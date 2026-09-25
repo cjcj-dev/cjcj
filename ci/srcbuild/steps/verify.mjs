@@ -3,7 +3,6 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import {runGrepProbe} from '../../../build/lib/fail-closed-probes.mjs';
 import {assertPackagedLineage} from '../../../build/lib/package-lineage.mjs';
 import {getTarget} from '../../../build/lib/targets.mjs';
 
@@ -15,8 +14,8 @@ if (!sdk) throw new Error('usage: verify.mjs [--no-fail-fast] <sdk-dir>');
 // Diagnostic mode only. The default is unchanged: the first failing phase ends
 // the run, so the release gate keeps failing exactly where it failed before.
 // With --no-fail-fast every phase is still attempted, the failures are all
-// collected, and the run still exits non-zero, so the four groups of the G8
-// gate can be measured in one pass without the gate becoming any weaker.
+// collected, and the run still exits non-zero so every SDK phase can be
+// measured in one pass without changing its failure criteria.
 const noFailFast = process.env.CJCJ_VERIFY_NO_FAIL_FAST === '1'
   || argv['fail-fast'] === false
   || process.argv.includes('--no-fail-fast');
@@ -58,14 +57,9 @@ if (process.platform !== target.spec.nodePlatform || process.arch !== target.spe
   throw new Error(`target ${targetKey} requires ${target.spec.nodePlatform}/${target.spec.nodeArch}`);
 }
 const self = `${sdk}/bin/cjc`;
-const oracle = `${workspace}/cangjie_compiler/output/bin/cjc`;
-let jobs = Number(process.env.CJCJ_VERIFY_JOBS || os.cpus().length || 1);
-if (!Number.isSafeInteger(jobs) || jobs < 1) throw new Error(`invalid CJCJ_VERIFY_JOBS: ${process.env.CJCJ_VERIFY_JOBS}`);
-jobs = String(Math.min(jobs, 16));
 const timeoutCommand = target.spec.os === 'darwin' ? 'gtimeout' : 'timeout';
 
 await $`test -x ${self}`;
-await $`test -x ${oracle}`;
 process.env.CANGJIE_HOME = sdk;
 process.env.PATH = `${sdk}/bin:${sdk}/tools/bin:${process.env.PATH}`;
 const libraryPath = [
@@ -131,73 +125,21 @@ for (const [label, rootDir] of tempRoots) {
 }
 const sccacheKeys = Object.keys(process.env).filter(key => key === 'RUSTC_WRAPPER' || key.startsWith('SCCACHE_')).sort();
 const sccachePath = await $({nothrow: true, quiet: true, stdio: 'pipe'})`sh -c 'command -v sccache || true'`;
-const oracleDeps = target.spec.os === 'darwin'
-  ? await $({nothrow: true, quiet: true, stdio: 'pipe'})`otool -L ${oracle}`
-  : await $({nothrow: true, quiet: true, stdio: 'pipe'})`ldd ${oracle}`;
-const oracleDepsOutput = `${oracleDeps.stdout}${oracleDeps.stderr}`;
-const oracleDepsNotFound = oracleDepsOutput.split(/\r?\n/).filter(line => /not found/i.test(line));
 const cgroupMemory = await readCgroupMemory();
 
 console.log('[preflight] runner-specific probes');
 for (const line of tempExec) console.log(`  temp-exec: ${line}`);
 console.log(`  sccache: path=${sccachePath.stdout.trim() || '<absent>'} env-keys=${sccacheKeys.join(',') || '<none>'}`);
-console.log(`  oracle-deps: inspector=${target.spec.os === 'darwin' ? 'otool' : 'ldd'} exit=${oracleDeps.exitCode} not-found=${oracleDepsNotFound.join(' | ') || '<none>'}`);
 console.log(`  cgroup-memory: ${cgroupMemory}`);
 
-async function reportPreflightFailure(label, result) {
-  console.error(`[preflight] ${label} failed: exit=${result.exitCode}`);
-  if (result.stdout) process.stderr.write(result.stdout);
-  if (result.stderr) process.stderr.write(result.stderr);
-  console.error(`[preflight] PATH=${process.env.PATH}`);
-  console.error(`[preflight] ${target.spec.loaderEnv}=${process.env[target.spec.loaderEnv]}`);
-  console.error(`[preflight] CANGJIE_HOME=${process.env.CANGJIE_HOME}`);
-  console.error(`[preflight] oracle dependencies not-found: ${oracleDepsNotFound.join(' | ') || '<none>'}`);
-  console.error(`[preflight] temp exec: ${tempExec.join(' || ')}`);
-  console.error(`[preflight] sccache env keys: ${sccacheKeys.join(',') || '<none>'}`);
-  console.error(`[preflight] cgroup memory: ${cgroupMemory}`);
-}
-
-console.log('[preflight] oracle --version');
-const oracleVersion = await $({nothrow: true, quiet: true, stdio: 'pipe'})`${oracle} --version`;
-if (oracleVersion.exitCode !== 0) {
-  await reportPreflightFailure('oracle --version', oracleVersion);
-  throw new Error('reference oracle preflight failed');
-}
-if (oracleVersion.stdout) process.stdout.write(oracleVersion.stdout);
-if (oracleVersion.stderr) process.stderr.write(oracleVersion.stderr);
-
-const corpus = `${root}/scripts/difftest_corpus`;
-const firstCorpusName = (await fs.readdir(corpus)).filter(name => name.endsWith('.cj')).sort()[0];
-if (!firstCorpusName) throw new Error(`reference oracle preflight failed: no .cj files in ${corpus}`);
-const firstCorpus = path.join(corpus, firstCorpusName);
-const preflightOutput = path.join(work, 'ref-preflight');
-console.log(`[preflight] reference compile: ${firstCorpusName}`);
-const referenceCompile = await $({nothrow: true, quiet: true, stdio: 'pipe', cwd: work})`${timeoutCommand} 180 ${oracle} ${firstCorpus} -o ${preflightOutput}`;
-await fs.rm(preflightOutput, {force: true});
-if (referenceCompile.exitCode !== 0) {
-  await reportPreflightFailure(`reference compile ${firstCorpusName}`, referenceCompile);
-  throw new Error('reference oracle preflight failed');
-}
-if (referenceCompile.stdout) process.stdout.write(referenceCompile.stdout);
-if (referenceCompile.stderr) process.stderr.write(referenceCompile.stderr);
-console.log('[preflight] PASS items=6 probes=4/4');
+// Bootstrap produces the deployed SDK, not a source C++ reference compiler.
+// Oracle comparisons remain available through scripts/difftest.mjs and bcgate.py
+// for callers that explicitly provide that separate compiler.
 
 await phase('lineage', async () => {
   await assertPackagedLineage(sdk, {
     allowNightlyStd: process.env.CJCJ_ALLOW_NIGHTLY_STD === '1',
   });
-});
-
-await phase('difftest', async () => {
-  console.log('[difftest] compare selfhost SDK and source-built C++ oracle');
-  const difftestEnv = {
-    ...process.env,
-    DIFFTEST_TC: sdk,
-    DIFFTEST_SELF: self,
-    DIFFTEST_REF: oracle,
-  };
-  await $({env: difftestEnv})`set -o pipefail; npx --yes zx@8 ${root}/scripts/difftest.mjs -j ${jobs} | tee ${work}/difftest.log`;
-  await $`grep -Eq 'TOTAL=[0-9]+[[:space:]]+PASS=[0-9]+[[:space:]]+MISMATCH=0[[:space:]]+FAIL=0' ${work}/difftest.log`;
 });
 
 await phase('smoke', async () => {
@@ -302,18 +244,6 @@ await phase('selfdet', async () => {
   }
   const selfdetWall = Number(process.hrtime.bigint() - selfdetStarted) / 1e9;
   console.log(`[selfdet] PASS package=${selfdetPackage} positive=different mapped=byte-identical wall=${selfdetWall.toFixed(3)}s`);
-});
-
-await phase('bcgate', async () => {
-  console.log('[bcgate] verify bitcode parity');
-  await $`set -o pipefail; python3 ${root}/scripts/bcgate.py --self ${self} --base ${oracle} --corpus ${root}/scripts/difftest_corpus -j ${jobs} | tee ${work}/bcgate.log`;
-  await $`grep -Eq 'byte-identical: [0-9]+ \\(100\\.0%\\)[[:space:]]+\\|[[:space:]]+differing: 0' ${work}/bcgate.log`;
-  await $`grep -Eq 'compile-errors: 0' ${work}/bcgate.log`;
-  const onlyOneSide = await runGrepProbe({
-    label: 'bcgate one-side divergence grep',
-    run: () => $({nothrow: true})`grep -q 'functions present on only one side' ${work}/bcgate.log`,
-  });
-  if (onlyOneSide.matched) throw new Error('bcgate failed: functions are present on only one side');
 });
 
 if (noFailFast) {

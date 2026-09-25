@@ -1865,13 +1865,10 @@ public class ClosureConversion {
     private func ConvertApplyToInvoke(apply: Apply): Unit {
         let callee = apply.GetCallee()
         let instParentType = ResolveAutoEnvCallParentType(callee, apply)
-        let (methodName, originalFuncType) = GetFuncTypeFromAutoEnvBaseDef(instParentType.GetClassDef())
         let methods = instParentType.GetClassDef().GetMethods()
         CJC_ASSERT(methods.size == 1)
         let funcContext = FuncCallContext(args: apply.GetArgs(), thisType: Some(instParentType))
-        // C++ ClosureConversion.cpp:2240-2245 — virMethodCtx from AutoEnv base, not methods[0] alone.
-        let virCtx = FuncSigInfo(originalFuncType, funcName: methodName)
-        let invokeContext = InvokeCallContext(methods[0], callee, funcContext, virMethodCtx: Some(virCtx))
+        let invokeContext = InvokeCallContext(methods[0], callee, funcContext)
         let retTy = apply.GetResultType() ??
             throw IllegalStateException("ClosureConversion apply has no result type")
         let parent = apply.GetParentBlock() ??
@@ -1885,12 +1882,10 @@ public class ClosureConversion {
     private func ConvertApplyWithExceptionToInvokeWithException(apply: ApplyWithException): Unit {
         let callee = apply.GetCallee()
         let instParentType = ResolveAutoEnvCallParentType(callee, apply)
-        let (methodName, originalFuncType) = GetFuncTypeFromAutoEnvBaseDef(instParentType.GetClassDef())
         let methods = instParentType.GetClassDef().GetMethods()
         CJC_ASSERT(methods.size == 1)
         let funcContext = FuncCallContext(args: apply.GetArgs(), thisType: Some(instParentType))
-        let virCtx = FuncSigInfo(originalFuncType, funcName: methodName)
-        let invokeContext = InvokeCallContext(methods[0], callee, funcContext, virMethodCtx: Some(virCtx))
+        let invokeContext = InvokeCallContext(methods[0], callee, funcContext)
         let retTy = apply.GetResultType() ??
             throw IllegalStateException("ClosureConversion apply-with-exception has no result type")
         let invoke = builder.CreateInvokeWithException(retTy, invokeContext, apply.GetSuccessBlock(),
@@ -2203,7 +2198,6 @@ public class ClosureConversion {
         fn.SetReturnValue(retVal)
 
         let instCustomType = memberVarType
-        let (methodName, originalFuncType) = GetFuncTypeFromAutoEnvBaseDef(instCustomType.GetClassDef())
         let methods = instCustomType.GetClassDef().GetMethods()
         CJC_ASSERT(methods.size == 1)
         let funcParams = fn.GetParams()
@@ -2224,11 +2218,8 @@ public class ClosureConversion {
         let createdLoad2211 = builder.CreateLoad(memberVarRefType, memberVarRefRef, entry)
         entry.AppendExpression(createdLoad2211)
         let memberVarRef = RequireResult(createdLoad2211)
-        // C++ ClosureConversion.cpp:2430-2442 — virMethodCtx from AutoEnv base.
-        let virCtx = FuncSigInfo(originalFuncType, funcName: methodName)
         let invokeInfo = InvokeCallContext(methods[0], memberVarRef,
-            FuncCallContext(args: invokeArgs, thisType: Some(instCustomType)),
-            virMethodCtx: Some(virCtx))
+            FuncCallContext(args: invokeArgs, thisType: Some(instCustomType)))
         let invoke = builder.CreateInvoke(retType, invokeInfo, entry)
         entry.AppendExpression(invoke)
         invoke.SetVirtualMethodOffset(0u64)

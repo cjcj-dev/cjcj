@@ -6,7 +6,13 @@ out=${LITERAL_OUT:?}; sdk=${CANGJIE_HOME:?}; host=${LITERAL_HOST:?}; lib=${LITER
 compiler=${LITERAL_CJC:-$sdk/bin/cjc}
 mkdir -p "$out"
 start=$SECONDS
-trap 'rc=$?; echo "$rc" > "$out/run.rc"; echo "wall=$((SECONDS-start))" > "$out/wall.txt"; uptime > "$out/uptime-after.txt"' EXIT
+record_exit() {
+  local rc=$?
+  echo "$rc" > "$out/run.rc"
+  echo "wall=$((SECONDS-start))" > "$out/wall.txt"
+  uptime > "$out/uptime-after.txt"
+}
+trap record_exit EXIT
 uptime > "$out/uptime-before.txt"
 sha256sum "$compiler" "$sdk/third_party/llvm/bin/llc" "$lib/"{libcangjie-runtime.so,libboundscheck.so} > "$out/inputs.sha256"
 export LD_LIBRARY_PATH="$host/runtime/lib/linux_x86_64_cjnative:$host/third_party/llvm/lib:$host/tools/lib"

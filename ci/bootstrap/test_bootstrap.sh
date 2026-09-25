@@ -25,6 +25,8 @@ new_tmp() {
 refresh_tuple_sums() {
   (
     cd "$TMP/colour-tuple" || exit 1
+    # SHA256SUMS is explicitly excluded from find; it is only the output.
+    # shellcheck disable=SC2094
     find . -type f ! -name SHA256SUMS -print | sort | xargs sha256sum > SHA256SUMS
   )
 }
@@ -113,7 +115,7 @@ check_shim_call_count() {
 }
 
 check_dry_contract() {
-  local log="$1"
+  local log="$1" jobs="${CJ_JOBS:-$(getconf _NPROCESSORS_ONLN)}"
   check_count A1 2 'shape=planned Int64.ti>1 FFI-archives>0' "$log"
   check_count A1 1 'FFI-set-equals=' "$log"
   check_count A2 1 'cjcj-stage1 --version' "$log"
@@ -121,12 +123,19 @@ check_dry_contract() {
   check_count A3 2 'ASSERT stage1-compiler executable=planned' "$log"
   check_count CJPM 4 'tools/bin/cjpm' "$log"
   check_count CJPM 2 'cjpm build' "$log"
-  check_count CJPM 1 'cjpm build -j 1' "$log"
+  # Stage self-hosting must use the configured CPU budget (0924 stage >=64
+  # cores policy on kkk2), not the inherited serial override. JOBS comes from
+  # CJ_JOBS/getconf; configure_build_resources independently bounds the heap.
+  check_count CJPM-JOBS 1 "cjpm build -j $jobs bin=" "$log"
   check_count CJPM 1 'compile-option = "-O1"' "$log"
   check_count CJPM 1 'ASSERT compile-option-o1 planned' "$log"
   check_count CJPM 2 'ISOLATE cjcj-src from=' "$log"
   check_count CJPM 1 'CMD cjpm build bin=' "$log"
-  check_count CJPM 1 'CMD cjpm build -j 1 bin=' "$log"
+  check_count CJPM-JOBS 1 "CMD cjpm build -j $jobs bin=" "$log"
+  # Observe the actual env/bash command too: a correct diagnostic alone does
+  # not prove that cjpm receives the job count.
+  check_count CJPM-EXEC-JOBS 1 "tools/bin/cjpm\\\\ build\\\\ -j\\\\ $jobs$" "$log"
+  echo "PASS dry stage1 cjpm jobs=$jobs reaches execution command"
   check_count CJPM 1 'heap=20480MB' "$log"
   check_shim_call_count "$log"
   check_count SHIM 1 'CMD shim build label=stage0 .*source-object=source .*sdk=.*/sdk-stage0 .*runtime=.*/host-rt' "$log"
@@ -182,6 +191,9 @@ make_sdk_fixture() {
   cp /bin/true "$base/tools/bin/cjpm"
   cp /bin/true "$base/third_party/llvm/bin/llc"
   cp /bin/true "$base/third_party/llvm/bin/opt"
+  cp /bin/true "$base/third_party/llvm/bin/ld.lld"
+  cjc_sha=$(sha256sum "$base/bin/cjc" | awk '{print $1}')
+  printf '{"compiler_sha256":"%s"}\n' "$cjc_sha" > "$base/std-producer.json"
   printf 'int base_llvm;\n' > "$TMP/base-llvm.c"
   cc -shared -fPIC "$TMP/base-llvm.c" -o "$base/third_party/llvm/lib/libLLVM-15.so"
   printf 'int host_runtime;\n' > "$TMP/host-runtime.c"
@@ -193,6 +205,60 @@ make_sdk_fixture() {
   printf 'int g_cjLoadBadMask;\n' > "$TMP/colour-reference.c"
   cc -shared -fPIC "$TMP/colour-reference.c" -o "$TMP/colour-reference.so"
   printf '%s\n' '#!/usr/bin/env bash' 'export PATH="$(dirname "${BASH_SOURCE[0]}")/bin:$PATH"' > "$base/envsetup.sh"
+}
+
+check_exit_receipts() {
+  new_tmp
+  local script out rc recorded
+  local -a scripts=(run.sh exceptions/run.sh library/run.sh library/execute.sh unload/run.sh)
+  if [ "$#" -gt 0 ]; then scripts=("$1"); fi
+  for script in "${scripts[@]}"; do
+    out="$TMP/$script.receipts"
+    mkdir -p "$out"
+    rc=0
+    # Missing input files stop before compilation; the EXIT receipt must retain
+    # that real script status, wall time and final uptime on this failure path.
+    env LITERAL_OUT="$out" CANGJIE_HOME="$TMP/missing-sdk" \
+      LITERAL_HOST="$TMP/missing-host" LITERAL_RUNTIME="$TMP/missing-runtime" \
+      LITERAL_RUNTIME_HEADERS="$TMP/missing-headers" LITERAL_ARTIFACTS="$TMP/missing-artifacts" \
+      LITERAL_CORES=0 bash "$ROOT/../../test/heap_string_literals/$script" > "$out/output.log" 2>&1 || rc=$?
+    [ "$rc" -ne 0 ] || fail EXIT-RECEIPT "missing inputs unexpectedly accepted: $script"
+    [ -f "$out/run.rc" ] || fail EXIT-RECEIPT "status receipt absent: $script rc=$rc"
+    recorded=$(cat "$out/run.rc")
+    [ "$recorded" = "$rc" ] || fail EXIT-RECEIPT "status mismatch: $script process=$rc receipt=$recorded"
+    /usr/bin/grep -Eq '^wall=[0-9]+$' "$out/wall.txt" || fail EXIT-RECEIPT "wall receipt absent: $script"
+    [ -s "$out/uptime-after.txt" ] || fail EXIT-RECEIPT "uptime receipt absent: $script"
+    echo "PASS EXIT-RECEIPT script=$script process=$rc receipt=$recorded"
+  done
+}
+
+check_sdk_literal_prefix() {
+  new_tmp
+  make_sdk_fixture
+  local tuple=linux_x86_64_cjnative prefix="$TMP/std [literal]" dest="$TMP/sdk [literal]" log="$TMP/std-path.log" rel
+  mkdir -p "$TMP/sdk-base/modules/$tuple" "$prefix/modules/$tuple" \
+    "$prefix/lib/$tuple" "$prefix/runtime/lib/$tuple"
+  printf 'new module\n' > "$prefix/modules/$tuple/core.cjo"
+  printf 'int replacement_std;\n' > "$TMP/replacement-std.c"
+  cc -fPIC -c "$TMP/replacement-std.c" -o "$TMP/replacement-std.o"
+  ar rcs "$prefix/lib/$tuple/libcangjie-std-core.a" "$TMP/replacement-std.o"
+  cc -shared "$TMP/replacement-std.o" -o "$prefix/runtime/lib/$tuple/libcangjie-std-core.so"
+  cp "$prefix/runtime/lib/$tuple/libcangjie-std-core.so" "$prefix/lib/libstdFFI.so"
+  for rel in "runtime/lib/$tuple/libcangjie-std-core.so" lib/libstdFFI.so; do
+    cp "$TMP/sdk-base/runtime/lib/$tuple/libcangjie-runtime.so" "$TMP/sdk-base/$rel"
+  done
+  # Drive the actual installer, including its identity and installed-byte checks.
+  local rc=0
+  bash "$SDK_PRODUCT" --from "$TMP/sdk-base" --to "$dest" --host \
+    --std "$prefix" --colour-runtime "$TMP/colour-reference.so" \
+    --host-runtime "$TMP/sdk-base/runtime/lib/$tuple/libcangjie-runtime.so" > "$log" 2>&1 || rc=$?
+  cat "$log"
+  [ "$rc" -eq 0 ] || fail STD-LITERAL-PREFIX "installer rc=$rc"
+  for rel in "lib/$tuple/libcangjie-std-core.a" "runtime/lib/$tuple/libcangjie-std-core.so" lib/libstdFFI.so "modules/$tuple/core.cjo"; do
+    cmp -s "$prefix/$rel" "$dest/$rel" || fail STD-LITERAL-PREFIX "installed bytes differ: $rel"
+  done
+  /usr/bin/grep -Fq '[std-prefix] modules -> modules/' "$log" || fail STD-LITERAL-PREFIX 'display path retained the SDK prefix'
+  echo 'PASS STD-LITERAL-PREFIX real installer accepts spaces and brackets; installed bytes match'
 }
 
 run_sdk_so() {
@@ -252,7 +318,7 @@ run_sdk_runtime_checked() {
 }
 
 positive_runtime_layouts() {
-  local flat_sha=2222222222222222222222222222222222222222 tuple=linux_x86_64_cjnative
+  local flat_sha=4c4cbf53b44497103e76e2a47a8fa35f5d7a7287 tuple=linux_x86_64_cjnative
   new_tmp
   make_sdk_fixture
   make_runtime_payload "$TMP/$flat_sha" "$flat_sha"
@@ -265,7 +331,7 @@ positive_runtime_layouts() {
     fail runtime-flat 'boundscheck SO was not installed from flat sodepot'
   cmp -s "$TMP/sdk-base/lib/$tuple/libcangjie-runtime.a" "$TMP/sdk-flat/lib/$tuple/libcangjie-runtime.a" ||
     fail runtime-flat 'flat shared closure unexpectedly changed the base static archive'
-  make_runtime_payload "$TMP/runtime-install" 3333333333333333333333333333333333333333 "$tuple"
+  make_runtime_payload "$TMP/runtime-install" 4c4cbf53b44497103e76e2a47a8fa35f5d7a7287 "$tuple"
   run_sdk_runtime_checked runtime-nested "$SDK_PRODUCT" "$TMP/runtime-install" "$TMP/sdk-nested"
   cmp -s "$TMP/runtime-install/runtime/lib/$tuple/libcangjie-runtime.so" "$TMP/sdk-nested/runtime/lib/$tuple/libcangjie-runtime.so" ||
     fail runtime-nested 'runtime SO was not installed from nested prefix'
@@ -275,7 +341,7 @@ positive_runtime_layouts() {
 }
 
 positive_runtime_layout_symlink_nested_only() {
-  local sha=9999999999999999999999999999999999999999 tuple=linux_x86_64_cjnative
+  local sha=4c4cbf53b44497103e76e2a47a8fa35f5d7a7287 tuple=linux_x86_64_cjnative
   new_tmp
   make_sdk_fixture
   make_runtime_payload "$TMP/real-install" "$sha" "$tuple"
@@ -290,7 +356,7 @@ positive_runtime_layout_symlink_nested_only() {
 }
 
 positive_runtime_layout_symlink_flat_only() {
-  local sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa tuple=linux_x86_64_cjnative
+  local sha=4c4cbf53b44497103e76e2a47a8fa35f5d7a7287 tuple=linux_x86_64_cjnative
   new_tmp
   make_sdk_fixture
   make_runtime_payload "$TMP/real-flat" "$sha"
@@ -598,6 +664,13 @@ fault_dry_stage1() {
     duplicate)
       sed '/^[[:space:]]*assert_executable stage1-compiler /p' "$PRODUCT" > "$TMP/bootstrap.sh"
       ;;
+    serial)
+      export CJ_JOBS=64
+      sed 's/"-j $JOBS"/"-j 1"/' "$PRODUCT" > "$TMP/bootstrap.sh"
+      ;;
+    drop-jobs)
+      sed 's/build${extra:+ $extra}"/build"/' "$PRODUCT" > "$TMP/bootstrap.sh"
+      ;;
     stale-stdlib)
       sed 's/assemble_stage1_sdk "$sdk" "$compiler" "$std"/assemble_stage1_sdk "$sdk" "$compiler" "$previous_std"/' "$PRODUCT" > "$TMP/bootstrap.sh"
       ;;
@@ -626,6 +699,13 @@ check_shim_wiring() {
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then return 0; fi
 
 case "${1:-test}" in
+  check-exit-receipts)
+    shift
+    check_exit_receipts "$@"
+    ;;
+  check-sdk-literal-prefix)
+    check_sdk_literal_prefix
+    ;;
   check-dry-contract)
     make_dry_fixture
     dry_run > "$TMP/dry.log" || fail dry-run 'bootstrap CLI failed before assertions'
@@ -798,7 +878,7 @@ case "${1:-test}" in
   fault-product-missing)
     fault_product_missing
     ;;
-  fault-dry-stage1-missing|fault-dry-stage1-duplicate|fault-dry-stage1-stale-stdlib)
+  fault-dry-stage1-missing|fault-dry-stage1-duplicate|fault-dry-stage1-stale-stdlib|fault-dry-stage1-serial|fault-dry-stage1-drop-jobs)
     fault_dry_stage1 "${1#fault-dry-stage1-}"
     ;;
   fault-shim-wiring)
@@ -811,11 +891,15 @@ case "${1:-test}" in
     [ $# -eq 4 ] || fail ruler-control 'usage: ruler-control OFFICIAL_OPT COLOUR_TUPLE EXPECTED_LLVM_SHA'
     # shellcheck disable=SC1090 # Product path is resolved above.
     source "$PRODUCT"
+    # Consumed by die() in the dynamically sourced bootstrap product.
+    # shellcheck disable=SC2034
     STAGE=test-ruler
     assert_official_opt_zero "$2"
     assert_colour_tuple "$3" "$4"
     ;;
   test)
+    bash "$0" check-exit-receipts || fail EXIT-RECEIPT "exit receipt regression"
+    bash "$0" check-sdk-literal-prefix || fail STD-LITERAL-PREFIX "literal prefix regression"
     make_dry_fixture
     dry_run > "$TMP/dry.log"
     check_dry_contract "$TMP/dry.log"
@@ -849,7 +933,7 @@ case "${1:-test}" in
       fail build-env 'bootstrap CLI HOME/TMPDIR contract did not pass'
     BOOTSTRAP_PRODUCT="$PRODUCT" SDK_BUILD_PRODUCT="$SDK_PRODUCT" bash "$0" check-runtime-layouts > "$TMP/runtime-layouts-positive.log" ||
       fail runtime-layouts 'flat/nested/dual/inner-rc runtime layout contract did not pass'
-    for arm in a1 a1-missing-core-archive a1-missing-core-shared a1-missing-ffi-shared a2 a3 dry-stage1-missing dry-stage1-duplicate dry-stage1-stale-stdlib a4 build-env runtime-stamp host-sha ast-sha host-colour colour-ruler colour-stamp-duplicate colour-stamp-mismatch colour-sha llvm-so-location tuple-missing-opt tuple-sums tuple-extra-entry old-host-llvm old-colour-llc cjpm-toml src-file compile-option product-missing shim-wiring; do
+    for arm in a1 a1-missing-core-archive a1-missing-core-shared a1-missing-ffi-shared a2 a3 dry-stage1-missing dry-stage1-duplicate dry-stage1-stale-stdlib dry-stage1-serial dry-stage1-drop-jobs a4 build-env runtime-stamp host-sha ast-sha host-colour colour-ruler colour-stamp-duplicate colour-stamp-mismatch colour-sha llvm-so-location tuple-missing-opt tuple-sums tuple-extra-entry old-host-llvm old-colour-llc cjpm-toml src-file compile-option product-missing shim-wiring; do
       log="$TMP/fault-$arm.log"
       if bash "$0" "fault-$arm" > "$log" 2>&1; then
         fail "$arm" 'fault arm unexpectedly passed'
@@ -858,6 +942,8 @@ case "${1:-test}" in
         a1) marker='BOOTSTRAP-FAIL \[test-A1\].*Int64.ti definitions=1';;
         a1-missing-*) marker='BOOTSTRAP-FAIL \[test-A1\].*install shape: core archive/shared 或 libstdFFI.so 缺失';;
         a2) marker='BOOTSTRAP-FAIL \[test-A2\].*命令失败 rc=23';;
+        dry-stage1-serial) marker='TEST-FAIL \[CJPM-JOBS\]';;
+        dry-stage1-drop-jobs) marker='TEST-FAIL \[CJPM-EXEC-JOBS\]';;
         a3) marker='BOOTSTRAP-FAIL \[test-A3\].*stage1-compiler';;
         dry-stage1-missing) marker='TEST-FAIL \[A3\] pattern count=0 expected=2: ASSERT stage1-compiler executable=planned';;
         dry-stage1-duplicate) marker='TEST-FAIL \[A3\] pattern count=4 expected=2: ASSERT stage1-compiler executable=planned';;
@@ -891,7 +977,7 @@ case "${1:-test}" in
     echo 'PASS bootstrap dry contracts, controlled build environment, LLVM assembly, and positive controls'
     ;;
   *)
-    echo "usage: $0 [test|check-dry-contract|dry-run|check-shim-wiring|check-build-env|check-runtime-layouts|positive-a1|positive-a4|positive-build-env|positive-runtime-layouts|positive-runtime-layout-symlink-nested-only|positive-runtime-layout-symlink-flat-only|positive-compile-option-o1|fault-a1|fault-a1-missing-core-archive|fault-a1-missing-core-shared|fault-a1-missing-ffi-shared|fault-a2|fault-a3|fault-dry-stage1-missing|fault-dry-stage1-duplicate|fault-dry-stage1-stale-stdlib|fault-a4|fault-build-env|fault-runtime-stamp|fault-runtime-dual-layout|fault-runtime-dual-missing-bounds|fault-runtime-dual-multiple-nested|fault-runtime-layout-symlink-nested|fault-runtime-layout-symlink-flat|fault-runtime-layout-inner-rc|fault-host-sha|fault-ast-sha|fault-ast-bytes|fault-host-colour|fault-colour-ruler|fault-colour-stamp-duplicate|fault-colour-stamp-mismatch|fault-colour-sha|fault-llvm-so-location|fault-tuple-missing-opt|fault-tuple-sums|fault-tuple-extra-entry|fault-old-host-llvm|fault-old-colour-llc|fault-shim-wiring|ruler-control OFFICIAL_OPT COLOUR_TUPLE EXPECTED_LLVM_SHA]" >&2
+    echo "usage: $0 [test|check-dry-contract|dry-run|check-shim-wiring|check-build-env|check-runtime-layouts|positive-a1|positive-a4|positive-build-env|positive-runtime-layouts|positive-runtime-layout-symlink-nested-only|positive-runtime-layout-symlink-flat-only|positive-compile-option-o1|fault-a1|fault-a1-missing-core-archive|fault-a1-missing-core-shared|fault-a1-missing-ffi-shared|fault-a2|fault-a3|fault-dry-stage1-missing|fault-dry-stage1-duplicate|fault-dry-stage1-stale-stdlib|fault-dry-stage1-serial|fault-dry-stage1-drop-jobs|fault-a4|fault-build-env|fault-runtime-stamp|fault-runtime-dual-layout|fault-runtime-dual-missing-bounds|fault-runtime-dual-multiple-nested|fault-runtime-layout-symlink-nested|fault-runtime-layout-symlink-flat|fault-runtime-layout-inner-rc|fault-host-sha|fault-ast-sha|fault-ast-bytes|fault-host-colour|fault-colour-ruler|fault-colour-stamp-duplicate|fault-colour-stamp-mismatch|fault-colour-sha|fault-llvm-so-location|fault-tuple-missing-opt|fault-tuple-sums|fault-tuple-extra-entry|fault-old-host-llvm|fault-old-colour-llc|fault-shim-wiring|ruler-control OFFICIAL_OPT COLOUR_TUPLE EXPECTED_LLVM_SHA]" >&2
     exit 2
     ;;
 esac

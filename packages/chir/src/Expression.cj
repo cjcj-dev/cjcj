@@ -498,6 +498,20 @@ func GetOperands(expression: Expression): ArrayList<Value> {
     if (let Some(constant) <- (expression as Constant)) {
         operands.add(constant.GetValue())
     }
+    if (let Some(terminator) <- expression.AsTerminator()) {
+        for (successor in terminator.GetSuccessors()) {
+            var already = false
+            for (operand in operands) {
+                if (refEq(operand, successor)) {
+                    already = true
+                    break
+                }
+            }
+            if (!already) {
+                operands.add(successor)
+            }
+        }
+    }
     return operands
 }
 
@@ -580,14 +594,14 @@ public class BinaryExpression <: BinaryExpressionBase {
 }
 
 public class Constant <: Expression {
-    public let literal: LiteralValue
-
     public init(literal: LiteralValue, parent: Option<Block>) {
-        super(ExprKind.CONSTANT, ArrayList<Value>(), parent)
-        this.literal = literal
+        super(ExprKind.CONSTANT, ArrayList<Value>([literal]), parent)
     }
 
-    public func GetValue(): LiteralValue { return literal }
+    public func GetValue(): LiteralValue {
+        CJC_ASSERT(GetOperand(0).IsLiteral())
+        return StaticCast<LiteralValue>(GetOperand(0))
+    }
     public func GetBoolLitVal(): Bool {
         let boolLiteral = (GetValue() as BoolLiteral) ?? throw IllegalStateException("constant is not a bool literal")
         return boolLiteral.GetVal()
@@ -612,16 +626,16 @@ public class Constant <: Expression {
         let intLiteral = (GetValue() as IntLiteral) ?? throw IllegalStateException("constant is not an int literal")
         return intLiteral.GetUnsignedVal()
     }
-    public func IsNullLit(): Bool { return literal.IsNullLit() }
-    public func IsBoolLit(): Bool { return literal.IsBoolLit() }
-    public func IsIntLit(): Bool { return literal.IsIntLit() }
-    public func IsFloatLit(): Bool { return literal.IsFloatLit() }
-    public func IsRuneLit(): Bool { return literal.IsRuneLit() }
+    public func IsNullLit(): Bool { return GetValue().IsNullLit() }
+    public func IsBoolLit(): Bool { return GetValue().IsBoolLit() }
+    public func IsIntLit(): Bool { return GetValue().IsIntLit() }
+    public func IsFloatLit(): Bool { return GetValue().IsFloatLit() }
+    public func IsRuneLit(): Bool { return GetValue().IsRuneLit() }
     public func IsSignedIntLit(): Bool {
         if (!IsIntLit()) {
             return false
         }
-        return StaticCast<IntLiteral>(literal).IsSigned()
+        return StaticCast<IntLiteral>(GetValue()).IsSigned()
     }
     public func IsUnSignedIntLit(): Bool {
         if (!IsIntLit()) {
@@ -629,15 +643,11 @@ public class Constant <: Expression {
         }
         return !IsSignedIntLit()
     }
-    public func IsStringLit(): Bool { return literal.IsStringLit() }
-    public func IsUnitLit(): Bool { return literal.IsUnitLit() }
-
-    public override func AddExtraComment(): String {
-        return literal.ToString(0)
-    }
+    public func IsStringLit(): Bool { return GetValue().IsStringLit() }
+    public func IsUnitLit(): Bool { return GetValue().IsUnitLit() }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
-        let litVal: LiteralValue = if (literal.IsNullLit()) { NullLiteral() } else { literal }
+        let litVal: LiteralValue = if (GetValue().IsNullLit()) { NullLiteral() } else { GetValue() }
         let cloned = builder.CreateConstant(GetResult().getOrThrow().GetType().getOrThrow(), litVal, parent)
         cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
         return cloned
@@ -899,24 +909,12 @@ public class InvokeCallContext {
     public let caller: Value
     public let funcCallCtx: FuncCallContext
     public let overflowStrategy: OverflowStrategy
-    // C++ Expression.h:751 FuncSigInfo virMethodCtx — original override-src signature for vtable match.
-    public let virMethodCtx: FuncSigInfo
-
     public init(method: Function, caller: Value, funcCallCtx: FuncCallContext,
-        overflowStrategy!: OverflowStrategy = OverflowStrategy.NA,
-        virMethodCtx!: Option<FuncSigInfo> = None) {
+        overflowStrategy!: OverflowStrategy = OverflowStrategy.NA) {
         this.method = method
         this.caller = caller
         this.funcCallCtx = funcCallCtx
         this.overflowStrategy = overflowStrategy
-        // Fallback keeps old call sites / deserializer wire-compatible when virMethodCtx is absent.
-        this.virMethodCtx = if (let Some(ctx) <- virMethodCtx) {
-            ctx
-        } else {
-            FuncSigInfo(method.GetFuncType().getOrThrow(),
-                funcName: method.GetSrcCodeIdentifier(),
-                genericTypeParams: method.GetGenericTypeParams())
-        }
     }
 }
 
@@ -924,8 +922,9 @@ public open class FuncCall <: Expression {
     private let instantiatedTypeArgs: ArrayList<Type> = ArrayList<Type>()
     private var thisType: Option<Type> = None
 
-    public init(kind: ExprKind, funcCallCtx: FuncCallContext, parent: Option<Block>) {
-        super(kind, ArrayList<Value>(), parent)
+    public init(kind: ExprKind, funcCallCtx: FuncCallContext, parent: Option<Block>,
+        operands!: ArrayList<Value> = ArrayList<Value>()) {
+        super(kind, operands, parent)
         for (ty in funcCallCtx.instTypeArgs) {
             instantiatedTypeArgs.add(ty)
         }
@@ -1041,14 +1040,11 @@ public class Apply <: FuncCall {
 
 public open class DynamicDispatch <: FuncCall {
     let overflowStrategy: OverflowStrategy
-    // C++ Expression.h:942 FuncSigInfo virMethodCtx
-    private let virMethodCtx: FuncSigInfo
     private var virtualMethodOffset: Option<UInt64> = None
 
     public init(kind: ExprKind, callContext: InvokeCallContext, parent: Option<Block>) {
-        super(kind, callContext.funcCallCtx, parent)
+        super(kind, callContext.funcCallCtx, parent, operands: ArrayList<Value>([callContext.method]))
         overflowStrategy = callContext.overflowStrategy
-        virMethodCtx = callContext.virMethodCtx
         CJC_ASSERT(callContext.overflowStrategy != OverflowStrategy.CHECKED)
     }
 
@@ -1056,23 +1052,20 @@ public open class DynamicDispatch <: FuncCall {
         return (GetOperand(0) as Function).getOrThrow()
     }
 
-    // C++ Expression.cpp:894-897 — name from virMethodCtx (already overflow-prefixed at construction).
     public func GetMethodName(): String {
-        return virMethodCtx.funcName
+        let name = GetCallee().GetSrcCodeIdentifier()
+        if (overflowStrategy != OverflowStrategy.NA) {
+            return OverflowStrategyPrefix(overflowStrategy) + name
+        }
+        return name
     }
 
-    // C++ Expression.cpp:899-901 — original override-src func type, not concrete callee Function type.
     public func GetMethodType(): FuncType {
-        return virMethodCtx.funcType
+        return GetCallee().GetFuncType().getOrThrow()
     }
 
-    // C++ Expression.cpp:904-906
     public func GetGenericTypeParams(): ArrayList<GenericType> {
-        return virMethodCtx.GetGenericTypeParams()
-    }
-
-    public func GetVirMethodCtx(): FuncSigInfo {
-        return virMethodCtx
+        return GetCallee().GetGenericTypeParams()
     }
 
     public func SetVirtualMethodOffset(offset: UInt64): Unit {
@@ -1178,7 +1171,6 @@ public open class DynamicDispatch <: FuncCall {
 public class Invoke <: DynamicDispatch {
     public init(callContext: InvokeCallContext, parent: Option<Block>) {
         super(ExprKind.INVOKE, callContext, parent)
-        AppendOperand(callContext.method)
         AppendOperand(callContext.caller)
         for (arg in callContext.funcCallCtx.args) {
             AppendOperand(arg)
@@ -1235,9 +1227,8 @@ public class Invoke <: DynamicDispatch {
         let args = GetArgs()
         args.remove(at: 0)
         let funcContext = FuncCallContext(args: args, instTypeArgs: GetInstantiatedTypeArgs(), thisType: GetThisType())
-        // C++ Expression.cpp:1060-1069 clones virMethodCtx.
         let invokeContext = InvokeCallContext(GetCallee(), GetObject(), funcContext,
-            overflowStrategy: overflowStrategy, virMethodCtx: Some(GetVirMethodCtx()))
+            overflowStrategy: overflowStrategy)
         let cloned = builder.CreateInvoke(GetResult().getOrThrow().GetType().getOrThrow(), invokeContext, parent)
         if (let Some(offset) <- GetVirtualMethodOffset()) {
             cloned.SetVirtualMethodOffset(offset)
@@ -1250,7 +1241,6 @@ public class Invoke <: DynamicDispatch {
 public class InvokeStatic <: DynamicDispatch {
     public init(callContext: InvokeCallContext, parent: Option<Block>) {
         super(ExprKind.INVOKESTATIC, callContext, parent)
-        AppendOperand(callContext.method)
         AppendOperand(callContext.caller)
         for (arg in callContext.funcCallCtx.args) {
             AppendOperand(arg)
@@ -1276,7 +1266,7 @@ public class InvokeStatic <: DynamicDispatch {
         let funcContext = FuncCallContext(args: GetArgs(), instTypeArgs: GetInstantiatedTypeArgs(),
             thisType: GetThisType())
         let invokeContext = InvokeCallContext(GetCallee(), GetRTTIValue(), funcContext,
-            overflowStrategy: overflowStrategy, virMethodCtx: Some(GetVirMethodCtx()))
+            overflowStrategy: overflowStrategy)
         let cloned = builder.CreateInvokeStatic(GetResult().getOrThrow().GetType().getOrThrow(), invokeContext, parent)
         if (let Some(offset) <- GetVirtualMethodOffset()) {
             cloned.SetVirtualMethodOffset(offset)

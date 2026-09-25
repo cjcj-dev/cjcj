@@ -664,7 +664,6 @@ public class VTableGenerator {
                 vtable.AddNewItemToTypeVTable(srcParentType, funcInfo)
             }
         }
-        UpdateInstanceAttr(vtable)
         customTypeDef.SetVTable(vtable)
     }
 }
@@ -1540,6 +1539,20 @@ public class GenerateVTable {
                     }(vtableGenerator, customDef)
                 }
                 taskQueue.RunAndWaitForAllTasksCompleted()
+            }
+            // Function instances are shared between definitions. Replay attribute snapshots
+            // in candidate order only after all workers have finished reading them.
+            for (customDef in candidateDefs) {
+                if (customDef.TestAttr(Attribute.GENERIC_INSTANTIATED)) {
+                    continue
+                }
+                let vtable = customDef.GetDefVTable()
+                for (typeVTable in vtable.GetModifiableTypeVTables()) {
+                    for (info in typeVTable.GetModifiableVirtualMethods()) {
+                        info.UpdateInstanceAttributeInfo()
+                    }
+                }
+                UpdateInstanceAttr(vtable)
             }
         }
     }

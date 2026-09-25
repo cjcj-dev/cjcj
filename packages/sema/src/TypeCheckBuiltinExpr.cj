@@ -219,6 +219,8 @@ private func DesugarArrayCall(typeManager: TypeManager, ctx: Option<ASTContext>,
     arrayExpr.sourceExpr = ce
     arrayExpr.begin = ce.begin
     arrayExpr.end = ce.end
+    arrayExpr.leftParenPos = ce.leftParenPos
+    arrayExpr.rightParenPos = ce.rightParenPos
     ce.desugarExpr = arrayExpr
     AddCurFile(ce, file: ce.curFile)
 }
@@ -709,8 +711,17 @@ public func ChkVArrayArg(typeManager: TypeManager, arrayExpr: ArrayExpr,
     checker!: Option<CallArgChecker> = None, diag!: Option<BasicDiagnosticEngine> = None): Bool {
     if (arrayExpr.args.size != 1) {
         if (let Some(diagValue) <- diag) {
+            let parenPosExist = !arrayExpr.leftParenPos.IsZero() && !arrayExpr.rightParenPos.IsZero()
+            let beginPos = if (parenPosExist) { arrayExpr.leftParenPos } else { arrayExpr.begin }
+            let lastArgAfterParen = !arrayExpr.args.isEmpty() &&
+                arrayExpr.args[arrayExpr.args.size - 1].end > arrayExpr.rightParenPos
+            let endPos = if (parenPosExist) {
+                if (lastArgAfterParen) { arrayExpr.args[arrayExpr.args.size - 1].end } else { arrayExpr.rightParenPos + 1 }
+            } else {
+                arrayExpr.end
+            }
             let builder = DiagnoseRefactor(diagValue, BasicDiagKindRefactor.sema_varray_args_number_mismatch,
-                arrayExpr, MakeRange(arrayExpr.leftParenPos, arrayExpr.rightParenPos + 1))
+                arrayExpr, MakeRange(beginPos, endPos))
             builder.Emit()
         }
         return false
@@ -777,10 +788,11 @@ public func ChkVArrayExpr(typeManager: TypeManager, target: Ty, arrayExpr: Array
     }
     if (!typeManager.IsSubtype(arrayTy, targetTy)) {
         if (let Some(diagValue) <- diag) {
-            let builder = DiagnoseRefactor(diagValue, BasicDiagKindRefactor.sema_mismatched_types,
-                arrayExpr)
-            builder.AddMainHintArguments([targetTy.String(), arrayTy.String()])
-            builder.Emit()
+            if (let Some(source) <- arrayExpr.sourceExpr) {
+                DiagMismatchedTypesWithFoundTy(diagValue, source, targetTy.String(), arrayTy.String())
+            } else {
+                DiagMismatchedTypesWithFoundTy(diagValue, arrayExpr, targetTy.String(), arrayTy.String())
+            }
         }
         arrayExpr.SetTy(TypeManager.GetInvalidTy())
         return false

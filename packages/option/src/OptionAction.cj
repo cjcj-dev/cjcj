@@ -1115,7 +1115,7 @@ public func ParseTargetTriple(opts: GlobalOptions, triple: String): Bool {
                     Errorln("The Android API level is not supported in the target. Please use a valid API level which is larger than 23.")
                 }
             } else {
-                Errorln("The Android API level is illegal. Please use a valid API level which is greater than or equal to 26.")
+                Errorln("The Android API level is illegal. Please use a valid API level which is greater than or equal to 23.")
             }
         }
     }

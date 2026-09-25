@@ -313,6 +313,8 @@ func CHIRKnownAttributes(): ArrayList<Attribute> {
     attrs.add(Attribute.PREVIOUSLY_DESERIALIZED)
     attrs.add(Attribute.DOES_NOT_THROW)
     attrs.add(Attribute.OBJ_C_IMPL)
+    attrs.add(Attribute.MATCH_PATTERN)
+    attrs.add(Attribute.PLUGIN_ADDED)
     attrs.add(Attribute.FAST_NATIVE)
     attrs.add(Attribute.NO_HEAP_ALLOC)
     attrs.add(Attribute.NO_WRITE_BARRIER)
@@ -364,6 +366,8 @@ func CHIRAttributeFromIndex(index: Int64): Attribute {
         case 37 => Attribute.PREVIOUSLY_DESERIALIZED
         case 38 => Attribute.DOES_NOT_THROW
         case 39 => Attribute.OBJ_C_IMPL
+        case 40 => Attribute.MATCH_PATTERN
+        case 41 => Attribute.PLUGIN_ADDED
         case 71 => Attribute.FAST_NATIVE
         case 76 => Attribute.NO_HEAP_ALLOC
         case 77 => Attribute.NO_WRITE_BARRIER_REC
@@ -501,6 +505,7 @@ func CHIRSourceExprFromIndex(index: Int64): SourceExpr {
         case 5 => SourceExpr.QUEST
         case 6 => SourceExpr.BINARY
         case 7 => SourceExpr.FOR_IN_EXPR
+        case 8 => SourceExpr.MATCH_CASE
         case _ => SourceExpr.OTHER
     }
 }

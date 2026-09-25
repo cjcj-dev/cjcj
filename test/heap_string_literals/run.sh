@@ -11,7 +11,13 @@ compiler=${LITERAL_CJC:-$sdk/bin/cjc}
 cores=${LITERAL_CORES:?}
 mkdir -p "$out/imported" "$out/temps-import" "$out/temps-main"
 start=$SECONDS
-trap 'rc=$?; echo "$rc" > "$out/run.rc"; echo "wall=$((SECONDS-start))" > "$out/wall.txt"; uptime > "$out/uptime-after.txt"' EXIT
+record_exit() {
+  local rc=$?
+  echo "$rc" > "$out/run.rc"
+  echo "wall=$((SECONDS-start))" > "$out/wall.txt"
+  uptime > "$out/uptime-after.txt"
+}
+trap record_exit EXIT
 uptime > "$out/uptime-before.txt"
 sha256sum "$compiler" "$sdk/third_party/llvm/bin/llc" "$lib/"{libcangjie-runtime.so,libboundscheck.so} > "$out/inputs.sha256"
 export PATH="$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:$PATH"

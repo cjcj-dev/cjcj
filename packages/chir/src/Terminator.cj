@@ -71,6 +71,9 @@ public class Branch <: Terminator {
 }
 
 public class MultiBranch <: Terminator {
+    private var sourceExpr: SourceExpr = SourceExpr.OTHER
+    public func SetSourceExpr(value: SourceExpr): Unit { sourceExpr = value }
+    public func GetSourceExpr(): SourceExpr { return sourceExpr }
     private let caseVals: ArrayList<UInt64> = ArrayList<UInt64>()
 
     public init(cond: Value, defaultBlock: Block, vals: ArrayList<UInt64>, succs: ArrayList<Block>,
@@ -130,6 +133,7 @@ public class MultiBranch <: Terminator {
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
         let cloned = builder.CreateMultiBranch(GetCondition(), GetDefaultBlock(), GetCaseVals(), GetNormalBlocks(),
             parent)
+        cloned.SetSourceExpr(sourceExpr)
         return cloned
     }
 }
@@ -293,8 +297,6 @@ public class ApplyWithException <: FuncCallWithException {
 
 public open class DynamicDispatchWithException <: FuncCallWithException {
     let overflowStrategy: OverflowStrategy
-    // C++ Terminator.h:446 FuncSigInfo virMethodCtx
-    private let virMethodCtx: FuncSigInfo
     private var virtualMethodOffset: Option<UInt64> = None
 
     public init(kind: ExprKind, callContext: InvokeCallContext, successBlock: Block, errorBlock: Block,
@@ -303,7 +305,6 @@ public open class DynamicDispatchWithException <: FuncCallWithException {
             callContext.funcCallCtx.args),
             callContext.funcCallCtx, successBlock, errorBlock, parent)
         overflowStrategy = callContext.overflowStrategy
-        virMethodCtx = callContext.virMethodCtx
         CJC_ASSERT(callContext.overflowStrategy != OverflowStrategy.CHECKED)
     }
 
@@ -311,23 +312,20 @@ public open class DynamicDispatchWithException <: FuncCallWithException {
         return (GetOperand(0) as Function).getOrThrow()
     }
 
-    // C++ Terminator.cpp:336-339
     public func GetMethodName(): String {
-        return virMethodCtx.funcName
+        let name = GetCallee().GetSrcCodeIdentifier()
+        if (overflowStrategy != OverflowStrategy.NA) {
+            return OverflowStrategyPrefix(overflowStrategy) + name
+        }
+        return name
     }
 
-    // C++ Terminator.cpp:341-344
     public func GetMethodType(): FuncType {
-        return virMethodCtx.funcType
+        return GetCallee().GetFuncType().getOrThrow()
     }
 
-    // C++ Terminator.cpp:346-349
     public func GetGenericTypeParams(): ArrayList<GenericType> {
-        return virMethodCtx.GetGenericTypeParams()
-    }
-
-    public func GetVirMethodCtx(): FuncSigInfo {
-        return virMethodCtx
+        return GetCallee().GetGenericTypeParams()
     }
 
     public func SetVirtualMethodOffset(offset: UInt64): Unit {
@@ -440,7 +438,7 @@ public class InvokeWithException <: DynamicDispatchWithException {
         args.remove(at: 0)
         let funcContext = FuncCallContext(args: args, instTypeArgs: GetInstantiatedTypeArgs(), thisType: GetThisType())
         let invokeContext = InvokeCallContext(GetCallee(), GetObject(), funcContext,
-            overflowStrategy: overflowStrategy, virMethodCtx: Some(GetVirMethodCtx()))
+            overflowStrategy: overflowStrategy)
         let cloned = builder.CreateInvokeWithException(GetResult().getOrThrow().GetType().getOrThrow(), invokeContext, GetSuccessBlock(),
             GetErrorBlock(), parent)
         if (let Some(offset) <- GetVirtualMethodOffset()) {
@@ -474,7 +472,7 @@ public class InvokeStaticWithException <: DynamicDispatchWithException {
         let funcContext = FuncCallContext(args: GetArgs(), instTypeArgs: GetInstantiatedTypeArgs(),
             thisType: GetThisType())
         let invokeContext = InvokeCallContext(GetCallee(), GetRTTIValue(), funcContext,
-            overflowStrategy: overflowStrategy, virMethodCtx: Some(GetVirMethodCtx()))
+            overflowStrategy: overflowStrategy)
         let cloned = builder.CreateInvokeStaticWithException(GetResult().getOrThrow().GetType().getOrThrow(), invokeContext,
             GetSuccessBlock(), GetErrorBlock(), parent)
         if (let Some(offset) <- GetVirtualMethodOffset()) {

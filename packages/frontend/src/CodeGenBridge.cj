@@ -26,6 +26,7 @@ import cjcj::chir.DeadCodeElimination
 import cjcj::chir.DebugLocation as ChirDebugLocation
 import cjcj::chir.Devirtualization as ChirDevirtualization
 import cjcj::chir.DevirtualizationInfo
+import cjcj::chir.DevirtualizeTrivialStatics
 import cjcj::chir.ExprKind as ChirExprKind
 import cjcj::chir.FaithfulAST2CHIR
 import cjcj::chir.FuncCallContext as ChirFuncCallContext
@@ -44,6 +45,8 @@ import cjcj::chir.NoWriteBarrierRecChecker
 import cjcj::chir.OptFuncRetType
 import cjcj::chir.OptEffectCHIRMap as ChirOptEffectCHIRMap
 import cjcj::chir.Package as RealCHIRPackage
+import cjcj::chir.MatchCaseId
+import cjcj::chir.UnreachableBlockAnalysis
 import cjcj::chir.UnreachableBranchCheck
 import cjcj::chir.RedundantFutureRemoval
 import cjcj::chir.RedundantGetOrThrowElimination
@@ -675,6 +678,8 @@ private class ToCHIR {
                     })
             }
             devirt.RunOnFuncs(funcs, builder, options.chirDebugOptimizer)
+            let devirtStatics = DevirtualizeTrivialStatics()
+            devirtStatics.RunOnPackage(currentPackage, builder, options.chirDebugOptimizer)
             if (!devirt.GetFrozenInstFuns().isEmpty()) {
                 let frozenFuncs = devirt.GetFrozenInstFuns()
                 for (fn in frozenFuncs) {
@@ -999,6 +1004,7 @@ private func RulesChecking(pkg: RealCHIRPackage, builder: ChirBuilder, options: 
     maybeUnreachable: HashMap<ChirBlock, ChirExpression>): Bool {
     DeadCodeElimination(builder, diag, pkg).UnreachableBlockWarningReporter(pkg,
         Int64(options.GetJobs()), maybeUnreachable)
+    UnreachableBlockAnalysis(diag, pkg).RunOnPackage(Int64(options.GetJobs()))
     DeadCodeElimination(builder).ClearUnreachableMarkBlock(pkg)
     MergeBlocks().RunOnPackage(pkg, builder, enableCompileDebug: options.enableCompileDebug,
         enableCoverage: options.enableCoverage)
@@ -1010,6 +1016,7 @@ private func RulesChecking(pkg: RealCHIRPackage, builder: ChirBuilder, options: 
         return false
     }
     UnreachableBranchCheck(wrapper, diag, pkg.GetName()).RunOnPackage(pkg, Int64(options.GetJobs()))
+    ClearMatchMetadata(pkg)
     DeadCodeElimination(builder).UnreachableBlockEliminationForPackage(pkg, isDebug: options.chirDebugOptimizer)
     MergeBlocks().RunOnPackage(pkg, builder, enableCompileDebug: options.enableCompileDebug,
         enableCoverage: options.enableCoverage)
@@ -1251,4 +1258,14 @@ private func GenerateBCFilePathAndUpdateToInvocation(options: GlobalOptions, kin
         return ""
     }
     return bcFilePath
+}
+
+private func ClearMatchMetadata(pkg: RealCHIRPackage): Unit {
+    for (fn in pkg.GetGlobalFuncsWithBody()) {
+        for (block in fn.GetBody().getOrThrow().GetAllBlocks()) {
+            block.DisableAttr(ChirAttribute.MATCH_PATTERN)
+            block.Remove<MatchCaseId>()
+            for (expr in block.GetExpressions()) { expr.DisableAttr(ChirAttribute.MATCH_PATTERN) }
+        }
+    }
 }

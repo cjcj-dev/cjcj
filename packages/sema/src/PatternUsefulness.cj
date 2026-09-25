@@ -1,7 +1,6 @@
 package cjcj::sema
 
 import std.collection.*
-import std.sort.*
 import cjcj::ast.*
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
@@ -267,7 +266,7 @@ private class DestructedPattern {
         }
         if (pattern.astKind == ASTKind.WILDCARD_PATTERN || pattern.astKind == ASTKind.VAR_PATTERN) {
             return DestructedPattern(PatternCtor.Wildcard(), ArrayList<DestructedPattern>(),
-                pattern.GetTy() ?? TypeManager.GetInvalidTy(), pattern)
+                goal, pattern)
         }
         if (let Some(varOrEnum) <- (pattern as VarOrEnumPattern)) {
             if (let Some(inner) <- varOrEnum.pattern) {
@@ -502,6 +501,18 @@ private class PatternStack {
         return stack[stack.size - 1]
     }
 
+    public func ReplaceHead(newHead: DestructedPattern): PatternStack {
+        CJC_ASSERT(!stack.isEmpty())
+        let newStack = ArrayList<DestructedPattern>()
+        var idx: Int64 = 0
+        while (idx < stack.size - 1) {
+            newStack.add(stack[idx])
+            idx++
+        }
+        newStack.add(newHead)
+        return PatternStack(newStack)
+    }
+
     public func Specialize(ctor: PatternCtor): PatternStack {
         let newStack = ArrayList<DestructedPattern>()
         var idx: Int64 = 0
@@ -544,14 +555,7 @@ private class PatternStack {
         CJC_ASSERT(Head().ctor.kind == PatternCtorKind.OR)
         let results = ArrayList<PatternStack>()
         for (newHead in Head().subPatterns) {
-            let newStack = ArrayList<DestructedPattern>()
-            var idx: Int64 = 0
-            while (idx < stack.size - 1) {
-                newStack.add(stack[idx])
-                idx++
-            }
-            newStack.add(newHead)
-            results.add(PatternStack(newStack))
+            results.add(ReplaceHead(newHead))
         }
         return results
     }
@@ -615,20 +619,50 @@ private class PatternMatrix {
     }
 }
 
+// CmpTyByName carried by the key because TreeSet takes Comparable keys.
+private struct TyByName <: Comparable<TyByName> {
+    public let ty: Ty
+
+    public init(ty: Ty) {
+        this.ty = ty
+    }
+
+    public func compare(other: TyByName): Ordering {
+        if (CompTyByNames(Some(ty), Some(other.ty))) {
+            return Ordering.LT
+        }
+        if (CompTyByNames(Some(other.ty), Some(ty))) {
+            return Ordering.GT
+        }
+        return Ordering.EQ
+    }
+
+    public operator func ==(other: TyByName): Bool {
+        return compare(other) == Ordering.EQ
+    }
+
+    public operator func !=(other: TyByName): Bool {
+        return compare(other) != Ordering.EQ
+    }
+}
+
 private class UsefulnessChecker {
     public let diag: BasicDiagnosticEngine
     public let typeManager: TypeManager
     public var matrix: PatternMatrix
-    public var keepABIStable: Bool = true
+    public let currentPackage: Option<Package>
 
-    public init(diag: BasicDiagnosticEngine, typeManager: TypeManager) {
+    public init(diag: BasicDiagnosticEngine, typeManager: TypeManager, currentPackage: Option<Package>) {
         this.diag = diag
+        this.currentPackage = currentPackage
         this.typeManager = typeManager
         this.matrix = PatternMatrix()
     }
 
-    public init(diag: BasicDiagnosticEngine, typeManager: TypeManager, matrix: PatternMatrix) {
+    public init(diag: BasicDiagnosticEngine, typeManager: TypeManager, matrix: PatternMatrix,
+        currentPackage: Option<Package>) {
         this.diag = diag
+        this.currentPackage = currentPackage
         this.typeManager = typeManager
         this.matrix = matrix
     }
@@ -655,7 +689,7 @@ private class UsefulnessChecker {
             return FindWitnessesForExpandedOr(vec.ExpandOr())
         }
         if (head.ctor.kind == PatternCtorKind.TYPE) {
-            let wildcard = PatternStack(DestructedPattern(PatternCtor.Wildcard(),
+            let wildcard = vec.ReplaceHead(DestructedPattern(PatternCtor.Wildcard(),
                 ArrayList<DestructedPattern>(), head.goalTy, None))
             if (FindWitnessesForWildcard(wildcard).isEmpty()) {
                 return ArrayList<PatternStack>()
@@ -669,16 +703,17 @@ private class UsefulnessChecker {
     }
 
     private static func SplitWildcard(typeManager: TypeManager, ty: Ty, matrix: PatternMatrix,
-        isABIStable: Bool): ArrayList<PatternCtor> {
+        currentPackage: Option<Package>): ArrayList<PatternCtor> {
         let ctors = ArrayList<PatternCtor>()
         if (matrix.MissingAll()) {
             ctors.add(PatternCtor.Wildcard())
             return ctors
         }
-        if (let Some(sealedTy) <- AsSealedLikeClassLikeTy(ty)) {
-            if (!ty.IsCType() && !isABIStable) {
-                SplitWildcardForSealed(ctors, sealedTy)
-                return ctors
+        if (let Some(sealedTy) <- (ty as ClassLikeTy)) {
+            if (let Some(pkg) <- currentPackage) {
+                if (IsClosedSealedHierarchy(sealedTy, pkg, true)) {
+                    return SplitWildcardForClosedSealed(sealedTy)
+                }
             }
         }
         if (!Ty.IsTyCorrect(ty)) {
@@ -721,36 +756,16 @@ private class UsefulnessChecker {
         return ctors
     }
 
-    private static func SplitWildcardForSealed(ctors: ArrayList<PatternCtor>, sealedTy: ClassLikeTy): Unit {
-        let directSubtypes = ArrayList<Ty>()
+    private static func SplitWildcardForClosedSealed(sealedTy: ClassLikeTy): ArrayList<PatternCtor> {
+        let directSubtypes = TreeSet<TyByName>()
         for (subTy in sealedTy.directSubtypes) {
-            directSubtypes.add(subTy)
+            directSubtypes.add(TyByName(subTy))
         }
-        sort(directSubtypes, by: { left: Ty, right: Ty =>
-            if (CompTyByNames(Some(left), Some(right))) {
-                Ordering.LT
-            } else if (CompTyByNames(Some(right), Some(left))) {
-                Ordering.GT
-            } else {
-                Ordering.EQ
-            }
-        }, stable: true)
+        let ctors = ArrayList<PatternCtor>()
         for (subTy in directSubtypes) {
-            if (let Some(subSealed) <- AsSealedLikeClassLikeTy(subTy)) {
-                if (!subTy.IsCType()) {
-                    SplitWildcardForSealed(ctors, subSealed)
-                    continue
-                }
-            }
-            ctors.add(PatternCtor.Type(subTy))
+            ctors.add(PatternCtor.Type(subTy.ty))
         }
-        if (let Some(classTy) <- (sealedTy as ClassTy)) {
-            if (let Some(classDecl) <- classTy.declPtr) {
-                if (!classDecl.TestAttr(Attribute.ABSTRACT)) {
-                    ctors.add(PatternCtor.Type(sealedTy))
-                }
-            }
-        }
+        return ctors
     }
 
     private func FindWitnessesForWildcard(vec: PatternStack): ArrayList<PatternStack> {
@@ -765,7 +780,7 @@ private class UsefulnessChecker {
             return FindWitnesses(stack)
         }
         let witnesses = ArrayList<PatternStack>()
-        let ctors = UsefulnessChecker.SplitWildcard(typeManager, goalTy, matrix, keepABIStable)
+        let ctors = UsefulnessChecker.SplitWildcard(typeManager, goalTy, matrix, currentPackage)
         for (ctor in ctors) {
             let subWitnesses = FindWitnessesBySpecialization(vec, ctor)
             for (witness in subWitnesses) {
@@ -777,7 +792,7 @@ private class UsefulnessChecker {
 
     private func FindWitnessesBySpecialization(vec: PatternStack, ctor: PatternCtor): ArrayList<PatternStack> {
         let witnesses = ArrayList<PatternStack>()
-        let newChecker = UsefulnessChecker(diag, typeManager, matrix.Specialize(typeManager, ctor))
+        let newChecker = UsefulnessChecker(diag, typeManager, matrix.Specialize(typeManager, ctor), currentPackage)
         let stack = vec.Specialize(ctor)
         let subWitnesses = newChecker.FindWitnesses(stack)
         for (witness in subWitnesses) {
@@ -787,7 +802,7 @@ private class UsefulnessChecker {
     }
 
     private func FindWitnessesForExpandedOr(vecs: ArrayList<PatternStack>): ArrayList<PatternStack> {
-        let newChecker = UsefulnessChecker(diag, typeManager, PatternMatrix(matrix))
+        let newChecker = UsefulnessChecker(diag, typeManager, PatternMatrix(matrix), currentPackage)
         let unreachables = ArrayList<Pattern>()
         let totalWitnesses = ArrayList<PatternStack>()
         for (vec in vecs) {
@@ -868,14 +883,49 @@ private func IsSealedLike(ty: Ty): Bool {
     return true
 }
 
-private func AsSealedLikeClassLikeTy(ty: Ty): Option<ClassLikeTy> {
-    if (!ty.IsClassLike() || !ty.typeArgs.isEmpty()) {
-        return None
+private func IsCurrentPackageDecl(decl: ClassLikeDecl, currentPackage: Package): Bool {
+    if (let Some(file) <- decl.curFile) {
+        if (let Some(pkg) <- file.curPackage) {
+            return pkg == currentPackage && decl.fullPackageName == currentPackage.fullPackageName
+        }
     }
-    if (!IsSealedLike(ty)) {
-        return None
+    return false
+}
+
+private func IsClosedSealedRoot(ty: ClassLikeTy, decl: ClassLikeDecl): Bool {
+    if (!decl.TestAttr(Attribute.SEALED)) {
+        return false
     }
-    return ty as ClassLikeTy
+    return !ty.IsClass() || decl.TestAttr(Attribute.ABSTRACT)
+}
+
+private func IsClosedSealedLeaf(ty: ClassLikeTy, decl: ClassLikeDecl): Bool {
+    return !ty.IsInterface() && !decl.TestAnyAttr(Attribute.OPEN, Attribute.SEALED, Attribute.ABSTRACT)
+}
+
+private func IsClosedSealedHierarchy(ty: ClassLikeTy, currentPackage: Package, isRoot: Bool): Bool {
+    if (ty.commonDecl.isNone() || !ty.typeArgs.isEmpty() || ty.IsCType()) {
+        return false
+    }
+    let decl = ty.commonDecl.getOrThrow()
+    if (decl.TestAnyAttr(Attribute.COMMON, Attribute.SPECIFIC, Attribute.FROM_COMMON_PART) ||
+        !IsCurrentPackageDecl(decl, currentPackage) || decl.TestAttr(Attribute.FOREIGN) ||
+        (if (isRoot) { !IsClosedSealedRoot(ty, decl) } else { !IsClosedSealedLeaf(ty, decl) })) {
+        return false
+    }
+    for (subTy in ty.directSubtypes) {
+        if (!Ty.IsTyCorrect(subTy)) {
+            return false
+        }
+        if (let Some(classLikeTy) <- (subTy as ClassLikeTy)) {
+            if (!IsClosedSealedHierarchy(classLikeTy, currentPackage, false)) {
+                return false
+            }
+        } else {
+            return false
+        }
+    }
+    return true
 }
 
 private func LitConstExprEq(left: LitConstExpr, right: LitConstExpr): Bool {
@@ -917,20 +967,22 @@ public func CheckMatchExprHasSelectorExhaustivenessAndReachability(
     if (!IsValidUsefulnessTy(selector.GetTy())) {
         return true
     }
-    let selectorTy = selector.GetTy().getOrThrow()
-    let checker = UsefulnessChecker(diag, typeManager)
+    let selectorTy = typeManager.ReplaceThisTy(typeManager.TryGreedySubst(selector.GetTy().getOrThrow()))
+    var currentPackage: Option<Package> = None
+    if (let Some(file) <- me.curFile) {
+        currentPackage = file.curPackage
+    }
+    let checker = UsefulnessChecker(diag, typeManager, currentPackage)
     for (mc in me.matchCases) {
         if (mc.patterns.isEmpty()) {
             CJC_ABORT()
             continue
         }
         for (pattern in mc.patterns) {
-            if (Ty.IsInitialTy(pattern.GetTy())) {
-                pattern.SetTy(typeManager.TryGreedySubst(selectorTy))
-            }
+            CJC_ASSERT(!Ty.IsInitialTy(pattern.GetTy()))
         }
         let vec = PatternStack(DestructedPattern.FromPatterns(typeManager,
-            typeManager.TryGreedySubst(selectorTy), CollectCasePatterns(mc.patterns)))
+            selectorTy, CollectCasePatterns(mc.patterns)))
         let witnesses = checker.FindWitnesses(vec)
         if (!witnesses.isEmpty()) {
             if (let None <- mc.patternGuard) {
@@ -943,7 +995,7 @@ public func CheckMatchExprHasSelectorExhaustivenessAndReachability(
         }
     }
     let stack = PatternStack(DestructedPattern(PatternCtor.Wildcard(),
-        ArrayList<DestructedPattern>(), typeManager.TryGreedySubst(selectorTy), None))
+        ArrayList<DestructedPattern>(), selectorTy, None))
     let witnesses = checker.FindWitnesses(stack)
     if (witnesses.isEmpty()) {
         return true

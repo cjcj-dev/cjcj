@@ -2397,7 +2397,8 @@ public class FaithfulAST2CHIR {
         return Translator(builder, chirType, globalCache, localConstVars: localConstVars, localConstFuncs: localConstFuncs,
             deserializedVals: deserializedVals, gim: gim, overrideSrcFuncResolver: overrideSrcFuncResolver, opts: opts,
             increKind: kind,
-            annoFactoryFuncs: annoFactoryFuncs, maybeUnreachable: maybeUnreachable,
+            annoFactoryFuncs: annoFactoryFuncs,
+            maybeUnreachable: maybeUnreachable,
             isComputingAnnos: isComputingAnnos,
             initFuncsForAnnoFactory: initFuncsForAnnoFactory)
     }

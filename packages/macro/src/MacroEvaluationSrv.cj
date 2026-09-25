@@ -196,7 +196,7 @@ extend MacroEvaluation {
         MacroEvalMsgSerializer.DeSerializeDeflibMsg(macroLibs, msg)
         for (lib in macroLibs) {
             let dyfile = FileUtil.NormalizePath(lib)
-            let handle = OpenSymbolTable(dyfile)
+            let handle = OpenMacroLibrary(dyfile)
             if (!handle.opened) {
                 let res = ArrayList<UInt8>()
                 for (byte in ("RespondFindDef " + dyfile).toArray()) {

@@ -88,7 +88,7 @@ public class UnitUnify {
                 return false
             }
             if (let Some(constant) <- (expr as Constant)) {
-                if (constant.literal.IsNullLit() || constant.literal.IsUnitLit()) {
+                if (constant.GetValue().IsNullLit() || constant.GetValue().IsUnitLit()) {
                     return false
                 }
             }

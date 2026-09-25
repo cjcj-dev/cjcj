@@ -2984,6 +2984,9 @@ public class RewriteObjCBlockConstruction <: Handler<InteropContext> {
                 if (node.astKind != ASTKind.CALL_EXPR) {
                     return VisitAction.WALK_CHILDREN
                 }
+                if (node.TestAttr(Attribute.IS_BROKEN)) {
+                    return VisitAction.SKIP_CHILDREN
+                }
                 let callExpr = (node as CallExpr).getOrThrow()
                 if (callExpr.callKind != CallKind.CALL_OBJECT_CREATION) {
                     return VisitAction.WALK_CHILDREN
@@ -3057,13 +3060,13 @@ public class InsertBaseCtorBody <: Handler<InteropContext> {
                 continue
             }
             if (let Some(mirrorClass) <- (mirror as ClassDecl)) {
-                let ctor = GetBaseCtor((mirrorClass as ClassDecl).getOrThrow()).getOrThrow()
+                let ctor = ctx.factory.GetGeneratedBaseCtor(mirrorClass).getOrThrow()
                 let curFile = ctor.curFile
                 let handleParam = WithinFile<RefExpr>(
                     CreateRefExpr(ctor.funcBody.getOrThrow().paramLists[0].params[0]), curFile)
                 if (HasMirrorSuperClass(mirrorClass)) {
                     let superClass = mirrorClass.GetSuperClassDecl().getOrThrow()
-                    let superCtor = GetBaseCtor((superClass as ClassDecl).getOrThrow()).getOrThrow()
+                    let superCtor = ctx.factory.GetGeneratedBaseCtor(superClass).getOrThrow()
                     let superCall = CreateSuperCall(mirrorClass, superCtor, superCtor.GetTy().getOrThrow())
                     superCall.args.add(CreateFuncArg(handleParam))
                     ctx.factory.AddMarkerToCallIfNeeded(superCall)
@@ -3081,7 +3084,7 @@ public class InsertBaseCtorBody <: Handler<InteropContext> {
             if (wrapper.TestAttr(Attribute.IS_BROKEN)) {
                 continue
             }
-            let ctor = GetBaseCtor((wrapper as ClassDecl).getOrThrow()).getOrThrow()
+            let ctor = ctx.factory.GetGeneratedBaseCtor(wrapper).getOrThrow()
             let curFile = ctor.curFile
             let handleParam = WithinFile<RefExpr>(
                 CreateRefExpr(ctor.funcBody.getOrThrow().paramLists[0].params[0]), curFile)
@@ -3616,7 +3619,30 @@ public class DrainGeneratedDecls <: Handler<InteropContext> {
     }
 }
 
-// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/CheckObjCPointerTypeArguments.cpp:22-40.
+// Upstream 1e741869, CheckObjCPointerTypeArguments.cpp.
+private func ReportObjCPointerIncompatibleTypeUsage(ctx: InteropContext, typeUsage: Type): Unit {
+    var errorRef: Node = typeUsage
+    let typeArgs = typeUsage.GetTypeArgs()
+    if (!typeArgs.isEmpty()) {
+        errorRef = typeArgs[0]
+    }
+    DiagnoseRefactor(ctx.diag, DiagKindRefactor.sema_objc_pointer_argument_must_be_objc_compatible,
+        errorRef).Emit()
+    typeUsage.EnableAttr(Attribute.IS_BROKEN)
+}
+
+private func ReportObjCPointerIncompatibleConstructorCall(ctx: InteropContext, callExpr: CallExpr): Unit {
+    let refExpr = callExpr.baseFunc.getOrThrow()
+    var errorRef: Node = refExpr
+    let typeArgs = refExpr.GetTypeArgs()
+    if (!typeArgs.isEmpty()) {
+        errorRef = typeArgs[0]
+    }
+    DiagnoseRefactor(ctx.diag, DiagKindRefactor.sema_objc_pointer_argument_must_be_objc_compatible,
+        errorRef).Emit()
+    callExpr.EnableAttr(Attribute.IS_BROKEN)
+}
+
 public class CheckObjCPointerTypeArguments <: Handler<InteropContext> {
     public func HandleImpl(ctx: InteropContext): Unit {
         for (file in ctx.pkg.files) {
@@ -3625,47 +3651,102 @@ public class CheckObjCPointerTypeArguments <: Handler<InteropContext> {
                     return VisitAction.WALK_CHILDREN
                 }
                 if (let Some(typeUsage) <- (node as Type)) {
-                    let usageTy = typeUsage.GetTy().getOrThrow()
-                    if (typeUsage.GetTypeArgs().size == 1 && IsObjCPointer(usageTy) &&
-                        !IsObjCCompatible(usageTy.typeArgs[0])) {
-                        DiagnoseRefactor(ctx.diag,
-                            DiagKindRefactor.sema_objc_pointer_argument_must_be_objc_compatible,
-                            typeUsage).Emit()
-                        typeUsage.EnableAttr(Attribute.IS_BROKEN)
-                    }
+                    CheckTypeUsage(ctx, typeUsage)
+                }
+                if (let Some(constructorCall) <- (node as CallExpr)) {
+                    CheckConstructorCall(ctx, constructorCall)
                 }
                 return VisitAction.WALK_CHILDREN
             })
             let _ = walker.Walk()
         }
     }
+
+    private func CheckTypeUsage(ctx: InteropContext, typeUsage: Type): Unit {
+        if (typeUsage.TestAttr(Attribute.COMPILER_ADD)) {
+            return
+        }
+        let ty = typeUsage.GetTy().getOrThrow()
+        if (ty.typeArgs.size != 1 || !IsObjCPointer(ty)) {
+            return
+        }
+        let tyArg = ty.typeArgs[0]
+        if (IsObjCCompatible(tyArg)) {
+            return
+        }
+        ReportObjCPointerIncompatibleTypeUsage(ctx, typeUsage)
+    }
+
+    private func CheckConstructorCall(ctx: InteropContext, call: CallExpr): Unit {
+        if (call.TestAttr(Attribute.COMPILER_ADD)) {
+            return
+        }
+        if (call.callKind != CallKind.CALL_OBJECT_CREATION && call.callKind != CallKind.CALL_STRUCT_CREATION) {
+            return
+        }
+        if (call.resolvedFunction.isNone()) {
+            return
+        }
+        if (!call.resolvedFunction.getOrThrow().TestAttr(Attribute.CONSTRUCTOR)) {
+            return
+        }
+        let ty = call.GetTy().getOrThrow()
+        if (ty.typeArgs.size != 1 || !IsObjCPointer(ty)) {
+            return
+        }
+        let tyArg = ty.typeArgs[0]
+        if (IsObjCCompatible(tyArg)) {
+            return
+        }
+        ReportObjCPointerIncompatibleConstructorCall(ctx, call)
+    }
 }
 
-// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/CheckObjCFuncTypeArguments.cpp:25-47.
-private func ReportObjCIncompatibleType(ctx: InteropContext, typeUsage: Type): Unit {
-    var errorRef: Node = typeUsage
-    if (!typeUsage.GetTypeArgs().isEmpty()) {
-        let tyArg = typeUsage.GetTypeArgs()[0]
-        errorRef = tyArg
-        if (let Some(funcTy) <- (tyArg as FuncType)) {
-            if (!IsObjCCompatible(funcTy.retType.getOrThrow().GetTy().getOrThrow())) {
-                errorRef = funcTy.retType.getOrThrow()
-            }
-            for (arg in funcTy.paramTypes) {
-                if (!IsObjCCompatible(arg.GetTy().getOrThrow())) {
-                    errorRef = arg
-                    break
-                }
+// Upstream 1e741869, CheckObjCFuncTypeArguments.cpp:24.
+private func FindIncompatibleTypeNode(ctx: InteropContext, tyArg: Type): Type {
+    var errorRef: Type = tyArg
+    if (let Some(fTy) <- (tyArg as FuncType)) {
+        if (!IsObjCCompatible(fTy.retType.getOrThrow().GetTy().getOrThrow())) {
+            errorRef = fTy.retType.getOrThrow()
+        }
+        for (arg in fTy.paramTypes) {
+            if (!IsObjCCompatible(arg.GetTy().getOrThrow())) {
+                errorRef = arg
+                break
             }
         }
     }
-    let typeDecl = Ty.GetDeclOfTy(typeUsage.GetTy()).getOrThrow()
+    return errorRef
+}
+
+// Upstream 1e741869, CheckObjCFuncTypeArguments.cpp.
+private func ReportObjCFuncIncompatibleTypeUsage(ctx: InteropContext, typeUsage: Type): Unit {
+    var errorRef: Node = typeUsage
+    let typeArgs = typeUsage.GetTypeArgs()
+    if (!typeArgs.isEmpty()) {
+        errorRef = FindIncompatibleTypeNode(ctx, typeArgs[0])
+    }
     DiagnoseRefactor(ctx.diag, DiagKindRefactor.sema_objc_func_argument_must_be_objc_compatible,
-        errorRef, typeDecl.identifier.Val()).Emit()
+        errorRef, Ty.GetDeclOfTy(typeUsage.GetTy()).getOrThrow().identifier.Val()).Emit()
     typeUsage.EnableAttr(Attribute.IS_BROKEN)
 }
 
-// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/CheckObjCFuncTypeArguments.cpp:50-79.
+private func ReportObjCFuncIncompatibleConstructorCall(ctx: InteropContext, callExpr: CallExpr): Unit {
+    let refExpr = callExpr.baseFunc.getOrThrow()
+    var errorRef: Node = refExpr
+    let typeArgs = refExpr.GetTypeArgs()
+    if (!typeArgs.isEmpty()) {
+        errorRef = FindIncompatibleTypeNode(ctx, typeArgs[0])
+    } else {
+        if (!callExpr.args.isEmpty()) {
+            errorRef = callExpr.args[0].expr.getOrThrow()
+        }
+    }
+    DiagnoseRefactor(ctx.diag, DiagKindRefactor.sema_objc_func_argument_must_be_objc_compatible,
+        errorRef, Ty.GetDeclOfTy(callExpr.GetTy()).getOrThrow().identifier.Val()).Emit()
+    callExpr.EnableAttr(Attribute.IS_BROKEN)
+}
+
 public class CheckObjCFuncTypeArguments <: Handler<InteropContext> {
     public func HandleImpl(ctx: InteropContext): Unit {
         for (file in ctx.pkg.files) {
@@ -3679,27 +3760,54 @@ public class CheckObjCFuncTypeArguments <: Handler<InteropContext> {
                     }
                 }
                 if (let Some(typeUsage) <- (node as Type)) {
-                    if (typeUsage.TestAttr(Attribute.COMPILER_ADD)) {
-                        return VisitAction.SKIP_CHILDREN
-                    }
-                    if (let Some(usageTy) <- typeUsage.GetTy()) {
-                        if (usageTy.typeArgs.size == 1 && IsObjCFuncOrBlock(usageTy)) {
-                            let tyArg = usageTy.typeArgs[0]
-                            var valid = tyArg.IsFunc()
-                            valid = valid && !tyArg.IsCFunc()
-                            for (subTy in tyArg.typeArgs) {
-                                valid = valid && IsObjCCompatible(subTy)
-                            }
-                            if (!valid) {
-                                ReportObjCIncompatibleType(ctx, typeUsage)
-                            }
-                        }
-                    }
+                    CheckTypeUsage(ctx, typeUsage)
+                }
+                if (let Some(constructorCall) <- (node as CallExpr)) {
+                    CheckConstructorCall(ctx, constructorCall)
                 }
                 return VisitAction.WALK_CHILDREN
             })
             let _ = walker.Walk()
         }
+    }
+
+    private func CheckTypeUsage(ctx: InteropContext, typeUsage: Type): Unit {
+        if (typeUsage.TestAttr(Attribute.COMPILER_ADD)) {
+            return
+        }
+        let ty = typeUsage.GetTy().getOrThrow()
+        if (ty.typeArgs.size != 1 || !IsObjCFuncOrBlock(ty)) {
+            return
+        }
+        let tyArg = ty.typeArgs[0]
+        if (IsObjCCompatibleFuncTy(tyArg)) {
+            return
+        }
+        ReportObjCFuncIncompatibleTypeUsage(ctx, typeUsage)
+    }
+
+    private func CheckConstructorCall(ctx: InteropContext, call: CallExpr): Unit {
+        if (call.TestAttr(Attribute.COMPILER_ADD)) {
+            return
+        }
+        if (call.callKind != CallKind.CALL_OBJECT_CREATION && call.callKind != CallKind.CALL_STRUCT_CREATION) {
+            return
+        }
+        if (call.resolvedFunction.isNone()) {
+            return
+        }
+        if (!call.resolvedFunction.getOrThrow().TestAttr(Attribute.CONSTRUCTOR)) {
+            return
+        }
+        let ty = call.GetTy().getOrThrow()
+        if (ty.typeArgs.size != 1 || !IsObjCFuncOrBlock(ty)) {
+            return
+        }
+        let tyArg = ty.typeArgs[0]
+        if (IsObjCCompatibleFuncTy(tyArg)) {
+            return
+        }
+        ReportObjCFuncIncompatibleConstructorCall(ctx, call)
     }
 }
 
@@ -4459,7 +4567,7 @@ public class DesugarMirrors <: Handler<InteropContext> {
         let curFile = ctor.curFile
         CJC_NULLPTR_CHECK(ctor.funcBody)
         CJC_ASSERT(!ctor.funcBody.getOrThrow().paramLists.isEmpty())
-        let generatedCtor = GetBaseCtor((mirror as ClassDecl).getOrThrow()).getOrThrow()
+        let generatedCtor = ctx.factory.GetGeneratedBaseCtor(mirror).getOrThrow()
         let thisCall = CreateThisCall(mirror, generatedCtor, generatedCtor.GetTy().getOrThrow(),
             curFile.getOrThrow())
         CJC_ASSERT_WITH_MSG(mirror.astKind == ASTKind.CLASS_DECL,
@@ -4623,8 +4731,9 @@ private func DesugarSuperCtorCall(ctx: InteropContext, impl: ClassDecl, ctor: Fu
                 nodes
             }), curFile)
         let retained = ctx.factory.CreateObjCRetainAutoreleasedReturnValueCall(withSuper)
-        let baseCtor = GetObjCMirrorBaseCtor(superClass).getOrThrow()
-        let call = WithinFile<CallExpr>(CreateSuperCall(superClass, baseCtor, baseCtor.GetTy().getOrThrow()), curFile)
+        let baseCtor = ctx.factory.GetGeneratedBaseCtor(impl).getOrThrow()
+        let call = WithinFile<CallExpr>(
+            CreateSuperCall(baseCtor.outerDecl.getOrThrow(), baseCtor, baseCtor.GetTy().getOrThrow()), curFile)
         call.args.add(CreateFuncArg(retained))
         ctx.factory.AddMarkerToCallIfNeeded(call)
         call.sourceExpr = Some(callExpr)
