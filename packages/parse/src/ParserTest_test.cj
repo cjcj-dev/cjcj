@@ -163,6 +163,101 @@ class ParseTypePortTest {
         "#)
         @Expect(countErrors(parsed[1]) > 0, true)
     }
+
+    // Upstream 5fd26cc0 unittests/Parse/ParseTypeTest.cpp ParseOptionTypeWithNewlines.
+    @TestCase
+    func parseOptionTypeWithNewlines(): Unit {
+        let sources = [
+            "?(Bool, Nothing\n)",
+            "?(Int64\n, Bool)",
+            "?V0\n.V1",
+            "?V0.\nV1",
+            "?Box<Int64\n, Bool>",
+            "?()\n-> (\n) -> Bool",
+            "? ?(?Int64\n, Bool\n)"
+        ]
+        let expected = [
+            ASTKind.TUPLE_TYPE,
+            ASTKind.TUPLE_TYPE,
+            ASTKind.QUALIFIED_TYPE,
+            ASTKind.QUALIFIED_TYPE,
+            ASTKind.REF_TYPE,
+            ASTKind.FUNC_TYPE,
+            ASTKind.TUPLE_TYPE
+        ]
+        for (idx in 0..sources.size) {
+            let parsed = parseFile("type T = " + sources[idx] + "\nmain() {}")
+            let errors = countErrors(parsed[1])
+            var kindOk = false
+            if (parsed[0].decls.size >= 1) {
+                if (let Some(alias) <- (parsed[0].decls[0] as TypeAliasDecl)) {
+                    if (let Some(ty) <- alias.typeNode) {
+                        if (let Some(option) <- (ty as OptionType)) {
+                            if (let Some(component) <- option.componentType) {
+                                kindOk = component.astKind == expected[idx]
+                            }
+                        }
+                    }
+                }
+            }
+            println("OPTNL_LEGAL_CHECKED idx=${idx} errors=${errors} decls=${parsed[0].decls.size} kind_ok=${kindOk}")
+            @Expect(errors, 0)
+            @Expect(parsed[0].decls.size, 2)
+            @Expect(kindOk, true)
+        }
+    }
+
+    // Upstream 5fd26cc0 unittests/Parse/ParseTypeTest.cpp RejectNewlineAfterOptionPrefix.
+    @TestCase
+    func rejectNewlineAfterOptionPrefix(): Unit {
+        let sources = ["?\nInt64", "?\n?Int64"]
+        for (source in sources) {
+            let parsed = parseFile("type T = " + source + "\nmain() {}")
+            let diagnostics = parsed[1].GetCategoryDiagnostic(DiagCategory.PARSE)
+            var matched = false
+            if (!diagnostics.isEmpty()) {
+                matched = diagnostics[0].rKind == DiagKindRefactor.parse_newline_not_allowed_between_quest_and_type
+            }
+            println("OPTNL_REJECT_CHECKED n=${diagnostics.size} matched=${matched}")
+            @Expect(diagnostics.size, 1)
+            @Expect(matched, true)
+        }
+    }
+
+    // Upstream a496a600 unittests/Parse/ParseTypeTest.cpp UnclosedOptionalTypeArgumentPosition.
+    @TestCase
+    func unclosedOptionalTypeArgumentPosition(): Unit {
+        let types = ["A<O", "?A<O", "? ?A<O", "?A<OtherType"]
+        let suffixes = ["", "\n", "\n// trailing comment\n"]
+        for (ty in types) {
+            for (suffix in suffixes) {
+                let line = "type C = " + ty
+                let sm = SourceManager()
+                let diag = DiagnosticEngine()
+                let file = Parser(line + suffix, diag, sm).ParseTopLevel()
+                let diagnostics = diag.GetCategoryDiagnostic(DiagCategory.PARSE)
+                let angle = line.indexOf("<") ?? -1
+                var mainLine: Int64 = -1
+                var mainColumn: Int64 = -1
+                var hintColumn: Int64 = -1
+                var kindOk = false
+                if (!diagnostics.isEmpty()) {
+                    kindOk = diagnostics[0].rKind == DiagKindRefactor.parse_expected_right_delimiter
+                    mainLine = diagnostics[0].mainHint.range.begin.line
+                    mainColumn = diagnostics[0].mainHint.range.begin.column
+                    if (!diagnostics[0].otherHints.isEmpty()) {
+                        hintColumn = diagnostics[0].otherHints[0].range.begin.column
+                    }
+                }
+                println("OPTNL_POS_CHECKED n=${diagnostics.size} kind_ok=${kindOk} line=${mainLine} col=${mainColumn} expect_col=${line.size + 1} hint=${hintColumn} expect_hint=${angle + 1} decls=${file.decls.size}")
+                @Expect(diagnostics.size, 1)
+                @Expect(kindOk, true)
+                @Expect(mainLine, 1)
+                @Expect(mainColumn, line.size + 1)
+                @Expect(hintColumn, angle + 1)
+            }
+        }
+    }
 }
 
 private func expectKinds(actual: ArrayList<TokenKind>, expected: Array<TokenKind>): Bool {

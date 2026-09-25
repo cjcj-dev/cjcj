@@ -68,7 +68,8 @@ private func GenerateIntrinsic(irBuilder: IRBuilder2, kind: IntrinsicKind, args:
     }
     if (kind == IntrinsicKind.ALIGN_OF) {
         if (!typeArgs.isEmpty()) {
-            return AlignOfType(irBuilder, typeArgs[0], resultType)
+            let cgRetTy = CGType.GetOrCreate(irBuilder.GetCGModule(), resultType.getOrThrow())
+            return irBuilder.GetAlign(typeArgs[0], cgRetTy.GetLLVMType())
         }
         return LLVMNullValue()
     }
@@ -760,11 +761,6 @@ private func CPointerWrite(irBuilder: IRBuilder2, args: ArrayList<Value>,
     return LLVMNullValue()
 }
 
-private func AlignOfType(irBuilder: IRBuilder2, ty: Type, resultType: Option<Type>): LLVMValueRef {
-    let alignValue = if (let Some(align) <- CGType.GetOrCreate(irBuilder.GetCGModule(), ty).GetAlign()) { align } else { 1 }
-    return IntegerConstantForResult(irBuilder, alignValue, resultType)
-}
-
 private func GenerateIsSubtypeTypes(irBuilder: IRBuilder2, leftTy: Type, rightTy: Type): LLVMValueRef {
     let args = ArrayList<LLVMValueRef>()
     args.add(CreateTypeInfoAsI8Ptr(irBuilder, leftTy))
@@ -779,15 +775,6 @@ private func CreateStaticTypeInfo(irBuilder: IRBuilder2, ty: Type): LLVMValueRef
 private func CreateTypeInfoAsI8Ptr(irBuilder: IRBuilder2, ty: Type): LLVMValueRef {
     let i8PtrType = unsafe { LLVMPointerType(LLVMInt8TypeInContext(irBuilder.GetLLVMContext().raw), 0u32) }
     return irBuilder.CreateBitCast(CreateStaticTypeInfo(irBuilder, ty), i8PtrType, name: "ti.i8")
-}
-
-private func IntegerConstantForResult(irBuilder: IRBuilder2, value: Int64, resultType: Option<Type>): LLVMValueRef {
-    let llvmType = if (let Some(resultTy) <- resultType) {
-        CGType.GetOrCreate(irBuilder.GetCGModule(), resultTy).GetLLVMType()
-    } else {
-        unsafe { LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw) }
-    }
-    return unsafe { LLVMConstInt(llvmType, UInt64(value), 0) }
 }
 
 private func ElementSizeOfPointerLike(irBuilder: IRBuilder2, ty: Type): Int64 {
