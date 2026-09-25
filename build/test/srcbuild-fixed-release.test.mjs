@@ -12,7 +12,7 @@ const hash = file => digest(fs.readFileSync(file));
 
 // Only external release bytes and the final bootstrap child are fixtures. The
 // complete srcbuild driver, acquire/store and manifest validator are unmodified.
-function fixture(t, {depot = 'missing', corrupt = '', sumsMismatch = false} = {}) {
+function fixture(t, {depot = 'missing', corrupt = '', sumsMismatch = false, unavailable = false} = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'fixed-release-'));
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));
   for (const dir of ['tools', 'build', 'ci']) fs.cpSync(path.join(repo, dir), path.join(root, dir), {recursive: true});
@@ -51,14 +51,14 @@ function fixture(t, {depot = 'missing', corrupt = '', sumsMismatch = false} = {}
   if (corrupt) fs.appendFileSync(path.join(payload, corrupt), 'changed');
   const requests = path.join(root, 'requests');
   const preload = path.join(root, 'release-fetch.mjs');
-  fs.writeFileSync(preload, `import fs from 'node:fs';\nconst pin=${JSON.stringify(pin)};\nglobalThis.fetch=async url=>{\nfs.appendFileSync(${JSON.stringify(requests)},url+'\\n');\nconst f=pin.files.find(f=>url==='https://api.github.com/repos/'+pin.repository+'/releases/assets/'+f.asset);\nreturn f ? new Response(fs.readFileSync(${JSON.stringify(payload)}+'/'+f.path)) : new Response('',{status:404});\n};\n`);
+  fs.writeFileSync(preload, `import fs from 'node:fs';\nconst pin=${JSON.stringify(pin)};\nglobalThis.fetch=async url=>{\nfs.appendFileSync(${JSON.stringify(requests)},url+'\\n');\nconst f=pin.files.find(f=>url==='https://api.github.com/repos/'+pin.repository+'/releases/assets/'+f.asset);\nreturn f && !${unavailable} ? new Response(fs.readFileSync(${JSON.stringify(payload)}+'/'+f.path)) : new Response('',{status:404});\n};\n`);
   const bin = path.join(root, 'fixture-bin'); fs.mkdirSync(bin);
   if (os.hostname().split('.')[0] !== 'kkk2') fs.writeFileSync(path.join(bin, 'hostname'), '#!/bin/sh\necho kkk2\n', {mode: 0o755});
   const child = path.join(root, 'bootstrap-child.sh');
   fs.writeFileSync(child, '#!/bin/bash\nprintf "ARG=<%s>\\n" "$@"\n', {mode: 0o755});
   const env = {...process.env, PATH: `${bin}:${process.env.PATH}`, NODE_OPTIONS: `--import=${preload}`,
     CJCJ_LLVM_DEPOT_ROOT: depotRoot, CJCJ_BOOTSTRAP_SH: child,
-    CJCJ_BOOTSTRAP_CPP_SRC: root, CJCJ_SRCBUILD_HOST_SDK: root,
+    CJCJ_BOOTSTRAP_CPP_SRC: root, CJCJ_SRCBUILD_HOST_SDK: root, CJCJ_BOOTSTRAP_CJCJ_SHA: pin.commit,
     CJCJ_BOOTSTRAP_HOST_LLVM_SO: child, CJCJ_BOOTSTRAP_HOST_LLVM_SHA256: hash(child),
     CJCJ_BOOTSTRAP_AST_SUPPORT: child, CJCJ_BOOTSTRAP_AST_SUPPORT_SHA256: hash(child)};
   for (const key of ['CJCJ_LLVM_DEPOT_PUBLISH', 'CJCJ_BOOTSTRAP_COLOUR_TUPLE', 'CJCJ_SELECTED_COLOUR_TUPLE',
@@ -116,3 +116,13 @@ for (const kind of ['asset', 'sums']) {
     console.log(`ASSERT rejected-${kind} driver_rc=${result.status}`);
   });
 }
+
+test('fixed release unavailable fails without source compilation', t => {
+  const f = fixture(t, {unavailable: true});
+  const result = f.run();
+  assert.equal(result.status, 1, result.log);
+  assert.match(result.log, /bootstrap GitHub request failed: 404/);
+  assert.equal(fs.existsSync(path.join(f.state, 'fixed-llvm-build')), false);
+  assert.equal(fs.existsSync(path.join(f.state, 'colour-tuple')), false);
+  console.log(`ASSERT release-unavailable driver_rc=${result.status}`);
+});
