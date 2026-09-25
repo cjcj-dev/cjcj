@@ -504,7 +504,7 @@ public func OpenMacroLibrary(path: String): RuntimeHandle {
         }
     }
     let handle = RuntimeHandle(path)
-    let load = GetHostRuntimeMethodPointer("LoadCJLibrary")
+    let load = GetTaskRuntimeMethodPointer("LoadCJLibrary")
     if (load.isNull()) {
         return handle
     }
@@ -534,7 +534,7 @@ public func GetMethodPointer(handle: RuntimeHandle, name: String): CPointer<Unit
     try (symbolName = unsafe { LibC.mallocCString(name) }.asResource()) {
         var symbol = CPointer<Unit>()
         if (handle.runtimeManaged) {
-            let find = GetHostRuntimeMethodPointer("FindCJSymbol")
+            let find = GetTaskRuntimeMethodPointer("FindCJSymbol")
             if (!find.isNull()) {
                 try (libraryName = unsafe { LibC.mallocCString(handle.path) }.asResource()) {
                     symbol = unsafe {
@@ -554,6 +554,23 @@ public func GetMethodPointer(handle: RuntimeHandle, name: String): CPointer<Unit
         result = CPointer<Unit>()
     }
     return result
+}
+
+// PackageInitBegin consults Runtime::CurrentRef()'s file catalog. LoadCJLibrary,
+// FindCJSymbol and UnloadCJLibrary must therefore bind the same image that
+// RunCJTask / InstanceRunTask will attach. Host-only lookup is only valid when
+// the macro task itself runs on the process host runtime.
+private func GetTaskRuntimeMethodPointer(name: String): CPointer<Unit> {
+    let runtime = RuntimeInit.GetInstance()
+    if (!runtime.runtimeInstanceHandle.isNull()) {
+        if (let Some(opened) <- runtime.GetHandle()) {
+            let method = GetMethodPointer(opened, name)
+            if (!method.isNull()) {
+                return method
+            }
+        }
+    }
+    return GetHostRuntimeMethodPointer(name)
 }
 
 // The Cangjie host has already initialized its runtime before main. Resolve
@@ -583,7 +600,7 @@ public func CloseSymbolTable(handle: RuntimeHandle): Int64 {
     }
     var ret: Int64 = 0
     if (handle.runtimeManaged) {
-        let unload = GetHostRuntimeMethodPointer("UnloadCJLibrary")
+        let unload = GetTaskRuntimeMethodPointer("UnloadCJLibrary")
         if (unload.isNull()) {
             return -1
         }
