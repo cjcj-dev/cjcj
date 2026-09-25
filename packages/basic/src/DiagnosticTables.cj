@@ -433,7 +433,7 @@ public enum DiagKindRefactor {
     | driver_invalid_compile_as_exe_platform
     | driver_invalid_visible_pkgs
     | driver_invalid_visible_pkgs_conflict
-    | driver_visible_pkgs_only_for_dylib
+    | driver_ineffective_option
     | driver_useless_option
     | driver_unsupport_compile_package_with_source_file
     | driver_unsupport_compile_source_file_with_path
@@ -2346,7 +2346,7 @@ public let errorData: Array<ErrorData> = [
     ErrorData(message: "Windows, Mac, IOS does not support --compile-as-exe", mainHint: "", otherHints: []),
     ErrorData(message: "--lto-keep-pkg-visibility only takes effect when lto mode is enabled", mainHint: "", otherHints: []),
     ErrorData(message: "--lto-keep-pkg-visibility and --compile-as-exe cannot be used together", mainHint: "", otherHints: []),
-    ErrorData(message: "--lto-keep-pkg-visibility only takes effect when outputting a dylib", mainHint: "", otherHints: []),
+    ErrorData(message: "%s does not take effect under the current configuration", mainHint: "", otherHints: []),
     ErrorData(message: "option '%s' is deprecated and will be removed in the future", mainHint: "", otherHints: []),
     ErrorData(message: "when having --package flag, not support compiling packages with source file '%s'", mainHint: "", otherHints: []),
     ErrorData(message: "when compiling source file, not support compiling it with directory '%s'", mainHint: "", otherHints: []),
@@ -4563,7 +4563,7 @@ public let RE_DIAG_KIND_STR: Array<String> = [
     "driver_invalid_compile_as_exe_platform",
     "driver_invalid_visible_pkgs",
     "driver_invalid_visible_pkgs_conflict",
-    "driver_visible_pkgs_only_for_dylib",
+    "driver_ineffective_option",
     "driver_useless_option",
     "driver_unsupport_compile_package_with_source_file",
     "driver_unsupport_compile_source_file_with_path",
@@ -5592,7 +5592,7 @@ public func DiagKindRefactorIndex(kind: DiagKindRefactor): Int64 {
         case DiagKindRefactor.driver_invalid_compile_as_exe_platform => 94
         case DiagKindRefactor.driver_invalid_visible_pkgs => 95
         case DiagKindRefactor.driver_invalid_visible_pkgs_conflict => 96
-        case DiagKindRefactor.driver_visible_pkgs_only_for_dylib => 97
+        case DiagKindRefactor.driver_ineffective_option => 97
         case DiagKindRefactor.driver_useless_option => 98
         case DiagKindRefactor.driver_unsupport_compile_package_with_source_file => 99
         case DiagKindRefactor.driver_unsupport_compile_source_file_with_path => 100
