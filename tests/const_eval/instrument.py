@@ -27,7 +27,7 @@ def membership(block, expr, expected, label, indent):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('tree', type=Path)
-    parser.add_argument('--cut', choices=['producer', 'consumer'])
+    parser.add_argument('--cut', choices=['producer', 'consumer', 'enum-selector'])
     parser.add_argument('--diff', type=Path, required=True)
     args = parser.parse_args()
     rel = 'packages/chir/src/ConstEval.cj'
@@ -44,6 +44,19 @@ def main():
         ('            return ExprResultAsValue(constant)',
          membership('parent', 'constant', 1, 'inserted', '            ')),
     ]
+    # At cast creation neither expression has been consumed; both are then
+    # inserted by the caller callback. These observe actual block membership.
+    sites += [
+        ('            let createdTypeCast340 = builder.CreateTypeCast(ty, selector, parent)',
+         membership('parent', 'selectorExpr', 0, 'enum-before-cast', '            ')),
+        ('            insertExpr(selectorExpr)',
+         membership('parent', 'selectorExpr', 0, 'enum-selector-created', '            ') +
+         membership('parent', 'createdTypeCast340', 0, 'enum-cast-created', '            ')),
+        ('            insertExpr(createdTypeCast340)',
+         membership('parent', 'selectorExpr', 1, 'enum-selector-inserted', '            ')),
+        ('            return ExprResultAsValue(createdTypeCast340)',
+         membership('parent', 'createdTypeCast340', 1, 'enum-cast-inserted', '            ')),
+    ]
     for needle, assertion in sites:
         if text.count(needle) != 1:
             raise SystemExit(f'expected exactly one product site: {needle}')
@@ -51,6 +64,9 @@ def main():
     if args.cut == 'consumer':
         text = text.replace('            insertExpr(constant)',
                             '            // Controlled cut: constant is not inserted.')
+    if args.cut == 'enum-selector':
+        text = text.replace('            insertExpr(selectorExpr)',
+                            '            // Controlled cut: enum selector is not inserted.')
     if args.cut == 'producer':
         needle = '                    let constant = builder.CreateConstant(ty, IntLiteral(val.GetInt()), parent)'
         if text.count(needle) != 1:

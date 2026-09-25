@@ -361,20 +361,18 @@ private class IVal2CHIR {
             if (!val.IsIntLike() && val.kind != InterpreterValueKind.IBOOL) {
                 return None
             }
-            let selector = if (selectorTy.IsBoolean()) {
-                let createdConstant332 = builder.CreateConstant(selectorTy, BoolLiteral(if (val.kind == InterpreterValueKind.IBOOL) {
+            let selectorExpr = if (selectorTy.IsBoolean()) {
+                builder.CreateConstant(selectorTy, BoolLiteral(if (val.kind == InterpreterValueKind.IBOOL) {
                     val.GetBool()
                 } else {
                     val.GetInt() != 0
                 }), parent)
-                insertExpr(createdConstant332)
-                ExprResultAsValue(createdConstant332) ?? return None
             } else {
-                let createdConstant338 = builder.CreateConstant(selectorTy, IntLiteral(val.GetInt()), parent)
-                insertExpr(createdConstant338)
-                ExprResultAsValue(createdConstant338) ?? return None
+                builder.CreateConstant(selectorTy, IntLiteral(val.GetInt()), parent)
             }
+            let selector = ExprResultAsValue(selectorExpr) ?? return None
             let createdTypeCast340 = builder.CreateTypeCast(ty, selector, parent)
+            insertExpr(selectorExpr)
             insertExpr(createdTypeCast340)
             return ExprResultAsValue(createdTypeCast340)
         }
