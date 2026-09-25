@@ -25,7 +25,7 @@ others=(
 fail=0
 for src in "${!expect[@]}"; do
   log="$out/${src}.log"
-  "$compiler" --output-type=chir --diagnostic-format=noColor "$fixtures/$src" >"$log" 2>&1
+  "$compiler" --experimental --output-type=chir --diagnostic-format=noColor "$fixtures/$src" >"$log" 2>&1
   rc=$?
   printf '%s\n' "$rc" > "$out/${src}.rc"
   msg="${expect[$src]}"
