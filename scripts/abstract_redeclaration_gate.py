@@ -29,7 +29,7 @@ def main():
         dest = args.out / name
         dest.mkdir(exist_ok=True)
         command = [str(args.compiler.resolve()), str(fixtures / (name + '.cj')),
-                   '--emit-chir=raw', '--dump-chir', '-o', str(dest / 'output.chir')]
+                   '--emit-chir=raw', '--dump-chir', '--jobs', '1', '-o', str(dest / 'output.chir')]
         start = time.monotonic()
         process = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                  text=True, timeout=180, cwd=dest)
