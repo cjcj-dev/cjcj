@@ -47,7 +47,9 @@ gdb.execute('run')
 if freed:
     try:
         gdb.execute('call (int)raise(2)')
-        gdb.execute('call (unsigned int)sleep(2)')
+        # IsDeleted retains the upstream bounded DELETING wait. Keep the
+        # interrupted Init parked until that handler exits, even at -O0.
+        gdb.execute('call (unsigned int)sleep(60)')
     except gdb.error as e:
         print('INFERIOR_CALL_STATUS '+str(e))
 result={'freed':freed,'calls':records,'exit_codes':exits}
