@@ -715,6 +715,7 @@ public class Translator {
         }
         funcDef.Set<AnnoFactoryInfo, ArrayList<GlobalVar>>(TranslateAnnotationsArraySig(annotationsArray, funcDef))
         let annoInstances = ArrayList<CustomAnnoInstance>()
+        var allLiteralArgs = true
         for (element in annotationsArray.children) {
             let callExpr = (element as AstCallExpr).getOrThrow()
             let callee = callExpr.resolvedFunction.getOrThrow().funcBody.getOrThrow()
@@ -725,8 +726,13 @@ public class Translator {
                 if (let Some(literal) <- (argValue as AstLitConstExpr)) {
                     paramValues.add(literal.rawString)
                 } else {
-                    return AnnoInfo(mangledName, ArrayList<CustomAnnoInstance>())
+                    allLiteralArgs = false
+                    break
                 }
+            }
+            if (!allLiteralArgs) {
+                annoInstances.clear()
+                break
             }
             annoInstances.add(CustomAnnoInstance(annoClassDecl.identifier.GetRawText(), paramValues,
                 TranslateLocation(element)))
