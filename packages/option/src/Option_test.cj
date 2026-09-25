@@ -1,5 +1,6 @@
 package cjcj::option
 
+import cjcj::utils.FileUtil
 import std.unittest.*
 import std.unittest.testmacro.*
 import std.core.Option as CoreOption
@@ -331,6 +332,141 @@ class OptionTableTest {
         } else {
             @Expect(false, true)
         }
+    }
+
+    private func ensureIosLtoSrc(): String {
+        let path = "/tmp/ios_lto_gate_main.cj"
+        let wrote = FileUtil.WriteToFile(path, "main(): Int64 { return 0 }\n")
+        if (wrote) {
+            return path
+        }
+        return OPTION_TEST_SRC_FILE
+    }
+
+    private func runIosLto(name: String, args: Array<String>): Bool {
+        eprintln("IOS_LTO_BEGIN " + name)
+        let parsed = parseArgs(args)
+        if (!parsed[0]) {
+            eprintln("IOS_LTO_END " + name + " rc=false")
+            return false
+        }
+        let opts = GlobalOptions()
+        let succ = opts.ParseFromArgs(parsed[1])
+        let rcText = if (succ) { "true" } else { "false" }
+        eprintln("IOS_LTO_END " + name + " rc=" + rcText)
+        return succ
+    }
+
+    private func iosLtoArgs(src: String, extra: Array<String>): Array<String> {
+        let args = Array<String>(1 + extra.size + 1, repeat: "")
+        args[0] = "cjc"
+        var i: Int64 = 0
+        while (i < extra.size) {
+            args[i + 1] = extra[i]
+            i = i + 1
+        }
+        args[extra.size + 1] = src
+        return args
+    }
+
+    @TestCase
+    func IosDylibLtoExperimental(): Unit {
+        let src = ensureIosLtoSrc()
+        let succ = runIosLto("IosDylibLtoExperimental", iosLtoArgs(src, [
+            "--experimental", "--lto", "full", "--output-type", "dylib", "--target", "aarch64-apple-ios"
+        ]))
+        println("EXECUTED IosDylibLtoExperimental rc=" + if (succ) { "true" } else { "false" })
+        @Expect(succ, true)
+    }
+
+    @TestCase
+    func IosStaticlibLtoExperimental(): Unit {
+        let src = ensureIosLtoSrc()
+        let succ = runIosLto("IosStaticlibLtoExperimental", iosLtoArgs(src, [
+            "--experimental", "--lto", "full", "--output-type", "staticlib", "--target", "aarch64-apple-ios"
+        ]))
+        println("EXECUTED IosStaticlibLtoExperimental rc=" + if (succ) { "true" } else { "false" })
+        @Expect(succ, true)
+    }
+
+    @TestCase
+    func IosDylibLtoNoExperimental(): Unit {
+        let src = ensureIosLtoSrc()
+        let succ = runIosLto("IosDylibLtoNoExperimental", iosLtoArgs(src, [
+            "--lto", "full", "--output-type", "dylib", "--target", "aarch64-apple-ios"
+        ]))
+        println("EXECUTED IosDylibLtoNoExperimental rc=" + if (succ) { "true" } else { "false" })
+        @Expect(succ, false)
+    }
+
+    @TestCase
+    func DarwinLtoRejected(): Unit {
+        let src = ensureIosLtoSrc()
+        let succ = runIosLto("DarwinLtoRejected", iosLtoArgs(src, [
+            "--lto", "full", "--target", "aarch64-apple-darwin"
+        ]))
+        println("EXECUTED DarwinLtoRejected rc=" + if (succ) { "true" } else { "false" })
+        @Expect(succ, false)
+    }
+
+    @TestCase
+    func WindowsLtoRejected(): Unit {
+        let src = ensureIosLtoSrc()
+        let succ = runIosLto("WindowsLtoRejected", iosLtoArgs(src, [
+            "--lto", "full", "--target", "x86_64-w64-mingw32"
+        ]))
+        println("EXECUTED WindowsLtoRejected rc=" + if (succ) { "true" } else { "false" })
+        @Expect(succ, false)
+    }
+
+    @TestCase
+    func LinuxExeVisibilityWarns(): Unit {
+        let src = ensureIosLtoSrc()
+        let succ = runIosLto("LinuxExeVisibilityWarns", iosLtoArgs(src, [
+            "--lto", "full", "--lto-keep-pkg-visibility", "mypkg", "--output-type", "exe",
+            "--target", "x86_64-unknown-linux-gnu"
+        ]))
+        println("EXECUTED LinuxExeVisibilityWarns rc=" + if (succ) { "true" } else { "false" })
+        @Expect(succ, true)
+    }
+
+    @TestCase
+    func LinuxDylibVisibilitySilent(): Unit {
+        let src = ensureIosLtoSrc()
+        let succ = runIosLto("LinuxDylibVisibilitySilent", iosLtoArgs(src, [
+            "--lto", "full", "--lto-keep-pkg-visibility", "mypkg", "--output-type", "dylib",
+            "--target", "x86_64-unknown-linux-gnu"
+        ]))
+        println("EXECUTED LinuxDylibVisibilitySilent rc=" + if (succ) { "true" } else { "false" })
+        @Expect(succ, true)
+    }
+
+    @TestCase
+    func IosStaticlibVisibilitySilent(): Unit {
+        let src = ensureIosLtoSrc()
+        let succ = runIosLto("IosStaticlibVisibilitySilent", iosLtoArgs(src, [
+            "--experimental", "--lto", "full", "--lto-keep-pkg-visibility", "mypkg",
+            "--output-type", "staticlib", "--target", "aarch64-apple-ios"
+        ]))
+        println("EXECUTED IosStaticlibVisibilitySilent rc=" + if (succ) { "true" } else { "false" })
+        @Expect(succ, true)
+    }
+
+    @TestCase
+    func IosVisibilityAnyOutputMode(): Unit {
+        let src = ensureIosLtoSrc()
+        let exe = runIosLto("IosVisibilityExe", iosLtoArgs(src, [
+            "--experimental", "--lto", "full", "--lto-keep-pkg-visibility", "mypkg",
+            "--output-type", "exe", "--target", "aarch64-apple-ios"
+        ]))
+        let dylib = runIosLto("IosVisibilityDylib", iosLtoArgs(src, [
+            "--experimental", "--lto", "full", "--lto-keep-pkg-visibility", "mypkg",
+            "--output-type", "dylib", "--target", "aarch64-apple-ios"
+        ]))
+        println("EXECUTED IosVisibilityAnyOutputMode exe=" + if (exe) { "true" } else { "false" } +
+            " dylib=" + if (dylib) { "true" } else { "false" })
+        @Expect(exe, true)
+        @Expect(dylib, true)
     }
 
     @TestCase
