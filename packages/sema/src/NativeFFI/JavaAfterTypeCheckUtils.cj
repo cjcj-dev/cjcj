@@ -311,20 +311,66 @@ public func CreateJavaRefCall(expr: Expr): Expr {
 }
 
 public func IsGeneratedJavaMirrorConstructor(ctor: FuncDecl): Bool {
-    return ctor.TestAttr(Attribute.JAVA_MIRROR) && ctor.TestAttr(Attribute.CONSTRUCTOR) &&
-        ctor.TestAttr(Attribute.COMPILER_ADD)
+    if (let None <- ctor.outerDecl) {
+        return false
+    }
+    return ctor.outerDecl.getOrThrow().TestAttr(Attribute.JAVA_MIRROR) &&
+        ctor.TestAttr(Attribute.CONSTRUCTOR) && ctor.TestAttr(Attribute.COMPILER_ADD)
 }
 
-public func GetGeneratedConstructorInMirror(mirror: ClassDecl): Option<FuncDecl> {
+public func IsWrappingConstructorOfJavaMirror(ctor: FuncDecl): Bool {
+    if (!ctor.TestAttr(Attribute.CONSTRUCTOR) || !ctor.TestAttr(Attribute.COMPILER_ADD)) {
+        return false
+    }
+    if (let None <- ctor.funcBody) {
+        return false
+    }
+    let lists = ctor.funcBody.getOrThrow().paramLists
+    if (lists.isEmpty() || lists[0].params.size != 1) {
+        return false
+    }
+    if (let Some(ty) <- lists[0].params[0].GetTy()) {
+        return InteropLibBridge.IsJavaEntityTy(ty)
+    }
+    return false
+}
+
+public func GetJavaMirrorWrappingConstructor(mirror: ClassDecl): Option<FuncDecl> {
     CJC_ASSERT(mirror.TestAttr(Attribute.JAVA_MIRROR))
     for (member in mirror.GetMemberDecls()) {
         if (let Some(fd) <- (member as FuncDecl)) {
-            if (IsGeneratedJavaMirrorConstructor(fd)) {
+            if (IsWrappingConstructorOfJavaMirror(fd)) {
                 return Some(fd)
             }
         }
     }
     return None
+}
+
+public func GetJavaMirrorWrappingConstructor(mirrorLike: ClassLikeDecl): Option<FuncDecl> {
+    if (IsImpl(mirrorLike)) {
+        for (superType in mirrorLike.inheritedTypes) {
+            if (superType.TyKind() != TypeKind.TYPE_CLASS) {
+                continue
+            }
+            if (let Some(superTy) <- (superType.GetTy() as ClassLikeTy)) {
+                if (let Some(superDecl) <- superTy.commonDecl) {
+                    if (IsMirror(superDecl) || IsImpl(superDecl)) {
+                        return GetJavaMirrorWrappingConstructor(superDecl)
+                    }
+                }
+            }
+        }
+        return None
+    }
+    if (let Some(mirrorClass) <- (mirrorLike as ClassDecl)) {
+        return GetJavaMirrorWrappingConstructor(mirrorClass)
+    }
+    return None
+}
+
+public func GetGeneratedConstructorInMirror(mirror: ClassDecl): Option<FuncDecl> {
+    return GetJavaMirrorWrappingConstructor(mirror)
 }
 
 public func GetGeneratedJavaMirrorConstructor(mirror: ClassLikeDecl): FuncDecl {
@@ -528,6 +574,14 @@ public func ReplaceClassName(classTypeSignature: String, newSegment: String): St
 
 public func NormalizeJavaSignature(sig: String): String {
     return sig.replace(".", "/")
+}
+
+public func GetJavaJniClassName(utils: Utils, cjtype: Ty): String {
+    if (IsJArray(cjtype)) {
+        return utils.GetJavaTypeSignature(cjtype)
+    }
+    let decl = Ty.GetDeclOfTy(Some(cjtype)).getOrThrow()
+    return NormalizeJavaSignature(GetJavaFQName(decl))
 }
 
 public func CreateMirrorConstructorCall(importManager: SemaImportManager, entity: Expr,

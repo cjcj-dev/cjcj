@@ -3,13 +3,13 @@ package cjcj::sema.NativeFFI.Java
 import std.collection.*
 import cjcj::ast.*
 import cjcj::ast.AnnotationKind as JavaAnnotationKind
-import cjcj::basic.{DiagnosticEngine, DiagKindRefactor, MakeRange}
+import cjcj::basic.{DEFAULT_POSITION, DiagnosticEngine, DiagKindRefactor, MakeRange}
 import cjcj::basic.Range as BasicRange
 import cjcj::mangle.BaseMangler
 import cjcj::modules.SemaImportManager
 import cjcj::option.MaybeString
 import cjcj::sema.{MakeRangeForDeclIdentifier, MemberMap, TypeManager}
-import cjcj::sema.NativeFFI.{GetJavaFQName, GetJavaFQSourceCodeName, HasPredefinedJavaName, IsJArray}
+import cjcj::sema.NativeFFI.{GetJavaFQName, GetJavaFQSourceCodeName, HasPredefinedJavaName, InteropLibBridge, IsJArray}
 import cjcj::utils.CJC_ASSERT
 
 // C++ src/Sema/NativeFFI/Java/AfterTypeCheck/DiagsInterop.cpp:16-31.
@@ -336,13 +336,22 @@ public class JavaInteropManager {
         }).Walk()
     }
 
-    // C++ DesugarPackage.cpp:75-112.
+    // C++ DesugarPackage.cpp:56-77.
     public func DesugarPackage(pkg: Package, memberMap: HashMap<InheritableDecl, MemberMap>,
         desugarPropRef: (Node) -> Unit): Unit {
-        if (!hasMirrorOrImpl) {
+        if (!InteropLibBridge.IsInteropLibAccessible(importManager)) {
+            if (hasMirrorOrImpl) {
+                diag.DiagnoseRefactor(DiagKindRefactor.sema_java_mirror_interoplib_must_be_imported,
+                    DEFAULT_POSITION).Emit()
+            }
             return
         }
-        // FEATURE_DEBT(JAVA_AFTERTYPECHECK_BODY): C++
-        // src/Sema/NativeFFI/Java/AfterTypeCheck/DesugarPackage.cpp:83-111.
+        let desugarer = JavaDesugarManager(importManager, typeManager, diag, mangler, javagenOutputPath, outputPath,
+            memberMap)
+        let ctx = AfterTypeCheckContext(importManager, typeManager, pkg, hasMirrorOrImpl)
+        if (hasMirrorOrImpl) {
+            desugarer.ProcessJavaMirrorImplStages(ctx, desugarPropRef)
+        }
+        desugarer.ProcessCallSiteDesugarStages(ctx)
     }
 }

@@ -30,6 +30,8 @@ private let INTEROPLIB_JAVA_ENTITY_KIND_JBOOLEAN: String = "JBOOLEAN"
 private let INTEROPLIB_JNI_GET_ENV_ID: String = "Java_CFFI_get_env"
 private let INTEROPLIB_CFFI_NEW_GLOBAL_REF_ID: String = "Java_CFFI_newGlobalReference"
 private let INTEROPLIB_CFFI_DELETE_GLOBAL_REF_ID: String = "Java_CFFI_deleteGlobalReference"
+private let INTEROPLIB_CFFI_SWAP_LOCAL_WITH_GLOBAL_REF_ID: String = "Java_CFFI_swapLocalWithGlobalRef"
+private let INTEROPLIB_JNI_HANDLE_PENDING_EXCEPTION_DECL_ID: String = "handlePendingException"
 private let INTEROPLIB_CFFI_NEW_JAVA_OBJECT_ID: String = "Java_CFFI_newJavaObject"
 private let INTEROPLIB_CFFI_NEW_JAVA_ARRAY_ID: String = "Java_CFFI_newJavaArray"
 private let INTEROPLIB_CFFI_JAVA_ARRAY_GET_ID: String = "Java_CFFI_arrayGet"
@@ -199,7 +201,7 @@ private func GetJavaImplWrappingConstructor(refWrapper: ClassDecl): FuncDecl {
 }
 
 public class InteropLibBridge {
-    private static let INTEROPLIB_VERSION: Int64 = 10
+    private static let INTEROPLIB_VERSION: Int64 = 12
     private static let INTEROPLIB_PACKAGE_NAME: String = "java.internal"
 
     private let importManager: SemaImportManager
@@ -275,6 +277,14 @@ public class InteropLibBridge {
 
     public func GetDeleteGlobalRefDecl(): Option<FuncDecl> {
         return GetInteropLibDecl<FuncDecl>(INTEROPLIB_CFFI_DELETE_GLOBAL_REF_ID)
+    }
+
+    public func GetSwapLocalWithGlobalRefDecl(): Option<FuncDecl> {
+        return GetInteropLibDecl<FuncDecl>(INTEROPLIB_CFFI_SWAP_LOCAL_WITH_GLOBAL_REF_ID)
+    }
+
+    public func GetJNIHandlePendingExceptionDecl(): Option<FuncDecl> {
+        return GetInteropLibDecl<FuncDecl>(INTEROPLIB_JNI_HANDLE_PENDING_EXCEPTION_DECL_ID, silent: true)
     }
 
     public func GetGetJniEnvDecl(): Option<FuncDecl> {
@@ -1099,6 +1109,98 @@ public class InteropLibBridge {
         return CreateCall(GetDeleteGlobalRefDecl(), obj.curFile, args: args)
     }
 
+    public func CreateSwapLocalWithGlobalRefCall(env: Expr, localRef: Expr): Option<CallExpr> {
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(env))
+        args.add(CreateFuncArg(localRef))
+        return CreateCall(GetSwapLocalWithGlobalRefDecl(), localRef.curFile, args: args)
+    }
+
+    public func FindAsJObjectDecl(): Option<FuncDecl> {
+        let entityDecl = GetJavaEntityDecl()
+        if (let None <- entityDecl) {
+            return None
+        }
+        for (decl in entityDecl.getOrThrow().GetMemberDecls()) {
+            if (decl.identifier.Val() == "asJObject") {
+                return decl as FuncDecl
+            }
+        }
+        return None
+    }
+
+    public func CreateAsJniJobjectCall(javaEntity: Expr): Option<CallExpr> {
+        let asJObject = FindAsJObjectDecl()
+        if (let None <- asJObject) {
+            return None
+        }
+        return Some(CreateMemberCall(javaEntity, asJObject.getOrThrow()))
+    }
+
+    public func CreateJObjectExpr(cjExpr: Expr): Option<Expr> {
+        let entityExpr = WrapJavaEntity(cjExpr)
+        if (let None <- entityExpr) {
+            return None
+        }
+        if (let Some(call) <- CreateAsJniJobjectCall(entityExpr.getOrThrow())) {
+            return Some((call as Expr).getOrThrow())
+        }
+        return None
+    }
+
+    public func CreateJNIHandlePendingExceptionCall(env: Expr): Option<CallExpr> {
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(env))
+        return CreateCall(GetJNIHandlePendingExceptionDecl(), env.curFile, args: args)
+    }
+
+    public func CreateNewJavaObjectLambdaNodes(curFile: File, ctor: FuncDecl,
+        callArgs: ArrayList<Expr>): Option<ArrayList<Node>> {
+        let envCall = CreateGetJniEnvCall(Some(curFile))
+        if (let None <- envCall) {
+            return None
+        }
+        let env = envCall.getOrThrow()
+        let signature = MemberJNISignature(utils, ctor)
+        signature.name = JAVA_CONSTRUCTOR
+        let local = CreateNewJavaObjectCall(env, signature.classTypeSignature, signature.signature, callArgs)
+        if (let None <- local) {
+            return None
+        }
+        let nodes = ArrayList<Node>()
+        let callRes = CreateTmpVarDecl(None, Some((local.getOrThrow() as Expr).getOrThrow()))
+        callRes.curFile = Some(curFile)
+        if (let Some(ty) <- local.getOrThrow().GetTy()) {
+            callRes.SetTy(ty)
+        }
+        nodes.add(callRes)
+        let pendingEnv = (ASTCloner.Clone(env) as Expr).getOrThrow()
+        if (let Some(pending) <- CreateJNIHandlePendingExceptionCall(pendingEnv)) {
+            nodes.add(pending)
+        }
+        let asObj = CreateAsJniJobjectCall(WithinFile<RefExpr>(CreateRefExpr(callRes), curFile))
+        if (let None <- asObj) {
+            return None
+        }
+        let swapEnv = (ASTCloner.Clone(env) as Expr).getOrThrow()
+        let swapped = CreateSwapLocalWithGlobalRefCall(swapEnv, asObj.getOrThrow())
+        if (let None <- swapped) {
+            return None
+        }
+        let entity = CreateJavaEntityJobjectCall(swapped.getOrThrow())
+        if (let None <- entity) {
+            return None
+        }
+        let gref = CreateTmpVarDecl(None, entity)
+        gref.curFile = Some(curFile)
+        if (let Some(ty) <- entity.getOrThrow().GetTy()) {
+            gref.SetTy(ty)
+        }
+        nodes.add(gref)
+        nodes.add(WithinFile<RefExpr>(CreateRefExpr(gref), curFile))
+        return Some(nodes)
+    }
+
     public func CreateRemoveFromRegistryCall(registryId: Expr): Option<CallExpr> {
         let args = ArrayList<FuncArg>()
         args.add(CreateFuncArg(registryId))
@@ -1281,7 +1383,7 @@ public class InteropLibBridge {
     }
 
     public func CreateSetFieldCall(env: Expr, obj: Expr, signature: MemberJNISignature,
-        value: Expr): Option<CallExpr> {
+        value: Expr, prepared!: Bool = false): Option<CallExpr> {
         let funcDecl = GetSetFieldDecl()
         let jclassInitFuncDecl = GetJClassDecl()
         let parseSignatureFuncDecl = GetParseComponentSignatureDecl()
@@ -1315,12 +1417,13 @@ public class InteropLibBridge {
         args.add(CreateFuncArg((ASTCloner.Clone(env) as Expr).getOrThrow()))
         args.add(CreateFuncArg(obj))
         args.add(CreateFuncArg(fieldID))
-        args.add(CreateFuncArg(WrapJavaEntity(value).getOrThrow()))
+        let stored = if (prepared) { value } else { WrapJavaEntity(value).getOrThrow() }
+        args.add(CreateFuncArg(stored))
         return Some(CreateCall(funcDecl.getOrThrow(), curFile, args: args))
     }
 
     public func CreateSetStaticFieldCall(env: Expr, typeSignature: String, fieldName: String,
-        fieldSignature: String, value: Expr): Option<CallExpr> {
+        fieldSignature: String, value: Expr, prepared!: Bool = false): Option<CallExpr> {
         let funcDecl = GetSetStaticFieldDecl()
         let jclassInitFuncDecl = GetJClassDecl()
         let parseSignatureFuncDecl = GetParseComponentSignatureDecl()
@@ -1354,7 +1457,8 @@ public class InteropLibBridge {
         args.add(CreateFuncArg((ASTCloner.Clone(env) as Expr).getOrThrow()))
         args.add(CreateFuncArg(jclass))
         args.add(CreateFuncArg(fieldID))
-        args.add(CreateFuncArg(WrapJavaEntity(value).getOrThrow()))
+        let stored = if (prepared) { value } else { WrapJavaEntity(value).getOrThrow() }
+        args.add(CreateFuncArg(stored))
         return Some(CreateCall(funcDecl.getOrThrow(), curFile, args: args))
     }
 
