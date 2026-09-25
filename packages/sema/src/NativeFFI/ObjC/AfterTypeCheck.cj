@@ -3057,13 +3057,13 @@ public class InsertBaseCtorBody <: Handler<InteropContext> {
                 continue
             }
             if (let Some(mirrorClass) <- (mirror as ClassDecl)) {
-                let ctor = GetBaseCtor((mirrorClass as ClassDecl).getOrThrow()).getOrThrow()
+                let ctor = ctx.factory.GetGeneratedBaseCtor(mirrorClass).getOrThrow()
                 let curFile = ctor.curFile
                 let handleParam = WithinFile<RefExpr>(
                     CreateRefExpr(ctor.funcBody.getOrThrow().paramLists[0].params[0]), curFile)
                 if (HasMirrorSuperClass(mirrorClass)) {
                     let superClass = mirrorClass.GetSuperClassDecl().getOrThrow()
-                    let superCtor = GetBaseCtor((superClass as ClassDecl).getOrThrow()).getOrThrow()
+                    let superCtor = ctx.factory.GetGeneratedBaseCtor(superClass).getOrThrow()
                     let superCall = CreateSuperCall(mirrorClass, superCtor, superCtor.GetTy().getOrThrow())
                     superCall.args.add(CreateFuncArg(handleParam))
                     ctx.factory.AddMarkerToCallIfNeeded(superCall)
@@ -3081,7 +3081,7 @@ public class InsertBaseCtorBody <: Handler<InteropContext> {
             if (wrapper.TestAttr(Attribute.IS_BROKEN)) {
                 continue
             }
-            let ctor = GetBaseCtor((wrapper as ClassDecl).getOrThrow()).getOrThrow()
+            let ctor = ctx.factory.GetGeneratedBaseCtor(wrapper).getOrThrow()
             let curFile = ctor.curFile
             let handleParam = WithinFile<RefExpr>(
                 CreateRefExpr(ctor.funcBody.getOrThrow().paramLists[0].params[0]), curFile)
@@ -4459,7 +4459,7 @@ public class DesugarMirrors <: Handler<InteropContext> {
         let curFile = ctor.curFile
         CJC_NULLPTR_CHECK(ctor.funcBody)
         CJC_ASSERT(!ctor.funcBody.getOrThrow().paramLists.isEmpty())
-        let generatedCtor = GetBaseCtor((mirror as ClassDecl).getOrThrow()).getOrThrow()
+        let generatedCtor = ctx.factory.GetGeneratedBaseCtor(mirror).getOrThrow()
         let thisCall = CreateThisCall(mirror, generatedCtor, generatedCtor.GetTy().getOrThrow(),
             curFile.getOrThrow())
         CJC_ASSERT_WITH_MSG(mirror.astKind == ASTKind.CLASS_DECL,
@@ -4623,8 +4623,9 @@ private func DesugarSuperCtorCall(ctx: InteropContext, impl: ClassDecl, ctor: Fu
                 nodes
             }), curFile)
         let retained = ctx.factory.CreateObjCRetainAutoreleasedReturnValueCall(withSuper)
-        let baseCtor = GetObjCMirrorBaseCtor(superClass).getOrThrow()
-        let call = WithinFile<CallExpr>(CreateSuperCall(superClass, baseCtor, baseCtor.GetTy().getOrThrow()), curFile)
+        let baseCtor = ctx.factory.GetGeneratedBaseCtor(impl).getOrThrow()
+        let call = WithinFile<CallExpr>(
+            CreateSuperCall(baseCtor.outerDecl.getOrThrow(), baseCtor, baseCtor.GetTy().getOrThrow()), curFile)
         call.args.add(CreateFuncArg(retained))
         ctx.factory.AddMarkerToCallIfNeeded(call)
         call.sourceExpr = Some(callExpr)
