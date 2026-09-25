@@ -274,17 +274,12 @@ struct RuntimeConfigParamC {
 
 private type RuntimeInitFunc = CFunc<(CPointer<RuntimeConfigParamC>) -> Int32>
 private type RuntimeFiniFunc = CFunc<() -> Int64>
-private type RuntimeInstanceNewFunc = CFunc<(CPointer<RuntimeConcurrencyParamC>) -> CPointer<Unit>>
-private type RuntimeInstanceStopFunc = CFunc<(CPointer<Unit>) -> Int32>
 
 private let CJ_RUNTIME_INIT: String = "InitCJRuntime"
 private let CJ_RUNTIME_FINI: String = "FiniCJRuntime"
 private let CJ_NEW_TASK_FROM_C: String = "RunCJTask"
 private let CJ_RELEASE_HANDLE_FROM_C: String = "ReleaseHandle"
 private let CJ_PACKAGE_INIT_BEGIN: String = "CJ_MCC_PackageInitBegin"
-private let CJCJ_MRT_INSTANCE_NEW: String = "CJCJ_MRT_InstanceNew"
-private let CJCJ_MRT_INSTANCE_RUN_TASK: String = "CJCJ_MRT_InstanceRunTask"
-private let CJCJ_MRT_INSTANCE_STOP: String = "CJCJ_MRT_InstanceStop"
 @When[os == "Windows"]
 private let CJ_HEAP_SIZE: String = "CJHEAPSIZE"
 @When[os != "Windows"]
@@ -300,8 +295,10 @@ private let MIN_HEAP_SIZE: UIntNative = 4 * 1024
 private let MIN_STACK_SIZE: UIntNative = 64
 private let MAX_STACK_SIZE: UIntNative = 1024 * 1024
 
-// InitCJRuntime interprets zero sizes/budgets using its platform defaults.
-// CangjieRuntimeApi.cpp config initialization is the default-value contract.
+// InitCJRuntime interprets zero heap sizes/budgets using its platform defaults.
+// CangjieRuntimeApi.cpp config initialization is the heap default-value contract.
+// Thread and coroutine stacks are KB and match InvokeUtil.h:50-51, not the
+// process default that a zero stack selects.
 public let REGION_SIZE: UIntNative = 64
 public let HEAP_SIZE: UIntNative = 0
 public let HEAP_SIZE_SET: Bool = false
@@ -323,8 +320,8 @@ public let MAX_TENURING_THRESHOLD: UInt32 = 15
 public let Z_TENURING_THRESHOLD: Int32 = -1
 public let MAX_TENURING_THRESHOLD_SET: Bool = false
 public let Z_TENURING_THRESHOLD_SET: Bool = false
-public let STACK_SIZE: UIntNative = 0
-public let CO_STACK_SIZE: UIntNative = 0
+public let STACK_SIZE: UIntNative = 64 * 1024
+public let CO_STACK_SIZE: UIntNative = 4 * 1024
 public let PROCESSOR_NUM: UInt32 = 0u32
 public let HEAP_INITIAL_SIZE: UIntNative = 64 * 1024
 
@@ -687,7 +684,7 @@ public func GetMethodPointer(handle: RuntimeHandle, name: String): CPointer<Unit
 // single opened handle (InvokeUtilCJNative.cpp:192-194).
 private func GetTaskRuntimeMethodPointer(name: String): CPointer<Unit> {
     let runtime = RuntimeInit.GetInstance()
-    if (!runtime.runtimeInstanceHandle.isNull() || runtime.taskOnOpenedRuntime) {
+    if (runtime.taskOnOpenedRuntime) {
         if (let Some(opened) <- runtime.GetHandle()) {
             let method = GetMethodPointer(opened, name)
             if (!method.isNull()) {
@@ -826,11 +823,9 @@ public class RuntimeInit {
     private var handle: Option<RuntimeHandle> = None
     public var runtimeMethodFunc: CPointer<Unit> = CPointer<Unit>()
     public var runtimeReleaseFunc: CPointer<Unit> = CPointer<Unit>()
-    public var runtimeInstanceHandle: CPointer<Unit> = CPointer<Unit>()
     public var taskOnOpenedRuntime: Bool = false
     private var hasLinkMap: Bool = false
     private var linkMapId: Int64 = 0
-    private var runtimeInstanceStopFunc: CPointer<Unit> = CPointer<Unit>()
 
     public init() {}
 
@@ -853,39 +848,44 @@ public class RuntimeInit {
     // (Cjstart.S .init_array, PackageInit.cpp:241-252). LoadCJLibrary cannot
     // do this: Loader.cpp:18 dlopens into the base namespace.
     @When[os == "Linux"]
-    private func BindAdmissionNamespace(runtimeLibPath: String, initArgs: ArrayList<(String, String)>): Bool {
+    private func BindAdmissionNamespace(runtimeLibPath: String, initArgs: ArrayList<(String, String)>): Option<Bool> {
         let opened = OpenInLinkMap(runtimeLibPath, LM_ID_NEWLM)
         if (!opened.opened) {
-            return false
+            return Some(false)
         }
         handle = Some(opened)
         if (GetMethodPointer(opened, CJ_PACKAGE_INIT_BEGIN).isNull()) {
             let _ = CloseSymbolTable(opened)
             handle = None
-            return false
+            return None<Bool>
         }
         if (!PrepareRuntime(opened, initArgs)) {
-            return false
+            return Some(false)
         }
         let mapId = ReadLinkMapId(opened.raw)
         if (let None <- mapId) {
-            return false
+            return Some(false)
         }
         let lmid = mapId.getOrThrow()
         if (!PreloadAdmissionSiblings(runtimeLibPath, lmid)) {
-            return false
+            return Some(false)
         }
         runtimeMethodFunc = GetMethodPointer(opened, CJ_NEW_TASK_FROM_C)
         runtimeReleaseFunc = GetMethodPointer(opened, CJ_RELEASE_HANDLE_FROM_C)
         if (runtimeMethodFunc.isNull() || runtimeReleaseFunc.isNull()) {
-            return false
+            var errorInfo = CJ_RELEASE_HANDLE_FROM_C
+            if (runtimeMethodFunc.isNull()) {
+                errorInfo = CJ_NEW_TASK_FROM_C
+            }
+            Errorln("could not find the create task method: " + errorInfo)
+            return Some(false)
         }
         opened.retain = true
         hasLinkMap = true
         linkMapId = lmid
         taskOnOpenedRuntime = true
         initRuntime = true
-        return true
+        return Some(true)
     }
 
     @When[os == "Linux"]
@@ -894,7 +894,7 @@ public class RuntimeInit {
         if (hostHasAdmission) {
             return None<Bool>
         }
-        return Some(BindAdmissionNamespace(runtimeLibPath, initArgs))
+        return BindAdmissionNamespace(runtimeLibPath, initArgs)
     }
 
     @When[os != "Linux"]
@@ -915,40 +915,7 @@ public class RuntimeInit {
                 return false
             }
             handle = Some(opened)
-            runtimeReleaseFunc = GetMethodPointer(opened, CJ_RELEASE_HANDLE_FROM_C)
-            // RT_ISOLATE_API_SPEC.md §3.2/§5 slice 2: the hybrid runtime exposes an
-            // instance scheduler for the macro task. Its stack values come from the same
-            // ConcurrencyParam assembled by C++ InvokeUtilCJNative.cpp:115-130,159-168.
-            let instanceNewPtr = GetMethodPointer(opened, CJCJ_MRT_INSTANCE_NEW)
-            if (!instanceNewPtr.isNull()) {
-                runtimeMethodFunc = GetMethodPointer(opened, CJCJ_MRT_INSTANCE_RUN_TASK)
-                runtimeInstanceStopFunc = GetMethodPointer(opened, CJCJ_MRT_INSTANCE_STOP)
-                if (runtimeMethodFunc.isNull() || runtimeInstanceStopFunc.isNull() ||
-                    runtimeReleaseFunc.isNull()) {
-                    return false
-                }
-                // C++ CallRuntime assembles heap before concurrency (InvokeUtilCJNative.cpp:159-168).
-                // InstanceNew consumes only ConcurrencyParam, but heap parsing still emits the
-                // exact C++ validation diagnostics before the shared-heap value is discarded.
-                let _ = GetHeapSizeFromEnv(initArgs)
-                try (param = LibC.malloc<RuntimeConcurrencyParamC>().asResource()) {
-                    if (param.value.isNull()) {
-                        return false
-                    }
-                    unsafe {
-                        // RT_ISOLATE_API_SPEC.md §3.2 fixes a sub-scheduler to one processor;
-                        // thread/coroutine stack sizes mirror InvokeUtil.h:50-51.
-                        param.value.write(RuntimeConcurrencyParamC(STACK_SIZE, GetStackSizeFromEnv(initArgs), 1u32))
-                        runtimeInstanceHandle = RuntimeInstanceNewFunc(instanceNewPtr)(param.value)
-                    }
-                } catch (e: Exception) {
-                    return false
-                }
-                if (runtimeInstanceHandle.isNull()) {
-                    return false
-                }
-                initRuntime = true
-            } else if (AdmissionOnlyInOpenedImage(hostHasAdmission, opened)) {
+            if (AdmissionOnlyInOpenedImage(hostHasAdmission, opened)) {
                 // Process image does not export CJ_MCC_PackageInitBegin; the opened
                 // image does. Generated code binds the admission entry there
                 // (InvokeUtil.h:80 RTLD_GLOBAL). That image must be the one
@@ -961,6 +928,11 @@ public class RuntimeInit {
                 runtimeMethodFunc = GetMethodPointer(opened, CJ_NEW_TASK_FROM_C)
                 runtimeReleaseFunc = GetMethodPointer(opened, CJ_RELEASE_HANDLE_FROM_C)
                 if (runtimeMethodFunc.isNull() || runtimeReleaseFunc.isNull()) {
+                    var errorInfo = CJ_RELEASE_HANDLE_FROM_C
+                    if (runtimeMethodFunc.isNull()) {
+                        errorInfo = CJ_NEW_TASK_FROM_C
+                    }
+                    Errorln("could not find the create task method: " + errorInfo)
                     return false
                 }
                 taskOnOpenedRuntime = true
@@ -975,6 +947,11 @@ public class RuntimeInit {
                 runtimeMethodFunc = GetHostRuntimeMethodPointer(CJ_NEW_TASK_FROM_C)
                 runtimeReleaseFunc = GetHostRuntimeMethodPointer(CJ_RELEASE_HANDLE_FROM_C)
                 if (runtimeMethodFunc.isNull() || runtimeReleaseFunc.isNull()) {
+                    var errorInfo = CJ_RELEASE_HANDLE_FROM_C
+                    if (runtimeMethodFunc.isNull()) {
+                        errorInfo = CJ_NEW_TASK_FROM_C
+                    }
+                    Errorln("could not find the create task method: " + errorInfo)
                     return false
                 }
                 taskOnOpenedRuntime = false
@@ -987,14 +964,6 @@ public class RuntimeInit {
     public func CloseRuntime(): Unit {
         if (let Some(opened) <- handle) {
             if (initRuntime) {
-                if (!runtimeInstanceHandle.isNull()) {
-                    // RT_ISOLATE_API_SPEC.md §3.2: InstanceStop occupies the C++
-                    // FinishRuntime position (InvokeUtilCJNative.cpp:181-190).
-                    let stopResult = unsafe { RuntimeInstanceStopFunc(runtimeInstanceStopFunc)(runtimeInstanceHandle) }
-                    if (stopResult != 0) {
-                        Errorln("runtime finish failed: ")
-                    }
-                }
                 initRuntime = false
             }
             if (!taskOnOpenedRuntime) {
@@ -1005,8 +974,6 @@ public class RuntimeInit {
         handle = None
         runtimeMethodFunc = CPointer<Unit>()
         runtimeReleaseFunc = CPointer<Unit>()
-        runtimeInstanceHandle = CPointer<Unit>()
-        runtimeInstanceStopFunc = CPointer<Unit>()
         taskOnOpenedRuntime = false
         hasLinkMap = false
         linkMapId = 0

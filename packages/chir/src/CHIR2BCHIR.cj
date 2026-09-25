@@ -296,19 +296,19 @@ public class CHIR2BCHIR {
     }
 
     public func TranslateExpression(context: CHIR2BCHIRContext, expr: Expression): Unit {
-        if (expr.GetExprKind() == ExprKind.INVOKE || expr.GetExprKind() == ExprKind.INVOKE_WITH_EXCEPTION) {
+        if (expr.GetExprKind() == ExprKind.INVOKE || expr.GetExprKind() == ExprKind.TRY_INVOKE) {
             context.definition.PushOp(OpCode.NULLPTR)
         }
-        if (expr.GetExprKind() == ExprKind.INVOKE || expr.GetExprKind() == ExprKind.INVOKE_WITH_EXCEPTION ||
+        if (expr.GetExprKind() == ExprKind.INVOKE || expr.GetExprKind() == ExprKind.TRY_INVOKE ||
             expr.GetExprKind() == ExprKind.INVOKESTATIC ||
-            expr.GetExprKind() == ExprKind.INVOKESTATIC_WITH_EXCEPTION) {
+            expr.GetExprKind() == ExprKind.TRY_INVOKESTATIC) {
             var operandIdx: Int64 = 1
-            while (operandIdx < expr.GetNumOfOperands()) {
+            while (operandIdx < expr.GetNumOfNonSuccessorOperands()) {
                 TranslateValue(this, context, expr.GetOperand(operandIdx))
                 operandIdx++
             }
         } else {
-            for (operand in expr.GetOperands()) {
+            for (operand in expr.GetNonSuccessorOperands()) {
                 TranslateValue(this, context, operand)
             }
         }

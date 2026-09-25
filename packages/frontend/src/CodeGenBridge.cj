@@ -3,7 +3,7 @@ package cjcj::frontend
 import std.collection.*
 import cjcj::basic.Linkage as BasicLinkage
 import cjcj::chir.Apply as ChirApply
-import cjcj::chir.ApplyWithException as ChirApplyWithException
+import cjcj::chir.TryApply as ChirTryApply
 import cjcj::chir.AnalysisWrapper
 import cjcj::chir.AnnotationChecker
 import cjcj::chir.ArrayListConstStartOpt
@@ -17,6 +17,7 @@ import cjcj::chir.CHIRType
 import cjcj::chir.CHIRTypeCache
 import cjcj::chir.CallGraphAnalysis
 import cjcj::chir.BCHIR
+import cjcj::chir.BoxRecursionValueType
 import cjcj::chir.ClosureConversion
 import cjcj::chir.ConstAnalysisWrapper
 import cjcj::chir.ConstEvalPass
@@ -34,6 +35,7 @@ import cjcj::chir.FuncKind as ChirFuncKind
 import cjcj::chir.FuncSigInfo as ChirFuncSigInfo
 import cjcj::chir.Function as ChirFunction
 import cjcj::chir.FunctionInline
+import cjcj::chir.GenerateVTable
 import cjcj::chir.GlobalVar as ChirGlobalVar
 import cjcj::chir.GlobalValue as ChirGlobalValue
 import cjcj::chir.GetRefToArrayElem
@@ -41,10 +43,12 @@ import cjcj::chir.INVALID_LOCATION as CHIR_INVALID_LOCATION
 import cjcj::chir.MergeBlocks
 import cjcj::chir.MergeEffectMap
 import cjcj::chir.NoHeapAllocChecker
+import cjcj::chir.NoSideEffectMarker
 import cjcj::chir.NoWriteBarrierRecChecker
 import cjcj::chir.OptFuncRetType
 import cjcj::chir.OptEffectCHIRMap as ChirOptEffectCHIRMap
 import cjcj::chir.Package as RealCHIRPackage
+import cjcj::chir.MarkClassHasInited
 import cjcj::chir.MatchCaseId
 import cjcj::chir.UnreachableBlockAnalysis
 import cjcj::chir.UnreachableBranchCheck
@@ -60,13 +64,14 @@ import cjcj::chir.rangeStateGlobals
 import cjcj::chir.ReplaceUsesWithWrapper
 import cjcj::chir.SanitizerCoverage
 import cjcj::chir.ShouldReportUnusedCodeWarnings
-import cjcj::chir.Terminator as ChirTerminator
+import cjcj::chir.Expression as ChirExpression
 import cjcj::chir.TypeAnalysis
 import cjcj::chir.TypeDomain
 import cjcj::chir.TypeValue
 import cjcj::chir.globalState as typeAnalysisGlobals
 import cjcj::chir.ToCHIRPhase
 import cjcj::chir.UnitUnify
+import cjcj::chir.UpdateMemberVarPath
 import cjcj::chir.UselessAllocateElimination
 import cjcj::chir.VarInitCheck
 import cjcj::chir.Value as ChirValue
@@ -305,6 +310,7 @@ private class ToCHIR {
     private let curVirtFuncWrapDep: VirtualWrapperDepMap = VirtualWrapperDepMap()
     private let delVirtFuncWrapForIncr: VirtualWrapperDepMap = VirtualWrapperDepMap()
     private let ccOutFuncsRawMangle: HashSet<String> = HashSet<String>()
+    private var maybeUnreachable: HashMap<ChirBlock, ChirExpression> = HashMap<ChirBlock, ChirExpression>()
     private var chirPkg: Option<RealCHIRPackage> = None
     private var debugFileIndex: UInt64 = 0u64
     private var isComputingAnnos: Bool = false
@@ -331,8 +337,6 @@ private class ToCHIR {
             opts: instance.invocation.globalOptions,
             kind: instance.kind,
             cachedInfo: instance.cachedInfo,
-            curVirtFuncWrapDep: curVirtFuncWrapDep,
-            delVirtFuncWrapForIncr: delVirtFuncWrapForIncr,
             chirWFC: instance.invocation.globalOptions.chirWFC,
             chirOptOverO2: instance.invocation.globalOptions.IsCHIROptimizationLevelOverO2(),
             diag: Some(instance.diag.AsBasicDiagnosticEngine()))
@@ -346,6 +350,7 @@ private class ToCHIR {
         let srcCodeImportedFuncs = ast2chir.GetSrcCodeImportedFuncs()
         let srcCodeImportedVars = ast2chir.GetSrcCodeImportedVars()
         let initFuncsForConstVar = ast2chir.GetInitFuncsForConstVar()
+        maybeUnreachable = ast2chir.GetMaybeUnreachableBlocks()
         chirPkg = Some(lowered)
         DumpCHIRToFile("AST_CHIR")
         ClearASTResources()
@@ -359,15 +364,16 @@ private class ToCHIR {
         if (!PerformPlugin(pluginPackage, srcCodeImportedFuncs, srcCodeImportedVars, initFuncsForConstVar)) {
             return None
         }
+        // C++: CHIR/CHIR.cpp:1142-1147. Plugin first; Canonicalization is the next step.
         pluginPackage = chirPkg.getOrThrow()
-        DumpCHIRToFile("Canonicalization")
+        Canonicalization()
         if (instance.invocation.globalOptions.emitCHIRPhase == CandidateEmitCHIRPhase.RAW) {
             EmitCHIR(outputPath, pluginPackage, ToCHIRPhase.RAW,
                 instance.invocation.globalOptions.NeedDumpCHIR())
             return Some(pluginPackage)
         }
         if (!RulesChecking(pluginPackage, builder, instance.invocation.globalOptions,
-            instance.diag.AsBasicDiagnosticEngine(), effectMap)) {
+            instance.diag.AsBasicDiagnosticEngine(), effectMap, maybeUnreachable)) {
             return None
         }
         RunOptimizationPass(pluginPackage)
@@ -449,6 +455,32 @@ private class ToCHIR {
         return succeed
     }
 
+    // C++: CHIR/CHIR.cpp:1283-1316 ToCHIR::Canonicalization.
+    private func Canonicalization(): Unit {
+        try (recorder = ProfileRecorder("CHIR", "Canonicalization")) {
+            try (tempRecorder = ProfileRecorder("Canonicalization", "GenerateVTable")) {
+                let current = chirPkg.getOrThrow()
+                let allDefs = current.GetAllCustomTypeDef()
+                let generator = GenerateVTable(current, allDefs, builder,
+                    instance.invocation.globalOptions, "GenerateVTable")
+                generator.CreateVTable()
+                generator.UpdateOperatorVirFunc()
+                generator.CreateVirtualFuncWrapper(instance.kind, instance.cachedInfo,
+                    curVirtFuncWrapDep, delVirtFuncWrapForIncr)
+                generator.SetSrcFuncType()
+                generator.CreateMutFuncWrapper()
+                generator.UpdateFuncCall()
+                DumpCHIRToFile("CreateVTable")
+            }
+            let current = chirPkg.getOrThrow()
+            MarkClassHasInited(builder).RunOnPackage(current)
+            UpdateMemberVarPath(builder).RunOnPackage(current)
+            let _ = NoSideEffectMarker().RunOnPackage(current)
+            BoxRecursionValueType(current, builder).Run()
+            DumpCHIRToFile("Canonicalization")
+        }
+    }
+
     // C++: CHIR/CHIR.cpp:1225-1251 ToCHIR::ExecuteCjPlugins.
     private func ExecuteCjPlugins(
         currentPackage: RealCHIRPackage,
@@ -464,7 +496,7 @@ private class ToCHIR {
             return false
         }
         if (let Some(newPackage) <- executePlugin.DeserializePluginResult(
-            srcCodeImportedFuncs, srcCodeImportedVars, initFuncsForConstVar)) {
+            srcCodeImportedFuncs, srcCodeImportedVars, initFuncsForConstVar, maybeUnreachable)) {
             chirPkg = Some(newPackage)
         } else {
             return false
@@ -572,7 +604,7 @@ private class ToCHIR {
         }
         try (recorder = ProfileRecorder("CHIR Opt", "ArrayListOpt")) {
             let functionInline = FunctionInline(builder, options.optimizationLevel, options.chirDebugOptimizer)
-            let pass = ArrayListConstStartOpt(builder, options, functionInline)
+            let pass = ArrayListConstStartOpt(builder, functionInline)
             pass.RunOnPackage(currentPackage)
             MergeEffectMap(pass.GetEffectMap(), effectMap)
             DumpCHIRToFile("RunArrayListConstStartOpt")
@@ -976,7 +1008,7 @@ private class ToCHIR {
         var index: Int64 = 0
         while (index < users.size) {
             if (users[index].GetExprKind() != ChirExprKind.APPLY &&
-                users[index].GetExprKind() != ChirExprKind.APPLY_WITH_EXCEPTION) {
+                users[index].GetExprKind() != ChirExprKind.TRY_APPLY) {
                 return false
             }
             if (users[index].GetExprKind() == ChirExprKind.APPLY) {
@@ -985,8 +1017,8 @@ private class ToCHIR {
                     return false
                 }
             }
-            if (users[index].GetExprKind() == ChirExprKind.APPLY_WITH_EXCEPTION) {
-                let applyNode = (users[index] as ChirApplyWithException).getOrThrow()
+            if (users[index].GetExprKind() == ChirExprKind.TRY_APPLY) {
+                let applyNode = (users[index] as ChirTryApply).getOrThrow()
                 if (!refEq(applyNode.GetCallee(), curFunc)) {
                     return false
                 }
@@ -998,7 +1030,10 @@ private class ToCHIR {
 }
 
 private func RulesChecking(pkg: RealCHIRPackage, builder: ChirBuilder, options: GlobalOptions,
-    diag: BasicDiagnosticEngine, effectMap: ChirOptEffectCHIRMap): Bool {
+    diag: BasicDiagnosticEngine, effectMap: ChirOptEffectCHIRMap,
+    maybeUnreachable: HashMap<ChirBlock, ChirExpression>): Bool {
+    DeadCodeElimination(builder, diag, pkg).UnreachableBlockWarningReporter(pkg,
+        Int64(options.GetJobs()), maybeUnreachable)
     UnreachableBlockAnalysis(diag, pkg).RunOnPackage(Int64(options.GetJobs()))
     DeadCodeElimination(builder).ClearUnreachableMarkBlock(pkg)
     MergeBlocks().RunOnPackage(pkg, builder, enableCompileDebug: options.enableCompileDebug,

@@ -75,11 +75,28 @@ public func Stoi(s: String, base!: Int32 = STOINT_BASE): Option<Int64> {
     return result
 }
 
+private func isStouiWhitespace(byte: UInt8): Bool {
+    return byte == 0x20u8 || byte == 0x09u8 || byte == 0x0au8 || byte == 0x0bu8 || byte == 0x0cu8 || byte == 0x0du8
+}
+
+private func stouiHasLeadingMinus(s: String): Bool {
+    var index: Int64 = 0
+    while (index < s.size) {
+        if (!isStouiWhitespace(s[index])) {
+            return s[index] == b'-'
+        }
+        index++
+    }
+    return false
+}
+
 public func Stoui(s: String, base!: Int32 = STOINT_BASE): Option<UInt64> {
     var result: Option<UInt64> = None
     try (cInput = unsafe { LibC.mallocCString(s) }.asResource(),
         endPtr = LibC.malloc<CString>().asResource()) {
-        if (!cInput.value.isNull()) {
+        if (!cInput.value.isNull() && stouiHasLeadingMinus(s)) {
+            result = None
+        } else if (!cInput.value.isNull()) {
             unsafe { endPtr.value.write(CString(CPointer<UInt8>())) }
             resetStdUtilsErrno()
             let value = UInt64(unsafe { strtoul(cInput.value, endPtr.value, base) })

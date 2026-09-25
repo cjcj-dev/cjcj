@@ -62,7 +62,7 @@ import cjcj::ast.Position as AstPosition
 import cjcj::ast.IsStaticInitializer as AstIsStaticInitializer
 import cjcj::ast.IsImpl as AstIsImpl
 import cjcj::ast.IsMirror as AstIsMirror
-import cjcj::incremental_compilation.{CompilationCache, IncreKind, VirtualWrapperDepMap}
+import cjcj::incremental_compilation.{CompilationCache, IncreKind}
 import cjcj::sema.GenericInstantiation.GenericInstantiationManager
 import cjcj::utils.{ANNOTATION_VAR_POSTFIX, CFFI_FUNC_SUFFIX, CJC_ABORT, CJC_ASSERT, FileUtil,
     MAIN_INVOKE, ProfileRecorder, STATIC_INIT_FUNC, STATIC_INIT_VAR}
@@ -999,8 +999,6 @@ public class FaithfulAST2CHIR {
     private let opts: GlobalOptions
     private let kind: IncreKind
     private let cachedInfo: CompilationCache
-    private let curVirtFuncWrapDep: VirtualWrapperDepMap
-    private let delVirtFuncWrapForIncr: VirtualWrapperDepMap
     private let chirWFC: Bool
     private let chirOptOverO2: Bool
     private let diag: Option<BasicDiagnosticEngine>
@@ -1047,6 +1045,7 @@ public class FaithfulAST2CHIR {
     private let annoFactoryFuncs: ArrayList<(AstDecl, Function)> = ArrayList<(AstDecl, Function)>()
     private let annotationTargets: HashMap<GlobalVar, AstExpr> = HashMap<GlobalVar, AstExpr>()
     private let classDeclWithAnnotation: ArrayList<(AstClassDecl, ClassDef)> = ArrayList<(AstClassDecl, ClassDef)>()
+    private let maybeUnreachable: HashMap<Block, Expression> = HashMap<Block, Expression>()
     private let isComputingAnnos: Bool
 
     public init(builder: CHIRBuilder, chirType: CHIRType, sourceManager: BasicSourceManager,
@@ -1056,8 +1055,6 @@ public class FaithfulAST2CHIR {
         overrideSrcFuncResolver!: Option<(AstFuncDecl) -> Option<AstFuncDecl>> = None,
         opts!: GlobalOptions = GlobalOptions(), kind!: IncreKind = IncreKind.INVALID,
         cachedInfo!: CompilationCache = CompilationCache(),
-        curVirtFuncWrapDep!: VirtualWrapperDepMap = VirtualWrapperDepMap(),
-        delVirtFuncWrapForIncr!: VirtualWrapperDepMap = VirtualWrapperDepMap(),
         chirWFC!: Bool = false, chirOptOverO2!: Bool = false,
         diag!: Option<BasicDiagnosticEngine> = None, isComputingAnnos!: Bool = false) {
         this.builder = builder
@@ -1070,8 +1067,6 @@ public class FaithfulAST2CHIR {
         this.opts = opts
         this.kind = kind
         this.cachedInfo = cachedInfo
-        this.curVirtFuncWrapDep = curVirtFuncWrapDep
-        this.delVirtFuncWrapForIncr = delVirtFuncWrapForIncr
         this.chirWFC = chirWFC
         this.chirOptOverO2 = chirOptOverO2
         this.diag = diag
@@ -1106,20 +1101,6 @@ public class FaithfulAST2CHIR {
         }
         TranslateOtherTopLevelDecls(node)
         FlatForInExpr(builder).RunOnPackage(CurrentPackage())
-        try (recorder = ProfileRecorder("Canonicalization", "GenerateVTable")) {
-            let allDefs = CurrentPackage().GetAllCustomTypeDef()
-            let generator = GenerateVTable(CurrentPackage(), allDefs, builder, opts, "GenerateVTable")
-            generator.CreateVTable()
-            generator.UpdateOperatorVirFunc()
-            generator.CreateVirtualFuncWrapper(kind, cachedInfo, curVirtFuncWrapDep, delVirtFuncWrapForIncr)
-            generator.SetSrcFuncType()
-            generator.CreateMutFuncWrapper()
-            generator.UpdateFuncCall()
-        }
-        MarkClassHasInited(builder).RunOnPackage(CurrentPackage())
-        UpdateMemberVarPath(builder).RunOnPackage(CurrentPackage())
-        NoSideEffectMarker().RunOnPackage(CurrentPackage())
-        BoxRecursionValueType(CurrentPackage(), builder).Run()
         if (chirWFC) {
             AST2CHIRCheck()
         }
@@ -1162,7 +1143,9 @@ public class FaithfulAST2CHIR {
         return initFuncsForConstVar
     }
 
-
+    public func GetMaybeUnreachableBlocks(): HashMap<Block, Expression> {
+        return maybeUnreachable
+    }
 
     public func GetSrcCodeImportedFuncs(): ArrayList<Function> {
         let funcs = ArrayList<Function>()
@@ -2395,6 +2378,7 @@ public class FaithfulAST2CHIR {
             deserializedVals: deserializedVals, gim: gim, overrideSrcFuncResolver: overrideSrcFuncResolver, opts: opts,
             increKind: kind,
             annoFactoryFuncs: annoFactoryFuncs,
+            maybeUnreachable: maybeUnreachable,
             isComputingAnnos: isComputingAnnos,
             initFuncsForAnnoFactory: initFuncsForAnnoFactory)
     }

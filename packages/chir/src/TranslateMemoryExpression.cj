@@ -26,8 +26,8 @@ public func TranslateAllocateExpression(compiler: CHIR2BCHIR, context: CHIR2BCHI
     expr: Expression, withException: Bool): Unit {
     let maybeType: Option<Type> = if (let Some(allocate) <- (expr as Allocate)) {
         Some(allocate.GetType())
-    } else if (let Some(allocateWithException) <- (expr as AllocateWithException)) {
-        Some(allocateWithException.GetType())
+    } else if (let Some(tryAllocate) <- (expr as TryAllocate)) {
+        Some(tryAllocate.GetType())
     } else {
         None
     }

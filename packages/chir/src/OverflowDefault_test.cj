@@ -40,12 +40,12 @@ public class OverflowDefaultTest {
         return decl
     }
 
-    private func TranslatorFor(builder: CHIRBuilder): Translator {
-        return Translator(builder, CHIRType(builder, CHIRTypeCache()), FaithfulAST2CHIRNodeMap(),
+    private func TranslatorFor(builder: CHIRBuilder, table: FaithfulAST2CHIRNodeMap): Translator {
+        return Translator(builder, CHIRType(builder, CHIRTypeCache()), table,
             deserializedVals: HashMap<String, Value>())
     }
 
-    private func ClassWithMethod(builder: CHIRBuilder, name: String, isStatic: Bool): ClassType {
+    private func ClassWithMethod(builder: CHIRBuilder, name: String, isStatic: Bool): (ClassType, Function) {
         let context = builder.context
         let def = builder.CreateClassDef("overflow", "Num")
         let classTy = context.GetClassTy(def, ArrayList<Type>())
@@ -62,16 +62,20 @@ public class OverflowDefaultTest {
             method.EnableAttr(Attribute.STATIC)
         }
         def.AddMethod(method)
-        return classTy
+        method.SetOuterDeclaredOrExtendedDef(def)
+        return (classTy, method)
     }
 
     private func ObserveWrapper(isStatic: Bool, name: String): String {
         let context = CHIRContext()
         let builder = CHIRBuilder(context)
         let block = Host(builder)
-        let classTy = ClassWithMethod(builder, name, isStatic)
+        let (classTy, method) = ClassWithMethod(builder, name, isStatic)
         let int64 = context.GetInt64Ty()
-        let translator = TranslatorFor(builder)
+        let decl = OverflowDecl(name, isStatic)
+        let table = FaithfulAST2CHIRNodeMap()
+        table.Set(decl, method)
+        let translator = TranslatorFor(builder, table)
         translator.SetCurrentBlock(block)
         var thisObj: Option<Value> = None<Value>
         if (!isStatic) {
@@ -85,8 +89,8 @@ public class OverflowDefaultTest {
         } else {
             ArrayList<Type>([classTy, int64])
         }
-        let info = FaithfulInstCalleeInfo(classTy, classTy, params, int64, ArrayList<Type>(), true)
-        let _ = translator.WrapMemberMethodByLambda(OverflowDecl(name, isStatic), info, thisObj)
+        let info = FaithfulInstCalleeInfo(classTy, classTy, params, int64, ArrayList<Type>(), true, decl)
+        let _ = translator.WrapMemberMethodByLambda(decl, info, thisObj)
         let lambda = (block.GetExpressions()[before] as Lambda).getOrThrow()
         let entry = lambda.GetBody().getOrThrow().GetEntryBlock().getOrThrow()
         var observed = ""
@@ -106,9 +110,12 @@ public class OverflowDefaultTest {
         let context = CHIRContext()
         let builder = CHIRBuilder(context)
         let block = Host(builder)
-        let classTy = ClassWithMethod(builder, "+", isStatic)
+        let (classTy, method) = ClassWithMethod(builder, "+", isStatic)
         let int64 = context.GetInt64Ty()
-        let translator = TranslatorFor(builder)
+        let decl = OverflowDecl("+", isStatic)
+        let table = FaithfulAST2CHIRNodeMap()
+        table.Set(decl, method)
+        let translator = TranslatorFor(builder, table)
         let callerExpr = builder.CreateConstant(int64, IntLiteral(1), block)
         block.AppendExpression(callerExpr)
         let params = if (isStatic) {
@@ -116,9 +123,9 @@ public class OverflowDefaultTest {
         } else {
             ArrayList<Type>([classTy, int64])
         }
-        let info = FaithfulInstCalleeInfo(classTy, classTy, params, int64, ArrayList<Type>(), true)
+        let info = FaithfulInstCalleeInfo(classTy, classTy, params, int64, ArrayList<Type>(), true, decl)
         let call = translator.GenerateInvokeCallContext(info, callerExpr.GetResult().getOrThrow(),
-            OverflowDecl("+", isStatic), ArrayList<Value>(), strategy: strategy)
+            ArrayList<Value>(), strategy: strategy)
         let invoke = if (isStatic) {
             builder.CreateInvokeStatic(int64, call, block)
         } else {

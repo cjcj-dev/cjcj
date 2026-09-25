@@ -271,8 +271,8 @@ public class SanitizerCoverage {
             } else {
                 builder.context.GetUInt64Ty()
             }
-            let lhsCast = builder.CreateTypeCast(unsignedType, lhs, parent)
-            let rhsCast = builder.CreateTypeCast(unsignedType, rhs, parent)
+            let lhsCast = builder.CreateNumericCast(unsignedType, lhs, parent, overflowStrategy: OverflowStrategy.NA)
+            let rhsCast = builder.CreateNumericCast(unsignedType, rhs, parent, overflowStrategy: OverflowStrategy.NA)
             lhsCast.SetDebugLocation(binary.GetDebugLocation())
             rhsCast.SetDebugLocation(binary.GetDebugLocation())
             lhs = lhsCast.GetResult().getOrThrow()
@@ -313,7 +313,7 @@ public class SanitizerCoverage {
         rawDataAcquire.MoveBefore(mb)
         var switchVal = mb.GetCondition()
         if (switchVal.GetType().getOrThrow().GetTypeKind() != TypeKind.TYPE_UINT64) {
-            let typeCast = builder.CreateTypeCast(u64Ty, switchVal, parent)
+            let typeCast = builder.CreateNumericCast(u64Ty, switchVal, parent, overflowStrategy: OverflowStrategy.NA)
             typeCast.SetDebugLocation(mb.GetDebugLocation())
             switchVal = typeCast.GetResult().getOrThrow()
             typeCast.MoveBefore(mb)
@@ -364,8 +364,8 @@ public class SanitizerCoverage {
             let sizeN = CreateMemberApply(builder.context.GetInt64Ty(), getSize,
                 oper1.GetType().getOrThrow(), ArrayList<Value>([oper1]), parent, builder, loc: loc)
             sizeN.MoveBefore(apply)
-            let sizeNCasted = builder.CreateTypeCast(builder.context.GetUInt32Ty(),
-                sizeN.GetResult().getOrThrow(), parent)
+            let sizeNCasted = builder.CreateNumericCast(builder.context.GetUInt32Ty(),
+                sizeN.GetResult().getOrThrow(), parent, overflowStrategy: OverflowStrategy.NA)
             sizeNCasted.SetDebugLocation(loc)
             sizeNCasted.MoveBefore(apply)
             res.add(sizeNCasted.GetResult().getOrThrow())
@@ -387,7 +387,7 @@ public class SanitizerCoverage {
         start.MoveBefore(apply)
         var startRes = start.GetResult().getOrThrow()
         if (startRes.GetType().getOrThrow() != builder.context.GetInt64Ty()) {
-            let castToInt64 = builder.CreateTypeCast(builder.context.GetInt64Ty(), startRes, parent)
+            let castToInt64 = builder.CreateNumericCast(builder.context.GetInt64Ty(), startRes, parent, overflowStrategy: OverflowStrategy.NA)
             castToInt64.SetDebugLocation(loc)
             castToInt64.MoveBefore(apply)
             startRes = castToInt64.GetResult().getOrThrow()
@@ -486,8 +486,8 @@ public class SanitizerCoverage {
                 overflowStrategy: OverflowStrategy.WRAPPING)
             calSize.SetDebugLocation(loc)
             calSize.MoveBefore(apply)
-            let sizeNCasted = builder.CreateTypeCast(builder.context.GetUInt32Ty(),
-                calSize.GetResult().getOrThrow(), parent)
+            let sizeNCasted = builder.CreateNumericCast(builder.context.GetUInt32Ty(),
+                calSize.GetResult().getOrThrow(), parent, overflowStrategy: OverflowStrategy.NA)
             sizeNCasted.SetDebugLocation(loc)
             sizeNCasted.MoveBefore(apply)
             res.add(sizeNCasted.GetResult().getOrThrow())
@@ -942,7 +942,7 @@ public class SanitizerCoverage {
         let pcInitType = builder.context.GetFuncTy(paramTypeList, builder.context.GetUnitTy(), isCFunc: true)
         let pcInitFunc = GenerateForeignFunc(SanCovCreatePCTable, INVALID_LOCATION, pcInitType,
             packName: packageName)
-        let typecast = builder.CreateTypeCast(builder.context.GetUInt64Ty(), funcSize.GetResult().getOrThrow(), block0)
+        let typecast = builder.CreateNumericCast(builder.context.GetUInt64Ty(), funcSize.GetResult().getOrThrow(), block0, overflowStrategy: OverflowStrategy.NA)
         block0.AppendExpression(typecast)
         let pcInitApply = CreateNonMemberApply(builder.context.GetUnitTy(), pcInitFunc,
             ArrayList<Value>([packCString.GetResult().getOrThrow(), typecast.GetResult().getOrThrow(),

@@ -494,7 +494,14 @@ public open class CGType {
     }
 
     public static func GetUnitType(context: LLVMContextHandle): LLVMTypeRef {
-        let result = GetOrCreateNamedStructType(context, UNIT_TYPE_STR)
+        var result = LLVMNullType()
+        try (nameCString = unsafe { LibC.mallocCString(UNIT_TYPE_STR) }.asResource()) {
+            result = unsafe { LLVMGetTypeByName2(context.raw, nameCString.value) }
+            if (!result.isNull()) {
+                return result
+            }
+            result = unsafe { LLVMStructCreateNamed(context.raw, nameCString.value) }
+        }
         let fields = ArrayList<LLVMTypeRef>()
         SetStructTypeBody(result, fields)
         return result
@@ -528,7 +535,14 @@ public open class CGType {
     }
 
     public static func GetBitMapType(context: LLVMContextHandle): LLVMTypeRef {
-        let result = GetOrCreateNamedStructType(context, "BitMap")
+        var result = LLVMNullType()
+        try (nameCString = unsafe { LibC.mallocCString("BitMap") }.asResource()) {
+            result = unsafe { LLVMGetTypeByName2(context.raw, nameCString.value) }
+            if (!result.isNull()) {
+                return result
+            }
+            result = unsafe { LLVMStructCreateNamed(context.raw, nameCString.value) }
+        }
         let body = ArrayList<LLVMTypeRef>()
         body.add(unsafe { LLVMInt32TypeInContext(context.raw) })
         body.add(unsafe { LLVMArrayType(LLVMInt8TypeInContext(context.raw), 0u32) })
@@ -709,7 +723,14 @@ public open class CGType {
     }
 
     public static func GetOrCreateTypeTemplateType(context: LLVMContextHandle): LLVMTypeRef {
-        let result = GetOrCreateNamedStructType(context, "TypeTemplate")
+        var result = LLVMNullType()
+        try (nameCString = unsafe { LibC.mallocCString("TypeTemplate") }.asResource()) {
+            result = unsafe { LLVMGetTypeByName2(context.raw, nameCString.value) }
+            if (!result.isNull()) {
+                return result
+            }
+            result = unsafe { LLVMStructCreateNamed(context.raw, nameCString.value) }
+        }
         let i8Ty = unsafe { LLVMInt8TypeInContext(context.raw) }
         let i16Ty = unsafe { LLVMInt16TypeInContext(context.raw) }
         let i8PtrTy = unsafe { LLVMPointerType(i8Ty, 0u32) }
