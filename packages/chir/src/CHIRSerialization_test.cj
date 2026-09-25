@@ -109,8 +109,6 @@ public class ExpressionFamilySerializationTest {
     }
 }
 
-// d6b9607e ExprKind.inc:21-39. In-memory TRY_* names; flatbuffer ordinals stay
-// at the pre-rename CHIRFB_CHIR_EXPR_KIND_TRY_* values (CHIRFlatBufferSchema.cj:168-184).
 @Test
 public class TryKindRenameTest {
     @TestCase
@@ -161,9 +159,10 @@ public class TryKindRenameTest {
         let normal = builder.CreateBlock(body)
         let error = builder.CreateBlock(body)
         body.SetEntryBlock(source)
-        let value = builder.CreateConstant(context.GetInt64Ty(), IntLiteral(7), source).GetResult().getOrThrow()
+        let valueExpr = builder.CreateConstant(context.GetInt64Ty(), IntLiteral(7), source)
+        let value = valueExpr.GetResult().getOrThrow()
         let neg = builder.CreateTryUnaryExpression(context.GetInt64Ty(), ExprKind.NEG, value, normal, error, source)
-        source.AppendExpressions(ArrayList<Expression>([neg]))
+        source.AppendExpressions(ArrayList<Expression>([valueExpr, neg]))
         let bytes = CHIRSerializer.Serialize(pkg)
         let serialized = GetCHIRPackage(bytes)
         let expressions = serialized.GetExprs().getOrThrow()
@@ -187,7 +186,15 @@ public class TryKindRenameTest {
         CHIRDeserializerImpl(restoredBuilder).Run(serialized)
         let restored = restoredContext.GetCurPackage().getOrThrow().GetGlobalFunctions()[0]
         let restoredExpressions = restored.GetEntryBlock().getOrThrow().GetExpressions()
-        @Expect(restoredExpressions[0].GetExprKind(), ExprKind.TRY_NEG)
-        @Expect((restoredExpressions[0] as TryUnaryExpression).isSome(), true)
+        var restoredTryNeg: Int64 = 0
+        var index: Int64 = 0
+        while (index < restoredExpressions.size) {
+            if (restoredExpressions[index].GetExprKind() == ExprKind.TRY_NEG &&
+                (restoredExpressions[index] as TryUnaryExpression).isSome()) {
+                restoredTryNeg++
+            }
+            index++
+        }
+        @Expect(restoredTryNeg, 1)
     }
 }
