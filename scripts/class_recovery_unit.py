@@ -38,7 +38,7 @@ def main():
     sources = [copied]
     executable = out / 'class-recovery-tests'
     command = [str(sdk / 'bin/cjc'), '--test', '-O0', '--diagnostic-format=noColor', '--trimpath', str(tree),
-               *map(str, sources), '-o', str(executable)]
+               copied.name, '-o', str(executable)]
     archives, inputs = [], list(sources)
     for directory in sorted((tree / 'target/release').iterdir()):
         if not directory.is_dir() or directory.name in ('bin', 'compiler_unittest@cjcj'):
@@ -58,7 +58,7 @@ def main():
               'uptime_before': subprocess.check_output(['uptime'], text=True).strip()}
     start = time.monotonic()
     with (out / 'build.log').open('w') as log:
-        record['build_rc'] = subprocess.call(command, cwd=tree, env=env, stdout=log, stderr=subprocess.STDOUT)
+        record['build_rc'] = subprocess.call(command, cwd=out, env=env, stdout=log, stderr=subprocess.STDOUT)
     record['build_wall'] = time.monotonic() - start
     if record['build_rc'] == 0:
         record['elf_sha256'] = digest(executable)
