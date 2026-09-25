@@ -729,7 +729,6 @@ public class CompilerInstance {
                 desugarMacrocall: invocation.globalOptions.enableMacroInLSP,
                 compatibleSDKVersion: compatibleSDKVersion)
         }
-        getCompileStrategy().InteropConfigTomlCheck()
         let semaInstance = FaithfulSemaCompilerInstance()
         semaInstance.typeManager = typeManager.getOrThrow().AsFaithfulSemaTypeManager()
         semaInstance.globalOptions = invocation.globalOptions

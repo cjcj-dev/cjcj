@@ -1,136 +1,12 @@
 package cjcj::chir
 
 import std.collection.*
-import cjcj::utils.{CJC_ASSERT, OverflowStrategy, OverflowStrategyName}
+import cjcj::utils.{CJC_ASSERT, OverflowStrategy}
 
 public open class Terminator <: Expression {
-    private let successors: ArrayList<Block> = ArrayList<Block>()
-
     public init(kind: ExprKind, operands: ArrayList<Value>, successors: ArrayList<Block>, parent: Option<Block>) {
         super(kind, operands, parent)
-        for (successor in successors) {
-            this.successors.add(successor)
-        }
-    }
-
-    public override func AsTerminator(): Option<Terminator> { return this }
-
-    public func GetSuccessors(): ArrayList<Block> {
-        return successors.clone()
-    }
-
-    public func GetSuccessorsRef(): ArrayList<Block> {
-        return successors
-    }
-
-    public func GetNumOfSuccessor(): Int64 {
-        return successors.size
-    }
-
-    public func GetSuccessor(index: Int64): Block {
-        return successors[index]
-    }
-
-    public func AddSuccessor(block: Block): Unit {
-        successors.add(block)
-        if (let Some(parentBlock) <- GetParentBlock()) {
-            block.AddPredecessor(parentBlock)
-        }
-    }
-
-    public func ReplaceSuccessor(oldBlock: Block, newBlock: Block): Unit {
-        var idx: Int64 = 0
-        while (idx < successors.size) {
-            if (successors[idx].nodeId == oldBlock.nodeId) {
-                successors[idx] = newBlock
-            }
-            idx++
-        }
-        if (let Some(parentBlock) <- GetParentBlock()) {
-            oldBlock.RemovePredecessor(parentBlock)
-            newBlock.AddPredecessor(parentBlock)
-        }
-    }
-
-    public func ReplaceSuccessor(index: Int64, newBlock: Block): Unit {
-        let oldBlock = successors[index]
-        successors[index] = newBlock
-        if (let Some(parentBlock) <- GetParentBlock()) {
-            oldBlock.RemovePredecessor(parentBlock)
-            newBlock.AddPredecessor(parentBlock)
-        }
-    }
-
-    public func SyncSuccessorPredecessors(): Unit {
-        if (let Some(parentBlock) <- GetParentBlock()) {
-            for (successor in successors) {
-                successor.AddPredecessor(parentBlock)
-            }
-        }
-    }
-
-    private func LetSuccessorsRemoveCurBlock(): Unit {
-        if (let Some(parentBlock) <- GetParentBlock()) {
-            for (successor in successors) {
-                successor.RemovePredecessor(parentBlock)
-            }
-        }
-    }
-
-    public override func DetachFromBlockOnly(): Unit {
-        if (let Some(parentBlock) <- GetParentBlock()) {
-            for (successor in successors) {
-                successor.RemovePredecessor(parentBlock)
-            }
-        }
-        super.DetachFromBlockOnly()
-    }
-
-    public override func RemoveSelfFromBlock(): Unit {
-        LetSuccessorsRemoveCurBlock()
-        if (let Some(parentBlock) <- GetParentBlock()) {
-            parentBlock.RemoveExprOnly(this)
-            ClearParent()
-        }
-        EraseOperands()
-    }
-
-    public override func ReplaceWith(newExpr: Expression): Unit {
-        let newTerminator = newExpr as Terminator ??
-            throw IllegalArgumentException("new expression is not a terminator")
-        let newTerminatorHadParent = newTerminator.GetParentBlock().isSome()
-        if (let Some(newParent) <- newTerminator.GetParentBlock()) {
-            newParent.RemoveExprOnly(newTerminator)
-            newTerminator.ClearParent()
-        }
-        if (let Some(oldResult) <- GetResult()) {
-            let newResult = newTerminator.GetResult() ??
-                throw IllegalStateException("new terminator has no result")
-            for (user in oldResult.GetUsers()) {
-                user.ReplaceOperand(oldResult, newResult)
-            }
-        }
-        let oldParent = GetParentBlock() ??
-            throw IllegalStateException("terminator has no parent block")
-        RemoveSelfFromBlock()
-        if (newTerminatorHadParent) {
-            oldParent.GetExpressionsRef().add(newTerminator)
-            newTerminator.SetParent(oldParent)
-            newTerminator.SyncSuccessorPredecessors()
-        } else {
-            oldParent.AppendExpression(newTerminator)
-        }
-    }
-
-    public open override func AddExtraComment(): String {
-        if (successors.isEmpty()) {
-            return ""
-        }
-        let names = ArrayList<String>()
-        for (successor in successors) {
-            names.add(successor.GetIdentifier())
-        }
-        return "successors: " + JoinStrings(names, ", ")
+        for (successor in successors) { this.operands.add(successor) }
     }
 }
 
@@ -269,7 +145,7 @@ public class Exit <: Terminator {
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
         var exitValue: Option<Value> = None
-        if (GetNumOfOperands() > 0) {
+        if (GetNumOfNonSuccessorOperands() > 0) {
             exitValue = GetOperand(0)
         }
         let cloned = builder.CreateExit(exitValue, parent)
@@ -395,7 +271,7 @@ public class ApplyWithException <: FuncCallWithException {
     public override func GetArgs(): ArrayList<Value> {
         let out = ArrayList<Value>()
         var idx: Int64 = 1
-        while (idx < GetNumOfOperands()) {
+        while (idx < GetNumOfNonSuccessorOperands()) {
             out.add(GetOperand(idx))
             idx++
         }
@@ -528,7 +404,7 @@ public open class DynamicDispatchWithException <: FuncCallWithException {
     public override func OperandsToString(): String {
         let parts = ArrayList<String>()
         parts.add(CallTargetPrefix() + GetCallee().GetIdentifier() + InstantiatedTypeArgsToString())
-        let operands = GetOperands()
+        let operands = GetNonSuccessorOperands()
         operands.remove(at: 0)
         parts.add(TerminatorValueIdsToString(operands))
         return JoinStrings(parts, ", ")
@@ -552,7 +428,7 @@ public class InvokeWithException <: DynamicDispatchWithException {
     }
 
     public override func GetArgs(): ArrayList<Value> {
-        let operands = GetOperands()
+        let operands = GetNonSuccessorOperands()
         operands.remove(at: 0)
         return operands
     }
@@ -585,7 +461,7 @@ public class InvokeStaticWithException <: DynamicDispatchWithException {
     public override func GetArgs(): ArrayList<Value> {
         let out = ArrayList<Value>()
         var idx: Int64 = 2
-        while (idx < GetNumOfOperands()) {
+        while (idx < GetNumOfNonSuccessorOperands()) {
             out.add(GetOperand(idx))
             idx++
         }
@@ -607,114 +483,53 @@ public class InvokeStaticWithException <: DynamicDispatchWithException {
     }
 }
 
-public class IntOpWithException <: ExpressionWithException {
-    private let opKind: ExprKind
-    private var overflowStrategy: OverflowStrategy
-
-    public init(opKind: ExprKind, operand: Value, successBlock: Block, errorBlock: Block, parent: Option<Block>,
+public class UnaryExpressionWithException <: UnaryExpressionBase {
+    public init(opKind: UnaryExprKind, operand: Value, successBlock: Block, errorBlock: Block, parent: Option<Block>,
         overflowStrategy!: OverflowStrategy = OverflowStrategy.NA) {
-        super(ExprKind.INT_OP_WITH_EXCEPTION, MakeUnaryTermOperands(operand), successBlock, errorBlock, parent)
-        this.opKind = opKind
-        this.overflowStrategy = overflowStrategy
+        super(opKind, operand, MakeTwoSuccessors(successBlock, errorBlock), parent, overflowStrategy: overflowStrategy,
+            isTry: true)
     }
 
-    public init(opKind: ExprKind, left: Value, right: Value, successBlock: Block, errorBlock: Block,
-        parent: Option<Block>, overflowStrategy!: OverflowStrategy = OverflowStrategy.NA) {
-        super(ExprKind.INT_OP_WITH_EXCEPTION, MakeBinaryTermOperands(left, right), successBlock, errorBlock, parent)
-        this.opKind = opKind
-        this.overflowStrategy = overflowStrategy
-    }
-
-    public func GetOpKind(): ExprKind {
-        return opKind
-    }
-
-    public func GetOpKindName(): String {
-        return ExprKindName(opKind) + "WithException"
-    }
-
-    public func GetLHSOperand(): Value {
-        return GetOperand(0)
-    }
-
-    public func GetRHSOperand(): Option<Value> {
-        if (GetNumOfOperands() > 1) {
-            return GetOperand(1)
-        }
-        return None
-    }
-
-    public func GetOverflowStrategy(): OverflowStrategy {
-        if (opKind == ExprKind.DIV) {
-            return overflowStrategy
-        }
-        return OverflowStrategy.THROWING
-    }
-
-    public func SetOverflowStrategy(strategy: OverflowStrategy): Unit {
-        overflowStrategy = strategy
-    }
-
-    public override func AddExtraComment(): String {
-        let base = super.AddExtraComment()
-        let overflowText = if (overflowStrategy != OverflowStrategy.NA) {
-            "Overflow: " + OverflowStrategyName(overflowStrategy)
-        } else {
-            ""
-        }
-        let opText = "op: " + GetOpKindName()
-        if (base.isEmpty()) {
-            if (overflowText.isEmpty()) {
-                return opText
-            }
-            return overflowText + " " + opText
-        }
-        if (overflowText.isEmpty()) {
-            return base + " " + opText
-        }
-        return base + " " + overflowText + " " + opText
-    }
+    public func GetSuccessBlock(): Block { return GetSuccessor(0) }
+    public func GetErrorBlock(): Block { return GetSuccessor(1) }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
-        let cloned = if (let Some(rhs) <- GetRHSOperand()) {
-            builder.CreateBinaryIntOpWithException(GetResult().getOrThrow().GetType().getOrThrow(), GetOpKind(), GetLHSOperand(), rhs,
-                GetSuccessBlock(), GetErrorBlock(), parent)
-        } else {
-            builder.CreateUnaryIntOpWithException(GetResult().getOrThrow().GetType().getOrThrow(), GetOpKind(), GetLHSOperand(),
-                GetSuccessBlock(), GetErrorBlock(), parent)
-        }
-        cloned.SetOverflowStrategy(overflowStrategy)
+        let cloned = builder.CreateUnaryExpressionWithException(GetResult().getOrThrow().GetType().getOrThrow(),
+            GetOpKind(), GetOperand(0), GetSuccessBlock(), GetErrorBlock(), parent)
+        cloned.SetOverflowStrategy(GetOverflowStrategy())
         cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
         return cloned
     }
 }
 
-public class TypeCastWithException <: ExpressionWithException {
-    public init(source: Value, successBlock: Block, errorBlock: Block, parent: Option<Block>) {
-        super(ExprKind.TYPECAST_WITH_EXCEPTION, MakeUnaryTermOperands(source), successBlock, errorBlock, parent)
+public class BinaryExpressionWithException <: BinaryExpressionBase {
+    public init(opKind: BinaryExprKind, left: Value, right: Value, successBlock: Block, errorBlock: Block,
+        parent: Option<Block>, overflowStrategy!: OverflowStrategy = OverflowStrategy.NA) {
+        super(opKind, left, right, MakeTwoSuccessors(successBlock, errorBlock), parent,
+            overflowStrategy: overflowStrategy, isTry: true)
     }
 
-    public func GetSourceValue(): Value {
-        return GetOperand(0)
-    }
-
-    public func GetSourceTy(): Option<Type> {
-        return GetSourceValue().GetType()
-    }
-
-    public func GetTargetTy(): Option<Type> {
-        if (let Some(res) <- GetResult()) {
-            return res.GetType()
-        }
-        return None
-    }
-
-    public func GetOverflowStrategy(): OverflowStrategy {
-        return OverflowStrategy.THROWING
-    }
+    public func GetSuccessBlock(): Block { return GetSuccessor(0) }
+    public func GetErrorBlock(): Block { return GetSuccessor(1) }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
-        let cloned = builder.CreateTypeCastWithException(GetResult().getOrThrow().GetType().getOrThrow(), GetSourceValue(),
+        let cloned = builder.CreateBinaryExpressionWithException(GetResult().getOrThrow().GetType().getOrThrow(),
+            GetOpKind(), GetLHSOperand(), GetRHSOperand(), GetSuccessBlock(), GetErrorBlock(), parent)
+        cloned.SetOverflowStrategy(GetOverflowStrategy())
+        cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
+        return cloned
+    }
+}
+
+public class NumericCastWithException <: NumericCastBase {
+    public init(source: Value, successBlock: Block, errorBlock: Block, parent: Option<Block>) {
+        super(ExprKind.NUMERIC_CAST_WITH_EXCEPTION, source, MakeTwoSuccessors(successBlock, errorBlock), parent, OverflowStrategy.THROWING)
+    }
+    public func GetSuccessBlock(): Block { return GetSuccessor(0) }
+    public func GetErrorBlock(): Block { return GetSuccessor(1) }
+
+    public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
+        let cloned = builder.CreateNumericCastWithException(GetResult().getOrThrow().GetType().getOrThrow(), GetSourceValue(),
             GetSuccessBlock(), GetErrorBlock(), parent)
         cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
         return cloned
@@ -749,7 +564,7 @@ public class IntrinsicWithException <: ExpressionWithException {
     }
 
     public func GetArgs(): ArrayList<Value> {
-        return GetOperands()
+        return GetNonSuccessorOperands()
     }
 
     public override func OperandsToString(): String {
@@ -769,25 +584,12 @@ public class IntrinsicWithException <: ExpressionWithException {
     }
 }
 
-public class AllocateWithException <: ExpressionWithException {
-    private var allocatedType: Type
-
+public class AllocateWithException <: AllocateBase {
     public init(ty: Type, successBlock: Block, errorBlock: Block, parent: Option<Block>) {
-        super(ExprKind.ALLOCATE_WITH_EXCEPTION, ArrayList<Value>(), successBlock, errorBlock, parent)
-        allocatedType = ty
+        super(ExprKind.ALLOCATE_WITH_EXCEPTION, ty, MakeTwoSuccessors(successBlock, errorBlock), parent)
     }
-
-    public func GetType(): Type {
-        return allocatedType
-    }
-
-    public func SetType(ty: Type): Unit {
-        allocatedType = ty
-    }
-
-    public override func OperandsToString(): String {
-        return allocatedType.ToString()
-    }
+    public func GetSuccessBlock(): Block { return GetSuccessor(0) }
+    public func GetErrorBlock(): Block { return GetSuccessor(1) }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
         let cloned = builder.CreateAllocateWithException(GetResult().getOrThrow().GetType().getOrThrow(), GetType(), GetSuccessBlock(),
@@ -797,29 +599,12 @@ public class AllocateWithException <: ExpressionWithException {
     }
 }
 
-public class RawArrayAllocateWithException <: ExpressionWithException {
-    private var elementType: Type
-
+public class RawArrayAllocateWithException <: RawArrayAllocateBase {
     public init(elementTy: Type, size: Value, successBlock: Block, errorBlock: Block, parent: Option<Block>) {
-        super(ExprKind.RAW_ARRAY_ALLOCATE_WITH_EXCEPTION, MakeUnaryTermOperands(size), successBlock, errorBlock, parent)
-        elementType = elementTy
+        super(ExprKind.RAW_ARRAY_ALLOCATE_WITH_EXCEPTION, elementTy, size, MakeTwoSuccessors(successBlock, errorBlock), parent)
     }
-
-    public func GetSize(): Value {
-        return GetOperand(0)
-    }
-
-    public func GetElementType(): Type {
-        return elementType
-    }
-
-    public func SetElementType(ty: Type): Unit {
-        elementType = ty
-    }
-
-    public override func OperandsToString(): String {
-        return elementType.ToString() + ", " + GetSize().GetIdentifier()
-    }
+    public func GetSuccessBlock(): Block { return GetSuccessor(0) }
+    public func GetErrorBlock(): Block { return GetSuccessor(1) }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
         let cloned = builder.CreateRawArrayAllocateWithException(GetResult().getOrThrow().GetType().getOrThrow(), GetElementType(), GetSize(),
@@ -829,62 +614,22 @@ public class RawArrayAllocateWithException <: ExpressionWithException {
     }
 }
 
-public class SpawnWithException <: ExpressionWithException {
-    private var executeClosure: Option<Function> = None
-
+public class SpawnWithException <: SpawnBase {
     public init(value: Value, successBlock: Block, errorBlock: Block, parent: Option<Block>) {
-        super(ExprKind.SPAWN_WITH_EXCEPTION, MakeUnaryTermOperands(value), successBlock, errorBlock, parent)
+        super(ExprKind.SPAWN_WITH_EXCEPTION, MakeUnaryTermOperands(value), MakeTwoSuccessors(successBlock, errorBlock), parent)
     }
-
     public init(value: Value, arg: Value, successBlock: Block, errorBlock: Block, parent: Option<Block>) {
-        super(ExprKind.SPAWN_WITH_EXCEPTION, MakeBinaryTermOperands(value, arg), successBlock, errorBlock, parent)
+        super(ExprKind.SPAWN_WITH_EXCEPTION, MakeBinaryTermOperands(value, arg), MakeTwoSuccessors(successBlock, errorBlock), parent)
     }
-
-    public func GetSpawnArg(): Option<Value> {
-        if (GetNumOfOperands() > 1) {
-            return GetOperand(1)
-        }
-        return None
-    }
-
-    public func IsExecuteClosure(): Bool {
-        return executeClosure.isSome()
-    }
-
-    public func SetExecuteClosure(fn: Function): Unit {
-        executeClosure = fn
-    }
-
-    public func GetFuture(): Value {
-        return GetOperand(0)
-    }
-
-    public func GetClosure(): Value {
-        return GetOperand(0)
-    }
-
-    public func GetExecuteClosure(): Option<Function> {
-        return executeClosure
-    }
-
-    public override func AddExtraComment(): String {
-        let base = super.AddExtraComment()
-        if (let Some(fn) <- executeClosure) {
-            let closureText = "executeClosure: " + fn.GetIdentifier()
-            if (base.isEmpty()) {
-                return closureText
-            }
-            return base + " " + closureText
-        }
-        return base
-    }
+    public func GetSuccessBlock(): Block { return GetSuccessor(0) }
+    public func GetErrorBlock(): Block { return GetSuccessor(1) }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
         let cloned = if (let Some(spawnArg) <- GetSpawnArg()) {
-            builder.CreateSpawnWithException(GetResult().getOrThrow().GetType().getOrThrow(), GetFuture(), spawnArg, GetSuccessBlock(),
+            builder.CreateSpawnWithException(GetResult().getOrThrow().GetType().getOrThrow(), GetObject(), spawnArg, GetSuccessBlock(),
                 GetErrorBlock(), parent)
         } else {
-            builder.CreateSpawnWithException(GetResult().getOrThrow().GetType().getOrThrow(), GetFuture(), GetSuccessBlock(),
+            builder.CreateSpawnWithException(GetResult().getOrThrow().GetType().getOrThrow(), GetObject(), GetSuccessBlock(),
                 GetErrorBlock(), parent)
         }
         if (let Some(fn) <- GetExecuteClosure()) {

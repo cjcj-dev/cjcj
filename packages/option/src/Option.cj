@@ -335,8 +335,6 @@ public open class GlobalOptions <: Option {
     public var diagFormat: DiagFormat = DiagFormat.DEFAULT
     public var parseTest: Bool = false
     public var implicitPrelude: Bool = true
-    public var enableInteropCJMapping: Bool = false
-    public var targetInteropLanguage: InteropLanguage = InteropLanguage.NA
     public var enableTimer: Bool = false
     public var enableMemoryCollect: Bool = false
     public var linkStaticStd: CoreOption<Bool> = None
@@ -398,7 +396,6 @@ public open class GlobalOptions <: Option {
     public var enableCoverage: Bool = false
     public var compileCjd: Bool = false
     public var cjdbMode: Bool = false
-    public var interopCJPackageConfigPath: String = "./"
     public var dumpAST: Bool = false
     public var dumpCHIR: Bool = false
     public var dumpIR: Bool = false
@@ -523,8 +520,6 @@ public open class GlobalOptions <: Option {
         diagFormat = other.diagFormat
         parseTest = other.parseTest
         implicitPrelude = other.implicitPrelude
-        enableInteropCJMapping = other.enableInteropCJMapping
-        targetInteropLanguage = other.targetInteropLanguage
         enableTimer = other.enableTimer
         enableMemoryCollect = other.enableMemoryCollect
         linkStaticStd = other.linkStaticStd
@@ -587,7 +582,6 @@ public open class GlobalOptions <: Option {
         enableCoverage = other.enableCoverage
         compileCjd = other.compileCjd
         cjdbMode = other.cjdbMode
-        interopCJPackageConfigPath = other.interopCJPackageConfigPath
         dumpAST = other.dumpAST
         dumpCHIR = other.dumpCHIR
         dumpIR = other.dumpIR
@@ -1706,7 +1700,6 @@ public open class GlobalOptions <: Option {
             BoolToSerializedString(enableMacroInLSP),
             BoolToSerializedString(enableCompileTest),
             BoolToSerializedString(implicitPrelude),
-            BoolToSerializedString(enableInteropCJMapping),
             BoolToSerializedString(chirEA),
             BoolToSerializedString(chirLICM),
             BoolToSerializedString(chirCC),

@@ -1011,19 +1011,11 @@ public func IsMirror(ty: Ty): Bool {
     return false
 }
 
-public func IsCJMapping(node: Node): Bool {
-    return node.TestAttr(Attribute.JAVA_CJ_MAPPING)
-}
-
 public func IsObject(node: Node): Bool {
     if (let Some(ty) <- node.GetTy()) {
         return ty.IsObject()
     }
     return false
-}
-
-public func IsFwdClass(node: Node): Bool {
-    return node.TestAttr(Attribute.CJ_MIRROR_JAVA_INTERFACE_FWD)
 }
 
 public func InsertJavaRefGetterStubWithBody(decl: ClassDecl): Unit {

@@ -17,6 +17,7 @@ private let INTEROPLIB_NATIVE_OBJ_C_CLASS: String = "NativeObjCClass"
 private let INTEROPLIB_REGISTRY_ID: String = "RegistryId"
 private let INTEROPLIB_OBJ_C_UNREACHABLE_CODE_EXCEPTION: String = "ObjCUnreachableCodeException"
 private let INTEROPLIB_OBJ_C_OPTIONAL_METHOD_UNIMPLEMENTED_EXCEPTION: String = "ObjCOptionalMethodUnimplementedException"
+private let INTEROPLIB_OBJ_C_INIT_EXCEPTION: String = "ObjCInitException"
 private let INTEROPLIB_OBJ_C_STATIC_METHOD_CALL_ON_INTERFACE_EXCEPTION: String = "ObjCStaticMethodCallOnInterfaceException"
 private let INTEROPLIB_NATIVE_BLOCK_ABI: String = "NativeBlockABI"
 private let INTEROPLIB_CANGJIE_BLOCK_ABI: String = "CangjieBlockABI"
@@ -82,6 +83,7 @@ public class InteropLibBridge {
     private static var registryIdDecl: Option<Option<TypeAliasDecl>> = None
     private static var objCUnreachableCodeExceptionDecl: Option<Option<ClassDecl>> = None
     private static var objCOptionalMethodUnimplementedExceptionDecl: Option<Option<ClassDecl>> = None
+    private static var objCInitExceptionDecl: Option<Option<ClassDecl>> = None
     private static var objCStaticMethodCallOnIntefaceExceptionDecl: Option<Option<ClassDecl>> = None
     private static var getFromRegistryByNativeHandleDecl: Option<Option<FuncDecl>> = None
     private static var getFromRegistryByIdDecl: Option<Option<FuncDecl>> = None
@@ -292,6 +294,13 @@ public class InteropLibBridge {
         let result = GetObjCLangDecl<ClassDecl>(INTEROPLIB_OBJ_C_OPTIONAL_METHOD_UNIMPLEMENTED_EXCEPTION,
             ASTKind.CLASS_DECL)
         InteropLibBridge.objCOptionalMethodUnimplementedExceptionDecl = Some(result)
+        return result
+    }
+    // Upstream 39ad854f, InteropLibBridge.cpp:171-174. Lookup is objc.lang, same as the optional-method exception.
+    public func GetObjCInitException(): Option<ClassDecl> {
+        if (let Some(result) <- InteropLibBridge.objCInitExceptionDecl) { return result }
+        let result = GetObjCLangDecl<ClassDecl>(INTEROPLIB_OBJ_C_INIT_EXCEPTION, ASTKind.CLASS_DECL)
+        InteropLibBridge.objCInitExceptionDecl = Some(result)
         return result
     }
     public func GetObjCStaticMethodCallOnIntefaceExceptionDecl(): Option<ClassDecl> {

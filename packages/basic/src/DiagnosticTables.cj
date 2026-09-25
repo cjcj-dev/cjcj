@@ -934,12 +934,6 @@ public enum DiagKindRefactor {
     | sema_cannot_use_annotation_jffi
     | sema_shadow_cannot_in_type_args
     | sema_unsupported_type_argument_in_java_interop
-    | sema_cjmapping_struct_generic_not_supported
-    | sema_cjmapping_struct_inheritance_interface_not_supported
-    | sema_cjmapping_decl_not_supported
-    | sema_cjmapping_method_arg_not_supported
-    | sema_cjmapping_method_ret_unsupported
-    | sema_cj_mapping_generic_method_not_get_instance_config
     | sema_varray_size_match
     | sema_varray_args_number_mismatch
     | sema_varray_subscript_num
@@ -1048,8 +1042,6 @@ public enum DiagKindRefactor {
     | sema_objc_func_call_property_can_only_be_called
     | sema_objc_impl_must_have_objc_mirror_super_class
     | sema_objc_setter_name_on_immutable_prop
-    | sema_objc_cjmapping_inheritance_interface_not_supported
-    | sema_objc_cjmapping_generic_not_supported
     | sema_foreign_name_appeared_in_child
     | sema_foreign_name_conflicting_annotation
     | sema_foreign_name_conflicting_derived_annotation
@@ -2855,12 +2847,6 @@ public let errorData: Array<ErrorData> = [
     ErrorData(message: "cannot use annotation here", mainHint: "", otherHints: []),
     ErrorData(message: "'%s' is not allowd to be used here as type argument, because it shadows field '%s' with its super type '%s'", mainHint: "", otherHints: []),
     ErrorData(message: "type argument in java interoperation should meet 'JType' constraint", mainHint: "", otherHints: []),
-    ErrorData(message: "cangjie mirror struct type generic %s is not supported", mainHint: "", otherHints: []),
-    ErrorData(message: "cangjie mirror struct type inheritance interface is not supported", mainHint: "", otherHints: []),
-    ErrorData(message: "cangjie mirror decl type is not supported for %s", mainHint: "", otherHints: []),
-    ErrorData(message: "argument type of cangjie mirror decl type member function is not supported", mainHint: "", otherHints: []),
-    ErrorData(message: "return type '%s' of function inside %s type is not supported", mainHint: "", otherHints: []),
-    ErrorData(message: "Instance configuration '%s' has incorrect format.", mainHint: "", otherHints: []),
     ErrorData(message: "mismatch 'VArray' type's size", mainHint: "expected size is %s, found %s", otherHints: []),
     ErrorData(message: "'VArray' constructor accepts only one argument", mainHint: "", otherHints: []),
     ErrorData(message: "'VArray' accepts exactly one subscript index with type of 'Int64'", mainHint: "", otherHints: []),
@@ -2969,8 +2955,6 @@ public let errorData: Array<ErrorData> = [
     ErrorData(message: "%s property 'call' can only be called directly, no other operations are permitted", mainHint: "", otherHints: []),
     ErrorData(message: "@ObjCImpl class must have @ObjCMirror super class", mainHint: "", otherHints: []),
     ErrorData(message: "@ForeignSetterName cannot be specified on immutable property", mainHint: "", otherHints: []),
-    ErrorData(message: "cangjie mirror decl type inheritance interface is not supported", mainHint: "", otherHints: []),
-    ErrorData(message: "cangjie mirror decl type generic %s is not supported", mainHint: "", otherHints: []),
     ErrorData(message: "@%s could not appear on overridden declaration", mainHint: "", otherHints: []),
     ErrorData(message: "Declaration '%s' has a conflicting @%s annotation", mainHint: "", otherHints: []),
     ErrorData(message: "Declaration '%s' has a conflicting derived @%s '%s'", mainHint: "", otherHints: []),
@@ -3626,12 +3610,6 @@ public let rDiagSeveritys: Array<DiagSeverity> = [
     DiagSeverity.DS_ERROR,
     DiagSeverity.DS_ERROR,
     DiagSeverity.DS_ERROR,
-    DiagSeverity.DS_ERROR,
-    DiagSeverity.DS_ERROR,
-    DiagSeverity.DS_ERROR,
-    DiagSeverity.DS_ERROR,
-    DiagSeverity.DS_ERROR,
-    DiagSeverity.DS_ERROR,
     DiagSeverity.DS_WARNING,
     DiagSeverity.DS_ERROR,
     DiagSeverity.DS_WARNING,
@@ -3687,8 +3665,6 @@ public let rDiagSeveritys: Array<DiagSeverity> = [
     DiagSeverity.DS_ERROR,
     DiagSeverity.DS_WARNING,
     DiagSeverity.DS_WARNING,
-    DiagSeverity.DS_ERROR,
-    DiagSeverity.DS_ERROR,
     DiagSeverity.DS_ERROR,
     DiagSeverity.DS_ERROR,
     DiagSeverity.DS_ERROR,
@@ -4368,12 +4344,6 @@ public let rWarnGroups: Array<WarnGroup> = [
     WarnGroup.NONE,
     WarnGroup.NONE,
     WarnGroup.NONE,
-    WarnGroup.NONE,
-    WarnGroup.NONE,
-    WarnGroup.NONE,
-    WarnGroup.NONE,
-    WarnGroup.NONE,
-    WarnGroup.NONE,
     WarnGroup.UNUSED,
     WarnGroup.NONE,
     WarnGroup.DEPRECATED,
@@ -4429,8 +4399,6 @@ public let rWarnGroups: Array<WarnGroup> = [
     WarnGroup.NONE,
     WarnGroup.UNGROUPED,
     WarnGroup.UNGROUPED,
-    WarnGroup.NONE,
-    WarnGroup.NONE,
     WarnGroup.NONE,
     WarnGroup.NONE,
     WarnGroup.NONE,
@@ -5096,12 +5064,6 @@ public let RE_DIAG_KIND_STR: Array<String> = [
     "sema_cannot_use_annotation_jffi",
     "sema_shadow_cannot_in_type_args",
     "sema_unsupported_type_argument_in_java_interop",
-    "sema_cjmapping_struct_generic_not_supported",
-    "sema_cjmapping_struct_inheritance_interface_not_supported",
-    "sema_cjmapping_decl_not_supported",
-    "sema_cjmapping_method_arg_not_supported",
-    "sema_cjmapping_method_ret_unsupported",
-    "sema_cj_mapping_generic_method_not_get_instance_config",
     "sema_varray_size_match",
     "sema_varray_args_number_mismatch",
     "sema_varray_subscript_num",
@@ -5210,8 +5172,6 @@ public let RE_DIAG_KIND_STR: Array<String> = [
     "sema_objc_func_call_property_can_only_be_called",
     "sema_objc_impl_must_have_objc_mirror_super_class",
     "sema_objc_setter_name_on_immutable_prop",
-    "sema_objc_cjmapping_inheritance_interface_not_supported",
-    "sema_objc_cjmapping_generic_not_supported",
     "sema_foreign_name_appeared_in_child",
     "sema_foreign_name_conflicting_annotation",
     "sema_foreign_name_conflicting_derived_annotation",
@@ -5238,7 +5198,7 @@ public let RE_DIAG_KIND_STR: Array<String> = [
     "sema_diag_end",
     "conditional_compilation_unexpected_cfg_name",
 ]
-public let RE_DIAG_KIND_STR_SIZE: Int64 = 739
+public let RE_DIAG_KIND_STR_SIZE: Int64 = 731
 
 public func DiagKindIndex(kind: DiagKind): Int64 {
     return match (kind) {
@@ -6133,147 +6093,139 @@ public func DiagKindRefactorIndex(kind: DiagKindRefactor): Int64 {
         case DiagKindRefactor.sema_cannot_use_annotation_jffi => 595
         case DiagKindRefactor.sema_shadow_cannot_in_type_args => 596
         case DiagKindRefactor.sema_unsupported_type_argument_in_java_interop => 597
-        case DiagKindRefactor.sema_cjmapping_struct_generic_not_supported => 598
-        case DiagKindRefactor.sema_cjmapping_struct_inheritance_interface_not_supported => 599
-        case DiagKindRefactor.sema_cjmapping_decl_not_supported => 600
-        case DiagKindRefactor.sema_cjmapping_method_arg_not_supported => 601
-        case DiagKindRefactor.sema_cjmapping_method_ret_unsupported => 602
-        case DiagKindRefactor.sema_cj_mapping_generic_method_not_get_instance_config => 603
-        case DiagKindRefactor.sema_varray_size_match => 604
-        case DiagKindRefactor.sema_varray_args_number_mismatch => 605
-        case DiagKindRefactor.sema_varray_subscript_num => 606
-        case DiagKindRefactor.sema_varray_in_cfunc => 607
-        case DiagKindRefactor.sema_varray_arg_type_with_reftype => 608
-        case DiagKindRefactor.sema_only_cfunc_can_use_annotation => 609
-        case DiagKindRefactor.sema_annotation_calling_conv_not_support => 610
-        case DiagKindRefactor.sema_annotation_invalid_args_type => 611
-        case DiagKindRefactor.sema_illegal_scope_use_of_annotation => 612
-        case DiagKindRefactor.sema_invalid_cfunc_return_type => 613
-        case DiagKindRefactor.sema_mock_disabled => 614
-        case DiagKindRefactor.sema_mock_not_in_test_mode => 615
-        case DiagKindRefactor.sema_mock_unsupported_type => 616
-        case DiagKindRefactor.sema_mock_wrong_static_decl => 617
-        case DiagKindRefactor.sema_mock_doesnt_support_mocking => 618
-        case DiagKindRefactor.sema_mock_frozen_unsupported => 619
-        case DiagKindRefactor.sema_mock_frozen_required => 620
-        case DiagKindRefactor.sema_command_handle_type_error => 621
-        case DiagKindRefactor.sema_resumption_handle_type_error => 622
-        case DiagKindRefactor.sema_resumption_incorrect_return_type => 623
-        case DiagKindRefactor.sema_command_resumption_mismatch => 624
-        case DiagKindRefactor.sema_implicit_resume_outside_handler => 625
-        case DiagKindRefactor.sema_resume_no_with => 626
-        case DiagKindRefactor.sema_resume_wrong_resumption_type => 627
-        case DiagKindRefactor.sema_mismatching_handle_block => 628
-        case DiagKindRefactor.sema_return_in_try_handle_block => 629
-        case DiagKindRefactor.sema_try_handle_capture_var => 630
-        case DiagKindRefactor.sema_command_incompatible_type => 631
-        case DiagKindRefactor.sema_resume_throwing_mismatch_type => 632
-        case DiagKindRefactor.sema_useless_command_type => 633
-        case DiagKindRefactor.sema_deprecated_error => 634
-        case DiagKindRefactor.sema_deprecated_warning => 635
-        case DiagKindRefactor.sema_deprecation_weakening => 636
-        case DiagKindRefactor.sema_deprecation_override_error => 637
-        case DiagKindRefactor.sema_deprecation_override_warning => 638
-        case DiagKindRefactor.sema_deprecation_redef_error => 639
-        case DiagKindRefactor.sema_deprecation_redef_warning => 640
-        case DiagKindRefactor.sema_common_open_class_no_init => 641
-        case DiagKindRefactor.sema_multiple_common_implementations => 642
-        case DiagKindRefactor.sema_common_direct_extension_has_duplicate_private_members => 643
-        case DiagKindRefactor.sema_common_direct_extension_has_common_private_members => 644
-        case DiagKindRefactor.sema_not_matched => 645
-        case DiagKindRefactor.sema_specific_var_not_match_let => 646
-        case DiagKindRefactor.sema_specific_init_common_primary_constructor => 647
-        case DiagKindRefactor.specific_has_different_kind => 648
-        case DiagKindRefactor.sema_specific_primary_unmatched_var_decl => 649
-        case DiagKindRefactor.common_non_exaustive_platfrom_exaustive_mismatch => 650
-        case DiagKindRefactor.sema_specific_has_different_type => 651
-        case DiagKindRefactor.sema_specific_member_must_have_implementation => 652
-        case DiagKindRefactor.sema_specific_has_different_modifier => 653
-        case DiagKindRefactor.sema_specific_has_different_annotation => 654
-        case DiagKindRefactor.sema_specific_has_deprecated_annotation => 655
-        case DiagKindRefactor.sema_cjmp_parameter_default_value_both_sides => 656
-        case DiagKindRefactor.sema_specific_has_different_parameter => 657
-        case DiagKindRefactor.sema_specific_has_different_super_type => 658
-        case DiagKindRefactor.sema_specific_has_duplicate_extensions => 659
-        case DiagKindRefactor.sema_common_package_has_main => 660
-        case DiagKindRefactor.sema_common_static_let_cant_be_initialized_in_static_init => 661
-        case DiagKindRefactor.sema_common_assign_to_common_immutable_in_ctor => 662
-        case DiagKindRefactor.sema_cjmp_abstract_class_member_has_no_explicit_modifier => 663
-        case DiagKindRefactor.sema_explicitly_abstract_can_not_have_body => 664
-        case DiagKindRefactor.sema_explicitly_abstract_only_for_cjmp_abstract_class => 665
-        case DiagKindRefactor.sema_open_abstract_specific_can_not_replace_open_common => 666
-        case DiagKindRefactor.sema_cjmp_non_specific_abstract_member_in_specific_class => 667
-        case DiagKindRefactor.sema_common_generic_frozen_not_supported => 668
-        case DiagKindRefactor.sema_common_generic_rename_not_supported => 669
-        case DiagKindRefactor.sema_common_specific_annotation_not_allowed => 670
-        case DiagKindRefactor.sema_java_mirror_ctor_arg_must_be_java_mirror => 671
-        case DiagKindRefactor.sema_java_mirror_method_arg_must_be_java_mirror => 672
-        case DiagKindRefactor.sema_java_mirror_method_ret_unsupported => 673
-        case DiagKindRefactor.sema_java_mirror_prop_must_be_java_mirror => 674
-        case DiagKindRefactor.sema_java_mirror_subtype_must_be_annotated => 675
-        case DiagKindRefactor.sema_java_mirror_cannot_inherit_pure_cangjie_type => 676
-        case DiagKindRefactor.sema_java_impl_cannot_inherit_pure_cangjie_type => 677
-        case DiagKindRefactor.sema_java_mirror_subtype_anno_must_inherit_mirror => 678
-        case DiagKindRefactor.sema_java_mirror_cannot_be_extended_with_interface => 679
-        case DiagKindRefactor.sema_java_impl_cannot_be_extended_with_interface => 680
-        case DiagKindRefactor.sema_java_impl_redefinition => 681
-        case DiagKindRefactor.sema_java_mirror_interoplib_must_be_imported => 682
-        case DiagKindRefactor.sema_java_interop_not_supported => 683
-        case DiagKindRefactor.sema_extend_ref_target_cannot_be_java_impl => 684
-        case DiagKindRefactor.sema_generic_parameter_of_java_type => 685
-        case DiagKindRefactor.sema_java_interoplib_version_too_old => 686
-        case DiagKindRefactor.sema_java_interoplib_version_mismatch => 687
-        case DiagKindRefactor.sema_java_has_default_annotation_args => 688
-        case DiagKindRefactor.sema_java_has_default_annotation_is_in_wrong_place => 689
-        case DiagKindRefactor.sema_java_has_default_conflict_with_static => 690
-        case DiagKindRefactor.sema_objc_interop_ctor_param_must_be_objc_compatible => 691
-        case DiagKindRefactor.sema_objc_interop_method_param_must_be_objc_compatible => 692
-        case DiagKindRefactor.sema_objc_interop_method_ret_must_be_objc_compatible => 693
-        case DiagKindRefactor.sema_objc_interop_prop_must_be_objc_compatible => 694
-        case DiagKindRefactor.sema_objc_interop_field_must_be_objc_compatible => 695
-        case DiagKindRefactor.sema_objc_mirror_decl_cannot_inherit => 696
-        case DiagKindRefactor.sema_objc_mirror_subtype_cannot_multiple_inherit => 697
-        case DiagKindRefactor.sema_objc_mirror_subtype_must_be_annotated => 698
-        case DiagKindRefactor.sema_objc_mirror_subtype_must_inherit_mirror => 699
-        case DiagKindRefactor.sema_objc_mirror_must_inherit_mirror => 700
-        case DiagKindRefactor.sema_objc_mirror_interoplib_must_be_imported => 701
-        case DiagKindRefactor.sema_objc_interop_not_supported => 702
-        case DiagKindRefactor.sema_objc_pointer_argument_must_be_objc_compatible => 703
-        case DiagKindRefactor.sema_objc_interop_toplevel_param_must_be_objc_compatible => 704
-        case DiagKindRefactor.sema_objc_interop_toplevel_ret_must_be_objc_compatible => 705
-        case DiagKindRefactor.sema_objc_method_must_have_foreign_name => 706
-        case DiagKindRefactor.sema_objc_ctor_must_have_foreign_name => 707
-        case DiagKindRefactor.sema_objc_func_argument_must_be_objc_compatible => 708
-        case DiagKindRefactor.sema_objc_func_call_property_can_only_be_called => 709
-        case DiagKindRefactor.sema_objc_impl_must_have_objc_mirror_super_class => 710
-        case DiagKindRefactor.sema_objc_setter_name_on_immutable_prop => 711
-        case DiagKindRefactor.sema_objc_cjmapping_inheritance_interface_not_supported => 712
-        case DiagKindRefactor.sema_objc_cjmapping_generic_not_supported => 713
-        case DiagKindRefactor.sema_foreign_name_appeared_in_child => 714
-        case DiagKindRefactor.sema_foreign_name_conflicting_annotation => 715
-        case DiagKindRefactor.sema_foreign_name_conflicting_derived_annotation => 716
-        case DiagKindRefactor.sema_ifavailable_arg_no_name => 717
-        case DiagKindRefactor.sema_ifavailable_arg_not_literal => 718
-        case DiagKindRefactor.sema_ifavailable_unknow_arg_name => 719
-        case DiagKindRefactor.sema_apilevel_multi_anno => 720
-        case DiagKindRefactor.sema_apilevel_missing_arg => 721
-        case DiagKindRefactor.sema_apilevel_invalid_version_format => 722
-        case DiagKindRefactor.sema_only_literal_support => 723
-        case DiagKindRefactor.sema_apilevel_ref_higher => 724
-        case DiagKindRefactor.sema_apilevel_syscap_warning => 725
-        case DiagKindRefactor.sema_apilevel_syscap_error => 726
-        case DiagKindRefactor.sema_apilevel_multi_diff_syscap => 727
-        case DiagKindRefactor.sema_apilevel_integer_form_unsupported => 728
-        case DiagKindRefactor.sema_ifavailable_level_limit => 729
-        case DiagKindRefactor.sema_hide_multi_annotation => 730
-        case DiagKindRefactor.sema_hide_at_func_param => 731
-        case DiagKindRefactor.sema_hide_missing_hide => 732
-        case DiagKindRefactor.sema_hide_compile_time_invisible => 733
-        case DiagKindRefactor.sema_hide_diff_param => 734
-        case DiagKindRefactor.sema_hide_must_at_end => 735
-        case DiagKindRefactor.sema_unused_import => 736
-        case DiagKindRefactor.sema_diag_end => 737
-        case DiagKindRefactor.conditional_compilation_unexpected_cfg_name => 738
+        case DiagKindRefactor.sema_varray_size_match => 598
+        case DiagKindRefactor.sema_varray_args_number_mismatch => 599
+        case DiagKindRefactor.sema_varray_subscript_num => 600
+        case DiagKindRefactor.sema_varray_in_cfunc => 601
+        case DiagKindRefactor.sema_varray_arg_type_with_reftype => 602
+        case DiagKindRefactor.sema_only_cfunc_can_use_annotation => 603
+        case DiagKindRefactor.sema_annotation_calling_conv_not_support => 604
+        case DiagKindRefactor.sema_annotation_invalid_args_type => 605
+        case DiagKindRefactor.sema_illegal_scope_use_of_annotation => 606
+        case DiagKindRefactor.sema_invalid_cfunc_return_type => 607
+        case DiagKindRefactor.sema_mock_disabled => 608
+        case DiagKindRefactor.sema_mock_not_in_test_mode => 609
+        case DiagKindRefactor.sema_mock_unsupported_type => 610
+        case DiagKindRefactor.sema_mock_wrong_static_decl => 611
+        case DiagKindRefactor.sema_mock_doesnt_support_mocking => 612
+        case DiagKindRefactor.sema_mock_frozen_unsupported => 613
+        case DiagKindRefactor.sema_mock_frozen_required => 614
+        case DiagKindRefactor.sema_command_handle_type_error => 615
+        case DiagKindRefactor.sema_resumption_handle_type_error => 616
+        case DiagKindRefactor.sema_resumption_incorrect_return_type => 617
+        case DiagKindRefactor.sema_command_resumption_mismatch => 618
+        case DiagKindRefactor.sema_implicit_resume_outside_handler => 619
+        case DiagKindRefactor.sema_resume_no_with => 620
+        case DiagKindRefactor.sema_resume_wrong_resumption_type => 621
+        case DiagKindRefactor.sema_mismatching_handle_block => 622
+        case DiagKindRefactor.sema_return_in_try_handle_block => 623
+        case DiagKindRefactor.sema_try_handle_capture_var => 624
+        case DiagKindRefactor.sema_command_incompatible_type => 625
+        case DiagKindRefactor.sema_resume_throwing_mismatch_type => 626
+        case DiagKindRefactor.sema_useless_command_type => 627
+        case DiagKindRefactor.sema_deprecated_error => 628
+        case DiagKindRefactor.sema_deprecated_warning => 629
+        case DiagKindRefactor.sema_deprecation_weakening => 630
+        case DiagKindRefactor.sema_deprecation_override_error => 631
+        case DiagKindRefactor.sema_deprecation_override_warning => 632
+        case DiagKindRefactor.sema_deprecation_redef_error => 633
+        case DiagKindRefactor.sema_deprecation_redef_warning => 634
+        case DiagKindRefactor.sema_common_open_class_no_init => 635
+        case DiagKindRefactor.sema_multiple_common_implementations => 636
+        case DiagKindRefactor.sema_common_direct_extension_has_duplicate_private_members => 637
+        case DiagKindRefactor.sema_common_direct_extension_has_common_private_members => 638
+        case DiagKindRefactor.sema_not_matched => 639
+        case DiagKindRefactor.sema_specific_var_not_match_let => 640
+        case DiagKindRefactor.sema_specific_init_common_primary_constructor => 641
+        case DiagKindRefactor.specific_has_different_kind => 642
+        case DiagKindRefactor.sema_specific_primary_unmatched_var_decl => 643
+        case DiagKindRefactor.common_non_exaustive_platfrom_exaustive_mismatch => 644
+        case DiagKindRefactor.sema_specific_has_different_type => 645
+        case DiagKindRefactor.sema_specific_member_must_have_implementation => 646
+        case DiagKindRefactor.sema_specific_has_different_modifier => 647
+        case DiagKindRefactor.sema_specific_has_different_annotation => 648
+        case DiagKindRefactor.sema_specific_has_deprecated_annotation => 649
+        case DiagKindRefactor.sema_cjmp_parameter_default_value_both_sides => 650
+        case DiagKindRefactor.sema_specific_has_different_parameter => 651
+        case DiagKindRefactor.sema_specific_has_different_super_type => 652
+        case DiagKindRefactor.sema_specific_has_duplicate_extensions => 653
+        case DiagKindRefactor.sema_common_package_has_main => 654
+        case DiagKindRefactor.sema_common_static_let_cant_be_initialized_in_static_init => 655
+        case DiagKindRefactor.sema_common_assign_to_common_immutable_in_ctor => 656
+        case DiagKindRefactor.sema_cjmp_abstract_class_member_has_no_explicit_modifier => 657
+        case DiagKindRefactor.sema_explicitly_abstract_can_not_have_body => 658
+        case DiagKindRefactor.sema_explicitly_abstract_only_for_cjmp_abstract_class => 659
+        case DiagKindRefactor.sema_open_abstract_specific_can_not_replace_open_common => 660
+        case DiagKindRefactor.sema_cjmp_non_specific_abstract_member_in_specific_class => 661
+        case DiagKindRefactor.sema_common_generic_frozen_not_supported => 662
+        case DiagKindRefactor.sema_common_generic_rename_not_supported => 663
+        case DiagKindRefactor.sema_common_specific_annotation_not_allowed => 664
+        case DiagKindRefactor.sema_java_mirror_ctor_arg_must_be_java_mirror => 665
+        case DiagKindRefactor.sema_java_mirror_method_arg_must_be_java_mirror => 666
+        case DiagKindRefactor.sema_java_mirror_method_ret_unsupported => 667
+        case DiagKindRefactor.sema_java_mirror_prop_must_be_java_mirror => 668
+        case DiagKindRefactor.sema_java_mirror_subtype_must_be_annotated => 669
+        case DiagKindRefactor.sema_java_mirror_cannot_inherit_pure_cangjie_type => 670
+        case DiagKindRefactor.sema_java_impl_cannot_inherit_pure_cangjie_type => 671
+        case DiagKindRefactor.sema_java_mirror_subtype_anno_must_inherit_mirror => 672
+        case DiagKindRefactor.sema_java_mirror_cannot_be_extended_with_interface => 673
+        case DiagKindRefactor.sema_java_impl_cannot_be_extended_with_interface => 674
+        case DiagKindRefactor.sema_java_impl_redefinition => 675
+        case DiagKindRefactor.sema_java_mirror_interoplib_must_be_imported => 676
+        case DiagKindRefactor.sema_java_interop_not_supported => 677
+        case DiagKindRefactor.sema_extend_ref_target_cannot_be_java_impl => 678
+        case DiagKindRefactor.sema_generic_parameter_of_java_type => 679
+        case DiagKindRefactor.sema_java_interoplib_version_too_old => 680
+        case DiagKindRefactor.sema_java_interoplib_version_mismatch => 681
+        case DiagKindRefactor.sema_java_has_default_annotation_args => 682
+        case DiagKindRefactor.sema_java_has_default_annotation_is_in_wrong_place => 683
+        case DiagKindRefactor.sema_java_has_default_conflict_with_static => 684
+        case DiagKindRefactor.sema_objc_interop_ctor_param_must_be_objc_compatible => 685
+        case DiagKindRefactor.sema_objc_interop_method_param_must_be_objc_compatible => 686
+        case DiagKindRefactor.sema_objc_interop_method_ret_must_be_objc_compatible => 687
+        case DiagKindRefactor.sema_objc_interop_prop_must_be_objc_compatible => 688
+        case DiagKindRefactor.sema_objc_interop_field_must_be_objc_compatible => 689
+        case DiagKindRefactor.sema_objc_mirror_decl_cannot_inherit => 690
+        case DiagKindRefactor.sema_objc_mirror_subtype_cannot_multiple_inherit => 691
+        case DiagKindRefactor.sema_objc_mirror_subtype_must_be_annotated => 692
+        case DiagKindRefactor.sema_objc_mirror_subtype_must_inherit_mirror => 693
+        case DiagKindRefactor.sema_objc_mirror_must_inherit_mirror => 694
+        case DiagKindRefactor.sema_objc_mirror_interoplib_must_be_imported => 695
+        case DiagKindRefactor.sema_objc_interop_not_supported => 696
+        case DiagKindRefactor.sema_objc_pointer_argument_must_be_objc_compatible => 697
+        case DiagKindRefactor.sema_objc_interop_toplevel_param_must_be_objc_compatible => 698
+        case DiagKindRefactor.sema_objc_interop_toplevel_ret_must_be_objc_compatible => 699
+        case DiagKindRefactor.sema_objc_method_must_have_foreign_name => 700
+        case DiagKindRefactor.sema_objc_ctor_must_have_foreign_name => 701
+        case DiagKindRefactor.sema_objc_func_argument_must_be_objc_compatible => 702
+        case DiagKindRefactor.sema_objc_func_call_property_can_only_be_called => 703
+        case DiagKindRefactor.sema_objc_impl_must_have_objc_mirror_super_class => 704
+        case DiagKindRefactor.sema_objc_setter_name_on_immutable_prop => 705
+        case DiagKindRefactor.sema_foreign_name_appeared_in_child => 706
+        case DiagKindRefactor.sema_foreign_name_conflicting_annotation => 707
+        case DiagKindRefactor.sema_foreign_name_conflicting_derived_annotation => 708
+        case DiagKindRefactor.sema_ifavailable_arg_no_name => 709
+        case DiagKindRefactor.sema_ifavailable_arg_not_literal => 710
+        case DiagKindRefactor.sema_ifavailable_unknow_arg_name => 711
+        case DiagKindRefactor.sema_apilevel_multi_anno => 712
+        case DiagKindRefactor.sema_apilevel_missing_arg => 713
+        case DiagKindRefactor.sema_apilevel_invalid_version_format => 714
+        case DiagKindRefactor.sema_only_literal_support => 715
+        case DiagKindRefactor.sema_apilevel_ref_higher => 716
+        case DiagKindRefactor.sema_apilevel_syscap_warning => 717
+        case DiagKindRefactor.sema_apilevel_syscap_error => 718
+        case DiagKindRefactor.sema_apilevel_multi_diff_syscap => 719
+        case DiagKindRefactor.sema_apilevel_integer_form_unsupported => 720
+        case DiagKindRefactor.sema_ifavailable_level_limit => 721
+        case DiagKindRefactor.sema_hide_multi_annotation => 722
+        case DiagKindRefactor.sema_hide_at_func_param => 723
+        case DiagKindRefactor.sema_hide_missing_hide => 724
+        case DiagKindRefactor.sema_hide_compile_time_invisible => 725
+        case DiagKindRefactor.sema_hide_diff_param => 726
+        case DiagKindRefactor.sema_hide_must_at_end => 727
+        case DiagKindRefactor.sema_unused_import => 728
+        case DiagKindRefactor.sema_diag_end => 729
+        case DiagKindRefactor.conditional_compilation_unexpected_cfg_name => 730
     }
 }
 

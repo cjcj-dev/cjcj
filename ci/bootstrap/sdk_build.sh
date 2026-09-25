@@ -631,8 +631,10 @@ in_sdk_env() {                    # in_sdk_env <命令...>：⭐ 在 SDK 环境�
 }
 verify_exe() {                    # verify_exe <路径> <是否跑 --version>
   local f="$1" runver="$2"
-  [ -f "$f" ] || return 0
-  case "$(file -b "$f")" in *ELF*) ;; *) die "$f 不是 ELF";; esac
+  if [ ! -e "$f" ] && [ ! -L "$f" ]; then
+    return 0
+  fi
+  case "$(file -bL "$f")" in *ELF*) ;; *) die "$f 不是 ELF";; esac
   local nf
   nf=$(in_sdk_env ldd "$f" 2>&1 | grep -c 'not found' || true)
   if [ "$nf" != 0 ]; then

@@ -170,7 +170,7 @@ public class MergeBlocks {
             return false
         }
         if (let Some(term) <- block.GetTerminator()) {
-            if (term.GetExprKind() != ExprKind.GOTO || term.GetSuccessorsRef().size != 1) {
+            if (term.GetExprKind() != ExprKind.GOTO || term.GetSuccessors().size != 1) {
                 return false
             }
             for (pred in block.GetPredecessorsRef()) {
