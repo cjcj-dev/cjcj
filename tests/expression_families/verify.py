@@ -38,7 +38,7 @@ class SerializedPackage:
         offset = self.pointer(table, slot)
         return self.data[offset + 4:offset + 4 + self.number('I', offset)].decode() if offset else ''
 
-    def cast_tags(self, package_name, function_name):
+    def cast_tags(self, package_name, function_name, include_box=False):
         root = self.number('I', 0)
         kinds, expressions = self.pointer(root, 18), self.pointer(root, 20)
         assert kinds and expressions, 'serializer produced no expression vectors'
@@ -75,14 +75,15 @@ class SerializedPackage:
             owned_expressions += 1
             kind_field = self.field(base, 6)
             kind = self.number('B', kind_field) if kind_field else 0
-            if kind in (44, 48):
+            if kind in (44, 48) or (include_box and kind == 45):
                 tags.append({'index': index, 'union': union, 'kind': kind})
         return tags, owned_expressions
 
 
 def run_case(compiler, fixture, output, jobs):
     output.mkdir(parents=True, exist_ok=True)
-    command = [str(compiler), str(fixture), '--emit-chir=raw', '--output-type=staticlib',
+    phase = 'opt' if fixture.stem == 'closure_cast' else 'raw'
+    command = [str(compiler), str(fixture), '--emit-chir=' + phase, '--output-type=staticlib',
                '--dump-chir', '--jobs', str(jobs), '-o', str(output / 'output.chir')]
     before = subprocess.check_output(['uptime'], text=True).strip()
     start = time.monotonic()
@@ -96,10 +97,10 @@ def run_case(compiler, fixture, output, jobs):
     serialized = [p for p in output.glob('*.chir') if p.read_bytes()[:4] != b'ToCH']
     assert len(serialized) == 1, serialized
     data = serialized[0].read_bytes()
-    target_function = {'class_cast': 'upcast', 'numeric_cast': 'widen', 'control': 'identity'}[fixture.stem]
-    tags, owned_expressions = SerializedPackage(data).cast_tags('expression_' + fixture.stem, target_function)
+    target_function = {'class_cast': 'upcast', 'numeric_cast': 'widen', 'control': 'identity', 'closure_cast': 'sortValues'}[fixture.stem]
+    tags, owned_expressions = SerializedPackage(data).cast_tags('expression_' + fixture.stem, target_function, include_box=fixture.stem == 'closure_cast')
     assert owned_expressions > 0, f'no product expressions observed in {target_function}'
-    expected = {'class_cast': (1, 44), 'numeric_cast': (18, 48), 'control': None}[fixture.stem]
+    expected = {'class_cast': (1, 44), 'numeric_cast': (18, 48), 'control': None, 'closure_cast': (1, 44)}[fixture.stem]
     actual = [(tag['union'], tag['kind']) for tag in tags]
     result.update(artifact=str(serialized[0]), sha256=hashlib.sha256(data).hexdigest(), tags=tags,
                   assertion_executed=True, expected=expected, owned_expressions=owned_expressions,
@@ -114,9 +115,11 @@ def main():
     parser.add_argument('--compiler', type=Path, required=True)
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--jobs', type=int, default=os.cpu_count())
+    parser.add_argument('--closure-only', action='store_true', help='check generic closure conversion after optimization')
     args = parser.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
-    fixtures = [Path(__file__).with_name(name + '.cj') for name in ('class_cast', 'numeric_cast', 'control')]
+    names = ('closure_cast',) if args.closure_only else ('class_cast', 'numeric_cast', 'control')
+    fixtures = [Path(__file__).with_name(name + '.cj') for name in names]
     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
         futures = {p.stem: pool.submit(run_case, args.compiler, p, args.out / p.stem, args.jobs) for p in fixtures}
         cases = {name: future.result() for name, future in futures.items()}

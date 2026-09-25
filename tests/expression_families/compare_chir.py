@@ -104,6 +104,7 @@ def main():
     p.add_argument('--jobs', type=int, default=os.cpu_count())
     p.add_argument('--fixture-only', action='store_true')
     p.add_argument('--workers', type=int, default=8, help='independent compiler processes')
+    p.add_argument('--indices', help='comma separated original input indices; other results remain recorded')
     p.add_argument('--baseline-results', type=Path, help='reuse successful immutable baseline outputs with matching compiler SHA')
     args = p.parse_args()
     imports = [args.imports_root] + sorted(args.imports_root.glob('*@cjcj'))
@@ -117,7 +118,12 @@ def main():
                 'affinity': sorted(os.sched_getaffinity(0)), 'jobs_per_serialization': args.jobs,
                 'parallel_compilers': args.workers, 'library_sources': list(map(str, sources)), 'cases': []}
     cases = [{'source': str(source)} for source in fixtures + sources]
+    if (args.out / 'result.json').exists():
+        saved = json.loads((args.out / 'result.json').read_text())
+        assert saved['compilers'] == manifest['compilers'], 'resume compiler identity mismatch'
+        cases = saved['cases']
     manifest['cases'] = cases
+    selected = set(map(int, args.indices.split(','))) if args.indices else set(range(len(cases)))
     prior = None
     if args.baseline_results:
         prior = json.loads((args.baseline_results / 'result.json').read_text())
@@ -127,6 +133,8 @@ def main():
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as pool:
         pending = {}
         for index, source in enumerate(fixtures + sources):
+            if index not in selected:
+                continue
             for name, exe in [('baseline', args.baseline), ('candidate', args.candidate)]:
                 if name == 'baseline' and prior:
                     previous = prior['cases'][index]
@@ -153,7 +161,7 @@ def main():
                     and case['baseline'].get('canonical_sha256') == case['candidate'].get('canonical_sha256'))
                 print(f"CHIR_BYTES {case['source']} same={case['same_normalized_bytes']} rc={case['baseline']['rc']}/{case['candidate']['rc']}", flush=True)
             (args.out / 'result.json').write_text(json.dumps(manifest, indent=2) + '\n')
-    return 0 if all(case['same_normalized_bytes'] for case in manifest['cases']) else 1
+    return 0 if all(case.get('same_normalized_bytes', False) for case in manifest['cases']) else 1
 
 
 if __name__ == '__main__':

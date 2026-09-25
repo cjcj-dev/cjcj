@@ -14,12 +14,12 @@ def sha(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def compile_case(exe, source, output, imports, jobs):
+def compile_case(exe, source, output, imports, jobs, optimization):
     output.mkdir(parents=True, exist_ok=True)
     (output / "temps").mkdir(exist_ok=True)
     command = [str(exe)]
     command += ['-p', str(source)] if source.is_dir() else [str(source)]
-    command += ['--experimental', '--output-type=obj', '--compile-target', 'staticlib', '-O2', '--jobs', str(jobs), '--dump-ir',
+    command += ['--experimental', '--output-type=obj', '--compile-target', 'staticlib', '-' + optimization, '--jobs', str(jobs), '--dump-ir',
                 '--trimpath', str(output), '--save-temps', str(output / 'temps'),
                 '-o', str(output / 'output.o')]
     for directory in imports:
@@ -52,6 +52,7 @@ def main():
     p.add_argument('--jobs', type=int, default=os.cpu_count())
     p.add_argument('--workers', type=int, default=2)
     p.add_argument('--fixture-only', action='store_true')
+    p.add_argument('--optimization', choices=('O0', 'O2'), default='O0')
     args = p.parse_args()
     imports = [args.imports_root] + sorted(args.imports_root.glob('*@cjcj'))
     sources = [] if args.fixture_only else [root / 'src' for root in sorted((args.source_root / 'packages').iterdir())
@@ -62,13 +63,13 @@ def main():
     manifest = {'compilers': {name: {'path': str(exe), 'sha256': sha(exe)} for name, exe in
                              [('baseline', args.baseline), ('candidate', args.candidate)]},
                 'affinity': sorted(os.sched_getaffinity(0)), 'jobs': args.jobs,
-                'parallel_compilers': args.workers, 'cases': cases}
+                'parallel_compilers': args.workers, 'optimization': args.optimization, 'cases': cases}
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as pool:
         pending = {}
         for index, source in enumerate(fixtures + sources):
             for name, exe in [('baseline', args.baseline), ('candidate', args.candidate)]:
                 pending[pool.submit(compile_case, exe, source, args.out / str(index) / name,
-                                    imports, args.jobs)] = (index, name)
+                                    imports, args.jobs, args.optimization)] = (index, name)
         for future in concurrent.futures.as_completed(pending):
             index, name = pending[future]
             case = cases[index]
