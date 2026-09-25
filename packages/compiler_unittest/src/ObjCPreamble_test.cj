@@ -6,7 +6,7 @@ import std.unittest.*
 import std.unittest.testmacro.*
 import cjcj::frontend.*
 import cjcj::driver.HostTripleInfo
-import cjcj::option.{OutputMode, InteropLanguage}
+import cjcj::option.OutputMode
 import cjcj::utils.{FileUtil, GenerateRandomHexString}
 
 // Compile source through the public frontend, then read the files it emitted.
@@ -16,7 +16,7 @@ private let EXPECTED_OBJC_PREAMBLE = "/*\n" +
     " * Do NOT modify it manually.\n" +
     " */\n"
 
-private func CompilePreambleFixture(code: String, mapping: Bool): String {
+private func CompilePreambleFixture(code: String): String {
     let dir = getVariable("TMPDIR").getOrThrow() + "/objc-preamble-" + GenerateRandomHexString()
     let _ = FileUtil.CreateDirs(dir + "/generated/")
     let path = dir + "/input.cj"
@@ -34,8 +34,6 @@ private func CompilePreambleFixture(code: String, mapping: Bool): String {
     opts.output = dir + "/fixture.a"
     opts.outputObjCGenDir = dir + "/generated"
     opts.disableCodeGen = true
-    opts.enableInteropCJMapping = mapping
-    opts.targetInteropLanguage = InteropLanguage.ObjC
     opts.SetCompilationCachedPath()
     opts.UpdateCachedDirName("preamble")
     let instance = CompilerInstance(invocation, DiagnosticEngine())
@@ -46,7 +44,7 @@ private func CompilePreambleFixture(code: String, mapping: Bool): String {
     } catch (ex: Exception) {
         println("OBJC_PREAMBLE_FRONTEND_EXCEPTION ${ex}")
     }
-    println("OBJC_PREAMBLE_COMPILE mapping=${mapping} ok=${ok} dir=${dir}")
+    println("OBJC_PREAMBLE_COMPILE ok=${ok} dir=${dir}")
     // Keep compilation success mandatory, but also reach the file assertion if
     // a later frontend step fails after writing the header (regression #273).
     @Expect(ok)
@@ -69,7 +67,7 @@ private func ExpectPreamble(dir: String, name: String): Unit {
 public class ObjCPreambleTest {
     @TestCase
     public func ordinaryFrontendControl(): Unit {
-        let _ = CompilePreambleFixture("package preamble_control\npublic func value(): Int64 { 7 }", false)
+        let _ = CompilePreambleFixture("package preamble_control\npublic func value(): Int64 { 7 }")
     }
 
     @TestCase
@@ -82,31 +80,9 @@ public class ObjCPreambleTest {
             public open class PreambleBase { public init() }
             @ObjCImpl
             public class PreambleImpl <: PreambleBase { public init() { super() } }
-            """, false)
+            """)
         ExpectPreamble(dir, "PreambleImpl.h")
         ExpectPreamble(dir, "PreambleImpl.m")
     }
 
-    @TestCase
-    public func mappingClassFiles(): Unit {
-        let dir = CompilePreambleFixture("""
-            package preamble_mapping
-            import objc.internal.*
-            import objc.lang.*
-            public class PreambleMapping { public init() {} }
-            """, true)
-        ExpectPreamble(dir, "PreambleMapping.h")
-        ExpectPreamble(dir, "PreambleMapping.m")
-    }
-
-    @TestCase
-    public func mappingProtocolHeader(): Unit {
-        let dir = CompilePreambleFixture("""
-            package preamble_protocol
-            import objc.internal.*
-            import objc.lang.*
-            public interface PreambleProtocol {}
-            """, true)
-        ExpectPreamble(dir, "PreambleProtocol.h")
-    }
 }

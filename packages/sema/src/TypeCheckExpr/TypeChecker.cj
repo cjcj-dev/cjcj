@@ -11,8 +11,6 @@ import cjcj::basic.DEFAULT_POSITION as BasicDefaultPosition
 import cjcj::basic.DiagnosticCache
 import cjcj::basic.Diagnostic
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
-import cjcj::basic.InteropCJPackageConfigReader
-import cjcj::basic.WriteError
 import cjcj::incremental_compilation.IncreKind
 import cjcj::option.GlobalOptions as OptionGlobalOptions
 import cjcj::option.OutputMode as OptionOutputMode
@@ -1264,20 +1262,8 @@ extend TypeChecker {
         try {
             let instance = impl.ci.getOrThrow()
             let options = instance.globalOptions
-            let packagesFullConfig = InteropCJPackageConfigReader()
-            if (options.enableInteropCJMapping && options.interopCJPackageConfigPath != "./" &&
-                !packagesFullConfig.Parse(options.interopCJPackageConfigPath)) {
-                WriteError("Failed to parse package config file\n")
-            }
-            if (options.enableInteropCJMapping && !packagesFullConfig.Validate()) {
-                WriteError("Package config validation failed\n")
-            }
             let manager = impl.importManager.getOrThrow()
             for (pkg in pkgs) {
-                if (options.enableInteropCJMapping && options.interopCJPackageConfigPath != "./") {
-                    pkg.isInteropCJPackageConfig = true
-                    ParsePackageConfigFile(impl, pkg, packagesFullConfig)
-                }
                 let ctx = instance.GetASTContextByPackage(Some(pkg)).getOrThrow()
                 PerformDesugarAfterTypeCheck(impl.typeManager, manager, instance.mangler,
                     impl.structMemberMap, pkg, context: Some(ctx), options: options,
@@ -4136,12 +4122,12 @@ extend TypeChecker {
                 impl.CheckRecursiveConstructorCall(body.decls)
             }
             if (classDecl.TestAnyAttr(
-                Attribute.JAVA_MIRROR, Attribute.JAVA_MIRROR_SUBTYPE, Attribute.JAVA_CJ_MAPPING)) {
+                Attribute.JAVA_MIRROR, Attribute.JAVA_MIRROR_SUBTYPE)) {
                 CheckJavaInteropLibImport(classDecl)
             }
             // C++ src/Sema/TypeCheckClassLike.cpp:136-138.
             if (classDecl.TestAnyAttr(
-                Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_IMPL, Attribute.OBJ_C_CJ_MAPPING)) {
+                Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_IMPL)) {
                 CheckObjCInteropLibImport(classDecl)
             }
             return tyOrInvalid(classDecl)
@@ -4152,14 +4138,6 @@ extend TypeChecker {
             if (let Some(body2) <- structDecl.body) {
                 TypeCheckCompositeBody(ctx, structDecl, body2.decls)
                 impl.CheckRecursiveConstructorCall(body2.decls)
-            }
-            if (structDecl.TestAnyAttr(Attribute.JAVA_CJ_MAPPING)) {
-                CheckJavaInteropLibImport(structDecl)
-                if (!structDecl.inheritedTypes.isEmpty()) {
-                    impl.diag.getOrThrow().DiagnoseRefactor(
-                        BasicDiagKindRefactor.sema_cjmapping_struct_inheritance_interface_not_supported,
-                        MakeRange(structDecl.identifier.Begin(), structDecl.identifier.End())).Emit()
-                }
             }
             return tyOrInvalid(structDecl)
         }
