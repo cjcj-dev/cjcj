@@ -26,3 +26,12 @@ consumer cut bypasses reuse of a cached empty-instance AnnoInfo. Both must fail
 `accessors_share_one_factory` for nonliteral inputs and preserve literal results;
 the restored compiler must recover the candidate result. Compile/load/exit
 failures do not count as this targeted failure.
+
+For a Cangjie stage1 host, use the bootstrap host/target split: the compiler
+process uses its official host runtime and std, while `CANGJIE_HOME` and the
+compiler-relative macro runtime point to the matching coloured target SDK.
+Validate the target std/runtime pair with `ci/bootstrap/std_runtime_colour.py`.
+An official-runtime-only host can reach the unrelated macro initialization
+failure tracked by cjcj#258; do not interpret that process failure as this test's
+expected red result. The qualified red result is compilation rc=0 followed by
+verifier rc=1 only for `accessors_share_one_factory`.
