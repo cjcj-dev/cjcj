@@ -45,7 +45,7 @@ def instructions(root):
             body = re.sub(r',? ![\w.]+ !\d+', '', m.group())
             body = re.sub(r'#(\d+)', lambda x: attributes[x.group(1)], body)
             body = re.sub(r'\s*;[^\n]*', '', body)
-            functions[name] = '\n'.join(line.rstrip() for line in body.splitlines())
+            functions[p.name + ':' + name] = '\n'.join(line.rstrip() for line in body.splitlines())
     return functions
 
 
