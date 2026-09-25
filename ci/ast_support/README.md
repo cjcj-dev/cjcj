@@ -1,7 +1,7 @@
 # Bootstrap AST archive pins
 
-`build-ast-support.yml` uses `ci/source_pin.env` and `ci/llvm_pin.env` to
-build upstream's `cangjie-ast-support` target, including its dependencies.
+`build-ast-support.yml` uses `ci/source_pin.env`, `ci/llvm_pin.env`, and
+`ci/ast_sdk_pin.env` to build upstream's `cangjie-ast-support` target, including its dependencies.
 It disables the C++ compiler target and enables position-independent code:
 stdlib links this archive into `libcangjie-std-ast.so`. Upstream sources and
 CMake files are not patched.
@@ -32,7 +32,8 @@ The alpha.06 input artifact also contains `include/cangjie`,
 `include/flatbuffers/StdAstFormat_generated.h`, and `schema/StdAstFormat.fbs`
 from the same compiler commit as the archive. The complete
 `third_party/flatbuffers/{bin,include,cangjie,modules}` tree is physically
-copied from official nightly `1.3.0-alpha.20260924001050`, preserving the
+copied from the official SDK named by `AST_FLATBUFFERS_SDK` in
+[`ci/ast_sdk_pin.env`](../ast_sdk_pin.env), preserving the
 matching Cangjie module and generator. `SHA256SUMS` covers all these files.
 `ci/install_std_sdk_inputs.py` installs them before bootstrap/final std builds.
 The compiler source authority is `https://gitcode.com/Cangjie/cangjie_compiler.git`;

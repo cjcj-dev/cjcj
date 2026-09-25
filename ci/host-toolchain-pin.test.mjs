@@ -14,6 +14,12 @@ import {
 const root = path.resolve(import.meta.dirname, '..');
 const pinPath = path.join(root, 'ci', 'host_sdk_pin.env');
 const cjpmPinPath = path.join(root, 'ci', 'cjpm_pin.env');
+const astSdkPinPath = path.join(root, 'ci', 'ast_sdk_pin.env');
+const h48LanguagePinPath = path.join(root, 'ci', 'h48_language_tuple_pin.json');
+const nightlyLiteral = /nightly-\d+\.\d+\.\d+-alpha\.\d+/;
+// Built in pieces so this test source is not itself an undeclared nightly literal.
+const astFlatbuffersSdk = 'nightly-' + '1.3.0-alpha.' + '20260924001050';
+const h48HostSdk = 'nightly-' + '1.3.0-alpha.' + '20260904010027';
 const loadCommand = 'cat ci/cjpm_pin.env >> "$GITHUB_ENV"';
 const srcbuildLoadCommand = 'cat ci/host_sdk_pin.env >> "$GITHUB_ENV"';
 
@@ -85,17 +91,58 @@ test('the ordinary host nightly literal has one pin and the release exception is
     // The astabi behavior-triad evidence harness is pinned to the 1.2 baseline
     // SDK lib paths; it is not an ordinary host consumer.
     const isAstabiBaselineHarness = file === path.join(root, 'tools', 'astabi', 'run_behavior_triad.sh');
-    if (file === pinPath || file === cjpmPinPath || file.endsWith('/.github/workflows/build-release-package.yml') || isAstabiBaselineHarness) continue;
+    if (file === pinPath || file === cjpmPinPath || file === astSdkPinPath || file === h48LanguagePinPath || file.endsWith('/.github/workflows/build-release-package.yml') || isAstabiBaselineHarness) continue;
     const text = await fs.readFile(file, 'utf8');
     if (/nightly-\d+\.\d+\.\d+-alpha\.\d+/.test(text)) {
       offenders.push(path.relative(root, file));
     }
   }
-  assert.deepEqual(offenders, []);
+    assert.deepEqual(offenders, []);
+    console.log(`ORDINARY-HOST-SCAN offenders=${offenders.length}`);
   const release = await fs.readFile(path.join(root, '.github', 'workflows', 'build-release-package.yml'), 'utf8');
   assert.equal(release.match(/^  RELEASE_HOST_TOOLCHAIN: nightly-\S+$/gm)?.length, 1);
   assert.match(release, /Five-platform 1\.3 archive hashes do not exist yet/);
   assert.match(release, /smoke changing from 13\/15 to 0\/15/);
+});
+
+test('workflow, shell, and markdown do not carry an ordinary nightly literal', async () => {
+  const bounded = [
+    '.github/workflows/build-ast-support.yml',
+    'ci/build_ast_support.sh',
+    'ci/release/H48_LANGUAGE_TUPLE.md',
+    'ci/ast_support/README.md',
+  ];
+  for (const rel of bounded) {
+    const text = await fs.readFile(path.join(root, rel), 'utf8');
+    assert.doesNotMatch(text, nightlyLiteral, rel);
+    console.log(`NIGHTLY-LITERAL-ABSENT ${rel}`);
+  }
+  const readme = await fs.readFile(path.join(root, 'ci', 'ast_support', 'README.md'), 'utf8');
+  assert.equal(readme.includes('20260924001050'), false, 'README must not keep a second flatbuffers SDK timestamp');
+});
+
+test('AST flatbuffers SDK is loaded from ci/ast_sdk_pin.env and consumed by name', async () => {
+  const workflow = await fs.readFile(path.join(root, '.github', 'workflows', 'build-ast-support.yml'), 'utf8');
+  assert.match(workflow, /cat ci\/source_pin\.env ci\/llvm_pin\.env ci\/ast_sdk_pin\.env >> "\$GITHUB_ENV"/);
+  assert.match(workflow, /install "\$\{AST_FLATBUFFERS_SDK:\?\}"/);
+  assert.match(workflow, /toolchains\/\$\{AST_FLATBUFFERS_SDK:\?\}/);
+  assert.match(workflow, /ci\/ast_sdk_pin\.env/);
+  const pin = await fs.readFile(astSdkPinPath, 'utf8');
+  assert.equal(pin, `AST_FLATBUFFERS_SDK=${astFlatbuffersSdk}\n`);
+  assert.doesNotMatch(pin, /^CJCJ_TOOLCHAIN=/m);
+  console.log('AST-SDK-PIN-LOADER cat=ci/ast_sdk_pin.env install=${AST_FLATBUFFERS_SDK:?} path=${AST_FLATBUFFERS_SDK:?}');
+});
+
+test('H48 host_sdk stays the published 0904 identity and is absent from workflows', async () => {
+  const pin = JSON.parse(await fs.readFile(h48LanguagePinPath, 'utf8'));
+  assert.equal(pin.sources.compiler.host_sdk, h48HostSdk);
+  const workflowDir = path.join(root, '.github', 'workflows');
+  for (const name of await fs.readdir(workflowDir)) {
+    if (!name.endsWith('.yml')) continue;
+    const text = await fs.readFile(path.join(workflowDir, name), 'utf8');
+    assert.equal(text.includes(h48HostSdk), false, name);
+  }
+  console.log(`H48-HOST-SDK workflows=absent identity=${h48HostSdk}`);
 });
 
 test('srcbuild pin reader returns the initial pinned host', async () => {
