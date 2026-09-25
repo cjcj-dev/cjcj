@@ -445,8 +445,8 @@ public class ClosureConversion {
                 (expr as Apply).getOrThrow().GetCallee() == callee) {
                 isRecursive.value = true
                 return VisitResult.STOP
-            } else if (expr.GetExprKind() == ExprKind.APPLY_WITH_EXCEPTION &&
-                (expr as ApplyWithException).getOrThrow().GetCallee() == callee) {
+            } else if (expr.GetExprKind() == ExprKind.TRY_APPLY &&
+                (expr as TryApply).getOrThrow().GetCallee() == callee) {
                 isRecursive.value = true
                 return VisitResult.STOP
             }
@@ -575,9 +575,9 @@ public class ClosureConversion {
                         continue
                     }
                 }
-                if (let Some(applyWithException) <- (expr as ApplyWithException)) {
-                    if (ApplyWithExceptionNeedConvertToInvokeWithException(applyWithException)) {
-                        ConvertApplyWithExceptionToInvokeWithException(applyWithException)
+                if (let Some(tryApply) <- (expr as TryApply)) {
+                    if (TryApplyNeedConvertToTryInvoke(tryApply)) {
+                        ConvertTryApplyToTryInvoke(tryApply)
                         continue
                     }
                 }
@@ -1332,9 +1332,9 @@ public class ClosureConversion {
         if (let Some(intrinsic) <- (expr as Intrinsic)) {
             intrinsic.SetInstantiatedTypeArgs(ConvertTypeArgsWithThisType(intrinsic.GetInstantiatedTypeArgs(), thisType))
         }
-        if (let Some(intrinsicWithException) <- (expr as IntrinsicWithException)) {
-            intrinsicWithException.SetInstantiatedTypeArgs(
-                ConvertTypeArgsWithThisType(intrinsicWithException.GetInstantiatedTypeArgs(), thisType))
+        if (let Some(tryIntrinsic) <- (expr as TryIntrinsic)) {
+            tryIntrinsic.SetInstantiatedTypeArgs(
+                ConvertTypeArgsWithThisType(tryIntrinsic.GetInstantiatedTypeArgs(), thisType))
         }
         if (let Some(getInstantiateValue) <- (expr as GetInstantiateValue)) {
             let instantiateTypes = getInstantiateValue.GetInstantiateTypesRef()
@@ -1522,19 +1522,19 @@ public class ClosureConversion {
                 return
             }
         }
-        if (let Some(applyWithException) <- (user as ApplyWithException)) {
-            if (applyWithException.GetCallee().nodeId == result.nodeId) {
+        if (let Some(tryApply) <- (user as TryApply)) {
+            if (tryApply.GetCallee().nodeId == result.nodeId) {
                 let methods = autoEnvImplDef.GetMethods()
                 let method = methods[methods.size - 1]
-                let args = applyWithException.GetArgs()
+                let args = tryApply.GetArgs()
                 args.add(autoEnvObj, at: 0)
-                let retTy = applyWithException.GetResultType() ??
+                let retTy = tryApply.GetResultType() ??
                     throw IllegalStateException("ClosureConversion apply-with-exception has no result type")
-                let newApply = builder.CreateApplyWithException(retTy, method, FuncCallContext(args: args,
-                    thisType: autoEnvObj.GetType()), applyWithException.GetSuccessBlock(),
-                    applyWithException.GetErrorBlock(), parent)
-                newApply.SetDebugLocation(applyWithException.GetDebugLocation())
-                applyWithException.ReplaceWith(newApply)
+                let newApply = builder.CreateTryApply(retTy, method, FuncCallContext(args: args,
+                    thisType: autoEnvObj.GetType()), tryApply.GetSuccessBlock(),
+                    tryApply.GetErrorBlock(), parent)
+                newApply.SetDebugLocation(tryApply.GetDebugLocation())
+                tryApply.ReplaceWith(newApply)
                 return
             }
         }
@@ -1596,7 +1596,7 @@ public class ClosureConversion {
             if (apply.GetCallee().nodeId == srcFunc.nodeId) {
                 OverlayInstantiatedTypeArgs(autoEnvInstTypeArgs, apply.GetInstantiatedTypeArgs())
             }
-        } else if (let Some(awe) <- (user as ApplyWithException)) {
+        } else if (let Some(awe) <- (user as TryApply)) {
             if (awe.GetCallee().nodeId == srcFunc.nodeId) {
                 OverlayInstantiatedTypeArgs(autoEnvInstTypeArgs, awe.GetInstantiatedTypeArgs())
             }
@@ -1879,7 +1879,7 @@ public class ClosureConversion {
         apply.ReplaceWith(invoke)
     }
 
-    private func ConvertApplyWithExceptionToInvokeWithException(apply: ApplyWithException): Unit {
+    private func ConvertTryApplyToTryInvoke(apply: TryApply): Unit {
         let callee = apply.GetCallee()
         let instParentType = ResolveAutoEnvCallParentType(callee, apply)
         let methods = instParentType.GetClassDef().GetMethods()
@@ -1888,7 +1888,7 @@ public class ClosureConversion {
         let invokeContext = InvokeCallContext(methods[0], callee, funcContext)
         let retTy = apply.GetResultType() ??
             throw IllegalStateException("ClosureConversion apply-with-exception has no result type")
-        let invoke = builder.CreateInvokeWithException(retTy, invokeContext, apply.GetSuccessBlock(),
+        let invoke = builder.CreateTryInvoke(retTy, invokeContext, apply.GetSuccessBlock(),
             apply.GetErrorBlock(), apply.GetParentBlock() ??
                 throw IllegalStateException("ClosureConversion apply-with-exception has no parent block"))
         invoke.SetDebugLocation(apply.GetDebugLocation())
@@ -1929,7 +1929,7 @@ public class ClosureConversion {
             for (arg in apply.GetArgs()) {
                 funcTypeArgs.add(arg.GetType().getOrThrow())
             }
-        } else if (let Some(applyE) <- (expr as ApplyWithException)) {
+        } else if (let Some(applyE) <- (expr as TryApply)) {
             for (arg in applyE.GetArgs()) {
                 funcTypeArgs.add(arg.GetType().getOrThrow())
             }
@@ -1961,7 +1961,7 @@ public class ClosureConversion {
         return false
     }
 
-    private func ApplyWithExceptionNeedConvertToInvokeWithException(apply: ApplyWithException): Bool {
+    private func TryApplyNeedConvertToTryInvoke(apply: TryApply): Bool {
         if (apply.GetCallee().IsFunc()) {
             return false
         }
@@ -2330,7 +2330,7 @@ public class ClosureConversion {
         ReplaceOperandWithAutoEnvWrapperClass(applyRetVal, RequireResult(typecast), skip)
     }
 
-    private func CastApplyWithExceptionArgAndRetIfNeed(e: ApplyWithException): Unit {
+    private func CastTryApplyArgAndRetIfNeed(e: TryApply): Unit {
         let maybeCalleeType = e.GetCallee().GetType().getOrThrow() as FuncType
         if (maybeCalleeType.isNone()) {
             return
@@ -2346,11 +2346,11 @@ public class ClosureConversion {
         let declaredRetType = calleeType.GetReturnType().StripAllRefs()
         let applyRetType = e.GetResult().getOrThrow().GetType().getOrThrow().StripAllRefs()
         if (!declaredRetType.IsAutoEnvInstBase() && applyRetType.IsAutoEnvInstBase()) {
-            WrapApplyWithExceptionRetVal(e)
+            WrapTryApplyRetVal(e)
         }
     }
 
-    private func WrapApplyWithExceptionRetVal(apply: ApplyWithException): Unit {
+    private func WrapTryApplyRetVal(apply: TryApply): Unit {
         let applyRetVal = apply.GetResult().getOrThrow()
         let applyRetType = applyRetVal.GetType().getOrThrow()
         let applyRetTypeNoRef = (applyRetType.StripAllRefs() as ClassType).getOrThrow()
@@ -2410,15 +2410,15 @@ public class ClosureConversion {
         ReplaceOperandWithAutoEnvWrapperClass(invokeRetVal, RequireResult(typecast), skip)
     }
 
-    private func CastInvokeWithExceptionRetIfNeed(e: DynamicDispatchWithException): Unit {
+    private func CastTryInvokeRetIfNeed(e: DynamicDispatchWithException): Unit {
         let declaredRetType = e.GetMethodType().GetReturnType().StripAllRefs()
         let invokeRetType = e.GetResult().getOrThrow().GetType().getOrThrow().StripAllRefs()
         if (!declaredRetType.IsAutoEnvInstBase() && invokeRetType.IsAutoEnvInstBase()) {
-            WrapInvokeWithExceptionRetVal(e)
+            WrapTryInvokeRetVal(e)
         }
     }
 
-    private func WrapInvokeWithExceptionRetVal(e: DynamicDispatchWithException): Unit {
+    private func WrapTryInvokeRetVal(e: DynamicDispatchWithException): Unit {
         let invokeRetVal = e.GetResult().getOrThrow()
         let invokeRetType = invokeRetVal.GetType().getOrThrow()
         let invokeRetTypeNoRef = (invokeRetType.StripAllRefs() as ClassType).getOrThrow()
@@ -2584,12 +2584,12 @@ public class ClosureConversion {
             for (expr in block.GetExpressions()) {
                 if (let Some(apply) <- (expr as Apply)) {
                     CastApplyArgAndRetIfNeed(apply)
-                } else if (let Some(applyWithException) <- (expr as ApplyWithException)) {
-                    CastApplyWithExceptionArgAndRetIfNeed(applyWithException)
+                } else if (let Some(tryApply) <- (expr as TryApply)) {
+                    CastTryApplyArgAndRetIfNeed(tryApply)
                 } else if (let Some(invoke) <- (expr as Invoke)) {
                     CastInvokeRetIfNeed(invoke)
-                } else if (let Some(invokeWithException) <- (expr as InvokeWithException)) {
-                    CastInvokeWithExceptionRetIfNeed(invokeWithException)
+                } else if (let Some(tryInvoke) <- (expr as TryInvoke)) {
+                    CastTryInvokeRetIfNeed(tryInvoke)
                 } else {
                     let enumRes = EnumConstructorNeedTypeCast(expr)
                     if (enumRes[0]) {
@@ -2785,14 +2785,14 @@ public class ClosureConversion {
         if (let Some(apply) <- (user as Apply)) {
             return apply.GetCallee() == op
         }
-        if (let Some(applyWithException) <- (user as ApplyWithException)) {
-            return applyWithException.GetCallee() == op
+        if (let Some(tryApply) <- (user as TryApply)) {
+            return tryApply.GetCallee() == op
         }
         if (let Some(invoke) <- (user as DynamicDispatch)) {
             return invoke.GetCallee() == op
         }
-        if (let Some(invokeWithException) <- (user as DynamicDispatchWithException)) {
-            return invokeWithException.GetCallee() == op
+        if (let Some(tryInvoke) <- (user as DynamicDispatchWithException)) {
+            return tryInvoke.GetCallee() == op
         }
         return false
     }

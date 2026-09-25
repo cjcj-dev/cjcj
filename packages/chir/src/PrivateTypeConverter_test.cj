@@ -79,7 +79,7 @@ public class PrivateTypeConverterTest {
     }
 
     @TestCase
-    public func VisitInvokeWithException(): Unit {
+    public func VisitTryInvoke(): Unit {
         let context = CHIRContext()
         let builder = CHIRBuilder(context)
         let converter = PrivateTypeConverter({ ty: Type =>
@@ -102,7 +102,7 @@ public class PrivateTypeConverterTest {
         owner.InitBody(body)
         let success = builder.CreateBlock(body)
         let error = builder.CreateBlock(body)
-        let invoke = InvokeWithException(invokeContext, success, error, None)
+        let invoke = TryInvoke(invokeContext, success, error, None)
         let invokeResult = LocalVar(context.GetInt64Ty(), "%invoke", Some(invoke))
         converter.VisitExpr(invoke)
         @Expect(invoke.GetCallee() == method, true)
@@ -117,7 +117,7 @@ public class PrivateTypeConverterTest {
     }
 
     @TestCase
-    public func VisitInvokeStaticWithException(): Unit {
+    public func VisitTryInvokeStatic(): Unit {
         let context = CHIRContext()
         let builder = CHIRBuilder(context)
         let converter = PrivateTypeConverter({ ty: Type =>
@@ -140,7 +140,7 @@ public class PrivateTypeConverterTest {
         owner.InitBody(body)
         let success = builder.CreateBlock(body)
         let error = builder.CreateBlock(body)
-        let invoke = InvokeStaticWithException(invokeContext, success, error, None)
+        let invoke = TryInvokeStatic(invokeContext, success, error, None)
         let invokeResult = LocalVar(context.GetInt64Ty(), "%invoke", Some(invoke))
         converter.VisitExpr(invoke)
         @Expect(invoke.GetCallee() == method, true)

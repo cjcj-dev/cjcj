@@ -207,7 +207,7 @@ public class VarInitCheck {
             }
             return
         }
-        if (fn.IsConstructor() && term.GetExprKind() == ExprKind.APPLY_WITH_EXCEPTION) {
+        if (fn.IsConstructor() && term.GetExprKind() == ExprKind.TRY_APPLY) {
             CheckMemberFuncCall(state, fn, term, checkResult)
         }
     }
@@ -320,7 +320,7 @@ public class VarInitCheck {
         let callee = if (apply.GetExprKind() == ExprKind.APPLY) {
             (apply as Apply).getOrThrow().GetCallee()
         } else {
-            (apply as ApplyWithException).getOrThrow().GetCallee()
+            (apply as TryApply).getOrThrow().GetCallee()
         }
         if (!callee.IsFuncWithBody()) {
             return
@@ -338,7 +338,7 @@ public class VarInitCheck {
             let args = if (apply.GetExprKind() == ExprKind.APPLY) {
                 (apply as Apply).getOrThrow().GetArgs()
             } else {
-                (apply as ApplyWithException).getOrThrow().GetArgs()
+                (apply as TryApply).getOrThrow().GetArgs()
             }
             let thisArg = initFunc.GetParam(0)
             let receiver = args[0]

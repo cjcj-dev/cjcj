@@ -3,7 +3,7 @@ package cjcj::frontend
 import std.collection.*
 import cjcj::basic.Linkage as BasicLinkage
 import cjcj::chir.Apply as ChirApply
-import cjcj::chir.ApplyWithException as ChirApplyWithException
+import cjcj::chir.TryApply as ChirTryApply
 import cjcj::chir.AnalysisWrapper
 import cjcj::chir.AnnotationChecker
 import cjcj::chir.ArrayListConstStartOpt
@@ -1008,7 +1008,7 @@ private class ToCHIR {
         var index: Int64 = 0
         while (index < users.size) {
             if (users[index].GetExprKind() != ChirExprKind.APPLY &&
-                users[index].GetExprKind() != ChirExprKind.APPLY_WITH_EXCEPTION) {
+                users[index].GetExprKind() != ChirExprKind.TRY_APPLY) {
                 return false
             }
             if (users[index].GetExprKind() == ChirExprKind.APPLY) {
@@ -1017,8 +1017,8 @@ private class ToCHIR {
                     return false
                 }
             }
-            if (users[index].GetExprKind() == ChirExprKind.APPLY_WITH_EXCEPTION) {
-                let applyNode = (users[index] as ChirApplyWithException).getOrThrow()
+            if (users[index].GetExprKind() == ChirExprKind.TRY_APPLY) {
+                let applyNode = (users[index] as ChirTryApply).getOrThrow()
                 if (!refEq(applyNode.GetCallee(), curFunc)) {
                     return false
                 }

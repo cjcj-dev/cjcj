@@ -981,28 +981,28 @@ public class CHIRChecker {
                 case ExprKind.BRANCH => CheckBranch(term, topLevelFunc)
                 case ExprKind.MULTIBRANCH => CheckMultiBranch(term, topLevelFunc)
                 case ExprKind.RAISE_EXCEPTION => CheckRaiseException(term, topLevelFunc)
-                case ExprKind.APPLY_WITH_EXCEPTION =>
-                    CheckApplyWithException((term as ApplyWithException).getOrThrow(), topLevelFunc)
-                case ExprKind.INVOKE_WITH_EXCEPTION =>
-                    CheckInvokeWithException((term as InvokeWithException).getOrThrow(), topLevelFunc)
-                case ExprKind.INVOKESTATIC_WITH_EXCEPTION =>
-                    CheckInvokeStaticWithException((term as InvokeStaticWithException).getOrThrow(), topLevelFunc)
-                case ExprKind.NEG_WITH_EXCEPTION =>
-                    CheckUnaryExpressionWithException((term as UnaryExpressionWithException).getOrThrow(), topLevelFunc)
-                case ExprKind.ADD_WITH_EXCEPTION | ExprKind.SUB_WITH_EXCEPTION | ExprKind.MUL_WITH_EXCEPTION |
-                    ExprKind.DIV_WITH_EXCEPTION | ExprKind.MOD_WITH_EXCEPTION | ExprKind.EXP_WITH_EXCEPTION |
-                    ExprKind.LSHIFT_WITH_EXCEPTION | ExprKind.RSHIFT_WITH_EXCEPTION =>
-                    CheckBinaryExpressionWithException((term as BinaryExpressionWithException).getOrThrow(), topLevelFunc)
-                case ExprKind.SPAWN_WITH_EXCEPTION =>
-                    CheckSpawnWithException((term as SpawnWithException).getOrThrow(), topLevelFunc)
-                case ExprKind.NUMERIC_CAST_WITH_EXCEPTION =>
-                    CheckNumericCastWithException((term as NumericCastWithException).getOrThrow(), topLevelFunc)
-                case ExprKind.INTRINSIC_WITH_EXCEPTION =>
-                    CheckIntrinsicWithException((term as IntrinsicWithException).getOrThrow(), topLevelFunc)
-                case ExprKind.ALLOCATE_WITH_EXCEPTION =>
-                    CheckAllocateWithException((term as AllocateWithException).getOrThrow(), topLevelFunc)
-                case ExprKind.RAW_ARRAY_ALLOCATE_WITH_EXCEPTION =>
-                    CheckRawArrayAllocateWithException((term as RawArrayAllocateWithException).getOrThrow(), topLevelFunc)
+                case ExprKind.TRY_APPLY =>
+                    CheckTryApply((term as TryApply).getOrThrow(), topLevelFunc)
+                case ExprKind.TRY_INVOKE =>
+                    CheckTryInvoke((term as TryInvoke).getOrThrow(), topLevelFunc)
+                case ExprKind.TRY_INVOKESTATIC =>
+                    CheckTryInvokeStatic((term as TryInvokeStatic).getOrThrow(), topLevelFunc)
+                case ExprKind.TRY_NEG =>
+                    CheckTryUnaryExpression((term as TryUnaryExpression).getOrThrow(), topLevelFunc)
+                case ExprKind.TRY_ADD | ExprKind.TRY_SUB | ExprKind.TRY_MUL |
+                    ExprKind.TRY_DIV | ExprKind.TRY_MOD | ExprKind.TRY_EXP |
+                    ExprKind.TRY_LSHIFT | ExprKind.TRY_RSHIFT =>
+                    CheckTryBinaryExpression((term as TryBinaryExpression).getOrThrow(), topLevelFunc)
+                case ExprKind.TRY_SPAWN =>
+                    CheckTrySpawn((term as TrySpawn).getOrThrow(), topLevelFunc)
+                case ExprKind.TRY_NUMERIC_CAST =>
+                    CheckTryNumericCast((term as TryNumericCast).getOrThrow(), topLevelFunc)
+                case ExprKind.TRY_INTRINSIC =>
+                    CheckTryIntrinsic((term as TryIntrinsic).getOrThrow(), topLevelFunc)
+                case ExprKind.TRY_ALLOCATE =>
+                    CheckTryAllocate((term as TryAllocate).getOrThrow(), topLevelFunc)
+                case ExprKind.TRY_RAW_ARRAY_ALLOCATE =>
+                    CheckTryRawArrayAllocate((term as TryRawArrayAllocate).getOrThrow(), topLevelFunc)
                 case _ => WarningInExpr(topLevelFunc, expr,
                     "find unrecongnized ExprKind `" + expr.GetExprKindName() + "`.")
             }
@@ -1094,7 +1094,7 @@ public class CHIRChecker {
         CheckBinaryExprBase(BinaryExprBase((expr as BinaryExpression).getOrThrow()), topLevelFunc)
     }
 
-    private func CheckUnaryExpressionWithException(expr: UnaryExpressionWithException, topLevelFunc: Function): Unit {
+    private func CheckTryUnaryExpression(expr: TryUnaryExpression, topLevelFunc: Function): Unit {
         if (!CheckHaveResult(expr, topLevelFunc)) {
             return
         }
@@ -1107,7 +1107,7 @@ public class CHIRChecker {
         CheckUnaryExprBase(UnaryExprBase(expr), topLevelFunc)
     }
 
-    private func CheckBinaryExpressionWithException(expr: BinaryExpressionWithException, topLevelFunc: Function): Unit {
+    private func CheckTryBinaryExpression(expr: TryBinaryExpression, topLevelFunc: Function): Unit {
         if (!CheckHaveResult(expr, topLevelFunc)) {
             return
         }
@@ -1292,7 +1292,7 @@ public class CHIRChecker {
         CheckAllocateBase((expr as AllocateBase).getOrThrow(), topLevelFunc)
     }
 
-    private func CheckAllocateWithException(expr: AllocateWithException, topLevelFunc: Function): Unit {
+    private func CheckTryAllocate(expr: TryAllocate, topLevelFunc: Function): Unit {
         if (!CheckHaveResult(expr, topLevelFunc)) {
             return
         }
@@ -1636,7 +1636,7 @@ public class CHIRChecker {
         CheckSpawnBase((expr as SpawnBase).getOrThrow(), topLevelFunc)
     }
 
-    private func CheckSpawnWithException(expr: SpawnWithException, topLevelFunc: Function): Unit {
+    private func CheckTrySpawn(expr: TrySpawn, topLevelFunc: Function): Unit {
         if (!CheckHaveResult(expr, topLevelFunc)) {
             return
         }
@@ -1667,7 +1667,7 @@ public class CHIRChecker {
         }
     }
 
-    private func CheckNumericCastWithException(expr: NumericCastWithException, topLevelFunc: Function): Unit {
+    private func CheckTryNumericCast(expr: TryNumericCast, topLevelFunc: Function): Unit {
         let _ = expr
         let _ = topLevelFunc
     }
@@ -1679,7 +1679,7 @@ public class CHIRChecker {
         CheckRawArrayAllocateBase((expr as RawArrayAllocateBase).getOrThrow(), topLevelFunc)
     }
 
-    private func CheckRawArrayAllocateWithException(expr: RawArrayAllocateWithException,
+    private func CheckTryRawArrayAllocate(expr: TryRawArrayAllocate,
         topLevelFunc: Function): Unit {
         if (!CheckHaveResult(expr, topLevelFunc)) {
             return
@@ -2206,7 +2206,7 @@ public class CHIRChecker {
         CheckApplyBase(ApplyBase(expr), topLevelFunc)
     }
 
-    private func CheckApplyWithException(expr: ApplyWithException, topLevelFunc: Function): Unit {
+    private func CheckTryApply(expr: TryApply, topLevelFunc: Function): Unit {
         if (!CheckHaveResult(expr, topLevelFunc)) {
             return
         }
@@ -2391,7 +2391,7 @@ public class CHIRChecker {
         return (ReplaceRawGenericArgType(originalFuncType, replaceTable, builder) as FuncType).getOrThrow()
     }
 
-    private func CheckInvokeWithException(expr: InvokeWithException, topLevelFunc: Function): Unit {
+    private func CheckTryInvoke(expr: TryInvoke, topLevelFunc: Function): Unit {
         if (!CheckHaveResult(expr, topLevelFunc)) {
             return
         }
@@ -2426,7 +2426,7 @@ public class CHIRChecker {
         CheckInvokeFuncArgs(expr.GetArgs(), expr.GetMethodType().GetParamTypes(), rawExpr, topLevelFunc)
     }
 
-    private func CheckInvokeStaticWithException(expr: InvokeStaticWithException,
+    private func CheckTryInvokeStatic(expr: TryInvokeStatic,
         topLevelFunc: Function): Unit {
         if (!CheckHaveResult(expr, topLevelFunc)) {
             return
@@ -2820,7 +2820,7 @@ public class CHIRChecker {
         CheckIntrinsicBase(IntrinsicBase(expr), topLevelFunc)
     }
 
-    private func CheckIntrinsicWithException(expr: IntrinsicWithException, topLevelFunc: Function): Unit {
+    private func CheckTryIntrinsic(expr: TryIntrinsic, topLevelFunc: Function): Unit {
         if (!CheckHaveResult(expr, topLevelFunc)) {
             return
         }
@@ -2887,16 +2887,16 @@ public class CHIRChecker {
             for (user in localVar.GetUsersRef()) {
                 let errMsgBase = "the result is used in a wrong expression `" + user.ToString(0) + "`, "
                 let kind = user.GetExprKind()
-                if (kind == ExprKind.APPLY || kind == ExprKind.APPLY_WITH_EXCEPTION) {
+                if (kind == ExprKind.APPLY || kind == ExprKind.TRY_APPLY) {
                     continue
-                } else if (kind == ExprKind.INVOKE || kind == ExprKind.INVOKE_WITH_EXCEPTION) {
+                } else if (kind == ExprKind.INVOKE || kind == ExprKind.TRY_INVOKE) {
                     let funcName = InvokeBase(user).GetMethodName()
                     if (funcName != INST_VIRTUAL_FUNC && funcName != GENERIC_VIRTUAL_FUNC) {
                         ErrorInExpr(topLevelFunc, rawExpr,
                             errMsgBase + "the result can't be used as virtual method's argument.")
                     }
                     continue
-                } else if (kind == ExprKind.INTRINSIC || kind == ExprKind.INTRINSIC_WITH_EXCEPTION) {
+                } else if (kind == ExprKind.INTRINSIC || kind == ExprKind.TRY_INTRINSIC) {
                     if (IntrinsicBase(user).GetIntrinsicKind() != IntrinsicKind.CPOINTER_INIT1) {
                         ErrorInExpr(topLevelFunc, rawExpr,
                             errMsgBase + "the result must be used as pointerInit1's argument.")
@@ -2960,13 +2960,13 @@ public class CHIRChecker {
                     }
                 }
                 CheckInoutOpSrc(field.GetBase(), expr, topLevelFunc)
-            } else if (localExpr.GetExprKind() == ExprKind.NUMERIC_CAST_WITH_EXCEPTION ||
+            } else if (localExpr.GetExprKind() == ExprKind.TRY_NUMERIC_CAST ||
                 localExpr.GetExprKind() == ExprKind.NUMERIC_CAST) {
                 CheckInoutOpSrc(localExpr.GetOperand(0), expr, topLevelFunc)
-            } else if (!localExpr.IsFuncCall() && localExpr.GetExprKind() != ExprKind.APPLY_WITH_EXCEPTION &&
-                localExpr.GetExprKind() != ExprKind.INVOKE_WITH_EXCEPTION &&
-                localExpr.GetExprKind() != ExprKind.INVOKESTATIC_WITH_EXCEPTION &&
-                localExpr.GetExprKind() != ExprKind.ALLOCATE_WITH_EXCEPTION &&
+            } else if (!localExpr.IsFuncCall() && localExpr.GetExprKind() != ExprKind.TRY_APPLY &&
+                localExpr.GetExprKind() != ExprKind.TRY_INVOKE &&
+                localExpr.GetExprKind() != ExprKind.TRY_INVOKESTATIC &&
+                localExpr.GetExprKind() != ExprKind.TRY_ALLOCATE &&
                 localExpr.GetExprKind() != ExprKind.ALLOCATE) {
                 ErrorInExpr(topLevelFunc, expr.GetRawExpr(),
                     "a wrong expression `" + op.ToString(0) + "` in `inout` operand chain.")
@@ -3323,14 +3323,14 @@ public class CHIRChecker {
             }
         }
         let kind = expr.GetExprKind()
-        if (kind == ExprKind.ALLOCATE || kind == ExprKind.ALLOCATE_WITH_EXCEPTION) {
+        if (kind == ExprKind.ALLOCATE || kind == ExprKind.TRY_ALLOCATE) {
             let ty = (expr as AllocateBase).getOrThrow().GetType()
             if (!GenericTypeIsInContainer(ty, reachableGenericTypes)) {
                 ErrorInFunc(topLevelFunc, "generic type " + ty.ToString() +
                     " is unreachable, the type is allocated type in expression " + expr.ToString(0) + ".")
             }
-        } else if (expr.IsFuncCall() || kind == ExprKind.APPLY_WITH_EXCEPTION ||
-            kind == ExprKind.INVOKE_WITH_EXCEPTION || kind == ExprKind.INVOKESTATIC_WITH_EXCEPTION) {
+        } else if (expr.IsFuncCall() || kind == ExprKind.TRY_APPLY ||
+            kind == ExprKind.TRY_INVOKE || kind == ExprKind.TRY_INVOKESTATIC) {
             let base = FuncCallBase(expr)
             let instantiatedTypeArgs = base.GetInstantiatedTypeArgs()
             var idx: Int64 = 0
@@ -3358,13 +3358,13 @@ public class CHIRChecker {
                 ErrorInFunc(topLevelFunc, "generic type " + instanceOf.GetType().ToString() +
                     " is unreachable, the type is instanceOf type in expression " + expr.ToString(0) + ".")
             }
-        } else if (kind == ExprKind.RAW_ARRAY_ALLOCATE || kind == ExprKind.RAW_ARRAY_ALLOCATE_WITH_EXCEPTION) {
+        } else if (kind == ExprKind.RAW_ARRAY_ALLOCATE || kind == ExprKind.TRY_RAW_ARRAY_ALLOCATE) {
             let elementType = (expr as RawArrayAllocateBase).getOrThrow().GetElementType()
             if (!GenericTypeIsInContainer(elementType, reachableGenericTypes)) {
                 ErrorInFunc(topLevelFunc, "generic type " + elementType.ToString() +
                     " is unreachable, the type is element type in expression " + expr.ToString(0) + ".")
             }
-        } else if (kind == ExprKind.INTRINSIC || kind == ExprKind.INTRINSIC_WITH_EXCEPTION) {
+        } else if (kind == ExprKind.INTRINSIC || kind == ExprKind.TRY_INTRINSIC) {
             let instantiatedTypeArgs = IntrinsicBase(expr).GetInstantiatedTypeArgs()
             var idx: Int64 = 0
             while (idx < instantiatedTypeArgs.size) {

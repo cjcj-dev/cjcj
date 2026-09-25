@@ -252,7 +252,7 @@ public func SaveAllocateMap(body: BlockGroup, allocateIdx: Int64, allocateIdxMap
     for (block in body.GetBlocksRef()) {
         for (expr in block.GetExpressionsRef()) {
             let kind = expr.GetExprKind()
-            if (kind == ExprKind.ALLOCATE || kind == ExprKind.ALLOCATE_WITH_EXCEPTION) {
+            if (kind == ExprKind.ALLOCATE || kind == ExprKind.TRY_ALLOCATE) {
                 if (let Some(result) <- expr.GetResult()) {
                     if (result.GetDebugExpr().isSome()) {
                         allocateIdxMap[result.nodeId] = nextIdx
