@@ -28,13 +28,10 @@ private func ResolveStaticCallee(invoke: InvokeStatic, clazz: ClassType,
     let funcCallType = FuncCallType(instFuncType, funcName: invoke.GetMethodName())
     let candidates = GetFuncIndexInVTable(clazz, funcCallType, builder)
     for (cand in candidates) {
-        if (cand.instance.isNone()) {
+        if (cand.instance.isNone() || cand.instance.getOrThrow().IsPureAbstract()) {
             continue
         }
         var expectedFunc = cand.instance.getOrThrow()
-        if (expectedFunc.IsPureAbstract()) {
-            continue
-        }
         // Rewriting reuses args without casts: unwrap only on exact parameter types.
         if (let Some(rawFunc) <- expectedFunc.GetWrappedRawMethod()) {
             let rawParams = rawFunc.GetFuncType().getOrThrow().GetParamTypes()
