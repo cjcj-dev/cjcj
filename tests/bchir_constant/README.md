@@ -10,3 +10,9 @@ already evaluates without local Constant emission.
 Use the same sources, SDK and compiler recipe for baseline, candidate, isolated
 product cuts and restored builds. A compiler launch/build error is not a target
 assertion failure. Record the compiler rc separately from the final CHIR checks.
+
+For the paired Package declaration fix, include `ci/smoke/04_iface_enum.cj`
+in `run.py --ordinary-dir` and run `verify_declarations.py <arm-output>`.
+It independently observes the abstract `Shape.area` declaration and concrete
+`Circle.area` implementation. Restoring the old Package filtering must fail
+that target while the enum literal assertion still passes.
