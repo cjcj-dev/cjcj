@@ -6,6 +6,14 @@ import cjcj::basic.Linkage as BasicLinkage
 import cjcj::flatbuffers.{FlatBufferString, Offset, Vector}
 import cjcj::utils.{CJC_ABORT, CJC_ASSERT, OverflowStrategy}
 
+private func IsExceptionIntOpKind(kind: ExprKind): Bool {
+    if (kind == ExprKind.NEG_WITH_EXCEPTION) {
+        return true
+    }
+    let index = ExprKindIndex(kind)
+    return index >= ExprKindIndex(ExprKind.ADD_WITH_EXCEPTION) && index <= ExprKindIndex(ExprKind.RSHIFT_WITH_EXCEPTION)
+}
+
 private func DeserializeOverflowStrategy(strategy: UInt8): OverflowStrategy {
     if (strategy == CHIRFB_OVERFLOW_STRATEGY_NA) {
         return OverflowStrategy.NA
@@ -37,15 +45,15 @@ private func CHIRExprKindToExprKind(kind: UInt8): (ExprKind, Bool) {
         case 10u8 => (ExprKind.NUMERIC_CAST_WITH_EXCEPTION, true)
         case 11u8 => (ExprKind.ALLOCATE_WITH_EXCEPTION, true)
         case 12u8 => (ExprKind.RAW_ARRAY_ALLOCATE_WITH_EXCEPTION, true)
-        case 13u8 => (ExprKind.NEG, true)
-        case 14u8 => (ExprKind.ADD, true)
-        case 15u8 => (ExprKind.SUB, true)
-        case 16u8 => (ExprKind.MUL, true)
-        case 17u8 => (ExprKind.DIV, true)
-        case 18u8 => (ExprKind.MOD, true)
-        case 19u8 => (ExprKind.EXP, true)
-        case 20u8 => (ExprKind.LSHIFT, true)
-        case 21u8 => (ExprKind.RSHIFT, true)
+        case 13u8 => (ExprKind.NEG_WITH_EXCEPTION, true)
+        case 14u8 => (ExprKind.ADD_WITH_EXCEPTION, true)
+        case 15u8 => (ExprKind.SUB_WITH_EXCEPTION, true)
+        case 16u8 => (ExprKind.MUL_WITH_EXCEPTION, true)
+        case 17u8 => (ExprKind.DIV_WITH_EXCEPTION, true)
+        case 18u8 => (ExprKind.MOD_WITH_EXCEPTION, true)
+        case 19u8 => (ExprKind.EXP_WITH_EXCEPTION, true)
+        case 20u8 => (ExprKind.LSHIFT_WITH_EXCEPTION, true)
+        case 21u8 => (ExprKind.RSHIFT_WITH_EXCEPTION, true)
         case 22u8 => (ExprKind.NEG, false)
         case 23u8 => (ExprKind.NOT, false)
         case 24u8 => (ExprKind.BITNOT, false)
@@ -845,6 +853,9 @@ class CHIRDeserializerImpl {
             payload, block)) {
             return concreteExpr
         }
+        if (let Some(exceptionOp) <- createExceptionIntOp(kind, resultTy, operands, successors, block)) {
+            return exceptionOp
+        }
         if (kind == ExprKind.LAMBDA && !blockGroups.isEmpty()) {
             return createLambdaExpression(operands, blockGroups[0], block, resultTy)
         }
@@ -955,6 +966,23 @@ class CHIRDeserializerImpl {
         throw IllegalStateException("unsupported CHIR expression")
     }
 
+    private func createExceptionIntOp(kind: ExprKind, resultTy: Option<Type>, operands: ArrayList<Value>,
+        successors: ArrayList<Block>, block: Block): Option<Expression> {
+        if (!IsExceptionIntOpKind(kind) || operands.isEmpty() || successors.size < 2) {
+            return None
+        }
+        let resultTyValue = resultTypeOrInvalid(resultTy)
+        if (kind == ExprKind.NEG_WITH_EXCEPTION) {
+            return builder.CreateUnaryExpressionWithException(resultTyValue, kind, operands[0], successors[0],
+                successors[1], block)
+        }
+        if (operands.size < 2) {
+            return None
+        }
+        return builder.CreateBinaryExpressionWithException(resultTyValue, kind, operands[0], operands[1],
+            successors[0], successors[1], block)
+    }
+
     private func createPayloadExpression(kind: ExprKind, resultTy: Option<Type>, operands: ArrayList<Value>,
         blockGroups: ArrayList<BlockGroup>, successors: ArrayList<Block>, payload: ArrayList<String>,
         block: Block): Option<Expression> {
@@ -969,15 +997,8 @@ class CHIRDeserializerImpl {
             branch.SetSourceExpr(CHIRSourceExprFromIndex(CHIRSafeI64(CHIRFieldAt(payload, 1))))
             return branch
         }
-        if (kind == ExprKind.INT_OP_WITH_EXCEPTION && !operands.isEmpty() && successors.size >= 2) {
-            let opKind = CHIRExprKindFromIndex(CHIRSafeI64(CHIRFieldAt(payload, 1)))
-            let resultTyValue = resultTypeOrInvalid(resultTy)
-            if (operands.size >= 2) {
-                return builder.CreateBinaryIntOpWithException(resultTyValue, opKind, operands[0], operands[1],
-                    successors[0], successors[1], block)
-            }
-            return builder.CreateUnaryIntOpWithException(resultTyValue, opKind, operands[0], successors[0],
-                successors[1], block)
+        if (IsExceptionIntOpKind(kind) && !operands.isEmpty() && successors.size >= 2) {
+            return createExceptionIntOp(kind, resultTy, operands, successors, block)
         }
         if ((kind == ExprKind.ALLOCATE || kind == ExprKind.ALLOCATE_WITH_EXCEPTION) &&
             CHIRFieldAt(payload, 0) == "allocate") {
@@ -2075,7 +2096,7 @@ class CHIRDeserializerImpl {
         if (isException) {
             let normalId = operands.Get(1u32, 0u32)
             let exceptionId = operands.Get(2u32, 0u32)
-            let result = builder.CreateUnaryIntOpWithException(resultTy, kind, operand,
+            let result = builder.CreateUnaryExpressionWithException(resultTy, kind, operand,
                 GetValue<Block>(normalId).getOrThrow(), GetValue<Block>(exceptionId).getOrThrow(), parentBlock)
             result.SetOverflowStrategy(overflowStrategy)
             return result
@@ -2096,7 +2117,7 @@ class CHIRDeserializerImpl {
         if (isException) {
             let normalId = operands.Get(2u32, 0u32)
             let exceptionId = operands.Get(3u32, 0u32)
-            let result = builder.CreateBinaryIntOpWithException(resultTy, kind, lhs, rhs,
+            let result = builder.CreateBinaryExpressionWithException(resultTy, kind, lhs, rhs,
                 GetValue<Block>(normalId).getOrThrow(), GetValue<Block>(exceptionId).getOrThrow(), parentBlock)
             result.SetOverflowStrategy(overflowStrategy)
             return result

@@ -226,7 +226,10 @@ public class TypeAnalysis <: ValueAnalysis<TypeValueDomain, FullStatePool<TypeVa
             case ExprKind.EXIT => HandleTerminatorEffectImpl(state, terminator)
             case ExprKind.BRANCH => HandleTerminatorEffectImpl(state, terminator)
             case ExprKind.MULTIBRANCH => HandleTerminatorEffectImpl(state, terminator)
-            case ExprKind.INT_OP_WITH_EXCEPTION => HandleTerminatorEffectImpl(state, terminator)
+            case ExprKind.NEG_WITH_EXCEPTION | ExprKind.ADD_WITH_EXCEPTION | ExprKind.SUB_WITH_EXCEPTION |
+                ExprKind.MUL_WITH_EXCEPTION | ExprKind.DIV_WITH_EXCEPTION | ExprKind.MOD_WITH_EXCEPTION |
+                ExprKind.EXP_WITH_EXCEPTION | ExprKind.LSHIFT_WITH_EXCEPTION | ExprKind.RSHIFT_WITH_EXCEPTION =>
+                HandleTerminatorEffectImpl(state, terminator)
             case ExprKind.INTRINSIC_WITH_EXCEPTION => HandleTerminatorEffectImpl(state, terminator)
             case _ => HandleTerminatorEffectImpl(state, terminator)
         }

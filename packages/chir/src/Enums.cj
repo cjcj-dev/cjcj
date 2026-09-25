@@ -476,7 +476,9 @@ extend ExprMajorKind <: Equatable<ExprMajorKind> {
 public enum ExprKind {
     | INVALID
     | GOTO | BRANCH | MULTIBRANCH | EXIT | APPLY_WITH_EXCEPTION | INVOKE_WITH_EXCEPTION
-    | INVOKESTATIC_WITH_EXCEPTION | RAISE_EXCEPTION | INT_OP_WITH_EXCEPTION | SPAWN_WITH_EXCEPTION
+    | INVOKESTATIC_WITH_EXCEPTION | RAISE_EXCEPTION | NEG_WITH_EXCEPTION | ADD_WITH_EXCEPTION
+    | SUB_WITH_EXCEPTION | MUL_WITH_EXCEPTION | DIV_WITH_EXCEPTION | MOD_WITH_EXCEPTION
+    | EXP_WITH_EXCEPTION | LSHIFT_WITH_EXCEPTION | RSHIFT_WITH_EXCEPTION | SPAWN_WITH_EXCEPTION
     | NUMERIC_CAST_WITH_EXCEPTION | INTRINSIC_WITH_EXCEPTION | ALLOCATE_WITH_EXCEPTION
     | RAW_ARRAY_ALLOCATE_WITH_EXCEPTION
     | NEG | NOT | BITNOT
@@ -503,72 +505,80 @@ public func ExprKindIndex(kind: ExprKind): Int64 {
         case ExprKind.INVOKE_WITH_EXCEPTION => 6
         case ExprKind.INVOKESTATIC_WITH_EXCEPTION => 7
         case ExprKind.RAISE_EXCEPTION => 8
-        case ExprKind.INT_OP_WITH_EXCEPTION => 9
-        case ExprKind.SPAWN_WITH_EXCEPTION => 10
-        case ExprKind.NUMERIC_CAST_WITH_EXCEPTION => 11
-        case ExprKind.INTRINSIC_WITH_EXCEPTION => 12
-        case ExprKind.ALLOCATE_WITH_EXCEPTION => 13
-        case ExprKind.RAW_ARRAY_ALLOCATE_WITH_EXCEPTION => 14
-        case ExprKind.NEG => 15
-        case ExprKind.NOT => 16
-        case ExprKind.BITNOT => 17
-        case ExprKind.ADD => 18
-        case ExprKind.SUB => 19
-        case ExprKind.MUL => 20
-        case ExprKind.DIV => 21
-        case ExprKind.MOD => 22
-        case ExprKind.EXP => 23
-        case ExprKind.LSHIFT => 24
-        case ExprKind.RSHIFT => 25
-        case ExprKind.BITAND => 26
-        case ExprKind.BITOR => 27
-        case ExprKind.BITXOR => 28
-        case ExprKind.LT => 29
-        case ExprKind.GT => 30
-        case ExprKind.LE => 31
-        case ExprKind.GE => 32
-        case ExprKind.EQUAL => 33
-        case ExprKind.NOTEQUAL => 34
-        case ExprKind.AND => 35
-        case ExprKind.OR => 36
-        case ExprKind.ALLOCATE => 37
-        case ExprKind.LOAD => 38
-        case ExprKind.STORE => 39
-        case ExprKind.GET_ELEMENT_REF => 40
-        case ExprKind.GET_ELEMENT_BY_NAME => 41
-        case ExprKind.STORE_ELEMENT_REF => 42
-        case ExprKind.STORE_ELEMENT_BY_NAME => 43
-        case ExprKind.FORIN_RANGE => 44
-        case ExprKind.FORIN_ITER => 45
-        case ExprKind.FORIN_CLOSED_RANGE => 46
-        case ExprKind.LAMBDA => 47
-        case ExprKind.CONSTANT => 48
-        case ExprKind.DEBUGEXPR => 49
-        case ExprKind.TUPLE => 50
-        case ExprKind.FIELD => 51
-        case ExprKind.FIELD_BY_NAME => 52
-        case ExprKind.APPLY => 53
-        case ExprKind.INVOKE => 54
-        case ExprKind.INVOKESTATIC => 55
-        case ExprKind.INSTANCEOF => 56
-        case ExprKind.CLASS_STATIC_CAST => 57
-        case ExprKind.NUMERIC_CAST => 58
-        case ExprKind.GET_EXCEPTION => 59
-        case ExprKind.RAW_ARRAY_ALLOCATE => 60
-        case ExprKind.RAW_ARRAY_LITERAL_INIT => 61
-        case ExprKind.RAW_ARRAY_INIT_BY_VALUE => 62
-        case ExprKind.VARRAY => 63
-        case ExprKind.VARRAY_BUILDER => 64
-        case ExprKind.INTRINSIC => 65
-        case ExprKind.SPAWN => 66
-        case ExprKind.GET_INSTANTIATE_VALUE => 67
-        case ExprKind.BOX => 68
-        case ExprKind.UNBOX_TO_VALUE => 69
-        case ExprKind.CAST_TO_GENERIC => 70
-        case ExprKind.CAST_TO_CONCRETE => 71
-        case ExprKind.UNBOX_TO_REF => 72
-        case ExprKind.GET_RTTI => 73
-        case ExprKind.GET_RTTI_STATIC => 74
+        case ExprKind.NEG_WITH_EXCEPTION => 9
+        case ExprKind.ADD_WITH_EXCEPTION => 10
+        case ExprKind.SUB_WITH_EXCEPTION => 11
+        case ExprKind.MUL_WITH_EXCEPTION => 12
+        case ExprKind.DIV_WITH_EXCEPTION => 13
+        case ExprKind.MOD_WITH_EXCEPTION => 14
+        case ExprKind.EXP_WITH_EXCEPTION => 15
+        case ExprKind.LSHIFT_WITH_EXCEPTION => 16
+        case ExprKind.RSHIFT_WITH_EXCEPTION => 17
+        case ExprKind.SPAWN_WITH_EXCEPTION => 18
+        case ExprKind.NUMERIC_CAST_WITH_EXCEPTION => 19
+        case ExprKind.INTRINSIC_WITH_EXCEPTION => 20
+        case ExprKind.ALLOCATE_WITH_EXCEPTION => 21
+        case ExprKind.RAW_ARRAY_ALLOCATE_WITH_EXCEPTION => 22
+        case ExprKind.NEG => 23
+        case ExprKind.NOT => 24
+        case ExprKind.BITNOT => 25
+        case ExprKind.ADD => 26
+        case ExprKind.SUB => 27
+        case ExprKind.MUL => 28
+        case ExprKind.DIV => 29
+        case ExprKind.MOD => 30
+        case ExprKind.EXP => 31
+        case ExprKind.LSHIFT => 32
+        case ExprKind.RSHIFT => 33
+        case ExprKind.BITAND => 34
+        case ExprKind.BITOR => 35
+        case ExprKind.BITXOR => 36
+        case ExprKind.LT => 37
+        case ExprKind.GT => 38
+        case ExprKind.LE => 39
+        case ExprKind.GE => 40
+        case ExprKind.EQUAL => 41
+        case ExprKind.NOTEQUAL => 42
+        case ExprKind.AND => 43
+        case ExprKind.OR => 44
+        case ExprKind.ALLOCATE => 45
+        case ExprKind.LOAD => 46
+        case ExprKind.STORE => 47
+        case ExprKind.GET_ELEMENT_REF => 48
+        case ExprKind.GET_ELEMENT_BY_NAME => 49
+        case ExprKind.STORE_ELEMENT_REF => 50
+        case ExprKind.STORE_ELEMENT_BY_NAME => 51
+        case ExprKind.FORIN_RANGE => 52
+        case ExprKind.FORIN_ITER => 53
+        case ExprKind.FORIN_CLOSED_RANGE => 54
+        case ExprKind.LAMBDA => 55
+        case ExprKind.CONSTANT => 56
+        case ExprKind.DEBUGEXPR => 57
+        case ExprKind.TUPLE => 58
+        case ExprKind.FIELD => 59
+        case ExprKind.FIELD_BY_NAME => 60
+        case ExprKind.APPLY => 61
+        case ExprKind.INVOKE => 62
+        case ExprKind.INVOKESTATIC => 63
+        case ExprKind.INSTANCEOF => 64
+        case ExprKind.CLASS_STATIC_CAST => 65
+        case ExprKind.NUMERIC_CAST => 66
+        case ExprKind.GET_EXCEPTION => 67
+        case ExprKind.RAW_ARRAY_ALLOCATE => 68
+        case ExprKind.RAW_ARRAY_LITERAL_INIT => 69
+        case ExprKind.RAW_ARRAY_INIT_BY_VALUE => 70
+        case ExprKind.VARRAY => 71
+        case ExprKind.VARRAY_BUILDER => 72
+        case ExprKind.INTRINSIC => 73
+        case ExprKind.SPAWN => 74
+        case ExprKind.GET_INSTANTIATE_VALUE => 75
+        case ExprKind.BOX => 76
+        case ExprKind.UNBOX_TO_VALUE => 77
+        case ExprKind.CAST_TO_GENERIC => 78
+        case ExprKind.CAST_TO_CONCRETE => 79
+        case ExprKind.UNBOX_TO_REF => 80
+        case ExprKind.GET_RTTI => 81
+        case ExprKind.GET_RTTI_STATIC => 82
     }
 }
 
@@ -583,7 +593,15 @@ public func ExprKindName(kind: ExprKind): String {
         case ExprKind.INVOKE_WITH_EXCEPTION => "InvokeWithException"
         case ExprKind.INVOKESTATIC_WITH_EXCEPTION => "InvokeStaticWithException"
         case ExprKind.RAISE_EXCEPTION => "RaiseException"
-        case ExprKind.INT_OP_WITH_EXCEPTION => "IntOpWithException"
+        case ExprKind.NEG_WITH_EXCEPTION => "NegWithException"
+        case ExprKind.ADD_WITH_EXCEPTION => "AddWithException"
+        case ExprKind.SUB_WITH_EXCEPTION => "SubWithException"
+        case ExprKind.MUL_WITH_EXCEPTION => "MulWithException"
+        case ExprKind.DIV_WITH_EXCEPTION => "DivWithException"
+        case ExprKind.MOD_WITH_EXCEPTION => "ModWithException"
+        case ExprKind.EXP_WITH_EXCEPTION => "ExpWithException"
+        case ExprKind.LSHIFT_WITH_EXCEPTION => "LShiftWithException"
+        case ExprKind.RSHIFT_WITH_EXCEPTION => "RShiftWithException"
         case ExprKind.SPAWN_WITH_EXCEPTION => "SpawnWithException"
         case ExprKind.NUMERIC_CAST_WITH_EXCEPTION => "NumericCastWithException"
         case ExprKind.INTRINSIC_WITH_EXCEPTION => "IntrinsicWithException"
@@ -670,6 +688,112 @@ public func ExprKindMajor(kind: ExprKind): ExprMajorKind {
         return ExprMajorKind.STRUCTURED_CTRL_FLOW_EXPR
     }
     return ExprMajorKind.OTHERS
+}
+
+public enum UnaryExprKind {
+    | NEG | NOT | BITNOT
+}
+
+public enum BinaryExprKind {
+    | ADD | SUB | MUL | DIV | MOD | EXP | LSHIFT | RSHIFT | BITAND | BITOR | BITXOR
+    | LT | GT | LE | GE | EQUAL | NOTEQUAL | AND | OR
+}
+
+public func ToExprKind(kind: UnaryExprKind, isTry: Bool): ExprKind {
+    return match (kind) {
+        case UnaryExprKind.NEG => if (isTry) { ExprKind.NEG_WITH_EXCEPTION } else { ExprKind.NEG }
+        case UnaryExprKind.NOT =>
+            if (isTry) {
+                CJC_ABORT()
+                ExprKind.INVALID
+            } else {
+                ExprKind.NOT
+            }
+        case UnaryExprKind.BITNOT =>
+            if (isTry) {
+                CJC_ABORT()
+                ExprKind.INVALID
+            } else {
+                ExprKind.BITNOT
+            }
+    }
+}
+
+public func ToExprKind(kind: BinaryExprKind, isTry: Bool): ExprKind {
+    return match (kind) {
+        case BinaryExprKind.ADD => if (isTry) { ExprKind.ADD_WITH_EXCEPTION } else { ExprKind.ADD }
+        case BinaryExprKind.SUB => if (isTry) { ExprKind.SUB_WITH_EXCEPTION } else { ExprKind.SUB }
+        case BinaryExprKind.MUL => if (isTry) { ExprKind.MUL_WITH_EXCEPTION } else { ExprKind.MUL }
+        case BinaryExprKind.DIV => if (isTry) { ExprKind.DIV_WITH_EXCEPTION } else { ExprKind.DIV }
+        case BinaryExprKind.MOD => if (isTry) { ExprKind.MOD_WITH_EXCEPTION } else { ExprKind.MOD }
+        case BinaryExprKind.EXP => if (isTry) { ExprKind.EXP_WITH_EXCEPTION } else { ExprKind.EXP }
+        case BinaryExprKind.LSHIFT => if (isTry) { ExprKind.LSHIFT_WITH_EXCEPTION } else { ExprKind.LSHIFT }
+        case BinaryExprKind.RSHIFT => if (isTry) { ExprKind.RSHIFT_WITH_EXCEPTION } else { ExprKind.RSHIFT }
+        case BinaryExprKind.BITAND => if (isTry) { CJC_ABORT(); ExprKind.INVALID } else { ExprKind.BITAND }
+        case BinaryExprKind.BITOR => if (isTry) { CJC_ABORT(); ExprKind.INVALID } else { ExprKind.BITOR }
+        case BinaryExprKind.BITXOR => if (isTry) { CJC_ABORT(); ExprKind.INVALID } else { ExprKind.BITXOR }
+        case BinaryExprKind.LT => if (isTry) { CJC_ABORT(); ExprKind.INVALID } else { ExprKind.LT }
+        case BinaryExprKind.GT => if (isTry) { CJC_ABORT(); ExprKind.INVALID } else { ExprKind.GT }
+        case BinaryExprKind.LE => if (isTry) { CJC_ABORT(); ExprKind.INVALID } else { ExprKind.LE }
+        case BinaryExprKind.GE => if (isTry) { CJC_ABORT(); ExprKind.INVALID } else { ExprKind.GE }
+        case BinaryExprKind.EQUAL => if (isTry) { CJC_ABORT(); ExprKind.INVALID } else { ExprKind.EQUAL }
+        case BinaryExprKind.NOTEQUAL => if (isTry) { CJC_ABORT(); ExprKind.INVALID } else { ExprKind.NOTEQUAL }
+        case BinaryExprKind.AND => if (isTry) { CJC_ABORT(); ExprKind.INVALID } else { ExprKind.AND }
+        case BinaryExprKind.OR => if (isTry) { CJC_ABORT(); ExprKind.INVALID } else { ExprKind.OR }
+    }
+}
+
+public func ToUnaryExprKind(kind: ExprKind): UnaryExprKind {
+    return match (kind) {
+        case ExprKind.NEG | ExprKind.NEG_WITH_EXCEPTION => UnaryExprKind.NEG
+        case ExprKind.NOT => UnaryExprKind.NOT
+        case ExprKind.BITNOT => UnaryExprKind.BITNOT
+        case _ =>
+            CJC_ABORT()
+            UnaryExprKind.NEG
+    }
+}
+
+public func ToBinaryExprKind(kind: ExprKind): BinaryExprKind {
+    return match (kind) {
+        case ExprKind.ADD | ExprKind.ADD_WITH_EXCEPTION => BinaryExprKind.ADD
+        case ExprKind.SUB | ExprKind.SUB_WITH_EXCEPTION => BinaryExprKind.SUB
+        case ExprKind.MUL | ExprKind.MUL_WITH_EXCEPTION => BinaryExprKind.MUL
+        case ExprKind.DIV | ExprKind.DIV_WITH_EXCEPTION => BinaryExprKind.DIV
+        case ExprKind.MOD | ExprKind.MOD_WITH_EXCEPTION => BinaryExprKind.MOD
+        case ExprKind.EXP | ExprKind.EXP_WITH_EXCEPTION => BinaryExprKind.EXP
+        case ExprKind.LSHIFT | ExprKind.LSHIFT_WITH_EXCEPTION => BinaryExprKind.LSHIFT
+        case ExprKind.RSHIFT | ExprKind.RSHIFT_WITH_EXCEPTION => BinaryExprKind.RSHIFT
+        case ExprKind.BITAND => BinaryExprKind.BITAND
+        case ExprKind.BITOR => BinaryExprKind.BITOR
+        case ExprKind.BITXOR => BinaryExprKind.BITXOR
+        case ExprKind.LT => BinaryExprKind.LT
+        case ExprKind.GT => BinaryExprKind.GT
+        case ExprKind.LE => BinaryExprKind.LE
+        case ExprKind.GE => BinaryExprKind.GE
+        case ExprKind.EQUAL => BinaryExprKind.EQUAL
+        case ExprKind.NOTEQUAL => BinaryExprKind.NOTEQUAL
+        case ExprKind.AND => BinaryExprKind.AND
+        case ExprKind.OR => BinaryExprKind.OR
+        case _ =>
+            CJC_ABORT()
+            BinaryExprKind.ADD
+    }
+}
+
+public func PlainExprKind(kind: ExprKind): ExprKind {
+    return match (kind) {
+        case ExprKind.NEG_WITH_EXCEPTION => ExprKind.NEG
+        case ExprKind.ADD_WITH_EXCEPTION => ExprKind.ADD
+        case ExprKind.SUB_WITH_EXCEPTION => ExprKind.SUB
+        case ExprKind.MUL_WITH_EXCEPTION => ExprKind.MUL
+        case ExprKind.DIV_WITH_EXCEPTION => ExprKind.DIV
+        case ExprKind.MOD_WITH_EXCEPTION => ExprKind.MOD
+        case ExprKind.EXP_WITH_EXCEPTION => ExprKind.EXP
+        case ExprKind.LSHIFT_WITH_EXCEPTION => ExprKind.LSHIFT
+        case ExprKind.RSHIFT_WITH_EXCEPTION => ExprKind.RSHIFT
+        case _ => kind
+    }
 }
 
 extend ExprKind <: Equatable<ExprKind> {

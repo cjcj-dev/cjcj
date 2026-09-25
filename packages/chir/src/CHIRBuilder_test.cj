@@ -135,4 +135,54 @@ public class ExpressionFamilyEdgesTest {
         @Expect(normal.GetPredecessors().size, 0)
         @Expect(error.GetPredecessors().size, 0)
     }
+
+    @TestCase
+    public func ExceptionOpsUseDistinctExprKinds(): Unit {
+        let context = CHIRContext()
+        let builder = CHIRBuilder(context)
+        let fn = builder.CreateFunction(context.GetFuncTy(ArrayList<Type>(), context.GetUnitTy()), "exception-ops")
+        let body = builder.CreateBlockGroup(fn)
+        fn.InitBody(body)
+        let source = builder.CreateBlock(body)
+        let normal = builder.CreateBlock(body)
+        let error = builder.CreateBlock(body)
+        body.SetEntryBlock(source)
+        let value = builder.CreateConstant(context.GetInt64Ty(), IntLiteral(7), source).GetResult().getOrThrow()
+        let neg = builder.CreateUnaryExpressionWithException(context.GetInt64Ty(), ExprKind.NEG, value, normal, error, source)
+        let add = builder.CreateBinaryExpressionWithException(context.GetInt64Ty(), ExprKind.ADD, value, value, normal, error, source)
+        @Expect(neg.GetExprKind(), ExprKind.NEG_WITH_EXCEPTION)
+        @Expect(add.GetExprKind(), ExprKind.ADD_WITH_EXCEPTION)
+        @Expect(neg.GetExprKind() == add.GetExprKind(), false)
+        @Expect((neg as UnaryExpressionBase).isSome(), true)
+        @Expect((neg as UnaryExpression).isSome(), false)
+        @Expect((add as BinaryExpressionBase).isSome(), true)
+        @Expect((add as BinaryExpression).isSome(), false)
+        @Expect(neg.GetOpKind(), ExprKind.NEG)
+        @Expect(add.GetOpKind(), ExprKind.ADD)
+    }
+
+    @TestCase
+    public func ReplaceOneDuplicateSuccessorKeepsPredecessor(): Unit {
+        let context = CHIRContext()
+        let builder = CHIRBuilder(context)
+        let fn = builder.CreateFunction(context.GetFuncTy(ArrayList<Type>(), context.GetUnitTy()), "dup-successor")
+        let body = builder.CreateBlockGroup(fn)
+        fn.InitBody(body)
+        let source = builder.CreateBlock(body)
+        let target = builder.CreateBlock(body)
+        let other = builder.CreateBlock(body)
+        body.SetEntryBlock(source)
+        let value = builder.CreateConstant(context.GetInt64Ty(), IntLiteral(3), source).GetResult().getOrThrow()
+        let add = builder.CreateBinaryExpressionWithException(context.GetInt64Ty(), ExprKind.ADD, value, value, target, target, source)
+        source.AppendExpression(add)
+        @Expect(target.GetPredecessors().size, 1)
+        add.ReplaceSuccessor(0, other)
+        @Expect(add.GetSuccessor(0).nodeId, other.nodeId)
+        @Expect(add.GetSuccessor(1).nodeId, target.nodeId)
+        @Expect(target.GetPredecessors().size, 1)
+        @Expect(other.GetPredecessors().size, 1)
+        add.ReplaceSuccessor(1, other)
+        @Expect(target.GetPredecessors().size, 0)
+        @Expect(other.GetPredecessors().size, 1)
+    }
 }

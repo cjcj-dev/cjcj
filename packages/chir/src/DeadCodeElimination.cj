@@ -407,9 +407,10 @@ public class DeadCodeElimination {
                 if (expr.GetExprKind() == ExprKind.LAMBDA) {
                     DiagUnusedCode(res, DiagKindRefactor.chir_dce_unused_function,
                         (expr as Lambda).getOrThrow().GetSrcCodeIdentifier())
-                } else if (expr.IsUnaryExpr() || expr.IsBinaryExpr() || expr.IsIntOpWithException()) {
-                    let kind = if (expr.GetExprKind() == ExprKind.INT_OP_WITH_EXCEPTION) {
-                        GetLiteralFromExprKind((expr as IntOpWithException).getOrThrow().GetOpKind())
+                } else if (expr.IsUnaryExpr() || expr.IsBinaryExpr() || expr.IsUnaryExpressionWithException() ||
+                    expr.IsBinaryExpressionWithException()) {
+                    let kind = if (expr.IsUnaryExpressionWithException() || expr.IsBinaryExpressionWithException()) {
+                        GetLiteralFromExprKind(PlainExprKind(expr.GetExprKind()))
                     } else {
                         GetLiteralFromExprKind(expr.GetExprKind())
                     }
@@ -734,7 +735,7 @@ public class DeadCodeElimination {
             let posForWarning = expression.GetDebugLocationInfoForWarning()
             let warningRange = ToRangeIfNotZero(posForWarning)
             if (warningRange[0]) {
-                if (expression.IsBinaryExpr() || expression.IsIntOpWithException()) {
+                if (expression.IsBinaryExpr() || expression.IsBinaryExpressionWithException()) {
                     var hasNothingOperand = false
                     var index: Int64 = 0
                     while (index < expression.GetNumOfNonSuccessorOperands()) {
@@ -819,7 +820,8 @@ public class DeadCodeElimination {
                 return false
             }
         }
-        if (expr.GetExprKind() == ExprKind.INT_OP_WITH_EXCEPTION && expr.GetNeverOverflowInfo() && isReportWarning) {
+        if ((expr.IsUnaryExpressionWithException() || expr.IsBinaryExpressionWithException()) &&
+            expr.GetNeverOverflowInfo() && isReportWarning) {
             return true
         }
         if (expr.IsTerminator()) {

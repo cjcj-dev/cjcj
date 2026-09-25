@@ -132,25 +132,14 @@ public class BlockGroupCopyHelper {
 
     private static func ReplaceExprOperandsInExpression(expr: Expression, valueMap: HashMap<Int64, Value>): Unit {
         if (expr.GetExprKind() != ExprKind.DEBUGEXPR) {
+            let allOperands = expr.GetOperands()
             var idx: Int64 = 0
-            while (idx < expr.GetNumOfNonSuccessorOperands()) {
-                let operand = expr.GetOperand(idx)
+            while (idx < allOperands.size) {
+                let operand = allOperands[idx]
                 if (let Some(newOperand) <- valueMap.get(operand.nodeId)) {
                     expr.ReplaceOperand(idx, newOperand)
                 }
                 idx++
-            }
-            if (let Some(term) <- expr.AsTerminator()) {
-                var succIdx: Int64 = 0
-                while (succIdx < term.GetNumOfSuccessor()) {
-                    let successor = term.GetSuccessor(succIdx)
-                    if (let Some(newSuccessorValue) <- valueMap.get(successor.nodeId)) {
-                        if (let Some(newSuccessor) <- newSuccessorValue.AsBlock()) {
-                            term.ReplaceSuccessor(succIdx, newSuccessor)
-                        }
-                    }
-                    succIdx++
-                }
             }
         }
 

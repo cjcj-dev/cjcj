@@ -1,7 +1,7 @@
 package cjcj::chir
 
 import std.collection.*
-import cjcj::utils.{CJC_ASSERT, OverflowStrategy, OverflowStrategyName}
+import cjcj::utils.{CJC_ASSERT, OverflowStrategy}
 
 public open class Terminator <: Expression {
     public init(kind: ExprKind, operands: ArrayList<Value>, successors: ArrayList<Block>, parent: Option<Block>) {
@@ -485,83 +485,39 @@ public class InvokeStaticWithException <: DynamicDispatchWithException {
     }
 }
 
-public class IntOpWithException <: ExpressionWithException {
-    private let opKind: ExprKind
-    private var overflowStrategy: OverflowStrategy
-
-    public init(opKind: ExprKind, operand: Value, successBlock: Block, errorBlock: Block, parent: Option<Block>,
+public class UnaryExpressionWithException <: UnaryExpressionBase {
+    public init(opKind: UnaryExprKind, operand: Value, successBlock: Block, errorBlock: Block, parent: Option<Block>,
         overflowStrategy!: OverflowStrategy = OverflowStrategy.NA) {
-        super(ExprKind.INT_OP_WITH_EXCEPTION, MakeUnaryTermOperands(operand), successBlock, errorBlock, parent)
-        this.opKind = opKind
-        this.overflowStrategy = overflowStrategy
+        super(opKind, operand, MakeTwoSuccessors(successBlock, errorBlock), parent, overflowStrategy: overflowStrategy,
+            isTry: true)
     }
 
-    public init(opKind: ExprKind, left: Value, right: Value, successBlock: Block, errorBlock: Block,
-        parent: Option<Block>, overflowStrategy!: OverflowStrategy = OverflowStrategy.NA) {
-        super(ExprKind.INT_OP_WITH_EXCEPTION, MakeBinaryTermOperands(left, right), successBlock, errorBlock, parent)
-        this.opKind = opKind
-        this.overflowStrategy = overflowStrategy
-    }
-
-    public func GetOpKind(): ExprKind {
-        return opKind
-    }
-
-    public func GetOpKindName(): String {
-        return ExprKindName(opKind) + "WithException"
-    }
-
-    public func GetLHSOperand(): Value {
-        return GetOperand(0)
-    }
-
-    public func GetRHSOperand(): Option<Value> {
-        if (GetNumOfNonSuccessorOperands() > 1) {
-            return GetOperand(1)
-        }
-        return None
-    }
-
-    public func GetOverflowStrategy(): OverflowStrategy {
-        if (opKind == ExprKind.DIV) {
-            return overflowStrategy
-        }
-        return OverflowStrategy.THROWING
-    }
-
-    public func SetOverflowStrategy(strategy: OverflowStrategy): Unit {
-        overflowStrategy = strategy
-    }
-
-    public override func AddExtraComment(): String {
-        let base = super.AddExtraComment()
-        let overflowText = if (overflowStrategy != OverflowStrategy.NA) {
-            "Overflow: " + OverflowStrategyName(overflowStrategy)
-        } else {
-            ""
-        }
-        let opText = "op: " + GetOpKindName()
-        if (base.isEmpty()) {
-            if (overflowText.isEmpty()) {
-                return opText
-            }
-            return overflowText + " " + opText
-        }
-        if (overflowText.isEmpty()) {
-            return base + " " + opText
-        }
-        return base + " " + overflowText + " " + opText
-    }
+    public func GetSuccessBlock(): Block { return GetSuccessor(0) }
+    public func GetErrorBlock(): Block { return GetSuccessor(1) }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
-        let cloned = if (let Some(rhs) <- GetRHSOperand()) {
-            builder.CreateBinaryIntOpWithException(GetResult().getOrThrow().GetType().getOrThrow(), GetOpKind(), GetLHSOperand(), rhs,
-                GetSuccessBlock(), GetErrorBlock(), parent)
-        } else {
-            builder.CreateUnaryIntOpWithException(GetResult().getOrThrow().GetType().getOrThrow(), GetOpKind(), GetLHSOperand(),
-                GetSuccessBlock(), GetErrorBlock(), parent)
-        }
-        cloned.SetOverflowStrategy(overflowStrategy)
+        let cloned = builder.CreateUnaryExpressionWithException(GetResult().getOrThrow().GetType().getOrThrow(),
+            GetOpKind(), GetOperand(0), GetSuccessBlock(), GetErrorBlock(), parent)
+        cloned.SetOverflowStrategy(GetOverflowStrategy())
+        cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
+        return cloned
+    }
+}
+
+public class BinaryExpressionWithException <: BinaryExpressionBase {
+    public init(opKind: BinaryExprKind, left: Value, right: Value, successBlock: Block, errorBlock: Block,
+        parent: Option<Block>, overflowStrategy!: OverflowStrategy = OverflowStrategy.NA) {
+        super(opKind, left, right, MakeTwoSuccessors(successBlock, errorBlock), parent,
+            overflowStrategy: overflowStrategy, isTry: true)
+    }
+
+    public func GetSuccessBlock(): Block { return GetSuccessor(0) }
+    public func GetErrorBlock(): Block { return GetSuccessor(1) }
+
+    public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
+        let cloned = builder.CreateBinaryExpressionWithException(GetResult().getOrThrow().GetType().getOrThrow(),
+            GetOpKind(), GetLHSOperand(), GetRHSOperand(), GetSuccessBlock(), GetErrorBlock(), parent)
+        cloned.SetOverflowStrategy(GetOverflowStrategy())
         cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
         return cloned
     }

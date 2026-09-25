@@ -73,7 +73,12 @@ public open class Expression <: Base & Hashable & Equatable<Expression> {
     public func IsDynamicDispatch(): Bool { return kind == ExprKind.INVOKE || kind == ExprKind.INVOKESTATIC }
     public func IsField(): Bool { return kind == ExprKind.FIELD }
     public func IsFuncCall(): Bool { return kind == ExprKind.APPLY || kind == ExprKind.INVOKE || kind == ExprKind.INVOKESTATIC }
-    public func IsIntOpWithException(): Bool { return kind == ExprKind.INT_OP_WITH_EXCEPTION }
+    public func IsUnaryExpressionWithException(): Bool { return kind == ExprKind.NEG_WITH_EXCEPTION }
+    public func IsBinaryExpressionWithException(): Bool {
+        let index = ExprKindIndex(kind)
+        return index >= ExprKindIndex(ExprKind.ADD_WITH_EXCEPTION) &&
+            index <= ExprKindIndex(ExprKind.RSHIFT_WITH_EXCEPTION)
+    }
     public func IsInvoke(): Bool { return kind == ExprKind.INVOKE }
     public func IsInvokeStaticBase(): Bool {
         return kind == ExprKind.INVOKESTATIC || kind == ExprKind.INVOKESTATIC_WITH_EXCEPTION
@@ -123,7 +128,8 @@ public open class Expression <: Base & Hashable & Equatable<Expression> {
     public func HasExceptionBranch(): Bool {
         return kind == ExprKind.APPLY_WITH_EXCEPTION || kind == ExprKind.INVOKE_WITH_EXCEPTION ||
             kind == ExprKind.INVOKESTATIC_WITH_EXCEPTION ||
-            kind == ExprKind.INT_OP_WITH_EXCEPTION || kind == ExprKind.SPAWN_WITH_EXCEPTION ||
+            IsUnaryExpressionWithException() || IsBinaryExpressionWithException() ||
+            kind == ExprKind.SPAWN_WITH_EXCEPTION ||
             kind == ExprKind.NUMERIC_CAST_WITH_EXCEPTION || kind == ExprKind.INTRINSIC_WITH_EXCEPTION ||
             kind == ExprKind.ALLOCATE_WITH_EXCEPTION || kind == ExprKind.RAW_ARRAY_ALLOCATE_WITH_EXCEPTION
     }
@@ -253,12 +259,7 @@ public open class Expression <: Base & Hashable & Equatable<Expression> {
     }
 
     public func ReplaceSuccessor(index: Int64, newBlock: Block): Unit {
-        let oldBlock = GetSuccessor(index)
         ReplaceOperand(GetSuccessorIndex(index), newBlock)
-        if (let Some(parentBlock) <- parent) {
-            oldBlock.RemovePredecessor(parentBlock)
-            newBlock.AddPredecessor(parentBlock)
-        }
     }
 
     public func SyncSuccessorPredecessors(): Unit {
@@ -286,14 +287,23 @@ public open class Expression <: Base & Hashable & Equatable<Expression> {
             return
         }
         operands[idx] = newOperand
-        newOperand.AddUserOnly(this)
-        var needRemoveOldOpUser = true
+        if (let Some(newBlock) <- (newOperand as Block)) {
+            newBlock.AddPredecessor(parent.getOrThrow())
+        } else {
+            newOperand.AddUserOnly(this)
+        }
+        var stillUsed = false
         for (operand in operands) {
             if (operand.nodeId == oldOperand.nodeId) {
-                needRemoveOldOpUser = false
+                stillUsed = true
             }
         }
-        if (needRemoveOldOpUser) {
+        if (stillUsed) {
+            return
+        }
+        if (let Some(oldBlock) <- (oldOperand as Block)) {
+            oldBlock.RemovePredecessor(parent.getOrThrow())
+        } else {
             oldOperand.RemoveUserOnly(this)
         }
     }
@@ -302,14 +312,27 @@ public open class Expression <: Base & Hashable & Equatable<Expression> {
         if (oldOperand.nodeId == newOperand.nodeId) {
             return
         }
+        var found = false
         var idx: Int64 = 0
         while (idx < operands.size) {
             if (operands[idx].nodeId == oldOperand.nodeId) {
                 operands[idx] = newOperand
-                newOperand.AddUserOnly(this)
-                oldOperand.RemoveUserOnly(this)
+                found = true
             }
             idx++
+        }
+        if (!found) {
+            return
+        }
+        if (let Some(oldBlock) <- (oldOperand as Block)) {
+            oldBlock.RemovePredecessor(parent.getOrThrow())
+        } else {
+            oldOperand.RemoveUserOnly(this)
+        }
+        if (let Some(newBlock) <- (newOperand as Block)) {
+            newBlock.AddPredecessor(parent.getOrThrow())
+        } else {
+            newOperand.AddUserOnly(this)
         }
     }
 
@@ -452,11 +475,7 @@ public open class Expression <: Base & Hashable & Equatable<Expression> {
             }
             out += ": " + res.GetType().getOrThrow().ToString() + " = "
         }
-        if (kind == ExprKind.INT_OP_WITH_EXCEPTION) {
-            out += (this as IntOpWithException).getOrThrow().GetOpKindName()
-        } else {
-            out += GetExprKindName()
-        }
+        out += GetExprKindName()
         if (kind == ExprKind.LAMBDA) {
             out += (this as Lambda).getOrThrow().LambdaOperandsToString(indent)
         } else {
@@ -482,24 +501,33 @@ func GetOperands(expression: Expression): ArrayList<Value> {
     return operands
 }
 
-public class UnaryExpression <: Expression {
-    private let overflowStrategy: OverflowStrategy
+public open class UnaryExpressionBase <: Expression {
+    protected var overflowStrategy: OverflowStrategy
 
-    public init(kind: ExprKind, operand: Value, parent: Option<Block>,
-        overflowStrategy!: OverflowStrategy = OverflowStrategy.NA) {
-        super(kind, MakeUnaryOperands(operand), parent)
+    public init(opKind: UnaryExprKind, operand: Value, successors: ArrayList<Block>, parent: Option<Block>,
+        overflowStrategy!: OverflowStrategy = OverflowStrategy.NA, isTry!: Bool = false) {
+        super(ToExprKind(opKind, isTry), MakeUnaryWithSuccessors(operand, successors), parent)
         this.overflowStrategy = overflowStrategy
     }
 
-    public func GetOverflowStrategy(): OverflowStrategy {
-        return overflowStrategy
-    }
+    public func GetOpKind(): ExprKind { return PlainExprKind(GetExprKind()) }
+
+    public func GetOverflowStrategy(): OverflowStrategy { return overflowStrategy }
+
+    public func SetOverflowStrategy(strategy: OverflowStrategy): Unit { overflowStrategy = strategy }
 
     public override func AddExtraComment(): String {
         if (overflowStrategy != OverflowStrategy.NA) {
             return OverflowToString(overflowStrategy)
         }
         return ""
+    }
+}
+
+public class UnaryExpression <: UnaryExpressionBase {
+    public init(kind: ExprKind, operand: Value, parent: Option<Block>,
+        overflowStrategy!: OverflowStrategy = OverflowStrategy.NA) {
+        super(ToUnaryExprKind(kind), operand, ArrayList<Block>(), parent, overflowStrategy: overflowStrategy, isTry: false)
     }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
@@ -510,32 +538,37 @@ public class UnaryExpression <: Expression {
     }
 }
 
-public class BinaryExpression <: Expression {
-    private let overflowStrategy: OverflowStrategy
+public open class BinaryExpressionBase <: Expression {
+    protected var overflowStrategy: OverflowStrategy
 
-    public init(kind: ExprKind, left: Value, right: Value, parent: Option<Block>,
-        overflowStrategy!: OverflowStrategy = OverflowStrategy.NA) {
-        super(kind, MakeBinaryOperands(left, right), parent)
+    public init(opKind: BinaryExprKind, left: Value, right: Value, successors: ArrayList<Block>, parent: Option<Block>,
+        overflowStrategy!: OverflowStrategy = OverflowStrategy.NA, isTry!: Bool = false) {
+        super(ToExprKind(opKind, isTry), MakeBinaryWithSuccessors(left, right, successors), parent)
         this.overflowStrategy = overflowStrategy
     }
 
-    public func GetLHSOperand(): Value {
-        return GetOperand(0)
-    }
+    public func GetLHSOperand(): Value { return GetOperand(0) }
 
-    public func GetRHSOperand(): Value {
-        return GetOperand(1)
-    }
+    public func GetRHSOperand(): Value { return GetOperand(1) }
 
-    public func GetOverflowStrategy(): OverflowStrategy {
-        return overflowStrategy
-    }
+    public func GetOpKind(): ExprKind { return PlainExprKind(GetExprKind()) }
+
+    public func GetOverflowStrategy(): OverflowStrategy { return overflowStrategy }
+
+    public func SetOverflowStrategy(strategy: OverflowStrategy): Unit { overflowStrategy = strategy }
 
     public override func AddExtraComment(): String {
         if (overflowStrategy != OverflowStrategy.NA) {
             return OverflowToString(overflowStrategy)
         }
         return ""
+    }
+}
+
+public class BinaryExpression <: BinaryExpressionBase {
+    public init(kind: ExprKind, left: Value, right: Value, parent: Option<Block>,
+        overflowStrategy!: OverflowStrategy = OverflowStrategy.NA) {
+        super(ToBinaryExprKind(kind), left, right, ArrayList<Block>(), parent, overflowStrategy: overflowStrategy, isTry: false)
     }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
@@ -2310,6 +2343,25 @@ public class Lambda <: Expression {
         cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
         return cloned
     }
+}
+
+private func MakeUnaryWithSuccessors(operand: Value, successors: ArrayList<Block>): ArrayList<Value> {
+    let ops = ArrayList<Value>()
+    ops.add(operand)
+    for (succ in successors) {
+        ops.add(succ)
+    }
+    return ops
+}
+
+private func MakeBinaryWithSuccessors(left: Value, right: Value, successors: ArrayList<Block>): ArrayList<Value> {
+    let ops = ArrayList<Value>()
+    ops.add(left)
+    ops.add(right)
+    for (succ in successors) {
+        ops.add(succ)
+    }
+    return ops
 }
 
 private func MakeUnaryOperands(operand: Value): ArrayList<Value> {

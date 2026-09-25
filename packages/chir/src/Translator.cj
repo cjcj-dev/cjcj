@@ -1873,7 +1873,7 @@ public class Translator {
                 case Some(exceptBlock) => exceptBlock
                 case None => errorBlock
             }
-            let binary = builder.CreateBinaryIntOpWithException(resultTy, binaryKind, lhs, rhs, successBlock,
+            let binary = builder.CreateBinaryExpressionWithException(resultTy, binaryKind, lhs, rhs, successBlock,
                 targetBlock, CurrentBlock())
             CurrentBlock().AppendExpression(binary)
             binary.SetOverflowStrategy(expr.overflowStrategy)
@@ -1915,7 +1915,7 @@ public class Translator {
                 case Some(exceptBlock) => exceptBlock
                 case None => errorBlock
             }
-            let unary = builder.CreateUnaryIntOpWithException(resultTy, kind, operand, successBlock,
+            let unary = builder.CreateUnaryExpressionWithException(resultTy, kind, operand, successBlock,
                 targetBlock, CurrentBlock())
             CurrentBlock().AppendExpression(unary)
             unary.SetOverflowStrategy(overflowStrategy)
@@ -9398,7 +9398,7 @@ public class Translator {
                     case Some(exceptBlock) => exceptBlock
                     case None => errorBlock
                 }
-                let opResult = builder.CreateBinaryIntOpWithException(resultTy, ToCHIRCompoundAssignOp(expr.op),
+                let opResult = builder.CreateBinaryExpressionWithException(resultTy, ToCHIRCompoundAssignOp(expr.op),
                     lhsValue, rhsValue, successBlock, targetBlock, CurrentBlock())
                 CurrentBlock().AppendExpression(opResult)
                 opResult.SetOverflowStrategy(expr.overflowStrategy)
@@ -9702,7 +9702,7 @@ public class Translator {
                     case Some(exceptBlock) => exceptBlock
                     case None => errorBlock
                 }
-                let opResult = builder.CreateBinaryIntOpWithException(resultTy, ToCHIRCompoundAssignOp(assign.op),
+                let opResult = builder.CreateBinaryExpressionWithException(resultTy, ToCHIRCompoundAssignOp(assign.op),
                     lhsValue, rhsValue, successBlock, targetBlock, CurrentBlock())
                 CurrentBlock().AppendExpression(opResult)
                 opResult.SetOverflowStrategy(assign.overflowStrategy)

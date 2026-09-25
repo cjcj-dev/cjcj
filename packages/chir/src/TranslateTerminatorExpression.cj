@@ -14,7 +14,10 @@ public func TranslateTerminatorExpression(compiler: CHIR2BCHIR, context: CHIR2BC
         case ExprKind.APPLY_WITH_EXCEPTION => TranslateApplyWithExceptionTerminator(compiler, context, expr)
         case ExprKind.INVOKE_WITH_EXCEPTION => TranslateInvokeWithExceptionTerminator(compiler, context, expr)
         case ExprKind.INVOKESTATIC_WITH_EXCEPTION => context.definition.PushOp(OpCode.ABORT)
-        case ExprKind.INT_OP_WITH_EXCEPTION => TranslateIntOpWithException(compiler, context, expr)
+        case ExprKind.NEG_WITH_EXCEPTION | ExprKind.ADD_WITH_EXCEPTION | ExprKind.SUB_WITH_EXCEPTION |
+            ExprKind.MUL_WITH_EXCEPTION | ExprKind.DIV_WITH_EXCEPTION | ExprKind.MOD_WITH_EXCEPTION |
+            ExprKind.EXP_WITH_EXCEPTION | ExprKind.LSHIFT_WITH_EXCEPTION | ExprKind.RSHIFT_WITH_EXCEPTION =>
+            TranslateIntOpWithException(compiler, context, expr)
         case ExprKind.ALLOCATE_WITH_EXCEPTION => TranslateAllocateWithExceptionTerminator(compiler, context, expr)
         case _ => context.definition.PushOp(OpCode.ABORT)
     }
@@ -139,25 +142,21 @@ private func TranslateInvokeWithExceptionTerminator(compiler: CHIR2BCHIR, contex
 
 private func TranslateIntOpWithException(compiler: CHIR2BCHIR, context: CHIR2BCHIRContext,
     expr: Expression): Unit {
-    if (let Some(intOp) <- (expr as IntOpWithException)) {
-        let opCode = BCHIRBinaryExprKindWithExceptionToOpCode(intOp.GetOpKind())
+    if (expr.IsUnaryExpressionWithException() || expr.IsBinaryExpressionWithException()) {
+        let opCode = BCHIRBinaryExprKindWithExceptionToOpCode(PlainExprKind(expr.GetExprKind()))
         if (opCode == OpCode.INVALID) {
             context.definition.PushOp(OpCode.NOT_SUPPORTED)
             return
         }
         compiler.PushOpCodeWithAnnotations(context, opCode, expr,
             args: ArrayList<Int64>([
-                BCHIRTypeKindCell(intOp.GetOperand(0).GetType()),
+                BCHIRTypeKindCell(expr.GetOperand(0).GetType()),
                 OverflowStrategyIndex(OverflowStrategy.THROWING)
             ]), storeCodePos: true)
         if (opCode == OpCode.BIN_LSHIFT_EXC || opCode == OpCode.BIN_RSHIFT_EXC) {
-            if (let Some(rhs) <- intOp.GetRHSOperand()) {
-                context.definition.PushCell(BCHIRTypeKindCell(rhs.GetType()))
-            } else {
-                context.definition.PushCell(TypeKindIndex(TypeKind.TYPE_INVALID))
-            }
+            context.definition.PushCell(BCHIRTypeKindCell(expr.GetOperand(1).GetType()))
         }
-        TranslateTryTerminatorJumps(compiler, context, intOp)
+        TranslateTryTerminatorJumps(compiler, context, expr)
     } else {
         context.definition.PushOp(OpCode.NOT_SUPPORTED)
     }

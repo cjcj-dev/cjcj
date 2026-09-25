@@ -14,7 +14,8 @@ import cjcj::chir.Exit
 import cjcj::chir.ExprKind
 import cjcj::chir.Function
 import cjcj::chir.GoTo
-import cjcj::chir.IntOpWithException
+import cjcj::chir.BinaryExpressionWithException
+import cjcj::chir.UnaryExpressionWithException
 import cjcj::chir.LocalVar
 import cjcj::chir.MultiBranch
 import cjcj::chir.Type
@@ -67,13 +68,13 @@ public func HandleTerminatorExpression(irBuilder: IRBuilder2, chirExpr: Expressi
             return GenerateInvokeExpression(builder, expr)
         })
     }
-    if (kind == ExprKind.INT_OP_WITH_EXCEPTION) {
+    if (chirExpr.IsUnaryExpressionWithException() || chirExpr.IsBinaryExpressionWithException()) {
         return HandleWithExceptionTerminator(irBuilder, chirExpr, { builder: IRBuilder2, expr: Expression =>
-            if (let Some(intOp) <- (expr as IntOpWithException)) {
-                if (intOp.GetNumOfNonSuccessorOperands() == 1) {
-                    return GenerateIntOpWithException(builder, intOp)
-                }
-                return HandleBinaryExpression(builder, CHIRBinaryExprWrapper(intOp))
+            if (let Some(unary) <- (expr as UnaryExpressionWithException)) {
+                return GenerateUnaryExpressionWithException(builder, unary)
+            }
+            if (let Some(binary) <- (expr as BinaryExpressionWithException)) {
+                return HandleBinaryExpression(builder, CHIRBinaryExprWrapper(binary))
             }
             return LLVMNullValue()
         })

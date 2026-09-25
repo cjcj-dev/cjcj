@@ -989,8 +989,12 @@ public class CHIRChecker {
                     CheckInvokeWithException((term as InvokeWithException).getOrThrow(), topLevelFunc)
                 case ExprKind.INVOKESTATIC_WITH_EXCEPTION =>
                     CheckInvokeStaticWithException((term as InvokeStaticWithException).getOrThrow(), topLevelFunc)
-                case ExprKind.INT_OP_WITH_EXCEPTION =>
-                    CheckIntOpWithException((term as IntOpWithException).getOrThrow(), topLevelFunc)
+                case ExprKind.NEG_WITH_EXCEPTION =>
+                    CheckUnaryExpressionWithException((term as UnaryExpressionWithException).getOrThrow(), topLevelFunc)
+                case ExprKind.ADD_WITH_EXCEPTION | ExprKind.SUB_WITH_EXCEPTION | ExprKind.MUL_WITH_EXCEPTION |
+                    ExprKind.DIV_WITH_EXCEPTION | ExprKind.MOD_WITH_EXCEPTION | ExprKind.EXP_WITH_EXCEPTION |
+                    ExprKind.LSHIFT_WITH_EXCEPTION | ExprKind.RSHIFT_WITH_EXCEPTION =>
+                    CheckBinaryExpressionWithException((term as BinaryExpressionWithException).getOrThrow(), topLevelFunc)
                 case ExprKind.SPAWN_WITH_EXCEPTION =>
                     CheckSpawnWithException((term as SpawnWithException).getOrThrow(), topLevelFunc)
                 case ExprKind.NUMERIC_CAST_WITH_EXCEPTION =>
@@ -1092,26 +1096,30 @@ public class CHIRChecker {
         CheckBinaryExprBase(BinaryExprBase((expr as BinaryExpression).getOrThrow()), topLevelFunc)
     }
 
-    private func CheckIntOpWithException(expr: IntOpWithException, topLevelFunc: Function): Unit {
+    private func CheckUnaryExpressionWithException(expr: UnaryExpressionWithException, topLevelFunc: Function): Unit {
         if (!CheckHaveResult(expr, topLevelFunc)) {
             return
         }
-        if (!OperandNumIsEqual([1, 2], expr, topLevelFunc)) {
+        if (!OperandNumIsEqual(1, expr, topLevelFunc)) {
             return
         }
         if (!SuccessorNumIsEqual(2, expr, topLevelFunc)) {
             return
         }
-        let exprKind = expr.GetOpKind()
-        if (ExprKindIndex(exprKind) >= ExprKindIndex(ExprKind.NEG) &&
-            ExprKindIndex(exprKind) <= ExprKindIndex(ExprKind.BITNOT)) {
-            CheckUnaryExprBase(UnaryExprBase(expr), topLevelFunc)
-        } else if (ExprKindIndex(exprKind) >= ExprKindIndex(ExprKind.ADD) &&
-            ExprKindIndex(exprKind) <= ExprKindIndex(ExprKind.OR)) {
-            CheckBinaryExprBase(BinaryExprBase(expr), topLevelFunc)
-        } else {
-            WarningInExpr(topLevelFunc, expr, "find unrecongnized ExprKind " + expr.GetOpKindName() + ".")
+        CheckUnaryExprBase(UnaryExprBase(expr), topLevelFunc)
+    }
+
+    private func CheckBinaryExpressionWithException(expr: BinaryExpressionWithException, topLevelFunc: Function): Unit {
+        if (!CheckHaveResult(expr, topLevelFunc)) {
+            return
         }
+        if (!OperandNumIsEqual(2, expr, topLevelFunc)) {
+            return
+        }
+        if (!SuccessorNumIsEqual(2, expr, topLevelFunc)) {
+            return
+        }
+        CheckBinaryExprBase(BinaryExprBase(expr), topLevelFunc)
     }
 
     private func CheckUnaryExprBase(expr: UnaryExprBase, topLevelFunc: Function): Unit {

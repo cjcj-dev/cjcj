@@ -6,8 +6,8 @@ import cjcj::chir.CHIRBuilder
 import cjcj::chir.Constant
 import cjcj::chir.Expression
 import cjcj::chir.ExprKind
-import cjcj::chir.ExprMajorKind
-import cjcj::chir.IntOpWithException
+import cjcj::chir.BinaryExpressionBase
+import cjcj::chir.BinaryExpressionWithException
 import cjcj::chir.Apply
 import cjcj::chir.ApplyWithException
 import cjcj::chir.Attribute
@@ -53,36 +53,24 @@ public class CHIRBinaryExprWrapper <: CHIRExprWrapper {
         super(binaryExpr)
     }
 
-    public init(binaryExprWithException: IntOpWithException) {
+    public init(binaryExprWithException: BinaryExpressionWithException) {
         super(binaryExprWithException)
     }
 
     public func GetLHSOperand(): Value {
-        if (expr.GetExprMajorKind() == ExprMajorKind.BINARY_EXPR) {
-            return (expr as BinaryExpression).getOrThrow().GetLHSOperand()
-        }
-        return (expr as IntOpWithException).getOrThrow().GetOperand(0)
+        return (expr as BinaryExpressionBase).getOrThrow().GetLHSOperand()
     }
 
     public func GetRHSOperand(): Value {
-        if (expr.GetExprMajorKind() == ExprMajorKind.BINARY_EXPR) {
-            return (expr as BinaryExpression).getOrThrow().GetRHSOperand()
-        }
-        return (expr as IntOpWithException).getOrThrow().GetOperand(1)
+        return (expr as BinaryExpressionBase).getOrThrow().GetRHSOperand()
     }
 
     public func GetOverflowStrategy(): OverflowStrategy {
-        if (expr.GetExprMajorKind() == ExprMajorKind.BINARY_EXPR) {
-            return (expr as BinaryExpression).getOrThrow().GetOverflowStrategy()
-        }
-        return (expr as IntOpWithException).getOrThrow().GetOverflowStrategy()
+        return (expr as BinaryExpressionBase).getOrThrow().GetOverflowStrategy()
     }
 
     public func GetBinaryExprKind(): ExprKind {
-        if (expr.GetExprMajorKind() == ExprMajorKind.BINARY_EXPR) {
-            return (expr as BinaryExpression).getOrThrow().GetExprKind()
-        }
-        return (expr as IntOpWithException).getOrThrow().GetOpKind()
+        return (expr as BinaryExpressionBase).getOrThrow().GetOpKind()
     }
 }
 

@@ -398,19 +398,15 @@ private func ToPackageExprKind(expr: Expression): UInt8 {
         case ExprKind.INVOKE_WITH_EXCEPTION | ExprKind.INVOKESTATIC_WITH_EXCEPTION =>
             CHIRFB_CHIR_EXPR_KIND_TRY_INVOKE
         case ExprKind.RAISE_EXCEPTION => CHIRFB_CHIR_EXPR_KIND_RAISE_EXCEPTION
-        case ExprKind.INT_OP_WITH_EXCEPTION =>
-            match ((expr as IntOpWithException).getOrThrow().GetOpKind()) {
-                case ExprKind.NEG => CHIRFB_CHIR_EXPR_KIND_TRY_NEG
-                case ExprKind.ADD => CHIRFB_CHIR_EXPR_KIND_TRY_ADD
-                case ExprKind.SUB => CHIRFB_CHIR_EXPR_KIND_TRY_SUB
-                case ExprKind.MUL => CHIRFB_CHIR_EXPR_KIND_TRY_MUL
-                case ExprKind.DIV => CHIRFB_CHIR_EXPR_KIND_TRY_DIV
-                case ExprKind.MOD => CHIRFB_CHIR_EXPR_KIND_TRY_MOD
-                case ExprKind.EXP => CHIRFB_CHIR_EXPR_KIND_TRY_EXP
-                case ExprKind.LSHIFT => CHIRFB_CHIR_EXPR_KIND_TRY_L_SHIFT
-                case ExprKind.RSHIFT => CHIRFB_CHIR_EXPR_KIND_TRY_R_SHIFT
-                case _ => CHIRFB_CHIR_EXPR_KIND_INVALID
-            }
+        case ExprKind.NEG_WITH_EXCEPTION => CHIRFB_CHIR_EXPR_KIND_TRY_NEG
+        case ExprKind.ADD_WITH_EXCEPTION => CHIRFB_CHIR_EXPR_KIND_TRY_ADD
+        case ExprKind.SUB_WITH_EXCEPTION => CHIRFB_CHIR_EXPR_KIND_TRY_SUB
+        case ExprKind.MUL_WITH_EXCEPTION => CHIRFB_CHIR_EXPR_KIND_TRY_MUL
+        case ExprKind.DIV_WITH_EXCEPTION => CHIRFB_CHIR_EXPR_KIND_TRY_DIV
+        case ExprKind.MOD_WITH_EXCEPTION => CHIRFB_CHIR_EXPR_KIND_TRY_MOD
+        case ExprKind.EXP_WITH_EXCEPTION => CHIRFB_CHIR_EXPR_KIND_TRY_EXP
+        case ExprKind.LSHIFT_WITH_EXCEPTION => CHIRFB_CHIR_EXPR_KIND_TRY_L_SHIFT
+        case ExprKind.RSHIFT_WITH_EXCEPTION => CHIRFB_CHIR_EXPR_KIND_TRY_R_SHIFT
         case ExprKind.SPAWN_WITH_EXCEPTION => CHIRFB_CHIR_EXPR_KIND_TRY_SPAWN
         case ExprKind.NUMERIC_CAST_WITH_EXCEPTION => CHIRFB_CHIR_EXPR_KIND_TRY_NUMERIC_CAST
         case ExprKind.INTRINSIC_WITH_EXCEPTION => CHIRFB_CHIR_EXPR_KIND_TRY_INTRINSIC
@@ -987,12 +983,12 @@ class CHIRSerializerImpl {
             if (blockGroups.isEmpty()) { None } else { Some(blockGroups) }, owner, resultLocalVar, resultTy)
     }
 
-    private func Serialize(obj: UnaryExpression): FlatBufferOffset {
+    private func Serialize(obj: UnaryExpressionBase): FlatBufferOffset {
         let base = Serialize((obj as Expression).getOrThrow())
         return CreateUnaryExpressionBase(builder, base, SerializeOverflowStrategy(obj.GetOverflowStrategy()))
     }
 
-    private func Serialize(obj: BinaryExpression): FlatBufferOffset {
+    private func Serialize(obj: BinaryExpressionBase): FlatBufferOffset {
         let base = Serialize((obj as Expression).getOrThrow())
         return CreateBinaryExpressionBase(builder, base, SerializeOverflowStrategy(obj.GetOverflowStrategy()))
     }
@@ -1277,9 +1273,11 @@ class CHIRSerializerImpl {
             case ExprKind.ADD | ExprKind.SUB | ExprKind.MUL | ExprKind.DIV | ExprKind.MOD | ExprKind.EXP |
                 ExprKind.LSHIFT | ExprKind.RSHIFT | ExprKind.BITAND | ExprKind.BITOR | ExprKind.BITXOR |
                 ExprKind.LT | ExprKind.GT | ExprKind.LE | ExprKind.GE | ExprKind.EQUAL | ExprKind.NOTEQUAL |
-                ExprKind.AND | ExprKind.OR =>
+                ExprKind.AND | ExprKind.OR | ExprKind.ADD_WITH_EXCEPTION | ExprKind.SUB_WITH_EXCEPTION |
+                ExprKind.MUL_WITH_EXCEPTION | ExprKind.DIV_WITH_EXCEPTION | ExprKind.MOD_WITH_EXCEPTION |
+                ExprKind.EXP_WITH_EXCEPTION | ExprKind.LSHIFT_WITH_EXCEPTION | ExprKind.RSHIFT_WITH_EXCEPTION =>
                 exprKind[index] = CHIRFB_EXPRESSION_ELEM_BINARY_EXPRESSION_BASE
-                Serialize((obj as BinaryExpression).getOrThrow())
+                Serialize((obj as BinaryExpressionBase).getOrThrow())
             case ExprKind.BRANCH =>
                 exprKind[index] = CHIRFB_EXPRESSION_ELEM_BRANCH
                 Serialize((obj as Branch).getOrThrow())
@@ -1307,17 +1305,9 @@ class CHIRSerializerImpl {
             case ExprKind.INSTANCEOF =>
                 exprKind[index] = CHIRFB_EXPRESSION_ELEM_INSTANCE_OF
                 Serialize((obj as InstanceOf).getOrThrow())
-            case ExprKind.INT_OP_WITH_EXCEPTION =>
-                let intOp = (obj as IntOpWithException).getOrThrow()
-                let base = Serialize(obj)
-                let overflow = SerializeOverflowStrategy(intOp.GetOverflowStrategy())
-                if (ExprKindMajor(intOp.GetOpKind()) == ExprMajorKind.UNARY_EXPR) {
-                    exprKind[index] = CHIRFB_EXPRESSION_ELEM_UNARY_EXPRESSION_BASE
-                    CreateUnaryExpressionBase(builder, base, overflow)
-                } else {
-                    exprKind[index] = CHIRFB_EXPRESSION_ELEM_BINARY_EXPRESSION_BASE
-                    CreateBinaryExpressionBase(builder, base, overflow)
-                }
+            case ExprKind.NEG_WITH_EXCEPTION =>
+                exprKind[index] = CHIRFB_EXPRESSION_ELEM_UNARY_EXPRESSION_BASE
+                Serialize((obj as UnaryExpressionBase).getOrThrow())
             case ExprKind.INTRINSIC =>
                 exprKind[index] = CHIRFB_EXPRESSION_ELEM_INTRINSIC_BASE
                 Serialize((obj as Intrinsic).getOrThrow())
@@ -1359,7 +1349,7 @@ class CHIRSerializerImpl {
                 Serialize((obj as StoreElementRef).getOrThrow())
             case ExprKind.NEG | ExprKind.NOT | ExprKind.BITNOT =>
                 exprKind[index] = CHIRFB_EXPRESSION_ELEM_UNARY_EXPRESSION_BASE
-                Serialize((obj as UnaryExpression).getOrThrow())
+                Serialize((obj as UnaryExpressionBase).getOrThrow())
             case ExprKind.CLASS_STATIC_CAST | ExprKind.GOTO | ExprKind.EXIT | ExprKind.RAISE_EXCEPTION | ExprKind.LOAD | ExprKind.STORE |
                 ExprKind.CONSTANT | ExprKind.FORIN_RANGE | ExprKind.FORIN_ITER | ExprKind.FORIN_CLOSED_RANGE |
                 ExprKind.TUPLE | ExprKind.BOX | ExprKind.UNBOX_TO_VALUE | ExprKind.GET_EXCEPTION |
@@ -2143,8 +2133,8 @@ class CHIRSerializerImpl {
         if (let Some(multiBranch) <- (expr as MultiBranch)) {
             return expressionPayload("multiBranch", [CHIRSerializeUInt64List(multiBranch.GetCaseVals())])
         }
-        if (let Some(intOp) <- (expr as IntOpWithException)) {
-            return expressionPayload("intOpWithException", [ExprKindIndex(intOp.GetOpKind()).toString()])
+        if (expr.IsUnaryExpressionWithException() || expr.IsBinaryExpressionWithException()) {
+            return ""
         }
         if (let Some(allocateWithException) <- (expr as AllocateWithException)) {
             return expressionPayload("allocate", [CHIRSerializeType(allocateWithException.GetType())])

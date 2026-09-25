@@ -2,7 +2,7 @@ package cjcj::codegen
 
 import std.collection.*
 import cjcj::chir.ExprKind
-import cjcj::chir.IntOpWithException
+import cjcj::chir.UnaryExpressionWithException
 import cjcj::chir.IntrinsicKind
 import cjcj::chir.Type
 import cjcj::chir.Value
@@ -42,15 +42,10 @@ private class StructInfo {
     }
 }
 
-public func GenerateIntOpWithException(irBuilder: IRBuilder2, expr: IntOpWithException): LLVMValueRef {
+public func GenerateUnaryExpressionWithException(irBuilder: IRBuilder2, expr: UnaryExpressionWithException): LLVMValueRef {
     let kind = expr.GetOpKind()
-    let lhs = expr.GetLHSOperand()
+    let lhs = expr.GetOperand(0)
     let lhsValue = irBuilder.GetCGModule().GetMappedCGValue(lhs)
-    if (let Some(rhs) <- expr.GetRHSOperand()) {
-        let rhsValue = irBuilder.GetCGModule().GetMappedCGValue(rhs)
-        return GenerateThrowingBinaryIntOp(irBuilder, kind, lhs, rhs, lhsValue.GetRawValue(), rhsValue.GetRawValue(),
-            expr.GetResultType())
-    }
     return GenerateThrowingUnaryIntOp(irBuilder, kind, lhs, lhsValue.GetRawValue(), expr.GetResultType())
 }
 

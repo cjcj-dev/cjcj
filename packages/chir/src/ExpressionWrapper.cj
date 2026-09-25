@@ -262,122 +262,49 @@ public class InvokeStaticBase <: DynamicDispatchBase {
 }
 
 public class UnaryExprBase <: ExpressionBase {
-    private let expr: Option<UnaryExpression>
-    private let exprE: Option<IntOpWithException>
+    private let expr: UnaryExpressionBase
 
     public init(expression: Expression) {
         super(expression)
-        if (expression.GetExprMajorKind() == ExprMajorKind.UNARY_EXPR) {
-            expr = (expression as UnaryExpression).getOrThrow()
-            exprE = None
-        } else {
-            expr = None
-            exprE = (expression as IntOpWithException).getOrThrow()
-        }
+        expr = (expression as UnaryExpressionBase).getOrThrow()
     }
 
-    public init(expression: UnaryExpression) {
+    public init(expression: UnaryExpressionBase) {
         super(expression)
         expr = expression
-        exprE = None
     }
 
-    public init(expression: IntOpWithException) {
-        super(expression)
-        expr = None
-        exprE = expression
-    }
+    public func GetOpKind(): ExprKind { return expr.GetOpKind() }
 
-    public func GetOpKind(): ExprKind {
-        if (let Some(unary) <- expr) {
-            return unary.GetExprKind()
-        }
-        return exprE.getOrThrow().GetOpKind()
-    }
+    public func GetExprKindName(): String { return expr.GetExprKindName() }
 
-    public func GetExprKindName(): String {
-        if (let Some(unary) <- expr) {
-            return unary.GetExprKindName()
-        }
-        return exprE.getOrThrow().GetOpKindName()
-    }
+    public func GetOperand(): Value { return expr.GetOperand(0) }
 
-    public func GetOperand(): Value {
-        if (let Some(unary) <- expr) {
-            return unary.GetOperand(0)
-        }
-        return exprE.getOrThrow().GetLHSOperand()
-    }
-
-    public func GetOverflowStrategy(): OverflowStrategy {
-        if (let Some(unary) <- expr) {
-            return unary.GetOverflowStrategy()
-        }
-        return exprE.getOrThrow().GetOverflowStrategy()
-    }
+    public func GetOverflowStrategy(): OverflowStrategy { return expr.GetOverflowStrategy() }
 }
 
 public class BinaryExprBase <: ExpressionBase {
-    private let expr: Option<BinaryExpression>
-    private let exprE: Option<IntOpWithException>
+    private let expr: BinaryExpressionBase
 
     public init(expression: Expression) {
         super(expression)
-        if (expression.GetExprMajorKind() == ExprMajorKind.BINARY_EXPR) {
-            expr = (expression as BinaryExpression).getOrThrow()
-            exprE = None
-        } else {
-            expr = None
-            exprE = (expression as IntOpWithException).getOrThrow()
-        }
+        expr = (expression as BinaryExpressionBase).getOrThrow()
     }
 
-    public init(expression: BinaryExpression) {
+    public init(expression: BinaryExpressionBase) {
         super(expression)
         expr = expression
-        exprE = None
     }
 
-    public init(expression: IntOpWithException) {
-        super(expression)
-        expr = None
-        exprE = expression
-    }
+    public func GetOpKind(): ExprKind { return expr.GetOpKind() }
 
-    public func GetOpKind(): ExprKind {
-        if (let Some(binary) <- expr) {
-            return binary.GetExprKind()
-        }
-        return exprE.getOrThrow().GetOpKind()
-    }
+    public func GetExprKindName(): String { return expr.GetExprKindName() }
 
-    public func GetExprKindName(): String {
-        if (let Some(binary) <- expr) {
-            return binary.GetExprKindName()
-        }
-        return exprE.getOrThrow().GetOpKindName()
-    }
+    public func GetLHSOperand(): Value { return expr.GetLHSOperand() }
 
-    public func GetLHSOperand(): Value {
-        if (let Some(binary) <- expr) {
-            return binary.GetOperand(0)
-        }
-        return exprE.getOrThrow().GetLHSOperand()
-    }
+    public func GetRHSOperand(): Value { return expr.GetRHSOperand() }
 
-    public func GetRHSOperand(): Value {
-        if (let Some(binary) <- expr) {
-            return binary.GetOperand(1)
-        }
-        return exprE.getOrThrow().GetRHSOperand().getOrThrow()
-    }
-
-    public func GetOverflowStrategy(): OverflowStrategy {
-        if (let Some(binary) <- expr) {
-            return binary.GetOverflowStrategy()
-        }
-        return exprE.getOrThrow().GetOverflowStrategy()
-    }
+    public func GetOverflowStrategy(): OverflowStrategy { return expr.GetOverflowStrategy() }
 }
 
 

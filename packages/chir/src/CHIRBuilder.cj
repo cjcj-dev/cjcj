@@ -741,18 +741,18 @@ public class CHIRBuilder {
         return term
     }
 
-    public func CreateUnaryIntOpWithException(resultTy: Type, opKind: ExprKind, operand: Value, successBlock: Block,
-        errorBlock: Block, parent: Block): IntOpWithException {
-        let term = IntOpWithException(opKind, operand, successBlock, errorBlock, parent)
+    public func CreateUnaryExpressionWithException(resultTy: Type, opKind: ExprKind, operand: Value, successBlock: Block,
+        errorBlock: Block, parent: Block): UnaryExpressionWithException {
+        let term = UnaryExpressionWithException(ToUnaryExprKind(opKind), operand, successBlock, errorBlock, parent)
         term.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(term.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(term))
         CreateLocalVar(resultTy, "%${term.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", term)
         return term
     }
 
-    public func CreateBinaryIntOpWithException(resultTy: Type, opKind: ExprKind, left: Value, right: Value,
-        successBlock: Block, errorBlock: Block, parent: Block): IntOpWithException {
-        let term = IntOpWithException(opKind, left, right, successBlock, errorBlock, parent)
+    public func CreateBinaryExpressionWithException(resultTy: Type, opKind: ExprKind, left: Value, right: Value,
+        successBlock: Block, errorBlock: Block, parent: Block): BinaryExpressionWithException {
+        let term = BinaryExpressionWithException(ToBinaryExprKind(opKind), left, right, successBlock, errorBlock, parent)
         term.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(term.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(term))
         CreateLocalVar(resultTy, "%${term.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", term)
