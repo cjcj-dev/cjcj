@@ -119,8 +119,8 @@ jobs:
             echo "::warning::Official MinGW toolchain cache is still absent after one bounded retry."
           fi
 
-      # The MinGW cross runtime, flatc and the std-ast object compile through
-      # sccache; the report step fails this job if the launcher saw no compile.
+      # The MinGW cross runtime, AST support archive and std-ast object compile
+      # through sccache; the report step fails this job if the launcher saw no compile.
       - name: Start sccache
         uses: ./.github/actions/sccache
         with:
@@ -156,24 +156,88 @@ jobs:
           path: ~/.cjv
           key: ${{ steps.cjv-cache.outputs.cache-primary-key }}
 
-      - name: Restore flatc
-        id: flatc-cache
-        uses: actions/cache/restore@v6
-        with:
-          path: .windows-stdast-buildtools/flatc
-          key: windows-stdast-flatc-${{ hashFiles('ci/runtime_pin.env') }}
+      - name: Load compiler pins
+        run: cat ci/source_pin.env ci/llvm_pin.env ci/host_sdk_pin.env >> "$GITHUB_ENV"
+
+      - name: Install AST support build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq clang cmake ninja-build
+
+      - name: Fetch pinned compiler
+        run: |
+          set -euo pipefail
+          git init compiler
+          git -C compiler remote add origin "$COMPILER_SRC_URL"
+          git -C compiler fetch --depth=1 origin "$COMPILER_REF"
+          git -C compiler checkout --detach FETCH_HEAD
+          test "$(git -C compiler rev-parse HEAD)" = "$COMPILER_REF"
+          git init compiler/third_party/flatbuffers
+          git -C compiler/third_party/flatbuffers remote add origin "$FLATBUFFERS_URL"
+          git -C compiler/third_party/flatbuffers fetch --depth=1 origin "$FLATBUFFERS_SHA"
+          git -C compiler/third_party/flatbuffers checkout --detach FETCH_HEAD
+
+      - name: Build Windows AST support archive
+        env:
+          RUNTIME_TOOLCHAIN: ${{ github.workspace }}/.windows-runtime-buildtools/llvm-mingw-w64
+          CMAKE_TOOLCHAIN_FILE: ${{ github.workspace }}/compiler/cmake/mingw_x86_64_toolchain.cmake
+          AST_CMAKE_PREFIX_PATH: ${{ github.workspace }}/.windows-runtime-buildtools/llvm-mingw-w64/x86_64-w64-mingw32
+          NM: llvm-nm
+        run: |
+          set -euo pipefail
+          export PATH="$RUNTIME_TOOLCHAIN/bin:$PATH"
+          sdk="$HOME/.cjv/toolchains/$CJCJ_TOOLCHAIN"
+          bash ci/build_ast_support.sh \
+            "$GITHUB_WORKSPACE/compiler" \
+            "$GITHUB_WORKSPACE/.windows-stdast-buildtools/ast-support-build" \
+            "$GITHUB_WORKSPACE/.windows-stdast-buildtools/ast-support-artifact" \
+            "$sdk"
+          printf 'compiler=%s\nflatbuffers=%s\nplatform=windows_x86_64\nrun_id=%s\nrun_attempt=%s\n' \
+            "$COMPILER_REF" "$FLATBUFFERS_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" \
+            > "$GITHUB_WORKSPACE/.windows-stdast-buildtools/ast-support-artifact/PROVENANCE"
+
+      - name: Install same-generation AST inputs
+        run: |
+          set -euo pipefail
+          python3 ci/install_std_sdk_inputs.py \
+            "$GITHUB_WORKSPACE/.windows-stdast-buildtools/ast-support-artifact" \
+            "$HOME/.cjv/toolchains/$CJCJ_TOOLCHAIN" \
+            windows_x86_64_cjnative
+
+      - name: Cross-build stdlib AST object
+        working-directory: runtime-source/stdlib
+        env:
+          RUNTIME_TOOLCHAIN: ${{ github.workspace }}/.windows-runtime-buildtools/llvm-mingw-w64
+        run: |
+          set -euo pipefail
+          sdk="$HOME/.cjv/toolchains/$CJCJ_TOOLCHAIN"
+          mingw="$RUNTIME_TOOLCHAIN"
+          export PATH="$sdk/bin:$sdk/tools/bin:$mingw/bin:$PATH"
+          export CANGJIE_HOME="$sdk"
+          export ARCH=x86_64
+          python3 build.py clean
+          python3 build.py build -t release --target windows-x86_64 \
+            --target-lib "$GITHUB_WORKSPACE/.platform-ci/runtime-install/windows_release_x86_64" \
+            --target-lib "$mingw/x86_64-w64-mingw32/lib" \
+            --target-sysroot "$mingw/" \
+            --target-toolchain "$mingw/bin"
+          ast_o=$(find "$GITHUB_WORKSPACE/runtime-source/stdlib" -path '*/modules/windows_x86_64_cjnative/std/ast.o' -type f -print -quit)
+          test -n "$ast_o"
+          test -f "$ast_o"
+          schema_sha=$(sha256sum "$sdk/schema/StdAstFormat.fbs" | awk '{print $1}')
+          provenance="$GITHUB_WORKSPACE/.windows-stdast-buildtools/std-ast.provenance"
+          printf 'schema_sha256=%s\ncompiler=%s\nobject=%s\n' "$schema_sha" "$COMPILER_REF" "$ast_o" > "$provenance"
+          {
+            echo "STDLIB_AST_OBJECT=$ast_o"
+            echo "STDLIB_AST_PROVENANCE=$provenance"
+          } >> "$GITHUB_ENV"
 
       - name: Rebuild host-dispatch std-ast DLL
         env:
           RUNTIME_TOOLCHAIN: ${{ github.workspace }}/.windows-runtime-buildtools/llvm-mingw-w64
+          COMPILER_SOURCE: ${{ github.workspace }}/compiler
+          AST_SUPPORT_ARTIFACT: ${{ github.workspace }}/.windows-stdast-buildtools/ast-support-artifact
         run: CANGJIE_HOME="$HOME/.cjv/toolchains/$CJCJ_TOOLCHAIN" npx --yes zx@8 ci/platform_matrix/build_windows_std_ast.mjs
-
-      - name: Save flatc
-        if: steps.flatc-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v6
-        with:
-          path: .windows-stdast-buildtools/flatc
-          key: ${{ steps.flatc-cache.outputs.cache-primary-key }}
 
       - name: Report sccache
         if: always()

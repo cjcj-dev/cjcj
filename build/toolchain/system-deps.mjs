@@ -163,6 +163,38 @@ async function installLlvmPython({
   logger.info('Selected unlinked %s (%s) from %s', LLVM_PYTHON_FORMULA, version, pythonBin);
 }
 
+// llvm@16's dependency closure contains a non-keg-only python@* formula.
+// Linking that formula rewrites prefix shims the runner already owns. Install
+// those formulae with the same --skip-link argv as the selected interpreter
+// and do not publish their bin. An installed keg satisfies the later batch
+// install; that install stays fail-closed. xz, zstd, and every other
+// dependency stay on the normal install path.
+const PYTHON_DEP_FORMULA = /^python@\d+\.\d+$/;
+
+async function installUnlinkedPythonDependencies(packages, runCommand) {
+  const seen = new Set();
+  const formulae = [];
+  for (const name of packages) {
+    const deps = await runCommand(['brew', 'deps', '--formula', '--1', name], {
+      stage: 'system_deps.deps',
+      capture: true,
+      logOutput: false,
+    });
+    for (const line of String(deps.stdout).split(/\r?\n/)) {
+      const formula = line.trim();
+      if (!PYTHON_DEP_FORMULA.test(formula) || formula === LLVM_PYTHON_FORMULA || seen.has(formula)) continue;
+      seen.add(formula);
+      formulae.push(formula);
+    }
+  }
+  for (const formula of formulae) {
+    await runCommand(['brew', 'install', '--skip-link', formula], {
+      stage: 'system_deps.python.install',
+    });
+    logger.info('Installed unlinked Homebrew dependency %s; prefix links unchanged', formula);
+  }
+}
+
 // PATH does not decide which Python LLDB compiles against. The nested LLDB
 // CMake runs its own find_package(Python3 COMPONENTS Interpreter Development),
 // and on macOS that takes the newest framework Python it can see. The one hook
@@ -244,6 +276,7 @@ export async function installDarwin(config, {
 } = {}) {
   if (!findExecutable('brew')) throw new BuildError('system_deps', 'Homebrew is required by docs/macos.md');
   await installLlvmPython({runCommand, fileExists, exposePath});
+  await installUnlinkedPythonDependencies(BREW_PACKAGES, runCommand);
   logger.info('Installing %d Homebrew packages', BREW_PACKAGES.length);
   await runCommand(['brew', 'install', ...BREW_PACKAGES], {stage: 'system_deps.install'});
   const pythonVersion = await assertPython('python3', {

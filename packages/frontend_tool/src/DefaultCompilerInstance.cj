@@ -151,15 +151,7 @@ public open class DefaultCompilerInstance {
             return true
         }
         return ProfiledBool("Main Stage", "Save results", { =>
-            if (invocation.globalOptions.outputMode == OutputMode.CHIR || invocation.frontendOptions.chirDeserialize) {
-                let pkgs = core.GetSourcePackages()
-                let saved = SaveCjos(pkgs)
-                if (saved) {
-                    RegisterCjoOutputs(pkgs)
-                }
-                return saved
-            }
-            return true
+            SaveCjos(core.GetSourcePackages())
         })
     }
 
