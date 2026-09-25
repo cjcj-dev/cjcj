@@ -39,7 +39,7 @@ public class StringBackingIntrinsicTest {
         let expr = builder.CreateIntrinsic(arrayTy,
             IntrisicCallContext(kind: kind, args: ArrayList<Value>([arg])), block)
         block.AppendExpression(expr)
-        block.AppendExpression(builder.CreateExit(expr.GetResult(), block))
+        block.AppendExpression(builder.CreateExit(Some<Value>(expr.GetResult().getOrThrow()), block))
         let restoredContext = CHIRContext()
         let restoredBuilder = CHIRBuilder(restoredContext)
         if (binary) {
