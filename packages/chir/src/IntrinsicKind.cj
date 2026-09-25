@@ -86,7 +86,7 @@ public enum IntrinsicKind {
     | ATOMIC_OPTIONREFERENCE_LOAD | ATOMIC_OPTIONREFERENCE_STORE | ATOMIC_OPTIONREFERENCE_SWAP
     | ATOMIC_OPTIONREFERENCE_CAS | BEGIN_CATCH | ABS | FABS | FLOOR | CEIL | TRUNC | SIN | COS | EXP | EXP2
     | LOG | LOG2 | LOG10 | SQRT | ROUND | POW | POWI | BIT_CAST | PREINITIALIZE | OBJECT_AS | IS_NULL
-    | GET_TYPE_FOR_TYPE_PARAMETER | IS_SUBTYPE_TYPES | EXCLUSIVE_SCOPE
+    | GET_TYPE_FOR_TYPE_PARAMETER | IS_SUBTYPE_TYPES | EXCLUSIVE_SCOPE | CANONICALIZE_STRING_BACKING
 }
 
 public func IntrinsicKindName(kind: IntrinsicKind): String {
@@ -453,6 +453,7 @@ public func IntrinsicKindName(kind: IntrinsicKind): String {
         case IntrinsicKind.GET_TYPE_FOR_TYPE_PARAMETER => "GET_TYPE_FOR_TYPE_PARAMETER"
         case IntrinsicKind.IS_SUBTYPE_TYPES => "IS_SUBTYPE_TYPES"
         case IntrinsicKind.EXCLUSIVE_SCOPE => "EXCLUSIVE_SCOPE"
+        case IntrinsicKind.CANONICALIZE_STRING_BACKING => "CANONICALIZE_STRING_BACKING"
     }
 }
 
@@ -490,6 +491,7 @@ public func LookupCoreIntrinsicKind(name: String): Option<IntrinsicKind> {
         case "vectorCompare32" => IntrinsicKind.VECTOR_COMPARE_32
         case "vectorIndexByte32" => IntrinsicKind.VECTOR_INDEX_BYTE_32
         case "fillInStackTrace" => IntrinsicKind.FILL_IN_STACK_TRACE
+        case "canonicalizeStringBacking" => IntrinsicKind.CANONICALIZE_STRING_BACKING
         case "decodeStackTrace" => IntrinsicKind.DECODE_STACK_TRACE
         case "dumpCurrentThreadInfo" => IntrinsicKind.DUMP_CURRENT_THREAD_INFO
         case "dumpAllThreadsInfo" => IntrinsicKind.DUMP_ALL_THREADS_INFO

@@ -363,6 +363,7 @@ public func IntrinsicKindToString(kind: IntrinsicKind): String {
         case IntrinsicKind.IS_NULL => "isNull"
         case IntrinsicKind.BLACK_BOX => "blackBox"
         case IntrinsicKind.EXCLUSIVE_SCOPE => "exclusiveScopeImpl"
+        case IntrinsicKind.CANONICALIZE_STRING_BACKING => "canonicalizeStringBacking"
         case _ => throw IllegalArgumentException("invalid intrinsic kind")
     }
 }

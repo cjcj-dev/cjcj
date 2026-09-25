@@ -2946,6 +2946,17 @@ public class IRBuilder2 <: Resource {
             return CreateIntrinsicCallNoInvoke(FILL_IN_STACK_TRACE_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(),
                 funcArgs)
         }
+        if (kind == IntrinsicKind.CANONICALIZE_STRING_BACKING) {
+            CJC_ASSERT(parameters.size == 1)
+            let retTy = resultType.getOrThrow()
+            let uint8ArrayTy = (DeRef(retTy) as RawArrayType).getOrThrow()
+            let i8PtrTy = unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 0u32) }
+            let funcArgs = ArrayList<LLVMValueRef>()
+            funcArgs.add(CreateBitCast(CreateTypeInfo(uint8ArrayTy), i8PtrTy))
+            funcArgs.add(all: RawValuesOfCGValues(parameters))
+            return CreateIntrinsicCallNoInvoke("llvm.cj.string.dedup.canonical", ArrayList<LLVMTypeRef>(),
+                funcArgs)
+        }
         if (kind == IntrinsicKind.DECODE_STACK_TRACE) {
             let retTy = resultType.getOrThrow()
             let retCGType = CGType.GetOrCreate(cgMod, retTy)

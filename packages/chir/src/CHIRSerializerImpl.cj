@@ -384,6 +384,7 @@ private func IntrinsicKindToPackageIntrinsicKind(kind: IntrinsicKind): UInt16 {
         case IntrinsicKind.GET_TYPE_FOR_TYPE_PARAMETER => 359u16
         case IntrinsicKind.IS_SUBTYPE_TYPES => 360u16
         case IntrinsicKind.EXCLUSIVE_SCOPE => 361u16
+        case IntrinsicKind.CANONICALIZE_STRING_BACKING => 362u16
 
     }
 }
