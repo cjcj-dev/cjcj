@@ -10,7 +10,8 @@ The published release is `395249571`; its exact asset IDs and digests are in
 The compiler source is `35da7be2434ad72348ed27e8a0bf599ec4e91524` (the retained
 build changes its compile option to `-O1`). The target LLVM source is
 `1ecb811801cae9968e0046048943e34c923a34c9`. The compiler process uses the separately
-packaged official `nightly-1.3.0-alpha.20260904010027` runtime and boundscheck.
+packaged official runtime and boundscheck whose host SDK identity is
+`sources.compiler.host_sdk` in [`ci/h48_language_tuple_pin.json`](../h48_language_tuple_pin.json).
 Every shipped file has a digest and an origin category in `language-tuple.json`.
 
 The rebuilt std/FFI source archive's commit was **not recorded**. Its source SHA

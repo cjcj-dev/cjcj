@@ -21,6 +21,13 @@ function write(file, contents = '') {
   return file;
 }
 
+function brewDependencyStdout(command) {
+  if (!(command[0] === 'brew' && command[1] === 'deps' && command[2] === '--formula' && command[3] === '--1')) {
+    return null;
+  }
+  return command[4] === 'llvm@16' ? 'python@3.12\nxz\nzstd\n' : '';
+}
+
 test('Darwin dependency pins keep LLVM 16 and OpenSSL 3 without top-level Python', () => {
   assert.equal(LLVM_PYTHON_FORMULA, 'python@3.11');
   assert.equal(LLVM_PYTHON_VERSION, '3.11');
@@ -96,19 +103,28 @@ test('Darwin install exposes the supported LLVM Python keg without linking it', 
   const kegInclude = path.join(keg, 'include', 'python3.11');
   const commands = [];
   const exposedPaths = [];
+  let batchExit = null;
   write(path.join(kegInclude, 'Python.h'));
   try {
     const runCommand = async (command, options = {}) => {
       commands.push(command);
+      const dependencyStdout = brewDependencyStdout(command);
+      if (dependencyStdout !== null) return {exitCode: 0, stdout: dependencyStdout};
       if (command[0] === 'brew' && command[1] === 'install' && command[2] === '--skip-link') {
         assert.equal(options.check, undefined);
+        assert.equal(command.length, 4);
         return {exitCode: 0, stdout: ''};
       }
       if (command[0] === 'brew' && command[1] === '--prefix') return {exitCode: 0, stdout: `${keg}\n`};
       if (command[0] === path.join(keg, 'libexec', 'bin', 'python3')) {
         return {exitCode: 0, stdout: `3.11\n${kegInclude}\n`};
       }
-      if (command[0] === 'brew' && command[1] === 'install') return {exitCode: 0, stdout: ''};
+      if (command[0] === 'brew' && command[1] === 'install') {
+        const skippedDependency = commands.some(item =>
+          item[0] === 'brew' && item[1] === 'install' && item[2] === '--skip-link' && item[3] === 'python@3.12');
+        batchExit = skippedDependency ? 0 : 1;
+        return {exitCode: batchExit, stdout: ''};
+      }
       if (command[0] === 'python3') {
         assert.deepEqual(exposedPaths, [path.join(keg, 'libexec', 'bin')]);
         return {exitCode: 0, stdout: `3.11\n${kegInclude}\n`};
@@ -129,13 +145,31 @@ test('Darwin install exposes the supported LLVM Python keg without linking it', 
       exposePath: directory => exposedPaths.push(directory),
     });
 
+    console.log(`TARGET_ASSERTION_RAN unlinked-python-dep batchExit=${batchExit}`);
+    assert.equal(batchExit, 0, 'batch brew install must exit 0 only after --skip-link python@3.12');
     const brewInstalls = commands.filter(command => command[0] === 'brew' && command[1] === 'install');
     assert.deepEqual(brewInstalls, [
       ['brew', 'install', '--skip-link', LLVM_PYTHON_FORMULA],
+      ['brew', 'install', '--skip-link', 'python@3.12'],
       ['brew', 'install', ...BREW_PACKAGES],
     ]);
+    assert.deepEqual(
+      commands.filter(command => command[0] === 'brew' && command[1] === 'deps'),
+      BREW_PACKAGES.map(name => ['brew', 'deps', '--formula', '--1', name]),
+    );
+    const indexOf = predicate => commands.findIndex(predicate);
+    const skipSelected = indexOf(command =>
+      command[0] === 'brew' && command[1] === 'install' && command[2] === '--skip-link' && command[3] === LLVM_PYTHON_FORMULA);
+    const firstDep = indexOf(command => command[0] === 'brew' && command[1] === 'deps');
+    const lastDep = commands.findLastIndex(command => command[0] === 'brew' && command[1] === 'deps');
+    const skipDependency = indexOf(command =>
+      command[0] === 'brew' && command[1] === 'install' && command[2] === '--skip-link' && command[3] === 'python@3.12');
+    const batch = indexOf(command => command[0] === 'brew' && command[1] === 'install' && command[2] !== '--skip-link');
+    assert.ok(skipSelected !== -1 && firstDep > skipSelected && lastDep < skipDependency && skipDependency < batch);
     assert.deepEqual(exposedPaths, [path.join(keg, 'libexec', 'bin')]);
     assert.ok(!commands.flat().includes('--overwrite'));
+    assert.ok(!commands.some(command =>
+      command[0] === 'brew' && command[1] === 'install' && (command.includes('xz') || command.includes('zstd'))));
   } finally {
     fs.rmSync(root, {recursive: true, force: true});
   }
@@ -150,6 +184,8 @@ test('Darwin install rejects a newer host Python when the pinned shim is not sel
   write(path.join(hostInclude, 'Python.h'));
   try {
     const runCommand = async command => {
+      const dependencyStdout = brewDependencyStdout(command);
+      if (dependencyStdout !== null) return {exitCode: 0, stdout: dependencyStdout};
       if (command[0] === 'brew' && command[1] === 'install') return {exitCode: 0, stdout: ''};
       if (command[0] === 'brew' && command[1] === '--prefix') return {exitCode: 0, stdout: `${keg}\n`};
       if (command[0] === path.join(keg, 'libexec', 'bin', 'python3')) {
