@@ -2972,18 +2972,88 @@ public class CHIRChecker {
 
     private func CheckGetInstantiateValue(expr: Expression, topLevelFunc: Function): Unit {
         if (optionalRules.contains(CHIRCheckerRule.GET_INSTANTIATE_VALUE_SHOULD_GONE)) {
-            Errorln("in function ${topLevelFunc.GetIdentifier()}, in " +
-                "`${GetExpressionString(expr)}`, `GetInstantiateValue` should be removed now, " +
-                "it can't be seen in CodeGen Stage.")
+            ErrorInExpr(topLevelFunc, expr,
+                "`GetInstantiateValue` should be removed now, it can't be seen in CodeGen Stage.")
             return
         }
         if (!OperandNumIsEqual(1, expr, topLevelFunc)) {
             return
         }
-        if (let Some(funcTy) <- expr.GetOperand(0).GetType()) {
-            if (!funcTy.IsFunc()) {
-                TypeCheckError(expr, expr.GetOperand(0), "Function", topLevelFunc)
+        // 1. operand must be FuncType
+        let instExpr = (expr as GetInstantiateValue).getOrThrow()
+        let `func` = instExpr.GetGenericResult()
+        if (!`func`.GetType().getOrThrow().IsFunc()) {
+            TypeCheckError(expr, `func`, "Function", topLevelFunc)
+            return
+        }
+
+        // 2. must have instantiated type args, or you will use Function directly
+        let instTypeArgs = instExpr.GetInstantiateTypes()
+        if (instTypeArgs.isEmpty()) {
+            ErrorInExpr(topLevelFunc, expr, "there must be instantiated type in `GetInstantiateValue`")
+            return
+        }
+
+        // 3. instantiated type args must satisfy all generic constraints
+        let funcAndGenericTypes = ArrayList<(Value, ArrayList<GenericType>)>()
+        CollectFuncAndGenericTypesRecursively(`func`, funcAndGenericTypes)
+        CJC_ASSERT(!funcAndGenericTypes.isEmpty())
+        var allGenericTypes: Int64 = 0
+        for ((_, genericTypes) in funcAndGenericTypes) {
+            allGenericTypes += genericTypes.size
+        }
+        let funcBase = funcAndGenericTypes[0][0].AsFunction().getOrThrow()
+        if (let Some(parentType) <- funcBase.GetParentCustomTypeOrExtendedType()) {
+            allGenericTypes += parentType.GetTypeArgs().size
+        }
+        if (allGenericTypes != instTypeArgs.size) {
+            let genericTypeSize = funcAndGenericTypes[funcAndGenericTypes.size - 1][1].size
+            var errMsg = "current func is " + GetFuncIdentifier(`func`) + " with " +
+                "${genericTypeSize} generic param type(s), and its outer func is "
+            funcAndGenericTypes.remove(at: funcAndGenericTypes.size - 1)
+            var idx = funcAndGenericTypes.size
+            while (idx > 0) {
+                idx--
+                let (outerFunc, genericTypes) = funcAndGenericTypes[idx]
+                errMsg += "[" + GetFuncIdentifier(outerFunc) + " with " +
+                    "${genericTypes.size} generic param type(s) ], "
             }
+            if (let Some(parentType) <- funcBase.GetParentCustomTypeOrExtendedType()) {
+                errMsg += "and the parent Custom type is " + parentType.ToString() + " with " +
+                    "${parentType.GetTypeArgs().size} generic param type(s), "
+            }
+            errMsg += "they have ${allGenericTypes} generic param type(s) in total, but there are " +
+                "${instTypeArgs.size} instantiated type arg(s) in current `GetInstantiateValue`."
+            ErrorInExpr(topLevelFunc, expr, errMsg)
+            return
+        }
+        var typeIdx: Int64 = 0
+        var errMsg = "the "
+        var hasError = false
+        if (let Some(parentType) <- funcBase.GetParentCustomTypeOrExtendedType()) {
+            if (let Some(customType) <- (parentType as CustomType)) {
+                for (arg in customType.GetGenericArgs()) {
+                    if (!InstTypeCanSetToGenericRelatedType(instTypeArgs[typeIdx], arg)) {
+                        errMsg += IndexToString(typeIdx + 1) + ", "
+                        hasError = true
+                    }
+                    typeIdx++
+                }
+            }
+        }
+        for ((_, genericTypes) in funcAndGenericTypes) {
+            for (genericType in genericTypes) {
+                if (!InstTypeCanSetToGenericRelatedType(instTypeArgs[typeIdx], genericType)) {
+                    errMsg += IndexToString(typeIdx + 1) + ", "
+                    hasError = true
+                }
+                typeIdx++
+            }
+        }
+        if (hasError) {
+            errMsg = errMsg[0..errMsg.size - 2]
+            errMsg += " instantiated type(s) don't satisfy the generic constraints."
+            ErrorInExpr(topLevelFunc, expr, errMsg)
         }
     }
 
