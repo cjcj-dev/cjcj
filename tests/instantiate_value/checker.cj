@@ -48,6 +48,7 @@ main(args: Array<String>): Int64 {
         if (mode.endsWith("intersection")) {
             let actual = context.GetGenericTy("S")
             actual.SetUpperBounds(ArrayList<Type>([typeA, typeB]))
+            caller.AddGenericTypeParam(actual)
             actuals.add(actual)
         } else {
             actuals.add(if (badParent) { typeB } else { typeA })
@@ -62,9 +63,10 @@ main(args: Array<String>): Int64 {
     block.AppendExpression(builder.CreateExit(None, block))
     println("INPUT bodies=${pkg.GetGlobalFuncsWithBody().size} " +
         "expressions=${block.GetExpressionsNum()} exprIsValue=${(inst as Value).isSome()}")
-    let observed = CHIRChecker(pkg, GlobalOptions(), builder).CheckPackage(
-        ArrayList<CHIRCheckerRule>([CHIRCheckerRule.CHECK_FUNC_BODY]))
-    let expected = !(mode.endsWith("bad") || mode == "empty" || mode == "arity")
+    let rules = ArrayList<CHIRCheckerRule>([CHIRCheckerRule.CHECK_FUNC_BODY])
+    if (mode == "gone") { rules.add(CHIRCheckerRule.GET_INSTANTIATE_VALUE_SHOULD_GONE) }
+    let observed = CHIRChecker(pkg, GlobalOptions(), builder).CheckPackage(rules)
+    let expected = !(mode.endsWith("bad") || mode == "empty" || mode == "arity" || mode == "gone")
     println("TARGET mode=${mode} observed=${observed} expected=${expected}")
     return if (observed == expected) { 0 } else { 1 }
 }

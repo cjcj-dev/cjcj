@@ -61,7 +61,7 @@ def main():
     if record['build_rc'] == 0:
         record['elf_sha256'] = digest(executable)
         record['cases'] = {}
-        for mode in ('control', 'function-good', 'function-bad', 'parent-good', 'parent-bad', 'function-intersection', 'parent-intersection', 'mixed-good', 'mixed-parent-bad', 'mixed-function-bad', 'empty', 'arity'):
+        for mode in ('control', 'function-good', 'function-bad', 'parent-good', 'parent-bad', 'function-intersection', 'parent-intersection', 'mixed-good', 'mixed-parent-bad', 'mixed-function-bad', 'empty', 'arity', 'gone'):
             start = time.monotonic()
             with (out / (mode + '.log')).open('w') as log:
                 rc = subprocess.call([str(executable), mode], cwd=tree, env=env,
@@ -71,7 +71,8 @@ def main():
             index = "2nd" if mode == "mixed-function-bad" else "1st"
             diagnostic = (f"the {index} instantiated type(s) don't satisfy the generic constraints." if mode.endswith('bad')
                           else 'there must be instantiated type' if mode == 'empty'
-                          else 'generic param type(s) in total' if mode == 'arity' else '')
+                          else 'generic param type(s) in total' if mode == 'arity'
+                          else '`GetInstantiateValue` should be removed now' if mode == 'gone' else '')
             record['cases'][mode] = {'rc': rc, 'wall': time.monotonic() - start,
                                      'target_executed': target in output,
                                      'target_diagnostic': not diagnostic or diagnostic in output}

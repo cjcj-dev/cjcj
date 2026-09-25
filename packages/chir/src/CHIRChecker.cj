@@ -925,45 +925,8 @@ public class CHIRChecker {
                 "doesn't have parent block.")
             return
         }
-        if (!expr.IsTerminator() && expr.GetResult().isNone()) {
-            Errorln("in function ${topLevelFunc.GetIdentifier()}, in `${GetExpressionString(expr)}`, " +
-                "this expression should have result.")
+        if (!expr.IsTerminator() && !CheckHaveResult(expr, topLevelFunc)) {
             return
-        }
-        if (let Some(resultValue) <- expr.GetResult()) {
-            if (let Some(ownerExpr) <- resultValue.GetExpr()) {
-                if ((ownerExpr as Value).getOrThrow() != (expr as Value).getOrThrow()) {
-                    Errorln("in function ${topLevelFunc.GetIdentifier()}, result " +
-                        "${resultValue.GetIdentifier()} is owned by a different expression.")
-                }
-            } else {
-                Errorln("in function ${topLevelFunc.GetIdentifier()}, result ${resultValue.GetIdentifier()} " +
-                    "doesn't point back to its expression.")
-            }
-        }
-        for (operand in expr.GetOperands()) {
-            var hasUser = false
-            for (user in operand.GetUsersRef()) {
-                if (refEq(user, expr)) {
-                    hasUser = true
-                    break
-                }
-            }
-            if (!hasUser) {
-                Errorln("in function ${topLevelFunc.GetIdentifier()}, operand ${operand.GetIdentifier()} " +
-                    "is missing user ${expr.GetExprKindName()}.")
-            }
-        }
-        for (blockGroup in expr.GetBlockGroups()) {
-            if (let Some(ownerExpr) <- blockGroup.GetOwnerExpression()) {
-                if ((ownerExpr as Value).getOrThrow() != (expr as Value).getOrThrow()) {
-                    Errorln("in function ${topLevelFunc.GetIdentifier()}, block group " +
-                        "${blockGroup.GetIdentifier()} is owned by a different expression.")
-                }
-            } else {
-                Errorln("in function ${topLevelFunc.GetIdentifier()}, block group " +
-                    "${blockGroup.GetIdentifier()} doesn't point back to owner expression.")
-            }
         }
         match (expr.GetExprMajorKind()) {
             case ExprMajorKind.TERMINATOR => CheckTerminator(expr, topLevelFunc)
