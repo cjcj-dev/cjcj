@@ -34,7 +34,7 @@ def main():
     cases = {'closed': 'accept', 'interface': 'accept', 'tuple': 'accept',
              'missing': 'nonexhaustive', 'open_leaf': 'nonexhaustive',
              'nested': 'nonexhaustive', 'generic': 'nonexhaustive',
-             'tuple_missing': 'nonexhaustive', 'or_pattern': 'accept', 'selectorless': 'two_unreachable', 'control': 'accept'}
+             'tuple_missing': 'nonexhaustive', 'tuple_columns': 'accept', 'this_wildcard': 'one_unreachable', 'this_partial': 'accept', 'or_pattern': 'accept', 'selectorless': 'two_unreachable', 'control': 'accept'}
 
     def run(item):
         name, expectation = item
@@ -56,7 +56,8 @@ def main():
         elif expectation == 'nonexhaustive':
             passed = rc == 1 and ('not exhaustive' in text.lower() or 'non-exhaustive' in text.lower())
         else:
-            passed = rc == 0 and text.lower().count('warning: unreachable') == 2
+            expected_warnings = 1 if expectation == 'one_unreachable' else 2
+            passed = rc == 0 and text.lower().count('warning: unreachable') == expected_warnings
         print(f'ASSERT {name}.{expectation} {"PASS" if passed else "FAIL"} compiler_rc={rc}', flush=True)
         return name, dict(command=cmd, fixture_sha256=sha(fixture), rc=rc,
                           wall=time.monotonic()-start, assertion=expectation, passed=passed)
