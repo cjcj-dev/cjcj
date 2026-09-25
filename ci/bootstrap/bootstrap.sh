@@ -291,10 +291,9 @@ source_identity() {
 }
 
 stage0_cache_key() {
-  local base="$1" rewritten_toml="$2" cjcj_identity stdlib_identity host_runtime_dir host_runtime_so
+  local base="$1" rewritten_toml="$2" cjcj_identity host_runtime_dir host_runtime_so
   local host_nightly compile_options cpp_headers material rel
   cjcj_identity=$(source_identity cjcj "$SRC" 1) || return $?
-  stdlib_identity=$(source_identity stdlib "$STDSRC" 0) || return $?
   host_nightly=$(awk -F= '$1 == "CJCJ_TOOLCHAIN" {print $2}' "$SRC/ci/host_sdk_pin.env" 2>/dev/null || true)
   if [ -z "$host_nightly" ]; then
     echo 'STAGE0_CACHE=disabled reason=host-nightly-pin-missing' >&2
@@ -317,9 +316,8 @@ stage0_cache_key() {
     cpp_headers="$cpp_headers$rel=$(tree_content_sha256 "$CPP_SRC/$rel")"$'\n' || return 1
   done
   material=$(printf '%s\n' \
-    'format=stage0-cache-v1' \
+    'format=stage0-cache-v2' \
     "cjcj=$cjcj_identity" \
-    "stdlib=$stdlib_identity" \
     "host_nightly=$host_nightly" \
     "host_cjc_sha256=$(sha256 "$base/bin/cjc")" \
     "host_llvm_sha256=$(sha256 "$HOST_LLVM_SO")" \
@@ -341,14 +339,14 @@ manifest_value() {
 }
 
 stage0_cache_restore() {
-  local key="$1" out="$2" std="$3" entry manifest compiler_sha stdlib_sha actual
+  local key="$1" out="$2" entry manifest compiler_sha actual
   entry="$STAGE0_CACHE_ROOT/$key"
   manifest="$entry/MANIFEST"
   if [ ! -f "$manifest" ]; then
     echo "STAGE0_CACHE=miss key=$key reason=missing"
     return 1
   fi
-  [ "$(manifest_value "$manifest" format)" = 'stage0-cache-v1' ] || {
+  [ "$(manifest_value "$manifest" format)" = 'stage0-cache-v2' ] || {
     echo "STAGE0_CACHE=rejected key=$key reason=format"
     return 1
   }
@@ -357,12 +355,11 @@ stage0_cache_restore() {
     return 1
   }
   compiler_sha=$(manifest_value "$manifest" cjcj_stage1_sha256)
-  stdlib_sha=$(manifest_value "$manifest" stdlib_stage1_sha256)
-  [ "${#compiler_sha}" -eq 64 ] && [ "${#stdlib_sha}" -eq 64 ] || {
+  [ "${#compiler_sha}" -eq 64 ] || {
     echo "STAGE0_CACHE=rejected key=$key reason=manifest-sha"
     return 1
   }
-  [ -f "$entry/cjcj-stage1" ] && [ -d "$entry/stdlib-stage1" ] || {
+  [ -f "$entry/cjcj-stage1" ] || {
     echo "STAGE0_CACHE=rejected key=$key reason=payload-missing"
     return 1
   }
@@ -371,33 +368,23 @@ stage0_cache_restore() {
     echo "STAGE0_CACHE=rejected key=$key reason=cjcj-sha-mismatch"
     return 1
   }
-  actual=$(tree_content_sha256 "$entry/stdlib-stage1")
-  [ "$actual" = "$stdlib_sha" ] || {
-    echo "STAGE0_CACHE=rejected key=$key reason=stdlib-sha-mismatch"
-    return 1
-  }
-  rm -rf -- "$out" "$std"
+  rm -f -- "$out"
   install -m0755 "$entry/cjcj-stage1" "$out" || return 1
-  cp -a "$entry/stdlib-stage1" "$std" || return 1
   [ "$(sha256 "$out")" = "$compiler_sha" ] || return 1
-  [ "$(tree_content_sha256 "$std")" = "$stdlib_sha" ] || return 1
   echo "STAGE0_CACHE=hit key=$key path=$entry"
 }
 
 stage0_cache_publish() {
-  local key="$1" out="$2" std="$3" entry incoming rejected compiler_sha stdlib_sha
+  local key="$1" out="$2" entry incoming rejected compiler_sha
   entry="$STAGE0_CACHE_ROOT/$key"
   mkdir -p "$STAGE0_CACHE_ROOT"
   incoming=$(mktemp -d "$STAGE0_CACHE_ROOT/.incoming-$key.XXXXXX") || return 1
   install -m0755 "$out" "$incoming/cjcj-stage1" || return 1
-  cp -a "$std" "$incoming/stdlib-stage1" || return 1
   compiler_sha=$(sha256 "$incoming/cjcj-stage1")
-  stdlib_sha=$(tree_content_sha256 "$incoming/stdlib-stage1")
   printf '%s\t%s\n' \
-    format stage0-cache-v1 \
+    format stage0-cache-v2 \
     key "$key" \
-    cjcj_stage1_sha256 "$compiler_sha" \
-    stdlib_stage1_sha256 "$stdlib_sha" > "$incoming/MANIFEST"
+    cjcj_stage1_sha256 "$compiler_sha" > "$incoming/MANIFEST"
   if [ -e "$entry" ]; then
     rejected="$STAGE0_CACHE_ROOT/.replaced-$key-$$"
     mv "$entry" "$rejected" || return 1
@@ -406,7 +393,7 @@ stage0_cache_publish() {
   fi
   mv "$incoming" "$entry" || return 1
   [ -z "$rejected" ] || rm -rf -- "$rejected"
-  echo "STAGE0_CACHE=stored key=$key path=$entry cjcj_sha=$compiler_sha stdlib_sha=$stdlib_sha"
+  echo "STAGE0_CACHE=stored key=$key path=$entry cjcj_sha=$compiler_sha"
 }
 
 sdk_ld_path() {
@@ -460,7 +447,7 @@ assert_std_install_shape() {
 }
 
 stdlib_build() {
-  local label="$1" sdk="$2" runtime="$3" prefix="$4" compare_prefix="${5:-}" ld script
+  local label="$1" sdk="$2" runtime="$3" prefix="$4" compare_prefix="${5:-}" target_lib="${6:-$2/runtime/lib/$HOST_TUPLE}" ld script
   source "$SRC/ci/build_resources.sh"
   configure_build_resources "$HEAP" || die "cannot determine std build resources"
   cmd "python3 $(printf '%q' "$SRC/ci/install_std_sdk_inputs.py") $(printf '%q' "$(dirname "$AST_SUPPORT")") $(printf '%q' "$sdk") $(printf '%q' "$HOST_TUPLE")"
@@ -468,7 +455,7 @@ stdlib_build() {
   prepare_build_env
   # shellcheck disable=SC2016 # Expanded by the inner bash, not this shell.
   script='cd "$1" && rm -rf build/build && python3 build.py clean && python3 build.py build -t relwithdebinfo --jobs "$2" --target-lib="$3" && python3 build.py install --prefix "$4"'
-  cmd "env -i HOME=$(printf '%q' "$BUILD_HOME") TMPDIR=$(printf '%q' "$BUILD_TMPDIR") CANGJIE_HOME=$(printf '%q' "$sdk") LD_LIBRARY_PATH=$(printf '%q' "$ld") PATH=$(printf '%q' "$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:/usr/bin:/bin") cjHeapSize=$(printf '%q' "$STD_BUILD_HEAP") bash -c $(printf '%q' "$script") bash $(printf '%q' "$STDSRC") $(printf '%q' "$STD_BUILD_JOBS") $(printf '%q' "$sdk/runtime/lib/$HOST_TUPLE") $(printf '%q' "$prefix")"
+  cmd "env -i HOME=$(printf '%q' "$BUILD_HOME") TMPDIR=$(printf '%q' "$BUILD_TMPDIR") CANGJIE_HOME=$(printf '%q' "$sdk") LD_LIBRARY_PATH=$(printf '%q' "$ld") PATH=$(printf '%q' "$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:/usr/bin:/bin") cjHeapSize=$(printf '%q' "$STD_BUILD_HEAP") bash -c $(printf '%q' "$script") bash $(printf '%q' "$STDSRC") $(printf '%q' "$STD_BUILD_JOBS") $(printf '%q' "$target_lib") $(printf '%q' "$prefix")"
   assert_std_install_shape "$prefix" "$compare_prefix" "$label"
 }
 
@@ -615,7 +602,7 @@ resolve_base_sdk() {
 stage0() {
   STAGE=stage0
   echo '[stage0] official cjc + stdlib + host LLVM; cjcj=-O1'
-  local base out std sdk ld cache_key='' cacheable=0 cache_hit=0
+  local base out sdk ld cache_key='' cacheable=0 cache_hit=0
   base=$(resolve_base_sdk)
   record official-sdk "$base"
   assert_official_opt_zero "$base/third_party/llvm/bin/opt"
@@ -631,10 +618,8 @@ stage0() {
   mkdir -p "$WORK"
 
   out="$WORK/cjcj-stage1"
-  std="$WORK/stdlib-stage1"
   sdk="$WORK/sdk-stage0"
   echo "OUTPUT cjcj-stage1=$out"
-  echo "OUTPUT stdlib-stage1=$std"
   cmd "bash $(printf '%q' "$SDK_BUILD") --from $(printf '%q' "$base") --to $(printf '%q' "$sdk") --host --llvm-so $(printf '%q' "$HOST_LLVM_SO") --colour-runtime $(printf '%q' "$(runtime_dir "$CRT")/libcangjie-runtime.so") --host-runtime $(printf '%q' "$(runtime_dir "$HRT")/libcangjie-runtime.so") --force"
   assert_installed_llvm_so "$sdk" "$HOST_LLVM_SO"
   cmd "install -Dm644 $(printf '%q' "$AST_SUPPORT") $(printf '%q' "$sdk/lib/$HOST_TUPLE/libcangjie-ast-support.a")"
@@ -649,7 +634,7 @@ stage0() {
   if [ "$DRY" -eq 0 ]; then
     if cache_key=$(stage0_cache_key "$base" "$copy/cjpm.toml"); then
       cacheable=1
-      if stage0_cache_restore "$cache_key" "$out" "$std"; then
+      if stage0_cache_restore "$cache_key" "$out"; then
         cache_hit=1
         cmd "ln -sfn $(printf '%q' "$(basename "$out")") $(printf '%q' "$WORK/cjc")"
       fi
@@ -662,20 +647,17 @@ stage0() {
     cjpm_build "$sdk" "$HRT" "$copy" "" "$HEAP"
     seed=$(resolve_cjpm_product "$copy/target/release/bin" cjcj-stage1)
     install_stage_compiler "$seed" "$out" "$WORK/cjc"
-    stdlib_build stdlib-stage1 "$sdk" "$HRT" "$std"
   fi
   if [ "$DRY" -eq 0 ]; then
     assert_executable cjcj-stage1 "$out"
-    [ -d "$std" ] || die 'stage0 未产出 stdlib-stage1'
   fi
   prepare_stage0_run_sdk
   assert_version cjcj-stage1 "$out" "$WORK/sdk-stage0-run" "$HRT"
   if [ "$DRY" -eq 0 ] && [ "$cacheable" -eq 1 ] && [ "$cache_hit" -eq 0 ]; then
-    stage0_cache_publish "$cache_key" "$out" "$std" || die 'stage0 cache 发布失败'
+    stage0_cache_publish "$cache_key" "$out" || die 'stage0 cache 发布失败'
   fi
   if [ "$DRY" -eq 0 ]; then
     printf '%s\n' "$out" > "$WORK/.cjcj-stage1"
-    printf '%s\n' "$std" > "$WORK/.stdlib-stage1"
   fi
 }
 
@@ -693,22 +675,58 @@ assemble_stage1_sdk() {
   assert_executable stage1-compiler "$sdk/bin/cjc"
 }
 
+# Bootstrap the first coloured std without installing host std beside CRT.
+# The temporary SDK stays a host pair; only the output link and native backend
+# processes use CRT. It is discarded before the target SDK is assembled.
+bootstrap_target_std() {
+  local compiler="$1" std="$2" sdk="$WORK/sdk-std-bootstrap" compiler_sha=planned target_lib
+  local link_root="$WORK/std-runtime-link" native dynamic file arch
+  target_lib=$(runtime_dir "$CRT")
+  cmd "bash $(printf '%q' "$SDK_BUILD") --from $(printf '%q' "$WORK/sdk-stage0") --to $(printf '%q' "$sdk") --host --llvm-tuple $(printf '%q' "$COLOUR_TUPLE") --colour-runtime $(printf '%q' "$(runtime_dir "$CRT")/libcangjie-runtime.so") --host-runtime $(printf '%q' "$(runtime_dir "$HRT")/libcangjie-runtime.so") --force"
+  assert_installed_llvm_tuple "$sdk" "$COLOUR_TUPLE"
+  cmd "install -m755 $(printf '%q' "$compiler") $(printf '%q' "$sdk/bin/cjc")"
+  cmd "install -m644 $(printf '%q' "$COLOUR_LLVM_SO") $(printf '%q' "$sdk/third_party/llvm/lib/libLLVM-15.so")"
+  if [ "$DRY" -eq 0 ]; then
+    compiler_sha=$(sha256 "$compiler")
+    record std-bootstrap-host-std "$sdk/lib/$HOST_TUPLE/libcangjie-std-core.a"
+    record std-bootstrap-host-runtime "$sdk/runtime/lib/$HOST_TUPLE/libcangjie-runtime.so"
+    record std-bootstrap-target-runtime "$target_lib/libcangjie-runtime.so"
+  fi
+  cmd "bash $(printf '%q' "$STAGE1_HOST_RUNNER") $(printf '%q' "$sdk") $(printf '%q' "$WORK/sdk-stage0") $(printf '%q' "$HRT") $(printf '%q' "$HOST_LLVM_SHA256") $(printf '%q' "$compiler") $(printf '%q' "$compiler_sha") $(printf '%q' "$WORK/sdk-stage0-run") $(printf '%q' "$COLOUR_LLVM_SHA256") $(printf '%q' "$target_lib")"
+  # stdlib's common-layout probe selects the FIRST runtime search path. A
+  # bare --target-lib directory is too late: its fallback is the host SDK.
+  arch=${HOST_TUPLE#linux_}
+  arch=${arch%_cjnative}
+  native="$link_root/common/linux_relwithdebinfo_$arch/lib/$HOST_TUPLE"
+  dynamic="$link_root/common/linux_relwithdebinfo_$arch/runtime/lib/$HOST_TUPLE"
+  cmd "rm -rf -- $(printf '%q' "$link_root")"
+  cmd "mkdir -p $(printf '%q' "$native") $(printf '%q' "$dynamic")"
+  for file in libcangjie-aio.a cjstart.o cjld.shared.lds discard_eh_frame.lds; do
+    cmd "install -m644 $(printf '%q' "$sdk/lib/$HOST_TUPLE/$file") $(printf '%q' "$native/$file")"
+    [ "$DRY" -eq 1 ] || record std-bootstrap-native "$native/$file"
+  done
+  for file in libcangjie-runtime.so libboundscheck.so; do
+    cmd "install -m644 $(printf '%q' "$target_lib/$file") $(printf '%q' "$dynamic/$file")"
+    [ "$DRY" -eq 1 ] || record std-bootstrap-target "$dynamic/$file"
+  done
+  stdlib_build stdlib-stage1 "$sdk" "$HRT" "$std" "" "$link_root"
+  cmd "python3 $(printf '%q' "$(dirname "$SDK_BUILD")/std_runtime_colour.py") --colour-runtime $(printf '%q' "$(runtime_dir "$CRT")/libcangjie-runtime.so") --host-runtime $(printf '%q' "$(runtime_dir "$HRT")/libcangjie-runtime.so") --runtime $(printf '%q' "$target_lib/libcangjie-runtime.so") --std $(printf '%q' "$std/lib/$HOST_TUPLE/libcangjie-std-core.a") --source $(printf '%q' "$STDSRC")"
+  cmd "rm -rf -- $(printf '%q' "$sdk")"
+  cmd "rm -rf -- $(printf '%q' "$link_root")"
+}
+
 stage1() {
   STAGE=stage1
   echo '[stage1] cjcj-stage1 self-host + coloured LLVM; C++=RelWithDebInfo'
   local compiler previous_std out std sdk ld
   compiler=$(cat "$WORK/.cjcj-stage1" 2>/dev/null || true)
-  previous_std=$(cat "$WORK/.stdlib-stage1" 2>/dev/null || true)
+  previous_std="$WORK/stdlib-stage1"
   if [ "$DRY" -eq 1 ]; then
     compiler="${compiler:-$WORK/cjcj-stage1}"
-    previous_std="${previous_std:-$WORK/stdlib-stage1}"
     echo "INPUT cjcj-stage1 path=$compiler sha256=not-built(dry-run)"
-    echo "INPUT stdlib-stage1 path=$previous_std sha256=not-built(dry-run)"
   else
     [ -n "$compiler" ] || die '缺少 stage0 cjcj-stage1'
-    [ -n "$previous_std" ] || die '缺少 stage1 stdlib'
     record cjcj-stage1 "$compiler"
-    record stdlib-stage1 "$previous_std"
   fi
   record colour-llvm-tuple "$COLOUR_TUPLE"
   record colour-runtime "$CRT"
@@ -722,6 +740,7 @@ stage1() {
   echo "OUTPUT stdlib-stage2=$std"
   # The compiler links std statically. Finish the target std before its link;
   # replacing SDK files afterwards cannot change the std already inside the ELF.
+  bootstrap_target_std "$compiler" "$previous_std"
   assemble_stage1_sdk "$sdk" "$compiler" "$previous_std"
   stdlib_build stdlib-stage2 "$sdk" "$HRT" "$std" "$previous_std"
   assemble_stage1_sdk "$sdk" "$compiler" "$std"
