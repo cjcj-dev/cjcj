@@ -85,11 +85,14 @@ public class TempFileManager {
     public func Init(options: GlobalOptions, isFrontend: Bool): Bool {
         isCjcFrontend = isFrontend
         opts = GlobalOptions(options)
-        deleteState.store(NOT_DELETED)
+        // CString storage must remain inaccessible to signal cleanup until
+        // the old list is cleared, just as during normal DeleteTempFiles.
+        deleteState.store(DELETING)
         for (path in deletedFiles) {
             unsafe { LibC.free(path) }
         }
         deletedFiles.clear()
+        deleteState.store(NOT_DELETED)
         if (!InitOutputDir()) {
             return false
         }

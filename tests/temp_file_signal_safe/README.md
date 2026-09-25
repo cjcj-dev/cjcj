@@ -47,3 +47,22 @@ by signal-safe deletion. The positive control is `direct` with
 The observer requires normal process exit, at least one observed allocation,
 no debugger read errors, and the stated live allocation count. SDK runtime
 search paths and `TMPDIR` must be set as in `run.py`.
+
+`reinit_signal.py` links `reinit_signal.cj` against the same release archives.
+On x86-64 Linux, it stops immediately before and after the first native free
+made by the second public `Init`, then raises SIGINT through the registered
+product handler. No product functions or memory are replaced. Both instants
+must exit 130 without passing any path to unlink/rmdir: the list is undergoing
+release and must remain unavailable until clear completes. The observer records
+native arguments, exit status and on-disk paths; missing the chosen free is a
+setup failure, not a passing empty observation.
+
+```sh
+python3 tests/temp_file_signal_safe/reinit_signal.py --tree "$PWD" \
+  --sdk "$CANGJIE_HOME" --dependencies "$PWD" --out /root/<lane>/evidence/reinit
+```
+
+Restore Init's early `NOT_DELETED` store for the product control arm. Only the
+new overlap assertions should fail; the existing direct/normal/SIGINT cases
+remain the positive controls for actual deletion. Rebuild the restored product
+and run the identical fixture and observer again.
