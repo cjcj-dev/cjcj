@@ -34,7 +34,9 @@ function jobs(text) {
 // ci.yml / platform-matrix.yml: the patched runtime on a runtime-cache miss plus
 // the shim objects, per runner (the runtime links the builder's glibc).
 // build-ast-support: libcangjie-ast-support.a via ci/build_ast_support.sh.
+// objc-darwin-e2e: the pinned runtime on macOS before the ObjC fixture.
 const CXX_JOBS = new Map([
+  ['objc-darwin-e2e.yml/objc-darwin-e2e', {component: 'runtime', pin: /env\.RUNTIME_REF/}],
   ['build-ast-support.yml/build', {component: 'ast-support', pin: /\$\{\{ env\.COMPILER_REF \}\}-\$\{\{ env\.FLATBUFFERS_SHA \}\}/}],
   ['build-host-llvm.yml/host', {component: 'host-llvm', pin: /steps\.pin\.outputs\.sha/}],
   ['build-llvm-dylib.yml/dylib', {component: '${{ inputs.cache-component }}', pin: /steps\.pin\.outputs\.sha/}],
