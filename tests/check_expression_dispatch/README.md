@@ -29,3 +29,13 @@ controls and instantiate-value suite retain their results. Replacing only the
 unary callback with CheckOtherExpression must fail only the unary witness.
 Removing the existing GET_INSTANTIATE_VALUE checker call must instead fail its
 negative witnesses while these seven dispatch cases retain their results.
+
+Control-flow dispatch additionally checks the three non-Lambda structured kinds
+(FORIN_RANGE, FORIN_ITER, FORIN_CLOSED_RANGE). Each must leave CheckPackage true
+and emit the upstream unrecognized-kind warning. The map and its lookup follow
+`src/CHIR/Checker/CHIRChecker.cpp:3325-3337`; Lambda narrowing stays in its callback.
+A Lambda callback routed to CheckOtherExpression, or a lookup forced to INVALID,
+must fail the malformed Lambda Bool/diagnostic assertion and both Lambda modes'
+no-warning assertion. The good Lambda Bool remains true; unrelated routes remain
+controls. Removing the fallback WarningInExpr must fail precisely the three
+non-Lambda warning assertions, with their TARGET Bool assertions still executed.

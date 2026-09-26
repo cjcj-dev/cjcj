@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Link expression-dispatch fixtures to existing product release archives.
+"""Link other-expression dispatch fixtures to existing product release archives.
 
 No product sources are recompiled. This avoids the dependency export-for-test
 failure tracked by cjcj#256. Build the supplied tree with cjpm build first.
 """
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 import os
@@ -34,7 +35,7 @@ def main():
         'runtime/lib/linux_x86_64_cjnative', 'lib/linux_x86_64_cjnative',
         'third_party/llvm/lib', 'tools/lib')) + ':/usr/lib/x86_64-linux-gnu'
     sources = [Path(__file__).resolve().parent / 'checker.cj']
-    executable = out / 'dispatch-checker'
+    executable = out / 'other-dispatch-checker'
     command = [str(sdk / 'bin/cjc'), '-O0', '--diagnostic-format=noColor', '--trimpath', str(tree),
                *map(str, sources), '-o', str(executable)]
     archives, inputs = [], list(sources)
@@ -62,33 +63,55 @@ def main():
         record['elf_sha256'] = digest(executable)
         record['cases'] = {}
         diagnostics = {
-            'unary': 'expect 1 operand(s), but there are 0 in fact.',
-            'binary': 'expect 2 operand(s), but there are 0 in fact.',
-            'memory': 'expect 1 operand(s), but there are 0 in fact.',
-            'exit': 'expect 0 operand(s), but there are 1 in fact.',
-            'lambda': "in function @caller, lambda %lambda doesn't have identifier.",
-            'control': '', 'lambda-good': '',
-            'forin-range': '', 'forin-iter': '', 'forin-closed-range': '',
+            'constant': 'expect 1 operand(s), but there are 0 in fact.',
+            'debug': 'expect 1 operand(s), but there are 0 in fact.',
+            'tuple': 'expect at least 1 operand(s), but there are 0 in fact.',
+            'field': 'expect 1 operand(s), but there are 0 in fact.',
+            'field-by-name': 'you should convert this expression to `Field`.',
+            'apply': 'expect at least 1 operand(s), but there are 0 in fact.',
+            'invoke': 'expect at least 1 operand(s), but there are 0 in fact.',
+            'invoke-static': 'expect at least 1 operand(s), but there are 0 in fact.',
+            'instanceof': 'expect 1 operand(s), but there are 0 in fact.',
+            'class-cast': '',
+            'numeric-cast': '',
+            'exception': 'Object&',
+            'spawn': 'expect at least 1 operand(s), but there are 0 in fact.',
+            'raw-allocate': 'expect 1 operand(s), but there are 0 in fact.',
+            'raw-literal': 'expect at least 1 operand(s), but there are 0 in fact.',
+            'raw-value': 'expect 3 operand(s), but there are 0 in fact.',
+            'varray': 'VArray',
+            'varray-builder': 'expect 3 operand(s), but there are 0 in fact.',
+            'intrinsic': 'intrinsic kind must be valid.',
+            'box': 'expect 1 operand(s), but there are 0 in fact.',
+            'unbox': 'expect 1 operand(s), but there are 0 in fact.',
+            'generic': 'expect 1 operand(s), but there are 0 in fact.',
+            'concrete': 'expect 1 operand(s), but there are 0 in fact.',
+            'instantiate': 'expect 1 operand(s), but there are 0 in fact.',
+            'unbox-ref': 'expect 1 operand(s), but there are 0 in fact.',
+            'rtti': 'expect 1 operand(s), but there are 0 in fact.',
+            'rtti-static': 'Unit',
+            'unknown': 'find unrecongnized ExprKind `INVALID.',
+            'constant-good': '',
         }
-        for mode, diagnostic in diagnostics.items():
+
+        def run_case(item):
+            mode, diagnostic = item
             start = time.monotonic()
             with (out / (mode + '.log')).open('w') as log:
                 rc = subprocess.call([str(executable), mode], cwd=tree, env=env,
                                      stdout=log, stderr=subprocess.STDOUT)
             output = (out / (mode + '.log')).read_text()
-            expected = 'true' if not diagnostic else 'false'
+            expected = 'true' if mode in ('class-cast', 'numeric-cast', 'unknown', 'constant-good') else 'false'
             target = f'TARGET mode={mode} observed={expected} expected={expected}'
-            warning_names = {'forin-range': 'ForInRange', 'forin-iter': 'ForInIter',
-                             'forin-closed-range': 'ForInClosedRange'}
-            warning = ('find unrecongnized ExprKind `' + warning_names[mode] + '.') if mode in warning_names else ''
-            record['cases'][mode] = {
+            return mode, {
                 'rc': rc, 'wall': time.monotonic() - start,
                 'target_executed': f'TARGET mode={mode} ' in output,
-                'target_warning': warning in output if warning else 'chir checker warning:' not in output,
                 'target_bool': target in output,
                 'target_diagnostic': diagnostic in output if diagnostic else 'chir checker error:' not in output,
             }
-        record['test_rc'] = int(any(c['rc'] != 0 or not c['target_executed'] or not c['target_bool'] or not c['target_diagnostic'] or not c['target_warning']
+        with ThreadPoolExecutor(max_workers=min(len(diagnostics), len(os.sched_getaffinity(0)))) as pool:
+            record['cases'] = dict(pool.map(run_case, diagnostics.items()))
+        record['test_rc'] = int(any(c['rc'] != 0 or not c['target_executed'] or not c['target_bool'] or not c['target_diagnostic']
                                     for c in record['cases'].values()))
     record['uptime_after'] = subprocess.check_output(['uptime'], text=True).strip()
     (out / 'result.json').write_text(json.dumps(record, indent=2) + '\n')
