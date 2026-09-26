@@ -41,10 +41,17 @@ main(args: Array<String>): Int64 {
         innerBlock.AppendExpression(builder.CreateExit(None, innerBlock))
         block.AppendExpression(expr)
     }
+    if (mode == "forin-range" || mode == "forin-iter" || mode == "forin-closed-range") {
+        let kind = if (mode == "forin-range") { ExprKind.FORIN_RANGE }
+            else if (mode == "forin-iter") { ExprKind.FORIN_ITER } else { ExprKind.FORIN_CLOSED_RANGE }
+        let expr = builder.CreateExpression(kind, Some(context.GetInt64Ty()), ArrayList<Value>(), block)
+        expr.GetResult().getOrThrow().SetIdentifier("%unrecognized")
+        block.AppendExpression(expr)
+    }
     block.AppendExpression(builder.CreateExit(if (mode == "exit") { Some(caller) } else { None }, block))
     let observed = CHIRChecker(pkg, GlobalOptions(), builder).CheckPackage(
         ArrayList<CHIRCheckerRule>([CHIRCheckerRule.CHECK_FUNC_BODY]))
-    let expected = mode == "control" || mode == "lambda-good"
+    let expected = mode == "control" || mode == "lambda-good" || mode.startsWith("forin-")
     println("TARGET mode=${mode} observed=${observed} expected=${expected}")
     return if (observed == expected) { 0 } else { 1 }
 }
