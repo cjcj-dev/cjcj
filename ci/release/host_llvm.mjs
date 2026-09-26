@@ -19,12 +19,14 @@ export function hostIdentity() {
   const identities = process.env.STAGE1_HOST_IDENTITIES
     || new URL('../bootstrap/stage1_host_identities.txt', import.meta.url);
   const lines = fs.readFileSync(identities, 'utf8').split('\n');
-  const hashes = lines.filter(line => /^libLLVM-15\.so\s/.test(line));
+  const linux = cell.platform.startsWith('linux_');
+  const hashes = lines.map(line => line.trim().split(/\s+/))
+    .filter(fields => fields[0] === cell.platform && fields[1] === cell.library);
   const records = lines.filter(line => line.startsWith('# HOST_LLVM_PROVENANCE '))
     .map(line => JSON.parse(line.slice('# HOST_LLVM_PROVENANCE '.length)))
     .filter(record => record.platform === cell.platform);
-  if (records.length !== 1 || (target === 'linux-x64' && hashes.length !== 1)) throw new Error('HOST_LLVM_PIN_MISSING');
-  const sha256 = target === 'linux-x64' ? hashes[0].trim().split(/\s+/)[1] : records[0].sha256;
+  if (records.length !== 1 || (linux && (hashes.length !== 1 || hashes[0].length !== 3))) throw new Error('HOST_LLVM_PIN_MISSING');
+  const sha256 = linux ? hashes[0][2] : records[0].sha256;
   const pin = {...records[0], sha256, library: cell.library};
   const source = fs.readFileSync(new URL('../bootstrap/host_llvm_source.env', import.meta.url), 'utf8')
     .match(new RegExp(`^HOST_LLVM_SOURCE_SHA_${cell.platform}=([a-f0-9]{40})$`, 'm'))?.[1];
