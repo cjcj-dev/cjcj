@@ -2,6 +2,8 @@
 // Repackage an official SDK with the self-host compiler and optional patched runtime into a relocatable release archive.
 
 import crypto from 'node:crypto';
+import {installCrossRuntime} from '../ci/release/cross-runtime.mjs';
+import {getReleasePlatform} from '../build/lib/targets.mjs';
 import {spawnSync} from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -42,6 +44,10 @@ const sdk = required('sdk');
 const binary = required('binary');
 const version = required('version');
 const platform = required('platform');
+const releaseKey = typeof argv['release-key'] === 'string' ? argv['release-key'] : '';
+if (releaseKey && getReleasePlatform(releaseKey).host !== platform) throw new Error('release key/host mismatch');
+const crossRuntimeDirs = (Array.isArray(argv['cross-runtime-dir']) ? argv['cross-runtime-dir']
+  : typeof argv['cross-runtime-dir'] === 'string' ? [argv['cross-runtime-dir']] : []).map(String);
 const outdir = required('outdir');
 const pythonBundle = required('python-bundle');
 const runtimeLib = typeof argv['runtime-lib'] === 'string' ? argv['runtime-lib'] : '';
@@ -108,7 +114,7 @@ if (!platforms[platform]) { console.error(`unsupported --platform: ${platform}`)
 const [runtimeDir, archiveType, exeSuffix] = platforms[platform];
 const runtimeLibrary = platform.startsWith('darwin-') ? 'libcangjie-runtime.dylib' : 'libcangjie-runtime.so';
 const isWindows = platform === 'windows-x64';
-const packageName = `cjcj-${version}-${platform}`;
+const packageName = `cjcj-${version}-${releaseKey || platform}`;
 const inputLlvmManifest = parseLlvmToolsManifest(await fs.readFile(llvmManifest, 'utf8'), {
   label: llvmManifest,
   schema: 'core-or-native',
@@ -634,6 +640,15 @@ if (stdDir) {
   // that survives under modules/ must carry a std. An empty one advertises a
   // --target the package cannot serve, which is exactly how the Linux cells lost
   // Windows cross-compilation between d1d7020c and now without anyone noticing.
+  for (const spec of crossRuntimeDirs) {
+    const split = spec.indexOf('=');
+    if (split <= 0) throw new Error('--cross-runtime-dir must be <tuple>=<root>');
+    const tuple = spec.slice(0, split);
+    if (!crossStdDirs.some(entry => entry.startsWith(`${tuple}=`))) {
+      throw new Error(`cross runtime ${tuple} has no matching final std input`);
+    }
+    await installCrossRuntime({root: spec.slice(split + 1), stage, tuple, runtimeRef: runtimeSourceCommit});
+  }
   const stagedTuples = path.join(stage, 'modules');
   if (await exists(stagedTuples, 'dir')) {
     const starved = [];

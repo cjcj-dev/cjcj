@@ -197,8 +197,8 @@ jobs:
       sdk_runtime_dir: ${{ matrix.sdk_runtime_dir }}
       compiler_artifact: ${{ matrix.compiler_artifact }}
       std_artifact: ${{ matrix.std_artifact }}
-      cross_std_artifact: ${{ matrix.cross_std_artifact }}
-      cross_std_tuple: ${{ matrix.cross_std_tuple }}
+      cross_std_artifacts: ${{ matrix.cross_std_artifacts }}
+      release_key: ${{ matrix.release_key }}
       version: ${{ inputs.version }}
       dry_run: ${{ inputs.dry_run }}
       runtime_ref: ${{ inputs.runtime_ref }}

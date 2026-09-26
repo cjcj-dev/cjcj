@@ -197,9 +197,11 @@ export function assertHostContract(key, {
 // registry, each producing final-std-<target> for its own runtime tuple. Cross
 // std: ci/srcbuild/steps/build-windows-final-std.mjs runs on the linux-x64
 // source cell only (srcbuild.yml `if: matrix.target == 'linux-x64'`), so the
-// Windows tuple is the one tuple with a producer other than its own host.
+// Windows and Android tuples are produced by the Linux source cell; Android
+// runtime and final std use ci/srcbuild/steps/build-android-final-std.mjs.
 const DAG_CROSS_STD_PRODUCERS = Object.freeze({
   windows_x86_64_cjnative: 'linux-x64',
+  linux_android_aarch64_cjnative: 'linux-x64',
 });
 
 // tuple -> target key whose source cell uploads final-std-<target> for it.
