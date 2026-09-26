@@ -806,12 +806,6 @@ public func PlainExprKind(kind: ExprKind): ExprKind {
     }
 }
 
-extend ExprKind <: Hashable {
-    public func hashCode(): Int64 {
-        return ExprKindIndex(this)
-    }
-}
-
 extend ExprKind <: Equatable<ExprKind> {
     public operator func ==(right: ExprKind): Bool {
         return ExprKindIndex(this) == ExprKindIndex(right)
