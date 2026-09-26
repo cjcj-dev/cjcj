@@ -205,7 +205,7 @@ function writeOutputs(file, plan) {
     `prerequisite_matrix=${JSON.stringify({include: plan.prerequisites})}`,
     `has_prerequisites=${plan.prerequisites.length > 0}`,
     `excluded=${plan.excluded.map(entry => entry.release_key).join(',')}`,
-    `package_keys=${plan.package.map(row => row.release_key).join(',')}`,
+    `package_keys=${plan.package.map(row => getReleasePlatform(row.release_key).archiveKey).join(',')}`,
     `has_source=${plan.source.length > 0}`,
     `has_package=${plan.package.length > 0}`,
     `has_blocked=${plan.blocked.length > 0}`,

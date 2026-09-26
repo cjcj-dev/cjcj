@@ -114,7 +114,7 @@ if (!platforms[platform]) { console.error(`unsupported --platform: ${platform}`)
 const [runtimeDir, archiveType, exeSuffix] = platforms[platform];
 const runtimeLibrary = platform.startsWith('darwin-') ? 'libcangjie-runtime.dylib' : 'libcangjie-runtime.so';
 const isWindows = platform === 'windows-x64';
-const packageName = `cjcj-${version}-${releaseKey || platform}`;
+const packageName = `cjcj-${version}-${releaseKey ? getReleasePlatform(releaseKey).archiveKey : platform}`;
 const inputLlvmManifest = parseLlvmToolsManifest(await fs.readFile(llvmManifest, 'utf8'), {
   label: llvmManifest,
   schema: 'core-or-native',

@@ -78,7 +78,7 @@ jobs:
       FINAL_STD_DIR: ${{ github.workspace }}/.release-final-std/${{ inputs.platform }}
       CROSS_STD_DIR: ${{ github.workspace }}/.release-cross-std/${{ inputs.platform }}
       CROSS_STD_ARTIFACTS: ${{ inputs.cross_std_artifacts }}
-      PACKAGE_KEY: ${{ inputs.release_key || inputs.platform }}
+      RELEASE_KEY: ${{ inputs.release_key }}
       PYTHON_BUNDLE_DIR: ${{ github.workspace }}/.release-python/${{ inputs.platform }}/bundle
       RELEASE_PLATFORM: ${{ inputs.platform }}
       SOURCE_CJPM_DIR: ${{ github.workspace }}/.release-cjpm/${{ inputs.platform }}
@@ -86,6 +86,9 @@ jobs:
     steps:
       - name: Checkout cjcj
         uses: actions/checkout@v7
+
+      - name: Resolve archive identity independently of host toolchain
+        run: node ci/release/package-key.mjs
 
       - name: Select reviewed release host exception
         shell: bash
@@ -510,7 +513,7 @@ jobs:
           # The checker discovers the target's complete std inventory; do not
           # duplicate artifact or tuple file lists in this workflow.
           node scripts/check_packaged_std.mjs \
-            --sdk "$PWD/dist/cjcj-${{ inputs.version }}-${{ inputs.release_key || inputs.platform }}" \
+            --sdk "$PWD/dist/cjcj-${{ inputs.version }}-${{ env.PACKAGE_KEY }}" \
             --std "$FINAL_STD_DIR" \
             --platform "$RELEASE_PLATFORM"
 
@@ -519,7 +522,7 @@ jobs:
         shell: bash
         run: |
           set -e
-          pkg="cjcj-${{ inputs.version }}-${{ inputs.release_key || inputs.platform }}"
+          pkg="cjcj-${{ inputs.version }}-${{ env.PACKAGE_KEY }}"
           mkdir -p pkgtest
           tar -C pkgtest -xzf "dist/${pkg}.tar.gz"
           # shellcheck disable=SC1090
@@ -540,7 +543,7 @@ jobs:
         if: inputs.verify && runner.os == 'Windows'
         shell: pwsh
         run: |
-          $pkg = "cjcj-${{ inputs.version }}-${{ inputs.release_key || inputs.platform }}"
+          $pkg = "cjcj-${{ inputs.version }}-${{ env.PACKAGE_KEY }}"
           $extract = Join-Path $PWD 'pkgtest'
           $work = Join-Path $env:RUNNER_TEMP 'release-smoke'
           $smokeExit = 1
@@ -572,7 +575,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: pkg-diagnosis-${{ inputs.release_key || inputs.platform }}-${{ github.run_attempt }}
+          name: pkg-diagnosis-${{ env.PACKAGE_KEY }}-${{ github.run_attempt }}
           retention-days: 7
           if-no-files-found: warn
           path: |
@@ -585,13 +588,13 @@ jobs:
       - name: Upload SDK artifact
         uses: actions/upload-artifact@v7
         with:
-          name: pkg-${{ inputs.release_key || inputs.platform }}
+          name: pkg-${{ env.PACKAGE_KEY }}
           path: |
-            dist/cjcj-${{ inputs.version }}-${{ inputs.release_key || inputs.platform }}.tar.gz
-            dist/cjcj-${{ inputs.version }}-${{ inputs.release_key || inputs.platform }}.tar.gz.sha256
-            dist/cjcj-${{ inputs.version }}-${{ inputs.release_key || inputs.platform }}.zip
-            dist/cjcj-${{ inputs.version }}-${{ inputs.release_key || inputs.platform }}.zip.sha256
-            dist/cjcj-${{ inputs.version }}-${{ inputs.release_key || inputs.platform }}.RELEASE-MANIFEST.jsonl
-            dist/cjcj-${{ inputs.version }}-${{ inputs.release_key || inputs.platform }}.SHA256SUMS
+            dist/cjcj-${{ inputs.version }}-${{ env.PACKAGE_KEY }}.tar.gz
+            dist/cjcj-${{ inputs.version }}-${{ env.PACKAGE_KEY }}.tar.gz.sha256
+            dist/cjcj-${{ inputs.version }}-${{ env.PACKAGE_KEY }}.zip
+            dist/cjcj-${{ inputs.version }}-${{ env.PACKAGE_KEY }}.zip.sha256
+            dist/cjcj-${{ inputs.version }}-${{ env.PACKAGE_KEY }}.RELEASE-MANIFEST.jsonl
+            dist/cjcj-${{ inputs.version }}-${{ env.PACKAGE_KEY }}.SHA256SUMS
           if-no-files-found: error
           retention-days: 90

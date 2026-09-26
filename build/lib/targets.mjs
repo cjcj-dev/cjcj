@@ -251,6 +251,7 @@ const DROPPED_ARM32_TUPLES = Object.freeze([
 
 function releasePlatform(fields) {
   return Object.freeze({
+    archiveKey: fields.key,
     crossTuples: Object.freeze([]),
     requires: Object.freeze([]),
     droppedTuples: Object.freeze([]),
@@ -266,7 +267,7 @@ const RELEASE_PLATFORMS = Object.freeze([
     runner: 'ubuntu-24.04', crossTuples: Object.freeze(['windows_x86_64_cjnative']),
   }),
   releasePlatform({
-    key: 'linux-arm64', officialArchive: 'cangjie-sdk-linux-aarch64', host: 'linux-aarch64',
+    key: 'linux-arm64', archiveKey: 'linux-aarch64', officialArchive: 'cangjie-sdk-linux-aarch64', host: 'linux-aarch64',
     runner: 'ubuntu-24.04-arm', crossTuples: Object.freeze(['windows_x86_64_cjnative']),
   }),
   releasePlatform({
@@ -313,7 +314,7 @@ const RELEASE_PLATFORMS = Object.freeze([
   releasePlatform({
     // Cross std comes from the linux-x64 source cell; the package job itself runs
     // on Windows (release.yml phase 3).
-    key: 'win32-x64', officialArchive: 'cangjie-sdk-windows-x64', host: 'windows-x64', runner: 'windows-2025',
+    key: 'win32-x64', archiveKey: 'windows-x64', officialArchive: 'cangjie-sdk-windows-x64', host: 'windows-x64', runner: 'windows-2025',
   }),
   releasePlatform({
     key: 'win32-x64-android', officialArchive: 'cangjie-sdk-windows-x64-android', host: 'windows-x64',
@@ -400,6 +401,7 @@ export function releasePlatformReadiness(key) {
     hostStdCrossBuilt: Boolean(hostTarget.spec.crossCompile),
     runner: platform.runner,
     officialArchive: platform.officialArchive,
+    archiveKey: platform.archiveKey,
     archiveFormat: hostTarget.spec.archiveFormat,
     llvmPlatform: hostTarget.spec.llvmPlatform,
     runtimeTuple: hostTarget.spec.runtimeTuple,
