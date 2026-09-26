@@ -5,7 +5,7 @@ import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import test from 'node:test';
 import {checkPlatform, planMatrix, probeRequirement, runnerHost, selectPlatforms} from './platform-matrix.mjs';
-import {allReleasePlatforms, getReleasePlatform} from '../../build/lib/targets.mjs';
+import {allReleasePlatforms, getReleasePlatform, RELEASE_REQUIREMENTS} from '../../build/lib/targets.mjs';
 
 const script = path.resolve(import.meta.dirname, 'platform-matrix.mjs');
 const run = args => spawnSync(process.execPath, [script, ...args], {encoding: 'utf8'});
@@ -175,4 +175,23 @@ test('the CLI writes GITHUB_OUTPUT lines the workflow fans out over', () => {
   const blocked = run(['check', '--platform', 'ohos-arm64']);
   assert.equal(blocked.status, 1);
   assert.match(blocked.stderr, /device-side SDK/);
+});
+
+test('every requirement has an installer export to cut, drawn from the probe candidates', () => {
+  const installer = fs.readFileSync(path.resolve(import.meta.dirname, 'install-runner-sdk.py'), 'utf8');
+  const exported = new Set(['android-ndk', 'ohos-sdk', 'xcode-ios'].map(requirement => {
+    const contract = RELEASE_REQUIREMENTS[requirement];
+    const candidates = contract.envCandidates ?? ['DEVELOPER_DIR'];
+    const hit = candidates.filter(variable =>
+      new RegExp(`^\\s*export\\('${variable}'.*$`, 'm').test(installer));
+    assert.ok(hit.length > 0, `${requirement}: no export line for any of ${candidates.join('/')}`);
+    return hit[0];
+  }));
+  assert.deepEqual([...exported].sort(), ['ANDROID_NDK_ROOT', 'DEVELOPER_DIR', 'OHOS_SDK_HOME']);
+  // Each exported name is one the probe itself reads, so a disconnected export
+  // can only turn the probe red through the documented candidate list.
+  for (const name of exported) {
+    assert.ok(Object.values(RELEASE_REQUIREMENTS).some(contract => contract.envCandidates?.includes(name))
+      || name === 'DEVELOPER_DIR', `${name}: not a probe candidate`);
+  }
 });
