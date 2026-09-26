@@ -5,6 +5,7 @@ No product sources are recompiled. This avoids the dependency export-for-test
 failure tracked by cjcj#256. Build the supplied tree with cjpm build first.
 """
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 import os
@@ -79,7 +80,8 @@ def main():
             'rawarray': 'expect 1 operand(s), but there are 0 in fact.',
             'numeric': '', 'control': '',
         }
-        for mode, diagnostic in diagnostics.items():
+        def run_case(item):
+            mode, diagnostic = item
             start = time.monotonic()
             with (out / (mode + '.log')).open('w') as log:
                 rc = subprocess.call([str(executable), mode], cwd=tree, env=env,
@@ -87,12 +89,14 @@ def main():
             output = (out / (mode + '.log')).read_text()
             expected = 'true' if not diagnostic else 'false'
             target = f'TARGET mode={mode} observed={expected} expected={expected}'
-            record['cases'][mode] = {
+            return mode, {
                 'rc': rc, 'wall': time.monotonic() - start,
                 'target_executed': f'TARGET mode={mode} ' in output,
                 'target_bool': target in output,
                 'target_diagnostic': diagnostic in output if diagnostic else 'chir checker error:' not in output and 'unrecongnized ExprKind' not in output,
             }
+        with ThreadPoolExecutor(max_workers=min(len(diagnostics), len(os.sched_getaffinity(0)))) as pool:
+            record['cases'] = dict(pool.map(run_case, diagnostics.items()))
         record['test_rc'] = int(any(c['rc'] != 0 or not c['target_executed'] or not c['target_bool'] or not c['target_diagnostic']
                                     for c in record['cases'].values()))
     record['uptime_after'] = subprocess.check_output(['uptime'], text=True).strip()
