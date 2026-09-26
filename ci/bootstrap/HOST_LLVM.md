@@ -17,11 +17,23 @@ table for inspection. It checks `llvm::cl::Option`'s type information as well as
 
 After reading back a successful artifact, pin its `HOST_LLVM_PROVENANCE` JSON
 comment in `stage1_host_identities.txt`. The record carries repository, run,
-attempt, artifact, source SHA, producer SHA, platform and (for the three new
-cells) the library digest. Linux x64 retains the existing `libLLVM-15.so` digest
-line also consumed by the Linux stage1 runner. The new records remain comments
-for that runner's strict legacy text parser. No downloaded manifest sets an
-expected digest during preparation.
+attempt, artifact, source SHA and producer SHA. Linux digest rows use
+`<platform> <library> <sha256>` for the full runtime/boundscheck/LLVM triple.
+Both acquisition and the Linux stage1 runner select those rows by platform;
+there is no unscoped fallback. Darwin acquisition continues to use its JSON
+record's library digest. JSON Linux library digests are producer provenance;
+the scoped row is the expected digest used to verify downloaded bytes.
+
+The runtime and boundscheck rows are fixed from the official release named by
+`ci/host_sdk_pin.env`; archive names and SHA256 receipts accompany the pins.
+Updating the SDK requires reviewing these rows as well. Neither preparation nor
+the runner learns an expected digest from the input it is checking.
+
+`test_host_identities.py` enters the real runner on its native Linux platform,
+checks its installed binding, and exercises per-library rejection before any SDK
+mutation. Supplying `HOST_IDENTITY_SDK` and `HOST_IDENTITY_LLVM` adds a real
+three-library receipt against the checked-in pins. This proves the identity
+apparatus only, not a complete stage1 compilation.
 
 | Source target | Producer platform | Library |
 | --- | --- | --- |
