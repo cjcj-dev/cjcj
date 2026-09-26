@@ -1,6 +1,7 @@
 package cjcj::compiler_unittest
 
 import cjcj::frontend.*
+import cjcj::utils.FileUtil
 import std.env.getVariable
 import std.unittest.*
 import std.unittest.testmacro.*
@@ -200,5 +201,15 @@ func foo() {}
         let _ = instance.Compile(stage: CompileStage.PARSE)
         let _ = instance.PerformConditionCompile()
         @Expect(diag.GetWarningCount(), 1u64)
+    }
+}
+
+// Observe the same source/config paths passed to CompilerInvocation above.
+@Test
+class ConditionalCompilationFixtureTest {
+    @TestCase
+    func sourceAndConfigExist(): Unit {
+        @Expect(FileUtil.FileExist(CONDITIONAL_COMPILATION_SRC_PATH + "os.cj"), true)
+        @Expect(FileUtil.FileExist(CONDITIONAL_COMPILATION_SRC_PATH + "cfg.toml"), true)
     }
 }
