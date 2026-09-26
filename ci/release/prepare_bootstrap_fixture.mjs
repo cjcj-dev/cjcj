@@ -46,7 +46,7 @@ export function fixture(check, target = 'linux-x64') {
     fs.writeFileSync(path.join(hostArtifact, 'manifest.json'), JSON.stringify({...hostPin, sha256: hostSha}));
     env.STAGE1_HOST_IDENTITIES = path.join(dir, 'host-identities.txt');
     fs.writeFileSync(env.STAGE1_HOST_IDENTITIES,
-      `# HOST_LLVM_PROVENANCE ${JSON.stringify(hostPin)}\nlibLLVM-15.so ${hostSha}\n`);
+      `# HOST_LLVM_PROVENANCE ${JSON.stringify(hostPin)}\n${hostPin.platform} libLLVM-15.so ${hostSha}\n`);
     env.CJCJ_BOOTSTRAP_HOST_LLVM_ARTIFACT = hostArtifact;
     const runtimeSource = path.join(dir, 'runtime-source');
     const runtime = path.join(dir, 'runtime');
