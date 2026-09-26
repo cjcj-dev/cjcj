@@ -80,6 +80,7 @@ export function planMatrix(requested) {
     const cross = crossTuples.map(tuple => {
       const producer = readiness.crossStd[tuple];
       if (!source.has(producer)) source.set(producer, {target: producer});
+      if (tuple === 'linux_android_aarch64_cjnative') source.get(producer).build_android = true;
       const artifact = tuple === 'linux_android_aarch64_cjnative'
         ? 'final-std-android-aarch64' : stdArtifact(allTargetKeysForTuple(tuple)[0]);
       return {tuple, artifact};

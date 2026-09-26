@@ -159,7 +159,7 @@ test('the CLI writes GITHUB_OUTPUT lines the workflow fans out over', () => {
   assert.equal(result.status, 0, result.stderr);
   const lines = Object.fromEntries(fs.readFileSync(out, 'utf8').trim().split('\n').map(line => line.split(/=(.*)/s).slice(0, 2)));
   assert.equal(lines.selected, 'linux-x64,linux-x64-android');
-  assert.deepEqual(JSON.parse(lines.source_matrix), {include: [{target: 'linux-x64'}]});
+  assert.deepEqual(JSON.parse(lines.source_matrix), {include: [{target: 'linux-x64', build_android: true}]});
   assert.deepEqual(JSON.parse(lines.package_matrix).include.map(row => row.release_key), ['linux-x64', 'linux-x64-android']);
   assert.deepEqual(JSON.parse(lines.blocked_matrix).include, []);
   assert.equal(lines.package_keys, 'linux-x64,linux-x64-android');

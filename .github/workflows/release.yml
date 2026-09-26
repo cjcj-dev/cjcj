@@ -52,6 +52,7 @@ jobs:
       dry_run: ${{ inputs.dry_run }}
       runtime_ref: ${{ inputs.runtime_ref }}
       targets: linux-x64
+      build_android: true
 
   source-p2-linux-aarch64:
     name: phase 2 · linux-aarch64 / source SDK and final std

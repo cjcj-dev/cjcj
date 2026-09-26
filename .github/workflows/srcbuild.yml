@@ -31,6 +31,11 @@ on:
         required: false
         type: string
         default: all
+      build_android:
+        description: Build the Android runtime and final std needed by Android release packages
+        required: false
+        type: boolean
+        default: false
       rebuild_llvm:
         description: Bypass the whole-artifact LLVM tools cache so the LLVM sccache hit rate can be measured.
         required: false
@@ -94,6 +99,11 @@ on:
         required: false
         type: string
         default: all
+      build_android:
+        description: Build the Android runtime and final std needed by Android release packages
+        required: false
+        type: boolean
+        default: false
       rebuild_llvm:
         description: Bypass the whole-artifact LLVM tools cache so the LLVM sccache hit rate can be measured.
         required: false
@@ -595,19 +605,19 @@ jobs:
         run: npx --yes zx@8 ci/srcbuild/steps/build-shim.mjs
 
       - name: Install Android NDK and probe
-        if: matrix.target == 'linux-x64'
+        if: matrix.target == 'linux-x64' && inputs.build_android
         uses: ./.github/actions/setup-release-sdk
         with:
           requirement: android-ndk
 
       - name: Build Android runtime and final std with stage2 cjc
-        if: matrix.target == 'linux-x64'
+        if: matrix.target == 'linux-x64' && inputs.build_android
         env:
           CJCJ_STAGE3_CANGJIE_VERSION: ${{ steps.version.outputs.value }}
         run: npx --yes zx@8 ci/srcbuild/steps/build-android-final-std.mjs
 
       - name: Upload Android runtime and final std
-        if: matrix.target == 'linux-x64'
+        if: matrix.target == 'linux-x64' && inputs.build_android
         uses: actions/upload-artifact@v7
         with:
           name: final-std-android-aarch64

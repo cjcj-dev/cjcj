@@ -23,6 +23,7 @@ test('Windows Android matrix CLI carries both cross artifacts into package argum
   const run = spawnSync(process.execPath, [script, 'plan', '--platforms', 'win32-x64-android'], {encoding: 'utf8'});
   assert.equal(run.status, 0, run.stderr);
   const plan = JSON.parse(run.stdout);
+  assert.deepEqual(plan.source, [{target: 'linux-x64', build_android: true}]);
   const row = plan.package[0];
   const entries = JSON.parse(row?.cross_std_artifacts ?? '[]');
   const args = crossStdArguments(JSON.stringify(entries), '/artifacts with spaces');
@@ -49,4 +50,10 @@ test('Android producer and package consumer are connected to the real release wo
   assert.match(packageWorkflow, /pattern: final-std-\*/);
   assert.equal((packageWorkflow.match(/npx --yes zx@8 ci\/release\/compose-package\.mjs/g) ?? []).length, 2);
   assert.match(packager, /await installCrossRuntime\(\{root: spec\.slice\(split \+ 1\), stage, tuple, runtimeRef: runtimeSourceCommit\}\)/);
+});
+
+test('plain host packages do not add an Android build dependency', () => {
+  const run = spawnSync(process.execPath, [path.join(import.meta.dirname, 'platform-matrix.mjs'), 'plan', '--platforms', 'linux-x64'], {encoding: 'utf8'});
+  assert.equal(run.status, 0, run.stderr);
+  assert.deepEqual(JSON.parse(run.stdout).source, [{target: 'linux-x64'}]);
 });
