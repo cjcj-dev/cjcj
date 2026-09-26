@@ -6,6 +6,8 @@ public type jobject = CPointer<Unit>
 
 @C
 public struct JNINativeInterface_ {
+    public var CallIntMethod: CFunc<(CPointer<CPointer<JNINativeInterface_>>, jobject, jobject) -> Int32> =
+        unsafe { CFunc<(CPointer<CPointer<JNINativeInterface_>>, jobject, jobject) -> Int32>(CPointer<Unit>()) }
     public var NewObject: CFunc<(CPointer<CPointer<JNINativeInterface_>>, jobject, jobject) -> jobject> =
         unsafe { CFunc<(CPointer<CPointer<JNINativeInterface_>>, jobject, jobject) -> jobject>(CPointer<Unit>()) }
     public var NewObjectA: CFunc<(CPointer<CPointer<JNINativeInterface_>>, jobject, jobject, CPointer<UInt64>) -> jobject> =
