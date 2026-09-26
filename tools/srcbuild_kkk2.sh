@@ -891,6 +891,7 @@ step_2() {
 step_3() {
     cat "$HOST_TOOLCHAIN_PIN" >> "$GITHUB_ENV"
     cat "$REPO_ROOT/ci/source_pin.env" >> "$GITHUB_ENV"
+    cat "$REPO_ROOT/ci/llvm_pin.env" >> "$GITHUB_ENV"
 }
 
 step_4() {
@@ -1066,12 +1067,13 @@ step_13() {
     # shallowClone creates the directory before its network fetch.  A dropped
     # connection therefore leaves a directory that fetch.mjs would otherwise
     # mistake for a completed clone on --from-step retries.
-    ensure_exact_clone "$CANGJIE_WORKSPACE/cangjie_compiler" "$COMPILER_SRC_URL" "$COMPILER_REF" || return 1
+    ensure_exact_clone "$CANGJIE_WORKSPACE/cangjie_compiler" \
+        "$CANGJIE_COMPILER_URL" "$CANGJIE_COMPILER_SHA" || return 1
     ensure_exact_clone "$CANGJIE_WORKSPACE/cangjie_runtime" "$RUNTIME_SRC_URL" "$RUNTIME_REF" || return 1
     ensure_exact_clone "$CANGJIE_WORKSPACE/cangjie_tools" "$TOOLS_SRC_URL" "$TOOLS_REF" || return 1
     ensure_exact_clone "$CANGJIE_WORKSPACE/cangjie_stdx" "$STDX_SRC_URL" "$STDX_REF" || return 1
     build_cli fetch \
-        --repo-url "compiler=$COMPILER_SRC_URL" --repo-tag "compiler=$COMPILER_REF" \
+        --repo-url "compiler=$CANGJIE_COMPILER_URL" --repo-tag "compiler=$CANGJIE_COMPILER_SHA" \
         --repo-url "runtime=$RUNTIME_SRC_URL" --repo-tag "runtime=$RUNTIME_REF" \
         --repo-url "tools=$TOOLS_SRC_URL" --repo-tag "tools=$TOOLS_REF" \
         --repo-url "stdx=$STDX_SRC_URL" --repo-tag "stdx=$STDX_REF"

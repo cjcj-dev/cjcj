@@ -29,10 +29,20 @@ function headers(root, relative = '') {
 export async function prepareCppHeaders(cppSrc) {
   const cpp = path.resolve(cppSrc);
   const pin = readPin('llvm_pin.env');
-  const sourcePin = readPin('source_pin.env');
+  // One compiler source identity for the whole stage chain, defined once in
+  // ci/llvm_pin.env: the same commit the colour LLVM tuple, the in-process dylib
+  // and every other LLVM product in this file are built from. The headers made
+  // below are compiled and linked against those products, so a source tree at any
+  // other commit -- ci/source_pin.env COMPILER_REF, whose tree has no
+  // schema/ModuleFormat.fbs -- is a different compiler, not an interchangeable
+  // checkout of this one.
   const identity = await run(['git', '-C', cpp, 'rev-parse', 'HEAD'], {capture: true});
-  if (identity.stdout.trim() !== sourcePin.COMPILER_REF) {
-    throw new Error(`default shim compiler source differs from COMPILER_REF: ${identity.stdout.trim()}`);
+  if (identity.stdout.trim() !== pin.CANGJIE_COMPILER_SHA) {
+    throw new Error(`default shim compiler source differs from CANGJIE_COMPILER_SHA: ${identity.stdout.trim()}`);
+  }
+  const schemaSource = path.join(cpp, 'schema/ModuleFormat.fbs');
+  if (!fs.existsSync(schemaSource)) {
+    throw new Error(`schema/ModuleFormat.fbs absent at CANGJIE_COMPILER_SHA ${pin.CANGJIE_COMPILER_SHA}: ${cpp}`);
   }
   const llvm = path.join(cpp, 'third_party/llvm-project');
   const flatbuffers = path.join(cpp, 'third_party/flatbuffers');
@@ -70,7 +80,7 @@ export async function prepareCppHeaders(cppSrc) {
       fs.cpSync(path.join(flatbuffers, 'include/flatbuffers'), path.join(build, 'include/flatbuffers'), {recursive: true});
       fs.mkdirSync(schema, {recursive: true});
       await execute([path.join(flatBuild, 'flatc'), '--no-warnings', '-c', '-o', schema,
-        path.join(cpp, 'schema/ModuleFormat.fbs')]);
+        schemaSource]);
     })(),
   ]);
   for (const result of results) {
@@ -79,10 +89,10 @@ export async function prepareCppHeaders(cppSrc) {
   const roots = ['third_party/llvm-project/llvm/include',
     'build/build/third_party/llvm/include', 'build/build/include', 'build/build/schema'];
   const manifest = {
-    compiler: {url: sourcePin.COMPILER_SRC_URL, sha: identity.stdout.trim()},
+    compiler: {url: pin.CANGJIE_COMPILER_URL, sha: pin.CANGJIE_COMPILER_SHA},
     llvm: {url: pin.LLVM_URL, sha: pin.LLVM_SHA},
     flatbuffers: {url: pin.FLATBUFFERS_URL, sha: pin.FLATBUFFERS_SHA},
-    schema: {path: 'schema/ModuleFormat.fbs', sha256: digest(path.join(cpp, 'schema/ModuleFormat.fbs'))},
+    schema: {path: 'schema/ModuleFormat.fbs', sha256: digest(schemaSource)},
     flatc: {path: path.join(flatBuild, 'flatc'), sha256: digest(path.join(flatBuild, 'flatc'))},
     commands,
     headers: Object.fromEntries(roots.map(root => [root, headers(path.join(cpp, root))])),

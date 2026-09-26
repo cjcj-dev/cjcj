@@ -24,7 +24,7 @@ caller and must already satisfy `bootstrap.sh`'s header checks.
 | `third_party/llvm-project/llvm/include` | exact LLVM source checkout | `ci/llvm_pin.env`: `LLVM_URL`, `LLVM_SHA` |
 | `build/build/third_party/llvm/include` | LLVM CMake configure and `llvm-headers` target | same LLVM checkout |
 | `build/build/include/flatbuffers` | copy FlatBuffers public includes | `ci/llvm_pin.env`: `FLATBUFFERS_URL`, `FLATBUFFERS_SHA` |
-| `build/build/schema/flatbuffers/ModuleFormat_generated.h` | source-built `flatc --no-warnings -c` | `ci/source_pin.env`: `COMPILER_REF`, `schema/ModuleFormat.fbs`, pinned FlatBuffers |
+| `build/build/schema/flatbuffers/ModuleFormat_generated.h` | source-built `flatc --no-warnings -c` | `ci/llvm_pin.env`: `CANGJIE_COMPILER_URL`, `CANGJIE_COMPILER_SHA`, `schema/ModuleFormat.fbs`, pinned FlatBuffers |
 
 This preparation builds LLVM header dependencies and flatc; it does not build
 the C++ compiler. The independent LLVM and FlatBuffers builds run concurrently.
