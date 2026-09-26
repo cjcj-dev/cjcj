@@ -50,8 +50,8 @@ function probeWith(env) {
 
 // Runs concurrently with the four probe arms below; only the assertions at
 // the end depend on its result.
-const exportArm = (async () => {
 const exportTree = path.join(evidence, 'cut-export');
+const exportArm = (async () => {
 fs.mkdirSync(path.join(exportTree, 'ci/release'), {recursive: true});
 const cutInstaller = path.join(exportTree, 'ci/release/install-runner-sdk.py');
 fs.writeFileSync(cutInstaller, installer.replace(exportLine, ''));
@@ -99,6 +99,11 @@ const exportRecord = {
   stdout: cutRun.stdout,
   controlRc: controlRun.status,
   controlStdout: controlRun.stdout,
+  // The export is load-bearing only where losing it loses the capability. Where
+  // the runner supplies the same SDK by another route (xcode-select's default
+  // toolchain), the arm records that fact instead of claiming a red it cannot see.
+  exportLoadBearing: controlRun.stdout?.startsWith(`PRESENT ${requirement}:`) === true
+    && cutRun.stdout?.startsWith(`PRESENT ${requirement}:`) !== true,
 };
 try {
   assert.deepEqual({rc: cutRun.status, present: cutRun.stdout?.startsWith(`PRESENT ${requirement}:`)},
@@ -148,18 +153,17 @@ await Promise.all(Object.entries(arms).map(async ([arm, source], index) => {
   record.stdout = run.stdout;
 }));
 const exportRecord = await exportArm;
-const present = run => run.stdout?.startsWith(`PRESENT ${requirement}:`) === true;
-// The export is load-bearing only where losing it loses the capability. Where
-// the runner supplies the same SDK by another route (xcode-select's default
-// toolchain), the arm records that fact instead of claiming a red it cannot see.
-exportRecord.exportLoadBearing = present(controlRun) && !present(cutRun);
-assert.equal(present(controlRun), true, 'control arm: the installed SDK is present');
-assert.equal(install.status, 0, 'cut-export: the installer still succeeded');
-assert.equal(exportRecord.targetAssertionRc, exportRecord.exportLoadBearing ? 1 : 0,
-  'cut-export: unchanged target assertion verdict');
+// Persist the observation before judging it, so a failing judge still leaves the
+// product's own numbers on disk.
 fs.writeFileSync(path.join(exportTree, 'results.json'), `${JSON.stringify(exportRecord, null, 2)}\n`);
 fs.writeFileSync(path.join(evidence, 'export-arm.json'), `${JSON.stringify(exportRecord, null, 2)}\n`);
 fs.writeFileSync(path.join(evidence, 'results.json'), `${JSON.stringify(results, null, 2)}\n`);
+assert.match(exportRecord.controlStdout, new RegExp(`^PRESENT ${requirement}:`),
+  'control arm: the installed SDK is present');
+assert.equal(exportRecord.installerRc, 0, 'cut-export: the installer still succeeded');
+assert.equal(exportRecord.toolCheckRc, 0, 'cut-export: the disconnected install still works');
+assert.equal(exportRecord.targetAssertionRc, exportRecord.exportLoadBearing ? 1 : 0,
+  'cut-export: unchanged target assertion verdict');
 for (const {arm, rc, expected, targetAssertionRc, stdout} of results) {
   assert.equal(rc, expected, `${arm}: target capability exit status`);
   assert.equal(targetAssertionRc, expected, `${arm}: unchanged target assertion verdict`);
