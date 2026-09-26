@@ -35,6 +35,7 @@ Control-flow dispatch additionally checks the three non-Lambda structured kinds
 and emit the upstream unrecognized-kind warning. The map and its lookup follow
 `src/CHIR/Checker/CHIRChecker.cpp:3325-3337`; Lambda narrowing stays in its callback.
 A Lambda callback routed to CheckOtherExpression, or a lookup forced to INVALID,
-must fail only the malformed Lambda witness; good Lambda and the unrelated routes
-are controls. Removing the fallback WarningInExpr must fail precisely the three
+must fail the malformed Lambda Bool/diagnostic assertion and both Lambda modes'
+no-warning assertion. The good Lambda Bool remains true; unrelated routes remain
+controls. Removing the fallback WarningInExpr must fail precisely the three
 non-Lambda warning assertions, with their TARGET Bool assertions still executed.
