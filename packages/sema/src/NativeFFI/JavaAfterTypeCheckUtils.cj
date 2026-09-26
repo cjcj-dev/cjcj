@@ -558,6 +558,20 @@ public func GetJavaFQSourceCodeName(decl: ClassLikeDecl): String {
     return decl.GetFullPackageName() + "." + decl.identifier.Val()
 }
 
+// Upstream Java/Utils.cpp:394-410. Escaped dollars stay inside a part; bare dollars are nested boundaries.
+public func GetJavaUnqualifiedTypeName(decl: ClassLikeDecl, nestedSeparator: String): String {
+    if (let Some(attr) <- GetJavaMirrorAnnoAttr(decl)) {
+        let nameParts = GetFQNameParts(attr)
+        if (!nameParts.isEmpty()) {
+            if (let Some(pos) <- nameParts[0].lastIndexOf(".")) {
+                nameParts[0] = nameParts[0][pos + 1..]
+            }
+        }
+        return JoinVector(nameParts, nestedSeparator)
+    }
+    return decl.identifier.Val()
+}
+
 public func GetJavaPackage(decl: Decl): String {
     for (anno in decl.annotations) {
         if (anno.kind != AstAnnotationKind.JAVA_MIRROR && anno.kind != AstAnnotationKind.JAVA_IMPL) {

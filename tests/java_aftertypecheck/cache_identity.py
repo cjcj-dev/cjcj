@@ -86,7 +86,7 @@ def main():
         return name, record
 
     if ready:
-        names = [f'cache_{kind}_{mode}' for kind in ('field', 'method') for mode in ('collision', 'control', 'hash_collision', 'class', 'name', 'signature', 'staticness')]
+        names = [f'cache_{kind}_{mode}' for kind in ('field', 'method') for mode in ('collision', 'control', 'hash_collision', 'class', 'name', 'signature', 'staticness', 'nested', 'nested_control')]
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
             result['cases'].update(dict(pool.map(check, names)))
     result['compiler_after_sha256'] = sha(compiler)

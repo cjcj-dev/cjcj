@@ -3,8 +3,7 @@ package cjcj::sema.NativeFFI.Java
 import std.collection.*
 import cjcj::ast.*
 import cjcj::sema.TypeManager
-import cjcj::sema.NativeFFI.{GetConstructorMarkerFQName, GetJavaJniClassName, GetJavaMemberName, GetParamTys,
-    NormalizeJavaSignature, Utils}
+import cjcj::sema.NativeFFI.{GetJavaMemberName, GetParamTys, Utils}
 import cjcj::utils.CJC_ASSERT
 
 private enum JavaMemberKind <: Equatable<JavaMemberKind> {
@@ -23,7 +22,8 @@ private enum JavaMemberKind <: Equatable<JavaMemberKind> {
 }
 
 public class JavaMemberSignature <: Hashable & Equatable<JavaMemberSignature> {
-    public let classTypeJniName: String
+    public let classSignature: JavaClassSignature
+    public prop classTypeJniName: String { get() { return classSignature.GetJniClassName() } }
     public let name: String
     public let signature: String
     public let isStatic: Bool
@@ -31,9 +31,9 @@ public class JavaMemberSignature <: Hashable & Equatable<JavaMemberSignature> {
     public prop isMethod: Bool { get() { return kind == JavaMemberKind.METHOD } }
     public prop isField: Bool { get() { return kind == JavaMemberKind.FIELD } }
 
-    private init(classTypeJniName: String, name: String, signature: String, kind: JavaMemberKind,
+    private init(classSignature: JavaClassSignature, name: String, signature: String, kind: JavaMemberKind,
         isStatic!: Bool = false) {
-        this.classTypeJniName = classTypeJniName
+        this.classSignature = classSignature
         this.name = name
         this.signature = signature
         this.isStatic = isStatic
@@ -41,12 +41,19 @@ public class JavaMemberSignature <: Hashable & Equatable<JavaMemberSignature> {
         CJC_ASSERT(kind != JavaMemberKind.CONSTRUCTOR || !isStatic)
     }
 
-    public func UnqualifiedTypeName(): String {
-        return UnqualifiedJniTypeName(classTypeJniName)
+    public func GetClassSignature(): JavaClassSignature {
+        return classSignature
     }
 
-    // JavaMemberSignature.cpp:147-162: member identity is structural. Hash collisions
-    // must never merge members whose class, name, signature, kind or staticness differs.
+    public func GetClassTypeJniName(): String {
+        return classSignature.GetJniClassName()
+    }
+
+    public func UnqualifiedTypeName(): String {
+        return classSignature.GetUnqualifiedTypeName(nestedDelimiter: "$")
+    }
+
+    // JavaMemberSignature.cpp:147-162. Class identity is JavaClassSignature, not the JNI spelling.
     public operator func ==(other: JavaMemberSignature): Bool {
         if (signature != other.signature) {
             return false
@@ -57,7 +64,7 @@ public class JavaMemberSignature <: Hashable & Equatable<JavaMemberSignature> {
         if (isStatic != other.isStatic) {
             return false
         }
-        if (classTypeJniName != other.classTypeJniName) {
+        if (classSignature != other.classSignature) {
             return false
         }
         return name == other.name
@@ -68,7 +75,7 @@ public class JavaMemberSignature <: Hashable & Equatable<JavaMemberSignature> {
     }
 
     public func hashCode(): Int64 {
-        return (classTypeJniName + "$" + name + "$$" + signature + if (isStatic) { "1" } else { "0" }).hashCode()
+        return (GetClassTypeJniName() + "$" + name + "$$" + signature + if (isStatic) { "1" } else { "0" }).hashCode()
     }
 
     public static func FromMethod(utils: Utils, method: FuncDecl): JavaMemberSignature {
@@ -76,7 +83,7 @@ public class JavaMemberSignature <: Hashable & Equatable<JavaMemberSignature> {
         let outerDecl = (method.outerDecl.getOrThrow() as ClassLikeDecl).getOrThrow()
         CJC_ASSERT(!method.TestAnyAttr(Attribute.CONSTRUCTOR, Attribute.FINALIZER))
         CJC_ASSERT(IsMirror(outerDecl) || IsImpl(outerDecl))
-        let className = GetJavaJniClassName(utils, outerDecl.GetTy().getOrThrow())
+        let className = JavaClassSignature.FromDecl(outerDecl)
         let body = method.funcBody.getOrThrow()
         let signature = utils.GetJavaTypeSignature(body.retType.getOrThrow().GetTy().getOrThrow(),
             GetParamTys(body.paramLists[0]), fullPackageName: method.fullPackageName)
@@ -88,14 +95,14 @@ public class JavaMemberSignature <: Hashable & Equatable<JavaMemberSignature> {
         CJC_ASSERT(ctor.outerDecl.isSome())
         CJC_ASSERT(ctor.TestAttr(Attribute.CONSTRUCTOR))
         let outerDecl = (ctor.outerDecl.getOrThrow() as ClassLikeDecl).getOrThrow()
-        let className = GetJavaJniClassName(utils, outerDecl.GetTy().getOrThrow())
+        let className = JavaClassSignature.FromDecl(outerDecl)
         let paramTys = GetParamTys(ctor.funcBody.getOrThrow().paramLists[0])
         var signature = "("
         for (paramTy in paramTys) {
             signature = signature + utils.GetJavaTypeSignature(paramTy)
         }
         if (withMarker) {
-            signature = signature + "L" + NormalizeJavaSignature(GetConstructorMarkerFQName()) + ";"
+            signature = signature + "L" + JavaClassSignature.GetConstructorMarkerClass().GetJniClassName() + ";"
         }
         signature = signature + ")V"
         return JavaMemberSignature(className, "<init>", signature, JavaMemberKind.CONSTRUCTOR)
@@ -105,7 +112,7 @@ public class JavaMemberSignature <: Hashable & Equatable<JavaMemberSignature> {
         CJC_ASSERT(propDecl.outerDecl.isSome())
         let outerDecl = (propDecl.outerDecl.getOrThrow() as ClassLikeDecl).getOrThrow()
         CJC_ASSERT(IsMirror(outerDecl) || IsImpl(outerDecl))
-        let className = GetJavaJniClassName(utils, outerDecl.GetTy().getOrThrow())
+        let className = JavaClassSignature.FromDecl(outerDecl)
         let signature = utils.GetJavaTypeSignature(propDecl.GetTy().getOrThrow(), fullPackageName: propDecl.fullPackageName)
         return JavaMemberSignature(className, GetJavaMemberName(propDecl), signature, JavaMemberKind.FIELD,
             isStatic: propDecl.TestAttr(Attribute.STATIC))

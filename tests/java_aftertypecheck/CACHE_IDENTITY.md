@@ -25,6 +25,8 @@ Both field and method fixtures exercise:
 | `name` | Same Java class/signature, different member name |
 | `signature` | Same Java class/name, `Int32` versus `Int64` |
 | `staticness` | Same Java class/name/signature, instance versus static |
+| `nested` | Literal-dollar `demo.A\\$m` versus nested `demo.A$m`: same JNI spelling, different source class identity |
+| `nested_control` | Second is nested `demo.B$m`: distinct JNI spelling control |
 
 The kind discriminator is constructed by the three product factories:
 `FromMethod`, `FromConstructor`, and `FromProperty`. Fields and methods live in
@@ -34,7 +36,8 @@ cannot create a pair differing only in kind in one cache. The existing
 
 Specification: upstream `71b92a0b9ff2f19b6206964efa2c721a2cd218ae`,
 `src/Sema/NativeFFI/Java/JavaMemberSignature.cpp:147-162` and
-`JavaMemberSignature.h:87-98`; consumers are
+`JavaMemberSignature.h:87-98`; class identity is
+`JavaClassSignature.cpp:34-46` and `:117-119`; consumers are
 `src/Sema/NativeFFI/Java/CachingApi/JMethodIdCache.cpp:70-89` and
 `JFieldIdCache.cpp:65-84`.
 
@@ -47,6 +50,9 @@ Expected causal checks, always using the same ordinary assertions:
 - Replacing member equality with hash equality fails only the two
   `hash_collision` separation assertions.
 - Restoring the saved candidate compiler restores all assertions.
+- Replacing `FromDecl`'s unqualified-name separator `.` with `$`, or comparing
+  `classTypeJniName` instead of `classSignature`, fails only the two `nested`
+  separation assertions. Alias reuse and `nested_control` stay green.
 
 These tests establish compiler AST cache identity. They do not claim execution
 of JNI calls in a Java VM; the imported JNI declarations are compilation fixtures.
