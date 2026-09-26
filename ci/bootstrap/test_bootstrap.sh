@@ -25,6 +25,8 @@ new_tmp() {
 refresh_tuple_sums() {
   (
     cd "$TMP/colour-tuple" || exit 1
+    # SHA256SUMS is explicitly excluded from find; it is only the output.
+    # shellcheck disable=SC2094
     find . -type f ! -name SHA256SUMS -print | sort | xargs sha256sum > SHA256SUMS
   )
 }
@@ -33,10 +35,12 @@ make_colour_tuple() {
   mkdir -p "$TMP/colour-tuple/bin" "$TMP/colour-tuple/lib" "$TMP/colour-tuple/fixed-llc"
   cp /bin/true "$TMP/colour-tuple/bin/opt"
   cp /bin/true "$TMP/colour-tuple/bin/llc"
+  cp /bin/true "$TMP/colour-tuple/bin/ld.lld"
   printf 'CJLLVM-COMMIT:1111111111111111111111111111111111111111\n' >> "$TMP/colour-tuple/bin/opt"
   printf 'shim\n' > "$TMP/colour-tuple/fixed-llc/cjselfhost_llvmshim.o"
   printf 'llc gzip fixture\n' > "$TMP/colour-tuple/fixed-llc/llc.gz"
   printf 'opt gzip fixture\n' > "$TMP/colour-tuple/fixed-llc/opt.gz"
+  printf 'ld.lld gzip fixture\n' > "$TMP/colour-tuple/fixed-llc/ld.lld.gz"
   printf 'fixed llc\n' > "$TMP/colour-tuple/fixed-llc/llvm-tools.manifest"
   printf 'static LLVM tuple\n' > "$TMP/colour-tuple/lib/STATIC_LLVM.txt"
   printf 'LLVM_SHA=1111111111111111111111111111111111111111\n' > "$TMP/colour-tuple/MANIFEST"
@@ -46,6 +50,18 @@ make_colour_tuple() {
     '}' > "$TMP/colour.cpp"
   c++ -shared -fPIC "$TMP/colour.cpp" -o "$TMP/colour-libLLVM-15.so"
   refresh_tuple_sums
+}
+
+make_std_sdk_inputs_fixture() {
+  mkdir -p "$TMP/src/ci" "$TMP/include" "$TMP/schema" "$TMP/third_party/flatbuffers/bin"
+  cp "$ROOT/../install_std_sdk_inputs.py" "$ROOT/../build_resources.sh" "$TMP/src/ci/"
+  printf 'ast\n' > "$TMP/ast.a"
+  if [ -n "${BOOTSTRAP_AST_ARCHIVE:-}" ]; then
+    cp "$BOOTSTRAP_AST_ARCHIVE" "$TMP/ast.a"
+  fi
+  cp /bin/true "$TMP/third_party/flatbuffers/bin/flatc"
+  cp "$TMP/ast.a" "$TMP/libcangjie-ast-support.a"
+  (cd "$TMP" && sha256sum libcangjie-ast-support.a third_party/flatbuffers/bin/flatc > SHA256SUMS)
 }
 
 make_dry_fixture() {
@@ -65,15 +81,7 @@ make_dry_fixture() {
   cp /bin/true "$TMP/base/tools/bin/cjpm"
   printf 'source\n' > "$TMP/src/main.cj"
   printf '#!/usr/bin/env python3\n' > "$TMP/stdsrc/build.py"
-  mkdir -p "$TMP/src/ci" "$TMP/include" "$TMP/schema" "$TMP/third_party/flatbuffers/bin"
-  cp "$ROOT/../install_std_sdk_inputs.py" "$ROOT/../build_resources.sh" "$TMP/src/ci/"
-  printf 'ast\n' > "$TMP/ast.a"
-  if [ -n "${BOOTSTRAP_AST_ARCHIVE:-}" ]; then
-    cp "$BOOTSTRAP_AST_ARCHIVE" "$TMP/ast.a"
-  fi
-  cp /bin/true "$TMP/third_party/flatbuffers/bin/flatc"
-  cp "$TMP/ast.a" "$TMP/libcangjie-ast-support.a"
-  (cd "$TMP" && sha256sum libcangjie-ast-support.a third_party/flatbuffers/bin/flatc > SHA256SUMS)
+  make_std_sdk_inputs_fixture
   printf 'int host_symbol;\n' > "$TMP/host.c"
   cc -shared -fPIC "$TMP/host.c" -o "$TMP/libLLVM-15.so"
   make_colour_tuple
@@ -108,23 +116,49 @@ check_shim_call_count() {
   check_count SHIM 2 'CMD shim build label=' "$1"
 }
 
+check_dry_build_env() {
+  local log="$1" home="${HOME:-/root}" tmpdir="${TMPDIR:-$TMP/work/tmp-private}"
+  local prefix line commands=0 planned=0
+  # Match the caller/default contract, including shell quoting in CMD output.
+  # Literal matching keeps spaces and regexp characters in caller paths exact.
+  prefix="CMD env -i HOME=$(printf '%q' "$home") TMPDIR=$(printf '%q' "$tmpdir") CANGJIE_HOME="
+  while IFS= read -r line; do
+    if [[ "$line" == "$prefix"*' bash -c '* ]]; then
+      commands=$((commands + 1))
+    fi
+    if [[ "$line" == "BUILD-ENV planned HOME=$home TMPDIR=$tmpdir" ]]; then
+      planned=$((planned + 1))
+    fi
+  done < "$log"
+  [ "$commands" -eq 4 ] || fail A4 "isolated HOME/TMPDIR command count=$commands expected=4: $prefix"
+  [ "$planned" -eq 4 ] || fail A4 "planned HOME/TMPDIR count=$planned expected=4"
+  echo 'PASS A4 four isolated commands preserve caller/default HOME/TMPDIR'
+}
+
 check_dry_contract() {
-  local log="$1"
-  check_count A1 1 'shape=planned Int64.ti>1 FFI-archives>0' "$log"
+  local log="$1" jobs="${CJ_JOBS:-$(getconf _NPROCESSORS_ONLN)}"
+  check_count A1 2 'shape=planned Int64.ti>1 FFI-archives>0' "$log"
   check_count A1 1 'FFI-set-equals=' "$log"
   check_count A2 1 'cjcj-stage1 --version' "$log"
   check_count A2 1 'cjcj-stage2 --version' "$log"
   check_count A3 2 'ASSERT stage1-compiler executable=planned' "$log"
   check_count CJPM 4 'tools/bin/cjpm' "$log"
   check_count CJPM 2 'cjpm build' "$log"
-  check_count CJPM 1 'cjpm build -j 1' "$log"
+  # Stage self-hosting must use the configured CPU budget (0924 stage >=64
+  # cores policy on kkk2), not the inherited serial override. JOBS comes from
+  # CJ_JOBS/getconf; configure_build_resources independently bounds the heap.
+  check_count CJPM-JOBS 1 "cjpm build -j $jobs bin=" "$log"
   check_count CJPM 1 'compile-option = "-O1"' "$log"
   check_count CJPM 1 'ASSERT compile-option-o1 planned' "$log"
   check_count CJPM 2 'ISOLATE cjcj-src from=' "$log"
   check_count CJPM 1 'CMD cjpm build bin=' "$log"
-  check_count CJPM 1 'CMD cjpm build -j 1 bin=' "$log"
-  check_count CJPM 1 'heap=20GB' "$log"
+  check_count CJPM-JOBS 1 "CMD cjpm build -j $jobs bin=" "$log"
+  # Observe the actual env/bash command too: a correct diagnostic alone does
+  # not prove that cjpm receives the job count.
+  check_count CJPM-EXEC-JOBS 1 "tools/bin/cjpm\\\\ build\\\\ -j\\\\ $jobs$" "$log"
+  echo "PASS dry stage1 cjpm jobs=$jobs reaches execution command"
   check_count BOOTSTRAP-STD 1 'CMD python3 .*seed_official_std.py --sdk .*/base --tuple linux_x86_64_cjnative --output .*/stdlib-stage1' "$log"
+  check_count CJPM 1 'heap=20480MB' "$log"
   check_shim_call_count "$log"
   check_count SHIM 1 'CMD shim build label=stage0 .*source-object=source .*sdk=.*/sdk-stage0 .*runtime=.*/host-rt' "$log"
   check_count SHIM 1 'CMD shim build label=stage1 .*source-object=.*/sdk-stage1/third_party/llvm/fixed-llc/cjselfhost_llvmshim.o .*sdk=.*/sdk-stage1 .*runtime=.*/colour-rt' "$log"
@@ -132,23 +166,31 @@ check_dry_contract() {
   check_count SHIM 1 'CJCJ_LLVM_SHIM_O=.*/sdk-stage1/third_party/llvm/fixed-llc/cjselfhost_llvmshim.o' "$log"
   check_count SHIM 2 'OUTPUT stage[01]-shim-cpp .*sha256=planned' "$log"
   check_count SHIM 2 'OUTPUT stage[01]-shim-config .*sha256=planned' "$log"
-  check_count A4 1 'rm\\ -rf\\ build/build' "$log"
-  check_count A4 1 '--target-lib' "$log"
-  check_count A4 3 'CMD env -i HOME=/root TMPDIR=.*/work/tmp-private CANGJIE_HOME=.*bash -c' "$log"
-  check_count A4 3 'BUILD-ENV planned HOME=/root TMPDIR=.*/work/tmp-private' "$log"
+  check_count A4 2 'rm\\ -rf\\ build/build' "$log"
+  check_count A4 2 '--target-lib' "$log"
+  check_dry_build_env "$log"
   check_count LLVM-SO 1 'sdk_build.sh .*--host --llvm-so .*libLLVM-15.so' "$log"
   check_count LLVM-SO 1 'ASSERT installed-host-llvm-so sha256=planned' "$log"
   check_count LLVM-TUPLE 2 'sdk_build.sh .*--target .*--llvm-tuple .*colour-tuple' "$log"
   check_count HOST-RT 2 '--verify-host-rt .*/host-rt' "$log"
   check_count HOST-RUNNER 2 'stage1_host_runner.sh .*/sdk-stage1 .*/sdk-stage0 .*/host-rt' "$log"
-  check_count LLVM-TUPLE 16 'ASSERT installed-colour-tuple sha256=planned' "$log"
+   check_count LLVM-TUPLE 30 'ASSERT installed-colour-tuple sha256=planned' "$log"
   check_count LLVM-RULER 2 'ruler=readelf--dyn-syms symbol=llvm::isCJTypedReadHelperCandidate' "$log"
   check_count LLVM-RULER 1 'ASSERT official-opt-zero ruler=strings .* hits=0' "$log"
   check_count LLVM-RULER 2 'ASSERT colour-opt-stamp ruler=strings .* hits=1' "$log"
+  check_count STD-BOOTSTRAP 1 'sdk_build.sh .*--to .*sdk-std-bootstrap --host --llvm-tuple' "$log"
+  check_count STD-BOOTSTRAP 1 'CMD env .*CANGJIE_HOME=.*/sdk-std-bootstrap .*bash .*/stdsrc .* .*/std-runtime-link .*/stdlib-stage1' "$log"
+  check_count STD-BOOTSTRAP 1 'sdk_build.sh .*--to .*sdk-std-bootstrap .*--colour-runtime .*/colour-rt/libcangjie-runtime.so --host-runtime .*/host-rt/libcangjie-runtime.so' "$log"
+  check_count STD-BOOTSTRAP 1 'std_runtime_colour.py --colour-runtime .*/colour-rt/libcangjie-runtime.so --host-runtime .*/host-rt/libcangjie-runtime.so --runtime .* --std .*/stdlib-stage1/lib/linux_x86_64_cjnative/libcangjie-std-core.a' "$log"
   # stage1 assembles the SDK on both sides of the target stdlib build.
   # Counts alone would also accept two assemblies using the old stdlib.
   local assembly_order
   assembly_order=$(awk '
+    /^\[stage0\]/ { print "stage0" }
+    /^\[stage1\]/ { print "stage1" }
+    /^ASSERT stdlib-stage1 shape=planned / { print "initial-std-built" }
+    /^CMD rm -rf -- .*\/sdk-std-bootstrap$/ { print "bootstrap-sdk-removed" }
+    /^CMD rm -rf -- .*\/std-runtime-link$/ { print "runtime-link-cleared" }
     /^CMD .*sdk_build\.sh .*--to .*\/sdk-stage1 --target / {
       if ($0 ~ / --std .*\/stdlib-stage1 --verify-host-rt /) print "assemble-old"
       else if ($0 ~ / --std .*\/stdlib-stage2 --verify-host-rt /) print "assemble-new"
@@ -157,7 +199,7 @@ check_dry_contract() {
     /^ASSERT stage1-compiler executable=planned path=.*\/sdk-stage1\/bin\/cjc$/ { print "executable" }
     /^ASSERT stdlib-stage2 shape=planned / { print "stdlib-built" }
   ' "$log")
-  [ "$assembly_order" = $'assemble-old\nexecutable\nstdlib-built\nassemble-new\nexecutable' ] ||
+  [ "$assembly_order" = $'stage0\nstage1\nruntime-link-cleared\ninitial-std-built\nbootstrap-sdk-removed\nruntime-link-cleared\nassemble-old\nexecutable\nstdlib-built\nassemble-new\nexecutable' ] ||
     fail A3-order "unexpected stage1 SDK assembly sequence: $assembly_order"
   echo 'PASS dry stage1 SDK assembly count and order'
 }
@@ -170,6 +212,9 @@ make_sdk_fixture() {
   cp /bin/true "$base/tools/bin/cjpm"
   cp /bin/true "$base/third_party/llvm/bin/llc"
   cp /bin/true "$base/third_party/llvm/bin/opt"
+  cp /bin/true "$base/third_party/llvm/bin/ld.lld"
+  cjc_sha=$(sha256sum "$base/bin/cjc" | awk '{print $1}')
+  printf '{"compiler_sha256":"%s"}\n' "$cjc_sha" > "$base/std-producer.json"
   printf 'int base_llvm;\n' > "$TMP/base-llvm.c"
   cc -shared -fPIC "$TMP/base-llvm.c" -o "$base/third_party/llvm/lib/libLLVM-15.so"
   printf 'int host_runtime;\n' > "$TMP/host-runtime.c"
@@ -177,19 +222,76 @@ make_sdk_fixture() {
   cc -shared -fPIC "$TMP/host-runtime.c" -o "$base/runtime/lib/linux_x86_64_cjnative/libboundscheck.so"
   cc -c "$TMP/host-runtime.c" -o "$TMP/host-runtime.o"
   ar rcs "$base/lib/linux_x86_64_cjnative/libcangjie-runtime.a" "$TMP/host-runtime.o"
+  ar rcs "$base/lib/linux_x86_64_cjnative/libcangjie-std-core.a" "$TMP/host-runtime.o"
+  printf 'int g_cjLoadBadMask;\n' > "$TMP/colour-reference.c"
+  cc -shared -fPIC "$TMP/colour-reference.c" -o "$TMP/colour-reference.so"
   printf '%s\n' '#!/usr/bin/env bash' 'export PATH="$(dirname "${BASH_SOURCE[0]}")/bin:$PATH"' > "$base/envsetup.sh"
+}
+
+check_exit_receipts() {
+  new_tmp
+  local script out rc recorded
+  local -a scripts=(run.sh exceptions/run.sh library/run.sh library/execute.sh unload/run.sh)
+  if [ "$#" -gt 0 ]; then scripts=("$1"); fi
+  for script in "${scripts[@]}"; do
+    out="$TMP/$script.receipts"
+    mkdir -p "$out"
+    rc=0
+    # Missing input files stop before compilation; the EXIT receipt must retain
+    # that real script status, wall time and final uptime on this failure path.
+    env LITERAL_OUT="$out" CANGJIE_HOME="$TMP/missing-sdk" \
+      LITERAL_HOST="$TMP/missing-host" LITERAL_RUNTIME="$TMP/missing-runtime" \
+      LITERAL_RUNTIME_HEADERS="$TMP/missing-headers" LITERAL_ARTIFACTS="$TMP/missing-artifacts" \
+      LITERAL_CORES=0 bash "$ROOT/../../test/heap_string_literals/$script" > "$out/output.log" 2>&1 || rc=$?
+    [ "$rc" -ne 0 ] || fail EXIT-RECEIPT "missing inputs unexpectedly accepted: $script"
+    [ -f "$out/run.rc" ] || fail EXIT-RECEIPT "status receipt absent: $script rc=$rc"
+    recorded=$(cat "$out/run.rc")
+    [ "$recorded" = "$rc" ] || fail EXIT-RECEIPT "status mismatch: $script process=$rc receipt=$recorded"
+    /usr/bin/grep -Eq '^wall=[0-9]+$' "$out/wall.txt" || fail EXIT-RECEIPT "wall receipt absent: $script"
+    [ -s "$out/uptime-after.txt" ] || fail EXIT-RECEIPT "uptime receipt absent: $script"
+    echo "PASS EXIT-RECEIPT script=$script process=$rc receipt=$recorded"
+  done
+}
+
+check_sdk_literal_prefix() {
+  new_tmp
+  make_sdk_fixture
+  local tuple=linux_x86_64_cjnative prefix="$TMP/std [literal]" dest="$TMP/sdk [literal]" log="$TMP/std-path.log" rel
+  mkdir -p "$TMP/sdk-base/modules/$tuple" "$prefix/modules/$tuple" \
+    "$prefix/lib/$tuple" "$prefix/runtime/lib/$tuple"
+  printf 'new module\n' > "$prefix/modules/$tuple/core.cjo"
+  printf 'int replacement_std;\n' > "$TMP/replacement-std.c"
+  cc -fPIC -c "$TMP/replacement-std.c" -o "$TMP/replacement-std.o"
+  ar rcs "$prefix/lib/$tuple/libcangjie-std-core.a" "$TMP/replacement-std.o"
+  cc -shared "$TMP/replacement-std.o" -o "$prefix/runtime/lib/$tuple/libcangjie-std-core.so"
+  cp "$prefix/runtime/lib/$tuple/libcangjie-std-core.so" "$prefix/lib/libstdFFI.so"
+  for rel in "runtime/lib/$tuple/libcangjie-std-core.so" lib/libstdFFI.so; do
+    cp "$TMP/sdk-base/runtime/lib/$tuple/libcangjie-runtime.so" "$TMP/sdk-base/$rel"
+  done
+  # Drive the actual installer, including its identity and installed-byte checks.
+  local rc=0
+  bash "$SDK_PRODUCT" --from "$TMP/sdk-base" --to "$dest" --host \
+    --std "$prefix" --colour-runtime "$TMP/colour-reference.so" \
+    --host-runtime "$TMP/sdk-base/runtime/lib/$tuple/libcangjie-runtime.so" > "$log" 2>&1 || rc=$?
+  cat "$log"
+  [ "$rc" -eq 0 ] || fail STD-LITERAL-PREFIX "installer rc=$rc"
+  for rel in "lib/$tuple/libcangjie-std-core.a" "runtime/lib/$tuple/libcangjie-std-core.so" lib/libstdFFI.so "modules/$tuple/core.cjo"; do
+    cmp -s "$prefix/$rel" "$dest/$rel" || fail STD-LITERAL-PREFIX "installed bytes differ: $rel"
+  done
+  /usr/bin/grep -Fq '[std-prefix] modules -> modules/' "$log" || fail STD-LITERAL-PREFIX 'display path retained the SDK prefix'
+  echo 'PASS STD-LITERAL-PREFIX real installer accepts spaces and brackets; installed bytes match'
 }
 
 run_sdk_so() {
   local product="$1" to="$2"
   bash "$product" --from "$TMP/sdk-base" --to "$to" --host \
-    --llvm-so "$TMP/libLLVM-15.so" --force
+    --llvm-so "$TMP/libLLVM-15.so" --colour-runtime "$TMP/colour-reference.so" --host-runtime "$TMP/sdk-base/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so" --force
 }
 
 run_sdk_tuple() {
   local product="$1" to="$2"
   bash "$product" --from "$TMP/sdk-base" --to "$to" --host \
-    --llvm-tuple "$TMP/colour-tuple" --force
+    --llvm-tuple "$TMP/colour-tuple" --colour-runtime "$TMP/colour-reference.so" --host-runtime "$TMP/sdk-base/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so" --force
 }
 
 make_runtime_payload() {
@@ -214,7 +316,12 @@ make_runtime_payload() {
 
 run_sdk_runtime() {
   local product="$1" source="$2" to="$3"
-  bash "$product" --from "$TMP/sdk-base" --to "$to" --target --runtime "$source" --force
+  # Runtime-layout tests need a complete target std fixture too.
+  printf 'extern int g_cjLoadBadMask; int *std_reference = &g_cjLoadBadMask;\n' > "$TMP/target-std.c"
+  cc -c -fPIC "$TMP/target-std.c" -o "$TMP/target-std.o"
+  rm -f "$TMP/sdk-base/lib/linux_x86_64_cjnative/libcangjie-std-core.a"
+  ar rcs "$TMP/sdk-base/lib/linux_x86_64_cjnative/libcangjie-std-core.a" "$TMP/target-std.o"
+  bash "$product" --from "$TMP/sdk-base" --to "$to" --target --runtime "$source" --colour-runtime "$TMP/colour-reference.so" --host-runtime "$TMP/sdk-base/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so" --force
 }
 
 run_sdk_runtime_checked() {
@@ -232,7 +339,7 @@ run_sdk_runtime_checked() {
 }
 
 positive_runtime_layouts() {
-  local flat_sha=2222222222222222222222222222222222222222 tuple=linux_x86_64_cjnative
+  local flat_sha=4c4cbf53b44497103e76e2a47a8fa35f5d7a7287 tuple=linux_x86_64_cjnative
   new_tmp
   make_sdk_fixture
   make_runtime_payload "$TMP/$flat_sha" "$flat_sha"
@@ -245,7 +352,7 @@ positive_runtime_layouts() {
     fail runtime-flat 'boundscheck SO was not installed from flat sodepot'
   cmp -s "$TMP/sdk-base/lib/$tuple/libcangjie-runtime.a" "$TMP/sdk-flat/lib/$tuple/libcangjie-runtime.a" ||
     fail runtime-flat 'flat shared closure unexpectedly changed the base static archive'
-  make_runtime_payload "$TMP/runtime-install" 3333333333333333333333333333333333333333 "$tuple"
+  make_runtime_payload "$TMP/runtime-install" 4c4cbf53b44497103e76e2a47a8fa35f5d7a7287 "$tuple"
   run_sdk_runtime_checked runtime-nested "$SDK_PRODUCT" "$TMP/runtime-install" "$TMP/sdk-nested"
   cmp -s "$TMP/runtime-install/runtime/lib/$tuple/libcangjie-runtime.so" "$TMP/sdk-nested/runtime/lib/$tuple/libcangjie-runtime.so" ||
     fail runtime-nested 'runtime SO was not installed from nested prefix'
@@ -255,7 +362,7 @@ positive_runtime_layouts() {
 }
 
 positive_runtime_layout_symlink_nested_only() {
-  local sha=9999999999999999999999999999999999999999 tuple=linux_x86_64_cjnative
+  local sha=4c4cbf53b44497103e76e2a47a8fa35f5d7a7287 tuple=linux_x86_64_cjnative
   new_tmp
   make_sdk_fixture
   make_runtime_payload "$TMP/real-install" "$sha" "$tuple"
@@ -270,7 +377,7 @@ positive_runtime_layout_symlink_nested_only() {
 }
 
 positive_runtime_layout_symlink_flat_only() {
-  local sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa tuple=linux_x86_64_cjnative
+  local sha=4c4cbf53b44497103e76e2a47a8fa35f5d7a7287 tuple=linux_x86_64_cjnative
   new_tmp
   make_sdk_fixture
   make_runtime_payload "$TMP/real-flat" "$sha"
@@ -441,17 +548,20 @@ make_fake_nm() {
 }
 
 run_shape_check() {
-  local count="$1"
+  local count="$1" missing="${2:-}"
   make_std_fixture "$TMP/std0"
   make_std_fixture "$TMP/std1"
+  [ -z "$missing" ] || rm "$TMP/std1/$missing"
   make_fake_nm
+  # Sourcing bypasses main(); initialize the same host layout before checking it.
   PATH="$TMP/fakebin:$PATH" BOOTSTRAP_TEST_INT64_COUNT="$count" \
-    bash -c 'source "$1"; host_tuple_init; STAGE=test-A1; DRY=0; assert_std_install_shape "$2" "$3" stdlib-stage2' \
+    bash -c 'source "$1"; STAGE=test-A1; host_tuple_init; DRY=0; assert_std_install_shape "$2" "$3" stdlib-stage2' \
       bash "$PRODUCT" "$TMP/std1" "$TMP/std0"
 }
 
 make_isolation_fixture() {
   local root="$TMP/isolation" sdk="$TMP/isolation/sdk" prefix="$TMP/isolation/std"
+  make_std_sdk_inputs_fixture
   mkdir -p "$root/src/build/build" "$sdk/bin" "$sdk/runtime/lib/linux_x86_64_cjnative" "$root/rt"
   printf 'runtime\n' > "$root/rt/libcangjie-runtime.so"
   printf '%s\n' \
@@ -482,7 +592,7 @@ make_isolation_fixture() {
 run_isolation_check() {
   local product="$1"
   PATH="$TMP/fakebin:$PATH" LEAK_ME=must-not-cross \
-    bash -c 'source "$1"; host_tuple_init; STAGE=test-A4; DRY=0; WORK="$2/work"; STDSRC="$2"; SRC="$6/src"; AST_SUPPORT="$6/ast.a"; stdlib_build stdlib-stage1 "$3" "$4" "$5"' \
+    bash -c 'source "$1"; STAGE=test-A4; host_tuple_init; DRY=0; WORK="$2/work"; STDSRC="$2"; SRC="$6/src"; AST_SUPPORT="$6/ast.a"; stdlib_build stdlib-stage1 "$3" "$4" "$5"' \
       bash "$product" "$TMP/isolation/src" "$TMP/isolation/sdk" "$TMP/isolation/rt" "$TMP/isolation/std" "$TMP"
 }
 
@@ -492,13 +602,26 @@ positive_build_env() {
   caller_tmp="$TMP/caller-tmp"
   mkdir -p "$caller_tmp" "$TMP/caller-home"
   HOME="$TMP/caller-home" TMPDIR="$caller_tmp" dry_run > "$TMP/build-env-passthrough.log"
-  check_count build-env 3 "CMD env -i HOME=$TMP/caller-home TMPDIR=$caller_tmp CANGJIE_HOME=" "$TMP/build-env-passthrough.log"
+  check_count build-env 4 "CMD env -i HOME=$TMP/caller-home TMPDIR=$caller_tmp CANGJIE_HOME=" "$TMP/build-env-passthrough.log"
   (
     unset TMPDIR
     HOME="$TMP/caller-home" dry_run
   ) > "$TMP/build-env-default.log"
-  check_count build-env 3 "CMD env -i HOME=$TMP/caller-home TMPDIR=.*/work/tmp-private CANGJIE_HOME=" "$TMP/build-env-default.log"
-  echo 'PASS bootstrap CLI keeps caller HOME and passes caller/default TMPDIR'
+  check_count build-env 4 "CMD env -i HOME=$TMP/caller-home TMPDIR=.*/work/tmp-private CANGJIE_HOME=" "$TMP/build-env-default.log"
+  echo 'PASS bootstrap CLI passes caller HOME and caller/default TMPDIR'
+}
+
+check_dry_build_env_matrix() {
+  new_tmp
+  local caller_home="$TMP/caller home[333]" caller_tmp="$TMP/caller-tmp[333]"
+  mkdir -p "$caller_home" "$caller_tmp"
+  env -u HOME -u TMPDIR bash "$0" check-dry-contract ||
+    fail A4 'default HOME/TMPDIR dry contract failed'
+  env -u TMPDIR HOME="$caller_home" bash "$0" check-dry-contract ||
+    fail A4 'caller HOME/default TMPDIR dry contract failed'
+  env HOME="$caller_home" TMPDIR="$caller_tmp" bash "$0" check-dry-contract ||
+    fail A4 'caller HOME/TMPDIR dry contract failed'
+  echo 'PASS A4 dry environment matrix defaults, caller HOME, caller HOME/TMPDIR'
 }
 
 fault_build_env() {
@@ -575,6 +698,13 @@ fault_dry_stage1() {
     duplicate)
       sed '/^[[:space:]]*assert_executable stage1-compiler /p' "$PRODUCT" > "$TMP/bootstrap.sh"
       ;;
+    serial)
+      export CJ_JOBS=64
+      sed 's/"-j $JOBS"/"-j 1"/' "$PRODUCT" > "$TMP/bootstrap.sh"
+      ;;
+    drop-jobs)
+      sed 's/build${extra:+ $extra}"/build"/' "$PRODUCT" > "$TMP/bootstrap.sh"
+      ;;
     stale-stdlib)
       sed 's/assemble_stage1_sdk "$sdk" "$compiler" "$std"/assemble_stage1_sdk "$sdk" "$compiler" "$previous_std"/' "$PRODUCT" > "$TMP/bootstrap.sh"
       ;;
@@ -603,10 +733,20 @@ check_shim_wiring() {
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then return 0; fi
 
 case "${1:-test}" in
+  check-exit-receipts)
+    shift
+    check_exit_receipts "$@"
+    ;;
+  check-sdk-literal-prefix)
+    check_sdk_literal_prefix
+    ;;
   check-dry-contract)
     make_dry_fixture
     dry_run > "$TMP/dry.log" || fail dry-run 'bootstrap CLI failed before assertions'
     check_dry_contract "$TMP/dry.log"
+    ;;
+  check-dry-build-env)
+    check_dry_build_env_matrix
     ;;
   dry-run)
     make_dry_fixture
@@ -615,6 +755,11 @@ case "${1:-test}" in
   positive-a1)
     new_tmp
     run_shape_check 2
+    ;;
+  positive-a4)
+    new_tmp
+    make_isolation_fixture
+    run_isolation_check "$PRODUCT"
     ;;
   positive-compile-option-o1)
     positive_compile_option_o1
@@ -640,6 +785,15 @@ case "${1:-test}" in
   fault-a1)
     new_tmp
     run_shape_check 1
+    ;;
+  fault-a1-missing-core-archive|fault-a1-missing-core-shared|fault-a1-missing-ffi-shared)
+    new_tmp
+    case "$1" in
+      fault-a1-missing-core-archive) missing=lib/linux_x86_64_cjnative/libcangjie-std-core.a;;
+      fault-a1-missing-core-shared) missing=runtime/lib/linux_x86_64_cjnative/libcangjie-std-core.so;;
+      fault-a1-missing-ffi-shared) missing=lib/libstdFFI.so;;
+    esac
+    run_shape_check 2 "$missing"
     ;;
   fault-a2)
     fault_a2
@@ -761,7 +915,7 @@ case "${1:-test}" in
   fault-product-missing)
     fault_product_missing
     ;;
-  fault-dry-stage1-missing|fault-dry-stage1-duplicate|fault-dry-stage1-stale-stdlib)
+  fault-dry-stage1-missing|fault-dry-stage1-duplicate|fault-dry-stage1-stale-stdlib|fault-dry-stage1-serial|fault-dry-stage1-drop-jobs)
     fault_dry_stage1 "${1#fault-dry-stage1-}"
     ;;
   fault-shim-wiring)
@@ -774,11 +928,16 @@ case "${1:-test}" in
     [ $# -eq 4 ] || fail ruler-control 'usage: ruler-control OFFICIAL_OPT COLOUR_TUPLE EXPECTED_LLVM_SHA'
     # shellcheck disable=SC1090 # Product path is resolved above.
     source "$PRODUCT"
+    # Consumed by die() in the dynamically sourced bootstrap product.
+    # shellcheck disable=SC2034
     STAGE=test-ruler
     assert_official_opt_zero "$2"
     assert_colour_tuple "$3" "$4"
     ;;
   test)
+    bash "$0" check-dry-build-env || fail A4 'dry environment matrix failed'
+    bash "$0" check-exit-receipts || fail EXIT-RECEIPT "exit receipt regression"
+    bash "$0" check-sdk-literal-prefix || fail STD-LITERAL-PREFIX "literal prefix regression"
     make_dry_fixture
     dry_run > "$TMP/dry.log"
     check_dry_contract "$TMP/dry.log"
@@ -793,13 +952,14 @@ case "${1:-test}" in
     cmp -s "$TMP/sdk-base/third_party/llvm/bin/opt" "$TMP/sdk-so/third_party/llvm/bin/opt" ||
       fail LLVM-SO 'SO-only install changed opt'
     run_sdk_tuple "$SDK_PRODUCT" "$TMP/sdk-tuple" > "$TMP/sdk-tuple.log"
-    for rel in MANIFEST bin/llc bin/opt lib/STATIC_LLVM.txt fixed-llc/cjselfhost_llvmshim.o fixed-llc/llc.gz fixed-llc/opt.gz fixed-llc/llvm-tools.manifest; do
+    for rel in MANIFEST bin/llc bin/opt bin/ld.lld lib/STATIC_LLVM.txt fixed-llc/cjselfhost_llvmshim.o fixed-llc/llc.gz fixed-llc/opt.gz fixed-llc/ld.lld.gz fixed-llc/llvm-tools.manifest; do
       cmp -s "$TMP/colour-tuple/$rel" "$TMP/sdk-tuple/third_party/llvm/$rel" ||
         fail LLVM-TUPLE "sdk_build tuple mismatch: $rel"
     done
     run_shape_check 2 > "$TMP/shape-positive.log"
     /usr/bin/grep -q 'shape=ok Int64.ti=2 FFI-archives=1 FFI-set-equal=1' "$TMP/shape-positive.log" ||
       fail A1 'positive stdlib shape arm did not pass'
+    echo 'PASS A1 positive stdlib install shape'
     make_isolation_fixture
     run_isolation_check "$PRODUCT" > "$TMP/isolation-positive.log"
     /usr/bin/grep -q 'shape=ok Int64.ti=2 FFI-archives=1' "$TMP/isolation-positive.log" ||
@@ -811,14 +971,17 @@ case "${1:-test}" in
       fail build-env 'bootstrap CLI HOME/TMPDIR contract did not pass'
     BOOTSTRAP_PRODUCT="$PRODUCT" SDK_BUILD_PRODUCT="$SDK_PRODUCT" bash "$0" check-runtime-layouts > "$TMP/runtime-layouts-positive.log" ||
       fail runtime-layouts 'flat/nested/dual/inner-rc runtime layout contract did not pass'
-    for arm in a1 a2 a3 dry-stage1-missing dry-stage1-duplicate dry-stage1-stale-stdlib a4 build-env runtime-stamp host-sha ast-sha host-colour colour-ruler colour-stamp-duplicate colour-stamp-mismatch colour-sha llvm-so-location tuple-missing-opt tuple-sums tuple-extra-entry old-host-llvm old-colour-llc cjpm-toml src-file compile-option product-missing shim-wiring; do
+    for arm in a1 a1-missing-core-archive a1-missing-core-shared a1-missing-ffi-shared a2 a3 dry-stage1-missing dry-stage1-duplicate dry-stage1-stale-stdlib dry-stage1-serial dry-stage1-drop-jobs a4 build-env runtime-stamp host-sha ast-sha host-colour colour-ruler colour-stamp-duplicate colour-stamp-mismatch colour-sha llvm-so-location tuple-missing-opt tuple-sums tuple-extra-entry old-host-llvm old-colour-llc cjpm-toml src-file compile-option product-missing shim-wiring; do
       log="$TMP/fault-$arm.log"
       if bash "$0" "fault-$arm" > "$log" 2>&1; then
         fail "$arm" 'fault arm unexpectedly passed'
       fi
       case "$arm" in
         a1) marker='BOOTSTRAP-FAIL \[test-A1\].*Int64.ti definitions=1';;
+        a1-missing-*) marker='BOOTSTRAP-FAIL \[test-A1\].*install shape: core archive/shared 或 libstdFFI.so 缺失';;
         a2) marker='BOOTSTRAP-FAIL \[test-A2\].*命令失败 rc=23';;
+        dry-stage1-serial) marker='TEST-FAIL \[CJPM-JOBS\]';;
+        dry-stage1-drop-jobs) marker='TEST-FAIL \[CJPM-EXEC-JOBS\]';;
         a3) marker='BOOTSTRAP-FAIL \[test-A3\].*stage1-compiler';;
         dry-stage1-missing) marker='TEST-FAIL \[A3\] pattern count=0 expected=2: ASSERT stage1-compiler executable=planned';;
         dry-stage1-duplicate) marker='TEST-FAIL \[A3\] pattern count=4 expected=2: ASSERT stage1-compiler executable=planned';;
@@ -836,7 +999,7 @@ case "${1:-test}" in
         llvm-so-location) marker='SDK-BUILD-FAIL llvm-so 安装后 sha256 不一致';;
         tuple-missing-opt) marker='BOOTSTRAP-FAIL \[stage0\] colour LLVM tuple 缺 bin/opt';;
         tuple-sums) marker='BOOTSTRAP-FAIL \[stage0\] colour LLVM tuple SHA256SUMS strict 校验失败';;
-        tuple-extra-entry) marker='BOOTSTRAP-FAIL \[stage0\] colour LLVM tuple SHA256SUMS 必须且只能登记 8 个 payload: entries=9';;
+        tuple-extra-entry) marker='BOOTSTRAP-FAIL \[stage0\] colour LLVM tuple SHA256SUMS 必须且只能登记 10 个 payload: entries=11';;
         old-host-llvm) marker='BOOTSTRAP-FAIL \[init\] 参数 --host-llvm 已废弃；使用 --host-llvm-so';;
         old-colour-llc) marker='BOOTSTRAP-FAIL \[init\] 参数 --colour-llc 已废弃；使用 --colour-tuple';;
         cjpm-toml) marker='BOOTSTRAP-FAIL \[init\] --src 缺少 cjpm.toml';;
@@ -848,10 +1011,11 @@ case "${1:-test}" in
       /usr/bin/grep -Eq "$marker" "$log" || fail "$arm" "fault arm missed precise marker; log=$log"
       echo "PASS precise-red $arm"
     done
+    BOOTSTRAP_PRODUCT="$PRODUCT" bash "$ROOT/test_stage0_cache.sh" || fail cache 'stage0 cache tests failed'
     echo 'PASS bootstrap dry contracts, controlled build environment, LLVM assembly, and positive controls'
     ;;
   *)
-    echo "usage: $0 [test|check-dry-contract|dry-run|check-shim-wiring|check-build-env|check-runtime-layouts|positive-a1|positive-build-env|positive-runtime-layouts|positive-runtime-layout-symlink-nested-only|positive-runtime-layout-symlink-flat-only|positive-compile-option-o1|fault-a1|fault-a2|fault-a3|fault-dry-stage1-missing|fault-dry-stage1-duplicate|fault-dry-stage1-stale-stdlib|fault-a4|fault-build-env|fault-runtime-stamp|fault-runtime-dual-layout|fault-runtime-dual-missing-bounds|fault-runtime-dual-multiple-nested|fault-runtime-layout-symlink-nested|fault-runtime-layout-symlink-flat|fault-runtime-layout-inner-rc|fault-host-sha|fault-ast-sha|fault-ast-bytes|fault-host-colour|fault-colour-ruler|fault-colour-stamp-duplicate|fault-colour-stamp-mismatch|fault-colour-sha|fault-llvm-so-location|fault-tuple-missing-opt|fault-tuple-sums|fault-tuple-extra-entry|fault-old-host-llvm|fault-old-colour-llc|fault-shim-wiring|ruler-control OFFICIAL_OPT COLOUR_TUPLE EXPECTED_LLVM_SHA]" >&2
+    echo "usage: $0 [test|check-dry-contract|check-dry-build-env|dry-run|check-shim-wiring|check-build-env|check-runtime-layouts|positive-a1|positive-a4|positive-build-env|positive-runtime-layouts|positive-runtime-layout-symlink-nested-only|positive-runtime-layout-symlink-flat-only|positive-compile-option-o1|fault-a1|fault-a1-missing-core-archive|fault-a1-missing-core-shared|fault-a1-missing-ffi-shared|fault-a2|fault-a3|fault-dry-stage1-missing|fault-dry-stage1-duplicate|fault-dry-stage1-stale-stdlib|fault-dry-stage1-serial|fault-dry-stage1-drop-jobs|fault-a4|fault-build-env|fault-runtime-stamp|fault-runtime-dual-layout|fault-runtime-dual-missing-bounds|fault-runtime-dual-multiple-nested|fault-runtime-layout-symlink-nested|fault-runtime-layout-symlink-flat|fault-runtime-layout-inner-rc|fault-host-sha|fault-ast-sha|fault-ast-bytes|fault-host-colour|fault-colour-ruler|fault-colour-stamp-duplicate|fault-colour-stamp-mismatch|fault-colour-sha|fault-llvm-so-location|fault-tuple-missing-opt|fault-tuple-sums|fault-tuple-extra-entry|fault-old-host-llvm|fault-old-colour-llc|fault-shim-wiring|ruler-control OFFICIAL_OPT COLOUR_TUPLE EXPECTED_LLVM_SHA]" >&2
     exit 2
     ;;
 esac

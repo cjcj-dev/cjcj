@@ -84,7 +84,7 @@ public enum Attribute {
     | JAVA_HAS_DEFAULT
     | JAVA_MIRROR_SYNTHETIC_WRAPPER
     | OBJ_C_MIRROR
-    | OBJ_C_MIRROR_SUBTYPE
+    | OBJ_C_IMPL
     | OBJ_C_INIT
     | OBJ_C_OPTIONAL
     | JAVA_CJ_MAPPING
@@ -92,12 +92,14 @@ public enum Attribute {
     | CJ_MIRROR_JAVA_INTERFACE_FWD
     | DESUGARED_MIRROR_FIELD
     | HAS_INITED_FIELD
-    | OBJ_C_MIRROR_SYNTHETIC_WRAPPER
+    | OBJ_C_MIRROR_INTERFACE_HANDLE_WRAPPER
     | CJ_MIRROR_JAVA_INTERFACE_DEFAULT
     | CJ_MIRROR_OBJC_INTERFACE_FWD
     | ALREADY_LOADED
     | JAVA_IMPL_REGISTRY_COMPANION
     | DOES_NOT_THROW
+    | OBJ_C_IMPL_REGISTRY_COMPANION
+    | OBJ_C_IMPL_MOVED_MEMBER_PROXY
     | AST_ATTR_END
 }
 
@@ -184,7 +186,7 @@ public func AttributeIndex(attr: Attribute): Int64 {
         case Attribute.JAVA_HAS_DEFAULT => 78
         case Attribute.JAVA_MIRROR_SYNTHETIC_WRAPPER => 79
         case Attribute.OBJ_C_MIRROR => 80
-        case Attribute.OBJ_C_MIRROR_SUBTYPE => 81
+        case Attribute.OBJ_C_IMPL => 81
         case Attribute.OBJ_C_INIT => 82
         case Attribute.OBJ_C_OPTIONAL => 83
         case Attribute.JAVA_CJ_MAPPING => 84
@@ -192,13 +194,15 @@ public func AttributeIndex(attr: Attribute): Int64 {
         case Attribute.CJ_MIRROR_JAVA_INTERFACE_FWD => 86
         case Attribute.DESUGARED_MIRROR_FIELD => 87
         case Attribute.HAS_INITED_FIELD => 88
-        case Attribute.OBJ_C_MIRROR_SYNTHETIC_WRAPPER => 89
+        case Attribute.OBJ_C_MIRROR_INTERFACE_HANDLE_WRAPPER => 89
         case Attribute.CJ_MIRROR_JAVA_INTERFACE_DEFAULT => 90
         case Attribute.CJ_MIRROR_OBJC_INTERFACE_FWD => 91
         case Attribute.ALREADY_LOADED => 92
         case Attribute.JAVA_IMPL_REGISTRY_COMPANION => 93
         case Attribute.DOES_NOT_THROW => 94
-        case Attribute.AST_ATTR_END => 95
+        case Attribute.OBJ_C_IMPL_REGISTRY_COMPANION => 95
+        case Attribute.OBJ_C_IMPL_MOVED_MEMBER_PROXY => 96
+        case Attribute.AST_ATTR_END => 97
     }
 }
 
@@ -294,20 +298,22 @@ private let ATTRIBUTE_NAMES: Array<String> = [
     "JAVA_HAS_DEFAULT",
     "JAVA_MIRROR_SYNTHETIC_WRAPPER",
     "OBJ_C_MIRROR",
-    "OBJ_C_MIRROR_SUBTYPE",
+    "OBJ_C_IMPL",
     "OBJ_C_INIT",
     "OBJ_C_OPTIONAL",
-    "JAVA_CJ_MAPPING",
-    "OBJ_C_CJ_MAPPING",
-    "CJ_MIRROR_JAVA_INTERFACE_FWD",
+    "JAVA_CJ_MAPPING(deprecated)",
+    "OBJ_C_CJ_MAPPING(deprecated)",
+    "CJ_MIRROR_JAVA_INTERFACE_FWD(deprecated)",
     "DESUGARED_MIRROR_FIELD",
     "HAS_INITED_FIELD",
-    "OBJ_C_MIRROR_SYNTHETIC_WRAPPER",
-    "CJ_MIRROR_JAVA_INTERFACE_DEFAULT",
-    "CJ_MIRROR_OBJC_INTERFACE_FWD",
+    "OBJ_C_MIRROR_INTERFACE_HANDLE_WRAPPER",
+    "CJ_MIRROR_JAVA_INTERFACE_DEFAULT(deprecated)",
+    "CJ_MIRROR_OBJC_INTERFACE_FWD(deprecated)",
     "ALREADY_LOADED",
     "JAVA_IMPL_REGISTRY_COMPANION",
     "DOES_NOT_THROW",
+    "OBJ_C_IMPL_REGISTRY_COMPANION",
+    "OBJ_C_IMPL_MOVED_MEMBER_PROXY",
     "AST_ATTR_END"
 ]
 

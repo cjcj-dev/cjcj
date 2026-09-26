@@ -97,6 +97,30 @@ public class BlockGroupCopyHelper {
         }
     }
 
+    // Upstream 6e125215 BlockGroupCopyHelper.cpp:180-208.
+    public func GetInstMapFromFuncCall(fn: Function, thisTy: Option<Type>,
+        instTypeArgs: ArrayList<Type>, args: ArrayList<Value>): Unit {
+        instMap.clear()
+        if (let Some(def) <- fn.GetParentCustomTypeDef()) {
+            if (def.IsGenericDef()) {
+                var parentTy = GetInstParentCustomTyOfCallee(fn, args, thisTy, builder) ??
+                    fn.GetParentCustomTypeOrExtendedType().getOrThrow()
+                parentTy = parentTy.StripAllRefs()
+                if (let Some(ex) <- (def as ExtendDef)) {
+                    let mapping = ex.GetExtendedType().getOrThrow().CalculateGenericTyMapping(parentTy)
+                    CJC_ASSERT(mapping[0])
+                    instMap = mapping[1]
+                } else {
+                    instMap = GetInstMapFromCurDefToCurType((parentTy as CustomType).getOrThrow())
+                }
+            }
+        }
+        let generics = fn.GetGenericTypeParams()
+        CJC_ASSERT(generics.size == instTypeArgs.size)
+        for (i in 0..generics.size) { if (!instMap.contains(generics[i])) { instMap[generics[i]] = instTypeArgs[i] } }
+        thisType = thisTy
+    }
+
     private func InstBlockGroup(blocks: ArrayList<Block>): Unit {
         let genericConverter = GenericTypeConvertor(instMap, builder)
         let convertFunc: ConvertTypeFunc = { ty =>
@@ -132,25 +156,14 @@ public class BlockGroupCopyHelper {
 
     private static func ReplaceExprOperandsInExpression(expr: Expression, valueMap: HashMap<Int64, Value>): Unit {
         if (expr.GetExprKind() != ExprKind.DEBUGEXPR) {
+            let allOperands = expr.GetOperands()
             var idx: Int64 = 0
-            while (idx < expr.GetNumOfOperands()) {
-                let operand = expr.GetOperand(idx)
+            while (idx < allOperands.size) {
+                let operand = allOperands[idx]
                 if (let Some(newOperand) <- valueMap.get(operand.nodeId)) {
                     expr.ReplaceOperand(idx, newOperand)
                 }
                 idx++
-            }
-            if (let Some(term) <- expr.AsTerminator()) {
-                var succIdx: Int64 = 0
-                while (succIdx < term.GetNumOfSuccessor()) {
-                    let successor = term.GetSuccessor(succIdx)
-                    if (let Some(newSuccessorValue) <- valueMap.get(successor.nodeId)) {
-                        if (let Some(newSuccessor) <- newSuccessorValue.AsBlock()) {
-                            term.ReplaceSuccessor(succIdx, newSuccessor)
-                        }
-                    }
-                    succIdx++
-                }
             }
         }
 
@@ -181,11 +194,11 @@ public func FixCastProblemAfterInst(blocks: ArrayList<Block>, builder: CHIRBuild
                     expr.GetParentBlock().getOrThrow())
                 expr.ReplaceWith(falseExpr)
             }
-        } else if (expr.GetExprKind() == ExprKind.TRANSFORM_TO_CONCRETE) {
-            let cast = (expr as TransformToConcrete).getOrThrow()
-            if (!cast.GetSourceTy().getOrThrow().IsGenericRelated()) {
+        } else if (expr.GetExprKind() == ExprKind.CAST_TO_CONCRETE) {
+            let cast = (expr as CastToConcrete).getOrThrow()
+            if (!cast.GetSourceType().getOrThrow().IsGenericRelated()) {
                 let sourceValue = cast.GetSourceValue()
-                let newCast = TypeCastOrBoxIfNeeded(sourceValue, cast.GetTargetTy().getOrThrow(), builder,
+                let (newCast, expressions) = TypeCastOrBoxIfNeeded(sourceValue, cast.GetTargetType().getOrThrow(), builder,
                     expr.GetParentBlock().getOrThrow(), expr.GetDebugLocation())
                 if (refEq(newCast, sourceValue)) {
                     for (user in expr.GetResult().getOrThrow().GetUsers()) {
@@ -197,14 +210,16 @@ public func FixCastProblemAfterInst(blocks: ArrayList<Block>, builder: CHIRBuild
                 for (user in expr.GetResult().getOrThrow().GetUsers()) {
                     user.ReplaceOperand(expr.GetResult().getOrThrow(), newCast)
                 }
-                newCast.AsLocalVar().getOrThrow().GetExpr().getOrThrow().MoveBefore(expr)
+                for (expression in expressions) {
+                    expression.MoveBefore(expr)
+                }
                 expr.RemoveSelfFromBlock()
             }
-        } else if (expr.GetExprKind() == ExprKind.TRANSFORM_TO_GENERIC) {
-            let cast = (expr as TransformToGeneric).getOrThrow()
-            if (!cast.GetTargetTy().getOrThrow().IsGenericRelated()) {
+        } else if (expr.GetExprKind() == ExprKind.CAST_TO_GENERIC) {
+            let cast = (expr as CastToGeneric).getOrThrow()
+            if (!cast.GetTargetType().getOrThrow().IsGenericRelated()) {
                 let sourceValue = cast.GetSourceValue()
-                let newCast = TypeCastOrBoxIfNeeded(sourceValue, cast.GetTargetTy().getOrThrow(), builder,
+                let (newCast, expressions) = TypeCastOrBoxIfNeeded(sourceValue, cast.GetTargetType().getOrThrow(), builder,
                     expr.GetParentBlock().getOrThrow(), expr.GetDebugLocation())
                 if (refEq(newCast, sourceValue)) {
                     for (user in expr.GetResult().getOrThrow().GetUsers()) {
@@ -216,29 +231,35 @@ public func FixCastProblemAfterInst(blocks: ArrayList<Block>, builder: CHIRBuild
                 for (user in expr.GetResult().getOrThrow().GetUsers()) {
                     user.ReplaceOperand(expr.GetResult().getOrThrow(), newCast)
                 }
-                newCast.AsLocalVar().getOrThrow().GetExpr().getOrThrow().MoveBefore(expr)
+                for (expression in expressions) {
+                    expression.MoveBefore(expr)
+                }
                 expr.RemoveSelfFromBlock()
             }
-        } else if (expr.GetExprKind() == ExprKind.TYPECAST) {
-            let cast = (expr as TypeCast).getOrThrow()
+        } else if (expr.GetExprKind() == ExprKind.CLASS_STATIC_CAST) {
+            let cast = (expr as ClassStaticCast).getOrThrow()
             let sourceValue = cast.GetSourceValue()
             if (sourceValue.GetType().getOrThrow().IsGenericRelated()) {
                 return VisitResult.CONTINUE
             }
-            let newCastResult = TypeCastOrBoxIfNeeded(sourceValue, expr.GetResult().getOrThrow().GetType().getOrThrow(),
+            let (newCastResult, expressions) = TypeCastOrBoxIfNeeded(sourceValue, expr.GetResult().getOrThrow().GetType().getOrThrow(),
                 builder, expr.GetParentBlock().getOrThrow(), expr.GetDebugLocation())
             if (refEq(newCastResult, sourceValue)) {
                 return VisitResult.CONTINUE
             }
             let newCast = newCastResult.AsLocalVar().getOrThrow()
-            if (newCast.GetExpr().getOrThrow().GetExprKind() == ExprKind.TYPECAST) {
-                newCast.GetExpr().getOrThrow().RemoveSelfFromBlock()
+            if (newCast.GetExpr().getOrThrow().GetExprKind() == ExprKind.CLASS_STATIC_CAST) {
+                for (expression in expressions) {
+                    expression.RemoveSelfFromBlock()
+                }
                 return VisitResult.CONTINUE
             }
             for (user in expr.GetResult().getOrThrow().GetUsers()) {
                 user.ReplaceOperand(expr.GetResult().getOrThrow(), newCast)
             }
-            newCast.GetExpr().getOrThrow().MoveBefore(expr)
+            for (expression in expressions) {
+                expression.MoveBefore(expr)
+            }
             expr.RemoveSelfFromBlock()
         }
         return VisitResult.CONTINUE

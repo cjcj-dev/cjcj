@@ -443,6 +443,7 @@ private func CheckMacroCallArgs(macCall: MacroCall, diag: DiagnosticEngine, comp
     if (let Some(macroFile) <- macCall.RequireNode().curFile) {
         parser.SetCurFile(macroFile)
     }
+    parser.SetForeignBlockModifiers(macCall.GetModifiers())
     let _ = parser.ParseDecl(toEvaluationParsedScopeKind(invocation.scopeKind.getOrThrow()))
     let hasParseError = parserDiag.GetErrorCount() > 0u64
     forwardEvaluationParserDiagnostics(parserDiag, diag)
@@ -800,14 +801,8 @@ public class MacroEvaluation {
                             CPointer<Unit>(idCell.value)))
                     }
                     synchronized(mInvoke.mtx) {
-                        let coroutineHandle = if (runtimeInit.runtimeInstanceHandle.isNull()) {
-                            unsafe { InvokeNewTaskFromC(runtimeInit.runtimeMethodFunc)(
-                                CPointer<Unit>(initGlobalFunc), CPointer<Unit>(resetNotify.value)) }
-                        } else {
-                            unsafe { InstanceRunTaskFromC(runtimeInit.runtimeMethodFunc)(
-                                runtimeInit.runtimeInstanceHandle, CPointer<Unit>(initGlobalFunc),
-                                CPointer<Unit>(resetNotify.value)) }
-                        }
+                        let coroutineHandle = unsafe { InvokeNewTaskFromC(runtimeInit.runtimeMethodFunc)(
+                            CPointer<Unit>(initGlobalFunc), CPointer<Unit>(resetNotify.value)) }
                         CJC_ASSERT(!coroutineHandle.isNull())
                         while (!mInvoke.isDataReady) {
                             mInvoke.cv.wait()
@@ -868,18 +863,9 @@ public class MacroEvaluation {
         unsafe { handle.write(id) }
 
         synchronized(mInvoke.mtx) {
-            if (runtimeInit.runtimeInstanceHandle.isNull()) {
-                macCall.coroutineHandle = unsafe {
-                    InvokeNewTaskFromC(runtimeInit.runtimeMethodFunc)(
-                        CPointer<Unit>(InvokeMacro), CPointer<Unit>(handle))
-                }
-            } else {
-                // RT_ISOLATE_API_SPEC.md §3.2: submit the same C++ InvokeMacro task
-                // (MacroEvaluationCJNative.cpp:123-137) to the isolated scheduler.
-                macCall.coroutineHandle = unsafe {
-                    InstanceRunTaskFromC(runtimeInit.runtimeMethodFunc)(runtimeInit.runtimeInstanceHandle,
-                        CPointer<Unit>(InvokeMacro), CPointer<Unit>(handle))
-                }
+            macCall.coroutineHandle = unsafe {
+                InvokeNewTaskFromC(runtimeInit.runtimeMethodFunc)(
+                    CPointer<Unit>(InvokeMacro), CPointer<Unit>(handle))
             }
             CJC_ASSERT(!macCall.coroutineHandle.isNull())
             while (!macCall.isDataReady) {
@@ -1086,6 +1072,7 @@ public class MacroEvaluation {
         if (let Some(macroFile) <- macCall.RequireNode().curFile) {
             parser.SetCurFile(macroFile)
         }
+        parser.SetForeignBlockModifiers(macCall.GetModifiers())
         parser.SetCompileOptions(ci.GetGlobalOptions())
         let decl = parser.ParseDecl(toEvaluationParsedScopeKind(scopeKind))
         if (!decl.IsMacroCallNode()) {
@@ -1383,7 +1370,7 @@ public class MacroEvaluation {
     public func CollectMacroLibs(): Unit {
         if (!ci.GetGlobalOptions().macroLib.isEmpty()) {
             for (dyfile in GetMacroDefDynamicFiles()) {
-                let handle = OpenSymbolTable(dyfile)
+                let handle = OpenMacroLibrary(dyfile)
                 if (!handle.opened) {
                     ci.GetDiag().Diagnose(DEFAULT_POSITION,
                         "Cannot dlopen from the dynamic library '" + dyfile + "' for macro")

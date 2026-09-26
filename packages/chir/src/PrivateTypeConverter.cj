@@ -11,21 +11,21 @@ public interface ExprTypeFunctor {
     func VisitExpr(o: Expression): Unit {
         match (o.GetExprKind()) {
             case ExprKind.ALLOCATE => VisitSubExpression(StaticCast<Allocate>(o))
-            case ExprKind.ALLOCATE_WITH_EXCEPTION => VisitSubExpression(StaticCast<AllocateWithException>(o))
+            case ExprKind.TRY_ALLOCATE => VisitSubExpression(StaticCast<TryAllocate>(o))
             case ExprKind.INSTANCEOF => VisitSubExpression(StaticCast<InstanceOf>(o))
             case ExprKind.RAW_ARRAY_ALLOCATE => VisitSubExpression(StaticCast<RawArrayAllocate>(o))
-            case ExprKind.RAW_ARRAY_ALLOCATE_WITH_EXCEPTION =>
-                VisitSubExpression(StaticCast<RawArrayAllocateWithException>(o))
+            case ExprKind.TRY_RAW_ARRAY_ALLOCATE =>
+                VisitSubExpression(StaticCast<TryRawArrayAllocate>(o))
             case ExprKind.APPLY => VisitSubExpression(StaticCast<Apply>(o))
-            case ExprKind.APPLY_WITH_EXCEPTION => VisitSubExpression(StaticCast<ApplyWithException>(o))
+            case ExprKind.TRY_APPLY => VisitSubExpression(StaticCast<TryApply>(o))
             case ExprKind.INVOKE => VisitSubExpression(StaticCast<Invoke>(o))
-            case ExprKind.INVOKE_WITH_EXCEPTION => VisitSubExpression(StaticCast<InvokeWithException>(o))
+            case ExprKind.TRY_INVOKE => VisitSubExpression(StaticCast<TryInvoke>(o))
             case ExprKind.INVOKESTATIC => VisitSubExpression(StaticCast<InvokeStatic>(o))
-            case ExprKind.INVOKESTATIC_WITH_EXCEPTION =>
-                VisitSubExpression(StaticCast<InvokeStaticWithException>(o))
+            case ExprKind.TRY_INVOKESTATIC =>
+                VisitSubExpression(StaticCast<TryInvokeStatic>(o))
             case ExprKind.CONSTANT => VisitSubExpression(StaticCast<Constant>(o))
             case ExprKind.INTRINSIC => VisitSubExpression(StaticCast<Intrinsic>(o))
-            case ExprKind.INTRINSIC_WITH_EXCEPTION => VisitSubExpression(StaticCast<IntrinsicWithException>(o))
+            case ExprKind.TRY_INTRINSIC => VisitSubExpression(StaticCast<TryIntrinsic>(o))
             case ExprKind.GET_INSTANTIATE_VALUE => VisitSubExpression(StaticCast<GetInstantiateValue>(o))
             case ExprKind.LAMBDA => VisitSubExpression(StaticCast<Lambda>(o))
             case ExprKind.GET_RTTI_STATIC => VisitSubExpression(StaticCast<GetRTTIStatic>(o))
@@ -35,19 +35,19 @@ public interface ExprTypeFunctor {
 
     func VisitExprDefaultImpl(o: Expression): Unit
     func VisitSubExpression(o: Allocate): Unit
-    func VisitSubExpression(o: AllocateWithException): Unit
+    func VisitSubExpression(o: TryAllocate): Unit
     func VisitSubExpression(o: InstanceOf): Unit
     func VisitSubExpression(o: RawArrayAllocate): Unit
-    func VisitSubExpression(o: RawArrayAllocateWithException): Unit
+    func VisitSubExpression(o: TryRawArrayAllocate): Unit
     func VisitSubExpression(o: Apply): Unit
-    func VisitSubExpression(o: ApplyWithException): Unit
+    func VisitSubExpression(o: TryApply): Unit
     func VisitSubExpression(o: Invoke): Unit
-    func VisitSubExpression(o: InvokeWithException): Unit
+    func VisitSubExpression(o: TryInvoke): Unit
     func VisitSubExpression(o: InvokeStatic): Unit
-    func VisitSubExpression(o: InvokeStaticWithException): Unit
+    func VisitSubExpression(o: TryInvokeStatic): Unit
     func VisitSubExpression(o: Constant): Unit
     func VisitSubExpression(o: Intrinsic): Unit
-    func VisitSubExpression(o: IntrinsicWithException): Unit
+    func VisitSubExpression(o: TryIntrinsic): Unit
     func VisitSubExpression(o: GetInstantiateValue): Unit
     func VisitSubExpression(o: Lambda): Unit
     func VisitSubExpression(o: GetRTTIStatic): Unit
@@ -128,7 +128,7 @@ public open class ExprTypeConverter <: TypeConverter & ExprTypeFunctor {
         o.SetType(ConvertType(o.GetType()))
     }
 
-    public open func VisitSubExpression(o: AllocateWithException): Unit {
+    public open func VisitSubExpression(o: TryAllocate): Unit {
         VisitExprDefaultImpl(o)
         o.SetType(ConvertType(o.GetType()))
     }
@@ -143,7 +143,7 @@ public open class ExprTypeConverter <: TypeConverter & ExprTypeFunctor {
         o.SetElementType(ConvertType(o.GetElementType()))
     }
 
-    public open func VisitSubExpression(o: RawArrayAllocateWithException): Unit {
+    public open func VisitSubExpression(o: TryRawArrayAllocate): Unit {
         VisitExprDefaultImpl(o)
         o.SetElementType(ConvertType(o.GetElementType()))
     }
@@ -160,7 +160,7 @@ public open class ExprTypeConverter <: TypeConverter & ExprTypeFunctor {
         }
     }
 
-    public open func VisitSubExpression(o: ApplyWithException): Unit {
+    public open func VisitSubExpression(o: TryApply): Unit {
         VisitExprDefaultImpl(o)
         let instantiatedTypeArgs = o.GetInstantiatedTypeArgs()
         for (idx in 0..instantiatedTypeArgs.size) {
@@ -172,10 +172,10 @@ public open class ExprTypeConverter <: TypeConverter & ExprTypeFunctor {
         }
     }
 
-    // C++ PrivateTypeConverter.cpp:88-125 — convert virMethodCtx.funcType with ConvertFuncParamsAndRetType.
+    // Upstream 174db8f4 PrivateTypeConverter.cpp:55-65 preserves the method signature.
+    // cf7b34a1 removed signature conversion from all four Invoke variants.
     public open func VisitSubExpression(o: Invoke): Unit {
         VisitExprDefaultImpl(o)
-        o.GetVirMethodCtx().funcType = ConvertFuncParamsAndRetType(o.GetMethodType())
         o.SetThisType(ConvertType(o.GetThisType().getOrThrow()))
         let instantiatedTypeArgs = o.GetInstantiatedTypeArgs()
         for (idx in 0..instantiatedTypeArgs.size) {
@@ -184,9 +184,8 @@ public open class ExprTypeConverter <: TypeConverter & ExprTypeFunctor {
         o.SetInstantiatedTypeArgs(instantiatedTypeArgs)
     }
 
-    public open func VisitSubExpression(o: InvokeWithException): Unit {
+    public open func VisitSubExpression(o: TryInvoke): Unit {
         VisitExprDefaultImpl(o)
-        o.GetVirMethodCtx().funcType = ConvertFuncParamsAndRetType(o.GetMethodType())
         o.SetThisType(ConvertType(o.GetThisType().getOrThrow()))
         let instantiatedTypeArgs = o.GetInstantiatedTypeArgs()
         for (idx in 0..instantiatedTypeArgs.size) {
@@ -197,7 +196,6 @@ public open class ExprTypeConverter <: TypeConverter & ExprTypeFunctor {
 
     public open func VisitSubExpression(o: InvokeStatic): Unit {
         VisitExprDefaultImpl(o)
-        o.GetVirMethodCtx().funcType = ConvertFuncParamsAndRetType(o.GetMethodType())
         o.SetThisType(ConvertType(o.GetThisType().getOrThrow()))
         let instantiatedTypeArgs = o.GetInstantiatedTypeArgs()
         for (idx in 0..instantiatedTypeArgs.size) {
@@ -206,9 +204,8 @@ public open class ExprTypeConverter <: TypeConverter & ExprTypeFunctor {
         o.SetInstantiatedTypeArgs(instantiatedTypeArgs)
     }
 
-    public open func VisitSubExpression(o: InvokeStaticWithException): Unit {
+    public open func VisitSubExpression(o: TryInvokeStatic): Unit {
         VisitExprDefaultImpl(o)
-        o.GetVirMethodCtx().funcType = ConvertFuncParamsAndRetType(o.GetMethodType())
         o.SetThisType(ConvertType(o.GetThisType().getOrThrow()))
         let instantiatedTypeArgs = o.GetInstantiatedTypeArgs()
         for (idx in 0..instantiatedTypeArgs.size) {
@@ -231,7 +228,7 @@ public open class ExprTypeConverter <: TypeConverter & ExprTypeFunctor {
         o.SetInstantiatedTypeArgs(instantiatedTypeArgs)
     }
 
-    public open func VisitSubExpression(o: IntrinsicWithException): Unit {
+    public open func VisitSubExpression(o: TryIntrinsic): Unit {
         VisitExprDefaultImpl(o)
         let instantiatedTypeArgs = o.GetInstantiatedTypeArgs()
         for (idx in 0..instantiatedTypeArgs.size) {
@@ -381,7 +378,7 @@ public class TypeConverterForCC <: ExprTypeConverter & ValueTypeConverter & Cust
         o.SetElementType(converter(o.GetElementType()))
     }
 
-    public override func VisitSubExpression(o: RawArrayAllocateWithException): Unit {
+    public override func VisitSubExpression(o: TryRawArrayAllocate): Unit {
         VisitExprDefaultImpl(o)
         o.SetElementType(converter(o.GetElementType()))
     }
@@ -444,7 +441,7 @@ public class PrivateTypeConverterNoInvokeOriginal <: PrivateTypeConverter {
         o.SetInstantiatedTypeArgs(instantiatedTypeArgs)
     }
 
-    public override func VisitSubExpression(o: InvokeWithException): Unit {
+    public override func VisitSubExpression(o: TryInvoke): Unit {
         VisitExprDefaultImpl(o)
         o.SetThisType(ConvertType(o.GetThisType().getOrThrow()))
         let instantiatedTypeArgs = o.GetInstantiatedTypeArgs()
@@ -464,7 +461,7 @@ public class PrivateTypeConverterNoInvokeOriginal <: PrivateTypeConverter {
         o.SetInstantiatedTypeArgs(instantiatedTypeArgs)
     }
 
-    public override func VisitSubExpression(o: InvokeStaticWithException): Unit {
+    public override func VisitSubExpression(o: TryInvokeStatic): Unit {
         VisitExprDefaultImpl(o)
         o.SetThisType(ConvertType(o.GetThisType().getOrThrow()))
         let instantiatedTypeArgs = o.GetInstantiatedTypeArgs()

@@ -42,11 +42,11 @@ public class OptFuncRetType {
                     }
                     apply.ReplaceWith(newApply)
                 } else {
-                    let awe = StaticCast<ApplyWithException>(user)
+                    let awe = StaticCast<TryApply>(user)
                     CJC_ASSERT(awe.GetCallee().nodeId == fn.nodeId)
                     let funcCallContext = FuncCallContext(args: awe.GetArgs(),
                         instTypeArgs: awe.GetInstantiatedTypeArgs(), thisType: awe.GetThisType())
-                    let newApply = builder.CreateApplyWithException(fn.GetReturnType().getOrThrow(), awe.GetCallee(),
+                    let newApply = builder.CreateTryApply(fn.GetReturnType().getOrThrow(), awe.GetCallee(),
                         funcCallContext, awe.GetSuccessBlock(), awe.GetErrorBlock(), awe.GetParentBlock().getOrThrow())
                     newApply.SetDebugLocation(awe.GetDebugLocation())
                     awe.ReplaceWith(newApply)

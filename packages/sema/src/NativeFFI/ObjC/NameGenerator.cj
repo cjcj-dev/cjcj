@@ -15,11 +15,19 @@ private let WRAPPER_PREFIX: String = "CJImpl_ObjC_"
 private let DELETE_CJ_OBJECT_SUFFIX: String = "_deleteCJObject"
 private let LOCK_CJ_OBJECT_SUFFIX: String = "_lockCJObject"
 private let UNLOCK_CJ_OBJECT_SUFFIX: String = "_unlockCJObject"
-private let WRAPPER_GETTER_SUFFIX: String = "_get"
-private let WRAPPER_GETTER_SUFFIX_INNER_GENERIC_PROP: String = "get"
-private let WRAPPER_SETTER_SUFFIX: String = "_set"
+    private let WRAPPER_GETTER_SUFFIX: String = "_get"
+    private let WRAPPER_SETTER_SUFFIX: String = "_set"
 
 public class NameGenerator {
+    // Upstream a51ced71, Utils/NameGenerator.cpp:298-306.
+    public static func GenerateHandleWrapperName(mirror: ClassLikeDecl): String {
+        return mirror.identifier.Val() + "$wrap"
+    }
+
+    public static func GenerateRegistryCompanionName(impl: ClassDecl): String {
+        return impl.identifier.Val() + "$reg"
+    }
+
     private let mangler: BaseMangler
     private let typeManager: TypeManager
 
@@ -29,45 +37,36 @@ public class NameGenerator {
     }
 
     // Mirrors NameGenerator::GenerateInitCjObjectName(VarDecl), NameGenerator.cpp:39-44.
-    public func GenerateInitCjObjectName(target: VarDecl,
-        genericActualName!: Option<String> = None): String {
+    public func GenerateInitCjObjectName(target: VarDecl): String {
         let outerDeclName = target.outerDecl.getOrThrow().identifier.Val()
-        let name = if (let Some(actualName) <- genericActualName) {
-            outerDeclName + "_" + actualName
-        } else {
-            outerDeclName + "_" + target.identifier.Val()
-        }
+        let name = outerDeclName + "_" + target.identifier.Val()
         return WRAPPER_PREFIX + name
     }
 
     // Mirrors NameGenerator::GenerateInitCjObjectName(FuncDecl), NameGenerator.cpp:46-56.
-    public func GenerateInitCjObjectName(target: FuncDecl,
-        genericActualName!: Option<String> = None): String {
+    public func GenerateInitCjObjectName(target: FuncDecl): String {
         let params = target.funcBody.getOrThrow().paramLists[0].params
         let ctorName = GetObjCDeclName(target)
-        let mangledCtorName = GetMangledMethodName(mangler, params, ctorName, typeManager)
-        var name = GetObjCFullDeclName(target.outerDecl.getOrThrow(),
-            genericActualName: genericActualName) + "_" + mangledCtorName
+        let mangledCtorName = GetMangledMethodName(mangler, params, ctorName)
+        var name = GetObjCFullDeclName(target.outerDecl.getOrThrow()) + "_" + mangledCtorName
         name = name.replace(".", "_").replace(":", "_")
         return WRAPPER_PREFIX + name
     }
 
     // Mirrors NameGenerator::GenerateInitCjObjectName(Decl), NameGenerator.cpp:58-67.
-    public func GenerateInitCjObjectName(target: Decl,
-        genericActualName!: Option<String> = None): String {
+    public func GenerateInitCjObjectName(target: Decl): String {
         if (let Some(funcDecl) <- (target as FuncDecl)) {
-            return GenerateInitCjObjectName(funcDecl, genericActualName: genericActualName)
+            return GenerateInitCjObjectName(funcDecl)
         } else if (let Some(varDecl) <- (target as VarDecl)) {
-            return GenerateInitCjObjectName(varDecl, genericActualName: genericActualName)
+            return GenerateInitCjObjectName(varDecl)
         }
         CJC_ABORT()
         return ""
     }
 
     // Mirrors NameGenerator::GenerateDeleteCjObjectName, NameGenerator.cpp:69-76.
-    public func GenerateDeleteCjObjectName(target: Decl,
-        genericActualName!: Option<String> = None): String {
-        let name = GetObjCFullDeclName(target, genericActualName: genericActualName).
+    public func GenerateDeleteCjObjectName(target: Decl): String {
+        let name = GetObjCFullDeclName(target).
             replace(".", "_").replace(":", "_")
         return WRAPPER_PREFIX + name + DELETE_CJ_OBJECT_SUFFIX
     }
@@ -85,17 +84,12 @@ public class NameGenerator {
     }
 
     // Mirrors NameGenerator::GenerateMethodWrapperName, NameGenerator.cpp:96-129.
-    public func GenerateMethodWrapperName(target: FuncDecl,
-        genericActualName!: Option<String> = None, isInnerGeneric!: Bool = false): String {
+    public func GenerateMethodWrapperName(target: FuncDecl): String {
         let params = target.funcBody.getOrThrow().paramLists[0].params
         let methodName = GetObjCDeclName(target)
-        let mangledMethodName = GetMangledMethodName(mangler, params, methodName, typeManager)
-        let outerDeclName = GetObjCFullDeclName(target.outerDecl.getOrThrow(),
-            genericActualName: genericActualName)
+        let mangledMethodName = GetMangledMethodName(mangler, params, methodName)
+        let outerDeclName = GetObjCFullDeclName(target.outerDecl.getOrThrow())
         var name = outerDeclName + "." + mangledMethodName
-        if (isInnerGeneric) {
-            name = name.replace("$", "")
-        }
         name = name.replace(".", "_").replace(":", "_")
         return WRAPPER_PREFIX + name
     }
@@ -108,14 +102,9 @@ public class NameGenerator {
     }
 
     // Mirrors NameGenerator::GetFieldGetterWrapperName, NameGenerator.cpp:154-168.
-    public func GetFieldGetterWrapperName(target: VarDecl,
-        genericActualName!: Option<String> = None, isInnerGeneric!: Bool = false): String {
-        let outerDeclName = GetObjCFullDeclName(target.outerDecl.getOrThrow(),
-            genericActualName: genericActualName)
+    public func GetFieldGetterWrapperName(target: VarDecl): String {
+        let outerDeclName = GetObjCFullDeclName(target.outerDecl.getOrThrow())
         let name = (outerDeclName + "." + GetObjCDeclName(target)).replace(".", "_").replace(":", "_")
-        if (isInnerGeneric) {
-            return WRAPPER_PREFIX + name + WRAPPER_GETTER_SUFFIX_INNER_GENERIC_PROP
-        }
         return WRAPPER_PREFIX + name + WRAPPER_GETTER_SUFFIX
     }
 
@@ -148,7 +137,7 @@ public class NameGenerator {
         return None
     }
 
-    public func GetObjCDeclName(target: Decl, genericActualName!: Option<String> = None): String {
+    public static func GetObjCDeclName(target: Decl): String {
         if (let Some(foreignName) <- GetUserDefinedObjCName(target)) {
             return foreignName
         }
@@ -190,9 +179,6 @@ public class NameGenerator {
             }
         }
 
-        if (let Some(actualName) <- genericActualName) {
-            return actualName
-        }
         return target.identifier.Val()
     }
 
@@ -275,13 +261,11 @@ public class NameGenerator {
         return result
     }
 
-    public func GetObjCFullDeclName(target: Decl, genericActualName!: Option<String> = None): String {
+    public func GetObjCFullDeclName(target: Decl): String {
         if (let Some(name) <- GetUserDefinedObjCName(target)) {
             return name
         }
-
-        let actualName = genericActualName ?? target.identifier.Val()
-        return target.fullPackageName + "." + actualName
+        return target.fullPackageName + "." + target.identifier.Val()
     }
 
     public func GetPropSetterWrapperName(target: PropDecl): String {

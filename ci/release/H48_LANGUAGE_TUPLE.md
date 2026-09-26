@@ -4,17 +4,18 @@ This prerelease preserves the compiler/stdlib inputs used by the kkk2 managed
 language gate. It is **not a rebuild of current master** and is not a stable
 release. The release tag explicitly says `provenance-partial`.
 
-The published release is `395249571`; its exact asset IDs and digests are in
+The published release is `396986820`; its exact asset IDs and digests are in
 [`ci/h48_language_tuple_pin.json`](../h48_language_tuple_pin.json).
 
 The compiler source is `35da7be2434ad72348ed27e8a0bf599ec4e91524` (the retained
 build changes its compile option to `-O1`). The target LLVM source is
 `1ecb811801cae9968e0046048943e34c923a34c9`. The compiler process uses the separately
-packaged official `nightly-1.3.0-alpha.20260904010027` runtime and boundscheck.
+packaged official runtime and boundscheck whose host SDK identity is
+`sources.compiler.host_sdk` in [`ci/h48_language_tuple_pin.json`](../h48_language_tuple_pin.json).
 Every shipped file has a digest and an origin category in `language-tuple.json`.
 
 The rebuilt std/FFI source archive's commit was **not recorded**. Its source SHA
-is `unrecorded`; its retained bytes and compiler/llc/opt input digests are pinned.
+is `unrecorded`; its retained bytes and compiler/llc/opt/ld.lld input digests are pinned.
 [cjcj#135](https://github.com/cjcj-dev/cjcj/issues/135) owns rebuilding a tuple
 with complete source provenance. The 2026-09-24 controller decision permits this
 partial-provenance handoff specifically to reproduce the existing H48 inputs.

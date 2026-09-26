@@ -75,7 +75,8 @@ public class ConstEvalPass {
                     } else if (let Some(body) <- newBody) {
                         let entry = body.GetEntryBlock() ??
                             throw IllegalStateException("const-eval replacement body has no entry block")
-                        builder.CreateExit(None, entry)
+                        let createdExit78 = builder.CreateExit(None, entry)
+                        entry.AppendExpression(createdExit78)
                         fn.ReplaceBody(body)
                         newFuncs.add(fn)
                     }
@@ -117,6 +118,7 @@ public class ConstEvalPass {
                 let varType = (varRefType as RefType).getOrThrow().GetBaseType()
                 let val2chir = IVal2CHIR(builder, interpreter, pkg)
                 if (let Some(constant) <- val2chir.TryConvertToConstant(varType, val, block)) {
+                    block.AppendExpression(constant)
                     if (!constant.IsConstantNull()) {
                         global.SetInitializer(constant.GetValue())
                         continue
@@ -131,9 +133,11 @@ public class ConstEvalPass {
                 let targetBody = newBody.getOrThrow()
                 let newBlock = targetBody.GetEntryBlock() ??
                     throw IllegalStateException("const-eval new initializer body has no entry block")
-                let constValue = val2chir.ConvertToChir(varType, val, newBlock) ??
+                let insertExpr = { expr: Expression => newBlock.AppendExpression(expr) }
+                let constValue = val2chir.ConvertToChir(varType, val, insertExpr, newBlock) ??
                     return None
-                builder.CreateStore(constValue, global, newBlock)
+                let createdStore136 = builder.CreateStore(constValue, global, newBlock)
+                newBlock.AppendExpression(createdStore136)
             }
         }
         return Some(newBody)
@@ -186,58 +190,75 @@ private class IVal2CHIR {
             case TypeKind.TYPE_INT8 | TypeKind.TYPE_INT16 | TypeKind.TYPE_INT32 | TypeKind.TYPE_INT64 |
                 TypeKind.TYPE_INT_NATIVE | TypeKind.TYPE_UINT8 | TypeKind.TYPE_UINT16 | TypeKind.TYPE_UINT32 |
                 TypeKind.TYPE_UINT64 | TypeKind.TYPE_UINT_NATIVE =>
-                if (val.IsIntLike()) { Some(builder.CreateConstant(ty, IntLiteral(val.GetInt()), parent)) } else { None }
+                if (val.IsIntLike()) {
+                    let constant = builder.CreateConstant(ty, IntLiteral(val.GetInt()), parent)
+                    Some(constant)
+                } else {
+                    None
+                }
             case TypeKind.TYPE_FLOAT16 | TypeKind.TYPE_FLOAT32 | TypeKind.TYPE_FLOAT64 =>
-                if (val.IsFloatLike()) { Some(builder.CreateConstant(ty, FloatLiteral(val.GetFloat()), parent)) } else { None }
+                if (val.IsFloatLike()) {
+                    let constant = builder.CreateConstant(ty, FloatLiteral(val.GetFloat()), parent)
+                    Some(constant)
+                } else {
+                    None
+                }
             case TypeKind.TYPE_RUNE =>
                 if (val.kind == InterpreterValueKind.IRUNE) {
-                    Some(builder.CreateConstant(ty, RuneLiteral(Rune(val.GetInt())), parent))
+                    let createdConstant194 = builder.CreateConstant(ty, RuneLiteral(Rune(val.GetInt())), parent)
+                    Some(createdConstant194)
                 } else {
                     None
                 }
             case TypeKind.TYPE_BOOLEAN =>
                 if (val.kind == InterpreterValueKind.IBOOL) {
-                    Some(builder.CreateConstant(ty, BoolLiteral(val.GetBool()), parent))
+                    let createdConstant200 = builder.CreateConstant(ty, BoolLiteral(val.GetBool()), parent)
+                    Some(createdConstant200)
                 } else {
                     None
                 }
             case _ =>
                 if (val.kind == InterpreterValueKind.INULLPTR) {
-                    Some(builder.CreateConstant(ty, NullLiteral(), parent))
+                    let createdConstant206 = builder.CreateConstant(ty, NullLiteral(), parent)
+                    Some(createdConstant206)
                 } else {
                     None
                 }
         }
     }
 
-    public func ConvertToChir(ty: Type, val: InterpreterValue, parent: Block): Option<Value> {
+    public func ConvertToChir(ty: Type, val: InterpreterValue,
+        insertExpr: (Expression) -> Unit, parent: Block): Option<Value> {
         if (let Some(constant) <- TryConvertToConstant(ty, val, parent)) {
+            insertExpr(constant)
             return ExprResultAsValue(constant)
         }
         return match (ty.GetTypeKind()) {
             case TypeKind.TYPE_TUPLE | TypeKind.TYPE_STRUCT =>
                 if (ty.IsString()) {
-                    ConvertStringToChir(ty, val, parent)
+                    ConvertStringToChir(ty, val, insertExpr, parent)
                 } else {
-                    ConvertTupleToChir(ty, val, parent)
+                    ConvertTupleToChir(ty, val, insertExpr, parent)
                 }
             case TypeKind.TYPE_ENUM =>
                 if (let Some(enumTy) <- (ty as EnumType)) {
-                    ConvertEnumToChir(enumTy, val, parent)
+                    ConvertEnumToChir(enumTy, val, insertExpr, parent)
                 } else {
                     None
                 }
             case TypeKind.TYPE_REFTYPE =>
                 if (let Some(refTy) <- (ty as RefType)) {
-                    ConvertRefToChir(refTy, val, parent)
+                    ConvertRefToChir(refTy, val, insertExpr, parent)
                 } else {
                     None
                 }
             case TypeKind.TYPE_UNIT =>
-                ExprResultAsValue(builder.CreateConstant(ty, UnitLiteral(), parent))
+                let createdConstant237 = builder.CreateConstant(ty, UnitLiteral(), parent)
+                insertExpr(createdConstant237)
+                ExprResultAsValue(createdConstant237)
             case TypeKind.TYPE_VARRAY =>
                 if (let Some(varrayTy) <- (ty as VArrayType)) {
-                    ConvertArrayToChir(varrayTy, val, parent)
+                    ConvertArrayToChir(varrayTy, val, insertExpr, parent)
                 } else {
                     None
                 }
@@ -250,7 +271,8 @@ private class IVal2CHIR {
         }
     }
 
-    private func ConvertStringToChir(ty: Type, val: InterpreterValue, parent: Block): Option<Value> {
+    private func ConvertStringToChir(ty: Type, val: InterpreterValue,
+        insertExpr: (Expression) -> Unit, parent: Block): Option<Value> {
         if (val.kind != InterpreterValueKind.ITUPLE) {
             return None
         }
@@ -279,11 +301,14 @@ private class IVal2CHIR {
             out.add(UInt8(arrData[idx + 1].GetInt()))
             idx++
         }
-        return ExprResultAsValue(builder.CreateConstant(ty,
-            StringLiteral(unsafe { String.fromUtf8Unchecked(out.toArray()) }), parent))
+        let createdConstant282 = builder.CreateConstant(ty,
+            StringLiteral(unsafe { String.fromUtf8Unchecked(out.toArray()) }), parent)
+        insertExpr(createdConstant282)
+        return ExprResultAsValue(createdConstant282)
     }
 
-    private func ConvertTupleToChir(ty: Type, val: InterpreterValue, parent: Block): Option<Value> {
+    private func ConvertTupleToChir(ty: Type, val: InterpreterValue,
+        insertExpr: (Expression) -> Unit, parent: Block): Option<Value> {
         if (val.kind != InterpreterValueKind.ITUPLE) {
             return None
         }
@@ -303,41 +328,53 @@ private class IVal2CHIR {
         let elements = ArrayList<Value>()
         var idx: Int64 = 0
         while (idx < elementVals.size) {
-            let elementVal = ConvertToChir(elementTys[idx], elementVals[idx], parent) ?? return None
+            let elementVal = ConvertToChir(elementTys[idx], elementVals[idx], insertExpr, parent) ?? return None
             elements.add(elementVal)
             idx++
         }
         if (ty.IsStruct()) {
             let refTy = builder.context.GetRefTy(ty)
-            let allocate = ExprResultAsValue(builder.CreateAllocate(refTy, ty, parent)) ?? return None
+            let createdAllocate312 = builder.CreateAllocate(refTy, ty, parent)
+            insertExpr(createdAllocate312)
+            let allocate = ExprResultAsValue(createdAllocate312) ?? return None
             var fieldIdx: Int64 = 0
             while (fieldIdx < elements.size) {
                 let path = ArrayList<UInt64>()
                 path.add(UInt64(fieldIdx))
-                builder.CreateStoreElementRef(elements[fieldIdx], allocate, path, parent)
+                let createdStoreElementRef317 = builder.CreateStoreElementRef(elements[fieldIdx], allocate, path, parent)
+                insertExpr(createdStoreElementRef317)
                 fieldIdx++
             }
-            return ExprResultAsValue(builder.CreateLoad(ty, allocate, parent))
+            let createdLoad320 = builder.CreateLoad(ty, allocate, parent)
+            insertExpr(createdLoad320)
+            return ExprResultAsValue(createdLoad320)
         }
-        return ExprResultAsValue(builder.CreateTuple(ty, elements, parent))
+        let createdTuple322 = builder.CreateTuple(ty, elements, parent)
+        insertExpr(createdTuple322)
+        return ExprResultAsValue(createdTuple322)
     }
 
-    private func ConvertEnumToChir(ty: EnumType, val: InterpreterValue, parent: Block): Option<Value> {
+    private func ConvertEnumToChir(ty: EnumType, val: InterpreterValue,
+        insertExpr: (Expression) -> Unit, parent: Block): Option<Value> {
         let selectorTy = builder.context.ToSelectorType(GetEnumSelectorType(ty.GetEnumDef()))
         if (ty.GetEnumDef().IsAllCtorsTrivial()) {
             if (!val.IsIntLike() && val.kind != InterpreterValueKind.IBOOL) {
                 return None
             }
-            let selector = if (selectorTy.IsBoolean()) {
-                ExprResultAsValue(builder.CreateConstant(selectorTy, BoolLiteral(if (val.kind == InterpreterValueKind.IBOOL) {
+            let selectorExpr = if (selectorTy.IsBoolean()) {
+                builder.CreateConstant(selectorTy, BoolLiteral(if (val.kind == InterpreterValueKind.IBOOL) {
                     val.GetBool()
                 } else {
                     val.GetInt() != 0
-                }), parent)) ?? return None
+                }), parent)
             } else {
-                ExprResultAsValue(builder.CreateConstant(selectorTy, IntLiteral(val.GetInt()), parent)) ?? return None
+                builder.CreateConstant(selectorTy, IntLiteral(val.GetInt()), parent)
             }
-            return ExprResultAsValue(builder.CreateTypeCast(ty, selector, parent))
+            let selector = ExprResultAsValue(selectorExpr) ?? return None
+            let createdTypeCast340 = builder.CreateClassStaticCast(ty, selector, parent)
+            insertExpr(selectorExpr)
+            insertExpr(createdTypeCast340)
+            return ExprResultAsValue(createdTypeCast340)
         }
         if (val.kind != InterpreterValueKind.ITUPLE) {
             return None
@@ -351,13 +388,13 @@ private class IVal2CHIR {
             if (elementVals[0].kind != InterpreterValueKind.IBOOL) {
                 return None
             }
-            elements.add(ConvertToChir(selectorTy, elementVals[0], parent) ?? return None)
+            elements.add(ConvertToChir(selectorTy, elementVals[0], insertExpr, parent) ?? return None)
             if (elementVals[0].GetBool()) { 1 } else { 0 }
         } else {
             if (!elementVals[0].IsIntLike()) {
                 return None
             }
-            elements.add(ConvertToChir(selectorTy, elementVals[0], parent) ?? return None)
+            elements.add(ConvertToChir(selectorTy, elementVals[0], insertExpr, parent) ?? return None)
             elementVals[0].GetInt()
         }
         let ctorInfos = ty.GetConstructorInfos(builder)
@@ -381,14 +418,17 @@ private class IVal2CHIR {
         }
         var idx: Int64 = 0
         while (idx < elementTys.size) {
-            let elementVal = ConvertToChir(elementTys[idx], elementVals[idx + 1], parent) ?? return None
+            let elementVal = ConvertToChir(elementTys[idx], elementVals[idx + 1], insertExpr, parent) ?? return None
             elements.add(elementVal)
             idx++
         }
-        return ExprResultAsValue(builder.CreateTuple(ty, elements, parent))
+        let createdTuple388 = builder.CreateTuple(ty, elements, parent)
+        insertExpr(createdTuple388)
+        return ExprResultAsValue(createdTuple388)
     }
 
-    private func ConvertRefToChir(ty: RefType, val: InterpreterValue, parent: Block): Option<Value> {
+    private func ConvertRefToChir(ty: RefType, val: InterpreterValue,
+        insertExpr: (Expression) -> Unit, parent: Block): Option<Value> {
         let referencedType = ty.GetBaseType()
         let valContent = interpreter.DereferenceValue(val) ?? return None
         return match (referencedType.GetTypeKind()) {
@@ -407,20 +447,24 @@ private class IVal2CHIR {
                     refType = builder.context.GetRefTy(classType)
                 }
                 let allocExpr = builder.CreateAllocate(refType, classType, parent)
+                insertExpr(allocExpr)
                 let classVal = ExprResultAsValue(allocExpr) ?? return None
                 let members = classType.GetClassDef().GetAllInstanceVars()
                 let content = valContent.GetElementsRef()
                 CJC_ASSERT(members.size == content.size)
                 var idx: Int64 = 0
                 while (idx < members.size) {
-                    let memberVal = ConvertToChir(members[idx].ty, content[idx], parent) ?? return None
+                    let memberVal = ConvertToChir(members[idx].ty, content[idx], insertExpr, parent) ?? return None
                     let path = ArrayList<UInt64>()
                     path.add(UInt64(idx))
-                    builder.CreateStoreElementRef(memberVal, classVal, path, parent)
+                    let createdStoreElementRef419 = builder.CreateStoreElementRef(memberVal, classVal, path, parent)
+                    insertExpr(createdStoreElementRef419)
                     idx++
                 }
                 if (needCast) {
-                    return ExprResultAsValue(builder.CreateTypeCast(ty, classVal, parent))
+                    let createdTypeCast423 = builder.CreateClassStaticCast(ty, classVal, parent)
+                    insertExpr(createdTypeCast423)
+                    return ExprResultAsValue(createdTypeCast423)
                 }
                 Some(classVal)
             case _ => None
@@ -450,16 +494,19 @@ private class IVal2CHIR {
         return builder.context.GetClassTy(classDef, ArrayList<Type>())
     }
 
-    private func ConvertArrayToChir(ty: VArrayType, val: InterpreterValue, parent: Block): Option<Value> {
+    private func ConvertArrayToChir(ty: VArrayType, val: InterpreterValue,
+        insertExpr: (Expression) -> Unit, parent: Block): Option<Value> {
         if (val.kind != InterpreterValueKind.IARRAY) {
             return None
         }
         let elementVals = val.GetElementsRef()
         let elements = ArrayList<Value>()
         for (elementVal in elementVals) {
-            elements.add(ConvertToChir(ty.GetElementType(), elementVal, parent) ?? return None)
+            elements.add(ConvertToChir(ty.GetElementType(), elementVal, insertExpr, parent) ?? return None)
         }
-        return ExprResultAsValue(builder.CreateVArray(ty, elements, parent))
+        let createdVArray462 = builder.CreateVArray(ty, elements, parent)
+        insertExpr(createdVArray462)
+        return ExprResultAsValue(createdVArray462)
     }
 
     private func GetEnumSelectorType(def: EnumDef): TypeKind {

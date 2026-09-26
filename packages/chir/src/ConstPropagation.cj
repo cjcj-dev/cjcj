@@ -20,11 +20,11 @@ private class RewriteInfo {
 }
 
 private class TerminatorRewriteInfo {
-    public let terminator: Terminator
+    public let terminator: Expression
     public let literalVal: Option<LiteralValue>
     public let target: Block
 
-    public init(terminator: Terminator, literalVal: Option<LiteralValue>, target: Block) {
+    public init(terminator: Expression, literalVal: Option<LiteralValue>, target: Block) {
         this.terminator = terminator
         this.literalVal = literalVal
         this.target = target
@@ -98,7 +98,7 @@ public class ConstPropagation {
                 }
                 if ((exprType.IsInteger() || exprType.IsFloat() || exprType.IsRune() ||
                     exprType.IsBoolean() || exprType.IsString()) &&
-                    (expr.GetExprKind() == ExprKind.LOAD || expr.GetExprKind() == ExprKind.TYPECAST ||
+                    (expr.GetExprKind() == ExprKind.LOAD || expr.GetExprKind() == ExprKind.NUMERIC_CAST ||
                     expr.GetExprKind() == ExprKind.FIELD)) {
                     if (let Some(absVal) <- state.CheckAbstractValue(exprResult)) {
                         toBeRewrited.add(RewriteInfo(expr, index, GenerateConstExpr(exprType, absVal, isCJLint)))
@@ -106,7 +106,7 @@ public class ConstPropagation {
                     }
                 }
             },
-            { state: State<ConstValueDomain, Pool>, terminator: Terminator, targetSucc: Option<Block> =>
+            { state: State<ConstValueDomain, Pool>, terminator: Expression, targetSucc: Option<Block> =>
                 if (targetSucc.isNone()) {
                     return
                 }
@@ -114,7 +114,10 @@ public class ConstPropagation {
                 match (terminator.GetExprKind()) {
                     case ExprKind.BRANCH | ExprKind.MULTIBRANCH =>
                         targetSuccMap.add(TerminatorRewriteInfo(terminator, None, target))
-                    case ExprKind.INT_OP_WITH_EXCEPTION | ExprKind.TYPECAST_WITH_EXCEPTION =>
+                    case ExprKind.TRY_NEG | ExprKind.TRY_ADD | ExprKind.TRY_SUB |
+                        ExprKind.TRY_MUL | ExprKind.TRY_DIV | ExprKind.TRY_MOD |
+                        ExprKind.TRY_EXP | ExprKind.TRY_LSHIFT | ExprKind.TRY_RSHIFT |
+                        ExprKind.TRY_NUMERIC_CAST =>
                         if (let Some(res) <- terminator.GetResult()) {
                             if (let Some(absVal) <- state.CheckAbstractValue(res)) {
                                 let literal = GenerateConstExpr(res.GetType().getOrThrow(), absVal, isCJLint)
@@ -265,7 +268,7 @@ public class ConstPropagation {
         }
     }
 
-    private func RewriteTerminator(oldTerminator: Terminator, newValue: Option<LiteralValue>,
+    private func RewriteTerminator(oldTerminator: Expression, newValue: Option<LiteralValue>,
         newTarget: Block, isDebug: Bool): Unit {
         if (SkipCP(oldTerminator)) {
             return
@@ -280,11 +283,13 @@ public class ConstPropagation {
         if (let Some(literal) <- newValue) {
             if (let Some(res) <- oldTerminator.GetResult()) {
                 let constant = chirBuilder.CreateConstant(literal.GetType().getOrThrow(), literal, parentBlock)
+                parentBlock.AppendExpression(constant)
                 constant.SetDebugLocation(loc)
                 res.ReplaceWith(constant.GetResult().getOrThrow(), constant.GetParentBlockGroup())
             }
         }
         let newTerminator = chirBuilder.CreateGoTo(newTarget, parentBlock)
+        parentBlock.AppendExpression(newTerminator)
         newTerminator.SetDebugLocation(loc)
         if (isDebug) {
             println("[ConstPropagation] The terminator " + oldTerminator.GetExprKindName() +

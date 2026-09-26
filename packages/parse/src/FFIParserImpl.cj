@@ -82,7 +82,7 @@ public open class FFIParserImpl {
             }
             if (let Some(outer) <- decl.outerDecl) {
                 if (outer.TestAnyAttr(Attribute.JAVA_MIRROR, Attribute.JAVA_MIRROR_SUBTYPE) ||
-                    outer.TestAnyAttr(Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_MIRROR_SUBTYPE)) {
+                    outer.TestAnyAttr(Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_IMPL)) {
                     return
                 }
             }

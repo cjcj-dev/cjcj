@@ -1,5 +1,7 @@
 package cjcj::codegen
 
+import cjcj::chir.AllocateBase
+
 import std.collection.ArrayList
 import cjcj::chir.Allocate
 import cjcj::chir.ClassType
@@ -15,14 +17,14 @@ private let LLVM_POINTER_TYPE_KIND: Int32 = 12
 
 public func HandleMemoryExpression(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
     let kind = chirExpr.GetExprKind()
-    if (kind == ExprKind.ALLOCATE || kind == ExprKind.ALLOCATE_WITH_EXCEPTION) {
+    if (kind == ExprKind.ALLOCATE || kind == ExprKind.TRY_ALLOCATE) {
         if (let Some(allocateExpr) <- (chirExpr as Allocate)) {
             if (let Some(retValueStorage) <- TryGetSpecialRetValueStorage(irBuilder, allocateExpr)) {
                 return retValueStorage
             }
             irBuilder.EmitLocation(CHIRExprWrapper(allocateExpr))
         }
-        let result = GenerateAllocate(irBuilder, chirExpr)
+        let result = GenerateAllocate(irBuilder, (chirExpr as AllocateBase).getOrThrow())
         if (let Some(allocateExpr) <- (chirExpr as Allocate)) {
             TryEmitNullInitForDebugLocalClass(irBuilder, allocateExpr, result)
         }

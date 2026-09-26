@@ -60,9 +60,10 @@ const CHIRFB_SOURCE_EXPR_IF_LET_OR_WHILE_LET: UInt8 = 4u8
 const CHIRFB_SOURCE_EXPR_QUEST: UInt8 = 5u8
 const CHIRFB_SOURCE_EXPR_BINARY: UInt8 = 6u8
 const CHIRFB_SOURCE_EXPR_FOR_IN_EXPR: UInt8 = 7u8
-const CHIRFB_SOURCE_EXPR_OTHER: UInt8 = 8u8
+const CHIRFB_SOURCE_EXPR_MATCH_CASE: UInt8 = 8u8
+const CHIRFB_SOURCE_EXPR_OTHER: UInt8 = 9u8
 const CHIRFB_SOURCE_EXPR_MIN: UInt8 = 0u8
-const CHIRFB_SOURCE_EXPR_MAX: UInt8 = 8u8
+const CHIRFB_SOURCE_EXPR_MAX: UInt8 = 9u8
 
 // Linkage enum ordinals. PackageFormat.fbs:135-141; PackageFormat_generated.h:411-419.
 const CHIRFB_LINKAGE_WEAK_ODR: Int16 = 0
@@ -104,8 +105,9 @@ const CHIRFB_ANNOTATION_ENUM_CASE_INDEX: UInt8 = 10u8
 const CHIRFB_ANNOTATION_VIR_METHOD_OFFSET: UInt8 = 11u8
 const CHIRFB_ANNOTATION_WRAPPED_RAW_METHOD: UInt8 = 12u8
 const CHIRFB_ANNOTATION_OVERRIDE_SRC_FUNC_TYPE: UInt8 = 13u8
+const CHIRFB_ANNOTATION_MATCH_CASE_ID: UInt8 = 14u8
 const CHIRFB_ANNOTATION_MIN: UInt8 = 0u8
-const CHIRFB_ANNOTATION_MAX: UInt8 = 13u8
+const CHIRFB_ANNOTATION_MAX: UInt8 = 14u8
 
 // ValueKind enum ordinals. PackageFormat.fbs:241-249; PackageFormat_generated.h:650-660.
 const CHIRFB_VALUE_KIND_LITERAL: UInt8 = 0u8
@@ -602,8 +604,9 @@ const CHIRFB_INTRINSIC_KIND_IS_NULL: UInt16 = 358u16
 const CHIRFB_INTRINSIC_KIND_GET_TYPE_FOR_TYPE_PARAMETER: UInt16 = 359u16
 const CHIRFB_INTRINSIC_KIND_IS_SUBTYPE_TYPES: UInt16 = 360u16
 const CHIRFB_INTRINSIC_KIND_EXCLUSIVE_SCOPE: UInt16 = 361u16
+const CHIRFB_INTRINSIC_KIND_CANONICALIZE_STRING_BACKING: UInt16 = 362u16
 const CHIRFB_INTRINSIC_KIND_MIN: UInt16 = 0u16
-const CHIRFB_INTRINSIC_KIND_MAX: UInt16 = 361u16
+const CHIRFB_INTRINSIC_KIND_MAX: UInt16 = 362u16
 
 // TypeElem union tags. PackageFormat.fbs:1164-1171; PackageFormat_generated.h:2216-2226.
 const CHIRFB_TYPE_ELEM_NONE: UInt8 = 0u8
@@ -768,6 +771,7 @@ const CHIRFB_IS_CAPTURED_CLASS_IN_CC_VT_VALUE: UInt16 = 4u16
 // EnumCaseIndex table field slot offsets. PackageFormat.fbs:203-205;
 // PackageFormat_generated.h:3603-3605 (EnumCaseIndex::FlatBuffersVTableOffset).
 const CHIRFB_ENUM_CASE_INDEX_VT_INDEX: UInt16 = 4u16
+const CHIRFB_MATCH_CASE_ID_VT_ID: UInt16 = 4u16
 
 // VirMethodOffset table field slot offsets. PackageFormat.fbs:207-209;
 // PackageFormat_generated.h:3644-3646 (VirMethodOffset::FlatBuffersVTableOffset).
@@ -1054,6 +1058,7 @@ const CHIRFB_BRANCH_VT_SOURCEEXPR: UInt16 = 6u16
 // PackageFormat_generated.h:6980-6983 (MultiBranch::FlatBuffersVTableOffset).
 const CHIRFB_MULTI_BRANCH_VT_BASE: UInt16 = 4u16
 const CHIRFB_MULTI_BRANCH_VT_CASEVALUES: UInt16 = 6u16
+const CHIRFB_MULTI_BRANCH_VT_SOURCEEXPR: UInt16 = 8u16
 
 // GetElementRef table field slot offsets. PackageFormat.fbs:1091-1094;
 // PackageFormat_generated.h:7044-7047 (GetElementRef::FlatBuffersVTableOffset).
@@ -1194,9 +1199,10 @@ public func VerifyCHIRPackageBufferSchemaConstants(): Bool {
     ok = ok && CHIRFB_SOURCE_EXPR_QUEST == 5u8
     ok = ok && CHIRFB_SOURCE_EXPR_BINARY == 6u8
     ok = ok && CHIRFB_SOURCE_EXPR_FOR_IN_EXPR == 7u8
-    ok = ok && CHIRFB_SOURCE_EXPR_OTHER == 8u8
+    ok = ok && CHIRFB_SOURCE_EXPR_MATCH_CASE == 8u8
+    ok = ok && CHIRFB_SOURCE_EXPR_OTHER == 9u8
     ok = ok && CHIRFB_SOURCE_EXPR_MIN == 0u8
-    ok = ok && CHIRFB_SOURCE_EXPR_MAX == 8u8
+    ok = ok && CHIRFB_SOURCE_EXPR_MAX == 9u8
     ok = ok && CHIRFB_LINKAGE_WEAK_ODR == 0
     ok = ok && CHIRFB_LINKAGE_EXTERNAL == 1
     ok = ok && CHIRFB_LINKAGE_INTERNAL == 2
@@ -1230,8 +1236,9 @@ public func VerifyCHIRPackageBufferSchemaConstants(): Bool {
     ok = ok && CHIRFB_ANNOTATION_VIR_METHOD_OFFSET == 11u8
     ok = ok && CHIRFB_ANNOTATION_WRAPPED_RAW_METHOD == 12u8
     ok = ok && CHIRFB_ANNOTATION_OVERRIDE_SRC_FUNC_TYPE == 13u8
+    ok = ok && CHIRFB_ANNOTATION_MATCH_CASE_ID == 14u8
     ok = ok && CHIRFB_ANNOTATION_MIN == 0u8
-    ok = ok && CHIRFB_ANNOTATION_MAX == 13u8
+    ok = ok && CHIRFB_ANNOTATION_MAX == 14u8
     ok = ok && CHIRFB_VALUE_KIND_LITERAL == 0u8
     ok = ok && CHIRFB_VALUE_KIND_GLOBALVAR == 1u8
     ok = ok && CHIRFB_VALUE_KIND_PARAMETER == 2u8
@@ -1716,8 +1723,9 @@ public func VerifyCHIRPackageBufferSchemaConstants(): Bool {
     ok = ok && CHIRFB_INTRINSIC_KIND_GET_TYPE_FOR_TYPE_PARAMETER == 359u16
     ok = ok && CHIRFB_INTRINSIC_KIND_IS_SUBTYPE_TYPES == 360u16
     ok = ok && CHIRFB_INTRINSIC_KIND_EXCLUSIVE_SCOPE == 361u16
+    ok = ok && CHIRFB_INTRINSIC_KIND_CANONICALIZE_STRING_BACKING == 362u16
     ok = ok && CHIRFB_INTRINSIC_KIND_MIN == 0u16
-    ok = ok && CHIRFB_INTRINSIC_KIND_MAX == 361u16
+    ok = ok && CHIRFB_INTRINSIC_KIND_MAX == 362u16
     ok = ok && CHIRFB_TYPE_ELEM_NONE == 0u8
     ok = ok && CHIRFB_TYPE_ELEM_TYPE == 1u8
     ok = ok && CHIRFB_TYPE_ELEM_RAW_ARRAY_TYPE == 2u8
@@ -1819,6 +1827,7 @@ public func VerifyCHIRPackageBufferSchemaConstants(): Bool {
     ok = ok && CHIRFB_IS_AUTO_ENV_CLASS_VT_VALUE == 4u16
     ok = ok && CHIRFB_IS_CAPTURED_CLASS_IN_CC_VT_VALUE == 4u16
     ok = ok && CHIRFB_ENUM_CASE_INDEX_VT_INDEX == 4u16
+    ok = ok && CHIRFB_MATCH_CASE_ID_VT_ID == 4u16
     ok = ok && CHIRFB_VIR_METHOD_OFFSET_VT_OFFSET == 4u16
     ok = ok && CHIRFB_WRAPPED_RAW_METHOD_VT_RAWMETHOD == 4u16
     ok = ok && CHIRFB_OVERRIDE_SRC_FUNC_TYPE_VT_TYPE == 4u16
@@ -1974,6 +1983,7 @@ public func VerifyCHIRPackageBufferSchemaConstants(): Bool {
     ok = ok && CHIRFB_BRANCH_VT_SOURCEEXPR == 6u16
     ok = ok && CHIRFB_MULTI_BRANCH_VT_BASE == 4u16
     ok = ok && CHIRFB_MULTI_BRANCH_VT_CASEVALUES == 6u16
+    ok = ok && CHIRFB_MULTI_BRANCH_VT_SOURCEEXPR == 8u16
     ok = ok && CHIRFB_GET_ELEMENT_REF_VT_BASE == 4u16
     ok = ok && CHIRFB_GET_ELEMENT_REF_VT_PATH == 6u16
     ok = ok && CHIRFB_GET_ELEMENT_BY_NAME_VT_BASE == 4u16

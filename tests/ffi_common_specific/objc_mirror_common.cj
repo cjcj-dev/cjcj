@@ -1,0 +1,2 @@
+@ObjCMirror
+common class OM {}

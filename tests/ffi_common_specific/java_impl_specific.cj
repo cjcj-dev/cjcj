@@ -1,0 +1,2 @@
+@JavaImpl
+specific class JI {}

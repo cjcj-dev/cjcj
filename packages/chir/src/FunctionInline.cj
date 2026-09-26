@@ -104,6 +104,12 @@ public class FunctionInline {
         if (fn.GetFuncKind() == FuncKind.INSTANCEVAR_INIT) {
             return true
         }
+        // @ObjCMirror functions are generated and always have the same body
+        // that calls relevant native code.
+        // According to benchmarks, they can always be inlined.
+        if (fn.TestAttr(Attribute.OBJ_C_MIRROR)) {
+            return true
+        }
         let currentGlobalFunc = globalFunc.getOrThrow()
         let inlinedCount = inlinedCountMap.get(currentGlobalFunc.nodeId) ?? 0
         if (inlinedCount >= INLINED_COUNT_THRESHOLD) {
@@ -132,11 +138,13 @@ public class FunctionInline {
             let newLoad = builder.CreateLoad(valueType, resNew, user.GetParentBlock().getOrThrow())
             newLoad.MoveBefore(user)
             user.ReplaceOperand(resOld, newLoad.GetResult().getOrThrow())
-            let cast = TypeCastOrBoxIfNeeded(newLoad.GetResult().getOrThrow(), resOld.GetType().getOrThrow(), builder,
+            let (cast, expressions) = TypeCastOrBoxIfNeeded(newLoad.GetResult().getOrThrow(), resOld.GetType().getOrThrow(), builder,
                 newLoad.GetParentBlock().getOrThrow(), INVALID_LOCATION)
             if (!refEq(cast, newLoad.GetResult().getOrThrow())) {
                 CJC_ASSERT(cast.IsLocalVar())
-                cast.AsLocalVar().getOrThrow().GetExpr().getOrThrow().MoveBefore(user)
+                for (expression in expressions) {
+                    expression.MoveBefore(user)
+                }
                 user.ReplaceOperand(newLoad.GetResult().getOrThrow(), cast)
             }
         }
@@ -187,7 +195,8 @@ public class FunctionInline {
         block1.GetTerminator().getOrThrow().ReplaceSuccessor(block2, funcEntry)
         for (exitBlock in exitBlocks) {
             exitBlock.GetTerminator().getOrThrow().RemoveSelfFromBlock()
-            let _ = builder.CreateGoTo(block2, exitBlock)
+            let createdExpression192 = builder.CreateGoTo(block2, exitBlock)
+            exitBlock.AppendExpression(createdExpression192)
         }
     }
 
@@ -247,7 +256,7 @@ private func InWhiteList(fn: Function): Bool {
 private func OnlyCalledOnce(fn: Function): Bool {
     var alreadyHasUser = false
     for (user in fn.GetUsers()) {
-        if (user.GetExprKind() == ExprKind.APPLY || user.GetExprKind() == ExprKind.APPLY_WITH_EXCEPTION) {
+        if (user.GetExprKind() == ExprKind.APPLY || user.GetExprKind() == ExprKind.TRY_APPLY) {
             if (alreadyHasUser) {
                 return false
             }

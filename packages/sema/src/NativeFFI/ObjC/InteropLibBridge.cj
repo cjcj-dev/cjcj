@@ -9,12 +9,15 @@ import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CJC_NULLPTR_CHECK, OBJ_C_BLOCK_IDENT,
 private let INTEROPLIB_PACKAGE_NAME: String = "objc.internal"
 private let INTEROPLIB_OBJ_C_ID: String = "ObjCId"
 private let INTEROPLIB_NATIVE_OBJ_C_ID: String = "NativeObjCId"
+private let INTEROPLIB_NATIVE_OBJ_C_ID_MARKER: String = "NativeObjCIdMarker"
+private let INTEROPLIB_NATIVE_OBJ_C_ID_MARKER_INSTANCE: String = "__NATIVE_OBJC_ID_MARKER"
 private let INTEROPLIB_NATIVE_OBJ_C_SEL: String = "NativeObjCSel"
 private let INTEROPLIB_NATIVE_OBJ_C_SUPER_PTR: String = "NativeObjCSuperPtr"
 private let INTEROPLIB_NATIVE_OBJ_C_CLASS: String = "NativeObjCClass"
 private let INTEROPLIB_REGISTRY_ID: String = "RegistryId"
 private let INTEROPLIB_OBJ_C_UNREACHABLE_CODE_EXCEPTION: String = "ObjCUnreachableCodeException"
 private let INTEROPLIB_OBJ_C_OPTIONAL_METHOD_UNIMPLEMENTED_EXCEPTION: String = "ObjCOptionalMethodUnimplementedException"
+private let INTEROPLIB_OBJ_C_INIT_EXCEPTION: String = "ObjCInitException"
 private let INTEROPLIB_OBJ_C_STATIC_METHOD_CALL_ON_INTERFACE_EXCEPTION: String = "ObjCStaticMethodCallOnInterfaceException"
 private let INTEROPLIB_NATIVE_BLOCK_ABI: String = "NativeBlockABI"
 private let INTEROPLIB_CANGJIE_BLOCK_ABI: String = "CangjieBlockABI"
@@ -22,7 +25,7 @@ private let INTEROPLIB_OBJ_C_GET_FROM_REGISTRY_BY_NATIVE_HANDLE: String = "getFr
 private let INTEROPLIB_OBJ_C_GET_FROM_REGISTRY_BY_ID: String = "getFromRegistryById"
 private let INTEROPLIB_OBJ_C_PUT_TO_REGISTRY: String = "putToRegistry"
 private let INTEROPLIB_OBJ_C_REMOVE_FROM_REGISTRY: String = "removeFromRegistry"
-private let INTEROPLIB_OBJ_C_ALLOC: String = "alloc"
+private let INTEROPLIB_OBJ_C_ALLOC: String = "objCAlloc"
 private let INTEROPLIB_OBJ_C_WITH_AUTORELEASE_POOL: String = "withAutoreleasePool"
 private let INTEROPLIB_OBJ_C_WITH_AUTORELEASE_POOL_OBJ: String = "withAutoreleasePoolObj"
 private let INTEROPLIB_OBJ_C_REGISTER_NAME: String = "registerName"
@@ -70,6 +73,8 @@ public class InteropLibBridge {
     // C++ InteropLibBridge.cpp:89-230 uses function-local statics. Cangjie only supports static
     // members, so the outer Option is initialization state and the inner Option caches a failed lookup.
     private static var forwarderMutexDecl: Option<Option<TypeAliasDecl>> = None
+    private static var nativeObjCIdMarkerDecl: Option<Option<StructDecl>> = None
+    private static var nativeObjCIdMarkerInstance: Option<Option<VarDecl>> = None
     private static var nativeObjCIdDecl: Option<Option<TypeAliasDecl>> = None
     private static var objCIdDecl: Option<Option<InterfaceDecl>> = None
     private static var nativeObjCSelDecl: Option<Option<TypeAliasDecl>> = None
@@ -78,6 +83,7 @@ public class InteropLibBridge {
     private static var registryIdDecl: Option<Option<TypeAliasDecl>> = None
     private static var objCUnreachableCodeExceptionDecl: Option<Option<ClassDecl>> = None
     private static var objCOptionalMethodUnimplementedExceptionDecl: Option<Option<ClassDecl>> = None
+    private static var objCInitExceptionDecl: Option<Option<ClassDecl>> = None
     private static var objCStaticMethodCallOnIntefaceExceptionDecl: Option<Option<ClassDecl>> = None
     private static var getFromRegistryByNativeHandleDecl: Option<Option<FuncDecl>> = None
     private static var getFromRegistryByIdDecl: Option<Option<FuncDecl>> = None
@@ -193,6 +199,25 @@ public class InteropLibBridge {
         InteropLibBridge.nativeObjCIdDecl = Some(result)
         return result
     }
+    // Upstream 0d3c5230, InteropLibBridge.cpp:92-102.
+    public func GetNativeObjCIdMarkerDecl(): Option<StructDecl> {
+        if (let Some(result) <- InteropLibBridge.nativeObjCIdMarkerDecl) { return result }
+        let result = GetInteropLibDecl<StructDecl>(INTEROPLIB_NATIVE_OBJ_C_ID_MARKER, ASTKind.STRUCT_DECL)
+        InteropLibBridge.nativeObjCIdMarkerDecl = Some(result)
+        return result
+    }
+
+    public func GetNativeObjCIdMarkerInstance(): Option<VarDecl> {
+        if (let Some(result) <- InteropLibBridge.nativeObjCIdMarkerInstance) { return result }
+        let result = GetInteropLibDecl<VarDecl>(INTEROPLIB_NATIVE_OBJ_C_ID_MARKER_INSTANCE, ASTKind.VAR_DECL)
+        InteropLibBridge.nativeObjCIdMarkerInstance = Some(result)
+        return result
+    }
+
+    public func GetNativeObjCIdMarkerTy(): Option<Ty> {
+        return GetNativeObjCIdMarkerDecl().getOrThrow().GetTy()
+    }
+
     public func GetObjCIdDecl(): Option<InterfaceDecl> {
         if (let Some(result) <- InteropLibBridge.objCIdDecl) { return result }
         let result = GetObjCLangDecl<InterfaceDecl>(INTEROPLIB_OBJ_C_ID, ASTKind.INTERFACE_DECL)
@@ -244,6 +269,13 @@ public class InteropLibBridge {
         InteropLibBridge.registryIdDecl = Some(result)
         return result
     }
+    // Upstream a51ced71, InteropLibBridge.cpp:340-350.
+    public func GetSetRegistryIdDecl(): Option<FuncDecl> {
+        return GetInteropLibDecl<FuncDecl>("setRegistryId", ASTKind.FUNC_DECL)
+    }
+    public func GetGetRegistryIdDecl(): Option<FuncDecl> {
+        return GetInteropLibDecl<FuncDecl>("getRegistryId", ASTKind.FUNC_DECL)
+    }
     public func GetRegistryIdTy(): Option<Ty> {
         let decl = GetRegistryIdDecl()
         CJC_NULLPTR_CHECK(decl)
@@ -262,6 +294,13 @@ public class InteropLibBridge {
         let result = GetObjCLangDecl<ClassDecl>(INTEROPLIB_OBJ_C_OPTIONAL_METHOD_UNIMPLEMENTED_EXCEPTION,
             ASTKind.CLASS_DECL)
         InteropLibBridge.objCOptionalMethodUnimplementedExceptionDecl = Some(result)
+        return result
+    }
+    // Upstream 39ad854f, InteropLibBridge.cpp:171-174. Lookup is objc.lang, same as the optional-method exception.
+    public func GetObjCInitException(): Option<ClassDecl> {
+        if (let Some(result) <- InteropLibBridge.objCInitExceptionDecl) { return result }
+        let result = GetObjCLangDecl<ClassDecl>(INTEROPLIB_OBJ_C_INIT_EXCEPTION, ASTKind.CLASS_DECL)
+        InteropLibBridge.objCInitExceptionDecl = Some(result)
         return result
     }
     public func GetObjCStaticMethodCallOnIntefaceExceptionDecl(): Option<ClassDecl> {

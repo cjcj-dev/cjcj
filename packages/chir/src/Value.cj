@@ -466,7 +466,7 @@ public class Block <: Value & Hashable & Equatable<Block> {
         }
     }
 
-    public func AppendTerminator(term: Terminator): Unit {
+    public func AppendTerminator(term: Expression): Unit {
         CJC_ASSERT(refEq(term.GetParentBlockGroup().getOrThrow(), GetParentBlockGroup().getOrThrow()))
         AppendExprOnly(term)
         term.SetParent(this)
@@ -519,11 +519,11 @@ public class Block <: Value & Hashable & Equatable<Block> {
         return out
     }
 
-    public func GetTerminator(): Option<Terminator> {
+    public func GetTerminator(): Option<Expression> {
         if (exprs.isEmpty()) {
             return None
         }
-        return exprs[exprs.size - 1] as Terminator
+        return exprs[exprs.size - 1].AsTerminator()
     }
 
     public func GetParentBlockGroup(): Option<BlockGroup> {
@@ -641,6 +641,7 @@ public class Block <: Value & Hashable & Equatable<Block> {
         }
         for (expr in exprs) {
             let newExpr = expr.Clone(builder, newBlock)
+            newBlock.AppendExpression(newExpr)
             newExpr.CopyBaseInfoFrom(expr)
             if (let Some(sourceResult) <- expr.GetResult()) {
                 if (let Some(clonedResult) <- newExpr.GetResult()) {

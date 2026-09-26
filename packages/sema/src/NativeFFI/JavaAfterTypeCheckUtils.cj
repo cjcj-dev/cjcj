@@ -2,6 +2,7 @@ package cjcj::sema.NativeFFI
 
 import cjcj::modules.SemaImportManager
 
+
 import std.collection.*
 import cjcj::ast.*
 import cjcj::ast.AnnotationKind as AstAnnotationKind
@@ -28,42 +29,31 @@ public class Utils {
     }
 
     public func GetOptionTy(ty: Ty): Ty {
-        return typeManager.GetEnumTy(GetOptionDecl(), typeArgs: [ty])
+        return FFIGetOptionTy(importManager, typeManager, ty)
     }
 
     public func GetOptionDecl(): EnumDecl {
-        return (importManager.GetCoreDecl<EnumDecl>(STD_LIB_OPTION).getOrThrow() as EnumDecl).getOrThrow()
+        return FFIGetOptionDecl(importManager)
     }
 
     private func GetOptionSomeDecl(): Decl {
-        return LookupEnumMember(GetOptionDecl(), OPTION_VALUE_CTOR).getOrThrow()
+        return FFIGetOptionSomeDecl(importManager)
     }
 
     private func GetOptionNoneDecl(): Decl {
-        return LookupEnumMember(GetOptionDecl(), OPTION_NONE_CTOR).getOrThrow()
+        return FFIGetOptionNoneDecl(importManager)
     }
 
     public func CreateOptionSomeRef(ty: Ty): Expr {
-        let someDeclRef = CreateRefExpr(GetOptionSomeDecl())
-        let optionActualTy = GetOptionTy(ty)
-        someDeclRef.SetTy(typeManager.GetFunctionTy([ty], optionActualTy))
-        return someDeclRef
+        return FFICreateOptionSomeRef(importManager, typeManager, ty)
     }
 
     public func CreateOptionNoneRef(ty: Ty): Expr {
-        let noneDeclRef = CreateRefExpr(GetOptionNoneDecl())
-        noneDeclRef.SetTy(GetOptionTy(ty))
-        return noneDeclRef
+        return FFICreateOptionNoneRef(importManager, typeManager, ty)
     }
 
     public func CreateOptionSomeCall(expr: Expr, ty: Ty): Expr {
-        let args = ArrayList<FuncArg>()
-        args.add(CreateFuncArg(expr))
-        let call = CreateCallExpr(CreateOptionSomeRef(ty), args)
-        call.SetTy(GetOptionTy(ty))
-        call.resolvedFunction = (GetOptionSomeDecl() as FuncDecl)
-        call.callKind = CallKind.CALL_DECLARED_FUNCTION
-        return call
+        return FFICreateOptionSomeCall(importManager, typeManager, expr, ty)
     }
 
     public func GetJObjectDecl(): Option<ClassLikeDecl> {
@@ -168,18 +158,12 @@ public class Utils {
                     jsig += GetParamJavaSignature(paramTy, fullPackageName)
                 }
                 jsig += ")" + GetParamJavaSignature(funcTy.retTy, fullPackageName)
-            case TypeKind.TYPE_TUPLE =>
-                jsig = "L" + NormalizeJavaSignature(pkg.fullPackageName + "." + GetCjMappingTupleName(cjtype)) + ";"
             case _ => CJC_ABORT()
         }
         return jsig
     }
 
     public func GetParamJavaSignature(ty: Ty, fullPackageName: String): String {
-        if (ty.kind == TypeKind.TYPE_FUNC) {
-            CJC_ASSERT(!fullPackageName.isEmpty())
-            return "L" + NormalizeJavaSignature(fullPackageName + "." + GetLambdaJavaClassName(ty)) + ";"
-        }
         return GetJavaTypeSignature(ty, fullPackageName: fullPackageName)
     }
 
@@ -233,9 +217,8 @@ public func GetJavaRefField(mirrorLike: ClassDecl): VarDecl {
         }
         return GetJavaRefField(superClass)
     }
-    CJC_ASSERT(mirrorLike.TestAttr(Attribute.JAVA_MIRROR) ||
-        mirrorLike.TestAttr(Attribute.CJ_MIRROR_JAVA_INTERFACE_FWD))
-    CJC_ASSERT(IsJObject(mirrorLike) || IsFwdClass(mirrorLike))
+    CJC_ASSERT(mirrorLike.TestAttr(Attribute.JAVA_MIRROR))
+    CJC_ASSERT(IsJObject(mirrorLike))
     let body = mirrorLike.body.getOrThrow()
     for (member in body.decls) {
         if (let Some(varDecl) <- (member as VarDecl)) {
@@ -279,16 +262,14 @@ public func GetJavaRefGetter(mirror: ClassLikeDecl): FuncDecl {
 
 public func CreateJavaRefCall(mirrorLike: ClassLikeDecl, javaRefGetter: FuncDecl,
     curFile: Option<File>): Expr {
-    CJC_ASSERT(mirrorLike.TestAnyAttr(Attribute.JAVA_MIRROR, Attribute.JAVA_MIRROR_SUBTYPE,
-        Attribute.CJ_MIRROR_JAVA_INTERFACE_FWD))
+    CJC_ASSERT(mirrorLike.TestAnyAttr(Attribute.JAVA_MIRROR, Attribute.JAVA_MIRROR_SUBTYPE))
     return CreateJavaRefCall(CreateThisRef(Some(mirrorLike), mirrorLike.GetTy(), curFile), javaRefGetter)
 }
 
 public func CreateJavaRefCall(mirrorLike: ClassLikeDecl, javaref: VarDecl,
     curFile: Option<File>): Expr {
     CJC_ASSERT((mirrorLike as ClassDecl).isSome())
-    CJC_ASSERT(mirrorLike.TestAnyAttr(Attribute.JAVA_MIRROR, Attribute.JAVA_MIRROR_SUBTYPE,
-        Attribute.CJ_MIRROR_JAVA_INTERFACE_FWD))
+    CJC_ASSERT(mirrorLike.TestAnyAttr(Attribute.JAVA_MIRROR, Attribute.JAVA_MIRROR_SUBTYPE))
     return CreateJavaRefCall(CreateThisRef(Some(mirrorLike), mirrorLike.GetTy(), curFile), javaref)
 }
 
@@ -308,14 +289,12 @@ public func CreateJavaRefCall(expr: Expr, javaref: VarDecl): Expr {
     let exprTy = expr.GetTy().getOrThrow()
     CJC_ASSERT(exprTy.IsClassLike())
     let commonDecl = (exprTy as ClassLikeTy).getOrThrow().commonDecl.getOrThrow()
-    CJC_ASSERT(commonDecl.TestAnyAttr(Attribute.JAVA_MIRROR, Attribute.JAVA_MIRROR_SUBTYPE,
-        Attribute.CJ_MIRROR_JAVA_INTERFACE_FWD))
+    CJC_ASSERT(commonDecl.TestAnyAttr(Attribute.JAVA_MIRROR, Attribute.JAVA_MIRROR_SUBTYPE))
     return WithinFile<MemberAccess>(CreateMemberAccess(expr, javaref), expr.curFile.getOrThrow())
 }
 
 public func CreateJavaRefCall(expr: Expr, mirrorLike: ClassLikeDecl): Expr {
-    CJC_ASSERT(mirrorLike.TestAnyAttr(Attribute.JAVA_MIRROR, Attribute.JAVA_MIRROR_SUBTYPE,
-        Attribute.CJ_MIRROR_JAVA_INTERFACE_FWD))
+    CJC_ASSERT(mirrorLike.TestAnyAttr(Attribute.JAVA_MIRROR, Attribute.JAVA_MIRROR_SUBTYPE))
     if (let Some(mirrorClass) <- (mirrorLike as ClassDecl)) {
         return CreateJavaRefCall(expr, GetJavaRefField(mirrorClass))
     }
@@ -453,18 +432,13 @@ public func GetJavaFQNameFromExtendDecl(extendDecl: ExtendDecl): String {
     return GetJavaFQName(refType.ref.target.getOrThrow())
 }
 
-public func GetJavaFQName(decl: Decl, genericActualName!: Option<String> = None): String {
+public func GetJavaFQName(decl: Decl): String {
     if (let Some(extendDecl) <- (decl as ExtendDecl)) {
         return GetJavaFQNameFromExtendDecl(extendDecl)
     }
     if (let Some(classLikeDecl) <- (decl as ClassLikeDecl)) {
         if (let Some(attr) <- GetJavaMirrorAnnoAttr(classLikeDecl)) {
             return GetFQNameJoinBy(attr, "$")
-        }
-    }
-    if (let Some(actualName) <- genericActualName) {
-        if (!actualName.isEmpty()) {
-            return decl.GetFullPackageName() + "." + actualName
         }
     }
     return decl.GetFullPackageName() + "." + decl.identifier.Val()

@@ -261,7 +261,7 @@ test('source-build workflow connects every native runner to its LLVM and std art
   assert.ok(order.every(index => index >= 0));
   assert.deepEqual([...order].sort((a, b) => a - b), order);
 
-  for (const payload of ['llc.gz', 'opt.gz', 'llvm-tools.manifest', 'cjselfhost_llvmshim.o']) {
+  for (const payload of ['llc.gz', 'opt.gz', 'ld.lld', 'ld64.lld', 'llvm-tools.manifest', 'cjselfhost_llvmshim.o']) {
     assert.ok(fixed.includes(payload), payload);
   }
 });

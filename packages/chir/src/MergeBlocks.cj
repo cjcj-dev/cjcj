@@ -22,6 +22,7 @@ private func CopyBlock(builder: CHIRBuilder, block: Block): Block {
     while (idx < exprs.size) {
         let expr = exprs[idx]
         let cloned = expr.Clone(builder, copiedBlock)
+        copiedBlock.AppendExpression(cloned)
         for ((oldValue, newValue) in replaceTable) {
             cloned.ReplaceOperand(oldValue, newValue)
         }
@@ -169,7 +170,7 @@ public class MergeBlocks {
             return false
         }
         if (let Some(term) <- block.GetTerminator()) {
-            if (term.GetExprKind() != ExprKind.GOTO || term.GetSuccessorsRef().size != 1) {
+            if (term.GetExprKind() != ExprKind.GOTO || term.GetSuccessors().size != 1) {
                 return false
             }
             for (pred in block.GetPredecessorsRef()) {
@@ -211,7 +212,7 @@ public class MergeBlocks {
     }
 
     private func SkipMergeBlock(block: Block, enableCompileDebug: Bool): Bool {
-        if (block.TestAttr(Attribute.UNREACHABLE)) {
+        if (block.TestAttr(Attribute.UNREACHABLE) || block.TestAttr(Attribute.MATCH_PATTERN)) {
             return true
         }
         if (!enableCompileDebug) {

@@ -4,8 +4,7 @@ import std.collection.*
 import cjcj::ast.*
 import cjcj::basic.Warningln
 import cjcj::sema.TypeManager
-import cjcj::sema.NativeFFI.{GenericConfigInfo, GetActualTypeKind, GetCangjieLibName,
-    GetForeignNameAnnotation, GetGenericActualType}
+import cjcj::sema.NativeFFI.{GetCangjieLibName, GetForeignNameAnnotation}
 import cjcj::utils.{CJC_ASSERT, FileUtil, OBJECT_NAME}
 
 // C++ src/Sema/NativeFFI/ObjC/ObjCCodeTranspiler/Transpiler.h:32-116 and
@@ -34,36 +33,14 @@ public class Transpiler {
     private let cjLibOutputPath: String
     private let decl: Decl
     private let ctx: InteropContext
-    private let interopType: InteropType
-    private let genericConfig: Option<GenericConfigInfo>
-    private let isGenericGlueCode: Bool
 
     // C++ Transpiler.cpp:30-43.
     public init(ctx: InteropContext, declArg: Decl, outputFilePath: String,
-        cjLibOutputPath: String, interopType: InteropType) {
+        cjLibOutputPath: String) {
         this.ctx = ctx
         this.decl = declArg
         this.outputFilePath = if (outputFilePath.isEmpty()) { DEFAULT_OUTPUT_DIR } else { outputFilePath }
         this.cjLibOutputPath = cjLibOutputPath
-        this.interopType = interopType
-        this.genericConfig = None
-        this.isGenericGlueCode = false
-        if (outputFilePath.isEmpty()) {
-            Warningln(DEFAULT_OUTPUT_DIR_WARNING)
-        }
-    }
-
-    // C++ Transpiler.cpp:45-61.
-    public init(ctx: InteropContext, declArg: Decl, outputFilePath: String,
-        cjLibOutputPath: String, interopType: InteropType, genericConfig: GenericConfigInfo,
-        isGenericGlueCode: Bool) {
-        this.ctx = ctx
-        this.decl = declArg
-        this.outputFilePath = if (outputFilePath.isEmpty()) { DEFAULT_OUTPUT_DIR } else { outputFilePath }
-        this.cjLibOutputPath = cjLibOutputPath
-        this.interopType = interopType
-        this.genericConfig = Some(genericConfig)
-        this.isGenericGlueCode = isGenericGlueCode
         if (outputFilePath.isEmpty()) {
             Warningln(DEFAULT_OUTPUT_DIR_WARNING)
         }
@@ -71,18 +48,10 @@ public class Transpiler {
 
     // C++ Transpiler.cpp:63-84.
     private func CheckFunction(arg: Decl): Bool {
-        if (ctx.factory.IsGeneratedMember(arg)) {
+        if (IsGeneratedMember(arg)) {
             return false
         }
         if (!arg.TestAttr(Attribute.PUBLIC)) {
-            return false
-        }
-        if (let InteropType.CJ_Mapping <- interopType) {
-            if (!TypeMapper.IsObjCCJMappingMember(arg) || arg.IsOpen()) {
-                return false
-            }
-        }
-        if (IsNotThisActualTyFunc(arg)) {
             return false
         }
         if (arg.astKind == ASTKind.FUNC_DECL &&
@@ -97,7 +66,7 @@ public class Transpiler {
         if (!arg.TestAttr(Attribute.PUBLIC)) {
             return false
         }
-        if (ctx.factory.IsGeneratedMember(arg)) {
+        if (IsGeneratedMember(arg)) {
             return false
         }
         if (!arg.TestAttr(Attribute.CONSTRUCTOR)) {
@@ -109,11 +78,6 @@ public class Transpiler {
         let funcDecl = (arg as FuncDecl).getOrThrow()
         if (let None <- funcDecl.funcBody) {
             return false
-        }
-        if (let InteropType.CJ_Mapping <- interopType) {
-            if (!TypeMapper.IsObjCCJMappingMember(arg)) {
-                return false
-            }
         }
         return true
     }
@@ -129,23 +93,18 @@ public class Transpiler {
         if (ctx.factory.IsGeneratedNativeHandleField(arg)) {
             return false
         }
-        if (let InteropType.CJ_Mapping <- interopType) {
-            if (!TypeMapper.IsObjCCJMappingMember(arg)) {
-                return false
-            }
-        }
         return true
     }
 
     // C++ Transpiler.cpp:144-163.
     private func CollectDependencies(ty: Ty): Unit {
-        if (TypeMapper.IsObjCObjectType(ty)) {
-            if (TypeMapper.IsObjCId(ty)) {
+        if (IsObjCObjectType(ty)) {
+            if (IsObjCId(ty)) {
                 return
             }
             if (!ty.IsCoreOptionType()) {
                 let declTy = Ty.GetDeclOfTy(Some(ty)).getOrThrow()
-                if (declTy.identifier.Val() != ctx.nameGenerator.GetObjCDeclName(decl)) {
+                if (declTy.identifier.Val() != NameGenerator.GetObjCDeclName(decl)) {
                     dependencies.add(declTy)
                 }
             }
@@ -227,9 +186,7 @@ public class Transpiler {
                                 Emitter.EmitObjCFuncInitialization(funcInitialization, funcMeta)
                                 Emitter.EmitObjCFuncHeaderFunctionDecl(headerBody, funcMeta)
                                 CollectDependencies(funcDecl.GetTy().getOrThrow())
-                                if (let InteropType.ObjC_Mirror <- interopType) {
-                                    generatedCtors.add(funcMeta.selectorComponents)
-                                }
+                                generatedCtors.add(funcMeta.selectorComponents)
                             }
                         }
                     }
@@ -272,9 +229,6 @@ public class Transpiler {
                 declPtr.TestAttr(Attribute.FOREIGN)) {
                 continue
             }
-            if (IsNotThisActualTyFunc(declPtr)) {
-                continue
-            }
             if (declPtr.astKind == ASTKind.FUNC_DECL && CheckFunction(declPtr)) {
                 Emitter.EmitObjCFuncStaticReference(staticReferences,
                     GetObjCFuncMetainfo((declPtr as FuncDecl).getOrThrow(), mangled: true))
@@ -282,7 +236,7 @@ public class Transpiler {
         }
 
         for (dependency in dependencies) {
-            let identifier = ctx.nameGenerator.GetObjCDeclName(dependency)
+            let identifier = NameGenerator.GetObjCDeclName(dependency)
             if (dependency.astKind == ASTKind.INTERFACE_DECL) {
                 Emitter.EmitForwardDeclarationProtocol(dependenciesStream, identifier)
             } else {
@@ -294,14 +248,13 @@ public class Transpiler {
             Emitter.EmitTypedef(headerImport, typedef)
         }
 
-        if (let InteropType.ObjC_Mirror <- interopType) {
-            if (let Some(concreteClassDecl) <- classDecl) {
+        if (let Some(concreteClassDecl) <- classDecl) {
                 let ctorsToGenerate = ctx.factory.GetAllParentCtors(concreteClassDecl)
                 for (ctor in ctorsToGenerate) {
                     if (!ctor.TestAttr(Attribute.PUBLIC) && ctor.outerDecl != Some(decl)) {
                         continue
                     }
-                    if (ctx.factory.IsGeneratedMember(ctor)) {
+                    if (IsGeneratedMember(ctor)) {
                         continue
                     }
                     let funcBody = ctor.funcBody.getOrThrow()
@@ -320,7 +273,6 @@ public class Transpiler {
                     generatedCtors.add(selectorComponents)
                 }
             }
-        }
     }
 
     // C++ Transpiler.cpp:368-383.
@@ -337,19 +289,9 @@ public class Transpiler {
     }
 
     // C++ Transpiler.cpp:386-396.
-    private func IsNotThisActualTyFunc(declPtr: Decl): Bool {
-        if (let Some(config) <- genericConfig) {
-            if (!declPtr.identifier.Val().contains(config.declInstName)) {
-                return true
-            }
-        }
-        return false
-    }
-
-    // C++ Transpiler.cpp:399-432.
     private func GetObjCClassMetainfo(classDecl: Option<ClassDecl>): EmittableObjCClassMetainfo {
         let concreteClassDecl = classDecl.getOrThrow()
-        let className = ctx.nameGenerator.GetObjCDeclName(concreteClassDecl)
+        let className = NameGenerator.GetObjCDeclName(concreteClassDecl)
         let superClassPtr = concreteClassDecl.GetSuperClassDecl()
         let isClassInheritedFromClass = if (let Some(superClass) <- superClassPtr) {
             superClass.identifier.Val() != OBJECT_NAME
@@ -357,19 +299,15 @@ public class Transpiler {
             false
         }
         let superclassName = if (isClassInheritedFromClass) {
-            ctx.nameGenerator.GetObjCDeclName(superClassPtr.getOrThrow())
+            NameGenerator.GetObjCDeclName(superClassPtr.getOrThrow())
         } else {
             ""
         }
-        let isFinal = if (let InteropType.CJ_Mapping <- interopType) {
-            TypeMapper.IsOneWayMapping(decl) && !decl.IsOpen()
-        } else {
-            false
-        }
+        let isFinal = !decl.IsOpen()
         let interfaceNames = ArrayList<String>()
         for (interfaceTy in concreteClassDecl.GetSuperInterfaceTys()) {
-            if (!TypeMapper.IsObjCId(interfaceTy)) {
-                interfaceNames.add(ctx.nameGenerator.GetObjCDeclName(interfaceTy.decl.getOrThrow()))
+            if (!IsObjCId(interfaceTy)) {
+                interfaceNames.add(NameGenerator.GetObjCDeclName(interfaceTy.decl.getOrThrow()))
             }
         }
         var result = EmittableObjCClassMetainfo()
@@ -381,30 +319,14 @@ public class Transpiler {
     }
 
     // C++ Transpiler.cpp:434-437.
-    private func SkipSetterForValueTypeDecl(declArg: Decl): Bool {
-        if (let InteropType.CJ_Mapping <- interopType) {
-            return declArg.GetTy().getOrThrow() is StructTy
-        }
-        return false
-    }
-
-    // C++ Transpiler.cpp:439-468.
     private func GetObjCPropMetainfoFromProp(varDecl: VarDeclAbstract): EmittableObjCPropMetainfo {
         var result = EmittableObjCPropMetainfo()
         result.isStatic = varDecl.TestAttr(Attribute.STATIC)
-        if (isGenericGlueCode && varDecl.GetTy().getOrThrow().IsGeneric()) {
-            let config = genericConfig.getOrThrow()
-            let genericActualTy = TypeManager.GetPrimitiveTy(
-                GetActualTypeKind(GetGenericActualType(config, varDecl.GetTy().getOrThrow().name)))
-            result.`type` = ObjCParamMapper.MapCJTypeToObjCType(typedefs, genericActualTy)
-        } else {
-            result.`type` = ObjCParamMapper.MapCJTypeToObjCType(typedefs, varDecl.GetTy().getOrThrow())
-        }
-        result.isReadwrite = varDecl.isVar && !SkipSetterForValueTypeDecl(decl)
-        result.name = ctx.nameGenerator.GetObjCDeclName(varDecl)
+        result.`type` = ObjCParamMapper.MapCJTypeToObjCType(typedefs, varDecl.GetTy().getOrThrow())
+        result.isReadwrite = varDecl.isVar
+        result.name = NameGenerator.GetObjCDeclName(varDecl)
         let varTy = varDecl.GetTy().getOrThrow()
-        let bridge = (TypeMapper.IsObjCObjectType(varTy) || TypeMapper.IsObjCBlock(varTy)) &&
-            !TypeMapper.IsObjCCJMapping(varTy)
+        let bridge = IsObjCObjectType(varTy) || IsObjCBlock(varTy)
         result.getter = ObjCParamMapper.GetGetterForProp(result, ctx.nameGenerator.GetObjCGetterName(varDecl),
             ctx.nameGenerator.GetFieldGetterWrapperName((varDecl as VarDecl).getOrThrow()), bridge)
         if (result.isReadwrite) {
@@ -445,27 +367,18 @@ public class Transpiler {
             {param: FuncParam => param.identifier.Val()}, sep: ", ", pre: ", ", suf: "", force: false)
         result.convertedParams = ObjCParamMapper.ConvertParamsListToArgsListToString(funcBody.paramLists,
             !result.isStatic)
-        result.bridge = (TypeMapper.IsObjCObjectType(retTy) || TypeMapper.IsObjCBlock(retTy)) &&
-            !TypeMapper.IsObjCCJMapping(retTy)
+        result.bridge = IsObjCObjectType(retTy) || IsObjCBlock(retTy)
         return result
     }
 
     // C++ Transpiler.cpp:507-541.
     private func GetObjCCtorMetainfo(funcDecl: FuncDecl): EmittableObjCFuncMetainfo {
         var result = EmittableObjCFuncMetainfo()
-        let ctor = if (let InteropType.ObjC_Mirror <- interopType) {
-            ctx.factory.GetGeneratedImplCtor(decl, funcDecl).getOrThrow()
-        } else {
-            funcDecl
-        }
+        let ctor = GetObjCImplRegDataCtor((decl as ClassDecl).getOrThrow(), funcDecl).getOrThrow()
         let selectorComponents = ctx.nameGenerator.GetObjCDeclSelectorComponents(funcDecl)
         CJC_ASSERT(!selectorComponents.isEmpty())
-        let cjWrapperName = if (let Some(config) <- genericConfig) {
-            ctx.nameGenerator.GenerateInitCjObjectName(ctor, genericActualName: Some(config.declInstName))
-        } else {
-            ctx.nameGenerator.GenerateInitCjObjectName(ctor)
-        }
-        result.isStatic = ctor.TestAttr(Attribute.STATIC)
+        let cjWrapperName = ctx.nameGenerator.GenerateInitCjObjectName(ctor)
+        result.isStatic = funcDecl.TestAttr(Attribute.STATIC)
         result.selectorComponents = selectorComponents
         result.mangledIdentifier = cjWrapperName
         result.identifier = selectorComponents[0]
@@ -488,28 +401,20 @@ public class Transpiler {
 
     // C++ Transpiler.cpp:543-559.
     private func WriteToFile(): Unit {
-        WriteToHeader(headerImport.toString() + dependenciesStream.toString() + headerBody.toString() + Emitter.END)
-        WriteToSource(sourceImport.toString() + staticReferences.toString() + sourceBody.toString() +
+        WriteToHeader(Emitter.GENERATED_FILE_PREAMBULE + headerImport.toString() + dependenciesStream.toString() + headerBody.toString() + Emitter.END)
+        WriteToSource(Emitter.GENERATED_FILE_PREAMBULE + sourceImport.toString() + staticReferences.toString() + sourceBody.toString() +
             ctors.toString() + initialize.toString() + defaultFuncImpls.toString() + Emitter.END)
     }
 
     // C++ Transpiler.cpp:561-567.
     private func WriteToHeader(content: String): Unit {
-        let objCDeclName = if (let Some(config) <- genericConfig) {
-            ctx.nameGenerator.GetObjCDeclName(decl, genericActualName: Some(config.declInstName))
-        } else {
-            ctx.nameGenerator.GetObjCDeclName(decl)
-        }
+        let objCDeclName = NameGenerator.GetObjCDeclName(decl)
         FileUtil.WriteToFile(FileUtil.JoinPath(outputFilePath, objCDeclName + ".h"), content)
     }
 
     // C++ Transpiler.cpp:569-575.
     private func WriteToSource(content: String): Unit {
-        let objCDeclName = if (let Some(config) <- genericConfig) {
-            ctx.nameGenerator.GetObjCDeclName(decl, genericActualName: Some(config.declInstName))
-        } else {
-            ctx.nameGenerator.GetObjCDeclName(decl)
-        }
+        let objCDeclName = NameGenerator.GetObjCDeclName(decl)
         FileUtil.WriteToFile(FileUtil.JoinPath(outputFilePath, objCDeclName + ".m"), content)
     }
 }

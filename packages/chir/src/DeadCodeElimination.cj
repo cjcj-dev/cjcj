@@ -24,7 +24,7 @@ private func AllUsersIsExprKind(users: ArrayList<Expression>, kind: ExprKind): B
         }
         var hasNothingOperand = false
         var index: Int64 = 0
-        while (index < user.GetNumOfOperands()) {
+        while (index < user.GetNumOfNonSuccessorOperands()) {
             if (user.GetOperand(index).GetType().getOrThrow().IsNothing()) {
                 hasNothingOperand = true
                 break
@@ -144,7 +144,7 @@ public class DeadCodeElimination {
                 workIdx++
                 workListSet.remove(expr.nodeId)
 
-                let operands = expr.GetOperands()
+                let operands = expr.GetNonSuccessorOperands()
                 expr.RemoveSelfFromBlock()
                 removed++
 
@@ -407,9 +407,10 @@ public class DeadCodeElimination {
                 if (expr.GetExprKind() == ExprKind.LAMBDA) {
                     DiagUnusedCode(res, DiagKindRefactor.chir_dce_unused_function,
                         (expr as Lambda).getOrThrow().GetSrcCodeIdentifier())
-                } else if (expr.IsUnaryExpr() || expr.IsBinaryExpr() || expr.IsIntOpWithException()) {
-                    let kind = if (expr.GetExprKind() == ExprKind.INT_OP_WITH_EXCEPTION) {
-                        GetLiteralFromExprKind((expr as IntOpWithException).getOrThrow().GetOpKind())
+                } else if (expr.IsUnaryExpr() || expr.IsBinaryExpr() || expr.IsTryUnaryExpression() ||
+                    expr.IsTryBinaryExpression()) {
+                    let kind = if (expr.IsTryUnaryExpression() || expr.IsTryBinaryExpression()) {
+                        GetLiteralFromExprKind(PlainExprKind(expr.GetExprKind()))
                     } else {
                         GetLiteralFromExprKind(expr.GetExprKind())
                     }
@@ -543,7 +544,7 @@ public class DeadCodeElimination {
     }
 
     public func UnreachableBlockWarningReporter(pkg: Package, threadsNum: Int64,
-        maybeUnreachableBlocks: HashMap<Block, Terminator>): Unit {
+        maybeUnreachableBlocks: HashMap<Block, Expression>): Unit {
         if (threadsNum == 1) {
             UnreachableBlockWarningReporterInSerial(pkg, maybeUnreachableBlocks)
         } else {
@@ -552,7 +553,7 @@ public class DeadCodeElimination {
     }
 
     private func UnreachableBlockWarningReporterInSerial(pkg: Package,
-        maybeUnreachableBlocks: HashMap<Block, Terminator>): Unit {
+        maybeUnreachableBlocks: HashMap<Block, Expression>): Unit {
         for (fn in pkg.GetGlobalFunctionsRef()) {
             if (fn.GetBody().isNone()) {
                 continue
@@ -570,7 +571,7 @@ public class DeadCodeElimination {
     }
 
     private func UnreachableBlockWarningReporterInParallel(pkg: Package, threadsNum: Int64,
-        maybeUnreachableBlocks: HashMap<Block, Terminator>): Unit {
+        maybeUnreachableBlocks: HashMap<Block, Expression>): Unit {
         let taskQueue = TaskQueue(threadsNum)
         for (fn in pkg.GetGlobalFunctionsRef()) {
             if (fn.GetBody().isNone() || fn.TestAttr(Attribute.SKIP_ANALYSIS)) {
@@ -632,7 +633,8 @@ public class DeadCodeElimination {
                     let expr = (cond as LocalVar).getOrThrow().GetExpr().getOrThrow()
                     expr.RemoveSelfFromBlock()
                 }
-                builder.CreateGoTo(target, block)
+                let createdGoTo635 = builder.CreateGoTo(target, block)
+                block.AppendExpression(createdGoTo635)
             }
 
             let updatedTerminator = block.GetTerminator().getOrThrow()
@@ -692,15 +694,15 @@ public class DeadCodeElimination {
                                 continue
                             } else {
                                 match (expr.GetExprKind()) {
-                                    case ExprKind.APPLY_WITH_EXCEPTION =>
+                                    case ExprKind.TRY_APPLY =>
                                         HandleNothingTerminator(builder,
-                                            (expr as ApplyWithException).getOrThrow(), funcBody)
-                                    case ExprKind.INVOKE_WITH_EXCEPTION =>
+                                            (expr as TryApply).getOrThrow(), funcBody)
+                                    case ExprKind.TRY_INVOKE =>
                                         HandleNothingTerminator(builder,
-                                            (expr as InvokeWithException).getOrThrow(), funcBody)
-                                    case ExprKind.INVOKESTATIC_WITH_EXCEPTION =>
+                                            (expr as TryInvoke).getOrThrow(), funcBody)
+                                    case ExprKind.TRY_INVOKESTATIC =>
                                         HandleNothingTerminator(builder,
-                                            (expr as InvokeStaticWithException).getOrThrow(), funcBody)
+                                            (expr as TryInvokeStatic).getOrThrow(), funcBody)
                                     case _ =>
                                         CJC_ABORT()
                                         return
@@ -716,7 +718,8 @@ public class DeadCodeElimination {
             }
             if (isNothingIr) {
                 CreateNullReturnValue(builder, block, funcBody)
-                builder.CreateExit(None, block)
+                let createdExit719 = builder.CreateExit(None, block)
+                block.AppendExpression(createdExit719)
             }
         }
     }
@@ -732,10 +735,10 @@ public class DeadCodeElimination {
             let posForWarning = expression.GetDebugLocationInfoForWarning()
             let warningRange = ToRangeIfNotZero(posForWarning)
             if (warningRange[0]) {
-                if (expression.IsBinaryExpr() || expression.IsIntOpWithException()) {
+                if (expression.IsBinaryExpr() || expression.IsTryBinaryExpression()) {
                     var hasNothingOperand = false
                     var index: Int64 = 0
-                    while (index < expression.GetNumOfOperands()) {
+                    while (index < expression.GetNumOfNonSuccessorOperands()) {
                         if (expression.GetOperand(index).GetType().getOrThrow().IsNothing()) {
                             hasNothingOperand = true
                             break
@@ -761,7 +764,7 @@ public class DeadCodeElimination {
         return (None, isNormal)
     }
 
-    private func PrintUnreachableBlockWarning(block: Block, terminator: Terminator,
+    private func PrintUnreachableBlockWarning(block: Block, terminator: Expression,
         isPrinted: CoreBox<Bool>): Unit {
         let terminalNodeRange = ToRangeIfNotZero(terminator.GetDebugLocation())
         if (terminalNodeRange[0] && !isPrinted.value) {
@@ -817,7 +820,8 @@ public class DeadCodeElimination {
                 return false
             }
         }
-        if (expr.GetExprKind() == ExprKind.INT_OP_WITH_EXCEPTION && expr.GetNeverOverflowInfo() && isReportWarning) {
+        if ((expr.IsTryUnaryExpression() || expr.IsTryBinaryExpression()) &&
+            expr.GetNeverOverflowInfo() && isReportWarning) {
             return true
         }
         if (expr.IsTerminator()) {
@@ -867,7 +871,8 @@ public class DeadCodeElimination {
                     let expr = (oprand as LocalVar).getOrThrow().GetExpr().getOrThrow()
                     expr.RemoveSelfFromBlock()
                 }
-                builder.CreateGoTo(target, pred)
+                let createdGoTo870 = builder.CreateGoTo(target, pred)
+                pred.AppendExpression(createdGoTo870)
             } else {
                 let multi = (predTerminator as MultiBranch).getOrThrow()
                 if (block.nodeId != multi.GetDefaultBlock().nodeId) {
@@ -914,7 +919,9 @@ private func CreateNullReturnValue(builder: CHIRBuilder, parent: Block, funcBody
     if (let Some(retVal) <- GetReturnValue(funcBody)) {
         let retValTy = GetFuncType(funcBody).getOrThrow().GetReturnType()
         let nullExpr = builder.CreateConstant(retValTy, NullLiteral(), parent)
-        builder.CreateStore(nullExpr.GetResult().getOrThrow(), retVal, parent)
+        parent.AppendExpression(nullExpr)
+        let createdStore917 = builder.CreateStore(nullExpr.GetResult().getOrThrow(), retVal, parent)
+        parent.AppendExpression(createdStore917)
     }
 }
 
@@ -946,7 +953,8 @@ private func HandleFuncWithNothingParamter(builder: CHIRBuilder, funcBody: Block
             expr.RemoveSelfFromBlock()
         }
         CreateNullReturnValue(builder, entry, funcBody)
-        builder.CreateExit(None, entry)
+        let createdExit949 = builder.CreateExit(None, entry)
+        entry.AppendExpression(createdExit949)
         if (let Some(fn) <- param.GetTopLevelFunc()) {
             fn.SetSkipCheck(SkipKind.SKIP_VIC)
         }
@@ -957,12 +965,13 @@ private func HandleFuncWithNothingParamter(builder: CHIRBuilder, funcBody: Block
 
 private func HandleNothingTerminator(builder: CHIRBuilder, expr: ExpressionWithException,
     funcBody: BlockGroup): Unit {
-    CJC_ASSERT(expr.GetExprKind() == ExprKind.APPLY_WITH_EXCEPTION ||
-        expr.GetExprKind() == ExprKind.INVOKE_WITH_EXCEPTION ||
-        expr.GetExprKind() == ExprKind.INVOKESTATIC_WITH_EXCEPTION)
+    CJC_ASSERT(expr.GetExprKind() == ExprKind.TRY_APPLY ||
+        expr.GetExprKind() == ExprKind.TRY_INVOKE ||
+        expr.GetExprKind() == ExprKind.TRY_INVOKESTATIC)
     let newSuccessBlock = builder.CreateBlock(funcBody)
     CreateNullReturnValue(builder, newSuccessBlock, funcBody)
-    builder.CreateExit(None, newSuccessBlock)
+    let createdExit965 = builder.CreateExit(None, newSuccessBlock)
+    newSuccessBlock.AppendExpression(createdExit965)
 
     let oldSuccessBlock = expr.GetSuccessBlock()
     expr.ReplaceSuccessor(oldSuccessBlock, newSuccessBlock)
@@ -1060,7 +1069,7 @@ private func GetMultiBranchTargetSucc(branch: MultiBranch): Option<Block> {
         return None
     }
     var condExpr = (branch.GetCondition() as LocalVar).getOrThrow().GetExpr().getOrThrow()
-    if (condExpr.GetExprKind() == ExprKind.TYPECAST) {
+    if (condExpr.GetExprKind() == ExprKind.NUMERIC_CAST || condExpr.GetExprKind() == ExprKind.CLASS_STATIC_CAST) {
         if (!condExpr.GetOperand(0).IsLocalVar()) {
             return None
         }

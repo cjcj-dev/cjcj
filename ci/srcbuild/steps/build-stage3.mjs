@@ -3,6 +3,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import {fileURLToPath} from 'node:url';
 import {writeStdProvenance} from '../../../build/lib/provenance.mjs';
 import {countSdkLoadBadMask, readRuntimeSymbols} from '../../../build/lib/runtime-split.mjs';
 import {getTarget} from '../../../build/lib/targets.mjs';
@@ -91,16 +92,21 @@ async function assertWriteBarriersWith(sdkRoot, coreLib, targetSpec) {
 
 async function assertStdBarriers(coreLib) {
   const symbolTable = await $({stdio: 'pipe'})`nm -A ${coreLib}`;
-  const hasMask = symbolTable.stdout.includes('g_cjLoadBadMask');
+  const colourCheck = fileURLToPath(new URL('../../bootstrap/std_runtime_colour.py', import.meta.url));
+  const hostRuntime = path.join(path.resolve(requiredEnv('CJCJ_BOOTSTRAP_HOST_RT')),
+    'runtime', 'lib', tuple, target.spec.runtimeLibrary);
+  const colour = await $({stdio: 'pipe'})`python3 ${colourCheck} --colour-runtime ${runtime} --host-runtime ${hostRuntime} --std-colour ${coreLib}`;
+  process.stderr.write(colour.stderr);
+  const hasColour = colour.stdout.trim() === '1';
   const hasReadBarrier = /CJ_MCC_Read(?:StaticRef|RefField)/.test(symbolTable.stdout);
-  if (!hasMask || !hasReadBarrier) {
-    throw new Error(`final std barrier symbol assertion failed: mask=${hasMask} read_barrier=${hasReadBarrier}`);
+  if (!hasColour || !hasReadBarrier) {
+    throw new Error(`final std barrier symbol assertion failed: colour=${hasColour} read_barrier=${hasReadBarrier}`);
   }
   if (target.spec.os !== 'linux' || target.spec.arch !== 'x86_64') {
     // The existing instruction-shape probe is x86-specific. On native AArch64
     // and Mach-O, require both exact runtime references instead of pretending
     // the x86 shr/relocation syntax applies.
-    console.log(`STAGE3_BARRIER_SYMBOL_ASSERT_PASS target=${target.spec.key} mask=1 read_barrier=1`);
+    console.log(`STAGE3_BARRIER_SYMBOL_ASSERT_PASS target=${target.spec.key} colour=1 read_barrier=1`);
     // Deliberate, and on stderr so it does not sit in the stream of green lines.
     // The disassembler is no longer the reason: llvm-objdump reads aarch64 and
     // Mach-O, and the write-side analyser now runs off it. What is still missing

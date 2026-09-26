@@ -35,8 +35,120 @@ public class PrivateTypeConverterTest {
         let invokeResult = LocalVar(context.GetInt64Ty(), "%invoke", Some(invoke))
         converter.VisitExpr(invoke)
         @Expect(invoke.GetCallee() == method, true)
-        @Expect(invoke.GetMethodType().GetParamType(0).IsInteger(), true)
-        @Expect(invoke.GetMethodType().GetReturnType().IsInteger(), true)
+        // The referenced declaration and the dispatch signature are independent observations.
+        @Expect(invoke.GetCallee().GetFuncType().getOrThrow().GetParamType(0) == context.GetInt64Ty(), true)
+        @Expect(invoke.GetCallee().GetFuncType().getOrThrow().GetReturnType() == context.GetInt64Ty(), true)
+        @Expect(invoke.GetMethodType().GetParamType(0) == context.GetInt64Ty(), true)
+        @Expect(invoke.GetMethodType().GetReturnType() == context.GetInt64Ty(), true)
+        @Expect(invoke.GetThisType().getOrThrow().IsBoolean(), true)
+        @Expect(invoke.GetInstantiatedTypeArgs()[0].IsBoolean(), true)
+        @Expect(invokeResult.GetType().getOrThrow().IsBoolean(), true)
+    }
+
+    @TestCase
+    public func VisitInvokeStatic(): Unit {
+        let context = CHIRContext()
+        let builder = CHIRBuilder(context)
+        let converter = PrivateTypeConverter({ ty: Type =>
+            if (ty.GetTypeKind() == TypeKind.TYPE_INT64) {
+                return context.GetBoolTy()
+            }
+            return ty
+        }, builder)
+
+        let methodParamTys = ArrayList<Type>([context.GetInt64Ty()])
+        let methodType = context.GetFuncTy(methodParamTys, context.GetInt64Ty())
+        let instantiatedTypeArgs = ArrayList<Type>([context.GetInt64Ty()])
+        let funcCallContext = FuncCallContext(instTypeArgs: instantiatedTypeArgs,
+            thisType: Some(context.GetInt64Ty()))
+        let object = LocalVar(context.GetInt64Ty(), "%object", None)
+        let method = Function(methodType, "$method", "method", "", "test")
+        let invokeContext = InvokeCallContext(method, object, funcCallContext)
+        let invoke = InvokeStatic(invokeContext, None)
+        let invokeResult = LocalVar(context.GetInt64Ty(), "%invoke", Some(invoke))
+        converter.VisitExpr(invoke)
+        @Expect(invoke.GetCallee() == method, true)
+        // The referenced declaration and the dispatch signature are independent observations.
+        @Expect(invoke.GetCallee().GetFuncType().getOrThrow().GetParamType(0) == context.GetInt64Ty(), true)
+        @Expect(invoke.GetCallee().GetFuncType().getOrThrow().GetReturnType() == context.GetInt64Ty(), true)
+        @Expect(invoke.GetMethodType().GetParamType(0) == context.GetInt64Ty(), true)
+        @Expect(invoke.GetMethodType().GetReturnType() == context.GetInt64Ty(), true)
+        @Expect(invoke.GetThisType().getOrThrow().IsBoolean(), true)
+        @Expect(invoke.GetInstantiatedTypeArgs()[0].IsBoolean(), true)
+        @Expect(invokeResult.GetType().getOrThrow().IsBoolean(), true)
+    }
+
+    @TestCase
+    public func VisitTryInvoke(): Unit {
+        let context = CHIRContext()
+        let builder = CHIRBuilder(context)
+        let converter = PrivateTypeConverter({ ty: Type =>
+            if (ty.GetTypeKind() == TypeKind.TYPE_INT64) {
+                return context.GetBoolTy()
+            }
+            return ty
+        }, builder)
+
+        let methodParamTys = ArrayList<Type>([context.GetInt64Ty()])
+        let methodType = context.GetFuncTy(methodParamTys, context.GetInt64Ty())
+        let instantiatedTypeArgs = ArrayList<Type>([context.GetInt64Ty()])
+        let funcCallContext = FuncCallContext(instTypeArgs: instantiatedTypeArgs,
+            thisType: Some(context.GetInt64Ty()))
+        let object = LocalVar(context.GetInt64Ty(), "%object", None)
+        let method = Function(methodType, "$method", "method", "", "test")
+        let invokeContext = InvokeCallContext(method, object, funcCallContext)
+        let owner = builder.CreateFunction(context.GetFuncTy(ArrayList<Type>(), context.GetUnitTy()), "owner")
+        let body = builder.CreateBlockGroup(owner)
+        owner.InitBody(body)
+        let success = builder.CreateBlock(body)
+        let error = builder.CreateBlock(body)
+        let invoke = TryInvoke(invokeContext, success, error, None)
+        let invokeResult = LocalVar(context.GetInt64Ty(), "%invoke", Some(invoke))
+        converter.VisitExpr(invoke)
+        @Expect(invoke.GetCallee() == method, true)
+        // The referenced declaration and the dispatch signature are independent observations.
+        @Expect(invoke.GetCallee().GetFuncType().getOrThrow().GetParamType(0) == context.GetInt64Ty(), true)
+        @Expect(invoke.GetCallee().GetFuncType().getOrThrow().GetReturnType() == context.GetInt64Ty(), true)
+        @Expect(invoke.GetMethodType().GetParamType(0) == context.GetInt64Ty(), true)
+        @Expect(invoke.GetMethodType().GetReturnType() == context.GetInt64Ty(), true)
+        @Expect(invoke.GetThisType().getOrThrow().IsBoolean(), true)
+        @Expect(invoke.GetInstantiatedTypeArgs()[0].IsBoolean(), true)
+        @Expect(invokeResult.GetType().getOrThrow().IsBoolean(), true)
+    }
+
+    @TestCase
+    public func VisitTryInvokeStatic(): Unit {
+        let context = CHIRContext()
+        let builder = CHIRBuilder(context)
+        let converter = PrivateTypeConverter({ ty: Type =>
+            if (ty.GetTypeKind() == TypeKind.TYPE_INT64) {
+                return context.GetBoolTy()
+            }
+            return ty
+        }, builder)
+
+        let methodParamTys = ArrayList<Type>([context.GetInt64Ty()])
+        let methodType = context.GetFuncTy(methodParamTys, context.GetInt64Ty())
+        let instantiatedTypeArgs = ArrayList<Type>([context.GetInt64Ty()])
+        let funcCallContext = FuncCallContext(instTypeArgs: instantiatedTypeArgs,
+            thisType: Some(context.GetInt64Ty()))
+        let object = LocalVar(context.GetInt64Ty(), "%object", None)
+        let method = Function(methodType, "$method", "method", "", "test")
+        let invokeContext = InvokeCallContext(method, object, funcCallContext)
+        let owner = builder.CreateFunction(context.GetFuncTy(ArrayList<Type>(), context.GetUnitTy()), "owner")
+        let body = builder.CreateBlockGroup(owner)
+        owner.InitBody(body)
+        let success = builder.CreateBlock(body)
+        let error = builder.CreateBlock(body)
+        let invoke = TryInvokeStatic(invokeContext, success, error, None)
+        let invokeResult = LocalVar(context.GetInt64Ty(), "%invoke", Some(invoke))
+        converter.VisitExpr(invoke)
+        @Expect(invoke.GetCallee() == method, true)
+        // The referenced declaration and the dispatch signature are independent observations.
+        @Expect(invoke.GetCallee().GetFuncType().getOrThrow().GetParamType(0) == context.GetInt64Ty(), true)
+        @Expect(invoke.GetCallee().GetFuncType().getOrThrow().GetReturnType() == context.GetInt64Ty(), true)
+        @Expect(invoke.GetMethodType().GetParamType(0) == context.GetInt64Ty(), true)
+        @Expect(invoke.GetMethodType().GetReturnType() == context.GetInt64Ty(), true)
         @Expect(invoke.GetThisType().getOrThrow().IsBoolean(), true)
         @Expect(invoke.GetInstantiatedTypeArgs()[0].IsBoolean(), true)
         @Expect(invokeResult.GetType().getOrThrow().IsBoolean(), true)

@@ -11,6 +11,7 @@ public class Package {
     private let importedExtends: ArrayList<ExtendDef> = ArrayList<ExtendDef>()
     private let globalVars: ArrayList<GlobalVar> = ArrayList<GlobalVar>()
     private let globalFuncs: ArrayList<Function> = ArrayList<Function>()
+    private let globalFuncIndex: HashMap<String, Function> = HashMap<String, Function>()
     private let structs: ArrayList<StructDef> = ArrayList<StructDef>()
     private let classes: ArrayList<ClassDef> = ArrayList<ClassDef>()
     private let enums: ArrayList<EnumDef> = ArrayList<EnumDef>()
@@ -116,15 +117,16 @@ public class Package {
         }
     }
 
-    public func AddGlobalFunc(item: Function): Unit { globalFuncs.add(item) }
+    public func AddGlobalFunc(item: Function): Unit {
+        globalFuncs.add(item)
+        let identifier = item.GetIdentifier()
+        if (!globalFuncIndex.contains(identifier)) {
+            globalFuncIndex.add(identifier, item)
+        }
+    }
 
     public func TryGetGlobalFunc(identifier: String): Option<Function> {
-        for (item in globalFuncs) {
-            if (item.GetIdentifier() == identifier) {
-                return item
-            }
-        }
-        return None
+        return globalFuncIndex.get(identifier)
     }
 
     public func GetGlobalFuncsWithoutBody(includePureAbstract!: Bool = false): ArrayList<Function> {
@@ -152,13 +154,16 @@ public class Package {
     }
 
     public func GetGlobalFunctions(includePureAbstract!: Bool = false): ArrayList<Function> {
-        let out = ArrayList<Function>()
+        if (includePureAbstract) {
+            return ArrayList<Function>(globalFuncs)
+        }
+        let funcs = ArrayList<Function>()
         for (item in globalFuncs) {
-            if (includePureAbstract || !item.IsPureAbstract()) {
-                out.add(item)
+            if (!item.IsPureAbstract()) {
+                funcs.add(item)
             }
         }
-        return out
+        return ArrayList<Function>(globalFuncs)
     }
 
     public func GetGlobalFunctionsRef(): ArrayList<Function> { return globalFuncs }
@@ -167,6 +172,13 @@ public class Package {
         globalFuncs.clear()
         for (item in funcs) {
             globalFuncs.add(item)
+        }
+        globalFuncIndex.clear()
+        for (item in globalFuncs) {
+            let identifier = item.GetIdentifier()
+            if (!globalFuncIndex.contains(identifier)) {
+                globalFuncIndex.add(identifier, item)
+            }
         }
     }
 

@@ -22,3 +22,6 @@ scripts/__pycache__/
 
 # Stray local binaries
 /main
+
+# lane working notes live outside the repository (agent_scratch)
+.lane-notes.md

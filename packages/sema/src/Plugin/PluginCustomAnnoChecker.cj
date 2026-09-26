@@ -998,6 +998,9 @@ public class PluginCustomAnnoChecker {
             return
         }
         let overriddenFd = overriddenFdOpt.getOrThrow()
+        if (SameDecl(overriddenFd, fd)) {
+            return
+        }
         let overriddenInfo = PluginCustomAnnoInfo(since: APILevelVersion(), syscap: "", hasHideAnno: None)
         Parse(overriddenFd, overriddenInfo)
         var overriddenFdWithHide = overriddenInfo.hasHideAnno

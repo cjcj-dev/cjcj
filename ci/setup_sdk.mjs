@@ -223,7 +223,7 @@ if (llcPlatform && fixedLlcGz) {
         process.exit(4);
       }
     }
-    if (hasFixedLld && (parsedSchema !== 'core-lineage' || manifest.get('LLD_TOOL') !== lldTool)) {
+    if (hasFixedLld && ((parsedSchema !== 'core-lineage' && parsedSchema !== 'native') || manifest.get('LLD_TOOL') !== lldTool)) {
       log(`FATAL: fixed LLVM LLD lineage mismatch (schema=${parsedSchema} tool=${manifest.get('LLD_TOOL') || ''})`);
       process.exit(4);
     }

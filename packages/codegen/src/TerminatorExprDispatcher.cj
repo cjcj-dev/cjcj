@@ -1,5 +1,11 @@
 package cjcj::codegen
 
+import cjcj::chir.SpawnBase
+
+import cjcj::chir.RawArrayAllocateBase
+
+import cjcj::chir.AllocateBase
+
 import std.collection.*
 import cjcj::chir.Expression
 import cjcj::chir.Block
@@ -8,11 +14,12 @@ import cjcj::chir.Exit
 import cjcj::chir.ExprKind
 import cjcj::chir.Function
 import cjcj::chir.GoTo
-import cjcj::chir.IntOpWithException
+import cjcj::chir.TryBinaryExpression
+import cjcj::chir.TryUnaryExpression
 import cjcj::chir.LocalVar
 import cjcj::chir.MultiBranch
 import cjcj::chir.Type
-import cjcj::chir.TypeCastWithException
+import cjcj::chir.TryNumericCast
 import cjcj::utils.CJC_ASSERT
 
 public func HandleTerminatorExpression(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
@@ -34,7 +41,7 @@ public func HandleTerminatorExpression(irBuilder: IRBuilder2, chirExpr: Expressi
                 branch.GetTrueBlock()), GetOrCreateTerminatorDest(irBuilder, branch.GetFalseBlock()))
         }
         let successors = GetTerminatorSuccessors(chirExpr)
-        if (chirExpr.GetNumOfOperands() > 0 && successors.size >= 2) {
+        if (chirExpr.GetNumOfNonSuccessorOperands() > 0 && successors.size >= 2) {
             let condValue = irBuilder.GetCGModule().GetMappedCGValue(chirExpr.GetOperand(0))
             return irBuilder.CreateCondBr(condValue.GetRawValue(), GetOrCreateTerminatorDest(irBuilder, successors[0]),
                 GetOrCreateTerminatorDest(irBuilder, successors[1]))
@@ -55,47 +62,47 @@ public func HandleTerminatorExpression(irBuilder: IRBuilder2, chirExpr: Expressi
     }
     if (IsCallLikeWithExceptionKind(kind)) {
         return HandleWithExceptionTerminator(irBuilder, chirExpr, { builder: IRBuilder2, expr: Expression =>
-            if (expr.GetExprKind() == ExprKind.APPLY_WITH_EXCEPTION) {
+            if (expr.GetExprKind() == ExprKind.TRY_APPLY) {
                 return EmitCallLikeExpression(builder, expr)
             }
             return GenerateInvokeExpression(builder, expr)
         })
     }
-    if (kind == ExprKind.INT_OP_WITH_EXCEPTION) {
+    if (chirExpr.IsTryUnaryExpression() || chirExpr.IsTryBinaryExpression()) {
         return HandleWithExceptionTerminator(irBuilder, chirExpr, { builder: IRBuilder2, expr: Expression =>
-            if (let Some(intOp) <- (expr as IntOpWithException)) {
-                if (intOp.GetNumOfOperands() == 1) {
-                    return GenerateIntOpWithException(builder, intOp)
-                }
-                return HandleBinaryExpression(builder, CHIRBinaryExprWrapper(intOp))
+            if (let Some(unary) <- (expr as TryUnaryExpression)) {
+                return GenerateTryUnaryExpression(builder, unary)
+            }
+            if (let Some(binary) <- (expr as TryBinaryExpression)) {
+                return HandleBinaryExpression(builder, CHIRBinaryExprWrapper(binary))
             }
             return LLVMNullValue()
         })
     }
-    if (kind == ExprKind.INTRINSIC_WITH_EXCEPTION) {
+    if (kind == ExprKind.TRY_INTRINSIC) {
         return HandleWithExceptionTerminator(irBuilder, chirExpr, { builder: IRBuilder2, expr: Expression =>
             GenerateIntrinsic(builder, expr)
         })
     }
-    if (kind == ExprKind.SPAWN_WITH_EXCEPTION) {
+    if (kind == ExprKind.TRY_SPAWN) {
         return HandleWithExceptionTerminator(irBuilder, chirExpr, { builder: IRBuilder2, expr: Expression =>
-            GenerateSpawn(builder, expr)
+            GenerateSpawn(builder, (expr as SpawnBase).getOrThrow())
         })
     }
-    if (kind == ExprKind.TYPECAST_WITH_EXCEPTION) {
+    if (kind == ExprKind.TRY_NUMERIC_CAST) {
         return HandleWithExceptionTerminator(irBuilder, chirExpr, { builder: IRBuilder2, expr: Expression =>
-            let typeCastWithException = (expr as TypeCastWithException).getOrThrow()
-            GenerateTypeCast(builder, CHIRTypeCastWrapper(typeCastWithException))
+            let tryNumericCast = (expr as TryNumericCast).getOrThrow()
+            GenerateTypeCast(builder, tryNumericCast)
         })
     }
-    if (kind == ExprKind.ALLOCATE_WITH_EXCEPTION) {
+    if (kind == ExprKind.TRY_ALLOCATE) {
         return HandleWithExceptionTerminator(irBuilder, chirExpr, { builder: IRBuilder2, expr: Expression =>
-            GenerateAllocate(builder, expr)
+            GenerateAllocate(builder, (expr as AllocateBase).getOrThrow())
         })
     }
-    if (kind == ExprKind.RAW_ARRAY_ALLOCATE_WITH_EXCEPTION) {
+    if (kind == ExprKind.TRY_RAW_ARRAY_ALLOCATE) {
         return HandleWithExceptionTerminator(irBuilder, chirExpr, { builder: IRBuilder2, expr: Expression =>
-            GenerateRawArrayAllocate(builder, expr)
+            GenerateRawArrayAllocate(builder, (expr as RawArrayAllocateBase).getOrThrow())
         })
     }
     return LLVMNullValue()
@@ -193,7 +200,7 @@ private func HandleMultiBranchTerminator(irBuilder: IRBuilder2, multiBranch: Mul
 }
 
 private func HandleRaiseException(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
-    if (chirExpr.GetNumOfOperands() == 0) {
+    if (chirExpr.GetNumOfNonSuccessorOperands() == 0) {
         return irBuilder.CreateUnreachable()
     }
     let successors = GetTerminatorSuccessors(chirExpr)
@@ -211,8 +218,8 @@ private func HandleRaiseException(irBuilder: IRBuilder2, chirExpr: Expression): 
 }
 
 private func IsCallLikeWithExceptionKind(kind: ExprKind): Bool {
-    return kind == ExprKind.APPLY_WITH_EXCEPTION || kind == ExprKind.INVOKE_WITH_EXCEPTION ||
-        kind == ExprKind.INVOKESTATIC_WITH_EXCEPTION
+    return kind == ExprKind.TRY_APPLY || kind == ExprKind.TRY_INVOKE ||
+        kind == ExprKind.TRY_INVOKESTATIC
 }
 
 private func HandleWithExceptionTerminator(irBuilder: IRBuilder2, chirExpr: Expression,

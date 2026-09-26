@@ -22,6 +22,11 @@ public class ObjCParamMapper {
     private static let VOID_TYPE: String = "void"
     private static let VOID_POINTER_TYPE: String = VOID_TYPE + "*"
 
+    private static func SelfInfoArgs(): String {
+        return SELF_NAME + "." + REGISTRY_ID + ", " + CAST_TO_VOID_PTR + SELF_NAME
+    }
+    private static func SelfInfoParamTypes(): String { return INT64_T + "," + VOID_POINTER_TYPE }
+
     public init() {}
 
     // C++ ObjCParamMapper.cpp:39-96. UB-006: the official STATIC_REF arm emits only right
@@ -60,7 +65,7 @@ public class ObjCParamMapper {
                     }
                 case FunctionListFormat.STATIC_REF =>
                     InternalError("STATIC_REF param-list generation is defective upstream " +
-                        "(ObjCParamMapper.cpp:72-77 / ObjCTranspilerCJMapping.cpp:594-649); " +
+                        "(ObjCParamMapper.cpp:72-77); " +
                         "arm believed dead — reaching it is a contract violation")
                 case FunctionListFormat.CANGJIE_DECL =>
                     genParams += cur.identifier.Val() + ": " + Ty.ToString(cur.typeNode.getOrThrow().GetTy())
@@ -94,6 +99,7 @@ public class ObjCParamMapper {
         let result = ArgsList()
         if (withRegistryId) {
             result.add((INT64_T, SELF_NAME + "." + REGISTRY_ID))
+            result.add((VOID_POINTER_TYPE, CAST_TO_VOID_PTR + SELF_NAME))
         }
         if (!paramLists.isEmpty()) {
             for (cur in paramLists[0].params) {
@@ -109,7 +115,7 @@ public class ObjCParamMapper {
         withRegistryId: Bool): String {
         let result = StringBuilder()
         if (withRegistryId) {
-            result.append(SELF_NAME + "." + REGISTRY_ID)
+            result.append(SelfInfoArgs())
         }
         if (!paramLists.isEmpty()) {
             if (withRegistryId && !paramLists[0].params.isEmpty()) {
@@ -164,18 +170,11 @@ public class ObjCParamMapper {
     }
 
     public static func GenerateArgumentCast(retTy: Ty, value: String): String {
-        if (TypeMapper.IsObjCCJMapping(retTy)) {
-            return value + "." + REGISTRY_ID
-        }
         let actualTy = if (retTy.IsCoreOptionType()) { retTy.typeArgs[0] } else { retTy }
-        if (TypeMapper.IsObjCImpl(actualTy)) {
-            return CAST_TO_VOID_PTR + value
-        }
-        if (TypeMapper.IsObjCMirror(actualTy) || TypeMapper.IsObjCBlock(actualTy) ||
-            TypeMapper.IsObjCCJMappingInterface(actualTy)) {
+        if (IsObjCMirror(actualTy) || IsObjCImpl(actualTy) || IsObjCBlock(actualTy)) {
             return CAST_TO_VOID_PTR_RETAINED + value
         }
-        if (TypeMapper.IsObjCPointer(actualTy)) {
+        if (IsObjCPointer(actualTy)) {
             return CAST_TO_VOID_PTR_UNSAFE + value
         }
         return value
@@ -190,9 +189,9 @@ public class ObjCParamMapper {
         getter.mangledIdentifier = getterWrapperName
         getter.retType = `prop`.`type`
         getter.paramsDecl = ""
-        getter.paramStaticRef = if (`prop`.isStatic) { "" } else { INT64_T }
-        getter.callingParams = if (`prop`.isStatic) { "" } else { SELF_NAME + "." + REGISTRY_ID }
-        getter.convertedParams = if (`prop`.isStatic) { "" } else { SELF_NAME + "." + REGISTRY_ID }
+        getter.paramStaticRef = if (`prop`.isStatic) { "()" } else { "(" + SelfInfoParamTypes() + ")" }
+        getter.callingParams = if (`prop`.isStatic) { "" } else { SelfInfoArgs() }
+        getter.convertedParams = if (`prop`.isStatic) { "" } else { SelfInfoArgs() }
         getter.bridge = bridge
         return getter
     }
@@ -207,14 +206,14 @@ public class ObjCParamMapper {
         setter.retType = VOID_TYPE
         setter.bridge = false
         setter.paramsDecl = "(" + `prop`.`type` + ")" + SETTER_PARAM_NAME
-        setter.paramStaticRef = (if (!`prop`.isStatic) { "(" + INT64_T + "," } else { "(" }) +
+        setter.paramStaticRef = (if (!`prop`.isStatic) { "(" + SelfInfoParamTypes() + "," } else { "(" }) +
             `prop`.`type` + ")"
         setter.callingParams = if (!`prop`.isStatic) {
-            SELF_NAME + "." + REGISTRY_ID + ", " + SETTER_PARAM_NAME
+            SelfInfoArgs() + ", " + SETTER_PARAM_NAME
         } else {
             SETTER_PARAM_NAME
         }
-        setter.convertedParams = (if (!`prop`.isStatic) { SELF_NAME + "." + REGISTRY_ID + ", " } else { "" }) +
+        setter.convertedParams = (if (!`prop`.isStatic) { SelfInfoArgs() + ", " } else { "" }) +
             GenerateArgumentCast(ty, SETTER_PARAM_NAME)
         return setter
     }

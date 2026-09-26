@@ -120,23 +120,23 @@ public open class ValueAnalysis<VD, Pool> <: Analysis<State<VD, Pool>> where VD 
         HandleNormalExpressionEffect(state, expression)
     }
 
-    public override func PropagateTerminatorEffect(state: State<VD, Pool>, terminator: Terminator): Option<Block> {
+    public override func PropagateTerminatorEffect(state: State<VD, Pool>, terminator: Expression): Option<Block> {
         match (terminator.GetExprKind()) {
-            case ExprKind.APPLY_WITH_EXCEPTION =>
-                return PreHandleApplyWithExceptionExpr(state, (terminator as ApplyWithException).getOrThrow())
-            case ExprKind.INVOKE_WITH_EXCEPTION =>
-                return PreHandleInvokeWithExceptionExpr(state, (terminator as InvokeWithException).getOrThrow())
-            case ExprKind.ALLOCATE_WITH_EXCEPTION =>
-                let allocate = (terminator as AllocateWithException).getOrThrow()
+            case ExprKind.TRY_APPLY =>
+                return PreHandleTryApplyExpr(state, (terminator as TryApply).getOrThrow())
+            case ExprKind.TRY_INVOKE =>
+                return PreHandleTryInvokeExpr(state, (terminator as TryInvoke).getOrThrow())
+            case ExprKind.TRY_ALLOCATE =>
+                let allocate = (terminator as TryAllocate).getOrThrow()
                 let refObj = PreHandleAllocateExpr(state, allocate)
-                return HandleAllocateWithExceptionTerminator(state, allocate, refObj)
-            case ExprKind.RAW_ARRAY_ALLOCATE_WITH_EXCEPTION =>
-                return PreHandleRawArrayAllocateWithException(state,
-                    (terminator as RawArrayAllocateWithException).getOrThrow())
-            case ExprKind.INTRINSIC_WITH_EXCEPTION =>
-                let intrinsic = (terminator as IntrinsicWithException).getOrThrow()
+                return HandleTryAllocateTerminator(state, allocate, refObj)
+            case ExprKind.TRY_RAW_ARRAY_ALLOCATE =>
+                return PreHandleTryRawArrayAllocate(state,
+                    (terminator as TryRawArrayAllocate).getOrThrow())
+            case ExprKind.TRY_INTRINSIC =>
+                let intrinsic = (terminator as TryIntrinsic).getOrThrow()
                 if (intrinsic.GetIntrinsicKind() == IntrinsicKind.INOUT_PARAM) {
-                    return PreHandleInoutIntrinsicWithException(state, intrinsic)
+                    return PreHandleInoutTryIntrinsic(state, intrinsic)
                 }
             case _ => ()
         }
@@ -211,7 +211,7 @@ public open class ValueAnalysis<VD, Pool> <: Analysis<State<VD, Pool>> where VD 
             case ExprKind.INVOKE =>
                 PreHandleInvokeExpr(state, (expression as Invoke).getOrThrow())
                 return true
-            case ExprKind.TYPECAST =>
+            case ExprKind.CLASS_STATIC_CAST | ExprKind.NUMERIC_CAST =>
                 let cast = (expression as TypeCast).getOrThrow()
                 if (!cast.GetNeedCheckCast()) {
                     return PreHandleNonCheckedTypeCast(state, cast)
@@ -453,7 +453,7 @@ public open class ValueAnalysis<VD, Pool> <: Analysis<State<VD, Pool>> where VD 
         return PreHandleAllocateExprImpl(state, allocate.GetResult().getOrThrow(), allocate.GetType(), allocate)
     }
 
-    private func PreHandleAllocateExpr(state: State<VD, Pool>, allocate: AllocateWithException): Option<Value> {
+    private func PreHandleAllocateExpr(state: State<VD, Pool>, allocate: TryAllocate): Option<Value> {
         return PreHandleAllocateExprImpl(state, allocate.GetResult().getOrThrow(), allocate.GetType(), allocate)
     }
 
@@ -486,8 +486,8 @@ public open class ValueAnalysis<VD, Pool> <: Analysis<State<VD, Pool>> where VD 
         HandleApplyExpr(state, apply, refObj)
     }
 
-    private func PreHandleApplyWithExceptionExpr(state: State<VD, Pool>,
-        apply: ApplyWithException): Option<Block> {
+    private func PreHandleTryApplyExpr(state: State<VD, Pool>,
+        apply: TryApply): Option<Block> {
         if (apply.GetCallee().TestAttr(Attribute.MUT)) {
             let structArg = apply.GetArgs()[0]
             let structTy = (structArg.GetType().getOrThrow() as RefType).getOrThrow().GetBaseType()
@@ -502,7 +502,7 @@ public open class ValueAnalysis<VD, Pool> <: Analysis<State<VD, Pool>> where VD 
             }
         }
         let refObj = PreHandleFuncCall(state, apply.GetResult().getOrThrow(), apply)
-        return HandleApplyWithExceptionTerminator(state, apply, refObj)
+        return HandleTryApplyTerminator(state, apply, refObj)
     }
 
     private func PreHandleInvokeExpr(state: State<VD, Pool>, invoke: Invoke): Unit {
@@ -510,10 +510,10 @@ public open class ValueAnalysis<VD, Pool> <: Analysis<State<VD, Pool>> where VD 
         HandleInvokeExpr(state, invoke, refObj)
     }
 
-    private func PreHandleInvokeWithExceptionExpr(state: State<VD, Pool>,
-        invoke: InvokeWithException): Option<Block> {
+    private func PreHandleTryInvokeExpr(state: State<VD, Pool>,
+        invoke: TryInvoke): Option<Block> {
         let refObj = PreHandleFuncCall(state, invoke.GetResult().getOrThrow(), invoke)
-        return HandleInvokeWithExceptionTerminator(state, invoke, refObj)
+        return HandleTryInvokeTerminator(state, invoke, refObj)
     }
 
     private func PreHandleFuncCall(state: State<VD, Pool>, dest: LocalVar, callExpr: Expression): Option<Value> {
@@ -606,7 +606,7 @@ public open class ValueAnalysis<VD, Pool> <: Analysis<State<VD, Pool>> where VD 
             } else {
                 false
             }
-            let sourceClassDef = GetClassDefFromRefType(cast.GetSourceTy().getOrThrow())
+            let sourceClassDef = GetClassDefFromRefType(cast.GetSourceType().getOrThrow())
             let isBoxArray = if (let Some(classDef) <- sourceClassDef) {
                 StartsWith(classDef.GetSrcCodeIdentifier(), BOX_DECL_PREFIX) &&
                     classDef.GetAllInstanceVarNum() == 1 && classDef.GetInstanceVar(0).ty.IsStructArray()
@@ -629,8 +629,8 @@ public open class ValueAnalysis<VD, Pool> <: Analysis<State<VD, Pool>> where VD 
         return None
     }
 
-    private func PreHandleRawArrayAllocateWithException(state: State<VD, Pool>,
-        allocate: RawArrayAllocateWithException): Option<Block> {
+    private func PreHandleTryRawArrayAllocate(state: State<VD, Pool>,
+        allocate: TryRawArrayAllocate): Option<Block> {
         state.GetReferencedObjAndSetToTop(allocate.GetResult().getOrThrow(), expr: Some(allocate))
         return None
     }
@@ -644,8 +644,8 @@ public open class ValueAnalysis<VD, Pool> <: Analysis<State<VD, Pool>> where VD 
         return None
     }
 
-    private func PreHandleInoutIntrinsicWithException(state: State<VD, Pool>,
-        intrinsic: IntrinsicWithException): Option<Block> {
+    private func PreHandleInoutTryIntrinsic(state: State<VD, Pool>,
+        intrinsic: TryIntrinsic): Option<Block> {
         let param = intrinsic.GetOperand(0)
         if (!param.IsLocalVar()) {
             return None
@@ -666,8 +666,8 @@ public open class ValueAnalysis<VD, Pool> <: Analysis<State<VD, Pool>> where VD 
         let _ = refObj
     }
 
-    public open func HandleAllocateWithExceptionTerminator(state: State<VD, Pool>,
-        allocate: AllocateWithException, refObj: Option<Value>): Option<Block> {
+    public open func HandleTryAllocateTerminator(state: State<VD, Pool>,
+        allocate: TryAllocate, refObj: Option<Value>): Option<Block> {
         let _ = state
         let _ = allocate
         let _ = refObj
@@ -680,8 +680,8 @@ public open class ValueAnalysis<VD, Pool> <: Analysis<State<VD, Pool>> where VD 
         let _ = refObj
     }
 
-    public open func HandleApplyWithExceptionTerminator(state: State<VD, Pool>,
-        apply: ApplyWithException, refObj: Option<Value>): Option<Block> {
+    public open func HandleTryApplyTerminator(state: State<VD, Pool>,
+        apply: TryApply, refObj: Option<Value>): Option<Block> {
         let _ = state
         let _ = apply
         let _ = refObj
@@ -694,8 +694,8 @@ public open class ValueAnalysis<VD, Pool> <: Analysis<State<VD, Pool>> where VD 
         let _ = refObj
     }
 
-    public open func HandleInvokeWithExceptionTerminator(state: State<VD, Pool>,
-        invoke: InvokeWithException, refObj: Option<Value>): Option<Block> {
+    public open func HandleTryInvokeTerminator(state: State<VD, Pool>,
+        invoke: TryInvoke, refObj: Option<Value>): Option<Block> {
         let _ = state
         let _ = invoke
         let _ = refObj
@@ -707,7 +707,7 @@ public open class ValueAnalysis<VD, Pool> <: Analysis<State<VD, Pool>> where VD 
         let _ = expression
     }
 
-    public open func HandleTerminatorEffect(state: State<VD, Pool>, terminator: Terminator): Option<Block> {
+    public open func HandleTerminatorEffect(state: State<VD, Pool>, terminator: Expression): Option<Block> {
         let _ = state
         let _ = terminator
         return None

@@ -2,7 +2,6 @@ package cjcj::frontend
 
 import cjcj::ast.AddCurFile
 import cjcj::ast.TokenKind
-import cjcj::basic.InteropCJPackageConfigReader
 import cjcj::conditional_compilation.ConditionalCompilation
 import cjcj::lex.TokenVecMap
 import cjcj::parse.Parser as RealParser
@@ -96,18 +95,6 @@ public open class CompileStrategy {
         let packages = ci.GetSourcePackages()
         let typeChecker = ci.GetTypeChecker()
         typeChecker.PerformDesugarAfterSema(packages)
-    }
-
-    public func InteropConfigTomlCheck(): Unit {
-        try (recorder = ProfileRecorder("Semantic", "InteropConfigTomlCheck")) {
-            let packagesFullConfig = InteropCJPackageConfigReader()
-            if (ci.invocation.globalOptions.enableInteropCJMapping &&
-                ci.invocation.globalOptions.interopCJPackageConfigPath != "./" &&
-                !packagesFullConfig.Parse(ci.invocation.globalOptions.interopCJPackageConfigPath)) {
-                ci.diag.DiagnoseRefactor(DiagKindRefactor.sema_cj_mapping_generic_method_not_get_instance_config,
-                    DEFAULT_POSITION, arguments: [ci.invocation.globalOptions.interopCJPackageConfigPath])
-            }
-        }
     }
 
     public func ImportPackages(): Bool {

@@ -53,49 +53,56 @@ private func HasGenericInNonFuncScope(ty: Type): Bool {
 }
 
 private func TypeCastIfNeeded(value: Value, expectedTy: Type, builder: CHIRBuilder, parentBlock: Block,
-    loc: DebugLocation, needCheck!: Bool = true): Value {
-    let valueTy = value.GetType() ?? return value
+    loc: DebugLocation, needCheck!: Bool = true): (Value, ArrayList<Expression>) {
+    let valueTy = value.GetType() ?? return (value, ArrayList<Expression>())
     if (valueTy.IsNothing()) {
-        return value
+        return (value, ArrayList<Expression>())
     }
     if (valueTy != expectedTy) {
+        let newExprs = ArrayList<Expression>()
         var tmpValue = value
         if (valueTy.StripAllRefs().IsGeneric() && valueTy.IsRef()) {
             let load = builder.CreateLoad(valueTy.StripAllRefs(), value, parentBlock)
+            newExprs.add(load)
             tmpValue = load.GetResult().getOrThrow()
         }
-        let ret = builder.CreateTypeCast(expectedTy, tmpValue, parentBlock)
+        let ret: Expression = if (valueTy.IsNumeric() && expectedTy.IsNumeric()) {
+            builder.CreateNumericCast(expectedTy, tmpValue, parentBlock, overflowStrategy: OverflowStrategy.NA)
+        } else {
+            builder.CreateClassStaticCast(expectedTy, tmpValue, parentBlock)
+        }
         ret.SetDebugLocation(loc)
-        let _ = needCheck
-        return ret.GetResult().getOrThrow()
+        newExprs.add(ret)
+        ret.Set<NeedCheckCast, Bool>(needCheck)
+        return (ret.GetResult().getOrThrow(), newExprs)
     }
-    return value
+    return (value, ArrayList<Expression>())
 }
 
 private func TransformGenericIfNeeded(value: Value, expectedTy: Type, builder: CHIRBuilder, parentBlock: Block,
-    loc: DebugLocation, needCheck!: Bool = true): Option<Value> {
-    let valueTy = value.GetType() ?? return None
+    loc: DebugLocation, needCheck!: Bool = true): (Option<Value>, ArrayList<Expression>) {
+    let valueTy = value.GetType() ?? return (None, ArrayList<Expression>())
     if (valueTy.IsEnum() && (expectedTy.IsTuple() || expectedTy.IsUnsignedInteger())) {
-        return None
+        return (None, ArrayList<Expression>())
     }
     if ((valueTy.IsTuple() || valueTy.IsUnsignedInteger()) && expectedTy.IsEnum()) {
-        return None
+        return (None, ArrayList<Expression>())
     }
     if (valueTy.IsStructArray() && expectedTy.IsStructArray()) {
-        return None
+        return (None, ArrayList<Expression>())
     }
     if (HasGenericInNonFuncScope(expectedTy) && !HasGenericInNonFuncScope(valueTy)) {
-        let ret = builder.CreateTransformToGeneric(expectedTy, value, parentBlock)
+        let ret = builder.CreateCastToGeneric(expectedTy, value, parentBlock)
         ret.SetDebugLocation(loc)
         let _ = needCheck
-        return ret.GetResult().getOrThrow()
+        return (Some(ret.GetResult().getOrThrow()), ArrayList<Expression>([ret]))
     } else if (HasGenericInNonFuncScope(valueTy) && !HasGenericInNonFuncScope(expectedTy)) {
-        let ret = builder.CreateTransformToConcrete(expectedTy, value, parentBlock)
+        let ret = builder.CreateCastToConcrete(expectedTy, value, parentBlock)
         ret.SetDebugLocation(loc)
         let _ = needCheck
-        return ret.GetResult().getOrThrow()
+        return (Some(ret.GetResult().getOrThrow()), ArrayList<Expression>([ret]))
     }
-    return None
+    return (None, ArrayList<Expression>())
 }
 
 private func LeftTypeIsBoxOfRightType(left: Type, right: Type): Bool {
@@ -108,8 +115,8 @@ private func LeftTypeIsBoxOfRightType(left: Type, right: Type): Bool {
 }
 
 private func BoxIfNeeded(value: Value, expectedTy: Type, builder: CHIRBuilder, parentBlock: Block,
-    loc: DebugLocation, needCheck!: Bool = true): Option<Value> {
-    let srcTy = value.GetType() ?? return None
+    loc: DebugLocation, needCheck!: Bool = true): (Option<Value>, ArrayList<Expression>) {
+    let srcTy = value.GetType() ?? return (None, ArrayList<Expression>())
     var srcIsValueTy = srcTy.IsValueType()
     if (let Some(refTy) <- (srcTy as RefType)) {
         CJC_ASSERT(!refTy.GetBaseType().IsRef())
@@ -124,54 +131,59 @@ private func BoxIfNeeded(value: Value, expectedTy: Type, builder: CHIRBuilder, p
     }
     let dstIsReferenceTy = expectedTy.IsRef() && (expectedTy as RefType).getOrThrow().GetBaseType().IsReferenceType()
     if (srcIsValueTy && dstIsReferenceTy) {
+        let newExprs = ArrayList<Expression>()
         var boxSrcVal = value
         if (srcTy.IsRef()) {
             let loadSrc = builder.CreateLoad((srcTy as RefType).getOrThrow().GetBaseType(), boxSrcVal, parentBlock)
+            newExprs.add(loadSrc)
             loadSrc.SetDebugLocation(loc)
             boxSrcVal = loadSrc.GetResult().getOrThrow()
         }
         let ret = builder.CreateBox(expectedTy, boxSrcVal, parentBlock)
         ret.SetDebugLocation(loc)
         let _ = needCheck
-        return ret.GetResult().getOrThrow()
+        newExprs.add(ret)
+        return (Some(ret.GetResult().getOrThrow()), newExprs)
     } else if (srcIsReferenceTy && dstIsValueTy) {
         if (expectedTy.IsRef()) {
             let ret = builder.CreateUnBoxToRef(expectedTy, value, parentBlock)
             ret.SetDebugLocation(loc)
             let _ = needCheck
-            return ret.GetResult().getOrThrow()
+            return (Some(ret.GetResult().getOrThrow()), ArrayList<Expression>([ret]))
         } else {
-            let ret = builder.CreateUnBox(expectedTy, value, parentBlock)
+            let ret = builder.CreateUnBoxToValue(expectedTy, value, parentBlock)
             ret.SetDebugLocation(loc)
             let _ = needCheck
-            return ret.GetResult().getOrThrow()
+            return (Some(ret.GetResult().getOrThrow()), ArrayList<Expression>([ret]))
         }
     } else if (LeftTypeIsBoxOfRightType(srcTy, expectedTy)) {
-        let ret = builder.CreateUnBox(expectedTy, value, parentBlock)
+        let ret = builder.CreateUnBoxToValue(expectedTy, value, parentBlock)
         ret.SetDebugLocation(loc)
         let _ = needCheck
-        return ret.GetResult().getOrThrow()
+        return (Some(ret.GetResult().getOrThrow()), ArrayList<Expression>([ret]))
     } else if (LeftTypeIsBoxOfRightType(expectedTy, srcTy)) {
         let ret = builder.CreateBox(expectedTy, value, parentBlock)
         ret.SetDebugLocation(loc)
         let _ = needCheck
-        return ret.GetResult().getOrThrow()
+        return (Some(ret.GetResult().getOrThrow()), ArrayList<Expression>([ret]))
     }
-    return None
+    return (None, ArrayList<Expression>())
 }
 
 public func TypeCastOrBoxIfNeeded(value: Value, expectedTy: Type, builder: CHIRBuilder, parentBlock: Block,
-    needCheck!: Bool = true): Value {
+    needCheck!: Bool = true): (Value, ArrayList<Expression>) {
     return TypeCastOrBoxIfNeeded(value, expectedTy, builder, parentBlock, INVALID_LOCATION, needCheck: needCheck)
 }
 
 public func TypeCastOrBoxIfNeeded(value: Value, expectedTy: Type, builder: CHIRBuilder, parentBlock: Block,
-    loc: DebugLocation, needCheck!: Bool = true): Value {
-    if (let Some(ret) <- BoxIfNeeded(value, expectedTy, builder, parentBlock, loc, needCheck: needCheck)) {
-        return ret
+    loc: DebugLocation, needCheck!: Bool = true): (Value, ArrayList<Expression>) {
+    var ret = BoxIfNeeded(value, expectedTy, builder, parentBlock, loc, needCheck: needCheck)
+    if (let Some(result) <- ret[0]) {
+        return (result, ret[1])
     }
-    if (let Some(ret) <- TransformGenericIfNeeded(value, expectedTy, builder, parentBlock, loc, needCheck: needCheck)) {
-        return ret
+    ret = TransformGenericIfNeeded(value, expectedTy, builder, parentBlock, loc, needCheck: needCheck)
+    if (let Some(result) <- ret[0]) {
+        return (result, ret[1])
     }
     return TypeCastIfNeeded(value, expectedTy, builder, parentBlock, loc, needCheck: needCheck)
 }
@@ -652,7 +664,6 @@ public class VTableGenerator {
                 vtable.AddNewItemToTypeVTable(srcParentType, funcInfo)
             }
         }
-        UpdateInstanceAttr(vtable)
         customTypeDef.SetVTable(vtable)
     }
 }
@@ -844,6 +855,7 @@ public class WrapVirtualFunc {
         let entry = builder.CreateBlock(body)
         body.SetEntryBlock(entry)
         let ret = builder.CreateAllocate(builder.context.GetRefTy(wrapperRetTy), wrapperRetTy, entry)
+        entry.AppendExpression(ret)
         wrapperFunc.SetReturnValue(ret.GetResult().getOrThrow())
 
         var instParentType = childFuncInfo.GetInstParentType()
@@ -867,7 +879,9 @@ public class WrapVirtualFunc {
         CJC_ASSERT(args.size == expectedParamTypes.size)
         var argIdx: Int64 = 0
         while (argIdx < expectedParamTypes.size) {
-            args[argIdx] = TypeCastOrBoxIfNeeded(args[argIdx], expectedParamTypes[argIdx], builder, entry)
+            let (arg, expressions) = TypeCastOrBoxIfNeeded(args[argIdx], expectedParamTypes[argIdx], builder, entry)
+            entry.AppendExpressions(expressions)
+            args[argIdx] = arg
             argIdx++
         }
         let instArgTypes = ArrayList<Type>()
@@ -880,10 +894,14 @@ public class WrapVirtualFunc {
         }
         let apply = builder.CreateApply(applyRetTy, rawFunc,
             FuncCallContext(args: args, instTypeArgs: instArgTypes, thisType: Some(thisInstTy)), entry)
+        entry.AppendExpression(apply)
         apply.SetDebugLocation(rawFunc.GetDebugLocation())
-        let res = TypeCastOrBoxIfNeeded(apply.GetResult().getOrThrow(), wrapperRetTy, builder, entry)
-        builder.CreateStore(res, wrapperFunc.GetReturnValue().getOrThrow(), entry)
-        builder.CreateExit(None, entry)
+        let (res, resExpressions) = TypeCastOrBoxIfNeeded(apply.GetResult().getOrThrow(), wrapperRetTy, builder, entry)
+        entry.AppendExpressions(resExpressions)
+        let createdStore885 = builder.CreateStore(res, wrapperFunc.GetReturnValue().getOrThrow(), entry)
+        entry.AppendExpression(createdStore885)
+        let createdExit886 = builder.CreateExit(None, entry)
+        entry.AppendExpression(createdExit886)
     }
 
     private func GetWrapperFuncType(parentFuncTyWithoutThisArg: FuncType, selfTy: Type,
@@ -1121,13 +1139,16 @@ public class WrapMutFunc {
         let entry = builder.CreateBlock(body)
         body.SetEntryBlock(entry)
         let ret = builder.CreateAllocate(builder.context.GetRefTy(retTy), retTy, entry)
+        entry.AppendExpression(ret)
         wrapperFn.SetReturnValue(ret.GetResult().getOrThrow())
-        let rawFuncFirstArgType = rawFunc.GetFuncType().getOrThrow().GetParamTypes()[0].StripAllRefs()
+        let rawFuncFirstArgType = rawFunc.GetFuncType().getOrThrow().GetParamType(0).StripAllRefs()
         var firstArgType = GetInstSubType(rawFuncFirstArgType, srcClassTy, builder)
         if (!firstArgType.IsValueType() || rawFunc.TestAttr(Attribute.MUT)) {
             firstArgType = builder.context.GetRefTy(firstArgType)
         }
-        args[0] = TypeCastOrBoxIfNeeded(args[0], firstArgType, builder, entry)
+        let (firstArg, firstArgExpressions) = TypeCastOrBoxIfNeeded(args[0], firstArgType, builder, entry)
+        entry.AppendExpressions(firstArgExpressions)
+        args[0] = firstArg
         let instArgTypes = ArrayList<Type>()
         for (wrapperGenericParam in wrapperGenericParams) {
             instArgTypes.add(wrapperGenericParam)
@@ -1135,19 +1156,28 @@ public class WrapMutFunc {
         let apply = builder.CreateApply(retTy, rawFunc,
             FuncCallContext(args: args, instTypeArgs: instArgTypes,
                 thisType: Some(curDef.GetType().getOrThrow())), entry)
-        builder.CreateStore(apply.GetResult().getOrThrow(), wrapperFn.GetReturnValue().getOrThrow(), entry)
-        let tempThis = TypeCastOrBoxIfNeeded(args[0], wrapperParamsTy[0], builder, entry)
-        let load = builder.CreateLoad(parentDefType, tempThis, entry).GetResult().getOrThrow()
+        entry.AppendExpression(apply)
+        let createdStore1138 = builder.CreateStore(apply.GetResult().getOrThrow(), wrapperFn.GetReturnValue().getOrThrow(), entry)
+        entry.AppendExpression(createdStore1138)
+        let (tempThis, tempThisExpressions) = TypeCastOrBoxIfNeeded(args[0], wrapperParamsTy[0], builder, entry)
+        entry.AppendExpressions(tempThisExpressions)
+        let createdLoad1140 = builder.CreateLoad(parentDefType, tempThis, entry)
+        entry.AppendExpression(createdLoad1140)
+        let load = createdLoad1140.GetResult().getOrThrow()
         let structMemberTypes = (parentDefType as StructType).getOrThrow().GetInstantiatedMemberTys(builder)
         var idx: Int64 = 0
         while (idx < structMemberTypes.size) {
             let path = ArrayList<UInt64>()
             path.add(UInt64(idx))
-            let field = builder.CreateField(structMemberTypes[idx], load, path, entry).GetResult().getOrThrow()
-            builder.CreateStoreElementRef(field, wrapperFn.GetParam(0), path, entry)
+            let createdField1146 = builder.CreateField(structMemberTypes[idx], load, path, entry)
+            entry.AppendExpression(createdField1146)
+            let field = createdField1146.GetResult().getOrThrow()
+            let createdStoreElementRef1147 = builder.CreateStoreElementRef(field, wrapperFn.GetParam(0), path, entry)
+            entry.AppendExpression(createdStoreElementRef1147)
             idx++
         }
-        builder.CreateExit(None, entry)
+        let createdExit1150 = builder.CreateExit(None, entry)
+        entry.AppendExpression(createdExit1150)
     }
 
     public func Run(customTypeDef: CustomTypeDef): Unit {
@@ -1319,19 +1349,25 @@ public class UpdateOperatorVTable {
         let block = builder.CreateBlock(body)
         body.SetEntryBlock(block)
         let retValue = builder.CreateAllocate(builder.context.GetRefTy(ty), ty, block)
+        block.AppendExpression(retValue)
         fn.SetReturnValue(retValue.GetResult().getOrThrow())
         if (isBinary) {
             let p1 = builder.CreateParameter(ty, DebugLocation(), fn)
             let p2 = builder.CreateParameter(ty, DebugLocation(), fn)
             let add = builder.CreateBinaryExpression(ToExprKind(name), ty, p1, p2, block, overflowStrategy: ovf)
-            builder.CreateStore(add.GetResult().getOrThrow(), retValue.GetResult().getOrThrow(), block)
+            block.AppendExpression(add)
+            let createdStore1327 = builder.CreateStore(add.GetResult().getOrThrow(), retValue.GetResult().getOrThrow(), block)
+            block.AppendExpression(createdStore1327)
         } else {
             let p1 = builder.CreateParameter(ty, DebugLocation(), fn)
             CJC_ASSERT(name == "-")
             let add = builder.CreateUnaryExpression(ExprKind.NEG, ty, p1, block, overflowStrategy: ovf)
-            builder.CreateStore(add.GetResult().getOrThrow(), retValue.GetResult().getOrThrow(), block)
+            block.AppendExpression(add)
+            let createdStore1332 = builder.CreateStore(add.GetResult().getOrThrow(), retValue.GetResult().getOrThrow(), block)
+            block.AppendExpression(createdStore1332)
         }
-        builder.CreateExit(None, block)
+        let createdExit1334 = builder.CreateExit(None, block)
+        block.AppendExpression(createdExit1334)
         fn.EnableAttr(Attribute.VIRTUAL)
         fn.EnableAttr(Attribute.FINAL)
         return fn
@@ -1504,6 +1540,20 @@ public class GenerateVTable {
                 }
                 taskQueue.RunAndWaitForAllTasksCompleted()
             }
+            // Function instances are shared between definitions. Replay attribute snapshots
+            // in candidate order only after all workers have finished reading them.
+            for (customDef in candidateDefs) {
+                if (customDef.TestAttr(Attribute.GENERIC_INSTANTIATED)) {
+                    continue
+                }
+                let vtable = customDef.GetDefVTable()
+                for (typeVTable in vtable.GetModifiableTypeVTables()) {
+                    for (info in typeVTable.GetModifiableVirtualMethods()) {
+                        info.UpdateInstanceAttributeInfo()
+                    }
+                }
+                UpdateInstanceAttr(vtable)
+            }
         }
     }
 
@@ -1594,9 +1644,9 @@ public class GenerateVTable {
 
     private func VisitExpression(expr: Expression): Unit {
         if (let Some(dyExpr) <- (expr as DynamicDispatch)) {
-            dyExpr.SetVirtualMethodOffset(dyExpr.GetVirtualMethodOffset(builder))
+            dyExpr.SetVirtualMethodOffset(dyExpr.GetVirtualMethodOffset())
         } else if (let Some(dyExprE) <- (expr as DynamicDispatchWithException)) {
-            dyExprE.SetVirtualMethodOffset(dyExprE.GetVirtualMethodOffset(builder))
+            dyExprE.SetVirtualMethodOffset(dyExprE.GetVirtualMethodOffset())
         } else if (let Some(apply) <- (expr as Apply)) {
             let callee = apply.GetCallee() as Function
             if (CalleeIsMutFuncFromParent(apply.GetThisType(), callee, expr.GetTopLevelFunc().getOrThrow())) {
@@ -1605,7 +1655,7 @@ public class GenerateVTable {
                     callee.getOrThrow())
                 apply.ReplaceOperand(callee.getOrThrow(), wrapperFunc)
             }
-        } else if (let Some(applyE) <- (expr as ApplyWithException)) {
+        } else if (let Some(applyE) <- (expr as TryApply)) {
             let callee = applyE.GetCallee() as Function
             if (CalleeIsMutFuncFromParent(applyE.GetThisType(), callee, expr.GetTopLevelFunc().getOrThrow())) {
                 let wrapperFunc = GetMutFuncWrapper(applyE.GetThisType().getOrThrow(), applyE.GetArgs(),
@@ -1627,8 +1677,40 @@ public class GenerateVTable {
         }
     }
 
+    private func ReplaceDeserializedDispatchCallee(expr: Expression): Unit {
+        if (let Some(dyExpr) <- (expr as DynamicDispatch)) {
+            let callee = dyExpr.GetCallee()
+            let expected = GetCalleeInSrcParentType(callee, dyExpr.GetMethodName(), dyExpr.GetStoredVirMethodOffset())
+            dyExpr.ReplaceOperand(callee, expected)
+        } else if (let Some(dyExprE) <- (expr as DynamicDispatchWithException)) {
+            let callee = dyExprE.GetCallee()
+            let expected = GetCalleeInSrcParentType(callee, dyExprE.GetMethodName(),
+                dyExprE.GetStoredVirMethodOffset())
+            dyExprE.ReplaceOperand(callee, expected)
+        }
+        for (group in expr.GetBlockGroups()) {
+            NormalizeDeserializedCallee(group)
+        }
+    }
+
+    private func NormalizeDeserializedCallee(group: BlockGroup): Unit {
+        for (block in group.GetBlocks()) {
+            for (expr in block.GetExpressions()) {
+                ReplaceDeserializedDispatchCallee(expr)
+            }
+        }
+    }
+
     public func UpdateFuncCall(): Unit {
         try (recorder = ProfileRecorder(passName, "UpdateFuncCall")) {
+            for (fn in pkg.GetGlobalFuncsWithBody()) {
+                if (!fn.TestAttr(Attribute.DESERIALIZED)) {
+                    continue
+                }
+                if (let Some(body) <- fn.GetBody()) {
+                    NormalizeDeserializedCallee(body)
+                }
+            }
             for (fn in pkg.GetGlobalFuncsWithBody()) {
                 if (let Some(body) <- fn.GetBody()) {
                     VisitBlockGroup(body)

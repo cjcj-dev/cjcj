@@ -501,10 +501,10 @@ private func NeedCheckForeignName(parent: MemberSignature, child: MemberSignatur
     if (!parentDecl.IsFuncOrProp()) {
         return false
     }
-    if (!parentDecl.outerDecl.getOrThrow().TestAnyAttr(Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_MIRROR_SUBTYPE)) {
+    if (!parentDecl.outerDecl.getOrThrow().TestAnyAttr(Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_IMPL)) {
         return false
     }
-    if (!childDecl.outerDecl.getOrThrow().TestAnyAttr(Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_MIRROR_SUBTYPE)) {
+    if (!childDecl.outerDecl.getOrThrow().TestAnyAttr(Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_IMPL)) {
         return false
     }
     if (SameDecl(parentDecl.outerDecl.getOrThrow(), childDecl.outerDecl.getOrThrow())) {
@@ -862,11 +862,13 @@ public class StructInheritanceChecker {
                 continue
             }
             CheckMembersWithInheritedDecls(extendDecl)
-            let extendMembers = GetStoredMembersForDecl(extendDecl)
-            if (let Some(currentPkg) <- curFile.curPackage) {
-                RemoveInvisibleMember(members, currentPkg.fullPackageName)
+            if (structInheritedMembers.contains(extendDecl)) {
+                let allVisibleMember = GetStoredMembersForDecl(extendDecl).Clone()
+                if (let Some(currentPkg) <- curFile.curPackage) {
+                    RemoveInvisibleMember(allVisibleMember, currentPkg.fullPackageName)
+                }
+                MergeInheritedMembers(members, allVisibleMember, baseTy)
             }
-            MergeInheritedMembers(members, extendMembers, baseTy)
         }
         return members
     }
@@ -1437,7 +1439,6 @@ public class StructInheritanceChecker {
             CheckNativeFFI(parent, child)
             if (shouldUpdate) {
                 if (parentDecl.TestAttr(Attribute.ABSTRACT) || !childDecl.TestAttr(Attribute.ABSTRACT)) {
-                    UpdateOverriddenFuncDeclCache(childDecl, parentDecl)
                     entry.signature = updated.Clone()
                 }
                 entry.signature.replaceOther = true
@@ -1506,17 +1507,6 @@ public class StructInheritanceChecker {
                 UpdateUpperBoundsSetForInheritance(typeManager, memberSig.upperBounds, typeMapping)
             }
             let _ = UpdateInheritedMemberIfNeeded(members, memberSig, inheritedInterfaces: inheritedInterfaces)
-        }
-    }
-
-    private func UpdateOverriddenFuncDeclCache(child: Decl, parent: Decl): Unit {
-        if (checkingDecls.isEmpty()) {
-            return
-        }
-        if (let Some(outer) <- child.outerDecl) {
-            if (SameDecl(outer, checkingDecls[checkingDecls.size - 1])) {
-                typeManager.UpdateTopOverriddenFuncDeclMap(child, parent)
-            }
         }
     }
 
@@ -1782,7 +1772,7 @@ public class StructInheritanceChecker {
 
     private func DiagnoseForUnimplementedInterfaces(members: MemberMap, structDecl: Decl): Unit {
         if (structDecl.TestAttr(Attribute.FOREIGN) ||
-            structDecl.TestAnyAttr(Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_MIRROR_SYNTHETIC_WRAPPER) ||
+            structDecl.TestAnyAttr(Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_MIRROR_INTERFACE_HANDLE_WRAPPER) ||
             structDecl.TestAttr(Attribute.JAVA_MIRROR_SYNTHETIC_WRAPPER)) {
             return
         }
@@ -2010,6 +2000,15 @@ public class StructInheritanceChecker {
                     diag,
                     child,
                     DiagKind.sema_invalid_override_member_in_class,
+                    args: [DiagArgument(typeText), DiagArgument(name), DiagArgument(typeText)]
+                ).Emit()
+            } else if (child.TestAttr(Attribute.ABSTRACT) && !notInInterface) {
+                // An intermediate abstract superclass can hide this redeclaration from
+                // CheckInheritanceForInterface; diagnose the inherited default here.
+                Diagnose(
+                    diag,
+                    child,
+                    DiagKind.sema_invalid_override_or_redefine_member_in_interface,
                     args: [DiagArgument(typeText), DiagArgument(name), DiagArgument(typeText)]
                 ).Emit()
             }

@@ -217,7 +217,8 @@ public class CHIRBuilder {
             if (refEq(expr, separator)) {
                 needMove = true
                 expr.RemoveSelfFromBlock()
-                CreateGoTo(block2, block1)
+                let goTo = CreateGoTo(block2, block1)
+                block1.AppendExpression(goTo)
                 continue
             }
             if (needMove) {
@@ -301,10 +302,11 @@ public class CHIRBuilder {
         return literal
     }
 
+    // Like upstream CHIRBuilder, creation sets ownership but does not insert into a block.
+    // Callers append the result or move it into position after constructing the whole group.
     public func CreateExpression(kind: ExprKind, resultTy: Option<Type>, operands: ArrayList<Value>,
         parent: Block): Expression {
         let expr = Expression(kind, operands, parent)
-        parent.AppendExpression(expr)
         expr.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(expr.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(expr))
         if (let Some(ty) <- resultTy) {
@@ -317,7 +319,6 @@ public class CHIRBuilder {
     public func CreateUnaryExpression(kind: ExprKind, resultTy: Type, operand: Value, parent: Block,
         overflowStrategy!: OverflowStrategy = OverflowStrategy.NA): UnaryExpression {
         let expr = UnaryExpression(kind, operand, parent, overflowStrategy: overflowStrategy)
-        parent.AppendExpression(expr)
         expr.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(expr.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(expr))
         CreateLocalVar(resultTy, "%${expr.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", expr)
@@ -327,7 +328,6 @@ public class CHIRBuilder {
     public func CreateBinaryExpression(kind: ExprKind, resultTy: Type, left: Value, right: Value,
         parent: Block, overflowStrategy!: OverflowStrategy = OverflowStrategy.NA): BinaryExpression {
         let expr = BinaryExpression(kind, left, right, parent, overflowStrategy: overflowStrategy)
-        parent.AppendExpression(expr)
         expr.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(expr.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(expr))
         CreateLocalVar(resultTy, "%${expr.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", expr)
@@ -337,7 +337,6 @@ public class CHIRBuilder {
     public func CreateConstant(resultTy: Type, literal: LiteralValue, parent: Block): Constant {
         literal.SetType(resultTy)
         let expr = Constant(literal, parent)
-        parent.AppendExpression(expr)
         expr.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(expr.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(expr))
         CreateLocalVar(resultTy, "%${expr.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", expr)
@@ -346,7 +345,6 @@ public class CHIRBuilder {
 
     public func CreateAllocate(resultTy: Type, allocatedTy: Type, parent: Block): Allocate {
         let expr = Allocate(allocatedTy, parent)
-        parent.AppendExpression(expr)
         expr.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(expr.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(expr))
         CreateLocalVar(resultTy, "%${expr.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", expr)
@@ -355,7 +353,6 @@ public class CHIRBuilder {
 
     public func CreateLoad(resultTy: Type, location: Value, parent: Block): Load {
         let expr = Load(location, parent)
-        parent.AppendExpression(expr)
         expr.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(expr.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(expr))
         CreateLocalVar(resultTy, "%${expr.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", expr)
@@ -364,7 +361,6 @@ public class CHIRBuilder {
 
     public func CreateStore(value: Value, location: Value, parent: Block): Store {
         let expr = Store(value, location, parent)
-        parent.AppendExpression(expr)
         expr.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(expr.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(expr))
         CreateLocalVar(context.GetUnitTy(), "%${expr.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", expr)
@@ -374,7 +370,6 @@ public class CHIRBuilder {
     public func CreateGetElementRef(resultTy: Type, location: Value, path: ArrayList<UInt64>,
         parent: Block): GetElementRef {
         let expr = GetElementRef(location, path, parent)
-        parent.AppendExpression(expr)
         expr.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(expr.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(expr))
         CreateLocalVar(resultTy, "%${expr.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", expr)
@@ -384,7 +379,6 @@ public class CHIRBuilder {
     public func CreateGetElementByName(resultTy: Type, location: Value, names: ArrayList<String>,
         parent: Block): GetElementByName {
         let expr = GetElementByName(location, names, parent)
-        parent.AppendExpression(expr)
         expr.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(expr.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(expr))
         CreateLocalVar(resultTy, "%${expr.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", expr)
@@ -394,7 +388,6 @@ public class CHIRBuilder {
     public func CreateStoreElementRef(value: Value, location: Value, path: ArrayList<UInt64>,
         parent: Block): StoreElementRef {
         let expr = StoreElementRef(value, location, path, parent)
-        parent.AppendExpression(expr)
         expr.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(expr.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(expr))
         CreateLocalVar(context.GetUnitTy(), "%${expr.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", expr)
@@ -404,7 +397,6 @@ public class CHIRBuilder {
     public func CreateStoreElementByName(value: Value, location: Value, names: ArrayList<String>,
         parent: Block): StoreElementByName {
         let expr = StoreElementByName(value, location, names, parent)
-        parent.AppendExpression(expr)
         expr.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(expr.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(expr))
         CreateLocalVar(context.GetUnitTy(), "%${expr.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", expr)
@@ -413,7 +405,6 @@ public class CHIRBuilder {
 
     public func CreateApply(resultTy: Type, callee: Value, callContext: FuncCallContext, parent: Block): Apply {
         let expr = Apply(callee, callContext, parent)
-        parent.AppendExpression(expr)
         expr.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(expr.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(expr))
         CreateLocalVar(resultTy, "%${expr.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", expr)
@@ -422,7 +413,6 @@ public class CHIRBuilder {
 
     public func CreateInvoke(resultTy: Type, callContext: InvokeCallContext, parent: Block): Invoke {
         let expr = Invoke(callContext, parent)
-        parent.AppendExpression(expr)
         expr.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(expr.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(expr))
         CreateLocalVar(resultTy, "%${expr.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", expr)
@@ -431,7 +421,6 @@ public class CHIRBuilder {
 
     public func CreateInvokeStatic(resultTy: Type, callContext: InvokeCallContext, parent: Block): InvokeStatic {
         let expr = InvokeStatic(callContext, parent)
-        parent.AppendExpression(expr)
         expr.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(expr.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(expr))
         CreateLocalVar(resultTy, "%${expr.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", expr)
@@ -440,7 +429,6 @@ public class CHIRBuilder {
 
     public func CreateGetRTTI(resultTy: Type, value: Value, parent: Block): GetRTTI {
         let expr = GetRTTI(value, parent)
-        parent.AppendExpression(expr)
         expr.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(expr.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(expr))
         CreateLocalVar(resultTy, "%${expr.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", expr)
@@ -449,17 +437,23 @@ public class CHIRBuilder {
 
     public func CreateGetRTTIStatic(resultTy: Type, ty: Type, parent: Block): GetRTTIStatic {
         let expr = GetRTTIStatic(ty, parent)
-        parent.AppendExpression(expr)
         expr.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(expr.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(expr))
         CreateLocalVar(resultTy, "%${expr.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", expr)
         return expr
     }
 
-    public func CreateTypeCast(resultTy: Type, source: Value, parent: Block,
-        overflowStrategy!: OverflowStrategy = OverflowStrategy.NA): TypeCast {
-        let expr = TypeCast(source, parent, overflowStrategy: overflowStrategy)
-        parent.AppendExpression(expr)
+    public func CreateClassStaticCast(resultTy: Type, source: Value, parent: Block): ClassStaticCast {
+        let expr = ClassStaticCast(source, parent)
+        expr.ConnectOperandsAndGroups()
+        StoreAllocatedPtrInFuncOrLambda(expr.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(expr))
+        CreateLocalVar(resultTy, "%${expr.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", expr)
+        return expr
+    }
+
+    public func CreateNumericCast(resultTy: Type, source: Value, parent: Block,
+        overflowStrategy!: OverflowStrategy): NumericCast {
+        let expr = NumericCast(source, parent, overflowStrategy: overflowStrategy)
         expr.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(expr.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(expr))
         CreateLocalVar(resultTy, "%${expr.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", expr)
@@ -468,7 +462,6 @@ public class CHIRBuilder {
 
     public func CreateInstanceOf(resultTy: Type, value: Value, ty: Type, parent: Block): InstanceOf {
         let expr = InstanceOf(value, ty, parent)
-        parent.AppendExpression(expr)
         expr.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(expr.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(expr))
         CreateLocalVar(resultTy, "%${expr.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", expr)
@@ -477,34 +470,30 @@ public class CHIRBuilder {
 
     public func CreateBox(resultTy: Type, source: Value, parent: Block): Box {
         let expr = Box(source, parent)
-        parent.AppendExpression(expr)
         expr.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(expr.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(expr))
         CreateLocalVar(resultTy, "%${expr.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", expr)
         return expr
     }
 
-    public func CreateUnBox(resultTy: Type, source: Value, parent: Block): UnBox {
-        let expr = UnBox(source, parent)
-        parent.AppendExpression(expr)
+    public func CreateUnBoxToValue(resultTy: Type, source: Value, parent: Block): UnBoxToValue {
+        let expr = UnBoxToValue(source, parent)
         expr.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(expr.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(expr))
         CreateLocalVar(resultTy, "%${expr.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", expr)
         return expr
     }
 
-    public func CreateTransformToGeneric(resultTy: Type, source: Value, parent: Block): TransformToGeneric {
-        let expr = TransformToGeneric(source, parent)
-        parent.AppendExpression(expr)
+    public func CreateCastToGeneric(resultTy: Type, source: Value, parent: Block): CastToGeneric {
+        let expr = CastToGeneric(source, parent)
         expr.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(expr.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(expr))
         CreateLocalVar(resultTy, "%${expr.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", expr)
         return expr
     }
 
-    public func CreateTransformToConcrete(resultTy: Type, source: Value, parent: Block): TransformToConcrete {
-        let expr = TransformToConcrete(source, parent)
-        parent.AppendExpression(expr)
+    public func CreateCastToConcrete(resultTy: Type, source: Value, parent: Block): CastToConcrete {
+        let expr = CastToConcrete(source, parent)
         expr.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(expr.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(expr))
         CreateLocalVar(resultTy, "%${expr.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", expr)
@@ -513,7 +502,6 @@ public class CHIRBuilder {
 
     public func CreateUnBoxToRef(resultTy: Type, source: Value, parent: Block): UnBoxToRef {
         let expr = UnBoxToRef(source, parent)
-        parent.AppendExpression(expr)
         expr.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(expr.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(expr))
         CreateLocalVar(resultTy, "%${expr.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", expr)
@@ -522,7 +510,6 @@ public class CHIRBuilder {
 
     public func CreateTuple(resultTy: Type, values: ArrayList<Value>, parent: Block): Tuple {
         let expr = Tuple(values, parent)
-        parent.AppendExpression(expr)
         expr.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(expr.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(expr))
         CreateLocalVar(resultTy, "%${expr.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", expr)
@@ -531,7 +518,6 @@ public class CHIRBuilder {
 
     public func CreateField(resultTy: Type, value: Value, path: ArrayList<UInt64>, parent: Block): Field {
         let expr = Field(value, path, parent)
-        parent.AppendExpression(expr)
         expr.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(expr.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(expr))
         CreateLocalVar(resultTy, "%${expr.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", expr)
@@ -540,7 +526,6 @@ public class CHIRBuilder {
 
     public func CreateFieldByName(resultTy: Type, value: Value, names: ArrayList<String>, parent: Block): FieldByName {
         let expr = FieldByName(value, names, parent)
-        parent.AppendExpression(expr)
         expr.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(expr.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(expr))
         CreateLocalVar(resultTy, "%${expr.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", expr)
@@ -550,7 +535,6 @@ public class CHIRBuilder {
     public func CreateRawArrayAllocate(resultTy: Type, elementTy: Type, size: Value,
         parent: Block): RawArrayAllocate {
         let expr = RawArrayAllocate(elementTy, size, parent)
-        parent.AppendExpression(expr)
         expr.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(expr.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(expr))
         CreateLocalVar(resultTy, "%${expr.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", expr)
@@ -560,7 +544,6 @@ public class CHIRBuilder {
     public func CreateRawArrayLiteralInit(resultTy: Type, rawArray: Value, elements: ArrayList<Value>,
         parent: Block): RawArrayLiteralInit {
         let expr = RawArrayLiteralInit(rawArray, elements, parent)
-        parent.AppendExpression(expr)
         expr.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(expr.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(expr))
         CreateLocalVar(resultTy, "%${expr.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", expr)
@@ -570,7 +553,6 @@ public class CHIRBuilder {
     public func CreateRawArrayInitByValue(resultTy: Type, rawArray: Value, size: Value, initValue: Value,
         parent: Block): RawArrayInitByValue {
         let expr = RawArrayInitByValue(rawArray, size, initValue, parent)
-        parent.AppendExpression(expr)
         expr.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(expr.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(expr))
         CreateLocalVar(resultTy, "%${expr.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", expr)
@@ -579,7 +561,6 @@ public class CHIRBuilder {
 
     public func CreateVArray(resultTy: Type, elements: ArrayList<Value>, parent: Block): `VArray` {
         let expr = `VArray`(elements, parent)
-        parent.AppendExpression(expr)
         expr.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(expr.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(expr))
         CreateLocalVar(resultTy, "%${expr.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", expr)
@@ -589,7 +570,6 @@ public class CHIRBuilder {
     public func CreateVArrayBuilder(resultTy: Type, size: Value, item: Value, initFunc: Value,
         parent: Block): VArrayBuilder {
         let expr = VArrayBuilder(size, item, initFunc, parent)
-        parent.AppendExpression(expr)
         expr.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(expr.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(expr))
         CreateLocalVar(resultTy, "%${expr.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", expr)
@@ -598,7 +578,6 @@ public class CHIRBuilder {
 
     public func CreateGetException(resultTy: Type, parent: Block): GetException {
         let expr = GetException(parent)
-        parent.AppendExpression(expr)
         expr.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(expr.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(expr))
         CreateLocalVar(resultTy, "%${expr.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", expr)
@@ -607,7 +586,6 @@ public class CHIRBuilder {
 
     public func CreateIntrinsic(resultTy: Type, callContext: IntrisicCallContext, parent: Block): Intrinsic {
         let expr = Intrinsic(callContext, parent)
-        parent.AppendExpression(expr)
         expr.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(expr.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(expr))
         CreateLocalVar(resultTy, "%${expr.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", expr)
@@ -616,7 +594,6 @@ public class CHIRBuilder {
 
     public func CreateDebug(resultTy: Type, value: Value, srcCodeIdentifier: String, parent: Block): Debug {
         let expr = Debug(value, srcCodeIdentifier, parent)
-        parent.AppendExpression(expr)
         expr.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(expr.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(expr))
         CreateLocalVar(resultTy, "%${expr.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", expr)
@@ -625,7 +602,6 @@ public class CHIRBuilder {
 
     public func CreateSpawn(resultTy: Type, value: Value, parent: Block): Spawn {
         let expr = Spawn(value, parent)
-        parent.AppendExpression(expr)
         expr.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(expr.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(expr))
         CreateLocalVar(resultTy, "%${expr.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", expr)
@@ -634,7 +610,6 @@ public class CHIRBuilder {
 
     public func CreateSpawn(resultTy: Type, value: Value, arg: Value, parent: Block): Spawn {
         let expr = Spawn(value, arg, parent)
-        parent.AppendExpression(expr)
         expr.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(expr.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(expr))
         CreateLocalVar(resultTy, "%${expr.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", expr)
@@ -643,7 +618,6 @@ public class CHIRBuilder {
 
     public func CreateForInRange(resultTy: Type, inductionVar: Value, loopCondVar: Value, parent: Block): ForInRange {
         let expr = ForInRange(inductionVar, loopCondVar, parent)
-        parent.AppendExpression(expr)
         expr.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(expr.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(expr))
         CreateLocalVar(resultTy, "%${expr.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", expr)
@@ -652,7 +626,6 @@ public class CHIRBuilder {
 
     public func CreateForInIter(resultTy: Type, inductionVar: Value, loopCondVar: Value, parent: Block): ForInIter {
         let expr = ForInIter(inductionVar, loopCondVar, parent)
-        parent.AppendExpression(expr)
         expr.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(expr.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(expr))
         CreateLocalVar(resultTy, "%${expr.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", expr)
@@ -662,7 +635,6 @@ public class CHIRBuilder {
     public func CreateForInClosedRange(resultTy: Type, inductionVar: Value, loopCondVar: Value,
         parent: Block): ForInClosedRange {
         let expr = ForInClosedRange(inductionVar, loopCondVar, parent)
-        parent.AppendExpression(expr)
         expr.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(expr.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(expr))
         CreateLocalVar(resultTy, "%${expr.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", expr)
@@ -672,7 +644,6 @@ public class CHIRBuilder {
     public func CreateGetInstantiateValue(resultTy: Type, value: Value, instantiatedTypes: ArrayList<Type>,
         parent: Block): GetInstantiateValue {
         let expr = GetInstantiateValue(value, instantiatedTypes, parent)
-        parent.AppendExpression(expr)
         expr.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(expr.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(expr))
         CreateLocalVar(resultTy, "%${expr.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", expr)
@@ -684,7 +655,6 @@ public class CHIRBuilder {
         genericTypeParams!: ArrayList<GenericType> = ArrayList<GenericType>()): Lambda {
         let expr = Lambda(funcTy, parent, isLocalFunc: isLocalFunc, identifier: identifier,
             srcCodeIdentifier: srcCodeIdentifier, genericTypeParams: genericTypeParams)
-        parent.AppendExpression(expr)
         expr.ConnectOperandsAndGroups()
         let bg = parent.GetFuncOrLambdaBody().getOrThrow()
         StoreAllocatedPtrInFuncOrLambda(bg, ptr: Some(expr))
@@ -695,7 +665,6 @@ public class CHIRBuilder {
 
     public func CreateLambda(resultTy: Type, operands: ArrayList<Value>, body: BlockGroup, parent: Block): Lambda {
         let expr = Lambda(operands, body, parent)
-        parent.AppendExpression(expr)
         expr.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(expr.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(expr))
         CreateLocalVar(resultTy, "%${expr.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", expr)
@@ -704,7 +673,6 @@ public class CHIRBuilder {
 
     public func CreateGoTo(target: Block, parent: Block): GoTo {
         let term = GoTo(target, parent)
-        parent.AppendExpression(term)
         term.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(term.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(term))
         return term
@@ -712,7 +680,6 @@ public class CHIRBuilder {
 
     public func CreateBranch(cond: Value, trueBlock: Block, falseBlock: Block, parent: Block): Branch {
         let term = Branch(cond, trueBlock, falseBlock, parent)
-        parent.AppendExpression(term)
         term.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(term.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(term))
         return term
@@ -721,7 +688,6 @@ public class CHIRBuilder {
     public func CreateMultiBranch(cond: Value, defaultBlock: Block, vals: ArrayList<UInt64>,
         succs: ArrayList<Block>, parent: Block): MultiBranch {
         let term = MultiBranch(cond, defaultBlock, vals, succs, parent)
-        parent.AppendExpression(term)
         term.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(term.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(term))
         return term
@@ -729,7 +695,6 @@ public class CHIRBuilder {
 
     public func CreateExit(value: Option<Value>, parent: Block): Exit {
         let term = Exit(value, parent)
-        parent.AppendExpression(term)
         term.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(term.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(term))
         return term
@@ -737,7 +702,6 @@ public class CHIRBuilder {
 
     public func CreateRaiseException(value: Value, parent: Block): RaiseException {
         let term = RaiseException(value, parent)
-        parent.AppendExpression(term)
         term.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(term.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(term))
         return term
@@ -745,116 +709,104 @@ public class CHIRBuilder {
 
     public func CreateRaiseException(value: Value, exceptionBlock: Block, parent: Block): RaiseException {
         let term = RaiseException(value, exceptionBlock, parent)
-        parent.AppendExpression(term)
         term.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(term.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(term))
         return term
     }
 
-    public func CreateApplyWithException(resultTy: Type, callee: Value, callContext: FuncCallContext,
-        successBlock: Block, errorBlock: Block, parent: Block): ApplyWithException {
-        let term = ApplyWithException(callee, callContext, successBlock, errorBlock, parent)
-        parent.AppendExpression(term)
-        term.ConnectOperandsAndGroups()
-        StoreAllocatedPtrInFuncOrLambda(term.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(term))
-        CreateLocalVar(resultTy, "%${term.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", term)
-        return term
-    }
-
-    public func CreateInvokeWithException(resultTy: Type, callContext: InvokeCallContext, successBlock: Block,
-        errorBlock: Block, parent: Block): InvokeWithException {
-        let term = InvokeWithException(callContext, successBlock, errorBlock, parent)
-        parent.AppendExpression(term)
+    public func CreateTryApply(resultTy: Type, callee: Value, callContext: FuncCallContext,
+        successBlock: Block, errorBlock: Block, parent: Block): TryApply {
+        let term = TryApply(callee, callContext, successBlock, errorBlock, parent)
         term.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(term.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(term))
         CreateLocalVar(resultTy, "%${term.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", term)
         return term
     }
 
-    public func CreateInvokeStaticWithException(resultTy: Type, callContext: InvokeCallContext, successBlock: Block,
-        errorBlock: Block, parent: Block): InvokeStaticWithException {
-        let term = InvokeStaticWithException(callContext, successBlock, errorBlock, parent)
-        parent.AppendExpression(term)
+    public func CreateTryInvoke(resultTy: Type, callContext: InvokeCallContext, successBlock: Block,
+        errorBlock: Block, parent: Block): TryInvoke {
+        let term = TryInvoke(callContext, successBlock, errorBlock, parent)
         term.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(term.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(term))
         CreateLocalVar(resultTy, "%${term.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", term)
         return term
     }
 
-    public func CreateUnaryIntOpWithException(resultTy: Type, opKind: ExprKind, operand: Value, successBlock: Block,
-        errorBlock: Block, parent: Block): IntOpWithException {
-        let term = IntOpWithException(opKind, operand, successBlock, errorBlock, parent)
-        parent.AppendExpression(term)
+    public func CreateTryInvokeStatic(resultTy: Type, callContext: InvokeCallContext, successBlock: Block,
+        errorBlock: Block, parent: Block): TryInvokeStatic {
+        let term = TryInvokeStatic(callContext, successBlock, errorBlock, parent)
         term.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(term.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(term))
         CreateLocalVar(resultTy, "%${term.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", term)
         return term
     }
 
-    public func CreateBinaryIntOpWithException(resultTy: Type, opKind: ExprKind, left: Value, right: Value,
-        successBlock: Block, errorBlock: Block, parent: Block): IntOpWithException {
-        let term = IntOpWithException(opKind, left, right, successBlock, errorBlock, parent)
-        parent.AppendExpression(term)
+    public func CreateTryUnaryExpression(resultTy: Type, opKind: ExprKind, operand: Value, successBlock: Block,
+        errorBlock: Block, parent: Block): TryUnaryExpression {
+        let term = TryUnaryExpression(ToUnaryExprKind(opKind), operand, successBlock, errorBlock, parent)
         term.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(term.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(term))
         CreateLocalVar(resultTy, "%${term.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", term)
         return term
     }
 
-    public func CreateTypeCastWithException(resultTy: Type, source: Value, successBlock: Block, errorBlock: Block,
-        parent: Block): TypeCastWithException {
-        let term = TypeCastWithException(source, successBlock, errorBlock, parent)
-        parent.AppendExpression(term)
+    public func CreateTryBinaryExpression(resultTy: Type, opKind: ExprKind, left: Value, right: Value,
+        successBlock: Block, errorBlock: Block, parent: Block): TryBinaryExpression {
+        let term = TryBinaryExpression(ToBinaryExprKind(opKind), left, right, successBlock, errorBlock, parent)
         term.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(term.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(term))
         CreateLocalVar(resultTy, "%${term.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", term)
         return term
     }
 
-    public func CreateIntrinsicWithException(resultTy: Type, callContext: IntrisicCallContext, successBlock: Block,
-        errorBlock: Block, parent: Block): IntrinsicWithException {
-        let term = IntrinsicWithException(callContext, successBlock, errorBlock, parent)
-        parent.AppendExpression(term)
+    public func CreateTryNumericCast(resultTy: Type, source: Value, successBlock: Block, errorBlock: Block,
+        parent: Block): TryNumericCast {
+        let term = TryNumericCast(source, successBlock, errorBlock, parent)
         term.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(term.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(term))
         CreateLocalVar(resultTy, "%${term.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", term)
         return term
     }
 
-    public func CreateAllocateWithException(resultTy: Type, allocatedTy: Type, successBlock: Block, errorBlock: Block,
-        parent: Block): AllocateWithException {
-        let term = AllocateWithException(allocatedTy, successBlock, errorBlock, parent)
-        parent.AppendExpression(term)
+    public func CreateTryIntrinsic(resultTy: Type, callContext: IntrisicCallContext, successBlock: Block,
+        errorBlock: Block, parent: Block): TryIntrinsic {
+        let term = TryIntrinsic(callContext, successBlock, errorBlock, parent)
         term.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(term.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(term))
         CreateLocalVar(resultTy, "%${term.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", term)
         return term
     }
 
-    public func CreateRawArrayAllocateWithException(resultTy: Type, elementTy: Type, size: Value,
-        successBlock: Block, errorBlock: Block, parent: Block): RawArrayAllocateWithException {
-        let term = RawArrayAllocateWithException(elementTy, size, successBlock, errorBlock, parent)
-        parent.AppendExpression(term)
+    public func CreateTryAllocate(resultTy: Type, allocatedTy: Type, successBlock: Block, errorBlock: Block,
+        parent: Block): TryAllocate {
+        let term = TryAllocate(allocatedTy, successBlock, errorBlock, parent)
         term.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(term.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(term))
         CreateLocalVar(resultTy, "%${term.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", term)
         return term
     }
 
-    public func CreateSpawnWithException(resultTy: Type, value: Value, successBlock: Block, errorBlock: Block,
-        parent: Block): SpawnWithException {
-        let term = SpawnWithException(value, successBlock, errorBlock, parent)
-        parent.AppendExpression(term)
+    public func CreateTryRawArrayAllocate(resultTy: Type, elementTy: Type, size: Value,
+        successBlock: Block, errorBlock: Block, parent: Block): TryRawArrayAllocate {
+        let term = TryRawArrayAllocate(elementTy, size, successBlock, errorBlock, parent)
         term.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(term.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(term))
         CreateLocalVar(resultTy, "%${term.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", term)
         return term
     }
 
-    public func CreateSpawnWithException(resultTy: Type, value: Value, arg: Value, successBlock: Block,
-        errorBlock: Block, parent: Block): SpawnWithException {
-        let term = SpawnWithException(value, arg, successBlock, errorBlock, parent)
-        parent.AppendExpression(term)
+    public func CreateTrySpawn(resultTy: Type, value: Value, successBlock: Block, errorBlock: Block,
+        parent: Block): TrySpawn {
+        let term = TrySpawn(value, successBlock, errorBlock, parent)
+        term.ConnectOperandsAndGroups()
+        StoreAllocatedPtrInFuncOrLambda(term.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(term))
+        CreateLocalVar(resultTy, "%${term.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", term)
+        return term
+    }
+
+    public func CreateTrySpawn(resultTy: Type, value: Value, arg: Value, successBlock: Block,
+        errorBlock: Block, parent: Block): TrySpawn {
+        let term = TrySpawn(value, arg, successBlock, errorBlock, parent)
         term.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(term.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(term))
         CreateLocalVar(resultTy, "%${term.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", term)

@@ -9,11 +9,12 @@ import cjcj::chir.IntType
 import cjcj::chir.NumericType
 import cjcj::chir.Type
 import cjcj::chir.TypeCast
+import cjcj::chir.NumericCastBase
 import cjcj::chir.TypeKind
 import cjcj::chir.TypeKindIndex
-import cjcj::chir.TransformToConcrete
-import cjcj::chir.TransformToGeneric
-import cjcj::chir.UnBox
+import cjcj::chir.CastToConcrete
+import cjcj::chir.CastToGeneric
+import cjcj::chir.UnBoxToValue
 import cjcj::chir.UnBoxToRef
 import cjcj::utils.{CJC_ASSERT, CJC_ASSERT_WITH_MSG, OverflowStrategy, StaticCast}
 import cjcj::option.ArchType
@@ -92,17 +93,17 @@ public func EmitTypeCastExpression(irBuilder: IRBuilder2, chirExpr: Expression):
     if (let Some(boxExpr) <- (chirExpr as ChirBox)) {
         return EmitBoxExpression(irBuilder, boxExpr)
     }
-    if (let Some(unboxExpr) <- (chirExpr as UnBox)) {
+    if (let Some(unboxExpr) <- (chirExpr as UnBoxToValue)) {
         return EmitUnBoxExpression(irBuilder, unboxExpr)
     }
     if (let Some(unboxToRefExpr) <- (chirExpr as UnBoxToRef)) {
         return EmitUnBoxToRefExpression(irBuilder, unboxToRefExpr)
     }
-    if (let Some(transformExpr) <- (chirExpr as TransformToConcrete)) {
-        return EmitTransformToConcreteExpression(irBuilder, transformExpr)
+    if (let Some(transformExpr) <- (chirExpr as CastToConcrete)) {
+        return EmitCastToConcreteExpression(irBuilder, transformExpr)
     }
-    if (let Some(transformExpr2) <- (chirExpr as TransformToGeneric)) {
-        return EmitTransformToGenericExpression(irBuilder, transformExpr2)
+    if (let Some(transformExpr2) <- (chirExpr as CastToGeneric)) {
+        return EmitCastToGenericExpression(irBuilder, transformExpr2)
     }
     let sourceOperand = chirExpr.GetOperand(0)
     let sourceCGValue = irBuilder.GetCGModule().GetMappedCGValue(sourceOperand)
@@ -110,7 +111,7 @@ public func EmitTypeCastExpression(irBuilder: IRBuilder2, chirExpr: Expression):
     if (let Some(targetTy) <- chirExpr.GetResultType()) {
         let targetLLVMType = CGType.GetOrCreate(irBuilder.GetCGModule(), targetTy).GetLLVMType()
         if (let Some(sourceTy) <- sourceOperand.GetType()) {
-            let overflowStrategy = if (let Some(typeCast) <- (chirExpr as TypeCast)) {
+            let overflowStrategy = if (let Some(typeCast) <- (chirExpr as NumericCastBase)) {
                 typeCast.GetOverflowStrategy()
             } else {
                 OverflowStrategy.NA
@@ -127,7 +128,7 @@ private func EmitBoxExpression(irBuilder: IRBuilder2, boxExpr: ChirBox): LLVMVal
     let sourceValue = boxExpr.GetSourceValue()
     let sourceCGValue = irBuilder.GetCGModule().GetMappedCGValue(sourceValue)
     let sourceRawValue = sourceCGValue.GetRawValue()
-    let sourceTy = boxExpr.GetSourceTy() ?? return sourceRawValue
+    let sourceTy = boxExpr.GetSourceType() ?? return sourceRawValue
     let sourceCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), sourceTy)
     if (let Some(targetTy) <- boxExpr.GetResultType()) {
         if (let Some(result) <- GenerateGenericTypeCast(irBuilder, sourceCGValue, sourceTy, targetTy)) {
@@ -177,16 +178,16 @@ private func EmitBoxExpression(irBuilder: IRBuilder2, boxExpr: ChirBox): LLVMVal
     return sourceRawValue
 }
 
-private func EmitUnBoxExpression(irBuilder: IRBuilder2, unboxExpr: UnBox): LLVMValueRef {
+private func EmitUnBoxExpression(irBuilder: IRBuilder2, unboxExpr: UnBoxToValue): LLVMValueRef {
     let sourceValue = unboxExpr.GetSourceValue()
     let sourceCGValue = irBuilder.GetCGModule().GetMappedCGValue(sourceValue)
     let sourceRawValue = sourceCGValue.GetRawValue()
-    let targetTy = unboxExpr.GetTargetTy() ?? return sourceRawValue
+    let targetTy = unboxExpr.GetTargetType() ?? return sourceRawValue
     let targetCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), targetTy)
     if (let Some(topLevelFunc) <- unboxExpr.GetTopLevelFunc()) {
         if (let Some(srcFuncType) <- topLevelFunc.GetOverrideSrcFuncType()) {
             if (sourceValue.IsParameter()) {
-                if (let Some(sourceTy) <- unboxExpr.GetSourceTy()) {
+                if (let Some(sourceTy) <- unboxExpr.GetSourceType()) {
                     if (DeRef(sourceTy).IsBox()) {
                         var idx: Int64 = 0
                         while (idx < topLevelFunc.GetNumOfParams()) {
@@ -222,7 +223,7 @@ private func EmitUnBoxExpression(irBuilder: IRBuilder2, unboxExpr: UnBox): LLVMV
 private func EmitUnBoxToRefExpression(irBuilder: IRBuilder2, unboxExpr: UnBoxToRef): LLVMValueRef {
     let sourceCGValue = irBuilder.GetCGModule().GetMappedCGValue(unboxExpr.GetSourceValue())
     let sourceRawValue = sourceCGValue.GetRawValue()
-    let targetTy = unboxExpr.GetTargetTy() ?? return sourceRawValue
+    let targetTy = unboxExpr.GetTargetType() ?? return sourceRawValue
     let derefTargetTy = targetTy.StripAllRefs()
     let targetCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), derefTargetTy)
     if (targetCGType.GetSize().isSome()) {
@@ -231,12 +232,12 @@ private func EmitUnBoxToRefExpression(irBuilder: IRBuilder2, unboxExpr: UnBoxToR
     return sourceRawValue
 }
 
-private func EmitTransformToGenericExpression(irBuilder: IRBuilder2, transformExpr: TransformToGeneric): LLVMValueRef {
+private func EmitCastToGenericExpression(irBuilder: IRBuilder2, transformExpr: CastToGeneric): LLVMValueRef {
     let sourceValue = transformExpr.GetSourceValue()
     let cgMod = irBuilder.GetCGModule()
     let sourceCGValue = cgMod.GetMappedCGValue(sourceValue)
-    let targetTy = transformExpr.GetTargetTy() ?? return sourceCGValue.GetRawValue()
-    let sourceTy = transformExpr.GetSourceTy() ?? return sourceCGValue.GetRawValue()
+    let targetTy = transformExpr.GetTargetType() ?? return sourceCGValue.GetRawValue()
+    let sourceTy = transformExpr.GetSourceType() ?? return sourceCGValue.GetRawValue()
     let srcCGType = CGType.GetOrCreate(cgMod, sourceTy)
     let targetCGType = CGType.GetOrCreate(cgMod, targetTy)
     if (srcCGType.IsReference() && targetTy.IsGeneric()) {
@@ -279,15 +280,15 @@ private func EmitTransformToGenericExpression(irBuilder: IRBuilder2, transformEx
     return boxedValue
 }
 
-private func EmitTransformToConcreteExpression(irBuilder: IRBuilder2,
-    transformExpr: TransformToConcrete): LLVMValueRef {
+private func EmitCastToConcreteExpression(irBuilder: IRBuilder2,
+    transformExpr: CastToConcrete): LLVMValueRef {
     let cgMod = irBuilder.GetCGModule()
     let sourceValue = transformExpr.GetSourceValue()
     var cgValue = cgMod.GetMappedCGValue(sourceValue)
-    let targetTy = transformExpr.GetTargetTy().getOrThrow()
+    let targetTy = transformExpr.GetTargetType().getOrThrow()
     let targetCGType = CGType.GetOrCreate(cgMod, targetTy)
     CJC_ASSERT_WITH_MSG(targetCGType.GetSize().isSome(), "target type must have size")
-    var sourceTy = transformExpr.GetSourceTy().getOrThrow()
+    var sourceTy = transformExpr.GetSourceType().getOrThrow()
     var sourceCGType = CGType.GetOrCreate(cgMod, sourceTy)
 
     if (IsGenericRef(sourceTy)) {
@@ -472,9 +473,10 @@ public func GenerateTupleTypeCast(irBuilder: IRBuilder2, sourceCGValue: CGValue,
     return irBuilder.CreateBitOrPointerCast(sourceCGValue.GetRawValue(), targetPointerType)
 }
 
-public func GenerateTypeCast(irBuilder: IRBuilder2, typeCast: CHIRTypeCastWrapper): LLVMValueRef {
-    let targetTyOption = typeCast.GetTargetTy()
-    let sourceTyOption = typeCast.GetSourceTy()
+public func GenerateTypeCast(irBuilder: IRBuilder2, typeCast: TypeCast): LLVMValueRef {
+    let overflowStrategy = if (let Some(numericCast) <- (typeCast as NumericCastBase)) { numericCast.GetOverflowStrategy() } else { OverflowStrategy.NA }
+    let targetTyOption = typeCast.GetTargetType()
+    let sourceTyOption = typeCast.GetSourceType()
     CJC_ASSERT(sourceTyOption.isSome() && targetTyOption.isSome())
     let targetTy = targetTyOption.getOrThrow()
     let sourceTy = sourceTyOption.getOrThrow()
@@ -515,7 +517,7 @@ public func GenerateTypeCast(irBuilder: IRBuilder2, typeCast: CHIRTypeCastWrappe
         return GenerateIntegerToFloatConvExpr(irBuilder, sourceValue, targetType.GetLLVMType(),
             StaticCast<IntType>(sourceTy))
     } else if (targetTy.IsInteger() && sourceTy.IsFloat()) {
-        return GenerateFloatToIntegerConvExpr(irBuilder, typeCast.GetOverflowStrategy(), sourceValue, targetType,
+        return GenerateFloatToIntegerConvExpr(irBuilder, overflowStrategy, sourceValue, targetType,
             StaticCast<FloatType>(sourceTy))
     } else if (irBuilder.GetTypeKindFromType(targetTy) == TypeKind.TYPE_UINT32 && sourceTy.IsRune()) {
         return sourceValue
@@ -532,7 +534,7 @@ public func GenerateTypeCast(irBuilder: IRBuilder2, typeCast: CHIRTypeCastWrappe
         let castedTo = unsafe { LLVMPointerType(functionType, addressSpace) }
         return irBuilder.CreateBitOrPointerCast(sourceValue, castedTo)
     } else if (targetTy.IsInteger() && sourceTy.IsInteger()) {
-        return GenerateIntegerConversionExpr(irBuilder, typeCast.GetOverflowStrategy(), sourceValue, targetType,
+        return GenerateIntegerConversionExpr(irBuilder, overflowStrategy, sourceValue, targetType,
             StaticCast<IntType>(sourceTy))
     } else if (targetType.GetLLVMType().toUIntNative() == sourceType.GetLLVMType().toUIntNative()) {
         return sourceValue

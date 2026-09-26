@@ -1,11 +1,9 @@
 package cjcj::parse
 
 import cjcj::ast.ASTCloner
-import cjcj::ast.InsertObjCSyntheticClassDecl
 import cjcj::ast.InsertPropGetterSignature
 import cjcj::ast.InsertPropSetterSignature
 import cjcj::ast.INVALID_IDENTIFIER
-import cjcj::ast.IsObjCDeclAppropriateForSyntheticClassGeneration
 import cjcj::ast.Node
 import cjcj::ast.IsMirror
 import cjcj::ast.SortModifierByPos
@@ -198,7 +196,7 @@ extend ParserImpl {
         Walker(file, visitPre: visitPre).Walk()
     }
 
-    private func ParseForeignDecls(modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): ArrayList<Decl> {
+    func ParseForeignDecls(modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): ArrayList<Decl> {
         let ret = ArrayList<Decl>()
         if (!Skip(TokenKind.LCURL)) {
             ret.add(ParseDecl(ScopeKind.TOPLEVEL, modifiers, annos))
@@ -207,7 +205,7 @@ extend ParserImpl {
         CheckNoDeprecatedAnno(annos, "foreign block")
         let leftCurlPos = lastToken.Begin()
         SkipBlank(TokenKind.SEMI)
-        inForeignBlock = true
+        SetForeignBlockModifiers(modifiers)
         while (true) {
             if (Skip(TokenKind.RCURL)) {
                 break
@@ -222,7 +220,7 @@ extend ParserImpl {
             ret.add(ParseDecl(ScopeKind.TOPLEVEL, clonedModifiers, clonedAnnos))
             SkipBlank(TokenKind.SEMI)
         }
-        inForeignBlock = false
+        foreignBlockModifiers.clear()
         return ret
     }
 
@@ -1041,7 +1039,7 @@ extend ParserImpl {
         let outerDecl = decl.outerDecl.getOrThrow()
         if (outerDecl.TestAttr(Attribute.JAVA_MIRROR_SUBTYPE) &&
             !outerDecl.TestAttr(Attribute.JAVA_MIRROR)) {
-            if (decl.GetGeneric().isSome() && !decl.TestAttr(Attribute.JAVA_CJ_MAPPING)) {
+            if (decl.GetGeneric().isSome()) {
                 FFIParserImpl(this).Java().DiagJavaImplCannotBeGeneric(decl)
                 return
             }
@@ -1071,7 +1069,7 @@ extend ParserImpl {
     // C++ anchor: cangjie_compiler/src/Parse/ParseDecl.cpp:564-619
     private func CheckObjCInteropMember(member: Decl): Unit {
         let outerDecl = member.outerDecl.getOrThrow()
-        if (outerDecl.TestAttr(Attribute.OBJ_C_MIRROR_SUBTYPE)) {
+        if (outerDecl.TestAttr(Attribute.OBJ_C_IMPL)) {
             if (member.GetGeneric().isSome()) {
                 outerDecl.EnableAttr(Attribute.IS_BROKEN)
                 member.EnableAttr(Attribute.IS_BROKEN)
@@ -2146,11 +2144,10 @@ extend ParserImpl {
             EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.CLASS))
             FFIParserImpl(this).CheckClassLikeSignature(ret, annos)
             SetPrimaryDecl(ret.identifier.Val(), isRawId: ret.identifier.IsRaw())
-            ParseClassLikeBody(ret, ScopeKind.CLASS_BODY)
+            ret.body = ParseClassBody(ret)
             RevertPrimaryDecl()
             ret.end = lastToken.End()
         }
-        CheckCJMappingAttr(ret)
         return ret
     }
 
@@ -2168,10 +2165,6 @@ extend ParserImpl {
             FFIParserImpl(this).CheckClassLikeSignature(ret, annos)
             ParseClassLikeBody(ret, ScopeKind.INTERFACE_BODY)
             ret.end = lastToken.End()
-        }
-        CheckCJMappingAttr(ret)
-        if (IsObjCDeclAppropriateForSyntheticClassGeneration(ret)) {
-            let _ = InsertObjCSyntheticClassDecl(ret, currentFile.getOrThrow())
         }
         return ret
     }
@@ -2204,7 +2197,6 @@ extend ParserImpl {
             RevertPrimaryDecl()
             ret.end = lastToken.End()
         }
-        CheckCJMappingAttr(ret)
         return ret
     }
 
@@ -2295,7 +2287,6 @@ extend ParserImpl {
             }
             ret.end = ret.rightCurlPos + 1
         }
-        CheckCJMappingAttr(ret)
         return ret
     }
 
@@ -2442,37 +2433,6 @@ extend ParserImpl {
         }
     }
 
-    // C++ anchor: cangjie_compiler/src/Parse/ParseDecl.cpp:829-857
-    public func CheckCJMappingAttr(decl: Decl): Unit {
-        if (!enableInteropCJMapping) {
-            return
-        }
-        if (decl.TestAnyAttr(Attribute.JAVA_MIRROR, Attribute.JAVA_MIRROR_SUBTYPE) ||
-            decl.TestAnyAttr(Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_MIRROR_SUBTYPE)) {
-            return
-        }
-        // Currently only support struct decl, enum decl, class decl interface decl, extend decl.
-        let isCJMappingClass = decl.astKind == ASTKind.CLASS_DECL && !decl.TestAttr(Attribute.ABSTRACT)
-        // Support java type.
-        if (decl.astKind == ASTKind.STRUCT_DECL || decl.astKind == ASTKind.ENUM_DECL || isCJMappingClass ||
-            decl.astKind == ASTKind.INTERFACE_DECL) {
-            if (!decl.TestAttr(Attribute.PUBLIC)) {
-                return
-            }
-            match (compileOptions.targetInteropLanguage) {
-                case InteropLanguage.Java => decl.EnableAttr(Attribute.JAVA_CJ_MAPPING)
-                case InteropLanguage.ObjC => decl.EnableAttr(Attribute.OBJ_C_CJ_MAPPING)
-                case _ => ()
-            }
-        }
-        if (decl.astKind == ASTKind.EXTEND_DECL) {
-            match (compileOptions.targetInteropLanguage) {
-                case InteropLanguage.Java => decl.EnableAttr(Attribute.JAVA_CJ_MAPPING)
-                case _ => ()
-            }
-        }
-    }
-
     public func ParseInheritedTypes(decl: InheritableDecl): Unit {
         decl.upperBoundPos = lastToken.Begin()
         while (true) {
@@ -2516,18 +2476,69 @@ extend ParserImpl {
         return ty.astKind == ASTKind.REF_TYPE || ty.astKind == ASTKind.QUALIFIED_TYPE
     }
 
+    // Upstream 293cf32a, src/Parse/ParseDecl.cpp:1079.
+    private func ParseClassBody(cd: ClassDecl): ClassBody {
+        let ret = ClassBody()
+        let brokenHeader = !Skip(TokenKind.LCURL)
+        if (brokenHeader) {
+            ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_left_brace, lookahead,
+                ConvertToken(lookahead)).Emit()
+            ConsumeUntilDecl(TokenKind.LCURL)
+            if (!Skip(TokenKind.LCURL)) {
+                ret.EnableAttr(Attribute.HAS_BROKEN)
+                ret.EnableAttr(Attribute.IS_BROKEN)
+                return ret
+            }
+        }
+        // Parse a recovered body in class scope, including its matching closing brace.
+        ret.leftCurlPos = lastToken.Begin()
+        ret.begin = lookahead.Begin()
+        while (true) {
+            let hasNLorSEMI = SkipNLOrSemi()
+            if (CheckSkipRcurOrPrematureEnd(ret)) {
+                break
+            }
+            if (!ret.decls.isEmpty() && !hasNLorSEMI) {
+                DiagExpectSemiOrNewline()
+            }
+            let decl = ParseDecl(ScopeKind.CLASS_BODY)
+            if (decl.IsInvalid()) {
+                continue
+            }
+            SetMemberParentInheritableDecl(cd, decl)
+            if (let Some(ctor) <- (decl as FuncDecl)) {
+                if (ctor.TestAttr(Attribute.CONSTRUCTOR)) {
+                    if (cd.TestAttr(Attribute.OBJ_C_MIRROR)) {
+                        ctor.EnableAttr(Attribute.OBJ_C_MIRROR)
+                    }
+                    CheckInitCtorDeclBody(ctor)
+                }
+            }
+            if (let Some(fd) <- (decl as FuncDecl)) {
+                CheckClassLikeFuncBodyAbstractness(fd)
+            } else if (let Some(pd) <- (decl as PropDecl)) {
+                CheckClassLikePropAbstractness(pd)
+            }
+            CheckJavaInteropMember(decl)
+            CheckObjCInteropMember(decl)
+            if (decl.astKind == ASTKind.PRIMARY_CTOR_DECL && decl.identifier != cd.identifier) {
+                ret.decls.add(InvalidDecl(decl.begin))
+                continue
+            }
+            ret.decls.add(decl)
+        }
+        if (brokenHeader) {
+            // Delay HAS_BROKEN so a genuinely missing closing brace is still diagnosed.
+            ret.EnableAttr(Attribute.HAS_BROKEN)
+            ret.EnableAttr(Attribute.IS_BROKEN)
+        }
+        ret.end = lastToken.End()
+        return ret
+    }
+
     public func ParseClassLikeBody(ret: InheritableDecl, scopeKind: ScopeKind): Unit {
         if (!Skip(TokenKind.LCURL)) {
-            if (let Some(classDecl) <- (ret as ClassDecl)) {
-                ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_left_brace, lookahead,
-                    ConvertToken(lookahead)).Emit()
-                ConsumeUntilDecl(TokenKind.LCURL)
-                Skip(TokenKind.LCURL)
-                let body = ClassBody()
-                body.EnableAttr(Attribute.HAS_BROKEN)
-                body.EnableAttr(Attribute.IS_BROKEN)
-                classDecl.body = body
-            } else if (let Some(interfaceDecl) <- (ret as InterfaceDecl)) {
+            if (let Some(interfaceDecl) <- (ret as InterfaceDecl)) {
                 ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_left_brace, lookahead,
                     ConvertToken(lookahead)).Emit()
                 let body = InterfaceBody()
@@ -2552,16 +2563,7 @@ extend ParserImpl {
         let leftCurl = lastToken.Begin()
         SetDeclBodyLeftCurl(ret, leftCurl)
         while (true) {
-            if (let Some(classDecl) <- (ret as ClassDecl)) {
-                let body = classDecl.body.getOrThrow()
-                let hasNLorSEMI = SkipNLOrSemi()
-                if (CheckSkipRcurOrPrematureEnd(body)) {
-                    break
-                }
-                if (!body.decls.isEmpty() && !hasNLorSEMI) {
-                    DiagExpectSemiOrNewline()
-                }
-            } else if (let Some(interfaceDecl) <- (ret as InterfaceDecl)) {
+            if (let Some(interfaceDecl) <- (ret as InterfaceDecl)) {
                 SkipBlank(TokenKind.SEMI)
                 if (CheckSkipRcurOrPrematureEnd(interfaceDecl.body.getOrThrow())) {
                     break
@@ -2585,15 +2587,7 @@ extend ParserImpl {
             let member = ParseDecl(scopeKind)
             if (let Some(ctor) <- (member as FuncDecl)) {
                 if (ctor.TestAttr(Attribute.CONSTRUCTOR)) {
-                    if (let Some(classDecl) <- (ret as ClassDecl)) {
-                        if (classDecl.TestAttr(Attribute.JAVA_MIRROR)) {
-                            ctor.EnableAttr(Attribute.JAVA_MIRROR)
-                        }
-                        if (classDecl.TestAttr(Attribute.OBJ_C_MIRROR)) {
-                            ctor.EnableAttr(Attribute.OBJ_C_MIRROR)
-                        }
-                        CheckInitCtorDeclBody(ctor)
-                    } else if (let Some(structDecl) <- (ret as StructDecl)) {
+                    if (let Some(structDecl) <- (ret as StructDecl)) {
                         if (structDecl.TestAttr(Attribute.JAVA_MIRROR)) {
                             ctor.EnableAttr(Attribute.JAVA_MIRROR)
                         }
@@ -2603,8 +2597,7 @@ extend ParserImpl {
             }
             if (!member.IsInvalid()) {
                 SetMemberParentInheritableDecl(ret, member)
-                if (ScopeKindEquals(scopeKind, ScopeKind.CLASS_BODY) ||
-                    ScopeKindEquals(scopeKind, ScopeKind.INTERFACE_BODY)) {
+                if (ScopeKindEquals(scopeKind, ScopeKind.INTERFACE_BODY)) {
                     if (let Some(funcDecl) <- (member as FuncDecl)) {
                         CheckClassLikeFuncBodyAbstractness(funcDecl)
                     } else if (let Some(propDecl) <- (member as PropDecl)) {
@@ -2615,12 +2608,7 @@ extend ParserImpl {
                 }
                 // C++: Parse/ParseDecl.cpp:1150-1153 / 1602-1605
                 if (member.astKind == ASTKind.PRIMARY_CTOR_DECL) {
-                    if (let Some(classDecl) <- (ret as ClassDecl)) {
-                        if (member.identifier != classDecl.identifier) {
-                            AddBodyMember(ret, InvalidDecl(member.begin))
-                            continue
-                        }
-                    } else if (let Some(structDecl) <- (ret as StructDecl)) {
+                    if (let Some(structDecl) <- (ret as StructDecl)) {
                         if (member.identifier != structDecl.identifier) {
                             AddBodyMember(ret, InvalidDecl(member.begin))
                             continue
@@ -2630,9 +2618,7 @@ extend ParserImpl {
                 AddBodyMember(ret, member)
             }
         }
-        if (let Some(classDecl) <- (ret as ClassDecl)) {
-            classDecl.body.getOrThrow().end = lastToken.End()
-        } else if (let Some(interfaceDecl) <- (ret as InterfaceDecl)) {
+        if (let Some(interfaceDecl) <- (ret as InterfaceDecl)) {
             let body = interfaceDecl.body.getOrThrow()
             body.end = body.rightCurlPos + 1
         } else if (let Some(structDecl) <- (ret as StructDecl)) {
@@ -2684,12 +2670,7 @@ extend ParserImpl {
     }
 
     private func SetDeclBodyLeftCurl(ret: InheritableDecl, pos: Position): Unit {
-        if (let Some(classDecl) <- (ret as ClassDecl)) {
-            let body = ClassBody()
-            body.leftCurlPos = pos
-            body.begin = pos
-            classDecl.body = body
-        } else if (let Some(interfaceDecl) <- (ret as InterfaceDecl)) {
+        if (let Some(interfaceDecl) <- (ret as InterfaceDecl)) {
             let body = InterfaceBody()
             body.leftCurlPos = pos
             body.begin = pos
@@ -2705,11 +2686,7 @@ extend ParserImpl {
     }
 
     private func AddBodyMember(ret: InheritableDecl, member: Decl): Unit {
-        if (let Some(classDecl) <- (ret as ClassDecl)) {
-            if (let Some(body) <- classDecl.body) {
-                body.decls.add(member)
-            }
-        } else if (let Some(interfaceDecl) <- (ret as InterfaceDecl)) {
+        if (let Some(interfaceDecl) <- (ret as InterfaceDecl)) {
             if (let Some(body) <- interfaceDecl.body) {
                 body.decls.add(member)
             }
@@ -3329,7 +3306,7 @@ extend ParserImpl {
         }
         let modifiers = SortModifierByPos(decl.modifiers)
         var index: Int64 = 0
-        if (inForeignBlock) {
+        if (!foreignBlockModifiers.isEmpty()) {
             while (index < modifiers.size && modifiers[index].modifier != TokenKind.FOREIGN) {
                 index++
             }

@@ -32,24 +32,22 @@ private enum MetadataKind {
     | PKG_METADATA | STRUCT_METADATA | CLASS_METADATA | ENUM_METADATA | GV_METADATA | GF_METADATA | COUNT
 }
 
-private enum GenReflectMode {
+private enum GenReflectMode <: Equatable<GenReflectMode> {
     | NO_REFLECT | FULL_REFLECT
-}
 
-private func GenReflectModeIndex(mode: GenReflectMode): Int64 {
-    return match (mode) {
-        case GenReflectMode.NO_REFLECT => 0
-        case GenReflectMode.FULL_REFLECT => 1
-    }
-}
-
-extend GenReflectMode <: Equatable<GenReflectMode> {
     public operator func ==(right: GenReflectMode): Bool {
         return GenReflectModeIndex(this) == GenReflectModeIndex(right)
     }
 
     public operator func !=(right: GenReflectMode): Bool {
         return !(this == right)
+    }
+}
+
+private func GenReflectModeIndex(mode: GenReflectMode): Int64 {
+    return match (mode) {
+        case GenReflectMode.NO_REFLECT => 0
+        case GenReflectMode.FULL_REFLECT => 1
     }
 }
 
@@ -545,7 +543,12 @@ private class ClassMetadataInfo <: MetadataInfo {
         if (IsClassForBoxType(cd.GetSrcCodeIdentifier())) {
             metadataType = ExtraAttribute.BOX_CLASS
         }
-        return GenerateAttrsMetadata(cd.GetAttributeInfo(), metadataType, cd.GetAnnoInfo())
+        // Abstract classes are implicitly open; preserve the original CHIR attributes.
+        let attrInfo = cd.GetAttributeInfo()
+        if (cd.IsClass() && cd.TestAttr(Attribute.ABSTRACT)) {
+            attrInfo.Enable(Attribute.VIRTUAL)
+        }
+        return GenerateAttrsMetadata(attrInfo, metadataType, cd.GetAnnoInfo())
     }
 }
 

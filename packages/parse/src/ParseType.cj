@@ -34,6 +34,8 @@ extend ParserImpl {
                     SkipBlank(TokenKind.NL)
                 }
             }
+            // Only the '?' prefix forbids newlines; allow them within the following type.
+            skipNL = true
             let baseType = ParseBaseType()
             skipNL = true
             let trailingNewlineSkipped = oldSkipNL && Seeing(TokenKind.NL)

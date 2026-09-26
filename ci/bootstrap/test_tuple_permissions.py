@@ -23,7 +23,7 @@ class TuplePermissions(unittest.TestCase):
             source = root / 'tuple'
             shutil.copytree(os.environ['LLVM_TUPLE'], source, symlinks=False)
             # All input bytes and checksums are preserved; change only modes.
-            for name in ('llc', 'opt'):
+            for name in ('llc', 'opt', 'ld.lld'):
                 (source / 'bin' / name).chmod(0o644)
             self.check_install(root, source)
 
@@ -34,11 +34,13 @@ class TuplePermissions(unittest.TestCase):
     def check_install(self, root, source):
         target = root / 'sdk'
         result = subprocess.run(['bash', str(PRODUCT), '--from', os.environ['HOST_SDK'],
-                                 '--to', str(target), '--host', '--llvm-tuple', str(source)],
+                                 '--to', str(target), '--host', '--llvm-tuple', str(source),
+                                 '--colour-runtime', os.environ['COLOUR_RUNTIME'],
+                                 '--host-runtime', str(Path(os.environ['HOST_SDK']) / 'runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so')],
                                 capture_output=True, text=True)
         # The target invariant runs even when the product's verification fails.
         observations = []
-        for name in ('llc', 'opt'):
+        for name in ('llc', 'opt', 'ld.lld'):
             installed = target / 'third_party/llvm/bin' / name
             same = installed.is_file() and hashlib.sha256(installed.read_bytes()).digest() == hashlib.sha256((source / 'bin' / name).read_bytes()).digest()
             executable = os.access(installed, os.X_OK)

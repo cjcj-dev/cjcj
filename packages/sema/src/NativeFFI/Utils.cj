@@ -3,12 +3,12 @@ package cjcj::sema.NativeFFI
 import std.collection.*
 import cjcj::ast.*
 import cjcj::ast.AnnotationKind as AstAnnotationKind
-import cjcj::basic.LambdaPattern as BasicLambdaPattern
 import cjcj::mangle.{BaseMangler, MangleType}
 import cjcj::modules.SemaImportManager
 import cjcj::option.GetFileName as OptionGetFileName
 import cjcj::option.IsDir as OptionIsDir
-import cjcj::sema.{CreateThrowException, TypeManager}
+import cjcj::sema.{CreateThrowException, TypeManager, GenerateTypeMapping}
+import cjcj::sema.Desugar.AfterTypeCheck.LookupEnumMember
 import cjcj::utils.{CJC_ABORT, CJC_ABORT_WITH_MSG, CJC_ASSERT, CJC_ASSERT_WITH_MSG, CJC_NULLPTR_CHECK}
 
 public let NSSTRING_CLASS_IDENT: String = "NSString"
@@ -49,23 +49,6 @@ extend ArrayOperationKind <: Equatable<ArrayOperationKind> {
     }
 }
 
-public class GenericConfigInfo {
-    public var declSymbolName: String
-    public var declInstName: String
-    public let instTypes: ArrayList<(String, String)> = ArrayList<(String, String)>()
-    public let funcNames: HashSet<String> = HashSet<String>()
-
-    public init(name: String, declInstName: String, insts: ArrayList<(String, String)>, funcs: HashSet<String>) {
-        declSymbolName = name
-        this.declInstName = declInstName
-        for (inst in insts) {
-            instTypes.add(inst)
-        }
-        for (funcName in funcs) {
-            funcNames.add(funcName)
-        }
-    }
-}
 
 public func GetParamTys(params: FuncParamList): ArrayList<Ty> {
     let paramTys = ArrayList<Ty>()
@@ -327,7 +310,8 @@ public func WrapReturningLambdaExpr(typeManager: TypeManager, nodes: ArrayList<N
     let retTy = nodes[nodes.size - 1].GetTy().getOrThrow()
     let paramTys = LambdaParamTys(lambdaParams)
     let paramLists = ArrayList<FuncParamList>()
-    paramLists.add(CreateFuncParamList(lambdaParams))
+    // C++ Utils.cpp:237 moves OwnedPtr params into Create.h:95. The one-argument overload clones.
+    paramLists.add(CreateFuncParamList(lambdaParams, None))
     let lambdaTy = typeManager.GetFunctionTy(paramTys.toArray(), retTy)
     let curFile: Option<File> = nodes[0].curFile
 
@@ -447,13 +431,6 @@ public func GetSingleArgumentAnnotationValue(target: Decl, annotationKind: AstAn
     return None
 }
 
-public func GetObjCMirrorForeignName(target: ClassLikeDecl): String {
-    if (let Some(customName) <- GetSingleArgumentAnnotationValue(target, AstAnnotationKind.OBJ_C_MIRROR)) {
-        return customName
-    }
-    return target.identifier.Val()
-}
-
 public func IsSuperConstructorCall(call: CallExpr): Bool {
     if (let Some(base) <- call.baseFunc) {
         if (let Some(refExpr) <- (base as RefExpr)) {
@@ -472,58 +449,6 @@ public func IsThisConstructorCall(call: CallExpr): Bool {
     return false
 }
 
-public func IsObjCGeneratedNSStringCtor(target: Decl): Bool {
-    if (let Some(funcDecl) <- (target as FuncDecl)) {
-        if (funcDecl.identifier.Val() != INIT_IDENT ||
-            !funcDecl.TestAttr(Attribute.CONSTRUCTOR) || !funcDecl.TestAttr(Attribute.COMPILER_ADD)) {
-            return false
-        }
-        if (let Some(body) <- funcDecl.funcBody) {
-            if (body.paramLists.isEmpty()) {
-                return false
-            }
-            let params = body.paramLists[0].params
-            if (params.size != 1) {
-                return false
-            }
-            if (let Some(typeNode) <- params[0].typeNode) {
-                if (let Some(refType) <- (typeNode as RefType)) {
-                    return refType.ref.identifier.Val() == STD_LIB_STRING_IDENT
-                }
-                return typeNode.ToString() == STD_LIB_STRING_IDENT
-            }
-        }
-    }
-    return false
-}
-
-public func IsObjCGeneratedNSObjectToString(target: Decl): Bool {
-    if (let Some(funcDecl) <- (target as FuncDecl)) {
-        if (funcDecl.identifier.Val() != TOSTRING_METHOD_IDENT ||
-            !funcDecl.TestAttr(Attribute.COMPILER_ADD)) {
-            return false
-        }
-        if (let Some(body) <- funcDecl.funcBody) {
-            if (body.paramLists.isEmpty()) {
-                return false
-            }
-            return body.paramLists[0].params.isEmpty()
-        }
-    }
-    return false
-}
-
-public func IsObjCGeneratedMember(target: Decl): Bool {
-    if (let Some(outer) <- target.outerDecl) {
-        if (let Some(classLikeDecl) <- (outer as ClassLikeDecl)) {
-            let foreignName = GetObjCMirrorForeignName(classLikeDecl)
-            return (foreignName == NSSTRING_CLASS_IDENT && IsObjCGeneratedNSStringCtor(target)) ||
-                (foreignName == NSOBJECT_CLASS_IDENT && IsObjCGeneratedNSObjectToString(target))
-        }
-    }
-    return false
-}
-
 // C++ src/Mangle/BaseMangler.cpp:258-296. This package-local extension avoids
 // colliding with cjcj::mangle.MangleType while preserving the C++ receiver.
 extend BaseMangler {
@@ -535,38 +460,15 @@ extend BaseMangler {
     }
 }
 
-public func GetMangledMethodName(mangler: BaseMangler, params: ArrayList<FuncParam>, methodName: String,
-    typeManager: TypeManager, genericConfig!: Option<GenericConfigInfo> = None): String {
+public func GetMangledMethodName(mangler: BaseMangler, params: ArrayList<FuncParam>, methodName: String): String {
     var name = methodName
     for (param in params) {
-        let rawParamTy = param.GetTy().getOrThrow()
-        var paramTy = rawParamTy
-        if (let Some(config) <- genericConfig) {
-            if (rawParamTy.HasGeneric()) {
-                paramTy = GetGenericInstTy(config, rawParamTy, typeManager)
-            }
-        }
+        let paramTy = param.GetTy().getOrThrow()
         name += mangler.MangleType(paramTy).replace(".", "_")
     }
     return name
 }
 
-public func IsCJMappingGeneric(decl: Decl): Bool {
-    if (let Some(classDecl) <- (decl as ClassDecl)) {
-        if (!classDecl.TestAnyAttr(Attribute.ABSTRACT, Attribute.OPEN)) {
-            if (let Some(ty) <- classDecl.GetTy()) {
-                return ty.HasGeneric()
-            }
-        }
-        return false
-    }
-    if ((decl as StructDecl).isSome() || (decl as EnumDecl).isSome() || (decl as InterfaceDecl).isSome()) {
-        if (let Some(ty) <- decl.GetTy()) {
-            return ty.HasGeneric()
-        }
-    }
-    return false
-}
 
 public func SplitAndTrim(value: String): ArrayList<String> {
     let out = ArrayList<String>()
@@ -591,30 +493,6 @@ public func JoinVector(values: ArrayList<String>, delimiter: String): String {
     return builder.toString()
 }
 
-public func InitGenericConfigs(file: File, decl: Decl, genericConfigs: ArrayList<GenericConfigInfo>,
-    isGenericGlueCode: Box<Bool>): Unit {
-    let curPackage = file.curPackage.getOrThrow()
-    for ((declSymbolName, innerMap) in curPackage.allowedInteropCJGenericInstantiations) {
-        if (declSymbolName != decl.identifier.Val()) {
-            continue
-        }
-        for ((typeStr, args) in innerMap) {
-            let funcNames = args.symbols
-            let actualTypes = SplitAndTrim(typeStr)
-            let instTypes = ArrayList<(String, String)>()
-            let typeArgs = decl.GetTy().getOrThrow().typeArgs
-            for (idx in 0..typeArgs.size) {
-                instTypes.add((typeArgs[idx].name, actualTypes[idx]))
-            }
-            let declName = decl.identifier.Val()
-            let declWInstStr = declName + JoinVector(actualTypes, "")
-            genericConfigs.add(GenericConfigInfo(declName, declWInstStr, instTypes, funcNames))
-            if (!isGenericGlueCode.value) {
-                isGenericGlueCode.value = true
-            }
-        }
-    }
-}
 
 public func GetActualTypeKind(configType: String): TypeKind {
     let typeKind: Option<TypeKind> = match (configType) {
@@ -659,176 +537,6 @@ public func GetTypeByName(typeName: String): Type {
     return GetPrimitiveType(typeName, typeKind)
 }
 
-public func GetGenericActualType(config: GenericConfigInfo, genericName: String): String {
-    for (inst in config.instTypes) {
-        if (inst[0] == genericName) {
-            return inst[1]
-        }
-    }
-    return ""
-}
-
-public func GetGenericInstTy(config: GenericConfigInfo, genericName: String): Ty {
-    let actualTypeName = GetGenericActualType(config, genericName)
-    if (actualTypeName.isEmpty()) {
-        return Ty.GetInitialTy()
-    }
-    return GetTyByName(actualTypeName)
-}
-
-public func GetGenericInstType(config: GenericConfigInfo, genericName: String): Type {
-    let actualTypeName = GetGenericActualType(config, genericName)
-    return GetTypeByName(actualTypeName)
-}
-
-public func GetGenericInstTy(config: GenericConfigInfo, genericTy: Ty, typeManager: TypeManager): Ty {
-    if (genericTy.kind == TypeKind.TYPE_GENERICS) {
-        return GetGenericInstTy(config, genericTy.name)
-    }
-    if (let Some(funcTy) <- (genericTy as FuncTy)) {
-        let paramTys = ArrayList<Ty>()
-        for (paramTy in funcTy.paramTys) {
-            if (paramTy.HasGeneric()) {
-                paramTys.add(GetGenericInstTy(config, paramTy, typeManager))
-            } else {
-                paramTys.add(paramTy)
-            }
-        }
-        let retTy = if (funcTy.retTy.HasGeneric()) {
-            GetGenericInstTy(config, funcTy.retTy, typeManager)
-        } else {
-            funcTy.retTy
-        }
-        return typeManager.GetFunctionTy(paramTys.toArray(), retTy)
-    }
-    if (let Some(tupleTy) <- (genericTy as TupleTy)) {
-        let elements = ArrayList<Ty>()
-        for (arg in tupleTy.typeArgs) {
-            if (arg.IsGeneric()) {
-                elements.add(GetGenericInstTy(config, arg.name))
-            } else {
-                elements.add(arg)
-            }
-        }
-        return typeManager.GetTupleTy(elements.toArray())
-    }
-    return genericTy
-}
-
-public func GetGenericInstType(config: GenericConfigInfo, genericTy: Ty, typeManager: TypeManager): Type {
-    let instantiatedTy = GetGenericInstTy(config, genericTy, typeManager)
-    if (instantiatedTy.IsPrimitive()) {
-        return GetPrimitiveType(instantiatedTy.String(), instantiatedTy.kind)
-    }
-    if (let Some(funcTy) <- (instantiatedTy as FuncTy)) {
-        let funcType = FuncType()
-        funcType.SetTy(instantiatedTy)
-        for (paramTy in funcTy.paramTys) {
-            funcType.paramTypes.add(GetGenericInstType(config, paramTy, typeManager))
-        }
-        funcType.retType = GetGenericInstType(config, funcTy.retTy, typeManager)
-        return funcType
-    }
-    if (instantiatedTy.IsTuple()) {
-        let tupleType = TupleType()
-        tupleType.SetTy(instantiatedTy)
-        return tupleType
-    }
-    return InvalidType(INVALID_POSITION)
-}
-
-public func ReplaceGenericTyForFuncTy(ty: Ty, config: GenericConfigInfo, typeManager: TypeManager): Ty {
-    if (!ty.HasGeneric()) {
-        return ty
-    }
-    return GetGenericInstTy(config, ty, typeManager)
-}
-
-public func ReplaceGenericTyForFunc(funcDecl: FuncDecl, config: GenericConfigInfo, typeManager: TypeManager): Unit {
-    if (let None <- funcDecl.funcBody) {
-        return
-    }
-    let body = funcDecl.funcBody.getOrThrow()
-    if (let Some(retTypeNode) <- body.retType) {
-        if (let Some(retTy) <- retTypeNode.GetTy()) {
-            if (retTy.HasGeneric()) {
-                body.retType = GetGenericInstType(config, retTy, typeManager)
-            }
-        }
-    }
-
-    let paramTys = ArrayList<Ty>()
-    if (!body.paramLists.isEmpty()) {
-        for (param in body.paramLists[0].params) {
-            if (let Some(paramTy) <- param.GetTy()) {
-                if (paramTy.HasGeneric()) {
-                    let actualTypeNode = GetGenericInstType(config, paramTy, typeManager)
-                    let actualTy = GetGenericInstTy(config, paramTy, typeManager)
-                    param.typeNode = actualTypeNode
-                    param.SetTy(actualTy)
-                    paramTys.add(actualTy)
-                } else {
-                    paramTys.add(paramTy)
-                }
-            }
-        }
-    }
-
-    let tmpTypeArgs = ArrayList<Ty>()
-    if (let Some(funcTy) <- funcDecl.GetTy()) {
-        for (typeArg in funcTy.typeArgs) {
-            if (typeArg.HasGeneric()) {
-                tmpTypeArgs.add(GetGenericInstTy(config, typeArg, typeManager))
-            } else {
-                tmpTypeArgs.add(typeArg)
-            }
-        }
-    }
-    let retTyForFunc = if (let Some(retTypeNode) <- body.retType) {
-        retTypeNode.GetTy() ?? TypeManager.GetInvalidTy()
-    } else {
-        TypeManager.GetInvalidTy()
-    }
-    let newFuncTy = typeManager.GetFunctionTy(paramTys.toArray(), retTyForFunc)
-    for (typeArg in tmpTypeArgs) {
-        newFuncTy.typeArgs.add(typeArg)
-    }
-    funcDecl.SetTy(newFuncTy)
-}
-
-public func GetArgsAndRetGenericActualTyVector(config: GenericConfigInfo, ctor: FuncDecl,
-    actualTyArgMap: HashMap<String, Ty>, funcTyParams: ArrayList<Ty>, actualPrimitiveType: ArrayList<Type>,
-    typeManager: TypeManager): Unit {
-    if (let Some(outerDecl) <- ctor.outerDecl) {
-        if (let Some(outerTy) <- outerDecl.GetTy()) {
-            for (argTy in outerTy.typeArgs) {
-                if (argTy.IsGeneric()) {
-                    let actualRetTy = GetGenericInstTy(config, argTy, typeManager)
-                    actualTyArgMap.add(argTy.name, actualRetTy)
-                    actualPrimitiveType.add(GetTypeByName(actualRetTy.String()))
-                }
-            }
-        }
-    }
-    if (let Some(body) <- ctor.funcBody) {
-        if (!body.paramLists.isEmpty()) {
-            for (param in body.paramLists[0].params) {
-                if (let Some(paramTy) <- param.GetTy()) {
-                    if (paramTy.HasGeneric()) {
-                        let actualTy = GetGenericInstTy(config, paramTy, typeManager)
-                        if (actualTy.kind != TypeKind.TYPE_INITIAL) {
-                            funcTyParams.add(actualTy)
-                        } else {
-                            funcTyParams.add(paramTy)
-                        }
-                    } else {
-                        funcTyParams.add(paramTy)
-                    }
-                }
-            }
-        }
-    }
-}
 
 public func GetInstantyForGenericTy(decl: Decl, actualTyArgMap: HashMap<String, Ty>,
     typeManager: TypeManager): Option<Ty> {
@@ -874,96 +582,6 @@ public func CreateThrowExceptionCall(importManager: SemaImportManager, typeManag
     return CreateThrowException(exception, exceptionArgs, curFile, typeManager)
 }
 
-public func IsGenericParam(ty: Ty, decl: Decl, config: GenericConfigInfo): Bool {
-    if (!IsCJMappingGeneric(decl) || !ty.HasGeneric()) {
-        return false
-    }
-    if (ty.IsGeneric()) {
-        return !GetGenericActualType(config, ty.name).isEmpty()
-    }
-    if (ty.IsTuple()) {
-        for (typeArg in ty.typeArgs) {
-            if (typeArg.IsGeneric() && !IsGenericParam(typeArg, decl, config)) {
-                return false
-            }
-        }
-        return true
-    }
-    if (let Some(funcTy) <- (ty as FuncTy)) {
-        for (paramTy in funcTy.paramTys) {
-            if (paramTy.IsGeneric() && !IsGenericParam(paramTy, decl, config)) {
-                return false
-            }
-        }
-        if (funcTy.retTy.IsGeneric()) {
-            return IsGenericParam(funcTy.retTy, decl, config)
-        }
-        return true
-    }
-    return false
-}
-
-public func IsVisibalFunc(funcDecl: FuncDecl, decl: Decl, config: GenericConfigInfo): Bool {
-    var hasGenericParam = false
-    if (let Some(body) <- funcDecl.funcBody) {
-        if (!body.paramLists.isEmpty()) {
-            for (param in body.paramLists[0].params) {
-                if (let Some(paramTy) <- param.GetTy()) {
-                    if (IsGenericParam(paramTy, decl, config)) {
-                        hasGenericParam = true
-                        break
-                    }
-                }
-            }
-        }
-        if (!hasGenericParam) {
-            if (let Some(retType) <- body.retType) {
-                if (let Some(retTy) <- retType.GetTy()) {
-                    hasGenericParam = IsGenericParam(retTy, decl, config)
-                }
-            }
-        }
-    }
-    if (!hasGenericParam) {
-        return true
-    }
-    return config.funcNames.contains(funcDecl.identifier.Val())
-}
-
-public func GetCjMappingTupleName(tupleTy: Ty): String {
-    if (!tupleTy.IsTuple()) {
-        return ""
-    }
-    let builder = StringBuilder()
-    builder.append("TupleOf")
-    for (typeArg in tupleTy.typeArgs) {
-        builder.append(typeArg.String())
-    }
-    return builder.toString()
-}
-
-public func GetLambdaJavaClassName(ty: Ty): String {
-    if (let Some(funcTy) <- (ty as FuncTy)) {
-        let builder = StringBuilder()
-        for (paramTy in funcTy.paramTys) {
-            builder.append(paramTy.String())
-        }
-        builder.append("To")
-        builder.append(funcTy.retTy.String())
-        return builder.toString()
-    }
-    return ""
-}
-
-public func GetLambdaJavaClassName(pattern: BasicLambdaPattern): String {
-    let builder = StringBuilder()
-    for (paramType in pattern.parameterTypes) {
-        builder.append(paramType)
-    }
-    builder.append("To")
-    builder.append(pattern.returnType)
-    return builder.toString()
-}
 
 public func AreParamTypeKindsValid(fd: FuncDecl, typeKinds: ArrayList<TypeKind>): Bool {
     if (let Some(body) <- fd.funcBody) {
@@ -986,4 +604,62 @@ public func AreParamTypeKindsValid(fd: FuncDecl, typeKinds: ArrayList<TypeKind>)
         return true
     }
     return false
+}
+
+// Upstream a51ced71, NativeFFI/Utils.cpp:176-203.
+private func GetGetPointerAddressIntrinsicDecl(importManager: SemaImportManager): FuncDecl {
+    return importManager.GetCoreDecl<FuncDecl>("getPointerAddress").getOrThrow()
+}
+public func CreateGetPointerAddressCall(importManager: SemaImportManager, typeManager: TypeManager, pointer: Expr): Expr {
+    CJC_ASSERT(pointer.GetTy().getOrThrow().IsPointer())
+    let fd = GetGetPointerAddressIntrinsicDecl(importManager)
+    let ref = WithinFile<RefExpr>(CreateRefExpr(fd), pointer.curFile)
+    ref.instTys.add(pointer.GetTy().getOrThrow().typeArgs[0])
+    let uintTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UINT_NATIVE)
+    ref.SetTy(typeManager.GetFunctionTy([pointer.GetTy().getOrThrow()], uintTy))
+    let args = ArrayList<FuncArg>()
+    args.add(CreateFuncArg((ASTCloner.Clone(pointer) as Expr).getOrThrow()))
+    let call = CreateCallExpr(ref, args, Some(fd), Some(uintTy), CallKind.CALL_INTRINSIC_FUNCTION)
+    call.EnableAttr(Attribute.UNSAFE)
+    return call
+}
+public func CreateIsPtrNullCheckCall(importManager: SemaImportManager, typeManager: TypeManager, pointer: Expr): Expr {
+    let uintTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UINT_NATIVE)
+    let call = CreateGetPointerAddressCall(importManager, typeManager, pointer)
+    let zero = WithinFile<LitConstExpr>(CreateLitConstExpr(LitConstKind.INTEGER, "0", uintTy), pointer.curFile)
+    let comparison = CreateBinaryExpr(call, zero, TokenKind.EQUAL)
+    comparison.SetTy(TypeManager.GetBoolTy())
+    return comparison
+}
+
+// Upstream fbf15ec8, NativeFFI/Utils.cpp:491-568.
+public func FFIGetOptionTy(importManager: SemaImportManager, typeManager: TypeManager, ty: Ty): Ty {
+    return typeManager.GetEnumTy(FFIGetOptionDecl(importManager), typeArgs: [ty])
+}
+public func FFIGetOptionDecl(importManager: SemaImportManager): EnumDecl {
+    return importManager.GetCoreDecl<EnumDecl>("Option").getOrThrow()
+}
+public func FFIGetOptionSomeDecl(importManager: SemaImportManager): Decl {
+    return LookupEnumMember(FFIGetOptionDecl(importManager), "Some").getOrThrow()
+}
+public func FFIGetOptionNoneDecl(importManager: SemaImportManager): Decl {
+    return LookupEnumMember(FFIGetOptionDecl(importManager), "None").getOrThrow()
+}
+public func FFICreateOptionSomeRef(importManager: SemaImportManager, typeManager: TypeManager, ty: Ty): Expr {
+    let ref = CreateRefExpr(FFIGetOptionSomeDecl(importManager))
+    ref.SetTy(typeManager.GetFunctionTy([ty], FFIGetOptionTy(importManager, typeManager, ty)))
+    return ref
+}
+public func FFICreateOptionNoneRef(importManager: SemaImportManager, typeManager: TypeManager, ty: Ty): Expr {
+    let ref = CreateRefExpr(FFIGetOptionNoneDecl(importManager))
+    ref.SetTy(FFIGetOptionTy(importManager, typeManager, ty))
+    return ref
+}
+public func FFICreateOptionSomeCall(importManager: SemaImportManager, typeManager: TypeManager, expr: Expr, ty: Ty): Expr {
+    let args = ArrayList<FuncArg>(); args.add(CreateFuncArg(expr))
+    let call = CreateCallExpr(FFICreateOptionSomeRef(importManager, typeManager, ty), args)
+    call.SetTy(FFIGetOptionTy(importManager, typeManager, ty))
+    call.resolvedFunction = FFIGetOptionSomeDecl(importManager) as FuncDecl
+    call.callKind = CallKind.CALL_DECLARED_FUNCTION
+    return call
 }

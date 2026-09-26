@@ -3,9 +3,80 @@ package cjcj::chir
 import std.collection.*
 import std.core.Box as CoreBox
 import cjcj::basic.Linkage as BasicLinkage
-import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CJC_NULLPTR_CHECK}
+import cjcj::modules.{GetPackageRelation, PackageRelation}
+import cjcj::option.{GlobalOptions, OutputMode}
+import cjcj::utils.{CJC_ABORT, CJC_ASSERT}
 
-// C++ Devirtualization.cpp:19-31.
+// Upstream 6e125215 Devirtualization.cpp:34-80: resolve the invoke parent and slot.
+private func CollectAllDefs(ty: Type, builder: CHIRBuilder): ArrayList<CustomTypeDef> {
+    let defs = ArrayList<CustomTypeDef>()
+    if (let Some(customTy) <- (ty as CustomType)) {
+        let def = customTy.GetCustomTypeDef()
+        defs.add(def)
+        for (ex in def.GetExtends()) { defs.add(ex) }
+    } else {
+        for (ex in ty.GetExtends(builder)) { defs.add(ex) }
+    }
+    return defs
+}
+
+private func SearchRealCalleeInVtable(ty: Type, invoke: InvokeBase, builder: CHIRBuilder): Option<Function> {
+    let allDefs = CollectAllDefs(ty, builder)
+    let srcParentTypeInRT = invoke.GetInstSrcParentCustomTypeOfMethod(builder)
+    var replaceTable = HashMap<GenericType, Type>()
+    if (let Some(customTy) <- (ty as CustomType)) {
+        replaceTable = GetInstMapFromCurDefAndExDefToCurType(customTy)
+    }
+    for (def in allDefs) {
+        for (vtable in def.GetDefVTable().GetTypeVTables()) {
+            let srcParentType = vtable.GetSrcParentType().getOrThrow()
+            if (srcParentType.GetClassDef() != srcParentTypeInRT.GetClassDef()) { continue }
+            if (ReplaceRawGenericArgType(srcParentType, replaceTable, builder) != srcParentTypeInRT) { continue }
+            let methods = vtable.GetVirtualMethods()
+            let offset = Int64(invoke.GetVirtualMethodOffset())
+            CJC_ASSERT(methods.size > offset)
+            let target = methods[offset].GetVirtualMethod().getOrThrow()
+            if (!target.IsPureAbstract()) { return target.GetWrappedRawMethod() ?? target }
+            break
+        }
+    }
+    return None
+}
+
+private func HasUnknownGenericType(knownType: Type, unknownType: Type): Bool {
+    let known = HashSet<GenericType>()
+    knownType.VisitTypeRecursively({ ty =>
+        if (let Some(generic) <- (ty as GenericType)) { known.add(generic) }
+        return true
+    })
+    let unknown = CoreBox<Bool>(false)
+    unknownType.VisitTypeRecursively({ ty =>
+        if (let Some(generic) <- (ty as GenericType)) {
+            if (!known.contains(generic)) { unknown.value = true; return false }
+        }
+        return true
+    })
+    return unknown.value
+}
+
+private func FindUpstreamThisValue(tempVar: LocalVar, casts: ArrayList<Expression>): Value {
+    let expr = tempVar.GetExpr().getOrThrow()
+    if (expr.GetExprKind() != ExprKind.BOX && expr.GetExprKind() != ExprKind.CLASS_STATIC_CAST) {
+        return tempVar
+    }
+    casts.add(expr)
+    let source = (expr as TypeCast).getOrThrow().GetSourceValue()
+    if (let Some(local) <- source.AsLocalVar()) {
+        return FindUpstreamThisValue(local, casts)
+    }
+    return source
+}
+
+private func CollectUpstreamTypeCasts(obj: LocalVar): (Value, ArrayList<Expression>) {
+    let casts = ArrayList<Expression>()
+    return (FindUpstreamThisValue(obj, casts), casts)
+}
+
 private func GetEntryBlock(oldBG: BlockGroup, blocks: ArrayList<Block>): Block {
     let oldBlocks = oldBG.GetBlocks()
     CJC_ASSERT(oldBlocks.size == blocks.size)
@@ -21,656 +92,299 @@ private func GetEntryBlock(oldBG: BlockGroup, blocks: ArrayList<Block>): Block {
     return blocks[0]
 }
 
-// C++ Devirtualization.h:28-34.
-public class DevirtualizationRewriteInfo {
-    public let invoke: Invoke
-    public let realCallee: Function
-    public let thisType: Type
-    public let typeArgs: ArrayList<Type>
-    public var newApply: Option<Apply> = None
 
-    public init(invoke: Invoke, realCallee: Function, thisType: Type, typeArgs: ArrayList<Type>) {
+private func CreateInstFuncMangleName(identifier: String, fn: Function, context: FuncCallContext,
+    builder: CHIRBuilder): String {
+    let types = ArrayList<Type>()
+    if (let Some(def) <- fn.GetParentCustomTypeDef()) {
+        if (def.IsGenericDef()) {
+            types.add(all: GetInstParentCustomTyOfCallee(fn, context.args, context.thisType, builder)
+                .getOrThrow().StripAllRefs().GetTypeArgs())
+        }
+    }
+    types.add(all: context.instTypeArgs)
+    return GenerateInstantiateFuncMangleName(identifier, types)
+}
+
+private func GetInstFuncTypeFromContext(fn: Function, context: FuncCallContext, builder: CHIRBuilder): FuncType {
+    var replaceTable = HashMap<GenericType, Type>()
+    if (let Some(def) <- fn.GetParentCustomTypeDef()) {
+        if (def.IsGenericDef()) {
+            let parentTy = GetInstParentCustomTyOfCallee(fn, context.args, context.thisType, builder).getOrThrow()
+            let mapping = def.GetType().getOrThrow().CalculateGenericTyMapping(parentTy)
+            CJC_ASSERT(mapping[0])
+            replaceTable = mapping[1]
+        }
+    }
+    let generics = fn.GetGenericTypeParams()
+    CJC_ASSERT(generics.size == context.instTypeArgs.size)
+    for (i in 0..generics.size) { replaceTable[generics[i]] = context.instTypeArgs[i] }
+    return (ReplaceRawGenericArgType(fn.GetType().getOrThrow(), replaceTable, builder) as FuncType).getOrThrow()
+}
+
+private class DevirtualizationRewriteInfo {
+    let invoke: InvokeBase
+    let realCallee: Function
+    let thisType: Type
+    init(invoke: InvokeBase, realCallee: Function, thisType: Type) {
         this.invoke = invoke
         this.realCallee = realCallee
         this.thisType = thisType
-        this.typeArgs = typeArgs
     }
 }
 
-// C++ Devirtualization.h:68-72.
-public class FuncSig {
-    public let name: String
-    public let types: ArrayList<Type>
-    public let typeArgs: ArrayList<Type>
-
-    public init(name: String, types: ArrayList<Type>, typeArgs: ArrayList<Type>) {
-        this.name = name
-        this.types = types
-        this.typeArgs = typeArgs
-    }
-}
-
-// C++ Devirtualization.cpp:113-120.
-private class BuiltinOpInfo {
-    let funcInfo: FuncInfo
-    let targetExprKind: ExprKind
-    let operandsNum: Int64
-
-    init(info: FuncInfo, exprKind: ExprKind, operandsNum: Int64) {
-        funcInfo = info
-        targetExprKind = exprKind
-        this.operandsNum = operandsNum
-    }
-}
-
-// C++ Devirtualization.cpp:122-130.
-private let COMPARABLE_FUNC_LISTS: Array<BuiltinOpInfo> = [
-    BuiltinOpInfo(FuncInfo(">", NOT_CARE, [NOT_CARE], ANY_TYPE, "std.core"), ExprKind.GT, 2),
-    BuiltinOpInfo(FuncInfo("<", NOT_CARE, [NOT_CARE], ANY_TYPE, "std.core"), ExprKind.LT, 2),
-    BuiltinOpInfo(FuncInfo(">=", NOT_CARE, [NOT_CARE], ANY_TYPE, "std.core"), ExprKind.GE, 2),
-    BuiltinOpInfo(FuncInfo("<=", NOT_CARE, [NOT_CARE], ANY_TYPE, "std.core"), ExprKind.LE, 2),
-    BuiltinOpInfo(FuncInfo("==", NOT_CARE, [NOT_CARE], ANY_TYPE, "std.core"), ExprKind.EQUAL, 2),
-    BuiltinOpInfo(FuncInfo("!=", NOT_CARE, [NOT_CARE], ANY_TYPE, "std.core"), ExprKind.NOTEQUAL, 2),
-    BuiltinOpInfo(FuncInfo("next", NOT_CARE, [NOT_CARE], ANY_TYPE, "std.core"), ExprKind.APPLY, 2)
-]
-
-// C++ Devirtualization.cpp:132-142.
-private func BuiltinOpCreateNewApply(builder: CHIRBuilder, oriInvoke: Invoke, fn: Function,
-    thisValue: Value, args: ArrayList<Value>): Apply {
-    let applyArgs = ArrayList<Value>()
-    applyArgs.add(thisValue)
-    applyArgs.add(all: args)
-    let thisType = builder.context.GetRefTy(thisValue.GetType().getOrThrow())
-    return builder.CreateApply(oriInvoke.GetResultType().getOrThrow(), fn,
-        FuncCallContext(args: applyArgs, thisType: Some(thisType)), oriInvoke.GetParentBlock().getOrThrow())
-}
-
-// C++ Devirtualization.cpp:144-152.
-private func BuiltinOpCreateNewBinary(builder: CHIRBuilder, oriInvoke: Invoke, kind: ExprKind,
-    thisValue: Value, args: ArrayList<Value>): BinaryExpression {
-    CJC_ASSERT(args.size == 1)
-    let binary = builder.CreateBinaryExpression(kind, oriInvoke.GetResultType().getOrThrow(), thisValue, args[0],
-        oriInvoke.GetParentBlock().getOrThrow())
-    binary.SetDebugLocation(oriInvoke.GetDebugLocation())
-    return binary
-}
-
-// C++ Devirtualization.cpp:283-301.
-private func CreateInstFuncMangleName(oriIdentifer: String, apply: Apply, builder: CHIRBuilder): String {
-    let genericTypes = ArrayList<Type>()
-    let fn = apply.GetCallee().AsFunction().getOrThrow()
-    if (let Some(customDef) <- fn.GetParentCustomTypeDef()) {
-        if (customDef.IsGenericDef()) {
-            var funcInCustomType = GetInstParentCustomTyOfCallee(apply.GetCallee(), apply.GetArgs(),
-                apply.GetThisType(), builder).getOrThrow()
-            while (funcInCustomType.IsRef()) {
-                funcInCustomType = (funcInCustomType as RefType).getOrThrow().GetBaseType()
-            }
-            genericTypes.add(all: funcInCustomType.GetTypeArgs())
-        }
-    }
-    let funcArgs = apply.GetInstantiatedTypeArgs()
-    if (!funcArgs.isEmpty()) {
-        genericTypes.add(all: funcArgs)
-    }
-    return GenerateInstantiateFuncMangleName(oriIdentifer, genericTypes)
-}
-
-// C++ Devirtualization.cpp:373-380. The C++ parameter is const, so this traversal intentionally does not mutate it.
-private func BuildOrphanTypeReplaceTable(mayBeGeneric: Type, replaceTable: HashMap<GenericType, Type>): Unit {
-    for (genericTypeArg in mayBeGeneric.GetTypeArgs()) {
-        BuildOrphanTypeReplaceTable(genericTypeArg, replaceTable)
-    }
-}
-
-// C++ Devirtualization.cpp:382-433.
-private func FindFunctionInVtable(parentTy: ClassType, infos: ArrayList<VirtualMethodInfo>, method: FuncSig,
-    builder: CHIRBuilder): Option<Function> {
-    let parentReplaceTable = HashMap<GenericType, Type>()
-    let paramTypes = method.types.clone()
-    paramTypes.remove(at: 0)
-    if (!parentTy.GetTypeArgs().isEmpty()) {
-        let instParentTypeArgs = parentTy.GetTypeArgs()
-        let genericParentTypeArgs = parentTy.GetCustomTypeDef().GetGenericTypeParams()
-        var index: Int64 = 0
-        while (index < genericParentTypeArgs.size) {
-            parentReplaceTable[genericParentTypeArgs[index]] = instParentTypeArgs[index]
-            index++
-        }
-    }
-    for (info in infos) {
-        if (info.GetMethodName() != method.name) {
-            continue
-        }
-        let sigParamTys = info.GetMethodSigType().GetParamTypes()
-        if (sigParamTys.size != paramTypes.size) {
-            continue
-        }
-        if (info.GetGenericTypeParams().size != method.typeArgs.size) {
-            continue
-        }
-        var isSigSame = true
-        let freeGenericReplaceTable = HashMap<GenericType, Type>()
-        var index: Int64 = 0
-        while (index < sigParamTys.size) {
-            BuildOrphanTypeReplaceTable(sigParamTys[index], freeGenericReplaceTable)
-            BuildOrphanTypeReplaceTable(paramTypes[index], freeGenericReplaceTable)
-            index++
-        }
-        let methodGenerics = info.GetGenericTypeParams()
-        index = 0
-        while (index < methodGenerics.size) {
-            freeGenericReplaceTable[methodGenerics[index]] = method.typeArgs[index]
-            index++
-        }
-        index = 0
-        while (index < paramTypes.size) {
-            if (isSigSame) {
-                let lhs = ReplaceRawGenericArgType(sigParamTys[index], freeGenericReplaceTable, builder)
-                var rhs = ReplaceRawGenericArgType(paramTypes[index], parentReplaceTable, builder)
-                rhs = ReplaceRawGenericArgType(rhs, freeGenericReplaceTable, builder)
-                isSigSame = lhs == rhs
-            } else {
-                break
-            }
-            index++
-        }
-        if (!isSigSame) {
-            continue
-        }
-        let virtualMethod = info.GetVirtualMethod() ?? return None
-        return if (virtualMethod.IsPureAbstract()) { None } else { Some(virtualMethod) }
-    }
-    return None
-}
-
-// C++ Devirtualization.h:18-115 and Devirtualization.cpp:33-659.
+// Upstream 6e125215 + 3d758bbb + e242ecf4 Devirtualization.cpp.
 public class Devirtualization {
     private let analysisWrapper: AnalysisWrapper<TypeAnalysis, TypeDomain>
     private let devirtFuncInfo: DevirtualizationInfo
-    private let rewriteInfos: ArrayList<DevirtualizationRewriteInfo> = ArrayList<DevirtualizationRewriteInfo>()
-    private let frozenInstFuns: ArrayList<Function> = ArrayList<Function>()
-    private let frozenStates: HashMap<Function, Option<Results<TypeDomain>>> =
-        HashMap<Function, Option<Results<TypeDomain>>>()
-    private let frozenInstFuncMap: HashMap<String, Function> = HashMap<String, Function>()
+    private let builder: CHIRBuilder
+    private let chirPackage: Package
+    private let opts: GlobalOptions
+    private let rewriteInfos = ArrayList<DevirtualizationRewriteInfo>()
+    private let frozenInstFuns = ArrayList<Function>()
+    private let frozenStates = HashMap<Function, Option<Results<TypeDomain>>>()
+    private let frozenInstFuncMap = HashMap<String, Function>()
 
-    public init(typeAnalysisWrapper: AnalysisWrapper<TypeAnalysis, TypeDomain>,
-        devirtFuncInfo: DevirtualizationInfo) {
-        analysisWrapper = typeAnalysisWrapper
-        this.devirtFuncInfo = devirtFuncInfo
+    public init(wrapper: AnalysisWrapper<TypeAnalysis, TypeDomain>, info: DevirtualizationInfo,
+        builder: CHIRBuilder, chirPackage: Package, opts: GlobalOptions) {
+        analysisWrapper = wrapper
+        devirtFuncInfo = info
+        this.builder = builder
+        this.chirPackage = chirPackage
+        this.opts = opts
     }
 
-    // C++ Devirtualization.cpp:39-47.
-    public func RunOnFuncs(funcs: ArrayList<Function>, builder: CHIRBuilder, isDebug: Bool): Unit {
-        rewriteInfos.clear()
-        for (fn in funcs) {
-            RunOnFunc(fn, builder)
+    private func IsSubtypeSetComplete(def: CustomTypeDef): Bool {
+        let relation = GetPackageRelation(def.GetPackageName(), chirPackage.GetName())
+        if (def.TestAttr(Attribute.PUBLIC) || def.TestAttr(Attribute.PROTECTED)) {
+            return opts.outputMode == OutputMode.EXECUTABLE && relation == PackageRelation.SAME_PACKAGE
         }
-        RewriteToApply(builder, rewriteInfos, isDebug)
-        InstantiateFuncIfPossible(builder, rewriteInfos)
-    }
-
-    // C++ Devirtualization.cpp:49-110.
-    private func RunOnFunc(fn: Function, builder: CHIRBuilder): Unit {
-        var result = analysisWrapper.CheckFuncResult(fn)
-        if (result.isNone()) {
-            result = frozenStates.get(fn) ?? None
-        }
-        let analysisResult = result ?? return
-        let visibleGenericTypes = CoreBox<Option<HashSet<GenericType>>>(None)
-        let actionBeforeVisitExpr = { state: TypeDomain, expr: Expression, _: Int64 =>
-            if (expr.GetExprKind() != ExprKind.INVOKE) {
-                return
-            }
-            let invoke = (expr as Invoke).getOrThrow()
-            let invokeAbsObject = state.CheckAbstractObjectRefBy(invoke.GetObject()) ?? return
-            let resVal = state.CheckAbstractValue(invokeAbsObject) ?? return
-            let paramTys = ArrayList<Type>()
-            for (param in invoke.GetArgs()) {
-                paramTys.add(param.GetType().getOrThrow())
-            }
-            let found = FindRealCallee(builder, resVal,
-                FuncSig(invoke.GetMethodName(), paramTys, invoke.GetInstantiatedTypeArgs()))
-            let realCallee = found[0] ?? return
-            let thisType = found[1].getOrThrow()
-            if (thisType.IsGenericRelated()) {
-                if (visibleGenericTypes.value.isNone()) {
-                    let types = GetVisiableGenericTypes(fn)
-                    let visible = HashSet<GenericType>()
-                    for (ty in types) {
-                        visible.add(ty)
-                    }
-                    visibleGenericTypes.value = Some(visible)
-                }
-                if (!CheckAllGenericTypeVisible(thisType, visibleGenericTypes.value.getOrThrow())) {
-                    return
-                }
-            }
-            rewriteInfos.add(DevirtualizationRewriteInfo(invoke, realCallee, thisType,
-                invoke.GetInstantiatedTypeArgs()))
-        }
-        let actionAfterVisitExpr = { _: TypeDomain, _: Expression, _: Int64 => }
-        let actionOnTerminator = { _: TypeDomain, _: Terminator, _: Option<Block> => }
-        analysisResult.VisitWith(actionBeforeVisitExpr, actionAfterVisitExpr, actionOnTerminator)
-    }
-
-    // C++ Devirtualization.cpp:155-216.
-    private static func RewriteToBuiltinOp(builder: CHIRBuilder, info: DevirtualizationRewriteInfo,
-        isDebug: Bool): Bool {
-        let invoke = info.invoke
-        let fn = info.realCallee.GetWrappedRawMethod() ?? info.realCallee
-        var targetExprKind = ExprKind.INVALID
-        var operandsNum: Int64 = 0
-        for (item in COMPARABLE_FUNC_LISTS) {
-            if (IsExpectedFunction(fn, item.funcInfo)) {
-                targetExprKind = item.targetExprKind
-                operandsNum = item.operandsNum
-            }
-        }
-        let args = invoke.GetArgs()
-        args.remove(at: 0)
-        if (targetExprKind == ExprKind.INVALID || args.size != operandsNum - 1) {
-            return false
-        }
-        for (arg in args) {
-            if (!arg.GetType().getOrThrow().IsPrimitive()) {
-                return false
-            }
-        }
-        var thisValue = invoke.GetObject()
-        let castExprs = ArrayList<Expression>()
-        if (thisValue.IsLocalVar() && !thisValue.GetType().getOrThrow().IsPrimitive()) {
-            var tempVar = thisValue.AsLocalVar()
-            while (let Some(localVar) <- tempVar) {
-                let castExpr = localVar.GetExpr().getOrThrow()
-                if (castExpr.GetExprKind() != ExprKind.BOX && castExpr.GetExprKind() != ExprKind.TYPECAST) {
-                    break
-                }
-                castExprs.add(castExpr)
-                thisValue = castExpr.GetOperand(0)
-                tempVar = thisValue.AsLocalVar()
-            }
-        }
-        if (!thisValue.GetType().getOrThrow().IsPrimitive()) {
-            return false
-        }
-        let op: Expression = if (targetExprKind == ExprKind.APPLY) {
-            BuiltinOpCreateNewApply(builder, invoke, fn, thisValue, args)
-        } else {
-            BuiltinOpCreateNewBinary(builder, invoke, targetExprKind, thisValue, args)
-        }
-        invoke.ReplaceWith(op)
-        for (castExpr in castExprs) {
-            if (castExpr.GetResult().getOrThrow().GetUsers().isEmpty()) {
-                castExpr.RemoveSelfFromBlock()
-            }
-        }
-        if (isDebug) {
-            let callName = if (targetExprKind == ExprKind.APPLY) {
-                fn.GetSrcCodeIdentifier()
-            } else {
-                op.GetExprKindName()
-            }
-            println("[Devirtualization] The function call to " + invoke.GetMethodName() +
-                ToPosInfo(invoke.GetDebugLocation()) + " was optimized to builtin op " + callName + ".")
-        }
-        return true
-    }
-
-    // C++ Devirtualization.cpp:218-271.
-    private static func RewriteToApply(builder: CHIRBuilder,
-        rewriteInfos: ArrayList<DevirtualizationRewriteInfo>,
-        isDebug: Bool): Unit {
-        var index = rewriteInfos.size - 1
-        while (index >= 0) {
-            let rewriteInfo = rewriteInfos[index]
-            if (RewriteToBuiltinOp(builder, rewriteInfo, isDebug)) {
-                index--
-                continue
-            }
-            let invoke = rewriteInfo.invoke
-            let parent = invoke.GetParentBlock().getOrThrow()
-            var thisType: Type = builder.context.GetRefTy(rewriteInfo.thisType)
-            var realFunc = rewriteInfo.realCallee
-            if ((rewriteInfo.thisType.IsStruct() || rewriteInfo.thisType.IsEnum()) &&
-                rewriteInfo.realCallee.GetWrappedRawMethod().isSome()) {
-                thisType = rewriteInfo.thisType
-                let isMutFunc = realFunc.TestAttr(Attribute.MUT) || realFunc.IsConstructor() ||
-                    realFunc.IsInstanceVarInit()
-                if (isMutFunc) {
-                    thisType = builder.context.GetRefTy(thisType)
-                }
-                realFunc = rewriteInfo.realCallee.GetWrappedRawMethod().getOrThrow()
-            }
-            let args = invoke.GetArgs()
-            let thisDerefType = thisType.StripAllRefs()
-            var instThisType = GetInstParentType(thisDerefType,
-                realFunc.GetFuncType().getOrThrow().GetParamTypes()[0].StripAllRefs(), builder)
-            if (thisDerefType.IsClassOrArray() || realFunc.TestAttr(Attribute.MUT)) {
-                instThisType = builder.context.GetRefTy(instThisType)
-            }
-            if (rewriteInfo.thisType.IsBuiltinType()) {
-                instThisType = builder.context.GetRefTy(builder.context.GetAnyTy().getOrThrow())
-            }
-            let typecastRes = TypeCastOrBoxIfNeeded(args[0], instThisType, builder, parent, INVALID_LOCATION)
-            if (typecastRes != args[0]) {
-                typecastRes.AsLocalVar().getOrThrow().GetExpr().getOrThrow().MoveBefore(invoke)
-                args[0] = typecastRes
-            }
-            let apply = builder.CreateApply(invoke.GetResultType().getOrThrow(), realFunc,
-                FuncCallContext(args: args, instTypeArgs: rewriteInfo.typeArgs, thisType: Some(thisType)), parent)
-            apply.SetDebugLocation(invoke.GetDebugLocation())
-            rewriteInfo.newApply = Some(apply)
-            invoke.ReplaceWith(apply)
-            invoke.GetResult().getOrThrow().ReplaceWith(apply.GetResult().getOrThrow(),
-                parent.GetParentBlockGroup())
-            if (isDebug) {
-                println("[Devirtualization] The function call to " + invoke.GetMethodName() +
-                    ToPosInfo(invoke.GetDebugLocation()) + " was optimized.")
-            }
-            index--
-        }
-    }
-
-    // C++ Devirtualization.cpp:273-276.
-    public func GetFrozenInstFuns(): ArrayList<Function> {
-        return frozenInstFuns
-    }
-
-    // C++ Devirtualization.cpp:278-281.
-    public func AppendFrozenFuncState(fn: Function, analysisRes: Option<Results<TypeDomain>>): Unit {
-        frozenStates[fn] = analysisRes
-    }
-
-    // C++ Devirtualization.cpp:303-370.
-    private func InstantiateFuncIfPossible(builder: CHIRBuilder,
-        rewriteInfoList: ArrayList<DevirtualizationRewriteInfo>): Unit {
-        var rewriteIndex = rewriteInfoList.size - 1
-        while (rewriteIndex >= 0) {
-            let rewriteInfo = rewriteInfoList[rewriteIndex]
-            let callee = rewriteInfo.realCallee
-            if (!callee.IsFuncWithBody() || !callee.IsInGenericContext() || callee.GetWrappedRawMethod().isSome()) {
-                rewriteIndex--
-                continue
-            }
-            let apply = rewriteInfo.newApply.getOrThrow()
-            let parameterType = ArrayList<Type>()
-            for (param in apply.GetArgs()) {
-                parameterType.add(param.GetType().getOrThrow())
-            }
-            let retType = apply.GetResultType().getOrThrow()
-            let instFuncType = builder.context.GetFuncTy(parameterType, retType)
-            if (instFuncType.IsGenericRelated()) {
-                rewriteIndex--
-                continue
-            }
-            let newId = CreateInstFuncMangleName(callee.GetIdentifierWithoutPrefix(), apply, builder)
-            var newFunc: Function
-            if (let Some(found) <- frozenInstFuncMap.get(newId)) {
-                newFunc = found
-            } else {
-                newFunc = builder.CreateFunction(instFuncType, newId,
-                    srcCodeIdentifier: callee.GetSrcCodeIdentifier(), rawMangledName: callee.GetRawMangledName(),
-                    packageName: callee.GetPackageName())
-                newFunc.SetDebugLocation(callee.GetDebugLocation())
-                newFunc.AppendAttributeInfo(callee.GetAttributeInfo())
-                newFunc.DisableAttr(Attribute.GENERIC)
-                if (!apply.GetInstantiatedTypeArgs().isEmpty()) {
-                    newFunc.EnableAttr(Attribute.GENERIC_INSTANTIATED)
-                }
-                newFunc.SetLinkTypeInfo(BasicLinkage.INTERNAL)
-                newFunc.SetGenericDecl(callee)
-                let oriBlockGroup = callee.GetBody().getOrThrow()
-                let copy = BlockGroupCopyHelper(builder)
-                copy.GetInstMapFromApply(apply, newBodyOuterFunction: Some(newFunc))
-                let newBody = builder.CreateBlockGroup(newFunc)
-                newFunc.InitBody(newBody)
-                let cloned = copy.CloneBlockGroup(oriBlockGroup, newBody)
-                let newBlocks = cloned[0]
-                let newBlockGroupRetValue = cloned[1].getOrThrow()
-                newBody.SetEntryBlock(GetEntryBlock(oriBlockGroup, newBlocks))
-                newFunc.SetReturnValue(newBlockGroupRetValue)
-                CJC_ASSERT(parameterType.size == callee.GetParams().size)
-                let paramMap = HashMap<Int64, Value>()
-                var paramIndex: Int64 = 0
-                while (paramIndex < parameterType.size) {
-                    let arg = builder.CreateParameter(parameterType[paramIndex],
-                        callee.GetParam(paramIndex).GetDebugLocation(), newFunc)
-                    paramMap[callee.GetParam(paramIndex).nodeId] = arg
-                    paramIndex++
-                }
-                BlockGroupCopyHelper.ReplaceExprOperands(newBlocks, paramMap)
-                FixCastProblemAfterInst(newBlocks, builder)
-                newFunc.SetReturnValue(newBlockGroupRetValue)
-                frozenInstFuns.add(newFunc)
-                frozenInstFuncMap[newId] = newFunc
-            }
-            let instApply = builder.CreateApply(retType, newFunc, FuncCallContext(args: apply.GetArgs()),
-                apply.GetParentBlock().getOrThrow())
-            instApply.SetDebugLocation(apply.GetDebugLocation())
-            apply.ReplaceWith(instApply)
-            rewriteIndex--
-        }
-    }
-
-    // C++ Devirtualization.cpp:436-456.
-    private func IsInstantiationOf(builder: CHIRBuilder, generic: GenericType, instantiated: Type): Bool {
-        if (generic.GetUpperBounds().isEmpty()) {
-            return true
-        }
-        let possibleParentTys = HashSet<Type>()
-        for (def in devirtFuncInfo.defsMap.get(instantiated) ?? ArrayList<CustomTypeDef>()) {
-            for (parentTy in def.GetSuperTypesInCurDef()) {
-                for (possibleParentTy in parentTy.GetSuperTypesRecusively(builder)) {
-                    possibleParentTys.add(possibleParentTy)
-                }
-            }
-        }
-        for (upperBound in generic.GetUpperBounds()) {
-            if (!possibleParentTys.contains(upperBound)) {
-                return false
-            }
-        }
-        return true
-    }
-
-    // C++ Devirtualization.cpp:458-490.
-    private func IsValidSubType(builder: CHIRBuilder, expected: Type, specific: Type,
-        replaceTable: HashMap<GenericType, Type>): Bool {
-        if (expected.GetTypeKind() != specific.GetTypeKind() && !expected.IsGeneric()) {
-            return false
-        }
-        if (expected.IsGeneric()) {
-            let generic = (expected as GenericType).getOrThrow()
-            if (IsInstantiationOf(builder, generic, specific)) {
-                replaceTable[generic] = specific
-                return true
-            }
-            return false
-        }
-        if (expected.IsNominal()) {
-            let specificCustomTy = (specific as CustomType).getOrThrow()
-            if (!specificCustomTy.IsEqualOrSubTypeOf(expected, builder)) {
-                return false
-            }
-        }
-        let argsOfExpected = expected.GetTypeArgs()
-        let argsOfSpecific = specific.GetTypeArgs()
-        if (argsOfExpected.size != argsOfSpecific.size) {
-            return false
-        }
-        var index: Int64 = 0
-        while (index < argsOfExpected.size) {
-            if (!IsValidSubType(builder, argsOfExpected[index].StripAllRefs(),
-                argsOfSpecific[index].StripAllRefs(), replaceTable)) {
-                return false
-            }
-            index++
-        }
-        return true
-    }
-
-    // C++ Devirtualization.cpp:492-530.
-    private func FindRealCallee(builder: CHIRBuilder, typeState: TypeValue,
-        method: FuncSig): (Option<Function>, Option<Type>) {
-        let typeStateKind = typeState.GetTypeKind()
-        let specificType = typeState.GetSpecificType()
-        if (!specificType.IsClass() || typeStateKind == DevirtualTyKind.EXACTLY) {
-            let extendsOrImplements = if (let Some(customType) <- (specificType as CustomType)) {
-                devirtFuncInfo.defsMap.get(customType.GetCustomTypeDef().GetType().getOrThrow()) ??
-                    ArrayList<CustomTypeDef>()
-            } else {
-                devirtFuncInfo.defsMap.get(specificType) ?? ArrayList<CustomTypeDef>()
-            }
-            var target: Option<Function> = None
-            for (def in extendsOrImplements) {
-                let mapping = def.GetType().getOrThrow().CalculateGenericTyMapping(specificType)
-                if (!mapping[0]) {
-                    continue
-                }
-                let paramTypes = method.types.clone()
-                paramTypes.remove(at: 0)
-                let funcType = builder.context.GetFuncTy(paramTypes, builder.context.GetUnitTy())
-                let funcCallType = FuncCallType(funcType, funcName: method.name, genericTypeArgs: method.typeArgs)
-                let result = def.GetFuncIndexInVTable(funcCallType, mapping[1], builder)
-                if (!result.isEmpty()) {
-                    if (let Some(instance) <- result[0].instance) {
-                        if (!instance.IsPureAbstract()) {
-                            target = Some(instance)
-                            break
-                        }
-                    }
-                }
-            }
-            CJC_NULLPTR_CHECK(target)
-            return (target, Some(specificType))
-        }
-        let specificClass = (specificType as ClassType).getOrThrow()
-        return CollectCandidates(builder, specificClass, (None, None), method)
-    }
-
-    // C++ Devirtualization.cpp:532-550.
-    private func GetCandidateFromSpecificType(builder: CHIRBuilder, specific: ClassType,
-        method: FuncSig): Option<Function> {
-        let specificDef = specific.GetClassDef()
-        if (specificDef.IsAbstract() || specificDef.IsInterface()) {
-            return None
-        }
-        let customType = specificDef.GetType().getOrThrow()
-        for (oriDef in devirtFuncInfo.defsMap.get(customType) ?? ArrayList<CustomTypeDef>()) {
-            let genericDef = oriDef.GetGenericDecl() ?? oriDef
-            for (item in genericDef.GetDefVTable().GetTypeVTables()) {
-                if (let Some(target) <- FindFunctionInVtable(item.GetSrcParentType().getOrThrow(),
-                    item.GetVirtualMethods(), method, builder)) {
-                    return Some(target)
-                }
-            }
-        }
-        return None
-    }
-
-    // C++ Devirtualization.cpp:552-615. The returned pair is the Cangjie representation of C++'s pair& result.
-    private func CollectCandidates(builder: CHIRBuilder, specific: ClassType,
-        input: (Option<Function>, Option<Type>), method: FuncSig): (Option<Function>, Option<Type>) {
-        var result = input
-        let specificDef = specific.GetClassDef()
-        if (specificDef.CanBeInherited() && !devirtFuncInfo.CheckCustomTypeInternal(specificDef)) {
-            return result
-        }
-        if (let Some(targetFromSpecificType) <- GetCandidateFromSpecificType(builder, specific, method)) {
-            if (result[0].isNone()) {
-                result = (Some(targetFromSpecificType), Some(specific))
-            } else if (result[0].getOrThrow() != targetFromSpecificType) {
-                return (None, None)
-            }
-        }
-        if (!specificDef.CanBeInherited()) {
-            return result
-        }
-        let inheritInfos = devirtFuncInfo.GetSubtypeMap().get(specificDef) ?? return result
-        for (inheritInfo in inheritInfos) {
-            let expected = inheritInfo.parentType
-            let replaceTable = HashMap<GenericType, Type>()
-            if (!IsValidSubType(builder, expected, specific, replaceTable)) {
-                continue
-            }
-            let subtype = ReplaceRawGenericArgType(inheritInfo.subType, replaceTable, builder)
-            let subtypeCustom = subtype as CustomType
-            if (subtypeCustom.isNone() ||
-                (!subtypeCustom.getOrThrow().GetCustomTypeDef().IsInterface() &&
-                    !subtypeCustom.getOrThrow().GetCustomTypeDef().TestAttr(Attribute.ABSTRACT))) {
-                let definitions = if (let Some(customType) <- subtypeCustom) {
-                    devirtFuncInfo.defsMap.get(customType) ?? ArrayList<CustomTypeDef>()
-                } else {
-                    ArrayList<CustomTypeDef>()
-                }
-                for (oriDef in definitions) {
-                    let def = oriDef.GetGenericDecl() ?? oriDef
-                    for (vtableIt in def.GetDefVTable().GetTypeVTables()) {
-                        let srcParentType = vtableIt.GetSrcParentType().getOrThrow()
-                        if (!expected.IsEqualOrSubTypeOf(srcParentType, builder)) {
-                            continue
-                        }
-                        if (let Some(target) <- FindFunctionInVtable(srcParentType,
-                            vtableIt.GetVirtualMethods(), method, builder)) {
-                            if (result[0].isNone()) {
-                                result = (Some(target), Some(subtypeCustom.getOrThrow()))
-                            } else if (result[0].getOrThrow() != target) {
-                                return (None, None)
-                            }
-                        }
-                    }
-                }
-            }
-            if (let Some(customType) <- subtypeCustom) {
-                if (customType.IsClass()) {
-                    result = CollectCandidates(builder, (customType as ClassType).getOrThrow(), result, method)
-                }
-            }
-        }
-        return result
-    }
-
-    // C++ Devirtualization.cpp:617-634.
-    private static func CheckFuncHasInvoke(bg: BlockGroup): Bool {
-        for (block in bg.GetBlocks()) {
-            let expressions = block.GetNonTerminatorExpressions()
-            var index: Int64 = 0
-            while (index < expressions.size) {
-                if (expressions[index].GetExprKind() == ExprKind.LAMBDA) {
-                    if (CheckFuncHasInvoke((expressions[index] as Lambda).getOrThrow().GetBody().getOrThrow())) {
-                        return true
-                    }
-                }
-                if (expressions[index].GetExprKind() == ExprKind.INVOKE) {
-                    return true
-                }
-                index++
-            }
+        if (def.TestAttr(Attribute.PRIVATE)) { return true }
+        if (def.TestAttr(Attribute.INTERNAL)) {
+            return (relation != PackageRelation.CHILD && relation != PackageRelation.SAME_PACKAGE) || opts.noSubPkg
         }
         return false
     }
 
-    // C++ Devirtualization.cpp:636-648.
-    private static func CheckAllGenericTypeVisible(ty: Type, visibleSet: HashSet<GenericType>): Bool {
-        if (ty.IsGeneric() && !visibleSet.contains((ty as GenericType).getOrThrow())) {
-            return false
+    public func RunOnFuncs(funcs: ArrayList<Function>): Unit {
+        rewriteInfos.clear()
+        for (fn in funcs) { RunOnFunc(fn) }
+        RewriteToApply(rewriteInfos)
+    }
+
+    private func RunOnFunc(fn: Function): Unit {
+        var result = analysisWrapper.CheckFuncResult(fn)
+        if (result.isNone()) { result = frozenStates.get(fn) ?? None }
+        let analysisResult = result ?? return
+        let tryCollect = { state: TypeDomain, invoke: InvokeBase =>
+            let obj = state.CheckAbstractObjectRefBy(invoke.GetObject()) ?? return
+            let value = state.CheckAbstractValue(obj) ?? return
+            let found = FindFinalCalleeAndThisType(value, invoke)
+            if (found[0].isNone() || found[1].isNone()) { return }
+            rewriteInfos.add(DevirtualizationRewriteInfo(invoke, found[0].getOrThrow(), found[1].getOrThrow()))
         }
-        for (typeArg in ty.GetTypeArgs()) {
-            if (!CheckAllGenericTypeVisible(typeArg, visibleSet)) {
-                return false
+        let before = { state: TypeDomain, expr: Expression, _: Int64 =>
+            if (let Some(invoke) <- (expr as Invoke)) { tryCollect(state, InvokeBase(invoke)) }
+        }
+        let after = { _: TypeDomain, _: Expression, _: Int64 => }
+        let terminator = { state: TypeDomain, expr: Expression, _: Option<Block> =>
+            if (let Some(invoke) <- (expr as TryInvoke)) { tryCollect(state, InvokeBase(invoke)) }
+        }
+        analysisResult.VisitWith(before, after, terminator)
+    }
+
+    private func RewriteToBuiltinOp(info: DevirtualizationRewriteInfo): Bool {
+        let kinds = [ExprKind.GT, ExprKind.LT, ExprKind.GE, ExprKind.LE, ExprKind.EQUAL, ExprKind.NOTEQUAL]
+        let names = [">", "<", ">=", "<=", "==", "!="]
+        var kind = ExprKind.INVALID
+        for (i in 0..kinds.size) {
+            if (IsExpectedFunction(info.realCallee, FuncInfo(names[i], ANY_TYPE, [ANY_TYPE], ANY_TYPE, "std.core"))) {
+                kind = kinds[i]
+                break
             }
         }
+        if (kind == ExprKind.INVALID) { return false }
+        let args = info.invoke.GetArgs()
+        if (args.size != 2) { return false }
+        var lhs = args[0]
+        let rhs = args[1]
+        var casts = ArrayList<Expression>()
+        if (let Some(local) <- lhs.AsLocalVar()) {
+            let collected = CollectUpstreamTypeCasts(local)
+            lhs = collected[0]
+            casts = collected[1]
+        }
+        if (!lhs.GetType().getOrThrow().IsPrimitive() || !rhs.GetType().getOrThrow().IsPrimitive()) { return false }
+        let invoke = info.invoke.GetRawExpr()
+        let parent = invoke.GetParentBlock().getOrThrow()
+        let next: Option<Block> = if (let Some(term) <- (invoke as TryInvoke)) { Some(term.GetSuccessBlock()) } else { None }
+        let binary = builder.CreateBinaryExpression(kind, invoke.GetResultType().getOrThrow(), lhs, rhs, parent)
+        binary.SetDebugLocation(invoke.GetDebugLocation())
+        invoke.ReplaceWith(binary)
+        for (cast in casts) {
+            if (cast.GetResult().getOrThrow().GetUsers().isEmpty()) { cast.RemoveSelfFromBlock() }
+        }
+        if (let Some(block) <- next) { builder.CreateGoTo(block, parent).MoveAfter(binary) }
         return true
     }
 
-    // C++ Devirtualization.cpp:650-659.
+    // 6e125215 Devirtualization.cpp:326 IsValueType, extracted by 3d758bbb AddRefIfNeeded.
+    private func AddRefIfNeeded(ty: Type, callee: Function): Type {
+        if (ty.IsReferenceType()) {
+            return builder.context.GetRefTy(ty)
+        }
+        if (ty.IsValueType() &&
+            (callee.TestAttr(Attribute.MUT) || callee.IsConstructor() || callee.IsInstanceVarInit())) {
+            return builder.context.GetRefTy(ty)
+        }
+        return ty
+    }
+
+    private func RewriteToApply(infos: ArrayList<DevirtualizationRewriteInfo>): Unit {
+        var i = infos.size - 1
+        while (i >= 0) {
+            let info = infos[i]
+            i--
+            if (RewriteToBuiltinOp(info)) { continue }
+            var realFunc = info.realCallee
+            let thisTy = AddRefIfNeeded(info.thisType, realFunc)
+            let invoke = info.invoke.GetRawExpr()
+            let context = FuncCallContext(args: info.invoke.GetArgs(),
+                instTypeArgs: info.invoke.GetInstantiatedTypeArgs(), thisType: Some(thisTy))
+            let expectedRetTy = invoke.GetResultType().getOrThrow()
+            var instRetTy = expectedRetTy
+            if (let Some(instFunc) <- CreateInstFuncIfPossible(realFunc, context)) {
+                realFunc = instFunc
+                instRetTy = instFunc.GetFuncType().getOrThrow().GetReturnType()
+            }
+            var instParentTy = GetInstParentCustomTyOfCallee(realFunc, context.args, context.thisType, builder) ??
+                realFunc.GetFuncType().getOrThrow().GetParamType(0)
+            instParentTy = AddRefIfNeeded(instParentTy, realFunc)
+            let parent = invoke.GetParentBlock().getOrThrow()
+            let (converted, expressions) = TypeCastOrBoxIfNeeded(context.args[0], instParentTy, builder, parent)
+            if (!refEq(converted, context.args[0])) {
+                for (expression in expressions) { expression.MoveBefore(invoke) }
+                context.args[0] = converted
+            }
+            let call: Expression = if (let Some(term) <- (invoke as TryInvoke)) {
+                builder.CreateTryApply(instRetTy, realFunc, context,
+                    term.GetSuccessBlock(), term.GetErrorBlock(), parent)
+            } else {
+                builder.CreateApply(instRetTy, realFunc, context, parent)
+            }
+            call.SetDebugLocation(invoke.GetDebugLocation())
+            invoke.ReplaceWith(call)
+            AddTypeCastForReturnVal(call, expectedRetTy, builder)
+        }
+    }
+
+    public func GetFrozenInstFuns(): ArrayList<Function> { return frozenInstFuns }
+    public func AppendFrozenFuncState(fn: Function, result: Option<Results<TypeDomain>>): Unit {
+        frozenStates[fn] = result
+    }
+
+    private func CreateInstFuncIfPossible(fn: Function, context: FuncCallContext): Option<Function> {
+        if (!fn.IsFuncWithBody() || !fn.IsInGenericContext() || context.thisType.getOrThrow().IsGenericRelated()) {
+            return None
+        }
+        for (ty in context.instTypeArgs) { if (ty.IsGenericRelated()) { return None } }
+        let newId = CreateInstFuncMangleName(fn.GetIdentifierWithoutPrefix(), fn, context, builder)
+        var newFunc: Function
+        if (let Some(found) <- frozenInstFuncMap.get(newId)) {
+            newFunc = found
+        } else {
+            let instFuncType = GetInstFuncTypeFromContext(fn, context, builder)
+            let parameterType = instFuncType.GetParamTypes()
+            newFunc = builder.CreateFunction(instFuncType, newId,
+                srcCodeIdentifier: fn.GetSrcCodeIdentifier(), rawMangledName: "",
+                packageName: fn.GetPackageName())
+            newFunc.SetDebugLocation(fn.GetDebugLocation())
+            newFunc.AppendAttributeInfo(fn.GetAttributeInfo())
+            newFunc.DisableAttr(Attribute.GENERIC)
+            if (!context.instTypeArgs.isEmpty()) {
+                newFunc.EnableAttr(Attribute.GENERIC_INSTANTIATED)
+            }
+            newFunc.SetLinkTypeInfo(BasicLinkage.INTERNAL)
+            newFunc.SetGenericDecl(fn)
+            let oriBlockGroup = fn.GetBody().getOrThrow()
+            let copy = BlockGroupCopyHelper(builder)
+            copy.GetInstMapFromFuncCall(fn, context.thisType, context.instTypeArgs, context.args)
+            let newBody = builder.CreateBlockGroup(newFunc)
+            newFunc.InitBody(newBody)
+            let cloned = copy.CloneBlockGroup(oriBlockGroup, newBody)
+            let newBlocks = cloned[0]
+            let newBlockGroupRetValue = cloned[1].getOrThrow()
+            newBody.SetEntryBlock(GetEntryBlock(oriBlockGroup, newBlocks))
+            newFunc.SetReturnValue(newBlockGroupRetValue)
+            CJC_ASSERT(parameterType.size == fn.GetParams().size)
+            let paramMap = HashMap<Int64, Value>()
+            var paramIndex: Int64 = 0
+            while (paramIndex < parameterType.size) {
+                let arg = builder.CreateParameter(parameterType[paramIndex],
+                    fn.GetParam(paramIndex).GetDebugLocation(), newFunc)
+                paramMap[fn.GetParam(paramIndex).nodeId] = arg
+                paramIndex++
+            }
+            BlockGroupCopyHelper.ReplaceExprOperands(newBlocks, paramMap)
+            FixCastProblemAfterInst(newBlocks, builder)
+            newFunc.SetReturnValue(newBlockGroupRetValue)
+            frozenInstFuns.add(newFunc)
+            frozenInstFuncMap[newId] = newFunc
+        }
+        context.instTypeArgs.clear()
+        context.thisType = None
+        return newFunc
+    }
+
+    private func CollectAllSubTypes(specific: ClassType): ArrayList<Type> {
+        if (specific.CanBeInherited() && !IsSubtypeSetComplete(specific.GetClassDef())) { return ArrayList<Type>() }
+        let all = ArrayList<Type>([specific])
+        let visited = HashSet<Type>()
+        visited.add(specific)
+        let work = ArrayList<ClassType>([specific])
+        while (!work.isEmpty()) {
+            let cur = work.remove(at: work.size - 1)
+            let infos = devirtFuncInfo.subtypeMap.get(cur.GetClassDef()) ?? ArrayList<InheritanceInfo>()
+            for (info in infos) {
+                let mapping = info.parentType.CalculateGenericTyMapping(cur)
+                if (!mapping[0]) { continue }
+                let sub = ReplaceRawGenericArgType(info.subType, mapping[1], builder)
+                if (!visited.add(sub)) { continue }
+                if (sub.CanBeInherited()) {
+                    let cls = (sub as ClassType).getOrThrow()
+                    if (!IsSubtypeSetComplete(cls.GetClassDef())) { return ArrayList<Type>() }
+                    work.add(cls)
+                }
+                all.add(sub)
+            }
+        }
+        return all
+    }
+
+    private func FindFinalCalleeAndThisType(state: TypeValue, invoke: InvokeBase): (Option<Function>, Option<Type>) {
+        let specific = state.GetSpecificType()
+        if (!specific.CanBeInherited() || state.GetTypeKind() == DevirtualTyKind.EXACTLY) {
+            let target = SearchRealCalleeInVtable(specific, invoke, builder).getOrThrow()
+            return (Some(target), Some(specific))
+        }
+        let subTypes = CollectAllSubTypes((specific as ClassType).getOrThrow())
+        let targets = HashSet<Function>()
+        for (sub in subTypes) {
+            if (let Some(target) <- SearchRealCalleeInVtable(sub, invoke, builder)) { targets.add(target) }
+        }
+        if (targets.size != 1) { return (None, None) }
+        let callee = targets.iterator().next().getOrThrow()
+        let srcParentTy = invoke.GetInstSrcParentCustomTypeOfMethod(builder)
+        let genericSubTy = callee.GetParentCustomTypeOrExtendedType().getOrThrow()
+        let thisTy = GetInstSubType(genericSubTy, srcParentTy, builder)
+        if (HasUnknownGenericType(srcParentTy, thisTy)) { return (Some(callee), None) }
+        return (Some(callee), Some(thisTy))
+    }
+
     public static func CollectContainInvokeExprFuncs(chirPackage: Package): ArrayList<Function> {
         let funcs = ArrayList<Function>()
         for (fn in chirPackage.GetGlobalFuncsWithBody()) {
-            if (CheckFuncHasInvoke(fn.GetBody().getOrThrow())) {
-                funcs.add(fn)
-            }
+            if (TypeAnalysis.CheckFuncHasInvoke(fn)) { funcs.add(fn) }
         }
         return funcs
     }

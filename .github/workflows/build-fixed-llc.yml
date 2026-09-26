@@ -95,7 +95,7 @@ jobs:
           const files = sums.toString().trim().split('\n').map(line => {
             const match = /^([a-f0-9]{64})  \.\/(.+)$/.exec(line);
             if (!match) throw new Error('invalid tuple manifest');
-            return {path: match[2], sha256: match[1], mode: ['bin/llc', 'bin/opt'].includes(match[2]) ? 0o755 : 0o644};
+            return {path: match[2], sha256: match[1], mode: ['bin/llc', 'bin/opt', 'bin/ld.lld'].includes(match[2]) ? 0o755 : 0o644};
           });
           files.push({path: 'SHA256SUMS', mode: 0o644, sha256: crypto.createHash('sha256').update(sums).digest('hex')});
           fs.writeFileSync(`${process.env.RUNNER_TEMP}/bootstrap-files.json`, JSON.stringify(files));

@@ -79,11 +79,15 @@ public class OCFFIParserImpl {
             DiagObjCMirrorCannotBeSealed(decl)
             decl.EnableAttr(Attribute.IS_BROKEN)
         }
+        if (decl.TestAnyAttr(Attribute.COMMON, Attribute.SPECIFIC)) {
+            DiagObjCMirrorCannotBeCommonOrSpecific(decl)
+            decl.EnableAttr(Attribute.IS_BROKEN)
+        }
     }
 
     public func CheckImplSignature(decl: ClassLikeDecl, annos: ArrayList<Annotation>): Unit {
         CJC_ASSERT(parser.HasAnnotation(annos, AnnotationKind.OBJ_C_IMPL))
-        decl.EnableAttr(Attribute.OBJ_C_MIRROR_SUBTYPE)
+        decl.EnableAttr(Attribute.OBJ_C_IMPL)
         if (let Some(_) <- decl.generic) {
             DiagObjCImplCannotBeGeneric(decl)
             decl.EnableAttr(Attribute.IS_BROKEN)
@@ -98,6 +102,11 @@ public class OCFFIParserImpl {
         }
         if (decl.astKind == ASTKind.INTERFACE_DECL) {
             DiagObjCImplCannotBeInterface(decl)
+            decl.EnableAttr(Attribute.IS_BROKEN)
+        }
+
+        if (decl.TestAnyAttr(Attribute.COMMON, Attribute.SPECIFIC)) {
+            DiagObjCImplCannotBeCommonOrSpecific(decl)
             decl.EnableAttr(Attribute.IS_BROKEN)
         }
     }
@@ -126,6 +135,12 @@ public class OCFFIParserImpl {
             DiagObjCMirrorFuncCannotBeConst(decl)
             decl.EnableAttr(Attribute.IS_BROKEN)
         }
+
+        if (decl.TestAnyAttr(Attribute.COMMON, Attribute.SPECIFIC)) {
+            DiagObjCMirrorCannotBeCommonOrSpecific(decl)
+            decl.EnableAttr(Attribute.IS_BROKEN)
+        }
+
         if (let Some(_) <- decl.outerDecl) {
             DiagObjCMirrorFuncMustBeTopLevel(decl)
             decl.EnableAttr(Attribute.IS_BROKEN)
@@ -283,6 +298,14 @@ public class OCFFIParserImpl {
 
     private func DiagObjCMirrorCannotBeSealed(node: Node): Unit {
         parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_mirror_cannot_be_sealed, node).Emit()
+    }
+
+    private func DiagObjCMirrorCannotBeCommonOrSpecific(node: Node): Unit {
+        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_mirror_cannot_be_common_specific, node).Emit()
+    }
+
+    private func DiagObjCImplCannotBeCommonOrSpecific(node: Node): Unit {
+        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_impl_cannot_be_common_specific, node).Emit()
     }
 
     private func DiagObjCImplCannotBeInterface(node: Node): Unit {
