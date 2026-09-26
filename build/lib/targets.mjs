@@ -229,6 +229,17 @@ export const RELEASE_REQUIREMENTS = Object.freeze({
   }),
 });
 
+// Which DAG stage installs each requirement and probes it on its own runner.
+// Same shape as DAG_CROSS_STD_PRODUCERS: the entry names a real job in
+// release-matrix.yml, and build/test/release-platforms.test.mjs fails if that job
+// or its action stops installing and probing, so this table cannot drift away
+// from the workflow into a claim the pipeline does not honour.
+export const DAG_REQUIREMENT_PRODUCERS = Object.freeze({
+  'android-ndk': Object.freeze({job: 'prerequisites', action: './.github/actions/setup-release-sdk'}),
+  'ohos-sdk': Object.freeze({job: 'prerequisites', action: './.github/actions/setup-release-sdk'}),
+  'xcode-ios': Object.freeze({job: 'prerequisites', action: './.github/actions/setup-release-sdk'}),
+});
+
 // ARM32 is abandoned for 0.0.2 (user order: 放弃 32 位). Tuples listed here are
 // present in the official package but deliberately not carried by ours.
 const DROPPED_ARM32_TUPLES = Object.freeze([
@@ -369,6 +380,10 @@ export function releasePlatformReadiness(key) {
   for (const requirement of platform.requires) {
     const contract = RELEASE_REQUIREMENTS[requirement];
     if (!contract) throw new ConfigError(`release platform ${key} names unknown requirement '${requirement}'`);
+    // Installed and probed by a DAG stage (release-matrix.yml `prerequisites`),
+    // so the gap is not "nobody provides it" any more. What may still be missing
+    // is the cross-built tuple above, which is reported on its own line.
+    if (DAG_REQUIREMENT_PRODUCERS[requirement]) continue;
     reasons.push(`requires ${requirement}: ${contract.summary}; no DAG stage installs or consumes it`);
   }
   // The host SDK's own std comes from its source cell, except for a host whose
