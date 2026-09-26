@@ -27,6 +27,8 @@ jobs:
         id: pin
         run: |
           source ci/bootstrap/host_llvm_source.env
+          key="HOST_LLVM_SOURCE_SHA_$HOST_LLVM_PLATFORM"
+          HOST_LLVM_SOURCE_SHA=${!key}
           printf 'HOST_LLVM_URL=%s\nHOST_LLVM_SOURCE_SHA=%s\n' "$HOST_LLVM_URL" "$HOST_LLVM_SOURCE_SHA" >> "$GITHUB_ENV"
           echo "sha=$HOST_LLVM_SOURCE_SHA" >> "$GITHUB_OUTPUT"
       - uses: ./.github/actions/sccache

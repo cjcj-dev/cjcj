@@ -65,42 +65,62 @@ test('missing host artifact cannot select the available nightly library', () => 
   assert.notEqual(result.status, 0);
 }));
 
-// Exercise the same target value that srcbuild.yml puts into every CLI step.
+// Enter the real preparation CLI at each source-workflow target boundary.
 for (const target of ['linux-aarch64', 'darwin-arm64', 'darwin-x64']) {
-  test(`source ${target} resolves its native SDK without the x64 download`, () => fixture(({env, so, run}) => {
-    env.CJCJ_SRCBUILD_TARGET = target;
-    delete env.CJCJ_BOOTSTRAP_HOST_LLVM_ARTIFACT;
-    delete env.CJCJ_BOOTSTRAP_HOST_LLVM_SO;
-    const file = path.join(env.CJCJ_SRCBUILD_HOST_SDK, 'third_party/llvm/lib',
-      target.startsWith('darwin-') ? 'libLLVM.dylib' : 'libLLVM-15.so');
-    fs.mkdirSync(path.dirname(file), {recursive: true});
-    const bytes = `${target} native library`;
-    fs.writeFileSync(file, bytes);
+  const library = target.startsWith('darwin-') ? 'libLLVM.dylib' : 'libLLVM-15.so';
+  test(`source ${target} exports pinned artifact bytes and digest`, () => fixture(({env, run}) => {
     const result = run();
     assert.equal(result.status, 0, result.stderr);
-    assert.match(result.stdout, new RegExp(`^CJCJ_BOOTSTRAP_HOST_LLVM_SO=${file}$`, 'm'));
-    const declared = crypto.createHash('sha256').update(bytes).digest('hex');
-    assert.ok(result.stdout.includes(`CJCJ_BOOTSTRAP_HOST_LLVM_SHA256=${declared}\n`));
-    console.log(`ASSERT target=${target} native SDK path and digest exported`);
-  }));
+    const output = /^CJCJ_BOOTSTRAP_HOST_LLVM_SO=(.+)$/m.exec(result.stdout)?.[1];
+    assert.ok(output, result.stdout);
+    const source = path.join(env.CJCJ_BOOTSTRAP_HOST_LLVM_ARTIFACT, library);
+    assert.notEqual(output, source);
+    assert.ok(fs.lstatSync(output).isFile());
+    assert.deepEqual(fs.readFileSync(output), fs.readFileSync(source));
+    const sha = JSON.parse(fs.readFileSync(path.join(env.CJCJ_BOOTSTRAP_HOST_LLVM_ARTIFACT, 'manifest.json'))).sha256;
+    assert.ok(result.stdout.includes(`CJCJ_BOOTSTRAP_HOST_LLVM_SHA256=${sha}\n`));
+    console.log(`ASSERT target=${target} pinned host bytes and digest exported`);
+  }, target));
 
-  test(`source ${target} cannot consume an accidentally supplied x64 artifact`, () => fixture(({env, so, run}) => {
-    env.CJCJ_SRCBUILD_TARGET = target;
-    fs.writeFileSync(path.join(env.CJCJ_BOOTSTRAP_HOST_LLVM_ARTIFACT, 'libLLVM-15.so'), 'foreign x64 library');
+  test(`source ${target} rejects one-digit digest change`, () => fixture(({env, run}) => {
+    const file = env.STAGE1_HOST_IDENTITIES;
+    fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace(/("sha256":")([a-f0-9])/, (_, prefix, digit) => prefix + (digit === '0' ? '1' : '0')));
     const result = run();
-    assert.equal(result.status, 0, result.stderr);
-    assert.ok(result.stdout.includes(`CJCJ_BOOTSTRAP_HOST_LLVM_SO=${so}\n`));
-    console.log(`ASSERT target=${target} ignores foreign x64 input`);
-  }));
+    assert.match(result.stderr, /HOST_LLVM_SHA256_MISMATCH expected=/);
+    assert.notEqual(result.status, 0);
+    assert.doesNotMatch(result.stdout, /^CJCJ_BOOTSTRAP_HOST_LLVM_SO=/m);
+    console.log(`ASSERT target=${target} digest rejection executed`);
+  }, target));
+
+  for (const field of ['source_sha', 'run_id', 'run_attempt', 'producer_sha', 'platform', 'sha256']) {
+    test(`source ${target} rejects provenance ${field}`, () => fixture(({env, run}) => {
+      const file = path.join(env.CJCJ_BOOTSTRAP_HOST_LLVM_ARTIFACT, 'manifest.json');
+      const manifest = JSON.parse(fs.readFileSync(file));
+      manifest[field] = 'different';
+      fs.writeFileSync(file, JSON.stringify(manifest));
+      const result = run();
+      assert.match(result.stderr, new RegExp(`HOST_LLVM_PROVENANCE_MISMATCH field=${field}`));
+      assert.notEqual(result.status, 0);
+      assert.doesNotMatch(result.stdout, /^CJCJ_BOOTSTRAP_HOST_LLVM_SO=/m);
+      console.log(`ASSERT target=${target} provenance ${field} rejection executed`);
+    }, target));
+  }
+
+  test(`source ${target} cannot fall back to SDK without artifact`, () => fixture(({env, run}) => {
+    delete env.CJCJ_BOOTSTRAP_HOST_LLVM_ARTIFACT;
+    const result = run();
+    assert.match(result.stderr, /HOST_LLVM_ARTIFACT_MISSING/);
+    assert.notEqual(result.status, 0);
+  }, target));
 }
 
-test('workflow supplies the target to the shared CLI and downloads host LLVM only for x64', () => {
+test('workflow supplies the target and downloads pinned host LLVM for every cell', () => {
   const workflow = fs.readFileSync(new URL('../../.github/workflows/srcbuild.yml', import.meta.url), 'utf8');
   assert.ok(workflow.includes('CJCJ_SRCBUILD_TARGET: ${{ matrix.target }}'));
   for (const name of ['Load immutable bootstrap host LLVM provenance', 'Download pinned bootstrap host LLVM']) {
     const step = workflow.split(`- name: ${name}\n`)[1]?.split('\n      - name:')[0];
     assert.ok(step, name);
-    assert.match(step, /if: matrix.target == 'linux-x64'/);
+    assert.doesNotMatch(step, /if:/);
   }
   assert.ok(workflow.includes('node ci/release/prepare_bootstrap_inputs.mjs'));
 });

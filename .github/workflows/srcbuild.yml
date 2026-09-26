@@ -282,7 +282,6 @@ jobs:
           path: ${{ env.CJCJ_FIXED_LLVM_DIR }}
 
       - name: Load immutable bootstrap host LLVM provenance
-        if: matrix.target == 'linux-x64'
         shell: bash
         run: |
           set -euo pipefail
@@ -290,7 +289,6 @@ jobs:
           echo "CJCJ_BOOTSTRAP_HOST_LLVM_ARTIFACT=$RUNNER_TEMP/bootstrap-host-llvm" >> "$GITHUB_ENV"
 
       - name: Download pinned bootstrap host LLVM
-        if: matrix.target == 'linux-x64'
         uses: actions/download-artifact@v8
         with:
           artifact-ids: ${{ env.HOST_LLVM_ARTIFACT_ID }}
