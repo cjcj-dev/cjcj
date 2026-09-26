@@ -2896,6 +2896,11 @@ public class IRBuilder2 <: Resource {
         return retCGType.GetLLVMType()
     }
 
+    private func ReportUnknownLLVMIntrinsic(intrinsicName: String): Nothing {
+        InternalError("unknown LLVM intrinsic: ${intrinsicName}")
+        throw IllegalStateException("unknown LLVM intrinsic: ${intrinsicName}")
+    }
+
     public func GetOrInsertIntrinsicDeclaration(intrinsicName: String): LLVMValueRef {
         return GetOrInsertIntrinsicDeclaration(intrinsicName, ArrayList<LLVMTypeRef>())
     }
@@ -2904,7 +2909,7 @@ public class IRBuilder2 <: Resource {
         overloadedTypes: ArrayList<LLVMTypeRef>): LLVMValueRef {
         let intrinsicID = LookupIntrinsicID(intrinsicName)
         if (intrinsicID == 0u32) {
-            return LLVMNullValue()
+            ReportUnknownLLVMIntrinsic(intrinsicName)
         }
         if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
             if (overloadedTypes.isEmpty()) {
@@ -2968,11 +2973,11 @@ public class IRBuilder2 <: Resource {
         args: ArrayList<LLVMValueRef>, name!: String = ""): LLVMValueRef {
         let callee = GetOrInsertIntrinsicDeclaration(intrinsicName, overloadedTypes)
         if (callee.isNull()) {
-            return LLVMNullValue()
+            ReportUnknownLLVMIntrinsic(intrinsicName)
         }
         let calleeType = GetIntrinsicFunctionType(intrinsicName, overloadedTypes)
         if (calleeType.isNull()) {
-            return LLVMNullValue()
+            ReportUnknownLLVMIntrinsic(intrinsicName)
         }
         return CreateCallOrInvoke(callee, args, name: name)
     }
@@ -2981,11 +2986,11 @@ public class IRBuilder2 <: Resource {
         args: ArrayList<LLVMValueRef>, name!: String = ""): LLVMValueRef {
         let callee = GetOrInsertIntrinsicDeclaration(intrinsicName, overloadedTypes)
         if (callee.isNull()) {
-            return LLVMNullValue()
+            ReportUnknownLLVMIntrinsic(intrinsicName)
         }
         let calleeType = GetIntrinsicFunctionType(intrinsicName, overloadedTypes)
         if (calleeType.isNull()) {
-            return LLVMNullValue()
+            ReportUnknownLLVMIntrinsic(intrinsicName)
         }
         return CreateCall(callee, calleeType, args, name: name)
     }
