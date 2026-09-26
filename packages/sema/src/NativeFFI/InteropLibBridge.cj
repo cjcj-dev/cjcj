@@ -1129,12 +1129,113 @@ public class InteropLibBridge {
         return None
     }
 
+    public func FindAsJValueDecl(): Option<FuncDecl> {
+        let entityDecl = GetJavaEntityDecl()
+        if (let None <- entityDecl) {
+            return None
+        }
+        for (decl in entityDecl.getOrThrow().GetMemberDecls()) {
+            if (decl.identifier.Val() == "asJValue") {
+                return decl as FuncDecl
+            }
+        }
+        return None
+    }
+
+    public func CreateAsJvalueCall(javaEntity: Expr): Option<CallExpr> {
+        let asJValue = FindAsJValueDecl()
+        if (let None <- asJValue) {
+            return None
+        }
+        return Some(CreateMemberCall(javaEntity, asJValue.getOrThrow()))
+    }
+
     public func CreateAsJniJobjectCall(javaEntity: Expr): Option<CallExpr> {
         let asJObject = FindAsJObjectDecl()
         if (let None <- asJObject) {
             return None
         }
         return Some(CreateMemberCall(javaEntity, asJObject.getOrThrow()))
+    }
+
+    public func CreateBitCastExpr(expr: Expr, resultTy: Ty, valueTy: Ty, curFile: File): Option<CallExpr> {
+        let bitCastDecl = importManager.GetCoreDecl<FuncDecl>("bitCast")
+        if (let None <- bitCastDecl) {
+            return None
+        }
+        let fd = bitCastDecl.getOrThrow()
+        let ref = WithinFile<RefExpr>(CreateRefExpr(fd), curFile)
+        ref.instTys.add(valueTy)
+        ref.instTys.add(resultTy)
+        ref.typeArguments.add(CreateType(valueTy))
+        ref.typeArguments.add(CreateType(resultTy))
+        ref.SetTy(typeManager.GetInstantiatedTy(fd.GetTy().getOrThrow(), GenerateTypeMapping(fd, ref.instTys)))
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(expr))
+        let call = CreateCallExpr(ref, args, Some(fd), Some(resultTy), CallKind.CALL_INTRINSIC_FUNCTION)
+        call.curFile = Some(curFile)
+        return Some(call)
+    }
+
+    public func CreateJValueExpr(expr: Expr): Option<Expr> {
+        let curFile = expr.curFile
+        let ty = expr.GetTy()
+        if (let None <- ty) {
+            return None
+        }
+        let valueTy = ty.getOrThrow()
+        if (valueTy.IsPrimitive()) {
+            match (valueTy.kind) {
+                case TypeKind.TYPE_BOOLEAN =>
+                    let jboolty = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UINT8)
+                    let thenNodes = ArrayList<Node>()
+                    let one = CreateLitConstExpr(LitConstKind.INTEGER, "1", jboolty)
+                    if (let Some(file) <- curFile) {
+                        one.curFile = Some(file)
+                    }
+                    thenNodes.add(one)
+                    let elseNodes = ArrayList<Node>()
+                    let zero = CreateLitConstExpr(LitConstKind.INTEGER, "0", jboolty)
+                    if (let Some(file) <- curFile) {
+                        zero.curFile = Some(file)
+                    }
+                    elseNodes.add(zero)
+                    let ifExpr = CreateIfExpr(expr, CreateBlock(thenNodes, Some(jboolty)),
+                        Some(CreateBlock(elseNodes, Some(jboolty))), Some(jboolty))
+                    ifExpr.curFile = curFile
+                    return Some(ifExpr)
+                case TypeKind.TYPE_FLOAT32 =>
+                    if (let Some(file) <- curFile) {
+                        if (let Some(call) <- CreateBitCastExpr(expr,
+                            TypeManager.GetPrimitiveTy(TypeKind.TYPE_UINT32),
+                            TypeManager.GetPrimitiveTy(TypeKind.TYPE_FLOAT32), file)) {
+                            return Some(call)
+                        }
+                    }
+                    return Some(expr)
+                case TypeKind.TYPE_FLOAT64 =>
+                    if (let Some(file) <- curFile) {
+                        if (let Some(call) <- CreateBitCastExpr(expr,
+                            TypeManager.GetPrimitiveTy(TypeKind.TYPE_UINT64),
+                            TypeManager.GetPrimitiveTy(TypeKind.TYPE_FLOAT64), file)) {
+                            return Some(call)
+                        }
+                    }
+                    return Some(expr)
+                case _ => return Some(expr)
+            }
+        }
+        let entityExpr = if (InteropLibBridge.IsJavaEntityTy(valueTy)) {
+            Some(expr)
+        } else {
+            WrapJavaEntity(expr)
+        }
+        if (let Some(entity) <- entityExpr) {
+            if (let Some(call) <- CreateAsJvalueCall(entity)) {
+                return Some(call)
+            }
+        }
+        return None
     }
 
     public func CreateJObjectExpr(cjExpr: Expr): Option<Expr> {
@@ -1382,8 +1483,25 @@ public class InteropLibBridge {
         return Some(CreateCall(funcDecl.getOrThrow(), curFile, args: args))
     }
 
+    private func CreateFieldStoreCall(fd: FuncDecl, curFile: File, args: ArrayList<FuncArg>,
+        value: Expr): CallExpr {
+        if (fd.GetGeneric().isNone()) {
+            return CreateCall(fd, curFile, args: args)
+        }
+        if (let None <- value.GetTy()) {
+            return CreateCall(fd, curFile, args: args)
+        }
+        let valueTy = value.GetTy().getOrThrow()
+        let fdRef = WithinFile<RefExpr>(CreateRefExpr(fd), curFile)
+        fdRef.instTys.add(valueTy)
+        fdRef.typeArguments.add(CreateType(valueTy))
+        fdRef.SetTy(typeManager.GetInstantiatedTy(fd.GetTy().getOrThrow(), GenerateTypeMapping(fd, fdRef.instTys)))
+        let funcTy = (fdRef.GetTy().getOrThrow() as FuncTy).getOrThrow()
+        return CreateCallExpr(fdRef, args, Some(fd), funcTy.retTy, CallKind.CALL_DECLARED_FUNCTION)
+    }
+
     public func CreateSetFieldCall(env: Expr, obj: Expr, signature: MemberJNISignature,
-        value: Expr, prepared!: Bool = false): Option<CallExpr> {
+        value: Expr): Option<CallExpr> {
         let funcDecl = GetSetFieldDecl()
         let jclassInitFuncDecl = GetJClassDecl()
         let parseSignatureFuncDecl = GetParseComponentSignatureDecl()
@@ -1417,13 +1535,12 @@ public class InteropLibBridge {
         args.add(CreateFuncArg((ASTCloner.Clone(env) as Expr).getOrThrow()))
         args.add(CreateFuncArg(obj))
         args.add(CreateFuncArg(fieldID))
-        let stored = if (prepared) { value } else { WrapJavaEntity(value).getOrThrow() }
-        args.add(CreateFuncArg(stored))
-        return Some(CreateCall(funcDecl.getOrThrow(), curFile, args: args))
+        args.add(CreateFuncArg(value))
+        return Some(CreateFieldStoreCall(funcDecl.getOrThrow(), curFile, args, value))
     }
 
     public func CreateSetStaticFieldCall(env: Expr, typeSignature: String, fieldName: String,
-        fieldSignature: String, value: Expr, prepared!: Bool = false): Option<CallExpr> {
+        fieldSignature: String, value: Expr): Option<CallExpr> {
         let funcDecl = GetSetStaticFieldDecl()
         let jclassInitFuncDecl = GetJClassDecl()
         let parseSignatureFuncDecl = GetParseComponentSignatureDecl()
@@ -1457,9 +1574,8 @@ public class InteropLibBridge {
         args.add(CreateFuncArg((ASTCloner.Clone(env) as Expr).getOrThrow()))
         args.add(CreateFuncArg(jclass))
         args.add(CreateFuncArg(fieldID))
-        let stored = if (prepared) { value } else { WrapJavaEntity(value).getOrThrow() }
-        args.add(CreateFuncArg(stored))
-        return Some(CreateCall(funcDecl.getOrThrow(), curFile, args: args))
+        args.add(CreateFuncArg(value))
+        return Some(CreateFieldStoreCall(funcDecl.getOrThrow(), curFile, args, value))
     }
 
     public func WrapExceptionHandling(env: Expr, action: LambdaExpr): Expr {

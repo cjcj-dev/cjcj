@@ -10,6 +10,9 @@ public struct Java_CFFI_JavaEntity {
     public func asJObject(): jobject {
         CPointer<Unit>()
     }
+    public func asJValue(): Java_CFFI_JavaEntity {
+        this
+    }
 }
 
 public enum Java_CFFI_JavaEntityKind {
@@ -68,4 +71,8 @@ public func Java_CFFI_FieldIDConstr(env: JNIEnv_ptr, clazz: Java_CFFI_JClass, na
     Java_CFFI_FieldID()
 }
 
-public func Java_CFFI_setField(env: JNIEnv_ptr, obj: jobject, field: Java_CFFI_FieldID, value: Java_CFFI_JavaEntity): Unit {}
+public func Java_CFFI_setField<T>(env: JNIEnv_ptr, obj: jobject, field: Java_CFFI_FieldID, value: T): Unit {}
+
+public func Java_CFFI_setStaticField<T>(env: JNIEnv_ptr, clazz: Java_CFFI_JClass, field: Java_CFFI_FieldID, value: T): Unit {}
+
+public func handlePendingException(env: JNIEnv_ptr): Unit {}

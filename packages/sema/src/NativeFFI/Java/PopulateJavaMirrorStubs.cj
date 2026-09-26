@@ -12,15 +12,13 @@ public class PopulateJavaMirrorStubs {
     private let typeManager: TypeManager
     private let ilib: InteropLibBridge
     private let utils: Utils
+    private let factory: ASTFactory
 
-    public init(typeManager: TypeManager, ilib: InteropLibBridge, utils: Utils) {
+    public init(typeManager: TypeManager, ilib: InteropLibBridge, utils: Utils, factory: ASTFactory) {
         this.typeManager = typeManager
         this.ilib = ilib
         this.utils = utils
-    }
-
-    private func NeedsPreparedJObject(ty: Ty): Bool {
-        return IsMirror(ty) || IsImpl(ty) || ty.IsString()
+        this.factory = factory
     }
 
     private func ParamExprs(paramList: FuncParamList, curFile: File): ArrayList<Expr> {
@@ -182,15 +180,6 @@ public class PopulateJavaMirrorStubs {
         }
     }
 
-    private func PreparedArg(paramRef: Expr, ty: Ty): (Expr, Bool) {
-        if (NeedsPreparedJObject(ty)) {
-            if (let Some(jobject) <- ilib.CreateJObjectExpr(paramRef)) {
-                return (jobject, true)
-            }
-        }
-        return (paramRef, false)
-    }
-
     private func InsertPropGetter(mirror: ClassLikeDecl, property: PropDecl): Unit {
         if (property.getters.isEmpty()) {
             return
@@ -271,27 +260,29 @@ public class PopulateJavaMirrorStubs {
         }
         let param = params[0]
         let paramRef = WithinFile<RefExpr>(CreateRefExpr(param), file)
-        let valueTy = param.GetTy()
+        var valueTy = param.GetTy()
+        if (valueTy.isNone()) {
+            valueTy = property.GetTy()
+        }
         if (let None <- valueTy) {
             return
         }
-        let (stored, prepared) = PreparedArg(paramRef, valueTy.getOrThrow())
+        let ty = valueTy.getOrThrow()
+        param.SetTy(ty)
+        paramRef.SetTy(ty)
         let signature = MemberJNISignature(utils, property)
-        let envCall = ilib.CreateGetJniEnvCall(Some(file))
-        if (let None <- envCall) {
-            return
-        }
-        var setCall: Option<CallExpr> = None
+        var setterBlock: Option<Block> = None
         if (property.TestAttr(Attribute.STATIC)) {
-            setCall = ilib.CreateSetStaticFieldCall(envCall.getOrThrow(), signature.classTypeSignature, signature.name,
-                signature.signature, stored, prepared: prepared)
+            setterBlock = factory.CreateStaticJavaFieldSetCall(file, signature, ty, paramRef)
         } else {
             if (let Some(asObj) <- ilib.CreateAsJniJobjectCall(CreateJavaRefCall(mirror, Some(file)))) {
-                setCall = ilib.CreateSetFieldCall(envCall.getOrThrow(), asObj, signature, stored, prepared: prepared)
+                setterBlock = factory.CreateInstanceJavaFieldSetCall(file, asObj, signature, ty, paramRef)
             }
         }
-        if (let Some(call) <- setCall) {
-            body.add(call)
+        if (let Some(block) <- setterBlock) {
+            for (node in block.body) {
+                body.add(node)
+            }
         }
     }
 

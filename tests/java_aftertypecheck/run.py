@@ -18,6 +18,39 @@ def ast_text(dest):
     return path.read_text() if path.exists() else ""
 
 
+def brace_section(text, token, from_idx=0):
+    start = text.find(token, from_idx)
+    if start < 0:
+        return ""
+    line_start = text.rfind("\n", 0, start) + 1
+    depth = 0
+    section = []
+    for line in text[line_start:].splitlines(True):
+        section.append(line)
+        depth += line.count("{") - line.count("}")
+        if depth == 0 and len(section) > 1:
+            return "".join(section)
+    return "".join(section)
+
+
+def setter_section(ast, name):
+    return brace_section(ast, "FuncDecl: $" + name + "set")
+
+
+def value_arg(setter):
+    idx = 0
+    found = ""
+    while True:
+        start = setter.find("FuncArg {", idx)
+        if start < 0:
+            return found
+        block = brace_section(setter, "FuncArg {", start)
+        idx = start + len("FuncArg {")
+        if "RefExpr: set {" in block and "Java_CFFI_get_env" not in block:
+            if not found or len(block) < len(found):
+                found = block
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--compiler", type=Path, required=True)
@@ -155,7 +188,15 @@ def main():
 
     mirror = compile_dump("mirror_user")
     mirror_ast = mirror.pop("ast")
-    mirror["assertions"] = {"exit": mirror["rc"] == 0}
+    flag = value_arg(setter_section(mirror_ast, "flag"))
+    count = value_arg(setter_section(mirror_ast, "count"))
+    name = value_arg(setter_section(mirror_ast, "name"))
+    mirror["assertions"] = {
+        "exit": mirror["rc"] == 0,
+        "flag_jvalue": "IfExpr" in flag and "ty: UInt8" in flag and "asJObject" not in flag,
+        "count_jvalue": "RefExpr: set" in count and "ty: Int32" in count and "asJObject" not in count and "IfExpr" not in count,
+        "name_jobject": "asJObject" in name and "RefExpr: set" in name and "IfExpr" not in name,
+    }
     mirror["passed"] = all(mirror["assertions"].values())
     result["cases"]["mirror_user"] = mirror
 
