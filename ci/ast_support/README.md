@@ -48,3 +48,15 @@ are printed. Windows qualification is `build-windows-runtime.yml`: it calls
 `ci/build_ast_support.sh` with `cmake/mingw_x86_64_toolchain.cmake`, installs
 that artifact, cross-builds `std/ast.o`, then `build_windows_std_ast.mjs`
 rejects a swapped schema, header or archive before the DLL export guard.
+
+For Linux x86_64 host-pin integration evidence, run
+`python3 ci/test_ast_host_workflow.py --repo "$PWD" --work /absolute/empty/workdir`
+on a build worker with PyYAML, clang, CMake and Ninja installed. It executes the
+workflow's pin-loading, source-fetching, real cjv installation and AST build
+shell steps, then checks the traced arguments and copied FlatBuffers bytes.
+The work directory retains step scripts, logs and `result.json`. Exit 1 means
+an executed target assertion failed; exit 2 means a workflow step failed and
+must not be counted as a successful fault-injection result. `--source` and
+`--seed-home` physically copy previously fetched sources and private SDK inputs
+for controlled arms. This local runner does not qualify macOS, ARM, cache
+Actions or artifact upload; those require the corresponding workflow jobs.
