@@ -467,6 +467,12 @@ public func ExprMajorKindIndex(kind: ExprMajorKind): Int64 {
     }
 }
 
+extend ExprMajorKind <: Hashable {
+    public func hashCode(): Int64 {
+        return ExprMajorKindIndex(this)
+    }
+}
+
 extend ExprMajorKind <: Equatable<ExprMajorKind> {
     public operator func ==(right: ExprMajorKind): Bool {
         return ExprMajorKindIndex(this) == ExprMajorKindIndex(right)
