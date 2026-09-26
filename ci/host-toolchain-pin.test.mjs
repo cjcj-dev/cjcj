@@ -305,7 +305,7 @@ test('ordinary CI and source-build hosts use the same nightly', async () => {
   const definitions = ordinary.match(/^CJCJ_TOOLCHAIN=\S+$/gm) ?? [];
   assert.equal(definitions.length, 1, 'ordinary host must define exactly one toolchain');
   assert.equal(definitions[0].slice('CJCJ_TOOLCHAIN='.length), await hostPin(),
-    'ordinary CI and source-build host versions must be equal');
+    'CJCJ_TOOLCHAIN must be equal in ci/cjpm_pin.env and ci/host_sdk_pin.env');
 });
 
 test('every CJCJ_TOOLCHAIN definition names a host and has measured consumers', async () => {
