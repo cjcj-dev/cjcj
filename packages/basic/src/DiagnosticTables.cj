@@ -3377,6 +3377,11 @@ public let rDiagSeveritys: Array<DiagSeverity> = [
     DiagSeverity.DS_ERROR,
     DiagSeverity.DS_ERROR,
     DiagSeverity.DS_ERROR,
+    DiagSeverity.DS_ERROR, // parse_java_mirror_cannot_be_common_specific
+    DiagSeverity.DS_ERROR,
+    DiagSeverity.DS_ERROR,
+    DiagSeverity.DS_ERROR,
+    DiagSeverity.DS_ERROR, // parse_java_impl_cannot_be_common_specific
     DiagSeverity.DS_ERROR,
     DiagSeverity.DS_ERROR,
     DiagSeverity.DS_ERROR,
@@ -3385,9 +3390,12 @@ public let rDiagSeveritys: Array<DiagSeverity> = [
     DiagSeverity.DS_ERROR,
     DiagSeverity.DS_ERROR,
     DiagSeverity.DS_ERROR,
+    DiagSeverity.DS_ERROR, // parse_objc_mirror_cannot_be_common_specific
     DiagSeverity.DS_ERROR,
     DiagSeverity.DS_ERROR,
     DiagSeverity.DS_ERROR,
+    DiagSeverity.DS_ERROR,
+    DiagSeverity.DS_ERROR, // parse_objc_impl_cannot_be_common_specific
     DiagSeverity.DS_ERROR,
     DiagSeverity.DS_ERROR,
     DiagSeverity.DS_ERROR,
@@ -4115,6 +4123,11 @@ public let rWarnGroups: Array<WarnGroup> = [
     WarnGroup.NONE,
     WarnGroup.NONE,
     WarnGroup.NONE,
+    WarnGroup.NONE, // parse_java_mirror_cannot_be_common_specific
+    WarnGroup.NONE,
+    WarnGroup.NONE,
+    WarnGroup.NONE,
+    WarnGroup.NONE, // parse_java_impl_cannot_be_common_specific
     WarnGroup.NONE,
     WarnGroup.NONE,
     WarnGroup.NONE,
@@ -4123,9 +4136,12 @@ public let rWarnGroups: Array<WarnGroup> = [
     WarnGroup.NONE,
     WarnGroup.NONE,
     WarnGroup.NONE,
+    WarnGroup.NONE, // parse_objc_mirror_cannot_be_common_specific
     WarnGroup.NONE,
     WarnGroup.NONE,
     WarnGroup.NONE,
+    WarnGroup.NONE,
+    WarnGroup.NONE, // parse_objc_impl_cannot_be_common_specific
     WarnGroup.NONE,
     WarnGroup.NONE,
     WarnGroup.NONE,

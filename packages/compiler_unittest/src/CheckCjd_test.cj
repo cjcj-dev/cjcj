@@ -6,10 +6,11 @@ import cjcj::option.GlobalOptions
 import cjcj::parse.Parser
 import cjcj::utils.{CJC_ASSERT, FileUtil, ProfileRecorder, TriggerPointSetter}
 import std.collection.*
+import std.env.getVariable
 import std.unittest.*
 import std.unittest.testmacro.*
 
-private let projectPath: String = "/root/cj_build/cangjie_compiler"
+private let projectPath: String = getVariable("PROJECT_SOURCE_DIR") ?? "."
 
 @When[os == "Windows"]
 private let srcPath: String = projectPath + "\\unittests\\Parse\\ParseCangjieFiles\\"
