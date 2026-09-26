@@ -1,5 +1,11 @@
 name: Android source runtime
 on:
+  pull_request:
+    paths:
+      - '.github/workflows/android-runtime.yml'
+      - 'ci/srcbuild/**/android-runtime.mjs'
+      - 'ci/srcbuild/steps/build-android-*.mjs'
+      - 'ci/release/cross-runtime.mjs'
   workflow_dispatch:
 permissions:
   contents: read
