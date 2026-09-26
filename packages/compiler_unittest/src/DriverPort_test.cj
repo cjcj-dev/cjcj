@@ -27,7 +27,7 @@ public class DriverTest {
         @Assert(GetDarwinSDKVersion(sdkPath + "/IncorrectSDKSettings1").isNone())
         @Assert(GetDarwinSDKVersion(sdkPath + "/IncorrectSDKSettings2").isNone())
         @Assert(GetDarwinSDKVersion(sdkPath + "/IncorrectSDKSettings3").isNone())
-        @Expect(GetDarwinSDKVersion(sdkPath + "/CorrectSDKSettings").getOrThrow(), "14.5")
+        @Expect(GetDarwinSDKVersion(sdkPath + "/CorrectSDKSettings") ?? "", "14.5")
     }
 }
 
