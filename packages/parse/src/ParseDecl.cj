@@ -2511,6 +2511,9 @@ extend ParserImpl {
                     if (cd.TestAttr(Attribute.OBJ_C_MIRROR)) {
                         ctor.EnableAttr(Attribute.OBJ_C_MIRROR)
                     }
+                    if (cd.TestAttr(Attribute.JAVA_MIRROR)) {
+                        ctor.EnableAttr(Attribute.JAVA_MIRROR)
+                    }
                     CheckInitCtorDeclBody(ctor)
                 }
             }

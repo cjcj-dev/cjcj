@@ -10,7 +10,7 @@ import cjcj::basic.*
 import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cjcj::mangle.BaseMangler
 import cjcj::sema.Desugar.AfterTypeCheck.LookupEnumMember
-import cjcj::sema.TypeManager
+import cjcj::sema.{GenerateTypeMapping, TypeManager}
 import cjcj::utils.*
 
 private let NATIVE_CONSTRUCTOR_MARKER_CLASS_NAME: String = "$$NativeConstructorMarker"
@@ -77,6 +77,20 @@ public class Utils {
 
     public func GetStringDecl(): StructDecl {
         return GetStringDecl(importManager)
+    }
+
+    public func CreateZeroValue(ty: Ty, curFile: File): CallExpr {
+        let decl = importManager.GetCoreDecl<FuncDecl>("zeroValue").getOrThrow()
+        let call = CallExpr()
+        let ref = WithinFile<RefExpr>(CreateRefExpr(decl), curFile)
+        ref.instTys.add(ty)
+        ref.SetTy(typeManager.GetInstantiatedTy(decl.GetTy().getOrThrow(), GenerateTypeMapping(decl, ref.instTys)))
+        call.baseFunc = Some(ref)
+        call.SetTy(ty)
+        call.callKind = CallKind.CALL_INTRINSIC_FUNCTION
+        call.resolvedFunction = Some(decl)
+        call.curFile = Some(curFile)
+        return call
     }
 
     public func GetJavaObjectTypeName(ty: Ty): String {
@@ -201,6 +215,39 @@ public class Utils {
         cases.add(caseNone)
         return WithinFile<MatchExpr>(CreateMatchExpr(selector, cases, ty), curFile)
     }
+
+    public func CreateNativeFunc(name: String, params: ArrayList<FuncParam>, retTy: Ty, nodes: ArrayList<Node>,
+        curFile: File, moduleName: String, fullPackageName: String): FuncDecl {
+        CJC_ASSERT(Ty.IsMetCType(retTy))
+        for (param in params) {
+            CJC_ASSERT(Ty.IsMetCType(param.GetTy().getOrThrow()))
+        }
+        let block = CreateBlock(nodes, Some(retTy))
+        block.EnableAttr(Attribute.COMPILER_ADD)
+        block.curFile = Some(curFile)
+        let funcTyParams = ArrayList<Ty>()
+        for (param in params) {
+            funcTyParams.add(param.GetTy().getOrThrow())
+        }
+        let paramLists = ArrayList<FuncParamList>()
+        paramLists.add(CreateFuncParamList(params, None))
+        let funcBody = CreateFuncBody(paramLists, None, Some(block), Some(retTy))
+        funcBody.curFile = Some(curFile)
+        let cfg = FuncTyConfig()
+        cfg.isC = true
+        let funcTy = typeManager.GetFunctionTy(funcTyParams.toArray(), retTy, cfg: cfg)
+        let fdecl = CreateFuncDecl(name, Some(funcBody), Some(funcTy))
+        fdecl.funcBody.getOrThrow().funcDecl = Some(fdecl)
+        fdecl.EnableAttr(Attribute.C)
+        fdecl.EnableAttr(Attribute.GLOBAL)
+        fdecl.EnableAttr(Attribute.PUBLIC)
+        fdecl.EnableAttr(Attribute.NO_MANGLE)
+        fdecl.EnableAttr(Attribute.UNSAFE)
+        fdecl.curFile = Some(curFile)
+        fdecl.moduleName = moduleName
+        fdecl.fullPackageName = fullPackageName
+        return fdecl
+    }
 }
 
 public func GetJavaRefField(mirrorLike: ClassDecl): VarDecl {
@@ -311,20 +358,80 @@ public func CreateJavaRefCall(expr: Expr): Expr {
 }
 
 public func IsGeneratedJavaMirrorConstructor(ctor: FuncDecl): Bool {
-    return ctor.TestAttr(Attribute.JAVA_MIRROR) && ctor.TestAttr(Attribute.CONSTRUCTOR) &&
-        ctor.TestAttr(Attribute.COMPILER_ADD)
+    if (let None <- ctor.outerDecl) {
+        return false
+    }
+    return ctor.outerDecl.getOrThrow().TestAttr(Attribute.JAVA_MIRROR) &&
+        ctor.TestAttr(Attribute.CONSTRUCTOR) && ctor.TestAttr(Attribute.COMPILER_ADD)
 }
 
-public func GetGeneratedConstructorInMirror(mirror: ClassDecl): Option<FuncDecl> {
+public func IsWrappingConstructorOfJavaMirror(ctor: FuncDecl): Bool {
+    if (!ctor.TestAttr(Attribute.CONSTRUCTOR) || !ctor.TestAttr(Attribute.COMPILER_ADD)) {
+        return false
+    }
+    if (let None <- ctor.funcBody) {
+        return false
+    }
+    let lists = ctor.funcBody.getOrThrow().paramLists
+    if (lists.isEmpty() || lists[0].params.size != 1) {
+        return false
+    }
+    if (let Some(ty) <- lists[0].params[0].GetTy()) {
+        return InteropLibBridge.IsJavaEntityTy(ty)
+    }
+    return false
+}
+
+public func GetJavaImplRegistryCompanionConstructor(companion: ClassDecl): FuncDecl {
+    CJC_ASSERT(IsImplRegistryCompanion(companion))
+    for (member in companion.GetMemberDecls()) {
+        if (!member.TestAttr(Attribute.CONSTRUCTOR)) {
+            continue
+        }
+        if (let Some(ctor) <- (member as FuncDecl)) {
+            return ctor
+        }
+    }
+    CJC_ABORT_WITH_MSG("Bad registry companion")
+    return FuncDecl()
+}
+
+public func GetJavaMirrorWrappingConstructor(mirror: ClassDecl): Option<FuncDecl> {
     CJC_ASSERT(mirror.TestAttr(Attribute.JAVA_MIRROR))
     for (member in mirror.GetMemberDecls()) {
         if (let Some(fd) <- (member as FuncDecl)) {
-            if (IsGeneratedJavaMirrorConstructor(fd)) {
+            if (IsWrappingConstructorOfJavaMirror(fd)) {
                 return Some(fd)
             }
         }
     }
     return None
+}
+
+public func GetJavaMirrorWrappingConstructor(mirrorLike: ClassLikeDecl): Option<FuncDecl> {
+    if (IsImpl(mirrorLike)) {
+        for (superType in mirrorLike.inheritedTypes) {
+            if (superType.TyKind() != TypeKind.TYPE_CLASS) {
+                continue
+            }
+            if (let Some(superTy) <- (superType.GetTy() as ClassLikeTy)) {
+                if (let Some(superDecl) <- superTy.commonDecl) {
+                    if (IsMirror(superDecl) || IsImpl(superDecl)) {
+                        return GetJavaMirrorWrappingConstructor(superDecl)
+                    }
+                }
+            }
+        }
+        return None
+    }
+    if (let Some(mirrorClass) <- (mirrorLike as ClassDecl)) {
+        return GetJavaMirrorWrappingConstructor(mirrorClass)
+    }
+    return None
+}
+
+public func GetGeneratedConstructorInMirror(mirror: ClassDecl): Option<FuncDecl> {
+    return GetJavaMirrorWrappingConstructor(mirror)
 }
 
 public func GetGeneratedJavaMirrorConstructor(mirror: ClassLikeDecl): FuncDecl {
@@ -451,6 +558,20 @@ public func GetJavaFQSourceCodeName(decl: ClassLikeDecl): String {
     return decl.GetFullPackageName() + "." + decl.identifier.Val()
 }
 
+// Upstream Java/Utils.cpp:394-410. Escaped dollars stay inside a part; bare dollars are nested boundaries.
+public func GetJavaUnqualifiedTypeName(decl: ClassLikeDecl, nestedSeparator: String): String {
+    if (let Some(attr) <- GetJavaMirrorAnnoAttr(decl)) {
+        let nameParts = GetFQNameParts(attr)
+        if (!nameParts.isEmpty()) {
+            if (let Some(pos) <- nameParts[0].lastIndexOf(".")) {
+                nameParts[0] = nameParts[0][pos + 1..]
+            }
+        }
+        return JoinVector(nameParts, nestedSeparator)
+    }
+    return decl.identifier.Val()
+}
+
 public func GetJavaPackage(decl: Decl): String {
     for (anno in decl.annotations) {
         if (anno.kind != AstAnnotationKind.JAVA_MIRROR && anno.kind != AstAnnotationKind.JAVA_IMPL) {
@@ -528,6 +649,14 @@ public func ReplaceClassName(classTypeSignature: String, newSegment: String): St
 
 public func NormalizeJavaSignature(sig: String): String {
     return sig.replace(".", "/")
+}
+
+public func GetJavaJniClassName(utils: Utils, cjtype: Ty): String {
+    if (IsJArray(cjtype)) {
+        return utils.GetJavaTypeSignature(cjtype)
+    }
+    let decl = Ty.GetDeclOfTy(Some(cjtype)).getOrThrow()
+    return NormalizeJavaSignature(GetJavaFQName(decl))
 }
 
 public func CreateMirrorConstructorCall(importManager: SemaImportManager, entity: Expr,
