@@ -22,10 +22,7 @@ public class DriverTest {
     @TestCase
     public func getDarwinSDKVersion(): Unit {
         let projectPath = getVariable("PROJECT_SOURCE_DIR") ?? "."
-        @When[os == "Windows"]
-        let sdkPath = FileUtil.JoinPath(projectPath, "unittests\\Driver")
-        @When[os != "Windows"]
-        let sdkPath = FileUtil.JoinPath(projectPath, "unittests/Driver")
+        let sdkPath = FileUtil.JoinPath(projectPath, "unittests" + DIR_SEPARATOR + "Driver")
         @Assert(GetDarwinSDKVersion(sdkPath).isNone())
         @Assert(GetDarwinSDKVersion(sdkPath + "/IncorrectSDKSettings1").isNone())
         @Assert(GetDarwinSDKVersion(sdkPath + "/IncorrectSDKSettings2").isNone())
