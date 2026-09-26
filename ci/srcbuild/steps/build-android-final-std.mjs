@@ -6,7 +6,7 @@ import path from 'node:path';
 import {assertBootstrapCompiler} from '../lib/bootstrap-handoff.mjs';
 import {writeStdProvenance} from '../../../build/lib/provenance.mjs';
 import {probeRequirement} from '../../release/platform-matrix.mjs';
-import {writeCrossRuntimeManifest} from '../../release/cross-runtime.mjs';
+import {buildAndroidRuntime} from '../lib/android-runtime.mjs';
 
 $.stdio = 'inherit';
 const required = name => {
@@ -40,9 +40,7 @@ const assertCompiler = async () => {
   await assertBootstrapCompiler({sdk, command});
 };
 await assertCompiler();
-await $({cwd: runtime, env: stageEnv})`python3 build.py clean`;
-await $({cwd: runtime, env: stageEnv})`python3 build.py build -t release --target android-aarch64 --target-toolchain ${path.join(ndk, 'toolchains')} -v ${version}`;
-await $({cwd: runtime, env: stageEnv})`python3 build.py install`;
+await buildAndroidRuntime({workspace, ndk, version, runtimeRef, env: stageEnv});
 await assertCompiler();
 await fs.rm(finalStd, {recursive: true, force: true});
 await $({cwd: stdlib, env: stageEnv})`python3 build.py clean`;
@@ -54,7 +52,7 @@ await writeStdProvenance({sourceDir: stdlib, installPrefix: finalStd,
 // Keep runtime separate from std so package consumers cannot confuse their provenance.
 const runtimeArtifact = path.join(finalStd, 'cross-runtime');
 await fs.cp(runtimeInstall, runtimeArtifact, {recursive: true});
-await writeCrossRuntimeManifest({root: runtimeArtifact, tuple, runtimeRef});
+
 for (const relative of [`runtime/lib/${tuple}/libcangjie-std-core.so`, `lib/${tuple}/libcangjie-std-core.a`, `modules/${tuple}/std/std.core.cjo`]) {
   await fs.access(path.join(finalStd, relative));
 }

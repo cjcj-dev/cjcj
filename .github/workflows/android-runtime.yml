@@ -1,0 +1,40 @@
+name: Android source runtime
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  runtime:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - uses: ./.github/actions/setup-release-sdk
+        with:
+          requirement: android-ndk
+      - name: Fetch pinned runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          source ci/runtime_pin.env
+          echo "RUNTIME_REF=$RUNTIME_REF" >> "$GITHUB_ENV"
+          echo "RUNTIME_VERSION=$RUNTIME_VERSION" >> "$GITHUB_ENV"
+          echo "CANGJIE_WORKSPACE=$RUNNER_TEMP/android-source" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/android-source/cangjie_runtime"
+          git -C "$RUNNER_TEMP/android-source/cangjie_runtime" init
+          git -C "$RUNNER_TEMP/android-source/cangjie_runtime" fetch --depth=1 "$RUNTIME_SRC_URL" "$RUNTIME_REF"
+          git -C "$RUNNER_TEMP/android-source/cangjie_runtime" checkout --detach FETCH_HEAD
+      - name: Build Android runtime through product entry
+        run: npx --yes zx@8 ci/srcbuild/steps/build-android-runtime.mjs
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: android-runtime-build-evidence
+          path: |
+            ${{ env.CANGJIE_WORKSPACE }}/cangjie_runtime/runtime/output
+            ${{ env.CANGJIE_WORKSPACE }}/cangjie_runtime/runtime/CMakebuild/CMakeCache.txt
+            ${{ env.CANGJIE_WORKSPACE }}/cangjie_runtime/runtime/CMakebuild/CMakeFiles/CMakeConfigureLog.yaml
+          if-no-files-found: warn
