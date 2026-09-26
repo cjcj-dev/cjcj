@@ -8,6 +8,10 @@ export const CANONICAL_WORKLOADS = Object.freeze([
 
 // Check the archive itself, after packaging, including nested directory entries.
 export async function assertNoCanonicalWorkloads(archive) {
+  if (process.env.CANGJIE_BUILD_DRY_RUN === '1') {
+    console.log(`CANONICAL_PACKAGE_EXCLUSION planned archive=${archive}`);
+    return;
+  }
   const argv = archive.endsWith('.tar.gz') ? ['tar', '-tzf', archive]
     : archive.endsWith('.zip') ? ['unzip', '-Z1', archive] : null;
   if (!argv) throw new Error(`unsupported package archive: ${archive}`);

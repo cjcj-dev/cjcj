@@ -160,3 +160,24 @@ for (const layout of ['same', 'alias', 'separate']) {
     }
   });
 }
+
+for (const name of ['natural_wave_notime', 'survival_dense']) {
+  test(`package entry rejects canonical workload ${name} after archiving`, async () => {
+    const {root, config} = packageFixture();
+    const previous = process.env.CANGJIE_BUILD_DRY_RUN;
+    delete process.env.CANGJIE_BUILD_DRY_RUN;
+    try {
+      const archives = await packageStage.run(config);
+      assert.equal(archives.length, 2);
+      const injected = file(config.repoPath('compiler'), ['output', 'bin', name], 'canonical test payload');
+      await assert.rejects(packageStage.run(config), new RegExp(`canonical-workload-in-package: cangjie/bin/${name}`));
+      fs.rmSync(injected);
+      assert.equal((await packageStage.run(config)).length, 2);
+      console.log(`PACKAGE_CANONICAL_TARGET_EXECUTED ${name}`);
+    } finally {
+      if (previous === undefined) delete process.env.CANGJIE_BUILD_DRY_RUN;
+      else process.env.CANGJIE_BUILD_DRY_RUN = previous;
+      fs.rmSync(root, {recursive: true, force: true});
+    }
+  });
+}
