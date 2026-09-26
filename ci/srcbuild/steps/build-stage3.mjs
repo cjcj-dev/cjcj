@@ -264,7 +264,7 @@ if (dryRun) {
   const buildRuntime = path.join(githubWorkspace, 'target', 'release', 'runtime');
   await fs.rm(buildRuntime, {recursive: true, force: true});
   await fs.cp(path.join(sdk, 'runtime'), buildRuntime, {recursive: true, dereference: true});
-  await $({cwd: githubWorkspace, env: {...stageEnv, cjHeapSize: '20GB'}})`cjpm build -j 1`;
+  await $({cwd: githubWorkspace, env: stageEnv})`cjpm build -j ${resources.STD_BUILD_JOBS}`;
   if (JSON.stringify(sourceIdentity(path.join(githubWorkspace, 'packages'))) !== JSON.stringify(source)) {
     throw new Error('stage3 compiler source changed during build');
   }

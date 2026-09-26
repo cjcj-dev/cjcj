@@ -670,6 +670,10 @@ jobs:
       - name: Verify self-hosted SDK
         run: npx --yes zx@8 ci/srcbuild/steps/verify.mjs "$CANGJIE_WORKSPACE/software/cangjie"
 
+      - name: Qualify source tuple against the pinned official bootstrap SDK
+        if: inputs.language_tuple
+        run: npx --yes zx@8 ci/srcbuild/steps/qualify-tuple-oracle.mjs "$CANGJIE_WORKSPACE/software/cangjie" "$CANGJIE_WORKSPACE/tuple-oracle"
+
       - name: Package source language tuple
         if: inputs.language_tuple
         shell: bash

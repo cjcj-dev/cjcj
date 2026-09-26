@@ -608,7 +608,7 @@ resolve_base_sdk() {
 stage0() {
   STAGE=stage0
   echo '[stage0] official cjc + stdlib + host LLVM; cjcj=-O1'
-  local base out sdk ld cache_key='' cacheable=0 cache_hit=0
+  local base out sdk ld std="$WORK/stdlib-stage1" cache_key='' cacheable=0 cache_hit=0
   base=$(resolve_base_sdk)
   record official-sdk "$base"
   assert_official_opt_zero "$base/third_party/llvm/bin/opt"
