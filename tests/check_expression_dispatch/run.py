@@ -66,7 +66,7 @@ def main():
             'binary': 'expect 2 operand(s), but there are 0 in fact.',
             'memory': 'expect 1 operand(s), but there are 0 in fact.',
             'exit': 'expect 0 operand(s), but there are 1 in fact.',
-            'lambda': "in function caller, lambda %lambda doesn't have identifier.",
+            'lambda': "in function @caller, lambda %lambda doesn't have identifier.",
             'control': '', 'lambda-good': '',
         }
         for mode, diagnostic in diagnostics.items():
