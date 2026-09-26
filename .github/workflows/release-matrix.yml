@@ -71,6 +71,8 @@ jobs:
       source_matrix: ${{ steps.plan.outputs.source_matrix }}
       package_matrix: ${{ steps.plan.outputs.package_matrix }}
       blocked_matrix: ${{ steps.plan.outputs.blocked_matrix }}
+      prerequisite_matrix: ${{ steps.plan.outputs.prerequisite_matrix }}
+      has_prerequisites: ${{ steps.plan.outputs.has_prerequisites }}
       package_keys: ${{ steps.plan.outputs.package_keys }}
       has_source: ${{ steps.plan.outputs.has_source }}
       has_package: ${{ steps.plan.outputs.has_package }}
@@ -84,6 +86,37 @@ jobs:
         env:
           PLATFORMS: ${{ inputs.platforms }}
         run: node ci/release/platform-matrix.mjs plan --platforms "$PLATFORMS" --github-output "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"
+
+  # SDK-input qualification only. Until the cross runtime/std producers and
+  # package consumers exist, these jobs do not clear the blocked platform rows.
+  prerequisites:
+    name: ${{ matrix.runner }} / ${{ matrix.requirement }} input
+    needs: plan
+    if: needs.plan.outputs.has_prerequisites == 'true'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.plan.outputs.prerequisite_matrix) }}
+    steps:
+      - name: Checkout cjcj
+        uses: actions/checkout@v7
+      - name: Install and probe target SDK
+        uses: ./.github/actions/setup-release-sdk
+        with:
+          requirement: ${{ matrix.requirement }}
+      - name: Verify probe on the installed SDK and disconnected product arms
+        env:
+          SDK_REQUIREMENT: ${{ matrix.requirement }}
+        shell: bash
+        run: node ci/release/verify-runner-sdk.mjs "$SDK_REQUIREMENT" "$RUNNER_TEMP/sdk-probe-evidence"
+      - name: Preserve SDK input evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: sdk-probe-${{ matrix.runner }}-${{ matrix.requirement }}
+          path: ${{ runner.temp }}/sdk-probe-evidence
+          if-no-files-found: warn
 
   # One red job per platform the DAG cannot build yet. The step prints the
   # missing tuples and capabilities and probes what the runner actually has.
