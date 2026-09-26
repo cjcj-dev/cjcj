@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import {execFileSync} from 'node:child_process';
+import {execFileSync, spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {produceFinalCompiler, fileSha256, stdIdentity} from '../lib/final-compiler.mjs';
 
@@ -16,7 +16,7 @@ const write = async (file, value) => {
 };
 const json = async (file, value) => write(file, JSON.stringify(value));
 
-async function fixture(body) {
+async function fixture(body, nativeHost = false) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'source-tuple-'));
   try {
     const sdk = path.join(root, 'sdk');
@@ -30,6 +30,9 @@ async function fixture(body) {
     await write(path.join(std, `lib/${tuple}/libcangjie-std-core.a`), 'std fixture');
     await write(path.join(std, `modules/${tuple}/core.cjo`), 'module fixture');
     await write(path.join(sdk, 'bin/cjc'), 'stage3 fixture');
+    // This device test executes the official tools and their real version-query
+    // compiler child; it does not claim a qualified stage3 compiler fixture.
+    if (nativeHost) await fs.copyFile(path.join(process.env.SOURCE_TUPLE_COMPILER_SDK, 'bin/cjc'), path.join(sdk, 'bin/cjc'));
     await fs.chmod(path.join(sdk, 'bin/cjc'), 0o755);
     const runtimeFiles = {};
     const hostPins = [];
@@ -37,9 +40,27 @@ async function fixture(body) {
       const rel = `runtime/lib/${tuple}/${name}`;
       await write(path.join(runtime, rel), `coloured fixture ${name}`);
       await write(path.join(sdk, rel), `coloured fixture ${name}`);
+      if (nativeHost) {
+        await fs.copyFile(path.join(process.env.SOURCE_TUPLE_COMPILER_SDK, rel), path.join(runtime, rel));
+        await fs.copyFile(path.join(runtime, rel), path.join(sdk, rel));
+      }
       runtimeFiles[rel] = await fileSha256(path.join(runtime, rel));
       await write(path.join(host, name), `official host fixture ${name}`);
+      if (nativeHost) await fs.copyFile(path.join(process.env.SOURCE_TUPLE_OFFICIAL_SDK, `runtime/lib/${tuple}/${name}`), path.join(host, name));
       hostPins.push(`${name} ${await fileSha256(path.join(host, name))}`);
+    }
+    const hostLlvm = path.join(host, 'libLLVM-15.so');
+    await write(hostLlvm, 'official host LLVM fixture');
+    if (nativeHost) {
+      await fs.copyFile(process.env.SOURCE_TUPLE_HOST_LLVM, hostLlvm);
+      assert.equal(await fileSha256(hostLlvm), '30e8ba8c8a30b8b8ea36b4d7ada4cce7b7e12e1a07a66439556b1bd6cb2b3981');
+    }
+    hostPins.push(`libLLVM-15.so ${await fileSha256(hostLlvm)}`);
+    for (const relative of ['tools/bin/cjpm', 'third_party/llvm/bin/llvm-ar', 'third_party/llvm/bin/llvm-objcopy']) {
+      await write(path.join(sdk, relative), `#!/bin/bash\nexec '${sdk}/producer-only-tool' "$@"\n`);
+      await fs.copyFile('/usr/bin/true', path.join(sdk, relative + '-stage1'));
+      if (nativeHost) await fs.copyFile(path.join(process.env.SOURCE_TUPLE_OFFICIAL_SDK, relative), path.join(sdk, relative + '-stage1'));
+      await fs.chmod(path.join(sdk, relative + '-stage1'), 0o755);
     }
     const hostPin = path.join(root, 'host-pins');
     await write(hostPin, hostPins.join('\n'));
@@ -64,12 +85,12 @@ async function fixture(body) {
         llvmManifestSha256: inputs.llvmManifest, stdSha256: await stdIdentity(std), runtimeSha256: inputs.runtime}});
     await json(path.join(runtime, 'manifest.json'), {runtime_sha: 'b'.repeat(40), files: runtimeFiles, build: {sourceCommit: 'b'.repeat(40), installed: runtimeFiles, buildInputs: {commands: ['synthetic build'], compiler_state: {fixture: true}}}});
     const pack = () => invoke('pack', '--sdk', sdk, '--std', std, '--compiler', compiler,
-      '--runtime', runtime, '--host', host, '--host-pins', hostPin, '--host-identity', 'test fixture',
+      '--runtime', runtime, '--host', host, '--host-llvm', hostLlvm, '--host-pins', hostPin, '--host-identity', 'test fixture',
       '--llvm-manifest', llvmManifest, '--output', output, '--cjcj-sha', 'a'.repeat(40), '--runtime-sha', 'b'.repeat(40),
       '--llvm-sha', 'c'.repeat(40), '--run-id', '42', '--run-attempt', '1', '--node', process.execPath);
     const pins = async () => ['--manifest-sha256', await fileSha256(path.join(output, 'language-tuple.json')),
       '--compiler-sha256', compilerSha];
-    await body({root, sdk, std, runtime, host, output, pack, pins});
+    await body({root, sdk, std, runtime, host, compiler, output, pack, pins, hostLlvm});
   } finally { await fs.rm(root, {recursive: true, force: true}); }
 }
 
@@ -137,3 +158,54 @@ test('source producer refuses std built by the bootstrap parent instead of shipp
   await json(compilerPath, compiler);
   assert.throws(pack, /source tuple stage\/source\/parent mismatch/);
 }));
+
+test('source producer rejects a different official host LLVM identity', () => fixture(async ({hostLlvm, pack, output}) => {
+  await write(hostLlvm, 'wrong host LLVM');
+  assert.throws(pack, /SOURCE_TUPLE_OFFICIAL_HOST_PIN libLLVM-15.so/);
+  console.log('HOST_LLVM_BEFORE_COPY_ASSERT_REACHED');
+  await assert.rejects(fs.stat(output), {code: 'ENOENT'});
+}));
+
+test('official native tools survive transport and deletion of producer SDK', {
+  skip: !(process.env.SOURCE_TUPLE_OFFICIAL_SDK && process.env.SOURCE_TUPLE_HOST_LLVM && process.env.SOURCE_TUPLE_COMPILER_SDK),
+}, () => fixture(async ({root, sdk, std, runtime, host, compiler, output, pack, pins}) => {
+  pack();
+  const pin = await pins();
+  const archive = path.join(output, (await fs.readdir(output)).find(name => name.endsWith('.tar.gz')));
+  const downloaded = path.join(root, 'downloaded');
+  invoke('unpack', '--archive', archive, '--archive-sha256', await fileSha256(archive), '--output', downloaded, ...pin);
+  const target = path.join(root, 'target');
+  const options = [];
+  for (const [name, flag] of [['libcangjie-runtime.so', 'target-runtime'], ['libboundscheck.so', 'target-boundscheck']]) {
+    await write(path.join(target, name), `independent target fixture ${name}`);
+    options.push(`--${flag}-sha256`, await fileSha256(path.join(target, name)));
+  }
+  const active = path.join(root, 'active');
+  invoke('activate', '--root', path.join(downloaded, 'tuple'), '--target', target, '--output', active, ...options, ...pin);
+  const moved = path.join(root, 'moved');
+  await fs.rename(active, moved);
+  for (const dir of [sdk, std, runtime, host, compiler, output]) await fs.rm(dir, {recursive: true});
+  const manifest = JSON.parse(await fs.readFile(path.join(downloaded, 'tuple/language-tuple.json'), 'utf8'));
+  console.log('OFFICIAL_TOOLS_PATCH_RECORD ' + JSON.stringify(manifest.official_host));
+  console.log('OFFICIAL_TOOLS_ROLE_DIGESTS ' + JSON.stringify(manifest.role_sha256));
+  const observations = [];
+  for (const relative of ['tools/bin/cjpm', 'third_party/llvm/bin/llvm-ar', 'third_party/llvm/bin/llvm-objcopy']) {
+    const native = path.join(moved, 'sdk', relative + '-stage1');
+    assert.deepEqual((await fs.readFile(native)).subarray(0, 4), Buffer.from([0x7f, 0x45, 0x4c, 0x46]));
+    const result = spawnSync(path.join(moved, 'sdk', relative), ['--version'], {
+      encoding: 'utf8', timeout: 30000, env: {...process.env, LD_LIBRARY_PATH: '/nonexistent-colour-loader', cjHeapSize: '1GB', LD_DEBUG: 'libs', LD_DEBUG_OUTPUT: path.join(root, 'loader')},
+    });
+    observations.push({tool: relative, rc: result.status, signal: result.signal,
+      sha256: await fileSha256(native), output: result.stdout + result.stderr, error: result.error?.message});
+  }
+  console.log('OFFICIAL_TOOLS_RELOCATION_ASSERT_REACHED ' + JSON.stringify(observations));
+  assert.deepEqual(observations.map(row => row.rc), [0, 0, 0], JSON.stringify(observations));
+  const traces = await Promise.all((await fs.readdir(root)).filter(name => name.startsWith('loader.')).map(name => fs.readFile(path.join(root, name), 'utf8')));
+  console.log('LOADER_PROGRAMS ' + JSON.stringify(traces.flatMap(text => text.match(/initialize program: .*/g) ?? [])));
+  const compilerTrace = traces.find(text => text.includes('initialize program:') && /initialize program: (?:.*\/bin\/)?(cjc|cjc-frontend|cjcj-stage1)\s/.test(text));
+  const hostTrace = traces.find(text => /initialize program: .*\/cjpm-stage1\s/.test(text));
+  console.log('COMPILER_CHILD_LOADER_ASSERT_REACHED ' + JSON.stringify({compiler: compilerTrace?.match(/calling init: .*libcangjie-runtime.so/g), host: hostTrace?.match(/calling init: .*libcangjie-runtime.so/g)}));
+  assert.match(compilerTrace ?? '', /calling init: .*\/compiler-runtime\/linux_x86_64_cjnative\/libcangjie-runtime.so/);
+  assert.match(hostTrace ?? '', /calling init: .*\/official-host\/linux_x86_64_cjnative\/libcangjie-runtime.so/);
+  for (const row of observations) assert.match(row.output, row.tool === 'tools/bin/cjpm' ? /^Cangjie Project Manager: \d+\.\d+/ : /LLVM version \d+\.\d+/);
+}, true));

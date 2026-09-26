@@ -82,6 +82,8 @@ export const GATING = Object.freeze([
   'ci/release/platform-matrix.test.mjs',
   'ci/release/prepare_bootstrap_inputs.test.mjs',
   'ci/sccache/report.test.mjs',
+  // Native inputs are supplied by srcbuild's host-identity step.
+  'ci/srcbuild/tests/host-pins-entry.test.mjs',
   'ci/srcbuild/tests/inject-version.test.mjs',
   'ci/srcbuild/tests/phase-control.test.mjs',
   'ci/srcbuild/tests/pin-compiler-llvm.test.mjs',
@@ -89,6 +91,8 @@ export const GATING = Object.freeze([
   'ci/srcbuild/tests/product-binary.test.mjs',
   'ci/srcbuild/tests/release-wire.test.mjs',
   'ci/srcbuild/tests/sccache-contract.test.mjs',
+  'ci/srcbuild/tests/source-build-receipt.test.mjs',
+  'ci/srcbuild/tests/tuple-oracle-entry.test.mjs',
   // Invokes npx --yes zx@8 on a rejected fixture SDK; CI primes zx below.
   'ci/srcbuild/tests/verify-sdk.test.mjs',
   'ci/srcbuild/tests/workflow-inputs.test.mjs',
@@ -100,6 +104,11 @@ export const GATING = Object.freeze([
 // records what the invocation in `needs` actually produced when run by hand, so
 // wiring one of these in is a decision about CI shape, not a re-investigation.
 export const DEFERRED = Object.freeze([
+  Object.freeze({
+    file: 'ci/srcbuild/tests/source-language-tuple.test.mjs',
+    needs: 'python3 and patchelf for packaging; native relocation additionally needs SOURCE_TUPLE_OFFICIAL_SDK, SOURCE_TUPLE_HOST_LLVM and a distinct SOURCE_TUPLE_COMPILER_SDK; synthetic receipts do not qualify stage3',
+    verified: 'kkk2 packaging and transport assertions run against the shipped CLI; native relocation currently being qualified under cjcj#135, not a language-gate acceptance',
+  }),
   Object.freeze({
     file: 'build/test/release-evidence.test.mjs',
     needs: 'RELEASE_EVIDENCE_TEST_ROOT set to a path outside /tmp (the test refuses tmpfs '

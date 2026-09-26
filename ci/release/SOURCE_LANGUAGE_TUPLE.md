@@ -12,6 +12,18 @@ Three runtime roles are explicit:
 | Official host runtime | `official-host/linux_x86_64_cjnative` | official host tools, through `CJCJ_OFFICIAL_HOST_RUNTIME_LIB_DIR` |
 | Runtime under test | supplied at activation, outside the tuple | compiled language tests, through `GCV2_RUNTIME_LIB_DIR` |
 
+Official tools also ship the independently pinned host LLVM under
+`official-host/llvm`. `write_host_pins.py` binds the selected SDK's two exported
+digests and the existing host LLVM pin into one run-local identity file, shared
+by the stage1 runner and packaging. Packaging checks these before copying.
+
+The copied cjpm, llvm-ar and llvm-objcopy native executables receive relative
+`DT_RPATH` entries with patchelf. Their original and installed digests, dynamic
+sections and patchelf version are recorded in the manifest. Relative launchers
+set compiler-role `LD_LIBRARY_PATH` for children; the official native tools'
+`DT_RPATH` takes priority in the parent process. Activation copies both frozen
+runtime roles beside the SDK so these launchers survive relocation.
+
 A compiler process failure belongs to the frozen compiler-runtime identity.
 A generated program failure belongs to the independently selected target
 runtime. Record both digests when reporting a gate failure.

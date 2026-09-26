@@ -512,6 +512,17 @@ jobs:
           c++filt < "$RUNNER_TEMP/colour-control.nm" > "$RUNNER_TEMP/colour-control.symbols"
           awk 'index($0, "llvm::isCJTypedReadHelperCandidate(") {print; n++} END {print "HOST_COLOUR_POSITIVE_CONTROL count=" n+0}' "$RUNNER_TEMP/colour-control.symbols"
 
+      - name: Bind the selected official host identities
+        if: runner.os == 'Linux' && runner.arch == 'X64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 ci/release/write_host_pins.py "$RUNNER_TEMP/bootstrap-host-identities.txt"
+          echo "STAGE1_HOST_IDENTITIES=$RUNNER_TEMP/bootstrap-host-identities.txt" >> "$GITHUB_ENV"
+          SOURCE_TUPLE_OFFICIAL_SDK="$CJCJ_SRCBUILD_HOST_SDK" \
+            SOURCE_TUPLE_HOST_LLVM="$CJCJ_BOOTSTRAP_HOST_LLVM_SO" \
+            node --test ci/srcbuild/tests/host-pins-entry.test.mjs
+
       - name: Bootstrap stage0 compiler
         shell: bash
         run: bash ci/bootstrap/gha_run.sh stage0
@@ -674,6 +685,12 @@ jobs:
         if: inputs.language_tuple
         run: npx --yes zx@8 ci/srcbuild/steps/qualify-tuple-oracle.mjs "$CANGJIE_WORKSPACE/software/cangjie" "$CANGJIE_WORKSPACE/tuple-oracle"
 
+      - name: Install tuple relocation tool
+        if: inputs.language_tuple
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y patchelf
+
       - name: Package source language tuple
         if: inputs.language_tuple
         shell: bash
@@ -686,7 +703,9 @@ jobs:
             --std "$CANGJIE_WORKSPACE/software/final-std-stage2" \
             --runtime "$CJCJ_BOOTSTRAP_COLOUR_RT" \
             --host "$CJCJ_SRCBUILD_HOST_SDK/runtime/lib/linux_x86_64_cjnative" \
+            --host-llvm "$CJCJ_BOOTSTRAP_HOST_LLVM_SO" \
             --host-identity "$CJCJ_TOOLCHAIN" \
+            --host-pins "$STAGE1_HOST_IDENTITIES" \
             --llvm-manifest "$CJCJ_FIXED_LLVM_DIR/llvm-tools.manifest" \
             --cjcj-sha "$GITHUB_SHA" --runtime-sha "$RUNTIME_REF" --llvm-sha "$LLVM_SHA" \
             --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
