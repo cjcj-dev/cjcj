@@ -793,7 +793,9 @@ test('DAG runs bootstrap after verify-source-pins and omits removed compiler/std
   assert.ok(order.indexOf(31) < order.indexOf(32));
   assert.ok(order.indexOf(32) < order.indexOf(30));
   assert.ok(order.indexOf(30) < order.indexOf(33));
-  assert.ok(order.indexOf(33) < order.indexOf(20));
+  assert.ok(order.includes(37));
+  assert.ok(order.indexOf(33) < order.indexOf(37));
+  assert.ok(order.indexOf(37) < order.indexOf(20));
   assert.ok(order.indexOf(20) < order.indexOf(26));
   assert.ok(order.indexOf(26) < order.indexOf(29));
   assert.ok(order.indexOf(29) < order.indexOf(34));
@@ -1224,4 +1226,19 @@ test('bootstrap driver matching pins starts real stage0 and sdk_build', t => {
   assert.equal(result.status, 1, result.stdout + result.stderr);
   assert.match(result.stdout, /STEP=31 .* rc=1 /);
   assert.doesNotMatch(result.stdout, /RESULT=success/);
+});
+
+
+test('complete driver admits canonical step 37 and checks its producer registration', t => {
+  const fixture = bootstrapDriverFixture(t);
+  const green = fixture.dryRun(37, 'canonical-green');
+  assert.equal(green.status, 0, green.stdout + green.stderr);
+  assert.match(green.stdout, /DRY_RUN COMMAND=.*build_cli build canonical-workloads/);
+  assert.match(green.stdout, /DRY_RUN RESULT=success through_step=37/);
+  const driver = path.join(fixture.root, 'tools/srcbuild_kkk2.sh');
+  const contents = fs.readFileSync(driver, 'utf8');
+  fs.writeFileSync(driver, contents.replace('build_cli build canonical-workloads', 'build_cli build stdx'));
+  const cut = fixture.dryRun(37, 'canonical-cut');
+  assert.equal(cut.status, 1, cut.stdout + cut.stderr);
+  assert.match(cut.stderr, /step_37 does not invoke canonical workload producer/);
 });

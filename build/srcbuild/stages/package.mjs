@@ -6,6 +6,7 @@ import {BuildError} from '../../lib/errors.mjs';
 import {getLogger, stage} from '../../lib/logging.mjs';
 import {run as runCommand} from '../../lib/runner.mjs';
 import {assertNoVerifierReportArtifacts} from '../../../scripts/verifier_artifact_gate.mjs';
+import {assertNoCanonicalWorkloads} from '../../lib/canonical-workloads.mjs';
 import {assertSdkPathParity} from '../../lib/sdk-path-parity.mjs';
 import {consumerSdk, copyInto, copytree, ensureDir, requireDir, requireFile} from './common.mjs';
 
@@ -38,6 +39,12 @@ async function makeArchive(config, sourceDir, baseName) {
     });
   } else {
     throw new BuildError('package.archive', `unsupported archive format: ${format}`);
+  }
+  try {
+    await assertNoCanonicalWorkloads(archive);
+  } catch (error) {
+    fs.rmSync(archive, {force: true});
+    throw error;
   }
   return archive;
 }

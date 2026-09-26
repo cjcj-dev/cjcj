@@ -14,7 +14,7 @@ readonly HOST_TOOLCHAIN_PIN="$REPO_ROOT/ci/host_sdk_pin.env"
 # Numeric GHA ids kept for --from-step/--through-step. Deleted ids 15-19 and
 # 27-28 are not in this order: bootstrap (31+32) and final-std (33) run after
 # P07/step 14, then stdx/tools/package, then shim, then compose/verify.
-DAG_ORDER=(2 3 4 5 6 7 8 9 10 11 12 13 14 31 32 30 33 20 21 22 23 24 25 26 29 34 35 36)
+DAG_ORDER=(2 3 4 5 6 7 8 9 10 11 12 13 14 31 32 30 33 37 20 21 22 23 24 25 26 29 34 35 36)
 readonly ORIGINAL_ARGS=("$@")
 
 read_host_toolchain_pin() {
@@ -370,9 +370,8 @@ if ((JOBS_EXPLICIT == 0)); then JOBS=$CPUSET_WIDTH; fi
 }
 [[ $FROM_STEP =~ ^[0-9]+$ ]] || { echo "from-step must be an integer" >&2; exit 2; }
 [[ $THROUGH_STEP =~ ^[0-9]+$ ]] || { echo "through-step must be an integer" >&2; exit 2; }
-((FROM_STEP >= 1 && FROM_STEP <= 36)) || { echo "from-step must be in 1..36" >&2; exit 2; }
-((THROUGH_STEP >= 2 && THROUGH_STEP <= 36)) || { echo "through-step must be in 2..36" >&2; exit 2; }
-((FROM_STEP <= THROUGH_STEP)) || { echo "from-step must not exceed through-step" >&2; exit 2; }
+((FROM_STEP >= 1 && FROM_STEP <= 37)) || { echo "from-step must be in 1..37" >&2; exit 2; }
+((THROUGH_STEP >= 2 && THROUGH_STEP <= 37)) || { echo "through-step must be in 2..37" >&2; exit 2; }
 if ((FROM_STEP == 1)); then FROM_STEP=2; fi
 validate_dag_range "$FROM_STEP" "$THROUGH_STEP" || exit $?
 validate_verifier_report_request "$VERIFIER_REPORT" "$FROM_STEP" "$THROUGH_STEP" || exit $?
@@ -1083,6 +1082,10 @@ step_14() {
     npx --yes zx@8 "$REPO_ROOT/ci/srcbuild/steps/verify-source-pins.mjs"
 }
 
+step_37() {
+    CJCJ_SRCBUILD_CONSUMER_SDK="$CANGJIE_WORKSPACE/software/cangjie" build_cli build canonical-workloads
+}
+
 step_20() { CJCJ_SRCBUILD_CONSUMER_SDK="$CANGJIE_WORKSPACE/software/cangjie" build_cli build stdx; }
 step_21() { CJCJ_SRCBUILD_CONSUMER_SDK="$CANGJIE_WORKSPACE/software/cangjie" build_cli build tools; }
 
@@ -1269,6 +1272,7 @@ declare -Ar STEP_NAMES=(
     [34]='Compose self-hosted SDK'
     [35]='Archive final compiler handoff'
     [36]='Verify self-hosted SDK'
+    [37]='Build canonical workload ELFs with stage2'
 )
 
 validate_stage_step_contracts() {
@@ -1335,6 +1339,18 @@ validate_stage_step_contracts() {
             return 1
         }
     fi
+    if includes_step 37; then
+        [[ -f $REPO_ROOT/build/srcbuild/stages/canonical-workloads.mjs ]] || {
+            echo "dry-run canonical workload stage missing" >&2
+            return 1
+        }
+        local step37_text
+        step37_text=$(awk '/^step_37\(\)/,/^}/' "$SCRIPT_PATH")
+        printf '%s\n' "$step37_text" | /usr/bin/grep -Fq 'build_cli build canonical-workloads' || {
+            echo "dry-run step_37 does not invoke canonical workload producer" >&2
+            return 1
+        }
+    fi
     if includes_step 34; then
         [[ -f $REPO_ROOT/ci/srcbuild/steps/compose-sdk.mjs ]] || {
             echo "dry-run compose-sdk step script missing" >&2
@@ -1370,6 +1386,9 @@ print_dry_step() {
         33)
             printf 'DRY_RUN ENV CJCJ_STAGE3_STDLIB_BUILD_TYPE=%s cjHeapSwap=on\n' "$BUILD_TYPE"
             printf 'DRY_RUN COMMAND=npx --yes zx@8 %q\n' "$STAGE3_STEP_SCRIPT"
+            ;;
+        37)
+            printf 'DRY_RUN COMMAND=CJCJ_SRCBUILD_CONSUMER_SDK=%q/software/cangjie build_cli build canonical-workloads\n' "$CANGJIE_WORKSPACE"
             ;;
         34)
             printf 'DRY_RUN COMMAND=npx --yes zx@8 %q\n' "$REPO_ROOT/ci/srcbuild/steps/compose-sdk.mjs"

@@ -537,3 +537,13 @@ test('an input the caller omits and the workflow does not default is a failure, 
   assert.throws(() => effectiveInputs(declared, new Map()),
     /input needed is omitted by the caller and declares no default/);
 });
+
+
+test('kkk2 canonical workload step follows final std and precedes packaging', async () => {
+  const script = await fs.readFile(path.join(root, 'tools/srcbuild_kkk2.sh'), 'utf8');
+  const order = script.match(/DAG_ORDER=\(([^)]+)\)/)[1].trim().split(/\s+/).map(Number);
+  assert.ok(order.includes(37));
+  assert.ok(order.indexOf(33) < order.indexOf(37));
+  assert.ok(order.indexOf(37) < order.indexOf(26));
+  assert.match(script, /step_37\(\) \{\s+CJCJ_SRCBUILD_CONSUMER_SDK=.*build_cli build canonical-workloads/);
+});
