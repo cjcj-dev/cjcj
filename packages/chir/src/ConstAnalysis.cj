@@ -94,7 +94,7 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValueDomain, Pool> where 
             case ExprKind.MULTIBRANCH =>
                 return HandleMultiBranchTerminator(state, (terminator as MultiBranch).getOrThrow())
             case ExprKind.TRY_NUMERIC_CAST =>
-                res = HandleTypeCast(state, (terminator as TryNumericCast).getOrThrow())
+                res = HandleNumericCast(state, (terminator as TryNumericCast).getOrThrow())
             case ExprKind.TRY_NEG | ExprKind.TRY_ADD | ExprKind.TRY_SUB |
                 ExprKind.TRY_MUL | ExprKind.TRY_DIV | ExprKind.TRY_MOD |
                 ExprKind.TRY_EXP | ExprKind.TRY_LSHIFT | ExprKind.TRY_RSHIFT =>
@@ -215,8 +215,11 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValueDomain, Pool> where 
 
     private func HandleOthersExpr(state: State<ConstValueDomain, Pool>, expression: Expression): ConstExceptionKind {
         match (expression.GetExprKind()) {
-            case ExprKind.CLASS_STATIC_CAST | ExprKind.NUMERIC_CAST =>
-                return HandleTypeCast(state, (expression as TypeCast).getOrThrow())
+            case ExprKind.CLASS_STATIC_CAST =>
+                HandleClassStaticCast(state, (expression as ClassStaticCast).getOrThrow())
+                return ConstExceptionKind.NA
+            case ExprKind.NUMERIC_CAST =>
+                return HandleNumericCast(state, (expression as NumericCast).getOrThrow())
             case ExprKind.INTRINSIC =>
                 let _ = HandleIntrinsic(state, (expression as Intrinsic).getOrThrow())
                 return ConstExceptionKind.NA
@@ -597,25 +600,34 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValueDomain, Pool> where 
         }
     }
 
-    private func HandleTypeCast(state: State<ConstValueDomain, Pool>, cast: TypeCast): ConstExceptionKind {
-        return HandleTypeCastImpl(state, cast, cast.GetSourceValue(), cast.GetSourceType().getOrThrow(),
-            cast.GetTargetType().getOrThrow(), GetOverflowStrategy(cast))
-    }
-
-    private func HandleTypeCastImpl(state: State<ConstValueDomain, Pool>, cast: Expression, sourceValue: Value, sourceTy: Type,
-        targetTy: Type, overflowStrategy: OverflowStrategy): ConstExceptionKind {
+    private func HandleNumericCast(state: State<ConstValueDomain, Pool>, cast: NumericCastBase): ConstExceptionKind {
         let dest = cast.GetResult().getOrThrow()
+        let sourceTy = cast.GetSourceType().getOrThrow()
         if (sourceTy.IsInteger()) {
-            if (let Some(srcAbsVal) <- state.CheckAbstractValue(sourceValue)) {
-                return HandleTypecastOfInt(state, cast, sourceTy, targetTy, overflowStrategy, srcAbsVal)
+            if (let Some(srcAbsVal) <- state.CheckAbstractValue(cast.GetSourceValue())) {
+                return HandleTypecastOfInt(state, cast, sourceTy, cast.GetTargetType().getOrThrow(),
+                    GetOverflowStrategy(cast), srcAbsVal)
             }
-        }
-        if (sourceTy.IsRef() || sourceTy.IsClass()) {
-            state.Propagate(sourceValue, dest)
-            return ConstExceptionKind.NA
         }
         state.SetToTopOrTopRef(dest, dest.GetType().getOrThrow().IsRef())
         return ConstExceptionKind.NA
+    }
+
+    private func HandleClassStaticCast(state: State<ConstValueDomain, Pool>, cast: ClassStaticCast): Unit {
+        let dest = cast.GetResult().getOrThrow()
+        let src = cast.GetSourceValue()
+        let srcTy = cast.GetSourceType().getOrThrow()
+        let targetTy = cast.GetTargetType().getOrThrow()
+        if ((targetTy.IsEnum() && srcTy.GetTypeKind() == TypeKind.TYPE_UINT32) ||
+            (srcTy.IsEnum() && targetTy.GetTypeKind() == TypeKind.TYPE_UINT32)) {
+            state.Propagate(src, dest)
+            return
+        }
+        if (srcTy.IsRef() || srcTy.IsClass()) {
+            state.Propagate(src, dest)
+            return
+        }
+        state.SetToTopOrTopRef(dest, dest.GetType().getOrThrow().IsRef())
     }
 
     private func HandleTypecastOfInt(state: State<ConstValueDomain, Pool>, cast: Expression, sourceTy: Type, targetTy: Type,
