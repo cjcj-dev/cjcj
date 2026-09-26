@@ -4,8 +4,7 @@ import std.collection.*
 import cjcj::ast.*
 import cjcj::utils.CJC_ASSERT
 
-// Upstream 2e110911, OverrideFunctionResolver.h:25-26. Ptr preserves object identity.
-public type MemberFuncSet = HashSet<FuncDecl>
+public type MemberFuncSet = TreeSet<FuncDecl>
 
 public type MemberFuncsWithInstTys = HashMap<FuncDecl, HashSet<Ptr<FuncTy>>>
 public type MemberFuncWithInstTys = (FuncDecl, HashSet<Ptr<FuncTy>>)
@@ -287,7 +286,7 @@ public class OverrideFunctionResolver {
         let extendDecls = TreeSet<ExtendDecl>()
         let result = MemberFuncSet()
         if (let Some(base) <- baseDecl) {
-            for (decl in base.GetAllSuperDecls()) {
+            for (decl in base.GetAllSuperDecls(obtainSpecific: true)) {
                 superDecls.add(decl)
             }
             extendDecls.add(all: typeManager.GetDeclExtends(base))
@@ -295,7 +294,7 @@ public class OverrideFunctionResolver {
             extendDecls.add(all: typeManager.GetAllExtendsByTy(instBaseTy))
         }
         for (extendDecl in extendDecls) {
-            for (decl in extendDecl.GetAllSuperDecls()) {
+            for (decl in extendDecl.GetAllSuperDecls(obtainSpecific: true)) {
                 superDecls.add(decl)
             }
         }

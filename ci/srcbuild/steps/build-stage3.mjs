@@ -258,7 +258,7 @@ if (dryRun) {
   console.log('STAGE3_DRY_RUN_REACHED_BUILD=1');
 } else {
   await $({cwd: githubWorkspace, env: stageEnv})`cjpm clean`;
-  await $({cwd: githubWorkspace, env: {...stageEnv, cjHeapSize: '20GB'}})`cjpm build -j 1`;
+  await $({cwd: githubWorkspace, env: stageEnv})`cjpm build -j 1`;
   const stage3Product = await findProductBinary('stage3');
   const stage3Sha = await sha256(stage3Product);
   await fs.writeFile(path.join(workspace, 'software', 'stage3-compiler.json'), `${JSON.stringify({

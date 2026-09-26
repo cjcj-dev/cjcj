@@ -157,3 +157,35 @@ test('bootstrap producer reaches actual stdx and tools subprocess entries', asyn
     assert.ok(row.compiler.endsWith('coloured std'), JSON.stringify(row));
   }
 });
+
+for (const hostHeap of ['12288MB', '10752MB', '5376MB']) {
+  test(`handoff keeps official host heap ${hostHeap} separate from compiler heap`, async t => {
+    const f = await fixture(t);
+    await fs.writeFile(path.join(f.work, 'cjcj-stage2'),
+      '#!/bin/bash\nprintf "compiler heap=%s\\n" "$cjHeapSize"\n');
+    await fs.writeFile(path.join(f.work, 'sdk-stage1', 'tools', 'bin', 'cjpm-stage1'),
+      '#!/bin/bash\nprintf "host heap=%s\\n" "$cjHeapSize"\n"$CANGJIE_HOME/bin/cjc"\n');
+    await prepareBootstrapHandoff(f);
+    const run = spawnSync(path.join(f.sdk, 'tools', 'bin', 'cjpm'), {
+      encoding: 'utf8', env: {...process.env, cjHeapSize: hostHeap},
+    });
+    assert.equal(run.status, 0, run.stderr);
+    console.log(`HEAP_BOUNDARY_ASSERT_REACHED ${JSON.stringify(run.stdout)}`);
+    assert.equal(run.stdout, `host heap=${hostHeap}\ncompiler heap=20GB\n`);
+  });
+}
+
+test('stage3 final cjpm build consumes the resource-limited host environment', async () => {
+  const stage = await fs.readFile(new URL('../../ci/srcbuild/steps/build-stage3.mjs', import.meta.url), 'utf8');
+  const call = stage.split('\n').find(line => line.includes('`cjpm build -j 1`'));
+  assert.ok(call, 'final build call exists');
+  console.log(`STAGE3_HEAP_CONTRACT_ASSERT_REACHED ${call.trim()}`);
+  assert.match(call, /env: stageEnv\}/);
+  assert.match(stage, /cjHeapSize: resources\.STD_BUILD_HEAP/);
+});
+
+test('legacy stage2 inherits the caller heap', async () => {
+  const stage = await fs.readFile(new URL('../../ci/srcbuild/steps/build-stage2.mjs', import.meta.url), 'utf8');
+  assert.match(stage, /await \$`cjpm build -j 1`/);
+  assert.doesNotMatch(stage, /cjHeapSize:/);
+});
