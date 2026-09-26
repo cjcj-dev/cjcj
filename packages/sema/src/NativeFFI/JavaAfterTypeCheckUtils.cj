@@ -368,6 +368,20 @@ public func IsWrappingConstructorOfJavaMirror(ctor: FuncDecl): Bool {
     return false
 }
 
+public func GetJavaImplRegistryCompanionConstructor(companion: ClassDecl): FuncDecl {
+    CJC_ASSERT(IsImplRegistryCompanion(companion))
+    for (member in companion.GetMemberDecls()) {
+        if (!member.TestAttr(Attribute.CONSTRUCTOR)) {
+            continue
+        }
+        if (let Some(ctor) <- (member as FuncDecl)) {
+            return ctor
+        }
+    }
+    CJC_ABORT_WITH_MSG("Bad registry companion")
+    return FuncDecl()
+}
+
 public func GetJavaMirrorWrappingConstructor(mirror: ClassDecl): Option<FuncDecl> {
     CJC_ASSERT(mirror.TestAttr(Attribute.JAVA_MIRROR))
     for (member in mirror.GetMemberDecls()) {

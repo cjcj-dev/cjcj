@@ -4,6 +4,7 @@ import std.collection.*
 import cjcj::ast.*
 import cjcj::modules.SemaImportManager
 import cjcj::sema.TypeManager
+import cjcj::utils.CJC_ABORT
 
 private class CtorPair {
     public let user: FuncDecl
@@ -101,6 +102,16 @@ public class AfterTypeCheckContext {
 
     public func CacheJavaImplRegistryCompanionReferenceField(refWrapper: ClassDecl, field: VarDecl): Unit {
         registryFields.add(ClassVarPair(refWrapper, field))
+    }
+
+    public func GetJavaImplRegistryCompanionReferenceField(refWrapper: ClassDecl): VarDecl {
+        for (pair in registryFields) {
+            if (pair.owner == refWrapper) {
+                return pair.field
+            }
+        }
+        CJC_ABORT()
+        return VarDecl()
     }
 
     public func CacheJavaImplReferenceWrapperConstructorsPair(userDefinedCtor: FuncDecl, generatedCtor: FuncDecl): Unit {

@@ -358,7 +358,8 @@ public class JavaDesugarManager {
         }
         GenerateInJavaImplRegistryCompanion(typeManager, BridgeLib()).Process(ctx)
         DesugarJavaImplSuperConstructorCall(typeManager, BridgeLib(), BridgeJni(), diag, BridgeUtils()).Process(ctx)
-        GenerateInJavaImplReferenceWrapper().Process(ctx)
+        GenerateInJavaImplReferenceWrapper(typeManager, importManager, BridgeLib(), ASTFactory(BridgeLib()),
+            BridgeUtils()).Process(ctx)
         DesugarJavaImplSuperMethodCall().Process(ctx)
         RewriteJavaImplReferenceWrapperFields().Process(ctx, desugarPropRef)
         GenerateNativeBridgeForJavaImpl().Process(ctx)

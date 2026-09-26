@@ -4,8 +4,10 @@ import std.collection.*
 import cjcj::ast.*
 import cjcj::basic.{DiagKindRefactor, DiagnosticEngine}
 import cjcj::sema.TypeManager
-import cjcj::sema.NativeFFI.{CreateThisRef, GetJavaFQName, InteropLibBridge, JAVA_IMPL_ENTITY_ARG_NAME_IN_GENERATED_CTOR,
-    Utils, WithinFile, WrapReturningLambdaExpr}
+import cjcj::modules.SemaImportManager
+import cjcj::sema.NativeFFI.{CreateSuperCall, CreateThisRef, GetJavaFQName, GetJavaImplRegistryCompanionConstructor,
+    GetJavaMirrorWrappingConstructor, GetJavaRefField, InteropLibBridge, IsSuperConstructorCall,
+    JAVA_IMPL_ENTITY_ARG_NAME_IN_GENERATED_CTOR, Utils, WithinFile, WrapReturningLambdaExpr}
 import cjcj::utils.{CJC_ASSERT, CJC_ASSERT_WITH_MSG, CJC_NULLPTR_CHECK}
 
 public class GenerateJavaImplApiStub {
@@ -462,15 +464,276 @@ public class DesugarJavaImplSuperConstructorCall {
     }
 }
 
-public class GenerateInJavaImplReferenceWrapper {
+public class GenerateJavaImplRegistryCompanionReferenceField {
+    private func CreateJavaImplRegistryCompanionReferenceField(companion: ClassDecl): VarDecl {
+        let field = CreateVarDecl("$reg", None, Some(CreateRefType(companion)))
+        field.SetTy(companion.GetTy().getOrThrow())
+        field.doNotExport = true
+        field.isVar = false
+        field.EnableAttr(Attribute.PRIVATE)
+        return field
+    }
+
+    public func InsertJavaImplRegistryCompanionReferenceField(companion: ClassDecl, refWrapper: ClassDecl): VarDecl {
+        let field = WithinFile<VarDecl>(CreateJavaImplRegistryCompanionReferenceField(companion), refWrapper.curFile)
+        field.outerDecl = Some(refWrapper)
+        field.fullPackageName = refWrapper.fullPackageName
+        field.moduleName = refWrapper.moduleName
+        if (let Some(body) <- refWrapper.body) {
+            field.begin = body.begin
+            field.end = body.begin
+        }
+        field.EnableAttr(Attribute.IN_CLASSLIKE)
+        refWrapper.GetMemberDecls().add(field, at: 0)
+        return field
+    }
+
     public func Process(ctx: AfterTypeCheckContext): Unit {
-        for (impl in ctx.GetJavaImplReferenceWrappers()) {
-            if (impl.TestAttr(Attribute.IS_BROKEN)) {
+        for (refWrapper in ctx.GetJavaImplReferenceWrappers()) {
+            let companion = ctx.GetJavaImplRegistryCompanion(refWrapper).getOrThrow()
+            let field = InsertJavaImplRegistryCompanionReferenceField(companion, refWrapper)
+            ctx.CacheJavaImplRegistryCompanionReferenceField(refWrapper, field)
+        }
+    }
+}
+
+public class GenerateInJavaImplReferenceWrapper {
+    private let typeManager: TypeManager
+    private let importManager: SemaImportManager
+    private let ilib: InteropLibBridge
+    private let factory: ASTFactory
+    private let utils: Utils
+
+    public init(typeManager: TypeManager, importManager: SemaImportManager, ilib: InteropLibBridge, factory: ASTFactory,
+        utils: Utils) {
+        this.typeManager = typeManager
+        this.importManager = importManager
+        this.ilib = ilib
+        this.factory = factory
+        this.utils = utils
+    }
+
+    private func CreateRegistryCompanionConstructorCall(companion: ClassDecl, javaRefField: VarDecl): CallExpr {
+        let companionCtor = GetJavaImplRegistryCompanionConstructor(companion)
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(WithinFile<RefExpr>(CreateRefExpr(javaRefField), companion.curFile)))
+        return CreateCallExpr(WithinFile<RefExpr>(CreateRefExpr(companionCtor), companion.curFile), args,
+            Some(companionCtor), companion.GetTy(), CallKind.CALL_OBJECT_CREATION)
+    }
+
+    private func CreateRegistryCompanionRefFieldAssignment(companion: ClassDecl, refWrapper: ClassDecl,
+        companionRefField: VarDecl): AssignExpr {
+        return CreateAssignExpr(WithinFile<RefExpr>(CreateRefExpr(companionRefField), refWrapper.curFile),
+            CreateRegistryCompanionConstructorCall(companion, GetJavaRefField(refWrapper)),
+            Some(TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)))
+    }
+
+    private func RewriteRefWrapperPrimaryConstructor(refWrapper: ClassDecl, companion: ClassDecl,
+        companionRefField: VarDecl): Unit {
+        CJC_ASSERT(IsImplReferenceWrapper(refWrapper))
+        for (member in refWrapper.GetMemberDecls()) {
+            if (let Some(pctor) <- (member as PrimaryCtorDecl)) {
+                let regInit = CreateRegistryCompanionRefFieldAssignment(companion, refWrapper, companionRefField)
+                let pbody = pctor.funcBody.getOrThrow().body.getOrThrow().body
+                var initPos: Int64 = 0
+                if (!pbody.isEmpty()) {
+                    if (let Some(callExpr) <- (pbody[0] as CallExpr)) {
+                        if (IsSuperConstructorCall(callExpr)) {
+                            initPos = 1
+                        }
+                    }
+                }
+                pbody.add(regInit, at: initPos)
+            }
+        }
+    }
+
+    private func GenerateWrappingConstructorBody(wrappingCtor: FuncDecl, companionRefField: VarDecl,
+        companion: ClassDecl): Unit {
+        let curFile = wrappingCtor.curFile
+        let refWrapper = (wrappingCtor.outerDecl.getOrThrow() as ClassDecl).getOrThrow()
+        let params = wrappingCtor.funcBody.getOrThrow().paramLists[0].params
+        CJC_ASSERT(!params.isEmpty())
+        let entityParam = params[0]
+        CJC_ASSERT(params.size > 1)
+        let regIdParam = params[1]
+        wrappingCtor.constructorCall = ConstructorCall.SUPER
+        let parentCtor = GetJavaMirrorWrappingConstructor(refWrapper.GetSuperClassDecl().getOrThrow()).getOrThrow()
+        CJC_ASSERT(parentCtor.funcBody.getOrThrow().paramLists[0].params.size == 1)
+        let superCall = CreateSuperCall(refWrapper, parentCtor, parentCtor.GetTy().getOrThrow())
+        superCall.args.add(CreateFuncArg(WithinFile<RefExpr>(CreateRefExpr(entityParam), curFile)))
+        let block = wrappingCtor.funcBody.getOrThrow().body.getOrThrow()
+        block.SetTy(refWrapper.GetTy().getOrThrow())
+        let regCompanionAssignment = CreateAssignExpr(
+            WithinFile<RefExpr>(CreateRefExpr(companionRefField), curFile),
+            ilib.CreateGetFromRegistryCall(ilib.CreateGetJniEnvCall(curFile).getOrThrow(),
+                WithinFile<RefExpr>(CreateRefExpr(regIdParam), curFile), companion.GetTy().getOrThrow()).getOrThrow(),
+            Some(TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)))
+        block.body.add(regCompanionAssignment, at: 0)
+        block.body.add(superCall, at: 0)
+    }
+
+    private func EraseSuperConstructorCalls(body: ArrayList<Node>): Unit {
+        var index = body.size - 1
+        while (index >= 0) {
+            if (let Some(call) <- (body[index] as CallExpr)) {
+                if (IsSuperConstructorCall(call)) {
+                    body.remove(at: index)
+                }
+            }
+            index = index - 1
+        }
+    }
+
+    private func GenerateJavaSideConstructor(userCtor: FuncDecl, companionRefField: VarDecl,
+        companion: ClassDecl): Option<FuncDecl> {
+        let curFile = userCtor.curFile
+        let refWrapper = (userCtor.outerDecl.getOrThrow() as ClassDecl).getOrThrow()
+        let ctor = (ASTCloner.Clone(userCtor) as FuncDecl).getOrThrow()
+        let params = ctor.funcBody.getOrThrow().paramLists[0].params
+        let regCompanionParam = CreateFuncParam("reg", Some(CreateRefType(companion)), None, companion.GetTy())
+        regCompanionParam.curFile = curFile
+        params.add(regCompanionParam, at: 0)
+        let javaEntityDecl = ilib.GetJavaEntityDecl()
+        if (let None <- javaEntityDecl) {
+            return None
+        }
+        let entityDecl = javaEntityDecl.getOrThrow()
+        let entityParam = CreateFuncParam(JAVA_IMPL_ENTITY_ARG_NAME_IN_GENERATED_CTOR, Some(CreateRefType(entityDecl)),
+            None, entityDecl.GetTy())
+        entityParam.curFile = curFile
+        params.add(entityParam, at: 0)
+        let parentCtor = GetJavaMirrorWrappingConstructor(refWrapper.GetSuperClassDecl().getOrThrow()).getOrThrow()
+        CJC_ASSERT(parentCtor.funcBody.getOrThrow().paramLists[0].params.size == 1)
+        let userTy = (userCtor.GetTy().getOrThrow() as FuncTy).getOrThrow()
+        let paramTys = ArrayList<Ty>()
+        paramTys.add(entityDecl.GetTy().getOrThrow())
+        paramTys.add(companion.GetTy().getOrThrow())
+        for (paramTy in userTy.paramTys) {
+            paramTys.add(paramTy)
+        }
+        let ctorTy = typeManager.GetFunctionTy(paramTys.toArray(), userTy.retTy)
+        let superCall = CreateSuperCall(refWrapper, parentCtor, parentCtor.GetTy().getOrThrow())
+        superCall.args.add(CreateFuncArg(WithinFile<RefExpr>(CreateRefExpr(entityParam), curFile)))
+        let block = ctor.funcBody.getOrThrow().body.getOrThrow()
+        EraseSuperConstructorCalls(block.body)
+        let regCompanionAssignment = CreateAssignExpr(
+            WithinFile<RefExpr>(CreateRefExpr(companionRefField), curFile),
+            WithinFile<RefExpr>(CreateRefExpr(regCompanionParam), curFile),
+            Some(TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)))
+        block.body.add(regCompanionAssignment, at: 0)
+        block.body.add(superCall, at: 0)
+        ctor.funcBody.getOrThrow().SetTy(ctorTy)
+        ctor.SetTy(ctorTy)
+        ctor.funcBody.getOrThrow().funcDecl = ctor
+        ctor.constructorCall = ConstructorCall.SUPER
+        ctor.DisableAttr(Attribute.PRIMARY_CONSTRUCTOR)
+        ctor.EnableAttr(Attribute.UNSAFE)
+        return Some(ctor)
+    }
+
+    private func InsertJavaSideConstructor(userCtor: FuncDecl, companionRefField: VarDecl, companion: ClassDecl,
+        ctx: AfterTypeCheckContext): Option<FuncDecl> {
+        CJC_ASSERT(IsImpl(userCtor.outerDecl.getOrThrow()))
+        let refWrapper = (userCtor.outerDecl.getOrThrow() as ClassDecl).getOrThrow()
+        let generated = GenerateJavaSideConstructor(userCtor, companionRefField, companion)
+        if (let None <- generated) {
+            userCtor.EnableAttr(Attribute.IS_BROKEN)
+            return None
+        }
+        let ctor = generated.getOrThrow()
+        ctor.outerDecl = Some(refWrapper)
+        ctor.fullPackageName = refWrapper.fullPackageName
+        ctor.moduleName = refWrapper.moduleName
+        if (let Some(body) <- refWrapper.body) {
+            ctor.begin = body.begin
+            ctor.end = body.begin
+        }
+        ctor.funcBody.getOrThrow().parentClassLike = Some(refWrapper)
+        ctor.EnableAttr(Attribute.IN_CLASSLIKE)
+        ctor.EnableAttr(Attribute.PROTECTED)
+        refWrapper.GetMemberDecls().add(ctor)
+        ctx.CacheJavaImplReferenceWrapperConstructorsPair(userCtor, ctor)
+        return Some(ctor)
+    }
+
+    private func RewriteUserDefinedConstructorInitialization(ctx: AfterTypeCheckContext, ctor: FuncDecl,
+        companionRefField: VarDecl, companion: ClassDecl): Unit {
+        let curFile = ctor.curFile
+        if (let None <- curFile) {
+            ctor.EnableAttr(Attribute.IS_BROKEN)
+            return
+        }
+        let file = curFile.getOrThrow()
+        if (ilib.CreateGetJniEnvCall(curFile).isNone() || ilib.GetJniEnvPtrDecl().isNone()) {
+            ctor.EnableAttr(Attribute.IS_BROKEN)
+            return
+        }
+        let refWrapper = (ctor.outerDecl.getOrThrow() as ClassDecl).getOrThrow()
+        let parentCtor = GetJavaMirrorWrappingConstructor(refWrapper.GetSuperClassDecl().getOrThrow()).getOrThrow()
+        CJC_ASSERT(parentCtor.funcBody.getOrThrow().paramLists[0].params.size == 1)
+        let paramList = ctor.funcBody.getOrThrow().paramLists[0]
+        paramList.curFile = curFile
+        let args = factory.CreateParamsUsage(paramList)
+        let marker = ilib.CreateJavaEntityNullCall(curFile)
+        if (let None <- marker) {
+            ctor.EnableAttr(Attribute.IS_BROKEN)
+            companion.EnableAttr(Attribute.HAS_BROKEN)
+            companion.EnableAttr(Attribute.IS_BROKEN)
+            return
+        }
+        args.add(marker.getOrThrow())
+        let javaCtorExpr = factory.CreateNewJavaObjectCall(ctx, file,
+            JavaMemberSignature.FromConstructor(utils, ctor, true), args)
+        if (let None <- javaCtorExpr) {
+            ctor.EnableAttr(Attribute.IS_BROKEN)
+            companion.EnableAttr(Attribute.HAS_BROKEN)
+            companion.EnableAttr(Attribute.IS_BROKEN)
+            return
+        }
+        let superCall = CreateSuperCall(ctor.outerDecl.getOrThrow(), parentCtor, parentCtor.GetTy().getOrThrow())
+        superCall.args.add(CreateFuncArg(javaCtorExpr.getOrThrow()), at: 0)
+        let body = ctor.funcBody.getOrThrow().body.getOrThrow().body
+        body.add(CreateRegistryCompanionRefFieldAssignment(companion, refWrapper, companionRefField), at: 0)
+        body.add(superCall, at: 0)
+    }
+
+    private func RewriteUserDefinedConstructorsInitialization(ctx: AfterTypeCheckContext, refWrapper: ClassDecl,
+        companionRefField: VarDecl, companion: ClassDecl): Unit {
+        for (ctor in ctx.GetJavaImplUserDefinedConstructors(refWrapper)) {
+            RewriteUserDefinedConstructorInitialization(ctx, ctor, companionRefField, companion)
+        }
+        RewriteRefWrapperPrimaryConstructor(refWrapper, companion, companionRefField)
+    }
+
+    private func InsertFinalizer(refWrapper: ClassDecl): Unit {
+        refWrapper.body.getOrThrow().decls.add(ilib.CreateDeletingGlobalRefFinalizer(refWrapper))
+    }
+
+    private func Process(refWrapper: ClassDecl, ctx: AfterTypeCheckContext): Unit {
+        CJC_ASSERT(IsImplReferenceWrapper(refWrapper))
+        let registryCompanionName = GetImplRegistryCompanionClassName(refWrapper)
+        let registryCompanion = importManager.GetImportedDecl<ClassDecl>(refWrapper.fullPackageName,
+            registryCompanionName)
+        CJC_NULLPTR_CHECK(registryCompanion)
+        let registryCompanionClass = registryCompanion.getOrThrow()
+        let regCompanionRefField = ctx.GetJavaImplRegistryCompanionReferenceField(refWrapper)
+        let wrappingCtor = ctx.GetJavaImplWrappingConstructor(refWrapper).getOrThrow()
+        GenerateWrappingConstructorBody(wrappingCtor, regCompanionRefField, registryCompanionClass)
+        for (userDefinedCtor in ctx.GetJavaImplUserDefinedConstructors(refWrapper)) {
+            let _ = InsertJavaSideConstructor(userDefinedCtor, regCompanionRefField, registryCompanionClass, ctx)
+        }
+        RewriteUserDefinedConstructorsInitialization(ctx, refWrapper, regCompanionRefField, registryCompanionClass)
+        InsertFinalizer(refWrapper)
+    }
+
+    public func Process(ctx: AfterTypeCheckContext): Unit {
+        GenerateJavaImplRegistryCompanionReferenceField().Process(ctx)
+        for (refWrapper in ctx.GetJavaImplReferenceWrappers()) {
+            if (refWrapper.TestAttr(Attribute.IS_BROKEN)) {
                 continue
             }
-            if (let None <- ctx.GetJavaImplRegistryCompanion(impl)) {
-                continue
-            }
+            Process(refWrapper, ctx)
         }
     }
 }
