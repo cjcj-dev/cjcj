@@ -21,6 +21,7 @@ public class JavaDesugarManager {
     private let memberMap: HashMap<InheritableDecl, MemberMap>
     private var utilsStore: Option<Utils> = None
     private var ilibStore: Option<InteropLibBridge> = None
+    private var jniStore: Option<JniBridge> = None
 
     public init(importManager: SemaImportManager, typeManager: TypeManager, diag: DiagnosticEngine,
         mangler: BaseMangler, javagenOutputPath: MaybeString, outputPath: String,
@@ -51,6 +52,24 @@ public class JavaDesugarManager {
 
     private func BridgeLib(): InteropLibBridge {
         return ilibStore.getOrThrow()
+    }
+
+    private func BridgeJni(): JniBridge {
+        if (let Some(jni) <- jniStore) {
+            return jni
+        }
+        let ilib = BridgeLib()
+        var envDecl: Option<Decl> = None
+        if (let Some(decl) <- ilib.GetJniEnvPtrDecl()) {
+            envDecl = Some(decl)
+        }
+        var jobjectDecl: Option<Decl> = None
+        if (let Some(decl) <- ilib.GetJobjectDecl()) {
+            jobjectDecl = Some(decl)
+        }
+        let jni = JniBridge(typeManager, importManager, mangler, BridgeUtils(), envDecl, jobjectDecl)
+        jniStore = Some(jni)
+        return jni
     }
 
     private func InsertJavaMirrorWrappingConstructorBody(decl: ClassDecl): Unit {
@@ -333,11 +352,11 @@ public class JavaDesugarManager {
         Ensure(ctx)
         GenerateJavaReferenceFieldInJObject(BridgeLib()).Process(ctx)
         GenerateJavaMirrorApiStub(typeManager, BridgeLib(), BridgeUtils(), memberMap).Process(ctx)
-        GenerateJavaImplApiStub().Process(ctx)
+        GenerateJavaImplApiStub(typeManager, BridgeLib(), BridgeJni()).Process(ctx)
         for (file in ctx.pkg.files) {
             GenerateInMirrors(file)
         }
-        GenerateInJavaImplRegistryCompanion().Process(ctx)
+        GenerateInJavaImplRegistryCompanion(typeManager, BridgeLib()).Process(ctx)
         DesugarJavaImplSuperConstructorCall().Process(ctx)
         GenerateInJavaImplReferenceWrapper().Process(ctx)
         DesugarJavaImplSuperMethodCall().Process(ctx)
