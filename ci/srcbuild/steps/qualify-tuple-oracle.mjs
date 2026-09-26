@@ -31,6 +31,10 @@ const official = await selectOfficialOracle({
   hostLlvmSha256: process.env.CJCJ_BOOTSTRAP_HOST_LLVM_SHA256,
 });
 const oracle = official.compiler;
+const corpus = path.join(root, 'scripts/difftest_corpus');
+const corpusFiles = (await fs.readdir(corpus)).filter(name => name.endsWith('.cj'));
+if (!corpusFiles.length) throw new Error('reference oracle preflight failed: no .cj corpus files');
+console.log(`TUPLE_ORACLE_CORPUS files=${corpusFiles.length}`);
 let jobs = Number(process.env.CJCJ_VERIFY_JOBS || os.cpus().length || 1);
 if (!Number.isSafeInteger(jobs) || jobs < 1) throw new Error(`invalid CJCJ_VERIFY_JOBS: ${process.env.CJCJ_VERIFY_JOBS}`);
 jobs = String(Math.min(jobs, 16));
@@ -51,7 +55,7 @@ await phase('difftest', async () => {
 
 await phase('bcgate', async () => {
   console.log('[bcgate] verify bitcode parity');
-  await $({env: {...process.env, CJ_HOST_RTLIB: '', BCGATE_BASE_HOME: official.sdk, BCGATE_BASE_LD_LIBRARY_PATH: official.env[target.spec.loaderEnv]}})`set -o pipefail; python3 ${root}/scripts/bcgate.py --self ${self} --base ${oracle} --corpus ${root}/scripts/difftest_corpus -j ${jobs} | tee ${work}/bcgate.log`;
+  await $({env: {...process.env, CJ_HOST_RTLIB: '', BCGATE_BASE_HOME: official.sdk, BCGATE_BASE_LD_LIBRARY_PATH: official.env[target.spec.loaderEnv]}})`set -o pipefail; python3 ${root}/scripts/bcgate.py --self ${self} --base ${oracle} --corpus ${corpus} -j ${jobs} | tee ${work}/bcgate.log`;
   await $`grep -Eq 'byte-identical: [0-9]+ \\(100\\.0%\\)[[:space:]]+\\|[[:space:]]+differing: 0' ${work}/bcgate.log`;
   await $`grep -Eq 'compile-errors: 0' ${work}/bcgate.log`;
   const onlyOneSide = await runGrepProbe({
