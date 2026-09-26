@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import platform
 import shutil
+import stat
 import subprocess
 import tarfile
 import zipfile
@@ -82,15 +83,47 @@ def install_ohos(root):
     print(f'OHOS_NATIVE_PACKAGE={matches[0]}', flush=True)
     sdk = root / 'sdk'
     sdk.mkdir()
+    links = {}
     with zipfile.ZipFile(native_zip) as bundle:
         for item in bundle.infolist():
             destination = (sdk / item.filename).resolve()
             if not destination.is_relative_to(sdk.resolve()):
                 raise ValueError(f'archive member escapes SDK: {item.filename}')
-            bundle.extract(item, sdk)
             mode = item.external_attr >> 16
+            if stat.S_ISLNK(mode):
+                links[destination] = (destination.parent / bundle.read(item).decode('utf-8')).resolve()
+                continue
+            bundle.extract(item, sdk)
             if mode and os.name != 'nt':
                 destination.chmod(mode & 0o777)
+    # zipfile.extract writes Unix link payloads as ordinary text files (clang
+    # becomes the eight bytes "clang-15"). Materialize aliases as physical
+    # copies, including chains such as clang++ -> clang -> clang-15.
+    visiting = set()
+
+    def materialize(destination):
+        if destination not in links:
+            return
+        if destination in visiting:
+            raise ValueError(f'cyclic SDK alias: {destination}')
+        visiting.add(destination)
+        target = links[destination]
+        if not target.is_relative_to(sdk.resolve()):
+            raise ValueError(f'SDK alias escapes root: {destination} -> {target}')
+        materialize(target)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if target.is_dir():
+            shutil.copytree(target, destination)
+        else:
+            shutil.copy2(target, destination)
+        visiting.remove(destination)
+        del links[destination]
+
+    for destination in list(links):
+        materialize(destination)
+    # A marker directory alone does not prove an installed native SDK works.
+    executable = 'clang.exe' if os.name == 'nt' else 'clang'
+    run(sdk / 'native/llvm/bin' / executable, '--version')
     export('OHOS_SDK_HOME', sdk)
     archive.unlink()
     native_zip.unlink()
