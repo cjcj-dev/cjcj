@@ -27,10 +27,28 @@ public abstract class UserBase {
         }
     }
 
+    private func firstDirSeparator(name: String, from: Int64): Option<Int64> {
+        var pos = from
+        while (pos < name.size) {
+            let byte = name[pos]
+            var sep: Int64 = 0
+            while (sep < DIR_SEPARATOR.size) {
+                if (byte == DIR_SEPARATOR[sep]) {
+                    return pos
+                }
+                sep++
+            }
+            pos++
+        }
+        return None
+    }
+
     public func WriteJson(context: String, suffix: String): Unit {
         var name = packageName
-        if (let Some(pos) <- name.indexOf("/")) {
-            name = name[0..pos] + "-" + name[pos + 1..]
+        var from: Int64 = 0
+        while (let Some(pos) <- firstDirSeparator(name, from)) {
+            name = name[0..pos] + "-" + name[(pos + 1)..]
+            from = pos + 1
         }
         let filename = name + suffix
         try {

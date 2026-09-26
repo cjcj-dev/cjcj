@@ -5,7 +5,7 @@ import std.env.*
 import cjcj::ast.*
 import cjcj::driver.HostTripleInfo
 import cjcj::frontend.*
-import cjcj::option.OutputMode
+import cjcj::option.{MockMode, OutputMode}
 import cjcj::utils.{FileUtil, GenerateRandomHexString}
 
 private let DEFAULT_TEST_CANGJIE_HOME: String = "/root/.cjv/toolchains/nightly-1.2.0-alpha.20260619020029"
@@ -49,7 +49,7 @@ private func NewTestSourcePath(): String {
     return FileUtil.JoinPath(dir, "test_" + GenerateRandomHexString() + ".cj")
 }
 
-private func ConfigureInvocation(invocation: CompilerInvocation, sourcePath: String): Unit {
+private func ConfigureInvocation(invocation: CompilerInvocation, sourcePath: String, mockOn: Bool): Unit {
     let home = CangjieHomeForTest()
     let opts = invocation.globalOptions
     opts.srcFiles.add(sourcePath)
@@ -62,14 +62,18 @@ private func ConfigureInvocation(invocation: CompilerInvocation, sourcePath: Str
     opts.disableCodeGen = true
     opts.SetCompilationCachedPath()
     opts.UpdateCachedDirName("default")
+    if (mockOn) {
+        opts.mock = MockMode.ON
+    }
 }
 
-public func CompileSource(code: String, stage!: CompileStage = CompileStage.GENERIC_INSTANTIATION): TestCompileResult {
+public func CompileSource(code: String, stage!: CompileStage = CompileStage.GENERIC_INSTANTIATION,
+    mockOn!: Bool = false): TestCompileResult {
     let sourcePath = NewTestSourcePath()
     let _ = FileUtil.WriteToFile(sourcePath, code)
     let diag = DiagnosticEngine()
     let invocation = CompilerInvocation()
-    ConfigureInvocation(invocation, sourcePath)
+    ConfigureInvocation(invocation, sourcePath, mockOn)
     let instance = CompilerInstance(invocation, diag)
     instance.buildTrie = false
     let ok = instance.Compile(stage: stage)

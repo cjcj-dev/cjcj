@@ -9,7 +9,9 @@ identities=${STAGE1_HOST_IDENTITIES:-$here/stage1_host_identities.txt}
 [ -f "$identities" ] || fail "missing host identities: $identities"
 # Arguments are intentionally explicit: the input hashes have already been pinned
 # by bootstrap, and are checked again against the declared host triple here.
-[ "$#" -ge 8 ] && [ "$#" -le 9 ] || fail 'usage: TARGET_SDK HOST_SDK HOST_RUNTIME HOST_LLVM_SHA COMPILER COMPILER_SHA RUN_SDK COLOUR_LLVM_SHA [BACKEND_RUNTIME_DIR]'
+if [ "$#" -lt 8 ] || [ "$#" -gt 9 ]; then
+  fail 'usage: TARGET_SDK HOST_SDK HOST_RUNTIME HOST_LLVM_SHA COMPILER COMPILER_SHA RUN_SDK COLOUR_LLVM_SHA [BACKEND_RUNTIME_DIR]'
+fi
 target=$(readlink -f "$1")
 host=$(readlink -f "$2")
 hrt=$(readlink -f "$3")
@@ -50,7 +52,7 @@ if [ -f "$hrt/runtime/lib/$platform/libcangjie-runtime.so" ]; then
 elif [ -f "$hrt/lib/$platform/libcangjie-runtime.so" ]; then
   hrt="$hrt/lib/$platform"
 fi
-decl_runtime= decl_bounds= decl_llvm=
+decl_runtime='' decl_bounds='' decl_llvm=''
 while read -r key val _; do
   [ -n "${key:-}" ] || continue
   case "$key" in
@@ -61,7 +63,9 @@ while read -r key val _; do
     *) fail "unknown identity key: $key" ;;
   esac
 done < "$identities"
-[ -n "$decl_runtime" ] && [ -n "$decl_bounds" ] && [ -n "$decl_llvm" ] || fail "incomplete host identities: $identities"
+if [ -z "$decl_runtime" ] || [ -z "$decl_bounds" ] || [ -z "$decl_llvm" ]; then
+  fail "incomplete host identities: $identities"
+fi
 [ "$llvm_sha" = "$decl_llvm" ] || fail "llvm sha is not the declared host triple: arg=$llvm_sha declared=$decl_llvm"
 check_sha() {
   local path=$1 expected=$2 actual
@@ -78,12 +82,16 @@ check_sha "$hrt/libboundscheck.so" "$decl_bounds"
 check_sha "$host/runtime/lib/$platform/libcangjie-runtime.so" "$decl_runtime"
 check_sha "$host/runtime/lib/$platform/libboundscheck.so" "$decl_bounds"
 for rel in bin/cjc tools/bin/cjpm third_party/llvm/bin/opt third_party/llvm/bin/llc; do
-  [ -x "$target/$rel" ] && [ ! -L "$target/$rel" ] || fail "regular executable required: $rel"
+  if [ ! -x "$target/$rel" ] || [ -L "$target/$rel" ]; then
+    fail "regular executable required: $rel"
+  fi
 done
 host_ld="$host/runtime/lib/$platform:$host/lib/$platform:$host/third_party/llvm/lib:$host/tools/lib:/usr/lib/$multiarch"
 compiler_ld="$host/runtime/lib/$platform:$host/lib/$platform:$run_sdk/third_party/llvm/lib:$host/tools/lib:/usr/lib/$multiarch"
 backend_runtime="${9:-$target/runtime/lib/$platform}"
-[ -f "$backend_runtime/libcangjie-runtime.so" ] && [ -f "$backend_runtime/libboundscheck.so" ] || fail "missing backend runtime: $backend_runtime"
+if [ ! -f "$backend_runtime/libcangjie-runtime.so" ] || [ ! -f "$backend_runtime/libboundscheck.so" ]; then
+  fail "missing backend runtime: $backend_runtime"
+fi
 target_ld="$backend_runtime:$target/lib/$platform:$target/third_party/llvm/lib:$target/tools/lib:/usr/lib/$multiarch"
 state="$target/.stage1-host"
 [ ! -e "$state" ] || fail 'runner already installed; reassemble the workspace SDK'

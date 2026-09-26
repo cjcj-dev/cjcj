@@ -196,6 +196,10 @@ public class VirtualMethodInfo {
         instance = newFunc
     }
 
+    public func UpdateInstanceAttributeInfo(): Unit {
+        attr.CopyFrom(instance.getOrThrow().GetAttributeInfo())
+    }
+
     public func UpdateMethodInfo(newInfo: VirtualMethodInfo): Unit {
         instance = newInfo.instance
         attr.CopyFrom(newInfo.attr)

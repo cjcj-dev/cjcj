@@ -6,9 +6,10 @@ import cjcj::chir.Expression
 import cjcj::chir.Intrinsic
 import cjcj::chir.IntrinsicKind
 import cjcj::chir.IntrinsicKindToString
-import cjcj::chir.IntrinsicWithException
+import cjcj::chir.TryIntrinsic
 import cjcj::chir.NeedCheckArrayBound
 import cjcj::chir.RawArrayType
+import cjcj::chir.Function
 import cjcj::chir.Type
 import cjcj::chir.Value
 import cjcj::utils.CJC_ASSERT
@@ -18,21 +19,23 @@ private let LLVM_ARRAY_TYPE_KIND_FOR_INTRINSICS: Int32 = 11
 private let LLVM_POINTER_TYPE_KIND_FOR_INTRINSICS: Int32 = 12
 
 public func GenerateIntrinsic(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
+    let topLevelFunc = chirExpr.GetTopLevelFunc()
     if (let Some(intrinsicExpr) <- (chirExpr as Intrinsic)) {
         return GenerateIntrinsic(irBuilder, intrinsicExpr.GetIntrinsicKind(), intrinsicExpr.GetArgs(),
             intrinsicExpr.GetInstantiatedTypeArgs(), intrinsicExpr.GetResultType(),
-            chirExpr.Get<NeedCheckArrayBound, Bool>())
+            chirExpr.Get<NeedCheckArrayBound, Bool>(), topLevelFunc)
     }
-    if (let Some(intrinsicWithExceptionExpr) <- (chirExpr as IntrinsicWithException)) {
-        return GenerateIntrinsic(irBuilder, intrinsicWithExceptionExpr.GetIntrinsicKind(),
-            intrinsicWithExceptionExpr.GetArgs(), intrinsicWithExceptionExpr.GetInstantiatedTypeArgs(),
-            intrinsicWithExceptionExpr.GetResultType(), chirExpr.Get<NeedCheckArrayBound, Bool>())
+    if (let Some(tryIntrinsicExpr) <- (chirExpr as TryIntrinsic)) {
+        return GenerateIntrinsic(irBuilder, tryIntrinsicExpr.GetIntrinsicKind(),
+            tryIntrinsicExpr.GetArgs(), tryIntrinsicExpr.GetInstantiatedTypeArgs(),
+            tryIntrinsicExpr.GetResultType(), chirExpr.Get<NeedCheckArrayBound, Bool>(), topLevelFunc)
     }
     return LLVMNullValue()
 }
 
 private func GenerateIntrinsic(irBuilder: IRBuilder2, kind: IntrinsicKind, args: ArrayList<Value>,
-    typeArgs: ArrayList<Type>, resultType: Option<Type>, needArrayBoundCheck: Bool): LLVMValueRef {
+    typeArgs: ArrayList<Type>, resultType: Option<Type>, needArrayBoundCheck: Bool,
+    topLevelFunc: Option<Function>): LLVMValueRef {
     if (IsOverflowIntrinsic(kind)) {
         return GenerateOverflowIntrinsic(irBuilder, kind, args, resultType)
     }
@@ -68,7 +71,8 @@ private func GenerateIntrinsic(irBuilder: IRBuilder2, kind: IntrinsicKind, args:
     }
     if (kind == IntrinsicKind.ALIGN_OF) {
         if (!typeArgs.isEmpty()) {
-            return AlignOfType(irBuilder, typeArgs[0], resultType)
+            let cgRetTy = CGType.GetOrCreate(irBuilder.GetCGModule(), resultType.getOrThrow())
+            return irBuilder.GetAlign(typeArgs[0], cgRetTy.GetLLVMType())
         }
         return LLVMNullValue()
     }
@@ -157,8 +161,9 @@ private func GenerateIntrinsic(irBuilder: IRBuilder2, kind: IntrinsicKind, args:
         return irBuilder.CallRuntimeIntrinsics(kind, args, resultType)
     }
     // CodeGen/Base/IntrinsicsDispatcher.h:163-167 IsReflectIntrinsic
+    // IntrinsicsDispatcher.cpp:717-737 GenerateReflectIntrinsic
     if (IsReflectIntrinsic(kind)) {
-        return irBuilder.CallRuntimeIntrinsics(kind, args, resultType)
+        return GenerateReflectIntrinsic(irBuilder, kind, args, typeArgs, resultType, topLevelFunc)
     }
     if (IsFutureIntrinsic(kind)) {
         return irBuilder.CallRuntimeIntrinsics(kind, args, resultType)
@@ -302,6 +307,40 @@ private func IsRuntimeIntrinsic(kind: IntrinsicKind): Bool {
         kind == IntrinsicKind.GET_THREAD_NUMBER ||
         kind == IntrinsicKind.GET_BLOCKING_THREAD_NUMBER ||
         kind == IntrinsicKind.GET_NATIVE_THREAD_NUMBER
+}
+
+// CodeGen/Base/IntrinsicsDispatcher.cpp:717-737
+private func GenerateReflectIntrinsic(irBuilder: IRBuilder2, kind: IntrinsicKind, args: ArrayList<Value>,
+    typeArgs: ArrayList<Type>, resultType: Option<Type>, topLevelFunc: Option<Function>): LLVMValueRef {
+    if (kind == IntrinsicKind.GET_TYPE_BY_MANGLED_NAME) {
+        if (typeArgs.isEmpty()) {
+            throw IllegalStateException("GET_TYPE_BY_MANGLED_NAME has no instantiated type")
+        }
+        let instTy = typeArgs[0]
+        var arg = LLVMNullValue()
+        if (instTy.IsGeneric()) {
+            if (let Some(fn) <- topLevelFunc) {
+                let moduleHandle = irBuilder.GetCGModule().GetLLVMModule() ??
+                    throw IllegalStateException("GET_TYPE_BY_MANGLED_NAME has no LLVM module")
+                let name = fn.GetIdentifierWithoutPrefix()
+                var llvmFn = LLVMNullValue()
+                try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
+                    llvmFn = unsafe { LLVMGetNamedFunction(moduleHandle.raw, nameCString.value) }
+                }
+                if (llvmFn.isNull()) {
+                    throw IllegalStateException("GET_TYPE_BY_MANGLED_NAME missing LLVM function")
+                }
+                arg = unsafe { LLVMGetParam(llvmFn, 0u32) }
+            } else {
+                throw IllegalStateException("GET_TYPE_BY_MANGLED_NAME generic type has no top-level function")
+            }
+        } else {
+            arg = CGType.GetOrCreate(irBuilder.GetCGModule(), DeRef(instTy)).GetOrCreateTypeInfo()
+        }
+        let i8PtrTy = unsafe { LLVMPointerType(LLVMInt8TypeInContext(irBuilder.GetLLVMContext().raw), 0u32) }
+        return irBuilder.CreateBitCast(arg, i8PtrTy)
+    }
+    return irBuilder.CallRuntimeIntrinsics(kind, args, resultType)
 }
 
 // CodeGen/Base/IntrinsicsDispatcher.h:163-167
@@ -761,11 +800,6 @@ private func CPointerWrite(irBuilder: IRBuilder2, args: ArrayList<Value>,
     return LLVMNullValue()
 }
 
-private func AlignOfType(irBuilder: IRBuilder2, ty: Type, resultType: Option<Type>): LLVMValueRef {
-    let alignValue = if (let Some(align) <- CGType.GetOrCreate(irBuilder.GetCGModule(), ty).GetAlign()) { align } else { 1 }
-    return IntegerConstantForResult(irBuilder, alignValue, resultType)
-}
-
 private func GenerateIsSubtypeTypes(irBuilder: IRBuilder2, leftTy: Type, rightTy: Type): LLVMValueRef {
     let args = ArrayList<LLVMValueRef>()
     args.add(CreateTypeInfoAsI8Ptr(irBuilder, leftTy))
@@ -780,15 +814,6 @@ private func CreateStaticTypeInfo(irBuilder: IRBuilder2, ty: Type): LLVMValueRef
 private func CreateTypeInfoAsI8Ptr(irBuilder: IRBuilder2, ty: Type): LLVMValueRef {
     let i8PtrType = unsafe { LLVMPointerType(LLVMInt8TypeInContext(irBuilder.GetLLVMContext().raw), 0u32) }
     return irBuilder.CreateBitCast(CreateStaticTypeInfo(irBuilder, ty), i8PtrType, name: "ti.i8")
-}
-
-private func IntegerConstantForResult(irBuilder: IRBuilder2, value: Int64, resultType: Option<Type>): LLVMValueRef {
-    let llvmType = if (let Some(resultTy) <- resultType) {
-        CGType.GetOrCreate(irBuilder.GetCGModule(), resultTy).GetLLVMType()
-    } else {
-        unsafe { LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw) }
-    }
-    return unsafe { LLVMConstInt(llvmType, UInt64(value), 0) }
 }
 
 private func ElementSizeOfPointerLike(irBuilder: IRBuilder2, ty: Type): Int64 {

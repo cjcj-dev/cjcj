@@ -2,7 +2,7 @@ package cjcj::codegen
 
 import std.collection.*
 import cjcj::chir.Apply
-import cjcj::chir.ApplyWithException
+import cjcj::chir.TryApply
 import cjcj::chir.Attribute
 import cjcj::chir.BoolLiteral
 import cjcj::chir.BoxType
@@ -71,6 +71,7 @@ private let PLAIN_SAFE_REPRESENTATION_GLOBAL: String = ".cj.repr.plain_safe"
 private let PLAIN_SAFE_REPRESENTATION_CONTRACT: String = "plain_safe"
 private let PLAIN_SAFE_RETURN_CONTRACT: String = "cj.repr.ret"
 private let FILL_IN_STACK_TRACE_INTRINSIC_NAME: String = "llvm.cj.fill.in.stack.trace"
+private let STRING_DEDUP_CANONICAL_INTRINSIC_NAME: String = "llvm.cj.string.dedup.canonical"
 private let NEW_CJ_THREAD_FUNC_NAME: String = PREFIX_OF_BACKEND_SYMS + "NewCJThread"
 private let NEW_CJ_THREAD_NO_RETURN_FUNC_NAME: String = PREFIX_OF_BACKEND_SYMS + "NewCJThreadNoReturn"
 private let MIN_ANDROID_ARM32_ENUM_ALIGN: UInt32 = 4u32
@@ -152,7 +153,7 @@ private func IsLoadExprForAllocatedGenericRef(chirExpression: Expression): Bool 
     }
     let locationExpr = (location as LocalVar).getOrThrow().GetExpr().getOrThrow()
     let locationExprKind = locationExpr.GetExprKind()
-    return locationExprKind == ExprKind.ALLOCATE || locationExprKind == ExprKind.ALLOCATE_WITH_EXCEPTION
+    return locationExprKind == ExprKind.ALLOCATE || locationExprKind == ExprKind.TRY_ALLOCATE
 }
 
 private func IntrinsicRuntimeFunctionName(kind: IntrinsicKind): Option<String> {
@@ -568,12 +569,18 @@ public class IRBuilder2 <: Resource {
     public init(cgMod: CGModule) {
         this.cgMod = cgMod
         builder = LLVMBuilderHandle.Create(cgMod.GetLLVMContext())
+        if (cgMod.GetCGContext().GetCompileOptions().fastMathMode) {
+            unsafe { LLVMSelfhostBuilderSetFastMath(builder.raw) }
+        }
     }
 
     public init(cgMod: CGModule, theBB: LLVMBasicBlockRef) {
         this.cgMod = cgMod
         builder = LLVMBuilderHandle.Create(cgMod.GetLLVMContext())
         unsafe { LLVMPositionBuilderAtEnd(builder.raw, theBB) }
+        if (cgMod.GetCGContext().GetCompileOptions().fastMathMode) {
+            unsafe { LLVMSelfhostBuilderSetFastMath(builder.raw) }
+        }
     }
 
     public func SetCHIRExpr(chirExprWrapper: CHIRExprWrapper): Unit {
@@ -728,7 +735,7 @@ public class IRBuilder2 <: Resource {
     }
 
     public func CreateLoadInstForParameter(chirExpression: Expression): Unit {
-        for (operand in chirExpression.GetOperands()) {
+        for (operand in chirExpression.GetNonSuccessorOperands()) {
             if (let Some((elementType, valueToLoad)) <- cgMod.GetValuesToLoad(operand)) {
                 var loadInst = LLVMNullValue()
                 try (nameCString = unsafe { LibC.mallocCString("") }.asResource()) {
@@ -1199,7 +1206,7 @@ public class IRBuilder2 <: Resource {
                         if (let Some(locationExpr) <- localVar.GetExpr()) {
                             let locationExprKind = locationExpr.GetExprKind()
                             isUntaggedLocalRefLoad = locationExprKind == ExprKind.ALLOCATE ||
-                                locationExprKind == ExprKind.ALLOCATE_WITH_EXCEPTION
+                                locationExprKind == ExprKind.TRY_ALLOCATE
                         }
                     }
                 }
@@ -2092,7 +2099,7 @@ public class IRBuilder2 <: Resource {
                 }
             }
         }
-        return ApplyFastMathIfNeeded(result)
+        return result
     }
 
     public func CreateUnary(kind: ExprKind, value: LLVMValueRef, name!: String = ""): LLVMValueRef {
@@ -2112,7 +2119,7 @@ public class IRBuilder2 <: Resource {
                 case _ => LLVMNullValue()
             }
         }
-        return ApplyFastMathIfNeeded(result)
+        return result
     }
 
     public func CreateNullValue(ty: Type): LLVMValueRef {
@@ -2339,8 +2346,8 @@ public class IRBuilder2 <: Resource {
                 var applyExprWrapper: Option<CHIRApplyWrapper> = None
                 if (let Some(applyExpr) <- (currentExpression as Apply)) {
                     applyExprWrapper = Some(CHIRApplyWrapper(applyExpr))
-                } else if (let Some(applyWithExceptionExpr) <- (currentExpression as ApplyWithException)) {
-                    applyExprWrapper = Some(CHIRApplyWrapper(applyWithExceptionExpr))
+                } else if (let Some(tryApplyExpr) <- (currentExpression as TryApply)) {
+                    applyExprWrapper = Some(CHIRApplyWrapper(tryApplyExpr))
                 }
                 let applyWrapper = applyExprWrapper.getOrThrow()
                 let caller = cgMod.GetOrInsertCGFunction(applyWrapper.GetTopLevelFunc().getOrThrow())
@@ -2434,8 +2441,8 @@ public class IRBuilder2 <: Resource {
             let currentExpression = exprWrapper.GetExpression()
             if (let Some(applyExpr) <- (currentExpression as Apply)) {
                 applyExprWrapper = Some(CHIRApplyWrapper(applyExpr))
-            } else if (let Some(applyWithExceptionExpr) <- (currentExpression as ApplyWithException)) {
-                applyExprWrapper = Some(CHIRApplyWrapper(applyWithExceptionExpr))
+            } else if (let Some(tryApplyExpr) <- (currentExpression as TryApply)) {
+                applyExprWrapper = Some(CHIRApplyWrapper(tryApplyExpr))
             }
             if (let Some(callExpr) <- (exprWrapper as CHIRCallExpr)) {
                 callExprWrapper = Some(callExpr)
@@ -2532,7 +2539,7 @@ public class IRBuilder2 <: Resource {
         let typeInfoPtrType = CGType.GetOrCreateTypeInfoPtrType(GetLLVMContext())
 
         let callExpression = callExprWrapper.GetExpression()
-        if ((callExpression as Apply).isSome() || (callExpression as ApplyWithException).isSome()) {
+        if ((callExpression as Apply).isSome() || (callExpression as TryApply).isSome()) {
             return CreateBitCast(CreateTypeInfo(outerCHIRType), typeInfoPtrType)
         }
 
@@ -3027,19 +3034,14 @@ public class IRBuilder2 <: Resource {
                 funcArgs)
         }
         if (kind == IntrinsicKind.CANONICALIZE_STRING_BACKING) {
-            CJC_ASSERT(parameters.size == 1)
+            CJC_ASSERT(!parameters.isEmpty())
             let retTy = resultType.getOrThrow()
             let uint8ArrayTy = (DeRef(retTy) as RawArrayType).getOrThrow()
+            let funcArgs = RawValuesOfCGValues(parameters)
             let i8PtrTy = unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 0u32) }
-            let funcArgs = ArrayList<LLVMValueRef>()
-            funcArgs.add(CreateBitCast(CreateTypeInfo(uint8ArrayTy), i8PtrTy))
-            funcArgs.add(all: RawValuesOfCGValues(parameters))
-            let result = CreateIntrinsicCallNoInvoke("llvm.cj.string.dedup.canonical", ArrayList<LLVMTypeRef>(),
+            funcArgs.add(CreateBitCast(CreateTypeInfo(uint8ArrayTy), i8PtrTy), at: 0)
+            return CreateIntrinsicCallNoInvoke(STRING_DEDUP_CANONICAL_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(),
                 funcArgs)
-            if (result.isNull()) {
-                throw IllegalStateException("LLVM does not provide llvm.cj.string.dedup.canonical")
-            }
-            return result
         }
         if (kind == IntrinsicKind.DECODE_STACK_TRACE) {
             let retTy = resultType.getOrThrow()
@@ -4452,7 +4454,7 @@ public class IRBuilder2 <: Resource {
             return CreateLoad(elemTypes[Int64(associatedValIdx)], fieldPtr)
         }
         let typeCastExpr = ((field.GetBase() as LocalVar).getOrThrow().GetExpr().getOrThrow() as TypeCast).getOrThrow()
-        let chirEnumType = (typeCastExpr.GetSourceTy().getOrThrow() as EnumType).getOrThrow()
+        let chirEnumType = (typeCastExpr.GetSourceType().getOrThrow() as EnumType).getOrThrow()
         CJC_ASSERT(typeCastExpr.GetResult().getOrThrow().GetEnumCaseIndex().isSome())
         let typeArgs = ArrayList<Type>()
         for (typeArg in GetGenericArgsFromCHIRType(chirEnumType.GetEnumDef().GetType().getOrThrow())) {
@@ -4923,7 +4925,7 @@ public class IRBuilder2 <: Resource {
         try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
             result = unsafe { LLVMBuildPhi(builder.raw, valueType, nameCString.value) }
         }
-        return ApplyFastMathIfNeeded(result)
+        return result
     }
 
     public func AddIncoming(phi: LLVMValueRef, values: ArrayList<LLVMValueRef>,
@@ -4956,7 +4958,6 @@ public class IRBuilder2 <: Resource {
         try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
             result = unsafe { LLVMBuildSelect(builder.raw, cond, trueValue, falseValue, nameCString.value) }
         }
-        result = ApplyFastMathIfNeeded(result)
         // baseprop: same invariant as BitCast (IRBuilder.h:183-191) for multi-arm join.
         PropagateBasePtrFromOperands(result, ArrayList<LLVMValueRef>([trueValue, falseValue]))
         return result
@@ -5917,6 +5918,33 @@ public class IRBuilder2 <: Resource {
         }
     }
 
+    // Mirrors CJNativeIRBuilder.cpp:2109-2130: alignment comes from instantiated typeinfo.
+    public func GetAlign(chirTy: Type, targetType: LLVMTypeRef): LLVMValueRef {
+        let typeInfo = CreateTypeInfo(chirTy)
+        let blocks = CreateAndInsertBasicBlocks(ArrayList<String>([GenNameForBB("get_ref_align"),
+            GenNameForBB("get_non_ref_align"), GenNameForBB("get_align_exit")]))
+        CreateCondBr(CreateTypeInfoIsReferenceCall(chirTy), blocks[0], blocks[1])
+        SetInsertPoint(blocks[0])
+        CreateBr(blocks[2])
+        SetInsertPoint(blocks[1])
+        let typeInfoType = CGType.GetOrCreateTypeInfoType(GetLLVMContext())
+        let typeInfoPtrType = unsafe { LLVMPointerType(typeInfoType, 0u32) }
+        let ptr = CreateStructGEP(typeInfoType, CreateBitCast(typeInfo, typeInfoPtrType),
+            7u32, name: "ti.align")
+        let alignValue = CreateLoad(unsafe { LLVMInt8TypeInContext(GetLLVMContext().raw) }, ptr,
+            name: "ti.align")
+        LLVMSetInstructionMetadata(GetLLVMContext(), alignValue, "invariant.load",
+            LLVMCreateMDTuple(GetLLVMContext(), ArrayList<LLVMMetadataRef>()))
+        let nonRefAlign = CreateSExt(alignValue, targetType)
+        CreateBr(blocks[2])
+        SetInsertPoint(blocks[2])
+        let alignPhi = CreatePHI(targetType)
+        AddIncoming(alignPhi, ArrayList<LLVMValueRef>([
+            unsafe { LLVMConstInt(targetType, GetPayloadOffset(), 0) }, nonRefAlign]),
+            ArrayList<LLVMBasicBlockRef>([blocks[0], blocks[1]]))
+        return alignPhi
+    }
+
     public func GetSizeFromTypeInfo(typeInfo: LLVMValueRef): LLVMValueRef {
         let currentBlock = GetInsertBlock()
         let blockKey = currentBlock.toUIntNative()
@@ -6544,11 +6572,6 @@ public class IRBuilder2 <: Resource {
             CreateBr(oldEntry)
         }
         return created
-    }
-
-    private func ApplyFastMathIfNeeded(value: LLVMValueRef): LLVMValueRef {
-        // LLVM-15 C API has no fast-math-flag accessor; skip (optimization hint only).
-        return value
     }
 
     private func IsFloatOperand(ty: Option<Type>): Bool {

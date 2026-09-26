@@ -66,10 +66,14 @@ private func TypeCastIfNeeded(value: Value, expectedTy: Type, builder: CHIRBuild
             newExprs.add(load)
             tmpValue = load.GetResult().getOrThrow()
         }
-        let ret = builder.CreateTypeCast(expectedTy, tmpValue, parentBlock)
+        let ret: Expression = if (valueTy.IsNumeric() && expectedTy.IsNumeric()) {
+            builder.CreateNumericCast(expectedTy, tmpValue, parentBlock, overflowStrategy: OverflowStrategy.NA)
+        } else {
+            builder.CreateClassStaticCast(expectedTy, tmpValue, parentBlock)
+        }
         ret.SetDebugLocation(loc)
-        let _ = needCheck
         newExprs.add(ret)
+        ret.Set<NeedCheckCast, Bool>(needCheck)
         return (ret.GetResult().getOrThrow(), newExprs)
     }
     return (value, ArrayList<Expression>())
@@ -88,12 +92,12 @@ private func TransformGenericIfNeeded(value: Value, expectedTy: Type, builder: C
         return (None, ArrayList<Expression>())
     }
     if (HasGenericInNonFuncScope(expectedTy) && !HasGenericInNonFuncScope(valueTy)) {
-        let ret = builder.CreateTransformToGeneric(expectedTy, value, parentBlock)
+        let ret = builder.CreateCastToGeneric(expectedTy, value, parentBlock)
         ret.SetDebugLocation(loc)
         let _ = needCheck
         return (Some(ret.GetResult().getOrThrow()), ArrayList<Expression>([ret]))
     } else if (HasGenericInNonFuncScope(valueTy) && !HasGenericInNonFuncScope(expectedTy)) {
-        let ret = builder.CreateTransformToConcrete(expectedTy, value, parentBlock)
+        let ret = builder.CreateCastToConcrete(expectedTy, value, parentBlock)
         ret.SetDebugLocation(loc)
         let _ = needCheck
         return (Some(ret.GetResult().getOrThrow()), ArrayList<Expression>([ret]))
@@ -147,13 +151,13 @@ private func BoxIfNeeded(value: Value, expectedTy: Type, builder: CHIRBuilder, p
             let _ = needCheck
             return (Some(ret.GetResult().getOrThrow()), ArrayList<Expression>([ret]))
         } else {
-            let ret = builder.CreateUnBox(expectedTy, value, parentBlock)
+            let ret = builder.CreateUnBoxToValue(expectedTy, value, parentBlock)
             ret.SetDebugLocation(loc)
             let _ = needCheck
             return (Some(ret.GetResult().getOrThrow()), ArrayList<Expression>([ret]))
         }
     } else if (LeftTypeIsBoxOfRightType(srcTy, expectedTy)) {
-        let ret = builder.CreateUnBox(expectedTy, value, parentBlock)
+        let ret = builder.CreateUnBoxToValue(expectedTy, value, parentBlock)
         ret.SetDebugLocation(loc)
         let _ = needCheck
         return (Some(ret.GetResult().getOrThrow()), ArrayList<Expression>([ret]))
@@ -660,7 +664,6 @@ public class VTableGenerator {
                 vtable.AddNewItemToTypeVTable(srcParentType, funcInfo)
             }
         }
-        UpdateInstanceAttr(vtable)
         customTypeDef.SetVTable(vtable)
     }
 }
@@ -1138,7 +1141,7 @@ public class WrapMutFunc {
         let ret = builder.CreateAllocate(builder.context.GetRefTy(retTy), retTy, entry)
         entry.AppendExpression(ret)
         wrapperFn.SetReturnValue(ret.GetResult().getOrThrow())
-        let rawFuncFirstArgType = rawFunc.GetFuncType().getOrThrow().GetParamTypes()[0].StripAllRefs()
+        let rawFuncFirstArgType = rawFunc.GetFuncType().getOrThrow().GetParamType(0).StripAllRefs()
         var firstArgType = GetInstSubType(rawFuncFirstArgType, srcClassTy, builder)
         if (!firstArgType.IsValueType() || rawFunc.TestAttr(Attribute.MUT)) {
             firstArgType = builder.context.GetRefTy(firstArgType)
@@ -1537,6 +1540,20 @@ public class GenerateVTable {
                 }
                 taskQueue.RunAndWaitForAllTasksCompleted()
             }
+            // Function instances are shared between definitions. Replay attribute snapshots
+            // in candidate order only after all workers have finished reading them.
+            for (customDef in candidateDefs) {
+                if (customDef.TestAttr(Attribute.GENERIC_INSTANTIATED)) {
+                    continue
+                }
+                let vtable = customDef.GetDefVTable()
+                for (typeVTable in vtable.GetModifiableTypeVTables()) {
+                    for (info in typeVTable.GetModifiableVirtualMethods()) {
+                        info.UpdateInstanceAttributeInfo()
+                    }
+                }
+                UpdateInstanceAttr(vtable)
+            }
         }
     }
 
@@ -1627,9 +1644,9 @@ public class GenerateVTable {
 
     private func VisitExpression(expr: Expression): Unit {
         if (let Some(dyExpr) <- (expr as DynamicDispatch)) {
-            dyExpr.SetVirtualMethodOffset(dyExpr.GetVirtualMethodOffset(builder))
+            dyExpr.SetVirtualMethodOffset(dyExpr.GetVirtualMethodOffset())
         } else if (let Some(dyExprE) <- (expr as DynamicDispatchWithException)) {
-            dyExprE.SetVirtualMethodOffset(dyExprE.GetVirtualMethodOffset(builder))
+            dyExprE.SetVirtualMethodOffset(dyExprE.GetVirtualMethodOffset())
         } else if (let Some(apply) <- (expr as Apply)) {
             let callee = apply.GetCallee() as Function
             if (CalleeIsMutFuncFromParent(apply.GetThisType(), callee, expr.GetTopLevelFunc().getOrThrow())) {
@@ -1638,7 +1655,7 @@ public class GenerateVTable {
                     callee.getOrThrow())
                 apply.ReplaceOperand(callee.getOrThrow(), wrapperFunc)
             }
-        } else if (let Some(applyE) <- (expr as ApplyWithException)) {
+        } else if (let Some(applyE) <- (expr as TryApply)) {
             let callee = applyE.GetCallee() as Function
             if (CalleeIsMutFuncFromParent(applyE.GetThisType(), callee, expr.GetTopLevelFunc().getOrThrow())) {
                 let wrapperFunc = GetMutFuncWrapper(applyE.GetThisType().getOrThrow(), applyE.GetArgs(),
@@ -1660,8 +1677,40 @@ public class GenerateVTable {
         }
     }
 
+    private func ReplaceDeserializedDispatchCallee(expr: Expression): Unit {
+        if (let Some(dyExpr) <- (expr as DynamicDispatch)) {
+            let callee = dyExpr.GetCallee()
+            let expected = GetCalleeInSrcParentType(callee, dyExpr.GetMethodName(), dyExpr.GetStoredVirMethodOffset())
+            dyExpr.ReplaceOperand(callee, expected)
+        } else if (let Some(dyExprE) <- (expr as DynamicDispatchWithException)) {
+            let callee = dyExprE.GetCallee()
+            let expected = GetCalleeInSrcParentType(callee, dyExprE.GetMethodName(),
+                dyExprE.GetStoredVirMethodOffset())
+            dyExprE.ReplaceOperand(callee, expected)
+        }
+        for (group in expr.GetBlockGroups()) {
+            NormalizeDeserializedCallee(group)
+        }
+    }
+
+    private func NormalizeDeserializedCallee(group: BlockGroup): Unit {
+        for (block in group.GetBlocks()) {
+            for (expr in block.GetExpressions()) {
+                ReplaceDeserializedDispatchCallee(expr)
+            }
+        }
+    }
+
     public func UpdateFuncCall(): Unit {
         try (recorder = ProfileRecorder(passName, "UpdateFuncCall")) {
+            for (fn in pkg.GetGlobalFuncsWithBody()) {
+                if (!fn.TestAttr(Attribute.DESERIALIZED)) {
+                    continue
+                }
+                if (let Some(body) <- fn.GetBody()) {
+                    NormalizeDeserializedCallee(body)
+                }
+            }
             for (fn in pkg.GetGlobalFuncsWithBody()) {
                 if (let Some(body) <- fn.GetBody()) {
                     VisitBlockGroup(body)

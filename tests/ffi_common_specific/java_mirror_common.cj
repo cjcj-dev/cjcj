@@ -1,0 +1,2 @@
+@JavaMirror
+common class JM {}

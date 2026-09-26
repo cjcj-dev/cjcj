@@ -2,32 +2,6 @@ package cjcj::sema.NativeFFI.ObjC
 
 import std.collection.ArrayList
 
-// C++ src/Sema/NativeFFI/ObjC/Utils/Handler.h:21-27.
-public enum InteropType {
-    | NA
-    | ObjC_Mirror
-    | CJ_Mapping
-    | CJ_Mapping_Interface
-    | Fwd_Class
-}
-
-extend InteropType <: Equatable<InteropType> {
-    public operator func ==(right: InteropType): Bool {
-        return match ((this, right)) {
-            case (InteropType.NA, InteropType.NA) => true
-            case (InteropType.ObjC_Mirror, InteropType.ObjC_Mirror) => true
-            case (InteropType.CJ_Mapping, InteropType.CJ_Mapping) => true
-            case (InteropType.CJ_Mapping_Interface, InteropType.CJ_Mapping_Interface) => true
-            case (InteropType.Fwd_Class, InteropType.Fwd_Class) => true
-            case _ => false
-        }
-    }
-
-    public operator func !=(right: InteropType): Bool {
-        return !(this == right)
-    }
-}
-
 // C++ src/Sema/NativeFFI/ObjC/Utils/Handler.h:33-48.
 // C++ uses CRTP to dispatch Handle to DerivedT::HandleImpl. Cangjie has no generic parameter packs;
 // CPP_TO_CJ_TRANSLATION.md requires the protocol default below and the ordered handler table beneath it.

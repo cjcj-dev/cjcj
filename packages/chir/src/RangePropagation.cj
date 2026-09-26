@@ -101,7 +101,7 @@ public class RangePropagation {
                         return
                     }
                 } else if ((exprType.IsInteger() || exprType.IsBoolean()) &&
-                    (expr.IsLoad() || expr.IsTypeCast() || expr.IsField())) {
+                    (expr.IsLoad() || expr.IsNumericCast() || expr.IsField())) {
                     if (let Some(absVal) <- state.CheckAbstractValue(exprResult)) {
                         if (!exprType.IsString()) {
                             toBeRewrited.add(RangePropagationRewriteInfo(expr, index,
@@ -117,7 +117,7 @@ public class RangePropagation {
                     }
                 }
             },
-            { _: RangeDomain, terminator: Terminator, targetSucc: Option<Block> =>
+            { _: RangeDomain, terminator: Expression, targetSucc: Option<Block> =>
                 match (terminator.GetExprKind()) {
                     case ExprKind.BRANCH | ExprKind.MULTIBRANCH =>
                         if (let Some(target) <- targetSucc) {
@@ -168,7 +168,7 @@ public class RangePropagation {
     }
 
     // C++ RangePropagation.cpp:157-173.
-    private func RewriteBranchTerminator(branch: Terminator, targetSucc: Block, isDebug: Bool): Unit {
+    private func RewriteBranchTerminator(branch: Expression, targetSucc: Block, isDebug: Bool): Unit {
         let parentBlock = branch.GetParentBlock().getOrThrow()
         branch.RemoveSelfFromBlock()
         let createdExpression174 = builder.CreateGoTo(targetSucc, parentBlock)
