@@ -1,10 +1,11 @@
 package cjcj::compiler_unittest
 
 import cjcj::frontend.*
+import std.env.getVariable
 import std.unittest.*
 import std.unittest.testmacro.*
 
-private let CONDITIONAL_COMPILATION_PROJECT_PATH: String = "/root/cj_build/cangjie_compiler"
+private let CONDITIONAL_COMPILATION_PROJECT_PATH: String = getVariable("PROJECT_SOURCE_DIR") ?? "."
 
 @When[os == "Windows"]
 private let CONDITIONAL_COMPILATION_SRC_PATH: String =
