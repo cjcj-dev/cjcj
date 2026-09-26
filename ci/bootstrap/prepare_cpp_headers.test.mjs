@@ -70,3 +70,24 @@ test('prepare_cpp_headers takes the compiler identity from ci/llvm_pin.env only'
     'the stage chain compiler identity must be defined in exactly one pin file');
   assert.match(text, /pin\.CANGJIE_COMPILER_SHA/);
 });
+
+test('every stage-chain site that names the compiler source names the same pin', () => {
+  // The tree prepare_cpp_headers gates is fetched by these sites. If one of them
+  // still asks for a different commit, the gate refuses a tree the chain just
+  // produced, and the header build never runs.
+  const sites = [
+    'ci/srcbuild/steps/verify-source-pins.mjs',
+    'ci/bootstrap/test_cpp_headers.sh',
+    'tools/srcbuild_kkk2.sh',
+  ];
+  for (const site of sites) {
+    const text = fs.readFileSync(path.join(repoRoot, site), 'utf8');
+    const used = text.split('\n').map((line, index) => `${site}:${index + 1}:${line}`)
+      .filter(entry => /CANGJIE_COMPILER_(SHA|URL)|COMPILER_REF|COMPILER_SRC_URL/.test(entry));
+    assert.ok(used.length > 0, `${site} names no compiler source pin`);
+    for (const entry of used) {
+      assert.doesNotMatch(entry, /\bCOMPILER_(REF|SRC_URL)\b/, `${entry} still uses the other pin`);
+    }
+    console.log(`COMPILER_SOURCE_SITE_OK site=${site} lines=${used.length}`);
+  }
+});
