@@ -263,7 +263,7 @@ Compiler cache:
   CJCJ_SRCBUILD_CCACHE=0 disables the ccache fallback.
 
 Final source-build steps:
-  32  Build stage 2 compiler (cjpm build -j 1, cjHeapSize=20GB)
+  32  Build stage 2 compiler (cjpm host heap capped by build_resources.sh)
   33  Build stage 3 compiler and final std
 
 --dry-run validates referenced step scripts and their command contracts, then
@@ -1262,7 +1262,7 @@ declare -Ar STEP_NAMES=(
     [29]='Build compiler shim'
     [30]='Inject selfhost compiler version'
     [31]='Bootstrap stage0 (cjpm -O1)'
-    [32]='Bootstrap stage1 (cjpm -j1 cjHeapSize=20GB)'
+    [32]='Bootstrap stage1 (cjpm -j1, resource-limited host heap)'
     [33]='Build stage 3 compiler and final std'
     [34]='Compose self-hosted SDK'
     [35]='Archive final compiler handoff'
