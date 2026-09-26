@@ -548,7 +548,7 @@ if [ -n "$RUNTIME" ]; then
         die "runtime shared alias 替换失败: $dst"
       fi
       same_sha "$d/$base" "$dst" || die "runtime shared alias sha256 不一致: $dst"
-      echo "  [runtime-shared] ${d#$TO/}/$base -> ${dst#$TO/}"
+      echo "  [runtime-shared] ${d#"$TO"/}/$base -> ${dst#"$TO"/}"
     done
   fi
 fi

@@ -108,13 +108,12 @@ if [ "$skip_fetch_sources" = 0 ]; then
     mkdir -p "$tuple"
     (
         set -euo pipefail
+        unset CJCJ_SRCBUILD_SOURCE_MIRRORS CJCJ_SRCBUILD_REQUIRE_MIRRORS
         export TUPLE_ROOT=$tuple
         export LLVM_URL="file://$llvm_bare" LLVM_SHA=$llvm_sha
         export CANGJIE_COMPILER_URL="file://$compiler_bare" CANGJIE_COMPILER_SHA=$compiler_sha
         export FLATBUFFERS_URL="file://$flatbuffers_bare" FLATBUFFERS_SHA=$flatbuffers_sha
-        export GIT_TRACE=$work/sources.trace
-        env -u CJCJ_SRCBUILD_SOURCE_MIRRORS -u CJCJ_SRCBUILD_REQUIRE_MIRRORS \
-            "$BASH" "$fetch_sources"
+        GIT_TRACE=$work/sources.trace "$BASH" "$fetch_sources"
     ) >"$work/sources.out" 2>"$work/sources.err"
     sources_rc=$?
     echo "ASSERT_REACHED name=fetch_sources_head"
