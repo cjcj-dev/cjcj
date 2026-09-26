@@ -77,22 +77,7 @@ jobs:
           grep -E ' _{1,2}ZTIN4llvm2cl6OptionE(@@?[^[:space:]]+)?$' host-artifact/defined-symbols.txt
           c++filt < host-artifact/defined-symbols.txt > host-artifact/demangled-symbols.txt
           grep -F 'llvm::SelectionDAGBuilder::visitRelocate(' host-artifact/demangled-symbols.txt
-          python3 - <<'PY'
-          import hashlib, json, os
-          from pathlib import Path
-          root = Path('host-artifact')
-          symbols = (root / 'demangled-symbols.txt').read_text()
-          if 'llvm::isCJTypedReadHelperCandidate(' in symbols:
-              raise SystemExit('HOST_LLVM_COLOUR_SYMBOL_PRESENT')
-          library = root / os.environ['HOST_LLVM_LIBRARY']
-          digest = hashlib.sha256(library.read_bytes()).hexdigest()
-          record = dict(source_sha=os.environ['HOST_LLVM_SOURCE_SHA'],
-                        run_id=os.environ['GITHUB_RUN_ID'], run_attempt=os.environ['GITHUB_RUN_ATTEMPT'],
-                        producer_sha=os.environ['GITHUB_SHA'], platform=os.environ['HOST_LLVM_PLATFORM'], sha256=digest)
-          (root / 'manifest.json').write_text(json.dumps(record, indent=2) + '\n')
-          (root / 'SHA256SUMS').write_text(digest + '  ' + library.name + '\n')
-          print(json.dumps(record))
-          PY
+          python3 ci/release/record_host_llvm.py host-artifact
       - uses: actions/upload-artifact@v7
         id: artifact
         with:

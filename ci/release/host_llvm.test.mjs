@@ -124,3 +124,22 @@ test('workflow supplies the target and downloads pinned host LLVM for every cell
   }
   assert.ok(workflow.includes('node ci/release/prepare_bootstrap_inputs.mjs'));
 });
+
+for (const target of ['linux-x64', 'linux-aarch64', 'darwin-arm64', 'darwin-x64']) {
+  test(`producer ${target} records actual digest and source identity for consumer`, () => fixture(({env, run}) => {
+    const root = env.CJCJ_BOOTSTRAP_HOST_LLVM_ARTIFACT;
+    const expected = JSON.parse(fs.readFileSync(path.join(root, 'manifest.json')));
+    fs.writeFileSync(path.join(root, 'demangled-symbols.txt'), '');
+    const producer = spawnSync('python3', [new URL('./record_host_llvm.py', import.meta.url).pathname, root], {
+      env: {...env, HOST_LLVM_SOURCE_SHA: expected.source_sha, HOST_LLVM_PLATFORM: expected.platform,
+        HOST_LLVM_LIBRARY: target.startsWith('darwin-') ? 'libLLVM.dylib' : 'libLLVM-15.so',
+        GITHUB_RUN_ID: expected.run_id, GITHUB_RUN_ATTEMPT: expected.run_attempt, GITHUB_SHA: expected.producer_sha}, encoding: 'utf8'});
+    assert.equal(producer.status, 0, producer.stderr);
+    const result = run();
+    assert.equal(result.status, 0, result.stderr);
+    const output = /^CJCJ_BOOTSTRAP_HOST_LLVM_SO=(.+)$/m.exec(result.stdout)?.[1];
+    assert.ok(output, result.stdout);
+    assert.equal(crypto.createHash('sha256').update(fs.readFileSync(output)).digest('hex'), expected.sha256);
+    console.log(`ASSERT producer target=${target} manifest accepted and bytes exported`);
+  }, target));
+}
