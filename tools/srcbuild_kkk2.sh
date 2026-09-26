@@ -370,9 +370,8 @@ if ((JOBS_EXPLICIT == 0)); then JOBS=$CPUSET_WIDTH; fi
 }
 [[ $FROM_STEP =~ ^[0-9]+$ ]] || { echo "from-step must be an integer" >&2; exit 2; }
 [[ $THROUGH_STEP =~ ^[0-9]+$ ]] || { echo "through-step must be an integer" >&2; exit 2; }
-((FROM_STEP >= 1 && FROM_STEP <= 36)) || { echo "from-step must be in 1..36" >&2; exit 2; }
-((THROUGH_STEP >= 2 && THROUGH_STEP <= 36)) || { echo "through-step must be in 2..36" >&2; exit 2; }
-((FROM_STEP <= THROUGH_STEP)) || { echo "from-step must not exceed through-step" >&2; exit 2; }
+((FROM_STEP >= 1 && FROM_STEP <= 37)) || { echo "from-step must be in 1..37" >&2; exit 2; }
+((THROUGH_STEP >= 2 && THROUGH_STEP <= 37)) || { echo "through-step must be in 2..37" >&2; exit 2; }
 if ((FROM_STEP == 1)); then FROM_STEP=2; fi
 validate_dag_range "$FROM_STEP" "$THROUGH_STEP" || exit $?
 validate_verifier_report_request "$VERIFIER_REPORT" "$FROM_STEP" "$THROUGH_STEP" || exit $?
@@ -1387,6 +1386,9 @@ print_dry_step() {
         33)
             printf 'DRY_RUN ENV CJCJ_STAGE3_STDLIB_BUILD_TYPE=%s cjHeapSwap=on\n' "$BUILD_TYPE"
             printf 'DRY_RUN COMMAND=npx --yes zx@8 %q\n' "$STAGE3_STEP_SCRIPT"
+            ;;
+        37)
+            printf 'DRY_RUN COMMAND=CJCJ_SRCBUILD_CONSUMER_SDK=%q/software/cangjie build_cli build canonical-workloads\n' "$CANGJIE_WORKSPACE"
             ;;
         34)
             printf 'DRY_RUN COMMAND=npx --yes zx@8 %q\n' "$REPO_ROOT/ci/srcbuild/steps/compose-sdk.mjs"

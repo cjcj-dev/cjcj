@@ -1227,3 +1227,18 @@ test('bootstrap driver matching pins starts real stage0 and sdk_build', t => {
   assert.match(result.stdout, /STEP=31 .* rc=1 /);
   assert.doesNotMatch(result.stdout, /RESULT=success/);
 });
+
+
+test('complete driver admits canonical step 37 and checks its producer registration', t => {
+  const fixture = bootstrapDriverFixture(t);
+  const green = fixture.dryRun(37, 'canonical-green');
+  assert.equal(green.status, 0, green.stdout + green.stderr);
+  assert.match(green.stdout, /DRY_RUN COMMAND=.*build_cli build canonical-workloads/);
+  assert.match(green.stdout, /DRY_RUN RESULT=success through_step=37/);
+  const driver = path.join(fixture.root, 'tools/srcbuild_kkk2.sh');
+  const contents = fs.readFileSync(driver, 'utf8');
+  fs.writeFileSync(driver, contents.replace('build_cli build canonical-workloads', 'build_cli build stdx'));
+  const cut = fixture.dryRun(37, 'canonical-cut');
+  assert.equal(cut.status, 1, cut.stdout + cut.stderr);
+  assert.match(cut.stderr, /step_37 does not invoke canonical workload producer/);
+});
