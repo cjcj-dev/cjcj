@@ -59,11 +59,16 @@ export function planMatrix(requested) {
   const packages = [];
   const blocked = [];
   const excluded = [];
+  const prerequisites = new Map();
   for (const key of selected) {
     const readiness = releasePlatformReadiness(key);
     if (readiness.status === 'excluded') {
       excluded.push({release_key: key, reason: readiness.reasons[0]});
       continue;
+    }
+    for (const requirement of getReleasePlatform(key).requires) {
+      const id = `${readiness.runner}-${requirement}`;
+      if (!prerequisites.has(id)) prerequisites.set(id, {runner: readiness.runner, requirement});
     }
     if (readiness.status === 'blocked') {
       blocked.push({release_key: key, runner: readiness.runner, reasons: readiness.reasons.join(' | ')});
@@ -99,6 +104,7 @@ export function planMatrix(requested) {
     package: packages,
     blocked,
     excluded,
+    prerequisites: [...prerequisites.values()],
     windowsSide,
   });
 }
@@ -204,6 +210,8 @@ function writeOutputs(file, plan) {
     `source_matrix=${JSON.stringify({include: plan.source})}`,
     `package_matrix=${JSON.stringify({include: plan.package})}`,
     `blocked_matrix=${JSON.stringify({include: plan.blocked})}`,
+    `prerequisite_matrix=${JSON.stringify({include: plan.prerequisites})}`,
+    `has_prerequisites=${plan.prerequisites.length > 0}`,
     `excluded=${plan.excluded.map(entry => entry.release_key).join(',')}`,
     `package_keys=${plan.package.map(row => row.platform).join(',')}`,
     `has_source=${plan.source.length > 0}`,

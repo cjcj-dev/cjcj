@@ -1,0 +1,51 @@
+#!/usr/bin/env node
+// Real-input acceptance: invoke the installed SDK probe, then disconnect its
+// producer and exit-status consumer in private source copies. No SDK is changed.
+import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import {spawnSync} from 'node:child_process';
+import {RELEASE_REQUIREMENTS} from '../../build/lib/targets.mjs';
+
+const [requirement, destination] = process.argv.slice(2);
+assert.ok(Object.hasOwn(RELEASE_REQUIREMENTS, requirement), 'known SDK requirement');
+assert.ok(destination, 'evidence directory required');
+const root = path.resolve(import.meta.dirname, '../..');
+const evidence = path.resolve(destination);
+fs.mkdirSync(evidence, {recursive: true});
+const original = fs.readFileSync(path.join(root, 'ci/release/platform-matrix.mjs'), 'utf8');
+const producer = requirement === 'xcode-ios'
+  ? "return {present: true, detail: found.join(', ')};"
+  : 'return {present: true, detail: `${variable}=${root}`};';
+const consumer = 'return result.present ? 0 : 1;';
+assert.ok(original.includes(producer), 'producer cut must match the product source');
+assert.ok(original.includes(consumer), 'consumer cut must match the product source');
+const arms = {
+  candidate: original,
+  'cut-producer': original.replace(producer, producer.replace('present: true', 'present: false')),
+  'cut-consumer': original.replace(consumer, 'return result.present ? 1 : 0;'),
+  restored: original,
+};
+const results = [];
+for (const [arm, source] of Object.entries(arms)) {
+  const tree = path.join(evidence, arm);
+  fs.mkdirSync(path.join(tree, 'ci/release'), {recursive: true});
+  fs.cpSync(path.join(root, 'build/lib'), path.join(tree, 'build/lib'), {recursive: true});
+  const script = path.join(tree, 'ci/release/platform-matrix.mjs');
+  fs.writeFileSync(script, source);
+  const run = spawnSync(process.execPath, [script, 'probe', '--requirement', requirement], {encoding: 'utf8', env: process.env});
+  fs.writeFileSync(path.join(tree, 'output.log'), `${run.stdout ?? ''}${run.stderr ?? ''}`);
+  const expected = arm.startsWith('cut-') ? 1 : 0;
+  const record = {arm, requirement, sha256: createHash('sha256').update(source).digest('hex'), rc: run.status, expected};
+  results.push(record);
+  fs.writeFileSync(path.join(evidence, 'results.json'), `${JSON.stringify(results, null, 2)}\n`);
+  // Emit the actual product result before asserting, so an earlier setup error
+  // cannot be mistaken for reaching this capability assertion.
+  console.log(JSON.stringify({...record, stdout: run.stdout, stderr: run.stderr}));
+  assert.equal(run.status, expected, `${arm}: target capability exit status`);
+  assert.match(run.stdout, new RegExp(`^${arm === 'cut-producer' ? 'MISSING' : 'PRESENT'} ${requirement}:`), `${arm}: target capability result`);
+}
+assert.equal(results[0].sha256, results[3].sha256);
+for (const cut of results.slice(1, 3)) assert.notEqual(cut.sha256, results[0].sha256);
+console.log(`SDK_PROBE_CAUSAL_CHECK requirement=${requirement} arms=${results.length}`);

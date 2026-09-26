@@ -5,6 +5,7 @@ import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import test from 'node:test';
 import {checkPlatform, planMatrix, probeRequirement, runnerHost, selectPlatforms} from './platform-matrix.mjs';
+import {allReleasePlatforms, getReleasePlatform} from '../../build/lib/targets.mjs';
 
 const script = path.resolve(import.meta.dirname, 'platform-matrix.mjs');
 const run = args => spawnSync(process.execPath, [script, ...args], {encoding: 'utf8'});
@@ -29,6 +30,29 @@ test('probe CLI reports SDK capability independently of blocked cross-build read
 test('probe CLI refuses absent and unknown requirement names', () => {
   assert.equal(run(['probe']).status, 2);
   assert.equal(run(['probe', '--requirement', 'unknown-sdk']).status, 2);
+});
+
+test('SDK input jobs cover the selected runner/requirement pairs and exclude abandoned ARM32', () => {
+  const expected = new Set(allReleasePlatforms().filter(key => !getReleasePlatform(key).excluded)
+    .flatMap(key => {
+      const platform = getReleasePlatform(key);
+      return platform.requires.map(requirement => `${platform.runner}/${requirement}`);
+    }));
+  const actual = planMatrix('all').prerequisites.map(row => `${row.runner}/${row.requirement}`);
+  assert.deepEqual(new Set(actual), expected);
+  assert.equal(actual.length, expected.size, 'shared runner SDKs install once');
+  assert.deepEqual(planMatrix('win32-x64-ohos-arm32').prerequisites, []);
+  assert.deepEqual(planMatrix('linux-x64-android').prerequisites,
+    [{runner: 'ubuntu-24.04', requirement: 'android-ndk'}]);
+});
+
+test('phased release source and package sets equal the buildable matrix', () => {
+  const workflow = fs.readFileSync(path.resolve(import.meta.dirname, '../../.github/workflows/release.yml'), 'utf8');
+  const source = [...workflow.matchAll(/^      targets: (\S+)$/gm)].map(match => match[1]);
+  const packages = [...workflow.matchAll(/^      platform: (\S+)$/gm)].map(match => match[1]);
+  const plan = planMatrix('all');
+  assert.deepEqual(source.sort(), plan.source.map(row => row.target).sort(), 'source symmetric difference');
+  assert.deepEqual(packages.sort(), plan.package.map(row => row.platform).sort(), 'package symmetric difference');
 });
 
 test('plan for all fourteen platforms: four source cells, five packages, eight blocked, one excluded', () => {
@@ -141,6 +165,9 @@ test('the CLI writes GITHUB_OUTPUT lines the workflow fans out over', () => {
   assert.equal(lines.package_keys, 'linux-x64');
   assert.equal(lines.has_source, 'true');
   assert.equal(lines.has_blocked, 'true');
+  assert.equal(lines.has_prerequisites, 'true');
+  assert.deepEqual(JSON.parse(lines.prerequisite_matrix).include,
+    [{runner: 'ubuntu-24.04', requirement: 'android-ndk'}]);
   assert.equal(lines.windows_side, 'false');
   const bad = run(['plan', '--platforms', 'plan9']);
   assert.equal(bad.status, 2);
