@@ -43,7 +43,7 @@ def main():
               'uptime_before': subprocess.check_output(['uptime'], text=True).strip()}
     start = time.monotonic()
     with (args.out / 'compile.log').open('w') as log:
-        run = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, timeout=600)
+        run = subprocess.run(command, cwd=args.out.resolve(), stdout=log, stderr=subprocess.STDOUT, timeout=600)
     result.update(compile_rc=run.returncode, wall=time.monotonic() - start,
                   uptime_after=subprocess.check_output(['uptime'], text=True).strip(), assertions=[])
     if run.returncode == 0:
