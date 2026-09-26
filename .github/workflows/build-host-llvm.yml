@@ -5,7 +5,21 @@ permissions:
   contents: read
 jobs:
   host:
-    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {runner: ubuntu-22.04, platform: linux_x86_64, library: libLLVM-15.so}
+          - {runner: ubuntu-24.04-arm, platform: linux_aarch64, library: libLLVM-15.so}
+          - {runner: macos-15, platform: darwin_aarch64, library: libLLVM.dylib}
+          - {runner: macos-15-intel, platform: darwin_x86_64, library: libLLVM.dylib}
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      HOST_LLVM_PLATFORM: ${{ matrix.platform }}
+      HOST_LLVM_LIBRARY: ${{ matrix.library }}
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v7
@@ -18,15 +32,20 @@ jobs:
       - uses: ./.github/actions/sccache
         with:
           component: host-llvm
-          platform: linux_x86_64
+          platform: ${{ matrix.platform }}
           pin: ${{ steps.pin.outputs.sha }}
           cache-size: 3G
       - name: Build host shared library from fixed source
         run: |
           set -euo pipefail
           ulimit -c 0
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq clang cmake ninja-build
+          if [ "$RUNNER_OS" = Linux ]; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq clang cmake ninja-build
+            jobs=$(nproc)
+          else
+            jobs=$(sysctl -n hw.logicalcpu)
+          fi
           git init host-source
           git -C host-source remote add origin "$HOST_LLVM_URL"
           git -C host-source fetch --depth=1 origin "$HOST_LLVM_SOURCE_SHA"
@@ -42,14 +61,18 @@ jobs:
             -DBUILD_SHARED_LIBS=OFF -DLLVM_BUILD_LLVM_DYLIB=ON -DLLVM_LINK_LLVM_DYLIB=ON \
             -DLLVM_TARGETS_TO_BUILD='X86;ARM;AArch64' -DLLVM_ENABLE_PROJECTS='' \
             -DCMAKE_CXX_FLAGS='-include cstdint -include unordered_map -include map -include vector -include string'
-          echo "HOST_LLVM_BUILD_JOBS=$(nproc)"
-          cmake --build host-build --target LLVM -j"$(nproc)"
+          echo "HOST_LLVM_BUILD_JOBS=$jobs"
+          cmake --build host-build --target LLVM -j"$jobs"
           mkdir -p host-artifact
-          cp -L host-build/lib/libLLVM-15.so host-artifact/libLLVM-15.so
-          nm --defined-only host-artifact/libLLVM-15.so > host-artifact/defined-symbols.txt
+          cp -L "host-build/lib/$HOST_LLVM_LIBRARY" "host-artifact/$HOST_LLVM_LIBRARY"
+          if [ "$RUNNER_OS" = Linux ]; then
+            nm --defined-only "host-artifact/$HOST_LLVM_LIBRARY" > host-artifact/defined-symbols.txt
+          else
+            nm -U "host-artifact/$HOST_LLVM_LIBRARY" > host-artifact/defined-symbols.txt
+          fi
           # The official host llc imports this RTTI symbol. Colour-dylib flags
           # cannot be reused for the official host ABI.
-          grep -E ' _ZTIN4llvm2cl6OptionE(@@?[^[:space:]]+)?$' host-artifact/defined-symbols.txt
+          grep -E ' _{1,2}ZTIN4llvm2cl6OptionE(@@?[^[:space:]]+)?$' host-artifact/defined-symbols.txt
           c++filt < host-artifact/defined-symbols.txt > host-artifact/demangled-symbols.txt
           grep -F 'llvm::SelectionDAGBuilder::visitRelocate(' host-artifact/demangled-symbols.txt
           python3 - <<'PY'
@@ -59,19 +82,19 @@ jobs:
           symbols = (root / 'demangled-symbols.txt').read_text()
           if 'llvm::isCJTypedReadHelperCandidate(' in symbols:
               raise SystemExit('HOST_LLVM_COLOUR_SYMBOL_PRESENT')
-          library = root / 'libLLVM-15.so'
+          library = root / os.environ['HOST_LLVM_LIBRARY']
           digest = hashlib.sha256(library.read_bytes()).hexdigest()
           record = dict(source_sha=os.environ['HOST_LLVM_SOURCE_SHA'],
                         run_id=os.environ['GITHUB_RUN_ID'], run_attempt=os.environ['GITHUB_RUN_ATTEMPT'],
-                        producer_sha=os.environ['GITHUB_SHA'], platform='linux_x86_64', sha256=digest)
+                        producer_sha=os.environ['GITHUB_SHA'], platform=os.environ['HOST_LLVM_PLATFORM'], sha256=digest)
           (root / 'manifest.json').write_text(json.dumps(record, indent=2) + '\n')
-          (root / 'SHA256SUMS').write_text(digest + '  libLLVM-15.so\n')
+          (root / 'SHA256SUMS').write_text(digest + '  ' + library.name + '\n')
           print(json.dumps(record))
           PY
       - uses: actions/upload-artifact@v7
         id: artifact
         with:
-          name: host-llvm-linux_x86_64
+          name: host-llvm-${{ matrix.platform }}
           path: host-artifact
           if-no-files-found: error
           retention-days: 90
@@ -83,5 +106,5 @@ jobs:
         if: always()
         with:
           component: host-llvm
-          platform: linux_x86_64
+          platform: ${{ matrix.platform }}
           require-compiles: ${{ job.status == 'success' }}
