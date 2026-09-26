@@ -5,9 +5,10 @@ import cjcj::ast.*
 import cjcj::basic.{DiagKindRefactor, DiagnosticEngine}
 import cjcj::sema.TypeManager
 import cjcj::modules.SemaImportManager
-import cjcj::sema.NativeFFI.{CreateJavaRefCall, CreateSuperCall, CreateThisRef, GetJavaFQName,
-    GetJavaImplRegistryCompanionConstructor, GetJavaMirrorWrappingConstructor, GetJavaRefField, InteropLibBridge,
-    IsSuperConstructorCall, JAVA_IMPL_ENTITY_ARG_NAME_IN_GENERATED_CTOR, Utils, WithinFile, WrapReturningLambdaExpr}
+import cjcj::sema.NativeFFI.{CreateJavaRefCall, CreateMirrorConstructorCall, CreateSuperCall, CreateThisRef,
+    GetJavaFQName, GetJavaImplRegistryCompanionConstructor, GetJavaMirrorWrappingConstructor, GetJavaRefField,
+    InteropLibBridge, IsSuperConstructorCall, JAVA_IMPL_ENTITY_ARG_NAME_IN_GENERATED_CTOR, Utils, WithinFile,
+    WrapReturningLambdaExpr, WrapUnitLambdaExpr}
 import cjcj::utils.{CJC_ASSERT, CJC_ASSERT_WITH_MSG, CJC_NULLPTR_CHECK}
 
 public class GenerateJavaImplApiStub {
@@ -1122,14 +1123,315 @@ public class RewriteJavaImplReferenceWrapperFields {
 }
 
 public class GenerateNativeBridgeForJavaImpl {
+    private let typeManager: TypeManager
+    private let importManager: SemaImportManager
+    private let ilib: InteropLibBridge
+    private let jni: JniBridge
+
+    public init(typeManager: TypeManager, importManager: SemaImportManager, ilib: InteropLibBridge, jni: JniBridge) {
+        this.typeManager = typeManager
+        this.importManager = importManager
+        this.ilib = ilib
+        this.jni = jni
+    }
+
+    private func ConvertJavaCompatibleToCTypeParam(sample: FuncParam, curFile: File): FuncParam {
+        let jniTy = jni.ConvertCangjieToJniTy(sample.GetTy().getOrThrow())
+        return WithinFile<FuncParam>(CreateFuncParam(sample.identifier.Val(), None, None, Some(jniTy)), curFile)
+    }
+
+    private func ConvertJavaCompatibleToCTypeParams(sample: ArrayList<FuncParam>, curFile: File): ArrayList<FuncParam> {
+        let nativeParams = ArrayList<FuncParam>()
+        for (param in sample) {
+            nativeParams.add(ConvertJavaCompatibleToCTypeParam(param, curFile))
+        }
+        return nativeParams
+    }
+
+    private func UnwrapCTypeExprAsJavaCompatible(cexpr: Expr, javaCompatibleTy: Ty, outerDecl: Decl): Expr {
+        let cexprTy = cexpr.GetTy()
+        CJC_ASSERT(cexprTy.isSome() && !IsMirror(cexprTy.getOrThrow()) && !IsImpl(cexprTy.getOrThrow()))
+        if (IsMirror(javaCompatibleTy)) {
+            let entity = ilib.CreateJavaEntityJobjectCall(cexpr).getOrThrow()
+            return CreateMirrorConstructorCall(importManager, entity, javaCompatibleTy).getOrThrow()
+        }
+        if (IsImpl(javaCompatibleTy)) {
+            let entity = ilib.CreateJavaEntityJobjectCall(cexpr).getOrThrow()
+            return ilib.UnwrapJavaEntity(entity, javaCompatibleTy, outerDecl).getOrThrow()
+        }
+        if (javaCompatibleTy.IsCoreOptionType() && IsMirror(javaCompatibleTy.typeArgs[0])) {
+            let entity = ilib.CreateJavaEntityJobjectCall(cexpr).getOrThrow()
+            return ilib.UnwrapJavaEntity(entity, javaCompatibleTy, outerDecl).getOrThrow()
+        }
+        if (javaCompatibleTy.IsCoreOptionType() && IsImpl(javaCompatibleTy.typeArgs[0])) {
+            let entity = ilib.CreateJavaEntityJobjectCall(cexpr).getOrThrow()
+            return ilib.UnwrapJavaEntity(entity, javaCompatibleTy, outerDecl).getOrThrow()
+        }
+        if (javaCompatibleTy.IsString()) {
+            let entity = ilib.CreateJavaEntityJobjectCall(cexpr).getOrThrow()
+            return ilib.UnwrapJavaEntity(entity, javaCompatibleTy, outerDecl).getOrThrow()
+        }
+        if (javaCompatibleTy.IsCoreOptionType() && javaCompatibleTy.typeArgs[0].IsString()) {
+            let entity = ilib.CreateJavaEntityJobjectCall(cexpr).getOrThrow()
+            return ilib.UnwrapJavaEntity(entity, javaCompatibleTy, outerDecl).getOrThrow()
+        }
+        return cexpr
+    }
+
+    private func CreateConstructorBridge(refWrapperUserCtor: FuncDecl, refWrapperGeneratedCtor: FuncDecl,
+        registryCompanionCtor: FuncDecl, companion: ClassDecl): FuncDecl {
+        let curFile = companion.curFile.getOrThrow()
+        let userParams = refWrapperUserCtor.funcBody.getOrThrow().paramLists[0].params
+        let nativeFuncName = jni.GetJniInitCjObjectFuncName(refWrapperUserCtor, false)
+        return jni.CreateNativeJavaABIFunc(nativeFuncName, ConvertJavaCompatibleToCTypeParams(userParams, curFile),
+            TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT), curFile, companion.moduleName, companion.fullPackageName,
+            { f: FuncDecl, jniEnv: FuncParam, jobject: FuncParam, cTypeUserParams: ArrayList<FuncParam> =>
+                let body = f.funcBody.getOrThrow().body.getOrThrow().body
+                let refWrapperCtorArgs = ArrayList<FuncArg>()
+                let javaref = CreateTmpVarDecl()
+                body.add(javaref)
+                let entityTy = ilib.GetJavaEntityTy()
+                CJC_NULLPTR_CHECK(entityTy)
+                javaref.SetTy(entityTy.getOrThrow())
+                javaref.initializer = ilib.CreateJavaEntityJobjectCall(
+                    ilib.CreateSwapLocalWithGlobalRefCall(
+                        WithinFile<RefExpr>(CreateRefExpr(jniEnv), curFile),
+                        WithinFile<RefExpr>(CreateRefExpr(jobject), curFile)).getOrThrow())
+                refWrapperCtorArgs.add(CreateFuncArg(WithinFile<RefExpr>(CreateRefExpr(javaref), curFile)))
+                let regArgs = ArrayList<FuncArg>()
+                regArgs.add(CreateFuncArg(WithinFile<RefExpr>(CreateRefExpr(javaref), curFile)))
+                let regCall = CreateCallExpr(
+                    WithinFile<RefExpr>(CreateRefExpr(registryCompanionCtor), curFile), regArgs,
+                    Some(registryCompanionCtor), companion.GetTy(), CallKind.CALL_OBJECT_CREATION)
+                refWrapperCtorArgs.add(CreateFuncArg(WithinFile<CallExpr>(regCall, curFile)))
+                CJC_ASSERT(cTypeUserParams.size == userParams.size)
+                var idx: Int64 = 0
+                while (idx < userParams.size) {
+                    let userParam = userParams[idx]
+                    let ctypeParam = cTypeUserParams[idx]
+                    let userTy = userParam.GetTy().getOrThrow()
+                    if (IsMirror(userTy) || IsImpl(userTy) || userTy.IsCoreOptionType()) {
+                        let gref = CreateTmpVarDecl(None, None)
+                        gref.curFile = Some(curFile)
+                        let swap = ilib.CreateSwapLocalWithGlobalRefCall(
+                            WithinFile<RefExpr>(CreateRefExpr(jniEnv), curFile),
+                            WithinFile<RefExpr>(CreateRefExpr(ctypeParam), curFile)).getOrThrow()
+                        gref.initializer = Some(swap)
+                        if (let Some(ty) <- swap.GetTy()) {
+                            gref.SetTy(ty)
+                        }
+                        body.add(gref)
+                        refWrapperCtorArgs.add(CreateFuncArg(UnwrapCTypeExprAsJavaCompatible(
+                            WithinFile<RefExpr>(CreateRefExpr(gref), curFile), userTy, companion)))
+                    } else {
+                        refWrapperCtorArgs.add(CreateFuncArg(UnwrapCTypeExprAsJavaCompatible(
+                            WithinFile<RefExpr>(CreateRefExpr(ctypeParam), curFile), userTy, companion)))
+                    }
+                    idx = idx + 1
+                }
+                let refWrapper = refWrapperUserCtor.outerDecl.getOrThrow()
+                let refWrapperCtorCall = CreateCallExpr(
+                    WithinFile<RefExpr>(CreateRefExpr(refWrapperGeneratedCtor), curFile), refWrapperCtorArgs,
+                    Some(refWrapperGeneratedCtor), refWrapper.GetTy(), CallKind.CALL_OBJECT_CREATION)
+                let ctorNodes = ArrayList<Node>()
+                ctorNodes.add(refWrapperCtorCall)
+                body.add(ilib.WrapExceptionHandling(WithinFile<RefExpr>(CreateRefExpr(jniEnv), curFile),
+                    WrapUnitLambdaExpr(typeManager, ctorNodes)))
+            })
+    }
+
+    private func CreateMethodBridge(ctx: AfterTypeCheckContext, refWrapperFunc: FuncDecl,
+        companion: ClassDecl): FuncDecl {
+        if (refWrapperFunc.TestAttr(Attribute.STATIC)) {
+            return CreateStaticMethodBridge(refWrapperFunc, companion)
+        }
+        return CreateInstanceMethodBridge(ctx, refWrapperFunc, companion)
+    }
+
+    private func CreateInstanceMethodBridge(ctx: AfterTypeCheckContext, refWrapperFunc: FuncDecl,
+        companion: ClassDecl): FuncDecl {
+        let curFile = companion.curFile.getOrThrow()
+        let funcTy = (refWrapperFunc.GetTy().getOrThrow() as FuncTy).getOrThrow()
+        let retTy = funcTy.retTy
+        let userParams = refWrapperFunc.funcBody.getOrThrow().paramLists[0].params
+        let ctypeParams = ConvertJavaCompatibleToCTypeParams(userParams, curFile)
+        ctypeParams.add(jni.CreateRegistryIdParam(), at: 0)
+        let nativeFuncName = jni.GetJniMethodName(refWrapperFunc)
+        return jni.CreateNativeJavaABIFunc(nativeFuncName, ctypeParams, jni.ConvertCangjieToJniTy(retTy), curFile,
+            refWrapperFunc.moduleName, refWrapperFunc.fullPackageName,
+            { f: FuncDecl, jniEnv: FuncParam, obj: FuncParam, ctypeUserParams: ArrayList<FuncParam> =>
+                let body = f.funcBody.getOrThrow().body.getOrThrow().body
+                let registryIdParam = ctypeUserParams[0]
+                CJC_ASSERT(refWrapperFunc.outerDecl.isSome() && (refWrapperFunc.outerDecl.getOrThrow() as ClassDecl).isSome())
+                let refWrapper = (refWrapperFunc.outerDecl.getOrThrow() as ClassDecl).getOrThrow()
+                let methodCallArgs = ArrayList<FuncArg>()
+                CJC_ASSERT(ctypeUserParams.size == userParams.size + 1)
+                var idx: Int64 = 0
+                while (idx < userParams.size) {
+                    let userParam = userParams[idx]
+                    let ctypeParam = ctypeUserParams[idx + 1]
+                    let userTy = userParam.GetTy().getOrThrow()
+                    if (IsMirror(userTy) || IsImpl(userTy) || userTy.IsCoreOptionType()) {
+                        let gref = CreateTmpVarDecl(None, None)
+                        gref.curFile = Some(curFile)
+                        let swap = ilib.CreateSwapLocalWithGlobalRefCall(
+                            WithinFile<RefExpr>(CreateRefExpr(jniEnv), curFile),
+                            WithinFile<RefExpr>(CreateRefExpr(ctypeParam), curFile)).getOrThrow()
+                        gref.initializer = Some(swap)
+                        if (let Some(ty) <- swap.GetTy()) {
+                            gref.SetTy(ty)
+                        }
+                        body.add(gref)
+                        methodCallArgs.add(CreateFuncArg(UnwrapCTypeExprAsJavaCompatible(
+                            WithinFile<RefExpr>(CreateRefExpr(gref), curFile), userTy, companion)))
+                    } else {
+                        methodCallArgs.add(CreateFuncArg(UnwrapCTypeExprAsJavaCompatible(
+                            WithinFile<RefExpr>(CreateRefExpr(ctypeParam), curFile), userTy, companion)))
+                    }
+                    idx = idx + 1
+                }
+                let ctor = ctx.GetJavaImplWrappingConstructor(refWrapper)
+                CJC_NULLPTR_CHECK(ctor)
+                let refWrapperCtorArgs = ArrayList<FuncArg>()
+                refWrapperCtorArgs.add(CreateFuncArg(ilib.CreateJavaEntityJobjectCall(
+                    ilib.CreateSwapLocalWithGlobalRefCall(
+                        WithinFile<RefExpr>(CreateRefExpr(jniEnv), curFile),
+                        WithinFile<RefExpr>(CreateRefExpr(obj), curFile)).getOrThrow()).getOrThrow()))
+                refWrapperCtorArgs.add(CreateFuncArg(WithinFile<RefExpr>(CreateRefExpr(registryIdParam), curFile)))
+                let refWrapperCtorCall = CreateCallExpr(
+                    WithinFile<RefExpr>(CreateRefExpr(ctor.getOrThrow()), curFile), refWrapperCtorArgs, ctor,
+                    refWrapper.GetTy(), CallKind.CALL_OBJECT_CREATION)
+                let methodAccess = CreateMemberAccess(refWrapperCtorCall, refWrapperFunc)
+                methodAccess.curFile = Some(curFile)
+                let methodCall = CreateCallExpr(methodAccess, methodCallArgs, Some(refWrapperFunc), Some(retTy),
+                    CallKind.CALL_DECLARED_FUNCTION)
+                let methodCallRes = CreateTmpVarDecl(None, Some(methodCall))
+                methodCallRes.SetTy(retTy)
+                let retExpr = ilib.UnwrapJavaEntity(
+                    ilib.WrapJavaEntity(WithinFile<RefExpr>(CreateRefExpr(methodCallRes), curFile)).getOrThrow(),
+                    jni.ConvertCangjieToJniTy(retTy), refWrapperFunc.outerDecl.getOrThrow(), toRaw: true).getOrThrow()
+                let nodes = ArrayList<Node>()
+                nodes.add(methodCallRes)
+                nodes.add(retExpr)
+                body.add(ilib.WrapExceptionHandling(WithinFile<RefExpr>(CreateRefExpr(jniEnv), curFile),
+                    WrapReturningLambdaExpr(typeManager, nodes)))
+            })
+    }
+
+    private func CreateStaticMethodBridge(refWrapperFunc: FuncDecl, companion: ClassDecl): FuncDecl {
+        let curFile = companion.curFile.getOrThrow()
+        let funcTy = (refWrapperFunc.GetTy().getOrThrow() as FuncTy).getOrThrow()
+        let retTy = funcTy.retTy
+        let userParams = refWrapperFunc.funcBody.getOrThrow().paramLists[0].params
+        let nativeFuncName = jni.GetJniMethodName(refWrapperFunc)
+        return jni.CreateNativeJavaABIFunc(nativeFuncName, ConvertJavaCompatibleToCTypeParams(userParams, curFile),
+            jni.ConvertCangjieToJniTy(retTy), curFile, refWrapperFunc.moduleName, refWrapperFunc.fullPackageName,
+            { f: FuncDecl, jniEnv: FuncParam, jclass: FuncParam, ctypeUserParams: ArrayList<FuncParam> =>
+                let body = f.funcBody.getOrThrow().body.getOrThrow().body
+                jclass.identifier = SrcIdentifier("_")
+                CJC_ASSERT(refWrapperFunc.outerDecl.isSome())
+                let refWrapper = refWrapperFunc.outerDecl.getOrThrow()
+                let methodCallArgs = ArrayList<FuncArg>()
+                CJC_ASSERT(ctypeUserParams.size == userParams.size)
+                var idx: Int64 = 0
+                while (idx < userParams.size) {
+                    let userParam = userParams[idx]
+                    let ctypeParam = ctypeUserParams[idx]
+                    let userTy = userParam.GetTy().getOrThrow()
+                    if (IsMirror(userTy) || IsImpl(userTy) || userTy.IsCoreOptionType()) {
+                        let gref = CreateTmpVarDecl(None, None)
+                        gref.curFile = Some(curFile)
+                        let swap = ilib.CreateSwapLocalWithGlobalRefCall(
+                            WithinFile<RefExpr>(CreateRefExpr(jniEnv), curFile),
+                            WithinFile<RefExpr>(CreateRefExpr(ctypeParam), curFile)).getOrThrow()
+                        gref.initializer = Some(swap)
+                        if (let Some(ty) <- swap.GetTy()) {
+                            gref.SetTy(ty)
+                        }
+                        body.add(gref)
+                        methodCallArgs.add(CreateFuncArg(UnwrapCTypeExprAsJavaCompatible(
+                            WithinFile<RefExpr>(CreateRefExpr(gref), curFile), userTy, companion)))
+                    } else {
+                        methodCallArgs.add(CreateFuncArg(UnwrapCTypeExprAsJavaCompatible(
+                            WithinFile<RefExpr>(CreateRefExpr(ctypeParam), curFile), userTy, companion)))
+                    }
+                    idx = idx + 1
+                }
+                let methodAccess = CreateMemberAccess(WithinFile<RefExpr>(CreateRefExpr(refWrapper), curFile),
+                    refWrapperFunc)
+                methodAccess.curFile = Some(curFile)
+                let methodCall = CreateCallExpr(methodAccess, methodCallArgs, Some(refWrapperFunc), Some(retTy),
+                    CallKind.CALL_DECLARED_FUNCTION)
+                let methodCallRes = CreateTmpVarDecl(None, Some(methodCall))
+                methodCallRes.SetTy(retTy)
+                let retExpr = ilib.UnwrapJavaEntity(
+                    ilib.WrapJavaEntity(WithinFile<RefExpr>(CreateRefExpr(methodCallRes), curFile)).getOrThrow(),
+                    jni.ConvertCangjieToJniTy(retTy), refWrapperFunc.outerDecl.getOrThrow(), toRaw: true).getOrThrow()
+                let nodes = ArrayList<Node>()
+                nodes.add(methodCallRes)
+                nodes.add(retExpr)
+                body.add(ilib.WrapExceptionHandling(WithinFile<RefExpr>(CreateRefExpr(jniEnv), curFile),
+                    WrapReturningLambdaExpr(typeManager, nodes)))
+            })
+    }
+
+    private func CreateFinalizationBridge(refWrapper: ClassDecl): FuncDecl {
+        let unitTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+        let ctypeParams = ArrayList<FuncParam>()
+        let registryIdParam = jni.CreateRegistryIdParam()
+        ctypeParams.add(registryIdParam)
+        let curFile = refWrapper.curFile.getOrThrow()
+        return jni.CreateNativeJavaABIFunc(jni.GetJniDeleteCjObjectFuncName(refWrapper), ctypeParams, unitTy, curFile,
+            refWrapper.moduleName, refWrapper.fullPackageName,
+            { fn: FuncDecl, jniEnvParam: FuncParam, jobjParam: FuncParam, cTypeUserParams: ArrayList<FuncParam> =>
+                let _ = jobjParam
+                let _ = cTypeUserParams
+                let removeFromRegistryCall = ilib.CreateRemoveFromRegistryCall(
+                    WithinFile<RefExpr>(CreateRefExpr(registryIdParam), curFile)).getOrThrow()
+                let body = fn.funcBody.getOrThrow().body.getOrThrow().body
+                let nodes = ArrayList<Node>()
+                nodes.add(removeFromRegistryCall)
+                body.add(ilib.WrapExceptionHandling(WithinFile<RefExpr>(CreateRefExpr(jniEnvParam), curFile),
+                    WrapReturningLambdaExpr(typeManager, nodes)))
+            })
+    }
+
+    private func Process(companion: ClassDecl, refWrapper: ClassDecl, ctx: AfterTypeCheckContext): Unit {
+        CJC_ASSERT(IsImplRegistryCompanion(companion))
+        CJC_ASSERT(IsImplReferenceWrapper(refWrapper))
+        let companionCtor = GetJavaImplRegistryCompanionConstructor(companion)
+        for (userCtor in ctx.GetJavaImplUserDefinedConstructors(refWrapper)) {
+            if (userCtor.TestAttr(Attribute.IS_BROKEN)) {
+                continue
+            }
+            let generatedCtor = ctx.GetJavaImplReferenceWrapperGeneratedConstructor(userCtor)
+            ctx.AddGeneratedDecl(CreateConstructorBridge(userCtor, generatedCtor, companionCtor, companion))
+        }
+        for (member in refWrapper.GetMemberDeclPtrs()) {
+            if (member.TestAttr(Attribute.IS_BROKEN)) {
+                continue
+            }
+            if (!member.TestAnyAttr(Attribute.PUBLIC, Attribute.PROTECTED)) {
+                continue
+            }
+            if (let Some(method) <- (member as FuncDecl)) {
+                if (member.TestAttr(Attribute.CONSTRUCTOR)) {
+                    continue
+                }
+                ctx.AddGeneratedDecl(CreateMethodBridge(ctx, method, companion))
+            }
+        }
+        ctx.AddGeneratedDecl(CreateFinalizationBridge(refWrapper))
+    }
+
     public func Process(ctx: AfterTypeCheckContext): Unit {
-        for (impl in ctx.GetJavaImplReferenceWrappers()) {
-            if (impl.TestAttr(Attribute.IS_BROKEN)) {
+        for (refWrapper in ctx.GetJavaImplReferenceWrappers()) {
+            if (refWrapper.TestAttr(Attribute.IS_BROKEN)) {
                 continue
             }
-            if (let None <- ctx.GetJavaImplRegistryCompanion(impl)) {
-                continue
-            }
+            let companion = ctx.GetJavaImplRegistryCompanion(refWrapper)
+            CJC_NULLPTR_CHECK(companion)
+            Process(companion.getOrThrow(), refWrapper, ctx)
         }
     }
 }

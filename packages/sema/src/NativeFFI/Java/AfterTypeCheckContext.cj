@@ -4,7 +4,7 @@ import std.collection.*
 import cjcj::ast.*
 import cjcj::modules.SemaImportManager
 import cjcj::sema.TypeManager
-import cjcj::utils.CJC_ABORT
+import cjcj::utils.{CJC_ABORT, CJC_NULLPTR_CHECK}
 
 private class CtorPair {
     public let user: FuncDecl
@@ -116,6 +116,18 @@ public class AfterTypeCheckContext {
 
     public func CacheJavaImplReferenceWrapperConstructorsPair(userDefinedCtor: FuncDecl, generatedCtor: FuncDecl): Unit {
         ctorPairs.add(CtorPair(userDefinedCtor, generatedCtor))
+    }
+
+    public func GetJavaImplReferenceWrapperGeneratedConstructor(userDefinedCtor: FuncDecl): FuncDecl {
+        var generated: Option<FuncDecl> = None
+        for (pair in ctorPairs) {
+            if (pair.user == userDefinedCtor) {
+                generated = Some(pair.generated)
+                break
+            }
+        }
+        CJC_NULLPTR_CHECK(generated)
+        return generated.getOrThrow()
     }
 
     public func GetJavaImplUserDefinedConstructors(refWrapper: ClassDecl): ArrayList<FuncDecl> {

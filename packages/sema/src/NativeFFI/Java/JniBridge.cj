@@ -1,11 +1,13 @@
 package cjcj::sema.NativeFFI.Java
 
+import std.collection.*
 import cjcj::ast.*
 import cjcj::mangle.BaseMangler
 import cjcj::modules.SemaImportManager
 import cjcj::sema.TypeManager
-import cjcj::sema.NativeFFI.{CreateType, Utils}
-import cjcj::utils.{CJC_ABORT, CJC_ASSERT}
+import cjcj::sema.NativeFFI.{CreateType, GetJavaFQName, GetJavaMemberName, GetMangledJniInitCjObjectFuncName,
+    GetMangledMethodName, Utils}
+import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CJC_ASSERT_WITH_MSG}
 
 public class JniBridge {
     private let typeManager: TypeManager
@@ -92,5 +94,47 @@ public class JniBridge {
             }
         }
         return escaped.replace(".", "_")
+    }
+
+    public func GetJniMethodName(method: FuncDecl): String {
+        let sampleJavaName = GetJavaMemberName(method)
+        let fqname = GetJavaFQName(method.outerDecl.getOrThrow())
+        CJC_ASSERT_WITH_MSG(!method.funcBody.getOrThrow().paramLists.isEmpty(), "paramLists cannot be empty")
+        let mangledFuncName = GetMangledMethodName(mangler, method.funcBody.getOrThrow().paramLists[0].params,
+            sampleJavaName)
+        return GetJavaNativeFunctionName(fqname, mangledFuncName)
+    }
+
+    public func GetJniInitCjObjectFuncName(ctor: FuncDecl, isGeneratedCtor: Bool): String {
+        let fqname = GetJavaFQName(ctor.outerDecl.getOrThrow())
+        var mangledFuncName = GetMangledJniInitCjObjectFuncName(mangler,
+            ctor.funcBody.getOrThrow().paramLists[0].params, isGeneratedCtor)
+        if ((ctor.outerDecl.getOrThrow() as EnumDecl).isSome()) {
+            mangledFuncName = ctor.identifier.Val() + mangledFuncName
+        }
+        return GetJavaNativeFunctionName(fqname, mangledFuncName)
+    }
+
+    public func GetJniDeleteCjObjectFuncName(decl: Decl): String {
+        let fqname = GetJavaFQName(decl)
+        return GetJavaNativeFunctionName(fqname, "deleteCJObject")
+    }
+
+    public func CreateNativeJavaABIFunc(name: String, userParams: ArrayList<FuncParam>, retTy: Ty, curFile: File,
+        moduleName: String, fullPackageName: String,
+        builder: (FuncDecl, FuncParam, FuncParam, ArrayList<FuncParam>) -> Unit): FuncDecl {
+        let userParamsView = ArrayList<FuncParam>()
+        for (userParam in userParams) {
+            userParamsView.add(userParam)
+        }
+        let params = userParams
+        let jniEnvParam = CreateJniEnvParam()
+        params.add(jniEnvParam, at: 0)
+        let objOrClassParam = CreateJniJobjectOrJclassParam()
+        params.add(objOrClassParam, at: 1)
+        let nativeFunc = utils.CreateNativeFunc(name, params, retTy, ArrayList<Node>(), curFile, moduleName,
+            fullPackageName)
+        builder(nativeFunc, jniEnvParam, objOrClassParam, userParamsView)
+        return nativeFunc
     }
 }
