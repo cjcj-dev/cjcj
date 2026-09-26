@@ -23,6 +23,7 @@ ROLES = {
     "stdlib": f"sdk/lib/{TUPLE}/libcangjie-std-core.a",
     "llc": "sdk/third_party/llvm/bin/llc",
     "opt": "sdk/third_party/llvm/bin/opt",
+    "ld.lld": "sdk/third_party/llvm/bin/ld.lld",
     "host_runtime": f"host/runtime/lib/{TUPLE}/libcangjie-runtime.so",
     "host_boundscheck": f"host/runtime/lib/{TUPLE}/libboundscheck.so",
 }
@@ -83,9 +84,9 @@ def validate_provenance(value):
     require(value["qualification"] == "H48-provenance-partial", "TUPLE_QUALIFICATION")
     require(value["sources"]["stdlib"]["commit"] == "unrecorded", "TUPLE_STD_SOURCE_NOT_RECORDED")
     require(value["sources"]["stdlib"]["follow_up"] == "cjcj-dev/cjcj#135", "TUPLE_STD_SOURCE_DEBT")
-    for name in ("compiler", "llc", "opt"):
-        require(value["sources"]["stdlib"]["inputs_sha256"][name] == value["role_sha256"][name],
-                f"TUPLE_STD_INPUT {name}")
+    std_inputs = value["sources"]["stdlib"]["inputs_sha256"]
+    for name in ("compiler", "llc", "opt", "ld.lld"):
+        require(std_inputs.get(name) == value["role_sha256"][name], f"TUPLE_STD_INPUT {name}")
     require(value["host_sdk"]["identity"], "TUPLE_HOST_IDENTITY")
     require(value["execution"]["kind"] in ("github-actions", "retained-build"), "TUPLE_EXECUTION")
     if value["execution"]["kind"] == "github-actions":

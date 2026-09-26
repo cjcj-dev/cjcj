@@ -6,6 +6,14 @@ import cjcj::basic.Linkage as BasicLinkage
 import cjcj::flatbuffers.{FlatBufferString, Offset, Vector}
 import cjcj::utils.{CJC_ABORT, CJC_ASSERT, OverflowStrategy}
 
+private func IsExceptionIntOpKind(kind: ExprKind): Bool {
+    if (kind == ExprKind.TRY_NEG) {
+        return true
+    }
+    let index = ExprKindIndex(kind)
+    return index >= ExprKindIndex(ExprKind.TRY_ADD) && index <= ExprKindIndex(ExprKind.TRY_RSHIFT)
+}
+
 private func DeserializeOverflowStrategy(strategy: UInt8): OverflowStrategy {
     if (strategy == CHIRFB_OVERFLOW_STRATEGY_NA) {
         return OverflowStrategy.NA
@@ -29,23 +37,23 @@ private func CHIRExprKindToExprKind(kind: UInt8): (ExprKind, Bool) {
         case 2u8 => (ExprKind.BRANCH, false)
         case 3u8 => (ExprKind.MULTIBRANCH, false)
         case 4u8 => (ExprKind.EXIT, false)
-        case 5u8 => (ExprKind.APPLY_WITH_EXCEPTION, true)
-        case 6u8 => (ExprKind.INVOKE_WITH_EXCEPTION, true)
-        case 7u8 => (ExprKind.INTRINSIC_WITH_EXCEPTION, true)
+        case 5u8 => (ExprKind.TRY_APPLY, true)
+        case 6u8 => (ExprKind.TRY_INVOKE, true)
+        case 7u8 => (ExprKind.TRY_INTRINSIC, true)
         case 8u8 => (ExprKind.RAISE_EXCEPTION, false)
-        case 9u8 => (ExprKind.SPAWN_WITH_EXCEPTION, true)
-        case 10u8 => (ExprKind.TYPECAST_WITH_EXCEPTION, true)
-        case 11u8 => (ExprKind.ALLOCATE_WITH_EXCEPTION, true)
-        case 12u8 => (ExprKind.RAW_ARRAY_ALLOCATE_WITH_EXCEPTION, true)
-        case 13u8 => (ExprKind.NEG, true)
-        case 14u8 => (ExprKind.ADD, true)
-        case 15u8 => (ExprKind.SUB, true)
-        case 16u8 => (ExprKind.MUL, true)
-        case 17u8 => (ExprKind.DIV, true)
-        case 18u8 => (ExprKind.MOD, true)
-        case 19u8 => (ExprKind.EXP, true)
-        case 20u8 => (ExprKind.LSHIFT, true)
-        case 21u8 => (ExprKind.RSHIFT, true)
+        case 9u8 => (ExprKind.TRY_SPAWN, true)
+        case 10u8 => (ExprKind.TRY_NUMERIC_CAST, true)
+        case 11u8 => (ExprKind.TRY_ALLOCATE, true)
+        case 12u8 => (ExprKind.TRY_RAW_ARRAY_ALLOCATE, true)
+        case 13u8 => (ExprKind.TRY_NEG, true)
+        case 14u8 => (ExprKind.TRY_ADD, true)
+        case 15u8 => (ExprKind.TRY_SUB, true)
+        case 16u8 => (ExprKind.TRY_MUL, true)
+        case 17u8 => (ExprKind.TRY_DIV, true)
+        case 18u8 => (ExprKind.TRY_MOD, true)
+        case 19u8 => (ExprKind.TRY_EXP, true)
+        case 20u8 => (ExprKind.TRY_LSHIFT, true)
+        case 21u8 => (ExprKind.TRY_RSHIFT, true)
         case 22u8 => (ExprKind.NEG, false)
         case 23u8 => (ExprKind.NOT, false)
         case 24u8 => (ExprKind.BITNOT, false)
@@ -68,13 +76,13 @@ private func CHIRExprKindToExprKind(kind: UInt8): (ExprKind, Bool) {
         case 41u8 => (ExprKind.NOTEQUAL, false)
         case 42u8 => (ExprKind.AND, false)
         case 43u8 => (ExprKind.OR, false)
-        case 44u8 => (ExprKind.TYPECAST, false)
+        case 44u8 => (ExprKind.CLASS_STATIC_CAST, false)
         case 45u8 => (ExprKind.BOX, false)
-        case 46u8 => (ExprKind.UNBOX, false)
+        case 46u8 => (ExprKind.UNBOX_TO_VALUE, false)
         case 47u8 => (ExprKind.UNBOX_TO_REF, false)
-        case 48u8 => (ExprKind.TYPECAST, false)
-        case 49u8 => (ExprKind.TRANSFORM_TO_CONCRETE, false)
-        case 50u8 => (ExprKind.TRANSFORM_TO_GENERIC, false)
+        case 48u8 => (ExprKind.NUMERIC_CAST, false)
+        case 49u8 => (ExprKind.CAST_TO_CONCRETE, false)
+        case 50u8 => (ExprKind.CAST_TO_GENERIC, false)
         case 51u8 => (ExprKind.ALLOCATE, false)
         case 52u8 => (ExprKind.LOAD, false)
         case 53u8 => (ExprKind.STORE, false)
@@ -845,6 +853,9 @@ class CHIRDeserializerImpl {
             payload, block)) {
             return concreteExpr
         }
+        if (let Some(exceptionOp) <- createExceptionIntOp(kind, resultTy, operands, successors, block)) {
+            return exceptionOp
+        }
         if (kind == ExprKind.LAMBDA && !blockGroups.isEmpty()) {
             return createLambdaExpression(operands, blockGroups[0], block, resultTy)
         }
@@ -882,6 +893,9 @@ class CHIRDeserializerImpl {
             }
             return builder.CreateRaiseException(operands[0], block)
         }
+        if (kind == ExprKind.CLASS_STATIC_CAST) {
+            return builder.CreateClassStaticCast(resultTypeOrInvalid(resultTy), operands[0], block)
+        }
         if (kind == ExprKind.BOX) {
             CJC_ASSERT(operands.size == 1)
             return builder.CreateBox(resultTypeOrInvalid(resultTy), operands[0], block)
@@ -911,20 +925,20 @@ class CHIRDeserializerImpl {
             CJC_ASSERT(operands.size == 2)
             return builder.CreateStore(operands[0], operands[1], block)
         }
-        if (kind == ExprKind.TRANSFORM_TO_CONCRETE) {
+        if (kind == ExprKind.CAST_TO_CONCRETE) {
             CJC_ASSERT(operands.size == 1)
-            return builder.CreateTransformToConcrete(resultTypeOrInvalid(resultTy), operands[0], block)
+            return builder.CreateCastToConcrete(resultTypeOrInvalid(resultTy), operands[0], block)
         }
-        if (kind == ExprKind.TRANSFORM_TO_GENERIC) {
+        if (kind == ExprKind.CAST_TO_GENERIC) {
             CJC_ASSERT(operands.size == 1)
-            return builder.CreateTransformToGeneric(resultTypeOrInvalid(resultTy), operands[0], block)
+            return builder.CreateCastToGeneric(resultTypeOrInvalid(resultTy), operands[0], block)
         }
         if (kind == ExprKind.TUPLE) {
             return builder.CreateTuple(resultTypeOrInvalid(resultTy), operands, block)
         }
-        if (kind == ExprKind.UNBOX) {
+        if (kind == ExprKind.UNBOX_TO_VALUE) {
             CJC_ASSERT(operands.size == 1)
-            return builder.CreateUnBox(resultTypeOrInvalid(resultTy), operands[0], block)
+            return builder.CreateUnBoxToValue(resultTypeOrInvalid(resultTy), operands[0], block)
         }
         if (kind == ExprKind.UNBOX_TO_REF) {
             CJC_ASSERT(operands.size == 1)
@@ -952,6 +966,23 @@ class CHIRDeserializerImpl {
         throw IllegalStateException("unsupported CHIR expression")
     }
 
+    private func createExceptionIntOp(kind: ExprKind, resultTy: Option<Type>, operands: ArrayList<Value>,
+        successors: ArrayList<Block>, block: Block): Option<Expression> {
+        if (!IsExceptionIntOpKind(kind) || operands.isEmpty() || successors.size < 2) {
+            return None
+        }
+        let resultTyValue = resultTypeOrInvalid(resultTy)
+        if (kind == ExprKind.TRY_NEG) {
+            return builder.CreateTryUnaryExpression(resultTyValue, kind, operands[0], successors[0],
+                successors[1], block)
+        }
+        if (operands.size < 2) {
+            return None
+        }
+        return builder.CreateTryBinaryExpression(resultTyValue, kind, operands[0], operands[1],
+            successors[0], successors[1], block)
+    }
+
     private func createPayloadExpression(kind: ExprKind, resultTy: Option<Type>, operands: ArrayList<Value>,
         blockGroups: ArrayList<BlockGroup>, successors: ArrayList<Block>, payload: ArrayList<String>,
         block: Block): Option<Expression> {
@@ -966,21 +997,14 @@ class CHIRDeserializerImpl {
             branch.SetSourceExpr(CHIRSourceExprFromIndex(CHIRSafeI64(CHIRFieldAt(payload, 1))))
             return branch
         }
-        if (kind == ExprKind.INT_OP_WITH_EXCEPTION && !operands.isEmpty() && successors.size >= 2) {
-            let opKind = CHIRExprKindFromIndex(CHIRSafeI64(CHIRFieldAt(payload, 1)))
-            let resultTyValue = resultTypeOrInvalid(resultTy)
-            if (operands.size >= 2) {
-                return builder.CreateBinaryIntOpWithException(resultTyValue, opKind, operands[0], operands[1],
-                    successors[0], successors[1], block)
-            }
-            return builder.CreateUnaryIntOpWithException(resultTyValue, opKind, operands[0], successors[0],
-                successors[1], block)
+        if (IsExceptionIntOpKind(kind) && !operands.isEmpty() && successors.size >= 2) {
+            return createExceptionIntOp(kind, resultTy, operands, successors, block)
         }
-        if ((kind == ExprKind.ALLOCATE || kind == ExprKind.ALLOCATE_WITH_EXCEPTION) &&
+        if ((kind == ExprKind.ALLOCATE || kind == ExprKind.TRY_ALLOCATE) &&
             CHIRFieldAt(payload, 0) == "allocate") {
             let allocatedTy = CHIRParseType(CHIRFieldAt(payload, 1), builder, customDefs)
-            if (kind == ExprKind.ALLOCATE_WITH_EXCEPTION && successors.size >= 2) {
-                return builder.CreateAllocateWithException(resultTypeOrInvalid(resultTy), allocatedTy, successors[0],
+            if (kind == ExprKind.TRY_ALLOCATE && successors.size >= 2) {
+                return builder.CreateTryAllocate(resultTypeOrInvalid(resultTy), allocatedTy, successors[0],
                     successors[1], block)
             }
             if (kind == ExprKind.ALLOCATE) {
@@ -1005,12 +1029,12 @@ class CHIRDeserializerImpl {
             return builder.CreateStoreElementByName(operands[0], operands[1], CHIRWireSplitList(CHIRFieldAt(payload, 1)),
                 block)
         }
-        if ((kind == ExprKind.APPLY || kind == ExprKind.APPLY_WITH_EXCEPTION) && !operands.isEmpty() &&
+        if ((kind == ExprKind.APPLY || kind == ExprKind.TRY_APPLY) && !operands.isEmpty() &&
             CHIRFieldAt(payload, 0) == "apply") {
             return createApplyExpression(kind, resultTy, operands, successors, payload, block)
         }
-        if ((kind == ExprKind.INVOKE || kind == ExprKind.INVOKESTATIC || kind == ExprKind.INVOKE_WITH_EXCEPTION ||
-            kind == ExprKind.INVOKESTATIC_WITH_EXCEPTION) && !operands.isEmpty() && CHIRFieldAt(payload, 0) == "invoke") {
+        if ((kind == ExprKind.INVOKE || kind == ExprKind.INVOKESTATIC || kind == ExprKind.TRY_INVOKE ||
+            kind == ExprKind.TRY_INVOKESTATIC) && !operands.isEmpty() && CHIRFieldAt(payload, 0) == "invoke") {
             return createInvokeExpression(kind, resultTy, operands, successors, payload, block)
         }
         if (kind == ExprKind.INSTANCEOF && !operands.isEmpty() && CHIRFieldAt(payload, 0) == "instanceOf") {
@@ -1033,25 +1057,25 @@ class CHIRDeserializerImpl {
             return builder.CreateFieldByName(resultTypeOrInvalid(resultTy), operands[0],
                 CHIRWireSplitList(CHIRFieldAt(payload, 1)), block)
         }
-        if ((kind == ExprKind.RAW_ARRAY_ALLOCATE || kind == ExprKind.RAW_ARRAY_ALLOCATE_WITH_EXCEPTION) &&
+        if ((kind == ExprKind.RAW_ARRAY_ALLOCATE || kind == ExprKind.TRY_RAW_ARRAY_ALLOCATE) &&
             !operands.isEmpty() && CHIRFieldAt(payload, 0) == "rawArrayAllocate") {
             let elementTy = CHIRParseType(CHIRFieldAt(payload, 1), builder, customDefs)
-            if (kind == ExprKind.RAW_ARRAY_ALLOCATE_WITH_EXCEPTION && successors.size >= 2) {
-                return builder.CreateRawArrayAllocateWithException(resultTypeOrInvalid(resultTy), elementTy, operands[0],
+            if (kind == ExprKind.TRY_RAW_ARRAY_ALLOCATE && successors.size >= 2) {
+                return builder.CreateTryRawArrayAllocate(resultTypeOrInvalid(resultTy), elementTy, operands[0],
                     successors[0], successors[1], block)
             }
             if (kind == ExprKind.RAW_ARRAY_ALLOCATE) {
                 return builder.CreateRawArrayAllocate(resultTypeOrInvalid(resultTy), elementTy, operands[0], block)
             }
         }
-        if ((kind == ExprKind.INTRINSIC || kind == ExprKind.INTRINSIC_WITH_EXCEPTION) &&
+        if ((kind == ExprKind.INTRINSIC || kind == ExprKind.TRY_INTRINSIC) &&
             CHIRFieldAt(payload, 0) == "intrinsic") {
             return createIntrinsicExpression(kind, resultTy, operands, successors, payload, block)
         }
         if (kind == ExprKind.DEBUGEXPR && !operands.isEmpty() && CHIRFieldAt(payload, 0) == "debug") {
             return builder.CreateDebug(resultTypeOrInvalid(resultTy), operands[0], CHIRFieldAt(payload, 1), block)
         }
-        if ((kind == ExprKind.SPAWN || kind == ExprKind.SPAWN_WITH_EXCEPTION) && !operands.isEmpty() &&
+        if ((kind == ExprKind.SPAWN || kind == ExprKind.TRY_SPAWN) && !operands.isEmpty() &&
             CHIRFieldAt(payload, 0) == "spawn") {
             return createSpawnExpression(kind, resultTy, operands, successors, payload, block)
         }
@@ -1070,8 +1094,8 @@ class CHIRDeserializerImpl {
         let callContext = FuncCallContext(args: valuesAfterFirst(operands),
             instTypeArgs: CHIRParseTypeList(CHIRFieldAt(payload, 1), builder, customDefs),
             thisType: parseOptionalType(CHIRFieldAt(payload, 2)))
-        if (kind == ExprKind.APPLY_WITH_EXCEPTION && successors.size >= 2) {
-            return builder.CreateApplyWithException(resultTypeOrInvalid(resultTy), operands[0], callContext,
+        if (kind == ExprKind.TRY_APPLY && successors.size >= 2) {
+            return builder.CreateTryApply(resultTypeOrInvalid(resultTy), operands[0], callContext,
                 successors[0], successors[1], block)
         }
         if (kind == ExprKind.APPLY) {
@@ -1108,14 +1132,14 @@ class CHIRDeserializerImpl {
             applyVirtualMethodOffset(invokeExpr, CHIRFieldAt(payload, 4))
             return invokeExpr
         }
-        if (kind == ExprKind.INVOKESTATIC_WITH_EXCEPTION && successors.size >= 2) {
-            let invokeExpr = builder.CreateInvokeStaticWithException(resultTypeOrInvalid(resultTy), invokeContext,
+        if (kind == ExprKind.TRY_INVOKESTATIC && successors.size >= 2) {
+            let invokeExpr = builder.CreateTryInvokeStatic(resultTypeOrInvalid(resultTy), invokeContext,
                 successors[0], successors[1], block)
             applyVirtualMethodOffset(invokeExpr, CHIRFieldAt(payload, 4))
             return invokeExpr
         }
-        if (kind == ExprKind.INVOKE_WITH_EXCEPTION && successors.size >= 2) {
-            let invokeExpr = builder.CreateInvokeWithException(resultTypeOrInvalid(resultTy), invokeContext,
+        if (kind == ExprKind.TRY_INVOKE && successors.size >= 2) {
+            let invokeExpr = builder.CreateTryInvoke(resultTypeOrInvalid(resultTy), invokeContext,
                 successors[0], successors[1], block)
             applyVirtualMethodOffset(invokeExpr, CHIRFieldAt(payload, 4))
             return invokeExpr
@@ -1127,8 +1151,8 @@ class CHIRDeserializerImpl {
         successors: ArrayList<Block>, payload: ArrayList<String>, block: Block): Option<Expression> {
         let callContext = IntrisicCallContext(kind: CHIRIntrinsicKindFromName(CHIRFieldAt(payload, 1)),
             args: operands, instTypeArgs: CHIRParseTypeList(CHIRFieldAt(payload, 2), builder, customDefs))
-        if (kind == ExprKind.INTRINSIC_WITH_EXCEPTION && successors.size >= 2) {
-            return builder.CreateIntrinsicWithException(resultTypeOrInvalid(resultTy), callContext, successors[0],
+        if (kind == ExprKind.TRY_INTRINSIC && successors.size >= 2) {
+            return builder.CreateTryIntrinsic(resultTypeOrInvalid(resultTy), callContext, successors[0],
                 successors[1], block)
         }
         if (kind == ExprKind.INTRINSIC) {
@@ -1139,12 +1163,12 @@ class CHIRDeserializerImpl {
 
     private func createSpawnExpression(kind: ExprKind, resultTy: Option<Type>, operands: ArrayList<Value>,
         successors: ArrayList<Block>, payload: ArrayList<String>, block: Block): Option<Expression> {
-        if (kind == ExprKind.SPAWN_WITH_EXCEPTION && successors.size >= 2) {
+        if (kind == ExprKind.TRY_SPAWN && successors.size >= 2) {
             let spawnExpr = if (operands.size >= 2) {
-                builder.CreateSpawnWithException(resultTypeOrInvalid(resultTy), operands[0], operands[1],
+                builder.CreateTrySpawn(resultTypeOrInvalid(resultTy), operands[0], operands[1],
                     successors[0], successors[1], block)
             } else {
-                builder.CreateSpawnWithException(resultTypeOrInvalid(resultTy), operands[0], successors[0],
+                builder.CreateTrySpawn(resultTypeOrInvalid(resultTy), operands[0], successors[0],
                     successors[1], block)
             }
             applySpawnExecuteClosure(spawnExpr, CHIRFieldAt(payload, 1))
@@ -1217,7 +1241,7 @@ class CHIRDeserializerImpl {
         }
     }
 
-    private func applySpawnExecuteClosure(expr: SpawnWithException, value: String): Unit {
+    private func applySpawnExecuteClosure(expr: TrySpawn, value: String): Unit {
         if (let Some(fnValue) <- valuesById.get(value)) {
             if (let Some(fn) <- (fnValue as Function)) {
                 expr.SetExecuteClosure(fn)
@@ -2074,7 +2098,7 @@ class CHIRDeserializerImpl {
         if (isException) {
             let normalId = operands.Get(1u32, 0u32)
             let exceptionId = operands.Get(2u32, 0u32)
-            let result = builder.CreateUnaryIntOpWithException(resultTy, kind, operand,
+            let result = builder.CreateTryUnaryExpression(resultTy, kind, operand,
                 GetValue<Block>(normalId).getOrThrow(), GetValue<Block>(exceptionId).getOrThrow(), parentBlock)
             result.SetOverflowStrategy(overflowStrategy)
             return result
@@ -2095,7 +2119,7 @@ class CHIRDeserializerImpl {
         if (isException) {
             let normalId = operands.Get(2u32, 0u32)
             let exceptionId = operands.Get(3u32, 0u32)
-            let result = builder.CreateBinaryIntOpWithException(resultTy, kind, lhs, rhs,
+            let result = builder.CreateTryBinaryExpression(resultTy, kind, lhs, rhs,
                 GetValue<Block>(normalId).getOrThrow(), GetValue<Block>(exceptionId).getOrThrow(), parentBlock)
             result.SetOverflowStrategy(overflowStrategy)
             return result
@@ -2166,16 +2190,19 @@ class CHIRDeserializerImpl {
             case ExprKind.STORE =>
                 CJC_ASSERT(operands.size == 2)
                 return builder.CreateStore(operands[0], operands[1], owner)
-            case ExprKind.TRANSFORM_TO_CONCRETE =>
+            case ExprKind.CLASS_STATIC_CAST =>
                 CJC_ASSERT(operands.size == 1)
-                return builder.CreateTransformToConcrete(resultTy.getOrThrow(), operands[0], owner)
-            case ExprKind.TRANSFORM_TO_GENERIC =>
+                return builder.CreateClassStaticCast(resultTy.getOrThrow(), operands[0], owner)
+            case ExprKind.CAST_TO_CONCRETE =>
                 CJC_ASSERT(operands.size == 1)
-                return builder.CreateTransformToGeneric(resultTy.getOrThrow(), operands[0], owner)
+                return builder.CreateCastToConcrete(resultTy.getOrThrow(), operands[0], owner)
+            case ExprKind.CAST_TO_GENERIC =>
+                CJC_ASSERT(operands.size == 1)
+                return builder.CreateCastToGeneric(resultTy.getOrThrow(), operands[0], owner)
             case ExprKind.TUPLE => return builder.CreateTuple(resultTy.getOrThrow(), operands, owner)
-            case ExprKind.UNBOX =>
+            case ExprKind.UNBOX_TO_VALUE =>
                 CJC_ASSERT(operands.size == 1)
-                return builder.CreateUnBox(resultTy.getOrThrow(), operands[0], owner)
+                return builder.CreateUnBoxToValue(resultTy.getOrThrow(), operands[0], owner)
             case ExprKind.UNBOX_TO_REF =>
                 CJC_ASSERT(operands.size == 1)
                 return builder.CreateUnBoxToRef(resultTy.getOrThrow(), operands[0], owner)
@@ -2200,7 +2227,7 @@ class CHIRDeserializerImpl {
         if (isException) {
             let operands = GetValue<Value>(base.GetOperands())
             CJC_ASSERT(operands.size == 2)
-            return builder.CreateAllocateWithException(resultTy, targetType,
+            return builder.CreateTryAllocate(resultTy, targetType,
                 (operands[0] as Block).getOrThrow(), (operands[1] as Block).getOrThrow(), parentBlock)
         }
         return builder.CreateAllocate(resultTy, targetType, parentBlock)
@@ -2281,7 +2308,7 @@ class CHIRDeserializerImpl {
             operands.remove(at: operands.size - 1)
             let callContext = FuncCallContext(args: operands, instTypeArgs: instantiatedTypeArgs,
                 thisType: objType)
-            return builder.CreateApplyWithException(resultTy, callee, callContext, normalBlock,
+            return builder.CreateTryApply(resultTy, callee, callContext, normalBlock,
                 exceptionBlock, owner)
         }
         let callContext = FuncCallContext(args: operands, instTypeArgs: instantiatedTypeArgs, thisType: objType)
@@ -2330,10 +2357,10 @@ class CHIRDeserializerImpl {
             return builder.CreateInvoke(resultTy, invokeInfo, owner)
         }
         if (isStatic) {
-            return builder.CreateInvokeStaticWithException(resultTy, invokeInfo, normalBlock.getOrThrow(),
+            return builder.CreateTryInvokeStatic(resultTy, invokeInfo, normalBlock.getOrThrow(),
                 exceptionBlock.getOrThrow(), owner)
         }
-        return builder.CreateInvokeWithException(resultTy, invokeInfo, normalBlock.getOrThrow(),
+        return builder.CreateTryInvoke(resultTy, invokeInfo, normalBlock.getOrThrow(),
             exceptionBlock.getOrThrow(), owner)
     }
 
@@ -2352,10 +2379,10 @@ class CHIRDeserializerImpl {
         let overflowStrategy = DeserializeOverflowStrategy(obj.GetOverflowStrategy())
         let (_, isException) = CHIRExprKindToExprKind(base.GetKind())
         if (isException) {
-            return builder.CreateTypeCastWithException(resultTy, operands[0],
+            return builder.CreateTryNumericCast(resultTy, operands[0],
                 (operands[1] as Block).getOrThrow(), (operands[2] as Block).getOrThrow(), owner)
         }
-        return builder.CreateTypeCast(resultTy, operands[0], owner, overflowStrategy: overflowStrategy)
+        return builder.CreateNumericCast(resultTy, operands[0], owner, overflowStrategy: overflowStrategy)
     }
 
     private func Deserialize(obj: PackageFormat_InstanceOf): InstanceOf {
@@ -2828,7 +2855,7 @@ class CHIRDeserializerImpl {
             operands.remove(at: operands.size - 1)
             let callContext = IntrisicCallContext(kind: intrinsicKind, args: operands,
                 instTypeArgs: GetType<Type>(funcCallBase.GetInstantiatedTypeArgs()))
-            return builder.CreateIntrinsicWithException(resultTy, callContext, normalBlock, exceptionBlock, owner)
+            return builder.CreateTryIntrinsic(resultTy, callContext, normalBlock, exceptionBlock, owner)
         }
         let callContext = IntrisicCallContext(kind: intrinsicKind, args: operands,
             instTypeArgs: GetType<Type>(funcCallBase.GetInstantiatedTypeArgs()))
@@ -2849,7 +2876,7 @@ class CHIRDeserializerImpl {
             operands.remove(at: operands.size - 1)
             let normalBlock = (operands[operands.size - 1] as Block).getOrThrow()
             operands.remove(at: operands.size - 1)
-            return builder.CreateRawArrayAllocateWithException(resultTy, elementType, size, normalBlock,
+            return builder.CreateTryRawArrayAllocate(resultTy, elementType, size, normalBlock,
                 exceptionBlock, owner)
         }
         return builder.CreateRawArrayAllocate(resultTy, elementType, size, owner)
@@ -2870,9 +2897,9 @@ class CHIRDeserializerImpl {
             let normalBlock = (operands[operands.size - 1] as Block).getOrThrow()
             operands.remove(at: operands.size - 1)
             let expression = if (operands.isEmpty()) {
-                builder.CreateSpawnWithException(resultTy, value, normalBlock, exceptionBlock, owner)
+                builder.CreateTrySpawn(resultTy, value, normalBlock, exceptionBlock, owner)
             } else {
-                builder.CreateSpawnWithException(resultTy, value, operands[0], normalBlock, exceptionBlock, owner)
+                builder.CreateTrySpawn(resultTy, value, operands[0], normalBlock, exceptionBlock, owner)
             }
             if (let Some(fn) <- executeClosure) {
                 expression.SetExecuteClosure(fn)

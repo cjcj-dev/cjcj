@@ -135,7 +135,7 @@ public class GetOrThrowResultAnalysis <: Analysis<GetOrThrowResultDomain> {
 
     public override func PropagateTerminatorEffect(
         state: GetOrThrowResultDomain,
-        terminator: Terminator
+        terminator: Expression
     ): Option<Block> {
         let _ = state
         let _ = terminator

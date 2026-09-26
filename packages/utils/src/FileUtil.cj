@@ -281,8 +281,8 @@ private func canRemovePath(path: String): Bool {
     if (attributes == INVALID_FILE_ATTRIBUTES) {
         return false
     }
-    if ((attributes & FILE_ATTRIBUTE_READONLY) == 1u32 || (attributes & FILE_ATTRIBUTE_SYSTEM) == 1u32 ||
-        (attributes & FILE_ATTRIBUTE_DEVICE) == 1u32 || (attributes & FILE_ATTRIBUTE_VIRTUAL) == 1u32) {
+    if ((attributes & FILE_ATTRIBUTE_READONLY) != 0u32 || (attributes & FILE_ATTRIBUTE_SYSTEM) != 0u32 ||
+        (attributes & FILE_ATTRIBUTE_DEVICE) != 0u32 || (attributes & FILE_ATTRIBUTE_VIRTUAL) != 0u32) {
         return false
     }
     return true

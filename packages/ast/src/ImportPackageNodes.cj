@@ -415,14 +415,6 @@ public class Package <: Node {
     public var isMacroPackage: Bool = false
     public var noSubPkg: Bool = false
     public var needExported: Bool = true
-    public var interopCJApiStrategy: InteropCJStrategy = InteropCJStrategy.NONE
-    public var interopCJGenericTypeStrategy: InteropCJGenericStrategyType = InteropCJGenericStrategyType.NONE
-    public let interopCJIncludedApis: ArrayList<String> = ArrayList<String>()
-    public let interopCJExcludedApis: ArrayList<String> = ArrayList<String>()
-    public let allowedInteropCJGenericInstantiations: HashMap<String, HashMap<String, GenericTypeArguments>> = HashMap<String, HashMap<String, GenericTypeArguments>>()
-    public let interopTuples: ArrayList<String> = ArrayList<String>()
-    public var isInteropCJPackageConfig: Bool = false
-    public let lambdaPatterns: ArrayList<LambdaPattern> = ArrayList<LambdaPattern>()
     private let allDependentStdPkgs: ArrayList<String> = ArrayList<String>()
 
     public init() {
@@ -470,10 +462,6 @@ public class Package <: Node {
 
     public func GetAllDependentStdPkgs(): ArrayList<String> {
         return allDependentStdPkgs
-    }
-
-    public func GetLambdaPatterns(): ArrayList<LambdaPattern> {
-        return lambdaPatterns
     }
 
     public override func ToString(): String {

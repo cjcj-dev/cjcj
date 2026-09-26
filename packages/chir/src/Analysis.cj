@@ -72,7 +72,7 @@ public abstract class Analysis<Domain> where Domain <: AbstractDomain<Domain> {
         let _ = expression
     }
 
-    public open func PropagateTerminatorEffect(state: Domain, terminator: Terminator): Option<Block> {
+    public open func PropagateTerminatorEffect(state: Domain, terminator: Expression): Option<Block> {
         let _ = state
         let _ = terminator
         return None

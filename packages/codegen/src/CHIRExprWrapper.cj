@@ -6,20 +6,20 @@ import cjcj::chir.CHIRBuilder
 import cjcj::chir.Constant
 import cjcj::chir.Expression
 import cjcj::chir.ExprKind
-import cjcj::chir.ExprMajorKind
-import cjcj::chir.IntOpWithException
+import cjcj::chir.BinaryExpressionBase
+import cjcj::chir.TryBinaryExpression
 import cjcj::chir.Apply
-import cjcj::chir.ApplyWithException
+import cjcj::chir.TryApply
 import cjcj::chir.Attribute
 import cjcj::chir.FuncType
 import cjcj::chir.Function
 import cjcj::chir.Invoke
 import cjcj::chir.InvokeStatic
-import cjcj::chir.InvokeStaticWithException
-import cjcj::chir.InvokeWithException
+import cjcj::chir.TryInvokeStatic
+import cjcj::chir.TryInvoke
 import cjcj::chir.Type
 import cjcj::chir.TypeCast
-import cjcj::chir.TypeCastWithException
+import cjcj::chir.TryNumericCast
 import cjcj::chir.UnaryExpression
 import cjcj::chir.Value
 import cjcj::utils.{CJC_ASSERT, CJC_ASSERT_WITH_MSG, OverflowStrategy}
@@ -53,74 +53,24 @@ public class CHIRBinaryExprWrapper <: CHIRExprWrapper {
         super(binaryExpr)
     }
 
-    public init(binaryExprWithException: IntOpWithException) {
-        super(binaryExprWithException)
+    public init(tryBinaryExpr: TryBinaryExpression) {
+        super(tryBinaryExpr)
     }
 
     public func GetLHSOperand(): Value {
-        if (expr.GetExprMajorKind() == ExprMajorKind.BINARY_EXPR) {
-            return (expr as BinaryExpression).getOrThrow().GetLHSOperand()
-        }
-        return (expr as IntOpWithException).getOrThrow().GetOperand(0)
+        return (expr as BinaryExpressionBase).getOrThrow().GetLHSOperand()
     }
 
     public func GetRHSOperand(): Value {
-        if (expr.GetExprMajorKind() == ExprMajorKind.BINARY_EXPR) {
-            return (expr as BinaryExpression).getOrThrow().GetRHSOperand()
-        }
-        return (expr as IntOpWithException).getOrThrow().GetOperand(1)
+        return (expr as BinaryExpressionBase).getOrThrow().GetRHSOperand()
     }
 
     public func GetOverflowStrategy(): OverflowStrategy {
-        if (expr.GetExprMajorKind() == ExprMajorKind.BINARY_EXPR) {
-            return (expr as BinaryExpression).getOrThrow().GetOverflowStrategy()
-        }
-        return (expr as IntOpWithException).getOrThrow().GetOverflowStrategy()
+        return (expr as BinaryExpressionBase).getOrThrow().GetOverflowStrategy()
     }
 
     public func GetBinaryExprKind(): ExprKind {
-        if (expr.GetExprMajorKind() == ExprMajorKind.BINARY_EXPR) {
-            return (expr as BinaryExpression).getOrThrow().GetExprKind()
-        }
-        return (expr as IntOpWithException).getOrThrow().GetOpKind()
-    }
-}
-
-public class CHIRTypeCastWrapper <: CHIRExprWrapper {
-    public init(typeCast: TypeCast) {
-        super(typeCast)
-    }
-
-    public init(typeCastWithException: TypeCastWithException) {
-        super(typeCastWithException)
-    }
-
-    public func GetSourceValue(): Value {
-        if (expr.GetExprKind() == ExprKind.TYPECAST) {
-            return (expr as TypeCast).getOrThrow().GetSourceValue()
-        }
-        return (expr as TypeCastWithException).getOrThrow().GetSourceValue()
-    }
-
-    public func GetSourceTy(): Option<Type> {
-        if (expr.GetExprKind() == ExprKind.TYPECAST) {
-            return (expr as TypeCast).getOrThrow().GetSourceTy()
-        }
-        return (expr as TypeCastWithException).getOrThrow().GetSourceTy()
-    }
-
-    public func GetTargetTy(): Option<Type> {
-        if (expr.GetExprKind() == ExprKind.TYPECAST) {
-            return (expr as TypeCast).getOrThrow().GetTargetTy()
-        }
-        return (expr as TypeCastWithException).getOrThrow().GetTargetTy()
-    }
-
-    public func GetOverflowStrategy(): OverflowStrategy {
-        if (expr.GetExprKind() == ExprKind.TYPECAST) {
-            return (expr as TypeCast).getOrThrow().GetOverflowStrategy()
-        }
-        return OverflowStrategy.THROWING
+        return (expr as BinaryExpressionBase).getOrThrow().GetOpKind()
     }
 }
 
@@ -156,8 +106,8 @@ public class CHIRApplyWrapper <: CHIRCallExpr {
         CheckCalleeTypeArgsNum()
     }
 
-    public init(applyWithException: ApplyWithException) {
-        super(applyWithException)
+    public init(tryApply: TryApply) {
+        super(tryApply)
         CheckCalleeTypeArgsNum()
     }
 
@@ -165,21 +115,21 @@ public class CHIRApplyWrapper <: CHIRCallExpr {
         if (let Some(apply) <- (expr as Apply)) {
             return apply.GetCallee()
         }
-        return (expr as ApplyWithException).getOrThrow().GetCallee()
+        return (expr as TryApply).getOrThrow().GetCallee()
     }
 
     public override func GetArgs(): ArrayList<Value> {
         if (let Some(apply) <- (expr as Apply)) {
             return apply.GetArgs()
         }
-        return (expr as ApplyWithException).getOrThrow().GetArgs()
+        return (expr as TryApply).getOrThrow().GetArgs()
     }
 
     public override func GetInstantiatedTypeArgs(): ArrayList<Type> {
         if (let Some(apply) <- (expr as Apply)) {
             return apply.GetInstantiatedTypeArgs()
         }
-        return (expr as ApplyWithException).getOrThrow().GetInstantiatedTypeArgs()
+        return (expr as TryApply).getOrThrow().GetInstantiatedTypeArgs()
     }
 
     public override func GetThisType(fromObj: Bool): Option<Type> {
@@ -187,7 +137,7 @@ public class CHIRApplyWrapper <: CHIRCallExpr {
         if (let Some(apply) <- (expr as Apply)) {
             return apply.GetThisType()
         }
-        return (expr as ApplyWithException).getOrThrow().GetThisType()
+        return (expr as TryApply).getOrThrow().GetThisType()
     }
 
     public override func IsCalleeMethod(): Bool {
@@ -220,7 +170,7 @@ public class CHIRApplyWrapper <: CHIRCallExpr {
         let res = if (expr.GetExprKind() == ExprKind.APPLY) {
             (expr as Apply).getOrThrow().GetInstParentCustomTyOfCallee(builder)
         } else {
-            (expr as ApplyWithException).getOrThrow().GetInstParentCustomTyOfCallee(builder)
+            (expr as TryApply).getOrThrow().GetInstParentCustomTyOfCallee(builder)
         }
         CJC_ASSERT(res.isSome())
         return res.getOrThrow()
@@ -269,51 +219,51 @@ public class CHIRInvokeWrapper <: CHIRInvokeExpr {
         super(invoke)
     }
 
-    public init(invokeWithException: InvokeWithException) {
-        super(invokeWithException)
+    public init(tryInvoke: TryInvoke) {
+        super(tryInvoke)
     }
 
     public func GetObject(): Value {
         if (let Some(invoke) <- (expr as Invoke)) {
             return invoke.GetObject()
         }
-        return (expr as InvokeWithException).getOrThrow().GetObject()
+        return (expr as TryInvoke).getOrThrow().GetObject()
     }
 
     public func GetMethodName(): String {
         if (let Some(invoke) <- (expr as Invoke)) {
             return invoke.GetMethodName()
         }
-        return (expr as InvokeWithException).getOrThrow().GetMethodName()
+        return (expr as TryInvoke).getOrThrow().GetMethodName()
     }
 
     public func GetMethodType(): FuncType {
         if (let Some(invoke) <- (expr as Invoke)) {
             return invoke.GetMethodType()
         }
-        return (expr as InvokeWithException).getOrThrow().GetMethodType()
+        return (expr as TryInvoke).getOrThrow().GetMethodType()
     }
 
     public override func GetArgs(): ArrayList<Value> {
         if (let Some(invoke) <- (expr as Invoke)) {
             return invoke.GetArgs()
         }
-        return (expr as InvokeWithException).getOrThrow().GetArgs()
+        return (expr as TryInvoke).getOrThrow().GetArgs()
     }
 
     public override func GetInstantiatedTypeArgs(): ArrayList<Type> {
         if (let Some(invoke) <- (expr as Invoke)) {
             return invoke.GetInstantiatedTypeArgs()
         }
-        return (expr as InvokeWithException).getOrThrow().GetInstantiatedTypeArgs()
+        return (expr as TryInvoke).getOrThrow().GetInstantiatedTypeArgs()
     }
 
     public override func GetThisType(fromObj: Bool): Option<Type> {
         if (let Some(invoke) <- (expr as Invoke)) {
             return if (fromObj) { invoke.GetObject().GetType() } else { invoke.GetThisType() }
         }
-        let invokeWithException = (expr as InvokeWithException).getOrThrow()
-        return if (fromObj) { invokeWithException.GetObject().GetType() } else { invokeWithException.GetThisType() }
+        let tryInvoke = (expr as TryInvoke).getOrThrow()
+        return if (fromObj) { tryInvoke.GetObject().GetType() } else { tryInvoke.GetThisType() }
     }
 
     public override func IsCalleeMethod(): Bool {
@@ -333,7 +283,7 @@ public class CHIRInvokeWrapper <: CHIRInvokeExpr {
         if (let Some(invoke) <- (expr as Invoke)) {
             return invoke.GetInstSrcParentCustomTypeOfMethod(builder)
         }
-        return (expr as InvokeWithException).getOrThrow().GetInstSrcParentCustomTypeOfMethod(builder)
+        return (expr as TryInvoke).getOrThrow().GetInstSrcParentCustomTypeOfMethod(builder)
     }
 
     public override func GetThisParam(): Option<Value> {
@@ -343,16 +293,16 @@ public class CHIRInvokeWrapper <: CHIRInvokeExpr {
 
     public override func GetVirtualMethodOffset(): UInt64 {
         if (let Some(invoke) <- (expr as Invoke)) {
-            return invoke.GetVirtualMethodOffset().getOrThrow()
+            return invoke.GetVirtualMethodOffset()
         }
-        return (expr as InvokeWithException).getOrThrow().GetVirtualMethodOffset().getOrThrow()
+        return (expr as TryInvoke).getOrThrow().GetVirtualMethodOffset()
     }
 
     public func TestVritualMethodAttr(attr: Attribute): Bool {
         if (let Some(invoke) <- (expr as Invoke)) {
             return invoke.GetVirtualMethodAttr().Test(attr)
         }
-        return (expr as InvokeWithException).getOrThrow().GetVirtualMethodAttr().Test(attr)
+        return (expr as TryInvoke).getOrThrow().GetVirtualMethodAttr().Test(attr)
     }
 }
 
@@ -361,36 +311,36 @@ public class CHIRInvokeStaticWrapper <: CHIRInvokeExpr {
         super(invokeStatic)
     }
 
-    public init(invokeStaticWithException: InvokeStaticWithException) {
-        super(invokeStaticWithException)
+    public init(tryInvokeStatic: TryInvokeStatic) {
+        super(tryInvokeStatic)
     }
 
     public func GetMethodName(): String {
         if (let Some(invokeStatic) <- (expr as InvokeStatic)) {
             return invokeStatic.GetMethodName()
         }
-        return (expr as InvokeStaticWithException).getOrThrow().GetMethodName()
+        return (expr as TryInvokeStatic).getOrThrow().GetMethodName()
     }
 
     public func GetMethodType(): FuncType {
         if (let Some(invokeStatic) <- (expr as InvokeStatic)) {
             return invokeStatic.GetMethodType()
         }
-        return (expr as InvokeStaticWithException).getOrThrow().GetMethodType()
+        return (expr as TryInvokeStatic).getOrThrow().GetMethodType()
     }
 
     public func GetRTTIValue(): Value {
         if (let Some(invokeStatic) <- (expr as InvokeStatic)) {
             return invokeStatic.GetRTTIValue()
         }
-        return (expr as InvokeStaticWithException).getOrThrow().GetRTTIValue()
+        return (expr as TryInvokeStatic).getOrThrow().GetRTTIValue()
     }
 
     public override func GetArgs(): ArrayList<Value> {
         if (let Some(invokeStatic) <- (expr as InvokeStatic)) {
             return invokeStatic.GetArgs()
         }
-        return (expr as InvokeStaticWithException).getOrThrow().GetArgs()
+        return (expr as TryInvokeStatic).getOrThrow().GetArgs()
     }
 
     public override func GetThisType(fromObj: Bool): Option<Type> {
@@ -398,14 +348,14 @@ public class CHIRInvokeStaticWrapper <: CHIRInvokeExpr {
         if (let Some(invokeStatic) <- (expr as InvokeStatic)) {
             return invokeStatic.GetThisType()
         }
-        return (expr as InvokeStaticWithException).getOrThrow().GetThisType()
+        return (expr as TryInvokeStatic).getOrThrow().GetThisType()
     }
 
     public override func GetInstantiatedTypeArgs(): ArrayList<Type> {
         if (let Some(invokeStatic) <- (expr as InvokeStatic)) {
             return invokeStatic.GetInstantiatedTypeArgs()
         }
-        return (expr as InvokeStaticWithException).getOrThrow().GetInstantiatedTypeArgs()
+        return (expr as TryInvokeStatic).getOrThrow().GetInstantiatedTypeArgs()
     }
 
     public override func IsCalleeMethod(): Bool {
@@ -425,7 +375,7 @@ public class CHIRInvokeStaticWrapper <: CHIRInvokeExpr {
         if (let Some(invokeStatic) <- (expr as InvokeStatic)) {
             return invokeStatic.GetInstSrcParentCustomTypeOfMethod(builder)
         }
-        return (expr as InvokeStaticWithException).getOrThrow().GetInstSrcParentCustomTypeOfMethod(builder)
+        return (expr as TryInvokeStatic).getOrThrow().GetInstSrcParentCustomTypeOfMethod(builder)
     }
 
     public override func GetThisParam(): Option<Value> {
@@ -435,8 +385,8 @@ public class CHIRInvokeStaticWrapper <: CHIRInvokeExpr {
 
     public override func GetVirtualMethodOffset(): UInt64 {
         if (let Some(invokeStatic) <- (expr as InvokeStatic)) {
-            return invokeStatic.GetVirtualMethodOffset().getOrThrow()
+            return invokeStatic.GetVirtualMethodOffset()
         }
-        return (expr as InvokeStaticWithException).getOrThrow().GetVirtualMethodOffset().getOrThrow()
+        return (expr as TryInvokeStatic).getOrThrow().GetVirtualMethodOffset()
     }
 }

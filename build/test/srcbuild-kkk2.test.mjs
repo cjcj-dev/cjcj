@@ -41,6 +41,12 @@ function writeTuple(root, embeddedSha, compilerSha) {
   const gzip = spawnSync('gzip', ['-n', '-c', opt], {encoding: null});
   assert.equal(gzip.status, 0, gzip.stderr?.toString());
   fs.writeFileSync(path.join(root, 'opt.gz'), gzip.stdout);
+  const lld = path.join(root, 'ld.lld');
+  fs.writeFileSync(lld, 'ld.lld fixture\n');
+  const lldGzip = spawnSync('gzip', ['-n', '-c', lld], {encoding: null});
+  assert.equal(lldGzip.status, 0, lldGzip.stderr?.toString());
+  fs.writeFileSync(path.join(root, 'ld.lld.gz'), lldGzip.stdout);
+  const lldSha = crypto.createHash('sha256').update(fs.readFileSync(lld)).digest('hex');
   fs.writeFileSync(path.join(root, 'llvm-tools.manifest'), [
     'PLATFORM=linux_x86_64',
     `LLVM_SHA=${llvmSha}`,
@@ -48,6 +54,10 @@ function writeTuple(root, embeddedSha, compilerSha) {
     `FLATBUFFERS_SHA=${field('FLATBUFFERS_SHA')}`,
     `LLC_SHA256=${'1'.repeat(64)}`,
     `OPT_SHA256=${'2'.repeat(64)}`,
+    'LLD_TOOL=ld.lld',
+    `LLD_SOURCE=tuple:${llvmSha}`,
+    'LLD_VERSION=LLD 15.0.4',
+    `LLD_SHA256=${lldSha}`,
     `SHIM_SHA256=${'3'.repeat(64)}`,
     '',
   ].join('\n'));
@@ -58,6 +68,7 @@ function writeDepotChecksums(depot) {
   const files = [
     'fixed-llc/llc.gz',
     'fixed-llc/opt.gz',
+    'fixed-llc/ld.lld.gz',
     'fixed-llc/cjselfhost_llvmshim.o',
     'fixed-llc/llvm-tools.manifest',
   ];
@@ -196,6 +207,25 @@ test('source-build shell mirror fallback is visible and optionally required', ()
   );
   assert.equal(required.status, 1, required.stdout + required.stderr);
   assert.match(required.stderr, /source mirror required by CJCJ_SRCBUILD_REQUIRE_MIRRORS=1/);
+});
+
+test('source-build shell mirror contract reaches fetch on the selected bash', () => {
+  const contract = path.join(repoRoot, 'build/test/srcbuild_git_shell_contract.sh');
+  const result = spawnSync('bash', [contract], {encoding: 'utf8'});
+  process.stdout.write(result.stdout);
+  if (result.stderr) process.stderr.write(result.stderr);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /ASSERT_REACHED name=fetch_head/);
+  assert.match(result.stdout, /ASSERT_PASS name=fetch_head/);
+  assert.match(result.stdout, /ASSERT_REACHED name=fetch_sources_head/);
+  assert.match(result.stdout, /ASSERT_PASS name=fetch_sources_head/);
+  assert.match(result.stdout, /ASSERT_REACHED name=invalid_message/);
+  assert.match(result.stdout, /ASSERT_PASS name=invalid_message/);
+  assert.match(result.stdout, /ASSERT_REACHED name=duplicate_message/);
+  assert.match(result.stdout, /ASSERT_PASS name=duplicate_message/);
+  assert.match(result.stdout, /ASSERT_REACHED name=glob_exact/);
+  assert.match(result.stdout, /ASSERT_PASS name=glob_exact/);
+  assert.match(result.stdout, /CONTRACT_FAILS=0/);
 });
 
 test('kkk2 source-build profile requires mirrors while local helpers keep fallback enabled', () => {
@@ -475,6 +505,85 @@ test('shared support cache misses until step 11 writes and then hits a second wo
   assert.equal(hitB.status, 0, hitB.stderr);
   assert.match(hitB.stdout, /local support-library cache hit/);
   assert.equal(fs.readFileSync(path.join(workspaceB, 'buildtools', 'installed.marker'), 'utf8'), 'built');
+});
+
+test('fixed tuple producer checks build-tree ld.lld through its symlink target', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'source-build-lld-symlink-'));
+  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
+  const clean = path.join(repoRoot, 'build/test/fixtures/colour-ld-lld/clean');
+  const bad = path.join(repoRoot, 'build/test/fixtures/colour-ld-lld/bad');
+  assert.equal(sha256(clean), '879294b77c945f5e7ddd821fbde7b4c2fd9bf2816987a4aed99cf80f5a569f33');
+  assert.equal(sha256(bad), '29f24afc38b856aa11674d5ee87f3dfc7adcb4f31acb560d451d4b70f97947fb');
+  const invoke = 'set -euo pipefail\n'
+    + `${shellFunction('build_fixed_tuple')}\n`
+    + 'fixed_tuple_is_current() { return 0; }\n'
+    + 'seed_fixed_tuple_from_depot() { return 1; }\n'
+    + 'checkout_exact() { return 0; }\n'
+    + 'checkout_sparse_exact() { return 0; }\n'
+    + 'cmake() { return 0; }\n'
+    + 'ninja() {\n'
+    + '  local dest=""\n'
+    + '  while [[ $# -gt 0 ]]; do\n'
+    + '    if [[ $1 == -C ]]; then dest=$2; shift 2; continue; fi\n'
+    + '    shift\n'
+    + '  done\n'
+    + '  mkdir -p "$dest/bin"\n'
+    + '  if [[ $dest == *llc-build ]]; then\n'
+    + '    cp "$CLEAN_ELF" "$dest/bin/llc"\n'
+    + '    cp "$CLEAN_ELF" "$dest/bin/opt"\n'
+    + '    cp "$LLD_ELF" "$dest/bin/lld"\n'
+    + '    ln -s lld "$dest/bin/ld.lld"\n'
+    + '  else\n'
+    + '    printf \'#!/bin/sh\\nexit 0\\n\' > "$dest/flatc"\n'
+    + '    chmod +x "$dest/flatc"\n'
+    + '  fi\n'
+    + '}\n'
+    + 'clang++() {\n'
+    + '  local out=""\n'
+    + '  while [[ $# -gt 0 ]]; do\n'
+    + '    if [[ $1 == -o ]]; then out=$2; break; fi\n'
+    + '    shift\n'
+    + '  done\n'
+    + '  mkdir -p "$(dirname "$out")"\n'
+    + '  printf shim > "$out"\n'
+    + '}\n'
+    + 'publish_fixed_tuple_to_depot() { echo PUBLISHED; return 0; }\n'
+    + 'resolve_depot_tuple_root() { printf \'%s\\n\' "$1/resolved"; }\n'
+    + 'CJCJ_LLVM_DEPOT_PUBLISH=1 DRY_RUN=0 JOBS=1 REPO_ROOT=$1 STATE_ROOT=$2 '
+    + 'CJCJ_FIXED_LLVM_DIR=$3 CLEAN_ELF=$4 LLD_ELF=$5\n'
+    + 'mkdir -p "$CJCJ_FIXED_LLVM_DIR"\n'
+    + 'build_fixed_tuple\n';
+  const run = lldElf => runBash(invoke, [repoRoot, path.join(root, 'state'), path.join(root, 'out'), clean, lldElf]);
+  const link = path.join(root, 'state', 'fixed-llvm-build', 'llc-build', 'bin', 'ld.lld');
+  const cleanRun = run(clean);
+  assert.equal(fs.lstatSync(link).isSymbolicLink(), true, 'producer fixture ld.lld must stay a symlink');
+  assert.equal(fs.readlinkSync(link), 'lld');
+  console.log(`FIXED_TUPLE_SYMLINK clean_rc=${cleanRun.status}`);
+  console.log(cleanRun.stdout);
+  console.log(cleanRun.stderr);
+  assert.match(cleanRun.stdout, /NO_LIBXML2 lld/);
+  assert.doesNotMatch(cleanRun.stdout + cleanRun.stderr, /not a regular file/);
+  assert.equal(cleanRun.status, 0, cleanRun.stdout + cleanRun.stderr);
+  assert.match(cleanRun.stdout, /NO_LIBXML2 llc/);
+  assert.match(cleanRun.stdout, /NO_LIBXML2 opt/);
+  assert.match(cleanRun.stdout, /PUBLISHED/);
+  fs.rmSync(path.join(root, 'state'), {recursive: true, force: true});
+  fs.rmSync(path.join(root, 'out'), {recursive: true, force: true});
+  const badRun = run(bad);
+  console.log(`FIXED_TUPLE_SYMLINK bad_rc=${badRun.status}`);
+  console.log(badRun.stdout);
+  console.log(badRun.stderr);
+  assert.equal(fs.lstatSync(link).isSymbolicLink(), true);
+  assert.match(badRun.stderr, /DT_NEEDED libxml2 in .*\/lld\n/);
+  assert.doesNotMatch(badRun.stdout + badRun.stderr, /not a regular file/);
+  assert.equal(badRun.status, 1, badRun.stdout + badRun.stderr);
+  assert.match(badRun.stdout, /NO_LIBXML2 llc/);
+  assert.match(badRun.stdout, /NO_LIBXML2 opt/);
+  assert.doesNotMatch(badRun.stdout, /NO_LIBXML2 lld/);
+  const directAfter = spawnSync('bash', [path.join(repoRoot, 'ci/assert_no_libxml2_needed.sh'), link], {encoding: 'utf8'});
+  console.log(`FIXED_TUPLE_SYMLINK direct_symlink_rc=${directAfter.status}`);
+  assert.equal(directAfter.status, 2, directAfter.stdout + directAfter.stderr);
+  assert.match(directAfter.stderr, /not a regular file: .*\/ld\.lld\n/);
 });
 
 test('fixed tuple build stops when an exact checkout fails', t => {
@@ -975,12 +1084,12 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
   fs.writeFileSync(inputs + '/ast.a', 'ast input\n');
   fs.writeFileSync(tuple + '/MANIFEST', `LLVM_SHA=${llvmSha}\n`);
   fs.writeFileSync(tuple + '/bin/opt', `CJLLVM-COMMIT:${llvmSha}\n`);
-  for (const name of ['bin/llc', 'lib/STATIC_LLVM.txt', 'fixed-llc/cjselfhost_llvmshim.o',
-    'fixed-llc/llc.gz', 'fixed-llc/opt.gz', 'fixed-llc/llvm-tools.manifest']) {
+  for (const name of ['bin/llc', 'bin/ld.lld', 'lib/STATIC_LLVM.txt', 'fixed-llc/cjselfhost_llvmshim.o',
+    'fixed-llc/llc.gz', 'fixed-llc/opt.gz', 'fixed-llc/ld.lld.gz', 'fixed-llc/llvm-tools.manifest']) {
     fs.writeFileSync(path.join(tuple, name), 'input fixture\n');
   }
-  const payloads = ['MANIFEST', 'bin/opt', 'bin/llc', 'lib/STATIC_LLVM.txt',
-    'fixed-llc/cjselfhost_llvmshim.o', 'fixed-llc/llc.gz', 'fixed-llc/opt.gz', 'fixed-llc/llvm-tools.manifest'];
+  const payloads = ['MANIFEST', 'bin/opt', 'bin/llc', 'bin/ld.lld', 'lib/STATIC_LLVM.txt',
+    'fixed-llc/cjselfhost_llvmshim.o', 'fixed-llc/llc.gz', 'fixed-llc/opt.gz', 'fixed-llc/ld.lld.gz', 'fixed-llc/llvm-tools.manifest'];
   fs.writeFileSync(tuple + '/SHA256SUMS', payloads.map(name => `${sha256(path.join(tuple, name))}  ./${name}\n`).join(''));
   fs.copyFileSync(path.join(repoRoot, 'cjpm.toml'), path.join(root, 'cjpm.toml'));
   // Give the real bootstrap pin check an actual source identity, not a

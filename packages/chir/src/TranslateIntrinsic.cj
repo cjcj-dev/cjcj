@@ -6,8 +6,8 @@ public func TranslateIntrinsicExpression(compiler: CHIR2BCHIR, context: CHIR2BCH
     expr: Expression, withException: Bool): Unit {
     let maybeKind: Option<IntrinsicKind> = if (let Some(intrinsic) <- (expr as Intrinsic)) {
         Some(intrinsic.GetIntrinsicKind())
-    } else if (let Some(intrinsicWithException) <- (expr as IntrinsicWithException)) {
-        Some(intrinsicWithException.GetIntrinsicKind())
+    } else if (let Some(tryIntrinsic) <- (expr as TryIntrinsic)) {
+        Some(tryIntrinsic.GetIntrinsicKind())
     } else {
         None
     }

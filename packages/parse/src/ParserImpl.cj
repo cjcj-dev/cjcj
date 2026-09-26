@@ -25,7 +25,7 @@ public class ParserImpl {
     public var deadlocked: Bool = false
     public var enableCustomAnno: Bool = false
     public var forImport: Bool = false
-    public var inForeignBlock: Bool = false
+    public var foreignBlockModifiers: ArrayList<Modifier> = ArrayList<Modifier>()
     public var moduleName: String = ""
     public var currentFile: Option<File> = None
     public var curMacroCall: Option<Node> = None
@@ -34,7 +34,6 @@ public class ParserImpl {
     public var curPrimaryDeclIdent: String = ""
     public var curPrimaryDeclIdentIsRaw: Bool = false
     public var enableEH: Bool = false
-    public var enableInteropCJMapping: Bool = false
     public var parseDeclFile: Bool = false
     public var enableAttachComment: Bool = false
     public var compileOptions: GlobalOptions = GlobalOptions()
@@ -123,10 +122,26 @@ public class ParserImpl {
         return this
     }
 
+    public func SetForeignBlockModifiers(modifiers: ArrayList<Modifier>): ParserImpl {
+        foreignBlockModifiers = CopyModifierList(modifiers)
+        return this
+    }
+
+    public func CopiedForeignBlockModifiers(): ArrayList<Modifier> {
+        return CopyModifierList(foreignBlockModifiers)
+    }
+
+    private func CopyModifierList(modifiers: ArrayList<Modifier>): ArrayList<Modifier> {
+        let copied = ArrayList<Modifier>()
+        for (modifier in modifiers) {
+            copied.add(modifier)
+        }
+        return copied
+    }
+
     public func SetCompileOptions(opts: GlobalOptions): Unit {
         compileOptions = opts
         scanDepPkg = opts.scanDepPkg
-        enableInteropCJMapping = opts.enableInteropCJMapping
         enableEH = opts.enableEH
         calculateLineNum = opts.enableTimer || opts.enableMemoryCollect
         lexer.SetEHEnabled(opts.enableEH)

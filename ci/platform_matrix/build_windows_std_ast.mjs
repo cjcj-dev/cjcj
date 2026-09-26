@@ -1,32 +1,42 @@
 #!/usr/bin/env zx
-// Rebuild libcangjie-std-ast.dll for Windows as the official library plus the
-// fork's host-dispatch entry point.
+// Rebuild libcangjie-std-ast.dll for Windows from one compiler generation.
 //
 // PE binds the CJ_* macro context callbacks inside libcangjie-std-ast at
 // static link time, so the selfhost compiler cannot override them the way ELF
 // symbol interposition does on Linux. The fork's ast_api.cpp forwards those
 // callbacks through a table registered via CJ_MacroCall_RegisterHostCallbacks.
-// Everything else in the DLL is consumed as-is from the official toolchain:
-// the Cangjie half (ast.o out of libcangjie-std-ast.a) and the C++ frontend
-// support archive (libcangjie-ast-support.a). Only ast_api.cpp is recompiled,
-// with the same flags the stdlib build uses. The result is verified to carry
-// the official export surface plus exactly one extra symbol and a bitwise
-// identical import table before it is installed into the runtime artifact.
+// The Cangjie object, schema, public headers, generated header and
+// libcangjie-ast-support.a must come from the same compiler pin. A swapped
+// file is rejected before compile. The DLL is then checked for the official
+// export surface plus exactly one extra symbol and a bitwise identical import
+// table before it is installed into the runtime artifact.
 
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import {shallowClone} from '../../build/lib/git.mjs';
 
 $.stdio = 'inherit';
 const log = (message) => console.log(`[std-ast] ${message}`);
 
 const env = (name, fallback = '') => process.env[name] || fallback;
+const required = (name) => {
+  const value = process.env[name];
+  if (!value) {
+    console.error(`[std-ast] missing ${name}`);
+    process.exit(2);
+  }
+  return value;
+};
+
 const runtimeSource = path.resolve(env('RUNTIME_SOURCE', 'runtime-source'));
-const toolchain = path.resolve(env('RUNTIME_TOOLCHAIN'));
-const cangjieHome = path.resolve(env('CANGJIE_HOME'));
+const toolchain = path.resolve(required('RUNTIME_TOOLCHAIN'));
+const cangjieHome = path.resolve(required('CANGJIE_HOME'));
+const compilerSource = path.resolve(required('COMPILER_SOURCE'));
+const artifact = path.resolve(required('AST_SUPPORT_ARTIFACT'));
 const installRoot = path.resolve(env('RUNTIME_INSTALL', '.platform-ci/runtime-install/windows_release_x86_64'));
-const flatcDir = path.resolve(env('FLATC_DIR', '.windows-stdast-buildtools/flatc'));
 const work = path.resolve(env('STDAST_WORKDIR', '.windows-stdast-buildtools/stdast-work'));
+const astObject = path.resolve(required('STDLIB_AST_OBJECT'));
+const astProvenance = path.resolve(required('STDLIB_AST_PROVENANCE'));
 
 async function isFile(target) {
   try { return (await fs.stat(target)).isFile(); } catch { return false; }
@@ -38,74 +48,102 @@ async function requireFile(target, hint) {
   if (!(await isFile(target))) { console.error(`[std-ast] missing ${hint}: ${target}`); process.exit(2); }
   return target;
 }
+async function requireDir(target, hint) {
+  if (!(await isDirectory(target))) { console.error(`[std-ast] missing ${hint}: ${target}`); process.exit(2); }
+  return target;
+}
+async function fileDigest(target) {
+  return crypto.createHash('sha256').update(await fs.readFile(target)).digest('hex');
+}
+async function treeDigest(dir) {
+  const files = [];
+  async function walk(current) {
+    const entries = await fs.readdir(current, {withFileTypes: true});
+    entries.sort((left, right) => left.name.localeCompare(right.name));
+    for (const entry of entries) {
+      const child = path.join(current, entry.name);
+      if (entry.isDirectory()) await walk(child);
+      else if (entry.isFile()) files.push(child);
+    }
+  }
+  await walk(dir);
+  const hash = crypto.createHash('sha256');
+  for (const file of files) {
+    hash.update(path.relative(dir, file).split(path.sep).join('/'));
+    hash.update('\0');
+    hash.update(await fs.readFile(file));
+    hash.update('\0');
+  }
+  return hash.digest('hex');
+}
+function reject(kind, code) {
+  console.log(`WINDOWS_STDAST_GENERATION_REJECT kind=${kind}`);
+  process.exit(code);
+}
+function pass(kind) {
+  console.log(`WINDOWS_STDAST_GENERATION_PASS kind=${kind}`);
+}
+async function assertBytes(kind, code, consumed, expected) {
+  if (await fileDigest(consumed) !== await fileDigest(expected)) reject(kind, code);
+  pass(kind);
+}
 
 const stdlibNative = path.join(runtimeSource, 'stdlib', 'libs', 'std', 'ast', 'native');
 const astApiCpp = await requireFile(path.join(stdlibNative, 'ast_api.cpp'), 'fork ast_api.cpp');
-const schema = await requireFile(path.join(runtimeSource, 'stdlib', 'schema', 'NodeFormat.fbs'), 'flatbuffers schema');
-// stdlib/third_party/flatbuffers is a build-time download (gitignored), so a CI
-// checkout does not carry it; provision it with the stdlib build's own pin
-// (stdlib/third_party/cmake/Flatbuffer.cmake).
-const FLATBUFFERS_REPOSITORY = 'https://gitcode.com/openharmony/third_party_flatbuffers.git';
-const FLATBUFFERS_PIN = 'c3e4d69cbd5950e43f775ba76eadb30750d6e0b7';
 const targetLib = path.join(cangjieHome, 'lib', 'windows_x86_64_cjnative');
 const targetRuntime = path.join(cangjieHome, 'runtime', 'lib', 'windows_x86_64_cjnative');
+const runtimeLib = path.join(installRoot, 'lib', 'windows_x86_64_cjnative');
+const runtimeDllDir = path.join(installRoot, 'runtime', 'lib', 'windows_x86_64_cjnative');
 const clangxx = await requireFile(path.join(toolchain, 'bin', 'x86_64-w64-mingw32-clang++'), 'mingw clang++');
 const gccDriver = await requireFile(path.join(toolchain, 'bin', 'x86_64-w64-mingw32-gcc'), 'mingw gcc driver');
-const llvmAr = await requireFile(path.join(toolchain, 'bin', 'llvm-ar'), 'llvm-ar');
 const llvmReadobj = await requireFile(path.join(toolchain, 'bin', 'llvm-readobj'), 'llvm-readobj');
-await requireFile(path.join(targetLib, 'libcangjie-std-ast.a'), 'official Cangjie half archive');
-await requireFile(path.join(targetLib, 'libcangjie-ast-support.a'), 'official ast-support archive');
-for (const object of ['section.o', 'cjstart.o']) await requireFile(path.join(targetLib, object), 'runtime start object');
-const officialDll = await requireFile(path.join(targetRuntime, 'libcangjie-std-ast.dll'), 'official std-ast DLL');
-if (!(await isDirectory(path.join(cangjieHome, 'include', 'cangjie')))) {
-  console.error(`[std-ast] missing compiler headers under ${cangjieHome}/include`); process.exit(2);
+const schema = await requireFile(path.join(cangjieHome, 'schema', 'StdAstFormat.fbs'), 'installed schema');
+const expectedSchema = await requireFile(path.join(compilerSource, 'schema', 'StdAstFormat.fbs'), 'compiler schema');
+const generatedHeader = await requireFile(
+  path.join(cangjieHome, 'include', 'flatbuffers', 'StdAstFormat_generated.h'),
+  'installed generated header');
+const expectedHeader = await requireFile(
+  path.join(artifact, 'include', 'flatbuffers', 'StdAstFormat_generated.h'),
+  'artifact generated header');
+const publicHeaders = await requireDir(path.join(cangjieHome, 'include', 'cangjie'), 'installed public headers');
+const expectedPublicHeaders = await requireDir(path.join(artifact, 'include', 'cangjie'), 'artifact public headers');
+const archive = await requireFile(path.join(targetLib, 'libcangjie-ast-support.a'), 'installed ast-support archive');
+const expectedArchive = await requireFile(path.join(artifact, 'libcangjie-ast-support.a'), 'artifact ast-support archive');
+await requireFile(astObject, 'stdlib ast object');
+await requireFile(astProvenance, 'stdlib ast provenance');
+await requireDir(path.join(cangjieHome, 'third_party', 'flatbuffers', 'include'), 'flatbuffers headers');
+for (const object of ['section.o', 'cjstart.o']) await requireFile(path.join(runtimeLib, object), 'runtime start object');
+await requireFile(path.join(runtimeDllDir, 'libcangjie-runtime.dll'), 'runtime DLL');
+for (const dll of ['libcangjie-std-core.dll', 'libcangjie-std-collection.dll', 'libcangjie-std-sort.dll', 'libcangjie-std-math.dll', 'libboundscheck.dll']) {
+  await requireFile(path.join(targetRuntime, dll), 'stdlib DLL');
 }
+const officialDll = await requireFile(path.join(targetRuntime, 'libcangjie-std-ast.dll'), 'official std-ast DLL');
+
+await assertBytes('schema', 4, schema, expectedSchema);
+await assertBytes('header', 5, generatedHeader, expectedHeader);
+if (await treeDigest(publicHeaders) !== await treeDigest(expectedPublicHeaders)) reject('public_headers', 6);
+pass('public_headers');
+await assertBytes('archive', 7, archive, expectedArchive);
+const officialLibPrefix = path.join(cangjieHome, 'lib') + path.sep;
+if (path.resolve(astObject).startsWith(officialLibPrefix)) reject('ast_object', 8);
+const provenanceText = await fs.readFile(astProvenance, 'utf8');
+const provenanceDigest = provenanceText.match(/^schema_sha256=([0-9a-f]{64})$/m)?.[1];
+if (!provenanceDigest) {
+  console.error(`[std-ast] missing schema_sha256 in ${astProvenance}`);
+  process.exit(2);
+}
+if (provenanceDigest !== await fileDigest(schema)) reject('ast_object', 8);
+pass('ast_object');
 
 await fs.mkdir(work, {recursive: true});
 
-let flatbuffersSrc = path.join(runtimeSource, 'stdlib', 'third_party', 'flatbuffers');
-if (!(await isFile(path.join(flatbuffersSrc, 'CMakeLists.txt')))) {
-  flatbuffersSrc = path.join(work, 'flatbuffers-src');
-  if (!(await isFile(path.join(flatbuffersSrc, 'CMakeLists.txt')))) {
-    log(`fetching flatbuffers ${FLATBUFFERS_PIN}`);
-    await fs.rm(flatbuffersSrc, {recursive: true, force: true});
-    await shallowClone(FLATBUFFERS_REPOSITORY, flatbuffersSrc, {tag: FLATBUFFERS_PIN});
-  }
-}
-
-// 1. flatc for the generated serialization header (host tool, cached across runs).
-let flatc = path.join(flatcDir, 'flatc');
-if (!(await isFile(flatc))) {
-  log('building flatc from vendored flatbuffers');
-  const flatcBuild = path.join(work, 'flatbuffers-build');
-  await $`cmake -S ${flatbuffersSrc} -B ${flatcBuild} -DCMAKE_BUILD_TYPE=Release -DFLATBUFFERS_BUILD_TESTS=OFF -DFLATBUFFERS_INSTALL=OFF`;
-  await $`cmake --build ${flatcBuild} --target flatc -j`;
-  await fs.mkdir(flatcDir, {recursive: true});
-  await fs.copyFile(path.join(flatcBuild, 'flatc'), flatc);
-  await fs.chmod(flatc, 0o755);
-}
-
-const generatedInclude = path.join(work, 'include');
-await fs.mkdir(path.join(generatedInclude, 'flatbuffers'), {recursive: true});
-await $`${flatc} --no-warnings -c -o ${path.join(generatedInclude, 'flatbuffers')} ${schema}`;
-
-// 2. Compile the fork ast_api.cpp with the stdlib build's flag set
-// (stdlib libs/std/ast/native + windows toolchain flags).
 const astApiObj = path.join(work, 'ast_api.cpp.obj');
-// Same launcher as the cmake-driven builds (sccache on GitHub Actions); empty when unset.
 const cxxLauncher = process.env.CMAKE_CXX_COMPILER_LAUNCHER ? [process.env.CMAKE_CXX_COMPILER_LAUNCHER] : [];
-await $`${cxxLauncher} ${clangxx} -c ${astApiCpp} -o ${astApiObj} -DCANGJIE_CODEGEN_CJNATIVE_BACKEND -DNDEBUG -DRELEASE -D__windows__ -w -Wdate-time -Wno-int-conversion -fno-omit-frame-pointer -pipe -fno-common -fno-strict-aliasing -m64 -Wa,-mbig-obj -fstack-protector-all -D_FORTIFY_SOURCE=2 -O2 -fPIC -std=c++17 -I${path.join(cangjieHome, 'include')} -I${generatedInclude} -I${path.join(flatbuffersSrc, 'include')}`;
+await $`${cxxLauncher} ${clangxx} -c ${astApiCpp} -o ${astApiObj} -DCANGJIE_CODEGEN_CJNATIVE_BACKEND -DNDEBUG -DRELEASE -D__windows__ -w -Wdate-time -Wno-int-conversion -fno-omit-frame-pointer -pipe -fno-common -fno-strict-aliasing -m64 -Wa,-mbig-obj -fstack-protector-all -D_FORTIFY_SOURCE=2 -O2 -fPIC -std=c++17 -I${path.join(cangjieHome, 'include')} -I${path.join(cangjieHome, 'third_party', 'flatbuffers', 'include')}`;
 
-// 3. The official Cangjie half: single-member archive holding ast.o.
-await $({cwd: work})`${llvmAr} x ${path.join(targetLib, 'libcangjie-std-ast.a')} ast.o`;
-const astO = await requireFile(path.join(work, 'ast.o'), 'extracted ast.o');
-
-// 4. Link with the stdlib build's DLL recipe.
 const rebuilt = path.join(work, 'libcangjie-std-ast.dll');
-await $`${gccDriver} ${astO} ${astApiObj} -L${targetLib} -lcangjie-ast-support -lstdc++ -lpthread -L${targetRuntime} -l:libcangjie-std-core.dll -l:libcangjie-std-collection.dll -l:libcangjie-std-sort.dll -l:libcangjie-std-math.dll -Wl,--no-insert-timestamp -Wl,--export-all-symbols ${path.join(targetLib, 'section.o')} ${path.join(targetLib, 'cjstart.o')} -l:libcangjie-runtime.dll -static -fstack-protector-all -lclang_rt-builtins -l:libboundscheck.dll -lm -Wl,--no-undefined -s -shared --target=x86_64-w64-mingw32 -B${path.join(toolchain, 'bin')} --sysroot=${toolchain} -o ${rebuilt}`;
+await $`${gccDriver} ${astObject} ${astApiObj} ${archive} -lstdc++ -lpthread -L${runtimeDllDir} -L${targetRuntime} -l:libcangjie-std-core.dll -l:libcangjie-std-collection.dll -l:libcangjie-std-sort.dll -l:libcangjie-std-math.dll -Wl,--no-insert-timestamp -Wl,--export-all-symbols ${path.join(runtimeLib, 'section.o')} ${path.join(runtimeLib, 'cjstart.o')} -l:libcangjie-runtime.dll -static -fstack-protector-all -lclang_rt-builtins -l:libboundscheck.dll -lm -Wl,--no-undefined -s -shared --target=x86_64-w64-mingw32 -B${path.join(toolchain, 'bin')} --sysroot=${toolchain} -o ${rebuilt}`;
 
-// 5. Fail-closed verification against the official DLL: export surface must be
-// official + exactly CJ_MacroCall_RegisterHostCallbacks, import table identical.
 async function readobj(kind, dll) {
   const result = await $({stdio: 'pipe'})`${llvmReadobj} ${kind} ${dll}`;
   return result.stdout.split('\n');
@@ -138,8 +176,6 @@ if (added.length !== 1 || added[0] !== HOST_DISPATCH_EXPORT || removed.length !=
   process.exit(3);
 }
 
-// 6. Install into the runtime artifact consumed by package_sdk.mjs, which
-// copies runtime/lib/windows_x86_64_cjnative over the staged official SDK.
 const destination = path.join(installRoot, 'runtime', 'lib', 'windows_x86_64_cjnative');
 await fs.mkdir(destination, {recursive: true});
 await fs.copyFile(rebuilt, path.join(destination, 'libcangjie-std-ast.dll'));

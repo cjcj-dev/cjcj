@@ -196,7 +196,7 @@ extend ParserImpl {
         Walker(file, visitPre: visitPre).Walk()
     }
 
-    private func ParseForeignDecls(modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): ArrayList<Decl> {
+    func ParseForeignDecls(modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): ArrayList<Decl> {
         let ret = ArrayList<Decl>()
         if (!Skip(TokenKind.LCURL)) {
             ret.add(ParseDecl(ScopeKind.TOPLEVEL, modifiers, annos))
@@ -205,7 +205,7 @@ extend ParserImpl {
         CheckNoDeprecatedAnno(annos, "foreign block")
         let leftCurlPos = lastToken.Begin()
         SkipBlank(TokenKind.SEMI)
-        inForeignBlock = true
+        SetForeignBlockModifiers(modifiers)
         while (true) {
             if (Skip(TokenKind.RCURL)) {
                 break
@@ -220,7 +220,7 @@ extend ParserImpl {
             ret.add(ParseDecl(ScopeKind.TOPLEVEL, clonedModifiers, clonedAnnos))
             SkipBlank(TokenKind.SEMI)
         }
-        inForeignBlock = false
+        foreignBlockModifiers.clear()
         return ret
     }
 
@@ -1039,7 +1039,7 @@ extend ParserImpl {
         let outerDecl = decl.outerDecl.getOrThrow()
         if (outerDecl.TestAttr(Attribute.JAVA_MIRROR_SUBTYPE) &&
             !outerDecl.TestAttr(Attribute.JAVA_MIRROR)) {
-            if (decl.GetGeneric().isSome() && !decl.TestAttr(Attribute.JAVA_CJ_MAPPING)) {
+            if (decl.GetGeneric().isSome()) {
                 FFIParserImpl(this).Java().DiagJavaImplCannotBeGeneric(decl)
                 return
             }
@@ -2148,7 +2148,6 @@ extend ParserImpl {
             RevertPrimaryDecl()
             ret.end = lastToken.End()
         }
-        CheckCJMappingAttr(ret)
         return ret
     }
 
@@ -2167,7 +2166,6 @@ extend ParserImpl {
             ParseClassLikeBody(ret, ScopeKind.INTERFACE_BODY)
             ret.end = lastToken.End()
         }
-        CheckCJMappingAttr(ret)
         return ret
     }
 
@@ -2199,7 +2197,6 @@ extend ParserImpl {
             RevertPrimaryDecl()
             ret.end = lastToken.End()
         }
-        CheckCJMappingAttr(ret)
         return ret
     }
 
@@ -2290,7 +2287,6 @@ extend ParserImpl {
             }
             ret.end = ret.rightCurlPos + 1
         }
-        CheckCJMappingAttr(ret)
         return ret
     }
 
@@ -2434,37 +2430,6 @@ extend ParserImpl {
         }
         if (Skip(TokenKind.WHERE)) {
             ParseConstraints(ret)
-        }
-    }
-
-    // C++ anchor: cangjie_compiler/src/Parse/ParseDecl.cpp:829-857
-    public func CheckCJMappingAttr(decl: Decl): Unit {
-        if (!enableInteropCJMapping) {
-            return
-        }
-        if (decl.TestAnyAttr(Attribute.JAVA_MIRROR, Attribute.JAVA_MIRROR_SUBTYPE) ||
-            decl.TestAnyAttr(Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_IMPL)) {
-            return
-        }
-        // Currently only support struct decl, enum decl, class decl interface decl, extend decl.
-        let isCJMappingClass = decl.astKind == ASTKind.CLASS_DECL && !decl.TestAttr(Attribute.ABSTRACT)
-        // Support java type.
-        if (decl.astKind == ASTKind.STRUCT_DECL || decl.astKind == ASTKind.ENUM_DECL || isCJMappingClass ||
-            decl.astKind == ASTKind.INTERFACE_DECL) {
-            if (!decl.TestAttr(Attribute.PUBLIC)) {
-                return
-            }
-            match (compileOptions.targetInteropLanguage) {
-                case InteropLanguage.Java => decl.EnableAttr(Attribute.JAVA_CJ_MAPPING)
-                case InteropLanguage.ObjC => decl.EnableAttr(Attribute.OBJ_C_CJ_MAPPING)
-                case _ => ()
-            }
-        }
-        if (decl.astKind == ASTKind.EXTEND_DECL) {
-            match (compileOptions.targetInteropLanguage) {
-                case InteropLanguage.Java => decl.EnableAttr(Attribute.JAVA_CJ_MAPPING)
-                case _ => ()
-            }
         }
     }
 
@@ -3341,7 +3306,7 @@ extend ParserImpl {
         }
         let modifiers = SortModifierByPos(decl.modifiers)
         var index: Int64 = 0
-        if (inForeignBlock) {
+        if (!foreignBlockModifiers.isEmpty()) {
             while (index < modifiers.size && modifiers[index].modifier != TokenKind.FOREIGN) {
                 index++
             }
