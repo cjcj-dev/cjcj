@@ -2,8 +2,30 @@ package cjcj::chir
 
 import cjcj::utils.CJC_ASSERT
 import std.collection.*
+import std.core.Box as CoreBox
 
 // C++ TypeAnalysis.h:14-61 and TypeAnalysis.cpp:14-75.
+public enum DevirtualTyKind {
+    | SUBTYPE_OF | EXACTLY
+}
+
+public func DevirtualTyKindIndex(kind: DevirtualTyKind): Int64 {
+    return match (kind) {
+        case DevirtualTyKind.SUBTYPE_OF => 0
+        case DevirtualTyKind.EXACTLY => 1
+    }
+}
+
+extend DevirtualTyKind <: Equatable<DevirtualTyKind> {
+    public operator func ==(right: DevirtualTyKind): Bool {
+        return DevirtualTyKindIndex(this) == DevirtualTyKindIndex(right)
+    }
+
+    public operator func !=(right: DevirtualTyKind): Bool {
+        return !(this == right)
+    }
+}
+
 public class TypeValue <: HasEqual<TypeValue> {
     protected let kind: DevirtualTyKind
     protected let baseLineType: Type
@@ -72,10 +94,6 @@ public class TypeValue <: HasEqual<TypeValue> {
 public type TypeValueDomain = ValueDomain<TypeValue>
 public type TypeDomain = State<TypeValueDomain, FullStatePool<TypeValueDomain>>
 
-// C++ TypeAnalysis.cpp:108-115 explicit TypeValueDomain instantiation.
-public let globalState = ValueAnalysisGlobals<TypeValueDomain, FullStatePool<TypeValueDomain>>()
-
-// C++ TypeAnalysis.cpp:79-103.
 private func GetRealGenericRetType(apply: Apply, genericType: Type,
     calleeFunc: Function, builder: CHIRBuilder): Option<Type> {
     let instTypes = apply.GetInstantiatedTypeArgs()
@@ -93,8 +111,6 @@ private func GetRealGenericRetType(apply: Apply, genericType: Type,
             let defGenericParams = def.GetGenericTypeParams()
             var customType = (thisType as CustomType).getOrThrow()
             if (defGenericParams.size != customType.GetGenericArgs().size) {
-                // The cjcj-only instantiated round can freeze an inherited Apply whose thisType is the subtype.
-                // C++ Utils.cpp:1410-1413 projects it to the callee's instantiated declared parent.
                 thisType = GetInstParentCustomTypeForApplyCallee(apply, builder).getOrThrow().StripAllRefs()
                 customType = (thisType as CustomType).getOrThrow()
             }
@@ -110,7 +126,9 @@ private func GetRealGenericRetType(apply: Apply, genericType: Type,
     return Some(ReplaceRawGenericArgType(genericType, genericMap, builder))
 }
 
-// C++ TypeAnalysis.h:93-155 and TypeAnalysis.cpp:117-477.
+// C++ TypeAnalysis.cpp:108-115 explicit TypeValueDomain instantiation.
+public let globalState = ValueAnalysisGlobals<TypeValueDomain, FullStatePool<TypeValueDomain>>()
+
 public class TypeAnalysis <: ValueAnalysis<TypeValueDomain, FullStatePool<TypeValueDomain>> {
     private let realRetTyMap: HashMap<Int64, Type>
     private let constMemberTypeMap: HashMap<Int64, HashMap<Int64, Type>>
@@ -119,8 +137,8 @@ public class TypeAnalysis <: ValueAnalysis<TypeValueDomain, FullStatePool<TypeVa
         devirtInfo: DevirtualizationInfo) {
         super(functionValue, builder, globalState,
             { literal: LiteralValue => TypeAnalysis.HandleNonNullLiteralValue(literal) }, isDebug: isDebug)
-        realRetTyMap = devirtInfo.GetReturnTypeMap()
-        constMemberTypeMap = devirtInfo.GetConstMemberMap()
+        realRetTyMap = devirtInfo.returnTypeMap
+        constMemberTypeMap = devirtInfo.constMemberTypeMap
     }
 
     public override func GetAnalysisName(): String {
@@ -146,28 +164,20 @@ public class TypeAnalysis <: ValueAnalysis<TypeValueDomain, FullStatePool<TypeVa
         return TypeValueDomain(true)
     }
 
-    public static func CheckFuncHasInvoke(body: BlockGroup): Bool {
-        let blocks = body.GetBlocks()
-        for (block in blocks) {
-            let expressions = block.GetNonTerminatorExpressions()
-            var index: Int64 = 0
-            while (index < expressions.size) {
-                if (expressions[index].GetExprKind() == ExprKind.LAMBDA) {
-                    if (CheckFuncHasInvoke((expressions[index] as Lambda).getOrThrow().GetBody().getOrThrow())) {
-                        return true
-                    }
-                }
-                if (expressions[index].GetExprKind() == ExprKind.INVOKE) {
-                    return true
-                }
-                index++
+    public static func CheckFuncHasInvoke(fn: Function): Bool {
+        let found = CoreBox<Bool>(false)
+        Visitor.Visit(fn, { expr =>
+            if (expr.GetExprKind() == ExprKind.INVOKE || expr.GetExprKind() == ExprKind.TRY_INVOKE) {
+                found.value = true
+                return VisitResult.STOP
             }
-        }
-        return false
+            return VisitResult.CONTINUE
+        })
+        return found.value
     }
 
     public static func Filter(method: Function): Bool {
-        if (!CheckFuncHasInvoke(method.GetBody().getOrThrow())) {
+        if (!CheckFuncHasInvoke(method)) {
             return false
         }
         if (IsSTDFunction(method)) {
@@ -185,7 +195,10 @@ public class TypeAnalysis <: ValueAnalysis<TypeValueDomain, FullStatePool<TypeVa
 
     public override func HandleNormalExpressionEffect(state: TypeDomain, expression: Expression): Unit {
         match (expression.GetExprKind()) {
-            case ExprKind.CLASS_STATIC_CAST | ExprKind.NUMERIC_CAST =>
+            case ExprKind.CLASS_STATIC_CAST =>
+                HandleClassStaticCastExpr(state, (expression as ClassStaticCast).getOrThrow())
+                return
+            case ExprKind.NUMERIC_CAST =>
                 HandleTypeCastExpr(state, (expression as TypeCast).getOrThrow())
                 return
             case ExprKind.BOX =>
@@ -256,27 +269,37 @@ public class TypeAnalysis <: ValueAnalysis<TypeValueDomain, FullStatePool<TypeVa
             TypeValue(DevirtualTyKind.SUBTYPE_OF, (resultType as ClassType).getOrThrow()))
     }
 
-    public override func HandleApplyExpr(state: TypeDomain, apply: Apply,
-        refObj: Option<Value>): Unit {
-        let callee = apply.GetCallee()
-        if (!callee.IsFuncWithBody()) {
-            HandleDefaultExpr(state, apply)
-            return
-        }
+    public override func HandleTryInvokeTerminator(state: TypeDomain,
+        invoke: TryInvoke, refObj: Option<Value>): Option<Block> {
+        let ty = invoke.GetResult().getOrThrow().GetType().getOrThrow().StripAllRefs()
+        if (ty.IsClass()) { state.Update(refObj.getOrThrow(), TypeValue(DevirtualTyKind.SUBTYPE_OF, ty)) }
+        return None
+    }
 
-        let calleeFunc = (callee as Function).getOrThrow()
-        let realRetTyOption = realRetTyMap.get(calleeFunc.nodeId)
-        if (realRetTyOption.isNone()) {
-            HandleDefaultExpr(state, apply)
-            return
-        }
-        var realRetTy = realRetTyOption.getOrThrow()
+    public override func HandleApplyExpr(state: TypeDomain, apply: Apply, refObj: Option<Value>): Unit {
+        HandleApplyBase(state, ApplyBase(apply), refObj)
+    }
+
+    public override func HandleTryApplyTerminator(state: TypeDomain,
+        apply: TryApply, refObj: Option<Value>): Option<Block> {
+        HandleApplyBase(state, ApplyBase(apply), refObj)
+        return None
+    }
+
+    private func HandleApplyBase(state: TypeDomain, apply: ApplyBase, refObj: Option<Value>): Unit {
+        let callee = apply.GetCallee()
+        if (!callee.IsFuncWithBody()) { HandleDefaultExpr(state, apply.GetRawExpr()); return }
+        let knownRetTy = realRetTyMap.get(callee.nodeId)
+        if (knownRetTy.isNone()) { return }
+        var realRetTy = knownRetTy.getOrThrow()
         if (realRetTy.IsGenericRelated()) {
-            let genericRetTy = GetRealGenericRetType(apply, realRetTy, calleeFunc, builder)
-            if (genericRetTy.isNone()) {
-                return
+            if (let Some(plain) <- (apply.GetRawExpr() as Apply)) {
+                let genericRetTy = GetRealGenericRetType(plain, realRetTy, (callee as Function).getOrThrow(), builder)
+                if (genericRetTy.isNone()) { return }
+                realRetTy = genericRetTy.getOrThrow()
+            } else {
+                realRetTy = ReplaceRawGenericArgType(realRetTy, GetInstMapFromApply(apply, builder), builder)
             }
-            realRetTy = genericRetTy.getOrThrow()
         }
         let result: Option<Value> = match (apply.GetResult()) {
             case Some(value) => Some(value)
@@ -288,7 +311,44 @@ public class TypeAnalysis <: ValueAnalysis<TypeValueDomain, FullStatePool<TypeVa
     private func HandleBoxExpr(state: TypeDomain, boxExpr: Box): Unit {
         let result = boxExpr.GetResult().getOrThrow()
         let obj = state.GetReferencedObjAndSetToTop(result, expr: Some(boxExpr))
-        state.Propagate(boxExpr.GetSourceValue(), obj)
+        let srcTy = boxExpr.GetSourceType().getOrThrow().StripAllRefs()
+        if (srcTy.IsValueType()) {
+            state.Update(obj, TypeValue(DevirtualTyKind.EXACTLY, srcTy))
+        } else {
+            state.Propagate(boxExpr.GetSourceValue(), obj)
+        }
+    }
+
+    // 6e125215 TypeAnalysis.cpp HandleClassStaticCastExpr; numeric casts do not enter here.
+    private func HandleClassStaticCastExpr(state: TypeDomain, typecast: ClassStaticCast): Unit {
+        let srcTy = typecast.GetSourceType().getOrThrow().StripAllRefs()
+        let tgtTy = typecast.GetTargetType().getOrThrow().StripAllRefs()
+        let result = typecast.GetResult().getOrThrow()
+        if (result.GetType().getOrThrow().IsRef()) {
+            state.GetReferencedObjAndSetToTop(result, expr: Some(typecast))
+        } else {
+            state.SetToTopOrTopRef(result, false)
+        }
+        if (!srcTy.IsClass() || !tgtTy.IsClass()) {
+            return
+        }
+        let srcObj = state.CheckAbstractObjectRefBy(typecast.GetSourceValue()) ?? return
+        let srcVal = state.CheckAbstractValue(srcObj) ?? return
+        let absTy = srcVal.GetSpecificType()
+        if (!absTy.IsClass()) { return }
+        let absClsTy = (absTy as ClassType).getOrThrow()
+        let tgtClsTy = (tgtTy as ClassType).getOrThrow()
+        if (absClsTy.IsEqualOrSubTypeOf(tgtClsTy, builder)) {
+            state.Propagate(typecast.GetSourceValue(), result)
+            return
+        }
+        if (tgtClsTy.IsEqualOrSubTypeOf(absClsTy, builder)) {
+            var resVal: Value = result
+            if (result.GetType().getOrThrow().IsRef()) {
+                resVal = state.CheckAbstractObjectRefBy(result).getOrThrow()
+            }
+            state.Update(resVal, TypeValue(DevirtualTyKind.SUBTYPE_OF, tgtClsTy))
+        }
     }
 
     private func HandleTypeCastExpr(state: TypeDomain, typecast: TypeCast): Unit {
@@ -296,7 +356,6 @@ public class TypeAnalysis <: ValueAnalysis<TypeValueDomain, FullStatePool<TypeVa
             typecast.GetSourceType().getOrThrow(), typecast.GetTargetType().getOrThrow())
     }
 
-    // C++ TypeAnalysis.cpp:287-347 template body.
     private func HandleTypeCastExprImpl(state: TypeDomain, typecast: Expression,
         sourceValue: Value, sourceType: Type, targetType: Type): Unit {
         var srcTy = sourceType
@@ -313,11 +372,9 @@ public class TypeAnalysis <: ValueAnalysis<TypeValueDomain, FullStatePool<TypeVa
         } else {
             state.SetToTopOrTopRef(result, false)
         }
-
         if (!srcTy.IsClass() || !tgtTy.IsClass()) {
             return
         }
-
         let checkSubClass = { sourceTy: ClassType, targetTy: ClassType =>
             let fatherTy = LeastCommonSuperClass(sourceTy, targetTy, builder)
             if (fatherTy.isSome() && fatherTy.getOrThrow() == targetTy) {
@@ -326,7 +383,6 @@ public class TypeAnalysis <: ValueAnalysis<TypeValueDomain, FullStatePool<TypeVa
                 targetTy
             }
         }
-
         let srcAbsVal = state.CheckAbstractObjectRefBy(sourceValue)
         if (srcAbsVal.isNone()) {
             return
@@ -335,7 +391,6 @@ public class TypeAnalysis <: ValueAnalysis<TypeValueDomain, FullStatePool<TypeVa
         if (srcVal.isNone()) {
             return
         }
-
         if (srcVal.getOrThrow().GetTypeKind() == DevirtualTyKind.EXACTLY) {
             state.Propagate(sourceValue, result)
             return
@@ -346,14 +401,12 @@ public class TypeAnalysis <: ValueAnalysis<TypeValueDomain, FullStatePool<TypeVa
             if (srcVal.getOrThrow().GetSpecificType() == resTy) {
                 state.Propagate(sourceValue, result)
                 return
-            } else {
-                var resVal: Value = result
-                if (result.GetType().getOrThrow().IsRef()) {
-                    resVal = state.CheckAbstractObjectRefBy(result).getOrThrow()
-                }
-                state.Update(resVal, TypeValue(DevirtualTyKind.SUBTYPE_OF, tgtClsTy))
-                return
             }
+            var resVal: Value = result
+            if (result.GetType().getOrThrow().IsRef()) {
+                resVal = state.CheckAbstractObjectRefBy(result).getOrThrow()
+            }
+            state.Update(resVal, TypeValue(DevirtualTyKind.SUBTYPE_OF, tgtClsTy))
         }
     }
 

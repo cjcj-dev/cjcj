@@ -3276,29 +3276,19 @@ public class Translator {
         }
         let parentBlock = curLambda.GetParentBlock() ??
             throw IllegalStateException("faithful AST2CHIR member wrapper lambda has no parent block")
-        var result: Value
-        var expressions = ArrayList<Expression>()
         if (let Some(refTy) <- (rawThisTy as RefType)) {
-            if (refTy.GetBaseType().IsStruct() && refTy.GetBaseType() == expectedTy) {
-                let createdLoad3180 = builder.CreateLoad(expectedTy, rawThis, parentBlock)
-                expressions.add(createdLoad3180)
-                result = RequireResult(createdLoad3180)
-            } else {
-                let (castedThis, createdExpressions) = TypeCastOrBoxIfNeeded(rawThis, expectedTy, builder, parentBlock)
-                expressions = createdExpressions
-                result = castedThis
-            }
-        } else {
-            let (castedThis, createdExpressions) = TypeCastOrBoxIfNeeded(rawThis, expectedTy, builder, parentBlock)
-            expressions = createdExpressions
-            result = castedThis
-        }
-        if (result != rawThis) {
-            for (expression in expressions) {
-                expression.MoveBefore(curLambda)
+            if (refTy.GetBaseType().IsStruct()) {
+                CJC_ASSERT(refTy.GetBaseType() == expectedTy)
+                let load = builder.CreateLoad(expectedTy, rawThis, parentBlock)
+                load.MoveBefore(curLambda)
+                return RequireResult(load)
             }
         }
-        return result
+        let (castedThis, createdExpressions) = TypeCastOrBoxIfNeeded(rawThis, expectedTy, builder, parentBlock)
+        for (expression in createdExpressions) {
+            expression.MoveBefore(curLambda)
+        }
+        return castedThis
     }
 
     private func GetExpectedFuncFromDef(def: CustomTypeDef, funcName: String, instFuncType: FuncType, isStatic: Bool,

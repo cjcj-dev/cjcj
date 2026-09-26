@@ -4362,7 +4362,7 @@ public class FaithfulAST2CHIR {
         fn.EnableAttr(Attribute.IMPORTED)
         SetFuncAttributeAndLinkageType(funcDecl, fn)
         if (HasImplicitThisParam(funcDecl)) {
-            let thisParam = builder.CreateParameter(funcTy.GetParamTypes()[0], INVALID_LOCATION, fn)
+            let thisParam = builder.CreateParameter(funcTy.GetParamType(0), INVALID_LOCATION, fn)
             thisParam.SetSrcCodeIdentifier("this")
         }
         let body = funcDecl.funcBody ??
@@ -4464,7 +4464,7 @@ public class FaithfulAST2CHIR {
         fn.EnableAttr(Attribute.IMPORTED)
         SetFuncAttributeAndLinkageType(funcDecl, fn)
         if (HasImplicitThisParam(funcDecl)) {
-            let thisParam = builder.CreateParameter(funcTy.GetParamTypes()[0], INVALID_LOCATION, fn)
+            let thisParam = builder.CreateParameter(funcTy.GetParamType(0), INVALID_LOCATION, fn)
             thisParam.SetSrcCodeIdentifier("this")
         }
         let body = funcDecl.funcBody ??
