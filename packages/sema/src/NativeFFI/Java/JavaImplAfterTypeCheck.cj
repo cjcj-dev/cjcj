@@ -191,7 +191,7 @@ private func TryGetSuperCall(ctor: FuncDecl): Option<CallExpr> {
 }
 
 private func GetCtorId(ctor: FuncDecl): Int64 {
-    let decl = (ctor.outerDecl as ClassLikeDecl).getOrThrow()
+    let decl = (ctor.outerDecl.getOrThrow() as ClassLikeDecl).getOrThrow()
     let members = decl.GetMemberDecls()
     var i: Int64 = 0
     for (member in members) {
@@ -425,7 +425,7 @@ public class DesugarJavaImplSuperConstructorCall {
         let funcBody = ctor.funcBody.getOrThrow()
         CJC_ASSERT_WITH_MSG(!funcBody.paramLists.isEmpty(), "paramLists cannot be empty")
         let paramList = funcBody.paramLists[0]
-        let decl = (ctor.outerDecl as ClassLikeDecl).getOrThrow()
+        let decl = (ctor.outerDecl.getOrThrow() as ClassLikeDecl).getOrThrow()
         let superCall = TryGetSuperCall(ctor)
         if (let None <- superCall) {
             return

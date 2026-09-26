@@ -200,6 +200,22 @@ def main():
     mirror["passed"] = all(mirror["assertions"].values())
     result["cases"]["mirror_user"] = mirror
 
+    impl = compile_dump("impl_user")
+    impl_ast = impl.pop("ast")
+    init_sec = brace_section(impl_ast, "FuncDecl: Java_demo_Child_initCJObject")
+    ping_sec = brace_section(impl_ast, "FuncDecl: Java_demo_Child_pingi")
+    delete_sec = brace_section(impl_ast, "FuncDecl: Java_demo_Child_deleteCJObject")
+    impl["assertions"] = {
+        "exit": impl["rc"] == 0,
+        "init_c": "NO_MANGLE" in init_sec and "UNSAFE, C," in init_sec,
+        "ping_c": "NO_MANGLE" in ping_sec and "UNSAFE, C," in ping_sec,
+        "delete_c": "NO_MANGLE" in delete_sec and "UNSAFE, C," in delete_sec,
+        "delete_remove": "Java_CFFI_removeFromRegistry" in delete_sec,
+        "no_alias_sig": "TypeAlias-JNIEnv_ptr" not in init_sec and "TypeAlias-jobject" not in init_sec,
+    }
+    impl["passed"] = all(impl["assertions"].values())
+    result["cases"]["impl_user"] = impl
+
     result["uptime_after"] = subprocess.check_output(["uptime"], text=True).strip()
     result["passed"] = all(row.get("passed", row["rc"] == 0) for row in result["cases"].values())
     (a.out / "result.json").write_text(json.dumps(result, indent=2) + "\n")

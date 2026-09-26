@@ -351,26 +351,38 @@ public class JavaDesugarManager {
     public func ProcessJavaMirrorImplStages(ctx: AfterTypeCheckContext, desugarPropRef: (Node) -> Unit): Unit {
         Ensure(ctx)
         GenerateJavaReferenceFieldInJObject(BridgeLib()).Process(ctx)
+        ctx.FlushGeneratedDecls()
         GenerateJavaMirrorApiStub(typeManager, BridgeLib(), BridgeUtils(), memberMap).Process(ctx)
+        ctx.FlushGeneratedDecls()
         GenerateJavaImplApiStub(typeManager, BridgeLib(), BridgeJni()).Process(ctx)
+        ctx.FlushGeneratedDecls()
         for (file in ctx.pkg.files) {
             GenerateInMirrors(file)
         }
         GenerateInJavaImplRegistryCompanion(typeManager, BridgeLib()).Process(ctx)
+        ctx.FlushGeneratedDecls()
         DesugarJavaImplSuperConstructorCall(typeManager, BridgeLib(), BridgeJni(), diag, BridgeUtils()).Process(ctx)
+        ctx.FlushGeneratedDecls()
         GenerateInJavaImplReferenceWrapper(typeManager, importManager, BridgeLib(), ASTFactory(BridgeLib()),
             BridgeUtils()).Process(ctx)
+        ctx.FlushGeneratedDecls()
         DesugarJavaImplSuperMethodCall(BridgeLib(), ASTFactory(BridgeLib()), BridgeUtils()).Process(ctx)
+        ctx.FlushGeneratedDecls()
         RewriteJavaImplReferenceWrapperFields(typeManager, BridgeUtils(), desugarPropRef).Process(ctx)
+        ctx.FlushGeneratedDecls()
         GenerateNativeBridgeForJavaImpl(typeManager, importManager, BridgeLib(), BridgeJni()).Process(ctx)
+        ctx.FlushGeneratedDecls()
         let ilib = BridgeLib()
         PopulateJavaMirrorStubs(typeManager, ilib, BridgeUtils(), ASTFactory(ilib)).Process(ctx)
+        ctx.FlushGeneratedDecls()
         GenerateJavaSourceCode(ctx)
     }
 
     public func ProcessCallSiteDesugarStages(ctx: AfterTypeCheckContext): Unit {
         Ensure(ctx)
         DesugarJArray(typeManager, importManager, BridgeLib()).Process(ctx)
+        ctx.FlushGeneratedDecls()
         DesugarTypeCheckingAndCasting(BridgeLib(), diag, BridgeUtils()).Process(ctx)
+        ctx.FlushGeneratedDecls()
     }
 }

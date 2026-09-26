@@ -9,6 +9,15 @@ import cjcj::sema.NativeFFI.{CreateType, GetJavaFQName, GetJavaMemberName, GetMa
     GetMangledMethodName, Utils}
 import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CJC_ASSERT_WITH_MSG}
 
+private func GetUnderlyingTy(ty: Ty): Ty {
+    if (let Some(aliasTy) <- (ty as TypeAliasTy)) {
+        let decl = aliasTy.declPtr.getOrThrow()
+        let typeNode = decl.typeNode.getOrThrow()
+        return GetUnderlyingTy(typeNode.GetTy().getOrThrow())
+    }
+    return ty
+}
+
 public class JniBridge {
     private let typeManager: TypeManager
     private let importManager: SemaImportManager
@@ -47,11 +56,11 @@ public class JniBridge {
         let _ = importManager
         let _ = mangler
         let _ = utils
-        return jniEnvPtrDecl.getOrThrow().GetTy().getOrThrow()
+        return GetUnderlyingTy(jniEnvPtrDecl.getOrThrow().GetTy().getOrThrow())
     }
 
     private func GetJniJobjectDeclTy(): Ty {
-        return jniJobjectDecl.getOrThrow().GetTy().getOrThrow()
+        return GetUnderlyingTy(jniJobjectDecl.getOrThrow().GetTy().getOrThrow())
     }
 
     private func GetRegistryIdJavaTy(): Ty {
