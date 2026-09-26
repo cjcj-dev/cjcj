@@ -69,6 +69,7 @@ export const GATING = Object.freeze([
   'ci/llvm-tools-manifest.test.mjs',
   'ci/objc_darwin/run_e2e.test.mjs',
   'ci/patched-runtime-language-defer.test.mjs',
+  'ci/bootstrap/prepare_cpp_headers.test.mjs',
   'ci/pin-sweep.test.mjs',
   'ci/release-gates.test.mjs',
   // Node fixtures use mocked transport, no SDK or credentials. The publisher

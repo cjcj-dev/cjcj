@@ -2,13 +2,13 @@ package cjcj::sema.NativeFFI.Java
 
 import std.collection.*
 import cjcj::ast.*
-import cjcj::basic.{DEFAULT_POSITION, DiagKindRefactor, DiagnosticEngine}
+import cjcj::basic.DiagnosticEngine
 import cjcj::mangle.BaseMangler
 import cjcj::modules.SemaImportManager
 import cjcj::option.MaybeString
 import cjcj::sema.{GenerateGetTypeForTypeParamIntrinsic, MemberMap, TypeManager}
-import cjcj::sema.NativeFFI.{CreateSuperCall, GetJavaMirrorWrappingConstructor, GetJavaRefField, InteropLibBridge,
-    IsJArray, Utils, WithinFile, WrapReturningLambdaCall}
+import cjcj::sema.NativeFFI.{CreateSuperCall, GetCangjieLibName, GetJavaMirrorWrappingConstructor, GetJavaRefField,
+    InteropLibBridge, IsJArray, Utils, WithinFile, WrapReturningLambdaCall}
 import cjcj::utils.{HAS_INITED_IDENT, JAVA_REF_GETTER_FUNC_NAME}
 
 public class JavaDesugarManager {
@@ -349,17 +349,14 @@ public class JavaDesugarManager {
         }
     }
 
+    // C++ src/Sema/NativeFFI/Java/AfterTypeCheck/GenerateJavaImplJavaSourceCode.cpp:16-24.
     public func GenerateJavaSourceCode(ctx: AfterTypeCheckContext): Unit {
-        if (!javagenOutputPath.hasValue) {
-            return
+        for (decl in ctx.GetJavaImplReferenceWrappers()) {
+            let fileJ = decl.identifier.Val() + ".java"
+            let codegen = JavaSourceCodeGenerator(decl, mangler, ctx, javagenOutputPath, fileJ,
+                GetCangjieLibName(outputPath, decl.GetFullPackageName()), ArrayList<ExtendDecl>())
+            codegen.Generate()
         }
-        let location = if (outputPath.isEmpty()) {
-            mangler.MangleFullPackageName(ctx.pkg.fullPackageName)
-        } else {
-            outputPath
-        }
-        diag.DiagnoseRefactor(DiagKindRefactor.sema_java_interop_not_supported, DEFAULT_POSITION,
-            "java source generation at " + location).Emit()
     }
 
     public func ProcessJavaMirrorImplStages(ctx: AfterTypeCheckContext, desugarPropRef: (Node) -> Unit): Unit {

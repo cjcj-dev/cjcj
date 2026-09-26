@@ -219,7 +219,9 @@ jobs:
         run: cat ci/host_sdk_pin.env >> "$GITHUB_ENV"
 
       - name: Load source pins
-        run: cat ci/source_pin.env >> "$GITHUB_ENV"
+        run: |
+          cat ci/source_pin.env >> "$GITHUB_ENV"
+          cat ci/llvm_pin.env >> "$GITHUB_ENV"
 
       - name: Load and validate runtime pin
         env:
@@ -296,8 +298,8 @@ jobs:
             --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" \
             --cangjie-version "${{ steps.version.outputs.value }}" \
             fetch \
-            --repo-url "compiler=$COMPILER_SRC_URL" \
-            --repo-tag "compiler=$COMPILER_REF" \
+            --repo-url "compiler=$CANGJIE_COMPILER_URL" \
+            --repo-tag "compiler=$CANGJIE_COMPILER_SHA" \
             --repo-url "runtime=$RUNTIME_SRC_URL" \
             --repo-tag "runtime=$RUNTIME_REF" \
             --repo-url "tools=$TOOLS_SRC_URL" \
