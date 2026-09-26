@@ -31,13 +31,14 @@ public class JavaMemberSignature <: Hashable & Equatable<JavaMemberSignature> {
     public prop isMethod: Bool { get() { return kind == JavaMemberKind.METHOD } }
     public prop isField: Bool { get() { return kind == JavaMemberKind.FIELD } }
 
-    public init(classTypeJniName: String, name: String, signature: String, isStatic: Bool, isMethod!: Bool = true,
-        isField!: Bool = false) {
+    private init(classTypeJniName: String, name: String, signature: String, kind: JavaMemberKind,
+        isStatic!: Bool = false) {
         this.classTypeJniName = classTypeJniName
         this.name = name
         this.signature = signature
         this.isStatic = isStatic
-        this.kind = if (isField) { JavaMemberKind.FIELD } else if (isMethod) { JavaMemberKind.METHOD } else { JavaMemberKind.CONSTRUCTOR }
+        this.kind = kind
+        CJC_ASSERT(kind != JavaMemberKind.CONSTRUCTOR || !isStatic)
     }
 
     public func UnqualifiedTypeName(): String {
@@ -47,8 +48,19 @@ public class JavaMemberSignature <: Hashable & Equatable<JavaMemberSignature> {
     // JavaMemberSignature.cpp:147-162: member identity is structural. Hash collisions
     // must never merge members whose class, name, signature, kind or staticness differs.
     public operator func ==(other: JavaMemberSignature): Bool {
-        return signature == other.signature && kind == other.kind &&
-            isStatic == other.isStatic && classTypeJniName == other.classTypeJniName && name == other.name
+        if (signature != other.signature) {
+            return false
+        }
+        if (kind != other.kind) {
+            return false
+        }
+        if (isStatic != other.isStatic) {
+            return false
+        }
+        if (classTypeJniName != other.classTypeJniName) {
+            return false
+        }
+        return name == other.name
     }
 
     public operator func !=(other: JavaMemberSignature): Bool {
@@ -56,7 +68,7 @@ public class JavaMemberSignature <: Hashable & Equatable<JavaMemberSignature> {
     }
 
     public func hashCode(): Int64 {
-        return (classTypeJniName + "$" + name + "$$" + signature + isStatic.toString()).hashCode()
+        return (classTypeJniName + "$" + name + "$$" + signature + if (isStatic) { "1" } else { "0" }).hashCode()
     }
 
     public static func FromMethod(utils: Utils, method: FuncDecl): JavaMemberSignature {
@@ -68,7 +80,8 @@ public class JavaMemberSignature <: Hashable & Equatable<JavaMemberSignature> {
         let body = method.funcBody.getOrThrow()
         let signature = utils.GetJavaTypeSignature(body.retType.getOrThrow().GetTy().getOrThrow(),
             GetParamTys(body.paramLists[0]), fullPackageName: method.fullPackageName)
-        return JavaMemberSignature(className, GetJavaMemberName(method), signature, method.TestAttr(Attribute.STATIC))
+        return JavaMemberSignature(className, GetJavaMemberName(method), signature, JavaMemberKind.METHOD,
+            isStatic: method.TestAttr(Attribute.STATIC))
     }
 
     public static func FromConstructor(utils: Utils, ctor: FuncDecl, withMarker: Bool): JavaMemberSignature {
@@ -85,7 +98,7 @@ public class JavaMemberSignature <: Hashable & Equatable<JavaMemberSignature> {
             signature = signature + "L" + NormalizeJavaSignature(GetConstructorMarkerFQName()) + ";"
         }
         signature = signature + ")V"
-        return JavaMemberSignature(className, "<init>", signature, false, isMethod: false)
+        return JavaMemberSignature(className, "<init>", signature, JavaMemberKind.CONSTRUCTOR)
     }
 
     public static func FromProperty(utils: Utils, propDecl: PropDecl): JavaMemberSignature {
@@ -94,8 +107,8 @@ public class JavaMemberSignature <: Hashable & Equatable<JavaMemberSignature> {
         CJC_ASSERT(IsMirror(outerDecl) || IsImpl(outerDecl))
         let className = GetJavaJniClassName(utils, outerDecl.GetTy().getOrThrow())
         let signature = utils.GetJavaTypeSignature(propDecl.GetTy().getOrThrow(), fullPackageName: propDecl.fullPackageName)
-        return JavaMemberSignature(className, GetJavaMemberName(propDecl), signature, propDecl.TestAttr(Attribute.STATIC),
-            isMethod: false, isField: true)
+        return JavaMemberSignature(className, GetJavaMemberName(propDecl), signature, JavaMemberKind.FIELD,
+            isStatic: propDecl.TestAttr(Attribute.STATIC))
     }
 }
 
