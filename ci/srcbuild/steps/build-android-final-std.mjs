@@ -30,7 +30,7 @@ const runtime = path.join(repository, 'runtime');
 const stdlib = path.join(repository, 'stdlib');
 const tuple = 'linux_android_aarch64_cjnative';
 const finalStd = path.join(workspace, 'software', 'final-std-android-aarch64');
-const runtimeInstall = path.join(runtime, 'output', 'linux_android_release_aarch64');
+const runtimeInstall = path.join(runtime, 'output', 'common', 'linux_android_release_aarch64');
 const runtimeRef = (await $({stdio: 'pipe'})`git -C ${repository} rev-parse HEAD`).stdout.trim();
 if (runtimeRef !== expectedRef) throw new Error(`runtime source mismatch: ${runtimeRef} != ${expectedRef}`);
 const stageEnv = {...process.env, CANGJIE_HOME: sdk, CANGJIE_VERSION: version,
@@ -44,7 +44,7 @@ await buildAndroidRuntime({workspace, ndk, version, runtimeRef, env: stageEnv});
 await assertCompiler();
 await fs.rm(finalStd, {recursive: true, force: true});
 await $({cwd: stdlib, env: stageEnv})`python3 build.py clean`;
-await $({cwd: stdlib, env: stageEnv})`python3 build.py build -t release --target android-aarch64 --target-lib=${path.join(runtimeInstall, 'runtime', 'lib', tuple)} --target-lib=${path.join(runtimeInstall, 'lib', tuple)} --target-toolchain ${path.join(toolchain, 'bin')} --target-sysroot ${path.join(toolchain, 'sysroot')}`;
+await $({cwd: stdlib, env: stageEnv})`python3 build.py build -t release --target android-aarch64 --target-lib=${path.join(runtime, 'output')} --target-lib=${path.join(runtimeInstall, 'runtime', 'lib', tuple)} --target-lib=${path.join(runtimeInstall, 'lib', tuple)} --target-toolchain ${path.join(toolchain, 'bin')} --target-sysroot ${path.join(toolchain, 'sysroot')}`;
 await $({cwd: stdlib, env: stageEnv})`python3 build.py install --prefix ${finalStd}`;
 await assertCompiler();
 await writeStdProvenance({sourceDir: stdlib, installPrefix: finalStd,
