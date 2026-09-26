@@ -35,6 +35,10 @@ private class ClassVarPair {
     }
 }
 
+private class SuperCtorNativeList {
+    public let funcs = ArrayList<Option<FuncDecl>>()
+}
+
 public class AfterTypeCheckContext {
     public let importManager: SemaImportManager
     public let typeManager: TypeManager
@@ -47,6 +51,8 @@ public class AfterTypeCheckContext {
     private let wrappingCtors: ArrayList<ClassFuncPair> = ArrayList<ClassFuncPair>()
     private let registryFields: ArrayList<ClassVarPair> = ArrayList<ClassVarPair>()
     private let generatedDecls: ArrayList<Decl> = ArrayList<Decl>()
+    private let javaImplUserCtorToNativeFuncs = HashMap<FuncDecl, SuperCtorNativeList>()
+    private let javaImplUserCtorToOriginalSuperCall = HashMap<FuncDecl, CallExpr>()
 
     public init(importManager: SemaImportManager, typeManager: TypeManager, pkg: Package, hasMirrorOrImpl: Bool) {
         this.importManager = importManager
@@ -111,6 +117,32 @@ public class AfterTypeCheckContext {
             }
         }
         return ctors
+    }
+
+    public func CacheJavaImplSuperCtorArgNativeFunc(ctor: FuncDecl, nativeFunc: Option<FuncDecl>): Unit {
+        if (javaImplUserCtorToNativeFuncs.get(ctor).isNone()) {
+            javaImplUserCtorToNativeFuncs[ctor] = SuperCtorNativeList()
+        }
+        javaImplUserCtorToNativeFuncs.get(ctor).getOrThrow().funcs.add(nativeFunc)
+    }
+
+    public func GetJavaImplSuperCtorArgNativeFuncs(ctor: FuncDecl): ArrayList<Option<FuncDecl>> {
+        if (javaImplUserCtorToNativeFuncs.get(ctor).isNone()) {
+            javaImplUserCtorToNativeFuncs[ctor] = SuperCtorNativeList()
+        }
+        return javaImplUserCtorToNativeFuncs.get(ctor).getOrThrow().funcs
+    }
+
+    public func HasDesugaredJavaImplSuperConstructorCall(userCtor: FuncDecl): Bool {
+        return javaImplUserCtorToNativeFuncs.get(userCtor).isSome()
+    }
+
+    public func CacheJavaImplSuperCtorCall(ctor: FuncDecl, call: CallExpr): Unit {
+        javaImplUserCtorToOriginalSuperCall[ctor] = call
+    }
+
+    public func GetJavaImplSuperCtorCall(ctor: FuncDecl): CallExpr {
+        return javaImplUserCtorToOriginalSuperCall.get(ctor).getOrThrow()
     }
 
     public func AddGeneratedDecl(decl: Decl): Unit {

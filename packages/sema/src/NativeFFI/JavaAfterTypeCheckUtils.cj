@@ -201,6 +201,39 @@ public class Utils {
         cases.add(caseNone)
         return WithinFile<MatchExpr>(CreateMatchExpr(selector, cases, ty), curFile)
     }
+
+    public func CreateNativeFunc(name: String, params: ArrayList<FuncParam>, retTy: Ty, nodes: ArrayList<Node>,
+        curFile: File, moduleName: String, fullPackageName: String): FuncDecl {
+        CJC_ASSERT(Ty.IsMetCType(retTy))
+        for (param in params) {
+            CJC_ASSERT(Ty.IsMetCType(param.GetTy().getOrThrow()))
+        }
+        let block = CreateBlock(nodes, Some(retTy))
+        block.EnableAttr(Attribute.COMPILER_ADD)
+        block.curFile = Some(curFile)
+        let funcTyParams = ArrayList<Ty>()
+        for (param in params) {
+            funcTyParams.add(param.GetTy().getOrThrow())
+        }
+        let paramLists = ArrayList<FuncParamList>()
+        paramLists.add(CreateFuncParamList(params, None))
+        let funcBody = CreateFuncBody(paramLists, None, Some(block), Some(retTy))
+        funcBody.curFile = Some(curFile)
+        let cfg = FuncTyConfig()
+        cfg.isC = true
+        let funcTy = typeManager.GetFunctionTy(funcTyParams.toArray(), retTy, cfg: cfg)
+        let fdecl = CreateFuncDecl(name, Some(funcBody), Some(funcTy))
+        fdecl.funcBody.getOrThrow().funcDecl = Some(fdecl)
+        fdecl.EnableAttr(Attribute.C)
+        fdecl.EnableAttr(Attribute.GLOBAL)
+        fdecl.EnableAttr(Attribute.PUBLIC)
+        fdecl.EnableAttr(Attribute.NO_MANGLE)
+        fdecl.EnableAttr(Attribute.UNSAFE)
+        fdecl.curFile = Some(curFile)
+        fdecl.moduleName = moduleName
+        fdecl.fullPackageName = fullPackageName
+        return fdecl
+    }
 }
 
 public func GetJavaRefField(mirrorLike: ClassDecl): VarDecl {

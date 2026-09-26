@@ -5,6 +5,7 @@ import cjcj::mangle.BaseMangler
 import cjcj::modules.SemaImportManager
 import cjcj::sema.TypeManager
 import cjcj::sema.NativeFFI.{CreateType, Utils}
+import cjcj::utils.{CJC_ABORT, CJC_ASSERT}
 
 public class JniBridge {
     private let typeManager: TypeManager
@@ -53,5 +54,43 @@ public class JniBridge {
 
     private func GetRegistryIdJavaTy(): Ty {
         return TypeManager.GetPrimitiveTy(TypeKind.TYPE_INT64)
+    }
+
+    public func GetJavaNativeFunctionName(fqTypeName: String, memberName: String): String {
+        return "Java_" + ApplyJavaNativeNameEscaping(fqTypeName) + "_" + ApplyJavaNativeNameEscaping(memberName)
+    }
+
+    public func ConvertCangjieToJniTy(javaCompatibleTy: Ty): Ty {
+        if (javaCompatibleTy.IsString()) {
+            return GetJniJobjectDeclTy()
+        }
+        if (javaCompatibleTy.IsCoreOptionType()) {
+            CJC_ASSERT(!javaCompatibleTy.typeArgs.isEmpty())
+            let argTy = javaCompatibleTy.typeArgs[0]
+            CJC_ASSERT(IsMirror(argTy) || IsImpl(argTy) || argTy.IsString())
+            return GetJniJobjectDeclTy()
+        }
+        if (IsMirror(javaCompatibleTy) || IsImpl(javaCompatibleTy)) {
+            return GetJniJobjectDeclTy()
+        }
+        if (javaCompatibleTy.IsBuiltin()) {
+            return javaCompatibleTy
+        }
+        CJC_ABORT()
+        return javaCompatibleTy
+    }
+
+    private func ApplyJavaNativeNameEscaping(name: String): String {
+        var escaped = name
+        var startPos: Int64 = 0
+        while (true) {
+            if (let Some(pos) <- escaped.indexOf("_", startPos)) {
+                escaped = escaped[0..pos] + "_1" + escaped[pos + 1..]
+                startPos = pos + 2
+            } else {
+                break
+            }
+        }
+        return escaped.replace(".", "_")
     }
 }
