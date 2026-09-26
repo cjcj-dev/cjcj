@@ -22,7 +22,7 @@ cpp="$CANGJIE_WORKSPACE/cangjie_compiler"
 node --input-type=module - "$repo" "$cpp" <<'JS'
 import {pathToFileURL} from 'node:url';
 const {checkoutExactSource} = await import(pathToFileURL(`${process.argv[2]}/build/lib/git.mjs`));
-await checkoutExactSource(process.env.COMPILER_SRC_URL, process.argv[3], process.env.COMPILER_REF);
+await checkoutExactSource(process.env.CANGJIE_COMPILER_URL, process.argv[3], process.env.CANGJIE_COMPILER_SHA);
 JS
 [[ ! -e "$cpp/build" ]]
 printf 'COLD_COMPILER_BUILD_ABSENT path=%s\n' "$cpp/build"
@@ -47,7 +47,8 @@ import path from 'node:path';
 const cpp = process.argv[2];
 assert.ok(fs.readFileSync(process.argv[3], 'utf8').split('\n').includes(`CJCJ_BOOTSTRAP_CPP_SRC=${cpp}`));
 const manifest = JSON.parse(fs.readFileSync(`${cpp}/build/build/shim-headers.json`));
-assert.equal(manifest.compiler.sha, process.env.COMPILER_REF);
+assert.equal(manifest.compiler.url, process.env.CANGJIE_COMPILER_URL);
+assert.equal(manifest.compiler.sha, process.env.CANGJIE_COMPILER_SHA);
 assert.equal(manifest.llvm.sha, process.env.LLVM_SHA);
 assert.equal(manifest.flatbuffers.sha, process.env.FLATBUFFERS_SHA);
 for (const [root, files] of Object.entries(manifest.headers)) {
