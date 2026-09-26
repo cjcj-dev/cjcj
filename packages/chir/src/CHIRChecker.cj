@@ -1438,85 +1438,66 @@ public class CHIRChecker {
     }
 
     private func CheckOtherExpression(expr: Expression, topLevelFunc: Function): Unit {
-        match (expr.GetExprKind()) {
-            case ExprKind.CONSTANT => CheckConstant(expr, topLevelFunc)
-            case ExprKind.DEBUGEXPR => CheckDebug((expr as Debug).getOrThrow(), topLevelFunc)
-            case ExprKind.TUPLE => CheckTuple(expr, topLevelFunc)
-            case ExprKind.VARRAY => CheckVArray(expr, topLevelFunc)
-            case ExprKind.FIELD => CheckField((expr as Field).getOrThrow(), topLevelFunc)
-            case ExprKind.GET_EXCEPTION => CheckGetException((expr as GetException).getOrThrow(), topLevelFunc)
-            case ExprKind.FIELD_BY_NAME =>
-                if (let Some(fieldByNameExpr) <- (expr as FieldByName)) {
-                    CheckFieldByName(fieldByNameExpr, topLevelFunc)
-                }
-            case ExprKind.APPLY =>
-                if (let Some(applyExpr) <- (expr as Apply)) {
-                    CheckApply(applyExpr, topLevelFunc)
-                }
-            case ExprKind.INVOKE =>
-                if (let Some(invokeExpr) <- (expr as Invoke)) {
-                    CheckInvoke(invokeExpr, topLevelFunc)
-                }
-            case ExprKind.INVOKESTATIC =>
-                if (let Some(invokeStaticExpr) <- (expr as InvokeStatic)) {
-                    CheckInvokeStatic(invokeStaticExpr, topLevelFunc)
-                }
-            case ExprKind.INSTANCEOF =>
-                if (let Some(instanceOfExpr) <- (expr as InstanceOf)) {
-                    CheckInstanceOf(instanceOfExpr, topLevelFunc)
-                }
-            case ExprKind.CLASS_STATIC_CAST | ExprKind.NUMERIC_CAST =>
-                OperandNumIsEqual(1, expr, topLevelFunc)
-                CheckHaveResult(expr, topLevelFunc)
-                if (let Some(typeCastExpr) <- (expr as TypeCast)) {
-                    CheckTypeCast(typeCastExpr, topLevelFunc)
-                }
-            case ExprKind.BOX =>
-                if (let Some(boxExpr) <- (expr as Box)) {
-                    CheckBox(boxExpr, topLevelFunc)
-                }
-            case ExprKind.UNBOX_TO_VALUE =>
-                if (let Some(unBoxExpr) <- (expr as UnBoxToValue)) {
-                    CheckUnBox(unBoxExpr, topLevelFunc)
-                }
-            case ExprKind.CAST_TO_GENERIC =>
-                if (let Some(transformExpr) <- (expr as CastToGeneric)) {
-                    CheckCastToGeneric(transformExpr, topLevelFunc)
-                }
-            case ExprKind.CAST_TO_CONCRETE =>
-                if (let Some(transformExpr) <- (expr as CastToConcrete)) {
-                    CheckCastToConcrete(transformExpr, topLevelFunc)
-                }
-            case ExprKind.UNBOX_TO_REF =>
-                if (let Some(unBoxToRefExpr) <- (expr as UnBoxToRef)) {
-                    CheckUnBoxToRef(unBoxToRefExpr, topLevelFunc)
-                }
-            case ExprKind.RAW_ARRAY_ALLOCATE =>
-                CheckRawArrayAllocate((expr as RawArrayAllocate).getOrThrow(), topLevelFunc)
-            case ExprKind.RAW_ARRAY_LITERAL_INIT =>
-                CheckRawArrayLiteralInit((expr as RawArrayLiteralInit).getOrThrow(), topLevelFunc)
-            case ExprKind.RAW_ARRAY_INIT_BY_VALUE =>
-                CheckRawArrayInitByValue((expr as RawArrayInitByValue).getOrThrow(), topLevelFunc)
-            case ExprKind.SPAWN => CheckSpawn((expr as Spawn).getOrThrow(), topLevelFunc)
-            case ExprKind.GET_RTTI =>
-                if (let Some(getRTTIExpr) <- (expr as GetRTTI)) {
-                    CheckGetRTTI(getRTTIExpr, topLevelFunc)
-                }
-            case ExprKind.GET_RTTI_STATIC =>
-                if (let Some(getRTTIStaticExpr) <- (expr as GetRTTIStatic)) {
-                    CheckGetRTTIStatic(getRTTIStaticExpr, topLevelFunc)
-                }
-            case ExprKind.VARRAY_BUILDER =>
-                if (let Some(varrayBuilderExpr) <- (expr as VArrayBuilder)) {
-                    CheckVArrayBuilder(varrayBuilderExpr, topLevelFunc)
-                }
-            case ExprKind.INTRINSIC =>
-                if (let Some(intrinsicExpr) <- (expr as Intrinsic)) {
-                    CheckIntrinsic(intrinsicExpr, topLevelFunc)
-                }
-            case ExprKind.GET_INSTANTIATE_VALUE => CheckGetInstantiateValue(expr, topLevelFunc)
-            case _ => WarningInExpr(topLevelFunc, expr,
-                "find unrecongnized ExprKind `" + expr.GetExprKindName() + "`.")
+        let actionMap = HashMap<ExprKind, () -> Unit>([
+            (ExprKind.CONSTANT, { =>
+                CheckConstant((expr as Constant).getOrThrow(), topLevelFunc) }),
+            (ExprKind.DEBUGEXPR, { =>
+                CheckDebug((expr as Debug).getOrThrow(), topLevelFunc) }),
+            (ExprKind.TUPLE, { =>
+                CheckTuple((expr as Tuple).getOrThrow(), topLevelFunc) }),
+            (ExprKind.FIELD, { =>
+                CheckField((expr as Field).getOrThrow(), topLevelFunc) }),
+            (ExprKind.FIELD_BY_NAME, { =>
+                CheckFieldByName((expr as FieldByName).getOrThrow(), topLevelFunc) }),
+            (ExprKind.APPLY, { =>
+                CheckApply((expr as Apply).getOrThrow(), topLevelFunc) }),
+            (ExprKind.INVOKE, { =>
+                CheckInvoke((expr as Invoke).getOrThrow(), topLevelFunc) }),
+            (ExprKind.INVOKESTATIC, { =>
+                CheckInvokeStatic((expr as InvokeStatic).getOrThrow(), topLevelFunc) }),
+            (ExprKind.INSTANCEOF, { =>
+                CheckInstanceOf((expr as InstanceOf).getOrThrow(), topLevelFunc) }),
+            (ExprKind.CLASS_STATIC_CAST, { =>
+                CheckTypeCast((expr as TypeCast).getOrThrow(), topLevelFunc) }),
+            (ExprKind.NUMERIC_CAST, { =>
+                CheckTypeCast((expr as TypeCast).getOrThrow(), topLevelFunc) }),
+            (ExprKind.GET_EXCEPTION, { =>
+                CheckGetException((expr as GetException).getOrThrow(), topLevelFunc) }),
+            (ExprKind.SPAWN, { =>
+                CheckSpawn((expr as Spawn).getOrThrow(), topLevelFunc) }),
+            (ExprKind.RAW_ARRAY_ALLOCATE, { =>
+                CheckRawArrayAllocate((expr as RawArrayAllocate).getOrThrow(), topLevelFunc) }),
+            (ExprKind.RAW_ARRAY_LITERAL_INIT, { =>
+                CheckRawArrayLiteralInit((expr as RawArrayLiteralInit).getOrThrow(), topLevelFunc) }),
+            (ExprKind.RAW_ARRAY_INIT_BY_VALUE, { =>
+                CheckRawArrayInitByValue((expr as RawArrayInitByValue).getOrThrow(), topLevelFunc) }),
+            (ExprKind.VARRAY, { =>
+                CheckVArray((expr as `VArray`).getOrThrow(), topLevelFunc) }),
+            (ExprKind.VARRAY_BUILDER, { =>
+                CheckVArrayBuilder((expr as VArrayBuilder).getOrThrow(), topLevelFunc) }),
+            (ExprKind.INTRINSIC, { =>
+                CheckIntrinsic((expr as Intrinsic).getOrThrow(), topLevelFunc) }),
+            (ExprKind.BOX, { =>
+                CheckBox((expr as Box).getOrThrow(), topLevelFunc) }),
+            (ExprKind.UNBOX_TO_VALUE, { =>
+                CheckUnBox((expr as UnBoxToValue).getOrThrow(), topLevelFunc) }),
+            (ExprKind.CAST_TO_GENERIC, { =>
+                CheckCastToGeneric((expr as CastToGeneric).getOrThrow(), topLevelFunc) }),
+            (ExprKind.CAST_TO_CONCRETE, { =>
+                CheckCastToConcrete((expr as CastToConcrete).getOrThrow(), topLevelFunc) }),
+            (ExprKind.GET_INSTANTIATE_VALUE, { =>
+                CheckGetInstantiateValue((expr as GetInstantiateValue).getOrThrow(), topLevelFunc) }),
+            (ExprKind.UNBOX_TO_REF, { =>
+                CheckUnBoxToRef((expr as UnBoxToRef).getOrThrow(), topLevelFunc) }),
+            (ExprKind.GET_RTTI, { =>
+                CheckGetRTTI((expr as GetRTTI).getOrThrow(), topLevelFunc) }),
+            (ExprKind.GET_RTTI_STATIC, { =>
+                CheckGetRTTIStatic((expr as GetRTTIStatic).getOrThrow(), topLevelFunc) })
+        ])
+        if (let Some(action) <- actionMap.get(expr.GetExprKind())) {
+            action()
+        } else {
+            WarningInExpr(topLevelFunc, expr, "find unrecongnized ExprKind `" + expr.GetExprKindName() + ".")
         }
     }
 
