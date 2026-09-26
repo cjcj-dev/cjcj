@@ -572,6 +572,18 @@ public func GetJavaUnqualifiedTypeName(decl: ClassLikeDecl, nestedSeparator: Str
     return decl.identifier.Val()
 }
 
+// Upstream Java/Utils.cpp:379-392.
+public func GetJavaTopLevelClassName(decl: ClassLikeDecl): String {
+    if (let Some(attr) <- GetJavaMirrorAnnoAttr(decl)) {
+        let leftmost = GetFQNameParts(attr)[0]
+        if (let Some(pos) <- leftmost.lastIndexOf(".")) {
+            return leftmost[pos + 1..]
+        }
+        return leftmost
+    }
+    return decl.identifier.Val()
+}
+
 public func GetJavaPackage(decl: Decl): String {
     for (anno in decl.annotations) {
         if (anno.kind != AstAnnotationKind.JAVA_MIRROR && anno.kind != AstAnnotationKind.JAVA_IMPL) {
