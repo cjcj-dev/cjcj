@@ -33,8 +33,17 @@ jobs:
           git -C "$RUNNER_TEMP/android-source/cangjie_runtime" init
           git -C "$RUNNER_TEMP/android-source/cangjie_runtime" fetch --depth=1 "$RUNTIME_SRC_URL" "$RUNTIME_REF"
           git -C "$RUNNER_TEMP/android-source/cangjie_runtime" checkout --detach FETCH_HEAD
+      - uses: ./.github/actions/sccache
+        with:
+          component: runtime
+          platform: android-aarch64
+          pin: ${{ env.RUNTIME_REF }}
       - name: Build Android runtime through product entry
         run: npx --yes zx@8 ci/srcbuild/steps/build-android-runtime.mjs
+      - uses: ./.github/actions/sccache-report
+        if: always()
+        with:
+          component: runtime
       - uses: actions/upload-artifact@v7
         if: always()
         with:
