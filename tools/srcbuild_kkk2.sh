@@ -1166,7 +1166,8 @@ load_bootstrap_pins() {
     elif [[ -f $CANGJIE_BUILD_ROOT/lib/libcangjie-ast-support.a ]]; then
         BOOTSTRAP_AST_SUPPORT=$CANGJIE_BUILD_ROOT/lib/libcangjie-ast-support.a
     else
-        BOOTSTRAP_AST_SUPPORT=/root/impl_fam_erased_dynpayload/build-copy/compiler/build/build/lib/libcangjie-ast-support.a
+        echo "bootstrap input missing: CJCJ_BOOTSTRAP_AST_SUPPORT is unset and CANGJIE_BUILD_ROOT/lib/libcangjie-ast-support.a is absent: $CANGJIE_BUILD_ROOT/lib/libcangjie-ast-support.a" >&2
+        return 1
     fi
     BOOTSTRAP_AST_SUPPORT_SHA256=$(bootstrap_input_sha256 "$BOOTSTRAP_AST_SUPPORT" "${CJCJ_BOOTSTRAP_AST_SUPPORT_SHA256:-}") || return 1
     BOOTSTRAP_COLOUR_TUPLE=${CJCJ_BOOTSTRAP_COLOUR_TUPLE:-${CJCJ_SELECTED_COLOUR_TUPLE:-$STATE_ROOT/colour-tuple}}
