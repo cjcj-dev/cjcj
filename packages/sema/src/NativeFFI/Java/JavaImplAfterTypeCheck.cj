@@ -800,17 +800,324 @@ public class DesugarJavaImplSuperMethodCall {
     }
 }
 
-public class RewriteJavaImplReferenceWrapperFields {
-    public func Process(ctx: AfterTypeCheckContext, desugarPropRef: (Node) -> Unit): Unit {
-        for (impl in ctx.GetJavaImplReferenceWrappers()) {
-            if (impl.TestAttr(Attribute.IS_BROKEN)) {
-                continue
+private class FieldPropPair {
+    public let field: VarDecl
+    public let proxyProp: PropDecl
+
+    public init(field: VarDecl, proxyProp: PropDecl) {
+        this.field = field
+        this.proxyProp = proxyProp
+    }
+}
+
+private func IsInsideRefWrapperConstructor(node: Node): Bool {
+    if (let Some(fd) <- (node as FuncDecl)) {
+        if (let Some(outer) <- fd.outerDecl) {
+            if (!IsImplReferenceWrapper(outer)) {
+                return false
             }
-            if (let None <- ctx.GetJavaImplRegistryCompanion(impl)) {
-                continue
+            return fd.TestAttr(Attribute.CONSTRUCTOR)
+        }
+    }
+    return false
+}
+
+private func IsInsideRegistryCompanion(node: Node): Bool {
+    if (let Some(cd) <- (node as ClassDecl)) {
+        return IsImplRegistryCompanion(cd)
+    }
+    return false
+}
+
+private func RemoveMember(members: ArrayList<Decl>, target: Decl): Unit {
+    var idx: Int64 = 0
+    while (idx < members.size) {
+        if (members[idx] == target) {
+            members.remove(at: idx)
+            return
+        }
+        idx = idx + 1
+    }
+}
+
+private func InsertProxyPropertyGetter(proxyProp: PropDecl, userField: VarDecl, regCompanionField: VarDecl,
+    typeManager: TypeManager): Unit {
+    CJC_ASSERT(IsImplReferenceWrapper(proxyProp.outerDecl.getOrThrow()))
+    let getter = WithinFile<FuncDecl>(FuncDecl(), proxyProp.curFile)
+    proxyProp.getters.add(getter)
+    getter.identifier = SrcIdentifier("$" + proxyProp.identifier.Val() + "get")
+    getter.outerDecl = proxyProp.outerDecl
+    getter.fullPackageName = proxyProp.fullPackageName
+    getter.moduleName = proxyProp.moduleName
+    getter.propDecl = Some(proxyProp)
+    getter.isGetter = true
+    let propTy = proxyProp.GetTy().getOrThrow()
+    getter.SetTy(typeManager.GetFunctionTy(Array<Ty>(), propTy))
+    getter.CloneAttrs(proxyProp)
+    getter.DisableAttr(Attribute.MUT)
+    getter.EnableAttr(Attribute.COMPILER_ADD)
+    let getterBody = WithinFile<FuncBody>(FuncBody(), proxyProp.curFile)
+    getter.funcBody = Some(getterBody)
+    getterBody.SetTy(propTy)
+    getterBody.EnableAttr(Attribute.COMPILER_ADD)
+    let paramList = WithinFile<FuncParamList>(FuncParamList(), proxyProp.curFile)
+    paramList.EnableAttr(Attribute.COMPILER_ADD)
+    getterBody.paramLists.add(paramList)
+    getterBody.funcDecl = Some(getter)
+    let block = WithinFile<Block>(CreateBlock(ArrayList<Node>(), proxyProp.GetTy()), proxyProp.curFile)
+    block.SetTy(propTy)
+    getterBody.body = Some(block)
+    let receiver = WithinFile<RefExpr>(CreateRefExpr(regCompanionField), proxyProp.curFile)
+    block.body.add(CreateMemberAccess(receiver, userField))
+}
+
+private func InsertProxyPropertySetter(proxyProp: PropDecl, userField: VarDecl, regCompanionField: VarDecl,
+    typeManager: TypeManager): Unit {
+    let unitTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+    let setter = WithinFile<FuncDecl>(FuncDecl(), proxyProp.curFile)
+    proxyProp.setters.add(setter)
+    setter.identifier = SrcIdentifier("$" + proxyProp.identifier.Val() + "set")
+    setter.outerDecl = proxyProp.outerDecl
+    setter.propDecl = Some(proxyProp)
+    setter.fullPackageName = proxyProp.fullPackageName
+    setter.moduleName = proxyProp.moduleName
+    setter.isSetter = true
+    let propTy = proxyProp.GetTy().getOrThrow()
+    setter.SetTy(typeManager.GetFunctionTy([propTy], unitTy))
+    setter.CloneAttrs(proxyProp)
+    setter.DisableAttr(Attribute.MUT)
+    setter.EnableAttr(Attribute.COMPILER_ADD)
+    let setterBody = WithinFile<FuncBody>(FuncBody(), proxyProp.curFile)
+    setter.funcBody = Some(setterBody)
+    setterBody.SetTy(unitTy)
+    setterBody.EnableAttr(Attribute.COMPILER_ADD)
+    let paramList = WithinFile<FuncParamList>(FuncParamList(), proxyProp.curFile)
+    paramList.EnableAttr(Attribute.COMPILER_ADD)
+    let setterParam = FuncParam()
+    setterParam.SetTy(propTy)
+    setterParam.EnableAttr(Attribute.COMPILER_ADD)
+    setterParam.identifier = SrcIdentifier("set")
+    paramList.params.add(setterParam)
+    setterBody.paramLists.add(paramList)
+    setterBody.funcDecl = Some(setter)
+    let block = WithinFile<Block>(CreateBlock(ArrayList<Node>(), proxyProp.GetTy()), proxyProp.curFile)
+    block.SetTy(unitTy)
+    setterBody.body = Some(block)
+    let receiver = WithinFile<RefExpr>(CreateRefExpr(regCompanionField), proxyProp.curFile)
+    let fieldAccess = CreateMemberAccess(receiver, userField)
+    let valueRef = WithinFile<RefExpr>(CreateRefExpr(setterParam), proxyProp.curFile)
+    block.body.add(WithinFile<AssignExpr>(CreateAssignExpr(fieldAccess, valueRef, Some(unitTy)), proxyProp.curFile))
+}
+
+public class RewriteJavaImplReferenceWrapperFields {
+    private let typeManager: TypeManager
+    private let utils: Utils
+    private let desugarPropRef: (Node) -> Unit
+    private let generatedProps = ArrayList<FieldPropPair>()
+    private var withinRefWrapperConstructor: Bool = false
+    private var hasPropsResolved: Bool = false
+
+    public init(typeManager: TypeManager, utils: Utils, desugarPropRef: (Node) -> Unit) {
+        this.typeManager = typeManager
+        this.utils = utils
+        this.desugarPropRef = desugarPropRef
+    }
+
+    private func FindProxy(field: VarDecl): Option<PropDecl> {
+        for (pair in generatedProps) {
+            if (pair.field == field) {
+                return Some(pair.proxyProp)
             }
         }
-        let _ = desugarPropRef
+        return None
+    }
+
+    private func MakeRegistryFieldAccess(isStatic: Bool, registryCompanion: ClassDecl, refWrapper: ClassDecl,
+        userField: VarDecl, regField: VarDecl): MemberAccess {
+        let receiver = if (isStatic) {
+            CreateRefExpr(registryCompanion)
+        } else {
+            CreateRefExpr(regField)
+        }
+        AddCurFile(receiver, file: refWrapper.curFile)
+        return CreateMemberAccess(receiver, userField)
+    }
+
+    private func RelocateFields(ctx: AfterTypeCheckContext, refWrapper: ClassDecl, registryCompanion: ClassDecl): Unit {
+        let regCompanionField = ctx.GetJavaImplRegistryCompanionReferenceField(refWrapper)
+        let toMove = ArrayList<VarDecl>()
+        for (member in refWrapper.GetMemberDecls()) {
+            if (member.astKind != ASTKind.VAR_DECL) {
+                continue
+            }
+            let field = (member as VarDecl).getOrThrow()
+            if (IsJavaImplRegistryCompanionReferenceField(field)) {
+                continue
+            }
+            generatedProps.add(FieldPropPair(field, GenerateProxyProperty(field, regCompanionField)))
+            toMove.add(field)
+        }
+        for (field in toMove) {
+            registryCompanion.GetMemberDecls().add(field)
+            RemoveMember(refWrapper.GetMemberDecls(), field)
+            field.outerDecl = Some(registryCompanion)
+            field.isVar = true
+            field.modifiers.clear()
+            field.DisableAttr(Attribute.PRIVATE)
+            field.DisableAttr(Attribute.INTERNAL)
+            field.DisableAttr(Attribute.PUBLIC)
+            field.EnableAttr(Attribute.PROTECTED)
+            if (field.initializer.isNone()) {
+                CJC_NULLPTR_CHECK(field.GetTy())
+                CJC_NULLPTR_CHECK(field.curFile)
+                field.initializer = Some(utils.CreateZeroValue(field.GetTy().getOrThrow(), field.curFile.getOrThrow()))
+            }
+        }
+    }
+
+    private func RetargetToProxy(node: Node, proxyProp: PropDecl): Unit {
+        if (let Some(ref) <- (node as RefExpr)) {
+            ref.ref.target = Some(proxyProp)
+        } else if (let Some(ma) <- (node as MemberAccess)) {
+            ma.target = Some(proxyProp)
+        }
+        hasPropsResolved = true
+    }
+
+    private func RewriteOneFieldAccess(ctx: AfterTypeCheckContext, pkg: Package, node: Node): VisitAction {
+        if (!node.IsSamePackage(pkg)) {
+            return VisitAction.WALK_CHILDREN
+        }
+        if (IsInsideRefWrapperConstructor(node)) {
+            withinRefWrapperConstructor = true
+        } else if (IsInsideRegistryCompanion(node)) {
+            return VisitAction.SKIP_CHILDREN
+        }
+        var target: Option<Decl> = None
+        if (let Some(ref) <- (node as RefExpr)) {
+            target = ref.ref.target
+        } else if (let Some(ma) <- (node as MemberAccess)) {
+            target = ma.target
+        }
+        if (let None <- target) {
+            return VisitAction.WALK_CHILDREN
+        }
+        let resolved = target.getOrThrow()
+        if (let None <- resolved.outerDecl) {
+            return VisitAction.WALK_CHILDREN
+        }
+        if (!IsImplRegistryCompanion(resolved.outerDecl.getOrThrow())) {
+            return VisitAction.WALK_CHILDREN
+        }
+        if (!resolved.IsSamePackage(pkg)) {
+            return VisitAction.WALK_CHILDREN
+        }
+        if (resolved.astKind != ASTKind.VAR_DECL) {
+            return VisitAction.WALK_CHILDREN
+        }
+        let userField = (resolved as VarDecl).getOrThrow()
+        let proxyOpt = FindProxy(userField)
+        CJC_NULLPTR_CHECK(proxyOpt)
+        let proxyProp = proxyOpt.getOrThrow()
+        let refWrapper = (proxyProp.outerDecl.getOrThrow() as ClassDecl).getOrThrow()
+        if (withinRefWrapperConstructor) {
+            let isStatic = userField.TestAttr(Attribute.STATIC)
+            let registryCompanion = (userField.outerDecl.getOrThrow() as ClassDecl).getOrThrow()
+            let regField = ctx.GetJavaImplRegistryCompanionReferenceField(refWrapper)
+            let fieldAccess = MakeRegistryFieldAccess(isStatic, registryCompanion, refWrapper, userField, regField)
+            if (let Some(ref) <- (node as RefExpr)) {
+                ref.desugarExpr = Some(fieldAccess)
+                return VisitAction.SKIP_CHILDREN
+            }
+            if (let Some(ma) <- (node as MemberAccess)) {
+                if (isStatic) {
+                    ma.desugarExpr = Some(fieldAccess)
+                    return VisitAction.SKIP_CHILDREN
+                }
+                if (let Some(base) <- ma.baseExpr) {
+                    if (let Some(lvalueRef) <- (base as RefExpr)) {
+                        if (lvalueRef.isThis) {
+                            ma.desugarExpr = Some(fieldAccess)
+                            return VisitAction.SKIP_CHILDREN
+                        }
+                    }
+                }
+            }
+        }
+        RetargetToProxy(node, proxyProp)
+        return VisitAction.SKIP_CHILDREN
+    }
+
+    private func RewriteFieldAccess(ctx: AfterTypeCheckContext, pkg: Package): Unit {
+        withinRefWrapperConstructor = false
+        hasPropsResolved = false
+        Walker(pkg, visitPre: { node: Node => RewriteOneFieldAccess(ctx, pkg, node) }, visitPost: { node: Node =>
+            if (IsInsideRefWrapperConstructor(node)) {
+                withinRefWrapperConstructor = false
+            }
+            return VisitAction.WALK_CHILDREN
+        }).Walk()
+        if (hasPropsResolved) {
+            desugarPropRef(pkg)
+        }
+    }
+
+    private func GenerateProxyProperty(userField: VarDecl, regCompanionRefField: VarDecl): PropDecl {
+        let propDecl = WithinFile<PropDecl>(PropDecl(), userField.curFile)
+        propDecl.begin = userField.begin
+        propDecl.end = userField.end
+        propDecl.keywordPos = userField.keywordPos
+        propDecl.identifier = userField.identifier
+        propDecl.colonPos = userField.colonPos
+        propDecl.typeNode = userField.typeNode
+        userField.typeNode = None
+        if (let Some(ty) <- userField.GetTy()) {
+            propDecl.SetTy(ty)
+        }
+        propDecl.CloneAttrs(userField)
+        propDecl.EnableAttr(Attribute.COMPILER_ADD)
+        for (modifier in userField.modifiers) {
+            propDecl.modifiers.add(modifier)
+        }
+        propDecl.isVar = userField.isVar
+        for (anno in userField.annotations) {
+            if (let Some(cloned) <- (ASTCloner.Clone(anno) as Annotation)) {
+                propDecl.annotations.add(cloned)
+            }
+        }
+        if (userField.isVar) {
+            propDecl.EnableAttr(Attribute.MUT)
+            let mutModifier = Modifier(TokenKind.MUT, userField.begin)
+            mutModifier.curFile = userField.curFile
+            propDecl.modifiers.add(mutModifier)
+        }
+        propDecl.outerDecl = userField.outerDecl
+        propDecl.fullPackageName = userField.fullPackageName
+        propDecl.moduleName = userField.moduleName
+        InsertProxyPropertyGetter(propDecl, userField, regCompanionRefField, typeManager)
+        if (userField.isVar) {
+            InsertProxyPropertySetter(propDecl, userField, regCompanionRefField, typeManager)
+        }
+        return propDecl
+    }
+
+    private func PushProxyProperties(): Unit {
+        for (pair in generatedProps) {
+            let refWrapper = (pair.proxyProp.outerDecl.getOrThrow() as ClassDecl).getOrThrow()
+            refWrapper.GetMemberDecls().add(pair.proxyProp)
+        }
+        generatedProps.clear()
+    }
+
+    public func Process(ctx: AfterTypeCheckContext): Unit {
+        generatedProps.clear()
+        for (refWrapper in ctx.GetJavaImplReferenceWrappers()) {
+            let companion = ctx.GetJavaImplRegistryCompanion(refWrapper)
+            CJC_NULLPTR_CHECK(companion)
+            RelocateFields(ctx, refWrapper, companion.getOrThrow())
+        }
+        RewriteFieldAccess(ctx, ctx.pkg)
+        PushProxyProperties()
     }
 }
 

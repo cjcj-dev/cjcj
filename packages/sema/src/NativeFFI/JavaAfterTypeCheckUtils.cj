@@ -10,7 +10,7 @@ import cjcj::basic.*
 import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cjcj::mangle.BaseMangler
 import cjcj::sema.Desugar.AfterTypeCheck.LookupEnumMember
-import cjcj::sema.TypeManager
+import cjcj::sema.{GenerateTypeMapping, TypeManager}
 import cjcj::utils.*
 
 private let NATIVE_CONSTRUCTOR_MARKER_CLASS_NAME: String = "$$NativeConstructorMarker"
@@ -77,6 +77,20 @@ public class Utils {
 
     public func GetStringDecl(): StructDecl {
         return GetStringDecl(importManager)
+    }
+
+    public func CreateZeroValue(ty: Ty, curFile: File): CallExpr {
+        let decl = importManager.GetCoreDecl<FuncDecl>("zeroValue").getOrThrow()
+        let call = CallExpr()
+        let ref = WithinFile<RefExpr>(CreateRefExpr(decl), curFile)
+        ref.instTys.add(ty)
+        ref.SetTy(typeManager.GetInstantiatedTy(decl.GetTy().getOrThrow(), GenerateTypeMapping(decl, ref.instTys)))
+        call.baseFunc = Some(ref)
+        call.SetTy(ty)
+        call.callKind = CallKind.CALL_INTRINSIC_FUNCTION
+        call.resolvedFunction = Some(decl)
+        call.curFile = Some(curFile)
+        return call
     }
 
     public func GetJavaObjectTypeName(ty: Ty): String {
