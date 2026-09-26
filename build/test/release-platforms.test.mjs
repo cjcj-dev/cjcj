@@ -181,3 +181,32 @@ test('the action behind a requirement producer runs both the installer and the p
       `${requirement}: the action does not run the capability probe`);
   }
 });
+
+// The acceptance is a difference set, not reasons.length === 0: installing the
+// SDK removes exactly the `requires` lines and leaves the cross-tuple ones, so a
+// platform can still be blocked for the tuple and say so.
+test('a platform whose SDK is installed and probed no longer reports a missing capability', () => {
+  const tupleReason = /^tuple \S+_cjnative: /;
+  let checkedRequirements = 0;
+  for (const key of allReleasePlatforms()) {
+    const readiness = releasePlatformReadiness(key);
+    for (const requirement of getReleasePlatform(key).requires) {
+      checkedRequirements++;
+      assert.ok(!readiness.reasons.some(reason => reason.startsWith(`requires ${requirement}:`)),
+        `${key}: still claims nothing installs ${requirement}: ${readiness.reasons.join('; ')}`);
+    }
+    // What is left must be the cross-built tuples (and the device-side gap),
+    // never a runner capability. The excluded arm32 package keeps its own line.
+    if (readiness.status === 'excluded') {
+      assert.match(readiness.reasons[0], /ARM32/, `${key}: excluded without the ARM32 reason`);
+      continue;
+    }
+    for (const reason of readiness.reasons) {
+      assert.ok(tupleReason.test(reason) || reason.startsWith('device-side SDK: '),
+        `${key}: leftover reason is neither a tuple nor a device-side gap: ${reason}`);
+    }
+  }
+  // Nine uses over nine platforms (the excluded arm32 package also names ohos-sdk,
+  // and is held to the same no-stale-claim rule before its own ARM32 line).
+  assert.equal(checkedRequirements, 9, 'the requirement uses across the release platform table');
+});
