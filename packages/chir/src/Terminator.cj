@@ -358,8 +358,42 @@ public open class DynamicDispatchWithException <: FuncCallWithException {
         if (thisTypeDeref.IsThis()) {
             thisTypeDeref = GetTopLevelFunc().getOrThrow().GetParentCustomTypeDef().getOrThrow().GetType().getOrThrow()
         }
-        let parent = GetInstParentCustomTyOfCallee(GetCallee(), GetArgs(), Some(thisTypeDeref), builder).getOrThrow()
-        return (parent as ClassType).getOrThrow()
+        if (let Some(parent) <- GetInstParentCustomTyOfCallee(GetCallee(), GetArgs(), Some(thisTypeDeref), builder)) {
+            if (let Some(ct) <- (parent as ClassType)) {
+                return ct
+            }
+        }
+        if (let Some(ct) <- (thisTypeDeref as ClassType)) {
+            return ct
+        }
+        let virtualOffset = GetVirtualMethodOffset()
+        let methodType = GetMethodType()
+        let instParamTypes = ArrayList<Type>()
+        for (arg in GetArgs()) {
+            instParamTypes.add(arg.GetType().getOrThrow())
+        }
+        if (!IsInvokeStaticBase()) {
+            instParamTypes.remove(at: 0)
+        }
+        let instFuncType = builder.context.GetFuncTy(instParamTypes, builder.context.GetUnitTy())
+        let funcCallType = FuncCallType(instFuncType, funcName: GetMethodName(), genericTypeArgs: GetInstantiatedTypeArgs())
+        for (res in GetFuncIndexInVTable(thisTypeDeref, funcCallType, builder)) {
+            if (res.offset != virtualOffset) {
+                continue
+            }
+            if (let Some(instSrcParentType) <- res.instSrcParentType) {
+                let defType = (instSrcParentType.GetClassDef().GetType().getOrThrow() as ClassType).getOrThrow()
+                let methods = instSrcParentType.GetClassDef().GetDefVTable().GetExpectedTypeVTable(defType).GetVirtualMethods()
+                if (Int64(res.offset) >= methods.size) {
+                    continue
+                }
+                let originalType = methods[Int64(res.offset)].GetOriginalFuncType()
+                if (VirMethodTypeIsMatched(originalType, methodType)) {
+                    return instSrcParentType
+                }
+            }
+        }
+        throw IllegalStateException("instantiated source parent custom type of virtual method is not available name=${GetMethodName()} offset=${virtualOffset}")
     }
 
     public func GetVirtualMethodAttr(): AttributeInfo {

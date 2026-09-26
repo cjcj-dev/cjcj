@@ -157,6 +157,7 @@ check_dry_contract() {
   # not prove that cjpm receives the job count.
   check_count CJPM-EXEC-JOBS 1 "tools/bin/cjpm\\\\ build\\\\ -j\\\\ $jobs$" "$log"
   echo "PASS dry stage1 cjpm jobs=$jobs reaches execution command"
+  check_count BOOTSTRAP-STD 1 'CMD python3 .*seed_official_std.py --sdk .*/base --tuple linux_x86_64_cjnative --output .*/stdlib-stage1' "$log"
   check_count CJPM 1 'heap=20480MB' "$log"
   check_shim_call_count "$log"
   check_count SHIM 1 'CMD shim build label=stage0 .*source-object=source .*sdk=.*/sdk-stage0 .*runtime=.*/host-rt' "$log"

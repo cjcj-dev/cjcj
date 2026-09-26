@@ -37,7 +37,7 @@ if (!versionOutput.includes(version)) {
 process.stdout.write(versionOutput);
 
 const installed = path.join(sdk, 'bin', 'cjc');
-const kind = (await $({stdio: 'pipe'})`file -b ${installed}`).stdout.trim();
+const kind = (await $({stdio: 'pipe'})`file -L -b ${installed}`).stdout.trim();
 if (!kind.includes(target.spec.fileFormat) || !kind.includes(target.spec.fileArch)) {
   throw new Error(`packaged compiler has wrong native format for ${targetKey}: ${kind}`);
 }

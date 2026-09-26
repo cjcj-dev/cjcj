@@ -44,6 +44,8 @@ const CXX_JOBS = new Map([
   ['platform-tuples.yml/build-tuple', {component: 'llvm-tuple', pin: /steps\.llvm-pin\.outputs\.sha/}],
   ['build-release-package.yml/package', {component: 'runtime', pin: /env\.RUNTIME_REF/}],
   ['build-windows-runtime.yml/build-runtime', {component: 'windows-runtime', pin: /env\.RUNTIME_REF/}],
+  ['source-language-tuple.yml/compiler-runtime', {component: 'runtime', pin: /env\.RUNTIME_REF/}],
+  ['source-language-tuple.yml/qualify-and-publish', {component: 'runtime', pin: /env\.RUNTIME_REF/}],
   ['srcbuild.yml/srcbuild', {component: 'srcbuild', pin: /env\.RUNTIME_REF/}],
   ['ci.yml/build', {component: 'runtime', pin: /env\.RUNTIME_REF/}],
   ['platform-matrix.yml/colour-runtime', {component: 'runtime', pin: /env\.RUNTIME_REF/}],

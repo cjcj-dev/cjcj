@@ -20,9 +20,13 @@ export async function installStage3Compiler({sdk, product, lineage}) {
   const bin = path.join(sdk, 'bin');
   await fs.mkdir(bin, {recursive: true});
   for (const name of COMPOSE_COMPILER_NAMES) await fs.rm(path.join(bin, name), {force: true});
+  // The executable basename participates in frontend dispatch. The two public
+  // entries must resolve to the managed compiler's local native filename.
+  const native = path.join(bin, 'cjcj-stage1');
+  await fs.copyFile(product, native);
+  await fs.chmod(native, 0o755);
+  for (const entry of ['cjc', 'cjc-frontend']) await fs.symlink('cjcj-stage1', path.join(bin, entry));
   const installed = path.join(bin, 'cjc');
-  await fs.copyFile(product, installed);
-  await fs.chmod(installed, 0o755);
   if (await fileSha256(installed) !== lineage.compilerSha256) {
     throw new Error('compose stage3 installed compiler mismatch');
   }

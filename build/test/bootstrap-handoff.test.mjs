@@ -177,7 +177,7 @@ for (const hostHeap of ['12288MB', '10752MB', '5376MB']) {
 
 test('stage3 final cjpm build consumes the resource-limited host environment', async () => {
   const stage = await fs.readFile(new URL('../../ci/srcbuild/steps/build-stage3.mjs', import.meta.url), 'utf8');
-  const call = stage.split('\n').find(line => line.includes('`cjpm build -j 1`'));
+  const call = stage.split('\n').find(line => line.includes('`cjpm build -j ${resources.STD_BUILD_JOBS}`'));
   assert.ok(call, 'final build call exists');
   console.log(`STAGE3_HEAP_CONTRACT_ASSERT_REACHED ${call.trim()}`);
   assert.match(call, /env: stageEnv\}/);

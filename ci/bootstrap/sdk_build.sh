@@ -38,6 +38,7 @@
 #   --std <dir>     build.py install prefix，或兼容旧调用的整个 modules/<平台> 目录
 #   --verify-host-rt <dir|sdk>  target SDK 验证 managed 工具时使用的未着色宿主 runtime
 #   --colour-runtime <SO>  染色 runtime 导出参考 SO（必填）
+#   --runtime-pin <file> 外部冻结 runtime 源 pin（缺省 ci/runtime_pin.env）
 #   --host-runtime <SO>    同 HRT 身份的官方 runtime 导出参考 SO（必填）
 #   --link <name>   ⭐ 组好后 `cjv toolchain link <name> <to>`
 #   --force         ⭐ 目标已存在时先删（⛔ 默认拒绝覆盖）
@@ -100,6 +101,7 @@ if [ "${1:-}" = env ]; then
   exit 0
 fi
 
+RUNTIME_PIN_FILE="$(dirname "${BASH_SOURCE[0]}")/../runtime_pin.env"
 FROM='' TO='' ROLE='' LLC='' OPT='' LLVM_SO='' LLVM_TUPLE='' CJPM='' CJC='' RUNTIME='' RUNTIME_COMMIT='' TARGET_TUPLE='' STD='' VERIFY_HOST_RT='' COLOUR_RUNTIME='' HOST_RUNTIME='' LINKNAME='' FORCE=0
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -118,6 +120,7 @@ while [ $# -gt 0 ]; do
     --cjpm) CJPM="${2:?}"; shift 2;;
     --cjc) CJC="${2:?}"; shift 2;;
     --runtime) RUNTIME="${2:?}"; shift 2;;
+    --runtime-pin) RUNTIME_PIN_FILE="${2:?}"; shift 2;;
     --runtime-commit) RUNTIME_COMMIT="${2:?}"; shift 2;;
     --std) STD="${2:?}"; shift 2;;
     --verify-host-rt) VERIFY_HOST_RT="${2:?}"; shift 2;;
@@ -141,9 +144,8 @@ if [ -z "$TARGET_TUPLE" ]; then
   esac
 fi
 [[ "$TARGET_TUPLE" =~ ^[a-z0-9]+_[a-z0-9_]+_cjnative$ ]] || die "无效构建目标 tuple: $TARGET_TUPLE"
-if [ -n "$LLVM_SO" ] && [ -n "$LLVM_TUPLE" ]; then
-  die '--llvm-so 与 --llvm-tuple 不可同时使用'
-fi
+# --llvm-so with --llvm-tuple is an overlay: the tuple has no libLLVM-15.so,
+# and the colour dylib is installed after the tuple so target verify sees its stamp.
 if [ -n "$LLVM_TUPLE" ] && { [ -n "$LLC" ] || [ -n "$OPT" ]; }; then
   die '--llvm-tuple 已包含 llc/opt，不可再混用 --llc/--opt'
 fi
@@ -343,11 +345,11 @@ install_llvm_tuple() {
 echo "[2/5] 替换组件"
 swap_all llc  "$LLC"  llc
 swap_all opt  "$OPT"  opt
-if [ -n "$LLVM_SO" ]; then
-  install_llvm_so "$LLVM_SO"
-fi
 if [ -n "$LLVM_TUPLE" ]; then
   install_llvm_tuple "$LLVM_TUPLE"
+fi
+if [ -n "$LLVM_SO" ]; then
+  install_llvm_so "$LLVM_SO"
 fi
 swap_all cjpm "$CJPM" cjpm
 swap_all cjc  "$CJC"  cjc
@@ -693,7 +695,7 @@ done
 
 echo "[lock] SDK.lock.json + sdk_verify"
 _SDK_VERIFY="$(dirname "${BASH_SOURCE[0]}")/sdk_verify.py"
-_PIN="$(dirname "${BASH_SOURCE[0]}")/../runtime_pin.env"
+_PIN="$RUNTIME_PIN_FILE"
 _IDENT=$(mktemp)
 _CJC_SHA=''
 if [ -f "$TO/bin/cjcj-stage1" ]; then

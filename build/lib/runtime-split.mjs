@@ -107,7 +107,7 @@ export function countLoadBadMask(symbols) {
     .filter(line => new RegExp(`\\b${LOAD_BAD_MASK_SYMBOL}\\b`).test(line)).length;
 }
 
-function countSdkLoadBadMask(symbols, target) {
+export function countSdkLoadBadMask(symbols, target) {
   const symbol = target.spec.os === 'darwin'
     ? `_${LOAD_BAD_MASK_SYMBOL}`
     : LOAD_BAD_MASK_SYMBOL;
