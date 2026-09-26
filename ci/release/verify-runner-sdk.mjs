@@ -38,12 +38,23 @@ for (const [arm, source] of Object.entries(arms)) {
   fs.writeFileSync(path.join(tree, 'output.log'), `${run.stdout ?? ''}${run.stderr ?? ''}`);
   const expected = arm.startsWith('cut-') ? 1 : 0;
   const record = {arm, requirement, sha256: createHash('sha256').update(source).digest('hex'), rc: run.status, expected};
+  // The target assertion is identical in every arm. The outer harness checks
+  // that only the disconnected arms fail it; it never rewrites the invariant.
+  try {
+    assert.deepEqual({rc: run.status, present: run.stdout?.startsWith(`PRESENT ${requirement}:`)},
+      {rc: 0, present: true}, 'installed SDK capability reaches a successful CLI result');
+    record.targetAssertionRc = 0;
+  } catch (error) {
+    record.targetAssertionRc = 1;
+    record.targetAssertionFailure = error.message;
+  }
   results.push(record);
   fs.writeFileSync(path.join(evidence, 'results.json'), `${JSON.stringify(results, null, 2)}\n`);
   // Emit the actual product result before asserting, so an earlier setup error
   // cannot be mistaken for reaching this capability assertion.
   console.log(JSON.stringify({...record, stdout: run.stdout, stderr: run.stderr}));
   assert.equal(run.status, expected, `${arm}: target capability exit status`);
+  assert.equal(record.targetAssertionRc, expected, `${arm}: unchanged target assertion verdict`);
   assert.match(run.stdout, new RegExp(`^${arm === 'cut-producer' ? 'MISSING' : 'PRESENT'} ${requirement}:`), `${arm}: target capability result`);
 }
 assert.equal(results[0].sha256, results[3].sha256);
