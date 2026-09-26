@@ -943,41 +943,57 @@ public class CHIRChecker {
     }
 
     private func CheckTerminator(expr: Expression, topLevelFunc: Function): Unit {
-        if (let Some(term) <- expr.AsTerminator()) {
-            match (expr.GetExprKind()) {
-                case ExprKind.GOTO => CheckGoTo(term, topLevelFunc)
-                case ExprKind.EXIT => CheckExit(term, topLevelFunc)
-                case ExprKind.BRANCH => CheckBranch(term, topLevelFunc)
-                case ExprKind.MULTIBRANCH => CheckMultiBranch(term, topLevelFunc)
-                case ExprKind.RAISE_EXCEPTION => CheckRaiseException(term, topLevelFunc)
-                case ExprKind.TRY_APPLY =>
-                    CheckTryApply((term as TryApply).getOrThrow(), topLevelFunc)
-                case ExprKind.TRY_INVOKE =>
-                    CheckTryInvoke((term as TryInvoke).getOrThrow(), topLevelFunc)
-                case ExprKind.TRY_INVOKESTATIC =>
-                    CheckTryInvokeStatic((term as TryInvokeStatic).getOrThrow(), topLevelFunc)
-                case ExprKind.TRY_NEG =>
-                    CheckTryUnaryExpression((term as TryUnaryExpression).getOrThrow(), topLevelFunc)
-                case ExprKind.TRY_ADD | ExprKind.TRY_SUB | ExprKind.TRY_MUL |
-                    ExprKind.TRY_DIV | ExprKind.TRY_MOD | ExprKind.TRY_EXP |
-                    ExprKind.TRY_LSHIFT | ExprKind.TRY_RSHIFT =>
-                    CheckTryBinaryExpression((term as TryBinaryExpression).getOrThrow(), topLevelFunc)
-                case ExprKind.TRY_SPAWN =>
-                    CheckTrySpawn((term as TrySpawn).getOrThrow(), topLevelFunc)
-                case ExprKind.TRY_NUMERIC_CAST =>
-                    CheckTryNumericCast((term as TryNumericCast).getOrThrow(), topLevelFunc)
-                case ExprKind.TRY_INTRINSIC =>
-                    CheckTryIntrinsic((term as TryIntrinsic).getOrThrow(), topLevelFunc)
-                case ExprKind.TRY_ALLOCATE =>
-                    CheckTryAllocate((term as TryAllocate).getOrThrow(), topLevelFunc)
-                case ExprKind.TRY_RAW_ARRAY_ALLOCATE =>
-                    CheckTryRawArrayAllocate((term as TryRawArrayAllocate).getOrThrow(), topLevelFunc)
-                case _ => WarningInExpr(topLevelFunc, expr,
-                    "find unrecongnized ExprKind `" + expr.GetExprKindName() + "`.")
-            }
+        let actionMap = HashMap<ExprKind, () -> Unit>([
+            (ExprKind.GOTO, { =>
+                CheckGoTo((expr as GoTo).getOrThrow(), topLevelFunc) }),
+            (ExprKind.EXIT, { =>
+                CheckExit((expr as Exit).getOrThrow(), topLevelFunc) }),
+            (ExprKind.RAISE_EXCEPTION, { =>
+                CheckRaiseException((expr as RaiseException).getOrThrow(), topLevelFunc) }),
+            (ExprKind.BRANCH, { =>
+                CheckBranch((expr as Branch).getOrThrow(), topLevelFunc) }),
+            (ExprKind.MULTIBRANCH, { =>
+                CheckMultiBranch((expr as MultiBranch).getOrThrow(), topLevelFunc) }),
+            (ExprKind.TRY_APPLY, { =>
+                CheckTryApply((expr as TryApply).getOrThrow(), topLevelFunc) }),
+            (ExprKind.TRY_INVOKE, { =>
+                CheckTryInvoke((expr as TryInvoke).getOrThrow(), topLevelFunc) }),
+            (ExprKind.TRY_INVOKESTATIC, { =>
+                CheckTryInvokeStatic((expr as TryInvokeStatic).getOrThrow(), topLevelFunc) }),
+            (ExprKind.TRY_NEG, { =>
+                CheckTryUnaryExpression((expr as TryUnaryExpression).getOrThrow(), topLevelFunc) }),
+            (ExprKind.TRY_ADD, { =>
+                CheckTryBinaryExpression((expr as TryBinaryExpression).getOrThrow(), topLevelFunc) }),
+            (ExprKind.TRY_SUB, { =>
+                CheckTryBinaryExpression((expr as TryBinaryExpression).getOrThrow(), topLevelFunc) }),
+            (ExprKind.TRY_MUL, { =>
+                CheckTryBinaryExpression((expr as TryBinaryExpression).getOrThrow(), topLevelFunc) }),
+            (ExprKind.TRY_DIV, { =>
+                CheckTryBinaryExpression((expr as TryBinaryExpression).getOrThrow(), topLevelFunc) }),
+            (ExprKind.TRY_MOD, { =>
+                CheckTryBinaryExpression((expr as TryBinaryExpression).getOrThrow(), topLevelFunc) }),
+            (ExprKind.TRY_EXP, { =>
+                CheckTryBinaryExpression((expr as TryBinaryExpression).getOrThrow(), topLevelFunc) }),
+            (ExprKind.TRY_LSHIFT, { =>
+                CheckTryBinaryExpression((expr as TryBinaryExpression).getOrThrow(), topLevelFunc) }),
+            (ExprKind.TRY_RSHIFT, { =>
+                CheckTryBinaryExpression((expr as TryBinaryExpression).getOrThrow(), topLevelFunc) }),
+            (ExprKind.TRY_SPAWN, { =>
+                CheckTrySpawn((expr as TrySpawn).getOrThrow(), topLevelFunc) }),
+            (ExprKind.TRY_NUMERIC_CAST, { =>
+                CheckTryNumericCast((expr as TryNumericCast).getOrThrow(), topLevelFunc) }),
+            (ExprKind.TRY_INTRINSIC, { =>
+                CheckTryIntrinsic((expr as TryIntrinsic).getOrThrow(), topLevelFunc) }),
+            (ExprKind.TRY_ALLOCATE, { =>
+                CheckTryAllocate((expr as TryAllocate).getOrThrow(), topLevelFunc) }),
+            (ExprKind.TRY_RAW_ARRAY_ALLOCATE, { =>
+                CheckTryRawArrayAllocate((expr as TryRawArrayAllocate).getOrThrow(), topLevelFunc) })
+        ])
+        if (let Some(action) <- actionMap.get(expr.GetExprKind())) {
+            action()
         } else {
-            Errorln("in function ${topLevelFunc.GetIdentifier()}, ${expr.ToString(0)} is terminator kind " +
-                "but not a Terminator node.")
+            WarningInExpr(topLevelFunc, expr,
+                "find unrecongnized ExprKind `" + expr.GetExprKindName() + ".")
         }
     }
 
@@ -1238,19 +1254,24 @@ public class CHIRChecker {
     }
 
     private func CheckMemoryExpression(expr: Expression, topLevelFunc: Function): Unit {
-        match (expr.GetExprKind()) {
-            case ExprKind.ALLOCATE => CheckAllocate((expr as Allocate).getOrThrow(), topLevelFunc)
-            case ExprKind.LOAD => CheckLoad(expr, topLevelFunc)
-            case ExprKind.STORE => CheckStore(expr, topLevelFunc)
-            case ExprKind.GET_ELEMENT_REF => CheckGetElementRef((expr as GetElementRef).getOrThrow(), topLevelFunc)
-            case ExprKind.GET_ELEMENT_BY_NAME =>
-                CheckGetElementByName((expr as GetElementByName).getOrThrow(), topLevelFunc)
-            case ExprKind.STORE_ELEMENT_REF =>
-                CheckStoreElementRef((expr as StoreElementRef).getOrThrow(), topLevelFunc)
-            case ExprKind.STORE_ELEMENT_BY_NAME =>
-                CheckStoreElementByName((expr as StoreElementByName).getOrThrow(), topLevelFunc)
-            case _ => WarningInExpr(topLevelFunc, expr,
-                "find unrecongnized ExprKind `" + expr.GetExprKindName() + "`.")
+        let actionMap = HashMap<ExprKind, () -> Unit>([
+            (ExprKind.ALLOCATE, { => CheckAllocate((expr as Allocate).getOrThrow(), topLevelFunc) }),
+            (ExprKind.LOAD, { => CheckLoad(expr, topLevelFunc) }),
+            (ExprKind.STORE, { => CheckStore(expr, topLevelFunc) }),
+            (ExprKind.GET_ELEMENT_REF, { =>
+                CheckGetElementRef((expr as GetElementRef).getOrThrow(), topLevelFunc) }),
+            (ExprKind.GET_ELEMENT_BY_NAME, { =>
+                CheckGetElementByName((expr as GetElementByName).getOrThrow(), topLevelFunc) }),
+            (ExprKind.STORE_ELEMENT_REF, { =>
+                CheckStoreElementRef((expr as StoreElementRef).getOrThrow(), topLevelFunc) }),
+            (ExprKind.STORE_ELEMENT_BY_NAME, { =>
+                CheckStoreElementByName((expr as StoreElementByName).getOrThrow(), topLevelFunc) })
+        ])
+        if (let Some(action) <- actionMap.get(expr.GetExprKind())) {
+            action()
+        } else {
+            WarningInExpr(topLevelFunc, expr,
+                "find unrecongnized ExprKind `" + expr.GetExprKindName() + ".")
         }
     }
 
