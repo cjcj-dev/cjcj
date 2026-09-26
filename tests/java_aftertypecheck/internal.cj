@@ -6,6 +6,18 @@ public type jobject = CPointer<Unit>
 
 @C
 public struct JNINativeInterface_ {
+    public var CallLongMethod: CFunc<(CPointer<CPointer<JNINativeInterface_>>, jobject, jobject) -> Int64> =
+        unsafe { CFunc<(CPointer<CPointer<JNINativeInterface_>>, jobject, jobject) -> Int64>(CPointer<Unit>()) }
+    public var CallStaticIntMethod: CFunc<(CPointer<CPointer<JNINativeInterface_>>, jobject, jobject) -> Int32> =
+        unsafe { CFunc<(CPointer<CPointer<JNINativeInterface_>>, jobject, jobject) -> Int32>(CPointer<Unit>()) }
+    public var GetLongField: CFunc<(CPointer<CPointer<JNINativeInterface_>>, jobject, jobject) -> Int64> =
+        unsafe { CFunc<(CPointer<CPointer<JNINativeInterface_>>, jobject, jobject) -> Int64>(CPointer<Unit>()) }
+    public var GetStaticIntField: CFunc<(CPointer<CPointer<JNINativeInterface_>>, jobject, jobject) -> Int32> =
+        unsafe { CFunc<(CPointer<CPointer<JNINativeInterface_>>, jobject, jobject) -> Int32>(CPointer<Unit>()) }
+    public var SetLongField: CFunc<(CPointer<CPointer<JNINativeInterface_>>, jobject, jobject, Int64) -> Unit> =
+        unsafe { CFunc<(CPointer<CPointer<JNINativeInterface_>>, jobject, jobject, Int64) -> Unit>(CPointer<Unit>()) }
+    public var SetStaticIntField: CFunc<(CPointer<CPointer<JNINativeInterface_>>, jobject, jobject, Int32) -> Unit> =
+        unsafe { CFunc<(CPointer<CPointer<JNINativeInterface_>>, jobject, jobject, Int32) -> Unit>(CPointer<Unit>()) }
     public var CallIntMethod: CFunc<(CPointer<CPointer<JNINativeInterface_>>, jobject, jobject) -> Int32> =
         unsafe { CFunc<(CPointer<CPointer<JNINativeInterface_>>, jobject, jobject) -> Int32>(CPointer<Unit>()) }
     public var NewObject: CFunc<(CPointer<CPointer<JNINativeInterface_>>, jobject, jobject) -> jobject> =
