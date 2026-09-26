@@ -205,55 +205,53 @@ main() {
     }
 
     @TestCase
-    public func invertedInheritOrderPicksEarliestPosition(): Unit {
-        let dir = getVariable("TMPDIR").getOrThrow() + "/override-invert-" + GenerateRandomHexString()
+    public func extendChainSourceDeclReachesInterfaceRoot(): Unit {
+        let dir = getVariable("TMPDIR").getOrThrow() + "/override-chain-" + GenerateRandomHexString()
         let _ = FileUtil.CreateDirs(dir + "/")
         let instance = NewOverrideInstance("""
-package invert
-public interface Early {
-    func foo(x: Int64): Int64
+package chain
+public interface I<T> {
+    func f(a: T): Int64
 }
-public interface Late {
-    func foo(x: Int64): Int64
+public open class A {
+    public open func f(a: Int64): Int64 {
+        a + 1
+    }
 }
-public class CCC <: Late & Early {
-    public func foo(x: Int64): Int64 {
-        x
+extend A <: I<Int64> {}
+public class B <: A {
+    public func f(a: Int64): Int64 {
+        a + 1
     }
 }
 main() {
-    CCC().foo(1)
+    B().f(1)
 }
-""", dir, "invert")
+""", dir, "chain")
         let ok = instance.Compile(stage: CompileStage.SEMA)
-        println("OVERRIDE_INVERT_COMPILE ok=${ok}")
+        println("OVERRIDE_CHAIN_COMPILE ok=${ok}")
         @Assert(ok)
-        let callee = FindNamedCallee(instance.GetSourcePackages()[0], "foo")
-        @Assert(callee.isSome())
-        let fd = callee.getOrThrow()
-        let manager = instance.faithfulSemaInstance.getOrThrow().typeManager
-        let tops = OverrideFunctionResolver(manager).GetTopOverriddenFuncs(
-            fd.outerDecl.getOrThrow().GetTy().getOrThrow(), fd)
-        var hasEarly = false
-        var hasLate = false
-        var listed = ""
-        for (top in tops) {
-            let name = top.outerDecl.getOrThrow().identifier.Val() + "." + top.identifier.Val()
-            listed = listed + name + ","
-            if (name == "Early.foo") {
-                hasEarly = true
-            }
-            if (name == "Late.foo") {
-                hasLate = true
+        var sourceBF: Option<FuncDecl> = None
+        for (file in instance.GetSourcePackages()[0].files) {
+            for (decl in file.decls) {
+                if (let Some(classDecl) <- (decl as ClassDecl)) {
+                    if (classDecl.identifier.Val() == "B") {
+                        for (member in classDecl.GetMemberDecls()) {
+                            if (let Some(funcDecl) <- (member as FuncDecl)) {
+                                if (funcDecl.identifier.Val() == "f") {
+                                    sourceBF = Some(funcDecl)
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
-        println("OVERRIDE_INVERT_SET size=${tops.size} names=${listed}")
-        @Expect(tops.size, 2)
-        @Expect(hasEarly)
-        @Expect(hasLate)
-        let actual = QualNameOf(manager.GetTopOverriddenFuncDecl(callee))
-        println("OVERRIDE_INVERT_ASSERT actual=${actual} expected=Early.foo")
-        @Expect(actual, "Early.foo")
+        @Assert(sourceBF.isSome())
+        let manager = instance.faithfulSemaInstance.getOrThrow().typeManager
+        let actual = QualNameOf(manager.GetTopOverriddenFuncDecl(sourceBF))
+        println("OVERRIDE_CHAIN_ASSERT actual=${actual} expected=I.f")
+        @Expect(actual, "I.f")
     }
 }
 
