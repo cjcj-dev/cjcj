@@ -31,6 +31,11 @@ on:
         required: false
         type: string
         default: all
+      build_ios:
+        description: Build the three iOS cross tuples on the Darwin arm64 source cell
+        required: false
+        type: boolean
+        default: false
       rebuild_llvm:
         description: Bypass the whole-artifact LLVM tools cache so the LLVM sccache hit rate can be measured.
         required: false
@@ -94,6 +99,11 @@ on:
         required: false
         type: string
         default: all
+      build_ios:
+        description: Build the three iOS cross tuples on the Darwin arm64 source cell
+        required: false
+        type: boolean
+        default: false
       rebuild_llvm:
         description: Bypass the whole-artifact LLVM tools cache so the LLVM sccache hit rate can be measured.
         required: false
@@ -535,17 +545,17 @@ jobs:
         run: npx --yes zx@8 ci/srcbuild/steps/build-stage3.mjs
 
       - name: Install and probe iOS SDKs
-        if: matrix.target == 'darwin-arm64'
+        if: matrix.target == 'darwin-arm64' && inputs.build_ios
         uses: ./.github/actions/setup-release-sdk
         with:
           requirement: xcode-ios
 
       - name: Build iOS runtimes and final std with stage2 host compiler
-        if: matrix.target == 'darwin-arm64'
+        if: matrix.target == 'darwin-arm64' && inputs.build_ios
         run: npx --yes zx@8 ci/srcbuild/steps/build-ios-final-std.mjs
 
       - name: Upload iOS runtime and final std tuple bundle
-        if: matrix.target == 'darwin-arm64'
+        if: matrix.target == 'darwin-arm64' && inputs.build_ios
         uses: actions/upload-artifact@v7
         with:
           name: final-std-ios

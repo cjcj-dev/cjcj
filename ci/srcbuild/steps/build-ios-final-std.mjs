@@ -4,6 +4,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import os from 'node:os';
 import {assertBootstrapCompiler} from '../lib/bootstrap-handoff.mjs';
 import {writeStdProvenance} from '../../../build/lib/provenance.mjs';
 import {probeRequirement} from '../../release/platform-matrix.mjs';
@@ -30,6 +31,7 @@ if (!compilerKind.includes('Mach-O') || !compilerKind.includes('arm64')) throw n
 const output = path.join(workspace, 'software', 'final-std-ios');
 await fs.rm(output, {recursive: true, force: true});
 await fs.mkdir(output, {recursive: true});
+const jobs = os.availableParallelism();
 const targets = [
   {target: 'ios-aarch64', tuple: 'ios_aarch64_cjnative', sdk: 'iphoneos', arch: 'arm64'},
   {target: 'ios-simulator-aarch64', tuple: 'ios_simulator_aarch64_cjnative', sdk: 'iphonesimulator', arch: 'arm64'},
@@ -58,7 +60,7 @@ await Promise.all(targets.map(async target => {
   await $({cwd: runtime, env})`python3 build.py build -t release --target ${target.target} --target-toolchain ${path.dirname(toolBin)} --target-sysroot ${sysroot} -v ${version}`;
   const runtimeOutput = path.join(source, 'runtime-install');
   await $({cwd: runtime, env})`python3 build.py install --prefix ${runtimeOutput}`;
-  await $({cwd: stdlib, env})`python3 build.py build -t release --target ${target.target} --target-lib=${path.join(runtimeOutput, 'lib')} --target-sysroot ${sysroot} --target-toolchain ${toolBin}`;
+  await $({cwd: stdlib, env})`python3 build.py build -t release -j ${jobs} --target ${target.target} --target-lib=${path.join(runtimeOutput, 'lib')} --target-sysroot ${sysroot} --target-toolchain ${toolBin}`;
   await $({cwd: stdlib, env})`python3 build.py install --prefix ${install}`;
   await assertCompiler();
   await writeStdProvenance({sourceDir: path.join(repository, 'stdlib'), installPrefix: install, compiler,
