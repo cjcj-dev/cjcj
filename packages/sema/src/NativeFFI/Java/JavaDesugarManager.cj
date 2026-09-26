@@ -386,6 +386,7 @@ public class JavaDesugarManager {
         let ilib = BridgeLib()
         PopulateJavaMirrorStubs(typeManager, ilib, BridgeUtils(), Factory()).Process(ctx)
         ctx.FlushGeneratedDecls()
+        GenerateJavaSourceCode(ctx)
     }
 
     public func ProcessCallSiteDesugarStages(ctx: AfterTypeCheckContext): Unit {
