@@ -53,13 +53,15 @@ export async function prepareBootstrapHandoff({work, sdk, source, tuple}) {
   const targetLd = [path.join(sdk, 'runtime', 'lib', tuple), path.join(sdk, 'lib', tuple),
     path.join(sdk, 'third_party', 'llvm', 'lib'), path.join(sdk, 'tools', 'lib'),
     '/usr/lib/x86_64-linux-gnu'].join(':');
-  const runner = async (entry, real, ld) => {
+  const runner = async (entry, real, ld, heap = null) => {
     await fs.rm(entry, {force: true});
-    await fs.writeFile(entry, `#!/usr/bin/env bash\nexport CANGJIE_HOME=${quote(sdk)}\nexport LD_LIBRARY_PATH=${quote(ld)}\nexec ${quote(real)} "$@"\n`, {mode: 0o755});
+    await fs.writeFile(entry, `#!/usr/bin/env bash\nexport CANGJIE_HOME=${quote(sdk)}\nexport LD_LIBRARY_PATH=${quote(ld)}\n${heap === null ? '' : `export cjHeapSize=${quote(heap)}\n`}exec ${quote(real)} "$@"\n`, {mode: 0o755});
   };
   await fs.copyFile(compiler, path.join(sdk, 'bin', 'cjcj-stage2'));
   await fs.chmod(path.join(sdk, 'bin', 'cjcj-stage2'), 0o755);
-  await runner(path.join(sdk, 'bin', 'cjc'), path.join(sdk, 'bin', 'cjcj-stage2'), targetLd);
+  // Only the coloured compiler needs the larger heap. The official host cjpm
+  // must retain the resource-limited parent value (its limit excludes swap).
+  await runner(path.join(sdk, 'bin', 'cjc'), path.join(sdk, 'bin', 'cjcj-stage2'), targetLd, '20GB');
   await runner(path.join(sdk, 'tools', 'bin', 'cjpm'), path.join(sdk, 'tools', 'bin', 'cjpm-stage1'), binding.host_ld);
   for (const name of ['opt', 'llc']) {
     await runner(path.join(sdk, 'third_party', 'llvm', 'bin', name),
