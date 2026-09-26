@@ -12,6 +12,7 @@ import * as mingw from './toolchain/mingw.mjs';
 import * as staticLibs from './toolchain/static-libs.mjs';
 import * as systemDeps from './toolchain/system-deps.mjs';
 import * as targetPython from './toolchain/target-python.mjs';
+import * as canonicalWorkloads from './srcbuild/stages/canonical-workloads.mjs';
 import * as compiler from './srcbuild/stages/compiler.mjs';
 import * as fetchStage from './srcbuild/stages/fetch.mjs';
 import * as packageStage from './srcbuild/stages/package.mjs';
@@ -27,7 +28,7 @@ const COMMANDS = new Set([
   'install-system-deps', 'print-version', 'install-static-libs', 'install-mingw',
   'install-target-python', 'fetch', 'build', 'package', 'verify', 'run-all',
 ]);
-const BUILD_STAGES = Object.freeze({compiler, runtime, stdlib, stdx, tools});
+const BUILD_STAGES = Object.freeze({compiler, runtime, stdlib, stdx, tools, 'canonical-workloads': canonicalWorkloads});
 const LOG_LEVELS = new Set(['DEBUG', 'INFO', 'WARNING', 'ERROR']);
 
 function usage() {

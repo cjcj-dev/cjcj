@@ -14,7 +14,7 @@ readonly HOST_TOOLCHAIN_PIN="$REPO_ROOT/ci/host_sdk_pin.env"
 # Numeric GHA ids kept for --from-step/--through-step. Deleted ids 15-19 and
 # 27-28 are not in this order: bootstrap (31+32) and final-std (33) run after
 # P07/step 14, then stdx/tools/package, then shim, then compose/verify.
-DAG_ORDER=(2 3 4 5 6 7 8 9 10 11 12 13 14 31 32 30 33 20 21 22 23 24 25 26 29 34 35 36)
+DAG_ORDER=(2 3 4 5 6 7 8 9 10 11 12 13 14 31 32 30 33 37 20 21 22 23 24 25 26 29 34 35 36)
 readonly ORIGINAL_ARGS=("$@")
 
 read_host_toolchain_pin() {
@@ -1083,6 +1083,10 @@ step_14() {
     npx --yes zx@8 "$REPO_ROOT/ci/srcbuild/steps/verify-source-pins.mjs"
 }
 
+step_37() {
+    CJCJ_SRCBUILD_CONSUMER_SDK="$CANGJIE_WORKSPACE/software/cangjie" build_cli build canonical-workloads
+}
+
 step_20() { CJCJ_SRCBUILD_CONSUMER_SDK="$CANGJIE_WORKSPACE/software/cangjie" build_cli build stdx; }
 step_21() { CJCJ_SRCBUILD_CONSUMER_SDK="$CANGJIE_WORKSPACE/software/cangjie" build_cli build tools; }
 
@@ -1269,6 +1273,7 @@ declare -Ar STEP_NAMES=(
     [34]='Compose self-hosted SDK'
     [35]='Archive final compiler handoff'
     [36]='Verify self-hosted SDK'
+    [37]='Build canonical workload ELFs with stage2'
 )
 
 validate_stage_step_contracts() {
@@ -1332,6 +1337,18 @@ validate_stage_step_contracts() {
         }
         [[ -f $CJCJ_BOOTSTRAP_WORK/cjcj-stage2 ]] || {
             echo "dry-run stage3 input missing: bootstrap stage2 compiler $CJCJ_BOOTSTRAP_WORK/cjcj-stage2" >&2
+            return 1
+        }
+    fi
+    if includes_step 37; then
+        [[ -f $REPO_ROOT/build/srcbuild/stages/canonical-workloads.mjs ]] || {
+            echo "dry-run canonical workload stage missing" >&2
+            return 1
+        }
+        local step37_text
+        step37_text=$(awk '/^step_37\(\)/,/^}/' "$SCRIPT_PATH")
+        printf '%s\n' "$step37_text" | /usr/bin/grep -Fq 'build_cli build canonical-workloads' || {
+            echo "dry-run step_37 does not invoke canonical workload producer" >&2
             return 1
         }
     fi

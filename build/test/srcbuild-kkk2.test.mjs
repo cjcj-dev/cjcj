@@ -793,7 +793,9 @@ test('DAG runs bootstrap after verify-source-pins and omits removed compiler/std
   assert.ok(order.indexOf(31) < order.indexOf(32));
   assert.ok(order.indexOf(32) < order.indexOf(30));
   assert.ok(order.indexOf(30) < order.indexOf(33));
-  assert.ok(order.indexOf(33) < order.indexOf(20));
+  assert.ok(order.includes(37));
+  assert.ok(order.indexOf(33) < order.indexOf(37));
+  assert.ok(order.indexOf(37) < order.indexOf(20));
   assert.ok(order.indexOf(20) < order.indexOf(26));
   assert.ok(order.indexOf(26) < order.indexOf(29));
   assert.ok(order.indexOf(29) < order.indexOf(34));
