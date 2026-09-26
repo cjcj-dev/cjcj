@@ -277,7 +277,8 @@ private func IsMathIntrinsic(kind: IntrinsicKind): Bool {
 
 private func IsStackTraceIntrinsic(kind: IntrinsicKind): Bool {
     return kind == IntrinsicKind.FILL_IN_STACK_TRACE ||
-        kind == IntrinsicKind.DECODE_STACK_TRACE
+        kind == IntrinsicKind.DECODE_STACK_TRACE ||
+        kind == IntrinsicKind.CANONICALIZE_STRING_BACKING
 }
 
 private func IsThreadInfoIntrinsic(kind: IntrinsicKind): Bool {

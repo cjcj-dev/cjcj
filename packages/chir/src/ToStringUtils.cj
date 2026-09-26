@@ -134,6 +134,7 @@ public func IntrinsicKindToString(kind: IntrinsicKind): String {
         case IntrinsicKind.ARRAY_SLICE_GET_ELEMENT_UNCHECKED => "arraySliceGetUnchecked"
         case IntrinsicKind.ARRAY_SLICE_SET_ELEMENT_UNCHECKED => "arraySliceSetUnchecked"
         case IntrinsicKind.FILL_IN_STACK_TRACE => "fillInStackTrace"
+        case IntrinsicKind.CANONICALIZE_STRING_BACKING => "canonicalizeStringBacking"
         case IntrinsicKind.DECODE_STACK_TRACE => "decodeStackTrace"
         case IntrinsicKind.DUMP_CURRENT_THREAD_INFO => "dumpCurrentThreadInfo"
         case IntrinsicKind.DUMP_ALL_THREADS_INFO => "dumpAllThreadsInfo"

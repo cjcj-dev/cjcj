@@ -71,6 +71,7 @@ private let PLAIN_SAFE_REPRESENTATION_GLOBAL: String = ".cj.repr.plain_safe"
 private let PLAIN_SAFE_REPRESENTATION_CONTRACT: String = "plain_safe"
 private let PLAIN_SAFE_RETURN_CONTRACT: String = "cj.repr.ret"
 private let FILL_IN_STACK_TRACE_INTRINSIC_NAME: String = "llvm.cj.fill.in.stack.trace"
+private let STRING_DEDUP_CANONICAL_INTRINSIC_NAME: String = "llvm.cj.string.dedup.canonical"
 private let NEW_CJ_THREAD_FUNC_NAME: String = PREFIX_OF_BACKEND_SYMS + "NewCJThread"
 private let NEW_CJ_THREAD_NO_RETURN_FUNC_NAME: String = PREFIX_OF_BACKEND_SYMS + "NewCJThreadNoReturn"
 private let MIN_ANDROID_ARM32_ENUM_ALIGN: UInt32 = 4u32
@@ -3030,6 +3031,16 @@ public class IRBuilder2 <: Resource {
             let i8PtrTy = unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 0u32) }
             funcArgs[0] = CreateBitCast(CreateTypeInfo(uint64ArrayTy), i8PtrTy)
             return CreateIntrinsicCallNoInvoke(FILL_IN_STACK_TRACE_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(),
+                funcArgs)
+        }
+        if (kind == IntrinsicKind.CANONICALIZE_STRING_BACKING) {
+            CJC_ASSERT(!parameters.isEmpty())
+            let retTy = resultType.getOrThrow()
+            let uint8ArrayTy = (DeRef(retTy) as RawArrayType).getOrThrow()
+            let funcArgs = RawValuesOfCGValues(parameters)
+            let i8PtrTy = unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 0u32) }
+            funcArgs.add(CreateBitCast(CreateTypeInfo(uint8ArrayTy), i8PtrTy), at: 0)
+            return CreateIntrinsicCallNoInvoke(STRING_DEDUP_CANONICAL_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(),
                 funcArgs)
         }
         if (kind == IntrinsicKind.DECODE_STACK_TRACE) {
