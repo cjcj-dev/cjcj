@@ -24,8 +24,8 @@ there is no unscoped fallback. Darwin acquisition continues to use its JSON
 record's library digest. JSON Linux library digests are producer provenance;
 the scoped row is the expected digest used to verify downloaded bytes.
 
-The runtime and boundscheck rows are fixed from the official release named by
-`ci/host_sdk_pin.env`; archive names and SHA256 receipts accompany the pins.
+Runtime and boundscheck pin updates must use the official release named by
+`ci/host_sdk_pin.env`, with archive names and SHA256 receipts alongside the pins.
 Updating the SDK requires reviewing these rows as well. Neither preparation nor
 the runner learns an expected digest from the input it is checking.
 
