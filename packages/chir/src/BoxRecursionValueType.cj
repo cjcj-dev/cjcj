@@ -124,7 +124,7 @@ private func UnBoxGetElementRefResIfNeed(ger: GetElementRef, builder: CHIRBuilde
         loadRes.SetType(boxRefType)
 
         let loadResUsers = loadRes.GetUsers()
-        let unbox = builder.CreateUnBox(targetType, loadRes, ger.GetParentBlock().getOrThrow())
+        let unbox = builder.CreateUnBoxToValue(targetType, loadRes, ger.GetParentBlock().getOrThrow())
         unbox.MoveAfter(load)
         for (user in loadResUsers) {
             user.ReplaceOperand(loadRes, unbox.GetResult().getOrThrow())
@@ -169,7 +169,7 @@ private func InsertUnBoxAfterField(field: Field, builder: CHIRBuilder): Unit {
     fieldRes.SetType(boxRefType)
     let parent = field.GetParentBlock().getOrThrow()
     let oldUsers = fieldRes.GetUsers()
-    let unbox = builder.CreateUnBox(resType, fieldRes, parent)
+    let unbox = builder.CreateUnBoxToValue(resType, fieldRes, parent)
     unbox.MoveAfter(field)
     for (user in oldUsers) {
         user.ReplaceOperand(fieldRes, unbox.GetResult().getOrThrow())
@@ -203,7 +203,7 @@ private func FieldAndTypeCastNeedUnBox(field: Field, collected: HashMap<Expressi
      *  %0: Enum-E = ...
      *  %1: Tuple<UInt64, Box<Struct-S>&> = TypeCast(%0)
      *  %2: Box<Struct-S>& = Field(%1, 1)
-     *  %3: Struct-S = UnBox(%2)
+     *  %3: Struct-S = UnBoxToValue(%2)
      */
     let index = field.GetPath()
     if (index.size != 1) {
@@ -217,15 +217,15 @@ private func FieldAndTypeCastNeedUnBox(field: Field, collected: HashMap<Expressi
         return false
     }
     let baseExpr = (base as LocalVar).getOrThrow().GetExpr().getOrThrow()
-    if (baseExpr.GetExprKind() != ExprKind.TYPECAST) {
+    if (baseExpr.GetExprKind() != ExprKind.CLASS_STATIC_CAST) {
         return false
     }
-    let typecast = (baseExpr as TypeCast).getOrThrow()
-    let srcType = typecast.GetSourceTy().getOrThrow()
+    let typecast = (baseExpr as ClassStaticCast).getOrThrow()
+    let srcType = typecast.GetSourceType().getOrThrow()
     if (!srcType.IsEnum()) {
         return false
     }
-    let targetType = typecast.GetTargetTy().getOrThrow()
+    let targetType = typecast.GetTargetType().getOrThrow()
     if (!targetType.IsTuple()) {
         return false
     }

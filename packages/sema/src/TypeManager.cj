@@ -225,15 +225,6 @@ private struct OverrideOrShadowKey <: Comparable<OverrideOrShadowKey> & Equatabl
     }
 }
 
-private class TopOverrideEntry {
-    public var src: FuncDecl
-    public let targets: ArrayList<FuncDecl> = ArrayList<FuncDecl>()
-
-    public init(src: FuncDecl) {
-        this.src = src
-    }
-}
-
 public class DeclExtendsEntry {
     public var decl: InheritableDecl
     public let extends: ArrayList<ExtendDecl> = ArrayList<ExtendDecl>()
@@ -395,7 +386,6 @@ public class TypeManager {
     private var anyTy: Ty = theAnyTy
     private var ctypeTy: Option<Ty> = None
     private let overrideCache: TreeMap<OverrideOrShadowKey, Bool> = TreeMap<OverrideOrShadowKey, Bool>()
-    private let topOverrideMap: ArrayList<TopOverrideEntry> = ArrayList<TopOverrideEntry>()
     private let boxUsedExtends: ArrayList<ExtendDecl> = ArrayList<ExtendDecl>()
     private let boxedNonGenericDecls: ArrayList<InheritableDecl> = ArrayList<InheritableDecl>()
     private let boxedTys: ArrayList<Ty> = ArrayList<Ty>()
@@ -2085,63 +2075,16 @@ public class TypeManager {
         return None
     }
 
-    public func UpdateTopOverriddenFuncDeclMap(src: Option<Decl>, target: Option<Decl>): Unit {
-        if (let Some(srcDecl) <- src) {
-            if (let Some(targetDecl) <- target) {
-                if (SameDecl(srcDecl, targetDecl)) {
-                    return
-                }
-                if (let Some(srcFunc) <- (srcDecl as FuncDecl)) {
-                    if (let Some(targetFunc) <- (targetDecl as FuncDecl)) {
-                        addTopOverride(srcFunc, targetFunc)
-                    }
-                } else if (let Some(srcProp) <- (srcDecl as PropDecl)) {
-                    if (let Some(targetProp) <- (targetDecl as PropDecl)) {
-                        if (!srcProp.getters.isEmpty() && !targetProp.getters.isEmpty()) {
-                            addTopOverride(srcProp.getters[0], targetProp.getters[0])
-                        }
-                        if (!srcProp.setters.isEmpty() && !targetProp.setters.isEmpty()) {
-                            addTopOverride(srcProp.setters[0], targetProp.setters[0])
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private func LookupTopOverriddenFromMap(funcDecl: FuncDecl): Option<FuncDecl> {
-        var current = firstTopOverrideTarget(funcDecl)
-        let traversed = TreeSet<FuncDecl>()
-        traversed.add(funcDecl)
-        while (let Some(fd) <- current) {
-            let next = firstTopOverrideTarget(fd)
-            if (next.isNone() || !traversed.add(fd)) {
-                return current
-            }
-            current = next
-        }
-        return None
-    }
-
     public func GetTopOverriddenFuncDecl(funcDecl: Option<FuncDecl>): Option<FuncDecl> {
         let fd = funcDecl.getOrThrow()
-        var fromMap = LookupTopOverriddenFromMap(fd)
         let generic = fd.genericDecl.flatMap({ decl => decl as FuncDecl })
-        if (fromMap.isNone()) {
-            if (let Some(genericFunc) <- generic) {
-                fromMap = LookupTopOverriddenFromMap(genericFunc)
-            }
-        }
-        let seed = fromMap ?? generic ?? fd
+        let seed = generic ?? fd
         // Instantiation writes TypeManager caches; serialize the entire resolver walk.
         let tops = synchronized(overrideResolverImplMutex) {
             OverrideFunctionResolver(this).GetTopOverriddenFuncs(fd.outerDecl.getOrThrow().GetTy().getOrThrow(), seed)
         }
         if (!tops.isEmpty()) {
             return tops.iterator().next().getOrThrow()
-        }
-        if (let Some(top) <- fromMap) {
-            return top
         }
         return fd
     }
@@ -2255,12 +2198,7 @@ public class TypeManager {
         AddInterfaceBaseMappingIfNeeded(typeMapping, src.outerDecl, target.outerDecl, baseTy)
         if (let Some(srcTy) <- GetPropOverrideTy(src)) {
             if (let Some(targetTy) <- GetPropOverrideTy(target)) {
-                let ret = SameTy(srcTy, GetInstantiatedTy(targetTy, typeMapping))
-                if (ret && SameDeclOption(src.outerDecl, GetDeclPtrOfOptionTy(baseTy)) &&
-                    src.TestAttr(Attribute.STATIC) == target.TestAttr(Attribute.STATIC)) {
-                    UpdateTopOverriddenFuncDeclMap(Some(src), Some(target))
-                }
-                return ret
+                return SameTy(srcTy, GetInstantiatedTy(targetTy, typeMapping))
             }
         }
         return false
@@ -3662,48 +3600,6 @@ public class TypeManager {
 
     private func removeTypeSubst(mapping: TypeSubst, tyVar: GenericsTy): Unit {
         mapping.entries.remove(Ptr<GenericsTy>(tyVar))
-    }
-
-    private func containsFuncDecl(values: ArrayList<FuncDecl>, decl: FuncDecl): Bool {
-        for (value in values) {
-            if (SameDecl(value, decl)) {
-                return true
-            }
-        }
-        return false
-    }
-
-    private func findTopOverrideEntry(src: FuncDecl): Option<TopOverrideEntry> {
-        for (entry in topOverrideMap) {
-            if (SameDecl(entry.src, src)) {
-                return entry
-            }
-        }
-        return None
-    }
-
-    private func addTopOverride(src: FuncDecl, target: FuncDecl): Unit {
-        if (SameDecl(src, target)) {
-            return
-        }
-        if (let Some(entry) <- findTopOverrideEntry(src)) {
-            if (!containsFuncDecl(entry.targets, target)) {
-                entry.targets.add(target)
-            }
-            return
-        }
-        let entry = TopOverrideEntry(src)
-        entry.targets.add(target)
-        topOverrideMap.add(entry)
-    }
-
-    private func firstTopOverrideTarget(src: FuncDecl): Option<FuncDecl> {
-        if (let Some(entry) <- findTopOverrideEntry(src)) {
-            if (!entry.targets.isEmpty()) {
-                return entry.targets[0]
-            }
-        }
-        return None
     }
 
     private func addBoxedTy(ty: Ty): Unit {

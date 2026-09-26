@@ -476,6 +476,12 @@ public open class Type <: Hashable & Equatable<Type> {
         return true
     }
 
+    // Upstream 6e125215 Type.cpp: CanBeInherited.
+    public func CanBeInherited(): Bool {
+        if (let Some(customTy) <- (this as CustomType)) { return customTy.GetCustomTypeDef().CanBeInherited() }
+        return false
+    }
+
     public func SatisfyGenericConstraints(genericType: GenericType, builder: CHIRBuilder,
         instMap: HashMap<GenericType, Type>, visited!: Option<HashSet<String>> = None): Bool {
         for (upperBound in genericType.GetUpperBounds()) {

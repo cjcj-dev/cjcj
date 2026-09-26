@@ -44,6 +44,7 @@ const CXX_JOBS = new Map([
   ['build-windows-runtime.yml/build-runtime', {component: 'windows-runtime', pin: /env\.RUNTIME_REF/}],
   ['srcbuild.yml/srcbuild', {component: 'srcbuild', pin: /env\.RUNTIME_REF/}],
   ['ci.yml/build', {component: 'runtime', pin: /env\.RUNTIME_REF/}],
+  ['platform-matrix.yml/colour-runtime', {component: 'runtime', pin: /env\.RUNTIME_REF/}],
   ['platform-matrix.yml/platform', {component: 'runtime', pin: /env\.RUNTIME_REF/}],
 ]);
 

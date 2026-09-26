@@ -93,7 +93,7 @@ public class Engine<Domain> where Domain <: AbstractDomain<Domain> {
                 continue
             }
             let last = exprs.size - 1
-            let terminator = (exprs[last] as Terminator) ??
+            let terminator = exprs[last].AsTerminator() ??
                 throw IllegalStateException("Engine IterateSingleUnitToFixpoint expected terminator")
 
             var exprIdx: Int64 = 0

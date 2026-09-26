@@ -60,8 +60,13 @@ for (const [key, expected] of [
   if (manifest[key] !== expected) throw new Error(`fixed LLVM manifest ${key}: expected ${expected}, got ${manifest[key]}`);
 }
 
+const lldTool = manifest.LLD_TOOL;
+const expectedLldTool = spec.os === 'darwin' ? 'ld64.lld' : 'ld.lld';
+if (lldTool !== expectedLldTool) {
+  throw new Error(`fixed LLVM LLD_TOOL ${lldTool} does not match ${expectedLldTool}`);
+}
 const selectedTools = [];
-for (const [tool, hashKey] of [['llc', 'LLC_SHA256'], ['opt', 'OPT_SHA256']]) {
+for (const [tool, hashKey] of [['llc', 'LLC_SHA256'], ['opt', 'OPT_SHA256'], [lldTool, 'LLD_SHA256']]) {
   const compressed = await fs.readFile(path.join(fixedRoot, `${tool}.gz`));
   const binary = zlib.gunzipSync(compressed);
   const digest = sha256(binary);
@@ -83,7 +88,7 @@ for (const [tool, hashKey] of [['llc', 'LLC_SHA256'], ['opt', 'OPT_SHA256']]) {
 // A successful --version is necessary but not sufficient: validate every LLVM
 // executable consumed by cjcj, then use the native loader inspector. This is our
 // fixed-tuple check in addition to the official compiler/runtime/std build order.
-for (const tool of ['llc', 'opt', 'llvm-objcopy', 'llvm-ar']) {
+for (const tool of ['llc', 'opt', lldTool, 'llvm-objcopy', 'llvm-ar']) {
   const executable = path.join(llvmBin, tool);
   const kind = (await $({stdio: 'pipe'})`file -b ${executable}`).stdout.trim();
   if (!kind.includes(spec.fileFormat) || !kind.includes(spec.fileArch)) {
@@ -156,4 +161,4 @@ await fs.appendFile(githubPath, `${path.join(sdk, 'bin')}\n${path.join(sdk, 'too
 for (const {tool, executable, digest} of selectedTools) {
   console.log(`FIXED_LLVM_TOOL_SELECTED tool=${tool} path=${executable} lineage=manifest:LLVM_SHA=${manifest.LLVM_SHA} sha256=${digest}`);
 }
-console.log(`FIXED_LLVM_TUPLE_ACTIVATED target=${targetKey} platform=${manifest.PLATFORM} llvm=${manifest.LLVM_SHA} llc=${manifest.LLC_SHA256} opt=${manifest.OPT_SHA256} shim=${manifest.SHIM_SHA256}`);
+console.log(`FIXED_LLVM_TUPLE_ACTIVATED target=${targetKey} platform=${manifest.PLATFORM} llvm=${manifest.LLVM_SHA} llc=${manifest.LLC_SHA256} opt=${manifest.OPT_SHA256} lld=${manifest.LLD_SHA256} shim=${manifest.SHIM_SHA256}`);

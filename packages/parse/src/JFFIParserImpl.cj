@@ -31,6 +31,11 @@ public class JFFIParserImpl {
             DiagJavaMirrorCannotBeSealed(decl)
             decl.EnableAttr(Attribute.IS_BROKEN)
         }
+
+        if (decl.TestAnyAttr(Attribute.COMMON, Attribute.SPECIFIC)) {
+            DiagJavaMirrorCannotBeCommonOrSpecific(decl)
+            decl.EnableAttr(Attribute.IS_BROKEN)
+        }
     }
 
     public func CheckImplSignature(decl: ClassLikeDecl, annos: ArrayList<Annotation>): Unit {
@@ -48,6 +53,12 @@ public class JFFIParserImpl {
             DiagJavaImplCannotBeSealed(decl)
             decl.EnableAttr(Attribute.IS_BROKEN)
         }
+
+        if (decl.TestAnyAttr(Attribute.COMMON, Attribute.SPECIFIC)) {
+            DiagJavaImplCannotBeCommonOrSpecific(decl)
+            decl.EnableAttr(Attribute.IS_BROKEN)
+        }
+
         if (decl.astKind == ASTKind.CLASS_DECL && decl.TestAttr(Attribute.OPEN)) {
             parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_java_impl_cannot_be_open, decl).Emit()
             decl.EnableAttr(Attribute.IS_BROKEN)
@@ -93,6 +104,10 @@ public class JFFIParserImpl {
         parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_java_mirror_cannot_have_const_member, node).Emit()
     }
 
+    public func DiagJavaMirrorCannotBeCommonOrSpecific(node: Node): Unit {
+        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_java_mirror_cannot_be_common_specific, node).Emit()
+    }
+
     public func DiagJavaImplCannotBeGeneric(node: Node): Unit {
         parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_java_impl_cannot_be_generic, node).Emit()
     }
@@ -103,6 +118,10 @@ public class JFFIParserImpl {
 
     public func DiagJavaImplCannotBeSealed(node: Node): Unit {
         parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_java_impl_cannot_be_sealed, node).Emit()
+    }
+
+    public func DiagJavaImplCannotBeCommonOrSpecific(node: Node): Unit {
+        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_java_impl_cannot_be_common_specific, node).Emit()
     }
 
     public func DiagJavaMirrorCannotBeSealed(node: Node): Unit {

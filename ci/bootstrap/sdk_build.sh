@@ -181,8 +181,9 @@ esac
 #   ⭐ `/root/.cjv/toolchains/cjcj-pin-937877c8 -> /root/sdks/cjcj-pin-937877c8`
 #   ⇒ ⭐ `cp -a` 复制的是**那条链接**，⭐ 于是"副本"仍指向共享安装
 #   ⇒ ⭐⭐⭐ **后面每一次组件替换都会写进共享 SDK** —— ⭐ 正是本工具要防的事
-#   ⚠ ⭐ 当时只是因为 `find` 默认不跟随符号链接、⭐ 没找到 llc 才没酿成事故 ⇒ ⭐ 那是运气
-#   ⇒ ⭐ 所以：⭐⭐ **先解引用**，⭐ 之后所有判断都用实路径
+#   ⚠ ⭐ 当时只是因为 `find -type f` 看不见文件软链、⭐ 没写进共享安装 ⇒ ⭐ 那是运气
+#   ⇒ ⭐ 基线先解引用。swap_all 接受副本内的文件软链（bin/cjc -> cjcj-stage1，
+#     写入参照体并保留链接）；参照体解析到副本外则拒绝，⛔ 不跟随目录软链。
 BASE=$(readlink -f "$BASE") || die "无法解析基线路径"
 [ -f "$BASE/bin/cjc" ] || die "$BASE 不像 SDK（缺 bin/cjc）"
 
@@ -219,15 +220,32 @@ cp -a "$BASE/." "$TO/" || die "cp -a 失败"
 
 # ⭐ 只替换**基线里已存在**的位置；⛔ 不新建路径
 swap_all() {                     # swap_all <相对文件名> <源文件> <标签>
-  local rel="$1" src="$2" label="$3" n=0 dst
+  local rel="$1" src="$2" label="$3" n=0 dst resolved was_link
   [ -n "$src" ] || return 0
   [ -f "$src" ] || die "$label 源文件不存在: $src"
   while IFS= read -r dst; do
     [ -n "$dst" ] || continue
+    was_link=0
+    if [ -L "$dst" ]; then
+      was_link=1
+      resolved=$(readlink -f -- "$dst" 2>/dev/null || true)
+      if [ -z "$resolved" ] || [ ! -e "$resolved" ]; then
+        die "$label: $dst 是悬空符号链接，拒绝替换"
+      fi
+      case "$resolved" in
+        "$TO"/*) ;;
+        *) die "$label: $dst 指向副本之外 $resolved，拒绝写入";;
+      esac
+      [ -f "$resolved" ] || die "$label: $dst 的参照体不是普通文件: $resolved"
+    fi
     cp -f "$src" "$dst" || die "写入失败: $dst"
+    if [ "$was_link" = 1 ] && [ ! -L "$dst" ]; then
+      die "$label: 替换后 $dst 不再是符号链接"
+    fi
+    same_sha "$src" "$dst" || die "$label: 替换后 sha256 不一致: $dst"
     n=$((n+1))
     printf '      %s\n' "${dst#"$TO"/}"
-  done < <(find "$TO" -maxdepth 4 -type f -name "$rel" 2>/dev/null)
+  done < <(find "$TO" -maxdepth 4 \( -type f -o -type l \) -name "$rel" 2>/dev/null)
   [ "$n" -gt 0 ] || die "$label: ⭐ 基线里没有名为 $rel 的位置 —— ⛔ 本工具不新建路径，⭐ 请确认组件名"
   echo "  [$label] 替换 $n 处  sha=$(sha256sum "$src" | cut -c1-16)"
 }
@@ -269,10 +287,10 @@ validate_llvm_tuple() {
     die 'llvm-tuple SHA256SUMS 格式或相对路径非法'
   fi
   entries=$(wc -l < "$tuple/SHA256SUMS")
-  [ "$entries" -eq 8 ] || die "llvm-tuple SHA256SUMS 必须且只能登记 8 个 payload: entries=$entries"
-  for rel in MANIFEST bin/llc bin/opt lib/STATIC_LLVM.txt \
+  [ "$entries" -eq 10 ] || die "llvm-tuple SHA256SUMS 必须且只能登记 10 个 payload: entries=$entries"
+  for rel in MANIFEST bin/llc bin/opt bin/ld.lld lib/STATIC_LLVM.txt \
     fixed-llc/cjselfhost_llvmshim.o fixed-llc/llc.gz \
-    fixed-llc/opt.gz fixed-llc/llvm-tools.manifest; do
+    fixed-llc/opt.gz fixed-llc/ld.lld.gz fixed-llc/llvm-tools.manifest; do
     [ -f "$tuple/$rel" ] || die "llvm-tuple 缺 $rel"
     tuple_sum_has "$tuple" "$rel" || die "llvm-tuple SHA256SUMS 未登记 $rel"
   done
@@ -288,6 +306,7 @@ install_llvm_tuple() {
   validate_llvm_tuple "$tuple"
   [ -f "$TO/third_party/llvm/bin/llc" ] || die 'llvm-tuple: 基线里没有安装位置 third_party/llvm/bin/llc'
   [ -f "$TO/third_party/llvm/bin/opt" ] || die 'llvm-tuple: 基线里没有安装位置 third_party/llvm/bin/opt'
+  [ -f "$TO/third_party/llvm/bin/ld.lld" ] || die 'llvm-tuple: 基线里没有安装位置 third_party/llvm/bin/ld.lld'
   rm -rf "$TO/third_party/llvm/fixed-llc"
   while IFS= read -r line; do
     expected=${line%% *}
@@ -302,7 +321,7 @@ install_llvm_tuple() {
     # Artifact extraction may omit executable mode; the payload list declares
     # these two entries as tools. Content identity is checked again below.
     case "$rel" in
-      bin/llc|bin/opt) chmod 755 "$target" || die "llvm-tuple 工具权限安装失败: $target";;
+      bin/llc|bin/opt|bin/ld.lld) chmod 755 "$target" || die "llvm-tuple 工具权限安装失败: $target";;
     esac
     count=$((count+1))
     echo "      $rel"
@@ -647,7 +666,7 @@ verify_exe() {                    # verify_exe <路径> <是否跑 --version>
   fi
   printf '  %-34s ELF ✓  ldd ✓%s\n' "${f#"$TO"/}" "$([ "$runver" = 1 ] && printf '  --version ✓')"
 }
-for rel in third_party/llvm/bin/llc third_party/llvm/bin/opt tools/bin/cjpm; do
+for rel in third_party/llvm/bin/llc third_party/llvm/bin/opt third_party/llvm/bin/ld.lld tools/bin/cjpm; do
   verify_exe "$TO/$rel" 1
 done
 # ⚠ ⭐ cjc 只在【宿主】SDK 上跑 --version：⭐ 目标 SDK 的 runtime 着色，⭐ 跑它必崩
@@ -666,7 +685,7 @@ else
 fi
 
 echo
-for rel in bin/cjc third_party/llvm/bin/llc third_party/llvm/bin/opt tools/bin/cjpm; do
+for rel in bin/cjc third_party/llvm/bin/llc third_party/llvm/bin/opt third_party/llvm/bin/ld.lld tools/bin/cjpm; do
   [ -f "$TO/$rel" ] && printf 'SDK-BUILD-SHA %-34s %s\n' "$rel" "$(sha256sum "$TO/$rel" | awk '{print $1}')"
 done
 

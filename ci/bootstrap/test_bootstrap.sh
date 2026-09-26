@@ -35,10 +35,12 @@ make_colour_tuple() {
   mkdir -p "$TMP/colour-tuple/bin" "$TMP/colour-tuple/lib" "$TMP/colour-tuple/fixed-llc"
   cp /bin/true "$TMP/colour-tuple/bin/opt"
   cp /bin/true "$TMP/colour-tuple/bin/llc"
+  cp /bin/true "$TMP/colour-tuple/bin/ld.lld"
   printf 'CJLLVM-COMMIT:1111111111111111111111111111111111111111\n' >> "$TMP/colour-tuple/bin/opt"
   printf 'shim\n' > "$TMP/colour-tuple/fixed-llc/cjselfhost_llvmshim.o"
   printf 'llc gzip fixture\n' > "$TMP/colour-tuple/fixed-llc/llc.gz"
   printf 'opt gzip fixture\n' > "$TMP/colour-tuple/fixed-llc/opt.gz"
+  printf 'ld.lld gzip fixture\n' > "$TMP/colour-tuple/fixed-llc/ld.lld.gz"
   printf 'fixed llc\n' > "$TMP/colour-tuple/fixed-llc/llvm-tools.manifest"
   printf 'static LLVM tuple\n' > "$TMP/colour-tuple/lib/STATIC_LLVM.txt"
   printf 'LLVM_SHA=1111111111111111111111111111111111111111\n' > "$TMP/colour-tuple/MANIFEST"
@@ -114,6 +116,25 @@ check_shim_call_count() {
   check_count SHIM 2 'CMD shim build label=' "$1"
 }
 
+check_dry_build_env() {
+  local log="$1" home="${HOME:-/root}" tmpdir="${TMPDIR:-$TMP/work/tmp-private}"
+  local prefix line commands=0 planned=0
+  # Match the caller/default contract, including shell quoting in CMD output.
+  # Literal matching keeps spaces and regexp characters in caller paths exact.
+  prefix="CMD env -i HOME=$(printf '%q' "$home") TMPDIR=$(printf '%q' "$tmpdir") CANGJIE_HOME="
+  while IFS= read -r line; do
+    if [[ "$line" == "$prefix"*' bash -c '* ]]; then
+      commands=$((commands + 1))
+    fi
+    if [[ "$line" == "BUILD-ENV planned HOME=$home TMPDIR=$tmpdir" ]]; then
+      planned=$((planned + 1))
+    fi
+  done < "$log"
+  [ "$commands" -eq 4 ] || fail A4 "isolated HOME/TMPDIR command count=$commands expected=4: $prefix"
+  [ "$planned" -eq 4 ] || fail A4 "planned HOME/TMPDIR count=$planned expected=4"
+  echo 'PASS A4 four isolated commands preserve caller/default HOME/TMPDIR'
+}
+
 check_dry_contract() {
   local log="$1" jobs="${CJ_JOBS:-$(getconf _NPROCESSORS_ONLN)}"
   check_count A1 2 'shape=planned Int64.ti>1 FFI-archives>0' "$log"
@@ -146,14 +167,13 @@ check_dry_contract() {
   check_count SHIM 2 'OUTPUT stage[01]-shim-config .*sha256=planned' "$log"
   check_count A4 2 'rm\\ -rf\\ build/build' "$log"
   check_count A4 2 '--target-lib' "$log"
-  check_count A4 4 'CMD env -i HOME=/root TMPDIR=.*/work/tmp-private CANGJIE_HOME=.*bash -c' "$log"
-  check_count A4 4 'BUILD-ENV planned HOME=/root TMPDIR=.*/work/tmp-private' "$log"
+  check_dry_build_env "$log"
   check_count LLVM-SO 1 'sdk_build.sh .*--host --llvm-so .*libLLVM-15.so' "$log"
   check_count LLVM-SO 1 'ASSERT installed-host-llvm-so sha256=planned' "$log"
   check_count LLVM-TUPLE 2 'sdk_build.sh .*--target .*--llvm-tuple .*colour-tuple' "$log"
   check_count HOST-RT 2 '--verify-host-rt .*/host-rt' "$log"
   check_count HOST-RUNNER 2 'stage1_host_runner.sh .*/sdk-stage1 .*/sdk-stage0 .*/host-rt' "$log"
-  check_count LLVM-TUPLE 24 'ASSERT installed-colour-tuple sha256=planned' "$log"
+   check_count LLVM-TUPLE 30 'ASSERT installed-colour-tuple sha256=planned' "$log"
   check_count LLVM-RULER 2 'ruler=readelf--dyn-syms symbol=llvm::isCJTypedReadHelperCandidate' "$log"
   check_count LLVM-RULER 1 'ASSERT official-opt-zero ruler=strings .* hits=0' "$log"
   check_count LLVM-RULER 2 'ASSERT colour-opt-stamp ruler=strings .* hits=1' "$log"
@@ -590,6 +610,19 @@ positive_build_env() {
   echo 'PASS bootstrap CLI passes caller HOME and caller/default TMPDIR'
 }
 
+check_dry_build_env_matrix() {
+  new_tmp
+  local caller_home="$TMP/caller home[333]" caller_tmp="$TMP/caller-tmp[333]"
+  mkdir -p "$caller_home" "$caller_tmp"
+  env -u HOME -u TMPDIR bash "$0" check-dry-contract ||
+    fail A4 'default HOME/TMPDIR dry contract failed'
+  env -u TMPDIR HOME="$caller_home" bash "$0" check-dry-contract ||
+    fail A4 'caller HOME/default TMPDIR dry contract failed'
+  env HOME="$caller_home" TMPDIR="$caller_tmp" bash "$0" check-dry-contract ||
+    fail A4 'caller HOME/TMPDIR dry contract failed'
+  echo 'PASS A4 dry environment matrix defaults, caller HOME, caller HOME/TMPDIR'
+}
+
 fault_build_env() {
   make_dry_fixture
   sed 's/TMPDIR=$(printf '\''%q'\'' "$BUILD_TMPDIR") //' "$PRODUCT" > "$TMP/bootstrap-no-tmpdir.sh"
@@ -710,6 +743,9 @@ case "${1:-test}" in
     make_dry_fixture
     dry_run > "$TMP/dry.log" || fail dry-run 'bootstrap CLI failed before assertions'
     check_dry_contract "$TMP/dry.log"
+    ;;
+  check-dry-build-env)
+    check_dry_build_env_matrix
     ;;
   dry-run)
     make_dry_fixture
@@ -898,6 +934,7 @@ case "${1:-test}" in
     assert_colour_tuple "$3" "$4"
     ;;
   test)
+    bash "$0" check-dry-build-env || fail A4 'dry environment matrix failed'
     bash "$0" check-exit-receipts || fail EXIT-RECEIPT "exit receipt regression"
     bash "$0" check-sdk-literal-prefix || fail STD-LITERAL-PREFIX "literal prefix regression"
     make_dry_fixture
@@ -914,7 +951,7 @@ case "${1:-test}" in
     cmp -s "$TMP/sdk-base/third_party/llvm/bin/opt" "$TMP/sdk-so/third_party/llvm/bin/opt" ||
       fail LLVM-SO 'SO-only install changed opt'
     run_sdk_tuple "$SDK_PRODUCT" "$TMP/sdk-tuple" > "$TMP/sdk-tuple.log"
-    for rel in MANIFEST bin/llc bin/opt lib/STATIC_LLVM.txt fixed-llc/cjselfhost_llvmshim.o fixed-llc/llc.gz fixed-llc/opt.gz fixed-llc/llvm-tools.manifest; do
+    for rel in MANIFEST bin/llc bin/opt bin/ld.lld lib/STATIC_LLVM.txt fixed-llc/cjselfhost_llvmshim.o fixed-llc/llc.gz fixed-llc/opt.gz fixed-llc/ld.lld.gz fixed-llc/llvm-tools.manifest; do
       cmp -s "$TMP/colour-tuple/$rel" "$TMP/sdk-tuple/third_party/llvm/$rel" ||
         fail LLVM-TUPLE "sdk_build tuple mismatch: $rel"
     done
@@ -961,7 +998,7 @@ case "${1:-test}" in
         llvm-so-location) marker='SDK-BUILD-FAIL llvm-so 安装后 sha256 不一致';;
         tuple-missing-opt) marker='BOOTSTRAP-FAIL \[stage0\] colour LLVM tuple 缺 bin/opt';;
         tuple-sums) marker='BOOTSTRAP-FAIL \[stage0\] colour LLVM tuple SHA256SUMS strict 校验失败';;
-        tuple-extra-entry) marker='BOOTSTRAP-FAIL \[stage0\] colour LLVM tuple SHA256SUMS 必须且只能登记 8 个 payload: entries=9';;
+        tuple-extra-entry) marker='BOOTSTRAP-FAIL \[stage0\] colour LLVM tuple SHA256SUMS 必须且只能登记 10 个 payload: entries=11';;
         old-host-llvm) marker='BOOTSTRAP-FAIL \[init\] 参数 --host-llvm 已废弃；使用 --host-llvm-so';;
         old-colour-llc) marker='BOOTSTRAP-FAIL \[init\] 参数 --colour-llc 已废弃；使用 --colour-tuple';;
         cjpm-toml) marker='BOOTSTRAP-FAIL \[init\] --src 缺少 cjpm.toml';;
@@ -977,7 +1014,7 @@ case "${1:-test}" in
     echo 'PASS bootstrap dry contracts, controlled build environment, LLVM assembly, and positive controls'
     ;;
   *)
-    echo "usage: $0 [test|check-dry-contract|dry-run|check-shim-wiring|check-build-env|check-runtime-layouts|positive-a1|positive-a4|positive-build-env|positive-runtime-layouts|positive-runtime-layout-symlink-nested-only|positive-runtime-layout-symlink-flat-only|positive-compile-option-o1|fault-a1|fault-a1-missing-core-archive|fault-a1-missing-core-shared|fault-a1-missing-ffi-shared|fault-a2|fault-a3|fault-dry-stage1-missing|fault-dry-stage1-duplicate|fault-dry-stage1-stale-stdlib|fault-dry-stage1-serial|fault-dry-stage1-drop-jobs|fault-a4|fault-build-env|fault-runtime-stamp|fault-runtime-dual-layout|fault-runtime-dual-missing-bounds|fault-runtime-dual-multiple-nested|fault-runtime-layout-symlink-nested|fault-runtime-layout-symlink-flat|fault-runtime-layout-inner-rc|fault-host-sha|fault-ast-sha|fault-ast-bytes|fault-host-colour|fault-colour-ruler|fault-colour-stamp-duplicate|fault-colour-stamp-mismatch|fault-colour-sha|fault-llvm-so-location|fault-tuple-missing-opt|fault-tuple-sums|fault-tuple-extra-entry|fault-old-host-llvm|fault-old-colour-llc|fault-shim-wiring|ruler-control OFFICIAL_OPT COLOUR_TUPLE EXPECTED_LLVM_SHA]" >&2
+    echo "usage: $0 [test|check-dry-contract|check-dry-build-env|dry-run|check-shim-wiring|check-build-env|check-runtime-layouts|positive-a1|positive-a4|positive-build-env|positive-runtime-layouts|positive-runtime-layout-symlink-nested-only|positive-runtime-layout-symlink-flat-only|positive-compile-option-o1|fault-a1|fault-a1-missing-core-archive|fault-a1-missing-core-shared|fault-a1-missing-ffi-shared|fault-a2|fault-a3|fault-dry-stage1-missing|fault-dry-stage1-duplicate|fault-dry-stage1-stale-stdlib|fault-dry-stage1-serial|fault-dry-stage1-drop-jobs|fault-a4|fault-build-env|fault-runtime-stamp|fault-runtime-dual-layout|fault-runtime-dual-missing-bounds|fault-runtime-dual-multiple-nested|fault-runtime-layout-symlink-nested|fault-runtime-layout-symlink-flat|fault-runtime-layout-inner-rc|fault-host-sha|fault-ast-sha|fault-ast-bytes|fault-host-colour|fault-colour-ruler|fault-colour-stamp-duplicate|fault-colour-stamp-mismatch|fault-colour-sha|fault-llvm-so-location|fault-tuple-missing-opt|fault-tuple-sums|fault-tuple-extra-entry|fault-old-host-llvm|fault-old-colour-llc|fault-shim-wiring|ruler-control OFFICIAL_OPT COLOUR_TUPLE EXPECTED_LLVM_SHA]" >&2
     exit 2
     ;;
 esac

@@ -41,7 +41,7 @@ that invocation; there is no automatic fallback. Output is a private directory
 of regular files, exposed only after the entire list verifies. Executable modes
 come from the reviewed pin rather than transport-specific ZIP metadata.
 
-The mechanism accepts a file list; the current workflow publishes the eight
+The mechanism accepts a file list; the current workflow publishes the ten
 static LLVM payloads plus SHA256SUMS. The fixed in-process LLVM and ast-support inputs from #82/#86 retain their
 existing download and reviewed-digest checks. They are not connected to this
 persistent publisher (advisor ruling

@@ -1,10 +1,18 @@
 package cjcj::option
 
+import cjcj::utils.FileUtil
 import std.unittest.*
 import std.unittest.testmacro.*
 import std.core.Option as CoreOption
+import std.env.getVariable
 
-private let OPTION_TEST_SRC_FILE: String = "/root/cj_build/cangjie_compiler/unittests/Option/main.cj"
+// Upstream: unittests/Option/OptionTest.cpp:18-35 (SetUp).
+// cjpm has no PROJECT_SOURCE_DIR compile definition. Tests run from the repository
+// root by default; standalone runners can supply that root through the environment.
+private func optionTestSourceFile(): String {
+    let projectPath = getVariable("PROJECT_SOURCE_DIR") ?? "."
+    return FileUtil.JoinPath(projectPath, "packages/option/testdata/main.cj")
+}
 
 private func parseArgs(args: Array<String>, frontendMode!: Bool = false): (Bool, ArgList) {
     let table = CreateOptionTable(frontendMode: frontendMode)
@@ -32,9 +40,16 @@ private func makeTriple(arch: ArchType, vendor: Vendor, os: OSType, env: Environ
 
 @Test
 class OptionTest {
+    private var srcFile: String = ""
+
+    @BeforeEach
+    func setUp(): Unit {
+        srcFile = optionTestSourceFile()
+    }
+
     @TestCase
     func GlobalOptionParseFromArgsTest(): Unit {
-        let parsed = parseArgs(["cjc", "--no-prelude", "--output-type", "staticlib", OPTION_TEST_SRC_FILE])
+        let parsed = parseArgs(["cjc", "--no-prelude", "--output-type", "staticlib", srcFile])
         @Expect(parsed[0], true)
         let opts = GlobalOptions()
         let succ = opts.ParseFromArgs(parsed[1])
@@ -44,7 +59,7 @@ class OptionTest {
 
     @TestCase
     func PgoOptionsTest01(): Unit {
-        let parsed = parseArgs(["cjc", "--pgo-instr-gen=cj.profraw", OPTION_TEST_SRC_FILE])
+        let parsed = parseArgs(["cjc", "--pgo-instr-gen=cj.profraw", srcFile])
         @Expect(parsed[0], true)
         let opts = GlobalOptions()
         let succ = opts.ParseFromArgs(parsed[1])
@@ -116,7 +131,7 @@ class OptionTest {
 
     @TestCase
     func PathPrefixMapParseTest(): Unit {
-        let parsed = parseArgs(["cjc", "--path-prefix-map=/build/root=module@v1", OPTION_TEST_SRC_FILE])
+        let parsed = parseArgs(["cjc", "--path-prefix-map=/build/root=module@v1", srcFile])
         @Expect(parsed[0], true)
         let opts = GlobalOptions()
         @Expect(opts.ParseFromArgs(parsed[1]), true)
@@ -127,7 +142,7 @@ class OptionTest {
 
     @TestCase
     func PathPrefixMapRejectsMalformedValueTest(): Unit {
-        let parsed = parseArgs(["cjc", "--path-prefix-map=/build/root", OPTION_TEST_SRC_FILE])
+        let parsed = parseArgs(["cjc", "--path-prefix-map=/build/root", srcFile])
         @Expect(parsed[0], true)
         let opts = GlobalOptions()
         @Expect(opts.ParseFromArgs(parsed[1]), false)
@@ -137,7 +152,7 @@ class OptionTest {
     @TestCase
     func PathPrefixMapRejectsConflictingOldPrefixTest(): Unit {
         let parsed = parseArgs(["cjc", "--path-prefix-map=/build/root=module@v1",
-            "--path-prefix-map=/build/root=module@v2", OPTION_TEST_SRC_FILE])
+            "--path-prefix-map=/build/root=module@v2", srcFile])
         @Expect(parsed[0], true)
         let opts = GlobalOptions()
         @Expect(opts.ParseFromArgs(parsed[1]), false)
@@ -222,6 +237,13 @@ class ToFullTripleStringTest {
 
 @Test
 class OptionTableTest {
+    private var srcFile: String = ""
+
+    @BeforeEach
+    func setUp(): Unit {
+        srcFile = optionTestSourceFile()
+    }
+
     @TestCase
     func ParseArgsTestEmptyInput(): Unit {
         let table = CreateOptionTable()
@@ -331,6 +353,139 @@ class OptionTableTest {
         } else {
             @Expect(false, true)
         }
+    }
+
+    private func ensureIosLtoSrc(): String {
+        let path = "/tmp/ios_lto_gate_main.cj"
+        let wrote = FileUtil.WriteToFile(path, "main(): Int64 { return 0 }\n")
+        if (wrote) {
+            return path
+        }
+        return srcFile
+    }
+
+    private func runIosLto(name: String, args: Array<String>): Bool {
+        eprintln("IOS_LTO_BEGIN " + name)
+        let parsed = parseArgs(args)
+        if (!parsed[0]) {
+            eprintln("IOS_LTO_END " + name + " rc=false")
+            return false
+        }
+        let opts = GlobalOptions()
+        let succ = opts.ParseFromArgs(parsed[1])
+        let rcText = if (succ) { "true" } else { "false" }
+        eprintln("IOS_LTO_END " + name + " rc=" + rcText)
+        return succ
+    }
+
+    private func iosLtoArgs(src: String, extra: Array<String>): Array<String> {
+        let args = Array<String>(1 + extra.size + 1, repeat: "")
+        args[0] = "cjc"
+        var i: Int64 = 0
+        while (i < extra.size) {
+            args[i + 1] = extra[i]
+            i = i + 1
+        }
+        args[extra.size + 1] = src
+        return args
+    }
+
+    @TestCase
+    func IosDylibLtoExperimental(): Unit {
+        let src = ensureIosLtoSrc()
+        let succ = runIosLto("IosDylibLtoExperimental", iosLtoArgs(src, [
+            "--experimental", "--lto", "full", "--output-type", "dylib", "--target", "aarch64-apple-ios"
+        ]))
+        println("EXECUTED IosDylibLtoExperimental rc=" + if (succ) { "true" } else { "false" })
+        @Expect(succ, true)
+    }
+
+    @TestCase
+    func IosStaticlibLtoExperimental(): Unit {
+        let src = ensureIosLtoSrc()
+        let succ = runIosLto("IosStaticlibLtoExperimental", iosLtoArgs(src, [
+            "--experimental", "--lto", "full", "--output-type", "staticlib", "--target", "aarch64-apple-ios"
+        ]))
+        println("EXECUTED IosStaticlibLtoExperimental rc=" + if (succ) { "true" } else { "false" })
+        @Expect(succ, true)
+    }
+
+    @TestCase
+    func IosDylibLtoNoExperimental(): Unit {
+        let src = ensureIosLtoSrc()
+        let succ = runIosLto("IosDylibLtoNoExperimental", iosLtoArgs(src, [
+            "--lto", "full", "--output-type", "dylib", "--target", "aarch64-apple-ios"
+        ]))
+        println("EXECUTED IosDylibLtoNoExperimental rc=" + if (succ) { "true" } else { "false" })
+        @Expect(succ, false)
+    }
+
+    @TestCase
+    func DarwinLtoRejected(): Unit {
+        let src = ensureIosLtoSrc()
+        let succ = runIosLto("DarwinLtoRejected", iosLtoArgs(src, [
+            "--lto", "full", "--target", "aarch64-apple-darwin"
+        ]))
+        println("EXECUTED DarwinLtoRejected rc=" + if (succ) { "true" } else { "false" })
+        @Expect(succ, false)
+    }
+
+    @TestCase
+    func WindowsLtoRejected(): Unit {
+        let src = ensureIosLtoSrc()
+        let succ = runIosLto("WindowsLtoRejected", iosLtoArgs(src, [
+            "--lto", "full", "--target", "x86_64-w64-mingw32"
+        ]))
+        println("EXECUTED WindowsLtoRejected rc=" + if (succ) { "true" } else { "false" })
+        @Expect(succ, false)
+    }
+
+    @TestCase
+    func LinuxExeVisibilityWarns(): Unit {
+        let src = ensureIosLtoSrc()
+        let succ = runIosLto("LinuxExeVisibilityWarns", iosLtoArgs(src, [
+            "--lto", "full", "--lto-keep-pkg-visibility", "mypkg", "--output-type", "exe",
+            "--target", "x86_64-unknown-linux-gnu"
+        ]))
+        println("EXECUTED LinuxExeVisibilityWarns rc=" + if (succ) { "true" } else { "false" })
+        @Expect(succ, true)
+    }
+
+    @TestCase
+    func LinuxDylibVisibilitySilent(): Unit {
+        let src = ensureIosLtoSrc()
+        let succ = runIosLto("LinuxDylibVisibilitySilent", iosLtoArgs(src, [
+            "--lto", "full", "--lto-keep-pkg-visibility", "mypkg", "--output-type", "dylib",
+            "--target", "x86_64-unknown-linux-gnu"
+        ]))
+        println("EXECUTED LinuxDylibVisibilitySilent rc=" + if (succ) { "true" } else { "false" })
+        @Expect(succ, true)
+    }
+
+    @TestCase
+    func IosStaticlibVisibilitySilent(): Unit {
+        let src = ensureIosLtoSrc()
+        let succ = runIosLto("IosStaticlibVisibilitySilent", iosLtoArgs(src, [
+            "--experimental", "--lto", "full", "--lto-keep-pkg-visibility", "mypkg",
+            "--output-type", "staticlib", "--target", "aarch64-apple-ios"
+        ]))
+        println("EXECUTED IosStaticlibVisibilitySilent rc=" + if (succ) { "true" } else { "false" })
+        @Expect(succ, true)
+    }
+
+    @TestCase
+    func IosVisibilityAnyOutputMode(): Unit {
+        let src = ensureIosLtoSrc()
+        let exe = runIosLto("IosVisibilityExe", iosLtoArgs(src, [
+            "--experimental", "--lto", "full", "--lto-keep-pkg-visibility", "mypkg",
+            "--output-type", "exe", "--target", "aarch64-apple-ios"
+        ]))
+        let dylib = runIosLto("IosVisibilityDylib", iosLtoArgs(src, [
+            "--experimental", "--lto", "full", "--lto-keep-pkg-visibility", "mypkg",
+            "--output-type", "dylib", "--target", "aarch64-apple-ios"
+        ]))
+        println("EXECUTED IosVisibilityAnyOutputMode exe=" + if (exe) { "true" } else { "false" } +
+            " dylib=" + if (dylib) { "true" } else { "false" })
     }
 
     @TestCase

@@ -176,8 +176,8 @@ public class ConstMemberVarCollector {
 
 private func IsForwardingExpression(expr: Expression): Bool {
     let kind = expr.GetExprKind()
-    return kind == ExprKind.TYPECAST || kind == ExprKind.TYPECAST_WITH_EXCEPTION ||
-        kind == ExprKind.BOX || kind == ExprKind.UNBOX || kind == ExprKind.TRANSFORM_TO_GENERIC ||
-        kind == ExprKind.TRANSFORM_TO_CONCRETE || kind == ExprKind.UNBOX_TO_REF ||
+    return kind == ExprKind.CLASS_STATIC_CAST || kind == ExprKind.NUMERIC_CAST || kind == ExprKind.TRY_NUMERIC_CAST ||
+        kind == ExprKind.BOX || kind == ExprKind.UNBOX_TO_VALUE || kind == ExprKind.CAST_TO_GENERIC ||
+        kind == ExprKind.CAST_TO_CONCRETE || kind == ExprKind.UNBOX_TO_REF ||
         kind == ExprKind.GET_INSTANTIATE_VALUE
 }

@@ -19,7 +19,7 @@ public open class ExpressionBase {
     }
 
     public func GetOperands(): ArrayList<Value> {
-        return expr.GetOperands()
+        return expr.GetNonSuccessorOperands()
     }
 }
 
@@ -81,7 +81,7 @@ public open class FuncCallBase <: ExpressionBase {
 
 public class ApplyBase <: FuncCallBase {
     private let expr: Option<Apply>
-    private let exprE: Option<ApplyWithException>
+    private let exprE: Option<TryApply>
 
     public init(expression: Expression) {
         super(expression)
@@ -90,7 +90,7 @@ public class ApplyBase <: FuncCallBase {
             exprE = None
         } else {
             expr = None
-            exprE = (expression as ApplyWithException).getOrThrow()
+            exprE = (expression as TryApply).getOrThrow()
         }
     }
 
@@ -100,7 +100,7 @@ public class ApplyBase <: FuncCallBase {
         exprE = None
     }
 
-    public init(expression: ApplyWithException) {
+    public init(expression: TryApply) {
         super(expression)
         expr = None
         exprE = expression
@@ -178,9 +178,9 @@ public open class DynamicDispatchBase <: FuncCallBase {
 
     public func GetVirtualMethodOffset(): UInt64 {
         if (let Some(dispatch) <- expr) {
-            return dispatch.GetVirtualMethodOffset().getOrThrow()
+            return dispatch.GetVirtualMethodOffset()
         }
-        return exprE.getOrThrow().GetVirtualMethodOffset().getOrThrow()
+        return exprE.getOrThrow().GetVirtualMethodOffset()
     }
 
     public func GetInstSrcParentCustomTypeOfMethod(builder: CHIRBuilder): ClassType {
@@ -193,7 +193,7 @@ public open class DynamicDispatchBase <: FuncCallBase {
 
 public class InvokeBase <: DynamicDispatchBase {
     private let expr: Option<Invoke>
-    private let exprE: Option<InvokeWithException>
+    private let exprE: Option<TryInvoke>
 
     public init(expression: Expression) {
         super(expression)
@@ -202,7 +202,7 @@ public class InvokeBase <: DynamicDispatchBase {
             exprE = None
         } else {
             expr = None
-            exprE = (expression as InvokeWithException).getOrThrow()
+            exprE = (expression as TryInvoke).getOrThrow()
         }
     }
 
@@ -212,7 +212,7 @@ public class InvokeBase <: DynamicDispatchBase {
         exprE = None
     }
 
-    public init(expression: InvokeWithException) {
+    public init(expression: TryInvoke) {
         super(expression)
         expr = None
         exprE = expression
@@ -228,7 +228,7 @@ public class InvokeBase <: DynamicDispatchBase {
 
 public class InvokeStaticBase <: DynamicDispatchBase {
     private let expr: Option<InvokeStatic>
-    private let exprE: Option<InvokeStaticWithException>
+    private let exprE: Option<TryInvokeStatic>
 
     public init(expression: Expression) {
         super(expression)
@@ -237,7 +237,7 @@ public class InvokeStaticBase <: DynamicDispatchBase {
             exprE = None
         } else {
             expr = None
-            exprE = (expression as InvokeStaticWithException).getOrThrow()
+            exprE = (expression as TryInvokeStatic).getOrThrow()
         }
     }
 
@@ -247,7 +247,7 @@ public class InvokeStaticBase <: DynamicDispatchBase {
         exprE = None
     }
 
-    public init(expression: InvokeStaticWithException) {
+    public init(expression: TryInvokeStatic) {
         super(expression)
         expr = None
         exprE = expression
@@ -262,169 +262,55 @@ public class InvokeStaticBase <: DynamicDispatchBase {
 }
 
 public class UnaryExprBase <: ExpressionBase {
-    private let expr: Option<UnaryExpression>
-    private let exprE: Option<IntOpWithException>
+    private let expr: UnaryExpressionBase
 
     public init(expression: Expression) {
         super(expression)
-        if (expression.GetExprMajorKind() == ExprMajorKind.UNARY_EXPR) {
-            expr = (expression as UnaryExpression).getOrThrow()
-            exprE = None
-        } else {
-            expr = None
-            exprE = (expression as IntOpWithException).getOrThrow()
-        }
+        expr = (expression as UnaryExpressionBase).getOrThrow()
     }
 
-    public init(expression: UnaryExpression) {
+    public init(expression: UnaryExpressionBase) {
         super(expression)
         expr = expression
-        exprE = None
     }
 
-    public init(expression: IntOpWithException) {
-        super(expression)
-        expr = None
-        exprE = expression
-    }
+    public func GetOpKind(): ExprKind { return expr.GetOpKind() }
 
-    public func GetOpKind(): ExprKind {
-        if (let Some(unary) <- expr) {
-            return unary.GetExprKind()
-        }
-        return exprE.getOrThrow().GetOpKind()
-    }
+    public func GetExprKindName(): String { return expr.GetExprKindName() }
 
-    public func GetExprKindName(): String {
-        if (let Some(unary) <- expr) {
-            return unary.GetExprKindName()
-        }
-        return exprE.getOrThrow().GetOpKindName()
-    }
+    public func GetOperand(): Value { return expr.GetOperand(0) }
 
-    public func GetOperand(): Value {
-        if (let Some(unary) <- expr) {
-            return unary.GetOperand(0)
-        }
-        return exprE.getOrThrow().GetLHSOperand()
-    }
-
-    public func GetOverflowStrategy(): OverflowStrategy {
-        if (let Some(unary) <- expr) {
-            return unary.GetOverflowStrategy()
-        }
-        return exprE.getOrThrow().GetOverflowStrategy()
-    }
+    public func GetOverflowStrategy(): OverflowStrategy { return expr.GetOverflowStrategy() }
 }
 
 public class BinaryExprBase <: ExpressionBase {
-    private let expr: Option<BinaryExpression>
-    private let exprE: Option<IntOpWithException>
+    private let expr: BinaryExpressionBase
 
     public init(expression: Expression) {
         super(expression)
-        if (expression.GetExprMajorKind() == ExprMajorKind.BINARY_EXPR) {
-            expr = (expression as BinaryExpression).getOrThrow()
-            exprE = None
-        } else {
-            expr = None
-            exprE = (expression as IntOpWithException).getOrThrow()
-        }
+        expr = (expression as BinaryExpressionBase).getOrThrow()
     }
 
-    public init(expression: BinaryExpression) {
+    public init(expression: BinaryExpressionBase) {
         super(expression)
         expr = expression
-        exprE = None
     }
 
-    public init(expression: IntOpWithException) {
-        super(expression)
-        expr = None
-        exprE = expression
-    }
+    public func GetOpKind(): ExprKind { return expr.GetOpKind() }
 
-    public func GetOpKind(): ExprKind {
-        if (let Some(binary) <- expr) {
-            return binary.GetExprKind()
-        }
-        return exprE.getOrThrow().GetOpKind()
-    }
+    public func GetExprKindName(): String { return expr.GetExprKindName() }
 
-    public func GetExprKindName(): String {
-        if (let Some(binary) <- expr) {
-            return binary.GetExprKindName()
-        }
-        return exprE.getOrThrow().GetOpKindName()
-    }
+    public func GetLHSOperand(): Value { return expr.GetLHSOperand() }
 
-    public func GetLHSOperand(): Value {
-        if (let Some(binary) <- expr) {
-            return binary.GetOperand(0)
-        }
-        return exprE.getOrThrow().GetLHSOperand()
-    }
+    public func GetRHSOperand(): Value { return expr.GetRHSOperand() }
 
-    public func GetRHSOperand(): Value {
-        if (let Some(binary) <- expr) {
-            return binary.GetOperand(1)
-        }
-        return exprE.getOrThrow().GetRHSOperand().getOrThrow()
-    }
-
-    public func GetOverflowStrategy(): OverflowStrategy {
-        if (let Some(binary) <- expr) {
-            return binary.GetOverflowStrategy()
-        }
-        return exprE.getOrThrow().GetOverflowStrategy()
-    }
+    public func GetOverflowStrategy(): OverflowStrategy { return expr.GetOverflowStrategy() }
 }
 
-public class SpawnBase <: ExpressionBase {
-    private let expr: Option<Spawn>
-    private let exprE: Option<SpawnWithException>
-
-    public init(expression: Expression) {
-        super(expression)
-        if (expression.GetExprKind() == ExprKind.SPAWN) {
-            expr = (expression as Spawn).getOrThrow()
-            exprE = None
-        } else {
-            expr = None
-            exprE = (expression as SpawnWithException).getOrThrow()
-        }
-    }
-
-    public init(expression: Spawn) {
-        super(expression)
-        expr = expression
-        exprE = None
-    }
-
-    public init(expression: SpawnWithException) {
-        super(expression)
-        expr = None
-        exprE = expression
-    }
-
-    public func GetObject(): Value {
-        if (let Some(spawnExpr) <- expr) {
-            return spawnExpr.GetOperands()[0]
-        }
-        return exprE.getOrThrow().GetOperands()[0]
-    }
-
-    public func IsExecuteClosure(): Bool {
-        if (let Some(spawnExpr) <- expr) {
-            return spawnExpr.IsExecuteClosure()
-        }
-        return exprE.getOrThrow().IsExecuteClosure()
-    }
-}
 
 public class IntrinsicBase <: ExpressionBase {
     private let expr: Option<Intrinsic>
-    private let exprE: Option<IntrinsicWithException>
+    private let exprE: Option<TryIntrinsic>
 
     public init(expression: Expression) {
         super(expression)
@@ -433,7 +319,7 @@ public class IntrinsicBase <: ExpressionBase {
             exprE = None
         } else {
             expr = None
-            exprE = (expression as IntrinsicWithException).getOrThrow()
+            exprE = (expression as TryIntrinsic).getOrThrow()
         }
     }
 
@@ -443,7 +329,7 @@ public class IntrinsicBase <: ExpressionBase {
         exprE = None
     }
 
-    public init(expression: IntrinsicWithException) {
+    public init(expression: TryIntrinsic) {
         super(expression)
         expr = None
         exprE = expression
@@ -468,82 +354,5 @@ public class IntrinsicBase <: ExpressionBase {
             return intrinsic.GetInstantiatedTypeArgs()
         }
         return exprE.getOrThrow().GetInstantiatedTypeArgs()
-    }
-}
-
-public class AllocateBase <: ExpressionBase {
-    private let expr: Option<Allocate>
-    private let exprE: Option<AllocateWithException>
-
-    public init(expression: Expression) {
-        super(expression)
-        if (expression.GetExprKind() == ExprKind.ALLOCATE) {
-            expr = (expression as Allocate).getOrThrow()
-            exprE = None
-        } else {
-            expr = None
-            exprE = (expression as AllocateWithException).getOrThrow()
-        }
-    }
-
-    public init(expression: Allocate) {
-        super(expression)
-        expr = expression
-        exprE = None
-    }
-
-    public init(expression: AllocateWithException) {
-        super(expression)
-        expr = None
-        exprE = expression
-    }
-
-    public func GetType(): Type {
-        if (let Some(allocate) <- expr) {
-            return allocate.GetType()
-        }
-        return exprE.getOrThrow().GetType()
-    }
-}
-
-public class RawArrayAllocateBase <: ExpressionBase {
-    private let expr: Option<RawArrayAllocate>
-    private let exprE: Option<RawArrayAllocateWithException>
-
-    public init(expression: Expression) {
-        super(expression)
-        if (expression.GetExprKind() == ExprKind.RAW_ARRAY_ALLOCATE) {
-            expr = (expression as RawArrayAllocate).getOrThrow()
-            exprE = None
-        } else {
-            expr = None
-            exprE = (expression as RawArrayAllocateWithException).getOrThrow()
-        }
-    }
-
-    public init(expression: RawArrayAllocate) {
-        super(expression)
-        expr = expression
-        exprE = None
-    }
-
-    public init(expression: RawArrayAllocateWithException) {
-        super(expression)
-        expr = None
-        exprE = expression
-    }
-
-    public func GetElementType(): Type {
-        if (let Some(allocate) <- expr) {
-            return allocate.GetElementType()
-        }
-        return exprE.getOrThrow().GetElementType()
-    }
-
-    public func GetSize(): Value {
-        if (let Some(allocate) <- expr) {
-            return allocate.GetSize()
-        }
-        return exprE.getOrThrow().GetSize()
     }
 }
