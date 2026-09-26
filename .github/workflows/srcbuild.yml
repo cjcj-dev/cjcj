@@ -389,6 +389,14 @@ jobs:
           CJCJ_BOOTSTRAP_AST_ARTIFACT="$RUNNER_TEMP/ast-support/libcangjie-ast-support.a" \
             node ci/release/prepare_bootstrap_inputs.mjs
 
+      - name: Verify native Linux stage1 host identities
+        if: startsWith(matrix.target, 'linux-')
+        shell: bash
+        env:
+          HOST_IDENTITY_SDK: ${{ env.CJCJ_BOOTSTRAP_BASE }}
+          HOST_IDENTITY_LLVM: ${{ env.CJCJ_BOOTSTRAP_HOST_LLVM_SO }}
+        run: python3 ci/bootstrap/test_host_identities.py
+
       - name: Prove colour runtime identity rejection
         shell: bash
         run: |
