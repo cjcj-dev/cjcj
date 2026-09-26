@@ -39,6 +39,7 @@ def main():
     libs.mkdir()
     symbols = {
         'mask': 'int g_cjLoadBadMask; ' + PIN_STAMP,
+        'mask-new': 'int g_cjLoadBadMask; ' + PIN_STAMP.replace(PIN, 'b' * 40),
         'both': 'int g_cjLoadBadMask; int g_cjLoadBadMaskOffset; int g_cjLoadShift; int future_colour_export; int unrelated; ' + PIN_STAMP,
         'shift-undefined': 'extern int g_cjLoadShift; int *reference = &g_cjLoadShift;',
         'future-undefined': 'extern int future_colour_export; int *reference = &future_colour_export;',
@@ -79,6 +80,8 @@ def main():
         ('linux-first', [LINUX, WINDOWS], 'mask', 'target', 0, None),
         ('verify-windows-first', [WINDOWS, LINUX], 'mask', 'target', 0, None),
         ('verify-linux-first', [LINUX, WINDOWS], 'mask', 'target', 0, None),
+        ('explicit-pin-current', [LINUX], 'mask-new', 'target', 0, None),
+        ('explicit-pin-wrong', [LINUX], 'mask', 'target', 1, 'rule=RUNTIME_PIN'),
         ('single-tuple-control', [LINUX], 'mask', 'target', 0, None),
         ('missing-target', [WINDOWS], 'mask', 'target', 1, '目标里缺构建目标 runtime/lib/' + LINUX),
         ('source-mismatch', [LINUX], 'mask', 'target', 1, 'runtime 平台不一致'),
@@ -146,7 +149,7 @@ def main():
         # Runtime-role failures still stop at their original assertion.
         std_dir = base / 'lib' / LINUX
         std_dir.mkdir(parents=True)
-        std_variant = 'undefined' if variant in ('mask', 'both', 'both-versioned') else 'none'
+        std_variant = 'undefined' if variant in ('mask', 'mask-new', 'both', 'both-versioned') else 'none'
         shutil.copyfile(libs / (std_variant + '.a'), std_dir / 'libcangjie-std-core.a')
         if name in pair_cases:
             shutil.copyfile(libs / (pair_cases[name][2] + '.a'), std_dir / 'libcangjie-std-core.a')
@@ -158,6 +161,10 @@ def main():
         cmd = ['bash', str(product), '--from', str(base), '--to', str(target), '--' + role]
         if role == 'target':
             cmd.append(LINUX)
+        if name.startswith('explicit-pin-'):
+            pin = work / 'selected-runtime.env'
+            pin.write_text('RUNTIME_REF=' + 'b' * 40 + '\n')
+            cmd += ['--runtime-pin', str(pin)]
         if not name.startswith('verify-'):
             cmd += ['--runtime', str(work / 'install')]
         if name in real_pairs:
