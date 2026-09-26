@@ -128,7 +128,7 @@ jobs:
       sdk_runtime_dir: linux_x86_64_cjnative
       compiler_artifact: final-compiler-linux-x64
       std_artifact: final-std-linux-x64
-      cross_std_artifacts: '[{"tuple":"windows_x86_64_cjnative","artifact":"final-std-windows-x64"}]' 
+      cross_std_artifacts: '[{"tuple":"windows_x86_64_cjnative","artifact":"final-std-windows-x64"}]'
       version: ${{ inputs.version }}
       dry_run: ${{ inputs.dry_run }}
       runtime_ref: ${{ inputs.runtime_ref }}
@@ -146,7 +146,7 @@ jobs:
       sdk_runtime_dir: linux_aarch64_cjnative
       compiler_artifact: final-compiler-linux-aarch64
       std_artifact: final-std-linux-aarch64
-      cross_std_artifacts: '[{"tuple":"windows_x86_64_cjnative","artifact":"final-std-windows-x64"}]' 
+      cross_std_artifacts: '[{"tuple":"windows_x86_64_cjnative","artifact":"final-std-windows-x64"}]'
       version: ${{ inputs.version }}
       dry_run: ${{ inputs.dry_run }}
       runtime_ref: ${{ inputs.runtime_ref }}
