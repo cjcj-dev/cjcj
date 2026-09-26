@@ -1270,3 +1270,14 @@ test('ast-support input contract wrong-sha reaches bootstrap assertion', t => {
   assert.deepEqual(observed, {rc: 1, assertion: true,
     failures: ['BOOTSTRAP-FAIL [stage0] ast-support sha256 不匹配']});
 });
+
+test('ast-support input contract missing stops real stage entry', t => {
+  const result = bootstrapDriverFixture(t, {ast: 'missing'}).run(31);
+  const observed = {
+    rc: result.status,
+    missingKey: /bootstrap input missing: CJCJ_BOOTSTRAP_AST_SUPPORT/.test(result.log),
+    bootstrapStarted: /\[stage0\]/.test(result.log),
+  };
+  console.log(`AST_ENTRY_ASSERT ${JSON.stringify(observed)}`);
+  assert.deepEqual(observed, {rc: 1, missingKey: true, bootstrapStarted: false});
+});
