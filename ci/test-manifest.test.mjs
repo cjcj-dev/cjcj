@@ -105,6 +105,19 @@ test('ci.yml runs the manifest rather than a literal file list', async () => {
     'the test step lost its timeout; a hang would go unattributed for the whole job');
 });
 
+test('Verify sources provisions the lineage consumer pin before running contracts', async () => {
+  const ci = (await workflows()).get('ci.yml');
+  const lint = ci.slice(ci.indexOf('  lint:'), ci.indexOf('  fixed-llvm-tools:'));
+  const install = step(lint, 'Install official lineage input');
+  assert.match(install, /source ci\/host_sdk_pin\.env/,
+    'lineage fixtures must use the same pin as pinnedOfficialSdkRoot');
+  assert.match(install, /"\$cjv_bin" install "\$CJCJ_TOOLCHAIN"/,
+    'Verify sources must actually install the pinned official input');
+  assert.ok(lint.indexOf('- name: Install official lineage input')
+    < lint.indexOf('- name: Test build and release contracts'),
+  'provision the input before the consumer executes');
+});
+
 test('ci.yml discovers the shell scripts it lints instead of listing them', async () => {
   // The same failure as the test list, in the same file, found the same week:
   // a literal list named two scripts, and all seven others were added after
