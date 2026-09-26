@@ -360,7 +360,7 @@ public class JavaDesugarManager {
         DesugarJavaImplSuperConstructorCall(typeManager, BridgeLib(), BridgeJni(), diag, BridgeUtils()).Process(ctx)
         GenerateInJavaImplReferenceWrapper(typeManager, importManager, BridgeLib(), ASTFactory(BridgeLib()),
             BridgeUtils()).Process(ctx)
-        DesugarJavaImplSuperMethodCall().Process(ctx)
+        DesugarJavaImplSuperMethodCall(BridgeLib(), ASTFactory(BridgeLib()), BridgeUtils()).Process(ctx)
         RewriteJavaImplReferenceWrapperFields().Process(ctx, desugarPropRef)
         GenerateNativeBridgeForJavaImpl().Process(ctx)
         let ilib = BridgeLib()

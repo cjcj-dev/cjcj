@@ -4,6 +4,7 @@ import std.collection.*
 import cjcj::ast.*
 import cjcj::sema.TypeManager
 import cjcj::sema.NativeFFI.{InteropLibBridge, MemberJNISignature, WithinFile}
+import cjcj::utils.{CJC_ASSERT, CJC_NULLPTR_CHECK}
 
 public class ASTFactory {
     private let ilib: InteropLibBridge
@@ -127,6 +128,68 @@ public class ASTFactory {
         if (let Some(ty) <- ilib.GetJavaEntityTy()) {
             block.SetTy(ty)
         }
+        return Some(block)
+    }
+
+    public func ExtractArgExprs(args: ArrayList<FuncArg>): ArrayList<Expr> {
+        let argExprs = ArrayList<Expr>()
+        for (arg in args) {
+            CJC_NULLPTR_CHECK(arg.expr)
+            argExprs.add((ASTCloner.Clone(arg.expr.getOrThrow()) as Expr).getOrThrow())
+        }
+        return argExprs
+    }
+
+    public func CreateNonvirtualJavaMethodCall(ctx: AfterTypeCheckContext, curFile: File, jobjectInstance: Expr,
+        method: JavaMemberSignature, retTy: Ty, args: ArrayList<Expr>, scope: ClassLikeDecl): Option<Block> {
+        CJC_ASSERT(!method.isStatic)
+        return CreateJavaMethodCall(ctx, curFile, Some(jobjectInstance), method, retTy, args, scope, isVirtual: false)
+    }
+
+    private func CreateJavaMethodCall(ctx: AfterTypeCheckContext, curFile: File, jobjectInstance: Option<Expr>,
+        method: JavaMemberSignature, retTy: Ty, args: ArrayList<Expr>, scope: ClassLikeDecl,
+        isVirtual!: Bool): Option<Block> {
+        let _ = ctx
+        CJC_ASSERT(method.isMethod)
+        CJC_ASSERT(method.isStatic || jobjectInstance.isSome())
+        CJC_ASSERT(!method.isStatic)
+        let envCall = ilib.CreateGetJniEnvCall(Some(curFile))
+        if (let None <- envCall) {
+            return None
+        }
+        let env = envCall.getOrThrow()
+        let wrapped = ArrayList<Expr>()
+        for (arg in args) {
+            if (let Some(entity) <- ilib.WrapJavaEntity(arg)) {
+                wrapped.add(entity)
+            } else {
+                return None
+            }
+        }
+        let memberSig = MemberJNISignature(method.classTypeJniName, method.name, method.signature)
+        let obj = jobjectInstance.getOrThrow()
+        let local = ilib.CreateCallMethodCall(env, obj, memberSig, wrapped, curFile, virt: isVirtual)
+        if (let None <- local) {
+            return None
+        }
+        let block = CreateBlock(ArrayList<Node>(), Some(retTy))
+        let callRes = CreateTmpVarDecl(None, Some((local.getOrThrow() as Expr).getOrThrow()))
+        callRes.curFile = Some(curFile)
+        if (let Some(ty) <- local.getOrThrow().GetTy()) {
+            callRes.SetTy(ty)
+        }
+        block.body.add(callRes)
+        if (let Some(pending) <- ilib.CreateJNIHandlePendingExceptionCall(
+            (ASTCloner.Clone(env) as Expr).getOrThrow())) {
+            block.body.add(pending)
+        }
+        let resultRef = WithinFile<RefExpr>(CreateRefExpr(callRes), curFile)
+        if (let Some(unwrapped) <- ilib.UnwrapJavaEntity(resultRef, retTy, scope)) {
+            block.body.add(unwrapped)
+        } else {
+            return None
+        }
+        block.SetTy(retTy)
         return Some(block)
     }
 }

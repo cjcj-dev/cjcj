@@ -5,9 +5,9 @@ import cjcj::ast.*
 import cjcj::basic.{DiagKindRefactor, DiagnosticEngine}
 import cjcj::sema.TypeManager
 import cjcj::modules.SemaImportManager
-import cjcj::sema.NativeFFI.{CreateSuperCall, CreateThisRef, GetJavaFQName, GetJavaImplRegistryCompanionConstructor,
-    GetJavaMirrorWrappingConstructor, GetJavaRefField, InteropLibBridge, IsSuperConstructorCall,
-    JAVA_IMPL_ENTITY_ARG_NAME_IN_GENERATED_CTOR, Utils, WithinFile, WrapReturningLambdaExpr}
+import cjcj::sema.NativeFFI.{CreateJavaRefCall, CreateSuperCall, CreateThisRef, GetJavaFQName,
+    GetJavaImplRegistryCompanionConstructor, GetJavaMirrorWrappingConstructor, GetJavaRefField, InteropLibBridge,
+    IsSuperConstructorCall, JAVA_IMPL_ENTITY_ARG_NAME_IN_GENERATED_CTOR, Utils, WithinFile, WrapReturningLambdaExpr}
 import cjcj::utils.{CJC_ASSERT, CJC_ASSERT_WITH_MSG, CJC_NULLPTR_CHECK}
 
 public class GenerateJavaImplApiStub {
@@ -739,14 +739,63 @@ public class GenerateInJavaImplReferenceWrapper {
 }
 
 public class DesugarJavaImplSuperMethodCall {
+    private let ilib: InteropLibBridge
+    private let factory: ASTFactory
+    private let utils: Utils
+
+    public init(ilib: InteropLibBridge, factory: ASTFactory, utils: Utils) {
+        this.ilib = ilib
+        this.factory = factory
+        this.utils = utils
+    }
+
+    private func DesugarSuperMethodCall(ctx: AfterTypeCheckContext, call: CallExpr, impl: ClassDecl): Unit {
+        CJC_ASSERT(call.baseFunc.isSome())
+        let ma = (call.baseFunc.getOrThrow() as MemberAccess).getOrThrow()
+        CJC_ASSERT(ma.baseExpr.isSome())
+        let ref = (ma.baseExpr.getOrThrow() as RefExpr).getOrThrow()
+        CJC_ASSERT(ref.isSuper)
+        CJC_ASSERT(call.resolvedFunction.isSome())
+        let superFunc = call.resolvedFunction.getOrThrow()
+        CJC_ASSERT(superFunc.outerDecl.isSome())
+        let predecessor = (superFunc.outerDecl.getOrThrow() as ClassDecl).getOrThrow()
+        CJC_ASSERT(IsMirror(predecessor))
+        CJC_NULLPTR_CHECK(call.curFile)
+        let file = call.curFile.getOrThrow()
+        let jobjectInstance = ilib.CreateAsJniJobjectCall(CreateJavaRefCall(impl, Some(file)))
+        CJC_NULLPTR_CHECK(jobjectInstance)
+        CJC_NULLPTR_CHECK(call.GetTy())
+        let desugared = factory.CreateNonvirtualJavaMethodCall(ctx, file, jobjectInstance.getOrThrow(),
+            JavaMemberSignature.FromMethod(utils, superFunc), call.GetTy().getOrThrow(),
+            factory.ExtractArgExprs(call.args), predecessor)
+        if (let Some(block) <- desugared) {
+            call.desugarExpr = Some(block)
+        } else {
+            call.EnableAttr(Attribute.IS_BROKEN)
+        }
+    }
+
     public func Process(ctx: AfterTypeCheckContext): Unit {
-        for (impl in ctx.GetJavaImplReferenceWrappers()) {
-            if (impl.TestAttr(Attribute.IS_BROKEN)) {
-                continue
-            }
-            if (let None <- ctx.GetJavaImplWrappingConstructor(impl)) {
-                continue
-            }
+        for (jimpl in ctx.GetJavaImplReferenceWrappers()) {
+            Walker(jimpl, visitPre: { node: Node =>
+                if (node.TestAttr(Attribute.IS_BROKEN) || node.astKind == ASTKind.PRIMARY_CTOR_DECL) {
+                    return VisitAction.SKIP_CHILDREN
+                }
+                if (let Some(call) <- (node as CallExpr)) {
+                    if (let Some(baseFunc) <- call.baseFunc) {
+                        if (let Some(ma) <- (baseFunc as MemberAccess)) {
+                            if (let Some(baseExpr) <- ma.baseExpr) {
+                                if (let Some(ref) <- (baseExpr as RefExpr)) {
+                                    if (ref.isSuper) {
+                                        DesugarSuperMethodCall(ctx, call, jimpl)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                return VisitAction.WALK_CHILDREN
+            }).Walk()
         }
     }
 }
