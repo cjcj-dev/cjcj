@@ -1,0 +1,38 @@
+name: Bootstrap native host routing
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/bootstrap-native-host.yml
+      - ci/bootstrap/gha_run.sh
+      - ci/bootstrap/bootstrap.sh
+      - ci/bootstrap/test_native_host.sh
+
+permissions:
+  contents: read
+
+jobs:
+  native-host:
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            tuple: darwin_aarch64_cjnative
+          - runner: macos-15-intel
+            tuple: darwin_x86_64_cjnative
+    steps:
+      - uses: actions/checkout@v7
+      - name: Assert native host admission through the GHA entry
+        shell: bash
+        run: bash ci/bootstrap/test_native_host.sh '${{ matrix.tuple }}' "$RUNNER_TEMP/native-host-evidence"
+      - name: Preserve entry output and product identities
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: bootstrap-native-host-${{ matrix.tuple }}
+          path: ${{ runner.temp }}/native-host-evidence
+          if-no-files-found: error
