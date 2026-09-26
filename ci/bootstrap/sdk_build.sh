@@ -544,7 +544,9 @@ if [ -n "$RUNTIME" ]; then
       dst="$lib_d/$base"
       [ -e "$dst" ] || [ -L "$dst" ] || continue
       [ -f "$d/$base" ] || die "runtime: pinned shared pair 缺 $d/$base"
-      rm -f "$dst" && cp "$d/$base" "$dst" || die "runtime shared alias 替换失败: $dst"
+      if ! rm -f "$dst" || ! cp "$d/$base" "$dst"; then
+        die "runtime shared alias 替换失败: $dst"
+      fi
       same_sha "$d/$base" "$dst" || die "runtime shared alias sha256 不一致: $dst"
       echo "  [runtime-shared] ${d#$TO/}/$base -> ${dst#$TO/}"
     done
