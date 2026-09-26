@@ -85,7 +85,7 @@ for (const target of ['linux-aarch64', 'darwin-arm64', 'darwin-x64']) {
 
   test(`source ${target} rejects one-digit digest change`, () => fixture(({env, run}) => {
     const file = env.STAGE1_HOST_IDENTITIES;
-    fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace(/("sha256":")([a-f0-9])/, (_, prefix, digit) => prefix + (digit === '0' ? '1' : '0')));
+    fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace(target === 'linux-aarch64' ? /(linux_aarch64 libLLVM-15.so )([a-f0-9])/ : /("sha256":")([a-f0-9])/, (_, prefix, digit) => prefix + (digit === '0' ? '1' : '0')));
     const result = run();
     assert.match(result.stderr, /HOST_LLVM_SHA256_MISMATCH expected=/);
     assert.notEqual(result.status, 0);
