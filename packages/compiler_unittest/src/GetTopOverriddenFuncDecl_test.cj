@@ -203,6 +203,61 @@ main() {
             i++
         }
     }
+
+    // Inheritance-list order is the reverse of source position. Baseline records the
+    // last merged interface as the map parent and GetTop follows that edge; the
+    // position-ordered set's begin is the earlier declaration. bd795e10 TypeManager.cpp:1992.
+    @TestCase
+    public func invertedInheritOrderPicksEarliestPosition(): Unit {
+        let dir = getVariable("TMPDIR").getOrThrow() + "/override-invert-" + GenerateRandomHexString()
+        let _ = FileUtil.CreateDirs(dir + "/")
+        let instance = NewOverrideInstance("""
+package invert
+public interface Early {
+    func foo(x: Int64): Int64
+}
+public interface Late {
+    func foo(x: Int64): Int64
+}
+public class CCC <: Late & Early {
+    public func foo(x: Int64): Int64 {
+        x
+    }
+}
+main() {
+    CCC().foo(1)
+}
+""", dir, "invert")
+        let ok = instance.Compile(stage: CompileStage.SEMA)
+        println("OVERRIDE_INVERT_COMPILE ok=${ok}")
+        @Assert(ok)
+        let callee = FindNamedCallee(instance.GetSourcePackages()[0], "foo")
+        @Assert(callee.isSome())
+        let fd = callee.getOrThrow()
+        let manager = instance.faithfulSemaInstance.getOrThrow().typeManager
+        let tops = OverrideFunctionResolver(manager).GetTopOverriddenFuncs(
+            fd.outerDecl.getOrThrow().GetTy().getOrThrow(), fd)
+        var hasEarly = false
+        var hasLate = false
+        var listed = ""
+        for (top in tops) {
+            let name = top.outerDecl.getOrThrow().identifier.Val() + "." + top.identifier.Val()
+            listed = listed + name + ","
+            if (name == "Early.foo") {
+                hasEarly = true
+            }
+            if (name == "Late.foo") {
+                hasLate = true
+            }
+        }
+        println("OVERRIDE_INVERT_SET size=${tops.size} names=${listed}")
+        @Expect(tops.size, 2)
+        @Expect(hasEarly)
+        @Expect(hasLate)
+        let actual = QualNameOf(manager.GetTopOverriddenFuncDecl(callee))
+        println("OVERRIDE_INVERT_ASSERT actual=${actual} expected=Early.foo")
+        @Expect(actual, "Early.foo")
+    }
 }
 
 private func FindNamedCallee(pkg: Package, name: String): Option<FuncDecl> {
