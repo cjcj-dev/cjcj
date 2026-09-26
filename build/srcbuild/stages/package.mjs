@@ -40,7 +40,12 @@ async function makeArchive(config, sourceDir, baseName) {
   } else {
     throw new BuildError('package.archive', `unsupported archive format: ${format}`);
   }
-  await assertNoCanonicalWorkloads(archive);
+  try {
+    await assertNoCanonicalWorkloads(archive);
+  } catch (error) {
+    fs.rmSync(archive, {force: true});
+    throw error;
+  }
   return archive;
 }
 

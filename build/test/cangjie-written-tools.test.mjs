@@ -171,6 +171,7 @@ for (const name of ['natural_wave_notime', 'survival_dense']) {
       assert.equal(archives.length, 2);
       const injected = file(config.repoPath('compiler'), ['output', 'bin', name], 'canonical test payload');
       await assert.rejects(packageStage.run(config), new RegExp(`canonical-workload-in-package: cangjie/bin/${name}`));
+      assert.equal(fs.existsSync(archives[0]), false, 'rejected SDK archive must not survive');
       fs.rmSync(injected);
       assert.equal((await packageStage.run(config)).length, 2);
       console.log(`PACKAGE_CANONICAL_TARGET_EXECUTED ${name}`);
