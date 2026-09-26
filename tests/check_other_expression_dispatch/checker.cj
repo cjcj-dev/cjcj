@@ -3,6 +3,7 @@ package other_expression_dispatch_checker
 import std.collection.*
 import cjcj::chir.*
 import cjcj::option.GlobalOptions
+import cjcj::utils.OverflowStrategy
 
 // Inputs only: all validation comes from the linked release CHIR archive.
 main(args: Array<String>): Int64 {
