@@ -1097,6 +1097,7 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
   if (runtimeCase === 'runtime-corrupt') fs.appendFileSync(runtimeDir + '/libcangjie-runtime.so', 'changed');
   if (runtimeCase === 'bounds-corrupt') fs.appendFileSync(runtimeDir + '/libboundscheck.so', 'changed');
   if (runtimeCase === 'bounds-missing') fs.unlinkSync(runtimeDir + '/libboundscheck.so');
+  if (runtimeCase === 'runtime-missing') fs.unlinkSync(runtimeDir + '/libcangjie-runtime.so');
 
   fs.writeFileSync(tuple + '/MANIFEST', `LLVM_SHA=${llvmSha}\n`);
   fs.writeFileSync(tuple + '/bin/opt', `CJLLVM-COMMIT:${llvmSha}\n`);
@@ -1259,10 +1260,11 @@ test('P12 external runtime pin and both SO digests gate the actual bootstrap com
     'runtime-corrupt': 'COLOUR_RT_SHA_MISMATCH',
     'bounds-corrupt': 'COLOUR_RT_SHA_MISMATCH',
     'bounds-missing': 'COLOUR_RT_FILE_MISSING',
+    'runtime-missing': 'COLOUR_RT_FILE_MISSING',
   };
   const observed = [], expected = [];
   for (const [runtimeCase, marker] of Object.entries(cases)) {
-    const fixture = bootstrapDriverFixture(t, {runtimeCase, child: true});
+    const fixture = bootstrapDriverFixture(t, {runtimeCase});
     for (const step of [31, 32]) {
       const result = fixture.dryRun(step, `${runtimeCase}-${step}`);
       const command = result.stdout.match(/^DRY_RUN COMMAND=(.*)$/m)?.[1] || '';
@@ -1275,6 +1277,14 @@ test('P12 external runtime pin and both SO digests gate the actual bootstrap com
       expected.push({runtimeCase, step, rc: valid ? 0 : 1, marker: true,
         runtime: valid ? fixture.runtimeDir : '', success: valid});
       console.log(`P12_ASSERT ${JSON.stringify(row)}`);
+      if (runtimeCase === 'old-pin') {
+        const live = fixture.run(step);
+        const liveRow = {runtimeCase, step, mode: 'execute', rc: live.status,
+          rejected: live.log.includes(marker), enteredBootstrap: /ASSERT cjcj-sha/.test(live.log)};
+        observed.push(liveRow);
+        expected.push({runtimeCase, step, mode: 'execute', rc: 1, rejected: true, enteredBootstrap: false});
+        console.log(`P12_ASSERT ${JSON.stringify(liveRow)}`);
+      }
     }
   }
   // All product observations reach the target assertion, including failures.
