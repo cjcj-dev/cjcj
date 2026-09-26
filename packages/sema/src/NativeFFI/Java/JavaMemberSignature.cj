@@ -7,13 +7,29 @@ import cjcj::sema.NativeFFI.{GetConstructorMarkerFQName, GetJavaJniClassName, Ge
     NormalizeJavaSignature, Utils}
 import cjcj::utils.CJC_ASSERT
 
-public class JavaMemberSignature {
+private enum JavaMemberKind <: Equatable<JavaMemberKind> {
+    | FIELD | METHOD | CONSTRUCTOR
+
+    public operator func ==(other: JavaMemberKind): Bool {
+        return match ((this, other)) {
+            case (FIELD, FIELD) | (METHOD, METHOD) | (CONSTRUCTOR, CONSTRUCTOR) => true
+            case _ => false
+        }
+    }
+
+    public operator func !=(other: JavaMemberKind): Bool {
+        return !(this == other)
+    }
+}
+
+public class JavaMemberSignature <: Hashable & Equatable<JavaMemberSignature> {
     public let classTypeJniName: String
     public let name: String
     public let signature: String
     public let isStatic: Bool
-    public let isMethod: Bool
-    public let isField: Bool
+    private let kind: JavaMemberKind
+    public prop isMethod: Bool { get() { return kind == JavaMemberKind.METHOD } }
+    public prop isField: Bool { get() { return kind == JavaMemberKind.FIELD } }
 
     public init(classTypeJniName: String, name: String, signature: String, isStatic: Bool, isMethod!: Bool = true,
         isField!: Bool = false) {
@@ -21,17 +37,26 @@ public class JavaMemberSignature {
         this.name = name
         this.signature = signature
         this.isStatic = isStatic
-        this.isMethod = isMethod
-        this.isField = isField
+        this.kind = if (isField) { JavaMemberKind.FIELD } else if (isMethod) { JavaMemberKind.METHOD } else { JavaMemberKind.CONSTRUCTOR }
     }
 
     public func UnqualifiedTypeName(): String {
         return UnqualifiedJniTypeName(classTypeJniName)
     }
 
-    public func CacheKey(): String {
-        return classTypeJniName + "$$" + name + "$$" + signature + "$$" + isStatic.toString() + "$$" +
-            isMethod.toString() + "$$" + isField.toString()
+    // JavaMemberSignature.cpp:147-162: member identity is structural. Hash collisions
+    // must never merge members whose class, name, signature, kind or staticness differs.
+    public operator func ==(other: JavaMemberSignature): Bool {
+        return signature == other.signature && kind == other.kind &&
+            isStatic == other.isStatic && classTypeJniName == other.classTypeJniName && name == other.name
+    }
+
+    public operator func !=(other: JavaMemberSignature): Bool {
+        return !(this == other)
+    }
+
+    public func hashCode(): Int64 {
+        return (classTypeJniName + "$" + name + "$$" + signature + isStatic.toString()).hashCode()
     }
 
     public static func FromMethod(utils: Utils, method: FuncDecl): JavaMemberSignature {

@@ -11,7 +11,7 @@ public class JFieldIdCache {
     private let importManager: SemaImportManager
     private let typeManager: TypeManager
     private let ilib: InteropLibBridge
-    private let cache: HashMap<String, VarDecl> = HashMap<String, VarDecl>()
+    private let cache: HashMap<JavaMemberSignature, VarDecl> = HashMap<JavaMemberSignature, VarDecl>()
 
     public init(importManager: SemaImportManager, typeManager: TypeManager, ilib: InteropLibBridge) {
         this.importManager = importManager
@@ -40,8 +40,7 @@ public class JFieldIdCache {
     }
 
     private func GetOrPut(ctx: AfterTypeCheckContext, field: JavaMemberSignature, curFile: File): VarDecl {
-        let key = field.CacheKey()
-        if (let Some(found) <- cache.get(key)) {
+        if (let Some(found) <- cache.get(field)) {
             return found
         }
         let idTy = ilib.GetJniJfieldIdTy()
@@ -57,7 +56,7 @@ public class JFieldIdCache {
         varDecl.curFile = Some(curFile)
         varDecl.fullPackageName = PackageName(curFile)
         varDecl.SetTy(idTy)
-        cache[key] = varDecl
+        cache[field] = varDecl
         ctx.AddGeneratedDecl(varDecl)
         return varDecl
     }
