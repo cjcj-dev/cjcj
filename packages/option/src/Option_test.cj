@@ -4,8 +4,15 @@ import cjcj::utils.FileUtil
 import std.unittest.*
 import std.unittest.testmacro.*
 import std.core.Option as CoreOption
+import std.env.getVariable
 
-private let OPTION_TEST_SRC_FILE: String = "/root/cj_build/cangjie_compiler/unittests/Option/main.cj"
+// Upstream: unittests/Option/OptionTest.cpp:18-35 (SetUp).
+// cjpm has no PROJECT_SOURCE_DIR compile definition. Tests run from the repository
+// root by default; standalone runners can supply that root through the environment.
+private func optionTestSourceFile(): String {
+    let projectPath = getVariable("PROJECT_SOURCE_DIR") ?? "."
+    return FileUtil.JoinPath(projectPath, "packages/option/testdata/main.cj")
+}
 
 private func parseArgs(args: Array<String>, frontendMode!: Bool = false): (Bool, ArgList) {
     let table = CreateOptionTable(frontendMode: frontendMode)
@@ -33,9 +40,16 @@ private func makeTriple(arch: ArchType, vendor: Vendor, os: OSType, env: Environ
 
 @Test
 class OptionTest {
+    private var srcFile: String = ""
+
+    @BeforeEach
+    func setUp(): Unit {
+        srcFile = optionTestSourceFile()
+    }
+
     @TestCase
     func GlobalOptionParseFromArgsTest(): Unit {
-        let parsed = parseArgs(["cjc", "--no-prelude", "--output-type", "staticlib", OPTION_TEST_SRC_FILE])
+        let parsed = parseArgs(["cjc", "--no-prelude", "--output-type", "staticlib", srcFile])
         @Expect(parsed[0], true)
         let opts = GlobalOptions()
         let succ = opts.ParseFromArgs(parsed[1])
@@ -45,7 +59,7 @@ class OptionTest {
 
     @TestCase
     func PgoOptionsTest01(): Unit {
-        let parsed = parseArgs(["cjc", "--pgo-instr-gen=cj.profraw", OPTION_TEST_SRC_FILE])
+        let parsed = parseArgs(["cjc", "--pgo-instr-gen=cj.profraw", srcFile])
         @Expect(parsed[0], true)
         let opts = GlobalOptions()
         let succ = opts.ParseFromArgs(parsed[1])
@@ -117,7 +131,7 @@ class OptionTest {
 
     @TestCase
     func PathPrefixMapParseTest(): Unit {
-        let parsed = parseArgs(["cjc", "--path-prefix-map=/build/root=module@v1", OPTION_TEST_SRC_FILE])
+        let parsed = parseArgs(["cjc", "--path-prefix-map=/build/root=module@v1", srcFile])
         @Expect(parsed[0], true)
         let opts = GlobalOptions()
         @Expect(opts.ParseFromArgs(parsed[1]), true)
@@ -128,7 +142,7 @@ class OptionTest {
 
     @TestCase
     func PathPrefixMapRejectsMalformedValueTest(): Unit {
-        let parsed = parseArgs(["cjc", "--path-prefix-map=/build/root", OPTION_TEST_SRC_FILE])
+        let parsed = parseArgs(["cjc", "--path-prefix-map=/build/root", srcFile])
         @Expect(parsed[0], true)
         let opts = GlobalOptions()
         @Expect(opts.ParseFromArgs(parsed[1]), false)
@@ -138,7 +152,7 @@ class OptionTest {
     @TestCase
     func PathPrefixMapRejectsConflictingOldPrefixTest(): Unit {
         let parsed = parseArgs(["cjc", "--path-prefix-map=/build/root=module@v1",
-            "--path-prefix-map=/build/root=module@v2", OPTION_TEST_SRC_FILE])
+            "--path-prefix-map=/build/root=module@v2", srcFile])
         @Expect(parsed[0], true)
         let opts = GlobalOptions()
         @Expect(opts.ParseFromArgs(parsed[1]), false)
@@ -223,6 +237,13 @@ class ToFullTripleStringTest {
 
 @Test
 class OptionTableTest {
+    private var srcFile: String = ""
+
+    @BeforeEach
+    func setUp(): Unit {
+        srcFile = optionTestSourceFile()
+    }
+
     @TestCase
     func ParseArgsTestEmptyInput(): Unit {
         let table = CreateOptionTable()
@@ -340,7 +361,7 @@ class OptionTableTest {
         if (wrote) {
             return path
         }
-        return OPTION_TEST_SRC_FILE
+        return srcFile
     }
 
     private func runIosLto(name: String, args: Array<String>): Bool {
