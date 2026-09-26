@@ -79,7 +79,8 @@ test('pinned official SDK supplies the lineage comparison input', async () => {
   // a missing install must fail here, not masquerade as a lineage verdict.
   assert.equal(installed?.isDirectory() ?? false, true,
     `official lineage comparison input was not provisioned: ${official}`);
-  const artifacts = await listPackagedArtifacts(path.join(official, 'modules'));
+  const artifacts = (await listPackagedArtifacts(official))
+    .filter(file => file.startsWith(path.join(official, 'modules') + path.sep));
   assert.ok(artifacts.length > 0, 'the official input must supply comparison artifacts');
 });
 
