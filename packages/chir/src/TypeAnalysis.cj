@@ -314,6 +314,65 @@ public class TypeAnalysis <: ValueAnalysis<TypeValueDomain, FullStatePool<TypeVa
         }
     }
 
+    private func HandleTypeCastExpr(state: TypeDomain, typecast: TypeCast): Unit {
+        HandleTypeCastExprImpl(state, typecast, typecast.GetSourceValue(),
+            typecast.GetSourceType().getOrThrow(), typecast.GetTargetType().getOrThrow())
+    }
+
+    private func HandleTypeCastExprImpl(state: TypeDomain, typecast: Expression,
+        sourceValue: Value, sourceType: Type, targetType: Type): Unit {
+        var srcTy = sourceType
+        var tgtTy = targetType
+        while (srcTy.IsRef()) {
+            srcTy = (srcTy as RefType).getOrThrow().GetBaseType()
+        }
+        while (tgtTy.IsRef()) {
+            tgtTy = (tgtTy as RefType).getOrThrow().GetBaseType()
+        }
+        let result = typecast.GetResult().getOrThrow()
+        if (result.GetType().getOrThrow().IsRef()) {
+            state.GetReferencedObjAndSetToTop(result, expr: Some(typecast))
+        } else {
+            state.SetToTopOrTopRef(result, false)
+        }
+        if (!srcTy.IsClass() || !tgtTy.IsClass()) {
+            return
+        }
+        let checkSubClass = { sourceTy: ClassType, targetTy: ClassType =>
+            let fatherTy = LeastCommonSuperClass(sourceTy, targetTy, builder)
+            if (fatherTy.isSome() && fatherTy.getOrThrow() == targetTy) {
+                sourceTy
+            } else {
+                targetTy
+            }
+        }
+        let srcAbsVal = state.CheckAbstractObjectRefBy(sourceValue)
+        if (srcAbsVal.isNone()) {
+            return
+        }
+        let srcVal = state.CheckAbstractValue(srcAbsVal.getOrThrow())
+        if (srcVal.isNone()) {
+            return
+        }
+        if (srcVal.getOrThrow().GetTypeKind() == DevirtualTyKind.EXACTLY) {
+            state.Propagate(sourceValue, result)
+            return
+        } else if (srcVal.getOrThrow().GetTypeKind() == DevirtualTyKind.SUBTYPE_OF) {
+            let srcClsTy = (srcTy as ClassType).getOrThrow()
+            let tgtClsTy = (tgtTy as ClassType).getOrThrow()
+            let resTy = checkSubClass(srcClsTy, tgtClsTy)
+            if (srcVal.getOrThrow().GetSpecificType() == resTy) {
+                state.Propagate(sourceValue, result)
+                return
+            }
+            var resVal: Value = result
+            if (result.GetType().getOrThrow().IsRef()) {
+                resVal = state.CheckAbstractObjectRefBy(result).getOrThrow()
+            }
+            state.Update(resVal, TypeValue(DevirtualTyKind.SUBTYPE_OF, tgtClsTy))
+        }
+    }
+
     private func GetInnerTypeFromMemberAccess(ma: GetElementRef): Type {
         return GetInnerTypeFromMemberAccessImpl(ma, ma.GetPath())
     }
