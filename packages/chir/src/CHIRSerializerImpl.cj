@@ -477,10 +477,11 @@ private func ToPackageExprKind(expr: Expression): UInt8 {
 class CHIRSerializerImpl {
     private let builder: FlatBufferBuilder = FlatBufferBuilder()
     private var pkg: Option<Package> = None
-    private let valueQueue: ArrayList<Value> = ArrayList<Value>()
-    private let typeQueue: ArrayList<Type> = ArrayList<Type>()
-    private let exprQueue: ArrayList<Expression> = ArrayList<Expression>()
-    private let defQueue: ArrayList<CustomTypeDef> = ArrayList<CustomTypeDef>()
+    // CHIRSerializerImpl.h:48-51; Dispatch pops the FIFO head without shifting the tail.
+    private let valueQueue: ArrayDeque<Value> = ArrayDeque<Value>()
+    private let typeQueue: ArrayQueue<Type> = ArrayQueue<Type>()
+    private let exprQueue: ArrayQueue<Expression> = ArrayQueue<Expression>()
+    private let defQueue: ArrayDeque<CustomTypeDef> = ArrayDeque<CustomTypeDef>()
 
     private var typeCount: UInt32 = 0u32
     private var valueCount: UInt32 = 0u32
@@ -520,7 +521,7 @@ class CHIRSerializerImpl {
             value2Id[obj.nodeId] = valueCount
             allValue.add(0u32)
             valueKind.add(0u8)
-            valueQueue.add(obj)
+            valueQueue.addLast(obj)
         }
         return value2Id[obj.nodeId]
     }
@@ -553,7 +554,7 @@ class CHIRSerializerImpl {
             def2Id[obj.nodeId] = defCount
             allCustomTypeDef.add(0u32)
             defKind.add(0u8)
-            defQueue.add(obj)
+            defQueue.addLast(obj)
         }
         return def2Id[obj.nodeId]
     }
@@ -1494,24 +1495,24 @@ class CHIRSerializerImpl {
     func Dispatch(): Unit {
         while (!(typeQueue.isEmpty() && valueQueue.isEmpty() && exprQueue.isEmpty() && defQueue.isEmpty())) {
             while (!typeQueue.isEmpty()) {
-                let value = typeQueue[0]
+                let value = typeQueue.peek().getOrThrow()
                 allType[Int64(GetId(value) - 1u32)] = Dispatch(value)
-                typeQueue.remove(at: 0)
+                typeQueue.remove()
             }
             while (!valueQueue.isEmpty()) {
-                let value = valueQueue[0]
+                let value = valueQueue.first.getOrThrow()
                 allValue[Int64(GetId(value) - 1u32)] = Dispatch(value)
-                valueQueue.remove(at: 0)
+                valueQueue.removeFirst()
             }
             while (!exprQueue.isEmpty()) {
-                let value = exprQueue[0]
+                let value = exprQueue.peek().getOrThrow()
                 allExpression[Int64(GetId(value) - 1u32)] = Dispatch(value)
-                exprQueue.remove(at: 0)
+                exprQueue.remove()
             }
             while (!defQueue.isEmpty()) {
-                let value = defQueue[0]
+                let value = defQueue.first.getOrThrow()
                 allCustomTypeDef[Int64(GetId(value) - 1u32)] = Dispatch(value)
-                defQueue.remove(at: 0)
+                defQueue.removeFirst()
             }
         }
         let chirPackage = pkg.getOrThrow()
@@ -1548,13 +1549,13 @@ class CHIRSerializerImpl {
     func Initialize(): Unit {
         let chirPackage = pkg.getOrThrow()
         for (value in chirPackage.GetGlobalVars()) {
-            valueQueue.add(value)
+            valueQueue.addLast(value)
         }
         for (value in chirPackage.GetGlobalFunctions()) {
-            valueQueue.add(value)
+            valueQueue.addLast(value)
         }
         for (definition in chirPackage.GetAllCustomTypeDef()) {
-            defQueue.add(definition)
+            defQueue.addLast(definition)
         }
         for (definition in defQueue) {
             defCount++

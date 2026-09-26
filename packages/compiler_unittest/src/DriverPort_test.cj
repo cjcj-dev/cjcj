@@ -1,5 +1,6 @@
 package cjcj::compiler_unittest
 
+import std.env.getVariable
 import std.unittest.*
 import std.unittest.testmacro.*
 import std.collection.ArrayList
@@ -20,12 +21,13 @@ public class DriverTest {
 
     @TestCase
     public func getDarwinSDKVersion(): Unit {
-        let sdkPath = "/root/cj_build/cangjie_compiler/unittests/Driver"
+        let projectPath = getVariable("PROJECT_SOURCE_DIR") ?? "."
+        let sdkPath = FileUtil.JoinPath(projectPath, "unittests" + DIR_SEPARATOR + "Driver")
         @Assert(GetDarwinSDKVersion(sdkPath).isNone())
         @Assert(GetDarwinSDKVersion(sdkPath + "/IncorrectSDKSettings1").isNone())
         @Assert(GetDarwinSDKVersion(sdkPath + "/IncorrectSDKSettings2").isNone())
         @Assert(GetDarwinSDKVersion(sdkPath + "/IncorrectSDKSettings3").isNone())
-        @Expect(GetDarwinSDKVersion(sdkPath + "/CorrectSDKSettings").getOrThrow(), "14.5")
+        @Expect(GetDarwinSDKVersion(sdkPath + "/CorrectSDKSettings") ?? "", "14.5")
     }
 }
 

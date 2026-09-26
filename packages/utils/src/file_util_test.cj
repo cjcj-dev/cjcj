@@ -1,10 +1,17 @@
 package cjcj::utils
 
 import std.collection.*
+import std.env.getVariable
 import std.fs.File
 import std.process.execute
 import std.unittest.*
 import std.unittest.testmacro.*
+
+// Upstream: unittests/Utils/UtilsTests.cpp:98-112.
+// cjpm tests start at the checkout root; standalone runners supply it explicitly.
+private func GetProjectPath(): String {
+    return getVariable("PROJECT_SOURCE_DIR") ?? "."
+}
 
 private let tempRoot = "/tmp/cangjie_selfhost_utils_tests"
 
@@ -119,7 +126,7 @@ private func TransferEscapeBacktickTest(): Unit {
 // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:432 TEST(UtilsTest, IsDirTest)
 @When[os == "Windows"]
 private func IsDirTest(): Unit {
-    @Expect(FileUtil.IsDir("/root/cj_build/cangjie_compiler/unittests/Utils/"), true)
+    @Expect(FileUtil.IsDir(GetProjectPath() + "/unittests/Utils/"), true)
     @Expect(FileUtil.IsDir("no/exist/dir"), false)
     let dir = tempRoot + "_definitelyDirectory"
     resetPath(dir)
@@ -131,7 +138,7 @@ private func IsDirTest(): Unit {
 // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:432 TEST(UtilsTest, IsDirTest)
 @When[os != "Windows"]
 private func IsDirTest(): Unit {
-    @Expect(FileUtil.IsDir("/root/cj_build/cangjie_compiler/unittests/Utils/"), true)
+    @Expect(FileUtil.IsDir(GetProjectPath() + "/unittests/Utils/"), true)
     @Expect(FileUtil.IsDir("no/exist/dir"), false)
     let dir = tempRoot + "_definitelyDirectory"
     resetPath(dir)
