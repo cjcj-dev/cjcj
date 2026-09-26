@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {execFileSync} from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
@@ -132,4 +133,20 @@ test('no workflow runs a test file the manifest does not gate', async () => {
     }
   }
   assert.deepEqual(offenders, [], `\n  ${offenders.join('\n  ')}`);
+});
+
+
+test('manifest CLI hands every gating file to the workflow consumer', () => {
+  const output = execFileSync(process.execPath, ['ci/test-manifest.mjs', 'list'],
+    {cwd: repoRoot, encoding: 'utf8'});
+  assert.deepEqual(output.trim().split('\n'), [...GATING]);
+});
+
+test('ci.yml provides the publisher archive tools before running contracts', async () => {
+  const ci = (await workflows()).get('ci.yml');
+  const install = step(ci, 'Install release contract dependencies');
+  assert.match(install, /apt-get install[^\n]*\bzip\b/);
+  assert.match(install, /apt-get install[^\n]*\bunzip\b/);
+  assert.ok(ci.indexOf('- name: Install release contract dependencies')
+    < ci.indexOf('- name: Test build and release contracts'));
 });
