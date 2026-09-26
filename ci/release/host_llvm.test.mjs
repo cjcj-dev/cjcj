@@ -75,6 +75,7 @@ for (const target of ['linux-aarch64', 'darwin-arm64', 'darwin-x64']) {
     assert.ok(output, result.stdout);
     const source = path.join(env.CJCJ_BOOTSTRAP_HOST_LLVM_ARTIFACT, library);
     assert.notEqual(output, source);
+    assert.notEqual(output, env.CJCJ_BOOTSTRAP_HOST_LLVM_SO);
     assert.ok(fs.lstatSync(output).isFile());
     assert.deepEqual(fs.readFileSync(output), fs.readFileSync(source));
     const sha = JSON.parse(fs.readFileSync(path.join(env.CJCJ_BOOTSTRAP_HOST_LLVM_ARTIFACT, 'manifest.json'))).sha256;
