@@ -9,6 +9,28 @@ import {checkPlatform, planMatrix, probeRequirement, runnerHost, selectPlatforms
 const script = path.resolve(import.meta.dirname, 'platform-matrix.mjs');
 const run = args => spawnSync(process.execPath, [script, ...args], {encoding: 'utf8'});
 
+test('probe CLI reports SDK capability independently of blocked cross-build readiness', t => {
+  const sdk = fs.mkdtempSync(path.join(os.tmpdir(), 'release-probe-'));
+  t.after(() => fs.rmSync(sdk, {recursive: true, force: true}));
+  const env = {...process.env, OHOS_SDK_HOME: sdk, OHOS_NDK_HOME: '', HOS_SDK_HOME: ''};
+  const probe = () => spawnSync(process.execPath, [script, 'probe', '--requirement', 'ohos-sdk'], {env, encoding: 'utf8'});
+  const absent = probe();
+  assert.equal(absent.status, 1, absent.stderr);
+  assert.match(absent.stdout, /^MISSING ohos-sdk:/);
+  fs.mkdirSync(path.join(sdk, 'native/llvm/bin'), {recursive: true});
+  const present = probe();
+  assert.equal(present.status, 0, present.stderr);
+  assert.match(present.stdout, /^PRESENT ohos-sdk:/);
+  const check = spawnSync(process.execPath, [script, 'check', '--platform', 'linux-x64-ohos'], {env, encoding: 'utf8'});
+  assert.equal(check.status, 1, 'SDK presence must not invent cross-build producers');
+  assert.match(check.stderr, /BLOCKED tuple linux_ohos_aarch64_cjnative:/);
+});
+
+test('probe CLI refuses absent and unknown requirement names', () => {
+  assert.equal(run(['probe']).status, 2);
+  assert.equal(run(['probe', '--requirement', 'unknown-sdk']).status, 2);
+});
+
 test('plan for all fourteen platforms: four source cells, five packages, eight blocked, one excluded', () => {
   const plan = planMatrix('all');
   assert.deepEqual(plan.source.map(row => row.target).sort(), ['darwin-arm64', 'darwin-x64', 'linux-aarch64', 'linux-x64']);

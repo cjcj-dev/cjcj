@@ -11,6 +11,9 @@
 //         and probe the capabilities the platform needs. Exit 1 with MISSING /
 //         BLOCKED lines when anything is absent. Blocked platforms always exit 1.
 //   table Markdown table of all fourteen platforms for humans.
+//   probe --requirement NAME
+//         Check one installed runner SDK without claiming the platform's
+//         runtime/final-std producers or package consumers are implemented.
 
 import fs from 'node:fs';
 import os from 'node:os';
@@ -230,10 +233,19 @@ export function main(argv, {log = console.log, error = console.error} = {}) {
     options: {
       platforms: {type: 'string', default: 'all'},
       platform: {type: 'string'},
+      requirement: {type: 'string'},
       'github-output': {type: 'string'},
       summary: {type: 'string'},
     },
   });
+  if (command === 'probe') {
+    if (!values.requirement) throw new Error('probe requires --requirement');
+    const result = probeRequirement(values.requirement);
+    const line = `${result.present ? 'PRESENT' : 'MISSING'} ${values.requirement}: ${result.detail}`;
+    log(line);
+    if (values.summary) fs.appendFileSync(values.summary, `${line}\n`);
+    return result.present ? 0 : 1;
+  }
   if (command === 'plan') {
     const plan = planMatrix(values.platforms);
     log(JSON.stringify(plan, null, 2));
@@ -255,7 +267,7 @@ export function main(argv, {log = console.log, error = console.error} = {}) {
     log(renderTable());
     return 0;
   }
-  throw new Error('usage: platform-matrix.mjs plan|check|table ...');
+  throw new Error('usage: platform-matrix.mjs plan|check|probe|table ...');
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
