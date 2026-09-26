@@ -56,9 +56,9 @@ await Promise.all(targets.map(async target => {
   };
   await assertCompiler();
   await $({cwd: runtime, env})`python3 build.py build -t release --target ${target.target} --target-toolchain ${path.dirname(toolBin)} --target-sysroot ${sysroot} -v ${version}`;
-  await $({cwd: runtime, env})`python3 build.py install`;
-  const runtimeOutput = path.join(runtime, 'output');
-  await $({cwd: stdlib, env})`python3 build.py build -t release --target ${target.target} --target-lib=${runtimeOutput} --target-sysroot ${sysroot} --target-toolchain ${toolBin}`;
+  const runtimeOutput = path.join(source, 'runtime-install');
+  await $({cwd: runtime, env})`python3 build.py install --prefix ${runtimeOutput}`;
+  await $({cwd: stdlib, env})`python3 build.py build -t release --target ${target.target} --target-lib=${path.join(runtimeOutput, 'lib')} --target-sysroot ${sysroot} --target-toolchain ${toolBin}`;
   await $({cwd: stdlib, env})`python3 build.py install --prefix ${install}`;
   await assertCompiler();
   await writeStdProvenance({sourceDir: path.join(repository, 'stdlib'), installPrefix: install, compiler,

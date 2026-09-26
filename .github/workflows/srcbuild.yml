@@ -534,6 +534,25 @@ jobs:
           CJCJ_BOOTSTRAP_WORK: ${{ env.CANGJIE_WORKSPACE }}/bootstrap-work
         run: npx --yes zx@8 ci/srcbuild/steps/build-stage3.mjs
 
+      - name: Install and probe iOS SDKs
+        if: matrix.target == 'darwin-arm64'
+        uses: ./.github/actions/setup-release-sdk
+        with:
+          requirement: xcode-ios
+
+      - name: Build iOS runtimes and final std with stage2 host compiler
+        if: matrix.target == 'darwin-arm64'
+        run: npx --yes zx@8 ci/srcbuild/steps/build-ios-final-std.mjs
+
+      - name: Upload iOS runtime and final std tuple bundle
+        if: matrix.target == 'darwin-arm64'
+        uses: actions/upload-artifact@v7
+        with:
+          name: final-std-ios
+          path: ${{ env.CANGJIE_WORKSPACE }}/software/final-std-ios
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Upload final source-built std install root
         uses: actions/upload-artifact@v7
         with:
