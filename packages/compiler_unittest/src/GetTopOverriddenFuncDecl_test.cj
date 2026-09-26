@@ -204,9 +204,6 @@ main() {
         }
     }
 
-    // Inheritance-list order is the reverse of source position. Baseline records the
-    // last merged interface as the map parent and GetTop follows that edge; the
-    // position-ordered set's begin is the earlier declaration. bd795e10 TypeManager.cpp:1992.
     @TestCase
     public func invertedInheritOrderPicksEarliestPosition(): Unit {
         let dir = getVariable("TMPDIR").getOrThrow() + "/override-invert-" + GenerateRandomHexString()
