@@ -1,87 +1,87 @@
 {
   "version": 1,
   "repository": "cjcj-dev/cjcj",
-  "run": 36190072480,
+  "run": 36202946134,
   "attempt": 1,
-  "commit": "a565db51e61c14db4c2d102be1de52cf07504d92",
-  "artifact": 10889213062,
+  "commit": "63abebe561b63cf5465a18898354ee50c9e7a3c4",
+  "artifact": 10893737926,
   "files": [
     {
       "path": "MANIFEST",
       "mode": 420,
-      "artifact_sha256": "e3031c2cf0a82a019a5a4c64158cd25928b48b14ceaee3a942e140115f2c9933",
-      "release_sha256": "e3031c2cf0a82a019a5a4c64158cd25928b48b14ceaee3a942e140115f2c9933",
-      "asset": 589329562
+      "artifact_sha256": "ae4e9e21e250994b3136090b9b39faeeae9bee9ad0d2bedc050064fdff85ae5e",
+      "release_sha256": "ae4e9e21e250994b3136090b9b39faeeae9bee9ad0d2bedc050064fdff85ae5e",
+      "asset": 589566718
     },
     {
       "path": "bin/llc",
       "mode": 493,
       "artifact_sha256": "42af90af1c0dd4ce8b2b6a8378964926dc53b5421d980e0d9e0873e76bd475e7",
       "release_sha256": "42af90af1c0dd4ce8b2b6a8378964926dc53b5421d980e0d9e0873e76bd475e7",
-      "asset": 589329584
+      "asset": 589566749
     },
     {
       "path": "bin/opt",
       "mode": 493,
       "artifact_sha256": "bae27a1de0e55f75fac561ea7628738b7d9273d04648c8e8a8af03ede8f3fe97",
       "release_sha256": "bae27a1de0e55f75fac561ea7628738b7d9273d04648c8e8a8af03ede8f3fe97",
-      "asset": 589329646
+      "asset": 589566823
     },
     {
       "path": "bin/ld.lld",
       "mode": 493,
-      "artifact_sha256": "57c9bc535810cec076dfeb0d5aee8f6f88e2927b1e6b1f912236f910c9539bbb",
-      "release_sha256": "57c9bc535810cec076dfeb0d5aee8f6f88e2927b1e6b1f912236f910c9539bbb",
-      "asset": 589329706
+      "artifact_sha256": "fdc258dcbdadd9f14ca16d9ea77099572c3d52657a8611ed40ce3a375c1f7425",
+      "release_sha256": "fdc258dcbdadd9f14ca16d9ea77099572c3d52657a8611ed40ce3a375c1f7425",
+      "asset": 589566882
     },
     {
       "path": "lib/STATIC_LLVM.txt",
       "mode": 420,
-      "artifact_sha256": "e3031c2cf0a82a019a5a4c64158cd25928b48b14ceaee3a942e140115f2c9933",
-      "release_sha256": "e3031c2cf0a82a019a5a4c64158cd25928b48b14ceaee3a942e140115f2c9933",
-      "asset": 589329747
+      "artifact_sha256": "ae4e9e21e250994b3136090b9b39faeeae9bee9ad0d2bedc050064fdff85ae5e",
+      "release_sha256": "ae4e9e21e250994b3136090b9b39faeeae9bee9ad0d2bedc050064fdff85ae5e",
+      "asset": 589566950
     },
     {
       "path": "fixed-llc/llc.gz",
       "mode": 420,
       "artifact_sha256": "cea59c0ab320f0bed516def4b64be5eac37dd403b7d216539274575f4ec5f64a",
       "release_sha256": "cea59c0ab320f0bed516def4b64be5eac37dd403b7d216539274575f4ec5f64a",
-      "asset": 589329764
+      "asset": 589566990
     },
     {
       "path": "fixed-llc/opt.gz",
       "mode": 420,
       "artifact_sha256": "c2234cc61db423aae0496ec91662821bd06234332e97153a002b07ebd8733b11",
       "release_sha256": "c2234cc61db423aae0496ec91662821bd06234332e97153a002b07ebd8733b11",
-      "asset": 589329785
+      "asset": 589567011
     },
     {
       "path": "fixed-llc/ld.lld.gz",
       "mode": 420,
-      "artifact_sha256": "91fb82535742b2278c4a973d6dab18c53443e3b2c98bbd463933e071a7aa5a87",
-      "release_sha256": "91fb82535742b2278c4a973d6dab18c53443e3b2c98bbd463933e071a7aa5a87",
-      "asset": 589329811
+      "artifact_sha256": "13485dd2712185062d80919b45b2f1552d3da24d37cab4f0d72c867a5b2b1537",
+      "release_sha256": "13485dd2712185062d80919b45b2f1552d3da24d37cab4f0d72c867a5b2b1537",
+      "asset": 589567043
     },
     {
       "path": "fixed-llc/cjselfhost_llvmshim.o",
       "mode": 420,
-      "artifact_sha256": "bd3472becee7484e944cf1b20f9c080b1f3f92faee58ea059cad6d1e4d305dee",
-      "release_sha256": "bd3472becee7484e944cf1b20f9c080b1f3f92faee58ea059cad6d1e4d305dee",
-      "asset": 589329843
+      "artifact_sha256": "69e900e45709b1fa749bbc7d0379e45b980f7733d3e2a19ebe0afded5e78a44d",
+      "release_sha256": "69e900e45709b1fa749bbc7d0379e45b980f7733d3e2a19ebe0afded5e78a44d",
+      "asset": 589567062
     },
     {
       "path": "fixed-llc/llvm-tools.manifest",
       "mode": 420,
-      "artifact_sha256": "942821c236b83cf03af40199bc04f693a10bb6526bdbad158ab14878d316619b",
-      "release_sha256": "942821c236b83cf03af40199bc04f693a10bb6526bdbad158ab14878d316619b",
-      "asset": 589329854
+      "artifact_sha256": "1e5a15a4a5fda388437fa46d7e74fdaf496c509c647a5ca0ceee581b7f7b329b",
+      "release_sha256": "1e5a15a4a5fda388437fa46d7e74fdaf496c509c647a5ca0ceee581b7f7b329b",
+      "asset": 589567113
     },
     {
       "path": "SHA256SUMS",
       "mode": 420,
-      "artifact_sha256": "519820cc5534ef0400db45bb73caef8060c2c67c73ef8b9740b911802f65626a",
-      "release_sha256": "519820cc5534ef0400db45bb73caef8060c2c67c73ef8b9740b911802f65626a",
-      "asset": 589329861
+      "artifact_sha256": "a3fbc6303ea036bfeed227ae03c99788e7be985e4ba7d33eec19dce09fcc9c9c",
+      "release_sha256": "a3fbc6303ea036bfeed227ae03c99788e7be985e4ba7d33eec19dce09fcc9c9c",
+      "asset": 589567118
     }
   ]
 }
