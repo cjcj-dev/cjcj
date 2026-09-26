@@ -69,6 +69,19 @@ jobs:
           uname -a > "$RUNNER_TEMP/identity-evidence/machine.txt"
           uptime >> "$RUNNER_TEMP/identity-evidence/machine.txt"
           python3 ci/bootstrap/test_host_identity_wiring.py "$RUNNER_TEMP/identity-evidence"
+          git fetch --no-tags --depth=1 origin 96a9458e8de025d1c5fcf5e7c150e51a77e2af37
+          git show 96a9458e8de025d1c5fcf5e7c150e51a77e2af37:ci/bootstrap/stage1_host_runner.sh > "$RUNNER_TEMP/identity-evidence/baseline-runner.sh"
+          git show 96a9458e8de025d1c5fcf5e7c150e51a77e2af37:ci/bootstrap/stage1_host_identities.txt > "$RUNNER_TEMP/identity-evidence/baseline-pins.txt"
+          set +e
+          STAGE1_RUNNER_PRODUCT="$RUNNER_TEMP/identity-evidence/baseline-runner.sh" \
+            STAGE1_PIN_PRODUCT="$RUNNER_TEMP/identity-evidence/baseline-pins.txt" \
+            python3 ci/bootstrap/test_host_identities.py HostIdentity.test_fixed_release_triple \
+            > "$RUNNER_TEMP/identity-evidence/baseline.log" 2>&1
+          rc=$?
+          set -e
+          echo "$rc" > "$RUNNER_TEMP/identity-evidence/baseline.rc"
+          test "$rc" = 1
+          grep -F 'llvm sha is not the declared host triple:' "$RUNNER_TEMP/identity-evidence/baseline.log"
           uptime >> "$RUNNER_TEMP/identity-evidence/machine.txt"
       - uses: actions/upload-artifact@v7
         if: always()
