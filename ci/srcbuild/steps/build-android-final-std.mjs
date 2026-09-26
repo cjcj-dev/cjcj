@@ -55,10 +55,8 @@ await writeStdProvenance({sourceDir: stdlib, installPrefix: finalStd,
 const runtimeArtifact = path.join(finalStd, 'cross-runtime');
 await fs.cp(runtimeInstall, runtimeArtifact, {recursive: true});
 await writeCrossRuntimeManifest({root: runtimeArtifact, tuple, runtimeRef});
-for (const relative of [`runtime/lib/${tuple}/libcangjie-std-core.so`, `lib/${tuple}/libcangjie-std-core.a`, `modules/${tuple}/std/core.cjo`]) {
-  // Module spelling is std.core.cjo in the compiler's installed tuple layout.
-  const file = relative.endsWith('/core.cjo') ? relative.replace('/core.cjo', '/std.core.cjo') : relative;
-  await fs.access(path.join(finalStd, file));
+for (const relative of [`runtime/lib/${tuple}/libcangjie-std-core.so`, `lib/${tuple}/libcangjie-std-core.a`, `modules/${tuple}/std/std.core.cjo`]) {
+  await fs.access(path.join(finalStd, relative));
 }
 await $`file ${path.join(runtimeArtifact, 'runtime', 'lib', tuple, 'libcangjie-runtime.so')} ${path.join(finalStd, 'runtime', 'lib', tuple, 'libcangjie-std-core.so')}`;
 await $`sha256sum ${path.join(runtimeArtifact, 'runtime', 'lib', tuple, 'libcangjie-runtime.so')} ${path.join(finalStd, 'lib', tuple, 'libcangjie-std-core.a')}`;
