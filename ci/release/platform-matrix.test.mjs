@@ -225,3 +225,14 @@ test('the SDK identity record hashes file content, never a path', () => {
   assert.ok(harness.includes("'restored-export: the export is back'"),
     'the export face has no restored arm');
 });
+
+test('the export reader drops the carriage return of a CRLF GITHUB_ENV line', () => {
+  const harness = fs.readFileSync(path.resolve(import.meta.dirname, 'verify-runner-sdk.mjs'), 'utf8');
+  // The installer writes GITHUB_ENV in the platform's text mode, so a Windows
+  // value arrives as `NAME=D:\path\r`. Splitting on a bare newline would put
+  // that carriage return inside the SDK path and the probe would read the
+  // directory as missing.
+  assert.ok(harness.includes("split(/\\r?\\n/)"), 'GITHUB_ENV lines are split on a bare newline');
+  assert.ok(harness.includes("'restored-export: the export is back'"),
+    'nothing judges the value the restored export actually carried');
+});

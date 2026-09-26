@@ -76,7 +76,10 @@ function runInstaller(script, tree) {
   });
 }
 function readExports(file) {
-  return Object.fromEntries(fs.readFileSync(file, 'utf8').split('\n').filter(Boolean)
+  // A GITHUB_ENV line is `NAME=VALUE`; Python writes it in the platform's text
+  // mode, so on Windows the separator is CRLF and the carriage return belongs to
+  // the line, not to the value.
+  return Object.fromEntries(fs.readFileSync(file, 'utf8').split(/\r?\n/).filter(Boolean)
     .map(line => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)]));
 }
 const exportArm = (async () => {
