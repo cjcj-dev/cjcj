@@ -77,6 +77,14 @@ class HostIdentity(unittest.TestCase):
     def test_native_triple(self):
         self.accepted(self.install())
 
+    def test_other_platform_rows_after_native(self):
+        self.identities.write_text('\n'.join(self.rows[3:] + self.rows[:3]) + '\n')
+        self.accepted(self.install())
+
+    def test_malformed_selected_pin(self):
+        self.identities.write_text('\n'.join(self.rows[:-1] + [f'{PLATFORM} libLLVM-15.so invalid']) + '\n')
+        self.rejected(self.install(), 'invalid host identity: ' + PLATFORM)
+
     def test_other_platform_cannot_fill_missing_pin(self):
         self.identities.write_text('\n'.join(self.rows[:-1]) + '\n')
         self.rejected(self.install(), 'incomplete host identities: ' + PLATFORM)
