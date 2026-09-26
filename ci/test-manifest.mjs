@@ -89,6 +89,8 @@ export const GATING = Object.freeze([
   'ci/srcbuild/tests/product-binary.test.mjs',
   'ci/srcbuild/tests/release-wire.test.mjs',
   'ci/srcbuild/tests/sccache-contract.test.mjs',
+  // Invokes npx --yes zx@8 on a rejected fixture SDK; CI primes zx below.
+  'ci/srcbuild/tests/verify-sdk.test.mjs',
   'ci/srcbuild/tests/workflow-inputs.test.mjs',
   'ci/test-manifest.test.mjs',
   'scripts/erased_dynpayload_gate.test.mjs',

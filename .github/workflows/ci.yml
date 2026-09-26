@@ -47,7 +47,9 @@ jobs:
       # both ends of that -- every test file must be in a manifest bucket, and
       # this step must keep asking the manifest.
       - name: Install release contract dependencies
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq zip unzip
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq zip unzip
+          npx --yes zx@8 --version
       - name: Test build and release contracts
         shell: bash
         env:

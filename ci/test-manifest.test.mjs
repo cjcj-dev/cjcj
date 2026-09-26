@@ -147,6 +147,7 @@ test('ci.yml provides the publisher archive tools before running contracts', asy
   const install = step(ci, 'Install release contract dependencies');
   assert.match(install, /apt-get install[^\n]*\bzip\b/);
   assert.match(install, /apt-get install[^\n]*\bunzip\b/);
+  assert.match(install, /npx --yes zx@8 --version/);
   assert.ok(ci.indexOf('- name: Install release contract dependencies')
     < ci.indexOf('- name: Test build and release contracts'));
 });
