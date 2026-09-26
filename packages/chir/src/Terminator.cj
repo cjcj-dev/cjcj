@@ -358,8 +358,15 @@ public open class DynamicDispatchWithException <: FuncCallWithException {
         if (thisTypeDeref.IsThis()) {
             thisTypeDeref = GetTopLevelFunc().getOrThrow().GetParentCustomTypeDef().getOrThrow().GetType().getOrThrow()
         }
-        let parent = GetInstParentCustomTyOfCallee(GetCallee(), GetArgs(), Some(thisTypeDeref), builder).getOrThrow()
-        return (parent as ClassType).getOrThrow()
+        if (let Some(parent) <- GetInstParentCustomTyOfCallee(GetCallee(), GetArgs(), Some(thisTypeDeref), builder)) {
+            if (let Some(ct) <- (parent as ClassType)) {
+                return ct
+            }
+        }
+        if (let Some(ct) <- (thisTypeDeref as ClassType)) {
+            return ct
+        }
+        throw IllegalStateException("instantiated source parent custom type of virtual method is not available name=${GetMethodName()}")
     }
 
     public func GetVirtualMethodAttr(): AttributeInfo {
