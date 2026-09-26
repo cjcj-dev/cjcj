@@ -6,7 +6,7 @@ import cjcj::sema.TypeManager
 import cjcj::sema.NativeFFI.{ArrayOperationKind, CreateJavaRefCall, CreateThisCall, GetArrayOperationKind,
     GetJavaMirrorWrappingConstructor, InteropLibBridge, IsGeneratedJavaMirrorConstructor, IsJArray, IsJavaRefGetter,
     IsSynthetic,
-    MemberJNISignature, Utils, WithinFile, WrapReturningLambdaCall}
+    Utils, WithinFile, WrapReturningLambdaCall}
 
 public class PopulateJavaMirrorStubs {
     private let typeManager: TypeManager
@@ -21,15 +21,7 @@ public class PopulateJavaMirrorStubs {
         this.factory = factory
     }
 
-    private func ParamExprs(paramList: FuncParamList, curFile: File): ArrayList<Expr> {
-        let args = ArrayList<Expr>()
-        for (param in paramList.params) {
-            args.add(WithinFile<RefExpr>(CreateRefExpr(param), curFile))
-        }
-        return args
-    }
-
-    private func PopulateUserConstructor(userCtor: FuncDecl, wrappingCtor: FuncDecl): Unit {
+    private func PopulateUserConstructor(ctx: AfterTypeCheckContext, userCtor: FuncDecl, wrappingCtor: FuncDecl): Unit {
         if (let Some(outer) <- userCtor.outerDecl) {
             if (IsJArray(outer)) {
                 return
@@ -52,14 +44,19 @@ public class PopulateJavaMirrorStubs {
         }
         let paramList = userCtor.funcBody.getOrThrow().paramLists[0]
         paramList.curFile = userCtor.curFile
-        let nodes = ilib.CreateNewJavaObjectLambdaNodes(file, userCtor, ParamExprs(paramList, file))
-        if (let None <- nodes) {
+        let constructorExpr = factory.CreateNewJavaObjectCall(ctx, file,
+            JavaMemberSignature.FromConstructor(utils, userCtor, false), factory.CreateParamsUsage(paramList))
+        if (let None <- constructorExpr) {
             userCtor.EnableAttr(Attribute.IS_BROKEN)
             return
         }
+        let nodes = ArrayList<Node>()
+        for (node in constructorExpr.getOrThrow().body) {
+            nodes.add(node)
+        }
         let thisCall = CreateThisCall(userCtor.outerDecl.getOrThrow(), wrappingCtor,
             wrappingCtor.GetTy().getOrThrow(), file)
-        thisCall.args.add(CreateFuncArg(WrapReturningLambdaCall(typeManager, nodes.getOrThrow())))
+        thisCall.args.add(CreateFuncArg(WrapReturningLambdaCall(typeManager, nodes)))
         userCtor.funcBody.getOrThrow().body.getOrThrow().body.add(thisCall)
     }
 
@@ -114,7 +111,7 @@ public class PopulateJavaMirrorStubs {
         userMethod.EnableAttr(Attribute.IS_BROKEN)
     }
 
-    private func PopulateUserMethod(mirror: ClassLikeDecl, userMethod: FuncDecl): Unit {
+    private func PopulateUserMethod(ctx: AfterTypeCheckContext, mirror: ClassLikeDecl, userMethod: FuncDecl): Unit {
         if (IsJArray(mirror)) {
             if (let Some(jarray) <- (mirror as ClassDecl)) {
                 PopulateJArrayMethod(jarray, userMethod)
@@ -141,46 +138,38 @@ public class PopulateJavaMirrorStubs {
             userMethod.funcBody.getOrThrow().SetTy(ty)
         }
         let body = userMethod.funcBody.getOrThrow().body.getOrThrow().body
-        let envCall = ilib.CreateGetJniEnvCall(Some(file))
-        if (let None <- envCall) {
+        if (let None <- retTy) {
             userMethod.EnableAttr(Attribute.IS_BROKEN)
             return
         }
-        let signature = MemberJNISignature(utils, userMethod)
+        let ty = retTy.getOrThrow()
+        let methodSignature = JavaMemberSignature.FromMethod(utils, userMethod)
         let paramList = userMethod.funcBody.getOrThrow().paramLists[0]
-        var methodCall: Option<CallExpr> = None
+        paramList.curFile = userMethod.curFile
+        var methodBlock: Option<Block> = None
         if (userMethod.TestAttr(Attribute.STATIC)) {
-            methodCall = ilib.CreateCFFICallStaticMethodCall(envCall.getOrThrow(), signature, paramList, file)
+            methodBlock = factory.CreateStaticJavaMethodCall(ctx, file, methodSignature, ty,
+                factory.CreateParamsUsage(paramList), mirror)
         } else {
             let javaRef = CreateJavaRefCall(mirror, Some(file))
             if (let Some(asObj) <- ilib.CreateAsJniJobjectCall(javaRef)) {
-                methodCall = ilib.CreateCFFICallMethodCall(envCall.getOrThrow(), asObj, signature, paramList, file)
+                methodBlock = factory.CreateVirtualJavaMethodCall(ctx, file, asObj, methodSignature, ty,
+                    factory.CreateParamsUsage(paramList), mirror)
             }
         }
-        if (let None <- methodCall) {
+        if (let None <- methodBlock) {
             userMethod.EnableAttr(Attribute.IS_BROKEN)
             return
         }
-        let call = methodCall.getOrThrow()
-        if (let Some(ty) <- retTy) {
-            if (!ty.IsUnit()) {
-                if (let Some(unwrapped) <- ilib.UnwrapJavaEntity(call, ty, mirror)) {
-                    body.add(CreateReturnExpr(unwrapped, userMethod.funcBody))
-                } else {
-                    body.add(CreateReturnExpr(call, userMethod.funcBody))
-                }
-            } else {
-                body.add(call)
-            }
-        } else {
-            body.add(call)
+        for (node in methodBlock.getOrThrow().body) {
+            body.add(node)
         }
         if (IsSynthetic(mirror)) {
             userMethod.DisableAttr(Attribute.ABSTRACT)
         }
     }
 
-    private func InsertPropGetter(mirror: ClassLikeDecl, property: PropDecl): Unit {
+    private func InsertPropGetter(ctx: AfterTypeCheckContext, mirror: ClassLikeDecl, property: PropDecl): Unit {
         if (property.getters.isEmpty()) {
             return
         }
@@ -200,21 +189,24 @@ public class PopulateJavaMirrorStubs {
             }
         }
         if (getterCall.isNone()) {
-            let signature = MemberJNISignature(utils, property)
-            let envCall = ilib.CreateGetJniEnvCall(curFile)
-            if (let Some(env) <- envCall) {
-                if (property.TestAttr(Attribute.STATIC)) {
-                    if (let Some(call) <- ilib.CreateGetStaticFieldCall(env, signature.classTypeSignature, signature.name,
-                        signature.signature)) {
-                        getterCall = Some((call as Expr).getOrThrow())
-                    }
-                } else {
-                    let obj = ilib.CreateAsJniJobjectCall(CreateJavaRefCall(mirror, curFile))
-                    if (let Some(asObj) <- obj) {
-                        if (let Some(call) <- ilib.CreateGetFieldCall(env, asObj, signature.classTypeSignature,
-                            signature.name, signature.signature)) {
-                            getterCall = Some((call as Expr).getOrThrow())
+            if (let Some(file) <- curFile) {
+                if (let Some(ty) <- property.GetTy()) {
+                    let fieldSignature = JavaMemberSignature.FromProperty(utils, property)
+                    var fieldBlock: Option<Block> = None
+                    if (property.TestAttr(Attribute.STATIC)) {
+                        fieldBlock = factory.CreateStaticJavaFieldGetCall(ctx, file, fieldSignature, ty, mirror)
+                    } else {
+                        if (let Some(asObj) <- ilib.CreateAsJniJobjectCall(CreateJavaRefCall(mirror, curFile))) {
+                            fieldBlock = factory.CreateInstanceJavaFieldGetCall(ctx, file, asObj, fieldSignature, ty,
+                                mirror)
                         }
+                    }
+                    if (let Some(block) <- fieldBlock) {
+                        let nodes = ArrayList<Node>()
+                        for (node in block.body) {
+                            nodes.add(node)
+                        }
+                        getterCall = Some(WrapReturningLambdaCall(typeManager, nodes))
                     }
                 }
             }
@@ -227,17 +219,11 @@ public class PopulateJavaMirrorStubs {
             }
             body.add(tmp)
             let ref = WithinFile<RefExpr>(CreateRefExpr(tmp), curFile)
-            if (let Some(ty) <- property.GetTy()) {
-                if (let Some(unwrapped) <- ilib.UnwrapJavaEntity(ref, ty, mirror)) {
-                    body.add(CreateReturnExpr(unwrapped, getter.funcBody))
-                    return
-                }
-            }
             body.add(CreateReturnExpr(ref, getter.funcBody))
         }
     }
 
-    private func InsertPropSetter(mirror: ClassLikeDecl, property: PropDecl): Unit {
+    private func InsertPropSetter(ctx: AfterTypeCheckContext, mirror: ClassLikeDecl, property: PropDecl): Unit {
         if (property.setters.isEmpty()) {
             return
         }
@@ -270,13 +256,13 @@ public class PopulateJavaMirrorStubs {
         let ty = valueTy.getOrThrow()
         param.SetTy(ty)
         paramRef.SetTy(ty)
-        let signature = MemberJNISignature(utils, property)
+        let signature = JavaMemberSignature.FromProperty(utils, property)
         var setterBlock: Option<Block> = None
         if (property.TestAttr(Attribute.STATIC)) {
-            setterBlock = factory.CreateStaticJavaFieldSetCall(file, signature, ty, paramRef)
+            setterBlock = factory.CreateStaticJavaFieldSetCall(ctx, file, signature, ty, paramRef)
         } else {
             if (let Some(asObj) <- ilib.CreateAsJniJobjectCall(CreateJavaRefCall(mirror, Some(file)))) {
-                setterBlock = factory.CreateInstanceJavaFieldSetCall(file, asObj, signature, ty, paramRef)
+                setterBlock = factory.CreateInstanceJavaFieldSetCall(ctx, file, asObj, signature, ty, paramRef)
             }
         }
         if (let Some(block) <- setterBlock) {
@@ -286,10 +272,10 @@ public class PopulateJavaMirrorStubs {
         }
     }
 
-    private func PopulateUserProperty(mirror: ClassLikeDecl, property: PropDecl): Unit {
-        InsertPropGetter(mirror, property)
+    private func PopulateUserProperty(ctx: AfterTypeCheckContext, mirror: ClassLikeDecl, property: PropDecl): Unit {
+        InsertPropGetter(ctx, mirror, property)
         if (property.isVar) {
-            InsertPropSetter(mirror, property)
+            InsertPropSetter(ctx, mirror, property)
         }
     }
 
@@ -316,7 +302,7 @@ public class PopulateJavaMirrorStubs {
                     }
                     if (fd.TestAttr(Attribute.CONSTRUCTOR)) {
                         if (let Some(wrapping) <- wrappingCtor) {
-                            PopulateUserConstructor(fd, wrapping)
+                            PopulateUserConstructor(ctx, fd, wrapping)
                         }
                     } else {
                         let isStatic = member.TestAttr(Attribute.STATIC)
@@ -324,10 +310,10 @@ public class PopulateJavaMirrorStubs {
                         if (mirror.IsInterfaceDecl() && !isStatic && !isDefault) {
                             continue
                         }
-                        PopulateUserMethod(mirror, fd)
+                        PopulateUserMethod(ctx, mirror, fd)
                     }
                 } else if (let Some(property) <- (member as PropDecl)) {
-                    PopulateUserProperty(mirror, property)
+                    PopulateUserProperty(ctx, mirror, property)
                 }
             }
         }

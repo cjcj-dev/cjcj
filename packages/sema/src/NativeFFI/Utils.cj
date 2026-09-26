@@ -237,6 +237,28 @@ public func CreateMemberCall(receiver: Expr, fd: FuncDecl, arg: FuncArg): CallEx
     return CreateMemberCall(receiver, fd, args: funcArgs)
 }
 
+// C++ src/Sema/NativeFFI/Utils.h:115-148. Function-pointer member, not a declared FuncDecl.
+public func CreateMemberCall(typeManager: TypeManager, receiver: Expr, vd: VarDecl,
+    args!: ArrayList<FuncArg> = ArrayList<FuncArg>()): CallExpr {
+    let _ = typeManager
+    CJC_NULLPTR_CHECK(receiver.GetTy())
+    let vdTy = vd.GetTy().getOrThrow()
+    CJC_ASSERT(vdTy.IsFunc() || vdTy.IsCFunc())
+    let funcTy = (vdTy as FuncTy).getOrThrow()
+    CJC_ASSERT(funcTy.paramTys.size == args.size)
+    let memberAccess = CreateMemberAccess(receiver, vd)
+    if (vdTy.IsCFunc()) {
+        memberAccess.EnableAttr(Attribute.UNSAFE)
+    }
+    CopyBasicInfo(receiver, memberAccess)
+    memberAccess.SetTy(funcTy)
+    let call = CreateCallExpr(memberAccess, args, None, Some(funcTy.retTy), CallKind.CALL_FUNCTION_PTR)
+    if (vdTy.IsCFunc()) {
+        call.EnableAttr(Attribute.UNSAFE)
+    }
+    return call
+}
+
 public func CreateBoolMatch(selector: Expr, trueBranch: Expr, falseBranch: Expr, ty: Ty): Expr {
     let boolTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN)
     let truePattern = ConstPattern()
@@ -610,6 +632,35 @@ public func AreParamTypeKindsValid(fd: FuncDecl, typeKinds: ArrayList<TypeKind>)
 private func GetGetPointerAddressIntrinsicDecl(importManager: SemaImportManager): FuncDecl {
     return importManager.GetCoreDecl<FuncDecl>("getPointerAddress").getOrThrow()
 }
+// C++ src/Sema/NativeFFI/Utils.cpp:140-173.
+private func UnwrapAliasTy(ty: Ty): Ty {
+    var current = ty
+    while (let Some(aliasTy) <- (current as TypeAliasTy)) {
+        let decl = aliasTy.declPtr.getOrThrow()
+        current = decl.typeNode.getOrThrow().GetTy().getOrThrow()
+    }
+    return current
+}
+
+public func CreateReadPointerCall(importManager: SemaImportManager, typeManager: TypeManager, pointer: Expr): Expr {
+    let ptrTy = UnwrapAliasTy(pointer.GetTy().getOrThrow())
+    CJC_ASSERT(ptrTy.IsPointer())
+    let fd = importManager.GetCoreDecl<FuncDecl>("readPointer").getOrThrow()
+    let ref = WithinFile<RefExpr>(CreateRefExpr(fd), pointer.curFile)
+    ref.instTys.add(ptrTy)
+    ref.SetTy(typeManager.GetInstantiatedTy(fd.GetTy().getOrThrow(), GenerateTypeMapping(fd, ref.instTys)))
+    let int64Ty = TypeManager.GetPrimitiveTy(TypeKind.TYPE_INT64)
+    let zero = WithinFile<LitConstExpr>(CreateLitConstExpr(LitConstKind.INTEGER, "0", int64Ty), pointer.curFile)
+    let elemTy = ptrTy.typeArgs[0]
+    let args = ArrayList<FuncArg>()
+    args.add(CreateFuncArg((ASTCloner.Clone(pointer) as Expr).getOrThrow()))
+    args.add(CreateFuncArg(zero))
+    let call = CreateCallExpr(ref, args, Some(fd), Some(elemTy), CallKind.CALL_INTRINSIC_FUNCTION)
+    call.EnableAttr(Attribute.UNSAFE)
+    call.SetTy(elemTy)
+    return call
+}
+
 public func CreateGetPointerAddressCall(importManager: SemaImportManager, typeManager: TypeManager, pointer: Expr): Expr {
     CJC_ASSERT(pointer.GetTy().getOrThrow().IsPointer())
     let fd = GetGetPointerAddressIntrinsicDecl(importManager)

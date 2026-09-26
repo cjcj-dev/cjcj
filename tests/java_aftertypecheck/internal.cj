@@ -2,8 +2,29 @@ package java.internal
 
 public let INTEROPLIB_VERSION: Int64 = 12
 
-public type JNIEnv_ptr = CPointer<Unit>
 public type jobject = CPointer<Unit>
+
+@C
+public struct JNINativeInterface_ {
+    public var NewObject: CFunc<(CPointer<CPointer<JNINativeInterface_>>, jobject, jobject) -> jobject> =
+        unsafe { CFunc<(CPointer<CPointer<JNINativeInterface_>>, jobject, jobject) -> jobject>(CPointer<Unit>()) }
+    public var NewObjectA: CFunc<(CPointer<CPointer<JNINativeInterface_>>, jobject, jobject, CPointer<UInt64>) -> jobject> =
+        unsafe { CFunc<(CPointer<CPointer<JNINativeInterface_>>, jobject, jobject, CPointer<UInt64>) -> jobject>(CPointer<Unit>()) }
+    public var GetBooleanField: CFunc<(CPointer<CPointer<JNINativeInterface_>>, jobject, jobject) -> UInt8> =
+        unsafe { CFunc<(CPointer<CPointer<JNINativeInterface_>>, jobject, jobject) -> UInt8>(CPointer<Unit>()) }
+    public var GetIntField: CFunc<(CPointer<CPointer<JNINativeInterface_>>, jobject, jobject) -> Int32> =
+        unsafe { CFunc<(CPointer<CPointer<JNINativeInterface_>>, jobject, jobject) -> Int32>(CPointer<Unit>()) }
+    public var GetObjectField: CFunc<(CPointer<CPointer<JNINativeInterface_>>, jobject, jobject) -> jobject> =
+        unsafe { CFunc<(CPointer<CPointer<JNINativeInterface_>>, jobject, jobject) -> jobject>(CPointer<Unit>()) }
+    public var SetBooleanField: CFunc<(CPointer<CPointer<JNINativeInterface_>>, jobject, jobject, UInt8) -> Unit> =
+        unsafe { CFunc<(CPointer<CPointer<JNINativeInterface_>>, jobject, jobject, UInt8) -> Unit>(CPointer<Unit>()) }
+    public var SetIntField: CFunc<(CPointer<CPointer<JNINativeInterface_>>, jobject, jobject, Int32) -> Unit> =
+        unsafe { CFunc<(CPointer<CPointer<JNINativeInterface_>>, jobject, jobject, Int32) -> Unit>(CPointer<Unit>()) }
+    public var SetObjectField: CFunc<(CPointer<CPointer<JNINativeInterface_>>, jobject, jobject, jobject) -> Unit> =
+        unsafe { CFunc<(CPointer<CPointer<JNINativeInterface_>>, jobject, jobject, jobject) -> Unit>(CPointer<Unit>()) }
+}
+
+public type JNIEnv_ptr = CPointer<CPointer<JNINativeInterface_>>
 
 public struct Java_CFFI_JavaEntity {
     public init() {}
@@ -36,6 +57,26 @@ public enum Java_CFFI_JavaEntityKind {
 }
 
 public func Java_CFFI_get_env(): JNIEnv_ptr {
+    CPointer<CPointer<JNINativeInterface_>>()
+}
+
+public func Java_CFFI_getClass(env: JNIEnv_ptr, name: String): jobject {
+    CPointer<Unit>()
+}
+
+public func Java_CFFI_getMethodID(env: JNIEnv_ptr, clazz: jobject, name: String, signature: String): jobject {
+    CPointer<Unit>()
+}
+
+public func Java_CFFI_getStaticMethodID(env: JNIEnv_ptr, clazz: jobject, name: String, signature: String): jobject {
+    CPointer<Unit>()
+}
+
+public func Java_CFFI_getInstanceFieldId(env: JNIEnv_ptr, clazz: jobject, name: String, signature: String): jobject {
+    CPointer<Unit>()
+}
+
+public func Java_CFFI_getStaticFieldId(env: JNIEnv_ptr, clazz: jobject, name: String, signature: String): jobject {
     CPointer<Unit>()
 }
 

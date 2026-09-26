@@ -22,6 +22,7 @@ public class JavaDesugarManager {
     private var utilsStore: Option<Utils> = None
     private var ilibStore: Option<InteropLibBridge> = None
     private var jniStore: Option<JniBridge> = None
+    private var factoryStore: Option<ASTFactory> = None
 
     public init(importManager: SemaImportManager, typeManager: TypeManager, diag: DiagnosticEngine,
         mangler: BaseMangler, javagenOutputPath: MaybeString, outputPath: String,
@@ -44,6 +45,15 @@ public class JavaDesugarManager {
         ilib.CheckInteropLibVersion()
         utilsStore = Some(utils)
         ilibStore = Some(ilib)
+        let _ = BridgeJni()
+        let jclassCache = JClassCache(importManager, typeManager, ilib)
+        let jmethodIdCache = JMethodIdCache(importManager, typeManager, ilib)
+        let jfieldIdCache = JFieldIdCache(importManager, typeManager, ilib)
+        factoryStore = Some(ASTFactory(typeManager, ilib, BridgeJni(), jclassCache, jmethodIdCache, jfieldIdCache))
+    }
+
+    private func Factory(): ASTFactory {
+        return factoryStore.getOrThrow()
     }
 
     private func BridgeUtils(): Utils {
@@ -67,7 +77,11 @@ public class JavaDesugarManager {
         if (let Some(decl) <- ilib.GetJobjectDecl()) {
             jobjectDecl = Some(decl)
         }
-        let jni = JniBridge(typeManager, importManager, mangler, BridgeUtils(), envDecl, jobjectDecl)
+        var interfaceDecl: Option<StructDecl> = None
+        if (let Some(decl) <- ilib.GetJNINativeInterfaceDecl()) {
+            interfaceDecl = Some(decl)
+        }
+        let jni = JniBridge(typeManager, importManager, mangler, BridgeUtils(), envDecl, jobjectDecl, interfaceDecl)
         jniStore = Some(jni)
         return jni
     }
@@ -363,17 +377,17 @@ public class JavaDesugarManager {
         ctx.FlushGeneratedDecls()
         DesugarJavaImplSuperConstructorCall(typeManager, BridgeLib(), BridgeJni(), diag, BridgeUtils()).Process(ctx)
         ctx.FlushGeneratedDecls()
-        GenerateInJavaImplReferenceWrapper(typeManager, importManager, BridgeLib(), ASTFactory(BridgeLib()),
+        GenerateInJavaImplReferenceWrapper(typeManager, importManager, BridgeLib(), Factory(),
             BridgeUtils()).Process(ctx)
         ctx.FlushGeneratedDecls()
-        DesugarJavaImplSuperMethodCall(BridgeLib(), ASTFactory(BridgeLib()), BridgeUtils()).Process(ctx)
+        DesugarJavaImplSuperMethodCall(BridgeLib(), Factory(), BridgeUtils()).Process(ctx)
         ctx.FlushGeneratedDecls()
         RewriteJavaImplReferenceWrapperFields(typeManager, BridgeUtils(), desugarPropRef).Process(ctx)
         ctx.FlushGeneratedDecls()
         GenerateNativeBridgeForJavaImpl(typeManager, importManager, BridgeLib(), BridgeJni()).Process(ctx)
         ctx.FlushGeneratedDecls()
         let ilib = BridgeLib()
-        PopulateJavaMirrorStubs(typeManager, ilib, BridgeUtils(), ASTFactory(ilib)).Process(ctx)
+        PopulateJavaMirrorStubs(typeManager, ilib, BridgeUtils(), Factory()).Process(ctx)
         ctx.FlushGeneratedDecls()
         GenerateJavaSourceCode(ctx)
     }

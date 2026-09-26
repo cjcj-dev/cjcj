@@ -71,6 +71,12 @@ private let INTEROPLIB_CFFI_JAVA_METHODID_CONSTR_ID: String = "Java_CFFI_MethodI
 private let INTEROPLIB_CFFI_JAVA_METHODID_CONSTR_STATIC_ID: String = "Java_CFFI_MethodIDConstrStatic"
 private let INTEROPLIB_CFFI_JAVA_FIELDID_CONSTR_ID: String = "Java_CFFI_FieldIDConstr"
 private let INTEROPLIB_CFFI_JAVA_FIELDID_CONSTR_STATIC_ID: String = "Java_CFFI_FieldIDConstrStatic"
+private let INTEROPLIB_JNI_JNINativeInterface_ID: String = "JNINativeInterface_"
+private let INTEROPLIB_CFFI_JAVA_CFFI_GET_CLASS: String = "Java_CFFI_getClass"
+private let INTEROPLIB_CFFI_GET_METHOD_ID: String = "Java_CFFI_getMethodID"
+private let INTEROPLIB_CFFI_GET_STATIC_METHOD_ID: String = "Java_CFFI_getStaticMethodID"
+private let INTEROPLIB_CFFI_GET_INSTANCE_FIELD_ID: String = "Java_CFFI_getInstanceFieldId"
+private let INTEROPLIB_CFFI_GET_STATIC_FIELD_ID: String = "Java_CFFI_getStaticFieldId"
 private let INTEROPLIB_JAVA_OBJECT_CONTROLLER: String = "JavaObjectController"
 private let DELETE_LOCAL_REF: String = "deleteLocalRef"
 private let DETACH_CJ_OBJECT: String = "detachCJObject"
@@ -260,6 +266,46 @@ public class InteropLibBridge {
 
     public func GetJniEnvPtrDecl(): Option<TypeAliasDecl> {
         return GetInteropLibDecl<TypeAliasDecl>(INTEROPLIB_JNI_ENV_PTR_ID)
+    }
+
+    public func GetJNINativeInterfaceDecl(): Option<StructDecl> {
+        return GetInteropLibDecl<StructDecl>(INTEROPLIB_JNI_JNINativeInterface_ID)
+    }
+
+    public func GetGetClassDecl(): Option<FuncDecl> {
+        return GetInteropLibDecl<FuncDecl>(INTEROPLIB_CFFI_JAVA_CFFI_GET_CLASS)
+    }
+
+    public func GetGetMethodIdDecl(): Option<FuncDecl> {
+        return GetInteropLibDecl<FuncDecl>(INTEROPLIB_CFFI_GET_METHOD_ID)
+    }
+
+    public func GetGetStaticMethodIdDecl(): Option<FuncDecl> {
+        return GetInteropLibDecl<FuncDecl>(INTEROPLIB_CFFI_GET_STATIC_METHOD_ID)
+    }
+
+    public func GetGetInstanceFieldIdDecl(): Option<FuncDecl> {
+        return GetInteropLibDecl<FuncDecl>(INTEROPLIB_CFFI_GET_INSTANCE_FIELD_ID)
+    }
+
+    public func GetGetStaticFieldIdDecl(): Option<FuncDecl> {
+        return GetInteropLibDecl<FuncDecl>(INTEROPLIB_CFFI_GET_STATIC_FIELD_ID)
+    }
+
+    public func GetJniJClassTy(): Ty {
+        return typeManager.GetPointerTy(TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT))
+    }
+
+    public func GetJniJmethodIdTy(): Ty {
+        return typeManager.GetPointerTy(TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT))
+    }
+
+    public func GetJniJfieldIdTy(): Ty {
+        return typeManager.GetPointerTy(TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT))
+    }
+
+    public func GetJValueTy(): Ty {
+        return TypeManager.GetPrimitiveTy(TypeKind.TYPE_UINT64)
     }
 
     public func GetJavaEntityKindDecl(): Option<EnumDecl> {
@@ -1247,6 +1293,97 @@ public class InteropLibBridge {
             return Some((call as Expr).getOrThrow())
         }
         return None
+    }
+
+    public func CreateGetClassCall(className: String, envPtr: Expr, curFile: File): Option<Expr> {
+        let getClassDecl = GetGetClassDecl()
+        if (let None <- getClassDecl) {
+            return None
+        }
+        let fd = getClassDecl.getOrThrow()
+        CJC_ASSERT_WITH_MSG(!fd.funcBody.getOrThrow().paramLists.isEmpty(), "paramLists cannot be empty")
+        CJC_ASSERT_WITH_MSG(fd.funcBody.getOrThrow().paramLists[0].params.size == 2, "expected 2 parameters")
+        let strTy = utils.GetStringDecl().GetTy().getOrThrow()
+        let classNameExpr = CreateLitConstExpr(LitConstKind.STRING, className, strTy)
+        classNameExpr.curFile = Some(curFile)
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg((ASTCloner.Clone(envPtr) as Expr).getOrThrow()))
+        args.add(CreateFuncArg(classNameExpr))
+        if (let Some(call) <- CreateCall(Some(fd), Some(curFile), args: args)) {
+            return Some(call)
+        }
+        return None
+    }
+
+    public func CreateGetMethodIdCall(env: Expr, clazz: Expr, name: String, signature: String,
+        isStatic: Bool): Option<CallExpr> {
+        let fd = if (isStatic) {
+            GetGetStaticMethodIdDecl()
+        } else {
+            GetGetMethodIdDecl()
+        }
+        if (let None <- fd) {
+            return None
+        }
+        let strTy = utils.GetStringDecl().GetTy().getOrThrow()
+        let methodName = CreateLitConstExpr(LitConstKind.STRING, name, strTy)
+        let signatureStr = CreateLitConstExpr(LitConstKind.STRING, signature, strTy)
+        methodName.curFile = env.curFile
+        signatureStr.curFile = env.curFile
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg((ASTCloner.Clone(env) as Expr).getOrThrow()))
+        args.add(CreateFuncArg(clazz))
+        args.add(CreateFuncArg(methodName))
+        args.add(CreateFuncArg(signatureStr))
+        return CreateCall(fd, env.curFile, args: args)
+    }
+
+    public func CreateGetFieldIdCall(env: Expr, clazz: Expr, name: String, signature: String,
+        isStatic: Bool): Option<CallExpr> {
+        let fd = if (isStatic) {
+            GetGetStaticFieldIdDecl()
+        } else {
+            GetGetInstanceFieldIdDecl()
+        }
+        if (let None <- fd) {
+            return None
+        }
+        let strTy = utils.GetStringDecl().GetTy().getOrThrow()
+        let fieldNameLit = CreateLitConstExpr(LitConstKind.STRING, name, strTy)
+        let fieldSignatureLit = CreateLitConstExpr(LitConstKind.STRING, signature, strTy)
+        fieldNameLit.curFile = env.curFile
+        fieldSignatureLit.curFile = env.curFile
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg((ASTCloner.Clone(env) as Expr).getOrThrow()))
+        args.add(CreateFuncArg(clazz))
+        args.add(CreateFuncArg(fieldNameLit))
+        args.add(CreateFuncArg(fieldSignatureLit))
+        return CreateCall(fd, env.curFile, args: args)
+    }
+
+    public func ConvertJavaResultToCJ(result: Expr, resultTy: Ty, scope: Option<Decl>): Option<Expr> {
+        if (!resultTy.IsPrimitive()) {
+            if (let Some(outer) <- scope) {
+                return UnwrapJavaEntity(result, resultTy, outer)
+            }
+            if (let Some(classLike) <- (resultTy as ClassLikeTy)) {
+                if (let Some(decl) <- classLike.commonDecl) {
+                    return UnwrapJavaEntity(result, resultTy, decl)
+                }
+            }
+            return Some(result)
+        }
+        if (resultTy.kind == TypeKind.TYPE_BOOLEAN) {
+            let resultTyNow = result.GetTy()
+            let zeroTy = if (let Some(ty) <- resultTyNow) { ty } else { resultTy }
+            let zero = CreateLitConstExpr(LitConstKind.INTEGER, "0", zeroTy)
+            zero.curFile = result.curFile
+            let cmp = CreateBinaryExpr(result, zero, TokenKind.NOTEQ)
+            cmp.SetTy(TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN))
+            cmp.curFile = result.curFile
+            return Some(cmp)
+        }
+        return Some(result)
     }
 
     public func CreateJNIHandlePendingExceptionCall(env: Expr): Option<CallExpr> {

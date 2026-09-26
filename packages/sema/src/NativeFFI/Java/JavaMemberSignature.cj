@@ -13,13 +13,25 @@ public class JavaMemberSignature {
     public let signature: String
     public let isStatic: Bool
     public let isMethod: Bool
+    public let isField: Bool
 
-    public init(classTypeJniName: String, name: String, signature: String, isStatic: Bool, isMethod!: Bool = true) {
+    public init(classTypeJniName: String, name: String, signature: String, isStatic: Bool, isMethod!: Bool = true,
+        isField!: Bool = false) {
         this.classTypeJniName = classTypeJniName
         this.name = name
         this.signature = signature
         this.isStatic = isStatic
         this.isMethod = isMethod
+        this.isField = isField
+    }
+
+    public func UnqualifiedTypeName(): String {
+        return UnqualifiedJniTypeName(classTypeJniName)
+    }
+
+    public func CacheKey(): String {
+        return classTypeJniName + "$$" + name + "$$" + signature + "$$" + isStatic.toString() + "$$" +
+            isMethod.toString() + "$$" + isField.toString()
     }
 
     public static func FromMethod(utils: Utils, method: FuncDecl): JavaMemberSignature {
@@ -50,4 +62,28 @@ public class JavaMemberSignature {
         signature = signature + ")V"
         return JavaMemberSignature(className, "<init>", signature, false, isMethod: false)
     }
+
+    public static func FromProperty(utils: Utils, propDecl: PropDecl): JavaMemberSignature {
+        CJC_ASSERT(propDecl.outerDecl.isSome())
+        let outerDecl = (propDecl.outerDecl.getOrThrow() as ClassLikeDecl).getOrThrow()
+        CJC_ASSERT(IsMirror(outerDecl) || IsImpl(outerDecl))
+        let className = GetJavaJniClassName(utils, outerDecl.GetTy().getOrThrow())
+        let signature = utils.GetJavaTypeSignature(propDecl.GetTy().getOrThrow(), fullPackageName: propDecl.fullPackageName)
+        return JavaMemberSignature(className, GetJavaMemberName(propDecl), signature, propDecl.TestAttr(Attribute.STATIC),
+            isMethod: false, isField: true)
+    }
+}
+
+public func UnqualifiedJniTypeName(classTypeJniName: String): String {
+    var text = classTypeJniName
+    if (text.endsWith(";")) {
+        text = text[0..text.size - 1]
+    }
+    if (text.startsWith("L") && text.contains("/")) {
+        text = text[1..]
+    }
+    if (let Some(slash) <- text.lastIndexOf("/")) {
+        text = text[slash + 1..]
+    }
+    return text
 }
