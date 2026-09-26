@@ -97,16 +97,7 @@ def main():
         observed = compile_one(name, True)
         text = Path(observed["log"]).read_text()
         observed["log_tail"] = text[-2000:]
-        if name == "lang":
-            ast = ast_text(a.out / name)
-            if not ast:
-                # Stub compiles omit --dump-ast. Recompile lang with a dump.
-                dumped = compile_one("lang_dump", False)
-                # lang_dump uses lang_dump.cj which does not exist. Dump via a second command below.
-                observed["dump_note"] = "separate"
-            result["cases"][name] = observed
-        else:
-            result["cases"][name] = observed
+        result["cases"][name] = observed
         if observed["rc"]:
             result["uptime_after"] = subprocess.check_output(["uptime"], text=True).strip()
             (a.out / "result.json").write_text(json.dumps(result, indent=2) + "\n")
