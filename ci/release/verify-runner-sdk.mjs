@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import {spawnSync} from 'node:child_process';
+import {spawn} from 'node:child_process';
 import {RELEASE_REQUIREMENTS} from '../../build/lib/targets.mjs';
 
 const [requirement, destination] = process.argv.slice(2);
@@ -28,13 +28,20 @@ const arms = {
   restored: original,
 };
 const results = [];
-for (const [arm, source] of Object.entries(arms)) {
+await Promise.all(Object.entries(arms).map(async ([arm, source], index) => {
   const tree = path.join(evidence, arm);
   fs.mkdirSync(path.join(tree, 'ci/release'), {recursive: true});
   fs.cpSync(path.join(root, 'build/lib'), path.join(tree, 'build/lib'), {recursive: true});
   const script = path.join(tree, 'ci/release/platform-matrix.mjs');
   fs.writeFileSync(script, source);
-  const run = spawnSync(process.execPath, [script, 'probe', '--requirement', requirement], {encoding: 'utf8', env: process.env});
+  const run = await new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [script, 'probe', '--requirement', requirement], {env: process.env});
+    let stdout = '', stderr = '';
+    child.stdout.setEncoding('utf8').on('data', chunk => { stdout += chunk; });
+    child.stderr.setEncoding('utf8').on('data', chunk => { stderr += chunk; });
+    child.on('error', reject);
+    child.on('close', status => resolve({status, stdout, stderr}));
+  });
   fs.writeFileSync(path.join(tree, 'output.log'), `${run.stdout ?? ''}${run.stderr ?? ''}`);
   const expected = arm.startsWith('cut-') ? 1 : 0;
   const record = {arm, requirement, sha256: createHash('sha256').update(source).digest('hex'), rc: run.status, expected};
@@ -48,14 +55,17 @@ for (const [arm, source] of Object.entries(arms)) {
     record.targetAssertionRc = 1;
     record.targetAssertionFailure = error.message;
   }
-  results.push(record);
-  fs.writeFileSync(path.join(evidence, 'results.json'), `${JSON.stringify(results, null, 2)}\n`);
+  results[index] = record;
   // Emit the actual product result before asserting, so an earlier setup error
   // cannot be mistaken for reaching this capability assertion.
   console.log(JSON.stringify({...record, stdout: run.stdout, stderr: run.stderr}));
-  assert.equal(run.status, expected, `${arm}: target capability exit status`);
-  assert.equal(record.targetAssertionRc, expected, `${arm}: unchanged target assertion verdict`);
-  assert.match(run.stdout, new RegExp(`^${arm === 'cut-producer' ? 'MISSING' : 'PRESENT'} ${requirement}:`), `${arm}: target capability result`);
+  record.stdout = run.stdout;
+}));
+fs.writeFileSync(path.join(evidence, 'results.json'), `${JSON.stringify(results, null, 2)}\n`);
+for (const {arm, rc, expected, targetAssertionRc, stdout} of results) {
+  assert.equal(rc, expected, `${arm}: target capability exit status`);
+  assert.equal(targetAssertionRc, expected, `${arm}: unchanged target assertion verdict`);
+  assert.match(stdout, new RegExp(`^${arm === 'cut-producer' ? 'MISSING' : 'PRESENT'} ${requirement}:`), `${arm}: target capability result`);
 }
 assert.equal(results[0].sha256, results[3].sha256);
 for (const cut of results.slice(1, 3)) assert.notEqual(cut.sha256, results[0].sha256);
