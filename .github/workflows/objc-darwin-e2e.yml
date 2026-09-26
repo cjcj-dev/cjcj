@@ -78,3 +78,11 @@ jobs:
 
       - name: Compile and run ObjC fixture
         run: node ci/objc_darwin/run_e2e.mjs
+
+      - name: Report sccache
+        if: always()
+        uses: ./.github/actions/sccache-report
+        with:
+          component: runtime
+          platform: macos-15
+          require-compiles: ${{ job.status == 'success' }}
