@@ -195,3 +195,33 @@ test('every requirement has an installer export to cut, drawn from the probe can
       || name === 'DEVELOPER_DIR', `${name}: not a probe candidate`);
   }
 });
+
+test('the SDK identity record hashes file content, never a path', () => {
+  const harness = fs.readFileSync(path.resolve(import.meta.dirname, 'verify-runner-sdk.mjs'), 'utf8');
+  // Every digest in the harness is fed either a call (contentSha/textSha read
+  // their argument) or one of the text variables below. A path variable is not
+  // on the list: hashing one would hash the name of a file, not the file.
+  const textVariables = ['text', 'source'];
+  const digestArguments = [...harness.matchAll(/createHash\('sha256'\)\.update\(([^;]*?)\)\.digest/g)]
+    .map(([, argument]) => argument.trim());
+  assert.ok(digestArguments.length > 0, 'no digest found; the guard would be vacuous');
+  for (const argument of digestArguments) {
+    const source = argument.includes('(') ? 'call' : `variable ${argument}`;
+    assert.ok(argument.includes('(') || textVariables.includes(argument),
+      `digest reads a ${source}, not file content`);
+  }
+  const contentHashes = [...harness.matchAll(/contentSha\(([^)]*)\)/g)].map(([, argument]) => argument.trim());
+  assert.ok(contentHashes.length >= 4, `expected the three arms plus the check, found ${contentHashes.length}`);
+  assert.ok(harness.includes('const contentSha = (file) => createHash(\'sha256\').update(fs.readFileSync(file))'),
+    'contentSha must read the file it names');
+  // The three arms are recorded with their paths beside them, and the real entry
+  // refuses a record whose identity equals its own path string.
+  for (const field of ['candidate', 'cut', 'restored']) {
+    assert.ok(new RegExp(`${field}: \\{path: \\w+, sha256: \\w+InstallerSha256, pathStringSha256: textSha\\(\\w+\\)\\}`, 'm')
+      .test(harness), `${field}: no {path, sha256, pathStringSha256} identity record`);
+  }
+  assert.ok(harness.includes('the identity is not the path string'),
+    'the entry does not judge a record against its own path string');
+  assert.ok(harness.includes("'restored-export: the export is back'"),
+    'the export face has no restored arm');
+});
