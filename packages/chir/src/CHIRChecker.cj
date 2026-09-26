@@ -920,56 +920,25 @@ public class CHIRChecker {
     }
 
     private func CheckExpression(expr: Expression, topLevelFunc: Function): Unit {
+        let actionMap = HashMap<ExprMajorKind, () -> Unit>([
+            (ExprMajorKind.TERMINATOR, { => CheckTerminator(expr, topLevelFunc) }),
+            (ExprMajorKind.UNARY_EXPR, { =>
+                CheckUnaryExpression((expr as UnaryExpression).getOrThrow(), topLevelFunc) }),
+            (ExprMajorKind.BINARY_EXPR, { =>
+                CheckBinaryExpression((expr as BinaryExpression).getOrThrow(), topLevelFunc) }),
+            (ExprMajorKind.MEMORY_EXPR, { => CheckMemoryExpression(expr, topLevelFunc) }),
+            (ExprMajorKind.STRUCTURED_CTRL_FLOW_EXPR, { => CheckControlFlowExpression(expr, topLevelFunc) }),
+            (ExprMajorKind.OTHERS, { => CheckOtherExpression(expr, topLevelFunc) })
+        ])
         if (expr.GetParentBlock().isNone()) {
-            Errorln("in function ${topLevelFunc.GetIdentifier()}, expression ${expr.ToString(0)} " +
-                "doesn't have parent block.")
+            ErrorInFunc(topLevelFunc, "expression " + expr.ToString(0) + " doesn't have parent block.")
             return
         }
         if (!expr.IsTerminator() && !CheckHaveResult(expr, topLevelFunc)) {
             return
         }
-        if (let Some(resultValue) <- expr.GetResult()) {
-            if (let Some(ownerExpr) <- resultValue.GetExpr()) {
-                if ((ownerExpr as Value).getOrThrow() != (expr as Value).getOrThrow()) {
-                    Errorln("in function ${topLevelFunc.GetIdentifier()}, result " +
-                        "${resultValue.GetIdentifier()} is owned by a different expression.")
-                }
-            } else {
-                Errorln("in function ${topLevelFunc.GetIdentifier()}, result ${resultValue.GetIdentifier()} " +
-                    "doesn't point back to its expression.")
-            }
-        }
-        for (operand in expr.GetNonSuccessorOperands()) {
-            var hasUser = false
-            for (user in operand.GetUsersRef()) {
-                if (refEq(user, expr)) {
-                    hasUser = true
-                    break
-                }
-            }
-            if (!hasUser) {
-                Errorln("in function ${topLevelFunc.GetIdentifier()}, operand ${operand.GetIdentifier()} " +
-                    "is missing user ${expr.GetExprKindName()}.")
-            }
-        }
-        for (blockGroup in expr.GetBlockGroups()) {
-            if (let Some(ownerExpr) <- blockGroup.GetOwnerExpression()) {
-                if ((ownerExpr as Value).getOrThrow() != (expr as Value).getOrThrow()) {
-                    Errorln("in function ${topLevelFunc.GetIdentifier()}, block group " +
-                        "${blockGroup.GetIdentifier()} is owned by a different expression.")
-                }
-            } else {
-                Errorln("in function ${topLevelFunc.GetIdentifier()}, block group " +
-                    "${blockGroup.GetIdentifier()} doesn't point back to owner expression.")
-            }
-        }
-        match (expr.GetExprMajorKind()) {
-            case ExprMajorKind.TERMINATOR => CheckTerminator(expr, topLevelFunc)
-            case ExprMajorKind.UNARY_EXPR => CheckUnaryExpression(expr, topLevelFunc)
-            case ExprMajorKind.BINARY_EXPR => CheckBinaryExpression(expr, topLevelFunc)
-            case ExprMajorKind.MEMORY_EXPR => CheckMemoryExpression(expr, topLevelFunc)
-            case ExprMajorKind.STRUCTURED_CTRL_FLOW_EXPR => CheckControlFlowExpression(expr, topLevelFunc)
-            case ExprMajorKind.OTHERS => CheckOtherExpression(expr, topLevelFunc)
+        if (let Some(action) <- actionMap.get(expr.GetExprMajorKind())) {
+            action()
         }
     }
 
@@ -1080,18 +1049,18 @@ public class CHIRChecker {
         }
     }
 
-    private func CheckUnaryExpression(expr: Expression, topLevelFunc: Function): Unit {
+    private func CheckUnaryExpression(expr: UnaryExpression, topLevelFunc: Function): Unit {
         if (!OperandNumIsEqual(1, expr, topLevelFunc)) {
             return
         }
-        CheckUnaryExprBase(UnaryExprBase((expr as UnaryExpression).getOrThrow()), topLevelFunc)
+        CheckUnaryExprBase(UnaryExprBase(expr), topLevelFunc)
     }
 
-    private func CheckBinaryExpression(expr: Expression, topLevelFunc: Function): Unit {
+    private func CheckBinaryExpression(expr: BinaryExpression, topLevelFunc: Function): Unit {
         if (!OperandNumIsEqual(2, expr, topLevelFunc)) {
             return
         }
-        CheckBinaryExprBase(BinaryExprBase((expr as BinaryExpression).getOrThrow()), topLevelFunc)
+        CheckBinaryExprBase(BinaryExprBase(expr), topLevelFunc)
     }
 
     private func CheckTryUnaryExpression(expr: TryUnaryExpression, topLevelFunc: Function): Unit {
