@@ -4,3 +4,6 @@
 libcangjie-runtime.so 7d1eeecff4d2a8ed012897785d309a221ddb7520e1b268b431812a0645b56cdc
 libboundscheck.so 3ad04fe38be88d5123078bd11d78cbc82377c114f6e6514b393ecd374e559bb7
 libLLVM-15.so 30e8ba8c8a30b8b8ea36b4d7ada4cce7b7e12e1a07a66439556b1bd6cb2b3981
+# HOST_LLVM_PROVENANCE {"source_sha":"418ace1896e22a51a6c1fa36ec29631b00301cd8","run_id":"36257397072","run_attempt":"1","producer_sha":"9b2e0125bf526747a7954562240c3f1c5425f95f","platform":"linux_aarch64","sha256":"25d8a03bb7e81fb09722cefb4b40a73634864d892f2e36bf1a989499d190a321","repository":"cjcj-dev/cjcj","artifact_id":"10910534726"}
+# HOST_LLVM_PROVENANCE {"source_sha":"418ace1896e22a51a6c1fa36ec29631b00301cd8","run_id":"36257397072","run_attempt":"1","producer_sha":"9b2e0125bf526747a7954562240c3f1c5425f95f","platform":"darwin_aarch64","sha256":"0429b5e9c149ce1b233621adea6381c6b2defd0e23a21081a382ea1fdada95e3","repository":"cjcj-dev/cjcj","artifact_id":"10911891505"}
+# HOST_LLVM_PROVENANCE {"source_sha":"418ace1896e22a51a6c1fa36ec29631b00301cd8","run_id":"36257397072","run_attempt":"1","producer_sha":"9b2e0125bf526747a7954562240c3f1c5425f95f","platform":"darwin_x86_64","sha256":"233db2583adafc33a632d28511e19c250efdfd76fc9ee0d590fda79abaf85cad","repository":"cjcj-dev/cjcj","artifact_id":"10911914734"}

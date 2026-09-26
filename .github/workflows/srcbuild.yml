@@ -282,7 +282,6 @@ jobs:
           path: ${{ env.CJCJ_FIXED_LLVM_DIR }}
 
       - name: Load immutable bootstrap host LLVM provenance
-        if: matrix.target == 'linux-x64'
         shell: bash
         run: |
           set -euo pipefail
@@ -290,7 +289,6 @@ jobs:
           echo "CJCJ_BOOTSTRAP_HOST_LLVM_ARTIFACT=$RUNNER_TEMP/bootstrap-host-llvm" >> "$GITHUB_ENV"
 
       - name: Download pinned bootstrap host LLVM
-        if: matrix.target == 'linux-x64'
         uses: actions/download-artifact@v8
         with:
           artifact-ids: ${{ env.HOST_LLVM_ARTIFACT_ID }}
@@ -436,6 +434,44 @@ jobs:
           fi
           grep -F 'HOST_LLVM_SHA256_MISMATCH expected=' "$RUNNER_TEMP/host-pin-cut.log"
           echo 'ASSERT real-artifact host pin one-digit rejection executed'
+
+      - name: Reject a one-digit native host provenance change with the real artifact
+        # linux-x64 is covered above by the libLLVM-15.so digest line; its legacy
+        # provenance record carries no digest of its own.
+        if: matrix.target != 'linux-x64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          platforms = {'linux-x64': 'linux_x86_64', 'linux-aarch64': 'linux_aarch64',
+                       'darwin-arm64': 'darwin_aarch64', 'darwin-x64': 'darwin_x86_64'}
+          target = os.environ['CJCJ_SRCBUILD_TARGET']
+          prefix = '# HOST_LLVM_PROVENANCE '
+          changed = count = 0
+          lines = []
+          for line in Path('ci/bootstrap/stage1_host_identities.txt').read_text().splitlines(True):
+              if line.startswith(prefix):
+                  pin = json.loads(line[len(prefix):])
+                  if pin['platform'] == platforms[target]:
+                      pin['sha256'] = ('1' if pin['sha256'][0] == '0' else '0') + pin['sha256'][1:]
+                      line = prefix + json.dumps(pin) + '\n'
+                      count += 1
+              lines.append(line)
+          assert count == 1, (target, count)
+          Path(os.environ['RUNNER_TEMP'], 'host-provenance-cut.txt').write_text(''.join(lines))
+          PY
+          sha256sum ci/bootstrap/stage1_host_identities.txt "$RUNNER_TEMP/host-provenance-cut.txt"
+          if STAGE1_HOST_IDENTITIES="$RUNNER_TEMP/host-provenance-cut.txt" \
+              node ci/release/prepare_bootstrap_inputs.mjs > "$RUNNER_TEMP/host-provenance-cut.log" 2>&1; then
+            echo 'host provenance change unexpectedly accepted' >&2
+            exit 1
+          else
+            echo "HOST_PROVENANCE_CUT_RC=$?"
+          fi
+          grep -F 'HOST_LLVM_SHA256_MISMATCH expected=' "$RUNNER_TEMP/host-provenance-cut.log"
+          echo "ASSERT real-artifact $CJCJ_SRCBUILD_TARGET provenance one-digit rejection executed"
 
       - name: Record host repair and nightly control symbols
         if: matrix.target == 'linux-x64'
