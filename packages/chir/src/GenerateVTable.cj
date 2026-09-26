@@ -72,8 +72,8 @@ private func TypeCastIfNeeded(value: Value, expectedTy: Type, builder: CHIRBuild
             builder.CreateClassStaticCast(expectedTy, tmpValue, parentBlock)
         }
         ret.SetDebugLocation(loc)
-        let _ = needCheck
         newExprs.add(ret)
+        ret.Set<NeedCheckCast, Bool>(needCheck)
         return (ret.GetResult().getOrThrow(), newExprs)
     }
     return (value, ArrayList<Expression>())
@@ -1141,7 +1141,7 @@ public class WrapMutFunc {
         let ret = builder.CreateAllocate(builder.context.GetRefTy(retTy), retTy, entry)
         entry.AppendExpression(ret)
         wrapperFn.SetReturnValue(ret.GetResult().getOrThrow())
-        let rawFuncFirstArgType = rawFunc.GetFuncType().getOrThrow().GetParamTypes()[0].StripAllRefs()
+        let rawFuncFirstArgType = rawFunc.GetFuncType().getOrThrow().GetParamType(0).StripAllRefs()
         var firstArgType = GetInstSubType(rawFuncFirstArgType, srcClassTy, builder)
         if (!firstArgType.IsValueType() || rawFunc.TestAttr(Attribute.MUT)) {
             firstArgType = builder.context.GetRefTy(firstArgType)
