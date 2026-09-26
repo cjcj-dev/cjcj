@@ -67,6 +67,28 @@ public func GetJavaImpls(pkg: Package): ArrayList<ClassDecl> {
     return impls
 }
 
+public func GetJavaImplRegistryCompanions(file: File): ArrayList<ClassDecl> {
+    let companions = ArrayList<ClassDecl>()
+    for (decl in file.decls) {
+        if (IsImplRegistryCompanion(decl)) {
+            if (let Some(companion) <- (decl as ClassDecl)) {
+                companions.add(companion)
+            }
+        }
+    }
+    return companions
+}
+
+public func GetJavaImplRegistryCompanions(pkg: Package): ArrayList<ClassDecl> {
+    let companions = ArrayList<ClassDecl>()
+    for (file in pkg.files) {
+        for (companion in GetJavaImplRegistryCompanions(file)) {
+            companions.add(companion)
+        }
+    }
+    return companions
+}
+
 // C++ src/Sema/NativeFFI/Java/Utils.cpp:114.
 private let JAVA_IMPL_REGISTRY_COMPANION_REFERENCE_FIELD_NAME_IN_REFERENCE_WRAPPER = "$reg"
 
