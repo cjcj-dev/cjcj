@@ -21,7 +21,10 @@ links, using the real IR mutation API so predecessor checks remain consistent.
 Controlled mutations must be applied in isolated product build trees:
 
 - Route TERMINATOR to CheckOtherExpression in CheckExpression: the 21 malformed
-  cases fail their Bool/diagnostic assertions; numeric and control keep true.
+  cases fail their Bool/diagnostic assertions; numeric and control keep true
+  but fail the no-unknown-kind-warning assertion. Thus all terminator-route
+  witnesses reject this cut, while the unrelated-route suite below stays green
+  except for its Exit witness.
   Run the existing expression-dispatch suite as well to show unrelated routes
   retain their results (only its malformed Exit should change).
 - Remove only TRY_ADD from the map: only `add` fails, with the real unknown-kind
