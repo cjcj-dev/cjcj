@@ -53,8 +53,8 @@ class HostIdentity(unittest.TestCase):
         self.rows += [f'{PLATFORM} {name} {self.pins[name]}' for name in NAMES]
         self.identities.write_text('\n'.join(self.rows) + '\n')
 
-    def install(self, llvm_sha=None):
-        args = ['bash', str(RUNNER), str(self.target), str(self.host), str(self.hrt),
+    def install(self, llvm_sha=None, hrt=None):
+        args = ['bash', str(RUNNER), str(self.target), str(self.host), str(hrt or self.hrt),
                 llvm_sha or self.pins[NAMES[2]], str(self.host / 'bin/cjc'), digest(self.host / 'bin/cjc'),
                 str(self.run_sdk), digest(self.run_sdk / 'third_party/llvm/lib/libLLVM-15.so')]
         return subprocess.run(args, env={**os.environ, 'STAGE1_HOST_IDENTITIES': str(self.identities)},
@@ -80,6 +80,17 @@ class HostIdentity(unittest.TestCase):
     def test_other_platform_rows_after_native(self):
         self.identities.write_text('\n'.join(self.rows[3:] + self.rows[:3]) + '\n')
         self.accepted(self.install())
+
+    def test_hrt_sdk_root(self):
+        self.accepted(self.install(hrt=self.host))
+
+    def test_hrt_library_root(self):
+        root = self.root / 'library-root'
+        directory = root / 'lib' / (PLATFORM + '_cjnative')
+        directory.mkdir(parents=True)
+        for name in NAMES[:2]:
+            shutil.copyfile(self.hrt / name, directory / name)
+        self.accepted(self.install(hrt=root))
 
     def test_malformed_selected_pin(self):
         self.identities.write_text('\n'.join(self.rows[:-1] + [f'{PLATFORM} libLLVM-15.so invalid']) + '\n')
@@ -133,7 +144,7 @@ class HostIdentity(unittest.TestCase):
             print(f'INPUT {name} {self.pins[name]} {source}', flush=True)
         # Pins remain checked-in data; input hashes only observe the result.
         self.identities = IDENTITIES
-        self.accepted(self.install())
+        self.accepted(self.install(hrt=sdk))
 
 
 if __name__ == '__main__':
