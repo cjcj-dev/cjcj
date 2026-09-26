@@ -69,7 +69,7 @@ const install = await new Promise((resolve, reject) => {
 });
 // The disconnected installer must still have produced a working SDK, otherwise
 // a red probe would only prove the install broke, not that the export carries it.
-const sdkBinary = cutRoot / 'sdk/native/llvm/bin' / (process.platform === 'win32' ? 'clang.exe' : 'clang');
+const sdkBinary = path.join(cutRoot, 'sdk/native/llvm/bin', process.platform === 'win32' ? 'clang.exe' : 'clang');
 const toolCheck = requirement === 'ohos-sdk'
   ? await new Promise(resolve => {
     const child = spawn(sdkBinary, ['--version']);
