@@ -14,7 +14,7 @@ import subprocess
 
 TUPLE = 'linux_x86_64_cjnative'
 PAIR = ('libcangjie-runtime.so', 'libboundscheck.so')
-COMMIT = '1234567890abcdef1234567890abcdef12345678'
+COMMIT = '4c4cbf53b44497103e76e2a47a8fa35f5d7a7287'
 
 
 def sha(path):
@@ -67,6 +67,8 @@ def main():
         copy(Path('/bin/true'), base / 'bin/cjc')
         (base / 'bin/cjc').chmod(0o755)
         (base / 'envsetup.sh').write_text(':\n')
+        (base / 'std-producer.json').write_text(
+            json.dumps({'compiler_sha256': sha(base / 'bin/cjc')}) + '\n')
         copy(libs / 'std.a', base / lib_rel / 'libcangjie-std-core.a')
         for member in PAIR:
             copy(libs / 'inherited.so', base / dyn_rel / member)

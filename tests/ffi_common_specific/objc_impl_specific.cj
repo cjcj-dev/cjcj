@@ -1,0 +1,2 @@
+@ObjCImpl
+specific class OI {}

@@ -42,7 +42,6 @@ public class Symbol <: Identifiable {
     public var astKind: ASTKind = ASTKind.NODE
     public var target: Option<Decl> = None
     public var invertedIndexBeenDeleted: Bool = false
-    public var isNeedExposedToInterop: Bool = false
     public let children: ArrayList<Symbol> = ArrayList<Symbol>()
     public prop objectId: Int64 {
         get() { Int64(hashID.fieldID) }

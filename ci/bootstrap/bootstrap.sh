@@ -27,6 +27,7 @@ HEAP="${CJ_HEAP:-96GB}"
 STAGE1_HEAP="${STAGE1_HEAP:-20GB}"
 JOBS="${CJ_JOBS:-$(getconf _NPROCESSORS_ONLN)}"
 SDK_BUILD="${SDK_BUILD:-$(dirname "${BASH_SOURCE[0]}")/sdk_build.sh}"
+SDK_VERIFY="${SDK_VERIFY:-$(dirname "${BASH_SOURCE[0]}")/sdk_verify.py}"
 STAGE1_HOST_RUNNER="${STAGE1_HOST_RUNNER:-$(dirname "${BASH_SOURCE[0]}")/stage1_host_runner.sh}"
 STAGE0_CACHE_ROOT="${STAGE0_CACHE_ROOT:-/root/stage0depot}"
 BUILD_TMPDIR=''
@@ -97,10 +98,10 @@ assert_colour_tuple() {
     die 'colour LLVM tuple SHA256SUMS 格式或相对路径非法'
   fi
   entries=$(wc -l < "$tuple/SHA256SUMS")
-  [ "$entries" -eq 8 ] || die "colour LLVM tuple SHA256SUMS 必须且只能登记 8 个 payload: entries=$entries"
-  for rel in MANIFEST bin/llc bin/opt lib/STATIC_LLVM.txt \
+  [ "$entries" -eq 10 ] || die "colour LLVM tuple SHA256SUMS 必须且只能登记 10 个 payload: entries=$entries"
+  for rel in MANIFEST bin/llc bin/opt bin/ld.lld lib/STATIC_LLVM.txt \
     fixed-llc/cjselfhost_llvmshim.o fixed-llc/llc.gz \
-    fixed-llc/opt.gz fixed-llc/llvm-tools.manifest; do
+    fixed-llc/opt.gz fixed-llc/ld.lld.gz fixed-llc/llvm-tools.manifest; do
     [ -f "$tuple/$rel" ] || die "colour LLVM tuple 缺 $rel"
     tuple_sum_has "$tuple" "$rel" || die "colour LLVM tuple SHA256SUMS 未登记 $rel"
   done
@@ -457,6 +458,9 @@ stdlib_build() {
   script='cd "$1" && rm -rf build/build && python3 build.py clean && python3 build.py build -t relwithdebinfo --jobs "$2" --target-lib="$3" && python3 build.py install --prefix "$4"'
   cmd "env -i HOME=$(printf '%q' "$BUILD_HOME") TMPDIR=$(printf '%q' "$BUILD_TMPDIR") CANGJIE_HOME=$(printf '%q' "$sdk") LD_LIBRARY_PATH=$(printf '%q' "$ld") PATH=$(printf '%q' "$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:/usr/bin:/bin") cjHeapSize=$(printf '%q' "$STD_BUILD_HEAP") bash -c $(printf '%q' "$script") bash $(printf '%q' "$STDSRC") $(printf '%q' "$STD_BUILD_JOBS") $(printf '%q' "$target_lib") $(printf '%q' "$prefix")"
   assert_std_install_shape "$prefix" "$compare_prefix" "$label"
+  if [ -f "$sdk/bin/cjc" ] || [ "$DRY" -eq 1 ]; then
+    cmd "python3 -c 'import hashlib,json,sys; h=hashlib.sha256(open(sys.argv[1],\"rb\").read()).hexdigest(); open(sys.argv[2],\"w\").write(json.dumps({\"compiler_sha256\":h})+chr(10))' $(printf '%q' "$sdk/bin/cjc") $(printf '%q' "$prefix/std-producer.json")"
+  fi
 }
 
 assert_cjcj_root() {
@@ -621,6 +625,9 @@ stage0() {
   sdk="$WORK/sdk-stage0"
   echo "OUTPUT cjcj-stage1=$out"
   cmd "bash $(printf '%q' "$SDK_BUILD") --from $(printf '%q' "$base") --to $(printf '%q' "$sdk") --host --llvm-so $(printf '%q' "$HOST_LLVM_SO") --colour-runtime $(printf '%q' "$(runtime_dir "$CRT")/libcangjie-runtime.so") --host-runtime $(printf '%q' "$(runtime_dir "$HRT")/libcangjie-runtime.so") --force"
+  if [ "$DRY" -eq 0 ]; then
+    cmd "python3 $(printf '%q' "$SDK_VERIFY") --sdk $(printf '%q' "$sdk") --role host --runtime-pin $(printf '%q' "$SRC/ci/runtime_pin.env")"
+  fi
   assert_installed_llvm_so "$sdk" "$HOST_LLVM_SO"
   cmd "install -Dm644 $(printf '%q' "$AST_SUPPORT") $(printf '%q' "$sdk/lib/$HOST_TUPLE/libcangjie-ast-support.a")"
   if [ "$DRY" -eq 0 ]; then
@@ -664,6 +671,9 @@ stage0() {
 assemble_stage1_sdk() {
   local sdk="$1" compiler="$2" std="$3"
   cmd "bash $(printf '%q' "$SDK_BUILD") --from $(printf '%q' "$WORK/sdk-stage0") --to $(printf '%q' "$sdk") --target $(printf '%q' "$HOST_TUPLE") --cjc $(printf '%q' "$compiler") --llvm-tuple $(printf '%q' "$COLOUR_TUPLE") --runtime $(printf '%q' "$CRT") --std $(printf '%q' "$std") --verify-host-rt $(printf '%q' "$HRT") --colour-runtime $(printf '%q' "$(runtime_dir "$CRT")/libcangjie-runtime.so") --host-runtime $(printf '%q' "$(runtime_dir "$HRT")/libcangjie-runtime.so") --force"
+  if [ "$DRY" -eq 0 ]; then
+    cmd "python3 $(printf '%q' "$SDK_VERIFY") --sdk $(printf '%q' "$sdk") --role target --runtime-pin $(printf '%q' "$SRC/ci/runtime_pin.env")"
+  fi
   assert_installed_llvm_tuple "$sdk" "$COLOUR_TUPLE"
   cmd "install -m644 $(printf '%q' "$COLOUR_LLVM_SO") $(printf '%q' "$sdk/third_party/llvm/lib/libLLVM-15.so")"
   if [ "$DRY" -eq 0 ]; then

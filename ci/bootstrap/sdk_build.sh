@@ -12,7 +12,10 @@
 #   ⭐ **换漏位置 / 换到不存在的位置** ⇒ 我在两份任务书里写过"llc 有两个位置"，
 #     ⭐ 实测原厂与 stageB **只有 `third_party/llvm/bin/llc`**，⭐ 而 driver 也只搜这一个
 #     （`packages/driver/src/CJNATIVEBackend.cj:56-58` · `ToolChain.cj:482`）
-#     ⇒ ⭐⭐ 本工具只替换**基线里已存在**的位置，⛔ 不凭猜测新建路径
+#   ⇒ ⭐⭐ 本工具只替换**基线里已存在**的位置，⛔ 不凭猜测新建路径
+#   ⭐ 手拼 SDK（不经本脚本装配，或未经同目录 sdk_verify.py 复核
+#     std-producer.json / CJRT-COMMIT / llc·opt·ld.lld·libLLVM 的 CJLLVM-COMMIT）
+#     不作验收证据。使用前必须先跑 sdk_verify，并留下 SDK.lock.json 的 sha256。
 #
 # 用法:
 #   sdk_build.sh --from <基线SDK名或路径> --to <目标目录> --host|--target [选项]
@@ -178,8 +181,9 @@ esac
 #   ⭐ `/root/.cjv/toolchains/cjcj-pin-937877c8 -> /root/sdks/cjcj-pin-937877c8`
 #   ⇒ ⭐ `cp -a` 复制的是**那条链接**，⭐ 于是"副本"仍指向共享安装
 #   ⇒ ⭐⭐⭐ **后面每一次组件替换都会写进共享 SDK** —— ⭐ 正是本工具要防的事
-#   ⚠ ⭐ 当时只是因为 `find` 默认不跟随符号链接、⭐ 没找到 llc 才没酿成事故 ⇒ ⭐ 那是运气
-#   ⇒ ⭐ 所以：⭐⭐ **先解引用**，⭐ 之后所有判断都用实路径
+#   ⚠ ⭐ 当时只是因为 `find -type f` 看不见文件软链、⭐ 没写进共享安装 ⇒ ⭐ 那是运气
+#   ⇒ ⭐ 基线先解引用。swap_all 接受副本内的文件软链（bin/cjc -> cjcj-stage1，
+#     写入参照体并保留链接）；参照体解析到副本外则拒绝，⛔ 不跟随目录软链。
 BASE=$(readlink -f "$BASE") || die "无法解析基线路径"
 [ -f "$BASE/bin/cjc" ] || die "$BASE 不像 SDK（缺 bin/cjc）"
 
@@ -216,15 +220,32 @@ cp -a "$BASE/." "$TO/" || die "cp -a 失败"
 
 # ⭐ 只替换**基线里已存在**的位置；⛔ 不新建路径
 swap_all() {                     # swap_all <相对文件名> <源文件> <标签>
-  local rel="$1" src="$2" label="$3" n=0 dst
+  local rel="$1" src="$2" label="$3" n=0 dst resolved was_link
   [ -n "$src" ] || return 0
   [ -f "$src" ] || die "$label 源文件不存在: $src"
   while IFS= read -r dst; do
     [ -n "$dst" ] || continue
+    was_link=0
+    if [ -L "$dst" ]; then
+      was_link=1
+      resolved=$(readlink -f -- "$dst" 2>/dev/null || true)
+      if [ -z "$resolved" ] || [ ! -e "$resolved" ]; then
+        die "$label: $dst 是悬空符号链接，拒绝替换"
+      fi
+      case "$resolved" in
+        "$TO"/*) ;;
+        *) die "$label: $dst 指向副本之外 $resolved，拒绝写入";;
+      esac
+      [ -f "$resolved" ] || die "$label: $dst 的参照体不是普通文件: $resolved"
+    fi
     cp -f "$src" "$dst" || die "写入失败: $dst"
+    if [ "$was_link" = 1 ] && [ ! -L "$dst" ]; then
+      die "$label: 替换后 $dst 不再是符号链接"
+    fi
+    same_sha "$src" "$dst" || die "$label: 替换后 sha256 不一致: $dst"
     n=$((n+1))
     printf '      %s\n' "${dst#"$TO"/}"
-  done < <(find "$TO" -maxdepth 4 -type f -name "$rel" 2>/dev/null)
+  done < <(find "$TO" -maxdepth 4 \( -type f -o -type l \) -name "$rel" 2>/dev/null)
   [ "$n" -gt 0 ] || die "$label: ⭐ 基线里没有名为 $rel 的位置 —— ⛔ 本工具不新建路径，⭐ 请确认组件名"
   echo "  [$label] 替换 $n 处  sha=$(sha256sum "$src" | cut -c1-16)"
 }
@@ -266,10 +287,10 @@ validate_llvm_tuple() {
     die 'llvm-tuple SHA256SUMS 格式或相对路径非法'
   fi
   entries=$(wc -l < "$tuple/SHA256SUMS")
-  [ "$entries" -eq 8 ] || die "llvm-tuple SHA256SUMS 必须且只能登记 8 个 payload: entries=$entries"
-  for rel in MANIFEST bin/llc bin/opt lib/STATIC_LLVM.txt \
+  [ "$entries" -eq 10 ] || die "llvm-tuple SHA256SUMS 必须且只能登记 10 个 payload: entries=$entries"
+  for rel in MANIFEST bin/llc bin/opt bin/ld.lld lib/STATIC_LLVM.txt \
     fixed-llc/cjselfhost_llvmshim.o fixed-llc/llc.gz \
-    fixed-llc/opt.gz fixed-llc/llvm-tools.manifest; do
+    fixed-llc/opt.gz fixed-llc/ld.lld.gz fixed-llc/llvm-tools.manifest; do
     [ -f "$tuple/$rel" ] || die "llvm-tuple 缺 $rel"
     tuple_sum_has "$tuple" "$rel" || die "llvm-tuple SHA256SUMS 未登记 $rel"
   done
@@ -285,6 +306,7 @@ install_llvm_tuple() {
   validate_llvm_tuple "$tuple"
   [ -f "$TO/third_party/llvm/bin/llc" ] || die 'llvm-tuple: 基线里没有安装位置 third_party/llvm/bin/llc'
   [ -f "$TO/third_party/llvm/bin/opt" ] || die 'llvm-tuple: 基线里没有安装位置 third_party/llvm/bin/opt'
+  [ -f "$TO/third_party/llvm/bin/ld.lld" ] || die 'llvm-tuple: 基线里没有安装位置 third_party/llvm/bin/ld.lld'
   rm -rf "$TO/third_party/llvm/fixed-llc"
   while IFS= read -r line; do
     expected=${line%% *}
@@ -299,7 +321,7 @@ install_llvm_tuple() {
     # Artifact extraction may omit executable mode; the payload list declares
     # these two entries as tools. Content identity is checked again below.
     case "$rel" in
-      bin/llc|bin/opt) chmod 755 "$target" || die "llvm-tuple 工具权限安装失败: $target";;
+      bin/llc|bin/opt|bin/ld.lld) chmod 755 "$target" || die "llvm-tuple 工具权限安装失败: $target";;
     esac
     count=$((count+1))
     echo "      $rel"
@@ -572,6 +594,12 @@ if [ -n "$STD" ]; then
       [ "$s1" = "$s2" ] || die "std: $pair 与源 sha 不一致（半套装配）"
     done
     echo "  [std-prefix] replaced existing library files=$n (lib/ + runtime/lib/ same-round)"
+    if [ -f "$STD/std-producer.json" ]; then
+      cp -f "$STD/std-producer.json" "$TO/std-producer.json" || die "std-producer.json 写入失败"
+      echo "  [std-prefix] std-producer.json"
+    elif [ "$ROLE" = target ]; then
+      rm -f "$TO/std-producer.json"
+    fi
   else
     # 旧调用：只给 modules/<平台> —— ⭐ 这会留下 lib/ 与 runtime/lib/ 的基线 std
     # 080811 实账：半套 std 让 --version 绿、最小编译崩。fail-closed。
@@ -622,8 +650,10 @@ in_sdk_env() {                    # in_sdk_env <命令...>：⭐ 在 SDK 环境�
 }
 verify_exe() {                    # verify_exe <路径> <是否跑 --version>
   local f="$1" runver="$2"
-  [ -f "$f" ] || return 0
-  case "$(file -b "$f")" in *ELF*) ;; *) die "$f 不是 ELF";; esac
+  if [ ! -e "$f" ] && [ ! -L "$f" ]; then
+    return 0
+  fi
+  case "$(file -bL "$f")" in *ELF*) ;; *) die "$f 不是 ELF";; esac
   local nf
   nf=$(in_sdk_env ldd "$f" 2>&1 | grep -c 'not found' || true)
   if [ "$nf" != 0 ]; then
@@ -636,7 +666,7 @@ verify_exe() {                    # verify_exe <路径> <是否跑 --version>
   fi
   printf '  %-34s ELF ✓  ldd ✓%s\n' "${f#"$TO"/}" "$([ "$runver" = 1 ] && printf '  --version ✓')"
 }
-for rel in third_party/llvm/bin/llc third_party/llvm/bin/opt tools/bin/cjpm; do
+for rel in third_party/llvm/bin/llc third_party/llvm/bin/opt third_party/llvm/bin/ld.lld tools/bin/cjpm; do
   verify_exe "$TO/$rel" 1
 done
 # ⚠ ⭐ cjc 只在【宿主】SDK 上跑 --version：⭐ 目标 SDK 的 runtime 着色，⭐ 跑它必崩
@@ -655,7 +685,46 @@ else
 fi
 
 echo
-for rel in bin/cjc third_party/llvm/bin/llc third_party/llvm/bin/opt tools/bin/cjpm; do
+for rel in bin/cjc third_party/llvm/bin/llc third_party/llvm/bin/opt third_party/llvm/bin/ld.lld tools/bin/cjpm; do
   [ -f "$TO/$rel" ] && printf 'SDK-BUILD-SHA %-34s %s\n' "$rel" "$(sha256sum "$TO/$rel" | awk '{print $1}')"
 done
+
+echo "[lock] SDK.lock.json + sdk_verify"
+_SDK_VERIFY="$(dirname "${BASH_SOURCE[0]}")/sdk_verify.py"
+_PIN="$(dirname "${BASH_SOURCE[0]}")/../runtime_pin.env"
+_IDENT=$(mktemp)
+_CJC_SHA=''
+if [ -f "$TO/bin/cjcj-stage1" ]; then
+  _CJC_SHA=$(sha256sum "$TO/bin/cjcj-stage1" | awk '{print $1}')
+elif [ -f "$TO/bin/cjc" ] && [ ! -L "$TO/bin/cjc" ]; then
+  _CJC_SHA=$(sha256sum "$TO/bin/cjc" | awk '{print $1}')
+elif [ -f "$TO/bin/cjc" ]; then
+  _CJC_SHA=$(sha256sum "$TO/bin/cjc" | awk '{print $1}')
+fi
+_STD_SHA=''
+if [ -f "$TO/std-producer.json" ]; then
+  _STD_SHA=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("compiler_sha256") or "")' "$TO/std-producer.json" 2>/dev/null || true)
+fi
+_RT_COMMIT=''
+_RTSO="$TO/runtime/lib/$TARGET_TUPLE/libcangjie-runtime.so"
+if [ -f "$_RTSO" ]; then
+  _RT_COMMIT=$(strings "$_RTSO" 2>/dev/null | /usr/bin/grep -Eo 'CJRT-COMMIT:[0-9a-fA-F]{40}' | head -1 | cut -d: -f2 || true)
+fi
+python3 - "$_IDENT" "$ROLE" "$_CJC_SHA" "$_STD_SHA" "$_RT_COMMIT" <<'PY'
+import json, sys
+path, role, cjc, std_sha, commit = sys.argv[1:6]
+payload = {
+    "role": role,
+    "cjc": {"compiler_sha256": cjc or None},
+    "std": {"compiler_sha256": std_sha or None, "source": "std-producer.json"},
+    "runtime": {"commit": (commit or None), "source": "CJRT-COMMIT"},
+    "llvm": {},
+    "cjpm": {},
+    "boundscheck": {"commit": commit or None},
+}
+open(path, "w").write(json.dumps(payload))
+PY
+python3 "$_SDK_VERIFY" --sdk "$TO" --role "$ROLE" --runtime-pin "$_PIN" --identities "$_IDENT" --target-tuple "$TARGET_TUPLE" --write-lock \
+  || { rm -f "$_IDENT"; die "sdk_verify 拒绝本枚 SDK（见 SDK-VERIFY-FAIL）"; }
+rm -f "$_IDENT"
 echo "SDK-BUILD-OK role=$ROLE from=$BASE to=$TO mask=$MASK"

@@ -37,7 +37,7 @@ public class Results<Domain> where Domain <: AbstractDomain<Domain> {
     public func VisitWith(
         actionBeforeVisitExpr: (Domain, Expression, Int64) -> Unit,
         actionAfterVisitExpr: (Domain, Expression, Int64) -> Unit,
-        actionOnTerminator: (Domain, Terminator, Option<Block>) -> Unit
+        actionOnTerminator: (Domain, Expression, Option<Block>) -> Unit
     ): Unit {
         let body = functionValue.GetBody() ??
             throw IllegalStateException("Results VisitWith expected function body")
@@ -90,7 +90,7 @@ public class Results<Domain> where Domain <: AbstractDomain<Domain> {
     private func VisitBlockWith(
         actionBeforeVisitExpr: (Domain, Expression, Int64) -> Unit,
         actionAfterVisitExpr: (Domain, Expression, Int64) -> Unit,
-        actionOnTerminator: (Domain, Terminator, Option<Block>) -> Unit,
+        actionOnTerminator: (Domain, Expression, Option<Block>) -> Unit,
         block: Block,
         entryStates: Option<HashMap<Int64, Domain>>
     ): Unit {

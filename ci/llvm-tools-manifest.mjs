@@ -33,6 +33,10 @@ export const LLVM_TOOLS_MANIFEST_SCHEMAS = Object.freeze({
     'FLATBUFFERS_SHA',
     'LLC_SHA256',
     'OPT_SHA256',
+    'LLD_TOOL',
+    'LLD_SOURCE',
+    'LLD_VERSION',
+    'LLD_SHA256',
     'SHIM_SHA256',
   ]),
 });
@@ -146,6 +150,15 @@ export function parseLlvmToolsManifest(text, {label = 'llvm-tools.manifest', sch
       if (values.get(`${tool}_VERSION`).length > 512) {
         throw new Error(`${label}: ${tool}_VERSION is longer than 512 characters`);
       }
+    }
+  }
+  if (selectedSchema === 'native') {
+    const expectedSource = `tuple:${values.get('LLVM_SHA')}`;
+    if (values.get('LLD_SOURCE') !== expectedSource) {
+      throw new Error(`${label}: LLD_SOURCE does not match LLVM_SHA`);
+    }
+    if (values.get('LLD_VERSION').length > 512) {
+      throw new Error(`${label}: LLD_VERSION is longer than 512 characters`);
     }
   }
   return {schema: selectedSchema, values};

@@ -86,7 +86,7 @@ public class CHIRBuilderTest {
         @Expect(expressions.size, 2)
         // The result and its operand are the actual values produced by the helper.
         @Expect(expressions[0].GetExprKind(), ExprKind.LOAD)
-        @Expect(expressions[1].GetExprKind(), ExprKind.TYPECAST)
+        @Expect(expressions[1].GetExprKind(), ExprKind.CLASS_STATIC_CAST)
         @Expect(expressions[1].GetOperand(0).nodeId, expressions[0].GetResult().getOrThrow().nodeId)
         @Expect(result.nodeId, expressions[1].GetResult().getOrThrow().nodeId)
         block.AppendExpressions(expressions)
@@ -116,4 +116,97 @@ public class CHIRBuilderTest {
         @Expect(after.GetPredecessors().size, 1)
     }
 
+}
+
+@Test
+public class ExpressionFamilyEdgesTest {
+    @TestCase
+    public func ExceptionalFamiliesUseExpressionOperands(): Unit {
+        let context = CHIRContext()
+        let builder = CHIRBuilder(context)
+        let fn = builder.CreateFunction(context.GetFuncTy(ArrayList<Type>(), context.GetUnitTy()), "families")
+        let body = builder.CreateBlockGroup(fn)
+        fn.InitBody(body)
+        let source = builder.CreateBlock(body)
+        let normal = builder.CreateBlock(body)
+        let error = builder.CreateBlock(body)
+        body.SetEntryBlock(source)
+        let value = builder.CreateConstant(context.GetInt64Ty(), IntLiteral(7), source).GetResult().getOrThrow()
+        let cast = builder.CreateTryNumericCast(context.GetInt32Ty(), value, normal, error, source)
+        let allocate = builder.CreateTryAllocate(context.GetRefTy(context.GetInt64Ty()), context.GetInt64Ty(),
+            normal, error, source)
+        let raw = builder.CreateTryRawArrayAllocate(context.GetRefTy(context.GetRawArrayTy(context.GetInt64Ty())),
+            context.GetInt64Ty(), value, normal, error, source)
+        let spawnExpr = builder.CreateTrySpawn(context.GetInt64Ty(), value, normal, error, source)
+        @Expect((cast as NumericCastBase).isSome(), true)
+        @Expect((allocate as AllocateBase).isSome(), true)
+        @Expect((raw as RawArrayAllocateBase).isSome(), true)
+        @Expect((spawnExpr as SpawnBase).isSome(), true)
+        for (expr in ArrayList<Expression>([cast, allocate, raw, spawnExpr])) {
+            @Expect(expr.IsTerminator(), true)
+            @Expect(expr.GetNumOfSuccessor(), 2)
+            @Expect(expr.GetOperands().size, expr.GetNumOfNonSuccessorOperands() + 2)
+            @Expect(expr.GetSuccessor(0).nodeId, normal.nodeId)
+            @Expect(expr.GetSuccessor(1).nodeId, error.nodeId)
+        }
+        source.AppendExpression(cast)
+        @Expect(source.GetTerminator().getOrThrow().nodeId, cast.nodeId)
+        @Expect(normal.GetPredecessors().size, 1)
+        @Expect(error.GetPredecessors().size, 1)
+        cast.RemoveSelfFromBlock()
+        @Expect(normal.GetPredecessors().size, 0)
+        @Expect(error.GetPredecessors().size, 0)
+    }
+
+    @TestCase
+    public func ExceptionOpsUseDistinctExprKinds(): Unit {
+        let context = CHIRContext()
+        let builder = CHIRBuilder(context)
+        let fn = builder.CreateFunction(context.GetFuncTy(ArrayList<Type>(), context.GetUnitTy()), "exception-ops")
+        let body = builder.CreateBlockGroup(fn)
+        fn.InitBody(body)
+        let source = builder.CreateBlock(body)
+        let normal = builder.CreateBlock(body)
+        let error = builder.CreateBlock(body)
+        body.SetEntryBlock(source)
+        let value = builder.CreateConstant(context.GetInt64Ty(), IntLiteral(7), source).GetResult().getOrThrow()
+        let neg = builder.CreateTryUnaryExpression(context.GetInt64Ty(), ExprKind.NEG, value, normal, error, source)
+        let add = builder.CreateTryBinaryExpression(context.GetInt64Ty(), ExprKind.ADD, value, value, normal, error, source)
+        @Expect(neg.GetExprKind(), ExprKind.TRY_NEG)
+        @Expect(add.GetExprKind(), ExprKind.TRY_ADD)
+        @Expect(ExprKindName(neg.GetExprKind()), "TryNeg")
+        @Expect(ExprKindName(add.GetExprKind()), "TryAdd")
+        @Expect(neg.GetExprKind() == add.GetExprKind(), false)
+        @Expect((neg as UnaryExpressionBase).isSome(), true)
+        @Expect((neg as UnaryExpression).isSome(), false)
+        @Expect((add as BinaryExpressionBase).isSome(), true)
+        @Expect((add as BinaryExpression).isSome(), false)
+        @Expect(neg.GetOpKind(), ExprKind.NEG)
+        @Expect(add.GetOpKind(), ExprKind.ADD)
+    }
+
+    @TestCase
+    public func ReplaceOneDuplicateSuccessorKeepsPredecessor(): Unit {
+        let context = CHIRContext()
+        let builder = CHIRBuilder(context)
+        let fn = builder.CreateFunction(context.GetFuncTy(ArrayList<Type>(), context.GetUnitTy()), "dup-successor")
+        let body = builder.CreateBlockGroup(fn)
+        fn.InitBody(body)
+        let source = builder.CreateBlock(body)
+        let target = builder.CreateBlock(body)
+        let other = builder.CreateBlock(body)
+        body.SetEntryBlock(source)
+        let value = builder.CreateConstant(context.GetInt64Ty(), IntLiteral(3), source).GetResult().getOrThrow()
+        let add = builder.CreateTryBinaryExpression(context.GetInt64Ty(), ExprKind.ADD, value, value, target, target, source)
+        source.AppendExpression(add)
+        @Expect(target.GetPredecessors().size, 1)
+        add.ReplaceSuccessor(0, other)
+        @Expect(add.GetSuccessor(0).nodeId, other.nodeId)
+        @Expect(add.GetSuccessor(1).nodeId, target.nodeId)
+        @Expect(target.GetPredecessors().size, 1)
+        @Expect(other.GetPredecessors().size, 1)
+        add.ReplaceSuccessor(1, other)
+        @Expect(target.GetPredecessors().size, 0)
+        @Expect(other.GetPredecessors().size, 1)
+    }
 }

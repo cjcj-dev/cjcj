@@ -862,11 +862,13 @@ public class StructInheritanceChecker {
                 continue
             }
             CheckMembersWithInheritedDecls(extendDecl)
-            let extendMembers = GetStoredMembersForDecl(extendDecl)
-            if (let Some(currentPkg) <- curFile.curPackage) {
-                RemoveInvisibleMember(members, currentPkg.fullPackageName)
+            if (structInheritedMembers.contains(extendDecl)) {
+                let allVisibleMember = GetStoredMembersForDecl(extendDecl).Clone()
+                if (let Some(currentPkg) <- curFile.curPackage) {
+                    RemoveInvisibleMember(allVisibleMember, currentPkg.fullPackageName)
+                }
+                MergeInheritedMembers(members, allVisibleMember, baseTy)
             }
-            MergeInheritedMembers(members, extendMembers, baseTy)
         }
         return members
     }

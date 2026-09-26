@@ -2,68 +2,21 @@ package cjcj::codegen
 
 import std.collection.*
 import cjcj::chir.ClassType
-import cjcj::chir.ExprKind
-import cjcj::chir.Expression
 import cjcj::chir.Function
-import cjcj::chir.Spawn
-import cjcj::chir.SpawnWithException
-import cjcj::chir.Type
+import cjcj::chir.SpawnBase
 import cjcj::chir.Value
 
-public func GenerateSpawn(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
-    if (let Some(spawnExpr) <- (chirExpr as Spawn)) {
-        return GenerateSpawn(irBuilder, SpawnInfo.FromSpawn(spawnExpr))
-    }
-    if (let Some(spawnWithExceptionExpr) <- (chirExpr as SpawnWithException)) {
-        return GenerateSpawn(irBuilder, SpawnInfo.FromSpawnWithException(spawnWithExceptionExpr))
-    }
-    return LLVMNullValue()
-}
-
-private class SpawnInfo {
-    public let exprKind: ExprKind
-    public let futureValue: Value
-    public let spawnArg: Option<Value>
-    public let executeClosure: Option<Function>
-    public let resultType: Option<Type>
-
-    private init(exprKind: ExprKind, futureValue: Value, spawnArg: Option<Value>, executeClosure: Option<Function>,
-        resultType: Option<Type>) {
-        this.exprKind = exprKind
-        this.futureValue = futureValue
-        this.spawnArg = spawnArg
-        this.executeClosure = executeClosure
-        this.resultType = resultType
-    }
-
-    public static func FromSpawn(spawnExpr: Spawn): SpawnInfo {
-        let value = if (spawnExpr.IsExecuteClosure()) { spawnExpr.GetClosure() } else { spawnExpr.GetFuture() }
-        return SpawnInfo(spawnExpr.GetExprKind(), value, spawnExpr.GetSpawnArg(),
-            spawnExpr.GetExecuteClosure(), spawnExpr.GetResultType())
-    }
-
-    public static func FromSpawnWithException(spawnExpr: SpawnWithException): SpawnInfo {
-        let value = if (spawnExpr.IsExecuteClosure()) { spawnExpr.GetClosure() } else { spawnExpr.GetFuture() }
-        return SpawnInfo(spawnExpr.GetExprKind(), value, spawnExpr.GetSpawnArg(),
-            spawnExpr.GetExecuteClosure(), spawnExpr.GetResultType())
-    }
-
-    public func IsExecuteClosure(): Bool {
-        return executeClosure.isSome()
-    }
-}
-
-private func GenerateSpawn(irBuilder: IRBuilder2, spawnInfo: SpawnInfo): LLVMValueRef {
+public func GenerateSpawn(irBuilder: IRBuilder2, spawnInfo: SpawnBase): LLVMValueRef {
     if (!spawnInfo.IsExecuteClosure()) {
         return GenerateSpawnWithExecuteFuture(irBuilder, spawnInfo)
     }
     return GenerateSpawnWithExecuteClosure(irBuilder, spawnInfo)
 }
 
-private func GenerateSpawnWithExecuteFuture(irBuilder: IRBuilder2, spawnInfo: SpawnInfo): LLVMValueRef {
-    let futureObj = irBuilder.GetCGModule().GetMappedCGValue(spawnInfo.futureValue)
-    let threadCtx = MaterializeSpawnArg(irBuilder, spawnInfo.spawnArg)
-    if (let Some(executeMethod) <- FindFutureExecuteMethod(spawnInfo.futureValue)) {
+private func GenerateSpawnWithExecuteFuture(irBuilder: IRBuilder2, spawnInfo: SpawnBase): LLVMValueRef {
+    let futureObj = irBuilder.GetCGModule().GetMappedCGValue(spawnInfo.GetObject())
+    let threadCtx = MaterializeSpawnArg(irBuilder, spawnInfo.GetSpawnArg())
+    if (let Some(executeMethod) <- FindFutureExecuteMethod(spawnInfo.GetObject())) {
         let cgFunc = irBuilder.GetCGModule().GetOrInsertCGFunction(executeMethod)
         let cjThreadHandle = irBuilder.CallSpawnIntrinsic(futureObj, cgFunc, threadCtx, true)
         GenerateCheckSpawnResult(irBuilder, cjThreadHandle)
@@ -73,12 +26,12 @@ private func GenerateSpawnWithExecuteFuture(irBuilder: IRBuilder2, spawnInfo: Sp
     return LLVMNullValue()
 }
 
-private func GenerateSpawnWithExecuteClosure(irBuilder: IRBuilder2, spawnInfo: SpawnInfo): LLVMValueRef {
-    let closureObj = irBuilder.GetCGModule().GetMappedCGValue(spawnInfo.futureValue)
-    let threadCtx = MaterializeSpawnArg(irBuilder, spawnInfo.spawnArg)
-    if (let Some(executeClosureFunc) <- spawnInfo.executeClosure) {
+private func GenerateSpawnWithExecuteClosure(irBuilder: IRBuilder2, spawnInfo: SpawnBase): LLVMValueRef {
+    let closureObj = irBuilder.GetCGModule().GetMappedCGValue(spawnInfo.GetObject())
+    let threadCtx = MaterializeSpawnArg(irBuilder, spawnInfo.GetSpawnArg())
+    if (let Some(executeClosureFunc) <- spawnInfo.GetExecuteClosure()) {
         let cgFunc = irBuilder.GetCGModule().GetOrInsertCGFunction(executeClosureFunc)
-        if (let Some(resultTy) <- spawnInfo.resultType) {
+        if (let Some(resultTy) <- spawnInfo.GetResultType()) {
             let futureTypeInfo = irBuilder.CreateTypeInfo(resultTy)
             let cjThreadHandle = irBuilder.CallSpawnIntrinsic(closureObj, cgFunc, threadCtx, false,
                 Some(futureTypeInfo))

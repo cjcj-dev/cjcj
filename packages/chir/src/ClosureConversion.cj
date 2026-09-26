@@ -445,8 +445,8 @@ public class ClosureConversion {
                 (expr as Apply).getOrThrow().GetCallee() == callee) {
                 isRecursive.value = true
                 return VisitResult.STOP
-            } else if (expr.GetExprKind() == ExprKind.APPLY_WITH_EXCEPTION &&
-                (expr as ApplyWithException).getOrThrow().GetCallee() == callee) {
+            } else if (expr.GetExprKind() == ExprKind.TRY_APPLY &&
+                (expr as TryApply).getOrThrow().GetCallee() == callee) {
                 isRecursive.value = true
                 return VisitResult.STOP
             }
@@ -575,9 +575,9 @@ public class ClosureConversion {
                         continue
                     }
                 }
-                if (let Some(applyWithException) <- (expr as ApplyWithException)) {
-                    if (ApplyWithExceptionNeedConvertToInvokeWithException(applyWithException)) {
-                        ConvertApplyWithExceptionToInvokeWithException(applyWithException)
+                if (let Some(tryApply) <- (expr as TryApply)) {
+                    if (TryApplyNeedConvertToTryInvoke(tryApply)) {
+                        ConvertTryApplyToTryInvoke(tryApply)
                         continue
                     }
                 }
@@ -599,7 +599,7 @@ public class ClosureConversion {
                         throw IllegalStateException("ClosureConversion TypeCast has no result type")
                     let parent = cast.GetParentBlock() ??
                         throw IllegalStateException("ClosureConversion TypeCast has no parent block")
-                    let unbox = builder.CreateUnBox(resultTy, cast.GetSourceValue(), parent)
+                    let unbox = builder.CreateUnBoxToValue(resultTy, cast.GetSourceValue(), parent)
                     cast.ReplaceWith(unbox)
                     continue
                 }
@@ -610,18 +610,18 @@ public class ClosureConversion {
                         throw IllegalStateException("ClosureConversion Box has no result type")
                     let parent = box.GetParentBlock() ??
                         throw IllegalStateException("ClosureConversion Box has no parent block")
-                    let typecast = builder.CreateTypeCast(resultTy, box.GetSourceValue(), parent)
+                    let typecast = builder.CreateClassStaticCast(resultTy, box.GetSourceValue(), parent)
                     box.ReplaceWith(typecast)
                     continue
                 }
                 if (UnBoxNeedConvertToTypeCast(expr)) {
-                    let unbox = (expr as UnBox) ??
-                        throw IllegalStateException("ClosureConversion UnBox branch is not an UnBox")
+                    let unbox = (expr as UnBoxToValue) ??
+                        throw IllegalStateException("ClosureConversion UnBoxToValue branch is not an UnBoxToValue")
                     let resultTy = unbox.GetResultType() ??
-                        throw IllegalStateException("ClosureConversion UnBox has no result type")
+                        throw IllegalStateException("ClosureConversion UnBoxToValue has no result type")
                     let parent = unbox.GetParentBlock() ??
-                        throw IllegalStateException("ClosureConversion UnBox has no parent block")
-                    let typecast = builder.CreateTypeCast(resultTy, unbox.GetSourceValue(), parent)
+                        throw IllegalStateException("ClosureConversion UnBoxToValue has no parent block")
+                    let typecast = builder.CreateClassStaticCast(resultTy, unbox.GetSourceValue(), parent)
                     unbox.ReplaceWith(typecast)
                     continue
                 }
@@ -1083,7 +1083,7 @@ public class ClosureConversion {
                 throw IllegalStateException("ClosureConversion parameter has no type")
             if (paramTy.IsCJFunc()) {
                 CJC_ASSERT(expectedTy == paramTy)
-                let createdTypeCast1084 = builder.CreateTypeCast(paramTy, params[idx], entry)
+                let createdTypeCast1084 = builder.CreateClassStaticCast(paramTy, params[idx], entry)
                 entry.AppendExpression(createdTypeCast1084)
                 applyArgs.add(RequireResult(createdTypeCast1084))
             } else {
@@ -1256,9 +1256,9 @@ public class ClosureConversion {
         if (let Some(result) <- expr.GetResult()) {
             ConvertValueTypeWithGenericMap(result, genericMap)
         }
-        if (let Some(allocate) <- (expr as Allocate)) {
+        if (let Some(allocate) <- (expr as AllocateBase)) {
             allocate.SetType(SubstituteGenericTypes(allocate.GetType(), genericMap))
-        } else if (let Some(rawArrayAllocate) <- (expr as RawArrayAllocate)) {
+        } else if (let Some(rawArrayAllocate) <- (expr as RawArrayAllocateBase)) {
             rawArrayAllocate.SetElementType(SubstituteGenericTypes(rawArrayAllocate.GetElementType(), genericMap))
         } else if (let Some(getRTTIStatic) <- (expr as GetRTTIStatic)) {
             getRTTIStatic.SetRTTIType(SubstituteGenericTypes(getRTTIStatic.GetRTTIType(), genericMap))
@@ -1310,19 +1310,13 @@ public class ClosureConversion {
         if (let Some(result) <- expr.GetResult()) {
             ConvertValueThisType(result, thisType)
         }
-        if (let Some(allocate) <- (expr as Allocate)) {
+        if (let Some(allocate) <- (expr as AllocateBase)) {
             allocate.SetType(ReplaceThisTypeToConcreteType(allocate.GetType(), thisType, builder))
-        } else if (let Some(allocateWithException) <- (expr as AllocateWithException)) {
-            allocateWithException.SetType(ReplaceThisTypeToConcreteType(allocateWithException.GetType(), thisType,
-                builder))
         } else if (let Some(instanceOfExpr) <- (expr as InstanceOf)) {
             instanceOfExpr.SetTestedType(ReplaceThisTypeToConcreteType(instanceOfExpr.GetType(), thisType, builder))
-        } else if (let Some(rawArrayAllocate) <- (expr as RawArrayAllocate)) {
+        } else if (let Some(rawArrayAllocate) <- (expr as RawArrayAllocateBase)) {
             rawArrayAllocate.SetElementType(ReplaceThisTypeToConcreteType(rawArrayAllocate.GetElementType(), thisType,
                 builder))
-        } else if (let Some(rawArrayAllocateWithException) <- (expr as RawArrayAllocateWithException)) {
-            rawArrayAllocateWithException.SetElementType(
-                ReplaceThisTypeToConcreteType(rawArrayAllocateWithException.GetElementType(), thisType, builder))
         } else if (let Some(getRTTIStatic) <- (expr as GetRTTIStatic)) {
             getRTTIStatic.SetRTTIType(ReplaceThisTypeToConcreteType(getRTTIStatic.GetRTTIType(), thisType, builder))
         }
@@ -1338,9 +1332,9 @@ public class ClosureConversion {
         if (let Some(intrinsic) <- (expr as Intrinsic)) {
             intrinsic.SetInstantiatedTypeArgs(ConvertTypeArgsWithThisType(intrinsic.GetInstantiatedTypeArgs(), thisType))
         }
-        if (let Some(intrinsicWithException) <- (expr as IntrinsicWithException)) {
-            intrinsicWithException.SetInstantiatedTypeArgs(
-                ConvertTypeArgsWithThisType(intrinsicWithException.GetInstantiatedTypeArgs(), thisType))
+        if (let Some(tryIntrinsic) <- (expr as TryIntrinsic)) {
+            tryIntrinsic.SetInstantiatedTypeArgs(
+                ConvertTypeArgsWithThisType(tryIntrinsic.GetInstantiatedTypeArgs(), thisType))
         }
         if (let Some(getInstantiateValue) <- (expr as GetInstantiateValue)) {
             let instantiateTypes = getInstantiateValue.GetInstantiateTypesRef()
@@ -1487,7 +1481,7 @@ public class ClosureConversion {
         let curClassTy = (((obj.GetType().getOrThrow() as RefType).getOrThrow().GetBaseType() as ClassType).getOrThrow())
         let superClassTy = curClassTy.GetSuperClassTy(builder: builder).getOrThrow()
         let superClassRefTy = builder.context.GetRefTy(superClassTy)
-        let castToBaseType = builder.CreateTypeCast(superClassRefTy, obj, parent)
+        let castToBaseType = builder.CreateClassStaticCast(superClassRefTy, obj, parent)
         castToBaseType.MoveBefore(user)
         let converted = CastTypeFromAutoEnvRefToFuncType(fn.GetFuncType().getOrThrow(),
             RequireResult(castToBaseType), user,
@@ -1528,19 +1522,19 @@ public class ClosureConversion {
                 return
             }
         }
-        if (let Some(applyWithException) <- (user as ApplyWithException)) {
-            if (applyWithException.GetCallee().nodeId == result.nodeId) {
+        if (let Some(tryApply) <- (user as TryApply)) {
+            if (tryApply.GetCallee().nodeId == result.nodeId) {
                 let methods = autoEnvImplDef.GetMethods()
                 let method = methods[methods.size - 1]
-                let args = applyWithException.GetArgs()
+                let args = tryApply.GetArgs()
                 args.add(autoEnvObj, at: 0)
-                let retTy = applyWithException.GetResultType() ??
+                let retTy = tryApply.GetResultType() ??
                     throw IllegalStateException("ClosureConversion apply-with-exception has no result type")
-                let newApply = builder.CreateApplyWithException(retTy, method, FuncCallContext(args: args,
-                    thisType: autoEnvObj.GetType()), applyWithException.GetSuccessBlock(),
-                    applyWithException.GetErrorBlock(), parent)
-                newApply.SetDebugLocation(applyWithException.GetDebugLocation())
-                applyWithException.ReplaceWith(newApply)
+                let newApply = builder.CreateTryApply(retTy, method, FuncCallContext(args: args,
+                    thisType: autoEnvObj.GetType()), tryApply.GetSuccessBlock(),
+                    tryApply.GetErrorBlock(), parent)
+                newApply.SetDebugLocation(tryApply.GetDebugLocation())
+                tryApply.ReplaceWith(newApply)
                 return
             }
         }
@@ -1602,7 +1596,7 @@ public class ClosureConversion {
             if (apply.GetCallee().nodeId == srcFunc.nodeId) {
                 OverlayInstantiatedTypeArgs(autoEnvInstTypeArgs, apply.GetInstantiatedTypeArgs())
             }
-        } else if (let Some(awe) <- (user as ApplyWithException)) {
+        } else if (let Some(awe) <- (user as TryApply)) {
             if (awe.GetCallee().nodeId == srcFunc.nodeId) {
                 OverlayInstantiatedTypeArgs(autoEnvInstTypeArgs, awe.GetInstantiatedTypeArgs())
             }
@@ -1733,7 +1727,7 @@ public class ClosureConversion {
         }
         let parent = user.GetParentBlock() ??
             throw IllegalStateException("ClosureConversion auto-env cast user has no parent block")
-        let unbox = builder.CreateUnBox(unboxRetTy, autoEnvObj, parent)
+        let unbox = builder.CreateUnBoxToValue(unboxRetTy, autoEnvObj, parent)
         unbox.MoveBefore(user)
         return RequireResult(unbox)
     }
@@ -1885,7 +1879,7 @@ public class ClosureConversion {
         apply.ReplaceWith(invoke)
     }
 
-    private func ConvertApplyWithExceptionToInvokeWithException(apply: ApplyWithException): Unit {
+    private func ConvertTryApplyToTryInvoke(apply: TryApply): Unit {
         let callee = apply.GetCallee()
         let instParentType = ResolveAutoEnvCallParentType(callee, apply)
         let methods = instParentType.GetClassDef().GetMethods()
@@ -1894,7 +1888,7 @@ public class ClosureConversion {
         let invokeContext = InvokeCallContext(methods[0], callee, funcContext)
         let retTy = apply.GetResultType() ??
             throw IllegalStateException("ClosureConversion apply-with-exception has no result type")
-        let invoke = builder.CreateInvokeWithException(retTy, invokeContext, apply.GetSuccessBlock(),
+        let invoke = builder.CreateTryInvoke(retTy, invokeContext, apply.GetSuccessBlock(),
             apply.GetErrorBlock(), apply.GetParentBlock() ??
                 throw IllegalStateException("ClosureConversion apply-with-exception has no parent block"))
         invoke.SetDebugLocation(apply.GetDebugLocation())
@@ -1935,7 +1929,7 @@ public class ClosureConversion {
             for (arg in apply.GetArgs()) {
                 funcTypeArgs.add(arg.GetType().getOrThrow())
             }
-        } else if (let Some(applyE) <- (expr as ApplyWithException)) {
+        } else if (let Some(applyE) <- (expr as TryApply)) {
             for (arg in applyE.GetArgs()) {
                 funcTypeArgs.add(arg.GetType().getOrThrow())
             }
@@ -1967,7 +1961,7 @@ public class ClosureConversion {
         return false
     }
 
-    private func ApplyWithExceptionNeedConvertToInvokeWithException(apply: ApplyWithException): Bool {
+    private func TryApplyNeedConvertToTryInvoke(apply: TryApply): Bool {
         if (apply.GetCallee().IsFunc()) {
             return false
         }
@@ -1978,34 +1972,34 @@ public class ClosureConversion {
     }
 
     private func TypeCastNeedConvertToBox(expr: Expression): Bool {
-        let typecast = (expr as TypeCast) ?? return false
-        let targetTy = typecast.GetTargetTy() ??
+        let typecast = (expr as ClassStaticCast) ?? return false
+        let targetTy = typecast.GetTargetType() ??
             throw IllegalStateException("ClosureConversion TypeCast has no target type")
-        let sourceTy = typecast.GetSourceTy() ??
+        let sourceTy = typecast.GetSourceType() ??
             throw IllegalStateException("ClosureConversion TypeCast has no source type")
         return targetTy.IsCJFunc() && !sourceTy.IsCJFunc()
     }
 
     private func TypeCastNeedConvertToUnBox(expr: Expression): Bool {
-        let typecast = (expr as TypeCast) ?? return false
-        let sourceTy = typecast.GetSourceTy() ??
+        let typecast = (expr as ClassStaticCast) ?? return false
+        let sourceTy = typecast.GetSourceType() ??
             throw IllegalStateException("ClosureConversion TypeCast has no source type")
-        let targetTy = typecast.GetTargetTy() ??
+        let targetTy = typecast.GetTargetType() ??
             throw IllegalStateException("ClosureConversion TypeCast has no target type")
         return sourceTy.IsCJFunc() && !targetTy.IsCJFunc()
     }
 
     private func BoxNeedConvertToTypeCast(expr: Expression): Bool {
         let box = (expr as Box) ?? return false
-        let sourceTy = box.GetSourceTy() ??
+        let sourceTy = box.GetSourceType() ??
             throw IllegalStateException("ClosureConversion Box has no source type")
         return sourceTy.IsCJFunc()
     }
 
     private func UnBoxNeedConvertToTypeCast(expr: Expression): Bool {
-        let unbox = (expr as UnBox) ?? return false
-        let targetTy = unbox.GetTargetTy() ??
-            throw IllegalStateException("ClosureConversion UnBox has no target type")
+        let unbox = (expr as UnBoxToValue) ?? return false
+        let targetTy = unbox.GetTargetType() ??
+            throw IllegalStateException("ClosureConversion UnBoxToValue has no target type")
         return targetTy.IsCJFunc()
     }
 
@@ -2047,7 +2041,7 @@ public class ClosureConversion {
             return base.GetType()
         }
         let expr = (base as LocalVar).getOrThrow().GetExpr() ?? return base.GetType()
-        if (expr.GetExprKind() != ExprKind.TYPECAST) {
+        if (expr.GetExprKind() != ExprKind.CLASS_STATIC_CAST) {
             return base.GetType()
         }
         let srcValType = (expr as TypeCast).getOrThrow().GetSourceValue().GetType().getOrThrow()
@@ -2127,7 +2121,7 @@ public class ClosureConversion {
             let op = expr.GetOperand(idx)
             let opClassTy = (op.GetType().getOrThrow().StripAllRefs() as ClassType).getOrThrow()
             let expectedType = builder.context.GetRefTy(opClassTy.GetClassDef().GetSuperClassTy().getOrThrow())
-            let typecast = builder.CreateTypeCast(expectedType, op, parentBlock)
+            let typecast = builder.CreateClassStaticCast(expectedType, op, parentBlock)
             typecast.MoveBefore(expr)
             expr.ReplaceOperand(idx, RequireResult(typecast))
         }
@@ -2329,14 +2323,14 @@ public class ClosureConversion {
         path.add(0u64)
         let storeMemberVar = builder.CreateStoreElementRef(applyRetVal, RequireResult(allocate), path, parentBlock)
         storeMemberVar.MoveAfter(allocate)
-        let typecast = builder.CreateTypeCast(applyRetType, RequireResult(allocate), parentBlock)
+        let typecast = builder.CreateClassStaticCast(applyRetType, RequireResult(allocate), parentBlock)
         typecast.MoveAfter(storeMemberVar)
         let skip = ArrayList<Expression>()
         skip.add(storeMemberVar)
         ReplaceOperandWithAutoEnvWrapperClass(applyRetVal, RequireResult(typecast), skip)
     }
 
-    private func CastApplyWithExceptionArgAndRetIfNeed(e: ApplyWithException): Unit {
+    private func CastTryApplyArgAndRetIfNeed(e: TryApply): Unit {
         let maybeCalleeType = e.GetCallee().GetType().getOrThrow() as FuncType
         if (maybeCalleeType.isNone()) {
             return
@@ -2352,11 +2346,11 @@ public class ClosureConversion {
         let declaredRetType = calleeType.GetReturnType().StripAllRefs()
         let applyRetType = e.GetResult().getOrThrow().GetType().getOrThrow().StripAllRefs()
         if (!declaredRetType.IsAutoEnvInstBase() && applyRetType.IsAutoEnvInstBase()) {
-            WrapApplyWithExceptionRetVal(e)
+            WrapTryApplyRetVal(e)
         }
     }
 
-    private func WrapApplyWithExceptionRetVal(apply: ApplyWithException): Unit {
+    private func WrapTryApplyRetVal(apply: TryApply): Unit {
         let applyRetVal = apply.GetResult().getOrThrow()
         let applyRetType = applyRetVal.GetType().getOrThrow()
         let applyRetTypeNoRef = (applyRetType.StripAllRefs() as ClassType).getOrThrow()
@@ -2378,7 +2372,7 @@ public class ClosureConversion {
             let storeMemberVar = builder.CreateStoreElementRef(applyRetVal, RequireResult(allocate), path,
                 userParentBlock)
             storeMemberVar.MoveAfter(allocate)
-            let typecast = builder.CreateTypeCast(applyRetType, RequireResult(allocate), userParentBlock)
+            let typecast = builder.CreateClassStaticCast(applyRetType, RequireResult(allocate), userParentBlock)
             typecast.MoveAfter(storeMemberVar)
             user.ReplaceOperand(applyRetVal, RequireResult(typecast))
         }
@@ -2409,22 +2403,22 @@ public class ClosureConversion {
         path.add(0u64)
         let storeMemberVar = builder.CreateStoreElementRef(invokeRetVal, RequireResult(allocate), path, parentBlock)
         storeMemberVar.MoveAfter(allocate)
-        let typecast = builder.CreateTypeCast(invokeRetType, RequireResult(allocate), parentBlock)
+        let typecast = builder.CreateClassStaticCast(invokeRetType, RequireResult(allocate), parentBlock)
         typecast.MoveAfter(storeMemberVar)
         let skip = ArrayList<Expression>()
         skip.add(storeMemberVar)
         ReplaceOperandWithAutoEnvWrapperClass(invokeRetVal, RequireResult(typecast), skip)
     }
 
-    private func CastInvokeWithExceptionRetIfNeed(e: DynamicDispatchWithException): Unit {
+    private func CastTryInvokeRetIfNeed(e: DynamicDispatchWithException): Unit {
         let declaredRetType = e.GetMethodType().GetReturnType().StripAllRefs()
         let invokeRetType = e.GetResult().getOrThrow().GetType().getOrThrow().StripAllRefs()
         if (!declaredRetType.IsAutoEnvInstBase() && invokeRetType.IsAutoEnvInstBase()) {
-            WrapInvokeWithExceptionRetVal(e)
+            WrapTryInvokeRetVal(e)
         }
     }
 
-    private func WrapInvokeWithExceptionRetVal(e: DynamicDispatchWithException): Unit {
+    private func WrapTryInvokeRetVal(e: DynamicDispatchWithException): Unit {
         let invokeRetVal = e.GetResult().getOrThrow()
         let invokeRetType = invokeRetVal.GetType().getOrThrow()
         let invokeRetTypeNoRef = (invokeRetType.StripAllRefs() as ClassType).getOrThrow()
@@ -2446,7 +2440,7 @@ public class ClosureConversion {
             let storeMemberVar = builder.CreateStoreElementRef(invokeRetVal, RequireResult(allocate), path,
                 userParentBlock)
             storeMemberVar.MoveAfter(allocate)
-            let typecast = builder.CreateTypeCast(invokeRetType, RequireResult(allocate), userParentBlock)
+            let typecast = builder.CreateClassStaticCast(invokeRetType, RequireResult(allocate), userParentBlock)
             typecast.MoveAfter(storeMemberVar)
             user.ReplaceOperand(invokeRetVal, RequireResult(typecast))
         }
@@ -2489,7 +2483,7 @@ public class ClosureConversion {
             parentBlock)
         storeMemberVar.MoveAfter(load)
         let expectedType = (getEleRefRetType as RefType).getOrThrow().GetBaseType()
-        let typecast = builder.CreateTypeCast(expectedType, RequireResult(allocate1), parentBlock)
+        let typecast = builder.CreateClassStaticCast(expectedType, RequireResult(allocate1), parentBlock)
         typecast.MoveAfter(storeMemberVar)
         let typecastRetType = RequireResult(typecast).GetType().getOrThrow()
         let allocate2 = builder.CreateAllocate(builder.context.GetRefTy(typecastRetType), typecastRetType,
@@ -2520,7 +2514,7 @@ public class ClosureConversion {
         path.add(0u64)
         let storeMemberVar = builder.CreateStoreElementRef(fieldRetVal, RequireResult(allocate), path, parentBlock)
         storeMemberVar.MoveAfter(allocate)
-        let typecast = builder.CreateTypeCast(fieldRetType, RequireResult(allocate), parentBlock)
+        let typecast = builder.CreateClassStaticCast(fieldRetType, RequireResult(allocate), parentBlock)
         typecast.MoveAfter(storeMemberVar)
         let skip = ArrayList<Expression>()
         skip.add(storeMemberVar)
@@ -2539,16 +2533,16 @@ public class ClosureConversion {
         }
     }
 
-    private func CastTypeCastArgIfNeed(e: TypeCast): Unit {
-        let srcType = e.GetSourceTy().getOrThrow().StripAllRefs()
-        let targetType = e.GetTargetTy().getOrThrow().StripAllRefs()
+    private func CastTypeCastArgIfNeed(e: ClassStaticCast): Unit {
+        let srcType = e.GetSourceType().getOrThrow().StripAllRefs()
+        let targetType = e.GetTargetType().getOrThrow().StripAllRefs()
         if (IsAutoEnvGenericType(srcType) && targetType.IsAutoEnvInstBase()) {
             WrapTypeCastSrcVal(e)
         }
     }
 
-    private func WrapTypeCastSrcVal(typecast: TypeCast): Unit {
-        let targetTypeNoRef = (typecast.GetTargetTy().getOrThrow().StripAllRefs() as ClassType).getOrThrow()
+    private func WrapTypeCastSrcVal(typecast: ClassStaticCast): Unit {
+        let targetTypeNoRef = (typecast.GetTargetType().getOrThrow().StripAllRefs() as ClassType).getOrThrow()
         let autoEnvWrapperDef = GetOrCreateAutoEnvWrapper(targetTypeNoRef)
         let parentBlock = typecast.GetParentBlock().getOrThrow()
         let autoEnvWrapperType = RequireClassType(autoEnvWrapperDef)
@@ -2563,7 +2557,7 @@ public class ClosureConversion {
         typecast.ReplaceOperand(srcVal, RequireResult(allocate))
     }
 
-    private func CastSpawnArgIfNeed(e: Spawn): Unit {
+    private func CastSpawnArgIfNeed(e: SpawnBase): Unit {
         if (!e.IsExecuteClosure()) {
             return
         }
@@ -2590,12 +2584,12 @@ public class ClosureConversion {
             for (expr in block.GetExpressions()) {
                 if (let Some(apply) <- (expr as Apply)) {
                     CastApplyArgAndRetIfNeed(apply)
-                } else if (let Some(applyWithException) <- (expr as ApplyWithException)) {
-                    CastApplyWithExceptionArgAndRetIfNeed(applyWithException)
+                } else if (let Some(tryApply) <- (expr as TryApply)) {
+                    CastTryApplyArgAndRetIfNeed(tryApply)
                 } else if (let Some(invoke) <- (expr as Invoke)) {
                     CastInvokeRetIfNeed(invoke)
-                } else if (let Some(invokeWithException) <- (expr as InvokeWithException)) {
-                    CastInvokeWithExceptionRetIfNeed(invokeWithException)
+                } else if (let Some(tryInvoke) <- (expr as TryInvoke)) {
+                    CastTryInvokeRetIfNeed(tryInvoke)
                 } else {
                     let enumRes = EnumConstructorNeedTypeCast(expr)
                     if (enumRes[0]) {
@@ -2612,9 +2606,9 @@ public class ClosureConversion {
                             }
                         } else if (let Some(rawArrayInitByValue) <- (expr as RawArrayInitByValue)) {
                             CastRawArrayInitByValueArgIfNeed(rawArrayInitByValue)
-                        } else if (let Some(typecast) <- (expr as TypeCast)) {
+                        } else if (let Some(typecast) <- (expr as ClassStaticCast)) {
                             CastTypeCastArgIfNeed(typecast)
-                        } else if (let Some(spawnExpr) <- (expr as Spawn)) {
+                        } else if (let Some(spawnExpr) <- (expr as SpawnBase)) {
                             CastSpawnArgIfNeed(spawnExpr)
                         }
                     }
@@ -2639,7 +2633,7 @@ public class ClosureConversion {
         path.add(0u64)
         let storeMemberVar = builder.CreateStoreElementRef(param, RequireResult(allocate), path, parentBlock)
         storeMemberVar.MoveAfter(allocate)
-        let typecast = builder.CreateTypeCast(param.GetType().getOrThrow(), RequireResult(allocate), parentBlock)
+        let typecast = builder.CreateClassStaticCast(param.GetType().getOrThrow(), RequireResult(allocate), parentBlock)
         typecast.MoveAfter(storeMemberVar)
         let skip = ArrayList<Expression>()
         skip.add(storeMemberVar)
@@ -2791,14 +2785,14 @@ public class ClosureConversion {
         if (let Some(apply) <- (user as Apply)) {
             return apply.GetCallee() == op
         }
-        if (let Some(applyWithException) <- (user as ApplyWithException)) {
-            return applyWithException.GetCallee() == op
+        if (let Some(tryApply) <- (user as TryApply)) {
+            return tryApply.GetCallee() == op
         }
         if (let Some(invoke) <- (user as DynamicDispatch)) {
             return invoke.GetCallee() == op
         }
-        if (let Some(invokeWithException) <- (user as DynamicDispatchWithException)) {
-            return invokeWithException.GetCallee() == op
+        if (let Some(tryInvoke) <- (user as DynamicDispatchWithException)) {
+            return tryInvoke.GetCallee() == op
         }
         return false
     }

@@ -1809,34 +1809,6 @@ public class ASTCloner {
                 dst.isMacroPackage = src.isMacroPackage
                 dst.noSubPkg = src.noSubPkg
                 dst.needExported = src.needExported
-                dst.interopCJApiStrategy = src.interopCJApiStrategy
-                dst.interopCJGenericTypeStrategy = src.interopCJGenericTypeStrategy
-                for (api in src.interopCJIncludedApis) { dst.interopCJIncludedApis.add(api) }
-                for (api in src.interopCJExcludedApis) { dst.interopCJExcludedApis.add(api) }
-                for (outerType in src.allowedInteropCJGenericInstantiations.keys()) {
-                    if (let Some(innerMap) <- src.allowedInteropCJGenericInstantiations.get(outerType)) {
-                        let copiedInnerMap = HashMap<String, GenericTypeArguments>()
-                        for (innerType in innerMap.keys()) {
-                            if (let Some(args) <- innerMap.get(innerType)) {
-                                let copiedArgs = GenericTypeArguments()
-                                for (symbol in args.symbols) { copiedArgs.symbols.add(symbol) }
-                                copiedInnerMap[innerType] = copiedArgs
-                            }
-                        }
-                        dst.allowedInteropCJGenericInstantiations[outerType] = copiedInnerMap
-                    }
-                }
-                for (tuple in src.interopTuples) { dst.interopTuples.add(tuple) }
-                dst.isInteropCJPackageConfig = src.isInteropCJPackageConfig
-                for (lambdaPattern in src.lambdaPatterns) {
-                    let copiedPattern = LambdaPattern(
-                        lambdaPattern.signature, lambdaPattern.parameterTypes.toArray(), lambdaPattern.returnType)
-                    for (classMapping in lambdaPattern.classMappings) {
-                        copiedPattern.classMappings.add(ClassMapping(classMapping.name, classMapping.pkgPath))
-                    }
-                    copiedPattern.fullPackageName = lambdaPattern.fullPackageName
-                    dst.lambdaPatterns.add(copiedPattern)
-                }
                 for (dep in src.GetAllDependentStdPkgs()) { dst.AddDependentStdPkg(dep) }
             }
         }

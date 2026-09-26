@@ -35,10 +35,12 @@ make_colour_tuple() {
   mkdir -p "$TMP/colour-tuple/bin" "$TMP/colour-tuple/lib" "$TMP/colour-tuple/fixed-llc"
   cp /bin/true "$TMP/colour-tuple/bin/opt"
   cp /bin/true "$TMP/colour-tuple/bin/llc"
+  cp /bin/true "$TMP/colour-tuple/bin/ld.lld"
   printf 'CJLLVM-COMMIT:1111111111111111111111111111111111111111\n' >> "$TMP/colour-tuple/bin/opt"
   printf 'shim\n' > "$TMP/colour-tuple/fixed-llc/cjselfhost_llvmshim.o"
   printf 'llc gzip fixture\n' > "$TMP/colour-tuple/fixed-llc/llc.gz"
   printf 'opt gzip fixture\n' > "$TMP/colour-tuple/fixed-llc/opt.gz"
+  printf 'ld.lld gzip fixture\n' > "$TMP/colour-tuple/fixed-llc/ld.lld.gz"
   printf 'fixed llc\n' > "$TMP/colour-tuple/fixed-llc/llvm-tools.manifest"
   printf 'static LLVM tuple\n' > "$TMP/colour-tuple/lib/STATIC_LLVM.txt"
   printf 'LLVM_SHA=1111111111111111111111111111111111111111\n' > "$TMP/colour-tuple/MANIFEST"
@@ -153,7 +155,7 @@ check_dry_contract() {
   check_count LLVM-TUPLE 2 'sdk_build.sh .*--target .*--llvm-tuple .*colour-tuple' "$log"
   check_count HOST-RT 2 '--verify-host-rt .*/host-rt' "$log"
   check_count HOST-RUNNER 2 'stage1_host_runner.sh .*/sdk-stage1 .*/sdk-stage0 .*/host-rt' "$log"
-  check_count LLVM-TUPLE 24 'ASSERT installed-colour-tuple sha256=planned' "$log"
+   check_count LLVM-TUPLE 30 'ASSERT installed-colour-tuple sha256=planned' "$log"
   check_count LLVM-RULER 2 'ruler=readelf--dyn-syms symbol=llvm::isCJTypedReadHelperCandidate' "$log"
   check_count LLVM-RULER 1 'ASSERT official-opt-zero ruler=strings .* hits=0' "$log"
   check_count LLVM-RULER 2 'ASSERT colour-opt-stamp ruler=strings .* hits=1' "$log"
@@ -191,6 +193,9 @@ make_sdk_fixture() {
   cp /bin/true "$base/tools/bin/cjpm"
   cp /bin/true "$base/third_party/llvm/bin/llc"
   cp /bin/true "$base/third_party/llvm/bin/opt"
+  cp /bin/true "$base/third_party/llvm/bin/ld.lld"
+  cjc_sha=$(sha256sum "$base/bin/cjc" | awk '{print $1}')
+  printf '{"compiler_sha256":"%s"}\n' "$cjc_sha" > "$base/std-producer.json"
   printf 'int base_llvm;\n' > "$TMP/base-llvm.c"
   cc -shared -fPIC "$TMP/base-llvm.c" -o "$base/third_party/llvm/lib/libLLVM-15.so"
   printf 'int host_runtime;\n' > "$TMP/host-runtime.c"
@@ -315,7 +320,7 @@ run_sdk_runtime_checked() {
 }
 
 positive_runtime_layouts() {
-  local flat_sha=2222222222222222222222222222222222222222 tuple=linux_x86_64_cjnative
+  local flat_sha=4c4cbf53b44497103e76e2a47a8fa35f5d7a7287 tuple=linux_x86_64_cjnative
   new_tmp
   make_sdk_fixture
   make_runtime_payload "$TMP/$flat_sha" "$flat_sha"
@@ -328,7 +333,7 @@ positive_runtime_layouts() {
     fail runtime-flat 'boundscheck SO was not installed from flat sodepot'
   cmp -s "$TMP/sdk-base/lib/$tuple/libcangjie-runtime.a" "$TMP/sdk-flat/lib/$tuple/libcangjie-runtime.a" ||
     fail runtime-flat 'flat shared closure unexpectedly changed the base static archive'
-  make_runtime_payload "$TMP/runtime-install" 3333333333333333333333333333333333333333 "$tuple"
+  make_runtime_payload "$TMP/runtime-install" 4c4cbf53b44497103e76e2a47a8fa35f5d7a7287 "$tuple"
   run_sdk_runtime_checked runtime-nested "$SDK_PRODUCT" "$TMP/runtime-install" "$TMP/sdk-nested"
   cmp -s "$TMP/runtime-install/runtime/lib/$tuple/libcangjie-runtime.so" "$TMP/sdk-nested/runtime/lib/$tuple/libcangjie-runtime.so" ||
     fail runtime-nested 'runtime SO was not installed from nested prefix'
@@ -338,7 +343,7 @@ positive_runtime_layouts() {
 }
 
 positive_runtime_layout_symlink_nested_only() {
-  local sha=9999999999999999999999999999999999999999 tuple=linux_x86_64_cjnative
+  local sha=4c4cbf53b44497103e76e2a47a8fa35f5d7a7287 tuple=linux_x86_64_cjnative
   new_tmp
   make_sdk_fixture
   make_runtime_payload "$TMP/real-install" "$sha" "$tuple"
@@ -353,7 +358,7 @@ positive_runtime_layout_symlink_nested_only() {
 }
 
 positive_runtime_layout_symlink_flat_only() {
-  local sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa tuple=linux_x86_64_cjnative
+  local sha=4c4cbf53b44497103e76e2a47a8fa35f5d7a7287 tuple=linux_x86_64_cjnative
   new_tmp
   make_sdk_fixture
   make_runtime_payload "$TMP/real-flat" "$sha"
@@ -911,7 +916,7 @@ case "${1:-test}" in
     cmp -s "$TMP/sdk-base/third_party/llvm/bin/opt" "$TMP/sdk-so/third_party/llvm/bin/opt" ||
       fail LLVM-SO 'SO-only install changed opt'
     run_sdk_tuple "$SDK_PRODUCT" "$TMP/sdk-tuple" > "$TMP/sdk-tuple.log"
-    for rel in MANIFEST bin/llc bin/opt lib/STATIC_LLVM.txt fixed-llc/cjselfhost_llvmshim.o fixed-llc/llc.gz fixed-llc/opt.gz fixed-llc/llvm-tools.manifest; do
+    for rel in MANIFEST bin/llc bin/opt bin/ld.lld lib/STATIC_LLVM.txt fixed-llc/cjselfhost_llvmshim.o fixed-llc/llc.gz fixed-llc/opt.gz fixed-llc/ld.lld.gz fixed-llc/llvm-tools.manifest; do
       cmp -s "$TMP/colour-tuple/$rel" "$TMP/sdk-tuple/third_party/llvm/$rel" ||
         fail LLVM-TUPLE "sdk_build tuple mismatch: $rel"
     done
@@ -958,7 +963,7 @@ case "${1:-test}" in
         llvm-so-location) marker='SDK-BUILD-FAIL llvm-so 安装后 sha256 不一致';;
         tuple-missing-opt) marker='BOOTSTRAP-FAIL \[stage0\] colour LLVM tuple 缺 bin/opt';;
         tuple-sums) marker='BOOTSTRAP-FAIL \[stage0\] colour LLVM tuple SHA256SUMS strict 校验失败';;
-        tuple-extra-entry) marker='BOOTSTRAP-FAIL \[stage0\] colour LLVM tuple SHA256SUMS 必须且只能登记 8 个 payload: entries=9';;
+        tuple-extra-entry) marker='BOOTSTRAP-FAIL \[stage0\] colour LLVM tuple SHA256SUMS 必须且只能登记 10 个 payload: entries=11';;
         old-host-llvm) marker='BOOTSTRAP-FAIL \[init\] 参数 --host-llvm 已废弃；使用 --host-llvm-so';;
         old-colour-llc) marker='BOOTSTRAP-FAIL \[init\] 参数 --colour-llc 已废弃；使用 --colour-tuple';;
         cjpm-toml) marker='BOOTSTRAP-FAIL \[init\] --src 缺少 cjpm.toml';;
