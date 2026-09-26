@@ -68,6 +68,7 @@ def main():
             'exit': 'expect 0 operand(s), but there are 1 in fact.',
             'lambda': "in function @caller, lambda %lambda doesn't have identifier.",
             'control': '', 'lambda-good': '',
+            'forin-range': '', 'forin-iter': '', 'forin-closed-range': '',
         }
         for mode, diagnostic in diagnostics.items():
             start = time.monotonic()
@@ -77,13 +78,17 @@ def main():
             output = (out / (mode + '.log')).read_text()
             expected = 'true' if not diagnostic else 'false'
             target = f'TARGET mode={mode} observed={expected} expected={expected}'
+            warning_names = {'forin-range': 'ForInRange', 'forin-iter': 'ForInIter',
+                             'forin-closed-range': 'ForInClosedRange'}
+            warning = ('find unrecongnized ExprKind `' + warning_names[mode] + '.') if mode in warning_names else ''
             record['cases'][mode] = {
                 'rc': rc, 'wall': time.monotonic() - start,
                 'target_executed': f'TARGET mode={mode} ' in output,
+                'target_warning': warning in output if warning else 'chir checker warning:' not in output,
                 'target_bool': target in output,
                 'target_diagnostic': diagnostic in output if diagnostic else 'chir checker error:' not in output,
             }
-        record['test_rc'] = int(any(c['rc'] != 0 or not c['target_executed'] or not c['target_bool'] or not c['target_diagnostic']
+        record['test_rc'] = int(any(c['rc'] != 0 or not c['target_executed'] or not c['target_bool'] or not c['target_diagnostic'] or not c['target_warning']
                                     for c in record['cases'].values()))
     record['uptime_after'] = subprocess.check_output(['uptime'], text=True).strip()
     (out / 'result.json').write_text(json.dumps(record, indent=2) + '\n')
