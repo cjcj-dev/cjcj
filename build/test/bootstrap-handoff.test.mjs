@@ -171,7 +171,7 @@ for (const hostHeap of ['12288MB', '10752MB', '5376MB']) {
     });
     assert.equal(run.status, 0, run.stderr);
     console.log(`HEAP_BOUNDARY_ASSERT_REACHED ${JSON.stringify(run.stdout)}`);
-    assert.equal(run.stdout, `host heap=${hostHeap}\ncompiler heap=20GB\n`);
+    assert.equal(run.stdout, `host heap=${hostHeap}\ncompiler heap=32GB\n`);
   });
 }
 

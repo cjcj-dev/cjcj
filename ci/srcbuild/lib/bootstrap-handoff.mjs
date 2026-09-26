@@ -61,7 +61,7 @@ export async function prepareBootstrapHandoff({work, sdk, source, tuple}) {
   await fs.chmod(path.join(sdk, 'bin', 'cjcj-stage2'), 0o755);
   // Only the coloured compiler needs the larger heap. The official host cjpm
   // must retain the resource-limited parent value (its limit excludes swap).
-  await runner(path.join(sdk, 'bin', 'cjc'), path.join(sdk, 'bin', 'cjcj-stage2'), targetLd, '20GB');
+  await runner(path.join(sdk, 'bin', 'cjc'), path.join(sdk, 'bin', 'cjcj-stage2'), targetLd, '32GB');
   await runner(path.join(sdk, 'tools', 'bin', 'cjpm'), path.join(sdk, 'tools', 'bin', 'cjpm-stage1'), binding.host_ld);
   for (const name of ['opt', 'llc']) {
     await runner(path.join(sdk, 'third_party', 'llvm', 'bin', name),
