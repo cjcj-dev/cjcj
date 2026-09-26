@@ -3,7 +3,7 @@ name: Bootstrap AST support
 on:
   push:
     branches: [master]
-    paths: [.github/workflows/build-ast-support.yml, ci/build_ast_support.sh, ci/source_pin.env, ci/ast_sdk_pin.env]
+    paths: [.github/workflows/build-ast-support.yml, ci/build_ast_support.sh, ci/source_pin.env, ci/host_sdk_pin.env]
   workflow_dispatch:
     inputs:
       cold_cache:
@@ -30,7 +30,9 @@ jobs:
       - uses: actions/checkout@v7
       - name: Load existing source pins
         run: |
-          cat ci/source_pin.env ci/llvm_pin.env ci/ast_sdk_pin.env >> "$GITHUB_ENV"
+          cat ci/source_pin.env ci/llvm_pin.env >> "$GITHUB_ENV"
+      - name: Load host toolchain pin
+        run: cat ci/host_sdk_pin.env >> "$GITHUB_ENV"
       - uses: ./.github/actions/sccache
         with:
           component: ast-support
@@ -78,9 +80,9 @@ jobs:
           mkdir -p "$RUNNER_TEMP/ast-cjv" "$RUNNER_TEMP/ast-nightly-home"
           curl -fsSL "https://github.com/Zxilly/cjv/releases/download/v0.2.20/cjv_${asset}.tar.gz" | tar -xz -C "$RUNNER_TEMP/ast-cjv"
           cjv_bin=$(find "$RUNNER_TEMP/ast-cjv" -type f -name cjv | head -1)
-          HOME="$RUNNER_TEMP/ast-nightly-home" "$cjv_bin" install "${AST_FLATBUFFERS_SDK:?}"
+          HOME="$RUNNER_TEMP/ast-nightly-home" "$cjv_bin" install "$CJCJ_TOOLCHAIN"
       - name: Build AST support and SDK inputs
-        run: bash ci/build_ast_support.sh compiler ast-build ast-artifact "$RUNNER_TEMP/ast-nightly-home/.cjv/toolchains/${AST_FLATBUFFERS_SDK:?}"
+        run: bash ci/build_ast_support.sh compiler ast-build ast-artifact "$RUNNER_TEMP/ast-nightly-home/.cjv/toolchains/$CJCJ_TOOLCHAIN"
       - name: Record provenance
         env:
           PLATFORM: ${{ matrix.platform }}
@@ -93,6 +95,7 @@ jobs:
         with:
           component: ast-support
           platform: ${{ matrix.platform }}
+          require-compiles: ${{ job.status == 'success' }}
       - uses: actions/upload-artifact@v7
         with:
           name: ast-support-${{ matrix.platform }}-${{ github.run_id }}-${{ github.run_attempt }}

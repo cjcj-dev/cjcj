@@ -313,6 +313,9 @@ private class ToCHIR {
     private let delVirtFuncWrapForIncr: VirtualWrapperDepMap = VirtualWrapperDepMap()
     private let ccOutFuncsRawMangle: HashSet<String> = HashSet<String>()
     private var maybeUnreachable: HashMap<ChirBlock, ChirExpression> = HashMap<ChirBlock, ChirExpression>()
+    private var srcCodeImportedFuncs = ArrayList<ChirFunction>()
+    private var srcCodeImportedVars = ArrayList<ChirGlobalVar>()
+    private var initFuncsForConstVar = ArrayList<ChirFunction>()
     private var chirPkg: Option<RealCHIRPackage> = None
     private var debugFileIndex: UInt64 = 0u64
     private var isComputingAnnos: Bool = false
@@ -324,38 +327,49 @@ private class ToCHIR {
         this.builder = ChirBuilder(instance.chirData.getOrThrow().GetRealCHIRContext())
     }
 
+    // CHIR.cpp:1318-1356: translation owns its phase recorder.
+    private func TranslateToCHIR(): Bool {
+        try (recorder = ProfileRecorder("CHIR", "AST to CHIR Translation")) {
+            let chirType = CHIRType(builder, CHIRTypeCache())
+            let ast2chir = FaithfulAST2CHIR(builder, chirType, instance.GetSourceManager(),
+                gim: instance.gim,
+                importedPkgs: instance.importManager.getOrThrow().GetAllImportedPackages(),
+                directImportedPkgs: instance.importManager.getOrThrow().GetCurImportedPackages(pkg.getOrThrow().fullPackageName),
+                overrideSrcFuncResolver: Some({ funcDecl =>
+                    match (instance.faithfulSemaInstance) {
+                        case Some(semaInstance) => semaInstance.typeManager.GetTopOverriddenFuncDecl(Some(funcDecl))
+                        case None => None
+                    }
+                }),
+                opts: instance.invocation.globalOptions,
+                kind: instance.kind,
+                cachedInfo: instance.cachedInfo,
+                chirWFC: instance.invocation.globalOptions.chirWFC,
+                chirOptOverO2: instance.invocation.globalOptions.IsCHIROptimizationLevelOverO2(),
+                diag: Some(instance.diag.AsBasicDiagnosticEngine()))
+            if (!ast2chir.ToCHIRPackage(pkg.getOrThrow()) || instance.diag.GetErrorCount() != 0) {
+                return false
+            }
+            let lowered = match (ast2chir.GetPackage()) {
+                case Some(value) => value
+                case None => return false
+            }
+            srcCodeImportedFuncs = ast2chir.GetSrcCodeImportedFuncs()
+            srcCodeImportedVars = ast2chir.GetSrcCodeImportedVars()
+            initFuncsForConstVar = ast2chir.GetInitFuncsForConstVar()
+            maybeUnreachable = ast2chir.GetMaybeUnreachableBlocks()
+            chirPkg = Some(lowered)
+            DumpCHIRToFile("AST_CHIR")
+            ClearASTResources()
+        }
+        return true
+    }
+
     public func Run(): Option<RealCHIRPackage> {
-        let chirType = CHIRType(builder, CHIRTypeCache())
-        let ast2chir = FaithfulAST2CHIR(builder, chirType, instance.GetSourceManager(),
-            gim: instance.gim,
-            importedPkgs: instance.importManager.getOrThrow().GetAllImportedPackages(),
-            directImportedPkgs: instance.importManager.getOrThrow().GetCurImportedPackages(pkg.getOrThrow().fullPackageName),
-            overrideSrcFuncResolver: Some({ funcDecl =>
-                match (instance.faithfulSemaInstance) {
-                    case Some(semaInstance) => semaInstance.typeManager.GetTopOverriddenFuncDecl(Some(funcDecl))
-                    case None => None
-                }
-            }),
-            opts: instance.invocation.globalOptions,
-            kind: instance.kind,
-            cachedInfo: instance.cachedInfo,
-            chirWFC: instance.invocation.globalOptions.chirWFC,
-            chirOptOverO2: instance.invocation.globalOptions.IsCHIROptimizationLevelOverO2(),
-            diag: Some(instance.diag.AsBasicDiagnosticEngine()))
-        if (!ast2chir.ToCHIRPackage(pkg.getOrThrow()) || instance.diag.GetErrorCount() != 0) {
+        if (!TranslateToCHIR()) {
             return None
         }
-        let lowered = match (ast2chir.GetPackage()) {
-            case Some(value) => value
-            case None => return None
-        }
-        let srcCodeImportedFuncs = ast2chir.GetSrcCodeImportedFuncs()
-        let srcCodeImportedVars = ast2chir.GetSrcCodeImportedVars()
-        let initFuncsForConstVar = ast2chir.GetInitFuncsForConstVar()
-        maybeUnreachable = ast2chir.GetMaybeUnreachableBlocks()
-        chirPkg = Some(lowered)
-        DumpCHIRToFile("AST_CHIR")
-        ClearASTResources()
+        let lowered = chirPkg.getOrThrow()
         // C++: CHIR/CHIR.cpp:1133-1140 ToCHIR::Run.
         if (instance.invocation.globalOptions.outputMode == OutputMode.CHIR) {
             let fileName = FileUtil.JoinPath(outputPath, lowered.GetName()) + CHIR_SERIALIZATION_FILE_EXTENSION
