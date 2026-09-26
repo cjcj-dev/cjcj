@@ -1153,7 +1153,11 @@ bootstrap_input_sha256() {
 }
 
 # P12: the runtime is a declared external input, never an implicit depot lookup.
-# Point at the directory containing BOTH shared libraries (not an SDK root).
+# Declare CJCJ_BOOTSTRAP_COLOUR_RT as the absolute directory containing BOTH
+# libcangjie-runtime.so and libboundscheck.so (not an SDK root). Supply reviewed
+# CJCJ_BOOTSTRAP_COLOUR_RT_SHA256 and CJCJ_BOOTSTRAP_BOUNDSCHECK_SHA256
+# from that external artifact release. Dry-run validates the same input.
+# The runtime embedded CJRT-COMMIT must equal ci/runtime_pin.env RUNTIME_REF.
 # Expected digests come from the input provider, not from hashing an unchecked
 # file and treating that freshly computed value as its own expected identity.
 assert_bootstrap_colour_runtime() {
