@@ -432,7 +432,7 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
       CROSS_STD_ARTIFACTS: JSON.stringify([{tuple, artifact: 'final-std-android-aarch64'}])}});
     const output = path.join(androidOut, 'cjcj-fixture-linux-x64-android');
     const names = [`runtime/lib/${tuple}/libcangjie-runtime.so`, `runtime/lib/${tuple}/libboundscheck.so`,
-      `lib/${tuple}/cjstart.o`, `lib/${tuple}/libcangjie-std-core.a`];
+      `lib/${tuple}/cjstart.o`, `lib/${tuple}/libcangjie-std-core.a`, `runtime/lib/${tuple}/libcangjie-std-core.so`];
     const observed = await Promise.all(names.map(async name => {
       const bytes = await fs.readFile(path.join(output, name)).catch(() => null);
       return bytes ? crypto.createHash('sha256').update(bytes).digest('hex') : 'MISSING';

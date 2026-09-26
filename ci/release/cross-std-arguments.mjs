@@ -18,4 +18,3 @@ export function crossStdArguments(text, root) {
     return args;
   });
 }
-
