@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import {CANONICAL_WORKLOADS} from '../build/lib/canonical-workloads.mjs';
+import {fileSha256} from '../build/lib/package-lineage.mjs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -154,6 +156,20 @@ async function evidenceFixture(t, {failing = '', positiveControls = true, verdic
   await write(root, 'fys0/f3-control.log', positiveControls ? f3Log(194) : '');
   await write(root, 'fys0/marksurvive.log', markSurvivalLog(0));
   await write(root, 'fys0/marksurvive-control.log', positiveControls ? markSurvivalLog(79) : '');
+  const head = spawnSync('git', ['-C', repo, 'rev-parse', 'HEAD'], {encoding: 'utf8'});
+  assert.equal(head.status, 0, head.stderr);
+  const workloads = [];
+  for (const item of CANONICAL_WORKLOADS) {
+    // Gate-parser fixture only, not a claim that stage2 compiled these bytes.
+    await write(root, `canonical-workloads/${item.name}`, `G12 identity fixture ${item.name}`);
+    workloads.push({...item, file: item.name, source_sha256: 'a'.repeat(64),
+      elf_sha256: await fileSha256(path.join(root, 'canonical-workloads', item.name))});
+  }
+  await write(root, 'canonical-workloads/CANONICAL_WORKLOADS.json', JSON.stringify({
+    schema: 1, cjcj_head_sha: head.stdout.trim(), runtime_source_sha: RUNTIME_COMMIT,
+    compiler: {kind: 'cjcj-stage2', sha256: 'b'.repeat(64)}, final_std_sha256: 'c'.repeat(64),
+    flags: ['-O2', '--static-std'], workloads,
+  }));
   await bindEvidence(root, 'G12', repo);
   return root;
 }
@@ -223,4 +239,36 @@ test('human verdict strings are ignored by the integer computation', async t => 
   const {result, value} = gate(evidence);
   assert.equal(result.status, 0, result.stderr);
   assert.equal(value.status, 'MET');
+});
+
+
+for (const {name} of CANONICAL_WORKLOADS) {
+  test(`G12 isolates the P21 identity mismatch for ${name}`, async t => {
+    const evidence = await evidenceFixture(t);
+    const manifest = path.join(evidence, 'canonical-workloads/CANONICAL_WORKLOADS.json');
+    const record = JSON.parse(await fs.readFile(manifest, 'utf8'));
+    const row = record.workloads.find(item => item.name === name);
+    row.elf_sha256 = (row.elf_sha256[0] === '0' ? '1' : '0') + row.elf_sha256.slice(1);
+    await fs.writeFile(manifest, JSON.stringify(record));
+    // Bind the mutation so the P21 consumer, not the outer archive checksum,
+    // supplies the verdict under test.
+    await bindEvidence(evidence, 'G12', repo);
+    const {result, value} = gate(evidence);
+    assert.equal(result.status, 2, result.stderr);
+    assert.equal(value.canonical_workloads.status, 'UNKNOWN');
+    assert.match(value.canonical_workloads.value, new RegExp(`canonical-workload-elf-sha256:${name}`));
+    assert.deepEqual(value.checks.map(item => item.status), Array(6).fill('MET'));
+    assert.deepEqual(value.records.map(item => item.id), ['R1', 'R2', 'R3', 'R4']);
+    console.log(`G12_P21_TARGET_EXECUTED ${name}`);
+  });
+}
+
+test('G12 reports an absent P21 record without changing the frozen floor results', async t => {
+  const evidence = await evidenceFixture(t);
+  await fs.rm(path.join(evidence, 'canonical-workloads'), {recursive: true});
+  await bindEvidence(evidence, 'G12', repo);
+  const {result, value} = gate(evidence);
+  assert.equal(result.status, 2, result.stderr);
+  assert.equal(value.canonical_workloads.status, 'UNKNOWN');
+  assert.deepEqual(value.checks.map(item => item.status), Array(6).fill('MET'));
 });

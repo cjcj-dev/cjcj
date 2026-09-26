@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import crypto from 'node:crypto';
+import {validateCanonicalWorkloads} from '../build/lib/canonical-workloads.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
@@ -1216,6 +1217,16 @@ async function evaluateG12(context) {
     return gateResult('G12', 'UNKNOWN',
       'GC floor F1-F6 已冻结；未指定 --evidence，无法读取计数行/TSV/日志');
   }
+  // P21 identities are additional release inputs. They do not replace the
+  // separately frozen G12 measurement workload or its F1-F6/R1-R4 criteria.
+  let canonicalWorkloads;
+  try {
+    const identity = await validateCanonicalWorkloads(path.join(context.evidence, 'canonical-workloads'),
+      {head: git(context, ['rev-parse', 'HEAD'])});
+    canonicalWorkloads = {status: 'MET', workloads: identity.workloads};
+  } catch (error) {
+    canonicalWorkloads = {status: 'UNKNOWN', value: error.message};
+  }
   const profileFiles = floor.evidence.profiles;
   const [metadata, runText, remsetText, throughputText, phaseText,
     defaultF3, defaultF3Control, defaultF4, defaultF4Control,
@@ -1261,10 +1272,11 @@ async function evaluateG12(context) {
     `FYS=0 ${fys0Checks.map(item => `${item.id}:${item.status}`).join(',')}`);
   const checks = [...defaultChecks, f6];
   const records = evaluateG12Records(remsetRows, throughputRows, phaseText, floor);
-  const status = checks.some(item => item.status === 'UNKNOWN') ? 'UNKNOWN' :
+  const status = canonicalWorkloads.status !== 'MET' || checks.some(item => item.status === 'UNKNOWN') ? 'UNKNOWN' :
     checks.every(item => item.status === 'MET') ? 'MET' : 'NOT_MET';
   const values = checks.map(item => `${item.id}=${item.status}(${item.value})`).join('; ');
-  return gateResult('G12', status, values, {
+  return gateResult('G12', status, `${values}; P21=${canonicalWorkloads.status}`, {
+    canonical_workloads: canonicalWorkloads,
     floor: {release: floor.release, heap_mib: floor.measurement.heap_mib,
       workload_sha8: floor.measurement.workload_sha8, runs: floor.measurement.runs},
     checks,
