@@ -94,6 +94,38 @@ public class TypeValue <: HasEqual<TypeValue> {
 public type TypeValueDomain = ValueDomain<TypeValue>
 public type TypeDomain = State<TypeValueDomain, FullStatePool<TypeValueDomain>>
 
+private func GetRealGenericRetType(apply: Apply, genericType: Type,
+    calleeFunc: Function, builder: CHIRBuilder): Option<Type> {
+    let instTypes = apply.GetInstantiatedTypeArgs()
+    let genericTypes = calleeFunc.GetGenericTypeParams()
+    CJC_ASSERT(instTypes.size == genericTypes.size)
+    let genericMap = HashMap<GenericType, Type>()
+    var index: Int64 = 0
+    while (index < instTypes.size) {
+        genericMap[genericTypes[index]] = instTypes[index]
+        index++
+    }
+    if (let Some(def) <- calleeFunc.GetParentCustomTypeDef()) {
+        var thisType = apply.GetThisType().getOrThrow().StripAllRefs()
+        if (thisType.IsClassOrStruct()) {
+            let defGenericParams = def.GetGenericTypeParams()
+            var customType = (thisType as CustomType).getOrThrow()
+            if (defGenericParams.size != customType.GetGenericArgs().size) {
+                thisType = GetInstParentCustomTypeForApplyCallee(apply, builder).getOrThrow().StripAllRefs()
+                customType = (thisType as CustomType).getOrThrow()
+            }
+            let genericArgs = customType.GetGenericArgs()
+            CJC_ASSERT(defGenericParams.size == genericArgs.size)
+            var genericIndex: Int64 = 0
+            while (genericIndex < customType.GetGenericArgs().size) {
+                genericMap[defGenericParams[genericIndex]] = genericArgs[genericIndex]
+                genericIndex++
+            }
+        }
+    }
+    return Some(ReplaceRawGenericArgType(genericType, genericMap, builder))
+}
+
 // C++ TypeAnalysis.cpp:108-115 explicit TypeValueDomain instantiation.
 public let globalState = ValueAnalysisGlobals<TypeValueDomain, FullStatePool<TypeValueDomain>>()
 
@@ -167,8 +199,7 @@ public class TypeAnalysis <: ValueAnalysis<TypeValueDomain, FullStatePool<TypeVa
                 HandleClassStaticCastExpr(state, (expression as ClassStaticCast).getOrThrow())
                 return
             case ExprKind.NUMERIC_CAST =>
-                let result = expression.GetResult().getOrThrow()
-                state.TrySetToTopOrTopRef(result, result.GetType().getOrThrow().IsRef())
+                HandleTypeCastExpr(state, (expression as TypeCast).getOrThrow())
                 return
             case ExprKind.BOX =>
                 HandleBoxExpr(state, (expression as Box).getOrThrow())
@@ -262,7 +293,13 @@ public class TypeAnalysis <: ValueAnalysis<TypeValueDomain, FullStatePool<TypeVa
         if (knownRetTy.isNone()) { return }
         var realRetTy = knownRetTy.getOrThrow()
         if (realRetTy.IsGenericRelated()) {
-            realRetTy = ReplaceRawGenericArgType(realRetTy, GetInstMapFromApply(apply, builder), builder)
+            if (let Some(plain) <- (apply.GetRawExpr() as Apply)) {
+                let genericRetTy = GetRealGenericRetType(plain, realRetTy, (callee as Function).getOrThrow(), builder)
+                if (genericRetTy.isNone()) { return }
+                realRetTy = genericRetTy.getOrThrow()
+            } else {
+                realRetTy = ReplaceRawGenericArgType(realRetTy, GetInstMapFromApply(apply, builder), builder)
+            }
         }
         let result: Option<Value> = match (apply.GetResult()) {
             case Some(value) => Some(value)
