@@ -26,9 +26,11 @@ jobs:
         run: |
           set -euo pipefail
           source ci/runtime_pin.env
-          echo "RUNTIME_REF=$RUNTIME_REF" >> "$GITHUB_ENV"
-          echo "RUNTIME_VERSION=$RUNTIME_VERSION" >> "$GITHUB_ENV"
-          echo "CANGJIE_WORKSPACE=$RUNNER_TEMP/android-source" >> "$GITHUB_ENV"
+          {
+            echo "RUNTIME_REF=$RUNTIME_REF"
+            echo "RUNTIME_VERSION=$RUNTIME_VERSION"
+            echo "CANGJIE_WORKSPACE=$RUNNER_TEMP/android-source"
+          } >> "$GITHUB_ENV"
           mkdir -p "$RUNNER_TEMP/android-source/cangjie_runtime"
           git -C "$RUNNER_TEMP/android-source/cangjie_runtime" init
           git -C "$RUNNER_TEMP/android-source/cangjie_runtime" fetch --depth=1 "$RUNTIME_SRC_URL" "$RUNTIME_REF"
@@ -44,6 +46,7 @@ jobs:
         if: always()
         with:
           component: runtime
+          platform: android-aarch64
           require-compiles: ${{ job.status == 'success' }}
       - uses: actions/upload-artifact@v7
         if: always()
