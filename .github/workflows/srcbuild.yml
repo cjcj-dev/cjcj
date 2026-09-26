@@ -395,7 +395,9 @@ jobs:
         env:
           HOST_IDENTITY_SDK: ${{ env.CJCJ_BOOTSTRAP_BASE }}
           HOST_IDENTITY_LLVM: ${{ env.CJCJ_BOOTSTRAP_HOST_LLVM_SO }}
-        run: python3 ci/bootstrap/test_host_identities.py
+        run: |
+          : "${HOST_IDENTITY_SDK:?}" "${HOST_IDENTITY_LLVM:?}"
+          python3 ci/bootstrap/test_host_identities.py
 
       - name: Prove colour runtime identity rejection
         shell: bash
