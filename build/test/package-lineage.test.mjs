@@ -69,6 +69,20 @@ async function copyOfficialStdModules(dest) {
   await fs.cp(srcModules, path.join(dest, 'modules'), {recursive: true});
 }
 
+test('pinned official SDK supplies the lineage comparison input', async () => {
+  const official = await pinnedOfficialSdkRoot();
+  const installed = await fs.stat(official).catch(error => {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  });
+  // This is the provisioning invariant itself, separate from classification:
+  // a missing install must fail here, not masquerade as a lineage verdict.
+  assert.equal(installed?.isDirectory() ?? false, true,
+    `official lineage comparison input was not provisioned: ${official}`);
+  const artifacts = await listPackagedArtifacts(path.join(official, 'modules'));
+  assert.ok(artifacts.length > 0, 'the official input must supply comparison artifacts');
+});
+
 test('feeds nightly std and turns red exactly official-std', async t => {
   const {root} = await miniTree('nightly');
   t.after(() => fs.rm(root, {recursive: true, force: true}));

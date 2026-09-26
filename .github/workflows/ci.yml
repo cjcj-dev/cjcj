@@ -50,6 +50,16 @@ jobs:
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq zip unzip
           npx --yes zx@8 --version
+      # package-lineage compares package bytes with the official host SDK. Load
+      # the consumer's pin, not the build job's independently loaded environment.
+      - name: Install official lineage input
+        shell: bash
+        run: |
+          source ci/host_sdk_pin.env
+          mkdir -p "$RUNNER_TEMP/lineage-cjv"
+          curl -fsSL https://github.com/Zxilly/cjv/releases/download/v0.2.20/cjv_linux_amd64.tar.gz | tar -xz -C "$RUNNER_TEMP/lineage-cjv"
+          cjv_bin=$(find "$RUNNER_TEMP/lineage-cjv" -type f -name cjv | head -1)
+          "$cjv_bin" install "$CJCJ_TOOLCHAIN"
       - name: Test build and release contracts
         shell: bash
         env:
