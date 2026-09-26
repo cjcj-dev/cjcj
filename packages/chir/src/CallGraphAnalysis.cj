@@ -125,15 +125,9 @@ public class CallGraph {
     private let functionNodes: ArrayList<CallGraphNode> = ArrayList<CallGraphNode>()
     private let entryNode: CallGraphNode = CallGraphNode(0, None)
     private let exitNode: CallGraphNode = CallGraphNode(1, None)
-    private var devirtFuncInfo: Option<DevirtualizationInfo> = None
     private var nextNodeId: Int64 = 2
 
     public init(chirPackage: Package) {
-        Build(chirPackage)
-    }
-
-    public init(chirPackage: Package, devirtFuncInfo: DevirtualizationInfo) {
-        this.devirtFuncInfo = devirtFuncInfo
         Build(chirPackage)
     }
 
@@ -202,9 +196,9 @@ public class CallGraph {
 
     private func VisitExpression(node: CallGraphNode, expr: Expression): Unit {
         let kind = expr.GetExprKind()
-        if (kind == ExprKind.INVOKE || kind == ExprKind.INVOKE_WITH_EXCEPTION) {
+        if (kind == ExprKind.INVOKE || kind == ExprKind.TRY_INVOKE) {
             AddVirtualEdgeToNode(node, expr)
-        } else if (kind == ExprKind.APPLY || kind == ExprKind.APPLY_WITH_EXCEPTION) {
+        } else if (kind == ExprKind.APPLY || kind == ExprKind.TRY_APPLY) {
             AddDirectEdgeToNode(node, expr)
         }
         for (group in expr.GetBlockGroups()) {
@@ -269,9 +263,9 @@ private func ExtractVirtualCallInfo(expr: Expression): Option<VirtualCallInfo> {
         return VirtualCallInfo(invoke.GetObject(), invoke.GetMethodName(),
             VirtualCallParamTypes(invoke.GetMethodType()))
     }
-    if (let Some(invokeWithException) <- (expr as InvokeWithException)) {
-        return VirtualCallInfo(invokeWithException.GetObject(), invokeWithException.GetMethodName(),
-            VirtualCallParamTypes(invokeWithException.GetMethodType()))
+    if (let Some(tryInvoke) <- (expr as TryInvoke)) {
+        return VirtualCallInfo(tryInvoke.GetObject(), tryInvoke.GetMethodName(),
+            VirtualCallParamTypes(tryInvoke.GetMethodType()))
     }
     return None
 }
@@ -291,8 +285,8 @@ private func ResolveDirectCallee(expr: Expression): Option<Function> {
     var calleeValue: Option<Value> = None
     if (let Some(apply) <- (expr as Apply)) {
         calleeValue = apply.GetCallee()
-    } else if (let Some(applyWithException) <- (expr as ApplyWithException)) {
-        calleeValue = applyWithException.GetCallee()
+    } else if (let Some(tryApply) <- (expr as TryApply)) {
+        calleeValue = tryApply.GetCallee()
     }
     if (let Some(value) <- calleeValue) {
         if (let Some(callee) <- value.AsFunction()) {
@@ -316,8 +310,7 @@ public class CallGraphAnalysis {
 
     public init() {}
 
-    public init(chirPackage: Package, devirtFuncInfo: DevirtualizationInfo) {
-        let _ = devirtFuncInfo
+    public init(chirPackage: Package) {
         this.chirPackage = chirPackage
     }
 

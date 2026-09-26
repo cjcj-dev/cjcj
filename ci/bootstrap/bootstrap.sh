@@ -98,10 +98,10 @@ assert_colour_tuple() {
     die 'colour LLVM tuple SHA256SUMS 格式或相对路径非法'
   fi
   entries=$(wc -l < "$tuple/SHA256SUMS")
-  [ "$entries" -eq 8 ] || die "colour LLVM tuple SHA256SUMS 必须且只能登记 8 个 payload: entries=$entries"
-  for rel in MANIFEST bin/llc bin/opt lib/STATIC_LLVM.txt \
+  [ "$entries" -eq 10 ] || die "colour LLVM tuple SHA256SUMS 必须且只能登记 10 个 payload: entries=$entries"
+  for rel in MANIFEST bin/llc bin/opt bin/ld.lld lib/STATIC_LLVM.txt \
     fixed-llc/cjselfhost_llvmshim.o fixed-llc/llc.gz \
-    fixed-llc/opt.gz fixed-llc/llvm-tools.manifest; do
+    fixed-llc/opt.gz fixed-llc/ld.lld.gz fixed-llc/llvm-tools.manifest; do
     [ -f "$tuple/$rel" ] || die "colour LLVM tuple 缺 $rel"
     tuple_sum_has "$tuple" "$rel" || die "colour LLVM tuple SHA256SUMS 未登记 $rel"
   done

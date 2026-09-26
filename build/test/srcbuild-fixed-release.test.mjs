@@ -26,9 +26,9 @@ function fixture(t, {depot = 'missing', corrupt = '', sumsMismatch = false, unav
   const gzip = spawnSync('gzip', ['-n', '-c'], {input: raw});
   assert.equal(gzip.status, 0);
   const shim = Buffer.from('shim fixture');
-  const manifest = Buffer.from(`PLATFORM=linux_x86_64\nLLVM_SHA=${llvm}\nCANGJIE_COMPILER_SHA=${compiler}\nFLATBUFFERS_SHA=${field('FLATBUFFERS_SHA')}\nLLC_SHA256=${digest(raw)}\nOPT_SHA256=${digest(raw)}\nSHIM_SHA256=${digest(shim)}\n`);
-  const files = {'MANIFEST': manifest, 'bin/llc': raw, 'bin/opt': raw, 'lib/STATIC_LLVM.txt': manifest,
-    'fixed-llc/llc.gz': gzip.stdout, 'fixed-llc/opt.gz': gzip.stdout,
+  const manifest = Buffer.from(`PLATFORM=linux_x86_64\nLLVM_SHA=${llvm}\nCANGJIE_COMPILER_SHA=${compiler}\nFLATBUFFERS_SHA=${field('FLATBUFFERS_SHA')}\nLLC_SHA256=${digest(raw)}\nOPT_SHA256=${digest(raw)}\nLLD_TOOL=ld.lld\nLLD_SOURCE=tuple:${llvm}\nLLD_VERSION=LLD 15.0.4\nLLD_SHA256=${digest(raw)}\nSHIM_SHA256=${digest(shim)}\n`);
+  const files = {'MANIFEST': manifest, 'bin/llc': raw, 'bin/opt': raw, 'bin/ld.lld': raw, 'lib/STATIC_LLVM.txt': manifest,
+    'fixed-llc/llc.gz': gzip.stdout, 'fixed-llc/opt.gz': gzip.stdout, 'fixed-llc/ld.lld.gz': gzip.stdout,
     'fixed-llc/cjselfhost_llvmshim.o': shim, 'fixed-llc/llvm-tools.manifest': manifest};
   files.SHA256SUMS = Buffer.from(Object.entries(files).map(([name, bytes]) => `${digest(bytes)}  ./${name}\n`).join(''));
   const pin = {version: 1, repository: 'cjcj-dev/cjcj', run: 123, attempt: 1, artifact: 456,
@@ -98,7 +98,7 @@ for (const depot of ['missing', 'mismatch', 'valid']) {
     assert.equal(result.status, 0, result.log);
     assert.doesNotMatch(result.log, /source mirror required|CMake Error/);
     if (depot === 'valid') assert.equal(fs.existsSync(f.requests), false);
-    else assert.equal(fs.readFileSync(f.requests, 'utf8').trim().split('\n').length, 9);
+    else assert.equal(fs.readFileSync(f.requests, 'utf8').trim().split('\n').length, 11);
     const again = f.run();
     assert.equal(again.status, 0, again.log);
     if (depot !== 'valid') assert.match(again.log, /reusing it/);

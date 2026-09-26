@@ -29,27 +29,27 @@ public func CHIR2BCHIRTranslateOtherExpression(compiler: CHIR2BCHIR, context: CH
         case ExprKind.CONSTANT => ()
         case ExprKind.TUPLE =>
             context.definition.PushOp(OpCode.TUPLE)
-            context.definition.PushCell(expr.GetNumOfOperands())
+            context.definition.PushCell(expr.GetNumOfNonSuccessorOperands())
         case ExprKind.FIELD => TranslateField(context, expr)
         case ExprKind.APPLY => TranslateApplyExpression(compiler, context, expr)
         case ExprKind.INVOKE => TranslateInvokeExpression(compiler, context, expr, false)
         case ExprKind.INSTANCEOF => TranslateInstanceOf(context, expr)
-        case ExprKind.TYPECAST => TranslateTypecastExpression(compiler, context, expr, false)
+        case ExprKind.CLASS_STATIC_CAST | ExprKind.NUMERIC_CAST => TranslateTypecastExpression(compiler, context, expr, false)
         case ExprKind.INTRINSIC => TranslateIntrinsicExpression(compiler, context, expr, false)
         case ExprKind.GET_EXCEPTION => context.definition.PushOp(OpCode.GET_EXCEPTION)
         case ExprKind.RAW_ARRAY_ALLOCATE => context.definition.PushOp(OpCode.ALLOCATE_RAW_ARRAY)
         case ExprKind.RAW_ARRAY_LITERAL_INIT =>
             context.definition.PushOp(OpCode.RAW_ARRAY_LITERAL_INIT)
-            context.definition.PushCell(if (expr.GetNumOfOperands() > 0) { expr.GetNumOfOperands() - 1 } else { 0 })
+            context.definition.PushCell(if (expr.GetNumOfNonSuccessorOperands() > 0) { expr.GetNumOfNonSuccessorOperands() - 1 } else { 0 })
         case ExprKind.RAW_ARRAY_INIT_BY_VALUE => context.definition.PushOp(OpCode.RAW_ARRAY_INIT_BY_VALUE)
         case ExprKind.VARRAY =>
             context.definition.PushOp(OpCode.VARRAY)
-            context.definition.PushCell(expr.GetNumOfOperands())
+            context.definition.PushCell(expr.GetNumOfNonSuccessorOperands())
         case ExprKind.BOX => TranslateBox(context, expr)
-        case ExprKind.UNBOX => context.definition.PushOp(OpCode.UNBOX)
+        case ExprKind.UNBOX_TO_VALUE => context.definition.PushOp(OpCode.UNBOX)
         case ExprKind.UNBOX_TO_REF => context.definition.PushOp(OpCode.UNBOX_REF)
         case ExprKind.VARRAY_BUILDER | ExprKind.SPAWN | ExprKind.INVOKESTATIC | ExprKind.GET_RTTI |
-            ExprKind.GET_RTTI_STATIC | ExprKind.TRANSFORM_TO_CONCRETE | ExprKind.TRANSFORM_TO_GENERIC =>
+            ExprKind.GET_RTTI_STATIC | ExprKind.CAST_TO_CONCRETE | ExprKind.CAST_TO_GENERIC =>
             context.definition.PushOp(OpCode.ABORT)
         case _ => context.definition.PushOp(OpCode.ABORT)
     }
@@ -57,7 +57,7 @@ public func CHIR2BCHIRTranslateOtherExpression(compiler: CHIR2BCHIR, context: CH
 
 private func TranslateCApplyExpression(compiler: CHIR2BCHIR, context: CHIR2BCHIRContext,
     apply: Apply, funcTy: FuncType): Unit {
-    let numberArgs = apply.GetNumOfOperands() - 1
+    let numberArgs = apply.GetNumOfNonSuccessorOperands() - 1
     CJC_ASSERT(numberArgs == funcTy.GetParamTypes().size)
     compiler.PushOpCodeWithAnnotations(context, OpCode.CAPPLY, apply,
         args: ArrayList<Int64>([funcTy.GetParamTypes().size]), storeCodePos: true)
@@ -70,7 +70,7 @@ private func TranslateCApplyExpression(compiler: CHIR2BCHIR, context: CHIR2BCHIR
 private func TranslateApplyExpression(compiler: CHIR2BCHIR, context: CHIR2BCHIRContext,
     expr: Expression): Unit {
     let apply = (expr as Apply).getOrThrow()
-    let operands = apply.GetOperands()
+    let operands = apply.GetNonSuccessorOperands()
     let callee = operands[0]
     let calleeName = callee.GetSrcCodeIdentifier()
     if ((callee.IsImportedFunc() && callee.GetAttributeInfo().Test(Attribute.FOREIGN)) ||
@@ -82,7 +82,7 @@ private func TranslateApplyExpression(compiler: CHIR2BCHIR, context: CHIR2BCHIRC
             return
         }
         let stringIndex = compiler.GetStringIdx(calleeName)
-        let numberArgs = apply.GetNumOfOperands() - 1
+        let numberArgs = apply.GetNumOfNonSuccessorOperands() - 1
         compiler.PushOpCodeWithAnnotations(context, OpCode.SYSCALL, apply,
             args: ArrayList<Int64>([stringIndex, numberArgs]), storeCodePos: true)
         context.definition.PushCell(compiler.GetTypeIdx(apply.GetResult().getOrThrow().GetType().getOrThrow()))
@@ -99,7 +99,7 @@ private func TranslateApplyExpression(compiler: CHIR2BCHIR, context: CHIR2BCHIRC
         return
     }
     compiler.PushOpCodeWithAnnotations(context, OpCode.APPLY, apply,
-        args: ArrayList<Int64>([apply.GetNumOfOperands()]), storeCodePos: true)
+        args: ArrayList<Int64>([apply.GetNumOfNonSuccessorOperands()]), storeCodePos: true)
 }
 
 private func TranslateField(context: CHIR2BCHIRContext, expr: Expression): Unit {
@@ -134,16 +134,16 @@ public func TranslateInvokeExpression(compiler: CHIR2BCHIR, context: CHIR2BCHIRC
             args: ArrayList<Int64>([numberArgs, 0]), storeCodePos: true)
         context.definition.AddMangledNameAnnotation(opIndex,
             MangleMethodName(invoke.GetMethodName(), invoke.GetMethodType(), omitFirstArg: true))
-    } else if (let Some(invokeWithException) <- (expr as InvokeWithException)) {
-        let numberArgs = invokeWithException.GetArgs().size
+    } else if (let Some(tryInvoke) <- (expr as TryInvoke)) {
+        let numberArgs = tryInvoke.GetArgs().size
         CJC_ASSERT(numberArgs > 0)
         CJC_ASSERT(numberArgs <= BYTECODE_CONTENT_MAX)
         let opCode = if (withException) { OpCode.INVOKE_EXC } else { OpCode.INVOKE }
         let opIndex = context.definition.NextIndex()
         compiler.PushOpCodeWithAnnotations(context, opCode, expr,
             args: ArrayList<Int64>([numberArgs, 0]), storeCodePos: true)
-        context.definition.AddMangledNameAnnotation(opIndex, MangleMethodName(invokeWithException.GetMethodName(),
-            invokeWithException.GetMethodType(), omitFirstArg: true))
+        context.definition.AddMangledNameAnnotation(opIndex, MangleMethodName(tryInvoke.GetMethodName(),
+            tryInvoke.GetMethodType(), omitFirstArg: true))
     } else {
         context.definition.PushOp(OpCode.NOT_SUPPORTED)
     }
@@ -151,27 +151,16 @@ public func TranslateInvokeExpression(compiler: CHIR2BCHIR, context: CHIR2BCHIRC
 
 public func TranslateTypecastExpression(compiler: CHIR2BCHIR, context: CHIR2BCHIRContext,
     expr: Expression, withException: Bool): Unit {
-    let sourceTy: Option<Type> = if (let Some(typeCast) <- (expr as TypeCast)) {
-        typeCast.GetSourceTy()
-    } else if (let Some(typeCastWithException) <- (expr as TypeCastWithException)) {
-        typeCastWithException.GetSourceTy()
-    } else {
-        None
-    }
-    let targetTy: Option<Type> = if (let Some(typeCast) <- (expr as TypeCast)) {
-        typeCast.GetTargetTy()
-    } else if (let Some(typeCastWithException) <- (expr as TypeCastWithException)) {
-        typeCastWithException.GetTargetTy()
-    } else {
-        None
-    }
+    let typeCast = (expr as TypeCast).getOrThrow()
+    let sourceTy = typeCast.GetSourceType()
+    let targetTy = typeCast.GetTargetType()
     if (let Some(src) <- sourceTy) {
         if (let Some(dst) <- targetTy) {
             if (src.IsPrimitive() && dst.IsPrimitive()) {
-                let overflowStrategy = if (let Some(typeCast) <- (expr as TypeCast)) {
-                    typeCast.GetOverflowStrategy()
+                let overflowStrategy = if (let Some(numericCast) <- (expr as NumericCastBase)) {
+                    numericCast.GetOverflowStrategy()
                 } else {
-                    OverflowStrategy.THROWING
+                    OverflowStrategy.NA
                 }
                 compiler.PushOpCodeWithAnnotations(context,
                     if (withException) { OpCode.TYPECAST_EXC } else { OpCode.TYPECAST }, expr,
@@ -209,7 +198,7 @@ private func TranslateInstanceOf(context: CHIR2BCHIRContext, expr: Expression): 
 
 private func TranslateBox(context: CHIR2BCHIRContext, expr: Expression): Unit {
     if (let Some(box) <- (expr as Box)) {
-        if (let Some(sourceTy) <- box.GetSourceTy()) {
+        if (let Some(sourceTy) <- box.GetSourceType()) {
             let opIndex = context.definition.NextIndex()
             context.definition.PushOp(OpCode.BOX)
             context.definition.PushCell(0)

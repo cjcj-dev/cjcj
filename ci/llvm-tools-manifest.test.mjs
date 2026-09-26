@@ -22,10 +22,14 @@ const nativeManifest = [
   `FLATBUFFERS_SHA=${pins.FLATBUFFERS_SHA}`,
   `LLC_SHA256=${'1'.repeat(64)}`,
   `OPT_SHA256=${'2'.repeat(64)}`,
+  'LLD_TOOL=ld.lld',
+  `LLD_SOURCE=tuple:${pins.LLVM_SHA}`,
+  'LLD_VERSION=LLD 15.0.4',
+  `LLD_SHA256=${'4'.repeat(64)}`,
   `SHIM_SHA256=${'3'.repeat(64)}`,
 ].join('\n');
 
-test('native producer manifest satisfies the seven-field consumer contract', () => {
+test('native producer manifest satisfies the eleven-field consumer contract', () => {
   const parsed = parseLlvmToolsManifest(nativeManifest, {schema: 'native'});
   assert.equal(parsed.schema, 'native');
   assert.deepEqual([...parsed.values.keys()], LLVM_TOOLS_MANIFEST_SCHEMAS.native);
@@ -36,6 +40,10 @@ test('native manifest missing one field is rejected', () => {
   assert.throws(
     () => parseLlvmToolsManifest(missingShim, {schema: 'native'}),
     /missing=SHIM_SHA256/,
+  );
+  assert.throws(
+    () => parseLlvmToolsManifest(nativeManifest.replace(`LLD_SOURCE=tuple:${pins.LLVM_SHA}`, `LLD_SOURCE=tuple:${'0'.repeat(40)}`), {schema: 'native'}),
+    /LLD_SOURCE does not match LLVM_SHA/,
   );
 });
 

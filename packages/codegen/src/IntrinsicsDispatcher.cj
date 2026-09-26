@@ -6,7 +6,7 @@ import cjcj::chir.Expression
 import cjcj::chir.Intrinsic
 import cjcj::chir.IntrinsicKind
 import cjcj::chir.IntrinsicKindToString
-import cjcj::chir.IntrinsicWithException
+import cjcj::chir.TryIntrinsic
 import cjcj::chir.NeedCheckArrayBound
 import cjcj::chir.RawArrayType
 import cjcj::chir.Function
@@ -25,10 +25,10 @@ public func GenerateIntrinsic(irBuilder: IRBuilder2, chirExpr: Expression): LLVM
             intrinsicExpr.GetInstantiatedTypeArgs(), intrinsicExpr.GetResultType(),
             chirExpr.Get<NeedCheckArrayBound, Bool>(), topLevelFunc)
     }
-    if (let Some(intrinsicWithExceptionExpr) <- (chirExpr as IntrinsicWithException)) {
-        return GenerateIntrinsic(irBuilder, intrinsicWithExceptionExpr.GetIntrinsicKind(),
-            intrinsicWithExceptionExpr.GetArgs(), intrinsicWithExceptionExpr.GetInstantiatedTypeArgs(),
-            intrinsicWithExceptionExpr.GetResultType(), chirExpr.Get<NeedCheckArrayBound, Bool>(), topLevelFunc)
+    if (let Some(tryIntrinsicExpr) <- (chirExpr as TryIntrinsic)) {
+        return GenerateIntrinsic(irBuilder, tryIntrinsicExpr.GetIntrinsicKind(),
+            tryIntrinsicExpr.GetArgs(), tryIntrinsicExpr.GetInstantiatedTypeArgs(),
+            tryIntrinsicExpr.GetResultType(), chirExpr.Get<NeedCheckArrayBound, Bool>(), topLevelFunc)
     }
     return LLVMNullValue()
 }
@@ -277,7 +277,8 @@ private func IsMathIntrinsic(kind: IntrinsicKind): Bool {
 
 private func IsStackTraceIntrinsic(kind: IntrinsicKind): Bool {
     return kind == IntrinsicKind.FILL_IN_STACK_TRACE ||
-        kind == IntrinsicKind.DECODE_STACK_TRACE
+        kind == IntrinsicKind.DECODE_STACK_TRACE ||
+        kind == IntrinsicKind.CANONICALIZE_STRING_BACKING
 }
 
 private func IsThreadInfoIntrinsic(kind: IntrinsicKind): Bool {

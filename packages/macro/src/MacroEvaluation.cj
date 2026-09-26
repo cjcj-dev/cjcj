@@ -801,14 +801,8 @@ public class MacroEvaluation {
                             CPointer<Unit>(idCell.value)))
                     }
                     synchronized(mInvoke.mtx) {
-                        let coroutineHandle = if (runtimeInit.runtimeInstanceHandle.isNull()) {
-                            unsafe { InvokeNewTaskFromC(runtimeInit.runtimeMethodFunc)(
-                                CPointer<Unit>(initGlobalFunc), CPointer<Unit>(resetNotify.value)) }
-                        } else {
-                            unsafe { InstanceRunTaskFromC(runtimeInit.runtimeMethodFunc)(
-                                runtimeInit.runtimeInstanceHandle, CPointer<Unit>(initGlobalFunc),
-                                CPointer<Unit>(resetNotify.value)) }
-                        }
+                        let coroutineHandle = unsafe { InvokeNewTaskFromC(runtimeInit.runtimeMethodFunc)(
+                            CPointer<Unit>(initGlobalFunc), CPointer<Unit>(resetNotify.value)) }
                         CJC_ASSERT(!coroutineHandle.isNull())
                         while (!mInvoke.isDataReady) {
                             mInvoke.cv.wait()
@@ -869,18 +863,9 @@ public class MacroEvaluation {
         unsafe { handle.write(id) }
 
         synchronized(mInvoke.mtx) {
-            if (runtimeInit.runtimeInstanceHandle.isNull()) {
-                macCall.coroutineHandle = unsafe {
-                    InvokeNewTaskFromC(runtimeInit.runtimeMethodFunc)(
-                        CPointer<Unit>(InvokeMacro), CPointer<Unit>(handle))
-                }
-            } else {
-                // RT_ISOLATE_API_SPEC.md §3.2: submit the same C++ InvokeMacro task
-                // (MacroEvaluationCJNative.cpp:123-137) to the isolated scheduler.
-                macCall.coroutineHandle = unsafe {
-                    InstanceRunTaskFromC(runtimeInit.runtimeMethodFunc)(runtimeInit.runtimeInstanceHandle,
-                        CPointer<Unit>(InvokeMacro), CPointer<Unit>(handle))
-                }
+            macCall.coroutineHandle = unsafe {
+                InvokeNewTaskFromC(runtimeInit.runtimeMethodFunc)(
+                    CPointer<Unit>(InvokeMacro), CPointer<Unit>(handle))
             }
             CJC_ASSERT(!macCall.coroutineHandle.isNull())
             while (!macCall.isDataReady) {
