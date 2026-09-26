@@ -22,3 +22,8 @@
   "cjcj::modules" = { path = "../modules" }
   "cjcj::option" = { path = "../option" }
   "cjcj::utils" = { path = "../utils" }
+
+[test-dependencies]
+  "cjcj::compiler_unittest" = { path = "../compiler_unittest" }
+  "cjcj::driver" = { path = "../driver" }
+  "cjcj::frontend" = { path = "../frontend" }

@@ -1224,6 +1224,7 @@ func CHIRIntrinsicKindFromName(name: String): IntrinsicKind {
         case "GET_TYPE_FOR_TYPE_PARAMETER" => IntrinsicKind.GET_TYPE_FOR_TYPE_PARAMETER
         case "IS_SUBTYPE_TYPES" => IntrinsicKind.IS_SUBTYPE_TYPES
         case "EXCLUSIVE_SCOPE" => IntrinsicKind.EXCLUSIVE_SCOPE
+        case "CANONICALIZE_STRING_BACKING" => IntrinsicKind.CANONICALIZE_STRING_BACKING
         case _ => IntrinsicKind.NOT_INTRINSIC
     }
 }

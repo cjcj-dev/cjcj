@@ -131,6 +131,11 @@ jobs:
         run: |
           test -s "fixed-toolchain/$TUPLE_PLATFORM/llc.gz"
           test -s "fixed-toolchain/$TUPLE_PLATFORM/opt.gz"
+          case "$TUPLE_PLATFORM" in
+            darwin_*) lld_tool=ld64.lld ;;
+            *) lld_tool=ld.lld ;;
+          esac
+          test -s "fixed-toolchain/$TUPLE_PLATFORM/${lld_tool}.gz"
           test -s "fixed-toolchain/$TUPLE_PLATFORM/llvm-tools.manifest"
           test -s "fixed-toolchain/$TUPLE_PLATFORM/cjselfhost_llvmshim.o"
           if [ "$TUPLE_PLATFORM" = windows_x86_64 ]; then

@@ -97,6 +97,30 @@ public class BlockGroupCopyHelper {
         }
     }
 
+    // Upstream 6e125215 BlockGroupCopyHelper.cpp:180-208.
+    public func GetInstMapFromFuncCall(fn: Function, thisTy: Option<Type>,
+        instTypeArgs: ArrayList<Type>, args: ArrayList<Value>): Unit {
+        instMap.clear()
+        if (let Some(def) <- fn.GetParentCustomTypeDef()) {
+            if (def.IsGenericDef()) {
+                var parentTy = GetInstParentCustomTyOfCallee(fn, args, thisTy, builder) ??
+                    fn.GetParentCustomTypeOrExtendedType().getOrThrow()
+                parentTy = parentTy.StripAllRefs()
+                if (let Some(ex) <- (def as ExtendDef)) {
+                    let mapping = ex.GetExtendedType().getOrThrow().CalculateGenericTyMapping(parentTy)
+                    CJC_ASSERT(mapping[0])
+                    instMap = mapping[1]
+                } else {
+                    instMap = GetInstMapFromCurDefToCurType((parentTy as CustomType).getOrThrow())
+                }
+            }
+        }
+        let generics = fn.GetGenericTypeParams()
+        CJC_ASSERT(generics.size == instTypeArgs.size)
+        for (i in 0..generics.size) { if (!instMap.contains(generics[i])) { instMap[generics[i]] = instTypeArgs[i] } }
+        thisType = thisTy
+    }
+
     private func InstBlockGroup(blocks: ArrayList<Block>): Unit {
         let genericConverter = GenericTypeConvertor(instMap, builder)
         let convertFunc: ConvertTypeFunc = { ty =>

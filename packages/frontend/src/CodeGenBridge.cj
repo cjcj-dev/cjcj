@@ -26,6 +26,8 @@ import cjcj::chir.CustomTypeDef as ChirCustomTypeDef
 import cjcj::chir.DeadCodeElimination
 import cjcj::chir.DebugLocation as ChirDebugLocation
 import cjcj::chir.Devirtualization as ChirDevirtualization
+import cjcj::chir.ReturnTypeMapCollector
+import cjcj::chir.ConstMemberVarCollector
 import cjcj::chir.DevirtualizationInfo
 import cjcj::chir.DevirtualizeTrivialStatics
 import cjcj::chir.ExprKind as ChirExprKind
@@ -667,8 +669,10 @@ private class ToCHIR {
             return
         }
         try (recorder = ProfileRecorder("CHIR Opt", "Devirtualization")) {
-            devirtInfo.FreshRetMap()
-            devirtInfo.CollectConstMemberVarType()
+            ReturnTypeMapCollector(currentPackage).Collect(devirtInfo.returnTypeMap)
+            for ((key, value) in ConstMemberVarCollector(currentPackage).CollectConstMemberVarType()) {
+                devirtInfo.constMemberTypeMap[key] = value
+            }
             let funcs = ArrayList<ChirFunction>()
             for (fn in ChirDevirtualization.CollectContainInvokeExprFuncs(currentPackage)) {
                 let parentInstantiated = if (let Some(parent) <- fn.GetParentCustomTypeDef()) {
@@ -690,7 +694,7 @@ private class ToCHIR {
                     TypeAnalysis.InitialiseLetGVState(analysisPackage, analysisBuilder, typeAnalysisGlobals,
                         { globalVar => TypeAnalysis.IsTrackedGV(globalVar) })
                 })
-            let devirt = ChirDevirtualization(typeAnalysisWrapper, devirtInfo)
+            let devirt = ChirDevirtualization(typeAnalysisWrapper, devirtInfo, builder, currentPackage, options)
             if (instantiatedOnly) {
                 TypeAnalysis.InitialiseLetGVState(currentPackage, builder, typeAnalysisGlobals,
                     { globalVar => TypeAnalysis.IsTrackedGV(globalVar) })
@@ -707,7 +711,7 @@ private class ToCHIR {
                         TypeAnalysis(fn, analysisBuilder, isDebug, devirtInfo)
                     })
             }
-            devirt.RunOnFuncs(funcs, builder, options.chirDebugOptimizer)
+            devirt.RunOnFuncs(funcs)
             let devirtStatics = DevirtualizeTrivialStatics()
             devirtStatics.RunOnPackage(currentPackage, builder, options.chirDebugOptimizer)
             if (!devirt.GetFrozenInstFuns().isEmpty()) {
@@ -719,7 +723,7 @@ private class ToCHIR {
                         })
                     devirt.AppendFrozenFuncState(fn, result)
                 }
-                devirt.RunOnFuncs(frozenFuncs, builder, options.chirDebugOptimizer)
+                devirt.RunOnFuncs(frozenFuncs)
                 if (inlineFrozen) {
                     let pass = FunctionInline(builder, options.optimizationLevel, options.chirDebugOptimizer)
                     for (fn in frozenFuncs) {
@@ -814,11 +818,11 @@ private class ToCHIR {
         var result: Option<DevirtualizationInfo> = None
         try (recorder = ProfileRecorder("CHIR Opt", "Collect Devirt Info")) {
             let options = instance.invocation.globalOptions
-            let devirtInfo = DevirtualizationInfo(currentPackage, options)
+            let devirtInfo = DevirtualizationInfo(currentPackage)
             if (options.IsOptimizationExisted(OptimizationFlag.FUNC_INLINING) ||
                 (options.IsOptimizationExisted(OptimizationFlag.DEVIRTUALIZATION) &&
                     !options.enIncrementalCompilation)) {
-                devirtInfo.CollectInfo()
+                devirtInfo.Collect()
             }
             result = devirtInfo
         }
@@ -831,7 +835,7 @@ private class ToCHIR {
             return
         }
         try (recorder = ProfileRecorder("CHIR Opt", "FunctionInline")) {
-            let callGraphAnalysis = CallGraphAnalysis(currentPackage, devirtInfo)
+            let callGraphAnalysis = CallGraphAnalysis(currentPackage)
             callGraphAnalysis.DoCallGraphAnalysis(options.chirDebugOptimizer)
             let pass = FunctionInline(builder, options.optimizationLevel, options.chirDebugOptimizer)
             for (functionOption in callGraphAnalysis.postOrderSCCFunctionlist) {
