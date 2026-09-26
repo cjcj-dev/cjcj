@@ -190,21 +190,38 @@ jobs:
             -DLLVM_LINK_LLVM_DYLIB=OFF \
             -DLLVM_BUILD_LLVM_DYLIB=OFF \
             -DLLVM_ENABLE_RTTI=OFF \
+            -DLLVM_ENABLE_LIBXML2=OFF \
             -DLLVM_TARGETS_TO_BUILD="${{ matrix.llvm-targets }}" \
-            -DLLVM_ENABLE_PROJECTS="" \
+            -DLLVM_ENABLE_PROJECTS="lld" \
             -DCMAKE_C_COMPILER=clang \
             -DCMAKE_CXX_COMPILER=clang++ \
             -DCMAKE_CXX_FLAGS="-gline-tables-only -include cstdint -include unordered_map -include map -include vector -include string"
-          ninja -C llc-build llc opt
+          ninja -C llc-build llc opt lld
           mkdir -p "fixed-toolchain/${{ matrix.platform }}"
+          case "${{ matrix.platform }}" in
+            darwin_*) lld_tool=ld64.lld ;;
+            *) lld_tool=ld.lld ;;
+          esac
           gzip -n -c -9 llc-build/bin/llc > "fixed-toolchain/${{ matrix.platform }}/llc.gz"
           gzip -n -c -9 llc-build/bin/opt > "fixed-toolchain/${{ matrix.platform }}/opt.gz"
+          gzip -n -c -9 "llc-build/bin/$lld_tool" > "fixed-toolchain/${{ matrix.platform }}/$lld_tool.gz"
+          lld_version="$(llc-build/bin/$lld_tool --version | awk '
+            /LLVM version |^LLD / {
+              sub(/^[[:space:]]+/, "")
+              print
+              found = 1
+              exit
+            }
+            END { if (!found) exit 1 }
+          ')"
           if command -v sha256sum >/dev/null; then
             llc_sha="$(sha256sum llc-build/bin/llc | awk '{print $1}')"
             opt_sha="$(sha256sum llc-build/bin/opt | awk '{print $1}')"
+            lld_sha="$(sha256sum "llc-build/bin/$lld_tool" | awk '{print $1}')"
           else
             llc_sha="$(shasum -a 256 llc-build/bin/llc | awk '{print $1}')"
             opt_sha="$(shasum -a 256 llc-build/bin/opt | awk '{print $1}')"
+            lld_sha="$(shasum -a 256 "llc-build/bin/$lld_tool" | awk '{print $1}')"
           fi
           {
             printf 'PLATFORM=%s\n' '${{ matrix.platform }}'
@@ -213,6 +230,10 @@ jobs:
             printf 'FLATBUFFERS_SHA=%s\n' "$FLATBUFFERS_SHA"
             printf 'LLC_SHA256=%s\n' "$llc_sha"
             printf 'OPT_SHA256=%s\n' "$opt_sha"
+            printf 'LLD_TOOL=%s\n' "$lld_tool"
+            printf 'LLD_SOURCE=%s\n' "tuple:$LLVM_SHA"
+            printf 'LLD_VERSION=%s\n' "$lld_version"
+            printf 'LLD_SHA256=%s\n' "$lld_sha"
           } > "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
 
       - name: Generate LLVM shim
@@ -250,7 +271,11 @@ jobs:
       - name: Verify LLVM tools
         run: |
           mkdir -p "$RUNNER_TEMP/fixed-llvm-tools"
-          for tool in llc opt; do
+          case "${{ matrix.platform }}" in
+            darwin_*) lld_tool=ld64.lld ;;
+            *) lld_tool=ld.lld ;;
+          esac
+          for tool in llc opt "$lld_tool"; do
             gunzip -c "fixed-toolchain/${{ matrix.platform }}/${tool}.gz" \
               > "$RUNNER_TEMP/fixed-llvm-tools/$tool"
             chmod +x "$RUNNER_TEMP/fixed-llvm-tools/$tool"
@@ -262,14 +287,26 @@ jobs:
               printf '%s\n' "$ldd_output"
               test -z "$(printf '%s\n' "$ldd_output" | grep 'not found' || true)"
             fi
+            bash ci/assert_no_libxml2_needed.sh "$RUNNER_TEMP/fixed-llvm-tools/$tool"
             "$RUNNER_TEMP/fixed-llvm-tools/$tool" --version | head -5
           done
+          lld_version="$("$RUNNER_TEMP/fixed-llvm-tools/$lld_tool" --version | awk '
+            /LLVM version |^LLD / {
+              sub(/^[[:space:]]+/, "")
+              print
+              found = 1
+              exit
+            }
+            END { if (!found) exit 1 }
+          ')"
           if command -v sha256sum >/dev/null; then
             llc_sha="$(sha256sum "$RUNNER_TEMP/fixed-llvm-tools/llc" | awk '{print $1}')"
             opt_sha="$(sha256sum "$RUNNER_TEMP/fixed-llvm-tools/opt" | awk '{print $1}')"
+            lld_sha="$(sha256sum "$RUNNER_TEMP/fixed-llvm-tools/$lld_tool" | awk '{print $1}')"
           else
             llc_sha="$(shasum -a 256 "$RUNNER_TEMP/fixed-llvm-tools/llc" | awk '{print $1}')"
             opt_sha="$(shasum -a 256 "$RUNNER_TEMP/fixed-llvm-tools/opt" | awk '{print $1}')"
+            lld_sha="$(shasum -a 256 "$RUNNER_TEMP/fixed-llvm-tools/$lld_tool" | awk '{print $1}')"
           fi
           grep -Fx "PLATFORM=${{ matrix.platform }}" \
             "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
@@ -282,6 +319,14 @@ jobs:
           grep -Fx "LLC_SHA256=$llc_sha" \
             "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
           grep -Fx "OPT_SHA256=$opt_sha" \
+            "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
+          grep -Fx "LLD_TOOL=$lld_tool" \
+            "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
+          grep -Fx "LLD_SOURCE=tuple:$LLVM_SHA" \
+            "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
+          grep -Fx "LLD_VERSION=$lld_version" \
+            "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
+          grep -Fx "LLD_SHA256=$lld_sha" \
             "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
           file "fixed-toolchain/${{ matrix.platform }}/cjselfhost_llvmshim.o"
           if command -v sha256sum >/dev/null; then
@@ -297,7 +342,7 @@ jobs:
             | grep -cE ' T _?(LLVMGlobalObjectAddStringAttribute|LLVMSelfhost|CJOF)')"
           test "$shim_exports" -ge 90
           echo "shim exported symbols: $shim_exports"
-          for file in llc.gz opt.gz llvm-tools.manifest cjselfhost_llvmshim.o; do
+          for file in llc.gz opt.gz "$lld_tool.gz" llvm-tools.manifest cjselfhost_llvmshim.o; do
             if command -v sha256sum >/dev/null; then
               sha256sum "fixed-toolchain/${{ matrix.platform }}/$file"
             else
@@ -326,7 +371,7 @@ jobs:
         with:
           name: fixed-llvm-tools-linux_x86_64
           path: fixed-toolchain/linux_x86_64
-      - name: Publish the shared eight-payload layout
+      - name: Publish the shared ten-payload layout
         shell: bash
         run: |
           set -euo pipefail
