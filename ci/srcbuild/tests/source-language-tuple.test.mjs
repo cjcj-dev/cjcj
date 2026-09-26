@@ -30,9 +30,9 @@ async function fixture(body, nativeHost = false) {
     await write(path.join(std, `lib/${tuple}/libcangjie-std-core.a`), 'std fixture');
     await write(path.join(std, `modules/${tuple}/core.cjo`), 'module fixture');
     await write(path.join(sdk, 'bin/cjc'), 'stage3 fixture');
-    // This device test executes the official tools and their real version-query
-    // compiler child; it does not claim a qualified stage3 compiler fixture.
-    if (nativeHost) await fs.copyFile(path.join(process.env.SOURCE_TUPLE_COMPILER_SDK, 'bin/cjc'), path.join(sdk, 'bin/cjc'));
+    // Execute official tools with a real self-built compiler child and a
+    // distinct runtime pair. This device fixture does not qualify stage3.
+    if (nativeHost) await fs.copyFile(process.env.SOURCE_TUPLE_COMPILER, path.join(sdk, 'bin/cjc'));
     await fs.chmod(path.join(sdk, 'bin/cjc'), 0o755);
     const runtimeFiles = {};
     const hostPins = [];
@@ -71,6 +71,7 @@ async function fixture(body, nativeHost = false) {
       inputs[name] = await fileSha256(path.join(sdk, `third_party/llvm/bin/${name}-stage1`));
     }
     await write(path.join(sdk, 'third_party/llvm/lib/libLLVM-15.so'), 'coloured LLVM library fixture');
+    if (nativeHost) await fs.copyFile(hostLlvm, path.join(sdk, 'third_party/llvm/lib/libLLVM-15.so'));
     inputs.llvmLibrary = await fileSha256(path.join(sdk, 'third_party/llvm/lib/libLLVM-15.so'));
     const llvmManifest = path.join(root, 'llvm-tools.manifest');
     await write(llvmManifest, `LLVM_SHA=${'c'.repeat(40)}\nLLC_SHA256=${inputs.llc}\nOPT_SHA256=${inputs.opt}\n`);
@@ -167,7 +168,7 @@ test('source producer rejects a different official host LLVM identity', () => fi
 }));
 
 test('official native tools survive transport and deletion of producer SDK', {
-  skip: !(process.env.SOURCE_TUPLE_OFFICIAL_SDK && process.env.SOURCE_TUPLE_HOST_LLVM && process.env.SOURCE_TUPLE_COMPILER_SDK),
+  skip: !(process.env.SOURCE_TUPLE_OFFICIAL_SDK && process.env.SOURCE_TUPLE_HOST_LLVM && process.env.SOURCE_TUPLE_COMPILER_SDK && process.env.SOURCE_TUPLE_COMPILER),
 }, () => fixture(async ({root, sdk, std, runtime, host, compiler, output, pack, pins}) => {
   pack();
   const pin = await pins();
@@ -204,6 +205,19 @@ test('official native tools survive transport and deletion of producer SDK', {
   console.log('LOADER_PROGRAMS ' + JSON.stringify(traces.flatMap(text => text.match(/initialize program: .*/g) ?? [])));
   const compilerTrace = traces.find(text => text.includes('initialize program:') && /initialize program: (?:.*\/bin\/)?(cjc|cjc-frontend|cjcj-stage1)\s/.test(text));
   const hostTrace = traces.find(text => /initialize program: .*\/cjpm-stage1\s/.test(text));
+  // Preserve the actually executed patched ELFs and loader traces when the
+  // integration runner provides its durable artifact directory.
+  if (process.env.SOURCE_TUPLE_EVIDENCE_DIR) {
+    const evidence = path.resolve(process.env.SOURCE_TUPLE_EVIDENCE_DIR);
+    await fs.mkdir(evidence, {recursive: true});
+    await json(path.join(evidence, 'manifest.json'), manifest);
+    await json(path.join(evidence, 'loader-traces.json'), traces);
+    await json(path.join(evidence, 'observations.json'), observations);
+    for (const row of observations) {
+      const native = path.join(moved, 'sdk', row.tool + '-stage1');
+      await fs.copyFile(native, path.join(evidence, path.basename(native)));
+    }
+  }
   console.log('COMPILER_CHILD_LOADER_ASSERT_REACHED ' + JSON.stringify({compiler: compilerTrace?.match(/calling init: .*libcangjie-runtime.so/g), host: hostTrace?.match(/calling init: .*libcangjie-runtime.so/g)}));
   assert.match(compilerTrace ?? '', /calling init: .*\/compiler-runtime\/linux_x86_64_cjnative\/libcangjie-runtime.so/);
   assert.match(hostTrace ?? '', /calling init: .*\/official-host\/linux_x86_64_cjnative\/libcangjie-runtime.so/);

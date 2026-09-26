@@ -106,8 +106,8 @@ export const GATING = Object.freeze([
 export const DEFERRED = Object.freeze([
   Object.freeze({
     file: 'ci/srcbuild/tests/source-language-tuple.test.mjs',
-    needs: 'python3 and patchelf for packaging; native relocation additionally needs SOURCE_TUPLE_OFFICIAL_SDK, SOURCE_TUPLE_HOST_LLVM and a distinct SOURCE_TUPLE_COMPILER_SDK; synthetic receipts do not qualify stage3',
-    verified: 'kkk2 packaging and transport assertions run against the shipped CLI; native relocation currently being qualified under cjcj#135, not a language-gate acceptance',
+    needs: 'python3 and patchelf for packaging; native relocation additionally needs SOURCE_TUPLE_OFFICIAL_SDK, SOURCE_TUPLE_HOST_LLVM a distinct SOURCE_TUPLE_COMPILER_SDK and its self-built SOURCE_TUPLE_COMPILER; synthetic receipts do not qualify stage3',
+    verified: 'kkk2 real CLI candidate/restored 8/8; each producer, consumer, host-pin and host-role cut 7/8, only its target assertion red (2026-09-26); not stage3 language qualification',
   }),
   Object.freeze({
     file: 'build/test/release-evidence.test.mjs',
