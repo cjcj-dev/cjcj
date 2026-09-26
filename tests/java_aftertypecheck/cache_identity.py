@@ -87,7 +87,7 @@ def main():
 
     if ready:
         names = [f'cache_{kind}_{mode}' for kind in ('field', 'method') for mode in ('collision', 'control', 'hash_collision')]
-        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
             result['cases'].update(dict(pool.map(check, names)))
     result['compiler_after_sha256'] = sha(compiler)
     result['uptime_after'] = subprocess.check_output(['uptime'], text=True)
