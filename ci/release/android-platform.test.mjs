@@ -4,7 +4,7 @@ import path from 'node:path';
 import test from 'node:test';
 import {spawnSync} from 'node:child_process';
 import {releasePlatformReadiness} from '../../build/lib/targets.mjs';
-import {crossStdArguments} from './compose-package.mjs';
+import {crossStdArguments} from './cross-std-arguments.mjs';
 
 const tuple = 'linux_android_aarch64_cjnative';
 const keys = ['linux-x64-android', 'darwin-arm64-android', 'win32-x64-android'];
