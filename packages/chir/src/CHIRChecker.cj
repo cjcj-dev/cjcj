@@ -1254,19 +1254,24 @@ public class CHIRChecker {
     }
 
     private func CheckMemoryExpression(expr: Expression, topLevelFunc: Function): Unit {
-        match (expr.GetExprKind()) {
-            case ExprKind.ALLOCATE => CheckAllocate((expr as Allocate).getOrThrow(), topLevelFunc)
-            case ExprKind.LOAD => CheckLoad(expr, topLevelFunc)
-            case ExprKind.STORE => CheckStore(expr, topLevelFunc)
-            case ExprKind.GET_ELEMENT_REF => CheckGetElementRef((expr as GetElementRef).getOrThrow(), topLevelFunc)
-            case ExprKind.GET_ELEMENT_BY_NAME =>
-                CheckGetElementByName((expr as GetElementByName).getOrThrow(), topLevelFunc)
-            case ExprKind.STORE_ELEMENT_REF =>
-                CheckStoreElementRef((expr as StoreElementRef).getOrThrow(), topLevelFunc)
-            case ExprKind.STORE_ELEMENT_BY_NAME =>
-                CheckStoreElementByName((expr as StoreElementByName).getOrThrow(), topLevelFunc)
-            case _ => WarningInExpr(topLevelFunc, expr,
-                "find unrecongnized ExprKind `" + expr.GetExprKindName() + "`.")
+        let actionMap = HashMap<ExprKind, () -> Unit>([
+            (ExprKind.ALLOCATE, { => CheckAllocate((expr as Allocate).getOrThrow(), topLevelFunc) }),
+            (ExprKind.LOAD, { => CheckLoad(expr, topLevelFunc) }),
+            (ExprKind.STORE, { => CheckStore(expr, topLevelFunc) }),
+            (ExprKind.GET_ELEMENT_REF, { =>
+                CheckGetElementRef((expr as GetElementRef).getOrThrow(), topLevelFunc) }),
+            (ExprKind.GET_ELEMENT_BY_NAME, { =>
+                CheckGetElementByName((expr as GetElementByName).getOrThrow(), topLevelFunc) }),
+            (ExprKind.STORE_ELEMENT_REF, { =>
+                CheckStoreElementRef((expr as StoreElementRef).getOrThrow(), topLevelFunc) }),
+            (ExprKind.STORE_ELEMENT_BY_NAME, { =>
+                CheckStoreElementByName((expr as StoreElementByName).getOrThrow(), topLevelFunc) })
+        ])
+        if (let Some(action) <- actionMap.get(expr.GetExprKind())) {
+            action()
+        } else {
+            WarningInExpr(topLevelFunc, expr,
+                "find unrecongnized ExprKind `" + expr.GetExprKindName() + ".")
         }
     }
 
