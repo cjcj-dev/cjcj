@@ -1451,11 +1451,14 @@ public class CHIRChecker {
     }
 
     private func CheckControlFlowExpression(expr: Expression, topLevelFunc: Function): Unit {
-        if (expr.GetExprKind() == ExprKind.LAMBDA) {
-            CheckLambda((expr as Lambda).getOrThrow(), topLevelFunc)
-            return
+        let actionMap = HashMap<ExprKind, () -> Unit>([
+            (ExprKind.LAMBDA, { => CheckLambda((expr as Lambda).getOrThrow(), topLevelFunc) })
+        ])
+        if (let Some(action) <- actionMap.get(expr.GetExprKind())) {
+            action()
+        } else {
+            WarningInExpr(topLevelFunc, expr, "find unrecongnized ExprKind `" + expr.GetExprKindName() + ".")
         }
-        WarningInExpr(topLevelFunc, expr, "find unrecongnized ExprKind `" + expr.GetExprKindName() + "`.")
     }
 
     private func CheckOtherExpression(expr: Expression, topLevelFunc: Function): Unit {
