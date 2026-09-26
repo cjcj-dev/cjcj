@@ -1042,7 +1042,7 @@ stage1
 
 // Execute the complete driver, including retained-state loading, prerequisite,
 // run_step and the final RESULT. Only external inputs live in the fixture.
-function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFailure = false, child = false} = {}) {
+function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFailure = false, child = false, ast = 'explicit'} = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bootstrap argv '));
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));
   for (const dir of ['ci', 'build', 'tools']) {
@@ -1125,6 +1125,16 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
     CJCJ_BOOTSTRAP_COLOUR_RT: inputs,
     CJCJ_BOOTSTRAP_CJCJ_SHA: sourceSha,
   };
+  const campaignArchive = path.join(state, 'buildtools/lib/libcangjie-ast-support.a');
+  if (ast === 'campaign' || ast === 'precedence') {
+    fs.mkdirSync(path.dirname(campaignArchive), {recursive: true});
+    fs.writeFileSync(campaignArchive, 'campaign ast input\n');
+  }
+  if (ast === 'missing' || ast === 'campaign') {
+    delete env.CJCJ_BOOTSTRAP_AST_SUPPORT;
+    delete env.CJCJ_BOOTSTRAP_AST_SUPPORT_SHA256;
+  }
+  if (ast === 'wrong-sha') env.CJCJ_BOOTSTRAP_AST_SUPPORT_SHA256 = '0'.repeat(64);
   delete env.CJCJ_BOOTSTRAP_SH;
   delete env.CJCJ_SRCBUILD_CPUSET;
   delete env.CJCJ_KKK2_AFFINED;
@@ -1224,4 +1234,50 @@ test('bootstrap driver matching pins starts real stage0 and sdk_build', t => {
   assert.equal(result.status, 1, result.stdout + result.stderr);
   assert.match(result.stdout, /STEP=31 .* rc=1 /);
   assert.doesNotMatch(result.stdout, /RESULT=success/);
+});
+
+for (const ast of ['missing', 'campaign', 'precedence']) {
+  test(`ast-support input contract ${ast}`, t => {
+    const fixture = bootstrapDriverFixture(t, {ast});
+    const result = fixture.dryRun(31, 1);
+    const command = result.stdout.match(/^DRY_RUN COMMAND=(.*)$/m)?.[1];
+    const archive = path.join(fixture.root, ast === 'campaign'
+      ? '.srcbuild/buildtools/lib/libcangjie-ast-support.a' : 'inputs/ast.a');
+    const expectedSha = ast === 'missing' ? '' : sha256(archive);
+    // Collect the product result before asserting, including failure diagnostics.
+    const observed = {
+      rc: result.status,
+      command: command !== undefined,
+      missingKey: /bootstrap input missing: CJCJ_BOOTSTRAP_AST_SUPPORT/.test(result.stderr),
+      campaignKey: /CANGJIE_BUILD_ROOT\/lib\/libcangjie-ast-support.a/.test(result.stderr),
+      selectedSha: command?.includes(`--ast-support-sha256 ${expectedSha} `) ?? false,
+    };
+    console.log(`AST_INPUT_ASSERT ${ast} ${JSON.stringify(observed)}`);
+    assert.deepEqual(observed, ast === 'missing'
+      ? {rc: 1, command: false, missingKey: true, campaignKey: true, selectedSha: false}
+      : {rc: 0, command: true, missingKey: false, campaignKey: false, selectedSha: true});
+  });
+}
+
+test('ast-support input contract wrong-sha reaches bootstrap assertion', t => {
+  const result = bootstrapDriverFixture(t, {ast: 'wrong-sha'}).run(31);
+  const observed = {
+    rc: result.status,
+    assertion: /ASSERT ast-support-sha256 expected=0{64} actual=[0-9a-f]{64}/.test(result.log),
+    failures: result.log.replace(/\x1b\[[0-9;]*m/g, '').split('\n').filter(line => line.startsWith('BOOTSTRAP-FAIL')),
+  };
+  console.log(`AST_SHA_ASSERT ${JSON.stringify(observed)}`);
+  assert.deepEqual(observed, {rc: 1, assertion: true,
+    failures: ['BOOTSTRAP-FAIL [stage0] ast-support sha256 不匹配']});
+});
+
+test('ast-support input contract missing stops real stage entry', t => {
+  const result = bootstrapDriverFixture(t, {ast: 'missing'}).run(31);
+  const observed = {
+    rc: result.status,
+    missingKey: /bootstrap input missing: CJCJ_BOOTSTRAP_AST_SUPPORT/.test(result.log),
+    bootstrapStarted: /\[stage0\]/.test(result.log),
+  };
+  console.log(`AST_ENTRY_ASSERT ${JSON.stringify(observed)}`);
+  assert.deepEqual(observed, {rc: 1, missingKey: true, bootstrapStarted: false});
 });
