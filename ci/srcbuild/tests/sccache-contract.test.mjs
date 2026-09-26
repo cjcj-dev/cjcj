@@ -33,7 +33,9 @@ function jobs(text) {
 // srcbuild: support libraries, stage3 std FFI, stdx, tools, shim, Windows cross runtime.
 // ci.yml / platform-matrix.yml: the patched runtime on a runtime-cache miss plus
 // the shim objects, per runner (the runtime links the builder's glibc).
+// build-ast-support: libcangjie-ast-support.a via ci/build_ast_support.sh.
 const CXX_JOBS = new Map([
+  ['build-ast-support.yml/build', {component: 'ast-support', pin: /\$\{\{ env\.COMPILER_REF \}\}-\$\{\{ env\.FLATBUFFERS_SHA \}\}/}],
   ['build-host-llvm.yml/host', {component: 'host-llvm', pin: /steps\.pin\.outputs\.sha/}],
   ['build-llvm-dylib.yml/dylib', {component: '${{ inputs.cache-component }}', pin: /steps\.pin\.outputs\.sha/}],
   ['build-llvm-tools.yml/build-tools', {component: 'llvm', pin: /steps\.llvm-pin\.outputs\.sha/}],
@@ -56,7 +58,7 @@ const CXX_JOBS = new Map([
 // or configures one is excluded below rather than left out here.
 // `cc` needs the extra guard: a bare word boundary also matches the end of a
 // filename like src/foo.cc, and a file being copied is not a compile.
-const COMPILES = /(\bcmake\b|\bninja\b|\bmake\b|build\.py build|(?<![.\w-])cc\b|\bgcc\b|\bg\+\+|clang\+\+|\bclang\b|build_patched_runtime\.mjs|build_runtime\.mjs|build_tuple\.sh|install-static-libs|gha_run\.sh|build-stage3\.mjs|build-windows-final-std\.mjs|build_shim\.mjs|build_windows_std_ast\.mjs)/;
+const COMPILES = /(\bcmake\b|\bninja\b|\bmake\b|build\.py build|(?<![.\w-])cc\b|\bgcc\b|\bg\+\+|clang\+\+|\bclang\b|build_patched_runtime\.mjs|build_runtime\.mjs|build_tuple\.sh|install-static-libs|gha_run\.sh|build-stage3\.mjs|build-windows-final-std\.mjs|build_shim\.mjs|build_windows_std_ast\.mjs|build_ast_support\.sh)/;
 // Only the package managers. Every other exclusion tried here -- the MSYS2
 // package list, --gcc-toolchain, CMAKE_C*_COMPILER=, shellcheck/actionlint --
 // was measured and carried nothing: dropping all six leaves the suite at the
@@ -91,6 +93,9 @@ test('every C/C++ compile job starts sccache before compiling and reports after,
     const start = steps.findIndex(step => /uses:\s*\.\/\.github\/actions\/sccache\s*$/m.test(step));
     const report = steps.findIndex(step => /uses:\s*\.\/\.github\/actions\/sccache-report\s*$/m.test(step));
     const firstCompile = steps.findIndex(compilesIn);
+    if (id === 'build-ast-support.yml/build') {
+      console.log(`AST-SCCACHE-CONTRACT job=${id} start=${start} compile=${firstCompile} report=${report}`);
+    }
     assert.ok(start >= 0, `${id}: no ./.github/actions/sccache step`);
     assert.ok(report >= 0, `${id}: no ./.github/actions/sccache-report step`);
     assert.ok(firstCompile >= 0, `${id}: no compile step found; CXX_JOBS is stale`);
