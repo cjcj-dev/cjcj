@@ -13,7 +13,7 @@ before checking it; the runner separately checks the product diagnostic.
 
 The 22 keys correspond to upstream `src/CHIR/Checker/CHIRChecker.cpp:1791`.
 Twenty-one cases use malformed IR to exercise each callback's existing operand
-or successor invariant. `numeric` checks the intentional no-op at upstream
+or successor invariant (MultiBranch instead checks the condition's Int type). `numeric` checks the intentional no-op at upstream
 `CHIRChecker.cpp:3030`; `control` supplies a valid Exit. Both must produce true
 and no checker error or unknown-kind warning. Removed operands include successor
 links, using the real IR mutation API so predecessor checks remain consistent.

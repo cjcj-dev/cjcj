@@ -51,9 +51,10 @@ main(args: Array<String>): Int64 {
             case _ => throw IllegalArgumentException("unknown case ${mode}")
         }
     }
+    // MultiBranch keeps its operands: its Function-typed condition violates Int.
     // Keep result metadata. Erase operands and successor links together so earlier
     // block/predecessor checks cannot mask the selected callback's diagnostic.
-    if (mode != "exit" && mode != "numeric" && mode != "control") {
+    if (mode != "exit" && mode != "numeric" && mode != "control" && mode != "multibranch") {
         expr.EraseOperands()
     }
     block.AppendExpression(expr)

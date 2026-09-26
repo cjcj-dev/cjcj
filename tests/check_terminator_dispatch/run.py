@@ -66,7 +66,7 @@ def main():
             'exit': 'expect 0 operand(s), but there are 1 in fact.',
             'raise': 'expect at least 1 operand(s), but there are 0 in fact.',
             'branch': 'expect 1 operand(s), but there are 0 in fact.',
-            'multibranch': 'expect 1 operand(s), but there are 0 in fact.',
+            'multibranch': ', but Int type is expected.',
             'apply': 'expect at least 1 operand(s), but there are 0 in fact.',
             'invoke': 'expect at least 1 operand(s), but there are 0 in fact.',
             'invokestatic': 'expect at least 1 operand(s), but there are 0 in fact.',
