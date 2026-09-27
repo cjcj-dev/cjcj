@@ -16,7 +16,7 @@ const pins = file => Object.fromEntries(read(file).trim().split('\n').map(line =
 const llvm = pins('ci/llvm_pin.env');
 const input = JSON.parse(read('ci/bootstrap_inputs_pin.json'));
 
-test('release runtime loader selects the return-poll runtime paired with LLVM', () => {
+test('release runtime loader selects the stack-slot-root runtime paired with LLVM', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'release-pair-'));
   try {
     const output = path.join(dir, 'github-env');
@@ -25,13 +25,13 @@ test('release runtime loader selects the return-poll runtime paired with LLVM', 
     const result = spawnSync(process.execPath, [fileURLToPath(new URL('ci/load_runtime_pin.mjs', root))], {env, encoding: 'utf8'});
     assert.equal(result.status, 0, result.stderr);
     const selected = /^RUNTIME_REF=(.*)$/m.exec(fs.readFileSync(output, 'utf8'))?.[1];
-    assert.equal(selected, '50a83f258c431e97a141c4e34e7c1239dd4e91ad', 'release runtime must provide the paired return-poll handler');
+    assert.equal(selected, '1a5d5ec2bf40ab87ac31f4a1da4370e87fd7b6ac', 'release runtime must provide the paired ordinary-statepoint register-root contract');
     console.log(`ASSERT release-runtime-selected=${selected}`);
   } finally { fs.rmSync(dir, {recursive: true, force: true}); }
 });
 
-test('release LLVM source and both dylib provenance pins use the return-poll producer', () => {
-  assert.equal(llvm.LLVM_SHA, '47af16885ca321ade18fa97dfa00725930685ca0');
+test('release LLVM source and both dylib provenance pins use the stack-slot-root and RawData safepoint producer', () => {
+  assert.equal(llvm.LLVM_SHA, 'e40afeefa6ccaee67d0d3e30d8a70b08f25c86f6');
   for (const platform of ['linux_x86_64', 'linux_aarch64']) {
     const dylib = pins(`ci/llvm-dylib/${platform}.env`);
     assert.equal(dylib.LLVM_DYLIB_SOURCE_SHA, llvm.LLVM_SHA, platform);
