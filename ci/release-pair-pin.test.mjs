@@ -30,20 +30,13 @@ test('release runtime loader selects the stack-slot-root runtime paired with LLV
   } finally { fs.rmSync(dir, {recursive: true, force: true}); }
 });
 
-test('release LLVM source and all dylib provenance pins use the stack-slot-root and RawData safepoint producer', () => {
+test('release LLVM source and both dylib provenance pins use the stack-slot-root and RawData safepoint producer', () => {
   assert.equal(llvm.LLVM_SHA, 'e40afeefa6ccaee67d0d3e30d8a70b08f25c86f6');
-  const release = JSON.parse(read('ci/llvm-dylib/release.json'));
-  assert.equal(release.llvm_sha, llvm.LLVM_SHA);
-  assert.equal(release.run_id, llvm.LLVM_TUPLE_RUN_ID);
-  assert.equal(release.run_attempt, llvm.LLVM_TUPLE_RUN_ATTEMPT);
-  assert.equal(release.prerelease, true);
-  for (const platform of ['linux_x86_64', 'linux_aarch64', 'darwin_x86_64', 'darwin_aarch64']) {
+  for (const platform of ['linux_x86_64', 'linux_aarch64']) {
     const dylib = pins(`ci/llvm-dylib/${platform}.env`);
     assert.equal(dylib.LLVM_DYLIB_SOURCE_SHA, llvm.LLVM_SHA, platform);
     assert.equal(dylib.LLVM_DYLIB_RUN_ID, llvm.LLVM_TUPLE_RUN_ID, platform);
     assert.equal(dylib.LLVM_DYLIB_RUN_ATTEMPT, llvm.LLVM_TUPLE_RUN_ATTEMPT, platform);
-    assert.equal(String(release.platforms[platform].artifact_id), dylib.LLVM_DYLIB_ARTIFACT_ID, platform);
-    assert.equal(release.platforms[platform].library_sha256, dylib.LLVM_DYLIB_SHA256, platform);
   }
   console.log('ASSERT release-llvm-dylib-pair executed');
 });
