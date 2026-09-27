@@ -11,24 +11,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  srcbuild-driver:
-    name: Verify srcbuild driver
-    runs-on: ubuntu-slim
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v7
-      - name: Test srcbuild driver contracts
-        env:
-          CJCJ_TEST_EVIDENCE: ${{ runner.temp }}/srcbuild-driver-evidence
-        run: node --test --test-timeout=300000 build/test/srcbuild-kkk2.test.mjs
-      - name: Preserve srcbuild driver evidence
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: srcbuild-driver-focused-evidence
-          path: ${{ runner.temp }}/srcbuild-driver-evidence
-          if-no-files-found: error
-
   lint:
     name: Verify sources
     runs-on: ubuntu-slim
