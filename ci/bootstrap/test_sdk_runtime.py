@@ -14,7 +14,7 @@ import subprocess
 
 LINUX = 'linux_x86_64_cjnative'
 WINDOWS = 'windows_x86_64_cjnative'
-PIN = '1a5d5ec2bf40ab87ac31f4a1da4370e87fd7b6ac'
+PIN = '97c42fe77c42bc33efedbe6a395043fd58443358'
 PIN_STAMP = '__attribute__((used)) static const char cjrt_pin[] = "CJRT-COMMIT:' + PIN + '";'
 
 
