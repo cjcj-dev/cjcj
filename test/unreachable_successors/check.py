@@ -8,6 +8,7 @@ CANGJIE_HOME and the runtime/library paths must describe the supplied compiler.
 import argparse
 import hashlib
 import json
+import re
 from pathlib import Path
 import subprocess
 import time
@@ -21,13 +22,13 @@ compiler = args.compiler.resolve()
 out = args.out.resolve()
 out.mkdir(parents=True, exist_ok=True)
 results = []
-for name in ("branch", "ordinary"):
+for name in ("branch", "ordinary", "diagnostic"):
     target = out / name
     target.mkdir(exist_ok=True)
     archive = target / (name + ".a")
     archive.unlink(missing_ok=True)
     command = [str(compiler), str(Path(__file__).resolve().with_name(name + ".cj")),
-               "--output-type=staticlib", "-O2", "-j" + str(args.jobs), "-o", str(archive)]
+               "--output-type=staticlib", "-O0" if name == "diagnostic" else "-O2", "-j" + str(args.jobs), "-o", str(archive)]
     start = time.monotonic()
     with (target / "compile.log").open("w") as log:
         run = subprocess.run(command, cwd=target, stdout=log, stderr=subprocess.STDOUT)
@@ -35,6 +36,13 @@ for name in ("branch", "ordinary"):
     text = (target / "compile.log").read_text(errors="replace")
     archive_ok = archive.is_file() and archive.read_bytes()[:8] == b"!<arch>\n"
     ok = run.returncode == 0 and "NoneValueException" not in text and archive_ok
+    if name == "diagnostic":
+        clean_log = re.sub(r"\x1b\[[0-9;]*m", "", text)
+        # The outer return's source expression is selected by this analysis;
+        # binding the warning to line 2 distinguishes the DCE reporter's other
+        # unreachable warnings from this phase's observable result.
+        warning = re.search(r"warning: unreachable expression\n(?:.*\n){0,3}?.*?diagnostic\.cj:2:", clean_log)
+        ok = ok and warning is not None
     # This assertion always executes, including when compilation throws. There
     # is no earlier fatal setup assertion that could hide the product result.
     print(f"{'PASS' if ok else 'FAIL'} {name}-typed-operands "
