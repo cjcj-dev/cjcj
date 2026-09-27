@@ -14,7 +14,7 @@ import subprocess
 
 TUPLE = 'linux_x86_64_cjnative'
 PAIR = ('libcangjie-runtime.so', 'libboundscheck.so')
-COMMIT = '10965c352184f366d9e46fc75341905724bf40d5'
+COMMIT = '50a83f258c431e97a141c4e34e7c1239dd4e91ad'
 
 
 def sha(path):

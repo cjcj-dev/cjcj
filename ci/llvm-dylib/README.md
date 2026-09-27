@@ -1,7 +1,8 @@
 # In-process LLVM input
 
 `build-llvm-dylib.yml` produces a separate `depot/dylib` directory on GitHub's
-Linux x64 and AArch64 runners. Both builds enable X86, ARM, and AArch64 and use
+Linux x64 and AArch64 runners, plus `macos-15` (AArch64) and
+`macos-15-intel` (x64). All four builds enable X86, ARM, and AArch64 and use
 `LLVM_SHA` from `ci/llvm_pin.env`. The existing sccache composite action supplies
 both compiler launchers and the disk cache (the GHA sccache backend stays off).
 
@@ -29,12 +30,20 @@ Linux runner. It checks the source pin, run/attempt and target list, then runs
 change must fail before the original manifest is restored and verified again.
 
 For a new publication, dispatch `build-llvm-dylib.yml` at the reviewed cjcj
-commit and wait for both native jobs to finish. Preserve each original Actions
+commit and wait for all four native jobs to finish. Preserve each original Actions
 artifact ZIP and its manifest in a draft prerelease, together with SHA256SUMS.
 Read back every asset and compare its bytes before publishing with
 `--prerelease --latest=false`. Record the immutable release/asset IDs in
-`release.json` and update the two `.env` pins from those verified manifests.
+`release.json` and update the platform `.env` pins from those verified manifests.
 Do not substitute a local build for a GitHub artifact or overwrite an old asset.
 
-Darwin and Windows dylibs are not supported by the existing producer or Linux
-bootstrap entry point; the broader platform matrix is tracked in cjcj#73.
+Darwin outputs `libLLVM.dylib`; Linux outputs `libLLVM-15.so`. The verifier
+uses the host library name and normalizes Mach-O's leading underscore in the
+full defined symbol table. `LLVM_NM` selects the same-build `llvm-nm` in the
+producer, so the verification command supports `--defined-only` on every host.
+The manifest additionally records the platform and library filename. Each
+Darwin job checks a real C API call and rejects a changed library before loading
+it; native source pins are candidates until the matching prerelease is published.
+
+Windows dylibs remain outside this producer; the broader platform matrix is
+tracked in cjcj#73.

@@ -48,7 +48,7 @@ jobs:
       # this step must keep asking the manifest.
       - name: Install release contract dependencies
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq zip unzip
+          sudo apt-get update -qq && sudo apt-get install -y -qq zip unzip clang lld
           npx --yes zx@8 --version
       # package-lineage compares package bytes with the official host SDK. Load
       # the consumer's pin, not the build job's independently loaded environment.
