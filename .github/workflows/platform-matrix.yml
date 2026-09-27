@@ -93,7 +93,15 @@ jobs:
           file "$lib/libcangjie-runtime.dylib" "$lib/libboundscheck.dylib" | tee .platform-ci/runtime-install/architecture.txt
           shasum -a 256 "$lib/libcangjie-runtime.dylib" "$lib/libboundscheck.dylib" | tee .platform-ci/runtime-install/SHA256SUMS
           nm -U "$lib/libcangjie-runtime.dylib" > .platform-ci/runtime-install/defined-symbols.txt
+          echo "NM_DEFINED_RC=0"
+          grep -E ' _CJ_MCC_HandleSafepoint$' .platform-ci/runtime-install/defined-symbols.txt
           grep -E ' _CJ_MCC_HandleReturnSafepoint$' .platform-ci/runtime-install/defined-symbols.txt
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: darwin-runtime-diagnostics-${{ matrix.platform }}
+          path: .platform-ci/runtime-install
+          if-no-files-found: warn
       - uses: actions/upload-artifact@v7
         with:
           name: darwin-runtime-build-${{ matrix.platform }}
