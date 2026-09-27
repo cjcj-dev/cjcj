@@ -5,6 +5,7 @@ import {assertFinalStd} from '../srcbuild/lib/final-std.mjs';
 import {getTarget} from '../../build/lib/targets.mjs';
 import {resolveProductBinary} from '../srcbuild/lib/product-binary.mjs';
 import {platformizeCjcToml} from './link_option.mjs';
+import {compilerBuildTypeToml} from '../srcbuild/lib/compiler-build-type.mjs';
 
 // The caller's existing MSYS adapter owns shell/CRT setup. This continuation
 // owns the W1 -> private target SDK -> clean/build -> named W2 handoff.
@@ -51,7 +52,7 @@ export async function buildWindowsFinalCompiler({root, cangjieHome, hostSdk, sdk
       }
     }
     await fs.writeFile(cjcTomlPath, platformizeCjcToml(
-      cjcToml, 'win32', targetSdk, process.env.CJCJ_LLVM_LINK_RSP || '', mingwCxxLinkRsp));
+      compilerBuildTypeToml(cjcToml, 'release'), 'win32', targetSdk, process.env.CJCJ_LLVM_LINK_RSP || '', mingwCxxLinkRsp));
     const clean = await runInMsys('cjpm clean', 'final-clean', targetSdk, hostSdk);
     if (clean.exitCode !== 0) return clean;
     const build = await runInMsys('cjc --version && cjpm build', 'final-build', targetSdk, hostSdk);
