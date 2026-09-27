@@ -1,0 +1,71 @@
+name: Pinned Darwin official host runtime
+on:
+  workflow_dispatch:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  host-runtime:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {runner: macos-15, platform: darwin_aarch64}
+          - {runner: macos-15-intel, platform: darwin_x86_64}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    env:
+      PLATFORM: ${{ matrix.platform }}
+      CJCJ_SDK_STOCK_LLC: '1'
+    steps:
+      - uses: actions/checkout@v7
+      - name: Load official host SDK pin
+        run: cat ci/host_sdk_pin.env >> "$GITHUB_ENV"
+      - name: Provision official host SDK
+        run: npx --yes zx@8 ci/setup_sdk.mjs
+      - name: Extract and verify the official pair
+        run: |
+          set -euo pipefail
+          node ci/release/host_runtime.mjs prepare "$CANGJIE_HOME" host-runtime "$PLATFORM"
+          node ci/release/host_runtime.mjs verify "$CANGJIE_HOME" host-runtime "$PLATFORM" | tee host-runtime/verified.log
+          lib="host-runtime/runtime/lib/${PLATFORM}_cjnative"
+          file "$lib"/*.dylib | tee host-runtime/architecture.txt
+          shasum -a 256 "$lib"/*.dylib | tee host-runtime/SHA256SUMS
+          nm -U "$lib/libcangjie-runtime.dylib" > host-runtime/defined-symbols.txt
+      - name: Exercise the real copy with native SDK bytes
+        run: |
+          set -euo pipefail
+          mkdir -p host-runtime/controls
+          cp ci/release/host_runtime.mjs host-runtime/controls/candidate.mjs
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('ci/release/host_runtime.mjs')
+          s = p.read_text()
+          old = 'fs.copyFileSync(source, destination);'
+          assert s.count(old) == 1
+          p.write_text(s.replace(old, "fs.copyFileSync(path.join(sdk, `runtime/lib/${platform}_cjnative/libboundscheck.dylib`), destination);"))
+          PY
+          cp ci/release/host_runtime.mjs host-runtime/controls/cut.mjs
+          node ci/release/host_runtime.mjs prepare "$CANGJIE_HOME" host-cut "$PLATFORM"
+          set +e
+          node ci/release/host_runtime.mjs verify "$CANGJIE_HOME" host-cut "$PLATFORM" > host-runtime/controls/cut.log 2>&1
+          rc=$?
+          set -e
+          echo "$rc" > host-runtime/controls/cut.rc
+          test "$rc" -ne 0
+          grep -F "HOST_RT_COPY_SHA256: runtime/lib/${PLATFORM}_cjnative/libcangjie-runtime.dylib" host-runtime/controls/cut.log
+          cp host-runtime/controls/candidate.mjs ci/release/host_runtime.mjs
+          cp ci/release/host_runtime.mjs host-runtime/controls/restored.mjs
+          node ci/release/host_runtime.mjs prepare "$CANGJIE_HOME" host-restored "$PLATFORM"
+          node ci/release/host_runtime.mjs verify "$CANGJIE_HOME" host-restored "$PLATFORM" | tee host-runtime/controls/restored.log
+          for name in libcangjie-runtime.dylib libboundscheck.dylib; do
+            relative="runtime/lib/${PLATFORM}_cjnative/$name"
+            cmp "host-runtime/$relative" "host-restored/$relative"
+            shasum -a 256 "host-runtime/$relative" "host-cut/$relative" "host-restored/$relative"
+          done | tee host-runtime/controls/arms.sha256
+          shasum -a 256 host-runtime/controls/*.mjs > host-runtime/controls/scripts.sha256
+      - uses: actions/upload-artifact@v7
+        with:
+          name: host-runtime-${{ matrix.platform }}
+          path: host-runtime
+          if-no-files-found: error

@@ -1,37 +1,59 @@
 {
   "version": 1,
   "repository": "cjcj-dev/cjcj",
-  "llvm_sha": "501694e0512adbe785f4d283809dc72207ec9d65",
-  "producer_sha": "7c8e9dfacb1d0a0f1c0838fef9d618c346c7ee83",
-  "run_id": "36054308179",
+  "llvm_sha": "47af16885ca321ade18fa97dfa00725930685ca0",
+  "producer_sha": "01709c59c360af3a6b9850492f9af729669b9687",
+  "run_id": "36287106320",
   "run_attempt": "1",
-  "release_id": 396080911,
-  "tag": "llvm-dylib-501694e0512a-36054308179-1-prerelease",
+  "release_id": 397477489,
+  "tag": "llvm-dylib-47af16885ca3-36287106320-1-prerelease",
   "prerelease": true,
-  "checksums_asset_id": 586847586,
-  "checksums_sha256": "3e47f5eede93b937a6ef4cbb30f6a3687c8676f499df9009a41194966dc14940",
+  "checksums_asset_id": 592041549,
+  "checksums_sha256": "c9c1fc5099ccbb07ab320157b9cc0418bf17c70446ca1f7d98748d27d6842311",
   "platforms": {
+    "darwin_x86_64": {
+      "artifact_id": 10922381831,
+      "artifact_digest": "sha256:e3e750573187a32b0118fc09649a96eb37016dadd00a3c11ff5eb38daef8239b",
+      "library_sha256": "61bb6e0e7dc40a71ff0f3e59c04c96859cc229ecb422112a1b1b12233c0fd132",
+      "archive": "llvm-dylib-darwin_x86_64.zip",
+      "archive_sha256": "e3e750573187a32b0118fc09649a96eb37016dadd00a3c11ff5eb38daef8239b",
+      "archive_asset_id": 592041543,
+      "manifest": "darwin_x86_64.manifest.json",
+      "manifest_sha256": "8dd53a5071bfbc59e48e547b5d095b7989675baca9b35b159247c5009fa73283",
+      "manifest_asset_id": 592041547
+    },
     "linux_x86_64": {
-      "artifact_id": 10833637078,
-      "artifact_digest": "sha256:ec54a525e7254a426b91d25c8c0eeba4abce19cdb6f8415f78da5b335bbb19f0",
-      "library_sha256": "eafe337696c51487527ebc60a96e2da4fe0f120b322312869085808a6b96829c",
-      "manifest_sha256": "a44652a44f43df3f3ba2a66480cefc5acce289ea24387988a70e02a0d476813b",
+      "artifact_id": 10921412411,
+      "artifact_digest": "sha256:07cdedc99d105b2f1a3f1266bd8c6015cc477c2b55f21230e81d75dc661f3807",
+      "library_sha256": "d557472de4fe9a1e93888720070e9a134ce058514019c73d8dcbfcd9c3c48310",
       "archive": "llvm-dylib-linux_x86_64.zip",
-      "archive_sha256": "ec54a525e7254a426b91d25c8c0eeba4abce19cdb6f8415f78da5b335bbb19f0",
+      "archive_sha256": "07cdedc99d105b2f1a3f1266bd8c6015cc477c2b55f21230e81d75dc661f3807",
+      "archive_asset_id": 591966714,
       "manifest": "linux_x86_64.manifest.json",
-      "archive_asset_id": 586846101,
-      "manifest_asset_id": 586846759
+      "manifest_sha256": "68954d4e4e211b115fd8a9ffe0e713d7ec4ca5f344bcfb3397c869ce79085768",
+      "manifest_asset_id": 591966720
+    },
+    "darwin_aarch64": {
+      "artifact_id": 10921191455,
+      "artifact_digest": "sha256:202f24b9f4c668ca7a4c622e39243105582c5dec759583f8a07cd75487c8f0ed",
+      "library_sha256": "43e85b4e34b940502479f54c9716dbb0ff85779effb22afb41b10d29eeebdccd",
+      "archive": "llvm-dylib-darwin_aarch64.zip",
+      "archive_sha256": "202f24b9f4c668ca7a4c622e39243105582c5dec759583f8a07cd75487c8f0ed",
+      "archive_asset_id": 591955460,
+      "manifest": "darwin_aarch64.manifest.json",
+      "manifest_sha256": "49c396613e0255a38349d1ee538a6a48b188c6d56dbccc45998f87f8750b4868",
+      "manifest_asset_id": 591955461
     },
     "linux_aarch64": {
-      "artifact_id": 10833231257,
-      "artifact_digest": "sha256:626332d816a0e6ed3916d63458476ad4c47fa32fdcf3e5e7da33c285653b45fd",
-      "library_sha256": "08d9d1290bcead0872c18de6cdf38ae0853388ee521b4500f09461617743a3aa",
-      "manifest_sha256": "64f44c13a403edd20849510da3bb1c582fa8b7aaebe9c2227a88bd49a67a3ce9",
+      "artifact_id": 10920903262,
+      "artifact_digest": "sha256:cabcac5b633fd77c419540a1b1745053d70b6892d7786d401b6e6a9cc44a7819",
+      "library_sha256": "4efa583b169bc27a9fdb0defaa5d398c86756513b34fde55454cf8377bb83796",
       "archive": "llvm-dylib-linux_aarch64.zip",
-      "archive_sha256": "626332d816a0e6ed3916d63458476ad4c47fa32fdcf3e5e7da33c285653b45fd",
+      "archive_sha256": "cabcac5b633fd77c419540a1b1745053d70b6892d7786d401b6e6a9cc44a7819",
+      "archive_asset_id": 591955466,
       "manifest": "linux_aarch64.manifest.json",
-      "archive_asset_id": 586846802,
-      "manifest_asset_id": 586847537
+      "manifest_sha256": "193df8413b972320d15f649ddf7bc90fe79edefef0a3e71dafe8c8dfb53b5fb9",
+      "manifest_asset_id": 591955464
     }
   }
 }

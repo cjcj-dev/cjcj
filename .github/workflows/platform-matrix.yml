@@ -5,6 +5,18 @@ on:
     branches: [ci/platform-matrix]
   workflow_dispatch:
     inputs:
+      darwin_verify_only:
+        description: Verify the published Darwin input and source classification
+        type: boolean
+        default: false
+      darwin_host_only:
+        description: Extract the pinned official Darwin host runtime pair
+        type: boolean
+        default: false
+      darwin_runtime_only:
+        description: Build the pinned Darwin native runtime pair on both official runners
+        type: boolean
+        default: false
       runtime_only:
         description: Build only the pinned Linux bootstrap runtime artifact
         type: boolean
@@ -39,6 +51,14 @@ env:
   CJ_HEAP_SIZE: 12GB
 
 jobs:
+  darwin-source-input:
+    if: ${{ inputs.darwin_verify_only }}
+    uses: ./.github/workflows/verify-darwin-runtime.yml
+
+  darwin-host:
+    if: ${{ inputs.darwin_host_only }}
+    uses: ./.github/workflows/build-host-runtime.yml
+
   std-input-evidence:
     if: ${{ inputs.std_evidence_only }}
     uses: ./.github/workflows/std-input-evidence.yml
@@ -47,8 +67,84 @@ jobs:
       runtime_sha256: ${{ inputs.runtime_sha256 }}
       boundscheck_sha256: ${{ inputs.boundscheck_sha256 }}
 
+  darwin-runtime:
+    if: ${{ inputs.darwin_runtime_only }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {runner: macos-15, platform: darwin_aarch64}
+          - {runner: macos-15-intel, platform: darwin_x86_64}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+      - name: Load runtime pin
+        run: cat ci/runtime_pin.env >> "$GITHUB_ENV"
+      - uses: actions/checkout@v7
+        with:
+          repository: cjcj-dev/cangjie-runtime
+          ref: ${{ env.RUNTIME_REF }}
+          path: runtime-source
+      - uses: ./.github/actions/sccache
+        with:
+          component: runtime
+          platform: ${{ matrix.platform }}
+          pin: ${{ env.RUNTIME_REF }}
+          cache-size: 1G
+      - name: Build pinned native runtime
+        env:
+          RUNTIME_BUILD_TYPE: relwithdebinfo
+        run: |
+          set -euo pipefail
+          ulimit -c 0
+          export CANGJIE_BUILD_JOBS=$(sysctl -n hw.logicalcpu)
+          npx --yes zx@8 ci/platform_matrix/build_runtime.mjs
+      - name: Package independent native libraries
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          set -euo pipefail
+          node ci/release/darwin_runtime.mjs prepare colour-runtime "$PLATFORM" .platform-ci/runtime-install
+          export COLOUR_RT_MANIFEST_SHA256=$(shasum -a 256 colour-runtime/manifest.json | awk '{print $1}')
+          export COLOUR_RT_RUN_ID=$GITHUB_RUN_ID COLOUR_RT_RUN_ATTEMPT=$GITHUB_RUN_ATTEMPT
+          node ci/release/darwin_runtime.mjs verify colour-runtime "$PLATFORM" .platform-ci/runtime-install | tee colour-runtime/verified.log
+      - name: Test native producer and consumer with controlled cuts
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          DARWIN_RT_NATIVE_SOURCE: .platform-ci/runtime-install
+        run: bash ci/release/test_darwin_runtime_controls.sh colour-runtime/controls
+      - name: Record native build identity
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          set -euo pipefail
+          lib="colour-runtime/runtime/lib/${PLATFORM}_cjnative"
+          file "$lib/libcangjie-runtime.dylib" "$lib/libboundscheck.dylib" "colour-runtime/lib/${PLATFORM}_cjnative/libcangjie-runtime.a" | tee colour-runtime/architecture.txt
+          shasum -a 256 "$lib/libcangjie-runtime.dylib" "$lib/libboundscheck.dylib" "colour-runtime/lib/${PLATFORM}_cjnative/libcangjie-runtime.a" | tee colour-runtime/SHA256SUMS
+          nm -U "$lib/libcangjie-runtime.dylib" > colour-runtime/defined-symbols.txt
+          echo "NM_DEFINED_RC=0"
+          grep -E ' _CJ_MCC_HandleSafepoint$' colour-runtime/defined-symbols.txt
+          grep -E ' _CJ_MCC_HandleReturnSafepoint$' colour-runtime/defined-symbols.txt
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: darwin-runtime-diagnostics-${{ matrix.platform }}
+          path: .platform-ci/runtime-install
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v7
+        with:
+          name: colour-runtime-${{ matrix.platform }}
+          path: colour-runtime
+          if-no-files-found: error
+      - uses: ./.github/actions/sccache-report
+        if: always()
+        with:
+          component: runtime
+          platform: ${{ matrix.platform }}
+          require-compiles: ${{ job.status == 'success' }}
   colour-runtime:
-    if: ${{ !inputs.std_evidence_only }}
+    if: ${{ !inputs.std_evidence_only && !inputs.darwin_runtime_only && !inputs.darwin_host_only && !inputs.darwin_verify_only }}
     name: Pinned Linux colour runtime
     runs-on: ubuntu-22.04
     steps:
@@ -180,18 +276,18 @@ jobs:
           retention-days: 7
 
   fixed-llvm-tuples:
-    if: ${{ !inputs.runtime_only && !inputs.std_evidence_only }}
+    if: ${{ !inputs.runtime_only && !inputs.std_evidence_only && !inputs.darwin_runtime_only && !inputs.darwin_host_only && !inputs.darwin_verify_only }}
     name: Build fixed LLVM tuples
     uses: ./.github/workflows/platform-tuples.yml
 
   patched-cjpm:
-    if: ${{ !inputs.runtime_only && !inputs.std_evidence_only }}
+    if: ${{ !inputs.runtime_only && !inputs.std_evidence_only && !inputs.darwin_runtime_only && !inputs.darwin_host_only && !inputs.darwin_verify_only }}
     name: Build patched cjpm
     uses: ./.github/workflows/build-cjpm.yml
     secrets: inherit
 
   windows-runtime:
-    if: ${{ !inputs.runtime_only && !inputs.std_evidence_only }}
+    if: ${{ !inputs.runtime_only && !inputs.std_evidence_only && !inputs.darwin_runtime_only && !inputs.darwin_host_only && !inputs.darwin_verify_only }}
     name: Build Windows runtime
     uses: ./.github/workflows/build-windows-runtime.yml
     with:
@@ -200,7 +296,7 @@ jobs:
   platform:
     name: ${{ matrix.runner }} / runtime + cjcj + smoke
     needs: [fixed-llvm-tuples, patched-cjpm, windows-runtime]
-    if: ${{ always() && !inputs.runtime_only && !inputs.std_evidence_only }}
+    if: ${{ always() && !inputs.runtime_only && !inputs.std_evidence_only && !inputs.darwin_runtime_only && !inputs.darwin_host_only && !inputs.darwin_verify_only }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 180
     strategy:
