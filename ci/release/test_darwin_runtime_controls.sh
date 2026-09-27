@@ -41,6 +41,10 @@ set +e
 DARWIN_RT_PRODUCT="$out/restored/release/darwin_runtime.mjs" node --test ci/release/darwin_runtime.test.mjs > "$out/restored.log" 2>&1
 echo "$?" > "$out/restored.rc"
 set -e
+for arm in candidate producer-cut consumer-cut restored; do
+  echo "ARM=$arm RC=$(cat "$out/$arm.rc")"
+  grep -E '^(ℹ|#) (tests|pass|fail)|^not ok |^✖ |^ASSERT |^  [A-Za-z]*Error' "$out/$arm.log" || true
+done
 test "$(cat "$out/candidate.rc")" = 0
 test "$(cat "$out/restored.rc")" = 0
 test "$(cat "$out/producer-cut.rc")" != 0
@@ -60,5 +64,5 @@ cmp "$out/candidate/release/darwin_runtime.mjs" "$out/restored/release/darwin_ru
 find "$out" -name '*.mjs' -print0 | xargs -0 shasum -a 256 > "$out/scripts.sha256"
 for arm in candidate producer-cut consumer-cut restored; do
   echo "ARM=$arm RC=$(cat "$out/$arm.rc")"
-  grep -E '^(ℹ|#) (tests|pass|fail)|^not ok |^✖ |^ASSERT ' "$out/$arm.log"
+  grep -E '^(ℹ|#) (tests|pass|fail)|^not ok |^✖ |^ASSERT |^  [A-Za-z]*Error' "$out/$arm.log" || true
 done
