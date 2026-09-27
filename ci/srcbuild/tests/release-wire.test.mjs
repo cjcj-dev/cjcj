@@ -51,7 +51,7 @@ test('release connects each platform row to its same-platform final std', async 
 test('release cross packages depend on their native phase and Android producer with same-host std', async () => {
   const release = await workflow('release.yml');
   const packages = packageJobsOf(release);
-  const cross = packages.filter(job => !nativeKeys.includes(scalar(job, 'release_key')));
+  const cross = packages.filter(job => scalar(job, 'release_key')?.endsWith('-android'));
   const rows = [
     ['linux-x64-android', 'linux-x64', 'package-p1-linux-x64'],
     ['darwin-arm64-android', 'darwin-arm64', 'package-p4-darwin-arm64'],

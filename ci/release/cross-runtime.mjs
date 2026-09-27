@@ -16,8 +16,32 @@ async function inventory(root, tuple) {
   }
   return files;
 }
+const iosCpus = Object.freeze({
+  ios_aarch64_cjnative: 0x0100000c,
+  ios_simulator_aarch64_cjnative: 0x0100000c,
+  ios_simulator_x86_64_cjnative: 0x01000007,
+});
 function assertTuple(tuple) {
-  if (tuple !== 'linux_android_aarch64_cjnative') throw new Error(`unsupported cross runtime tuple: ${tuple}`);
+  if (tuple !== 'linux_android_aarch64_cjnative' && !Object.hasOwn(iosCpus, tuple)) {
+    throw new Error(`unsupported cross runtime tuple: ${tuple}`);
+  }
+}
+async function assertRuntimeLibraries(root, tuple) {
+  if (tuple === 'linux_android_aarch64_cjnative') {
+    for (const name of ['libcangjie-runtime.so', 'libboundscheck.so']) {
+      await assertAndroidElf(path.join(root, 'runtime', 'lib', tuple, name));
+    }
+    return;
+  }
+  for (const name of ['libcangjie-runtime.dylib', 'libboundscheck.dylib']) {
+    const file = path.join(root, 'runtime', 'lib', tuple, name);
+    const bytes = await fs.readFile(file);
+    // mach-o/loader.h: MH_MAGIC_64, CPU_TYPE_ARM64/X86_64, MH_DYLIB.
+    if (bytes.length < 32 || bytes.readUInt32LE(0) !== 0xfeedfacf
+        || bytes.readUInt32LE(4) !== iosCpus[tuple] || bytes.readUInt32LE(12) !== 6) {
+      throw new Error(`cross runtime is not a ${tuple} Mach-O dylib: ${file}`);
+    }
+  }
 }
 async function assertAndroidElf(file) {
   const bytes = await fs.readFile(file);
@@ -29,9 +53,7 @@ async function assertAndroidElf(file) {
 export async function writeCrossRuntimeManifest({root, tuple, runtimeRef}) {
   assertTuple(tuple);
   if (!/^[0-9a-f]{40}$/.test(runtimeRef)) throw new Error('cross runtime requires exact source SHA');
-  for (const name of ['libcangjie-runtime.so', 'libboundscheck.so']) {
-    await assertAndroidElf(path.join(root, 'runtime', 'lib', tuple, name));
-  }
+  await assertRuntimeLibraries(root, tuple);
   await fs.access(path.join(root, 'lib', tuple, 'cjstart.o'));
   const record = {schema: 1, tuple, runtimeRef, files: await inventory(root, tuple)};
   await fs.writeFile(path.join(root, manifestName), `${JSON.stringify(record, null, 2)}\n`);
@@ -45,9 +67,7 @@ export async function installCrossRuntime({root, stage, tuple, runtimeRef}) {
   }
   const files = await inventory(root, tuple);
   if (JSON.stringify(files) !== JSON.stringify(record.files)) throw new Error('cross runtime inventory/hash mismatch');
-  for (const name of ['libcangjie-runtime.so', 'libboundscheck.so']) {
-    await assertAndroidElf(path.join(root, 'runtime', 'lib', tuple, name));
-  }
+  await assertRuntimeLibraries(root, tuple);
   await fs.access(path.join(root, 'lib', tuple, 'cjstart.o'));
   for (const file of files) {
     const destination = path.join(stage, file.path);

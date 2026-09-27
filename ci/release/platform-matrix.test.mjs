@@ -55,11 +55,11 @@ test('phased release source and package sets equal the buildable matrix', () => 
   assert.deepEqual(packages.sort(), plan.package.map(row => row.release_key).sort(), 'package symmetric difference');
 });
 
-test('plan for all fourteen platforms: four source cells, eight packages, five blocked, one excluded', () => {
+test('plan for all fourteen platforms: four source cells, nine packages, four blocked, one excluded', () => {
   const plan = planMatrix('all');
   assert.deepEqual(plan.source.map(row => row.target).sort(), ['darwin-arm64', 'darwin-x64', 'linux-aarch64', 'linux-x64']);
-  assert.deepEqual(plan.package.map(row => row.release_key), ['linux-x64', 'linux-arm64', 'linux-x64-android', 'darwin-arm64', 'darwin-x64', 'darwin-arm64-android', 'win32-x64', 'win32-x64-android']);
-  assert.equal(plan.blocked.length, 5);
+  assert.deepEqual(plan.package.map(row => row.release_key), ['linux-x64', 'linux-arm64', 'linux-x64-android', 'darwin-arm64', 'darwin-x64', 'darwin-arm64-android', 'darwin-arm64-ios', 'win32-x64', 'win32-x64-android']);
+  assert.equal(plan.blocked.length, 4);
   assert.deepEqual(plan.excluded.map(row => row.release_key), ['win32-x64-ohos-arm32']);
   assert.equal(plan.windowsSide, true);
   for (const row of plan.blocked) {

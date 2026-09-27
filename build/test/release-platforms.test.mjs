@@ -46,9 +46,9 @@ test('every release platform names a buildable host target and a runner of that 
 test('readiness is derived from DAG producers: native and Android packages have DAG producers; other gaps remain named', () => {
   const byStatus = {buildable: [], blocked: [], excluded: []};
   for (const key of allReleasePlatforms()) byStatus[releasePlatformReadiness(key).status].push(key);
-  assert.deepEqual(byStatus.buildable, ['linux-x64', 'linux-arm64', 'linux-x64-android', 'darwin-arm64', 'darwin-x64', 'darwin-arm64-android', 'win32-x64', 'win32-x64-android']);
+  assert.deepEqual(byStatus.buildable, ['linux-x64', 'linux-arm64', 'linux-x64-android', 'darwin-arm64', 'darwin-x64', 'darwin-arm64-android', 'darwin-arm64-ios', 'win32-x64', 'win32-x64-android']);
   assert.deepEqual(byStatus.excluded, ['win32-x64-ohos-arm32']);
-  assert.equal(byStatus.blocked.length, 5);
+  assert.equal(byStatus.blocked.length, 4);
   for (const key of byStatus.blocked) {
     const readiness = releasePlatformReadiness(key);
     assert.ok(readiness.reasons.length > 0, `${key} blocked without a reason`);

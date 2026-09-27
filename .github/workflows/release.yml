@@ -73,6 +73,7 @@ jobs:
       dry_run: ${{ inputs.dry_run }}
       runtime_ref: ${{ inputs.runtime_ref }}
       targets: darwin-arm64
+      build_ios: true
 
   source-p5-darwin-x64:
     name: phase 5 · darwin-x64 / source SDK and final std
@@ -242,6 +243,24 @@ jobs:
       runtime_ref: ${{ inputs.runtime_ref }}
     secrets: inherit
 
+  package-darwin-arm64-ios:
+    name: darwin-arm64-ios / Build release package
+    needs: [package-p4-darwin-arm64, source-p4-darwin-arm64]
+    uses: ./.github/workflows/build-release-package.yml
+    with:
+      runner: macos-15
+      platform: darwin-arm64
+      release_key: darwin-arm64-ios
+      llvm_platform: darwin_aarch64
+      sdk_runtime_dir: darwin_aarch64_cjnative
+      compiler_artifact: final-compiler-darwin-arm64
+      std_artifact: final-std-darwin-arm64
+      cross_std_artifacts: '[{"tuple":"ios_aarch64_cjnative","artifact":"final-std-ios-aarch64-cjnative"},{"tuple":"ios_simulator_aarch64_cjnative","artifact":"final-std-ios-simulator-aarch64-cjnative"},{"tuple":"ios_simulator_x86_64_cjnative","artifact":"final-std-ios-simulator-x86-64-cjnative"}]'
+      version: ${{ inputs.version }}
+      dry_run: ${{ inputs.dry_run }}
+      runtime_ref: ${{ inputs.runtime_ref }}
+    secrets: inherit
+
   package-win32-x64-android:
     name: win32-x64-android / Build release package
     needs: [package-p3-windows-x64, source-p1-linux-x64]
@@ -262,7 +281,7 @@ jobs:
 
   publish:
     name: Publish release
-    needs: [source-p1-linux-x64, source-p2-linux-aarch64, source-p4-darwin-arm64, source-p5-darwin-x64, windows-fixed-llvm-tuple, patched-cjpm, windows-runtime, package-p1-linux-x64, package-p2-linux-aarch64, package-p3-windows-x64, package-p4-darwin-arm64, package-p5-darwin-x64, package-linux-x64-android, package-darwin-arm64-android, package-win32-x64-android]
+    needs: [source-p1-linux-x64, source-p2-linux-aarch64, source-p4-darwin-arm64, source-p5-darwin-x64, windows-fixed-llvm-tuple, patched-cjpm, windows-runtime, package-p1-linux-x64, package-p2-linux-aarch64, package-p3-windows-x64, package-p4-darwin-arm64, package-p5-darwin-x64, package-linux-x64-android, package-darwin-arm64-android, package-win32-x64-android, package-darwin-arm64-ios]
     if: >-
       ${{
         always() &&
@@ -274,6 +293,7 @@ jobs:
         needs.package-p5-darwin-x64.result == 'success' &&
         needs.package-linux-x64-android.result == 'success' &&
         needs.package-darwin-arm64-android.result == 'success' &&
+        needs.package-darwin-arm64-ios.result == 'success' &&
         needs.package-win32-x64-android.result == 'success'
       }}
     runs-on: ubuntu-24.04

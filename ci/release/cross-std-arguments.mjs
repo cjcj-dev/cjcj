@@ -17,7 +17,7 @@ export function crossStdArguments(text, root, {artifact = '', tuple = ''} = {}) 
     tuples.add(tuple);
     const directory = path.join(root, artifact);
     const args = ['--cross-std-dir', `${tuple}=${directory}`];
-    if (tuple === 'linux_android_aarch64_cjnative') {
+    if (tuple === 'linux_android_aarch64_cjnative' || ['ios_aarch64_cjnative', 'ios_simulator_aarch64_cjnative', 'ios_simulator_x86_64_cjnative'].includes(tuple)) {
       args.push('--cross-runtime-dir', `${tuple}=${path.join(directory, 'cross-runtime')}`);
     }
     return args;

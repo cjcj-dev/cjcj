@@ -202,6 +202,9 @@ export function assertHostContract(key, {
 const DAG_CROSS_STD_PRODUCERS = Object.freeze({
   windows_x86_64_cjnative: 'linux-x64',
   linux_android_aarch64_cjnative: 'linux-x64',
+  ios_aarch64_cjnative: 'darwin-arm64',
+  ios_simulator_aarch64_cjnative: 'darwin-arm64',
+  ios_simulator_x86_64_cjnative: 'darwin-arm64',
 });
 
 // tuple -> target key whose source cell uploads final-std-<target> for it.
