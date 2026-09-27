@@ -77,3 +77,14 @@ for (const target of ['darwin-arm64', 'darwin-x64']) {
     console.log(`ASSERT ${target} native dylib selection and digest rejection executed`);
   }, target));
 }
+
+for (const target of ['darwin-arm64', 'darwin-x64']) {
+  test(`${target} requires an explicit colour artifact at the real input entry`, () => fixture(({env, run}) => {
+    delete env.CJCJ_BOOTSTRAP_DYLIB_ARTIFACT;
+    delete env.CJCJ_BOOTSTRAP_COLOUR_DYLIB;
+    const result = run();
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /DARWIN_COLOUR_ARTIFACT_MISSING/);
+    console.log(`ASSERT ${target} missing-artifact classification executed`);
+  }, target));
+}

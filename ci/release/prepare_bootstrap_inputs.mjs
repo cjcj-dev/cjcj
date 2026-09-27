@@ -42,6 +42,12 @@ function findFile(root, predicate) {
   return undefined;
 }
 
+// Native Darwin has no implicit Linux depot input. Reject before acquisition.
+if ((process.env.CJCJ_SRCBUILD_TARGET || process.platform).startsWith('darwin')
+    && !process.env.CJCJ_BOOTSTRAP_DYLIB_ARTIFACT && !process.env.CJCJ_BOOTSTRAP_COLOUR_DYLIB) {
+  throw new Error('DARWIN_COLOUR_ARTIFACT_MISSING');
+}
+
 const hostSdk = process.env.CJCJ_SRCBUILD_HOST_SDK
   || (process.env.CJCJ_TOOLCHAIN && process.env.HOME
     ? path.join(process.env.HOME, '.cjv', 'toolchains', process.env.CJCJ_TOOLCHAIN)

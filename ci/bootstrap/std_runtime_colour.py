@@ -5,11 +5,12 @@ import hashlib
 from pathlib import Path
 import subprocess
 import sys
+from host_nm import read_symbols
 
 
 def symbols(file, *, runtime=False):
     command = ['nm', '-D', '--defined-only'] if runtime else ['nm', '-A']
-    result = subprocess.run([*command, str(file)], capture_output=True, text=True)
+    result = read_symbols([*command[1:], str(file)])
     if result.returncode:
         raise ValueError(f'nm rc={result.returncode} file={file}: {result.stderr.strip()}')
     found = set()

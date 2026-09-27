@@ -9,6 +9,13 @@ on:
       - ci/bootstrap/bootstrap.sh
       - ci/bootstrap/test_native_host.sh
       - ci/bootstrap/test_native_host_controls.py
+      - ci/bootstrap/host_tools.sh
+      - ci/bootstrap/host_nm.py
+      - ci/bootstrap/sdk_build.sh
+      - ci/bootstrap/sdk_verify.py
+      - ci/bootstrap/std_runtime_colour.py
+      - ci/bootstrap/test_native_sdk.py
+      - ci/release/prepare_bootstrap_inputs.mjs
 
 permissions:
   contents: read
@@ -29,9 +36,17 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+      - name: Install bootstrap file utilities
+        run: brew install coreutils findutils gnu-tar
       - name: Assert native host admission through the GHA entry
         shell: bash
         run: python3 ci/bootstrap/test_native_host_controls.py "$RUNNER_TEMP/native-host-evidence" 9d390634fd915de7680a5aab5cd06e6e9135457b
+      - name: Assert native SDK installation and std pairing
+        shell: bash
+        run: python3 ci/bootstrap/test_native_sdk.py "$RUNNER_TEMP/native-host-evidence/sdk"
+      - name: Assert explicit Darwin colour input at the real Node entry
+        shell: bash
+        run: node --test ci/release/prepare_llvm_dylib.test.mjs
       - name: Preserve entry output and product identities
         if: always()
         uses: actions/upload-artifact@v7

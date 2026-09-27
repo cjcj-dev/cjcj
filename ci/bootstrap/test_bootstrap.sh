@@ -20,6 +20,7 @@ trap cleanup EXIT
 
 new_tmp() {
   TMP=$(mktemp -d)
+  cp "$ROOT/host_tools.sh" "$ROOT/host_nm.py" "$TMP/"
 }
 
 refresh_tuple_sums() {

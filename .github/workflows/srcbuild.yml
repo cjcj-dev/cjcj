@@ -355,6 +355,10 @@ jobs:
           run-id: ${{ env.LLVM_DYLIB_RUN_ID }}
           path: ${{ env.CJCJ_BOOTSTRAP_DYLIB_ARTIFACT }}
 
+      - name: Install native bootstrap file tools
+        if: runner.os == 'macOS'
+        run: brew install coreutils findutils gnu-tar
+
       - name: Load pinned colour runtime provenance
         shell: bash
         env:
@@ -382,14 +386,16 @@ jobs:
         run: node ci/release/darwin_runtime.mjs source "$CJCJ_BOOTSTRAP_COLOUR_RT" "$RUNTIME_PLATFORM"
 
       - name: Inspect downloaded colour runtime symbols
-        if: runner.os != 'macOS'
         shell: bash
+        env:
+          RUNTIME_PLATFORM: ${{ matrix.llvm_platform }}
         run: |
           set -euo pipefail
-          so="$CJCJ_BOOTSTRAP_COLOUR_RT/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so"
-          archive="$CJCJ_BOOTSTRAP_COLOUR_RT/lib/linux_x86_64_cjnative/libcangjie-runtime.a"
-          sha256sum "$so" "$archive"
-          nm --defined-only "$so" > "$RUNNER_TEMP/colour-runtime-symbols.txt"
+          source ci/bootstrap/host_tools.sh
+          so="$CJCJ_BOOTSTRAP_COLOUR_RT/runtime/lib/${RUNTIME_PLATFORM}_cjnative/libcangjie-runtime.${HOST_LIB_EXT}"
+          archive="$CJCJ_BOOTSTRAP_COLOUR_RT/lib/${RUNTIME_PLATFORM}_cjnative/libcangjie-runtime.a"
+          host_sha256sum "$so" "$archive"
+          host_nm --defined-only "$so" > "$RUNNER_TEMP/colour-runtime-symbols.txt"
           awk '$NF ~ /^g_cjLoadBadMask(@@?[^[:space:]]+)?$/ {print; n++} END {print "COLOUR_RT_DEFINED_MASK_COUNT=" n+0; exit n != 1}' "$RUNNER_TEMP/colour-runtime-symbols.txt"
 
       - name: Load immutable AST support provenance
@@ -476,7 +482,8 @@ jobs:
           assert count == 1
           Path(os.environ['RUNNER_TEMP'], 'host-pin-cut.txt').write_text(changed)
           PY
-          sha256sum ci/bootstrap/stage1_host_identities.txt "$RUNNER_TEMP/host-pin-cut.txt"
+          source ci/bootstrap/host_tools.sh
+          host_sha256sum ci/bootstrap/stage1_host_identities.txt "$RUNNER_TEMP/host-pin-cut.txt"
           if STAGE1_HOST_IDENTITIES="$RUNNER_TEMP/host-pin-cut.txt" \
               node ci/release/prepare_bootstrap_inputs.mjs > "$RUNNER_TEMP/host-pin-cut.log" 2>&1; then
             echo 'host pin change unexpectedly accepted' >&2
@@ -513,7 +520,8 @@ jobs:
           assert count == 1, (target, count)
           Path(os.environ['RUNNER_TEMP'], 'host-provenance-cut.txt').write_text(''.join(lines))
           PY
-          sha256sum ci/bootstrap/stage1_host_identities.txt "$RUNNER_TEMP/host-provenance-cut.txt"
+          source ci/bootstrap/host_tools.sh
+          host_sha256sum ci/bootstrap/stage1_host_identities.txt "$RUNNER_TEMP/host-provenance-cut.txt"
           if STAGE1_HOST_IDENTITIES="$RUNNER_TEMP/host-provenance-cut.txt" \
               node ci/release/prepare_bootstrap_inputs.mjs > "$RUNNER_TEMP/host-provenance-cut.log" 2>&1; then
             echo 'host provenance change unexpectedly accepted' >&2
@@ -536,7 +544,7 @@ jobs:
               so="$CJCJ_BOOTSTRAP_BASE/third_party/llvm/lib/libLLVM-15.so"
             fi
             sha256sum "$so"
-            nm --defined-only "$so" > "$RUNNER_TEMP/host-$arm.nm"
+            host_nm --defined-only "$so" > "$RUNNER_TEMP/host-$arm.nm"
             c++filt < "$RUNNER_TEMP/host-$arm.nm" > "$RUNNER_TEMP/host-$arm.symbols"
             awk -v arm="$arm" 'index($0, "llvm::SelectionDAGBuilder::visitRelocate(") {print; n++} END {print "HOST_RELOCATE_SYMBOLS arm=" arm " count=" n+0}' "$RUNNER_TEMP/host-$arm.symbols"
           done
@@ -719,8 +727,8 @@ jobs:
           sdk="$CANGJIE_WORKSPACE/software/cangjie"
           node ci/capture-g2-identity.mjs \
             --identity "$G2_IDENTITY" \
-            --runtime-dynamic "$sdk/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so" \
-            --runtime-static "$sdk/lib/linux_x86_64_cjnative/libcangjie-runtime.a" \
+            --runtime-dynamic "$sdk/runtime/lib/${RUNTIME_PLATFORM}_cjnative/libcangjie-runtime.${HOST_LIB_EXT}" \
+            --runtime-static "$sdk/lib/${RUNTIME_PLATFORM}_cjnative/libcangjie-runtime.a" \
             --llvm-llc "$sdk/third_party/llvm/bin/llc" \
             --llvm-opt "$sdk/third_party/llvm/bin/opt" \
             --cjcj "$sdk/bin/cjc" \
