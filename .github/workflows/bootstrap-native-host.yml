@@ -10,6 +10,7 @@ on:
       - ci/bootstrap/test_native_host.sh
       - ci/bootstrap/test_native_host_controls.py
       - ci/bootstrap/test_native_runner_controls.py
+      - ci/bootstrap/test_native_link_controls.py
       - ci/bootstrap/prepare_native_link.mjs
       - ci/bootstrap/host_tools.sh
       - ci/bootstrap/host_nm.py
@@ -67,6 +68,9 @@ jobs:
       - name: Observe native compiler and backend runner bindings
         if: always()
         run: python3 ci/bootstrap/test_native_runner_controls.py "$RUNNER_TEMP/native-host-evidence/runner"
+      - name: Observe native link recipe producer and consumer
+        if: always()
+        run: python3 ci/bootstrap/test_native_link_controls.py "$RUNNER_TEMP/native-host-evidence/link"
       - name: Preserve entry output and product identities
         if: always()
         uses: actions/upload-artifact@v7
