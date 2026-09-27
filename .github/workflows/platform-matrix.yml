@@ -5,6 +5,10 @@ on:
     branches: [ci/platform-matrix]
   workflow_dispatch:
     inputs:
+      darwin_verify_only:
+        description: Verify the published Darwin input and source classification
+        type: boolean
+        default: false
       darwin_host_only:
         description: Extract the pinned official Darwin host runtime pair
         type: boolean
@@ -47,6 +51,10 @@ env:
   CJ_HEAP_SIZE: 12GB
 
 jobs:
+  darwin-source-input:
+    if: ${{ inputs.darwin_verify_only }}
+    uses: ./.github/workflows/verify-darwin-runtime.yml
+
   darwin-host:
     if: ${{ inputs.darwin_host_only }}
     uses: ./.github/workflows/build-host-runtime.yml
@@ -136,7 +144,7 @@ jobs:
           platform: ${{ matrix.platform }}
           require-compiles: ${{ job.status == 'success' }}
   colour-runtime:
-    if: ${{ !inputs.std_evidence_only && !inputs.darwin_runtime_only && !inputs.darwin_host_only }}
+    if: ${{ !inputs.std_evidence_only && !inputs.darwin_runtime_only && !inputs.darwin_host_only && !inputs.darwin_verify_only }}
     name: Pinned Linux colour runtime
     runs-on: ubuntu-22.04
     steps:
@@ -268,18 +276,18 @@ jobs:
           retention-days: 7
 
   fixed-llvm-tuples:
-    if: ${{ !inputs.runtime_only && !inputs.std_evidence_only && !inputs.darwin_runtime_only && !inputs.darwin_host_only }}
+    if: ${{ !inputs.runtime_only && !inputs.std_evidence_only && !inputs.darwin_runtime_only && !inputs.darwin_host_only && !inputs.darwin_verify_only }}
     name: Build fixed LLVM tuples
     uses: ./.github/workflows/platform-tuples.yml
 
   patched-cjpm:
-    if: ${{ !inputs.runtime_only && !inputs.std_evidence_only && !inputs.darwin_runtime_only && !inputs.darwin_host_only }}
+    if: ${{ !inputs.runtime_only && !inputs.std_evidence_only && !inputs.darwin_runtime_only && !inputs.darwin_host_only && !inputs.darwin_verify_only }}
     name: Build patched cjpm
     uses: ./.github/workflows/build-cjpm.yml
     secrets: inherit
 
   windows-runtime:
-    if: ${{ !inputs.runtime_only && !inputs.std_evidence_only && !inputs.darwin_runtime_only && !inputs.darwin_host_only }}
+    if: ${{ !inputs.runtime_only && !inputs.std_evidence_only && !inputs.darwin_runtime_only && !inputs.darwin_host_only && !inputs.darwin_verify_only }}
     name: Build Windows runtime
     uses: ./.github/workflows/build-windows-runtime.yml
     with:
@@ -288,7 +296,7 @@ jobs:
   platform:
     name: ${{ matrix.runner }} / runtime + cjcj + smoke
     needs: [fixed-llvm-tuples, patched-cjpm, windows-runtime]
-    if: ${{ always() && !inputs.runtime_only && !inputs.std_evidence_only && !inputs.darwin_runtime_only && !inputs.darwin_host_only }}
+    if: ${{ always() && !inputs.runtime_only && !inputs.std_evidence_only && !inputs.darwin_runtime_only && !inputs.darwin_host_only && !inputs.darwin_verify_only }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 180
     strategy:
