@@ -5,7 +5,7 @@ import crypto from 'node:crypto';
 import {prepareRuntime, digest as runtimeDigest, runtimeFiles} from './colour_runtime.mjs';
 import {spawnSync} from 'node:child_process';
 
-export function fixture(check) {
+export function fixture(check, target = 'linux-x64') {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tuple-inputs-'));
   try {
     const sdk = path.join(dir, 'sdk');
@@ -30,7 +30,7 @@ export function fixture(check) {
       llvm_sha: 'a'.repeat(40), sha256: dylibSha, targets: ['X86', 'ARM', 'AArch64']}));
     const dylibFallback = path.join(dir, 'dylib-fallback');
     fs.cpSync(dylib, dylibFallback, {recursive: true});
-    const env = {...process.env, CJCJ_SRCBUILD_TARGET: 'linux-x64', CJCJ_BOOTSTRAP_COLOUR_DYLIB: dylibFallback, CJCJ_BOOTSTRAP_DYLIB_ARTIFACT: dylib, LLVM_DYLIB_SHA256: dylibSha, GITHUB_ENV: '', CJCJ_SRCBUILD_HOST_SDK: sdk,
+    const env = {...process.env, CJCJ_SRCBUILD_TARGET: target, CJCJ_BOOTSTRAP_COLOUR_DYLIB: dylibFallback, CJCJ_BOOTSTRAP_DYLIB_ARTIFACT: dylib, LLVM_DYLIB_SHA256: dylibSha, GITHUB_ENV: '', CJCJ_SRCBUILD_HOST_SDK: sdk,
       CJCJ_BOOTSTRAP_HOST_LLVM_SO: so, CJCJ_BOOTSTRAP_AST_SUPPORT: ast,
       CJCJ_BOOTSTRAP_SOURCE: 'depot', CJCJ_BOOTSTRAP_SOURCE_REASON: 'fixture explicit depot', CJCJ_BOOTSTRAP_INPUTS_WORK: path.join(dir, 'work'), CJCJ_BOOTSTRAP_COLOUR_TUPLE: fallback,
       CJCJ_BOOTSTRAP_CPP_SRC: sdk, LLVM_SHA: 'a'.repeat(40),
@@ -38,14 +38,15 @@ export function fixture(check) {
       AST_SUPPORT_SHA256: crypto.createHash('sha256').update('ast fixture').digest('hex')};
     const hostArtifact = path.join(dir, 'host-artifact');
     fs.mkdirSync(hostArtifact);
-    fs.copyFileSync(so, path.join(hostArtifact, 'libLLVM-15.so'));
+    const library = target.startsWith('darwin-') ? 'libLLVM.dylib' : 'libLLVM-15.so';
+    fs.copyFileSync(so, path.join(hostArtifact, library));
     const hostSha = crypto.createHash('sha256').update(fs.readFileSync(so)).digest('hex');
     const hostPin = {repository: 'cjcj-dev/cjcj', run_id: '123', run_attempt: '1', artifact_id: '456',
-      source_sha: '418ace1896e22a51a6c1fa36ec29631b00301cd8', producer_sha: 'b'.repeat(40), platform: 'linux_x86_64'};
+      source_sha: '418ace1896e22a51a6c1fa36ec29631b00301cd8', producer_sha: 'b'.repeat(40), platform: {'linux-x64': 'linux_x86_64', 'linux-aarch64': 'linux_aarch64', 'darwin-arm64': 'darwin_aarch64', 'darwin-x64': 'darwin_x86_64'}[target], sha256: hostSha};
     fs.writeFileSync(path.join(hostArtifact, 'manifest.json'), JSON.stringify({...hostPin, sha256: hostSha}));
     env.STAGE1_HOST_IDENTITIES = path.join(dir, 'host-identities.txt');
     fs.writeFileSync(env.STAGE1_HOST_IDENTITIES,
-      `# HOST_LLVM_PROVENANCE ${JSON.stringify(hostPin)}\nlibLLVM-15.so ${hostSha}\n`);
+      `# HOST_LLVM_PROVENANCE ${JSON.stringify(hostPin)}\n${hostPin.platform} libLLVM-15.so ${hostSha}\n`);
     env.CJCJ_BOOTSTRAP_HOST_LLVM_ARTIFACT = hostArtifact;
     const runtimeSource = path.join(dir, 'runtime-source');
     const runtime = path.join(dir, 'runtime');

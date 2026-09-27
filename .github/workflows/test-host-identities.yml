@@ -1,0 +1,91 @@
+name: Native stage1 host identity contract
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'ci/bootstrap/stage1_host*'
+      - 'ci/bootstrap/test_host_identit*'
+      - 'ci/host_sdk_pin.env'
+      - 'ci/release/host_llvm.mjs'
+      - '.github/workflows/test-host-identities.yml'
+permissions:
+  contents: read
+  actions: read
+jobs:
+  aarch64:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Read fixed native archive and host LLVM provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = aarch64
+          node ci/release/host_llvm.mjs env >> "$GITHUB_ENV"
+          source ci/host_sdk_pin.env
+          export CJCJ_TOOLCHAIN
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          prefix = '# HOST_SDK_PROVENANCE '
+          rows = [json.loads(line[len(prefix):]) for line in Path('ci/bootstrap/stage1_host_identities.txt').read_text().splitlines() if line.startswith(prefix)]
+          rows = [row for row in rows if row['platform'] == 'linux_aarch64']
+          assert len(rows) == 1
+          pin = rows[0]
+          version = os.environ['CJCJ_TOOLCHAIN'].removeprefix('nightly-')
+          assert pin['archive'] == f'cangjie-sdk-linux-aarch64-{version}.tar.gz'
+          with open(os.environ['GITHUB_ENV'], 'a') as out:
+              out.write(f"SDK_ARCHIVE={pin['archive']}\nSDK_SHA256={pin['sha256']}\nSDK_VERSION={version}\n")
+          PY
+      - uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ env.HOST_LLVM_ARTIFACT_ID }}
+          run-id: ${{ env.HOST_LLVM_RUN_ID }}
+          github-token: ${{ github.token }}
+          merge-multiple: true
+          path: ${{ runner.temp }}/host-llvm
+      - name: Get the fixed official SDK archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --max-time 300 \
+            "https://gitcode.com/Cangjie/nightly_build/releases/download/$SDK_VERSION/$SDK_ARCHIVE" \
+            -o "$RUNNER_TEMP/$SDK_ARCHIVE"
+          printf '%s  %s\n' "$SDK_SHA256" "$RUNNER_TEMP/$SDK_ARCHIVE" | sha256sum --check
+          mkdir "$RUNNER_TEMP/fixed-sdk"
+          tar -xzf "$RUNNER_TEMP/$SDK_ARCHIVE" -C "$RUNNER_TEMP/fixed-sdk"
+      - name: Native candidate, producer cut, consumer cut and restored arms
+        shell: bash
+        env:
+          HOST_IDENTITY_SDK: ${{ runner.temp }}/fixed-sdk/cangjie
+          HOST_IDENTITY_LLVM: ${{ runner.temp }}/host-llvm/libLLVM-15.so
+        run: |
+          set -euo pipefail
+          ulimit -c 0
+          mkdir -p "$RUNNER_TEMP/identity-evidence"
+          uname -a > "$RUNNER_TEMP/identity-evidence/machine.txt"
+          uptime >> "$RUNNER_TEMP/identity-evidence/machine.txt"
+          python3 ci/bootstrap/test_host_identity_wiring.py "$RUNNER_TEMP/identity-evidence"
+          git fetch --no-tags --depth=1 origin 96a9458e8de025d1c5fcf5e7c150e51a77e2af37
+          git show 96a9458e8de025d1c5fcf5e7c150e51a77e2af37:ci/bootstrap/stage1_host_runner.sh > "$RUNNER_TEMP/identity-evidence/baseline-runner.sh"
+          git show 96a9458e8de025d1c5fcf5e7c150e51a77e2af37:ci/bootstrap/stage1_host_identities.txt > "$RUNNER_TEMP/identity-evidence/baseline-pins.txt"
+          set +e
+          STAGE1_RUNNER_PRODUCT="$RUNNER_TEMP/identity-evidence/baseline-runner.sh" \
+            STAGE1_PIN_PRODUCT="$RUNNER_TEMP/identity-evidence/baseline-pins.txt" \
+            python3 ci/bootstrap/test_host_identities.py HostIdentity.test_fixed_release_triple \
+            > "$RUNNER_TEMP/identity-evidence/baseline.log" 2>&1
+          rc=$?
+          set -e
+          echo "$rc" > "$RUNNER_TEMP/identity-evidence/baseline.rc"
+          test "$rc" = 1
+          grep -F 'llvm sha is not the declared host triple:' "$RUNNER_TEMP/identity-evidence/baseline.log"
+          uptime >> "$RUNNER_TEMP/identity-evidence/machine.txt"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: native-host-identities-aarch64
+          path: ${{ runner.temp }}/identity-evidence
+          if-no-files-found: warn

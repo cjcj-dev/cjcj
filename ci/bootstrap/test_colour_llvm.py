@@ -51,7 +51,7 @@ class ColourLLVM(unittest.TestCase):
         shutil.copyfile(LIB, self.target / 'third_party/llvm/lib/libLLVM-15.so')
         self.pin = digest(LIB)
         self.identities = self.root / 'identities.txt'
-        self.identities.write_text('\n'.join(f'{n} {digest(p)}' for n, p in [
+        self.identities.write_text('\n'.join(f'{self.platform.removesuffix("_cjnative")} {n} {digest(p)}' for n, p in [
             ('libLLVM-15.so', self.host_lib),
             *[(n, self.host / self.runtime / n) for n in ('libcangjie-runtime.so', 'libboundscheck.so')]]) + '\n')
         self.compiler = self.root / 'process-fixture'

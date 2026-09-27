@@ -5,9 +5,55 @@ import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import test from 'node:test';
 import {checkPlatform, planMatrix, probeRequirement, runnerHost, selectPlatforms} from './platform-matrix.mjs';
+import {allReleasePlatforms, getReleasePlatform, RELEASE_REQUIREMENTS} from '../../build/lib/targets.mjs';
 
 const script = path.resolve(import.meta.dirname, 'platform-matrix.mjs');
 const run = args => spawnSync(process.execPath, [script, ...args], {encoding: 'utf8'});
+
+test('probe CLI reports SDK capability independently of blocked cross-build readiness', t => {
+  const sdk = fs.mkdtempSync(path.join(os.tmpdir(), 'release-probe-'));
+  t.after(() => fs.rmSync(sdk, {recursive: true, force: true}));
+  const env = {...process.env, OHOS_SDK_HOME: sdk, OHOS_NDK_HOME: '', HOS_SDK_HOME: ''};
+  const probe = () => spawnSync(process.execPath, [script, 'probe', '--requirement', 'ohos-sdk'], {env, encoding: 'utf8'});
+  const absent = probe();
+  assert.equal(absent.status, 1, absent.stderr);
+  assert.match(absent.stdout, /^MISSING ohos-sdk:/);
+  fs.mkdirSync(path.join(sdk, 'native/llvm/bin'), {recursive: true});
+  const present = probe();
+  assert.equal(present.status, 0, present.stderr);
+  assert.match(present.stdout, /^PRESENT ohos-sdk:/);
+  const check = spawnSync(process.execPath, [script, 'check', '--platform', 'linux-x64-ohos'], {env, encoding: 'utf8'});
+  assert.equal(check.status, 1, 'SDK presence must not invent cross-build producers');
+  assert.match(check.stderr, /BLOCKED tuple linux_ohos_aarch64_cjnative:/);
+});
+
+test('probe CLI refuses absent and unknown requirement names', () => {
+  assert.equal(run(['probe']).status, 2);
+  assert.equal(run(['probe', '--requirement', 'unknown-sdk']).status, 2);
+});
+
+test('SDK input jobs cover the selected runner/requirement pairs and exclude abandoned ARM32', () => {
+  const expected = new Set(allReleasePlatforms().filter(key => !getReleasePlatform(key).excluded)
+    .flatMap(key => {
+      const platform = getReleasePlatform(key);
+      return platform.requires.map(requirement => `${platform.runner}/${requirement}`);
+    }));
+  const actual = planMatrix('all').prerequisites.map(row => `${row.runner}/${row.requirement}`);
+  assert.deepEqual(new Set(actual), expected);
+  assert.equal(actual.length, expected.size, 'shared runner SDKs install once');
+  assert.deepEqual(planMatrix('win32-x64-ohos-arm32').prerequisites, []);
+  assert.deepEqual(planMatrix('linux-x64-android').prerequisites,
+    [{runner: 'ubuntu-24.04', requirement: 'android-ndk'}]);
+});
+
+test('phased release source and package sets equal the buildable matrix', () => {
+  const workflow = fs.readFileSync(path.resolve(import.meta.dirname, '../../.github/workflows/release.yml'), 'utf8');
+  const source = [...workflow.matchAll(/^      targets: (\S+)$/gm)].map(match => match[1]);
+  const packages = [...workflow.matchAll(/^      platform: (\S+)$/gm)].map(match => match[1]);
+  const plan = planMatrix('all');
+  assert.deepEqual(source.sort(), plan.source.map(row => row.target).sort(), 'source symmetric difference');
+  assert.deepEqual(packages.sort(), plan.package.map(row => row.platform).sort(), 'package symmetric difference');
+});
 
 test('plan for all fourteen platforms: four source cells, five packages, eight blocked, one excluded', () => {
   const plan = planMatrix('all');
@@ -119,6 +165,9 @@ test('the CLI writes GITHUB_OUTPUT lines the workflow fans out over', () => {
   assert.equal(lines.package_keys, 'linux-x64');
   assert.equal(lines.has_source, 'true');
   assert.equal(lines.has_blocked, 'true');
+  assert.equal(lines.has_prerequisites, 'true');
+  assert.deepEqual(JSON.parse(lines.prerequisite_matrix).include,
+    [{runner: 'ubuntu-24.04', requirement: 'android-ndk'}]);
   assert.equal(lines.windows_side, 'false');
   const bad = run(['plan', '--platforms', 'plan9']);
   assert.equal(bad.status, 2);
@@ -126,4 +175,64 @@ test('the CLI writes GITHUB_OUTPUT lines the workflow fans out over', () => {
   const blocked = run(['check', '--platform', 'ohos-arm64']);
   assert.equal(blocked.status, 1);
   assert.match(blocked.stderr, /device-side SDK/);
+});
+
+test('every requirement has an installer export to cut, drawn from the probe candidates', () => {
+  const installer = fs.readFileSync(path.resolve(import.meta.dirname, 'install-runner-sdk.py'), 'utf8');
+  const exported = new Set(['android-ndk', 'ohos-sdk', 'xcode-ios'].map(requirement => {
+    const contract = RELEASE_REQUIREMENTS[requirement];
+    const candidates = contract.envCandidates ?? ['DEVELOPER_DIR'];
+    const hit = candidates.filter(variable =>
+      new RegExp(`^\\s*export\\('${variable}'.*$`, 'm').test(installer));
+    assert.ok(hit.length > 0, `${requirement}: no export line for any of ${candidates.join('/')}`);
+    return hit[0];
+  }));
+  assert.deepEqual([...exported].sort(), ['ANDROID_NDK_ROOT', 'DEVELOPER_DIR', 'OHOS_SDK_HOME']);
+  // Each exported name is one the probe itself reads, so a disconnected export
+  // can only turn the probe red through the documented candidate list.
+  for (const name of exported) {
+    assert.ok(Object.values(RELEASE_REQUIREMENTS).some(contract => contract.envCandidates?.includes(name))
+      || name === 'DEVELOPER_DIR', `${name}: not a probe candidate`);
+  }
+});
+
+test('the SDK identity record hashes file content, never a path', () => {
+  const harness = fs.readFileSync(path.resolve(import.meta.dirname, 'verify-runner-sdk.mjs'), 'utf8');
+  // Every digest in the harness is fed either a call (contentSha/textSha read
+  // their argument) or one of the text variables below. A path variable is not
+  // on the list: hashing one would hash the name of a file, not the file.
+  const textVariables = ['text', 'source'];
+  const digestArguments = [...harness.matchAll(/createHash\('sha256'\)\.update\(([^;]*?)\)\.digest/g)]
+    .map(([, argument]) => argument.trim());
+  assert.ok(digestArguments.length > 0, 'no digest found; the guard would be vacuous');
+  for (const argument of digestArguments) {
+    const source = argument.includes('(') ? 'call' : `variable ${argument}`;
+    assert.ok(argument.includes('(') || textVariables.includes(argument),
+      `digest reads a ${source}, not file content`);
+  }
+  const contentHashes = [...harness.matchAll(/contentSha\(([^)]*)\)/g)].map(([, argument]) => argument.trim());
+  assert.ok(contentHashes.length >= 4, `expected the three arms plus the check, found ${contentHashes.length}`);
+  assert.ok(harness.includes('const contentSha = (file) => createHash(\'sha256\').update(fs.readFileSync(file))'),
+    'contentSha must read the file it names');
+  // The three arms are recorded with their paths beside them, and the real entry
+  // refuses a record whose identity equals its own path string.
+  for (const field of ['candidate', 'cut', 'restored']) {
+    assert.ok(new RegExp(`${field}: \\{path: \\w+, sha256: \\w+InstallerSha256, pathStringSha256: textSha\\(\\w+\\)\\}`, 'm')
+      .test(harness), `${field}: no {path, sha256, pathStringSha256} identity record`);
+  }
+  assert.ok(harness.includes('the identity is not the path string'),
+    'the entry does not judge a record against its own path string');
+  assert.ok(harness.includes("'restored-export: the export is back'"),
+    'the export face has no restored arm');
+});
+
+test('the export reader drops the carriage return of a CRLF GITHUB_ENV line', () => {
+  const harness = fs.readFileSync(path.resolve(import.meta.dirname, 'verify-runner-sdk.mjs'), 'utf8');
+  // The installer writes GITHUB_ENV in the platform's text mode, so a Windows
+  // value arrives as `NAME=D:\path\r`. Splitting on a bare newline would put
+  // that carriage return inside the SDK path and the probe would read the
+  // directory as missing.
+  assert.ok(harness.includes("split(/\\r?\\n/)"), 'GITHUB_ENV lines are split on a bare newline');
+  assert.ok(harness.includes("'restored-export: the export is back'"),
+    'nothing judges the value the restored export actually carried');
 });

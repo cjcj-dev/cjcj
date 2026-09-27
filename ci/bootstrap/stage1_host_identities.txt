@@ -1,6 +1,14 @@
-# Host triple: runtime/boundscheck originals selected by ci/host_sdk_pin.env.
+# Host runtime/boundscheck/LLVM identities, scoped by Linux platform.
 # Host LLVM is the independently produced relocate(undef) repair; see HOST_LLVM.md.
 # HOST_LLVM_PROVENANCE {"source_sha":"418ace1896e22a51a6c1fa36ec29631b00301cd8","run_id":"35923450660","run_attempt":"1","producer_sha":"9adfa29123107a19a9196836ef6f4a30c8ce0a40","platform":"linux_x86_64","repository":"cjcj-dev/cjcj","artifact_id":"10778964263"}
-libcangjie-runtime.so 7d1eeecff4d2a8ed012897785d309a221ddb7520e1b268b431812a0645b56cdc
-libboundscheck.so 3ad04fe38be88d5123078bd11d78cbc82377c114f6e6514b393ecd374e559bb7
-libLLVM-15.so 30e8ba8c8a30b8b8ea36b4d7ada4cce7b7e12e1a07a66439556b1bd6cb2b3981
+# HOST_SDK_PROVENANCE {"platform":"linux_x86_64","archive":"cangjie-sdk-linux-x64-1.3.0-alpha.20260925001050.tar.gz","sha256":"fde68a5713968f5f875e013355d73aab8bd95bb1fbfd1f1b6a29b1adcf48943b"}
+linux_x86_64 libcangjie-runtime.so a656fbc7d16e0fa2c61598fc68a74bb55948834e428c908fed17c945783f3988
+linux_x86_64 libboundscheck.so 3ad04fe38be88d5123078bd11d78cbc82377c114f6e6514b393ecd374e559bb7
+linux_x86_64 libLLVM-15.so 30e8ba8c8a30b8b8ea36b4d7ada4cce7b7e12e1a07a66439556b1bd6cb2b3981
+# HOST_LLVM_PROVENANCE {"source_sha":"418ace1896e22a51a6c1fa36ec29631b00301cd8","run_id":"36257397072","run_attempt":"1","producer_sha":"9b2e0125bf526747a7954562240c3f1c5425f95f","platform":"linux_aarch64","sha256":"25d8a03bb7e81fb09722cefb4b40a73634864d892f2e36bf1a989499d190a321","repository":"cjcj-dev/cjcj","artifact_id":"10910534726"}
+# HOST_LLVM_PROVENANCE {"source_sha":"418ace1896e22a51a6c1fa36ec29631b00301cd8","run_id":"36257397072","run_attempt":"1","producer_sha":"9b2e0125bf526747a7954562240c3f1c5425f95f","platform":"darwin_aarch64","sha256":"0429b5e9c149ce1b233621adea6381c6b2defd0e23a21081a382ea1fdada95e3","repository":"cjcj-dev/cjcj","artifact_id":"10911891505"}
+# HOST_LLVM_PROVENANCE {"source_sha":"418ace1896e22a51a6c1fa36ec29631b00301cd8","run_id":"36257397072","run_attempt":"1","producer_sha":"9b2e0125bf526747a7954562240c3f1c5425f95f","platform":"darwin_x86_64","sha256":"233db2583adafc33a632d28511e19c250efdfd76fc9ee0d590fda79abaf85cad","repository":"cjcj-dev/cjcj","artifact_id":"10911914734"}
+# HOST_SDK_PROVENANCE {"platform":"linux_aarch64","archive":"cangjie-sdk-linux-aarch64-1.3.0-alpha.20260925001050.tar.gz","sha256":"471fc3738ef70f7cbbb1f0a7dfee4b6f1a54ed19fa15b6d580b000786042e79a"}
+linux_aarch64 libcangjie-runtime.so 27ec89f0604bfcdfde332dd4de64b057125e964b86a74d2c1adb8b600486405d
+linux_aarch64 libboundscheck.so 5330fba239794dbb24e42a30936e38c145312997d26146844bf23d2ef025c047
+linux_aarch64 libLLVM-15.so 25d8a03bb7e81fb09722cefb4b40a73634864d892f2e36bf1a989499d190a321

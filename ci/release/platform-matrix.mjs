@@ -11,6 +11,9 @@
 //         and probe the capabilities the platform needs. Exit 1 with MISSING /
 //         BLOCKED lines when anything is absent. Blocked platforms always exit 1.
 //   table Markdown table of all fourteen platforms for humans.
+//   probe --requirement NAME
+//         Check one installed runner SDK without claiming the platform's
+//         runtime/final-std producers or package consumers are implemented.
 
 import fs from 'node:fs';
 import os from 'node:os';
@@ -56,11 +59,16 @@ export function planMatrix(requested) {
   const packages = [];
   const blocked = [];
   const excluded = [];
+  const prerequisites = new Map();
   for (const key of selected) {
     const readiness = releasePlatformReadiness(key);
     if (readiness.status === 'excluded') {
       excluded.push({release_key: key, reason: readiness.reasons[0]});
       continue;
+    }
+    for (const requirement of getReleasePlatform(key).requires) {
+      const id = `${readiness.runner}-${requirement}`;
+      if (!prerequisites.has(id)) prerequisites.set(id, {runner: readiness.runner, requirement});
     }
     if (readiness.status === 'blocked') {
       blocked.push({release_key: key, runner: readiness.runner, reasons: readiness.reasons.join(' | ')});
@@ -96,6 +104,7 @@ export function planMatrix(requested) {
     package: packages,
     blocked,
     excluded,
+    prerequisites: [...prerequisites.values()],
     windowsSide,
   });
 }
@@ -201,6 +210,8 @@ function writeOutputs(file, plan) {
     `source_matrix=${JSON.stringify({include: plan.source})}`,
     `package_matrix=${JSON.stringify({include: plan.package})}`,
     `blocked_matrix=${JSON.stringify({include: plan.blocked})}`,
+    `prerequisite_matrix=${JSON.stringify({include: plan.prerequisites})}`,
+    `has_prerequisites=${plan.prerequisites.length > 0}`,
     `excluded=${plan.excluded.map(entry => entry.release_key).join(',')}`,
     `package_keys=${plan.package.map(row => row.platform).join(',')}`,
     `has_source=${plan.source.length > 0}`,
@@ -230,10 +241,19 @@ export function main(argv, {log = console.log, error = console.error} = {}) {
     options: {
       platforms: {type: 'string', default: 'all'},
       platform: {type: 'string'},
+      requirement: {type: 'string'},
       'github-output': {type: 'string'},
       summary: {type: 'string'},
     },
   });
+  if (command === 'probe') {
+    if (!values.requirement) throw new Error('probe requires --requirement');
+    const result = probeRequirement(values.requirement);
+    const line = `${result.present ? 'PRESENT' : 'MISSING'} ${values.requirement}: ${result.detail}`;
+    log(line);
+    if (values.summary) fs.appendFileSync(values.summary, `${line}\n`);
+    return result.present ? 0 : 1;
+  }
   if (command === 'plan') {
     const plan = planMatrix(values.platforms);
     log(JSON.stringify(plan, null, 2));
@@ -255,7 +275,7 @@ export function main(argv, {log = console.log, error = console.error} = {}) {
     log(renderTable());
     return 0;
   }
-  throw new Error('usage: platform-matrix.mjs plan|check|table ...');
+  throw new Error('usage: platform-matrix.mjs plan|check|probe|table ...');
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
