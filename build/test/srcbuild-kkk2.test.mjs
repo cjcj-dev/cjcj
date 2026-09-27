@@ -631,7 +631,7 @@ test('step13 stops before build CLI when an interrupted clone repair fails', t =
     + 'ensure_exact_clone() { repair_calls=$((repair_calls + 1)); '
     + 'if ((repair_calls == 2)); then return 17; fi; return 0; }\n'
     + 'build_cli() { touch "$CLI_MARKER"; }\n'
-    + 'CANGJIE_WORKSPACE=$1 CLI_MARKER=$2 COMPILER_SRC_URL=a COMPILER_REF=aa '
+    + 'CANGJIE_WORKSPACE=$1 CLI_MARKER=$2 CANGJIE_COMPILER_URL=a CANGJIE_COMPILER_SHA=aa '
     + 'RUNTIME_SRC_URL=b RUNTIME_REF=bb TOOLS_SRC_URL=c TOOLS_REF=cc '
     + 'STDX_SRC_URL=d STDX_REF=dd\n'
     + 'step_13\n';

@@ -29,7 +29,7 @@ function foreignSource(t) {
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));
   git(['init', '-q', root]);
   fs.mkdirSync(path.join(root, 'schema'), {recursive: true});
-  fs.writeFileSync(path.join(root, 'schema/ModuleFormat.fbs'), 'table Placeholder {}\n');
+  fs.writeFileSync(path.join(root, 'schema/CjoFormat.fbs'), 'table Placeholder {}\n');
   git(['-C', root, 'add', '.']);
   git(['-C', root, '-c', 'user.name=fixture', '-c', 'user.email=fixture@example.invalid',
     'commit', '-q', '-m', 'fixture']);
@@ -52,10 +52,8 @@ test('the same rejection names the identity the LLVM products are pinned to', as
   const colour = pin('llvm_pin.env');
   const source = pin('source_pin.env');
   assert.equal(colour.CANGJIE_COMPILER_SHA, pin('llvm_pin.env').CANGJIE_COMPILER_SHA);
-  // The rejected commit is named with the pin the colour tuple, the dylib and
-  // the depot path are keyed by; the error must not fall back to the other
-  // compiler pin, which has no schema/ModuleFormat.fbs at all.
-  assert.notEqual(source.COMPILER_REF, colour.CANGJIE_COMPILER_SHA);
+  assert.ok(!Object.keys(source).some(key => key.startsWith('COMPILER_')),
+    'source_pin.env must not define a second compiler source');
   await assert.rejects(() => prepareCppHeaders(root), error => {
     assert.match(error.message, /CANGJIE_COMPILER_SHA/);
     assert.doesNotMatch(error.message, /COMPILER_REF/);
@@ -79,6 +77,9 @@ test('every stage-chain site that names the compiler source names the same pin',
     'ci/srcbuild/steps/verify-source-pins.mjs',
     'ci/bootstrap/test_cpp_headers.sh',
     'tools/srcbuild_kkk2.sh',
+    '.github/workflows/build-ast-support.yml',
+    '.github/workflows/build-windows-runtime.yml',
+    '.github/workflows/std-input-evidence.yml',
   ];
   for (const site of sites) {
     const text = fs.readFileSync(path.join(repoRoot, site), 'utf8');

@@ -26,7 +26,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Load fixed source and AST input identities
-        run: cat ci/runtime_pin.env ci/source_pin.env ci/ast_support/linux_x86_64.env >> "$GITHUB_ENV"
+        run: cat ci/runtime_pin.env ci/llvm_pin.env ci/source_pin.env ci/ast_support/linux_x86_64.env >> "$GITHUB_ENV"
       - uses: actions/checkout@v7
         with:
           repository: cjcj-dev/cangjie-runtime
@@ -96,7 +96,7 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p "$RUNNER_TEMP/std-evidence"
-          grep -Fx "compiler=$COMPILER_REF" "$RUNNER_TEMP/ast-support/PROVENANCE"
+          grep -Fx "compiler=$CANGJIE_COMPILER_SHA" "$RUNNER_TEMP/ast-support/PROVENANCE"
           python3 ci/test_build_resources.py
           bash ci/release/build_colour_std.sh runtime-source "$RUNNER_TEMP/std-active" \
             "$RUNNER_TEMP/ast-support" "$RUNNER_TEMP/std-evidence" 2>&1 | tee "$RUNNER_TEMP/std-evidence.log"

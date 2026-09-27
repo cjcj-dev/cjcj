@@ -79,7 +79,7 @@ run_fetch() {
 llvm_sha=$(make_repo llvm llvm/include/llvm/Transforms/Scalar/ReflectionInfo.h 'enum EnumReflectionType {
   ERT_NONE,
 };')
-compiler_sha=$(make_repo compiler schema/ModuleFormat.fbs 'table Fixture {}')
+compiler_sha=$(make_repo compiler schema/CjoFormat.fbs 'table Fixture {}')
 flatbuffers_sha=$(make_repo flatbuffers CMakeLists.txt 'cmake_minimum_required(VERSION 3.16)')
 llvm_bare=$work/bare-llvm
 compiler_bare=$work/bare-compiler
@@ -125,7 +125,7 @@ if [ "$skip_fetch_sources" = 0 ]; then
         && grep -F 'SOURCE-MIRROR none, falling back to' "$work/sources.out" >/dev/null \
         && ! grep -F 'local: -A' "$work/sources.out" "$work/sources.err" >/dev/null \
         && ! grep -F 'entries[@]' "$work/sources.out" "$work/sources.err" >/dev/null \
-        && test -f "$tuple/cangjie-compiler/schema/ModuleFormat.fbs" \
+        && test -f "$tuple/cangjie-compiler/schema/CjoFormat.fbs" \
         && test -f "$tuple/flatbuffers/CMakeLists.txt"; then
         pass_assert fetch_sources_head
     else

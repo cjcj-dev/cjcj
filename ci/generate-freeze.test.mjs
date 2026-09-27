@@ -126,7 +126,6 @@ test('freeze generator roundtrips through G1 and keeps every negative control cl
     'RUNTIME_REF',
     'LLVM_SHA',
     'CANGJIE_COMPILER_SHA',
-    'COMPILER_REF',
     'TOOLS_REF',
     'STDX_REF',
     'CJPM_FORK_REF',

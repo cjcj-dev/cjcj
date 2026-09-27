@@ -168,10 +168,10 @@ jobs:
         run: |
           set -euo pipefail
           git init compiler
-          git -C compiler remote add origin "$COMPILER_SRC_URL"
-          git -C compiler fetch --depth=1 origin "$COMPILER_REF"
+          git -C compiler remote add origin "$CANGJIE_COMPILER_URL"
+          git -C compiler fetch --depth=1 origin "$CANGJIE_COMPILER_SHA"
           git -C compiler checkout --detach FETCH_HEAD
-          test "$(git -C compiler rev-parse HEAD)" = "$COMPILER_REF"
+          test "$(git -C compiler rev-parse HEAD)" = "$CANGJIE_COMPILER_SHA"
           git init compiler/third_party/flatbuffers
           git -C compiler/third_party/flatbuffers remote add origin "$FLATBUFFERS_URL"
           git -C compiler/third_party/flatbuffers fetch --depth=1 origin "$FLATBUFFERS_SHA"
@@ -193,7 +193,7 @@ jobs:
             "$GITHUB_WORKSPACE/.windows-stdast-buildtools/ast-support-artifact" \
             "$sdk"
           printf 'compiler=%s\nflatbuffers=%s\nplatform=windows_x86_64\nrun_id=%s\nrun_attempt=%s\n' \
-            "$COMPILER_REF" "$FLATBUFFERS_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" \
+            "$CANGJIE_COMPILER_SHA" "$FLATBUFFERS_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" \
             > "$GITHUB_WORKSPACE/.windows-stdast-buildtools/ast-support-artifact/PROVENANCE"
 
       - name: Install same-generation AST inputs
@@ -226,7 +226,7 @@ jobs:
           test -f "$ast_o"
           schema_sha=$(sha256sum "$sdk/schema/StdAstFormat.fbs" | awk '{print $1}')
           provenance="$GITHUB_WORKSPACE/.windows-stdast-buildtools/std-ast.provenance"
-          printf 'schema_sha256=%s\ncompiler=%s\nobject=%s\n' "$schema_sha" "$COMPILER_REF" "$ast_o" > "$provenance"
+          printf 'schema_sha256=%s\ncompiler=%s\nobject=%s\n' "$schema_sha" "$CANGJIE_COMPILER_SHA" "$ast_o" > "$provenance"
           {
             echo "STDLIB_AST_OBJECT=$ast_o"
             echo "STDLIB_AST_PROVENANCE=$provenance"

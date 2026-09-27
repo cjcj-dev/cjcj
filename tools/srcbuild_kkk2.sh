@@ -828,7 +828,7 @@ build_fixed_tuple() {
     ninja -j "$JOBS" -C "$flatbuffers_build" flatc
     mkdir -p "$generated/flatbuffers"
     "$flatbuffers_build/flatc" --no-warnings -c -o "$generated/flatbuffers" \
-        "$compiler/schema/ModuleFormat.fbs"
+        "$compiler/schema/CjoFormat.fbs"
     clang++ -std=c++17 -O2 -fPIC -fno-rtti -fno-exceptions \
         -I"$llvm_fork/llvm/include" -I"$llc_build/include" \
         -I"$flatbuffers/include" -I"$generated" \

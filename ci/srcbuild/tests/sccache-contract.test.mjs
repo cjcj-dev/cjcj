@@ -38,7 +38,7 @@ function jobs(text) {
 const CXX_JOBS = new Map([
   ['android-runtime.yml/runtime', {component: 'runtime', pin: /env\.RUNTIME_REF/}],
   ['objc-darwin-e2e.yml/objc-darwin-e2e', {component: 'runtime', pin: /env\.RUNTIME_REF/}],
-  ['build-ast-support.yml/build', {component: 'ast-support', pin: /\$\{\{ env\.COMPILER_REF \}\}-\$\{\{ env\.FLATBUFFERS_SHA \}\}/}],
+  ['build-ast-support.yml/build', {component: 'ast-support', pin: /\$\{\{ env\.CANGJIE_COMPILER_SHA \}\}-\$\{\{ env\.FLATBUFFERS_SHA \}\}/}],
   ['build-host-llvm.yml/host', {component: 'host-llvm', pin: /steps\.pin\.outputs\.sha/}],
   ['build-llvm-dylib.yml/dylib', {component: '${{ inputs.cache-component }}', pin: /steps\.pin\.outputs\.sha/}],
   ['build-llvm-tools.yml/build-tools', {component: 'llvm', pin: /steps\.llvm-pin\.outputs\.sha/}],
