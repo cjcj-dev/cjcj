@@ -43,12 +43,12 @@ test('every release platform names a buildable host target and a runner of that 
   }
 });
 
-test('readiness is derived from DAG producers: the five native packages build, the rest are blocked or excluded by name', () => {
+test('readiness is derived from DAG producers: native and Android packages have DAG producers; other gaps remain named', () => {
   const byStatus = {buildable: [], blocked: [], excluded: []};
   for (const key of allReleasePlatforms()) byStatus[releasePlatformReadiness(key).status].push(key);
-  assert.deepEqual(byStatus.buildable, ['linux-x64', 'linux-arm64', 'darwin-arm64', 'darwin-x64', 'win32-x64']);
+  assert.deepEqual(byStatus.buildable, ['linux-x64', 'linux-arm64', 'linux-x64-android', 'darwin-arm64', 'darwin-x64', 'darwin-arm64-android', 'win32-x64', 'win32-x64-android']);
   assert.deepEqual(byStatus.excluded, ['win32-x64-ohos-arm32']);
-  assert.equal(byStatus.blocked.length, 8);
+  assert.equal(byStatus.blocked.length, 5);
   for (const key of byStatus.blocked) {
     const readiness = releasePlatformReadiness(key);
     assert.ok(readiness.reasons.length > 0, `${key} blocked without a reason`);
@@ -88,13 +88,13 @@ test('ARM32 tuples are dropped, never carried, and the arm32-only package is exc
 });
 
 test('asking the build for a blocked release platform fails closed with the missing tuple, not "unknown target"', () => {
-  assert.throws(() => getTarget('linux-x64-android'), error => {
-    assert.match(error.message, /release platform 'linux-x64-android' is blocked/);
-    // The NDK is installed and probed by the prerequisites job, so the gap this
+  assert.throws(() => getTarget('linux-x64-ohos'), error => {
+    assert.match(error.message, /release platform 'linux-x64-ohos' is blocked/);
+    // The OHOS SDK is installed and probed by the prerequisites job, so the gap this
     // platform still has is the cross-built tuple. Naming the SDK here would be
     // a stale claim, so assert its absence too.
-    assert.match(error.message, /linux_android_aarch64_cjnative/);
-    assert.doesNotMatch(error.message, /android-ndk/);
+    assert.match(error.message, /linux_ohos_aarch64_cjnative/);
+    assert.doesNotMatch(error.message, /ohos-sdk/);
     assert.doesNotMatch(error.message, /unknown target/);
     return true;
   });
@@ -106,26 +106,24 @@ test('asking the build for a blocked release platform fails closed with the miss
 test('release.yml package jobs agree with the release platform table', () => {
   const release = fs.readFileSync(path.join(root, '.github/workflows/release.yml'), 'utf8');
   const jobs = release.split(/\n  (?=[a-z0-9-]+:\n)/).filter(job => job.includes('uses: ./.github/workflows/build-release-package.yml'));
-  assert.equal(jobs.length, 5);
+  assert.equal(jobs.length, allReleasePlatforms().filter(key => releasePlatformReadiness(key).status === 'buildable').length);
   const scalar = (job, key) => job.match(new RegExp(String.raw`^\s*${key}: '?([^'\n]*)'?\s*$`, 'm'))?.[1];
-  // Several official packages share a host (linux-x64 also hosts the android,
-  // ohos and device-side packages); release.yml builds the plain one, which is
-  // the buildable release platform of that host.
-  const buildableByHost = new Map(allReleasePlatforms()
-    .filter(key => releasePlatformReadiness(key).status === 'buildable')
-    .map(key => [getReleasePlatform(key).host, key]));
+  const seen = [];
   for (const job of jobs) {
     const platform = scalar(job, 'platform');
-    const key = buildableByHost.get(platform);
+    const key = scalar(job, 'release_key');
+    seen.push(key);
     assert.ok(key, `release.yml packages ${platform}, which no buildable release platform uses as host`);
     const readiness = releasePlatformReadiness(key);
+    assert.equal(platform, readiness.host);
     assert.equal(scalar(job, 'runner'), readiness.runner, `${key}: runner`);
     assert.equal(scalar(job, 'llvm_platform'), readiness.llvmPlatform, `${key}: llvm_platform`);
     assert.equal(scalar(job, 'sdk_runtime_dir'), readiness.runtimeTuple, `${key}: sdk_runtime_dir`);
     assert.equal(scalar(job, 'std_artifact'), `final-std-${readiness.host}`, `${key}: std_artifact`);
-    const crossTuple = scalar(job, 'cross_std_tuple') || '';
-    assert.deepEqual(Object.keys(readiness.crossStd), crossTuple ? [crossTuple] : [], `${key}: cross_std_tuple`);
+    const cross = JSON.parse(scalar(job, 'cross_std_artifacts'));
+    assert.deepEqual(Object.keys(readiness.crossStd), cross.map(entry => entry.tuple), `${key}: cross tuples`);
   }
+  assert.deepEqual(seen.sort(), allReleasePlatforms().filter(key => releasePlatformReadiness(key).status === 'buildable').sort());
 });
 
 // DAG_REQUIREMENT_PRODUCERS is the only thing that lets a `requires <sdk>` line
