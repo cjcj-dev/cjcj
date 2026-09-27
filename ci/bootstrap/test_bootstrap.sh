@@ -157,7 +157,19 @@ check_dry_contract() {
   # not prove that cjpm receives the job count.
   check_count CJPM-EXEC-JOBS 1 "tools/bin/cjpm\\\\ build\\\\ -j\\\\ $jobs$" "$log"
   echo "PASS dry stage1 cjpm jobs=$jobs reaches execution command"
-  check_count CJPM 1 'heap=20480MB' "$log"
+  # Use the same resource policy and requested heap as the product. Run it in
+  # a subshell so the expected value does not alter the fixture environment.
+  local heap
+  heap=$(
+    source "$ROOT/../build_resources.sh"
+    configure_build_resources "${STAGE1_HEAP:-20GB}" || exit 1
+    printf '%s' "$STD_BUILD_HEAP"
+  ) || fail CJPM-HEAP 'cannot determine configured heap'
+  check_count CJPM-HEAP 1 "CMD cjpm build -j $jobs .* heap=$heap$" "$log"
+  # Observe the execution command, not just its diagnostic. Scope to stage1
+  # cjpm: std and stage0 have independently configured heap requests.
+  check_count CJPM-EXEC-HEAP 1 "cjHeapSize=$heap bash -c .*tools/bin/cjpm\\\\ build\\\\ -j\\\\ $jobs$" "$log"
+  echo "PASS dry stage1 cjpm heap=$heap reaches execution command"
   check_shim_call_count "$log"
   check_count SHIM 1 'CMD shim build label=stage0 .*source-object=source .*sdk=.*/sdk-stage0 .*runtime=.*/host-rt' "$log"
   check_count SHIM 1 'CMD shim build label=stage1 .*source-object=.*/sdk-stage1/third_party/llvm/fixed-llc/cjselfhost_llvmshim.o .*sdk=.*/sdk-stage1 .*runtime=.*/colour-rt' "$log"
