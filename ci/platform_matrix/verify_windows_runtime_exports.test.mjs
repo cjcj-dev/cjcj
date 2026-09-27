@@ -108,18 +108,17 @@ try {
       await fs.writeFile(runtimeDll, changed);
       check(`native-missing:${symbol}`, invoke(true), 1, [`FATAL: missing exports: ${symbol}`]);
     }
+    // Give one noncontract implementation export two different ABI tags.
+    // Reuse its PE name storage; neither variant touches a caller-contract name.
+    const abiTemplate = '_ZNSt3__1fixtureB220108Ev';
+    const implementation = [...offsets].find(([name]) =>
+      !expected.includes(name) && name.length >= abiTemplate.length);
+    if (!implementation) throw new Error('native ABI control requires an implementation export');
     for (const tag of ['220107', '220108']) {
       const changed = Buffer.from(dll);
-      let replacements = 0;
-      for (const [name, offset] of offsets) {
-        if (!expected.includes(name) && name.includes('220108')) {
-          changed.write(name.replaceAll('220108', tag), offset);
-          replacements++;
-        }
-      }
-      if (!replacements) throw new Error('native ABI control requires implementation ABI labels');
+      changed.write(abiTemplate.replace('220108', tag) + '\0', implementation[1]);
       await fs.writeFile(runtimeDll, changed);
-      console.log(`SELFTEST_NATIVE_ABI tag=${tag} replacements=${replacements} sha256=${hash(changed)}`);
+      console.log(`SELFTEST_NATIVE_ABI tag=${tag} replaced=${implementation[0]} sha256=${hash(changed)}`);
       check(`native-abi-${tag}`, invoke(true), 0);
     }
   }

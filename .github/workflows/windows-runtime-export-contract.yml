@@ -1,0 +1,70 @@
+name: Windows runtime export contract
+
+on:
+  pull_request:
+    paths:
+      - 'ci/platform_matrix/verify_windows_runtime_exports*.mjs'
+      - '.github/workflows/windows-runtime-export-contract.yml'
+  workflow_dispatch:
+    inputs:
+      runtime_ref:
+        description: Runtime commit providing the generated caller contract
+        required: true
+        default: 1d0c8be495d4b6378fefbd27fb08135b3db288fd
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  native-contract:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      # Fixed integration fixture: runtime's reviewed caller-contract producer.
+      RUNTIME_REF: ${{ inputs.runtime_ref || '1d0c8be495d4b6378fefbd27fb08135b3db288fd' }}
+      RUNTIME_TARGET: windows-x86_64
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          repository: cjcj-dev/cangjie-runtime
+          ref: ${{ env.RUNTIME_REF }}
+          path: runtime-source
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          release: false
+          update: true
+          path-type: inherit
+          install: >-
+            git make python gzip unzip file binutils
+            mingw-w64-x86_64-clang
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-compiler-rt
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-libc++
+            mingw-w64-x86_64-libunwind
+            mingw-w64-x86_64-ninja
+      - name: Build through the production MINGW64 entry
+        shell: bash
+        run: npx --yes zx@8 ci/platform_matrix/build_runtime.mjs
+      - name: Verify the installed runtime contract
+        shell: bash
+        run: npx --yes zx@8 ci/platform_matrix/verify_windows_runtime_exports.mjs
+      - name: Retain native inputs and build evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-runtime-contract-inputs
+          include-hidden-files: true
+          path: |
+            .platform-ci/
+            runtime-source/runtime/src/windows_x86_64_exports.def
+            runtime-source/runtime/src/windows_export_references.json
+            runtime-source/runtime/CMakebuild/**/windows_x86_64_exports.raw.def
+          if-no-files-found: error
+          retention-days: 7
