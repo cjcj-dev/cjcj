@@ -78,7 +78,7 @@ test('host toolchain consumers accept the value loaded from the sole pin', async
   assert.equal(requireHostToolchain({CJCJ_TOOLCHAIN: pin}), pin);
 });
 
-test('the ordinary host nightly literal has one pin and the release exception is explicit', async () => {
+test('ordinary and release hosts share the single nightly pin', async () => {
   const files = [
     ...await filesBelow(path.join(root, 'ci')),
     ...await filesBelow(path.join(root, '.github', 'workflows')),
