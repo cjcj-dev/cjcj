@@ -79,6 +79,17 @@ incomplete suite produces exit 1. Environment hints in failures are only text
 matches for triage; they do not reclassify or exempt failures. Full errors and
 commands remain in the raw upstream result files.
 
+Each suite also writes `environment-failures.json`: the failed/unrun cases
+whose output matched an environment signature (`No such directory:`,
+`can not find package`, missing file/executable, timeout, memory, disk),
+each with the matched signatures, the reason (for example a compiler search
+path that consumes `CANGJIE_STDX_PATH`, per cangjie_build
+`docs/linux.md`), and the original error line as evidence. Cases without a
+signature stay only in `failures.json`. `verify_hints.py` exercises the
+matcher with one hit (`No such directory: '-lstdx.chir'` plus
+`can not find package 'stdx.net.http'`) and one non-hit and checks the
+written list; it exits nonzero if either is misclassified.
+
 Compare two repeats with `python3 ci/cangjie-test/compare.py RUN1 RUN2 diff.json
 --repeat`. Exit 1 means SDK identity, case sets or counts changed; the JSON lists
 all case/status differences. Differences are observations, not automatically
