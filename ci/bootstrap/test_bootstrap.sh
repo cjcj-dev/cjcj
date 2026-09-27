@@ -350,7 +350,7 @@ run_sdk_runtime_checked() {
 }
 
 positive_runtime_layouts() {
-  local flat_sha=50a83f258c431e97a141c4e34e7c1239dd4e91ad tuple=linux_x86_64_cjnative
+  local flat_sha=1a5d5ec2bf40ab87ac31f4a1da4370e87fd7b6ac tuple=linux_x86_64_cjnative
   new_tmp
   make_sdk_fixture
   make_runtime_payload "$TMP/$flat_sha" "$flat_sha"
@@ -363,7 +363,7 @@ positive_runtime_layouts() {
     fail runtime-flat 'boundscheck SO was not installed from flat sodepot'
   cmp -s "$TMP/sdk-base/lib/$tuple/libcangjie-runtime.a" "$TMP/sdk-flat/lib/$tuple/libcangjie-runtime.a" ||
     fail runtime-flat 'flat shared closure unexpectedly changed the base static archive'
-  make_runtime_payload "$TMP/runtime-install" 50a83f258c431e97a141c4e34e7c1239dd4e91ad "$tuple"
+  make_runtime_payload "$TMP/runtime-install" 1a5d5ec2bf40ab87ac31f4a1da4370e87fd7b6ac "$tuple"
   run_sdk_runtime_checked runtime-nested "$SDK_PRODUCT" "$TMP/runtime-install" "$TMP/sdk-nested"
   cmp -s "$TMP/runtime-install/runtime/lib/$tuple/libcangjie-runtime.so" "$TMP/sdk-nested/runtime/lib/$tuple/libcangjie-runtime.so" ||
     fail runtime-nested 'runtime SO was not installed from nested prefix'
@@ -373,7 +373,7 @@ positive_runtime_layouts() {
 }
 
 positive_runtime_layout_symlink_nested_only() {
-  local sha=50a83f258c431e97a141c4e34e7c1239dd4e91ad tuple=linux_x86_64_cjnative
+  local sha=1a5d5ec2bf40ab87ac31f4a1da4370e87fd7b6ac tuple=linux_x86_64_cjnative
   new_tmp
   make_sdk_fixture
   make_runtime_payload "$TMP/real-install" "$sha" "$tuple"
@@ -388,7 +388,7 @@ positive_runtime_layout_symlink_nested_only() {
 }
 
 positive_runtime_layout_symlink_flat_only() {
-  local sha=50a83f258c431e97a141c4e34e7c1239dd4e91ad tuple=linux_x86_64_cjnative
+  local sha=1a5d5ec2bf40ab87ac31f4a1da4370e87fd7b6ac tuple=linux_x86_64_cjnative
   new_tmp
   make_sdk_fixture
   make_runtime_payload "$TMP/real-flat" "$sha"
