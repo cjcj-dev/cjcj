@@ -10,6 +10,7 @@ on:
       - ci/bootstrap/test_native_host.sh
       - ci/bootstrap/test_native_host_controls.py
       - ci/bootstrap/test_native_runner_controls.py
+      - ci/bootstrap/prepare_native_link.mjs
       - ci/bootstrap/host_tools.sh
       - ci/bootstrap/host_nm.py
       - ci/bootstrap/sdk_build.sh
@@ -51,6 +52,8 @@ jobs:
       - name: Assert native host admission through the GHA entry
         shell: bash
         run: python3 ci/bootstrap/test_native_host_controls.py "$RUNNER_TEMP/native-host-evidence" 9d390634fd915de7680a5aab5cd06e6e9135457b
+      - name: Check native in-place optimization rewrite
+        run: bash ci/bootstrap/test_bootstrap.sh positive-compile-option-o1
       - name: Assert native SDK installation and std pairing
         shell: bash
         run: python3 ci/bootstrap/test_native_sdk_controls.py "$RUNNER_TEMP/native-host-evidence/sdk"

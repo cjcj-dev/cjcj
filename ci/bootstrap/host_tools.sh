@@ -48,3 +48,12 @@ host_cache_env() {
     [ -z "$value" ] || printf '%s=%q ' "$key" "$value"
   done
 }
+
+# BSD sed requires a separate empty backup suffix for in-place updates.
+host_sed_inplace() {
+  if [ "$HOST_OS" = Darwin ]; then
+    command sed -i '' "$@"
+  else
+    command sed -i "$@"
+  fi
+}

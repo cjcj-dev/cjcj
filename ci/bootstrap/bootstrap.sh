@@ -498,7 +498,7 @@ rewrite_compile_option_o1() {
   [ -f "$toml" ] || die "隔离副本缺 cjpm.toml: $toml"
   o2_hits=$(/usr/bin/grep -c -- 'compile-option = "-O2"' "$toml" || true)
   if [ "$o2_hits" -gt 0 ]; then
-    cmd "sed -i 's/compile-option = \"-O2\"/compile-option = \"-O1\"/' $(printf '%q' "$toml")"
+    cmd "host_sed_inplace 's/compile-option = \"-O2\"/compile-option = \"-O1\"/' $(printf '%q' "$toml")"
   fi
   o1_hits=$(/usr/bin/grep -c -- 'compile-option = "-O1"' "$toml" || true)
   [ "$o1_hits" -ge 1 ] || die "隔离副本 cjpm.toml 的 compile-option 不是 -O1: $toml"
@@ -534,6 +534,9 @@ install_stage_compiler() {
 
 cjpm_build() {
   local sdk="$1" runtime="$2" srcdir="$3" extra="$4" heap="$5" ld cjpm script
+  if [ "$HOST_OS" = Darwin ]; then
+    cmd "node $(printf '%q' "$SRC/ci/bootstrap/prepare_native_link.mjs") $(printf '%q' "$srcdir") $(printf '%q' "$sdk")"
+  fi
   source "$SRC/ci/build_resources.sh"
   configure_build_resources "$heap" || die "cannot determine compiler build resources"
   heap="$STD_BUILD_HEAP"
