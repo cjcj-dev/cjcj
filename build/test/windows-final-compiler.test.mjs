@@ -67,8 +67,9 @@ for (const fail of ['', 'final-clean', 'final-build']) {
         if (tag === 'final-build') {
           const effectiveWorkspace = await fs.readFile('cjpm.toml', 'utf8');
           console.log('WINDOWS_W2_OPTIMIZATION_ASSERT_REACHED fixture_only=true');
-          assert.equal(effectiveWorkspace, workspaceToml, 'W2 must consume the native release workspace, not W1 O1');
-          assert.match(effectiveWorkspace, /^  compile-option = "-O2"$/m);
+          const optimization = effectiveWorkspace.match(/^\s*compile-option\s*=\s*"([^"]*)"/m)?.[1];
+          assert.equal(optimization, '-O2', 'W2 optimization must be -O2');
+          assert.equal(effectiveWorkspace, workspaceToml, 'W2 must preserve the complete native release workspace');
         }
         const child = spawnSync('python3', [external, command, tag, sdkRoot, hostRoot, fail], {encoding: 'utf8'});
         assert.equal(child.error, undefined);
