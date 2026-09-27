@@ -32,7 +32,11 @@ def check(source, compiler, out):
     if rc == 0 and dumps:
         text = dumps[-1].read_text()
         if source.stem == 'control':
-            assertions.append(dict(name='concrete_getter_retained', passed='srcCodeIdentifier: $sizeget,' in text))
+            getter = re.search(r'\bFunc (@\S*dispatch_uses_control4Item4sizepgHv)\(', text)
+            observed = getter[1] if getter else None
+            assertions.append(dict(name='concrete_getter_retained', passed=bool(getter) and
+                                   bool(re.search(r'= Apply\([^\n]*' + re.escape(getter[1]) + r',', text)),
+                                   observed=observed))
         else:
             kind = {'instance': 'Invoke', 'static': 'InvokeStatic',
                     'exception': 'TryInvoke', 'exception_static': 'TryInvokeStatic'}[source.stem]
