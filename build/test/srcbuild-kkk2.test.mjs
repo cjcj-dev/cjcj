@@ -1042,13 +1042,21 @@ stage1
 
 // Execute the complete driver, including retained-state loading, prerequisite,
 // run_step and the final RESULT. Only external inputs live in the fixture.
-function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFailure = false, child = false, runtimeCase = 'valid', ast = 'explicit'} = {}) {
+function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFailure = false, child = false, runtimeCase = 'valid', ast = 'explicit', largeContract = false} = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bootstrap argv '));
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));
   for (const dir of ['ci', 'build', 'tools']) {
     fs.cpSync(path.join(repoRoot, dir), path.join(root, dir), {recursive: true});
   }
   const driver = path.join(root, 'tools/srcbuild_kkk2.sh');
+  if (largeContract) {
+    // Comments leave the executable contract unchanged. Exceed pipe capacity
+    // so early-exit text readers cannot rely on the writer winning a race.
+    const padding = `    # ${'contract documentation '.repeat(8192)}\n`;
+    fs.writeFileSync(driver, fs.readFileSync(driver, 'utf8').replace(
+      /^(bootstrap_argv|step_31|step_32)\(\) \{[\s\S]*?^\}/gm,
+      body => body.slice(0, -1) + padding + '}'));
+  }
   if (empty || partialFailure) {
     const text = fs.readFileSync(driver, 'utf8');
     fs.writeFileSync(driver, text.replace(/^bootstrap_argv\(\) \{[\s\S]*?^\}/m,
@@ -1202,6 +1210,27 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
     },
   };
 }
+
+test('dry-run bootstrap preserves pin outcomes with large contract bodies', t => {
+  const observed = [];
+  const expected = [];
+  for (const mismatch of [false, true]) {
+    const fixture = bootstrapDriverFixture(t, {mismatch, largeContract: true});
+    for (const step of [31, 32]) {
+      const result = fixture.dryRun(step, `${step}-${mismatch}`);
+      const command = result.stdout.match(/^DRY_RUN COMMAND=(.*)$/m)?.[1];
+      const row = {step, mismatch, rc: result.status,
+        command: command?.includes(`--stage stage${step - 31}`) ?? false,
+        success: /^DRY_RUN RESULT=success/m.test(result.stdout),
+        rejected: /LLVM_DYLIB_SOURCE_MISMATCH/.test(result.stderr)};
+      observed.push(row);
+      expected.push({step, mismatch, rc: mismatch ? 1 : 0,
+        command: !mismatch, success: !mismatch, rejected: mismatch});
+      console.log(`LARGE_CONTRACT_ASSERT ${JSON.stringify(row)} stderr=${JSON.stringify(result.stderr)}`);
+    }
+  }
+  assert.deepEqual(observed, expected);
+});
 
 for (const step of [31, 32]) {
   test(`bootstrap driver step ${step} propagates pin mismatch`, t => {
