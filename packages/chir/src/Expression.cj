@@ -1056,10 +1056,9 @@ public open class DynamicDispatch <: FuncCall {
     private var virtualMethodOffset: Option<UInt64> = None
 
     public init(kind: ExprKind, callContext: InvokeCallContext, parent: Option<Block>) {
-        super(kind, callContext.funcCallCtx, parent)
+        super(kind, callContext.funcCallCtx, parent, operands: ArrayList<Value>([callContext.method]))
         overflowStrategy = callContext.overflowStrategy
         CJC_ASSERT(callContext.overflowStrategy != OverflowStrategy.CHECKED)
-        AppendOperand(callContext.method)
     }
 
     public func GetCallee(): Function {
