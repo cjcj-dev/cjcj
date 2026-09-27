@@ -71,8 +71,8 @@ if [ "${1:-}" = env ]; then
   fi
   hm=$(host_nm -D "$hso" 2>/dev/null | grep -c g_cjLoadBadMask || true)
   tm=$(host_nm -D "$tso" 2>/dev/null | grep -c g_cjLoadBadMask || true)
-  [ "$hm" = 0 ] || die "env: ⛔ 宿主 runtime 着色了（mask=$hm）⇒ ⭐ cjc 会 SEGV"
-  [ "$tm" = 1 ] || die "env: ⛔ 目标 runtime 未着色（mask=$tm）⇒ ⭐ 最终链接会 undefined reference to g_cjLoadBadMask"
+  [ "$hm" = 0 ] || die "env: ⛔ 宿主 runtime 着色了（mask=${hm}）⇒ ⭐ cjc 会 SEGV"
+  [ "$tm" = 1 ] || die "env: ⛔ 目标 runtime 未着色（mask=${tm}）⇒ ⭐ 最终链接会 undefined reference to g_cjLoadBadMask"
   # ⛔⛔⛔ 0808 实账：⭐⭐ **mask 对了照样崩** —— ⭐ mask 是必要条件，⛔ 不是充分条件
   #   ⭐ `ptrmask` 用 nightly-0619 的 runtime（mask=0）跑 stageB 那枚自举 cjc
   #     ⇒ ⭐ `There are no one managed frame / ThrowException fail`
@@ -168,7 +168,7 @@ if [ -n "$VERIFY_HOST_RT" ]; then
     VERIFY_HOST_RT_DIR=$(dirname "$(host_readlink -f "$VERIFY_HOST_RT_SO")")
   fi
   VERIFY_HOST_MASK=$(host_nm -D "$VERIFY_HOST_RT_DIR/libcangjie-runtime.${HOST_LIB_EXT}" 2>/dev/null | grep -c g_cjLoadBadMask || true)
-  [ "$VERIFY_HOST_MASK" = 0 ] || die "--verify-host-rt 必须未着色（mask=$VERIFY_HOST_MASK）"
+  [ "$VERIFY_HOST_MASK" = 0 ] || die "--verify-host-rt 必须未着色（mask=${VERIFY_HOST_MASK}）"
 fi
 
 CJV="${CJV:-/root/.local/bin/cjv}"
@@ -237,7 +237,7 @@ swap_all() {                     # swap_all <相对文件名> <源文件> <标�
       fi
       case "$resolved" in
         "$TO"/*) ;;
-        *) die "$label: $dst 指向副本之外 $resolved，拒绝写入";;
+        *) die "$label: $dst 指向副本之外 ${resolved}，拒绝写入";;
       esac
       [ -f "$resolved" ] || die "$label: $dst 的参照体不是普通文件: $resolved"
     fi
@@ -489,7 +489,7 @@ if [ -n "$RUNTIME" ]; then
   # Both installation and validation consume the same build target tuple.
   if [ "$RT_LAYOUT" = flat ]; then
     for base in libcangjie-runtime.${HOST_LIB_EXT} libboundscheck.${HOST_LIB_EXT}; do
-      [ -f "$d/$base" ] || die "flat runtime: 基线里没有 runtime/lib/$tgt_tuple/$base，拒绝新建"
+      [ -f "$d/$base" ] || die "flat runtime: 基线里没有 runtime/lib/$tgt_tuple/${base}，拒绝新建"
       cp -f "$RT_DYN_SRC/$base" "$d/$base" || die "flat runtime 动态库替换失败: $base"
       same_sha "$RT_DYN_SRC/$base" "$d/$base" || die "flat runtime 安装后 sha256 不一致: $base"
     done
@@ -578,14 +578,14 @@ if [ -n "$STD" ]; then
         esac
         rel="${src#"$STD"/}"
         dst="$TO/$rel"
-        [ -f "$BASE/$rel" ] || die "std: 基线里没有 $rel，拒绝新建"
+        [ -f "$BASE/$rel" ] || die "std: 基线里没有 ${rel}，拒绝新建"
         cp -f "$src" "$dst" || die "std 写入失败: $rel"
         n=$((n+1))
       done < <(host_find "$STD/$relroot" -maxdepth 1 -type f | host_sort)
     done
     rel=lib/libstdFFI.${HOST_LIB_EXT}
     [ -f "$STD/$rel" ] || die "std install prefix 缺文件: $rel"
-    [ -f "$TO/$rel" ] || die "std: 基线里没有 $rel，拒绝新建"
+    [ -f "$TO/$rel" ] || die "std: 基线里没有 ${rel}，拒绝新建"
     cp -f "$STD/$rel" "$TO/$rel" || die "std 写入失败: $rel"
     n=$((n+1))
     # ⭐ 同轮自证：core 的 .a 与 .so 必须都来自本 prefix（sha 对源）
@@ -608,18 +608,18 @@ if [ -n "$STD" ]; then
   else
     # 旧调用：只给 modules/<平台> —— ⭐ 这会留下 lib/ 与 runtime/lib/ 的基线 std
     # 080811 实账：半套 std 让 --version 绿、最小编译崩。fail-closed。
-    die "std: 拒绝 modules-only 源（$STD）—— 会留下 lib/<tuple> 基线 std。请传 build.py install --prefix 的完整根（含 modules/ + lib/ + runtime/lib/）"
+    die "std: 拒绝 modules-only 源（${STD}）—— 会留下 lib/<tuple> 基线 std。请传 build.py install --prefix 的完整根（含 modules/ + lib/ + runtime/lib/）"
   fi
 fi
 
 # ⭐⭐⭐ 着色断言 —— ⭐ 宿主与目标要求**相反**，⛔ 这一条最常被漏
-echo "[3/5] 着色断言（role=$ROLE）"
+echo "[3/5] 着色断言（role=${ROLE}）"
 RTSO="$TO/runtime/lib/$TARGET_TUPLE/libcangjie-runtime.${HOST_LIB_EXT}"
 [ -f "$RTSO" ] || die "找不到构建目标 runtime: $RTSO"
 MASK=$(host_nm -D --defined-only "$RTSO" 2>/dev/null | awk '$NF ~ /^g_cjLoadBadMask(@@?[^[:space:]]+)?$/ {n++} END {print n+0}')
 case "$ROLE" in
-  host)   [ "$MASK" = 0 ] || die "⛔ 宿主 SDK 的 runtime **着色**了（mask=$MASK）⇒ ⭐ 宿主 cjc 会在 0.5 秒内 SEGV";;
-  target) [ "$MASK" = 1 ] || die "⛔ 目标 SDK 的 runtime **未着色**（mask=$MASK）⇒ ⭐ 编出来的程序拿不到着色 ABI";;
+  host)   [ "$MASK" = 0 ] || die "⛔ 宿主 SDK 的 runtime **着色**了（mask=${MASK}）⇒ ⭐ 宿主 cjc 会在 0.5 秒内 SEGV";;
+  target) [ "$MASK" = 1 ] || die "⛔ 目标 SDK 的 runtime **未着色**（mask=${MASK}）⇒ ⭐ 编出来的程序拿不到着色 ABI";;
 esac
 echo "  g_cjLoadBadMask=$MASK ✓  ($RTSO)"
 
