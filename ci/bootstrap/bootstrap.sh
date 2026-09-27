@@ -631,7 +631,7 @@ stage0() {
   echo "OUTPUT cjcj-stage1=$out"
   cmd "bash $(printf '%q' "$SDK_BUILD") --from $(printf '%q' "$base") --to $(printf '%q' "$sdk") --host --llvm-so $(printf '%q' "$HOST_LLVM_SO") --colour-runtime $(printf '%q' "$(runtime_dir "$CRT")/libcangjie-runtime.${HOST_LIB_EXT}") --host-runtime $(printf '%q' "$(runtime_dir "$HRT")/libcangjie-runtime.${HOST_LIB_EXT}") --force"
   if [ "$DRY" -eq 0 ]; then
-    cmd "python3 $(printf '%q' "$SDK_VERIFY") --sdk $(printf '%q' "$sdk") --role host --runtime-pin $(printf '%q' "$SRC/ci/runtime_pin.env")"
+    cmd "python3 $(printf '%q' "$SDK_VERIFY") --sdk $(printf '%q' "$sdk") --role host --target-tuple $(printf '%q' "$HOST_TUPLE") --runtime-pin $(printf '%q' "$SRC/ci/runtime_pin.env")"
   fi
   assert_installed_llvm_so "$sdk" "$HOST_LLVM_SO"
   cmd "host_install -Dm644 $(printf '%q' "$AST_SUPPORT") $(printf '%q' "$sdk/lib/$HOST_TUPLE/libcangjie-ast-support.a")"

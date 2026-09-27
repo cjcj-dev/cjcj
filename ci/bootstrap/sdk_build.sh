@@ -85,7 +85,7 @@ if [ "${1:-}" = env ]; then
   #   ⇒ ⭐⭐ 所以真编一个最小程序，⭐ 那才踩到 `There are no one managed frame`
   _probe=$(mktemp -d)
   printf 'main(): Int64 { return 0 }\n' > "$_probe/p.cj"
-  if ! CANGJIE_HOME="$TGTSDK" LD_LIBRARY_PATH="$_env_ld" PATH="$_env_path" \
+  if ! env CANGJIE_HOME="$TGTSDK" "$HOST_LOADER_VAR=$_env_ld" PATH="$_env_path" \
        "$TGTSDK/bin/cjc" "$_probe/p.cj" -o "$_probe/p" >"$_probe/log" 2>&1; then
     RED "env: ⛔ 这套环境下 cjc **编不动最小程序**（⭐ mask 两边都对，⛔ 但宿主 runtime 与该 cjc 不配对）"
     head -5 "$_probe/log"
@@ -95,7 +95,7 @@ if [ "${1:-}" = env ]; then
   rm -rf "$_probe"
   echo "# host mask=$hm ✓   target mask=$tm ✓   最小程序编译 ✓"
   echo "export CANGJIE_HOME=$TGTSDK"
-  echo "export LD_LIBRARY_PATH=$(dirname "$hso"):$TGTSDK/third_party/llvm/lib:$TGTSDK/tools/lib\${LD_LIBRARY_PATH:+:\$LD_LIBRARY_PATH}"
+  printf 'export %s=%q\n' "$HOST_LOADER_VAR" "$(dirname "$hso"):$TGTSDK/third_party/llvm/lib:$TGTSDK/tools/lib${!HOST_LOADER_VAR:+:${!HOST_LOADER_VAR}}"
   echo "export PATH=$TGTSDK/bin:$TGTSDK/tools/bin:\$PATH"
   echo "# ⚠ LD_LIBRARY_PATH 首项必须是宿主 runtime —— ⭐ 顺序就是判据"
   exit 0
@@ -558,7 +558,7 @@ fi
 if [ -n "$STD" ]; then
   [ -d "$STD" ] || die "std 源目录不存在: $STD"
   d="$TO/modules/$TARGET_TUPLE"
-  [ -n "$d" ] || die "目标里找不到 modules/<平台>"
+  [ -d "$d" ] || die "目标里找不到 modules/$TARGET_TUPLE"
   if [ -d "$STD/modules" ]; then
     smod="$STD/modules/$TARGET_TUPLE"
     [ -d "$smod" ] || die "std install prefix 里找不到 modules/$TARGET_TUPLE"

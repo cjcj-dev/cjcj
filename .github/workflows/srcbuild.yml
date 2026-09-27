@@ -544,7 +544,7 @@ jobs:
               so="$CJCJ_BOOTSTRAP_BASE/third_party/llvm/lib/libLLVM-15.so"
             fi
             sha256sum "$so"
-            host_nm --defined-only "$so" > "$RUNNER_TEMP/host-$arm.nm"
+            nm --defined-only "$so" > "$RUNNER_TEMP/host-$arm.nm"
             c++filt < "$RUNNER_TEMP/host-$arm.nm" > "$RUNNER_TEMP/host-$arm.symbols"
             awk -v arm="$arm" 'index($0, "llvm::SelectionDAGBuilder::visitRelocate(") {print; n++} END {print "HOST_RELOCATE_SYMBOLS arm=" arm " count=" n+0}' "$RUNNER_TEMP/host-$arm.symbols"
           done

@@ -92,8 +92,10 @@ for name, std_input, expected in (('native-layout', std, 0), ('official-std', of
                '--colour-runtime', str(runtime), '--host-runtime', str(host)]
     if name == 'native-layout':
         command += ['--llvm-tuple', str(tuple_root)]
-    result = subprocess.run(command, capture_output=True, text=True)
-    text = result.stdout + result.stderr
+    result = subprocess.run(command, capture_output=True)
+    raw = result.stdout + result.stderr
+    (out / (name + '.raw.log')).write_bytes(raw)
+    text = raw.decode('utf-8', errors='backslashreplace')
     (out / (name + '.log')).write_text(text)
     # Nonfatal assertions all inspect assembler results, even on an early failure.
     checks = {'status': result.returncode == expected}
