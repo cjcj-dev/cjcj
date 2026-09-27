@@ -148,6 +148,10 @@ const runnerOs = runner => {
 function stepRuns(step, context) {
   const condition = scalar(step, 'if');
   if (condition === undefined) return true;
+  if (condition.includes(' || ')) {
+    const results = condition.split(' || ').map(part => stepRuns(`        if: ${part}`, context));
+    return results.some(Boolean);
+  }
   const os = condition.match(/^runner\.os (==|!=) '(\w+)'$/);
   if (os) return (os[1] === '==') === (context.runnerOs === os[2]);
   // `*` not `+`: `inputs.x != ''` is how this repo spells "was anything passed",
@@ -212,7 +216,8 @@ function failClosedDownloads(text, inputs) {
     .filter(step => stepRuns(step, context))
     .flatMap(step => {
       if (scalar(step, 'pattern') === 'final-std-*') {
-        return JSON.parse(context.inputs.get('cross_std_artifacts')).map(entry => entry.artifact);
+        return [...JSON.parse(context.inputs.get('cross_std_artifacts')).map(entry => entry.artifact),
+          ...[context.inputs.get('cross_std_artifact')].filter(Boolean)];
       }
       return [substitute(scalar(step, 'name'), inputs)];
     });
@@ -520,6 +525,10 @@ test('an omitted optional input reads the way Actions reads it, not as undefined
   const withCross = failClosedDownloads(consumer,
     new Map([...base, ['cross_std_artifacts', JSON.stringify([{tuple: 'windows_x86_64_cjnative', artifact: 'final-std-windows-x64'}])]]));
   assert.ok(withCross.includes(gated), `passing it should demand the artifact: ${withCross}`);
+
+  const legacy = failClosedDownloads(consumer, new Map([...base,
+    ['cross_std_artifact', gated], ['cross_std_tuple', 'windows_x86_64_cjnative']]));
+  assert.ok(legacy.includes(gated), 'legacy single tuple must still download its artifact');
 
   const withoutCross = failClosedDownloads(consumer, new Map(base));
   assert.ok(!withoutCross.includes(gated),

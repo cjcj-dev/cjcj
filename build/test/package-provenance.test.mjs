@@ -403,10 +403,10 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
     /PROVENANCE|RELEASE-MANIFEST/.test(line)).join('\n')}\nARCHIVE-PROVENANCE-END`);
   console.log(`RELEASE-MANIFEST-BEGIN\n${manifestText.trim()}\nRELEASE-MANIFEST-END`);
 
-  await t.test('Android archive consumes runtime and std through the release compose entry', async () => {
+  for (const mode of ['list', 'single']) await t.test(`Android archive consumes runtime and std through the release compose entry (${mode})`, async () => {
     // These are package-device fixture inputs, not acceptance of a real runtime/std build.
     const tuple = 'linux_android_aarch64_cjnative';
-    const crossRoot = path.join(root, 'cross artifacts');
+    const crossRoot = path.join(root, `cross artifacts ${mode}`);
     const crossStd = path.join(crossRoot, 'final-std-android-aarch64');
     for (const directory of ['modules', 'lib', 'runtime/lib']) {
       await fs.cp(path.join(std, directory, TUPLE), path.join(crossStd, directory, tuple), {recursive: true});
@@ -423,13 +423,15 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
     await fs.copyFile(path.join(shared, 'libcangjie-runtime.so'), path.join(shared, 'libboundscheck.so'));
     run('clang', ['--target=aarch64-linux-android23', '-c', runtimeSource, '-o', path.join(staticLib, 'cjstart.o')]);
     await writeCrossRuntimeManifest({root: crossRuntime, tuple, runtimeRef: RUNTIME_SHA});
-    const androidOut = path.join(root, 'android-dist');
+    const androidOut = path.join(root, `android-dist-${mode}`);
     const forwarded = finalArgs.slice(1);
     forwarded[forwarded.indexOf('--outdir') + 1] = androidOut;
     const result = runRaw('zx', [path.resolve('ci/release/compose-package.mjs'), '--cross-root', crossRoot,
       '--', ...forwarded, '--release-key', 'linux-x64-android'],
     {env: {...process.env, GITHUB_RUN_ID: 'fixture-run', GITHUB_RUN_ATTEMPT: '1',
-      CROSS_STD_ARTIFACTS: JSON.stringify([{tuple, artifact: 'final-std-android-aarch64'}])}});
+      CROSS_STD_ARTIFACTS: mode === 'list' ? JSON.stringify([{tuple, artifact: 'final-std-android-aarch64'}]) : '[]',
+      CROSS_STD_ARTIFACT: mode === 'single' ? 'final-std-android-aarch64' : '',
+      CROSS_STD_TUPLE: mode === 'single' ? tuple : ''}});
     const output = path.join(androidOut, 'cjcj-fixture-linux-x64-android');
     const names = [`runtime/lib/${tuple}/libcangjie-runtime.so`, `runtime/lib/${tuple}/libboundscheck.so`,
       `lib/${tuple}/cjstart.o`, `lib/${tuple}/libcangjie-std-core.a`, `runtime/lib/${tuple}/libcangjie-std-core.so`];
@@ -438,7 +440,7 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
       return bytes ? crypto.createHash('sha256').update(bytes).digest('hex') : 'MISSING';
     }));
     const expected = await Promise.all(names.map((name, index) => sha256(path.join(index < 3 ? crossRuntime : crossStd, name))));
-    console.log(`ASSERT_ANDROID_PACKAGE_BYTES rc=${result.status} observed=${JSON.stringify(observed)} expected=${JSON.stringify(expected)}`);
+    console.log(`ASSERT_ANDROID_PACKAGE_BYTES mode=${mode} rc=${result.status} observed=${JSON.stringify(observed)} expected=${JSON.stringify(expected)}`);
     assert.deepEqual(observed, expected, `real compose/package entry must carry Android inputs: ${result.stderr}`);
     assert.equal(result.status, 0, result.stdout + result.stderr);
     const archive = path.join(androidOut, 'cjcj-fixture-linux-x64-android.tar.gz');
