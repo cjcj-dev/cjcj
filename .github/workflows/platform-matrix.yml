@@ -49,8 +49,23 @@ jobs:
 
   colour-runtime:
     if: ${{ !inputs.std_evidence_only }}
-    name: Pinned Linux colour runtime
-    runs-on: ubuntu-22.04
+    name: Pinned Linux colour runtime (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            platform: linux_x86_64
+            language_pin: ci/h48_language_tuple_pin.json
+            diagnostics: colour-runtime-gate-diagnostics
+          - runner: ubuntu-22.04-arm
+            platform: linux_aarch64
+            language_pin: ci/colour-runtime/linux_aarch64.language-tuple.json
+            diagnostics: colour-runtime-gate-diagnostics-linux_aarch64
+    env:
+      COLOUR_RT_PLATFORM: ${{ matrix.platform }}
+      COLOUR_RT_LANGUAGE_PIN: ${{ matrix.language_pin }}
     steps:
       - uses: actions/checkout@v7
       - name: Load runtime pin
@@ -63,7 +78,7 @@ jobs:
       - uses: ./.github/actions/sccache
         with:
           component: runtime
-          platform: ubuntu-22.04
+          platform: ${{ matrix.runner }}
           pin: ${{ env.RUNTIME_REF }}
           cache-size: 1G
       - name: Fetch pinned H48 language tuple
@@ -71,7 +86,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           python3 ci/release/publish_language_tuple.py fetch \
-            --pin ci/h48_language_tuple_pin.json --output "$RUNNER_TEMP/h48-download"
+            --pin "$COLOUR_RT_LANGUAGE_PIN" --output "$RUNNER_TEMP/h48-download"
       - name: Provision native gate debugger
         run: |
           sudo apt-get update -qq
@@ -92,7 +107,7 @@ jobs:
             "$RUNNER_TEMP/h48-download/installed/tuple" "$RUNNER_TEMP/h48-active" \
             .platform-ci/runtime-install
       - name: Load same-generation AST SDK inputs
-        run: cat ci/ast_support/linux_x86_64.env >> "$GITHUB_ENV"
+        run: cat "ci/ast_support/$COLOUR_RT_PLATFORM.env" >> "$GITHUB_ENV"
       - uses: actions/download-artifact@v8
         with:
           artifact-ids: ${{ env.AST_SUPPORT_ARTIFACT_ID }}
@@ -110,16 +125,19 @@ jobs:
           # Use the exact published pair selected and verified by the gate.
           # The output layout also retains staging and earlier configurations.
           source "$RUNNER_TEMP/h48-active.env"
-          cp "$GCV2_RUNTIME_LIB_DIR/libboundscheck.so" .platform-ci/runtime-install/runtime/lib/linux_x86_64_cjnative/libboundscheck.so
+          cp "$GCV2_RUNTIME_LIB_DIR/libboundscheck.so" ".platform-ci/runtime-install/runtime/lib/${COLOUR_RT_PLATFORM}_cjnative/libboundscheck.so"
           node ci/release/colour_runtime.mjs .platform-ci/runtime-install colour-runtime
-          nm --defined-only colour-runtime/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so > colour-runtime/symbols.txt
+          so="colour-runtime/runtime/lib/${COLOUR_RT_PLATFORM}_cjnative/libcangjie-runtime.so"
+          sha256sum "$so" "colour-runtime/runtime/lib/${COLOUR_RT_PLATFORM}_cjnative/libboundscheck.so"
+          nm --defined-only "$so" > colour-runtime/symbols.txt
           test "$(grep -Ec ' g_cjLoadBadMask(@@?[^[:space:]]+)?$' colour-runtime/symbols.txt)" = 1
-          nm -D --defined-only colour-runtime/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so > colour-runtime/exports.txt
+          test "$(grep -Ec ' CJ_MCC_HandleReturnSafepoint(@@?[^[:space:]]+)?$' colour-runtime/symbols.txt)" = 1
+          nm -D --defined-only "$so" > colour-runtime/exports.txt
           test "$(grep -Ec ' g_cjLoadBadMask(@@?[^[:space:]]+)?$' colour-runtime/exports.txt)" = 1
       - uses: actions/upload-artifact@v7
         id: artifact
         with:
-          name: colour-runtime-linux_x86_64
+          name: colour-runtime-${{ matrix.platform }}
           path: colour-runtime/
           if-no-files-found: error
           retention-days: 7
@@ -139,7 +157,7 @@ jobs:
         uses: ./.github/actions/sccache-report
         with:
           component: runtime
-          platform: ubuntu-22.04
+          platform: ${{ matrix.runner }}
           require-compiles: ${{ job.status == 'success' }}
 
       - name: Report runtime gate log availability
@@ -160,10 +178,10 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: colour-runtime-gate-diagnostics
+          name: ${{ matrix.diagnostics }}
           path: |
             ci/runtime_pin.env
-            ci/h48_language_tuple_pin.json
+            ${{ matrix.language_pin }}
             ${{ runner.temp }}/h48-active.env
             ${{ steps.runtime-build.outcome == 'failure' && '.platform-ci/runtime-gate-diagnostics/' || '' }}
             runtime-source/runtime/**/gate_run.log

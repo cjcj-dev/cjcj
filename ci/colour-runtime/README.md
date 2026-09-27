@@ -1,12 +1,13 @@
 # Bootstrap colour runtime artifacts
 
-`platform-matrix.yml` publishes `colour-runtime-linux_x86_64` from the exact
+`platform-matrix.yml` produces `colour-runtime-linux_x86_64` and
+`colour-runtime-linux_aarch64` on native Ubuntu 22.04 runners from the exact
 `ci/runtime_pin.env` revision. Dispatch with `runtime_only=true` to build that
 input alone. The producer uses Ubuntu 22.04, matching the source SDK cell, and
 RelWithDebInfo so the full symbol table remains available for verification.
 
 Copy the four `COLOUR_RT_*` values printed by the successful producer into
-`linux_x86_64.env`. `COLOUR_RT_MANIFEST_SHA256` pins `manifest.json`, which binds
+matching `linux_*.env`. `COLOUR_RT_MANIFEST_SHA256` pins `manifest.json`, which binds
 the runtime source revision, platform, run ID/attempt, and every required library
 SHA256. The source workflow downloads by run ID and artifact ID, then validates
 the manifest and payloads before exporting the runtime path. A changed runtime
@@ -18,7 +19,12 @@ published configuration selected by the installed runtime digest and verified
 by the runtime's output resolver. Staging and earlier configurations are not
 package inputs. Files are copied, never linked.
 
-The producer fetches the pinned H48 prerelease in `ci/h48_language_tuple_pin.json`.
+The producer selects its language tuple through `COLOUR_RT_LANGUAGE_PIN`.
+The x86_64 job currently names `ci/h48_language_tuple_pin.json`; the aarch64
+job requires `ci/colour-runtime/linux_aarch64.language-tuple.json` from the
+matching tuple publisher. The latter pin is not present yet: #135 must publish
+matching native compiler/std inputs before either new runtime pin is accepted.
+Do not copy the x86_64 tuple pin into the aarch64 slot.
 Its native build runs the existing gate in `defer` mode, then
 `ci/release/gate_colour_runtime.sh` activates a private SDK with the same target
 pair and runs the complete gate in `all` mode before packaging. The H48 compiler
@@ -30,5 +36,8 @@ teardown proof. H48's partial source provenance remains documented in
 Artifacts expire after seven days. `release.json` records the matching
 prerelease (tag, asset IDs, archive and manifest digests). Consumers still
 download the exact Actions artifact named in the platform env. There is no
-SDK/depot fallback. Linux aarch64, Darwin and Windows have no producer in
-`platform-matrix.yml` and are not published by this pin.
+SDK/depot fallback. The checked-in release still describes the old x86_64
+artifact; it does not certify the new matrix or aarch64. Update it only after
+the complete gate, coloured std rebuild and symbol checks succeed, and the
+source workflow resolves the matching inputs. Darwin and Windows are outside
+this Linux producer.
