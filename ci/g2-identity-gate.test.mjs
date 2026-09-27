@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -369,7 +370,7 @@ test('capture records a dirty build truthfully instead of laundering it', async 
 
 // Like the packaged-std P05 contract, count production workflow invocations,
 // not mentions in tests, comments, or the capture command's usage text.
-test('G2 identity capture has exactly one workflow consumer', async () => {
+test('G2 identity capture has exactly one workflow consumer', async t => {
   const workflows = path.join(repo, '.github', 'workflows');
   const consumers = [];
   for (const name of (await fs.readdir(workflows)).sort()) {
@@ -380,4 +381,57 @@ test('G2 identity capture has exactly one workflow consumer', async () => {
   }
   assert.equal(consumers.length, 1,
     `G2_WORKFLOW_CONSUMERS: expected exactly one capture invocation; found ${JSON.stringify(consumers)}`);
+
+  // Execute the workflow's actual run block, with SDK-shaped fixture files.
+  // No copy of the capture implementation or hand-written invocation lives here.
+  const source = await fs.readFile(path.join(workflows, consumers[0]), 'utf8');
+  const step = source.split(/^      - name:/m)
+    .find(value => /^[ \t]*node ci\/capture-g2-identity\.mjs[ \t]/m.test(value));
+  const lines = step.split('\n');
+  const runStart = lines.indexOf('        run: |');
+  assert.ok(runStart >= 0, 'capture workflow must expose its shell run block');
+  const body = [];
+  for (const line of lines.slice(runStart + 1)) {
+    if (line && !line.startsWith('          ')) break;
+    body.push(line.slice(10));
+  }
+  const state = await fixture(t);
+  await writeIdentity(state, skeleton());
+  const files = await artifactSet(state);
+  const workspace = path.join(state.campaign, 'workspace');
+  const sdk = path.join(workspace, 'software', 'cangjie');
+  const locations = {
+    runtime_dynamic: 'runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so',
+    runtime_static: 'lib/linux_x86_64_cjnative/libcangjie-runtime.a',
+    llvm_llc: 'third_party/llvm/bin/llc',
+    llvm_opt: 'third_party/llvm/bin/opt',
+    cjcj: 'bin/cjc',
+    std: 'lib/linux_x86_64_cjnative/libcangjie-std-core.a',
+  };
+  const expected = {};
+  for (const name of ARTIFACT_NAMES) {
+    const destination = path.join(sdk, locations[name]);
+    const bytes = await fs.readFile(files[name]);
+    await fs.mkdir(path.dirname(destination), {recursive: true});
+    await fs.copyFile(files[name], destination);
+    const commit = name.startsWith('runtime_') ? state.runtimePin
+      : name.startsWith('llvm_') ? LLVM_SHA : name === 'cjcj' ? CJCJ_SHA : STD_SHA;
+    expected[name] = {
+      artifact_path: destination,
+      sha256: crypto.createHash('sha256').update(bytes).digest('hex'),
+      provenance_stamp: `${STAMP_PREFIXES[name]}:${commit}`,
+      source_commit: commit,
+      source_dirty: false,
+    };
+  }
+  const result = run('bash', ['-e', '-o', 'pipefail', '-c', body.join('\n')], {
+    cwd: repo,
+    env: {...process.env, CANGJIE_WORKSPACE: workspace,
+      G2_IDENTITY: path.join(state.campaign, 'G2_IDENTITY.json')},
+  });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const captured = await readIdentity(state);
+  assert.deepEqual(captured.artifacts, expected, 'G2_WORKFLOW_CAPTURE: persist all six measured SDK identities');
+  assert.equal(captured.status, 'READY');
+  assert.match(captured.captured_utc, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
 });

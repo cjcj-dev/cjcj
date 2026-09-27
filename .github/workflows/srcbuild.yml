@@ -209,6 +209,27 @@ jobs:
           CJCJ_ALLOW_RUNTIME_OVERRIDE: ${{ inputs.dry_run && inputs.runtime_ref != '' }}
         run: npx --yes zx@8 ci/load_runtime_pin.mjs
 
+      # G2 describes the canonical Linux x64 SDK. Freeze while the checkout
+      # is clean; later build steps create files and inject the product version.
+      - name: Freeze G2 identity inputs
+        if: matrix.target == 'linux-x64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          GITHUB_ENV="$RUNNER_TEMP/g2-base.env" node ci/release/prepare_base_sdk.mjs \
+            --platform linux-x64 --toolchain "$CJCJ_TOOLCHAIN" \
+            --outdir "$RUNNER_TEMP/g2-base-sdk"
+          source "$RUNNER_TEMP/g2-base.env"
+          node ci/generate-freeze.mjs \
+            --base-sdk "$BASE_SDK_ARCHIVE" \
+            --workflow-ref "$GITHUB_SHA" \
+            --evidence-root "$RUNNER_TEMP/g2-campaigns" \
+            | tee "$RUNNER_TEMP/g2-freeze.log"
+          identity=$(sed -n 's/^G2_IDENTITY=//p' "$RUNNER_TEMP/g2-freeze.log")
+          test -f "$identity"
+          echo "G2_IDENTITY=$identity" >> "$GITHUB_ENV"
+          echo "G2_CAMPAIGN_DIR=$(dirname "$identity")" >> "$GITHUB_ENV"
+
       - name: Provision uncoloured host SDK
         shell: bash
         run: |
@@ -678,6 +699,31 @@ jobs:
         env:
           SOURCE_SDK_VERSION: ${{ steps.version.outputs.value }}
         run: npx --yes zx@8 ci/srcbuild/steps/compose-sdk.mjs
+
+      - name: Capture G2 SDK identity
+        if: matrix.target == 'linux-x64'
+        timeout-minutes: 2
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdk="$CANGJIE_WORKSPACE/software/cangjie"
+          node ci/capture-g2-identity.mjs \
+            --identity "$G2_IDENTITY" \
+            --runtime-dynamic "$sdk/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so" \
+            --runtime-static "$sdk/lib/linux_x86_64_cjnative/libcangjie-runtime.a" \
+            --llvm-llc "$sdk/third_party/llvm/bin/llc" \
+            --llvm-opt "$sdk/third_party/llvm/bin/opt" \
+            --cjcj "$sdk/bin/cjc" \
+            --std "$sdk/lib/linux_x86_64_cjnative/libcangjie-std-core.a"
+
+      - name: Retain G2 campaign identity
+        if: always() && matrix.target == 'linux-x64' && env.G2_IDENTITY != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: g2-identity-linux-x64-${{ github.run_attempt }}
+          path: ${{ env.G2_CAMPAIGN_DIR }}
+          if-no-files-found: error
+          retention-days: 90
 
       - name: Archive final compiler handoff
         run: tar -C "$CANGJIE_WORKSPACE/software/final-compiler" -czf "$CANGJIE_WORKSPACE/software/final-compiler.tar.gz" .
