@@ -59,7 +59,7 @@ try {
   for (const tag of ['220107', '220108']) {
     // Change only fixture implementation names, never contract names.
     const abiNames = raw.map((name) => expected.includes(name) ? name : name.replaceAll('220108', tag));
-    abiNames.push(`_ZNSt3__1fixtureB${tag}Ev`);
+    abiNames.push(`_ZNSt3__17fixtureB9nqn${tag}Ev`);
     await run(`implementation-abi-${tag}`, abiNames, 0);
   }
   for (const symbol of expected) {
@@ -110,7 +110,7 @@ try {
     }
     // Give one noncontract implementation export two different ABI tags.
     // Reuse its PE name storage; neither variant touches a caller-contract name.
-    const abiTemplate = '_ZNSt3__1fixtureB220108Ev';
+    const abiTemplate = '_ZNSt3__17fixtureB9nqn220108Ev';
     const implementation = [...offsets].find(([name]) =>
       !expected.includes(name) && name.length >= abiTemplate.length);
     if (!implementation) throw new Error('native ABI control requires an implementation export');
