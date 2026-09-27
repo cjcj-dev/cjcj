@@ -54,8 +54,8 @@ jobs:
         shell: pwsh
         run: |
           # MSYS2's login profile removes USERPROFILE, but native ccache needs it.
-          $profile = $env:USERPROFILE.Replace('\', '/')
-          "export USERPROFILE='$profile'" | Set-Content -Encoding utf8 C:/msys64/etc/profile.d/runtime-export-contract.sh
+          $cacheHome = $env:USERPROFILE.Replace('\', '/')
+          "export USERPROFILE='$cacheHome'" | Set-Content -NoNewline -Encoding utf8 C:/msys64/etc/profile.d/runtime-export-contract.sh
       - name: Build through the production MINGW64 entry
         shell: bash
         run: npx --yes zx@8 ci/platform_matrix/build_runtime.mjs
