@@ -10,7 +10,7 @@ on:
       runtime_ref:
         description: Runtime commit providing the generated caller contract
         required: true
-        default: 1d0c8be495d4b6378fefbd27fb08135b3db288fd
+        default: 1a14f0a8ccb685038729d8ca221768884beb5654
         type: string
 
 permissions:
@@ -18,11 +18,11 @@ permissions:
 
 jobs:
   native-contract:
-    runs-on: windows-latest
+    runs-on: windows-2025
     timeout-minutes: 45
     env:
       # Fixed integration fixture: runtime's reviewed caller-contract producer.
-      RUNTIME_REF: ${{ inputs.runtime_ref || '1d0c8be495d4b6378fefbd27fb08135b3db288fd' }}
+      RUNTIME_REF: ${{ inputs.runtime_ref || '1a14f0a8ccb685038729d8ca221768884beb5654' }}
       RUNTIME_TARGET: windows-x86_64
     steps:
       - uses: actions/checkout@v7
@@ -48,6 +48,7 @@ jobs:
             mingw-w64-x86_64-gcc
             mingw-w64-x86_64-libc++
             mingw-w64-x86_64-libunwind
+            mingw-w64-x86_64-lld
             mingw-w64-x86_64-ninja
             mingw-w64-x86_64-python
       - name: Preserve the native cache home through the MSYS2 login shell
