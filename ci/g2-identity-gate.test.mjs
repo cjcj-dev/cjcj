@@ -385,11 +385,17 @@ test('G2 identity capture has exactly one workflow consumer', async t => {
   // Execute the workflow's actual run block, with SDK-shaped fixture files.
   // No copy of the capture implementation or hand-written invocation lives here.
   const source = await fs.readFile(path.join(workflows, consumers[0]), 'utf8');
-  // FREEZE's base SDK is the package input, which can differ from the
-  // source compiler's nightly host. Keep the pin at its existing owner.
-  assert.ok(source.includes("sed -n 's/^  RELEASE_HOST_TOOLCHAIN: //p' .github/workflows/build-release-package.yml"));
-  assert.ok(source.includes('--platform linux-x64 --toolchain "$release_base"'));
-  assert.ok(source.indexOf('- name: Freeze G2 identity inputs') < source.indexOf('- name: Provision uncoloured host SDK'));
+  // FREEZE's base SDK is the host toolchain this job provisions for itself:
+  // an input the workflow already produces, so the freeze is reachable in
+  // every real run and downloads nothing extra (cjcj#556).
+  assert.ok(source.indexOf('- name: Provision uncoloured host SDK') < source.indexOf('- name: Freeze G2 identity inputs'));
+  const freezeStep = source.split(/^      - name:/m)
+    .find(value => /^[ \t]*node ci\/generate-freeze\.mjs[ \t]/m.test(value));
+  assert.ok(freezeStep, 'G2_WORKFLOW_FREEZE: workflow must generate the campaign skeleton');
+  assert.ok(freezeStep.includes('tar -cf "$base_archive" -C "$CJCJ_SRCBUILD_HOST_SDK" .'));
+  assert.ok(freezeStep.includes('--base-sdk "$base_archive"'));
+  assert.ok(!freezeStep.includes('prepare_base_sdk'), 'G2_WORKFLOW_FREEZE: no network download feeds the freeze');
+  assert.ok(source.indexOf('- name: Freeze G2 identity inputs') < source.indexOf('- name: Compose self-hosted SDK'));
   assert.ok(source.indexOf('- name: Compose self-hosted SDK') < source.indexOf('- name: Capture G2 SDK identity'));
   assert.ok(source.indexOf('- name: Capture G2 SDK identity') < source.indexOf('- name: Retain G2 campaign identity'));
   const step = source.split(/^      - name:/m)
