@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import {prepareRuntime, digest as runtimeDigest, runtimeFiles} from './colour_runtime.mjs';
+import {prepareRuntime, digest as runtimeDigest, runtimeFilesFor, runtimePlatform} from './colour_runtime.mjs';
 import {spawnSync} from 'node:child_process';
 
 export function fixture(check, target = 'linux-x64') {
@@ -50,17 +50,18 @@ export function fixture(check, target = 'linux-x64') {
     env.CJCJ_BOOTSTRAP_HOST_LLVM_ARTIFACT = hostArtifact;
     const runtimeSource = path.join(dir, 'runtime-source');
     const runtime = path.join(dir, 'runtime');
-    for (const rel of runtimeFiles) {
+    const platform = runtimePlatform(env);
+    for (const rel of runtimeFilesFor(platform)) {
       fs.mkdirSync(path.dirname(path.join(runtimeSource, rel)), {recursive: true});
       fs.writeFileSync(path.join(runtimeSource, rel), `fixture ${rel}`);
     }
-    for (const rel of ['lib/linux_x86_64_cjnative/libcangjie-std-core.a', 'runtime/lib/linux_x86_64_cjnative/libcangjie-std-core.so', 'lib/libstdFFI.so', 'modules/linux_x86_64_cjnative/std.core.cjo']) {
+    for (const rel of [`lib/${platform}_cjnative/libcangjie-std-core.a`, `runtime/lib/${platform}_cjnative/libcangjie-std-core.so`, 'lib/libstdFFI.so', `modules/${platform}_cjnative/std.core.cjo`]) {
       fs.mkdirSync(path.dirname(path.join(runtimeSource, rel)), {recursive: true});
       fs.writeFileSync(path.join(runtimeSource, rel), `new std fixture ${rel}`);
     }
     env.RUNTIME_REF = 'd'.repeat(40);
     fs.writeFileSync(path.join(runtimeSource, 'SOURCE_SHA'), env.RUNTIME_REF);
-    prepareRuntime(runtimeSource, runtime, {RUNTIME_REF: env.RUNTIME_REF,
+    prepareRuntime(runtimeSource, runtime, {RUNTIME_REF: env.RUNTIME_REF, COLOUR_RT_PLATFORM: platform,
       GITHUB_RUN_ID: '123', GITHUB_RUN_ATTEMPT: '1'});
     Object.assign(env, {CJCJ_BOOTSTRAP_COLOUR_RT: runtime, COLOUR_RT_RUN_ID: '123',
       COLOUR_RT_RUN_ATTEMPT: '1', COLOUR_RT_ARTIFACT_ID: '456',

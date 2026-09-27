@@ -7,11 +7,13 @@ tuple=$(realpath "${2:?verified tuple}")
 active=$(realpath -m "${3:?new private SDK directory}")
 installed=$(realpath "${4:?runtime install root}")
 repo=$(cd "$(dirname "$0")/../.." && pwd)
-pin="$repo/ci/h48_language_tuple_pin.json"
+platform=${COLOUR_RT_PLATFORM:-linux_x86_64}
+pin=${COLOUR_RT_LANGUAGE_PIN:-$repo/ci/h48_language_tuple_pin.json}
+[[ "$pin" = /* ]] || pin="$repo/$pin"
 
 # Select the build that produced the installed SO, then let its own resolver
 # validate both published files. No other configuration may satisfy the gate.
-installed_sha=$(sha256sum "$installed/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so" | cut -d' ' -f1)
+installed_sha=$(sha256sum "$installed/runtime/lib/${platform}_cjnative/libcangjie-runtime.so" | cut -d' ' -f1)
 manifests=()
 for manifest in "$source_root"/runtime/output/temp/*/runtime-build-config.txt; do
   [[ -f "$manifest" ]] || continue

@@ -3,11 +3,20 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 
-export const runtimeFiles = [
-  'runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so',
-  'runtime/lib/linux_x86_64_cjnative/libboundscheck.so',
-  'lib/linux_x86_64_cjnative/libcangjie-runtime.a',
+export function runtimePlatform(env = process.env) {
+  const target = {'linux-x64': 'linux_x86_64', 'linux-aarch64': 'linux_aarch64'}[env.CJCJ_SRCBUILD_TARGET];
+  const platform = env.COLOUR_RT_PLATFORM || target || 'linux_x86_64';
+  if (!['linux_x86_64', 'linux_aarch64'].includes(platform) || (target && platform !== target)) {
+    throw new Error('COLOUR_RT_PLATFORM_MISMATCH');
+  }
+  return platform;
+}
+export const runtimeFilesFor = platform => [
+  `runtime/lib/${platform}_cjnative/libcangjie-runtime.so`,
+  `runtime/lib/${platform}_cjnative/libboundscheck.so`,
+  `lib/${platform}_cjnative/libcangjie-runtime.a`,
 ];
+export const runtimeFiles = runtimeFilesFor('linux_x86_64');
 export const digest = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 function regularFile(root, relative) {
   let current = root;
@@ -19,6 +28,7 @@ function regularFile(root, relative) {
   return current;
 }
 export function prepareRuntime(source, dest, env = process.env) {
+  const platform = runtimePlatform(env);
   const sourceSha = fs.readFileSync(path.join(source, 'SOURCE_SHA'), 'utf8').trim();
   if (!/^[a-f0-9]{40}$/.test(env.RUNTIME_REF || '') || sourceSha !== env.RUNTIME_REF) {
     throw new Error('COLOUR_RT_SOURCE_MISMATCH');
@@ -34,19 +44,19 @@ export function prepareRuntime(source, dest, env = process.env) {
   }
   const stdFiles = [...walk(path.join(source, 'lib')), ...walk(path.join(source, 'runtime/lib'))]
     .filter(rel => /^(libcangjie-std-|lib.*FFI\.)/.test(path.basename(rel)));
-  if (!stdFiles.includes('lib/linux_x86_64_cjnative/libcangjie-std-core.a')) {
+  if (!stdFiles.includes(`lib/${platform}_cjnative/libcangjie-std-core.a`)) {
     throw new Error('COLOUR_RT_STD_MISSING');
   }
   const moduleFiles = walk(path.join(source, 'modules'));
   const files = {};
-  for (const rel of [...runtimeFiles, ...stdFiles, ...moduleFiles]) {
+  for (const rel of [...runtimeFilesFor(platform), ...stdFiles, ...moduleFiles]) {
     const input = regularFile(source, rel);
     const output = path.join(dest, rel);
     fs.mkdirSync(path.dirname(output), {recursive: true});
     fs.copyFileSync(input, output);
     files[rel] = digest(output);
   }
-  const manifest = {runtime_sha: sourceSha, platform: 'linux_x86_64',
+  const manifest = {runtime_sha: sourceSha, platform,
     run_id: env.GITHUB_RUN_ID, run_attempt: env.GITHUB_RUN_ATTEMPT, files};
   fs.writeFileSync(path.join(dest, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
   const sha = digest(path.join(dest, 'manifest.json'));
@@ -54,6 +64,7 @@ export function prepareRuntime(source, dest, env = process.env) {
   console.log(`COLOUR_RT_MANIFEST_SHA256=${sha}`);
 }
 export function verifyRuntime(env = process.env) {
+  const platform = runtimePlatform(env);
   const root = env.CJCJ_BOOTSTRAP_COLOUR_RT;
   if (!root) throw new Error('COLOUR_RT_INPUT_MISSING');
   if (!/^\d+$/.test(env.COLOUR_RT_RUN_ID || '') || !/^\d+$/.test(env.COLOUR_RT_ARTIFACT_ID || '')
@@ -64,11 +75,11 @@ export function verifyRuntime(env = process.env) {
     throw new Error(`COLOUR_RT_SHA256_MISMATCH expected=${pin} actual=${actual}`);
   }
   const manifest = JSON.parse(fs.readFileSync(path.join(root, 'manifest.json'), 'utf8'));
-  if (manifest.runtime_sha !== env.RUNTIME_REF || manifest.platform !== 'linux_x86_64'
+  if (manifest.runtime_sha !== env.RUNTIME_REF || manifest.platform !== platform
       || manifest.run_id !== env.COLOUR_RT_RUN_ID || manifest.run_attempt !== env.COLOUR_RT_RUN_ATTEMPT) {
     throw new Error('COLOUR_RT_MANIFEST_MISMATCH');
   }
-  for (const rel of new Set([...runtimeFiles, ...Object.keys(manifest.files || {})])) {
+  for (const rel of new Set([...runtimeFilesFor(platform), ...Object.keys(manifest.files || {})])) {
     if (digest(regularFile(root, rel)) !== manifest.files?.[rel]) {
       throw new Error(`COLOUR_RT_FILE_SHA256_MISMATCH: ${rel}`);
     }
