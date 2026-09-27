@@ -123,8 +123,6 @@ def run_suite(suite, test, framework, output, env, jobs, scratch=None, compiler_
         command = [sys.executable, str(framework / 'main.py'),
                    '--test_cfg', str(test / 'testsuites' / suite / cfg),
                    '-j', str(jobs), '--timeout=180', '--fail_exit',
-                   '-C', 'compiler=cjc --jobs=' + str(compiler_jobs),
-                   '-C', 'cjc=cjc --jobs=' + str(compiler_jobs),
                    '--progress=silent', '--json_output', str(out / 'results.json'),
                    '--test_list', str(test / 'testsuites' / suite / ('testlist' if suite == 'HLT' else 'cjnative_testlist')),
                    '--output', str(out / 'results.txt'), '--temp_dir', str(bulk / 'temp'),
@@ -158,7 +156,7 @@ def main():
     parser.add_argument('--inputs', type=Path, required=True,
                         help='directory containing pinned cangjie_test and cangjie_test_framework')
     parser.add_argument('--compiler-jobs', type=int, choices=(1, 2), default=1,
-                        help='default direct compiler parallelism (explicit test options are retained)')
+                        help='Conformance compiler parallelism; Maple uses unmodified test options inside CPU scope')
     parser.add_argument('--scratch', type=Path,
                         help='separate bulk directory for work/temp/log dirs (results stay in output)')
     parser.add_argument('--suites', default='Conformance,HLT,LLT',
