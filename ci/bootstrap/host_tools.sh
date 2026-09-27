@@ -10,6 +10,7 @@ HOST_LLVM_LIBRARY=libLLVM-15.so
 HOST_LINKER=ld.lld
 HOST_LOADER_VAR=LD_LIBRARY_PATH
 HOST_LAYOUT_OS=linux
+HOST_SYSTEM_PATH=/usr/bin:/bin
 HOST_SHA256_COMMAND=sha256sum
 if [ "$HOST_OS" = Darwin ]; then
   HOST_DYNSYM_RULER=native-nm-defined
@@ -18,6 +19,7 @@ if [ "$HOST_OS" = Darwin ]; then
   HOST_LINKER=ld64.lld
   HOST_LOADER_VAR=DYLD_LIBRARY_PATH
   HOST_LAYOUT_OS=darwin
+  HOST_SYSTEM_PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
   HOST_SHA256_COMMAND=gsha256sum
 fi
 host_file_tool() {

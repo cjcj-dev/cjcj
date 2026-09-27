@@ -357,7 +357,7 @@ jobs:
 
       - name: Install native bootstrap file tools
         if: runner.os == 'macOS'
-        run: brew install coreutils findutils gnu-tar
+        run: brew install bash coreutils findutils gnu-tar
 
       - name: Load pinned colour runtime provenance
         shell: bash
@@ -378,6 +378,19 @@ jobs:
           github-token: ${{ github.token }}
           run-id: ${{ env.COLOUR_RT_RUN_ID }}
           path: ${{ env.CJCJ_BOOTSTRAP_COLOUR_RT }}
+
+      - name: Verify independent Darwin seed libraries
+        if: runner.os == 'macOS'
+        env:
+          RUNTIME_PLATFORM: ${{ matrix.llvm_platform }}
+        run: node ci/release/darwin_runtime.mjs verify "$CJCJ_BOOTSTRAP_COLOUR_RT" "$RUNTIME_PLATFORM"
+
+      - name: Acquire the registered native coloured std
+        if: runner.os == 'macOS'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RUNTIME_PLATFORM: ${{ matrix.llvm_platform }}
+        run: node ci/release/acquire_darwin_std.mjs "$CJCJ_BOOTSTRAP_COLOUR_RT" "$RUNTIME_PLATFORM"
 
       - name: Verify independent Darwin libraries and classify std input
         if: runner.os == 'macOS'
@@ -727,8 +740,8 @@ jobs:
           sdk="$CANGJIE_WORKSPACE/software/cangjie"
           node ci/capture-g2-identity.mjs \
             --identity "$G2_IDENTITY" \
-            --runtime-dynamic "$sdk/runtime/lib/${RUNTIME_PLATFORM}_cjnative/libcangjie-runtime.${HOST_LIB_EXT}" \
-            --runtime-static "$sdk/lib/${RUNTIME_PLATFORM}_cjnative/libcangjie-runtime.a" \
+            --runtime-dynamic "$sdk/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so" \
+            --runtime-static "$sdk/lib/linux_x86_64_cjnative/libcangjie-runtime.a" \
             --llvm-llc "$sdk/third_party/llvm/bin/llc" \
             --llvm-opt "$sdk/third_party/llvm/bin/opt" \
             --cjcj "$sdk/bin/cjc" \

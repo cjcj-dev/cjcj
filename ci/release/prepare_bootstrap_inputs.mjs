@@ -3,10 +3,12 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import {fileURLToPath} from 'node:url';
 import {acquire} from './bootstrap_store.mjs';
 import {verifyRuntime} from './colour_runtime.mjs';
 import {prepareCppHeaders} from '../bootstrap/prepare_cpp_headers.mjs';
 import {prepareHostLlvm} from './host_llvm.mjs';
+import {nativeTuplePin} from './native_tuple_pin.mjs';
 
 function sha256File(file) {
   return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
@@ -42,6 +44,8 @@ function findFile(root, predicate) {
   return undefined;
 }
 
+// Source consumers verify a complete runtime/std pair; the std producer verifies its seed libraries.
+export async function prepareBootstrapInputs(verifyRuntimeInput) {
 // Native Darwin has no implicit Linux depot input. Reject before acquisition.
 if ((process.env.CJCJ_SRCBUILD_TARGET || process.platform).startsWith('darwin')
     && !process.env.CJCJ_BOOTSTRAP_DYLIB_ARTIFACT && !process.env.CJCJ_BOOTSTRAP_COLOUR_DYLIB) {
@@ -70,7 +74,12 @@ const astSupport = pinnedInput(process.env.CJCJ_BOOTSTRAP_AST_ARTIFACT, [
 
 const pinPath = process.env.CJCJ_BOOTSTRAP_INPUTS_PIN
   || new URL('../bootstrap_inputs_pin.json', import.meta.url);
-const inputPin = JSON.parse(fs.readFileSync(pinPath, 'utf8'));
+const inputConfig = JSON.parse(fs.readFileSync(pinPath, 'utf8'));
+const target = process.env.CJCJ_SRCBUILD_TARGET || `${process.platform}-${process.arch}`;
+const nativePlatform = {'darwin-arm64': 'darwin_aarch64', 'darwin-x64': 'darwin_x86_64'}[target];
+const inputPin = nativePlatform && !process.env.CJCJ_BOOTSTRAP_INPUTS_PIN
+  ? nativeTuplePin(inputConfig, nativePlatform) : inputConfig;
+const tupleSumsPin = inputPin.sums_sha256 || process.env.LLVM_TUPLE_SUMS_SHA || '';
 const colourTuple = await acquire(inputPin,
   process.env.CJCJ_BOOTSTRAP_INPUTS_WORK || path.join(process.env.RUNNER_TEMP || buildRoot || '.', 'bootstrap-inputs'), {
     mode: process.env.CJCJ_BOOTSTRAP_SOURCE || 'release',
@@ -80,12 +89,12 @@ const colourTuple = await acquire(inputPin,
   });
 // The pin is reviewed source, never a digest learned from this run's download.
 const tupleSums = path.join(colourTuple, 'SHA256SUMS');
-if (!/^[0-9a-f]{64}$/.test(process.env.LLVM_TUPLE_SUMS_SHA || '')
-    || sha256File(tupleSums) !== process.env.LLVM_TUPLE_SUMS_SHA) {
+if (!/^[0-9a-f]{64}$/.test(tupleSumsPin)
+    || sha256File(tupleSums) !== tupleSumsPin) {
   throw new Error(`colour tuple SHA256SUMS disagrees with ci/llvm_pin.env: ${colourTuple}`);
 }
 
-const colourRt = verifyRuntime();
+const colourRt = verifyRuntimeInput();
 
 const llvmSha = process.env.LLVM_SHA || '';
 if (!/^[0-9a-f]{40}$/.test(llvmSha)) throw new Error('LLVM_SHA pin missing');
@@ -159,3 +168,9 @@ if (process.env.GITHUB_ENV) {
   fs.appendFileSync(process.env.GITHUB_ENV, `${lines.join('\n')}\n`);
 }
 for (const line of lines) console.log(line);
+
+}
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  await prepareBootstrapInputs(verifyRuntime);
+}

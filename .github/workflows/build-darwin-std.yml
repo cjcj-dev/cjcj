@@ -1,0 +1,233 @@
+name: Native Darwin coloured std producer
+on:
+  push:
+    paths: [.github/workflows/build-darwin-std.yml]
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: read
+jobs:
+  std:
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: darwin-arm64
+            llvm_platform: darwin_aarch64
+            runner: macos-15
+          - target: darwin-x64
+            llvm_platform: darwin_x86_64
+            runner: macos-15-intel
+    env:
+      CANGJIE_WORKSPACE: ${{ github.workspace }}/.srcbuild/workspace
+      CANGJIE_BUILD_ROOT: ${{ github.workspace }}/.srcbuild/buildtools
+      CJCJ_SRCBUILD_TARGET: ${{ matrix.target }}
+      cjHeapSize: 12GB
+      cjHeapSwap: "on"
+    steps:
+      - uses: actions/checkout@v7
+      - name: Require a registered native static tuple before building
+        env:
+          TUPLE_PLATFORM: ${{ matrix.llvm_platform }}
+        run: node ci/release/native_tuple_pin.mjs
+
+      - name: Load host toolchain pin
+        run: cat ci/host_sdk_pin.env >> "$GITHUB_ENV"
+
+      - name: Load source pins
+        run: |
+          cat ci/source_pin.env >> "$GITHUB_ENV"
+          cat ci/llvm_pin.env >> "$GITHUB_ENV"
+
+      - name: Load and validate runtime pin
+        run: npx --yes zx@8 ci/load_runtime_pin.mjs
+
+      - name: Provision uncoloured host SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          export CJCJ_SDK_STOCK_LLC=1
+          npx --yes zx@8 ci/setup_sdk.mjs
+          host_sdk="$HOME/.cjv/toolchains/$CJCJ_TOOLCHAIN"
+          test -d "$host_sdk"
+          echo "CJCJ_SRCBUILD_BOOTSTRAP_SDK=$host_sdk" >> "$GITHUB_ENV"
+          echo "CJCJ_SRCBUILD_HOST_SDK=$host_sdk" >> "$GITHUB_ENV"
+
+      - name: Install build dependencies
+        run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" install-system-deps
+
+      - name: Start sccache
+        uses: ./.github/actions/sccache
+        with:
+          component: srcbuild
+          platform: ${{ matrix.target }}
+          pin: ${{ env.RUNTIME_REF }}
+          cache-size: 2G
+
+      - name: Generate SDK version
+        id: version
+        env:
+          REQUESTED_REF: ''
+        run: |
+          value=$(npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" --cangjie-version "$REQUESTED_REF" print-version)
+          echo "value=$value" >> "$GITHUB_OUTPUT"
+
+      - name: Download pinned source
+        run: |
+          npx --yes zx@8 build/cli.mjs \
+            --target "${{ matrix.target }}" \
+            --build-type "relwithdebinfo" \
+            --cangjie-version "${{ steps.version.outputs.value }}" \
+            fetch \
+            --repo-url "compiler=$CANGJIE_COMPILER_URL" \
+            --repo-tag "compiler=$CANGJIE_COMPILER_SHA" \
+            --repo-url "runtime=$RUNTIME_SRC_URL" \
+            --repo-tag "runtime=$RUNTIME_REF" \
+            --repo-url "tools=$TOOLS_SRC_URL" \
+            --repo-tag "tools=$TOOLS_REF" \
+            --repo-url "stdx=$STDX_SRC_URL" \
+            --repo-tag "stdx=$STDX_REF"
+
+      - name: Verify source revisions
+        run: npx --yes zx@8 ci/srcbuild/steps/verify-source-pins.mjs
+
+      - name: Load immutable bootstrap host LLVM provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          node ci/release/host_llvm.mjs env >> "$GITHUB_ENV"
+          echo "CJCJ_BOOTSTRAP_HOST_LLVM_ARTIFACT=$RUNNER_TEMP/bootstrap-host-llvm" >> "$GITHUB_ENV"
+
+      - name: Download pinned bootstrap host LLVM
+        uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ env.HOST_LLVM_ARTIFACT_ID }}
+          merge-multiple: true
+          github-token: ${{ github.token }}
+          run-id: ${{ env.HOST_LLVM_RUN_ID }}
+          path: ${{ env.CJCJ_BOOTSTRAP_HOST_LLVM_ARTIFACT }}
+
+      - name: Load immutable in-process LLVM dylib provenance
+        if: runner.os == 'Linux' || runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          source ci/llvm_pin.env
+          source "ci/llvm-dylib/${{ matrix.llvm_platform }}.env"
+          test "$LLVM_DYLIB_SOURCE_SHA" = "$LLVM_SHA"
+          test -n "$LLVM_DYLIB_RUN_ID"
+          test -n "$LLVM_DYLIB_RUN_ATTEMPT"
+          test -n "$LLVM_DYLIB_ARTIFACT_ID"
+          cat "ci/llvm-dylib/${{ matrix.llvm_platform }}.env" >> "$GITHUB_ENV"
+          echo "CJCJ_BOOTSTRAP_DYLIB_ARTIFACT=$RUNNER_TEMP/llvm-depot/$LLVM_SHA/$CANGJIE_COMPILER_SHA/dylib" >> "$GITHUB_ENV"
+
+      - name: Download pinned in-process LLVM dylib
+        if: runner.os == 'Linux' || runner.os == 'macOS'
+        uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ env.LLVM_DYLIB_ARTIFACT_ID }}
+          merge-multiple: true
+          github-token: ${{ github.token }}
+          run-id: ${{ env.LLVM_DYLIB_RUN_ID }}
+          path: ${{ env.CJCJ_BOOTSTRAP_DYLIB_ARTIFACT }}
+
+      - name: Install native bootstrap file tools
+        if: runner.os == 'macOS'
+        run: brew install bash coreutils findutils gnu-tar
+
+      - name: Load pinned colour runtime provenance
+        shell: bash
+        env:
+          RUNTIME_PLATFORM: ${{ matrix.llvm_platform }}
+        run: |
+          set -euo pipefail
+          pin="ci/colour-runtime/$RUNTIME_PLATFORM.env"
+          test -f "$pin" || { echo "COLOUR_RT_PLATFORM_PIN_MISSING: $RUNTIME_PLATFORM" >&2; exit 1; }
+          cat "$pin" >> "$GITHUB_ENV"
+          echo "CJCJ_BOOTSTRAP_COLOUR_RT=$RUNNER_TEMP/colour-runtime" >> "$GITHUB_ENV"
+
+      - name: Download pinned colour runtime pair
+        uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ env.COLOUR_RT_ARTIFACT_ID }}
+          merge-multiple: true
+          github-token: ${{ github.token }}
+          run-id: ${{ env.COLOUR_RT_RUN_ID }}
+          path: ${{ env.CJCJ_BOOTSTRAP_COLOUR_RT }}
+
+      - name: Load immutable AST support provenance
+        shell: bash
+        env:
+          AST_PLATFORM: ${{ matrix.llvm_platform }}
+        run: |
+          set -euo pipefail
+          # shellcheck source=/dev/null
+          source "ci/ast_support/${AST_PLATFORM}.env"
+          test -n "$AST_SUPPORT_RUN_ID"
+          test -n "$AST_SUPPORT_RUN_ATTEMPT"
+          test -n "$AST_SUPPORT_ARTIFACT_ID"
+          cat "ci/ast_support/${AST_PLATFORM}.env" >> "$GITHUB_ENV"
+
+      - name: Download AST support archive
+        uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ env.AST_SUPPORT_ARTIFACT_ID }}
+          merge-multiple: true
+          github-token: ${{ github.token }}
+          run-id: ${{ env.AST_SUPPORT_RUN_ID }}
+          path: ${{ runner.temp }}/ast-support
+
+      - name: Resolve verified library seeds for the std producer
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          CJCJ_BOOTSTRAP_AST_ARTIFACT="$RUNNER_TEMP/ast-support/libcangjie-ast-support.a" \
+            node ci/release/prepare_darwin_std_inputs.mjs
+      - name: Compile the native stage0 compiler
+        run: bash ci/bootstrap/gha_run.sh stage0
+      - name: Compile coloured std through bootstrap_target_std
+        run: bash ci/bootstrap/gha_run.sh std
+      - name: Verify and package the same-run std identity
+        env:
+          STD_PLATFORM: ${{ matrix.llvm_platform }}
+        run: |
+          set -euo pipefail
+          output="$RUNNER_TEMP/native-std"
+          node ci/release/darwin_std.mjs \
+            "$CANGJIE_WORKSPACE/bootstrap-work/stdlib-stage1" \
+            "$CJCJ_BOOTSTRAP_COLOUR_RT" "$CJCJ_BOOTSTRAP_HOST_RT" \
+            "$CANGJIE_WORKSPACE/bootstrap-work/cjcj-stage1" "$STD_PLATFORM" "$output"
+          mkdir -p "$RUNNER_TEMP/std-package"
+          tar -czf "$RUNNER_TEMP/std-package/darwin-std-$STD_PLATFORM.tar.gz" -C "$output" .
+          cp "$output/std-manifest.json" "$RUNNER_TEMP/std-package/"
+      - uses: actions/upload-artifact@v7
+        id: std-artifact
+        with:
+          name: native-colour-std-${{ matrix.llvm_platform }}
+          path: ${{ runner.temp }}/std-package
+          if-no-files-found: error
+          retention-days: 90
+      - name: Persist and read back the std artifact
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          BOOTSTRAP_ARTIFACT_ID: ${{ steps.std-artifact.outputs.artifact-id }}
+          STD_PLATFORM: ${{ matrix.llvm_platform }}
+          STD_PACKAGE: ${{ runner.temp }}/std-package
+        run: node ci/release/publish_darwin_std.mjs
+      - uses: actions/upload-artifact@v7
+        with:
+          name: native-colour-std-pin-${{ matrix.llvm_platform }}
+          path: ${{ runner.temp }}/darwin-std-pin.json
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: native-std-diagnostics-${{ matrix.llvm_platform }}
+          path: |
+            ${{ env.CANGJIE_WORKSPACE }}/bootstrap-work/*.json
+            ${{ env.CANGJIE_WORKSPACE }}/bootstrap-work/*.log
+            ${{ runner.temp }}/darwin-std-identity.json
+          if-no-files-found: warn

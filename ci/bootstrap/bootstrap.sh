@@ -55,7 +55,7 @@ host_tuple_init() {
 BUILD_HOME="${HOME:-/root}"
 
 usage() {
-  echo 'bootstrap.sh --work DIR --src CJCJ_ROOT --cjcj-sha 40HEX --stdsrc STDLIB --cpp-src CANGJIE_CPP_ROOT --host-llvm-so ${HOST_LLVM_LIBRARY} --host-llvm-sha256 HEX --colour-llvm-so ${HOST_LLVM_LIBRARY} --colour-llvm-sha256 HEX --ast-support FILE --ast-support-sha256 HEX --colour-tuple DIR --colour-llvm-sha 40HEX --colour-rt DIR --host-rt DIR [--stage stage0|stage1|all] [--stage1-heap 20GB] [--dry-run]'
+  echo 'bootstrap.sh --work DIR --src CJCJ_ROOT --cjcj-sha 40HEX --stdsrc STDLIB --cpp-src CANGJIE_CPP_ROOT --host-llvm-so ${HOST_LLVM_LIBRARY} --host-llvm-sha256 HEX --colour-llvm-so ${HOST_LLVM_LIBRARY} --colour-llvm-sha256 HEX --ast-support FILE --ast-support-sha256 HEX --colour-tuple DIR --colour-llvm-sha 40HEX --colour-rt DIR --host-rt DIR [--stage stage0|stage1|std|all] [--stage1-heap 20GB] [--dry-run]'
 }
 
 sha256() {
@@ -411,7 +411,7 @@ assert_version() {
   local label="$1" compiler="$2" sdk="$3" runtime="$4" ld
   assert_executable "$label" "$compiler"
   ld=$(sdk_ld_path "$sdk" "$runtime")
-  cmd "env -i HOME=$(printf '%q' "$BUILD_HOME") CANGJIE_HOME=$(printf '%q' "$sdk") ${HOST_LOADER_VAR}=$(printf '%q' "$ld") PATH=/usr/bin:/bin $(printf '%q' "$compiler") --version"
+  cmd "env -i HOME=$(printf '%q' "$BUILD_HOME") CANGJIE_HOME=$(printf '%q' "$sdk") ${HOST_LOADER_VAR}=$(printf '%q' "$ld") PATH=$(printf '%q' "$HOST_SYSTEM_PATH") $(printf '%q' "$compiler") --version"
   [ "$DRY" -eq 1 ] || ok "$label --version rc=0"
 }
 
@@ -461,10 +461,12 @@ stdlib_build() {
   prepare_build_env
   # shellcheck disable=SC2016 # Expanded by the inner bash, not this shell.
   script='cd "$1" && rm -rf build/build && python3 build.py clean && python3 build.py build -t relwithdebinfo --jobs "$2" --target-lib="$3" && python3 build.py install --prefix "$4"'
-  cmd "env -i HOME=$(printf '%q' "$BUILD_HOME") TMPDIR=$(printf '%q' "$BUILD_TMPDIR") CANGJIE_HOME=$(printf '%q' "$sdk") ${HOST_LOADER_VAR}=$(printf '%q' "$ld") PATH=$(printf '%q' "$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:/usr/bin:/bin") cjHeapSize=$(printf '%q' "$STD_BUILD_HEAP") bash -c $(printf '%q' "$script") bash $(printf '%q' "$STDSRC") $(printf '%q' "$STD_BUILD_JOBS") $(printf '%q' "$target_lib") $(printf '%q' "$prefix")"
+  cmd "env -i HOME=$(printf '%q' "$BUILD_HOME") TMPDIR=$(printf '%q' "$BUILD_TMPDIR") CANGJIE_HOME=$(printf '%q' "$sdk") ${HOST_LOADER_VAR}=$(printf '%q' "$ld") PATH=$(printf '%q' "$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:$HOST_SYSTEM_PATH") cjHeapSize=$(printf '%q' "$STD_BUILD_HEAP") bash -c $(printf '%q' "$script") bash $(printf '%q' "$STDSRC") $(printf '%q' "$STD_BUILD_JOBS") $(printf '%q' "$target_lib") $(printf '%q' "$prefix")"
   assert_std_install_shape "$prefix" "$compare_prefix" "$label"
-  if [ -f "$sdk/bin/cjc" ] || [ "$DRY" -eq 1 ]; then
-    cmd "python3 -c 'import hashlib,json,sys; h=hashlib.sha256(open(sys.argv[1],\"rb\").read()).hexdigest(); open(sys.argv[2],\"w\").write(json.dumps({\"compiler_sha256\":h})+chr(10))' $(printf '%q' "$sdk/bin/cjc") $(printf '%q' "$prefix/std-producer.json")"
+  local producer="$sdk/bin/cjc"
+  [ ! -f "$sdk/bin/cjcj-stage1" ] || producer="$sdk/bin/cjcj-stage1"
+  if [ -f "$producer" ] || [ "$DRY" -eq 1 ]; then
+    cmd "python3 -c 'import hashlib,json,sys; h=hashlib.sha256(open(sys.argv[1],\"rb\").read()).hexdigest(); open(sys.argv[2],\"w\").write(json.dumps({\"compiler_sha256\":h})+chr(10))' $(printf '%q' "$producer") $(printf '%q' "$prefix/std-producer.json")"
   fi
 }
 
@@ -539,7 +541,7 @@ cjpm_build() {
   cjpm="$sdk/tools/bin/cjpm"
   script="cd $(printf '%q' "$srcdir") && $(printf '%q' "$cjpm") build${extra:+ $extra}"
   echo "CMD cjpm build${extra:+ $extra} bin=$cjpm cwd=$srcdir heap=$heap"
-  cmd "env -i HOME=$(printf '%q' "$BUILD_HOME") TMPDIR=$(printf '%q' "$BUILD_TMPDIR") CANGJIE_HOME=$(printf '%q' "$sdk") ${HOST_LOADER_VAR}=$(printf '%q' "$ld") PATH=$(printf '%q' "$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:/usr/bin:/bin") cjHeapSize=$(printf '%q' "$heap") bash -c $(printf '%q' "$script")"
+  cmd "env -i HOME=$(printf '%q' "$BUILD_HOME") TMPDIR=$(printf '%q' "$BUILD_TMPDIR") CANGJIE_HOME=$(printf '%q' "$sdk") ${HOST_LOADER_VAR}=$(printf '%q' "$ld") PATH=$(printf '%q' "$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:$HOST_SYSTEM_PATH") cjHeapSize=$(printf '%q' "$heap") bash -c $(printf '%q' "$script")"
 }
 
 assert_shim_cpp_src() {
@@ -585,7 +587,7 @@ shim_build() {
   fi
   echo "CMD shim build label=$label cwd=$srcdir cpp-src=$CPP_SRC source-object=${source_object:-source} sdk=$sdk runtime=$runtime"
   cmd "rm -f $(printf '%q' "$srcdir/runtime_shim/cjselfhost_llvmshim.o") $(printf '%q' "$srcdir/runtime_shim/cjc_runtime_config.o")"
-  cmd "env -i HOME=$(printf '%q' "$BUILD_HOME") CANGJIE_HOME=$(printf '%q' "$sdk") CANGJIE_CPP_SRC=$(printf '%q' "$CPP_SRC") CJCJ_COMMIT=$(printf '%q' "$CJCJ_SHA") ${source_env}${HOST_LOADER_VAR}=$(printf '%q' "$ld") PATH=$(printf '%q' "$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:$node_bin:/usr/bin:/bin") bash $(printf '%q' "$srcdir/runtime_shim/build_shim.sh")"
+  cmd "env -i HOME=$(printf '%q' "$BUILD_HOME") CANGJIE_HOME=$(printf '%q' "$sdk") CANGJIE_CPP_SRC=$(printf '%q' "$CPP_SRC") CJCJ_COMMIT=$(printf '%q' "$CJCJ_SHA") ${source_env}${HOST_LOADER_VAR}=$(printf '%q' "$ld") PATH=$(printf '%q' "$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:$node_bin:$HOST_SYSTEM_PATH") bash $(printf '%q' "$srcdir/runtime_shim/build_shim.sh")"
   if [ "$DRY" -eq 1 ]; then
     echo "OUTPUT $label-shim-cpp path=$srcdir/runtime_shim/cjselfhost_llvmshim.o sha256=planned"
     echo "OUTPUT $label-shim-config path=$srcdir/runtime_shim/cjc_runtime_config.o sha256=planned"
@@ -677,7 +679,7 @@ assemble_stage1_sdk() {
   local sdk="$1" compiler="$2" std="$3"
   cmd "bash $(printf '%q' "$SDK_BUILD") --from $(printf '%q' "$WORK/sdk-stage0") --to $(printf '%q' "$sdk") --target $(printf '%q' "$HOST_TUPLE") --cjc $(printf '%q' "$compiler") --llvm-tuple $(printf '%q' "$COLOUR_TUPLE") --runtime $(printf '%q' "$CRT") --std $(printf '%q' "$std") --verify-host-rt $(printf '%q' "$HRT") --colour-runtime $(printf '%q' "$(runtime_dir "$CRT")/libcangjie-runtime.${HOST_LIB_EXT}") --host-runtime $(printf '%q' "$(runtime_dir "$HRT")/libcangjie-runtime.${HOST_LIB_EXT}") --force"
   if [ "$DRY" -eq 0 ]; then
-    cmd "python3 $(printf '%q' "$SDK_VERIFY") --sdk $(printf '%q' "$sdk") --role target --runtime-pin $(printf '%q' "$SRC/ci/runtime_pin.env")"
+    cmd "python3 $(printf '%q' "$SDK_VERIFY") --sdk $(printf '%q' "$sdk") --role target --target-tuple $(printf '%q' "$HOST_TUPLE") --runtime-pin $(printf '%q' "$SRC/ci/runtime_pin.env")"
   fi
   assert_installed_llvm_tuple "$sdk" "$COLOUR_TUPLE"
   cmd "host_install -m644 $(printf '%q' "$COLOUR_LLVM_SO") $(printf '%q' "$sdk/third_party/llvm/lib/${HOST_LLVM_LIBRARY}")"
@@ -778,6 +780,15 @@ stage1() {
   assert_version cjcj-stage2 "$out" "$sdk" "$CRT"
 }
 
+stage_std() {
+  STAGE=std
+  local compiler
+  compiler=$(cat "$WORK/.cjcj-stage1" 2>/dev/null || true)
+  [ -n "$compiler" ] || die 'std producer requires completed stage0'
+  assert_executable std-producer-compiler "$compiler"
+  bootstrap_target_std "$compiler" "$WORK/stdlib-stage1"
+}
+
 main() {
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -810,7 +821,7 @@ main() {
   for value in WORK SRC CJCJ_SHA STDSRC HOST_LLVM_SO HOST_LLVM_SHA256 COLOUR_LLVM_SO COLOUR_LLVM_SHA256 AST_SUPPORT AST_SUPPORT_SHA256 COLOUR_TUPLE COLOUR_LLVM_SHA CRT HRT; do
     eval "[ -n \"\${$value}\" ]" || die "缺少参数 $value"
   done
-  case "$WANT" in stage0|stage1|all) ;; *) die '--stage 只能是 stage0|stage1|all';; esac
+  case "$WANT" in stage0|stage1|std|all) ;; *) die '--stage 只能是 stage0|stage1|std|all';; esac
   case "$WANT" in
     stage0|all) [ -n "$CPP_SRC" ] || die '缺少参数 CPP_SRC';;
   esac
@@ -820,6 +831,7 @@ main() {
   case "$WANT" in
     stage0) stage0;;
     stage1) stage1;;
+    std) stage_std;;
     all) stage0; stage1;;
   esac
   echo "BOOTSTRAP-OK 到 $WANT work=$WORK"

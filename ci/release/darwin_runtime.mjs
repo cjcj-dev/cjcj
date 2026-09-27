@@ -3,8 +3,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import {digest} from './colour_runtime.mjs';
+import {fileURLToPath} from 'node:url';
+import {verifyDarwinStd} from './darwin_std.mjs';
 
-const [mode, root, platform, source] = process.argv.slice(2);
+export function darwinRuntime(mode, root, platform, source) {
 assert.ok(['prepare', 'verify', 'source'].includes(mode), 'COLOUR_RT_MODE');
 assert.ok(['darwin_aarch64', 'darwin_x86_64'].includes(platform), 'COLOUR_RT_PLATFORM');
 const tuple = `${platform}_cjnative`;
@@ -51,6 +53,15 @@ if (mode === 'prepare') {
     // #473 must register a complete, separately verified std input before bootstrap.
     assert.ok(fs.existsSync(path.join(root, `lib/${tuple}/libcangjie-std-core.a`))
       && fs.existsSync(path.join(root, 'modules', tuple)), `COLOUR_RT_STD_MISSING: ${platform}`);
-    throw new Error(`COLOUR_RT_STD_PROVENANCE_MISSING: ${platform}`);
+    const release = JSON.parse(fs.readFileSync(process.env.CJCJ_COLOUR_RUNTIME_RELEASE_PIN
+      || new URL('../colour-runtime/release.json', import.meta.url)));
+    verifyDarwinStd(root, platform, release.platforms?.[platform]?.std, digest(manifestFile));
   }
+}
+
+return root;
+}
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  darwinRuntime(...process.argv.slice(2));
 }

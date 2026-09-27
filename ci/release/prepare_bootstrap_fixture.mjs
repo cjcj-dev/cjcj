@@ -65,6 +65,36 @@ export function fixture(check, target = 'linux-x64') {
     Object.assign(env, {CJCJ_BOOTSTRAP_COLOUR_RT: runtime, COLOUR_RT_RUN_ID: '123',
       COLOUR_RT_RUN_ATTEMPT: '1', COLOUR_RT_ARTIFACT_ID: '456',
       COLOUR_RT_MANIFEST_SHA256: runtimeDigest(path.join(runtime, 'manifest.json'))});
+    if (target.startsWith('darwin-')) {
+      const platform = hostPin.platform;
+      const tuple = `${platform}_cjnative`;
+      const nativeFiles = {};
+      for (const rel of runtimeFiles) {
+        const native = rel.replace('linux_x86_64_cjnative', tuple).replace(/\.so$/, '.dylib');
+        const dest = path.join(runtime, native);
+        fs.mkdirSync(path.dirname(dest), {recursive: true});
+        fs.writeFileSync(dest, `native input fixture ${native}`);
+        nativeFiles[native] = runtimeDigest(dest);
+      }
+      fs.writeFileSync(path.join(runtime, 'manifest.json'), JSON.stringify({role: 'colour-runtime-libraries',
+        platform, runtime_sha: env.RUNTIME_REF, run_id: '123', run_attempt: '1', files: nativeFiles}));
+      env.COLOUR_RT_MANIFEST_SHA256 = runtimeDigest(path.join(runtime, 'manifest.json'));
+      const stdFiles = {};
+      for (const rel of [`lib/${tuple}/libcangjie-std-core.a`, `runtime/lib/${tuple}/libcangjie-std-core.dylib`,
+                         'lib/libstdFFI.dylib', `modules/${tuple}/std.core.cjo`, 'std-producer.json']) {
+        const dest = path.join(runtime, rel);
+        fs.mkdirSync(path.dirname(dest), {recursive: true});
+        fs.writeFileSync(dest, rel === 'std-producer.json' ? JSON.stringify({compiler_sha256: hostSha}) : `std input fixture ${rel}`);
+        stdFiles[rel] = runtimeDigest(dest);
+      }
+      fs.writeFileSync(path.join(runtime, 'std-manifest.json'), JSON.stringify({role: 'colour-std', platform,
+        runtime_manifest_sha256: env.COLOUR_RT_MANIFEST_SHA256, compiler_sha256: hostSha,
+        producer_sha: 'b'.repeat(40), run_id: '123', run_attempt: '1', files: stdFiles}));
+      env.CJCJ_COLOUR_RUNTIME_RELEASE_PIN = path.join(dir, 'std-release.json');
+      fs.writeFileSync(env.CJCJ_COLOUR_RUNTIME_RELEASE_PIN, JSON.stringify({platforms: {[platform]: {std: {
+        manifest_sha256: runtimeDigest(path.join(runtime, 'std-manifest.json')), compiler_sha256: hostSha,
+        producer_sha: 'b'.repeat(40), run_id: '123', run_attempt: '1'}}}}));
+    }
     const pinFile = path.join(dir, 'pin.json');
     fs.writeFileSync(pinFile, JSON.stringify({version: 1, repository: 'cjcj-dev/cjcj', run: 123,
       attempt: 1, artifact: 456, commit: 'b'.repeat(40), files: [{path: 'SHA256SUMS', mode: 0o644,
