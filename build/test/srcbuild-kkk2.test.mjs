@@ -1221,11 +1221,11 @@ test('dry-run bootstrap preserves pin outcomes with large contract bodies', t =>
   const expected = [];
   for (const mismatch of [false, true]) {
     const fixture = bootstrapDriverFixture(t, {mismatch, largeContract: true});
-    for (const step of [31, 32]) {
+    for (const step of mismatch ? [31, 32] : [31, 32, 34]) {
       const result = fixture.dryRun(step, `${step}-${mismatch}`);
       const command = result.stdout.match(/^DRY_RUN COMMAND=(.*)$/m)?.[1];
       const row = {step, mismatch, rc: result.status,
-        command: command?.includes(`--stage stage${step - 31}`) ?? false,
+        command: command?.includes(step === 34 ? 'compose-sdk.mjs' : `--stage stage${step - 31}`) ?? false,
         success: /^DRY_RUN RESULT=success/m.test(result.stdout),
         rejected: /LLVM_DYLIB_SOURCE_MISMATCH/.test(result.stderr)};
       observed.push(row);
