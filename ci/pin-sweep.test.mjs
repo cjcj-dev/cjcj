@@ -33,7 +33,6 @@ test('every commit-valued pin is inventoried and paired with its clone URL', () 
   assert.deepEqual(pins.map(pin => pin.key).sort(), [
     'CANGJIE_COMPILER_SHA',
     'CJPM_FORK_REF',
-    'COMPILER_REF',
     'FLATBUFFERS_SHA',
     'LLVM_SHA',
     'LOADERLIFE_MIN_REF',
@@ -56,7 +55,6 @@ test('every commit-valued pin is inventoried and paired with its clone URL', () 
     [
       ['CANGJIE_COMPILER_SHA', 'refs/heads/main', 'refs/heads/main'],
       ['CJPM_FORK_REF', 'refs/heads/fix/cjpm-fixed', 'refs/heads/main'],
-      ['COMPILER_REF', 'refs/heads/main', 'refs/heads/main'],
       ['FLATBUFFERS_SHA', 'refs/heads/master', 'refs/heads/master'],
       ['LLVM_SHA', 'refs/heads/main', 'refs/heads/main'],
       ['LOADERLIFE_MIN_REF', 'refs/heads/main', 'refs/heads/main'],
@@ -173,15 +171,15 @@ test('offline --repo with a stale local authority is STALE, not STRANDED', () =>
     git(source, 'reset', '--quiet', '--hard', base);
     const pins = [{
       file: 'ci/fixture_pin.env',
-      key: 'COMPILER_REF',
+      key: 'CANGJIE_COMPILER_SHA',
       sha: remoteAhead,
       urlKey: 'COMPILER_URL',
       url: source,
-      ...declaration('COMPILER_REF'),
+      ...declaration('CANGJIE_COMPILER_SHA'),
     }];
     const offline = auditPins(pins, {
       remote: false,
-      repoSpecifications: [`COMPILER_REF=${source}#main`],
+      repoSpecifications: [`CANGJIE_COMPILER_SHA=${source}#main`],
       timeoutMs: 10_000,
     });
     assert.equal(offline[0].q1.answer, 'MET');

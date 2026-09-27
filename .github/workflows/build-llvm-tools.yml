@@ -246,7 +246,7 @@ jobs:
           ninja -C flatbuffers-build flatc
           mkdir -p shim-generated/flatbuffers
           flatbuffers-build/flatc --no-warnings -c -o shim-generated/flatbuffers \
-            cangjie-compiler/schema/ModuleFormat.fbs
+            cangjie-compiler/schema/CjoFormat.fbs
           ${SCCACHE_PATH:+"$SCCACHE_PATH"} clang++ -std=c++17 -O2 -fPIC -fno-rtti -fno-exceptions \
             -Illvm-fork/llvm/include -Illc-build/include \
             -Iflatbuffers/include -Ishim-generated \

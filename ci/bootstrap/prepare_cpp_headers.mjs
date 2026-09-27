@@ -29,20 +29,15 @@ function headers(root, relative = '') {
 export async function prepareCppHeaders(cppSrc) {
   const cpp = path.resolve(cppSrc);
   const pin = readPin('llvm_pin.env');
-  // One compiler source identity for the whole stage chain, defined once in
-  // ci/llvm_pin.env: the same commit the colour LLVM tuple, the in-process dylib
-  // and every other LLVM product in this file are built from. The headers made
-  // below are compiled and linked against those products, so a source tree at any
-  // other commit -- ci/source_pin.env COMPILER_REF, whose tree has no
-  // schema/ModuleFormat.fbs -- is a different compiler, not an interchangeable
-  // checkout of this one.
+  // The shim, schema, AST support and Windows runtime share the compiler pin.
+  // Generate the upstream CjoFormat schema at that exact source identity.
   const identity = await run(['git', '-C', cpp, 'rev-parse', 'HEAD'], {capture: true});
   if (identity.stdout.trim() !== pin.CANGJIE_COMPILER_SHA) {
     throw new Error(`default shim compiler source differs from CANGJIE_COMPILER_SHA: ${identity.stdout.trim()}`);
   }
-  const schemaSource = path.join(cpp, 'schema/ModuleFormat.fbs');
+  const schemaSource = path.join(cpp, 'schema/CjoFormat.fbs');
   if (!fs.existsSync(schemaSource)) {
-    throw new Error(`schema/ModuleFormat.fbs absent at CANGJIE_COMPILER_SHA ${pin.CANGJIE_COMPILER_SHA}: ${cpp}`);
+    throw new Error(`schema/CjoFormat.fbs absent at CANGJIE_COMPILER_SHA ${pin.CANGJIE_COMPILER_SHA}: ${cpp}`);
   }
   const llvm = path.join(cpp, 'third_party/llvm-project');
   const flatbuffers = path.join(cpp, 'third_party/flatbuffers');
@@ -92,7 +87,7 @@ export async function prepareCppHeaders(cppSrc) {
     compiler: {url: pin.CANGJIE_COMPILER_URL, sha: pin.CANGJIE_COMPILER_SHA},
     llvm: {url: pin.LLVM_URL, sha: pin.LLVM_SHA},
     flatbuffers: {url: pin.FLATBUFFERS_URL, sha: pin.FLATBUFFERS_SHA},
-    schema: {path: 'schema/ModuleFormat.fbs', sha256: digest(schemaSource)},
+    schema: {path: 'schema/CjoFormat.fbs', sha256: digest(schemaSource)},
     flatc: {path: path.join(flatBuild, 'flatc'), sha256: digest(path.join(flatBuild, 'flatc'))},
     commands,
     headers: Object.fromEntries(roots.map(root => [root, headers(path.join(cpp, root))])),

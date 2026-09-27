@@ -35,7 +35,7 @@ sed -n '/enum EnumReflectionType/,/};/p' \
     | grep -c '^  ERT_' || true
 
 fetch_exact "${CANGJIE_COMPILER_URL:?}" "${CANGJIE_COMPILER_SHA:?}" "$root/cangjie-compiler" schema
-test -f "$root/cangjie-compiler/schema/ModuleFormat.fbs"
+test -f "$root/cangjie-compiler/schema/CjoFormat.fbs"
 
 fetch_exact "${FLATBUFFERS_URL:?}" "${FLATBUFFERS_SHA:?}" "$root/flatbuffers"
 test -f "$root/flatbuffers/CMakeLists.txt"

@@ -54,7 +54,7 @@ cmake -G Ninja -S "$flatbuffers_src" -B "$flatbuffers_build" \
 cmake --build "$flatbuffers_build" --target flatc --parallel 3
 mkdir -p "$generated/flatbuffers"
 "$flatbuffers_build/flatc$exe" --no-warnings -c -o "$generated/flatbuffers" \
-    "$root/cangjie-compiler/schema/ModuleFormat.fbs"
+    "$root/cangjie-compiler/schema/CjoFormat.fbs"
 
 # Through the same launcher cmake uses, so the shim object is cached with llc/opt.
 ${SCCACHE_PATH:+"$SCCACHE_PATH"} clang++ -std=c++17 -O2 ${pic_flag:+"$pic_flag"} -fno-rtti -fno-exceptions \

@@ -15,7 +15,6 @@ const PIN_SOURCES = Object.freeze({
   RUNTIME_REF: 'ci/runtime_pin.env',
   LLVM_SHA: 'ci/llvm_pin.env',
   CANGJIE_COMPILER_SHA: 'ci/llvm_pin.env',
-  COMPILER_REF: 'ci/source_pin.env',
   TOOLS_REF: 'ci/source_pin.env',
   STDX_REF: 'ci/source_pin.env',
   CJPM_FORK_REF: 'ci/cjpm_pin.env',

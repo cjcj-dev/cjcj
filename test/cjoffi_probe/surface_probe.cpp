@@ -9,7 +9,7 @@
 #include <utility>
 #include <vector>
 
-#include "flatbuffers/ModuleFormat_generated.h"
+#include "flatbuffers/CjoFormat_generated.h"
 
 extern "C" {
 void *CJOFPackageViewOpen(const unsigned char *, size_t);

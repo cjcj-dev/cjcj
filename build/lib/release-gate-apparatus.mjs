@@ -4,6 +4,7 @@ import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {
   BASE_SDK_SOURCE_REASON,
+  PINNED_BASE_SDK_VERSION,
   SOURCE_PROVENANCE_NOT_APPLICABLE,
   SOURCE_PROVENANCE_UNRESOLVED,
   validateBaseSdkProvenance,
@@ -79,10 +80,6 @@ function requirePlatform(platform) {
 
 function normalizeRelative(value) {
   return value.split(path.sep).join('/');
-}
-
-function toolchainVersion(toolchain) {
-  return toolchain.replace(/^nightly-/, '');
 }
 
 function requireReviewedToolchain(value, label = 'gate host toolchain') {
@@ -223,9 +220,6 @@ export function validateGateApparatusProvenance(value, {platform, expectedToolch
   } else if (value.schema === 2 && Object.hasOwn(value, 'coverage_warning')) {
     throw new Error(`${label}.coverage_warning must be absent when coverage=covered`);
   }
-  if (expectedToolchain && reviewedAgainst !== expectedToolchain) {
-    throw new Error(`${label}.reviewed_against mismatch: ${reviewedAgainst} != ${expectedToolchain}`);
-  }
   const allowedRuntimePaths = runtimePaths.get(platform);
   const runtimePath = requireString(value.host_runtime?.path, `${label}.host_runtime.path`);
   if (!allowedRuntimePaths.includes(runtimePath)) {
@@ -238,9 +232,14 @@ export function validateGateApparatusProvenance(value, {platform, expectedToolch
   if (value.host_runtime?.symbol_probe !== probeCommand(platform)) {
     throw new Error(`${label}.host_runtime.symbol_probe mismatch: ${value.host_runtime?.symbol_probe || '<empty>'}`);
   }
+  // The reviewed host is historical apparatus evidence. The release base is
+  // checked against its own pin, independently of that coverage record.
   const baseSdk = value.base_sdk;
-  if (baseSdk?.version !== toolchainVersion(reviewedAgainst)) {
-    throw new Error(`${label}.base_sdk.version does not match ${reviewedAgainst}`);
+  if (expectedToolchain && `nightly-${baseSdk?.version}` !== expectedToolchain) {
+    throw new Error(`${label}.base_sdk.version mismatch: ${baseSdk?.version} != ${expectedToolchain}`);
+  }
+  if (baseSdk?.version !== PINNED_BASE_SDK_VERSION) {
+    throw new Error(`${label}.base_sdk.version does not match ${PINNED_BASE_SDK_VERSION}`);
   }
   for (const name of ['release_repository', 'download_url', 'archive_path']) {
     requireString(baseSdk?.[name], `${label}.base_sdk.${name}`);
@@ -292,7 +291,7 @@ export async function writeGateApparatusProvenance({
     gate_host_toolchain: actualToolchain,
     reviewed_against: reviewedToolchain,
     coverage,
-    base_sdk: requireBaseSdk(baseSdkProvenance, {platform, toolchain: reviewedToolchain}, 'base SDK provenance'),
+    base_sdk: requireBaseSdk(baseSdkProvenance, {platform, toolchain: `nightly-${PINNED_BASE_SDK_VERSION}`}, 'base SDK provenance'),
     host_runtime: {
       path: normalizedRuntimePath,
       sha256: await fileSha256(runtime),
@@ -304,7 +303,7 @@ export async function writeGateApparatusProvenance({
   if (coverage === 'not-covered') {
     value.coverage_warning = gateApparatusCoverageWarning(actualToolchain);
   }
-  validateGateApparatusProvenance(value, {platform, expectedToolchain: reviewedToolchain});
+  validateGateApparatusProvenance(value, {platform, expectedToolchain: `nightly-${PINNED_BASE_SDK_VERSION}`});
   await fs.writeFile(destination, `${JSON.stringify(value, null, 2)}\n`);
   return value;
 }

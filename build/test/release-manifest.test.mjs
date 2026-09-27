@@ -21,6 +21,7 @@ import {
   BASE_SDK_SOURCE_REASON,
   SOURCE_PROVENANCE_NOT_APPLICABLE,
   baseSdkDownload,
+  PINNED_BASE_SDK_VERSION,
 } from '../lib/release-component-provenance.mjs';
 import {
   GATE_APPARATUS_COMPONENT,
@@ -109,7 +110,7 @@ async function fixture() {
   };
   const pythonMetadataArtifact = path.join(stage, 'third_party', 'python', 'PYTHON-BUNDLE.json');
   await fs.writeFile(pythonMetadataArtifact, `${JSON.stringify(pythonMetadata, null, 2)}\n`);
-  const baseDownload = baseSdkDownload(platforms[0], REVIEWED_GATE_HOST_TOOLCHAIN);
+  const baseDownload = baseSdkDownload(platforms[0], `nightly-${PINNED_BASE_SDK_VERSION}`);
   const baseSdkProvenance = {
     schema: 1,
     component: 'base-sdk',
@@ -163,7 +164,7 @@ async function fixture() {
     pythonMetadata,
     pythonMetadataArtifact,
     pythonVersion: RELEASE_PYTHON_VERSION,
-    baseSdkId: REVIEWED_GATE_HOST_TOOLCHAIN,
+    baseSdkId: `nightly-${PINNED_BASE_SDK_VERSION}`,
     baseSdkProvenance,
     gateApparatusArtifact,
   };

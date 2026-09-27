@@ -84,7 +84,7 @@
 #include "llvm/Transforms/Utils/ValueMapper.h"
 #include "llvm/IR/Value.h"
 
-#include "flatbuffers/ModuleFormat_generated.h"
+#include "flatbuffers/CjoFormat_generated.h"
 #include "llvm/Analysis/CallGraph.h"
 
 using namespace llvm;

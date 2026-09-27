@@ -10,6 +10,7 @@ import {
   BASE_SDK_SOURCE_REASON,
   SOURCE_PROVENANCE_NOT_APPLICABLE,
   baseSdkDownload,
+  PINNED_BASE_SDK_VERSION,
 } from '../lib/release-component-provenance.mjs';
 import {
   GATE_APPARATUS_PROVENANCE,
@@ -29,10 +30,10 @@ test('gate apparatus records actual host bytes separately from its review covera
   const compiled = spawnSync('cc', ['-shared', '-fPIC', source, '-o', runtime], {encoding: 'utf8'});
   assert.equal(compiled.status, 0, compiled.stderr);
 
-  const archive = path.join(root, baseSdkDownload('linux-x64', REVIEWED_GATE_HOST_TOOLCHAIN).archive);
+  const archive = path.join(root, baseSdkDownload('linux-x64', `nightly-${PINNED_BASE_SDK_VERSION}`).archive);
   await fs.writeFile(archive, 'fixture SDK archive\n');
   const baseSidecar = path.join(root, BASE_SDK_PROVENANCE);
-  const baseDownload = baseSdkDownload('linux-x64', REVIEWED_GATE_HOST_TOOLCHAIN);
+  const baseDownload = baseSdkDownload('linux-x64', `nightly-${PINNED_BASE_SDK_VERSION}`);
   const archiveBytes = await fs.readFile(archive);
   await fs.writeFile(baseSidecar, `${JSON.stringify({
     schema: 1,

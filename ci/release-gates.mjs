@@ -439,7 +439,6 @@ async function evaluateG1(context) {
     RUNTIME_REF: pins.runtime.RUNTIME_REF,
     LLVM_SHA: pins.llvm.LLVM_SHA,
     CANGJIE_COMPILER_SHA: pins.llvm.CANGJIE_COMPILER_SHA,
-    COMPILER_REF: pins.source.COMPILER_REF,
     TOOLS_REF: pins.source.TOOLS_REF,
     STDX_REF: pins.source.STDX_REF,
     CJPM_FORK_REF: pins.cjpm.CJPM_FORK_REF,
