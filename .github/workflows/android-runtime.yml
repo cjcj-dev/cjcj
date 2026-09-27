@@ -35,7 +35,7 @@ jobs:
           node --test ci/release/android-platform.test.mjs ci/release/cross-runtime.test.mjs ci/release/platform-matrix.test.mjs ci/release-pair-pin.test.mjs ci/srcbuild/tests/platform-contract.test.mjs ci/srcbuild/tests/sccache-contract.test.mjs build/test/package-provenance.test.mjs build/test/runtime-pin.test.mjs
           python3 ci/bootstrap/test_sdk_runtime.py --output "$RUNNER_TEMP/sdk-runtime-tests"
           python3 ci/bootstrap/test_sdk_verify.py
-          python3 ci/bootstrap/test_sdk_shared_pair.py
+          python3 ci/bootstrap/test_sdk_shared_pair.py --output "$RUNNER_TEMP/sdk-shared-pair-tests"
           bash ci/bootstrap/test_bootstrap.sh
       - uses: ./.github/actions/setup-release-sdk
         with:
