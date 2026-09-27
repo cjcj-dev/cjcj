@@ -59,7 +59,7 @@ from pathlib import Path
 p = Path('ci/release/prepare_bootstrap_inputs.mjs')
 s = p.read_text()
 a = s.index("if (!/^[0-9a-f]{64}$/.test(tupleSumsPin")
-b = s.index("\nconst colourRt", a)
+b = s.index("\n  const colourRt", a)
 p.write_text(s[:a] + s[b:])
 CUT
 diff -u "$work/consumer.saved" "$consumer" > "$work/pin-cut.diff" || test "$?" -eq 1

@@ -72,6 +72,7 @@ for name in ('llc', 'opt', linker):
     copy(tool, 'third_party/llvm/bin/' + name, base)
     copy(tool, 'bin/' + name, tuple_root)
 copy(llvm, 'third_party/llvm/lib/' + library, base)
+(base / 'third_party/llvm/MANIFEST').write_text('LLVM_SHA=' + llvm_sha + '\n')
 (tuple_root / 'MANIFEST').write_text('LLVM_SHA=' + llvm_sha + '\n')
 for relative in ('lib/STATIC_LLVM.txt', 'fixed-llc/cjselfhost_llvmshim.o', 'fixed-llc/llc.gz',
                  'fixed-llc/opt.gz', 'fixed-llc/' + linker + '.gz', 'fixed-llc/llvm-tools.manifest'):
