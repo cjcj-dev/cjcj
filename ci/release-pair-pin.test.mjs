@@ -30,9 +30,9 @@ test('release runtime loader selects the stack-slot-root runtime paired with LLV
   } finally { fs.rmSync(dir, {recursive: true, force: true}); }
 });
 
-test('release LLVM source and both dylib provenance pins use the stack-slot-root and RawData safepoint producer', () => {
+test('release LLVM source and all dylib provenance pins use the stack-slot-root and RawData safepoint producer', () => {
   assert.equal(llvm.LLVM_SHA, 'e40afeefa6ccaee67d0d3e30d8a70b08f25c86f6');
-  for (const platform of ['linux_x86_64', 'linux_aarch64']) {
+  for (const platform of ['linux_x86_64', 'linux_aarch64', 'darwin_x86_64', 'darwin_aarch64']) {
     const dylib = pins(`ci/llvm-dylib/${platform}.env`);
     assert.equal(dylib.LLVM_DYLIB_SOURCE_SHA, llvm.LLVM_SHA, platform);
     assert.equal(dylib.LLVM_DYLIB_RUN_ID, llvm.LLVM_TUPLE_RUN_ID, platform);
