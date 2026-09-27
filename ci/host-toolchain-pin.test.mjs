@@ -98,9 +98,9 @@ test('the ordinary host nightly literal has one pin and the release exception is
     assert.deepEqual(offenders, []);
     console.log(`ORDINARY-HOST-SCAN offenders=${offenders.length}`);
   const release = await fs.readFile(path.join(root, '.github', 'workflows', 'build-release-package.yml'), 'utf8');
-  assert.equal(release.match(/^  RELEASE_HOST_TOOLCHAIN: nightly-\S+$/gm)?.length, 1);
-  assert.match(release, /Five-platform 1\.3 archive hashes do not exist yet/);
-  assert.match(release, /smoke changing from 13\/15 to 0\/15/);
+  assert.doesNotMatch(release, /^  RELEASE_HOST_TOOLCHAIN: nightly-/m);
+  assert.match(release, /source ci\/host_sdk_pin\.env/);
+  assert.ok(release.includes('echo "RELEASE_HOST_TOOLCHAIN=$CJCJ_TOOLCHAIN" >> "$GITHUB_ENV"'));
 });
 
 test('release markdown does not carry an ordinary nightly literal', async () => {
@@ -264,16 +264,15 @@ test('measured cjc version is converted to the exact nightly identity', () => {
   assert.throws(() => hostToolchainFromCjcVersion('not a compiler version'), /did not report/);
 });
 
-test('release base SDK dry-run resolves the explicit 1.2 exception, not the ordinary 1.3 host pin', async () => {
+test('release base SDK resolves the same pinned nightly for every platform', async () => {
   const release = await fs.readFile(path.join(root, '.github', 'workflows', 'build-release-package.yml'), 'utf8');
-  const releaseHost = release.match(/^  RELEASE_HOST_TOOLCHAIN: (\S+)$/m)?.[1];
-  const ordinaryHost = await hostPin();
-  assert.ok(releaseHost);
-  assert.notEqual(releaseHost, ordinaryHost);
+  const releaseHost = await hostPin();
+  assert.match(release, /source ci\/host_sdk_pin\.env/);
+  assert.ok(release.includes('echo "RELEASE_HOST_TOOLCHAIN=$CJCJ_TOOLCHAIN" >> "$GITHUB_ENV"'));
   for (const platform of ['linux-x64', 'linux-aarch64', 'darwin-x64', 'darwin-arm64', 'windows-x64']) {
     assert.match(baseSdkDownload(platform, releaseHost).sha256, /^[0-9a-f]{64}$/);
   }
-  assert.throws(() => baseSdkDownload('linux-x64', ordinaryHost), /no pinned archive identity/);
+  assert.throws(() => baseSdkDownload('linux-x64', 'nightly-unpinned'), /no pinned archive identity/);
   assert.match(release, /--toolchain "\$RELEASE_HOST_TOOLCHAIN"/);
   assert.match(release, /--base-sdk-id "\$RELEASE_HOST_TOOLCHAIN"/);
 });

@@ -12,6 +12,7 @@ import {
   SOURCE_PROVENANCE_NOT_APPLICABLE,
   SOURCE_PROVENANCE_RESOLVED,
   baseSdkDownload,
+  PINNED_BASE_SDK_VERSION,
   writeCjpmProvenance,
 } from '../lib/release-component-provenance.mjs';
 import {
@@ -260,7 +261,7 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
     `LLD_SHA256=${await sha256(path.join(sdk, 'third_party/llvm/bin/ld.lld'))}`,
     '',
   ].join('\n'));
-  const baseSdkId = REVIEWED_GATE_HOST_TOOLCHAIN;
+  const baseSdkId = `nightly-${PINNED_BASE_SDK_VERSION}`;
   const baseArchive = await write(root, baseSdkDownload('linux-x64', baseSdkId).archive,
     'fixture official SDK archive');
   const baseSidecar = path.join(root, BASE_SDK_PROVENANCE);
@@ -355,7 +356,7 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
   const rows = manifestText.trim().split('\n').map(JSON.parse);
   assert.equal(rows.length, 9);
   const apparatus = rows.find(row => row.component === GATE_APPARATUS_COMPONENT).acceptance_apparatus;
-  assert.equal(apparatus.gate_host_toolchain, REVIEWED_GATE_HOST_TOOLCHAIN);
+  assert.equal(apparatus.gate_host_toolchain, baseSdkId);
   assert.equal(apparatus.host_runtime.sha256, gateProvenance.host_runtime.sha256);
   assert.equal(apparatus.host_runtime.g_cjLoadBadMask_count, 0);
   assert.match(apparatus.known_apparatus_limitations.text, /PostTraceBarrier::ReadReference/);
@@ -363,7 +364,7 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
     `CJLLVM-COMMIT:${LLVM_SHA}`);
   assert.equal(rows.find(row => row.component === 'python').source.commit, RELEASE_PYTHON_VERSION);
   assert.equal(rows.find(row => row.component === 'base-sdk').source.version,
-    REVIEWED_GATE_HOST_TOOLCHAIN.replace(/^nightly-/, ''));
+    PINNED_BASE_SDK_VERSION);
   assert.equal(rows.find(row => row.component === 'base-sdk').source.status,
     SOURCE_PROVENANCE_NOT_APPLICABLE);
   assert.equal(rows.find(row => row.component === 'base-sdk').source.commit,
@@ -595,7 +596,7 @@ async function stdClosureStage(parent) {
   };
   const pythonMetadataArtifact = await write(stage, 'third_party/python/PYTHON-BUNDLE.json',
     `${JSON.stringify(pythonMetadata, null, 2)}\n`);
-  const baseDownload = baseSdkDownload('linux-x64', REVIEWED_GATE_HOST_TOOLCHAIN);
+  const baseDownload = baseSdkDownload('linux-x64', `nightly-${PINNED_BASE_SDK_VERSION}`);
   const baseSdkProvenance = {
     schema: 1,
     component: 'base-sdk',
@@ -646,7 +647,7 @@ async function stdClosureStage(parent) {
       pythonMetadata,
       pythonMetadataArtifact,
       pythonVersion: RELEASE_PYTHON_VERSION,
-      baseSdkId: REVIEWED_GATE_HOST_TOOLCHAIN,
+      baseSdkId: `nightly-${PINNED_BASE_SDK_VERSION}`,
       baseSdkProvenance,
       gateApparatusArtifact,
     },

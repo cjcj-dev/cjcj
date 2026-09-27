@@ -12,6 +12,7 @@ import {
   SOURCE_PROVENANCE_NOT_APPLICABLE,
   SOURCE_PROVENANCE_RESOLVED,
   baseSdkDownload,
+  PINNED_BASE_SDK_VERSION,
   persistBaseSdkProvenance,
   writeBaseSdkProvenance,
 } from '../lib/release-component-provenance.mjs';
@@ -81,7 +82,7 @@ test('base SDK provenance maps every release platform to its nightly archive', (
 test('base SDK provenance refuses an archive outside the pinned digest', async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'base-sdk-pin-negative-'));
   t.after(() => fs.rm(root, {recursive: true, force: true}));
-  const expected = baseSdkDownload('linux-x64', REVIEWED_GATE_HOST_TOOLCHAIN);
+  const expected = baseSdkDownload('linux-x64', `nightly-${PINNED_BASE_SDK_VERSION}`);
   const archive = path.join(root, expected.archive);
   const destination = path.join(root, BASE_SDK_PROVENANCE);
   await fs.writeFile(archive, 'tampered base SDK archive\n');
@@ -91,7 +92,7 @@ test('base SDK provenance refuses an archive outside the pinned digest', async t
       archive,
       destination,
       platform: 'linux-x64',
-      toolchain: REVIEWED_GATE_HOST_TOOLCHAIN,
+      toolchain: `nightly-${PINNED_BASE_SDK_VERSION}`,
     }),
     new RegExp(`base SDK archive SHA-256 mismatch for linux-x64: expected ${expected.sha256}, got [0-9a-f]{64}`),
   );
@@ -102,7 +103,7 @@ test('base SDK provenance is atomically retained with a content-addressed archiv
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'base-sdk-durable-'));
   t.after(() => fs.rm(root, {recursive: true, force: true}));
   const toolchain = path.join(root, 'private-toolchain');
-  const expected = baseSdkDownload('linux-x64', REVIEWED_GATE_HOST_TOOLCHAIN);
+  const expected = baseSdkDownload('linux-x64', `nightly-${PINNED_BASE_SDK_VERSION}`);
   const archive = path.join(root, expected.archive);
   const inputSidecar = path.join(root, BASE_SDK_PROVENANCE);
   const contents = Buffer.from('fixture base SDK archive\n');
@@ -130,7 +131,7 @@ test('base SDK provenance is atomically retained with a content-addressed archiv
     sidecar: inputSidecar,
     toolchainDir: toolchain,
     platform: 'linux-x64',
-    toolchain: REVIEWED_GATE_HOST_TOOLCHAIN,
+    toolchain: `nightly-${PINNED_BASE_SDK_VERSION}`,
   });
   assert.equal(await fs.readFile(retained.cachedArchive, 'utf8'), contents.toString());
   assert.equal(retained.provenance.artifact.size, contents.length);
@@ -147,7 +148,7 @@ test('base SDK provenance is atomically retained with a content-addressed archiv
       sidecar: inputSidecar,
       toolchainDir: toolchain,
       platform: 'linux-x64',
-      toolchain: REVIEWED_GATE_HOST_TOOLCHAIN,
+      toolchain: `nightly-${PINNED_BASE_SDK_VERSION}`,
     }),
     /base SDK provenance archive size mismatch|base SDK provenance archive SHA-256 mismatch/,
   );
@@ -168,7 +169,7 @@ function digest(contents) {
 }
 
 function baseSdkProvenance(platform) {
-  const download = baseSdkDownload(platform, REVIEWED_GATE_HOST_TOOLCHAIN);
+  const download = baseSdkDownload(platform, `nightly-${PINNED_BASE_SDK_VERSION}`);
   return {
     schema: 1,
     component: 'base-sdk',
@@ -271,7 +272,7 @@ test('release manifest keeps every component and requires frozen clean stamps', 
     platform: 'linux-x64',
     runtimeArtifact: runtime,
     stdProvenance: provenance,
-    baseSdkId: REVIEWED_GATE_HOST_TOOLCHAIN,
+    baseSdkId: `nightly-${PINNED_BASE_SDK_VERSION}`,
     baseSdkProvenance: baseSdkProvenance('linux-x64'),
     gateApparatusArtifact,
     cjcjCommit: CJCJ_SHA,

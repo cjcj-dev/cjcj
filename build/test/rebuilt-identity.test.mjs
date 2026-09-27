@@ -25,6 +25,7 @@ import {
   BASE_SDK_SOURCE_REASON,
   SOURCE_PROVENANCE_NOT_APPLICABLE,
   baseSdkDownload,
+  PINNED_BASE_SDK_VERSION,
 } from '../lib/release-component-provenance.mjs';
 import {
   GATE_APPARATUS_COMPONENT,
@@ -86,7 +87,7 @@ async function fixture({stdOnDisk, stdInProvenance, tools} = {}) {
   };
   const pythonMetadataArtifact = await write(stage, 'third_party/python/PYTHON-BUNDLE.json',
     `${JSON.stringify(pythonMetadata, null, 2)}\n`);
-  const baseDownload = baseSdkDownload('linux-x64', REVIEWED_GATE_HOST_TOOLCHAIN);
+  const baseDownload = baseSdkDownload('linux-x64', `nightly-${PINNED_BASE_SDK_VERSION}`);
   const baseSdkProvenance = {
     schema: 1,
     component: 'base-sdk',
@@ -128,7 +129,7 @@ async function fixture({stdOnDisk, stdInProvenance, tools} = {}) {
       platform: 'linux-x64',
       runtimeArtifact,
       stdProvenance,
-      baseSdkId: REVIEWED_GATE_HOST_TOOLCHAIN,
+      baseSdkId: `nightly-${PINNED_BASE_SDK_VERSION}`,
       baseSdkProvenance,
       gateApparatusArtifact,
       cjcjCommit: CJCJ_SHA,

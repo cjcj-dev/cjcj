@@ -15,7 +15,7 @@ const SHA40 = /^[0-9a-f]{40}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 const NIGHTLY_RELEASE_REPOSITORY = 'https://gitcode.com/Cangjie/nightly_build';
 const NIGHTLY_RELEASE_BASE = `${NIGHTLY_RELEASE_REPOSITORY}/releases/download`;
-const PINNED_BASE_SDK_VERSION = '1.3.0-alpha.20260925001050';
+export const PINNED_BASE_SDK_VERSION = '1.3.0-alpha.20260925001050';
 
 const baseSdkPlatforms = new Map([
   ['linux-x64', {
