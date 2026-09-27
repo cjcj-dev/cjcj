@@ -48,7 +48,7 @@ jobs:
     name: phase 1 · linux-x64 / source SDK and final std (also cross-builds the Windows std)
     uses: ./.github/workflows/srcbuild.yml
     with:
-      build_type: relwithdebinfo
+      build_type: release
       dry_run: ${{ inputs.dry_run }}
       runtime_ref: ${{ inputs.runtime_ref }}
       targets: linux-x64
@@ -58,7 +58,7 @@ jobs:
     uses: ./.github/workflows/srcbuild.yml
     needs: package-p1-linux-x64
     with:
-      build_type: relwithdebinfo
+      build_type: release
       dry_run: ${{ inputs.dry_run }}
       runtime_ref: ${{ inputs.runtime_ref }}
       targets: linux-aarch64
@@ -68,7 +68,7 @@ jobs:
     uses: ./.github/workflows/srcbuild.yml
     needs: package-p3-windows-x64
     with:
-      build_type: relwithdebinfo
+      build_type: release
       dry_run: ${{ inputs.dry_run }}
       runtime_ref: ${{ inputs.runtime_ref }}
       targets: darwin-arm64
@@ -78,7 +78,7 @@ jobs:
     uses: ./.github/workflows/srcbuild.yml
     needs: package-p4-darwin-arm64
     with:
-      build_type: relwithdebinfo
+      build_type: release
       dry_run: ${{ inputs.dry_run }}
       runtime_ref: ${{ inputs.runtime_ref }}
       targets: darwin-x64

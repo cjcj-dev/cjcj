@@ -25,6 +25,7 @@ CJCJ_SHA=''
 BASE_SDK="${BASE_SDK:-cjcj-pin-937877c8}"
 HEAP="${CJ_HEAP:-96GB}"
 STAGE1_HEAP="${STAGE1_HEAP:-20GB}"
+STDLIB_BUILD_TYPE="${CJCJ_STAGE3_STDLIB_BUILD_TYPE:-release}"
 JOBS="${CJ_JOBS:-$(getconf _NPROCESSORS_ONLN)}"
 SDK_BUILD="${SDK_BUILD:-$(dirname "${BASH_SOURCE[0]}")/sdk_build.sh}"
 SDK_VERIFY="${SDK_VERIFY:-$(dirname "${BASH_SOURCE[0]}")/sdk_verify.py}"
@@ -455,8 +456,8 @@ stdlib_build() {
   ld=$(sdk_ld_path "$sdk" "$runtime")
   prepare_build_env
   # shellcheck disable=SC2016 # Expanded by the inner bash, not this shell.
-  script='cd "$1" && rm -rf build/build && python3 build.py clean && python3 build.py build -t relwithdebinfo --jobs "$2" --target-lib="$3" && python3 build.py install --prefix "$4"'
-  cmd "env -i HOME=$(printf '%q' "$BUILD_HOME") TMPDIR=$(printf '%q' "$BUILD_TMPDIR") CANGJIE_HOME=$(printf '%q' "$sdk") LD_LIBRARY_PATH=$(printf '%q' "$ld") PATH=$(printf '%q' "$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:/usr/bin:/bin") cjHeapSize=$(printf '%q' "$STD_BUILD_HEAP") bash -c $(printf '%q' "$script") bash $(printf '%q' "$STDSRC") $(printf '%q' "$STD_BUILD_JOBS") $(printf '%q' "$target_lib") $(printf '%q' "$prefix")"
+  script='cd "$1" && rm -rf build/build && python3 build.py clean && python3 build.py build -t "$5" --jobs "$2" --target-lib="$3" && python3 build.py install --prefix "$4"'
+  cmd "env -i HOME=$(printf '%q' "$BUILD_HOME") TMPDIR=$(printf '%q' "$BUILD_TMPDIR") CANGJIE_HOME=$(printf '%q' "$sdk") LD_LIBRARY_PATH=$(printf '%q' "$ld") PATH=$(printf '%q' "$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:/usr/bin:/bin") cjHeapSize=$(printf '%q' "$STD_BUILD_HEAP") bash -c $(printf '%q' "$script") bash $(printf '%q' "$STDSRC") $(printf '%q' "$STD_BUILD_JOBS") $(printf '%q' "$target_lib") $(printf '%q' "$prefix") $(printf '%q' "$STDLIB_BUILD_TYPE")"
   assert_std_install_shape "$prefix" "$compare_prefix" "$label"
   if [ -f "$sdk/bin/cjc" ] || [ "$DRY" -eq 1 ]; then
     cmd "python3 -c 'import hashlib,json,sys; h=hashlib.sha256(open(sys.argv[1],\"rb\").read()).hexdigest(); open(sys.argv[2],\"w\").write(json.dumps({\"compiler_sha256\":h})+chr(10))' $(printf '%q' "$sdk/bin/cjc") $(printf '%q' "$prefix/std-producer.json")"
@@ -707,8 +708,8 @@ bootstrap_target_std() {
   # bare --target-lib directory is too late: its fallback is the host SDK.
   arch=${HOST_TUPLE#linux_}
   arch=${arch%_cjnative}
-  native="$link_root/common/linux_relwithdebinfo_$arch/lib/$HOST_TUPLE"
-  dynamic="$link_root/common/linux_relwithdebinfo_$arch/runtime/lib/$HOST_TUPLE"
+  native="$link_root/common/linux_${STDLIB_BUILD_TYPE}_$arch/lib/$HOST_TUPLE"
+  dynamic="$link_root/common/linux_${STDLIB_BUILD_TYPE}_$arch/runtime/lib/$HOST_TUPLE"
   cmd "rm -rf -- $(printf '%q' "$link_root")"
   cmd "mkdir -p $(printf '%q' "$native") $(printf '%q' "$dynamic")"
   for file in libcangjie-aio.a cjstart.o cjld.shared.lds discard_eh_frame.lds; do

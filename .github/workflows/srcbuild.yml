@@ -12,7 +12,7 @@ on:
         description: C++ SDK build type for native hosts
         required: false
         type: string
-        default: relwithdebinfo
+        default: release
       dry_run:
         description: Authorize an exact runtime_ref override without publishing
         required: false
@@ -73,7 +73,7 @@ on:
       build_type:
         description: C++ SDK build type
         required: true
-        default: relwithdebinfo
+        default: release
         type: choice
         options: [release, relwithdebinfo, debug]
       dry_run:
@@ -180,7 +180,7 @@ jobs:
       # backend is a tarball and not SCCACHE_GHA_ENABLED.
       cjHeapSize: 12GB
       cjHeapSwap: "on"
-      CJCJ_STAGE3_STDLIB_BUILD_TYPE: ${{ inputs.build_type || 'relwithdebinfo' }}
+      CJCJ_STAGE3_STDLIB_BUILD_TYPE: ${{ github.event_name == 'workflow_dispatch' && inputs.build_type || 'release' }}
     steps:
       - name: Checkout cjcj
         uses: actions/checkout@v7
@@ -260,7 +260,7 @@ jobs:
         run: |
           npx --yes zx@8 build/cli.mjs \
             --target "${{ matrix.target }}" \
-            --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" \
+            --build-type "${{ github.event_name == 'workflow_dispatch' && inputs.build_type || 'release' }}" \
             --cangjie-version "${{ steps.version.outputs.value }}" \
             fetch \
             --repo-url "compiler=$CANGJIE_COMPILER_URL" \
@@ -545,12 +545,12 @@ jobs:
       - name: Build stdx from source
         env:
           CJCJ_SRCBUILD_CONSUMER_SDK: ${{ env.CANGJIE_WORKSPACE }}/software/cangjie
-        run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" build stdx
+        run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" --build-type "${{ github.event_name == 'workflow_dispatch' && inputs.build_type || 'release' }}" --cangjie-version "${{ steps.version.outputs.value }}" build stdx
 
       - name: Build SDK tools from source
         env:
           CJCJ_SRCBUILD_CONSUMER_SDK: ${{ env.CANGJIE_WORKSPACE }}/software/cangjie
-        run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" build tools
+        run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" --build-type "${{ github.event_name == 'workflow_dispatch' && inputs.build_type || 'release' }}" --cangjie-version "${{ steps.version.outputs.value }}" build tools
 
       - name: Prepare source-built cjpm artifact
         run: |
@@ -586,8 +586,8 @@ jobs:
         env:
           CJCJ_SRCBUILD_CONSUMER_SDK: ${{ env.CANGJIE_WORKSPACE }}/software/cangjie
         run: |
-          npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" package
-          npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" verify
+          npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" --build-type "${{ github.event_name == 'workflow_dispatch' && inputs.build_type || 'release' }}" --cangjie-version "${{ steps.version.outputs.value }}" package
+          npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" --build-type "${{ github.event_name == 'workflow_dispatch' && inputs.build_type || 'release' }}" --cangjie-version "${{ steps.version.outputs.value }}" verify
 
       - name: Build compiler shim
         env:
