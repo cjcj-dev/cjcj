@@ -24,7 +24,7 @@ export function fixture(check, target = 'linux-x64') {
     fs.mkdirSync(dylib);
     const libraryBytes = process.env.DYLIB_TEST_FILE
       ? fs.readFileSync(process.env.DYLIB_TEST_FILE) : Buffer.from('reviewed dylib fixture');
-    fs.writeFileSync(path.join(dylib, 'libLLVM-15.so'), libraryBytes);
+    fs.writeFileSync(path.join(dylib, target.startsWith('darwin-') ? 'libLLVM.dylib' : 'libLLVM-15.so'), libraryBytes);
     const dylibSha = crypto.createHash('sha256').update(libraryBytes).digest('hex');
     fs.writeFileSync(path.join(dylib, 'manifest.json'), JSON.stringify({
       llvm_sha: 'a'.repeat(40), sha256: dylibSha, targets: ['X86', 'ARM', 'AArch64']}));

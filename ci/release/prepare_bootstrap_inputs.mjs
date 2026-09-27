@@ -102,14 +102,15 @@ if (!/^[0-9a-f]{40}$/.test(cjcjSha)) throw new Error('cjcj sha missing (GITHUB_S
 // LLVM and from the static tuple's eight payloads. An explicitly selected input
 // never falls back after a missing file or identity mismatch.
 const colourInputs = {};
-// The pinned .so producer supports the Linux bootstrap hosts.
-if (process.platform === 'linux' || process.env.CJCJ_BOOTSTRAP_DYLIB_ARTIFACT
+// Select the library for the source cell, as for the independent host LLVM.
+const darwin = (process.env.CJCJ_SRCBUILD_TARGET || process.platform).startsWith('darwin');
+if (process.platform === 'linux' || darwin || process.env.CJCJ_BOOTSTRAP_DYLIB_ARTIFACT
     || process.env.CJCJ_BOOTSTRAP_COLOUR_DYLIB) {
   const dylibRoot = process.env.CJCJ_BOOTSTRAP_DYLIB_ARTIFACT
     || process.env.CJCJ_BOOTSTRAP_COLOUR_DYLIB
     || path.join(process.env.CJCJ_LLVM_DEPOT_ROOT || '/root/llvmdepot',
       llvmSha, process.env.CANGJIE_COMPILER_SHA || '', 'dylib');
-  const colourLlvm = path.join(dylibRoot, 'libLLVM-15.so');
+  const colourLlvm = path.join(dylibRoot, darwin ? 'libLLVM.dylib' : 'libLLVM-15.so');
   const dylibPin = process.env.LLVM_DYLIB_SHA256 || '';
   if (!/^[0-9a-f]{64}$/.test(dylibPin)) throw new Error('LLVM_DYLIB_PIN_MISSING');
   if (!fs.existsSync(colourLlvm)) throw new Error(`LLVM_DYLIB_MISSING: ${colourLlvm}`);
