@@ -11,7 +11,8 @@ const platform = process.env.PLATFORM || 'darwin_aarch64';
 const tuple = `${platform}_cjnative`;
 const files = [`runtime/lib/${tuple}/libcangjie-runtime.dylib`,
   `runtime/lib/${tuple}/libboundscheck.dylib`, `lib/${tuple}/libcangjie-runtime.a`];
-const product = process.env.DARWIN_RT_PRODUCT || fileURLToPath(new URL('./darwin_runtime.mjs', import.meta.url));
+const originalProduct = fileURLToPath(new URL('./darwin_runtime.mjs', import.meta.url));
+const product = process.env.DARWIN_RT_PRODUCT || originalProduct;
 function fixture(body) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'darwin-runtime-'));
   const source = path.join(root, 'source');
@@ -27,7 +28,14 @@ function fixture(body) {
   fs.writeFileSync(path.join(source, 'SOURCE_SHA'), env.RUNTIME_REF);
   const run = (mode, dir = output, reference) => spawnSync(process.execPath,
     [product, mode, dir, platform, ...(reference ? [reference] : [])], {env, encoding: 'utf8'});
-  try { body({root, source, output, env, run}); }
+  try {
+    // Consumer controls start with a manifest emitted by the actual producer.
+    // Keep the producer intact when cutting only the consumer bearing point.
+    const prepared = spawnSync(process.execPath, [originalProduct, 'prepare', output, platform, source], {env, encoding: 'utf8'});
+    assert.equal(prepared.status, 0, prepared.stderr);
+    env.COLOUR_RT_MANIFEST_SHA256 = digest(path.join(output, 'manifest.json'));
+    body({root, source, output, env, run});
+  }
   finally { fs.rmSync(root, {recursive: true, force: true}); }
 }
 
@@ -41,11 +49,6 @@ test('producer copies exactly the three native source libraries', () => fixture(
 }));
 
 test('consumer rejects changed library bytes after authentic manifest verification', () => fixture(({source, output, env, run}) => {
-  fs.cpSync(source, output, {recursive: true});
-  fs.writeFileSync(path.join(output, 'manifest.json'), JSON.stringify({role: 'colour-runtime-libraries', platform,
-    runtime_sha: env.RUNTIME_REF, run_id: '123', run_attempt: '1',
-    files: Object.fromEntries(files.map(rel => [rel, digest(path.join(source, rel))]))}));
-  env.COLOUR_RT_MANIFEST_SHA256 = digest(path.join(output, 'manifest.json'));
   assert.equal(run('verify').status, 0);
   fs.appendFileSync(path.join(output, files[0]), 'changed payload');
   const rejected = run('verify');
@@ -55,11 +58,6 @@ test('consumer rejects changed library bytes after authentic manifest verificati
 }));
 
 test('source classifies missing std only after verifying all native libraries', () => fixture(({source, output, env, run}) => {
-  fs.cpSync(source, output, {recursive: true});
-  fs.writeFileSync(path.join(output, 'manifest.json'), JSON.stringify({role: 'colour-runtime-libraries', platform,
-    runtime_sha: env.RUNTIME_REF, run_id: '123', run_attempt: '1',
-    files: Object.fromEntries(files.map(rel => [rel, digest(path.join(source, rel))]))}));
-  env.COLOUR_RT_MANIFEST_SHA256 = digest(path.join(output, 'manifest.json'));
   const result = run('source');
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, new RegExp(`COLOUR_RT_STD_MISSING: ${platform}`));

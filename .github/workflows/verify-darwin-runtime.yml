@@ -30,6 +30,10 @@ jobs:
           github-token: ${{ github.token }}
           run-id: ${{ env.COLOUR_RT_RUN_ID }}
           path: colour-runtime
+      - name: Exercise producer manifests and consumer cuts on downloaded native bytes
+        env:
+          DARWIN_RT_NATIVE_SOURCE: colour-runtime
+        run: bash ci/release/test_darwin_runtime_controls.sh evidence/controls
       - name: Exercise the source entries with candidate, missing pin and restored input
         run: |
           set -euo pipefail
