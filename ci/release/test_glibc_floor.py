@@ -36,12 +36,31 @@ class GlibcFloorTest(unittest.TestCase):
             shutil.copyfile(self.low, self.official / scope / "payload")
         shutil.copytree(self.official, self.candidate)
 
-    def run_gate(self):
+    def versioned_payload(self, version):
+        """Produce real ELF version-needs records, including nonnumeric names."""
+        directory = self.root / version
+        directory.mkdir()
+        (directory / "provider.c").write_text("int supplied(void) { return 0; }\n")
+        (directory / "consumer.c").write_text("extern int supplied(void); int entry(void) { return supplied(); }\n")
+        (directory / "versions.map").write_text(version + " { global: supplied; local: *; };\n")
+        provider = directory / "libfloor-provider.so"
+        output = directory / "consumer.so"
+        subprocess.run([
+            "cc", "-shared", "-fPIC", str(directory / "provider.c"),
+            "-Wl,--version-script=" + str(directory / "versions.map"),
+            "-Wl,-soname,libfloor-provider.so", "-o", str(provider),
+        ], check=True)
+        subprocess.run([
+            "cc", "-shared", "-fPIC", str(directory / "consumer.c"), str(provider), "-o", str(output),
+        ], check=True)
+        return output
+
+    def run_gate(self, env=None):
         destination = self.root / "report.json"
         process = subprocess.run([
             sys.executable, str(SCANNER), "--candidate", str(self.candidate),
             "--official", str(self.official), "--json", str(destination),
-        ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+        ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, env=env)
         report = json.loads(destination.read_text())
         print("CLI_RESULT {} rc={} elf={} failures={}".format(
             self._testMethodName, process.returncode, report.get("elf_count"), report["failures"]), flush=True)
@@ -70,6 +89,13 @@ class GlibcFloorTest(unittest.TestCase):
                     self.assertEqual((rc, observed), (1, [(target, "rejected")]))
                 finally:
                     shutil.copyfile(self.low, self.candidate / target)
+        with self.subTest(scope="numeric-order"):
+            shutil.copyfile(self.versioned_payload("GLIBC_2.9"), self.official / "bin/payload")
+            shutil.copyfile(self.versioned_payload("GLIBC_2.10"), self.candidate / "bin/payload")
+            rc, report = self.run_gate()
+            observed = [(row["path"], row["status"]) for row in report["files"] if row["status"] != "accepted"]
+            print("TARGET_ABI_ASSERT scope=numeric-order rc={} verdict={}".format(rc, observed), flush=True)
+            self.assertEqual((rc, observed), (1, [("bin/payload", "rejected")]))
 
     def test_missing_official_counterpart_fails_closed(self):
         (self.official / "bin/payload").unlink()
@@ -125,6 +151,30 @@ class GlibcFloorTest(unittest.TestCase):
                 (root / scope / "payload").unlink()
         rc, report = self.run_gate()
         self.assertEqual((rc, report["failures"]), (1, ["no ELF payload inspected"]))
+
+    def test_named_abi_requirement_must_exist_in_reference(self):
+        named = self.versioned_payload("GLIBC_ABI_DT_RELR")
+        shutil.copyfile(named, self.candidate / "bin/payload")
+        rc, report = self.run_gate()
+        self.assertEqual((rc, report["failures"]), (1, ["bin/payload"]))
+        shutil.copyfile(named, self.official / "bin/payload")
+        rc, report = self.run_gate()
+        self.assertEqual((rc, report["failures"]), (0, []))
+
+    def test_private_glibc_requirement_is_rejected(self):
+        private = self.versioned_payload("GLIBC_PRIVATE")
+        for root in (self.candidate, self.official):
+            shutil.copyfile(private, root / "bin/payload")
+        rc, report = self.run_gate()
+        self.assertEqual((rc, report["failures"]), (1, ["bin/payload"]))
+
+    def test_missing_readelf_cannot_report_success(self):
+        rc, report = self.run_gate(env=dict(os.environ, PATH=""))
+        self.assertEqual(rc, 1, report)
+        self.assertFalse(report["passed"])
+        rows = [row for row in report["files"] if row["status"] == "error"]
+        self.assertEqual({row["path"] for row in rows}, {scope + "/payload" for scope in SCOPES})
+        self.assertTrue(all("readelf" in row["reason"] for row in rows))
 
 
 if __name__ == "__main__":
