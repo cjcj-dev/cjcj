@@ -63,7 +63,9 @@ while read -r identity_platform key val extra; do
     *) fail "unknown identity platform: $identity_platform" ;;
   esac
   [ "$identity_platform" = "${platform%_cjnative}" ] || continue
-  [ -z "${extra:-}" ] && [[ "${val:-}" =~ ^[a-f0-9]{64}$ ]] || fail "invalid host identity: $identity_platform $key"
+  if [ -n "${extra:-}" ] || [[ ! "${val:-}" =~ ^[a-f0-9]{64}$ ]]; then
+    fail "invalid host identity: $identity_platform $key"
+  fi
   case "$key" in
     libcangjie-runtime.so) [ -z "$decl_runtime" ] || fail "duplicate host identity: $key"; decl_runtime=$val ;;
     libboundscheck.so) [ -z "$decl_bounds" ] || fail "duplicate host identity: $key"; decl_bounds=$val ;;
