@@ -9,6 +9,7 @@ on:
       - ci/bootstrap/bootstrap.sh
       - ci/bootstrap/test_native_host.sh
       - ci/bootstrap/test_native_host_controls.py
+      - ci/bootstrap/test_native_runner_controls.py
       - ci/bootstrap/host_tools.sh
       - ci/bootstrap/host_nm.py
       - ci/bootstrap/sdk_build.sh
@@ -60,6 +61,9 @@ jobs:
       - name: Assert native std producer and consumer identities
         if: always()
         run: python3 ci/release/test_darwin_std_controls.py "$RUNNER_TEMP/native-host-evidence/std"
+      - name: Observe native compiler and backend runner bindings
+        if: always()
+        run: python3 ci/bootstrap/test_native_runner_controls.py "$RUNNER_TEMP/native-host-evidence/runner"
       - name: Preserve entry output and product identities
         if: always()
         uses: actions/upload-artifact@v7
