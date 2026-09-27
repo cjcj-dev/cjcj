@@ -5,3 +5,5 @@ public class Item {
 }
 
 public func entry(value: Item): Int64 { value.size }
+
+main(): Int64 { entry(Item()) - 7 }

@@ -1,9 +1,11 @@
 package dispatch_uses_static
 
-public interface Measured {
+interface Measured {
     static prop size: Int64
 }
-
-public func readSize<T>(): Int64 where T <: Measured {
-    T.size
+interface Reader<T> where T <: Measured {
+    func readSize(): Int64 { T.size }
 }
+class Item <: Measured { public static prop size: Int64 { get() { 7 } } }
+class ItemReader <: Reader<Item> {}
+main(): Int64 { ItemReader().readSize() - 7 }

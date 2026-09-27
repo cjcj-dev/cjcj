@@ -17,7 +17,7 @@ def check(source, compiler, out):
     # Keep dispatch in CHIR so the declaration/use invariant can be read even
     # when a broken callee user edge would fail the subsequent devirtualizer.
     command = [str(compiler), str(source), '-O2', '--emit-chir=opt',
-               '--output-type=staticlib', '--dump-chir', '--fno-chir-devirtualization',
+               '--output-type=exe', '--dump-chir', '--fno-chir-devirtualization',
                '--fno-chir-function-inlining', '--jobs', str(os.cpu_count()),
                '-o', str(destination / 'output.chir')]
     start = time.monotonic()
@@ -27,7 +27,7 @@ def check(source, compiler, out):
                                 stderr=subprocess.STDOUT, timeout=180).returncode
         except subprocess.TimeoutExpired:
             rc = 124
-    dumps = sorted(destination.glob('**/*UselessFuncElimination.chirtxt'))
+    dumps = sorted(destination.glob('**/*RunArrayListConstStartOpt.chirtxt'))
     assertions = []
     if rc == 0 and dumps:
         text = dumps[-1].read_text()
@@ -63,7 +63,7 @@ def main():
     compiler, out = args.compiler.resolve(), args.out.resolve()
     out.mkdir(parents=True, exist_ok=True)
     before = subprocess.check_output(['uptime'], text=True).strip()
-    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
         cases = list(pool.map(lambda source: check(source, compiler, out),
                               sorted(Path(__file__).resolve().parent.glob('*.cj'))))
     manifest = dict(compiler=str(compiler), compiler_sha256=hashlib.sha256(compiler.read_bytes()).hexdigest(),
