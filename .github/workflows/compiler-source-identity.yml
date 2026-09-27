@@ -1,0 +1,148 @@
+name: Compiler source identity
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  source:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        arm: [candidate, cut-producer, cut-consumer, restored]
+    steps:
+      - uses: actions/checkout@v7
+      - name: Load compiler and AST pins
+        run: cat ci/llvm_pin.env ci/ast_support/linux_x86_64.env >> "$GITHUB_ENV"
+      - uses: ./.github/actions/sccache
+        with:
+          component: compiler-source-identity
+          platform: linux_x86_64
+          pin: ${{ env.CANGJIE_COMPILER_SHA }}-${{ env.LLVM_SHA }}-${{ env.FLATBUFFERS_SHA }}
+      - name: Install source build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq clang cmake ninja-build
+      - uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ env.AST_SUPPORT_ARTIFACT_ID }}
+          run-id: ${{ env.AST_SUPPORT_RUN_ID }}
+          github-token: ${{ github.token }}
+          merge-multiple: true
+          path: ${{ runner.temp }}/ast-input
+      - name: Verify the pinned AST archive
+        run: echo "$AST_SUPPORT_SHA256  $RUNNER_TEMP/ast-input/libcangjie-ast-support.a" | sha256sum --check --strict
+      - name: Fetch the actual compiler
+        run: |
+          set -euo pipefail
+          git init "$RUNNER_TEMP/compiler-source"
+          git -C "$RUNNER_TEMP/compiler-source" fetch --depth=1 "$CANGJIE_COMPILER_URL" "$CANGJIE_COMPILER_SHA"
+          git -C "$RUNNER_TEMP/compiler-source" checkout --detach FETCH_HEAD
+          test "$(git -C "$RUNNER_TEMP/compiler-source" rev-parse HEAD)" = "$CANGJIE_COMPILER_SHA"
+      - name: Apply the product control arm
+        env:
+          ARM: ${{ matrix.arm }}
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          arm = os.environ['ARM']
+          if arm == 'cut-producer':
+              file = Path('ci/bootstrap/prepare_cpp_headers.mjs')
+              old = 'compiler: {url: pin.CANGJIE_COMPILER_URL, sha: pin.CANGJIE_COMPILER_SHA},'
+              new = "compiler: {url: pin.CANGJIE_COMPILER_URL, sha: '0'.repeat(40)},"
+          elif arm == 'cut-consumer':
+              file = Path('ci/install_std_sdk_inputs.py')
+              old = 'shutil.copytree(artifact / name, sdk / name, dirs_exist_ok=True, symlinks=False)'
+              new = "shutil.copytree(artifact / name, sdk / ('schema-disconnected' if name == 'schema' else name), dirs_exist_ok=True, symlinks=False)"
+          else:
+              raise SystemExit(0)
+          text = file.read_text()
+          assert text.count(old) == 1
+          file.write_text(text.replace(old, new))
+          PY
+          git diff > "$RUNNER_TEMP/cut.diff"
+      - name: Build the shim and execute the real AST installer
+        env:
+          ARM: ${{ matrix.arm }}
+        run: |
+          set -euo pipefail
+          ulimit -c 0
+          export CANGJIE_BUILD_JOBS
+          CANGJIE_BUILD_JOBS=$(nproc)
+          uptime > "$RUNNER_TEMP/uptime-before.txt"
+          sha256sum "$(command -v node)" > "$RUNNER_TEMP/node.sha256"
+          set +e
+          node ci/bootstrap/test_compiler_source.mjs "$RUNNER_TEMP/compiler-source" \
+            "$RUNNER_TEMP/ast-input" "$RUNNER_TEMP/compiler-result"
+          rc=$?
+          set -e
+          echo "$rc" > "$RUNNER_TEMP/compiler-result/entry.rc"
+          uptime > "$RUNNER_TEMP/uptime-after.txt"
+          cp "$RUNNER_TEMP/cut.diff" "$RUNNER_TEMP/node.sha256" \
+            "$RUNNER_TEMP/uptime-before.txt" "$RUNNER_TEMP/uptime-after.txt" "$RUNNER_TEMP/compiler-result/"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          root = Path(os.environ['RUNNER_TEMP']) / 'compiler-result'
+          result = json.loads((root / 'result.json').read_text())
+          arm = os.environ['ARM']
+          expected = {'cut-producer': ['shim-manifest-compiler-identity'],
+                      'cut-consumer': ['installed-schema-source']}.get(arm, [])
+          failed = [x['name'] for x in result['assertions'] if not x['pass']]
+          assert len(result['commands']) == 5 and all(x['rc'] == 0 for x in result['commands']), result
+          assert len(result['assertions']) == 9, result
+          assert failed == expected, (failed, expected)
+          assert int((root / 'entry.rc').read_text()) == result['rc'] == bool(expected), result
+          print('COMPILER_ARM_ASSERTIONS', arm, 'failed=', failed, 'shim=', result['shimSha256'])
+          PY
+      - uses: ./.github/actions/sccache-report
+        if: always()
+        with:
+          component: compiler-source-identity
+          platform: linux_x86_64
+          require-compiles: ${{ job.status == 'success' }}
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: compiler-source-${{ matrix.arm }}
+          path: ${{ runner.temp }}/compiler-result/
+          if-no-files-found: error
+          retention-days: 90
+
+  compare:
+    needs: source
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: compiler-source-*
+          path: evidence
+      - name: Compare unchanged artifacts and exact product cuts
+        run: |
+          python3 - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          arms = ['candidate', 'cut-producer', 'cut-consumer', 'restored']
+          roots = {a: Path('evidence/compiler-source-' + a) for a in arms}
+          results = {a: json.loads((p / 'result.json').read_text()) for a, p in roots.items()}
+          assert len({r['shimSha256'] for r in results.values()}) == 1, results
+          assert len({(p / 'node.sha256').read_text() for p in roots.values()}) == 1
+          for a, p in roots.items():
+              digest = hashlib.sha256((p / 'runtime_shim/cjselfhost_llvmshim.o').read_bytes()).hexdigest()
+              assert digest == results[a]['shimSha256']
+          original = results['candidate']['inputs']
+          assert results['restored']['inputs'] == original
+          for a, changed in [('cut-producer', 'ci/bootstrap/prepare_cpp_headers.mjs'),
+                             ('cut-consumer', 'ci/install_std_sdk_inputs.py')]:
+              assert [f for f in original if original[f] != results[a]['inputs'][f]] == [changed]
+          print('COMPILER_SOURCE_CLOSURE', json.dumps({a: {
+              'rc': results[a]['rc'], 'assertions': len(results[a]['assertions']),
+              'failed': [x['name'] for x in results[a]['assertions'] if not x['pass']],
+              'shimSha256': results[a]['shimSha256']} for a in arms}))
+          PY
