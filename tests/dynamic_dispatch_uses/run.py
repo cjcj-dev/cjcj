@@ -41,12 +41,14 @@ def check(source, compiler, out):
             declarations = {}
             for match in re.finditer(r'^.*?\bFunc (@[^\n(]+)\([^\n]*(?:\n.*?)*?\):[^\n]*', text, re.M):
                 declarations[match[1]] = match[0]
-            assertions.append(dict(name='virtual_getter_executed_in_chir', passed=bool(getters), observed=getters))
+            assertions.append(dict(name='virtual_getter_present_in_chir', passed=bool(getters), observed=getters))
             assertions.append(dict(name='live_getter_keeps_declaring_type', passed=bool(getters) and
                                    all('declaredParent:' in declarations.get(name, '') for name in getters),
                                    observed={name: declarations.get(name) for name in getters}))
     record = dict(case=source.stem, command=command, rc=rc, wall=time.monotonic()-start,
-                  input_sha256=hashlib.sha256(source.read_bytes()).hexdigest(), assertions=assertions)
+                  input_sha256=hashlib.sha256(source.read_bytes()).hexdigest(), assertions=assertions,
+                  observation=str(dumps[-1]) if dumps else None,
+                  observation_sha256=hashlib.sha256(dumps[-1].read_bytes()).hexdigest() if dumps else None)
     record['passed'] = rc == 0 and bool(assertions) and all(a['passed'] for a in assertions)
     for assertion in assertions:
         print(f"ASSERT {source.stem}:{assertion['name']} {'PASS' if assertion['passed'] else 'FAIL'}", flush=True)
@@ -67,7 +69,13 @@ def main():
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
         cases = list(pool.map(lambda source: check(source, compiler, out),
                               sorted(Path(__file__).resolve().parent.glob('*.cj'))))
-    manifest = dict(compiler=str(compiler), compiler_sha256=hashlib.sha256(compiler.read_bytes()).hexdigest(),
+    libraries = {}
+    for directory in os.environ.get('LD_LIBRARY_PATH', '').split(':'):
+        for name in ('libcangjie-runtime.so', 'libboundscheck.so', 'libLLVM-15.so'):
+            path = Path(directory) / name
+            if name not in libraries and path.is_file():
+                libraries[name] = dict(path=str(path.resolve()), sha256=hashlib.sha256(path.read_bytes()).hexdigest())
+    manifest = dict(libraries=libraries, compiler=str(compiler), compiler_sha256=hashlib.sha256(compiler.read_bytes()).hexdigest(),
                     affinity=sorted(os.sched_getaffinity(0)), uptime_before=before,
                     uptime_after=subprocess.check_output(['uptime'], text=True).strip(), cases=cases)
     (out / 'result.json').write_text(json.dumps(manifest, indent=2) + '\n')
