@@ -12,7 +12,7 @@ import tempfile
 
 PRODUCT = Path(__file__).with_name('sdk_verify.py')
 PIN = Path(__file__).resolve().parents[1] / 'runtime_pin.env'
-COMMIT = '4c4cbf53b44497103e76e2a47a8fa35f5d7a7287'
+COMMIT = 'a891df782f6132909c81afb9ecb4c05a73278d03'
 LLVM_SHA = 'a' * 40
 
 
