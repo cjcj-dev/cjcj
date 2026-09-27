@@ -16,7 +16,7 @@ const pins = file => Object.fromEntries(read(file).trim().split('\n').map(line =
 const llvm = pins('ci/llvm_pin.env');
 const input = JSON.parse(read('ci/bootstrap_inputs_pin.json'));
 
-test('release runtime loader selects the return-poll runtime paired with LLVM', () => {
+test('release runtime loader selects the stack-slot-root runtime paired with LLVM', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'release-pair-'));
   try {
     const output = path.join(dir, 'github-env');
@@ -25,13 +25,13 @@ test('release runtime loader selects the return-poll runtime paired with LLVM', 
     const result = spawnSync(process.execPath, [fileURLToPath(new URL('ci/load_runtime_pin.mjs', root))], {env, encoding: 'utf8'});
     assert.equal(result.status, 0, result.stderr);
     const selected = /^RUNTIME_REF=(.*)$/m.exec(fs.readFileSync(output, 'utf8'))?.[1];
-    assert.equal(selected, '50a83f258c431e97a141c4e34e7c1239dd4e91ad', 'release runtime must provide the paired return-poll handler');
+    assert.equal(selected, '97c42fe77c42bc33efedbe6a395043fd58443358', 'release runtime must provide the paired ordinary-statepoint register-root contract');
     console.log(`ASSERT release-runtime-selected=${selected}`);
   } finally { fs.rmSync(dir, {recursive: true, force: true}); }
 });
 
-test('release LLVM source and both dylib provenance pins use the return-poll producer', () => {
-  assert.equal(llvm.LLVM_SHA, '47af16885ca321ade18fa97dfa00725930685ca0');
+test('release LLVM source and both dylib provenance pins use the stack-slot-root and RawData safepoint producer', () => {
+  assert.equal(llvm.LLVM_SHA, 'e40afeefa6ccaee67d0d3e30d8a70b08f25c86f6');
   for (const platform of ['linux_x86_64', 'linux_aarch64']) {
     const dylib = pins(`ci/llvm-dylib/${platform}.env`);
     assert.equal(dylib.LLVM_DYLIB_SOURCE_SHA, llvm.LLVM_SHA, platform);
@@ -39,6 +39,21 @@ test('release LLVM source and both dylib provenance pins use the return-poll pro
     assert.equal(dylib.LLVM_DYLIB_RUN_ATTEMPT, llvm.LLVM_TUPLE_RUN_ATTEMPT, platform);
   }
   console.log('ASSERT release-llvm-dylib-pair executed');
+});
+
+test('every platform dylib pin names the paired prerelease that published it', () => {
+  const release = JSON.parse(read('ci/llvm-dylib/release.json'));
+  assert.equal(release.llvm_sha, llvm.LLVM_SHA);
+  assert.equal(release.run_id, llvm.LLVM_TUPLE_RUN_ID);
+  assert.equal(release.run_attempt, llvm.LLVM_TUPLE_RUN_ATTEMPT);
+  assert.equal(release.prerelease, true, 'the tuple must ship as a prerelease, never a full release');
+  for (const platform of ['linux_x86_64', 'linux_aarch64', 'darwin_x86_64', 'darwin_aarch64']) {
+    const dylib = pins(`ci/llvm-dylib/${platform}.env`);
+    assert.equal(dylib.LLVM_DYLIB_SOURCE_SHA, llvm.LLVM_SHA, platform);
+    assert.equal(String(release.platforms[platform].artifact_id), dylib.LLVM_DYLIB_ARTIFACT_ID, platform);
+    assert.equal(release.platforms[platform].library_sha256, dylib.LLVM_DYLIB_SHA256, platform);
+  }
+  console.log(`ASSERT release-dylib-prerelease-pair run=${release.run_id} prerelease=${release.prerelease}`);
 });
 
 test('release tuple sums digest equals the reviewed LLVM pin and immutable input', () => {
