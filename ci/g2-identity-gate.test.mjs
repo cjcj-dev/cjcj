@@ -366,3 +366,18 @@ test('capture records a dirty build truthfully instead of laundering it', async 
   assert.equal(value.status, 'NOT_MET');
   assert.match(value.value, /std\.source_dirty=true/);
 });
+
+// Like the packaged-std P05 contract, count production workflow invocations,
+// not mentions in tests, comments, or the capture command's usage text.
+test('G2 identity capture has exactly one workflow consumer', async () => {
+  const workflows = path.join(repo, '.github', 'workflows');
+  const consumers = [];
+  for (const name of (await fs.readdir(workflows)).sort()) {
+    if (!/\.ya?ml$/.test(name)) continue;
+    const source = await fs.readFile(path.join(workflows, name), 'utf8');
+    const calls = source.match(/^[ \t]*(?:run:[ \t]*)?node[ \t]+ci\/capture-g2-identity\.mjs(?=[ \t]|$)/gm) || [];
+    consumers.push(...calls.map(() => name));
+  }
+  assert.equal(consumers.length, 1,
+    `G2_WORKFLOW_CONSUMERS: expected exactly one capture invocation; found ${JSON.stringify(consumers)}`);
+});
