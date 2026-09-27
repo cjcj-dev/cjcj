@@ -7,6 +7,12 @@ on:
       - 'ci/srcbuild/steps/build-android-*.mjs'
       - 'ci/release/cross-runtime.mjs'
   workflow_dispatch:
+    inputs:
+      runtime_ref:
+        description: Exact runtime commit for this evidence-only build; empty uses the pin
+        required: false
+        type: string
+        default: ''
 permissions:
   contents: read
 jobs:
@@ -21,11 +27,15 @@ jobs:
       - uses: ./.github/actions/setup-release-sdk
         with:
           requirement: android-ndk
+      - name: Resolve runtime provenance
+        env:
+          CJCJ_RUNTIME_REF_OVERRIDE: ${{ inputs.runtime_ref }}
+          CJCJ_ALLOW_RUNTIME_OVERRIDE: ${{ github.event_name == 'workflow_dispatch' && inputs.runtime_ref != '' }}
+        run: npx --yes zx@8 ci/load_runtime_pin.mjs
       - name: Fetch pinned runtime
         shell: bash
         run: |
           set -euo pipefail
-          source ci/runtime_pin.env
           {
             echo "RUNTIME_REF=$RUNTIME_REF"
             echo "RUNTIME_VERSION=$RUNTIME_VERSION"
