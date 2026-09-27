@@ -41,6 +41,21 @@ test('release LLVM source and both dylib provenance pins use the stack-slot-root
   console.log('ASSERT release-llvm-dylib-pair executed');
 });
 
+test('every platform dylib pin names the paired prerelease that published it', () => {
+  const release = JSON.parse(read('ci/llvm-dylib/release.json'));
+  assert.equal(release.llvm_sha, llvm.LLVM_SHA);
+  assert.equal(release.run_id, llvm.LLVM_TUPLE_RUN_ID);
+  assert.equal(release.run_attempt, llvm.LLVM_TUPLE_RUN_ATTEMPT);
+  assert.equal(release.prerelease, true, 'the tuple must ship as a prerelease, never a full release');
+  for (const platform of ['linux_x86_64', 'linux_aarch64', 'darwin_x86_64', 'darwin_aarch64']) {
+    const dylib = pins(`ci/llvm-dylib/${platform}.env`);
+    assert.equal(dylib.LLVM_DYLIB_SOURCE_SHA, llvm.LLVM_SHA, platform);
+    assert.equal(String(release.platforms[platform].artifact_id), dylib.LLVM_DYLIB_ARTIFACT_ID, platform);
+    assert.equal(release.platforms[platform].library_sha256, dylib.LLVM_DYLIB_SHA256, platform);
+  }
+  console.log(`ASSERT release-dylib-prerelease-pair run=${release.run_id} prerelease=${release.prerelease}`);
+});
+
 test('release tuple sums digest equals the reviewed LLVM pin and immutable input', () => {
   const digest = createHash('sha256').update(read('ci/llvm_tuple_SHA256SUMS')).digest('hex');
   assert.equal(llvm.LLVM_TUPLE_SUMS_SHA, digest, 'reviewed tuple checksum pin');
