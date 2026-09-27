@@ -1040,6 +1040,10 @@ stage1
 });
 
 
+// Registered fixture identities, independent of the selected archive at run time.
+const astInputSha = '3bd4034ec7aafa46a586d57042ec2009df39c18ab14f97766aeb030637fe4b0a';
+const campaignAstSha = 'f1bdd6b76bdd2b82e6a991a759dbd317a07244c4716e08fb1e0c69579f29f337';
+
 // Execute the complete driver, including retained-state loading, prerequisite,
 // run_step and the final RESULT. Only external inputs live in the fixture.
 function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFailure = false, child = false, runtimeCase = 'valid', ast = 'explicit', largeContract = false, contractDefect} = {}) {
@@ -1150,7 +1154,7 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
     CJCJ_BOOTSTRAP_HOST_LLVM_SO: inputs + '/libLLVM-15.so',
     CJCJ_BOOTSTRAP_HOST_LLVM_SHA256: sha256(inputs + '/libLLVM-15.so'),
     CJCJ_BOOTSTRAP_AST_SUPPORT: inputs + '/ast.a',
-    CJCJ_BOOTSTRAP_AST_SUPPORT_SHA256: sha256(inputs + '/ast.a'),
+    CJCJ_BOOTSTRAP_AST_SUPPORT_SHA256: astInputSha,
     CJCJ_BOOTSTRAP_COLOUR_TUPLE: tuple,
     CJCJ_BOOTSTRAP_COLOUR_RT: runtimeCase === 'undeclared' ? '' : runtimeDir,
     CJCJ_BOOTSTRAP_COLOUR_RT_SHA256: runtimeCase === 'no-runtime-sha' ? '' : runtimeSha,
@@ -1158,14 +1162,18 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
     CJCJ_BOOTSTRAP_CJCJ_SHA: sourceSha,
   };
   const campaignArchive = path.join(state, 'buildtools/lib/libcangjie-ast-support.a');
-  if (ast === 'campaign' || ast === 'precedence') {
+  if (ast.startsWith('campaign') || ast === 'precedence') {
     fs.mkdirSync(path.dirname(campaignArchive), {recursive: true});
     fs.writeFileSync(campaignArchive, 'campaign ast input\n');
   }
-  if (ast === 'missing' || ast === 'campaign') {
+  if (ast.startsWith('campaign')) {
     delete env.CJCJ_BOOTSTRAP_AST_SUPPORT;
-    delete env.CJCJ_BOOTSTRAP_AST_SUPPORT_SHA256;
+    env.CJCJ_BOOTSTRAP_AST_SUPPORT_SHA256 = campaignAstSha;
   }
+  if (ast === 'missing') delete env.CJCJ_BOOTSTRAP_AST_SUPPORT;
+  if (ast === 'missing' || ast.endsWith('no-sha')) delete env.CJCJ_BOOTSTRAP_AST_SUPPORT_SHA256;
+  if (ast.endsWith('invalid-sha')) env.CJCJ_BOOTSTRAP_AST_SUPPORT_SHA256 = 'g'.repeat(64);
+  if (ast.endsWith('corrupt')) fs.appendFileSync(ast.startsWith('campaign') ? campaignArchive : inputs + '/ast.a', 'changed');
   if (ast === 'wrong-sha') env.CJCJ_BOOTSTRAP_AST_SUPPORT_SHA256 = '0'.repeat(64);
   delete env.CJCJ_BOOTSTRAP_SH;
   delete env.CJCJ_SRCBUILD_CPUSET;
@@ -1363,9 +1371,7 @@ for (const ast of ['missing', 'campaign', 'precedence']) {
     const fixture = bootstrapDriverFixture(t, {ast});
     const result = fixture.dryRun(31, 1);
     const command = result.stdout.match(/^DRY_RUN COMMAND=(.*)$/m)?.[1];
-    const archive = path.join(fixture.root, ast === 'campaign'
-      ? '.srcbuild/buildtools/lib/libcangjie-ast-support.a' : 'inputs/ast.a');
-    const expectedSha = ast === 'missing' ? '' : sha256(archive);
+    const expectedSha = ast === 'missing' ? '' : ast === 'campaign' ? campaignAstSha : astInputSha;
     // Collect the product result before asserting, including failure diagnostics.
     const observed = {
       rc: result.status,
@@ -1403,3 +1409,39 @@ test('ast-support input contract missing stops real stage entry', t => {
   console.log(`AST_ENTRY_ASSERT ${JSON.stringify(observed)}`);
   assert.deepEqual(observed, {rc: 1, missingKey: true, bootstrapStarted: false});
 });
+
+for (const source of ['campaign', 'explicit']) {
+  for (const defect of ['no-sha', 'invalid-sha']) {
+    test(`ast-support input contract ${source}-${defect} rejects declaration`, t => {
+      const fixture = bootstrapDriverFixture(t, {ast: `${source}-${defect}`});
+      const observed = [];
+      for (const step of [31, 32]) {
+        for (const mode of ['dry', 'live']) {
+          const result = mode === 'dry' ? fixture.dryRun(step, mode) : fixture.run(step);
+          const output = result.stderr + (result.log || '');
+          observed.push({step, mode, rc: result.status,
+            rejected: output.includes('AST_SUPPORT_SHA_REQUIRED'),
+            entered: /ASSERT ast-support-sha256/.test(output),
+            success: /RESULT=success/.test(result.stdout)});
+        }
+      }
+      console.log(`AST_DECLARATION_ASSERT ${source}-${defect} ${JSON.stringify(observed)}`);
+      assert.deepEqual(observed, [31, 32].flatMap(step => ['dry', 'live'].map(mode =>
+        ({step, mode, rc: 1, rejected: true, entered: false, success: false}))));
+    });
+  }
+  for (const corrupt of [false, true]) {
+    test(`ast-support input contract ${source} ${corrupt ? 'corrupt' : 'registered'} reaches real verifier`, t => {
+      const result = bootstrapDriverFixture(t, {ast: source + (corrupt ? '-corrupt' : '')}).run(31);
+      const expected = source === 'campaign' ? campaignAstSha : astInputSha;
+      const observed = {rc: result.status,
+        expected: result.log.includes(`ASSERT ast-support-sha256 expected=${expected} actual=`),
+        accepted: result.log.includes('ast-support sha256 匹配'),
+        mismatch: result.log.includes('ast-support sha256 不匹配'),
+        sdk: result.log.includes('SDK-BUILD-FAIL')};
+      console.log(`AST_VERIFIER_ASSERT ${source} corrupt=${corrupt} ${JSON.stringify(observed)}`);
+      // The bounded SDK fixture stops after successful input verification.
+      assert.deepEqual(observed, {rc: 1, expected: true, accepted: !corrupt, mismatch: corrupt, sdk: !corrupt});
+    });
+  }
+}
