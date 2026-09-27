@@ -25,10 +25,12 @@ function packageFixture() {
   const officialSdkRoot = path.join(root, 'official-sdk');
   fs.mkdirSync(path.join(workspace, 'cangjie_compiler', 'output'), {recursive: true});
   fs.mkdirSync(path.join(workspace, 'cangjie_stdx', 'target', 'linux_x86_64_cjnative'), {recursive: true});
+  file(workspace, ['cangjie_compiler', 'output', 'tools', 'bin', 'cjcompat'], 'old cjcompat');
   file(tools, ['cjpm', 'dist', 'cjpm']);
   file(officialSdkRoot, ['tools', 'bin', 'cjpm']);
   file(tools, ['cjfmt', 'build', 'build', 'bin', 'cjfmt']);
   file(tools, ['cjfmt', 'config', 'default.toml']);
+  file(tools, ['cjcompat', 'dist', 'bin', 'cjcompat'], 'source-built cjcompat');
   file(tools, ['hyperlangExtension', 'target', 'bin', 'main']);
   file(tools, ['hyperlangExtension', 'src', 'dtsparser', 'keep.txt']);
   file(tools, ['cangjie-language-server', 'output', 'bin', 'LSPServer']);
@@ -84,6 +86,25 @@ async function runPackage(action) {
   }
 }
 
+test('cjcompat is built on every SDK target', () => {
+  for (const targetKey of ['linux-x64', 'linux-aarch64', 'darwin-arm64', 'darwin-x64', 'windows-x64']) {
+    const names = toolsFor(buildConfig({targetKey})).map(([name]) => name);
+    assert.ok(names.includes('cjcompat'), `${targetKey} lost cjcompat`);
+  }
+});
+
+test('package entry carries the source-built cjcompat bytes', async () => {
+  const {root, config} = packageFixture();
+  try {
+    await runPackage(() => packageStage.run(config));
+    const result = fs.readFileSync(path.join(config.softwareDir, 'cangjie', 'tools', 'bin', 'cjcompat'), 'utf8');
+    console.log('CJCOMPAT_PACKAGE_BYTES_ASSERT_REACHED');
+    assert.equal(result, 'source-built cjcompat');
+  } finally {
+    fs.rmSync(root, {recursive: true, force: true});
+  }
+});
+
 test('the Cangjie-written tools are built from source on native targets', () => {
   for (const targetKey of ['linux-x64', 'linux-aarch64', 'darwin-arm64', 'darwin-x64']) {
     const names = toolsFor(buildConfig({targetKey})).map(([name]) => name);
@@ -117,6 +138,7 @@ test('the SDK tree carries the source-built cjcov and cjtrace-recover', async ()
 });
 
 for (const [tool, product] of [
+  ['cjcompat', ['cjcompat', 'dist', 'bin', 'cjcompat']],
   ['cjcov', ['cjcov', 'dist', 'cjcov']],
   ['cjtrace-recover', ['cjtrace-recover', 'dist', 'bin', 'cjtrace-recover']],
 ]) {

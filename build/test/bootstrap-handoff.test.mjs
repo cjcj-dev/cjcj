@@ -132,11 +132,14 @@ test('bootstrap producer reaches actual stdx and tools subprocess entries', asyn
   const python = `import json, os, pathlib, subprocess, sys\nif sys.argv[1] == 'build':\n r = subprocess.run(['cjc'], text=True, capture_output=True)\n r.check_returncode()\n with open(${JSON.stringify(trace)}, 'a') as out: out.write(json.dumps({'cwd': os.getcwd(), 'compiler': r.stdout}) + '\\n')\n p = pathlib.Path('build_temp/build/build.ninja')\n p.parent.mkdir(parents=True, exist_ok=True)\n p.write_text('LD_LIBRARY_PATH=' + os.environ['LD_LIBRARY_PATH'] + ' cjc file.cj\\n')\n`;
   await write(path.join(config.repoPath('stdx'), 'build.py'), python);
   const products = {
+    cjcompat: ['cjcompat/dist/bin/cjcompat'],
     cjpm: ['cjpm/dist/cjpm'], cjfmt: ['cjfmt/build/build/bin/cjfmt', 'cjfmt/config/default.toml'],
     hle: ['hyperlangExtension/target/bin/main', 'hyperlangExtension/src/dtsparser/keep.txt'],
     lsp: ['cangjie-language-server/output/bin/LSPServer'], cjcov: ['cjcov/dist/cjcov'],
     'cjtrace-recover': ['cjtrace-recover/dist/bin/cjtrace-recover'],
   };
+  await write(path.join(config.repoPath('tools'), 'cjcompat', 'dist', 'bin', 'cjcompat'), 'old cjcompat');
+  await write(path.join(config.repoPath('compiler'), 'output', 'tools', 'bin', 'cjcompat'), 'old cjcompat');
   for (const [name, directory] of tools.toolsFor(config)) {
     const destinations = products[name].map(relative => path.join(config.repoPath('tools'), relative));
     const install = `if sys.argv[1] == 'install':\n for name in ${JSON.stringify(destinations)}:\n  p = pathlib.Path(name)\n  p.parent.mkdir(parents=True, exist_ok=True)\n  p.write_text('fixture tool from ' + pathlib.Path('compiler-result.txt').read_text())\n`;
@@ -149,6 +152,8 @@ test('bootstrap producer reaches actual stdx and tools subprocess entries', asyn
   console.log('SDK_PACKAGE_ORIGIN_ASSERT_REACHED');
   assert.equal(await fs.readFile(path.join(f.sdk, 'lib', f.tuple, 'libcangjie-std-core.a'), 'utf8'), 'coloured std');
   assert.ok((await fs.readFile(path.join(f.sdk, 'tools', 'bin', 'cjpm'), 'utf8')).includes(`compiler home=${f.sdk}`));
+  console.log('CJCOMPAT_COMPILER_ORIGIN_ASSERT_REACHED');
+  assert.ok((await fs.readFile(path.join(config.softwareDir, 'cangjie', 'tools', 'bin', 'cjcompat'), 'utf8')).includes(`compiler home=${f.sdk}`));
   const invocations = (await fs.readFile(trace, 'utf8')).trim().split('\n').map(JSON.parse);
   assert.equal(invocations.length, 1 + tools.toolsFor(config).length);
   for (const row of invocations) {

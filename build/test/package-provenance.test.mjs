@@ -199,7 +199,7 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
   // the compiler emits, so the fixture has to carry one.
   const cjpm = await write(sdk, 'tools/bin/cjpm',
     `fixture source-built cjpm\0CJTOOL-COMMIT:${CJPM_SHA}\0CJ_MCC_WriteRefField\0`, 0o755);
-  for (const tool of ['cjfmt', 'hle', 'LSPServer', 'cjcov', 'cjtrace-recover']) {
+  for (const tool of ['cjfmt', 'cjcompat', 'hle', 'LSPServer', 'cjcov', 'cjtrace-recover']) {
     await write(sdk, `tools/bin/${tool}`,
       `fixture source-built ${tool}\0CJTOOL-COMMIT:${CJPM_SHA}\0CJCJ-COMMIT:${CJCJ_SHA}\0`, 0o755);
   }

@@ -1,6 +1,7 @@
 // Port of cangjie-build/src/cangjie_build/stages/tools.py.
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import {BuildError} from '../../lib/errors.mjs';
 import {fetchSource} from '../../lib/git.mjs';
@@ -17,6 +18,7 @@ const TOOL_PATHS = [
   ['cjfmt', path.join('cjfmt', 'build')],
   ['hle', path.join('hyperlangExtension', 'build')],
   ['lsp', path.join('cangjie-language-server', 'build')],
+  ['cjcompat', path.join('cjcompat', 'build')],
   ['cjcov', path.join('cjcov', 'build')],
   ['cjtrace-recover', path.join('cjtrace-recover', 'build')],
 ];
@@ -66,10 +68,13 @@ async function checkoutPinnedCjpm(toolsRoot) {
 
 function buildArgsFor(name, config) {
   if (config.target.spec.crossCompile) {
-    return ['build', '-t', config.crossBuildType, '--target', 'windows-x86_64'];
+    const args = ['build', '-t', config.crossBuildType, '--target', 'windows-x86_64'];
+    if (name === 'cjcompat') args.push('-j', String(os.availableParallelism()));
+    return args;
   }
   const toolsBuildType = config.buildType === 'relwithdebinfo' ? 'release' : config.buildType;
   const args = ['build', '-t', toolsBuildType];
+  if (name === 'cjcompat') args.push('-j', String(os.availableParallelism()));
   if (name === 'cjpm') {
     args.push(
       '--set-rpath',
