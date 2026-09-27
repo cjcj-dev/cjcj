@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
+import {allReleasePlatforms, releasePlatformReadiness} from '../../../build/lib/targets.mjs';
 
 const root = path.resolve(import.meta.dirname, '../../..');
 const workflow = name => fs.readFile(path.join(root, '.github/workflows', name), 'utf8');
@@ -45,10 +46,23 @@ test('release connects each platform row to its same-platform final std', async 
     assert.match(job, new RegExp(String.raw`^\s*std_artifact: final-std-${platform}\s*$`, 'm'),
       `the ${platform} package job does not ask for final-std-${platform}`);
   }
+  const allPackageJobs = packageJobsOf(release);
+  const expected = allReleasePlatforms().filter(key => releasePlatformReadiness(key).status === 'buildable');
+  const seen = [];
+  for (const job of allPackageJobs) {
+    const key = job.match(/^      release_key: (\S+)$/m)?.[1];
+    assert.ok(key, 'each package must name its release key');
+    seen.push(key);
+    const {host} = releasePlatformReadiness(key);
+    assert.match(job, new RegExp(String.raw`^\s*platform: ${host}\s*$`, 'm'), `${key}: host`);
+    assert.match(job, new RegExp(String.raw`^\s*std_artifact: final-std-${host}\s*$`, 'm'),
+      `${key}: same-host final std`);
+  }
+  assert.deepEqual(seen.sort(), expected.sort(), 'release package key symmetric difference');
   assert.ok(release.includes('pattern: pkg-*'));
 });
 
-test('release cross packages depend on their native phase and Android producer with same-host std', async () => {
+test('release cross packages depend on their native phase and cross producer with same-host std', async () => {
   const release = await workflow('release.yml');
   const packages = packageJobsOf(release);
   const cross = packages.filter(job => !nativeKeys.includes(scalar(job, 'release_key')));
@@ -56,6 +70,9 @@ test('release cross packages depend on their native phase and Android producer w
     ['linux-x64-android', 'linux-x64', 'package-p1-linux-x64'],
     ['darwin-arm64-android', 'darwin-arm64', 'package-p4-darwin-arm64'],
     ['win32-x64-android', 'windows-x64', 'package-p3-windows-x64'],
+    ['linux-x64-ohos', 'linux-x64', 'package-p1-linux-x64'],
+    ['darwin-arm64-ohos', 'darwin-arm64', 'package-p4-darwin-arm64'],
+    ['win32-x64-ohos', 'windows-x64', 'package-p3-windows-x64'],
   ];
   assert.deepEqual(cross.map(job => scalar(job, 'release_key')).sort(), rows.map(([key]) => key).sort(),
     'every non-native package must have an explicit cross contract');
@@ -64,10 +81,15 @@ test('release cross packages depend on their native phase and Android producer w
     assert.equal(scalar(job, 'platform'), host, `${key}: package host`);
     assert.equal(scalar(job, 'std_artifact'), `final-std-${host}`, `${key}: same-host final std`);
     assert.deepEqual(scalar(job, 'needs').slice(1, -1).split(',').map(s => s.trim()).sort(),
-      [nativePhase, 'source-p1-linux-x64'].sort(), `${key}: native phase and Android producer dependencies`);
+      [nativePhase, 'source-p1-linux-x64'].sort(), `${key}: native phase and cross producer dependencies`);
     const tuples = JSON.parse(scalar(job, 'cross_std_artifacts').replace(/^'|'$/g, ''));
-    const expected = [{tuple: 'linux_android_aarch64_cjnative', artifact: 'final-std-android-aarch64'}];
-    if (host === 'windows-x64') expected.push({tuple: 'linux_x86_64_cjnative', artifact: 'final-std-linux-x64'});
+    const ohos = key.endsWith('-ohos');
+    const expected = ohos
+      ? [{tuple: 'linux_ohos_aarch64_cjnative', artifact: 'final-std-ohos-aarch64'}]
+      : [{tuple: 'linux_android_aarch64_cjnative', artifact: 'final-std-android-aarch64'}];
+    if (ohos && host !== 'darwin-arm64') expected.push({tuple: 'linux_ohos_x86_64_cjnative', artifact: 'final-std-ohos-x86-64'});
+    if (ohos && host === 'linux-x64') expected.push({tuple: 'windows_x86_64_cjnative', artifact: 'final-std-windows-x64'});
+    if (!ohos && host === 'windows-x64') expected.push({tuple: 'linux_x86_64_cjnative', artifact: 'final-std-linux-x64'});
     assert.deepEqual(tuples, expected, `${key}: cross std tuples`);
     const publish = release.slice(release.indexOf('\n  publish:'));
     assert.ok(scalar(publish, 'needs').slice(1, -1).split(',').map(s => s.trim()).includes(`package-${key}`),
@@ -77,6 +99,7 @@ test('release cross packages depend on their native phase and Android producer w
   const producer = release.split('\n  source-p1-linux-x64:')[1].split(/\n  [a-z0-9-]+:/)[0];
   assert.equal(scalar(producer, 'targets'), 'linux-x64');
   assert.equal(scalar(producer, 'build_android'), 'true', 'Android producer is enabled');
+  assert.equal(scalar(producer, 'build_ohos'), 'true', 'OHOS producer is enabled');
 });
 
 test('component provenance, final std, and Python inputs are fail-closed in both package commands', async () => {

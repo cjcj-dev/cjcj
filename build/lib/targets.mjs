@@ -202,6 +202,9 @@ export function assertHostContract(key, {
 const DAG_CROSS_STD_PRODUCERS = Object.freeze({
   windows_x86_64_cjnative: 'linux-x64',
   linux_android_aarch64_cjnative: 'linux-x64',
+  // build-ohos-final-std.mjs in the linux-x64 source cell produces both tuples.
+  linux_ohos_aarch64_cjnative: 'linux-x64',
+  linux_ohos_x86_64_cjnative: 'linux-x64',
 });
 
 // tuple -> target key whose source cell uploads final-std-<target> for it.
