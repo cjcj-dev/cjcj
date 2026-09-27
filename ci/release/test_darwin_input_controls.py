@@ -4,6 +4,7 @@ import concurrent.futures
 import difflib
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import shutil
@@ -32,7 +33,9 @@ for arm, content in {'baseline': base, 'candidate': original, 'cut': cut, 'resto
 def run(arm):
     tree = out / arm / 'src'
     start = time.monotonic()
-    result = subprocess.run(['node', '--test', str(tree / 'ci/release/prepare_llvm_dylib.test.mjs')],
+    # Linux depot branches are exercised on kkk2; native runners select the four Darwin cases.
+    selection = ['--test-name-pattern', '^darwin-'] if os.uname().sysname == 'Darwin' else []
+    result = subprocess.run(['node', '--test', *selection, str(tree / 'ci/release/prepare_llvm_dylib.test.mjs')],
                             capture_output=True, text=True)
     text = result.stdout + result.stderr
     (out / arm / 'test.log').write_text(text)
