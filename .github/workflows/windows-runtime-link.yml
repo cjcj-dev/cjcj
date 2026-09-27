@@ -21,8 +21,8 @@ jobs:
       matrix:
         arm: [candidate, cut-entry, cut-selection, restored]
     env:
-      # Reproduce #586 against the exact runtime that exposed the link failure.
-      RUNTIME_REF: 1d0c8be495d4b6378fefbd27fb08135b3db288fd
+      # Runtime includes the publication and Windows export-source fixes (#1234/#1236).
+      RUNTIME_REF: 1a14f0a8ccb685038729d8ca221768884beb5654
       RUNTIME_TARGET: windows-x86_64
       LINK_CONTROL_ARM: ${{ matrix.arm }}
     steps:
