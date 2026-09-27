@@ -152,7 +152,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('sdk', type=Path)
     parser.add_argument('output', type=Path, help='new directory; existing outputs are never reused')
-    parser.add_argument('jobs', type=int, help='total workers across both Conformance pools and two Maple pools (4..48)')
+    parser.add_argument('jobs', type=int, nargs='?', default=48, help='total workers across both Conformance pools and two Maple pools (4..48)')
     parser.add_argument('--inputs', type=Path, required=True,
                         help='directory containing pinned cangjie_test and cangjie_test_framework')
     parser.add_argument('--compiler-jobs', type=int, choices=(1, 2), default=1,
