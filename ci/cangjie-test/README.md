@@ -9,7 +9,7 @@ pinned commits (preparation does not fetch or change shared checkouts):
 
 ```sh
 python3 ci/cangjie-test/prepare.py /path/to/repositories /path/to/new-inputs
-python3 ci/cangjie-test/run.py /path/to/sdk /path/to/new-output 192 --inputs /path/to/new-inputs
+python3 ci/cangjie-test/run.py /path/to/sdk /path/to/new-output 48 --compiler-jobs 1 --inputs /path/to/new-inputs
 ```
 
 Run on kkk2 through `/root/cj_build/ops/bin/wf_kkk2.sh sh <lane> '<command>'`,
@@ -20,7 +20,11 @@ succeed before any suite starts. Install the upstream framework dependencies
 the execution environment. Missing tools are recorded as failures or unrun
 suites, never treated as passes. Shared SDK directories are never modified.
 
-The worker budget is divided among three concurrent suite processes. Existing
+The worker budget (4 through 48) includes four pools: Conformance compilation
+and execution, HLT, and LLT. At 48 this means 12 workers per pool.
+`--compiler-jobs` accepts 1 or 2 and configures direct compiler commands.
+Nested compiler launches through cjpm still need the approved execution adapter;
+do not start full runs until that coverage and load/disk admission are complete. Existing
 output directories are rejected, preventing stale results from being reused.
 Keep raw logs and JSON together with the normalized `cases.json`,
 `failures.json`, `summary.json` and `identity.json`. Each suite records its

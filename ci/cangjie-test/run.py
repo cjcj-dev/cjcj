@@ -97,7 +97,7 @@ def summarize(suite, raw, root):
     return sorted(rows, key=lambda r: r['name'])
 
 
-def run_suite(suite, test, framework, output, env, jobs, scratch=None):
+def run_suite(suite, test, framework, output, env, jobs, scratch=None, compiler_jobs=1):
     out = output / suite
     out.mkdir()
     bulk = scratch / suite if scratch else out
@@ -108,6 +108,7 @@ def run_suite(suite, test, framework, output, env, jobs, scratch=None):
                    '--test-root', str(test / 'Conformance/Compiler/testsuite'),
                    '--work-dir', str(bulk / 'work'), '--cjc', env['CANGJIE_HOME'] + '/bin/cjc',
                    '--comp-threads', str(jobs), '--exec-threads', str(jobs),
+                   '--cjc-flags=--jobs=' + str(compiler_jobs),
                    '--base-timeout', '30', '--log-file', str(out / 'results.log'),
                    '--no-color', '--log-mode', 'short']
         cwd = harness
@@ -118,6 +119,8 @@ def run_suite(suite, test, framework, output, env, jobs, scratch=None):
         command = [sys.executable, str(framework / 'main.py'),
                    '--test_cfg', str(test / 'testsuites' / suite / cfg),
                    '-j', str(jobs), '--timeout=180', '--fail_exit',
+                   '-C', 'compiler=cjc --jobs=' + str(compiler_jobs),
+                   '-C', 'cjc=cjc --jobs=' + str(compiler_jobs),
                    '--progress=silent', '--json_output', str(out / 'results.json'),
                    '--test_list', str(test / 'testsuites' / suite / ('testlist' if suite == 'HLT' else 'cjnative_testlist')),
                    '--output', str(out / 'results.txt'), '--temp_dir', str(bulk / 'temp'),
@@ -147,15 +150,17 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('sdk', type=Path)
     parser.add_argument('output', type=Path, help='new directory; existing outputs are never reused')
-    parser.add_argument('jobs', type=int, help='total worker budget, divided among three suites')
+    parser.add_argument('jobs', type=int, help='total workers across both Conformance pools and two Maple pools (4..48)')
     parser.add_argument('--inputs', type=Path, required=True,
                         help='directory containing pinned cangjie_test and cangjie_test_framework')
+    parser.add_argument('--compiler-jobs', type=int, choices=(1, 2), default=1,
+                        help='parallelism for direct compiler commands; nested cjpm coverage pending')
     parser.add_argument('--scratch', type=Path,
                         help='separate bulk directory for work/temp/log dirs (results stay in output)')
     args = parser.parse_args()
     sdk, output, inputs = args.sdk.resolve(), args.output.resolve(), args.inputs.resolve()
-    if args.jobs < 3:
-        parser.error('jobs must be at least 3')
+    if not 4 <= args.jobs <= 48:
+        parser.error('jobs must be between 4 and 48 (including both Conformance pools)')
     if not (sdk / 'bin/cjc').is_file() or not (sdk / 'envsetup.sh').is_file():
         parser.error('INVALID_SDK: expected bin/cjc and envsetup.sh in SDK root')
     if platform.machine() != 'x86_64' or platform.system() != 'Linux':
@@ -191,13 +196,13 @@ def main():
                 'pins': json.loads((HERE / 'inputs.json').read_text()),
                 'recipe_sha256': sha(HERE / 'run.py'),
                 'source_manifest_sha256': sha(inputs / 'source-manifest.json'),
-                'inputs': str(inputs), 'jobs': args.jobs,
+                'inputs': str(inputs), 'jobs': args.jobs, 'compiler_jobs': args.compiler_jobs,
                 'affinity': sorted(os.sched_getaffinity(0)), 'uname': list(platform.uname()),
                 'uptime_before': before}
     dump(output / 'identity.json', identity)
     smoke = output / 'smoke.cj'
     smoke.write_text('main() { println("CANGJIE_TEST_SDK_READY") }\n')
-    compiled = execute([str(sdk / 'bin/cjc'), str(smoke), '-o', str(output / 'smoke')],
+    compiled = execute([str(sdk / 'bin/cjc'), '--jobs', str(args.compiler_jobs), str(smoke), '-o', str(output / 'smoke')],
                        output, env, output / 'smoke-compile.log')
     if compiled['rc']:
         raise RuntimeError('SDK compilation preflight failed; see smoke-compile.log')
@@ -205,9 +210,13 @@ def main():
     executed = execute([str(output / 'smoke')], output, env, output / 'smoke-run.log')
     if executed['rc'] or (output / 'smoke-run.log').read_text().strip() != 'CANGJIE_TEST_SDK_READY':
         raise RuntimeError('SDK execution preflight failed; see smoke-run.log')
+    conformance_workers = args.jobs // 4
+    maple_workers = args.jobs - 2 * conformance_workers
+    workers = (conformance_workers, maple_workers // 2, maple_workers - maple_workers // 2)
+    identity['suite_workers'] = dict(zip(('Conformance_each_pool', 'HLT', 'LLT'), workers))
     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
         futures = {name: pool.submit(run_suite, name, test, framework, output, env,
-                                    args.jobs // 3 + (i < args.jobs % 3), scratch)
+                                    workers[i], scratch, args.compiler_jobs)
                    for i, name in enumerate(('Conformance', 'HLT', 'LLT'))}
         summaries = {name: future.result() for name, future in futures.items()}
     identity.update(uptime_after=subprocess.check_output(['uptime'], text=True).strip(),
