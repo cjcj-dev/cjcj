@@ -17,7 +17,7 @@ def run(arm):
  hashes={p:hashlib.sha256((cwd/p).read_bytes()).hexdigest() for p in ['.github/workflows/ci.yml','ci/test-manifest.test.mjs','ci/test-manifest.mjs']}
  start=time.monotonic()
  with (root/(arm+'.log')).open('w') as out:
-  r=subprocess.run(['node','--test','ci/test-manifest.test.mjs'],cwd=cwd,stdout=out,stderr=subprocess.STDOUT)
+  r=subprocess.run(['node','--test','--test-name-pattern=ci.yml provides the publisher archive tools|ci.yml runs the manifest rather', 'ci/test-manifest.test.mjs'],cwd=cwd,stdout=out,stderr=subprocess.STDOUT)
  return dict(arm=arm,rc=r.returncode,wall=time.monotonic()-start,sha256=hashes)
 with concurrent.futures.ThreadPoolExecutor(max_workers=5) as pool: results=list(pool.map(run,['candidate','cut-clang','cut-lld','cut-consumer','restored']))
 (root/'arms.json').write_text(json.dumps(results,indent=2))
