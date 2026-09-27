@@ -17,6 +17,11 @@ on:
         required: false
         type: boolean
         default: false
+      publish_native_tuple:
+        description: Publish both native Darwin static tuple candidates.
+        required: false
+        type: boolean
+        default: false
       publish_tuple:
         description: Publish a new static tuple candidate (consumers normally use the fixed artifact).
         required: false
@@ -388,6 +393,47 @@ jobs:
         id: static-artifact
         with:
           name: static-llvm-tuple-linux_x86_64
+          path: ${{ env.STATIC_TUPLE }}
+          if-no-files-found: error
+          retention-days: 90
+
+  native-static-tuple:
+    if: inputs.publish_native_tuple
+    name: Publish native Darwin static colour LLVM tuple
+    needs: build-tools
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: darwin_aarch64
+            runner: macos-15
+          - platform: darwin_x86_64
+            runner: macos-15-intel
+    steps:
+      - uses: actions/checkout@v7
+      - run: brew install coreutils findutils gnu-tar
+      - uses: actions/download-artifact@v8
+        with:
+          name: fixed-llvm-tools-${{ matrix.platform }}
+          path: fixed-toolchain/${{ matrix.platform }}
+      - name: Publish the shared ten-payload native layout
+        shell: bash
+        env:
+          TUPLE_PLATFORM: ${{ matrix.platform }}
+        run: |
+          set -euo pipefail
+          source ci/llvm_pin.env
+          REPO_ROOT="$GITHUB_WORKSPACE"
+          CJCJ_FIXED_LLVM_DIR="$GITHUB_WORKSPACE/fixed-toolchain/$TUPLE_PLATFORM"
+          source ci/llvm-tuple-layout.sh
+          publish_fixed_tuple_to_depot "$RUNNER_TEMP/llvm-tuple"
+          tuple="$RUNNER_TEMP/llvm-tuple/$LLVM_SHA/$CANGJIE_COMPILER_SHA"
+          (cd "$tuple" && host_sha256sum --strict -c SHA256SUMS)
+          echo "STATIC_TUPLE=$tuple" >> "$GITHUB_ENV"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: static-llvm-tuple-${{ matrix.platform }}
           path: ${{ env.STATIC_TUPLE }}
           if-no-files-found: error
           retention-days: 90
