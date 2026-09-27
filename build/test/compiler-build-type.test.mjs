@@ -27,3 +27,18 @@ test('final compiler release options request portable stripping', () => {
     assert.equal(buildConfig({buildType}).buildType, buildType);
   }
 });
+
+test('release workflow callers and defaults do not request diagnostic builds', () => {
+  const read = name => fs.readFileSync(new URL(`../../.github/workflows/${name}.yml`, import.meta.url), 'utf8');
+  const release = read('release');
+  assert.doesNotMatch(release, /build_type: (relwithdebinfo|debug)/);
+  assert.equal((release.match(/build_type: release/g) || []).length, 4);
+  const srcbuild = read('srcbuild');
+  assert.doesNotMatch(srcbuild, /default: relwithdebinfo/);
+  // A diagnostic selection is available only on a manual dispatch. Called
+  // release workflows always select the same release recipe as Windows std.
+  for (const line of srcbuild.split('\n').filter(line => line.includes('inputs.build_type'))) {
+    assert.match(line, /github.event_name == 'workflow_dispatch' && inputs.build_type \|\| 'release'/);
+  }
+  assert.doesNotMatch(read('release-matrix'), /default: relwithdebinfo/);
+});
