@@ -414,7 +414,7 @@ readonly CJCJ_FIXED_LLVM_DIR="$STATE_ROOT/fixed-llc"
 readonly STAGE3_STEP_SCRIPT="$REPO_ROOT/ci/srcbuild/steps/build-stage3.mjs"
 readonly BOOTSTRAP_SH="${CJCJ_BOOTSTRAP_SH:-$REPO_ROOT/ci/bootstrap/bootstrap.sh}"
 export CJCJ_BOOTSTRAP_WORK="$STATE_ROOT/bootstrap-work"
-readonly BUILD_TYPE=relwithdebinfo
+readonly BUILD_TYPE=release
 readonly VERIFIER_DIAGNOSTIC_MARKER="$CANGJIE_WORKSPACE/.cjcj-verifier-diagnostic.json"
 START_STAMP=$(date -u +%Y%m%dT%H%M%SZ)
 readonly START_STAMP

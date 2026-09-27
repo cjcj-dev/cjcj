@@ -104,7 +104,7 @@ function makeFixture() {
 
   directory(compilerRoot, 'output');
   for (const subdirectory of ['lib', 'runtime']) {
-    file(runtimeRoot, ['runtime', 'output', 'common', 'linux_relwithdebinfo_x86_64', subdirectory, '.keep']);
+    file(runtimeRoot, ['runtime', 'output', 'common', 'linux_release_x86_64', subdirectory, '.keep']);
   }
   directory(runtimeRoot, 'runtime', 'output');
   directory(runtimeRoot, 'runtime', 'target');
@@ -647,20 +647,20 @@ test('Linux source stages emit the Python command order', async () => {
 
     const expectedCommands = [
       expected(root, compilerRoot, ['python3', 'build.py', 'clean']),
-      expected(root, compilerRoot, ['python3', 'build.py', 'build', '-t', 'relwithdebinfo', '--no-tests', '--build-cjdb', '-v', '1.2.3']),
+      expected(root, compilerRoot, ['python3', 'build.py', 'build', '-t', 'release', '--no-tests', '--build-cjdb', '-v', '1.2.3']),
       expected(root, compilerRoot, ['python3', 'build.py', 'install']),
       expected(root, runtimeRoot, ['python3', 'build.py', 'clean']),
-      expected(root, runtimeRoot, ['python3', 'build.py', 'build', '--target', 'native', '-t', 'relwithdebinfo', '-v', '1.2.3']),
+      expected(root, runtimeRoot, ['python3', 'build.py', 'build', '--target', 'native', '-t', 'release', '-v', '1.2.3']),
       expected(root, runtimeRoot, ['python3', 'build.py', 'install']),
       expected(root, stdlibRoot, ['python3', 'build.py', 'clean']),
       expected(root, stdlibRoot, [
-        'python3', 'build.py', 'build', '-t', 'relwithdebinfo', '--target', 'native',
+        'python3', 'build.py', 'build', '-t', 'release', '--target', 'native',
         `--target-lib=${path.join(runtimeRoot, 'target')}`, '--target-lib=/usr/lib/x86_64-linux-gnu',
       ]),
       expected(root, stdlibRoot, ['python3', 'build.py', 'install']),
       expected(root, stdxRoot, ['python3', 'build.py', 'clean']),
       expected(root, stdxRoot, [
-        'python3', 'build.py', 'build', '-t', 'relwithdebinfo',
+        'python3', 'build.py', 'build', '-t', 'release',
         `--include=${path.join(compilerRoot, 'include')}`, '--target-lib=/usr/lib/x86_64-linux-gnu',
       ]),
       expected(root, stdxRoot, ['python3', 'build.py', 'install']),
