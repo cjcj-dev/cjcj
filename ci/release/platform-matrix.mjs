@@ -81,7 +81,8 @@ export function planMatrix(requested) {
       const producer = readiness.crossStd[tuple];
       if (!source.has(producer)) source.set(producer, {target: producer});
       if (tuple === 'linux_android_aarch64_cjnative') source.get(producer).build_android = true;
-      const artifact = tuple === 'linux_android_aarch64_cjnative'
+      if (tuple.startsWith('ios_')) source.get(producer).build_ios = true;
+      const artifact = tuple.startsWith('ios_') ? `final-std-${tuple.replaceAll('_', '-')}` : tuple === 'linux_android_aarch64_cjnative'
         ? 'final-std-android-aarch64' : stdArtifact(allTargetKeysForTuple(tuple)[0]);
       return {tuple, artifact};
     });

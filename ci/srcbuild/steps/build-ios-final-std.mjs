@@ -7,6 +7,7 @@ import path from 'node:path';
 import os from 'node:os';
 import {assertBootstrapCompiler} from '../lib/bootstrap-handoff.mjs';
 import {writeStdProvenance} from '../../../build/lib/provenance.mjs';
+import {writeCrossRuntimeManifest} from '../../release/cross-runtime.mjs';
 import {probeRequirement} from '../../release/platform-matrix.mjs';
 
 $.stdio = 'inherit';
@@ -60,27 +61,30 @@ await Promise.all(targets.map(async target => {
   await $({cwd: runtime, env})`python3 build.py build -t release --target ${target.target} --target-toolchain ${path.dirname(toolBin)} --target-sysroot ${sysroot} -v ${version}`;
   const runtimeOutput = path.join(source, 'runtime-install');
   await $({cwd: runtime, env})`python3 build.py install --prefix ${runtimeOutput}`;
-  await $({cwd: stdlib, env})`python3 build.py build -t release -j ${jobs} --target ${target.target} --target-lib=${path.join(runtimeOutput, 'lib')} --target-sysroot ${sysroot} --target-toolchain ${toolBin}`;
+  await $({cwd: stdlib, env})`python3 build.py build -t release -j ${jobs} --target ${target.target} --target-lib=${path.join(runtimeOutput, 'lib', target.tuple)} --target-lib=${path.join(runtimeOutput, 'runtime', 'lib', target.tuple)} --target-sysroot ${sysroot} --target-toolchain ${toolBin}`;
   await $({cwd: stdlib, env})`python3 build.py install --prefix ${install}`;
   await assertCompiler();
   await writeStdProvenance({sourceDir: path.join(repository, 'stdlib'), installPrefix: install, compiler,
     note: `stage2 Darwin host cjc cross-built ${target.tuple}; runtime ${actualRef}; SDK ${sysroot}`});
-  const runtimeDir = path.join(install, 'runtime', 'lib', target.tuple);
-  await fs.mkdir(runtimeDir, {recursive: true});
+  // runtime/CMakeLists.txt installs tuple directories, not a flat lib/ tree.
+  // Keep runtime provenance separate from final std as in the Android producer.
+  const runtimeArtifact = path.join(install, 'cross-runtime');
+  await fs.cp(runtimeOutput, runtimeArtifact, {recursive: true});
+  const runtimeDir = path.join(runtimeArtifact, 'runtime', 'lib', target.tuple);
   const records = [];
   for (const name of ['libcangjie-runtime.dylib', 'libboundscheck.dylib']) {
     const destination = path.join(runtimeDir, name);
-    await fs.copyFile(path.join(runtimeOutput, 'lib', name), destination);
     const kind = (await $({stdio: 'pipe'})`file -b ${destination}`).stdout.trim();
     if (!kind.includes('Mach-O') || !kind.includes(target.arch)) throw new Error(`${target.tuple}/${name}: ${kind}`);
     records.push({file: path.relative(install, destination), sha256: await sha256(destination), kind});
   }
+  await writeCrossRuntimeManifest({root: runtimeArtifact, tuple: target.tuple, runtimeRef: actualRef});
   const core = path.join(install, 'lib', target.tuple, 'libcangjie-std-core.a');
   const kind = (await $({stdio: 'pipe'})`file -b ${core}`).stdout.trim();
   const arches = (await $({stdio: 'pipe'})`lipo -archs ${core}`).stdout.trim();
   if (arches !== target.arch) throw new Error(`${target.tuple} core architectures: ${arches}`);
   records.push({file: path.relative(install, core), sha256: await sha256(core), kind, arches});
-  await fs.access(path.join(install, 'modules', target.tuple, 'std.cjo'));
+  await fs.access(path.join(install, 'modules', target.tuple, 'std', 'std.core.cjo'));
   await fs.writeFile(path.join(install, 'ios-build.json'), JSON.stringify({target, runtimeRef: actualRef,
     compilerSha256: await sha256(compiler), sysroot, records, wall: (Date.now() - started) / 1000}, null, 2) + '\n');
   console.log(`IOS_FINAL_STD_BUILT tuple=${target.tuple} records=${JSON.stringify(records)}`);

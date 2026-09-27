@@ -148,6 +148,7 @@ jobs:
     uses: ./.github/workflows/srcbuild.yml
     with:
       build_android: ${{ matrix.build_android || false }}
+      build_ios: ${{ matrix.build_ios || false }}
       build_type: ${{ inputs.build_type }}
       dry_run: ${{ inputs.dry_run }}
       runtime_ref: ${{ inputs.runtime_ref }}

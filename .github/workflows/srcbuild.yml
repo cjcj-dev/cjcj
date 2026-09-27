@@ -595,12 +595,30 @@ jobs:
         if: matrix.target == 'darwin-arm64' && inputs.build_ios
         run: npx --yes zx@8 ci/srcbuild/steps/build-ios-final-std.mjs
 
-      - name: Upload iOS runtime and final std tuple bundle
+      - name: Upload ios_aarch64_cjnative runtime and final std
         if: matrix.target == 'darwin-arm64' && inputs.build_ios
         uses: actions/upload-artifact@v7
         with:
-          name: final-std-ios
-          path: ${{ env.CANGJIE_WORKSPACE }}/software/final-std-ios
+          name: final-std-ios-aarch64-cjnative
+          path: ${{ env.CANGJIE_WORKSPACE }}/software/final-std-ios/ios_aarch64_cjnative
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload ios_simulator_aarch64_cjnative runtime and final std
+        if: matrix.target == 'darwin-arm64' && inputs.build_ios
+        uses: actions/upload-artifact@v7
+        with:
+          name: final-std-ios-simulator-aarch64-cjnative
+          path: ${{ env.CANGJIE_WORKSPACE }}/software/final-std-ios/ios_simulator_aarch64_cjnative
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload ios_simulator_x86_64_cjnative runtime and final std
+        if: matrix.target == 'darwin-arm64' && inputs.build_ios
+        uses: actions/upload-artifact@v7
+        with:
+          name: final-std-ios-simulator-x86-64-cjnative
+          path: ${{ env.CANGJIE_WORKSPACE }}/software/final-std-ios/ios_simulator_x86_64_cjnative
           if-no-files-found: error
           retention-days: 7
 
