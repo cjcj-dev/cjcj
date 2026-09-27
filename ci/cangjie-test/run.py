@@ -88,14 +88,16 @@ def summarize(suite, raw, root):
     return sorted(rows, key=lambda r: r['name'])
 
 
-def run_suite(suite, test, framework, output, env, jobs):
+def run_suite(suite, test, framework, output, env, jobs, scratch=None):
     out = output / suite
     out.mkdir()
+    bulk = scratch / suite if scratch else out
+    bulk.mkdir(parents=True, exist_ok=True)
     if suite == 'Conformance':
         harness = test / 'Conformance/Compiler/harness'
         command = [sys.executable, str(harness / 'harness.py'),
                    '--test-root', str(test / 'Conformance/Compiler/testsuite'),
-                   '--work-dir', str(out / 'work'), '--cjc', env['CANGJIE_HOME'] + '/bin/cjc',
+                   '--work-dir', str(bulk / 'work'), '--cjc', env['CANGJIE_HOME'] + '/bin/cjc',
                    '--comp-threads', str(jobs), '--exec-threads', str(jobs),
                    '--base-timeout', '30', '--log-file', str(out / 'results.log'),
                    '--no-color', '--log-mode', 'short']
@@ -109,8 +111,8 @@ def run_suite(suite, test, framework, output, env, jobs):
                    '-j', str(jobs), '--timeout=180', '--fail_exit',
                    '--progress=silent', '--json_output', str(out / 'results.json'),
                    '--test_list', str(test / 'testsuites' / suite / ('testlist' if suite == 'HLT' else 'cjnative_testlist')),
-                   '--output', str(out / 'results.txt'), '--temp_dir', str(out / 'temp'),
-                   '--log_dir', str(out / 'logs'), str(test / 'testsuites' / suite)]
+                   '--output', str(out / 'results.txt'), '--temp_dir', str(bulk / 'temp'),
+                   '--log_dir', str(bulk / 'logs'), str(test / 'testsuites' / suite)]
         cwd = framework
         raw = out / 'results.json'
     record = execute(command, cwd, env, out / 'runner.log')
@@ -138,6 +140,8 @@ def main():
     parser.add_argument('jobs', type=int, help='total worker budget, divided among three suites')
     parser.add_argument('--inputs', type=Path, required=True,
                         help='directory containing pinned cangjie_test and cangjie_test_framework')
+    parser.add_argument('--scratch', type=Path,
+                        help='separate bulk directory for work/temp/log dirs (results stay in output)')
     args = parser.parse_args()
     sdk, output, inputs = args.sdk.resolve(), args.output.resolve(), args.inputs.resolve()
     if args.jobs < 3:
@@ -157,6 +161,10 @@ def main():
         if sha(inputs / name) != expected:
             parser.error('input content changed: ' + name)
     output.mkdir(parents=True, exist_ok=False)
+    scratch = None
+    if args.scratch:
+        scratch = args.scratch.resolve()
+        scratch.mkdir(parents=True, exist_ok=False)
     before = subprocess.check_output(['uptime'], text=True).strip()
     start = time.monotonic()
     # SDK scripts are sourced in a child; never mutate a shared installation.
@@ -189,7 +197,7 @@ def main():
         raise RuntimeError('SDK execution preflight failed; see smoke-run.log')
     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
         futures = {name: pool.submit(run_suite, name, test, framework, output, env,
-                                    args.jobs // 3 + (i < args.jobs % 3))
+                                    args.jobs // 3 + (i < args.jobs % 3), scratch)
                    for i, name in enumerate(('Conformance', 'HLT', 'LLT'))}
         summaries = {name: future.result() for name, future in futures.items()}
     identity.update(uptime_after=subprocess.check_output(['uptime'], text=True).strip(),
