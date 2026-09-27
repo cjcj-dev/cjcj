@@ -1,0 +1,106 @@
+name: iOS source runtime
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/ios-runtime.yml'
+      - 'ci/srcbuild/lib/ios-runtime.mjs'
+      - 'ci/srcbuild/steps/build-ios-*.mjs'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  runtime:
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [ios-aarch64, ios-simulator-aarch64, ios-simulator-x86_64]
+        arm: [candidate, cut-producer, cut-consumer, restored]
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - uses: ./.github/actions/setup-release-sdk
+        with:
+          requirement: xcode-ios
+      - name: Resolve runtime provenance
+        run: npx --yes zx@8 ci/load_runtime_pin.mjs
+      - name: Fetch pinned runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "CANGJIE_WORKSPACE=$RUNNER_TEMP/ios-source" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/ios-source/cangjie_runtime"
+          git -C "$RUNNER_TEMP/ios-source/cangjie_runtime" init
+          git -C "$RUNNER_TEMP/ios-source/cangjie_runtime" fetch --depth=1 "$RUNTIME_SRC_URL" "$RUNTIME_REF"
+          git -C "$RUNNER_TEMP/ios-source/cangjie_runtime" checkout --detach FETCH_HEAD
+      - uses: ./.github/actions/sccache
+        with:
+          component: runtime
+          platform: ${{ matrix.target }}
+          pin: ${{ env.RUNTIME_REF }}
+      - name: Prepare controlled arm
+        env:
+          ARM: ${{ matrix.arm }}
+        shell: bash
+        run: |
+          python3 - <<'PYCODE'
+          import os
+          from pathlib import Path
+          arm = os.environ['ARM']
+          if arm in ('cut-producer', 'restored'):
+              p = Path('ci/srcbuild/lib/ios-runtime.mjs')
+              s = p.read_text()
+              needle = "`${target.runtimeArch}_Release`, 'libboundscheck.dylib'"
+              assert s.count(needle) == 1
+              p.write_text(s.replace(needle, "`${target.runtimeArch}_Release`, 'libcangjie-runtime.dylib'"))
+          if arm == 'cut-consumer':
+              p = Path('ci/release/cross-runtime.mjs')
+              s = p.read_text()
+              needle = 'await fs.copyFile(path.join(root, file.path), destination);'
+              assert s.count(needle) == 1
+              p.write_text(s.replace(needle, 'await fs.writeFile(destination, "cut");'))
+          PYCODE
+          git diff > "$RUNNER_TEMP/ios-cut.diff"
+          if [[ "$ARM" == restored ]]; then git restore ci/srcbuild/lib/ios-runtime.mjs; fi
+          shasum -a 256 ci/srcbuild/lib/ios-runtime.mjs ci/release/cross-runtime.mjs ci/release/verify-ios-runtime.mjs
+      - name: Build iOS runtime through product entry
+        env:
+          IOS_TARGET: ${{ matrix.target }}
+        run: npx --yes zx@8 ci/srcbuild/steps/build-ios-runtime.mjs
+      - name: Assert produced and installed runtime bytes
+        env:
+          IOS_TARGET: ${{ matrix.target }}
+          ARM: ${{ matrix.arm }}
+        shell: bash
+        run: |
+          set +e
+          node ci/release/verify-ios-runtime.mjs > "$RUNNER_TEMP/ios-assertion.log" 2>&1
+          rc=$?
+          set -e
+          cat "$RUNNER_TEMP/ios-assertion.log"
+          echo "IOS_ARM=$ARM ASSERT_RC=$rc"
+          case "$ARM" in
+            cut-producer) test "$rc" = 1; grep -q 'IOS_BOUNDSCHECK_SAME_BUILD_BYTES' "$RUNNER_TEMP/ios-assertion.log" ;;
+            cut-consumer) test "$rc" = 1; grep -q 'IOS_INSTALLED_RUNTIME_BYTES' "$RUNNER_TEMP/ios-assertion.log" ;;
+            *) test "$rc" = 0 ;;
+          esac
+      - uses: ./.github/actions/sccache-report
+        if: always()
+        with:
+          component: runtime
+          platform: ${{ matrix.target }}
+          require-compiles: ${{ job.status == 'success' }}
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: ios-runtime-${{ matrix.target }}-${{ matrix.arm }}
+          path: |
+            ${{ runner.temp }}/ios-cut.diff
+            ${{ runner.temp }}/ios-assertion.log
+            ${{ env.CANGJIE_WORKSPACE }}/cangjie_runtime/runtime-install
+            ${{ env.CANGJIE_WORKSPACE }}/cangjie_runtime/runtime/CMakebuild/CMakeCache.txt
+            ${{ env.CANGJIE_WORKSPACE }}/cangjie_runtime/runtime/CMakebuild/CMakeFiles/CMakeConfigureLog.yaml
+          if-no-files-found: warn

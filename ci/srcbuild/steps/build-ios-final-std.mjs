@@ -7,7 +7,7 @@ import path from 'node:path';
 import os from 'node:os';
 import {assertBootstrapCompiler} from '../lib/bootstrap-handoff.mjs';
 import {writeStdProvenance} from '../../../build/lib/provenance.mjs';
-import {writeCrossRuntimeManifest} from '../../release/cross-runtime.mjs';
+import {buildIosRuntime, iosTargets} from '../lib/ios-runtime.mjs';
 import {probeRequirement} from '../../release/platform-matrix.mjs';
 
 $.stdio = 'inherit';
@@ -33,13 +33,8 @@ const output = path.join(workspace, 'software', 'final-std-ios');
 await fs.rm(output, {recursive: true, force: true});
 await fs.mkdir(output, {recursive: true});
 const jobs = os.availableParallelism();
-const targets = [
-  {target: 'ios-aarch64', tuple: 'ios_aarch64_cjnative', sdk: 'iphoneos', arch: 'arm64'},
-  {target: 'ios-simulator-aarch64', tuple: 'ios_simulator_aarch64_cjnative', sdk: 'iphonesimulator', arch: 'arm64'},
-  {target: 'ios-simulator-x86_64', tuple: 'ios_simulator_x86_64_cjnative', sdk: 'iphonesimulator', arch: 'x86_64'},
-];
 const sha256 = async file => crypto.createHash('sha256').update(await fs.readFile(file)).digest('hex');
-await Promise.all(targets.map(async target => {
+await Promise.all(iosTargets.map(async target => {
   const started = Date.now();
   const source = path.join(workspace, 'ios-source', target.target);
   await fs.rm(source, {recursive: true, force: true});
@@ -48,7 +43,6 @@ await Promise.all(targets.map(async target => {
   const sysroot = (await $({stdio: 'pipe'})`xcrun --sdk ${target.sdk} --show-sdk-path`).stdout.trim();
   const clang = (await $({stdio: 'pipe'})`xcrun --sdk ${target.sdk} --find clang`).stdout.trim();
   const toolBin = path.dirname(clang);
-  const runtime = path.join(source, 'runtime');
   const stdlib = path.join(source, 'stdlib');
   const install = path.join(output, target.tuple);
   const env = {...process.env, CANGJIE_HOME: sdk, CANGJIE_VERSION: version,
@@ -58,9 +52,7 @@ await Promise.all(targets.map(async target => {
     await assertBootstrapCompiler({sdk, command});
   };
   await assertCompiler();
-  await $({cwd: runtime, env})`python3 build.py build -t release --target ${target.target} --target-toolchain ${path.dirname(toolBin)} --target-sysroot ${sysroot} -v ${version}`;
-  const runtimeOutput = path.join(source, 'runtime-install');
-  await $({cwd: runtime, env})`python3 build.py install --prefix ${runtimeOutput}`;
+  const runtimeOutput = await buildIosRuntime({source, target, sysroot, toolBin, version, runtimeRef: actualRef, env});
   await $({cwd: stdlib, env})`python3 build.py build -t release -j ${jobs} --target ${target.target} --target-lib=${path.join(runtimeOutput, 'lib', target.tuple)} --target-lib=${path.join(runtimeOutput, 'runtime', 'lib', target.tuple)} --target-sysroot ${sysroot} --target-toolchain ${toolBin}`;
   await $({cwd: stdlib, env})`python3 build.py install --prefix ${install}`;
   await assertCompiler();
@@ -78,7 +70,6 @@ await Promise.all(targets.map(async target => {
     if (!kind.includes('Mach-O') || !kind.includes(target.arch)) throw new Error(`${target.tuple}/${name}: ${kind}`);
     records.push({file: path.relative(install, destination), sha256: await sha256(destination), kind});
   }
-  await writeCrossRuntimeManifest({root: runtimeArtifact, tuple: target.tuple, runtimeRef: actualRef});
   const core = path.join(install, 'lib', target.tuple, 'libcangjie-std-core.a');
   const kind = (await $({stdio: 'pipe'})`file -b ${core}`).stdout.trim();
   const arches = (await $({stdio: 'pipe'})`lipo -archs ${core}`).stdout.trim();
