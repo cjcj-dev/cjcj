@@ -298,7 +298,7 @@ jobs:
           path: ${{ env.CJCJ_BOOTSTRAP_HOST_LLVM_ARTIFACT }}
 
       - name: Load immutable in-process LLVM dylib provenance
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' || runner.os == 'macOS'
         shell: bash
         run: |
           set -euo pipefail
@@ -312,7 +312,7 @@ jobs:
           echo "CJCJ_BOOTSTRAP_DYLIB_ARTIFACT=$RUNNER_TEMP/llvm-depot/$LLVM_SHA/$CANGJIE_COMPILER_SHA/dylib" >> "$GITHUB_ENV"
 
       - name: Download pinned in-process LLVM dylib
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' || runner.os == 'macOS'
         uses: actions/download-artifact@v8
         with:
           artifact-ids: ${{ env.LLVM_DYLIB_ARTIFACT_ID }}
