@@ -27,6 +27,10 @@ async function fixture(t, tuple, triple) {
   await fs.copyFile(output, path.join(shared, 'libboundscheck.so'));
   const object = spawnSync('clang', [`--target=${triple}`, '-c', source, '-o', path.join(lib, 'cjstart.o')], {encoding: 'utf8'});
   assert.equal(object.status, 0, `fixture object: ${object.stderr}`);
+  const identity = crypto.createHash('sha256').update(await fs.readFile(output)).digest('hex');
+  const format = spawnSync('file', ['-b', output], {encoding: 'utf8'});
+  assert.equal(format.status, 0, format.stderr);
+  console.log(`FIXTURE_ELF tuple=${tuple} triple=${triple} sha256=${identity} file=${format.stdout.trim()}`);
   return {root, stage, tuple, runtimeRef};
 }
 
