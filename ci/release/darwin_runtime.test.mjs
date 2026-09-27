@@ -1,0 +1,68 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {spawnSync} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
+import assert from 'node:assert/strict';
+import {test} from 'node:test';
+import {digest} from './colour_runtime.mjs';
+
+const platform = process.env.PLATFORM || 'darwin_aarch64';
+const tuple = `${platform}_cjnative`;
+const files = [`runtime/lib/${tuple}/libcangjie-runtime.dylib`,
+  `runtime/lib/${tuple}/libboundscheck.dylib`, `lib/${tuple}/libcangjie-runtime.a`];
+const product = process.env.DARWIN_RT_PRODUCT || fileURLToPath(new URL('./darwin_runtime.mjs', import.meta.url));
+function fixture(body) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'darwin-runtime-'));
+  const source = path.join(root, 'source');
+  const output = path.join(root, 'output');
+  const env = {...process.env, RUNTIME_REF: process.env.RUNTIME_REF || 'a'.repeat(40),
+    GITHUB_RUN_ID: '123', GITHUB_RUN_ATTEMPT: '1', COLOUR_RT_RUN_ID: '123', COLOUR_RT_RUN_ATTEMPT: '1'};
+  for (const relative of files) {
+    const dest = path.join(source, relative);
+    fs.mkdirSync(path.dirname(dest), {recursive: true});
+    if (process.env.DARWIN_RT_NATIVE_SOURCE) fs.copyFileSync(path.join(process.env.DARWIN_RT_NATIVE_SOURCE, relative), dest);
+    else fs.writeFileSync(dest, `fixture for device test: ${relative}`);
+  }
+  fs.writeFileSync(path.join(source, 'SOURCE_SHA'), env.RUNTIME_REF);
+  const run = (mode, dir = output, reference) => spawnSync(process.execPath,
+    [product, mode, dir, platform, ...(reference ? [reference] : [])], {env, encoding: 'utf8'});
+  try { body({root, source, output, env, run}); }
+  finally { fs.rmSync(root, {recursive: true, force: true}); }
+}
+
+test('producer copies exactly the three native source libraries', () => fixture(({source, output, run}) => {
+  const result = run('prepare', output, source);
+  assert.equal(result.status, 0, result.stderr);
+  for (const relative of files) {
+    assert.equal(digest(path.join(output, relative)), digest(path.join(source, relative)), `PRODUCER_BYTES: ${relative}`);
+  }
+  console.log(`ASSERT PRODUCER_BYTES ${platform}`);
+}));
+
+test('consumer rejects changed library bytes after authentic manifest verification', () => fixture(({source, output, env, run}) => {
+  fs.cpSync(source, output, {recursive: true});
+  fs.writeFileSync(path.join(output, 'manifest.json'), JSON.stringify({role: 'colour-runtime-libraries', platform,
+    runtime_sha: env.RUNTIME_REF, run_id: '123', run_attempt: '1',
+    files: Object.fromEntries(files.map(rel => [rel, digest(path.join(source, rel))]))}));
+  env.COLOUR_RT_MANIFEST_SHA256 = digest(path.join(output, 'manifest.json'));
+  assert.equal(run('verify').status, 0);
+  fs.appendFileSync(path.join(output, files[0]), 'changed payload');
+  const rejected = run('verify');
+  assert.notEqual(rejected.status, 0, 'CONSUMER_REJECTS_CHANGED_BYTES');
+  assert.match(rejected.stderr, /COLOUR_RT_FILE_SHA256_MISMATCH/);
+  console.log(`ASSERT CONSUMER_REJECTS_CHANGED_BYTES ${platform}`);
+}));
+
+test('source classifies missing std only after verifying all native libraries', () => fixture(({source, output, env, run}) => {
+  fs.cpSync(source, output, {recursive: true});
+  fs.writeFileSync(path.join(output, 'manifest.json'), JSON.stringify({role: 'colour-runtime-libraries', platform,
+    runtime_sha: env.RUNTIME_REF, run_id: '123', run_attempt: '1',
+    files: Object.fromEntries(files.map(rel => [rel, digest(path.join(source, rel))]))}));
+  env.COLOUR_RT_MANIFEST_SHA256 = digest(path.join(output, 'manifest.json'));
+  const result = run('source');
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, new RegExp(`COLOUR_RT_STD_MISSING: ${platform}`));
+  assert.equal(result.stdout.split('COLOUR_RT_LIBRARY_VERIFIED').length - 1, 3);
+  console.log(`ASSERT SOURCE_STD_CLASSIFIED ${platform}`);
+}));

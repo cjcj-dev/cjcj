@@ -375,7 +375,14 @@ jobs:
           run-id: ${{ env.COLOUR_RT_RUN_ID }}
           path: ${{ env.CJCJ_BOOTSTRAP_COLOUR_RT }}
 
+      - name: Verify independent Darwin libraries and classify std input
+        if: runner.os == 'macOS'
+        env:
+          RUNTIME_PLATFORM: ${{ matrix.llvm_platform }}
+        run: node ci/release/darwin_runtime.mjs source "$CJCJ_BOOTSTRAP_COLOUR_RT" "$RUNTIME_PLATFORM"
+
       - name: Inspect downloaded colour runtime symbols
+        if: runner.os != 'macOS'
         shell: bash
         run: |
           set -euo pipefail
