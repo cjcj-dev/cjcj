@@ -4,7 +4,7 @@ import path from 'node:path';
 import test from 'node:test';
 import os from 'node:os';
 import {spawnSync} from 'node:child_process';
-import {allReleasePlatforms} from '../../../build/lib/targets.mjs';
+import {allReleasePlatforms, getReleasePlatform} from '../../../build/lib/targets.mjs';
 
 const root = path.resolve(import.meta.dirname, '..', '..', '..');
 const readWorkflow = name => fs.readFile(path.join(root, '.github/workflows', name), 'utf8');
@@ -214,7 +214,7 @@ test('policy failure capture: package identity reaches GITHUB_ENV for native and
   t.after(() => fs.rm(dir, {recursive: true, force: true}));
   const cells = [
     ...PHASES.map(host => ({host, key: '', archiveKey: host})),
-    ...allReleasePlatforms(),
+    ...allReleasePlatforms().map(getReleasePlatform),
   ];
   for (const [index, cell] of cells.entries()) {
     const envFile = path.join(dir, `${index}.env`);
@@ -247,7 +247,7 @@ function diagnosticNames(template, cells) {
 test('policy failure capture: diagnostic names distinguish same-host packages and attempts', async () => {
   const text = uncommented(await readWorkflow('build-release-package.yml'));
   const upload = text.split(/\n\s*- name: /).find(step => step.startsWith('Upload failure diagnostics\n'));
-  const names = diagnosticNames(scalar(upload, 'name'), allReleasePlatforms());
+  const names = diagnosticNames(scalar(upload, 'name'), allReleasePlatforms().map(getReleasePlatform));
   assert.ok(names.includes('pkg-diagnosis-linux-x64-android-1'));
   assert.ok(names.includes('pkg-diagnosis-linux-x64-1'));
 });
@@ -255,7 +255,7 @@ test('policy failure capture: diagnostic names distinguish same-host packages an
 test('policy failure capture: collision controls reject host-only, omitted-key and omitted-attempt names', () => {
   for (const template of ['pkg-diagnosis-${{ inputs.platform }}-${{ github.run_attempt }}',
     'pkg-diagnosis-${{ github.run_attempt }}', 'pkg-diagnosis-${{ env.PACKAGE_KEY }}']) {
-    assert.throws(() => diagnosticNames(template, allReleasePlatforms()),
+    assert.throws(() => diagnosticNames(template, allReleasePlatforms().map(getReleasePlatform)),
       /failure diagnostics collide across package cells or run attempts/);
   }
 });
