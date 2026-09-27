@@ -12,7 +12,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runtime: ['3c3bacda906b208db161819e51b3eea63406ac05']
+        runtime: ['3c3bacda906b208db161819e51b3eea63406ac05', '1d0c8be495d4b6378fefbd27fb08135b3db288fd']
     env:
       RUNTIME_REF: ${{ matrix.runtime }}
       RUNTIME_TARGET: windows-x86_64
@@ -56,6 +56,7 @@ jobs:
       - name: Relink identical objects with official linker choice
         shell: msys2 {0}
         run: |
+          set +e
           set -uo pipefail
           pacman -Q > evidence/packages.txt
           clang++ --version > evidence/clang.txt
@@ -63,12 +64,20 @@ jobs:
           ld.lld --version > evidence/lld.txt
           cd runtime-source/runtime/CMakebuild/src
           sha256sum CMakeFiles/cangjie-runtime.dir/objects.a > ../../../../evidence/objects.sha256
-          cp CMakeFiles/cangjie-runtime.dir/link.txt ../../../../evidence/link.txt
-          sed 's/clang++.exe /clang++.exe -fuse-ld=lld /g' CMakeFiles/cangjie-runtime.dir/link.txt > link-lld.sh
+          python3 - <<'PYLINK'
+          from pathlib import Path
+          lines = Path('../../../../evidence/build.log').read_text(encoding='utf-8-sig').splitlines()
+          commands = [line.split(' && ', 1)[1] for line in lines if line.startswith('cd ') and ' && clang++.exe ' in line and '-shared ' in line]
+          assert commands, 'actual DLL link command was not observed'
+          command = commands[-1]
+          Path('../../../../evidence/link.txt').write_text(command + '\n')
+          Path('link-lld.sh').write_text(command.replace('clang++.exe ', 'clang++.exe -fuse-ld=lld ', 1) + '\n')
+          PYLINK
           bash link-lld.sh > ../../../../evidence/lld-link.log 2>&1
           rc=$?
           echo "lld_relink_rc=$rc" | tee -a ../../../../evidence/result.txt
           tail -20 ../../../../evidence/lld-link.log
+          sha256sum CMakeFiles/cangjie-runtime.dir/objects.a > ../../../../evidence/objects-after.sha256
           find .. -name 'libcangjie-runtime.dll' -exec sha256sum '{}' ';' > ../../../../evidence/dll.sha256
           exit 0
       - uses: actions/upload-artifact@v7
