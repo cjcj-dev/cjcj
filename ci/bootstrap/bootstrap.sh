@@ -464,6 +464,9 @@ stdlib_build() {
   configure_build_resources "$HEAP" || die "cannot determine std build resources"
   cmd "python3 $(printf '%q' "$SRC/ci/install_std_sdk_inputs.py") $(printf '%q' "$(dirname "$AST_SUPPORT")") $(printf '%q' "$sdk") $(printf '%q' "$HOST_TUPLE")"
   ld=$(sdk_ld_path "$sdk" "$runtime")
+  # Native C/C++ tools must use their own LLVM/LTO libraries. The installed
+  # cjc/llc/opt runners bind their libraries individually (stage1_host_runner.sh).
+  if [ "$HOST_OS" = Darwin ]; then ld=; fi
   prepare_build_env
   # shellcheck disable=SC2016 # Expanded by the inner bash, not this shell.
   script='cd "$1" && rm -rf build/build && python3 build.py clean && python3 build.py build -t relwithdebinfo --jobs "$2" --target-lib="$3" "${@:5}" && python3 build.py install --prefix "$4"'
