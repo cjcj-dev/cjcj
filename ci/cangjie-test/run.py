@@ -111,7 +111,8 @@ def run_suite(suite, test, framework, output, env, jobs):
         record['total'] = len(rows)
         record['status'] = 'ran'
         # A framework error must remain visible even when partial records exist.
-        record['complete'] = record['rc'] in (0, 1) and record['counts']['not_run'] == 0
+        record['complete'] = (record['rc'] in (0, 1) and record['counts']['not_run'] == 0
+                              and record['counts']['pass'] + record['counts']['fail'] > 0)
         dump(out / 'cases.json', rows)
         dump(out / 'failures.json', [r for r in rows if r['category'] in ('fail', 'not_run')])
     except (OSError, ValueError, KeyError, TypeError) as error:
