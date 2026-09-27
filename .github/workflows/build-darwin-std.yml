@@ -189,11 +189,12 @@ jobs:
       - name: Compile coloured std through bootstrap_target_std
         run: bash ci/bootstrap/gha_run.sh std
       - name: Record compiler cache activity
+        if: always()
         uses: ./.github/actions/sccache-report
         with:
           component: srcbuild
           platform: ${{ matrix.target }}
-          require-compiles: 'true'
+          require-compiles: ${{ job.status == 'success' }}
       - name: Verify and package the same-run std identity
         env:
           STD_PLATFORM: ${{ matrix.llvm_platform }}
