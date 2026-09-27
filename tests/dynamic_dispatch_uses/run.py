@@ -34,7 +34,8 @@ def check(source, compiler, out):
         if source.stem == 'control':
             assertions.append(dict(name='concrete_getter_retained', passed='srcCodeIdentifier: $sizeget,' in text))
         else:
-            kind = 'InvokeStatic' if source.stem == 'static' else 'Invoke'
+            kind = {'instance': 'Invoke', 'static': 'InvokeStatic',
+                    'exception': 'TryInvoke', 'exception_static': 'TryInvokeStatic'}[source.stem]
             callees = set(re.findall(r'\b' + kind + r'\([^\n]*?->(@[^,\n]+),', text))
             getters = sorted(name for name in callees if 'sizepg' in name)
             declarations = {}
