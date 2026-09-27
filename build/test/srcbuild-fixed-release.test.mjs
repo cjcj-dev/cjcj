@@ -12,7 +12,7 @@ const hash = file => digest(fs.readFileSync(file));
 
 // Only external release bytes and the final bootstrap child are fixtures. The
 // complete srcbuild driver, acquire/store and manifest validator are unmodified.
-function fixture(t, {depot = 'missing', corrupt = '', sumsMismatch = false, unavailable = false} = {}) {
+function fixture(t, {depot = 'missing', corrupt = '', sumsMismatch = false, unavailable = false, runtimeCase = 'valid'} = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'fixed-release-'));
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));
   for (const dir of ['tools', 'build', 'ci']) fs.cpSync(path.join(repo, dir), path.join(root, dir), {recursive: true});
@@ -56,10 +56,26 @@ function fixture(t, {depot = 'missing', corrupt = '', sumsMismatch = false, unav
   if (os.hostname().split('.')[0] !== 'kkk2') fs.writeFileSync(path.join(bin, 'hostname'), '#!/bin/sh\necho kkk2\n', {mode: 0o755});
   const child = path.join(root, 'bootstrap-child.sh');
   fs.writeFileSync(child, '#!/bin/bash\nprintf "ARG=<%s>\\n" "$@"\n', {mode: 0o755});
+  // P12 inputs are external fixture bytes, with identities declared before any
+  // negative-control mutation. The real driver still validates both digests and
+  // the runtime pin before it can invoke the bootstrap child.
+  const runtimePin = fs.readFileSync(path.join(root, 'ci/runtime_pin.env'), 'utf8')
+    .match(/^RUNTIME_REF=(.*)$/m)[1];
+  const runtimeDir = path.join(root, 'colour-runtime');
+  fs.mkdirSync(runtimeDir);
+  const runtime = Buffer.from(`CJRT-COMMIT:${runtimePin}\n`);
+  const bounds = Buffer.from('boundscheck fixture\n');
+  fs.writeFileSync(path.join(runtimeDir, 'libcangjie-runtime.so'), runtime);
+  fs.writeFileSync(path.join(runtimeDir, 'libboundscheck.so'), bounds);
+  if (runtimeCase === 'runtime-corrupt') fs.appendFileSync(path.join(runtimeDir, 'libcangjie-runtime.so'), 'changed');
+  if (runtimeCase === 'bounds-corrupt') fs.appendFileSync(path.join(runtimeDir, 'libboundscheck.so'), 'changed');
   const env = {...process.env, PATH: `${bin}:${process.env.PATH}`, NODE_OPTIONS: `--import=${preload}`,
     CJCJ_LLVM_DEPOT_ROOT: depotRoot, CJCJ_BOOTSTRAP_SH: child,
     CJCJ_BOOTSTRAP_CPP_SRC: root, CJCJ_SRCBUILD_HOST_SDK: root, CJCJ_BOOTSTRAP_CJCJ_SHA: pin.commit,
     CJCJ_BOOTSTRAP_HOST_LLVM_SO: child, CJCJ_BOOTSTRAP_HOST_LLVM_SHA256: hash(child),
+    CJCJ_BOOTSTRAP_COLOUR_RT: runtimeCase === 'undeclared' ? '' : runtimeDir,
+    CJCJ_BOOTSTRAP_COLOUR_RT_SHA256: digest(runtime),
+    CJCJ_BOOTSTRAP_BOUNDSCHECK_SHA256: digest(bounds),
     CJCJ_BOOTSTRAP_AST_SUPPORT: child, CJCJ_BOOTSTRAP_AST_SUPPORT_SHA256: hash(child)};
   for (const key of ['CJCJ_LLVM_DEPOT_PUBLISH', 'CJCJ_BOOTSTRAP_COLOUR_TUPLE', 'CJCJ_SELECTED_COLOUR_TUPLE',
     'CJCJ_BOOTSTRAP_INPUTS_PIN', 'CJCJ_SRCBUILD_CPUSET', 'CJCJ_KKK2_AFFINED']) delete env[key];
@@ -126,3 +142,18 @@ test('fixed release unavailable fails without source compilation', t => {
   assert.equal(fs.existsSync(path.join(f.state, 'colour-tuple')), false);
   console.log(`ASSERT release-unavailable driver_rc=${result.status}`);
 });
+
+for (const [runtimeCase, diagnostic] of [
+  ['undeclared', 'COLOUR_RT_INPUT_REQUIRED'],
+  ['runtime-corrupt', 'COLOUR_RT_SHA_MISMATCH: libcangjie-runtime.so'],
+  ['bounds-corrupt', 'COLOUR_RT_SHA_MISMATCH: libboundscheck.so'],
+]) {
+  test(`fixed release rejects ${runtimeCase} before bootstrap tuple consumption`, t => {
+    const f = fixture(t, {runtimeCase});
+    const result = f.run();
+    assert.equal(result.status, 1, result.log);
+    assert.ok(result.log.includes(diagnostic), result.log);
+    assert.doesNotMatch(result.log, /ARG=<--colour-tuple>/);
+    console.log(`ASSERT rejected-${runtimeCase} driver_rc=${result.status}`);
+  });
+}
