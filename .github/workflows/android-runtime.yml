@@ -17,6 +17,10 @@ permissions:
   contents: read
 jobs:
   runtime:
+    strategy:
+      fail-fast: false
+      matrix:
+        arm: [candidate, cut, restored]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -50,8 +54,45 @@ jobs:
           component: runtime
           platform: android-aarch64
           pin: ${{ env.RUNTIME_REF }}
+      - name: Prepare controlled producer arm
+        env:
+          ARM: ${{ matrix.arm }}
+        shell: bash
+        run: |
+          if [[ "$ARM" != candidate ]]; then
+            python3 - <<'PYCODE'
+          from pathlib import Path
+          p = Path('ci/srcbuild/lib/android-runtime.mjs')
+          text = p.read_text()
+          source = "'aarch64_Release', 'libboundscheck.so'"
+          assert text.count(source) == 1
+          p.write_text(text.replace(source, "'aarch64_Release', 'libcangjie-runtime.so'"))
+          PYCODE
+            git diff -- ci/srcbuild/lib/android-runtime.mjs > "$RUNNER_TEMP/producer-cut.diff"
+          fi
+          if [[ "$ARM" == restored ]]; then
+            git restore ci/srcbuild/lib/android-runtime.mjs
+          fi
+          sha256sum ci/srcbuild/lib/android-runtime.mjs ci/release/verify-android-runtime.mjs
       - name: Build Android runtime through product entry
         run: npx --yes zx@8 ci/srcbuild/steps/build-android-runtime.mjs
+      - name: Assert installed boundscheck bytes from this build
+        env:
+          ARM: ${{ matrix.arm }}
+        shell: bash
+        run: |
+          set +e
+          node ci/release/verify-android-runtime.mjs > "$RUNNER_TEMP/producer-assertion.log" 2>&1
+          rc=$?
+          set -e
+          cat "$RUNNER_TEMP/producer-assertion.log"
+          echo "ANDROID_PRODUCER_ARM=$ARM ASSERT_RC=$rc"
+          if [[ "$ARM" == cut ]]; then
+            test "$rc" = 1
+            grep -q 'ANDROID_BOUNDSCHECK_SAME_BUILD_BYTES' "$RUNNER_TEMP/producer-assertion.log"
+          else
+            test "$rc" = 0
+          fi
       - uses: ./.github/actions/sccache-report
         if: always()
         with:
@@ -61,8 +102,10 @@ jobs:
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: android-runtime-build-evidence
+          name: android-runtime-build-evidence-${{ matrix.arm }}
           path: |
+            ${{ runner.temp }}/producer-cut.diff
+            ${{ runner.temp }}/producer-assertion.log
             ${{ env.CANGJIE_WORKSPACE }}/cangjie_runtime/runtime/output
             ${{ env.CANGJIE_WORKSPACE }}/cangjie_runtime/runtime/CMakebuild/CMakeCache.txt
             ${{ env.CANGJIE_WORKSPACE }}/cangjie_runtime/runtime/CMakebuild/CMakeFiles/CMakeConfigureLog.yaml
