@@ -20,16 +20,19 @@ an error; it never falls through to the official host library.
 The official `CJCJ_BOOTSTRAP_HOST_LLVM_SO` remains a separate input. Installing
 the colour library into the cjcj runtime SDK is tracked by cjcj#92. The standalone
 C API check proves that this dylib can be loaded and called; it does not claim
-that the bootstrap compiler has loaded it. Static tuple publication and its
-eight payloads are unchanged.
+that the bootstrap compiler has loaded it. The static tuple retains its ten
+payloads and SHA256SUMS.
 
 `test-llvm-tuple.yml` downloads each platform's pinned artifact on its native
 Linux runner. It checks the source pin, run/attempt and target list, then runs
 `verify.py` against the reviewed library digest. A one-character manifest digest
 change must fail before the original manifest is restored and verified again.
 
-For a new publication, dispatch `build-llvm-dylib.yml` at the reviewed cjcj
-commit and wait for both native jobs to finish. Preserve each original Actions
+For a release pair update, dispatch `build-fixed-llc.yml` at the reviewed cjcj
+commit with both `publish_tuple` and `publish_dylib`, and wait for all jobs.
+`ci/release-pair-pin.test.mjs` requires both dylibs and the tuple to use the
+same run and attempt. Update `ci/llvm_tuple_SHA256SUMS` alongside the tuple pin.
+Preserve each original Actions
 artifact ZIP and its manifest in a draft prerelease, together with SHA256SUMS.
 Read back every asset and compare its bytes before publishing with
 `--prerelease --latest=false`. Record the immutable release/asset IDs in
