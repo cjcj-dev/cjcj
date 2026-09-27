@@ -31,6 +31,11 @@ on:
         required: false
         type: string
         default: all
+      build_ohos:
+        description: Build both OHOS runtime and final std tuples on the Linux source cell
+        required: false
+        type: boolean
+        default: false
       build_android:
         description: Build the Android runtime and final std needed by Android release packages
         required: false
@@ -99,6 +104,11 @@ on:
         required: false
         type: string
         default: all
+      build_ohos:
+        description: Build both OHOS runtime and final std tuples on the Linux source cell
+        required: false
+        type: boolean
+        default: false
       build_android:
         description: Build the Android runtime and final std needed by Android release packages
         required: false
@@ -646,6 +656,36 @@ jobs:
         with:
           name: final-std-android-aarch64
           path: ${{ env.CANGJIE_WORKSPACE }}/software/final-std-android-aarch64
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Install OHOS SDK and probe
+        if: matrix.target == 'linux-x64' && inputs.build_ohos
+        uses: ./.github/actions/setup-release-sdk
+        with:
+          requirement: ohos-sdk
+
+      - name: Build OHOS runtime and final std with stage2 cjc
+        if: matrix.target == 'linux-x64' && inputs.build_ohos
+        env:
+          CJCJ_STAGE3_CANGJIE_VERSION: ${{ steps.version.outputs.value }}
+        run: npx --yes zx@8 ci/srcbuild/steps/build-ohos-final-std.mjs
+
+      - name: Upload OHOS aarch64 runtime and final std
+        if: matrix.target == 'linux-x64' && inputs.build_ohos
+        uses: actions/upload-artifact@v7
+        with:
+          name: final-std-ohos-aarch64
+          path: ${{ env.CANGJIE_WORKSPACE }}/software/final-std-ohos-aarch64
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload OHOS x86-64 runtime and final std
+        if: matrix.target == 'linux-x64' && inputs.build_ohos
+        uses: actions/upload-artifact@v7
+        with:
+          name: final-std-ohos-x86-64
+          path: ${{ env.CANGJIE_WORKSPACE }}/software/final-std-ohos-x86-64
           if-no-files-found: error
           retention-days: 7
 

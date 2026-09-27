@@ -22,9 +22,9 @@ test('probe CLI reports SDK capability independently of blocked cross-build read
   const present = probe();
   assert.equal(present.status, 0, present.stderr);
   assert.match(present.stdout, /^PRESENT ohos-sdk:/);
-  const check = spawnSync(process.execPath, [script, 'check', '--platform', 'linux-x64-ohos'], {env, encoding: 'utf8'});
+  const check = spawnSync(process.execPath, [script, 'check', '--platform', 'ohos-arm64'], {env, encoding: 'utf8'});
   assert.equal(check.status, 1, 'SDK presence must not invent cross-build producers');
-  assert.match(check.stderr, /BLOCKED tuple linux_ohos_aarch64_cjnative:/);
+  assert.match(check.stderr, /BLOCKED device-side SDK:/);
 });
 
 test('probe CLI refuses absent and unknown requirement names', () => {
@@ -55,11 +55,11 @@ test('phased release source and package sets equal the buildable matrix', () => 
   assert.deepEqual(packages.sort(), plan.package.map(row => row.release_key).sort(), 'package symmetric difference');
 });
 
-test('plan for all fourteen platforms: four source cells, eight packages, five blocked, one excluded', () => {
+test('plan for all fourteen platforms: four source cells, eleven packages, two blocked, one excluded', () => {
   const plan = planMatrix('all');
   assert.deepEqual(plan.source.map(row => row.target).sort(), ['darwin-arm64', 'darwin-x64', 'linux-aarch64', 'linux-x64']);
-  assert.deepEqual(plan.package.map(row => row.release_key), ['linux-x64', 'linux-arm64', 'linux-x64-android', 'darwin-arm64', 'darwin-x64', 'darwin-arm64-android', 'win32-x64', 'win32-x64-android']);
-  assert.equal(plan.blocked.length, 5);
+  assert.deepEqual(plan.package.map(row => row.release_key), ['linux-x64', 'linux-arm64', 'linux-x64-android', 'linux-x64-ohos', 'darwin-arm64', 'darwin-x64', 'darwin-arm64-android', 'darwin-arm64-ohos', 'win32-x64', 'win32-x64-android', 'win32-x64-ohos']);
+  assert.deepEqual(plan.blocked.map(row => row.release_key), ['darwin-arm64-ios', 'ohos-arm64']);
   assert.deepEqual(plan.excluded.map(row => row.release_key), ['win32-x64-ohos-arm32']);
   assert.equal(plan.windowsSide, true);
   for (const row of plan.blocked) {
@@ -100,7 +100,7 @@ test('selecting a consumer selects the source cells it needs and nothing else', 
 });
 
 test('a blocked-only selection still produces a plan with a red cell, and an unknown key is refused', () => {
-  const blocked = planMatrix('linux-x64-ohos');
+  const blocked = planMatrix('ohos-arm64');
   assert.deepEqual(blocked.source, []);
   assert.deepEqual(blocked.package, []);
   assert.equal(blocked.blocked.length, 1);

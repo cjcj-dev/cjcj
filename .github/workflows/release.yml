@@ -53,6 +53,7 @@ jobs:
       runtime_ref: ${{ inputs.runtime_ref }}
       targets: linux-x64
       build_android: true
+      build_ohos: true
 
   source-p2-linux-aarch64:
     name: phase 2 · linux-aarch64 / source SDK and final std
@@ -260,9 +261,63 @@ jobs:
       runtime_ref: ${{ inputs.runtime_ref }}
     secrets: inherit
 
+  package-linux-x64-ohos:
+    name: linux-x64-ohos / Build release package
+    needs: [package-p1-linux-x64, source-p1-linux-x64]
+    uses: ./.github/workflows/build-release-package.yml
+    with:
+      runner: ubuntu-24.04
+      platform: linux-x64
+      release_key: linux-x64-ohos
+      llvm_platform: linux_x86_64
+      sdk_runtime_dir: linux_x86_64_cjnative
+      compiler_artifact: final-compiler-linux-x64
+      std_artifact: final-std-linux-x64
+      cross_std_artifacts: '[{"tuple":"linux_ohos_aarch64_cjnative","artifact":"final-std-ohos-aarch64"},{"tuple":"linux_ohos_x86_64_cjnative","artifact":"final-std-ohos-x86-64"},{"tuple":"windows_x86_64_cjnative","artifact":"final-std-windows-x64"}]'
+      version: ${{ inputs.version }}
+      dry_run: ${{ inputs.dry_run }}
+      runtime_ref: ${{ inputs.runtime_ref }}
+    secrets: inherit
+
+  package-darwin-arm64-ohos:
+    name: darwin-arm64-ohos / Build release package
+    needs: [package-p4-darwin-arm64, source-p1-linux-x64]
+    uses: ./.github/workflows/build-release-package.yml
+    with:
+      runner: macos-15
+      platform: darwin-arm64
+      release_key: darwin-arm64-ohos
+      llvm_platform: darwin_aarch64
+      sdk_runtime_dir: darwin_aarch64_cjnative
+      compiler_artifact: final-compiler-darwin-arm64
+      std_artifact: final-std-darwin-arm64
+      cross_std_artifacts: '[{"tuple":"linux_ohos_aarch64_cjnative","artifact":"final-std-ohos-aarch64"}]'
+      version: ${{ inputs.version }}
+      dry_run: ${{ inputs.dry_run }}
+      runtime_ref: ${{ inputs.runtime_ref }}
+    secrets: inherit
+
+  package-win32-x64-ohos:
+    name: win32-x64-ohos / Build release package
+    needs: [package-p3-windows-x64, source-p1-linux-x64]
+    uses: ./.github/workflows/build-release-package.yml
+    with:
+      runner: windows-2025
+      platform: windows-x64
+      release_key: win32-x64-ohos
+      llvm_platform: windows_x86_64
+      sdk_runtime_dir: windows_x86_64_cjnative
+      compiler_artifact: ''
+      std_artifact: final-std-windows-x64
+      cross_std_artifacts: '[{"tuple":"linux_ohos_aarch64_cjnative","artifact":"final-std-ohos-aarch64"},{"tuple":"linux_ohos_x86_64_cjnative","artifact":"final-std-ohos-x86-64"}]'
+      version: ${{ inputs.version }}
+      dry_run: ${{ inputs.dry_run }}
+      runtime_ref: ${{ inputs.runtime_ref }}
+    secrets: inherit
+
   publish:
     name: Publish release
-    needs: [source-p1-linux-x64, source-p2-linux-aarch64, source-p4-darwin-arm64, source-p5-darwin-x64, windows-fixed-llvm-tuple, patched-cjpm, windows-runtime, package-p1-linux-x64, package-p2-linux-aarch64, package-p3-windows-x64, package-p4-darwin-arm64, package-p5-darwin-x64, package-linux-x64-android, package-darwin-arm64-android, package-win32-x64-android]
+    needs: [source-p1-linux-x64, source-p2-linux-aarch64, source-p4-darwin-arm64, source-p5-darwin-x64, windows-fixed-llvm-tuple, patched-cjpm, windows-runtime, package-p1-linux-x64, package-p2-linux-aarch64, package-p3-windows-x64, package-p4-darwin-arm64, package-p5-darwin-x64, package-linux-x64-android, package-darwin-arm64-android, package-win32-x64-android, package-linux-x64-ohos, package-darwin-arm64-ohos, package-win32-x64-ohos]
     if: >-
       ${{
         always() &&
@@ -274,7 +329,10 @@ jobs:
         needs.package-p5-darwin-x64.result == 'success' &&
         needs.package-linux-x64-android.result == 'success' &&
         needs.package-darwin-arm64-android.result == 'success' &&
-        needs.package-win32-x64-android.result == 'success'
+        needs.package-win32-x64-android.result == 'success' &&
+        needs.package-linux-x64-ohos.result == 'success' &&
+        needs.package-darwin-arm64-ohos.result == 'success' &&
+        needs.package-win32-x64-ohos.result == 'success'
       }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20

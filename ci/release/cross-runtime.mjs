@@ -16,21 +16,26 @@ async function inventory(root, tuple) {
   }
   return files;
 }
+const machines = Object.freeze({
+  linux_android_aarch64_cjnative: 183,
+  linux_ohos_aarch64_cjnative: 183,
+  linux_ohos_x86_64_cjnative: 62,
+});
 function assertTuple(tuple) {
-  if (tuple !== 'linux_android_aarch64_cjnative') throw new Error(`unsupported cross runtime tuple: ${tuple}`);
+  if (!Object.hasOwn(machines, tuple)) throw new Error(`unsupported cross runtime tuple: ${tuple}`);
 }
-async function assertAndroidElf(file) {
+async function assertCrossElf(file, tuple) {
   const bytes = await fs.readFile(file);
   if (bytes.length < 20 || bytes.subarray(0, 4).toString('hex') !== '7f454c46'
-    || bytes[4] !== 2 || bytes[5] !== 1 || bytes.readUInt16LE(18) !== 183) {
-    throw new Error(`cross runtime is not an AArch64 ELF64: ${file}`);
+    || bytes[4] !== 2 || bytes[5] !== 1 || bytes.readUInt16LE(18) !== machines[tuple]) {
+    throw new Error(`cross runtime is not an ELF64 for ${tuple}: ${file}`);
   }
 }
 export async function writeCrossRuntimeManifest({root, tuple, runtimeRef}) {
   assertTuple(tuple);
   if (!/^[0-9a-f]{40}$/.test(runtimeRef)) throw new Error('cross runtime requires exact source SHA');
   for (const name of ['libcangjie-runtime.so', 'libboundscheck.so']) {
-    await assertAndroidElf(path.join(root, 'runtime', 'lib', tuple, name));
+    await assertCrossElf(path.join(root, 'runtime', 'lib', tuple, name), tuple);
   }
   await fs.access(path.join(root, 'lib', tuple, 'cjstart.o'));
   const record = {schema: 1, tuple, runtimeRef, files: await inventory(root, tuple)};
@@ -46,7 +51,7 @@ export async function installCrossRuntime({root, stage, tuple, runtimeRef}) {
   const files = await inventory(root, tuple);
   if (JSON.stringify(files) !== JSON.stringify(record.files)) throw new Error('cross runtime inventory/hash mismatch');
   for (const name of ['libcangjie-runtime.so', 'libboundscheck.so']) {
-    await assertAndroidElf(path.join(root, 'runtime', 'lib', tuple, name));
+    await assertCrossElf(path.join(root, 'runtime', 'lib', tuple, name), tuple);
   }
   await fs.access(path.join(root, 'lib', tuple, 'cjstart.o'));
   for (const file of files) {
