@@ -385,6 +385,13 @@ test('G2 identity capture has exactly one workflow consumer', async t => {
   // Execute the workflow's actual run block, with SDK-shaped fixture files.
   // No copy of the capture implementation or hand-written invocation lives here.
   const source = await fs.readFile(path.join(workflows, consumers[0]), 'utf8');
+  // FREEZE's base SDK is the package input, which can differ from the
+  // source compiler's nightly host. Keep the pin at its existing owner.
+  assert.ok(source.includes("sed -n 's/^  RELEASE_HOST_TOOLCHAIN: //p' .github/workflows/build-release-package.yml"));
+  assert.ok(source.includes('--platform linux-x64 --toolchain "$release_base"'));
+  assert.ok(source.indexOf('- name: Freeze G2 identity inputs') < source.indexOf('- name: Provision uncoloured host SDK'));
+  assert.ok(source.indexOf('- name: Compose self-hosted SDK') < source.indexOf('- name: Capture G2 SDK identity'));
+  assert.ok(source.indexOf('- name: Capture G2 SDK identity') < source.indexOf('- name: Retain G2 campaign identity'));
   const step = source.split(/^      - name:/m)
     .find(value => /^[ \t]*node ci\/capture-g2-identity\.mjs[ \t]/m.test(value));
   const lines = step.split('\n');

@@ -216,8 +216,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # FREEZE records the release package base, not the source compiler host.
+          release_base=$(sed -n 's/^  RELEASE_HOST_TOOLCHAIN: //p' .github/workflows/build-release-package.yml)
+          test -n "$release_base"
           GITHUB_ENV="$RUNNER_TEMP/g2-base.env" node ci/release/prepare_base_sdk.mjs \
-            --platform linux-x64 --toolchain "$CJCJ_TOOLCHAIN" \
+            --platform linux-x64 --toolchain "$release_base" \
             --outdir "$RUNNER_TEMP/g2-base-sdk"
           source "$RUNNER_TEMP/g2-base.env"
           node ci/generate-freeze.mjs \
