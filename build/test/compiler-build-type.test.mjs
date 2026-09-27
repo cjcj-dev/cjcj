@@ -15,7 +15,7 @@ test('published native and cross recipes all select release', () => {
   }
 });
 
-test('final compiler release link strips before producer hashes are recorded', () => {
+test('final compiler release options request portable stripping', () => {
   const release = compilerBuildTypeToml(toml, 'release');
   console.log('ASSERT final-compiler-release-options');
   assert.match(release, /^  compile-option = "--strip-all"$/m);
