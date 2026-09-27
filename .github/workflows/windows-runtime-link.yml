@@ -1,0 +1,103 @@
+name: Windows runtime link controls
+
+on:
+  pull_request:
+    paths:
+      - 'ci/platform_matrix/build_runtime.mjs'
+      - 'ci/platform_matrix/windows_runtime_toolchain.cmake'
+      - 'ci/platform_matrix/test_windows_runtime_link.mjs'
+      - '.github/workflows/windows-runtime-link.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  link:
+    runs-on: windows-2025
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        arm: [candidate, cut-entry, cut-selection, restored]
+    env:
+      # Runtime includes the publication and Windows export-source fixes (#1234/#1236).
+      RUNTIME_REF: 1a14f0a8ccb685038729d8ca221768884beb5654
+      RUNTIME_TARGET: windows-x86_64
+      LINK_CONTROL_ARM: ${{ matrix.arm }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          repository: cjcj-dev/cangjie-runtime
+          ref: ${{ env.RUNTIME_REF }}
+          path: runtime-source
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          release: false
+          update: true
+          path-type: inherit
+          install: >-
+            git make python gzip unzip file binutils
+            mingw-w64-x86_64-clang mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-compiler-rt mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-libc++ mingw-w64-x86_64-libunwind
+            mingw-w64-x86_64-ninja mingw-w64-x86_64-python mingw-w64-x86_64-lld
+      - name: Preserve native cache directories
+        shell: pwsh
+        run: |
+          $cacheHome = $env:USERPROFILE.Replace('\', '/')
+          $cacheConfigHome = $env:LOCALAPPDATA.Replace('\', '/')
+          "export USERPROFILE='$cacheHome' LOCALAPPDATA='$cacheConfigHome'" | Set-Content -NoNewline -Encoding utf8 C:/msys64/etc/profile.d/runtime-link.sh
+      - name: Exercise production entry and linker controls
+        shell: bash
+        run: npx --yes zx@8 ci/platform_matrix/test_windows_runtime_link.mjs
+      - name: Record toolchain versions
+        if: always()
+        shell: msys2 {0}
+        run: |
+          mkdir -p link-evidence
+          pacman -Q > link-evidence/packages.txt
+          clang++ --version > link-evidence/clang.txt
+          ld --version > link-evidence/ld.txt
+          ld.lld --version > link-evidence/lld.txt
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: windows-runtime-link-${{ matrix.arm }}
+          path: link-evidence/
+          retention-days: 7
+
+  compare:
+    needs: link
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: windows-runtime-link-*
+          path: link-results
+      - name: Check identical restored product and isolated negative controls
+        shell: python
+        run: |
+          import json
+          from pathlib import Path
+          root = Path('link-results')
+          arms = {arm: json.loads((root / ('windows-runtime-link-' + arm) / 'result.json').read_text())
+                  for arm in ('candidate', 'cut-entry', 'cut-selection', 'restored')}
+          for arm, result in arms.items():
+              assert result['controlPassed'], (arm, result)
+              assert result['identity']['test'] == arms['candidate']['identity']['test']
+              assert result['identity']['runtime'] == arms['candidate']['identity']['runtime']
+          assert arms['candidate']['identity'] == arms['restored']['identity']
+          assert arms['candidate']['dll']['sha256'] == arms['restored']['dll']['sha256']
+          assert arms['cut-entry']['identity']['selection'] == arms['candidate']['identity']['selection']
+          assert arms['cut-selection']['identity']['entry'] == arms['candidate']['identity']['entry']
+          for arm in ('cut-entry', 'cut-selection'):
+              assert arms[arm]['buildRc'] != 0
+              assert arms[arm]['productAssertionRc'] == 1
+          print('RESTORED_DLL_SHA256=' + arms['candidate']['dll']['sha256'])
+          print('DLL_BUILD_ASSERTIONS candidate=0 cut-entry=1 cut-selection=1 restored=0')
