@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import re
 import subprocess
 import sys
 import time
@@ -67,6 +68,13 @@ def summarize(suite, raw, root):
         name = str(case.resolve().relative_to(root))
         detail = item.get('output', '') if suite != 'Conformance' else (
             item.get('compile_log', '') + '\n' + item.get('execute_log', ''))
+        # Exact upstream timeout signatures; do not classify arbitrary mentions.
+        timeout_failure = STATUS[status] == 'fail' and (
+            bool(re.search(r'The [0-9.]+-second timeout has expired', detail))
+            if suite == 'Conformance' else
+            isinstance(detail, list) and any(isinstance(command, dict)
+                and command.get('return_code') == 3 and command.get('stderr') == 'TimeOut'
+                for command in detail))
         # Maple stops at the failed command; its XML reporter uses the last result.
         summary_detail = detail[-1] if isinstance(detail, list) and detail else detail
         if not isinstance(summary_detail, str):
@@ -81,6 +89,7 @@ def summarize(suite, raw, root):
                        'No space left on device') if word in detail]
         rows.append({'suite': suite, 'name': name, 'status': status,
                      'category': STATUS[status], 'environment_hints': environment,
+                     'timeout_failure': timeout_failure,
                      'error_summary': summary_detail if STATUS[status] != 'pass' else ''})
     names = [r['name'] for r in rows]
     if len(set(names)) != len(names):
@@ -127,6 +136,7 @@ def run_suite(suite, test, framework, output, env, jobs, scratch=None):
                               and record['counts']['pass'] + record['counts']['fail'] > 0)
         dump(out / 'cases.json', rows)
         dump(out / 'failures.json', [r for r in rows if r['category'] in ('fail', 'not_run')])
+        dump(out / 'timeout-failures.json', [r for r in rows if r['timeout_failure']])
     except (OSError, ValueError, KeyError, TypeError) as error:
         record.update(status='NOT_RUN', complete=False, error=str(error), counts=None, total=None)
     dump(out / 'summary.json', record)

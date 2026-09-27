@@ -55,3 +55,9 @@ Compare two repeats with `python3 ci/cangjie-test/compare.py RUN1 RUN2 diff.json
 all case/status differences. Differences are observations, not automatically
 classified as nondeterministic tests. For the bootstrap-versus-official
 comparison omit `--repeat`; common and arm-only failure sets are retained.
+
+Timeout failures retain their upstream failed status and are listed in
+`timeout-failures.json`. The comparator excludes a case from both failure sets
+if either arm has an exact upstream timeout signature; raw failure sets, counts
+and status changes remain visible. Older case files must be normalized again
+to include the timeout field. This does not turn timeouts into passes.

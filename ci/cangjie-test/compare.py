@@ -22,7 +22,14 @@ def compare(left, right):
         names = [set(arm) for arm in index]
         failures = [{name for name, row in arm.items() if row['category'] in ('fail', 'not_run')}
                     for arm in index]
+        timeouts = [{name for name, row in arm.items() if row['timeout_failure']} for arm in index]
+        excluded = timeouts[0] | timeouts[1]
+        raw_failures = failures
+        failures = [arm - excluded for arm in failures]
         result['suites'][suite] = {
+            'timeout_failures': [sorted(arm) for arm in timeouts],
+            'excluded_from_failure_diff': sorted(excluded),
+            'unfiltered_failures': [sorted(arm) for arm in raw_failures],
             'counts': [s['counts'] for s in summaries],
             'counts_equal': summaries[0]['counts'] == summaries[1]['counts'],
             'left_only_cases': sorted(names[0] - names[1]),
