@@ -55,7 +55,11 @@ def run(arm):
     (here/'command.log').write_text(result.stdout+result.stderr)
     checks={'sdk-root':result.returncode==0 and f'OBS_SDKROOT={sdkroot}\n' in result.stdout,
             'isolation':result.returncode==0 and 'OBS_LEAK=CLEAN\n' in result.stdout}
-    record={'rc':int(not all(checks.values())),'product_rc':result.returncode,'checks':checks,
+    checkfile=here/'checks.json'
+    checkfile.write_text(json.dumps(checks))
+    assertion=subprocess.run([sys.executable,'-c','import json,sys; r=json.load(open(sys.argv[1])); print("ASSERT native-build-env-target",r); sys.exit(not all(r.values()))',str(checkfile)],capture_output=True,text=True)
+    (here/'assertions.log').write_text(assertion.stdout+assertion.stderr)
+    record={'rc':assertion.returncode,'product_rc':result.returncode,'checks':checks,
             'product':{f:hashlib.sha256((here/f).read_bytes()).hexdigest() for f in original},
             'observer_sha256':hashlib.sha256(observer.read_bytes()).hexdigest()}
     (here/'result.json').write_text(json.dumps(record,indent=2))
