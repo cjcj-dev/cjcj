@@ -453,7 +453,10 @@ assert_std_install_shape() {
 }
 
 stdlib_build() {
-  local label="$1" sdk="$2" runtime="$3" prefix="$4" compare_prefix="${5:-}" target_lib="${6:-$2/runtime/lib/$HOST_TUPLE}" ld script cache_env native_env system_path
+  local label="$1" sdk="$2" runtime="$3" prefix="$4" compare_prefix="${5:-}" target_lib="${6:-$2/runtime/lib/$HOST_TUPLE}" ld script cache_env native_env system_path native_toolchain=()
+  # stdlib/build.py:460-469 supports an explicit native C/C++ toolchain.
+  # Keep Homebrew archive tools visible without loading its clang against SDK LLVM.
+  if [ "$HOST_OS" = Darwin ]; then native_toolchain=(--target-toolchain=/usr/bin); fi
   system_path=$(host_std_system_path) || die "cannot determine native std toolchain"
   cache_env=$(host_cache_env)
   native_env=$(host_native_env) || die "cannot determine native SDKROOT"
@@ -463,8 +466,8 @@ stdlib_build() {
   ld=$(sdk_ld_path "$sdk" "$runtime")
   prepare_build_env
   # shellcheck disable=SC2016 # Expanded by the inner bash, not this shell.
-  script='cd "$1" && rm -rf build/build && python3 build.py clean && python3 build.py build -t relwithdebinfo --jobs "$2" --target-lib="$3" && python3 build.py install --prefix "$4"'
-  cmd "env -i HOME=$(printf '%q' "$BUILD_HOME") TMPDIR=$(printf '%q' "$BUILD_TMPDIR") CANGJIE_HOME=$(printf '%q' "$sdk") ${cache_env}${native_env}${HOST_LOADER_VAR}=$(printf '%q' "$ld") PATH=$(printf '%q' "$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:$system_path") cjHeapSize=$(printf '%q' "$STD_BUILD_HEAP") bash -c $(printf '%q' "$script") bash $(printf '%q' "$STDSRC") $(printf '%q' "$STD_BUILD_JOBS") $(printf '%q' "$target_lib") $(printf '%q' "$prefix")"
+  script='cd "$1" && rm -rf build/build && python3 build.py clean && python3 build.py build -t relwithdebinfo --jobs "$2" --target-lib="$3" "${@:5}" && python3 build.py install --prefix "$4"'
+  cmd "env -i HOME=$(printf '%q' "$BUILD_HOME") TMPDIR=$(printf '%q' "$BUILD_TMPDIR") CANGJIE_HOME=$(printf '%q' "$sdk") ${cache_env}${native_env}${HOST_LOADER_VAR}=$(printf '%q' "$ld") PATH=$(printf '%q' "$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:$system_path") cjHeapSize=$(printf '%q' "$STD_BUILD_HEAP") bash -c $(printf '%q' "$script") bash $(printf '%q' "$STDSRC") $(printf '%q' "$STD_BUILD_JOBS") $(printf '%q' "$target_lib") $(printf '%q' "$prefix") ${native_toolchain[*]}"
   assert_std_install_shape "$prefix" "$compare_prefix" "$label"
   local producer="$sdk/bin/cjc"
   [ ! -f "$sdk/bin/cjcj-stage1" ] || producer="$sdk/bin/cjcj-stage1"

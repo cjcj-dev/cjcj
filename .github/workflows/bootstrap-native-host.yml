@@ -51,7 +51,12 @@ jobs:
         with:
           fetch-depth: 0
       - name: Install bootstrap file utilities
-        run: brew install coreutils findutils gnu-tar llvm@16
+        run: |
+          # Match system-deps.mjs: install Python dependencies without replacing runner shims.
+          brew deps --formula --1 llvm@16 | while IFS= read -r formula; do
+            case "$formula" in python@*) brew install --skip-link "$formula" ;; esac
+          done
+          brew install coreutils findutils gnu-tar llvm@16
       - name: Assert native host admission through the GHA entry
         shell: bash
         run: python3 ci/bootstrap/test_native_host_controls.py "$RUNNER_TEMP/native-host-evidence" 9d390634fd915de7680a5aab5cd06e6e9135457b
