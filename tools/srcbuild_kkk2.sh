@@ -1212,7 +1212,10 @@ load_bootstrap_pins() {
         echo "bootstrap input missing: CJCJ_BOOTSTRAP_AST_SUPPORT is unset and CANGJIE_BUILD_ROOT/lib/libcangjie-ast-support.a is absent: $CANGJIE_BUILD_ROOT/lib/libcangjie-ast-support.a" >&2
         return 1
     fi
-    BOOTSTRAP_AST_SUPPORT_SHA256=$(bootstrap_input_sha256 "$BOOTSTRAP_AST_SUPPORT" "${CJCJ_BOOTSTRAP_AST_SUPPORT_SHA256:-}") || return 1
+    BOOTSTRAP_AST_SUPPORT_SHA256=${CJCJ_BOOTSTRAP_AST_SUPPORT_SHA256:-}
+    [[ $BOOTSTRAP_AST_SUPPORT_SHA256 =~ ^[0-9a-f]{64}$ ]] || {
+        echo 'AST_SUPPORT_SHA_REQUIRED: set CJCJ_BOOTSTRAP_AST_SUPPORT_SHA256 from the input provider' >&2; return 1;
+    }
     BOOTSTRAP_COLOUR_TUPLE=${CJCJ_BOOTSTRAP_COLOUR_TUPLE:-${CJCJ_SELECTED_COLOUR_TUPLE:-$STATE_ROOT/colour-tuple}}
     # Reviewed process-library digest is independent of the static tuple.
     # shellcheck disable=SC1090
