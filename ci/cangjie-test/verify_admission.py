@@ -32,6 +32,7 @@ def main():
     parser.add_argument('sdk', type=Path)
     parser.add_argument('output', type=Path)
     args = parser.parse_args()
+    args.inputs, args.sdk, args.output = (p.resolve() for p in (args.inputs, args.sdk, args.output))
     args.output.mkdir(parents=True)
     test, framework, hashes = prepare(args.inputs, args.output)
     harness = test / 'Conformance/Compiler/harness'
