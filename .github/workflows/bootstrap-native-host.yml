@@ -13,6 +13,7 @@ on:
       - ci/bootstrap/test_native_link_controls.py
       - ci/bootstrap/test_native_build_env_controls.py
       - ci/bootstrap/test_native_std_env_controls.py
+      - ci/bootstrap/test_native_std_layout_controls.py
       - ci/bootstrap/prepare_native_link.mjs
       - ci/bootstrap/host_tools.sh
       - ci/bootstrap/host_nm.py
@@ -94,6 +95,9 @@ jobs:
       - name: Observe native std archive tools and SDKROOT at the isolated command
         if: always()
         run: python3 ci/bootstrap/test_native_std_env_controls.py "$RUNNER_TEMP/native-host-evidence/std-env" .native-stdlib-source/stdlib/build.py
+      - name: Observe native std link objects through the real bootstrap assembler
+        if: always()
+        run: python3 ci/bootstrap/test_native_std_layout_controls.py "$RUNNER_TEMP/native-host-evidence/std-layout" .native-stdlib-source/stdlib/build.py
       - name: Preserve entry output and product identities
         if: always()
         uses: actions/upload-artifact@v7

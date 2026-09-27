@@ -737,6 +737,9 @@ bootstrap_target_std() {
   local native_files=(libcangjie-aio.a cjstart.o)
   if [ "$HOST_OS" = Linux ]; then
     native_files+=(cjld.shared.lds discard_eh_frame.lds)
+  elif [ "$HOST_OS" = Darwin ]; then
+    # MakeCJNATIVEStdSharedLib.cmake:105 and MachO.cpp:124 consume this object.
+    native_files+=(section.o)
   fi
   for file in "${native_files[@]}"; do
     cmd "host_install -m644 $(printf '%q' "$sdk/lib/$HOST_TUPLE/$file") $(printf '%q' "$native/$file")"
