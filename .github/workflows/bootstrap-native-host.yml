@@ -18,6 +18,9 @@ on:
       - ci/bootstrap/test_native_sdk_controls.py
       - ci/release/prepare_bootstrap_inputs.mjs
       - ci/release/test_darwin_input_controls.py
+      - ci/release/darwin_std.mjs
+      - ci/release/test_darwin_std.py
+      - ci/release/test_darwin_std_controls.py
 
 permissions:
   contents: read
@@ -54,6 +57,9 @@ jobs:
         if: always()
         shell: bash
         run: python3 ci/release/test_darwin_input_controls.py "$RUNNER_TEMP/native-host-evidence/inputs" 9d390634fd915de7680a5aab5cd06e6e9135457b
+      - name: Assert native std producer and consumer identities
+        if: always()
+        run: python3 ci/release/test_darwin_std_controls.py "$RUNNER_TEMP/native-host-evidence/std"
       - name: Preserve entry output and product identities
         if: always()
         uses: actions/upload-artifact@v7
