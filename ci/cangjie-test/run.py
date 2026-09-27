@@ -96,7 +96,7 @@ def run_suite(suite, test, framework, output, env, jobs):
                else 'configs/cjnative/cjnative_test.cfg')
         command = [sys.executable, str(framework / 'main.py'),
                    '--test_cfg', str(test / 'testsuites' / suite / cfg),
-                   '-j', str(jobs), '--timeout=180', '--retry=0', '--fail_exit',
+                   '-j', str(jobs), '--timeout=180', '--fail_exit',
                    '--progress=silent', '--json_output', str(out / 'results.json'),
                    '--test_list', str(test / 'testsuites' / suite / ('testlist' if suite == 'HLT' else 'cjnative_testlist')),
                    '--output', str(out / 'results.txt'), '--temp_dir', str(out / 'temp'),

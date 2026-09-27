@@ -36,7 +36,8 @@ Recipes (all from the commits in `inputs.json`):
   exists in the pinned test tree.
 * LLT: `testsuites/LLT/configs/cjnative/cjnative_test.cfg` and
   `testsuites/LLT/cjnative_testlist` (there is no LLT `testlist`).
-* Maple: 180s per-case timeout, no retries, all result statuses emitted. Do not
+* Maple: 180s per-case timeout, default zero retries, all result statuses emitted.
+  Omit `--retry`: upstream rejects an explicit zero despite its zero default. Do not
   add `-pFAIL`: upstream filters JSON case records by that option too.
 
 `PASS/PASSED` map to pass; `FAIL/FAILED/ERRORED/XPASS` to fail;
