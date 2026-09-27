@@ -12,7 +12,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runtime: ['707a07a1e79008845f1881f21ddf6964636aa500', '0280bc7b49564dba532f5a03af879bbbcad6012c', '1d0c8be495d4b6378fefbd27fb08135b3db288fd']
+        runtime: ['3c3bacda906b208db161819e51b3eea63406ac05']
     env:
       RUNTIME_REF: ${{ matrix.runtime }}
       RUNTIME_TARGET: windows-x86_64
