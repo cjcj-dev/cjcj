@@ -24,6 +24,7 @@ base = subprocess.check_output(['git', 'show', f'{sys.argv[2]}:{product}'], cwd=
 for arm, content in {'baseline': base, 'candidate': original, 'cut': cut, 'restored': original}.items():
     tree = out / arm / 'src'
     shutil.copytree(root / 'ci', tree / 'ci')
+    shutil.copytree(root / 'build', tree / 'build')
     (tree / product).write_text(content)
 (out / 'cut.diff').write_text(''.join(difflib.unified_diff(original.splitlines(True), cut.splitlines(True),
     fromfile='a/' + product, tofile='b/' + product)))

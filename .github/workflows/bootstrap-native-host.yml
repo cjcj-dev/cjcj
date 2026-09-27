@@ -22,6 +22,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: bootstrap-native-host-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   native-host:
     runs-on: ${{ matrix.runner }}

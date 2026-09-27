@@ -1,7 +1,5 @@
 name: Native Darwin coloured std producer
 on:
-  push:
-    paths: [.github/workflows/build-darwin-std.yml]
   workflow_dispatch:
 permissions:
   contents: write
