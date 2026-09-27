@@ -52,14 +52,16 @@ test "$(cat "$out/consumer-cut.rc")" != 0
 grep -q 'PRODUCER_BYTES:' "$out/producer-cut.log"
 grep -q 'CONSUMER_REJECTS_CHANGED_BYTES' "$out/consumer-cut.log"
 # Exactly one failure per cut, and it is the assertion that carries the cut.
-# (node's spec reporter writes "✖ <title>" and "ℹ fail <n>", not TAP "not ok".)
+# node prints TAP on the GHA runners and the spec reporter on a terminal, so
+# read both: "# fail <n>" / "not ok <i> - <title>" and "ℹ fail <n>" / "✖ <title>".
+fails() { awk '/^(#|ℹ) fail /{print $3; exit}' "$1"; }
 for arm in candidate restored; do
-  test "$(awk '/^ℹ fail /{print $3}' "$out/$arm.log")" = 0
+  test "$(fails "$out/$arm.log")" = 0
 done
-test "$(awk '/^ℹ fail /{print $3}' "$out/producer-cut.log")" = 1
-test "$(awk '/^ℹ fail /{print $3}' "$out/consumer-cut.log")" = 1
-grep -q '^✖ producer copies exactly the three native source libraries' "$out/producer-cut.log"
-grep -q '^✖ consumer rejects changed library bytes after authentic manifest verification' "$out/consumer-cut.log"
+test "$(fails "$out/producer-cut.log")" = 1
+test "$(fails "$out/consumer-cut.log")" = 1
+grep -qE '^(not ok [0-9]+ - |✖ )producer copies exactly the three native source libraries' "$out/producer-cut.log"
+grep -qE '^(not ok [0-9]+ - |✖ )consumer rejects changed library bytes after authentic manifest verification' "$out/consumer-cut.log"
 cmp "$out/candidate/release/darwin_runtime.mjs" "$out/restored/release/darwin_runtime.mjs"
 find "$out" -name '*.mjs' -print0 | xargs -0 shasum -a 256 > "$out/scripts.sha256"
 for arm in candidate producer-cut consumer-cut restored; do
