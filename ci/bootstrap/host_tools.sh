@@ -38,3 +38,13 @@ host_sort() { host_file_tool sort "$@"; }
 host_tar() { host_file_tool tar "$@"; }
 host_find() { host_file_tool find "$@"; }
 host_nm() { python3 "$BOOTSTRAP_TOOLS_DIR/host_nm.py" "$@"; }
+# Carry only the configured compiler-cache contract into isolated build shells.
+# Keep credentials and unrelated caller environment outside env -i builds.
+host_cache_env() {
+  local key value
+  for key in CMAKE_C_COMPILER_LAUNCHER CMAKE_CXX_COMPILER_LAUNCHER CMAKE_ASM_COMPILER_LAUNCHER \
+      SCCACHE_DIR SCCACHE_CACHE_SIZE SCCACHE_IDLE_TIMEOUT SCCACHE_GHA_ENABLED SCCACHE_LOG SCCACHE_ERROR_LOG; do
+    value=$(printenv "$key" 2>/dev/null || true)
+    [ -z "$value" ] || printf '%s=%q ' "$key" "$value"
+  done
+}

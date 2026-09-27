@@ -453,7 +453,8 @@ assert_std_install_shape() {
 }
 
 stdlib_build() {
-  local label="$1" sdk="$2" runtime="$3" prefix="$4" compare_prefix="${5:-}" target_lib="${6:-$2/runtime/lib/$HOST_TUPLE}" ld script
+  local label="$1" sdk="$2" runtime="$3" prefix="$4" compare_prefix="${5:-}" target_lib="${6:-$2/runtime/lib/$HOST_TUPLE}" ld script cache_env
+  cache_env=$(host_cache_env)
   source "$SRC/ci/build_resources.sh"
   configure_build_resources "$HEAP" || die "cannot determine std build resources"
   cmd "python3 $(printf '%q' "$SRC/ci/install_std_sdk_inputs.py") $(printf '%q' "$(dirname "$AST_SUPPORT")") $(printf '%q' "$sdk") $(printf '%q' "$HOST_TUPLE")"
@@ -461,7 +462,7 @@ stdlib_build() {
   prepare_build_env
   # shellcheck disable=SC2016 # Expanded by the inner bash, not this shell.
   script='cd "$1" && rm -rf build/build && python3 build.py clean && python3 build.py build -t relwithdebinfo --jobs "$2" --target-lib="$3" && python3 build.py install --prefix "$4"'
-  cmd "env -i HOME=$(printf '%q' "$BUILD_HOME") TMPDIR=$(printf '%q' "$BUILD_TMPDIR") CANGJIE_HOME=$(printf '%q' "$sdk") ${HOST_LOADER_VAR}=$(printf '%q' "$ld") PATH=$(printf '%q' "$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:$HOST_SYSTEM_PATH") cjHeapSize=$(printf '%q' "$STD_BUILD_HEAP") bash -c $(printf '%q' "$script") bash $(printf '%q' "$STDSRC") $(printf '%q' "$STD_BUILD_JOBS") $(printf '%q' "$target_lib") $(printf '%q' "$prefix")"
+  cmd "env -i HOME=$(printf '%q' "$BUILD_HOME") TMPDIR=$(printf '%q' "$BUILD_TMPDIR") CANGJIE_HOME=$(printf '%q' "$sdk") ${cache_env}${HOST_LOADER_VAR}=$(printf '%q' "$ld") PATH=$(printf '%q' "$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:$HOST_SYSTEM_PATH") cjHeapSize=$(printf '%q' "$STD_BUILD_HEAP") bash -c $(printf '%q' "$script") bash $(printf '%q' "$STDSRC") $(printf '%q' "$STD_BUILD_JOBS") $(printf '%q' "$target_lib") $(printf '%q' "$prefix")"
   assert_std_install_shape "$prefix" "$compare_prefix" "$label"
   local producer="$sdk/bin/cjc"
   [ ! -f "$sdk/bin/cjcj-stage1" ] || producer="$sdk/bin/cjcj-stage1"
@@ -571,8 +572,9 @@ assert_cjcj_sha() {
 }
 
 shim_build() {
-  local label="$1" sdk="$2" runtime="$3" srcdir="$4" source_object="${5:-}" ld npx_path node_bin source_env=''
+  local label="$1" sdk="$2" runtime="$3" srcdir="$4" source_object="${5:-}" ld npx_path node_bin cache_env source_env=''
   ld=$(sdk_ld_path "$sdk" "$runtime")
+  cache_env=$(host_cache_env)
   npx_path=$(command -v npx 2>/dev/null || true)
   [ -x "$npx_path" ] || die "$label shim 构建需要可执行 npx"
   node_bin=$(dirname "$npx_path")
@@ -587,7 +589,7 @@ shim_build() {
   fi
   echo "CMD shim build label=$label cwd=$srcdir cpp-src=$CPP_SRC source-object=${source_object:-source} sdk=$sdk runtime=$runtime"
   cmd "rm -f $(printf '%q' "$srcdir/runtime_shim/cjselfhost_llvmshim.o") $(printf '%q' "$srcdir/runtime_shim/cjc_runtime_config.o")"
-  cmd "env -i HOME=$(printf '%q' "$BUILD_HOME") CANGJIE_HOME=$(printf '%q' "$sdk") CANGJIE_CPP_SRC=$(printf '%q' "$CPP_SRC") CJCJ_COMMIT=$(printf '%q' "$CJCJ_SHA") ${source_env}${HOST_LOADER_VAR}=$(printf '%q' "$ld") PATH=$(printf '%q' "$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:$node_bin:$HOST_SYSTEM_PATH") bash $(printf '%q' "$srcdir/runtime_shim/build_shim.sh")"
+  cmd "env -i HOME=$(printf '%q' "$BUILD_HOME") CANGJIE_HOME=$(printf '%q' "$sdk") CANGJIE_CPP_SRC=$(printf '%q' "$CPP_SRC") CJCJ_COMMIT=$(printf '%q' "$CJCJ_SHA") ${source_env}${cache_env}${HOST_LOADER_VAR}=$(printf '%q' "$ld") PATH=$(printf '%q' "$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:$node_bin:$HOST_SYSTEM_PATH") bash $(printf '%q' "$srcdir/runtime_shim/build_shim.sh")"
   if [ "$DRY" -eq 1 ]; then
     echo "OUTPUT $label-shim-cpp path=$srcdir/runtime_shim/cjselfhost_llvmshim.o sha256=planned"
     echo "OUTPUT $label-shim-config path=$srcdir/runtime_shim/cjc_runtime_config.o sha256=planned"
