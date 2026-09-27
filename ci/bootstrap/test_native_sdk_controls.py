@@ -18,6 +18,7 @@ fixtures = out / 'fixtures'
 subprocess.run([sys.executable, str(root / 'ci/bootstrap/test_native_sdk.py'), str(fixtures), '--prepare'], check=True)
 # Producer and consumer independently carry the native linker selection.
 cuts = {
+    'copy-cut': ('ci/bootstrap/sdk_build.sh', 'cp -aL "$BASE/." "$TO/"', 'cp -a "$BASE/." "$TO/"'),
     'producer-cut': ('ci/bootstrap/sdk_build.sh',
                      'for rel in MANIFEST bin/llc bin/opt bin/${HOST_LINKER} lib/STATIC_LLVM.txt',
                      'for rel in MANIFEST bin/llc bin/opt bin/ld.lld lib/STATIC_LLVM.txt'),

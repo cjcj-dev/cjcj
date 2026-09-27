@@ -215,7 +215,18 @@ fi
 echo "[1/5] cp -a $BASE -> $TO"
 # ⭐ 拷**内容**（`$BASE/.`），⛔ 不拷目录项本身 —— ⭐ 免得再把符号链接复制过来
 mkdir -p "$TO" || die "mkdir 失败: $TO"
-cp -a "$BASE/." "$TO/" || die "cp -a 失败"
+if [ "$HOST_OS" = Darwin ]; then
+  # Native SDK aliases must become private files before the strict inventory check.
+  cp -aL "$BASE/." "$TO/" || die "cp -aL 失败"
+  for entry in cjc cjc-frontend; do
+    if [ -L "$BASE/bin/$entry" ] && [ "$(readlink "$BASE/bin/$entry")" = cjcj-stage1 ]; then
+      rm -f "$TO/bin/$entry"
+      ln -s cjcj-stage1 "$TO/bin/$entry" || die "compiler alias 写入失败"
+    fi
+  done
+else
+  cp -a "$BASE/." "$TO/" || die "cp -a 失败"
+fi
 # ⭐⭐ 复核：⭐ 副本必须是**真目录**，⛔ 不是链接；⭐ 且不能与基线同一个 inode
 [ -L "$TO" ] && die "⛔ $TO 是符号链接 —— ⭐ 替换会写进它指向的地方"
 [ "$(host_readlink -f "$TO")" = "$BASE" ] && die "⛔ 副本与基线是同一个目录"

@@ -72,6 +72,9 @@ for name in ('llc', 'opt', linker):
     copy(tool, 'third_party/llvm/bin/' + name, base)
     copy(tool, 'bin/' + name, tuple_root)
 copy(llvm, 'third_party/llvm/lib/' + library, base)
+if darwin:
+    copy(host, 'lib/native-dependency.dylib', base)
+    (base / 'lib/native-alias.dylib').symlink_to('native-dependency.dylib')
 (base / 'third_party/llvm/MANIFEST').write_text('LLVM_SHA=' + llvm_sha + '\n')
 (tuple_root / 'MANIFEST').write_text('LLVM_SHA=' + llvm_sha + '\n')
 for relative in ('lib/STATIC_LLVM.txt', 'fixed-llc/cjselfhost_llvmshim.o', 'fixed-llc/llc.gz',
@@ -101,6 +104,9 @@ for name, std_input, expected in (('native-layout', std, 0), ('official-std', of
     # Nonfatal assertions all inspect assembler results, even on an early failure.
     checks = {'status': result.returncode == expected}
     if expected == 0:
+        if darwin:
+            alias = target / 'lib/native-alias.dylib'
+            checks['private-dependency'] = alias.is_file() and not alias.is_symlink() and sha(alias) == sha(host)
         checks['installed-linker'] = (target / 'third_party/llvm/bin' / linker).is_file()
         checks['installed-std'] = (target / f'lib/{tuple_name}/libcangjie-std-core.a').is_file() and sha(target / f'lib/{tuple_name}/libcangjie-std-core.a') == sha(std_input)
         checks['lock-verified'] = 'SDK-VERIFY-OK' in text and 'SDK-BUILD-OK' in text

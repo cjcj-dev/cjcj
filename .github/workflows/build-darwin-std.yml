@@ -22,7 +22,7 @@ jobs:
       CANGJIE_WORKSPACE: ${{ github.workspace }}/.srcbuild/workspace
       CANGJIE_BUILD_ROOT: ${{ github.workspace }}/.srcbuild/buildtools
       CJCJ_SRCBUILD_TARGET: ${{ matrix.target }}
-      cjHeapSize: 12GB
+      cjHeapSize: 4GB
       cjHeapSwap: "on"
     steps:
       - uses: actions/checkout@v7
