@@ -25,7 +25,7 @@ test('release runtime loader selects the return-poll runtime paired with LLVM', 
     const result = spawnSync(process.execPath, [fileURLToPath(new URL('ci/load_runtime_pin.mjs', root))], {env, encoding: 'utf8'});
     assert.equal(result.status, 0, result.stderr);
     const selected = /^RUNTIME_REF=(.*)$/m.exec(fs.readFileSync(output, 'utf8'))?.[1];
-    assert.equal(selected, '0af8c5957082a325323e1b8adcf97d157035a5f8', 'release runtime must provide the paired return-poll handler');
+    assert.equal(selected, '50a83f258c431e97a141c4e34e7c1239dd4e91ad', 'release runtime must provide the paired return-poll handler');
     console.log(`ASSERT release-runtime-selected=${selected}`);
   } finally { fs.rmSync(dir, {recursive: true, force: true}); }
 });
