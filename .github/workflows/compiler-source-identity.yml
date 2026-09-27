@@ -2,6 +2,15 @@ name: Compiler source identity
 
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/compiler-source-identity.yml
+      - ci/llvm_pin.env
+      - ci/ast_support/*.env
+      - ci/bootstrap/prepare_cpp_headers.mjs
+      - ci/bootstrap/test_compiler_source.mjs
+      - ci/install_std_sdk_inputs.py
+      - runtime_shim/cjselfhost_llvmshim.cpp
 
 permissions:
   contents: read
