@@ -17,6 +17,7 @@ on:
       - ci/bootstrap/test_native_sdk.py
       - ci/bootstrap/test_native_sdk_controls.py
       - ci/release/prepare_bootstrap_inputs.mjs
+      - ci/release/test_darwin_input_controls.py
 
 permissions:
   contents: read
@@ -46,8 +47,9 @@ jobs:
         shell: bash
         run: python3 ci/bootstrap/test_native_sdk_controls.py "$RUNNER_TEMP/native-host-evidence/sdk"
       - name: Assert explicit Darwin colour input at the real Node entry
+        if: always()
         shell: bash
-        run: node --test ci/release/prepare_llvm_dylib.test.mjs
+        run: python3 ci/release/test_darwin_input_controls.py "$RUNNER_TEMP/native-host-evidence/inputs" 9d390634fd915de7680a5aab5cd06e6e9135457b
       - name: Preserve entry output and product identities
         if: always()
         uses: actions/upload-artifact@v7

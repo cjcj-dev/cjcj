@@ -2,6 +2,7 @@
 """Run native host identity apparatus arms with the same tests and real inputs."""
 import difflib
 import hashlib
+import shutil
 import json
 import os
 from pathlib import Path
@@ -27,10 +28,12 @@ def main():
     test = root / 'test_host_identities.py'
     platform = 'linux_' + os.uname().machine
     original = runner.read_text()
-    call = 'check_sha "$hrt/libcangjie-runtime.so" "$decl_runtime"\n'
+    call = 'check_sha "$hrt/libcangjie-runtime.${HOST_LIB_EXT}" "$decl_runtime"\n'
     assert original.count(call) == 1
     cut = original.replace(call, '')
     (out / 'runner-cut.sh').write_text(cut)
+    for helper in ('host_tools.sh', 'host_nm.py'):
+        shutil.copyfile(root / helper, out / helper)
     (out / 'cut.diff').write_text(''.join(difflib.unified_diff(
         original.splitlines(True), cut.splitlines(True),
         fromfile='a/ci/bootstrap/stage1_host_runner.sh', tofile='b/ci/bootstrap/stage1_host_runner.sh')))
