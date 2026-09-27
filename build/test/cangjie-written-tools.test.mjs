@@ -25,7 +25,6 @@ function packageFixture() {
   const officialSdkRoot = path.join(root, 'official-sdk');
   fs.mkdirSync(path.join(workspace, 'cangjie_compiler', 'output'), {recursive: true});
   fs.mkdirSync(path.join(workspace, 'cangjie_stdx', 'target', 'linux_x86_64_cjnative'), {recursive: true});
-  file(workspace, ['cangjie_compiler', 'output', 'tools', 'bin', 'cjcompat'], 'old cjcompat');
   file(tools, ['cjpm', 'dist', 'cjpm']);
   file(officialSdkRoot, ['tools', 'bin', 'cjpm']);
   file(tools, ['cjfmt', 'build', 'build', 'bin', 'cjfmt']);
@@ -96,6 +95,7 @@ test('cjcompat is built on every SDK target', () => {
 test('package entry carries the source-built cjcompat bytes', async () => {
   const {root, config} = packageFixture();
   try {
+    file(config.repoPath('compiler'), ['output', 'tools', 'bin', 'cjcompat'], 'old cjcompat');
     await runPackage(() => packageStage.run(config));
     const result = fs.readFileSync(path.join(config.softwareDir, 'cangjie', 'tools', 'bin', 'cjcompat'), 'utf8');
     console.log('CJCOMPAT_PACKAGE_BYTES_ASSERT_REACHED');
