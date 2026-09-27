@@ -22,6 +22,11 @@ suites, never treated as passes. Shared SDK directories are never modified.
 
 The worker budget (4 through 48) includes four pools: Conformance compilation
 and execution, HLT, and LLT. At 48 this means 12 workers per pool.
+`--suites Conformance,HLT,LLT` restricts the run to a subset; selected suites
+split the full worker budget (a single suite gets all of it, Conformance split
+evenly across its two pools). The runner refuses to start when load1 exceeds
+200 or the output filesystem has under 8GiB free, and appends load/disk samples
+to `load-monitor.log` once a minute while running.
 `--compiler-jobs` accepts 1 or 2 and configures direct compiler commands.
 Nested compiler launches through cjpm still need the approved execution adapter;
 do not start full runs until that coverage and load/disk admission are complete. Existing

@@ -8,8 +8,10 @@ import os
 from pathlib import Path
 import platform
 import re
+import shutil
 import subprocess
 import sys
+import threading
 import time
 
 HERE = Path(__file__).resolve().parent
@@ -107,7 +109,7 @@ def run_suite(suite, test, framework, output, env, jobs, scratch=None, compiler_
         command = [sys.executable, str(harness / 'harness.py'),
                    '--test-root', str(test / 'Conformance/Compiler/testsuite'),
                    '--work-dir', str(bulk / 'work'), '--cjc', env['CANGJIE_HOME'] + '/bin/cjc',
-                   '--comp-threads', str(jobs), '--exec-threads', str(jobs),
+                   '--comp-threads', str(max(1, jobs // 2)), '--exec-threads', str(jobs - max(1, jobs // 2)),
                    '--cjc-flags=--jobs=' + str(compiler_jobs),
                    '--base-timeout', '30', '--log-file', str(out / 'results.log'),
                    '--no-color', '--log-mode', 'short']
@@ -157,7 +159,13 @@ def main():
                         help='parallelism for direct compiler commands; nested cjpm coverage pending')
     parser.add_argument('--scratch', type=Path,
                         help='separate bulk directory for work/temp/log dirs (results stay in output)')
+    parser.add_argument('--suites', default='Conformance,HLT,LLT',
+                        help='comma-separated subset of Conformance,HLT,LLT (default: all three)')
     args = parser.parse_args()
+    selected = args.suites.split(',')
+    if not selected or any(name not in ('Conformance', 'HLT', 'LLT') for name in selected) \
+            or len(set(selected)) != len(selected):
+        parser.error('--suites must be a comma-separated subset of Conformance,HLT,LLT')
     sdk, output, inputs = args.sdk.resolve(), args.output.resolve(), args.inputs.resolve()
     if not 4 <= args.jobs <= 48:
         parser.error('jobs must be between 4 and 48 (including both Conformance pools)')
@@ -180,6 +188,26 @@ def main():
     if args.scratch:
         scratch = args.scratch.resolve()
         scratch.mkdir(parents=True, exist_ok=False)
+    # Admission preflight (0927 14:3x ruling): refuse to start under heavy load or low disk.
+    load1 = float(Path('/proc/loadavg').read_text().split()[0])
+    free_gib = shutil.disk_usage(output).free / 2**30
+    if load1 > 200:
+        parser.error(f'LOAD_ADMISSION: load1={load1:.1f} > 200; not starting new cases')
+    if free_gib < 8:
+        parser.error(f'DISK_ADMISSION: free={free_gib:.1f}GiB < 8GiB; not starting new cases')
+    stop_monitor = threading.Event()
+
+    def monitor():
+        with (output / 'load-monitor.log').open('w') as stream:
+            while not stop_monitor.is_set():
+                loads = Path('/proc/loadavg').read_text().split()[:3]
+                disk = shutil.disk_usage(output).free / 2**30
+                stream.write(f'{time.strftime("%H:%M:%S")} load={"/".join(loads)} free_gib={disk:.1f}\n')
+                stream.flush()
+                stop_monitor.wait(60)
+
+    watcher = threading.Thread(target=monitor, daemon=True)
+    watcher.start()
     before = subprocess.check_output(['uptime'], text=True).strip()
     start = time.monotonic()
     # SDK scripts are sourced in a child; never mutate a shared installation.
@@ -210,15 +238,26 @@ def main():
     executed = execute([str(output / 'smoke')], output, env, output / 'smoke-run.log')
     if executed['rc'] or (output / 'smoke-run.log').read_text().strip() != 'CANGJIE_TEST_SDK_READY':
         raise RuntimeError('SDK execution preflight failed; see smoke-run.log')
-    conformance_workers = args.jobs // 4
-    maple_workers = args.jobs - 2 * conformance_workers
-    workers = (conformance_workers, maple_workers // 2, maple_workers - maple_workers // 2)
-    identity['suite_workers'] = dict(zip(('Conformance_each_pool', 'HLT', 'LLT'), workers))
-    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
+    # Worker units: Conformance occupies two pools (compile + execute); each Maple suite one.
+    units = (2 if 'Conformance' in selected else 0) + sum(1 for name in ('HLT', 'LLT') if name in selected)
+    per_unit = args.jobs // units
+    extra = args.jobs - per_unit * units
+    workers = {}
+    for name in selected:
+        share = per_unit * (2 if name == 'Conformance' else 1)
+        if extra:
+            share += extra
+            extra = 0
+        workers[name] = share
+    identity['suite_workers'] = workers
+    identity['suites'] = selected
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(selected)) as pool:
         futures = {name: pool.submit(run_suite, name, test, framework, output, env,
-                                    workers[i], scratch, args.compiler_jobs)
-                   for i, name in enumerate(('Conformance', 'HLT', 'LLT'))}
+                                     workers[name], scratch, args.compiler_jobs)
+                   for name in selected}
         summaries = {name: future.result() for name, future in futures.items()}
+    stop_monitor.set()
+    watcher.join()
     identity.update(uptime_after=subprocess.check_output(['uptime'], text=True).strip(),
                     wall=time.monotonic() - start)
     dump(output / 'identity.json', identity)
