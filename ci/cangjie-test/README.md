@@ -48,3 +48,9 @@ zero-test pass. Invalid SDK/input/preflight produces exit 2. Any failed or
 incomplete suite produces exit 1. Environment hints in failures are only text
 matches for triage; they do not reclassify or exempt failures. Full errors and
 commands remain in the raw upstream result files.
+
+Compare two repeats with `python3 ci/cangjie-test/compare.py RUN1 RUN2 diff.json
+--repeat`. Exit 1 means SDK identity, case sets or counts changed; the JSON lists
+all case/status differences. Differences are observations, not automatically
+classified as nondeterministic tests. For the bootstrap-versus-official
+comparison omit `--repeat`; common and arm-only failure sets are retained.

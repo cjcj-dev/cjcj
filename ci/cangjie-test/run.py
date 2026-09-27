@@ -45,6 +45,9 @@ def summarize(suite, raw, root):
     data = json.loads(raw.read_text())
     if suite == 'Conformance':
         tests = [item for item in data if 'test_path' in item]
+        expected = sum(1 for _ in (root / 'Conformance/Compiler/testsuite').rglob('test*.cj'))
+        if len(tests) != expected:
+            raise ValueError(f'Conformance inventory mismatch: {len(tests)} records, {expected} input cases')
     else:
         tests = [item for group in data for item in group['tests']]
         if sum(group['total'] for group in data) != len(tests):
@@ -157,6 +160,8 @@ def main():
                 'runtime_sha256': {str(p.relative_to(sdk)): sha(p)
                                    for p in sorted((sdk / 'runtime').rglob('*.so'))},
                 'pins': json.loads((HERE / 'inputs.json').read_text()),
+                'recipe_sha256': sha(HERE / 'run.py'),
+                'source_manifest_sha256': sha(inputs / 'source-manifest.json'),
                 'inputs': str(inputs), 'jobs': args.jobs,
                 'affinity': sorted(os.sched_getaffinity(0)), 'uname': list(platform.uname()),
                 'uptime_before': before}
