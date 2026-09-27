@@ -470,7 +470,7 @@ resolve_runtime_pair() {
   # 候选按优先级试；每个都过 same-round 才收
   for cand in \
       "$(host_readlink -f "$RT_DYN_SRC/../../../lib/$RT_TUPLE" 2>/dev/null || true)" \
-      "$(if [ -d "$root/lib/$RT_TUPLE" ]; then readlink -f "$root/lib/$RT_TUPLE" || true; fi)" \
+      "$(if [ -d "$root/lib/$RT_TUPLE" ]; then host_readlink -f "$root/lib/$RT_TUPLE" || true; fi)" \
       "$(host_readlink -f "$RT_DYN_SRC/../../lib/$RT_TUPLE" 2>/dev/null || true)"; do
     if [ -z "$cand" ] || [ ! -d "$cand" ]; then continue; fi
     if runtime_pair_same_round "$RT_DYN_SRC" "$cand"; then
@@ -677,7 +677,7 @@ verify_exe() {                    # verify_exe <路径> <是否跑 --version>
     in_sdk_env "$f" --version >/dev/null \
       || die "$f --version 非零退出（已 source $TO/envsetup.sh）"
   fi
-  printf '  %-34s ELF ✓  ldd ✓%s\n' "${f#"$TO"/}" "$([ "$runver" = 1 ] && printf '  --version ✓')"
+  printf '  %-34s native format ✓  dependency inspection ✓%s\n' "${f#"$TO"/}" "$([ "$runver" = 1 ] && printf '  --version ✓')"
 }
 for rel in third_party/llvm/bin/llc third_party/llvm/bin/opt third_party/llvm/bin/${HOST_LINKER} tools/bin/cjpm; do
   verify_exe "$TO/$rel" 1
