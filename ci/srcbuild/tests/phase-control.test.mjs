@@ -71,7 +71,12 @@ async function artifactUploads(name) {
 
 test('policy contract 1: the five package phases run in the policy order, one after another', async () => {
   const release = jobs(await readWorkflow('release.yml'));
-  const packages = [...release].filter(([, job]) => /uses:\s*\.\/\.github\/workflows\/build-release-package\.yml/.test(job));
+  // release_key selects the package variant; platform alone also matches the
+  // Android packages running on these hosts (package-key.mjs consumes both).
+  const nativeKeys = ['linux-x64', 'linux-arm64', 'win32-x64', 'darwin-arm64', 'darwin-x64'];
+  const packages = [...release].filter(([, job]) =>
+    /uses:\s*\.\/\.github\/workflows\/build-release-package\.yml/.test(job) &&
+    nativeKeys.includes(scalar(job, 'release_key')));
   assert.equal(packages.length, PHASES.length,
     `expected one package job per phase, found ${packages.length}: ${packages.map(([n]) => n)}`);
   const byPhase = new Map(packages.map(([name, job]) => [phaseOf(job), name]));
