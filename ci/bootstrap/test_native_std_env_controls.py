@@ -36,6 +36,10 @@ sha = lambda p: hashlib.sha256(p.read_bytes()).hexdigest()
 producer = 'ci/bootstrap/host_tools.sh'
 consumer = 'ci/bootstrap/bootstrap.sh'
 original = {f: (root/f).read_text() for f in (producer, consumer)}
+# Last candidate before the native linker fix: same Darwin route and SDK setup.
+baseline = subprocess.check_output(
+    ['git', '-C', str(root), 'show',
+     'e80c46badf70a79349eefd8b30b1a12ed1c80285:' + consumer], text=True)
 cuts = {
     'archive-producer-cut': (producer, 'printf \'%s:%s\' "$llvm_prefix/bin" "$HOST_SYSTEM_PATH"', 'printf \'%s\' "$HOST_SYSTEM_PATH"'),
     'archive-consumer-cut': (consumer, '$sdk/third_party/llvm/bin:$system_path', '$sdk/third_party/llvm/bin:$HOST_SYSTEM_PATH'),
@@ -47,7 +51,7 @@ cuts = {
     'sdk-producer-cut': (producer, "printf 'SDKROOT=%q ' \"$sdk_root\"", "printf 'SDKROOT=%q ' /"),
     'sdk-consumer-cut': (consumer, '${cache_env}${native_env}${HOST_LOADER_VAR}', '${cache_env}${HOST_LOADER_VAR}'),
 }
-arms = ['candidate', *cuts, 'restored']
+arms = ['baseline', 'candidate', *cuts, 'restored']
 
 def copy(src, dest):
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -56,6 +60,8 @@ def copy(src, dest):
 for arm in arms:
     here = out/arm
     shutil.copytree(root/'ci', here/'ci')
+    if arm == 'baseline':
+        (here/consumer).write_text(baseline)
     if arm in cuts:
         file, before, after = cuts[arm]
         text = original[file]
@@ -125,7 +131,7 @@ with concurrent.futures.ThreadPoolExecutor(max_workers=len(arms)) as pool:
 (out/'results.json').write_text(json.dumps(results,indent=2))
 for arm,record in results.items():
     failed = [k for k,v in record['checks'].items() if not v]
-    expected = ['archive-tool'] if arm.startswith('archive-') else ['sdk-root'] if arm.startswith('sdk-') else ['native-compiler'] if arm.startswith('compiler-') else ['ambient-loader'] if arm.startswith('loader-') else ['native-linker'] if arm == 'linker-cut' else []
+    expected = ['archive-tool'] if arm.startswith('archive-') else ['sdk-root'] if arm.startswith('sdk-') else ['native-compiler'] if arm.startswith('compiler-') else ['ambient-loader'] if arm.startswith('loader-') else ['native-linker'] if arm in ('baseline', 'linker-cut') else []
     print(f'ASSERT native-std-env-control arm={arm} rc={record["rc"]} product_rc={record["product_rc"]} failed={failed}',flush=True)
     assert failed == expected and record['rc'] == bool(expected) and record['product_rc'] == 0
     assert record['objects'] == results['candidate']['objects']
