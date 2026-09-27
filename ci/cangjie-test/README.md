@@ -20,16 +20,36 @@ succeed before any suite starts. Install the upstream framework dependencies
 the execution environment. Missing tools are recorded as failures or unrun
 suites, never treated as passes. Shared SDK directories are never modified.
 
-The worker budget (4 through 48) includes four pools: Conformance compilation
+The worker budget (default 48, range 4 through 48) includes four pools: Conformance compilation
 and execution, HLT, and LLT. At 48 this means 12 workers per pool.
 `--suites Conformance,HLT,LLT` restricts the run to a subset; selected suites
 split the full worker budget (a single suite gets all of it, Conformance split
 evenly across its two pools). The runner refuses to start when load1 exceeds
 200 or the output filesystem has under 8GiB free, and appends load/disk samples
 to `load-monitor.log` once a minute while running.
-`--compiler-jobs` accepts 1 or 2 and configures direct compiler commands.
-Nested compiler launches through cjpm still need the approved execution adapter;
-do not start full runs until that coverage and load/disk admission are complete. Existing
+The runner enters a synchronous systemd scope using the last 96 CPUs in the
+caller's affinity and a 96-CPU quota (`CPUQuota=9600%`). The scope is stopped
+when the caller exits or receives a termination signal. No SDK executable is
+wrapped or changed. This implements the #504 advisor ruling of 2026-09-27
+20:3x: explicit jobs-option tests retain their arguments; nested compiler CPU
+usage is bounded by the inherited scope, not by rewriting their jobs options.
+`--compiler-jobs` accepts 1 or 2 for Conformance's compiler flags. Maple uses
+the upstream compiler options, including diagnostic and explicit jobs tests.
+
+Verified pinned inputs are copied to `execution-inputs` in each output. Only
+three scheduling entries are adapted: Maple `run_commands`, Conformance
+`DriverManager.do_compile` and `do_execute`. Each waits while load1 >160,
+before starting the upstream timeout clock; `admission.jsonl` records pause
+and resume with the case identity and observed load. Active cases drain.
+The copied Conformance reporter also deletes each passing executable after
+recording its result; Maple already removes passing case work directories.
+Failure artifacts and original input files are retained. Adapter hashes are
+part of the comparison identity. No test source, assertion or exclusion list
+is modified. `verify_admission.py INPUTS SDK NEW_OUTPUT` exercises the actual
+upstream entries with controlled load readings in the fixture's Python
+processes; it never creates host overload.
+
+Existing
 output directories are rejected, preventing stale results from being reused.
 Keep raw logs and JSON together with the normalized `cases.json`,
 `failures.json`, `summary.json` and `identity.json`. Each suite records its
