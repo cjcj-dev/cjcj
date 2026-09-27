@@ -52,6 +52,7 @@ jobs:
       dry_run: ${{ inputs.dry_run }}
       runtime_ref: ${{ inputs.runtime_ref }}
       targets: linux-x64
+      build_android: true
 
   source-p2-linux-aarch64:
     name: phase 2 · linux-aarch64 / source SDK and final std
@@ -123,12 +124,12 @@ jobs:
     with:
       runner: ubuntu-24.04
       platform: linux-x64
+      release_key: linux-x64
       llvm_platform: linux_x86_64
       sdk_runtime_dir: linux_x86_64_cjnative
       compiler_artifact: final-compiler-linux-x64
       std_artifact: final-std-linux-x64
-      cross_std_artifact: 'final-std-windows-x64'
-      cross_std_tuple: 'windows_x86_64_cjnative'
+      cross_std_artifacts: '[{"tuple":"windows_x86_64_cjnative","artifact":"final-std-windows-x64"}]'
       version: ${{ inputs.version }}
       dry_run: ${{ inputs.dry_run }}
       runtime_ref: ${{ inputs.runtime_ref }}
@@ -141,12 +142,12 @@ jobs:
     with:
       runner: ubuntu-24.04-arm
       platform: linux-aarch64
+      release_key: linux-arm64
       llvm_platform: linux_aarch64
       sdk_runtime_dir: linux_aarch64_cjnative
       compiler_artifact: final-compiler-linux-aarch64
       std_artifact: final-std-linux-aarch64
-      cross_std_artifact: 'final-std-windows-x64'
-      cross_std_tuple: 'windows_x86_64_cjnative'
+      cross_std_artifacts: '[{"tuple":"windows_x86_64_cjnative","artifact":"final-std-windows-x64"}]'
       version: ${{ inputs.version }}
       dry_run: ${{ inputs.dry_run }}
       runtime_ref: ${{ inputs.runtime_ref }}
@@ -159,11 +160,11 @@ jobs:
     with:
       runner: windows-2025
       platform: windows-x64
+      release_key: win32-x64
       llvm_platform: windows_x86_64
       sdk_runtime_dir: windows_x86_64_cjnative
       std_artifact: final-std-windows-x64
-      cross_std_artifact: ''
-      cross_std_tuple: ''
+      cross_std_artifacts: '[]'
       version: ${{ inputs.version }}
       dry_run: ${{ inputs.dry_run }}
       runtime_ref: ${{ inputs.runtime_ref }}
@@ -176,12 +177,12 @@ jobs:
     with:
       runner: macos-15
       platform: darwin-arm64
+      release_key: darwin-arm64
       llvm_platform: darwin_aarch64
       sdk_runtime_dir: darwin_aarch64_cjnative
       compiler_artifact: final-compiler-darwin-arm64
       std_artifact: final-std-darwin-arm64
-      cross_std_artifact: ''
-      cross_std_tuple: ''
+      cross_std_artifacts: '[]'
       version: ${{ inputs.version }}
       dry_run: ${{ inputs.dry_run }}
       runtime_ref: ${{ inputs.runtime_ref }}
@@ -194,12 +195,66 @@ jobs:
     with:
       runner: macos-15-intel
       platform: darwin-x64
+      release_key: darwin-x64
       llvm_platform: darwin_x86_64
       sdk_runtime_dir: darwin_x86_64_cjnative
       compiler_artifact: final-compiler-darwin-x64
       std_artifact: final-std-darwin-x64
-      cross_std_artifact: ''
-      cross_std_tuple: ''
+      cross_std_artifacts: '[]'
+      version: ${{ inputs.version }}
+      dry_run: ${{ inputs.dry_run }}
+      runtime_ref: ${{ inputs.runtime_ref }}
+    secrets: inherit
+
+  package-linux-x64-android:
+    name: linux-x64-android / Build release package
+    needs: [package-p1-linux-x64, source-p1-linux-x64]
+    uses: ./.github/workflows/build-release-package.yml
+    with:
+      runner: ubuntu-24.04
+      platform: linux-x64
+      release_key: linux-x64-android
+      llvm_platform: linux_x86_64
+      sdk_runtime_dir: linux_x86_64_cjnative
+      compiler_artifact: final-compiler-linux-x64
+      std_artifact: final-std-linux-x64
+      cross_std_artifacts: '[{"tuple":"linux_android_aarch64_cjnative","artifact":"final-std-android-aarch64"}]'
+      version: ${{ inputs.version }}
+      dry_run: ${{ inputs.dry_run }}
+      runtime_ref: ${{ inputs.runtime_ref }}
+    secrets: inherit
+
+  package-darwin-arm64-android:
+    name: darwin-arm64-android / Build release package
+    needs: [package-p4-darwin-arm64, source-p1-linux-x64]
+    uses: ./.github/workflows/build-release-package.yml
+    with:
+      runner: macos-15
+      platform: darwin-arm64
+      release_key: darwin-arm64-android
+      llvm_platform: darwin_aarch64
+      sdk_runtime_dir: darwin_aarch64_cjnative
+      compiler_artifact: final-compiler-darwin-arm64
+      std_artifact: final-std-darwin-arm64
+      cross_std_artifacts: '[{"tuple":"linux_android_aarch64_cjnative","artifact":"final-std-android-aarch64"}]'
+      version: ${{ inputs.version }}
+      dry_run: ${{ inputs.dry_run }}
+      runtime_ref: ${{ inputs.runtime_ref }}
+    secrets: inherit
+
+  package-win32-x64-android:
+    name: win32-x64-android / Build release package
+    needs: [package-p3-windows-x64, source-p1-linux-x64]
+    uses: ./.github/workflows/build-release-package.yml
+    with:
+      runner: windows-2025
+      platform: windows-x64
+      release_key: win32-x64-android
+      llvm_platform: windows_x86_64
+      sdk_runtime_dir: windows_x86_64_cjnative
+      compiler_artifact: ''
+      std_artifact: final-std-windows-x64
+      cross_std_artifacts: '[{"tuple":"linux_android_aarch64_cjnative","artifact":"final-std-android-aarch64"},{"tuple":"linux_x86_64_cjnative","artifact":"final-std-linux-x64"}]'
       version: ${{ inputs.version }}
       dry_run: ${{ inputs.dry_run }}
       runtime_ref: ${{ inputs.runtime_ref }}
@@ -207,7 +262,7 @@ jobs:
 
   publish:
     name: Publish release
-    needs: [source-p1-linux-x64, source-p2-linux-aarch64, source-p4-darwin-arm64, source-p5-darwin-x64, windows-fixed-llvm-tuple, patched-cjpm, windows-runtime, package-p1-linux-x64, package-p2-linux-aarch64, package-p3-windows-x64, package-p4-darwin-arm64, package-p5-darwin-x64]
+    needs: [source-p1-linux-x64, source-p2-linux-aarch64, source-p4-darwin-arm64, source-p5-darwin-x64, windows-fixed-llvm-tuple, patched-cjpm, windows-runtime, package-p1-linux-x64, package-p2-linux-aarch64, package-p3-windows-x64, package-p4-darwin-arm64, package-p5-darwin-x64, package-linux-x64-android, package-darwin-arm64-android, package-win32-x64-android]
     if: >-
       ${{
         always() &&
@@ -216,7 +271,10 @@ jobs:
         needs.windows-fixed-llvm-tuple.result == 'success' &&
         needs.patched-cjpm.result == 'success' &&
         needs.windows-runtime.result == 'success' &&
-        needs.package-p5-darwin-x64.result == 'success'
+        needs.package-p5-darwin-x64.result == 'success' &&
+        needs.package-linux-x64-android.result == 'success' &&
+        needs.package-darwin-arm64-android.result == 'success' &&
+        needs.package-win32-x64-android.result == 'success'
       }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20

@@ -76,23 +76,16 @@ export function planMatrix(requested) {
     }
     const host = getTarget(readiness.host);
     const crossTuples = Object.keys(readiness.crossStd);
-    if (crossTuples.length > 1) {
-      throw new Error(`${key}: build-release-package.yml takes one cross std, platform carries ${crossTuples.length}: ${crossTuples.join(', ')}`);
-    }
-    const [crossTuple] = crossTuples;
-    const crossTarget = crossTuple ? [...new Set(Object.values(readiness.crossStd))][0] : '';
     if (!source.has(readiness.sourceTarget)) source.set(readiness.sourceTarget, {target: readiness.sourceTarget});
-    // A cross std is built by another platform's source cell; selecting the
-    // consumer selects its producer, the same edge release.yml draws.
-    if (crossTarget && !source.has(crossTarget)) source.set(crossTarget, {target: crossTarget});
-    if (crossTuple) {
-      // The cross std artifact is named after the tuple's own target key
-      // (final-std-windows-x64), produced by the linux-x64 source cell.
-      const tupleTarget = [...allTargetKeysForTuple(crossTuple)][0];
-      packages.push(packageRow(key, readiness, host, {artifact: stdArtifact(tupleTarget), tuple: crossTuple, producer: crossTarget}));
-    } else {
-      packages.push(packageRow(key, readiness, host, null));
-    }
+    const cross = crossTuples.map(tuple => {
+      const producer = readiness.crossStd[tuple];
+      if (!source.has(producer)) source.set(producer, {target: producer});
+      if (tuple === 'linux_android_aarch64_cjnative') source.get(producer).build_android = true;
+      const artifact = tuple === 'linux_android_aarch64_cjnative'
+        ? 'final-std-android-aarch64' : stdArtifact(allTargetKeysForTuple(tuple)[0]);
+      return {tuple, artifact};
+    });
+    packages.push(packageRow(key, readiness, host, cross));
   }
   if (source.size + packages.length + blocked.length + excluded.length === 0) {
     throw new Error(`no release platform selected from '${requested}'`);
@@ -129,8 +122,7 @@ function packageRow(key, readiness, host, cross) {
     // native host hands its own final-compiler-<target> over.
     compiler_artifact: windows ? '' : `final-compiler-${readiness.host}`,
     std_artifact: stdArtifact(readiness.host),
-    cross_std_artifact: cross ? cross.artifact : '',
-    cross_std_tuple: cross ? cross.tuple : '',
+    cross_std_artifacts: JSON.stringify(cross),
     host_std_cross_built: windows ? 'true' : 'false',
   };
 }
@@ -213,7 +205,7 @@ function writeOutputs(file, plan) {
     `prerequisite_matrix=${JSON.stringify({include: plan.prerequisites})}`,
     `has_prerequisites=${plan.prerequisites.length > 0}`,
     `excluded=${plan.excluded.map(entry => entry.release_key).join(',')}`,
-    `package_keys=${plan.package.map(row => row.platform).join(',')}`,
+    `package_keys=${plan.package.map(row => getReleasePlatform(row.release_key).archiveKey).join(',')}`,
     `has_source=${plan.source.length > 0}`,
     `has_package=${plan.package.length > 0}`,
     `has_blocked=${plan.blocked.length > 0}`,
