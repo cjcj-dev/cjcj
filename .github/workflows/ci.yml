@@ -52,8 +52,6 @@ jobs:
           npx --yes zx@8 --version
       # package-lineage compares package bytes with the official host SDK. Load
       # the consumer's pin, not the build job's independently loaded environment.
-      - name: Verify provisioning control arms
-        run: python3 ci/provision-arms-temporary.py
       - name: Install official lineage input
         shell: bash
         run: |
