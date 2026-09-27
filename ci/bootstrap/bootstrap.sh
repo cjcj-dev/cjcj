@@ -35,9 +35,7 @@ STAGE=init
 WANT=all
 DRY=0
 # Host tuple directories and the multiarch loader path, from the machine this
-# script runs on. Linux only: the script assumes ELF .so names, GNU find/install/
-# nm and lib/<tuple> layouts, so a Darwin host is refused here rather than
-# failing later on a path that happened to be spelled for x86_64.
+# script runs on; naming follows ci/release/host_llvm.mjs hostIdentity.
 HOST_TUPLE=''
 HOST_MULTIARCH=''
 host_tuple_init() {
@@ -46,7 +44,9 @@ host_tuple_init() {
   case "$os/$arch" in
     Linux/x86_64) HOST_TUPLE=linux_x86_64_cjnative; HOST_MULTIARCH=x86_64-linux-gnu;;
     Linux/aarch64) HOST_TUPLE=linux_aarch64_cjnative; HOST_MULTIARCH=aarch64-linux-gnu;;
-    *) die "host $os/$arch is not supported by bootstrap.sh (Linux x86_64/aarch64 only: ELF .so, GNU find/install/nm, lib/<tuple> layout)";;
+    Darwin/arm64) HOST_TUPLE=darwin_aarch64_cjnative; HOST_MULTIARCH=;;
+    Darwin/x86_64) HOST_TUPLE=darwin_x86_64_cjnative; HOST_MULTIARCH=;;
+    *) die "host $os/$arch is not supported by bootstrap.sh";;
   esac
   echo "HOST-TUPLE $HOST_TUPLE multiarch=$HOST_MULTIARCH home=$BUILD_HOME"
 }
