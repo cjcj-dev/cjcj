@@ -8,7 +8,8 @@ from run import dump
 
 def compare(left, right):
     identities = [json.loads((root / 'identity.json').read_text()) for root in (left, right)]
-    for key in ('pins', 'jobs', 'compiler_jobs', 'recipe_sha256', 'source_manifest_sha256'):
+    for key in ('pins', 'jobs', 'compiler_jobs', 'recipe_sha256', 'source_manifest_sha256',
+                'adapter_hashes', 'adapter_source_sha256'):
         if identities[0][key] != identities[1][key]:
             raise ValueError('different comparison recipe: ' + key)
     result = {'same_sdk': all(identities[0][key] == identities[1][key]

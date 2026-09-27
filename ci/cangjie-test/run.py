@@ -13,6 +13,8 @@ import subprocess
 import sys
 import threading
 import time
+from adapt import prepare as prepare_execution_inputs
+from envelope import enter as enter_envelope
 
 HERE = Path(__file__).resolve().parent
 STATUS = {'PASSED': 'pass', 'PASS': 'pass', 'FAILED': 'fail', 'FAIL': 'fail',
@@ -156,7 +158,7 @@ def main():
     parser.add_argument('--inputs', type=Path, required=True,
                         help='directory containing pinned cangjie_test and cangjie_test_framework')
     parser.add_argument('--compiler-jobs', type=int, choices=(1, 2), default=1,
-                        help='parallelism for direct compiler commands; nested cjpm coverage pending')
+                        help='default direct compiler parallelism (explicit test options are retained)')
     parser.add_argument('--scratch', type=Path,
                         help='separate bulk directory for work/temp/log dirs (results stay in output)')
     parser.add_argument('--suites', default='Conformance,HLT,LLT',
@@ -183,6 +185,9 @@ def main():
     for name, expected in manifest['files'].items():
         if sha(inputs / name) != expected:
             parser.error('input content changed: ' + name)
+    envelope = enter_envelope()
+    if isinstance(envelope, int):
+        return envelope
     output.mkdir(parents=True, exist_ok=False)
     scratch = None
     if args.scratch:
@@ -195,6 +200,7 @@ def main():
         parser.error(f'LOAD_ADMISSION: load1={load1:.1f} > 200; not starting new cases')
     if free_gib < 8:
         parser.error(f'DISK_ADMISSION: free={free_gib:.1f}GiB < 8GiB; not starting new cases')
+    test, framework, adapter_hashes = prepare_execution_inputs(inputs, output)
     stop_monitor = threading.Event()
 
     def monitor():
@@ -216,6 +222,7 @@ def main():
     env = dict(entry.decode().split('=', 1) for entry in loaded.split(b'\0') if entry)
     env['CANGJIE_HOME'] = str(sdk)
     env['CANGJIE_TEST'] = str(test)
+    env['CANGJIE_TEST_ADMISSION_LOG'] = str(output / 'admission.jsonl')
     env['PATH'] = str(sdk / 'bin') + ':' + env['PATH']
     env['PYTHONDONTWRITEBYTECODE'] = '1'
     identity = {'sdk': str(sdk), 'compiler_sha256': sha(sdk / 'bin/cjc'),
@@ -223,6 +230,9 @@ def main():
                                    for p in sorted((sdk / 'runtime').rglob('*.so'))},
                 'pins': json.loads((HERE / 'inputs.json').read_text()),
                 'recipe_sha256': sha(HERE / 'run.py'),
+                'adapter_hashes': adapter_hashes,
+                'cpu_envelope': envelope,
+                'adapter_source_sha256': {p.name: sha(p) for p in sorted(HERE.glob('*.py'))},
                 'source_manifest_sha256': sha(inputs / 'source-manifest.json'),
                 'inputs': str(inputs), 'jobs': args.jobs, 'compiler_jobs': args.compiler_jobs,
                 'affinity': sorted(os.sched_getaffinity(0)), 'uname': list(platform.uname()),
@@ -238,6 +248,7 @@ def main():
     executed = execute([str(output / 'smoke')], output, env, output / 'smoke-run.log')
     if executed['rc'] or (output / 'smoke-run.log').read_text().strip() != 'CANGJIE_TEST_SDK_READY':
         raise RuntimeError('SDK execution preflight failed; see smoke-run.log')
+    (output / 'smoke').unlink()
     # Worker units: Conformance occupies two pools (compile + execute); each Maple suite one.
     units = (2 if 'Conformance' in selected else 0) + sum(1 for name in ('HLT', 'LLT') if name in selected)
     per_unit = args.jobs // units
