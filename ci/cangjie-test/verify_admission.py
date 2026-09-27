@@ -9,21 +9,18 @@ import sys
 import time
 from adapt import prepare
 
-BOOT = '''import os, runpy, sys, time, traceback
-root, entry, target = sys.argv[1:4]
-sys.path.insert(0, root)
-sys.argv = [entry] + sys.argv[4:]
+CONTROL = """import os, time, traceback
 first = None
 def controlled_load():
     global first
+    target = os.environ['ADMISSION_TEST_TARGET']
     if any(frame.name == target for frame in traceback.extract_stack()):
         if first is None:
             first = time.monotonic()
         return (201.0 if time.monotonic() - first < 2 else 0.0, 0.0, 0.0)
     return (0.0, 0.0, 0.0)
 os.getloadavg = controlled_load
-runpy.run_path(entry, run_name='__main__')
-'''
+"""
 
 
 def main():
@@ -57,11 +54,16 @@ def main():
         else:
             entry = harness / 'harness.py'
             options = ['--test-root', str(test / 'Conformance/Compiler/testsuite'),
-                       '--tests', 'src/regression/0006076/test_bug_0006076.cj',
+                       '--tests', 'src/regression/0005878/test_bug_0005878_04.cj',
                        '--work-dir', str(out / 'work'), '--cjc', str(args.sdk / 'bin/cjc'),
                        '--cjc-flags=--jobs=1', '--comp-threads', '1', '--exec-threads', '1',
                        '--log-file', str(out / 'results.log'), '--no-color', '--log-mode', 'short']
-        command = [sys.executable, '-c', BOOT, str(entry.parent), str(entry), target, *options]
+        probe = out / 'controlled-load'
+        probe.mkdir()
+        (probe / 'sitecustomize.py').write_text(CONTROL)
+        env['PYTHONPATH'] = str(probe)
+        env['ADMISSION_TEST_TARGET'] = target
+        command = [sys.executable, str(entry), *options]
         with (out / 'run.log').open('w') as stream:
             result = subprocess.run(command, cwd=entry.parent, env=env, stdout=stream,
                                     stderr=subprocess.STDOUT, timeout=180)
