@@ -51,8 +51,7 @@ export function darwinRuntime(mode, root, platform, source) {
     }
     if (mode === 'source') {
       // Source consumers require the separately registered std identity.
-      const release = JSON.parse(fs.readFileSync(process.env.CJCJ_COLOUR_RUNTIME_RELEASE_PIN
-        || new URL('../colour-runtime/release.json', import.meta.url)));
+      const release = JSON.parse(fs.readFileSync(new URL('../colour-runtime/release.json', import.meta.url)));
       verifyDarwinStd(root, platform, release.platforms?.[platform]?.std, digest(manifestFile));
     }
   }

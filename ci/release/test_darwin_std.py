@@ -22,8 +22,8 @@ env = {**os.environ, 'RUNTIME_REF': pin, 'GITHUB_SHA': 'b' * 40, 'GITHUB_RUN_ID'
        'GITHUB_RUN_ATTEMPT': '1', 'COLOUR_RT_RUN_ID': '123', 'COLOUR_RT_RUN_ATTEMPT': '1',
        'RUNNER_TEMP': str(out)}
 
-def run(script, args):
-    return subprocess.run(['node', str(root / 'ci/release' / script), *map(str, args)], env=env,
+def run(script, args, product=root):
+    return subprocess.run(['node', str(product / 'ci/release' / script), *map(str, args)], env=env,
                           capture_output=True, text=True, errors='backslashreplace')
 
 def copy(source, target):
@@ -83,10 +83,11 @@ for name in ('valid', 'changed-std', 'wrong-compiler-pin', 'missing-std'):
         with (work / f'lib/{tuple_name}/libcangjie-std-core.a').open('ab') as file: file.write(b'changed')
     elif name == 'wrong-compiler-pin': selected['compiler_sha256'] = '0' * 64
     elif name == 'missing-std': (work / f'lib/{tuple_name}/libcangjie-std-core.a').unlink()
-    release = out / (name + '-pin.json')
+    product = out / (name + '-product')
+    shutil.copytree(root / 'ci', product / 'ci')
+    release = product / 'ci/colour-runtime/release.json'
     release.write_text(json.dumps({'platforms': {platform: {'std': selected}}}))
-    env['CJCJ_COLOUR_RUNTIME_RELEASE_PIN'] = str(release)
-    result = run('darwin_runtime.mjs', ['source', work, platform])
+    result = run('darwin_runtime.mjs', ['source', work, platform], product)
     text = result.stdout + result.stderr
     (out / (name + '.log')).write_text(text)
     expected = {'valid': 'COLOUR_RT_STD_VERIFIED', 'changed-std': 'COLOUR_RT_STD_FILE_SHA256',

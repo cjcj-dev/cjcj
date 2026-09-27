@@ -30,6 +30,7 @@ export function fixture(check, target = 'linux-x64') {
       llvm_sha: 'a'.repeat(40), sha256: dylibSha, targets: ['X86', 'ARM', 'AArch64']}));
     const dylibFallback = path.join(dir, 'dylib-fallback');
     fs.cpSync(dylib, dylibFallback, {recursive: true});
+    let entry = new URL('./prepare_bootstrap_inputs.mjs', import.meta.url).pathname;
     const env = {...process.env, CJCJ_SRCBUILD_TARGET: target, CJCJ_BOOTSTRAP_COLOUR_DYLIB: dylibFallback, CJCJ_BOOTSTRAP_DYLIB_ARTIFACT: dylib, LLVM_DYLIB_SHA256: dylibSha, GITHUB_ENV: '', CJCJ_SRCBUILD_HOST_SDK: sdk,
       CJCJ_BOOTSTRAP_HOST_LLVM_SO: so, CJCJ_BOOTSTRAP_AST_SUPPORT: ast,
       CJCJ_BOOTSTRAP_SOURCE: 'depot', CJCJ_BOOTSTRAP_SOURCE_REASON: 'fixture explicit depot', CJCJ_BOOTSTRAP_INPUTS_WORK: path.join(dir, 'work'), CJCJ_BOOTSTRAP_COLOUR_TUPLE: fallback,
@@ -90,8 +91,12 @@ export function fixture(check, target = 'linux-x64') {
       fs.writeFileSync(path.join(runtime, 'std-manifest.json'), JSON.stringify({role: 'colour-std', platform,
         runtime_manifest_sha256: env.COLOUR_RT_MANIFEST_SHA256, compiler_sha256: hostSha,
         producer_sha: 'b'.repeat(40), run_id: '123', run_attempt: '1', files: stdFiles}));
-      env.CJCJ_COLOUR_RUNTIME_RELEASE_PIN = path.join(dir, 'std-release.json');
-      fs.writeFileSync(env.CJCJ_COLOUR_RUNTIME_RELEASE_PIN, JSON.stringify({platforms: {[platform]: {std: {
+      // Isolate normal reviewed configuration; production has no test-only selector.
+      const product = path.join(dir, 'product');
+      fs.cpSync(new URL('../', import.meta.url), path.join(product, 'ci'), {recursive: true});
+      fs.cpSync(new URL('../../build/', import.meta.url), path.join(product, 'build'), {recursive: true});
+      entry = path.join(product, 'ci/release/prepare_bootstrap_inputs.mjs');
+      fs.writeFileSync(path.join(product, 'ci/colour-runtime/release.json'), JSON.stringify({platforms: {[platform]: {std: {
         manifest_sha256: runtimeDigest(path.join(runtime, 'std-manifest.json')), compiler_sha256: hostSha,
         producer_sha: 'b'.repeat(40), run_id: '123', run_attempt: '1'}}}}));
     }
@@ -112,7 +117,7 @@ export function fixture(check, target = 'linux-x64') {
     `);
     env.FIXTURE_RELEASE_FILE = path.join(artifact, 'SHA256SUMS');
     const run = () => spawnSync(process.execPath,
-      ['--import', transport, new URL('./prepare_bootstrap_inputs.mjs', import.meta.url).pathname], {env, encoding: 'utf8'});
+      ['--import', transport, entry], {env, encoding: 'utf8'});
     check({env, artifact, fallback, dylib, dylibSha, so, runtime, runtimeSource, run, pinFile});
   } finally { fs.rmSync(dir, {recursive: true, force: true}); }
 }
