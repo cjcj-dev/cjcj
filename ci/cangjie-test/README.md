@@ -70,3 +70,23 @@ Timeout failures retain their upstream failed status and are listed in
 if either arm has an exact upstream timeout signature; raw failure sets, counts
 and status changes remain visible. Older case files must be normalized again
 to include the timeout field. This does not turn timeouts into passes.
+
+## Observed official nightly baseline (jobs=48, --compiler-jobs=2)
+
+Two consecutive runs of the same SDK (`nightly-1.3.0-alpha.20260925001050`,
+`bin/cjc` sha256 `045957a2…`) on a 192-core Linux x86_64 host produced identical
+case inventories and these counts:
+
+| suite | pass | fail | skip | not_run | stable failures (both arms) |
+|---|---|---|---|---|---|
+| Conformance | 26203 / 26206 | 2855 / 2852 | 2 | 0 | 2852 |
+| HLT | 43755 / 43758 | 8211 / 8208 | 0 | 26391 | 34598 |
+| LLT | 18179 / 18179 | 2080 / 2080 | 0 | 6244 | 8324 |
+
+`not_run` are upstream `UNRESOLVED` records ("No valid command statement was
+found"), not executed cases. Six cases changed status between the two runs (three
+under `Conformance/Compiler/testsuite/src/tests/08_extension/02_members_of_extension/02_properties/01_modifier/a05/`,
+three under `testsuites/HLT/Runtime/Concurrency/Thread/thread003|thread004` and
+`testsuites/HLT/Tools/cjtrace-recover/test11`); treat them as nondeterministic and
+compare them separately. One HLT case (`testsuites/HLT/regression/testcase_774/test.cj`)
+carries the upstream timeout signature and is listed apart from the failure sets.
