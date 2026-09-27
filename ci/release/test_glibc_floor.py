@@ -104,6 +104,25 @@ class GlibcFloorTest(unittest.TestCase):
         rc, report = self.run_gate()
         self.assertEqual((rc, report["failures"]), (1, ["bin/payload"]))
 
+    def test_exported_glibc_version_is_not_a_requirement(self):
+        versions = self.root / "exports.map"
+        versions.write_text("GLIBC_999.0 { global: entry; local: *; };\n")
+        subprocess.run([
+            "cc", "-shared", "-fPIC", str(self.root / "low.c"),
+            "-Wl,--version-script=" + str(versions), "-o", str(self.candidate / "bin/payload"),
+        ], check=True)
+        rc, report = self.run_gate()
+        self.assertEqual(rc, 0, report)
+        row = next(row for row in report["files"] if row["path"] == "bin/payload")
+        self.assertNotIn("GLIBC_999.0", row["candidate"]["needs"])
+
+    def test_empty_payload_is_not_a_pass(self):
+        for root in (self.candidate, self.official):
+            for scope in SCOPES:
+                (root / scope / "payload").unlink()
+        rc, report = self.run_gate()
+        self.assertEqual((rc, report["failures"]), (1, ["no ELF payload inspected"]))
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
