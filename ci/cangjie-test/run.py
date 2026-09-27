@@ -75,10 +75,21 @@ def environment_hints(detail):
 def environment_evidence(detail, hints):
     if not isinstance(detail, str):
         detail = json.dumps(detail, ensure_ascii=False)
-    for line in detail.splitlines():
-        if any(hint in line for hint in hints):
-            return line.strip()[:300]
-    return detail.strip()[:300]
+    # Maple serializes cmd before stderr. Anchor each excerpt at the diagnostic,
+    # never at the start of that potentially very long command record.
+    excerpts = []
+    for hint in hints:
+        position = detail.find(hint)
+        if position < 0:
+            continue
+        start = max(detail.rfind('\n', 0, position) + 1, position - 80)
+        end = detail.find('\n', position)
+        if end < 0:
+            end = len(detail)
+        excerpt = detail[start:min(end, position + 300)].strip()
+        if excerpt not in excerpts:
+            excerpts.append(excerpt)
+    return '\n'.join(excerpts) if excerpts else detail.strip()[:300]
 
 
 def environment_failures(rows):
