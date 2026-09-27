@@ -149,7 +149,7 @@ for (const [runtimeCase, diagnostic] of [
   ['bounds-corrupt', 'COLOUR_RT_SHA_MISMATCH: libboundscheck.so'],
 ]) {
   test(`fixed release rejects ${runtimeCase} before bootstrap tuple consumption`, t => {
-    const f = fixture(t, {runtimeCase});
+    const f = fixture(t, {depot: 'valid', runtimeCase});
     const result = f.run();
     assert.equal(result.status, 1, result.log);
     assert.ok(result.log.includes(diagnostic), result.log);
