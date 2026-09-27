@@ -1,0 +1,79 @@
+name: Windows runtime link controls
+on:
+  push:
+    branches: ['sym/586-implement-r5858614396']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  link:
+    runs-on: windows-2025
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: ['707a07a1e79008845f1881f21ddf6964636aa500', '0280bc7b49564dba532f5a03af879bbbcad6012c', '1d0c8be495d4b6378fefbd27fb08135b3db288fd']
+    env:
+      RUNTIME_REF: ${{ matrix.runtime }}
+      RUNTIME_TARGET: windows-x86_64
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          repository: cjcj-dev/cangjie-runtime
+          ref: ${{ env.RUNTIME_REF }}
+          path: runtime-source
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          release: false
+          update: true
+          path-type: inherit
+          install: >-
+            git make python gzip unzip file binutils
+            mingw-w64-x86_64-clang mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-compiler-rt mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-libc++ mingw-w64-x86_64-libunwind
+            mingw-w64-x86_64-ninja mingw-w64-x86_64-python mingw-w64-x86_64-lld
+      - name: Preserve native cache directories
+        shell: pwsh
+        run: |
+          $cacheHome = $env:USERPROFILE.Replace('\', '/')
+          $cacheConfigHome = $env:LOCALAPPDATA.Replace('\', '/')
+          "export USERPROFILE='$cacheHome' LOCALAPPDATA='$cacheConfigHome'" | Set-Content -NoNewline -Encoding utf8 C:/msys64/etc/profile.d/runtime-link.sh
+      - name: Run unchanged production entry
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force evidence | Out-Null
+          npx --yes zx@8 ci/platform_matrix/build_runtime.mjs *> evidence/build.log
+          $rc = $LASTEXITCODE
+          "baseline_rc=$rc" | Tee-Object -FilePath evidence/result.txt
+          Get-Content evidence/build.log -Tail 25
+          exit 0
+      - name: Relink identical objects with official linker choice
+        shell: msys2 {0}
+        run: |
+          set -uo pipefail
+          pacman -Q > evidence/packages.txt
+          clang++ --version > evidence/clang.txt
+          ld --version > evidence/ld.txt
+          ld.lld --version > evidence/lld.txt
+          cd runtime-source/runtime/CMakebuild/src
+          sha256sum CMakeFiles/cangjie-runtime.dir/objects.a > ../../../../evidence/objects.sha256
+          cp CMakeFiles/cangjie-runtime.dir/link.txt ../../../../evidence/link.txt
+          sed 's/clang++.exe /clang++.exe -fuse-ld=lld /g' CMakeFiles/cangjie-runtime.dir/link.txt > link-lld.sh
+          bash link-lld.sh > ../../../../evidence/lld-link.log 2>&1
+          rc=$?
+          echo "lld_relink_rc=$rc" | tee -a ../../../../evidence/result.txt
+          tail -20 ../../../../evidence/lld-link.log
+          find .. -name 'libcangjie-runtime.dll' -exec sha256sum '{}' ';' > ../../../../evidence/dll.sha256
+          exit 0
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: runtime-link-${{ matrix.runtime }}
+          path: evidence/
+          retention-days: 7
