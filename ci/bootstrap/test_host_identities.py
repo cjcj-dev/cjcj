@@ -96,6 +96,10 @@ class HostIdentity(unittest.TestCase):
         self.identities.write_text('\n'.join(self.rows[:-1] + [f'{PLATFORM} libLLVM-15.so invalid']) + '\n')
         self.rejected(self.install(), 'invalid host identity: ' + PLATFORM)
 
+    def test_extra_selected_pin_field(self):
+        self.identities.write_text('\n'.join(self.rows[:-1] + [self.rows[-1] + ' extra']) + '\n')
+        self.rejected(self.install(), 'invalid host identity: ' + PLATFORM)
+
     def test_other_platform_cannot_fill_missing_pin(self):
         self.identities.write_text('\n'.join(self.rows[:-1]) + '\n')
         self.rejected(self.install(), 'incomplete host identities: ' + PLATFORM)
@@ -131,9 +135,9 @@ class HostIdentity(unittest.TestCase):
         self.files[NAMES[2]].write_bytes(b'changed host llvm')
         self.rejected(self.install(), 'sha mismatch: ' + str(self.files[NAMES[2]]))
 
-    @unittest.skipUnless(os.environ.get('HOST_IDENTITY_SDK') and os.environ.get('HOST_IDENTITY_LLVM'),
-                         'real fixed SDK and pinned host LLVM required')
-    def test_fixed_release_triple(self):
+    def fixed_release(self):
+        if not (os.environ.get('HOST_IDENTITY_SDK') and os.environ.get('HOST_IDENTITY_LLVM')):
+            self.skipTest('real fixed SDK and pinned host LLVM required')
         sdk = Path(os.environ['HOST_IDENTITY_SDK'])
         for name in NAMES:
             source = Path(os.environ['HOST_IDENTITY_LLVM']) if name == NAMES[2] else sdk / self.runtime / name
@@ -144,7 +148,38 @@ class HostIdentity(unittest.TestCase):
             print(f'INPUT {name} {self.pins[name]} {source}', flush=True)
         # Pins remain checked-in data; input hashes only observe the result.
         self.identities = IDENTITIES
-        self.accepted(self.install(hrt=sdk))
+
+    def test_fixed_release_triple(self):
+        self.fixed_release()
+        self.accepted(self.install())
+
+    def test_fixed_release_runtime_pin_bit(self):
+        self.fixed_release()
+        rows = IDENTITIES.read_text().splitlines()
+        for i, row in enumerate(rows):
+            if row.startswith(PLATFORM + ' ' + NAMES[0] + ' '):
+                fields = row.split()
+                fields[2] = ('0' if fields[2][0] != '0' else '1') + fields[2][1:]
+                rows[i] = ' '.join(fields)
+        self.identities = self.root / 'changed-pin.txt'
+        self.identities.write_text('\n'.join(rows) + '\n')
+        self.rejected(self.install(), 'sha mismatch: ' + str(self.hrt / NAMES[0]))
+
+    def test_fixed_release_hrt_runtime_byte(self):
+        self.fixed_release()
+        with (self.hrt / NAMES[0]).open('r+b') as stream:
+            byte = stream.read(1)
+            stream.seek(0)
+            stream.write(bytes([byte[0] ^ 1]))
+        self.rejected(self.install(), 'sha mismatch: ' + str(self.hrt / NAMES[0]))
+
+    def test_fixed_release_host_runtime_byte(self):
+        self.fixed_release()
+        with self.files[NAMES[0]].open('r+b') as stream:
+            byte = stream.read(1)
+            stream.seek(0)
+            stream.write(bytes([byte[0] ^ 1]))
+        self.rejected(self.install(), 'sha mismatch: ' + str(self.files[NAMES[0]]))
 
 
 if __name__ == '__main__':

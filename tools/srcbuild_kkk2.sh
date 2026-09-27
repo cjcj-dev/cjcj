@@ -1152,6 +1152,49 @@ bootstrap_input_sha256() {
     sha256sum "$path" | awk '{print $1}'
 }
 
+# P12: the runtime is a declared external input, never an implicit depot lookup.
+# Declare CJCJ_BOOTSTRAP_COLOUR_RT as the absolute directory containing BOTH
+# libcangjie-runtime.so and libboundscheck.so (not an SDK root). Supply reviewed
+# CJCJ_BOOTSTRAP_COLOUR_RT_SHA256 and CJCJ_BOOTSTRAP_BOUNDSCHECK_SHA256
+# from that external artifact release. Dry-run validates the same input.
+# The runtime embedded CJRT-COMMIT must equal ci/runtime_pin.env RUNTIME_REF.
+# Expected digests come from the input provider, not from hashing an unchecked
+# file and treating that freshly computed value as its own expected identity.
+assert_bootstrap_colour_runtime() {
+    local root=$1 file expected actual stamps
+    [[ $RUNTIME_REF =~ ^[0-9a-f]{40}$ ]] || {
+        echo 'COLOUR_RT_PIN_INVALID' >&2; return 1;
+    }
+    [[ $root == /* && -d $root ]] || {
+        echo 'COLOUR_RT_INPUT_REQUIRED: set CJCJ_BOOTSTRAP_COLOUR_RT to an absolute library directory' >&2; return 1;
+    }
+    for file in libcangjie-runtime.so libboundscheck.so; do
+        if [[ $file == libcangjie-runtime.so ]]; then
+            expected=${CJCJ_BOOTSTRAP_COLOUR_RT_SHA256:-}
+        else
+            expected=${CJCJ_BOOTSTRAP_BOUNDSCHECK_SHA256:-}
+        fi
+        [[ $expected =~ ^[0-9a-f]{64}$ ]] || {
+            echo "COLOUR_RT_SHA_REQUIRED: $file" >&2; return 1;
+        }
+        [[ -f $root/$file ]] || {
+            echo "COLOUR_RT_FILE_MISSING: $root/$file" >&2; return 1;
+        }
+        actual=$(sha256sum "$root/$file") || return 1
+        actual=${actual%% *}
+        [[ $actual == "$expected" ]] || {
+            echo "COLOUR_RT_SHA_MISMATCH: $file expected=$expected actual=$actual" >&2; return 1;
+        }
+    done
+    stamps=$(LC_ALL=C strings "$root/libcangjie-runtime.so" | /usr/bin/grep -oE 'CJRT-COMMIT:[[:alnum:]_-]+' | sort -u) || {
+        echo 'COLOUR_RT_STAMP_MISSING' >&2; return 1;
+    }
+    [[ $stamps == "CJRT-COMMIT:$RUNTIME_REF" ]] || {
+        echo "COLOUR_RT_PIN_MISMATCH: expected=$RUNTIME_REF actual=$stamps" >&2; return 1;
+    }
+    echo "COLOUR_RT_INPUT_VERIFIED: path=$root commit=$RUNTIME_REF runtime_sha256=$CJCJ_BOOTSTRAP_COLOUR_RT_SHA256 boundscheck_sha256=$CJCJ_BOOTSTRAP_BOUNDSCHECK_SHA256" >&2
+}
+
 load_bootstrap_pins() {
     resolve_host_toolchain_pin
     # shellcheck disable=SC1091
@@ -1178,13 +1221,8 @@ load_bootstrap_pins() {
     BOOTSTRAP_COLOUR_LLVM_SO=${CJCJ_BOOTSTRAP_COLOUR_LLVM_SO:-${CJCJ_BOOTSTRAP_DYLIB_ARTIFACT:-${CJCJ_BOOTSTRAP_COLOUR_DYLIB:-$BOOTSTRAP_COLOUR_TUPLE/dylib}}/libLLVM-15.so}
     BOOTSTRAP_COLOUR_LLVM_SHA256=$LLVM_DYLIB_SHA256
     BOOTSTRAP_STDSRC=${CJCJ_BOOTSTRAP_STDSRC:-$CANGJIE_WORKSPACE/cangjie_runtime/stdlib}
-    if [[ -n ${CJCJ_BOOTSTRAP_COLOUR_RT:-} ]]; then
-        BOOTSTRAP_COLOUR_RT=$CJCJ_BOOTSTRAP_COLOUR_RT
-    elif [[ -d /root/sodepot/$RUNTIME_REF ]]; then
-        BOOTSTRAP_COLOUR_RT=/root/sodepot/$RUNTIME_REF
-    else
-        BOOTSTRAP_COLOUR_RT=/root/merge_fwdtable_pr/sodepot/$RUNTIME_REF
-    fi
+    BOOTSTRAP_COLOUR_RT=${CJCJ_BOOTSTRAP_COLOUR_RT:-}
+    assert_bootstrap_colour_runtime "$BOOTSTRAP_COLOUR_RT" || return 1
     BOOTSTRAP_CPP_SRC=${CJCJ_BOOTSTRAP_CPP_SRC:-${CANGJIE_CPP_SRC:-$CANGJIE_WORKSPACE/cangjie_compiler}}
     BOOTSTRAP_CJCJ_SHA=${CJCJ_BOOTSTRAP_CJCJ_SHA:-$(git -C "$REPO_ROOT" rev-parse HEAD)}
 }
@@ -1276,7 +1314,7 @@ validate_stage_step_contracts() {
     includes_step() {
         local want=$1
         if declare -F selected_dag_steps >/dev/null 2>&1; then
-            selected_dag_steps "$FROM_STEP" "$THROUGH_STEP" | /usr/bin/grep -qx "$want"
+            /usr/bin/grep -qx "$want" <<< "$(selected_dag_steps "$FROM_STEP" "$THROUGH_STEP")"
         else
             ((FROM_STEP <= want && THROUGH_STEP >= want))
         fi
@@ -1288,10 +1326,13 @@ validate_stage_step_contracts() {
         }
         local missing flag argv_text step31_text step32_text
         argv_text=$(awk '/^bootstrap_argv\(\)/,/^}/' "$SCRIPT_PATH")
+        # grep -q may exit before a pipe writer finishes. With pipefail that
+        # turns a found contract into a false rejection; feed captured text
+        # directly so only the match status decides the contract.
         for flag in --work --src --cjcj-sha --stdsrc --cpp-src --base --host-llvm-so --host-llvm-sha256 \
             --colour-llvm-so --colour-llvm-sha256 --ast-support --ast-support-sha256 --colour-tuple --colour-llvm-sha \
             --colour-rt --host-rt --stage; do
-            printf '%s\n' "$argv_text" | /usr/bin/grep -Fq -- "$flag" || missing+="$flag "
+            /usr/bin/grep -Fq -- "$flag" <<< "$argv_text" || missing+="$flag "
         done
         [[ -z ${missing:-} ]] || {
             echo "dry-run bootstrap argv missing flags: $missing" >&2
@@ -1299,22 +1340,22 @@ validate_stage_step_contracts() {
         }
         if includes_step 31; then
             step31_text=$(awk '/^step_31\(\)/,/^}/' "$SCRIPT_PATH")
-            printf '%s\n' "$step31_text" | /usr/bin/grep -Fq 'run_bootstrap_stage stage0' || {
+            /usr/bin/grep -Fq 'run_bootstrap_stage stage0' <<< "$step31_text" || {
                 echo "dry-run step_31 does not exec bootstrap.sh --stage stage0" >&2
                 return 1
             }
-            printf '%s\n' "$step31_text" | /usr/bin/grep -Fq 'build-stage1.mjs' && {
+            /usr/bin/grep -Fq 'build-stage1.mjs' <<< "$step31_text" && {
                 echo "dry-run step_31 must not call build-stage1.mjs" >&2
                 return 1
             }
-            printf '%s\n' "$step31_text" | /usr/bin/grep -E -q 'PATH=.*opt|/bin/opt' && {
+            /usr/bin/grep -E -q 'PATH=.*opt|/bin/opt' <<< "$step31_text" && {
                 echo "dry-run stage0 forbids injecting colour opt on PATH" >&2
                 return 1
             }
         fi
         if includes_step 32; then
             step32_text=$(awk '/^step_32\(\)/,/^}/' "$SCRIPT_PATH")
-            printf '%s\n' "$step32_text" | /usr/bin/grep -Fq 'run_bootstrap_stage stage1' || {
+            /usr/bin/grep -Fq 'run_bootstrap_stage stage1' <<< "$step32_text" || {
                 echo "dry-run step_32 does not exec bootstrap.sh --stage stage1" >&2
                 return 1
             }
@@ -1343,7 +1384,7 @@ validate_stage_step_contracts() {
         }
         local step34_text
         step34_text=$(awk '/^step_34\(\)/,/^}/' "$SCRIPT_PATH")
-        printf '%s\n' "$step34_text" | /usr/bin/grep -Fq 'compose-sdk.mjs' || {
+        /usr/bin/grep -Fq 'compose-sdk.mjs' <<< "$step34_text" || {
             echo "dry-run step_34 does not invoke compose-sdk.mjs" >&2
             return 1
         }
