@@ -25,15 +25,23 @@ on:
         description: Same-platform source-built final std artifact
         required: true
         type: string
+      release_key:
+        description: Official release package key; empty retains the host package name
+        required: false
+        type: string
+        default: ''
+      cross_std_artifacts:
+        description: JSON array of tuple/artifact pairs from the source cells
+        required: false
+        type: string
+        default: '[]'
       cross_std_artifact:
-        description: >-
-          Source-built final std for a tuple this package can target but is not
-          built on. Empty means the package targets only its own tuple.
+        description: Legacy single cross std artifact; normalized into the tuple list
         required: false
         type: string
         default: ''
       cross_std_tuple:
-        description: Runtime tuple that cross_std_artifact fills (e.g. windows_x86_64_cjnative)
+        description: Legacy single cross std tuple
         required: false
         type: string
         default: ''
@@ -74,7 +82,10 @@ jobs:
       FINAL_COMPILER_DIR: ${{ github.workspace }}/.release-final-compiler/${{ inputs.platform }}
       FINAL_STD_DIR: ${{ github.workspace }}/.release-final-std/${{ inputs.platform }}
       CROSS_STD_DIR: ${{ github.workspace }}/.release-cross-std/${{ inputs.platform }}
+      CROSS_STD_ARTIFACTS: ${{ inputs.cross_std_artifacts }}
+      CROSS_STD_ARTIFACT: ${{ inputs.cross_std_artifact }}
       CROSS_STD_TUPLE: ${{ inputs.cross_std_tuple }}
+      RELEASE_KEY: ${{ inputs.release_key }}
       PYTHON_BUNDLE_DIR: ${{ github.workspace }}/.release-python/${{ inputs.platform }}/bundle
       RELEASE_PLATFORM: ${{ inputs.platform }}
       SOURCE_CJPM_DIR: ${{ github.workspace }}/.release-cjpm/${{ inputs.platform }}
@@ -82,6 +93,9 @@ jobs:
     steps:
       - name: Checkout cjcj
         uses: actions/checkout@v7
+
+      - name: Resolve archive identity independently of host toolchain
+        run: node ci/release/package-key.mjs
 
       - name: Load release and source-build host pin
         shell: bash
@@ -126,10 +140,10 @@ jobs:
         run: tar -C "$FINAL_COMPILER_DIR" -xzf "$FINAL_COMPILER_DIR/final-compiler.tar.gz"
 
       - name: Download cross-tuple source-built final std
-        if: inputs.cross_std_artifact != ''
+        if: inputs.cross_std_artifacts != '[]' || inputs.cross_std_artifact != ''
         uses: actions/download-artifact@v8
         with:
-          name: ${{ inputs.cross_std_artifact }}
+          pattern: final-std-*
           path: ${{ env.CROSS_STD_DIR }}
 
       - name: Download same-platform source-built cjpm
@@ -429,16 +443,9 @@ jobs:
           runtime_lib="$PWD/dist-runtime/libcangjie-runtime.so"
           if [ "$RUNNER_OS" = "macOS" ]; then runtime_lib="$PWD/dist-runtime/libcangjie-runtime.dylib"; fi
           llvm_manifest="${FIXED_LLVM_MANIFEST:-$PWD/fixed-toolchain/${{ inputs.llvm_platform }}/llvm-tools.manifest}"
-          # Two words when a cross tuple is configured, zero when not. Plain string
-          # rather than an array: macOS runners still ship bash 3.2, where "${a[@]}"
-          # on an empty array is an unbound-variable error under set -u.
-          cross_std_arg=""
-          if [ -n "${CROSS_STD_TUPLE:-}" ]; then
-            cross_std_arg="--cross-std-dir ${CROSS_STD_TUPLE}=${CROSS_STD_DIR}"
-          fi
-          # shellcheck disable=SC2086
-          npx --yes zx@8 scripts/package_sdk.mjs \
-            $cross_std_arg \
+          npx --yes zx@8 ci/release/compose-package.mjs \
+            --cross-root "$CROSS_STD_DIR" -- \
+            --release-key "${{ inputs.release_key }}" \
             --sdk "$CANGJIE_HOME" \
             --binary "$FINAL_COMPILER_BINARY" \
             --compiler-artifact "$FINAL_COMPILER_DIR" \
@@ -471,7 +478,9 @@ jobs:
         shell: pwsh
         run: |
           $binary = "$env:FINAL_COMPILER_BINARY"
-          npx --yes zx@8 scripts/package_sdk.mjs `
+          npx --yes zx@8 ci/release/compose-package.mjs `
+            --cross-root "$env:CROSS_STD_DIR" -- `
+            --release-key "${{ inputs.release_key }}" `
             --sdk "$env:CANGJIE_HOME" `
             --binary "$binary" `
             --compiler-artifact "$env:FINAL_COMPILER_DIR" `
@@ -505,7 +514,7 @@ jobs:
       # refuses to publish a list with a platform missing.
       - name: Write package checksums
         shell: bash
-        run: node ci/release/package_checksums.mjs write --dist dist --platform "$RELEASE_PLATFORM" --version "${{ inputs.version }}"
+        run: node ci/release/package_checksums.mjs write --dist dist --platform "$PACKAGE_KEY" --version "${{ inputs.version }}"
 
       - name: Verify packaged standard library
         if: inputs.verify
@@ -515,7 +524,7 @@ jobs:
           # The checker discovers the target's complete std inventory; do not
           # duplicate artifact or tuple file lists in this workflow.
           node scripts/check_packaged_std.mjs \
-            --sdk "$PWD/dist/cjcj-${{ inputs.version }}-${{ inputs.platform }}" \
+            --sdk "$PWD/dist/cjcj-${{ inputs.version }}-${{ env.PACKAGE_KEY }}" \
             --std "$FINAL_STD_DIR" \
             --platform "$RELEASE_PLATFORM"
 
@@ -524,7 +533,7 @@ jobs:
         shell: bash
         run: |
           set -e
-          pkg="cjcj-${{ inputs.version }}-${{ inputs.platform }}"
+          pkg="cjcj-${{ inputs.version }}-${{ env.PACKAGE_KEY }}"
           mkdir -p pkgtest
           tar -C pkgtest -xzf "dist/${pkg}.tar.gz"
           # shellcheck disable=SC1090
@@ -545,7 +554,7 @@ jobs:
         if: inputs.verify && runner.os == 'Windows'
         shell: pwsh
         run: |
-          $pkg = "cjcj-${{ inputs.version }}-${{ inputs.platform }}"
+          $pkg = "cjcj-${{ inputs.version }}-${{ env.PACKAGE_KEY }}"
           $extract = Join-Path $PWD 'pkgtest'
           $work = Join-Path $env:RUNNER_TEMP 'release-smoke'
           $smokeExit = 1
@@ -577,7 +586,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: pkg-diagnosis-${{ inputs.platform }}-${{ github.run_attempt }}
+          name: pkg-diagnosis-${{ env.PACKAGE_KEY }}-${{ github.run_attempt }}
           retention-days: 7
           if-no-files-found: warn
           path: |
@@ -590,13 +599,13 @@ jobs:
       - name: Upload SDK artifact
         uses: actions/upload-artifact@v7
         with:
-          name: pkg-${{ inputs.platform }}
+          name: pkg-${{ env.PACKAGE_KEY }}
           path: |
-            dist/cjcj-${{ inputs.version }}-${{ inputs.platform }}.tar.gz
-            dist/cjcj-${{ inputs.version }}-${{ inputs.platform }}.tar.gz.sha256
-            dist/cjcj-${{ inputs.version }}-${{ inputs.platform }}.zip
-            dist/cjcj-${{ inputs.version }}-${{ inputs.platform }}.zip.sha256
-            dist/cjcj-${{ inputs.version }}-${{ inputs.platform }}.RELEASE-MANIFEST.jsonl
-            dist/cjcj-${{ inputs.version }}-${{ inputs.platform }}.SHA256SUMS
+            dist/cjcj-${{ inputs.version }}-${{ env.PACKAGE_KEY }}.tar.gz
+            dist/cjcj-${{ inputs.version }}-${{ env.PACKAGE_KEY }}.tar.gz.sha256
+            dist/cjcj-${{ inputs.version }}-${{ env.PACKAGE_KEY }}.zip
+            dist/cjcj-${{ inputs.version }}-${{ env.PACKAGE_KEY }}.zip.sha256
+            dist/cjcj-${{ inputs.version }}-${{ env.PACKAGE_KEY }}.RELEASE-MANIFEST.jsonl
+            dist/cjcj-${{ inputs.version }}-${{ env.PACKAGE_KEY }}.SHA256SUMS
           if-no-files-found: error
           retention-days: 90
