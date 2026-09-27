@@ -1146,6 +1146,11 @@ public open class DynamicDispatch <: FuncCall {
 public class Invoke <: DynamicDispatch {
     public init(callContext: InvokeCallContext, parent: Option<Block>) {
         super(ExprKind.INVOKE, callContext, parent)
+        // Upstream Expression.cpp:1042 `AppendOperand(*callContext.method)` registers the method as a
+        // user while the operand list is still being built; the open-class constructor cannot call
+        // `AppendOperand` here, so register the inherited `method` operand explicitly before the
+        // remaining operands are appended. Invariant: every operand has its user recorded.
+        ConnectOperandsAndGroups()
         AppendOperand(callContext.caller)
         for (arg in callContext.funcCallCtx.args) {
             AppendOperand(arg)
@@ -1216,6 +1221,8 @@ public class Invoke <: DynamicDispatch {
 public class InvokeStatic <: DynamicDispatch {
     public init(callContext: InvokeCallContext, parent: Option<Block>) {
         super(ExprKind.INVOKESTATIC, callContext, parent)
+        // Upstream Expression.cpp:1195 `AppendOperand(*callContext.method)`, see Invoke.init.
+        ConnectOperandsAndGroups()
         AppendOperand(callContext.caller)
         for (arg in callContext.funcCallCtx.args) {
             AppendOperand(arg)
