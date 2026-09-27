@@ -71,7 +71,13 @@ if either arm has an exact upstream timeout signature; raw failure sets, counts
 and status changes remain visible. Older case files must be normalized again
 to include the timeout field. This does not turn timeouts into passes.
 
-## Observed official nightly baseline (jobs=48, --compiler-jobs=2)
+## Historical runs outside the required execution envelope
+
+These records are not an accepted baseline for #482: runtime load admission
+was missing, and nested cjpm compiler parallelism was not bounded. The first
+run contains load1 >200 samples. Retain these records as historical evidence;
+new runs must establish both controls before their failure sets are used.
+The requested settings were jobs=48 and --compiler-jobs=2.
 
 Two consecutive runs of the same SDK (`nightly-1.3.0-alpha.20260925001050`,
 `bin/cjc` sha256 `045957a2…`) on a 192-core Linux x86_64 host produced identical
