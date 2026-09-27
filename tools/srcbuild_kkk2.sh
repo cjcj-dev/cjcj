@@ -1314,7 +1314,7 @@ validate_stage_step_contracts() {
     includes_step() {
         local want=$1
         if declare -F selected_dag_steps >/dev/null 2>&1; then
-            selected_dag_steps "$FROM_STEP" "$THROUGH_STEP" | /usr/bin/grep -qx "$want"
+            /usr/bin/grep -qx "$want" <<< "$(selected_dag_steps "$FROM_STEP" "$THROUGH_STEP")"
         else
             ((FROM_STEP <= want && THROUGH_STEP >= want))
         fi
@@ -1326,10 +1326,13 @@ validate_stage_step_contracts() {
         }
         local missing flag argv_text step31_text step32_text
         argv_text=$(awk '/^bootstrap_argv\(\)/,/^}/' "$SCRIPT_PATH")
+        # grep -q may exit before a pipe writer finishes. With pipefail that
+        # turns a found contract into a false rejection; feed captured text
+        # directly so only the match status decides the contract.
         for flag in --work --src --cjcj-sha --stdsrc --cpp-src --base --host-llvm-so --host-llvm-sha256 \
             --colour-llvm-so --colour-llvm-sha256 --ast-support --ast-support-sha256 --colour-tuple --colour-llvm-sha \
             --colour-rt --host-rt --stage; do
-            printf '%s\n' "$argv_text" | /usr/bin/grep -Fq -- "$flag" || missing+="$flag "
+            /usr/bin/grep -Fq -- "$flag" <<< "$argv_text" || missing+="$flag "
         done
         [[ -z ${missing:-} ]] || {
             echo "dry-run bootstrap argv missing flags: $missing" >&2
@@ -1337,22 +1340,22 @@ validate_stage_step_contracts() {
         }
         if includes_step 31; then
             step31_text=$(awk '/^step_31\(\)/,/^}/' "$SCRIPT_PATH")
-            printf '%s\n' "$step31_text" | /usr/bin/grep -Fq 'run_bootstrap_stage stage0' || {
+            /usr/bin/grep -Fq 'run_bootstrap_stage stage0' <<< "$step31_text" || {
                 echo "dry-run step_31 does not exec bootstrap.sh --stage stage0" >&2
                 return 1
             }
-            printf '%s\n' "$step31_text" | /usr/bin/grep -Fq 'build-stage1.mjs' && {
+            /usr/bin/grep -Fq 'build-stage1.mjs' <<< "$step31_text" && {
                 echo "dry-run step_31 must not call build-stage1.mjs" >&2
                 return 1
             }
-            printf '%s\n' "$step31_text" | /usr/bin/grep -E -q 'PATH=.*opt|/bin/opt' && {
+            /usr/bin/grep -E -q 'PATH=.*opt|/bin/opt' <<< "$step31_text" && {
                 echo "dry-run stage0 forbids injecting colour opt on PATH" >&2
                 return 1
             }
         fi
         if includes_step 32; then
             step32_text=$(awk '/^step_32\(\)/,/^}/' "$SCRIPT_PATH")
-            printf '%s\n' "$step32_text" | /usr/bin/grep -Fq 'run_bootstrap_stage stage1' || {
+            /usr/bin/grep -Fq 'run_bootstrap_stage stage1' <<< "$step32_text" || {
                 echo "dry-run step_32 does not exec bootstrap.sh --stage stage1" >&2
                 return 1
             }
@@ -1381,7 +1384,7 @@ validate_stage_step_contracts() {
         }
         local step34_text
         step34_text=$(awk '/^step_34\(\)/,/^}/' "$SCRIPT_PATH")
-        printf '%s\n' "$step34_text" | /usr/bin/grep -Fq 'compose-sdk.mjs' || {
+        /usr/bin/grep -Fq 'compose-sdk.mjs' <<< "$step34_text" || {
             echo "dry-run step_34 does not invoke compose-sdk.mjs" >&2
             return 1
         }

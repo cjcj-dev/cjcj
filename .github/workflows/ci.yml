@@ -64,6 +64,7 @@ jobs:
         shell: bash
         env:
           RELEASE_EVIDENCE_TEST_ROOT: ${{ runner.temp }}/release-evidence-tests
+          CJCJ_TEST_EVIDENCE: ${{ runner.temp }}/srcbuild-driver-evidence
         run: |
           mapfile -t FILES < <(node ci/test-manifest.mjs list)
           echo "manifest gates ${#FILES[@]} test files"
@@ -78,6 +79,13 @@ jobs:
           # a failure. 300s is ~150x the whole suite's normal 2s; a test that
           # genuinely needs longer says so with its own {timeout}, which wins.
           node --test --test-timeout=300000 "${FILES[@]}"
+      - name: Preserve srcbuild driver evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: srcbuild-driver-evidence
+          path: ${{ runner.temp }}/srcbuild-driver-evidence
+          if-no-files-found: warn
       - name: Audit pin reachability
         run: node ci/pin-sweep.mjs --remote
       - name: Verify smoke assets
