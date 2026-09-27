@@ -78,8 +78,8 @@ def main():
                 'consumer-cut': digest(out / 'runner-cut.sh'), 'producer-cut': digest(out / 'pin-cut.txt')}
     (out / 'arms.json').write_text(json.dumps({'arms': results, 'identity': identity}, indent=2) + '\n')
     assert before == {str(p): digest(p) for p in (runner, identities, test)}
-    expected = {'candidate': [], 'consumer-cut': ['test_hrt_runtime_bytes'],
-                'producer-cut': ['test_fixed_release_triple'], 'restored': []}
+    expected = {'candidate': [], 'consumer-cut': ['test_fixed_release_hrt_runtime_byte', 'test_fixed_release_runtime_pin_bit', 'test_hrt_runtime_bytes'],
+                'producer-cut': ['test_fixed_release_host_runtime_byte', 'test_fixed_release_triple'], 'restored': []}
     for name, failures in expected.items():
         result = results[name]
         assert result['failures'] == failures, (name, result)
