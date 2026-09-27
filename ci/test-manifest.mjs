@@ -71,6 +71,7 @@ export const GATING = Object.freeze([
   'ci/patched-runtime-language-defer.test.mjs',
   'ci/bootstrap/prepare_cpp_headers.test.mjs',
   'ci/pin-sweep.test.mjs',
+  'ci/release-pair-pin.test.mjs',
   'ci/release-gates.test.mjs',
   // Node fixtures use mocked transport, no SDK or credentials. The publisher
   // exercises real zip/unzip; ci.yml installs both before running this list.
