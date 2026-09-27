@@ -35,6 +35,16 @@ on:
         required: false
         type: string
         default: '[]'
+      cross_std_artifact:
+        description: Legacy single cross std artifact; normalized into the tuple list
+        required: false
+        type: string
+        default: ''
+      cross_std_tuple:
+        description: Legacy single cross std tuple
+        required: false
+        type: string
+        default: ''
       version:
         required: true
         type: string
@@ -78,6 +88,8 @@ jobs:
       FINAL_STD_DIR: ${{ github.workspace }}/.release-final-std/${{ inputs.platform }}
       CROSS_STD_DIR: ${{ github.workspace }}/.release-cross-std/${{ inputs.platform }}
       CROSS_STD_ARTIFACTS: ${{ inputs.cross_std_artifacts }}
+      CROSS_STD_ARTIFACT: ${{ inputs.cross_std_artifact }}
+      CROSS_STD_TUPLE: ${{ inputs.cross_std_tuple }}
       RELEASE_KEY: ${{ inputs.release_key }}
       PYTHON_BUNDLE_DIR: ${{ github.workspace }}/.release-python/${{ inputs.platform }}/bundle
       RELEASE_PLATFORM: ${{ inputs.platform }}
@@ -129,7 +141,7 @@ jobs:
         run: tar -C "$FINAL_COMPILER_DIR" -xzf "$FINAL_COMPILER_DIR/final-compiler.tar.gz"
 
       - name: Download cross-tuple source-built final std
-        if: inputs.cross_std_artifacts != '[]'
+        if: inputs.cross_std_artifacts != '[]' || inputs.cross_std_artifact != ''
         uses: actions/download-artifact@v8
         with:
           pattern: final-std-*

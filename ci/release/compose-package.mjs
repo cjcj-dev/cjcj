@@ -4,7 +4,9 @@ import {fileURLToPath} from 'node:url';
 import {crossStdArguments} from './cross-std-arguments.mjs';
 const root = argv['cross-root'];
 if (typeof root !== 'string' || !root) throw new Error('--cross-root is required');
-const args = crossStdArguments(process.env.CROSS_STD_ARTIFACTS ?? '[]', root);
+const args = crossStdArguments(process.env.CROSS_STD_ARTIFACTS ?? '[]', root, {
+  artifact: process.env.CROSS_STD_ARTIFACT, tuple: process.env.CROSS_STD_TUPLE,
+});
 // zx reparses argv and consumes the separator; retain the product arguments
 // from the original process vector, including values containing spaces.
 const separator = process.argv.indexOf('--');
