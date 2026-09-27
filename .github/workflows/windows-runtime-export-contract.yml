@@ -61,6 +61,7 @@ jobs:
         shell: pwsh
         env:
           MSYSTEM: MINGW64
+          MSYS2_PATH_TYPE: inherit
         run: |
           & C:/msys64/usr/bin/bash.exe -lc 'ccache --show-config'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
