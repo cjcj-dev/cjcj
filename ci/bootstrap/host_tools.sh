@@ -67,3 +67,15 @@ host_native_env() {
     printf 'SDKROOT=%q ' "$sdk_root"
   fi
 }
+
+# stdlib/cmake/darwin_toolchain.cmake:36-37 requires LLVM archive tools.
+host_std_system_path() {
+  local llvm_prefix
+  if [ "$HOST_OS" = Darwin ]; then
+    llvm_prefix=$(brew --prefix llvm@16) || return 1
+    [ -x "$llvm_prefix/bin/llvm-ranlib" ] || { echo "native llvm-ranlib missing: $llvm_prefix/bin" >&2; return 1; }
+    printf '%s:%s' "$llvm_prefix/bin" "$HOST_SYSTEM_PATH"
+  else
+    printf '%s' "$HOST_SYSTEM_PATH"
+  fi
+}
