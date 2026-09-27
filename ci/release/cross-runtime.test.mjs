@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -45,19 +46,21 @@ test(`${label} runtime consumer installs the producer inventory byte for byte`, 
   }
   const expected = await Promise.all(produced.files.map(async file => ({path: file.path,
     bytes: (await fs.readFile(path.join(args.root, file.path))).toString('hex')})));
-  console.log('ASSERT_ANDROID_RUNTIME_INSTALLED_BYTES');
-  assert.deepEqual(actual, expected, 'Android runtime consumer must install every attested byte');
+  console.log(`ASSERT_RUNTIME_INSTALLED_BYTES ${tuple}`);
+  assert.deepEqual(actual, expected, `${label} runtime consumer must install every attested byte`);
 });
 
 test(`${label} runtime producer records exact file hashes and source identity`, async t => {
   const args = await fixture(t, tuple, triple);
   await writeCrossRuntimeManifest(args);
   const record = JSON.parse(await fs.readFile(path.join(args.root, 'CROSS-RUNTIME.json'), 'utf8'));
-  console.log('ASSERT_ANDROID_RUNTIME_PRODUCER_IDENTITY');
+  console.log(`ASSERT_RUNTIME_PRODUCER_IDENTITY ${tuple}`);
   assert.equal(record.runtimeRef, runtimeRef);
   assert.deepEqual(record.files.map(file => file.path), [`lib/${tuple}/cjstart.o`,
     `runtime/lib/${tuple}/libboundscheck.so`, `runtime/lib/${tuple}/libcangjie-runtime.so`]);
-  assert.ok(record.files.every(file => /^[0-9a-f]{64}$/.test(file.sha256)));
+  const actualHashes = await Promise.all(record.files.map(async file => crypto.createHash('sha256')
+    .update(await fs.readFile(path.join(args.root, file.path))).digest('hex')));
+  assert.deepEqual(record.files.map(file => file.sha256), actualHashes);
 });
 
 test(`${label} runtime consumer rejects changed bytes and mismatched source identity`, async t => {

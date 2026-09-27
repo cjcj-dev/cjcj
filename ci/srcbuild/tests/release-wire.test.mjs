@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
+import {allReleasePlatforms, releasePlatformReadiness} from '../../../build/lib/targets.mjs';
 
 const root = path.resolve(import.meta.dirname, '../../..');
 const workflow = name => fs.readFile(path.join(root, '.github/workflows', name), 'utf8');
@@ -32,14 +33,18 @@ test('release connects each platform row to its same-platform final std', async 
   // wiring as missing.
   const packageJobs = release.split(/\n  (?=[a-z0-9-]+:\n)/)
     .filter(job => job.includes('uses: ./.github/workflows/build-release-package.yml'));
-  assert.equal(packageJobs.length, platforms.length,
-    `expected one package job per platform, found ${packageJobs.length}`);
-  for (const platform of platforms) {
-    const job = packageJobs.find(entry => new RegExp(String.raw`^\s*platform: ${platform}\s*$`, 'm').test(entry));
-    assert.ok(job, `no package job declares platform: ${platform}`);
-    assert.match(job, new RegExp(String.raw`^\s*std_artifact: final-std-${platform}\s*$`, 'm'),
-      `the ${platform} package job does not ask for final-std-${platform}`);
+  const expected = allReleasePlatforms().filter(key => releasePlatformReadiness(key).status === 'buildable');
+  const seen = [];
+  for (const job of packageJobs) {
+    const key = job.match(/^      release_key: (\S+)$/m)?.[1];
+    assert.ok(key, 'each package must name its release key');
+    seen.push(key);
+    const {host} = releasePlatformReadiness(key);
+    assert.match(job, new RegExp(String.raw`^\s*platform: ${host}\s*$`, 'm'), `${key}: host`);
+    assert.match(job, new RegExp(String.raw`^\s*std_artifact: final-std-${host}\s*$`, 'm'),
+      `${key}: same-host final std`);
   }
+  assert.deepEqual(seen.sort(), expected.sort(), 'release package key symmetric difference');
   assert.ok(release.includes('pattern: pkg-*'));
 });
 
