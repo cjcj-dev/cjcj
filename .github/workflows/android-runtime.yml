@@ -1,0 +1,130 @@
+name: Android source runtime
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/android-runtime.yml'
+      - 'ci/srcbuild/**/android-runtime.mjs'
+      - 'ci/srcbuild/steps/build-android-*.mjs'
+      - 'ci/release/cross-runtime.mjs'
+  workflow_dispatch:
+    inputs:
+      runtime_ref:
+        description: Exact runtime commit for this evidence-only build; empty uses the pin
+        required: false
+        type: string
+        default: ''
+permissions:
+  contents: read
+jobs:
+  runtime:
+    strategy:
+      fail-fast: false
+      matrix:
+        arm: [candidate, cut, restored]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Install official lineage test input
+        if: matrix.arm == 'candidate'
+        shell: bash
+        run: |
+          source ci/host_sdk_pin.env
+          mkdir -p "$RUNNER_TEMP/lineage-cjv"
+          curl -fsSL https://github.com/Zxilly/cjv/releases/download/v0.2.20/cjv_linux_amd64.tar.gz | tar -xz -C "$RUNNER_TEMP/lineage-cjv"
+          cjv_bin=$(find "$RUNNER_TEMP/lineage-cjv" -type f -name cjv | head -1)
+          "$cjv_bin" install "$CJCJ_TOOLCHAIN"
+      - name: Verify Android release and pin contracts
+        if: matrix.arm == 'candidate'
+        shell: bash
+        run: |
+          node --test ci/release/android-platform.test.mjs ci/release/cross-runtime.test.mjs ci/release/platform-matrix.test.mjs ci/release-pair-pin.test.mjs ci/srcbuild/tests/platform-contract.test.mjs ci/srcbuild/tests/sccache-contract.test.mjs build/test/package-provenance.test.mjs build/test/runtime-pin.test.mjs
+          python3 ci/bootstrap/test_sdk_runtime.py --output "$RUNNER_TEMP/sdk-runtime-tests"
+          python3 ci/bootstrap/test_sdk_verify.py
+          python3 ci/bootstrap/test_sdk_shared_pair.py --output "$RUNNER_TEMP/sdk-shared-pair-tests"
+          bash ci/bootstrap/test_bootstrap.sh
+      - uses: ./.github/actions/setup-release-sdk
+        with:
+          requirement: android-ndk
+      - name: Resolve runtime provenance
+        env:
+          CJCJ_RUNTIME_REF_OVERRIDE: ${{ inputs.runtime_ref }}
+          CJCJ_ALLOW_RUNTIME_OVERRIDE: ${{ github.event_name == 'workflow_dispatch' && inputs.runtime_ref != '' }}
+        run: npx --yes zx@8 ci/load_runtime_pin.mjs
+      - name: Fetch pinned runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "RUNTIME_REF=$RUNTIME_REF"
+            echo "RUNTIME_VERSION=$RUNTIME_VERSION"
+            echo "CANGJIE_WORKSPACE=$RUNNER_TEMP/android-source"
+          } >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/android-source/cangjie_runtime"
+          git -C "$RUNNER_TEMP/android-source/cangjie_runtime" init
+          git -C "$RUNNER_TEMP/android-source/cangjie_runtime" fetch --depth=1 "$RUNTIME_SRC_URL" "$RUNTIME_REF"
+          git -C "$RUNNER_TEMP/android-source/cangjie_runtime" checkout --detach FETCH_HEAD
+      - uses: ./.github/actions/sccache
+        with:
+          component: runtime
+          platform: android-aarch64
+          pin: ${{ env.RUNTIME_REF }}
+      - name: Prepare controlled producer arm
+        env:
+          ARM: ${{ matrix.arm }}
+        shell: bash
+        run: |
+          if [[ "$ARM" != candidate ]]; then
+            python3 - <<'PYCODE'
+          from pathlib import Path
+          p = Path('ci/srcbuild/lib/android-runtime.mjs')
+          text = p.read_text()
+          source = "'aarch64_Release', 'libboundscheck.so'"
+          assert text.count(source) == 1
+          p.write_text(text.replace(source, "'aarch64_Release', 'libcangjie-runtime.so'"))
+          PYCODE
+            git diff -- ci/srcbuild/lib/android-runtime.mjs > "$RUNNER_TEMP/producer-cut.diff"
+          fi
+          if [[ "$ARM" == restored ]]; then
+            git restore ci/srcbuild/lib/android-runtime.mjs
+          fi
+          sha256sum ci/srcbuild/lib/android-runtime.mjs ci/release/verify-android-runtime.mjs
+      - name: Build Android runtime through product entry
+        run: npx --yes zx@8 ci/srcbuild/steps/build-android-runtime.mjs
+      - name: Assert installed boundscheck bytes from this build
+        env:
+          ARM: ${{ matrix.arm }}
+        shell: bash
+        run: |
+          set +e
+          node ci/release/verify-android-runtime.mjs > "$RUNNER_TEMP/producer-assertion.log" 2>&1
+          rc=$?
+          set -e
+          cat "$RUNNER_TEMP/producer-assertion.log"
+          echo "ANDROID_PRODUCER_ARM=$ARM ASSERT_RC=$rc"
+          if [[ "$ARM" == cut ]]; then
+            test "$rc" = 1
+            grep -q 'ANDROID_BOUNDSCHECK_SAME_BUILD_BYTES' "$RUNNER_TEMP/producer-assertion.log"
+          else
+            test "$rc" = 0
+          fi
+      - uses: ./.github/actions/sccache-report
+        if: always()
+        with:
+          component: runtime
+          platform: android-aarch64
+          require-compiles: ${{ job.status == 'success' }}
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: android-runtime-build-evidence-${{ matrix.arm }}
+          path: |
+            ${{ runner.temp }}/producer-cut.diff
+            ${{ runner.temp }}/producer-assertion.log
+            ${{ env.CANGJIE_WORKSPACE }}/cangjie_runtime/runtime/output
+            ${{ env.CANGJIE_WORKSPACE }}/cangjie_runtime/runtime/CMakebuild/CMakeCache.txt
+            ${{ env.CANGJIE_WORKSPACE }}/cangjie_runtime/runtime/CMakebuild/CMakeFiles/CMakeConfigureLog.yaml
+          if-no-files-found: warn
