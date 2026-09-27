@@ -30,5 +30,27 @@ teardown proof. H48's partial source provenance remains documented in
 Artifacts expire after seven days. `release.json` records the matching
 prerelease (tag, asset IDs, archive and manifest digests). Consumers still
 download the exact Actions artifact named in the platform env. There is no
-SDK/depot fallback. Linux aarch64, Darwin and Windows have no producer in
-`platform-matrix.yml` and are not published by this pin.
+SDK/depot fallback. Linux aarch64 and Windows are not published by this pin.
+
+Darwin uses `darwin_runtime_only=true` on the same workflow, with native
+`macos-15` and `macos-15-intel` runners and sccache. Its independent input
+contains the dynamic runtime, boundscheck and static runtime, built from
+`ci/runtime_pin.env`. `darwin_runtime.mjs` records source/run/platform and
+per-file digests and verifies the copied bytes. Native producer and consumer
+controls must each reject their targeted corruption before artifact upload.
+
+The Darwin entries in `release.json` contain their own complete prerelease
+provenance; the top-level historical provenance belongs to the Linux entry.
+The platform env files select the corresponding immutable Actions artifacts.
+Darwin source jobs verify all three libraries, then report
+`COLOUR_RT_STD_MISSING: <platform>` because these independent archives do not
+provide coloured std. They do not certify a complete bootstrap input.
+Issue #473 owns the native coloured std build and registration of the complete
+input. The existing full-input std guard remains mandatory. The official host
+runtime and boundscheck are a separate, unchanged SDK extraction described in
+`ci/host-runtime/README.md`.
+
+`verify-darwin-runtime.yml` downloads the pinned native inputs on both runners
+and executes the actual source workflow shell entries. It verifies platform
+pin presence, exact platform-specific rejection when that pin is removed,
+restoration, library verification and the missing-std classification.

@@ -20,6 +20,58 @@
       "manifest": "linux_x86_64.manifest.json",
       "archive_asset_id": 588030033,
       "manifest_asset_id": 588030995
+    },
+    "darwin_aarch64": {
+      "role": "colour-runtime-libraries",
+      "runtime_sha": "0af8c5957082a325323e1b8adcf97d157035a5f8",
+      "producer_sha": "427f9389231f159400268cf248fee06c2e72d077",
+      "run_id": "36305485834",
+      "run_attempt": "1",
+      "release_id": 397565672,
+      "tag": "colour-runtime-darwin-0af8c5957082-36305485834-1-prerelease",
+      "prerelease": true,
+      "checksums_asset_id": 592480506,
+      "checksums_sha256": "9367a15269e64955fd38c3862b7d92d2ff835c4bb5db880e0aae47ad47d90dce",
+      "artifact_id": 10927755130,
+      "artifact_digest": "sha256:4deb707c69a06b225c20ec2f7ebdd06d5bffb0fed6e3bbac5512e025225d63a8",
+      "manifest_sha256": "41f9c7e49444592be36db33e135f641abb3554ae5727d21f151e4a9c11234c8e",
+      "archive": "colour-runtime-darwin_aarch64.zip",
+      "archive_sha256": "4deb707c69a06b225c20ec2f7ebdd06d5bffb0fed6e3bbac5512e025225d63a8",
+      "manifest": "darwin_aarch64.manifest.json",
+      "archive_asset_id": 592480513,
+      "manifest_asset_id": 592480502,
+      "files": {
+        "runtime/lib/darwin_aarch64_cjnative/libcangjie-runtime.dylib": "09dc2f2ee382a587275d6d16f0c06d2e57762daae735d252f1a0e778baa8768b",
+        "runtime/lib/darwin_aarch64_cjnative/libboundscheck.dylib": "8ea0142942b9c3aa6e18b8ed1f46ccf29b7c3b7d7ec32aa1c23d3d9a91e0cab5",
+        "lib/darwin_aarch64_cjnative/libcangjie-runtime.a": "8cb42306a3dc7456eca9940ab696b0570832c30a2a27560c0463fd15651e0401"
+      },
+      "std_status": "pending-cjcj-473"
+    },
+    "darwin_x86_64": {
+      "role": "colour-runtime-libraries",
+      "runtime_sha": "0af8c5957082a325323e1b8adcf97d157035a5f8",
+      "producer_sha": "427f9389231f159400268cf248fee06c2e72d077",
+      "run_id": "36305485834",
+      "run_attempt": "1",
+      "release_id": 397565672,
+      "tag": "colour-runtime-darwin-0af8c5957082-36305485834-1-prerelease",
+      "prerelease": true,
+      "checksums_asset_id": 592480506,
+      "checksums_sha256": "9367a15269e64955fd38c3862b7d92d2ff835c4bb5db880e0aae47ad47d90dce",
+      "artifact_id": 10927535574,
+      "artifact_digest": "sha256:88bd0844c8e854dc6e139983dcc95c4adb6ee3fe0777ca5ddf708114e45f5300",
+      "manifest_sha256": "15376b6459630fc9c55282d0a30a7aaba79d0b680c858a0ff22e06537b43876e",
+      "archive": "colour-runtime-darwin_x86_64.zip",
+      "archive_sha256": "88bd0844c8e854dc6e139983dcc95c4adb6ee3fe0777ca5ddf708114e45f5300",
+      "manifest": "darwin_x86_64.manifest.json",
+      "archive_asset_id": 592480504,
+      "manifest_asset_id": 592480503,
+      "files": {
+        "runtime/lib/darwin_x86_64_cjnative/libcangjie-runtime.dylib": "ee9416b342403459a3dc69c92882eadd6d9d5fa37ddde844bdebe3e6137d0caa",
+        "runtime/lib/darwin_x86_64_cjnative/libboundscheck.dylib": "393af28c54064a0d8b1c48ac68f6b18bd83fe3161501988d5e0143b971077958",
+        "lib/darwin_x86_64_cjnative/libcangjie-runtime.a": "28b8a5b93762af42cdd9f1b0d2ef23c99554ff672d9a9f4b43169423bfec5c7c"
+      },
+      "std_status": "pending-cjcj-473"
     }
   }
 }
