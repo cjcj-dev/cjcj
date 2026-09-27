@@ -67,6 +67,12 @@ def summarize(suite, raw, root):
         name = str(case.resolve().relative_to(root))
         detail = item.get('output', '') if suite != 'Conformance' else (
             item.get('compile_log', '') + '\n' + item.get('execute_log', ''))
+        # Maple stops at the failed command; its XML reporter uses the last result.
+        summary_detail = detail[-1] if isinstance(detail, list) and detail else detail
+        if not isinstance(summary_detail, str):
+            summary_detail = json.dumps(summary_detail, ensure_ascii=False)
+        if len(summary_detail) > 4000:
+            summary_detail = summary_detail[:1000] + '\n... [see raw results] ...\n' + summary_detail[-2900:]
         if not isinstance(detail, str):
             detail = json.dumps(detail, ensure_ascii=False)
         # Preserve original upstream status and logs; these are triage hints only.
@@ -75,7 +81,7 @@ def summarize(suite, raw, root):
                        'No space left on device') if word in detail]
         rows.append({'suite': suite, 'name': name, 'status': status,
                      'category': STATUS[status], 'environment_hints': environment,
-                     'error_summary': detail[:4000] if STATUS[status] != 'pass' else ''})
+                     'error_summary': summary_detail if STATUS[status] != 'pass' else ''})
     names = [r['name'] for r in rows]
     if len(set(names)) != len(names):
         raise ValueError('Duplicate test identities in suite ' + suite)
