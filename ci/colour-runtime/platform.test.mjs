@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
+import {createHash} from 'node:crypto';
 import {fixture} from '../release/prepare_bootstrap_fixture.mjs';
 
 for (const [target, platform] of [['linux-x64', 'linux_x86_64'], ['linux-aarch64', 'linux_aarch64']]) {
@@ -37,14 +38,16 @@ for (const [target, platform] of [['linux-x64', 'linux_x86_64'], ['linux-aarch64
   }, target));
 }
 
-test('aarch64 bootstrap rejects a valid x86_64 manifest before payload access', () => fixture(({env, run}) => {
-  // Change only the requested platform; retain the real producer's manifest,
-  // payloads, runtime SHA and reviewed digest, so the platform guard is tested.
-  env.COLOUR_RT_PLATFORM = 'linux_aarch64';
-  env.CJCJ_SRCBUILD_TARGET = 'linux-aarch64';
+test('aarch64 bootstrap rejects a valid x86_64 manifest before payload access', () => fixture(({runtime: x64}) =>
+  fixture(({env, runtime, run}) => {
+  // Keep the aarch64 host inputs valid. Substitute the real x86_64 producer's
+  // manifest and its reviewed digest to reach the runtime platform guard.
+  const manifest = fs.readFileSync(path.join(x64, 'manifest.json'));
+  fs.writeFileSync(path.join(runtime, 'manifest.json'), manifest);
+  env.COLOUR_RT_MANIFEST_SHA256 = createHash('sha256').update(manifest).digest('hex');
   const result = run();
   assert.match(result.stderr, /COLOUR_RT_MANIFEST_MISMATCH/);
   assert.notEqual(result.status, 0);
   assert.doesNotMatch(result.stdout, /CJCJ_BOOTSTRAP_COLOUR_RT=/);
   console.log('ASSERT cross-platform manifest rejection executed');
-}));
+}, 'linux-aarch64')));
