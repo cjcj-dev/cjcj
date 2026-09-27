@@ -453,8 +453,9 @@ assert_std_install_shape() {
 }
 
 stdlib_build() {
-  local label="$1" sdk="$2" runtime="$3" prefix="$4" compare_prefix="${5:-}" target_lib="${6:-$2/runtime/lib/$HOST_TUPLE}" ld script cache_env
+  local label="$1" sdk="$2" runtime="$3" prefix="$4" compare_prefix="${5:-}" target_lib="${6:-$2/runtime/lib/$HOST_TUPLE}" ld script cache_env native_env
   cache_env=$(host_cache_env)
+  native_env=$(host_native_env) || die "cannot determine native SDKROOT"
   source "$SRC/ci/build_resources.sh"
   configure_build_resources "$HEAP" || die "cannot determine std build resources"
   cmd "python3 $(printf '%q' "$SRC/ci/install_std_sdk_inputs.py") $(printf '%q' "$(dirname "$AST_SUPPORT")") $(printf '%q' "$sdk") $(printf '%q' "$HOST_TUPLE")"
@@ -462,7 +463,7 @@ stdlib_build() {
   prepare_build_env
   # shellcheck disable=SC2016 # Expanded by the inner bash, not this shell.
   script='cd "$1" && rm -rf build/build && python3 build.py clean && python3 build.py build -t relwithdebinfo --jobs "$2" --target-lib="$3" && python3 build.py install --prefix "$4"'
-  cmd "env -i HOME=$(printf '%q' "$BUILD_HOME") TMPDIR=$(printf '%q' "$BUILD_TMPDIR") CANGJIE_HOME=$(printf '%q' "$sdk") ${cache_env}${HOST_LOADER_VAR}=$(printf '%q' "$ld") PATH=$(printf '%q' "$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:$HOST_SYSTEM_PATH") cjHeapSize=$(printf '%q' "$STD_BUILD_HEAP") bash -c $(printf '%q' "$script") bash $(printf '%q' "$STDSRC") $(printf '%q' "$STD_BUILD_JOBS") $(printf '%q' "$target_lib") $(printf '%q' "$prefix")"
+  cmd "env -i HOME=$(printf '%q' "$BUILD_HOME") TMPDIR=$(printf '%q' "$BUILD_TMPDIR") CANGJIE_HOME=$(printf '%q' "$sdk") ${cache_env}${native_env}${HOST_LOADER_VAR}=$(printf '%q' "$ld") PATH=$(printf '%q' "$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:$HOST_SYSTEM_PATH") cjHeapSize=$(printf '%q' "$STD_BUILD_HEAP") bash -c $(printf '%q' "$script") bash $(printf '%q' "$STDSRC") $(printf '%q' "$STD_BUILD_JOBS") $(printf '%q' "$target_lib") $(printf '%q' "$prefix")"
   assert_std_install_shape "$prefix" "$compare_prefix" "$label"
   local producer="$sdk/bin/cjc"
   [ ! -f "$sdk/bin/cjcj-stage1" ] || producer="$sdk/bin/cjcj-stage1"
@@ -533,7 +534,8 @@ install_stage_compiler() {
 }
 
 cjpm_build() {
-  local sdk="$1" runtime="$2" srcdir="$3" extra="$4" heap="$5" ld cjpm script
+  local sdk="$1" runtime="$2" srcdir="$3" extra="$4" heap="$5" ld cjpm script native_env
+  native_env=$(host_native_env) || die "cannot determine native SDKROOT"
   if [ "$HOST_OS" = Darwin ]; then
     cmd "node $(printf '%q' "$SRC/ci/bootstrap/prepare_native_link.mjs") $(printf '%q' "$srcdir") $(printf '%q' "$sdk")"
   fi
@@ -545,7 +547,7 @@ cjpm_build() {
   cjpm="$sdk/tools/bin/cjpm"
   script="cd $(printf '%q' "$srcdir") && $(printf '%q' "$cjpm") build${extra:+ $extra}"
   echo "CMD cjpm build${extra:+ $extra} bin=$cjpm cwd=$srcdir heap=$heap"
-  cmd "env -i HOME=$(printf '%q' "$BUILD_HOME") TMPDIR=$(printf '%q' "$BUILD_TMPDIR") CANGJIE_HOME=$(printf '%q' "$sdk") ${HOST_LOADER_VAR}=$(printf '%q' "$ld") PATH=$(printf '%q' "$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:$HOST_SYSTEM_PATH") cjHeapSize=$(printf '%q' "$heap") bash -c $(printf '%q' "$script")"
+  cmd "env -i HOME=$(printf '%q' "$BUILD_HOME") TMPDIR=$(printf '%q' "$BUILD_TMPDIR") CANGJIE_HOME=$(printf '%q' "$sdk") ${native_env}${HOST_LOADER_VAR}=$(printf '%q' "$ld") PATH=$(printf '%q' "$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:$HOST_SYSTEM_PATH") cjHeapSize=$(printf '%q' "$heap") bash -c $(printf '%q' "$script")"
 }
 
 assert_shim_cpp_src() {

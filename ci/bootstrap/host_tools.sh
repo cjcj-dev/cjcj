@@ -57,3 +57,13 @@ host_sed_inplace() {
     command sed -i "$@"
   fi
 }
+
+# Option.cpp:1279 consumes SDKROOT to select Darwin system libraries.
+host_native_env() {
+  local sdk_root
+  if [ "$HOST_OS" = Darwin ]; then
+    sdk_root=${SDKROOT:-$(xcrun --sdk macosx --show-sdk-path)} || return 1
+    [ -d "$sdk_root" ] || { echo "native SDKROOT directory missing: $sdk_root" >&2; return 1; }
+    printf 'SDKROOT=%q ' "$sdk_root"
+  fi
+}
