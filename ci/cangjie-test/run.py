@@ -60,7 +60,11 @@ def summarize(suite, raw, root):
         if status not in STATUS:
             raise ValueError('Unknown upstream status: ' + status)
         name = item.get('test_path', item.get('name'))
-        name = str(Path(name).resolve().relative_to(root))
+        case = Path(name)
+        if not case.is_absolute():
+            base = root / 'testsuites' / suite if suite != 'Conformance' else root / 'Conformance/Compiler/testsuite'
+            case = base / case
+        name = str(case.resolve().relative_to(root))
         detail = item.get('output', '') if suite != 'Conformance' else (
             item.get('compile_log', '') + '\n' + item.get('execute_log', ''))
         if not isinstance(detail, str):
