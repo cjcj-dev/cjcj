@@ -1042,13 +1042,26 @@ stage1
 
 // Execute the complete driver, including retained-state loading, prerequisite,
 // run_step and the final RESULT. Only external inputs live in the fixture.
-function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFailure = false, child = false, runtimeCase = 'valid', ast = 'explicit'} = {}) {
+function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFailure = false, child = false, runtimeCase = 'valid', ast = 'explicit', largeContract = false, contractDefect} = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bootstrap argv '));
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));
   for (const dir of ['ci', 'build', 'tools']) {
     fs.cpSync(path.join(repoRoot, dir), path.join(root, dir), {recursive: true});
   }
   const driver = path.join(root, 'tools/srcbuild_kkk2.sh');
+  if (largeContract) {
+    // Comments leave the executable contract unchanged. Exceed pipe capacity
+    // so early-exit text readers cannot rely on the writer winning a race.
+    const padding = `    # ${'contract documentation '.repeat(8192)}\n`;
+    fs.writeFileSync(driver, fs.readFileSync(driver, 'utf8').replace(
+      /^(bootstrap_argv|step_31|step_32|step_34)\(\) \{[\s\S]*?^\}/gm,
+      body => body.slice(0, -1) + padding + '}'));
+  }
+  if (contractDefect) {
+    fs.writeFileSync(driver, fs.readFileSync(driver, 'utf8').replace(
+      new RegExp(`^${contractDefect.functionName}\\(\\) \\{[\\s\\S]*?^\\}`, 'm'),
+      body => body.replace(contractDefect.from, contractDefect.to)));
+  }
   if (empty || partialFailure) {
     const text = fs.readFileSync(driver, 'utf8');
     fs.writeFileSync(driver, text.replace(/^bootstrap_argv\(\) \{[\s\S]*?^\}/m,
@@ -1202,6 +1215,50 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
     },
   };
 }
+
+test('dry-run bootstrap preserves pin outcomes with large contract bodies', t => {
+  const observed = [];
+  const expected = [];
+  for (const mismatch of [false, true]) {
+    const fixture = bootstrapDriverFixture(t, {mismatch, largeContract: true});
+    for (const step of mismatch ? [31, 32] : [31, 32, 34]) {
+      const result = fixture.dryRun(step, `${step}-${mismatch}`);
+      const command = result.stdout.match(/^DRY_RUN COMMAND=(.*)$/m)?.[1];
+      const row = {step, mismatch, rc: result.status,
+        command: command?.includes(step === 34 ? 'compose-sdk.mjs' : `--stage stage${step - 31}`) ?? false,
+        success: /^DRY_RUN RESULT=success/m.test(result.stdout),
+        rejected: /LLVM_DYLIB_SOURCE_MISMATCH/.test(result.stderr)};
+      observed.push(row);
+      expected.push({step, mismatch, rc: mismatch ? 1 : 0,
+        command: !mismatch, success: !mismatch, rejected: mismatch});
+      console.log(`LARGE_CONTRACT_ASSERT ${JSON.stringify(row)} stderr=${JSON.stringify(result.stderr)}`);
+    }
+  }
+  assert.deepEqual(observed, expected);
+});
+
+test('dry-run contract validation still rejects malformed large bodies', t => {
+  const cases = [
+    {step: 31, functionName: 'bootstrap_argv', from: '--stdsrc', to: '--removed-stdsrc', marker: 'argv missing flags: --stdsrc'},
+    {step: 31, functionName: 'step_31', from: 'run_bootstrap_stage stage0', to: ':', marker: 'step_31 does not exec'},
+    {step: 32, functionName: 'step_32', from: 'run_bootstrap_stage stage1', to: ':', marker: 'step_32 does not exec'},
+    {step: 31, functionName: 'step_31', from: '    run_bootstrap_stage', to: '    : build-stage1.mjs\n    run_bootstrap_stage', marker: 'step_31 must not call'},
+    {step: 31, functionName: 'step_31', from: '    run_bootstrap_stage', to: '    PATH=/colour/opt:$PATH\n    run_bootstrap_stage', marker: 'stage0 forbids injecting colour opt'},
+    {step: 34, functionName: 'step_34', from: 'compose-sdk.mjs', to: 'missing-compose.mjs', marker: 'step_34 does not invoke'},
+  ];
+  const observed = cases.map((contractDefect, index) => {
+    const fixture = bootstrapDriverFixture(t, {largeContract: true, contractDefect});
+    const result = fixture.dryRun(contractDefect.step, index);
+    const row = {marker: contractDefect.marker, rc: result.status,
+      rejected: result.stderr.includes(contractDefect.marker),
+      command: /^DRY_RUN COMMAND=/m.test(result.stdout),
+      success: /^DRY_RUN RESULT=success/m.test(result.stdout)};
+    console.log(`CONTRACT_REJECT_ASSERT ${JSON.stringify(row)}`);
+    return row;
+  });
+  assert.deepEqual(observed, cases.map(({marker}) => ({marker, rc: 1,
+    rejected: true, command: false, success: false})));
+});
 
 for (const step of [31, 32]) {
   test(`bootstrap driver step ${step} propagates pin mismatch`, t => {
