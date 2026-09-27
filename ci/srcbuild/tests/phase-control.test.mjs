@@ -2,6 +2,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
+import os from 'node:os';
+import {spawnSync} from 'node:child_process';
+import {allReleasePlatforms, getReleasePlatform} from '../../../build/lib/targets.mjs';
 
 const root = path.resolve(import.meta.dirname, '..', '..', '..');
 const readWorkflow = name => fs.readFile(path.join(root, '.github/workflows', name), 'utf8');
@@ -182,10 +185,15 @@ test('policy failure capture: a package cell that dies leaves evidence behind', 
   const text = uncommented(await readWorkflow('build-release-package.yml'));
   assert.match(text, /if:\s*failure\(\)\s*\n\s*uses:\s*actions\/upload-artifact@/,
     'no failure-only upload: the pkg-* upload runs only after everything before it succeeded');
-  // srcbuild names its per-cell diagnosis this way; two cells uploading the same
-  // name would collide under contract 5.
-  assert.match(text, /name:\s*pkg-diagnosis-\$\{\{\s*inputs\.platform\s*\}\}/,
-    'failure diagnostics must be named per platform');
+  const upload = text.split(/\n\s*- name: /).find(step => step.startsWith('Upload failure diagnostics\n'));
+  assert.ok(upload, 'failure diagnostics upload step is missing');
+  assert.match(upload, /if:\s*failure\(\)\s*\n\s*uses:\s*actions\/upload-artifact@/);
+  assert.equal(scalar(upload, 'name'), 'pkg-diagnosis-${{ env.PACKAGE_KEY }}-${{ github.run_attempt }}',
+    'failure diagnostics must be named per package and run attempt');
+  for (const evidence of ['dist/*.sha256', 'dist/RELEASE-MANIFEST.jsonl',
+    'pkgtest/**/PROVENANCE.txt', 'pkgtest/**/*.log', '${{ runner.temp }}/release-smoke/**']) {
+    assert.ok(upload.includes(evidence), `failure diagnostics must retain ${evidence}`);
+  }
 });
 
 test('policy failure capture: smoke workspaces survive the failure that needs them', async () => {
@@ -197,4 +205,62 @@ test('policy failure capture: smoke workspaces survive the failure that needs th
     .filter(handler => /\brm\s+-rf/.test(handler));
   assert.deepEqual(unconditional, [],
     `these EXIT traps delete the smoke workspace whatever happened: ${JSON.stringify(unconditional)}`);
+});
+
+// Execute the same CLI that the workflow uses, and read its GITHUB_ENV output;
+// stdout alone would miss a broken producer-to-Actions environment handoff.
+test('policy failure capture: package identity reaches GITHUB_ENV for native and Android cells', async t => {
+  const workflow = uncommented(await readWorkflow('build-release-package.yml'));
+  assert.match(workflow, /RELEASE_PLATFORM:\s*\$\{\{ inputs\.platform \}\}/);
+  assert.match(workflow, /RELEASE_KEY:\s*\$\{\{ inputs\.release_key \}\}/);
+  assert.ok(workflow.indexOf('run: node ci/release/package-key.mjs') > 0);
+  assert.ok(workflow.indexOf('run: node ci/release/package-key.mjs') < workflow.indexOf('Upload failure diagnostics'));
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'package-key-contract-'));
+  t.after(() => fs.rm(dir, {recursive: true, force: true}));
+  const cells = [
+    ...PHASES.map(host => ({host, key: '', archiveKey: host})),
+    ...allReleasePlatforms().map(getReleasePlatform),
+  ];
+  for (const [index, cell] of cells.entries()) {
+    const envFile = path.join(dir, `${index}.env`);
+    const run = spawnSync(process.execPath, [path.join(root, 'ci/release/package-key.mjs')], {
+      encoding: 'utf8', env: {...process.env, RELEASE_PLATFORM: cell.host,
+        RELEASE_KEY: cell.key, GITHUB_ENV: envFile},
+    });
+    assert.equal(run.status, 0, run.stderr);
+    const output = await fs.readFile(envFile, 'utf8');
+    assert.equal(output, `PACKAGE_KEY=${cell.archiveKey}\n`,
+      `package identity must reach GITHUB_ENV for ${cell.key || cell.host}`);
+    console.log(`ASSERT_PACKAGE_KEY ${cell.key || cell.host}: ${output.trim()}`);
+  }
+});
+
+function diagnosticNames(template, cells) {
+  const names = cells.flatMap(cell => [1, 2].map(attempt => {
+    const values = {'env.PACKAGE_KEY': cell.archiveKey, 'inputs.platform': cell.host,
+      'github.run_attempt': String(attempt)};
+    return template.replace(/\$\{\{\s*([\w.]+)\s*\}\}/g, (_, key) => {
+      assert.ok(Object.hasOwn(values, key), `unknown artifact expression ${key}`);
+      return values[key];
+    });
+  }));
+  assert.equal(new Set(names).size, names.length,
+    'failure diagnostics collide across package cells or run attempts');
+  return names;
+}
+
+test('policy failure capture: diagnostic names distinguish same-host packages and attempts', async () => {
+  const text = uncommented(await readWorkflow('build-release-package.yml'));
+  const upload = text.split(/\n\s*- name: /).find(step => step.startsWith('Upload failure diagnostics\n'));
+  const names = diagnosticNames(scalar(upload, 'name'), allReleasePlatforms().map(getReleasePlatform));
+  assert.ok(names.includes('pkg-diagnosis-linux-x64-android-1'));
+  assert.ok(names.includes('pkg-diagnosis-linux-x64-1'));
+});
+
+test('policy failure capture: collision controls reject host-only, omitted-key and omitted-attempt names', () => {
+  for (const template of ['pkg-diagnosis-${{ inputs.platform }}-${{ github.run_attempt }}',
+    'pkg-diagnosis-${{ github.run_attempt }}', 'pkg-diagnosis-${{ env.PACKAGE_KEY }}']) {
+    assert.throws(() => diagnosticNames(template, allReleasePlatforms().map(getReleasePlatform)),
+      /failure diagnostics collide across package cells or run attempts/);
+  }
 });
