@@ -96,6 +96,10 @@ class HostIdentity(unittest.TestCase):
         self.identities.write_text('\n'.join(self.rows[:-1] + [f'{PLATFORM} libLLVM-15.so invalid']) + '\n')
         self.rejected(self.install(), 'invalid host identity: ' + PLATFORM)
 
+    def test_extra_selected_pin_field(self):
+        self.identities.write_text('\n'.join(self.rows[:-1] + [self.rows[-1] + ' extra']) + '\n')
+        self.rejected(self.install(), 'invalid host identity: ' + PLATFORM)
+
     def test_other_platform_cannot_fill_missing_pin(self):
         self.identities.write_text('\n'.join(self.rows[:-1]) + '\n')
         self.rejected(self.install(), 'incomplete host identities: ' + PLATFORM)
