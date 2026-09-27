@@ -45,6 +45,7 @@ class GlibcFloorTest(unittest.TestCase):
         report = json.loads(destination.read_text())
         print("CLI_RESULT {} rc={} elf={} failures={}".format(
             self._testMethodName, process.returncode, report.get("elf_count"), report["failures"]), flush=True)
+        print("CLI_REPORT " + json.dumps(report, sort_keys=True), flush=True)
         return process.returncode, report
 
     def test_same_elf_passes_and_identity_is_recorded(self):
@@ -62,11 +63,13 @@ class GlibcFloorTest(unittest.TestCase):
             with self.subTest(scope=scope):
                 target = scope + "/payload"
                 shutil.copyfile(self.high, self.candidate / target)
-                rc, report = self.run_gate()
-                observed = [(row["path"], row["status"]) for row in report["files"] if row["status"] != "accepted"]
-                print("TARGET_ABI_ASSERT scope={} rc={} verdict={}".format(scope, rc, observed), flush=True)
-                self.assertEqual((rc, observed), (1, [(target, "rejected")]))
-                shutil.copyfile(self.low, self.candidate / target)
+                try:
+                    rc, report = self.run_gate()
+                    observed = [(row["path"], row["status"]) for row in report["files"] if row["status"] != "accepted"]
+                    print("TARGET_ABI_ASSERT scope={} rc={} verdict={}".format(scope, rc, observed), flush=True)
+                    self.assertEqual((rc, observed), (1, [(target, "rejected")]))
+                finally:
+                    shutil.copyfile(self.low, self.candidate / target)
 
     def test_missing_official_counterpart_fails_closed(self):
         (self.official / "bin/payload").unlink()
