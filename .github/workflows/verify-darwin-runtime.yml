@@ -1,0 +1,46 @@
+name: Verify published Darwin runtime input
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  source-input:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {runner: macos-15, platform: darwin_aarch64}
+          - {runner: macos-15-intel, platform: darwin_x86_64}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    env:
+      PLATFORM: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Load immutable input pins
+        run: |
+          cat ci/runtime_pin.env >> "$GITHUB_ENV"
+          cat "ci/colour-runtime/$PLATFORM.env" >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ env.COLOUR_RT_ARTIFACT_ID }}
+          merge-multiple: true
+          github-token: ${{ github.token }}
+          run-id: ${{ env.COLOUR_RT_RUN_ID }}
+          path: colour-runtime
+      - name: Exercise the source entries with candidate, missing pin and restored input
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          node ci/release/check_darwin_source.mjs colour-runtime "$PLATFORM" | tee evidence/source.log
+          shasum -a 256 ci/release/darwin_runtime.mjs ci/release/check_darwin_source.mjs .github/workflows/srcbuild.yml > evidence/scripts.sha256
+          file colour-runtime/runtime/lib/*/*.dylib | tee evidence/architecture.txt
+          nm -U colour-runtime/runtime/lib/*/libcangjie-runtime.dylib > evidence/defined-symbols.txt
+          grep -E ' _CJ_MCC_HandleReturnSafepoint$' evidence/defined-symbols.txt
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: darwin-source-evidence-${{ matrix.platform }}
+          path: evidence
+          if-no-files-found: error
