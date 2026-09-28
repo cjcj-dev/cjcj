@@ -39,7 +39,7 @@ def collect(args):
                MRT_LOG_FILE_SIZE='128M')
     compiler = args.compiler.resolve(strict=True)
     command = ['taskset', '-c', args.cores, '/usr/bin/time', '-v', str(compiler),
-               *recipe['argv'], '--output', str(out / 'package.a')]
+               *recipe['argv'], '--output', str(out / recipe.get('output_name', 'package.a'))]
     result = dict(command=command, recipe_sha256=digest(args.recipe),
                   elf_sha256=digest(compiler), cores=args.cores, heap=args.heap,
                   host_libraries={p: digest(p) for p in recipe['host_libraries']},

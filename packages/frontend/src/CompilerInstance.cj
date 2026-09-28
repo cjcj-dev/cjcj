@@ -922,7 +922,7 @@ public class CompilerInstance {
         for (sourcePkg in srcPkgs) {
             sourcePackagesCHIR.add(WeakRef<Package>(sourcePkg, CleanupPolicy.EAGER))
         }
-        let pkgsOrderedCHIR = packageManager.getOrThrow().GetBuildOrders(srcPkgs)
+        let pkgsOrderedCHIR = packageManager.getOrThrow().GetBuildOrders()
         let emitted = HashSet<String>()
         for (group in pkgsOrderedCHIR) {
             if (group.isEmpty()) {
