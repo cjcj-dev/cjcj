@@ -54,10 +54,14 @@ jobs:
       # The runtime's find_program prefers ccache over sccache. Remove the
       # runner image's ccache so every arm, including cut-entry, selects sccache.
       - name: Remove the runner's preinstalled ccache
-        shell: pwsh
+        shell: msys2 {0}
         run: |
-          choco uninstall ccache --yes --no-progress
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          set -euo pipefail
+          while cache=$(command -v ccache); do
+            echo "Removing preinstalled compiler cache: $cache"
+            rm -f -- "$cache" "$cache.exe"
+            hash -r
+          done
       - name: Start sccache
         uses: ./.github/actions/sccache
         with:
