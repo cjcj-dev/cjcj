@@ -141,9 +141,6 @@ if [ -z "$TARGET_TUPLE" ]; then
   esac
 fi
 [[ "$TARGET_TUPLE" =~ ^[a-z0-9]+_[a-z0-9_]+_cjnative$ ]] || die "无效构建目标 tuple: $TARGET_TUPLE"
-if [ -n "$LLVM_SO" ] && [ -n "$LLVM_TUPLE" ]; then
-  die '--llvm-so 与 --llvm-tuple 不可同时使用'
-fi
 if [ -n "$LLVM_TUPLE" ] && { [ -n "$LLC" ] || [ -n "$OPT" ]; }; then
   die '--llvm-tuple 已包含 llc/opt，不可再混用 --llc/--opt'
 fi
@@ -343,11 +340,13 @@ install_llvm_tuple() {
 echo "[2/5] 替换组件"
 swap_all llc  "$LLC"  llc
 swap_all opt  "$OPT"  opt
-if [ -n "$LLVM_SO" ]; then
-  install_llvm_so "$LLVM_SO"
-fi
 if [ -n "$LLVM_TUPLE" ]; then
   install_llvm_tuple "$LLVM_TUPLE"
+fi
+# The static tuple does not carry the compiler process libLLVM. Install both
+# before recording identities and running the mandatory SDK verification.
+if [ -n "$LLVM_SO" ]; then
+  install_llvm_so "$LLVM_SO"
 fi
 swap_all cjpm "$CJPM" cjpm
 swap_all cjc  "$CJC"  cjc
