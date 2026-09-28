@@ -352,6 +352,17 @@ public class CompilerInstance {
             info.typeManager = typeManager
             typeManager = None
 
+            // CompilerInstance.h:484,501-506 stores borrowed AST pointers.
+            // Retire the corresponding managed owners at the AST boundary.
+            rawMangleName2DeclMap.clear()
+            declsWithDuplicatedRawMangleName.clear()
+            directExtends.clear()
+            fileMap.clear()
+            order.clear()
+            mangledName2DeclMap.clear()
+            cachedInfo.semaInfo.usages.clear()
+            cachedInfo.varAndFuncDep.clear()
+
             // C++: std::async destroyFunc (CompilerInstance.cpp:173-185).
             // CJ: drop held roots then InvokeGC (delete ≡ GC reclaim) + FreeIdleMemoryToOS.
             // Future stored for JoinDestroyASTResources ≡ dtor destroyFut.get() (cpp:87-91).
