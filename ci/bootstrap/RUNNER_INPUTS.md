@@ -11,7 +11,14 @@ They do not exec `/root/cj_build/tools/bootstrap.sh`.
 | macos-15 (darwin-arm64) | same nightly install | `$base/third_party/llvm/lib/libLLVM*.dylib` or `.so` | host SDK `lib/*/libcangjie-ast-support.a` (no static-libs job) | `fixed-llvm-tools-darwin_aarch64` | same |
 | macos-15-intel (darwin-x64) | same nightly install | same dylib search | host SDK archive | `fixed-llvm-tools-darwin_x86_64` | same |
 
-`ci/release/prepare_bootstrap_inputs.mjs` resolves those paths, hashes them, and exports `CJCJ_BOOTSTRAP_*`.
+`ci/release/prepare_bootstrap_inputs.mjs` resolves those paths, validates the ast-support
+archive against `AST_SUPPORT_SHA256`, and exports `CJCJ_BOOTSTRAP_*`.
+For the kkk2 entry, set `CJCJ_BOOTSTRAP_AST_SUPPORT_SHA256` to the independently
+registered digest supplied with the archive (for example, the matching
+`ci/ast_support/<platform>.env` pin). This is required for both an explicit path
+and the campaign cache. Missing or malformed digests fail with
+`AST_SUPPORT_SHA_REQUIRED`; do not derive the expected digest from the selected
+archive. `bootstrap.sh` compares the selected archive against that declaration.
 
 For the default fetched `--cpp-src`, both runners execute
 `ci/bootstrap/prepare_cpp_headers.mjs` before stage0. kkk2 calls it in

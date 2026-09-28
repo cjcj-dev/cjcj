@@ -220,6 +220,30 @@ jobs:
           echo "CJCJ_SRCBUILD_BOOTSTRAP_SDK=$host_sdk" >> "$GITHUB_ENV"
           echo "CJCJ_SRCBUILD_HOST_SDK=$host_sdk" >> "$GITHUB_ENV"
 
+      # G2 describes the canonical Linux x64 SDK. Freeze right after the host
+      # SDK is provisioned: the checkout itself is still clean (provisioning
+      # only writes under $HOME/.cjv) and the frozen base is the archive of
+      # the toolchain this build actually bootstraps from. Later build steps
+      # create files and inject the product version.
+      - name: Freeze G2 identity inputs
+        if: matrix.target == 'linux-x64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d "$CJCJ_SRCBUILD_HOST_SDK"
+          base_archive="$RUNNER_TEMP/g2-base-sdk/host-sdk.tar"
+          mkdir -p "$(dirname "$base_archive")"
+          tar -cf "$base_archive" -C "$CJCJ_SRCBUILD_HOST_SDK" .
+          node ci/generate-freeze.mjs \
+            --base-sdk "$base_archive" \
+            --workflow-ref "${GITHUB_SHA:-$(git rev-parse HEAD)}" \
+            --evidence-root "$RUNNER_TEMP/g2-campaigns" \
+            | tee "$RUNNER_TEMP/g2-freeze.log"
+          identity=$(sed -n 's/^G2_IDENTITY=//p' "$RUNNER_TEMP/g2-freeze.log")
+          test -f "$identity"
+          echo "G2_IDENTITY=$identity" >> "$GITHUB_ENV"
+          echo "G2_CAMPAIGN_DIR=$(dirname "$identity")" >> "$GITHUB_ENV"
+
       - name: Install build dependencies
         run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" install-system-deps
 
@@ -308,7 +332,7 @@ jobs:
           path: ${{ env.CJCJ_BOOTSTRAP_HOST_LLVM_ARTIFACT }}
 
       - name: Load immutable in-process LLVM dylib provenance
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' || runner.os == 'macOS'
         shell: bash
         run: |
           set -euo pipefail
@@ -322,7 +346,7 @@ jobs:
           echo "CJCJ_BOOTSTRAP_DYLIB_ARTIFACT=$RUNNER_TEMP/llvm-depot/$LLVM_SHA/$CANGJIE_COMPILER_SHA/dylib" >> "$GITHUB_ENV"
 
       - name: Download pinned in-process LLVM dylib
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' || runner.os == 'macOS'
         uses: actions/download-artifact@v8
         with:
           artifact-ids: ${{ env.LLVM_DYLIB_ARTIFACT_ID }}
@@ -351,7 +375,14 @@ jobs:
           run-id: ${{ env.COLOUR_RT_RUN_ID }}
           path: ${{ env.CJCJ_BOOTSTRAP_COLOUR_RT }}
 
+      - name: Verify independent Darwin libraries and classify std input
+        if: runner.os == 'macOS'
+        env:
+          RUNTIME_PLATFORM: ${{ matrix.llvm_platform }}
+        run: node ci/release/darwin_runtime.mjs source "$CJCJ_BOOTSTRAP_COLOUR_RT" "$RUNTIME_PLATFORM"
+
       - name: Inspect downloaded colour runtime symbols
+        if: runner.os != 'macOS'
         shell: bash
         run: |
           set -euo pipefail
@@ -678,6 +709,31 @@ jobs:
         env:
           SOURCE_SDK_VERSION: ${{ steps.version.outputs.value }}
         run: npx --yes zx@8 ci/srcbuild/steps/compose-sdk.mjs
+
+      - name: Capture G2 SDK identity
+        if: matrix.target == 'linux-x64'
+        timeout-minutes: 2
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdk="$CANGJIE_WORKSPACE/software/cangjie"
+          node ci/capture-g2-identity.mjs \
+            --identity "$G2_IDENTITY" \
+            --runtime-dynamic "$sdk/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so" \
+            --runtime-static "$sdk/lib/linux_x86_64_cjnative/libcangjie-runtime.a" \
+            --llvm-llc "$sdk/third_party/llvm/bin/llc" \
+            --llvm-opt "$sdk/third_party/llvm/bin/opt" \
+            --cjcj "$sdk/bin/cjc" \
+            --std "$sdk/lib/linux_x86_64_cjnative/libcangjie-std-core.a"
+
+      - name: Retain G2 campaign identity
+        if: always() && matrix.target == 'linux-x64' && env.G2_IDENTITY != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: g2-identity-linux-x64-${{ github.run_attempt }}
+          path: ${{ env.G2_CAMPAIGN_DIR }}
+          if-no-files-found: error
+          retention-days: 90
 
       - name: Archive final compiler handoff
         run: tar -C "$CANGJIE_WORKSPACE/software/final-compiler" -czf "$CANGJIE_WORKSPACE/software/final-compiler.tar.gz" .
