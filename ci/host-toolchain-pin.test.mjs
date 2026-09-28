@@ -90,18 +90,104 @@ test('the ordinary host nightly literal has one pin and the release exception is
     // SDK lib paths; it is not an ordinary host consumer.
     const isAstabiBaselineHarness = file === path.join(root, 'tools', 'astabi', 'run_behavior_triad.sh');
     if (file === pinPath || file === cjpmPinPath || file === h48LanguagePinPath || file.endsWith('/.github/workflows/build-release-package.yml') || isAstabiBaselineHarness) continue;
-    const text = await fs.readFile(file, 'utf8');
+    let text = await fs.readFile(file, 'utf8');
+    // These are observations of past runs, not inputs to SDK selection.
+    // Keep scanning the rest of each record: neither file is a pin exemption.
+    if (file === path.join(root, 'ci', 'cangjie-test', 'README.md')) {
+      text = text.replace(
+        /^(Two consecutive runs of the same SDK \(`)(nightly-\d+\.\d+\.\d+-alpha\.\d+)(`,)$/m,
+        '$1$3',
+      );
+    }
+    if (file === path.join(root, 'ci', 'host-runtime', 'release.json')) {
+      const record = JSON.parse(text);
+      if (record.role === 'official-host-runtime') {
+        // host_runtime.mjs emits this identity after setup_sdk loads the pin.
+        // Remove only the identity value, preserving any other pin definitions.
+        if (typeof record.toolchain === 'string' &&
+            /^nightly-\d+\.\d+\.\d+-alpha\.\d+$/.test(record.toolchain)) {
+          record.toolchain = '';
+        }
+        text = JSON.stringify(record);
+      }
+    }
     if (/nightly-\d+\.\d+\.\d+-alpha\.\d+/.test(text)) {
       offenders.push(path.relative(root, file));
     }
   }
-    assert.deepEqual(offenders, []);
-    console.log(`ORDINARY-HOST-SCAN offenders=${offenders.length}`);
+  assert.deepEqual(offenders, []);
+  console.log(`ORDINARY-HOST-SCAN offenders=${offenders.length}`);
   const release = await fs.readFile(path.join(root, '.github', 'workflows', 'build-release-package.yml'), 'utf8');
   assert.equal(release.match(/^  RELEASE_HOST_TOOLCHAIN: nightly-\S+$/gm)?.length, 1);
   assert.match(release, /Five-platform 1\.3 archive hashes do not exist yet/);
   assert.match(release, /smoke changing from 13\/15 to 0\/15/);
 });
+
+// Run the real scan entry in an isolated tree, not a duplicate classifier.
+// The filter prevents these integration controls from recursively spawning.
+const scanTestName = 'the ordinary host nightly literal has one pin and the release exception is explicit';
+const competingSdk = 'nightly-' + '9.9.9-alpha.' + '20990101000000';
+const scanControls = [
+  ['historical observations', null, null],
+  ['shell pin', 'tools/competing-host.sh', () => `CJCJ_TOOLCHAIN=${competingSdk}\n`],
+  ['workflow pin', '.github/workflows/competing-host.yml', () => `env:\n  CJCJ_TOOLCHAIN: ${competingSdk}\n`],
+  ['env pin', 'ci/competing-host.env', () => `CJCJ_TOOLCHAIN=${competingSdk}\n`],
+  ['JSON pin', 'ci/competing-host.json', () => JSON.stringify({toolchain: competingSdk})],
+  ['README pin', 'ci/cangjie-test/README.md', text => text + `\nCJCJ_TOOLCHAIN=${competingSdk}\n`],
+  ['provenance extra pin', 'ci/host-runtime/release.json', text =>
+    JSON.stringify({...JSON.parse(text), CJCJ_TOOLCHAIN: competingSdk})],
+  ['provenance nested pin', 'ci/host-runtime/release.json', text =>
+    JSON.stringify({...JSON.parse(text), selection: {toolchain: competingSdk}})],
+  ['non-provenance role', 'ci/host-runtime/release.json', text =>
+    JSON.stringify({...JSON.parse(text), role: 'host-selection'})],
+  ['provenance non-identity', 'ci/host-runtime/release.json', text =>
+    JSON.stringify({...JSON.parse(text), toolchain: `CJCJ_TOOLCHAIN=${competingSdk}`})],
+];
+for (const [name, changedFile, mutate] of scanControls) {
+  test(`ordinary host scan control: ${name}`, async () => {
+    const fixture = await fs.mkdtemp(path.join(os.tmpdir(), 'host-scan-'));
+    try {
+      for (const directory of ['ci', 'tools', '.github/workflows', 'build/lib']) {
+        await fs.mkdir(path.join(fixture, directory), {recursive: true});
+      }
+      for (const relative of [
+        'ci/host-toolchain-pin.test.mjs', 'ci/host-toolchain-pin.mjs',
+        'build/lib/release-component-provenance.mjs',
+        '.github/workflows/build-release-package.yml',
+        'ci/cangjie-test/README.md', 'ci/host-runtime/release.json',
+      ]) {
+        const destination = path.join(fixture, relative);
+        await fs.mkdir(path.dirname(destination), {recursive: true});
+        await fs.copyFile(path.join(root, relative), destination);
+      }
+      if (changedFile) {
+        const target = path.join(fixture, changedFile);
+        const previous = await fs.readFile(target, 'utf8').catch(error => {
+          if (error.code !== 'ENOENT') throw error;
+          return '';
+        });
+        await fs.writeFile(target, mutate(previous));
+      }
+      const childEnv = {...process.env};
+      delete childEnv.NODE_TEST_CONTEXT;
+      const result = spawnSync(process.execPath, [
+        '--test', '--test-reporter=tap', `--test-name-pattern=^${scanTestName}$`,
+        path.join(fixture, 'ci', 'host-toolchain-pin.test.mjs'),
+      ], {encoding: 'utf8', timeout: 30_000, env: childEnv});
+      assert.ifError(result.error);
+      const output = result.stdout + result.stderr;
+      assert.equal(result.status, changedFile ? 1 : 0, output);
+      if (changedFile) {
+        assert.ok(output.includes(changedFile), output);
+        assert.match(output, /ERR_ASSERTION/, output);
+      } else {
+        assert.match(output, /ORDINARY-HOST-SCAN offenders=0/, output);
+      }
+    } finally {
+      await fs.rm(fixture, {recursive: true, force: true});
+    }
+  });
+}
 
 test('release markdown does not carry an ordinary nightly literal', async () => {
   const bounded = [
