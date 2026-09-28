@@ -10,7 +10,7 @@ public open class Value <: Base & Hashable & Equatable<Value> {
     private var ty: Option<Type>
     private var identifier: String
     private let kind: ValueKind
-    private let users: ArrayList<Expression> = ArrayList<Expression>(0)
+    private let users: ArrayList<Expression> = ArrayList<Expression>()
     private let userMutex: Mutex = Mutex()
 
     public init(ty: Option<Type>, identifier: String, kind: ValueKind) {
@@ -370,8 +370,8 @@ public class LocalVar <: Value {
 
 public class Block <: Value & Hashable & Equatable<Block> {
     private var parentGroup: Option<BlockGroup> = None
-    private let exprs: ArrayList<Expression> = ArrayList<Expression>(0)
-    private let predecessors: ArrayList<Block> = ArrayList<Block>(0)
+    private let exprs: ArrayList<Expression> = ArrayList<Expression>()
+    private let predecessors: ArrayList<Block> = ArrayList<Block>()
     private var exceptions: Option<ArrayList<ClassType>> = None
 
     public init(identifier: String, parentGroup: Option<BlockGroup>) {
@@ -685,7 +685,7 @@ public class Block <: Value & Hashable & Equatable<Block> {
 
 public class BlockGroup <: Value & Hashable & Equatable<BlockGroup> {
     private var entryBlock: Option<Block> = None
-    private let blocks: ArrayList<Block> = ArrayList<Block>(0)
+    private let blocks: ArrayList<Block> = ArrayList<Block>()
     private var ownerFunc: Option<Function> = None
     private var ownerExpression: Option<Expression> = None
 

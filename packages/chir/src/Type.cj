@@ -57,7 +57,7 @@ public open class Type <: Hashable & Equatable<Type> {
 
     public let objectId: Int64
     public let kind: TypeKind
-    public let argTys: ArrayList<Type> = ArrayList<Type>(0)
+    public let argTys: ArrayList<Type> = ArrayList<Type>()
 
     public init(kind: TypeKind) {
         objectId = nextObjectId.fetchAdd(1)

@@ -613,6 +613,7 @@ public class OverrideSrcFuncType <: Annotation<Option<FuncType>> {
 
 public class AnnotationMap {
     private let annotations: HashMap<TypeIndex, AnnotationBase> = HashMap<TypeIndex, AnnotationBase>(0)
+    private let annotationOrder: ArrayList<TypeIndex> = ArrayList<TypeIndex>()
 
     public init() {}
 
@@ -623,11 +624,21 @@ public class AnnotationMap {
     // Set annotation T for this node, updating its value if it already exists. Annotation.h:363.
     public func Set<T, R>(value: R): Unit where T <: Annotation<R> {
         let index = T.GetTypeIndex()
+        if (!annotations.contains(index)) { annotationOrder.add(index) }
         annotations[index] = T.Create(value)
     }
 
     public func Remove<T>(): Unit where T <: AnnotationBase {
-        annotations.remove(T.GetTypeIndex())
+        let index = T.GetTypeIndex()
+        annotations.remove(index)
+        var position: Int64 = 0
+        while (position < annotationOrder.size) {
+            if (annotationOrder[position] == index) {
+                annotationOrder.remove(at: position)
+                break
+            }
+            position++
+        }
     }
 
     // Get the value of the annotation T, returning the default empty value when absent. Annotation.h:370.
@@ -645,18 +656,20 @@ public class AnnotationMap {
         }
         let annotation = T.Create()
         annotations[index] = annotation
+        annotationOrder.add(index)
         return (annotation as T).getOrThrow()
     }
 
     // Annotation.h:432 GetAnnos().
     public func GetAnnos(): ArrayList<(TypeIndex, AnnotationBase)> {
         let result = ArrayList<(TypeIndex, AnnotationBase)>()
-        for ((index, annotation) in annotations) { result.add((index, annotation)) }
+        for (index in annotationOrder) { result.add((index, annotations[index])) }
         return result
     }
 
     public func Clear(): Unit {
         annotations.clear()
+        annotationOrder.clear()
     }
 
     // Annotation.h:407-425 copy semantics: deep-clone each annotation.
@@ -665,8 +678,11 @@ public class AnnotationMap {
             return
         }
         annotations.clear()
-        for ((index, annotation) in other.annotations) {
+        annotationOrder.clear()
+        for (index in other.annotationOrder) {
+            let annotation = other.annotations[index]
             annotations[index] = annotation.Clone()
+            annotationOrder.add(index)
         }
     }
 
@@ -676,7 +692,8 @@ public class AnnotationMap {
             return ""
         }
         let annotationParts = ArrayList<String>()
-        for ((_, annotation) in annotations) {
+        for (index in annotationOrder) {
+            let annotation = annotations[index]
             let text = annotation.ToString()
             if (!text.isEmpty()) {
                 annotationParts.add("${IndentToString(indent)}${text}")
