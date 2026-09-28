@@ -58,6 +58,8 @@ def collect(args):
     log = (out / 'runtime.log').read_text() if (out / 'runtime.log').exists() else ''
     cycles = re.findall(r'GC for .*?utilization \((\d+)->[^/]+/(\d+)->', log)
     result['gc_cycles'] = len(cycles)
+    result['user_gc_object_bytes'] = [int(value) for value in re.findall(
+        r'GC for user:.*?utilization \((\d+)->', log)]
     result['gc_peak_used_obj_bytes'] = max((int(a) for a, _ in cycles), default=None)
     result['gc_peak_used_region_bytes'] = max((int(b) for _, b in cycles), default=None)
     rss = re.search(r'Maximum resident set size \(kbytes\): (\d+)',
@@ -74,6 +76,11 @@ def check(args):
     candidate = json.loads(args.candidate.read_text())
     checks = {'compiler-completed': candidate['rc'] == 0,
               'reference-completed': reference['rc'] == 0,
+              'same-recipe': bool(reference.get('recipe_sha256')) and
+              candidate.get('recipe_sha256') == reference['recipe_sha256'],
+              'same-host-runtime': bool(reference.get('host_libraries')) and
+              candidate.get('host_libraries') == reference['host_libraries'],
+              'same-heap-limit': candidate['heap'] == reference['heap'],
               'gc-observed': candidate['gc_cycles'] > 0 and reference['gc_cycles'] > 0}
     for label, key, ratio in [('gc-live-bound', 'gc_peak_used_obj_bytes', args.live_ratio),
                               ('rss-bound', 'maxrss_kb', args.rss_ratio)]:
@@ -86,6 +93,9 @@ def check(args):
             return sorted(v for k, v in result['outputs'].items() if k.endswith('.cjo'))
         expected, actual = interfaces(reference), interfaces(candidate)
         checks['interface-unchanged'] = bool(expected) and actual == expected
+    if args.same_output:
+        expected = reference['outputs']
+        checks['output-unchanged'] = bool(expected) and candidate['outputs'] == expected
     for label, passed in checks.items():
         print(f'{"PASS" if passed else "FAIL"} {label}')
     if args.json:
@@ -109,6 +119,7 @@ def main():
     verify.add_argument('--live-ratio', type=float, required=True)
     verify.add_argument('--rss-ratio', type=float, required=True)
     verify.add_argument('--same-interface', action='store_true')
+    verify.add_argument('--same-output', action='store_true')
     verify.add_argument('--json', type=Path)
     args = parser.parse_args()
     return collect(args) if args.action == 'run' else check(args)
