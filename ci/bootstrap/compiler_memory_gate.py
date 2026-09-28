@@ -103,6 +103,48 @@ def check(args):
     return 0 if all(checks.values()) else 1
 
 
+def check_heap(args):
+    """Read actual cjprof/cjheap_hist output, never a model of the IR objects.
+
+    These budgets apply to the std.unittest fixture. Two 16-pointer buffers per
+    actual BlockGroup allow existing populated-list helpers, while rejecting a
+    buffer for every expression, including expressions without block groups.
+    """
+    result = json.loads(args.snapshot.read_text())
+    rows = {}
+    for line in (args.snapshot.parent / 'hist.tsv').read_text().splitlines()[1:]:
+        name, count, size = line.split('\t')
+        rows[name] = (int(count), int(size))
+    checks = {'compiler-completed': result['rc'] == 0,
+              'snapshot-completed': result.get('dump_rc') == 0 and result.get('hist_rc') == 0,
+              'ir-observed': rows.get('cjcj/chir:AnnotationMap', (0, 0))[0] > 0}
+    if 'annotation' in args.invariant:
+        count = rows.get('RawArray<cjcj/chir:TypeIndex>', (0, 0))[0]
+        print(f'OBSERVED annotation-key-storage auxiliary_arrays={count}')
+        checks['annotation-key-storage-not-duplicated'] = count == 0
+    if 'vectors' in args.invariant:
+        groups = rows.get('cjcj/chir:BlockGroup', (0, 0))[0]
+        payload = rows.get('RawArray<cjcj/chir:BlockGroup>', (0, 0))[1]
+        print(f'OBSERVED block-group-storage payload_bytes={payload} populated_groups={groups}')
+        checks['block-group-storage-proportional-to-groups'] = groups > 0 and payload <= groups * 256
+    if 'ast' in args.invariant:
+        if args.reference is None:
+            raise ValueError('AST retention comparison requires --reference histogram')
+        baseline = {}
+        for line in args.reference.read_text().splitlines()[1:]:
+            name, count, _ = line.split('\t')
+            baseline[name] = int(count)
+        actual = rows.get('cjcj/ast:RefExpr', (0, 0))[0]
+        before = baseline.get('cjcj/ast:RefExpr', 0)
+        print(f'OBSERVED retired-ast-reference-expressions actual={actual} baseline={before}')
+        checks['retired-ast-reference-expressions'] = before > 0 and actual <= before / 10
+    for label, passed in checks.items():
+        print(f'{"PASS" if passed else "FAIL"} {label}')
+    if args.json:
+        args.json.write_text(json.dumps(checks, indent=2) + '\n')
+    return 0 if all(checks.values()) else 1
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='action', required=True)
@@ -121,8 +163,15 @@ def main():
     verify.add_argument('--same-interface', action='store_true')
     verify.add_argument('--same-output', action='store_true')
     verify.add_argument('--json', type=Path)
+    heap = sub.add_parser('heap-check')
+    heap.add_argument('--snapshot', type=Path, required=True)
+    heap.add_argument('--reference', type=Path)
+    heap.add_argument('--invariant', choices=['annotation', 'vectors', 'ast'], action='append', required=True)
+    heap.add_argument('--json', type=Path)
     args = parser.parse_args()
-    return collect(args) if args.action == 'run' else check(args)
+    if args.action == 'run':
+        return collect(args)
+    return check_heap(args) if args.action == 'heap-check' else check(args)
 
 
 if __name__ == '__main__':
