@@ -9,7 +9,7 @@ const root = path.resolve(import.meta.dirname, '../../..');
 const entry = path.join(root, 'ci/srcbuild/steps/verify.mjs');
 const target = {
   'linux/x64': 'linux-x64', 'linux/arm64': 'linux-aarch64',
-  'darwin/x64': 'mac-x64', 'darwin/arm64': 'mac-aarch64',
+  'darwin/x64': 'darwin-x64', 'darwin/arm64': 'darwin-arm64',
 }[`${process.platform}/${process.arch}`];
 
 test('bootstrap SDK verification retains exactly the SDK-owned phases', async () => {
