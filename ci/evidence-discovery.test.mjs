@@ -5,7 +5,7 @@ import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import test from 'node:test';
 
-import {bindEvidence} from './evidence-binding-fixture.mjs';
+import {campaignFixture} from './gc-campaign-fixture.mjs';
 
 const command = path.resolve(import.meta.dirname, 'release-gates.mjs');
 
@@ -29,37 +29,13 @@ function git(root, ...args) {
   return result.stdout.trim();
 }
 
-function rows() {
-  const raw = [];
-  const remset = [];
-  for (let round = 1; round <= 20; round += 1) {
-    for (const load of ['O0', 'O2']) {
-      const miss = load === 'O0' && round === 3 ? 108 : 0;
-      raw.push([round, load, 1, 0, 2, miss, miss, miss, 'OK', 1, 1].join('\t'));
-      remset.push([round, load, 1, 0, 2, miss, miss, miss, 'OK'].join('\t'));
-    }
-  }
-  return {
-    raw: [
-      'round\tload\tfys\trc\tminors\tmiss\tmissBare\tmissBareNeverSeen\tstatus\tfys_bound\tfallbackFullScan_obs',
-      ...raw,
-      '',
-    ].join('\n'),
-    remset: [
-      'round\tload\tfys\trc\tminors\tremsetMiss\tmissBare\tmissBareNeverSeen\tstatus',
-      ...remset,
-      '',
-    ].join('\n'),
-  };
-}
-
 async function fixture(t) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'evidence-discovery-'));
   const checkout = path.join(root, 'checkout');
   const evidenceRoot = path.join(root, 'release-evidence', '0.0.2');
   const evidence = path.join(evidenceRoot, 'gates', 'G14');
   t.after(() => fs.rm(root, {recursive: true, force: true}));
-  await write(checkout, 'build/lib/release-manifest.mjs', "export const IDLE_WRITER_POLICY = 'FYS_CENSUS';\n");
+  await write(checkout, 'build/lib/release-manifest.mjs', "// single-profile G14 has no policy switch\n");
   await write(checkout, '.github/workflows/release.yml', 'name: release\n');
   await write(checkout, 'ops/coord/RELEASE_0_0_2_RUNBOOK.md',
     `export RELEASE_EVIDENCE_ROOT=${evidenceRoot}\n`);
@@ -67,10 +43,7 @@ async function fixture(t) {
   git(checkout, 'add', '.');
   git(checkout, '-c', 'user.name=Zxilly', '-c', 'user.email=zxilly@outlook.com',
     'commit', '-q', '-m', 'fixture');
-  const evidenceRows = rows();
-  await write(evidence, 'raw.tsv', evidenceRows.raw);
-  await write(evidence, 'remset.tsv', evidenceRows.remset);
-  const binding = await bindEvidence(evidence, 'G14', checkout);
+  const binding = await campaignFixture(evidence, 'G14', checkout);
   await write(evidenceRoot, 'GATE_EVIDENCE.json', `${JSON.stringify({
     schema: 1,
     gates: {G14: 'gates/G14'},

@@ -1,0 +1,12 @@
+[GCLOG] v=1 rec=phase seq=1 name=young.mark_closure us=622890
+[GCLOG] v=1 rec=phase seq=1 name=young.copy us=30670
+[GCLOG] v=1 rec=phase seq=1 name=young.evac_finish us=3748
+[GCLOG] v=1 rec=phase seq=1 name=young.mark_closure us=731756
+[GCLOG] v=1 rec=phase seq=1 name=young.copy us=25407
+[GCLOG] v=1 rec=phase seq=1 name=young.evac_finish us=3679
+[GCLOG] v=1 rec=phase seq=1 name=young.mark_closure us=16503
+[GCLOG] v=1 rec=phase seq=1 name=young.copy us=24937
+[GCLOG] v=1 rec=phase seq=1 name=young.evac_finish us=2746
+[GCLOG] v=1 rec=phase seq=1 name=young.mark_closure us=19005
+[GCLOG] v=1 rec=phase seq=1 name=young.copy us=29691
+[GCLOG] v=1 rec=phase seq=1 name=young.evac_finish us=2776

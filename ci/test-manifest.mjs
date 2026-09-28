@@ -105,6 +105,16 @@ export const GATING = Object.freeze([
 // wiring one of these in is a decision about CI shape, not a re-investigation.
 export const DEFERRED = Object.freeze([
   Object.freeze({
+    file: 'ci/gc-campaign-producer.test.mjs',
+    needs: 'Linux kkk2 device integration: cc, ldd, taskset, timeout and at least 64 allowed CPUs. '
+      + 'The ordinary ubuntu-slim lint runner cannot execute the campaign CPU contract. '
+      + 'Run explicitly with the G12/G14 acceptance suite on kkk2; physical runtime qualification '
+      + 'additionally waits for cjcj#135 and is not represented by these synthetic child inputs',
+    verified: 'node --test ci/gc-campaign-producer.test.mjs via the full ci glob: '
+      + 'producer-G12 and producer-G14 target assertions passed (2026-09-28, kkk2, Node 20.19.0); '
+      + 'device only, not runtime acceptance',
+  }),
+  Object.freeze({
     file: 'build/test/release-evidence.test.mjs',
     needs: 'RELEASE_EVIDENCE_TEST_ROOT set to a path outside /tmp (the test refuses tmpfs '
       + 'because it archives evidence that must survive); on a runner, ${{ runner.temp }} qualifies',
