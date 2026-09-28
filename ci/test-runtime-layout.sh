@@ -43,6 +43,7 @@ git -C "$work/llvm" diff HEAD~ HEAD > "$work/consumer-cut.diff"
 sha256sum "$work/llvm/$header" > "$work/consumer-cut.sha256"
 rc=0
 check > "$work/consumer-cut.log" 2>&1 || rc=$?
+printf 'ASSERT layout consumer mismatch actual_rc=%s expected_rc=1\n' "$rc"
 test "$rc" -eq 1
 grep -F 'differs from runtime assertions' "$work/consumer-cut.log"
 echo 'ASSERT layout consumer mismatch rc=1'
@@ -69,7 +70,12 @@ git -C "$work/runtime" -c user.name=Zxilly -c user.email=zxilly@outlook.com comm
 git -C "$work/runtime" diff HEAD~ HEAD > "$work/producer-cut.diff"
 rc=0
 check > "$work/producer-cut.log" 2>&1 || rc=$?
+printf 'ASSERT layout producer mismatch actual_rc=%s expected_rc=1\n' "$rc"
 test "$rc" -eq 1
 grep -F 'differs from runtime assertions' "$work/producer-cut.log"
 echo 'ASSERT layout producer mismatch rc=1'
+git -C "$work/runtime" restore --source=HEAD~ --staged --worktree runtime/src/Common/BaseObject.h
+git -C "$work/runtime" -c user.name=Zxilly -c user.email=zxilly@outlook.com commit -qm 'test: restore producer layout'
+check > "$work/producer-restored.log" 2>&1
+echo 'ASSERT layout producer restored rc=0'
 # Source/header synchronization only: no runtime or generated-code behavior claim.
