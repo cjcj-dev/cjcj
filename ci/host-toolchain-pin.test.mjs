@@ -296,7 +296,7 @@ const HOST_TOOLCHAIN_PINS = Object.freeze({
   }),
   'ci/host_sdk_pin.env': Object.freeze({
     host: 'source-build host',
-    loaders: Object.freeze(['build-ast-support.yml', 'srcbuild.yml']),
+    loaders: Object.freeze(['build-ast-support.yml', 'build-host-runtime.yml', 'srcbuild.yml']),
   }),
 });
 
