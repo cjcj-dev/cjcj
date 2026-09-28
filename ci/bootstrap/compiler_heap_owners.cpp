@@ -1,3 +1,6 @@
+// Diagnostic only: official HRT dumps can contain unresolved pre-forwarding
+// references after GC (cjcj#633). A resolved raw-ID chain is not proof of live
+// ownership. Qualify the snapshot with fixtures/compiler_heap_graph.cj first.
 // Inspect Constant -> ArrayList<BlockGroup> -> RawArray ownership in an
 // official Cangjie "CANGJIE PROFILE 1.0.2" heap dump. Constant has no block
 // groups (CHIR/IR/Expression/Expression.h; Expression.cj:609-612).
