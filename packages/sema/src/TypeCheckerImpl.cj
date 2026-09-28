@@ -96,6 +96,8 @@ public class CollectDeclsInfo {
 }
 
 public class TypeCheckerImpl {
+    // C++ TypeCheckerImpl.h:1773: cache lifetime is the checker lifetime.
+    internal let inoutCache = HashMap<FuncDecl, Bool>()
     public var typeManager: TypeManager
     public var ci: Option<CompilerInstance> = None
     public var diag: Option<BasicDiagnosticEngine> = None

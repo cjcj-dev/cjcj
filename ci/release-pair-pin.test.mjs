@@ -13,6 +13,7 @@ const pins = file => Object.fromEntries(read(file).trim().split('\n').map(line =
   const i = line.indexOf('=');
   return [line.slice(0, i), line.slice(i + 1)];
 }));
+const runtime = pins('ci/runtime_pin.env');
 const llvm = pins('ci/llvm_pin.env');
 const input = JSON.parse(read('ci/bootstrap_inputs_pin.json'));
 
@@ -25,7 +26,7 @@ test('release runtime loader selects the stack-slot-root runtime paired with LLV
     const result = spawnSync(process.execPath, [fileURLToPath(new URL('ci/load_runtime_pin.mjs', root))], {env, encoding: 'utf8'});
     assert.equal(result.status, 0, result.stderr);
     const selected = /^RUNTIME_REF=(.*)$/m.exec(fs.readFileSync(output, 'utf8'))?.[1];
-    assert.equal(selected, '97c42fe77c42bc33efedbe6a395043fd58443358', 'release runtime must provide the paired ordinary-statepoint register-root contract');
+    assert.equal(selected, runtime.RUNTIME_REF, 'release runtime must provide the paired ordinary-statepoint register-root contract');
     console.log(`ASSERT release-runtime-selected=${selected}`);
   } finally { fs.rmSync(dir, {recursive: true, force: true}); }
 });

@@ -798,6 +798,38 @@ stage1() {
     [ -d "$std" ] || die 'stage1 未产出 stdlib-stage2'
   fi
   assert_version cjcj-stage2 "$out" "$sdk" "$CRT"
+  # Forensic arm is opt-in and runs only after the release compiler is installed.
+  # It does not rewrite $out. Spec: cjpm `build -g` (default off) lands in
+  # target/debug; std RelWithDebInfo already passes -g via AddCangjieSource.cmake.
+  stage2_forensic
+}
+
+# Optional -g stage2 for line tables on cjcj packages. Default off.
+# Independent tree; same shim inputs as the release arm; one extra cjpm flag.
+stage2_forensic() {
+  local copy seed out sdk src_stamp
+  [ "${CJCJ_FORENSIC_STAGE2:-0}" = 1 ] || return 0
+  sdk="$WORK/sdk-stage1"
+  out="$WORK/cjcj-stage2-forensic"
+  copy="$WORK/cjcj-src-stage1-forensic"
+  echo "OUTPUT cjcj-stage2-forensic=$out"
+  echo "FORENSIC stage2 enabled=1 flag=-g product-dir=target/debug/bin source=$copy"
+  isolate_cjcj_src "$copy"
+  shim_build stage1 "$sdk" "$CRT" "$copy" "$sdk/third_party/llvm/fixed-llc/cjselfhost_llvmshim.o"
+  cjpm_build "$sdk" "$HRT" "$copy" "-j $JOBS -g" "$STAGE1_HEAP"
+  seed=$(resolve_cjpm_product "$copy/target/debug/bin" cjcj-stage2-forensic)
+  install_stage_compiler "$seed" "$out" "$WORK/cjc-stage2-forensic"
+  if [ "$DRY" -eq 0 ]; then
+    assert_executable cjcj-stage2-forensic "$out"
+    record cjcj-stage2-forensic "$out"
+    src_stamp="$copy/cjpm.toml"
+    record cjcj-stage2-forensic-src "$src_stamp"
+    echo "INPUT cjcj-stage2-forensic-cjcj-sha sha256=$CJCJ_SHA"
+  else
+    echo "INPUT cjcj-stage2-forensic path=$out sha256=planned"
+    echo "INPUT cjcj-stage2-forensic-src path=$copy/cjpm.toml sha256=planned"
+    echo "INPUT cjcj-stage2-forensic-cjcj-sha sha256=$CJCJ_SHA"
+  fi
 }
 
 stage_std() {

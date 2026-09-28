@@ -78,8 +78,8 @@ public class TypeValue <: HasEqual<TypeValue> {
         return baseLineType
     }
 
-    public static func SetCHIRBuilder(chirBuilder: CHIRBuilder): Unit {
-        builder = Some(chirBuilder)
+    public static func SetCHIRBuilder(chirBuilder: Option<CHIRBuilder>): Unit {
+        builder = chirBuilder
     }
 
     private func GetKindString(clsTyKind: DevirtualTyKind): String {
