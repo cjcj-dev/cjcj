@@ -10,7 +10,6 @@ import {assertFinalStd} from '../lib/final-std.mjs';
 import {resolveProductBinary} from '../lib/product-binary.mjs';
 import {prepareBootstrapHandoff} from '../lib/bootstrap-handoff.mjs';
 import {stdIdentity} from '../lib/final-compiler.mjs';
-import {assertWriteBarriers} from '../lib/write-barrier.mjs';
 
 $.stdio = 'inherit';
 
@@ -84,15 +83,6 @@ async function countRuntimeMarkers(runtime) {
 }
 
 
-// The SDK ships llvm-objdump; failing when it is absent keeps this from quietly
-// becoming a no-op on a host that happens not to have one.
-async function assertWriteBarriersWith(sdkRoot, coreLib, targetSpec) {
-  const tool = path.join(sdkRoot, 'third_party', 'llvm', 'bin', 'llvm-objdump');
-  if (!await exists(tool)) throw new Error(`write-barrier check needs llvm-objdump: ${tool}`);
-  const dump = await $({stdio: 'pipe'})`${tool} -d -r -C ${coreLib}`;
-  return assertWriteBarriers(dump.stdout, `target=${targetSpec.spec.key} core=${path.basename(coreLib)}`);
-}
-
 async function assertStdBarriers(coreLib) {
   const symbolTable = await $({stdio: 'pipe'})`nm -A ${coreLib}`;
   const colourCheck = fileURLToPath(new URL('../../bootstrap/std_runtime_colour.py', import.meta.url));
@@ -110,35 +100,12 @@ async function assertStdBarriers(coreLib) {
     // and Mach-O, require both exact runtime references instead of pretending
     // the x86 shr/relocation syntax applies.
     console.log(`STAGE3_BARRIER_SYMBOL_ASSERT_PASS target=${target.spec.key} colour=1 read_barrier=1`);
-    // Deliberate, and on stderr so it does not sit in the stream of green lines.
-    // The disassembler is no longer the reason: llvm-objdump reads aarch64 and
-    // Mach-O, and the write-side analyser now runs off it. What is still missing
-    // is a real aarch64 std archive to check the phase-check shape against --
-    // `lsr x9, x28, #56` is readable in AArch64AsmPrinter but has never been put
-    // through a two-armed check, and a fixture I write myself would only prove my
-    // own regex reads my own text. No verdict here until that exists.
-    console.error(`STAGE3_WRITE_BARRIER_SKIP target=${target.spec.key} reason=aarch64-shape-never-validated-against-a-real-archive`);
-    console.error('STAGE3_WRITE_BARRIER_SKIP no write-side conclusion on this target — not a pass');
     return;
   }
   const output = await $({stdio: 'pipe'})`objdump -drwC ${coreLib}`;
-  // Everything below proves the read side: the tag test and a CJ_MCC_Read* call.
-  // A std built with colouring but without the generational post barrier passes
-  // all of it, which is exactly the shape the pinned llc produces by default, so
-  // the write side is checked too -- but off llvm-objdump, not this output.
-  //
-  // Why a second disassembly rather than reusing this one: llvm-objdump is the
-  // only one of the two that reads aarch64 and Mach-O, and running the write-side
-  // patterns against one dialect everywhere is worth a few seconds. The two tools
-  // were measured to agree exactly on the four write-side columns for both a stock
-  // and a source-built core (426/14/7/405 and 19/19/0/0), with a control arm that
-  // does diverge when one side is given wrong flags.
-  //
-  // The read side below stays on GNU objdump on purpose: its `shr $0x30` probe is
-  // written in GNU's radix and llvm-objdump spells the same instruction `shrq $48`.
-  // The equivalence measured above covers the write-side analyser only, so moving
-  // the read side too would be changing a validated check on unvalidated grounds.
-  await assertWriteBarriersWith(sdk, coreLib, target);
+  // LLVM #96 removed GCPhase guards. The retired phase-shape write checker
+  // cannot observe the new store-mask protocol. This checks only the read side;
+  // source layout compatibility is checked by check-llvm-runtime-abi.sh.
   const lines = output.stdout.split('\n');
   const symbols = [
     '_CNat6String7indexOfHRNatY0_E',
