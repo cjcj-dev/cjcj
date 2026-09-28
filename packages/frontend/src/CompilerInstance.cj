@@ -37,6 +37,7 @@ import cjcj::chir.CHIRDeserializer as ChirDeserializer
 import cjcj::chir.CHIRPrinter as ChirPrinter
 import cjcj::chir.ToCHIRPhase as ChirToCHIRPhase
 import std.collection.*
+import std.ref.{WeakRef, CleanupPolicy}
 import std.core.Box as CoreBox
 
 foreign {
@@ -274,12 +275,12 @@ public class CompilerInstance {
         astResourcesDestroyed = true
         try (recorder = ProfileRecorder("ClearASTResources", "DestroyASTResources")) {
             // 2) TypeChecker first (holds AST / TypeManager refs).
-            let toDestroyTypeChecker = faithfulTypeChecker
+            var toDestroyTypeChecker = faithfulTypeChecker
             faithfulTypeChecker = None
             hasTypeCheckerFlag = false
 
             // Selfhost extra strong root (C++ TypeChecker holds non-owning CompilerInstance*).
-            let toDestroySema = faithfulSemaInstance
+            var toDestroySema = faithfulSemaInstance
             if (let Some(sema) <- toDestroySema) {
                 sema.packages.clear()
                 sema.sourcePackages.clear()
@@ -291,22 +292,22 @@ public class CompilerInstance {
             faithfulSemaInstance = None
 
             // 3) TestManager
-            let toDestroyTestManager = testManager
+            var toDestroyTestManager = testManager
             testManager = None
 
             // 4) GIM
-            let toDestroyGim = gim
+            var toDestroyGim = gim
             gim = None
 
             // 5) PackageManager
-            let toDestroyPackageManager = packageManager
+            var toDestroyPackageManager = packageManager
             packageManager = None
 
             // 5.1) ImportManager after PackageManager
             if (let Some(im) <- importManager) {
                 im.DeleteASTWriters()
             }
-            let toDestroyImportManager = importManager
+            var toDestroyImportManager = importManager
             importManager = None
 
             // 6) AST packages before ASTContext (symbol detaching order).
@@ -332,22 +333,34 @@ public class CompilerInstance {
             pkgCtxMap.clear()
 
             // 8) TypeManager last among heap managers
-            let toDestroyTypeManager = typeManager
+            var toDestroyTypeManager = typeManager
             typeManager = None
+
+            // C++ CompilerInstance.h:484,501-506 keeps non-owning AST pointers here.
+            // Managed references own their referents, so retire those tables at the same
+            // DestroyASTResources boundary before the asynchronous delete counterpart.
+            rawMangleName2DeclMap.clear()
+            declsWithDuplicatedRawMangleName.clear()
+            directExtends.clear()
+            fileMap.clear()
+            order.clear()
+            mangledName2DeclMap.clear()
+            cachedInfo.semaInfo.usages.clear()
+            cachedInfo.varAndFuncDep.clear()
 
             // C++: std::async destroyFunc (CompilerInstance.cpp:173-185).
             // CJ: drop held roots then InvokeGC (delete ≡ GC reclaim) + FreeIdleMemoryToOS.
             // Future stored for JoinDestroyASTResources ≡ dtor destroyFut.get() (cpp:87-91).
             let destroyFunc = { =>
-                let _tc = toDestroyTypeChecker
-                let _sema = toDestroySema
-                let _tmgr = toDestroyTestManager
-                let _gim = toDestroyGim
-                let _pm = toDestroyPackageManager
-                let _im = toDestroyImportManager
+                toDestroyTypeChecker = None
+                toDestroySema = None
+                toDestroyTestManager = None
+                toDestroyGim = None
+                toDestroyPackageManager = None
+                toDestroyImportManager = None
                 toDestroySrcPkgs.clear()
                 toDestroyCtx.clear()
-                let _tyman = toDestroyTypeManager
+                toDestroyTypeManager = None
                 unsafe {
                     CJ_MCC_InvokeGC(true)
                 }
@@ -846,21 +859,8 @@ public class CompilerInstance {
                     "missing real AST package for '" + pkg.fullPackageName + "'")
                 return false
         }
-        if (let Some(realPkg) <- BuildRealCHIRForASTPackage(this, realASTPkg)) {
-            chirData.getOrThrow().AppendNewRealPackage(realPkg)
-            chirInfo.varInitDepMap.clear()
-            for ((rawMangledName, initFuncName) in GetVarInitDepMap(realPkg)) {
-                chirInfo.varInitDepMap[rawMangledName] = initFuncName
-            }
-        } else {
-            if (diag.GetErrorCount() != 0) {
-                return false
-            }
-            diag.Diagnose(DiagCategory.CHIR, PackageDiagnosticPosition(pkg),
-                "unsupported construct in package '" + pkg.fullPackageName +
-                "' (not yet implemented in real pipeline)")
-            return false
-        }
+        // CHIR.cpp:1376-1390 releases AST during conversion. Capture frontend
+        // result metadata first so neither success nor error handling keeps pkg live.
         let chirPkg = CHIRPackage(pkg.fullPackageName)
         chirPkg.fileCount = pkg.files.size
         for (file in pkg.files) {
@@ -872,6 +872,23 @@ public class CompilerInstance {
             collectCHIRDeclSummary(chirPkg, decl)
         }
         chirPkg.declCount = chirPkg.mangleNames.size
+        let packageName = pkg.fullPackageName
+        let packagePosition = PackageDiagnosticPosition(pkg)
+        if (let Some(realPkg) <- BuildRealCHIRForASTPackage(this, realASTPkg)) {
+            chirData.getOrThrow().AppendNewRealPackage(realPkg)
+            chirInfo.varInitDepMap.clear()
+            for ((rawMangledName, initFuncName) in GetVarInitDepMap(realPkg)) {
+                chirInfo.varInitDepMap[rawMangledName] = initFuncName
+            }
+        } else {
+            if (diag.GetErrorCount() != 0) {
+                return false
+            }
+            diag.Diagnose(DiagCategory.CHIR, packagePosition,
+                "unsupported construct in package '" + packageName +
+                "' (not yet implemented in real pipeline)")
+            return false
+        }
         chirData.getOrThrow().AppendNewPackage(chirPkg)
         chirData.getOrThrow().SetConstVarInitFuncs(chirPkg, chirPkg.constVarInitFuncs)
         return true
@@ -886,24 +903,34 @@ public class CompilerInstance {
         }
         FreeIdleMemoryToOS()
         var ret = true
-        let sourcePackagesCHIR = GetSourcePackages()
-        let pkgsOrderedCHIR = packageManager.getOrThrow().GetBuildOrders(sourcePackagesCHIR)
+        // CompilerInstance.cpp:1023 uses non-owning Ptr<Package>. A managed
+        // strong-reference copy would keep all AST alive through CHIR optimization.
+        let sourcePackagesCHIR = ArrayList<WeakRef<Package>>(0)
+        for (sourcePkg in srcPkgs) {
+            sourcePackagesCHIR.add(WeakRef<Package>(sourcePkg, CleanupPolicy.EAGER))
+        }
+        let pkgsOrderedCHIR = packageManager.getOrThrow().GetBuildOrders(srcPkgs)
         let emitted = HashSet<String>()
         for (group in pkgsOrderedCHIR) {
             if (group.isEmpty()) {
                 continue
             }
             let wanted = group[0].fullPackageName
-            for (pkg in sourcePackagesCHIR) {
-                if (pkg.fullPackageName == wanted && !emitted.contains(pkg.fullPackageName)) {
-                    ret = ret && GenerateCHIRForPkg(pkg)
-                    emitted.add(pkg.fullPackageName)
+            for (pkgRef in sourcePackagesCHIR) {
+                if (let Some(pkg) <- pkgRef.value) {
+                    let packageName = pkg.fullPackageName
+                    if (packageName == wanted && !emitted.contains(packageName)) {
+                        ret = ret && GenerateCHIRForPkg(pkg)
+                        emitted.add(packageName)
+                    }
                 }
             }
         }
-        for (pkg in sourcePackagesCHIR) {
-            if (!emitted.contains(pkg.fullPackageName)) {
-                ret = ret && GenerateCHIRForPkg(pkg)
+        for (pkgRef in sourcePackagesCHIR) {
+            if (let Some(pkg) <- pkgRef.value) {
+                if (!emitted.contains(pkg.fullPackageName)) {
+                    ret = ret && GenerateCHIRForPkg(pkg)
+                }
             }
         }
         if (ret && realASTPkgs.size > 1 && invocation.globalOptions.outputMode != OutputMode.CHIR && !isCJLint) {
