@@ -21,7 +21,7 @@ for (const changed of [null, 'CJCJ_HOST_RUNTIME_SHA256', 'CJCJ_HOST_BOUNDSCHECK_
       ];
       const env = {...process.env, CJCJ_SRCBUILD_HOST_SDK: sdk, CJCJ_BOOTSTRAP_HOST_LLVM_SO: llvm};
       for (const [, file, key] of rows) env[key] = await fileSha256(file);
-      const expected = rows.map(([name, , key]) => `${name} ${env[key]}\n`).join('');
+      const expected = rows.map(([name, , key]) => `linux_x86_64 ${name} ${env[key]}\n`).join('');
       if (changed) env[changed] = '0'.repeat(64);
       const output = path.join(dir, 'identities');
       const result = spawnSync('python3', [cli, output], {env, encoding: 'utf8'});

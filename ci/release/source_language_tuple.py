@@ -140,8 +140,16 @@ def pack(args):
     host_pins = {}
     for line in args.host_pins.read_text().splitlines():
         fields = line.split()
-        if len(fields) == 2 and fields[0] in ('libcangjie-runtime.so', 'libboundscheck.so', 'libLLVM-15.so'):
-            host_pins[fields[0]] = fields[1]
+        if not fields or fields[0].startswith('#'):
+            continue
+        require(fields[0] in ('linux_x86_64', 'linux_aarch64'), 'SOURCE_TUPLE_HOST_PIN_PLATFORM')
+        if fields[0] != 'linux_x86_64':
+            continue
+        require(len(fields) == 3 and re.fullmatch('[0-9a-f]{64}', fields[2]), 'SOURCE_TUPLE_HOST_PIN_RECORD')
+        name, sha = fields[1:]
+        require(name in ('libcangjie-runtime.so', 'libboundscheck.so', 'libLLVM-15.so') and name not in host_pins,
+                'SOURCE_TUPLE_HOST_PIN_KEY')
+        host_pins[name] = sha
     for file in ('libcangjie-runtime.so', 'libboundscheck.so'):
         require(digest(args.host / file) == host_pins.get(file), f'SOURCE_TUPLE_OFFICIAL_HOST_PIN {file}')
     require(digest(args.host_llvm) == host_pins.get('libLLVM-15.so'), 'SOURCE_TUPLE_OFFICIAL_HOST_PIN libLLVM-15.so')

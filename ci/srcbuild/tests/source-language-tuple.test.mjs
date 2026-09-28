@@ -47,7 +47,7 @@ async function fixture(body, nativeHost = false) {
       runtimeFiles[rel] = await fileSha256(path.join(runtime, rel));
       await write(path.join(host, name), `official host fixture ${name}`);
       if (nativeHost) await fs.copyFile(path.join(process.env.SOURCE_TUPLE_OFFICIAL_SDK, `runtime/lib/${tuple}/${name}`), path.join(host, name));
-      hostPins.push(`${name} ${await fileSha256(path.join(host, name))}`);
+      hostPins.push(`linux_x86_64 ${name} ${await fileSha256(path.join(host, name))}`);
     }
     const hostLlvm = path.join(host, 'libLLVM-15.so');
     await write(hostLlvm, 'official host LLVM fixture');
@@ -55,7 +55,7 @@ async function fixture(body, nativeHost = false) {
       await fs.copyFile(process.env.SOURCE_TUPLE_HOST_LLVM, hostLlvm);
       assert.equal(await fileSha256(hostLlvm), '30e8ba8c8a30b8b8ea36b4d7ada4cce7b7e12e1a07a66439556b1bd6cb2b3981');
     }
-    hostPins.push(`libLLVM-15.so ${await fileSha256(hostLlvm)}`);
+    hostPins.push(`linux_x86_64 libLLVM-15.so ${await fileSha256(hostLlvm)}`);
     for (const relative of ['tools/bin/cjpm', 'third_party/llvm/bin/llvm-ar', 'third_party/llvm/bin/llvm-objcopy']) {
       await write(path.join(sdk, relative), `#!/bin/bash\nexec '${sdk}/producer-only-tool' "$@"\n`);
       await fs.copyFile('/usr/bin/true', path.join(sdk, relative + '-stage1'));
@@ -91,7 +91,7 @@ async function fixture(body, nativeHost = false) {
       '--llvm-sha', 'c'.repeat(40), '--run-id', '42', '--run-attempt', '1', '--node', process.execPath);
     const pins = async () => ['--manifest-sha256', await fileSha256(path.join(output, 'language-tuple.json')),
       '--compiler-sha256', compilerSha];
-    await body({root, sdk, std, runtime, host, compiler, output, pack, pins, hostLlvm});
+    await body({root, sdk, std, runtime, host, compiler, output, pack, pins, hostLlvm, hostPin});
   } finally { await fs.rm(root, {recursive: true, force: true}); }
 }
 
@@ -223,3 +223,20 @@ test('official native tools survive transport and deletion of producer SDK', {
   assert.match(hostTrace ?? '', /calling init: .*\/official-host\/linux_x86_64_cjnative\/libcangjie-runtime.so/);
   for (const row of observations) assert.match(row.output, row.tool === 'tools/bin/cjpm' ? /^Cangjie Project Manager: \d+\.\d+/ : /LLVM version \d+\.\d+/);
 }, true));
+
+
+test('source producer accepts only the platform-scoped host triple', () => fixture(async ({hostPin, pack}) => {
+  const valid = await fs.readFile(hostPin, 'utf8');
+  const cases = [
+    ['unscoped', valid.replaceAll('linux_x86_64 ', ''), /SOURCE_TUPLE_HOST_PIN_PLATFORM/],
+    ['other-platform', valid.replaceAll('linux_x86_64 ', 'linux_aarch64 '), /SOURCE_TUPLE_OFFICIAL_HOST_PIN/],
+    ['duplicate', valid + '\n' + valid.split('\n')[0], /SOURCE_TUPLE_HOST_PIN_KEY/],
+  ];
+  for (const [name, contents, marker] of cases) {
+    await fs.writeFile(hostPin, contents);
+    let failure;
+    try { pack(); } catch (error) { failure = String(error); }
+    console.log(`HOST_PLATFORM_ASSERT_REACHED case=${name} rejected=${failure !== undefined}`);
+    assert.match(failure || '', marker);
+  }
+}));

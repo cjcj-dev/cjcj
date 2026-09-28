@@ -27,7 +27,7 @@ def main():
                 actual.update(block)
         if actual.hexdigest() != expected:
             raise SystemExit(f'HOST_PIN_MISMATCH {name}')
-        rows.append(f'{name} {expected}\n')
+        rows.append(f'linux_x86_64 {name} {expected}\n')
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(''.join(rows))
     print(f'HOST_PINS_BOUND files={len(rows)} output={output}')
