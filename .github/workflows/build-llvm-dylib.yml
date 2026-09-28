@@ -22,10 +22,21 @@ jobs:
         include:
           - runner: ubuntu-22.04
             platform: linux_x86_64
+            library: libLLVM-15.so
           - runner: ubuntu-24.04-arm
             platform: linux_aarch64
+            library: libLLVM-15.so
+          - runner: macos-15
+            platform: darwin_aarch64
+            library: libLLVM.dylib
+          - runner: macos-15-intel
+            platform: darwin_x86_64
+            library: libLLVM.dylib
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 120
+    timeout-minutes: 180
+    env:
+      LLVM_DYLIB_LIBRARY: ${{ matrix.library }}
+      LLVM_DYLIB_PLATFORM: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v7
       - name: Load reviewed source pin
@@ -43,8 +54,14 @@ jobs:
       - name: Build three-target shared LLVM
         run: |
           set -euo pipefail
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq clang cmake ninja-build
+          ulimit -c 0
+          if [ "$RUNNER_OS" = Linux ]; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq clang cmake ninja-build
+            jobs=$(nproc)
+          else
+            jobs=$(sysctl -n hw.logicalcpu)
+          fi
           git init llvm-fork
           git -C llvm-fork remote add origin "$LLVM_URL"
           git -C llvm-fork fetch --depth=1 origin "$LLVM_SHA"
@@ -58,20 +75,23 @@ jobs:
             -DBUILD_SHARED_LIBS=OFF -DLLVM_BUILD_LLVM_DYLIB=ON -DLLVM_LINK_LLVM_DYLIB=OFF \
             -DLLVM_TARGETS_TO_BUILD='X86;ARM;AArch64' -DLLVM_ENABLE_PROJECTS='' \
             -DCMAKE_CXX_FLAGS='-include cstdint -include unordered_map -include map -include vector -include string'
-          cmake --build dylib-build --target LLVM -j"$(nproc)"
+          cmake --build dylib-build --target LLVM llvm-nm -j"$jobs"
           # nm --defined-only must see the real full symbol table, including
           # local symbols; a stripped binary cannot establish that invariant.
-          nm --defined-only dylib-build/lib/libLLVM-15.so > dylib-build/defined-symbols.txt
+          dylib-build/bin/llvm-nm --defined-only "dylib-build/lib/$LLVM_DYLIB_LIBRARY" > dylib-build/defined-symbols.txt
           grep -q LLVMInitializeX86TargetInfo dylib-build/defined-symbols.txt
           mkdir -p depot/dylib
-          cp -L dylib-build/lib/libLLVM-15.so depot/dylib/libLLVM-15.so
+          cp -L "dylib-build/lib/$LLVM_DYLIB_LIBRARY" "depot/dylib/$LLVM_DYLIB_LIBRARY"
+          file "depot/dylib/$LLVM_DYLIB_LIBRARY" | tee depot/dylib/architecture.txt
+          cp dylib-build/defined-symbols.txt depot/dylib/defined-symbols.txt
           python3 - <<'PY'
           import hashlib, json, os
           from pathlib import Path
           root = Path('depot/dylib')
-          sha = hashlib.sha256((root / 'libLLVM-15.so').read_bytes()).hexdigest()
+          sha = hashlib.sha256((root / os.environ['LLVM_DYLIB_LIBRARY']).read_bytes()).hexdigest()
           (root / 'manifest.json').write_text(json.dumps({
               'llvm_sha': os.environ['LLVM_SHA'], 'sha256': sha,
+              'platform': os.environ['LLVM_DYLIB_PLATFORM'], 'library': os.environ['LLVM_DYLIB_LIBRARY'],
               'targets': ['X86', 'ARM', 'AArch64'],
               'run_id': os.environ['GITHUB_RUN_ID'], 'run_attempt': os.environ['GITHUB_RUN_ATTEMPT']}) + '\n')
           with open(os.environ['GITHUB_ENV'], 'a') as out:
@@ -80,9 +100,10 @@ jobs:
       - name: Verify exact loaded library and C API
         run: |
           set -euo pipefail
-          python3 ci/llvm-dylib/verify.py depot/dylib "$LLVM_SHA" "$BUILT_DYLIB_SHA256" | tee depot/dylib/loaded.json
+          LLVM_NM="$PWD/dylib-build/bin/llvm-nm" python3 ci/llvm-dylib/verify.py depot/dylib "$LLVM_SHA" "$BUILT_DYLIB_SHA256" | tee depot/dylib/loaded.json
           test -s depot/dylib/loaded.json
       - name: Exercise bootstrap identity check with real libraries
+        if: runner.os == 'Linux'
         run: |
           set -euo pipefail
           wrong="$(ldconfig -p | awk '/libLLVM-[0-9]+\.so/ && !found {print $NF; found=1}')"
@@ -100,6 +121,20 @@ jobs:
           grep -F 'LLVM_DYLIB_SHA256_MISMATCH expected=' dylib-build/invalid-dylib/stderr.log
           DYLIB_TEST_FILE="$PWD/depot/dylib/libLLVM-15.so" DYLIB_TEST_WRONG_FILE="$wrong" \
             node --test ci/release/prepare_bootstrap_inputs.test.mjs ci/release/prepare_llvm_dylib.test.mjs | tee depot/dylib/input-tests.log
+      - name: Reject a changed Darwin library before loading it
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          mkdir -p dylib-build/invalid-dylib
+          cp "depot/dylib/$LLVM_DYLIB_LIBRARY" dylib-build/invalid-dylib/
+          cp depot/dylib/manifest.json dylib-build/invalid-dylib/
+          printf 'changed' >> "dylib-build/invalid-dylib/$LLVM_DYLIB_LIBRARY"
+          if LLVM_NM="$PWD/dylib-build/bin/llvm-nm" python3 ci/llvm-dylib/verify.py dylib-build/invalid-dylib "$LLVM_SHA" "$BUILT_DYLIB_SHA256" > dylib-build/rejected.log 2>&1; then
+            echo 'changed library unexpectedly accepted' >&2
+            exit 1
+          fi
+          grep -F 'LLVM_DYLIB_SHA256_MISMATCH expected=' dylib-build/rejected.log
+          cp dylib-build/rejected.log depot/dylib/identity-rejection.log
       - uses: ./.github/actions/sccache-report
         if: always()
         with:

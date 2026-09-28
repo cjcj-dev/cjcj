@@ -81,8 +81,8 @@ async function fixture(t) {
 test('default RELEASE_EVIDENCE_ROOT discovery is MET only while its checkout binding matches', async t => {
   const state = await fixture(t);
   const positive = run(state.checkout);
+  assert.equal(positive.value.status, 'MET', JSON.stringify(positive.value));
   assert.equal(positive.result.status, 0, positive.result.stderr);
-  assert.equal(positive.value.status, 'MET');
 
   const mismatched = {...state.binding, cjcj_head_sha: 'f'.repeat(40)};
   await write(state.evidence, 'EVIDENCE_BINDING.json', `${JSON.stringify(mismatched, null, 2)}\n`);

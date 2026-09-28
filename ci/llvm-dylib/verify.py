@@ -4,6 +4,8 @@ import argparse
 import ctypes
 import hashlib
 import json
+import os
+import sys
 import re
 from pathlib import Path
 import subprocess
@@ -11,7 +13,7 @@ import subprocess
 
 def verify(directory, llvm_sha, expected_sha):
     root = Path(directory).resolve()
-    library = root / 'libLLVM-15.so'
+    library = root / ('libLLVM.dylib' if sys.platform == 'darwin' else 'libLLVM-15.so')
     manifest = json.loads((root / 'manifest.json').read_text())
     if manifest['llvm_sha'] != llvm_sha:
         raise ValueError('LLVM_DYLIB_SOURCE_MISMATCH')
@@ -22,8 +24,9 @@ def verify(directory, llvm_sha, expected_sha):
     stamps = set(re.findall(rb'CJLLVM-COMMIT:([0-9a-z-]+)', library_bytes))
     if stamps != {llvm_sha.encode()}:
         raise ValueError(f'LLVM_DYLIB_SOURCE_STAMP_MISMATCH expected={llvm_sha} actual={sorted(stamps)}')
-    symbols = subprocess.check_output(['nm', '--defined-only', str(library)], text=True)
-    defined = {line.split()[-1].split('@')[0] for line in symbols.splitlines() if line.split()}
+    symbols = subprocess.check_output([os.environ.get('LLVM_NM', 'nm'), '--defined-only', str(library)], text=True)
+    defined = {(line.split()[-1].split('@')[0][1:] if sys.platform == 'darwin'
+                else line.split()[-1].split('@')[0]) for line in symbols.splitlines() if line.split()}
     required = [f'LLVMInitialize{target}{part}' for target in ('X86', 'ARM', 'AArch64')
                 for part in ('TargetInfo', 'Target', 'TargetMC', 'AsmPrinter', 'AsmParser')]
     missing = sorted(set(required) - defined)

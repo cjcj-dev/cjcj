@@ -49,17 +49,17 @@ test('SDK input jobs cover the selected runner/requirement pairs and exclude aba
 test('phased release source and package sets equal the buildable matrix', () => {
   const workflow = fs.readFileSync(path.resolve(import.meta.dirname, '../../.github/workflows/release.yml'), 'utf8');
   const source = [...workflow.matchAll(/^      targets: (\S+)$/gm)].map(match => match[1]);
-  const packages = [...workflow.matchAll(/^      platform: (\S+)$/gm)].map(match => match[1]);
+  const packages = [...workflow.matchAll(/^      release_key: (\S+)$/gm)].map(match => match[1]);
   const plan = planMatrix('all');
   assert.deepEqual(source.sort(), plan.source.map(row => row.target).sort(), 'source symmetric difference');
-  assert.deepEqual(packages.sort(), plan.package.map(row => row.platform).sort(), 'package symmetric difference');
+  assert.deepEqual(packages.sort(), plan.package.map(row => row.release_key).sort(), 'package symmetric difference');
 });
 
-test('plan for all fourteen platforms: four source cells, five packages, eight blocked, one excluded', () => {
+test('plan for all fourteen platforms: four source cells, eight packages, five blocked, one excluded', () => {
   const plan = planMatrix('all');
   assert.deepEqual(plan.source.map(row => row.target).sort(), ['darwin-arm64', 'darwin-x64', 'linux-aarch64', 'linux-x64']);
-  assert.deepEqual(plan.package.map(row => row.release_key), ['linux-x64', 'linux-arm64', 'darwin-arm64', 'darwin-x64', 'win32-x64']);
-  assert.equal(plan.blocked.length, 8);
+  assert.deepEqual(plan.package.map(row => row.release_key), ['linux-x64', 'linux-arm64', 'linux-x64-android', 'darwin-arm64', 'darwin-x64', 'darwin-arm64-android', 'win32-x64', 'win32-x64-android']);
+  assert.equal(plan.blocked.length, 5);
   assert.deepEqual(plan.excluded.map(row => row.release_key), ['win32-x64-ohos-arm32']);
   assert.equal(plan.windowsSide, true);
   for (const row of plan.blocked) {
@@ -73,13 +73,13 @@ test('package rows carry exactly the inputs build-release-package.yml takes, spe
   assert.deepEqual(rows.get('linux-x64'), {
     release_key: 'linux-x64', platform: 'linux-x64', runner: 'ubuntu-24.04', llvm_platform: 'linux_x86_64',
     sdk_runtime_dir: 'linux_x86_64_cjnative', compiler_artifact: 'final-compiler-linux-x64',
-    std_artifact: 'final-std-linux-x64', cross_std_artifact: 'final-std-windows-x64',
-    cross_std_tuple: 'windows_x86_64_cjnative', host_std_cross_built: 'false',
+    std_artifact: 'final-std-linux-x64',
+    cross_std_artifacts: JSON.stringify([{tuple: 'windows_x86_64_cjnative', artifact: 'final-std-windows-x64'}]), host_std_cross_built: 'false',
   });
   assert.deepEqual(rows.get('win32-x64'), {
     release_key: 'win32-x64', platform: 'windows-x64', runner: 'windows-2025', llvm_platform: 'windows_x86_64',
     sdk_runtime_dir: 'windows_x86_64_cjnative', compiler_artifact: '', std_artifact: 'final-std-windows-x64',
-    cross_std_artifact: '', cross_std_tuple: '', host_std_cross_built: 'true',
+    cross_std_artifacts: '[]', host_std_cross_built: 'true',
   });
   assert.equal(rows.get('darwin-arm64').runner, 'macos-15');
   assert.equal(rows.get('darwin-x64').runner, 'macos-15-intel');
@@ -100,11 +100,11 @@ test('selecting a consumer selects the source cells it needs and nothing else', 
 });
 
 test('a blocked-only selection still produces a plan with a red cell, and an unknown key is refused', () => {
-  const blocked = planMatrix('linux-x64-android');
+  const blocked = planMatrix('linux-x64-ohos');
   assert.deepEqual(blocked.source, []);
   assert.deepEqual(blocked.package, []);
   assert.equal(blocked.blocked.length, 1);
-  assert.match(blocked.blocked[0].reasons, /linux_android_aarch64_cjnative/);
+  assert.match(blocked.blocked[0].reasons, /linux_ohos_aarch64_cjnative/);
   assert.throws(() => selectPlatforms('linux-x64,plan9'), /unknown release platform\(s\): plan9/);
   assert.throws(() => planMatrix(' , '), /no release platform selected/);
 });
@@ -130,9 +130,9 @@ test('check on a blocked platform is red even when the runner has the capability
   const ndk = fs.mkdtempSync(path.join(os.tmpdir(), 'ndk-'));
   fs.mkdirSync(path.join(ndk, 'toolchains/llvm/prebuilt'), {recursive: true});
   const present = checkPlatform('linux-x64-android', {platform: 'linux', arch: 'x64', env: {ANDROID_NDK_ROOT: ndk}});
-  assert.equal(present.ok, false);
+  assert.equal(present.ok, true);
   assert.ok(present.lines.some(line => line.startsWith('PRESENT android-ndk:')), present.lines.join('\n'));
-  assert.ok(present.problems.some(problem => /BLOCKED tuple linux_android_aarch64_cjnative/.test(problem)), present.problems.join('\n'));
+  assert.deepEqual(present.problems, []);
   const absent = checkPlatform('linux-x64-android', {platform: 'linux', arch: 'x64', env: {}});
   assert.ok(absent.problems.some(problem => /^MISSING android-ndk: Android NDK/.test(problem)), absent.problems.join('\n'));
 });
@@ -159,12 +159,12 @@ test('the CLI writes GITHUB_OUTPUT lines the workflow fans out over', () => {
   assert.equal(result.status, 0, result.stderr);
   const lines = Object.fromEntries(fs.readFileSync(out, 'utf8').trim().split('\n').map(line => line.split(/=(.*)/s).slice(0, 2)));
   assert.equal(lines.selected, 'linux-x64,linux-x64-android');
-  assert.deepEqual(JSON.parse(lines.source_matrix), {include: [{target: 'linux-x64'}]});
-  assert.equal(JSON.parse(lines.package_matrix).include.length, 1);
-  assert.equal(JSON.parse(lines.blocked_matrix).include[0].release_key, 'linux-x64-android');
-  assert.equal(lines.package_keys, 'linux-x64');
+  assert.deepEqual(JSON.parse(lines.source_matrix), {include: [{target: 'linux-x64', build_android: true}]});
+  assert.deepEqual(JSON.parse(lines.package_matrix).include.map(row => row.release_key), ['linux-x64', 'linux-x64-android']);
+  assert.deepEqual(JSON.parse(lines.blocked_matrix).include, []);
+  assert.equal(lines.package_keys, 'linux-x64,linux-x64-android');
   assert.equal(lines.has_source, 'true');
-  assert.equal(lines.has_blocked, 'true');
+  assert.equal(lines.has_blocked, 'false');
   assert.equal(lines.has_prerequisites, 'true');
   assert.deepEqual(JSON.parse(lines.prerequisite_matrix).include,
     [{runner: 'ubuntu-24.04', requirement: 'android-ndk'}]);
