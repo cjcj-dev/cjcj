@@ -38,6 +38,7 @@ import cjcj::chir.CHIRPrinter as ChirPrinter
 import cjcj::chir.ToCHIRPhase as ChirToCHIRPhase
 import std.collection.*
 import std.ref.{WeakRef, CleanupPolicy}
+import cjcj::sema.GenericInstantiation.PartialInstantiation
 import std.core.Box as CoreBox
 
 foreign {
@@ -374,6 +375,10 @@ public class CompilerInstance {
                 info.gim = None
                 info.srcPkgs.clear()
                 info.pkgCtxMap.clear()
+                // PartialInstantiation.h:72-73 stores borrowed AST pointers. The
+                // managed maps own their values, so retire those roots at the
+                // CompilerInstance.cpp:110-185 AST destruction boundary as well.
+                PartialInstantiation.ResetGlobalMap()
                 unsafe {
                     CJ_MCC_InvokeGC(true)
                 }
