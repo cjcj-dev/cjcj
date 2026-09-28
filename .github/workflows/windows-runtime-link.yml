@@ -47,12 +47,13 @@ jobs:
             mingw-w64-x86_64-compiler-rt mingw-w64-x86_64-gcc
             mingw-w64-x86_64-libc++ mingw-w64-x86_64-libunwind
             mingw-w64-x86_64-ninja mingw-w64-x86_64-python mingw-w64-x86_64-lld
-      - name: Preserve native cache directories
+      # The runtime's find_program prefers ccache over sccache. Remove the
+      # runner image's ccache so every arm, including cut-entry, selects sccache.
+      - name: Remove the runner's preinstalled ccache
         shell: pwsh
         run: |
-          $cacheHome = $env:USERPROFILE.Replace('\', '/')
-          $cacheConfigHome = $env:LOCALAPPDATA.Replace('\', '/')
-          "export USERPROFILE='$cacheHome' LOCALAPPDATA='$cacheConfigHome'" | Set-Content -NoNewline -Encoding utf8 C:/msys64/etc/profile.d/runtime-link.sh
+          choco uninstall ccache --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Start sccache
         uses: ./.github/actions/sccache
         with:
