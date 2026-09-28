@@ -40,7 +40,6 @@ import std.collection.*
 import std.ref.{WeakRef, CleanupPolicy}
 import cjcj::sema.GenericInstantiation.PartialInstantiation
 import cjcj::sema.OverrideFunctionResolver
-import cjcj::sema.ReleaseInoutUseCache
 import std.core.Box as CoreBox
 
 foreign {
@@ -388,7 +387,6 @@ public class CompilerInstance {
                 // GenericInstantiationContext.cpp:35-43 clears this borrowed-
                 // pointer cache. Retire its managed roots with the AST as well.
                 OverrideFunctionResolver.ClearCache()
-                ReleaseInoutUseCache()
                 unsafe {
                     CJ_MCC_InvokeGC(true)
                 }

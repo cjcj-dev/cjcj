@@ -13,30 +13,12 @@ import cjcj::modules.IsTestPackage as ModulesIsTestPackage
 import cjcj::modules.PackageRelation as ModulesPackageRelation
 import cjcj::modules.SemaImportManager
 
-private class InoutUseCacheEntry {
-    public var decl: Decl
-    public var value: Bool
-
-    public init(decl: Decl, value: Bool) {
-        this.decl = decl
-        this.value = value
-    }
-}
-
 private class BoolBox {
     public var value: Bool
 
     public init(value: Bool) {
         this.value = value
     }
-}
-
-private let inoutUseCache: ArrayList<InoutUseCacheEntry> = ArrayList<InoutUseCacheEntry>()
-
-// TypeCheckerImpl.h:1773 owns this cache; CompilerInstance.cpp:173 destroys
-// that owner before AST packages. Retire the managed table at the same boundary.
-public func ReleaseInoutUseCache(): Unit {
-    inoutUseCache.clear()
 }
 
 public func MaybeStruct(ty: Ty): Bool {
@@ -488,11 +470,10 @@ public func CheckNonFuncAccessControl(diag: BasicDiagnosticEngine, typeManager: 
     return false
 }
 
+extend TypeCheckerImpl {
 public func CheckIfUseInout(decl: FuncDecl): Bool {
-    for (entry in inoutUseCache) {
-        if (entry.decl == decl) {
-            return entry.value
-        }
+    if (let Some(value) <- inoutCache.get(decl)) {
+        return value
     }
     let result = BoolBox(false)
     if (let Some(body) <- decl.funcBody) {
@@ -517,8 +498,9 @@ public func CheckIfUseInout(decl: FuncDecl): Bool {
         })
         let _ = walker.Walk()
     }
-    inoutUseCache.add(InoutUseCacheEntry(decl, result.value))
+    inoutCache[decl] = result.value
     return result.value
+}
 }
 
 private func CheckMutationInStruct(diag: BasicDiagnosticEngine, ctx: ASTContext, expr: Expr): Unit {
@@ -594,6 +576,7 @@ private func DiagImmutableAccessMutableFunc(diag: BasicDiagnosticEngine, outerMa
     builder.Emit()
 }
 
+extend TypeCheckerImpl {
 public func CheckLetInstanceAccessMutableFunc(
     diag: BasicDiagnosticEngine,
     ctx: ASTContext,
@@ -695,6 +678,7 @@ public func CheckLetInstanceAccessMutableFunc(
             CheckMutationInStruct(diag, ctx, baseExpr)
         }
     }
+}
 }
 
 public func CheckMutationInStructNonMut(diag: BasicDiagnosticEngine, structDecl: StructDecl, expr: Expr): Unit {

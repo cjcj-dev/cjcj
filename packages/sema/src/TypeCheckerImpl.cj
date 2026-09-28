@@ -96,6 +96,8 @@ public class CollectDeclsInfo {
 }
 
 public class TypeCheckerImpl {
+    // TypeCheckerImpl.h:1773: the checker owns the inout query cache.
+    internal let inoutCache = HashMap<FuncDecl, Bool>()
     public var typeManager: TypeManager
     public var ci: Option<CompilerInstance> = None
     public var diag: Option<BasicDiagnosticEngine> = None
