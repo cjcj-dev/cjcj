@@ -14,11 +14,11 @@ def sha(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def run(command, log):
+def run(command, log, env=None):
     with log.open('w') as out:
         try:
             return subprocess.run(command, stdout=out, stderr=subprocess.STDOUT,
-                                  timeout=300).returncode
+                                  timeout=300, env=env).returncode
         except subprocess.TimeoutExpired:
             return 124
 
@@ -58,11 +58,40 @@ def case(args, source, debug):
     return result
 
 
+def value_case(args):
+    out = args.out / 'value-debug'
+    out.mkdir()
+    source = Path(__file__).resolve().with_name('value.cj')
+    executable = out / 'value'
+    command = [str(args.compiler), str(source), '-g', '-O0', '-j' + str(args.jobs),
+               '-o', str(executable)]
+    result = {'command': command, 'compile_rc': run(command, out / 'compile.log'),
+              'source_sha256': sha(source), 'run_rc': None}
+    if result['compile_rc'] == 0 and executable.is_file():
+        result['elf_sha256'] = sha(executable)
+        env = dict(os.environ, LD_LIBRARY_PATH=str(args.runtime_dir))
+        result['runtime_sha256'] = sha(args.runtime_dir / 'libcangjie-runtime.so')
+        result['boundscheck_sha256'] = sha(args.runtime_dir / 'libboundscheck.so')
+        result['run_rc'] = run([str(executable)], out / 'run.log', env=env)
+        result['value_assertion_executed'] = 'ASSERT generic_struct_value=' in (out / 'run.log').read_text()
+        result['passed'] = result['run_rc'] == 0 and (
+            'ASSERT generic_struct_value=PASS value=305419896' in (out / 'run.log').read_text())
+    else:
+        result['passed'] = False
+        result['value_assertion_executed'] = False
+    # A failed compile is NOT a runtime-value red arm. Keep that distinction explicit.
+    result['status'] = ('PASS' if result['passed'] else 'FAIL') if result['run_rc'] is not None else 'NOT_RUN'
+    print('ASSERT generic_struct_value=' + result['status'], flush=True)
+    (out / 'result.json').write_text(json.dumps(result, indent=2) + '\n')
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--compiler', type=Path, required=True)
     parser.add_argument('--opt', type=Path, required=True)
     parser.add_argument('--out', type=Path, required=True)
+    parser.add_argument('--runtime-dir', type=Path, help='Matching target runtime/std directory for value execution')
     parser.add_argument('--jobs', type=int, default=os.cpu_count())
     args = parser.parse_args()
     args.compiler = args.compiler.absolute()
@@ -86,9 +115,13 @@ def main():
         tasks = [pool.submit(case, args, Path(__file__).resolve().with_name(name + '.cj'), debug)
                  for name in ('offset', 'control') for debug in (False, True)]
         record['cases'] = [task.result() for task in tasks]
+    if args.runtime_dir:
+        args.runtime_dir = args.runtime_dir.resolve()
+        record['value'] = value_case(args)
     record['wall'] = time.monotonic() - start
     record['uptime_after'] = subprocess.check_output(['uptime'], text=True)
-    record['rc'] = int(not all(all(c['checks'].values()) for c in record['cases']))
+    record['rc'] = int(not all(all(c['checks'].values()) for c in record['cases']) or
+                       not record.get('value', {'passed': True})['passed'])
     (args.out / 'result.json').write_text(json.dumps(record, indent=2) + '\n')
     return record['rc']
 
