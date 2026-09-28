@@ -10,7 +10,7 @@ const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const digest = value => crypto.createHash('sha256').update(value).digest('hex');
 const sha = async file => digest(await fs.readFile(file));
 function command(program, args) {
-  const r = spawnSync(program, args, {encoding: 'utf8'});
+  const r = spawnSync(program, args, {encoding: 'utf8', env: {...process.env, LC_ALL: 'C'}});
   if (r.status !== 0) throw new Error(`${program}: ${r.error?.message || r.stderr}`);
   return r.stdout.trim();
 }
@@ -90,6 +90,7 @@ export async function main(gate) {
   const loadBegin = (await fs.readFile('/proc/loadavg', 'utf8')).trim();
   await write(root, 'inputs.json', JSON.stringify(inputs, null, 2) + '\n');
   await fs.copyFile(inputs.toolchain_provenance.path, path.join(root, 'toolchain-provenance.json'));
+  if (gate === 'G12') await fs.copyFile(inputs.control_patch.path, path.join(root, 'control.diff'));
   await write(root, 'RECIPE.txt', [
     `GATE=${gate}`, `SOURCE=ci/release/${gate.toLowerCase()}.mjs`, `HEAD=${head}`,
     'PROFILE=DEFAULT', 'HEAP=256MB', 'N=20', `CORES=${values.cores}`,
@@ -135,7 +136,8 @@ export async function main(gate) {
       uptime_begin: before, uptime_end: command('uptime', []),
       workload_sha256: elf.sha256, runtime_sha256: runtime.sha256};
     let gcLog = await fs.readFile(path.join(dir, 'stderr.log'), 'utf8');
-    for (const name of (await fs.readdir(dir)).filter(name => name === 'report' || name.startsWith('report.')).sort()) {
+    receipt.gc_sources = ['stderr.log', ...(await fs.readdir(dir)).filter(name => name === 'report' || name.startsWith('report.')).sort()];
+    for (const name of receipt.gc_sources.slice(1)) {
       gcLog += '\n' + await fs.readFile(path.join(dir, name), 'utf8');
     }
     await write(dir, 'gc.log', gcLog);
