@@ -1,4 +1,8 @@
-// Streaming histogram for Cangjie "CANGJIE PROFILE 1.0.2" heap dumps.
+// Inspect Constant -> ArrayList<BlockGroup> -> RawArray ownership in an
+// official Cangjie "CANGJIE PROFILE 1.0.2" heap dump. Constant has no block
+// groups (CHIR/IR/Expression/Expression.h; Expression.cj:609-612).
+// Primitive size fields are absent: report only fully resolved pointer chains.
+// Unresolved records are not guessed to be zero-capacity arrays.
 // Format anchors: runtime/src/Inspector/CjHeapData.cpp WriteFixedHeader,
 // WriteClass, WriteInstance, WriteObjectArray, WriteStructArray, and
 // WritePrimitiveArray.
@@ -90,55 +94,12 @@ struct ClassInfo {
     uint32_t instanceOrComponentSize = 0;
 };
 
-struct Stat {
-    uint64_t count = 0;
-    uint64_t bytes = 0;
-};
-
-uint64_t CheckedMul(uint64_t a, uint64_t b)
-{
-    if (a != 0 && b > std::numeric_limits<uint64_t>::max() / a) {
-        throw std::runtime_error("record size overflow");
-    }
-    return a * b;
-}
-
-std::string BasicTypeName(uint8_t type)
-{
-    switch (type) {
-        case 4: return "<primitive-array:boolean>";
-        case 5: return "<primitive-array:char>";
-        case 6: return "<primitive-array:float>";
-        case 7: return "<primitive-array:double>";
-        case 8: return "<primitive-array:byte>";
-        case 9: return "<primitive-array:short>";
-        case 10: return "<primitive-array:int>";
-        case 11: return "<primitive-array:long>";
-        default: return "<primitive-array:unknown-" + std::to_string(type) + ">";
-    }
-}
-
-uint64_t BasicTypeSize(uint8_t type)
-{
-    switch (type) {
-        case 4:
-        case 8: return 1;
-        case 5:
-        case 9: return 2;
-        case 6:
-        case 10: return 4;
-        case 7:
-        case 11: return 8;
-        default: return 0;
-    }
-}
-
 } // namespace
 
 
 #include <unordered_set>
 int main(int argc, char** argv) {
- if(argc!=3) return 2;
+ if(argc!=2) { std::cerr << "usage: compiler_heap_owners HEAP.dat\n"; return 2; }
  int fd=open(argv[1],O_RDONLY); struct stat st{}; if(fd<0||fstat(fd,&st))return 2;
  auto data=static_cast<const uint8_t*>(mmap(nullptr,st.st_size,PROT_READ,MAP_PRIVATE,fd,0));
  try {
