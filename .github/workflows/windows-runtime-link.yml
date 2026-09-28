@@ -62,13 +62,6 @@ jobs:
       - name: Exercise production entry and linker controls
         shell: bash
         run: npx --yes zx@8 ci/platform_matrix/test_windows_runtime_link.mjs
-      - name: Report sccache
-        if: always()
-        uses: ./.github/actions/sccache-report
-        with:
-          component: windows-runtime
-          platform: windows-x86_64-${{ matrix.arm }}
-          require-compiles: ${{ job.status == 'success' }}
       - name: Record toolchain versions
         if: always()
         shell: msys2 {0}
@@ -78,6 +71,13 @@ jobs:
           clang++ --version > link-evidence/clang.txt
           ld --version > link-evidence/ld.txt
           ld.lld --version > link-evidence/lld.txt
+      - name: Report sccache
+        if: always()
+        uses: ./.github/actions/sccache-report
+        with:
+          component: windows-runtime
+          platform: windows-x86_64-${{ matrix.arm }}
+          require-compiles: ${{ job.status == 'success' }}
       - uses: actions/upload-artifact@v7
         if: always()
         with:
