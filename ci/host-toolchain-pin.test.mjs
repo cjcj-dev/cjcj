@@ -123,7 +123,6 @@ test('the ordinary host nightly literal has one pin and the release exception is
   assert.match(release, /smoke changing from 13\/15 to 0\/15/);
 });
 
-
 // Run the real scan entry in an isolated tree, not a duplicate classifier.
 // The filter prevents these integration controls from recursively spawning.
 const scanTestName = 'the ordinary host nightly literal has one pin and the release exception is explicit';
@@ -169,10 +168,12 @@ for (const [name, changedFile, mutate] of scanControls) {
         });
         await fs.writeFile(target, mutate(previous));
       }
+      const childEnv = {...process.env};
+      delete childEnv.NODE_TEST_CONTEXT;
       const result = spawnSync(process.execPath, [
         '--test', '--test-reporter=tap', `--test-name-pattern=^${scanTestName}$`,
         path.join(fixture, 'ci', 'host-toolchain-pin.test.mjs'),
-      ], {encoding: 'utf8', timeout: 30_000});
+      ], {encoding: 'utf8', timeout: 30_000, env: childEnv});
       assert.ifError(result.error);
       const output = result.stdout + result.stderr;
       assert.equal(result.status, changedFile ? 1 : 0, output);
