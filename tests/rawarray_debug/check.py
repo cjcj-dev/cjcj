@@ -45,13 +45,13 @@ def arrays(text):
 def check(text):
     observed = arrays(text)
     generic = [a for a in observed if a['name'] == 'RawArray<$G_T>']
-    concrete = [a for a in observed if a['name'] == 'RawArray<Int64>']
+    concrete = [a for a in observed if a['name'] in ('RawArray<Int64>', 'RawArray<UInt64>', 'RawArray<UInt8>')]
     # Evaluate every assertion: a presence failure must not hide the target shape assertion.
     checks = {
         'generic_rawarray_present': bool(generic),
         'unsized_rawarray_ti_only': all(a['members'] == {'$ti': '0'} for a in generic),
         'concrete_rawarray_present': bool(concrete),
-        # {ArrayBase={i64}, [0 x i64]} behind the 8-byte object header.
+        # {ArrayBase={i64}, [0 x scalar]} behind the 8-byte object header.
         'sized_rawarray_members_match_layout': all(
             a['members'] == {'$ti': '0', 'size': '8', 'elements': '16'} for a in concrete),
     }
