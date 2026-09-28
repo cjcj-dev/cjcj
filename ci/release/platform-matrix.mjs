@@ -11,6 +11,9 @@
 //         and probe the capabilities the platform needs. Exit 1 with MISSING /
 //         BLOCKED lines when anything is absent. Blocked platforms always exit 1.
 //   table Markdown table of all fourteen platforms for humans.
+//   probe --requirement NAME
+//         Check one installed runner SDK without claiming the platform's
+//         runtime/final-std producers or package consumers are implemented.
 
 import fs from 'node:fs';
 import os from 'node:os';
@@ -56,11 +59,16 @@ export function planMatrix(requested) {
   const packages = [];
   const blocked = [];
   const excluded = [];
+  const prerequisites = new Map();
   for (const key of selected) {
     const readiness = releasePlatformReadiness(key);
     if (readiness.status === 'excluded') {
       excluded.push({release_key: key, reason: readiness.reasons[0]});
       continue;
+    }
+    for (const requirement of getReleasePlatform(key).requires) {
+      const id = `${readiness.runner}-${requirement}`;
+      if (!prerequisites.has(id)) prerequisites.set(id, {runner: readiness.runner, requirement});
     }
     if (readiness.status === 'blocked') {
       blocked.push({release_key: key, runner: readiness.runner, reasons: readiness.reasons.join(' | ')});
@@ -68,23 +76,16 @@ export function planMatrix(requested) {
     }
     const host = getTarget(readiness.host);
     const crossTuples = Object.keys(readiness.crossStd);
-    if (crossTuples.length > 1) {
-      throw new Error(`${key}: build-release-package.yml takes one cross std, platform carries ${crossTuples.length}: ${crossTuples.join(', ')}`);
-    }
-    const [crossTuple] = crossTuples;
-    const crossTarget = crossTuple ? [...new Set(Object.values(readiness.crossStd))][0] : '';
     if (!source.has(readiness.sourceTarget)) source.set(readiness.sourceTarget, {target: readiness.sourceTarget});
-    // A cross std is built by another platform's source cell; selecting the
-    // consumer selects its producer, the same edge release.yml draws.
-    if (crossTarget && !source.has(crossTarget)) source.set(crossTarget, {target: crossTarget});
-    if (crossTuple) {
-      // The cross std artifact is named after the tuple's own target key
-      // (final-std-windows-x64), produced by the linux-x64 source cell.
-      const tupleTarget = [...allTargetKeysForTuple(crossTuple)][0];
-      packages.push(packageRow(key, readiness, host, {artifact: stdArtifact(tupleTarget), tuple: crossTuple, producer: crossTarget}));
-    } else {
-      packages.push(packageRow(key, readiness, host, null));
-    }
+    const cross = crossTuples.map(tuple => {
+      const producer = readiness.crossStd[tuple];
+      if (!source.has(producer)) source.set(producer, {target: producer});
+      if (tuple === 'linux_android_aarch64_cjnative') source.get(producer).build_android = true;
+      const artifact = tuple === 'linux_android_aarch64_cjnative'
+        ? 'final-std-android-aarch64' : stdArtifact(allTargetKeysForTuple(tuple)[0]);
+      return {tuple, artifact};
+    });
+    packages.push(packageRow(key, readiness, host, cross));
   }
   if (source.size + packages.length + blocked.length + excluded.length === 0) {
     throw new Error(`no release platform selected from '${requested}'`);
@@ -96,6 +97,7 @@ export function planMatrix(requested) {
     package: packages,
     blocked,
     excluded,
+    prerequisites: [...prerequisites.values()],
     windowsSide,
   });
 }
@@ -120,8 +122,7 @@ function packageRow(key, readiness, host, cross) {
     // native host hands its own final-compiler-<target> over.
     compiler_artifact: windows ? '' : `final-compiler-${readiness.host}`,
     std_artifact: stdArtifact(readiness.host),
-    cross_std_artifact: cross ? cross.artifact : '',
-    cross_std_tuple: cross ? cross.tuple : '',
+    cross_std_artifacts: JSON.stringify(cross),
     host_std_cross_built: windows ? 'true' : 'false',
   };
 }
@@ -201,8 +202,10 @@ function writeOutputs(file, plan) {
     `source_matrix=${JSON.stringify({include: plan.source})}`,
     `package_matrix=${JSON.stringify({include: plan.package})}`,
     `blocked_matrix=${JSON.stringify({include: plan.blocked})}`,
+    `prerequisite_matrix=${JSON.stringify({include: plan.prerequisites})}`,
+    `has_prerequisites=${plan.prerequisites.length > 0}`,
     `excluded=${plan.excluded.map(entry => entry.release_key).join(',')}`,
-    `package_keys=${plan.package.map(row => row.platform).join(',')}`,
+    `package_keys=${plan.package.map(row => getReleasePlatform(row.release_key).archiveKey).join(',')}`,
     `has_source=${plan.source.length > 0}`,
     `has_package=${plan.package.length > 0}`,
     `has_blocked=${plan.blocked.length > 0}`,
@@ -230,10 +233,19 @@ export function main(argv, {log = console.log, error = console.error} = {}) {
     options: {
       platforms: {type: 'string', default: 'all'},
       platform: {type: 'string'},
+      requirement: {type: 'string'},
       'github-output': {type: 'string'},
       summary: {type: 'string'},
     },
   });
+  if (command === 'probe') {
+    if (!values.requirement) throw new Error('probe requires --requirement');
+    const result = probeRequirement(values.requirement);
+    const line = `${result.present ? 'PRESENT' : 'MISSING'} ${values.requirement}: ${result.detail}`;
+    log(line);
+    if (values.summary) fs.appendFileSync(values.summary, `${line}\n`);
+    return result.present ? 0 : 1;
+  }
   if (command === 'plan') {
     const plan = planMatrix(values.platforms);
     log(JSON.stringify(plan, null, 2));
@@ -255,7 +267,7 @@ export function main(argv, {log = console.log, error = console.error} = {}) {
     log(renderTable());
     return 0;
   }
-  throw new Error('usage: platform-matrix.mjs plan|check|table ...');
+  throw new Error('usage: platform-matrix.mjs plan|check|probe|table ...');
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

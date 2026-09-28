@@ -53,18 +53,28 @@ elif [ -f "$hrt/lib/$platform/libcangjie-runtime.so" ]; then
   hrt="$hrt/lib/$platform"
 fi
 decl_runtime='' decl_bounds='' decl_llvm=''
-while read -r key val _; do
-  [ -n "${key:-}" ] || continue
-  case "$key" in
+# Only the native platform's reviewed triple may authorize these host bytes.
+# No unscoped fallback: another platform's declaration cannot fill a missing pin.
+while read -r identity_platform key val extra; do
+  [ -n "${identity_platform:-}" ] || continue
+  case "$identity_platform" in
     '#'*) continue ;;
-    libcangjie-runtime.so) decl_runtime=$val ;;
-    libboundscheck.so) decl_bounds=$val ;;
-    libLLVM-15.so) decl_llvm=$val ;;
+    linux_x86_64|linux_aarch64) ;;
+    *) fail "unknown identity platform: $identity_platform" ;;
+  esac
+  [ "$identity_platform" = "${platform%_cjnative}" ] || continue
+  if [ -n "${extra:-}" ] || [[ ! "${val:-}" =~ ^[a-f0-9]{64}$ ]]; then
+    fail "invalid host identity: $identity_platform $key"
+  fi
+  case "$key" in
+    libcangjie-runtime.so) [ -z "$decl_runtime" ] || fail "duplicate host identity: $key"; decl_runtime=$val ;;
+    libboundscheck.so) [ -z "$decl_bounds" ] || fail "duplicate host identity: $key"; decl_bounds=$val ;;
+    libLLVM-15.so) [ -z "$decl_llvm" ] || fail "duplicate host identity: $key"; decl_llvm=$val ;;
     *) fail "unknown identity key: $key" ;;
   esac
 done < "$identities"
 if [ -z "$decl_runtime" ] || [ -z "$decl_bounds" ] || [ -z "$decl_llvm" ]; then
-  fail "incomplete host identities: $identities"
+  fail "incomplete host identities: ${platform%_cjnative} $identities"
 fi
 [ "$llvm_sha" = "$decl_llvm" ] || fail "llvm sha is not the declared host triple: arg=$llvm_sha declared=$decl_llvm"
 check_sha() {

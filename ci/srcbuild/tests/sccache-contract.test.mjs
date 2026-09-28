@@ -36,6 +36,7 @@ function jobs(text) {
 // build-ast-support: libcangjie-ast-support.a via ci/build_ast_support.sh.
 // objc-darwin-e2e: the pinned runtime on macOS before the ObjC fixture.
 const CXX_JOBS = new Map([
+  ['android-runtime.yml/runtime', {component: 'runtime', pin: /env\.RUNTIME_REF/}],
   ['objc-darwin-e2e.yml/objc-darwin-e2e', {component: 'runtime', pin: /env\.RUNTIME_REF/}],
   ['build-ast-support.yml/build', {component: 'ast-support', pin: /\$\{\{ env\.COMPILER_REF \}\}-\$\{\{ env\.FLATBUFFERS_SHA \}\}/}],
   ['build-host-llvm.yml/host', {component: 'host-llvm', pin: /steps\.pin\.outputs\.sha/}],
@@ -48,6 +49,7 @@ const CXX_JOBS = new Map([
   ['source-language-tuple.yml/qualify-and-publish', {component: 'runtime', pin: /env\.RUNTIME_REF/}],
   ['srcbuild.yml/srcbuild', {component: 'srcbuild', pin: /env\.RUNTIME_REF/}],
   ['ci.yml/build', {component: 'runtime', pin: /env\.RUNTIME_REF/}],
+  ['platform-matrix.yml/darwin-runtime', {component: 'runtime', pin: /env\.RUNTIME_REF/}],
   ['platform-matrix.yml/colour-runtime', {component: 'runtime', pin: /env\.RUNTIME_REF/}],
   ['platform-matrix.yml/platform', {component: 'runtime', pin: /env\.RUNTIME_REF/}],
 ]);
@@ -62,7 +64,7 @@ const CXX_JOBS = new Map([
 // or configures one is excluded below rather than left out here.
 // `cc` needs the extra guard: a bare word boundary also matches the end of a
 // filename like src/foo.cc, and a file being copied is not a compile.
-const COMPILES = /(\bcmake\b|\bninja\b|\bmake\b|build\.py build|(?<![.\w-])cc\b|\bgcc\b|\bg\+\+|clang\+\+|\bclang\b|build_patched_runtime\.mjs|build_runtime\.mjs|build_tuple\.sh|install-static-libs|gha_run\.sh|build-stage3\.mjs|build-windows-final-std\.mjs|build_shim\.mjs|build_windows_std_ast\.mjs|build_ast_support\.sh)/;
+const COMPILES = /(\bcmake\b|\bninja\b|\bmake\b|build\.py build|(?<![.\w-])cc\b|\bgcc\b|\bg\+\+|clang\+\+|\bclang\b|build_patched_runtime\.mjs|build_runtime\.mjs|build_tuple\.sh|install-static-libs|gha_run\.sh|build-stage3\.mjs|build-windows-final-std\.mjs|build-android-final-std\.mjs|build-android-runtime\.mjs|build_shim\.mjs|build_windows_std_ast\.mjs|build_ast_support\.sh)/;
 // Only the package managers. Every other exclusion tried here -- the MSYS2
 // package list, --gcc-toolchain, CMAKE_C*_COMPILER=, shellcheck/actionlint --
 // was measured and carried nothing: dropping all six leaves the suite at the

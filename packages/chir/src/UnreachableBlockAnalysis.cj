@@ -160,7 +160,7 @@ private func AnalyzeBody(body: BlockGroup): ArrayList<UnreachableBlockRegion> {
 private func AllUsersIsExprKind(users: ArrayList<Expression>, kind: ExprKind): Bool {
     for (user in users) {
         var hasNothing = false
-        for (arg in user.GetOperands()) {
+        for (arg in user.GetNonSuccessorOperands()) {
             if (let Some(ty) <- arg.GetType()) {
                 if (ty.IsNothing()) { hasNothing = true }
             }

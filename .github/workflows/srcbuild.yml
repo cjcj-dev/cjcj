@@ -46,6 +46,11 @@ on:
         required: false
         type: string
         default: all
+      build_android:
+        description: Build the Android runtime and final std needed by Android release packages
+        required: false
+        type: boolean
+        default: false
       rebuild_llvm:
         description: Bypass the whole-artifact LLVM tools cache so the LLVM sccache hit rate can be measured.
         required: false
@@ -124,6 +129,11 @@ on:
         required: false
         type: string
         default: all
+      build_android:
+        description: Build the Android runtime and final std needed by Android release packages
+        required: false
+        type: boolean
+        default: false
       rebuild_llvm:
         description: Bypass the whole-artifact LLVM tools cache so the LLVM sccache hit rate can be measured.
         required: false
@@ -240,6 +250,30 @@ jobs:
           echo "CJCJ_SRCBUILD_BOOTSTRAP_SDK=$host_sdk" >> "$GITHUB_ENV"
           echo "CJCJ_SRCBUILD_HOST_SDK=$host_sdk" >> "$GITHUB_ENV"
 
+      # G2 describes the canonical Linux x64 SDK. Freeze right after the host
+      # SDK is provisioned: the checkout itself is still clean (provisioning
+      # only writes under $HOME/.cjv) and the frozen base is the archive of
+      # the toolchain this build actually bootstraps from. Later build steps
+      # create files and inject the product version.
+      - name: Freeze G2 identity inputs
+        if: matrix.target == 'linux-x64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d "$CJCJ_SRCBUILD_HOST_SDK"
+          base_archive="$RUNNER_TEMP/g2-base-sdk/host-sdk.tar"
+          mkdir -p "$(dirname "$base_archive")"
+          tar -cf "$base_archive" -C "$CJCJ_SRCBUILD_HOST_SDK" .
+          node ci/generate-freeze.mjs \
+            --base-sdk "$base_archive" \
+            --workflow-ref "${GITHUB_SHA:-$(git rev-parse HEAD)}" \
+            --evidence-root "$RUNNER_TEMP/g2-campaigns" \
+            | tee "$RUNNER_TEMP/g2-freeze.log"
+          identity=$(sed -n 's/^G2_IDENTITY=//p' "$RUNNER_TEMP/g2-freeze.log")
+          test -f "$identity"
+          echo "G2_IDENTITY=$identity" >> "$GITHUB_ENV"
+          echo "G2_CAMPAIGN_DIR=$(dirname "$identity")" >> "$GITHUB_ENV"
+
       - name: Install build dependencies
         run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" install-system-deps
 
@@ -317,7 +351,6 @@ jobs:
           path: ${{ env.CJCJ_FIXED_LLVM_DIR }}
 
       - name: Load immutable bootstrap host LLVM provenance
-        if: matrix.target == 'linux-x64'
         shell: bash
         run: |
           set -euo pipefail
@@ -325,7 +358,6 @@ jobs:
           echo "CJCJ_BOOTSTRAP_HOST_LLVM_ARTIFACT=$RUNNER_TEMP/bootstrap-host-llvm" >> "$GITHUB_ENV"
 
       - name: Download pinned bootstrap host LLVM
-        if: matrix.target == 'linux-x64'
         uses: actions/download-artifact@v8
         with:
           artifact-ids: ${{ env.HOST_LLVM_ARTIFACT_ID }}
@@ -335,7 +367,7 @@ jobs:
           path: ${{ env.CJCJ_BOOTSTRAP_HOST_LLVM_ARTIFACT }}
 
       - name: Load immutable in-process LLVM dylib provenance
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' || runner.os == 'macOS'
         shell: bash
         run: |
           set -euo pipefail
@@ -349,7 +381,7 @@ jobs:
           echo "CJCJ_BOOTSTRAP_DYLIB_ARTIFACT=$RUNNER_TEMP/llvm-depot/$LLVM_SHA/$CANGJIE_COMPILER_SHA/dylib" >> "$GITHUB_ENV"
 
       - name: Download pinned in-process LLVM dylib
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' || runner.os == 'macOS'
         uses: actions/download-artifact@v8
         with:
           artifact-ids: ${{ env.LLVM_DYLIB_ARTIFACT_ID }}
@@ -394,7 +426,14 @@ jobs:
           run-id: ${{ env.COLOUR_RT_RUN_ID }}
           path: ${{ env.CJCJ_BOOTSTRAP_COLOUR_RT }}
 
+      - name: Verify independent Darwin libraries and classify std input
+        if: runner.os == 'macOS'
+        env:
+          RUNTIME_PLATFORM: ${{ matrix.llvm_platform }}
+        run: node ci/release/darwin_runtime.mjs source "$CJCJ_BOOTSTRAP_COLOUR_RT" "$RUNTIME_PLATFORM"
+
       - name: Inspect downloaded colour runtime symbols
+        if: runner.os != 'macOS'
         shell: bash
         run: |
           set -euo pipefail
@@ -444,6 +483,16 @@ jobs:
           CJCJ_BOOTSTRAP_AST_ARTIFACT="$RUNNER_TEMP/ast-support/libcangjie-ast-support.a" \
             node ci/release/prepare_bootstrap_inputs.mjs
 
+      - name: Verify native Linux stage1 host identities
+        if: startsWith(matrix.target, 'linux-')
+        shell: bash
+        env:
+          HOST_IDENTITY_SDK: ${{ env.CJCJ_BOOTSTRAP_BASE }}
+          HOST_IDENTITY_LLVM: ${{ env.CJCJ_BOOTSTRAP_HOST_LLVM_SO }}
+        run: |
+          : "${HOST_IDENTITY_SDK:?}" "${HOST_IDENTITY_LLVM:?}"
+          python3 ci/bootstrap/test_host_identities.py
+
       - name: Prove colour runtime identity rejection
         shell: bash
         run: |
@@ -468,7 +517,7 @@ jobs:
           echo "ASSERT colour-runtime wrong-pin rejected rc=$rc; valid input resolved in prior step"
 
       - name: Reject a one-digit host pin change with the real artifact
-        if: matrix.target == 'linux-x64'
+        if: startsWith(matrix.target, 'linux-')
         shell: bash
         run: |
           set -euo pipefail
@@ -476,7 +525,8 @@ jobs:
           import os, re
           from pathlib import Path
           original = Path('ci/bootstrap/stage1_host_identities.txt').read_text()
-          changed, count = re.subn(r'^(libLLVM-15.so )([a-f0-9])',
+          platform = {'linux-x64': 'linux_x86_64', 'linux-aarch64': 'linux_aarch64'}[os.environ['CJCJ_SRCBUILD_TARGET']]
+          changed, count = re.subn(r'^(' + platform + r' libLLVM-15.so )([a-f0-9])',
               lambda m: m[1] + ('1' if m[2] == '0' else '0'), original, flags=re.M)
           assert count == 1
           Path(os.environ['RUNNER_TEMP'], 'host-pin-cut.txt').write_text(changed)
@@ -491,6 +541,43 @@ jobs:
           fi
           grep -F 'HOST_LLVM_SHA256_MISMATCH expected=' "$RUNNER_TEMP/host-pin-cut.log"
           echo 'ASSERT real-artifact host pin one-digit rejection executed'
+
+      - name: Reject a one-digit native host provenance change with the real artifact
+        # Linux cells use the scoped digest rows checked above.
+        if: startsWith(matrix.target, 'darwin-')
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          platforms = {'linux-x64': 'linux_x86_64', 'linux-aarch64': 'linux_aarch64',
+                       'darwin-arm64': 'darwin_aarch64', 'darwin-x64': 'darwin_x86_64'}
+          target = os.environ['CJCJ_SRCBUILD_TARGET']
+          prefix = '# HOST_LLVM_PROVENANCE '
+          changed = count = 0
+          lines = []
+          for line in Path('ci/bootstrap/stage1_host_identities.txt').read_text().splitlines(True):
+              if line.startswith(prefix):
+                  pin = json.loads(line[len(prefix):])
+                  if pin['platform'] == platforms[target]:
+                      pin['sha256'] = ('1' if pin['sha256'][0] == '0' else '0') + pin['sha256'][1:]
+                      line = prefix + json.dumps(pin) + '\n'
+                      count += 1
+              lines.append(line)
+          assert count == 1, (target, count)
+          Path(os.environ['RUNNER_TEMP'], 'host-provenance-cut.txt').write_text(''.join(lines))
+          PY
+          sha256sum ci/bootstrap/stage1_host_identities.txt "$RUNNER_TEMP/host-provenance-cut.txt"
+          if STAGE1_HOST_IDENTITIES="$RUNNER_TEMP/host-provenance-cut.txt" \
+              node ci/release/prepare_bootstrap_inputs.mjs > "$RUNNER_TEMP/host-provenance-cut.log" 2>&1; then
+            echo 'host provenance change unexpectedly accepted' >&2
+            exit 1
+          else
+            echo "HOST_PROVENANCE_CUT_RC=$?"
+          fi
+          grep -F 'HOST_LLVM_SHA256_MISMATCH expected=' "$RUNNER_TEMP/host-provenance-cut.log"
+          echo "ASSERT real-artifact $CJCJ_SRCBUILD_TARGET provenance one-digit rejection executed"
 
       - name: Record host repair and nightly control symbols
         if: matrix.target == 'linux-x64'
@@ -615,6 +702,27 @@ jobs:
           CANGJIE_CPP_SRC: ${{ env.CANGJIE_WORKSPACE }}/cangjie_compiler
         run: npx --yes zx@8 ci/srcbuild/steps/build-shim.mjs
 
+      - name: Install Android NDK and probe
+        if: matrix.target == 'linux-x64' && inputs.build_android
+        uses: ./.github/actions/setup-release-sdk
+        with:
+          requirement: android-ndk
+
+      - name: Build Android runtime and final std with stage2 cjc
+        if: matrix.target == 'linux-x64' && inputs.build_android
+        env:
+          CJCJ_STAGE3_CANGJIE_VERSION: ${{ steps.version.outputs.value }}
+        run: npx --yes zx@8 ci/srcbuild/steps/build-android-final-std.mjs
+
+      - name: Upload Android runtime and final std
+        if: matrix.target == 'linux-x64' && inputs.build_android
+        uses: actions/upload-artifact@v7
+        with:
+          name: final-std-android-aarch64
+          path: ${{ env.CANGJIE_WORKSPACE }}/software/final-std-android-aarch64
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Restore official MinGW toolchain
         if: matrix.target == 'linux-x64'
         id: windows-mingw-cache
@@ -668,6 +776,31 @@ jobs:
         env:
           SOURCE_SDK_VERSION: ${{ steps.version.outputs.value }}
         run: npx --yes zx@8 ci/srcbuild/steps/compose-sdk.mjs
+
+      - name: Capture G2 SDK identity
+        if: matrix.target == 'linux-x64'
+        timeout-minutes: 2
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdk="$CANGJIE_WORKSPACE/software/cangjie"
+          node ci/capture-g2-identity.mjs \
+            --identity "$G2_IDENTITY" \
+            --runtime-dynamic "$sdk/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so" \
+            --runtime-static "$sdk/lib/linux_x86_64_cjnative/libcangjie-runtime.a" \
+            --llvm-llc "$sdk/third_party/llvm/bin/llc" \
+            --llvm-opt "$sdk/third_party/llvm/bin/opt" \
+            --cjcj "$sdk/bin/cjc" \
+            --std "$sdk/lib/linux_x86_64_cjnative/libcangjie-std-core.a"
+
+      - name: Retain G2 campaign identity
+        if: always() && matrix.target == 'linux-x64' && env.G2_IDENTITY != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: g2-identity-linux-x64-${{ github.run_attempt }}
+          path: ${{ env.G2_CAMPAIGN_DIR }}
+          if-no-files-found: error
+          retention-days: 90
 
       - name: Archive final compiler handoff
         run: tar -C "$CANGJIE_WORKSPACE/software/final-compiler" -czf "$CANGJIE_WORKSPACE/software/final-compiler.tar.gz" .

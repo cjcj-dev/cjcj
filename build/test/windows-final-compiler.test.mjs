@@ -8,6 +8,8 @@ import {buildWindowsFinalCompiler} from '../../ci/platform_matrix/windows-final-
 import {fileSha256, FINAL_COMPILER_PROVENANCE} from '../../ci/srcbuild/lib/final-compiler.mjs';
 import {getTarget} from '../lib/targets.mjs';
 
+const workspaceToml = await fs.readFile(new URL('../../cjpm.toml', import.meta.url), 'utf8');
+
 for (const fail of ['', 'final-clean', 'final-build']) {
   test(`Windows continuation subprocess fixture: ${fail || 'handoff'}`, async t => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'windows-continuation-'));
@@ -48,16 +50,27 @@ for (const fail of ['', 'final-clean', 'final-build']) {
     const llvmManifest = await write(path.join(root, 'llvm-tools.manifest'), 'native LLVM tuple');
     const mingw = path.join(root, 'mingw');
     await fs.mkdir(mingw);
+    for (const dll of ['libstdc++-6.dll', 'libwinpthread-1.dll', 'libgcc_s_seh-1.dll']) {
+      await write(path.join(mingw, dll), `MinGW ${dll}`);
+    }
+    await write(path.join(root, 'cjpm.toml'), workspaceToml.replace('compile-option = "-O2"', 'compile-option = "-O1"'));
     const cjcTomlPath = await write(path.join(root, 'cjc.toml'), 'link-option = "original"\n');
     Object.assign(process.env, {GITHUB_SERVER_URL: 'https://github.com', GITHUB_REPOSITORY: 'cjcj-dev/cjcj',
       GITHUB_SHA: 'a'.repeat(40), GITHUB_RUN_ID: 'fixture', GITHUB_RUN_ATTEMPT: '1', CJCJ_LLVM_LINK_RSP: 'llvm.rsp'});
     const external = await write(path.join(root, 'external-build.py'), `import pathlib, sys, shutil\ncommand, tag, sdk, host, fail = sys.argv[1:]\nsdk = pathlib.Path(sdk)\nassert (sdk/'bin/cjc.exe').read_text() == 'W1 compiler fixture'\nassert (sdk/'lib/${tuple}/libcangjie-std-p0.a').read_text() == 'final static std'\nwith open('commands.log', 'a') as out: out.write(tag + ':' + command + '\\n')\nif tag == fail: sys.exit(71)\nif tag == 'final-clean': shutil.rmtree('target')\nelse:\n p = pathlib.Path('target/release/bin/cjc@cjcj.exe')\n p.parent.mkdir(parents=True)\n p.write_text('W2 from ' + (sdk/'bin/cjc.exe').read_text())\n p.with_name('decoy').write_text('old compiler fixture')\n`);
     process.chdir(root);
     const result = await buildWindowsFinalCompiler({root, cangjieHome: sdk, hostSdk: host, sdkRuntimeDirName: tuple,
-      cjcTomlPath, cjcToml: 'link-option = "original"\n', mingwCxxLinkRsp: 'crt.rsp',
+      cjcTomlPath, cjcToml: 'link-option = "original"\n', workspaceToml, mingwCxxLinkRsp: 'crt.rsp',
       installedRuntimeLib: path.join(sdk, 'runtime', 'lib', tuple, 'libcangjie-runtime.dll'),
       fixedLlvmManifest: llvmManifest, finalCompilerOutput: path.join(root, 'artifact'), finalStd, mingwBin: mingw,
       runInMsys: async (command, tag, sdkRoot, hostRoot) => {
+        if (tag === 'final-build') {
+          const effectiveWorkspace = await fs.readFile('cjpm.toml', 'utf8');
+          console.log('WINDOWS_W2_OPTIMIZATION_ASSERT_REACHED fixture_only=true');
+          const optimization = effectiveWorkspace.match(/^\s*compile-option\s*=\s*"([^"]*)"/m)?.[1];
+          assert.equal(optimization, '-O2', 'W2 optimization must be -O2');
+          assert.equal(effectiveWorkspace, workspaceToml, 'W2 must preserve the complete native release workspace');
+        }
         const child = spawnSync('python3', [external, command, tag, sdkRoot, hostRoot, fail], {encoding: 'utf8'});
         assert.equal(child.error, undefined);
         return {exitCode: child.status};
@@ -70,7 +83,14 @@ for (const fail of ['', 'final-clean', 'final-build']) {
       console.log('WINDOWS_W2_ORIGIN_ASSERT_REACHED fixture_only=true');
       await assert.rejects(fs.stat(path.join(root, 'final-compiler-target-sdk', 'lib', tuple, 'libcangjie-std-old.a')), {code: 'ENOENT'});
       assert.equal(await fs.readFile(path.join(root, 'artifact', 'cjc.exe'), 'utf8'), 'W2 from W1 compiler fixture');
-      assert.equal(JSON.parse(await fs.readFile(record, 'utf8')).production.parentSha256, parentSha);
+      const production = JSON.parse(await fs.readFile(record, 'utf8')).production;
+      assert.equal(production.parentSha256, parentSha);
+      assert.equal(production.workspaceOptionsSha256, await fileSha256(path.join(root, 'cjpm.toml')));
+      for (const dll of ['libstdc++-6.dll', 'libwinpthread-1.dll', 'libgcc_s_seh-1.dll']) {
+        for (const directory of [path.join(host, 'tools/bin'), path.join(root, 'final-compiler-target-sdk/bin')]) {
+          assert.equal(await fs.readFile(path.join(directory, dll), 'utf8'), `MinGW ${dll}`);
+        }
+      }
       assert.equal(await fs.readFile(path.join(host, 'tools/bin/libcangjie-runtime.dll'), 'utf8'), 'host DLL');
       assert.equal(await fs.readFile(path.join(root, 'final-compiler-target-sdk/bin/libcangjie-runtime.dll'), 'utf8'), 'target DLL');
       assert.equal(await fs.readFile(path.join(root, 'commands.log'), 'utf8'), 'final-clean:cjpm clean\nfinal-build:cjc --version && cjpm build\n');

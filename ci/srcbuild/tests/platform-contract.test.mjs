@@ -148,11 +148,15 @@ const runnerOs = runner => {
 function stepRuns(step, context) {
   const condition = scalar(step, 'if');
   if (condition === undefined) return true;
+  if (condition.includes(' || ')) {
+    const results = condition.split(' || ').map(part => stepRuns(`        if: ${part}`, context));
+    return results.some(Boolean);
+  }
   const os = condition.match(/^runner\.os (==|!=) '(\w+)'$/);
   if (os) return (os[1] === '==') === (context.runnerOs === os[2]);
   // `*` not `+`: `inputs.x != ''` is how this repo spells "was anything passed",
   // and a `+` cannot match the empty literal at all.
-  const input = condition.match(/^inputs\.(\w+) (==|!=) '([\w-]*)'$/);
+  const input = condition.match(/^inputs\.(\w+) (==|!=) '([\w\[\]-]*)'$/);
   if (input) {
     // Reading straight from the caller's map would compare against undefined for
     // any input the caller omitted, and `undefined !== ''` flips every one of
@@ -210,7 +214,13 @@ function failClosedDownloads(text, inputs) {
     .filter(step => step.includes('uses: actions/download-artifact@'))
     .filter(step => scalar(step, 'continue-on-error') !== 'true')
     .filter(step => stepRuns(step, context))
-    .map(step => substitute(scalar(step, 'name'), inputs));
+    .flatMap(step => {
+      if (scalar(step, 'pattern') === 'final-std-*') {
+        return [...JSON.parse(context.inputs.get('cross_std_artifacts')).map(entry => entry.artifact),
+          ...[context.inputs.get('cross_std_artifact')].filter(Boolean)];
+      }
+      return [substitute(scalar(step, 'name'), inputs)];
+    });
 }
 
 function substitute(value, inputs) {
@@ -499,10 +509,8 @@ test('final std install roots satisfy package_sdk layout (a) on every release ta
 });
 
 test('an omitted optional input reads the way Actions reads it, not as undefined', async () => {
-  // release.yml passes cross_std_artifact on two matrix rows and arm-soak.yml passes
-  // it on none. build-release-package.yml gates a download on `!= ''`, so the two
-  // cases have to come out opposite -- and the omitted one has to come out the same
-  // way Actions comes out, which is '' (its declared default), not undefined.
+  // Cross artifacts are a JSON list. An omitted input resolves to its declared
+  // empty list, so it must skip the download exactly as Actions does.
   const consumer = await readWorkflow('build-release-package.yml');
   // failClosedDownloads yields the artifact names the job will demand.
   const gated = 'final-std-windows-x64';
@@ -516,18 +524,22 @@ test('an omitted optional input reads the way Actions reads it, not as undefined
   ];
 
   const withCross = failClosedDownloads(consumer,
-    new Map([...base, ['cross_std_artifact', 'final-std-windows-x64']]));
+    new Map([...base, ['cross_std_artifacts', JSON.stringify([{tuple: 'windows_x86_64_cjnative', artifact: 'final-std-windows-x64'}])]]));
   assert.ok(withCross.includes(gated), `passing it should demand the artifact: ${withCross}`);
+
+  const legacy = failClosedDownloads(consumer, new Map([...base,
+    ['cross_std_artifact', gated], ['cross_std_tuple', 'windows_x86_64_cjnative']]));
+  assert.ok(legacy.includes(gated), 'legacy single tuple must still download its artifact');
 
   const withoutCross = failClosedDownloads(consumer, new Map(base));
   assert.ok(!withoutCross.includes(gated),
     `omitting it must skip that download the way Actions does: ${withoutCross}`);
 
   // The specific wrong answer this guards: leaving the caller's map alone makes the
-  // value undefined, `undefined !== ''` holds, and the step reads as running.
+  // value undefined, `undefined !== '[]'` holds, and the step reads as running.
   const resolved = effectiveInputs(consumer, new Map(base));
-  assert.equal(resolved.get('cross_std_artifact'), '');
-  assert.equal(scalar(block(uncommented(consumer), /^ {6}cross_std_artifact:\s*$/), 'default'), "''");
+  assert.equal(resolved.get('cross_std_artifacts'), '[]');
+  assert.equal(scalar(block(uncommented(consumer), /^ {6}cross_std_artifacts:\s*$/), 'default'), "'[]'");
 });
 
 test('an input the caller omits and the workflow does not default is a failure, not a guess', async () => {

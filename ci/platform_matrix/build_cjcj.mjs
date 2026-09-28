@@ -571,7 +571,7 @@ if (process.platform === 'win32') {
   build = await runInMsys('cjpm build', 'build');
   if (finalWindows && shim.exitCode === 0 && build.exitCode === 0) {
     build = await buildWindowsFinalCompiler({root, cangjieHome, hostSdk, sdkRuntimeDirName,
-      cjcTomlPath, cjcToml, mingwCxxLinkRsp, installedRuntimeLib, fixedLlvmManifest,
+      cjcTomlPath, cjcToml, workspaceToml: cjpmToml, mingwCxxLinkRsp, installedRuntimeLib, fixedLlvmManifest,
       finalCompilerOutput, finalStd: process.env.FINAL_STD_DIR, runInMsys});
   }
 } else {

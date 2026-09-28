@@ -71,6 +71,8 @@ jobs:
       source_matrix: ${{ steps.plan.outputs.source_matrix }}
       package_matrix: ${{ steps.plan.outputs.package_matrix }}
       blocked_matrix: ${{ steps.plan.outputs.blocked_matrix }}
+      prerequisite_matrix: ${{ steps.plan.outputs.prerequisite_matrix }}
+      has_prerequisites: ${{ steps.plan.outputs.has_prerequisites }}
       package_keys: ${{ steps.plan.outputs.package_keys }}
       has_source: ${{ steps.plan.outputs.has_source }}
       has_package: ${{ steps.plan.outputs.has_package }}
@@ -84,6 +86,37 @@ jobs:
         env:
           PLATFORMS: ${{ inputs.platforms }}
         run: node ci/release/platform-matrix.mjs plan --platforms "$PLATFORMS" --github-output "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"
+
+  # SDK-input qualification only. Until the cross runtime/std producers and
+  # package consumers exist, these jobs do not clear the blocked platform rows.
+  prerequisites:
+    name: ${{ matrix.runner }} / ${{ matrix.requirement }} input
+    needs: plan
+    if: needs.plan.outputs.has_prerequisites == 'true'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.plan.outputs.prerequisite_matrix) }}
+    steps:
+      - name: Checkout cjcj
+        uses: actions/checkout@v7
+      - name: Install and probe target SDK
+        uses: ./.github/actions/setup-release-sdk
+        with:
+          requirement: ${{ matrix.requirement }}
+      - name: Verify probe on the installed SDK and disconnected product arms
+        env:
+          SDK_REQUIREMENT: ${{ matrix.requirement }}
+        shell: bash
+        run: node ci/release/verify-runner-sdk.mjs "$SDK_REQUIREMENT" "$RUNNER_TEMP/sdk-probe-evidence"
+      - name: Preserve SDK input evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: sdk-probe-${{ matrix.runner }}-${{ matrix.requirement }}
+          path: ${{ runner.temp }}/sdk-probe-evidence
+          if-no-files-found: warn
 
   # One red job per platform the DAG cannot build yet. The step prints the
   # missing tuples and capabilities and probes what the runner actually has.
@@ -114,6 +147,7 @@ jobs:
       matrix: ${{ fromJson(needs.plan.outputs.source_matrix) }}
     uses: ./.github/workflows/srcbuild.yml
     with:
+      build_android: ${{ matrix.build_android || false }}
       build_type: ${{ inputs.build_type }}
       dry_run: ${{ inputs.dry_run }}
       runtime_ref: ${{ inputs.runtime_ref }}
@@ -164,8 +198,8 @@ jobs:
       sdk_runtime_dir: ${{ matrix.sdk_runtime_dir }}
       compiler_artifact: ${{ matrix.compiler_artifact }}
       std_artifact: ${{ matrix.std_artifact }}
-      cross_std_artifact: ${{ matrix.cross_std_artifact }}
-      cross_std_tuple: ${{ matrix.cross_std_tuple }}
+      cross_std_artifacts: ${{ matrix.cross_std_artifacts }}
+      release_key: ${{ matrix.release_key }}
       version: ${{ inputs.version }}
       dry_run: ${{ inputs.dry_run }}
       runtime_ref: ${{ inputs.runtime_ref }}

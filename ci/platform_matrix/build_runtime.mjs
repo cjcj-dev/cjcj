@@ -4,6 +4,7 @@
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import {fileURLToPath} from 'node:url';
 import {printCommonVersions, stageBegin, toCommandPath} from './common.mjs';
 import {pickWindowsCC} from './pick_cc.mjs';
 
@@ -83,12 +84,15 @@ if (process.platform === 'linux') {
   const targetArch = runtimeTarget.slice(targetSeparator + 1);
   const configuredInstallRoot = path.join(installRoot, `${targetPlatform}_${buildType}_${targetArch}`);
   artifactRoot = configuredInstallRoot;
+  const linkerToolchain = fileURLToPath(new URL('./windows_runtime_toolchain.cmake', import.meta.url));
   const script = [
     'set -euo pipefail',
     'export PATH=/mingw64/bin:/usr/bin:$PATH',
     // build.py drives the main tree with `make cangjie-runtime`; Ninja files have no
     // such rule (round-9 root), so force the Makefiles generator (make is installed).
     "export CMAKE_GENERATOR='Unix Makefiles'",
+    // Select the official llvm-mingw linker before build.py configures CMake.
+    `export CMAKE_TOOLCHAIN_FILE="$(cygpath -m ${shellQuote(linkerToolchain)})"`,
     'command -v cmake ninja clang; cmake --version | head -1',
     `runtime_source="$(cygpath -u ${shellQuote(runtimeDirectory)})"`,
     `runtime_preinstall="$(cygpath -u ${shellQuote(installRoot)})"`,

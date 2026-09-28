@@ -1040,15 +1040,34 @@ stage1
 });
 
 
+// Registered fixture identities; never derive expectations from the selected file.
+const astInputPins = {
+  explicit: '3bd4034ec7aafa46a586d57042ec2009df39c18ab14f97766aeb030637fe4b0a',
+  campaign: 'f1bdd6b76bdd2b82e6a991a759dbd317a07244c4716e08fb1e0c69579f29f337',
+};
+
 // Execute the complete driver, including retained-state loading, prerequisite,
 // run_step and the final RESULT. Only external inputs live in the fixture.
-function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFailure = false, child = false} = {}) {
+function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFailure = false, child = false, runtimeCase = 'valid', ast = 'explicit', largeContract = false, contractDefect} = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bootstrap argv '));
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));
   for (const dir of ['ci', 'build', 'tools']) {
     fs.cpSync(path.join(repoRoot, dir), path.join(root, dir), {recursive: true});
   }
   const driver = path.join(root, 'tools/srcbuild_kkk2.sh');
+  if (largeContract) {
+    // Comments leave the executable contract unchanged. Exceed pipe capacity
+    // so early-exit text readers cannot rely on the writer winning a race.
+    const padding = `    # ${'contract documentation '.repeat(8192)}\n`;
+    fs.writeFileSync(driver, fs.readFileSync(driver, 'utf8').replace(
+      /^(bootstrap_argv|step_31|step_32|step_34)\(\) \{[\s\S]*?^\}/gm,
+      body => body.slice(0, -1) + padding + '}'));
+  }
+  if (contractDefect) {
+    fs.writeFileSync(driver, fs.readFileSync(driver, 'utf8').replace(
+      new RegExp(`^${contractDefect.functionName}\\(\\) \\{[\\s\\S]*?^\\}`, 'm'),
+      body => body.replace(contractDefect.from, contractDefect.to)));
+  }
   if (empty || partialFailure) {
     const text = fs.readFileSync(driver, 'utf8');
     fs.writeFileSync(driver, text.replace(/^bootstrap_argv\(\) \{[\s\S]*?^\}/m,
@@ -1082,6 +1101,23 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
   fs.copyFileSync('/bin/true', base + '/third_party/llvm/bin/opt');
   fs.copyFileSync('/bin/true', inputs + '/libLLVM-15.so');
   fs.writeFileSync(inputs + '/ast.a', 'ast input\n');
+  const runtimePin = fs.readFileSync(path.join(root, 'ci/runtime_pin.env'), 'utf8').match(/^RUNTIME_REF=(.*)$/m)[1];
+  const runtimeDir = path.join(inputs, 'external runtime');
+  fs.mkdirSync(runtimeDir);
+  let stamp = `CJRT-COMMIT:${runtimePin}`;
+  if (runtimeCase === 'old-pin') stamp = `CJRT-COMMIT:${'0'.repeat(40)}`;
+  if (runtimeCase === 'dirty') stamp += '-dirty';
+  if (runtimeCase === 'ambiguous') stamp += `\nCJRT-COMMIT:${'1'.repeat(40)}`;
+  if (runtimeCase === 'unstamped') stamp = 'runtime without stamp';
+  fs.writeFileSync(runtimeDir + '/libcangjie-runtime.so', stamp + '\n');
+  fs.writeFileSync(runtimeDir + '/libboundscheck.so', 'boundscheck input\n');
+  const runtimeSha = sha256(runtimeDir + '/libcangjie-runtime.so');
+  const boundsSha = sha256(runtimeDir + '/libboundscheck.so');
+  if (runtimeCase === 'runtime-corrupt') fs.appendFileSync(runtimeDir + '/libcangjie-runtime.so', 'changed');
+  if (runtimeCase === 'bounds-corrupt') fs.appendFileSync(runtimeDir + '/libboundscheck.so', 'changed');
+  if (runtimeCase === 'bounds-missing') fs.unlinkSync(runtimeDir + '/libboundscheck.so');
+  if (runtimeCase === 'runtime-missing') fs.unlinkSync(runtimeDir + '/libcangjie-runtime.so');
+
   fs.writeFileSync(tuple + '/MANIFEST', `LLVM_SHA=${llvmSha}\n`);
   fs.writeFileSync(tuple + '/bin/opt', `CJLLVM-COMMIT:${llvmSha}\n`);
   for (const name of ['bin/llc', 'bin/ld.lld', 'lib/STATIC_LLVM.txt', 'fixed-llc/cjselfhost_llvmshim.o',
@@ -1120,11 +1156,28 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
     CJCJ_BOOTSTRAP_HOST_LLVM_SO: inputs + '/libLLVM-15.so',
     CJCJ_BOOTSTRAP_HOST_LLVM_SHA256: sha256(inputs + '/libLLVM-15.so'),
     CJCJ_BOOTSTRAP_AST_SUPPORT: inputs + '/ast.a',
-    CJCJ_BOOTSTRAP_AST_SUPPORT_SHA256: sha256(inputs + '/ast.a'),
+    CJCJ_BOOTSTRAP_AST_SUPPORT_SHA256: astInputPins.explicit,
     CJCJ_BOOTSTRAP_COLOUR_TUPLE: tuple,
-    CJCJ_BOOTSTRAP_COLOUR_RT: inputs,
+    CJCJ_BOOTSTRAP_COLOUR_RT: runtimeCase === 'undeclared' ? '' : runtimeDir,
+    CJCJ_BOOTSTRAP_COLOUR_RT_SHA256: runtimeCase === 'no-runtime-sha' ? '' : runtimeSha,
+    CJCJ_BOOTSTRAP_BOUNDSCHECK_SHA256: runtimeCase === 'no-bounds-sha' ? '' : boundsSha,
     CJCJ_BOOTSTRAP_CJCJ_SHA: sourceSha,
   };
+  const campaignArchive = path.join(state, 'buildtools/lib/libcangjie-ast-support.a');
+  if (ast.startsWith('campaign') || ast === 'precedence') {
+    fs.mkdirSync(path.dirname(campaignArchive), {recursive: true});
+    fs.writeFileSync(campaignArchive, 'campaign ast input\n');
+  }
+  if (ast === 'missing' || ast.startsWith('campaign')) {
+    delete env.CJCJ_BOOTSTRAP_AST_SUPPORT;
+    env.CJCJ_BOOTSTRAP_AST_SUPPORT_SHA256 = astInputPins.campaign;
+  }
+  if (ast === 'missing' || ast.endsWith('no-sha')) delete env.CJCJ_BOOTSTRAP_AST_SUPPORT_SHA256;
+  if (ast.endsWith('malformed-sha')) env.CJCJ_BOOTSTRAP_AST_SUPPORT_SHA256 = 'not-a-digest';
+  if (ast.endsWith('tampered')) {
+    fs.appendFileSync(ast.startsWith('campaign') ? campaignArchive : inputs + '/ast.a', 'changed after registration\n');
+  }
+  if (ast === 'wrong-sha') env.CJCJ_BOOTSTRAP_AST_SUPPORT_SHA256 = '0'.repeat(64);
   delete env.CJCJ_BOOTSTRAP_SH;
   delete env.CJCJ_SRCBUILD_CPUSET;
   delete env.CJCJ_KKK2_AFFINED;
@@ -1135,6 +1188,7 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
   }
   return {
     root,
+    runtimeDir,
     sourceSha,
     dryRun(step, sample) {
       const result = spawnSync('bash', [driver, '--from-step', String(step), '--through-step', String(step), '--dry-run'],
@@ -1172,6 +1226,50 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
     },
   };
 }
+
+test('dry-run bootstrap preserves pin outcomes with large contract bodies', t => {
+  const observed = [];
+  const expected = [];
+  for (const mismatch of [false, true]) {
+    const fixture = bootstrapDriverFixture(t, {mismatch, largeContract: true});
+    for (const step of mismatch ? [31, 32] : [31, 32, 34]) {
+      const result = fixture.dryRun(step, `${step}-${mismatch}`);
+      const command = result.stdout.match(/^DRY_RUN COMMAND=(.*)$/m)?.[1];
+      const row = {step, mismatch, rc: result.status,
+        command: command?.includes(step === 34 ? 'compose-sdk.mjs' : `--stage stage${step - 31}`) ?? false,
+        success: /^DRY_RUN RESULT=success/m.test(result.stdout),
+        rejected: /LLVM_DYLIB_SOURCE_MISMATCH/.test(result.stderr)};
+      observed.push(row);
+      expected.push({step, mismatch, rc: mismatch ? 1 : 0,
+        command: !mismatch, success: !mismatch, rejected: mismatch});
+      console.log(`LARGE_CONTRACT_ASSERT ${JSON.stringify(row)} stderr=${JSON.stringify(result.stderr)}`);
+    }
+  }
+  assert.deepEqual(observed, expected);
+});
+
+test('dry-run contract validation still rejects malformed large bodies', t => {
+  const cases = [
+    {step: 31, functionName: 'bootstrap_argv', from: '--stdsrc', to: '--removed-stdsrc', marker: 'argv missing flags: --stdsrc'},
+    {step: 31, functionName: 'step_31', from: 'run_bootstrap_stage stage0', to: ':', marker: 'step_31 does not exec'},
+    {step: 32, functionName: 'step_32', from: 'run_bootstrap_stage stage1', to: ':', marker: 'step_32 does not exec'},
+    {step: 31, functionName: 'step_31', from: '    run_bootstrap_stage', to: '    : build-stage1.mjs\n    run_bootstrap_stage', marker: 'step_31 must not call'},
+    {step: 31, functionName: 'step_31', from: '    run_bootstrap_stage', to: '    PATH=/colour/opt:$PATH\n    run_bootstrap_stage', marker: 'stage0 forbids injecting colour opt'},
+    {step: 34, functionName: 'step_34', from: 'compose-sdk.mjs', to: 'missing-compose.mjs', marker: 'step_34 does not invoke'},
+  ];
+  const observed = cases.map((contractDefect, index) => {
+    const fixture = bootstrapDriverFixture(t, {largeContract: true, contractDefect});
+    const result = fixture.dryRun(contractDefect.step, index);
+    const row = {marker: contractDefect.marker, rc: result.status,
+      rejected: result.stderr.includes(contractDefect.marker),
+      command: /^DRY_RUN COMMAND=/m.test(result.stdout),
+      success: /^DRY_RUN RESULT=success/m.test(result.stdout)};
+    console.log(`CONTRACT_REJECT_ASSERT ${JSON.stringify(row)}`);
+    return row;
+  });
+  assert.deepEqual(observed, cases.map(({marker}) => ({marker, rc: 1,
+    rejected: true, command: false, success: false})));
+});
 
 for (const step of [31, 32]) {
   test(`bootstrap driver step ${step} propagates pin mismatch`, t => {
@@ -1224,4 +1322,129 @@ test('bootstrap driver matching pins starts real stage0 and sdk_build', t => {
   assert.equal(result.status, 1, result.stdout + result.stderr);
   assert.match(result.stdout, /STEP=31 .* rc=1 /);
   assert.doesNotMatch(result.stdout, /RESULT=success/);
+});
+
+
+test('P12 external runtime pin and both SO digests gate the actual bootstrap command', t => {
+  const cases = {
+    valid: 'COLOUR_RT_INPUT_VERIFIED',
+    'old-pin': 'COLOUR_RT_PIN_MISMATCH',
+    dirty: 'COLOUR_RT_PIN_MISMATCH',
+    ambiguous: 'COLOUR_RT_PIN_MISMATCH',
+    unstamped: 'COLOUR_RT_STAMP_MISSING',
+    undeclared: 'COLOUR_RT_INPUT_REQUIRED',
+    'no-runtime-sha': 'COLOUR_RT_SHA_REQUIRED',
+    'no-bounds-sha': 'COLOUR_RT_SHA_REQUIRED',
+    'runtime-corrupt': 'COLOUR_RT_SHA_MISMATCH',
+    'bounds-corrupt': 'COLOUR_RT_SHA_MISMATCH',
+    'bounds-missing': 'COLOUR_RT_FILE_MISSING',
+    'runtime-missing': 'COLOUR_RT_FILE_MISSING',
+  };
+  const observed = [], expected = [];
+  for (const [runtimeCase, marker] of Object.entries(cases)) {
+    const fixture = bootstrapDriverFixture(t, {runtimeCase});
+    for (const step of [31, 32]) {
+      const result = fixture.dryRun(step, `${runtimeCase}-${step}`);
+      const command = result.stdout.match(/^DRY_RUN COMMAND=(.*)$/m)?.[1] || '';
+      const argv = command ? runBash(`eval "set -- $1"; printf '%s\\n' "$@"`, [command]).stdout.split('\n') : [];
+      const valid = runtimeCase === 'valid';
+      const row = {runtimeCase, step, rc: result.status, marker: result.stderr.includes(marker),
+        runtime: argv[argv.indexOf('--colour-rt') + 1] || '',
+        success: /^DRY_RUN RESULT=success/m.test(result.stdout)};
+      observed.push(row);
+      expected.push({runtimeCase, step, rc: valid ? 0 : 1, marker: true,
+        runtime: valid ? fixture.runtimeDir : '', success: valid});
+      console.log(`P12_ASSERT ${JSON.stringify(row)}`);
+      if (runtimeCase === 'old-pin') {
+        const live = fixture.run(step);
+        const liveRow = {runtimeCase, step, mode: 'execute', rc: live.status,
+          rejected: live.log.includes(marker), enteredBootstrap: /ASSERT cjcj-sha/.test(live.log)};
+        observed.push(liveRow);
+        expected.push({runtimeCase, step, mode: 'execute', rc: 1, rejected: true, enteredBootstrap: false});
+        console.log(`P12_ASSERT ${JSON.stringify(liveRow)}`);
+      }
+    }
+  }
+  // All product observations reach the target assertion, including failures.
+  assert.deepEqual(observed, expected);
+});
+
+for (const ast of ['missing', 'campaign', 'precedence']) {
+  test(`ast-support input contract ${ast}`, t => {
+    const fixture = bootstrapDriverFixture(t, {ast});
+    const result = fixture.dryRun(31, 1);
+    const command = result.stdout.match(/^DRY_RUN COMMAND=(.*)$/m)?.[1];
+    const expectedSha = ast === 'campaign' ? astInputPins.campaign : astInputPins.explicit;
+    // Collect the product result before asserting, including failure diagnostics.
+    const observed = {
+      rc: result.status,
+      command: command !== undefined,
+      missingKey: /bootstrap input missing: CJCJ_BOOTSTRAP_AST_SUPPORT/.test(result.stderr),
+      campaignKey: /CANGJIE_BUILD_ROOT\/lib\/libcangjie-ast-support.a/.test(result.stderr),
+      selectedSha: command?.includes(`--ast-support-sha256 ${expectedSha} `) ?? false,
+    };
+    console.log(`AST_INPUT_ASSERT ${ast} ${JSON.stringify(observed)}`);
+    assert.deepEqual(observed, ast === 'missing'
+      ? {rc: 1, command: false, missingKey: true, campaignKey: true, selectedSha: false}
+      : {rc: 0, command: true, missingKey: false, campaignKey: false, selectedSha: true});
+  });
+}
+
+for (const source of ['explicit', 'campaign']) {
+  for (const defect of ['no-sha', 'malformed-sha']) {
+    test(`ast-support input contract ${source} ${defect} rejects before bootstrap`, t => {
+      const fixture = bootstrapDriverFixture(t, {ast: `${source}-${defect}`});
+      const observed = [];
+      for (const step of [31, 32]) {
+        const dry = fixture.dryRun(step, step);
+        const live = fixture.run(step);
+        for (const [mode, result, output] of [['dry', dry, dry.stdout + dry.stderr], ['live', live, live.log]]) {
+          observed.push({step, mode, rc: result.status,
+            required: output.includes('AST_SUPPORT_SHA_REQUIRED:'),
+            entered: /ASSERT cjcj-sha|DRY_RUN COMMAND=/.test(output)});
+        }
+      }
+      console.log(`AST_REQUIRED_ASSERT ${JSON.stringify(observed)}`);
+      assert.deepEqual(observed, [31, 32].flatMap(step => ['dry', 'live'].map(mode =>
+        ({step, mode, rc: 1, required: true, entered: false}))));
+    });
+  }
+  for (const tampered of [false, true]) {
+    test(`ast-support input contract ${source} ${tampered ? 'tampered' : 'registered'} reaches real digest comparison`, t => {
+      const fixture = bootstrapDriverFixture(t, {ast: `${source}${tampered ? '-tampered' : ''}`});
+      const result = fixture.run(31);
+      const expected = astInputPins[source];
+      const comparison = result.log.match(/ASSERT ast-support-sha256 expected=([0-9a-f]{64}) actual=([0-9a-f]{64})/);
+      const observed = {expected: comparison?.[1], matches: comparison?.[2] === expected,
+        rejected: result.log.includes('ast-support sha256 不匹配'),
+        accepted: result.log.includes('ast-support sha256 匹配')};
+      console.log(`AST_REGISTERED_ASSERT rc=${result.status} ${JSON.stringify(observed)}`);
+      // Success at this input boundary may proceed to unrelated SDK fixture limits.
+      assert.deepEqual(observed, {expected, matches: !tampered, rejected: tampered, accepted: !tampered});
+      if (tampered) assert.equal(result.status, 1);
+    });
+  }
+}
+
+test('ast-support input contract wrong-sha reaches bootstrap assertion', t => {
+  const result = bootstrapDriverFixture(t, {ast: 'wrong-sha'}).run(31);
+  const observed = {
+    rc: result.status,
+    assertion: /ASSERT ast-support-sha256 expected=0{64} actual=[0-9a-f]{64}/.test(result.log),
+    failures: result.log.replace(/\x1b\[[0-9;]*m/g, '').split('\n').filter(line => line.startsWith('BOOTSTRAP-FAIL')),
+  };
+  console.log(`AST_SHA_ASSERT ${JSON.stringify(observed)}`);
+  assert.deepEqual(observed, {rc: 1, assertion: true,
+    failures: ['BOOTSTRAP-FAIL [stage0] ast-support sha256 不匹配']});
+});
+
+test('ast-support input contract missing stops real stage entry', t => {
+  const result = bootstrapDriverFixture(t, {ast: 'missing'}).run(31);
+  const observed = {
+    rc: result.status,
+    missingKey: /bootstrap input missing: CJCJ_BOOTSTRAP_AST_SUPPORT/.test(result.log),
+    bootstrapStarted: /\[stage0\]/.test(result.log),
+  };
+  console.log(`AST_ENTRY_ASSERT ${JSON.stringify(observed)}`);
+  assert.deepEqual(observed, {rc: 1, missingKey: true, bootstrapStarted: false});
 });
