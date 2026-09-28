@@ -66,7 +66,7 @@ if (target.spec.os === 'darwin') {
     const pathLine = lines.slice(index + 1, index + 5).find(line => /^\s*path .* \(offset \d+\)$/.test(line));
     if (pathLine) rpaths.push(pathLine.trim().replace(/^path /, '').replace(/ \(offset \d+\)$/, ''));
   }
-  for (const rpath of new Set(rpaths.filter(value => path.isAbsolute(value)))) {
+  for (const rpath of new Set(rpaths.filter(value => path.isAbsolute(value) || value === '@loader_path/../third_party/llvm/lib'))) {
     await $`install_name_tool -delete_rpath ${rpath} ${installed}`;
   }
   const relativeRpaths = [

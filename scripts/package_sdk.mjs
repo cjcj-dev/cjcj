@@ -731,9 +731,8 @@ if (platform.startsWith('linux-')) {
     const pathLine = lines.slice(index + 1, index + 5).find((line) => /^\s*path .* \(offset \d+\)$/.test(line));
     if (pathLine) rpaths.push(pathLine.trim().replace(/^path /, '').replace(/ \(offset \d+\)$/, ''));
   }
-  const sdkRoot = `${path.resolve(sdk)}${path.sep}`;
   const obsoleteRpaths = [...new Set(rpaths.filter((rpath) =>
-    rpath.startsWith(sdkRoot) || rpath.startsWith('@loader_path/../../runtime/')))];
+    path.isAbsolute(rpath) || rpath.startsWith('@loader_path/../../runtime/') || rpath === '@loader_path/../third_party/llvm/lib'))];
   for (const rpath of obsoleteRpaths) {
     await $({stdio: 'inherit'})`install_name_tool -delete_rpath ${rpath} ${installed}`;
   }
@@ -756,6 +755,7 @@ if (platform.startsWith('linux-')) {
   ].join('\n'));
   console.log(`  install name: ${relativeRuntime}`);
   console.log(`  rpaths: ${relativeRpaths.join(':')}`);
+  await assertCompilerLoader({sdk: stage, platform});
 } else {
   console.log('  Windows resolves packaged DLLs through runtime/lib and PATH');
 }

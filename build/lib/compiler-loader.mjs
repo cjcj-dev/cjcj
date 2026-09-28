@@ -55,8 +55,26 @@ export async function prepareCompilerLoader({sdk, platform, expectedSha256}) {
 }
 
 export async function assertCompilerLoader({sdk, platform}) {
-  if (!platform.startsWith('linux-')) return; // Mach-O paths are set by the native compose/package branch.
+  if (platform.startsWith('windows-')) return; // PE uses the existing static LLVM tuple.
   const binary = path.join(sdk, 'bin/cjc');
+  if (platform.startsWith('darwin-')) {
+    const dependencies = llvmDependencies(binary, platform);
+    const commands = probe('otool', ['-l', binary]);
+    const paths = [...commands.matchAll(/cmd LC_RPATH\s+cmdsize \d+\s+path (.*?) \(offset/g)].map(match => match[1]);
+    if (paths.some(entry => !entry.startsWith('@loader_path/'))) {
+      throw new Error(`compiler search path is not SDK-relative: ${paths.join(':')}`);
+    }
+    if (dependencies.length) {
+      if (dependencies.length !== 1 || dependencies[0] !== '@rpath/libLLVM.dylib'
+        || !paths.includes('@loader_path/../third_party/cjc/lib')) {
+        throw new Error('compiler LLVM Mach-O lookup is not SDK-relative');
+      }
+      await fs.access(path.join(sdk, 'third_party/cjc/lib/libLLVM.dylib'));
+    }
+    console.log(`COMPILER_MACHO_LOOKUP_OK ${binary}`);
+    return;
+  }
+  if (!platform.startsWith('linux-')) throw new Error(`unsupported compiler platform: ${platform}`);
   const dynamic = probe('readelf', ['-d', binary]);
   const paths = [...dynamic.matchAll(/\((?:RUNPATH|RPATH)\).*\[([^\]]*)\]/g)].flatMap(match => match[1].split(':'));
   if (paths.some(entry => !entry.startsWith('$ORIGIN/'))) {
