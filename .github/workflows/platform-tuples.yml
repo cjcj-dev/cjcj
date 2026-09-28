@@ -57,7 +57,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: fixed-toolchain/${{ matrix.platform }}
-          key: tuple-${{ matrix.platform }}-${{ steps.llvm-pin.outputs.sha }}-${{ hashFiles('.github/workflows/platform-tuples.yml', 'ci/llvm_pin.env', 'ci/llvm-tools-manifest.mjs', 'ci/platform_tuples/**', 'ci/platform_matrix/**', 'runtime_shim/cjselfhost_llvmshim.cpp') }}
+          key: tuple-${{ matrix.platform }}-${{ steps.llvm-pin.outputs.sha }}-${{ hashFiles('ci/runtime_pin.env', 'ci/fetch-llvm-runtime.sh', '.github/workflows/platform-tuples.yml', 'ci/llvm_pin.env', 'ci/llvm-tools-manifest.mjs', 'ci/platform_tuples/**', 'ci/platform_matrix/**', 'runtime_shim/cjselfhost_llvmshim.cpp') }}
 
       # llc, opt, lld, flatc and the shim object all compile through sccache;
       # the report step fails the job if the launcher never saw a compile.
