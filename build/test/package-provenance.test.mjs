@@ -360,7 +360,6 @@ test(`package_sdk archives std provenance and an honest complete manifest (${com
   assert.match(packaged.stdout, /DONE: .*cjcj-fixture-linux-x64\.tar\.gz/);
   if (compilerMode === 'dynamic') {
     console.log('PACKAGE_LLVM_RESULT_ASSERT_REACHED');
-    assert.match(packaged.stdout, /COMPILER_LLVM_RESOLVED libLLVM-15.so => .*third_party\/cjc\/lib\/libLLVM-15.so/);
     const execution = run('bash', ['--noprofile', '--norc', '-c',
       'unset LD_LIBRARY_PATH; source "$1/envsetup.sh"; "$1/bin/cjc"', 'package-execute', path.dirname(path.dirname(packagedCompiler))]);
     assert.equal(execution.stdout.trim(), 'LLVM_RESULT=517');
@@ -386,6 +385,7 @@ test(`package_sdk archives std provenance and an honest complete manifest (${com
     console.log(`PACKAGE_RUNPATH_REJECTION_ASSERT_REACHED rc=${hostPath.status}`);
     assert.notEqual(hostPath.status, 0, 'packaging must reject a build-host RUNPATH even with valid provenance');
     assert.match(hostPath.stderr, /compiler search path is not SDK-relative/);
+    assert.match(packaged.stdout, /COMPILER_LLVM_RESOLVED libLLVM-15.so => .*third_party\/cjc\/lib\/libLLVM-15.so/);
     console.log(`PACKAGE_LLVM_PAYLOAD compiler=${await sha256(packagedCompiler)} llvm=${await sha256(compilerLlvm)}`);
     return;
   }
