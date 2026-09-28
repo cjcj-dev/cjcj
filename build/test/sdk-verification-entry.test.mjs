@@ -27,7 +27,7 @@ chmod +x hello
   }
   await write(path.join(sdk, 'envsetup.sh'), `export CANGJIE_HOME='${sdk}'
 export PATH="$CANGJIE_HOME/bin:$PATH"
-export LD_LIBRARY_PATH="$CANGJIE_HOME/runtime/lib:$CANGJIE_HOME/tools/lib"
+export LD_LIBRARY_PATH="$CANGJIE_HOME/runtime/lib:$CANGJIE_HOME/tools/lib\${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 `);
   const pin = await fs.readFile(new URL('../../ci/host_sdk_pin.env', import.meta.url), 'utf8');
   const toolchain = pin.match(/^CJCJ_TOOLCHAIN=(\S+)$/m)[1];

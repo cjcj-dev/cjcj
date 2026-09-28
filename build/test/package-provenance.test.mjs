@@ -373,6 +373,20 @@ test(`package_sdk archives std provenance and an honest complete manifest (${com
     assert.notEqual(rejected.status, 0);
     assert.match(rejected.stderr, /final compiler LLVM SHA-256 mismatch/);
     await fs.writeFile(artifactLibrary, libraryBytes);
+    // Keep producer identity valid while testing an invalid loader contract.
+    // This must reach the loader verdict, not an earlier provenance assertion.
+    run('patchelf', ['--set-rpath', '/build-host/llvm', binary]);
+    await produceFinalCompiler({binary, llvmLibrary: compilerLlvm, outdir: artifact, platform: 'linux-x64',
+      repository: 'https://github.com/cjcj-dev/cjcj.git', commit: CJCJ_SHA,
+      runId: 'fixture-run', runAttempt: '1', std,
+      lineage: {stage: 'stage3', compilerSha256: await sha256(binary), parentSha256: 'f'.repeat(64),
+        stdSha256: await stdIdentity(std), llvmManifestSha256: await sha256(llvmManifest)}});
+    const hostPath = runRaw('zx', finalArgs, {cwd: path.resolve('.'),
+      env: {...process.env, GITHUB_RUN_ID: 'fixture-run', GITHUB_RUN_ATTEMPT: '1'}});
+    console.log(`PACKAGE_RUNPATH_REJECTION_ASSERT_REACHED rc=${hostPath.status}`);
+    assert.notEqual(hostPath.status, 0, 'packaging must reject a build-host RUNPATH even with valid provenance');
+    assert.match(hostPath.stderr, /compiler search path is not SDK-relative/);
+    console.log(`PACKAGE_LLVM_PAYLOAD compiler=${await sha256(packagedCompiler)} llvm=${await sha256(compilerLlvm)}`);
     return;
   }
 

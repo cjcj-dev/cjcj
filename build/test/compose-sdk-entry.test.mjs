@@ -106,6 +106,8 @@ for (const mode of ['local', 'github', 'github-missing-run']) {
     assert.equal(archived, final, 'archive and final artifact must contain the same transformed stage3');
     assert.notEqual(final, expected, 'shared-LLVM product must acquire its relative RUNPATH');
     assert.equal(provenance.production.transformation, 'compose-relative-runpath');
+    console.log('COMPOSE_LLVM_PRODUCER_IDENTITY_ASSERT_REACHED');
+    assert.deepEqual(provenance.production.compilerLlvm, {name: 'libLLVM-15.so', sha256: await fileSha256(llvm)});
     assert.equal(await fileSha256(path.join(artifact, 'compiler-llvm/libLLVM-15.so')), await fileSha256(llvm));
     const relocated = path.join(unpack, 'cangjie');
     const execution = run('bash', ['--noprofile', '--norc', '-c',
