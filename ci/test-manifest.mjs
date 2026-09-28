@@ -79,6 +79,7 @@ export const GATING = Object.freeze([
   'ci/release/bootstrap_store.test.mjs',
   'ci/release/colour_runtime.test.mjs',
   'ci/release/cross-runtime.test.mjs',
+  'ci/release/darwin_runtime.test.mjs',
   'ci/release/host_llvm.test.mjs',
   'ci/release/prepare_llvm_dylib.test.mjs',
   'ci/release/publish_bootstrap_inputs.test.mjs',
