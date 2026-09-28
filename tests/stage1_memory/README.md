@@ -1,6 +1,6 @@
 # Stage1 lifetime assertions
 
-`python3 check.py <result.json> --kind ast|chir` checks completed compilations,
+`python3 check.py <result.json> --kind ast|ast-multi|chir` checks completed compilations,
 positive controls and GC-completed observations before evaluating every target.
 Exit 0 means all selected lifetime assertions passed, 1 means a target failed,
 and 2 means the measurement was not qualified. It does not infer release from
@@ -24,3 +24,9 @@ check alone does not establish artifact identity or complete branch coverage.
 The #614 measurement recipes, diagnostic patches and immutable outputs are
 indexed by REPORT-sym_cjcj_614_implement_r5876319779.md. Container capacity and
 annotation-map storage are not observed by these tests.
+
+The two fixtures exercise the real multi-package route (`-p first second`).
+`--kind ast-multi` first requires more than one source package, then checks
+retirement at `chir_end`: CompilerInstance.cpp:1021-1042 keeps AST available
+until all packages have been converted. Requiring zero at each package's
+`chir_optimized` boundary would be incorrect for that route.

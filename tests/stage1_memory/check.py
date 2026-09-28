@@ -21,14 +21,16 @@ def check(result, kind):
                 r"\b(pkg|file|topdecl|chir_context)=(\d+/\d+)", line
             )
         }
-    if kind == "ast":
+    if kind in ("ast", "ast-multi"):
         tags = ("pkg", "file", "topdecl")
         positive = "sema_end"
-        targets = ("chir_optimized", "chir_end")
+        targets = ("chir_optimized", "chir_end") if kind == "ast" else ("chir_end",)
     else:
         tags = ("chir_context",)
         positive = "chir_optimized"
         targets = ("process_end",)
+    if kind == "ast-multi" and phases[positive]["pkg"][1] <= 1:
+        raise ValueError("multi-package route was not entered")
     totals = {}
     for tag in tags:
         live, total = phases[positive][tag]
@@ -55,7 +57,7 @@ def check(result, kind):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("result", type=Path)
-    parser.add_argument("--kind", choices=("ast", "chir"), required=True)
+    parser.add_argument("--kind", choices=("ast", "ast-multi", "chir"), required=True)
     args = parser.parse_args()
     try:
         return check(json.loads(args.result.read_text()), args.kind)
