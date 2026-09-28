@@ -9,7 +9,7 @@ import {platformizeCjcToml} from './link_option.mjs';
 // The caller's existing MSYS adapter owns shell/CRT setup. This continuation
 // owns the W1 -> private target SDK -> clean/build -> named W2 handoff.
 export async function buildWindowsFinalCompiler({root, cangjieHome, hostSdk, sdkRuntimeDirName,
-  cjcTomlPath, cjcToml, mingwCxxLinkRsp, installedRuntimeLib, fixedLlvmManifest,
+  cjcTomlPath, cjcToml, workspaceToml, mingwCxxLinkRsp, installedRuntimeLib, fixedLlvmManifest,
   finalCompilerOutput, finalStd, runInMsys, mingwBin = 'C:\\msys64\\mingw64\\bin'}) {
     await assertFinalStd(finalStd, getTarget('windows-x64'));
     const seed = await resolveProductBinary(path.join('target', 'release', 'bin'), 'Windows W1', {windows: true});
@@ -52,6 +52,9 @@ export async function buildWindowsFinalCompiler({root, cangjieHome, hostSdk, sdk
     }
     await fs.writeFile(cjcTomlPath, platformizeCjcToml(
       cjcToml, 'win32', targetSdk, process.env.CJCJ_LLVM_LINK_RSP || '', mingwCxxLinkRsp));
+    // W1 uses an O1 workspace. Restore the source release configuration (O2),
+    // just as native stage3 does, before cleaning and building the final compiler.
+    await fs.writeFile('cjpm.toml', workspaceToml);
     const clean = await runInMsys('cjpm clean', 'final-clean', targetSdk, hostSdk);
     if (clean.exitCode !== 0) return clean;
     const build = await runInMsys('cjc --version && cjpm build', 'final-build', targetSdk, hostSdk);
@@ -69,6 +72,7 @@ export async function buildWindowsFinalCompiler({root, cangjieHome, hostSdk, sdk
           command: 'cjc --version && cjpm build',
           compilerEntry: seedInstalled, hostTools: path.join(hostSdk, 'tools', 'bin'),
           linkOptionsSha256: await fileSha256(cjcTomlPath),
+          workspaceOptionsSha256: await fileSha256('cjpm.toml'),
           llvmManifestSha256: await fileSha256(fixedLlvmManifest)},
       });
     }
