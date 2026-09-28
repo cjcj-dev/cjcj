@@ -348,6 +348,8 @@ swap_all opt  "$OPT"  opt
 if [ -n "$LLVM_TUPLE" ]; then
   install_llvm_tuple "$LLVM_TUPLE"
 fi
+# The static tuple does not carry the compiler process libLLVM. Install both
+# before recording identities and running the mandatory SDK verification.
 if [ -n "$LLVM_SO" ]; then
   install_llvm_so "$LLVM_SO"
 fi

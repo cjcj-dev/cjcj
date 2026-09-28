@@ -51,27 +51,36 @@ jobs:
             mingw-w64-x86_64-lld
             mingw-w64-x86_64-ninja
             mingw-w64-x86_64-python
-      - name: Preserve the native cache home through the MSYS2 login shell
-        shell: pwsh
+      # The runtime's find_program prefers ccache over sccache. Remove the
+      # runner image's ccache so every arm, including cut-entry, selects sccache.
+      - name: Remove the runner's preinstalled ccache
+        shell: msys2 {0}
         run: |
-          # MSYS2 removes native profile paths; ccache needs both home and config directories.
-          $cacheHome = $env:USERPROFILE.Replace('\', '/')
-          $cacheConfigHome = $env:LOCALAPPDATA.Replace('\', '/')
-          "export USERPROFILE='$cacheHome' LOCALAPPDATA='$cacheConfigHome'" | Set-Content -NoNewline -Encoding utf8 C:/msys64/etc/profile.d/runtime-export-contract.sh
-      - name: Check native cache configuration under the build shell
-        shell: pwsh
-        env:
-          MSYSTEM: MINGW64
-          MSYS2_PATH_TYPE: inherit
-        run: |
-          & C:/msys64/usr/bin/bash.exe -lc 'ccache --show-config'
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          set -euo pipefail
+          while cache=$(command -v ccache); do
+            echo "Removing preinstalled compiler cache: $cache"
+            rm -f -- "$cache" "$cache.exe"
+            hash -r
+          done
+      - name: Start sccache
+        uses: ./.github/actions/sccache
+        with:
+          component: windows-runtime
+          platform: windows-x86_64
+          pin: ${{ env.RUNTIME_REF }}
       - name: Build through the production MINGW64 entry
         shell: bash
         run: npx --yes zx@8 ci/platform_matrix/build_runtime.mjs
       - name: Verify the installed runtime contract
         shell: bash
         run: npx --yes zx@8 ci/platform_matrix/verify_windows_runtime_exports.mjs
+      - name: Report sccache
+        if: always()
+        uses: ./.github/actions/sccache-report
+        with:
+          component: windows-runtime
+          platform: windows-x86_64
+          require-compiles: ${{ job.status == 'success' }}
       - name: Retain native inputs and build evidence
         if: always()
         uses: actions/upload-artifact@v7

@@ -451,7 +451,7 @@ assert_std_install_shape() {
 }
 
 stdlib_build() {
-  local label="$1" sdk="$2" runtime="$3" prefix="$4" compare_prefix="${5:-}" target_lib="${6:-$2/runtime/lib/$HOST_TUPLE}" ld script
+  local label="$1" sdk="$2" runtime="$3" prefix="$4" compare_prefix="${5:-}" target_lib="${6:-$2/runtime/lib/$HOST_TUPLE}" ld script compiler
   source "$SRC/ci/build_resources.sh"
   configure_build_resources "$HEAP" || die "cannot determine std build resources"
   cmd "python3 $(printf '%q' "$SRC/ci/install_std_sdk_inputs.py") $(printf '%q' "$(dirname "$AST_SUPPORT")") $(printf '%q' "$sdk") $(printf '%q' "$HOST_TUPLE")"
@@ -461,12 +461,11 @@ stdlib_build() {
   script='cd "$1" && rm -rf build/build && python3 build.py clean && python3 build.py build -t relwithdebinfo --jobs "$2" --target-lib="$3" && python3 build.py install --prefix "$4"'
   cmd "env -i HOME=$(printf '%q' "$BUILD_HOME") TMPDIR=$(printf '%q' "$BUILD_TMPDIR") CANGJIE_HOME=$(printf '%q' "$sdk") LD_LIBRARY_PATH=$(printf '%q' "$ld") PATH=$(printf '%q' "$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:/usr/bin:/bin") cjHeapSize=$(printf '%q' "$STD_BUILD_HEAP") bash -c $(printf '%q' "$script") bash $(printf '%q' "$STDSRC") $(printf '%q' "$STD_BUILD_JOBS") $(printf '%q' "$target_lib") $(printf '%q' "$prefix")"
   assert_std_install_shape "$prefix" "$compare_prefix" "$label"
-  if [ -f "$sdk/bin/cjc" ] || [ "$DRY" -eq 1 ]; then
-    local producer_bin="$sdk/bin/cjc"
-    if [ -f "$sdk/bin/cjcj-stage1" ]; then
-      producer_bin="$sdk/bin/cjcj-stage1"
-    fi
-    cmd "python3 -c 'import hashlib,json,sys; h=hashlib.sha256(open(sys.argv[1],\"rb\").read()).hexdigest(); open(sys.argv[2],\"w\").write(json.dumps({\"compiler_sha256\":h})+chr(10))' $(printf '%q' "$producer_bin") $(printf '%q' "$prefix/std-producer.json")"
+  # Match sdk_verify.measured_cjc_sha: the runner is only a launcher.
+  compiler="$sdk/bin/cjc"
+  [ ! -f "$sdk/bin/cjcj-stage1" ] || compiler="$sdk/bin/cjcj-stage1"
+  if [ -f "$compiler" ] || [ "$DRY" -eq 1 ]; then
+    cmd "python3 -c 'import hashlib,json,sys; h=hashlib.sha256(open(sys.argv[1],\"rb\").read()).hexdigest(); open(sys.argv[2],\"w\").write(json.dumps({\"compiler_sha256\":h})+chr(10))' $(printf '%q' "$compiler") $(printf '%q' "$prefix/std-producer.json")"
   fi
 }
 
@@ -685,7 +684,6 @@ assemble_stage1_sdk() {
     cmd "python3 $(printf '%q' "$SDK_VERIFY") --sdk $(printf '%q' "$sdk") --role target --runtime-pin $(printf '%q' "${RUNTIME_PIN:-$SRC/ci/runtime_pin.env}")"
   fi
   assert_installed_llvm_tuple "$sdk" "$COLOUR_TUPLE"
-  cmd "install -m644 $(printf '%q' "$COLOUR_LLVM_SO") $(printf '%q' "$sdk/third_party/llvm/lib/libLLVM-15.so")"
   if [ "$DRY" -eq 0 ]; then
     assert_expected_sha target-colour-llvm "$sdk/third_party/llvm/lib/libLLVM-15.so" "$COLOUR_LLVM_SHA256"
   fi
