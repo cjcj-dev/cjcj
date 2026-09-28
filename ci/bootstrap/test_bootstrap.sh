@@ -800,7 +800,7 @@ assert_forensic_plan() {
   done <<EOF
 forensic-output|1|OUTPUT cjcj-stage2-forensic=
 forensic-g|1|CMD cjpm build -j $jobs -g bin=
-forensic-isolation|1|ISOLATE cjcj-src from=.* dest=.*/cjcj-src-stage1-forensic 
+forensic-isolation|1|ISOLATE cjcj-src from=.* dest=.*/cjcj-src-stage1-forensic[[:space:]]
 forensic-debug|2|target/debug/bin
 forensic-pickup|1|product=planned dir=.*/cjcj-src-stage1-forensic/target/debug/bin
 forensic-stamp|1|INPUT cjcj-stage2-forensic path=.* sha256=planned
