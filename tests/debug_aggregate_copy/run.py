@@ -42,7 +42,8 @@ def case(args, source, debug):
         reader_command = [str(args.opt), '-disable-verify', '-disable-output', str(bc)]
         rc = run(reader_command, log)
         readers.append({'file': str(bc), 'sha256': sha(bc), 'command': reader_command,
-                        'rc': rc, 'log': str(log)})
+                        'rc': rc, 'log': str(log),
+                        'gep_type_rejected': 'Explicit gep type does not match pointee type' in log.read_text()})
     # Keep presence and the target assertion separate. Even after a driver error,
     # inspect every produced bitcode instead of masking the reader's result.
     checks = {'bitcode_produced': bool(bitcodes),
