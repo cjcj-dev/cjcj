@@ -64,12 +64,12 @@ class TimeoutHintsTest(unittest.TestCase):
             self.assertEqual(rows[0]['status'], status)
             self.assertEqual(rows[0]['category'], 'fail' if status == 'FAIL' else 'pass')
             self.assertEqual(len(written['failures']), int(status == 'FAIL'))
-            self.assertEqual(rows[0]['timeout_failure'], timeout)
-            self.assertEqual(len(written['timeout-failures']), int(timeout))
             # The target assertion observes the final product JSON, not a helper.
             actual = [h for entry in written['environment-failures'] for h in entry['hints']]
             print('TARGET_OBSERVED', self._testMethodName, suite, 'hints=', actual, flush=True)
             self.assertEqual(actual, [hint] if hint else [])
+            self.assertEqual(rows[0]['timeout_failure'], timeout)
+            self.assertEqual(len(written['timeout-failures']), int(timeout))
             if hint:
                 self.assertIn(hint, written['environment-failures'][0]['error_evidence'])
                 self.assertTrue(written['environment-failures'][0]['reasons'])
