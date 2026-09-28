@@ -194,7 +194,7 @@ await fs.copyFile(binary, installed);
 await fs.chmod(installed, 0o755);
 // Only the compiler artifact supplies its private LLVM; never inherit the
 // debugger's LLVM or resolve against a library installed on the build host.
-await fs.rm(path.join(stage, 'lib/cjc'), {recursive: true, force: true});
+await fs.rm(path.join(stage, 'third_party/cjc/lib'), {recursive: true, force: true});
 if (compilerArtifact) await installFinalCompilerLlvm({directory: compilerArtifact, sdk: stage, platform});
 
 console.log('[3/9] swap in patched runtime');
@@ -739,7 +739,7 @@ if (platform.startsWith('linux-')) {
   }
   const relativeRpaths = [
     `@loader_path/../runtime/lib/${runtimeDir}`,
-    '@loader_path/../lib/cjc',
+    '@loader_path/../third_party/cjc/lib',
     '@loader_path/../tools/lib',
   ];
   const retainedRpaths = new Set(rpaths.filter((rpath) => !obsoleteRpaths.includes(rpath)));

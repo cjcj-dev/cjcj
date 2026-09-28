@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
@@ -29,7 +30,7 @@ function llvmDependencies(binary, platform) {
 
 // Keep cjc's LLVM separate from the SDK debugger's library. Unlike upstream's
 // static cjc, this compiler consumes a shared LLVM from its build SDK.
-export async function prepareCompilerLoader({sdk, platform}) {
+export async function prepareCompilerLoader({sdk, platform, expectedSha256}) {
   const binary = path.join(sdk, 'bin/cjc');
   const dependencies = llvmDependencies(binary, platform);
   if (!dependencies.length) return undefined;
@@ -37,12 +38,15 @@ export async function prepareCompilerLoader({sdk, platform}) {
   if (dependencies.length !== 1 || path.basename(dependencies[0]) !== name) {
     throw new Error(`unexpected compiler LLVM dependencies: ${dependencies.join(', ')}`);
   }
-  const library = path.join(sdk, 'lib/cjc', name);
+  const source = path.join(sdk, 'third_party/llvm/lib', name);
+  const actual = crypto.createHash('sha256').update(await fs.readFile(source)).digest('hex');
+  if (actual !== expectedSha256) throw new Error('compiler build LLVM SHA-256 mismatch');
+  const library = path.join(sdk, 'third_party/cjc/lib', name);
   await fs.mkdir(path.dirname(library), {recursive: true});
-  await fs.copyFile(path.join(sdk, 'third_party/llvm/lib', name), library);
+  await fs.copyFile(source, library);
   if (platform.startsWith('linux-')) {
     // Do this after cjpm, which interprets $ORIGIN in link-option as an env var.
-    probe('patchelf', ['--set-rpath', '$ORIGIN/../lib/cjc', binary]);
+    probe('patchelf', ['--set-rpath', '$ORIGIN/../third_party/cjc/lib', binary]);
   } else {
     probe('install_name_tool', ['-id', `@rpath/${name}`, library]);
     probe('install_name_tool', ['-change', dependencies[0], `@rpath/${name}`, binary]);
@@ -59,8 +63,8 @@ export async function assertCompilerLoader({sdk, platform}) {
     throw new Error(`compiler search path is not SDK-relative: ${paths.join(':')}`);
   }
   const dependencies = llvmDependencies(binary, platform);
-  if (dependencies.length && (!/\(RUNPATH\)/.test(dynamic) || !paths.includes('$ORIGIN/../lib/cjc'))) {
-    throw new Error('compiler LLVM RUNPATH missing $ORIGIN/../lib/cjc');
+  if (dependencies.length && (!/\(RUNPATH\)/.test(dynamic) || !paths.includes('$ORIGIN/../third_party/cjc/lib'))) {
+    throw new Error('compiler LLVM RUNPATH missing $ORIGIN/../third_party/cjc/lib');
   }
   const output = probe('ldd', [binary], sdkEnvironment(sdk));
   if (/not found/.test(output)) throw new Error(`compiler unresolved dependency:\n${output}`);
@@ -68,7 +72,7 @@ export async function assertCompilerLoader({sdk, platform}) {
     const name = compilerLlvmName(platform);
     const resolved = output.split('\n').map(line => line.trim().match(/^(\S+) => (.*?) \(0x/))
       .filter(Boolean).filter(match => match[1] === name);
-    const expected = await fs.realpath(path.join(sdk, 'lib/cjc', name));
+    const expected = await fs.realpath(path.join(sdk, 'third_party/cjc/lib', name));
     if (resolved.length !== 1 || await fs.realpath(resolved[0][2]) !== expected) {
       throw new Error(`compiler LLVM resolved outside its SDK: ${output}`);
     }

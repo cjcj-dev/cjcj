@@ -31,7 +31,7 @@ const product = await resolveProductBinary('target/release/bin', 'compose-sdk');
 await $`test -x ${product}`;
 const lineage = JSON.parse(await fs.readFile(path.join(workspace, 'software', 'stage3-compiler.json'), 'utf8'));
 await installStage3Compiler({sdk, product, lineage});
-const compilerLlvm = await prepareCompilerLoader({sdk, platform: targetKey});
+const compilerLlvm = await prepareCompilerLoader({sdk, platform: targetKey, expectedSha256: lineage.compilerLlvmSha256});
 const installed = path.join(sdk, 'bin', 'cjc');
 const kind = (await $({stdio: 'pipe'})`file -b ${installed}`).stdout.trim();
 if (!kind.includes(target.spec.fileFormat) || !kind.includes(target.spec.fileArch)) {
@@ -71,7 +71,7 @@ if (target.spec.os === 'darwin') {
   }
   const relativeRpaths = [
     `@loader_path/../runtime/lib/${target.spec.runtimeTuple}`,
-    '@loader_path/../lib/cjc',
+    '@loader_path/../third_party/cjc/lib',
     '@loader_path/../tools/lib',
   ];
   for (const rpath of relativeRpaths) {

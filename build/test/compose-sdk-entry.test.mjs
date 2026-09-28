@@ -58,7 +58,7 @@ for (const mode of ['local', 'github', 'github-missing-run']) {
     await write(path.join(std, 'lib/linux_x86_64_cjnative/libcangjie-std-core.a'), 'fixture static std\n');
     await fs.cp(std, sdk, {recursive: true});
     await write(path.join(software, 'stage3-compiler.json'), JSON.stringify({
-      stage: 'stage3', compilerSha256: expected, parentSha256: parent, stdSha256: await stdIdentity(std),
+      stage: 'stage3', compilerLlvmSha256: await fileSha256(llvm), compilerSha256: expected, parentSha256: parent, stdSha256: await stdIdentity(std),
     }));
     run('git', ['init', '-q']);
     run('git', ['remote', 'add', 'origin', repository]);

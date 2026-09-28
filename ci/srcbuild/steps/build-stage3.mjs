@@ -257,12 +257,17 @@ if (dryRun) {
   console.log('[stage3][dry-run] cjpm clean; cjpm build -j 1');
   console.log('STAGE3_DRY_RUN_REACHED_BUILD=1');
 } else {
+  const compilerLlvm = path.join(sdk, 'third_party/llvm/lib',
+    target.spec.os === 'darwin' ? 'libLLVM.dylib' : 'libLLVM-15.so');
+  const compilerLlvmSha256 = await sha256(compilerLlvm);
   await $({cwd: githubWorkspace, env: stageEnv})`cjpm clean`;
   await $({cwd: githubWorkspace, env: stageEnv})`cjpm build -j 1`;
+  if (await sha256(compilerLlvm) !== compilerLlvmSha256) throw new Error('stage3 build LLVM changed during compilation');
   const stage3Product = await findProductBinary('stage3');
   const stage3Sha = await sha256(stage3Product);
   await fs.writeFile(path.join(workspace, 'software', 'stage3-compiler.json'), `${JSON.stringify({
     compilerSha256: stage3Sha,
+    compilerLlvmSha256,
     parentSha256: stage2Sha,
     stdSha256: await stdIdentity(finalStd),
     stage: 'stage3',

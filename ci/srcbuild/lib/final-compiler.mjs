@@ -81,7 +81,7 @@ export async function installFinalCompilerLlvm({directory, sdk, platform}) {
   const value = JSON.parse(await fs.readFile(path.join(directory, FINAL_COMPILER_PROVENANCE), 'utf8'));
   const source = await checkedCompilerLlvm(directory, platform, value);
   if (!source) return;
-  const destination = path.join(sdk, 'lib/cjc', path.basename(source));
+  const destination = path.join(sdk, 'third_party/cjc/lib', path.basename(source));
   await fs.mkdir(path.dirname(destination), {recursive: true});
   await fs.copyFile(source, destination);
 }

@@ -148,7 +148,7 @@ test(`package_sdk archives std provenance and an honest complete manifest (${com
     const libSource = await write(root, 'compiler-llvm.c', 'int compiler_llvm_marker(void) { return 517; }\n');
     run('cc', ['-shared', '-fPIC', libSource, '-Wl,-soname,libLLVM-15.so', '-o', compilerLlvm]);
     const source = await write(root, 'compiler.c', '#include <stdio.h>\nextern int compiler_llvm_marker(void);\nint main(void) { printf("LLVM_RESULT=%d\\n", compiler_llvm_marker()); }\n');
-    run('cc', [source, compilerLlvm, '-Wl,-rpath,$ORIGIN/../lib/cjc', '-o', binary]);
+    run('cc', [source, compilerLlvm, '-Wl,-rpath,$ORIGIN/../third_party/cjc/lib', '-o', binary]);
   } else await fs.copyFile('/bin/true', binary);
   await fs.appendFile(binary, `\0CJCJ-COMMIT:${CJCJ_SHA}\0`);
   await fs.chmod(binary, 0o755);
@@ -360,7 +360,7 @@ test(`package_sdk archives std provenance and an honest complete manifest (${com
   assert.match(packaged.stdout, /DONE: .*cjcj-fixture-linux-x64\.tar\.gz/);
   if (compilerMode === 'dynamic') {
     console.log('PACKAGE_LLVM_RESULT_ASSERT_REACHED');
-    assert.match(packaged.stdout, /COMPILER_LLVM_RESOLVED libLLVM-15.so => .*lib\/cjc\/libLLVM-15.so/);
+    assert.match(packaged.stdout, /COMPILER_LLVM_RESOLVED libLLVM-15.so => .*third_party\/cjc\/lib\/libLLVM-15.so/);
     const execution = run('bash', ['--noprofile', '--norc', '-c',
       'unset LD_LIBRARY_PATH; source "$1/envsetup.sh"; "$1/bin/cjc"', 'package-execute', path.dirname(path.dirname(packagedCompiler))]);
     assert.equal(execution.stdout.trim(), 'LLVM_RESULT=517');
