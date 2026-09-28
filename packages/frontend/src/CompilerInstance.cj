@@ -891,7 +891,7 @@ public class CompilerInstance {
         FreeIdleMemoryToOS()
         var ret = true
         let sourcePackagesCHIR = GetSourcePackages()
-        let pkgsOrderedCHIR = packageManager.getOrThrow().GetBuildOrders(sourcePackagesCHIR)
+        let pkgsOrderedCHIR = packageManager.getOrThrow().GetBuildOrders()
         for (group in pkgsOrderedCHIR) {
             if (group.isEmpty()) {
                 continue
