@@ -1028,16 +1028,16 @@ prepare_stage0_run_sdk() { :; }
 sdk_ld_path() { :; }
 assemble_stage1_sdk() {
   value=$(cat "$3/std-id")
-  [[ $value == target ]] || { echo "SDK consumed $value std" >&2; return 17; }
+  [[ $value == stdlib-stage1 || $value == stdlib-stage2 ]] || { echo "SDK consumed $value std" >&2; return 17; }
   mkdir -p "$1"; cp "$3/std-id" "$1/std-id"
   echo SDK_CONSUMED_TARGET_STD
 }
-stdlib_build() { mkdir -p "$4"; printf target > "$4/std-id"; }
+stdlib_build() { mkdir -p "$4"; printf '%s' "$1" > "$4/std-id"; }
 isolate_cjcj_src() { mkdir -p "$1"; }
 shim_build() { :; }
 cjpm_build() {
   value=$(cat "$1/std-id")
-  [[ $value == target ]] || { echo "compiler consumed $value std" >&2; return 17; }
+  [[ $value == stdlib-stage2 ]] || { echo "compiler consumed $value std" >&2; return 17; }
   echo COMPILER_CONSUMED_TARGET_STD
 }
 resolve_cjpm_product() { printf '%s/compiled\\n' "$WORK"; }
