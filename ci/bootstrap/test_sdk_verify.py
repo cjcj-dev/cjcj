@@ -133,6 +133,12 @@ def main() -> int:
         forged = identities(sha((case / 'bin' / 'cjcj-stage1').read_bytes()))
         expect_rule(run_verify(case, forged), 'LLVM_TUPLE', 'old-ld.lld')
 
+        case = work / 'old-libllvm'
+        make_sdk(case, llvm_sha=LLVM_SHA, stamp_tools=True, lld_stamp=True)
+        write(case / 'third_party/llvm/lib/libLLVM-15.so', b'official-libLLVM')
+        forged = identities(sha((case / 'bin' / 'cjcj-stage1').read_bytes()))
+        expect_rule(run_verify(case, forged), 'LLVM_TUPLE', 'old-libLLVM')
+
         case = work / 'missing-lld'
         make_sdk(case, write_lld=False)
         forged = identities(sha((case / 'bin' / 'cjcj-stage1').read_bytes()))
@@ -150,7 +156,7 @@ def main() -> int:
         write(case / 'lib' / 'sneaky-official.so', b'leak')
         expect_rule(run_verify(case, forged, write_lock=False), 'UNDECLARED', 'undeclared-file')
 
-        print('ALL-PASS N=7')
+        print('ALL-PASS N=8')
         return 0
     finally:
         shutil.rmtree(work, ignore_errors=True)
