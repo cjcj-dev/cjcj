@@ -10,6 +10,7 @@ import {assertFinalStd} from '../lib/final-std.mjs';
 import {resolveProductBinary} from '../lib/product-binary.mjs';
 import {prepareBootstrapHandoff} from '../lib/bootstrap-handoff.mjs';
 import {stdIdentity} from '../lib/final-compiler.mjs';
+import {compilerBuildTypeToml} from '../lib/compiler-build-type.mjs';
 import {assertWriteBarriers} from '../lib/write-barrier.mjs';
 
 $.stdio = 'inherit';
@@ -257,6 +258,8 @@ if (dryRun) {
   console.log('[stage3][dry-run] cjpm clean; cjpm build -j 1');
   console.log('STAGE3_DRY_RUN_REACHED_BUILD=1');
 } else {
+  const compilerToml = path.join(githubWorkspace, 'packages', 'cjc', 'cjpm.toml');
+  await fs.writeFile(compilerToml, compilerBuildTypeToml(await fs.readFile(compilerToml, 'utf8'), stdlibBuildType));
   await $({cwd: githubWorkspace, env: stageEnv})`cjpm clean`;
   await $({cwd: githubWorkspace, env: stageEnv})`cjpm build -j 1`;
   const stage3Product = await findProductBinary('stage3');

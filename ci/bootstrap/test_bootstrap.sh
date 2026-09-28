@@ -583,6 +583,10 @@ make_isolation_fixture() {
     'if os.environ.get("CANGJIE_HOME") != expected_sdk:' \
     '    raise SystemExit(45)' \
     'if len(sys.argv) > 1 and sys.argv[1] == "build":' \
+    "    expected_type = '${BOOTSTRAP_EXPECT_STDLIB_BUILD_TYPE:-release}'" \
+    '    actual_type = sys.argv[sys.argv.index("-t") + 1]' \
+    '    print(f"ASSERT std-build-type actual={actual_type} expected={expected_type}", flush=True)' \
+    '    assert actual_type == expected_type, "stdlib build type did not reach build.py"' \
     '    target = next((x.split("=", 1)[1] for x in sys.argv if x.startswith("--target-lib=")), "")' \
     '    if target != expected_sdk + "/runtime/lib/linux_x86_64_cjnative":' \
     '        raise SystemExit(46)' \

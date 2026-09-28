@@ -36,7 +36,7 @@ on:
         required: false
         type: choice
         options: [release, relwithdebinfo, debug]
-        default: relwithdebinfo
+        default: release
       dry_run:
         description: Build and verify only; no GitHub release is created here in any case
         required: false

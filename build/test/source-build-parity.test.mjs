@@ -104,7 +104,7 @@ function makeFixture() {
 
   directory(compilerRoot, 'output');
   for (const subdirectory of ['lib', 'runtime']) {
-    file(runtimeRoot, ['runtime', 'output', 'common', 'linux_relwithdebinfo_x86_64', subdirectory, '.keep']);
+    file(runtimeRoot, ['runtime', 'output', 'common', 'linux_release_x86_64', subdirectory, '.keep']);
   }
   directory(runtimeRoot, 'runtime', 'output');
   directory(runtimeRoot, 'runtime', 'target');
@@ -505,6 +505,38 @@ test('tools select the target compiler home while keeping the plain host loader'
   }
 });
 
+test('source stage loader keeps inherited SDK LLVM before system dependencies', () => {
+  const {root, config: original} = makeFixture();
+  const target = original.target;
+  const systemLibraries = directory(root, 'system-libraries');
+  const sdkLlvm = directory(root, 'sdk-llvm');
+  const config = {...original, target: {...target, spec: {...target.spec,
+    llvmBinDir: directory(root, 'llvm-bin'), opensslLibDir: systemLibraries,
+  }}};
+  const hostKey = 'CJCJ_SRCBUILD_HOST_SDK';
+  const loaderKey = target.spec.loaderEnv;
+  const previous = {[hostKey]: process.env[hostKey], [loaderKey]: process.env[loaderKey]};
+  try {
+    const hostSdk = directory(root, 'host-sdk');
+    const targetSdk = path.join(config.repoPath('compiler'), 'output');
+    const runtime = ['runtime', 'lib', target.spec.runtimeTuple, target.spec.runtimeLibrary];
+    file(hostSdk, runtime, 'host runtime');
+    file(targetSdk, runtime, 'target runtime');
+    process.env[hostKey] = hostSdk;
+    process.env[loaderKey] = sdkLlvm;
+    const entries = baseEnv(config)[loaderKey].split(path.delimiter);
+    assert.deepEqual(entries, [path.join(hostSdk, ...runtime.slice(0, -1)),
+      path.join(targetSdk, 'tools', 'lib'), sdkLlvm, systemLibraries],
+      'SDK LLVM must precede system dependency libraries');
+    console.log('ASSERT SDK-LLVM-before-system evaluated');
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+    fs.rmSync(root, {recursive: true, force: true});
+  }
+});
+
 test('runtime producer uses the host loader before the target runtime exists', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'srcbuild-runtime-producer-'));
   const previousDryRun = process.env.CANGJIE_BUILD_DRY_RUN;
@@ -647,20 +679,20 @@ test('Linux source stages emit the Python command order', async () => {
 
     const expectedCommands = [
       expected(root, compilerRoot, ['python3', 'build.py', 'clean']),
-      expected(root, compilerRoot, ['python3', 'build.py', 'build', '-t', 'relwithdebinfo', '--no-tests', '--build-cjdb', '-v', '1.2.3']),
+      expected(root, compilerRoot, ['python3', 'build.py', 'build', '-t', 'release', '--no-tests', '--build-cjdb', '-v', '1.2.3']),
       expected(root, compilerRoot, ['python3', 'build.py', 'install']),
       expected(root, runtimeRoot, ['python3', 'build.py', 'clean']),
-      expected(root, runtimeRoot, ['python3', 'build.py', 'build', '--target', 'native', '-t', 'relwithdebinfo', '-v', '1.2.3']),
+      expected(root, runtimeRoot, ['python3', 'build.py', 'build', '--target', 'native', '-t', 'release', '-v', '1.2.3']),
       expected(root, runtimeRoot, ['python3', 'build.py', 'install']),
       expected(root, stdlibRoot, ['python3', 'build.py', 'clean']),
       expected(root, stdlibRoot, [
-        'python3', 'build.py', 'build', '-t', 'relwithdebinfo', '--target', 'native',
+        'python3', 'build.py', 'build', '-t', 'release', '--target', 'native',
         `--target-lib=${path.join(runtimeRoot, 'target')}`, '--target-lib=/usr/lib/x86_64-linux-gnu',
       ]),
       expected(root, stdlibRoot, ['python3', 'build.py', 'install']),
       expected(root, stdxRoot, ['python3', 'build.py', 'clean']),
       expected(root, stdxRoot, [
-        'python3', 'build.py', 'build', '-t', 'relwithdebinfo',
+        'python3', 'build.py', 'build', '-t', 'release',
         `--include=${path.join(compilerRoot, 'include')}`, '--target-lib=/usr/lib/x86_64-linux-gnu',
       ]),
       expected(root, stdxRoot, ['python3', 'build.py', 'install']),

@@ -6,7 +6,8 @@ import {ConfigError} from './errors.mjs';
 import {getTarget} from './targets.mjs';
 
 export const VALID_BUILD_TYPES = Object.freeze(['release', 'debug', 'relwithdebinfo']);
-export const DEFAULT_BUILD_TYPE = 'relwithdebinfo';
+// cangjie_build/docs/linux.md:243,255,269: published std, stdx and tools use release.
+export const DEFAULT_BUILD_TYPE = 'release';
 export const REPO_NAMES = Object.freeze(['compiler', 'runtime', 'tools', 'stdx']);
 
 const SEMVER_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;

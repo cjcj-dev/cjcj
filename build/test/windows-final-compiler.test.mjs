@@ -54,7 +54,7 @@ for (const fail of ['', 'final-clean', 'final-build']) {
     const external = await write(path.join(root, 'external-build.py'), `import pathlib, sys, shutil\ncommand, tag, sdk, host, fail = sys.argv[1:]\nsdk = pathlib.Path(sdk)\nassert (sdk/'bin/cjc.exe').read_text() == 'W1 compiler fixture'\nassert (sdk/'lib/${tuple}/libcangjie-std-p0.a').read_text() == 'final static std'\nwith open('commands.log', 'a') as out: out.write(tag + ':' + command + '\\n')\nif tag == fail: sys.exit(71)\nif tag == 'final-clean': shutil.rmtree('target')\nelse:\n p = pathlib.Path('target/release/bin/cjc@cjcj.exe')\n p.parent.mkdir(parents=True)\n p.write_text('W2 from ' + (sdk/'bin/cjc.exe').read_text())\n p.with_name('decoy').write_text('old compiler fixture')\n`);
     process.chdir(root);
     const result = await buildWindowsFinalCompiler({root, cangjieHome: sdk, hostSdk: host, sdkRuntimeDirName: tuple,
-      cjcTomlPath, cjcToml: 'link-option = "original"\n', mingwCxxLinkRsp: 'crt.rsp',
+      cjcTomlPath, cjcToml: 'compile-option = ""\nlink-option = "original"\n', mingwCxxLinkRsp: 'crt.rsp',
       installedRuntimeLib: path.join(sdk, 'runtime', 'lib', tuple, 'libcangjie-runtime.dll'),
       fixedLlvmManifest: llvmManifest, finalCompilerOutput: path.join(root, 'artifact'), finalStd, mingwBin: mingw,
       runInMsys: async (command, tag, sdkRoot, hostRoot) => {
@@ -68,6 +68,9 @@ for (const fail of ['', 'final-clean', 'final-build']) {
     if (fail) await assert.rejects(fs.stat(record), {code: 'ENOENT'});
     else {
       console.log('WINDOWS_W2_ORIGIN_ASSERT_REACHED fixture_only=true');
+      const linkedToml = await fs.readFile(cjcTomlPath, 'utf8');
+      console.log('ASSERT Windows-final-release-options fixture_only=true');
+      assert.match(linkedToml, /^compile-option = "--strip-all"$/m);
       await assert.rejects(fs.stat(path.join(root, 'final-compiler-target-sdk', 'lib', tuple, 'libcangjie-std-old.a')), {code: 'ENOENT'});
       assert.equal(await fs.readFile(path.join(root, 'artifact', 'cjc.exe'), 'utf8'), 'W2 from W1 compiler fixture');
       assert.equal(JSON.parse(await fs.readFile(record, 'utf8')).production.parentSha256, parentSha);
