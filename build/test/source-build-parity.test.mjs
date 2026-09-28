@@ -114,10 +114,11 @@ function makeFixture() {
   file(toolsRoot, ['cjpm', 'build', 'build.py'], '# fixture\n');
   file(toolsRoot, ['cjpm', 'dist', 'cjpm']);
   for (const parts of [
-    ['cjfmt', 'build'], ['hyperlangExtension', 'build'], ['cangjie-language-server', 'build'],
+    ['cjcompat', 'build'], ['cjfmt', 'build'], ['hyperlangExtension', 'build'], ['cangjie-language-server', 'build'],
   ]) directory(toolsRoot, ...parts);
   file(toolsRoot, ['cjfmt', 'build', 'build', 'bin', 'cjfmt']);
   file(toolsRoot, ['cjfmt', 'config', 'default.toml']);
+  file(toolsRoot, ['cjcompat', 'dist', 'bin', 'cjcompat'], 'source-built cjcompat');
   file(toolsRoot, ['hyperlangExtension', 'target', 'bin', 'main']);
   file(toolsRoot, ['hyperlangExtension', 'src', 'dtsparser', 'keep.txt']);
   file(toolsRoot, ['hyperlangExtension', 'src', 'dtsparser', 'drop.cj']);
@@ -685,12 +686,14 @@ test('Linux source stages emit the Python command order', async () => {
       ['cjfmt', path.join('cjfmt', 'build')],
       ['hle', path.join('hyperlangExtension', 'build')],
       ['lsp', path.join('cangjie-language-server', 'build')],
+      ['cjcompat', path.join('cjcompat', 'build')],
       ['cjcov', path.join('cjcov', 'build')],
       ['cjtrace-recover', path.join('cjtrace-recover', 'build')],
     ]) {
       const cwd = path.join(toolsRoot, subpath);
       expectedCommands.push(expected(root, cwd, ['python3', 'build.py', 'clean']));
       const buildArgs = ['python3', 'build.py', 'build', '-t', 'release'];
+      if (name === 'cjcompat') buildArgs.push('-j', String(os.availableParallelism()));
       if (name === 'cjpm') buildArgs.push('--set-rpath', '$ORIGIN/../../runtime/lib/linux_x86_64_cjnative');
       expectedCommands.push(expected(root, cwd, buildArgs));
       const installArgs = ['python3', 'build.py', 'install'];

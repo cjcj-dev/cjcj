@@ -5,7 +5,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 
 export const PACKAGED_TOOL_NAMES = Object.freeze([
-  'cjpm', 'cjfmt', 'hle', 'LSPServer', 'cjcov', 'cjtrace-recover',
+  'cjpm', 'cjfmt', 'cjcompat', 'hle', 'LSPServer', 'cjcov', 'cjtrace-recover',
 ]);
 
 const SHA40 = /^[0-9a-f]{40}$/;
