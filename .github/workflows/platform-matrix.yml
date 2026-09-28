@@ -98,7 +98,8 @@ jobs:
         run: |
           set -euo pipefail
           ulimit -c 0
-          export CANGJIE_BUILD_JOBS=$(sysctl -n hw.logicalcpu)
+          CANGJIE_BUILD_JOBS=$(sysctl -n hw.logicalcpu)
+          export CANGJIE_BUILD_JOBS
           npx --yes zx@8 ci/platform_matrix/build_runtime.mjs
       - name: Package independent native libraries
         env:
@@ -106,7 +107,8 @@ jobs:
         run: |
           set -euo pipefail
           node ci/release/darwin_runtime.mjs prepare colour-runtime "$PLATFORM" .platform-ci/runtime-install
-          export COLOUR_RT_MANIFEST_SHA256=$(shasum -a 256 colour-runtime/manifest.json | awk '{print $1}')
+          COLOUR_RT_MANIFEST_SHA256=$(shasum -a 256 colour-runtime/manifest.json | awk '{print $1}')
+          export COLOUR_RT_MANIFEST_SHA256
           export COLOUR_RT_RUN_ID=$GITHUB_RUN_ID COLOUR_RT_RUN_ATTEMPT=$GITHUB_RUN_ATTEMPT
           node ci/release/darwin_runtime.mjs verify colour-runtime "$PLATFORM" .platform-ci/runtime-install | tee colour-runtime/verified.log
       - name: Test native producer and consumer with controlled cuts

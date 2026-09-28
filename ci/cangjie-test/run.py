@@ -58,18 +58,24 @@ ENVIRONMENT_SIGNATURES = (
     ('No such file or directory',
      'referenced file or executable absent from the environment'),
     ('command not found', 'required executable absent from PATH'),
-    ('timed out', 'case or command exceeded its time limit'),
-    ('Timeout', 'case or command exceeded its time limit'),
-    ('timeout has expired', 'case or command exceeded its time limit'),
     ('Cannot allocate memory', 'host out of memory while running the case'),
     ('No space left on device', 'filesystem full while running the case'),
 )
 
 
-def environment_hints(detail):
+TIMEOUT_REASONS = dict.fromkeys(
+    ('TimeOut', 'timeout has expired'), 'case or command exceeded its time limit')
+
+
+def environment_hints(detail, timeout_failure=False):
+    # Reuse the suite's upstream timeout verdict, never a mention in source text.
+    timeout_hint = 'timeout has expired' if isinstance(detail, str) else 'TimeOut'
     if not isinstance(detail, str):
         detail = json.dumps(detail, ensure_ascii=False)
-    return [signature for signature, _ in ENVIRONMENT_SIGNATURES if signature in detail]
+    hints = [signature for signature, _ in ENVIRONMENT_SIGNATURES if signature in detail]
+    if timeout_failure:
+        hints.append(timeout_hint)
+    return hints
 
 
 def environment_evidence(detail, hints):
@@ -93,7 +99,7 @@ def environment_evidence(detail, hints):
 
 
 def environment_failures(rows):
-    reasons = dict(ENVIRONMENT_SIGNATURES)
+    reasons = dict(ENVIRONMENT_SIGNATURES, **TIMEOUT_REASONS)
     result = []
     for row in rows:
         if row['category'] not in ('fail', 'not_run') or not row['environment_hints']:
@@ -145,10 +151,8 @@ def summarize(suite, raw, root):
             summary_detail = json.dumps(summary_detail, ensure_ascii=False)
         if len(summary_detail) > 4000:
             summary_detail = summary_detail[:1000] + '\n... [see raw results] ...\n' + summary_detail[-2900:]
-        if not isinstance(detail, str):
-            detail = json.dumps(detail, ensure_ascii=False)
         # Preserve original upstream status and logs; these are triage hints only.
-        environment = environment_hints(detail)
+        environment = environment_hints(detail, timeout_failure)
         rows.append({'suite': suite, 'name': name, 'status': status,
                      'category': STATUS[status], 'environment_hints': environment,
                      'timeout_failure': timeout_failure,

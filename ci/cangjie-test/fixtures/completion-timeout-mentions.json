@@ -1,0 +1,10 @@
+[
+  {
+    "name": "testsuites/HLT/Tools/cjlsp/testcases/autotestcase/completion/textDocument_completion_082.info",
+    "stdout": ")\\\",\\\"sortText\\\": \\\"577143\\\"},{\\\"deprecated\\\": false,\\\"detail\\\": \\\"public class TimeoutException <: Exception\\\",\\\"documentation\\\": \\\"\\\",\\\"filterText\\\": \\\"TimeoutException\\\",\\\"insertText\\\": \\\"TimeoutException\\\",\\\"insertTextFormat\\\": 1,\\\"kind\\\": 7,\\\"label\\\": \\\"TimeoutException\\\",\\\""
+  },
+  {
+    "name": "testsuites/HLT/Tools/cjlsp/testcases/autotestcase/deprecated/textDocument_completion_018.info",
+    "stdout": "t\\\",\\\"sortText\\\": \\\"611429\\\"},{\\\"deprecated\\\": false,\\\"detail\\\": \\\"public class TimeoutException <: Exception\\\",\\\"documentation\\\": \\\"\\\",\\\"filterText\\\": \\\"TimeoutException\\\",\\\"insertText\\\": \\\"TimeoutException\\\",\\\"insertTextFormat\\\": 1,\\\"kind\\\": 7,\\\"label\\\": \\\"TimeoutException\\\",\\\""
+  }
+]
