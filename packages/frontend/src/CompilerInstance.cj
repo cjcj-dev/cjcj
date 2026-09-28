@@ -11,6 +11,7 @@ import cjcj::mangle.MangleDecl as RealMangleDecl
 import cjcj::mangle.ManglerContext as RealManglerContext
 import cjcj::sema.CompilerInstance as FaithfulSemaCompilerInstance
 import cjcj::sema.GenericInstantiation.GenericInstantiationManager
+import cjcj::sema.GenericInstantiation.PartialInstantiation
 import cjcj::sema.Desugar.DesugarBeforeTypeCheck as FaithfulDesugarBeforeTypeCheck
 import cjcj::sema.TypeCheckExpr.TypeChecker as FaithfulSemaTypeChecker
 import cjcj::sema.TypeCheckReferenceRemoveTargetNotMeetExtendConstraint
@@ -272,6 +273,9 @@ public class CompilerInstance {
             return
         }
         astResourcesDestroyed = true
+        PartialInstantiation.ResetGlobalMap()
+        mangler.ClearManglerCtxTable()
+        mangler.adapter = RealMangleAstAdapter()
         try (recorder = ProfileRecorder("ClearASTResources", "DestroyASTResources")) {
             // 2) TypeChecker first (holds AST / TypeManager refs).
             let toDestroyTypeChecker = faithfulTypeChecker
@@ -888,23 +892,26 @@ public class CompilerInstance {
         var ret = true
         let sourcePackagesCHIR = GetSourcePackages()
         let pkgsOrderedCHIR = packageManager.getOrThrow().GetBuildOrders(sourcePackagesCHIR)
-        let emitted = HashSet<String>()
         for (group in pkgsOrderedCHIR) {
             if (group.isEmpty()) {
                 continue
             }
             let wanted = group[0].fullPackageName
-            for (pkg in sourcePackagesCHIR) {
-                if (pkg.fullPackageName == wanted && !emitted.contains(pkg.fullPackageName)) {
+            var index: Int64 = 0
+            while (index < sourcePackagesCHIR.size) {
+                if (sourcePackagesCHIR[index].fullPackageName == wanted) {
+                    let pkg = sourcePackagesCHIR[index]
+                    sourcePackagesCHIR.remove(at: index)
                     ret = ret && GenerateCHIRForPkg(pkg)
-                    emitted.add(pkg.fullPackageName)
+                    break
                 }
+                index++
             }
         }
-        for (pkg in sourcePackagesCHIR) {
-            if (!emitted.contains(pkg.fullPackageName)) {
-                ret = ret && GenerateCHIRForPkg(pkg)
-            }
+        while (!sourcePackagesCHIR.isEmpty()) {
+            let pkg = sourcePackagesCHIR[0]
+            sourcePackagesCHIR.remove(at: 0)
+            ret = ret && GenerateCHIRForPkg(pkg)
         }
         if (ret && realASTPkgs.size > 1 && invocation.globalOptions.outputMode != OutputMode.CHIR && !isCJLint) {
             try (recorder = ProfileRecorder("AST to CHIR Translation", "ClearASTResources")) {
