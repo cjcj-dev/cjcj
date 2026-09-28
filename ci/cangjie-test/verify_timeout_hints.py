@@ -53,14 +53,14 @@ class TimeoutHintsTest(unittest.TestCase):
                 runner = framework / 'main.py'
             runner.write_text(RUNNER)
             runner.with_name('records.json').write_text(json.dumps(records))
-            record, rows = run_suite(suite, test, framework, output,
+            record = run_suite(suite, test, framework, output,
                                     dict(os.environ, CANGJIE_HOME=str(root)), 2)
             out = output / suite
             written = {name: json.loads((out / (name + '.json')).read_text())
                        for name in ('cases', 'failures', 'timeout-failures', 'environment-failures')}
             self.assertEqual(record['rc'], 1)
             self.assertIn('UPSTREAM_RECORDS_EMITTED', (out / 'runner.log').read_text())
-            self.assertEqual(rows, written['cases'])
+            rows = written['cases']
             self.assertEqual(rows[0]['status'], status)
             self.assertEqual(rows[0]['category'], 'fail' if status == 'FAIL' else 'pass')
             self.assertEqual(len(written['failures']), int(status == 'FAIL'))
