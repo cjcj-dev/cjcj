@@ -28,7 +28,7 @@ variants = {
 }
 for arm, content in variants.items():
     tree = out / arm / 'src'
-    for directory in ('.github', 'ci', 'build'):
+    for directory in ('.github', 'ci', 'build', 'scripts'):
         shutil.copytree(root / directory, tree / directory)
     (tree / product).write_text(content)
     if content != original:

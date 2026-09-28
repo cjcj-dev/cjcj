@@ -240,6 +240,14 @@ function substitute(value, inputs) {
   });
 }
 
+test('native tuple publication expands only its job matrix when enabled', async () => {
+  const disabled = await runArtifacts('build-llvm-tools.yml');
+  const enabled = await runArtifacts('build-llvm-tools.yml', new Map([['publish_native_tuple', 'true']]));
+  const native = rows => rows.map(([name]) => name).filter(name => name.startsWith('static-llvm-tuple-')).sort();
+  assert.deepEqual(native(disabled), []);
+  assert.deepEqual(native(enabled), ['static-llvm-tuple-darwin_aarch64', 'static-llvm-tuple-darwin_x86_64']);
+});
+
 test('source-build workflow connects every native runner to its LLVM and std artifact', async () => {
   const workflow = await fs.readFile(path.join(root, '.github/workflows/srcbuild.yml'), 'utf8');
   const fixed = await fs.readFile(path.join(root, '.github/workflows/build-llvm-tools.yml'), 'utf8');
