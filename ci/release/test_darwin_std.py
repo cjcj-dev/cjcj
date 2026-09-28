@@ -44,6 +44,12 @@ if len(sys.argv) > 2 and sys.argv[2] == '--prepare':
     (modules / 'std.core.cjo').write_text('module input fixture\n')
     (prefix / 'std-producer.json').write_text(json.dumps({'compiler_sha256': sha(objects / 'tool')}))
     copy(objects / 'host.dylib', host / f'runtime/lib/{tuple_name}/libcangjie-runtime.dylib')
+    # Match the real runtime export contract before exercising the independent std checks.
+    colour_source = objects / 'colour.dylib.c'
+    with colour_source.open('a') as source:
+        source.write('\n' + '\n'.join('void CJ_MCC_PackageInit' + suffix + '(void) {}'
+                                    for suffix in ('Begin', 'Complete', 'Fail', 'Abort')))
+    subprocess.run(['/usr/bin/clang', '-dynamiclib', str(colour_source), '-o', str(objects / 'colour.dylib')], check=True)
     copy(objects / 'colour.dylib', runtime_source / f'runtime/lib/{tuple_name}/libcangjie-runtime.dylib')
     copy(objects / 'host.dylib', runtime_source / f'runtime/lib/{tuple_name}/libboundscheck.dylib')
     obj = objects / 'runtime.o'

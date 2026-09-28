@@ -75,6 +75,13 @@ export function fixture(check, target = 'linux-x64') {
         const dest = path.join(runtime, native);
         fs.mkdirSync(path.dirname(dest), {recursive: true});
         fs.writeFileSync(dest, `native input fixture ${native}`);
+        if (process.platform === 'darwin' && native.endsWith('/libcangjie-runtime.dylib')) {
+          const source = path.join(dir, 'runtime-exports.c');
+          fs.writeFileSync(source, ['Begin', 'Complete', 'Fail', 'Abort']
+            .map(suffix => `void CJ_MCC_PackageInit${suffix}(void) {}`).join('\n'));
+          const compiled = spawnSync('/usr/bin/clang', ['-dynamiclib', source, '-o', dest], {encoding: 'utf8'});
+          if (compiled.status !== 0) throw new Error(`native runtime fixture: ${compiled.stderr}`);
+        }
         nativeFiles[native] = runtimeDigest(dest);
       }
       fs.writeFileSync(path.join(runtime, 'manifest.json'), JSON.stringify({role: 'colour-runtime-libraries',

@@ -13,58 +13,68 @@ const readWorkflow = name => fs.readFile(path.join(root, '.github/workflows', na
 
 const uncommented = text => text.split('\n').filter(line => !/^\s*#/.test(line)).join('\n');
 
-// One entry per reusable-workflow *call*, not per distinct file: two jobs calling
-// one producer upload its artifacts twice, so the repeat has to survive here.
-async function invokedWorkflows(entry, stack = []) {
-  assert.ok(!stack.includes(entry), `reusable workflow cycle: ${[...stack, entry].join(' -> ')}`);
-  const text = uncommented(await readWorkflow(entry));
-  const invocations = [entry];
-  for (const [, called] of text.matchAll(/uses:\s*\.\/\.github\/workflows\/([\w.-]+\.yml)/g)) {
-    invocations.push(...await invokedWorkflows(called, [...stack, entry]));
-  }
-  return invocations;
-}
-
-// A selectable matrix cannot be a literal any more -- Actions has no way to
-// filter one -- so the tuple table moved into the plan step as JSON. It is still
-// one table in one place; it just is not YAML, and reading only the YAML form
-// leaves this file blind to every tuple.
+// The selectable matrix is emitted by this workflow's plan job. Literal matrices
+// belong only to their own job; pooling them duplicates unrelated platform rows.
 const planTable = text => [...text.matchAll(/^\s*all='(\[[\s\S]*?\])'\s*$/gm)]
   .flatMap(([, json]) => JSON.parse(json));
 
-// The values a ${{ matrix.KEY }} placeholder can take inside one workflow file.
-const matrixValues = (text, key) => [
-  ...[...text.matchAll(new RegExp(String.raw`^\s*(?:- )?${key}: (\S+)$`, 'gm'))].map(([, value]) => value),
-  ...planTable(text).map(entry => entry[key]).filter(value => value !== undefined).map(String),
-];
+function matrixValues(job, text, key) {
+  const strategy = block(job, /^\s*strategy:\s*$/);
+  assert.ok(strategy !== undefined, `matrix.${key} used outside a matrix job`);
+  const dynamic = scalar(strategy, 'matrix');
+  if (dynamic !== undefined) {
+    assert.equal(dynamic, '${{ fromJson(needs.plan.outputs.matrix) }}');
+    return planTable(jobs(text).get('plan')).map(row => row[key]).filter(value => value !== undefined);
+  }
+  const matrix = block(strategy, /^\s*matrix:\s*$/);
+  assert.ok(matrix !== undefined, 'literal matrix missing');
+  const axis = scalar(matrix, key);
+  if (axis?.startsWith('[')) return axis.slice(1, -1).split(',').map(value => unquote(value.trim()));
+  return [...matrix.matchAll(new RegExp(String.raw`^\s*(?:- )?${key}: (\S+)$`, 'gm'))]
+    .map(([, value]) => unquote(value));
+}
 
-function expandMatrix(name, text) {
+function expandMatrix(name, job, text) {
   const placeholder = name.match(/\$\{\{\s*matrix\.(\w+)\s*\}\}/);
   if (!placeholder) return [name];
-  const values = matrixValues(text, placeholder[1]);
+  const values = matrixValues(job, text, placeholder[1]);
   assert.ok(values.length > 0, `no matrix values for ${placeholder[1]} in ${name}`);
-  return values.flatMap(value => expandMatrix(name.replace(placeholder[0], value), text));
+  return values.flatMap(value => expandMatrix(name.replace(placeholder[0], value), job, text));
 }
 
-// Artifact names one workflow file uploads, with its own matrix fanout expanded.
-function uploadedArtifacts(text) {
-  const lines = text.split('\n');
-  const names = [];
-  for (const [index, line] of lines.entries()) {
-    if (!line.includes('uses: actions/upload-artifact@')) continue;
-    const nameLine = lines.slice(index + 1, index + 10).find(entry => /^\s+name: /.test(entry));
-    assert.ok(nameLine, `upload step at line ${index + 1} declares no artifact name`);
-    names.push(...expandMatrix(nameLine.replace(/^\s+name: /, '').trim(), text));
-  }
-  return names;
+function jobRuns(job, inputs) {
+  const condition = job.match(/^ {4}if: (.+?)\s*$/m)?.[1];
+  if (condition === undefined) return true;
+  const input = condition.match(/^inputs\.(\w+)$/);
+  assert.ok(input, `unrecognized job condition: ${condition}`);
+  const value = inputs.get(input[1]);
+  assert.ok(value === 'true' || value === 'false', `non-boolean job input: ${condition}=${value}`);
+  return value === 'true';
 }
 
-// [artifact, producing workflow] for everything a dispatch entry point uploads.
-async function runArtifacts(entry) {
+// Keep one record per actual upload/call. Never deduplicate names: the caller's
+// uniqueness assertion must still detect two uploads in one job or across jobs.
+async function runArtifacts(entry, inputs = new Map(), stack = []) {
+  assert.ok(!stack.includes(entry), `reusable workflow cycle: ${[...stack, entry].join(' -> ')}`);
+  const text = uncommented(await readWorkflow(entry));
+  const resolved = effectiveInputs(text, inputs);
   const produced = [];
-  for (const name of await invokedWorkflows(entry)) {
-    const text = uncommented(await readWorkflow(name));
-    for (const artifact of uploadedArtifacts(text)) produced.push([artifact, name]);
+  for (const job of jobs(text).values()) {
+    if (!jobRuns(job, resolved)) continue;
+    const called = scalar(job, 'uses')?.match(/^\.\/\.github\/workflows\/([\w.-]+\.yml)$/);
+    if (called) {
+      const passed = mapping(block(job, /^\s*with:\s*$/));
+      produced.push(...await runArtifacts(called[1], passed, [...stack, entry]));
+      continue;
+    }
+    for (const step of steps(job)) {
+      if (!step.includes('uses: actions/upload-artifact@')) continue;
+      const name = scalar(step, 'name');
+      // A step's display name precedes `with:`; read the artifact name there.
+      const artifact = scalar(block(step, /^\s*with:\s*$/), 'name');
+      assert.ok(artifact, `upload step ${name || ''} declares no artifact name`);
+      for (const expanded of expandMatrix(artifact, job, text)) produced.push([expanded, entry]);
+    }
   }
   return produced;
 }
