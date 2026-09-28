@@ -505,6 +505,38 @@ test('tools select the target compiler home while keeping the plain host loader'
   }
 });
 
+test('source stage loader keeps inherited SDK LLVM before system dependencies', () => {
+  const {root, config: original} = makeFixture();
+  const target = original.target;
+  const systemLibraries = directory(root, 'system-libraries');
+  const sdkLlvm = directory(root, 'sdk-llvm');
+  const config = {...original, target: {...target, spec: {...target.spec,
+    llvmBinDir: directory(root, 'llvm-bin'), opensslLibDir: systemLibraries,
+  }}};
+  const hostKey = 'CJCJ_SRCBUILD_HOST_SDK';
+  const loaderKey = target.spec.loaderEnv;
+  const previous = {[hostKey]: process.env[hostKey], [loaderKey]: process.env[loaderKey]};
+  try {
+    const hostSdk = directory(root, 'host-sdk');
+    const targetSdk = path.join(config.repoPath('compiler'), 'output');
+    const runtime = ['runtime', 'lib', target.spec.runtimeTuple, target.spec.runtimeLibrary];
+    file(hostSdk, runtime, 'host runtime');
+    file(targetSdk, runtime, 'target runtime');
+    process.env[hostKey] = hostSdk;
+    process.env[loaderKey] = sdkLlvm;
+    const entries = baseEnv(config)[loaderKey].split(path.delimiter);
+    assert.deepEqual(entries, [path.join(hostSdk, ...runtime.slice(0, -1)),
+      path.join(targetSdk, 'tools', 'lib'), sdkLlvm, systemLibraries],
+      'SDK LLVM must precede system dependency libraries');
+    console.log('ASSERT SDK-LLVM-before-system evaluated');
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+    fs.rmSync(root, {recursive: true, force: true});
+  }
+});
+
 test('runtime producer uses the host loader before the target runtime exists', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'srcbuild-runtime-producer-'));
   const previousDryRun = process.env.CANGJIE_BUILD_DRY_RUN;

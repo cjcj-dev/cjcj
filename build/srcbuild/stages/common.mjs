@@ -102,7 +102,7 @@ export function baseEnv(config) {
         hostSdk: process.env.CJCJ_SRCBUILD_HOST_SDK,
         targetSdk: cangjieHome,
         target: config.target,
-        inherited: joinPathsep(...ldPaths, process.env[spec.loaderEnv] || ''),
+        inherited: joinPathsep(process.env[spec.loaderEnv] || '', ...ldPaths),
         includeTargetLlvm: false,
       });
     }
