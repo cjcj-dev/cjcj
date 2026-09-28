@@ -104,6 +104,8 @@ export async function main(gate) {
     `RUNTIME_STAMP=${stamp[0]}`, `EXPECTED_CHECKSUM=${inputs.expected_checksum}`,
     ...loads.map(load => `WORKLOAD_ELF_SHA256_${load}=${inputs.workloads[load].sha256}`), '',
   ].join('\n'));
+  await fs.mkdir(path.join(root, 'workloads'));
+  for (const load of loads) await fs.copyFile(inputs.workloads[load].path, path.join(root, 'workloads', load));
   const receipts = [];
   const rows = [];
   let combined = '';
@@ -117,10 +119,12 @@ export async function main(gate) {
     await fs.copyFile(runtime.path, path.join(lib, 'libcangjie-runtime.so'));
     await fs.copyFile(inputs.boundscheck.path, path.join(lib, 'libboundscheck.so'));
     const elf = inputs.workloads[item.load];
+    const elfPath = path.join(root, 'workloads', item.load);
+    await validateArtifact({path: elfPath, sha256: elf.sha256}, `${key} retained ELF`);
     const env = {PATH: process.env.PATH, LD_LIBRARY_PATH: lib, cjHeapSize: '256MB', CANGJIE_CJHEAP_SIZE: '256MB',
       MRT_GC_LOG: '1', MRT_LOG_LEVEL: 'i', MRT_REPORT: path.join(dir, 'report'),
       ZVerifyRemembered: item.mode === 'normal' ? '0' : '1', ZVerifyRoots: '1', ZVerifyMarking: '1'};
-    await write(dir, 'loader.txt', command('env', [`LD_LIBRARY_PATH=${lib}`, 'ldd', elf.path]) + '\n');
+    await write(dir, 'loader.txt', command('env', [`LD_LIBRARY_PATH=${lib}`, 'ldd', elfPath]) + '\n');
     if (!(await fs.readFile(path.join(dir, 'loader.txt'), 'utf8')).includes(`${lib}/libcangjie-runtime.so`)) {
       throw new Error(`${key}: loader does not select the retained runtime`);
     }
@@ -128,13 +132,15 @@ export async function main(gate) {
     const err = await fs.open(path.join(dir, 'stderr.log'), 'w');
     const before = command('uptime', []);
     const start = performance.now();
-    const args = ['-c', values.cores, '/usr/bin/timeout', '--signal=TERM', '--kill-after=5s', '120s', elf.path];
+    const args = ['-c', values.cores, '/usr/bin/timeout', '--signal=TERM', '--kill-after=5s', '120s', elfPath];
     const child = spawnSync('taskset', args, {env, stdio: ['ignore', out.fd, err.fd]});
     await out.close(); await err.close();
     const receipt = {...item, rc: child.status ?? -1, signal: child.signal || '', error: child.error?.message || '',
       wall_ms: Math.round(performance.now() - start), env, argv: ['taskset', ...args],
       uptime_begin: before, uptime_end: command('uptime', []),
-      workload_sha256: elf.sha256, runtime_sha256: runtime.sha256};
+      workload_path: elfPath, workload_sha256: elf.sha256, runtime_sha256: runtime.sha256};
+    await validateArtifact({path: elfPath, sha256: elf.sha256}, `${key} retained ELF`);
+    await validateArtifact({path: path.join(lib, 'libcangjie-runtime.so'), sha256: runtime.sha256}, `${key} retained runtime`);
     let gcLog = await fs.readFile(path.join(dir, 'stderr.log'), 'utf8');
     receipt.gc_sources = ['stderr.log', ...(await fs.readdir(dir)).filter(name => name === 'report' || name.startsWith('report.')).sort()];
     for (const name of receipt.gc_sources.slice(1)) {
@@ -156,6 +162,7 @@ export async function main(gate) {
   await fs.appendFile(path.join(root, 'meta.txt'),
     `LOADAVG_END=${(await fs.readFile('/proc/loadavg', 'utf8')).trim()}\nUPTIME_END=${command('uptime', [])}\nFINISHED_UTC=${finished}\n`);
   // Shared libraries are inputs, not archived evidence. Their identities remain in inputs/receipts.
+  await fs.rm(path.join(root, 'workloads'), {recursive: true, force: true});
   await fs.rm(path.join(root, 'lib'), {recursive: true, force: true});
   await fs.rm(path.join(root, 'control-lib'), {recursive: true, force: true});
   await bindCampaign(root, gate, head, started, finished);

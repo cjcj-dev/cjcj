@@ -86,7 +86,8 @@ export async function evaluateCampaign(gate, read) {
       receipt.env.MRT_GC_LOG === '1' && receipt.env.ZVerifyRoots === '1' && receipt.env.ZVerifyMarking === '1' &&
       receipt.env.cjHeapSize === '256MB' && receipt.env.CANGJIE_CJHEAP_SIZE === '256MB', `${key}: run environment mismatch`);
     requireValue(receipt.argv?.[0] === 'taskset' && receipt.argv[1] === '-c' && receipt.argv[2] === meta.CORES &&
-      receipt.argv.at(-1) === elf.path, `${key}: execution identity mismatch`);
+      typeof receipt.workload_path === 'string' && receipt.workload_path.endsWith(`/workloads/${expected.load}`) &&
+      receipt.argv.at(-1) === receipt.workload_path, `${key}: execution identity mismatch`);
     const loader = await read(`${base}/loader.txt`);
     requireValue(loader.includes(`${receipt.env.LD_LIBRARY_PATH}/libcangjie-runtime.so`), `${key}: loader identity mismatch`);
     const stdout = await read(`${base}/stdout.log`);

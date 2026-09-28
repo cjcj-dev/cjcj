@@ -61,8 +61,8 @@ export async function campaignFixture(root, gate, checkout, mutate = () => {}) {
     const receipt = {...item, rc: control ? 134 : 0, signal: '', error: '', wall_ms: 10,
       env: {ZVerifyRemembered: item.mode === 'normal' ? '0' : '1', ZVerifyRoots: '1', ZVerifyMarking: '1',
         MRT_GC_LOG: '1', cjHeapSize: '256MB', CANGJIE_CJHEAP_SIZE: '256MB', LD_LIBRARY_PATH: '/fixture/lib'},
-      argv: ['taskset', '-c', '0-63', '/usr/bin/timeout', '120s', inputs.workloads[item.load].path],
-      uptime_begin: UPTIME, uptime_end: UPTIME, workload_sha256: inputs.workloads[item.load].sha256,
+      argv: ['taskset', '-c', '0-63', '/usr/bin/timeout', '120s', `/fixture/workloads/${item.load}`],
+      uptime_begin: UPTIME, uptime_end: UPTIME, workload_path: `/fixture/workloads/${item.load}`, workload_sha256: inputs.workloads[item.load].sha256,
       runtime_sha256: control ? inputs.control_runtime.sha256 : SHA, gc_sources: ['stderr.log']};
     const data = {receipt, stdout: stdoutLog(), log: control ? 'Missing remembered field 0x100 in source 0x200\n' : gcLog()};
     mutate(data);
