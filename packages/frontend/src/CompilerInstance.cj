@@ -877,21 +877,8 @@ public class CompilerInstance {
                     "missing real AST package for '" + pkg.fullPackageName + "'")
                 return false
         }
-        if (let Some(realPkg) <- BuildRealCHIRForASTPackage(this, realASTPkg)) {
-            chirData.getOrThrow().AppendNewRealPackage(realPkg)
-            chirInfo.varInitDepMap.clear()
-            for ((rawMangledName, initFuncName) in GetVarInitDepMap(realPkg)) {
-                chirInfo.varInitDepMap[rawMangledName] = initFuncName
-            }
-        } else {
-            if (diag.GetErrorCount() != 0) {
-                return false
-            }
-            diag.Diagnose(DiagCategory.CHIR, PackageDiagnosticPosition(pkg),
-                "unsupported construct in package '" + pkg.fullPackageName +
-                "' (not yet implemented in real pipeline)")
-            return false
-        }
+        // CHIR.cpp:1376-1390 releases AST during conversion. Capture frontend
+        // result metadata first so neither success nor error handling keeps pkg live.
         let chirPkg = CHIRPackage(pkg.fullPackageName)
         chirPkg.fileCount = pkg.files.size
         for (file in pkg.files) {
@@ -903,6 +890,23 @@ public class CompilerInstance {
             collectCHIRDeclSummary(chirPkg, decl)
         }
         chirPkg.declCount = chirPkg.mangleNames.size
+        let packageName = pkg.fullPackageName
+        let packagePosition = PackageDiagnosticPosition(pkg)
+        if (let Some(realPkg) <- BuildRealCHIRForASTPackage(this, realASTPkg)) {
+            chirData.getOrThrow().AppendNewRealPackage(realPkg)
+            chirInfo.varInitDepMap.clear()
+            for ((rawMangledName, initFuncName) in GetVarInitDepMap(realPkg)) {
+                chirInfo.varInitDepMap[rawMangledName] = initFuncName
+            }
+        } else {
+            if (diag.GetErrorCount() != 0) {
+                return false
+            }
+            diag.Diagnose(DiagCategory.CHIR, packagePosition,
+                "unsupported construct in package '" + packageName +
+                "' (not yet implemented in real pipeline)")
+            return false
+        }
         chirData.getOrThrow().AppendNewPackage(chirPkg)
         chirData.getOrThrow().SetConstVarInitFuncs(chirPkg, chirPkg.constVarInitFuncs)
         return true
@@ -927,8 +931,7 @@ public class CompilerInstance {
             var index: Int64 = 0
             while (index < sourcePackagesCHIR.size) {
                 if (sourcePackagesCHIR[index].fullPackageName == wanted) {
-                    let pkg = sourcePackagesCHIR[index]
-                    sourcePackagesCHIR.remove(at: index)
+                    let pkg = sourcePackagesCHIR.remove(at: index)
                     ret = ret && GenerateCHIRForPkg(pkg)
                     break
                 }
@@ -936,8 +939,7 @@ public class CompilerInstance {
             }
         }
         while (!sourcePackagesCHIR.isEmpty()) {
-            let pkg = sourcePackagesCHIR[0]
-            sourcePackagesCHIR.remove(at: 0)
+            let pkg = sourcePackagesCHIR.remove(at: 0)
             ret = ret && GenerateCHIRForPkg(pkg)
         }
         if (ret && realASTPkgs.size > 1 && invocation.globalOptions.outputMode != OutputMode.CHIR && !isCJLint) {
