@@ -1146,6 +1146,9 @@ public open class DynamicDispatch <: FuncCall {
 public class Invoke <: DynamicDispatch {
     public init(callContext: InvokeCallContext, parent: Option<Block>) {
         super(ExprKind.INVOKE, callContext, parent)
+        // Open constructors cannot call instance methods; connect the inherited callee first.
+        // Upstream Expression.cpp:1036-1043 appends it in DynamicDispatch.
+        ConnectOperandsAndGroups()
         AppendOperand(callContext.caller)
         for (arg in callContext.funcCallCtx.args) {
             AppendOperand(arg)
@@ -1216,6 +1219,9 @@ public class Invoke <: DynamicDispatch {
 public class InvokeStatic <: DynamicDispatch {
     public init(callContext: InvokeCallContext, parent: Option<Block>) {
         super(ExprKind.INVOKESTATIC, callContext, parent)
+        // Open constructors cannot call instance methods; connect the inherited callee first.
+        // Upstream Expression.cpp:1036-1043 appends it in DynamicDispatch.
+        ConnectOperandsAndGroups()
         AppendOperand(callContext.caller)
         for (arg in callContext.funcCallCtx.args) {
             AppendOperand(arg)
