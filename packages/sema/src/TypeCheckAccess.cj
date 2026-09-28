@@ -33,6 +33,12 @@ private class BoolBox {
 
 private let inoutUseCache: ArrayList<InoutUseCacheEntry> = ArrayList<InoutUseCacheEntry>()
 
+// TypeCheckerImpl.h:1773 owns this cache; CompilerInstance.cpp:173 destroys
+// that owner before AST packages. Retire the managed table at the same boundary.
+public func ReleaseInoutUseCache(): Unit {
+    inoutUseCache.clear()
+}
+
 public func MaybeStruct(ty: Ty): Bool {
     if (!Ty.IsTyCorrect(ty)) {
         return false

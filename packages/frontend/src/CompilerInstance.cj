@@ -40,6 +40,7 @@ import std.collection.*
 import std.ref.{WeakRef, CleanupPolicy}
 import cjcj::sema.GenericInstantiation.PartialInstantiation
 import cjcj::sema.OverrideFunctionResolver
+import cjcj::sema.ReleaseInoutUseCache
 import std.core.Box as CoreBox
 
 foreign {
@@ -362,6 +363,10 @@ public class CompilerInstance {
             mangledName2DeclMap.clear()
             cachedInfo.semaInfo.usages.clear()
             cachedInfo.varAndFuncDep.clear()
+            // Translation can refill the borrowed-pointer mangling contexts
+            // after PerformCHIRCompilation's initial clear.
+            mangler.adapter.ReleaseConvertedAst()
+            mangler.ClearManglerCtxTable()
 
             // C++: std::async destroyFunc (CompilerInstance.cpp:173-185).
             // CJ: drop held roots then InvokeGC (delete ≡ GC reclaim) + FreeIdleMemoryToOS.
@@ -383,6 +388,7 @@ public class CompilerInstance {
                 // GenericInstantiationContext.cpp:35-43 clears this borrowed-
                 // pointer cache. Retire its managed roots with the AST as well.
                 OverrideFunctionResolver.ClearCache()
+                ReleaseInoutUseCache()
                 unsafe {
                     CJ_MCC_InvokeGC(true)
                 }
