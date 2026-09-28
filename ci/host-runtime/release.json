@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "repository": "cjcj-dev/cjcj",
+  "role": "official-host-runtime",
+  "toolchain": "nightly-1.3.0-alpha.20260925001050",
+  "producer_sha": "dac89069a271c3b3313099d49349537e4caa7f20",
+  "run_id": "36290987795",
+  "run_attempt": "1",
+  "release_id": 397492956,
+  "tag": "host-runtime-nightly-20260925001050-36290987795-1-prerelease",
+  "prerelease": true,
+  "checksums_asset_id": 592031002,
+  "checksums_sha256": "d4676e6afaa7f8fed8b25655c420bb75720e86bd65407dd5b1a5543f94f24605",
+  "platforms": {
+    "darwin_x86_64": {
+      "artifact_id": 10922780083,
+      "artifact_digest": "sha256:f041a6958c70d617f2f2416289935b82eeca5da0be977db092ae09e19ec563c6",
+      "archive": "host-runtime-darwin_x86_64.zip",
+      "archive_sha256": "f041a6958c70d617f2f2416289935b82eeca5da0be977db092ae09e19ec563c6",
+      "archive_asset_id": 592031001,
+      "manifest": "darwin_x86_64.manifest.json",
+      "manifest_sha256": "af2075ac0032cc7e8bcda121346d39ac143d8ccd1914781fa6e462ff9ad11c22",
+      "manifest_asset_id": 592031005,
+      "files": {
+        "runtime/lib/darwin_x86_64_cjnative/libcangjie-runtime.dylib": "d0822d2d8e7018e041e65cfb2dd885c80fee835428eee72d22e4def901f5df40",
+        "runtime/lib/darwin_x86_64_cjnative/libboundscheck.dylib": "3ed5b96a13eced90eaf3cdcf22c7b3e57f7c56310e55312ea6d5a7f7e54b101e"
+      }
+    },
+    "darwin_aarch64": {
+      "artifact_id": 10922550686,
+      "artifact_digest": "sha256:28f88a764b0995443041d9b54f2bf7ba5a087af4fe04acda9d13703e57105e1f",
+      "archive": "host-runtime-darwin_aarch64.zip",
+      "archive_sha256": "28f88a764b0995443041d9b54f2bf7ba5a087af4fe04acda9d13703e57105e1f",
+      "archive_asset_id": 592031008,
+      "manifest": "darwin_aarch64.manifest.json",
+      "manifest_sha256": "78e403b5c9c14d43031ac7a2d1087823635b407aabe8f6627bd39fdb06236a46",
+      "manifest_asset_id": 592031006,
+      "files": {
+        "runtime/lib/darwin_aarch64_cjnative/libcangjie-runtime.dylib": "55c5945ee0837d31cb996994d0d16863233a2abd7a64381a2cdb973f51dae516",
+        "runtime/lib/darwin_aarch64_cjnative/libboundscheck.dylib": "4814dc1585b4ef71fade765f1bd40fdaae7ac21c3fbf75fb9b0437ddbb110ea9"
+      }
+    }
+  }
+}

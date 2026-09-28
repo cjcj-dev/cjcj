@@ -62,3 +62,18 @@ test('dylib depot fallback uses the same reviewed digest', () => fixture(({env, 
   assert.equal(result.status, 0, result.stderr);
   assert.ok(result.stdout.includes(`CJCJ_BOOTSTRAP_COLOUR_LLVM_SO=${nested}/libLLVM-15.so\n`));
 }));
+
+for (const target of ['darwin-arm64', 'darwin-x64']) {
+  test(`${target} exports the reviewed native dylib and rejects changed bytes`, () => fixture(({env, dylib, dylibSha, run}) => {
+    const valid = run();
+    assert.equal(valid.status, 0, valid.stderr);
+    assert.ok(valid.stdout.includes(`CJCJ_BOOTSTRAP_COLOUR_LLVM_SO=${dylib}/libLLVM.dylib\n`));
+    assert.ok(valid.stdout.includes(`CJCJ_BOOTSTRAP_COLOUR_LLVM_SHA256=${dylibSha}\n`));
+    fs.appendFileSync(path.join(dylib, 'libLLVM.dylib'), 'changed');
+    const invalid = run();
+    assert.notEqual(invalid.status, 0);
+    assert.match(invalid.stderr, /LLVM_DYLIB_SHA256_MISMATCH/);
+    assert.doesNotMatch(invalid.stdout, /CJCJ_BOOTSTRAP_COLOUR_LLVM_SO=/);
+    console.log(`ASSERT ${target} native dylib selection and digest rejection executed`);
+  }, target));
+}

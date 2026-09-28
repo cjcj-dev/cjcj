@@ -41,6 +41,8 @@ export RELEASE_EVIDENCE_ROOT=/root/cj_build/ops/release_evidence/0.0.2
 
 `RELEASE_EVIDENCE_ROOT` 是**版本持久**目录：批准记录、environment JSON、各门证据都留在这里，跨 campaign 不变。
 
+此处是[持久证据路径政策](../../evidence/README.md)的唯一版本根配置。门脚本从 `$RELEASE_EVIDENCE_ROOT/GATE_EVIDENCE.json` 读取 `gates` 索引，并相对于该根解析 `gates/G12`、`gates/G14` 等目录；索引不另设根路径。campaign 输出目录不替代这个版本根。
+
 而 `generate-freeze.mjs` 产的是**不可变的 per-campaign 目录** `<parent>/<campaign_id>/`，`campaign_id` 里带 `cjcj_head_sha`。两者是不同的东西，中间缺的是「哪个 campaign 是当前的」这条声明 —— G1 默认从 `$RELEASE_EVIDENCE_ROOT/FREEZE.json` 读，而生成器永远不会写到那个路径。
 
 **冻结 = 生成 campaign 后把持久目录里的指针指过去。** 不复制、不改判据：
