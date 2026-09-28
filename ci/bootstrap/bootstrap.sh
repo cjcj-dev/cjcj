@@ -55,6 +55,7 @@ BUILD_HOME="${HOME:-/root}"
 
 usage() {
   echo 'bootstrap.sh --work DIR --src CJCJ_ROOT --cjcj-sha 40HEX --stdsrc STDLIB --cpp-src CANGJIE_CPP_ROOT --host-llvm-so libLLVM-15.so --host-llvm-sha256 HEX --colour-llvm-so libLLVM-15.so --colour-llvm-sha256 HEX --ast-support FILE --ast-support-sha256 HEX --colour-tuple DIR --colour-llvm-sha 40HEX --colour-rt DIR --host-rt DIR [--stage stage0|stage1|all] [--stage1-heap 20GB] [--dry-run]'
+  echo 'CJCJ_FORENSIC_STAGE2=1 additionally builds cjcj-stage2-forensic with -g in an independent source tree (bootstrap only).'
 }
 
 sha256() {
@@ -727,6 +728,37 @@ bootstrap_target_std() {
   cmd "rm -rf -- $(printf '%q' "$link_root")"
 }
 
+forensic_stage2() {
+  local sdk="$WORK/sdk-stage1" copy="$WORK/cjcj-src-stage1-forensic" seed
+  local out="$WORK/cjcj-stage2-forensic" release_before='planned'
+  if [ "$DRY" -eq 0 ]; then
+    record forensic-release-before "$WORK/cjcj-stage2"
+    release_before=$(sha256 "$WORK/cjcj-stage2")
+  fi
+  isolate_cjcj_src "$copy"
+  # Same SDK, shim and optimisation as stage1; cjpm -g selects target/debug.
+  shim_build stage1 "$sdk" "$CRT" "$copy" "$sdk/third_party/llvm/fixed-llc/cjselfhost_llvmshim.o"
+  cjpm_build "$sdk" "$HRT" "$copy" "-j $JOBS -g" "$STAGE1_HEAP"
+  seed=$(resolve_cjpm_product "$copy/target/debug/bin" cjcj-stage2-forensic)
+  cmd "install -m0755 $(printf '%q' "$seed") $(printf '%q' "$out")"
+  if [ "$DRY" -eq 0 ]; then
+    assert_expected_sha forensic-release-unchanged "$WORK/cjcj-stage2" "$release_before"
+    (
+      printf 'CJCJ_SHA=%s\nCJPM_EXTRA=-j %s -g\n' "$CJCJ_SHA" "$JOBS"
+      record forensic-source-options "$copy/cjpm.toml"
+      record forensic-bootstrap "${BASH_SOURCE[0]}"
+      record forensic-parent "$sdk/bin/cjcj-stage1"
+      record forensic-std "$sdk/lib/$HOST_TUPLE/libcangjie-std-core.a"
+      record forensic-release "$WORK/cjcj-stage2"
+      record forensic-compiler "$out"
+    ) > "$out.source-stamps.txt" || die 'forensic source stamps failed'
+    (cd "$WORK" && sha256sum cjcj-stage2-forensic cjcj-stage2-forensic.source-stamps.txt > cjcj-stage2-forensic.SHA256SUMS) || die 'forensic checksums failed'
+    record forensic-compiler "$out"
+    record forensic-source-stamps "$out.source-stamps.txt"
+  fi
+  echo "OUTPUT cjcj-stage2-forensic=$out"
+}
+
 stage1() {
   STAGE=stage1
   echo '[stage1] cjcj-stage1 self-host + coloured LLVM; C++=RelWithDebInfo'
@@ -769,6 +801,9 @@ stage1() {
     [ -d "$std" ] || die 'stage1 未产出 stdlib-stage2'
   fi
   assert_version cjcj-stage2 "$out" "$sdk" "$CRT"
+  if [ "${CJCJ_FORENSIC_STAGE2:-0}" = 1 ]; then
+    forensic_stage2
+  fi
 }
 
 main() {

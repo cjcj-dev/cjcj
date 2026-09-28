@@ -112,6 +112,20 @@ check_count() {
   [ "$count" -eq "$expected" ] || fail "$label" "pattern count=$count expected=$expected: $pattern"
 }
 
+check_forensic_plan() {
+  make_dry_fixture
+  CJCJ_FORENSIC_STAGE2=0 dry_run > "$TMP/release.log" || fail FORENSIC 'release CLI failed'
+  CJCJ_FORENSIC_STAGE2=1 dry_run > "$TMP/forensic.log" || fail FORENSIC 'forensic CLI failed'
+  # Everything before the optional segment must remain the release recipe.
+  sed '/^BOOTSTRAP-OK/,$d' "$TMP/release.log" > "$TMP/release-prefix.log"
+  sed '/^ISOLATE .*cjcj-src-stage1-forensic/,$d' "$TMP/forensic.log" > "$TMP/forensic-prefix.log"
+  cmp "$TMP/release-prefix.log" "$TMP/forensic-prefix.log" || fail FORENSIC 'release recipe changed'
+  check_count FORENSIC 1 'CMD cjpm build -j .* -g bin=.*cwd=.*cjcj-src-stage1-forensic ' "$TMP/forensic.log"
+  check_count FORENSIC 1 'product=planned dir=.*/cjcj-src-stage1-forensic/target/debug/bin' "$TMP/forensic.log"
+  check_count FORENSIC 1 '^OUTPUT cjcj-stage2-forensic=.*/cjcj-stage2-forensic$' "$TMP/forensic.log"
+  echo 'PASS forensic plan: independent source/debug product, unchanged release prefix (dry-run only)'
+}
+
 check_shim_call_count() {
   check_count SHIM 2 'CMD shim build label=' "$1"
 }
@@ -781,6 +795,7 @@ check_shim_wiring() {
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then return 0; fi
 
 case "${1:-test}" in
+  check-forensic-plan) check_forensic_plan;;
   check-std-compiler-identity) check_std_compiler_identity;;
   check-tuple-with-so) check_tuple_with_so;;
   check-exit-receipts)
