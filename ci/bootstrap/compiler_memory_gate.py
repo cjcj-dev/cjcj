@@ -12,6 +12,7 @@ import json
 import os
 from pathlib import Path
 import re
+import signal
 import subprocess
 import time
 
@@ -45,10 +46,13 @@ def collect(args):
                   uptime_before=uptime(), started_at=time.time())
     started = time.monotonic()
     with (out / 'stdout.log').open('w') as stdout, (out / 'stderr.log').open('w') as stderr:
+        process = subprocess.Popen(command, cwd=out, env=env, stdout=stdout,
+                                   stderr=stderr, start_new_session=True)
         try:
-            rc = subprocess.run(command, cwd=out, env=env, stdout=stdout,
-                                stderr=stderr, timeout=args.timeout).returncode
+            rc = process.wait(timeout=args.timeout)
         except subprocess.TimeoutExpired:
+            os.killpg(process.pid, signal.SIGKILL)
+            process.wait()
             rc = 124
     result.update(rc=rc, wall_s=time.monotonic() - started, uptime_after=uptime())
     log = (out / 'runtime.log').read_text() if (out / 'runtime.log').exists() else ''
