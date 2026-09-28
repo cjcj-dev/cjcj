@@ -80,6 +80,18 @@ test('consumer rejects changed library bytes after authentic manifest verificati
   console.log(`ASSERT CONSUMER_REJECTS_CHANGED_BYTES ${platform}`);
 }));
 
+test('consumer rejection names expected and actual manifest digests', () => fixture(({env, run}) => {
+  assert.equal(run('verify').status, 0);
+  const actual = env.COLOUR_RT_MANIFEST_SHA256;
+  const wrong = (actual[0] === '0' ? '1' : '0') + actual.slice(1);
+  env.COLOUR_RT_MANIFEST_SHA256 = wrong;
+  const rejected = run('verify');
+  assert.notEqual(rejected.status, 0, 'CONSUMER_REJECTS_WRONG_PIN');
+  assert.ok(rejected.stderr.includes(`COLOUR_RT_SHA256_MISMATCH expected=${wrong} actual=${actual}`),
+    `WORKFLOW_GREP_FORMAT: ${rejected.stderr}`);
+  console.log(`ASSERT CONSUMER_WRONG_PIN_MESSAGE ${platform}`);
+}));
+
 test('source classifies missing std only after verifying all native libraries', () => fixture(({source, output, env, run}) => {
   const result = run('source');
   assert.notEqual(result.status, 0);

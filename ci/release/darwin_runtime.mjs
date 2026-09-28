@@ -80,7 +80,9 @@ export function darwinRuntime(mode, root, platform, source) {
     console.log(`COLOUR_RT_MANIFEST_SHA256=${digest(manifestFile)}`);
   } else {
     assert.match(process.env.COLOUR_RT_MANIFEST_SHA256 || '', /^[a-f0-9]{64}$/, 'COLOUR_RT_PIN_MISSING');
-    assert.equal(digest(manifestFile), process.env.COLOUR_RT_MANIFEST_SHA256, 'COLOUR_RT_SHA256_MISMATCH');
+    const manifestSha = digest(manifestFile);
+    if (manifestSha !== process.env.COLOUR_RT_MANIFEST_SHA256)
+      throw new Error(`COLOUR_RT_SHA256_MISMATCH expected=${process.env.COLOUR_RT_MANIFEST_SHA256} actual=${manifestSha}`);
     const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
     assert.equal(manifest.role, 'colour-runtime-libraries', 'COLOUR_RT_ROLE_MISMATCH');
     assert.equal(manifest.platform, platform, 'COLOUR_RT_PLATFORM_MISMATCH');
