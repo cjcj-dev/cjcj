@@ -93,6 +93,32 @@ for name, injected, expect_ok in (
     records.append({'name': name, 'rc': result.returncode,
                     'checks': {'status': (result.returncode == 0) == expect_ok,
                                'target': expect_ok or 'COLOUR_RT_STD_CORE_LIBRARY' in text}})
+# Versioned library symlinks are first-party install products (libpcre2-8.0.dylib -> entity).
+for name in ('symlink-escape-prefix', 'symlink-dangling', 'versioned-symlink'):
+    work_prefix = out / (name + '-prefix')
+    shutil.copytree(prefix, work_prefix)
+    link = work_prefix / f'runtime/lib/{tuple_name}/libpcre2-8.0.dylib'
+    if name == 'symlink-escape-prefix':
+        os.symlink(seed / 'objects/host.dylib', link)
+        expected = 'COLOUR_RT_STD_SYMLINK_ESCAPE'
+    elif name == 'symlink-dangling':
+        os.symlink('libpcre2-8.0.nonexistent.dylib', link)
+        expected = 'COLOUR_RT_STD_SYMLINK'
+    else:
+        copy(seed / 'objects/host.dylib', work_prefix / f'runtime/lib/{tuple_name}/libpcre2-8.0.14.0.dylib')
+        os.symlink('libpcre2-8.0.14.0.dylib', link)
+        expected = None
+    result = run('darwin_std.mjs', [work_prefix, runtime, host, compiler, platform, out / (name + '-std')])
+    text = result.stdout + result.stderr
+    (out / (name + '.log')).write_text(text)
+    checks = {'status': (result.returncode == 0) == (expected is None),
+              'target': expected is None or expected in text}
+    if expected is None and result.returncode == 0:
+        produced = out / (name + '-std')
+        checks['materialised'] = not any((produced / f).is_symlink()
+                                         for f in json.loads((produced / 'std-manifest.json').read_text())['files'])
+        checks['symlink-bytes'] = sha(produced / f'runtime/lib/{tuple_name}/libpcre2-8.0.dylib') == sha(seed / 'objects/host.dylib')
+    records.append({'name': name, 'rc': result.returncode, 'checks': checks})
 for name in ('valid', 'changed-std', 'wrong-compiler-pin', 'missing-std'):
     work = out / name
     shutil.copytree(runtime, work)

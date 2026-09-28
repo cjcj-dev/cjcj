@@ -228,6 +228,18 @@ jobs:
           path: ${{ runner.temp }}/darwin-std-pin.json
           if-no-files-found: error
       - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: native-std-prefix-${{ matrix.llvm_platform }}
+          path: |
+            ${{ env.CANGJIE_WORKSPACE }}/bootstrap-work/stdlib-stage1/modules/${{ matrix.llvm_platform }}_cjnative
+            ${{ env.CANGJIE_WORKSPACE }}/bootstrap-work/stdlib-stage1/lib/${{ matrix.llvm_platform }}_cjnative
+            ${{ env.CANGJIE_WORKSPACE }}/bootstrap-work/stdlib-stage1/runtime/lib/${{ matrix.llvm_platform }}_cjnative
+            ${{ env.CANGJIE_WORKSPACE }}/bootstrap-work/stdlib-stage1/lib/libstdFFI.dylib
+            ${{ env.CANGJIE_WORKSPACE }}/bootstrap-work/stdlib-stage1/std-producer.json
+          if-no-files-found: warn
+          retention-days: 30
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: native-std-diagnostics-${{ matrix.llvm_platform }}

@@ -22,6 +22,21 @@ function required(platform) {
   return [`lib/${tuple}/libcangjie-std-core.a`, `runtime/lib/${tuple}/libcangjie-std-core.dylib`,
     'lib/libstdFFI.dylib', 'std-producer.json'];
 }
+function materializable(root, relative) {
+  assert.ok(/^[\w.-]+(?:\/[\w.-]+)*$/.test(relative)
+    && !relative.split('/').some(p => p === '.' || p === '..'), 'COLOUR_RT_STD_PATH');
+  const file = path.join(root, relative);
+  let real;
+  try {
+    real = fs.realpathSync(file);
+  } catch {
+    assert.fail(`COLOUR_RT_STD_SYMLINK: ${relative}`);
+  }
+  assert.ok(real === fs.realpathSync(root) || real.startsWith(fs.realpathSync(root) + path.sep),
+    `COLOUR_RT_STD_SYMLINK_ESCAPE: ${relative}`);
+  assert.ok(fs.statSync(real).isFile(), `COLOUR_RT_STD_FILE: ${relative}`);
+  return real;
+}
 export function verifyDarwinStd(root, platform, pin, runtimeManifestSha) {
   const tuple = `${platform}_cjnative`;
   assert.ok(fs.existsSync(path.join(root, `lib/${tuple}/libcangjie-std-core.a`))
@@ -76,7 +91,7 @@ export function prepareDarwinStd(prefix, runtime, hostRuntime, compiler, platfor
     assert.ok(!/^libcangjie-runtime/.test(base), 'COLOUR_RT_STD_CORE_LIBRARY');
     assert.ok(!/^libboundscheck/.test(base) || !relative.startsWith(`runtime/lib/${tuple}/`),
       'COLOUR_RT_STD_CORE_LIBRARY');
-    const source = regular(prefix, relative);
+    const source = materializable(prefix, relative);
     const dest = path.join(output, relative);
     fs.mkdirSync(path.dirname(dest), {recursive: true});
     fs.copyFileSync(source, dest);
