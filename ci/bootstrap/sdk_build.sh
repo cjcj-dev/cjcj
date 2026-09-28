@@ -638,9 +638,12 @@ echo "  g_cjLoadBadMask=$MASK ✓  ($RTSO)"
 COLOUR_CHECK="$(dirname "${BASH_SOURCE[0]}")/std_runtime_colour.py"
 [ -n "$COLOUR_RUNTIME" ] || die '配对检查缺 --colour-runtime 参考 SO'
 [ -n "$HOST_RUNTIME" ] || die '配对检查缺 --host-runtime 参考 SO'
+_COLOUR_LOG="$(dirname "$TO")/sdk-colour-check.log"
 python3 "$COLOUR_CHECK" --colour-runtime "$COLOUR_RUNTIME" --host-runtime "$HOST_RUNTIME" --runtime "$RTSO" \
   --std "$TO/lib/$TARGET_TUPLE/libcangjie-std-core.a" --source "${STD:-$BASE}" \
-  || die "std/runtime 颜色配对失败（来源与 sha256 见上）"
+  >"$_COLOUR_LOG" 2>&1 \
+  || { cat "$_COLOUR_LOG" >&2; die "std/runtime 颜色配对失败（来源与 sha256 见上）"; }
+cat "$_COLOUR_LOG"
 
 # ⭐⭐ 有效性三步：⛔ sha 只证同一性
 echo "[4/5] 自证 file -> ldd -> --version"

@@ -33,7 +33,9 @@ def colour_symbols(colour_runtime, host_runtime):
     identity = (f'colour_runtime={colour_runtime} colour_runtime_sha256={sha256(colour_runtime)} '
                 f'host_runtime={host_runtime} host_runtime_sha256={sha256(host_runtime)}')
     exports = symbols(colour_runtime, runtime=True) - symbols(host_runtime, runtime=True)
-    print(f'STD-COLOUR-EXPORTS {identity} colour_only={",".join(sorted(exports)) or "none"}',
+    names = sorted(exports)
+    sample = ','.join(names[:8]) or 'none'
+    print(f'STD-COLOUR-EXPORTS {identity} colour_only_count={len(names)} colour_only_sample={sample}',
           file=sys.stderr)
     if not exports:
         raise ValueError(f'empty colour-only runtime export set {identity}')
@@ -48,8 +50,12 @@ def assert_pair(runtime, std, source, exports, host_runtime):
         std_hits = symbols(std) & exports
     except (OSError, ValueError) as error:
         raise ValueError(f'{identity} inspection={error}') from error
-    detail = (f'{identity} runtime_symbols={",".join(sorted(rt_hits)) or "none"} '
-              f'std_symbols={",".join(sorted(std_hits)) or "none"}')
+    rt_names = sorted(rt_hits)
+    std_names = sorted(std_hits)
+    detail = (f'{identity} runtime_symbol_count={len(rt_names)} '
+              f'runtime_symbol_sample={",".join(rt_names[:8]) or "none"} '
+              f'std_symbol_count={len(std_names)} '
+              f'std_symbol_sample={",".join(std_names[:8]) or "none"}')
     if bool(rt_hits) != bool(std_hits):
         raise ValueError(f'STD-RUNTIME-COLOUR-MISMATCH {detail}')
     print(f'STD-RUNTIME-PAIR-OK {detail}')
