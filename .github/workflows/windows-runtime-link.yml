@@ -53,9 +53,22 @@ jobs:
           $cacheHome = $env:USERPROFILE.Replace('\', '/')
           $cacheConfigHome = $env:LOCALAPPDATA.Replace('\', '/')
           "export USERPROFILE='$cacheHome' LOCALAPPDATA='$cacheConfigHome'" | Set-Content -NoNewline -Encoding utf8 C:/msys64/etc/profile.d/runtime-link.sh
+      - name: Start sccache
+        uses: ./.github/actions/sccache
+        with:
+          component: windows-runtime
+          platform: windows-x86_64-${{ matrix.arm }}
+          pin: ${{ env.RUNTIME_REF }}
       - name: Exercise production entry and linker controls
         shell: bash
         run: npx --yes zx@8 ci/platform_matrix/test_windows_runtime_link.mjs
+      - name: Report sccache
+        if: always()
+        uses: ./.github/actions/sccache-report
+        with:
+          component: windows-runtime
+          platform: windows-x86_64-${{ matrix.arm }}
+          require-compiles: ${{ job.status == 'success' }}
       - name: Record toolchain versions
         if: always()
         shell: msys2 {0}

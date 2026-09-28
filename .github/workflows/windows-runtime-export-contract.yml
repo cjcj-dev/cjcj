@@ -66,12 +66,25 @@ jobs:
         run: |
           & C:/msys64/usr/bin/bash.exe -lc 'ccache --show-config'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Start sccache
+        uses: ./.github/actions/sccache
+        with:
+          component: windows-runtime
+          platform: windows-x86_64
+          pin: ${{ env.RUNTIME_REF }}
       - name: Build through the production MINGW64 entry
         shell: bash
         run: npx --yes zx@8 ci/platform_matrix/build_runtime.mjs
       - name: Verify the installed runtime contract
         shell: bash
         run: npx --yes zx@8 ci/platform_matrix/verify_windows_runtime_exports.mjs
+      - name: Report sccache
+        if: always()
+        uses: ./.github/actions/sccache-report
+        with:
+          component: windows-runtime
+          platform: windows-x86_64
+          require-compiles: ${{ job.status == 'success' }}
       - name: Retain native inputs and build evidence
         if: always()
         uses: actions/upload-artifact@v7
