@@ -80,6 +80,19 @@ if result.returncode == 0:
     checks['emitted-compiler'] = json.loads((out / 'darwin-std-identity.json').read_text())['compiler_sha256'] == sha(compiler)
     checks['std-bytes'] = sha(out / f'produced/lib/{tuple_name}/libcangjie-std-core.a') == sha(prefix / f'lib/{tuple_name}/libcangjie-std-core.a')
 records.append({'name': 'producer-identity', 'rc': result.returncode, 'checks': checks})
+for name, injected, expect_ok in (
+        ('bundled-runtime', f'runtime/lib/{tuple_name}/libcangjie-runtime.dylib', False),
+        ('bundled-boundscheck-runtime-dir', f'runtime/lib/{tuple_name}/libboundscheck.dylib', False),
+        ('own-boundscheck-lib', f'lib/{tuple_name}/libboundscheck.dylib', True)):
+    work_prefix = out / (name + '-prefix')
+    shutil.copytree(prefix, work_prefix)
+    copy(seed / 'objects/host.dylib', work_prefix / injected)
+    result = run('darwin_std.mjs', [work_prefix, runtime, host, compiler, platform, out / (name + '-std')])
+    text = result.stdout + result.stderr
+    (out / (name + '.log')).write_text(text)
+    records.append({'name': name, 'rc': result.returncode,
+                    'checks': {'status': (result.returncode == 0) == expect_ok,
+                               'target': expect_ok or 'COLOUR_RT_STD_CORE_LIBRARY' in text}})
 for name in ('valid', 'changed-std', 'wrong-compiler-pin', 'missing-std'):
     work = out / name
     shutil.copytree(runtime, work)

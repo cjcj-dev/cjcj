@@ -72,7 +72,10 @@ export function prepareDarwinStd(prefix, runtime, hostRuntime, compiler, platfor
     ...walk(`runtime/lib/${tuple}`), 'lib/libstdFFI.dylib'];
   const files = {};
   for (const relative of names) {
-    assert.ok(!/^libcangjie-runtime|^libboundscheck/.test(path.basename(relative)), 'COLOUR_RT_STD_CORE_LIBRARY');
+    const base = path.basename(relative);
+    assert.ok(!/^libcangjie-runtime/.test(base), 'COLOUR_RT_STD_CORE_LIBRARY');
+    assert.ok(!/^libboundscheck/.test(base) || !relative.startsWith(`runtime/lib/${tuple}/`),
+      'COLOUR_RT_STD_CORE_LIBRARY');
     const source = regular(prefix, relative);
     const dest = path.join(output, relative);
     fs.mkdirSync(path.dirname(dest), {recursive: true});
