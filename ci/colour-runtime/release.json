@@ -71,7 +71,39 @@
         "runtime/lib/darwin_x86_64_cjnative/libboundscheck.dylib": "393af28c54064a0d8b1c48ac68f6b18bd83fe3161501988d5e0143b971077958",
         "lib/darwin_x86_64_cjnative/libcangjie-runtime.a": "353e479d823fd2cd944e14b794642afa3c5eb791ab9fd99872fd29ecf113c8ab"
       },
-      "std_status": "pending-cjcj-473"
+      "std_status": "bootstrap-36425528508-1-10974886716-prerelease",
+      "std": {
+        "manifest_sha256": "e893285e3bbb3157a74037ec62d191877028fbc9bfff292508fbd6794d65b301",
+        "compiler_sha256": "d7e1a3a1eae692e0bb38240c9697541459a3e41d7790a20d3e108d909cff624b",
+        "producer_sha": "ed1b457bacf4cb6cf8600d595418e5174fd3258a",
+        "run_id": "36425528508",
+        "run_attempt": "1",
+        "archive": "darwin-std-darwin_x86_64.tar.gz",
+        "transport": {
+          "version": 1,
+          "repository": "cjcj-dev/cjcj",
+          "run": 36425528508,
+          "attempt": 1,
+          "commit": "ed1b457bacf4cb6cf8600d595418e5174fd3258a",
+          "artifact": 10974886716,
+          "files": [
+            {
+              "path": "darwin-std-darwin_x86_64.tar.gz",
+              "mode": 420,
+              "artifact_sha256": "d0b4cbb178db5f3ace2c650e29c713a69bf16f660203870f27155248ffa6a00f",
+              "release_sha256": "d0b4cbb178db5f3ace2c650e29c713a69bf16f660203870f27155248ffa6a00f",
+              "asset": 595575914
+            },
+            {
+              "path": "std-manifest.json",
+              "mode": 420,
+              "artifact_sha256": "e893285e3bbb3157a74037ec62d191877028fbc9bfff292508fbd6794d65b301",
+              "release_sha256": "e893285e3bbb3157a74037ec62d191877028fbc9bfff292508fbd6794d65b301",
+              "asset": 595576043
+            }
+          ]
+        }
+      }
     }
   }
 }
