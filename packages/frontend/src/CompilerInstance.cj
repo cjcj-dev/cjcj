@@ -181,6 +181,20 @@ public enum ExtendMemberQueryType {
     | ByInheritableDecl(InheritableDecl)
 }
 
+// CompilerInstance.cpp:125-137 ToBeDestroyInfo. Cangjie escaping closures
+// capture this record by reference; clearing its fields releases the GC roots.
+private class ToBeDestroyInfo {
+    public var typeChecker: Option<FaithfulSemaTypeChecker> = None
+    public var sema: Option<FaithfulSemaCompilerInstance> = None
+    public var testManager: Option<TestManager> = None
+    public var gim: Option<GenericInstantiationManager> = None
+    public var packageManager: Option<PackageManager> = None
+    public var importManager: Option<ImportManager> = None
+    public var typeManager: Option<TypeManager> = None
+    public let srcPkgs: ArrayList<Package> = ArrayList<Package>(0)
+    public let pkgCtxMap: ArrayList<ASTContext> = ArrayList<ASTContext>(0)
+}
+
 public class CompilerInstance {
     public let invocation: CompilerInvocation
     public var cangjieHome: String = ""
@@ -277,14 +291,15 @@ public class CompilerInstance {
         mangler.ClearManglerCtxTable()
         mangler.adapter = RealMangleAstAdapter()
         try (recorder = ProfileRecorder("ClearASTResources", "DestroyASTResources")) {
+            let info = ToBeDestroyInfo()
             // 2) TypeChecker first (holds AST / TypeManager refs).
-            let toDestroyTypeChecker = faithfulTypeChecker
+            info.typeChecker = faithfulTypeChecker
             faithfulTypeChecker = None
             hasTypeCheckerFlag = false
 
             // Selfhost extra strong root (C++ TypeChecker holds non-owning CompilerInstance*).
-            let toDestroySema = faithfulSemaInstance
-            if (let Some(sema) <- toDestroySema) {
+            info.sema = faithfulSemaInstance
+            if (let Some(sema) <- info.sema) {
                 sema.packages.clear()
                 sema.sourcePackages.clear()
                 sema.packageDecls.clear()
@@ -295,28 +310,27 @@ public class CompilerInstance {
             faithfulSemaInstance = None
 
             // 3) TestManager
-            let toDestroyTestManager = testManager
+            info.testManager = testManager
             testManager = None
 
             // 4) GIM
-            let toDestroyGim = gim
+            info.gim = gim
             gim = None
 
             // 5) PackageManager
-            let toDestroyPackageManager = packageManager
+            info.packageManager = packageManager
             packageManager = None
 
             // 5.1) ImportManager after PackageManager
             if (let Some(im) <- importManager) {
                 im.DeleteASTWriters()
             }
-            let toDestroyImportManager = importManager
+            info.importManager = importManager
             importManager = None
 
             // 6) AST packages before ASTContext (symbol detaching order).
-            let toDestroySrcPkgs = ArrayList<Package>()
             for (pkg in srcPkgs) {
-                toDestroySrcPkgs.add(pkg)
+                info.srcPkgs.add(pkg)
             }
             srcPkgs.clear()
             realASTPkgs.clear()
@@ -327,31 +341,30 @@ public class CompilerInstance {
             for (k in pkgCtxMap.keys()) {
                 toDestroyCtxKeys.add(k)
             }
-            let toDestroyCtx = ArrayList<ASTContext>()
             for (k in toDestroyCtxKeys) {
                 if (let Some(ctx) <- pkgCtxMap.get(k)) {
-                    toDestroyCtx.add(ctx)
+                    info.pkgCtxMap.add(ctx)
                 }
             }
             pkgCtxMap.clear()
 
             // 8) TypeManager last among heap managers
-            let toDestroyTypeManager = typeManager
+            info.typeManager = typeManager
             typeManager = None
 
             // C++: std::async destroyFunc (CompilerInstance.cpp:173-185).
             // CJ: drop held roots then InvokeGC (delete ≡ GC reclaim) + FreeIdleMemoryToOS.
             // Future stored for JoinDestroyASTResources ≡ dtor destroyFut.get() (cpp:87-91).
             let destroyFunc = { =>
-                let _tc = toDestroyTypeChecker
-                let _sema = toDestroySema
-                let _tmgr = toDestroyTestManager
-                let _gim = toDestroyGim
-                let _pm = toDestroyPackageManager
-                let _im = toDestroyImportManager
-                toDestroySrcPkgs.clear()
-                toDestroyCtx.clear()
-                let _tyman = toDestroyTypeManager
+                info.typeChecker = None
+                info.sema = None
+                info.testManager = None
+                info.packageManager = None
+                info.importManager = None
+                info.typeManager = None
+                info.gim = None
+                info.srcPkgs.clear()
+                info.pkgCtxMap.clear()
                 unsafe {
                     CJ_MCC_InvokeGC(true)
                 }
