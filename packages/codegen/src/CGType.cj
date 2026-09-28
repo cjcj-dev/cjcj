@@ -188,7 +188,7 @@ public open class CGType {
         if (let Some(rawLayout) <- layoutType) {
             return rawLayout
         }
-        return GetLLVMType()
+        return LLVMNullType()
     }
 
     public func GetOriginal(): Type { return chirType }
