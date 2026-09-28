@@ -61,6 +61,10 @@ for (const gate of ['G12', 'G14']) {
     assert.match(meta, /^LOADAVG_END=/m);
     assert.match(meta, /^UPTIME_END=/m);
     assert.match(await fs.readFile(path.join(output, 'RECIPE.txt'), 'utf8'), new RegExp(`SOURCE=ci/release/${gate.toLowerCase()}\\.mjs`));
+    const archive = JSON.parse(await fs.readFile(path.join(output, 'inputs.json'), 'utf8'));
+    console.log(`DEVICE_INPUT_HASHES ${gate} ${JSON.stringify({runtime: archive.runtime.sha256,
+      O0: archive.workloads.O0.sha256, O2: archive.workloads.O2.sha256, control: archive.control_runtime.sha256})}`);
+    console.log(`DEVICE_GATE_RESULT ${gate} ${consumer.stdout.trim()}`);
     assert.equal(run(process.execPath, args).status, 2, 'reusing an output directory must fail');
     console.log(`TARGET_ASSERTION_EXECUTED producer-${gate} device-only`);
   });
