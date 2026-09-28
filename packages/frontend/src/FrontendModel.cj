@@ -9213,22 +9213,10 @@ public class PackageManager {
         return ret
     }
 
-    public func GetBuildOrders(pkgs: ArrayList<Package>): ArrayList<ArrayList<Package>> {
-        let out = ArrayList<ArrayList<Package>>()
-        let sortPackageMap = HashMap<String, Package>()
-        for (pkg in pkgs) {
-            sortPackageMap[pkg.fullPackageName] = pkg
-        }
-        for (component in orderedPackageInfos) {
-            let group = ArrayList<Package>()
-            for (pkgInfo in component) {
-                if (let Some(pkg) <- sortPackageMap.get(pkgInfo.fullPackageName)) {
-                    group.add(pkg)
-                }
-            }
-            out.add(group)
-        }
-        return out
+    // C++ Modules/PackageManager.h:62-65: build order contains dependency
+    // metadata, not owning references to the AST packages being compiled.
+    public func GetBuildOrders(): ArrayList<ArrayList<PackageInfo>> {
+        return orderedPackageInfos
     }
 
     private func CollectDeps(pkgs: ArrayList<Package>): Unit {

@@ -4,6 +4,7 @@ import cjcj::ast.Package as RealASTPackage
 import cjcj::ast.PackageDecl as RealASTPackageDecl
 import cjcj::ast.StructTy as RealASTStructTy
 import cjcj::ast.PrintNode
+import cjcj::chir.TypeValue
 import cjcj::mangle.BaseMangler as RealBaseMangler
 import cjcj::mangle.CHIRMangler as RealCHIRMangler
 import cjcj::mangle.MangleAstAdapter as RealMangleAstAdapter
@@ -11,6 +12,8 @@ import cjcj::mangle.MangleDecl as RealMangleDecl
 import cjcj::mangle.ManglerContext as RealManglerContext
 import cjcj::sema.CompilerInstance as FaithfulSemaCompilerInstance
 import cjcj::sema.GenericInstantiation.GenericInstantiationManager
+import cjcj::sema.OverrideFunctionResolver
+import cjcj::sema.GenericInstantiation.PartialInstantiation
 import cjcj::sema.Desugar.DesugarBeforeTypeCheck as FaithfulDesugarBeforeTypeCheck
 import cjcj::sema.TypeCheckExpr.TypeChecker as FaithfulSemaTypeChecker
 import cjcj::sema.TypeCheckReferenceRemoveTargetNotMeetExtendConstraint
@@ -180,6 +183,20 @@ public enum ExtendMemberQueryType {
     | ByInheritableDecl(InheritableDecl)
 }
 
+// CompilerInstance.cpp:125-137 ToBeDestroyInfo. Cangjie escaping closures
+// capture this record by reference; clearing its fields releases the GC roots.
+private class ToBeDestroyInfo {
+    public var typeChecker: Option<FaithfulSemaTypeChecker> = None
+    public var sema: Option<FaithfulSemaCompilerInstance> = None
+    public var testManager: Option<TestManager> = None
+    public var gim: Option<GenericInstantiationManager> = None
+    public var packageManager: Option<PackageManager> = None
+    public var importManager: Option<ImportManager> = None
+    public var typeManager: Option<TypeManager> = None
+    public let srcPkgs: ArrayList<Package> = ArrayList<Package>(0)
+    public let pkgCtxMap: ArrayList<ASTContext> = ArrayList<ASTContext>(0)
+}
+
 public class CompilerInstance {
     public let invocation: CompilerInvocation
     public var cangjieHome: String = ""
@@ -272,15 +289,21 @@ public class CompilerInstance {
             return
         }
         astResourcesDestroyed = true
+        PartialInstantiation.ResetGlobalMap()
+        // GenericInstantiationContext.cpp:35-43 retires the borrowed override cache.
+        OverrideFunctionResolver.ClearCache()
+        mangler.ClearManglerCtxTable()
+        mangler.adapter = RealMangleAstAdapter()
         try (recorder = ProfileRecorder("ClearASTResources", "DestroyASTResources")) {
+            let info = ToBeDestroyInfo()
             // 2) TypeChecker first (holds AST / TypeManager refs).
-            let toDestroyTypeChecker = faithfulTypeChecker
+            info.typeChecker = faithfulTypeChecker
             faithfulTypeChecker = None
             hasTypeCheckerFlag = false
 
             // Selfhost extra strong root (C++ TypeChecker holds non-owning CompilerInstance*).
-            let toDestroySema = faithfulSemaInstance
-            if (let Some(sema) <- toDestroySema) {
+            info.sema = faithfulSemaInstance
+            if (let Some(sema) <- info.sema) {
                 sema.packages.clear()
                 sema.sourcePackages.clear()
                 sema.packageDecls.clear()
@@ -291,28 +314,27 @@ public class CompilerInstance {
             faithfulSemaInstance = None
 
             // 3) TestManager
-            let toDestroyTestManager = testManager
+            info.testManager = testManager
             testManager = None
 
             // 4) GIM
-            let toDestroyGim = gim
+            info.gim = gim
             gim = None
 
             // 5) PackageManager
-            let toDestroyPackageManager = packageManager
+            info.packageManager = packageManager
             packageManager = None
 
             // 5.1) ImportManager after PackageManager
             if (let Some(im) <- importManager) {
                 im.DeleteASTWriters()
             }
-            let toDestroyImportManager = importManager
+            info.importManager = importManager
             importManager = None
 
             // 6) AST packages before ASTContext (symbol detaching order).
-            let toDestroySrcPkgs = ArrayList<Package>()
             for (pkg in srcPkgs) {
-                toDestroySrcPkgs.add(pkg)
+                info.srcPkgs.add(pkg)
             }
             srcPkgs.clear()
             realASTPkgs.clear()
@@ -323,31 +345,41 @@ public class CompilerInstance {
             for (k in pkgCtxMap.keys()) {
                 toDestroyCtxKeys.add(k)
             }
-            let toDestroyCtx = ArrayList<ASTContext>()
             for (k in toDestroyCtxKeys) {
                 if (let Some(ctx) <- pkgCtxMap.get(k)) {
-                    toDestroyCtx.add(ctx)
+                    info.pkgCtxMap.add(ctx)
                 }
             }
             pkgCtxMap.clear()
 
             // 8) TypeManager last among heap managers
-            let toDestroyTypeManager = typeManager
+            info.typeManager = typeManager
             typeManager = None
+
+            // CompilerInstance.h:484,501-506 stores borrowed AST pointers.
+            // Retire the corresponding managed owners at the AST boundary.
+            rawMangleName2DeclMap.clear()
+            declsWithDuplicatedRawMangleName.clear()
+            directExtends.clear()
+            fileMap.clear()
+            order.clear()
+            mangledName2DeclMap.clear()
+            cachedInfo.semaInfo.usages.clear()
+            cachedInfo.varAndFuncDep.clear()
 
             // C++: std::async destroyFunc (CompilerInstance.cpp:173-185).
             // CJ: drop held roots then InvokeGC (delete ≡ GC reclaim) + FreeIdleMemoryToOS.
             // Future stored for JoinDestroyASTResources ≡ dtor destroyFut.get() (cpp:87-91).
             let destroyFunc = { =>
-                let _tc = toDestroyTypeChecker
-                let _sema = toDestroySema
-                let _tmgr = toDestroyTestManager
-                let _gim = toDestroyGim
-                let _pm = toDestroyPackageManager
-                let _im = toDestroyImportManager
-                toDestroySrcPkgs.clear()
-                toDestroyCtx.clear()
-                let _tyman = toDestroyTypeManager
+                info.typeChecker = None
+                info.sema = None
+                info.testManager = None
+                info.packageManager = None
+                info.importManager = None
+                info.typeManager = None
+                info.gim = None
+                info.srcPkgs.clear()
+                info.pkgCtxMap.clear()
                 unsafe {
                     CJ_MCC_InvokeGC(true)
                 }
@@ -846,21 +878,8 @@ public class CompilerInstance {
                     "missing real AST package for '" + pkg.fullPackageName + "'")
                 return false
         }
-        if (let Some(realPkg) <- BuildRealCHIRForASTPackage(this, realASTPkg)) {
-            chirData.getOrThrow().AppendNewRealPackage(realPkg)
-            chirInfo.varInitDepMap.clear()
-            for ((rawMangledName, initFuncName) in GetVarInitDepMap(realPkg)) {
-                chirInfo.varInitDepMap[rawMangledName] = initFuncName
-            }
-        } else {
-            if (diag.GetErrorCount() != 0) {
-                return false
-            }
-            diag.Diagnose(DiagCategory.CHIR, PackageDiagnosticPosition(pkg),
-                "unsupported construct in package '" + pkg.fullPackageName +
-                "' (not yet implemented in real pipeline)")
-            return false
-        }
+        // CHIR.cpp:1376-1390 releases AST during conversion. Capture frontend
+        // result metadata first so neither success nor error handling keeps pkg live.
         let chirPkg = CHIRPackage(pkg.fullPackageName)
         chirPkg.fileCount = pkg.files.size
         for (file in pkg.files) {
@@ -872,6 +891,23 @@ public class CompilerInstance {
             collectCHIRDeclSummary(chirPkg, decl)
         }
         chirPkg.declCount = chirPkg.mangleNames.size
+        let packageName = pkg.fullPackageName
+        let packagePosition = PackageDiagnosticPosition(pkg)
+        if (let Some(realPkg) <- BuildRealCHIRForASTPackage(this, realASTPkg)) {
+            chirData.getOrThrow().AppendNewRealPackage(realPkg)
+            chirInfo.varInitDepMap.clear()
+            for ((rawMangledName, initFuncName) in GetVarInitDepMap(realPkg)) {
+                chirInfo.varInitDepMap[rawMangledName] = initFuncName
+            }
+        } else {
+            if (diag.GetErrorCount() != 0) {
+                return false
+            }
+            diag.Diagnose(DiagCategory.CHIR, packagePosition,
+                "unsupported construct in package '" + packageName +
+                "' (not yet implemented in real pipeline)")
+            return false
+        }
         chirData.getOrThrow().AppendNewPackage(chirPkg)
         chirData.getOrThrow().SetConstVarInitFuncs(chirPkg, chirPkg.constVarInitFuncs)
         return true
@@ -887,24 +923,25 @@ public class CompilerInstance {
         FreeIdleMemoryToOS()
         var ret = true
         let sourcePackagesCHIR = GetSourcePackages()
-        let pkgsOrderedCHIR = packageManager.getOrThrow().GetBuildOrders(sourcePackagesCHIR)
-        let emitted = HashSet<String>()
+        let pkgsOrderedCHIR = packageManager.getOrThrow().GetBuildOrders()
         for (group in pkgsOrderedCHIR) {
             if (group.isEmpty()) {
                 continue
             }
             let wanted = group[0].fullPackageName
-            for (pkg in sourcePackagesCHIR) {
-                if (pkg.fullPackageName == wanted && !emitted.contains(pkg.fullPackageName)) {
+            var index: Int64 = 0
+            while (index < sourcePackagesCHIR.size) {
+                if (sourcePackagesCHIR[index].fullPackageName == wanted) {
+                    let pkg = sourcePackagesCHIR.remove(at: index)
                     ret = ret && GenerateCHIRForPkg(pkg)
-                    emitted.add(pkg.fullPackageName)
+                    break
                 }
+                index++
             }
         }
-        for (pkg in sourcePackagesCHIR) {
-            if (!emitted.contains(pkg.fullPackageName)) {
-                ret = ret && GenerateCHIRForPkg(pkg)
-            }
+        while (!sourcePackagesCHIR.isEmpty()) {
+            let pkg = sourcePackagesCHIR.remove(at: 0)
+            ret = ret && GenerateCHIRForPkg(pkg)
         }
         if (ret && realASTPkgs.size > 1 && invocation.globalOptions.outputMode != OutputMode.CHIR && !isCJLint) {
             try (recorder = ProfileRecorder("AST to CHIR Translation", "ClearASTResources")) {
@@ -1129,6 +1166,9 @@ public class CompilerInstance {
     }
 
     public func FreeCHIRData(): Unit {
+        // TypeAnalysis.h:66 / TypeAnalysis.cpp:62-79 keeps a nullable borrowed
+        // builder pointer. Retire its managed owner with the CHIR data.
+        TypeValue.SetCHIRBuilder(None)
         chirData = None
     }
 
