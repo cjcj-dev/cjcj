@@ -1166,7 +1166,7 @@ public func CheckInstanceMemberAccessLegality(
     var valid = true
     // C++ src/Sema/TypeCheckReference.cpp:718-723 CheckInstanceMemberAccessLegality.
     impl.CheckForbiddenMemberAccess(ctx, ma, target)
-    CheckLetInstanceAccessMutableFunc(diag, ctx, ma, target)
+    impl.CheckLetInstanceAccessMutableFunc(diag, ctx, ma, target)
     if (let Some(baseExpr) <- ma.baseExpr) {
         if (let Some(refExpr) <- (baseExpr as RefExpr)) {
             if (refExpr.isSuper && target.TestAttr(Attribute.ABSTRACT)) {

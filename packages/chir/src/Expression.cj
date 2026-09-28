@@ -25,8 +25,8 @@ private func GetAllSuperClassDefs(def: ClassDef, allSuperDefs: HashSet<CustomTyp
 
 public open class Expression <: Base & Hashable & Equatable<Expression> {
     private let kind: ExprKind
-    protected let operands: ArrayList<Value> = ArrayList<Value>()
-    private let blockGroups: ArrayList<BlockGroup> = ArrayList<BlockGroup>()
+    protected let operands: ArrayList<Value> = ArrayList<Value>(0)
+    private let blockGroups: ArrayList<BlockGroup> = ArrayList<BlockGroup>(0)
     private var parent: Option<Block> = None
     private var result: Option<LocalVar> = None
     private var operandsAndGroupsConnected: Bool = false
