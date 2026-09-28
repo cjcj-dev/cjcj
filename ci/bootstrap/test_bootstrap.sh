@@ -116,13 +116,36 @@ check_forensic_plan() {
   make_dry_fixture
   CJCJ_FORENSIC_STAGE2=0 dry_run > "$TMP/release.log" || fail FORENSIC 'release CLI failed'
   CJCJ_FORENSIC_STAGE2=1 dry_run > "$TMP/forensic.log" || fail FORENSIC 'forensic CLI failed'
+  bash "$PRODUCT" --stage forensic --work "$TMP/work" --src "$TMP/src" \
+    --cjcj-sha aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+    --cpp-src "$TMP/cpp-src" \
+    --colour-rt "$TMP/colour-rt" --host-rt "$TMP/host-rt" --dry-run \
+    > "$TMP/incremental.log" || fail FORENSIC 'incremental CLI failed'
   # Everything before the optional segment must remain the release recipe.
   sed '/^BOOTSTRAP-OK/,$d' "$TMP/release.log" > "$TMP/release-prefix.log"
   sed '/^ISOLATE .*cjcj-src-stage1-forensic/,$d' "$TMP/forensic.log" > "$TMP/forensic-prefix.log"
   cmp "$TMP/release-prefix.log" "$TMP/forensic-prefix.log" || fail FORENSIC 'release recipe changed'
+  for mode in forensic incremental; do
+    sed -n '/^ISOLATE .*cjcj-src-stage1-forensic/,$p' "$TMP/$mode.log" |
+      sed '/^BOOTSTRAP-OK/,$d' > "$TMP/$mode-segment.log"
+  done
+  cmp "$TMP/forensic-segment.log" "$TMP/incremental-segment.log" || fail FORENSIC 'incremental recipe differs'
   check_count FORENSIC 1 'CMD cjpm build -j .* -g bin=.*cwd=.*cjcj-src-stage1-forensic ' "$TMP/forensic.log"
   check_count FORENSIC 1 'product=planned dir=.*/cjcj-src-stage1-forensic/target/debug/bin' "$TMP/forensic.log"
   check_count FORENSIC 1 '^OUTPUT cjcj-stage2-forensic=.*/cjcj-stage2-forensic$' "$TMP/forensic.log"
+  python3 - "$TMP/forensic.log" "${CJ_JOBS:-$(getconf _NPROCESSORS_ONLN)}" <<'PY' || fail FORENSIC 'executed cjpm recipe lacks -g'
+import shlex
+import sys
+commands = []
+for line in open(sys.argv[1]):
+    if line.startswith('CMD env -i ') and 'cjcj-src-stage1-forensic' in line:
+        argv = shlex.split(line[4:])
+        if '-c' in argv:
+            commands.append(shlex.split(argv[argv.index('-c') + 1]))
+assert len(commands) == 1, commands
+assert commands[0][-4:] == ['build', '-j', sys.argv[2], '-g'], commands
+print('PASS forensic executed command carries -g (dry-run only)')
+PY
   echo 'PASS forensic plan: independent source/debug product, unchanged release prefix (dry-run only)'
 }
 
@@ -1000,6 +1023,7 @@ case "${1:-test}" in
     assert_colour_tuple "$3" "$4"
     ;;
   test)
+    bash "$0" check-forensic-plan || fail FORENSIC 'forensic CLI plan regression'
     bash "$0" check-dry-build-env || fail A4 'dry environment matrix failed'
     bash "$0" check-std-compiler-identity || fail STD_CJC "compiler identity regression"
     bash "$0" check-tuple-with-so || fail LLVM_TUPLE "combined tuple regression"

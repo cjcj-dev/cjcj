@@ -10,8 +10,23 @@ import subprocess
 
 
 def sha256(path):
+    digest = hashlib.sha256()
     with path.open('rb') as stream:
-        return hashlib.file_digest(stream, 'sha256').hexdigest()
+        for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def std_lines(decoded):
+    """Compare source/line membership, excluding relocated code addresses."""
+    rows, source = set(), ''
+    for line in decoded.splitlines():
+        if line.endswith(':') or line.endswith(':[++]'):
+            source = line.split('/stdlib/', 1)[1].rstrip(':') if '/stdlib/' in line else ''
+        row = re.match(r'\S+\.cj\s+([1-9][0-9]*)\s+0x[0-9a-fA-F]+', line)
+        if source and row:
+            rows.add((source, int(row[1])))
+    return rows
 
 
 def main():
@@ -46,6 +61,11 @@ def main():
     sections = run('sections', ['readelf', '-SW', str(args.forensic)])
     check('forensic-debug-line', bool(re.search(r'\s\.debug_line\s', sections)), '.debug_line section')
     decoded = run('decodedline', ['objdump', '--dwarf=decodedline', str(args.forensic)])
+    release_decoded = run('release-decodedline', ['objdump', '--dwarf=decodedline', str(args.release)])
+    release_std, forensic_std = std_lines(release_decoded), std_lines(decoded)
+    check('std-lines-unchanged', bool(release_std) and release_std == forensic_std,
+          f'release={len(release_std)} forensic={len(forensic_std)} '
+          f'added={len(forensic_std - release_std)} removed={len(release_std - forensic_std)}')
     # Use source package paths, not the spelling of the disposable checkout.
     paths = [line for line in decoded.splitlines()
              if re.search(r'/packages/[^/]+/src/.*\.cj:', line)]

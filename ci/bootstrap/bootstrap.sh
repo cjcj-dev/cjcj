@@ -56,6 +56,7 @@ BUILD_HOME="${HOME:-/root}"
 usage() {
   echo 'bootstrap.sh --work DIR --src CJCJ_ROOT --cjcj-sha 40HEX --stdsrc STDLIB --cpp-src CANGJIE_CPP_ROOT --host-llvm-so libLLVM-15.so --host-llvm-sha256 HEX --colour-llvm-so libLLVM-15.so --colour-llvm-sha256 HEX --ast-support FILE --ast-support-sha256 HEX --colour-tuple DIR --colour-llvm-sha 40HEX --colour-rt DIR --host-rt DIR [--stage stage0|stage1|all] [--stage1-heap 20GB] [--dry-run]'
   echo 'CJCJ_FORENSIC_STAGE2=1 additionally builds cjcj-stage2-forensic with -g in an independent source tree (bootstrap only).'
+  echo 'Incremental: --stage forensic --work DIR --src CJCJ_ROOT --cjcj-sha 40HEX --colour-rt DIR --host-rt DIR [--stage1-heap 20GB] [--dry-run]; reuses DIR/sdk-stage1 and DIR/cjcj-stage2 from a completed stage1.'
 }
 
 sha256() {
@@ -729,6 +730,7 @@ bootstrap_target_std() {
 }
 
 forensic_stage2() {
+  STAGE=forensic
   local sdk="$WORK/sdk-stage1" copy="$WORK/cjcj-src-stage1-forensic" seed
   local out="$WORK/cjcj-stage2-forensic" release_before='planned'
   if [ "$DRY" -eq 0 ]; then
@@ -834,11 +836,14 @@ main() {
       *) die "未知参数 $1";;
     esac
   done
-  local value
-  for value in WORK SRC CJCJ_SHA STDSRC HOST_LLVM_SO HOST_LLVM_SHA256 COLOUR_LLVM_SO COLOUR_LLVM_SHA256 AST_SUPPORT AST_SUPPORT_SHA256 COLOUR_TUPLE COLOUR_LLVM_SHA CRT HRT; do
+  local value required='WORK SRC CJCJ_SHA CRT HRT'
+  if [ "$WANT" != forensic ]; then
+    required+=' STDSRC HOST_LLVM_SO HOST_LLVM_SHA256 COLOUR_LLVM_SO COLOUR_LLVM_SHA256 AST_SUPPORT AST_SUPPORT_SHA256 COLOUR_TUPLE COLOUR_LLVM_SHA'
+  fi
+  for value in $required; do
     eval "[ -n \"\${$value}\" ]" || die "缺少参数 $value"
   done
-  case "$WANT" in stage0|stage1|all) ;; *) die '--stage 只能是 stage0|stage1|all';; esac
+  case "$WANT" in stage0|stage1|forensic|all) ;; *) die '--stage 只能是 stage0|stage1|forensic|all';; esac
   case "$WANT" in
     stage0|all) [ -n "$CPP_SRC" ] || die '缺少参数 CPP_SRC';;
   esac
@@ -848,6 +853,7 @@ main() {
   case "$WANT" in
     stage0) stage0;;
     stage1) stage1;;
+    forensic) forensic_stage2;;
     all) stage0; stage1;;
   esac
   echo "BOOTSTRAP-OK 到 $WANT work=$WORK"
