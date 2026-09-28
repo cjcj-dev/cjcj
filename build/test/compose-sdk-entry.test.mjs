@@ -45,6 +45,7 @@ for (const mode of ['local', 'github', 'github-missing-run']) {
         '-Wl,-rpath,$ORIGIN/../runtime/lib/linux_x86_64_cjnative', '-lcangjie-runtime', '-o', destination]);
     }
     await fs.copyFile(installed, path.join(sdk, 'bin/decoy'));
+    await write(path.join(sdk, 'envsetup.sh'), `export CANGJIE_HOME='${sdk}'\nexport LD_LIBRARY_PATH='${runtimeDir}'\n`);
     const expected = await fileSha256(product);
     const parent = await fileSha256(installed);
     assert.notEqual(expected, parent, 'fixture must distinguish stage2 from stage3');

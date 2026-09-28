@@ -1,5 +1,7 @@
 #!/usr/bin/env zx
 
+import {prepareCompilerLoader, assertCompilerLoader} from '../../../build/lib/compiler-loader.mjs';
+import {sdkEnvironment} from '../../../build/lib/sdk-environment.mjs';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -29,13 +31,7 @@ const product = await resolveProductBinary('target/release/bin', 'compose-sdk');
 await $`test -x ${product}`;
 const lineage = JSON.parse(await fs.readFile(path.join(workspace, 'software', 'stage3-compiler.json'), 'utf8'));
 await installStage3Compiler({sdk, product, lineage});
-const productVersion = await $({stdio: 'pipe'})`${sdk}/bin/cjc --version`;
-const versionOutput = `${productVersion.stdout}${productVersion.stderr}`;
-if (!versionOutput.includes(version)) {
-  throw new Error(`selfhost version mismatch: expected ${version}, got ${versionOutput.trim()}`);
-}
-process.stdout.write(versionOutput);
-
+const compilerLlvm = await prepareCompilerLoader({sdk, platform: targetKey});
 const installed = path.join(sdk, 'bin', 'cjc');
 const kind = (await $({stdio: 'pipe'})`file -b ${installed}`).stdout.trim();
 if (!kind.includes(target.spec.fileFormat) || !kind.includes(target.spec.fileArch)) {
@@ -48,7 +44,7 @@ await runRequiredCheck({
 
 if (target.spec.os === 'darwin') {
   const runtime = path.join(sdk, 'runtime', 'lib', target.spec.runtimeTuple, target.spec.runtimeLibrary);
-  const llvm = path.join(sdk, 'third_party', 'llvm', 'lib', 'libLLVM.dylib');
+  const llvm = compilerLlvm || path.join(sdk, 'third_party', 'llvm', 'lib', 'libLLVM.dylib');
   await $`install_name_tool -id ${`@rpath/${target.spec.runtimeLibrary}`} ${runtime}`;
   await $`install_name_tool -id '@rpath/libLLVM.dylib' ${llvm}`;
   const linked = await $({stdio: 'pipe'})`otool -L ${installed}`;
@@ -75,13 +71,22 @@ if (target.spec.os === 'darwin') {
   }
   const relativeRpaths = [
     `@loader_path/../runtime/lib/${target.spec.runtimeTuple}`,
-    '@loader_path/../third_party/llvm/lib',
+    '@loader_path/../lib/cjc',
     '@loader_path/../tools/lib',
   ];
   for (const rpath of relativeRpaths) {
     if (!rpaths.includes(rpath)) await $`install_name_tool -add_rpath ${rpath} ${installed}`;
   }
 }
+
+const productVersion = await $({env: sdkEnvironment(sdk), stdio: 'pipe'})`${sdk}/bin/cjc --version`;
+const versionOutput = `${productVersion.stdout}${productVersion.stderr}`;
+if (!versionOutput.includes(version)) {
+  throw new Error(`selfhost version mismatch: expected ${version}, got ${versionOutput.trim()}`);
+}
+process.stdout.write(versionOutput);
+
+await assertCompilerLoader({sdk, platform: targetKey});
 
 const installedSha256 = await fileSha256(installed);
 // GitHub artifacts keep their workflow identity. The shell entry also composes
@@ -102,12 +107,13 @@ const execution = github ? {kind: 'github-actions'} : {
 };
 await produceFinalCompiler({
   binary: installed,
+  llvmLibrary: compilerLlvm,
   outdir: path.join(workspace, 'software', 'final-compiler'),
   platform: targetKey,
   repository, commit, runId, runAttempt,
   std: path.join(workspace, 'software', 'final-std-stage2'),
   lineage: {...lineage, execution, compilerSha256: installedSha256, originalSha256: lineage.compilerSha256,
-    transformation: target.spec.os === 'darwin' ? 'compose-install-name-tool' : 'copy'},
+    transformation: target.spec.os === 'darwin' ? 'compose-install-name-tool' : compilerLlvm ? 'compose-relative-runpath' : 'copy'},
 });
 
 const archive = path.join(

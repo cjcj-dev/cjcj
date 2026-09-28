@@ -143,7 +143,7 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
   await fs.copyFile('/bin/true', binary);
   await fs.appendFile(binary, `\0CJCJ-COMMIT:${CJCJ_SHA}\0`);
   await fs.chmod(binary, 0o755);
-  await write(sdk, 'envsetup.sh', '# fixture SDK\n', 0o755);
+  await write(sdk, 'envsetup.sh', 'export CANGJIE_HOME="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"\n', 0o755);
   await write(sdk, `runtime/lib/${TUPLE}/libcangjie-runtime.so`,
     `fixture-runtime\0CJRT-COMMIT:${RUNTIME_SHA}\0`);
   const llvmFixtureSource = await write(root, 'llvm-tool.c', [
@@ -465,9 +465,9 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
     console.log(`NEGATIVE-${name.toUpperCase()} RC=${result.status}\n${result.stderr.trim()}`);
   }
   await expectInspectionFailure('readelf',
-    /package readelf -d bin\/cjc failed \(exit=73\): readelf forced failure/);
+    /readelf failed \(73\): readelf forced failure/);
   await expectInspectionFailure('ldd',
-    /package ldd bin\/cjc failed \(exit=73\): ldd forced failure/);
+    /ldd failed \(73\): ldd forced failure/);
 
   const originalLlvmManifest = await fs.readFile(llvmManifest, 'utf8');
   await fs.writeFile(llvmManifest, originalLlvmManifest.replace(/^OPT_SHA256=.*$/m, `OPT_SHA256=${'0'.repeat(64)}`));
