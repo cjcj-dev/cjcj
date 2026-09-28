@@ -182,7 +182,7 @@ check_dry_contract() {
   check_dry_build_env "$log"
   check_count LLVM-SO 1 'sdk_build.sh .*--host --llvm-so .*libLLVM-15.so' "$log"
   check_count LLVM-SO 1 'ASSERT installed-host-llvm-so sha256=planned' "$log"
-  check_count LLVM-TUPLE 2 'sdk_build.sh .*--target .*--llvm-tuple .*colour-tuple' "$log"
+  check_count LLVM-TUPLE 2 'sdk_build.sh .*--target .*--llvm-tuple .*colour-tuple --llvm-so .*colour-libLLVM-15.so' "$log"
   check_count HOST-RT 2 '--verify-host-rt .*/host-rt' "$log"
   check_count HOST-RUNNER 2 'stage1_host_runner.sh .*/sdk-stage1 .*/sdk-stage0 .*/host-rt' "$log"
    check_count LLVM-TUPLE 30 'ASSERT installed-colour-tuple sha256=planned' "$log"
@@ -303,6 +303,43 @@ run_sdk_tuple() {
   local product="$1" to="$2"
   bash "$product" --from "$TMP/sdk-base" --to "$to" --host \
     --llvm-tuple "$TMP/colour-tuple" --colour-runtime "$TMP/colour-reference.so" --host-runtime "$TMP/sdk-base/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so" --force
+}
+
+check_std_compiler_identity() {
+  new_tmp
+  make_isolation_fixture
+  local sdk="$TMP/isolation/sdk" expected actual mode
+  # Both layouts enter the same stdlib_build producer; wrapper bytes must never
+  # become the compiler identity consumed by sdk_verify.
+  for mode in direct runner; do
+    cp /bin/true "$sdk/bin/cjc"
+    if [ "$mode" = runner ]; then
+      cp /bin/true "$sdk/bin/cjcj-stage1"
+      printf '#!/bin/sh\nexec "$(dirname "$0")/cjcj-stage1" "$@"\n' > "$sdk/bin/cjc"
+    fi
+    run_isolation_check "$PRODUCT" > "$TMP/identity-$mode.log" || fail STD_CJC 'stdlib producer failed'
+    expected=$(sha256sum /bin/true | awk '{print $1}')
+    actual=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["compiler_sha256"])' "$TMP/isolation/std/std-producer.json")
+    [ "$actual" = "$expected" ] || fail STD_CJC "$mode producer=$actual compiler=$expected"
+    echo "PASS STD_CJC $mode producer=$actual compiler=$expected"
+  done
+}
+
+check_tuple_with_so() {
+  new_tmp
+  make_colour_tuple
+  make_sdk_fixture
+  cp "$TMP/colour-libLLVM-15.so" "$TMP/libLLVM-15.so"
+  bash "$SDK_PRODUCT" --from "$TMP/sdk-base" --to "$TMP/sdk-combined" --host \
+    --llvm-tuple "$TMP/colour-tuple" --llvm-so "$TMP/libLLVM-15.so" \
+    --colour-runtime "$TMP/colour-reference.so" \
+    --host-runtime "$TMP/sdk-base/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so" \
+    > "$TMP/combined.log" 2>&1 || { cat "$TMP/combined.log"; fail LLVM_TUPLE 'combined installer failed'; }
+  cmp -s "$TMP/libLLVM-15.so" "$TMP/sdk-combined/third_party/llvm/lib/libLLVM-15.so" ||
+    fail LLVM_TUPLE 'combined installer retained baseline libLLVM'
+  cmp -s "$TMP/colour-tuple/bin/opt" "$TMP/sdk-combined/third_party/llvm/bin/opt" ||
+    fail LLVM_TUPLE 'combined installer changed tuple opt'
+  echo 'PASS LLVM_TUPLE combined tuple and process library installed before verification'
 }
 
 make_runtime_payload() {
@@ -744,6 +781,8 @@ check_shim_wiring() {
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then return 0; fi
 
 case "${1:-test}" in
+  check-std-compiler-identity) check_std_compiler_identity;;
+  check-tuple-with-so) check_tuple_with_so;;
   check-exit-receipts)
     shift
     check_exit_receipts "$@"
@@ -947,6 +986,8 @@ case "${1:-test}" in
     ;;
   test)
     bash "$0" check-dry-build-env || fail A4 'dry environment matrix failed'
+    bash "$0" check-std-compiler-identity || fail STD_CJC "compiler identity regression"
+    bash "$0" check-tuple-with-so || fail LLVM_TUPLE "combined tuple regression"
     bash "$0" check-exit-receipts || fail EXIT-RECEIPT "exit receipt regression"
     bash "$0" check-sdk-literal-prefix || fail STD-LITERAL-PREFIX "literal prefix regression"
     make_dry_fixture
