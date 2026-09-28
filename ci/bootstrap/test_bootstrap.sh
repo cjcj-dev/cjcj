@@ -170,6 +170,11 @@ check_dry_contract() {
   # cjpm: std and stage0 have independently configured heap requests.
   check_count CJPM-EXEC-HEAP 1 "cjHeapSize=$heap bash -c .*tools/bin/cjpm\\\\ build\\\\ -j\\\\ $jobs$" "$log"
   echo "PASS dry stage1 cjpm heap=$heap reaches execution command"
+  # Release arm stays free of the forensic -g / debug pickup (default env off).
+  check_count FORENSIC 0 'cjcj-stage2-forensic' "$log"
+  check_count FORENSIC 0 'target/debug/bin' "$log"
+  check_count FORENSIC 0 'cjpm build -j .* -g' "$log"
+  echo 'PASS dry release arm has no forensic stage2'
   check_shim_call_count "$log"
   check_count SHIM 1 'CMD shim build label=stage0 .*source-object=source .*sdk=.*/sdk-stage0 .*runtime=.*/host-rt' "$log"
   check_count SHIM 1 'CMD shim build label=stage1 .*source-object=.*/sdk-stage1/third_party/llvm/fixed-llc/cjselfhost_llvmshim.o .*sdk=.*/sdk-stage1 .*runtime=.*/colour-rt' "$log"
@@ -779,6 +784,48 @@ fault_shim_wiring() {
   check_shim_call_count "$TMP/skip-stage0-shim.log"
 }
 
+# Use one assertion set for candidate, faults and restoration. Do not stop at
+# the first failure: the release assertions must also execute in fault arms.
+assert_forensic_plan() {
+  local log="$1" jobs="${CJ_JOBS:-$(getconf _NPROCESSORS_ONLN)}" failed=0
+  local label expected pattern count
+  while IFS='|' read -r label expected pattern; do
+    count=$(/usr/bin/grep -c -- "$pattern" "$log" || true)
+    if [ "$count" -eq "$expected" ]; then
+      echo "PASS $label count=$count"
+    else
+      echo "TEST-FAIL [$label] count=$count expected=$expected pattern=$pattern"
+      failed=$((failed+1))
+    fi
+  done <<EOF
+forensic-output|1|OUTPUT cjcj-stage2-forensic=
+forensic-g|1|CMD cjpm build -j $jobs -g bin=
+forensic-isolation|1|ISOLATE cjcj-src from=.* dest=.*/cjcj-src-stage1-forensic[[:space:]]
+forensic-debug|2|target/debug/bin
+forensic-pickup|1|product=planned dir=.*/cjcj-src-stage1-forensic/target/debug/bin
+forensic-stamp|1|INPUT cjcj-stage2-forensic path=.* sha256=planned
+forensic-source-stamp|1|INPUT cjcj-stage2-forensic-src path=.*cjpm.toml sha256=planned
+release-pickup|1|product=planned dir=.*/cjcj-src-stage1/target/release/bin
+release-command|1|CMD cjpm build -j $jobs bin=.* cwd=.*/cjcj-src-stage1 heap=
+EOF
+  echo "ASSERTIONS total=9 failed=$failed"
+  [ "$failed" -eq 0 ]
+}
+
+check_forensic_dry() {
+  make_dry_fixture
+  CJCJ_FORENSIC_STAGE2=1 dry_run > "$TMP/forensic-dry.log" || fail FORENSIC 'forensic dry-run failed'
+  assert_forensic_plan "$TMP/forensic-dry.log"
+}
+
+fault_forensic_drop_g() {
+  make_dry_fixture
+  sed 's/"-j \$JOBS -g"/"-j \$JOBS"/' "$PRODUCT" > "$TMP/bootstrap-no-g.sh"
+  PRODUCT="$TMP/bootstrap-no-g.sh"
+  CJCJ_FORENSIC_STAGE2=1 dry_run > "$TMP/forensic-cut.log" || fail FORENSIC-CUT 'cut dry-run failed before assertion'
+  assert_forensic_plan "$TMP/forensic-cut.log"
+}
+
 check_shim_wiring() {
   make_dry_fixture
   dry_run > "$TMP/shim-wiring.log"
@@ -982,6 +1029,12 @@ case "${1:-test}" in
     ;;
   check-shim-wiring)
     check_shim_wiring
+    ;;
+  check-forensic-dry)
+    check_forensic_dry
+    ;;
+  fault-forensic-drop-g)
+    fault_forensic_drop_g
     ;;
   ruler-control)
     [ $# -eq 4 ] || fail ruler-control 'usage: ruler-control OFFICIAL_OPT COLOUR_TUPLE EXPECTED_LLVM_SHA'
