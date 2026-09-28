@@ -39,6 +39,7 @@ import cjcj::chir.ToCHIRPhase as ChirToCHIRPhase
 import std.collection.*
 import std.ref.{WeakRef, CleanupPolicy}
 import cjcj::sema.GenericInstantiation.PartialInstantiation
+import cjcj::sema.OverrideFunctionResolver
 import std.core.Box as CoreBox
 
 foreign {
@@ -379,6 +380,9 @@ public class CompilerInstance {
                 // managed maps own their values, so retire those roots at the
                 // CompilerInstance.cpp:110-185 AST destruction boundary as well.
                 PartialInstantiation.ResetGlobalMap()
+                // GenericInstantiationContext.cpp:35-43 clears this borrowed-
+                // pointer cache. Retire its managed roots with the AST as well.
+                OverrideFunctionResolver.ClearCache()
                 unsafe {
                     CJ_MCC_InvokeGC(true)
                 }
