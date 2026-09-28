@@ -38,7 +38,8 @@ def main():
             if directory and path.is_file() and name not in result['libraries']:
                 result['libraries'][name] = {'path': str(path), 'sha256': sha(path)}
     archive = args.out / 'result.a'
-    command = [str(args.compiler.resolve()), str(args.source.resolve()), '--no-sub-pkg', '-g',
+    source_args = ['-p', str(args.source.resolve())] if args.source.is_dir() else [str(args.source.resolve())]
+    command = [str(args.compiler.resolve()), *source_args, '--no-sub-pkg', '-g',
                '--apc=1', '--output-type=staticlib', '-O2', '-j' + str(args.jobs), '-o', str(archive)]
     result['command'] = command
     start = time.monotonic()
