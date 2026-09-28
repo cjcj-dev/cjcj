@@ -170,6 +170,11 @@ check_dry_contract() {
   # cjpm: std and stage0 have independently configured heap requests.
   check_count CJPM-EXEC-HEAP 1 "cjHeapSize=$heap bash -c .*tools/bin/cjpm\\\\ build\\\\ -j\\\\ $jobs$" "$log"
   echo "PASS dry stage1 cjpm heap=$heap reaches execution command"
+  # Release arm stays free of the forensic -g / debug pickup (default env off).
+  check_count FORENSIC 0 'cjcj-stage2-forensic' "$log"
+  check_count FORENSIC 0 'target/debug/bin' "$log"
+  check_count FORENSIC 0 'cjpm build -j .* -g' "$log"
+  echo 'PASS dry release arm has no forensic stage2'
   check_shim_call_count "$log"
   check_count SHIM 1 'CMD shim build label=stage0 .*source-object=source .*sdk=.*/sdk-stage0 .*runtime=.*/host-rt' "$log"
   check_count SHIM 1 'CMD shim build label=stage1 .*source-object=.*/sdk-stage1/third_party/llvm/fixed-llc/cjselfhost_llvmshim.o .*sdk=.*/sdk-stage1 .*runtime=.*/colour-rt' "$log"
@@ -779,6 +784,31 @@ fault_shim_wiring() {
   check_shim_call_count "$TMP/skip-stage0-shim.log"
 }
 
+check_forensic_dry() {
+  local jobs="${CJ_JOBS:-$(getconf _NPROCESSORS_ONLN)}"
+  make_dry_fixture
+  CJCJ_FORENSIC_STAGE2=1 dry_run > "$TMP/forensic-dry.log" || fail FORENSIC 'forensic dry-run failed'
+  check_count FORENSIC 1 'OUTPUT cjcj-stage2-forensic=' "$TMP/forensic-dry.log"
+  check_count FORENSIC 1 "CMD cjpm build -j $jobs -g bin=" "$TMP/forensic-dry.log"
+  check_count FORENSIC 1 'ISOLATE cjcj-src from=.* dest=.*/cjcj-src-stage1-forensic ' "$TMP/forensic-dry.log"
+  check_count FORENSIC 2 'target/debug/bin' "$TMP/forensic-dry.log"
+  check_count FORENSIC 1 "product=planned dir=.*/cjcj-src-stage1-forensic/target/debug/bin" "$TMP/forensic-dry.log"
+  check_count FORENSIC 1 'INPUT cjcj-stage2-forensic path=.* sha256=planned' "$TMP/forensic-dry.log"
+  check_count FORENSIC 1 'INPUT cjcj-stage2-forensic-src path=.*cjpm.toml sha256=planned' "$TMP/forensic-dry.log"
+  # Release pickup is unchanged and still exactly one.
+  check_count FORENSIC 1 'cjcj-src-stage1/target/release/bin' "$TMP/forensic-dry.log"
+  check_count FORENSIC 1 "CMD cjpm build -j $jobs bin=" "$TMP/forensic-dry.log"
+  echo "PASS forensic dry-run -g debug/bin jobs=$jobs"
+}
+
+fault_forensic_drop_g() {
+  make_dry_fixture
+  sed 's/"-j \$JOBS -g"/"-j \$JOBS"/' "$PRODUCT" > "$TMP/bootstrap-no-g.sh"
+  PRODUCT="$TMP/bootstrap-no-g.sh"
+  CJCJ_FORENSIC_STAGE2=1 dry_run > "$TMP/forensic-cut.log" || fail FORENSIC-CUT 'cut dry-run failed before assertion'
+  check_count FORENSIC 1 "CMD cjpm build -j ${CJ_JOBS:-$(getconf _NPROCESSORS_ONLN)} -g bin=" "$TMP/forensic-cut.log"
+}
+
 check_shim_wiring() {
   make_dry_fixture
   dry_run > "$TMP/shim-wiring.log"
@@ -982,6 +1012,12 @@ case "${1:-test}" in
     ;;
   check-shim-wiring)
     check_shim_wiring
+    ;;
+  check-forensic-dry)
+    check_forensic_dry
+    ;;
+  fault-forensic-drop-g)
+    fault_forensic_drop_g
     ;;
   ruler-control)
     [ $# -eq 4 ] || fail ruler-control 'usage: ruler-control OFFICIAL_OPT COLOUR_TUPLE EXPECTED_LLVM_SHA'
