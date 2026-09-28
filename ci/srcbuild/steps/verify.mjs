@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {assertPackagedLineage} from '../../../build/lib/package-lineage.mjs';
+import {sdkEnvironment} from '../../../build/lib/sdk-environment.mjs';
 import {getTarget} from '../../../build/lib/targets.mjs';
 
 $.stdio = 'inherit';
@@ -60,16 +61,9 @@ const self = `${sdk}/bin/cjc`;
 const timeoutCommand = target.spec.os === 'darwin' ? 'gtimeout' : 'timeout';
 
 await $`test -x ${self}`;
-process.env.CANGJIE_HOME = sdk;
-process.env.PATH = `${sdk}/bin:${sdk}/tools/bin:${process.env.PATH}`;
-const libraryPath = [
-  `${sdk}/third_party/llvm/lib`,
-  `${sdk}/runtime/lib/${target.spec.runtimeTuple}`,
-  `${sdk}/tools/lib`,
-  process.env[target.spec.loaderEnv] || '',
-].filter(Boolean).join(path.delimiter);
-process.env[target.spec.loaderEnv] = libraryPath;
-if (target.spec.os === 'darwin') process.env.DYLD_FALLBACK_LIBRARY_PATH = libraryPath;
+const activated = sdkEnvironment(sdk);
+for (const key of Object.keys(process.env)) if (!(key in activated)) delete process.env[key];
+Object.assign(process.env, activated);
 process.env.cjHeapSize ||= '12GB';
 
 const work = `${process.env.RUNNER_TEMP || '/tmp'}/cjcj-srcbuild-verify`;

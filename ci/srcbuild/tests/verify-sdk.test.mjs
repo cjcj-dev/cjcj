@@ -23,6 +23,7 @@ async function runEntry(t, {compiler = true} = {}) {
   t.after(() => fs.rm(work, {recursive: true, force: true}));
   const sdk = path.join(work, 'sdk');
   await fs.mkdir(path.join(sdk, 'bin'), {recursive: true});
+  await fs.writeFile(path.join(sdk, 'envsetup.sh'), `export CANGJIE_HOME='${sdk}'\n`);
   // An intentionally rejected SDK lets the real lineage phase expose its
   // result without running any compiler. There is no source compiler tree.
   await fs.writeFile(path.join(sdk, 'PROVENANCE.txt'), 'LINEAGE: stdlib-stage1\n');
