@@ -56,14 +56,8 @@ jobs:
       - name: Remove the runner's preinstalled ccache
         shell: pwsh
         run: |
-          choco install ccache --yes --no-progress
+          choco uninstall ccache --yes --no-progress
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Restore native ccache directories for the controlled cut
-        shell: pwsh
-        run: |
-          $cacheHome = $env:USERPROFILE.Replace('\', '/')
-          $cacheConfigHome = $env:LOCALAPPDATA.Replace('\', '/')
-          "export USERPROFILE='$cacheHome' LOCALAPPDATA='$cacheConfigHome'" | Set-Content -NoNewline -Encoding utf8 C:/msys64/etc/profile.d/runtime-export-contract.sh
       - name: Start sccache
         uses: ./.github/actions/sccache
         with:
