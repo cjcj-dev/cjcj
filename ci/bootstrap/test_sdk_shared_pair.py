@@ -14,7 +14,9 @@ import subprocess
 
 TUPLE = 'linux_x86_64_cjnative'
 PAIR = ('libcangjie-runtime.so', 'libboundscheck.so')
-COMMIT = '97c42fe77c42bc33efedbe6a395043fd58443358'
+COMMIT = dict(line.split('=', 1) for line in
+             (Path(__file__).resolve().parents[1] / 'runtime_pin.env').read_text().splitlines()
+             if line)['RUNTIME_REF']
 
 
 def sha(path):
