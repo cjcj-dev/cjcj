@@ -11,6 +11,7 @@ import cjcj::mangle.MangleDecl as RealMangleDecl
 import cjcj::mangle.ManglerContext as RealManglerContext
 import cjcj::sema.CompilerInstance as FaithfulSemaCompilerInstance
 import cjcj::sema.GenericInstantiation.GenericInstantiationManager
+import cjcj::sema.OverrideFunctionResolver
 import cjcj::sema.GenericInstantiation.PartialInstantiation
 import cjcj::sema.Desugar.DesugarBeforeTypeCheck as FaithfulDesugarBeforeTypeCheck
 import cjcj::sema.TypeCheckExpr.TypeChecker as FaithfulSemaTypeChecker
@@ -288,6 +289,8 @@ public class CompilerInstance {
         }
         astResourcesDestroyed = true
         PartialInstantiation.ResetGlobalMap()
+        // GenericInstantiationContext.cpp:35-43 retires the borrowed override cache.
+        OverrideFunctionResolver.ClearCache()
         mangler.ClearManglerCtxTable()
         mangler.adapter = RealMangleAstAdapter()
         try (recorder = ProfileRecorder("ClearASTResources", "DestroyASTResources")) {
