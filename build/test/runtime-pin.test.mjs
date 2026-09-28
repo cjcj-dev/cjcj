@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import fs from 'node:fs/promises';
 import {resolveRuntimeSource} from '../../ci/runtime-pin.mjs';
 
 const overrideRef = '1111111111111111111111111111111111111111';
@@ -29,6 +30,17 @@ test('runtime source defaults to the checked-in pin', async () => {
   assert.equal(source.runtimeRef, source.pinRef);
   assert.equal(source.overrideRef, '');
 });
+
+for (const platform of ['darwin_aarch64', 'darwin_x86_64']) {
+  test(`runtime pin matches published native libraries for ${platform}`, async () => {
+    const source = await resolveRuntimeSource({});
+    const release = JSON.parse(await fs.readFile(
+      new URL('../../ci/colour-runtime/release.json', import.meta.url), 'utf8'));
+    assert.equal(release.platforms[platform]?.runtime_sha, source.pinRef,
+      `DARWIN_RUNTIME_PIN_MISMATCH: ${platform}; rebuild and publish the native libraries with the runtime pin`);
+    console.log(`ASSERT DARWIN_RUNTIME_PIN_MATCH ${platform} ${source.pinRef}`);
+  });
+}
 
 test('runtime source rejects an unauthorized override', async () => {
   await assert.rejects(resolveRuntimeSource({CJCJ_RUNTIME_REF_OVERRIDE: overrideRef}),
