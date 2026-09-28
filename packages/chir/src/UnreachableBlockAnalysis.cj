@@ -161,9 +161,7 @@ private func AllUsersIsExprKind(users: ArrayList<Expression>, kind: ExprKind): B
     for (user in users) {
         var hasNothing = false
         for (arg in user.GetNonSuccessorOperands()) {
-            if (let Some(ty) <- arg.GetType()) {
-                if (ty.IsNothing()) { hasNothing = true }
-            }
+            if (arg.GetType().getOrThrow().IsNothing()) { hasNothing = true }
         }
         if (user.GetExprKind() != kind || !hasNothing) { return false }
     }
