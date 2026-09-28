@@ -1153,26 +1153,65 @@ bootstrap_input_sha256() {
 }
 
 # P12: the runtime is a declared external input, never an implicit depot lookup.
-# Declare CJCJ_BOOTSTRAP_COLOUR_RT as the absolute directory containing BOTH
-# libcangjie-runtime.so and libboundscheck.so (not an SDK root). Supply reviewed
+# CJCJ_BOOTSTRAP_COLOUR_RT accepts the complete runtime artifact root, whose
+# pinned manifest selects the target tuple, or the existing flat SO directory.
+# The original root is passed to bootstrap so its static libraries stay paired.
+# For a flat directory supply reviewed
 # CJCJ_BOOTSTRAP_COLOUR_RT_SHA256 and CJCJ_BOOTSTRAP_BOUNDSCHECK_SHA256
 # from that external artifact release. Dry-run validates the same input.
 # The runtime embedded CJRT-COMMIT must equal ci/runtime_pin.env RUNTIME_REF.
 # Expected digests come from the input provider, not from hashing an unchecked
 # file and treating that freshly computed value as its own expected identity.
 assert_bootstrap_colour_runtime() {
-    local root=$1 file expected actual stamps
+    local root=$1 file expected actual stamps selection
+    local runtime_sha=${CJCJ_BOOTSTRAP_COLOUR_RT_SHA256:-}
+    local bounds_sha=${CJCJ_BOOTSTRAP_BOUNDSCHECK_SHA256:-}
+    local -a selected
     [[ $RUNTIME_REF =~ ^[0-9a-f]{40}$ ]] || {
         echo 'COLOUR_RT_PIN_INVALID' >&2; return 1;
     }
     [[ $root == /* && -d $root ]] || {
         echo 'COLOUR_RT_INPUT_REQUIRED: set CJCJ_BOOTSTRAP_COLOUR_RT to an absolute library directory' >&2; return 1;
     }
+    if [[ -f $root/manifest.json ]]; then
+        selection=$(node --input-type=module - "$REPO_ROOT" "$root" "$TARGET" "$RUNTIME_REF" "${COLOUR_RT_MANIFEST_SHA256:-}" <<'JS'
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import {pathToFileURL} from 'node:url';
+const [repo, root, target, source, pin] = process.argv.slice(2);
+const {getTarget} = await import(pathToFileURL(path.join(repo, 'build/lib/targets.mjs')));
+const spec = getTarget(target).spec;
+const bytes = fs.readFileSync(path.join(root, 'manifest.json'));
+if (!/^[0-9a-f]{64}$/.test(pin) || crypto.createHash('sha256').update(bytes).digest('hex') !== pin) {
+    throw new Error('COLOUR_RT_MANIFEST_DIGEST');
+}
+const manifest = JSON.parse(bytes);
+if (manifest.runtime_sha !== source || manifest.platform !== spec.llvmPlatform) {
+    throw new Error('COLOUR_RT_MANIFEST_SOURCE');
+}
+const relative = `runtime/lib/${spec.runtimeTuple}`;
+const digests = ['libcangjie-runtime.so', 'libboundscheck.so'].map(name => manifest.files?.[`${relative}/${name}`]);
+if (digests.some(value => !/^[0-9a-f]{64}$/.test(value || ''))) {
+    throw new Error('COLOUR_RT_MANIFEST_FILE');
+}
+console.log([path.join(root, relative), ...digests].join('\n'));
+JS
+        ) || return 1
+        mapfile -t selected <<< "$selection"
+        if [[ ( -n $runtime_sha && $runtime_sha != "${selected[1]}" ) ||
+              ( -n $bounds_sha && $bounds_sha != "${selected[2]}" ) ]]; then
+            echo 'COLOUR_RT_DECLARED_SHA_MISMATCH' >&2; return 1;
+        fi
+        root=${selected[0]}
+        runtime_sha=${selected[1]}
+        bounds_sha=${selected[2]}
+    fi
     for file in libcangjie-runtime.so libboundscheck.so; do
         if [[ $file == libcangjie-runtime.so ]]; then
-            expected=${CJCJ_BOOTSTRAP_COLOUR_RT_SHA256:-}
+            expected=$runtime_sha
         else
-            expected=${CJCJ_BOOTSTRAP_BOUNDSCHECK_SHA256:-}
+            expected=$bounds_sha
         fi
         [[ $expected =~ ^[0-9a-f]{64}$ ]] || {
             echo "COLOUR_RT_SHA_REQUIRED: $file" >&2; return 1;
@@ -1192,7 +1231,7 @@ assert_bootstrap_colour_runtime() {
     [[ $stamps == "CJRT-COMMIT:$RUNTIME_REF" ]] || {
         echo "COLOUR_RT_PIN_MISMATCH: expected=$RUNTIME_REF actual=$stamps" >&2; return 1;
     }
-    echo "COLOUR_RT_INPUT_VERIFIED: path=$root commit=$RUNTIME_REF runtime_sha256=$CJCJ_BOOTSTRAP_COLOUR_RT_SHA256 boundscheck_sha256=$CJCJ_BOOTSTRAP_BOUNDSCHECK_SHA256" >&2
+    echo "COLOUR_RT_INPUT_VERIFIED: path=$root commit=$RUNTIME_REF runtime_sha256=$runtime_sha boundscheck_sha256=$bounds_sha" >&2
 }
 
 load_bootstrap_pins() {
