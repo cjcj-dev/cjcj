@@ -26,7 +26,8 @@ export async function run(config) {
   requireFile(path.join(cangjieDir, 'envsetup.sh'), {stage: 'verify'});
   const work = ensureDir(path.join(config.workspace, 'verify'));
   fs.writeFileSync(path.join(work, 'hello.cj'), HELLO_SOURCE, 'utf8');
-  const compiler = requireFile(path.join(cangjieDir, 'bin', `cjc${suffix}`), {stage: 'verify.cjc'});
+  const compiler = path.join(cangjieDir, 'bin', `cjc${suffix}`);
+  if (process.env.CANGJIE_BUILD_DRY_RUN !== '1') requireFile(compiler, {stage: 'verify.cjc'});
   await stage('verify', async () => {
     assertGcUnitLanguageDone(config, cangjieDir);
     if (process.env.CANGJIE_BUILD_DRY_RUN !== '1') {

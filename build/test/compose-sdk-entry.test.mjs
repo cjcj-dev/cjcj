@@ -35,17 +35,21 @@ for (const mode of ['local', 'github', 'github-missing-run']) {
     await write(path.join(root, 'runtime.c'), 'int g_cjLoadBadMask = 0;\n');
     await fs.mkdir(runtimeDir, {recursive: true});
     run('cc', ['-shared', '-fPIC', 'runtime.c', '-o', runtime]);
-    await write(path.join(root, 'compiler.c'), '#include <stdio.h>\nextern int g_cjLoadBadMask;\nint main(void) { puts("fixture-0.0.2 " STAGE); return g_cjLoadBadMask; }\n');
+    const llvm = path.join(sdk, 'third_party/llvm/lib/libLLVM-15.so');
+    await fs.mkdir(path.dirname(llvm), {recursive: true});
+    await write(path.join(root, 'llvm.c'), 'int compiler_llvm_marker(void) { return 517; }\n');
+    run('cc', ['-shared', '-fPIC', 'llvm.c', '-Wl,-soname,libLLVM-15.so', '-o', llvm]);
+    await write(path.join(root, 'compiler.c'), '#include <stdio.h>\nextern int g_cjLoadBadMask;\nextern int compiler_llvm_marker(void);\nint main(void) { if (compiler_llvm_marker() != 517) return 31; puts("fixture-0.0.2 " STAGE); return g_cjLoadBadMask; }\n');
     const product = path.join(root, 'target/release/bin/cjc@cjcj');
     const installed = path.join(sdk, 'bin/cjc');
     await fs.mkdir(path.dirname(product), {recursive: true});
     await fs.mkdir(path.dirname(installed), {recursive: true});
     for (const [destination, stage] of [[product, 'stage3'], [installed, 'stage2']]) {
       run('cc', ['-fPIC', '-pie', 'compiler.c', `-DSTAGE="${stage}"`, '-L', runtimeDir,
-        '-Wl,-rpath,$ORIGIN/../runtime/lib/linux_x86_64_cjnative', '-lcangjie-runtime', '-o', destination]);
+        '-Wl,-rpath,$ORIGIN/../runtime/lib/linux_x86_64_cjnative', '-lcangjie-runtime', llvm, '-o', destination]);
     }
     await fs.copyFile(installed, path.join(sdk, 'bin/decoy'));
-    await write(path.join(sdk, 'envsetup.sh'), `export CANGJIE_HOME='${sdk}'\nexport LD_LIBRARY_PATH='${runtimeDir}'\n`);
+    await write(path.join(sdk, 'envsetup.sh'), 'export CANGJIE_HOME="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"\nexport LD_LIBRARY_PATH="$CANGJIE_HOME/runtime/lib/linux_x86_64_cjnative"\n');
     const expected = await fileSha256(product);
     const parent = await fileSha256(installed);
     assert.notEqual(expected, parent, 'fixture must distinguish stage2 from stage3');
@@ -99,8 +103,15 @@ for (const mode of ['local', 'github', 'github-missing-run']) {
       runtimeSha256: await fileSha256(runtime), archiveSha256: await fileSha256(archive), provenance};
     if (save) await fs.writeFile(path.join(save, 'observed.json'), JSON.stringify(observed, null, 2));
     console.log(`COMPOSE_ARCHIVE_ORIGIN_ASSERT_REACHED ${JSON.stringify(observed)}`);
-    assert.equal(archived, expected, 'final SDK archive bin/cjc must be the stage3 product');
-    assert.equal(final, expected, 'named final compiler must be the stage3 product');
+    assert.equal(archived, final, 'archive and final artifact must contain the same transformed stage3');
+    assert.notEqual(final, expected, 'shared-LLVM product must acquire its relative RUNPATH');
+    assert.equal(provenance.production.transformation, 'compose-relative-runpath');
+    assert.equal(await fileSha256(path.join(artifact, 'compiler-llvm/libLLVM-15.so')), await fileSha256(llvm));
+    const relocated = path.join(unpack, 'cangjie');
+    const execution = run('bash', ['--noprofile', '--norc', '-c',
+      'unset LD_LIBRARY_PATH; source "$1/envsetup.sh"; "$1/bin/cjc"', 'compose-relocated', relocated]);
+    console.log(`COMPOSE_LLVM_RESULT_ASSERT_REACHED ${execution}`);
+    assert.equal(execution, 'fixture-0.0.2 stage3');
     assert.equal(provenance.source.commit, commit);
     assert.equal(provenance.source.repository, repository);
     assert.equal(provenance.production.originalSha256, expected);
