@@ -1,6 +1,7 @@
 #!/usr/bin/env zx
 // Repackage an official SDK with the self-host compiler and optional patched runtime into a relocatable release archive.
 
+import {assertCompilerLoader} from '../build/lib/compiler-loader.mjs';
 import crypto from 'node:crypto';
 import {installCrossRuntime} from '../ci/release/cross-runtime.mjs';
 import {getReleasePlatform} from '../build/lib/targets.mjs';
@@ -23,7 +24,7 @@ import {
   GATE_APPARATUS_PROVENANCE,
   verifyGateApparatusProvenance,
 } from '../build/lib/release-gate-apparatus.mjs';
-import {consumeFinalCompiler, FINAL_COMPILER_PROVENANCE, fileSha256} from '../ci/srcbuild/lib/final-compiler.mjs';
+import {installFinalCompilerLlvm, consumeFinalCompiler, FINAL_COMPILER_PROVENANCE, fileSha256} from '../ci/srcbuild/lib/final-compiler.mjs';
 import {RELEASE_MANIFEST, writeReleaseManifest} from '../build/lib/release-manifest.mjs';
 import {writeToolchainIdentity} from '../build/lib/toolchain-identity.mjs';
 import {assertNoVerifierReportArtifacts} from './verifier_artifact_gate.mjs';
@@ -191,6 +192,10 @@ if (compilerArtifact) {
 const selectedCompilerSha256 = await fileSha256(binary);
 await fs.copyFile(binary, installed);
 await fs.chmod(installed, 0o755);
+// Only the compiler artifact supplies its private LLVM; never inherit the
+// debugger's LLVM or resolve against a library installed on the build host.
+await fs.rm(path.join(stage, 'third_party/cjc/lib'), {recursive: true, force: true});
+if (compilerArtifact) await installFinalCompilerLlvm({directory: compilerArtifact, sdk: stage, platform});
 
 console.log('[3/9] swap in patched runtime');
 let packagedRuntime = '';
@@ -701,45 +706,7 @@ console.log(`  PSF license: ${packagedPython.license}`);
 
 console.log('[6/9] set relative runtime lookup paths');
 if (platform.startsWith('linux-')) {
-  // cjc no longer carries $ORIGIN rpaths: the binary does not get to assume where it sits
-  // relative to its SDK, and the nightly cjpm rejects $ORIGIN outright. envsetup.sh below is
-  // what points at the three directories now, so the only thing left to assert here is that
-  // nothing absolute leaked in -- a RUNPATH naming the build host would make the package work
-  // on this machine and nowhere else, which is exactly the failure packaging must not ship.
-  const dynamic = await runRequiredProbe({
-    label: 'package readelf -d bin/cjc',
-    run: () => $({nothrow: true, quiet: true})`readelf -d ${path.join(stage, 'bin/cjc')}`,
-  });
-  const runpath = dynamic.stdout.split('\n').find(line => line.includes('RUNPATH'))?.match(/\[(.*)\]/)?.[1] || '';
-  const entries = runpath.split(':').filter(Boolean);
-  const hostPaths = entries.filter((entry) => entry.startsWith('/'));
-  if (hostPaths.length > 0) {
-    console.error(`  ERROR: bin/cjc RUNPATH carries build-host paths: ${hostPaths.join(', ')}`);
-    console.error('  The link step owns this; fix packages/cjc/cjpm.toml link-option.');
-    process.exit(3);
-  }
-
-  // Do not paper over a missing library here. Official cjc needs no rpath and no extra
-  // LD_LIBRARY_PATH entry because it has no SDK-internal dynamic dependency at all: its ldd
-  // lists only pthread/m/dl/stdc++/gcc_s/c, and the SDK ships no LLVM .a, so upstream links
-  // LLVM statically at its own build time. Our self-hosted cjc links the shipped
-  // libLLVM-15.so instead -- that difference is the thing to fix, and adding a search path
-  // would only hide it. libcangjie-runtime.so is not part of the problem; the stock
-  // envsetup.sh already covers runtime/lib.
-  const dependencies = await runRequiredProbe({
-    label: 'package ldd bin/cjc',
-    run: () => $({nothrow: true, quiet: true})`ldd ${path.join(stage, 'bin/cjc')}`,
-  });
-  const sdkInternal = dependencies.stdout.split('\n')
-    .filter((line) => /libLLVM|not found/.test(line))
-    .map((line) => line.trim());
-  if (sdkInternal.length > 0) {
-    console.error('  ERROR: bin/cjc has SDK-internal dynamic dependencies that official cjc does not:');
-    for (const line of sdkInternal) console.error(`    ${line}`);
-    console.error('  Official links LLVM statically; match that rather than adding a search path.');
-    process.exit(3);
-  }
-  process.stdout.write(`  RUNPATH: ${runpath || '(none, as upstream)'}\n`);
+  await assertCompilerLoader({sdk: stage, platform});
 } else if (platform.startsWith('darwin-')) {
   const available = await $({nothrow: true, quiet: true})`command -v install_name_tool`;
   if (available.exitCode !== 0) { console.error('  ERROR: install_name_tool not found'); process.exit(3); }
@@ -764,15 +731,14 @@ if (platform.startsWith('linux-')) {
     const pathLine = lines.slice(index + 1, index + 5).find((line) => /^\s*path .* \(offset \d+\)$/.test(line));
     if (pathLine) rpaths.push(pathLine.trim().replace(/^path /, '').replace(/ \(offset \d+\)$/, ''));
   }
-  const sdkRoot = `${path.resolve(sdk)}${path.sep}`;
   const obsoleteRpaths = [...new Set(rpaths.filter((rpath) =>
-    rpath.startsWith(sdkRoot) || rpath.startsWith('@loader_path/../../runtime/')))];
+    path.isAbsolute(rpath) || rpath.startsWith('@loader_path/../../runtime/') || rpath === '@loader_path/../third_party/llvm/lib'))];
   for (const rpath of obsoleteRpaths) {
     await $({stdio: 'inherit'})`install_name_tool -delete_rpath ${rpath} ${installed}`;
   }
   const relativeRpaths = [
     `@loader_path/../runtime/lib/${runtimeDir}`,
-    '@loader_path/../third_party/llvm/lib',
+    '@loader_path/../third_party/cjc/lib',
     '@loader_path/../tools/lib',
   ];
   const retainedRpaths = new Set(rpaths.filter((rpath) => !obsoleteRpaths.includes(rpath)));
@@ -784,11 +750,12 @@ if (platform.startsWith('linux-')) {
   await fs.appendFile(envsetup, [
     '',
     '# Prefer the packaged Darwin libraries when running the self-host compiler.',
-    `export DYLD_LIBRARY_PATH="\${CANGJIE_HOME}/runtime/lib/${runtimeDir}:\${CANGJIE_HOME}/third_party/llvm/lib:\${CANGJIE_HOME}/tools/lib\${DYLD_LIBRARY_PATH:+:\${DYLD_LIBRARY_PATH}}"`,
+    `export DYLD_LIBRARY_PATH="\${CANGJIE_HOME}/runtime/lib/${runtimeDir}:\${CANGJIE_HOME}/tools/lib\${DYLD_LIBRARY_PATH:+:\${DYLD_LIBRARY_PATH}}"`,
     '',
   ].join('\n'));
   console.log(`  install name: ${relativeRuntime}`);
   console.log(`  rpaths: ${relativeRpaths.join(':')}`);
+  await assertCompilerLoader({sdk: stage, platform});
 } else {
   console.log('  Windows resolves packaged DLLs through runtime/lib and PATH');
 }

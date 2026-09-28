@@ -130,7 +130,8 @@ async function writePythonBundle(root) {
   return bundle;
 }
 
-test('package_sdk archives std provenance and an honest complete manifest', async t => {
+for (const compilerMode of ['static', 'dynamic']) {
+test(`package_sdk archives std provenance and an honest complete manifest (${compilerMode})`, async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'package-provenance-'));
   t.after(() => fs.rm(root, {recursive: true, force: true}));
   const sdk = path.join(root, 'sdk');
@@ -140,10 +141,18 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
   const pythonBundle = await writePythonBundle(root);
 
   const binary = path.join(root, 'cjc');
-  await fs.copyFile('/bin/true', binary);
+  let compilerLlvm;
+  if (compilerMode === 'dynamic') {
+    compilerLlvm = path.join(root, 'compiler-build/libLLVM-15.so');
+    await fs.mkdir(path.dirname(compilerLlvm), {recursive: true});
+    const libSource = await write(root, 'compiler-llvm.c', 'int compiler_llvm_marker(void) { return 517; }\n');
+    run('cc', ['-shared', '-fPIC', libSource, '-Wl,-soname,libLLVM-15.so', '-o', compilerLlvm]);
+    const source = await write(root, 'compiler.c', '#include <stdio.h>\nextern int compiler_llvm_marker(void);\nint main(void) { printf("LLVM_RESULT=%d\\n", compiler_llvm_marker()); }\n');
+    run('cc', [source, compilerLlvm, '-Wl,-rpath,$ORIGIN/../third_party/cjc/lib', '-o', binary]);
+  } else await fs.copyFile('/bin/true', binary);
   await fs.appendFile(binary, `\0CJCJ-COMMIT:${CJCJ_SHA}\0`);
   await fs.chmod(binary, 0o755);
-  await write(sdk, 'envsetup.sh', '# fixture SDK\n', 0o755);
+  await write(sdk, 'envsetup.sh', 'export CANGJIE_HOME="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"\n', 0o755);
   await write(sdk, `runtime/lib/${TUPLE}/libcangjie-runtime.so`,
     `fixture-runtime\0CJRT-COMMIT:${RUNTIME_SHA}\0`);
   const llvmFixtureSource = await write(root, 'llvm-tool.c', [
@@ -324,7 +333,7 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
   await fs.appendFile(decoy, '\0old-workspace-compiler\0');
   await fs.copyFile(decoy, path.join(sdk, 'bin', 'cjc'));
   const artifact = path.join(root, 'final-compiler');
-  const selected = await produceFinalCompiler({binary, outdir: artifact, platform: 'linux-x64',
+  const selected = await produceFinalCompiler({binary, llvmLibrary: compilerLlvm, outdir: artifact, platform: 'linux-x64',
     repository: 'https://github.com/cjcj-dev/cjcj.git', commit: CJCJ_SHA,
     runId: 'fixture-run', runAttempt: '1', std,
     lineage: {stage: 'stage3', compilerSha256: await sha256(binary), parentSha256: 'f'.repeat(64),
@@ -349,6 +358,38 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
   assert.equal(finalRecord.packaging.inputSha256, await sha256(binary));
   assert.equal(finalRecord.packaging.installedSha256, await sha256(packagedCompiler));
   assert.match(packaged.stdout, /DONE: .*cjcj-fixture-linux-x64\.tar\.gz/);
+  if (compilerMode === 'dynamic') {
+    console.log('PACKAGE_LLVM_RESULT_ASSERT_REACHED');
+    const execution = run('bash', ['--noprofile', '--norc', '-c',
+      'unset LD_LIBRARY_PATH; source "$1/envsetup.sh"; "$1/bin/cjc"', 'package-execute', path.dirname(path.dirname(packagedCompiler))]);
+    assert.equal(execution.stdout.trim(), 'LLVM_RESULT=517');
+    const artifactLibrary = path.join(artifact, 'compiler-llvm/libLLVM-15.so');
+    const libraryBytes = await fs.readFile(artifactLibrary);
+    await fs.appendFile(artifactLibrary, 'tampered');
+    const rejected = runRaw('zx', finalArgs, {cwd: path.resolve('.'),
+      env: {...process.env, GITHUB_RUN_ID: 'fixture-run', GITHUB_RUN_ATTEMPT: '1'}});
+    console.log(`PACKAGE_LLVM_IDENTITY_ASSERT_REACHED rc=${rejected.status}`);
+    assert.notEqual(rejected.status, 0);
+    assert.match(rejected.stderr, /final compiler LLVM SHA-256 mismatch/);
+    await fs.writeFile(artifactLibrary, libraryBytes);
+    // Keep producer identity valid while testing an invalid loader contract.
+    // This must reach the loader verdict, not an earlier provenance assertion.
+    run('patchelf', ['--set-rpath', '/build-host/llvm', binary]);
+    await produceFinalCompiler({binary, llvmLibrary: compilerLlvm, outdir: artifact, platform: 'linux-x64',
+      repository: 'https://github.com/cjcj-dev/cjcj.git', commit: CJCJ_SHA,
+      runId: 'fixture-run', runAttempt: '1', std,
+      lineage: {stage: 'stage3', compilerSha256: await sha256(binary), parentSha256: 'f'.repeat(64),
+        stdSha256: await stdIdentity(std), llvmManifestSha256: await sha256(llvmManifest)}});
+    const hostPath = runRaw('zx', finalArgs, {cwd: path.resolve('.'),
+      env: {...process.env, GITHUB_RUN_ID: 'fixture-run', GITHUB_RUN_ATTEMPT: '1'}});
+    console.log(`PACKAGE_RUNPATH_REJECTION_ASSERT_REACHED rc=${hostPath.status}`);
+    assert.notEqual(hostPath.status, 0, 'packaging must reject a build-host RUNPATH even with valid provenance');
+    assert.match(hostPath.stderr, /compiler search path is not SDK-relative/);
+    assert.match(packaged.stdout, /COMPILER_LLVM_RESOLVED libLLVM-15.so => .*third_party\/cjc\/lib\/libLLVM-15.so/);
+    console.log(`PACKAGE_LLVM_PAYLOAD compiler=${await sha256(packagedCompiler)} llvm=${await sha256(compilerLlvm)}`);
+    return;
+  }
+
 
   const packageName = 'cjcj-fixture-linux-x64';
   const manifestFile = path.join(out, `${packageName}.RELEASE-MANIFEST.jsonl`);
@@ -465,9 +506,9 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
     console.log(`NEGATIVE-${name.toUpperCase()} RC=${result.status}\n${result.stderr.trim()}`);
   }
   await expectInspectionFailure('readelf',
-    /package readelf -d bin\/cjc failed \(exit=73\): readelf forced failure/);
+    /readelf failed \(73\): readelf forced failure/);
   await expectInspectionFailure('ldd',
-    /package ldd bin\/cjc failed \(exit=73\): ldd forced failure/);
+    /ldd failed \(73\): ldd forced failure/);
 
   const originalLlvmManifest = await fs.readFile(llvmManifest, 'utf8');
   await fs.writeFile(llvmManifest, originalLlvmManifest.replace(/^OPT_SHA256=.*$/m, `OPT_SHA256=${'0'.repeat(64)}`));
@@ -583,6 +624,7 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
   assert.notEqual(changed.status, 0, 'changing one byte in the cjpm sidecar must fail closed');
   console.log(`NEGATIVE-CHANGE-SIDECAR RC=${changed.status}\n${changed.stderr.trim()}`);
 });
+}
 
 // ── #62: the std closure is a property of the stage, not of where it sits ─────
 // stagedStdFiles tested /(^|[/\\])(std|libcangjie-std)/ against each staged

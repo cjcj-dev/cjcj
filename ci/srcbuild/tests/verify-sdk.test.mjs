@@ -9,7 +9,7 @@ const root = path.resolve(import.meta.dirname, '../../..');
 const entry = path.join(root, 'ci/srcbuild/steps/verify.mjs');
 const target = {
   'linux/x64': 'linux-x64', 'linux/arm64': 'linux-aarch64',
-  'darwin/x64': 'mac-x64', 'darwin/arm64': 'mac-aarch64',
+  'darwin/x64': 'darwin-x64', 'darwin/arm64': 'darwin-arm64',
 }[`${process.platform}/${process.arch}`];
 
 test('bootstrap SDK verification retains exactly the SDK-owned phases', async () => {
@@ -23,6 +23,7 @@ async function runEntry(t, {compiler = true} = {}) {
   t.after(() => fs.rm(work, {recursive: true, force: true}));
   const sdk = path.join(work, 'sdk');
   await fs.mkdir(path.join(sdk, 'bin'), {recursive: true});
+  await fs.writeFile(path.join(sdk, 'envsetup.sh'), `export CANGJIE_HOME='${sdk}'\n`);
   // An intentionally rejected SDK lets the real lineage phase expose its
   // result without running any compiler. There is no source compiler tree.
   await fs.writeFile(path.join(sdk, 'PROVENANCE.txt'), 'LINEAGE: stdlib-stage1\n');

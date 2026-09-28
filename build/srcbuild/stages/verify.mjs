@@ -5,7 +5,7 @@ import path from 'node:path';
 import {BuildError} from '../../lib/errors.mjs';
 import {getLogger, stage} from '../../lib/logging.mjs';
 import {run as runCommand} from '../../lib/runner.mjs';
-import {assertRuntimeSplit, hostLoaderPath, targetLoaderPath} from '../../lib/runtime-split.mjs';
+import {sdkEnvironment} from '../../lib/sdk-environment.mjs';
 import {assertGcUnitLanguageDone} from '../gc-unit-gate.mjs';
 import {ensureDir, requireFile} from './common.mjs';
 import {assertPackagedLineage} from '../../lib/package-lineage.mjs';
@@ -23,28 +23,11 @@ export async function run(config) {
     return;
   }
 
-  const envsetup = requireFile(path.join(cangjieDir, 'envsetup.sh'), {stage: 'verify'});
+  requireFile(path.join(cangjieDir, 'envsetup.sh'), {stage: 'verify'});
   const work = ensureDir(path.join(config.workspace, 'verify'));
   fs.writeFileSync(path.join(work, 'hello.cj'), HELLO_SOURCE, 'utf8');
-  if (process.env.CANGJIE_BUILD_DRY_RUN !== '1') {
-    assertRuntimeSplit({
-      hostSdk: process.env.CJCJ_SRCBUILD_HOST_SDK,
-      targetSdk: cangjieDir,
-      target: config.target,
-    });
-  }
-  const hostLibraries = process.env.CANGJIE_BUILD_DRY_RUN === '1' ? '<HOST_LIBRARIES>' : hostLoaderPath({
-    hostSdk: process.env.CJCJ_SRCBUILD_HOST_SDK,
-    targetSdk: cangjieDir,
-    target: config.target,
-  });
-  const targetLibraries = process.env.CANGJIE_BUILD_DRY_RUN === '1' ? '<TARGET_LIBRARIES>' : targetLoaderPath({
-    targetSdk: cangjieDir,
-    target: config.target,
-  });
-  const hostCompiler = process.env.CANGJIE_BUILD_DRY_RUN === '1'
-    ? '<HOST_CJC>'
-    : requireFile(path.join(process.env.CJCJ_SRCBUILD_HOST_SDK, 'bin', 'cjc'), {stage: 'verify.host-cjc'});
+  const compiler = path.join(cangjieDir, 'bin', `cjc${suffix}`);
+  if (process.env.CANGJIE_BUILD_DRY_RUN !== '1') requireFile(compiler, {stage: 'verify.cjc'});
   await stage('verify', async () => {
     assertGcUnitLanguageDone(config, cangjieDir);
     if (process.env.CANGJIE_BUILD_DRY_RUN !== '1') {
@@ -52,12 +35,15 @@ export async function run(config) {
         allowNightlyStd: process.env.CJCJ_ALLOW_NIGHTLY_STD === '1',
       });
     }
+    const activated = process.env.CANGJIE_BUILD_DRY_RUN === '1' ? {} : sdkEnvironment(cangjieDir);
+    const envOverlay = Object.fromEntries(Object.keys(process.env).map(key => [key, null]));
+    Object.assign(envOverlay, activated);
     await runCommand([
-      'bash', '-c',
-      'set -e; source "$1"; export "$2=$3"; "$5" hello.cj -o hello; export "$2=$4"; ./hello',
-      'srcbuild-verify', envsetup, config.target.spec.loaderEnv, hostLibraries, targetLibraries, hostCompiler,
+      'bash', '--noprofile', '--norc', '-c',
+      'set -e; "$1" hello.cj -o hello; ./hello',
+      'srcbuild-verify', compiler,
     ], {
-      cwd: work, stage: 'verify.hello',
+      cwd: work, stage: 'verify.hello', envOverlay,
     });
     if (!fs.existsSync(path.join(work, 'hello'))) {
       throw new BuildError('verify', 'hello binary was not produced');
