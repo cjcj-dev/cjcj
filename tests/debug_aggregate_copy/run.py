@@ -93,6 +93,7 @@ def main():
     parser.add_argument('--opt', type=Path, required=True)
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--runtime-dir', type=Path, help='Matching target runtime/std directory for value execution')
+    parser.add_argument('--workers', type=int, default=4)
     parser.add_argument('--jobs', type=int, default=os.cpu_count())
     args = parser.parse_args()
     args.compiler = args.compiler.absolute()
@@ -101,7 +102,7 @@ def main():
     args.out.mkdir(parents=True, exist_ok=True)
     record = {'compiler': str(args.compiler), 'compiler_sha256': sha(args.compiler),
               'opt': str(args.opt), 'opt_sha256': sha(args.opt),
-              'runner_sha256': sha(Path(__file__)), 'jobs': args.jobs, 'parallel_cases': 4,
+              'runner_sha256': sha(Path(__file__)), 'jobs': args.jobs, 'parallel_cases': args.workers,
               'affinity': sorted(os.sched_getaffinity(0)),
               'uptime_before': subprocess.check_output(['uptime'], text=True),
               'environment': {k: os.environ.get(k, '') for k in
@@ -112,7 +113,7 @@ def main():
             if directory and path.is_file() and name not in record['libraries']:
                 record['libraries'][name] = {'path': str(path), 'sha256': sha(path)}
     start = time.monotonic()
-    with ThreadPoolExecutor(max_workers=4) as pool:
+    with ThreadPoolExecutor(max_workers=args.workers) as pool:
         tasks = [pool.submit(case, args, Path(__file__).resolve().with_name(name + '.cj'), debug)
                  for name in ('offset', 'control') for debug in (False, True)]
         record['cases'] = [task.result() for task in tasks]
