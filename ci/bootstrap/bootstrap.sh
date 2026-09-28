@@ -453,7 +453,7 @@ assert_std_install_shape() {
 }
 
 stdlib_build() {
-  local label="$1" sdk="$2" runtime="$3" prefix="$4" compare_prefix="${5:-}" target_lib="${6:-$2/runtime/lib/$HOST_TUPLE}" ld script cache_env native_env system_path std_path
+  local label="$1" sdk="$2" runtime="$3" prefix="$4" compare_prefix="${5:-}" target_lib="${6:-$2/runtime/lib/$HOST_TUPLE}" ld script compiler cache_env native_env system_path std_path
   system_path=$(host_std_system_path) || die "cannot determine native std toolchain"
   std_path="$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:$system_path"
   # build_native.sh:28-34 uses native build.py without --target-toolchain.
@@ -474,10 +474,11 @@ stdlib_build() {
   script='cd "$1" && rm -rf build/build && python3 build.py clean && python3 build.py build -t relwithdebinfo --jobs "$2" --target-lib="$3" && python3 build.py install --prefix "$4"'
   cmd "env -i HOME=$(printf '%q' "$BUILD_HOME") TMPDIR=$(printf '%q' "$BUILD_TMPDIR") CANGJIE_HOME=$(printf '%q' "$sdk") ${cache_env}${native_env}${HOST_LOADER_VAR}=$(printf '%q' "$ld") PATH=$(printf '%q' "$std_path") cjHeapSize=$(printf '%q' "$STD_BUILD_HEAP") bash -c $(printf '%q' "$script") bash $(printf '%q' "$STDSRC") $(printf '%q' "$STD_BUILD_JOBS") $(printf '%q' "$target_lib") $(printf '%q' "$prefix")"
   assert_std_install_shape "$prefix" "$compare_prefix" "$label"
-  local producer="$sdk/bin/cjc"
-  [ ! -f "$sdk/bin/cjcj-stage1" ] || producer="$sdk/bin/cjcj-stage1"
-  if [ -f "$producer" ] || [ "$DRY" -eq 1 ]; then
-    cmd "python3 -c 'import hashlib,json,sys; h=hashlib.sha256(open(sys.argv[1],\"rb\").read()).hexdigest(); open(sys.argv[2],\"w\").write(json.dumps({\"compiler_sha256\":h})+chr(10))' $(printf '%q' "$producer") $(printf '%q' "$prefix/std-producer.json")"
+  # Match sdk_verify.measured_cjc_sha: the runner is only a launcher.
+  compiler="$sdk/bin/cjc"
+  [ ! -f "$sdk/bin/cjcj-stage1" ] || compiler="$sdk/bin/cjcj-stage1"
+  if [ -f "$compiler" ] || [ "$DRY" -eq 1 ]; then
+    cmd "python3 -c 'import hashlib,json,sys; h=hashlib.sha256(open(sys.argv[1],\"rb\").read()).hexdigest(); open(sys.argv[2],\"w\").write(json.dumps({\"compiler_sha256\":h})+chr(10))' $(printf '%q' "$compiler") $(printf '%q' "$prefix/std-producer.json")"
   fi
 }
 
@@ -693,12 +694,12 @@ stage0() {
 
 assemble_stage1_sdk() {
   local sdk="$1" compiler="$2" std="$3"
-  cmd "bash $(printf '%q' "$SDK_BUILD") --from $(printf '%q' "$WORK/sdk-stage0") --to $(printf '%q' "$sdk") --target $(printf '%q' "$HOST_TUPLE") --cjc $(printf '%q' "$compiler") --llvm-tuple $(printf '%q' "$COLOUR_TUPLE") --runtime $(printf '%q' "$CRT") --std $(printf '%q' "$std") --verify-host-rt $(printf '%q' "$HRT") --colour-runtime $(printf '%q' "$(runtime_dir "$CRT")/libcangjie-runtime.${HOST_LIB_EXT}") --host-runtime $(printf '%q' "$(runtime_dir "$HRT")/libcangjie-runtime.${HOST_LIB_EXT}") --force"
+  cmd "bash $(printf '%q' "$SDK_BUILD") --from $(printf '%q' "$WORK/sdk-stage0") --to $(printf '%q' "$sdk") --target $(printf '%q' "$HOST_TUPLE") --cjc $(printf '%q' "$compiler") --llvm-tuple $(printf '%q' "$COLOUR_TUPLE") --llvm-so $(printf '%q' "$COLOUR_LLVM_SO") --runtime $(printf '%q' "$CRT") --std $(printf '%q' "$std") --verify-host-rt $(printf '%q' "$HRT") --colour-runtime $(printf '%q' "$(runtime_dir "$CRT")/libcangjie-runtime.${HOST_LIB_EXT}") --host-runtime $(printf '%q' "$(runtime_dir "$HRT")/libcangjie-runtime.${HOST_LIB_EXT}") --force"
   if [ "$DRY" -eq 0 ]; then
     cmd "python3 $(printf '%q' "$SDK_VERIFY") --sdk $(printf '%q' "$sdk") --role target --target-tuple $(printf '%q' "$HOST_TUPLE") --runtime-pin $(printf '%q' "$SRC/ci/runtime_pin.env")"
   fi
   assert_installed_llvm_tuple "$sdk" "$COLOUR_TUPLE"
-  cmd "host_install -m644 $(printf '%q' "$COLOUR_LLVM_SO") $(printf '%q' "$sdk/third_party/llvm/lib/${HOST_LLVM_LIBRARY}")"
+
   if [ "$DRY" -eq 0 ]; then
     assert_expected_sha target-colour-llvm "$sdk/third_party/llvm/lib/${HOST_LLVM_LIBRARY}" "$COLOUR_LLVM_SHA256"
   fi
