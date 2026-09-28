@@ -106,9 +106,9 @@ def check(args):
 def check_heap(args):
     """Read actual cjprof/cjheap_hist output, never a model of the IR objects.
 
-    These budgets apply to the std.unittest fixture. Two 16-pointer buffers per
-    actual BlockGroup allow existing populated-list helpers, while rejecting a
-    buffer for every expression, including expressions without block groups.
+    Constant expressions have no block groups. Follow their actual member list
+    to its backing array; aggregate histogram bytes include temporary lists and
+    cannot establish the empty-member allocation invariant.
     """
     result = json.loads(args.snapshot.read_text())
     rows = {}
@@ -123,10 +123,13 @@ def check_heap(args):
         print(f'OBSERVED annotation-key-storage auxiliary_arrays={count}')
         checks['annotation-key-storage-not-duplicated'] = count == 0
     if 'vectors' in args.invariant:
-        groups = rows.get('cjcj/chir:BlockGroup', (0, 0))[0]
-        payload = rows.get('RawArray<cjcj/chir:BlockGroup>', (0, 0))[1]
-        print(f'OBSERVED block-group-storage payload_bytes={payload} populated_groups={groups}')
-        checks['block-group-storage-proportional-to-groups'] = groups > 0 and payload <= groups * 256
+        owner_rows = (args.snapshot.parent / 'constant-owners.tsv').read_text().splitlines()
+        capacities = {int(capacity): int(count) for capacity, count in
+                      (line.split('\t') for line in owner_rows[1:])}
+        observed = sum(capacities.values())
+        allocated = sum(count for capacity, count in capacities.items() if capacity > 0)
+        print(f'OBSERVED constant-block-group-arrays observed={observed} allocated={allocated}')
+        checks['empty-constant-block-group-array-has-zero-capacity'] = observed > 0 and allocated == 0
     if 'ast' in args.invariant:
         if args.reference is None:
             raise ValueError('AST retention comparison requires --reference histogram')
