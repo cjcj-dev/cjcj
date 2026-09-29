@@ -39,14 +39,22 @@ let pass = 0;
 let fail = 0;
 if (process.platform === 'win32') process.env.cjStackSize = process.env.cjStackSize || '64MB';
 
-// The samples carry a RUNPATH into $CANGJIE_HOME/runtime/lib, which now holds
-// the official runtime. LD_LIBRARY_PATH is consulted first, so the isolated
-// runtime wins at load time and the sample runs the library it was linked
-// against. Only our own self-built samples get this; official SDK tools keep
-// whatever the SDK alone sets.
-if (runtimeLibDir) {
-  const ldKey = process.platform === 'darwin' ? 'DYLD_LIBRARY_PATH' : 'LD_LIBRARY_PATH';
-  process.env[ldKey] = [runtimeLibDir, process.env[ldKey]].filter(Boolean).join(':');
+// Scoped deliberately: the compiler is a self-built executable linked against the
+// official SDK's runtime, and it is the one that already runs correctly in the
+// Build workspace step. Only the samples -- artifacts this compiler produces --
+// get the coloured runtime. Prepending it process-wide instead made the compiler
+// itself load the coloured runtime and crash in the GC relocate phase.
+function withSampleLoader(fn) {
+  if (!runtimeLibDir) return fn();
+  const key = process.platform === 'darwin' ? 'DYLD_LIBRARY_PATH' : 'LD_LIBRARY_PATH';
+  const previous = process.env[key];
+  process.env[key] = [runtimeLibDir, previous].filter(Boolean).join(':');
+  try {
+    return fn();
+  } finally {
+    if (previous === undefined) delete process.env[key];
+    else process.env[key] = previous;
+  }
 }
 
 async function runCommand(executable, args, cwd) {
@@ -254,7 +262,7 @@ for (const [name, wanted] of expect) {
     fail++;
     continue;
   }
-  const ran = await runCommand(exe, []);
+  const ran = await withSampleLoader(() => runCommand(exe, []));
   await fs.writeFile(runLog, `rc=${ran.exitCode} signal=${ran.signal ?? 'none'} ms=${ran.ms}\n--- stdout ---\n${ran.stdout}\n--- stderr ---\n${ran.stderr}`);
   // Normalize CRLF before comparing: Windows println emits \r\n, and the
   // expectations encode line structure, not the OS newline byte sequence.
@@ -302,7 +310,7 @@ if (macroOk) {
   }
 }
 if (macroOk) {
-  result = await runCommand(path.join(macroBuild, `app/app${exeSuffix}`), []);
+  result = await withSampleLoader(() => runCommand(path.join(macroBuild, `app/app${exeSuffix}`), []));
   await fs.writeFile(path.join(work, 'macro.run.log'), `rc=${result.exitCode} signal=${result.signal ?? 'none'} ms=${result.ms}\n--- stdout ---\n${result.stdout}\n--- stderr ---\n${result.stderr}`);
   got = result.stdout.replace(/\r\n/g, '\n').replace(/\n$/, '');
   if (result.exitCode !== 0) {
