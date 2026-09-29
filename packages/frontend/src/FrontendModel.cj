@@ -7361,6 +7361,7 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
         }
         let pkg = GetPackage(fullPackageName).getOrThrow()
         for (depStdPkg in pkg.GetAllDependentStdPkgs()) {
+            CJC_ASSERT(STANDARD_LIBS.contains(depStdPkg))
             if (!cjoFilePaths.contains(depStdPkg)) {
                 let depCjoPath = FileUtil.FindSerializationFile(depStdPkg, ".cjo", searchPath.toArray())
                 HandleStdPackage(depStdPkg, depCjoPath, isRecursive: true)
