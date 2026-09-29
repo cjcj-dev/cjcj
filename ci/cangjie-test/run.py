@@ -15,6 +15,7 @@ import threading
 import time
 from adapt import prepare as prepare_execution_inputs
 from envelope import enter as enter_envelope
+from environment import apply_environment
 
 HERE = Path(__file__).resolve().parent
 STATUS = {'PASSED': 'pass', 'PASS': 'pass', 'FAILED': 'fail', 'FAIL': 'fail',
@@ -225,6 +226,8 @@ def main():
     parser.add_argument('jobs', type=int, nargs='?', default=48, help='total workers across both Conformance pools and two Maple pools (4..48)')
     parser.add_argument('--inputs', type=Path, required=True,
                         help='directory containing pinned cangjie_test and cangjie_test_framework')
+    parser.add_argument('--environment', type=Path, help='environment.py manifest for this private SDK')
+    parser.add_argument('--arm', choices=('official', 'bootstrap'), default='official')
     parser.add_argument('--compiler-jobs', type=int, choices=(1, 2), default=1,
                         help='Conformance compiler parallelism; Maple uses unmodified test options inside CPU scope')
     parser.add_argument('--scratch', type=Path,
@@ -243,6 +246,8 @@ def main():
         parser.error('INVALID_SDK: expected bin/cjc and envsetup.sh in SDK root')
     if platform.machine() != 'x86_64' or platform.system() != 'Linux':
         parser.error('the pinned recipe requires Linux x86_64')
+    if args.arm == 'bootstrap':
+        subprocess.run([sys.executable, str(HERE.parent / 'bootstrap/compiler_identity.py'), str(sdk)], check=True)
     test, framework = inputs / 'cangjie_test', inputs / 'cangjie_test_framework'
     for path in (test / 'Conformance/Compiler/harness/harness.py', framework / 'main.py'):
         if not path.is_file():
@@ -288,6 +293,17 @@ def main():
     loaded = subprocess.check_output(['bash', '-c', 'source "$1/envsetup.sh" >&2 && env -0',
                                       'sdk-environment', str(sdk)])
     env = dict(entry.decode().split('=', 1) for entry in loaded.split(b'\0') if entry)
+    environment = json.loads(args.environment.read_text()) if args.environment else None
+    if environment:
+        if environment['arm'] != args.arm:
+            raise ValueError('environment arm mismatch')
+        env = apply_environment(sdk, env, environment)
+        config = test / 'testsuites/HLT/Tools/cjlsp/lsp_config.txt'
+        text = config.read_text()
+        if text.count('${linux_lsp_server_path}') != 1:
+            raise ValueError('upstream LSP configuration anchor mismatch')
+        config.write_text(text.replace('${linux_lsp_server_path}', str(sdk / 'tools/bin')))
+        dump(output / 'environment.json', environment)
     env['CANGJIE_HOME'] = str(sdk)
     env['CANGJIE_TEST'] = str(test)
     env['CANGJIE_TEST_ADMISSION_LOG'] = str(output / 'admission.jsonl')
@@ -305,6 +321,8 @@ def main():
                 'inputs': str(inputs), 'jobs': args.jobs, 'compiler_jobs': args.compiler_jobs,
                 'affinity': sorted(os.sched_getaffinity(0)), 'uname': list(platform.uname()),
                 'uptime_before': before}
+    identity['environment_recipe_sha256'] = environment['recipe_sha256'] if environment else None
+    identity['arm'] = args.arm
     dump(output / 'identity.json', identity)
     smoke = output / 'smoke.cj'
     smoke.write_text('main() { println("CANGJIE_TEST_SDK_READY") }\n')
