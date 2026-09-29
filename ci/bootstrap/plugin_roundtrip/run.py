@@ -29,7 +29,7 @@ records = []
 for name, mode, plugin in results:
     label = name + '-' + mode
     out = root / label
-    out.mkdir(exist_ok=True)
+    out.mkdir()  # A stale artifact must never satisfy output-produced.
     cmd = [a.compiler, str(inputs / (name + '.cj')), '-O0', '--output-type=staticlib', '--output-dir', str(out)]
     if plugin:
         cmd += ['--plugin', plugin]
@@ -40,7 +40,7 @@ for name, mode, plugin in results:
     checks = {}
     if mode in ('plain', 'pass'):
         checks['cli-success'] = run.returncode == 0
-        checks['output-produced'] = any(f.is_file() for f in out.rglob('*'))
+        checks['output-produced'] = any(f.is_file() and f.stat().st_size > 0 for f in out.glob('*.a'))
     else:
         checks['cli-failure'] = run.returncode != 0
     if mode == 'pass':
