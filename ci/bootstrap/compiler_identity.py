@@ -24,11 +24,18 @@ def digest(stream):
     return value.hexdigest()
 
 
-def verify(sdk):
+def verify(sdk, expected_producer_sha256=None):
     record = json.loads((sdk / RECORD).read_text())
     expected = record['installed_sha256']
     if len(expected) != 64 or not record.get('producer_sha256'):
         raise ValueError('COMPILER_IDENTITY invalid producer record')
+    # The installation record establishes copy consistency, not producer origin.
+    # A bootstrap consumer must supply its build's hash independently of this SDK.
+    if expected_producer_sha256 is not None:
+        if len(expected_producer_sha256) != 64 or any(c not in '0123456789abcdef' for c in expected_producer_sha256):
+            raise ValueError('COMPILER_IDENTITY invalid expected producer SHA-256')
+        if record['producer_sha256'] != expected_producer_sha256 or expected != expected_producer_sha256:
+            raise ValueError('COMPILER_IDENTITY independent bootstrap producer mismatch')
     rejected = []
     for name in NAMES:
         path = sdk / 'bin' / name
@@ -68,9 +75,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('sdk', type=Path)
     parser.add_argument('--install', type=Path)
+    parser.add_argument('--expected-producer-sha256', help='trusted build output hash, obtained outside the installed SDK')
     args = parser.parse_args()
+    if args.install and args.expected_producer_sha256:
+        parser.error('--expected-producer-sha256 is a consumer constraint; install separately')
     try:
-        record = install(args.sdk, args.install) if args.install else verify(args.sdk)
+        record = install(args.sdk, args.install) if args.install else verify(args.sdk, args.expected_producer_sha256)
     except (OSError, ValueError, KeyError) as error:
         parser.exit(1, str(error) + '\n')
     print(json.dumps(record, sort_keys=True))

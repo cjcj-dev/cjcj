@@ -6,6 +6,7 @@ import test from 'node:test';
 
 const execute = promisify(execFile);
 for (const [name, script, marker] of [
+  ['bootstrap independent compiler identity', '../../ci/cangjie-test/verify_bootstrap_identity.py', 'BOOTSTRAP_OFFICIAL_TARGET rejected= True'],
   ['seven-way upstream result triage', '../../ci/cangjie-test/verify_classify.py', 'CLASSIFY_EXACT_DELTA'],
   ['compiler producer and frontend SDK entry', '../../ci/bootstrap/test_compiler_identity.py', 'SDK_VERIFY_FRONTEND_RESTORED'],
 ]) {

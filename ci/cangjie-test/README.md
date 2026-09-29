@@ -190,3 +190,28 @@ Device regression entries are `verify_classify.py`,
 assembly entry with distinct fixture ELFs; it does not certify compiler
 semantics. Its optional real compiler/frontend inputs rehearse the identity
 guard without executing a compiler against fixture runtime libraries.
+
+### Bootstrap compiler trust input
+
+`--arm bootstrap` requires `--bootstrap-compiler-sha256 HASH`. Obtain HASH from
+our independent compiler build output (for srcbuild, `compilerSha256` in
+`software/stage3-compiler.json`, emitted by `build-stage3.mjs`). For a shared
+stage1 build, use the verified build manifest's compiler artifact hash. Keep
+that build's source commit, recipe and artifact hash with the run evidence.
+Never derive this argument from the SDK being tested or its
+`compiler-lineage.json`: the installer's record proves copy consistency and
+can legitimately describe an official host compiler.
+
+The Linux runner checks this independent hash against both producer/installed
+records and all installed compiler bytes before admitting suite inputs. A
+missing or mismatching hash fails admission. Official host assembly and
+`--arm official` remain supported. A supplied hash is a trusted caller input,
+not a claim that a self-written JSON record authenticates a producer. The
+runner records the independent hash in `identity.json` for later comparison.
+
+`verify_bootstrap_identity.py --compiler BUILD_ARTIFACT --official-frontend
+OFFICIAL_COMPILER` rehearses the real installer and B entry with real bytes:
+our compiler passes identity admission; installing the official compiler with
+its genuine installer-generated record is rejected. Input admission deliberately
+stops these tests before any compiler executes; this proves SDK identity
+admission only, not compiler correctness or suite completion.
