@@ -17,7 +17,7 @@ work=$(cd "$work" && pwd)
 mkdir -p "$work/frontend"
 cp "$compiler" "$work/frontend/cjcj-stage1"
 cmp "$compiler" "$work/frontend/cjcj-stage1"
-ln -s cjcj-stage1 "$work/frontend/cjc-frontend"
+ln -sfn cjcj-stage1 "$work/frontend/cjc-frontend"
 compiler="$work/frontend/cjc-frontend"
 # The source check includes the generated Cangjie file, not just the LLVM copy.
 bash "$repo/ci/check-llvm-runtime-abi.sh" --llvm-repo "$llvm_repo" --llvm-ref "$LLVM_SHA" \
