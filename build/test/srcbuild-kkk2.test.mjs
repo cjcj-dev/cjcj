@@ -1069,7 +1069,8 @@ test('stage1 compiler consumer sees the completed target std', t => {
   fs.mkdirSync(path.join(root, 'stdlib-stage1'));
   fs.writeFileSync(path.join(root, 'stdlib-stage1', 'std-id'), 'host');
   const bootstrap = fs.readFileSync(path.join(repoRoot, 'ci/bootstrap/bootstrap.sh'), 'utf8');
-  const invoke = ['bootstrap_target_std', 'stage2_forensic', 'stage1']
+  const invoke = ['bootstrap_target_std', 'stage2_forensic', 'stage1_inputs',
+    'stage1_initial_std', 'stage1_std', 'stage1_compiler', 'stage1']
     .map(name => extractFn(bootstrap, name)).join('\n') + `
 set -e
 WORK=$1 DRY=1 COLOUR_TUPLE=tuple CRT=runtime HOST_LLVM_SO=llvm COLOUR_LLVM_SHA=sha STAGE1_HEAP=20GB
