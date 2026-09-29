@@ -59,8 +59,8 @@ function changeCase(f, suite, category, timeout = false) {
 test('G11 actual CLI consumes all three suites and Q54-C official reasons', async t => {
   const f = await fixture(t);
   const {rc, row} = await runFixture(f);
-  assert.equal(rc, 0);
   assert.equal(row.status, 'MET');
+  assert.equal(rc, 0);
   assert.match(row.value, /selfhost_only_failures=0; official_allowances=3/);
   assert.doesNotMatch(JSON.stringify(row), /29060/);
 });
@@ -108,6 +108,6 @@ test('G11 missing archive remains UNKNOWN', () => {
 test('G11 all-gates CLI consumes the same evidence', async t => {
   const f = await fixture(t);
   const {rc, row} = await runFixture(f, 'all');
-  assert.equal(rc, 0);
   assert.equal(row.status, 'MET');
+  assert.equal(rc, 0);
 });
