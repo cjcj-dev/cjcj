@@ -318,8 +318,8 @@ test('every workflow host consumer loads ci/cjpm_pin.env after checkout', async 
     const text = await fs.readFile(path.join(workflows, name), 'utf8');
     assert.equal(text.split(loadCommand).length - 1, count, name);
   }
-  const srcbuild = await fs.readFile(path.join(workflows, 'srcbuild.yml'), 'utf8');
-  assert.equal(srcbuild.split(srcbuildLoadCommand).length - 1, 1, 'srcbuild.yml');
+  const srcbuild = await fs.readFile(path.join(workflows, 'srcbuild-target.yml'), 'utf8');
+  assert.equal(srcbuild.split(srcbuildLoadCommand).length - 1, 1, 'srcbuild-target.yml');
 
 
   const windowsRuntime = await fs.readFile(path.join(workflows, 'build-windows-runtime.yml'), 'utf8');
@@ -382,7 +382,7 @@ const HOST_TOOLCHAIN_PINS = Object.freeze({
   }),
   'ci/host_sdk_pin.env': Object.freeze({
     host: 'source-build host',
-    loaders: Object.freeze(['build-ast-support.yml', 'build-host-runtime.yml', 'srcbuild.yml']),
+    loaders: Object.freeze(['build-ast-support.yml', 'build-host-runtime.yml', 'srcbuild-target.yml']),
   }),
 });
 

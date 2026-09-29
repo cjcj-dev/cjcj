@@ -19,7 +19,7 @@ const packageJobsOf = release => jobsOf(release)
 const platforms = allTargets();
 
 test('srcbuild exposes reusable inputs, outputs, and the runtime override chain', async () => {
-  const sourceBuild = await workflow('srcbuild.yml');
+  const sourceBuild = await workflow('srcbuild-target.yml');
   for (const contract of [
     'workflow_call:',
     'runtime_ref:',
@@ -166,7 +166,7 @@ test('release package runs the packaged std checker as a bounded fail-closed ste
 
 test('all package cells consume cjpm artifacts with producer sidecars', async () => {
   const [sourceBuild, windowsCjpm, consumer] = await Promise.all([
-    workflow('srcbuild.yml'),
+    workflow('srcbuild-target.yml'),
     workflow('build-cjpm.yml'),
     workflow('build-release-package.yml'),
   ]);
@@ -198,7 +198,7 @@ test('release has one LLVM producer per tuple', async () => {
 
 test('release packages select the named final compiler in each native phase', async () => {
   const release = await releaseWorkflow();
-  const source = await workflow('srcbuild.yml');
+  const source = await workflow('srcbuild-target.yml');
   const consumer = await workflow('build-release-package.yml');
   const jobs = packageJobsOf(release);
   for (const platform of platforms.filter(name => !getTarget(name).spec.crossCompile)) {

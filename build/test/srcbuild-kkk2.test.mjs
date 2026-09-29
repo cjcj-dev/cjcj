@@ -895,7 +895,7 @@ function ghaBootstrapDefects(yml, ghaRun) {
 }
 
 test('GHA srcbuild does not build compiler or stdlib before bootstrap', () => {
-  const yml = fs.readFileSync(path.join(repoRoot, '.github/workflows/srcbuild.yml'), 'utf8');
+  const yml = fs.readFileSync(path.join(repoRoot, '.github/workflows/srcbuild-target.yml'), 'utf8');
   const ghaRun = fs.readFileSync(path.join(repoRoot, 'ci/bootstrap/gha_run.sh'), 'utf8');
   const boot = yml.indexOf('Bootstrap stage0 compiler');
   const compiler = yml.indexOf('build compiler');
@@ -1024,7 +1024,7 @@ for (const kind of ['missing', 'read', 'import-missing', 'import-bad']) test(`ve
 
 
 test('GHA absolute campaign bootstrap path turns only the GHA contract red', () => {
-  const yml = fs.readFileSync(path.join(repoRoot, '.github/workflows/srcbuild.yml'), 'utf8');
+  const yml = fs.readFileSync(path.join(repoRoot, '.github/workflows/srcbuild-target.yml'), 'utf8');
   const ghaRun = fs.readFileSync(path.join(repoRoot, 'ci/bootstrap/gha_run.sh'), 'utf8');
   assert.deepEqual(ghaBootstrapDefects(yml, ghaRun), []);
   const mutated = yml.replace(
@@ -1069,7 +1069,8 @@ test('stage1 compiler consumer sees the completed target std', t => {
   fs.mkdirSync(path.join(root, 'stdlib-stage1'));
   fs.writeFileSync(path.join(root, 'stdlib-stage1', 'std-id'), 'host');
   const bootstrap = fs.readFileSync(path.join(repoRoot, 'ci/bootstrap/bootstrap.sh'), 'utf8');
-  const invoke = ['bootstrap_target_std', 'stage2_forensic', 'stage1']
+  const invoke = ['bootstrap_target_std', 'stage2_forensic', 'stage1_inputs',
+    'stage1_initial_std', 'stage1_std', 'stage1_compiler', 'stage1']
     .map(name => extractFn(bootstrap, name)).join('\n') + `
 set -e
 WORK=$1 DRY=1 COLOUR_TUPLE=tuple CRT=runtime HOST_LLVM_SO=llvm COLOUR_LLVM_SHA=sha STAGE1_HEAP=20GB
