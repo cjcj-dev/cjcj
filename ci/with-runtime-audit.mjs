@@ -35,7 +35,8 @@ fs.writeFileSync(log, '');
 const build = spawnSync('cc', ['-shared', '-fPIC', '-O2', '-Wall', '-Wextra', '-Werror',
   new URL('./official-runtime-audit.c', import.meta.url).pathname, '-o', audit, '-lcrypto'], {stdio: 'inherit'});
 if (build.status !== 0) throw new Error('cannot build runtime loader audit');
-console.log(`RUNTIME_AUDIT sdk=${sdk} colour=${runtime} sha256=${sha} log=${log}`);
+const auditSha = crypto.createHash('sha256').update(fs.readFileSync(audit)).digest('hex');
+console.log(`RUNTIME_AUDIT sdk=${sdk} colour=${runtime} sha256=${sha} audit_sha256=${auditSha} log=${log}`);
 const result = spawnSync(args[0], args.slice(1), {stdio: 'inherit', env: {...process.env,
   LD_AUDIT: [audit, process.env.LD_AUDIT].filter(Boolean).join(':'),
   CJCJ_AUDIT_SDK: sdk, CJCJ_AUDIT_IDENTITIES: identityFile, CJCJ_AUDIT_RUNTIME: runtime, CJCJ_AUDIT_SHA256: sha, CJCJ_AUDIT_LOG: log,
