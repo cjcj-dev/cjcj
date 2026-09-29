@@ -9,7 +9,7 @@ import {resolveRuntimeSource} from './runtime-pin.mjs';
 $.stdio = 'inherit';
 
 const dist = argv._[0];
-if (!dist) throw new Error('usage: install_patched_runtime.mjs <runtime-artifact-dir>');
+if (!dist) throw new Error('usage: install_patched_runtime.mjs <runtime-artifact-dir> [install-root]');
 const cangjieHome = process.env.CANGJIE_HOME;
 if (!cangjieHome) throw new Error('CANGJIE_HOME is required');
 

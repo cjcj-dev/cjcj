@@ -26,7 +26,7 @@ function fixture(t) {
   const source = path.join(root, 'main.c');
   fs.writeFileSync(source, '#include <stdio.h>\nextern int runtime_value(void);\nint main(void) { printf("runtime=%d\\n", runtime_value()); return 0; }\n');
   const exe = path.join(sdk, 'bin/host');
-  ok(run('cc', [source, `-L${host}`, '-lcangjie-runtime', `-Wl,-rpath,${host}`, '-o', exe], {}));
+  ok(run('cc', [source, `-L${host}`, '-lcangjie-runtime', '-Wl,-rpath,$ORIGIN/../runtime/lib/linux_x86_64_cjnative', '-o', exe], {}));
   const pin = fs.readFileSync(path.join(repo, 'ci/runtime_pin.env'), 'utf8').match(/^RUNTIME_REF=(.+)$/m)[1];
   fs.writeFileSync(path.join(dist, 'SOURCE_SHA'), `${pin}\n`);
   fs.writeFileSync(path.join(dist, 'libcangjie-runtime.so.sha256'), `${hash(path.join(dist, 'libcangjie-runtime.so'))}\n`);
