@@ -61,6 +61,7 @@ export const GATING = Object.freeze([
   'ci/full-gate-floor.test.mjs',
   'ci/gc-fix-floor.test.mjs',
   'ci/g2-identity-gate.test.mjs',
+  'ci/g10/run.test.mjs',
   'ci/generate-freeze.test.mjs',
   'ci/gc-release-floor.test.mjs',
   'ci/host-toolchain-pin.test.mjs',
