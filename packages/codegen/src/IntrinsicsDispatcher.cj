@@ -671,13 +671,16 @@ private func CPointerAdd(irBuilder: IRBuilder2, args: ArrayList<Value>,
     let pointerValue = irBuilder.GetCGModule().GetMappedCGValue(args[0]).GetRawValue()
     let offsetValue = irBuilder.GetCGModule().GetMappedCGValue(args[1]).GetRawValue()
     if (let Some(resultTy) <- resultType) {
-        let elemSize = ElementSizeOfPointerLike(irBuilder, resultTy)
         let ptrAsInt = irBuilder.CreatePtrToInt(pointerValue, unsafe { LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw) },
             name: "ptr.int")
+        // IntrinsicsDispatcher.cpp:541-546: generic element sizes come from TypeInfo.
+        let typeArgs = resultTy.GetTypeArgs()
+        CJC_ASSERT(typeArgs.size == 1)
+        let elemSize = irBuilder.GetSize_64(typeArgs[0])
         let int64Ty = unsafe { LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw) }
         let offsetI64 = CastIntegerValueToType(irBuilder, offsetValue, int64Ty)
         let byteOffset = irBuilder.CreateBinary(ExprKind.MUL, offsetI64,
-            unsafe { LLVMConstInt(int64Ty, UInt64(elemSize), 0) }, name: "ptr.byte.offset")
+            elemSize, name: "ptr.byte.offset")
         let newAddress = irBuilder.CreateBinary(ExprKind.ADD, ptrAsInt, byteOffset, name: "ptr.add")
         return irBuilder.CreateIntToPtr(newAddress, CGType.GetOrCreate(irBuilder.GetCGModule(), resultTy).GetLLVMType(),
             name: "ptr.add.cast")
@@ -814,18 +817,6 @@ private func CreateStaticTypeInfo(irBuilder: IRBuilder2, ty: Type): LLVMValueRef
 private func CreateTypeInfoAsI8Ptr(irBuilder: IRBuilder2, ty: Type): LLVMValueRef {
     let i8PtrType = unsafe { LLVMPointerType(LLVMInt8TypeInContext(irBuilder.GetLLVMContext().raw), 0u32) }
     return irBuilder.CreateBitCast(CreateStaticTypeInfo(irBuilder, ty), i8PtrType, name: "ti.i8")
-}
-
-private func ElementSizeOfPointerLike(irBuilder: IRBuilder2, ty: Type): Int64 {
-    let typeArgs = ty.GetTypeArgs()
-    if (!typeArgs.isEmpty()) {
-        if (let Some(size) <- CGType.GetOrCreate(irBuilder.GetCGModule(), typeArgs[0]).GetSize()) {
-            if (size > 0) {
-                return size
-            }
-        }
-    }
-    return 1
 }
 
 private func CastPointerLikeIfNeeded(irBuilder: IRBuilder2, value: LLVMValueRef, destType: LLVMTypeRef): LLVMValueRef {
