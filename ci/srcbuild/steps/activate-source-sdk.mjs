@@ -74,16 +74,22 @@ for (const [tool, hashKey] of [['llc', 'LLC_SHA256'], ['opt', 'OPT_SHA256'], [ll
   if (digest !== manifest[hashKey]) {
     throw new Error(`${tool} sha256 mismatch: expected ${manifest[hashKey]}, got ${digest}`);
   }
-  const temporary = path.join(llvmBin, `${tool}.fixed`);
-  await fs.writeFile(temporary, binary, {mode: 0o755});
-  const kind = (await $({stdio: 'pipe'})`file -b ${temporary}`).stdout.trim();
-  if (!kind.includes(spec.fileFormat) || !kind.includes(spec.fileArch)) {
-    throw new Error(`${tool} has wrong native format for ${targetKey}: ${kind}`);
+  // LLD selects its driver from argv[0]; retain ld.lld/ld64.lld while staging.
+  const staging = await fs.mkdtemp(path.join(llvmBin, '.fixed-'));
+  const temporary = path.join(staging, tool);
+  try {
+    await fs.writeFile(temporary, binary, {mode: 0o755});
+    const kind = (await $({stdio: 'pipe'})`file -b ${temporary}`).stdout.trim();
+    if (!kind.includes(spec.fileFormat) || !kind.includes(spec.fileArch)) {
+      throw new Error(`${tool} has wrong native format for ${targetKey}: ${kind}`);
+    }
+    await $({stdio: 'pipe'})`${temporary} --version`;
+    const executable = path.join(llvmBin, tool);
+    await fs.rename(temporary, executable);
+    selectedTools.push({tool, executable, digest});
+  } finally {
+    await fs.rm(staging, {recursive: true, force: true});
   }
-  await $({stdio: 'pipe'})`${temporary} --version`;
-  const executable = path.join(llvmBin, tool);
-  await fs.rename(temporary, executable);
-  selectedTools.push({tool, executable, digest});
 }
 
 // A successful --version is necessary but not sufficient: validate every LLVM
