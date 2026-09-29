@@ -1220,7 +1220,7 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
     },
     run(step, childRc = 0) {
       const result = spawnSync('bash', [...(coreObserve ? ['-x'] : []), driver, '--from-step', String(step), '--through-step', String(step)],
-        {encoding: 'utf8', env: {...env, CHILD_RC: String(childRc)}});
+        {encoding: 'utf8', env: {...env, ...(coreObserve ? {SHELLOPTS: 'xtrace'} : {}), CHILD_RC: String(childRc)}});
       const logs = path.join(state, 'logs');
       const logFile = fs.readdirSync(logs).find(name => name.endsWith(`-step${step}.log`));
       assert.ok(logFile, result.stdout + result.stderr);
