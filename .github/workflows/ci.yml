@@ -225,6 +225,8 @@ jobs:
           key: rt-${{ runner.os }}-${{ runner.arch }}-${{ matrix.runner }}-${{ env.RUNTIME_REF }}-${{ env.RUNTIME_VERSION }}-${{ hashFiles('ci/build_patched_runtime.mjs', 'ci/runtime-diagnostics.mjs') }}
       - name: Install patched runtime
         run: npx --yes zx@8 ci/install_patched_runtime.mjs "$PWD/dist-runtime"
+      - name: Prepare paired coloured target SDK
+        run: node ci/prepare-colour-sdk.mjs "$PWD/dist-runtime"
       - name: Build runtime shim
         env:
           CJCJ_LLVM_SHIM_O: ${{ github.workspace }}/fixed-toolchain/${{ matrix.llvm_platform }}/cjselfhost_llvmshim.o
@@ -240,14 +242,15 @@ jobs:
         run: |
           node ci/check-codegen-runtime-layout.mjs
           node ci/release/trimpath.mjs .
-          cjpm build
+          node ci/with-colour-sdk.mjs build -- cjpm build
       # Deploy name must be cjcj, not cjc (process-name GC stack-root exclusion -> SEGV).
       - name: Compose compiler
         run: |
           test -f "target/release/bin/cjcj::cjc"
+          python3 ci/check-colour-tlab.py "target/release/bin/cjcj::cjc"
           cp "target/release/bin/cjcj::cjc" "target/release/bin/cjcj"
       - name: Run smoke tests
-        run: npx --yes zx@8 ci/smoke/run_smoke.mjs "$PWD/target/release/bin/cjcj"
+        run: node ci/with-colour-sdk.mjs run -- npx --yes zx@8 ci/smoke/run_smoke.mjs "$PWD/target/release/bin/cjcj"
 
   # Non-gating: verifies SDK provisioning on macOS; does not build cjcj.
   provision:
