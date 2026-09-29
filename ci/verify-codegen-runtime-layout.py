@@ -88,6 +88,14 @@ def main():
                   {'type': describe(t), 'kind': kind(t), 'width': api('LLVMGetIntTypeWidth', uint, ptr)(t) if kind(t) == 8 else None, 'offset': offset(td, ti, i)})
     surfaces = ('size', 'payload', 'boxed') if a.surface == 'objects' else ('array_static', 'array_dynamic_get', 'array_dynamic_set', 'array_dynamic_ref')
     witnesses = {k: [] for k in ('size', 'payload', 'array_static', 'array_dynamic_get', 'array_dynamic_set', 'array_dynamic_ref', 'boxed')}
+    def base_offset(value):
+        # Follow the product's cast/GEP result back to the actual array argument.
+        if is_cast(value):
+            return base_offset(operand(value, 0))
+        if is_gep(value) and operands(value) == 2 and is_int(operand(value, 1)):
+            before = base_offset(operand(value, 0))
+            return None if before is None else before + integer(operand(value, 1)) * size(td, gep_type(value))
+        return 0 if api('LLVMIsAArgument', ptr, ptr)(value) and name(value) == b'array' else None
     get_first = api('LLVMGetFirstFunction', ptr, ptr); get_next = api('LLVMGetNextFunction', ptr, ptr)
     first_block = api('LLVMGetFirstBasicBlock', ptr, ptr); next_block = api('LLVMGetNextBasicBlock', ptr, ptr)
     first_inst = api('LLVMGetFirstInstruction', ptr, ptr); next_inst = api('LLVMGetNextInstruction', ptr, ptr)
@@ -116,8 +124,11 @@ def main():
                     if label.startswith('arr.idx.get.gep') and 'layoutRawStatic' in fn:
                         src = gep_type(inst)
                         observed = offset(td, src, 1) if kind(src) == 10 and count(src) == 2 else None
+                        payload = base_offset(operand(inst, 0))
+                        absolute = payload + observed if payload is not None and observed is not None else None
                         witnesses['array_static'].append({'function': fn, 'ir': text, 'offset': observed,
-                            'pass': observed == values['ArrayHeaderSize'] - values['ArrayLengthOffset'] and address_space(type_of(inst)) == 1})
+                            'payload_offset': payload, 'elements_offset': absolute,
+                            'pass': observed == values['ArrayHeaderSize'] - values['ArrayLengthOffset'] and absolute == values['ArrayHeaderSize'] and address_space(type_of(inst)) == 1})
                     # Dynamic raw-array addressing is i8 GEP(array, mul(size,index)+header).
                     if any(n in fn for n in ('layoutRawGet', 'layoutRawSet', 'layoutRawRef')) and name(operand(inst, 0)) == b'array' and kind(gep_type(inst)) == 8 and api('LLVMGetIntTypeWidth', uint, ptr)(gep_type(inst)) == 8 and operands(inst) == 2:
                         idx = operand(inst, 1)
