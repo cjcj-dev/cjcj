@@ -19,3 +19,20 @@ not establish the task-ownership invariant or acceptance of a product fix.
 Specification: upstream `src/Frontend/CompilerInstance.cpp:794-805,845-869`;
 #692 Synthesize report P0-P5. The full intermediate-model migration belongs to
 #693 and is outside this test package.
+
+`qualify.py --race` additionally installs `Race.cj` and synchronization calls in
+real StoreTy and parameter-consumption paths. Use it only after the observation
+qualification succeeds. The fixture pauses the first source-type publication,
+allows RaceB to consume, and releases RaceA in RaceB's finally block. A timeout
+or missing qualification/result event is a fixture failure, not a red arm.
+
+`run.py` records compiler/runtime/source hashes, affinity, uptime, compiler rc,
+bitcode hash and defined symbol set. `--race --expect-red` accepts only the
+missing-Class-declaration result observed at the real parameter consumer;
+ordinary compiler errors do not satisfy that condition. Single-worker and
+remainder/control cases must still succeed. Successful intermediate outputs are
+removed after recording identities; failure artifacts are retained.
+
+The synchronization fixture and runner are draft code until a stage1 build and
+all acceptance arms have run. Do not treat Python/source inspection as product
+validation.

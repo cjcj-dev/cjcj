@@ -11,7 +11,7 @@ def main():
     args.output.mkdir(parents=True, exist_ok=True)
     macro = lambda name: f'public macro {name}(input: Tokens): Tokens {{ return input }}\n'
     lines = ['macro package ownership\n', 'import std.ast.*\n', macro('RaceA')]
-    lines += [f'func before{i}(x: Int64): Int64 {{ x + {i} }}\n' for i in range(30)]
+    lines += [f'func before{i}(x: Int64): Int64 {{ x + {i} }}\n' for i in range(29)]
     lines += [macro('RaceB')]
     lines += [f'func after{i}(x: Int64): Int64 {{ x - {i} }}\n' for i in range(31)]
     lines += [macro('Remainder')]
