@@ -29,7 +29,7 @@ internal func ReallocateDownward(old: CPointer<UInt8>, oldSize: Int64,
     return result
 }
 
-// detached_buffer.h:29-49,80-87,111-120. Ownership is transferred, not copied.
+// detached_buffer.h:29-49,75,101-114. Ownership is transferred, not copied.
 public class DetachedBuffer <: Resource {
     private var allocation: CPointer<UInt8>
     private var data: CPointer<UInt8>

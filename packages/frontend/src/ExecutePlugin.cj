@@ -23,7 +23,7 @@ struct PluginResult {
     }
 }
 
-class ExecutePlugin {
+class ExecutePlugin <: Resource {
     private let builder: CHIRBuilder
     private var handle: RuntimeHandle = RuntimeHandle()
     private var serializedData: DetachedBuffer = DetachedBuffer()
@@ -44,6 +44,20 @@ class ExecutePlugin {
         }
     }
 
+    public func isClosed(): Bool { return !handle.opened && serializedData.isClosed() }
+
+    public func close(): Unit {
+        // ExecutePlugin.cpp:18-23: close the library before destroying its input owner.
+        try {
+            if (handle.opened) {
+                let _ = CloseSymbolTable(handle)
+                handle = RuntimeHandle()
+            }
+        } finally {
+            serializedData.close()
+        }
+    }
+
     func SerializePackage(pkg: PluginCHIRPackage): Bool {
         serializedData.close()
         serializedData = CHIRSerializer.Serialize(pkg)
@@ -54,21 +68,17 @@ class ExecutePlugin {
     }
 
     func Execute(pluginPath: String): Bool {
-        try {
-            handle = OpenSymbolTableSafely(pluginPath)
-            if (!handle.opened) {
-                return false
-            }
-            let functionPointer = GetMethodPointer(handle, "executeCHIRPlugins")
-            if (functionPointer.isNull()) {
-                return false
-            }
-            let execute = CFunc<(CPointer<UInt8>, Int64) -> PluginResult>(functionPointer)
-            pluginResult = unsafe { execute(serializedData.GetBufferPointer(), serializedData.size) }
-            return pluginResult.success
-        } finally {
-            serializedData.close()
+        handle = OpenSymbolTableSafely(pluginPath)
+        if (!handle.opened) {
+            return false
         }
+        let functionPointer = GetMethodPointer(handle, "executeCHIRPlugins")
+        if (functionPointer.isNull()) {
+            return false
+        }
+        let execute = CFunc<(CPointer<UInt8>, Int64) -> PluginResult>(functionPointer)
+        pluginResult = unsafe { execute(serializedData.GetBufferPointer(), serializedData.size) }
+        return pluginResult.success
     }
 
     func DeserializePluginResult(
