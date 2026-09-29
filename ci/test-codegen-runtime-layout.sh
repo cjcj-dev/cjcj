@@ -31,7 +31,8 @@ cp "$repo/tests/runtime_layout/raw.cj" "$core/layout_contract.cj"
 # The compiler uses the same paired LLVM dylib as the independent reader. Host
 # runtime and std stay together; the generated target code is not executed here.
 export CANGJIE_HOME="$sdk"
-export LD_LIBRARY_PATH="$(dirname "$llvm_library"):$sdk/runtime/lib/linux_x86_64_cjnative:$sdk/lib/linux_x86_64_cjnative:$sdk/third_party/llvm/lib:$sdk/tools/lib"
+LD_LIBRARY_PATH="$(dirname "$llvm_library"):$sdk/runtime/lib/linux_x86_64_cjnative:$sdk/lib/linux_x86_64_cjnative:$sdk/third_party/llvm/lib:$sdk/tools/lib"
+export LD_LIBRARY_PATH
 export cjHeapSize=32GB
 jobs=$(nproc)
 uptime > "$work/uptime-before.txt"
