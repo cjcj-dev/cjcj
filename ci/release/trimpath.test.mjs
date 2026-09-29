@@ -49,7 +49,8 @@ for (const [name, input, debug] of [
         await fs.writeFile(file, `compile-option = ${JSON.stringify(input)}\noverride-compile-option = "-O2"\n`);
         if (name !== 'clean O2') await prepareTrimpath(root, {debug});
         const before = await fs.readFile(file, 'utf8');
-        const expected = before.replace('= "-O2', '= "-O1');
+        const expected = before.startsWith('compile-option = "-O2')
+          ? 'compile-option = "-O1' + before.slice('compile-option = "-O2'.length) : before;
         let result;
         if (consumer === 'bootstrap') {
           result = spawnSync('bash', ['-c',
