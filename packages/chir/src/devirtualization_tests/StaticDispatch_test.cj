@@ -18,7 +18,7 @@ public class StaticDispatchTest {
         let signature = context.GetFuncTy(ArrayList<Type>(), context.GetUnitTy())
         let generics = ArrayList<GenericType>()
         if (instantiate) { generics.add(context.GetGenericTy("T")) }
-        let method = builder.CreateFunction(signature, "method", srcCodeIdentifier: "method",
+        let method = builder.CreateFunction(signature, "_CN15static_dispatch8Receiver6methodHv", srcCodeIdentifier: "method",
             packageName: "static_dispatch", genericTypeParams: generics)
         method.EnableAttr(Attribute.STATIC)
         method.SetOuterDeclaredOrExtendedDef(def)
