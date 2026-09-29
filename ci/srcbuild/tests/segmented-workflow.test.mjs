@@ -64,3 +64,16 @@ test('split CLI routes each expensive build to exactly one phase and preserves c
     console.log(`PHASE_ASSERT phase=${phase} expensive-builds=${builds.length} cache=inherited`);
   }));
 });
+
+test('G2 freezes before portable SDK files dirty the checkout, then retains identical identity bytes', () => {
+  const body = jobs.get('source-stage0');
+  const freeze = body.indexOf('- name: Freeze G2 identity inputs');
+  const copy = body.indexOf('- name: Copy host inputs for source handoffs');
+  const retain = body.indexOf('- name: Copy frozen G2 identity for source handoffs');
+  assert.ok(freeze >= 0 && copy > freeze && retain > copy);
+  assert.doesNotMatch(body.slice(0, freeze), /(?:mkdir|cp|tee|base_archive=).*\.srcbuild/);
+  assert.match(body.slice(freeze, copy), /base_archive="\$RUNNER_TEMP\/g2-base-sdk\/host-sdk.tar"/);
+  assert.match(body.slice(freeze, copy), /--evidence-root "\$RUNNER_TEMP\/g2-campaigns"/);
+  assert.match(body.slice(retain), /cmp "\$G2_CAMPAIGN_DIR\/FREEZE.json" "\$destination\/FREEZE.json"/);
+  assert.match(body.slice(retain), /cmp "\$G2_IDENTITY" "\$destination\/G2_IDENTITY.json"/);
+});

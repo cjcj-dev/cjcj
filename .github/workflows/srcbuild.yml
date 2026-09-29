@@ -217,16 +217,8 @@ jobs:
           set -euo pipefail
           export CJCJ_SDK_STOCK_LLC=1
           npx --yes zx@8 ci/setup_sdk.mjs
-          host_sdk="$GITHUB_WORKSPACE/.srcbuild/host-sdk"
-          mkdir -p "$(dirname "$host_sdk")"
-          cp -a "$HOME/.cjv/toolchains/$CJCJ_TOOLCHAIN" "$host_sdk"
-          cp -a "$HOME/.cjv/stdx/$CJCJ_TOOLCHAIN" "$GITHUB_WORKSPACE/.srcbuild/host-stdx"
-          echo "CANGJIE_STDX_PATH=$GITHUB_WORKSPACE/.srcbuild/host-stdx/static/stdx" >> "$GITHUB_ENV"
-          echo "CANGJIE_HOME=$host_sdk" >> "$GITHUB_ENV"
-          echo "$host_sdk/bin" >> "$GITHUB_PATH"
-          echo "$host_sdk/tools/bin" >> "$GITHUB_PATH"
+          host_sdk="$HOME/.cjv/toolchains/$CJCJ_TOOLCHAIN"
           test -d "$host_sdk"
-          node ci/srcbuild/host-env.mjs "$host_sdk"
           echo "CJCJ_SRCBUILD_BOOTSTRAP_SDK=$host_sdk" >> "$GITHUB_ENV"
           echo "CJCJ_SRCBUILD_HOST_SDK=$host_sdk" >> "$GITHUB_ENV"
 
@@ -241,18 +233,48 @@ jobs:
         run: |
           set -euo pipefail
           test -d "$CJCJ_SRCBUILD_HOST_SDK"
-          base_archive="$GITHUB_WORKSPACE/.srcbuild/g2-base-sdk/host-sdk.tar"
+          base_archive="$RUNNER_TEMP/g2-base-sdk/host-sdk.tar"
           mkdir -p "$(dirname "$base_archive")"
           tar -cf "$base_archive" -C "$CJCJ_SRCBUILD_HOST_SDK" .
           node ci/generate-freeze.mjs \
             --base-sdk "$base_archive" \
             --workflow-ref "${GITHUB_SHA:-$(git rev-parse HEAD)}" \
-            --evidence-root "$GITHUB_WORKSPACE/.srcbuild/g2-campaigns" \
-            | tee "$GITHUB_WORKSPACE/.srcbuild/g2-freeze.log"
-          identity=$(sed -n 's/^G2_IDENTITY=//p' "$GITHUB_WORKSPACE/.srcbuild/g2-freeze.log")
+            --evidence-root "$RUNNER_TEMP/g2-campaigns" \
+            | tee "$RUNNER_TEMP/g2-freeze.log"
+          identity=$(sed -n 's/^G2_IDENTITY=//p' "$RUNNER_TEMP/g2-freeze.log")
           test -f "$identity"
           echo "G2_IDENTITY=$identity" >> "$GITHUB_ENV"
           echo "G2_CAMPAIGN_DIR=$(dirname "$identity")" >> "$GITHUB_ENV"
+
+      - name: Copy host inputs for source handoffs
+        shell: bash
+        run: |
+          set -euo pipefail
+          host_sdk="$GITHUB_WORKSPACE/.srcbuild/host-sdk"
+          mkdir -p "$(dirname "$host_sdk")"
+          cp -a "$HOME/.cjv/toolchains/$CJCJ_TOOLCHAIN" "$host_sdk"
+          cp -a "$HOME/.cjv/stdx/$CJCJ_TOOLCHAIN" "$GITHUB_WORKSPACE/.srcbuild/host-stdx"
+          echo "CANGJIE_STDX_PATH=$GITHUB_WORKSPACE/.srcbuild/host-stdx/static/stdx" >> "$GITHUB_ENV"
+          echo "CANGJIE_HOME=$host_sdk" >> "$GITHUB_ENV"
+          echo "$host_sdk/bin" >> "$GITHUB_PATH"
+          echo "$host_sdk/tools/bin" >> "$GITHUB_PATH"
+          test -d "$host_sdk"
+          node ci/srcbuild/host-env.mjs "$host_sdk"
+          echo "CJCJ_SRCBUILD_BOOTSTRAP_SDK=$host_sdk" >> "$GITHUB_ENV"
+          echo "CJCJ_SRCBUILD_HOST_SDK=$host_sdk" >> "$GITHUB_ENV"
+
+      - name: Copy frozen G2 identity for source handoffs
+        if: matrix.target == 'linux-x64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          destination="$GITHUB_WORKSPACE/.srcbuild/g2-campaigns/$(basename "$G2_CAMPAIGN_DIR")"
+          mkdir -p "$(dirname "$destination")"
+          cp -a "$G2_CAMPAIGN_DIR" "$destination"
+          cmp "$G2_CAMPAIGN_DIR/FREEZE.json" "$destination/FREEZE.json"
+          cmp "$G2_IDENTITY" "$destination/G2_IDENTITY.json"
+          echo "G2_CAMPAIGN_DIR=$destination" >> "$GITHUB_ENV"
+          echo "G2_IDENTITY=$destination/G2_IDENTITY.json" >> "$GITHUB_ENV"
 
       - name: Install build dependencies
         run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" install-system-deps
