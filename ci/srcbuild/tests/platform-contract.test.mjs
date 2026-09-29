@@ -38,23 +38,29 @@ const matrixValues = (text, key) => [
   ...planTable(text).map(entry => entry[key]).filter(value => value !== undefined).map(String),
 ];
 
-function expandMatrix(name, text) {
+function expandMatrix(name, text, workflow = text) {
   const placeholder = name.match(/\$\{\{\s*matrix\.(\w+)\s*\}\}/);
   if (!placeholder) return [name];
-  const values = matrixValues(text, placeholder[1]);
+  const local = matrixValues(text, placeholder[1]);
+  const values = local.length ? local : planTable(workflow)
+    .map(entry => entry[placeholder[1]]).filter(value => value !== undefined).map(String);
   assert.ok(values.length > 0, `no matrix values for ${placeholder[1]} in ${name}`);
-  return values.flatMap(value => expandMatrix(name.replace(placeholder[0], value), text));
+  return values.flatMap(value => expandMatrix(name.replace(placeholder[0], value), text, workflow));
 }
 
 // Artifact names one workflow file uploads, with its own matrix fanout expanded.
 function uploadedArtifacts(text) {
-  const lines = text.split('\n');
   const names = [];
-  for (const [index, line] of lines.entries()) {
-    if (!line.includes('uses: actions/upload-artifact@')) continue;
-    const nameLine = lines.slice(index + 1, index + 10).find(entry => /^\s+name: /.test(entry));
-    assert.ok(nameLine, `upload step at line ${index + 1} declares no artifact name`);
-    names.push(...expandMatrix(nameLine.replace(/^\s+name: /, '').trim(), text));
+  // Matrix values belong to the producing job. A Linux-only cross job must
+  // not multiply every native artifact by its own target declaration.
+  for (const job of jobs(text).values()) {
+    const lines = job.split('\n');
+    for (const [index, line] of lines.entries()) {
+      if (!line.includes('uses: actions/upload-artifact@')) continue;
+      const nameLine = lines.slice(index + 1, index + 10).find(entry => /^\s+name: /.test(entry));
+      assert.ok(nameLine, `upload step at line ${index + 1} declares no artifact name`);
+      names.push(...expandMatrix(nameLine.replace(/^\s+name: /, '').trim(), job, text));
+    }
   }
   return names;
 }
@@ -231,7 +237,7 @@ function substitute(value, inputs) {
 }
 
 test('source-build workflow connects every native runner to its LLVM and std artifact', async () => {
-  const workflow = await fs.readFile(path.join(root, '.github/workflows/srcbuild.yml'), 'utf8');
+  const workflow = await fs.readFile(path.join(root, '.github/workflows/srcbuild-target.yml'), 'utf8');
   const fixed = await fs.readFile(path.join(root, '.github/workflows/build-llvm-tools.yml'), 'utf8');
   assert.ok(workflow.includes('uses: ./.github/workflows/build-llvm-tools.yml'), 'source build must call the reusable tuple producer');
   const cells = [
@@ -318,7 +324,7 @@ test('arm soak produces every artifact its package job downloads, each exactly o
 
   // The point of the whole test: demanded and produced have to be the same set.
   for (const artifact of required) assert.equal(producersOf(artifact).length, 1, `producers of ${artifact}`);
-  assert.deepEqual(producersOf(demanded), ['srcbuild.yml']);
+  assert.deepEqual(producersOf(demanded), ['srcbuild-target.yml']);
 
   // upload-artifact rejects a name already uploaded in the same run, so two callers
   // of one producer workflow break the run rather than merging.
@@ -339,7 +345,7 @@ test('arm soak produces every artifact its package job downloads, each exactly o
 });
 
 test('source-build leaves the sccache GHA backend off and persists the disk cache as one entry per target', async () => {
-  const workflow = await fs.readFile(path.join(root, '.github/workflows/srcbuild.yml'), 'utf8');
+  const workflow = await fs.readFile(path.join(root, '.github/workflows/srcbuild-target.yml'), 'utf8');
   const action = await fs.readFile(path.join(root, '.github/actions/sccache/action.yml'), 'utf8');
   // The per-object backend was measured, not assumed: run 31551077927 got 230 hits
   // against 6585 misses while spending 4162 s on writes, and the repository cache
@@ -394,7 +400,7 @@ test('native build environments use configured architecture, OpenSSL, and loader
 });
 
 test('source build keeps the pinned plain host runtime across both bootstrap halves', async () => {
-  const workflow = await fs.readFile(path.join(root, '.github/workflows/srcbuild.yml'), 'utf8');
+  const workflow = await fs.readFile(path.join(root, '.github/workflows/srcbuild-target.yml'), 'utf8');
   const provision = workflow.indexOf('- name: Provision uncoloured host SDK');
   const bootstrap0 = workflow.indexOf('- name: Bootstrap stage0 compiler');
   const bootstrap1 = workflow.indexOf('- name: Bootstrap stage1 compiler');
@@ -457,8 +463,11 @@ test('Darwin selfhost link uses the source SDK dylib and libc++', () => {
   assert.doesNotMatch(link, /libLLVM-15\.so|-lstdc\+\+/);
 });
 
+// #736 moved these jobs into srcbuild-target.yml and reordered them: the
+// source-mingw job now restores the stage3 handoff before cross-building, so
+// the stage2 step name it shipped with is stale and the stage3 one is truthful.
 test('Windows final std is cross-built by the shipped stage3 Linux host compiler', async () => {
-  const workflow = await fs.readFile(path.join(root, '.github/workflows/srcbuild.yml'), 'utf8');
+  const workflow = await fs.readFile(path.join(root, '.github/workflows/srcbuild-target.yml'), 'utf8');
   const producer = await fs.readFile(path.join(root, 'ci/srcbuild/steps/build-windows-final-std.mjs'), 'utf8');
   for (const edge of [
     "if: matrix.target == 'linux-x64'",

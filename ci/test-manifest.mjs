@@ -96,12 +96,14 @@ export const GATING = Object.freeze([
   // Native inputs are supplied by srcbuild's host-identity step.
   'ci/srcbuild/tests/host-pins-entry.test.mjs',
   'ci/srcbuild/tests/inject-version.test.mjs',
+  'ci/srcbuild/tests/job-handoff.test.mjs',
   'ci/srcbuild/tests/phase-control.test.mjs',
   'ci/srcbuild/tests/pin-compiler-llvm.test.mjs',
   'ci/srcbuild/tests/platform-contract.test.mjs',
   'ci/srcbuild/tests/product-binary.test.mjs',
   'ci/srcbuild/tests/release-wire.test.mjs',
   'ci/srcbuild/tests/sccache-contract.test.mjs',
+  'ci/srcbuild/tests/segmented-workflow.test.mjs',
   'ci/srcbuild/tests/source-build-receipt.test.mjs',
   'ci/srcbuild/tests/tuple-oracle-entry.test.mjs',
   // Invokes npx --yes zx@8 on a rejected fixture SDK; CI primes zx below.

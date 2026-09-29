@@ -141,7 +141,7 @@ test('policy contract 4: a STOP leaves later phases skipped, with no condition t
 
 test('policy contract 5: each artifact name has exactly one producer in the run', async () => {
   const produced = [];
-  for (const workflow of ['release.yml', 'srcbuild.yml', 'build-release-package.yml',
+  for (const workflow of ['release.yml', 'srcbuild.yml', 'srcbuild-target.yml', 'build-release-package.yml',
     'platform-tuples.yml', 'build-cjpm.yml', 'build-windows-runtime.yml']) {
     produced.push(...await artifactUploads(workflow));
   }

@@ -103,7 +103,7 @@ dry_run() {
     --ast-support "$TMP/ast.a" --ast-support-sha256 "$ast_sha" \
     --colour-tuple "$TMP/colour-tuple" --colour-llvm-sha "$COLOUR_SHA" \
     --colour-rt "$TMP/colour-rt" --host-rt "$TMP/host-rt" \
-    --stage all --dry-run
+    --stage "${3:-all}" --dry-run
 }
 
 check_count() {
@@ -862,7 +862,7 @@ case "${1:-test}" in
     ;;
   dry-run)
     make_dry_fixture
-    dry_run
+    dry_run "$HOST_SHA" "$AST_SHA" "${2:-all}"
     ;;
   positive-a1)
     new_tmp

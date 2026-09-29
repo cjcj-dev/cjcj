@@ -306,3 +306,42 @@ for (const [host, phase] of [['linux-x64', 1], ['linux-aarch64', 2], ['darwin-ar
     });
   }
 }
+
+for (const [host, phase] of [['linux-x64', 1], ['linux-aarch64', 2], ['darwin-arm64', 4], ['darwin-x64', 5]]) {
+  test(`segmented ${host} permits only its conditional jobs to skip`, async () => {
+    const {source, archive, jobs} = await fixture();
+    const suffix = host === 'linux-x64' ? ' (also cross-builds the Windows std)' : '';
+    const parent = `phase ${phase} · ${host} / source SDK and final std${suffix} / ${host} / source SDK`;
+    const optional = ['Build native LLVM tools / in-process-dylib',
+      'Build native LLVM tools / Publish static colour LLVM tuple'];
+    if (host !== 'linux-x64') optional.push(...['android', 'mingw', 'windows'].map(p => `linux-x64 / source-${p}`));
+    let id = 99000;
+    const append = (name, conclusion) => {
+      id++;
+      const job = {id, name: `${parent} / ${name}`, conclusion,
+        html_url: `https://github.com/cjcj-dev/cjcj/actions/runs/${RUN_ID}/job/${id}`};
+      jobs.push(job);
+      return job;
+    };
+    const conditional = optional.map(name => append(name, 'skipped'));
+    await writeJobs(source, jobs);
+    assert.equal(collect(source, archive).status, 0);
+    for (const job of conditional) {
+      job.conclusion = 'failure';
+      await writeJobs(source, jobs);
+      rejected(collect(source, `${archive}-failure-${job.id}`), `job has the wrong dry-run conclusion: ${job.name}`);
+      job.conclusion = 'skipped';
+    }
+    const required = ['stage0', 'stage1-initial-std', 'stage1-std', 'stage1-compiler', 'stage3'];
+    if (host === 'linux-x64') required.push('android', 'mingw', 'windows');
+    for (const phaseName of required) {
+      const job = append(`${host} / source-${phaseName}`, 'skipped');
+      await writeJobs(source, jobs);
+      rejected(collect(source, `${archive}-required-${job.id}`), `job has the wrong dry-run conclusion: ${job.name}`);
+      jobs.pop();
+    }
+    const alien = append('alien / source-mingw', 'skipped');
+    await writeJobs(source, jobs);
+    rejected(collect(source, `${archive}-alien`), `job has the wrong dry-run conclusion: ${alien.name}`);
+  });
+}

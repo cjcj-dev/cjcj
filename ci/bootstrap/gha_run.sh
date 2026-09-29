@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-stage=${1:?stage0|stage1}
+stage=${1:?stage0|stage1-initial-std|stage1-std|stage1-compiler}
 root=${GITHUB_WORKSPACE:?}
 : "${CJCJ_BOOTSTRAP_BASE:?}"
 : "${CJCJ_BOOTSTRAP_HOST_LLVM_SO:?}"
