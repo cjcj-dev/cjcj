@@ -67,6 +67,7 @@ export const GATING = Object.freeze([
   'ci/idle-writer-policy.test.mjs',
   'ci/llvm-tools-manifest.test.mjs',
   'ci/objc_darwin/run_e2e.test.mjs',
+  'ci/patched-runtime-diagnostics.test.mjs',
   'ci/patched-runtime-language-defer.test.mjs',
   'ci/official-runtime-isolation.test.mjs',
   'ci/bootstrap/prepare_cpp_headers.test.mjs',
