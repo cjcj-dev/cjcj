@@ -8,6 +8,7 @@ import cjcj::chir.Expression as CHIRExpression
 import cjcj::macro_pkg.{CloseSymbolTable, GetMethodPointer, OpenSymbolTableSafely, RuntimeHandle}
 import cjcj::utils.CJC_ASSERT
 import std.collection.*
+import cjcj::flatbuffers.DetachedBuffer
 
 @C
 struct PluginResult {
@@ -22,10 +23,10 @@ struct PluginResult {
     }
 }
 
-class ExecutePlugin {
+class ExecutePlugin <: Resource {
     private let builder: CHIRBuilder
     private var handle: RuntimeHandle = RuntimeHandle()
-    private var serializedData: Array<UInt8> = Array<UInt8>()
+    private var serializedData: DetachedBuffer = DetachedBuffer()
     private var pluginResult: PluginResult = PluginResult()
 
     private let srcCodeImportedFuncNames: HashSet<String> = HashSet<String>()
@@ -43,7 +44,22 @@ class ExecutePlugin {
         }
     }
 
+    public func isClosed(): Bool { return !handle.opened && serializedData.isClosed() }
+
+    public func close(): Unit {
+        // ExecutePlugin.cpp:18-23: close the library before destroying its input owner.
+        try {
+            if (handle.opened) {
+                let _ = CloseSymbolTable(handle)
+                handle = RuntimeHandle()
+            }
+        } finally {
+            serializedData.close()
+        }
+    }
+
     func SerializePackage(pkg: PluginCHIRPackage): Bool {
+        serializedData.close()
         serializedData = CHIRSerializer.Serialize(pkg)
         if (serializedData.isEmpty()) {
             return false
@@ -61,12 +77,7 @@ class ExecutePlugin {
             return false
         }
         let execute = CFunc<(CPointer<UInt8>, Int64) -> PluginResult>(functionPointer)
-        let dataHandle = unsafe { acquireArrayRawData(serializedData) }
-        try {
-            pluginResult = unsafe { execute(dataHandle.pointer, serializedData.size) }
-        } finally {
-            unsafe { releaseArrayRawData<UInt8>(dataHandle) }
-        }
+        pluginResult = unsafe { execute(serializedData.GetBufferPointer(), serializedData.size) }
         return pluginResult.success
     }
 

@@ -1,5 +1,6 @@
 #!/usr/bin/env zx
 
+import {checkCodegenRuntimeLayout} from '../../check-codegen-runtime-layout.mjs';
 import {prepareTrimpath} from '../../release/trimpath.mjs';
 
 import crypto from 'node:crypto';
@@ -221,6 +222,7 @@ if (dryRun) {
   console.log('[stage3][dry-run] cjpm clean; cjpm build -j 1');
   console.log('STAGE3_DRY_RUN_REACHED_BUILD=1');
 } else {
+  await checkCodegenRuntimeLayout();
   await $({cwd: githubWorkspace, env: stageEnv})`cjpm clean`;
   await prepareTrimpath(githubWorkspace);
   await $({cwd: githubWorkspace, env: stageEnv})`cjpm build -j 1`;

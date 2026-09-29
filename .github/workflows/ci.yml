@@ -169,10 +169,17 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: dist-runtime
-          key: rt-${{ runner.os }}-${{ runner.arch }}-${{ matrix.runner }}-${{ env.RUNTIME_REF }}-${{ env.RUNTIME_VERSION }}-${{ hashFiles('ci/build_patched_runtime.mjs') }}
+          key: rt-${{ runner.os }}-${{ runner.arch }}-${{ matrix.runner }}-${{ env.RUNTIME_REF }}-${{ env.RUNTIME_VERSION }}-${{ hashFiles('ci/build_patched_runtime.mjs', 'ci/runtime-diagnostics.mjs') }}
+      - name: Initialize runtime diagnostics
+        run: |
+          dir="$GITHUB_WORKSPACE/runtime-diagnostics/${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.runner }}"
+          mkdir -p "$dir"
+          echo "RUNTIME_DIAGNOSTICS_DIR=$dir" >> "$GITHUB_ENV"
+          RUNTIME_DIAGNOSTICS_DIR="$dir" node ci/runtime-diagnostics.mjs
       - name: Install runtime dependencies
+        id: rtdeps
         if: steps.rtcache.outputs.cache-hit != 'true'
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq clang cmake make
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq clang cmake make gdb
       # The patched runtime (on a runtime cache miss) and the two shim objects
       # compile through sccache; keyed per runner because the runtime links the
       # builder's glibc, as the runtime cache key above already records.
@@ -184,16 +191,38 @@ jobs:
           pin: ${{ env.RUNTIME_REF }}
           cache-size: 1G
       - name: Build patched runtime
+        id: rtbuild
         if: steps.rtcache.outputs.cache-hit != 'true'
         env:
           RUNTIME_VERSION: ${{ env.RUNTIME_VERSION }}
         run: npx --yes zx@8 ci/build_patched_runtime.mjs "$PWD/dist-runtime"
+      - name: Record runtime workflow outcome
+        if: always() && env.RUNTIME_DIAGNOSTICS_DIR != ''
+        env:
+          RUNTIME_CACHE_HIT: ${{ steps.rtcache.outputs.cache-hit }}
+          RUNTIME_DEPENDENCY_OUTCOME: ${{ steps.rtdeps.outcome }}
+          RUNTIME_BUILD_OUTCOME: ${{ steps.rtbuild.outcome }}
+        run: node ci/runtime-diagnostics.mjs
+      - name: Upload runtime diagnostics
+        if: always() && env.RUNTIME_DIAGNOSTICS_DIR != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: runtime-diagnostics-${{ matrix.runner }}-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          path: |
+            ${{ env.RUNTIME_DIAGNOSTICS_DIR }}/**/*.json
+            ${{ env.RUNTIME_DIAGNOSTICS_DIR }}/**/*.log
+            ${{ env.RUNTIME_DIAGNOSTICS_DIR }}/**/*.rc
+            ${{ env.RUNTIME_DIAGNOSTICS_DIR }}/**/*.txt
+            ${{ env.RUNTIME_DIAGNOSTICS_DIR }}/**/*.tsv
+            ${{ env.RUNTIME_DIAGNOSTICS_DIR }}/**/*.status
+            ${{ env.RUNTIME_DIAGNOSTICS_DIR }}/**/*.sha256
       - name: Save patched runtime cache
         if: steps.rtcache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6
         with:
           path: dist-runtime
-          key: rt-${{ runner.os }}-${{ runner.arch }}-${{ matrix.runner }}-${{ env.RUNTIME_REF }}-${{ env.RUNTIME_VERSION }}-${{ hashFiles('ci/build_patched_runtime.mjs') }}
+          key: rt-${{ runner.os }}-${{ runner.arch }}-${{ matrix.runner }}-${{ env.RUNTIME_REF }}-${{ env.RUNTIME_VERSION }}-${{ hashFiles('ci/build_patched_runtime.mjs', 'ci/runtime-diagnostics.mjs') }}
       - name: Install patched runtime
         run: npx --yes zx@8 ci/install_patched_runtime.mjs "$PWD/dist-runtime"
       - name: Build runtime shim
@@ -209,6 +238,7 @@ jobs:
           require-compiles: ${{ job.status == 'success' }}
       - name: Build workspace
         run: |
+          node ci/check-codegen-runtime-layout.mjs
           node ci/release/trimpath.mjs .
           cjpm build
       # Deploy name must be cjcj, not cjc (process-name GC stack-root exclusion -> SEGV).

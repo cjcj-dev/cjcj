@@ -59,7 +59,7 @@ export async function buildWindowsFinalCompiler({root, cangjieHome, hostSdk, sdk
     const clean = await runInMsys('cjpm clean', 'final-clean', targetSdk, hostSdk);
     if (clean.exitCode !== 0) return clean;
     await prepareTrimpath(process.cwd());
-    const build = await runInMsys('cjc --version && cjpm build', 'final-build', targetSdk, hostSdk);
+    const build = await runInMsys('cjc --version && node ci/check-codegen-runtime-layout.mjs && cjpm build', 'final-build', targetSdk, hostSdk);
     if (build.exitCode === 0) {
       if (await fileSha256(seedInstalled) !== parentSha256 || await stdIdentity(finalStd) !== stdSha256
         || await stdIdentity(targetSdk, finalStd) !== stdSha256) {
@@ -71,7 +71,7 @@ export async function buildWindowsFinalCompiler({root, cangjieHome, hostSdk, sdk
         runId: process.env.GITHUB_RUN_ID, runAttempt: process.env.GITHUB_RUN_ATTEMPT, std: finalStd,
         lineage: {stage: 'windows-W2', parentSha256, stdSha256, compilerSha256: await fileSha256(final),
           tuple: sdkRuntimeDirName, runtimeSha256: await fileSha256(installedRuntimeLib),
-          command: 'cjc --version && cjpm build',
+          command: 'cjc --version && node ci/check-codegen-runtime-layout.mjs && cjpm build',
           compilerEntry: seedInstalled, hostTools: path.join(hostSdk, 'tools', 'bin'),
           linkOptionsSha256: await fileSha256(cjcTomlPath),
           workspaceOptionsSha256: await fileSha256('cjpm.toml'),

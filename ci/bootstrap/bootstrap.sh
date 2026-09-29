@@ -529,6 +529,7 @@ install_stage_compiler() {
 
 cjpm_build() {
   local sdk="$1" runtime="$2" srcdir="$3" extra="$4" heap="$5" ld cjpm script
+  cmd "node $(printf '%q' "$srcdir/ci/check-codegen-runtime-layout.mjs") $(printf '%q' "$WORK/layout-sources")"
   source "$SRC/ci/build_resources.sh"
   configure_build_resources "$heap" || die "cannot determine compiler build resources"
   heap="$STD_BUILD_HEAP"
@@ -644,6 +645,8 @@ stage0() {
   copy="$WORK/cjcj-src-stage0"
   isolate_cjcj_src "$copy"
   rewrite_compile_option_o1 "$copy/cjpm.toml"
+  # Cache hits bypass cjpm_build, so validate their source contract here too.
+  cmd "node $(printf '%q' "$copy/ci/check-codegen-runtime-layout.mjs") $(printf '%q' "$WORK/layout-sources")"
   if [ "$DRY" -eq 0 ]; then
     if cache_key=$(stage0_cache_key "$base" "$copy/cjpm.toml"); then
       cacheable=1
@@ -666,6 +669,11 @@ stage0() {
   fi
   prepare_stage0_run_sdk
   assert_version cjcj-stage1 "$out" "$WORK/sdk-stage0-run" "$HRT"
+  # The Linux x64 layout CI uses the actual seed, including cached seeds. Its
+  # host runtime/std stay paired; only the LLVM producer/reader use the target pin.
+  if [ "$HOST_TUPLE" = linux_x86_64_cjnative ]; then
+    cmd "bash $(printf '%q' "$copy/ci/test-codegen-runtime-layout.sh") $(printf '%q' "$out") $(printf '%q' "$sdk") $(printf '%q' "$COLOUR_LLVM_SO") $(printf '%q' "$WORK/layout-sources/llvm") $(printf '%q' "$WORK/layout-sources/runtime") $(printf '%q' "$WORK/layout-ir-stage0")"
+  fi
   if [ "$DRY" -eq 0 ] && [ "$cacheable" -eq 1 ] && [ "$cache_hit" -eq 0 ]; then
     stage0_cache_publish "$cache_key" "$out" || die 'stage0 cache 发布失败'
   fi

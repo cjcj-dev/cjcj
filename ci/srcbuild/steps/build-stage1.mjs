@@ -1,5 +1,6 @@
 #!/usr/bin/env zx
 
+import {checkCodegenRuntimeLayout} from '../../check-codegen-runtime-layout.mjs';
 import {prepareTrimpath, withSeedOptimization} from '../../release/trimpath.mjs';
 
 import fs from 'node:fs/promises';
@@ -35,6 +36,7 @@ const hostLibraryPath = hostLoaderPath({
   target,
   inherited: process.env[target.spec.loaderEnv] || '',
 });
+await checkCodegenRuntimeLayout();
 const workspaceToml = path.resolve('cjpm.toml');
 const workspaceTomlBackup = `${workspaceToml}.O2bak`;
 const cjcToml = path.resolve('packages', 'cjc', 'cjpm.toml');

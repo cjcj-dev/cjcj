@@ -615,7 +615,7 @@ private func GenerateArrayGetElemRef(irBuilder: IRBuilder2, args: ArrayList<Valu
             let elementType = elementCGType.GetLLVMType()
             var offset = irBuilder.CreateBinary(ExprKind.MUL, irBuilder.GetSize_64(elementCHIRType), indexValue)
             offset = irBuilder.CreateBinary(ExprKind.ADD, offset,
-                irBuilder.GetInt64(Int64(irBuilder.GetPayloadOffset() + 8u64)))
+                irBuilder.GetInt64(Int64(irBuilder.GetPayloadOffset() + RuntimeLayout.ArrayLengthSize)))
             var elePtr = irBuilder.CreateInBoundsGEP(unsafe { LLVMInt8TypeInContext(irBuilder.GetLLVMContext().raw) },
                 arrayValue, ArrayList<LLVMValueRef>([offset]))
             let arrayAddressSpace = unsafe { LLVMGetPointerAddressSpace(LLVMTypeOf(arrayValue)) }
