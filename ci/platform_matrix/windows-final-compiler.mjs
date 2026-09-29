@@ -1,3 +1,4 @@
+import {prepareTrimpath} from '../release/trimpath.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {produceFinalCompiler, fileSha256, stdIdentity} from '../srcbuild/lib/final-compiler.mjs';
@@ -57,6 +58,7 @@ export async function buildWindowsFinalCompiler({root, cangjieHome, hostSdk, sdk
     await fs.writeFile('cjpm.toml', workspaceToml);
     const clean = await runInMsys('cjpm clean', 'final-clean', targetSdk, hostSdk);
     if (clean.exitCode !== 0) return clean;
+    await prepareTrimpath(process.cwd());
     const build = await runInMsys('cjc --version && node ci/check-codegen-runtime-layout.mjs && cjpm build', 'final-build', targetSdk, hostSdk);
     if (build.exitCode === 0) {
       if (await fileSha256(seedInstalled) !== parentSha256 || await stdIdentity(finalStd) !== stdSha256

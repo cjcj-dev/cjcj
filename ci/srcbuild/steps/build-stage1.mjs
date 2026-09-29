@@ -1,6 +1,7 @@
 #!/usr/bin/env zx
 
 import {checkCodegenRuntimeLayout} from '../../check-codegen-runtime-layout.mjs';
+import {prepareTrimpath, withSeedOptimization} from '../../release/trimpath.mjs';
 
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -44,7 +45,7 @@ await fs.writeFile(cjcToml, platformizeCjcToml(cjcConfig, process.platform, sdk)
 await fs.copyFile(workspaceToml, workspaceTomlBackup);
 await fs.writeFile(
   workspaceToml,
-  (await fs.readFile(workspaceToml, 'utf8')).replace('compile-option = "-O2"', 'compile-option = "-O1"'),
+  withSeedOptimization(await fs.readFile(workspaceToml, 'utf8')),
 );
 // Upstream cjc miscompiles cjcj at -O2. Build the seed at -O1 to avoid the
 // generic concrete-to-interface upcast loss in the upstream CHIR optimizer.
@@ -62,6 +63,7 @@ process.exit(child.status ?? 1);
 `, {mode: 0o755});
 const oracleEnv = {...process.env, PATH: `${oracleCompilerDir}${path.delimiter}${process.env.PATH || ''}`};
 try {
+  await prepareTrimpath(process.cwd());
   await $({env: oracleEnv})`cjpm build`;
 } finally {
   await fs.rm(oracleCompilerDir, {recursive: true, force: true});

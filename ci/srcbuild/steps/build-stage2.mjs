@@ -1,6 +1,7 @@
 #!/usr/bin/env zx
 
 import {checkCodegenRuntimeLayout} from '../../check-codegen-runtime-layout.mjs';
+import {prepareTrimpath} from '../../release/trimpath.mjs';
 
 $.stdio = 'inherit';
 
@@ -11,4 +12,5 @@ await $`set -o pipefail; cjc --version | head -2`;
 // Inherit the caller’s resource-limited host heap; swap does not raise the
 // official runtime’s physical-memory limit. Compiler sizing belongs to its wrapper.
 await checkCodegenRuntimeLayout();
+await prepareTrimpath(process.cwd());
 await $`cjpm build -j 1`;

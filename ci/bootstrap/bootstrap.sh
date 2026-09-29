@@ -491,13 +491,13 @@ rewrite_compile_option_o1() {
     return 0
   fi
   [ -f "$toml" ] || die "隔离副本缺 cjpm.toml: $toml"
-  o2_hits=$(/usr/bin/grep -c -- 'compile-option = "-O2"' "$toml" || true)
+  o2_hits=$(/usr/bin/grep -Ec -- '^ *compile-option = "-O2([[:space:]]|")' "$toml" || true)
   if [ "$o2_hits" -gt 0 ]; then
-    cmd "sed -i 's/compile-option = \"-O2\"/compile-option = \"-O1\"/' $(printf '%q' "$toml")"
+    cmd "sed -E -i 's/^( *compile-option = \")-O2([[:space:]]|\")/\1-O1\2/' $(printf '%q' "$toml")"
   fi
-  o1_hits=$(/usr/bin/grep -c -- 'compile-option = "-O1"' "$toml" || true)
+  o1_hits=$(/usr/bin/grep -Ec -- '^ *compile-option = "-O1([[:space:]]|")' "$toml" || true)
   [ "$o1_hits" -ge 1 ] || die "隔离副本 cjpm.toml 的 compile-option 不是 -O1: $toml"
-  o2_hits=$(/usr/bin/grep -c -- 'compile-option = "-O2"' "$toml" || true)
+  o2_hits=$(/usr/bin/grep -Ec -- '^ *compile-option = "-O2([[:space:]]|")' "$toml" || true)
   [ "$o2_hits" -eq 0 ] || die "compile-option 仍含 -O2: $toml"
   echo "ASSERT compile-option-o1 ok file=$toml"
 }
@@ -536,6 +536,9 @@ cjpm_build() {
   ld=$(sdk_ld_path "$sdk" "$runtime")
   prepare_build_env
   cjpm="$sdk/tools/bin/cjpm"
+  local trim_debug=""
+  case " $extra " in *" -g "*) trim_debug=" --debug";; esac
+  cmd "node $(printf '%q' "$SRC/ci/release/trimpath.mjs") $(printf '%q' "$srcdir")$trim_debug"
   script="cd $(printf '%q' "$srcdir") && $(printf '%q' "$cjpm") build${extra:+ $extra}"
   echo "CMD cjpm build${extra:+ $extra} bin=$cjpm cwd=$srcdir heap=$heap"
   cmd "env -i HOME=$(printf '%q' "$BUILD_HOME") TMPDIR=$(printf '%q' "$BUILD_TMPDIR") CANGJIE_HOME=$(printf '%q' "$sdk") LD_LIBRARY_PATH=$(printf '%q' "$ld") PATH=$(printf '%q' "$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:/usr/bin:/bin") cjHeapSize=$(printf '%q' "$heap") bash -c $(printf '%q' "$script")"

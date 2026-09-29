@@ -1,6 +1,7 @@
 #!/usr/bin/env zx
 
 import {checkCodegenRuntimeLayout} from '../../check-codegen-runtime-layout.mjs';
+import {prepareTrimpath} from '../../release/trimpath.mjs';
 
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
@@ -223,6 +224,7 @@ if (dryRun) {
 } else {
   await checkCodegenRuntimeLayout();
   await $({cwd: githubWorkspace, env: stageEnv})`cjpm clean`;
+  await prepareTrimpath(githubWorkspace);
   await $({cwd: githubWorkspace, env: stageEnv})`cjpm build -j 1`;
   const stage3Product = await findProductBinary('stage3');
   const stage3Sha = await sha256(stage3Product);
