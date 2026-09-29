@@ -173,7 +173,12 @@ async function main() {
       console.error(`diagnostic handoff failed: ${error.message}`);
       failure ||= error;
     }
-    if (work) await fs.rm(work, {recursive: true, force: true});
+    try {
+      if (work) await fs.rm(work, {recursive: true, force: true});
+    } catch (error) {
+      console.error(`source cleanup failed: ${error.message}`);
+      failure ||= error;
+    }
   }
   if (failure) throw failure;
 }

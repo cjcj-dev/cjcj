@@ -26,6 +26,9 @@ export async function startDiagnostics(runtimeRef, version) {
     runner: process.env.RUNNER_NAME || os.hostname(), arch: process.arch,
     run: process.env.GITHUB_RUN_ID || 'local', attempt: process.env.GITHUB_RUN_ATTEMPT || 'local',
     configuration: 'native/release', language: 'defer', stage: 'source',
+    command: ['python3', 'build.py', 'build', '--target', 'native', '--build-type', 'release', '-v', version],
+    scripts: Object.fromEntries(await Promise.all(['build_patched_runtime.mjs', 'runtime-diagnostics.mjs']
+      .map(async name => [name, sha256(await fs.readFile(new URL(name, import.meta.url)))]))),
     buildRc: 'NOT_RUN', collection: 'NOT_RUN', tools: {},
     // Deliberately do not serialize the parent environment.
     environment: Object.fromEntries(['CANGJIE_HOME', 'CC', 'CXX', 'CMAKE_BUILD_PARALLEL_LEVEL',
@@ -115,6 +118,9 @@ export async function collectDiagnostics(diagnostics, work) {
     otherVmExit: /GC_UNIT_OTHER_VM_EXIT_RC=(\d+)/,
     teardown: /GC_UNIT_OTHER_VM_TEARDOWN_RC=(\d+)/,
     suite: /GC_UNIT_GATE_FAIL[^\n]*rc=(\d+)/,
+    runner: /GC_UNIT_RUN_DONE rc=(\d+)/,
+    main: /GC_UNIT_RUN_DONE[^\n]*main_rc=(\d+)/,
+    publication: /GC_UNIT_RUN_DONE[^\n]*publication_rc=(\d+)/,
   })) {
     const match = raw.match(pattern);
     record.layers[name] = match ? Number(match[1]) : 'UNKNOWN';

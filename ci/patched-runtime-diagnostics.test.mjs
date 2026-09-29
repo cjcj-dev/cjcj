@@ -47,7 +47,7 @@ if mode == 'failure':
 if mode == 'collection':
  (root / 'output').mkdir()
  (root / 'output/conflict.txt').write_text('copy conflict')
- target = out.parent / 'runtime-output/conflict.txt'
+ target = status.parent / 'runtime-output/conflict.txt'
  target.mkdir(parents=True)
  sys.exit(9)
 output = root / 'output/Release/lib'
