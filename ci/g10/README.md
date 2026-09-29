@@ -26,8 +26,8 @@ The 50 checked-in programs are newly authored valid-program negative controls,
 not a reconstruction of the unavailable 0809 temporary corpus. They cover scalar
 operations, branches/loops, calls/recursion, tuples/arrays, strings, numeric
 conversions, closures, generics, classes, structs, enums and options. Each returns
-zero only when its result assertion holds. `controls/panic.cj` is an unhandled
-exception control, excluded from the normal corpus. `--inject 17_recursion`
+zero only when its result assertion holds. `controls/panic.cj` calls libc `abort()` as a SIGABRT
+control, excluded from the normal corpus. `--inject 17_recursion`
 replaces exactly that case in **both** available arms; its compiled program must
 fail and the report must name its arm, phase, ID and failing step.
 
