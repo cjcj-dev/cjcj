@@ -142,9 +142,11 @@ python3 ci/cangjie-test/run.py PRIVATE_SDK O1 48 --compiler-jobs 1 \
 python3 ci/cangjie-test/classify.py O1 official-classification.json
 ```
 
-For B use `--arm bootstrap` in both commands. That run requires
-`compiler-lineage.json` from `compose-install` or `sdk_build --cjc`; it checks
-both driver names against the recorded producer before executing any tests.
+For B use `--arm bootstrap` in both commands and pass
+`--bootstrap-compiler-sha256 HASH` to `run.py` (see the trust input below).
+That run requires `compiler-lineage.json` from `compose-install` or
+`sdk_build --cjc`; it checks both driver names and the recorded producer
+against the independent build hash before executing any tests.
 Both `bin/cjc` and `bin/cjc-frontend` point to the same physical
 `bin/cjcj-stage1`. The name is the SDK layout convention even for a stage3
 producer; the record retains the source and installed hashes. Darwin's

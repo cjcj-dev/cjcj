@@ -7,7 +7,6 @@ fixture runtime. Expected identity comes from the separate build artifact.
 import argparse
 import hashlib
 from pathlib import Path
-import shutil
 import subprocess
 import sys
 import tempfile
