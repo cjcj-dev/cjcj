@@ -28,8 +28,9 @@ After checking the actual publication and its digests, copy the emitted
 Each platform entry retains its own run/attempt/commit/artifact, file digests,
 asset IDs, `platform`, and `tuple_sums_sha256`. Do not replace another platform's
 entry. Never fill asset IDs with placeholders or learn expected digests from an
-unreviewed download. The existing x86 entry is retained unchanged; the aarch64
-entry must be filled from a real publication after #657 lands.
+unreviewed download. The x86 entry retains the #657 publication; the aarch64 entry comes from
+run `36611013257` on the paired LLVM/runtime pins. Subsequent updates must
+retain the other platform entry and repeat the real-input contract tests.
 
 Dispatch `build-fixed-llc.yml` with `publish_tuple=true` and
 `platforms=linux_aarch64` to build only that tuple on the standard
