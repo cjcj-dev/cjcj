@@ -5,7 +5,12 @@ publish_fixed_tuple_to_depot() {
     local depot_root=${1:-${CJCJ_LLVM_DEPOT_ROOT:-/root/llvmdepot}}
     local depot="$depot_root/$LLVM_SHA/$CANGJIE_COMPILER_SHA"
     local tuple="$depot/fixed-llc"
-    local payload recipe_sha
+    local payload recipe_sha platform
+    platform=$(sed -n 's/^PLATFORM=//p' "$CJCJ_FIXED_LLVM_DIR/llvm-tools.manifest") || return 1
+    case "$platform" in
+        linux_x86_64|linux_aarch64) ;;
+        *) echo "LLVM_TUPLE_PLATFORM_UNSUPPORTED platform=$platform" >&2; return 65 ;;
+    esac
     local -a payloads=(llc.gz opt.gz ld.lld.gz cjselfhost_llvmshim.o llvm-tools.manifest)
     [[ -n ${LLVM_SHA:-} && -n ${CANGJIE_COMPILER_SHA:-} ]] || return 1
     recipe_sha=$(git -C "$REPO_ROOT" rev-parse HEAD) || return 1
@@ -18,7 +23,7 @@ publish_fixed_tuple_to_depot() {
         chmod +x "$depot/bin/$payload" || return 1
     done
     {
-        printf 'PLATFORM=linux_x86_64\n'
+        printf 'PLATFORM=%s\n' "$platform"
         printf 'LLVM_SHA=%s\n' "$LLVM_SHA"
         printf 'CANGJIE_COMPILER_SHA=%s\n' "$CANGJIE_COMPILER_SHA"
         printf 'RECIPE_CJCJ_SHA=%s\n' "$recipe_sha"

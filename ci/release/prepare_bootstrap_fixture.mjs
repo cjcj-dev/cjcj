@@ -19,6 +19,11 @@ export function fixture(check, target = 'linux-x64') {
     for (const d of [artifact, fallback]) {
       fs.writeFileSync(path.join(d, 'SHA256SUMS'), 'reviewed fixture sums');
     }
+    const platform = {'linux-x64': 'linux_x86_64', 'linux-aarch64': 'linux_aarch64',
+      'darwin-x64': 'darwin_x86_64', 'darwin-arm64': 'darwin_aarch64'}[target];
+    const manifest = `PLATFORM=${platform}\n`;
+    for (const d of [artifact, fallback]) fs.writeFileSync(path.join(d, 'MANIFEST'), manifest);
+    const manifestDigest = crypto.createHash('sha256').update(manifest).digest('hex');
     const digest = crypto.createHash('sha256').update('reviewed fixture sums').digest('hex');
     const dylib = path.join(dir, 'dylib');
     fs.mkdirSync(dylib);
@@ -66,20 +71,29 @@ export function fixture(check, target = 'linux-x64') {
       COLOUR_RT_RUN_ATTEMPT: '1', COLOUR_RT_ARTIFACT_ID: '456',
       COLOUR_RT_MANIFEST_SHA256: runtimeDigest(path.join(runtime, 'manifest.json'))});
     const pinFile = path.join(dir, 'pin.json');
-    fs.writeFileSync(pinFile, JSON.stringify({version: 1, repository: 'cjcj-dev/cjcj', run: 123,
+    fs.writeFileSync(pinFile, JSON.stringify({version: 2, platforms: {[platform]: {platform, tuple_sums_sha256: digest, version: 1, repository: 'cjcj-dev/cjcj', run: 123,
       attempt: 1, artifact: 456, commit: 'b'.repeat(40), files: [{path: 'SHA256SUMS', mode: 0o644,
-      asset: 789, artifact_sha256: digest, release_sha256: digest}]}));
+      asset: 789, artifact_sha256: digest, release_sha256: digest},
+      {path: 'MANIFEST', mode: 0o644, asset: 790, artifact_sha256: manifestDigest, release_sha256: manifestDigest}]}}}));
+    if (target.startsWith('darwin-')) {
+      // The real repository has Linux pins only. Do not invent a Darwin pin
+      // merely to get the native dylib consumer past an unrelated guard.
+      fs.copyFileSync(new URL('../bootstrap_inputs_pin.json', import.meta.url), pinFile);
+      delete env.CJCJ_BOOTSTRAP_COLOUR_TUPLE;
+    }
     env.CJCJ_BOOTSTRAP_INPUTS_PIN = pinFile;
     const transport = path.join(dir, 'transport.mjs');
     fs.writeFileSync(transport, `
       import fs from 'node:fs';
       globalThis.fetch = async url => {
-        if (url !== 'https://api.github.com/repos/cjcj-dev/cjcj/releases/assets/789')
+        if (!['https://api.github.com/repos/cjcj-dev/cjcj/releases/assets/789',
+          'https://api.github.com/repos/cjcj-dev/cjcj/releases/assets/790'].includes(url))
           throw new Error('unexpected source request: ' + url);
         console.log('FIXTURE_RELEASE_REQUEST ' + url);
-        return new Response(fs.readFileSync(process.env.FIXTURE_RELEASE_FILE));
+        return new Response(fs.readFileSync(url.endsWith('/790') ? process.env.FIXTURE_MANIFEST_FILE : process.env.FIXTURE_RELEASE_FILE));
       };
     `);
+    env.FIXTURE_MANIFEST_FILE = path.join(artifact, 'MANIFEST');
     env.FIXTURE_RELEASE_FILE = path.join(artifact, 'SHA256SUMS');
     const run = () => spawnSync(process.execPath,
       ['--import', transport, new URL('./prepare_bootstrap_inputs.mjs', import.meta.url).pathname], {env, encoding: 'utf8'});

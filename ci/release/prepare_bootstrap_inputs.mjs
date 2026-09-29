@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import {acquire} from './bootstrap_store.mjs';
+import {selectTuplePin, verifyTuplePlatform} from './tuple_platform.mjs';
 import {verifyRuntime} from './colour_runtime.mjs';
 import {prepareCppHeaders} from '../bootstrap/prepare_cpp_headers.mjs';
 import {prepareHostLlvm} from './host_llvm.mjs';
@@ -62,21 +63,34 @@ const astSupport = pinnedInput(process.env.CJCJ_BOOTSTRAP_AST_ARTIFACT, [
   findFile(path.join(base, 'lib'), (_full, name) => name === 'libcangjie-ast-support.a'),
 ], '', process.env.AST_SUPPORT_SHA256, 'ast-support archive SHA256');
 
-const pinPath = process.env.CJCJ_BOOTSTRAP_INPUTS_PIN
-  || new URL('../bootstrap_inputs_pin.json', import.meta.url);
-const inputPin = JSON.parse(fs.readFileSync(pinPath, 'utf8'));
-const colourTuple = await acquire(inputPin,
-  process.env.CJCJ_BOOTSTRAP_INPUTS_WORK || path.join(process.env.RUNNER_TEMP || buildRoot || '.', 'bootstrap-inputs'), {
-    mode: process.env.CJCJ_BOOTSTRAP_SOURCE || 'release',
-    reason: process.env.CJCJ_BOOTSTRAP_SOURCE_REASON || '',
-    depot: process.env.CJCJ_BOOTSTRAP_COLOUR_TUPLE || (process.env.LLVM_SHA && process.env.CANGJIE_COMPILER_SHA
-      ? path.join(process.env.CJCJ_LLVM_DEPOT_ROOT || '/root/llvmdepot', process.env.LLVM_SHA, process.env.CANGJIE_COMPILER_SHA) : ''),
-  });
-// The pin is reviewed source, never a digest learned from this run's download.
-const tupleSums = path.join(colourTuple, 'SHA256SUMS');
-if (!/^[0-9a-f]{64}$/.test(process.env.LLVM_TUPLE_SUMS_SHA || '')
-    || sha256File(tupleSums) !== process.env.LLVM_TUPLE_SUMS_SHA) {
-  throw new Error(`colour tuple SHA256SUMS disagrees with ci/llvm_pin.env: ${colourTuple}`);
+const target = process.env.CJCJ_SRCBUILD_TARGET
+  || `${process.platform}-${process.platform === 'linux' && process.arch === 'arm64' ? 'aarch64' : process.arch}`;
+const platform = {'linux-x64': 'linux_x86_64', 'linux-aarch64': 'linux_aarch64',
+  'darwin-x64': 'darwin_x86_64', 'darwin-arm64': 'darwin_aarch64'}[target];
+// Static tuples are published only for Linux. Darwin has independent native
+// host/runtime/dylib inputs and must not acquire or export a Linux tuple.
+const darwin = target === 'darwin-x64' || target === 'darwin-arm64';
+let colourTuple;
+if (!darwin) {
+  const pinPath = process.env.CJCJ_BOOTSTRAP_INPUTS_PIN
+    || new URL('../bootstrap_inputs_pin.json', import.meta.url);
+  const pins = JSON.parse(fs.readFileSync(pinPath, 'utf8'));
+  const inputPin = selectTuplePin(pins, platform);
+  colourTuple = await acquire(inputPin,
+    process.env.CJCJ_BOOTSTRAP_INPUTS_WORK || path.join(process.env.RUNNER_TEMP || buildRoot || '.', 'bootstrap-inputs'), {
+      mode: process.env.CJCJ_BOOTSTRAP_SOURCE || 'release',
+      reason: process.env.CJCJ_BOOTSTRAP_SOURCE_REASON || '',
+      depot: process.env.CJCJ_BOOTSTRAP_COLOUR_TUPLE || (process.env.LLVM_SHA && process.env.CANGJIE_COMPILER_SHA
+        ? path.join(process.env.CJCJ_LLVM_DEPOT_ROOT || '/root/llvmdepot', process.env.LLVM_SHA, process.env.CANGJIE_COMPILER_SHA) : ''),
+    });
+  // The pin is reviewed source, never a digest learned from this run's download.
+  verifyTuplePlatform(colourTuple, platform);
+  const tupleSums = path.join(colourTuple, 'SHA256SUMS');
+  const tupleSumsPin = process.env[`LLVM_TUPLE_SUMS_SHA_${platform}`] || inputPin.tuple_sums_sha256;
+  if (!/^[0-9a-f]{64}$/.test(tupleSumsPin || '')
+      || sha256File(tupleSums) !== tupleSumsPin) {
+    throw new Error(`colour tuple SHA256SUMS disagrees with platform pin: ${colourTuple}`);
+  }
 }
 
 const colourRt = verifyRuntime();
@@ -103,7 +117,6 @@ if (!/^[0-9a-f]{40}$/.test(cjcjSha)) throw new Error('cjcj sha missing (GITHUB_S
 // never falls back after a missing file or identity mismatch.
 const colourInputs = {};
 // Select the library for the source cell, as for the independent host LLVM.
-const darwin = (process.env.CJCJ_SRCBUILD_TARGET || process.platform).startsWith('darwin');
 if (process.platform === 'linux' || darwin || process.env.CJCJ_BOOTSTRAP_DYLIB_ARTIFACT
     || process.env.CJCJ_BOOTSTRAP_COLOUR_DYLIB) {
   const dylibRoot = process.env.CJCJ_BOOTSTRAP_DYLIB_ARTIFACT
@@ -142,7 +155,7 @@ const exported = {
   CJCJ_BOOTSTRAP_HOST_LLVM_SHA256: hostLlvm.sha256,
   CJCJ_BOOTSTRAP_AST_SUPPORT: path.resolve(astSupport),
   CJCJ_BOOTSTRAP_AST_SUPPORT_SHA256: process.env.AST_SUPPORT_SHA256,
-  CJCJ_BOOTSTRAP_COLOUR_TUPLE: path.resolve(colourTuple),
+  ...(colourTuple ? {CJCJ_BOOTSTRAP_COLOUR_TUPLE: path.resolve(colourTuple)} : {}),
   CJCJ_BOOTSTRAP_COLOUR_RT: path.resolve(colourRt),
   CJCJ_BOOTSTRAP_COLOUR_LLVM_SHA: llvmSha,
   CJCJ_BOOTSTRAP_HOST_RT: path.resolve(base),

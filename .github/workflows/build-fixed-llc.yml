@@ -66,23 +66,38 @@ jobs:
       rebuild: ${{ inputs.rebuild || false }}
 
   persist:
-    if: inputs.publish_tuple
+    if: inputs.publish_tuple && needs.tuple.outputs.tuple_platforms != '[]'
     needs: tuple
-    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: ${{ fromJson(needs.tuple.outputs.tuple_platforms) }}
+    runs-on: ${{ matrix.platform == 'linux_aarch64' && 'ubuntu-24.04-arm' || 'ubuntu-22.04' }}
     permissions:
       actions: read
       contents: write
     steps:
       - uses: actions/checkout@v7
+      - name: Resolve this platform's immutable artifact
+        id: tuple-artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          id=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" \
+            --jq '.artifacts[] | select(.name == "static-llvm-tuple-${{ matrix.platform }}" and .expired == false) | .id')
+          [[ "$id" =~ ^[0-9]+$ ]]
+          echo "id=$id" >> "$GITHUB_OUTPUT"
       - uses: actions/download-artifact@v8
         with:
-          artifact-ids: ${{ needs.tuple.outputs.tuple_artifact_id }}
+          artifact-ids: ${{ steps.tuple-artifact.outputs.id }}
           merge-multiple: true
           path: ${{ runner.temp }}/static-tuple
       - name: Persist the same fixed artifact and emit a candidate pin
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          BOOTSTRAP_ARTIFACT_ID: ${{ needs.tuple.outputs.tuple_artifact_id }}
+          BOOTSTRAP_ARTIFACT_ID: ${{ steps.tuple-artifact.outputs.id }}
+          BOOTSTRAP_PLATFORM: ${{ matrix.platform }}
           STATIC_TUPLE: ${{ runner.temp }}/static-tuple
         shell: bash
         run: |
@@ -103,7 +118,7 @@ jobs:
           node ci/release/publish_bootstrap_inputs.mjs "$STATIC_TUPLE" "$RUNNER_TEMP/bootstrap-files.json" "$RUNNER_TEMP/bootstrap-inputs-pin.json"
       - uses: actions/upload-artifact@v7
         with:
-          name: bootstrap-inputs-pin
+          name: bootstrap-inputs-pin-${{ matrix.platform }}
           path: ${{ runner.temp }}/bootstrap-inputs-pin.json
           if-no-files-found: error
           retention-days: 90

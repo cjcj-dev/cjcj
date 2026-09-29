@@ -67,6 +67,8 @@ for (const target of ['darwin-arm64', 'darwin-x64']) {
   test(`${target} exports the reviewed native dylib and rejects changed bytes`, () => fixture(({env, dylib, dylibSha, run}) => {
     const valid = run();
     assert.equal(valid.status, 0, valid.stderr);
+    assert.doesNotMatch(valid.stdout, /BOOTSTRAP_SOURCE|BOOTSTRAP_VERIFIED|^CJCJ_BOOTSTRAP_COLOUR_TUPLE=/m);
+    console.log(`ASSERT ${target} real-pin-set preparation rc=0 no static tuple`);
     assert.ok(valid.stdout.includes(`CJCJ_BOOTSTRAP_COLOUR_LLVM_SO=${dylib}/libLLVM.dylib\n`));
     assert.ok(valid.stdout.includes(`CJCJ_BOOTSTRAP_COLOUR_LLVM_SHA256=${dylibSha}\n`));
     fs.appendFileSync(path.join(dylib, 'libLLVM.dylib'), 'changed');

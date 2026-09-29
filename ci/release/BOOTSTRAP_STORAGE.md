@@ -1,7 +1,7 @@
 # Persistent bootstrap inputs
 
 `build-fixed-llc.yml` is the publication entry point. In one workflow
-run it calls the existing fixed tuple producer, waits for its artifact ID, then
+run it calls the selected Linux fixed tuple producers, resolves each platform artifact ID, then
 publishes exactly that artifact's reviewed file list to a dedicated prerelease
 `bootstrap-<run>-<attempt>-<artifact>-prerelease`. The publisher reads back both the artifact
 and every Release asset before publishing the draft or emitting its candidate
@@ -22,15 +22,37 @@ job. Existing read-only callers use `build-llvm-tools.yml` and remain read-only;
 reusable workflows cannot elevate a caller's token permissions:
 https://docs.github.com/en/actions/reference/workflows-and-actions/reusing-workflow-configurations.
 
-After checking the actual publication and its digests, commit the emitted
-`bootstrap-inputs-pin.json` as `ci/bootstrap_inputs_pin.json`, together with any
-corresponding `ci/llvm_pin.env` and `ci/llvm_tuple_SHA256SUMS` update. Never fill
-asset IDs with placeholders or compute the consumer's expected digest from an
-unreviewed download. The initial checked publication is
-[`bootstrap-35858653195-1-10748596481-prerelease`](https://github.com/cjcj-dev/cjcj/releases/tag/bootstrap-35858653195-1-10748596481-prerelease),
-from [run 35858653195, attempt 1](https://github.com/cjcj-dev/cjcj/actions/runs/35858653195).
-Its nine asset IDs and both per-file digests are recorded in
-`ci/bootstrap_inputs_pin.json`; the fixed artifact is `10748596481`.
+After checking the actual publication and its digests, copy the emitted
+`bootstrap-inputs-pin-<platform>` artifact's `bootstrap-inputs-pin.json` into
+`ci/bootstrap_inputs_pin.json` under `platforms.<platform>` (schema version 2).
+Each platform entry retains its own run/attempt/commit/artifact, file digests,
+asset IDs, `platform`, and `tuple_sums_sha256`. Do not replace another platform's
+entry. Never fill asset IDs with placeholders or learn expected digests from an
+unreviewed download. The x86 entry retains the #657 publication; the aarch64 entry comes from
+run `36611013257` on the paired LLVM/runtime pins. Subsequent updates must
+retain the other platform entry and repeat the real-input contract tests.
+
+Dispatch `build-fixed-llc.yml` with `publish_tuple=true` and
+`platforms=linux_aarch64` to build only that tuple on the standard
+`ubuntu-24.04-arm` runner (the same glibc baseline as its source-build consumer).
+The existing sccache action wraps C++ compilation. Publications remain
+prereleases. macOS tools remain available through the existing tools workflow;
+this static bootstrap tuple publisher selects only Linux platforms.
+
+The Linux consumer selects by `CJCJ_SRCBUILD_TARGET` (or the native host identity).
+An absent platform pin returns 65 / `BOOTSTRAP_TUPLE_PLATFORM_PIN_MISSING`;
+a pin or verified MANIFEST for another platform returns 65 /
+`BOOTSTRAP_TUPLE_PLATFORM_MISMATCH`, before any bootstrap environment is exported.
+There is no cross-platform fallback. The kkk2 release CLI uses the same selection
+and MANIFEST checks, taking the explicit `linux_$(uname -m)` platform argument;
+it also retains the caller's independent sums digest check.
+Darwin preparation verifies and exports its native host, AST, runtime and dylib
+inputs without acquiring or exporting a static tuple. Repository pins do not
+contain Darwin static tuples. Full Darwin bootstrap still requires a native
+static tuple and its downstream wiring; passing input preparation does not
+certify that full bootstrap. An optional
+`LLVM_TUPLE_SUMS_SHA_<platform>` override is checked against the downloaded sums;
+the default is that platform's reviewed `tuple_sums_sha256`.
 
 `prepare_bootstrap_inputs.mjs` defaults to Release assets. To explicitly recover
 from another source set `CJCJ_BOOTSTRAP_SOURCE=artifact` or `depot` and provide

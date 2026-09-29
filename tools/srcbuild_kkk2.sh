@@ -744,7 +744,7 @@ acquire_fixed_tuple_from_release() {
     local colour_tuple="$STATE_ROOT/colour-tuple"
     node "$REPO_ROOT/ci/release/acquire_fixed_tuple.mjs" \
         "${CJCJ_BOOTSTRAP_INPUTS_PIN:-$REPO_ROOT/ci/bootstrap_inputs_pin.json}" \
-        "$colour_tuple" "$LLVM_TUPLE_SUMS_SHA" || return 1
+        "$colour_tuple" "$LLVM_TUPLE_SUMS_SHA" "linux_$(uname -m)" || return 1
     fixed_tuple_is_current "$colour_tuple/fixed-llc" || return 1
     local payload
     mkdir -p "$CJCJ_FIXED_LLVM_DIR" || return 1

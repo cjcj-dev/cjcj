@@ -12,7 +12,12 @@ on:
       - 'packages/codegen/src/**'
       - 'tests/runtime_layout/**'
       - 'ci/test-llvm-tuple*.sh'
+      - 'ci/llvm-tuple-platform.test.mjs'
+      - 'ci/bootstrap_inputs_pin.json'
       - 'ci/release/prepare_bootstrap_inputs*'
+      - 'ci/release/acquire_fixed_tuple*'
+      - 'ci/release/tuple_platform.mjs'
+      - 'tools/srcbuild_kkk2.sh'
       - 'ci/release/prepare_bootstrap_fixture.mjs'
       - 'ci/release/prepare_llvm_dylib.test.mjs'
       - 'ci/llvm-dylib/**'
@@ -117,11 +122,30 @@ jobs:
           cp "$RUNNER_TEMP/manifest.original.json" "$root/manifest.json"
           python3 ci/llvm-dylib/verify.py "$root" "$LLVM_SHA" "$LLVM_DYLIB_SHA256"
   contract:
-    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            platform: linux_x86_64
+            target: linux-x64
+          - runner: ubuntu-24.04-arm
+            platform: linux_aarch64
+            target: linux-aarch64
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v7
       - name: Read reviewed artifact pin
-        run: cat ci/llvm_pin.env >> "$GITHUB_ENV"
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const pin = JSON.parse(fs.readFileSync('ci/bootstrap_inputs_pin.json')).platforms[process.env.PLATFORM];
+          if (pin.platform !== process.env.PLATFORM) throw new Error('wrong tuple platform pin');
+          fs.appendFileSync(process.env.GITHUB_ENV,
+            `LLVM_TUPLE_ARTIFACT_ID=${pin.artifact}\nLLVM_TUPLE_RUN_ID=${pin.run}\nLLVM_TUPLE_SUMS_SHA=${pin.tuple_sums_sha256}\n`);
+          NODE
       - uses: actions/download-artifact@v8
         with:
           artifact-ids: ${{ env.LLVM_TUPLE_ARTIFACT_ID }}
@@ -133,19 +157,32 @@ jobs:
         run: |
           set -euo pipefail
           test "$(sha256sum "$RUNNER_TEMP/tuple/SHA256SUMS" | cut -d' ' -f1)" = "$LLVM_TUPLE_SUMS_SHA"
-          cmp ci/llvm_tuple_SHA256SUMS "$RUNNER_TEMP/tuple/SHA256SUMS"
+          grep -Fx 'PLATFORM=${{ matrix.platform }}' "$RUNNER_TEMP/tuple/MANIFEST"
+          if [ '${{ matrix.platform }}' = linux_x86_64 ]; then
+            cmp ci/llvm_tuple_SHA256SUMS "$RUNNER_TEMP/tuple/SHA256SUMS"
+          fi
           bash ci/test-llvm-tuple-layout.sh "$RUNNER_TEMP/layout-test" "$RUNNER_TEMP/tuple"
+          chmod +x "$RUNNER_TEMP/tuple/bin/"*
+          "$RUNNER_TEMP/tuple/bin/llc" --version
+          "$RUNNER_TEMP/tuple/bin/opt" --version
+          "$RUNNER_TEMP/tuple/bin/ld.lld" --version
       - name: Exercise bootstrap input consumer
-        run: node --test ci/release/prepare_bootstrap_inputs.test.mjs ci/release/prepare_llvm_dylib.test.mjs ci/release/colour_runtime.test.mjs
+        env:
+          REAL_BOOTSTRAP_TUPLE_DIR: ${{ runner.temp }}/tuple
+          REAL_BOOTSTRAP_TARGET: ${{ matrix.target }}
+        run: node --test ci/release/acquire_fixed_tuple.test.mjs ci/llvm-tuple-platform.test.mjs ci/release/publish_bootstrap_inputs.test.mjs ci/release/prepare_bootstrap_inputs.test.mjs ci/release/prepare_llvm_dylib.test.mjs ci/release/colour_runtime.test.mjs
       - name: Cut producer and consumer script wiring
         run: bash ci/test-llvm-tuple-wiring.sh "$RUNNER_TEMP/wiring-test"
+      - name: Cut each platform publication and selection guard
+        run: bash ci/test-llvm-tuple-platform-wiring.sh "$RUNNER_TEMP/platform-wiring-test"
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: tuple-layout-evidence
+          name: tuple-layout-evidence-${{ matrix.platform }}
           path: |
             ${{ runner.temp }}/layout-test/*.log
             ${{ runner.temp }}/wiring-test/*.log
             ${{ runner.temp }}/wiring-test/*.diff
             ${{ runner.temp }}/wiring-test/*.sha256
+            ${{ runner.temp }}/platform-wiring-test/logs/*
           if-no-files-found: error

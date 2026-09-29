@@ -10,6 +10,19 @@ const pin = {version: 1, repository: process.env.GITHUB_REPOSITORY,
   run: Number(process.env.GITHUB_RUN_ID), attempt: Number(process.env.GITHUB_RUN_ATTEMPT),
   commit: process.env.GITHUB_SHA, artifact: Number(process.env.BOOTSTRAP_ARTIFACT_ID),
   files: files.map(file => ({path: file.path, mode: file.mode, artifact_sha256: file.sha256, release_sha256: file.sha256, asset: 1}))};
+const platform = process.env.BOOTSTRAP_PLATFORM;
+{
+  const platforms = fs.readFileSync(path.join(root, 'MANIFEST'), 'utf8').split('\n')
+    .filter(line => line.startsWith('PLATFORM=')).map(line => line.slice(9));
+  if (!['linux_x86_64', 'linux_aarch64'].includes(platform)
+      || platforms.length !== 1 || platforms[0] !== platform) {
+    console.error(`BOOTSTRAP_TUPLE_PLATFORM_MISMATCH expected=${platform} actual=${platforms.join(',')}`);
+    process.exit(65);
+  }
+  pin.platform = platform;
+  pin.tuple_sums_sha256 = files.find(file => file.path === 'SHA256SUMS')?.sha256;
+  if (!pin.tuple_sums_sha256) throw new Error('BOOTSTRAP_TUPLE_SUMS_PIN_MISSING');
+}
 validatePin(pin);
 for (const file of files) {
   const source = path.join(root, file.path);
