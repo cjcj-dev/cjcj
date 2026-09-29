@@ -48,7 +48,7 @@ jobs:
       # this step must keep asking the manifest.
       - name: Install release contract dependencies
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq zip unzip clang lld
+          sudo apt-get update -qq && sudo apt-get install -y -qq zip unzip clang lld libssl-dev
           npx --yes zx@8 --version
       # package-lineage compares package bytes with the official host SDK. Load
       # the consumer's pin, not the build job's independently loaded environment.
@@ -223,8 +223,10 @@ jobs:
         with:
           path: dist-runtime
           key: rt-${{ runner.os }}-${{ runner.arch }}-${{ matrix.runner }}-${{ env.RUNTIME_REF }}-${{ env.RUNTIME_VERSION }}-${{ hashFiles('ci/build_patched_runtime.mjs', 'ci/runtime-diagnostics.mjs') }}
+      - name: Install runtime audit dependencies
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libssl-dev
       - name: Install patched runtime
-        run: npx --yes zx@8 ci/install_patched_runtime.mjs "$PWD/dist-runtime"
+        run: npx --yes zx@8 ci/install_patched_runtime.mjs "$PWD/dist-runtime" "$PWD/patched-runtime"
       - name: Build runtime shim
         env:
           CJCJ_LLVM_SHIM_O: ${{ github.workspace }}/fixed-toolchain/${{ matrix.llvm_platform }}/cjselfhost_llvmshim.o
@@ -240,7 +242,7 @@ jobs:
         run: |
           node ci/check-codegen-runtime-layout.mjs
           node ci/release/trimpath.mjs .
-          cjpm build
+          node ci/with-runtime-audit.mjs -- cjpm build
       # Deploy name must be cjcj, not cjc (process-name GC stack-root exclusion -> SEGV).
       - name: Compose compiler
         run: |
