@@ -451,7 +451,7 @@ assert_std_install_shape() {
 }
 
 stdlib_build() {
-  local label="$1" sdk="$2" runtime="$3" prefix="$4" compare_prefix="${5:-}" target_lib="${6:-$2/runtime/lib/$HOST_TUPLE}" ld script
+  local label="$1" sdk="$2" runtime="$3" prefix="$4" compare_prefix="${5:-}" target_lib="${6:-$2/runtime/lib/$HOST_TUPLE}" ld script compiler
   source "$SRC/ci/build_resources.sh"
   configure_build_resources "$HEAP" || die "cannot determine std build resources"
   cmd "python3 $(printf '%q' "$SRC/ci/install_std_sdk_inputs.py") $(printf '%q' "$(dirname "$AST_SUPPORT")") $(printf '%q' "$sdk") $(printf '%q' "$HOST_TUPLE")"
@@ -461,12 +461,11 @@ stdlib_build() {
   script='cd "$1" && rm -rf build/build && python3 build.py clean && python3 build.py build -t relwithdebinfo --jobs "$2" --target-lib="$3" && python3 build.py install --prefix "$4"'
   cmd "env -i HOME=$(printf '%q' "$BUILD_HOME") TMPDIR=$(printf '%q' "$BUILD_TMPDIR") CANGJIE_HOME=$(printf '%q' "$sdk") LD_LIBRARY_PATH=$(printf '%q' "$ld") PATH=$(printf '%q' "$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:/usr/bin:/bin") cjHeapSize=$(printf '%q' "$STD_BUILD_HEAP") bash -c $(printf '%q' "$script") bash $(printf '%q' "$STDSRC") $(printf '%q' "$STD_BUILD_JOBS") $(printf '%q' "$target_lib") $(printf '%q' "$prefix")"
   assert_std_install_shape "$prefix" "$compare_prefix" "$label"
-  if [ -f "$sdk/bin/cjc" ] || [ "$DRY" -eq 1 ]; then
-    local producer_bin="$sdk/bin/cjc"
-    if [ -f "$sdk/bin/cjcj-stage1" ]; then
-      producer_bin="$sdk/bin/cjcj-stage1"
-    fi
-    cmd "python3 -c 'import hashlib,json,sys; h=hashlib.sha256(open(sys.argv[1],\"rb\").read()).hexdigest(); open(sys.argv[2],\"w\").write(json.dumps({\"compiler_sha256\":h})+chr(10))' $(printf '%q' "$producer_bin") $(printf '%q' "$prefix/std-producer.json")"
+  # Match sdk_verify.measured_cjc_sha: the runner is only a launcher.
+  compiler="$sdk/bin/cjc"
+  [ ! -f "$sdk/bin/cjcj-stage1" ] || compiler="$sdk/bin/cjcj-stage1"
+  if [ -f "$compiler" ] || [ "$DRY" -eq 1 ]; then
+    cmd "python3 -c 'import hashlib,json,sys; h=hashlib.sha256(open(sys.argv[1],\"rb\").read()).hexdigest(); open(sys.argv[2],\"w\").write(json.dumps({\"compiler_sha256\":h})+chr(10))' $(printf '%q' "$compiler") $(printf '%q' "$prefix/std-producer.json")"
   fi
 }
 
@@ -685,7 +684,6 @@ assemble_stage1_sdk() {
     cmd "python3 $(printf '%q' "$SDK_VERIFY") --sdk $(printf '%q' "$sdk") --role target --runtime-pin $(printf '%q' "${RUNTIME_PIN:-$SRC/ci/runtime_pin.env}")"
   fi
   assert_installed_llvm_tuple "$sdk" "$COLOUR_TUPLE"
-  cmd "install -m644 $(printf '%q' "$COLOUR_LLVM_SO") $(printf '%q' "$sdk/third_party/llvm/lib/libLLVM-15.so")"
   if [ "$DRY" -eq 0 ]; then
     assert_expected_sha target-colour-llvm "$sdk/third_party/llvm/lib/libLLVM-15.so" "$COLOUR_LLVM_SHA256"
   fi
@@ -777,6 +775,38 @@ stage1() {
     [ -d "$std" ] || die 'stage1 未产出 stdlib-stage2'
   fi
   assert_version cjcj-stage2 "$out" "$sdk" "$CRT"
+  # Forensic arm is opt-in and runs only after the release compiler is installed.
+  # It does not rewrite $out. Spec: cjpm `build -g` (default off) lands in
+  # target/debug; std RelWithDebInfo already passes -g via AddCangjieSource.cmake.
+  stage2_forensic
+}
+
+# Optional -g stage2 for line tables on cjcj packages. Default off.
+# Independent tree; same shim inputs as the release arm; one extra cjpm flag.
+stage2_forensic() {
+  local copy seed out sdk src_stamp
+  [ "${CJCJ_FORENSIC_STAGE2:-0}" = 1 ] || return 0
+  sdk="$WORK/sdk-stage1"
+  out="$WORK/cjcj-stage2-forensic"
+  copy="$WORK/cjcj-src-stage1-forensic"
+  echo "OUTPUT cjcj-stage2-forensic=$out"
+  echo "FORENSIC stage2 enabled=1 flag=-g product-dir=target/debug/bin source=$copy"
+  isolate_cjcj_src "$copy"
+  shim_build stage1 "$sdk" "$CRT" "$copy" "$sdk/third_party/llvm/fixed-llc/cjselfhost_llvmshim.o"
+  cjpm_build "$sdk" "$HRT" "$copy" "-j $JOBS -g" "$STAGE1_HEAP"
+  seed=$(resolve_cjpm_product "$copy/target/debug/bin" cjcj-stage2-forensic)
+  install_stage_compiler "$seed" "$out" "$WORK/cjc-stage2-forensic"
+  if [ "$DRY" -eq 0 ]; then
+    assert_executable cjcj-stage2-forensic "$out"
+    record cjcj-stage2-forensic "$out"
+    src_stamp="$copy/cjpm.toml"
+    record cjcj-stage2-forensic-src "$src_stamp"
+    echo "INPUT cjcj-stage2-forensic-cjcj-sha sha256=$CJCJ_SHA"
+  else
+    echo "INPUT cjcj-stage2-forensic path=$out sha256=planned"
+    echo "INPUT cjcj-stage2-forensic-src path=$copy/cjpm.toml sha256=planned"
+    echo "INPUT cjcj-stage2-forensic-cjcj-sha sha256=$CJCJ_SHA"
+  fi
 }
 
 main() {

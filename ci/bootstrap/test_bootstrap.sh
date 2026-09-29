@@ -171,6 +171,11 @@ check_dry_contract() {
   # cjpm: std and stage0 have independently configured heap requests.
   check_count CJPM-EXEC-HEAP 1 "cjHeapSize=$heap bash -c .*tools/bin/cjpm\\\\ build\\\\ -j\\\\ $jobs$" "$log"
   echo "PASS dry stage1 cjpm heap=$heap reaches execution command"
+  # Release arm stays free of the forensic -g / debug pickup (default env off).
+  check_count FORENSIC 0 'cjcj-stage2-forensic' "$log"
+  check_count FORENSIC 0 'target/debug/bin' "$log"
+  check_count FORENSIC 0 'cjpm build -j .* -g' "$log"
+  echo 'PASS dry release arm has no forensic stage2'
   check_shim_call_count "$log"
   check_count SHIM 1 'CMD shim build label=stage0 .*source-object=source .*sdk=.*/sdk-stage0 .*runtime=.*/host-rt' "$log"
   check_count SHIM 1 'CMD shim build label=stage1 .*source-object=.*/sdk-stage1/third_party/llvm/fixed-llc/cjselfhost_llvmshim.o .*sdk=.*/sdk-stage1 .*runtime=.*/colour-rt' "$log"
@@ -183,7 +188,7 @@ check_dry_contract() {
   check_dry_build_env "$log"
   check_count LLVM-SO 1 'sdk_build.sh .*--host --llvm-so .*libLLVM-15.so' "$log"
   check_count LLVM-SO 1 'ASSERT installed-host-llvm-so sha256=planned' "$log"
-  check_count LLVM-TUPLE 2 'sdk_build.sh .*--target .*--llvm-tuple .*colour-tuple' "$log"
+  check_count LLVM-TUPLE 2 'sdk_build.sh .*--target .*--llvm-tuple .*colour-tuple --llvm-so .*colour-libLLVM-15.so' "$log"
   check_count HOST-RT 2 '--verify-host-rt .*/host-rt' "$log"
   check_count HOST-RUNNER 2 'stage1_host_runner.sh .*/sdk-stage1 .*/sdk-stage0 .*/host-rt' "$log"
    check_count LLVM-TUPLE 30 'ASSERT installed-colour-tuple sha256=planned' "$log"
@@ -306,6 +311,43 @@ run_sdk_tuple() {
     --llvm-tuple "$TMP/colour-tuple" --colour-runtime "$TMP/colour-reference.so" --host-runtime "$TMP/sdk-base/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so" --force
 }
 
+check_std_compiler_identity() {
+  new_tmp
+  make_isolation_fixture
+  local sdk="$TMP/isolation/sdk" expected actual mode
+  # Both layouts enter the same stdlib_build producer; wrapper bytes must never
+  # become the compiler identity consumed by sdk_verify.
+  for mode in direct runner; do
+    cp /bin/true "$sdk/bin/cjc"
+    if [ "$mode" = runner ]; then
+      cp /bin/true "$sdk/bin/cjcj-stage1"
+      printf '#!/bin/sh\nexec "$(dirname "$0")/cjcj-stage1" "$@"\n' > "$sdk/bin/cjc"
+    fi
+    run_isolation_check "$PRODUCT" > "$TMP/identity-$mode.log" || fail STD_CJC 'stdlib producer failed'
+    expected=$(sha256sum /bin/true | awk '{print $1}')
+    actual=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["compiler_sha256"])' "$TMP/isolation/std/std-producer.json")
+    [ "$actual" = "$expected" ] || fail STD_CJC "$mode producer=$actual compiler=$expected"
+    echo "PASS STD_CJC $mode producer=$actual compiler=$expected"
+  done
+}
+
+check_tuple_with_so() {
+  new_tmp
+  make_colour_tuple
+  make_sdk_fixture
+  cp "$TMP/colour-libLLVM-15.so" "$TMP/libLLVM-15.so"
+  bash "$SDK_PRODUCT" --from "$TMP/sdk-base" --to "$TMP/sdk-combined" --host \
+    --llvm-tuple "$TMP/colour-tuple" --llvm-so "$TMP/libLLVM-15.so" \
+    --colour-runtime "$TMP/colour-reference.so" \
+    --host-runtime "$TMP/sdk-base/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so" \
+    > "$TMP/combined.log" 2>&1 || { cat "$TMP/combined.log"; fail LLVM_TUPLE 'combined installer failed'; }
+  cmp -s "$TMP/libLLVM-15.so" "$TMP/sdk-combined/third_party/llvm/lib/libLLVM-15.so" ||
+    fail LLVM_TUPLE 'combined installer retained baseline libLLVM'
+  cmp -s "$TMP/colour-tuple/bin/opt" "$TMP/sdk-combined/third_party/llvm/bin/opt" ||
+    fail LLVM_TUPLE 'combined installer changed tuple opt'
+  echo 'PASS LLVM_TUPLE combined tuple and process library installed before verification'
+}
+
 make_runtime_payload() {
   local root="$1" sha="$2" tuple="${3:-}" dyn="$1" static=''
   if [ -n "$tuple" ]; then
@@ -350,8 +392,15 @@ run_sdk_runtime_checked() {
   fi
 }
 
+# Read the same checked-in pin that sdk_build.sh passes to sdk_verify.py.
+# Keep fixture identity independent of caller overrides and product selection.
+runtime_fixture_ref() {
+  (source "$ROOT/../runtime_pin.env" && printf '%s\n' "$RUNTIME_REF")
+}
+
 positive_runtime_layouts() {
-  local flat_sha=97c42fe77c42bc33efedbe6a395043fd58443358 tuple=linux_x86_64_cjnative
+  local flat_sha tuple=linux_x86_64_cjnative
+  flat_sha=$(runtime_fixture_ref) || fail runtime-pin 'cannot read runtime pin'
   new_tmp
   make_sdk_fixture
   make_runtime_payload "$TMP/$flat_sha" "$flat_sha"
@@ -364,7 +413,7 @@ positive_runtime_layouts() {
     fail runtime-flat 'boundscheck SO was not installed from flat sodepot'
   cmp -s "$TMP/sdk-base/lib/$tuple/libcangjie-runtime.a" "$TMP/sdk-flat/lib/$tuple/libcangjie-runtime.a" ||
     fail runtime-flat 'flat shared closure unexpectedly changed the base static archive'
-  make_runtime_payload "$TMP/runtime-install" 97c42fe77c42bc33efedbe6a395043fd58443358 "$tuple"
+  make_runtime_payload "$TMP/runtime-install" "$flat_sha" "$tuple"
   run_sdk_runtime_checked runtime-nested "$SDK_PRODUCT" "$TMP/runtime-install" "$TMP/sdk-nested"
   cmp -s "$TMP/runtime-install/runtime/lib/$tuple/libcangjie-runtime.so" "$TMP/sdk-nested/runtime/lib/$tuple/libcangjie-runtime.so" ||
     fail runtime-nested 'runtime SO was not installed from nested prefix'
@@ -374,7 +423,8 @@ positive_runtime_layouts() {
 }
 
 positive_runtime_layout_symlink_nested_only() {
-  local sha=97c42fe77c42bc33efedbe6a395043fd58443358 tuple=linux_x86_64_cjnative
+  local sha tuple=linux_x86_64_cjnative
+  sha=$(runtime_fixture_ref) || fail runtime-pin 'cannot read runtime pin'
   new_tmp
   make_sdk_fixture
   make_runtime_payload "$TMP/real-install" "$sha" "$tuple"
@@ -389,7 +439,8 @@ positive_runtime_layout_symlink_nested_only() {
 }
 
 positive_runtime_layout_symlink_flat_only() {
-  local sha=97c42fe77c42bc33efedbe6a395043fd58443358 tuple=linux_x86_64_cjnative
+  local sha tuple=linux_x86_64_cjnative
+  sha=$(runtime_fixture_ref) || fail runtime-pin 'cannot read runtime pin'
   new_tmp
   make_sdk_fixture
   make_runtime_payload "$TMP/real-flat" "$sha"
@@ -734,6 +785,48 @@ fault_shim_wiring() {
   check_shim_call_count "$TMP/skip-stage0-shim.log"
 }
 
+# Use one assertion set for candidate, faults and restoration. Do not stop at
+# the first failure: the release assertions must also execute in fault arms.
+assert_forensic_plan() {
+  local log="$1" jobs="${CJ_JOBS:-$(getconf _NPROCESSORS_ONLN)}" failed=0
+  local label expected pattern count
+  while IFS='|' read -r label expected pattern; do
+    count=$(/usr/bin/grep -c -- "$pattern" "$log" || true)
+    if [ "$count" -eq "$expected" ]; then
+      echo "PASS $label count=$count"
+    else
+      echo "TEST-FAIL [$label] count=$count expected=$expected pattern=$pattern"
+      failed=$((failed+1))
+    fi
+  done <<EOF
+forensic-output|1|OUTPUT cjcj-stage2-forensic=
+forensic-g|1|CMD cjpm build -j $jobs -g bin=
+forensic-isolation|1|ISOLATE cjcj-src from=.* dest=.*/cjcj-src-stage1-forensic[[:space:]]
+forensic-debug|2|target/debug/bin
+forensic-pickup|1|product=planned dir=.*/cjcj-src-stage1-forensic/target/debug/bin
+forensic-stamp|1|INPUT cjcj-stage2-forensic path=.* sha256=planned
+forensic-source-stamp|1|INPUT cjcj-stage2-forensic-src path=.*cjpm.toml sha256=planned
+release-pickup|1|product=planned dir=.*/cjcj-src-stage1/target/release/bin
+release-command|1|CMD cjpm build -j $jobs bin=.* cwd=.*/cjcj-src-stage1 heap=
+EOF
+  echo "ASSERTIONS total=9 failed=$failed"
+  [ "$failed" -eq 0 ]
+}
+
+check_forensic_dry() {
+  make_dry_fixture
+  CJCJ_FORENSIC_STAGE2=1 dry_run > "$TMP/forensic-dry.log" || fail FORENSIC 'forensic dry-run failed'
+  assert_forensic_plan "$TMP/forensic-dry.log"
+}
+
+fault_forensic_drop_g() {
+  make_dry_fixture
+  sed 's/"-j \$JOBS -g"/"-j \$JOBS"/' "$PRODUCT" > "$TMP/bootstrap-no-g.sh"
+  PRODUCT="$TMP/bootstrap-no-g.sh"
+  CJCJ_FORENSIC_STAGE2=1 dry_run > "$TMP/forensic-cut.log" || fail FORENSIC-CUT 'cut dry-run failed before assertion'
+  assert_forensic_plan "$TMP/forensic-cut.log"
+}
+
 check_shim_wiring() {
   make_dry_fixture
   dry_run > "$TMP/shim-wiring.log"
@@ -745,6 +838,8 @@ check_shim_wiring() {
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then return 0; fi
 
 case "${1:-test}" in
+  check-std-compiler-identity) check_std_compiler_identity;;
+  check-tuple-with-so) check_tuple_with_so;;
   check-exit-receipts)
     shift
     check_exit_receipts "$@"
@@ -936,6 +1031,12 @@ case "${1:-test}" in
   check-shim-wiring)
     check_shim_wiring
     ;;
+  check-forensic-dry)
+    check_forensic_dry
+    ;;
+  fault-forensic-drop-g)
+    fault_forensic_drop_g
+    ;;
   ruler-control)
     [ $# -eq 4 ] || fail ruler-control 'usage: ruler-control OFFICIAL_OPT COLOUR_TUPLE EXPECTED_LLVM_SHA'
     # shellcheck disable=SC1090 # Product path is resolved above.
@@ -948,6 +1049,8 @@ case "${1:-test}" in
     ;;
   test)
     bash "$0" check-dry-build-env || fail A4 'dry environment matrix failed'
+    bash "$0" check-std-compiler-identity || fail STD_CJC "compiler identity regression"
+    bash "$0" check-tuple-with-so || fail LLVM_TUPLE "combined tuple regression"
     bash "$0" check-exit-receipts || fail EXIT-RECEIPT "exit receipt regression"
     bash "$0" check-sdk-literal-prefix || fail STD-LITERAL-PREFIX "literal prefix regression"
     make_dry_fixture

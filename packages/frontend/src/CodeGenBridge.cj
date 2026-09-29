@@ -702,7 +702,7 @@ private class ToCHIR {
                 return
             }
             let threadNum = Int64(options.GetJobs())
-            TypeValue.SetCHIRBuilder(builder)
+            TypeValue.SetCHIRBuilder(Some(builder))
             let typeAnalysisWrapper = AnalysisWrapper<TypeAnalysis, TypeDomain>(builder,
                 { analysisPackage: RealCHIRPackage, analysisBuilder: ChirBuilder =>
                     TypeAnalysis.InitialiseLetGVState(analysisPackage, analysisBuilder, typeAnalysisGlobals,

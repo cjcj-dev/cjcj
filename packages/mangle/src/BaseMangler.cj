@@ -591,9 +591,9 @@ public open class BaseMangler {
     public var moduleDelimiter: String = MANGLE_DOLLAR_PREFIX
     public var lambdaCounter: Int64 = 0
     public var exportIdMode: Bool = false
-    // Shared read-only across parallel DoMangling batches (CompilerInstance.cpp:846-870).
-    public let manglerCtxTable: ConcurrentHashMap<String, ManglerContext> =
-        ConcurrentHashMap<String, ManglerContext>()
+    // BaseMangler.h:184 unordered_map<string, Ptr<ManglerContext>>. HashMap so clear drops values
+    // (ConcurrentHashMap.remove keeps removed values reachable).
+    public let manglerCtxTable: HashMap<String, ManglerContext> = HashMap<String, ManglerContext>()
     public var adapter: MangleAstAdapter = MangleAstAdapter()
 
     public init() {}
@@ -602,15 +602,8 @@ public open class BaseMangler {
         moduleDelimiter = delimiter
     }
 
-    // ConcurrentHashMap has no clear(); callers of the former HashMap.clear() use this.
     public func ClearManglerCtxTable(): Unit {
-        let keys = ArrayList<String>()
-        for ((key, _) in manglerCtxTable) {
-            keys.add(key)
-        }
-        for (key in keys) {
-            manglerCtxTable.remove(key)
-        }
+        manglerCtxTable.clear()
     }
 
     public func Mangle(decl: Decl): String {

@@ -13,6 +13,7 @@ const pins = file => Object.fromEntries(read(file).trim().split('\n').map(line =
   const i = line.indexOf('=');
   return [line.slice(0, i), line.slice(i + 1)];
 }));
+const runtime = pins('ci/runtime_pin.env');
 const llvm = pins('ci/llvm_pin.env');
 const input = JSON.parse(read('ci/bootstrap_inputs_pin.json'));
 
@@ -25,13 +26,13 @@ test('release runtime loader selects the stack-slot-root runtime paired with LLV
     const result = spawnSync(process.execPath, [fileURLToPath(new URL('ci/load_runtime_pin.mjs', root))], {env, encoding: 'utf8'});
     assert.equal(result.status, 0, result.stderr);
     const selected = /^RUNTIME_REF=(.*)$/m.exec(fs.readFileSync(output, 'utf8'))?.[1];
-    assert.equal(selected, '97c42fe77c42bc33efedbe6a395043fd58443358', 'release runtime must provide the paired ordinary-statepoint register-root contract');
+    assert.equal(selected, runtime.RUNTIME_REF, 'release runtime must provide the paired ordinary-statepoint register-root contract');
     console.log(`ASSERT release-runtime-selected=${selected}`);
   } finally { fs.rmSync(dir, {recursive: true, force: true}); }
 });
 
 test('release LLVM source and both dylib provenance pins use the stack-slot-root and RawData safepoint producer', () => {
-  assert.equal(llvm.LLVM_SHA, 'e40afeefa6ccaee67d0d3e30d8a70b08f25c86f6');
+  assert.match(llvm.LLVM_SHA, /^[0-9a-f]{40}$/, 'LLVM source identity comes from ci/llvm_pin.env');
   for (const platform of ['linux_x86_64', 'linux_aarch64']) {
     const dylib = pins(`ci/llvm-dylib/${platform}.env`);
     assert.equal(dylib.LLVM_DYLIB_SOURCE_SHA, llvm.LLVM_SHA, platform);

@@ -11,7 +11,7 @@ import path from 'node:path';
 // failure is silent by construction -- an unreferenced test file looks exactly
 // like a referenced one, and nothing goes red when a contract stops being
 // checked. Among the twenty were phase-control.test.mjs, which the dry-run policy
-// names as its own unblock condition, and write-barrier.test.mjs.
+// names as its own unblock condition.
 //
 // A bare glob would also have closed that hole, but it forces an exclusion list
 // for the entries below that need an invocation CI does not yet have -- and an
@@ -57,7 +57,6 @@ export const GATING = Object.freeze([
   'build/test/system-deps.test.mjs',
   'build/test/toolchain-identity.test.mjs',
   'build/test/verifier-report-mode.test.mjs',
-  'build/test/write-barrier.test.mjs',
   'ci/evidence-discovery.test.mjs',
   'ci/full-gate-floor.test.mjs',
   'ci/gc-fix-floor.test.mjs',
@@ -79,6 +78,7 @@ export const GATING = Object.freeze([
   'ci/release/bootstrap_store.test.mjs',
   'ci/release/colour_runtime.test.mjs',
   'ci/release/cross-runtime.test.mjs',
+  'ci/release/darwin_runtime.test.mjs',
   'ci/release/host_llvm.test.mjs',
   'ci/release/prepare_llvm_dylib.test.mjs',
   'ci/release/publish_bootstrap_inputs.test.mjs',

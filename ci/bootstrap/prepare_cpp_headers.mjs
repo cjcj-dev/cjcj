@@ -45,8 +45,11 @@ export async function prepareCppHeaders(cppSrc) {
     throw new Error(`schema/ModuleFormat.fbs absent at CANGJIE_COMPILER_SHA ${pin.CANGJIE_COMPILER_SHA}: ${cpp}`);
   }
   const llvm = path.join(cpp, 'third_party/llvm-project');
+  const runtimePin = readPin('runtime_pin.env');
+  const runtime = path.join(cpp, 'third_party/paired-runtime');
   const flatbuffers = path.join(cpp, 'third_party/flatbuffers');
   await checkoutExactSource(pin.LLVM_URL, llvm, pin.LLVM_SHA);
+  await checkoutExactSource(runtimePin.RUNTIME_SRC_URL, runtime, runtimePin.RUNTIME_REF);
   await checkoutExactSource(pin.FLATBUFFERS_URL, flatbuffers, pin.FLATBUFFERS_SHA);
 
   const build = path.join(cpp, 'build/build');
@@ -65,6 +68,7 @@ export async function prepareCppHeaders(cppSrc) {
   const results = await Promise.allSettled([
     (async () => {
       await execute(['cmake', '-G', 'Ninja', '-S', `${llvm}/llvm`, '-B', llvmBuild,
+        `-DCANGJIE_RUNTIME_SOURCE_DIR=${runtime}`,
         '-DCMAKE_BUILD_TYPE=Release', '-DLLVM_ENABLE_PROJECTS=', '-DLLVM_TARGETS_TO_BUILD=X86',
         '-DLLVM_ENABLE_RTTI=OFF', '-DLLVM_INCLUDE_TESTS=OFF',
         '-DCMAKE_C_COMPILER=clang', '-DCMAKE_CXX_COMPILER=clang++',
@@ -91,6 +95,7 @@ export async function prepareCppHeaders(cppSrc) {
   const manifest = {
     compiler: {url: pin.CANGJIE_COMPILER_URL, sha: pin.CANGJIE_COMPILER_SHA},
     llvm: {url: pin.LLVM_URL, sha: pin.LLVM_SHA},
+    runtime: {url: runtimePin.RUNTIME_SRC_URL, sha: runtimePin.RUNTIME_REF},
     flatbuffers: {url: pin.FLATBUFFERS_URL, sha: pin.FLATBUFFERS_SHA},
     schema: {path: 'schema/ModuleFormat.fbs', sha256: digest(schemaSource)},
     flatc: {path: path.join(flatBuild, 'flatc'), sha256: digest(path.join(flatBuild, 'flatc'))},
