@@ -25,6 +25,7 @@ export const repoRoot = path.resolve(import.meta.dirname, '..');
 
 // Run by `node --test` in .github/workflows/ci.yml, via `test-manifest.mjs list`.
 export const GATING = Object.freeze([
+  'ci/release/g8.test.mjs',
   'build/test/archive.test.mjs',
   'build/test/cangjie-written-tools.test.mjs',
   'build/test/compose-install.test.mjs',
@@ -61,17 +62,20 @@ export const GATING = Object.freeze([
   'ci/full-gate-floor.test.mjs',
   'ci/gc-fix-floor.test.mjs',
   'ci/g2-identity-gate.test.mjs',
+  'ci/g10/run.test.mjs',
   'ci/generate-freeze.test.mjs',
   'ci/gc-release-floor.test.mjs',
   'ci/host-toolchain-pin.test.mjs',
   'ci/idle-writer-policy.test.mjs',
   'ci/llvm-tools-manifest.test.mjs',
   'ci/objc_darwin/run_e2e.test.mjs',
+  'ci/patched-runtime-diagnostics.test.mjs',
   'ci/patched-runtime-language-defer.test.mjs',
   'ci/bootstrap/prepare_cpp_headers.test.mjs',
   'ci/pin-sweep.test.mjs',
   'ci/release-pair-pin.test.mjs',
   'ci/release-gates.test.mjs',
+  'ci/release-run-evidence.test.mjs',
   // Node fixtures use mocked transport, no SDK or credentials. The publisher
   // exercises real zip/unzip; ci.yml installs both before running this list.
   'ci/release/android-platform.test.mjs',
