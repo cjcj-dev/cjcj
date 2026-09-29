@@ -24,9 +24,30 @@ try {
   process.exit(2);
 }
 
+// The samples are compiled by our self-built compiler, so they are our own
+// artifact and must link the source-built runtime -- not the official SDK's.
+// ci/install_patched_runtime.mjs publishes that runtime outside the SDK and
+// exports the directory as CJCJ_PATCHED_RUNTIME_LIB_DIR; the driver otherwise
+// searches $CANGJIE_HOME/runtime/lib, which now holds the official runtime.
+// --library-path is searched before the default, so the link resolves the
+// coloured runtime without any official SDK byte being touched.
+const runtimeLibDir = process.platform === 'win32' ? '' : (process.env.CJCJ_PATCHED_RUNTIME_LIB_DIR || '');
+const linkArgs = runtimeLibDir ? ['-L', runtimeLibDir] : [];
+if (runtimeLibDir) console.log(`[smoke] linking against the isolated runtime: ${runtimeLibDir}`);
+
 let pass = 0;
 let fail = 0;
 if (process.platform === 'win32') process.env.cjStackSize = process.env.cjStackSize || '64MB';
+
+// The samples carry a RUNPATH into $CANGJIE_HOME/runtime/lib, which now holds
+// the official runtime. LD_LIBRARY_PATH is consulted first, so the isolated
+// runtime wins at load time and the sample runs the library it was linked
+// against. Only our own self-built samples get this; official SDK tools keep
+// whatever the SDK alone sets.
+if (runtimeLibDir) {
+  const ldKey = process.platform === 'darwin' ? 'DYLD_LIBRARY_PATH' : 'LD_LIBRARY_PATH';
+  process.env[ldKey] = [runtimeLibDir, process.env[ldKey]].filter(Boolean).join(':');
+}
 
 async function runCommand(executable, args, cwd) {
   const t0 = performance.now();
@@ -226,7 +247,7 @@ for (const [name, wanted] of expect) {
   const runLog = path.join(work, `${name}.run.log`);
   await Promise.all([fs.rm(exe, {force: true}), fs.rm(buildLog, {force: true}), fs.rm(runLog, {force: true})]);
   console.log(`[smoke] sample ${name}`);
-  const built = await runCommand(cjcj, [src, '-o', exe]);
+  const built = await runCommand(cjcj, [...linkArgs, src, '-o', exe]);
   await fs.writeFile(buildLog, `rc=${built.exitCode} signal=${built.signal ?? 'none'} ms=${built.ms}\n--- stdout ---\n${built.stdout}\n--- stderr ---\n${built.stderr}`);
   if (built.exitCode !== 0) {
     reportFailure('compile', name, built);
@@ -256,14 +277,14 @@ await fs.rm(macroBuild, {recursive: true, force: true});
 await fs.cp(path.join(here, 'macro_demo'), macroBuild, {recursive: true});
 let macroOk = true;
 let got = '';
-let result = await runCommand(cjcj, ['--compile-macro', 'def.cj'], path.join(macroBuild, 'mymacros'));
+let result = await runCommand(cjcj, [...linkArgs, '--compile-macro', 'def.cj'], path.join(macroBuild, 'mymacros'));
 await fs.writeFile(path.join(work, 'macro.build.log'), `rc=${result.exitCode} signal=${result.signal ?? 'none'} ms=${result.ms}\n--- stdout ---\n${result.stdout}\n--- stderr ---\n${result.stderr}`);
 if (result.exitCode !== 0) {
   reportFailure('compile', '06_macro/package', result);
   macroOk = false;
 }
 if (macroOk) {
-  result = await runCommand(cjcj, ['main.cj', '--import-path', macroBuild, '-o', path.join(macroBuild, `app/app${exeSuffix}`)], path.join(macroBuild, 'app'));
+  result = await runCommand(cjcj, [...linkArgs, 'main.cj', '--import-path', macroBuild, '-o', path.join(macroBuild, `app/app${exeSuffix}`)], path.join(macroBuild, 'app'));
   await fs.writeFile(path.join(work, 'macro.app.log'), `rc=${result.exitCode} signal=${result.signal ?? 'none'} ms=${result.ms}\n--- stdout ---\n${result.stdout}\n--- stderr ---\n${result.stderr}`);
   if (result.exitCode !== 0) {
     reportFailure('compile', '06_macro/app', result);
