@@ -826,7 +826,7 @@ test('DAG compose endpoint installs recorded stage3 after package', () => {
 test('step_31 execs bootstrap.sh not build-stage1.mjs and only that contract turns red on revert', () => {
   assert.deepEqual(bootstrapExecDefects(script), []);
   const mutated = script.replace(
-    /step_31\(\) \{\n    ulimit -c unlimited \|\| true\n    run_bootstrap_stage stage0\n\}/,
+    /step_31\(\) \{\n    ulimit -c 0\n    run_bootstrap_stage stage0\n\}/,
     'step_31() {\n    npx --yes zx@8 "$REPO_ROOT/ci/srcbuild/steps/build-stage1.mjs"\n}',
   );
   assert.deepEqual(bootstrapExecDefects(mutated), ['step_31-not-bootstrap', 'step_31-build-stage1']);
@@ -845,7 +845,7 @@ test('bootstrap argv missing one 66aec40 flag turns only the flag contract red',
 test('stage0 PATH injection of colour opt turns only the isolation contract red', () => {
   assert.deepEqual(bootstrapExecDefects(script), []);
   const mutated = script.replace(
-    /step_31\(\) \{\n    ulimit -c unlimited \|\| true\n    run_bootstrap_stage stage0\n\}/,
+    /step_31\(\) \{\n    ulimit -c 0\n    run_bootstrap_stage stage0\n\}/,
     'step_31() {\n    PATH=/root/llvmdepot/opt:$PATH\n    run_bootstrap_stage stage0\n}',
   );
   assert.deepEqual(bootstrapExecDefects(mutated), ['stage0-colour-opt-on-path']);
@@ -1060,7 +1060,7 @@ const astInputPins = {
 
 // Execute the complete driver, including retained-state loading, prerequisite,
 // run_step and the final RESULT. Only external inputs live in the fixture.
-function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFailure = false, child = false, runtimeCase = 'valid', ast = 'explicit', largeContract = false, contractDefect} = {}) {
+function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFailure = false, child = false, coreObserve = false, runtimeCase = 'valid', ast = 'explicit', largeContract = false, contractDefect} = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bootstrap argv '));
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));
   for (const dir of ['ci', 'build', 'tools']) {
@@ -1196,6 +1196,9 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
   if (child) {
     const entry = inputs + '/bootstrap child.sh';
     fs.writeFileSync(entry, '#!/bin/bash\nprintf "CHILD SDK_BUILD=%s\\n" "$SDK_BUILD"\nprintf "ARG=<%s>\\n" "$@"\nexit "${CHILD_RC:-0}"\n', {mode: 0o755});
+    if (coreObserve) {
+      fs.writeFileSync(entry, '#!/bin/bash\nprintf "CHILD_CORE_LIMIT=%s\\n" "$(ulimit -c)"\nprintf "CHILD_CORE_HARD=%s\\n" "$(ulimit -Hc)"\n');
+    }
     env.CJCJ_BOOTSTRAP_SH = entry;
   }
   return {
@@ -1216,7 +1219,7 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
       return result;
     },
     run(step, childRc = 0) {
-      const result = spawnSync('bash', [driver, '--from-step', String(step), '--through-step', String(step)],
+      const result = spawnSync('bash', [...(coreObserve ? ['-x'] : []), driver, '--from-step', String(step), '--through-step', String(step)],
         {encoding: 'utf8', env: {...env, CHILD_RC: String(childRc)}});
       const logs = path.join(state, 'logs');
       const logFile = fs.readdirSync(logs).find(name => name.endsWith(`-step${step}.log`));
@@ -1459,4 +1462,23 @@ test('ast-support input contract missing stops real stage entry', t => {
   };
   console.log(`AST_ENTRY_ASSERT ${JSON.stringify(observed)}`);
   assert.deepEqual(observed, {rc: 1, missingKey: true, bootstrapStarted: false});
+});
+
+test('stage0 disables core dumps before launching the bootstrap child', t => {
+  const result = bootstrapDriverFixture(t, {child: true, coreObserve: true}).run(31);
+  const limit = result.log.match(/^CHILD_CORE_LIMIT=(.*)$/m)?.[1];
+  const hard = result.log.match(/^CHILD_CORE_HARD=(.*)$/m)?.[1];
+  const setLimit = result.log.indexOf('ulimit -c 0');
+  const launch = result.log.indexOf('run_bootstrap_stage stage0');
+  const observed = {
+    rc: result.status,
+    limit,
+    hard,
+    disabledBeforeLaunch: setLimit >= 0 && launch > setLimit,
+    completed: /RESULT=success through_step=31/.test(result.stdout),
+  };
+  console.log('OBSERVED stage0 core policy ' + JSON.stringify(observed));
+  assert.deepEqual(observed, {
+    rc: 0, limit: '0', hard: '0', disabledBeforeLaunch: true, completed: true,
+  }, 'stage0 must explicitly disable core dumps before its child inherits the limit');
 });

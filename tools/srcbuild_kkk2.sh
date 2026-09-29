@@ -1270,7 +1270,7 @@ run_bootstrap_stage() {
 }
 
 step_31() {
-    ulimit -c unlimited || true
+    ulimit -c 0
     run_bootstrap_stage stage0
 }
 
