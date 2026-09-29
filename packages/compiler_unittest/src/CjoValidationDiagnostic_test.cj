@@ -6,7 +6,7 @@ import cjcj::utils.{FileUtil, GenerateRandomHexString}
 import std.unittest.*
 import std.unittest.testmacro.*
 import cjcj::ast.*
-import cjcj::basic.{CANGJIE_VERSION, DiagCategory}
+import cjcj::basic.{CANGJIE_VERSION, DiagCategory, DiagKindRefactorName}
 import cjcj::basic.DiagnosticEngine as HeaderDiagnostics
 import cjcj::frontend.*
 import cjcj::modules.{ASTLoader, GetPackage}
@@ -44,6 +44,8 @@ private func CheckValidationDiagnostic(result: TestCompileResult, data: Array<UI
     @Assert(diagnostics.size, 1)
     println("HEADER_TARGET producer=${producer} different=${different}")
     @Expect(diagnostics[0].errorMessage, expected)
+    @Expect(DiagKindRefactorName(diagnostics[0].rKind),
+        if (different) { "module_loaded_ast_failed_with_version" } else { "module_loaded_ast_failed" })
 
     let pkg = RequireFirstPackage(result)
     let frontendDiag = DiagnosticEngine()
@@ -68,7 +70,7 @@ private func CheckImportedValidation(result: TestCompileResult, data: Array<UInt
     valid: Bool): Unit {
     let directory = FileUtil.JoinPath(getVariable("CJO_DIAGNOSTIC_TEST_TMP") ?? ".",
         "cjo-" + GenerateRandomHexString())
-    @Assert(FileUtil.CreateDirs(directory + "/"))
+    @Assert(FileUtil.CreateDirs(directory + "/"), 0)
     @Assert(FileUtil.WriteBufferToASTFile(directory + "/diagnosticfixture.cjo", data))
     let diag = DiagnosticEngine()
     let manager = ImportManager(diag,
