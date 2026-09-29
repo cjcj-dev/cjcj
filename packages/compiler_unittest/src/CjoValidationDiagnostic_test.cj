@@ -48,20 +48,33 @@ private func CheckValidationDiagnostic(result: TestCompileResult, data: Array<UI
         if (different) { "module_loaded_ast_failed_with_version" } else { "module_loaded_ast_failed" })
 
     let pkg = RequireFirstPackage(result)
-    let frontendDiag = DiagnosticEngine()
-    let loader = CjoSignatureMaterializer(packageName, pkg, HashMap<UInt32, File>(),
-        HashMap<UInt64, File>(), ArrayList<Package>(), HashMap<String, PackageDecl>(),
-        HashMap<String, HashMap<String, Decl>>(), frontendDiag,
-        result.instance.typeManager.getOrThrow().AsFaithfulSemaTypeManager(), data: Some(data))
-    loader.SetCjoPath(cjoPath)
-    @Expect(loader.LoadPackageDepInfo(), "")
-    @Expect(frontendDiag.GetErrorCount(), 1u64)
-    // The frontend exposes the production diagnostic output, not its backing
-    // engine. The integration runner asserts the emitted message in this block.
-    println("FRONTEND_TARGET_BEGIN")
-    frontendDiag.EmitCategoryDiagnostics(DiagCategory.MODULE)
-    println("FRONTEND_TARGET_END")
-    println("FRONTEND_EXPECTED=${expected}")
+    for (entry in ["dep-info", "dependencies", "common-part", "cached-type"]) {
+        let frontendDiag = DiagnosticEngine()
+        let loader = CjoSignatureMaterializer(packageName, pkg, HashMap<UInt32, File>(),
+            HashMap<UInt64, File>(), ArrayList<Package>(), HashMap<String, PackageDecl>(),
+            HashMap<String, HashMap<String, Decl>>(), frontendDiag,
+            result.instance.typeManager.getOrThrow().AsFaithfulSemaTypeManager(), data: Some(data))
+        loader.SetCjoPath(cjoPath)
+        if (entry == "dep-info") {
+            @Expect(loader.LoadPackageDepInfo(), "")
+        } else if (entry == "dependencies") {
+            @Expect(loader.LoadPackageDependencies(data), false)
+        } else if (entry == "common-part") {
+            @Expect(loader.PreloadCommonPartOfPackage(pkg, result.instance.invocation.globalOptions), false)
+        } else {
+            @Expect(loader.LoadCachedTypeForPackage(pkg, HashMap<String, Decl>()).isEmpty())
+        }
+        @Expect(frontendDiag.GetErrorCount(), 1u64)
+        // Use the existing output surface; do not add a test-only product API.
+        println("FRONTEND_TARGET_BEGIN entry=${entry}")
+        frontendDiag.EmitCategoryDiagnostics(DiagCategory.MODULE)
+        println("FRONTEND_TARGET_END")
+        let expectedMessage = if (entry == "cached-type") {
+            expected.replace("validation of ast file", "validation of cached type file")
+        } else { expected }
+        println("FRONTEND_EXPECTED=${expectedMessage}")
+    }
+
 }
 
 // Exercise the importer entry that previously diagnosed before reaching the

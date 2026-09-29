@@ -25,8 +25,8 @@ for case in ("DifferentProducerVersion", "SameProducerVersion", "UnavailableProd
     (args.evidence / (case + ".log")).write_text(run.stdout)
     text = re.sub(r"\x1b\[[0-9;]*m", "", run.stdout)
     expected = re.findall(r"^FRONTEND_EXPECTED=(.*)$", text, re.M)
-    observed = re.findall(r"^\s*error: (validation of ast file .*?)\s*$", text, re.M)
-    expected_count = 0 if case == "ValidDependencyHeader" else (2 if case == "DifferentProducerVersion" else 1)
+    observed = re.findall(r"^\s*error: (validation of (?:ast|cached type) file .*?)\s*$", text, re.M)
+    expected_count = 0 if case == "ValidDependencyHeader" else (5 if case == "DifferentProducerVersion" else 4)
     target_executed = ("IMPORT_TARGET loaded=true expected=true" in text if expected_count == 0
                        else len(expected) == expected_count and "FRONTEND_TARGET_BEGIN" in text
                        and "FRONTEND_TARGET_END" in text)
