@@ -2,6 +2,12 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 
+// Optimization and source-location options are independent upstream
+// (AddCangjieSource.cmake:264-272 and :125-136).
+export function withSeedOptimization(config) {
+  return config.replace(/^(\s*compile-option\s*=\s*")-O2(?=[\s"])/m, '$1-O1');
+}
+
 // Upstream stdlib/cmake/modules/AddCangjieSource.cmake:125-136:
 // Release trims the source root; debug builds retain source locations.
 export async function prepareTrimpath(sourceRoot, {debug = false} = {}) {

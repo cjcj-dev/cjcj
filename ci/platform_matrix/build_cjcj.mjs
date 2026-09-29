@@ -1,5 +1,5 @@
 #!/usr/bin/env zx
-import {prepareTrimpath} from '../release/trimpath.mjs';
+import {prepareTrimpath, withSeedOptimization} from '../release/trimpath.mjs';
 // Provision the official host nightly SDK, activate the native fixed LLVM
 // tuple, then attempt the O1 workspace build.
 
@@ -422,7 +422,7 @@ const cjcTomlPath = path.join('packages', 'cjc', 'cjpm.toml');
 const cjcToml = await fs.readFile(cjcTomlPath, 'utf8');
 
 const cjpmToml = await fs.readFile('cjpm.toml', 'utf8');
-await fs.writeFile(path.join(root, 'cjpm.O1.toml'), cjpmToml.replace(/^(\s*compile-option\s*=\s*")-O2(?=[\s"])/m, '$1-O1'));
+await fs.writeFile(path.join(root, 'cjpm.O1.toml'), withSeedOptimization(cjpmToml));
 await fs.copyFile(path.join(root, 'cjpm.O1.toml'), 'cjpm.toml');
 await prepareTrimpath(process.cwd());
 

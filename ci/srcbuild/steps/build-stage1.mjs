@@ -1,6 +1,6 @@
 #!/usr/bin/env zx
 
-import {prepareTrimpath} from '../../release/trimpath.mjs';
+import {prepareTrimpath, withSeedOptimization} from '../../release/trimpath.mjs';
 
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -43,7 +43,7 @@ await fs.writeFile(cjcToml, platformizeCjcToml(cjcConfig, process.platform, sdk)
 await fs.copyFile(workspaceToml, workspaceTomlBackup);
 await fs.writeFile(
   workspaceToml,
-  (await fs.readFile(workspaceToml, 'utf8')).replace(/^(\s*compile-option\s*=\s*")-O2(?=[\s"])/m, '$1-O1'),
+  withSeedOptimization(await fs.readFile(workspaceToml, 'utf8')),
 );
 // Upstream cjc miscompiles cjcj at -O2. Build the seed at -O1 to avoid the
 // generic concrete-to-interface upcast loss in the upstream CHIR optimizer.
