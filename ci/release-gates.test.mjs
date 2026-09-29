@@ -161,7 +161,6 @@ async function platformFixture(t) {
 }
 
 const platformGates = ['G3', 'G6', 'G7', 'G9', 'G15'];
-const unknownRunGates = platformGates.filter(name => name !== 'G15');
 
 async function mutateFile(root, relative, transform) {
   const file = path.join(root, relative);
@@ -194,26 +193,30 @@ test('new registry platform makes each dependent gate red until its package job 
   await mutateFile(root, 'build/lib/targets.mjs', source => source.replace(
     'const RELEASE_PLATFORMS = Object.freeze([',
     "const RELEASE_PLATFORMS = Object.freeze([\n  releasePlatform({key: 'fixture-new-platform', host: 'linux-x64', runner: 'ubuntu-24.04'}),"));
-  for (const name of platformGates) {
+  for (const name of platformGates) await t.test(`${name} detects the added platform`, () => {
     const {result, value} = gate(root, name);
     t.diagnostic(`${name}: added platform returned rc=${result.status}, status=${value.status}`);
     assert.equal(result.status, 1, `${name}: ${JSON.stringify(value)}`);
     assert.match(value.value, /fixture-new-platform: expected one package job, found 0/);
-  }
+  });
   // A newly supported platform can be wired without editing the gate itself.
   await mutateFile(root, '.github/workflows/release.yml', source => source.replace('jobs:\n', [
     'jobs:',
     '  fixture-new-package:',
     '    uses: ./.github/workflows/build-release-package.yml',
+    '    needs: [package-p1-linux-x64]',
     '    with:',
     '      release_key: fixture-new-platform',
     '      platform: linux-x64',
     '      llvm_platform: linux_x86_64',
+    '      std_artifact: final-std-linux-x64',
+    "      cross_std_artifacts: '[]'",
     '',
-  ].join('\n')));
-  for (const name of unknownRunGates) {
+  ].join('\n')).replace('    needs: [source-p1-linux-x64,', '    needs: [fixture-new-package, source-p1-linux-x64,')
+    .replace("        needs.package-p5-darwin-x64.result == 'success' &&", "        needs.fixture-new-package.result == 'success' &&\n        needs.package-p5-darwin-x64.result == 'success' &&"));
+  for (const name of platformGates) {
     const {result, value} = gate(root, name);
-    assert.equal(result.status, 2, JSON.stringify(value));
+    assert.equal(result.status, name === 'G15' ? 0 : 2, JSON.stringify(value));
     assert.equal(value.scope.failures.length, 0);
     assert.ok(value.scope.jobs.some(job => job.key === 'fixture-new-platform'));
   }

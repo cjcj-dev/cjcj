@@ -2,15 +2,19 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
+import {allTargets, getReleasePlatform, releasePlatformReadiness} from '../../../build/lib/targets.mjs';
+import {planMatrix} from '../../release/platform-matrix.mjs';
 
 const root = path.resolve(import.meta.dirname, '../../..');
 const workflow = name => fs.readFile(path.join(root, '.github/workflows', name), 'utf8');
-const nativeKeys = ['linux-x64', 'linux-arm64', 'darwin-x64', 'darwin-arm64', 'win32-x64'];
+const plan = planMatrix('all');
+const nativeRows = plan.package.filter(row => getReleasePlatform(row.release_key).archiveKey === row.platform);
+const nativeKeys = nativeRows.map(row => row.release_key);
 const scalar = (text, key) => text.match(new RegExp(String.raw`^\s*${key}:\s*(.+?)\s*$`, 'm'))?.[1];
 const packageJobsOf = release => release.split(/\n  (?=[a-z0-9-]+:\n)/)
   .filter(job => job.includes('uses: ./.github/workflows/build-release-package.yml'));
 
-const platforms = ['linux-x64', 'linux-aarch64', 'darwin-x64', 'darwin-arm64', 'windows-x64'];
+const platforms = allTargets();
 
 test('srcbuild exposes reusable inputs, outputs, and the runtime override chain', async () => {
   const sourceBuild = await workflow('srcbuild.yml');
@@ -52,31 +56,38 @@ test('release cross packages depend on their native phase and Android producer w
   const release = await workflow('release.yml');
   const packages = packageJobsOf(release);
   const cross = packages.filter(job => !nativeKeys.includes(scalar(job, 'release_key')));
-  const rows = [
-    ['linux-x64-android', 'linux-x64', 'package-p1-linux-x64'],
-    ['darwin-arm64-android', 'darwin-arm64', 'package-p4-darwin-arm64'],
-    ['win32-x64-android', 'windows-x64', 'package-p3-windows-x64'],
-  ];
-  assert.deepEqual(cross.map(job => scalar(job, 'release_key')).sort(), rows.map(([key]) => key).sort(),
+  const rows = plan.package.filter(row => !nativeKeys.includes(row.release_key));
+  assert.deepEqual(cross.map(job => scalar(job, 'release_key')).sort(), rows.map(row => row.release_key).sort(),
     'every non-native package must have an explicit cross contract');
-  for (const [key, host, nativePhase] of rows) {
+  const sources = release.split(/\n  (?=[a-z0-9-]+:\n)/)
+    .filter(job => job.includes('uses: ./.github/workflows/srcbuild.yml'));
+  const jobId = job => job.trimStart().split(':')[0];
+  for (const row of rows) {
+    const {release_key: key, platform: host} = row;
     const job = cross.find(entry => scalar(entry, 'release_key') === key);
     assert.equal(scalar(job, 'platform'), host, `${key}: package host`);
-    assert.equal(scalar(job, 'std_artifact'), `final-std-${host}`, `${key}: same-host final std`);
+    assert.equal(scalar(job, 'std_artifact'), row.std_artifact, `${key}: same-host final std`);
+    const native = packages.find(entry => nativeKeys.includes(scalar(entry, 'release_key')) && scalar(entry, 'platform') === host);
+    assert.ok(native, `${key}: native package dependency`);
+    const producerJobs = Object.values(releasePlatformReadiness(key).crossStd).map(target => {
+      const producer = sources.find(entry => scalar(entry, 'targets') === target);
+      assert.ok(producer, `${key}: cross std source ${target}`);
+      return jobId(producer);
+    });
     assert.deepEqual(scalar(job, 'needs').slice(1, -1).split(',').map(s => s.trim()).sort(),
-      [nativePhase, 'source-p1-linux-x64'].sort(), `${key}: native phase and Android producer dependencies`);
+      [...new Set([jobId(native), ...producerJobs])].sort(), `${key}: native phase and cross producer dependencies`);
     const tuples = JSON.parse(scalar(job, 'cross_std_artifacts').replace(/^'|'$/g, ''));
-    const expected = [{tuple: 'linux_android_aarch64_cjnative', artifact: 'final-std-android-aarch64'}];
-    if (host === 'windows-x64') expected.push({tuple: 'linux_x86_64_cjnative', artifact: 'final-std-linux-x64'});
-    assert.deepEqual(tuples, expected, `${key}: cross std tuples`);
+    assert.deepEqual(tuples, JSON.parse(row.cross_std_artifacts), `${key}: cross std tuples`);
     const publish = release.slice(release.indexOf('\n  publish:'));
-    assert.ok(scalar(publish, 'needs').slice(1, -1).split(',').map(s => s.trim()).includes(`package-${key}`),
+    assert.ok(scalar(publish, 'needs').slice(1, -1).split(',').map(s => s.trim()).includes(jobId(job)),
       `${key}: publish waits for the cross package`);
-    assert.ok(publish.includes(`needs.package-${key}.result == 'success'`), `${key}: publish requires cross success`);
+    assert.ok(publish.includes(`needs.${jobId(job)}.result == 'success'`), `${key}: publish requires cross success`);
   }
-  const producer = release.split('\n  source-p1-linux-x64:')[1].split(/\n  [a-z0-9-]+:/)[0];
-  assert.equal(scalar(producer, 'targets'), 'linux-x64');
-  assert.equal(scalar(producer, 'build_android'), 'true', 'Android producer is enabled');
+  for (const row of plan.source.filter(row => row.build_android)) {
+    const producer = sources.find(job => scalar(job, 'targets') === row.target);
+    assert.ok(producer, `${row.target}: Android producer exists`);
+    assert.equal(scalar(producer, 'build_android'), 'true', `${row.target}: Android producer is enabled`);
+  }
 });
 
 test('component provenance, final std, and Python inputs are fail-closed in both package commands', async () => {
