@@ -1197,7 +1197,7 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
     const entry = inputs + '/bootstrap child.sh';
     fs.writeFileSync(entry, '#!/bin/bash\nprintf "CHILD SDK_BUILD=%s\\n" "$SDK_BUILD"\nprintf "ARG=<%s>\\n" "$@"\nexit "${CHILD_RC:-0}"\n', {mode: 0o755});
     if (coreObserve) {
-      fs.writeFileSync(entry, '#!/bin/bash\nprintf "CHILD_CORE_LIMIT=%s\\n" "$(ulimit -c)"\nprintf "CHILD_CORE_HARD=%s\\n" "$(ulimit -Hc)"\n');
+      fs.writeFileSync(entry, '#!/bin/bash\nawk \'/^Max core file size/ {print "CHILD_CORE_SOFT_BYTES=" $5; print "CHILD_CORE_HARD_BYTES=" $6}\' /proc/$$/limits\n');
     }
     env.CJCJ_BOOTSTRAP_SH = entry;
   }
@@ -1219,8 +1219,10 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
       return result;
     },
     run(step, childRc = 0) {
-      const result = spawnSync('bash', [...(coreObserve ? ['-x'] : []), driver, '--from-step', String(step), '--through-step', String(step)],
-        {encoding: 'utf8', env: {...env, ...(coreObserve ? {SHELLOPTS: 'xtrace'} : {}), CHILD_RC: String(childRc)}});
+      const result = spawnSync('bash', [...(coreObserve ? [
+        '-c', 'ulimit -c 1 || exit; exec bash "$@"', 'core-limit-control',
+      ] : []), driver, '--from-step', String(step), '--through-step', String(step)],
+        {encoding: 'utf8', env: {...env, CHILD_RC: String(childRc)}});
       const logs = path.join(state, 'logs');
       const logFile = fs.readdirSync(logs).find(name => name.endsWith(`-step${step}.log`));
       assert.ok(logFile, result.stdout + result.stderr);
@@ -1466,19 +1468,27 @@ test('ast-support input contract missing stops real stage entry', t => {
 
 test('stage0 disables core dumps before launching the bootstrap child', t => {
   const result = bootstrapDriverFixture(t, {child: true, coreObserve: true}).run(31);
-  const limit = result.log.match(/^CHILD_CORE_LIMIT=(.*)$/m)?.[1];
-  const hard = result.log.match(/^CHILD_CORE_HARD=(.*)$/m)?.[1];
-  const setLimit = result.log.indexOf('ulimit -c 0');
-  const launch = result.log.indexOf('run_bootstrap_stage stage0');
+  const limit = result.log.match(/^CHILD_CORE_SOFT_BYTES=(.*)$/m)?.[1];
+  const hard = result.log.match(/^CHILD_CORE_HARD_BYTES=(.*)$/m)?.[1];
   const observed = {
     rc: result.status,
     limit,
     hard,
-    disabledBeforeLaunch: setLimit >= 0 && launch > setLimit,
     completed: /RESULT=success through_step=31/.test(result.stdout),
   };
   console.log('OBSERVED stage0 core policy ' + JSON.stringify(observed));
   assert.deepEqual(observed, {
-    rc: 0, limit: '0', hard: '0', disabledBeforeLaunch: true, completed: true,
+    rc: 0, limit: '0', hard: '0', completed: true,
   }, 'stage0 must explicitly disable core dumps before its child inherits the limit');
+});
+
+test('kkk2 stage0 core-limit contract rejects nonzero policies', () => {
+  const defects = text => {
+    const commands = extractFn(text, 'step_31').match(/^[ \t]*ulimit -c .*$/gm) || [];
+    return commands.length === 1 && commands[0].trim() === 'ulimit -c 0' ? [] : ['stage0-core-policy'];
+  };
+  assert.deepEqual(defects(script), []);
+  // Inspect the forbidden policy as text; never execute a limit increase.
+  assert.deepEqual(defects(script.replace('ulimit -c 0', 'ulimit -c unlimited || true')),
+    ['stage0-core-policy']);
 });
