@@ -3156,6 +3156,7 @@ public let rDiagSeveritys: Array<DiagSeverity> = [
     DiagSeverity.DS_ERROR,
     DiagSeverity.DS_ERROR,
     DiagSeverity.DS_ERROR,
+    DiagSeverity.DS_ERROR,
     DiagSeverity.DS_WARNING,
     DiagSeverity.DS_ERROR,
     DiagSeverity.DS_ERROR,
@@ -3882,6 +3883,7 @@ public let rWarnGroups: Array<WarnGroup> = [
     WarnGroup.NONE,
     WarnGroup.NONE,
     WarnGroup.PARSER,
+    WarnGroup.NONE,
     WarnGroup.NONE,
     WarnGroup.NONE,
     WarnGroup.NONE,
@@ -5221,7 +5223,7 @@ public let RE_DIAG_KIND_STR: Array<String> = [
     "sema_diag_end",
     "conditional_compilation_unexpected_cfg_name",
 ]
-public let RE_DIAG_KIND_STR_SIZE: Int64 = 735
+public let RE_DIAG_KIND_STR_SIZE: Int64 = 736
 
 public func DiagKindIndex(kind: DiagKind): Int64 {
     return match (kind) {
