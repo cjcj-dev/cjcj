@@ -91,7 +91,6 @@ async function fixture(mode, check, {missingTool = false} = {}) {
       dir = path.join(diagnostics, (await fs.readdir(diagnostics)).find(name => name.startsWith('build-')));
       record = JSON.parse(await fs.readFile(path.join(dir, 'result.json')));
     } catch { /* assertions below identify missing handoff, including baseline controls */ }
-    await check({result, record, dir, root, observation, env});
     if (process.env.DIAGNOSTIC_TEST_EVIDENCE) {
       const dest = path.join(process.env.DIAGNOSTIC_TEST_EVIDENCE, mode + (missingTool ? '-missing' : '') + '-' + path.basename(root));
       await fs.mkdir(dest, {recursive: true});
@@ -99,6 +98,7 @@ async function fixture(mode, check, {missingTool = false} = {}) {
       await fs.writeFile(path.join(dest, 'entry.json'), JSON.stringify(result, null, 2));
       console.log(`ENTRY_EVIDENCE=${dest}`);
     }
+    await check({result, record, dir, root, observation, env});
   } finally { await fs.rm(root, {recursive: true, force: true}); }
 }
 
