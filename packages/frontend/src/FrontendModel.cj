@@ -7348,29 +7348,23 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
         return result
     }
 
+    // ImportManager.cpp:1634-1660: load through the package header loader
+    // before consuming dependencies, including its verification diagnostics.
     public func AnalyzeDepStdPkgsOfBC(fullPackageName: String): Bool {
         if ((let Some(_) <- GetPackage(fullPackageName)) || cjoFilePaths.contains(fullPackageName)) {
             return true
         }
         let cjoPath = FileUtil.FindSerializationFile(fullPackageName, ".cjo", searchPath.toArray())
-        if (cjoPath.isEmpty()) {
+        if (cjoPath.isEmpty() || !LoadImportedPackageFromCjo(fullPackageName, cjoPath)) {
             diag.DiagnoseRefactor(DiagKindRefactor.bc_cjo_error, DEFAULT_POSITION, arguments: [fullPackageName])
             return false
         }
-        let (ok, data, _) = FileUtil.ReadBinaryFileToBuffer(cjoPath)
-        if (!ok) {
-            diag.DiagnoseRefactor(DiagKindRefactor.bc_cjo_error, DEFAULT_POSITION, arguments: [fullPackageName])
-            return false
-        }
-        if (!VerifySerializedPackageData(data, fullPackageName)) {
-            return false
-        }
-        cjoFilePaths[fullPackageName] = cjoPath
-        let end = cjoPath.lastIndexOf(SERIALIZED_FILE_EXTENSION) ?? cjoPath.size
-        depPkgCjdPaths[fullPackageName] = cjoPath[0..end] + CJ_D_FILE_EXTENSION
-        for (depStdPkg in ReadAllDependentStdPkgs(data)) {
-            let depCjoPath = FindAndSaveDepStdCjoPath(depStdPkg)
-            HandleStdPackage(depStdPkg, depCjoPath, isRecursive: true)
+        let pkg = GetPackage(fullPackageName).getOrThrow()
+        for (depStdPkg in pkg.GetAllDependentStdPkgs()) {
+            if (!cjoFilePaths.contains(depStdPkg)) {
+                let depCjoPath = FileUtil.FindSerializationFile(depStdPkg, ".cjo", searchPath.toArray())
+                HandleStdPackage(depStdPkg, depCjoPath, isRecursive: true)
+            }
         }
         return true
     }
@@ -8784,41 +8778,9 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
         return true
     }
 
-    private func VerifySerializedPackageData(data: Array<UInt8>, importedPackageName: String): Bool {
-        let reader = CjoFlatBuffer(data)
-        if (!reader.VerifyPackageBuffer()) {
-            diag.DiagnoseRefactor(DiagKindRefactor.module_loaded_ast_failed, DEFAULT_POSITION,
-                arguments: ["ast", importedPackageName, CANGJIE_VERSION])
-            return false
-        }
-        return true
-    }
-
     private func CanInlineImportedSource(opts: GlobalOptions): Bool {
         return opts.chirLLVM && enumIndex(opts.optimizationLevel) > enumIndex(OptimizationLevel.O1) &&
             !opts.enableCompileTest && !opts.enableHotReload
-    }
-
-    private func ReadAllDependentStdPkgs(data: Array<UInt8>): ArrayList<String> {
-        let out = ArrayList<String>()
-        let reader = CjoFlatBuffer(data)
-        let root = reader.RootTable()
-        if (root < 0) {
-            return out
-        }
-        let dependentStdPkgs = reader.VectorField(root, 34)
-        if (dependentStdPkgs < 0) {
-            return out
-        }
-        var idx: Int64 = 0
-        while (idx < reader.VectorLength(dependentStdPkgs)) {
-            let depName = reader.StringAt(reader.VectorOffsetElement(dependentStdPkgs, idx))
-            if (!depName.isEmpty()) {
-                out.add(depName)
-            }
-            idx++
-        }
-        return out
     }
 
     private func FindAndSaveDepStdCjoPath(fullPackageName: String): String {
