@@ -965,7 +965,7 @@ public class DiagnosticBuilder <: Resource {
 }
 
 public class DiagnosticCache {
-    public let cachedDiags: ArrayList<Diagnostic> = ArrayList<Diagnostic>()
+    public let cachedDiags: ArrayList<Diagnostic> = ArrayList<Diagnostic>(0)
 
     public init() {}
 
