@@ -67,7 +67,7 @@ export async function prepareColourSdk(runtimeRoot, env = process.env) {
   for (const entry of await fs.readdir(path.join(sdk, 'runtime', 'lib', tuple), {withFileTypes: true})) {
     if (entry.isFile()) await fs.copyFile(path.join(sdk, 'runtime', 'lib', tuple, entry.name), path.join(realPublished, entry.name));
   }
-  const state = {host, sdk, runtime: realPublished, tuple, std_manifest_sha256: pin.manifest_sha256};
+  const state = {host, sdk, runtime: realPublished, tuple, runtime_sha: env.RUNTIME_REF, std_manifest_sha256: pin.manifest_sha256};
   await fs.writeFile(stateFile, JSON.stringify(state, null, 2) + '\n');
   if (env.GITHUB_ENV) await fs.appendFile(env.GITHUB_ENV, `CJCJ_PATCHED_RUNTIME_LIB_DIR=${realPublished}\n`);
   console.log(`COLOUR_SDK ${JSON.stringify(state)}`);
@@ -75,6 +75,9 @@ export async function prepareColourSdk(runtimeRoot, env = process.env) {
 }
 export async function colourEnvironment(mode, env = process.env) {
   const state = JSON.parse(await fs.readFile(stateFile, 'utf8'));
+  if (!/^[a-f0-9]{40}$/.test(state.runtime_sha || '') || state.runtime_sha !== env.RUNTIME_REF) {
+    throw new Error('COLOUR_RT_STATE_MISMATCH: prepare the SDK for the current runtime pin');
+  }
   const libraries = mode === 'build'
     ? [path.join(state.host, 'runtime', 'lib', state.tuple), path.join(state.host, 'tools/lib'), path.join(state.host, 'third_party/llvm/lib')]
     : [state.runtime, path.join(state.sdk, 'lib'), path.join(state.sdk, 'tools/lib'), path.join(state.sdk, 'third_party/llvm/lib')];

@@ -18,7 +18,7 @@ async function fixture(t) {
     console.log(`PRODUCT ${file} sha256=${createHash('sha256').update(bytes).digest('hex')}`);
   }
   const state = {host: path.join(root, 'host'), sdk: path.join(root, 'target'),
-    runtime: path.join(root, 'patched-runtime/lib/linux_x86_64_cjnative'), tuple: 'linux_x86_64_cjnative'};
+    runtime: path.join(root, 'patched-runtime/lib/linux_x86_64_cjnative'), tuple: 'linux_x86_64_cjnative', runtime_sha: '5d35d19345d76dfa585fabfd562df19336fe8e5e'};
   await fs.mkdir(state.host);
   await fs.writeFile(path.join(root, '.platform-ci/colour-sdk.json'), JSON.stringify(state));
   return {root, state};
@@ -28,7 +28,7 @@ for (const mode of ['build', 'run']) {
     const {root, state} = await fixture(t);
     const result = spawnSync(process.execPath, [path.join(root, 'ci/with-colour-sdk.mjs'), mode, '--',
       process.execPath, '-e', 'console.log(JSON.stringify(process.env))'],
-    {encoding: 'utf8', env: {...process.env, LD_LIBRARY_PATH: '/unrelated-inherited-runtime'}});
+    {encoding: 'utf8', env: {...process.env, RUNTIME_REF: state.runtime_sha, LD_LIBRARY_PATH: '/unrelated-inherited-runtime'}});
     assert.equal(result.status, 0, result.stderr);
     const child = JSON.parse(result.stdout);
     assert.equal(child.CANGJIE_HOME, state.sdk);
@@ -43,6 +43,10 @@ for (const mode of ['build', 'run']) {
 test('real preparation entry refuses the published std from a different runtime generation', async t => {
   const {root, state} = await fixture(t);
   const pin = JSON.parse(await fs.readFile(path.join(root, 'ci/colour-std-pin.json'), 'utf8'));
+  // Historical input is deliberate: updating the production pin must not
+  // remove the mismatched-generation control.
+  pin.runtime_sha = '4c4cbf53b44497103e76e2a47a8fa35f5d7a7287';
+  await fs.writeFile(path.join(root, 'ci/colour-std-pin.json'), JSON.stringify(pin));
   const result = spawnSync(process.execPath, [path.join(root, 'ci/prepare-colour-sdk.mjs'), 'absent-runtime'],
     {encoding: 'utf8', env: {...process.env, CANGJIE_HOME: state.host, RUNTIME_REF: '5d35d19345d76dfa585fabfd562df19336fe8e5e'}});
   console.log(`TARGET_ASSERT runtime-generation rc=${result.status} pin=${pin.runtime_sha}`);
