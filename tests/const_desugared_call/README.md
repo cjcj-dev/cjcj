@@ -2,6 +2,8 @@
 
 Run `python3 run.py --compiler /absolute/cjcj-stage1 --sdk /absolute/host-sdk --out /absolute/results`.
 The compiler must be built from the candidate source with its matching host libraries.
+The runner copies the complete product ELF and invokes its `cjc-frontend --typecheck`
+entry through a same-directory alias, so backend generation cannot mask Sema diagnostics.
 
 `empty`, `nonempty`, and `generic` call an instance with an Array-only `operator ()`
 in a const function body. The compiler must reject the synthesized Array as

@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import time
 
@@ -22,6 +23,17 @@ def main():
     parser.add_argument('--out', required=True, type=Path)
     args = parser.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
+    # RunDriverMain selects the real frontend from argv[0]. Keep the complete
+    # product ELF and invoke it under its supported frontend entry name.
+    bindir = args.out / 'bin'
+    bindir.mkdir(exist_ok=True)
+    product = bindir / 'cjcj-stage1'
+    shutil.copy2(args.compiler, product)
+    for name in ('cjc', 'cjc-frontend'):
+        alias = bindir / name
+        if alias.is_symlink():
+            alias.unlink()
+        alias.symlink_to('cjcj-stage1')
     env = dict(os.environ, CANGJIE_HOME=str(args.sdk), cjHeapSize='32GB')
     env['LD_LIBRARY_PATH'] = ':'.join(str(args.sdk / p) for p in (
         'runtime/lib/linux_x86_64_cjnative', 'lib/linux_x86_64_cjnative',
@@ -37,8 +49,7 @@ def main():
         fixture = here / (name + '.cj')
         out = args.out / name
         out.mkdir(exist_ok=True)
-        cmd = [str(args.compiler), str(fixture), '--output-type=staticlib',
-               '-o', str(out / 'fixture.a')]
+        cmd = [str(bindir / 'cjc-frontend'), str(fixture), '--typecheck']
         start = time.monotonic()
         with (out / 'compile.log').open('w') as log:
             result = subprocess.run(cmd, cwd=out, env=env, stdout=log,
