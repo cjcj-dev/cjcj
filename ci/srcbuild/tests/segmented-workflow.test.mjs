@@ -5,7 +5,7 @@ import test from 'node:test';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 
-const file = path.resolve(import.meta.dirname, '../../../.github/workflows/srcbuild.yml');
+const file = path.resolve(import.meta.dirname, '../../../.github/workflows/srcbuild-target.yml');
 const workflow = await fs.readFile(file, 'utf8');
 const jobs = new Map([...workflow.matchAll(/^  ([\w-]+):\n([\s\S]*?)(?=^  [\w-]+:\n|$(?![\s\S]))/gm)]
   .map(([, name, body]) => [name, body]));
@@ -78,4 +78,17 @@ test('G2 freezes before portable SDK files dirty the checkout, then retains iden
   assert.match(body.slice(freeze, copy), /--evidence-root "\$RUNNER_TEMP\/g2-campaigns"/);
   assert.match(body.slice(retain), /cmp "\$G2_CAMPAIGN_DIR\/FREEZE.json" "\$destination\/FREEZE.json"/);
   assert.match(body.slice(retain), /cmp "\$G2_IDENTITY" "\$destination\/G2_IDENTITY.json"/);
+});
+
+test('each source target has an independent reusable job chain with the same standard-runner table', async () => {
+  const caller = await fs.readFile(path.resolve(import.meta.dirname, '../../../.github/workflows/srcbuild.yml'), 'utf8');
+  assert.match(caller, /uses: \.\/\.github\/workflows\/srcbuild-target.yml/);
+  assert.match(caller, /targets: \$\{\{ matrix.target \}\}/);
+  assert.match(caller, /fail-fast: false/);
+  const table = text => JSON.parse(text.match(/all='(\[[\s\S]*?\])'/)[1]);
+  assert.deepEqual(table(caller), table(workflow));
+  assert.equal(table(caller).length, 4);
+  assert.match(workflow, /test "\$count" -eq 1/);
+  // A nested workflow must not contend with its caller's concurrency group.
+  assert.doesNotMatch(workflow, /^concurrency:/m);
 });

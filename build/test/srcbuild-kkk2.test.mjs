@@ -895,7 +895,7 @@ function ghaBootstrapDefects(yml, ghaRun) {
 }
 
 test('GHA srcbuild does not build compiler or stdlib before bootstrap', () => {
-  const yml = fs.readFileSync(path.join(repoRoot, '.github/workflows/srcbuild.yml'), 'utf8');
+  const yml = fs.readFileSync(path.join(repoRoot, '.github/workflows/srcbuild-target.yml'), 'utf8');
   const ghaRun = fs.readFileSync(path.join(repoRoot, 'ci/bootstrap/gha_run.sh'), 'utf8');
   const boot = yml.indexOf('Bootstrap stage0 compiler');
   const compiler = yml.indexOf('build compiler');
@@ -1024,7 +1024,7 @@ for (const kind of ['missing', 'read', 'import-missing', 'import-bad']) test(`ve
 
 
 test('GHA absolute campaign bootstrap path turns only the GHA contract red', () => {
-  const yml = fs.readFileSync(path.join(repoRoot, '.github/workflows/srcbuild.yml'), 'utf8');
+  const yml = fs.readFileSync(path.join(repoRoot, '.github/workflows/srcbuild-target.yml'), 'utf8');
   const ghaRun = fs.readFileSync(path.join(repoRoot, 'ci/bootstrap/gha_run.sh'), 'utf8');
   assert.deepEqual(ghaBootstrapDefects(yml, ghaRun), []);
   const mutated = yml.replace(

@@ -47,15 +47,15 @@ const CXX_JOBS = new Map([
   ['build-windows-runtime.yml/build-runtime', {component: 'windows-runtime', pin: /env\.RUNTIME_REF/}],
   ['windows-runtime-export-contract.yml/native-contract', {component: 'windows-runtime', pin: /env\.RUNTIME_REF/}],
   ['windows-runtime-link.yml/link', {component: 'windows-runtime', pin: /env\.RUNTIME_REF/}],
-  ['srcbuild.yml/source-stage0', {component: 'srcbuild-stage0', pin: /env\.RUNTIME_REF/}],
-  ['srcbuild.yml/source-stage1-initial-std', {component: 'srcbuild-stage1-initial-std', pin: /env\.RUNTIME_REF/}],
-  ['srcbuild.yml/source-stage1-std', {component: 'srcbuild-stage1-std', pin: /env\.RUNTIME_REF/}],
-  ['srcbuild.yml/source-stage1-compiler', {component: 'srcbuild-stage1-compiler', pin: /env\.RUNTIME_REF/}],
-  ['srcbuild.yml/source-stage3', {component: 'srcbuild-stage3', pin: /env\.RUNTIME_REF/}],
-  ['srcbuild.yml/srcbuild', {component: 'srcbuild-package', pin: /env\.RUNTIME_REF/}],
-  ['srcbuild.yml/source-android', {component: 'srcbuild-android', pin: /env\.RUNTIME_REF/}],
-  ['srcbuild.yml/source-mingw', {component: 'srcbuild-mingw', pin: /env\.RUNTIME_REF/}],
-  ['srcbuild.yml/source-windows', {component: 'srcbuild-windows', pin: /env\.RUNTIME_REF/}],
+  ['srcbuild-target.yml/source-stage0', {component: 'srcbuild-stage0', pin: /env\.RUNTIME_REF/}],
+  ['srcbuild-target.yml/source-stage1-initial-std', {component: 'srcbuild-stage1-initial-std', pin: /env\.RUNTIME_REF/}],
+  ['srcbuild-target.yml/source-stage1-std', {component: 'srcbuild-stage1-std', pin: /env\.RUNTIME_REF/}],
+  ['srcbuild-target.yml/source-stage1-compiler', {component: 'srcbuild-stage1-compiler', pin: /env\.RUNTIME_REF/}],
+  ['srcbuild-target.yml/source-stage3', {component: 'srcbuild-stage3', pin: /env\.RUNTIME_REF/}],
+  ['srcbuild-target.yml/srcbuild', {component: 'srcbuild-package', pin: /env\.RUNTIME_REF/}],
+  ['srcbuild-target.yml/source-android', {component: 'srcbuild-android', pin: /env\.RUNTIME_REF/}],
+  ['srcbuild-target.yml/source-mingw', {component: 'srcbuild-mingw', pin: /env\.RUNTIME_REF/}],
+  ['srcbuild-target.yml/source-windows', {component: 'srcbuild-windows', pin: /env\.RUNTIME_REF/}],
   ['ci.yml/build', {component: 'runtime', pin: /env\.RUNTIME_REF/}],
   ['platform-matrix.yml/darwin-runtime', {component: 'runtime', pin: /env\.RUNTIME_REF/}],
   ['platform-matrix.yml/colour-runtime', {component: 'runtime', pin: /env\.RUNTIME_REF/}],
@@ -123,7 +123,7 @@ test('every C/C++ compile job starts sccache before compiling and reports after,
     assert.match(steps[report], /^\s*if: always\(\)/m, `${id}: the report must run when the build failed too`);
     // Enforced on green jobs only: a job that already failed before its first
     // compile must not gain a second, misleading error from the report.
-    assert.match(steps[report], id === 'srcbuild.yml/source-mingw'
+    assert.match(steps[report], id === 'srcbuild-target.yml/source-mingw'
       ? /^\s*require-compiles: \$\{\{ job\.status == 'success' && steps\.windows-mingw-cache\.outputs\.cache-hit != 'true' \}\}\s*$/m
       : /^\s*require-compiles: \$\{\{ job\.status == 'success' \}\}\s*$/m,
       `${id}: the report must require compiles exactly when the job is otherwise green`);

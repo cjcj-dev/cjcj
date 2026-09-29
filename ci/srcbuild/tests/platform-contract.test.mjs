@@ -237,7 +237,7 @@ function substitute(value, inputs) {
 }
 
 test('source-build workflow connects every native runner to its LLVM and std artifact', async () => {
-  const workflow = await fs.readFile(path.join(root, '.github/workflows/srcbuild.yml'), 'utf8');
+  const workflow = await fs.readFile(path.join(root, '.github/workflows/srcbuild-target.yml'), 'utf8');
   const fixed = await fs.readFile(path.join(root, '.github/workflows/build-llvm-tools.yml'), 'utf8');
   assert.ok(workflow.includes('uses: ./.github/workflows/build-llvm-tools.yml'), 'source build must call the reusable tuple producer');
   const cells = [
@@ -324,7 +324,7 @@ test('arm soak produces every artifact its package job downloads, each exactly o
 
   // The point of the whole test: demanded and produced have to be the same set.
   for (const artifact of required) assert.equal(producersOf(artifact).length, 1, `producers of ${artifact}`);
-  assert.deepEqual(producersOf(demanded), ['srcbuild.yml']);
+  assert.deepEqual(producersOf(demanded), ['srcbuild-target.yml']);
 
   // upload-artifact rejects a name already uploaded in the same run, so two callers
   // of one producer workflow break the run rather than merging.
@@ -345,7 +345,7 @@ test('arm soak produces every artifact its package job downloads, each exactly o
 });
 
 test('source-build leaves the sccache GHA backend off and persists the disk cache as one entry per target', async () => {
-  const workflow = await fs.readFile(path.join(root, '.github/workflows/srcbuild.yml'), 'utf8');
+  const workflow = await fs.readFile(path.join(root, '.github/workflows/srcbuild-target.yml'), 'utf8');
   const action = await fs.readFile(path.join(root, '.github/actions/sccache/action.yml'), 'utf8');
   // The per-object backend was measured, not assumed: run 31551077927 got 230 hits
   // against 6585 misses while spending 4162 s on writes, and the repository cache
@@ -400,7 +400,7 @@ test('native build environments use configured architecture, OpenSSL, and loader
 });
 
 test('source build keeps the pinned plain host runtime across both bootstrap halves', async () => {
-  const workflow = await fs.readFile(path.join(root, '.github/workflows/srcbuild.yml'), 'utf8');
+  const workflow = await fs.readFile(path.join(root, '.github/workflows/srcbuild-target.yml'), 'utf8');
   const provision = workflow.indexOf('- name: Provision uncoloured host SDK');
   const bootstrap0 = workflow.indexOf('- name: Bootstrap stage0 compiler');
   const bootstrap1 = workflow.indexOf('- name: Bootstrap stage1 compiler');
@@ -464,7 +464,7 @@ test('Darwin selfhost link uses the source SDK dylib and libc++', () => {
 });
 
 test('Windows final std is cross-built by the stage2 Linux host compiler', async () => {
-  const workflow = await fs.readFile(path.join(root, '.github/workflows/srcbuild.yml'), 'utf8');
+  const workflow = await fs.readFile(path.join(root, '.github/workflows/srcbuild-target.yml'), 'utf8');
   const producer = await fs.readFile(path.join(root, 'ci/srcbuild/steps/build-windows-final-std.mjs'), 'utf8');
   for (const edge of [
     "if: matrix.target == 'linux-x64'",
