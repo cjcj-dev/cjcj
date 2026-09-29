@@ -767,24 +767,24 @@ public class ASTWriter <: Resource {
         return declKeyToIndex.contains(decl)
     }
 
-    // ASTWriter.cpp:1617-1642 CollectInitializationDependencies.
+    // ASTWriter.cpp:1592-1618 (6e306d76) CollectInitializationDependencies.
     private func CollectInitializationDependencies(decl: Decl, visited: HashSet<Decl>): ArrayList<FlatBufferOffset> {
         if (visited.contains(decl)) {
             return ArrayList<FlatBufferOffset>()
         }
-        let currentVisited = HashSet<Decl>()
-        for (visitedDecl in visited) {
-            currentVisited.add(visitedDecl)
-        }
-        currentVisited.add(decl)
+        visited.add(decl)
 
         let dependencies = ArrayList<FlatBufferOffset>()
         for (dependencyOpt in decl.dependencies) {
             let dependency = dependencyOpt.getOrThrow()
+            if (visited.contains(dependency)) {
+                continue
+            }
             if (PlannedToBeSerialized(dependency)) {
+                visited.add(dependency)
                 dependencies.add(CreateFullIdForDecl(dependency))
             } else {
-                for (transitiveFullId in CollectInitializationDependencies(dependency, currentVisited)) {
+                for (transitiveFullId in CollectInitializationDependencies(dependency, visited)) {
                     dependencies.add(transitiveFullId)
                 }
             }
@@ -855,7 +855,8 @@ public class ASTWriter <: Resource {
         let declKind = DeclKindToFlat(decl)
         let infoType = DeclInfoTypeToFlat(decl)
         let dependencies = if (serializingCommon) {
-            builder.CreateVectorOffsets(CollectInitializationDependencies(decl, HashSet<Decl>()))
+            let visited = HashSet<Decl>()
+            builder.CreateVectorOffsets(CollectInitializationDependencies(decl, visited))
         } else {
             0u32
         }
