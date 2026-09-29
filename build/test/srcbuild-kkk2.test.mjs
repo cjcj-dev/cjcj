@@ -826,7 +826,7 @@ test('DAG compose endpoint installs recorded stage3 after package', () => {
 test('step_31 execs bootstrap.sh not build-stage1.mjs and only that contract turns red on revert', () => {
   assert.deepEqual(bootstrapExecDefects(script), []);
   const mutated = script.replace(
-    /step_31\(\) \{\n    ulimit -c 0\n    run_bootstrap_stage stage0\n\}/,
+    /^step_31\(\) \{[\s\S]*?^\}/m,
     'step_31() {\n    npx --yes zx@8 "$REPO_ROOT/ci/srcbuild/steps/build-stage1.mjs"\n}',
   );
   assert.deepEqual(bootstrapExecDefects(mutated), ['step_31-not-bootstrap', 'step_31-build-stage1']);
@@ -845,7 +845,7 @@ test('bootstrap argv missing one 66aec40 flag turns only the flag contract red',
 test('stage0 PATH injection of colour opt turns only the isolation contract red', () => {
   assert.deepEqual(bootstrapExecDefects(script), []);
   const mutated = script.replace(
-    /step_31\(\) \{\n    ulimit -c 0\n    run_bootstrap_stage stage0\n\}/,
+    /^step_31\(\) \{[\s\S]*?^\}/m,
     'step_31() {\n    PATH=/root/llvmdepot/opt:$PATH\n    run_bootstrap_stage stage0\n}',
   );
   assert.deepEqual(bootstrapExecDefects(mutated), ['stage0-colour-opt-on-path']);
@@ -1220,7 +1220,8 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
     },
     run(step, childRc = 0) {
       const result = spawnSync('bash', [...(coreObserve ? [
-        '-c', 'ulimit -c 1 || exit; exec bash "$@"', 'core-limit-control',
+        // Bounded positive control: never enable unlimited cores or induce a fault.
+        '-c', 'ulimit -c 1 || exit; printf "CONTROL_CORE_KIB=%s\\n" "$(ulimit -c)"; exec bash "$@"', 'core-limit-control',
       ] : []), driver, '--from-step', String(step), '--through-step', String(step)],
         {encoding: 'utf8', env: {...env, CHILD_RC: String(childRc)}});
       const logs = path.join(state, 'logs');
@@ -1472,13 +1473,14 @@ test('stage0 disables core dumps before launching the bootstrap child', t => {
   const hard = result.log.match(/^CHILD_CORE_HARD_BYTES=(.*)$/m)?.[1];
   const observed = {
     rc: result.status,
+    initialKiB: result.stdout.match(/^CONTROL_CORE_KIB=(.*)$/m)?.[1],
     limit,
     hard,
     completed: /RESULT=success through_step=31/.test(result.stdout),
   };
   console.log('OBSERVED stage0 core policy ' + JSON.stringify(observed));
   assert.deepEqual(observed, {
-    rc: 0, limit: '0', hard: '0', completed: true,
+    rc: 0, initialKiB: '1', limit: '0', hard: '0', completed: true,
   }, 'stage0 must explicitly disable core dumps before its child inherits the limit');
 });
 
