@@ -244,7 +244,6 @@ public class SourceManager {
     public func Clear(): Unit {
         sources.clear()
         filePathToFileIDMap.clear()
-        fileHashInputToPath.clear()
         sources.add(0, Source(0, "", ""))
     }
 
