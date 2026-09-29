@@ -160,7 +160,7 @@ test('bootstrap producer reaches actual stdx and tools subprocess entries', asyn
 });
 
 for (const hostHeap of ['12288MB', '10752MB', '5376MB']) {
-  test(`handoff keeps official host heap ${hostHeap} separate from compiler heap`, async t => {
+  test(`handoff passes recipe heap ${hostHeap} to host and compiler`, async t => {
     const f = await fixture(t);
     await fs.writeFile(path.join(f.work, 'cjcj-stage2'),
       '#!/bin/bash\nprintf "compiler heap=%s\\n" "$cjHeapSize"\n');
@@ -172,9 +172,40 @@ for (const hostHeap of ['12288MB', '10752MB', '5376MB']) {
     });
     assert.equal(run.status, 0, run.stderr);
     console.log(`HEAP_BOUNDARY_ASSERT_REACHED ${JSON.stringify(run.stdout)}`);
-    assert.equal(run.stdout, `host heap=${hostHeap}\ncompiler heap=20GB\n`);
+    assert.equal(run.stdout, `host heap=${hostHeap}\ncompiler heap=${hostHeap}\n`);
   });
 }
+
+for (const heap of ['20GB', '', undefined]) {
+  test(`handoff preserves explicit heap ${JSON.stringify(heap)}`, async t => {
+    const f = await fixture(t);
+    await fs.writeFile(path.join(f.work, 'cjcj-stage2'),
+      '#!/bin/bash\nprintf "set=%s heap=%s\\n" "${cjHeapSize+x}" "$cjHeapSize"\n');
+    await prepareBootstrapHandoff(f);
+    await assertBootstrapCompiler({sdk: f.sdk, command: path.join(f.sdk, 'bin', 'cjc')});
+    const env = {...process.env};
+    if (heap === undefined) delete env.cjHeapSize; else env.cjHeapSize = heap;
+    const run = spawnSync(path.join(f.sdk, 'bin', 'cjc'), {encoding: 'utf8', env});
+    assert.equal(run.status, 0, run.stderr);
+    console.log(`HEAP_PRESENCE_ASSERT_REACHED ${JSON.stringify(run.stdout)}`);
+    assert.equal(run.stdout, `set=${heap === undefined ? '' : 'x'} heap=${heap ?? ''}\n`);
+  });
+}
+
+test('same handoff SDK inherits each invocation heap without capturing generation environment', async t => {
+  const f = await fixture(t);
+  await fs.writeFile(path.join(f.work, 'cjcj-stage2'),
+    '#!/bin/bash\nprintf "%s\\n" "$cjHeapSize"\n');
+  await prepareBootstrapHandoff(f);
+  for (const heap of ['5376MB', '10752MB']) {
+    const run = spawnSync(path.join(f.sdk, 'bin', 'cjc'), {
+      encoding: 'utf8', env: {...process.env, cjHeapSize: heap},
+    });
+    assert.equal(run.status, 0, run.stderr);
+    console.log(`HEAP_PER_INVOCATION_ASSERT_REACHED expected=${heap} actual=${run.stdout.trim()}`);
+    assert.equal(run.stdout, `${heap}\n`);
+  }
+});
 
 test('stage3 final cjpm build consumes the resource-limited host environment', async () => {
   const stage = await fs.readFile(new URL('../../ci/srcbuild/steps/build-stage3.mjs', import.meta.url), 'utf8');
