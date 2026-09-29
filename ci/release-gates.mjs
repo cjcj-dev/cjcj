@@ -1002,7 +1002,7 @@ async function loadG12Floor(context) {
   const floor = imported.GC_RELEASE_FLOOR;
   const blockers = floor?.blocking?.map(item => item.id);
   const records = floor?.recording?.map(item => item.id);
-  if (floor?.schema !== 1 || JSON.stringify(blockers) !== JSON.stringify(['F1', 'F2', 'F3', 'F4', 'F5', 'F6']) ||
+  if (floor?.schema !== 2 || JSON.stringify(blockers) !== JSON.stringify(['F1', 'F2', 'F3', 'F4', 'F5', 'F6']) ||
       JSON.stringify(records) !== JSON.stringify(['R1', 'R2', 'R3', 'R4'])) {
     throw new GateInputError('UNKNOWN', 'frozen G12 floor does not contain exactly F1-F6 and R1-R4');
   }
@@ -1150,25 +1150,44 @@ function evaluateG12F5(rows, floor, profileName) {
 }
 
 function evaluateG12Records(remsetRows, throughputRows, phaseText, floor) {
-  const phaseNames = floor.recording.find(item => item.id === 'R1').phases;
-  const phaseUs = Object.fromEntries(phaseNames.map(name => [name, []]));
+  const r1 = floor.recording.find(item => item.id === 'R1');
+  const phaseNames = [...r1.phases, ...r1.optional_phases];
+  const phaseNs = Object.fromEntries(phaseNames.map(name => [name, []]));
+  const pauseNs = [];
   for (const line of phaseText.split(/\r?\n/)) {
     if (!line.startsWith('[GCLOG]') || !/\brec=phase\b/.test(line)) continue;
     const match = line.match(/^\[GCLOG\] v=5 rec=phase seq=(\d+) gc_tag=([yYO-]) name=([A-Za-z0-9._-]+) kind=(pause|conc|subphase|critical) start_ns=(\d+) ns=(\d+)$/);
     if (!match) throw new GateInputError('UNKNOWN', `R1 malformed or unsupported GCLOG phase: ${line}`);
     const ns = g12Integer(match[6], `R1.${match[3]}.ns`);
-    if (match[2] === 'y' && Object.hasOwn(phaseUs, match[3])) phaseUs[match[3]].push(ns / 1000);
+    // Y (major young, including preclean) and O never fill minor coverage.
+    if (match[2] !== r1.gc_tag) continue;
+    if (!Object.hasOwn(phaseNs, match[3])) {
+      if (match[4] === 'pause' || match[4] === 'conc') {
+        throw new GateInputError('UNKNOWN', `R1 unexpected minor top-level phase: ${match[3]}`);
+      }
+      continue;
+    }
+    const expectedKind = r1.pause_phases.includes(match[3]) ? 'pause' : 'conc';
+    if (match[4] !== expectedKind) {
+      throw new GateInputError('UNKNOWN', `R1 wrong kind for ${match[3]}: ${match[4]}`);
+    }
+    phaseNs[match[3]].push(ns);
+    if (match[4] === 'pause') pauseNs.push(ns);
   }
-  const missing = Object.entries(phaseUs).filter(([, values]) => values.length === 0).map(([name]) => name);
+  const missing = r1.phases.filter(name => phaseNs[name].length === 0);
   if (missing.length > 0) {
     throw new GateInputError('UNKNOWN', `R1 missing floor phases (no matching current producer records): ${missing.join(', ')}`);
   }
-  const phaseSums = Object.fromEntries(Object.entries(phaseUs)
+  const phaseSums = Object.fromEntries(Object.entries(phaseNs)
     .map(([name, values]) => [name, values.reduce((sum, value) => sum + value, 0)]));
-  const fourPillarTotal = Object.values(phaseSums).reduce((sum, value) => sum + value, 0);
-  if (fourPillarTotal <= 0) throw new GateInputError('UNKNOWN', 'R1 four-pillar phase total is zero');
-  const shares = Object.fromEntries(Object.entries(phaseSums)
-    .map(([name, value]) => [name, Number((value / fourPillarTotal).toFixed(6))]));
+  const totalNs = Object.values(phaseSums).reduce((sum, value) => sum + value, 0);
+  if (totalNs <= 0) throw new GateInputError('UNKNOWN', 'R1 top-level phase total is zero');
+  const shares = Object.fromEntries(Object.entries(phaseSums).map(([name, value]) => [name, {
+    count: phaseNs[name].length,
+    status: phaseNs[name].length ? 'observed' : 'not_observed',
+    total_ns: phaseNs[name].length ? value : null,
+    share: phaseNs[name].length ? Number((value / totalNs).toFixed(6)) : null,
+  }]));
 
   const defaultFys = floor.measurement.profiles.DEFAULT.full_young_scan;
   const remset = {};
@@ -1205,11 +1224,9 @@ function evaluateG12Records(remsetRows, throughputRows, phaseText, floor) {
   if (task[r3.minor_disabled_arm] <= 0) throw new GateInputError('UNKNOWN', 'R3 denominator is not positive');
   const ratio = task[r3.generational_arm] / task[r3.minor_disabled_arm];
 
-  const stw = [...phaseText.matchAll(/young collection stw time:\s*([0-9,]+)us/g)]
-    .map((match, index) => g12Integer(match[1].replaceAll(',', ''), `R4.stw[${index}]`));
-  if (stw.length === 0) throw new GateInputError('UNKNOWN', 'R4 lacks young collection STW duration lines');
+  const stw = pauseNs.map(ns => ns / 1000);
   return [
-    {id: 'R1', value: shares},
+    {id: 'R1', value: {coverage: r1.coverage, total_ns: totalNs, phases: shares}},
     {id: 'R2', value: remset},
     {id: 'R3', value: {median_task_ms: task, ratio: Number(ratio.toFixed(6))}},
     {id: 'R4', value: {samples: stw.length, median_us: g12Median(stw), max_us: Math.max(...stw)}},
