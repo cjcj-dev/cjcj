@@ -96,6 +96,9 @@ export function floorCandidate(results, {measuredUtc = '', evidenceResults} = {}
   if (results === null || typeof results !== 'object' || Array.isArray(results)) {
     throw new FloorRefused(['results file root must be an object']);
   }
+  if (results.schema !== 1) {
+    throw new FloorRefused([results.schema === undefined ? 'missing=schema' : `invalid=schema=${results.schema}`]);
+  }
   return {
     campaign_id: results.campaign_id,
     cjcj_head_sha: results.cjcj_head_sha,
