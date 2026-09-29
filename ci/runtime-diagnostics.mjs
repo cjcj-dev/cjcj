@@ -136,10 +136,12 @@ export async function collectDiagnostics(diagnostics, work) {
     const rcFile = `unit/test-rc/${index}-${kind}.rc`;
     const rc = await read(path.join(dir, rcFile));
     record.tests.push({kind, name, index, rc: rc?.trim() ?? 'UNKNOWN', rcFile,
+      logFile: `unit/test-logs/${index}-${kind}.log`, tallyFile: `unit/test-tallies/${index}-${kind}.txt`,
       reason: rc === null ? 'terminal rc absent; execution/completion unknown' : 'raw terminal rc'});
   }
   record.expected = Object.fromEntries(['gate.status', 'unit/gate_run.log', 'unit/teardown.log',
-    'unit/teardown.rc', 'unit/other_vm_exit.log', 'unit/test-manifest.tsv'].map(name =>
+    'unit/teardown.rc', 'unit/other_vm_exit.log', 'unit/test-manifest.tsv',
+    'unit/test-artifacts.sha256', 'unit/teardown-artifacts.sha256'].map(name =>
     [name, name === 'gate.status' ? (status === null ? 'NOT_PRODUCED; stage unknown' : 'PRESENT')
       : (files.some(file => file.path === name) ? 'PRESENT' : 'NOT_PRODUCED; stage unknown')]));
   record.manifestState = manifest === null ? 'NOT_PRODUCED; test execution unknown' : 'PRESENT';

@@ -44,12 +44,12 @@ if mode == 'timeout':
 if mode == 'failure':
  print('GC_UNIT_GATE_FAIL: suite exited unsuccessfully (rc=127)', file=sys.stderr)
  sys.exit(7)
-if mode == 'collection':
+if mode.startswith('collection'):
  (root / 'output').mkdir()
  (root / 'output/conflict.txt').write_text('copy conflict')
  target = status.parent / 'runtime-output/conflict.txt'
  target.mkdir(parents=True)
- sys.exit(9)
+ if mode == 'collection': sys.exit(9)
 output = root / 'output/Release/lib'
 output.mkdir(parents=True)
 (output / 'libcangjie-runtime.so').write_text('fixture only, not a runtime SO')
@@ -93,10 +93,11 @@ async function fixture(mode, check, {missingTool = false} = {}) {
     } catch { /* assertions below identify missing handoff, including baseline controls */ }
     await check({result, record, dir, root, observation, env});
     if (process.env.DIAGNOSTIC_TEST_EVIDENCE) {
-      const dest = path.join(process.env.DIAGNOSTIC_TEST_EVIDENCE, mode + (missingTool ? '-missing' : ''));
+      const dest = path.join(process.env.DIAGNOSTIC_TEST_EVIDENCE, mode + (missingTool ? '-missing' : '') + '-' + path.basename(root));
       await fs.mkdir(dest, {recursive: true});
       if (dir) await fs.cp(dir, path.join(dest, 'diagnostics'), {recursive: true});
       await fs.writeFile(path.join(dest, 'entry.json'), JSON.stringify(result, null, 2));
+      console.log(`ENTRY_EVIDENCE=${dest}`);
     }
   } finally { await fs.rm(root, {recursive: true, force: true}); }
 }
@@ -126,7 +127,7 @@ test('unit evidence survives cleanup and missing terminal rc stays unknown', asy
     assert.ok(record.files.every(file => !file.path.endsWith('.o')));
   });
 });
-for (const [mode, expected] of [['failure', 7], ['timeout', 124], ['collection', 9]]) {
+for (const [mode, expected] of [['failure', 7], ['timeout', 124], ['collection', 9], ['collection-success', 0]]) {
   test(`native ${mode} preserves build rc and raw stdout/stderr`, async () => {
     await fixture(mode, async ({result, record, dir}) => {
       console.log(`TARGET_ASSERT_EXECUTED ${mode} buildRc=${record?.buildRc}`);
@@ -134,9 +135,9 @@ for (const [mode, expected] of [['failure', 7], ['timeout', 124], ['collection',
       assert.equal(record?.buildRc, expected);
       assert.match(await fs.readFile(path.join(dir, 'build.stdout.log'), 'utf8'), /stdout before exit/);
       assert.match(await fs.readFile(path.join(dir, 'build.stderr.log'), 'utf8'), /stderr before exit/);
-      if (mode === 'collection') {
+      if (mode.startsWith('collection')) {
         assert.equal(record.collection, 'FAILED');
-        assert.match(record.error, /rc=9/);
+        if (mode === 'collection') assert.match(record.error, /rc=9/);
         assert.ok(record.collectionError);
       } else {
         assert.match(record.gateStatus, /CPP_SUITE=FAIL/);
