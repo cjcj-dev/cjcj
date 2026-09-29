@@ -771,24 +771,18 @@ stage1_inputs() {
 
 stage1_initial_std() {
   STAGE=stage1-initial-std
-  local compiler previous_std out std sdk
-  stage1_inputs
   prepare_stage0_run_sdk
   bootstrap_target_std "$compiler" "$previous_std"
 }
 
 stage1_std() {
   STAGE=stage1-std
-  local compiler previous_std out std sdk
-  stage1_inputs
   assemble_stage1_sdk "$sdk" "$compiler" "$previous_std"
   stdlib_build stdlib-stage2 "$sdk" "$HRT" "$std" "$previous_std"
 }
 
 stage1_compiler() {
   STAGE=stage1-compiler
-  local compiler previous_std out std sdk ld
-  stage1_inputs
   echo "OUTPUT cjcj-stage2=$out"
   echo "OUTPUT stdlib-stage2=$std"
   # The compiler links std statically: consume the completed std from its job.
@@ -814,10 +808,16 @@ stage1_compiler() {
 
 
 stage1() {
+  STAGE=stage1
   echo '[stage1] cjcj-stage1 self-host + coloured LLVM; C++=RelWithDebInfo'
-  stage1_initial_std
-  stage1_std
-  stage1_compiler
+  local compiler previous_std out std sdk ld
+  stage1_inputs
+  case "${1:-all}" in
+    initial-std) stage1_initial_std;;
+    std) stage1_std;;
+    compiler) stage1_compiler;;
+    all) stage1_initial_std; stage1_std; stage1_compiler;;
+  esac
 }
 
 # Optional -g stage2 for line tables on cjcj packages. Default off.
@@ -890,9 +890,9 @@ main() {
   case "$WANT" in
     stage0) stage0;;
     stage1) stage1;;
-    stage1-initial-std) stage1_initial_std;;
-    stage1-std) stage1_std;;
-    stage1-compiler) stage1_compiler;;
+    stage1-initial-std) stage1 initial-std;;
+    stage1-std) stage1 std;;
+    stage1-compiler) stage1 compiler;;
     all) stage0; stage1;;
   esac
   echo "BOOTSTRAP-OK 到 $WANT work=$WORK"

@@ -38,23 +38,29 @@ const matrixValues = (text, key) => [
   ...planTable(text).map(entry => entry[key]).filter(value => value !== undefined).map(String),
 ];
 
-function expandMatrix(name, text) {
+function expandMatrix(name, text, workflow = text) {
   const placeholder = name.match(/\$\{\{\s*matrix\.(\w+)\s*\}\}/);
   if (!placeholder) return [name];
-  const values = matrixValues(text, placeholder[1]);
+  const local = matrixValues(text, placeholder[1]);
+  const values = local.length ? local : planTable(workflow)
+    .map(entry => entry[placeholder[1]]).filter(value => value !== undefined).map(String);
   assert.ok(values.length > 0, `no matrix values for ${placeholder[1]} in ${name}`);
-  return values.flatMap(value => expandMatrix(name.replace(placeholder[0], value), text));
+  return values.flatMap(value => expandMatrix(name.replace(placeholder[0], value), text, workflow));
 }
 
 // Artifact names one workflow file uploads, with its own matrix fanout expanded.
 function uploadedArtifacts(text) {
-  const lines = text.split('\n');
   const names = [];
-  for (const [index, line] of lines.entries()) {
-    if (!line.includes('uses: actions/upload-artifact@')) continue;
-    const nameLine = lines.slice(index + 1, index + 10).find(entry => /^\s+name: /.test(entry));
-    assert.ok(nameLine, `upload step at line ${index + 1} declares no artifact name`);
-    names.push(...expandMatrix(nameLine.replace(/^\s+name: /, '').trim(), text));
+  // Matrix values belong to the producing job. A Linux-only cross job must
+  // not multiply every native artifact by its own target declaration.
+  for (const job of jobs(text).values()) {
+    const lines = job.split('\n');
+    for (const [index, line] of lines.entries()) {
+      if (!line.includes('uses: actions/upload-artifact@')) continue;
+      const nameLine = lines.slice(index + 1, index + 10).find(entry => /^\s+name: /.test(entry));
+      assert.ok(nameLine, `upload step at line ${index + 1} declares no artifact name`);
+      names.push(...expandMatrix(nameLine.replace(/^\s+name: /, '').trim(), job, text));
+    }
   }
   return names;
 }
