@@ -17,7 +17,8 @@ parser.add_argument("--evidence", type=Path, required=True)
 args = parser.parse_args()
 args.evidence.mkdir(parents=True, exist_ok=True)
 results = []
-for case in ("DifferentProducerVersion", "SameProducerVersion", "UnavailableProducerVersion"):
+for case in ("DifferentProducerVersion", "SameProducerVersion", "UnavailableProducerVersion",
+             "EmptyPackageNameUsesPath", "EmptyPackageNameAndPathUsesUnknown"):
     run = subprocess.run([str(args.elf.resolve()), "--no-color", "--show-all-output", "--no-progress", "--filter=CjoValidationDiagnosticTest." + case],
                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     (args.evidence / (case + ".log")).write_text(run.stdout)

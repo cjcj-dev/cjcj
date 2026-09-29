@@ -25,17 +25,18 @@ private func InvalidValidationData(result: TestCompileResult, different: Bool): 
 }
 
 private func CheckValidationDiagnostic(result: TestCompileResult, data: Array<UInt8>, producer: String,
-    different: Bool): Unit {
+    different: Bool, packageName!: String = "diagnostic.package", cjoPath!: String = "diagnostic.cjo",
+    expectedName!: String = "diagnostic.package"): Unit {
     let expected = if (different) {
-        "validation of ast file 'diagnostic.package' failed: it was compiled with cjc '${producer}', " +
+        "validation of ast file '${expectedName}' failed: it was compiled with cjc '${producer}', " +
             "but the current compiler is cjc '${CANGJIE_VERSION}'."
     } else {
-        "validation of ast file 'diagnostic.package' failed, please confirm it was created by compiler " +
+        "validation of ast file '${expectedName}' failed, please confirm it was created by compiler " +
             "whose version is '${CANGJIE_VERSION}'."
     }
     let diag = HeaderDiagnostics()
-    let header = ASTLoader(data, "diagnostic.package", diag)
-    header.SetCjoPath("diagnostic.cjo")
+    let header = ASTLoader(data, packageName, diag)
+    header.SetCjoPath(cjoPath)
     @Expect(header.LoadPackageDepInfo(), "")
     let diagnostics = diag.GetCategoryDiagnostic(DiagCategory.MODULE)
     @Assert(diagnostics.size, 1)
@@ -44,11 +45,11 @@ private func CheckValidationDiagnostic(result: TestCompileResult, data: Array<UI
 
     let pkg = RequireFirstPackage(result)
     let frontendDiag = DiagnosticEngine()
-    let loader = CjoSignatureMaterializer("diagnostic.package", pkg, HashMap<UInt32, File>(),
+    let loader = CjoSignatureMaterializer(packageName, pkg, HashMap<UInt32, File>(),
         HashMap<UInt64, File>(), ArrayList<Package>(), HashMap<String, PackageDecl>(),
         HashMap<String, HashMap<String, Decl>>(), frontendDiag,
         result.instance.typeManager.getOrThrow().AsFaithfulSemaTypeManager(), data: Some(data))
-    loader.SetCjoPath("diagnostic.cjo")
+    loader.SetCjoPath(cjoPath)
     @Expect(loader.LoadPackageDepInfo(), "")
     @Expect(frontendDiag.GetErrorCount(), 1u64)
     // The frontend exposes the production diagnostic output, not its backing
@@ -84,4 +85,20 @@ public class CjoValidationDiagnosticTest {
         @Assert(result.ok)
         CheckValidationDiagnostic(result, Array<UInt8>(4, repeat: 0u8), "", false)
     }
+    @TestCase
+    public func EmptyPackageNameUsesPath(): Unit {
+        let result = CompileSource("package diagnosticfixture\npublic func value(): Int64 { 0 }")
+        @Assert(result.ok)
+        CheckValidationDiagnostic(result, Array<UInt8>(4, repeat: 0u8), "", false,
+            packageName: "", expectedName: "diagnostic.cjo")
+    }
+
+    @TestCase
+    public func EmptyPackageNameAndPathUsesUnknown(): Unit {
+        let result = CompileSource("package diagnosticfixture\npublic func value(): Int64 { 0 }")
+        @Assert(result.ok)
+        CheckValidationDiagnostic(result, Array<UInt8>(4, repeat: 0u8), "", false,
+            packageName: "", cjoPath: "", expectedName: "unknown package")
+    }
+
 }
