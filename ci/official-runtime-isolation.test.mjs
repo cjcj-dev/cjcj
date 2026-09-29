@@ -199,6 +199,19 @@ test('rebuilt compiler may explicitly execute the isolated optimizer', t => {
 
 
 for (const name of ['llc', 'ld.lld']) {
+  test(`${name} publication leaves the official tool byte-identical`, t => {
+    const f = optimizerFixture(t);
+    const host = path.join(f.sdk, 'third_party/llvm/bin', name);
+    const target = path.join(f.patchedBin, name);
+    const before = hash(host); const archive = path.join(f.root, `${name}.gz`);
+    fs.writeFileSync(archive, gzipSync(fs.readFileSync(target)));
+    const output = path.join(f.root, 'published-llvm/bin', name);
+    const result = run(process.execPath, ['ci/install_patched_llvm_tool.mjs', host, archive, hash(target), output], f.env);
+    console.log(`TARGET_ASSERT_EXECUTED ${name}_unchanged before=${before} after=${hash(host)}`);
+    assert.equal(hash(host), before, 'official tool must remain byte-identical');
+    ok(result);
+    assert.equal(hash(output), hash(target));
+  });
   test(`official compiler cannot execute isolated ${name}`, t => {
     const f = optimizerFixture(t); const tool = path.join(f.patchedBin, name);
     const result = audit(f, f.compiler, [tool]);

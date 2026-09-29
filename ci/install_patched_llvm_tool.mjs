@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Publish a verified LLVM tool without replacing the official frontend's opt.
+// Publish a verified LLVM tool without replacing the official frontend's tools.
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';

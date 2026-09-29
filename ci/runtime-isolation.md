@@ -29,3 +29,18 @@ The audit requires a C compiler and OpenSSL development headers/library. The
 check for ordinary inherited process environments, not a security boundary
 against commands that deliberately remove loader instrumentation. Non-glibc
 platforms require a separate loader implementation before using this entry.
+
+
+`setup_sdk.mjs` also retains the official `opt`, `llc`, and native LLD. It
+verifies the target tuple, publishes those tools via
+`install_patched_llvm_tool.mjs` into `patched-llvm/bin`, and exports
+`CJCJ_PATCHED_LLVM_BIN`. It does not put that directory on the host PATH.
+Official SDK caches use the `cjv-host-tools-isolated` namespace so earlier
+mutated SDK caches cannot be reused. A cached tool already matching the
+coloured artifact is rejected; it is not silently accepted as official.
+
+When an isolated LLVM directory is supplied, the audit also checks executable
+path/hash before main and follows `/proc` ancestry through intermediate
+shells. An official `cjc`/`cjc-frontend` ancestor paired with a coloured
+optimizer, backend, or linker produces `OFFICIAL_TOOLCHAIN_MISMATCH` (86).
+Explicit use by a rebuilt compiler is recorded as `LLVM_TOOL_LOAD`.
