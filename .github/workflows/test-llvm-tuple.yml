@@ -170,6 +170,8 @@ jobs:
         run: node --test ci/llvm-tuple-platform.test.mjs ci/release/publish_bootstrap_inputs.test.mjs ci/release/prepare_bootstrap_inputs.test.mjs ci/release/prepare_llvm_dylib.test.mjs ci/release/colour_runtime.test.mjs
       - name: Cut producer and consumer script wiring
         run: bash ci/test-llvm-tuple-wiring.sh "$RUNNER_TEMP/wiring-test"
+      - name: Cut each platform publication and selection guard
+        run: bash ci/test-llvm-tuple-platform-wiring.sh "$RUNNER_TEMP/platform-wiring-test"
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -179,4 +181,5 @@ jobs:
             ${{ runner.temp }}/wiring-test/*.log
             ${{ runner.temp }}/wiring-test/*.diff
             ${{ runner.temp }}/wiring-test/*.sha256
+            ${{ runner.temp }}/platform-wiring-test/logs/*
           if-no-files-found: error
