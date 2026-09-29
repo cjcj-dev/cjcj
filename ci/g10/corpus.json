@@ -1,0 +1,255 @@
+{
+  "schema": 1,
+  "cases": [
+    {
+      "id": "01_empty",
+      "file": "progs/01_empty.cj",
+      "expected_rc": 0
+    },
+    {
+      "id": "02_literal",
+      "file": "progs/02_literal.cj",
+      "expected_rc": 0
+    },
+    {
+      "id": "03_add",
+      "file": "progs/03_add.cj",
+      "expected_rc": 0
+    },
+    {
+      "id": "04_subtract",
+      "file": "progs/04_subtract.cj",
+      "expected_rc": 0
+    },
+    {
+      "id": "05_multiply",
+      "file": "progs/05_multiply.cj",
+      "expected_rc": 0
+    },
+    {
+      "id": "06_divide",
+      "file": "progs/06_divide.cj",
+      "expected_rc": 0
+    },
+    {
+      "id": "07_remainder",
+      "file": "progs/07_remainder.cj",
+      "expected_rc": 0
+    },
+    {
+      "id": "08_negative",
+      "file": "progs/08_negative.cj",
+      "expected_rc": 0
+    },
+    {
+      "id": "09_boolean",
+      "file": "progs/09_boolean.cj",
+      "expected_rc": 0
+    },
+    {
+      "id": "10_compare",
+      "file": "progs/10_compare.cj",
+      "expected_rc": 0
+    },
+    {
+      "id": "11_if_else",
+      "file": "progs/11_if_else.cj",
+      "expected_rc": 0
+    },
+    {
+      "id": "12_while",
+      "file": "progs/12_while.cj",
+      "expected_rc": 0
+    },
+    {
+      "id": "13_for_range",
+      "file": "progs/13_for_range.cj",
+      "expected_rc": 0
+    },
+    {
+      "id": "14_break",
+      "file": "progs/14_break.cj",
+      "expected_rc": 0
+    },
+    {
+      "id": "15_continue",
+      "file": "progs/15_continue.cj",
+      "expected_rc": 0
+    },
+    {
+      "id": "16_function",
+      "file": "progs/16_function.cj",
+      "expected_rc": 0
+    },
+    {
+      "id": "17_recursion",
+      "file": "progs/17_recursion.cj",
+      "expected_rc": 0
+    },
+    {
+      "id": "18_mutual_recursion",
+      "file": "progs/18_mutual_recursion.cj",
+      "expected_rc": 0
+    },
+    {
+      "id": "19_tuple",
+      "file": "progs/19_tuple.cj",
+      "expected_rc": 0
+    },
+    {
+      "id": "20_tuple_return",
+      "file": "progs/20_tuple_return.cj",
+      "expected_rc": 0
+    },
+    {
+      "id": "21_array_read",
+      "file": "progs/21_array_read.cj",
+      "expected_rc": 0
+    },
+    {
+      "id": "22_array_write",
+      "file": "progs/22_array_write.cj",
+      "expected_rc": 0
+    },
+    {
+      "id": "23_array_loop",
+      "file": "progs/23_array_loop.cj",
+      "expected_rc": 0
+    },
+    {
+      "id": "24_array_size",
+      "file": "progs/24_array_size.cj",
+      "expected_rc": 0
+    },
+    {
+      "id": "25_nested_array",
+      "file": "progs/25_nested_array.cj",
+      "expected_rc": 0
+    },
+    {
+      "id": "26_string_equal",
+      "file": "progs/26_string_equal.cj",
+      "expected_rc": 0
+    },
+    {
+      "id": "27_string_concat",
+      "file": "progs/27_string_concat.cj",
+      "expected_rc": 0
+    },
+    {
+      "id": "28_interpolation",
+      "file": "progs/28_interpolation.cj",
+      "expected_rc": 0
+    },
+    {
+      "id": "29_unicode",
+      "file": "progs/29_unicode.cj",
+      "expected_rc": 0
+    },
+    {
+      "id": "30_float64",
+      "file": "progs/30_float64.cj",
+      "expected_rc": 0
+    },
+    {
+      "id": "31_float32",
+      "file": "progs/31_float32.cj",
+      "expected_rc": 0
+    },
+    {
+      "id": "32_int8",
+      "file": "progs/32_int8.cj",
+      "expected_rc": 0
+    },
+    {
+      "id": "33_uint64",
+      "file": "progs/33_uint64.cj",
+      "expected_rc": 0
+    },
+    {
+      "id": "34_conversion",
+      "file": "progs/34_conversion.cj",
+      "expected_rc": 0
+    },
+    {
+      "id": "35_closure",
+      "file": "progs/35_closure.cj",
+      "expected_rc": 0
+    },
+    {
+      "id": "36_capture",
+      "file": "progs/36_capture.cj",
+      "expected_rc": 0
+    },
+    {
+      "id": "37_returned_closure",
+      "file": "progs/37_returned_closure.cj",
+      "expected_rc": 0
+    },
+    {
+      "id": "38_generic_function",
+      "file": "progs/38_generic_function.cj",
+      "expected_rc": 0
+    },
+    {
+      "id": "39_generic_array",
+      "file": "progs/39_generic_array.cj",
+      "expected_rc": 0
+    },
+    {
+      "id": "40_class_field",
+      "file": "progs/40_class_field.cj",
+      "expected_rc": 0
+    },
+    {
+      "id": "41_class_method",
+      "file": "progs/41_class_method.cj",
+      "expected_rc": 0
+    },
+    {
+      "id": "42_mutable_field",
+      "file": "progs/42_mutable_field.cj",
+      "expected_rc": 0
+    },
+    {
+      "id": "43_generic_class",
+      "file": "progs/43_generic_class.cj",
+      "expected_rc": 0
+    },
+    {
+      "id": "44_struct",
+      "file": "progs/44_struct.cj",
+      "expected_rc": 0
+    },
+    {
+      "id": "45_enum",
+      "file": "progs/45_enum.cj",
+      "expected_rc": 0
+    },
+    {
+      "id": "46_enum_payload",
+      "file": "progs/46_enum_payload.cj",
+      "expected_rc": 0
+    },
+    {
+      "id": "47_option",
+      "file": "progs/47_option.cj",
+      "expected_rc": 0
+    },
+    {
+      "id": "48_option_none",
+      "file": "progs/48_option_none.cj",
+      "expected_rc": 0
+    },
+    {
+      "id": "49_nested_calls",
+      "file": "progs/49_nested_calls.cj",
+      "expected_rc": 0
+    },
+    {
+      "id": "50_nested_loop",
+      "file": "progs/50_nested_loop.cj",
+      "expected_rc": 0
+    }
+  ]
+}
