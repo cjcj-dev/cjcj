@@ -1153,11 +1153,15 @@ function evaluateG12Records(remsetRows, throughputRows, phaseText, floor) {
   const phaseNames = floor.recording.find(item => item.id === 'R1').phases;
   const phaseUs = Object.fromEntries(phaseNames.map(name => [name, []]));
   for (const line of phaseText.split(/\r?\n/)) {
-    const match = line.match(/\[GCLOG\].*\brec=phase\b.*\bname=(young\.[A-Za-z0-9_.-]+)\s+us=(\d+)\b/);
-    if (match && Object.hasOwn(phaseUs, match[1])) phaseUs[match[1]].push(g12Integer(match[2], `R1.${match[1]}`));
+    if (!line.startsWith('[GCLOG]') || !/\brec=phase\b/.test(line)) continue;
+    const match = line.match(/^\[GCLOG\] v=5 rec=phase seq=(\d+) gc_tag=([yYO-]) name=([A-Za-z0-9._-]+) kind=(pause|conc|subphase|critical) start_ns=(\d+) ns=(\d+)$/);
+    if (!match) throw new GateInputError('UNKNOWN', `R1 malformed or unsupported GCLOG phase: ${line}`);
+    const ns = g12Integer(match[6], `R1.${match[3]}.ns`);
+    if (match[2] === 'y' && Object.hasOwn(phaseUs, match[3])) phaseUs[match[3]].push(ns / 1000);
   }
-  if (Object.values(phaseUs).some(values => values.length === 0)) {
-    throw new GateInputError('UNKNOWN', 'R1 lacks one or more four-pillar [GCLOG] phase records');
+  const missing = Object.entries(phaseUs).filter(([, values]) => values.length === 0).map(([name]) => name);
+  if (missing.length > 0) {
+    throw new GateInputError('UNKNOWN', `R1 missing floor phases (no matching current producer records): ${missing.join(', ')}`);
   }
   const phaseSums = Object.fromEntries(Object.entries(phaseUs)
     .map(([name, values]) => [name, values.reduce((sum, value) => sum + value, 0)]));
