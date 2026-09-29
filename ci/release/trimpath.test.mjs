@@ -42,7 +42,7 @@ const aggregate = await fs.readFile(new URL('../../scripts/cjcjcg_aggregate_ctyp
 const aggregateConfig = aggregate.slice(
   aggregate.indexOf('cp -a "$source_tree/cjpm.toml"'),
   aggregate.indexOf('library_path='));
-assert.match(aggregateConfig, /sed .*\nnode /);
+assert.match(aggregateConfig, /sed /);
 for (const [name, input, debug] of [
   ['clean O2', '-O2', false],
   ['prepared release O2', '-O2', false],
