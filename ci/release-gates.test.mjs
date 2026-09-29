@@ -258,7 +258,7 @@ test('job identity and host mapping matter even when the package job count is un
   for (const [from, to, expected] of [
     [`llvm_platform: ${first.llvm_platform}\n`, 'llvm_platform: fixture-wrong-llvm\n', 'host/LLVM mismatch'],
     [`release_key: ${first.key}\n`, 'release_key: fixture-unknown-key\n', 'unexpected release_key=fixture-unknown-key'],
-    [`release_key: ${first.key}\n`, '', 'unexpected release_key=<missing>'],
+    [`      release_key: ${first.key}\n`, '', 'unexpected release_key=<missing>'],
   ]) {
     await write(root, '.github/workflows/release.yml', workflow.replace(from, to));
     const bad = gate(root, 'G15');

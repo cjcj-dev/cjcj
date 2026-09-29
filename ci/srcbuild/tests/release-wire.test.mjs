@@ -35,7 +35,7 @@ test('srcbuild exposes reusable inputs, outputs, and the runtime override chain'
 
 test('release connects each platform row to its same-platform final std', async () => {
   const release = await releaseWorkflow();
-  assert.ok(jobsOf(release).some(job => job.uses === './.github/workflows/srcbuild.yml')); 
+  assert.ok(jobsOf(release).some(job => job.uses === './.github/workflows/srcbuild.yml'));
   assert.ok(jobsOf(release).some(job => job.with?.runtime_ref === '${{ inputs.runtime_ref }}'));
   // The pairing, not the row that used to carry it. Phase control replaced the
   // matrix with one job per phase, so platform and std_artifact now sit on
