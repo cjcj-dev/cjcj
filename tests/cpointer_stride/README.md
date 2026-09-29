@@ -12,3 +12,15 @@ assertions run even when one fails. An official prebuilt std is not evidence
 for this regression because its generic pointer operators bypass our codegen.
 
 Reference: cangjie_compiler/src/CodeGen/Base/IntrinsicsDispatcher.cpp:529-551.
+
+Run on kkk2 through box.sh:
+
+```sh
+bash tests/cpointer_stride/run.sh TARGET_SDK COLOURED_RUNTIME_LIB_DIR OUTPUT_DIR
+```
+
+The target SDK's compiler launcher must have its normal host/target binding.
+The runner preserves compiler and process return codes, input and ELF hashes,
+all assertion values, and before/after uptime. Compiler failures are not stride
+assertion failures. The test statically links std.core, so a changed std archive
+requires relinking the test ELF; an unchanged source file alone is insufficient.
