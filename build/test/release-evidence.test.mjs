@@ -159,10 +159,21 @@ function rejected(result, message) {
 // Mutate a sealed archive without making the integrity ledger the reason for rejection.
 async function resealJobs(archive, jobs) {
   await writeJobs(archive, jobs);
+  const urlsFile = path.join(archive, 'urls.tsv');
+  const lines = (await fs.readFile(urlsFile, 'utf8')).trimEnd().split('\n');
+  const conclusions = new Map(jobs.map(job => [String(job.id), job.conclusion]));
+  await fs.writeFile(urlsFile, lines.map(line => {
+    const fields = line.split('\t');
+    if (fields[0] === 'job') fields[3] = conclusions.get(fields[1]);
+    return fields.join('\t');
+  }).join('\n') + '\n');
   const ledger = path.join(archive, 'EVIDENCE_SHA256SUMS');
-  const text = await fs.readFile(ledger, 'utf8');
-  const hash = crypto.createHash('sha256').update(await fs.readFile(path.join(archive, 'jobs.json'))).digest('hex');
-  await fs.writeFile(ledger, text.replace(/^[a-f0-9]{64}  jobs\.json$/m, `${hash}  jobs.json`));
+  let text = await fs.readFile(ledger, 'utf8');
+  for (const file of ['jobs.json', 'urls.tsv']) {
+    const hash = crypto.createHash('sha256').update(await fs.readFile(path.join(archive, file))).digest('hex');
+    text = text.split('\n').map(line => line.endsWith(`  ${file}`) ? `${hash}  ${file}` : line).join('\n');
+  }
+  await fs.writeFile(ledger, text);
 }
 
 test('archives and verifies all eight release cells with optional skips', async () => {
@@ -274,3 +285,24 @@ test('runbook jq accepts exactly the buildable artifact set', async () => {
   assert.notEqual((await audit(artifacts.map((a, i) => i === 0 ? {...a, digest: ''} : a))).status, 0, 'digest');
   console.log('TARGET_RUNBOOK eight accepted; eight missing, duplicate, expired, empty digest rejected');
 });
+
+for (const [host, phase] of [['linux-x64', 1], ['linux-aarch64', 2], ['darwin-arm64', 4], ['darwin-x64', 5]]) {
+  for (const leaf of ['in-process-dylib', 'Publish static colour LLVM tuple']) {
+    test(`only optional ${host} ${leaf} may skip`, async () => {
+      const {source, archive, jobs} = await fixture();
+      const suffix = host === 'linux-x64' ? ' (also cross-builds the Windows std)' : '';
+      const name = `phase ${phase} · ${host} / source SDK and final std${suffix} / Build native LLVM tools / ${leaf}`;
+      let job = jobs.find(j => j.name === name);
+      if (!job) {
+        job = {id: 99999, name, conclusion: 'skipped', html_url: `https://github.com/cjcj-dev/cjcj/actions/runs/${RUN_ID}/job/99999`};
+        jobs.push(job);
+      }
+      await writeJobs(source, jobs);
+      const result = collect(source, archive);
+      assert.equal(result.status, 0, result.stderr);
+      job.conclusion = 'failure';
+      await writeJobs(source, jobs);
+      rejected(collect(source, `${archive}-failure`), `job has the wrong dry-run conclusion: ${name}`);
+    });
+  }
+}
