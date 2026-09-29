@@ -29,3 +29,31 @@ for (const platform of ['linux_x86_64', 'linux_aarch64']) {
     } finally { fs.rmSync(root, {recursive: true, force: true}); }
   });
 }
+
+for (const [requested, platforms] of [
+  ['linux_aarch64', ['linux_aarch64']],
+  ['linux_x86_64', ['linux_x86_64']],
+  ['all', ['linux_x86_64', 'linux_aarch64']],
+  ['darwin_aarch64', []],
+]) {
+  test(`workflow selects static tuple platforms for ${requested}`, () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tuple-plan-'));
+    try {
+      const workflow = fs.readFileSync('.github/workflows/build-llvm-tools.yml', 'utf8');
+      const plan = workflow.slice(workflow.indexOf('  plan:'), workflow.indexOf('  build-tools:'));
+      const script = plan.slice(plan.indexOf('        run: |\n') + '        run: |\n'.length)
+        .split('\n').map(line => line.replace(/^          /, '')).join('\n');
+      const output = path.join(root, 'output');
+      const result = spawnSync('bash', ['-c', script], {encoding: 'utf8',
+        env: {...process.env, REQUESTED: requested, GITHUB_OUTPUT: output}});
+      assert.equal(result.status, 0, result.stderr);
+      const lines = Object.fromEntries(fs.readFileSync(output, 'utf8').trim().split('\n').map(line => {
+        const i = line.indexOf('='); return [line.slice(0, i), line.slice(i + 1)];
+      }));
+      assert.deepEqual(JSON.parse(lines.tuple_platforms), platforms);
+      const arm = JSON.parse(lines.matrix).include.find(cell => cell.platform === 'linux_aarch64');
+      if (arm) assert.equal(arm.runner, 'ubuntu-24.04-arm');
+      console.log(`ASSERT tuple-plan ${requested}=${lines.tuple_platforms}`);
+    } finally { fs.rmSync(root, {recursive: true, force: true}); }
+  });
+}

@@ -64,7 +64,6 @@ jobs:
         id: select
         env:
           REQUESTED: ${{ inputs.platforms || 'all' }}
-          PUBLISH_TUPLE: ${{ inputs.publish_tuple }}
         run: |
           set -euo pipefail
           all='[
@@ -357,7 +356,7 @@ jobs:
           retention-days: 7
 
   static-tuple:
-    if: inputs.publish_tuple
+    if: inputs.publish_tuple && needs.plan.outputs.tuple_platforms != '[]'
     name: Publish static colour LLVM tuple
     needs: [plan, build-tools]
     strategy:
