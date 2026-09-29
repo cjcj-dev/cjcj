@@ -2,6 +2,7 @@
 """Assemble SDK.lock.json and fail-closed verify an assembled SDK tree."""
 from __future__ import annotations
 
+from compiler_identity import verify as verify_compiler_identity
 import argparse
 import hashlib
 import json
@@ -45,7 +46,7 @@ def sha256_file(path: Path) -> str:
 
 
 def classify(rel: str) -> str:
-    if rel == LOCK_NAME:
+    if rel in (LOCK_NAME, 'compiler-lineage.json'):
         return 'sdk-meta'
     if rel == 'std-producer.json':
         return 'std'
@@ -207,6 +208,11 @@ def verify(sdk: Path, lock: dict, pin: dict, identities: dict, errors: list, tar
             fail('UNDECLARED', f'unknown component for {rel}', errors)
 
     role = lock.get('role')
+    if (sdk / 'compiler-lineage.json').is_file():
+        try:
+            verify_compiler_identity(sdk)
+        except (OSError, ValueError, KeyError) as error:
+            fail('COMPILER_IDENTITY', str(error), errors)
     measured = measured_cjc_sha(sdk)
     producer = std_producer_sha(sdk)
     has_std = any(

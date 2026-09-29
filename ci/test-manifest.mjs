@@ -25,9 +25,11 @@ export const repoRoot = path.resolve(import.meta.dirname, '..');
 
 // Run by `node --test` in .github/workflows/ci.yml, via `test-manifest.mjs list`.
 export const GATING = Object.freeze([
+  'ci/platform_matrix/summarize_scope.test.mjs',
   'ci/release/g8.test.mjs',
   'build/test/archive.test.mjs',
   'build/test/cangjie-written-tools.test.mjs',
+  'build/test/cangjie-test-preparation.test.mjs',
   'build/test/compose-install.test.mjs',
   'build/test/compose-sdk-entry.test.mjs',
   'build/test/darwin-cjdb-python.test.mjs',
@@ -77,6 +79,7 @@ export const GATING = Object.freeze([
   'ci/release-pair-pin.test.mjs',
   'ci/release-gates.test.mjs',
   'ci/smoke/smoke-runtime-isolation.test.mjs',
+  'ci/release-run-evidence.test.mjs',
   // Node fixtures use mocked transport, no SDK or credentials. The publisher
   // exercises real zip/unzip; ci.yml installs both before running this list.
   'ci/release/android-platform.test.mjs',
@@ -93,12 +96,14 @@ export const GATING = Object.freeze([
   'ci/release/trimpath.test.mjs',
   'ci/sccache/report.test.mjs',
   'ci/srcbuild/tests/inject-version.test.mjs',
+  'ci/srcbuild/tests/job-handoff.test.mjs',
   'ci/srcbuild/tests/phase-control.test.mjs',
   'ci/srcbuild/tests/pin-compiler-llvm.test.mjs',
   'ci/srcbuild/tests/platform-contract.test.mjs',
   'ci/srcbuild/tests/product-binary.test.mjs',
   'ci/srcbuild/tests/release-wire.test.mjs',
   'ci/srcbuild/tests/sccache-contract.test.mjs',
+  'ci/srcbuild/tests/segmented-workflow.test.mjs',
   // Invokes npx --yes zx@8 on a rejected fixture SDK; CI primes zx below.
   'ci/srcbuild/tests/verify-sdk.test.mjs',
   'ci/srcbuild/tests/workflow-inputs.test.mjs',

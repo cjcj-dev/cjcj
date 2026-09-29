@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import crypto from 'node:crypto';
+import {platformRequirements, platformEvidence, g10Evidence} from './release-run-evidence.mjs';
 import {load as loadYaml} from './vendor/js-yaml/js-yaml.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -15,8 +16,8 @@ const STATUSES = new Set(['MET', 'NOT_MET', 'UNKNOWN']);
 const PLATFORM_GATES = new Set(['G3', 'G6', 'G7', 'G9']);
 const EVIDENCE_REGISTRY = 'GATE_EVIDENCE.json';
 const EVIDENCE_BINDING = 'EVIDENCE_BINDING.json';
-const DISCOVERABLE_EVIDENCE_GATES = new Set(['G2', 'G8', 'G12', 'G14']);
-const GENERIC_BINDING_GATES = new Set(['G12', 'G14']);
+const DISCOVERABLE_EVIDENCE_GATES = new Set(['G2', 'G3', 'G6', 'G7', 'G8', 'G9', 'G10', 'G12', 'G14']);
+const GENERIC_BINDING_GATES = new Set(['G3', 'G6', 'G7', 'G9', 'G10', 'G12', 'G14']);
 const G2_ARTIFACTS = [
   'runtime_dynamic',
   'runtime_static',
@@ -1152,11 +1153,15 @@ function evaluateG12Records(remsetRows, throughputRows, phaseText, floor) {
   const phaseNames = floor.recording.find(item => item.id === 'R1').phases;
   const phaseUs = Object.fromEntries(phaseNames.map(name => [name, []]));
   for (const line of phaseText.split(/\r?\n/)) {
-    const match = line.match(/\[GCLOG\].*\brec=phase\b.*\bname=(young\.[A-Za-z0-9_.-]+)\s+us=(\d+)\b/);
-    if (match && Object.hasOwn(phaseUs, match[1])) phaseUs[match[1]].push(g12Integer(match[2], `R1.${match[1]}`));
+    if (!line.startsWith('[GCLOG]') || !/\brec=phase\b/.test(line)) continue;
+    const match = line.match(/^\[GCLOG\] v=5 rec=phase seq=(\d+) gc_tag=([yYO-]) name=([A-Za-z0-9._-]+) kind=(pause|conc|subphase|critical) start_ns=(\d+) ns=(\d+)$/);
+    if (!match) throw new GateInputError('UNKNOWN', `R1 malformed or unsupported GCLOG phase: ${line}`);
+    const ns = g12Integer(match[6], `R1.${match[3]}.ns`);
+    if (match[2] === 'y' && Object.hasOwn(phaseUs, match[3])) phaseUs[match[3]].push(ns / 1000);
   }
-  if (Object.values(phaseUs).some(values => values.length === 0)) {
-    throw new GateInputError('UNKNOWN', 'R1 lacks one or more four-pillar [GCLOG] phase records');
+  const missing = Object.entries(phaseUs).filter(([, values]) => values.length === 0).map(([name]) => name);
+  if (missing.length > 0) {
+    throw new GateInputError('UNKNOWN', `R1 missing floor phases (no matching current producer records): ${missing.join(', ')}`);
   }
   const phaseSums = Object.fromEntries(Object.entries(phaseUs)
     .map(([name, values]) => [name, values.reduce((sum, value) => sum + value, 0)]));
@@ -1460,12 +1465,42 @@ function scopeSummary(scope) {
     `LLVM=[${scope.llvm_platforms.join(',')}]; std_tuples=[${scope.std_tuples.join(',')}]`;
 }
 
+function evidenceRunResult(gate, result, extra = {}) {
+  return gateResult(gate, result.status,
+    `missing=${result.missing.join(',') || '<none>'}; failures=${result.failures.join(',') || '<none>'}`,
+    {...result, ...extra});
+}
+
+async function readRunResults(gate, context) {
+  try {
+    return parseEvidenceJson(await fs.readFile(path.join(context.evidence, `${gate}_RESULTS.json`), 'utf8'), `${gate}_RESULTS.json`);
+  } catch (error) {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
 async function evaluatePlatformRun(gate, context) {
   const scope = await releaseScope(context);
-  const status = scope.failures.length ? 'NOT_MET' : 'UNKNOWN';
-  const detail = scope.failures.length ? `platform/job mismatch: ${scope.failures.join('; ')}` :
-    `NEEDS_RUN: ${GATES[gate].needsRun}`;
-  return gateResult(gate, status, `${detail}; ${scopeSummary(scope)}`, {scope});
+  if (scope.failures.length) return gateResult(gate, 'NOT_MET',
+    `platform/job mismatch: ${scope.failures.join('; ')}; ${scopeSummary(scope)}`, {scope});
+  context = await discoverEvidenceContext(gate, context);
+  const data = context.evidence ? await readRunResults(gate, context) : null;
+  if (!data) {
+    const missing = platformRequirements(gate, scope).map(row => `${row.id}:record`);
+    const blocked = scope.platforms.some(p => p.status === 'blocked');
+    return gateResult(gate, blocked ? 'NOT_MET' : 'UNKNOWN',
+      `NEEDS_RUN: ${GATES[gate].needsRun}; missing=${gate}_RESULTS.json,${missing.join(',')}; ${scopeSummary(scope)}`,
+      {scope, missing: [`${gate}_RESULTS.json`, ...missing]});
+  }
+  const binding = parseEvidenceJson(await readAbsolute(path.join(context.evidence, EVIDENCE_BINDING)), EVIDENCE_BINDING);
+  const result = platformEvidence(gate, scope, data, binding.payload_sha256);
+  return evidenceRunResult(gate, result, {scope});
+}
+
+async function evaluateG10(context) {
+  if (!context.evidence) return evidenceRunResult('G10', {status: 'UNKNOWN', missing: ['G10_RESULTS.json'], failures: []});
+  return evidenceRunResult('G10', g10Evidence(await readRunResults('G10', context), git(context, ['rev-parse', 'HEAD'])));
 }
 
 async function evaluateG15(context) {
@@ -1529,6 +1564,7 @@ async function evaluate(gate, context) {
     G4: evaluateG4,
     G5: evaluateG5,
     G8: evaluateG8,
+    G10: evaluateG10,
     G12: evaluateG12,
     G13: contextValue => loaderlifeResult(contextValue),
     G14: evaluateG14,
@@ -1538,10 +1574,11 @@ async function evaluate(gate, context) {
   };
   try {
     if (PLATFORM_GATES.has(gate)) return await evaluatePlatformRun(gate, context);
-    if (GATES[gate].needsRun) return gateResult(gate, 'UNKNOWN', `NEEDS_RUN: ${GATES[gate].needsRun}`);
+    if (gate !== 'G10' && GATES[gate].needsRun) return gateResult(gate, 'UNKNOWN', `NEEDS_RUN: ${GATES[gate].needsRun}`);
     return await evaluators[gate](await discoverEvidenceContext(gate, context));
   } catch (error) {
-    if (error instanceof GateInputError) return gateResult(gate, error.kind, error.message);
+    if (error instanceof GateInputError) return gateResult(gate, error.kind,
+      `${PLATFORM_GATES.has(gate) || gate === 'G10' ? 'missing=' : ''}${error.message}`);
     return gateResult(gate, 'UNKNOWN', `unexpected evaluator error: ${error.message}`);
   }
 }
