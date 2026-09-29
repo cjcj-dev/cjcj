@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import test from 'node:test';
+import {load as loadYaml, dump as dumpYaml} from './vendor/js-yaml/js-yaml.mjs';
 
 import {GATES} from './release-gates.mjs';
 
@@ -302,5 +303,48 @@ test('new blocked and excluded registry rows remain visible without inventing pa
     assert.ok(value.scope.std_tuples.includes('fixture_unproduced_tuple'));
     assert.match(value.value, /fixture_unproduced_tuple: no P01-P23 stage/);
     assert.match(value.value, /fixture-excluded \(fixture documented exclusion\)/);
+  }
+});
+
+
+test('release YAML formatting preserves real CLI gate results', async t => {
+  const root = await platformFixture(t);
+  const relative = '.github/workflows/release.yml';
+  const original = await fs.readFile(path.join(root, relative), 'utf8');
+  const expected = loadYaml(original);
+  const before = Object.fromEntries(platformGates.map(name => [name, gate(root, name)]));
+  const reordered = loadYaml(original);
+  for (const job of Object.values(reordered.jobs)) {
+    if (job.with) job.with = Object.fromEntries(Object.entries(job.with).reverse());
+  }
+  const variants = {
+    'blank line': original.replace('      release_key: linux-x64\n', '      release_key: linux-x64\n\n'),
+    'comment': original.replace('      release_key: linux-x64\n', '      release_key: linux-x64 # release identity\n    # comment between inputs\n'),
+    'key order': dumpYaml(reordered, {lineWidth: -1}),
+    'flow mapping': dumpYaml(expected, {flowLevel: 3, lineWidth: -1}),
+  };
+  for (const [label, source] of Object.entries(variants)) await t.test(label, () => {
+    assert.notEqual(source, original);
+    assert.deepEqual(loadYaml(source), expected, 'formatting must preserve workflow data');
+    return write(root, relative, source).then(() => {
+      for (const name of platformGates) {
+        const after = gate(root, name);
+        t.diagnostic(`${label} ${name}: rc=${after.result.status}, status=${after.value.status}`);
+        assert.equal(after.result.status, before[name].result.status, JSON.stringify(after.value));
+        assert.equal(after.value.status, before[name].value.status);
+        assert.deepEqual(after.value.scope, before[name].value.scope);
+      }
+    });
+  });
+});
+
+test('invalid release YAML and duplicate mapping keys fail closed', async t => {
+  const root = await platformFixture(t);
+  for (const source of ['jobs: [', 'jobs: {}\njobs: {}\n', 'jobs: []\n']) {
+    await write(root, '.github/workflows/release.yml', source);
+    const {result, value} = gate(root, 'G15');
+    assert.equal(result.status, 1, JSON.stringify(value));
+    assert.equal(value.status, 'NOT_MET');
+    assert.match(value.value, /invalid release workflow YAML|jobs must be a mapping/);
   }
 });

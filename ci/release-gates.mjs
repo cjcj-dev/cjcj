@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import crypto from 'node:crypto';
+import {load as loadYaml} from './vendor/js-yaml/js-yaml.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
@@ -1413,20 +1414,19 @@ async function releaseScope(context) {
     };
   });
   const release = await readFile(context, '.github/workflows/release.yml');
-  // Match job-level uses and with scalars only; a comment/step/string containing
-  // the reusable workflow name must not count as a package job.
-  const body = release.split(/^jobs:\s*$/m)[1] || '';
-  const scalar = (block, indent, key) => {
-    const raw = block.match(new RegExp(`^ {${indent}}${key}: +(.+?)\\s*$`, 'm'))?.[1] || '';
-    return raw.replace(/\s+#.*$/, '').replace(/^(['"])(.*)\1$/, '$2');
-  };
-  const jobs = [...body.matchAll(/^ {2}([\w-]+):[^\S\n]*(?:#.*)?\n([\s\S]*?)(?=^ {2}[\w-]+:|(?![\s\S]))/gm)]
-    .filter(([, , block]) => scalar(block, 4, 'uses') === './.github/workflows/build-release-package.yml')
-    .map(([, id, block]) => {
-      const inputs = block.match(/^ {4}with:\s*\n((?:^ {6}[^\n]*\n?)*)/m)?.[1] || '';
-      return {id, key: scalar(inputs, 6, 'release_key'), host: scalar(inputs, 6, 'platform'),
-        llvm_platform: scalar(inputs, 6, 'llvm_platform')};
-    });
+  let workflow;
+  try {
+    workflow = loadYaml(release);
+  } catch (error) {
+    throw new GateInputError('NOT_MET', `invalid release workflow YAML: ${error.message}`);
+  }
+  if (!plainObject(workflow?.jobs)) {
+    throw new GateInputError('NOT_MET', 'release workflow jobs must be a mapping');
+  }
+  const jobs = Object.entries(workflow.jobs)
+    .filter(([, job]) => job?.uses === './.github/workflows/build-release-package.yml')
+    .map(([id, job]) => ({id, key: job.with?.release_key, host: job.with?.platform,
+      llvm_platform: job.with?.llvm_platform}));
   const expected = platforms.filter(platform => platform.status === 'buildable');
   const failures = [];
   if (!platforms.length || !expected.length) failures.push('empty release platform/buildable set');

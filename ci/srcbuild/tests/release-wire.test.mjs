@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
+import {load as loadYaml} from '../../vendor/js-yaml/js-yaml.mjs';
 import {allTargets, getTarget, getReleasePlatform, releasePlatformReadiness} from '../../../build/lib/targets.mjs';
 import {planMatrix} from '../../release/platform-matrix.mjs';
 
@@ -10,9 +11,10 @@ const workflow = name => fs.readFile(path.join(root, '.github/workflows', name),
 const plan = planMatrix('all');
 const nativeRows = plan.package.filter(row => getReleasePlatform(row.release_key).archiveKey === row.platform);
 const nativeKeys = nativeRows.map(row => row.release_key);
-const scalar = (text, key) => text.match(new RegExp(String.raw`^\s*${key}:\s*(.+?)\s*$`, 'm'))?.[1];
-const packageJobsOf = release => release.split(/\n  (?=[a-z0-9-]+:\n)/)
-  .filter(job => job.includes('uses: ./.github/workflows/build-release-package.yml'));
+const releaseWorkflow = async () => loadYaml(await workflow('release.yml'));
+const jobsOf = release => Object.entries(release.jobs).map(([id, job]) => ({...job, id}));
+const packageJobsOf = release => jobsOf(release)
+  .filter(job => job.uses === './.github/workflows/build-release-package.yml');
 
 const platforms = allTargets();
 
@@ -32,61 +34,60 @@ test('srcbuild exposes reusable inputs, outputs, and the runtime override chain'
 });
 
 test('release connects each platform row to its same-platform final std', async () => {
-  const release = await workflow('release.yml');
-  assert.ok(release.includes('uses: ./.github/workflows/srcbuild.yml'));
-  assert.ok(release.includes('runtime_ref: ${{ inputs.runtime_ref }}'));
+  const release = await releaseWorkflow();
+  assert.ok(jobsOf(release).some(job => job.uses === './.github/workflows/srcbuild.yml')); 
+  assert.ok(jobsOf(release).some(job => job.with?.runtime_ref === '${{ inputs.runtime_ref }}'));
   // The pairing, not the row that used to carry it. Phase control replaced the
   // matrix with one job per phase, so platform and std_artifact now sit on
   // separate lines of the same with: block; a line-shaped check reads a correct
   // wiring as missing.
   const packageJobs = packageJobsOf(release)
-    .filter(job => nativeKeys.includes(scalar(job, 'release_key')));
+    .filter(job => nativeKeys.includes(job.with?.release_key));
   assert.equal(packageJobs.length, platforms.length,
     `expected one package job per platform, found ${packageJobs.length}`);
   for (const platform of platforms) {
-    const job = packageJobs.find(entry => new RegExp(String.raw`^\s*platform: ${platform}\s*$`, 'm').test(entry));
+    const job = packageJobs.find(entry => entry.with?.platform === platform);
     assert.ok(job, `no package job declares platform: ${platform}`);
-    assert.match(job, new RegExp(String.raw`^\s*std_artifact: final-std-${platform}\s*$`, 'm'),
+    assert.equal(job.with?.std_artifact, `final-std-${platform}`,
       `the ${platform} package job does not ask for final-std-${platform}`);
   }
-  assert.ok(release.includes('pattern: pkg-*'));
+  assert.ok(jobsOf(release).some(job => job.steps?.some(step => step.with?.pattern === 'pkg-*')));
 });
 
 test('release cross packages depend on their native phase and Android producer with same-host std', async () => {
-  const release = await workflow('release.yml');
+  const release = await releaseWorkflow();
   const packages = packageJobsOf(release);
-  const cross = packages.filter(job => !nativeKeys.includes(scalar(job, 'release_key')));
+  const cross = packages.filter(job => !nativeKeys.includes(job.with?.release_key));
   const rows = plan.package.filter(row => !nativeKeys.includes(row.release_key));
-  assert.deepEqual(cross.map(job => scalar(job, 'release_key')).sort(), rows.map(row => row.release_key).sort(),
+  assert.deepEqual(cross.map(job => job.with?.release_key).sort(), rows.map(row => row.release_key).sort(),
     'every non-native package must have an explicit cross contract');
-  const sources = release.split(/\n  (?=[a-z0-9-]+:\n)/)
-    .filter(job => job.includes('uses: ./.github/workflows/srcbuild.yml'));
-  const jobId = job => job.trimStart().split(':')[0];
+  const sources = jobsOf(release).filter(job => job.uses === './.github/workflows/srcbuild.yml');
+  const jobId = job => job.id;
   for (const row of rows) {
     const {release_key: key, platform: host} = row;
-    const job = cross.find(entry => scalar(entry, 'release_key') === key);
-    assert.equal(scalar(job, 'platform'), host, `${key}: package host`);
-    assert.equal(scalar(job, 'std_artifact'), row.std_artifact, `${key}: same-host final std`);
-    const native = packages.find(entry => nativeKeys.includes(scalar(entry, 'release_key')) && scalar(entry, 'platform') === host);
+    const job = cross.find(entry => entry.with?.release_key === key);
+    assert.equal(job.with?.platform, host, `${key}: package host`);
+    assert.equal(job.with?.std_artifact, row.std_artifact, `${key}: same-host final std`);
+    const native = packages.find(entry => nativeKeys.includes(entry.with?.release_key) && entry.with?.platform === host);
     assert.ok(native, `${key}: native package dependency`);
     const producerJobs = Object.values(releasePlatformReadiness(key).crossStd).map(target => {
-      const producer = sources.find(entry => scalar(entry, 'targets') === target);
+      const producer = sources.find(entry => entry.with?.targets === target);
       assert.ok(producer, `${key}: cross std source ${target}`);
       return jobId(producer);
     });
-    assert.deepEqual(scalar(job, 'needs').slice(1, -1).split(',').map(s => s.trim()).sort(),
+    assert.deepEqual([...job.needs].sort(),
       [...new Set([jobId(native), ...producerJobs])].sort(), `${key}: native phase and cross producer dependencies`);
-    const tuples = JSON.parse(scalar(job, 'cross_std_artifacts').replace(/^'|'$/g, ''));
+    const tuples = JSON.parse(job.with?.cross_std_artifacts);
     assert.deepEqual(tuples, JSON.parse(row.cross_std_artifacts), `${key}: cross std tuples`);
-    const publish = release.slice(release.indexOf('\n  publish:'));
-    assert.ok(scalar(publish, 'needs').slice(1, -1).split(',').map(s => s.trim()).includes(jobId(job)),
+    const publish = release.jobs.publish;
+    assert.ok(publish.needs.includes(jobId(job)),
       `${key}: publish waits for the cross package`);
-    assert.ok(publish.includes(`needs.${jobId(job)}.result == 'success'`), `${key}: publish requires cross success`);
+    assert.ok(publish.if.includes(`needs.${jobId(job)}.result == 'success'`), `${key}: publish requires cross success`);
   }
   for (const row of plan.source.filter(row => row.build_android)) {
-    const producer = sources.find(job => scalar(job, 'targets') === row.target);
+    const producer = sources.find(job => job.with?.targets === row.target);
     assert.ok(producer, `${row.target}: Android producer exists`);
-    assert.equal(scalar(producer, 'build_android'), 'true', `${row.target}: Android producer is enabled`);
+    assert.equal(producer.with?.build_android, true, `${row.target}: Android producer is enabled`);
   }
 });
 
@@ -178,10 +179,10 @@ test('all package cells consume cjpm artifacts with producer sidecars', async ()
 });
 
 test('release has one LLVM producer per tuple', async () => {
-  const [release, tuples] = await Promise.all([workflow('release.yml'), workflow('platform-tuples.yml')]);
-  assert.ok(release.includes('platform_set: windows-only'));
-  assert.ok(!release.includes('platform_set: darwin-windows'));
-  assert.ok(!release.includes('uses: ./.github/workflows/build-fixed-llc.yml'));
+  const [release, tuples] = await Promise.all([releaseWorkflow(), workflow('platform-tuples.yml')]);
+  assert.ok(jobsOf(release).some(job => job.with?.platform_set === 'windows-only'));
+  assert.ok(!jobsOf(release).some(job => job.with?.platform_set === 'darwin-windows'));
+  assert.ok(!jobsOf(release).some(job => job.uses === './.github/workflows/build-fixed-llc.yml'));
   assert.ok(tuples.includes("inputs.platform_set == 'windows-only'"));
 
   const artifacts = [
@@ -196,14 +197,13 @@ test('release has one LLVM producer per tuple', async () => {
 });
 
 test('release packages select the named final compiler in each native phase', async () => {
-  const release = await workflow('release.yml');
+  const release = await releaseWorkflow();
   const source = await workflow('srcbuild.yml');
   const consumer = await workflow('build-release-package.yml');
-  const jobs = release.split(/\n  (?=[a-z0-9-]+:\n)/)
-    .filter(job => job.includes('uses: ./.github/workflows/build-release-package.yml'));
+  const jobs = packageJobsOf(release);
   for (const platform of platforms.filter(name => !getTarget(name).spec.crossCompile)) {
-    const job = jobs.find(entry => entry.includes(`platform: ${platform}\n`));
-    assert.ok(job.includes(`compiler_artifact: final-compiler-${platform}`), platform);
+    const job = jobs.find(entry => entry.with?.platform === platform);
+    assert.equal(job.with?.compiler_artifact, `final-compiler-${platform}`, platform);
     assert.ok(source.includes(`final_compiler_${platform.replaceAll('-', '_')}:`), platform);
   }
   assert.match(source, /name: final-compiler-\$\{\{ matrix.target \}\}/);
