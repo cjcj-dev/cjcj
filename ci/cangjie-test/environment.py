@@ -45,6 +45,8 @@ def apply_environment(sdk, env, manifest):
             if sha(Path(root) / rel) != expected:
                 raise ValueError('environment artifact changed: ' + str(Path(root) / rel))
     env['LD_LIBRARY_PATH'] = str(sdk / 'third_party/llvm/lib') + ':' + env.get('LD_LIBRARY_PATH', '')
+    for key in ('JAVA_HOME', 'CANGJIE_STDX_PATH'):
+        env.pop(key, None)
     for key, value in manifest['variables'].items():
         env[key] = value
     if env.get('JAVA_HOME'):
