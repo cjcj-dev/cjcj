@@ -164,6 +164,7 @@ def main():
             global_name = name(glob).decode()
             globals_.append({'name': global_name, 'ir': print_value(init).decode()})
             if global_name in ('layout_contract:Parent.ti', 'layout_contract:Child.ti', 'layout_contract:Cell<Int64>.ti',
+                               'layout_contract:Tagged:0.ti', 'layout_contract:Tagged:1.ti',
                                'RawArray<Int64>.ti', 'RawArray<UInt8>.ti'):
                 observed = {}
                 for f in ('fieldNum', 'instanceSize', 'align', 'typeArgsNum'):
@@ -179,11 +180,17 @@ def main():
     if a.surface == 'objects':
         specs = {'layout_contract:Parent.ti': (1, 4, 4, 0),
                  'layout_contract:Child.ti': (2, 16, 8, 0),
-                 'layout_contract:Cell<Int64>.ti': (1, 8, 8, 1)}
+                 'layout_contract:Cell<Int64>.ti': (1, 8, 8, 1),
+                 # Each associated constructor has the tag followed by i64 or
+                 # Parent reference, using the upstream enum layout producer.
+                 'layout_contract:Tagged:0.ti': (2, 16, 8, 0),
+                 'layout_contract:Tagged:1.ti': (2, 16, 8, 0)}
         for global_name, expected in specs.items():
             observed = semantic.get(global_name, {})
             actual = tuple(observed.get(f) for f in ('fieldNum', 'instanceSize', 'align', 'typeArgsNum'))
             check('initializer.' + global_name, actual == expected and '.fields' in observed.get('fields', '') and '.offsets' in observed.get('offsets', ''), observed)
+            if ':Tagged:' in global_name:
+                check('initializer.super.' + global_name, 'layout_contract:Tagged.ti' in observed.get('super', ''), observed.get('super'))
         check('initializer.inheritance', 'layout_contract:Parent.ti' in semantic.get('layout_contract:Child.ti', {}).get('super', ''), semantic.get('layout_contract:Child.ti', {}).get('super'))
     else:
         # RawArray's instanceSize is its element size; the object header and
