@@ -148,3 +148,122 @@ test('G13 distinguishes ancestor, non-ancestor, and unreadable runtime histories
   assert.equal(unknown.value.status, 'UNKNOWN');
   assert.match(unknown.value.value, /runtime ancestry unreadable/);
 });
+
+// Exercise the CLI against a real checkout copy. The copied targets module and
+// workflow are the production inputs, and G15 still runs its real bundle/wire tests.
+async function platformFixture(t) {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'release-platform-gates-'));
+  t.after(() => fs.rm(root, {recursive: true, force: true}));
+  for (const entry of ['build', 'ci', '.github', 'scripts', 'ops']) {
+    await fs.cp(path.join(repo, entry), path.join(root, entry), {recursive: true});
+  }
+  return root;
+}
+
+const platformGates = ['G3', 'G6', 'G7', 'G9', 'G15'];
+const unknownRunGates = platformGates.filter(name => name !== 'G15');
+
+async function mutateFile(root, relative, transform) {
+  const file = path.join(root, relative);
+  const before = await fs.readFile(file, 'utf8');
+  const after = transform(before);
+  assert.notEqual(after, before, `mutation did not change ${relative}`);
+  await fs.writeFile(file, after);
+}
+
+test('platform gates consume every registry row and retain explicit run requirements', async () => {
+  const {allReleasePlatforms, getReleasePlatform, releasePlatformReadiness} = await import('../build/lib/targets.mjs');
+  for (const name of platformGates) {
+    const {result, value} = gate(repo, name);
+    assert.equal(result.status, name === 'G15' ? 0 : 2, JSON.stringify(value));
+    assert.deepEqual(value.scope.platforms.map(row => row.key), allReleasePlatforms());
+    for (const row of value.scope.platforms) {
+      assert.equal(row.status, releasePlatformReadiness(row.key).status);
+      assert.equal(row.host, getReleasePlatform(row.key).host);
+      assert.deepEqual(row.reasons, [...releasePlatformReadiness(row.key).reasons]);
+    }
+    assert.deepEqual(value.scope.jobs.map(job => job.key).sort(), allReleasePlatforms()
+      .filter(key => releasePlatformReadiness(key).status === 'buildable').sort());
+    if (name !== 'G15') assert.match(value.value, /NEEDS_RUN:/);
+  }
+});
+
+test('new registry platform makes each dependent gate red until its package job exists', async t => {
+  const root = await platformFixture(t);
+  await mutateFile(root, 'build/lib/targets.mjs', source => source.replace(
+    'const RELEASE_PLATFORMS = Object.freeze([',
+    "const RELEASE_PLATFORMS = Object.freeze([\n  releasePlatform({key: 'fixture-new-platform', host: 'linux-x64', runner: 'ubuntu-24.04'}),"));
+  for (const name of platformGates) {
+    const {result, value} = gate(root, name);
+    assert.equal(result.status, 1, `${name}: ${JSON.stringify(value)}`);
+    assert.match(value.value, /fixture-new-platform: expected one package job, found 0/);
+  }
+  // A newly supported platform can be wired without editing the gate itself.
+  await mutateFile(root, '.github/workflows/release.yml', source => source.replace('jobs:\n', [
+    'jobs:',
+    '  fixture-new-package:',
+    '    uses: ./.github/workflows/build-release-package.yml',
+    '    with:',
+    '      release_key: fixture-new-platform',
+    '      platform: linux-x64',
+    '      llvm_platform: linux_x86_64',
+    '',
+  ].join('\n')));
+  for (const name of unknownRunGates) {
+    const {result, value} = gate(root, name);
+    assert.equal(result.status, 2, JSON.stringify(value));
+    assert.equal(value.scope.failures.length, 0);
+    assert.ok(value.scope.jobs.some(job => job.key === 'fixture-new-platform'));
+  }
+});
+
+test('deleting a real package job cannot shrink the required gate set', async t => {
+  const root = await platformFixture(t);
+  const original = gate(root, 'G7').value.scope;
+  const removed = original.jobs.at(-1);
+  await mutateFile(root, '.github/workflows/release.yml', source => source.replace(
+    new RegExp(`^  ${removed.id}:[\\s\\S]*?(?=^  [\\w-]+:|$(?![\\s\\S]))`, 'm'), ''));
+  for (const name of platformGates) {
+    const {result, value} = gate(root, name);
+    assert.equal(result.status, 1, JSON.stringify(value));
+    assert.ok(value.scope.failures.includes(`${removed.key}: expected one package job, found 0`));
+    assert.deepEqual(value.scope.platforms, original.platforms);
+  }
+});
+
+test('job identity and host mapping matter even when the package job count is unchanged', async t => {
+  const root = await platformFixture(t);
+  const scope = gate(root, 'G7').value.scope;
+  const [first, second] = scope.jobs;
+  await mutateFile(root, '.github/workflows/release.yml', source => source.replace(
+    `release_key: ${first.key}\n`, `release_key: ${second.key}\n`));
+  const duplicate = gate(root, 'G15');
+  assert.equal(duplicate.result.status, 1, JSON.stringify(duplicate.value));
+  assert.equal(duplicate.value.scope.jobs.length, scope.jobs.length);
+  assert.ok(duplicate.value.scope.failures.includes(`${first.key}: expected one package job, found 0`));
+  assert.ok(duplicate.value.scope.failures.includes(`${second.key}: expected one package job, found 2`));
+  await fs.copyFile(path.join(repo, '.github/workflows/release.yml'), path.join(root, '.github/workflows/release.yml'));
+  await mutateFile(root, '.github/workflows/release.yml', source => source.replace(
+    `platform: ${first.host}\n`, 'platform: fixture-wrong-host\n'));
+  const wrongHost = gate(root, 'G15');
+  assert.equal(wrongHost.result.status, 1, JSON.stringify(wrongHost.value));
+  assert.match(wrongHost.value.value, /host\/LLVM mismatch/);
+});
+
+test('comments do not create jobs and excluded or blocked rows keep their reasons', async t => {
+  const root = await platformFixture(t);
+  const before = gate(root, 'G7');
+  await mutateFile(root, '.github/workflows/release.yml', source => source +
+    '\n# uses: ./.github/workflows/build-release-package.yml\n');
+  const after = gate(root, 'G7');
+  assert.equal(after.result.status, before.result.status);
+  assert.deepEqual(after.value.scope, before.value.scope);
+  for (const row of after.value.scope.platforms.filter(row => row.status !== 'buildable')) {
+    assert.ok(row.reasons.length, row.key);
+    assert.ok(after.value.value.includes(row.key));
+    assert.ok(after.value.value.includes(row.reasons[0]));
+  }
+  const historical = gate(root, 'G7', ['--ref', 'HEAD']);
+  assert.equal(historical.result.status, 2);
+  assert.match(historical.value.value, /require a checkout, not --ref/);
+});
