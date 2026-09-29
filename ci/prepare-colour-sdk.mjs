@@ -65,7 +65,12 @@ export async function prepareColourSdk(runtimeRoot, env = process.env) {
   const realPublished = await fs.realpath(published);
   if (realPublished === host || realPublished.startsWith(`${host}${path.sep}`)) throw new Error('runtime destination is inside official SDK');
   for (const entry of await fs.readdir(path.join(sdk, 'runtime', 'lib', tuple), {withFileTypes: true})) {
-    if (entry.isFile()) await fs.copyFile(path.join(sdk, 'runtime', 'lib', tuple, entry.name), path.join(realPublished, entry.name));
+    if (!entry.isFile()) continue;
+    // Rename a fresh file so an inherited destination symlink cannot write
+    // through into a host SDK (the #710 installer uses the same boundary).
+    const temporary = path.join(realPublished, `.${entry.name}.${crypto.randomUUID()}`);
+    await fs.copyFile(path.join(sdk, 'runtime', 'lib', tuple, entry.name), temporary, fs.constants.COPYFILE_EXCL);
+    await fs.rename(temporary, path.join(realPublished, entry.name));
   }
   const state = {host, sdk, runtime: realPublished, tuple, runtime_sha: env.RUNTIME_REF, std_manifest_sha256: pin.manifest_sha256};
   await fs.writeFile(stateFile, JSON.stringify(state, null, 2) + '\n');
