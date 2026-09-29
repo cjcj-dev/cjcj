@@ -118,15 +118,18 @@ function throughputRows() {
   return `${header.join('\t')}\n${rows.join('\n')}\n`;
 }
 
+// Independent expected collect sequence, not derived from the product floor.
+const MINOR_PHASES = [
+  ['Pause_Mark_Start', 'pause'], ['Concurrent_Mark', 'conc'], ['Pause_Mark_End', 'pause'],
+  ['Concurrent_Mark_Free', 'conc'], ['Concurrent_Reset_Relocation_Set', 'conc'],
+  ['Concurrent_Select_Relocation_Set', 'conc'], ['Pause_Relocate_Start', 'pause'],
+  ['Concurrent_Relocate', 'conc'],
+];
+function phaseLine(name, kind, ns, tag = 'y') {
+  return `[GCLOG] v=5 rec=phase seq=2 gc_tag=${tag} name=${name} kind=${kind} start_ns=1 ns=${ns}`;
+}
 function phaseLog() {
-  return [
-    '[GCLOG] v=5 rec=phase seq=2 gc_tag=y name=young.mark_closure kind=conc start_ns=1 ns=42012000',
-    '[GCLOG] v=5 rec=phase seq=2 gc_tag=y name=young.ref_fix kind=conc start_ns=1 ns=30264000',
-    '[GCLOG] v=5 rec=phase seq=2 gc_tag=y name=young.copy kind=conc start_ns=1 ns=20686000',
-    '[GCLOG] v=5 rec=phase seq=2 gc_tag=y name=young.evac_finish kind=conc start_ns=1 ns=2001000',
-    'young collection stw time: 103,437us',
-    '',
-  ].join('\n');
+  return MINOR_PHASES.map(([name, kind], i) => phaseLine(name, kind, (i + 1) * 1000)).join('\n') + '\n';
 }
 
 async function evidenceFixture(t, {failing = '', positiveControls = true, verdict = ''} = {}) {
@@ -231,7 +234,7 @@ test('current ZGC phase names report every missing frozen R1 phase as UNKNOWN', 
   await bindEvidence(evidence, 'G12', repo);
   const {value} = gate(evidence);
   assert.equal(value.status, 'UNKNOWN');
-  for (const name of GC_RELEASE_FLOOR.recording.find(item => item.id === 'R1').phases) {
+  for (const [name] of MINOR_PHASES.filter(([name]) => name !== 'Concurrent_Mark')) {
     assert.ok(JSON.stringify(value).includes(name), name);
   }
   console.log('R1_MISSING_PHASE_TARGET executed');
@@ -244,4 +247,93 @@ test('legacy microsecond phase input is explicitly UNKNOWN', async t => {
   const {value} = gate(evidence);
   assert.equal(value.status, 'UNKNOWN');
   assert.match(JSON.stringify(value), /malformed or unsupported GCLOG phase/);
+});
+
+async function withPhases(t, text) {
+  const evidence = await evidenceFixture(t);
+  await write(evidence, 'gc.log', text);
+  await bindEvidence(evidence, 'G12', repo);
+  return gate(evidence);
+}
+
+test('minor top-level values reach the CLI recording assertions', async t => {
+  const {result, value} = await withPhases(t, phaseLog());
+  const r1 = value.records?.find(r => r.id === 'R1')?.value;
+  console.log('MINOR_TOTAL_ASSERTION reached', JSON.stringify(value));
+  assert.equal(r1?.total_ns, 36000, 'R1 observed top-level total');
+  assert.equal(r1.coverage, 'archive');
+  assert.deepEqual(r1.phases.Concurrent_Mark_Continue,
+    {count: 0, status: 'not_observed', total_ns: null, share: null});
+  assert.equal(r1.phases.Concurrent_Mark.share, 0.055556);
+  console.log('MINOR_PAUSE_ASSERTION reached');
+  assert.deepEqual(value.records.find(r => r.id === 'R4').value,
+    {samples: 3, median_us: 3, max_us: 7});
+  assert.equal(result.status, 0);
+  console.log('MINOR_RECORDING_TARGET executed');
+});
+
+test('retries accumulate and R4 measures individual pauses with ns conversion', async t => {
+  const extra = [phaseLine('Concurrent_Mark_Continue', 'conc', 500),
+    phaseLine('Concurrent_Mark_Continue', 'conc', 1500), phaseLine('Pause_Mark_End', 'pause', 500)];
+  const {value} = await withPhases(t, phaseLog() + extra.join('\n'));
+  assert.equal(value.status, 'MET', JSON.stringify(value));
+  const r1 = value.records.find(r => r.id === 'R1').value;
+  assert.equal(r1.total_ns, 38500);
+  assert.deepEqual(r1.phases.Concurrent_Mark_Continue,
+    {count: 2, status: 'observed', total_ns: 2000, share: 0.051948});
+  assert.equal(r1.phases.Pause_Mark_End.count, 2);
+  assert.deepEqual(value.records.find(r => r.id === 'R4').value,
+    {samples: 4, median_us: 2, max_us: 7});
+});
+
+test('major generations and nested phases cannot change minor records', async t => {
+  const {value: plain} = await withPhases(t, phaseLog());
+  const {value: mixed} = await withPhases(t, phaseLog() +
+    phaseLog().replaceAll('gc_tag=y', 'gc_tag=Y') + phaseLog().replaceAll('gc_tag=y', 'gc_tag=O') +
+    phaseLine('Pause_Mark_Start__Major_', 'pause', 999, 'Y') + '\n' +
+    phaseLine('Nested_Work', 'subphase', 999999) + '\n' + phaseLine('Wait', 'critical', 999999));
+  assert.equal(mixed.status, 'MET');
+  assert.deepEqual(mixed.records, plain.records);
+});
+
+for (const [missing, kind] of MINOR_PHASES) {
+  test(`minor coverage requires ${missing} even when major has it`, async t => {
+    const text = phaseLog().split('\n').filter(line => !line.includes(`name=${missing} `)).join('\n') +
+      '\n' + phaseLine(missing, kind, 1000, 'Y') + '\n' + phaseLine(missing, kind, 1000, 'O');
+    const {result, value} = await withPhases(t, text);
+    assert.equal(value.status, 'UNKNOWN');
+    assert.match(value.value, new RegExp(`missing floor phases.*${missing}`));
+    assert.equal(result.status, 2);
+  });
+}
+for (const kind of ['conc', 'subphase', 'critical']) {
+  test(`wrong kind ${kind} cannot impersonate minor pause`, async t => {
+    const {value} = await withPhases(t, phaseLog().replace('kind=pause', `kind=${kind}`));
+    assert.equal(value.status, 'UNKNOWN');
+    assert.match(value.value, /wrong kind for Pause_Mark_Start/);
+  });
+}
+test('zero total is UNKNOWN but an individual zero is recorded', async t => {
+  const {value: zero} = await withPhases(t, phaseLog().replace(/ ns=\d+/g, ' ns=0'));
+  assert.equal(zero.status, 'UNKNOWN');
+  assert.match(zero.value, /total is zero/);
+  const {value: oneZero} = await withPhases(t, phaseLog().replace(' ns=1000', ' ns=0'));
+  assert.equal(oneZero.status, 'MET');
+  assert.equal(oneZero.records[0].value.phases.Pause_Mark_Start.total_ns, 0);
+});
+test('v5 old pillars and major-start cannot impersonate minor phases', async t => {
+  for (const name of ['young.mark_closure', 'Pause_Mark_Start__Major_']) {
+    const {value} = await withPhases(t, phaseLog().replace('name=Pause_Mark_Start', `name=${name}`));
+    assert.equal(value.status, 'UNKNOWN');
+    assert.match(value.value, /unexpected minor top-level phase/);
+  }
+});
+
+test('archived runtime 1309 phases pass the recording floor', {skip: !process.env.G12_RUNTIME_LOG}, async t => {
+  const {value, result} = await withPhases(t, await fs.readFile(process.env.G12_RUNTIME_LOG, 'utf8'));
+  assert.equal(value.status, 'MET', JSON.stringify(value));
+  assert.ok(value.records[0].value.total_ns > 0);
+  assert.ok(value.records[3].value.samples >= 3);
+  assert.equal(result.status, 0);
+  console.log('RUNTIME_ARCHIVE_RECORDING_TARGET executed');
 });

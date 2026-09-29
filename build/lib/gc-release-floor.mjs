@@ -1,7 +1,7 @@
 // G12 release floor for 0.0.2.  Keep this data-only: ci/release-gates.mjs
 // imports it and recomputes every blocking result from archived measurements.
 export const GC_RELEASE_FLOOR = Object.freeze({
-  schema: 1,
+  schema: 2,
   release: '0.0.2',
   measurement: Object.freeze({
     heap_mib: 256,
@@ -59,9 +59,16 @@ export const GC_RELEASE_FLOOR = Object.freeze({
   ]),
   recording: Object.freeze([
     Object.freeze({
-      id: 'R1', metric: 'minor_phase_share', unit: 'ratio', phases: Object.freeze([
-        'young.mark_closure', 'young.ref_fix', 'young.evac_finish', 'young.copy',
+      id: 'R1', metric: 'minor_top_level_phase_share', unit: 'ratio', gc_tag: 'y',
+      coverage: 'archive', denominator: 'sum_of_minor_top_level_phase_ns',
+      // ZGC zGeneration.cpp:538-580: Continue is conditional; End may repeat.
+      phases: Object.freeze([
+        'Pause_Mark_Start', 'Concurrent_Mark', 'Pause_Mark_End', 'Concurrent_Mark_Free',
+        'Concurrent_Reset_Relocation_Set', 'Concurrent_Select_Relocation_Set',
+        'Pause_Relocate_Start', 'Concurrent_Relocate',
       ]),
+      optional_phases: Object.freeze(['Concurrent_Mark_Continue']),
+      pause_phases: Object.freeze(['Pause_Mark_Start', 'Pause_Mark_End', 'Pause_Relocate_Start']),
     }),
     Object.freeze({
       id: 'R2', metric: 'remset_size', unit: 'slots', aggregates: Object.freeze(['median', 'max']),
@@ -72,7 +79,7 @@ export const GC_RELEASE_FLOOR = Object.freeze({
       generational_arm: 'A', minor_disabled_arm: 'B', aggregates: Object.freeze(['median']),
     }),
     Object.freeze({
-      id: 'R4', metric: 'gc_phase_stw', unit: 'us', aggregates: Object.freeze(['median', 'max']),
+      id: 'R4', metric: 'minor_top_level_pause', gc_tag: 'y', unit: 'us', aggregates: Object.freeze(['median', 'max']),
     }),
   ]),
 });
