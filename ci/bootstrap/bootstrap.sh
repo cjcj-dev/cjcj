@@ -535,6 +535,9 @@ cjpm_build() {
   ld=$(sdk_ld_path "$sdk" "$runtime")
   prepare_build_env
   cjpm="$sdk/tools/bin/cjpm"
+  local trim_debug=""
+  case " $extra " in *" -g "*) trim_debug=" --debug";; esac
+  cmd "node $(printf '%q' "$SRC/ci/release/trimpath.mjs") $(printf '%q' "$srcdir")$trim_debug"
   script="cd $(printf '%q' "$srcdir") && $(printf '%q' "$cjpm") build${extra:+ $extra}"
   echo "CMD cjpm build${extra:+ $extra} bin=$cjpm cwd=$srcdir heap=$heap"
   cmd "env -i HOME=$(printf '%q' "$BUILD_HOME") TMPDIR=$(printf '%q' "$BUILD_TMPDIR") CANGJIE_HOME=$(printf '%q' "$sdk") LD_LIBRARY_PATH=$(printf '%q' "$ld") PATH=$(printf '%q' "$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:/usr/bin:/bin") cjHeapSize=$(printf '%q' "$heap") bash -c $(printf '%q' "$script")"

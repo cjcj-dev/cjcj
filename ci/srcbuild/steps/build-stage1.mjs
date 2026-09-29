@@ -1,5 +1,7 @@
 #!/usr/bin/env zx
 
+import {prepareTrimpath} from '../../release/trimpath.mjs';
+
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -59,6 +61,7 @@ process.exit(child.status ?? 1);
 `, {mode: 0o755});
 const oracleEnv = {...process.env, PATH: `${oracleCompilerDir}${path.delimiter}${process.env.PATH || ''}`};
 try {
+  await prepareTrimpath(process.cwd());
   await $({env: oracleEnv})`cjpm build`;
 } finally {
   await fs.rm(oracleCompilerDir, {recursive: true, force: true});
