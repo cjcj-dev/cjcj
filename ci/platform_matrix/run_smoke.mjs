@@ -6,10 +6,12 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {printCommonVersions, stageBegin, toCommandPath} from './common.mjs';
+import {colourEnvironment} from '../prepare-colour-sdk.mjs';
 import {PRODUCT_NAMES} from '../srcbuild/lib/product-binary.mjs';
 
 const {root} = stageBegin('test');
 await printCommonVersions();
+Object.assign(process.env, await colourEnvironment('run'));
 const exeSuffix = process.platform === 'win32' ? '.exe' : '';
 
 if (process.platform === 'darwin' && !process.env.SDKROOT) {
@@ -168,6 +170,7 @@ async function runOne(name, expected, env = process.env) {
     return true;
   }
   await $({env})`${toCommandPath(deploy)} ${toCommandPath(path.join('ci', 'smoke', `${name}.cj`))} -o ${toCommandPath(output)}`;
+  await $`python3 ci/check-colour-tlab.py ${output}`;
   const got = (await $({env, stdio: 'pipe', verbose: false})`${toCommandPath(output)}`).stdout.trimEnd();
   console.log(`${name} => [${got}]`);
   if (got !== expected) {
@@ -179,7 +182,7 @@ async function runOne(name, expected, env = process.env) {
 if (!(await runOne('01_hello', 'hello from cjcj'))) process.exit(1);
 if (!(await runOne('02_generics', '42 hi 7'))) process.exit(1);
 
-const runtimeLib = await findFirst(path.join(root, 'runtime-install'), (name) =>
+const runtimeLib = await findFirst(process.env.CJCJ_PATCHED_RUNTIME_LIB_DIR, (name) =>
   ['libcangjie-runtime.so', 'libcangjie-runtime.dylib', 'libcangjie-runtime.dll', 'cangjie-runtime.dll'].includes(name.toLowerCase()),
 );
 if (!runtimeLib) {
@@ -187,27 +190,10 @@ if (!runtimeLib) {
   process.exit(3);
 }
 console.log(`combined runtime smoke: ${runtimeLib}`);
-const runtimeDir = path.dirname(runtimeLib);
 const env = {...process.env};
-if (process.platform === 'darwin') env.DYLD_LIBRARY_PATH = `${runtimeDir}:${env.DYLD_LIBRARY_PATH || ''}`;
-else if (process.platform !== 'win32') env.LD_LIBRARY_PATH = `${runtimeDir}:${env.LD_LIBRARY_PATH || ''}`;
 if (process.platform === 'win32') {
-  // Swapping only the DLL under an SDK-import-lib-linked exe is a pairing the
-  // product never ships: the SDK import lib leaks mingw CRT helpers as DLL
-  // imports the UCRT-based fork can never export (R26: __mingw_vfprintf,
-  // __stack_chk_fail). Install the fork runtime INTO the toolchain — import
-  // lib, DLL, and static side — and relink the samples, which is the actual
-  // product configuration.
-  const installRoot = path.resolve(runtimeDir, '..', '..', '..');
-  for (const sub of [path.join('runtime', 'lib', 'windows_x86_64_cjnative'), path.join('lib', 'windows_x86_64_cjnative')]) {
-    const from = path.join(installRoot, sub);
-    const to = path.join(process.env.CANGJIE_HOME || '', sub);
-    if (!(await fs.stat(from).then((s) => s.isDirectory(), () => false))) continue;
-    for (const entry of await fs.readdir(from)) {
-      await fs.cp(path.join(from, entry), path.join(to, entry), {recursive: true, force: true});
-      console.log(`combined smoke installed ${path.join(sub, entry)}`);
-    }
-  }
+  // The target SDK was paired before linking; keep the import/export
+  // diagnostic without installing anything into the host SDK here.
   // Diagnostic: the relinked sample's runtime imports must all exist in the
   // fork DLL — diff the tables so any gap is named, not guessed.
   // Import entries are "<vma> [<ordinal>] <hint> <name>" lines inside the DLL's

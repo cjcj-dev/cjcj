@@ -29,6 +29,13 @@ let fail = 0;
 if (process.platform === 'win32') process.env.cjStackSize = process.env.cjStackSize || '64MB';
 
 async function runCommand(executable, args, cwd) {
+  // The paired CI entry selects this domain; packaged SDK callers own theirs.
+  if (process.env.CJCJ_PATCHED_RUNTIME_LIB_DIR && executable !== cjcj) {
+    const scan = spawnSync('python3', [path.join(here, '..', 'check-colour-tlab.py'), executable],
+      {encoding: 'utf8'});
+    process.stdout.write(scan.stdout || '');
+    if (scan.status !== 0) throw new Error(`smoke TLAB layout rejected ${executable}: ${scan.stderr}`);
+  }
   const t0 = performance.now();
   let out;
   if (process.platform !== 'win32') {

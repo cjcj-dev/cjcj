@@ -25,6 +25,7 @@ export const repoRoot = path.resolve(import.meta.dirname, '..');
 
 // Run by `node --test` in .github/workflows/ci.yml, via `test-manifest.mjs list`.
 export const GATING = Object.freeze([
+  'ci/colour-sdk.test.mjs',
   'build/test/archive.test.mjs',
   'build/test/cangjie-written-tools.test.mjs',
   'build/test/compose-install.test.mjs',
