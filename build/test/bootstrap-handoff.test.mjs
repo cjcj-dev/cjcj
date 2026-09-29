@@ -35,7 +35,8 @@ test('bootstrap handoff consumes stage2 std and compiler and rebinds host and ta
   const f = await fixture(t);
   const result = await prepareBootstrapHandoff(f);
   assert.equal(result.compiler, path.join(f.work, 'cjcj-stage2'));
-  assert.equal(await fs.readlink(path.join(f.sdk, 'lib', f.tuple, 'core-relative.a')), 'libcangjie-std-core.a');
+  assert.equal((await fs.lstat(path.join(f.sdk, 'lib', f.tuple, 'core-relative.a'))).isFile(), true);
+  assert.equal(await fs.readFile(path.join(f.sdk, 'lib', f.tuple, 'core-relative.a'), 'utf8'), 'bootstrap std');
   assert.equal(await fs.readFile(path.join(f.sdk, 'lib', f.tuple, 'libcangjie-std-core.a'), 'utf8'), 'coloured std');
   await assert.rejects(fs.stat(path.join(f.sdk, 'stale-sdk')), {code: 'ENOENT'});
   const run = spawnSync(path.join(f.sdk, 'tools', 'bin', 'cjpm'), {encoding: 'utf8'});
@@ -188,4 +189,41 @@ test('legacy stage2 inherits the caller heap', async () => {
   const stage = await fs.readFile(new URL('../../ci/srcbuild/steps/build-stage2.mjs', import.meta.url), 'utf8');
   assert.match(stage, /await \$`cjpm build -j 1`/);
   assert.doesNotMatch(stage, /cjHeapSize:/);
+});
+
+
+test('handoff materializes overlapping library links on two consecutive promotions', async t => {
+  const f = await fixture(t);
+  const relative = path.join('lib', f.tuple);
+  for (const [tree, content] of [['sdk-stage1', 'old pcre'], ['stdlib-stage2', 'stage2 pcre']]) {
+    const directory = path.join(f.work, tree, relative);
+    await fs.writeFile(path.join(directory, 'libpcre2-8.so'), content);
+    await fs.symlink('libpcre2-8.so', path.join(directory, 'libpcre2-8.so.0'));
+    assert.equal((await fs.lstat(path.join(directory, 'libpcre2-8.so.0'))).isSymbolicLink(), true);
+  }
+  const links = async directory => {
+    const result = [];
+    for (const entry of await fs.readdir(directory, {withFileTypes: true})) {
+      const file = path.join(directory, entry.name);
+      if (entry.isSymbolicLink()) result.push(file);
+      else if (entry.isDirectory()) result.push(...await links(file));
+    }
+    return result;
+  };
+  for (let pass = 1; pass <= 2; pass++) {
+    let failure;
+    try { await prepareBootstrapHandoff(f); } catch (error) { failure = error; }
+    console.log(`HANDOFF_COMPLETION_ASSERT_REACHED pass=${pass} code=${failure?.code ?? 'OK'}`);
+    assert.equal(failure, undefined, `handoff must complete: ${failure?.stack}`);
+    for (const name of ['libpcre2-8.so', 'libpcre2-8.so.0']) {
+      const file = path.join(f.sdk, relative, name);
+      assert.equal((await fs.lstat(file)).isFile(), true, name);
+      assert.equal(await fs.readFile(file, 'utf8'), 'stage2 pcre', name);
+    }
+    assert.deepEqual(await links(f.sdk), []);
+    await assertBootstrapCompiler({sdk: f.sdk, command: path.join(f.sdk, 'bin', 'cjc')});
+    console.log(`HANDOFF_REGULAR_CONTENT_ASSERT_PASS pass=${pass}`);
+    await fs.writeFile(path.join(f.sdk, relative, 'libpcre2-8.so.0'), 'stale consumer');
+    assert.equal(await fs.readFile(path.join(f.work, 'stdlib-stage2', relative, 'libpcre2-8.so'), 'utf8'), 'stage2 pcre');
+  }
 });
