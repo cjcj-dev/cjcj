@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
-import {allTargets, getReleasePlatform, releasePlatformReadiness} from '../../../build/lib/targets.mjs';
+import {allTargets, getTarget, getReleasePlatform, releasePlatformReadiness} from '../../../build/lib/targets.mjs';
 import {planMatrix} from '../../release/platform-matrix.mjs';
 
 const root = path.resolve(import.meta.dirname, '../../..');
@@ -163,7 +163,7 @@ test('release package runs the packaged std checker as a bounded fail-closed ste
   assert.ok(start < consumer.indexOf('- name: Verify packaged SDK'));
 });
 
-test('all five package cells consume cjpm artifacts with producer sidecars', async () => {
+test('all package cells consume cjpm artifacts with producer sidecars', async () => {
   const [sourceBuild, windowsCjpm, consumer] = await Promise.all([
     workflow('srcbuild.yml'),
     workflow('build-cjpm.yml'),
@@ -185,14 +185,12 @@ test('release has one LLVM producer per tuple', async () => {
   assert.ok(tuples.includes("inputs.platform_set == 'windows-only'"));
 
   const artifacts = [
-    ...['linux_x86_64', 'linux_aarch64', 'darwin_x86_64', 'darwin_aarch64']
-      .map(platform => `fixed-llvm-tools-${platform}`),
-    'fixed-llvm-tools-windows_x86_64',
+    ...platforms.map(platform => `fixed-llvm-tools-${getTarget(platform).spec.llvmPlatform}`),
     ...platforms.map(platform => `final-std-${platform}`),
-    ...platforms.filter(platform => platform !== 'windows-x64').map(platform => `source-cjpm-${platform}`),
+    ...platforms.filter(platform => !getTarget(platform).spec.crossCompile).map(platform => `source-cjpm-${platform}`),
     ...platforms.map(platform => `pkg-${platform}`),
-    'runtime-install-windows_x86_64',
-    'patched-cjpm-windows_x86_64',
+    ...platforms.filter(platform => getTarget(platform).spec.crossCompile).flatMap(platform =>
+      [`runtime-install-${getTarget(platform).spec.llvmPlatform}`, `patched-cjpm-${getTarget(platform).spec.llvmPlatform}`]),
   ];
   assert.equal(new Set(artifacts).size, artifacts.length);
 });
@@ -203,7 +201,7 @@ test('release packages select the named final compiler in each native phase', as
   const consumer = await workflow('build-release-package.yml');
   const jobs = release.split(/\n  (?=[a-z0-9-]+:\n)/)
     .filter(job => job.includes('uses: ./.github/workflows/build-release-package.yml'));
-  for (const platform of platforms.filter(name => name !== 'windows-x64')) {
+  for (const platform of platforms.filter(name => !getTarget(name).spec.crossCompile)) {
     const job = jobs.find(entry => entry.includes(`platform: ${platform}\n`));
     assert.ok(job.includes(`compiler_artifact: final-compiler-${platform}`), platform);
     assert.ok(source.includes(`final_compiler_${platform.replaceAll('-', '_')}:`), platform);
