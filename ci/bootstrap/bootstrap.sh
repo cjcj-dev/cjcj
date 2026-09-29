@@ -491,13 +491,13 @@ rewrite_compile_option_o1() {
     return 0
   fi
   [ -f "$toml" ] || die "隔离副本缺 cjpm.toml: $toml"
-  o2_hits=$(/usr/bin/grep -c -- 'compile-option = "-O2"' "$toml" || true)
+  o2_hits=$(/usr/bin/grep -Ec -- '^ *compile-option = "-O2([[:space:]]|")' "$toml" || true)
   if [ "$o2_hits" -gt 0 ]; then
-    cmd "sed -i 's/compile-option = \"-O2\"/compile-option = \"-O1\"/' $(printf '%q' "$toml")"
+    cmd "sed -E -i 's/^( *compile-option = \")-O2([[:space:]]|\")/\1-O1\2/' $(printf '%q' "$toml")"
   fi
-  o1_hits=$(/usr/bin/grep -c -- 'compile-option = "-O1"' "$toml" || true)
+  o1_hits=$(/usr/bin/grep -Ec -- '^ *compile-option = "-O1([[:space:]]|")' "$toml" || true)
   [ "$o1_hits" -ge 1 ] || die "隔离副本 cjpm.toml 的 compile-option 不是 -O1: $toml"
-  o2_hits=$(/usr/bin/grep -c -- 'compile-option = "-O2"' "$toml" || true)
+  o2_hits=$(/usr/bin/grep -Ec -- '^ *compile-option = "-O2([[:space:]]|")' "$toml" || true)
   [ "$o2_hits" -eq 0 ] || die "compile-option 仍含 -O2: $toml"
   echo "ASSERT compile-option-o1 ok file=$toml"
 }

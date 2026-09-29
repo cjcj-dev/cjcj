@@ -422,7 +422,7 @@ const cjcTomlPath = path.join('packages', 'cjc', 'cjpm.toml');
 const cjcToml = await fs.readFile(cjcTomlPath, 'utf8');
 
 const cjpmToml = await fs.readFile('cjpm.toml', 'utf8');
-await fs.writeFile(path.join(root, 'cjpm.O1.toml'), cjpmToml.replace('compile-option = "-O2"', 'compile-option = "-O1"'));
+await fs.writeFile(path.join(root, 'cjpm.O1.toml'), cjpmToml.replace(/^(\s*compile-option\s*=\s*")-O2(?=[\s"])/m, '$1-O1'));
 await fs.copyFile(path.join(root, 'cjpm.O1.toml'), 'cjpm.toml');
 await prepareTrimpath(process.cwd());
 
