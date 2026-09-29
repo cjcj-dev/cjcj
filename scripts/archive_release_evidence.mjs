@@ -37,8 +37,18 @@ function packageJobName(platform) {
 const OPTIONAL_SKIPPED_JOBS = new Set(
   [...PHASES].filter(([host]) => host !== 'windows-x64').flatMap(([host, phase]) => {
     const suffix = host === 'linux-x64' ? ' (also cross-builds the Windows std)' : '';
-    const caller = `phase ${phase} · ${host} / source SDK and final std${suffix} / Build native LLVM tools`;
-    return ['in-process-dylib', 'Publish static colour LLVM tuple'].map(name => `${caller} / ${name}`);
+    const caller = `phase ${phase} · ${host} / source SDK and final std${suffix}`;
+    const segmented = `${caller} / ${host} / source SDK`;
+    // Retain the exact historical names for archived runs. New runs have the
+    // per-target reusable workflow between the release caller and LLVM jobs.
+    const llvm = [caller, segmented].flatMap(parent =>
+      ['in-process-dylib', 'Publish static colour LLVM tuple']
+        .map(name => `${parent} / Build native LLVM tools / ${name}`));
+    // These Linux-only jobs are absent on the other three source targets.
+    // release.yml enables Android for linux-x64, so none may skip there.
+    const cross = host === 'linux-x64' ? [] : ['android', 'mingw', 'windows']
+      .map(name => `${segmented} / linux-x64 / source-${name}`);
+    return [...llvm, ...cross];
   }),
 );
 

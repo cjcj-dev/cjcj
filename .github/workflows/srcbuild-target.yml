@@ -1080,7 +1080,7 @@ jobs:
           require-compiles: ${{ job.status == 'success' }}
 
   source-android:
-    name: ${{ matrix.target }} / source-android
+    name: linux-x64 / source-android
     needs: [plan, source-stage3]
     if: contains(needs.plan.outputs.llvm_platforms, 'linux_x86_64') && inputs.build_android
     runs-on: ${{ matrix.runner }}
@@ -1170,7 +1170,7 @@ jobs:
           require-compiles: ${{ job.status == 'success' }}
 
   source-mingw:
-    name: ${{ matrix.target }} / source-mingw
+    name: linux-x64 / source-mingw
     needs: plan
     if: contains(needs.plan.outputs.llvm_platforms, 'linux_x86_64')
     runs-on: ${{ matrix.runner }}
@@ -1258,7 +1258,7 @@ jobs:
           require-compiles: ${{ job.status == 'success' && steps.windows-mingw-cache.outputs.cache-hit != 'true' }}
 
   source-windows:
-    name: ${{ matrix.target }} / source-windows
+    name: linux-x64 / source-windows
     needs: [plan, source-stage3, source-mingw]
     if: contains(needs.plan.outputs.llvm_platforms, 'linux_x86_64')
     runs-on: ${{ matrix.runner }}
