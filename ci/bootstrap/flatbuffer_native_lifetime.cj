@@ -6,7 +6,8 @@ import std.fs.*
 main(): Int64 {
     let path = "flatbuffer-native-lifetime.bin"
     let builder = FlatBufferBuilder()
-    let root = builder.CreateString("native allocation ownership")
+    // Exceed the initial capacity so the allocation lifetime check also covers growth.
+    let root = builder.CreateString(String.fromUtf8(Array<UInt8>(4096, repeat: 110u8)))
     builder.Finish(root)
     let expected = builder.GetBufferArray()
     try (detached = builder.Release()) {
@@ -26,6 +27,14 @@ main(): Int64 {
         } finally {
             let _ = removeIfExists(path)
         }
+        var rejectedDirectory = false
+        try {
+            WriteFlatBufferToFile(".", detached.GetBufferPointer(), detached.size)
+        } catch (_: Exception) {
+            rejectedDirectory = true
+        }
+        println("ASSERT native file open failure propagated")
+        if (!rejectedDirectory) { return 3 }
     }
     try {
         try (exceptional = FlatBufferBuilder()) {
