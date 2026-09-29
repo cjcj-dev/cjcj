@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {assertPackagedLineage} from '../../../build/lib/package-lineage.mjs';
 import {getTarget} from '../../../build/lib/targets.mjs';
+import {verifyRepeatedCjo} from '../verify-repeated-cjo.mjs';
 
 $.stdio = 'inherit';
 
@@ -171,31 +172,13 @@ await phase('selfcheck', async () => {
   }
 });
 
-await phase('selfdet', async () => {
-  // Upstream SourceManager.cpp:107-115 hashes the absolute source path.
-  // Repeat the same source directory; cross-directory ELF reproducibility is
-  // covered by the release trimpath checks.
-  console.log('[selfdet] verify same-directory repeated CJO compilation');
-  const started = process.hrtime.bigint();
-  const sourceDir = path.join(root, 'packages', 'conditional_compilation', 'src');
-  const outputDir = path.join(work, 'selfdet');
-  await fs.mkdir(outputDir, {recursive: true});
-  const output = path.join(outputDir, 'conditional_compilation.a');
-  async function compile() {
-    await $`${timeoutCommand} 900 ${self} --emit-chir=raw --output-type=staticlib --package ${sourceDir} --module-name cjcj --import-path ${root}/target/release --trimpath=${sourceDir} -o ${output}`;
-    const cjos = (await fs.readdir(outputDir)).filter(name => name.endsWith('.cjo'));
-    if (cjos.length !== 1) throw new Error(`selfdet expected one CJO, found ${cjos.length}`);
-    const bytes = await fs.readFile(path.join(outputDir, cjos[0]));
-    if (bytes.length === 0) throw new Error('selfdet CJO is empty');
-    return bytes;
-  }
-  const first = await compile();
-  await fs.rm(outputDir, {recursive: true});
-  await fs.mkdir(outputDir, {recursive: true});
-  const second = await compile();
-  if (!first.equals(second)) throw new Error('selfdet repeated CJO compilation differs');
-  console.log(`[selfdet] PASS bytes=${first.length} wall=${(Number(process.hrtime.bigint() - started) / 1e9).toFixed(3)}s`);
-});
+await phase('selfdet', () => verifyRepeatedCjo({
+  compiler: self,
+  sourceDir: path.join(root, 'packages', 'conditional_compilation', 'src'),
+  importPath: path.join(root, 'target', 'release'),
+  outputDir: path.join(work, 'selfdet'),
+  timeoutCommand,
+}));
 
 if (noFailFast) {
   console.log('[verify] --no-fail-fast summary');
