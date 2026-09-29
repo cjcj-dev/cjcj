@@ -39,8 +39,19 @@ const expectedFileSha = (await fs.readFile(`${source}.sha256`, 'utf8')).trim().s
 if (sourceFileSha !== expectedFileSha) throw new Error('source runtime sha mismatch');
 
 const installRoot = path.resolve(argv._[1] || 'patched-runtime');
-await fs.mkdir(installRoot, {recursive: true});
 const sdkRoot = await fs.realpath(cangjieHome);
+let ancestor = installRoot;
+while (true) {
+  try { ancestor = await fs.realpath(ancestor); break; }
+  catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+    ancestor = path.dirname(ancestor);
+  }
+}
+if (ancestor === sdkRoot || ancestor.startsWith(`${sdkRoot}${path.sep}`)) {
+  throw new Error('patched runtime destination must be outside the official SDK');
+}
+await fs.mkdir(installRoot, {recursive: true});
 const realInstallRoot = await fs.realpath(installRoot);
 if (realInstallRoot === sdkRoot || realInstallRoot.startsWith(`${sdkRoot}${path.sep}`)) {
   throw new Error('patched runtime destination must be outside the official SDK');

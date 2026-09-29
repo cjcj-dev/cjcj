@@ -88,3 +88,21 @@ test('rebuilt executable outside the SDK may explicitly select coloured runtime'
   assert.match(result.stdout, /runtime=9/);
   assert.match(result.stdout, /official=0 coloured=1/);
 });
+
+
+test('installer rejects a destination inside the official SDK before creating it', t => {
+  const f = fixture(t); const dest = path.join(f.sdk, 'forbidden');
+  const result = run('npx', ['--yes', 'zx@8', 'ci/install_patched_runtime.mjs', f.dist, dest], f.env);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /destination must be outside the official SDK/);
+  assert.equal(fs.existsSync(dest), false);
+});
+
+test('renamed coloured preload is rejected by content hash', t => {
+  const f = fixture(t); const alias = path.join(f.root, 'renamed.so');
+  fs.copyFileSync(path.join(f.dist, 'libcangjie-runtime.so'), alias);
+  const result = audit(f, f.exe, [], {LD_PRELOAD: alias});
+  console.log(`TARGET_ASSERT_EXECUTED renamed_rejection rc=${result.status} ${result.stdout}`);
+  assert.equal(result.status, 86);
+  assert.ok(result.stdout.includes(`so=${alias}`));
+});
