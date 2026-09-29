@@ -17,7 +17,7 @@ import cjcj::basic.Range as BasicRange
 import cjcj::chir.CHIRContext as RealCHIRContext
 import cjcj::chir.Package as RealCHIRPackage
 import cjcj::modules.{CheckCjoVersionCompat, CjoVersionCompat, CjoVersionTriplet,
-    VersionAtLeast, VersionAtMost, VersionExactly}
+    VersionAtLeast, VersionAtMost, VersionExactly, ReadPackageVersionForDiagnostic}
 import cjcj::modules.SemaCjoManager
 import cjcj::modules.SemaImportManager
 import cjcj::modules.MacroHostImportManager
@@ -1352,8 +1352,16 @@ public class CjoSignatureMaterializer {
     private func VerifyForData(id: String): Bool {
         let rawData = data ?? Array<UInt8>()
         if (!CjoFlatBuffer(rawData).VerifyPackageBuffer()) {
-            diag.DiagnoseRefactor(DiagKindRefactor.module_loaded_ast_failed, DEFAULT_POSITION,
-                arguments: [id, packageName, CANGJIE_VERSION])
+            var diagnosticPackageName = if (packageName.isEmpty()) { cjoPath } else { packageName }
+            if (diagnosticPackageName.isEmpty()) { diagnosticPackageName = "unknown package" }
+            let producerVersion = ReadPackageVersionForDiagnostic(rawData)
+            if (producerVersion.isEmpty() || producerVersion == CANGJIE_VERSION) {
+                diag.DiagnoseRefactor(DiagKindRefactor.module_loaded_ast_failed, DEFAULT_POSITION,
+                    arguments: [id, diagnosticPackageName, CANGJIE_VERSION])
+            } else {
+                diag.DiagnoseRefactor(DiagKindRefactor.module_loaded_ast_failed_with_version, DEFAULT_POSITION,
+                    arguments: [id, diagnosticPackageName, producerVersion, CANGJIE_VERSION])
+            }
             return false
         }
         return true
@@ -2412,11 +2420,6 @@ public class CjoSignatureMaterializer {
         importNonGenericSrcFuncDecls.clear()
         allFileIds = Array<UInt64>()
         let reader = flat.getOrThrow()
-        if (!reader.VerifyPackageBuffer()) {
-            diag.DiagnoseRefactor(DiagKindRefactor.module_loaded_ast_failed, DEFAULT_POSITION,
-                arguments: ["ast", targetPkg.fullPackageName, CANGJIE_VERSION])
-            return false
-        }
         let root = reader.RootTable()
         if (root < 0) {
             return false
@@ -8759,10 +8762,6 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
             loadingPackages.remove(fullPackageName)
             diag.Diagnose(DiagCategory.IMPORT_PACKAGE, DEFAULT_POSITION,
                 "failed to load imported package '${fullPackageName}' from '${cjoPath}': ${reason}")
-            return false
-        }
-        if (!VerifySerializedPackageData(data, fullPackageName)) {
-            loadingPackages.remove(fullPackageName)
             return false
         }
         let pkg = CreatePackage(fullPackageName)

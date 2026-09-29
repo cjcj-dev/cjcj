@@ -5,7 +5,7 @@ import cjcj::basic.{CANGJIE_VERSION, DEFAULT_POSITION, DiagKindRefactor, Diagnos
 
 // ASTLoader.cpp:30-56 (ed8c7bc5): validate each access independently of
 // full package verification, which has already failed at the call site.
-private func ReadPackageVersionForDiagnostic(data: Array<UInt8>): String {
+public func ReadPackageVersionForDiagnostic(data: Array<UInt8>): String {
     if (data.size < 4) { return "" }
     var options = VerifierOptions()
     options.maxDepth = UInt32(FB_MAX_DEPTH)
