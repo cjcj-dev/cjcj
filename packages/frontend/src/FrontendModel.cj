@@ -1348,7 +1348,7 @@ public class CjoSignatureMaterializer {
         return packageTable.getOrThrow().GetPkgDepInfo().getOrThrow().str()
     }
 
-    // ASTLoader.cpp:207-220 VerifyForData.
+    // ASTLoader.cpp:367-389 (ed8c7bc5) VerifyForData.
     private func VerifyForData(id: String): Bool {
         let rawData = data ?? Array<UInt8>()
         if (!CjoFlatBuffer(rawData).VerifyPackageBuffer()) {
