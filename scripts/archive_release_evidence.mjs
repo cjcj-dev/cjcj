@@ -14,13 +14,33 @@ import {
   validateGateApparatusManifestSection,
 } from '../build/lib/release-gate-apparatus.mjs';
 
-const PLATFORMS = [
-  'linux-x64',
-  'linux-aarch64',
-  'darwin-x64',
-  'darwin-arm64',
-  'windows-x64',
-];
+import {allReleasePlatforms, releasePlatformReadiness} from '../build/lib/targets.mjs';
+
+const RELEASE_PLATFORMS = allReleasePlatforms().map(releasePlatformReadiness)
+  .filter(platform => platform.status === 'buildable');
+const PLATFORMS = RELEASE_PLATFORMS.map(platform => platform.archiveKey);
+const PLATFORM_CONTRACTS = new Map(RELEASE_PLATFORMS.map(platform => [platform.archiveKey, platform]));
+
+// Caller names: release.yml; callee name: build-release-package.yml:81.
+const PHASES = new Map([
+  ['linux-x64', 1], ['linux-aarch64', 2], ['windows-x64', 3],
+  ['darwin-arm64', 4], ['darwin-x64', 5],
+]);
+function packageJobName(platform) {
+  const {host} = PLATFORM_CONTRACTS.get(platform);
+  const caller = platform === host ? `phase ${PHASES.get(host)} · ${host}` : platform;
+  return `${caller} / Build release package / ${host} / Build release package`;
+}
+
+// Only these conditional jobs may skip (build-llvm-tools.yml:15-24,48,366).
+// Exact full names prevent an unrelated job with the same suffix being exempted.
+const OPTIONAL_SKIPPED_JOBS = new Set(
+  [...PHASES].filter(([host]) => host !== 'windows-x64').flatMap(([host, phase]) => {
+    const suffix = host === 'linux-x64' ? ' (also cross-builds the Windows std)' : '';
+    const caller = `phase ${phase} · ${host} / source SDK and final std${suffix} / Build native LLVM tools`;
+    return ['in-process-dylib', 'Publish static colour LLVM tuple'].map(name => `${caller} / ${name}`);
+  }),
+);
 
 const REQUIRED_MANIFEST_COMPONENTS = [
   'base-sdk',
@@ -47,7 +67,7 @@ function usage() {
     '  run.json       GitHub REST workflow-run response',
     '  jobs.json      GitHub REST workflow-jobs response (or --paginate --slurp pages)',
     '  run.log        unmodified combined workflow log',
-    '  artifacts/**   downloaded pkg-* artifacts containing five manifests and checksums',
+    '  artifacts/**   downloaded pkg-* artifacts containing manifests and checksums for every buildable release platform',
   ].join('\n');
 }
 
@@ -153,13 +173,14 @@ function validateJobs(jobs) {
     if (urls.has(url)) throw new Error(`duplicate job URL: ${url}`);
     urls.add(url);
     const expectedConclusion = job.name === 'Publish release' ? 'skipped' : 'success';
-    if (job.conclusion !== expectedConclusion) {
+    const optionalSkip = job.conclusion === 'skipped' && OPTIONAL_SKIPPED_JOBS.has(job.name);
+    if (job.conclusion !== expectedConclusion && !optionalSkip) {
       throw new Error(`job has the wrong dry-run conclusion: ${job.name} expected=${expectedConclusion} actual=${job.conclusion}`);
     }
   }
 
   for (const platform of PLATFORMS) {
-    const packageJobs = jobs.filter(job => job.name.includes(platform) && job.name.includes('Build release package'));
+    const packageJobs = jobs.filter(job => job.name === packageJobName(platform));
     if (packageJobs.length !== 1 || packageJobs[0].conclusion !== 'success') {
       throw new Error(`${platform} package grid is not exactly one success (found ${packageJobs.length})`);
     }
@@ -194,7 +215,7 @@ function manifestName(version, platform) {
 }
 
 function checksumName(version, platform) {
-  const archive = platform === 'windows-x64' ? 'zip' : 'tar.gz';
+  const archive = PLATFORM_CONTRACTS.get(platform).archiveFormat;
   return `cjcj-${version}-${platform}.${archive}.sha256`;
 }
 
@@ -205,6 +226,7 @@ function findExactlyOne(files, basename, label) {
 }
 
 async function validateManifest(file, platform) {
+  const {host} = PLATFORM_CONTRACTS.get(platform);
   const text = await fs.readFile(file, 'utf8');
   const lines = text.split(/\r?\n/).filter(line => line.length > 0);
   if (lines.length !== REQUIRED_MANIFEST_ROWS) {
@@ -218,7 +240,7 @@ async function validateManifest(file, platform) {
       throw new Error(`${platform} manifest row ${index + 1} is invalid JSON: ${error.message}`);
     }
     if (row.schema !== 1) throw new Error(`${platform} manifest row ${index + 1} schema is not 1`);
-    if (row.platform !== platform) throw new Error(`${platform} manifest row ${index + 1} platform=${row.platform}`);
+    if (row.platform !== host) throw new Error(`${platform} manifest row ${index + 1} platform=${row.platform}`);
     const component = requireString(row.component, `${platform} row ${index + 1} component`);
     if (components.has(component)) throw new Error(`${platform} manifest repeats component ${component}`);
     components.add(component);
@@ -236,7 +258,7 @@ async function validateManifest(file, platform) {
   if (JSON.stringify(actualComponents) !== JSON.stringify(requiredComponents)) {
     throw new Error(`${platform} manifest components mismatch: expected=${requiredComponents.join(',')} actual=${actualComponents.join(',')}`);
   }
-  validateGateApparatusManifestSection(gateApparatus, platform);
+  validateGateApparatusManifestSection(gateApparatus, host);
 }
 
 async function validateChecksum(file, version, platform) {
