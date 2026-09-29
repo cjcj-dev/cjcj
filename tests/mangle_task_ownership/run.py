@@ -36,9 +36,14 @@ def run(args, case, single=False):
     env['LD_LIBRARY_PATH'] = ':'.join(str(args.sdk / p) for p in
         ('runtime/lib/linux_x86_64_cjnative', 'lib/linux_x86_64_cjnative',
          'tools/lib', 'third_party/llvm/lib'))
+    env['CANGJIE_PATH'] = ':'.join(str(args.sdk / p) for p in
+        ('modules/linux_x86_64_cjnative', 'third_party/flatbuffers/modules'))
+    env['LIBRARY_PATH'] = str(args.sdk / 'lib/linux_x86_64_cjnative')
     identities = {str(args.compiler): sha(args.compiler), str(case): sha(case)}
     identities.update({str(p): sha(p) for p in
                        (args.sdk / 'runtime/lib/linux_x86_64_cjnative').glob('*.so')})
+    identities.update({str(p): sha(p) for p in
+                       (args.sdk / 'third_party/flatbuffers/modules').glob('*.cjo')})
     before = subprocess.check_output(['uptime'], text=True).strip()
     start = time.monotonic()
     with (output / 'compile.log').open('w') as log:
@@ -53,7 +58,8 @@ def run(args, case, single=False):
     good = 'MANGLE_INVARIANT sourceDecl=true consumerDecl=true kind=Class' in text
     reached = bool(re.search(r'MANGLE_ASSERT consumed=true name=\S+', text))
     qualified = 'MANGLE_QUALIFICATION shared=true separate=true fullTasks=true' in text
-    expected_red = (args.expect_red and case.stem == 'parallel' and not single)
+    expected_red = ((args.expect_red and case.stem == 'parallel') or
+                    (args.ordinary_red and case.stem == 'ordinary')) and not single
     if expected_red:
         passed = (rc != 0 and rc != 124 and bad and qualified and
                   'MANGLE_CONSUMER cachedFirst=true' in text and
@@ -61,7 +67,7 @@ def run(args, case, single=False):
                   'MANGLE_RACE second-finally-release' in text)
     else:
         passed = rc == 0 and bc.is_file()
-        if args.race and case.stem == 'parallel' and not single:
+        if args.race and case.stem in ('parallel', 'ordinary') and not single:
             passed = (passed and good and reached and not bad and qualified and
                       'MANGLE_RACE second-store sameAdapter=false' in text and
                       'MANGLE_CONSUMER cachedFirst=false' in text and
@@ -105,20 +111,25 @@ def main():
     p.add_argument('--output', type=Path, required=True)
     p.add_argument('--race', action='store_true')
     p.add_argument('--expect-red', action='store_true')
+    p.add_argument('--ordinary-red', action='store_true', help='constructor cut also shares ordinary adapters')
+    p.add_argument('--parallelism', type=int, choices=range(1, 5), default=4)
     args = p.parse_args()
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
     cases = [(args.inputs / 'parallel.cj', False), (args.inputs / 'parallel.cj', True),
-             (args.inputs / 'remainder.cj', False), (args.inputs / 'control.cj', False)]
-    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+             (args.inputs / 'remainder.cj', False), (args.inputs / 'control.cj', False),
+             (args.inputs / 'ordinary.cj', False), (args.inputs / 'ordinary.cj', True)]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=args.parallelism) as pool:
         futures = [pool.submit(run, args, case, single) for case, single in cases]
         results = [future.result() for future in futures]
     parallel, single = results[:2]
     # Compare measured sets, not an assumed fixed count. Red arms have no valid
     # parallel output to compare; the unaffected controls must still pass.
     same_names = (parallel['symbols'] == single['symbols']) if not args.expect_red else None
+    ordinary_same_names = (results[4]['symbols'] == results[5]['symbols']) if not args.ordinary_red else None
     (args.output / 'summary.json').write_text(json.dumps(
-        dict(results=results, parallel_single_symbols_equal=same_names), indent=2) + '\n')
-    return int(not all(r['passed'] for r in results) or same_names is False)
+        dict(results=results, parallel_single_symbols_equal=same_names,
+             ordinary_single_symbols_equal=ordinary_same_names), indent=2) + '\n')
+    return int(not all(r['passed'] for r in results) or same_names is False or ordinary_same_names is False)
 
 
 if __name__ == '__main__':

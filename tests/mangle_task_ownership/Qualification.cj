@@ -14,8 +14,13 @@ func MangleOwnershipQualification(decls: ArrayList<(String, Decl)>, workers: Int
     for (index in 0..decls.size) {
         let decl = decls[index][1]
         println("MANGLE_TOP index=${index} batch=${index / 30} name=${decl.identifier.Val()} kind=${ASTKindName(decl.astKind)}")
-        if (decl.astKind != ASTKind.MACRO_DECL) { continue }
-        if (let Some(desugar) <- decl.GetDesugarDecl()) {
+        var target: Option<FuncDecl> = None
+        if (decl.astKind == ASTKind.MACRO_DECL) {
+            target = decl.GetDesugarDecl()
+        } else if (decl.identifier.Val() == "OrdinaryA" || decl.identifier.Val() == "OrdinaryB") {
+            target = decl as FuncDecl
+        }
+        if (let Some(desugar) <- target) {
             if (let Some(body) <- desugar.funcBody) {
                 for (params in body.paramLists) {
                     for (param in params.params) {
@@ -25,11 +30,11 @@ func MangleOwnershipQualification(decls: ArrayList<(String, Decl)>, workers: Int
                                 hasDecl = classTy.decl.isSome()
                             }
                             println("MANGLE_SOURCE macro=${decl.identifier.Val()} type=${ty.objectId} kind=${TypeKindName(ty.kind)} classDecl=${hasDecl}")
-                            if (decl.identifier.Val() == "RaceA" && hasDecl) {
+                            if ((decl.identifier.Val() == "RaceA" || decl.identifier.Val() == "OrdinaryA") && hasDecl) {
                                 first = ty
                                 firstIndex = index
                             }
-                            if (decl.identifier.Val() == "RaceB" && hasDecl) {
+                            if ((decl.identifier.Val() == "RaceB" || decl.identifier.Val() == "OrdinaryB") && hasDecl) {
                                 second = ty
                                 secondIndex = index
                             }

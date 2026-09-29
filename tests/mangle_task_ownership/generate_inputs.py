@@ -18,6 +18,13 @@ def main():
     (args.output / 'parallel.cj').write_text('\n'.join(lines))
     (args.output / 'remainder.cj').write_text(
         'macro package ownershipsmall\nimport std.ast.*\n' + macro('Remainder'))
+    ordinary = ['package ownershipordinary\n',
+                'public class Shared { public init() {} }\n',
+                'public func OrdinaryA(value: Shared): Shared { let f = { node: Shared => node }; f(value) }\n']
+    ordinary += [f'func before{i}(x: Int64): Int64 {{ x + {i} }}\n' for i in range(28)]
+    ordinary += ['public func OrdinaryB(value: Shared): Shared { value }\n']
+    ordinary += [f'func after{i}(x: Int64): Int64 {{ x - {i} }}\n' for i in range(31)]
+    (args.output / 'ordinary.cj').write_text('\n'.join(ordinary))
     (args.output / 'control.cj').write_text('''package ownershipcontrol
 public class Recursive {
     public let next: Option<Recursive>

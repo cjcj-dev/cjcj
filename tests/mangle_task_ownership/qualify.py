@@ -37,7 +37,7 @@ def main():
             if (!same || !separate || !fullTasks || decls.size % 30 == 0) {
                 throw IllegalStateException("MANGLE_FIXTURE_INELIGIBLE")
             }
-            MangleOwnershipRace.Configure(a, workers)''')
+            MangleOwnershipRace.Configure(a, workers, decls[secondIndex][1].identifier.Val())''')
         modified = modified.replace('import cjcj::mangle.BaseMangler as RealBaseMangler',
             'import cjcj::mangle.MangleOwnershipRace\nimport cjcj::mangle.BaseMangler as RealBaseMangler')
         old_routes = [
@@ -48,13 +48,31 @@ def main():
         if len(routes) != 1:
             raise SystemExit('expected one recognized product macro route')
         route = routes[0]
-        modified = modified.replace(route, '''                            MangleOwnershipRace.BeforeMacro(curDecl.identifier.Val())
+        modified = modified.replace(route, '''                            MangleOwnershipRace.BeforeEntry(curDecl.identifier.Val())
                             try {
     ''' + route + '''
-                                MangleOwnershipRace.MacroResult(curDecl.identifier.Val(), desugarDecl.mangledName)
+                                MangleOwnershipRace.EntryResult(curDecl.identifier.Val(), desugarDecl.mangledName)
+                            } catch (error: Exception) {
+                                println("MANGLE_MACRO_EXCEPTION macro=${curDecl.identifier.Val()} error=${error.message}")
+                                throw error
                             } finally {
                                 MangleOwnershipRace.Release(curDecl.identifier.Val())
                             }''')
+        ordinary_begin = '                        let convertedDecl = adapter.ConvertDecl(curDecl)'
+        ordinary_end = '                        mangledDecls.add(PendingMangledDecl(curDecl, mangledName))'
+        start = modified.index(ordinary_begin)
+        end = modified.index(ordinary_end, start) + len(ordinary_end)
+        body = modified[start:end]
+        modified = modified[:start] + '''                        MangleOwnershipRace.BeforeEntry(curDecl.identifier.Val())
+                        try {
+''' + '\n'.join('    ' + line for line in body.splitlines()) + '''
+                            MangleOwnershipRace.EntryResult(curDecl.identifier.Val(), mangledName)
+                        } catch (error: Exception) {
+                            println("MANGLE_ENTRY_EXCEPTION entry=${curDecl.identifier.Val()} error=${error.message}")
+                            throw error
+                        } finally {
+                            MangleOwnershipRace.Release(curDecl.identifier.Val())
+                        }''' + modified[end:]
         modified = modified.replace('        DoMangling(baseMangler, parallelNum, topDecls)',
             '        DoMangling(baseMangler, parallelNum, topDecls)\n        MangleOwnershipRace.Finish()')
         mangle = args.tree / 'packages/mangle/src'

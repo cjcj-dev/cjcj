@@ -16,22 +16,24 @@ public class MangleOwnershipRace {
     private static var released = false
     private static var secondConsumed = false
     private static var secondName = ""
+    private static var secondEntry = "RaceB"
 
     private static func NewCondition(): Condition {
         synchronized(mutex) { return mutex.condition() }
     }
 
-    public static func Configure(source: Ty, workers: Int64): Unit {
+    public static func Configure(source: Ty, workers: Int64, second: String): Unit {
         synchronized(mutex) {
             watched = source
+            secondEntry = second
             enabled = workers > 1
             println("MANGLE_RACE configured source=${source.objectId} enabled=${enabled}")
         }
     }
 
-    public static func BeforeMacro(name: String): Unit {
+    public static func BeforeEntry(name: String): Unit {
         synchronized(mutex) {
-            if (!enabled || name != "RaceB") { return }
+            if (!enabled || name != secondEntry) { return }
             while (!published) { changed.wait() }
             println("MANGLE_RACE second-after-publication")
         }
@@ -76,16 +78,16 @@ public class MangleOwnershipRace {
         }
     }
 
-    public static func MacroResult(name: String, mangled: String): Unit {
+    public static func EntryResult(name: String, mangled: String): Unit {
         synchronized(mutex) {
             println("MANGLE_RESULT macro=${name} mangled=${mangled}")
-            if (name == "RaceB") { secondName = mangled }
+            if (name == secondEntry) { secondName = mangled }
         }
     }
 
     public static func Release(name: String): Unit {
         synchronized(mutex) {
-            if (!enabled || name != "RaceB") { return }
+            if (!enabled || name != secondEntry) { return }
             released = true
             changed.notifyAll()
             println("MANGLE_RACE second-finally-release")

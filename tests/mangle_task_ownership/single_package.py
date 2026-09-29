@@ -34,10 +34,12 @@ def main():
     env['LD_LIBRARY_PATH'] = ':'.join(str(a.sdk / q) for q in (
         'runtime/lib/linux_x86_64_cjnative', 'lib/linux_x86_64_cjnative',
         'tools/lib', 'third_party/llvm/lib'))
-    env['CANGJIE_PATH'] = str(a.sdk / 'modules/linux_x86_64_cjnative')
+    env['CANGJIE_PATH'] = ':'.join(str(a.sdk / q) for q in
+        ('modules/linux_x86_64_cjnative', 'third_party/flatbuffers/modules'))
     env['LIBRARY_PATH'] = str(a.sdk / 'lib/linux_x86_64_cjnative')
     hashes = {str(a.compiler): sha(a.compiler)}
-    for directory in ('runtime/lib/linux_x86_64_cjnative', 'modules/linux_x86_64_cjnative'):
+    for directory in ('runtime/lib/linux_x86_64_cjnative', 'modules/linux_x86_64_cjnative',
+                      'third_party/flatbuffers/modules'):
         hashes.update({str(q): sha(q) for q in (a.sdk / directory).rglob('*') if q.is_file()})
     source_hashes = {str(q.relative_to(a.source)): sha(q) for q in a.source.rglob('*') if q.is_file()}
     before = subprocess.check_output(['uptime'], text=True).strip()
