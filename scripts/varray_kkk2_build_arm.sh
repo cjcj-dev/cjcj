@@ -15,6 +15,7 @@ nproc > "$r/evidence/$arm-jobs"
 taskset -pc $$ > "$r/evidence/$arm-cpuset" || true
 sha256sum "$CANGJIE_HOME/bin/cjc" "$CANGJIE_HOME/third_party/llvm/bin/llc" "$CANGJIE_HOME/third_party/llvm/lib/libLLVM-15.so" > "$r/evidence/$arm-input.sha256"
 /usr/bin/grep -n 'compile-option' cjpm.toml > "$r/evidence/$arm-compile-option.txt"
+node ci/release/trimpath.mjs . || exit $?
 /usr/bin/time -f 'wall=%e' cjpm build -j"$(nproc)" > "$r/evidence/$arm-build.log" 2>&1
 rc=$?
 echo "$rc" > "$r/evidence/$arm-build.rc"
