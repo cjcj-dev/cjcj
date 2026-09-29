@@ -12,7 +12,6 @@ import {prepareBootstrapHandoff} from '../lib/bootstrap-handoff.mjs';
 import {stdIdentity, payloadIdentity} from '../lib/final-compiler.mjs';
 import {installStage3Compiler} from '../lib/compose-install.mjs';
 import {captureBuildInputs, finishBuildReceipt, sourceIdentity} from '../lib/source-build-receipt.mjs';
-import {assertWriteBarriers} from '../lib/write-barrier.mjs';
 import {assertColouredRuntime} from '../lib/runtime-colour.mjs';
 
 $.stdio = 'inherit';
@@ -79,15 +78,6 @@ async function assertBuildCompiler(stageEnv, expectedSha, nativeName = 'cjcj-sta
     throw new Error(`build compiler assertion failed: link=${resolvedLink}, command=${resolvedCommand}, expected=${resolvedInstalled}, sha=${installedSha}`);
   }
   console.log(`STAGE3_COMPILER_ASSERT_PASS path=${resolvedInstalled} sha256=${installedSha}`);
-}
-
-// The SDK ships llvm-objdump; failing when it is absent keeps this from quietly
-// becoming a no-op on a host that happens not to have one.
-async function assertWriteBarriersWith(sdkRoot, coreLib, targetSpec) {
-  const tool = path.join(sdkRoot, 'third_party', 'llvm', 'bin', 'llvm-objdump');
-  if (!await exists(tool)) throw new Error(`write-barrier check needs llvm-objdump: ${tool}`);
-  const dump = await $({stdio: 'pipe'})`${tool} -d -r -C ${coreLib}`;
-  return assertWriteBarriers(dump.stdout, `target=${targetSpec.spec.key} core=${path.basename(coreLib)}`);
 }
 
 async function assertStdBarriers(coreLib) {
