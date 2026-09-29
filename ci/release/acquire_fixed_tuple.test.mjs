@@ -100,3 +100,12 @@ test('fixed release CLI preserves asset digest verification', () => fixture(({pa
   assert.match(result.stderr, /bootstrap digest mismatch: bin\/llc/);
   assert.equal(fs.existsSync(destination), false);
 }));
+
+test('fixed release CLI checks the selected platform sums pin', () => fixture(({pin, run, destination}) => {
+  const reviewed = pin.tuple_sums_sha256;
+  pin.tuple_sums_sha256 = 'f'.repeat(64);
+  const result = run(reviewed);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /bootstrap digest mismatch: platform tuple_sums_sha256/);
+  assert.equal(fs.existsSync(destination), false);
+}));

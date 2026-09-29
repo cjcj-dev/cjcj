@@ -10,7 +10,7 @@ cd "$work"
 export TMPDIR=$work/tmp
 mkdir tmp logs
 uptime > logs/uptime-before.txt
-arms=(green restored producer-cut pin-cut manifest-cut publisher-cut)
+arms=(green restored producer-cut pin-cut manifest-cut publisher-cut fixed-sums-cut)
 for arm in "${arms[@]}"; do
   mkdir -p "$arm/build" "$arm/.github"
   cp -a "$root/ci" "$arm/ci"
@@ -28,6 +28,7 @@ python3 - <<'PY'
 from pathlib import Path
 import difflib
 cuts = {
+ 'fixed-sums-cut': ('ci/release/acquire_fixed_tuple.mjs', "  verify(fs.readFileSync(path.join(tuple, 'SHA256SUMS')), sumsSha, 'LLVM_TUPLE_SUMS_SHA');", "  // cut: omit independent reviewed sums verification"),
  'producer-cut': ('ci/llvm-tuple-layout.sh', "printf 'PLATFORM=%s\\n' \"$platform\"", "printf 'PLATFORM=%s\\n' linux_x86_64"),
  'pin-cut': ('ci/release/tuple_platform.mjs', "if (pin.platform !== platform) platformFailure('BOOTSTRAP_TUPLE_PLATFORM_MISMATCH', platform, pin.platform);", "// cut: omit selected pin platform validation"),
  'manifest-cut': ('ci/release/tuple_platform.mjs', "    platformFailure('BOOTSTRAP_TUPLE_PLATFORM_MISMATCH', platform, platforms.join(','));", "  // cut: omit verified MANIFEST platform validation"),
@@ -60,11 +61,12 @@ for arm in "${arms[@]}"; do
 done
 for arm in green restored; do test "$(cat "logs/$arm.rc")" = 0; done
 cmp logs/green.sha256 logs/restored.sha256
-cuts=(producer-cut pin-cut manifest-cut publisher-cut)
+cuts=(producer-cut pin-cut manifest-cut publisher-cut fixed-sums-cut)
 targets=('tuple producer preserves linux_aarch64 from tools manifest'
   'platform tuple rejects wrong-platform pin with rc 65 before acquisition'
   'platform tuple rejects digest-valid wrong-platform manifest with rc 65'
-  'publisher refuses wrong platform before creating a prerelease')
+  'publisher refuses wrong platform before creating a prerelease'
+  'fixed release CLI preserves independent sums pin and existing destination on rejection')
 for i in "${!cuts[@]}"; do
   arm=${cuts[$i]}
   test "$(cat "logs/$arm.rc")" = 1
