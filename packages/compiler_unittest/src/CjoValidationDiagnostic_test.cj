@@ -93,6 +93,9 @@ private func CheckImportedValidation(result: TestCompileResult, data: Array<UInt
     @Assert(FileUtil.CreateDirs(directory + "/"), 0)
     @Assert(FileUtil.WriteBufferToASTFile(directory + "/diagnosticfixture.cjo", data))
     let diag = DiagnosticEngine()
+    // CompilerInstance.cpp:80 / CompilerInstance.cj:277 initialize the live engine
+    // with a SourceManager before a successful package header materializes files.
+    diag.SetSourceManager(result.diag.GetSourceManager())
     let manager = ImportManager(diag,
         result.instance.typeManager.getOrThrow().AsFaithfulSemaTypeManager(), result.instance.invocation.globalOptions)
     manager.GetSearchPath().add(directory)
@@ -101,6 +104,11 @@ private func CheckImportedValidation(result: TestCompileResult, data: Array<UInt
     @Expect(loaded, valid)
     if (valid) {
         @Expect(diag.GetErrorCount(), 0u64)
+        if (let Some(loadedPackage) <- manager.GetPackage("diagnosticfixture")) {
+            for (name in loadedPackage.GetAllDependentStdPkgs()) {
+                println("VALID_STANDARD_DEPENDENCY=${name}")
+            }
+        }
     } else {
         let expected = "validation of ast file 'diagnosticfixture' failed: it was compiled with cjc '" +
             producer + "', but the current compiler is cjc '" + CANGJIE_VERSION + "'."
