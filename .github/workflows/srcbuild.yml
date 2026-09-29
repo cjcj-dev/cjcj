@@ -1213,7 +1213,7 @@ jobs:
 
   source-mingw:
     name: ${{ matrix.target }} / source-mingw
-    needs: [plan, source-stage3]
+    needs: plan
     if: contains(needs.plan.outputs.llvm_platforms, 'linux_x86_64')
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 360
@@ -1239,14 +1239,11 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Download preceding source phase
-        uses: actions/download-artifact@v8
-        with:
-          name: source-handoff-${{ matrix.target }}-stage3
-          path: ${{ runner.temp }}/source-handoff
-
-      - name: Verify preceding source phase
-        run: node ci/srcbuild/job-handoff.mjs restore stage3 "$RUNNER_TEMP/source-handoff"
+      - name: Load and validate runtime pin
+        env:
+          CJCJ_RUNTIME_REF_OVERRIDE: ${{ inputs.runtime_ref }}
+          CJCJ_ALLOW_RUNTIME_OVERRIDE: ${{ inputs.dry_run && inputs.runtime_ref != '' }}
+        run: npx --yes zx@8 ci/load_runtime_pin.mjs
 
       - name: Install build dependencies
         run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" install-system-deps
@@ -1258,19 +1255,6 @@ jobs:
           platform: ${{ matrix.target }}
           pin: ${{ env.RUNTIME_REF }}
           cache-size: 2G
-
-      - name: Restore source SDK version output
-        id: version
-        run: echo "value=$SOURCE_SDK_VERSION" >> "$GITHUB_OUTPUT"
-
-      - name: Add Linux swap for stage2 chir heap
-        if: runner.os == 'Linux'
-        run: |
-          sudo fallocate -l 12G /mnt/swapfile
-          sudo chmod 600 /mnt/swapfile
-          sudo mkswap /mnt/swapfile
-          sudo swapon /mnt/swapfile
-          free -h
 
       - name: Restore official MinGW toolchain
         if: matrix.target == 'linux-x64'
@@ -1317,7 +1301,7 @@ jobs:
 
   source-windows:
     name: ${{ matrix.target }} / source-windows
-    needs: [plan, source-mingw]
+    needs: [plan, source-stage3, source-mingw]
     if: contains(needs.plan.outputs.llvm_platforms, 'linux_x86_64')
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 360
@@ -1343,14 +1327,23 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Download preceding source phase
+      - name: Download native stage3 handoff
+        uses: actions/download-artifact@v8
+        with:
+          name: source-handoff-${{ matrix.target }}-stage3
+          path: ${{ runner.temp }}/source-handoff
+
+      - name: Verify native stage3 handoff
+        run: node ci/srcbuild/job-handoff.mjs restore stage3 "$RUNNER_TEMP/source-handoff"
+
+      - name: Download MinGW handoff
         uses: actions/download-artifact@v8
         with:
           name: source-handoff-${{ matrix.target }}-mingw
-          path: ${{ runner.temp }}/source-handoff
+          path: ${{ runner.temp }}/mingw-handoff
 
-      - name: Verify preceding source phase
-        run: node ci/srcbuild/job-handoff.mjs restore mingw "$RUNNER_TEMP/source-handoff"
+      - name: Verify MinGW handoff
+        run: node ci/srcbuild/job-handoff.mjs restore mingw "$RUNNER_TEMP/mingw-handoff"
 
       - name: Install build dependencies
         run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" install-system-deps

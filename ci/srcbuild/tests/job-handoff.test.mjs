@@ -8,7 +8,7 @@ import test from 'node:test';
 
 const product = path.resolve(import.meta.dirname, '../job-handoff.mjs');
 const digest = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
-async function fixture(t) {
+async function fixture(t, phase = 'stage1-compiler') {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'source-handoff-'));
   t.after(() => fs.rm(dir, {recursive: true, force: true}));
   const root = path.join(dir, 'workspace');
@@ -20,6 +20,8 @@ async function fixture(t) {
   await fs.symlink('cjcj-stage2', path.join(path.dirname(binary), 'cjc'));
   await fs.writeFile(path.join(root, 'runtime_shim/config.o'), 'producer-object-bytes');
   await fs.writeFile(path.join(root, 'cjpm.toml'), 'fixture');
+  await fs.mkdir(path.join(root, '.srcbuild/buildtools/llvm-mingw-w64/bin'), {recursive: true});
+  await fs.writeFile(path.join(root, '.srcbuild/buildtools/llvm-mingw-w64/bin/clang'), 'mingw-producer');
   const archive = path.join(dir, 'artifact');
   const env = {...process.env, GITHUB_WORKSPACE: root, GITHUB_SHA: '1'.repeat(40),
     GITHUB_RUN_ID: '702', CJCJ_SRCBUILD_TARGET: 'linux-x64',
@@ -27,7 +29,7 @@ async function fixture(t) {
     CANGJIE_HOME: path.join(root, '.srcbuild/host-sdk'), SOURCE_SDK_VERSION: '0.0.2',
     CJCJ_BOOTSTRAP_COLOUR_LLVM_SHA256: '2'.repeat(64)};
   const run = (mode, overrides = {}) => {
-    const r = spawnSync(process.execPath, [product, mode, 'stage1-compiler', archive],
+    const r = spawnSync(process.execPath, [product, mode, phase, archive],
       {env: {...env, ...overrides}, encoding: 'utf8'});
     return {rc: r.status, output: `${r.stdout}${r.stderr}`};
   };
@@ -86,4 +88,20 @@ test('consumer rejects wrong phase and does not accept a missing artifact', asyn
   assert.match(f.run('restore').output, /handoff identity mismatch: phase/);
   await fs.rm(file);
   assert.notEqual(f.run('restore').rc, 0);
+});
+
+test('independent MinGW handoff overlays only the toolchain and preserves stage3 source and environment', async t => {
+  const f = await fixture(t, 'mingw');
+  const manifest = JSON.parse(await fs.readFile(path.join(f.archive, 'manifest.json')));
+  assert.deepEqual(manifest.entries, ['.srcbuild/buildtools/llvm-mingw-w64']);
+  assert.deepEqual(manifest.environment, {});
+  await fs.rm(path.join(f.root, '.srcbuild/buildtools'), {recursive: true});
+  await fs.writeFile(path.join(f.root, 'cjpm.toml'), 'stage3-injected-version');
+  await fs.writeFile(f.env.GITHUB_ENV, 'SOURCE_SDK_VERSION=0.0.3\n');
+  const result = f.run('restore');
+  assert.equal(result.rc, 0, result.output);
+  assert.equal(await fs.readFile(path.join(f.root, '.srcbuild/buildtools/llvm-mingw-w64/bin/clang'), 'utf8'), 'mingw-producer');
+  assert.equal(await fs.readFile(path.join(f.root, 'cjpm.toml'), 'utf8'), 'stage3-injected-version');
+  assert.equal(await fs.readFile(f.env.GITHUB_ENV, 'utf8'), 'SOURCE_SDK_VERSION=0.0.3\n');
+  console.log('HANDOFF_ASSERT mingw=restored stage3-source=preserved stage3-environment=preserved');
 });

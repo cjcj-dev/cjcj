@@ -36,14 +36,18 @@ const tar = args => {
 // Deliberately exclude PATH, cache launchers, tokens and runner command files.
 // Every consuming job installs its own dependencies and starts its own cache.
 const allowed = name => /^(CJCJ_BOOTSTRAP_[A-Z0-9_]+|CJCJ_SRCBUILD_(HOST_SDK|BOOTSTRAP_SDK)|CJCJ_TOOLCHAIN|CJCJ_ACTUAL_HOST_TOOLCHAIN|CANGJIE_HOME|CANGJIE_STDX_PATH|LD_LIBRARY_PATH|DYLD_LIBRARY_PATH|G2_IDENTITY|G2_CAMPAIGN_DIR|SOURCE_SDK_VERSION|RUNTIME_REF|RUNTIME_SRC_URL|TOOLS_REF|TOOLS_SRC_URL|STDX_REF|STDX_SRC_URL|CANGJIE_COMPILER_SHA|CANGJIE_COMPILER_URL|LLVM_SHA|LLVM_TUPLE_SUMS_SHA)$/.test(name);
-const roots = ['.srcbuild', 'packages', 'runtime_shim', 'cjpm.toml'];
-const optional = ['cjpm.lock', 'target'];
+// MinGW is an independent producer. Its overlay must not replace the native
+// SDK, injected source version or environment when Windows std joins both arms.
+const roots = phase === 'mingw' ? ['.srcbuild/buildtools/llvm-mingw-w64']
+  : ['.srcbuild', 'packages', 'runtime_shim', 'cjpm.toml'];
+const optional = phase === 'mingw' ? [] : ['cjpm.lock', 'target'];
 if (mode === 'pack') {
   await fs.mkdir(dir, {recursive: true});
   if (dir === root || roots.some(entry => dir.startsWith(path.join(root, entry) + path.sep))) {
     throw new Error('handoff output must be outside archived trees');
   }
-  const environment = Object.fromEntries(Object.entries(process.env).filter(([key]) => allowed(key)));
+  const environment = phase === 'mingw' ? {}
+    : Object.fromEntries(Object.entries(process.env).filter(([key]) => allowed(key)));
   for (const [key, value] of Object.entries(environment)) {
     if (/[\r\n]/.test(value)) throw new Error(`multiline handoff environment: ${key}`);
   }

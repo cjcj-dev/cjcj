@@ -35,8 +35,10 @@ test('native packaging, Android, MinGW and Windows std occupy distinct jobs', ()
   for (const name of ['srcbuild', 'source-android', 'source-mingw', 'source-windows']) assert.ok(jobs.has(name), name);
   assert.match(jobs.get('srcbuild'), /needs: \[plan, source-stage3\]/);
   assert.match(jobs.get('source-android'), /needs: \[plan, source-stage3\]/);
-  assert.match(jobs.get('source-mingw'), /needs: \[plan, source-stage3\]/);
-  assert.match(jobs.get('source-windows'), /needs: \[plan, source-mingw\]/);
+  assert.match(jobs.get('source-mingw'), /needs: plan/);
+  assert.match(jobs.get('source-windows'), /needs: \[plan, source-stage3, source-mingw\]/);
+  assert.match(jobs.get('source-windows'), /job-handoff.mjs restore stage3 /);
+  assert.match(jobs.get('source-windows'), /job-handoff.mjs restore mingw /);
   assert.doesNotMatch(jobs.get('srcbuild'), /run:.*(build-android-final-std|install-mingw|build-windows-final-std)/);
   assert.doesNotMatch(jobs.get('source-windows'), /run:.*install-mingw/);
 });
