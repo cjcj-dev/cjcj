@@ -29,6 +29,7 @@ export const GATING = Object.freeze([
   'ci/release/g8.test.mjs',
   'build/test/archive.test.mjs',
   'build/test/cangjie-written-tools.test.mjs',
+  'build/test/cangjie-test-preparation.test.mjs',
   'build/test/compose-install.test.mjs',
   'build/test/compose-sdk-entry.test.mjs',
   'build/test/darwin-cjdb-python.test.mjs',

@@ -12,6 +12,8 @@ def compare(left, right):
                 'adapter_hashes', 'adapter_source_sha256'):
         if identities[0][key] != identities[1][key]:
             raise ValueError('different comparison recipe: ' + key)
+    if identities[0].get('environment_recipe_sha256') != identities[1].get('environment_recipe_sha256'):
+        raise ValueError('different environment recipe')
     result = {'same_sdk': all(identities[0][key] == identities[1][key]
                             for key in ('compiler_sha256', 'runtime_sha256')), 'suites': {}}
     for suite in ('Conformance', 'HLT', 'LLT'):

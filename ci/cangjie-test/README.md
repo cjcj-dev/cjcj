@@ -127,3 +127,93 @@ three under `testsuites/HLT/Runtime/Concurrency/Thread/thread003|thread004` and
 `testsuites/HLT/Tools/cjtrace-recover/test11`); treat them as nondeterministic and
 compare them separately. One HLT case (`testsuites/HLT/regression/testcase_774/test.cj`)
 carries the upstream timeout signature and is listed apart from the failure sets.
+
+## Private prerequisites and seven-way triage (#705)
+
+Prepare an independent SDK copy and evidence from the shared official SDK, or
+from the qualified bootstrap SDK supplied by #135:
+
+```sh
+python3 ci/cangjie-test/environment.py SDK_SOURCE PRIVATE_SDK ENV_EVIDENCE \
+  --arm official --jdk PRIVATE_JDK
+python3 ci/cangjie-test/run.py PRIVATE_SDK O1 48 --compiler-jobs 1 \
+  --inputs INPUTS --scratch O1.work --arm official \
+  --environment ENV_EVIDENCE/environment.json
+python3 ci/cangjie-test/classify.py O1 official-classification.json
+```
+
+For B use `--arm bootstrap` in both commands and pass
+`--bootstrap-compiler-sha256 HASH` to `run.py` (see the trust input below).
+That run requires `compiler-lineage.json` from `compose-install` or
+`sdk_build --cjc`; it checks both driver names and the recorded producer
+against the independent build hash before executing any tests.
+Both `bin/cjc` and `bin/cjc-frontend` point to the same physical
+`bin/cjcj-stage1`. The name is the SDK layout convention even for a stage3
+producer; the record retains the source and installed hashes. Darwin's
+`install_name_tool` transformation is recorded at final packaging.
+
+The environment preparation copies `modules` into the private SDK's
+`tools/bin` as prescribed by the framework README:83–95. `run.py` sets the
+LSP server path only in its private execution-input copy. The environment
+adds the SDK's `third_party/llvm/lib` to the library path for cjdb and uses
+only explicitly supplied JDK/stdx paths. It records file hashes and runs
+JDK compile/execute and tool launch probes. Tool logs include loader traces;
+`*.dynamic.txt` records ELF dynamic metadata. These probes establish tool
+readiness, not correctness. Neither shared SDKs nor upstream input files
+are modified.
+
+`--stdx` must refer to an arm-specific build: official stdx is not a valid
+bootstrap input. Without qualified stdx (owned by #522), the manifest marks
+it unavailable. Managed tools on the bootstrap arm remain unqualified
+under #521. All underlying test verdicts remain in `cases.json`.
+
+Once both arms and their repetitions exist:
+
+```sh
+python3 ci/cangjie-test/classify.py O1 classified.json --bootstrap B1 \
+  --repeat-official O2 --repeat-bootstrap B2
+```
+
+The seven disjoint categories are `B_only`, `O_only`, `common`, `timeout`,
+`nondeterministic`, `tool_not_ready`, and `environment`. Status changes in
+repetitions take precedence, followed by timeouts, unavailable dependencies,
+and environment **hints**. The last two are triage evidence, not proven
+causes. A one-sided failure requires the other arm to pass; missing, skipped,
+or unresolved peers are retained as `unpaired_failures`, not successes.
+`UNRESOLVED` records also remain in `unexecuted`. The classifier rejects
+missing suites and differing input/runner recipes through `compare.py`.
+With only O, `comparison_available=false`: no B/O comparison or repeated-run
+stability is asserted. Raw failures, sources, and statuses are preserved in
+every classified record. Repetition evidence availability is explicit.
+
+Device regression entries are `verify_classify.py`,
+`../bootstrap/test_compiler_identity.py`, and
+`build/test/compose-install.test.mjs`. The shell test exercises the full SDK
+assembly entry with distinct fixture ELFs; it does not certify compiler
+semantics. Its optional real compiler/frontend inputs rehearse the identity
+guard without executing a compiler against fixture runtime libraries.
+
+### Bootstrap compiler trust input
+
+`--arm bootstrap` requires `--bootstrap-compiler-sha256 HASH`. Obtain HASH from
+our independent compiler build output (for srcbuild, `compilerSha256` in
+`software/stage3-compiler.json`, emitted by `build-stage3.mjs`). For a shared
+stage1 build, use the verified build manifest's compiler artifact hash. Keep
+that build's source commit, recipe and artifact hash with the run evidence.
+Never derive this argument from the SDK being tested or its
+`compiler-lineage.json`: the installer's record proves copy consistency and
+can legitimately describe an official host compiler.
+
+The Linux runner checks this independent hash against both producer/installed
+records and all installed compiler bytes before admitting suite inputs. A
+missing or mismatching hash fails admission. Official host assembly and
+`--arm official` remain supported. A supplied hash is a trusted caller input,
+not a claim that a self-written JSON record authenticates a producer. The
+runner records the independent hash in `identity.json` for later comparison.
+
+`verify_bootstrap_identity.py --compiler BUILD_ARTIFACT --official-frontend
+OFFICIAL_COMPILER` rehearses the real installer and B entry with real bytes:
+our compiler passes identity admission; installing the official compiler with
+its genuine installer-generated record is rejected. Input admission deliberately
+stops these tests before any compiler executes; this proves SDK identity
+admission only, not compiler correctness or suite completion.
