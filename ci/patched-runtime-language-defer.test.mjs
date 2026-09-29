@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import {execFileSync, spawnSync} from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -27,10 +28,20 @@ function sdkFixture(root) {
   execFileSync('gcc', ['-shared', '-fPIC', '-x', 'c', '-o', path.join(soDir, 'libcangjie-runtime.so'), '-'], {
     input: 'int cjcj_gate_fixture;\n',
   });
+  fs.copyFileSync(path.join(soDir, 'libcangjie-runtime.so'), path.join(soDir, 'libboundscheck.so'));
   return {sdk, soDir};
 }
 
 function publishOverlay(buildEnv, fixture, root) {
+  // The pinned gate checks the pair's compile receipt before the language branch.
+  // This remains a shell contract fixture, not a real runtime configuration.
+  const output = path.join(root, 'output');
+  fs.mkdirSync(output, {recursive: true});
+  fs.writeFileSync(path.join(output, 'runtime-build-inputs.txt'), JSON.stringify({
+    products: Object.fromEntries(['libcangjie-runtime.so', 'libboundscheck.so'].map(name =>
+      [name, crypto.createHash('sha256').update(fs.readFileSync(path.join(fixture.soDir, name))).digest('hex')])),
+    commands: [{file: '/fixture/Heap/z/zGeneration.cpp', arguments: ['c++', '-c', '/fixture/Heap/z/zGeneration.cpp']}],
+  }));
   return {
     ...buildEnv,
     GCV2_RUNTIME_LIB_DIR: fixture.soDir,
@@ -100,7 +111,7 @@ test('deferred build env does not enter the compiler-host runtime check', (t) =>
     const controlEnv = publishOverlay(base, fixture, path.join(root, 'control'));
     const control = runGate(gate, controlEnv);
     assert.equal(control.status, 2);
-    assert.ok(control.stderr.includes(HOST_RUNTIME_FAIL));
+    assert.ok(control.stderr.includes(HOST_RUNTIME_FAIL), control.stderr);
 
     const productEnv = publishOverlay(patchedRuntimeBuildEnv(base), fixture, path.join(root, 'product'));
     const product = runGate(gate, productEnv);
