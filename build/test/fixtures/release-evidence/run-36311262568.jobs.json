@@ -1,0 +1,155 @@
+{
+  "total_count": 25,
+  "jobs": [
+    {
+      "id": 108597512683,
+      "name": "phase 1 \u00b7 linux-x64 / source SDK and final std (also cross-builds the Windows std) / Select targets",
+      "conclusion": "success",
+      "html_url": "https://github.com/cjcj-dev/cjcj/actions/runs/36311262568/job/108597512683"
+    },
+    {
+      "id": 108597527231,
+      "name": "phase 1 \u00b7 linux-x64 / source SDK and final std (also cross-builds the Windows std) / Build native LLVM tools / Select tuples",
+      "conclusion": "success",
+      "html_url": "https://github.com/cjcj-dev/cjcj/actions/runs/36311262568/job/108597527231"
+    },
+    {
+      "id": 108597528149,
+      "name": "phase 1 \u00b7 linux-x64 / source SDK and final std (also cross-builds the Windows std) / Build native LLVM tools / in-process-dylib",
+      "conclusion": "skipped",
+      "html_url": "https://github.com/cjcj-dev/cjcj/actions/runs/36311262568/job/108597528149"
+    },
+    {
+      "id": 108597543504,
+      "name": "phase 1 \u00b7 linux-x64 / source SDK and final std (also cross-builds the Windows std) / Build native LLVM tools / linux_x86_64 / Build tools",
+      "conclusion": "success",
+      "html_url": "https://github.com/cjcj-dev/cjcj/actions/runs/36311262568/job/108597543504"
+    },
+    {
+      "id": 108597599007,
+      "name": "phase 1 \u00b7 linux-x64 / source SDK and final std (also cross-builds the Windows std) / linux-x64 / source SDK",
+      "conclusion": "failure",
+      "html_url": "https://github.com/cjcj-dev/cjcj/actions/runs/36311262568/job/108597599007"
+    },
+    {
+      "id": 108597599457,
+      "name": "phase 1 \u00b7 linux-x64 / source SDK and final std (also cross-builds the Windows std) / Build native LLVM tools / Publish static colour LLVM tuple",
+      "conclusion": "skipped",
+      "html_url": "https://github.com/cjcj-dev/cjcj/actions/runs/36311262568/job/108597599457"
+    },
+    {
+      "id": 108598168531,
+      "name": "phase 1 \u00b7 linux-x64 / source SDK and final std (also cross-builds the Windows std) / Publish final std artifact contract",
+      "conclusion": "skipped",
+      "html_url": "https://github.com/cjcj-dev/cjcj/actions/runs/36311262568/job/108598168531"
+    },
+    {
+      "id": 108598169135,
+      "name": "phase 1 \u00b7 linux-x64 / Build release package",
+      "conclusion": "skipped",
+      "html_url": "https://github.com/cjcj-dev/cjcj/actions/runs/36311262568/job/108598169135"
+    },
+    {
+      "id": 108598169296,
+      "name": "linux-x64-android / Build release package",
+      "conclusion": "skipped",
+      "html_url": "https://github.com/cjcj-dev/cjcj/actions/runs/36311262568/job/108598169296"
+    },
+    {
+      "id": 108598169319,
+      "name": "phase 2 \u00b7 linux-aarch64 / source SDK and final std",
+      "conclusion": "skipped",
+      "html_url": "https://github.com/cjcj-dev/cjcj/actions/runs/36311262568/job/108598169319"
+    },
+    {
+      "id": 108598169453,
+      "name": "linux-x64-ohos / Build release package",
+      "conclusion": "skipped",
+      "html_url": "https://github.com/cjcj-dev/cjcj/actions/runs/36311262568/job/108598169453"
+    },
+    {
+      "id": 108598169615,
+      "name": "phase 2 \u00b7 linux-aarch64 / Build release package",
+      "conclusion": "skipped",
+      "html_url": "https://github.com/cjcj-dev/cjcj/actions/runs/36311262568/job/108598169615"
+    },
+    {
+      "id": 108598169647,
+      "name": "Build patched cjpm",
+      "conclusion": "skipped",
+      "html_url": "https://github.com/cjcj-dev/cjcj/actions/runs/36311262568/job/108598169647"
+    },
+    {
+      "id": 108598169779,
+      "name": "phase 3 \u00b7 windows-x64 / Build release package",
+      "conclusion": "skipped",
+      "html_url": "https://github.com/cjcj-dev/cjcj/actions/runs/36311262568/job/108598169779"
+    },
+    {
+      "id": 108598169797,
+      "name": "Build Windows runtime",
+      "conclusion": "skipped",
+      "html_url": "https://github.com/cjcj-dev/cjcj/actions/runs/36311262568/job/108598169797"
+    },
+    {
+      "id": 108598169992,
+      "name": "Build Windows LLVM tuple",
+      "conclusion": "skipped",
+      "html_url": "https://github.com/cjcj-dev/cjcj/actions/runs/36311262568/job/108598169992"
+    },
+    {
+      "id": 108598170021,
+      "name": "win32-x64-android / Build release package",
+      "conclusion": "skipped",
+      "html_url": "https://github.com/cjcj-dev/cjcj/actions/runs/36311262568/job/108598170021"
+    },
+    {
+      "id": 108598170355,
+      "name": "phase 4 \u00b7 darwin-arm64 / Build release package",
+      "conclusion": "skipped",
+      "html_url": "https://github.com/cjcj-dev/cjcj/actions/runs/36311262568/job/108598170355"
+    },
+    {
+      "id": 108598170392,
+      "name": "win32-x64-ohos / Build release package",
+      "conclusion": "skipped",
+      "html_url": "https://github.com/cjcj-dev/cjcj/actions/runs/36311262568/job/108598170392"
+    },
+    {
+      "id": 108598170406,
+      "name": "phase 4 \u00b7 darwin-arm64 / source SDK and final std",
+      "conclusion": "skipped",
+      "html_url": "https://github.com/cjcj-dev/cjcj/actions/runs/36311262568/job/108598170406"
+    },
+    {
+      "id": 108598170500,
+      "name": "darwin-arm64-ohos / Build release package",
+      "conclusion": "skipped",
+      "html_url": "https://github.com/cjcj-dev/cjcj/actions/runs/36311262568/job/108598170500"
+    },
+    {
+      "id": 108598170715,
+      "name": "darwin-arm64-android / Build release package",
+      "conclusion": "skipped",
+      "html_url": "https://github.com/cjcj-dev/cjcj/actions/runs/36311262568/job/108598170715"
+    },
+    {
+      "id": 108598170889,
+      "name": "phase 5 \u00b7 darwin-x64 / source SDK and final std",
+      "conclusion": "skipped",
+      "html_url": "https://github.com/cjcj-dev/cjcj/actions/runs/36311262568/job/108598170889"
+    },
+    {
+      "id": 108598170938,
+      "name": "Publish release",
+      "conclusion": "skipped",
+      "html_url": "https://github.com/cjcj-dev/cjcj/actions/runs/36311262568/job/108598170938"
+    },
+    {
+      "id": 108598171054,
+      "name": "phase 5 \u00b7 darwin-x64 / Build release package",
+      "conclusion": "skipped",
+      "html_url": "https://github.com/cjcj-dev/cjcj/actions/runs/36311262568/job/108598171054"
+    }
+  ]
+}
