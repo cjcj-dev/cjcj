@@ -18,7 +18,7 @@ args = parser.parse_args()
 args.evidence.mkdir(parents=True, exist_ok=True)
 results = []
 for case in ("DifferentProducerVersion", "SameProducerVersion", "UnavailableProducerVersion"):
-    run = subprocess.run([str(args.elf.resolve()), "--filter=CjoValidationDiagnosticTest." + case],
+    run = subprocess.run([str(args.elf.resolve()), "--no-color", "--show-all-output", "--no-progress", "--filter=CjoValidationDiagnosticTest." + case],
                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     (args.evidence / (case + ".log")).write_text(run.stdout)
     text = re.sub(r"\x1b\[[0-9;]*m", "", run.stdout)
