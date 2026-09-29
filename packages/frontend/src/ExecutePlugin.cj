@@ -142,10 +142,10 @@ class ExecutePlugin <: Resource {
     ): Unit {
         let chirPkg = builder.GetChirContext().GetCurPackage().getOrThrow()
         for (definition in chirPkg.GetAllExtendDef()) {
-            if (let Some(builtinType) <- (definition.GetExtendedType() as BuiltinType)) {
+            if (let Some(builtinType) <- (definition.GetExtendedType().getOrThrow() as BuiltinType)) {
                 GetBuiltinTypeWithVTable(builtinType, builder).AddExtend(definition)
             } else {
-                let customType = (definition.GetExtendedType() as CustomType).getOrThrow()
+                let customType = (definition.GetExtendedType().getOrThrow() as CustomType).getOrThrow()
                 let customTypeDef = customType.GetCustomTypeDef()
                 CJC_ASSERT(customTypeDef.GetCustomKind() != CustomDefKind.TYPE_EXTEND)
                 customTypeDef.AddExtend(definition)

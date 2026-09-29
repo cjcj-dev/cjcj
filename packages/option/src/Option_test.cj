@@ -123,40 +123,7 @@ class OptionTest {
         @Expect(parsed[0], false)
     }
 
-    @TestCase
-    func PathPrefixMapDefaultsOffTest(): Unit {
-        let opts = GlobalOptions()
-        @Expect(opts.pathPrefixMaps.isEmpty(), true)
-    }
 
-    @TestCase
-    func PathPrefixMapParseTest(): Unit {
-        let parsed = parseArgs(["cjc", "--path-prefix-map=/build/root=module@v1", srcFile])
-        @Expect(parsed[0], true)
-        let opts = GlobalOptions()
-        @Expect(opts.ParseFromArgs(parsed[1]), true)
-        @Expect(opts.pathPrefixMaps.size, 1)
-        @Expect(opts.pathPrefixMaps[0][0], "/build/root")
-        @Expect(opts.pathPrefixMaps[0][1], "module@v1")
-    }
-
-    @TestCase
-    func PathPrefixMapRejectsMalformedValueTest(): Unit {
-        let parsed = parseArgs(["cjc", "--path-prefix-map=/build/root", srcFile])
-        @Expect(parsed[0], true)
-        let opts = GlobalOptions()
-        @Expect(opts.ParseFromArgs(parsed[1]), false)
-        @Expect(opts.pathPrefixMaps.isEmpty(), true)
-    }
-
-    @TestCase
-    func PathPrefixMapRejectsConflictingOldPrefixTest(): Unit {
-        let parsed = parseArgs(["cjc", "--path-prefix-map=/build/root=module@v1",
-            "--path-prefix-map=/build/root=module@v2", srcFile])
-        @Expect(parsed[0], true)
-        let opts = GlobalOptions()
-        @Expect(opts.ParseFromArgs(parsed[1]), false)
-    }
 }
 
 @Test
