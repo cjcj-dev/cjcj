@@ -8,13 +8,13 @@ import cjcj::sema.*
 
 func variable(tm: TypeManager, name: String): GenericsTy {
     let decl = GenericParamDecl()
-    decl.identifier = Identifier(name)
+    decl.identifier = SrcIdentifier(name)
     return tm.GetGenericsTy(decl)
 }
 
 func enumTarget(tm: TypeManager, y: GenericsTy): Ty {
     let decl = EnumDecl()
-    decl.identifier = Identifier("EnumTest")
+    decl.identifier = SrcIdentifier("EnumTest")
     return tm.GetEnumTy(decl, typeArgs: [y])
 }
 
