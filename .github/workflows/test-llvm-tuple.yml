@@ -15,6 +15,9 @@ on:
       - 'ci/llvm-tuple-platform.test.mjs'
       - 'ci/bootstrap_inputs_pin.json'
       - 'ci/release/prepare_bootstrap_inputs*'
+      - 'ci/release/acquire_fixed_tuple*'
+      - 'ci/release/tuple_platform.mjs'
+      - 'tools/srcbuild_kkk2.sh'
       - 'ci/release/prepare_bootstrap_fixture.mjs'
       - 'ci/release/prepare_llvm_dylib.test.mjs'
       - 'ci/llvm-dylib/**'
@@ -167,7 +170,7 @@ jobs:
         env:
           REAL_BOOTSTRAP_TUPLE_DIR: ${{ runner.temp }}/tuple
           REAL_BOOTSTRAP_TARGET: ${{ matrix.target }}
-        run: node --test ci/llvm-tuple-platform.test.mjs ci/release/publish_bootstrap_inputs.test.mjs ci/release/prepare_bootstrap_inputs.test.mjs ci/release/prepare_llvm_dylib.test.mjs ci/release/colour_runtime.test.mjs
+        run: node --test ci/release/acquire_fixed_tuple.test.mjs ci/llvm-tuple-platform.test.mjs ci/release/publish_bootstrap_inputs.test.mjs ci/release/prepare_bootstrap_inputs.test.mjs ci/release/prepare_llvm_dylib.test.mjs ci/release/colour_runtime.test.mjs
       - name: Cut producer and consumer script wiring
         run: bash ci/test-llvm-tuple-wiring.sh "$RUNNER_TEMP/wiring-test"
       - name: Cut each platform publication and selection guard

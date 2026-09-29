@@ -29,8 +29,8 @@ from pathlib import Path
 import difflib
 cuts = {
  'producer-cut': ('ci/llvm-tuple-layout.sh', "printf 'PLATFORM=%s\\n' \"$platform\"", "printf 'PLATFORM=%s\\n' linux_x86_64"),
- 'pin-cut': ('ci/release/prepare_bootstrap_inputs.mjs', "if (inputPin.platform !== platform) platformFailure('BOOTSTRAP_TUPLE_PLATFORM_MISMATCH', inputPin.platform);", "// cut: omit selected pin platform validation"),
- 'manifest-cut': ('ci/release/prepare_bootstrap_inputs.mjs', "  platformFailure('BOOTSTRAP_TUPLE_PLATFORM_MISMATCH', manifestPlatforms.join(','));", "  // cut: omit verified MANIFEST platform validation"),
+ 'pin-cut': ('ci/release/tuple_platform.mjs', "if (pin.platform !== platform) platformFailure('BOOTSTRAP_TUPLE_PLATFORM_MISMATCH', platform, pin.platform);", "// cut: omit selected pin platform validation"),
+ 'manifest-cut': ('ci/release/tuple_platform.mjs', "    platformFailure('BOOTSTRAP_TUPLE_PLATFORM_MISMATCH', platform, platforms.join(','));", "  // cut: omit verified MANIFEST platform validation"),
  'publisher-cut': ('ci/release/publish_bootstrap_inputs.mjs', "|| platforms.length !== 1 || platforms[0] !== platform", "|| platforms.length !== 1"),
 }
 for arm, (file, old, new) in cuts.items():
@@ -40,11 +40,11 @@ for arm, (file, old, new) in cuts.items():
  p.write_text(s.replace(old,new))
  Path('logs', arm+'.diff').write_text(''.join(difflib.unified_diff(s.splitlines(True),p.read_text().splitlines(True),fromfile='a/'+file,tofile='b/'+file)))
 PY
-files=(ci/llvm-tuple-platform.test.mjs ci/release/prepare_bootstrap_inputs.test.mjs ci/release/publish_bootstrap_inputs.test.mjs ci/release/bootstrap_store.test.mjs ci/release/prepare_llvm_dylib.test.mjs ci/release-pair-pin.test.mjs)
+files=(ci/llvm-tuple-platform.test.mjs ci/release/prepare_bootstrap_inputs.test.mjs ci/release/publish_bootstrap_inputs.test.mjs ci/release/bootstrap_store.test.mjs ci/release/acquire_fixed_tuple.test.mjs ci/release/prepare_llvm_dylib.test.mjs ci/release-pair-pin.test.mjs)
 for arm in "${arms[@]}"; do
   (
     cd "$arm"
-    sha256sum ci/llvm-tuple-layout.sh ci/release/prepare_bootstrap_inputs.mjs ci/release/publish_bootstrap_inputs.mjs ci/release/prepare_bootstrap_fixture.mjs > "../logs/$arm.sha256"
+    sha256sum ci/release/tuple_platform.mjs ci/release/acquire_fixed_tuple.mjs ci/llvm-tuple-layout.sh ci/release/prepare_bootstrap_inputs.mjs ci/release/publish_bootstrap_inputs.mjs ci/release/prepare_bootstrap_fixture.mjs > "../logs/$arm.sha256"
     sha256sum "${files[@]}" > "../logs/$arm.tests.sha256"
     set +e
     /usr/bin/time -f wall=%e node --test "${files[@]}" > "../logs/$arm.log" 2>&1
@@ -68,8 +68,15 @@ targets=('tuple producer preserves linux_aarch64 from tools manifest'
 for i in "${!cuts[@]}"; do
   arm=${cuts[$i]}
   test "$(cat "logs/$arm.rc")" = 1
-  grep -Fx '# fail 1' "logs/$arm.log"
+  expected=1
+  if [[ $arm == pin-cut || $arm == manifest-cut ]]; then expected=2; fi
+  grep -Fx "# fail $expected" "logs/$arm.log"
   grep -E '^not ok ' "logs/$arm.log" | grep -F -- "${targets[$i]}"
+  if [[ $arm == pin-cut ]]; then
+    grep -E '^not ok ' "logs/$arm.log" | grep -F 'fixed release CLI rejects wrong-platform pin before download'
+  elif [[ $arm == manifest-cut ]]; then
+    grep -E '^not ok ' "logs/$arm.log" | grep -F 'fixed release CLI rejects digest-valid foreign MANIFEST before publication'
+  fi
   if cmp -s logs/green.sha256 "logs/$arm.sha256"; then
     echo "cut did not change product identity: $arm" >&2
     exit 1

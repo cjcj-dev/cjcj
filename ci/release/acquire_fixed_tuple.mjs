@@ -4,15 +4,18 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {acquire, verify} from './bootstrap_store.mjs';
+import {selectTuplePin, verifyTuplePlatform} from './tuple_platform.mjs';
 
-const [pinFile, destination, sumsSha] = process.argv.slice(2);
-if (!pinFile || !destination || !/^[a-f0-9]{64}$/.test(sumsSha || '')) {
-  throw new Error('usage: acquire_fixed_tuple.mjs PIN DESTINATION LLVM_TUPLE_SUMS_SHA');
+const [pinFile, destination, sumsSha, platform] = process.argv.slice(2);
+if (!pinFile || !destination || !platform || !/^[a-f0-9]{64}$/.test(sumsSha || '')) {
+  throw new Error('usage: acquire_fixed_tuple.mjs PIN DESTINATION LLVM_TUPLE_SUMS_SHA PLATFORM');
 }
-const pin = JSON.parse(fs.readFileSync(pinFile, 'utf8'));
+const pin = selectTuplePin(JSON.parse(fs.readFileSync(pinFile, 'utf8')), platform);
 // Share the release consumer's source selection and per-asset verification.
 const tuple = await acquire(pin, path.dirname(destination));
 try {
+  verifyTuplePlatform(tuple, platform);
+  verify(fs.readFileSync(path.join(tuple, 'SHA256SUMS')), pin.tuple_sums_sha256, 'platform tuple_sums_sha256');
   verify(fs.readFileSync(path.join(tuple, 'SHA256SUMS')), sumsSha, 'LLVM_TUPLE_SUMS_SHA');
   const checked = spawnSync('sha256sum', ['--strict', '-c', 'SHA256SUMS'], {
     cwd: tuple, stdio: 'inherit',

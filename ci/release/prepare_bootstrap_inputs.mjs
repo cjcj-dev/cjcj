@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import {acquire} from './bootstrap_store.mjs';
+import {selectTuplePin, verifyTuplePlatform} from './tuple_platform.mjs';
 import {verifyRuntime} from './colour_runtime.mjs';
 import {prepareCppHeaders} from '../bootstrap/prepare_cpp_headers.mjs';
 import {prepareHostLlvm} from './host_llvm.mjs';
@@ -69,13 +70,7 @@ const target = process.env.CJCJ_SRCBUILD_TARGET
   || `${process.platform}-${process.platform === 'linux' && process.arch === 'arm64' ? 'aarch64' : process.arch}`;
 const platform = {'linux-x64': 'linux_x86_64', 'linux-aarch64': 'linux_aarch64',
   'darwin-x64': 'darwin_x86_64', 'darwin-arm64': 'darwin_aarch64'}[target];
-function platformFailure(code, actual) {
-  console.error(`${code} expected=${platform} actual=${actual}`);
-  process.exit(65);
-}
-const inputPin = pins.version === 2 && pins.platforms?.[platform];
-if (!inputPin) platformFailure('BOOTSTRAP_TUPLE_PLATFORM_PIN_MISSING', target);
-if (inputPin.platform !== platform) platformFailure('BOOTSTRAP_TUPLE_PLATFORM_MISMATCH', inputPin.platform);
+const inputPin = selectTuplePin(pins, platform);
 const colourTuple = await acquire(inputPin,
   process.env.CJCJ_BOOTSTRAP_INPUTS_WORK || path.join(process.env.RUNNER_TEMP || buildRoot || '.', 'bootstrap-inputs'), {
     mode: process.env.CJCJ_BOOTSTRAP_SOURCE || 'release',
@@ -84,11 +79,7 @@ const colourTuple = await acquire(inputPin,
       ? path.join(process.env.CJCJ_LLVM_DEPOT_ROOT || '/root/llvmdepot', process.env.LLVM_SHA, process.env.CANGJIE_COMPILER_SHA) : ''),
   });
 // The pin is reviewed source, never a digest learned from this run's download.
-const manifestPlatforms = fs.readFileSync(path.join(colourTuple, 'MANIFEST'), 'utf8')
-  .split('\n').filter(line => line.startsWith('PLATFORM=')).map(line => line.slice(9));
-if (manifestPlatforms.length !== 1 || manifestPlatforms[0] !== platform) {
-  platformFailure('BOOTSTRAP_TUPLE_PLATFORM_MISMATCH', manifestPlatforms.join(','));
-}
+verifyTuplePlatform(colourTuple, platform);
 const tupleSums = path.join(colourTuple, 'SHA256SUMS');
 const tupleSumsPin = process.env[`LLVM_TUPLE_SUMS_SHA_${platform}`] || inputPin.tuple_sums_sha256;
 if (!/^[0-9a-f]{64}$/.test(tupleSumsPin || '')
