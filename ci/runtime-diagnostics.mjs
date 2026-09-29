@@ -30,6 +30,7 @@ export async function startDiagnostics(runtimeRef, version) {
     scripts: Object.fromEntries(await Promise.all(['build_patched_runtime.mjs', 'runtime-diagnostics.mjs']
       .map(async name => [name, sha256(await fs.readFile(new URL(name, import.meta.url)))]))),
     buildRc: 'NOT_RUN', collection: 'NOT_RUN', tools: {},
+    buildLogs: {stdout: 'build.stdout.log', stderr: 'build.stderr.log'},
     // Deliberately do not serialize the parent environment.
     environment: Object.fromEntries(['CANGJIE_HOME', 'CC', 'CXX', 'CMAKE_BUILD_PARALLEL_LEVEL',
       'GC_UNIT_JOBS', 'cjHeapSize'].filter(key => process.env[key] !== undefined)
