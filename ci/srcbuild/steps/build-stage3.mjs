@@ -1,5 +1,7 @@
 #!/usr/bin/env zx
 
+import {checkCodegenRuntimeLayout} from '../../check-codegen-runtime-layout.mjs';
+
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -219,6 +221,7 @@ if (dryRun) {
   console.log('[stage3][dry-run] cjpm clean; cjpm build -j 1');
   console.log('STAGE3_DRY_RUN_REACHED_BUILD=1');
 } else {
+  await checkCodegenRuntimeLayout();
   await $({cwd: githubWorkspace, env: stageEnv})`cjpm clean`;
   await $({cwd: githubWorkspace, env: stageEnv})`cjpm build -j 1`;
   const stage3Product = await findProductBinary('stage3');

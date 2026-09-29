@@ -529,6 +529,7 @@ install_stage_compiler() {
 
 cjpm_build() {
   local sdk="$1" runtime="$2" srcdir="$3" extra="$4" heap="$5" ld cjpm script
+  cmd "node $(printf '%q' "$srcdir/ci/check-codegen-runtime-layout.mjs") $(printf '%q' "$WORK/layout-sources")"
   source "$SRC/ci/build_resources.sh"
   configure_build_resources "$heap" || die "cannot determine compiler build resources"
   heap="$STD_BUILD_HEAP"

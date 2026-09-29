@@ -619,25 +619,25 @@ private func BuildConcreteTypeInfoInitializer(cgMod: CGModule, chirTy: Type, typ
     var inheritedClassNum = InheritedClassNumBase(cgMod, chirTy)
     let (mtable, updatedInheritedClassNum) = GenMTableOfTypeInfo(cgMod, chirTy, i8PtrType, inheritedClassNum)
     inheritedClassNum = updatedInheritedClassNum
-    let typeInfoValues = ArrayList<LLVMValueRef>()
-    typeInfoValues.add(cgMod.GenerateTypeNameConstantString(TypeInfoRuntimeName(cgMod, chirTy), false))
-    typeInfoValues.add(unsafe { LLVMConstInt(i8Type, TypeInfoKind(cgMod, chirTy), 0) })
-    typeInfoValues.add(unsafe { LLVMConstInt(i8Type, 0u64, 0) })
-    typeInfoValues.add(unsafe { LLVMConstInt(i16Type, fieldCount, 0) })
-    typeInfoValues.add(unsafe { LLVMConstInt(i32Type, sizeValue, 0) })
-    typeInfoValues.add(unsafe { LLVMConstNull(bitMapPtrType) })
-    typeInfoValues.add(unsafe { LLVMConstInt(i32Type, 0u64, 0) })
-    typeInfoValues.add(unsafe { LLVMConstInt(i8Type, alignValue, 0) })
-    typeInfoValues.add(unsafe { LLVMConstInt(i8Type, typeArgsNum, 0) })
-    typeInfoValues.add(unsafe { LLVMConstInt(i16Type, inheritedClassNum | INHERITED_CLASS_NUM_FE_FLAG, 0) })
-    typeInfoValues.add(offsets)
-    typeInfoValues.add(sourceGeneric)
-    typeInfoValues.add(typeArgs)
-    typeInfoValues.add(fields)
-    typeInfoValues.add(superType)
-    typeInfoValues.add(extensionDef)
-    typeInfoValues.add(mtable)
-    typeInfoValues.add(unsafe { LLVMConstNull(i8PtrType) })
+    let typeInfoValues = ArrayList<LLVMValueRef>(Array<LLVMValueRef>(TypeInfoLayout.FieldCount, { _: Int64 => LLVMNullValue() }))
+    typeInfoValues[TypeInfoLayout.typeInfoNameIndex] = cgMod.GenerateTypeNameConstantString(TypeInfoRuntimeName(cgMod, chirTy), false)
+    typeInfoValues[TypeInfoLayout.typeIndex] = unsafe { LLVMConstInt(i8Type, TypeInfoKind(cgMod, chirTy), 0) }
+    typeInfoValues[TypeInfoLayout.flagIndex] = unsafe { LLVMConstInt(i8Type, 0u64, 0) }
+    typeInfoValues[TypeInfoLayout.fieldNumIndex] = unsafe { LLVMConstInt(i16Type, fieldCount, 0) }
+    typeInfoValues[TypeInfoLayout.instanceSizeIndex] = unsafe { LLVMConstInt(i32Type, sizeValue, 0) }
+    typeInfoValues[TypeInfoLayout.gctibIndex] = unsafe { LLVMConstNull(bitMapPtrType) }
+    typeInfoValues[TypeInfoLayout.uuidIndex] = unsafe { LLVMConstInt(i32Type, 0u64, 0) }
+    typeInfoValues[TypeInfoLayout.alignIndex] = unsafe { LLVMConstInt(i8Type, alignValue, 0) }
+    typeInfoValues[TypeInfoLayout.typeArgsNumIndex] = unsafe { LLVMConstInt(i8Type, typeArgsNum, 0) }
+    typeInfoValues[TypeInfoLayout.validInheritNumIndex] = unsafe { LLVMConstInt(i16Type, inheritedClassNum | INHERITED_CLASS_NUM_FE_FLAG, 0) }
+    typeInfoValues[TypeInfoLayout.fieldOffsetsIndex] = offsets
+    typeInfoValues[TypeInfoLayout.sourceGenericIndex] = sourceGeneric
+    typeInfoValues[TypeInfoLayout.typeArgsIndex] = typeArgs
+    typeInfoValues[TypeInfoLayout.fieldsIndex] = fields
+    typeInfoValues[TypeInfoLayout.superTypeInfoIndex] = superType
+    typeInfoValues[TypeInfoLayout.vExtensionDataStartIndex] = extensionDef
+    typeInfoValues[TypeInfoLayout.mTableDescIndex] = mtable
+    typeInfoValues[TypeInfoLayout.reflectInfoIndex] = unsafe { LLVMConstNull(i8PtrType) }
     return TypeInfoConstStruct(typeInfoTy, typeInfoValues)
 }
 
