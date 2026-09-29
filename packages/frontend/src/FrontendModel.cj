@@ -17,7 +17,7 @@ import cjcj::basic.Range as BasicRange
 import cjcj::chir.CHIRContext as RealCHIRContext
 import cjcj::chir.Package as RealCHIRPackage
 import cjcj::modules.{CheckCjoVersionCompat, CjoVersionCompat, CjoVersionTriplet,
-    VersionAtLeast, VersionAtMost, VersionExactly}
+    VersionAtLeast, VersionAtMost, VersionExactly, ReadPackageVersionForDiagnostic}
 import cjcj::modules.SemaCjoManager
 import cjcj::modules.SemaImportManager
 import cjcj::modules.MacroHostImportManager
@@ -1348,12 +1348,20 @@ public class CjoSignatureMaterializer {
         return packageTable.getOrThrow().GetPkgDepInfo().getOrThrow().str()
     }
 
-    // ASTLoader.cpp:207-220 VerifyForData.
+    // ASTLoader.cpp:367-389 (ed8c7bc5) VerifyForData.
     private func VerifyForData(id: String): Bool {
         let rawData = data ?? Array<UInt8>()
         if (!CjoFlatBuffer(rawData).VerifyPackageBuffer()) {
-            diag.DiagnoseRefactor(DiagKindRefactor.module_loaded_ast_failed, DEFAULT_POSITION,
-                arguments: [id, packageName, CANGJIE_VERSION])
+            var diagnosticPackageName = if (packageName.isEmpty()) { cjoPath } else { packageName }
+            if (diagnosticPackageName.isEmpty()) { diagnosticPackageName = "unknown package" }
+            let producerVersion = ReadPackageVersionForDiagnostic(rawData)
+            if (producerVersion.isEmpty() || producerVersion == CANGJIE_VERSION) {
+                diag.DiagnoseRefactor(DiagKindRefactor.module_loaded_ast_failed, DEFAULT_POSITION,
+                    arguments: [id, diagnosticPackageName, CANGJIE_VERSION])
+            } else {
+                diag.DiagnoseRefactor(DiagKindRefactor.module_loaded_ast_failed_with_version, DEFAULT_POSITION,
+                    arguments: [id, diagnosticPackageName, producerVersion, CANGJIE_VERSION])
+            }
             return false
         }
         return true
@@ -2412,11 +2420,6 @@ public class CjoSignatureMaterializer {
         importNonGenericSrcFuncDecls.clear()
         allFileIds = Array<UInt64>()
         let reader = flat.getOrThrow()
-        if (!reader.VerifyPackageBuffer()) {
-            diag.DiagnoseRefactor(DiagKindRefactor.module_loaded_ast_failed, DEFAULT_POSITION,
-                arguments: ["ast", targetPkg.fullPackageName, CANGJIE_VERSION])
-            return false
-        }
         let root = reader.RootTable()
         if (root < 0) {
             return false
@@ -7345,29 +7348,24 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
         return result
     }
 
+    // ImportManager.cpp:1634-1660: load through the package header loader
+    // before consuming dependencies, including its verification diagnostics.
     public func AnalyzeDepStdPkgsOfBC(fullPackageName: String): Bool {
         if ((let Some(_) <- GetPackage(fullPackageName)) || cjoFilePaths.contains(fullPackageName)) {
             return true
         }
         let cjoPath = FileUtil.FindSerializationFile(fullPackageName, ".cjo", searchPath.toArray())
-        if (cjoPath.isEmpty()) {
+        if (cjoPath.isEmpty() || !LoadImportedPackageFromCjo(fullPackageName, cjoPath)) {
             diag.DiagnoseRefactor(DiagKindRefactor.bc_cjo_error, DEFAULT_POSITION, arguments: [fullPackageName])
             return false
         }
-        let (ok, data, _) = FileUtil.ReadBinaryFileToBuffer(cjoPath)
-        if (!ok) {
-            diag.DiagnoseRefactor(DiagKindRefactor.bc_cjo_error, DEFAULT_POSITION, arguments: [fullPackageName])
-            return false
-        }
-        if (!VerifySerializedPackageData(data, fullPackageName)) {
-            return false
-        }
-        cjoFilePaths[fullPackageName] = cjoPath
-        let end = cjoPath.lastIndexOf(SERIALIZED_FILE_EXTENSION) ?? cjoPath.size
-        depPkgCjdPaths[fullPackageName] = cjoPath[0..end] + CJ_D_FILE_EXTENSION
-        for (depStdPkg in ReadAllDependentStdPkgs(data)) {
-            let depCjoPath = FindAndSaveDepStdCjoPath(depStdPkg)
-            HandleStdPackage(depStdPkg, depCjoPath, isRecursive: true)
+        let pkg = GetPackage(fullPackageName).getOrThrow()
+        for (depStdPkg in pkg.GetAllDependentStdPkgs()) {
+            CJC_ASSERT(STANDARD_LIBS.contains(depStdPkg))
+            if (!cjoFilePaths.contains(depStdPkg)) {
+                let depCjoPath = FileUtil.FindSerializationFile(depStdPkg, ".cjo", searchPath.toArray())
+                HandleStdPackage(depStdPkg, depCjoPath, isRecursive: true)
+            }
         }
         return true
     }
@@ -8761,10 +8759,6 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
                 "failed to load imported package '${fullPackageName}' from '${cjoPath}': ${reason}")
             return false
         }
-        if (!VerifySerializedPackageData(data, fullPackageName)) {
-            loadingPackages.remove(fullPackageName)
-            return false
-        }
         let pkg = CreatePackage(fullPackageName)
         pkg.EnableAttr(Attribute.IMPORTED)
         let filesByIndex = HashMap<UInt32, File>()
@@ -8785,41 +8779,9 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
         return true
     }
 
-    private func VerifySerializedPackageData(data: Array<UInt8>, importedPackageName: String): Bool {
-        let reader = CjoFlatBuffer(data)
-        if (!reader.VerifyPackageBuffer()) {
-            diag.DiagnoseRefactor(DiagKindRefactor.module_loaded_ast_failed, DEFAULT_POSITION,
-                arguments: ["ast", importedPackageName, CANGJIE_VERSION])
-            return false
-        }
-        return true
-    }
-
     private func CanInlineImportedSource(opts: GlobalOptions): Bool {
         return opts.chirLLVM && enumIndex(opts.optimizationLevel) > enumIndex(OptimizationLevel.O1) &&
             !opts.enableCompileTest && !opts.enableHotReload
-    }
-
-    private func ReadAllDependentStdPkgs(data: Array<UInt8>): ArrayList<String> {
-        let out = ArrayList<String>()
-        let reader = CjoFlatBuffer(data)
-        let root = reader.RootTable()
-        if (root < 0) {
-            return out
-        }
-        let dependentStdPkgs = reader.VectorField(root, 34)
-        if (dependentStdPkgs < 0) {
-            return out
-        }
-        var idx: Int64 = 0
-        while (idx < reader.VectorLength(dependentStdPkgs)) {
-            let depName = reader.StringAt(reader.VectorOffsetElement(dependentStdPkgs, idx))
-            if (!depName.isEmpty()) {
-                out.add(depName)
-            }
-            idx++
-        }
-        return out
     }
 
     private func FindAndSaveDepStdCjoPath(fullPackageName: String): String {
