@@ -163,7 +163,8 @@ def main():
         if init and type_of(init) == ti:
             global_name = name(glob).decode()
             globals_.append({'name': global_name, 'ir': print_value(init).decode()})
-            if a.surface == 'objects' and global_name in ('layout_contract:Parent.ti', 'layout_contract:Child.ti', 'layout_contract:Cell<Int64>.ti'):
+            if global_name in ('layout_contract:Parent.ti', 'layout_contract:Child.ti', 'layout_contract:Cell<Int64>.ti',
+                               'RawArray<Int64>.ti', 'RawArray<UInt8>.ti'):
                 observed = {}
                 for f in ('fieldNum', 'instanceSize', 'align', 'typeArgsNum'):
                     v = operand(init, values[f + 'Index'])
@@ -171,6 +172,7 @@ def main():
                 observed['super'] = print_value(operand(init, values['superTypeInfoIndex'])).decode()
                 observed['fields'] = print_value(operand(init, values['fieldsIndex'])).decode()
                 observed['offsets'] = print_value(operand(init, values['fieldOffsetsIndex'])).decode()
+                observed['sourceGeneric'] = print_value(operand(init, values['sourceGenericIndex'])).decode()
                 semantic[global_name] = observed
         glob = next_global(glob)
     check('initializers.present', bool(globals_), globals_)
@@ -183,6 +185,16 @@ def main():
             actual = tuple(observed.get(f) for f in ('fieldNum', 'instanceSize', 'align', 'typeArgsNum'))
             check('initializer.' + global_name, actual == expected and '.fields' in observed.get('fields', '') and '.offsets' in observed.get('offsets', ''), observed)
         check('initializer.inheritance', 'layout_contract:Parent.ti' in semantic.get('layout_contract:Child.ti', {}).get('super', ''), semantic.get('layout_contract:Child.ti', {}).get('super'))
+    else:
+        # RawArray's instanceSize is its element size; the object header and
+        # length are separately accounted for by the address assertions above.
+        for element, width in (('Int64', 8), ('UInt8', 1)):
+            global_name = 'RawArray<' + element + '>.ti'
+            observed = semantic.get(global_name, {})
+            actual = tuple(observed.get(f) for f in ('fieldNum', 'instanceSize', 'align', 'typeArgsNum'))
+            check('initializer.' + global_name, actual == (0, width, 1, 0)
+                  and '@' + element + '.ti' in observed.get('super', '')
+                  and '@RawArray.tt' in observed.get('sourceGeneric', ''), observed)
     result = {'checks': checks, 'hashes': {str(f): hashlib.sha256(f.read_bytes()).hexdigest()
               for f in (a.llvm_library, a.header, a.bitcode)}, 'datalayout': api('LLVMGetDataLayoutStr', C.c_char_p, ptr)(module).decode()}
     a.result.write_text(json.dumps(result, indent=2) + '\n')
