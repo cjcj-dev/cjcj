@@ -567,26 +567,26 @@ private func BuildRawArrayTypeInfoInitializer(cgMod: CGModule, chirTy: Type, typ
     let elementSize = if (let Some(size) <- elementCGType.GetSize()) { UInt64(size) } else { 0u64 }
     let typeTemplateTy = CGType.GetOrCreateTypeTemplateType(contextHandle)
     let rawArrayTypeTemplate = GetOrInsertCodeGenGlobal(cgMod, "RawArray.tt", typeTemplateTy)
-    let typeInfoValues = ArrayList<LLVMValueRef>()
-    typeInfoValues.add(cgMod.GenerateTypeNameConstantString(GetTypeQualifiedName(chirTy, forNameFieldOfTi: true),
-        false))
-    typeInfoValues.add(unsafe { LLVMConstInt(i8Type, UG_RAW_ARRAY_KIND, 0) })
-    typeInfoValues.add(unsafe { LLVMConstInt(i8Type, 0u64, 0) })
-    typeInfoValues.add(unsafe { LLVMConstInt(i16Type, 0u64, 0) })
-    typeInfoValues.add(unsafe { LLVMConstInt(i32Type, elementSize, 0) })
-    typeInfoValues.add(unsafe { LLVMConstNull(bitMapPtrType) })
-    typeInfoValues.add(unsafe { LLVMConstInt(i32Type, 0u64, 0) })
-    typeInfoValues.add(unsafe { LLVMConstInt(i8Type, 1u64, 0) })
-    typeInfoValues.add(unsafe { LLVMConstInt(i8Type, 0u64, 0) })
-    typeInfoValues.add(unsafe { LLVMConstInt(i16Type, INHERITED_CLASS_NUM_FE_FLAG, 0) })
-    typeInfoValues.add(unsafe { LLVMConstNull(i32PtrType) })
-    typeInfoValues.add(unsafe { LLVMConstBitCast(rawArrayTypeTemplate, i8PtrType) })
-    typeInfoValues.add(unsafe { LLVMConstNull(i8PtrType) })
-    typeInfoValues.add(unsafe { LLVMConstNull(i8PtrType) })
-    typeInfoValues.add(elementTI)
-    typeInfoValues.add(unsafe { LLVMConstNull(extensionDefPtrPtrType) })
-    typeInfoValues.add(unsafe { LLVMConstNull(i8PtrType) })
-    typeInfoValues.add(unsafe { LLVMConstNull(i8PtrType) })
+    let typeInfoValues = ArrayList<LLVMValueRef>(Array<LLVMValueRef>(TypeInfoLayout.FieldCount, { _: Int64 => LLVMNullValue() }))
+    typeInfoValues[TypeInfoLayout.typeInfoNameIndex] = cgMod.GenerateTypeNameConstantString(GetTypeQualifiedName(chirTy, forNameFieldOfTi: true),
+        false)
+    typeInfoValues[TypeInfoLayout.typeIndex] = unsafe { LLVMConstInt(i8Type, UG_RAW_ARRAY_KIND, 0) }
+    typeInfoValues[TypeInfoLayout.flagIndex] = unsafe { LLVMConstInt(i8Type, 0u64, 0) }
+    typeInfoValues[TypeInfoLayout.fieldNumIndex] = unsafe { LLVMConstInt(i16Type, 0u64, 0) }
+    typeInfoValues[TypeInfoLayout.instanceSizeIndex] = unsafe { LLVMConstInt(i32Type, elementSize, 0) }
+    typeInfoValues[TypeInfoLayout.gctibIndex] = unsafe { LLVMConstNull(bitMapPtrType) }
+    typeInfoValues[TypeInfoLayout.uuidIndex] = unsafe { LLVMConstInt(i32Type, 0u64, 0) }
+    typeInfoValues[TypeInfoLayout.alignIndex] = unsafe { LLVMConstInt(i8Type, 1u64, 0) }
+    typeInfoValues[TypeInfoLayout.typeArgsNumIndex] = unsafe { LLVMConstInt(i8Type, 0u64, 0) }
+    typeInfoValues[TypeInfoLayout.validInheritNumIndex] = unsafe { LLVMConstInt(i16Type, INHERITED_CLASS_NUM_FE_FLAG, 0) }
+    typeInfoValues[TypeInfoLayout.fieldOffsetsIndex] = unsafe { LLVMConstNull(i32PtrType) }
+    typeInfoValues[TypeInfoLayout.sourceGenericIndex] = unsafe { LLVMConstBitCast(rawArrayTypeTemplate, i8PtrType) }
+    typeInfoValues[TypeInfoLayout.typeArgsIndex] = unsafe { LLVMConstNull(i8PtrType) }
+    typeInfoValues[TypeInfoLayout.fieldsIndex] = unsafe { LLVMConstNull(i8PtrType) }
+    typeInfoValues[TypeInfoLayout.superTypeInfoIndex] = elementTI
+    typeInfoValues[TypeInfoLayout.vExtensionDataStartIndex] = unsafe { LLVMConstNull(extensionDefPtrPtrType) }
+    typeInfoValues[TypeInfoLayout.mTableDescIndex] = unsafe { LLVMConstNull(i8PtrType) }
+    typeInfoValues[TypeInfoLayout.reflectInfoIndex] = unsafe { LLVMConstNull(i8PtrType) }
     return TypeInfoConstStruct(typeInfoTy, typeInfoValues)
 }
 
