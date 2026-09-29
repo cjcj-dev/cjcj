@@ -51,7 +51,7 @@ public class MangleOwnershipRace {
         synchronized(mutex) {
             if (!enabled || name != secondEntry) { return }
             while (!published) {
-                if (!changed.wait(timeout: Duration.Second * 60)) {
+                if (!changed.wait(timeout: Duration.minute)) {
                     waitExpired = true
                     println("MANGLE_RACE second-wait-timeout entry=${name}")
                     return
@@ -82,7 +82,7 @@ public class MangleOwnershipRace {
                 println("MANGLE_RACE published entry=${task} source=${source.objectId} targetDecl=${target.decl.isSome()}")
                 changed.notifyAll()
                 while (!released) {
-                    if (!changed.wait(timeout: Duration.Second * 60)) {
+                    if (!changed.wait(timeout: Duration.minute)) {
                         waitExpired = true
                         println("MANGLE_RACE first-wait-timeout entry=${task}")
                         return
