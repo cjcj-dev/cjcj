@@ -19,15 +19,24 @@ def main():
     (args.output / 'remainder.cj').write_text(
         'macro package ownershipsmall\nimport std.ast.*\n' + macro('Remainder'))
     (args.output / 'control.cj').write_text('''package ownershipcontrol
-class Recursive {
-    let next: Option<Recursive>
-    init(next: Option<Recursive>) { this.next = next }
+public class Recursive {
+    public let next: Option<Recursive>
+    public init(next: Option<Recursive>) { this.next = next }
+}
+public class Holder<T> {
+    public let value: T
+    public init(value: T) { this.value = value }
 }
 func identity<T>(value: T): T { value }
 public func ordinary(x: Int64): Int64 {
     let f = { value: Int64 => identity(value) }
     f(x)
 }
+public func classLambda(node: Recursive): Option<Recursive> {
+    let f = { value: Recursive => identity(value) }
+    f(node).next
+}
+public func genericClass(value: Holder<Recursive>): Recursive { value.value }
 ''')
 
 
