@@ -225,7 +225,6 @@ class FlatBufferBuilderTest {
         try (detached = builder.Release()) {
             @Expect(detached.GetBufferPointer().toUIntNative() == ptr.toUIntNative())
             @Expect(builder.GetSize(), 0)
-            builder.Clear()
             let replacement = builder.CreateString("replacement")
             builder.Finish(replacement)
             builder.close()
@@ -253,6 +252,101 @@ class FlatBufferBuilderTest {
                 let _ = removeIfExists(path)
             }
         }
+    }
+
+    // flatbuffer_builder.h:225-231: Release() transfers ownership and then
+    // runs Clear(), so the builder is immediately reusable. Without the Clear
+    // a stale string pool entry makes the reused CreateSharedString pop the
+    // bytes it just wrote, and the following Finish() underflows (upstream
+    // serializes the reused value with exactly the fresh-builder bytes).
+    @TestCase
+    func reuseAfterReleaseMatchesFreshBuilderBytes(): Unit {
+        let builder = FlatBufferBuilder()
+        let firstTitle = builder.CreateSharedString("same")
+        let firstName = builder.CreateSharedString("same")
+        @Expect(firstName, firstTitle)
+        let firstValues = ArrayList<UInt32>()
+        firstValues.add(1u32)
+        firstValues.add(2u32)
+        let firstVector = builder.CreateVectorU32(firstValues)
+        builder.StartTable(1)
+        builder.AddI64(0, 42)
+        let firstPayload = builder.EndTable()
+        builder.StartTable(3)
+        builder.AddOffset(2, firstPayload)
+        builder.AddOffset(1, firstVector)
+        builder.AddOffset(0, firstName)
+        let firstItem = builder.EndTable()
+        builder.StartTable(2)
+        builder.AddOffset(1, firstItem)
+        builder.AddOffset(0, firstTitle)
+        let firstRoot = builder.EndTable()
+        builder.Finish(firstRoot, "FBWT")
+        let expected = builder.GetBufferArray()
+        println("ASSERT release reuse target reached")
+
+        var released: DetachedBuffer = DetachedBuffer()
+        try {
+            released = builder.Release()
+            println("ASSERT release returned detached buffer")
+        } finally {
+            released.close()
+        }
+
+        var reusedBytes: Array<UInt8> = []
+        var reusedFailed = false
+        try {
+            let title = builder.CreateSharedString("same")
+            let name = builder.CreateSharedString("same")
+            let values = ArrayList<UInt32>()
+            values.add(1u32)
+            values.add(2u32)
+            let vector = builder.CreateVectorU32(values)
+            builder.StartTable(1)
+            builder.AddI64(0, 42)
+            let payload = builder.EndTable()
+            builder.StartTable(3)
+            builder.AddOffset(2, payload)
+            builder.AddOffset(1, vector)
+            builder.AddOffset(0, name)
+            let item = builder.EndTable()
+            builder.StartTable(2)
+            builder.AddOffset(1, item)
+            builder.AddOffset(0, title)
+            let root = builder.EndTable()
+            builder.Finish(root, "FBWT")
+            reusedBytes = builder.GetBufferArray()
+        } catch (_: Exception) {
+            reusedFailed = true
+        }
+        println("ASSERT release reuse target reached")
+        @Expect(!reusedFailed)
+        @Expect(reusedBytes == expected)
+        @Expect(builder.GetSize(), expected.size)
+
+        let fresh = FlatBufferBuilder()
+        let freshTitle = fresh.CreateSharedString("same")
+        let freshName = fresh.CreateSharedString("same")
+        let freshValues = ArrayList<UInt32>()
+        freshValues.add(1u32)
+        freshValues.add(2u32)
+        let freshVector = fresh.CreateVectorU32(freshValues)
+        fresh.StartTable(1)
+        fresh.AddI64(0, 42)
+        let freshPayload = fresh.EndTable()
+        fresh.StartTable(3)
+        fresh.AddOffset(2, freshPayload)
+        fresh.AddOffset(1, freshVector)
+        fresh.AddOffset(0, freshName)
+        let freshItem = fresh.EndTable()
+        fresh.StartTable(2)
+        fresh.AddOffset(1, freshItem)
+        fresh.AddOffset(0, freshTitle)
+        let freshRoot = fresh.EndTable()
+        fresh.Finish(freshRoot, "FBWT")
+        @Expect(fresh.GetBufferArray() == expected)
+        builder.close()
+        fresh.close()
     }
 
     @TestCase

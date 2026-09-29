@@ -11,7 +11,6 @@ main(): Int64 {
     builder.Finish(root)
     let expected = builder.GetBufferArray()
     try (detached = builder.Release()) {
-        builder.Clear()
         let replacement = builder.CreateString("replacement allocation")
         builder.Finish(replacement)
         builder.close()

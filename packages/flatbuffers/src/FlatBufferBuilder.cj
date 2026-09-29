@@ -200,10 +200,14 @@ public class FlatBufferBuilder <: Resource {
         return buffer.data()
     }
 
+    // flatbuffer_builder.h:225-231: Finished() -> buf_.release() -> Clear() -> return.
+    // Clear() must run after ownership transfer so the builder is reusable; a
+    // stale string pool/offset list would make the next Finish() overflow.
     public func Release(): DetachedBuffer {
         let _ = GetBufferPointer()
-        finished = false
-        return buffer.release()
+        let result = buffer.release()
+        Clear()
+        return result
     }
 
     public func isClosed(): Bool { return closed }
