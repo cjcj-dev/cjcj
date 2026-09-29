@@ -24,12 +24,13 @@ for case in ("DifferentProducerVersion", "SameProducerVersion", "UnavailableProd
     (args.evidence / (case + ".log")).write_text(run.stdout)
     text = re.sub(r"\x1b\[[0-9;]*m", "", run.stdout)
     expected = re.findall(r"^FRONTEND_EXPECTED=(.*)$", text, re.M)
-    observed = re.sub(r"^FRONTEND_EXPECTED=.*$", "", text, flags=re.M)
+    observed = re.findall(r"^\s*error: (validation of ast file .*?)\s*$", text, re.M)
     passed = (run.returncode == 0 and len(expected) == 1
-              and "FRONTEND_TARGET_BEGIN" in observed and "FRONTEND_TARGET_END" in observed
+              and "FRONTEND_TARGET_BEGIN" in text and "FRONTEND_TARGET_END" in text
               and expected[0] in observed)
     results.append({"case": case, "rc": run.returncode,
                     "target_assertion_executed": len(expected) == 1,
+                    "observed_frontend_messages": observed,
                     "frontend_message_matches": len(expected) == 1 and expected[0] in observed,
                     "pass": passed})
     print(json.dumps(results[-1]), flush=True)
