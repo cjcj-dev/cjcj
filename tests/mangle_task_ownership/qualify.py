@@ -40,9 +40,16 @@ def main():
             MangleOwnershipRace.Configure(a, workers, decls[secondIndex][1].identifier.Val())''')
         modified = modified.replace('import cjcj::mangle.BaseMangler as RealBaseMangler',
             'import cjcj::mangle.MangleOwnershipRace\nimport cjcj::mangle.BaseMangler as RealBaseMangler')
+        # The product macro route: the candidate converts through the per-task
+        # adapter; the frozen baseline converted through the shared member one.
         old_routes = [
-            '                            desugarDecl.mangledName = baseMangler.Mangle(desugarDecl)',
-            '                            desugarDecl.mangledName = baseMangler.Mangle(adapter.ConvertDecl(desugarDecl))',
+            '                            desugarDecl.mangledName = baseMangler.Mangle(desugarDecl)\n',
+            '                            desugarDecl.mangledName = baseMangler.Mangle(adapter.ConvertDecl(desugarDecl))\n',
+            '''                            let convertedDesugarDecl = adapter.ConvertDecl(desugarDecl)
+                            let desugarMangledName = baseMangler.Mangle(convertedDesugarDecl)
+                            desugarDecl.mangledName = desugarMangledName
+                            convertedDesugarDecl.mangledName = desugarMangledName
+''',
         ]
         routes = [route for route in old_routes if route in modified]
         if len(routes) != 1:
@@ -50,7 +57,7 @@ def main():
         route = routes[0]
         modified = modified.replace(route, '''                            MangleOwnershipRace.BeforeEntry(curDecl.identifier.Val())
                             try {
-    ''' + route + '''
+''' + ''.join('    ' + line for line in route.splitlines(True)) + '''
                                 MangleOwnershipRace.EntryResult(curDecl.identifier.Val(), desugarDecl.mangledName)
                             } catch (error: Exception) {
                                 println("MANGLE_MACRO_EXCEPTION macro=${curDecl.identifier.Val()} error=${error.message}")
