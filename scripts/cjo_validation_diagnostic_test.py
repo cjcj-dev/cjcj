@@ -38,6 +38,18 @@ for case in ("DifferentProducerVersion", "SameProducerVersion", "UnavailableProd
                     "frontend_message_matches": matches,
                     "pass": passed})
     print(json.dumps(results[-1]), flush=True)
+# Existing version-query tests protect successful verification and the normal
+# CJO compatibility gate while the new cases target failed verification.
+regression = subprocess.run([str(args.elf.resolve()), "--no-color", "--show-all-output", "--no-progress",
+                             "--filter=CjoVersionTest.*"],
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+(args.evidence / "CjoVersionTest.log").write_text(regression.stdout)
+markers = ["CjoVersionQueryOnLoader observed", "MissingVersionQueryOnLoader observed",
+           "HeaderVersionQueryAndGate observed"]
+results.append({"case": "CjoVersionTest.*", "rc": regression.returncode,
+                "target_assertion_executed": all(marker in regression.stdout for marker in markers),
+                "pass": regression.returncode == 0 and all(marker in regression.stdout for marker in markers)})
+print(json.dumps(results[-1]), flush=True)
 record = {"elf_sha256": hashlib.sha256(args.elf.read_bytes()).hexdigest(), "results": results}
 (args.evidence / "result.json").write_text(json.dumps(record, indent=2) + "\n")
 raise SystemExit(0 if all(result["pass"] for result in results) else 1)
