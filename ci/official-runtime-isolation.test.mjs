@@ -5,6 +5,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import test from 'node:test';
 import {gzipSync} from 'node:zlib';
+import {installIsolatedLlvmTuple} from '../build/lib/isolated-llvm-tuple.mjs';
 
 const repo = path.resolve(import.meta.dirname, '..');
 const hash = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
@@ -221,3 +222,64 @@ for (const name of ['llc', 'ld.lld']) {
     assert.match(result.stdout, /OFFICIAL_TOOLCHAIN_MISMATCH .*official_parent=1/);
   });
 }
+
+// The release packager is the second consumer of the isolated tuple: it clones
+// the official SDK into a stage, so the stage starts with the official backend
+// bytes. The published cjcj SDK must carry the coloured tuple its own runtime
+// and std were built with, and the official SDK it was cloned from must stay
+// untouched -- these cases pin both halves, so dropping either side turns red.
+function releaseFixture(t) {
+  const f = optimizerFixture(t);
+  f.stageLlvmBin = path.join(f.root, 'stage/third_party/llvm/bin');
+  fs.mkdirSync(f.stageLlvmBin, {recursive: true});
+  f.manifestValues = new Map();
+  for (const name of ['llc', 'opt', 'ld.lld']) {
+    const official = path.join(f.sdk, 'third_party/llvm/bin', name);
+    if (!fs.existsSync(official)) fs.copyFileSync(f.officialOpt, official);
+    fs.copyFileSync(official, path.join(f.stageLlvmBin, name));
+    f.manifestValues.set(name === 'ld.lld' ? 'LLD_SHA256' : `${name.toUpperCase()}_SHA256`, hash(path.join(f.patchedBin, name)));
+  }
+  f.install = () => installIsolatedLlvmTuple({
+    tupleBin: f.patchedBin, packagedLlvmBin: f.stageLlvmBin, lldTool: 'ld.lld',
+    manifestValues: f.manifestValues, verify: async () => {},
+  });
+  return f;
+}
+
+test('release stage receives the coloured tuple from the isolated directory', async t => {
+  const f = releaseFixture(t);
+  const installed = await f.install();
+  console.log(`TARGET_ASSERT_EXECUTED stage_tuple count=${installed.length} ${installed.map(i => `${i.tool}:${i.sha256.slice(0, 12)}`).join(' ')}`);
+  assert.equal(installed.length, 3);
+  for (const name of ['llc', 'opt', 'ld.lld']) {
+    assert.equal(hash(path.join(f.stageLlvmBin, name)), hash(path.join(f.patchedBin, name)),
+      `staged ${name} must be the coloured tuple, not the inherited official tool`);
+  }
+});
+
+test('release packaging leaves the official SDK backend byte-identical', async t => {
+  const f = releaseFixture(t);
+  const before = new Map(['llc', 'opt', 'ld.lld'].map(n => [n, hash(path.join(f.sdk, 'third_party/llvm/bin', n))]));
+  await f.install();
+  for (const [name, digest] of before) {
+    console.log(`TARGET_ASSERT_EXECUTED official_${name}_unchanged before=${digest.slice(0, 12)} after=${hash(path.join(f.sdk, 'third_party/llvm/bin', name)).slice(0, 12)}`);
+    assert.equal(hash(path.join(f.sdk, 'third_party/llvm/bin', name)), digest,
+      `packaging must not overwrite the official ${name}`);
+  }
+});
+
+test('release packaging refuses a tuple whose bytes do not match the manifest', async t => {
+  const f = releaseFixture(t);
+  f.manifestValues.set('OPT_SHA256', hash(f.officialOpt));
+  await assert.rejects(f.install(), /opt sha256 .* does not match manifest/);
+  console.log('TARGET_ASSERT_EXECUTED tuple_sha_mismatch_rejected');
+});
+
+test('release packaging refuses to guess when the isolated directory is absent', async t => {
+  const f = releaseFixture(t);
+  await assert.rejects(installIsolatedLlvmTuple({
+    tupleBin: '', packagedLlvmBin: f.stageLlvmBin, lldTool: 'ld.lld',
+    manifestValues: f.manifestValues, verify: async () => {},
+  }), /isolated LLVM tuple directory is required/);
+  console.log('TARGET_ASSERT_EXECUTED tuple_dir_required');
+});

@@ -453,6 +453,7 @@ jobs:
             --runtime-lib "$runtime_lib" \
             --std-dir "$FINAL_STD_DIR" \
             --llvm-manifest "$llvm_manifest" \
+            --isolated-llvm-bin "$CJCJ_PATCHED_LLVM_BIN" \
             --base-sdk-id "$RELEASE_HOST_TOOLCHAIN" \
             --base-sdk-archive "$BASE_SDK_ARCHIVE" \
             --base-sdk-provenance "$BASE_SDK_PROVENANCE" \
@@ -488,6 +489,7 @@ jobs:
             --runtime-root "$PWD\.platform-ci\runtime-install\windows_release_x86_64" `
             --std-dir "$env:FINAL_STD_DIR" `
             --llvm-manifest "$env:FIXED_LLVM_MANIFEST" `
+            --isolated-llvm-bin "$env:CJCJ_PATCHED_LLVM_BIN" `
             --base-sdk-id "$env:RELEASE_HOST_TOOLCHAIN" `
             --base-sdk-archive "$env:BASE_SDK_ARCHIVE" `
             --base-sdk-provenance "$env:BASE_SDK_PROVENANCE" `

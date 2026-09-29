@@ -193,8 +193,18 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
     await fs.copyFile(llvmFixture, destination);
     await fs.chmod(destination, 0o755);
   }
-  await fs.appendFile(path.join(sdk, 'third_party/llvm/bin/llc'), `\0CJLLVM-COMMIT:${LLVM_SHA}\0`);
-  await fs.appendFile(path.join(sdk, 'third_party/llvm/bin/opt'), `\0CJLLVM-COMMIT:${LLVM_SHA}\0`);
+  // The official SDK keeps its own backend; the source-built tuple is published
+  // beside it, never over it. The stage is cloned from the SDK, so the packager
+  // has to carry the tuple across explicitly.
+  const isolatedLlvmBin = path.join(root, 'patched-llvm', 'bin');
+  await fs.mkdir(isolatedLlvmBin, {recursive: true});
+  for (const tool of ['llc', 'opt', 'ld.lld']) {
+    const destination = path.join(isolatedLlvmBin, tool);
+    await fs.copyFile(llvmFixture, destination);
+    await fs.chmod(destination, 0o755);
+  }
+  await fs.appendFile(path.join(isolatedLlvmBin, 'llc'), `\0CJLLVM-COMMIT:${LLVM_SHA}\0`);
+  await fs.appendFile(path.join(isolatedLlvmBin, 'opt'), `\0CJLLVM-COMMIT:${LLVM_SHA}\0`);
   // Cangjie-written: the manifest finds these tools by the runtime entry points
   // the compiler emits, so the fixture has to carry one.
   const cjpm = await write(sdk, 'tools/bin/cjpm',
@@ -251,14 +261,14 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
     `LLVM_SHA=${LLVM_SHA}`,
     `LLC_SOURCE=tuple:${LLVM_SHA}`,
     'LLC_VERSION=LLVM version 15.0.4',
-    `LLC_SHA256=${await sha256(path.join(sdk, 'third_party/llvm/bin/llc'))}`,
+    `LLC_SHA256=${await sha256(path.join(isolatedLlvmBin, 'llc'))}`,
     `OPT_SOURCE=tuple:${LLVM_SHA}`,
     'OPT_VERSION=LLVM version 15.0.4',
-    `OPT_SHA256=${await sha256(path.join(sdk, 'third_party/llvm/bin/opt'))}`,
+    `OPT_SHA256=${await sha256(path.join(isolatedLlvmBin, 'opt'))}`,
     'LLD_TOOL=ld.lld',
     `LLD_SOURCE=tuple:${LLVM_SHA}`,
     'LLD_VERSION=LLVM version 15.0.4',
-    `LLD_SHA256=${await sha256(path.join(sdk, 'third_party/llvm/bin/ld.lld'))}`,
+    `LLD_SHA256=${await sha256(path.join(isolatedLlvmBin, 'ld.lld'))}`,
     '',
   ].join('\n'));
   const baseSdkId = REVIEWED_GATE_HOST_TOOLCHAIN;
@@ -303,6 +313,7 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
     '--allow-stock-runtime',
     '--std-dir', std,
     '--llvm-manifest', llvmManifest,
+    '--isolated-llvm-bin', isolatedLlvmBin,
     '--python-bundle', pythonBundle,
     '--base-sdk-id', baseSdkId,
     '--base-sdk-archive', baseArchive,
