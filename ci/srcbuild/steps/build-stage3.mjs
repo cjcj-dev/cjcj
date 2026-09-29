@@ -9,6 +9,7 @@ import {getTarget} from '../../../build/lib/targets.mjs';
 import {assertFinalStd} from '../lib/final-std.mjs';
 import {resolveProductBinary} from '../lib/product-binary.mjs';
 import {prepareBootstrapHandoff} from '../lib/bootstrap-handoff.mjs';
+import {assertColouredRuntime} from '../lib/runtime-colour.mjs';
 import {stdIdentity} from '../lib/final-compiler.mjs';
 
 $.stdio = 'inherit';
@@ -76,12 +77,6 @@ async function assertStage2Compiler(stageEnv, stage2Sha) {
   }
   console.log(`STAGE3_COMPILER_ASSERT_PASS path=${resolvedInstalled} sha256=${installedSha}`);
 }
-
-async function countRuntimeMarkers(runtime) {
-  const contents = (await fs.readFile(runtime)).toString('latin1');
-  return contents.match(/MRT_GCV2_/g)?.length ?? 0;
-}
-
 
 async function assertStdBarriers(coreLib) {
   const symbolTable = await $({stdio: 'pipe'})`nm -A ${coreLib}`;
@@ -173,9 +168,9 @@ const runtimeKind = (await $({stdio: 'pipe'})`file -b ${runtime}`).stdout.trim()
 if (!runtimeKind.includes(target.spec.fileFormat) || !runtimeKind.includes(target.spec.fileArch)) {
   throw new Error(`fork runtime has wrong native format for ${target.spec.key}: ${runtimeKind}`);
 }
-const runtimeMarkers = await countRuntimeMarkers(runtime);
-if (runtimeMarkers === 0) throw new Error(`${runtime} carries no MRT_GCV2_ markers; refusing stock runtime`);
-console.log(`STAGE3_RUNTIME_ASSERT_PASS MRT_GCV2_markers=${runtimeMarkers}`);
+await assertColouredRuntime(runtime, path.join(path.resolve(requiredEnv('CJCJ_BOOTSTRAP_HOST_RT')),
+  'runtime', 'lib', tuple, target.spec.runtimeLibrary));
+console.log('STAGE3_RUNTIME_ASSERT_PASS colour=1');
 
 const bootstrapCore = path.join(sdk, 'lib', tuple, 'libcangjie-std-core.a');
 if (!await exists(bootstrapCore)) throw new Error(`bootstrap std core missing: ${bootstrapCore}`);

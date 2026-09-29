@@ -6,6 +6,7 @@ import path from 'node:path';
 import zlib from 'node:zlib';
 import {getTarget} from '../../../build/lib/targets.mjs';
 import {assertRuntimeSplit, targetLoaderPath} from '../../../build/lib/runtime-split.mjs';
+import {assertColouredRuntime} from '../lib/runtime-colour.mjs';
 import {parseLlvmToolsManifest} from '../../llvm-tools-manifest.mjs';
 
 $.stdio = 'inherit';
@@ -120,13 +121,8 @@ for (const directory of [llvmLib, runtimeLib, toolsLib, spec.opensslLibDir]) {
 }
 await fs.access(hostCompiler);
 const runtimeBinary = path.join(runtimeLib, spec.runtimeLibrary);
-const runtimeSymbols = await $({stdio: 'pipe'})`nm -g ${runtimeBinary}`;
-if (!runtimeSymbols.stdout.includes('g_cjLoadBadMask')) {
-  throw new Error(`${runtimeBinary} does not export g_cjLoadBadMask; refusing an uncoloured target runtime`);
-}
-if (!(await fs.readFile(runtimeBinary)).includes('MRT_GCV2_')) {
-  throw new Error(`${runtimeBinary} carries no MRT_GCV2_ markers; refusing a stock target runtime`);
-}
+await assertColouredRuntime(runtimeBinary, path.join(hostSdk, 'runtime', 'lib',
+  spec.hostRuntimeTuple || spec.runtimeTuple, spec.hostRuntimeLibrary || spec.runtimeLibrary));
 assertRuntimeSplit({
   hostSdk: process.env.CJCJ_SRCBUILD_HOST_SDK,
   targetSdk: sdk,
@@ -147,7 +143,7 @@ const envLines = [
   `OPENSSL_PATH=${spec.opensslLibDir}`,
   'CJSTD_COLOURED=YES',
   'CJSTD_PREFLIGHT_C2=GREEN',
-  `CJSTD_PROVENANCE_NOTE=source runtime exports g_cjLoadBadMask; bootstrap native hello passed before fixed tuple activation`,
+  `CJSTD_PROVENANCE_NOTE=source runtime has declared-host colour export difference; bootstrap native hello passed before fixed tuple activation`,
   `${spec.loaderEnv}=${libraryPath}`,
 ];
 if (spec.os === 'darwin') {
