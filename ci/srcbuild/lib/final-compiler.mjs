@@ -15,9 +15,11 @@ export async function payloadIdentity(root, layoutRoot = root) {
       const file = path.join(directory, item.name);
       const relative = path.relative(layoutRoot, file).split(path.sep).join('/');
       const installed = path.join(root, relative);
-      if (item.isDirectory()) await walk(file);
-      else if (item.isSymbolicLink()) entries.push([relative, 'link', await fs.readlink(installed)]);
-      else if (item.isFile()) entries.push([relative, 'file', await fileSha256(installed)]);
+      // SDK handoff materializes library aliases. Bind every layout path to
+      // its resolved file bytes in both the source and the installed copy.
+      const resolved = item.isSymbolicLink() ? await fs.stat(file) : item;
+      if (resolved.isDirectory()) await walk(file);
+      else if (resolved.isFile()) entries.push([relative, 'file', await fileSha256(installed)]);
     }
   }
   await walk(layoutRoot);

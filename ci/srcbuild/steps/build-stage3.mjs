@@ -201,6 +201,7 @@ const retainedProduct = path.join(workspace, 'software', 'stage3-compiler');
 const parentStd = path.join(bootstrapWork, 'stdlib-stage2');
 const linkStdSha256 = await payloadIdentity(parentStd);
 if (await payloadIdentity(sdk, parentStd) !== linkStdSha256) throw new Error('stage3 bootstrap std installation mismatch');
+console.log(`STAGE3_BOOTSTRAP_STD_ASSERT_PASS sha256=${linkStdSha256}`);
 let stage3Lineage;
 if (dryRun) {
   console.log('[stage3][dry-run] build stage3 with stage2, then rebuild shipped std with stage3');
