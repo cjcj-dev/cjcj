@@ -41,7 +41,8 @@ test('producer archive restores executable compiler, symlink, shim and environme
   const manifest = JSON.parse(await fs.readFile(path.join(f.archive, 'manifest.json')));
   assert.equal(manifest.sha256, digest(await fs.readFile(path.join(f.archive, 'payload.tar'))));
   await fs.rm(f.root, {recursive: true});
-  await fs.mkdir(f.root);
+  await fs.mkdir(path.join(f.root, 'runtime_shim'), {recursive: true});
+  await fs.writeFile(path.join(f.root, 'runtime_shim/config.o'), 'unrestored');
   const restored = f.run('restore');
   assert.equal(restored.rc, 0, restored.output);
   assert.match(restored.output, /BOOTSTRAP_VERIFIED handoff\/stage1-compiler [a-f0-9]{64}/);

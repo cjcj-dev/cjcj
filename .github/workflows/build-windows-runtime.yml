@@ -52,6 +52,16 @@ jobs:
           fetch-depth: 1
           path: runtime-source
 
+      # The MinGW cross runtime, AST support archive and std-ast object compile
+      # through sccache; the report step fails this job if the launcher saw no compile.
+      - name: Start sccache
+        uses: ./.github/actions/sccache
+        with:
+          component: windows-runtime
+          platform: windows_x86_64
+          pin: ${{ env.RUNTIME_REF }}
+          cache-size: 1G
+
       - name: Restore official MinGW toolchain
         id: mingw-cache
         uses: actions/cache/restore@v6
@@ -118,16 +128,6 @@ jobs:
           else
             echo "::warning::Official MinGW toolchain cache is still absent after one bounded retry."
           fi
-
-      # The MinGW cross runtime, AST support archive and std-ast object compile
-      # through sccache; the report step fails this job if the launcher saw no compile.
-      - name: Start sccache
-        uses: ./.github/actions/sccache
-        with:
-          component: windows-runtime
-          platform: windows_x86_64
-          pin: ${{ env.RUNTIME_REF }}
-          cache-size: 1G
 
       - name: Cross-build pinned Windows runtime
         env:
