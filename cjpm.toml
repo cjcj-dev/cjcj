@@ -74,6 +74,8 @@
   # producing an unusable TargetConstant, StatepointLowering.cpp) is fixed in cjcj-llvm
   # fix/scheddag-memcorrupt (edd69670 + 17c6e735). The fixed static llc is swapped into the SDK
   # toolchain via ci/setup_sdk.mjs. Evidence: reports/REPORT-llvmfix.md, reports/REPORT-o2root.md.
+  # Release build entry points inject --trimpath with this workspace root.
+  # Keep the checked-in option path-free; -g builds retain source locations.
   compile-option = "-O2"
   override-compile-option = ""
   link-option = ""

@@ -41,10 +41,7 @@ import cjcj::chir.CHIRPrinter as ChirPrinter
 import cjcj::chir.ToCHIRPhase as ChirToCHIRPhase
 import std.collection.*
 import std.core.Box as CoreBox
-
-foreign {
-    func CJ_MCC_InvokeGC(sync: Bool): Unit
-}
+import std.runtime.gc
 
 // Faithful port of C++ RegisterMacroCallDiagInfos (Frontend/CompilerInstance.cpp:935-947).
 func RegisterMacroCallDiagInfos(diag: DiagnosticEngine, pkg: Package): Unit {
@@ -255,7 +252,6 @@ public class CompilerInstance {
     public init(invocation: CompilerInvocation, diag: DiagnosticEngine) {
         this.invocation = invocation
         this.diag = diag
-        sm.SetPathPrefixMaps(invocation.globalOptions.pathPrefixMaps.toArray())
         // C++ CompilerInstance.cpp:61-64 allocate managers in safe order.
         let tm = TypeManager()
         typeManager = Some(tm)
@@ -368,7 +364,7 @@ public class CompilerInstance {
             cachedInfo.varAndFuncDep.clear()
 
             // C++: std::async destroyFunc (CompilerInstance.cpp:173-185).
-            // CJ: drop held roots then InvokeGC (delete ≡ GC reclaim) + FreeIdleMemoryToOS.
+            // CJ: drop held roots then gc (delete ≡ GC reclaim) + FreeIdleMemoryToOS.
             // Future stored for JoinDestroyASTResources ≡ dtor destroyFut.get() (cpp:87-91).
             let destroyFunc = { =>
                 info.typeChecker = None
@@ -380,9 +376,7 @@ public class CompilerInstance {
                 info.gim = None
                 info.srcPkgs.clear()
                 info.pkgCtxMap.clear()
-                unsafe {
-                    CJ_MCC_InvokeGC(true)
-                }
+                gc(heavy: true)
                 FreeIdleMemoryToOS()
             }
             if (let Some(future) <- ConcurrencyBudget.Get().SpawnBudgeted(destroyFunc)) {
@@ -680,9 +674,7 @@ public class CompilerInstance {
         semaInstance.mangler.adapter = RealMangleAstAdapter()
         semaInstance.mangler.ClearManglerCtxTable()
         semaInstance.typeManager.ReleaseSemaQueryCaches()
-        unsafe {
-            CJ_MCC_InvokeGC(true)
-        }
+        gc(heavy: true)
         if (!invocation.globalOptions.enIncrementalCompilation) {
             if (let Some(genericInstantiationManager) <- gim) {
                 genericInstantiationManager.ResetGenericInstantiationStage()
@@ -917,9 +909,7 @@ public class CompilerInstance {
         mangler.ClearManglerCtxTable()
         typeManager.getOrThrow().ReleasePostSemaCaches()
         chirData.getOrThrow().ClearRealPackages()
-        unsafe {
-            CJ_MCC_InvokeGC(true)
-        }
+        gc(heavy: true)
         FreeIdleMemoryToOS()
         var ret = true
         let sourcePackagesCHIR = GetSourcePackages()

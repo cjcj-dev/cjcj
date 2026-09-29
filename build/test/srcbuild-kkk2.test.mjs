@@ -826,7 +826,7 @@ test('DAG compose endpoint installs recorded stage3 after package', () => {
 test('step_31 execs bootstrap.sh not build-stage1.mjs and only that contract turns red on revert', () => {
   assert.deepEqual(bootstrapExecDefects(script), []);
   const mutated = script.replace(
-    /step_31\(\) \{\n    ulimit -c unlimited \|\| true\n    run_bootstrap_stage stage0\n\}/,
+    /^step_31\(\) \{[\s\S]*?^\}/m,
     'step_31() {\n    npx --yes zx@8 "$REPO_ROOT/ci/srcbuild/steps/build-stage1.mjs"\n}',
   );
   assert.deepEqual(bootstrapExecDefects(mutated), ['step_31-not-bootstrap', 'step_31-build-stage1']);
@@ -845,7 +845,7 @@ test('bootstrap argv missing one 66aec40 flag turns only the flag contract red',
 test('stage0 PATH injection of colour opt turns only the isolation contract red', () => {
   assert.deepEqual(bootstrapExecDefects(script), []);
   const mutated = script.replace(
-    /step_31\(\) \{\n    ulimit -c unlimited \|\| true\n    run_bootstrap_stage stage0\n\}/,
+    /^step_31\(\) \{[\s\S]*?^\}/m,
     'step_31() {\n    PATH=/root/llvmdepot/opt:$PATH\n    run_bootstrap_stage stage0\n}',
   );
   assert.deepEqual(bootstrapExecDefects(mutated), ['stage0-colour-opt-on-path']);
@@ -911,62 +911,117 @@ test('GHA srcbuild does not build compiler or stdlib before bootstrap', () => {
   assert.ok(!yml.includes('ci/srcbuild/steps/build-stage2.mjs'));
 });
 
-function readSourceEnv() {
-  const text = fs.readFileSync(path.join(repoRoot, 'ci/bootstrap/SOURCE.env'), 'utf8');
-  const map = {};
-  for (const line of text.split('\n')) {
-    const match = line.match(/^([A-Za-z0-9_.]+)=([0-9a-f]+)$/);
-    if (match) map[match[1]] = match[2];
+// Exercise the same CLI used for the checkout contract, including rejection controls.
+const contractCLI = path.join(repoRoot, 'ci/bootstrap/vendor_contract.mjs');
+const contractNames = ['bootstrap.sh', 'sdk_build.sh', 'test_bootstrap.sh', 'stage1_host_runner.sh', 'stage1_host_identities.txt'];
+function contractRun(sourceRepo, commit = 'HEAD', consumerRoot = sourceRepo) {
+  const run = spawnSync(process.execPath, [contractCLI, '--source-repo', sourceRepo, '--commit', commit, '--consumer-root', consumerRoot], {encoding: 'utf8'});
+  assert.equal(run.error, undefined);
+  assert.notEqual(run.status, null, run.stderr);
+  return {rc: run.status, result: JSON.parse(run.stdout)};
+}
+function contractFixture(t) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vendor-contract-'));
+  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
+  const source = path.join(root, 'source');
+  fs.mkdirSync(path.join(source, 'ci/bootstrap'), {recursive: true});
+  for (const name of [...contractNames, 'SOURCE.env']) fs.copyFileSync(path.join(repoRoot, 'ci/bootstrap', name), path.join(source, 'ci/bootstrap', name));
+  const git = (...args) => runGit(['-C', source, ...args]);
+  git('init', '-b', 'main');
+  git('config', 'user.name', 'Zxilly');
+  git('config', 'user.email', 'zxilly@outlook.com');
+  git('add', '.'); git('commit', '-m', 'fixture source');
+  return {root, source, git, base: git('rev-parse', 'HEAD')};
+}
+function contractDefects(run) {
+  return run.result.files.flatMap(item => item.errors.map(error => `${error.kind}:${item.name}`));
+}
+
+test('vendor contract: actual checkout uses fixed HEAD', () => {
+  const run = contractRun(repoRoot);
+  assert.equal(run.result.commit, runGit(['rev-parse', 'HEAD']));
+  assert.deepEqual(contractDefects(run), []);
+  assert.equal(run.rc, 0);
+});
+
+test('vendor contract: committed edits need no snapshot update and old source rejects exactly changed files', t => {
+  const {source, git, base} = contractFixture(t);
+  for (const name of ['bootstrap.sh', 'test_bootstrap.sh']) fs.appendFileSync(path.join(source, 'ci/bootstrap', name), '\n# committed change\n');
+  git('add', '.'); git('commit', '-m', 'legitimate change');
+  assert.equal(contractRun(source).rc, 0);
+  const old = contractRun(source, base);
+  assert.deepEqual(contractDefects(old), ['content-drift:bootstrap.sh', 'content-drift:test_bootstrap.sh']);
+  assert.equal(old.rc, 1, 'old source must reject committed content changes');
+});
+
+for (const name of contractNames) test(`vendor contract: one-byte consumer mutation ${name}`, t => {
+  const {root, source, base} = contractFixture(t);
+  const consumer = path.join(root, 'consumer');
+  fs.cpSync(path.join(source, 'ci'), path.join(consumer, 'ci'), {recursive: true});
+  assert.equal(fs.existsSync(path.join(consumer, '.git')), false);
+  assert.equal(contractRun(source, base, consumer).rc, 0);
+  const file = path.join(consumer, 'ci/bootstrap', name);
+  const original = fs.readFileSync(file);
+  const changed = Buffer.from(original); changed[0] ^= 1;
+  fs.writeFileSync(file, changed);
+  const run = contractRun(source, base, consumer);
+  assert.deepEqual(contractDefects(run), [`content-drift:${name}`]);
+  assert.equal(run.rc, 1, `CLI must reject one-byte mutation: ${name}`);
+  fs.writeFileSync(file, original);
+  assert.equal(contractRun(source, base, consumer).rc, 0);
+});
+
+test('vendor contract: merge checkout, shallow clone and worktree retain actual commit identity', t => {
+  const {root, source, git, base} = contractFixture(t);
+  git('checkout', '-b', 'topic');
+  fs.appendFileSync(path.join(source, 'ci/bootstrap/bootstrap.sh'), '\n# topic\n');
+  git('commit', '-am', 'topic edit'); const topic = git('rev-parse', 'HEAD');
+  git('checkout', 'main');
+  fs.appendFileSync(path.join(source, 'ci/bootstrap/test_bootstrap.sh'), '\n# main\n');
+  git('commit', '-am', 'main edit'); git('merge', '--no-ff', 'topic', '-m', 'merge fixture');
+  const merge = git('rev-parse', 'HEAD');
+  assert.notEqual(merge, topic); assert.notEqual(merge, base);
+  assert.equal(contractRun(source).result.commit, merge);
+  assert.equal(contractRun(source).rc, 0);
+  assert.deepEqual(contractDefects(contractRun(source, topic)), ['content-drift:test_bootstrap.sh']);
+  const shallow = path.join(root, 'shallow');
+  runGit(['clone', '--depth=1', `file://${source}`, shallow]);
+  assert.equal(runGit(['-C', shallow, 'rev-parse', '--is-shallow-repository']), 'true');
+  assert.equal(contractRun(shallow).rc, 0);
+  const worktree = path.join(root, 'worktree'); git('worktree', 'add', '--detach', worktree, merge);
+  assert.ok(fs.statSync(path.join(worktree, '.git')).isFile());
+  assert.equal(contractRun(worktree).rc, 0);
+});
+
+test('vendor contract: missing identity and missing source blob are explicit failures', t => {
+  const {root, source, git} = contractFixture(t);
+  const missing = contractRun(source, 'missing-commit');
+  assert.equal(missing.result.errors[0].kind, 'source-identity'); assert.equal(missing.rc, 1);
+  const consumer = path.join(root, 'consumer'); fs.cpSync(path.join(source, 'ci'), path.join(consumer, 'ci'), {recursive: true});
+  const isolated = contractRun(consumer);
+  assert.equal(isolated.result.errors[0].kind, 'source-identity'); assert.equal(isolated.rc, 1);
+  git('rm', 'ci/bootstrap/bootstrap.sh'); git('commit', '-m', 'missing source blob');
+  const absent = contractRun(source, 'HEAD', consumer);
+  assert.deepEqual(contractDefects(absent), ['source-blob:bootstrap.sh']); assert.equal(absent.rc, 1);
+});
+
+for (const kind of ['missing', 'read', 'import-missing', 'import-bad']) test(`vendor contract: ${kind} is localized`, t => {
+  const {source} = contractFixture(t);
+  const file = path.join(source, 'ci/bootstrap/bootstrap.sh');
+  const env = path.join(source, 'ci/bootstrap/SOURCE.env');
+  if (kind === 'missing' || kind === 'read') {
+    fs.unlinkSync(file); if (kind === 'read') fs.mkdirSync(file);
+  } else {
+    const text = fs.readFileSync(env, 'utf8');
+    fs.writeFileSync(env, text.replace(/^TOOLS_bootstrap.sh=.*\n/m, kind === 'import-missing' ? '' : 'TOOLS_bootstrap.sh=invalid\n'));
   }
-  return map;
-}
-
-function vendorShaDefects(sourceEnv, files) {
-  const defects = [];
-  for (const name of ['bootstrap.sh', 'sdk_build.sh', 'test_bootstrap.sh', 'stage1_host_runner.sh', 'stage1_host_identities.txt']) {
-    const recorded = sourceEnv[`TOOLS_${name}`];
-    if (!/^[0-9a-f]{64}$/.test(recorded || '')) defects.push(`missing-record:${name}`);
-    const vendor = sha256(files[name]);
-    const vendorRecord = sourceEnv[`VENDOR_${name}`];
-    if (!/^[0-9a-f]{64}$/.test(vendorRecord || '')) defects.push(`missing-vendor-record:${name}`);
-    if (vendorRecord && vendor !== vendorRecord) defects.push(`vendor-drift:${name}`);
-  }
-  return defects;
-}
-
-function vendorFiles() {
-  return {
-    'bootstrap.sh': path.join(repoRoot, 'ci/bootstrap/bootstrap.sh'),
-    'sdk_build.sh': path.join(repoRoot, 'ci/bootstrap/sdk_build.sh'),
-    'test_bootstrap.sh': path.join(repoRoot, 'ci/bootstrap/test_bootstrap.sh'),
-    'stage1_host_runner.sh': path.join(repoRoot, 'ci/bootstrap/stage1_host_runner.sh'),
-    'stage1_host_identities.txt': path.join(repoRoot, 'ci/bootstrap/stage1_host_identities.txt'),
-  };
-}
-
-test('in-repo bootstrap copies match VENDOR hashes and retain TOOLS source records', () => {
-  assert.deepEqual(vendorShaDefects(readSourceEnv(), vendorFiles()), []);
+  const run = contractRun(source);
+  const expected = kind.startsWith('import') ? 'import-record' : `consumer-${kind}`;
+  assert.deepEqual(contractDefects(run), [`${expected}:bootstrap.sh`]);
+  assert.equal(run.rc, 1, 'CLI must reject localized input defect');
 });
 
-test('SOURCE.env recorded sha bit-flip turns only the vendor-sha contract red', () => {
-  const drifted = {...readSourceEnv(), 'VENDOR_bootstrap.sh': '0'.repeat(64)};
-  assert.deepEqual(vendorShaDefects(drifted, vendorFiles()), ['vendor-drift:bootstrap.sh']);
-  assert.deepEqual(vendorShaDefects(readSourceEnv(), vendorFiles()), []);
-});
 
-test('one-byte copy mutation turns only the vendor-sha contract red', () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vendor-sha-'));
-  const mutatedPath = path.join(tmp, 'bootstrap.sh');
-  const original = fs.readFileSync(path.join(repoRoot, 'ci/bootstrap/bootstrap.sh'));
-  fs.writeFileSync(mutatedPath, Buffer.concat([original, Buffer.from([0x0a])]));
-  const files = {
-    ...vendorFiles(),
-    'bootstrap.sh': mutatedPath,
-  };
-  assert.deepEqual(vendorShaDefects(readSourceEnv(), files), ['vendor-drift:bootstrap.sh']);
-  assert.deepEqual(vendorShaDefects(readSourceEnv(), vendorFiles()), []);
-  fs.rmSync(tmp, {recursive: true, force: true});
-});
 
 test('GHA absolute campaign bootstrap path turns only the GHA contract red', () => {
   const yml = fs.readFileSync(path.join(repoRoot, '.github/workflows/srcbuild.yml'), 'utf8');
@@ -1060,7 +1115,7 @@ const astInputPins = {
 
 // Execute the complete driver, including retained-state loading, prerequisite,
 // run_step and the final RESULT. Only external inputs live in the fixture.
-function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFailure = false, child = false, runtimeCase = 'valid', runtimeLayout = 'flat', ast = 'explicit', largeContract = false, contractDefect} = {}) {
+function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFailure = false, child = false, coreObserve = false, runtimeCase = 'valid', runtimeLayout = 'flat', ast = 'explicit', largeContract = false, contractDefect} = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bootstrap argv '));
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));
   for (const dir of ['ci', 'build', 'tools']) {
@@ -1213,6 +1268,9 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
   if (child) {
     const entry = inputs + '/bootstrap child.sh';
     fs.writeFileSync(entry, '#!/bin/bash\nprintf "CHILD SDK_BUILD=%s\\n" "$SDK_BUILD"\nprintf "ARG=<%s>\\n" "$@"\nexit "${CHILD_RC:-0}"\n', {mode: 0o755});
+    if (coreObserve) {
+      fs.writeFileSync(entry, '#!/bin/bash\nawk \'/^Max core file size/ {print "CHILD_CORE_SOFT_BYTES=" $5; print "CHILD_CORE_HARD_BYTES=" $6}\' /proc/$$/limits\n');
+    }
     env.CJCJ_BOOTSTRAP_SH = entry;
   }
   return {
@@ -1234,7 +1292,10 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
       return result;
     },
     run(step, childRc = 0) {
-      const result = spawnSync('bash', [driver, '--from-step', String(step), '--through-step', String(step)],
+      const result = spawnSync('bash', [...(coreObserve ? [
+        // Bounded positive control: never enable unlimited cores or induce a fault.
+        '-c', 'ulimit -c 1 || exit; printf "CONTROL_CORE_KIB=%s\\n" "$(ulimit -c)"; exec bash "$@"', 'core-limit-control',
+      ] : []), driver, '--from-step', String(step), '--through-step', String(step)],
         {encoding: 'utf8', env: {...env, CHILD_RC: String(childRc)}});
       const logs = path.join(state, 'logs');
       const logFile = fs.readdirSync(logs).find(name => name.endsWith(`-step${step}.log`));
@@ -1505,4 +1566,32 @@ test('complete runtime root reaches bootstrap with manifest-selected target iden
     }
   }
   assert.deepEqual(observed, expected);
+});
+
+test('stage0 disables core dumps before launching the bootstrap child', t => {
+  const result = bootstrapDriverFixture(t, {child: true, coreObserve: true}).run(31);
+  const limit = result.log.match(/^CHILD_CORE_SOFT_BYTES=(.*)$/m)?.[1];
+  const hard = result.log.match(/^CHILD_CORE_HARD_BYTES=(.*)$/m)?.[1];
+  const observed = {
+    rc: result.status,
+    initialKiB: result.stdout.match(/^CONTROL_CORE_KIB=(.*)$/m)?.[1],
+    limit,
+    hard,
+    completed: /RESULT=success through_step=31/.test(result.stdout),
+  };
+  console.log('OBSERVED stage0 core policy ' + JSON.stringify(observed));
+  assert.deepEqual(observed, {
+    rc: 0, initialKiB: '1', limit: '0', hard: '0', completed: true,
+  }, 'stage0 must explicitly disable core dumps before its child inherits the limit');
+});
+
+test('kkk2 stage0 core-limit contract rejects nonzero policies', () => {
+  const defects = text => {
+    const commands = extractFn(text, 'step_31').match(/^[ \t]*ulimit -c .*$/gm) || [];
+    return commands.length === 1 && commands[0].trim() === 'ulimit -c 0' ? [] : ['stage0-core-policy'];
+  };
+  assert.deepEqual(defects(script), []);
+  // Inspect the forbidden policy as text; never execute a limit increase.
+  assert.deepEqual(defects(script.replace('ulimit -c 0', 'ulimit -c unlimited || true')),
+    ['stage0-core-policy']);
 });

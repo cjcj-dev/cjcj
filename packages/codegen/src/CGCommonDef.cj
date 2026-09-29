@@ -13,28 +13,6 @@ public let INTEGER_CONVERT_MAP = HashMap<TypeKind, TypeKind>([
     (TypeKind.TYPE_UINT_NATIVE, TypeKind.TYPE_INT_NATIVE)
 ])
 
-public enum TypeInfoFields {
-    | TYPEINFO_NAME
-    | TYPEINFO_TYPE_KIND
-    | TYPEINFO_FLAG
-    | TYPEINFO_FIELDS_NUM
-    | TYPEINFO_SIZE
-    | TYPEINFO_GC_TIB
-    | TYPEINFO_UUID
-    | TYPEINFO_ALIGN
-    | TYPEINFO_TYPE_ARGS_NUM
-    | TYPEINFO_INHERITED_CLASS_NUM
-    | TYPEINFO_OFFSETS
-    | TYPEINFO_SOURCE_GENERIC
-    | TYPEINFO_TYPE_ARGS
-    | TYPEINFO_FIELDS
-    | TYPEINFO_SUPER
-    | TYPEINFO_EXTENSIONDEF_PTR
-    | TYPEINFO_MTABLE
-    | TYPEINFO_REFLECTION
-    | TYPE_INFO_FIELDS_NUM
-}
-
 public enum GenericTypeInfoFields {
     | GENERIC_TYPEINFO_NAME
     | GENERIC_TYPEINFO_TYPE_KIND
@@ -79,9 +57,9 @@ public enum ExtensionDefFields {
     | EXTENSION_DEF_FIELDS_NUM
 }
 
-public enum ArrayBaseFields {
-    | ARRAY_BASE_ARRAY_LEN
-    | ARRAY_BASE_FIELDS_NUM
+public class ArrayBaseFields {
+    public static let ARRAY_BASE_ARRAY_LEN: Int64 = 0
+    public static let ARRAY_BASE_FIELDS_NUM: Int64 = 1
 }
 
 public enum BitMapFields {

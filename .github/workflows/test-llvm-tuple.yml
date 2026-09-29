@@ -7,6 +7,10 @@ on:
       - 'ci/runtime_pin.env'
       - 'ci/check-llvm-runtime-abi.sh'
       - 'ci/test-runtime-layout.sh'
+      - 'ci/test-codegen-layout-sync.sh'
+      - 'ci/*codegen-runtime-layout*'
+      - 'packages/codegen/src/**'
+      - 'tests/runtime_layout/**'
       - 'ci/test-llvm-tuple*.sh'
       - 'ci/release/prepare_bootstrap_inputs*'
       - 'ci/release/prepare_bootstrap_fixture.mjs'
@@ -43,6 +47,8 @@ jobs:
           done
           bash ci/test-runtime-layout.sh "$RUNNER_TEMP/layout-evidence" \
             "$RUNNER_TEMP/layout-sources/runtime" "$RUNNER_TEMP/layout-sources/llvm"
+          bash ci/test-codegen-layout-sync.sh "$RUNNER_TEMP/codegen-layout-evidence" \
+            "$RUNNER_TEMP/layout-sources/runtime" "$RUNNER_TEMP/layout-sources/llvm"
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -51,6 +57,9 @@ jobs:
             ${{ runner.temp }}/layout-evidence/*.log
             ${{ runner.temp }}/layout-evidence/*.diff
             ${{ runner.temp }}/layout-evidence/*.sha256
+            ${{ runner.temp }}/codegen-layout-evidence/*.log
+            ${{ runner.temp }}/codegen-layout-evidence/*.diff
+            ${{ runner.temp }}/codegen-layout-evidence/*.sha256
   dylib-contract:
     strategy:
       fail-fast: false

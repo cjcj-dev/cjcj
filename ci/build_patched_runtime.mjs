@@ -8,6 +8,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {resolveRuntimeSource} from './runtime-pin.mjs';
 import {fetchSource} from '../build/lib/git.mjs';
+import {startDiagnostics, checkNativeTools, runNativeBuild, collectDiagnostics, writeRecord} from './runtime-diagnostics.mjs';
 
 const log = (message) => console.log(`[runtime] ${message}`);
 export const INITIAL_RUNTIME_FETCH_DEPTH = 200;
@@ -64,7 +65,9 @@ export async function gcFixCommit(env = process.env) {
 }
 
 export function patchedRuntimeBuildEnv(base = process.env) {
-  return {...base, GC_UNIT_GATE_LANGUAGE_TESTS: 'defer'};
+  const env = {...base, GC_UNIT_GATE_LANGUAGE_TESTS: 'defer'};
+  delete env.cjHeapSize;
+  return env;
 }
 
 export async function verifyGcFixWeakSourceShape(work, runtimeRef = 'HEAD', env = process.env) {
@@ -92,10 +95,18 @@ async function main() {
   if (!out) throw new Error('usage: build_patched_runtime.mjs <out-dir>');
   const {runtimeRef, sourceUrl: srcUrl, pinRef, overrideRef} = await resolveRuntimeSource();
   const version = process.env.RUNTIME_VERSION || '1.2.0-alpha.20260619020029';
-  const work = await fs.mkdtemp(path.join(os.tmpdir(), 'cjcj-runtime-'));
+  const diagnostics = await startDiagnostics(runtimeRef, version);
+  const {dir, record} = diagnostics;
+  let work;
+  let failure;
   const runtimeLibrary = process.platform === 'darwin' ? 'libcangjie-runtime.dylib' : 'libcangjie-runtime.so';
 
   try {
+    record.stage = 'dependencies';
+    await checkNativeTools(diagnostics);
+    record.stage = 'source';
+    work = await fs.mkdtemp(path.join(os.tmpdir(), 'cjcj-runtime-'));
+    record.work = work;
     log(`source ref=${runtimeRef} pin=${pinRef} override=${overrideRef || '<none>'}`);
     log(`shallow fetch fork commit ${runtimeRef}`);
     await $`git -C ${work} init -q`;
@@ -122,10 +133,14 @@ async function main() {
 
     log('build (native, release)');
     // build.py drives cmake with -S ., so retain the runtime source working directory.
-    await $({
-      cwd: `${work}/runtime`,
-      env: patchedRuntimeBuildEnv(),
-    })`python3 build.py build --target native --build-type release -v ${version}`;
+    record.stage = 'build';
+    const env = patchedRuntimeBuildEnv();
+    env.GC_UNIT_OUT = path.join(dir, 'unit');
+    env.GC_UNIT_GATE_STATUS = path.join(dir, 'gate.status');
+    await fs.mkdir(env.GC_UNIT_OUT, {recursive: true});
+    const result = await runNativeBuild(work, version, env, diagnostics);
+    if (result.code !== 0) throw new Error(`native build failed rc=${result.code} signal=${result.signal || 'none'}`);
+    record.stage = 'package';
     const found = await $({stdio: 'pipe'})`find ${work}/runtime/output -path '*Release*' -name ${runtimeLibrary}`;
     const runtime = found.stdout.split('\n').find(Boolean);
     if (!runtime) throw new Error(`built ${runtimeLibrary} not found`);
@@ -139,9 +154,33 @@ async function main() {
     const digest = crypto.createHash('sha256').update(await fs.readFile(packagedRuntime)).digest('hex');
     await fs.writeFile(`${packagedRuntime}.sha256`, `${digest}  ${runtimeLibrary}\n`);
     log(`wrote ${packagedRuntime}`);
+    record.stage = 'complete';
+  } catch (error) {
+    failure = error;
+    record.error = error.message;
   } finally {
-    await fs.rm(work, {recursive: true, force: true});
+    try {
+      await collectDiagnostics(diagnostics, work);
+    } catch (error) {
+      record.collection = 'FAILED';
+      record.collectionError = error.message;
+      failure ||= error;
+    }
+    record.finished = new Date().toISOString();
+    try {
+      await writeRecord(path.join(dir, 'result.json'), record);
+    } catch (error) {
+      console.error(`diagnostic handoff failed: ${error.message}`);
+      failure ||= error;
+    }
+    try {
+      if (work) await fs.rm(work, {recursive: true, force: true});
+    } catch (error) {
+      console.error(`source cleanup failed: ${error.message}`);
+      failure ||= error;
+    }
   }
+  if (failure) throw failure;
 }
 
 const isEntryPoint = process.argv.slice(2)

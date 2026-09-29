@@ -1,5 +1,8 @@
 #!/usr/bin/env zx
 
+import {checkCodegenRuntimeLayout} from '../../check-codegen-runtime-layout.mjs';
+import {prepareTrimpath} from '../../release/trimpath.mjs';
+
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -225,6 +228,8 @@ if (dryRun) {
     CANGJIE_HOME: '', // Compile the objects without creating a shared runtime symlink.
     CJCJ_LLVM_SHIM_O: path.join(requiredEnv('CJCJ_FIXED_LLVM_DIR'), 'cjselfhost_llvmshim.o')}})
     `npx --yes zx@8 ${path.join(githubWorkspace, 'runtime_shim', 'build_shim.mjs')}`;
+  await checkCodegenRuntimeLayout();
+  await prepareTrimpath(githubWorkspace);
   await $({cwd: githubWorkspace, env: stageEnv})`cjpm clean`;
   const buildRuntime = path.join(githubWorkspace, 'target', 'release', 'runtime');
   await fs.rm(buildRuntime, {recursive: true, force: true});

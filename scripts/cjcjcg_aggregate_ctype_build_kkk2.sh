@@ -40,7 +40,8 @@ sha256sum "$stage_sdk/bin/cjc" \
 
 rm -rf "$source_tree/target"
 cp -a "$source_tree/cjpm.toml" "$source_tree/cjpm.toml.O2bak"
-sed -i 's/compile-option = "-O2"/compile-option = "-O1"/' "$source_tree/cjpm.toml"
+sed -E -i 's/^( *compile-option = ")-O2([[:space:]]|")/\1-O1\2/' "$source_tree/cjpm.toml"
+node "$source_tree/ci/release/trimpath.mjs" "$source_tree" || exit $?
 library_path="$stage_sdk/runtime/lib/linux_x86_64_cjnative:$stage_sdk/lib/linux_x86_64_cjnative:$stage_sdk/third_party/llvm/lib:$stage_sdk/tools/lib:/usr/lib/x86_64-linux-gnu"
 env -i HOME=/root USER=root TMPDIR="$lane_tmp" CANGJIE_HOME="$stage_sdk" \
   PATH="$stage_sdk/bin:$stage_sdk/tools/bin:$stage_sdk/third_party/llvm/bin:/usr/bin:/bin" \

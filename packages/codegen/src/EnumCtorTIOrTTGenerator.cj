@@ -130,25 +130,25 @@ public class EnumCtorTIOrTTGenerator {
         let fieldsTypes = layout.fieldTypes
         let fieldConstants = CGCustomType.GenTypeInfoConstantVectorForTypes(cgMod, fieldsTypes)
         let layoutType = GetLLVMStructType(cgMod, fieldsTypes, GetClassObjLayoutName(className))
-        let typeInfoVec = ArrayList<LLVMValueRef>()
-        typeInfoVec.add(cgMod.GenerateTypeNameConstantString(className, false))
-        typeInfoVec.add(unsafe { LLVMConstInt(i8Ty, 132u64, 0) })
-        typeInfoVec.add(unsafe { LLVMConstInt(i8Ty, 0u64, 0) })
-        typeInfoVec.add(unsafe { LLVMConstInt(i16Ty, UInt64(fieldsTypes.size), 0) })
-        typeInfoVec.add(unsafe { LLVMConstInt(i32Ty, UInt64(layout.size), 0) })
-        typeInfoVec.add(unsafe { LLVMConstNull(LLVMPointerType(CGType.GetBitMapType(llvmCtx), 0u32)) })
-        typeInfoVec.add(unsafe { LLVMConstNull(i32Ty) })
-        typeInfoVec.add(unsafe { LLVMConstInt(i8Ty, UInt64(layout.align), 0) })
-        typeInfoVec.add(GenTypeArgsNumOfTypeInfo())
-        typeInfoVec.add(unsafe { LLVMConstInt(i16Ty, INHERITED_CLASS_NUM_FE_FLAG, 0) })
-        typeInfoVec.add(layout.offsets)
-        typeInfoVec.add(GenSourceGenericOfTypeInfo())
-        typeInfoVec.add(GenTypeArgsOfTypeInfo())
-        typeInfoVec.add(CGCustomType.GenTypeInfoArray(cgMod, tiName + ".fields", fieldConstants, CJTI_FIELDS_ATTR))
-        typeInfoVec.add(CGType.GetOrCreate(cgMod, chirEnumType).GetOrCreateTypeInfo())
-        typeInfoVec.add(unsafe { LLVMConstNull(LLVMPointerType(CGType.GetOrCreateExtensionDefPtrType(llvmCtx), 0u32)) })
-        typeInfoVec.add(i8PtrNull)
-        typeInfoVec.add(i8PtrNull)
+        let typeInfoVec = ArrayList<LLVMValueRef>(Array<LLVMValueRef>(TypeInfoLayout.FieldCount, { _: Int64 => LLVMNullValue() }))
+        typeInfoVec[TypeInfoLayout.typeInfoNameIndex] = cgMod.GenerateTypeNameConstantString(className, false)
+        typeInfoVec[TypeInfoLayout.typeIndex] = unsafe { LLVMConstInt(i8Ty, 132u64, 0) }
+        typeInfoVec[TypeInfoLayout.flagIndex] = unsafe { LLVMConstInt(i8Ty, 0u64, 0) }
+        typeInfoVec[TypeInfoLayout.fieldNumIndex] = unsafe { LLVMConstInt(i16Ty, UInt64(fieldsTypes.size), 0) }
+        typeInfoVec[TypeInfoLayout.instanceSizeIndex] = unsafe { LLVMConstInt(i32Ty, UInt64(layout.size), 0) }
+        typeInfoVec[TypeInfoLayout.gctibIndex] = unsafe { LLVMConstNull(LLVMPointerType(CGType.GetBitMapType(llvmCtx), 0u32)) }
+        typeInfoVec[TypeInfoLayout.uuidIndex] = unsafe { LLVMConstNull(i32Ty) }
+        typeInfoVec[TypeInfoLayout.alignIndex] = unsafe { LLVMConstInt(i8Ty, UInt64(layout.align), 0) }
+        typeInfoVec[TypeInfoLayout.typeArgsNumIndex] = GenTypeArgsNumOfTypeInfo()
+        typeInfoVec[TypeInfoLayout.validInheritNumIndex] = unsafe { LLVMConstInt(i16Ty, INHERITED_CLASS_NUM_FE_FLAG, 0) }
+        typeInfoVec[TypeInfoLayout.fieldOffsetsIndex] = layout.offsets
+        typeInfoVec[TypeInfoLayout.sourceGenericIndex] = GenSourceGenericOfTypeInfo()
+        typeInfoVec[TypeInfoLayout.typeArgsIndex] = GenTypeArgsOfTypeInfo()
+        typeInfoVec[TypeInfoLayout.fieldsIndex] = CGCustomType.GenTypeInfoArray(cgMod, tiName + ".fields", fieldConstants, CJTI_FIELDS_ATTR)
+        typeInfoVec[TypeInfoLayout.superTypeInfoIndex] = CGType.GetOrCreate(cgMod, chirEnumType).GetOrCreateTypeInfo()
+        typeInfoVec[TypeInfoLayout.vExtensionDataStartIndex] = unsafe { LLVMConstNull(LLVMPointerType(CGType.GetOrCreateExtensionDefPtrType(llvmCtx), 0u32)) }
+        typeInfoVec[TypeInfoLayout.mTableDescIndex] = i8PtrNull
+        typeInfoVec[TypeInfoLayout.reflectInfoIndex] = i8PtrNull
 
         unsafe {
             LLVMSetInitializer(ti, ConstNamedStruct(CGType.GetOrCreateTypeInfoType(llvmCtx), typeInfoVec))

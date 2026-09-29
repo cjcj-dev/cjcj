@@ -4,7 +4,7 @@ import std.collection.*
 import std.fs.File
 import cjcj::basic.Linkage as BasicLinkage
 import cjcj::basic.LinkageToInt
-import cjcj::flatbuffers.{FlatBufferBuilder, FlatBufferOffset}
+import cjcj::flatbuffers.{FlatBufferBuilder, FlatBufferOffset, DetachedBuffer, WriteFlatBufferToFile}
 import cjcj::utils.{CJC_ABORT, CJC_ASSERT}
 import cjcj::utils.OverflowStrategy
 
@@ -1524,6 +1524,8 @@ class CHIRSerializerImpl {
         }
     }
 
+    func Close(): Unit { builder.close() }
+
     func Save(filename: String, phase: ToCHIRPhase): Unit {
         let chirPackage = pkg.getOrThrow()
         let serializedPackage = CreateCHIRPackageDirect(builder, Some(chirPackage.GetName()), Some(""),
@@ -1531,19 +1533,21 @@ class CHIRSerializerImpl {
             Some(valueKind), Some(allValue), Some(exprKind), Some(allExpression), Some(defKind),
             Some(allCustomTypeDef), packageInitFunc, ToCHIRPhaseIndex(phase), packageLiteralInitFunc)
         try {
-            File.writeTo(filename, builder.Finish(serializedPackage))
+            builder.Finish(serializedPackage)
+            WriteFlatBufferToFile(filename, builder.GetBufferPointer(), builder.GetSize())
         } catch (_: Exception) {
             CJC_ASSERT(false)
         }
     }
 
-    func ConvertToMemoryData(): Array<UInt8> {
+    func ConvertToMemoryData(): DetachedBuffer {
         let chirPackage = pkg.getOrThrow()
         let serializedPackage = CreateCHIRPackageDirect(builder, Some(chirPackage.GetName()), Some(""),
             UInt8(AccessLevelIndex(chirPackage.GetPackageAccessLevel())), Some(typeKind), Some(allType),
             Some(valueKind), Some(allValue), Some(exprKind), Some(allExpression), Some(defKind),
             Some(allCustomTypeDef), packageInitFunc, ToCHIRPhaseIndex(ToCHIRPhase.RAW), packageLiteralInitFunc)
-        return builder.Finish(serializedPackage)
+        builder.Finish(serializedPackage)
+        return builder.Release()
     }
 
     func Initialize(): Unit {

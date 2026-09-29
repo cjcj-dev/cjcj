@@ -783,11 +783,13 @@ build_fixed_tuple() {
         return
     fi
 
+    source "$REPO_ROOT/ci/runtime_pin.env"
     export LLVM_URL LLVM_SHA CANGJIE_COMPILER_URL CANGJIE_COMPILER_SHA
     export FLATBUFFERS_URL FLATBUFFERS_SHA
     local build_root="$STATE_ROOT/fixed-llvm-build"
     local llvm_fork="$build_root/llvm-fork"
     local compiler="$build_root/cangjie-compiler"
+    local runtime="$build_root/paired-runtime"
     local flatbuffers="$build_root/flatbuffers"
     local llc_build="$build_root/llc-build"
     local flatbuffers_build="$build_root/flatbuffers-build"
@@ -796,11 +798,13 @@ build_fixed_tuple() {
 
     mkdir -p "$build_root"
     checkout_exact "$llvm_fork" "$LLVM_URL" "$LLVM_SHA" || return 1
+    checkout_exact "$runtime" "$RUNTIME_SRC_URL" "$RUNTIME_REF" || return 1
     checkout_sparse_exact "$compiler" "$CANGJIE_COMPILER_URL" "$CANGJIE_COMPILER_SHA" schema || return 1
     checkout_exact "$flatbuffers" "$FLATBUFFERS_URL" "$FLATBUFFERS_SHA" || return 1
 
     cmake -G Ninja -S "$llvm_fork/llvm" -B "$llc_build" \
         -DCMAKE_BUILD_TYPE=Release \
+        -DCANGJIE_RUNTIME_SOURCE_DIR="$runtime" \
         -DLLVM_ENABLE_ASSERTIONS=OFF \
         -DBUILD_SHARED_LIBS=OFF \
         -DLLVM_LINK_LLVM_DYLIB=OFF \
@@ -1309,7 +1313,7 @@ run_bootstrap_stage() {
 }
 
 step_31() {
-    ulimit -c unlimited || true
+    ulimit -c 0
     run_bootstrap_stage stage0
 }
 

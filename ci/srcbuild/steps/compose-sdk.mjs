@@ -8,7 +8,7 @@ import {runRequiredCheck} from '../../../build/lib/fail-closed-probes.mjs';
 import {assertSdkCompilerRuntimeAbi} from '../../../build/lib/runtime-split.mjs';
 import {getTarget} from '../../../build/lib/targets.mjs';
 import {produceFinalCompiler, fileSha256} from '../lib/final-compiler.mjs';
-import {installStage3Compiler} from '../lib/compose-install.mjs';
+import {installStage3Compiler, sealStage3Compiler} from '../lib/compose-install.mjs';
 import {resolveProductBinary} from '../lib/product-binary.mjs';
 
 $.stdio = 'inherit';
@@ -37,7 +37,7 @@ if (!versionOutput.includes(version)) {
 process.stdout.write(versionOutput);
 
 const installed = path.join(sdk, 'bin', 'cjc');
-const kind = (await $({stdio: 'pipe'})`file -L -b ${installed}`).stdout.trim();
+const kind = (await $({stdio: 'pipe'})`file -Lb ${installed}`).stdout.trim();
 if (!kind.includes(target.spec.fileFormat) || !kind.includes(target.spec.fileArch)) {
   throw new Error(`packaged compiler has wrong native format for ${targetKey}: ${kind}`);
 }
@@ -83,6 +83,7 @@ if (target.spec.os === 'darwin') {
   }
 }
 
+await sealStage3Compiler(sdk, target.spec.os === 'darwin' ? 'compose-install-name-tool' : 'copy');
 const installedSha256 = await fileSha256(installed);
 // GitHub artifacts keep their workflow identity. The shell entry also composes
 // SDKs outside Actions: record that execution explicitly, never invent a GitHub run.

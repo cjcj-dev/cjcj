@@ -25,8 +25,11 @@ export const repoRoot = path.resolve(import.meta.dirname, '..');
 
 // Run by `node --test` in .github/workflows/ci.yml, via `test-manifest.mjs list`.
 export const GATING = Object.freeze([
+  'ci/platform_matrix/summarize_scope.test.mjs',
+  'ci/release/g8.test.mjs',
   'build/test/archive.test.mjs',
   'build/test/cangjie-written-tools.test.mjs',
+  'build/test/cangjie-test-preparation.test.mjs',
   'build/test/compose-install.test.mjs',
   'build/test/compose-sdk-entry.test.mjs',
   'build/test/darwin-cjdb-python.test.mjs',
@@ -61,17 +64,20 @@ export const GATING = Object.freeze([
   'ci/full-gate-floor.test.mjs',
   'ci/gc-fix-floor.test.mjs',
   'ci/g2-identity-gate.test.mjs',
+  'ci/g10/run.test.mjs',
   'ci/generate-freeze.test.mjs',
   'ci/gc-release-floor.test.mjs',
   'ci/host-toolchain-pin.test.mjs',
   'ci/idle-writer-policy.test.mjs',
   'ci/llvm-tools-manifest.test.mjs',
   'ci/objc_darwin/run_e2e.test.mjs',
+  'ci/patched-runtime-diagnostics.test.mjs',
   'ci/patched-runtime-language-defer.test.mjs',
   'ci/bootstrap/prepare_cpp_headers.test.mjs',
   'ci/pin-sweep.test.mjs',
   'ci/release-pair-pin.test.mjs',
   'ci/release-gates.test.mjs',
+  'ci/release-run-evidence.test.mjs',
   // Node fixtures use mocked transport, no SDK or credentials. The publisher
   // exercises real zip/unzip; ci.yml installs both before running this list.
   'ci/release/android-platform.test.mjs',
@@ -85,6 +91,7 @@ export const GATING = Object.freeze([
   'ci/release/package_checksums.test.mjs',
   'ci/release/platform-matrix.test.mjs',
   'ci/release/prepare_bootstrap_inputs.test.mjs',
+  'ci/release/trimpath.test.mjs',
   'ci/sccache/report.test.mjs',
   // Native inputs are supplied by srcbuild's host-identity step.
   'ci/srcbuild/tests/host-pins-entry.test.mjs',
@@ -112,6 +119,15 @@ export const DEFERRED = Object.freeze([
     file: 'ci/srcbuild/tests/source-language-tuple.test.mjs',
     needs: 'python3 and patchelf for packaging; native relocation additionally needs SOURCE_TUPLE_OFFICIAL_SDK, SOURCE_TUPLE_HOST_LLVM a distinct SOURCE_TUPLE_COMPILER_SDK and its self-built SOURCE_TUPLE_COMPILER; synthetic receipts do not qualify stage3',
     verified: 'kkk2 real CLI candidate/restored 8/8; each producer, consumer, host-pin and host-role cut 7/8, only its target assertion red (2026-09-26); not stage3 language qualification',
+  }),
+  Object.freeze({
+    file: 'build/test/runtime-colour.test.mjs',
+    needs: 'Node and git, plus cc with shared/PIC support, an ELF linker with version-script '
+      + 'support, python3, and nm --defined-only dynamic export inspection; the current CI '
+      + 'workflow has not demonstrated this complete dependency set',
+    verified: 'node --test build/test/runtime-colour.test.mjs => rc=0 tests 6 pass 6 fail 0 '
+      + 'skipped 0 (2026-09-29, kkk2, Node v20.19.0); defined exports accepted; official, '
+      + 'retired-marker and undefined exports rejected; versioned exports checked both ways',
   }),
   Object.freeze({
     file: 'build/test/release-evidence.test.mjs',
