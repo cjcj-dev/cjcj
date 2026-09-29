@@ -61,8 +61,10 @@ def probe(name, sdk, env, output, arm):
         return name, dict(record, ready=False, reason='executable missing', rc=None)
     debug_env = dict(env, LD_DEBUG='libs')
     command = [str(path), '--version']
-    if name in ('cjdb', 'hle', 'cjcompat', 'cjtrace-recover'):
+    if name in ('cjdb', 'hle'):
         command[-1] = '--help'
+    if name in ('cjfmt', 'cjlint', 'cjcompat', 'cjtrace-recover'):
+        command[-1] = '-h'
     with (output / (name + '.log')).open('w') as stream:
         try:
             rc = subprocess.run(command, env=debug_env, stdout=stream, stderr=subprocess.STDOUT,

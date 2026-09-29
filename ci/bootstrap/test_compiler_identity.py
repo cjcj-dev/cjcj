@@ -53,6 +53,9 @@ class CompilerIdentityTest(unittest.TestCase):
         self.host = runtime / 'libcangjie-runtime.so'
         subprocess.run(['cc', '-shared', '-fPIC', str(source), '-o', str(self.host)], check=True)
         shutil.copyfile(self.host, runtime / 'libboundscheck.so')
+        llvm = self.base / 'third_party/llvm/lib/libLLVM-15.so'
+        llvm.parent.mkdir(parents=True)
+        shutil.copyfile(self.host, llvm)
         obj = self.root / 'host.o'
         subprocess.run(['cc', '-c', str(source), '-o', str(obj)], check=True)
         static = self.base / 'lib/linux_x86_64_cjnative'
