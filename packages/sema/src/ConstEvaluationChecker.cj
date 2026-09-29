@@ -723,7 +723,12 @@ public class ConstEvaluationChecker {
     }
 
     private func ChkCallExpr(callExpr: CallExpr, isWeak: Bool): Bool {
-        if (!ChkOptionalExpr(callExpr.baseFunc, isWeak)) {
+        // An operator '()' call may be desugared again as a variadic call,
+        // moving its baseFunc into the new desugarExpr.
+        if (callExpr.baseFunc.isNone()) {
+            return ChkExpr(callExpr.desugarExpr.getOrThrow(), isWeak)
+        }
+        if (!ChkExpr(callExpr.baseFunc.getOrThrow(), isWeak)) {
             return false
         }
         var result = true

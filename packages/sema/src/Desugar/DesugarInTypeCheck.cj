@@ -689,8 +689,9 @@ public func DesugarCallExpr(expr: CallExpr): Unit {
     if (let Some(baseFunc) <- expr.baseFunc) {
         let callExpr = CallExpr()
         callExpr.sourceExpr = expr
-        callExpr.begin = expr.begin
-        callExpr.end = expr.end
+        CopyBasicInfo(expr, callExpr)
+        callExpr.leftParenPos = expr.leftParenPos
+        callExpr.rightParenPos = expr.rightParenPos
         let memberAccess = MemberAccess()
         memberAccess.scopeName = baseFunc.scopeName
         memberAccess.field = SrcIdentifier(CALL_OPERATOR_NAME)
@@ -719,6 +720,8 @@ public func DesugarVariadicCallExpr(expr: CallExpr, fixedPositionalArity: Int64)
         expr.callKind = CallKind.CALL_VARIADIC_FUNCTION
         callExpr.sourceExpr = expr
         CopyBasicInfo(expr, callExpr)
+        callExpr.leftParenPos = expr.leftParenPos
+        callExpr.rightParenPos = expr.rightParenPos
         callExpr.baseFunc = baseFunc
         // Mirrors C++ std::move(ce.baseFunc): the original call no longer owns the moved base.
         expr.baseFunc = None
