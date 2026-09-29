@@ -89,3 +89,46 @@ test('bootstrap still rejects unsupported optimization and prefix lookalikes', a
     await fs.rm(root, {recursive: true, force: true});
   }
 });
+
+test('srcbuild entry sends prepared O1 configuration to cjpm', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'seed-entry '));
+  try {
+    await fs.mkdir(path.join(root, 'packages/cjc'), {recursive: true});
+    await fs.mkdir(path.join(root, 'software/cangjie'), {recursive: true});
+    const runtime = path.join(root, 'host/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so');
+    await fs.mkdir(path.dirname(runtime), {recursive: true});
+    await fs.writeFile(runtime, 'configuration fixture; never loaded');
+    await fs.writeFile(path.join(root, 'packages/cjc/cjpm.toml'), 'link-option = ""\n');
+    await fs.writeFile(path.join(root, 'cjpm.toml'), 'compile-option = "-O2"\n');
+    await prepareTrimpath(root);
+    const before = await fs.readFile(path.join(root, 'cjpm.toml'), 'utf8');
+    const entry = new URL('../srcbuild/steps/build-stage1.mjs', import.meta.url).href;
+    // Substitute only the external command runner; import the complete real
+    // entry module. This test proves the configuration sent to cjpm, not a build.
+    const script = `
+      import fs from 'node:fs';
+      const stop = new Error('observed cjpm boundary');
+      globalThis.$ = () => (strings) => {
+        if (strings.join('') !== 'cjpm build') throw new Error('unexpected command');
+        fs.copyFileSync('cjpm.toml', 'observed.toml');
+        console.log('OBSERVED cjpm build configuration');
+        throw stop;
+      };
+      try { await import(${JSON.stringify(entry)}); }
+      catch (error) { if (error !== stop) throw error; }
+    `;
+    const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+      cwd: root, encoding: 'utf8', env: {...process.env,
+        CANGJIE_WORKSPACE: root, GITHUB_WORKSPACE: root, CJCJ_SRCBUILD_TARGET: 'linux-x64',
+        CJCJ_SRCBUILD_HOST_SDK: path.join(root, 'host'), CJCJ_SRCBUILD_HOST_CJC: '/unused/configuration-only',
+      },
+    });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.match(result.stdout, /OBSERVED cjpm build configuration/);
+    assert.equal(await fs.readFile(path.join(root, 'observed.toml'), 'utf8'),
+      before.replace('compile-option = "-O2', 'compile-option = "-O1'));
+    console.log('ASSERT srcbuild-cjpm-config=PASS');
+  } finally {
+    await fs.rm(root, {recursive: true, force: true});
+  }
+});
