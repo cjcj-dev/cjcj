@@ -25,9 +25,11 @@ export const repoRoot = path.resolve(import.meta.dirname, '..');
 
 // Run by `node --test` in .github/workflows/ci.yml, via `test-manifest.mjs list`.
 export const GATING = Object.freeze([
+  'ci/platform_matrix/summarize_scope.test.mjs',
   'ci/release/g8.test.mjs',
   'build/test/archive.test.mjs',
   'build/test/cangjie-written-tools.test.mjs',
+  'build/test/cangjie-test-preparation.test.mjs',
   'build/test/compose-install.test.mjs',
   'build/test/compose-sdk-entry.test.mjs',
   'build/test/darwin-cjdb-python.test.mjs',

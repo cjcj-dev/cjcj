@@ -51,6 +51,18 @@ env:
   CJ_HEAP_SIZE: 12GB
 
 jobs:
+  matrix-scope:
+    name: Report matrix coverage scope
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Record requested coverage
+        env:
+          MATRIX_INPUTS: ${{ toJSON(inputs) }}
+        run: |
+          node ci/platform_matrix/summarize_scope.mjs
+          cat "$GITHUB_STEP_SUMMARY"
+
   darwin-source-input:
     if: ${{ inputs.darwin_verify_only }}
     uses: ./.github/workflows/verify-darwin-runtime.yml

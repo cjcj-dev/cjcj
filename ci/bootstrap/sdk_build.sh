@@ -349,7 +349,10 @@ if [ -n "$LLVM_SO" ]; then
   install_llvm_so "$LLVM_SO"
 fi
 swap_all cjpm "$CJPM" cjpm
-swap_all cjc  "$CJC"  cjc
+if [ -n "$CJC" ]; then
+  python3 "$(dirname "${BASH_SOURCE[0]}")/compiler_identity.py" "$TO" --install "$CJC" \
+    || die 'compiler producer installation failed'
+fi
 # ⭐⭐⭐ 同轮元组：runtime 的 .so 装在 runtime/lib/<tuple>，.a 装在 lib/<tuple>
 #   CMake 真值：runtime/CMakeLists.txt:518 (shared→runtime/lib) · :799 (static→lib)
 #   Driver 真值：Linux_CJNATIVE.cj:104 静态链 -l:libcangjie-runtime.a（-L 先 lib/ 再 runtime/lib）
