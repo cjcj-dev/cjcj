@@ -1748,7 +1748,17 @@ public class IRBuilder2 <: Resource {
         CJC_ASSERT(!aggregateType.isNull())
         let kind = unsafe { LLVMGetTypeKind(aggregateType) }
         CJC_ASSERT(kind == LLVM_STRUCT_TYPE_KIND || kind == LLVM_ARRAY_TYPE_KIND)
-        CopyAggregateTyped(aggregateType, source, destination)
+        // CJNativeIRBuilder.cpp:837-847 copies the bytes at these addresses.
+        // Debug boxing may cast an object payload to pointer-to-argument type
+        // (IRBuilder.cpp:379-385); that does not add a slot to dereference.
+        // Our typed copy needs aggregate pointers for GEP, preserving each address.
+        let sourceType = unsafe { LLVMPointerType(aggregateType, LLVMGetPointerAddressSpace(LLVMTypeOf(source))) }
+        let destinationType = unsafe {
+            LLVMPointerType(aggregateType, LLVMGetPointerAddressSpace(LLVMTypeOf(destination)))
+        }
+        let typedSource = CreateBitCast(source, sourceType, name: "typed.copy.source")
+        let typedDestination = CreateBitCast(destination, destinationType, name: "typed.copy.destination")
+        CopyAggregateTyped(aggregateType, typedSource, typedDestination)
     }
 
     private func IsCurrentLoadCTypeAggregate(): Bool {
