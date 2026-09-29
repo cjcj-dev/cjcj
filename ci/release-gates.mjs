@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import crypto from 'node:crypto';
+import {evaluateG11Evidence} from './release-g11.mjs';
 import {load as loadYaml} from './vendor/js-yaml/js-yaml.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -56,7 +57,7 @@ const GATES = Object.freeze({
   },
   G11: {
     name: 'Conformance',
-    needsRun: 'G10 先通后，以 final apparatus 跑 29060/29060；isolation selfhost-only、loader/GC assert/SEGV 均为 0，并绑定 final SHA',
+    needsRun: '以 #482 ci/cangjie-test 跑 Conformance/HLT/LLT 官方 SDK 与自举 SDK 同时段同尺两臂；Q54-C 许可集来自官方臂实测失败并逐项写理由；自举独有失败为 0，绑定 final SHA',
   },
   G12: {name: 'GC release floor'},
   G13: {name: 'loaderlife 直接门'},
@@ -1537,6 +1538,10 @@ async function evaluate(gate, context) {
     G17: evaluateG17,
   };
   try {
+    if (gate === 'G11') {
+      const result = await evaluateG11Evidence(context.evidence, git(context, ['rev-parse', context.ref || 'HEAD']));
+      return gateResult(gate, result.status, result.value, {failures: result.failures || []});
+    }
     if (PLATFORM_GATES.has(gate)) return await evaluatePlatformRun(gate, context);
     if (GATES[gate].needsRun) return gateResult(gate, 'UNKNOWN', `NEEDS_RUN: ${GATES[gate].needsRun}`);
     return await evaluators[gate](await discoverEvidenceContext(gate, context));
