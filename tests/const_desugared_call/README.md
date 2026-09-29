@@ -4,7 +4,7 @@ Run `python3 run.py --compiler /absolute/cjcj-stage1 --sdk /absolute/host-sdk --
 The compiler must be built from the candidate source with its matching host libraries.
 
 `empty`, `nonempty`, and `generic` call an instance with an Array-only `operator ()`
-in a constant initializer. The compiler must reject the synthesized Array as
+in a const function body. The compiler must reject the synthesized Array as
 nonconstant and report the source call on line 9 with a nonzero column.
 `control` exercises a scalar operator call without variadic desugaring.
 Every assertion prints its result independently; a failed diagnostic assertion
