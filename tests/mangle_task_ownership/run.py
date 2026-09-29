@@ -54,24 +54,42 @@ def run(args, case, single=False):
             rc = 124
     wall = time.monotonic() - start
     text = (output / 'compile.log').read_text(errors='replace')
-    bad = 'MANGLE_INVARIANT sourceDecl=true consumerDecl=false kind=Class' in text
-    good = 'MANGLE_INVARIANT sourceDecl=true consumerDecl=true kind=Class' in text
-    reached = bool(re.search(r'MANGLE_ASSERT consumed=true name=\S+', text))
+    # Every device failure mode is named so it can never be read as a red.
+    device = [m for m in ('MANGLE_FIXTURE_INCOMPLETE', 'MANGLE_FIXTURE_INELIGIBLE',
+                          'MANGLE_RACE first-wait-timeout', 'MANGLE_RACE second-wait-timeout')
+              if m in text]
+    configured = re.search(r'MANGLE_RACE configured source=\S+ enabled=true first=(\S+) second=(\S+)', text)
+    second = configured.group(2) if configured else ''
+    published = re.search(r'MANGLE_RACE published entry=(\S+)', text)
+    publisher = published.group(1) if published else ''
+    consumer = re.search(r'MANGLE_CONSUMER entry=(\S+) cachedFirst=(\S+) consumerDecl=(\S+) kind=(\S+)', text)
     qualified = 'MANGLE_QUALIFICATION shared=true separate=true fullTasks=true' in text
-    expected_red = ((args.expect_red and case.stem == 'parallel') or
-                    (args.ordinary_red and case.stem == 'ordinary')) and not single
-    if expected_red:
-        passed = (rc != 0 and rc != 124 and bad and qualified and
-                  'MANGLE_CONSUMER cachedFirst=true' in text and
-                  'User-defined type has no declaration' in text and
+    signature = 'User-defined type has no declaration' in text
+    # The qualified second task is the only one allowed to satisfy the assertion.
+    bound = bool(consumer) and consumer.group(1) == second
+    good = bool(consumer) and consumer.group(3) == 'true' and consumer.group(2) == 'false'
+    bad = bool(consumer) and consumer.group(3) == 'false' and consumer.group(2) == 'true'
+    reached = bool(re.search(r'MANGLE_ASSERT consumed=true entry=\S+', text))
+    red = (not single) and case.stem in args.red
+    mechanism_red = (not single) and case.stem in args.red_mechanism
+    if red:
+        # The fixture itself drove the interleaving and the product's own
+        # missing-declaration check is the red.
+        passed = (rc not in (0, 124) and not device and qualified and bound and bad and
+                  published is not None and publisher != second and signature and
                   'MANGLE_RACE second-finally-release' in text)
+    elif mechanism_red:
+        # Reached by the same broken invariant through a different consumer, not
+        # through the fixture protocol; the product signature must still be it.
+        passed = rc not in (0, 124) and not device and signature
     else:
         passed = rc == 0 and bc.is_file()
         if args.race and case.stem in ('parallel', 'ordinary') and not single:
-            passed = (passed and good and reached and not bad and qualified and
-                      'MANGLE_RACE second-store sameAdapter=false' in text and
-                      'MANGLE_CONSUMER cachedFirst=false' in text and
-                      'MANGLE_RACE first-resumed' in text)
+            passed = (passed and not device and qualified and bound and good and reached and
+                      published is not None and publisher != second and
+                      'MANGLE_RACE first-resumed' in text and
+                      re.search(r'MANGLE_RACE second-store entry=\S+', text) is not None)
+    expected_red = red or mechanism_red
     dis_rc = None
     symbols = []
     output_hash = None
@@ -92,6 +110,10 @@ def run(args, case, single=False):
                   affinity=sorted(os.sched_getaffinity(0)), sdk=str(args.sdk), hashes=identities,
                   output_sha256=output_hash, disassemble_rc=dis_rc, symbols=symbols,
                   incomplete_observed=bad, complete_observed=good, result_assertion_reached=reached,
+                  qualified=qualified, second_entry=second, publisher_entry=publisher,
+                  consumer_entry=consumer.group(1) if consumer else '',
+                  device_failures=device, target_signature=signature,
+                  red_kind='fixture' if red else ('mechanism' if mechanism_red else 'none'),
                   expected_red=expected_red, passed=passed)
     (output / 'result.json').write_text(json.dumps(result, indent=2) + '\n')
     print(f'{name} rc={rc} wall={wall:.2f} expected_red={expected_red} passed={passed}', flush=True)
@@ -110,8 +132,10 @@ def main():
     p.add_argument('--inputs', type=Path, required=True)
     p.add_argument('--output', type=Path, required=True)
     p.add_argument('--race', action='store_true')
-    p.add_argument('--expect-red', action='store_true')
-    p.add_argument('--ordinary-red', action='store_true', help='constructor cut also shares ordinary adapters')
+    p.add_argument('--red', default='', type=lambda v: [x for x in v.split(',') if x],
+                   help='cases whose red the fixture protocol itself must have driven')
+    p.add_argument('--red-mechanism', default='', type=lambda v: [x for x in v.split(',') if x],
+                   help='cases expected red only by the same target signature')
     p.add_argument('--parallelism', type=int, choices=range(1, 5), default=4)
     args = p.parse_args()
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
@@ -124,8 +148,9 @@ def main():
     parallel, single = results[:2]
     # Compare measured sets, not an assumed fixed count. Red arms have no valid
     # parallel output to compare; the unaffected controls must still pass.
-    same_names = (parallel['symbols'] == single['symbols']) if not args.expect_red else None
-    ordinary_same_names = (results[4]['symbols'] == results[5]['symbols']) if not args.ordinary_red else None
+    same_names = (parallel['symbols'] == single['symbols']) if parallel['red_kind'] == 'none' else None
+    ordinary = results[4]
+    ordinary_same_names = (ordinary['symbols'] == results[5]['symbols']) if ordinary['red_kind'] == 'none' else None
     (args.output / 'summary.json').write_text(json.dumps(
         dict(results=results, parallel_single_symbols_equal=same_names,
              ordinary_single_symbols_equal=ordinary_same_names), indent=2) + '\n')

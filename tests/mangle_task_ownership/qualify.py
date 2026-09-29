@@ -37,7 +37,7 @@ def main():
             if (!same || !separate || !fullTasks || decls.size % 30 == 0) {
                 throw IllegalStateException("MANGLE_FIXTURE_INELIGIBLE")
             }
-            MangleOwnershipRace.Configure(a, workers, decls[secondIndex][1].identifier.Val())''')
+            MangleOwnershipRace.Configure(a, workers, decls[firstIndex][1].identifier.Val(), decls[secondIndex][1].identifier.Val())''')
         modified = modified.replace('import cjcj::mangle.BaseMangler as RealBaseMangler',
             'import cjcj::mangle.MangleOwnershipRace\nimport cjcj::mangle.BaseMangler as RealBaseMangler')
         # The product macro route: the candidate converts through the per-task
@@ -55,7 +55,7 @@ def main():
         if len(routes) != 1:
             raise SystemExit('expected one recognized product macro route')
         route = routes[0]
-        modified = modified.replace(route, '''                            MangleOwnershipRace.BeforeEntry(curDecl.identifier.Val())
+        modified = modified.replace(route, '''                            MangleOwnershipRace.EnterTask(curDecl.identifier.Val())
                             try {
 ''' + ''.join('    ' + line for line in route.splitlines(True)) + '''
                                 MangleOwnershipRace.EntryResult(curDecl.identifier.Val(), desugarDecl.mangledName)
@@ -63,6 +63,7 @@ def main():
                                 println("MANGLE_MACRO_EXCEPTION macro=${curDecl.identifier.Val()} error=${error.message}")
                                 throw error
                             } finally {
+                                MangleOwnershipRace.LeaveTask()
                                 MangleOwnershipRace.Release(curDecl.identifier.Val())
                             }''')
         ordinary_begin = '                        let convertedDecl = adapter.ConvertDecl(curDecl)'
@@ -70,7 +71,7 @@ def main():
         start = modified.index(ordinary_begin)
         end = modified.index(ordinary_end, start) + len(ordinary_end)
         body = modified[start:end]
-        modified = modified[:start] + '''                        MangleOwnershipRace.BeforeEntry(curDecl.identifier.Val())
+        modified = modified[:start] + '''                        MangleOwnershipRace.EnterTask(curDecl.identifier.Val())
                         try {
 ''' + '\n'.join('    ' + line for line in body.splitlines()) + '''
                             MangleOwnershipRace.EntryResult(curDecl.identifier.Val(), mangledName)
@@ -78,6 +79,7 @@ def main():
                             println("MANGLE_ENTRY_EXCEPTION entry=${curDecl.identifier.Val()} error=${error.message}")
                             throw error
                         } finally {
+                            MangleOwnershipRace.LeaveTask()
                             MangleOwnershipRace.Release(curDecl.identifier.Val())
                         }''' + modified[end:]
         modified = modified.replace('        DoMangling(baseMangler, parallelNum, topDecls)',
