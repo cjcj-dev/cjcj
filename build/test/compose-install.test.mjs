@@ -17,7 +17,13 @@ test('compose replaces stage2 wrapper with recorded stage3 product', async t => 
   const product = path.join(root, 'cjc@cjcj');
   await fs.writeFile(product, 'stage3 final compiler fixture', {mode: 0o755});
   const lineage = {compilerSha256: await fileSha256(product), parentSha256: 'b'.repeat(64), stage: 'stage3'};
-  const installed = await installStage3Compiler({sdk, product, lineage});
+  let installed, installationError;
+  try { installed = await installStage3Compiler({sdk, product, lineage}); }
+  catch (error) { installationError = error; }
+  const frontendHash = await fileSha256(path.join(sdk, 'bin', 'cjc-frontend')).catch(() => null);
+  console.log('COMPOSE_FRONTEND_PRODUCER_TARGET', frontendHash, 'expected', lineage.compilerSha256);
+  assert.equal(frontendHash, lineage.compilerSha256, 'COMPOSE_FRONTEND_PRODUCER_TARGET');
+  assert.equal(installationError, undefined);
   console.log('COMPOSE_STAGE3_ORIGIN_ASSERT_REACHED');
   assert.equal(installed, path.join(sdk, 'bin', 'cjc'));
   assert.equal(await fs.readFile(installed, 'utf8'), 'stage3 final compiler fixture');
