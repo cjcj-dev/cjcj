@@ -109,3 +109,44 @@ test('fixed release CLI checks the selected platform sums pin', () => fixture(({
   assert.match(result.stderr, /bootstrap digest mismatch: platform tuple_sums_sha256/);
   assert.equal(fs.existsSync(destination), false);
 }));
+
+if (process.env.REAL_BOOTSTRAP_TUPLE_DIR) {
+  test('fixed release CLI consumes real platform asset bytes and rejects foreign pin then restores', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fixed-real-'));
+    try {
+      const platform = {'linux-x64': 'linux_x86_64', 'linux-aarch64': 'linux_aarch64'}[process.env.REAL_BOOTSTRAP_TARGET];
+      assert.ok(platform, 'REAL_BOOTSTRAP_TARGET must name the supplied native tuple');
+      const pins = JSON.parse(fs.readFileSync(new URL('../bootstrap_inputs_pin.json', import.meta.url)));
+      const pin = pins.platforms[platform];
+      const pinFile = path.join(dir, 'pin.json');
+      const transport = path.join(dir, 'transport.mjs');
+      const sources = Object.fromEntries(pin.files.map(file => [
+        `https://api.github.com/repos/${pin.repository}/releases/assets/${file.asset}`,
+        path.resolve(process.env.REAL_BOOTSTRAP_TUPLE_DIR, file.path)]));
+      fs.writeFileSync(transport, `import fs from 'node:fs';
+        const sources = ${JSON.stringify(sources)};
+        globalThis.fetch = async url => {
+          if (!(url in sources)) throw new Error('unexpected release request: ' + url);
+          return new Response(fs.readFileSync(sources[url]));
+        };`);
+      const run = name => spawnSync(process.execPath, ['--import', transport,
+        new URL('./acquire_fixed_tuple.mjs', import.meta.url).pathname, pinFile,
+        path.join(dir, name), pin.tuple_sums_sha256, platform], {encoding: 'utf8'});
+      for (const arm of ['candidate', 'wrong-pin', 'restored']) {
+        const input = structuredClone(pins);
+        if (arm === 'wrong-pin') input.platforms[platform] = pins.platforms[
+          platform === 'linux_x86_64' ? 'linux_aarch64' : 'linux_x86_64'];
+        fs.writeFileSync(pinFile, JSON.stringify(input));
+        const result = run(arm);
+        assert.equal(result.status, arm === 'wrong-pin' ? 65 : 0, result.stderr);
+        if (arm === 'wrong-pin') {
+          assert.match(result.stderr, /BOOTSTRAP_TUPLE_PLATFORM_MISMATCH/);
+          assert.equal(fs.existsSync(path.join(dir, arm)), false);
+        } else {
+          for (const file of pin.files) assert.equal(digest(fs.readFileSync(path.join(dir, arm, file.path))), file.release_sha256);
+        }
+        console.log(`ASSERT fixed-real ${platform} arm=${arm} rc=${result.status} files=${arm === 'wrong-pin' ? 0 : pin.files.length}`);
+      }
+    } finally { fs.rmSync(dir, {recursive: true, force: true}); }
+  });
+}

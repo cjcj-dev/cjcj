@@ -39,11 +39,18 @@ The existing sccache action wraps C++ compilation. Publications remain
 prereleases. macOS tools remain available through the existing tools workflow;
 this static bootstrap tuple publisher selects only Linux platforms.
 
-The consumer selects by `CJCJ_SRCBUILD_TARGET` (or the native host identity).
+The Linux consumer selects by `CJCJ_SRCBUILD_TARGET` (or the native host identity).
 An absent platform pin returns 65 / `BOOTSTRAP_TUPLE_PLATFORM_PIN_MISSING`;
 a pin or verified MANIFEST for another platform returns 65 /
 `BOOTSTRAP_TUPLE_PLATFORM_MISMATCH`, before any bootstrap environment is exported.
-There is no cross-platform fallback. An optional
+There is no cross-platform fallback. The kkk2 release CLI uses the same selection
+and MANIFEST checks, taking the explicit `linux_$(uname -m)` platform argument;
+it also retains the caller's independent sums digest check.
+Darwin preparation verifies and exports its native host, AST, runtime and dylib
+inputs without acquiring or exporting a static tuple. Repository pins do not
+contain Darwin static tuples. Full Darwin bootstrap still requires a native
+static tuple and its downstream wiring; passing input preparation does not
+certify that full bootstrap. An optional
 `LLVM_TUPLE_SUMS_SHA_<platform>` override is checked against the downloaded sums;
 the default is that platform's reviewed `tuple_sums_sha256`.
 

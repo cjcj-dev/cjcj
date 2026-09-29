@@ -75,6 +75,12 @@ export function fixture(check, target = 'linux-x64') {
       attempt: 1, artifact: 456, commit: 'b'.repeat(40), files: [{path: 'SHA256SUMS', mode: 0o644,
       asset: 789, artifact_sha256: digest, release_sha256: digest},
       {path: 'MANIFEST', mode: 0o644, asset: 790, artifact_sha256: manifestDigest, release_sha256: manifestDigest}]}}}));
+    if (target.startsWith('darwin-')) {
+      // The real repository has Linux pins only. Do not invent a Darwin pin
+      // merely to get the native dylib consumer past an unrelated guard.
+      fs.copyFileSync(new URL('../bootstrap_inputs_pin.json', import.meta.url), pinFile);
+      delete env.CJCJ_BOOTSTRAP_COLOUR_TUPLE;
+    }
     env.CJCJ_BOOTSTRAP_INPUTS_PIN = pinFile;
     const transport = path.join(dir, 'transport.mjs');
     fs.writeFileSync(transport, `

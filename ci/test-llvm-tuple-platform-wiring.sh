@@ -10,7 +10,7 @@ cd "$work"
 export TMPDIR=$work/tmp
 mkdir tmp logs
 uptime > logs/uptime-before.txt
-arms=(green restored producer-cut pin-cut manifest-cut publisher-cut fixed-sums-cut)
+arms=(green restored producer-cut pin-cut manifest-cut publisher-cut fixed-sums-cut darwin-boundary-cut)
 for arm in "${arms[@]}"; do
   mkdir -p "$arm/build" "$arm/.github"
   cp -a "$root/ci" "$arm/ci"
@@ -28,6 +28,7 @@ python3 - <<'PY'
 from pathlib import Path
 import difflib
 cuts = {
+ 'darwin-boundary-cut': ('ci/release/prepare_bootstrap_inputs.mjs', 'if (!darwin) {', 'if (true) { // cut: impose Linux static tuple on Darwin'),
  'fixed-sums-cut': ('ci/release/acquire_fixed_tuple.mjs', "  verify(fs.readFileSync(path.join(tuple, 'SHA256SUMS')), sumsSha, 'LLVM_TUPLE_SUMS_SHA');", "  // cut: omit independent reviewed sums verification"),
  'producer-cut': ('ci/llvm-tuple-layout.sh', "printf 'PLATFORM=%s\\n' \"$platform\"", "printf 'PLATFORM=%s\\n' linux_x86_64"),
  'pin-cut': ('ci/release/tuple_platform.mjs', "if (pin.platform !== platform) platformFailure('BOOTSTRAP_TUPLE_PLATFORM_MISMATCH', platform, pin.platform);", "// cut: omit selected pin platform validation"),
@@ -61,20 +62,23 @@ for arm in "${arms[@]}"; do
 done
 for arm in green restored; do test "$(cat "logs/$arm.rc")" = 0; done
 cmp logs/green.sha256 logs/restored.sha256
-cuts=(producer-cut pin-cut manifest-cut publisher-cut fixed-sums-cut)
+cuts=(producer-cut pin-cut manifest-cut publisher-cut fixed-sums-cut darwin-boundary-cut)
 targets=('tuple producer preserves linux_aarch64 from tools manifest'
   'platform tuple rejects wrong-platform pin with rc 65 before acquisition'
   'platform tuple rejects digest-valid wrong-platform manifest with rc 65'
   'publisher refuses wrong platform before creating a prerelease'
-  'fixed release CLI preserves independent sums pin and existing destination on rejection')
+  'fixed release CLI preserves independent sums pin and existing destination on rejection'
+  'darwin-arm64 exports the reviewed native dylib and rejects changed bytes')
 for i in "${!cuts[@]}"; do
   arm=${cuts[$i]}
   test "$(cat "logs/$arm.rc")" = 1
   expected=1
-  if [[ $arm == pin-cut || $arm == manifest-cut ]]; then expected=2; fi
+  if [[ $arm == pin-cut || $arm == manifest-cut || $arm == darwin-boundary-cut ]]; then expected=2; fi
   grep -Fx "# fail $expected" "logs/$arm.log"
   grep -E '^not ok ' "logs/$arm.log" | grep -F -- "${targets[$i]}"
-  if [[ $arm == pin-cut ]]; then
+  if [[ $arm == darwin-boundary-cut ]]; then
+    grep -E '^not ok ' "logs/$arm.log" | grep -F 'darwin-x64 exports the reviewed native dylib and rejects changed bytes'
+  elif [[ $arm == pin-cut ]]; then
     grep -E '^not ok ' "logs/$arm.log" | grep -F 'fixed release CLI rejects wrong-platform pin before download'
   elif [[ $arm == manifest-cut ]]; then
     grep -E '^not ok ' "logs/$arm.log" | grep -F 'fixed release CLI rejects digest-valid foreign MANIFEST before publication'
