@@ -50,8 +50,8 @@ function runGate(gate, env) {
 
 test('patched runtime build.py inherits GC_UNIT_GATE_LANGUAGE_TESTS=defer', () => {
   const source = fs.readFileSync(PRODUCT_SOURCE, 'utf8');
-  assert.match(source, /env: patchedRuntimeBuildEnv\(\)/);
-  assert.match(source, /python3 build\.py build --target native --build-type release/);
+  assert.match(source, /const env = patchedRuntimeBuildEnv\(\)/);
+  assert.match(source, /runNativeBuild\(work, version, env, diagnostics\)/);
 
   const base = {
     PATH: process.env.PATH,
