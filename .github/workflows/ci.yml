@@ -209,6 +209,7 @@ jobs:
           require-compiles: ${{ job.status == 'success' }}
       - name: Build workspace
         run: |
+          node ci/check-codegen-runtime-layout.mjs
           node ci/release/trimpath.mjs .
           cjpm build
       # Deploy name must be cjcj, not cjc (process-name GC stack-root exclusion -> SEGV).

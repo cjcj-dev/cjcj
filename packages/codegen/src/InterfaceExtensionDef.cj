@@ -318,13 +318,13 @@ private class CGExtensionDef {
         }
         let typeInfoType = CGType.GetOrCreateTypeInfoType(cgMod.GetLLVMContext())
         let i8PtrType = unsafe { LLVMPointerType(LLVMInt8TypeInContext(cgMod.GetLLVMContext().raw), 0u32) }
-        let realTypeTemplatePtr = irBuilder.CreateStructGEP(typeInfoType, typeInfo, 11u32)
+        let realTypeTemplatePtr = irBuilder.CreateStructGEP(typeInfoType, typeInfo, UInt32(TypeInfoLayout.sourceGenericIndex))
         let realTypeTemplate = irBuilder.CreateLoad(i8PtrType, realTypeTemplatePtr, name: prefix + "_tt")
         let typeCmp = irBuilder.CreateICmp(LLVMIntPredicate.EQ, realTypeTemplate, GetTargetType(cgMod, derefType))
         HandleShortcutBranch(irBuilder, typeCmp, prefix + "_tt")
         let backupBB = irBuilder.GetInsertBlock()
         irBuilder.SetInsertPointForPreparingTypeInfo()
-        let typeInfosPtr = irBuilder.CreateStructGEP(typeInfoType, typeInfo, 12u32)
+        let typeInfosPtr = irBuilder.CreateStructGEP(typeInfoType, typeInfo, UInt32(TypeInfoLayout.typeArgsIndex))
         let typeInfosRaw = irBuilder.CreateLoad(i8PtrType, typeInfosPtr)
         let typeInfoPtrType = CGType.GetOrCreateTypeInfoPtrType(cgMod.GetLLVMContext())
         let typeInfos = irBuilder.CreateBitCast(typeInfosRaw, unsafe { LLVMPointerType(typeInfoPtrType, 0u32) })
@@ -437,7 +437,7 @@ private class CGExtensionDef {
             innerTypeMap[curType.objectId] = InnerTiInfo(curTi, true)
             irBuilder.SetInsertPoint(backupBB, backupIt)
             if (pathIdx + 1 < remainPath.size) {
-                let typeInfosPtr = irBuilder.CreateStructGEP(typeInfoType, curTi, 12u32)
+                let typeInfosPtr = irBuilder.CreateStructGEP(typeInfoType, curTi, UInt32(TypeInfoLayout.typeArgsIndex))
                 let typeInfosRaw = irBuilder.CreateLoad(i8PtrType, typeInfosPtr)
                 typeArgs = irBuilder.CreateBitCast(typeInfosRaw, unsafe { LLVMPointerType(typeInfoPtrType, 0u32) })
             }

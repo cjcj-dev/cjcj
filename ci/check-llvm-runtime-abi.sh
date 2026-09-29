@@ -102,6 +102,12 @@ if ! git -C "$llvm_repo" show \
     exit 2
 fi
 if python3 "$work/runtime/tools/generate-runtime-layout.py" --header "$header"; then
+    repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+    if ! python3 "$repo/ci/generate-codegen-runtime-layout.py" \
+        --runtime-root "$work" --header "$header" --check; then
+        printf 'ABI_PAIR=CODEGEN_MISMATCH llvm=%s runtime=%s\n' "$llvm_commit" "$runtime_commit"
+        exit 1
+    fi
     printf 'ABI_PAIR=OK llvm=%s runtime=%s\n' "$llvm_commit" "$runtime_commit"
 else
     printf 'ABI_PAIR=MISMATCH llvm=%s runtime=%s\n' "$llvm_commit" "$runtime_commit"
