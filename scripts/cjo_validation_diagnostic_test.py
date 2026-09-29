@@ -4,6 +4,7 @@
 Run separately per case so an unrelated emitted message cannot satisfy a case.
 The ELF and product archives must be built from the tested source revision.
 """
+from collections import Counter
 import argparse
 import hashlib
 import json
@@ -18,20 +19,23 @@ args = parser.parse_args()
 args.evidence.mkdir(parents=True, exist_ok=True)
 results = []
 for case in ("DifferentProducerVersion", "SameProducerVersion", "UnavailableProducerVersion",
-             "EmptyPackageNameUsesPath", "EmptyPackageNameAndPathUsesUnknown"):
+             "EmptyPackageNameUsesPath", "EmptyPackageNameAndPathUsesUnknown", "ValidDependencyHeader"):
     run = subprocess.run([str(args.elf.resolve()), "--no-color", "--show-all-output", "--no-progress", "--filter=CjoValidationDiagnosticTest." + case],
                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     (args.evidence / (case + ".log")).write_text(run.stdout)
     text = re.sub(r"\x1b\[[0-9;]*m", "", run.stdout)
     expected = re.findall(r"^FRONTEND_EXPECTED=(.*)$", text, re.M)
     observed = re.findall(r"^\s*error: (validation of ast file .*?)\s*$", text, re.M)
-    passed = (run.returncode == 0 and len(expected) == 1
-              and "FRONTEND_TARGET_BEGIN" in text and "FRONTEND_TARGET_END" in text
-              and expected[0] in observed)
+    expected_count = 0 if case == "ValidDependencyHeader" else (2 if case == "DifferentProducerVersion" else 1)
+    target_executed = ("IMPORT_TARGET loaded=true expected=true" in text if expected_count == 0
+                       else len(expected) == expected_count and "FRONTEND_TARGET_BEGIN" in text
+                       and "FRONTEND_TARGET_END" in text)
+    matches = Counter(observed) == Counter(expected)
+    passed = run.returncode == 0 and target_executed and matches
     results.append({"case": case, "rc": run.returncode,
-                    "target_assertion_executed": len(expected) == 1,
+                    "target_assertion_executed": target_executed,
                     "observed_frontend_messages": observed,
-                    "frontend_message_matches": len(expected) == 1 and expected[0] in observed,
+                    "frontend_message_matches": matches,
                     "pass": passed})
     print(json.dumps(results[-1]), flush=True)
 record = {"elf_sha256": hashlib.sha256(args.elf.read_bytes()).hexdigest(), "results": results}
