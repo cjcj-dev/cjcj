@@ -30,3 +30,7 @@ public struct FixedCell<T> {
     public mut func set(value: Int64): Unit { this.value = value }
 }
 public func boxedFixed<T>(value: Int64): FixedCell<T> { return FixedCell<T>(value) }
+
+public enum Tagged { Number(Int64) | Reference(Parent) }
+public func makeNumber(): Tagged { return Tagged.Number(23) }
+public func makeReference(): Tagged { return Tagged.Reference(Parent(5)) }
