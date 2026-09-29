@@ -10,12 +10,31 @@ private class VectorDownward {
     private static let INITIAL_SIZE: Int64 = 1024
     private static let MIN_ALIGNMENT: Int64 = 8
 
-    private var storage: Array<UInt8> = Array<UInt8>()
+    private var storage: CPointer<UInt8> = CPointer<UInt8>()
     public var reserved: Int64 = 0
     public var cur: Int64 = 0
     public var size: Int64 = 0
 
     public init() {}
+
+    ~init() { unsafe { LibC.free(storage) } }
+
+    public func reset(): Unit {
+        unsafe { LibC.free(storage) }
+        storage = CPointer<UInt8>()
+        reserved = 0
+        clear()
+    }
+
+    public func data(): CPointer<UInt8> { return unsafe { storage + cur } }
+
+    public func release(): DetachedBuffer {
+        let result = DetachedBuffer(storage, data(), size)
+        storage = CPointer<UInt8>()
+        reserved = 0
+        clear()
+        return result
+    }
 
     public func clear(): Unit {
         cur = reserved
@@ -45,38 +64,43 @@ private class VectorDownward {
             return
         }
         let start = makeSpace(bytes.size)
-        bytes.copyTo(storage, 0, start, bytes.size)
+        let handle = unsafe { acquireArrayRawData(bytes) }
+        try {
+            unsafe { memcpy(storage + start, handle.pointer, UIntNative(bytes.size)) }
+        } finally {
+            unsafe { releaseArrayRawData(handle) }
+        }
     }
 
     public func pushSmall(value: UInt8): Unit {
         let start = makeSpace(1)
-        storage[start] = value
+        unsafe { storage.write(start, value) }
     }
 
     public func pushSmall(value: UInt16): Unit {
         let start = makeSpace(2)
-        storage[start] = UInt8(value & 0xffu16)
-        storage[start + 1] = UInt8((value >> 8) & 0xffu16)
+        unsafe { storage.write(start, UInt8(value & 0xffu16)) }
+        unsafe { storage.write(start + 1, UInt8((value >> 8) & 0xffu16)) }
     }
 
     public func pushSmall(value: UInt32): Unit {
         let start = makeSpace(4)
-        storage[start] = UInt8(value & 0xffu32)
-        storage[start + 1] = UInt8((value >> 8) & 0xffu32)
-        storage[start + 2] = UInt8((value >> 16) & 0xffu32)
-        storage[start + 3] = UInt8((value >> 24) & 0xffu32)
+        unsafe { storage.write(start, UInt8(value & 0xffu32)) }
+        unsafe { storage.write(start + 1, UInt8((value >> 8) & 0xffu32)) }
+        unsafe { storage.write(start + 2, UInt8((value >> 16) & 0xffu32)) }
+        unsafe { storage.write(start + 3, UInt8((value >> 24) & 0xffu32)) }
     }
 
     public func pushSmall(value: UInt64): Unit {
         let start = makeSpace(8)
-        storage[start] = UInt8(value & 0xffu64)
-        storage[start + 1] = UInt8((value >> 8) & 0xffu64)
-        storage[start + 2] = UInt8((value >> 16) & 0xffu64)
-        storage[start + 3] = UInt8((value >> 24) & 0xffu64)
-        storage[start + 4] = UInt8((value >> 32) & 0xffu64)
-        storage[start + 5] = UInt8((value >> 40) & 0xffu64)
-        storage[start + 6] = UInt8((value >> 48) & 0xffu64)
-        storage[start + 7] = UInt8((value >> 56) & 0xffu64)
+        unsafe { storage.write(start, UInt8(value & 0xffu64)) }
+        unsafe { storage.write(start + 1, UInt8((value >> 8) & 0xffu64)) }
+        unsafe { storage.write(start + 2, UInt8((value >> 16) & 0xffu64)) }
+        unsafe { storage.write(start + 3, UInt8((value >> 24) & 0xffu64)) }
+        unsafe { storage.write(start + 4, UInt8((value >> 32) & 0xffu64)) }
+        unsafe { storage.write(start + 5, UInt8((value >> 40) & 0xffu64)) }
+        unsafe { storage.write(start + 6, UInt8((value >> 48) & 0xffu64)) }
+        unsafe { storage.write(start + 7, UInt8((value >> 56) & 0xffu64)) }
     }
 
     // vector_downward.h:211-227 (fill/pop).
@@ -84,7 +108,7 @@ private class VectorDownward {
         let start = makeSpace(zeroBytes)
         var idx: Int64 = 0
         while (idx < zeroBytes) {
-            storage[start + idx] = 0u8
+            unsafe { storage.write(start + idx, 0u8) }
             idx++
         }
     }
@@ -98,21 +122,11 @@ private class VectorDownward {
     }
 
     public func readAt(offset: Int64, displacement: Int64): UInt8 {
-        return storage[dataAt(offset) + displacement]
+        return unsafe { storage.read(dataAt(offset) + displacement) }
     }
 
     public func writeAt(offset: Int64, displacement: Int64, value: UInt8): Unit {
-        storage[dataAt(offset) + displacement] = value
-    }
-
-    // FlatBufferBuilder's Array carrier owns the only copy exposed to callers.
-    public func toArray(): Array<UInt8> {
-        if (size == 0) {
-            return Array<UInt8>()
-        }
-        let result = Array<UInt8>(size, repeat: 0u8)
-        storage.copyTo(result, cur, 0, size)
-        return result
+        unsafe { storage.write(dataAt(offset) + displacement, value) }
     }
 
     // vector_downward.h:269-284. Existing serialized bytes stay adjacent to
@@ -126,10 +140,8 @@ private class VectorDownward {
         }
         let remainder = growth % MIN_ALIGNMENT
         let newReserved = if (remainder == 0) { growth } else { growth + MIN_ALIGNMENT - remainder }
-        let newStorage = Array<UInt8>(newReserved, repeat: 0u8)
-        if (size > 0) {
-            storage.copyTo(newStorage, cur, newReserved - size, size)
-        }
+        let newStorage = if (storage.isNull()) { Allocate(newReserved) }
+            else { ReallocateDownward(storage, reserved, newReserved, size) }
         storage = newStorage
         reserved = newReserved
         cur = reserved - size
@@ -149,20 +161,21 @@ private class FlatBufferTableState {
     }
 }
 
-public class FlatBufferBuilder {
+public class FlatBufferBuilder <: Resource {
     private let buffer: VectorDownward = VectorDownward()
     private var stringPool: Option<HashMap<String, FlatBufferOffset>> = None
     private let vtableOffsets: ArrayList<FlatBufferOffset> = ArrayList<FlatBufferOffset>()
     private var minAlign: Int64 = 1
     private var currentTable: Option<FlatBufferTableState> = None
     private var finished: Bool = false
-    private var finishedBuffer: Option<Array<UInt8>> = None
+    private var closed: Bool = false
 
     // flatbuffer_builder.h:84-112 (FlatBufferBuilderImpl constructor state).
     public init() {}
 
     // flatbuffer_builder.h:166-176 (Clear).
     public func Clear(): Unit {
+        closed = false
         buffer.clear()
         if (let Some(pool) <- stringPool) {
             pool.clear()
@@ -171,7 +184,7 @@ public class FlatBufferBuilder {
         minAlign = 1
         currentTable = None
         finished = false
-        finishedBuffer = None
+
     }
 
     // flatbuffer_builder.h:178-180 (GetSize).
@@ -179,17 +192,42 @@ public class FlatBufferBuilder {
         return buffer.size
     }
 
-    // flatbuffer_builder.h:205-211 (GetBufferPointer); Array is the Cangjie byte-buffer carrier.
-    public func GetBufferPointer(): Array<UInt8> {
-        if (!finished) {
+    // flatbuffer_builder.h:205-211,218-224. Pointer is borrowed until mutation/Release.
+    public func GetBufferPointer(): CPointer<UInt8> {
+        if (!finished || closed) {
             throw IllegalStateException("flatbuffer is not finished")
         }
-        if (let Some(bytes) <- finishedBuffer) {
-            return bytes
+        return buffer.data()
+    }
+
+    // flatbuffer_builder.h:225-231: Finished() -> buf_.release() -> Clear() -> return.
+    // Clear() must run after ownership transfer so the builder is reusable; a
+    // stale string pool/offset list would make the next Finish() overflow.
+    public func Release(): DetachedBuffer {
+        let _ = GetBufferPointer()
+        let result = buffer.release()
+        Clear()
+        return result
+    }
+
+    public func isClosed(): Bool { return closed }
+    public func close(): Unit {
+        buffer.reset()
+        finished = false
+        closed = true
+    }
+
+    // Explicit adapter for consumers whose public wire reader still requires Array.
+    public func GetBufferArray(): Array<UInt8> {
+        let ptr = GetBufferPointer()
+        let result = Array<UInt8>(buffer.size, repeat: 0u8)
+        let handle = unsafe { acquireArrayRawData(result) }
+        try {
+            unsafe { memcpy(handle.pointer, ptr, UIntNative(result.size)) }
+        } finally {
+            unsafe { releaseArrayRawData(handle) }
         }
-        let bytes = buffer.toArray()
-        finishedBuffer = Some(bytes)
-        return bytes
+        return result
     }
 
     // flatbuffer_builder.h:530-563,1375-1385 (CreateString/CreateStringImpl).
@@ -529,7 +567,7 @@ public class FlatBufferBuilder {
     }
 
     // flatbuffer_builder.h:1224-1229,1258-1282 (Finish with four-byte identifier).
-    public func Finish(root: FlatBufferOffset, fileIdentifier: String): Array<UInt8> {
+    public func Finish(root: FlatBufferOffset, fileIdentifier: String): Unit {
         CheckFinishState()
         if (fileIdentifier.size != 4) {
             throw IllegalArgumentException("flatbuffer file identifier must be 4 bytes")
@@ -539,16 +577,16 @@ public class FlatBufferBuilder {
         buffer.push(ident)
         PrependUOffset(root)
         finished = true
-        return GetBufferPointer()
+
     }
 
     // flatbuffer_builder.h:1224-1229,1258-1282 (Finish without identifier).
-    public func Finish(root: FlatBufferOffset): Array<UInt8> {
+    public func Finish(root: FlatBufferOffset): Unit {
         CheckFinishState()
         Prep(minAlign, 4)
         PrependUOffset(root)
         finished = true
-        return GetBufferPointer()
+
     }
 
     // flatbuffer_builder.h:676-684 (StartVector).
