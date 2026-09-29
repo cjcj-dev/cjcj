@@ -15,7 +15,7 @@ const pins = file => Object.fromEntries(read(file).trim().split('\n').map(line =
 }));
 const runtime = pins('ci/runtime_pin.env');
 const llvm = pins('ci/llvm_pin.env');
-const input = JSON.parse(read('ci/bootstrap_inputs_pin.json'));
+const input = JSON.parse(read('ci/bootstrap_inputs_pin.json')).platforms.linux_x86_64;
 
 test('release runtime loader selects the stack-slot-root runtime paired with LLVM', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'release-pair-'));

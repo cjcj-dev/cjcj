@@ -3,9 +3,9 @@ name: Reusable LLVM tools
 on:
   workflow_call:
     outputs:
-      tuple_artifact_id:
-        description: Fixed static tuple artifact from this run.
-        value: ${{ jobs.static-tuple.outputs.artifact_id }}
+      tuple_platforms:
+        description: Selected Linux static tuple platforms from this run.
+        value: ${{ jobs.plan.outputs.tuple_platforms }}
     inputs:
       cache-component:
         description: Isolated dylib cache namespace; reuse for a cold/warm pair.
@@ -58,6 +58,7 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       matrix: ${{ steps.select.outputs.matrix }}
+      tuple_platforms: ${{ steps.select.outputs.tuple_platforms }}
     steps:
       - name: Select the requested tuples
         id: select
@@ -85,12 +86,7 @@ jobs:
             echo "no tuple matched platforms=$REQUESTED" >&2
             exit 1
           fi
-          # Only an explicit publication builds the X86 static colour tuple.
-          # Source matrix calls consume the immutable artifact from the pin.
-          if [ "$PUBLISH_TUPLE" = true ]; then
-            selected="$(printf '%s' "$selected" | jq -c --argjson all "$all" \
-              '. + [$all[] | select(.platform == "linux_x86_64")] | unique_by(.platform)')"
-          fi
+          printf 'tuple_platforms=%s\n' "$(printf '%s' "$selected" | jq -c '[.[] | select(.platform | startswith("linux_")) | .platform]')" >> "$GITHUB_OUTPUT"
           echo "selected $count tuple(s) for platforms=$REQUESTED"
           printf 'matrix=%s\n' "$(printf '%s' "$selected" | jq -c '{include: .}')" >> "$GITHUB_OUTPUT"
 
@@ -361,25 +357,27 @@ jobs:
           retention-days: 7
 
   static-tuple:
-    outputs:
-      artifact_id: ${{ steps.static-artifact.outputs.artifact-id }}
     if: inputs.publish_tuple
     name: Publish static colour LLVM tuple
-    needs: build-tools
-    runs-on: ubuntu-22.04
+    needs: [plan, build-tools]
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: ${{ fromJson(needs.plan.outputs.tuple_platforms) }}
+    runs-on: ${{ matrix.platform == 'linux_aarch64' && 'ubuntu-24.04-arm' || 'ubuntu-22.04' }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
-          name: fixed-llvm-tools-linux_x86_64
-          path: fixed-toolchain/linux_x86_64
+          name: fixed-llvm-tools-${{ matrix.platform }}
+          path: fixed-toolchain/${{ matrix.platform }}
       - name: Publish the shared ten-payload layout
         shell: bash
         run: |
           set -euo pipefail
           source ci/llvm_pin.env
           REPO_ROOT="$GITHUB_WORKSPACE"
-          CJCJ_FIXED_LLVM_DIR="$GITHUB_WORKSPACE/fixed-toolchain/linux_x86_64"
+          CJCJ_FIXED_LLVM_DIR="$GITHUB_WORKSPACE/fixed-toolchain/${{ matrix.platform }}"
           source ci/llvm-tuple-layout.sh
           publish_fixed_tuple_to_depot "$RUNNER_TEMP/llvm-tuple"
           tuple="$RUNNER_TEMP/llvm-tuple/$LLVM_SHA/$CANGJIE_COMPILER_SHA"
@@ -389,7 +387,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         id: static-artifact
         with:
-          name: static-llvm-tuple-linux_x86_64
+          name: static-llvm-tuple-${{ matrix.platform }}
           path: ${{ env.STATIC_TUPLE }}
           if-no-files-found: error
           retention-days: 90

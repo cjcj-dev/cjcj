@@ -18,7 +18,7 @@ else
         printf 'fixture %s\n' "$tool" | gzip -n > "$CJCJ_FIXED_LLVM_DIR/$tool.gz"
     done
     printf 'fixture shim\n' > "$CJCJ_FIXED_LLVM_DIR/cjselfhost_llvmshim.o"
-    printf 'fixture manifest\n' > "$CJCJ_FIXED_LLVM_DIR/llvm-tools.manifest"
+    printf 'PLATFORM=linux_x86_64\n' > "$CJCJ_FIXED_LLVM_DIR/llvm-tools.manifest"
     publish_fixed_tuple_to_depot "$work/depot"
     tuple="$work/depot/$LLVM_SHA/$CANGJIE_COMPILER_SHA"
 fi
