@@ -208,7 +208,9 @@ jobs:
           platform: ${{ matrix.runner }}
           require-compiles: ${{ job.status == 'success' }}
       - name: Build workspace
-        run: cjpm build
+        run: |
+          node ci/release/trimpath.mjs .
+          cjpm build
       # Deploy name must be cjcj, not cjc (process-name GC stack-root exclusion -> SEGV).
       - name: Compose compiler
         run: |
