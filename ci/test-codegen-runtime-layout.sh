@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Real frontend -> bitcode -> independent LLVM DataLayout/IR assertions.
-# Compiler must be the cjc-frontend entry of the candidate product.
+# Compiler is copied to a private frontend entry; no SDK executable is replaced.
 set -euo pipefail
 ulimit -c 0
 repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-compiler=${1:?cjc-frontend entry}
+compiler=${1:?candidate compiler}
 sdk=${2:?host SDK}
 llvm_library=${3:?paired libLLVM}
 llvm_repo=${4:?paired LLVM source}
@@ -14,6 +14,11 @@ source "$repo/ci/llvm_pin.env"
 source "$repo/ci/runtime_pin.env"
 mkdir -p "$work"
 work=$(cd "$work" && pwd)
+mkdir -p "$work/frontend"
+cp "$compiler" "$work/frontend/cjcj-stage1"
+cmp "$compiler" "$work/frontend/cjcj-stage1"
+ln -s cjcj-stage1 "$work/frontend/cjc-frontend"
+compiler="$work/frontend/cjc-frontend"
 # The source check includes the generated Cangjie file, not just the LLVM copy.
 bash "$repo/ci/check-llvm-runtime-abi.sh" --llvm-repo "$llvm_repo" --llvm-ref "$LLVM_SHA" \
     --runtime-repo "$runtime_repo" --runtime-ref "$RUNTIME_REF" > "$work/pairing.log" 2>&1

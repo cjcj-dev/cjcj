@@ -1,5 +1,6 @@
-Run `ci/test-codegen-runtime-layout.sh FRONTEND HOST_SDK PAIRED_LIBLLVM LLVM_REPO RUNTIME_REPO OUTPUT`.
-The frontend must be the real candidate `cjc-frontend` entry. The two source repositories
+Run `ci/test-codegen-runtime-layout.sh COMPILER HOST_SDK PAIRED_LIBLLVM LLVM_REPO RUNTIME_REPO OUTPUT`.
+The compiler must be the real candidate product; the runner copies it into a private
+`cjc-frontend` entry. Bootstrap stage0 runs this on Linux x64, including seed cache hits. The two source repositories
 must contain the commits named by the pins. The host SDK supplies its matching runtime
 and std; the paired LLVM library must both produce and read the bitcode.
 
