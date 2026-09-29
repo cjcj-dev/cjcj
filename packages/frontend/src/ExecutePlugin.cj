@@ -8,6 +8,7 @@ import cjcj::chir.Expression as CHIRExpression
 import cjcj::macro_pkg.{CloseSymbolTable, GetMethodPointer, OpenSymbolTableSafely, RuntimeHandle}
 import cjcj::utils.CJC_ASSERT
 import std.collection.*
+import cjcj::flatbuffers.DetachedBuffer
 
 @C
 struct PluginResult {
@@ -25,7 +26,7 @@ struct PluginResult {
 class ExecutePlugin {
     private let builder: CHIRBuilder
     private var handle: RuntimeHandle = RuntimeHandle()
-    private var serializedData: Array<UInt8> = Array<UInt8>()
+    private var serializedData: DetachedBuffer = DetachedBuffer()
     private var pluginResult: PluginResult = PluginResult()
 
     private let srcCodeImportedFuncNames: HashSet<String> = HashSet<String>()
@@ -44,6 +45,7 @@ class ExecutePlugin {
     }
 
     func SerializePackage(pkg: PluginCHIRPackage): Bool {
+        serializedData.close()
         serializedData = CHIRSerializer.Serialize(pkg)
         if (serializedData.isEmpty()) {
             return false
@@ -52,22 +54,21 @@ class ExecutePlugin {
     }
 
     func Execute(pluginPath: String): Bool {
-        handle = OpenSymbolTableSafely(pluginPath)
-        if (!handle.opened) {
-            return false
-        }
-        let functionPointer = GetMethodPointer(handle, "executeCHIRPlugins")
-        if (functionPointer.isNull()) {
-            return false
-        }
-        let execute = CFunc<(CPointer<UInt8>, Int64) -> PluginResult>(functionPointer)
-        let dataHandle = unsafe { acquireArrayRawData(serializedData) }
         try {
-            pluginResult = unsafe { execute(dataHandle.pointer, serializedData.size) }
+            handle = OpenSymbolTableSafely(pluginPath)
+            if (!handle.opened) {
+                return false
+            }
+            let functionPointer = GetMethodPointer(handle, "executeCHIRPlugins")
+            if (functionPointer.isNull()) {
+                return false
+            }
+            let execute = CFunc<(CPointer<UInt8>, Int64) -> PluginResult>(functionPointer)
+            pluginResult = unsafe { execute(serializedData.GetBufferPointer(), serializedData.size) }
+            return pluginResult.success
         } finally {
-            unsafe { releaseArrayRawData<UInt8>(dataHandle) }
+            serializedData.close()
         }
-        return pluginResult.success
     }
 
     func DeserializePluginResult(

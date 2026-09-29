@@ -8,7 +8,9 @@ import cjcj::flatbuffers.{FlatBufferBuilder, FlatBufferOffset, FlatBufferString,
 import cjcj::modules.{FB_MAX_DEPTH, FB_MAX_TABLES}
 import cjcj::parse.ASTHasher
 
-public class HashedASTWriter {
+public class HashedASTWriter <: Resource {
+    public func isClosed(): Bool { return builder.isClosed() }
+    public func close(): Unit { builder.close() }
     private let builder: FlatBufferBuilder = FlatBufferBuilder()
     private let bitcodeFilesName: ArrayList<FlatBufferOffset> = ArrayList<FlatBufferOffset>()
     private let compileArgs: ArrayList<FlatBufferOffset> = ArrayList<FlatBufferOffset>()

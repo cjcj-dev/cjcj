@@ -1,6 +1,7 @@
 package cjcj::flatbuffers
 
 import std.collection.ArrayList
+import std.fs.*
 import std.unittest.*
 import std.unittest.testmacro.*
 
@@ -69,7 +70,8 @@ class FlatBufferBuilderTest {
         builder.AddOffset(1, items)
         builder.AddOffset(0, title)
         let rootOffset = builder.EndTable()
-        let bytes = builder.Finish(rootOffset, "FBWT")
+        builder.Finish(rootOffset, "FBWT")
+        let bytes = builder.GetBufferArray()
 
         let expected: Array<UInt8> = [
             20u8, 0u8, 0u8, 0u8, 70u8, 66u8, 87u8, 84u8, 0u8, 0u8, 0u8, 0u8,
@@ -91,7 +93,7 @@ class FlatBufferBuilderTest {
         ]
         @Expect(bytes == expected)
         @Expect(builder.GetSize(), 192)
-        @Expect(builder.GetBufferPointer() == expected)
+        @Expect(builder.GetBufferArray() == expected)
 
         let root = Root(bytes, Int64(ReadScalar<UInt32>(bytes, 0)))
         @Expect(root.title(), "same")
@@ -125,7 +127,8 @@ class FlatBufferBuilderTest {
         dedupBuilder.StartTable(2)
         dedupBuilder.AddOffset(1, emptyItems)
         let dedupRootOffset = dedupBuilder.EndTable()
-        let dedupBytes = dedupBuilder.Finish(dedupRootOffset)
+        dedupBuilder.Finish(dedupRootOffset)
+        let dedupBytes = dedupBuilder.GetBufferArray()
         let dedupRoot = Root(dedupBytes, Int64(ReadScalar<UInt32>(dedupBytes, 0)))
         let dedupItems = dedupRoot.items()
         let firstDedup = Item(dedupBytes, (dedupItems.Get(0u32) as Int64).getOrThrow())
@@ -150,7 +153,8 @@ class FlatBufferBuilderTest {
         builder.StartTable(1)
         builder.AddOffset(0, second)
         let rootOffset = builder.EndTable()
-        let bytes = builder.Finish(rootOffset)
+        builder.Finish(rootOffset)
+        let bytes = builder.GetBufferArray()
 
         let expected = Array<UInt8>(4124, repeat: 0u8)
         expected[0] = 12u8
@@ -163,7 +167,7 @@ class FlatBufferBuilderTest {
         expected[21] = 16u8
         payloadBytes.copyTo(expected, 0, 24, payloadBytes.size)
         @Expect(bytes == expected)
-        @Expect(builder.GetBufferPointer() == expected)
+        @Expect(builder.GetBufferArray() == expected)
 
         let root = Root(bytes, Int64(ReadScalar<UInt32>(bytes, 0)))
         @Expect(root.title(), payload)
@@ -186,7 +190,8 @@ class FlatBufferBuilderTest {
 
         let builder = FlatBufferBuilder()
         let vector = builder.CreateVectorOfStructs(values, elementSize: 8, alignment: 8)
-        let bytes = builder.Finish(vector)
+        builder.Finish(vector)
+        let bytes = builder.GetBufferArray()
         let expected = Array<UInt8>(4112, repeat: 0u8)
         expected[0] = 4u8
         expected[4] = 1u8
@@ -201,11 +206,69 @@ class FlatBufferBuilderTest {
         smallValues.add(8u8)
         smallValues.add(9u8)
         let smallVector = builder.CreateVectorU8(smallValues)
-        let afterClear = builder.Finish(smallVector)
+        builder.Finish(smallVector)
+        let afterClear = builder.GetBufferArray()
         let expectedAfterClear: Array<UInt8> = [
             4u8, 0u8, 0u8, 0u8, 3u8, 0u8, 0u8, 0u8, 7u8, 8u8, 9u8, 0u8
         ]
         @Expect(afterClear == expectedAfterClear)
-        @Expect(builder.GetBufferPointer() == expectedAfterClear)
+        @Expect(builder.GetBufferArray() == expectedAfterClear)
     }
+
+    @TestCase
+    func releasedNativeBufferSurvivesBuilderClearAndClose(): Unit {
+        let builder = FlatBufferBuilder()
+        let root = builder.CreateString("owned bytes")
+        builder.Finish(root)
+        let expected = builder.GetBufferArray()
+        let ptr = builder.GetBufferPointer()
+        try (detached = builder.Release()) {
+            @Expect(detached.GetBufferPointer().toUIntNative() == ptr.toUIntNative())
+            @Expect(builder.GetSize(), 0)
+            builder.Clear()
+            let replacement = builder.CreateString("replacement")
+            builder.Finish(replacement)
+            builder.close()
+            let actual = Array<UInt8>(detached.size,
+                { i => unsafe { detached.GetBufferPointer().read(i) } })
+            println("ASSERT detached ownership bytes")
+            @Expect(actual == expected)
+        }
+        builder.close()
+    }
+
+    @TestCase
+    func nativeFileWriteMatchesFinishedWire(): Unit {
+        let path = "flatbuffers-native-write-test.bin"
+        try (builder = FlatBufferBuilder()) {
+            let root = builder.CreateString("native file payload")
+            builder.Finish(root)
+            let expected = builder.GetBufferArray()
+            try {
+                WriteFlatBufferToFile(path, builder.GetBufferPointer(), builder.GetSize())
+                let actual = File.readFrom(path)
+                println("ASSERT native file exact bytes")
+                @Expect(actual == expected)
+            } finally {
+                let _ = removeIfExists(path)
+            }
+        }
+    }
+
+    @TestCase
+    func exceptionalScopeClosesNativeAllocation(): Unit {
+        let builder = FlatBufferBuilder()
+        try {
+            try (resource = builder) {
+                let _ = resource.CreateString("exception scope")
+                throw Exception("leave builder scope")
+            }
+        } catch (_: Exception) {
+            ()
+        }
+        println("ASSERT exceptional builder closed")
+        @Expect(builder.isClosed())
+        @Expect(builder.GetSize(), 0)
+    }
+
 }
