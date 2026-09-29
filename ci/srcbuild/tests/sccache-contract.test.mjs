@@ -47,7 +47,15 @@ const CXX_JOBS = new Map([
   ['build-windows-runtime.yml/build-runtime', {component: 'windows-runtime', pin: /env\.RUNTIME_REF/}],
   ['windows-runtime-export-contract.yml/native-contract', {component: 'windows-runtime', pin: /env\.RUNTIME_REF/}],
   ['windows-runtime-link.yml/link', {component: 'windows-runtime', pin: /env\.RUNTIME_REF/}],
-  ['srcbuild.yml/srcbuild', {component: 'srcbuild', pin: /env\.RUNTIME_REF/}],
+  ['srcbuild.yml/source-stage0', {component: 'srcbuild-stage0', pin: /env\.RUNTIME_REF/}],
+  ['srcbuild.yml/source-stage1-initial-std', {component: 'srcbuild-stage1-initial-std', pin: /env\.RUNTIME_REF/}],
+  ['srcbuild.yml/source-stage1-std', {component: 'srcbuild-stage1-std', pin: /env\.RUNTIME_REF/}],
+  ['srcbuild.yml/source-stage1-compiler', {component: 'srcbuild-stage1-compiler', pin: /env\.RUNTIME_REF/}],
+  ['srcbuild.yml/source-stage3', {component: 'srcbuild-stage3', pin: /env\.RUNTIME_REF/}],
+  ['srcbuild.yml/srcbuild', {component: 'srcbuild-package', pin: /env\.RUNTIME_REF/}],
+  ['srcbuild.yml/source-android', {component: 'srcbuild-android', pin: /env\.RUNTIME_REF/}],
+  ['srcbuild.yml/source-mingw', {component: 'srcbuild-mingw', pin: /env\.RUNTIME_REF/}],
+  ['srcbuild.yml/source-windows', {component: 'srcbuild-windows', pin: /env\.RUNTIME_REF/}],
   ['ci.yml/build', {component: 'runtime', pin: /env\.RUNTIME_REF/}],
   ['platform-matrix.yml/darwin-runtime', {component: 'runtime', pin: /env\.RUNTIME_REF/}],
   ['platform-matrix.yml/colour-runtime', {component: 'runtime', pin: /env\.RUNTIME_REF/}],
@@ -64,7 +72,7 @@ const CXX_JOBS = new Map([
 // or configures one is excluded below rather than left out here.
 // `cc` needs the extra guard: a bare word boundary also matches the end of a
 // filename like src/foo.cc, and a file being copied is not a compile.
-const COMPILES = /(\bcmake\b|\bninja\b|\bmake\b|build\.py build|(?<![.\w-])cc\b|\bgcc\b|\bg\+\+|clang\+\+|\bclang\b|build_patched_runtime\.mjs|build_runtime\.mjs|test_windows_runtime_link\.mjs|build_tuple\.sh|install-static-libs|gha_run\.sh|build-stage3\.mjs|build-windows-final-std\.mjs|build-android-final-std\.mjs|build-android-runtime\.mjs|build_shim\.mjs|build_windows_std_ast\.mjs|build_ast_support\.sh)/;
+const COMPILES = /(\bcmake\b|\bninja\b|\bmake\b|build\.py build|(?<![.\w-])cc\b|\bgcc\b|\bg\+\+|clang\+\+|\bclang\b|build_patched_runtime\.mjs|build_runtime\.mjs|test_windows_runtime_link\.mjs|build_tuple\.sh|install-static-libs|gha_run\.sh|build-stage3\.mjs|build-windows-final-std\.mjs|build-android-final-std\.mjs|build-android-runtime\.mjs|build_shim\.mjs|build_windows_std_ast\.mjs|build_ast_support\.sh|build-shim\.mjs|install-mingw)/;
 // Only the package managers. Every other exclusion tried here -- the MSYS2
 // package list, --gcc-toolchain, CMAKE_C*_COMPILER=, shellcheck/actionlint --
 // was measured and carried nothing: dropping all six leaves the suite at the
@@ -115,7 +123,9 @@ test('every C/C++ compile job starts sccache before compiling and reports after,
     assert.match(steps[report], /^\s*if: always\(\)/m, `${id}: the report must run when the build failed too`);
     // Enforced on green jobs only: a job that already failed before its first
     // compile must not gain a second, misleading error from the report.
-    assert.match(steps[report], /^\s*require-compiles: \$\{\{ job\.status == 'success' \}\}\s*$/m,
+    assert.match(steps[report], id === 'srcbuild.yml/source-mingw'
+      ? /^\s*require-compiles: \$\{\{ job\.status == 'success' && steps\.windows-mingw-cache\.outputs\.cache-hit != 'true' \}\}\s*$/m
+      : /^\s*require-compiles: \$\{\{ job\.status == 'success' \}\}\s*$/m,
       `${id}: the report must require compiles exactly when the job is otherwise green`);
     // A launcher only works for a job whose compile steps see it: the start
     // step must not be guarded by a condition the compile steps do not share.

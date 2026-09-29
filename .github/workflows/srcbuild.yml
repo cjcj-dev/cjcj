@@ -169,8 +169,8 @@ jobs:
       platforms: ${{ needs.plan.outputs.llvm_platforms }}
       rebuild: ${{ inputs.rebuild_llvm || false }}
 
-  srcbuild:
-    name: ${{ matrix.target }} / source SDK
+  source-stage0:
+    name: ${{ matrix.target }} / source-stage0
     needs: [plan, fixed-llvm]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 360
@@ -194,6 +194,8 @@ jobs:
     steps:
       - name: Checkout cjcj
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Load host toolchain pin
         run: cat ci/host_sdk_pin.env >> "$GITHUB_ENV"
@@ -215,8 +217,16 @@ jobs:
           set -euo pipefail
           export CJCJ_SDK_STOCK_LLC=1
           npx --yes zx@8 ci/setup_sdk.mjs
-          host_sdk="$HOME/.cjv/toolchains/$CJCJ_TOOLCHAIN"
+          host_sdk="$GITHUB_WORKSPACE/.srcbuild/host-sdk"
+          mkdir -p "$(dirname "$host_sdk")"
+          cp -a "$HOME/.cjv/toolchains/$CJCJ_TOOLCHAIN" "$host_sdk"
+          cp -a "$HOME/.cjv/stdx/$CJCJ_TOOLCHAIN" "$GITHUB_WORKSPACE/.srcbuild/host-stdx"
+          echo "CANGJIE_STDX_PATH=$GITHUB_WORKSPACE/.srcbuild/host-stdx/static/stdx" >> "$GITHUB_ENV"
+          echo "CANGJIE_HOME=$host_sdk" >> "$GITHUB_ENV"
+          echo "$host_sdk/bin" >> "$GITHUB_PATH"
+          echo "$host_sdk/tools/bin" >> "$GITHUB_PATH"
           test -d "$host_sdk"
+          node ci/srcbuild/host-env.mjs "$host_sdk"
           echo "CJCJ_SRCBUILD_BOOTSTRAP_SDK=$host_sdk" >> "$GITHUB_ENV"
           echo "CJCJ_SRCBUILD_HOST_SDK=$host_sdk" >> "$GITHUB_ENV"
 
@@ -231,15 +241,15 @@ jobs:
         run: |
           set -euo pipefail
           test -d "$CJCJ_SRCBUILD_HOST_SDK"
-          base_archive="$RUNNER_TEMP/g2-base-sdk/host-sdk.tar"
+          base_archive="$GITHUB_WORKSPACE/.srcbuild/g2-base-sdk/host-sdk.tar"
           mkdir -p "$(dirname "$base_archive")"
           tar -cf "$base_archive" -C "$CJCJ_SRCBUILD_HOST_SDK" .
           node ci/generate-freeze.mjs \
             --base-sdk "$base_archive" \
             --workflow-ref "${GITHUB_SHA:-$(git rev-parse HEAD)}" \
-            --evidence-root "$RUNNER_TEMP/g2-campaigns" \
-            | tee "$RUNNER_TEMP/g2-freeze.log"
-          identity=$(sed -n 's/^G2_IDENTITY=//p' "$RUNNER_TEMP/g2-freeze.log")
+            --evidence-root "$GITHUB_WORKSPACE/.srcbuild/g2-campaigns" \
+            | tee "$GITHUB_WORKSPACE/.srcbuild/g2-freeze.log"
+          identity=$(sed -n 's/^G2_IDENTITY=//p' "$GITHUB_WORKSPACE/.srcbuild/g2-freeze.log")
           test -f "$identity"
           echo "G2_IDENTITY=$identity" >> "$GITHUB_ENV"
           echo "G2_CAMPAIGN_DIR=$(dirname "$identity")" >> "$GITHUB_ENV"
@@ -254,7 +264,7 @@ jobs:
       - name: Start sccache
         uses: ./.github/actions/sccache
         with:
-          component: srcbuild
+          component: srcbuild-stage0
           platform: ${{ matrix.target }}
           pin: ${{ env.RUNTIME_REF }}
           cache-size: 2G
@@ -289,6 +299,7 @@ jobs:
         run: |
           value=$(npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" --cangjie-version "$REQUESTED_REF" print-version)
           echo "value=$value" >> "$GITHUB_OUTPUT"
+          echo "SOURCE_SDK_VERSION=$value" >> "$GITHUB_ENV"
 
       - name: Download pinned source
         run: |
@@ -320,7 +331,7 @@ jobs:
         run: |
           set -euo pipefail
           node ci/release/host_llvm.mjs env >> "$GITHUB_ENV"
-          echo "CJCJ_BOOTSTRAP_HOST_LLVM_ARTIFACT=$RUNNER_TEMP/bootstrap-host-llvm" >> "$GITHUB_ENV"
+          echo "CJCJ_BOOTSTRAP_HOST_LLVM_ARTIFACT=$GITHUB_WORKSPACE/.srcbuild/inputs/bootstrap-host-llvm" >> "$GITHUB_ENV"
 
       - name: Download pinned bootstrap host LLVM
         uses: actions/download-artifact@v8
@@ -343,7 +354,7 @@ jobs:
           test -n "$LLVM_DYLIB_RUN_ATTEMPT"
           test -n "$LLVM_DYLIB_ARTIFACT_ID"
           cat "ci/llvm-dylib/${{ matrix.llvm_platform }}.env" >> "$GITHUB_ENV"
-          echo "CJCJ_BOOTSTRAP_DYLIB_ARTIFACT=$RUNNER_TEMP/llvm-depot/$LLVM_SHA/$CANGJIE_COMPILER_SHA/dylib" >> "$GITHUB_ENV"
+          echo "CJCJ_BOOTSTRAP_DYLIB_ARTIFACT=$GITHUB_WORKSPACE/.srcbuild/inputs/llvm-depot/$LLVM_SHA/$CANGJIE_COMPILER_SHA/dylib" >> "$GITHUB_ENV"
 
       - name: Download pinned in-process LLVM dylib
         if: runner.os == 'Linux' || runner.os == 'macOS'
@@ -364,7 +375,7 @@ jobs:
           pin="ci/colour-runtime/$RUNTIME_PLATFORM.env"
           test -f "$pin" || { echo "COLOUR_RT_PLATFORM_PIN_MISSING: $RUNTIME_PLATFORM" >&2; exit 1; }
           cat "$pin" >> "$GITHUB_ENV"
-          echo "CJCJ_BOOTSTRAP_COLOUR_RT=$RUNNER_TEMP/colour-runtime" >> "$GITHUB_ENV"
+          echo "CJCJ_BOOTSTRAP_COLOUR_RT=$GITHUB_WORKSPACE/.srcbuild/inputs/colour-runtime" >> "$GITHUB_ENV"
 
       - name: Download pinned colour runtime pair
         uses: actions/download-artifact@v8
@@ -389,8 +400,8 @@ jobs:
           so="$CJCJ_BOOTSTRAP_COLOUR_RT/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so"
           archive="$CJCJ_BOOTSTRAP_COLOUR_RT/lib/linux_x86_64_cjnative/libcangjie-runtime.a"
           sha256sum "$so" "$archive"
-          nm --defined-only "$so" > "$RUNNER_TEMP/colour-runtime-symbols.txt"
-          awk '$NF ~ /^g_cjLoadBadMask(@@?[^[:space:]]+)?$/ {print; n++} END {print "COLOUR_RT_DEFINED_MASK_COUNT=" n+0; exit n != 1}' "$RUNNER_TEMP/colour-runtime-symbols.txt"
+          nm --defined-only "$so" > "$GITHUB_WORKSPACE/.srcbuild/inputs/colour-runtime-symbols.txt"
+          awk '$NF ~ /^g_cjLoadBadMask(@@?[^[:space:]]+)?$/ {print; n++} END {print "COLOUR_RT_DEFINED_MASK_COUNT=" n+0; exit n != 1}' "$GITHUB_WORKSPACE/.srcbuild/inputs/colour-runtime-symbols.txt"
 
       - name: Load immutable AST support provenance
         shell: bash
@@ -412,7 +423,7 @@ jobs:
           merge-multiple: true
           github-token: ${{ github.token }}
           run-id: ${{ env.AST_SUPPORT_RUN_ID }}
-          path: ${{ runner.temp }}/ast-support
+          path: ${{ github.workspace }}/.srcbuild/inputs/ast-support
 
       # set -a: `source` alone makes shell variables, and prepare_bootstrap_inputs
       # reads LLVM_SHA from its environment -- without the export every host
@@ -427,7 +438,9 @@ jobs:
           source ci/llvm_pin.env
           source ci/runtime_pin.env
           set +a
-          CJCJ_BOOTSTRAP_AST_ARTIFACT="$RUNNER_TEMP/ast-support/libcangjie-ast-support.a" \
+          CJCJ_BOOTSTRAP_INPUTS_WORK="$GITHUB_WORKSPACE/.srcbuild/inputs/bootstrap-inputs" \
+          CJCJ_BOOTSTRAP_HOST_LLVM_WORK="$GITHUB_WORKSPACE/.srcbuild/inputs/host-llvm" \
+          CJCJ_BOOTSTRAP_AST_ARTIFACT="$GITHUB_WORKSPACE/.srcbuild/inputs/ast-support/libcangjie-ast-support.a" \
             node ci/release/prepare_bootstrap_inputs.mjs
 
       - name: Verify native Linux stage1 host identities
@@ -550,6 +563,230 @@ jobs:
         shell: bash
         run: bash ci/bootstrap/gha_run.sh stage0
 
+      - name: Seal source phase handoff
+        run: node ci/srcbuild/job-handoff.mjs pack stage0 "$RUNNER_TEMP/source-handoff-output"
+
+      - name: Upload source phase handoff
+        uses: actions/upload-artifact@v7
+        with:
+          name: source-handoff-${{ matrix.target }}-stage0
+          path: ${{ runner.temp }}/source-handoff-output
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Report sccache
+        if: always()
+        uses: ./.github/actions/sccache-report
+        with:
+          component: srcbuild-stage0
+          platform: ${{ matrix.target }}
+          require-compiles: ${{ job.status == 'success' }}
+
+  source-stage1-initial-std:
+    name: ${{ matrix.target }} / source-stage1-initial-std
+    needs: [plan, source-stage0]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
+    env:
+      CANGJIE_WORKSPACE: ${{ github.workspace }}/.srcbuild/workspace
+      CANGJIE_BUILD_ROOT: ${{ github.workspace }}/.srcbuild/buildtools
+      CJCJ_SRCBUILD_TARGET: ${{ matrix.target }}
+      CJCJ_FIXED_LLVM_DIR: ${{ github.workspace }}/.srcbuild/fixed-llc
+      cjHeapSize: 12GB
+      cjHeapSwap: "on"
+      CJCJ_STAGE3_STDLIB_BUILD_TYPE: ${{ inputs.build_type || 'relwithdebinfo' }}
+    steps:
+      - name: Checkout cjcj
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Download preceding source phase
+        uses: actions/download-artifact@v8
+        with:
+          name: source-handoff-${{ matrix.target }}-stage0
+          path: ${{ runner.temp }}/source-handoff
+
+      - name: Verify preceding source phase
+        run: node ci/srcbuild/job-handoff.mjs restore stage0 "$RUNNER_TEMP/source-handoff"
+
+      - name: Install build dependencies
+        run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" install-system-deps
+
+      - name: Start sccache
+        uses: ./.github/actions/sccache
+        with:
+          component: srcbuild-stage1-initial-std
+          platform: ${{ matrix.target }}
+          pin: ${{ env.RUNTIME_REF }}
+          cache-size: 2G
+
+      - name: Restore source SDK version output
+        id: version
+        run: echo "value=$SOURCE_SDK_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Add Linux swap for stage2 chir heap
+        if: runner.os == 'Linux'
+        run: |
+          sudo fallocate -l 12G /mnt/swapfile
+          sudo chmod 600 /mnt/swapfile
+          sudo mkswap /mnt/swapfile
+          sudo swapon /mnt/swapfile
+          free -h
+
+      - name: Bootstrap stage1-initial-std
+        shell: bash
+        run: bash ci/bootstrap/gha_run.sh stage1-initial-std
+
+      - name: Seal source phase handoff
+        run: node ci/srcbuild/job-handoff.mjs pack stage1-initial-std "$RUNNER_TEMP/source-handoff-output"
+
+      - name: Upload source phase handoff
+        uses: actions/upload-artifact@v7
+        with:
+          name: source-handoff-${{ matrix.target }}-stage1-initial-std
+          path: ${{ runner.temp }}/source-handoff-output
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Report sccache
+        if: always()
+        uses: ./.github/actions/sccache-report
+        with:
+          component: srcbuild-stage1-initial-std
+          platform: ${{ matrix.target }}
+          require-compiles: ${{ job.status == 'success' }}
+
+  source-stage1-std:
+    name: ${{ matrix.target }} / source-stage1-std
+    needs: [plan, source-stage1-initial-std]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
+    env:
+      CANGJIE_WORKSPACE: ${{ github.workspace }}/.srcbuild/workspace
+      CANGJIE_BUILD_ROOT: ${{ github.workspace }}/.srcbuild/buildtools
+      CJCJ_SRCBUILD_TARGET: ${{ matrix.target }}
+      CJCJ_FIXED_LLVM_DIR: ${{ github.workspace }}/.srcbuild/fixed-llc
+      cjHeapSize: 12GB
+      cjHeapSwap: "on"
+      CJCJ_STAGE3_STDLIB_BUILD_TYPE: ${{ inputs.build_type || 'relwithdebinfo' }}
+    steps:
+      - name: Checkout cjcj
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Download preceding source phase
+        uses: actions/download-artifact@v8
+        with:
+          name: source-handoff-${{ matrix.target }}-stage1-initial-std
+          path: ${{ runner.temp }}/source-handoff
+
+      - name: Verify preceding source phase
+        run: node ci/srcbuild/job-handoff.mjs restore stage1-initial-std "$RUNNER_TEMP/source-handoff"
+
+      - name: Install build dependencies
+        run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" install-system-deps
+
+      - name: Start sccache
+        uses: ./.github/actions/sccache
+        with:
+          component: srcbuild-stage1-std
+          platform: ${{ matrix.target }}
+          pin: ${{ env.RUNTIME_REF }}
+          cache-size: 2G
+
+      - name: Restore source SDK version output
+        id: version
+        run: echo "value=$SOURCE_SDK_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Add Linux swap for stage2 chir heap
+        if: runner.os == 'Linux'
+        run: |
+          sudo fallocate -l 12G /mnt/swapfile
+          sudo chmod 600 /mnt/swapfile
+          sudo mkswap /mnt/swapfile
+          sudo swapon /mnt/swapfile
+          free -h
+
+      - name: Bootstrap stage1-std
+        shell: bash
+        run: bash ci/bootstrap/gha_run.sh stage1-std
+
+      - name: Seal source phase handoff
+        run: node ci/srcbuild/job-handoff.mjs pack stage1-std "$RUNNER_TEMP/source-handoff-output"
+
+      - name: Upload source phase handoff
+        uses: actions/upload-artifact@v7
+        with:
+          name: source-handoff-${{ matrix.target }}-stage1-std
+          path: ${{ runner.temp }}/source-handoff-output
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Report sccache
+        if: always()
+        uses: ./.github/actions/sccache-report
+        with:
+          component: srcbuild-stage1-std
+          platform: ${{ matrix.target }}
+          require-compiles: ${{ job.status == 'success' }}
+
+  source-stage1-compiler:
+    name: ${{ matrix.target }} / source-stage1-compiler
+    needs: [plan, source-stage1-std]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
+    env:
+      CANGJIE_WORKSPACE: ${{ github.workspace }}/.srcbuild/workspace
+      CANGJIE_BUILD_ROOT: ${{ github.workspace }}/.srcbuild/buildtools
+      CJCJ_SRCBUILD_TARGET: ${{ matrix.target }}
+      CJCJ_FIXED_LLVM_DIR: ${{ github.workspace }}/.srcbuild/fixed-llc
+      cjHeapSize: 12GB
+      cjHeapSwap: "on"
+      CJCJ_STAGE3_STDLIB_BUILD_TYPE: ${{ inputs.build_type || 'relwithdebinfo' }}
+    steps:
+      - name: Checkout cjcj
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Download preceding source phase
+        uses: actions/download-artifact@v8
+        with:
+          name: source-handoff-${{ matrix.target }}-stage1-std
+          path: ${{ runner.temp }}/source-handoff
+
+      - name: Verify preceding source phase
+        run: node ci/srcbuild/job-handoff.mjs restore stage1-std "$RUNNER_TEMP/source-handoff"
+
+      - name: Install build dependencies
+        run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" install-system-deps
+
+      - name: Start sccache
+        uses: ./.github/actions/sccache
+        with:
+          component: srcbuild-stage1-compiler
+          platform: ${{ matrix.target }}
+          pin: ${{ env.RUNTIME_REF }}
+          cache-size: 2G
+
+      - name: Restore source SDK version output
+        id: version
+        run: echo "value=$SOURCE_SDK_VERSION" >> "$GITHUB_OUTPUT"
+
       - name: Add Linux swap for stage2 chir heap
         if: runner.os == 'Linux'
         run: |
@@ -561,7 +798,82 @@ jobs:
 
       - name: Bootstrap stage1 compiler
         shell: bash
-        run: bash ci/bootstrap/gha_run.sh stage1
+        run: bash ci/bootstrap/gha_run.sh stage1-compiler
+
+      - name: Seal source phase handoff
+        run: node ci/srcbuild/job-handoff.mjs pack stage1-compiler "$RUNNER_TEMP/source-handoff-output"
+
+      - name: Upload source phase handoff
+        uses: actions/upload-artifact@v7
+        with:
+          name: source-handoff-${{ matrix.target }}-stage1-compiler
+          path: ${{ runner.temp }}/source-handoff-output
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Report sccache
+        if: always()
+        uses: ./.github/actions/sccache-report
+        with:
+          component: srcbuild-stage1-compiler
+          platform: ${{ matrix.target }}
+          require-compiles: ${{ job.status == 'success' }}
+
+  source-stage3:
+    name: ${{ matrix.target }} / source-stage3
+    needs: [plan, source-stage1-compiler]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
+    env:
+      CANGJIE_WORKSPACE: ${{ github.workspace }}/.srcbuild/workspace
+      CANGJIE_BUILD_ROOT: ${{ github.workspace }}/.srcbuild/buildtools
+      CJCJ_SRCBUILD_TARGET: ${{ matrix.target }}
+      CJCJ_FIXED_LLVM_DIR: ${{ github.workspace }}/.srcbuild/fixed-llc
+      cjHeapSize: 12GB
+      cjHeapSwap: "on"
+      CJCJ_STAGE3_STDLIB_BUILD_TYPE: ${{ inputs.build_type || 'relwithdebinfo' }}
+    steps:
+      - name: Checkout cjcj
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Download preceding source phase
+        uses: actions/download-artifact@v8
+        with:
+          name: source-handoff-${{ matrix.target }}-stage1-compiler
+          path: ${{ runner.temp }}/source-handoff
+
+      - name: Verify preceding source phase
+        run: node ci/srcbuild/job-handoff.mjs restore stage1-compiler "$RUNNER_TEMP/source-handoff"
+
+      - name: Install build dependencies
+        run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" install-system-deps
+
+      - name: Start sccache
+        uses: ./.github/actions/sccache
+        with:
+          component: srcbuild-stage3
+          platform: ${{ matrix.target }}
+          pin: ${{ env.RUNTIME_REF }}
+          cache-size: 2G
+
+      - name: Restore source SDK version output
+        id: version
+        run: echo "value=$SOURCE_SDK_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Add Linux swap for stage2 chir heap
+        if: runner.os == 'Linux'
+        run: |
+          sudo fallocate -l 12G /mnt/swapfile
+          sudo chmod 600 /mnt/swapfile
+          sudo mkswap /mnt/swapfile
+          sudo swapon /mnt/swapfile
+          free -h
 
       - name: Inject selfhost compiler version
         env:
@@ -582,6 +894,81 @@ jobs:
           path: ${{ env.CANGJIE_WORKSPACE }}/software/final-std-stage2
           if-no-files-found: error
           retention-days: 7
+
+      - name: Seal source phase handoff
+        run: node ci/srcbuild/job-handoff.mjs pack stage3 "$RUNNER_TEMP/source-handoff-output"
+
+      - name: Upload source phase handoff
+        uses: actions/upload-artifact@v7
+        with:
+          name: source-handoff-${{ matrix.target }}-stage3
+          path: ${{ runner.temp }}/source-handoff-output
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Report sccache
+        if: always()
+        uses: ./.github/actions/sccache-report
+        with:
+          component: srcbuild-stage3
+          platform: ${{ matrix.target }}
+          require-compiles: ${{ job.status == 'success' }}
+
+  srcbuild:
+    name: ${{ matrix.target }} / srcbuild
+    needs: [plan, source-stage3]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
+    env:
+      CANGJIE_WORKSPACE: ${{ github.workspace }}/.srcbuild/workspace
+      CANGJIE_BUILD_ROOT: ${{ github.workspace }}/.srcbuild/buildtools
+      CJCJ_SRCBUILD_TARGET: ${{ matrix.target }}
+      CJCJ_FIXED_LLVM_DIR: ${{ github.workspace }}/.srcbuild/fixed-llc
+      cjHeapSize: 12GB
+      cjHeapSwap: "on"
+      CJCJ_STAGE3_STDLIB_BUILD_TYPE: ${{ inputs.build_type || 'relwithdebinfo' }}
+    steps:
+      - name: Checkout cjcj
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Download preceding source phase
+        uses: actions/download-artifact@v8
+        with:
+          name: source-handoff-${{ matrix.target }}-stage3
+          path: ${{ runner.temp }}/source-handoff
+
+      - name: Verify preceding source phase
+        run: node ci/srcbuild/job-handoff.mjs restore stage3 "$RUNNER_TEMP/source-handoff"
+
+      - name: Install build dependencies
+        run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" install-system-deps
+
+      - name: Start sccache
+        uses: ./.github/actions/sccache
+        with:
+          component: srcbuild-package
+          platform: ${{ matrix.target }}
+          pin: ${{ env.RUNTIME_REF }}
+          cache-size: 2G
+
+      - name: Restore source SDK version output
+        id: version
+        run: echo "value=$SOURCE_SDK_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Add Linux swap for stage2 chir heap
+        if: runner.os == 'Linux'
+        run: |
+          sudo fallocate -l 12G /mnt/swapfile
+          sudo chmod 600 /mnt/swapfile
+          sudo mkswap /mnt/swapfile
+          sudo swapon /mnt/swapfile
+          free -h
 
       - name: Build stdx from source
         env:
@@ -634,65 +1021,6 @@ jobs:
         env:
           CANGJIE_CPP_SRC: ${{ env.CANGJIE_WORKSPACE }}/cangjie_compiler
         run: npx --yes zx@8 ci/srcbuild/steps/build-shim.mjs
-
-      - name: Install Android NDK and probe
-        if: matrix.target == 'linux-x64' && inputs.build_android
-        uses: ./.github/actions/setup-release-sdk
-        with:
-          requirement: android-ndk
-
-      - name: Build Android runtime and final std with stage2 cjc
-        if: matrix.target == 'linux-x64' && inputs.build_android
-        env:
-          CJCJ_STAGE3_CANGJIE_VERSION: ${{ steps.version.outputs.value }}
-        run: npx --yes zx@8 ci/srcbuild/steps/build-android-final-std.mjs
-
-      - name: Upload Android runtime and final std
-        if: matrix.target == 'linux-x64' && inputs.build_android
-        uses: actions/upload-artifact@v7
-        with:
-          name: final-std-android-aarch64
-          path: ${{ env.CANGJIE_WORKSPACE }}/software/final-std-android-aarch64
-          if-no-files-found: error
-          retention-days: 7
-
-      - name: Restore official MinGW toolchain
-        if: matrix.target == 'linux-x64'
-        id: windows-mingw-cache
-        uses: actions/cache/restore@v6
-        with:
-          path: ${{ env.CANGJIE_BUILD_ROOT }}/llvm-mingw-w64
-          key: windows-final-std-mingw-20220906-5c68a1cb123161b54b72ce90e7975d95a8eaf2a4-${{ hashFiles('build/toolchain/mingw.mjs', 'build/lib/archive.mjs', 'build/lib/runner.mjs') }}
-
-      - name: Install Windows cross toolchain dependencies
-        if: matrix.target == 'linux-x64' && steps.windows-mingw-cache.outputs.cache-hit != 'true'
-        run: npx --yes zx@8 build/cli.mjs --target windows-x64 --build-root "$CANGJIE_BUILD_ROOT" install-system-deps
-
-      - name: Build official MinGW toolchain
-        if: matrix.target == 'linux-x64' && steps.windows-mingw-cache.outputs.cache-hit != 'true'
-        run: npx --yes zx@8 build/cli.mjs --target windows-x64 --build-root "$CANGJIE_BUILD_ROOT" install-mingw
-
-      - name: Save official MinGW toolchain
-        if: matrix.target == 'linux-x64' && steps.windows-mingw-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v6
-        with:
-          path: ${{ env.CANGJIE_BUILD_ROOT }}/llvm-mingw-w64
-          key: ${{ steps.windows-mingw-cache.outputs.cache-primary-key }}
-
-      - name: Cross-build Windows final std with stage2 host compiler
-        if: matrix.target == 'linux-x64'
-        env:
-          CJCJ_STAGE3_CANGJIE_VERSION: ${{ steps.version.outputs.value }}
-        run: npx --yes zx@8 ci/srcbuild/steps/build-windows-final-std.mjs
-
-      - name: Upload Windows source-built std install root
-        if: matrix.target == 'linux-x64'
-        uses: actions/upload-artifact@v7
-        with:
-          name: final-std-windows-x64
-          path: ${{ env.CANGJIE_WORKSPACE }}/software/final-std-windows-stage2
-          if-no-files-found: error
-          retention-days: 7
 
       - name: Upload stage diagnostics
         if: failure()
@@ -767,13 +1095,295 @@ jobs:
         if: always()
         uses: ./.github/actions/sccache-report
         with:
-          component: srcbuild
+          component: srcbuild-package
+          platform: ${{ matrix.target }}
+          require-compiles: ${{ job.status == 'success' }}
+
+  source-android:
+    name: ${{ matrix.target }} / source-android
+    needs: [plan, source-stage3]
+    if: contains(needs.plan.outputs.llvm_platforms, 'linux_x86_64') && inputs.build_android
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x64
+            runner: ubuntu-22.04
+            llvm_platform: linux_x86_64
+            static_libs: true
+    env:
+      CANGJIE_WORKSPACE: ${{ github.workspace }}/.srcbuild/workspace
+      CANGJIE_BUILD_ROOT: ${{ github.workspace }}/.srcbuild/buildtools
+      CJCJ_SRCBUILD_TARGET: ${{ matrix.target }}
+      CJCJ_FIXED_LLVM_DIR: ${{ github.workspace }}/.srcbuild/fixed-llc
+      cjHeapSize: 12GB
+      cjHeapSwap: "on"
+      CJCJ_STAGE3_STDLIB_BUILD_TYPE: ${{ inputs.build_type || 'relwithdebinfo' }}
+    steps:
+      - name: Checkout cjcj
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Download preceding source phase
+        uses: actions/download-artifact@v8
+        with:
+          name: source-handoff-${{ matrix.target }}-stage3
+          path: ${{ runner.temp }}/source-handoff
+
+      - name: Verify preceding source phase
+        run: node ci/srcbuild/job-handoff.mjs restore stage3 "$RUNNER_TEMP/source-handoff"
+
+      - name: Install build dependencies
+        run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" install-system-deps
+
+      - name: Start sccache
+        uses: ./.github/actions/sccache
+        with:
+          component: srcbuild-android
+          platform: ${{ matrix.target }}
+          pin: ${{ env.RUNTIME_REF }}
+          cache-size: 2G
+
+      - name: Restore source SDK version output
+        id: version
+        run: echo "value=$SOURCE_SDK_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Add Linux swap for stage2 chir heap
+        if: runner.os == 'Linux'
+        run: |
+          sudo fallocate -l 12G /mnt/swapfile
+          sudo chmod 600 /mnt/swapfile
+          sudo mkswap /mnt/swapfile
+          sudo swapon /mnt/swapfile
+          free -h
+
+      - name: Install Android NDK and probe
+        if: matrix.target == 'linux-x64' && inputs.build_android
+        uses: ./.github/actions/setup-release-sdk
+        with:
+          requirement: android-ndk
+
+      - name: Build Android runtime and final std with stage2 cjc
+        if: matrix.target == 'linux-x64' && inputs.build_android
+        env:
+          CJCJ_STAGE3_CANGJIE_VERSION: ${{ steps.version.outputs.value }}
+        run: npx --yes zx@8 ci/srcbuild/steps/build-android-final-std.mjs
+
+      - name: Upload Android runtime and final std
+        if: matrix.target == 'linux-x64' && inputs.build_android
+        uses: actions/upload-artifact@v7
+        with:
+          name: final-std-android-aarch64
+          path: ${{ env.CANGJIE_WORKSPACE }}/software/final-std-android-aarch64
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Report sccache
+        if: always()
+        uses: ./.github/actions/sccache-report
+        with:
+          component: srcbuild-android
+          platform: ${{ matrix.target }}
+          require-compiles: ${{ job.status == 'success' }}
+
+  source-mingw:
+    name: ${{ matrix.target }} / source-mingw
+    needs: [plan, source-stage3]
+    if: contains(needs.plan.outputs.llvm_platforms, 'linux_x86_64')
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x64
+            runner: ubuntu-22.04
+            llvm_platform: linux_x86_64
+            static_libs: true
+    env:
+      CANGJIE_WORKSPACE: ${{ github.workspace }}/.srcbuild/workspace
+      CANGJIE_BUILD_ROOT: ${{ github.workspace }}/.srcbuild/buildtools
+      CJCJ_SRCBUILD_TARGET: ${{ matrix.target }}
+      CJCJ_FIXED_LLVM_DIR: ${{ github.workspace }}/.srcbuild/fixed-llc
+      cjHeapSize: 12GB
+      cjHeapSwap: "on"
+      CJCJ_STAGE3_STDLIB_BUILD_TYPE: ${{ inputs.build_type || 'relwithdebinfo' }}
+    steps:
+      - name: Checkout cjcj
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Download preceding source phase
+        uses: actions/download-artifact@v8
+        with:
+          name: source-handoff-${{ matrix.target }}-stage3
+          path: ${{ runner.temp }}/source-handoff
+
+      - name: Verify preceding source phase
+        run: node ci/srcbuild/job-handoff.mjs restore stage3 "$RUNNER_TEMP/source-handoff"
+
+      - name: Install build dependencies
+        run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" install-system-deps
+
+      - name: Start sccache
+        uses: ./.github/actions/sccache
+        with:
+          component: srcbuild-mingw
+          platform: ${{ matrix.target }}
+          pin: ${{ env.RUNTIME_REF }}
+          cache-size: 2G
+
+      - name: Restore source SDK version output
+        id: version
+        run: echo "value=$SOURCE_SDK_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Add Linux swap for stage2 chir heap
+        if: runner.os == 'Linux'
+        run: |
+          sudo fallocate -l 12G /mnt/swapfile
+          sudo chmod 600 /mnt/swapfile
+          sudo mkswap /mnt/swapfile
+          sudo swapon /mnt/swapfile
+          free -h
+
+      - name: Restore official MinGW toolchain
+        if: matrix.target == 'linux-x64'
+        id: windows-mingw-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ env.CANGJIE_BUILD_ROOT }}/llvm-mingw-w64
+          key: windows-final-std-mingw-20220906-5c68a1cb123161b54b72ce90e7975d95a8eaf2a4-${{ hashFiles('build/toolchain/mingw.mjs', 'build/lib/archive.mjs', 'build/lib/runner.mjs') }}
+
+      - name: Install Windows cross toolchain dependencies
+        if: matrix.target == 'linux-x64' && steps.windows-mingw-cache.outputs.cache-hit != 'true'
+        run: npx --yes zx@8 build/cli.mjs --target windows-x64 --build-root "$CANGJIE_BUILD_ROOT" install-system-deps
+
+      - name: Build official MinGW toolchain
+        if: matrix.target == 'linux-x64' && steps.windows-mingw-cache.outputs.cache-hit != 'true'
+        run: npx --yes zx@8 build/cli.mjs --target windows-x64 --build-root "$CANGJIE_BUILD_ROOT" install-mingw
+
+      - name: Save official MinGW toolchain
+        if: matrix.target == 'linux-x64' && steps.windows-mingw-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ env.CANGJIE_BUILD_ROOT }}/llvm-mingw-w64
+          key: ${{ steps.windows-mingw-cache.outputs.cache-primary-key }}
+
+      - name: Seal source phase handoff
+        run: node ci/srcbuild/job-handoff.mjs pack mingw "$RUNNER_TEMP/source-handoff-output"
+
+      - name: Upload source phase handoff
+        uses: actions/upload-artifact@v7
+        with:
+          name: source-handoff-${{ matrix.target }}-mingw
+          path: ${{ runner.temp }}/source-handoff-output
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Report sccache
+        if: always()
+        uses: ./.github/actions/sccache-report
+        with:
+          component: srcbuild-mingw
+          platform: ${{ matrix.target }}
+          require-compiles: ${{ job.status == 'success' && steps.windows-mingw-cache.outputs.cache-hit != 'true' }}
+
+  source-windows:
+    name: ${{ matrix.target }} / source-windows
+    needs: [plan, source-mingw]
+    if: contains(needs.plan.outputs.llvm_platforms, 'linux_x86_64')
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x64
+            runner: ubuntu-22.04
+            llvm_platform: linux_x86_64
+            static_libs: true
+    env:
+      CANGJIE_WORKSPACE: ${{ github.workspace }}/.srcbuild/workspace
+      CANGJIE_BUILD_ROOT: ${{ github.workspace }}/.srcbuild/buildtools
+      CJCJ_SRCBUILD_TARGET: ${{ matrix.target }}
+      CJCJ_FIXED_LLVM_DIR: ${{ github.workspace }}/.srcbuild/fixed-llc
+      cjHeapSize: 12GB
+      cjHeapSwap: "on"
+      CJCJ_STAGE3_STDLIB_BUILD_TYPE: ${{ inputs.build_type || 'relwithdebinfo' }}
+    steps:
+      - name: Checkout cjcj
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Download preceding source phase
+        uses: actions/download-artifact@v8
+        with:
+          name: source-handoff-${{ matrix.target }}-mingw
+          path: ${{ runner.temp }}/source-handoff
+
+      - name: Verify preceding source phase
+        run: node ci/srcbuild/job-handoff.mjs restore mingw "$RUNNER_TEMP/source-handoff"
+
+      - name: Install build dependencies
+        run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" install-system-deps
+
+      - name: Start sccache
+        uses: ./.github/actions/sccache
+        with:
+          component: srcbuild-windows
+          platform: ${{ matrix.target }}
+          pin: ${{ env.RUNTIME_REF }}
+          cache-size: 2G
+
+      - name: Restore source SDK version output
+        id: version
+        run: echo "value=$SOURCE_SDK_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Add Linux swap for stage2 chir heap
+        if: runner.os == 'Linux'
+        run: |
+          sudo fallocate -l 12G /mnt/swapfile
+          sudo chmod 600 /mnt/swapfile
+          sudo mkswap /mnt/swapfile
+          sudo swapon /mnt/swapfile
+          free -h
+
+      - name: Cross-build Windows final std with stage2 host compiler
+        if: matrix.target == 'linux-x64'
+        env:
+          CJCJ_STAGE3_CANGJIE_VERSION: ${{ steps.version.outputs.value }}
+        run: npx --yes zx@8 ci/srcbuild/steps/build-windows-final-std.mjs
+
+      - name: Upload Windows source-built std install root
+        if: matrix.target == 'linux-x64'
+        uses: actions/upload-artifact@v7
+        with:
+          name: final-std-windows-x64
+          path: ${{ env.CANGJIE_WORKSPACE }}/software/final-std-windows-stage2
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Report sccache
+        if: always()
+        uses: ./.github/actions/sccache-report
+        with:
+          component: srcbuild-windows
           platform: ${{ matrix.target }}
           require-compiles: ${{ job.status == 'success' }}
 
   artifact-contract:
     name: Publish final std artifact contract
-    needs: srcbuild
+    needs: [srcbuild, source-windows, source-android]
+    if: >-
+      always() && needs.srcbuild.result == 'success' &&
+      (needs.source-windows.result == 'success' || needs.source-windows.result == 'skipped') &&
+      (needs.source-android.result == 'success' || needs.source-android.result == 'skipped')
     runs-on: ubuntu-22.04
     outputs:
       final_compiler_linux_x64: ${{ steps.contract.outputs.final_compiler_linux_x64 }}
