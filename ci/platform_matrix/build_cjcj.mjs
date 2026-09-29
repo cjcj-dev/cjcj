@@ -2,6 +2,7 @@
 // Provision the official host nightly SDK, activate the native fixed LLVM
 // tuple, then attempt the O1 workspace build.
 
+import {checkCodegenRuntimeLayout} from '../check-codegen-runtime-layout.mjs';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -568,7 +569,7 @@ if (process.platform === 'win32') {
   for (const name of ['cjcj.exe', ...PRODUCT_NAMES.map((n) => `${n}.exe`)]) {
     await fs.rm(path.join('target', 'release', 'bin', name), {force: true});
   }
-  build = await runInMsys('cjpm build', 'build');
+  build = await runInMsys('node ci/check-codegen-runtime-layout.mjs && cjpm build', 'build');
   if (finalWindows && shim.exitCode === 0 && build.exitCode === 0) {
     build = await buildWindowsFinalCompiler({root, cangjieHome, hostSdk, sdkRuntimeDirName,
       cjcTomlPath, cjcToml, workspaceToml: cjpmToml, mingwCxxLinkRsp, installedRuntimeLib, fixedLlvmManifest,
@@ -579,6 +580,7 @@ if (process.platform === 'win32') {
     cjcToml, process.platform, cangjieHome, process.env.CJCJ_LLVM_LINK_RSP || ''));
   shim = await $({nothrow: true})`npx --yes zx@8 runtime_shim/build_shim.mjs`;
   console.log(`shim_rc=${shim.exitCode}; continuing to cjpm build so the platform frontier is recorded`);
+  await checkCodegenRuntimeLayout();
   build = await $({nothrow: true})`cjpm build`;
 }
 console.log(`setup_rc=${setupRc} shim_rc=${shim.exitCode} build_rc=${build.exitCode}`);
