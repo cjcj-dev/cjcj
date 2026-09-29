@@ -35,12 +35,45 @@ for (const [name, options, debug, trimmed] of [
 }
 
 const bootstrap = fileURLToPath(new URL('../bootstrap/bootstrap.sh', import.meta.url));
+const aggregate = await fs.readFile(new URL('../../scripts/cjcjcg_aggregate_ctype_build_kkk2.sh', import.meta.url), 'utf8');
+// Execute the original configuration statements up to the cjpm environment.
+// The historical full script has fixed SDK/shim locations; this exercises its
+// actual file producer, without claiming to build that historical SDK.
+const aggregateConfig = aggregate.slice(
+  aggregate.indexOf('cp -a "$source_tree/cjpm.toml"'),
+  aggregate.indexOf('library_path='));
+assert.match(aggregateConfig, /sed .*\nnode /);
 for (const [name, input, debug] of [
   ['clean O2', '-O2', false],
   ['prepared release O2', '-O2', false],
   ['prepared release O1', '-O1', false],
   ['debug O2', '-O2 -g', true],
 ]) {
+  test(`aggregate entry: ${name} selects O1 before cjpm`, async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'aggregate seed space '));
+    try {
+      const file = path.join(root, 'cjpm.toml');
+      await fs.mkdir(path.join(root, 'ci/release'), {recursive: true});
+      await fs.copyFile(new URL('./trimpath.mjs', import.meta.url), path.join(root, 'ci/release/trimpath.mjs'));
+      await fs.writeFile(file, `compile-option = ${JSON.stringify(input)}\noverride-compile-option = "-O2"\n`);
+      if (name !== 'clean O2') await prepareTrimpath(root, {debug});
+      const before = await fs.readFile(file, 'utf8');
+      const result = spawnSync('bash', ['-c', 'source_tree="$1"\n' + aggregateConfig, 'bash', root], {encoding: 'utf8'});
+      const output = await fs.readFile(file, 'utf8');
+      const encoded = output.match(/^compile-option = (.*)$/m)[1];
+      const options = JSON.parse(encoded);
+      // Target assertion precedes command-status checks so a guard cannot mask it.
+      assert.match(options, /^-O1(?:\s|$)/, 'aggregate must send O1 to cjpm even after release preparation');
+      assert.equal(options.includes('--trimpath'), !debug);
+      assert.equal(options.includes('-g'), debug);
+      assert.match(output, /^override-compile-option = "-O2"$/m);
+      assert.equal(await fs.readFile(file + '.O2bak', 'utf8'), before);
+      assert.equal(result.status, 0, result.stdout + result.stderr);
+      console.log(`ASSERT aggregate-cjpm-config ${name}=PASS`);
+    } finally {
+      await fs.rm(root, {recursive: true, force: true});
+    }
+  });
   for (const consumer of ['bootstrap', 'JS seed']) {
     test(`${consumer}: ${name} preserves options and selects O1`, async () => {
       const root = await fs.mkdtemp(path.join(os.tmpdir(), 'seed space '));
