@@ -171,10 +171,11 @@ async function mutateFile(root, relative, transform) {
   await fs.writeFile(file, after);
 }
 
-test('platform gates consume every registry row and retain explicit run requirements', async () => {
+test('platform gates consume every registry row and retain explicit run requirements', async t => {
   const {allReleasePlatforms, getReleasePlatform, releasePlatformReadiness} = await import('../build/lib/targets.mjs');
   for (const name of platformGates) {
     const {result, value} = gate(repo, name);
+    t.diagnostic(`${name}: real CLI rc=${result.status}, status=${value.status}`);
     assert.equal(result.status, name === 'G15' ? 0 : 2, JSON.stringify(value));
     assert.deepEqual(value.scope.platforms.map(row => row.key), allReleasePlatforms());
     for (const row of value.scope.platforms) {
@@ -195,6 +196,7 @@ test('new registry platform makes each dependent gate red until its package job 
     "const RELEASE_PLATFORMS = Object.freeze([\n  releasePlatform({key: 'fixture-new-platform', host: 'linux-x64', runner: 'ubuntu-24.04'}),"));
   for (const name of platformGates) {
     const {result, value} = gate(root, name);
+    t.diagnostic(`${name}: added platform returned rc=${result.status}, status=${value.status}`);
     assert.equal(result.status, 1, `${name}: ${JSON.stringify(value)}`);
     assert.match(value.value, /fixture-new-platform: expected one package job, found 0/);
   }
@@ -248,6 +250,17 @@ test('job identity and host mapping matter even when the package job count is un
   const wrongHost = gate(root, 'G15');
   assert.equal(wrongHost.result.status, 1, JSON.stringify(wrongHost.value));
   assert.match(wrongHost.value.value, /host\/LLVM mismatch/);
+  const workflow = await fs.readFile(path.join(repo, '.github/workflows/release.yml'), 'utf8');
+  for (const [from, to, expected] of [
+    [`llvm_platform: ${first.llvm_platform}\n`, 'llvm_platform: fixture-wrong-llvm\n', 'host/LLVM mismatch'],
+    [`release_key: ${first.key}\n`, 'release_key: fixture-unknown-key\n', 'unexpected release_key=fixture-unknown-key'],
+    [`release_key: ${first.key}\n`, '', 'unexpected release_key=<missing>'],
+  ]) {
+    await write(root, '.github/workflows/release.yml', workflow.replace(from, to));
+    const bad = gate(root, 'G15');
+    assert.equal(bad.result.status, 1, JSON.stringify(bad.value));
+    assert.ok(bad.value.value.includes(expected), bad.value.value);
+  }
 });
 
 test('comments do not create jobs and excluded or blocked rows keep their reasons', async t => {
@@ -266,4 +279,25 @@ test('comments do not create jobs and excluded or blocked rows keep their reason
   const historical = gate(root, 'G7', ['--ref', 'HEAD']);
   assert.equal(historical.result.status, 2);
   assert.match(historical.value.value, /require a checkout, not --ref/);
+});
+
+
+test('new blocked and excluded registry rows remain visible without inventing package jobs', async t => {
+  const root = await platformFixture(t);
+  await mutateFile(root, 'build/lib/targets.mjs', source => source.replace(
+    'const RELEASE_PLATFORMS = Object.freeze([',
+    `const RELEASE_PLATFORMS = Object.freeze([
+      releasePlatform({key: 'fixture-blocked', host: 'linux-x64', runner: 'ubuntu-24.04',
+        crossTuples: Object.freeze(['fixture_unproduced_tuple'])}),
+      releasePlatform({key: 'fixture-excluded', host: 'linux-x64', runner: 'ubuntu-24.04',
+        excluded: 'fixture documented exclusion'}),`));
+  for (const name of platformGates) {
+    const {result, value} = gate(root, name);
+    assert.equal(result.status, name === 'G15' ? 0 : 2, JSON.stringify(value));
+    const blocked = value.scope.platforms.find(row => row.key === 'fixture-blocked');
+    assert.equal(blocked.status, 'blocked');
+    assert.ok(value.scope.std_tuples.includes('fixture_unproduced_tuple'));
+    assert.match(value.value, /fixture_unproduced_tuple: no P01-P23 stage/);
+    assert.match(value.value, /fixture-excluded \(fixture documented exclusion\)/);
+  }
 });
