@@ -120,10 +120,10 @@ function throughputRows() {
 
 function phaseLog() {
   return [
-    '2026-08-05 20:14:15.683115 537047 [GCLOG] v=1 rec=phase seq=2 name=young.mark_closure us=42012',
-    '2026-08-05 20:14:15.721468 537047 [GCLOG] v=1 rec=phase seq=2 name=young.ref_fix us=30264',
-    '2026-08-05 20:14:15.742160 537047 [GCLOG] v=1 rec=phase seq=2 name=young.copy us=20686',
-    '2026-08-05 20:14:15.744166 537047 [GCLOG] v=1 rec=phase seq=2 name=young.evac_finish us=2001',
+    '[GCLOG] v=5 rec=phase seq=2 gc_tag=y name=young.mark_closure kind=conc start_ns=1 ns=42012000',
+    '[GCLOG] v=5 rec=phase seq=2 gc_tag=y name=young.ref_fix kind=conc start_ns=1 ns=30264000',
+    '[GCLOG] v=5 rec=phase seq=2 gc_tag=y name=young.copy kind=conc start_ns=1 ns=20686000',
+    '[GCLOG] v=5 rec=phase seq=2 gc_tag=y name=young.evac_finish kind=conc start_ns=1 ns=2001000',
     'young collection stw time: 103,437us',
     '',
   ].join('\n');
@@ -223,4 +223,25 @@ test('human verdict strings are ignored by the integer computation', async t => 
   const {result, value} = gate(evidence);
   assert.equal(result.status, 0, result.stderr);
   assert.equal(value.status, 'MET');
+});
+
+test('current ZGC phase names report every missing frozen R1 phase as UNKNOWN', async t => {
+  const evidence = await evidenceFixture(t);
+  await write(evidence, 'gc.log', '[GCLOG] v=5 rec=phase seq=2 gc_tag=y name=Concurrent_Mark kind=conc start_ns=1 ns=999\n');
+  await bindEvidence(evidence, 'G12', repo);
+  const {value} = gate(evidence);
+  assert.equal(value.status, 'UNKNOWN');
+  for (const name of GC_RELEASE_FLOOR.recording.find(item => item.id === 'R1').phases) {
+    assert.ok(JSON.stringify(value).includes(name), name);
+  }
+  console.log('R1_MISSING_PHASE_TARGET executed');
+});
+
+test('legacy microsecond phase input is explicitly UNKNOWN', async t => {
+  const evidence = await evidenceFixture(t);
+  await write(evidence, 'gc.log', '[GCLOG] v=1 rec=phase seq=2 name=young.copy us=1\n');
+  await bindEvidence(evidence, 'G12', repo);
+  const {value} = gate(evidence);
+  assert.equal(value.status, 'UNKNOWN');
+  assert.match(JSON.stringify(value), /malformed or unsupported GCLOG phase/);
 });
