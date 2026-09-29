@@ -25,6 +25,7 @@ case "$platform" in
 esac
 
 cmake -G Ninja -S "$llvm_src/llvm" -B "$llvm_build" \
+    -DCANGJIE_RUNTIME_SOURCE_DIR="$(cd "$root/paired-runtime" && pwd)" \
     -DCMAKE_BUILD_TYPE=Release \
     -DLLVM_ENABLE_ASSERTIONS=OFF \
     -DBUILD_SHARED_LIBS=OFF \
