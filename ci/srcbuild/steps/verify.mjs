@@ -192,9 +192,8 @@ await phase('selfdet', async () => {
   });
   console.log(`[selfdet] package=${selfdetPackage} source-a=${selfdetSourceA} length=${selfdetSourceA.length}`);
   console.log(`[selfdet] package=${selfdetPackage} source-b=${selfdetSourceB} length=${selfdetSourceB.length}`);
-  console.log('[selfdet] env MRT_GCV2_MARKPAR_FORCE_SERIAL=1');
 
-  const selfdetEnv = {...process.env, MRT_GCV2_MARKPAR_FORCE_SERIAL: '1'};
+  const selfdetEnv = {...process.env};
   async function compileSelfdet(sourceDir, arm, mapped) {
     const outputDir = path.join(selfdetRoot, arm);
     await fs.mkdir(outputDir, {recursive: true});
