@@ -149,6 +149,7 @@ function optimizerFixture(t) {
     fs.copyFileSync(f.officialOpt, path.join(bin, name));
   }
   f.env.CJCJ_PATCHED_LLVM_BIN = f.patchedBin;
+  console.log(`COMPILER_FIXTURE official=${hash(f.compiler)} rebuilt=${hash(f.rebuiltCompiler)} opt=${hash(f.patchedOpt)} llc=${hash(path.join(f.patchedBin, 'llc'))} lld=${hash(path.join(f.patchedBin, 'ld.lld'))}`);
   return f;
 }
 
