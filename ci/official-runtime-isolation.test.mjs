@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import test from 'node:test';
+import {gzipSync} from 'node:zlib';
 
 const repo = path.resolve(import.meta.dirname, '..');
 const hash = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
@@ -118,4 +119,72 @@ test('copied official executable outside SDK remains official by identity', t =>
   console.log(`TARGET_ASSERT_EXECUTED copied_host_rejection rc=${result.status} ${result.stdout}`);
   assert.equal(result.status, 86);
   assert.match(result.stdout, /official=1 coloured=1/);
+});
+
+
+function optimizerFixture(t) {
+  const f = fixture(t);
+  const bin = path.join(f.sdk, 'third_party/llvm/bin');
+  fs.mkdirSync(bin, {recursive: true});
+  f.officialOpt = path.join(bin, 'opt');
+  f.patchedOpt = path.join(f.root, 'patched-opt');
+  for (const [file, text] of [[f.officialOpt, 'official optimizer executed'], [f.patchedOpt, 'coloured optimizer executed']]) {
+    const src = path.join(f.root, 'opt.c');
+    fs.writeFileSync(src, `#include <stdio.h>\nint main(void) { puts("${text}"); return 0; }\n`);
+    ok(run('cc', [src, '-o', file], {}));
+  }
+  f.compiler = path.join(f.sdk, 'bin/cjc');
+  f.rebuiltCompiler = path.join(f.root, 'rebuilt-cjc');
+  for (const [file, text] of [[f.compiler, 'official frontend'], [f.rebuiltCompiler, 'rebuilt frontend']]) {
+    const src = path.join(f.root, 'compiler.c');
+    fs.writeFileSync(src, `#include <stdio.h>\n#include <stdlib.h>\nint main(int argc, char **argv) { puts("${text}"); return argc == 2 ? (system(argv[1]) != 0) : 0; }\n`);
+    ok(run('cc', [src, '-o', file], {}));
+  }
+  f.env.CJCJ_PATCHED_OPT = f.patchedOpt;
+  return f;
+}
+
+test('optimizer publication leaves the official optimizer byte-identical', t => {
+  const f = optimizerFixture(t); const before = hash(f.officialOpt);
+  const archive = path.join(f.root, 'opt.gz');
+  fs.writeFileSync(archive, gzipSync(fs.readFileSync(f.patchedOpt)));
+  const output = path.join(f.root, 'patched-llvm/bin/opt');
+  const result = run(process.execPath, ['ci/install_patched_opt.mjs', f.officialOpt, archive, hash(f.patchedOpt), output], f.env);
+  const after = hash(f.officialOpt);
+  console.log(`TARGET_ASSERT_EXECUTED official_opt_unchanged before=${before} after=${after}`);
+  assert.equal(after, before, 'official optimizer must remain byte-identical');
+  ok(result);
+  assert.equal(hash(output), hash(f.patchedOpt));
+  assert.equal(fs.readFileSync(f.env.GITHUB_ENV, 'utf8'), `CJCJ_PATCHED_OPT=${output}\n`);
+});
+
+test('official compiler may execute its official optimizer', t => {
+  const f = optimizerFixture(t); const result = audit(f, f.compiler, [f.officialOpt]);
+  console.log(`TARGET_ASSERT_EXECUTED official_opt_allowed rc=${result.status} ${result.stdout}`);
+  ok(result);
+  assert.match(result.stdout, /official optimizer executed/);
+});
+
+test('official compiler cannot execute coloured optimizer through a shell', t => {
+  const f = optimizerFixture(t); const result = audit(f, f.compiler, [f.patchedOpt]);
+  console.log(`TARGET_ASSERT_EXECUTED official_opt_rejected rc=${result.status} ${result.stdout}`);
+  assert.equal(result.status, 86);
+  assert.match(result.stdout, /OFFICIAL_TOOLCHAIN_MISMATCH .*official_parent=1/);
+  assert.doesNotMatch(result.stdout, /coloured optimizer executed/);
+});
+
+test('overwritten SDK optimizer is rejected by hash under the official compiler', t => {
+  const f = optimizerFixture(t); fs.copyFileSync(f.patchedOpt, f.officialOpt);
+  const result = audit(f, f.compiler, [f.officialOpt]);
+  console.log(`TARGET_ASSERT_EXECUTED overwritten_opt_rejected rc=${result.status} ${result.stdout}`);
+  assert.equal(result.status, 86);
+  assert.match(result.stdout, /OFFICIAL_TOOLCHAIN_MISMATCH .*official_parent=1/);
+});
+
+test('rebuilt compiler may explicitly execute the isolated optimizer', t => {
+  const f = optimizerFixture(t); const result = audit(f, f.rebuiltCompiler, [f.patchedOpt]);
+  console.log(`TARGET_ASSERT_EXECUTED rebuilt_opt_allowed rc=${result.status} ${result.stdout}`);
+  ok(result);
+  assert.match(result.stdout, /coloured optimizer executed/);
+  assert.match(result.stdout, /OPT_LOAD .*official_parent=0/);
 });
