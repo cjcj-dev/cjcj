@@ -182,4 +182,40 @@ async function runOne(name, expected, env = process.env) {
 if (!(await runOne('01_hello', 'hello from cjcj'))) process.exit(1);
 if (!(await runOne('02_generics', '42 hi 7'))) process.exit(1);
 
-console.log(`paired runtime smoke: ${process.env.CJCJ_PATCHED_RUNTIME_LIB_DIR}`);
+const runtimeLib = await findFirst(process.env.CJCJ_PATCHED_RUNTIME_LIB_DIR, (name) =>
+  ['libcangjie-runtime.so', 'libcangjie-runtime.dylib', 'libcangjie-runtime.dll', 'cangjie-runtime.dll'].includes(name.toLowerCase()),
+);
+if (!runtimeLib) {
+  console.error('ERROR: combined runtime smoke unavailable: runtime stage produced no host library');
+  process.exit(3);
+}
+console.log(`combined runtime smoke: ${runtimeLib}`);
+const env = {...process.env};
+if (process.platform === 'win32') {
+  // The target SDK was paired before linking; keep the import/export
+  // diagnostic without installing anything into the host SDK here.
+  // Diagnostic: the relinked sample's runtime imports must all exist in the
+  // fork DLL — diff the tables so any gap is named, not guessed.
+  // Import entries are "<vma> [<ordinal>] <hint> <name>" lines inside the DLL's
+  // block; export names are the last field of "[<n>] +base[<m>] <hint> <name>"
+  // lines in the [Ordinal/Name Pointer] Table.
+  const dumpImports = (file, dll) => {
+    const out = spawnSync('objdump', ['-p', file], {encoding: 'utf8', maxBuffer: 256 * 1024 * 1024}).stdout || '';
+    const block = out.split(/DLL Name: /).find((s) => s.toLowerCase().startsWith(dll.toLowerCase()));
+    if (!block) return [];
+    return block.split('\n\n')[0].split('\n')
+      .map((line) => /^\s*[0-9a-fA-F]+\s+(?:<none>\s+|\d+\s+)?[0-9a-fA-F]+\s+(\S+)\s*$/.exec(line))
+      .filter(Boolean).map((m) => m[1]);
+  };
+  const dumpExports = (dll) => {
+    const out = spawnSync('objdump', ['-p', dll], {encoding: 'utf8', maxBuffer: 256 * 1024 * 1024}).stdout || '';
+    return new Set([...out.matchAll(/^\s*\[\s*\d+\]\s+\+base\[\s*\d+\]\s+[0-9a-fA-F]+\s+(\S+)\s*$/gm)].map((m) => m[1]));
+  };
+  const combinedOk = await runOne('01_hello', 'hello from cjcj', env);
+  const imported = dumpImports(path.join(root, `01_hello${exeSuffix}`), 'libcangjie-runtime.dll');
+  const forkExports = dumpExports(runtimeLib);
+  const missingInFork = imported.filter((s) => !forkExports.has(s));
+  console.log(`combined smoke export diff: hello imports=${imported.length} fork_exports=${forkExports.size}`);
+  console.log(`relinked hello imports missing from the fork DLL: ${missingInFork.join(', ') || '(none)'}`);
+  if (!combinedOk) process.exit(1);
+} else if (!(await runOne('01_hello', 'hello from cjcj', env))) process.exit(1);
