@@ -20,6 +20,7 @@ def digest(path):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--build-tree', type=Path, required=True)
+    parser.add_argument('--chir-archive', type=Path, help='Replace only the product CHIR carrier archive')
     parser.add_argument('--release-dir', type=Path, help='Shared build release artifacts')
     parser.add_argument('--sdk', type=Path, required=True)
     parser.add_argument('--interface-tree', type=Path,
@@ -39,10 +40,11 @@ def main():
     env['LD_LIBRARY_PATH'] = ':'.join(str(sdk / p) for p in (
         'runtime/lib/linux_x86_64_cjnative', 'lib/linux_x86_64_cjnative',
         'third_party/llvm/lib', 'tools/lib')) + ':/usr/lib/x86_64-linux-gnu'
-    source_dir = args.source_dir or tree / 'packages/chir/src/devirtualization_tests'
+    source_dir = (args.source_dir or tree / 'packages/chir/src/devirtualization_tests').resolve()
     sources = sorted(source_dir.glob('*_test.cj'))
+    (out / 'temps').mkdir(exist_ok=True)
     executable = out / 'static-dispatch-tests'
-    command = [str(sdk / 'bin/cjc'), '--test', '-O0', '--diagnostic-format=noColor', '--trimpath', str(tree),
+    command = [str(sdk / 'bin/cjc'), '--test', '-O0', '--diagnostic-format=noColor', '--trimpath', str(source_dir), '--save-temps', str(out / 'temps'),
                *map(str, sources), '-o', str(executable)]
     archives, inputs = [], list(sources) + [Path(__file__).resolve()]
     for directory in sorted(release.iterdir()):
@@ -50,7 +52,9 @@ def main():
             continue
         interface_directory = interfaces / directory.name
         command += ['--import-path', str(interface_directory), '-L', str(directory)]
-        archives += sorted(directory.glob('*.a'))
+        for archive in sorted(directory.glob('*.a')):
+            archives.append(args.chir_archive.resolve()
+                            if args.chir_archive and archive.name == 'libchir@cjcj.a' else archive)
         inputs += sorted(interface_directory.glob('*.cjo'))
     shim = tree / 'runtime_shim/cjselfhost_llvmshim.o'
     command += ['--link-options=' + ' '.join([
@@ -68,6 +72,8 @@ def main():
     record['build_wall'] = time.monotonic() - start
     if record['build_rc'] == 0:
         record['elf_sha256'] = digest(executable)
+        record['test_objects'] = {str(p.relative_to(out)): digest(p)
+                                  for p in sorted((out / 'temps').rglob('*.o'))}
         start = time.monotonic()
         with (out / 'test.log').open('w') as log:
             record['test_rc'] = subprocess.call([str(executable), '--no-color', '--show-all-output',
