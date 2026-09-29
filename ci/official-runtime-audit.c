@@ -45,16 +45,27 @@ static int official_executable(const char *exe, const char *sdk) {
     return known;
 }
 
-// cjc invokes opt through a shell; follow the process ancestry, not just PPID.
-static void check_optimizer(void) {
-    const char *opt = getenv("CJCJ_AUDIT_OPT");
-    if (!opt || !opt[0]) return;
-    const char *expected = getenv("CJCJ_AUDIT_OPT_SHA256");
+// cjc invokes backend tools through a shell; follow ancestry, not just PPID.
+static void check_llvm_tool(void) {
+    const char *tools = getenv("CJCJ_AUDIT_LLVM_TOOLS");
+    if (!tools || !tools[0]) return;
     const char *log = getenv("CJCJ_AUDIT_LOG");
     char exe[PATH_MAX], digest[SHA256_DIGEST_LENGTH * 2 + 1];
-    if (!expected || !log || !realpath("/proc/self/exe", exe)) _exit(87);
+    if (!log || !realpath("/proc/self/exe", exe)) _exit(87);
     file_sha256(exe, digest);
-    if (strcmp(exe, opt) && strcmp(digest, expected)) return;
+    FILE *list = fopen(tools, "r");
+    if (!list) _exit(87);
+    char record[PATH_MAX + 128];
+    int coloured = 0;
+    while (fgets(record, sizeof(record), list)) {
+        if (strlen(record) < 66 || record[64] != '\t') _exit(87);
+        record[64] = 0;
+        char *tool = record + 65;
+        tool[strcspn(tool, "\n")] = 0;
+        if (!strcmp(exe, tool) || !strcmp(digest, record)) { coloured = 1; break; }
+    }
+    fclose(list);
+    if (!coloured) return;
     long pid = getppid();
     int official_parent = 0;
     char ancestor[PATH_MAX] = "none";
@@ -81,7 +92,7 @@ static void check_optimizer(void) {
     int fd = open(log, O_WRONLY | O_CREAT | O_APPEND, 0600);
     if (fd < 0) _exit(87);
     dprintf(fd, "%s pid=%ld exe=%s sha256=%s official_parent=%d ancestor=%s\n",
-            official_parent ? "OFFICIAL_TOOLCHAIN_MISMATCH" : "OPT_LOAD", (long)getpid(), exe, digest, official_parent, ancestor);
+            official_parent ? "OFFICIAL_TOOLCHAIN_MISMATCH" : "LLVM_TOOL_LOAD", (long)getpid(), exe, digest, official_parent, ancestor);
     close(fd);
     if (official_parent) {
         dprintf(STDERR_FILENO, "OFFICIAL_TOOLCHAIN_MISMATCH exe=%s official_compiler=%s\n", exe, ancestor);
@@ -90,7 +101,7 @@ static void check_optimizer(void) {
 }
 
 unsigned int la_version(unsigned int version) {
-    check_optimizer();
+    check_llvm_tool();
     return version < LAV_CURRENT ? version : LAV_CURRENT;
 }
 

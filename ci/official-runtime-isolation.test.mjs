@@ -127,7 +127,9 @@ function optimizerFixture(t) {
   const bin = path.join(f.sdk, 'third_party/llvm/bin');
   fs.mkdirSync(bin, {recursive: true});
   f.officialOpt = path.join(bin, 'opt');
-  f.patchedOpt = path.join(f.root, 'patched-opt');
+  f.patchedBin = path.join(f.root, 'patched-llvm/bin');
+  fs.mkdirSync(f.patchedBin, {recursive: true});
+  f.patchedOpt = path.join(f.patchedBin, 'opt');
   for (const [file, text] of [[f.officialOpt, 'official optimizer executed'], [f.patchedOpt, 'coloured optimizer executed']]) {
     const src = path.join(f.root, 'opt.c');
     fs.writeFileSync(src, `#include <stdio.h>\nint main(void) { puts("${text}"); return 0; }\n`);
@@ -140,7 +142,13 @@ function optimizerFixture(t) {
     fs.writeFileSync(src, `#include <stdio.h>\n#include <stdlib.h>\nint main(int argc, char **argv) { puts("${text}"); return argc == 2 ? (system(argv[1]) != 0) : 0; }\n`);
     ok(run('cc', [src, '-o', file], {}));
   }
-  f.env.CJCJ_PATCHED_OPT = f.patchedOpt;
+  for (const name of ['llc', 'ld.lld']) {
+    const src = path.join(f.root, `${name}.c`);
+    fs.writeFileSync(src, `#include <stdio.h>\nint main(void) { puts("coloured ${name} executed"); return 0; }\n`);
+    ok(run('cc', [src, '-o', path.join(f.patchedBin, name)], {}));
+    fs.copyFileSync(f.officialOpt, path.join(bin, name));
+  }
+  f.env.CJCJ_PATCHED_LLVM_BIN = f.patchedBin;
   return f;
 }
 
@@ -148,14 +156,14 @@ test('optimizer publication leaves the official optimizer byte-identical', t => 
   const f = optimizerFixture(t); const before = hash(f.officialOpt);
   const archive = path.join(f.root, 'opt.gz');
   fs.writeFileSync(archive, gzipSync(fs.readFileSync(f.patchedOpt)));
-  const output = path.join(f.root, 'patched-llvm/bin/opt');
-  const result = run(process.execPath, ['ci/install_patched_opt.mjs', f.officialOpt, archive, hash(f.patchedOpt), output], f.env);
+  const output = path.join(f.root, 'published-llvm/bin/opt');
+  const result = run(process.execPath, ['ci/install_patched_llvm_tool.mjs', f.officialOpt, archive, hash(f.patchedOpt), output], f.env);
   const after = hash(f.officialOpt);
   console.log(`TARGET_ASSERT_EXECUTED official_opt_unchanged before=${before} after=${after}`);
   assert.equal(after, before, 'official optimizer must remain byte-identical');
   ok(result);
   assert.equal(hash(output), hash(f.patchedOpt));
-  assert.equal(fs.readFileSync(f.env.GITHUB_ENV, 'utf8'), `CJCJ_PATCHED_OPT=${output}\n`);
+  assert.equal(fs.readFileSync(f.env.GITHUB_ENV, 'utf8'), `CJCJ_PATCHED_LLVM_BIN=${path.dirname(output)}\n`);
 });
 
 test('official compiler may execute its official optimizer', t => {
@@ -186,5 +194,16 @@ test('rebuilt compiler may explicitly execute the isolated optimizer', t => {
   console.log(`TARGET_ASSERT_EXECUTED rebuilt_opt_allowed rc=${result.status} ${result.stdout}`);
   ok(result);
   assert.match(result.stdout, /coloured optimizer executed/);
-  assert.match(result.stdout, /OPT_LOAD .*official_parent=0/);
+  assert.match(result.stdout, /LLVM_TOOL_LOAD .*official_parent=0/);
 });
+
+
+for (const name of ['llc', 'ld.lld']) {
+  test(`official compiler cannot execute isolated ${name}`, t => {
+    const f = optimizerFixture(t); const tool = path.join(f.patchedBin, name);
+    const result = audit(f, f.compiler, [tool]);
+    console.log(`TARGET_ASSERT_EXECUTED ${name}_rejected rc=${result.status} ${result.stdout}`);
+    assert.equal(result.status, 86);
+    assert.match(result.stdout, /OFFICIAL_TOOLCHAIN_MISMATCH .*official_parent=1/);
+  });
+}

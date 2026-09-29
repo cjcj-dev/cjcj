@@ -36,8 +36,21 @@ const identityFile = path.join(work, 'sdk-executables.sha256');
 fs.writeFileSync(identityFile, [...identities].join('\n') + '\n');
 const compilerFile = path.join(work, 'official-compilers.sha256');
 fs.writeFileSync(compilerFile, [...compilerIdentities].join('\n') + '\n');
-const patchedOpt = process.env.CJCJ_PATCHED_OPT ? fs.realpathSync(process.env.CJCJ_PATCHED_OPT) : '';
-const patchedOptSha = patchedOpt ? crypto.createHash('sha256').update(fs.readFileSync(patchedOpt)).digest('hex') : '';
+const llvmTools = [];
+if (process.env.CJCJ_PATCHED_LLVM_BIN) {
+  const bin = fs.realpathSync(process.env.CJCJ_PATCHED_LLVM_BIN);
+  for (const name of ['opt', 'llc', 'ld.lld', 'ld64.lld']) {
+    const file = path.join(bin, name);
+    if (!fs.existsSync(file)) {
+      if (name === 'opt' || name === 'llc') throw new Error(`incomplete isolated LLVM tuple: ${file}`);
+      continue;
+    }
+    const real = fs.realpathSync(file);
+    llvmTools.push(`${crypto.createHash('sha256').update(fs.readFileSync(real)).digest('hex')}\t${real}`);
+  }
+}
+const toolsFile = path.join(work, 'llvm-tools.sha256');
+fs.writeFileSync(toolsFile, llvmTools.join('\n') + '\n');
 fs.writeFileSync(log, '');
 const build = spawnSync('cc', ['-shared', '-fPIC', '-O2', '-Wall', '-Wextra', '-Werror',
   new URL('./official-runtime-audit.c', import.meta.url).pathname, '-o', audit, '-lcrypto'], {stdio: 'inherit'});
@@ -46,7 +59,7 @@ const auditSha = crypto.createHash('sha256').update(fs.readFileSync(audit)).dige
 console.log(`RUNTIME_AUDIT sdk=${sdk} colour=${runtime} sha256=${sha} audit_sha256=${auditSha} log=${log}`);
 const result = spawnSync(args[0], args.slice(1), {stdio: 'inherit', env: {...process.env,
   LD_AUDIT: [audit, process.env.LD_AUDIT].filter(Boolean).join(':'),
-  CJCJ_AUDIT_OPT: patchedOpt, CJCJ_AUDIT_OPT_SHA256: patchedOptSha, CJCJ_AUDIT_COMPILERS: compilerFile,
+  CJCJ_AUDIT_LLVM_TOOLS: llvmTools.length ? toolsFile : '', CJCJ_AUDIT_COMPILERS: compilerFile,
   CJCJ_AUDIT_SDK: sdk, CJCJ_AUDIT_IDENTITIES: identityFile, CJCJ_AUDIT_RUNTIME: runtime, CJCJ_AUDIT_SHA256: sha, CJCJ_AUDIT_LOG: log,
 }});
 const observed = fs.readFileSync(log, 'utf8');
