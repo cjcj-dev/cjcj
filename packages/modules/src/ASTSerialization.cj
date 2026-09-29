@@ -3,6 +3,29 @@ package cjcj::modules
 import cjcj::flatbuffers.{VerifierOptions, VerifierTemplate}
 import cjcj::basic.{CANGJIE_VERSION, DEFAULT_POSITION, DiagKindRefactor, DiagnosticEngine}
 
+// ASTLoader.cpp:30-56 (ed8c7bc5): validate each access independently of
+// full package verification, which has already failed at the call site.
+private func ReadPackageVersionForDiagnostic(data: Array<UInt8>): String {
+    if (data.size < 4) { return "" }
+    var options = VerifierOptions()
+    options.maxDepth = UInt32(FB_MAX_DEPTH)
+    options.maxTables = UInt32(FB_MAX_TABLES)
+    let verifier = VerifierTemplate(data, opts: options)
+    let rootOffset = verifier.VerifyOffset(0)
+    if (rootOffset == 0) { return "" }
+    if (!verifier.VerifyTableStart(rootOffset)) { return "" }
+    let packageTable = PackageFormat_Package(data, rootOffset)
+    let versionOffset = packageTable.GetOptionalFieldOffset(MF_PACKAGE_VT_VERSION)
+    if (versionOffset == 0u16 || verifier.VerifyOffset(rootOffset, versionOffset) == 0) {
+        return ""
+    }
+    let version = packageTable.GetVersion()
+    if (version.isNone() || !verifier.VerifyString(packageTable.GetPointer(MF_PACKAGE_VT_VERSION))) {
+        return ""
+    }
+    return version.getOrThrow().str()
+}
+
 // Binary header reader. Full package materialization belongs to the frontend loader.
 public class ASTLoader {
     private let data: Array<UInt8>
@@ -104,11 +127,16 @@ public class ASTLoader {
         options.maxTables = UInt32(FB_MAX_TABLES)
         let verifier = VerifierTemplate(data, opts: options)
         if (!VerifyPackageBuffer(data, verifier)) {
-            diag.DiagnoseRefactor(
-                DiagKindRefactor.module_loaded_ast_failed,
-                DEFAULT_POSITION,
-                arguments: [id, requestedPackageName, CANGJIE_VERSION]
-            ).Emit()
+            var packageName = if (requestedPackageName.isEmpty()) { cjoPath } else { requestedPackageName }
+            if (packageName.isEmpty()) { packageName = "unknown package" }
+            let producerVersion = ReadPackageVersionForDiagnostic(data)
+            if (producerVersion.isEmpty() || producerVersion == CANGJIE_VERSION) {
+                diag.DiagnoseRefactor(DiagKindRefactor.module_loaded_ast_failed, DEFAULT_POSITION,
+                    arguments: [id, packageName, CANGJIE_VERSION]).Emit()
+            } else {
+                diag.DiagnoseRefactor(DiagKindRefactor.module_loaded_ast_failed_with_version, DEFAULT_POSITION,
+                    arguments: [id, packageName, producerVersion, CANGJIE_VERSION]).Emit()
+            }
             return false
         }
         return true
