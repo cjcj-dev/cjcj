@@ -5,6 +5,48 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {fixture} from './prepare_bootstrap_fixture.mjs';
 
+// Optional integration arm: the tuple and its pin are real immutable release
+// inputs; unrelated host/runtime dependencies still use the script fixture.
+if (process.env.REAL_BOOTSTRAP_TUPLE_DIR) {
+  test('platform tuple consumes real pinned payloads, rejects swapped pin, and restores', () => {
+    const target = process.env.REAL_BOOTSTRAP_TARGET;
+    const platform = {'linux-x64': 'linux_x86_64', 'linux-aarch64': 'linux_aarch64'}[target];
+    assert.ok(platform, 'REAL_BOOTSTRAP_TARGET must select a Linux tuple');
+    const pins = JSON.parse(fs.readFileSync(new URL('../bootstrap_inputs_pin.json', import.meta.url)));
+    const other = platform === 'linux_x86_64' ? 'linux_aarch64' : 'linux_x86_64';
+    const original = JSON.stringify(pins);
+    fixture(({env, pinFile, run}) => {
+      env.CJCJ_BOOTSTRAP_COLOUR_TUPLE = path.resolve(process.env.REAL_BOOTSTRAP_TUPLE_DIR);
+      env.CJCJ_BOOTSTRAP_SOURCE_REASON = 'real immutable tuple integration arm';
+      fs.writeFileSync(pinFile, original);
+      const checkAccepted = label => {
+        const result = run();
+        assert.equal(result.status, 0, result.stderr);
+        const exported = /^CJCJ_BOOTSTRAP_COLOUR_TUPLE=(.+)$/m.exec(result.stdout)?.[1];
+        assert.ok(exported, result.stdout);
+        assert.match(fs.readFileSync(path.join(exported, 'MANIFEST'), 'utf8'),
+          new RegExp(`^PLATFORM=${platform}$`, 'm'));
+        for (const file of pins.platforms[platform].files) {
+          assert.equal(createHash('sha256').update(fs.readFileSync(path.join(exported, file.path))).digest('hex'),
+            file.release_sha256, file.path);
+        }
+        console.log(`ASSERT real-tuple ${platform} ${label} rc=${result.status} run=${pins.platforms[platform].run}`);
+      };
+      checkAccepted('green');
+      pins.platforms[platform] = pins.platforms[other];
+      fs.writeFileSync(pinFile, JSON.stringify(pins));
+      const rejected = run();
+      assert.equal(rejected.status, 65, rejected.stderr);
+      assert.match(rejected.stderr, new RegExp(`BOOTSTRAP_TUPLE_PLATFORM_MISMATCH expected=${platform} actual=${other}`));
+      assert.doesNotMatch(rejected.stdout, /BOOTSTRAP_SOURCE|^CJCJ_BOOTSTRAP_COLOUR_TUPLE=/m);
+      console.log(`ASSERT real-tuple ${platform} swapped-pin rc=65 before acquisition`);
+      Object.assign(pins, JSON.parse(original));
+      fs.writeFileSync(pinFile, original);
+      checkAccepted('restored');
+    }, target);
+  });
+}
+
 test('reviewed sums pin rejects altered tuple bytes', () => fixture(({env, fallback, run}) => {
   // Isolate the digest contract from artifact-selection policy.
   delete env.CJCJ_BOOTSTRAP_TUPLE_ARTIFACT;
