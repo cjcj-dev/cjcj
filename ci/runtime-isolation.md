@@ -44,3 +44,11 @@ path/hash before main and follows `/proc` ancestry through intermediate
 shells. An official `cjc`/`cjc-frontend` ancestor paired with a coloured
 optimizer, backend, or linker produces `OFFICIAL_TOOLCHAIN_MISMATCH` (86).
 Explicit use by a rebuilt compiler is recorded as `LLVM_TOOL_LOAD`.
+
+Until #715 supplies matching coloured std and backend inputs, smoke retains the
+host SDK's backend, std and runtime. It does not consume the isolated runtime
+export as a linker or loader override. The smoke driver requests verbose compiler
+output and rejects a link line containing both official SDK libraries and the
+isolated runtime path (`SMOKE_RUNTIME_MISMATCH`, compile rc 86), before running
+that sample. This transcript check covers the CI compiler's verbose link format;
+it does not claim to inspect arbitrary linker response files.

@@ -24,38 +24,11 @@ try {
   process.exit(2);
 }
 
-// The samples are compiled by our self-built compiler, so they are our own
-// artifact and must link the source-built runtime -- not the official SDK's.
-// ci/install_patched_runtime.mjs publishes that runtime outside the SDK and
-// exports the directory as CJCJ_PATCHED_RUNTIME_LIB_DIR; the driver otherwise
-// searches $CANGJIE_HOME/runtime/lib, which now holds the official runtime.
-// --library-path is searched before the default, so the link resolves the
-// coloured runtime without any official SDK byte being touched.
-const runtimeLibDir = process.platform === 'win32' ? '' : (process.env.CJCJ_PATCHED_RUNTIME_LIB_DIR || '');
-const linkArgs = runtimeLibDir ? ['-L', runtimeLibDir] : [];
-if (runtimeLibDir) console.log(`[smoke] linking against the isolated runtime: ${runtimeLibDir}`);
-
+// Until #715 supplies matching coloured std/backend inputs, smoke uses the
+// official SDK libraries, backend and runtime, just like the host build.
 let pass = 0;
 let fail = 0;
 if (process.platform === 'win32') process.env.cjStackSize = process.env.cjStackSize || '64MB';
-
-// Scoped deliberately: the compiler is a self-built executable linked against the
-// official SDK's runtime, and it is the one that already runs correctly in the
-// Build workspace step. Only the samples -- artifacts this compiler produces --
-// get the coloured runtime. Prepending it process-wide instead made the compiler
-// itself load the coloured runtime and crash in the GC relocate phase.
-function withSampleLoader(fn) {
-  if (!runtimeLibDir) return fn();
-  const key = process.platform === 'darwin' ? 'DYLD_LIBRARY_PATH' : 'LD_LIBRARY_PATH';
-  const previous = process.env[key];
-  process.env[key] = [runtimeLibDir, previous].filter(Boolean).join(':');
-  try {
-    return fn();
-  } finally {
-    if (previous === undefined) delete process.env[key];
-    else process.env[key] = previous;
-  }
-}
 
 async function runCommand(executable, args, cwd) {
   const t0 = performance.now();
@@ -72,6 +45,20 @@ async function runCommand(executable, args, cwd) {
       maxBuffer: 64 * 1024 * 1024,
     });
     out = {exitCode: result.status ?? 1, stdout: result.stdout || '', stderr: result.stderr || String(result.error || ''), signal: result.signal || null};
+  }
+  // Inspect the actual compiler transcript before executing any produced sample.
+  // The official SDK supplies both its lib directory and cjstart.o to the linker.
+  if (executable === cjcj) {
+    const sdk = process.env.CANGJIE_HOME;
+    const patched = process.env.CJCJ_PATCHED_RUNTIME_LIB_DIR;
+    const lines = `${out.stdout || ''}\n${out.stderr || ''}`.split(/\r?\n/);
+    const mixed = lines.find(line => sdk &&
+      (line.includes(`${sdk}/lib/`) || line.includes(`${sdk}\\lib\\`)) &&
+      (line.includes('patched-runtime') || (patched && line.includes(patched))));
+    if (mixed) {
+      out = {exitCode: 86, stdout: out.stdout || '',
+        stderr: `${out.stderr || ''}\nSMOKE_RUNTIME_MISMATCH: official SDK std with patched runtime: ${mixed}\n`};
+    }
   }
   const ms = Math.round(performance.now() - t0);
   return {
@@ -255,14 +242,14 @@ for (const [name, wanted] of expect) {
   const runLog = path.join(work, `${name}.run.log`);
   await Promise.all([fs.rm(exe, {force: true}), fs.rm(buildLog, {force: true}), fs.rm(runLog, {force: true})]);
   console.log(`[smoke] sample ${name}`);
-  const built = await runCommand(cjcj, [...linkArgs, src, '-o', exe]);
+  const built = await runCommand(cjcj, ['--verbose', src, '-o', exe]);
   await fs.writeFile(buildLog, `rc=${built.exitCode} signal=${built.signal ?? 'none'} ms=${built.ms}\n--- stdout ---\n${built.stdout}\n--- stderr ---\n${built.stderr}`);
   if (built.exitCode !== 0) {
     reportFailure('compile', name, built);
     fail++;
     continue;
   }
-  const ran = await withSampleLoader(() => runCommand(exe, []));
+  const ran = await runCommand(exe, []);
   await fs.writeFile(runLog, `rc=${ran.exitCode} signal=${ran.signal ?? 'none'} ms=${ran.ms}\n--- stdout ---\n${ran.stdout}\n--- stderr ---\n${ran.stderr}`);
   // Normalize CRLF before comparing: Windows println emits \r\n, and the
   // expectations encode line structure, not the OS newline byte sequence.
@@ -285,14 +272,14 @@ await fs.rm(macroBuild, {recursive: true, force: true});
 await fs.cp(path.join(here, 'macro_demo'), macroBuild, {recursive: true});
 let macroOk = true;
 let got = '';
-let result = await runCommand(cjcj, [...linkArgs, '--compile-macro', 'def.cj'], path.join(macroBuild, 'mymacros'));
+let result = await runCommand(cjcj, ['--verbose', '--compile-macro', 'def.cj'], path.join(macroBuild, 'mymacros'));
 await fs.writeFile(path.join(work, 'macro.build.log'), `rc=${result.exitCode} signal=${result.signal ?? 'none'} ms=${result.ms}\n--- stdout ---\n${result.stdout}\n--- stderr ---\n${result.stderr}`);
 if (result.exitCode !== 0) {
   reportFailure('compile', '06_macro/package', result);
   macroOk = false;
 }
 if (macroOk) {
-  result = await runCommand(cjcj, [...linkArgs, 'main.cj', '--import-path', macroBuild, '-o', path.join(macroBuild, `app/app${exeSuffix}`)], path.join(macroBuild, 'app'));
+  result = await runCommand(cjcj, ['--verbose', 'main.cj', '--import-path', macroBuild, '-o', path.join(macroBuild, `app/app${exeSuffix}`)], path.join(macroBuild, 'app'));
   await fs.writeFile(path.join(work, 'macro.app.log'), `rc=${result.exitCode} signal=${result.signal ?? 'none'} ms=${result.ms}\n--- stdout ---\n${result.stdout}\n--- stderr ---\n${result.stderr}`);
   if (result.exitCode !== 0) {
     reportFailure('compile', '06_macro/app', result);
@@ -310,7 +297,7 @@ if (macroOk) {
   }
 }
 if (macroOk) {
-  result = await withSampleLoader(() => runCommand(path.join(macroBuild, `app/app${exeSuffix}`), []));
+  result = await runCommand(path.join(macroBuild, `app/app${exeSuffix}`), []);
   await fs.writeFile(path.join(work, 'macro.run.log'), `rc=${result.exitCode} signal=${result.signal ?? 'none'} ms=${result.ms}\n--- stdout ---\n${result.stdout}\n--- stderr ---\n${result.stderr}`);
   got = result.stdout.replace(/\r\n/g, '\n').replace(/\n$/, '');
   if (result.exitCode !== 0) {
