@@ -44,7 +44,7 @@ export function evaluate(records, ids, notRun = {}) {
           const result = record[step];
           if (!result || result.rc !== 0 || result.signal || result.error || result.timed_out ||
               result.skipped_who !== 0 || (step === 'compile' && !record.elf_sha256)) {
-            failures.push({arm, phase, id, step, reason: result?.signature || 'missing-result'});
+            failures.push({arm, phase, id, step, reason: !result ? 'missing-result' : step === 'compile' && !record.elf_sha256 ? 'missing-elf' : result.signature});
           }
         }
       }
@@ -166,14 +166,20 @@ export async function run(config) {
       });
     }
   }
+  // Interleave the arms so a bounded worker pool runs both SDKs concurrently.
+  const queue = !notRun.selfhost ? tasks.slice(0, tasks.length / 2).flatMap((task, i) =>
+    [task, tasks[i + tasks.length / 2]]) : tasks;
   let cursor = 0;
   await Promise.all(Array.from({length: Math.min(config.jobs, tasks.length)}, async () => {
-    while (cursor < tasks.length) await tasks[cursor++]();
+    while (cursor < queue.length) await queue[cursor++]();
   }));
   records.sort((a, b) => `${a.arm}/${a.phase}/${a.id}`.localeCompare(`${b.arm}/${b.phase}/${b.id}`));
   for (const arm of Object.keys(arms)) {
     if (notRun[arm]) continue;
     if (await digest(arms[arm].compiler) !== arms[arm].compiler_sha256) throw new Error(`${arm} compiler changed during run`);
+    for (const [name, expected] of Object.entries(arms[arm].runtime)) {
+      if (await digest(path.join(arms[arm].sdk, 'runtime/lib/linux_x86_64_cjnative', name)) !== expected) throw new Error(`${arm} runtime changed during run: ${name}`);
+    }
   }
   const result = {schema: 1, ...evaluate(records, [...ids], notRun), head: config.head, arms, records,
     skipped_who: records.reduce((n, r) => n + ['invoke', 'compile', 'run'].reduce((s, k) => s + (r[k]?.skipped_who || 0), 0), 0),
