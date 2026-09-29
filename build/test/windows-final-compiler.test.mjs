@@ -96,7 +96,7 @@ for (const fail of ['', 'final-clean', 'final-build']) {
       }
       assert.equal(await fs.readFile(path.join(host, 'tools/bin/libcangjie-runtime.dll'), 'utf8'), 'host DLL');
       assert.equal(await fs.readFile(path.join(root, 'final-compiler-target-sdk/bin/libcangjie-runtime.dll'), 'utf8'), 'target DLL');
-      assert.equal(await fs.readFile(path.join(root, 'commands.log'), 'utf8'), 'final-clean:cjpm clean\nfinal-build:cjc --version && cjpm build\n');
+      assert.equal(await fs.readFile(path.join(root, 'commands.log'), 'utf8'), 'final-clean:cjpm clean\nfinal-build:cjc --version && node ci/check-codegen-runtime-layout.mjs && cjpm build\n');
     }
   });
 }
