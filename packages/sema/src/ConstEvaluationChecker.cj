@@ -726,6 +726,7 @@ public class ConstEvaluationChecker {
         // An operator '()' call may be desugared again as a variadic call,
         // moving its baseFunc into the new desugarExpr.
         if (callExpr.baseFunc.isNone()) {
+            CJC_ASSERT(callExpr.desugarExpr.isSome())
             return ChkExpr(callExpr.desugarExpr.getOrThrow(), isWeak)
         }
         if (!ChkExpr(callExpr.baseFunc.getOrThrow(), isWeak)) {
