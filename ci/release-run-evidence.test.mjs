@@ -5,7 +5,7 @@ import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import test from 'node:test';
 import {bindEvidence} from './evidence-binding-fixture.mjs';
-import {allReleasePlatforms, getReleasePlatform, getTarget} from '../build/lib/targets.mjs';
+import {allReleasePlatforms, getReleasePlatform, getTarget, releasePlatformReadiness} from '../build/lib/targets.mjs';
 
 const repo = path.resolve(import.meta.dirname, '..');
 const command = path.join(repo, 'ci/release-gates.mjs');
@@ -100,7 +100,7 @@ for (const gate of gates) {
     await fs.rm(path.join(s.evidence, `${gate}_RESULTS.json`));
     await fs.rm(path.join(s.evidence, 'EVIDENCE_BINDING.json'));
     await bindEvidence(s.evidence, gate, s.checkout);
-    check(t, run(s, gate), 'UNKNOWN', `${gate}_RESULTS.json`);
+    check(t, run(s, gate), gate !== 'G10' && allReleasePlatforms().some(key => releasePlatformReadiness(key).status === 'blocked') ? 'NOT_MET' : 'UNKNOWN', `${gate}_RESULTS.json`);
   });
 }
 for (const gate of gates.filter(g => g !== 'G10')) {
@@ -169,5 +169,36 @@ test('G10 skipped WHO, malformed records, NOT_RUN, short corpus and duplicate ar
     [d => { d.head = 'f'.repeat(40); }, 'UNKNOWN', 'G10_RESULTS.json:head'],
   ]) {
     Object.assign(s.data, structuredClone(original)); mutate(s.data); await s.save(); check(t, run(s, 'G10'), status, needle);
+  }
+});
+
+for (const gate of gates) test(`${gate} absent evidence lists its missing obligations`, async t => {
+  const s = await fixture(t, gate);
+  await fs.rm(path.join(s.root, 'evidence', 'GATE_EVIDENCE.json'));
+  check(t, run(s, gate, false), gate !== 'G10' && allReleasePlatforms().some(key => releasePlatformReadiness(key).status === 'blocked') ? 'NOT_MET' : 'UNKNOWN', `${gate}_RESULTS.json`);
+});
+test('G3 blocked and excluded rows cannot shrink submitted coverage', async t => {
+  const s = await fixture(t, 'G3');
+  const file = path.join(s.checkout, 'build/lib/targets.mjs');
+  await fs.writeFile(file, (await fs.readFile(file, 'utf8')).replace('const RELEASE_PLATFORMS = Object.freeze([',
+    `const RELEASE_PLATFORMS = Object.freeze([
+      releasePlatform({key: 'fixture-blocked', host: 'linux-x64', runner: 'ubuntu-24.04', crossTuples: Object.freeze(['fixture_unproduced_tuple'])}),
+      releasePlatform({key: 'fixture-excluded', host: 'linux-x64', runner: 'ubuntu-24.04', excluded: 'documented exclusion'}),`));
+  git(s.checkout, 'add', '.'); git(s.checkout, '-c', 'user.name=Zxilly', '-c', 'user.email=zxilly@outlook.com', 'commit', '-qm', 'extend scope');
+  await s.save();
+  const r = run(s, 'G3');
+  check(t, r, 'NOT_MET', 'fixture-blocked/fixture_unproduced_tuple:records=0');
+  assert.ok(r.value.includes('fixture-excluded/'));
+});
+
+test('G10 every step failure and required result field reaches the verdict', async t => {
+  const s = await fixture(t, 'G10'), original = structuredClone(s.data);
+  for (const [index, step] of [[0, 'invoke'], [20, 'compile'], [20, 'run'], [40, 'compile'], [40, 'run']]) {
+    for (const field of ['rc', 'signal', 'error', 'timed_out', 'skipped_who', 'signature']) {
+      Object.assign(s.data, structuredClone(original)); delete s.data.records[index][step][field]; await s.save();
+      const row = s.data.records[index]; check(t, run(s, 'G10'), 'UNKNOWN', `${row.arm}/${row.phase}/${row.id}:${step}`);
+    }
+    Object.assign(s.data, structuredClone(original)); s.data.records[index][step].rc = 7; await s.save();
+    const row = s.data.records[index]; check(t, run(s, 'G10'), 'NOT_MET', `${row.arm}/${row.phase}/${row.id}:${step}`);
   }
 });
