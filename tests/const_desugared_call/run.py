@@ -49,12 +49,17 @@ def main():
             checks['ordinary_const_accepted'] = result.returncode == 0
         else:
             # Separate verdict and location assertions: neither masks the other.
+            diagnostics = re.split(r'(?m)(?=^(?:error|warning):)', text)
+            array_diagnostics = [d for d in diagnostics
+                                 if d.startswith("error: expected 'const' expression")
+                                 and "expressions of type 'Array' are not constant" in d]
             checks['array_rejected_as_nonconstant'] = (
-                result.returncode == 1 and "expected 'const' expression" in text
-                and "expressions of type 'Array' are not constant" in text)
-            positions = re.findall(re.escape(fixture.name) + r':(\d+):(\d+)', text)
-            checks['diagnostic_on_call_site'] = any(
-                int(line) == 9 and int(column) > 0 for line, column in positions)
+                result.returncode == 1 and bool(array_diagnostics))
+            # Bind the location to the Array error, not a note or unrelated error.
+            locations = [re.search(re.escape(fixture.name) + r':(\d+):(\d+)', d)
+                         for d in array_diagnostics]
+            checks['diagnostic_on_call_site'] = bool(locations) and all(
+                p is not None and int(p[1]) == 9 and int(p[2]) > 0 for p in locations)
             checks['no_internal_error'] = 'Internal Compiler Error' not in text
         for assertion, passed in checks.items():
             print(f'ASSERT {name}.{assertion} {"PASS" if passed else "FAIL"}', flush=True)
