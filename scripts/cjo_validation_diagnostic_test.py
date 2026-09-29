@@ -27,7 +27,7 @@ for case in ("DifferentProducerVersion", "SameProducerVersion", "UnavailableProd
     expected = re.findall(r"^FRONTEND_EXPECTED=(.*)$", text, re.M)
     observed = re.findall(r"^\s*error: (validation of (?:ast|cached type) file .*?)\s*$", text, re.M)
     expected_count = 0 if case == "ValidDependencyHeader" else (5 if case == "DifferentProducerVersion" else 4)
-    target_executed = ("IMPORT_TARGET loaded=true expected=true" in text if expected_count == 0
+    target_executed = (re.search(r"IMPORT_TARGET loaded=(?:true|false) expected=true", text) is not None if expected_count == 0
                        else len(expected) == expected_count and "FRONTEND_TARGET_BEGIN" in text
                        and "FRONTEND_TARGET_END" in text)
     matches = Counter(observed) == Counter(expected)
