@@ -105,6 +105,15 @@ export const GATING = Object.freeze([
 // wiring one of these in is a decision about CI shape, not a re-investigation.
 export const DEFERRED = Object.freeze([
   Object.freeze({
+    file: 'build/test/runtime-colour.test.mjs',
+    needs: 'Node and git, plus cc with shared/PIC support, an ELF linker with version-script '
+      + 'support, python3, and nm --defined-only dynamic export inspection; the current CI '
+      + 'workflow has not demonstrated this complete dependency set',
+    verified: 'node --test build/test/runtime-colour.test.mjs => rc=0 tests 6 pass 6 fail 0 '
+      + 'skipped 0 (2026-09-29, kkk2, Node v20.19.0); defined exports accepted; official, '
+      + 'retired-marker and undefined exports rejected; versioned exports checked both ways',
+  }),
+  Object.freeze({
     file: 'build/test/release-evidence.test.mjs',
     needs: 'RELEASE_EVIDENCE_TEST_ROOT set to a path outside /tmp (the test refuses tmpfs '
       + 'because it archives evidence that must survive); on a runner, ${{ runner.temp }} qualifies',
