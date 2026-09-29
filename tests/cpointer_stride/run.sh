@@ -13,8 +13,13 @@ export CANGJIE_HOME=$sdk
 uptime > "$out/uptime-before.txt"
 start=$SECONDS
 sha256sum "$here/main.cj" "$here/run.sh" \
+  "$sdk/bin/cjc" \
   "$sdk/lib/linux_x86_64_cjnative/libcangjie-std-core.a" \
   "$runtime/libcangjie-runtime.so" "$runtime/libboundscheck.so" > "$out/inputs.sha256"
+if [ -f "$sdk/bin/cjcj-stage1" ]; then
+  sha256sum "$sdk/bin/cjcj-stage1" >> "$out/inputs.sha256"
+fi
+printf 'sdk=%s\nruntime=%s\n' "$sdk" "$runtime" > "$out/recipe.txt"
 "$sdk/bin/cjc" "$here/main.cj" -O0 -o "$out/stride" > "$out/build.log" 2>&1
 rc=$?
 printf '%s\n' "$rc" > "$out/build.rc"
