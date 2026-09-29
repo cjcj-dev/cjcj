@@ -268,13 +268,16 @@ if (llcPlatform && fixedLlcGz) {
   }
   for (const tool of toolsToInstall) {
     const expectedSha = expectedShas.get(tool.name);
-    const currentSha = await isFile(tool.sdk)
-      ? (await $({stdio: 'pipe'})`sha256sum ${tool.sdk}`).stdout.trim().split(/\s+/)[0] : '';
-    if (currentSha !== expectedSha) {
-      if (tool.name !== 'opt' && !(await isFile(`${tool.sdk}.orig`))) await $`cp -f ${tool.sdk} ${tool.sdk}.orig`;
-      await fs.rm(tool.sdk, {force: true});
-      await $`gunzip -c ${tool.archive} > ${tool.sdk}`;
-      await $`chmod 0755 ${tool.sdk}`;
+    if (tool.name === 'opt') {
+      await $`node ${path.join(import.meta.dirname, 'install_patched_opt.mjs')} ${path.join(sdkLlvmBin, 'opt')} ${tool.archive} ${expectedSha} ${tool.sdk}`;
+    } else {
+      const currentSha = (await $({stdio: 'pipe'})`sha256sum ${tool.sdk}`).stdout.trim().split(/\s+/)[0];
+      if (currentSha !== expectedSha) {
+        if (!(await isFile(`${tool.sdk}.orig`))) await $`cp -f ${tool.sdk} ${tool.sdk}.orig`;
+        await fs.rm(tool.sdk, {force: true});
+        await $`gunzip -c ${tool.archive} > ${tool.sdk}`;
+        await $`chmod 0755 ${tool.sdk}`;
+      }
     }
     const installedSha = (await $({stdio: 'pipe'})`sha256sum ${tool.sdk}`).stdout.trim().split(/\s+/)[0];
     if (installedSha !== expectedSha) {
@@ -282,13 +285,7 @@ if (llcPlatform && fixedLlcGz) {
       process.exit(4);
     }
     log(`${tool.name} -> source-built fixed LLVM (${installedSha}) path=${tool.sdk}`);
-    if (tool.name === 'opt') {
-      const hostOpt = path.join(sdkLlvmBin, 'opt');
-      const hostSha = crypto.createHash('sha256').update(await fs.readFile(hostOpt)).digest('hex');
-      if (hostSha === installedSha) throw new Error('OFFICIAL_TOOLCHAIN_MISMATCH: SDK opt is already coloured; provision a clean official SDK');
-      if (process.env.GITHUB_ENV) await fs.appendFile(process.env.GITHUB_ENV, `CJCJ_PATCHED_OPT=${tool.sdk}\n`);
-      log(`official opt retained: path=${hostOpt} sha256=${hostSha}`);
-    }
+
   }
 
   if (fixedOptGz) {

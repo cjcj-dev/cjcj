@@ -23,26 +23,76 @@ static void file_sha256(const char *file, char *digest) {
     for (int i = 0; i < SHA256_DIGEST_LENGTH; ++i) sprintf(digest + i * 2, "%02x", hash[i]);
 }
 
-static int official_executable(const char *exe, const char *sdk) {
-    static int known = -1;
-    if (known >= 0) return known;
-    known = !strncmp(exe, sdk, strlen(sdk)) && exe[strlen(sdk)] == '/';
-    if (known) return known;
-    const char *identities = getenv("CJCJ_AUDIT_IDENTITIES");
+static int matches_identity(const char *exe, const char *identities) {
     if (!identities) _exit(87);
     FILE *list = fopen(identities, "r");
     if (!list) _exit(87);
     char digest[SHA256_DIGEST_LENGTH * 2 + 1], line[128];
     file_sha256(exe, digest);
+    int match = 0;
     while (fgets(line, sizeof(line), list)) {
         line[strcspn(line, "\n")] = 0;
-        if (!strcmp(line, digest)) { known = 1; break; }
+        if (!strcmp(line, digest)) { match = 1; break; }
     }
     fclose(list);
+    return match;
+}
+
+static int official_executable(const char *exe, const char *sdk) {
+    static int known = -1;
+    if (known < 0) known = (!strncmp(exe, sdk, strlen(sdk)) && exe[strlen(sdk)] == '/') ||
+                          matches_identity(exe, getenv("CJCJ_AUDIT_IDENTITIES"));
     return known;
 }
 
-unsigned int la_version(unsigned int version) { return version < LAV_CURRENT ? version : LAV_CURRENT; }
+// cjc invokes opt through a shell; follow the process ancestry, not just PPID.
+static void check_optimizer(void) {
+    const char *opt = getenv("CJCJ_AUDIT_OPT");
+    if (!opt || !opt[0]) return;
+    const char *expected = getenv("CJCJ_AUDIT_OPT_SHA256");
+    const char *log = getenv("CJCJ_AUDIT_LOG");
+    char exe[PATH_MAX], digest[SHA256_DIGEST_LENGTH * 2 + 1];
+    if (!expected || !log || !realpath("/proc/self/exe", exe)) _exit(87);
+    file_sha256(exe, digest);
+    if (strcmp(exe, opt) && strcmp(digest, expected)) return;
+    long pid = getppid();
+    int official_parent = 0;
+    char ancestor[PATH_MAX] = "none";
+    while (pid > 1) {
+        char proc[64], parent[PATH_MAX], line[256];
+        snprintf(proc, sizeof(proc), "/proc/%ld/exe", pid);
+        if (!realpath(proc, parent)) _exit(87);
+        if (matches_identity(parent, getenv("CJCJ_AUDIT_COMPILERS"))) {
+            official_parent = 1;
+            snprintf(ancestor, sizeof(ancestor), "%s", parent);
+            break;
+        }
+        snprintf(proc, sizeof(proc), "/proc/%ld/status", pid);
+        FILE *status = fopen(proc, "r");
+        if (!status) _exit(87);
+        long next = 0;
+        while (fgets(line, sizeof(line), status)) {
+            if (!strncmp(line, "PPid:", 5)) { next = strtol(line + 5, NULL, 10); break; }
+        }
+        fclose(status);
+        if (next == pid) _exit(87);
+        pid = next;
+    }
+    int fd = open(log, O_WRONLY | O_CREAT | O_APPEND, 0600);
+    if (fd < 0) _exit(87);
+    dprintf(fd, "%s pid=%ld exe=%s sha256=%s official_parent=%d ancestor=%s\n",
+            official_parent ? "OFFICIAL_TOOLCHAIN_MISMATCH" : "OPT_LOAD", (long)getpid(), exe, digest, official_parent, ancestor);
+    close(fd);
+    if (official_parent) {
+        dprintf(STDERR_FILENO, "OFFICIAL_TOOLCHAIN_MISMATCH exe=%s official_compiler=%s\n", exe, ancestor);
+        _exit(86);
+    }
+}
+
+unsigned int la_version(unsigned int version) {
+    check_optimizer();
+    return version < LAV_CURRENT ? version : LAV_CURRENT;
+}
 
 unsigned int la_objopen(struct link_map *map, Lmid_t ns, uintptr_t *cookie) {
     (void)ns; (void)cookie;
