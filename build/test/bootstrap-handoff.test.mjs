@@ -192,14 +192,19 @@ test('legacy stage2 inherits the caller heap', async () => {
 });
 
 
-test('handoff materializes overlapping library links on two consecutive promotions', async t => {
+for (const topology of ['overlapping-links', 'stage33-regular-sdk']) {
+test(`handoff materializes ${topology} on two consecutive promotions`, async t => {
   const f = await fixture(t);
   const relative = path.join('lib', f.tuple);
   for (const [tree, content] of [['sdk-stage1', 'old pcre'], ['stdlib-stage2', 'stage2 pcre']]) {
     const directory = path.join(f.work, tree, relative);
-    await fs.writeFile(path.join(directory, 'libpcre2-8.so'), content);
-    await fs.symlink('libpcre2-8.so', path.join(directory, 'libpcre2-8.so.0'));
-    assert.equal((await fs.lstat(path.join(directory, 'libpcre2-8.so.0'))).isSymbolicLink(), true);
+    await fs.writeFile(path.join(directory, 'libpcre2-8.so.0.14.0'), content);
+    for (const [name, target] of [['libpcre2-8.so', 'libpcre2-8.so.0'], ['libpcre2-8.so.0', 'libpcre2-8.so.0.14.0']]) {
+      const isLink = topology === 'overlapping-links' || tree === 'stdlib-stage2';
+      if (isLink) await fs.symlink(target, path.join(directory, name));
+      else await fs.writeFile(path.join(directory, name), content);
+      assert.equal((await fs.lstat(path.join(directory, name))).isSymbolicLink(), isLink);
+    }
   }
   const links = async directory => {
     const result = [];
@@ -227,3 +232,4 @@ test('handoff materializes overlapping library links on two consecutive promotio
     assert.equal(await fs.readFile(path.join(f.work, 'stdlib-stage2', relative, 'libpcre2-8.so'), 'utf8'), 'stage2 pcre');
   }
 });
+}
