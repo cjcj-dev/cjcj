@@ -306,7 +306,6 @@ public open class GlobalOptions <: Option {
     public let inputLinkOptionsOrder: ArrayList<OrderedInput> = ArrayList<OrderedInput>()
     public let inputLinkOptionOrder: ArrayList<OrderedInput> = ArrayList<OrderedInput>()
     public let removedPathPrefix: ArrayList<String> = ArrayList<String>()
-    public let pathPrefixMaps: ArrayList<(String, String)> = ArrayList<(String, String)>()
     public var moduleName: String = ""
     public var compilePackage: Bool = false
     public var compileMacroPackage: Bool = false
@@ -491,7 +490,6 @@ public open class GlobalOptions <: Option {
             inputLinkOptionOrder.add(OrderedInput(value.value, value.index))
         }
         for (value in other.removedPathPrefix) { removedPathPrefix.add(value) }
-        for (mapping in other.pathPrefixMaps) { pathPrefixMaps.add((mapping[0], mapping[1])) }
         moduleName = other.moduleName
         compilePackage = other.compilePackage
         compileMacroPackage = other.compileMacroPackage
