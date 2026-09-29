@@ -166,7 +166,7 @@ public class TypeAnalysis <: ValueAnalysis<TypeValueDomain, FullStatePool<TypeVa
 
     public static func CheckFuncHasInvoke(fn: Function): Bool {
         let found = CoreBox<Bool>(false)
-        Visitor.Visit(fn, { expr =>
+        Visitor.Visit(fn, { expr: Expression =>
             if (expr is DynamicDispatch || expr is DynamicDispatchWithException) {
                 found.value = true
                 return VisitResult.STOP

@@ -13,16 +13,15 @@ The runner compiles three source fixtures at `-O2` and reads the real compiler's
 separate instances of `I<T>`. It also observes preserved generic type arguments,
 a generic receiver, dynamic RTTI, and an ordinary constant-folded return.
 
-Two independent product mutations must fail only
-`actual_types_choose_nonrecursive_raw_callee`:
+The merged Devirtualization pass follows upstream 2a468452. Remove
+`RunOnFuncForInvokeStatic` from `Devirtualization.RunOnFuncs` to exercise the
+static collection boundary. The CHIR unit cases in
+`packages/chir/src/devirtualization_tests` additionally cover RTTI(value),
+TryInvokeStatic successors, unknown receiver types, and the STATIC attribute of
+an instantiated function. Removing the GetRTTIStatic guard must affect only the
+RTTI(value) cases; bypassing `invoke.ReplaceWith(call)` exercises the existing
+RewriteToApply consumer.
 
-* Remove `devirtStatics.RunOnPackage` in `CodeGenBridge.cj`.
-* Replace `ResolveStaticCallee` at its call site with the pre-d1f7107d
-  `GetExpectedFunc(invoke.GetMethodName(), invoke.GetMethodType(), true,
-  ArrayList<Type>(), builder, false)` query.
-
-The second mutation selects `f1(String)` for the `Int64` argument, recreating the
-recursive dispatch choice described by d1f7107d. Keep the same runner, fixtures,
-SDK and build configuration in candidate, mutation and restored arms. Preserve
-compiler hashes immediately after each build. Compilation failures cannot count
-as the expected failing assertion.
+Keep the same runner, fixtures, SDK and build configuration in candidate,
+mutation and restored arms. Preserve compiler hashes immediately after each
+build. Compilation failures cannot count as the expected failing assertion.
