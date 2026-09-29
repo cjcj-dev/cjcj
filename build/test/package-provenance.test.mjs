@@ -480,16 +480,22 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
   await expectInspectionFailure('ldd',
     /package ldd bin\/cjc failed \(exit=73\): ldd forced failure/);
 
+  // The packager reads the tuple from the isolated directory, so the negative
+  // cases perturb that directory and the manifest, never the official SDK.
   const originalLlvmManifest = await fs.readFile(llvmManifest, 'utf8');
   await fs.writeFile(llvmManifest, originalLlvmManifest.replace(/^OPT_SHA256=.*$/m, `OPT_SHA256=${'0'.repeat(64)}`));
   const changedLlvm = runRaw('zx', packageArgs, {cwd: path.resolve('.')});
   assert.notEqual(changedLlvm.status, 0, 'changing one LLVM tool sha must fail closed');
-  assert.match(`${changedLlvm.stdout}\n${changedLlvm.stderr}`, /opt: packaged sha256 .* does not match tuple manifest/);
+  // The packager verifies each tool against the manifest before staging it, so a
+  // manifest that disagrees with the isolated bytes aborts before anything is
+  // copied into the stage. The lineage audit further down re-checks the staged
+  // bytes against the same manifest, so the mismatch is caught at both points.
+  assert.match(`${changedLlvm.stdout}\n${changedLlvm.stderr}`, /opt: packaged sha256 .* does not match tuple manifest|isolated opt sha256 .* does not match manifest/);
   console.log(`NEGATIVE-CHANGE-LLVM RC=${changedLlvm.status}\n${changedLlvm.stderr.trim()}`);
   await fs.writeFile(llvmManifest, originalLlvmManifest);
 
   async function expectThinTupleFailure(tool, manifestField) {
-    const executable = path.join(sdk, 'third_party', 'llvm', 'bin', tool);
+    const executable = path.join(isolatedLlvmBin, tool);
     const originalExecutable = await fs.readFile(executable);
     await fs.copyFile(thinLlvmFixture, executable);
     if (tool === 'llc' || tool === 'opt') {
@@ -514,7 +520,7 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
   await fs.writeFile(llvmManifest, originalLlvmManifest.replace(/^LLD_SHA256=.*$/m, `LLD_SHA256=${'0'.repeat(64)}`));
   const changedLld = runRaw('zx', packageArgs, {cwd: path.resolve('.')});
   assert.notEqual(changedLld.status, 0, 'changing the LTO linker sha must fail closed');
-  assert.match(`${changedLld.stdout}\n${changedLld.stderr}`, /ld\.lld: packaged sha256 .* does not match tuple manifest/);
+  assert.match(`${changedLld.stdout}\n${changedLld.stderr}`, /ld\.lld: packaged sha256 .* does not match tuple manifest|isolated ld\.lld sha256 .* does not match manifest/);
   console.log(`NEGATIVE-CHANGE-LLD RC=${changedLld.status}\n${changedLld.stderr.trim()}`);
   await fs.writeFile(llvmManifest, originalLlvmManifest);
 

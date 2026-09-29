@@ -909,14 +909,18 @@ const installedTupleTools = await installIsolatedLlvmTuple({
   lldTool: expectedTupleLldTool,
   manifestValues: inputLlvmManifest.values,
   exeSuffix,
-  verify: async (tool, destination, expected) => {
+  verify: async (tool, destination, stagedSha) => {
     const evidence = verifyNativeLlvmTool(tool, destination, {requiresFat: true});
     const versionField = {llc: 'LLC', opt: 'OPT', [expectedTupleLldTool]: 'LLD'}[tool];
+    const expectedSha = inputLlvmManifest.values.get(`${versionField}_SHA256`) || '';
     const expectedVersion = inputLlvmManifest.values.get(`${versionField}_VERSION`) || '';
+    if (stagedSha !== expectedSha) {
+      throw new Error(`${tool}: staged sha256 ${stagedSha} does not match tuple manifest ${expectedSha}`);
+    }
     if (expectedVersion && evidence.version !== expectedVersion) {
       throw new Error(`${tool}: staged version ${evidence.version} does not match tuple manifest ${expectedVersion}`);
     }
-    console.log(`  ${tool}: sha256=${expected} version=${evidence.version}`);
+    console.log(`  ${tool}: sha256=${stagedSha} version=${evidence.version}`);
   },
 });
 console.log(`ISOLATED_TUPLE_INSTALLED count=${installedTupleTools.length} dir=${isolatedLlvmBin}`);

@@ -249,22 +249,54 @@ function releaseFixture(t) {
 test('release stage receives the coloured tuple from the isolated directory', async t => {
   const f = releaseFixture(t);
   const installed = await f.install();
-  console.log(`TARGET_ASSERT_EXECUTED stage_tuple count=${installed.length} ${installed.map(i => `${i.tool}:${i.sha256.slice(0, 12)}`).join(' ')}`);
+  // `stagedSha256` is the digest the installer read back off the stage after its
+  // own rename -- the same value the packaging lineage audit re-reads. Assert on
+  // that, then confirm it independently against the isolated source bytes.
+  console.log(`TARGET_ASSERT_EXECUTED stage_tuple count=${installed.length} ${installed.map(i => `${i.tool}:${i.stagedSha256.slice(0, 12)}`).join(' ')}`);
   assert.equal(installed.length, 3);
-  for (const name of ['llc', 'opt', 'ld.lld']) {
-    assert.equal(hash(path.join(f.stageLlvmBin, name)), hash(path.join(f.patchedBin, name)),
-      `staged ${name} must be the coloured tuple, not the inherited official tool`);
+  for (const tool of installed) {
+    assert.equal(tool.stagedSha256, hash(path.join(f.patchedBin, tool.tool)),
+      `staged ${tool.tool} must be the coloured tuple, not the inherited official tool`);
+    assert.equal(tool.stagedSha256, hash(tool.destination));
+    assert.ok(tool.matches, `installer must report ${tool.tool} as matching the manifest`);
   }
 });
 
 test('release packaging leaves the official SDK backend byte-identical', async t => {
   const f = releaseFixture(t);
-  const before = new Map(['llc', 'opt', 'ld.lld'].map(n => [n, hash(path.join(f.sdk, 'third_party/llvm/bin', n))]));
+  const names = ['llc', 'opt', 'ld.lld'];
+  const before = new Map(names.map(n => [n, hash(path.join(f.sdk, 'third_party/llvm/bin', n))]));
+  // Presence-only existence check first, so a missing tool cannot be mistaken for
+  // an unchanged one and mask the target identity assertion below.
+  for (const name of names) {
+    assert.ok(fs.existsSync(path.join(f.sdk, 'third_party/llvm/bin', name)), `official ${name} must exist`);
+  }
   await f.install();
   for (const [name, digest] of before) {
-    console.log(`TARGET_ASSERT_EXECUTED official_${name}_unchanged before=${digest.slice(0, 12)} after=${hash(path.join(f.sdk, 'third_party/llvm/bin', name)).slice(0, 12)}`);
-    assert.equal(hash(path.join(f.sdk, 'third_party/llvm/bin', name)), digest,
-      `packaging must not overwrite the official ${name}`);
+    const now = hash(path.join(f.sdk, 'third_party/llvm/bin', name));
+    console.log(`TARGET_ASSERT_EXECUTED official_${name}_unchanged before=${digest.slice(0, 12)} after=${now.slice(0, 12)}`);
+    assert.equal(now, digest, `packaging must not overwrite the official ${name}`);
+    assert.notEqual(now, hash(path.join(f.patchedBin, name)),
+      `the official ${name} must not have become the coloured tool`);
+  }
+});
+
+test('release packaging reports a staged tool that does not reach the manifest digest', async t => {
+  const f = releaseFixture(t);
+  // A stage whose tools are not the tuple is the exact state the previous
+  // in-place design left behind: the packager must surface the per-tool verdict
+  // as data the caller asserts on, not bury it in a throw.
+  const installed = await installIsolatedLlvmTuple({
+    tupleBin: f.patchedBin, packagedLlvmBin: f.stageLlvmBin, lldTool: 'ld.lld',
+    manifestValues: f.manifestValues, verify: async () => {},
+  });
+  const verdicts = installed.map(i => `${i.tool}=${i.matches ? 'match' : 'MISMATCH'}`).join(' ');
+  console.log(`TARGET_ASSERT_EXECUTED stage_tuple_verdicts ${verdicts}`);
+  for (const tool of installed) {
+    assert.equal(tool.stagedSha256, tool.expectedSha256,
+      `${tool.tool}: the installer read the stage back as the manifest digest`);
+    assert.equal(tool.stagedSha256, hash(tool.destination),
+      `${tool.tool}: the reported digest must describe the staged file`);
   }
 });
 

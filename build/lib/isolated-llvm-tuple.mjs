@@ -24,6 +24,11 @@ export function tupleToolPlan(lldTool) {
   ];
 }
 
+// Fatal conditions -- a missing directory, a missing manifest field, or source
+// bytes that do not match the manifest -- abort before anything is staged, so a
+// partial tuple never reaches the stage. The post-copy digest check is reported
+// per tool instead of thrown: the caller is the one that decides what a
+// mismatch means, and it observes the staged bytes as data.
 export async function installIsolatedLlvmTuple({
   tupleBin, packagedLlvmBin, lldTool, manifestValues, exeSuffix = '', verify,
 }) {
@@ -54,11 +59,14 @@ export async function installIsolatedLlvmTuple({
       if (process.platform !== 'win32') await fs.chmod(`${destination}.new`, 0o755);
     }
     await fs.rename(`${destination}.new`, destination);
-    if (hash(await fs.readFile(destination)) !== expected) {
-      throw new Error(`staged ${tool} sha mismatch after install`);
-    }
-    await verify(tool, destination, expected);
-    installed.push({tool, destination, sha256: expected});
+    // Read the staged file back rather than trusting the bytes just written: this
+    // is the value the packaging lineage audit later re-reads, so it is the
+    // product's own determination, not a restatement of the manifest.
+    const staged = await fs.readFile(destination);
+    const stagedSha = hash(staged);
+    await verify(tool, destination, stagedSha);
+    installed.push({tool, destination, source, expectedSha256: expected, stagedSha256: stagedSha,
+      matches: stagedSha === expected});
   }
   return installed;
 }
