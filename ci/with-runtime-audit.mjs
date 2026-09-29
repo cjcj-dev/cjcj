@@ -14,6 +14,23 @@ const sha = crypto.createHash('sha256').update(fs.readFileSync(runtime)).digest(
 const work = fs.mkdtempSync(path.resolve(process.env.RUNNER_TEMP || '.', 'runtime-audit-'));
 const audit = path.join(work, 'audit.so');
 const log = path.join(work, 'loads.log');
+// Include copied SDK executables: moving a stock binary does not rebuild it.
+const identities = new Set();
+function inventory(dir) {
+  for (const entry of fs.readdirSync(dir, {withFileTypes: true})) {
+    const file = path.join(dir, entry.name);
+    if (entry.isDirectory()) inventory(file);
+    else if (entry.isFile() && (fs.statSync(file).mode & 0o111)) {
+      const bytes = fs.readFileSync(file);
+      if (bytes.subarray(0, 4).equals(Buffer.from([0x7f, 0x45, 0x4c, 0x46]))) {
+        identities.add(crypto.createHash('sha256').update(bytes).digest('hex'));
+      }
+    }
+  }
+}
+inventory(sdk);
+const identityFile = path.join(work, 'sdk-executables.sha256');
+fs.writeFileSync(identityFile, [...identities].join('\n') + '\n');
 fs.writeFileSync(log, '');
 const build = spawnSync('cc', ['-shared', '-fPIC', '-O2', '-Wall', '-Wextra', '-Werror',
   new URL('./official-runtime-audit.c', import.meta.url).pathname, '-o', audit, '-lcrypto'], {stdio: 'inherit'});
@@ -21,7 +38,7 @@ if (build.status !== 0) throw new Error('cannot build runtime loader audit');
 console.log(`RUNTIME_AUDIT sdk=${sdk} colour=${runtime} sha256=${sha} log=${log}`);
 const result = spawnSync(args[0], args.slice(1), {stdio: 'inherit', env: {...process.env,
   LD_AUDIT: [audit, process.env.LD_AUDIT].filter(Boolean).join(':'),
-  CJCJ_AUDIT_SDK: sdk, CJCJ_AUDIT_RUNTIME: runtime, CJCJ_AUDIT_SHA256: sha, CJCJ_AUDIT_LOG: log,
+  CJCJ_AUDIT_SDK: sdk, CJCJ_AUDIT_IDENTITIES: identityFile, CJCJ_AUDIT_RUNTIME: runtime, CJCJ_AUDIT_SHA256: sha, CJCJ_AUDIT_LOG: log,
 }});
 const observed = fs.readFileSync(log, 'utf8');
 process.stdout.write(observed);

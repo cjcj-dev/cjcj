@@ -11,6 +11,37 @@
 #include <stdlib.h>
 #include <string.h>
 
+static void file_sha256(const char *file, char *digest) {
+    int fd = open(file, O_RDONLY);
+    struct stat st;
+    if (fd < 0 || fstat(fd, &st) || st.st_size <= 0) _exit(87);
+    void *bytes = mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    if (bytes == MAP_FAILED) _exit(87);
+    unsigned char hash[SHA256_DIGEST_LENGTH];
+    SHA256(bytes, st.st_size, hash);
+    munmap(bytes, st.st_size); close(fd);
+    for (int i = 0; i < SHA256_DIGEST_LENGTH; ++i) sprintf(digest + i * 2, "%02x", hash[i]);
+}
+
+static int official_executable(const char *exe, const char *sdk) {
+    static int known = -1;
+    if (known >= 0) return known;
+    known = !strncmp(exe, sdk, strlen(sdk)) && exe[strlen(sdk)] == '/';
+    if (known) return known;
+    const char *identities = getenv("CJCJ_AUDIT_IDENTITIES");
+    if (!identities) _exit(87);
+    FILE *list = fopen(identities, "r");
+    if (!list) _exit(87);
+    char digest[SHA256_DIGEST_LENGTH * 2 + 1], line[128];
+    file_sha256(exe, digest);
+    while (fgets(line, sizeof(line), list)) {
+        line[strcspn(line, "\n")] = 0;
+        if (!strcmp(line, digest)) { known = 1; break; }
+    }
+    fclose(list);
+    return known;
+}
+
 unsigned int la_version(unsigned int version) { return version < LAV_CURRENT ? version : LAV_CURRENT; }
 
 unsigned int la_objopen(struct link_map *map, Lmid_t ns, uintptr_t *cookie) {
@@ -25,21 +56,13 @@ unsigned int la_objopen(struct link_map *map, Lmid_t ns, uintptr_t *cookie) {
     const char *log = getenv("CJCJ_AUDIT_LOG");
     if (!sdk || !colour || !expected || !log || !realpath("/proc/self/exe", exe) ||
         !realpath(map->l_name, so)) _exit(87);
-    int official = !strncmp(exe, sdk, strlen(sdk)) && exe[strlen(sdk)] == '/';
+    int official = official_executable(exe, sdk);
     if (!official && strcmp(name, "libcangjie-runtime.so")) return 0;
-    int fd = open(so, O_RDONLY);
-    struct stat st;
-    if (fd < 0 || fstat(fd, &st) || st.st_size <= 0) _exit(87);
-    void *bytes = mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
-    if (bytes == MAP_FAILED) _exit(87);
-    unsigned char hash[SHA256_DIGEST_LENGTH];
-    SHA256(bytes, st.st_size, hash);
-    munmap(bytes, st.st_size); close(fd);
-    for (int i = 0; i < SHA256_DIGEST_LENGTH; ++i) sprintf(digest + i * 2, "%02x", hash[i]);
+    file_sha256(so, digest);
     int coloured = !strcmp(so, colour) || !strcmp(digest, expected);
     if (!coloured && strcmp(name, "libcangjie-runtime.so")) return 0;
     int blocked = official && coloured;
-    fd = open(log, O_WRONLY | O_CREAT | O_APPEND, 0600);
+    int fd = open(log, O_WRONLY | O_CREAT | O_APPEND, 0600);
     if (fd < 0) _exit(87);
     dprintf(fd, "%s pid=%ld exe=%s so=%s sha256=%s official=%d coloured=%d\n",
             blocked ? "OFFICIAL_RUNTIME_MISMATCH" : "RUNTIME_LOAD", (long)getpid(), exe, so, digest, official, coloured);

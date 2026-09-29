@@ -82,7 +82,10 @@ test('original in-place overwrite is rejected by hash, including an absorbed chi
 });
 
 test('rebuilt executable outside the SDK may explicitly select coloured runtime', t => {
-  const f = fixture(t); const rebuilt = path.join(f.root, 'rebuilt'); fs.copyFileSync(f.exe, rebuilt);
+  const f = fixture(t); const rebuilt = path.join(f.root, 'rebuilt');
+  const source = path.join(f.root, 'rebuilt.c');
+  fs.writeFileSync(source, '#include <stdio.h>\nextern int runtime_value(void);\nint main(void) { puts("rebuilt consumer"); printf("runtime=%d\\n", runtime_value()); return 0; }\n');
+  ok(run('cc', [source, `-L${f.dist}`, '-lcangjie-runtime', '-o', rebuilt], {}));
   const result = audit(f, rebuilt, [], {LD_LIBRARY_PATH: f.dist}); ok(result);
   console.log(`TARGET_ASSERT_EXECUTED rebuilt_runtime ${result.stdout}`);
   assert.match(result.stdout, /runtime=9/);
@@ -105,4 +108,14 @@ test('renamed coloured preload is rejected by content hash', t => {
   console.log(`TARGET_ASSERT_EXECUTED renamed_rejection rc=${result.status} ${result.stdout}`);
   assert.equal(result.status, 86);
   assert.ok(result.stdout.includes(`so=${alias}`));
+});
+
+
+test('copied official executable outside SDK remains official by identity', t => {
+  const f = fixture(t); const copy = path.join(f.root, 'copied-host');
+  fs.copyFileSync(f.exe, copy);
+  const result = audit(f, copy, [], {LD_LIBRARY_PATH: f.dist});
+  console.log(`TARGET_ASSERT_EXECUTED copied_host_rejection rc=${result.status} ${result.stdout}`);
+  assert.equal(result.status, 86);
+  assert.match(result.stdout, /official=1 coloured=1/);
 });
