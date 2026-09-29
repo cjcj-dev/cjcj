@@ -8,6 +8,10 @@ Then run `python3 test/reduce_multi_type_subst/run.py --release <target/release>
 --sdk <official-host-sdk> --out <evidence-directory>`.
 The runner compiles only test source and links the supplied product archives.
 It captures archive, CJO, runtime and executable identities before execution.
+For fault arms, pass `--reference-release <candidate-release>` to freeze every
+interface and dependency archive; only `sema@cjcj/libsema@cjcj.a` is exchanged.
+Independent full builds can have different archive bytes even for unchanged
+source, so those differences must not enter the fault comparison.
 
 All four cases enter `TypeManager.GetInstantiatedTys`; the returned type set
 is the assertion input. The `EnumTest<Y>` fixtures reproduce the substitution

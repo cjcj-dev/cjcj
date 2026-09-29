@@ -16,6 +16,8 @@ def sha(path):
 p = argparse.ArgumentParser(description=__doc__)
 p.add_argument('--release', type=Path, required=True)
 p.add_argument('--sdk', type=Path, required=True)
+p.add_argument('--reference-release', type=Path,
+               help='Freeze interfaces and all archives except the mutated sema product archive')
 p.add_argument('--out', type=Path, required=True)
 a = p.parse_args()
 a.out.mkdir(parents=True, exist_ok=True)
@@ -32,11 +34,15 @@ command = [str(a.sdk / 'bin/cjc'), '--test', '-O0', '--trimpath', str(source.par
            '--diagnostic-format=noColor', str(source), '-o', str(elf)]
 archives = []
 inputs = [source, Path(__file__).resolve(), a.sdk / 'bin/cjc']
-for directory in sorted(a.release.iterdir()):
+reference = a.reference_release or a.release
+for directory in sorted(reference.iterdir()):
     if not directory.is_dir() or directory.name == 'bin':
         continue
     command += ['--import-path', str(directory), '-L', str(directory)]
-    archives += sorted(directory.glob('*.a'))
+    for archive in sorted(directory.glob('*.a')):
+        if archive.name == 'libsema@cjcj.a':
+            archive = a.release / directory.name / archive.name
+        archives.append(archive)
     inputs += sorted(directory.glob('*.cjo'))
 command += ['--link-options=--start-group ' + ' '.join(map(str, archives)) + ' --end-group']
 inputs += archives + sorted((a.sdk / 'runtime/lib/linux_x86_64_cjnative').glob('*.so'))
