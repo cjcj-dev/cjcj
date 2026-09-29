@@ -57,7 +57,7 @@ const GATES = Object.freeze({
   },
   G11: {
     name: 'Conformance',
-    needsRun: '以 #482 ci/cangjie-test 跑 Conformance/HLT/LLT 官方 SDK 与自举 SDK 同时段同尺两臂；Q54-C 许可集来自官方臂实测失败并逐项写理由；自举独有失败为 0，绑定 final SHA',
+    needsRun: 'G10 先通后，以 #482 ci/cangjie-test 跑 Conformance/HLT/LLT 官方 SDK 与自举 SDK 同时段同尺两臂；Q54-C 许可集来自官方臂实测失败并逐项写理由；自举独有失败为 0，绑定 final SHA',
   },
   G12: {name: 'GC release floor'},
   G13: {name: 'loaderlife 直接门'},
