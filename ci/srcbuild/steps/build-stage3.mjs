@@ -5,7 +5,6 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {writeStdProvenance} from '../../../build/lib/provenance.mjs';
-import {countSdkLoadBadMask, readRuntimeSymbols} from '../../../build/lib/runtime-split.mjs';
 import {getTarget} from '../../../build/lib/targets.mjs';
 import {assertFinalStd} from '../lib/final-std.mjs';
 import {resolveProductBinary} from '../lib/product-binary.mjs';
@@ -14,6 +13,7 @@ import {stdIdentity, payloadIdentity} from '../lib/final-compiler.mjs';
 import {installStage3Compiler} from '../lib/compose-install.mjs';
 import {captureBuildInputs, finishBuildReceipt, sourceIdentity} from '../lib/source-build-receipt.mjs';
 import {assertWriteBarriers} from '../lib/write-barrier.mjs';
+import {assertColouredRuntime} from '../lib/runtime-colour.mjs';
 
 $.stdio = 'inherit';
 
@@ -88,11 +88,6 @@ async function assertWriteBarriersWith(sdkRoot, coreLib, targetSpec) {
   if (!await exists(tool)) throw new Error(`write-barrier check needs llvm-objdump: ${tool}`);
   const dump = await $({stdio: 'pipe'})`${tool} -d -r -C ${coreLib}`;
   return assertWriteBarriers(dump.stdout, `target=${targetSpec.spec.key} core=${path.basename(coreLib)}`);
-}
-
-async function countRuntimeMarkers(runtime) {
-  const contents = (await fs.readFile(runtime)).toString('latin1');
-  return contents.match(/MRT_GCV2_/g)?.length ?? 0;
 }
 
 async function assertStdBarriers(coreLib) {
@@ -183,14 +178,8 @@ const runtimeKind = (await $({stdio: 'pipe'})`file -b ${runtime}`).stdout.trim()
 if (!runtimeKind.includes(target.spec.fileFormat) || !runtimeKind.includes(target.spec.fileArch)) {
   throw new Error(`fork runtime has wrong native format for ${target.spec.key}: ${runtimeKind}`);
 }
-const runtimeMarkers = await countRuntimeMarkers(runtime);
-if (runtimeMarkers === 0) throw new Error(`${runtime} carries no MRT_GCV2_ markers; refusing stock runtime`);
-console.log(`STAGE3_RUNTIME_MARKER_ASSERT_PASS MRT_GCV2_markers=${runtimeMarkers}`);
-// Check the loader input before starting the managed compiler. Diagnostic text
-// markers were removed from runtime main; use the same exported ABI reader as
-// compose-sdk and bind its bytes to the separately pinned runtime manifest.
-const maskCount = countSdkLoadBadMask(readRuntimeSymbols(runtime, target), target);
-if (maskCount !== 1) throw new Error(`STAGE3_RUNTIME_COLOUR_ABI_MISMATCH symbol=g_cjLoadBadMask count=${maskCount}`);
+await assertColouredRuntime(runtime, path.join(path.resolve(requiredEnv('CJCJ_BOOTSTRAP_HOST_RT')),
+  'runtime', 'lib', tuple, target.spec.runtimeLibrary));
 const runtimeManifest = path.join(requiredEnv('CJCJ_BOOTSTRAP_COLOUR_RT'), 'manifest.json');
 const runtimeManifestPin = requiredEnv('COLOUR_RT_MANIFEST_SHA256');
 const runtimeManifestSha = await sha256(runtimeManifest);
@@ -203,7 +192,7 @@ if (runtimeIdentity.runtime_sha !== requiredEnv('RUNTIME_REF')
     || runtimeIdentity.files?.[`runtime/lib/${tuple}/${target.spec.runtimeLibrary}`] !== runtimeSha) {
   throw new Error('STAGE3_RUNTIME_SOURCE_OR_PAYLOAD_MISMATCH');
 }
-console.log(`STAGE3_RUNTIME_ASSERT_PASS symbol=g_cjLoadBadMask count=${maskCount} source=${runtimeIdentity.runtime_sha} runtime_sha256=${runtimeSha} manifest_sha256=${runtimeManifestSha}`);
+console.log(`STAGE3_RUNTIME_ASSERT_PASS colour=1 source=${runtimeIdentity.runtime_sha} runtime_sha256=${runtimeSha} manifest_sha256=${runtimeManifestSha}`);
 await assertBuildCompiler(stageEnv, stage2Sha);
 await $({cwd: githubWorkspace, env: stageEnv})`set -o pipefail; cjc --version | head -2`;
 

@@ -6,6 +6,7 @@ import path from 'node:path';
 import zlib from 'node:zlib';
 import {getTarget} from '../../../build/lib/targets.mjs';
 import {assertRuntimeSplit, targetLoaderPath} from '../../../build/lib/runtime-split.mjs';
+import {assertColouredRuntime} from '../lib/runtime-colour.mjs';
 import {parseLlvmToolsManifest} from '../../llvm-tools-manifest.mjs';
 
 $.stdio = 'inherit';
@@ -73,16 +74,22 @@ for (const [tool, hashKey] of [['llc', 'LLC_SHA256'], ['opt', 'OPT_SHA256'], [ll
   if (digest !== manifest[hashKey]) {
     throw new Error(`${tool} sha256 mismatch: expected ${manifest[hashKey]}, got ${digest}`);
   }
-  const temporary = path.join(llvmBin, `${tool}.fixed`);
-  await fs.writeFile(temporary, binary, {mode: 0o755});
-  const kind = (await $({stdio: 'pipe'})`file -b ${temporary}`).stdout.trim();
-  if (!kind.includes(spec.fileFormat) || !kind.includes(spec.fileArch)) {
-    throw new Error(`${tool} has wrong native format for ${targetKey}: ${kind}`);
+  // LLD selects its driver from argv[0]; retain ld.lld/ld64.lld while staging.
+  const staging = await fs.mkdtemp(path.join(llvmBin, '.fixed-'));
+  const temporary = path.join(staging, tool);
+  try {
+    await fs.writeFile(temporary, binary, {mode: 0o755});
+    const kind = (await $({stdio: 'pipe'})`file -b ${temporary}`).stdout.trim();
+    if (!kind.includes(spec.fileFormat) || !kind.includes(spec.fileArch)) {
+      throw new Error(`${tool} has wrong native format for ${targetKey}: ${kind}`);
+    }
+    await $({stdio: 'pipe'})`${temporary} --version`;
+    const executable = path.join(llvmBin, tool);
+    await fs.rename(temporary, executable);
+    selectedTools.push({tool, executable, digest});
+  } finally {
+    await fs.rm(staging, {recursive: true, force: true});
   }
-  await $({stdio: 'pipe'})`${temporary} --version`;
-  const executable = path.join(llvmBin, tool);
-  await fs.rename(temporary, executable);
-  selectedTools.push({tool, executable, digest});
 }
 
 // A successful --version is necessary but not sufficient: validate every LLVM
@@ -120,13 +127,8 @@ for (const directory of [llvmLib, runtimeLib, toolsLib, spec.opensslLibDir]) {
 }
 await fs.access(hostCompiler);
 const runtimeBinary = path.join(runtimeLib, spec.runtimeLibrary);
-const runtimeSymbols = await $({stdio: 'pipe'})`nm -g ${runtimeBinary}`;
-if (!runtimeSymbols.stdout.includes('g_cjLoadBadMask')) {
-  throw new Error(`${runtimeBinary} does not export g_cjLoadBadMask; refusing an uncoloured target runtime`);
-}
-if (!(await fs.readFile(runtimeBinary)).includes('MRT_GCV2_')) {
-  throw new Error(`${runtimeBinary} carries no MRT_GCV2_ markers; refusing a stock target runtime`);
-}
+await assertColouredRuntime(runtimeBinary, path.join(hostSdk, 'runtime', 'lib',
+  spec.hostRuntimeTuple || spec.runtimeTuple, spec.hostRuntimeLibrary || spec.runtimeLibrary));
 assertRuntimeSplit({
   hostSdk: process.env.CJCJ_SRCBUILD_HOST_SDK,
   targetSdk: sdk,
@@ -147,7 +149,7 @@ const envLines = [
   `OPENSSL_PATH=${spec.opensslLibDir}`,
   'CJSTD_COLOURED=YES',
   'CJSTD_PREFLIGHT_C2=GREEN',
-  `CJSTD_PROVENANCE_NOTE=source runtime exports g_cjLoadBadMask; bootstrap native hello passed before fixed tuple activation`,
+  `CJSTD_PROVENANCE_NOTE=source runtime has declared-host colour export difference; bootstrap native hello passed before fixed tuple activation`,
   `${spec.loaderEnv}=${libraryPath}`,
 ];
 if (spec.os === 'darwin') {
