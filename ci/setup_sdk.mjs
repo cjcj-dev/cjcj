@@ -140,8 +140,8 @@ if (actualHostToolchain !== toolchain) {
   throw new Error(`installed base SDK identity mismatch: requested=${toolchain} actual=${actualHostToolchain}`);
 }
 
-// 2.5 Swap the SDK's optimizer, backend and (for releases) LTO linker with one
-// source-built fixed LLVM tuple.
+// 2.5 Verify the fixed LLVM tuple. Publish its optimizer outside the official
+// SDK; retain the existing backend/linker setup for the target pipeline.
 // The stock nightly backend materializes relocate-of-undef as a phantom GC root.
 // These static tools contain the backend fixes and have no libLLVM dependency. Keep
 // each true original once, and break a possible hardlink before replacing a binary.
@@ -166,9 +166,13 @@ const fixedLldGz = process.env.FIXED_LLD_GZ ||
 const hasFixedLld = Boolean(fixedLldGz && await isFile(fixedLldGz));
 const releaseNeedsLld = Boolean(process.env.RELEASE_PLATFORM);
 const sdkLlvmBin = `${cangjieHome}/third_party/llvm/bin`;
+// The official frontend's IR must pass through its matching official optimizer.
+// A fixed optimizer is an explicit input for rebuilt target consumers only.
+const isolatedLlvmBin = path.join(repoRoot, 'patched-llvm', 'bin');
+await fs.mkdir(isolatedLlvmBin, {recursive: true});
 const fixedTools = [
   {name: 'llc', archive: fixedLlcGz, sdk: `${sdkLlvmBin}/llc`, manifestKey: 'LLC_SHA256', versionKey: 'LLC_VERSION'},
-  {name: 'opt', archive: fixedOptGz, sdk: `${sdkLlvmBin}/opt`, manifestKey: 'OPT_SHA256', versionKey: 'OPT_VERSION'},
+  {name: 'opt', archive: fixedOptGz, sdk: `${isolatedLlvmBin}/opt`, manifestKey: 'OPT_SHA256', versionKey: 'OPT_VERSION'},
   {name: lldTool, archive: fixedLldGz, sdk: `${sdkLlvmBin}/${lldTool}`, manifestKey: 'LLD_SHA256', versionKey: 'LLD_VERSION'},
 ];
 if (llcPlatform && fixedLlcGz) {
@@ -184,7 +188,7 @@ if (llcPlatform && fixedLlcGz) {
       log(`FATAL: fixed ${tool.name} artifact missing: ${tool.archive}`);
       process.exit(4);
     }
-    if (!(await isFile(tool.sdk))) {
+    if (tool.name !== 'opt' && !(await isFile(tool.sdk))) {
       log(`FATAL: SDK ${tool.name} missing: ${tool.sdk}`);
       process.exit(4);
     }
@@ -264,9 +268,10 @@ if (llcPlatform && fixedLlcGz) {
   }
   for (const tool of toolsToInstall) {
     const expectedSha = expectedShas.get(tool.name);
-    const currentSha = (await $({stdio: 'pipe'})`sha256sum ${tool.sdk}`).stdout.trim().split(/\s+/)[0];
+    const currentSha = await isFile(tool.sdk)
+      ? (await $({stdio: 'pipe'})`sha256sum ${tool.sdk}`).stdout.trim().split(/\s+/)[0] : '';
     if (currentSha !== expectedSha) {
-      if (!(await isFile(`${tool.sdk}.orig`))) await $`cp -f ${tool.sdk} ${tool.sdk}.orig`;
+      if (tool.name !== 'opt' && !(await isFile(`${tool.sdk}.orig`))) await $`cp -f ${tool.sdk} ${tool.sdk}.orig`;
       await fs.rm(tool.sdk, {force: true});
       await $`gunzip -c ${tool.archive} > ${tool.sdk}`;
       await $`chmod 0755 ${tool.sdk}`;
@@ -276,7 +281,14 @@ if (llcPlatform && fixedLlcGz) {
       log(`FATAL: installed ${tool.name} sha mismatch (${installedSha})`);
       process.exit(4);
     }
-    log(`SDK ${tool.name} -> source-built fixed LLVM (${installedSha})`);
+    log(`${tool.name} -> source-built fixed LLVM (${installedSha}) path=${tool.sdk}`);
+    if (tool.name === 'opt') {
+      const hostOpt = path.join(sdkLlvmBin, 'opt');
+      const hostSha = crypto.createHash('sha256').update(await fs.readFile(hostOpt)).digest('hex');
+      if (hostSha === installedSha) throw new Error('OFFICIAL_TOOLCHAIN_MISMATCH: SDK opt is already coloured; provision a clean official SDK');
+      if (process.env.GITHUB_ENV) await fs.appendFile(process.env.GITHUB_ENV, `CJCJ_PATCHED_OPT=${tool.sdk}\n`);
+      log(`official opt retained: path=${hostOpt} sha256=${hostSha}`);
+    }
   }
 
   if (fixedOptGz) {

@@ -140,7 +140,7 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: ~/.cjv
-          key: cjv-${{ runner.os }}-${{ runner.arch }}-${{ env.CJCJ_TOOLCHAIN }}
+          key: cjv-host-opt-isolated-${{ runner.os }}-${{ runner.arch }}-${{ env.CJCJ_TOOLCHAIN }}
       - name: Restore cjpm cache
         uses: actions/cache@v6
         with:
@@ -161,7 +161,7 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: ~/.cjv
-          key: cjv-${{ runner.os }}-${{ runner.arch }}-${{ env.CJCJ_TOOLCHAIN }}
+          key: cjv-host-opt-isolated-${{ runner.os }}-${{ runner.arch }}-${{ env.CJCJ_TOOLCHAIN }}
       # Keyed by matrix.runner: the runtime .so links the builder's glibc, so a cache
       # entry built on a newer distro is unloadable on an older one (GLIBC_x.y not found).
       - name: Restore patched runtime cache
@@ -272,7 +272,7 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: ~/.cjv
-          key: cjv-${{ runner.os }}-${{ runner.arch }}-${{ env.CJCJ_TOOLCHAIN }}
+          key: cjv-host-opt-isolated-${{ runner.os }}-${{ runner.arch }}-${{ env.CJCJ_TOOLCHAIN }}
       - name: Install SDK
         id: setup
         env:
@@ -285,7 +285,7 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: ~/.cjv
-          key: cjv-${{ runner.os }}-${{ runner.arch }}-${{ env.CJCJ_TOOLCHAIN }}
+          key: cjv-host-opt-isolated-${{ runner.os }}-${{ runner.arch }}-${{ env.CJCJ_TOOLCHAIN }}
       - name: Verify SDK layout
         run: |
           ls -la "$CANGJIE_HOME/bin" || true
