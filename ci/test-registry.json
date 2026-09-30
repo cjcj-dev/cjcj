@@ -129,6 +129,11 @@
     "reason": "Requires candidate compiler, paired host SDK/libLLVM and both runtime/LLVM source repositories for ABI integration."
   },
   {
+    "file": "ci/test-frontend-apc.py",
+    "executor": "manual",
+    "reason": "Requires a real candidate compiler, paired host SDK/libLLVM, fixed core input tree and private evidence directory; invocation and output contract are documented in tests/frontend_apc/README.md."
+  },
+  {
     "file": "ci/test-colour-libxml2.sh",
     "executor": "manual",
     "reason": "Fault-arm tool rewrites workflow, srcbuild and checker files in place; optional real bad/good ld.lld controls need retained linker artifacts."

@@ -1537,6 +1537,14 @@ public open class GlobalOptions <: Option {
             aggressiveParallelCompile = MaybeUInt64(1u64)
             return
         }
+        if (frontendMode && !IsDir(output)) {
+            if ((aggressiveParallelCompile.hasValue && aggressiveParallelCompile.value > 1u64) ||
+                aggressiveParallelCompileWithoutArg) {
+                Warningln("'--apc' is not supported for a frontend output file.")
+            }
+            aggressiveParallelCompile = MaybeUInt64(1u64)
+            return
+        }
         if (aggressiveParallelCompile.hasValue) { return }
         if (aggressiveParallelCompileWithoutArg) {
             aggressiveParallelCompile = jobs
