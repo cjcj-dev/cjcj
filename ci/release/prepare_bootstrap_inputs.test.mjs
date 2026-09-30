@@ -124,6 +124,18 @@ test('explicit bare ast archive is rejected before bootstrap export', () => fixt
   console.log('ASSERT incomplete explicit AST input rejected before export');
 }));
 
+for (const name of ['include/cangjie', 'include/flatbuffers/StdAstFormat_generated.h',
+  'schema/StdAstFormat.fbs', 'third_party/flatbuffers/bin/flatc']) {
+  test(`explicit AST input missing ${name} is rejected before export`, () => fixture(({sdk, run}) => {
+    fs.rmSync(path.join(sdk, name), {recursive: true});
+    const result = run();
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /AST_SUPPORT_INPUTS_INCOMPLETE/);
+    assert.doesNotMatch(result.stdout, /^CJCJ_BOOTSTRAP_AST_SUPPORT=/m);
+    console.log(`ASSERT incomplete explicit AST input rejected: ${name}`);
+  }));
+}
+
 test('bare build archive selects complete downloaded AST inputs consumed by installer', () => fixture(({env, dir, sdk, astFiles, fallback, run}) => {
   delete env.CJCJ_BOOTSTRAP_AST_SUPPORT;
   delete env.CJCJ_BOOTSTRAP_AST_ARTIFACT;
