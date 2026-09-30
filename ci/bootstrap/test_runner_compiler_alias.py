@@ -39,11 +39,13 @@ class CompilerAlias(unittest.TestCase):
         self.work = self.output / self._testMethodName
         self.work.mkdir()
         self.sdk = self.work / 'sdk'
-        shutil.copytree(self.inputs['sdk'], self.sdk, symlinks=False)
+        # Preserve the two compiler aliases produced by sdk_build/compiler_identity.
+        original = Path(self.inputs['sdk'])
+        links = {str(p.relative_to(original)): os.readlink(p)
+                 for p in original.rglob('*') if p.is_symlink()}
+        self.assertEqual(links, {'bin/cjc': 'cjcj-stage1', 'bin/cjc-frontend': 'cjcj-stage1'})
+        shutil.copytree(original, self.sdk, symlinks=True)
         self.addCleanup(shutil.rmtree, self.sdk)
-        for name in ('cjc', 'cjc-frontend'):
-            (self.sdk / 'bin' / name).unlink()
-            (self.sdk / 'bin' / name).symlink_to('cjcj-stage1')
         self.before = digest(self.sdk / 'bin/cjcj-stage1')
         self.assertEqual(self.before, self.inputs['compiler_sha256'])
         self.row = {'test': self._testMethodName, 'runner_sha256': digest(self.runner),
