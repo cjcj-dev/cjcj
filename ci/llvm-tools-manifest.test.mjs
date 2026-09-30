@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {spawnSync} from 'node:child_process';
 import test from 'node:test';
 import {
   LLVM_TOOLS_MANIFEST_SCHEMAS,
@@ -78,6 +81,23 @@ function packagedRows() {
     sha256: tool === 'llc' ? '1'.repeat(64) : '2'.repeat(64),
   }));
 }
+
+test('tuple CLI validates the source identity read from its real file input', t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'tuple-manifest-'));
+  t.after(() => fs.rmSync(directory, {recursive: true, force: true}));
+  const manifest = path.join(directory, 'llvm-tools.manifest');
+  const command = path.join(import.meta.dirname, 'llvm-tools-manifest.mjs');
+  fs.writeFileSync(manifest, tupleManifest);
+  const valid = spawnSync(process.execPath, [command, 'validate', 'tuple', manifest], {encoding: 'utf8'});
+  console.log(`TUPLE_CLI valid_rc=${valid.status} ${valid.stdout.trim()}`);
+  assert.equal(valid.status, 0, valid.stderr);
+  assert.match(valid.stdout, /schema=tuple fields=15/);
+  fs.writeFileSync(manifest, tupleManifest.replace(`OPT_SOURCE=tuple:${pins.LLVM_SHA}`, `OPT_SOURCE=tuple:${'0'.repeat(40)}`));
+  const invalid = spawnSync(process.execPath, [command, 'validate', 'tuple', manifest], {encoding: 'utf8'});
+  console.log(`TUPLE_CLI changed_source_rc=${invalid.status}`);
+  assert.equal(invalid.status, 1, 'mismatched source must be rejected by the CLI');
+  assert.match(invalid.stderr, /OPT_SOURCE does not match LLVM_SHA/);
+});
 
 test('packaged manifest round-trips every canonical LLVM tool lineage row', () => {
   const expected = {
