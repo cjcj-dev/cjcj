@@ -395,7 +395,10 @@ const HOST_TOOLCHAIN_PINS = Object.freeze({
   }),
   'ci/host_sdk_pin.env': Object.freeze({
     host: 'source-build host',
-    loaders: Object.freeze(['build-ast-support.yml', 'build-host-runtime.yml', 'build-release-package.yml', 'srcbuild-target.yml']),
+    // ci.yml/package-tests installs the official test SDK and keys its shim
+    // sccache on the same pin, so ci.yml loads this file and not cjpm_pin.env.
+    loaders: Object.freeze(['build-ast-support.yml', 'build-host-runtime.yml',
+      'build-release-package.yml', 'ci.yml', 'srcbuild-target.yml']),
   }),
 });
 

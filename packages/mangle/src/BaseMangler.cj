@@ -1,122 +1,29 @@
 package cjcj::mangle
 
 import std.collection.*
-import std.collection.concurrent.*
 import cjcj::ast.*
 import cjcj::utils.{CJC_ASSERT, CJC_NULLPTR_CHECK}
 
-private class VarBucket {
-    public var key: MangleDecl
-    public let vars: ArrayList<MangleDecl> = ArrayList<MangleDecl>()
-
-    public init(key: MangleDecl) {
-        this.key = key
-    }
-}
-
-private class FuncBucket {
-    public var key: MangleDecl
-    public let funcs: ArrayList<MangleDecl> = ArrayList<MangleDecl>()
-
-    public init(key: MangleDecl) {
-        this.key = key
-    }
-}
-
-private class LambdaBucket {
-    public var key: MangleDecl
-    public let lambdas: ArrayList<MangleDecl> = ArrayList<MangleDecl>()
-
-    public init(key: MangleDecl) {
-        this.key = key
-    }
-}
-
-private class WildcardBucket {
-    public var key: MangleDecl
-    public let vars: ArrayList<MangleDecl> = ArrayList<MangleDecl>()
-
-    public init(key: MangleDecl) {
-        this.key = key
-    }
-}
-
-private class AnnotationLambdaKey {
-    public var owner: MangleDecl
-    public var annotationKey: MangleDecl
-
-    public init(owner: MangleDecl, annotationKey: MangleDecl) {
-        this.owner = owner
-        this.annotationKey = annotationKey
-    }
-}
-
-private class FileWildcardBucket {
-    public var file: MangleFile
-    public let vars: ArrayList<MangleDecl> = ArrayList<MangleDecl>()
-
-    public init(file: MangleFile) {
-        this.file = file
-    }
-}
-
-private class ExtendBucket {
-    public var file: MangleFile
-    public var extendedTypeName: String
-    public let extends: ArrayList<MangleDecl> = ArrayList<MangleDecl>()
-
-    public init(file: MangleFile, extendedTypeName: String) {
-        this.file = file
-        this.extendedTypeName = extendedTypeName
-    }
-}
-
-// Composite key for file-keyed HashMaps, equivalent to the former sameFile
-// equality (fileName == fileName && fileHash == fileHash). The NUL separator
-// avoids collisions across the fileName/fileHash boundary.
-private func fileKey(file: MangleFile): String {
-    return file.fileName + "\u{0}" + file.fileHash.toString()
-}
-
-private func sameDecl(left: MangleDecl, right: MangleDecl): Bool {
-    return left.identity == right.identity
-}
-
-private func addUniqueDecl(values: ArrayList<MangleDecl>, value: MangleDecl): Unit {
-    for (item in values) {
-        if (sameDecl(item, value)) {
-            return
+private func GetParentDecl(decl: FuncDecl): Option<Decl> {
+    if (let Some(body) <- decl.funcBody) {
+        if (let Some(parent) <- body.parentClassLike) {
+            return parent
+        }
+        if (let Some(parent) <- body.parentStruct) {
+            return parent
+        }
+        if (let Some(parent) <- body.parentEnum) {
+            return parent
         }
     }
-    values.add(value)
+    return decl.outerDecl
 }
 
-private func findDeclIndex(values: ArrayList<MangleDecl>, target: MangleDecl): Option<Int64> {
-    var idx: Int64 = 0
-    for (item in values) {
-        if (sameDecl(item, target)) {
-            return idx
-        }
-        idx++
-    }
-    return None
-}
-
-private func extendedTypeKey(extendDecl: MangleDecl): String {
-    if (let Some(typeNode) <- extendDecl.extendedType) {
-        if (let Some(ty) <- typeNode.ty) {
-            return ty.String()
-        }
-        return typeNode.name
-    }
-    return ""
-}
-
-private func unsupportedMangleType(kind: TypeKind, context: String): String {
+private func unsupportedTy(kind: TypeKind, context: String): String {
     throw IllegalArgumentException(context + ": " + TypeKindName(kind))
 }
 
-private func isMangledToExportForTestBefore(decl: MangleDecl, prefix: ArrayList<MangleDecl>): Bool {
+private func isMangledToExportForTestBefore(decl: Decl, prefix: ArrayList<Node>): Bool {
     if (decl.TestAttr(Attribute.FOR_TEST)) {
         return true
     }
@@ -158,435 +65,6 @@ private func toBase62(value: UInt64): String {
     return if (reversed.size > length) { reversed[0..length] } else { reversed }
 }
 
-public class ManglerContext {
-    // Identity-keyed maps mirror the C++ pointer-keyed std::map containers
-    // (include/cangjie/Mangle/BaseMangler.h:160-169). Lookups in C++ are .find()
-    // probes that never rely on map iteration order; they index into the value
-    // vector instead. The inner bucket lists stay ArrayList so insertion order
-    // (the load-bearing order) is preserved. This restores O(1) lookup vs the
-    // previous O(n) linear scans -> overall O(n^2) -> O(n) on large packages.
-    // File-keyed containers use a composite "fileName\u{0}fileHash" string key
-    // mirroring sameFile (fileName == fileName && fileHash == fileHash).
-    // ConcurrentHashMap: DoMangling (CompilerInstance.cpp:846-870) shares one
-    // prepared ManglerContext across parallel batch tasks for concurrent reads.
-    private let file2GlobalWildcardVar: ConcurrentHashMap<String, FileWildcardBucket> =
-        ConcurrentHashMap<String, FileWildcardBucket>()
-    private let node2LocalWildcardVar: ConcurrentHashMap<Int64, WildcardBucket> =
-        ConcurrentHashMap<Int64, WildcardBucket>()
-    private let node2Lambda: ConcurrentHashMap<Int64, LambdaBucket> = ConcurrentHashMap<Int64, LambdaBucket>()
-    private let owner2AnnotationLambdaKey: ConcurrentHashMap<Int64, AnnotationLambdaKey> =
-        ConcurrentHashMap<Int64, AnnotationLambdaKey>()
-    private let node2LocalVar: ConcurrentHashMap<Int64, VarBucket> = ConcurrentHashMap<Int64, VarBucket>()
-    private let node2LocalFunc: ConcurrentHashMap<Int64, FuncBucket> = ConcurrentHashMap<Int64, FuncBucket>()
-    private let file2ExtendDecl: ConcurrentHashMap<String, ExtendBucket> = ConcurrentHashMap<String, ExtendBucket>()
-    public let fileIndexes: ArrayList<UInt64> = ArrayList<UInt64>()
-
-    public init() {}
-
-    private func fileWildcardBucket(file: MangleFile): FileWildcardBucket {
-        let mapKey = fileKey(file)
-        if (let Some(bucket) <- file2GlobalWildcardVar.get(mapKey)) {
-            return bucket
-        }
-        let bucket = FileWildcardBucket(file)
-        file2GlobalWildcardVar[mapKey] = bucket
-        return bucket
-    }
-
-    private func wildcardBucket(node: MangleDecl): WildcardBucket {
-        if (let Some(bucket) <- node2LocalWildcardVar.get(node.identity)) {
-            return bucket
-        }
-        let bucket = WildcardBucket(node)
-        node2LocalWildcardVar[node.identity] = bucket
-        return bucket
-    }
-
-    private func varBucket(node: MangleDecl): VarBucket {
-        if (let Some(bucket) <- node2LocalVar.get(node.identity)) {
-            return bucket
-        }
-        let bucket = VarBucket(node)
-        node2LocalVar[node.identity] = bucket
-        return bucket
-    }
-
-    private func funcBucket(node: MangleDecl): FuncBucket {
-        if (let Some(bucket) <- node2LocalFunc.get(node.identity)) {
-            return bucket
-        }
-        let bucket = FuncBucket(node)
-        node2LocalFunc[node.identity] = bucket
-        return bucket
-    }
-
-    private func lambdaBucket(node: MangleDecl): LambdaBucket {
-        if (let Some(bucket) <- node2Lambda.get(node.identity)) {
-            return bucket
-        }
-        let bucket = LambdaBucket(node)
-        node2Lambda[node.identity] = bucket
-        return bucket
-    }
-
-    private func findLambdaBucket(node: MangleDecl): Option<LambdaBucket> {
-        return node2Lambda.get(node.identity)
-    }
-
-    private func findAnnotationLambdaKey(node: MangleDecl): Option<MangleDecl> {
-        if (let Some(item) <- owner2AnnotationLambdaKey.get(node.identity)) {
-            return item.annotationKey
-        }
-        return None
-    }
-
-    private func extendBucket(file: MangleFile, extendedTypeName: String): ExtendBucket {
-        let mapKey = fileKey(file) + "\u{0}" + extendedTypeName
-        if (let Some(bucket) <- file2ExtendDecl.get(mapKey)) {
-            return bucket
-        }
-        let bucket = ExtendBucket(file, extendedTypeName)
-        file2ExtendDecl[mapKey] = bucket
-        return bucket
-    }
-
-    private func IsVarDeclAbstract(node: MangleDecl): Bool {
-        return node.astKind == ASTKind.VAR_DECL || node.astKind == ASTKind.VAR_WITH_PATTERN_DECL
-    }
-
-    private func IsCompositeMemberVar(node: MangleDecl): Bool {
-        if (!IsVarDeclAbstract(node)) {
-            return false
-        }
-        if (let Some(outer) <- node.outerDecl) {
-            return outer.astKind == ASTKind.CLASS_DECL || outer.astKind == ASTKind.INTERFACE_DECL ||
-                outer.astKind == ASTKind.STRUCT_DECL || outer.astKind == ASTKind.ENUM_DECL
-        }
-        return false
-    }
-
-    private func IsFuncBodyScopeOwner(node: MangleDecl): Bool {
-        return node.astKind == ASTKind.FUNC_DECL || node.astKind == ASTKind.PRIMARY_CTOR_DECL ||
-            node.astKind == ASTKind.LAMBDA_EXPR
-    }
-
-    private func GetFuncBodyScopeKey(node: MangleDecl): Option<MangleDecl> {
-        if (!IsFuncBodyScopeOwner(node)) {
-            return None
-        }
-        if (let None <- node.funcBody) {
-            return None
-        }
-        return node
-    }
-
-    private func GetLocalVarScopeKey(node: MangleDecl): Option<MangleDecl> {
-        // C++ BaseMangler.cpp:1357-1368 keys local vars by funcBody for function-like scopes.
-        if (node.astKind == ASTKind.FUNC_BODY) {
-            return node
-        }
-        if (let Some(key) <- GetFuncBodyScopeKey(node)) {
-            return key
-        }
-        if (IsVarDeclAbstract(node) && node.TestAttr(Attribute.GLOBAL)) {
-            return node
-        }
-        return None
-    }
-
-    private func GetLocalWildcardScopeKey(node: MangleDecl): Option<MangleDecl> {
-        // C++ BaseMangler.cpp:1331-1342 uses the same funcBody/global-var keying for local wildcards.
-        return GetLocalVarScopeKey(node)
-    }
-
-    private func GetLocalFuncScopeKey(node: MangleDecl): Option<MangleDecl> {
-        // C++ BaseMangler.cpp:1281-1294 uses funcBody for function-like scopes and any VarDeclAbstract otherwise.
-        if (node.astKind == ASTKind.FUNC_BODY) {
-            return node
-        }
-        if (let Some(key) <- GetFuncBodyScopeKey(node)) {
-            return key
-        }
-        if (IsVarDeclAbstract(node)) {
-            return node
-        }
-        return None
-    }
-
-    private func GetLambdaScopeKey(node: MangleDecl): Option<MangleDecl> {
-        // C++ BaseMangler.cpp:1383-1402 keys lambdas by funcBody or by eligible VarDeclAbstract owners.
-        if (node.astKind == ASTKind.FUNC_BODY || node.astKind == ASTKind.NODE) {
-            return node
-        }
-        if (let Some(key) <- GetFuncBodyScopeKey(node)) {
-            return key
-        }
-        if (IsVarDeclAbstract(node)) {
-            if (node.TestAttr(Attribute.GLOBAL) || IsCompositeMemberVar(node)) {
-                return node
-            }
-        }
-        return None
-    }
-
-    private func NeedCollectScope(node: MangleDecl): Bool {
-        return node.astKind == ASTKind.FUNC_DECL || node.astKind == ASTKind.LAMBDA_EXPR ||
-            (IsVarDeclAbstract(node) && node.TestAttr(Attribute.GLOBAL)) || IsCompositeMemberVar(node)
-    }
-
-    private func ShouldSkipNestedLocalScope(child: MangleDecl): Bool {
-        return child.astKind == ASTKind.FUNC_DECL || child.astKind == ASTKind.PRIMARY_CTOR_DECL ||
-            child.astKind == ASTKind.LAMBDA_EXPR
-    }
-
-    private func CollectLocalVarsInScope(key: MangleDecl, node: MangleDecl): Unit {
-        for (child in node.members) {
-            if (IsVarDeclAbstract(child)) {
-                RegisterLocalVar(key, child)
-            }
-            if (!ShouldSkipNestedLocalScope(child)) {
-                CollectLocalVarsInScope(key, child)
-            }
-        }
-    }
-
-    private func CollectLocalWildcardVarsInScope(key: MangleDecl, node: MangleDecl): Unit {
-        for (child in node.members) {
-            if (child.astKind == ASTKind.VAR_WITH_PATTERN_DECL) {
-                RegisterLocalWildcardVar(key, child)
-            }
-            if (!ShouldSkipNestedLocalScope(child)) {
-                CollectLocalWildcardVarsInScope(key, child)
-            }
-        }
-    }
-
-    private func CollectLocalFunctionsInScope(key: MangleDecl, node: MangleDecl): Unit {
-        for (child in node.members) {
-            if (child.astKind == ASTKind.FUNC_DECL) {
-                RegisterLocalFunc(key, child)
-            }
-            CollectLocalFunctionsInScope(key, child)
-        }
-    }
-
-    private func CollectLambdasInScope(key: MangleDecl, node: MangleDecl): Unit {
-        for (child in node.members) {
-            if (child.astKind == ASTKind.LAMBDA_EXPR) {
-                RegisterLambda(key, child)
-            }
-            if (!ShouldSkipNestedLocalScope(child)) {
-                CollectLambdasInScope(key, child)
-            }
-        }
-    }
-
-    public func GetIndexOfGlobalWildcardVar(file: MangleFile, target: MangleDecl): Option<Int64> {
-        if (file.fileHash == 0u64) {
-            return None
-        }
-        if (let Some(bucket) <- file2GlobalWildcardVar.get(fileKey(file))) {
-            return findDeclIndex(bucket.vars, target)
-        }
-        return None
-    }
-
-    public func GetIndexOfLocalWildcardVar(node: MangleDecl, target: MangleDecl): Option<Int64> {
-        let lookupKey = if (let Some(value) <- GetLocalWildcardScopeKey(node)) { value } else { return None }
-        if (let Some(bucket) <- node2LocalWildcardVar.get(lookupKey.identity)) {
-            return findDeclIndex(bucket.vars, target)
-        }
-        return None
-    }
-
-    public func GetIndexOfVar(node: MangleDecl, target: MangleDecl): Option<Int64> {
-        let lookupKey = if (let Some(value) <- GetLocalVarScopeKey(node)) { value } else { return None }
-        // C++ BaseMangler.cpp:1482-1507 unwraps LambdaExpr/FuncDecl/PrimaryCtorDecl to funcBody before lookup.
-        if (let Some(bucket) <- node2LocalVar.get(lookupKey.identity)) {
-            var idx: Int64 = 0
-            for (item in bucket.vars) {
-                if (item.identifier == target.identifier) {
-                    if (sameDecl(item, target)) {
-                        return idx
-                    }
-                    idx++
-                }
-            }
-        }
-        return None
-    }
-
-    public func GetIndexOfFunc(node: MangleDecl, target: MangleDecl): Option<Int64> {
-        let lookupKey = if (let Some(value) <- GetLocalFuncScopeKey(node)) { value } else { return None }
-        if (let Some(bucket) <- node2LocalFunc.get(lookupKey.identity)) {
-            var idx: Int64 = 0
-            for (item in bucket.funcs) {
-                if (item.identifier == target.identifier) {
-                    if (sameDecl(item, target)) {
-                        return idx
-                    }
-                    idx++
-                }
-            }
-        }
-        return None
-    }
-
-    public func GetIndexOfLambda(node: MangleDecl, target: MangleDecl): Option<Int64> {
-        let lookupKey = if (let Some(value) <- GetLambdaScopeKey(node)) { value } else { return None }
-        var bodyLambdaCount: Int64 = 0
-        if (let Some(bodyBucket) <- findLambdaBucket(lookupKey)) {
-            bodyLambdaCount = bodyBucket.lambdas.size
-            if (let Some(index) <- findDeclIndex(bodyBucket.lambdas, target)) {
-                return index
-            }
-        }
-        if (let Some(annotationKey) <- findAnnotationLambdaKey(lookupKey)) {
-            if (let Some(annotationBucket) <- findLambdaBucket(annotationKey)) {
-                if (let Some(index) <- findDeclIndex(annotationBucket.lambdas, target)) {
-                    return bodyLambdaCount + index
-                }
-            }
-        }
-        return None
-    }
-
-    public func GetIndexOfExtend(file: MangleFile, target: MangleDecl): Option<Int64> {
-        let typeName = extendedTypeKey(target)
-        let mapKey = fileKey(file) + "\u{0}" + typeName
-        if (let Some(bucket) <- file2ExtendDecl.get(mapKey)) {
-            return findDeclIndex(bucket.extends, target)
-        }
-        return None
-    }
-
-    public func SaveGlobalWildcardVar(file: MangleFile, vpd: MangleDecl): Unit {
-        if (let Some(pattern) <- vpd.irrefutablePattern) {
-            if (pattern.astKind == ASTKind.WILDCARD_PATTERN || CheckAllElementsWildcard(pattern)) {
-                addUniqueDecl(fileWildcardBucket(file).vars, vpd)
-            }
-        }
-    }
-
-    public func SaveLocalWildcardVar2Decl(node: MangleDecl): Unit {
-        if (let Some(key) <- GetLocalWildcardScopeKey(node)) {
-            CollectLocalWildcardVarsInScope(key, node)
-        }
-    }
-
-    public func SaveVar2CurDecl(node: MangleDecl): Unit {
-        if (let Some(key) <- GetLocalVarScopeKey(node)) {
-            CollectLocalVarsInScope(key, node)
-        }
-    }
-
-    public func SaveFunc2CurDecl(node: MangleDecl): Unit {
-        if (node.astKind == ASTKind.FUNC_DECL && node.TestAttr(Attribute.GENERIC_INSTANTIATED) &&
-            !node.TestAttr(Attribute.GLOBAL)) {
-            if (let Some(outer) <- node.outerDecl) {
-                if (!outer.IsNominalDecl()) {
-                    if (let Some(key) <- GetLocalFuncScopeKey(outer)) {
-                        RegisterLocalFunc(key, node)
-                    }
-                }
-            }
-        }
-        if (let Some(key) <- GetLocalFuncScopeKey(node)) {
-            CollectLocalFunctionsInScope(key, node)
-        }
-    }
-
-    public func SaveLambda2CurDecl(node: MangleDecl): Unit {
-        if (let Some(key) <- GetLambdaScopeKey(node)) {
-            CollectLambdasInScope(key, node)
-        }
-    }
-
-    public func SaveExtend2CurFile(file: MangleFile, node: MangleDecl): Unit {
-        let typeName = extendedTypeKey(node)
-        addUniqueDecl(extendBucket(file, typeName).extends, node)
-    }
-
-    public func CollectNode(node: MangleDecl): Unit {
-        if (node.astKind == ASTKind.EXTEND_DECL) {
-            if (let Some(file) <- node.curFile) {
-                SaveExtend2CurFile(file, node)
-            }
-        }
-        if (node.astKind == ASTKind.VAR_WITH_PATTERN_DECL && node.TestAttr(Attribute.GLOBAL)) {
-            if (let Some(file) <- node.curFile) {
-                SaveGlobalWildcardVar(file, node)
-            }
-        }
-        if (NeedCollectScope(node)) {
-            SaveVar2CurDecl(node)
-            SaveLambda2CurDecl(node)
-            SaveLocalWildcardVar2Decl(node)
-            SaveFunc2CurDecl(node)
-        }
-        for (child in node.members) {
-            CollectNode(child)
-        }
-    }
-
-    public func RegisterLocalVar(node: MangleDecl, target: MangleDecl): Unit {
-        if (let Some(key) <- GetLocalVarScopeKey(node)) {
-            addUniqueDecl(varBucket(key).vars, target)
-        }
-    }
-
-    public func RegisterLocalFunc(node: MangleDecl, target: MangleDecl): Unit {
-        if (let Some(key) <- GetLocalFuncScopeKey(node)) {
-            addUniqueDecl(funcBucket(key).funcs, target)
-        }
-    }
-
-    public func RegisterLocalWildcardVar(node: MangleDecl, target: MangleDecl): Unit {
-        if (let Some(key) <- GetLocalWildcardScopeKey(node)) {
-            addUniqueDecl(wildcardBucket(key).vars, target)
-        }
-    }
-
-    public func RegisterLambda(node: MangleDecl, target: MangleDecl): Unit {
-        if (let Some(key) <- GetLambdaScopeKey(node)) {
-            addUniqueDecl(lambdaBucket(key).lambdas, target)
-        }
-    }
-
-    public func RegisterLambdaAnnotationKey(owner: MangleDecl, annotationKey: MangleDecl): Unit {
-        let ownerKey = if (let Some(value) <- GetLambdaScopeKey(owner)) { value } else { owner }
-        if (owner2AnnotationLambdaKey.contains(ownerKey.identity)) {
-            return
-        }
-        owner2AnnotationLambdaKey[ownerKey.identity] = AnnotationLambdaKey(ownerKey, annotationKey)
-    }
-
-    public static func CheckAllElementsWildcard(root: ManglePattern): Bool {
-        if (root.astKind == ASTKind.WILDCARD_PATTERN) {
-            return true
-        }
-        if (root.astKind == ASTKind.TUPLE_PATTERN || root.astKind == ASTKind.ENUM_PATTERN) {
-            if (root.astKind == ASTKind.ENUM_PATTERN && root.patterns.isEmpty()) {
-                return false
-            }
-            var allWildcards = true
-            for (pattern in root.patterns) {
-                allWildcards = allWildcards && ManglerContext.CheckAllElementsWildcard(pattern)
-            }
-            return allWildcards
-        }
-        return false
-    }
-
-    public static func ReduceUnitTestPackageName(pkgName: String): String {
-        let suffix = "$test"
-        if (EndsWith(pkgName, suffix)) {
-            return pkgName[0..pkgName.size - suffix.size]
-        }
-        return pkgName
-    }
-}
-
 public open class BaseMangler {
     public var moduleDelimiter: String = MANGLE_DOLLAR_PREFIX
     public var lambdaCounter: Int64 = 0
@@ -594,7 +72,6 @@ public open class BaseMangler {
     // BaseMangler.h:184 unordered_map<string, Ptr<ManglerContext>>. HashMap so clear drops values
     // (ConcurrentHashMap.remove keeps removed values reachable).
     public let manglerCtxTable: HashMap<String, ManglerContext> = HashMap<String, ManglerContext>()
-    public var adapter: MangleAstAdapter = MangleAstAdapter()
 
     public init() {}
 
@@ -606,21 +83,6 @@ public open class BaseMangler {
         manglerCtxTable.clear()
     }
 
-    public func Mangle(decl: Decl): String {
-        return Mangle(adapter.ConvertDecl(decl))
-    }
-
-    public func Mangle(decl: Decl, prefix: ArrayList<Node>): String {
-        PrepareAstContext(adapter, decl)
-        let convertedPrefix = ArrayList<MangleDecl>()
-        for (node in prefix) {
-            if (let Some(convertedNode) <- adapter.ConvertNode(node)) {
-                convertedPrefix.add(convertedNode)
-            }
-        }
-        return Mangle(adapter.ConvertDecl(decl), convertedPrefix)
-    }
-
     public func MangleWithDeclPrefix(decl: Decl, prefix: ArrayList<Decl>): String {
         let nodePrefix = ArrayList<Node>()
         for (node in prefix) {
@@ -629,19 +91,8 @@ public open class BaseMangler {
         return Mangle(decl, nodePrefix)
     }
 
-    public func MangleLambda(lambda: LambdaExpr, prefix: ArrayList<Node>): String {
-        PrepareAstContext(adapter, lambda)
-        let convertedPrefix = ArrayList<MangleDecl>()
-        for (node in prefix) {
-            if (let Some(convertedNode) <- adapter.ConvertNode(node)) {
-                convertedPrefix.add(convertedNode)
-            }
-        }
-        return MangleLambda(adapter.ConvertLambdaExpr(lambda), convertedPrefix)
-    }
-
-    public func Mangle(decl: MangleDecl): String {
-        let prefix = ArrayList<MangleDecl>()
+    public func Mangle(decl: Decl): String {
+        let prefix = ArrayList<Node>()
         var outerDecl = decl.outerDecl
         while (let Some(outer) <- outerDecl) {
             prefix.add(outer)
@@ -651,37 +102,37 @@ public open class BaseMangler {
         return Mangle(decl, prefix)
     }
 
-    public func Mangle(decl: MangleDecl, prefix: ArrayList<MangleDecl>): String {
+    public func Mangle(decl: Decl, prefix: ArrayList<Node>): String {
         if (decl.TestAttr(Attribute.NO_MANGLE)) {
-            return decl.identifier
+            return decl.identifier.Val()
         }
         let genericsTypeStack = ArrayList<String>()
         if (decl.astKind == ASTKind.VAR_DECL) {
-            return CJMangledCompression(MangleVarDecl(decl, prefix))
+            return CJMangledCompression(MangleVarDecl((decl as VarDecl).getOrThrow(), prefix))
         }
         if (decl.astKind == ASTKind.FUNC_DECL) {
-            return CJMangledCompression(MangleFunctionDecl(decl, prefix, genericsTypeStack, true))
+            return CJMangledCompression(MangleFunctionDecl((decl as FuncDecl).getOrThrow(), prefix, genericsTypeStack, true))
         }
         if (decl.astKind == ASTKind.VAR_WITH_PATTERN_DECL) {
-            return CJMangledCompression(MangleVarWithPatternDecl(decl, prefix))
+            return CJMangledCompression(MangleVarWithPatternDecl((decl as VarWithPatternDecl).getOrThrow(), prefix))
         }
-        return CJMangledCompression(MangleDeclName(decl, prefix, genericsTypeStack, true))
+        return CJMangledCompression(DeclName(decl, prefix, genericsTypeStack, true))
     }
 
-    public func MangleFunctionDecl(funcDecl: MangleDecl, prefix: ArrayList<MangleDecl>,
+    public func MangleFunctionDecl(funcDecl: FuncDecl, prefix: ArrayList<Node>,
         genericsTypeStack: ArrayList<String>, _: Bool): String {
         if (!funcDecl.mangledName.isEmpty()) {
             return funcDecl.mangledName
         }
         if (funcDecl.TestAttr(Attribute.GENERIC_INSTANTIATED) && prefix.isEmpty()) {
-            let newPrefix = ArrayList<MangleDecl>()
+            let newPrefix = ArrayList<Node>()
             var outerDecl = funcDecl.outerDecl
             while (let Some(outer) <- outerDecl) {
                 newPrefix.add(outer)
                 outerDecl = outer.outerDecl
             }
             reverseDecls(newPrefix)
-            var mangled = MangleDeclName(funcDecl, newPrefix, genericsTypeStack, true, withSuffix: false)
+            var mangled = DeclName(funcDecl, newPrefix, genericsTypeStack, true, withSuffix: false)
             mangled += MANGLE_FUNC_PARAM_TYPE_PREFIX
             mangled += MangleFuncParams(funcDecl, genericsTypeStack, false)
             return mangled
@@ -698,7 +149,7 @@ public open class BaseMangler {
         if (funcDecl.TestAttr(Attribute.HAS_INITIAL)) {
             CJC_NULLPTR_CHECK(funcDecl.ownerFunc)
             let owner = funcDecl.ownerFunc.getOrThrow()
-            let newPrefix = ArrayList<MangleDecl>()
+            let newPrefix = ArrayList<Node>()
             newPrefix.add(owner)
             var outerDecl = owner.outerDecl
             while (let Some(outer) <- outerDecl) {
@@ -707,19 +158,19 @@ public open class BaseMangler {
             }
             reverseDecls(newPrefix)
             let mangledPrefix = MANGLE_CANGJIE_PREFIX + MANGLE_NESTED_PREFIX
-            let ownerMangled = MangleDeclName(funcDecl, newPrefix, genericsTypeStack, true, withSuffix: true)
+            let ownerMangled = DeclName(funcDecl, newPrefix, genericsTypeStack, true, withSuffix: true)
             mangled += MANGLE_CANGJIE_PREFIX + MANGLE_FUNC_PARA_INIT_PREFIX +
                 ownerMangled[mangledPrefix.size..ownerMangled.size - 1]
             mangled += MANGLE_FUNC_PARAM_TYPE_PREFIX
         } else {
-            mangled = MangleDeclName(funcDecl, prefix, genericsTypeStack, true, withSuffix: false)
+            mangled = DeclName(funcDecl, prefix, genericsTypeStack, true, withSuffix: false)
             mangled += MANGLE_FUNC_PARAM_TYPE_PREFIX
         }
         mangled += MangleFuncParams(funcDecl, genericsTypeStack, false)
         return mangled
     }
 
-    public func MangleDeclName(decl: MangleDecl, prefix: ArrayList<MangleDecl>, genericsTypeStack: ArrayList<String>,
+    public func DeclName(decl: Decl, prefix: ArrayList<Node>, genericsTypeStack: ArrayList<String>,
         declare: Bool, withSuffix!: Bool = true): String {
         if (!decl.mangledName.isEmpty() && isMangledToExportForTestBefore(decl, prefix)) {
             return decl.mangledName
@@ -727,35 +178,35 @@ public open class BaseMangler {
         var newMangled = MANGLE_CANGJIE_PREFIX + MANGLE_NESTED_PREFIX
         if (decl.astKind == ASTKind.VAR_WITH_PATTERN_DECL) {
             newMangled += ManglePackage(decl)
-            newMangled += MangleVarWithPatternDecl(decl, prefix)
+            newMangled += MangleVarWithPatternDecl((decl as VarWithPatternDecl).getOrThrow(), prefix)
         } else if (decl.astKind == ASTKind.EXTEND_DECL) {
             newMangled += ManglePrefix(decl, prefix, genericsTypeStack, declare)
-            newMangled += MangleExtendEntity(decl, genericsTypeStack, declare)
+            newMangled += MangleExtendEntity((decl as ExtendDecl).getOrThrow(), genericsTypeStack, declare)
             newMangled += MangleGenericArguments(decl, genericsTypeStack, declare)
         } else {
             newMangled += ManglePrefix(decl, prefix, genericsTypeStack, declare)
             let useInternalIdent = decl.TestAnyAttr(Attribute.CONSTRUCTOR, Attribute.MAIN_ENTRY) &&
                 decl.astKind != ASTKind.PRIMARY_CTOR_DECL
             if (useInternalIdent) {
-                let staticPrefix = if (decl.TestAttr(Attribute.STATIC) && decl.identifier != STATIC_INIT_FUNC) {
+                let staticPrefix = if (decl.TestAttr(Attribute.STATIC) && decl.identifier.Val() != STATIC_INIT_FUNC) {
                     "static."
                 } else {
                     ""
                 }
-                newMangled += MangleName(MANGLE_LT_PREFIX + staticPrefix + decl.identifier + MANGLE_GT_PREFIX)
-            } else if (decl.TestAttr(Attribute.OPERATOR) && OperatorTypeMangle(decl.identifier).isSome()) {
-                newMangled += OperatorTypeMangle(decl.identifier).getOrThrow()
-            } else if (decl.identifier.startsWith(MANGLE_DOLLAR_PREFIX) &&
-                (EndsWith(decl.identifier, SPECIAL_NAME_FOR_SET) || EndsWith(decl.identifier, SPECIAL_NAME_FOR_GET))) {
-                newMangled += MangleName(decl.identifier[MANGLE_CHAR_LEN..decl.identifier.size - MANGLE_PROP_LEN])
-                newMangled += if (EndsWith(decl.identifier, SPECIAL_NAME_FOR_SET)) { "ps" } else { "pg" }
+                newMangled += MangleName(MANGLE_LT_PREFIX + staticPrefix + decl.identifier.Val() + MANGLE_GT_PREFIX)
+            } else if (decl.TestAttr(Attribute.OPERATOR) && OperatorTypeMangle(decl.identifier.Val()).isSome()) {
+                newMangled += OperatorTypeMangle(decl.identifier.Val()).getOrThrow()
+            } else if (decl.identifier.Val().startsWith(MANGLE_DOLLAR_PREFIX) &&
+                (EndsWith(decl.identifier.Val(), SPECIAL_NAME_FOR_SET) || EndsWith(decl.identifier.Val(), SPECIAL_NAME_FOR_GET))) {
+                newMangled += MangleName(decl.identifier.Val()[MANGLE_CHAR_LEN..decl.identifier.Val().size - MANGLE_PROP_LEN])
+                newMangled += if (EndsWith(decl.identifier.Val(), SPECIAL_NAME_FOR_SET)) { "ps" } else { "pg" }
             } else {
-                var name = decl.identifier
+                var name = decl.identifier.Val()
                 if (decl.astKind == ASTKind.GENERIC_PARAM_DECL) {
                     if (let Some(outer) <- decl.outerDecl) {
                         if (outer.TestAnyAttr(Attribute.COMMON, Attribute.SPECIFIC) &&
                             outer.TestAttr(Attribute.GENERIC)) {
-                            if (let Some(genericsTy) <- decl.semaTy()) {
+                            if (let Some(genericsTy) <- decl.GetTy()) {
                                 var found = false
                                 var reverseIndex: Int64 = genericsTypeStack.size - 1
                                 while (reverseIndex >= 0) {
@@ -773,13 +224,13 @@ public open class BaseMangler {
                         }
                     }
                 } else if (decl.TestAttr(Attribute.HAS_INITIAL)) {
-                    if (let Some(pos) <- decl.identifier.indexOf(MANGLE_DOT_PREFIX)) {
-                        name = decl.identifier[0..pos]
+                    if (let Some(pos) <- decl.identifier.Val().indexOf(MANGLE_DOT_PREFIX)) {
+                        name = decl.identifier.Val()[0..pos]
                     }
                 }
                 newMangled += MangleName(name)
-                if (decl.IsFunc() && IsLocalFunc(decl)) {
-                    newMangled += GetMangledLocalFuncIndex(decl)
+                if (decl.IsFunc() && IsLocalFunc((decl as FuncDecl).getOrThrow())) {
+                    newMangled += GetMangledLocalFuncIndex((decl as FuncDecl).getOrThrow())
                 }
             }
             newMangled += MangleGenericArguments(decl, genericsTypeStack, declare)
@@ -790,41 +241,41 @@ public open class BaseMangler {
         return newMangled
     }
 
-    public func ManglePrefix(node: MangleDecl, prefix: ArrayList<MangleDecl>, genericsTypeStack: ArrayList<String>,
+    public func ManglePrefix(node: Node, prefix: ArrayList<Node>, genericsTypeStack: ArrayList<String>,
         declare: Bool): String {
         var mangled = ""
-        var outerMostNode: Option<MangleDecl> = None
+        var outerMostNode: Option<Node> = None
         var prefixIndex: Int64 = 0
         for (curPrefix in prefix) {
             if (curPrefix.astKind == ASTKind.CLASS_DECL || curPrefix.astKind == ASTKind.INTERFACE_DECL ||
                 curPrefix.astKind == ASTKind.ENUM_DECL || curPrefix.astKind == ASTKind.STRUCT_DECL ||
                 curPrefix.astKind == ASTKind.BUILTIN_DECL) {
-                mangled += MangleName(curPrefix.identifier)
-                let genericArgs = MangleGenericArgumentsHelper(curPrefix, genericsTypeStack, true)
+                mangled += MangleName((curPrefix as Decl).getOrThrow().identifier.Val())
+                let genericArgs = MangleGenericArgumentsHelper((curPrefix as Decl).getOrThrow(), genericsTypeStack, true)
                 if (!genericArgs.isEmpty()) {
                     mangled += genericArgs + MANGLE_SUFFIX
                 }
             } else if (curPrefix.astKind == ASTKind.VAR_DECL) {
                 if (curPrefix.TestAttr(Attribute.GLOBAL)) {
-                    mangled += MangleName(curPrefix.identifier)
+                    mangled += MangleName((curPrefix as Decl).getOrThrow().identifier.Val())
                 }
             } else if (curPrefix.astKind == ASTKind.FUNC_DECL) {
-                mangled += MangleName(curPrefix.identifier)
-                if (IsLocalFunc(curPrefix)) {
-                    mangled += GetMangledLocalFuncIndex(curPrefix)
+                mangled += MangleName((curPrefix as Decl).getOrThrow().identifier.Val())
+                if (IsLocalFunc((curPrefix as FuncDecl).getOrThrow())) {
+                    mangled += GetMangledLocalFuncIndex((curPrefix as FuncDecl).getOrThrow())
                 }
-                mangled += MangleGenericArgumentsHelper(curPrefix, genericsTypeStack, true) +
-                    MANGLE_FUNC_PARAM_TYPE_PREFIX + MangleFuncParams(curPrefix, genericsTypeStack, false) +
+                mangled += MangleGenericArgumentsHelper((curPrefix as Decl).getOrThrow(), genericsTypeStack, true) +
+                    MANGLE_FUNC_PARAM_TYPE_PREFIX + MangleFuncParams((curPrefix as FuncDecl).getOrThrow(), genericsTypeStack, false) +
                     MANGLE_SUFFIX
             } else if (curPrefix.astKind == ASTKind.EXTEND_DECL) {
                 let isInitFunc = node.astKind == ASTKind.FUNC_DECL && node.TestAttr(Attribute.HAS_INITIAL)
                 let useExtendEntity = node.astKind == ASTKind.GENERIC_PARAM_DECL ||
                     (node.TestAttr(Attribute.PRIVATE) && !isInitFunc) ||
-                    (isInitFunc && node.ownerFunc.getOrThrow().TestAttr(Attribute.PRIVATE))
+                    (isInitFunc && (node as FuncDecl).getOrThrow().ownerFunc.getOrThrow().TestAttr(Attribute.PRIVATE))
                 if (useExtendEntity) {
-                    mangled += MangleExtendEntity(curPrefix, genericsTypeStack, declare)
-                } else if (let Some(extendedType) <- curPrefix.extendedType) {
-                    if (let Some(ty) <- extendedType.ty) {
+                    mangled += MangleExtendEntity((curPrefix as ExtendDecl).getOrThrow(), genericsTypeStack, declare)
+                } else if (let Some(extendedType) <- (curPrefix as ExtendDecl).getOrThrow().extendedType) {
+                    if (let Some(ty) <- extendedType.GetTy()) {
                         mangled += MANGLE_EXTEND_PREFIX + MangleSemaType(ty, genericsTypeStack, declare: true)
                     }
                 }
@@ -837,12 +288,12 @@ public open class BaseMangler {
                 var pkgName = ""
                 if (ASTKindIndex(outerNode.astKind) >= ASTKindIndex(ASTKind.DECL) &&
                     ASTKindIndex(outerNode.astKind) <= ASTKindIndex(ASTKind.INVALID_DECL)) {
-                    pkgName = outerNode.fullPackageName
+                    pkgName = (outerNode as Decl).getOrThrow().fullPackageName
                 } else {
                     for (lambdaPrefixDecl in prefix) {
                         if (ASTKindIndex(lambdaPrefixDecl.astKind) >= ASTKindIndex(ASTKind.DECL) &&
                             ASTKindIndex(lambdaPrefixDecl.astKind) <= ASTKindIndex(ASTKind.INVALID_DECL)) {
-                            pkgName = lambdaPrefixDecl.fullPackageName
+                            pkgName = (lambdaPrefixDecl as Decl).getOrThrow().fullPackageName
                             break
                         }
                     }
@@ -856,7 +307,7 @@ public open class BaseMangler {
                 } else {
                     throw IllegalArgumentException("Mangler context not prepared for package: " + pkgName)
                 }
-                let lambdaIndex = if (let Some(value) <- ctx.GetIndexOfLambda(outerNode, curPrefix)) {
+                let lambdaIndex = if (let Some(value) <- ctx.GetIndexOfLambda(outerNode, (curPrefix as LambdaExpr).getOrThrow())) {
                     value
                 } else {
                     throw IllegalArgumentException("Index of lambda is not found.")
@@ -866,44 +317,44 @@ public open class BaseMangler {
                 if (curPrefix.TestAttr(Attribute.GLOBAL)) {
                     var mangleStr = ""
                     var patternContainsVar = false
-                    let varDeclCollection = HashSet<Int64>()
-                    let vwpDecl = curPrefix
+                    let varDeclCollection = HashSet<Decl>()
+                    let vwpDecl = (curPrefix as VarWithPatternDecl).getOrThrow()
 
-                    func patternWalkThrough(pattern: ManglePattern): Unit {
+                    func patternWalkThrough(pattern: Pattern): Unit {
                         if (!mangleStr.isEmpty()) {
                             return
                         }
                         if (pattern.astKind == ASTKind.VAR_PATTERN) {
-                            let varDecl = pattern.varDecl.getOrThrow()
-                            mangleStr = MangleName(varDecl.identifier)
-                            if (varDeclCollection.contains(varDecl.identity)) {
+                            let varDecl = (pattern as VarPattern).getOrThrow().varDecl.getOrThrow()
+                            mangleStr = MangleName(varDecl.identifier.Val())
+                            if (varDeclCollection.contains(varDecl)) {
                                 patternContainsVar = true
                             }
                         }
 
                         if (pattern.astKind == ASTKind.TUPLE_PATTERN) {
-                            for (item in pattern.patterns) {
+                            for (item in (pattern as TuplePattern).getOrThrow().patterns) {
                                 patternWalkThrough(item)
                             }
                         } else if (pattern.astKind == ASTKind.ENUM_PATTERN) {
-                            for (item in pattern.patterns) {
+                            for (item in (pattern as EnumPattern).getOrThrow().patterns) {
                                 patternWalkThrough(item)
                             }
                         }
                     }
 
-                    func collectAllVarPattern(pattern: ManglePattern): Unit {
+                    func collectAllVarPattern(pattern: Pattern): Unit {
                         if (pattern.astKind == ASTKind.VAR_PATTERN) {
-                            let varDecl = pattern.varDecl.getOrThrow()
-                            varDeclCollection.add(varDecl.identity)
+                            let varDecl = (pattern as VarPattern).getOrThrow().varDecl.getOrThrow()
+                            varDeclCollection.add(varDecl)
                             return
                         }
                         if (pattern.astKind == ASTKind.TUPLE_PATTERN) {
-                            for (item in pattern.patterns) {
+                            for (item in (pattern as TuplePattern).getOrThrow().patterns) {
                                 collectAllVarPattern(item)
                             }
                         } else if (pattern.astKind == ASTKind.ENUM_PATTERN) {
-                            for (item in pattern.patterns) {
+                            for (item in (pattern as EnumPattern).getOrThrow().patterns) {
                                 collectAllVarPattern(item)
                             }
                         }
@@ -911,24 +362,24 @@ public open class BaseMangler {
 
                     if (let Some(pattern) <- vwpDecl.irrefutablePattern) {
                         if (pattern.astKind == ASTKind.TUPLE_PATTERN) {
-                            for (item in pattern.patterns) {
+                            for (item in (pattern as TuplePattern).getOrThrow().patterns) {
                                 collectAllVarPattern(item)
                             }
                         } else if (pattern.astKind == ASTKind.ENUM_PATTERN) {
-                            for (item in pattern.patterns) {
+                            for (item in (pattern as EnumPattern).getOrThrow().patterns) {
                                 collectAllVarPattern(item)
                             }
                         }
 
                         if (pattern.astKind == ASTKind.TUPLE_PATTERN) {
-                            for (item in pattern.patterns) {
+                            for (item in (pattern as TuplePattern).getOrThrow().patterns) {
                                 patternWalkThrough(item)
                                 if (!mangleStr.isEmpty()) {
                                     break
                                 }
                             }
                         } else if (pattern.astKind == ASTKind.ENUM_PATTERN) {
-                            for (item in pattern.patterns) {
+                            for (item in (pattern as EnumPattern).getOrThrow().patterns) {
                                 patternWalkThrough(item)
                                 if (!mangleStr.isEmpty()) {
                                     break
@@ -973,18 +424,18 @@ public open class BaseMangler {
                 let packagePrefixDecl = prefix[reverseIndex]
                 if (ASTKindIndex(packagePrefixDecl.astKind) >= ASTKindIndex(ASTKind.DECL) &&
                     ASTKindIndex(packagePrefixDecl.astKind) <= ASTKindIndex(ASTKind.INVALID_DECL)) {
-                    mangled = ManglePackage(packagePrefixDecl) + mangled
+                    mangled = ManglePackage((packagePrefixDecl as Decl).getOrThrow()) + mangled
                     break
                 }
                 reverseIndex--
             }
         } else {
-            mangled = ManglePackage(node) + mangled
+            mangled = ManglePackage((node as Decl).getOrThrow()) + mangled
         }
         return mangled
     }
 
-    public func ManglePackage(decl: MangleDecl): String {
+    public func ManglePackage(decl: Decl): String {
         let genericPackageName = ManglePackageNameForGeneric(decl)
         return if (genericPackageName.isEmpty()) { MangleFullPackageName(decl) } else { genericPackageName }
     }
@@ -1006,30 +457,26 @@ public open class BaseMangler {
         return MangleName(orgName + newPkgName)
     }
 
-    public func MangleFullPackageName(decl: MangleDecl): String {
+    public func MangleFullPackageName(decl: Decl): String {
         return MangleFullPackageName(decl.fullPackageName)
     }
 
-    public func GetPrefixOfType(ty: MangleType): String {
+    public func GetPrefixOfType(ty: Ty): String {
         return match (ty.kind) {
             case TypeKind.TYPE_ENUM => MANGLE_TYPE_ENUM_PREFIX
             case TypeKind.TYPE_INTERFACE => MANGLE_TYPE_CLASS_PREFIX
             case TypeKind.TYPE_CLASS => MANGLE_TYPE_CLASS_PREFIX
             case TypeKind.TYPE_STRUCT => MANGLE_TYPE_STRUCT_PREFIX
-            case _ => unsupportedMangleType(ty.kind, "Unexpected user-defined type")
+            case _ => unsupportedTy(ty.kind, "Unexpected user-defined type")
         }
     }
 
-    public func MangleSemaType(ty: MangleType): String {
+    public func MangleSemaType(ty: Ty): String {
         let genericsTypeStack = ArrayList<String>()
         return MangleSemaType(ty, genericsTypeStack, declare: true)
     }
 
-    public func MangleAstSemanticType(ty: Ty): String {
-        return MangleSemaType(adapter.ConvertTy(ty))
-    }
-
-    public func MangleSemaType(ty: MangleType, genericsTypeStack: ArrayList<String>, declare!: Bool = false,
+    public func MangleSemaType(ty: Ty, genericsTypeStack: ArrayList<String>, declare!: Bool = false,
         isCollectGTy!: Bool = true): String {
         if (let Some(primitive) <- PrimitiveTypeMangle(ty.kind)) {
             return primitive
@@ -1068,12 +515,16 @@ public open class BaseMangler {
         return ""
     }
 
-    public func MangleUserDefinedType(ty: MangleType, genericsTypeStack: ArrayList<String>, declare: Bool,
+    public func MangleUserDefinedType(ty: Ty, genericsTypeStack: ArrayList<String>, declare: Bool,
         isCollectGTy!: Bool = true): String {
-        let decl = if (let Some(value) <- ty.decl) {
+        if (ty.kind != TypeKind.TYPE_ENUM && ty.kind != TypeKind.TYPE_STRUCT &&
+            ty.kind != TypeKind.TYPE_CLASS && ty.kind != TypeKind.TYPE_INTERFACE) {
+            return unsupportedTy(ty.kind, "Unexpected user-defined type")
+        }
+        let decl = if (let Some(value) <- Ty.GetDeclOfTy(ty)) {
             value
         } else {
-            return unsupportedMangleType(ty.kind, "User-defined type has no declaration")
+            return unsupportedTy(ty.kind, "User-defined type has no declaration")
         }
         if (IsAutoBoxedBaseDecl(decl)) {
             return decl.mangledName
@@ -1085,14 +536,14 @@ public open class BaseMangler {
         } else {
             mangledName += MangleFullPackageName(decl)
         }
-        if (decl.TestAttr(Attribute.PRIVATE) && decl.linkage() == Linkage.INTERNAL) {
+        if (decl.TestAttr(Attribute.PRIVATE) && decl.linkage == Linkage.INTERNAL) {
             if (let Some(file) <- decl.curFile) {
                 mangledName += MANGLE_FILE_ID_PREFIX + fileIdFor(file)
             } else {
                 throw IllegalArgumentException("Private internal type declaration has no current file.")
             }
         }
-        mangledName += MangleName(decl.identifier)
+        mangledName += MangleName(decl.identifier.Val())
         if (let Some(_) <- decl.GetGeneric()) {
             mangledName += MANGLE_GENERIC_PREFIX
         }
@@ -1103,30 +554,19 @@ public open class BaseMangler {
         return mangledName
     }
 
-    public func MangleGenericArguments(decl: MangleDecl, genericsTypeStack: ArrayList<String>, declare: Bool): String {
+    public func MangleGenericArguments(decl: Decl, genericsTypeStack: ArrayList<String>, declare: Bool): String {
         return MangleGenericArgumentsHelper(decl, genericsTypeStack, declare, isCollectGTy: false)
     }
 
-    public func MangleGenericArgumentsHelper(decl: MangleDecl, genericsTypeStack: ArrayList<String>, declare: Bool,
+    public func MangleGenericArgumentsHelper(decl: Decl, genericsTypeStack: ArrayList<String>, declare: Bool,
         isCollectGTy!: Bool = true): String {
-        let args = ArrayList<MangleType>()
-        var collectFuncGeneric = decl.astKind == ASTKind.FUNC_DECL
-        if (let Some(ty) <- decl.semaTy()) {
-            if (!ty.IsFunc()) {
-                collectFuncGeneric = false
-                for (arg in ty.typeArgs) {
-                    args.add(arg)
-                }
-            }
-        }
-        if (collectFuncGeneric) {
-            let body = decl.funcBody.getOrThrow()
-            if (let Some(generic) <- body.generic()) {
-                for (arg in generic.typeParameters) {
-                    if (let Some(ty) <- arg.semaTy()) {
-                        args.add(ty)
-                    }
-                }
+        let args = ArrayList<Ty>()
+        if (decl.GetTy().isSome() && !decl.GetTy().getOrThrow().IsFunc()) {
+            for (arg in decl.GetTy().getOrThrow().typeArgs) { args.add(arg) }
+        } else if (decl.astKind == ASTKind.FUNC_DECL) {
+            let body = (decl as FuncDecl).getOrThrow().funcBody.getOrThrow()
+            if (let Some(generic) <- body.generic) {
+                for (arg in generic.typeParameters) { args.add(arg.GetTy().getOrThrow()) }
             }
         }
         if (args.isEmpty()) {
@@ -1139,40 +579,40 @@ public open class BaseMangler {
         return mangled
     }
 
-    public open func MangleEntryFunction(funcDecl: MangleDecl): Option<String> {
-        if (funcDecl.identifier == MAIN_INVOKE && funcDecl.TestAttr(Attribute.GLOBAL)) {
+    public open func MangleEntryFunction(funcDecl: FuncDecl): Option<String> {
+        if (funcDecl.identifier.Val() == MAIN_INVOKE && funcDecl.TestAttr(Attribute.GLOBAL)) {
             return USER_MAIN_MANGLED_NAME
         }
-        if (funcDecl.identifier == TEST_ENTRY_NAME) {
+        if (funcDecl.identifier.Val() == TEST_ENTRY_NAME) {
             return TEST_ENTRY_NAME
         }
         return None
     }
 
-    public func MangleEnumType(ty: MangleType, genericsTypeStack: ArrayList<String>, declare: Bool,
+    public func MangleEnumType(ty: Ty, genericsTypeStack: ArrayList<String>, declare: Bool,
         isCollectGTy!: Bool = true): String {
         return MangleUserDefinedType(ty, genericsTypeStack, declare, isCollectGTy: isCollectGTy)
     }
 
-    public func MangleRawArrayType(ty: MangleType, genericsTypeStack: ArrayList<String>, declare: Bool,
+    public func MangleRawArrayType(ty: Ty, genericsTypeStack: ArrayList<String>, declare: Bool,
         isCollectGTy!: Bool = true): String {
         if (ty.typeArgs.isEmpty()) {
-            return unsupportedMangleType(ty.kind, "RawArray type has no element type")
+            return unsupportedTy(ty.kind, "RawArray type has no element type")
         }
-        return MANGLE_TYPE_ARRAY_PREFIX + DecimalToManglingNumber("${ty.dims}") +
+        return MANGLE_TYPE_ARRAY_PREFIX + DecimalToManglingNumber("${(ty as ArrayTy).getOrThrow().dims}") +
             MangleSemaType(ty.typeArgs[0], genericsTypeStack, declare: declare, isCollectGTy: isCollectGTy)
     }
 
-    public func MangleVArrayType(ty: MangleType, genericsTypeStack: ArrayList<String>, declare: Bool,
+    public func MangleVArrayType(ty: Ty, genericsTypeStack: ArrayList<String>, declare: Bool,
         isCollectGTy!: Bool = true): String {
-        var mangled = MANGLE_VARRAY_PREFIX + DecimalToManglingNumber("${ty.size}")
+        var mangled = MANGLE_VARRAY_PREFIX + DecimalToManglingNumber("${(ty as VArrayTy).getOrThrow().size}")
         for (arg in ty.typeArgs) {
             mangled += MangleSemaType(arg, genericsTypeStack, declare: declare, isCollectGTy: isCollectGTy)
         }
         return mangled
     }
 
-    public func MangleTupleType(ty: MangleType, genericsTypeStack: ArrayList<String>, declare: Bool,
+    public func MangleTupleType(ty: Ty, genericsTypeStack: ArrayList<String>, declare: Bool,
         isCollectGTy!: Bool = true): String {
         var mangled = MANGLE_TUPLE_PREFIX + DecimalToManglingNumber("${ty.typeArgs.size}")
         for (arg in ty.typeArgs) {
@@ -1182,39 +622,34 @@ public open class BaseMangler {
         return mangled
     }
 
-    public func MangleFuncType(ty: MangleType, genericsTypeStack: ArrayList<String>, declare: Bool,
+    public func MangleFuncType(ty: Ty, genericsTypeStack: ArrayList<String>, declare: Bool,
         isCollectGTy!: Bool = true): String {
-        var mangled = if (ty.isCFunc) { MANGLE_CFUNC_PREFIX } else { MANGLE_GENERAL_FUNC_PREFIX }
-        var retTy = if (let Some(ret) <- ty.retTy) {
-            MangleSemaType(ret, genericsTypeStack, declare: declare, isCollectGTy: isCollectGTy)
-        } else {
-            MANGLE_VOID_TY_SUFFIX
+        let funcTy = (ty as FuncTy).getOrThrow()
+        var mangled = if (funcTy.IsCFunc()) { MANGLE_CFUNC_PREFIX } else { MANGLE_GENERAL_FUNC_PREFIX }
+        var retTy = MangleSemaType(funcTy.retTy, genericsTypeStack, declare: declare, isCollectGTy: isCollectGTy)
+        if (retTy.isEmpty()) { retTy = MANGLE_VOID_TY_SUFFIX }
+        var params = ""
+        for (param in funcTy.paramTys) {
+            params += MangleSemaType(param, genericsTypeStack, declare: declare, isCollectGTy: isCollectGTy)
         }
-        if (retTy.isEmpty()) {
-            retTy = MANGLE_VOID_TY_SUFFIX
-        }
-        mangled += retTy
-        for (param in ty.paramTys) {
-            mangled += MangleSemaType(param, genericsTypeStack, declare: declare, isCollectGTy: isCollectGTy)
-        }
-        mangled += MANGLE_SUFFIX
+        mangled += retTy + params + MANGLE_SUFFIX
         return mangled
     }
 
-    public func MangleFuncParams(funcDecl: MangleDecl, genericsTypeStack: ArrayList<String>, declare: Bool,
+    public func MangleFuncParams(funcDecl: FuncDecl, genericsTypeStack: ArrayList<String>, declare: Bool,
         isCollectGTy!: Bool = true): String {
         if (let Some(body) <- funcDecl.funcBody) {
-            if (body.params.isEmpty()) {
+            if (body.paramLists.isEmpty() || body.paramLists[0].params.isEmpty()) {
                 return MANGLE_VOID_TY_SUFFIX
             }
             var mangled = ""
-            for (param in body.params) {
-                if (let Some(ty) <- param.semaTy()) {
+            for (param in body.paramLists[0].params) {
+                if (let Some(ty) <- param.GetTy()) {
                     if (ty.kind != TypeKind.TYPE_INITIAL) {
                         mangled += MangleSemaType(ty, genericsTypeStack, declare: declare, isCollectGTy: isCollectGTy)
                     }
                 } else {
-                    throw IllegalArgumentException("Function parameter has no semantic type: " + param.identifier)
+                    throw IllegalArgumentException("Function parameter has no semantic type: " + param.identifier.Val())
                 }
             }
             return mangled
@@ -1222,20 +657,20 @@ public open class BaseMangler {
         return MANGLE_VOID_TY_SUFFIX
     }
 
-    public func MangleCPointerType(ty: MangleType, genericsTypeStack: ArrayList<String>, declare: Bool,
+    public func MangleCPointerType(ty: Ty, genericsTypeStack: ArrayList<String>, declare: Bool,
         isCollectGTy!: Bool = true): String {
         if (ty.typeArgs.isEmpty()) {
-            return unsupportedMangleType(ty.kind, "CPointer type has no element type")
+            return unsupportedTy(ty.kind, "CPointer type has no element type")
         }
         return MANGLE_POINTER_PREFIX + MangleSemaType(ty.typeArgs[0], genericsTypeStack, declare: declare,
             isCollectGTy: isCollectGTy)
     }
 
-    public func MangleGenericType(ty: MangleType): String {
+    public func MangleGenericType(ty: Ty): String {
         return MANGLE_GENERIC_TYPE_PREFIX + MangleName(ty.name)
     }
 
-    public func MangleGenericType(ty: MangleType, genericsTypeStack: ArrayList<String>, declare!: Bool = false): String {
+    public func MangleGenericType(ty: Ty, genericsTypeStack: ArrayList<String>, declare!: Bool = false): String {
         var index: Int64 = 0
         if (declare) {
             index = genericsTypeStack.size
@@ -1262,11 +697,11 @@ public open class BaseMangler {
         return "k"
     }
 
-    public func MangleVarDecl(decl: MangleDecl, prefix: ArrayList<MangleDecl>): String {
+    public func MangleVarDecl(decl: VarDecl, prefix: ArrayList<Node>): String {
         var mangleStr = MANGLE_CANGJIE_PREFIX + MANGLE_NESTED_PREFIX
         let genericsTypeStack = ArrayList<String>()
         mangleStr += ManglePrefix(decl, prefix, genericsTypeStack, false)
-        mangleStr += MangleName(decl.identifier)
+        mangleStr += MangleName(decl.identifier.Val())
         if (IsLocalVariable(decl)) {
             if (let Some(ctx) <- manglerCtxTable.get(decl.fullPackageName)) {
                 mangleStr += MANGLE_COUNT_PREFIX
@@ -1287,7 +722,7 @@ public open class BaseMangler {
         return mangleStr
     }
 
-    public func GetIndexOfWildcard(vwpDecl: MangleDecl, prefix: ArrayList<MangleDecl>): Int64 {
+    public func GetIndexOfWildcard(vwpDecl: VarWithPatternDecl, prefix: ArrayList<Node>): Int64 {
         let pattern = if (let Some(value) <- vwpDecl.irrefutablePattern) {
             value
         } else {
@@ -1324,7 +759,7 @@ public open class BaseMangler {
         throw IllegalArgumentException("Index of VarWithPattern declaration is not found.")
     }
 
-    public func MangleVarWithPatternDecl(vwpDecl: MangleDecl, prefix: ArrayList<MangleDecl>): String {
+    public func MangleVarWithPatternDecl(vwpDecl: VarWithPatternDecl, prefix: ArrayList<Node>): String {
         if (let Some(pattern) <- vwpDecl.irrefutablePattern) {
             if (let Some(varDecl) <- firstVarPatternDecl(pattern)) {
                 return MangleVarDecl(varDecl, prefix)
@@ -1348,13 +783,13 @@ public open class BaseMangler {
         return mangleStr
     }
 
-    public func MangleExtendEntity(extendDecl: MangleDecl, genericsTypeStack: ArrayList<String>, declare: Bool): String {
+    public func MangleExtendEntity(extendDecl: ExtendDecl, genericsTypeStack: ArrayList<String>, declare: Bool): String {
         let extNode = if (let Some(value) <- extendDecl.extendedType) {
             value
         } else {
             throw IllegalArgumentException("Extend declaration has no extended type.")
         }
-        let extTy = if (let Some(value) <- extNode.ty) {
+        let extTy = if (let Some(value) <- extNode.GetTy()) {
             value
         } else {
             throw IllegalArgumentException("Extend declaration extended type has no semantic type.")
@@ -1381,8 +816,37 @@ public open class BaseMangler {
         return mangled
     }
 
-    public func MangleLambda(lambda: MangleDecl, prefix: ArrayList<MangleDecl>): String {
-        let index = GetLambdaIndex(lambda, prefix, prefix.size)
+    public func MangleLambda(lambda: LambdaExpr, prefix: ArrayList<Node>): String {
+        let outerNode = if (let Some(value) <- FindOuterNodeOfLambda(prefix, prefix.size)) {
+            value
+        } else {
+            throw IllegalArgumentException("Outer container of lambda is not found.")
+        }
+        var pkgName = ""
+        if (let Some(decl) <- (outerNode as Decl)) {
+            pkgName = decl.fullPackageName
+        } else {
+            for (node in prefix) {
+                if (let Some(decl) <- (node as Decl)) {
+                    pkgName = decl.fullPackageName
+                    break
+                }
+            }
+        }
+        pkgName = ManglerContext.ReduceUnitTestPackageName(pkgName)
+        if (pkgName.isEmpty()) {
+            throw IllegalArgumentException("Package name of lambda is empty.")
+        }
+        let ctx = if (let Some(value) <- manglerCtxTable.get(pkgName)) {
+            value
+        } else {
+            throw IllegalArgumentException("Mangler context not prepared for package: " + pkgName)
+        }
+        let index = if (let Some(value) <- ctx.GetIndexOfLambda(outerNode, lambda)) {
+            value
+        } else {
+            throw IllegalArgumentException("Index of lambda is not found.")
+        }
         var mangleStr = MANGLE_CANGJIE_PREFIX + MANGLE_NESTED_PREFIX
         let genericsTypeStack = ArrayList<String>()
         mangleStr += ManglePrefix(lambda, prefix, genericsTypeStack, true)
@@ -1390,7 +854,7 @@ public open class BaseMangler {
         return CJMangledCompression(mangleStr)
     }
 
-    public func GetMangledLocalFuncIndex(decl: MangleDecl): String {
+    public func GetMangledLocalFuncIndex(decl: FuncDecl): String {
         if (let Some(outerNode) <- GetOuterDecl(decl)) {
             let pkgName = ManglerContext.ReduceUnitTestPackageName(decl.fullPackageName)
             let ctx = if (let Some(value) <- manglerCtxTable.get(pkgName)) {
@@ -1401,20 +865,20 @@ public open class BaseMangler {
             let index = if (let Some(value) <- ctx.GetIndexOfFunc(outerNode, decl)) {
                 value
             } else {
-                throw IllegalArgumentException("Index of local function is not found: " + decl.identifier)
+                throw IllegalArgumentException("Index of local function is not found: " + decl.identifier.Val())
             }
             if (index > 0) {
                 return MANGLE_COUNT_PREFIX + DecimalToManglingNumber("${index - 1}")
             }
         } else {
-            if (IsLocalFunc(decl)) {
-                throw IllegalArgumentException("Outer declaration of local function is not found: " + decl.identifier)
+            if (IsLocalFunc((decl as FuncDecl).getOrThrow())) {
+                throw IllegalArgumentException("Outer declaration of local function is not found: " + decl.identifier.Val())
             }
         }
         return ""
     }
 
-    public func IsLocalVariable(decl: MangleDecl): Bool {
+    public func IsLocalVariable(decl: Decl): Bool {
         if (decl.astKind != ASTKind.VAR_DECL) {
             return false
         }
@@ -1426,7 +890,7 @@ public open class BaseMangler {
         return !decl.TestAttr(Attribute.GLOBAL) && !isStaticMemberVar
     }
 
-    public func IsLocalFunc(funcDecl: MangleDecl): Bool {
+    public func IsLocalFunc(funcDecl: FuncDecl): Bool {
         if (let Some(outer) <- funcDecl.outerDecl) {
             return !funcDecl.TestAttr(Attribute.GLOBAL) && !outer.IsNominalDecl()
         }
@@ -1437,81 +901,54 @@ public open class BaseMangler {
         return "CNat3AnyE"
     }
 
-    public func PrepareContextForPackage(pkg: MangleDecl): ManglerContext {
+    public func PrepareContextForPackage(pkg: Package): ManglerContext {
         let pkgName = ManglerContext.ReduceUnitTestPackageName(pkg.fullPackageName)
         let ctx = ManglerContext()
         manglerCtxTable[pkgName] = ctx
         return ctx
     }
 
-    public func CollectLocalDecls(ctx: ManglerContext, pkg: MangleDecl): Unit {
-        for (decl in pkg.members) {
-            ctx.CollectNode(decl)
-        }
-    }
-
-    public func MangleExportIds(pkg: MangleDecl): Unit {
-        let ctx = PrepareContextForPackage(pkg)
-        CollectLocalDecls(ctx, pkg)
-        exportIdMode = true
-        for (decl in pkg.members) {
-            if (decl.TestAttr(Attribute.GLOBAL)) {
-                decl.exportId = MangleExportId(decl)
+    public func CollectLocalDecls(ctx: ManglerContext, pkg: Package): Unit {
+        Walker(pkg, visitPre: { node: Node =>
+            if (let Some(ed) <- (node as ExtendDecl)) { ctx.SaveExtend2CurFile(ed.curFile.getOrThrow(), ed) }
+            if (let Some(vpd) <- (node as VarWithPatternDecl)) {
+                if (vpd.TestAttr(Attribute.GLOBAL)) { ctx.SaveGlobalWildcardVar(vpd.curFile.getOrThrow(), vpd) }
             }
-        }
+            let isGlobal = node is VarDeclAbstract && node.TestAttr(Attribute.GLOBAL)
+            var isCompositeType = false
+            if (let Some(vda) <- (node as VarDeclAbstract)) {
+                if (let Some(outer) <- vda.outerDecl) {
+                    isCompositeType = outer.astKind == ASTKind.CLASS_DECL || outer.astKind == ASTKind.INTERFACE_DECL ||
+                        outer.astKind == ASTKind.STRUCT_DECL || outer.astKind == ASTKind.ENUM_DECL
+                }
+            }
+            if (node is FuncDecl || node is LambdaExpr || isGlobal || isCompositeType) {
+                ctx.SaveVar2CurDecl(node)
+                ctx.SaveLambda2CurDecl(node)
+                ctx.SaveLocalWildcardVar2Decl(node)
+                ctx.SaveFunc2CurDecl(node)
+            }
+            VisitAction.WALK_CHILDREN
+        }).Walk()
     }
 
     public func MangleExportIds(pkg: Package): Unit {
-        let adapters = HashMap<String, MangleAstAdapter>()
-        let preparedPackages = HashSet<String>()
-        let preparePackage = { astPkg: Package =>
-            let pkgName = ManglerContext.ReduceUnitTestPackageName(astPkg.fullPackageName)
-            if (!preparedPackages.contains(pkgName)) {
-                let adapter = MangleAstAdapter()
-                adapters[pkgName] = adapter
-                let convertedPkg = adapter.ConvertPackage(astPkg)
-                let ctx = PrepareContextForPackage(convertedPkg)
-                adapter.CollectLocalDecls(ctx, astPkg)
-                preparedPackages.add(pkgName)
-            }
-        }
-        preparePackage(pkg)
+        let ctx = PrepareContextForPackage(pkg)
+        CollectLocalDecls(ctx, pkg)
         exportIdMode = true
-        let walker = Walker(pkg, visitPre: { node: Node =>
+        Walker(pkg, visitPre: { node: Node =>
             if (let Some(decl) <- (node as Decl)) {
                 if (Ty.IsTyCorrect(decl.GetTy()) && decl.TestAttr(Attribute.GLOBAL)) {
-                    if (let Some(file) <- decl.curFile) {
-                        if (let Some(astPkg) <- file.curPackage) {
-                            preparePackage(astPkg)
-                        }
-                    }
-                    let pkgName = ManglerContext.ReduceUnitTestPackageName(if (!decl.fullPackageName.isEmpty()) {
-                        decl.fullPackageName
-                    } else {
-                        pkg.fullPackageName
-                    })
-                    let adapter = if (let Some(value) <- adapters.get(pkgName)) {
-                        value
-                    } else {
-                        throw IllegalArgumentException("Mangler context not prepared for package: " + pkgName)
-                    }
-                    let convertedDecl = adapter.ConvertDecl(decl)
-                    convertedDecl.exportId = MangleExportId(convertedDecl)
+                    decl.exportId = MangleExportId(decl)
                 }
             }
             VisitAction.WALK_CHILDREN
-        })
-        walker.Walk()
-        for (pkgName in adapters.keys()) {
-            if (let Some(adapter) <- adapters.get(pkgName)) {
-                adapter.CopyExportIdsToAst()
-            }
-        }
+        }).Walk()
     }
 
-    public func MangleExportId(decl: MangleDecl): String {
+    public func MangleExportId(decl: Decl): String {
         if (decl.TestAttr(Attribute.NO_MANGLE)) {
-            return decl.identifier
+            return decl.identifier.Val()
         }
         if (decl.astKind == ASTKind.PRIMARY_CTOR_DECL) {
             return ""
@@ -1528,31 +965,22 @@ public open class BaseMangler {
             return decl.exportId
         }
         if (decl.astKind == ASTKind.PROP_DECL) {
-            for (getter in decl.getters) {
+            for (getter in (decl as PropDecl).getOrThrow().getters) {
                 getter.exportId = Mangle(getter)
             }
-            for (setter in decl.setters) {
+            for (setter in (decl as PropDecl).getOrThrow().setters) {
                 setter.exportId = Mangle(setter)
             }
-            decl.exportId = Mangle(decl)
-            return decl.exportId
+            return Mangle(decl)
         }
         decl.exportId = Mangle(decl)
-        for (member in decl.GetMemberDecls()) {
+        for (member in decl.GetMemberDeclPtrs()) {
             member.exportId = MangleExportId(member)
         }
         if (decl.astKind == ASTKind.INTERFACE_DECL && decl.TestAttr(Attribute.GENERIC)) {
             MangleExportIdForGenericParamDecl(decl)
         }
         return decl.exportId
-    }
-
-    public func MangleExportId(decl: Decl): String {
-        PrepareAstContext(adapter, decl)
-        let convertedDecl = adapter.ConvertDecl(decl)
-        let out = MangleExportId(convertedDecl)
-        adapter.CopyExportIdsToAst()
-        return out
     }
 
     public static func HashToBase62(input: String): String {
@@ -1579,7 +1007,7 @@ public open class BaseMangler {
         return fileName
     }
 
-    private func ManglePackageNameForGeneric(decl: MangleDecl): String {
+    private func ManglePackageNameForGeneric(decl: Decl): String {
         var genericPkg = ""
         var genericDecl = decl.genericDecl
         while (let Some(value) <- genericDecl) {
@@ -1589,7 +1017,7 @@ public open class BaseMangler {
         if (!genericPkg.isEmpty()) {
             return genericPkg
         }
-        var outer: Option<MangleDecl> = decl
+        var outer: Option<Decl> = decl
         while (let Some(current) <- outer) {
             if (let Some(generic) <- current.genericDecl) {
                 return MangleFullPackageName(generic)
@@ -1599,100 +1027,38 @@ public open class BaseMangler {
         return genericPkg
     }
 
-    private func PrepareAstContext(adapter: MangleAstAdapter, node: Node): Unit {
-        if (let Some(file) <- node.curFile) {
-            if (let Some(pkg) <- file.curPackage) {
-                let convertedPkg = adapter.ConvertPackage(pkg)
-                let ctx = PrepareContextForPackage(convertedPkg)
-                adapter.CollectLocalDecls(ctx, pkg)
-            }
-        }
-    }
-
-    private func GetOuterDecl(decl: MangleDecl): Option<MangleDecl> {
+    private func GetOuterDecl(decl: Decl): Option<Decl> {
         if (decl.astKind != ASTKind.FUNC_DECL) {
             return decl.outerDecl
         }
-        if (let Some(body) <- decl.funcBody) {
-            if (let Some(parent) <- body.parentClassLike) {
-                return parent
-            }
-            if (let Some(parent) <- body.parentStruct) {
-                return parent
-            }
-            if (let Some(parent) <- body.parentEnum) {
-                return parent
-            }
-        }
-        return decl.outerDecl
+        return GetParentDecl((decl as FuncDecl).getOrThrow())
     }
 
-    private func IsLambdaOuterCandidate(node: MangleDecl): Bool {
-        if (node.astKind == ASTKind.FUNC_DECL || node.astKind == ASTKind.PRIMARY_CTOR_DECL ||
-            node.astKind == ASTKind.LAMBDA_EXPR) {
-            return true
-        }
-        if ((node.astKind == ASTKind.VAR_DECL || node.astKind == ASTKind.VAR_WITH_PATTERN_DECL) &&
-            node.TestAttr(Attribute.GLOBAL)) {
-            return true
-        }
-        if (node.astKind == ASTKind.VAR_DECL || node.astKind == ASTKind.VAR_WITH_PATTERN_DECL) {
-            if (let Some(outer) <- node.outerDecl) {
-                return outer.astKind == ASTKind.CLASS_DECL || outer.astKind == ASTKind.INTERFACE_DECL ||
-                    outer.astKind == ASTKind.STRUCT_DECL || outer.astKind == ASTKind.ENUM_DECL
-            }
-        }
-        return false
-    }
-
-    private func FindOuterNodeOfLambda(prefix: ArrayList<MangleDecl>, stopExclusive: Int64): Option<MangleDecl> {
+    private func FindOuterNodeOfLambda(prefix: ArrayList<Node>, stopExclusive: Int64): Option<Node> {
         var idx = stopExclusive - 1
         while (idx >= 0) {
             let prevPrefix = prefix[idx]
-            if (IsLambdaOuterCandidate(prevPrefix)) {
+            idx--
+            let variable = prevPrefix as VarDeclAbstract
+            let outerDecl = variable.flatMap({decl => decl.outerDecl})
+            if (prevPrefix.astKind == ASTKind.FUNC_DECL || prevPrefix.astKind == ASTKind.PRIMARY_CTOR_DECL ||
+                prevPrefix.astKind == ASTKind.LAMBDA_EXPR ||
+                variable.map({decl => decl.TestAttr(Attribute.GLOBAL)}).getOrDefault({ => false }) ||
+                outerDecl.map({outer => outer.astKind == ASTKind.CLASS_DECL ||
+                    outer.astKind == ASTKind.INTERFACE_DECL || outer.astKind == ASTKind.STRUCT_DECL ||
+                    outer.astKind == ASTKind.ENUM_DECL}).getOrDefault({ => false })) {
                 return prevPrefix
             }
-            idx--
         }
         return None
     }
 
-    private func GetLambdaIndex(lambda: MangleDecl, prefix: ArrayList<MangleDecl>, stopExclusive: Int64): Int64 {
-        let outerNode = if (let Some(value) <- FindOuterNodeOfLambda(prefix, stopExclusive)) {
-            value
-        } else {
-            throw IllegalArgumentException("Outer container of lambda is not found.")
-        }
-        var pkgName = outerNode.fullPackageName
-        if (pkgName.isEmpty()) {
-            for (prefixDecl in prefix) {
-                if (!prefixDecl.fullPackageName.isEmpty()) {
-                    pkgName = prefixDecl.fullPackageName
-                    break
-                }
-            }
-        }
-        pkgName = ManglerContext.ReduceUnitTestPackageName(pkgName)
-        if (pkgName.isEmpty()) {
-            throw IllegalArgumentException("Package name of lambda is empty.")
-        }
-        let ctx = if (let Some(value) <- manglerCtxTable.get(pkgName)) {
-            value
-        } else {
-            throw IllegalArgumentException("Mangler context not prepared for package: " + pkgName)
-        }
-        if (let Some(index) <- ctx.GetIndexOfLambda(outerNode, lambda)) {
-            return index
-        }
-        throw IllegalArgumentException("Index of lambda is not found.")
-    }
-
     @When[backend == "cjnative"]
-    private func GetSpecialFuncName(fd: MangleDecl): Option<String> {
+    private func GetSpecialFuncName(fd: FuncDecl): Option<String> {
         if (fd.fullPackageName != CORE_PACKAGE_NAME) {
             return None
         }
-        return match (fd.identifier) {
+        return match (fd.identifier.Val()) {
             case "throwGlobalOutOfMemoryError" => "rt$ThrowGlobalOutOfMemoryError"
             case "throwStackOverflowError" => "rt$ThrowStackOverflowError"
             case "throwOutOfMemoryError" => "rt$ThrowOutOfMemoryError"
@@ -1714,11 +1080,11 @@ public open class BaseMangler {
     }
 
     @When[backend != "cjnative"]
-    private func GetSpecialFuncName(fd: MangleDecl): Option<String> {
+    private func GetSpecialFuncName(fd: FuncDecl): Option<String> {
         if (fd.fullPackageName != CORE_PACKAGE_NAME) {
             return None
         }
-        return match (fd.identifier) {
+        return match (fd.identifier.Val()) {
             case "throwOutOfMemoryError" => "rt$ThrowOutOfMemoryError"
             case "throwImplicitException" => "rt$ThrowImplicitException"
             case "throwArithmeticException" => "rt$ThrowArithmeticException"
@@ -1737,27 +1103,27 @@ public open class BaseMangler {
         }
     }
 
-    private func MangleExportIdForGenericParamDecl(decl: MangleDecl): Unit {
+    private func MangleExportIdForGenericParamDecl(decl: Decl): Unit {
         if (let Some(generic) <- decl.GetGeneric()) {
             for (gpd in generic.typeParameters) {
                 let outer = if (let Some(value) <- gpd.outerDecl) {
                     value
                 } else {
-                    throw IllegalArgumentException("Generic parameter has no outer declaration: " + gpd.identifier)
+                    throw IllegalArgumentException("Generic parameter has no outer declaration: " + gpd.identifier.Val())
                 }
-                let ty = if (let Some(value) <- gpd.semaTy()) {
+                let ty = if (let Some(value) <- gpd.GetTy()) {
                     value
                 } else {
-                    throw IllegalArgumentException("Generic parameter has no semantic type: " + gpd.identifier)
+                    throw IllegalArgumentException("Generic parameter has no semantic type: " + gpd.identifier.Val())
                 }
                 let genericsTypeStack = ArrayList<String>()
-                gpd.exportId = outer.exportId + MANGLE_WILDCARD_PREFIX + gpd.identifier +
+                gpd.exportId = outer.exportId + MANGLE_WILDCARD_PREFIX + gpd.identifier.Val() +
                     MangleSemaType(ty, genericsTypeStack, declare: false, isCollectGTy: false)
             }
         }
     }
 
-    private func findOuterNodeOfLocal(prefix: ArrayList<MangleDecl>): Option<MangleDecl> {
+    private func findOuterNodeOfLocal(prefix: ArrayList<Node>): Option<Node> {
         var idx = prefix.size - 1
         while (idx >= 0) {
             let curPrefix = prefix[idx]
@@ -1777,21 +1143,21 @@ public open class BaseMangler {
         return None
     }
 
-    private func firstVarPatternDecl(pattern: ManglePattern): Option<MangleDecl> {
-        if (pattern.astKind == ASTKind.VAR_PATTERN) {
-            return pattern.varDecl
-        }
-        if (pattern.astKind == ASTKind.TUPLE_PATTERN || pattern.astKind == ASTKind.ENUM_PATTERN) {
-            for (child in pattern.patterns) {
-                if (let Some(found) <- firstVarPatternDecl(child)) {
-                    return found
-                }
+    private func firstVarPatternDecl(pattern: Pattern): Option<VarDecl> {
+        if (let Some(vp) <- (pattern as VarPattern)) { return vp.varDecl }
+        if (let Some(tp) <- (pattern as TuplePattern)) {
+            for (child in tp.patterns) {
+                if (let Some(found) <- firstVarPatternDecl(child)) { return found }
+            }
+        } else if (let Some(ep) <- (pattern as EnumPattern)) {
+            for (child in ep.patterns) {
+                if (let Some(found) <- firstVarPatternDecl(child)) { return found }
             }
         }
         return None
     }
 
-    private func fileIdFor(file: MangleFile): String {
+    private func fileIdFor(file: File): String {
         return if (BaseMangler.IsHashable(file.fileName)) {
             BaseMangler.HashToBase62(file.fileName)
         } else {
@@ -1799,7 +1165,7 @@ public open class BaseMangler {
         }
     }
 
-    private func reverseDecls(values: ArrayList<MangleDecl>): Unit {
+    private func reverseDecls(values: ArrayList<Node>): Unit {
         var left: Int64 = 0
         var right = values.size - 1
         while (left < right) {
