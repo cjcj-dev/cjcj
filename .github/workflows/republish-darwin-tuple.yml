@@ -1,6 +1,9 @@
 name: Republish pinned Darwin static tuples
 on:
   workflow_dispatch:
+  push:
+    branches: [sym/473-implement-r5848758650]
+    paths: [.github/workflows/republish-darwin-tuple.yml]
 permissions:
   contents: read
   actions: read
