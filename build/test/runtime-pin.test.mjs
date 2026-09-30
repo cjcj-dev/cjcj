@@ -31,14 +31,25 @@ test('runtime source defaults to the checked-in pin', async () => {
   assert.equal(source.overrideRef, '');
 });
 
-for (const platform of ['darwin_aarch64', 'darwin_x86_64']) {
+const release = JSON.parse(await fs.readFile(
+  new URL('../../ci/colour-runtime/release.json', import.meta.url), 'utf8'));
+for (const [platform, published] of Object.entries(release.platforms)) {
   test(`runtime pin matches published native libraries for ${platform}`, async () => {
     const source = await resolveRuntimeSource({});
-    const release = JSON.parse(await fs.readFile(
-      new URL('../../ci/colour-runtime/release.json', import.meta.url), 'utf8'));
-    assert.equal(release.platforms[platform]?.runtime_sha, source.pinRef,
-      `DARWIN_RUNTIME_PIN_MISMATCH: ${platform}; rebuild and publish the native libraries with the runtime pin`);
-    console.log(`ASSERT DARWIN_RUNTIME_PIN_MATCH ${platform} ${source.pinRef}`);
+    assert.equal(published.runtime_sha ?? release.runtime_sha, source.pinRef,
+      `COLOUR_RUNTIME_PIN_MISMATCH: ${platform}; rebuild and publish the native libraries with the runtime pin`);
+    console.log(`ASSERT COLOUR_RUNTIME_PIN_MATCH ${platform} ${source.pinRef}`);
+  });
+  test(`published runtime scope is explicit for ${platform}`, () => {
+    if (published.role === 'colour-runtime-libraries') {
+      assert.match(published.std_status || '', /^pending-cjcj-\d+$/,
+        `COLOUR_RUNTIME_STD_STATUS: ${platform}`);
+      assert.ok(!Object.keys(published.files || {}).some(file => file.includes('libcangjie-std-')),
+        `COLOUR_RUNTIME_NATIVE_ONLY: ${platform}`);
+    } else {
+      assert.equal(published.role, undefined, `COLOUR_RUNTIME_ROLE: ${platform}`);
+      assert.equal(published.std_status, undefined, `COLOUR_RUNTIME_STD_STATUS: ${platform}`);
+    }
   });
 }
 

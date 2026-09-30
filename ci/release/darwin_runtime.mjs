@@ -6,10 +6,11 @@ import {digest} from './colour_runtime.mjs';
 
 const [mode, root, platform, source] = process.argv.slice(2);
 assert.ok(['prepare', 'verify', 'source'].includes(mode), 'COLOUR_RT_MODE');
-assert.ok(['darwin_aarch64', 'darwin_x86_64'].includes(platform), 'COLOUR_RT_PLATFORM');
+assert.ok(['darwin_aarch64', 'darwin_x86_64', 'linux_aarch64'].includes(platform), 'COLOUR_RT_PLATFORM');
 const tuple = `${platform}_cjnative`;
-const files = [`runtime/lib/${tuple}/libcangjie-runtime.dylib`,
-  `runtime/lib/${tuple}/libboundscheck.dylib`, `lib/${tuple}/libcangjie-runtime.a`];
+const extension = platform.startsWith('linux_') ? 'so' : 'dylib';
+const files = [`runtime/lib/${tuple}/libcangjie-runtime.${extension}`,
+  `runtime/lib/${tuple}/libboundscheck.${extension}`, `lib/${tuple}/libcangjie-runtime.a`];
 const manifestFile = path.join(root, 'manifest.json');
 if (mode === 'prepare') {
   assert.match(process.env.RUNTIME_REF || '', /^[a-f0-9]{40}$/, 'COLOUR_RT_SOURCE_PIN');
@@ -27,6 +28,7 @@ if (mode === 'prepare') {
     hashes[relative] = digest(input);
   }
   fs.writeFileSync(manifestFile, JSON.stringify({role: 'colour-runtime-libraries',
+    ...(platform === 'linux_aarch64' ? {std_status: 'pending-cjcj-768'} : {}),
     runtime_sha: process.env.RUNTIME_REF, platform, producer_sha: process.env.GITHUB_SHA,
     run_id: process.env.GITHUB_RUN_ID, run_attempt: process.env.GITHUB_RUN_ATTEMPT,
     files: hashes}, null, 2) + '\n');
@@ -37,6 +39,7 @@ if (mode === 'prepare') {
   const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
   assert.equal(manifest.role, 'colour-runtime-libraries', 'COLOUR_RT_ROLE_MISMATCH');
   assert.equal(manifest.platform, platform, 'COLOUR_RT_PLATFORM_MISMATCH');
+  if (platform === 'linux_aarch64') assert.equal(manifest.std_status, 'pending-cjcj-768', 'COLOUR_RT_STD_STATUS_MISMATCH');
   assert.equal(manifest.runtime_sha, process.env.RUNTIME_REF, 'COLOUR_RT_SOURCE_MISMATCH');
   assert.equal(manifest.run_id, process.env.COLOUR_RT_RUN_ID, 'COLOUR_RT_RUN_MISMATCH');
   assert.equal(manifest.run_attempt, process.env.COLOUR_RT_RUN_ATTEMPT, 'COLOUR_RT_RUN_MISMATCH');
