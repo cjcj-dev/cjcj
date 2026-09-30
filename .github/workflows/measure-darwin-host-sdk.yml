@@ -1,6 +1,10 @@
 name: Verify immutable Darwin host SDK archives
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/measure-darwin-host-sdk.yml
+      - ci/bootstrap/measure_darwin_host_sdk.sh
 permissions:
   contents: read
 jobs:
