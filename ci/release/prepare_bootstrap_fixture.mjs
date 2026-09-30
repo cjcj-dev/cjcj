@@ -1,3 +1,4 @@
+import {getTarget} from '../../build/lib/targets.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -42,7 +43,7 @@ export function fixture(check, target = 'linux-x64') {
     fs.copyFileSync(so, path.join(hostArtifact, library));
     const hostSha = crypto.createHash('sha256').update(fs.readFileSync(so)).digest('hex');
     const hostPin = {repository: 'cjcj-dev/cjcj', run_id: '123', run_attempt: '1', artifact_id: '456',
-      source_sha: '418ace1896e22a51a6c1fa36ec29631b00301cd8', producer_sha: 'b'.repeat(40), platform: {'linux-x64': 'linux_x86_64', 'linux-aarch64': 'linux_aarch64', 'darwin-arm64': 'darwin_aarch64', 'darwin-x64': 'darwin_x86_64'}[target], sha256: hostSha};
+      source_sha: '418ace1896e22a51a6c1fa36ec29631b00301cd8', producer_sha: 'b'.repeat(40), platform: getTarget(target).spec.llvmPlatform, sha256: hostSha};
     fs.writeFileSync(path.join(hostArtifact, 'manifest.json'), JSON.stringify({...hostPin, sha256: hostSha}));
     env.STAGE1_HOST_IDENTITIES = path.join(dir, 'host-identities.txt');
     fs.writeFileSync(env.STAGE1_HOST_IDENTITIES,

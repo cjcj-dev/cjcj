@@ -3,7 +3,7 @@
 
 import crypto from 'node:crypto';
 import {installCrossRuntime} from '../ci/release/cross-runtime.mjs';
-import {getReleasePlatform} from '../build/lib/targets.mjs';
+import {getReleasePlatform, getTarget} from '../build/lib/targets.mjs';
 import {spawnSync} from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -112,16 +112,9 @@ if (!await exists(pythonBundle, 'dir')) { console.error(`Python bundle dir not f
 // .bc/.o inputs for the report-mode named metadata.
 assertNoVerifierReportArtifacts([sdk, ...[stdDir, runtimeRoot].filter(Boolean)]);
 
-const platforms = {
-  'linux-x64': ['linux_x86_64_cjnative', 'tar', ''],
-  'linux-aarch64': ['linux_aarch64_cjnative', 'tar', ''],
-  'darwin-arm64': ['darwin_aarch64_cjnative', 'tar', ''],
-  'darwin-x64': ['darwin_x86_64_cjnative', 'tar', ''],
-  'windows-x64': ['windows_x86_64_cjnative', 'zip', '.exe'],
-};
-if (!platforms[platform]) { console.error(`unsupported --platform: ${platform}`); process.exit(2); }
-const [runtimeDir, archiveType, exeSuffix] = platforms[platform];
-const runtimeLibrary = platform.startsWith('darwin-') ? 'libcangjie-runtime.dylib' : 'libcangjie-runtime.so';
+const {spec: targetSpec} = getTarget(platform);
+const {runtimeTuple: runtimeDir, exeSuffix, runtimeLibrary} = targetSpec;
+const archiveType = targetSpec.archiveFormat === 'tar.gz' ? 'tar' : 'zip';
 const isWindows = platform === 'windows-x64';
 const packageName = `cjcj-${version}-${releaseKey ? getReleasePlatform(releaseKey).archiveKey : platform}`;
 const inputLlvmManifest = parseLlvmToolsManifest(await fs.readFile(llvmManifest, 'utf8'), {
@@ -849,24 +842,10 @@ function versionLine(executable) {
   return {version: `unavailable(exit=${probe.status ?? 'spawn'}): ${detail}`.slice(0, 512), probe};
 }
 
-const requiredLlvmTools = new Map([
-  ['linux-x64', ['llc', 'opt', 'ld.lld', 'llvm-objcopy']],
-  ['linux-aarch64', ['llc', 'opt', 'ld.lld', 'llvm-objcopy']],
-  ['darwin-arm64', ['llc', 'opt', 'ld64.lld']],
-  ['darwin-x64', ['llc', 'opt', 'ld64.lld']],
-  ['windows-x64', ['llc', 'opt', 'ld.lld', 'llvm-ar']],
-]);
-const nativeFilePatterns = new Map([
-  ['linux-x64', /ELF 64-bit.*(?:x86-64|x86_64)/i],
-  ['linux-aarch64', /ELF 64-bit.*(?:ARM aarch64|aarch64)/i],
-  ['darwin-arm64', /Mach-O 64-bit.*(?:arm64|aarch64)/i],
-  ['darwin-x64', /Mach-O 64-bit.*x86_64/i],
-  ['windows-x64', /PE32\+ executable.*x86-64/i],
-]);
 
 function verifyNativeLlvmTool(tool, executable, {requiresFat = false} = {}) {
   const fileProbe = runLineageProbe('file', ['-b', executable]);
-  if (fileProbe.status !== 0 || !nativeFilePatterns.get(platform).test(fileProbe.output)) {
+  if (fileProbe.status !== 0 || !targetSpec.nativeFilePattern.test(fileProbe.output)) {
     throw new Error(`${tool}: wrong native format for ${platform}: ${oneLine(fileProbe.output)}`);
   }
   let loaderProbe;
@@ -988,7 +967,7 @@ for (const tool of allToolNames) {
   lineageRows.push({tool, present: 'yes', source, version: version.version, sha256: digest});
 }
 
-for (const tool of requiredLlvmTools.get(platform)) {
+for (const tool of targetSpec.requiredLlvmTools) {
   const physical = physicalTools.get(tool);
   if (!physical) throw new Error(`${tool}: required by ${platform} driver but absent from package`);
   const evidence = verifyNativeLlvmTool(tool, path.join(packagedLlvmBin, physical), {
@@ -1027,7 +1006,7 @@ for (const row of recordedLineage.tools.filter(row => row.present === 'yes')) {
     throw new Error(`${row.tool}: packaged manifest does not match final payload`);
   }
 }
-console.log(`LLVM_TOOL_LINEAGE_OK total=${lineageRows.length} present=${physicalTools.size} required=${requiredLlvmTools.get(platform).length}`);
+console.log(`LLVM_TOOL_LINEAGE_OK total=${lineageRows.length} present=${physicalTools.size} required=${targetSpec.requiredLlvmTools.length}`);
 
 if (compilerArtifact) {
   if (await fileSha256(binary) !== selectedCompilerSha256) throw new Error('selected final compiler changed during packaging');

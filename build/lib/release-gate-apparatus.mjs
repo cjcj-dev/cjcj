@@ -1,3 +1,4 @@
+import {allTargets, getTarget} from './targets.mjs';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -51,16 +52,12 @@ export const KNOWN_GATE_APPARATUS_LIMITATIONS = Object.freeze({
 });
 
 const SHA256 = /^[0-9a-f]{64}$/;
-const runtimePaths = new Map([
-  ['linux-x64', ['runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so']],
-  ['linux-aarch64', ['runtime/lib/linux_aarch64_cjnative/libcangjie-runtime.so']],
-  ['darwin-x64', ['runtime/lib/darwin_x86_64_cjnative/libcangjie-runtime.dylib']],
-  ['darwin-arm64', ['runtime/lib/darwin_aarch64_cjnative/libcangjie-runtime.dylib']],
-  ['windows-x64', [
-    'runtime/lib/windows_x86_64_cjnative/libcangjie-runtime.dll',
-    'runtime/lib/windows_x86_64_cjnative/cangjie-runtime.dll',
-  ]],
-]);
+const runtimePaths = new Map(allTargets().map(key => {
+  const {spec} = getTarget(key);
+  const libraries = [spec.runtimeLibrary];
+  if (spec.os === 'windows') libraries.push(spec.runtimeLibrary.replace(/^lib/, ''));
+  return [key, libraries.map(library => `runtime/lib/${spec.runtimeTuple}/${library}`)];
+}));
 
 function requireString(value, label) {
   if (typeof value !== 'string' || value.trim() === '') throw new Error(`${label} is empty`);

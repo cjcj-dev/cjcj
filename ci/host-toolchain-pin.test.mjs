@@ -152,6 +152,7 @@ for (const [name, changedFile, mutate] of scanControls) {
         'ci/host-toolchain-pin.test.mjs', 'ci/host-toolchain-pin.mjs',
         'ci/host_sdk_pin.env', 'ci/release/base-sdk-identities.json',
         'build/lib/release-component-provenance.mjs',
+        'build/lib/targets.mjs', 'build/lib/errors.mjs',
         '.github/workflows/build-release-package.yml',
         'ci/cangjie-test/README.md', 'ci/host-runtime/release.json',
       ]) {

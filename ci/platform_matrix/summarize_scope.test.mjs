@@ -1,3 +1,4 @@
+import {platformTestCells} from '../../build/lib/targets.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -5,9 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-const runners = ['macos-26', 'macos-26-intel', 'macos-15', 'macos-15-intel',
-  'ubuntu-24.04', 'ubuntu-24.04-arm', 'ubuntu-22.04', 'ubuntu-22.04-arm',
-  'windows-2025', 'windows-2022'];
+const runners = platformTestCells().map(cell => cell.runner);
 const switches = ['runtime_only', 'std_evidence_only', 'darwin_runtime_only',
   'darwin_host_only', 'darwin_verify_only'];
 
@@ -39,7 +38,7 @@ test('full dispatch and push do not list skipped jobs', () => {
   for (const inputs of [{}, Object.fromEntries(switches.map(key => [key, false])),
     Object.fromEntries(switches.map(key => [key, 'false']))]) {
     const text = summary(inputs);
-    assert.match(text, /Full platform matrix requested \(10 jobs\)/);
+    assert.ok(text.includes(`Full platform matrix requested (${runners.length} jobs)`));
     assert.ok(!text.includes('skipped'));
     assert.ok(!text.includes('\n- '));
   }
