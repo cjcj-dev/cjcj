@@ -98,7 +98,9 @@ test('CI invokes both registered script and pinned official cjpm consumers', asy
   const ci = (await workflows()).get('ci.yml');
   assert.match(ci, /node ci\/run-registered-tests\.mjs scripts/);
   const job = ci.slice(ci.indexOf('  package-tests:'), ci.indexOf('  fixed-llvm-tools:'));
-  assert.match(job, /source ci\/host_sdk_pin\.env/);
+  // The pinned loader idiom is the one ci/host-toolchain-pin.test.mjs audits,
+  // so requiring it here keeps the two contracts agreeing on one spelling.
+  assert.match(job, /cat ci\/host_sdk_pin\.env >> "\$GITHUB_ENV"/);
   assert.match(job, /"\$cjv_bin" install "\$CJCJ_TOOLCHAIN"/);
   assert.match(job, /source "\$sdk\/envsetup\.sh"/);
   assert.match(job, /node ci\/run-registered-tests\.mjs cj/);

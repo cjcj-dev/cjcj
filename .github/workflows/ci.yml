@@ -133,25 +133,42 @@ jobs:
         with:
           name: fixed-llvm-tools-linux_x86_64
           path: fixed-toolchain/linux_x86_64
+      - name: Export host toolchain pin
+        run: cat ci/host_sdk_pin.env >> "$GITHUB_ENV"
       - name: Install official test SDK
         shell: bash
         run: |
-          source ci/host_sdk_pin.env
           mkdir -p "$RUNNER_TEMP/test-cjv"
           curl -fsSL https://github.com/Zxilly/cjv/releases/download/v0.2.20/cjv_linux_amd64.tar.gz | tar -xz -C "$RUNNER_TEMP/test-cjv"
           cjv_bin=$(find "$RUNNER_TEMP/test-cjv" -type f -name cjv | head -1)
           "$cjv_bin" install "$CJCJ_TOOLCHAIN"
+      # The shim object compiles C++ against the LLVM that produced
+      # fixed-llvm-tools, so the cache key carries the same host toolchain pin
+      # the SDK above is installed from; a pin change must not reuse its objects.
+      - name: Start sccache
+        uses: ./.github/actions/sccache
+        with:
+          component: runtime-shim
+          platform: ubuntu-24.04
+          pin: ${{ env.CJCJ_TOOLCHAIN }}
+          cache-size: 1G
       - name: Run registered Cangjie package tests
         shell: bash
         env:
           CJCJ_LLVM_SHIM_O: ${{ github.workspace }}/fixed-toolchain/linux_x86_64/cjselfhost_llvmshim.o
         run: |
           ulimit -c 0
-          source ci/host_sdk_pin.env
           sdk="$HOME/.cjv/toolchains/$CJCJ_TOOLCHAIN"
           source "$sdk/envsetup.sh"
           npx --yes zx@8 runtime_shim/build_shim.mjs
           node ci/run-registered-tests.mjs cj "$RUNNER_TEMP/package-tests"
+      - name: Report sccache
+        if: always()
+        uses: ./.github/actions/sccache-report
+        with:
+          component: runtime-shim
+          platform: ubuntu-24.04
+          require-compiles: ${{ job.status == 'success' }}
       - name: Preserve Cangjie test results
         if: always()
         uses: actions/upload-artifact@v7
