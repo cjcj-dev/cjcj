@@ -25,6 +25,13 @@ over workspace `test-members` with machine-readable reports and records SDK
 hashes. Nonzero child exits remain failures; an empty report set cannot pass.
 Compile/link failures are recorded as failures to execute, not successful tests.
 
+The first frozen-baseline run exposed existing failures: `test_sdk_cjc_swap.py`
+fails four replacement/path assertions (cjcj#783), and workspace tests fail to
+link `chir`, `codegen` and `sema.resolver_tests` before test bodies execute.
+The CI jobs deliberately retain these nonzero exits. Their baseline evidence
+and follow-up issues are recorded in the implementation report; no test has
+been reclassified as manual because of an assertion failure.
+
 For baseline comparison use the same runner, registry, SDK, flags and shim on
 two isolated source trees, retaining each `results.json`, `run.log` and test
 report directory. Compare failure identities, not just exit codes or counts.

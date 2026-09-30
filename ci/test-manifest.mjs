@@ -234,7 +234,9 @@ export function validateManifest(root = repoRoot, registered = REGISTERED, gatin
       if (!entry.reason || entry.reason.trim().length < 20) throw new Error(`manual reason missing: ${entry.file}`);
     } else if (entry.executor === 'workflow') {
       const workflow = fs.readFileSync(path.join(root, entry.workflow), 'utf8');
-      if (!workflow.includes(`${entry.interpreter} ${entry.file}`)) throw new Error(`workflow does not execute: ${entry.file}`);
+      const command = `${entry.interpreter} ${entry.file}`;
+      const lines = workflow.split('\n').map(line => line.replace(/(^|\s)#.*$/, '$1').trim().replace(/^(?:- )?run:\s*/, ''));
+      if (!lines.some(line => line === command || line.startsWith(`${command} `))) throw new Error(`workflow does not execute: ${entry.file}`);
     } else if (entry.executor === 'cjpm') {
       if (!entry.file.startsWith(`${entry.member}/src/`) || !entry.file.endsWith('_test.cj')) {
         throw new Error(`invalid cjpm member: ${entry.file}`);

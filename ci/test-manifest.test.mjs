@@ -105,6 +105,23 @@ test('CI invokes both registered script and pinned official cjpm consumers', asy
   assert.doesNotMatch(job, /continue-on-error|build_patched_runtime|setup_sdk\.mjs/);
 });
 
+test('workflow registration requires an invocation, not a comment or echoed command', async () => {
+  const root = await fs.mkdtemp(path.join(process.env.TMPDIR || '/tmp', 'manifest-workflow-'));
+  try {
+    execFileSync('git', ['init', '-q', root]);
+    await fs.writeFile(path.join(root, 'test_external.py'), '');
+    const registered = [{file: 'test_external.py', executor: 'workflow', workflow: 'ci.yml', interpreter: 'python3'}];
+    await fs.writeFile(path.join(root, 'ci.yml'), 'run: python3 test_external.py\n');
+    validateManifest(root, registered, [], []);
+    for (const text of ['# run: python3 test_external.py\n', 'run: echo python3 test_external.py\n']) {
+      await fs.writeFile(path.join(root, 'ci.yml'), text);
+      assert.throws(() => validateManifest(root, registered, [], []), /workflow does not execute/);
+    }
+  } finally {
+    await fs.rm(root, {recursive: true, force: true});
+  }
+});
+
 test('the gating set does not silently shrink', () => {
   assert.ok(GATING.length >= GATING_FLOOR,
     `GATING lists ${GATING.length} files, floor is ${GATING_FLOOR}; removing a test from CI must be a deliberate edit to both`);
