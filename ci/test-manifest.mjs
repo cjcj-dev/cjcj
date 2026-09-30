@@ -51,6 +51,7 @@ export const GATING = Object.freeze([
   'build/test/python-bundle.test.mjs',
   'build/test/rebuilt-identity.test.mjs',
   'build/test/release-evidence.test.mjs',
+  'build/test/release-host-pin.test.mjs',
   'build/test/release-platforms.test.mjs',
   'build/test/release-manifest-components.test.mjs',
   'build/test/release-manifest.test.mjs',
