@@ -9,6 +9,9 @@ const linuxX64 = Object.freeze({
   sourceBuild: Object.freeze({runner: 'ubuntu-22.04', reasons: Object.freeze([])}),
   spec: Object.freeze({
     key: 'linux-x64', sdkName: 'linux-x64', archiveFormat: 'tar.gz',
+    packageHost: Object.freeze(['linux', 'x64']), hostLlvmLibrary: 'libLLVM-15.so',
+    nativeFilePattern: /ELF 64-bit.*(?:x86-64|x86_64)/i,
+    requiredLlvmTools: Object.freeze(['llc', 'opt', 'ld.lld', 'llvm-objcopy']),
     exeSuffix: '', outputDirSuffix: 'x86_64', crossCompile: false, needsMingw: false,
     kkk2Supported: true,
     needsStaticLibs: true, os: 'linux', arch: 'x86_64', nodePlatform: 'linux', nodeArch: 'x64',
@@ -33,6 +36,9 @@ const linuxAArch64 = Object.freeze({
   ])}),
   spec: Object.freeze({
     key: 'linux-aarch64', sdkName: 'linux-aarch64', archiveFormat: 'tar.gz',
+    packageHost: Object.freeze(['linux', 'arm64']), hostLlvmLibrary: 'libLLVM-15.so',
+    nativeFilePattern: /ELF 64-bit.*(?:ARM aarch64|aarch64)/i,
+    requiredLlvmTools: Object.freeze(['llc', 'opt', 'ld.lld', 'llvm-objcopy']),
     exeSuffix: '', outputDirSuffix: 'aarch64', crossCompile: false, needsMingw: false,
     kkk2Supported: false,
     needsStaticLibs: true, os: 'linux', arch: 'aarch64', nodePlatform: 'linux', nodeArch: 'arm64',
@@ -57,6 +63,9 @@ const darwinArm64 = Object.freeze({
   ])}),
   spec: Object.freeze({
     key: 'darwin-arm64', sdkName: 'mac-aarch64', archiveFormat: 'tar.gz',
+    packageHost: Object.freeze(['darwin', 'arm64']), hostLlvmLibrary: 'libLLVM.dylib',
+    nativeFilePattern: /Mach-O 64-bit.*(?:arm64|aarch64)/i,
+    requiredLlvmTools: Object.freeze(['llc', 'opt', 'ld64.lld']),
     exeSuffix: '', outputDirSuffix: 'aarch64', crossCompile: false, needsMingw: false,
     kkk2Supported: false,
     needsStaticLibs: false, os: 'darwin', arch: 'aarch64', nodePlatform: 'darwin', nodeArch: 'arm64',
@@ -81,6 +90,9 @@ const darwinX64 = Object.freeze({
   ])}),
   spec: Object.freeze({
     key: 'darwin-x64', sdkName: 'mac-x64', archiveFormat: 'tar.gz',
+    packageHost: Object.freeze(['darwin', 'x64']), hostLlvmLibrary: 'libLLVM.dylib',
+    nativeFilePattern: /Mach-O 64-bit.*x86_64/i,
+    requiredLlvmTools: Object.freeze(['llc', 'opt', 'ld64.lld']),
     exeSuffix: '', outputDirSuffix: 'x86_64', crossCompile: false, needsMingw: false,
     kkk2Supported: false,
     needsStaticLibs: false, os: 'darwin', arch: 'x86_64', nodePlatform: 'darwin', nodeArch: 'x64',
@@ -102,6 +114,9 @@ const darwinX64 = Object.freeze({
 const windowsX64 = Object.freeze({
   spec: Object.freeze({
     key: 'windows-x64', sdkName: 'windows-x64', archiveFormat: 'zip',
+    packageHost: Object.freeze(['win32', 'x64']),
+    nativeFilePattern: /PE32\+ executable.*x86-64/i,
+    requiredLlvmTools: Object.freeze(['llc', 'opt', 'ld.lld', 'llvm-ar']),
     exeSuffix: '.exe', outputDirSuffix: 'x86_64', crossCompile: true, needsMingw: true,
     kkk2Supported: false,
     needsStaticLibs: false, os: 'windows', arch: 'x86_64', nodePlatform: 'linux', nodeArch: 'x64',
@@ -162,6 +177,41 @@ export function sourceBuildCells() {
   }));
 }
 
+export function targetForHost(platform = process.platform, arch = process.arch) {
+  return [...registry.values()].find(({spec}) => spec.packageHost[0] === platform && spec.packageHost[1] === arch);
+}
+
+const CI_BUILD_RUNNERS = Object.freeze([
+  ['ubuntu-24.04', 'linux-x64', false],
+  ['ubuntu-22.04', 'linux-x64', false],
+  ['ubuntu-26.04', 'linux-x64', true],
+  ['ubuntu-24.04-arm', 'linux-aarch64', false],
+]);
+const PLATFORM_RUNNERS = Object.freeze([
+  ['macos-26', 'darwin-arm64'], ['macos-26-intel', 'darwin-x64'],
+  ['macos-15', 'darwin-arm64'], ['macos-15-intel', 'darwin-x64'],
+  ['ubuntu-24.04', 'linux-x64'], ['ubuntu-24.04-arm', 'linux-aarch64'],
+  ['ubuntu-22.04', 'linux-x64'], ['ubuntu-22.04-arm', 'linux-aarch64'],
+  ['windows-2025', 'windows-x64'], ['windows-2022', 'windows-x64'],
+]);
+
+export function ciBuildCells() {
+  return CI_BUILD_RUNNERS.map(([runner, target, experimental]) => ({
+    runner, llvm_platform: getTarget(target).spec.llvmPlatform, experimental,
+  }));
+}
+
+export function ciProvisionCells() {
+  return [{runner: 'macos-latest'}];
+}
+
+export function platformTestCells() {
+  return PLATFORM_RUNNERS.map(([runner, target]) => ({
+    runner, llvm_platform: getTarget(target).spec.llvmPlatform,
+    sdk_runtime_dir: getTarget(target).spec.runtimeTuple,
+  }));
+}
+
 export function hostContract(key) {
   const {spec} = getTarget(key);
   const cross = spec.crossCompile ? 'yes' : 'no';
@@ -217,7 +267,7 @@ export function assertHostContract(key, {
 // What the P01-P23 chain produces today. Host SDKs: every key in the target
 // registry, each producing final-std-<target> for its own runtime tuple. Cross
 // std: ci/srcbuild/steps/build-windows-final-std.mjs runs on the linux-x64
-// source cell only (srcbuild.yml `if: matrix.target == 'linux-x64'`), so the
+// source cell only (srcbuild-target.yml source-mingw/source-android), so the
 // Windows and Android tuples are produced by the Linux source cell; Android
 // runtime and final std use ci/srcbuild/steps/build-android-final-std.mjs.
 const DAG_CROSS_STD_PRODUCERS = Object.freeze({

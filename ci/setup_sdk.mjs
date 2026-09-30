@@ -1,6 +1,7 @@
 #!/usr/bin/env zx
 // Install the Cangjie bootstrap SDK and export the build environment.
 
+import {targetForHost} from '../build/lib/targets.mjs';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -149,13 +150,7 @@ if (actualHostToolchain !== toolchain) {
 // IR to llc at all (the non-gating SDK provisioning check, which exercises only the
 // official toolchain) keep the stock llc with CJCJ_SDK_STOCK_LLC=1.
 const keepStockLlc = process.env.CJCJ_SDK_LINK_INPUTS_ONLY || process.env.CJCJ_SDK_STOCK_LLC;
-const llcPlatforms = {
-  'Linux/x86_64': 'linux_x86_64',
-  'Linux/aarch64': 'linux_aarch64',
-  'Darwin/x86_64': 'darwin_x86_64',
-  'Darwin/arm64': 'darwin_aarch64',
-};
-const llcPlatform = keepStockLlc ? '' : llcPlatforms[`${hostOs}/${hostArch}`] || '';
+const llcPlatform = keepStockLlc ? '' : targetForHost()?.spec.llvmPlatform || '';
 const fixedLlcGz = process.env.FIXED_LLC_GZ || '';
 const fixedOptGz = process.env.FIXED_OPT_GZ || '';
 const lldTool = hostOs === 'Darwin' ? 'ld64.lld' : 'ld.lld';

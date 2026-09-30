@@ -1,3 +1,4 @@
+import {getTarget} from './targets.mjs';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -19,23 +20,23 @@ const PINNED_BASE_SDK_VERSION = '1.2.0-alpha.20260721165458';
 
 const baseSdkPlatforms = new Map([
   ['linux-x64', {
-    os: 'linux', arch: 'x64', extension: '.tar.gz', size: 201639272,
+    size: 201639272,
     sha256: '4490fd0ac553f4122b90ab6cb0d437bc6a5325fbe81e43643cc01d484a0dc0d6',
   }],
   ['linux-aarch64', {
-    os: 'linux', arch: 'aarch64', extension: '.tar.gz', size: 203100802,
+    size: 203100802,
     sha256: '461e8d1c2f81b540d9c270c92333e57af60980e8c0e1f59b051f6c8906449320',
   }],
   ['darwin-x64', {
-    os: 'mac', arch: 'x64', extension: '.tar.gz', size: 173277379,
+    size: 173277379,
     sha256: '7546e5cbf8cffce60d91f65de17c4d7fb88abb960e4238fad0a26765182eef07',
   }],
   ['darwin-arm64', {
-    os: 'mac', arch: 'aarch64', extension: '.tar.gz', size: 164273695,
+    size: 164273695,
     sha256: '4c2b55321697bcac5da5e8ba349fc4405212c4e0f3e7105cfa78457a14810138',
   }],
   ['windows-x64', {
-    os: 'windows', arch: 'x64', extension: '.zip', size: 263516382,
+    size: 263516382,
     sha256: 'fa121323c4b411501690fe67169982215a7872e671df8007d85070c8afffa672',
   }],
 ]);
@@ -135,7 +136,8 @@ export function baseSdkDownload(platform, toolchain) {
   if (version !== PINNED_BASE_SDK_VERSION) {
     throw new Error(`base SDK release has no pinned archive identity: ${version}`);
   }
-  const archive = `cangjie-sdk-${tuple.os}-${tuple.arch}-${version}${tuple.extension}`;
+  const {spec} = getTarget(platform);
+  const archive = `cangjie-sdk-${spec.sdkName}-${version}.${spec.archiveFormat}`;
   return {
     archive,
     url: `${NIGHTLY_RELEASE_BASE}/${version}/${archive}`,
