@@ -1,3 +1,4 @@
+import {getTarget} from '../../build/lib/targets.mjs';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -8,14 +9,9 @@ import {fileURLToPath} from 'node:url';
 export function hostIdentity() {
   const target = process.env.CJCJ_SRCBUILD_TARGET
     || `${process.platform}-${process.platform === 'linux' && process.arch === 'arm64' ? 'aarch64' : process.arch}`;
-  const cells = {
-    'linux-x64': {platform: 'linux_x86_64', library: 'libLLVM-15.so'},
-    'linux-aarch64': {platform: 'linux_aarch64', library: 'libLLVM-15.so'},
-    'darwin-arm64': {platform: 'darwin_aarch64', library: 'libLLVM.dylib'},
-    'darwin-x64': {platform: 'darwin_x86_64', library: 'libLLVM.dylib'},
-  };
-  const cell = cells[target];
-  if (!cell) throw new Error(`HOST_LLVM_TARGET_UNSUPPORTED target=${target}`);
+  const {spec} = getTarget(target);
+  if (!spec.hostLlvmLibrary) throw new Error(`HOST_LLVM_TARGET_UNSUPPORTED target=${target}`);
+  const cell = {platform: spec.llvmPlatform, library: spec.hostLlvmLibrary};
   const identities = process.env.STAGE1_HOST_IDENTITIES
     || new URL('../bootstrap/stage1_host_identities.txt', import.meta.url);
   const lines = fs.readFileSync(identities, 'utf8').split('\n');

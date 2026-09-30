@@ -41,34 +41,6 @@ on:
         required: false
         type: boolean
         default: false
-    outputs:
-      final_compiler_linux_x64:
-        description: Same-run final compiler for linux-x64
-        value: ${{ jobs.artifact-contract.outputs.final_compiler_linux_x64 }}
-      final_std_linux_x64:
-        description: Linux x64 source-built std artifact
-        value: ${{ jobs.artifact-contract.outputs.final_std_linux_x64 }}
-      final_compiler_linux_aarch64:
-        description: Same-run final compiler for linux-aarch64
-        value: ${{ jobs.artifact-contract.outputs.final_compiler_linux_aarch64 }}
-      final_std_linux_aarch64:
-        description: Linux AArch64 source-built std artifact
-        value: ${{ jobs.artifact-contract.outputs.final_std_linux_aarch64 }}
-      final_compiler_darwin_x64:
-        description: Same-run final compiler for darwin-x64
-        value: ${{ jobs.artifact-contract.outputs.final_compiler_darwin_x64 }}
-      final_std_darwin_x64:
-        description: Darwin x64 source-built std artifact
-        value: ${{ jobs.artifact-contract.outputs.final_std_darwin_x64 }}
-      final_compiler_darwin_arm64:
-        description: Same-run final compiler for darwin-arm64
-        value: ${{ jobs.artifact-contract.outputs.final_compiler_darwin_arm64 }}
-      final_std_darwin_arm64:
-        description: Darwin arm64 source-built std artifact
-        value: ${{ jobs.artifact-contract.outputs.final_std_darwin_arm64 }}
-      final_std_windows_x64:
-        description: Windows x64 source-built std artifact
-        value: ${{ jobs.artifact-contract.outputs.final_std_windows_x64 }}
 
 permissions:
   contents: read
@@ -79,8 +51,6 @@ permissions:
 # call but one pending -- and cancel all but the newest pending one.
 
 jobs:
-  # Validate the single target passed by srcbuild.yml. The contract test keeps
-  # this platform table identical to the caller's selection table.
   plan:
     name: Select targets
     runs-on: ubuntu-24.04
@@ -88,36 +58,17 @@ jobs:
       matrix: ${{ steps.select.outputs.matrix }}
       llvm_platforms: ${{ steps.select.outputs.llvm_platforms }}
     steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
       - name: Select the requested targets
         id: select
         env:
           REQUESTED: ${{ inputs.targets }}
-        run: |
-          set -euo pipefail
-          all='[
-            {"target":"linux-aarch64","runner":"ubuntu-24.04-arm","llvm_platform":"linux_aarch64","static_libs":true},
-            {"target":"darwin-arm64","runner":"macos-15","llvm_platform":"darwin_aarch64","static_libs":false},
-            {"target":"darwin-x64","runner":"macos-15-intel","llvm_platform":"darwin_x86_64","static_libs":false},
-            {"target":"linux-x64","runner":"ubuntu-22.04","llvm_platform":"linux_x86_64","static_libs":true}
-          ]'
-          if [ -z "$REQUESTED" ] || [ "$REQUESTED" = all ]; then
-            selected="$all"
-          else
-            selected="$(printf '%s' "$all" | jq -c --arg want "$REQUESTED" \
-              '[.[] | select(.target as $t | ($want | split(",") | map(gsub("^ +| +$";"")) | index($t)))]')"
-          fi
-          count="$(printf '%s' "$selected" | jq 'length')"
-          # An empty matrix skips every dependent job while reporting nothing wrong.
-          if [ "$count" -eq 0 ]; then
-            echo "no target matched targets=$REQUESTED" >&2
-            exit 1
-          fi
-          # A matrix caller supplies exactly one target. Its jobs must never
-          # wait for another target's phase or inherit another target's failure.
-          test "$count" -eq 1 || { echo "source target workflow requires exactly one target" >&2; exit 1; }
-          echo "selected $count target(s) for targets=$REQUESTED"
-          printf 'matrix=%s\n' "$(printf '%s' "$selected" | jq -c '{include: .}')" >> "$GITHUB_OUTPUT"
-          printf 'llvm_platforms=%s\n' "$(printf '%s' "$selected" | jq -r '[.[].llvm_platform] | join(",")')" >> "$GITHUB_OUTPUT"
+        run: node ci/srcbuild/target-matrix.mjs --targets "$REQUESTED" --single --require-ready
 
   fixed-llvm:
     name: Build native LLVM tools
@@ -481,6 +432,8 @@ jobs:
           echo 'ASSERT real-artifact host pin one-digit rejection executed'
 
       - name: Reject a one-digit native host provenance change with the real artifact
+        env:
+          TARGET_LLVM_PLATFORM: ${{ matrix.llvm_platform }}
         # Linux cells use the scoped digest rows checked above.
         if: startsWith(matrix.target, 'darwin-')
         shell: bash
@@ -489,8 +442,6 @@ jobs:
           python3 - <<'PY'
           import json, os
           from pathlib import Path
-          platforms = {'linux-x64': 'linux_x86_64', 'linux-aarch64': 'linux_aarch64',
-                       'darwin-arm64': 'darwin_aarch64', 'darwin-x64': 'darwin_x86_64'}
           target = os.environ['CJCJ_SRCBUILD_TARGET']
           prefix = '# HOST_LLVM_PROVENANCE '
           changed = count = 0
@@ -498,7 +449,7 @@ jobs:
           for line in Path('ci/bootstrap/stage1_host_identities.txt').read_text().splitlines(True):
               if line.startswith(prefix):
                   pin = json.loads(line[len(prefix):])
-                  if pin['platform'] == platforms[target]:
+                  if pin['platform'] == os.environ['TARGET_LLVM_PLATFORM']:
                       pin['sha256'] = ('1' if pin['sha256'][0] == '0' else '0') + pin['sha256'][1:]
                       line = prefix + json.dumps(pin) + '\n'
                       count += 1
@@ -1349,37 +1300,3 @@ jobs:
           component: srcbuild-windows
           platform: ${{ matrix.target }}
           require-compiles: ${{ job.status == 'success' }}
-
-  artifact-contract:
-    name: Publish final std artifact contract
-    needs: [srcbuild, source-windows, source-android]
-    if: >-
-      always() && needs.srcbuild.result == 'success' &&
-      (needs.source-windows.result == 'success' || needs.source-windows.result == 'skipped') &&
-      (needs.source-android.result == 'success' || needs.source-android.result == 'skipped')
-    runs-on: ubuntu-22.04
-    outputs:
-      final_compiler_linux_x64: ${{ steps.contract.outputs.final_compiler_linux_x64 }}
-      final_std_linux_x64: ${{ steps.contract.outputs.final_std_linux_x64 }}
-      final_compiler_linux_aarch64: ${{ steps.contract.outputs.final_compiler_linux_aarch64 }}
-      final_std_linux_aarch64: ${{ steps.contract.outputs.final_std_linux_aarch64 }}
-      final_compiler_darwin_x64: ${{ steps.contract.outputs.final_compiler_darwin_x64 }}
-      final_std_darwin_x64: ${{ steps.contract.outputs.final_std_darwin_x64 }}
-      final_compiler_darwin_arm64: ${{ steps.contract.outputs.final_compiler_darwin_arm64 }}
-      final_std_darwin_arm64: ${{ steps.contract.outputs.final_std_darwin_arm64 }}
-      final_std_windows_x64: ${{ steps.contract.outputs.final_std_windows_x64 }}
-    steps:
-      - name: Export artifact names
-        id: contract
-        run: |
-          {
-            echo "final_compiler_linux_x64=final-compiler-linux-x64"
-            echo "final_std_linux_x64=final-std-linux-x64"
-            echo "final_compiler_linux_aarch64=final-compiler-linux-aarch64"
-            echo "final_std_linux_aarch64=final-std-linux-aarch64"
-            echo "final_compiler_darwin_x64=final-compiler-darwin-x64"
-            echo "final_std_darwin_x64=final-std-darwin-x64"
-            echo "final_compiler_darwin_arm64=final-compiler-darwin-arm64"
-            echo "final_std_darwin_arm64=final-std-darwin-arm64"
-            echo "final_std_windows_x64=final-std-windows-x64"
-          } >> "$GITHUB_OUTPUT"

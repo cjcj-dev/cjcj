@@ -6,11 +6,12 @@ import {load as loadYaml} from '../../vendor/js-yaml/js-yaml.mjs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import {execFileSync} from 'node:child_process';
 import {buildConfig} from '../../../build/lib/config.mjs';
 import {baseEnv} from '../../../build/srcbuild/stages/common.mjs';
 import {assembleCjcLinkOption} from '../../platform_matrix/link_option.mjs';
 import {assertFinalStd} from '../lib/final-std.mjs';
-import {llvmToolMatrix} from '../../../build/lib/targets.mjs';
+import {llvmToolMatrix, sourceBuildCells} from '../../../build/lib/targets.mjs';
 
 const root = path.resolve(import.meta.dirname, '../../..');
 const readWorkflow = name => fs.readFile(path.join(root, '.github/workflows', name), 'utf8');
@@ -135,13 +136,18 @@ async function invokedWorkflows(entry, stack = []) {
 }
 
 // A selectable matrix cannot be a literal any more -- Actions has no way to
-// filter one -- so the tuple table moved into the plan step as JSON. It is still
-// one table in one place; it just is not YAML, and reading only the YAML form
-// leaves this file blind to every tuple.
-const planTable = text => text.includes('run: node ci/llvm-tools-matrix.mjs')
-  ? llvmToolMatrix('all', {platformSet: 'all'}).include
-  : [...text.matchAll(/^\s*all='(\[[\s\S]*?\])'\s*$/gm)]
-    .flatMap(([, json]) => JSON.parse(json));
+// filter one -- so each table moved into its plan step as JSON. It is still one
+// table in one place; it just is not YAML, and reading only the YAML form leaves
+// this file blind to every row. Two selectors are live and both are covered:
+// the fixed-LLVM producer (llvm-tools-matrix.mjs) and the source-build matrix
+// (srcbuild/target-matrix.mjs).
+const planTable = text => {
+  if (text.includes('run: node ci/llvm-tools-matrix.mjs')) {
+    return llvmToolMatrix('all', {platformSet: 'all'}).include;
+  }
+  if (text.includes('run: node ci/srcbuild/target-matrix.mjs')) return sourceBuildCells();
+  return [...text.matchAll(/^\s*all='(\[[\s\S]*?\])'\s*$/gm)].flatMap(([, json]) => JSON.parse(json));
+};
 
 // The values a ${{ matrix.KEY }} placeholder can take inside one workflow file.
 const matrixValues = (text, key) => [
@@ -351,13 +357,7 @@ test('source-build workflow connects every native runner to its LLVM and std art
   const workflow = await fs.readFile(path.join(root, '.github/workflows/srcbuild-target.yml'), 'utf8');
   const fixed = await fs.readFile(path.join(root, '.github/workflows/build-llvm-tools.yml'), 'utf8');
   assert.ok(workflow.includes('uses: ./.github/workflows/build-llvm-tools.yml'), 'source build must call the reusable tuple producer');
-  const cells = [
-    ['linux-aarch64', 'ubuntu-24.04-arm', 'linux_aarch64'],
-    ['darwin-arm64', 'macos-15', 'darwin_aarch64'],
-    ['darwin-x64', 'macos-15-intel', 'darwin_x86_64'],
-    ['linux-x64', 'ubuntu-22.04', 'linux_x86_64'],
-  ];
-  for (const [target, runner, llvmPlatform] of cells) {
+  for (const {target, runner, llvm_platform: llvmPlatform} of sourceBuildCells()) {
     // Whole-tuple equality: a row that pairs the right target with the wrong
     // runner has to fail, which is why this compares the entry and not three
     // independent substring hits.
@@ -406,15 +406,20 @@ test('arm soak produces every artifact its package job downloads, each exactly o
   // What the package job asks for, resolved through arm-soak's own dispatch defaults.
   const packageJob = soakJobs.get('package');
   assert.ok(packageJob, 'arm-soak has no package job');
+  const command = scalar(soakJobs.get('matrix-plan'), 'run');
+  const output = execFileSync('bash', ['-e', '-c', command], {
+    cwd: root, encoding: 'utf8', env: {...process.env, GITHUB_OUTPUT: ''},
+  });
+  const plan = Object.fromEntries(output.trim().split('\n').map(line => line.split('=')));
   const callerInputs = new Map([...mapping(block(packageJob, /^\s*with:\s*$/))].map(([key, value]) => [
     key,
-    value.replace(/\$\{\{\s*inputs\.(\w+)\s*\}\}/g, (_, name) => {
+    value.replace(/\$\{\{\s*inputs\.(\w+)\s*\|\|\s*needs.matrix-plan.outputs.(\w+)\s*\}\}/g, (_, name, outputName) => {
       const declared = block(armSoak, new RegExp(String.raw`^ {6}${name}:\s*$`));
       assert.ok(declared, `arm-soak declares no dispatch input ${name}`);
       const fallback = scalar(declared, 'default');
       assert.ok(fallback !== undefined, `dispatch input ${name} has no default`);
-      return fallback;
-    }),
+      return unquote(fallback) || plan[outputName];
+    }).replace(/\$\{\{\s*needs.matrix-plan.outputs.(\w+)\s*\}\}/g, (_, name) => plan[name]),
   ]));
 
   const platform = callerInputs.get('platform');
