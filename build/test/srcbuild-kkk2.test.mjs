@@ -1168,6 +1168,16 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
   }
   fs.copyFileSync('/bin/true', base + '/third_party/llvm/bin/opt');
   fs.copyFileSync('/bin/true', inputs + '/libLLVM-15.so');
+  const hostArtifact = path.join(inputs, 'host-artifact');
+  fs.mkdirSync(hostArtifact);
+  fs.copyFileSync(inputs + '/libLLVM-15.so', path.join(hostArtifact, 'libLLVM-15.so'));
+  const hostSha = sha256(path.join(hostArtifact, 'libLLVM-15.so'));
+  const hostPin = {repository: 'cjcj-dev/cjcj', run_id: '123', run_attempt: '1', artifact_id: '456',
+    source_sha: '418ace1896e22a51a6c1fa36ec29631b00301cd8', producer_sha: 'b'.repeat(40),
+    platform: 'linux_x86_64', sha256: hostSha};
+  fs.writeFileSync(path.join(hostArtifact, 'manifest.json'), JSON.stringify(hostPin));
+  const hostIdentities = path.join(inputs, 'host-identities.txt');
+  fs.writeFileSync(hostIdentities, `# HOST_LLVM_PROVENANCE ${JSON.stringify(hostPin)}\nlinux_x86_64 libLLVM-15.so ${hostSha}\n`);
   fs.writeFileSync(inputs + '/ast.a', 'ast input\n');
   const runtimePin = fs.readFileSync(path.join(root, 'ci/runtime_pin.env'), 'utf8').match(/^RUNTIME_REF=(.*)$/m)[1];
   const runtimeDir = path.join(inputs, 'external runtime');
@@ -1221,6 +1231,8 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
     CJCJ_BOOTSTRAP_CPP_SRC: inputs,
     CJCJ_BOOTSTRAP_STDSRC: inputs,
     CJCJ_SRCBUILD_HOST_SDK: base,
+    CJCJ_BOOTSTRAP_HOST_LLVM_ARTIFACT: hostArtifact,
+    STAGE1_HOST_IDENTITIES: hostIdentities,
     CJCJ_BOOTSTRAP_HOST_LLVM_SO: inputs + '/libLLVM-15.so',
     CJCJ_BOOTSTRAP_HOST_LLVM_SHA256: sha256(inputs + '/libLLVM-15.so'),
     CJCJ_BOOTSTRAP_AST_SUPPORT: inputs + '/ast.a',
@@ -1259,6 +1271,8 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
   }
   return {
     root,
+    hostArtifact,
+    hostIdentities,
     runtimeDir,
     sourceSha,
     dryRun(step, sample) {
@@ -1299,6 +1313,42 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
       return {...result, log};
     },
   };
+}
+
+test('kkk2 host LLVM preparation reaches bootstrap arguments with verified bytes', t => {
+  const fixture = bootstrapDriverFixture(t);
+  const result = fixture.dryRun(32, 1);
+  const command = result.stdout.match(/^DRY_RUN COMMAND=(.*)$/m)?.[1] || '';
+  const parsed = runBash(`set -- ${command}\nwhile (($#)); do\nif [[ $1 == --host-llvm-so ]]; then sha256sum "$2"; fi\nshift\ndone`);
+  const expected = sha256(path.join(fixture.hostArtifact, 'libLLVM-15.so'));
+  const observed = {rc: result.status, hashRc: parsed.status, digest: parsed.stdout.split(' ')[0],
+    declared: command.includes(`--host-llvm-sha256 ${expected}`), verified: /HOST_LLVM_VERIFIED/.test(result.stderr)};
+  console.log(`HOST_LLVM_ARGUMENT_ASSERT ${JSON.stringify(observed)}`);
+  assert.deepEqual(observed, {rc: 0, hashRc: 0, digest: expected, declared: true, verified: true});
+});
+
+for (const defect of ['digest', 'provenance', 'missing']) {
+  test(`kkk2 host LLVM rejects ${defect} before bootstrap arguments`, t => {
+    const fixture = bootstrapDriverFixture(t);
+    if (defect === 'digest') {
+      fs.writeFileSync(fixture.hostIdentities, fs.readFileSync(fixture.hostIdentities, 'utf8')
+        .replace(/(libLLVM-15.so )[a-f0-9]{64}/, `$1${'0'.repeat(64)}`));
+    } else if (defect === 'provenance') {
+      const file = path.join(fixture.hostArtifact, 'manifest.json');
+      const manifest = JSON.parse(fs.readFileSync(file));
+      manifest.sha256 = '0'.repeat(64);
+      fs.writeFileSync(file, JSON.stringify(manifest));
+    } else {
+      fs.unlinkSync(path.join(fixture.hostArtifact, 'libLLVM-15.so'));
+    }
+    const result = fixture.dryRun(32, 1);
+    const marker = defect === 'digest' ? 'HOST_LLVM_SHA256_MISMATCH' : defect === 'provenance'
+      ? 'HOST_LLVM_PROVENANCE_MISMATCH field=sha256' : 'ENOENT';
+    const observed = {failed: result.status !== 0, marker: result.stderr.includes(marker),
+      command: /^DRY_RUN COMMAND=/m.test(result.stdout)};
+    console.log(`HOST_LLVM_REJECTION_ASSERT defect=${defect} ${JSON.stringify(observed)}`);
+    assert.deepEqual(observed, {failed: true, marker: true, command: false});
+  });
 }
 
 test('dry-run bootstrap preserves pin outcomes with large contract bodies', t => {
