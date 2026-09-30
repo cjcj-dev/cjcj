@@ -8,7 +8,7 @@ import { spawnSync } from 'node:child_process';
 const runners = ['macos-26', 'macos-26-intel', 'macos-15', 'macos-15-intel',
   'ubuntu-24.04', 'ubuntu-24.04-arm', 'ubuntu-22.04', 'ubuntu-22.04-arm',
   'windows-2025', 'windows-2022'];
-const switches = ['runtime_only', 'std_evidence_only', 'darwin_runtime_only',
+const switches = ['runtime_only', 'linux_native_only', 'std_evidence_only', 'darwin_runtime_only',
   'darwin_host_only', 'darwin_verify_only'];
 
 function summary(inputs) {

@@ -21,16 +21,15 @@ for name, old, new in [
     assert s.count(old) == 1
     p.write_text(s.replace(old, new))
 PY
-for arm in candidate producer-cut consumer-cut; do
+cp "$out/candidate.mjs" "$out/restored.mjs"
+for arm in candidate producer-cut consumer-cut restored; do
   (set +e
    DARWIN_RT_PRODUCT="$out/$arm.mjs" node --test ci/release/darwin_runtime.test.mjs > "$out/$arm.log" 2>&1
    echo "$?" > "$out/$arm.rc") &
 done
 wait
-cp "$out/candidate.mjs" "$out/restored.mjs"
-DARWIN_RT_PRODUCT="$out/restored.mjs" node --test ci/release/darwin_runtime.test.mjs > "$out/restored.log" 2>&1
-echo 0 > "$out/restored.rc"
 test "$(cat "$out/candidate.rc")" = 0
+test "$(cat "$out/restored.rc")" = 0
 test "$(cat "$out/producer-cut.rc")" != 0
 test "$(cat "$out/consumer-cut.rc")" != 0
 grep -q 'PRODUCER_BYTES:' "$out/producer-cut.log"
