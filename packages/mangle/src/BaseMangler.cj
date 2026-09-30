@@ -502,6 +502,10 @@ public open class BaseMangler {
 
     public func MangleUserDefinedType(ty: Ty, genericsTypeStack: ArrayList<String>, declare: Bool,
         isCollectGTy!: Bool = true): String {
+        if (ty.kind != TypeKind.TYPE_ENUM && ty.kind != TypeKind.TYPE_STRUCT &&
+            ty.kind != TypeKind.TYPE_CLASS && ty.kind != TypeKind.TYPE_INTERFACE) {
+            return unsupportedTy(ty.kind, "Unexpected user-defined type")
+        }
         let decl = if (let Some(value) <- Ty.GetDeclOfTy(ty)) {
             value
         } else {
@@ -542,23 +546,12 @@ public open class BaseMangler {
     public func MangleGenericArgumentsHelper(decl: Decl, genericsTypeStack: ArrayList<String>, declare: Bool,
         isCollectGTy!: Bool = true): String {
         let args = ArrayList<Ty>()
-        var collectFuncGeneric = decl.astKind == ASTKind.FUNC_DECL
-        if (let Some(ty) <- decl.GetTy()) {
-            if (!ty.IsFunc()) {
-                collectFuncGeneric = false
-                for (arg in ty.typeArgs) {
-                    args.add(arg)
-                }
-            }
-        }
-        if (collectFuncGeneric) {
+        if (decl.GetTy().isSome() && !decl.GetTy().getOrThrow().IsFunc()) {
+            for (arg in decl.GetTy().getOrThrow().typeArgs) { args.add(arg) }
+        } else if (decl.astKind == ASTKind.FUNC_DECL) {
             let body = (decl as FuncDecl).getOrThrow().funcBody.getOrThrow()
             if (let Some(generic) <- body.generic) {
-                for (arg in generic.typeParameters) {
-                    if (let Some(ty) <- arg.GetTy()) {
-                        args.add(ty)
-                    }
-                }
+                for (arg in generic.typeParameters) { args.add(arg.GetTy().getOrThrow()) }
             }
         }
         if (args.isEmpty()) {
@@ -616,27 +609,22 @@ public open class BaseMangler {
 
     public func MangleFuncType(ty: Ty, genericsTypeStack: ArrayList<String>, declare: Bool,
         isCollectGTy!: Bool = true): String {
-        var mangled = if ((ty as FuncTy).getOrThrow().IsCFunc()) { MANGLE_CFUNC_PREFIX } else { MANGLE_GENERAL_FUNC_PREFIX }
-        var retTy = if (let Some(ret) <- Some((ty as FuncTy).getOrThrow().retTy)) {
-            MangleSemaType(ret, genericsTypeStack, declare: declare, isCollectGTy: isCollectGTy)
-        } else {
-            MANGLE_VOID_TY_SUFFIX
+        let funcTy = (ty as FuncTy).getOrThrow()
+        var mangled = if (funcTy.IsCFunc()) { MANGLE_CFUNC_PREFIX } else { MANGLE_GENERAL_FUNC_PREFIX }
+        var retTy = MangleSemaType(funcTy.retTy, genericsTypeStack, declare: declare, isCollectGTy: isCollectGTy)
+        if (retTy.isEmpty()) { retTy = MANGLE_VOID_TY_SUFFIX }
+        var params = ""
+        for (param in funcTy.paramTys) {
+            params += MangleSemaType(param, genericsTypeStack, declare: declare, isCollectGTy: isCollectGTy)
         }
-        if (retTy.isEmpty()) {
-            retTy = MANGLE_VOID_TY_SUFFIX
-        }
-        mangled += retTy
-        for (param in (ty as FuncTy).getOrThrow().paramTys) {
-            mangled += MangleSemaType(param, genericsTypeStack, declare: declare, isCollectGTy: isCollectGTy)
-        }
-        mangled += MANGLE_SUFFIX
+        mangled += retTy + params + MANGLE_SUFFIX
         return mangled
     }
 
     public func MangleFuncParams(funcDecl: FuncDecl, genericsTypeStack: ArrayList<String>, declare: Bool,
         isCollectGTy!: Bool = true): String {
         if (let Some(body) <- funcDecl.funcBody) {
-            if (body.paramLists[0].params.isEmpty()) {
+            if (body.paramLists.isEmpty() || body.paramLists[0].params.isEmpty()) {
                 return MANGLE_VOID_TY_SUFFIX
             }
             var mangled = ""
@@ -939,8 +927,7 @@ public open class BaseMangler {
             for (setter in (decl as PropDecl).getOrThrow().setters) {
                 setter.exportId = Mangle(setter)
             }
-            decl.exportId = Mangle(decl)
-            return decl.exportId
+            return Mangle(decl)
         }
         decl.exportId = Mangle(decl)
         for (member in decl.GetMemberDeclPtrs()) {

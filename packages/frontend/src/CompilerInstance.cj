@@ -1342,15 +1342,6 @@ public class CompilerInstance {
     }
 
     private func PrepareManglerContexts(baseMangler: RealBaseMangler): Unit {
-        for (pkg in GetPackages()) {
-            let pkgName = RealManglerContext.ReduceUnitTestPackageName(pkg.fullPackageName)
-            let ctx = if (let Some(value) <- baseMangler.manglerCtxTable.get(pkgName)) {
-                value
-            } else {
-                baseMangler.PrepareContextForPackage(pkg)
-            }
-            baseMangler.CollectLocalDecls(ctx, pkg)
-        }
         for (pkg in importManager.getOrThrow().GetAllImportedPackages()) {
             let pkgName = RealManglerContext.ReduceUnitTestPackageName(pkg.fullPackageName)
             let ctx = if (let Some(value) <- baseMangler.manglerCtxTable.get(pkgName)) {
