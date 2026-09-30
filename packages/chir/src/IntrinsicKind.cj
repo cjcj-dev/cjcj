@@ -88,10 +88,15 @@ public enum IntrinsicKind {
     | LOG | LOG2 | LOG10 | SQRT | ROUND | POW | POWI | BIT_CAST | PREINITIALIZE | OBJECT_AS | IS_NULL
     | GET_TYPE_FOR_TYPE_PARAMETER | IS_SUBTYPE_TYPES | EXCLUSIVE_SCOPE
     | CANONICALIZE_STRING_BACKING
+    | REFERENCE_INVOKE_FINALIZE | REFERENCE_WAIT_PENDING | REFERENCE_RUNTIME_RUNNING | REFERENCE_NANO_TIME
 }
 
 public func IntrinsicKindName(kind: IntrinsicKind): String {
     return match (kind) {
+        case IntrinsicKind.REFERENCE_INVOKE_FINALIZE => "REFERENCE_INVOKE_FINALIZE"
+        case IntrinsicKind.REFERENCE_WAIT_PENDING => "REFERENCE_WAIT_PENDING"
+        case IntrinsicKind.REFERENCE_RUNTIME_RUNNING => "REFERENCE_RUNTIME_RUNNING"
+        case IntrinsicKind.REFERENCE_NANO_TIME => "REFERENCE_NANO_TIME"
         case IntrinsicKind.NOT_INTRINSIC => "NOT_INTRINSIC"
         case IntrinsicKind.NOT_IMPLEMENTED => "NOT_IMPLEMENTED"
         case IntrinsicKind.ARRAY_INIT => "ARRAY_INIT"
@@ -468,6 +473,10 @@ public func LookupHeadlessIntrinsicKind(name: String): Option<IntrinsicKind> {
 
 public func LookupCoreIntrinsicKind(name: String): Option<IntrinsicKind> {
     return match (name) {
+        case "referenceInvokeFinalize" => IntrinsicKind.REFERENCE_INVOKE_FINALIZE
+        case "referenceWaitPending" => IntrinsicKind.REFERENCE_WAIT_PENDING
+        case "referenceRuntimeRunning" => IntrinsicKind.REFERENCE_RUNTIME_RUNNING
+        case "referenceNanoTime" => IntrinsicKind.REFERENCE_NANO_TIME
         case "mutexInit" => IntrinsicKind.MUTEX_INIT
         case "mutexLock" => IntrinsicKind.CJ_MUTEX_LOCK
         case "mutexTryLock" => IntrinsicKind.MUTEX_TRY_LOCK
