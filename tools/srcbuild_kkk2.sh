@@ -583,14 +583,19 @@ run_step() {
     local step=$1 name=$2 function_name=$3
     local log="$LOG_ROOT/${START_STAMP}-step${step}.log"
     local stop_file="$STATE_ROOT/.affinity-${START_STAMP}-step${step}-$$.stop"
-    local start_ns end_ns wall rc monitor_pid
+    local start_ns rc monitor_pid
     start_ns=$(date +%s%N)
     capture_build_child_affinity "$$" "$step" "$stop_file" &
     monitor_pid=$!
-    set +e
+    trap 'rc=$?; if ((BASH_SUBSHELL == 0)); then trap - ERR; set +e; finish_step "$step" "$name" "$log" "$stop_file" "$monitor_pid" "$start_ns" "$rc"; exit "$rc"; fi' ERR
     "$function_name" > "$log" 2>&1
-    rc=$?
-    set -e
+    trap - ERR
+    finish_step "$step" "$name" "$log" "$stop_file" "$monitor_pid" "$start_ns" 0
+}
+
+finish_step() {
+    local step=$1 name=$2 log=$3 stop_file=$4 monitor_pid=$5 start_ns=$6 rc=$7
+    local end_ns wall
     : > "$stop_file"
     wait "$monitor_pid" || true
     end_ns=$(date +%s%N)

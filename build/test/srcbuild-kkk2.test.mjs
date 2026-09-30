@@ -84,6 +84,92 @@ function sha256(file) {
   return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 }
 
+function runStepFailureFixture(from, through, failure, missingSdk = false) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'srcbuild-step-failure-'));
+  const files = ['tools/srcbuild_kkk2.sh', 'build/lib/srcbuild_git.sh',
+    'build/lib/targets.mjs', 'build/lib/errors.mjs', 'ci/host_sdk_pin.env',
+    'ci/srcbuild/steps/assert-host-contract.mjs'];
+  for (const file of files) {
+    fs.mkdirSync(path.dirname(path.join(root, file)), {recursive: true});
+    fs.copyFileSync(path.join(repoRoot, file), path.join(root, file));
+  }
+  const state = path.join(root, '.srcbuild');
+  const bin = path.join(state, 'home/.local/bin');
+  fs.mkdirSync(bin, {recursive: true});
+  fs.writeFileSync(path.join(state, 'kkk2-github.env'), 'CJCJ_SRCBUILD_VERSION=fixture-version\n');
+  fs.writeFileSync(path.join(state, 'kkk2-github.path'), '');
+  const executable = (name, text) => {
+    fs.writeFileSync(path.join(bin, name), `#!/usr/bin/env bash\nset -euo pipefail\n${text}\n`, {mode: 0o755});
+  };
+  executable('hostname', 'echo kkk2');
+  executable('node', `if [[ $1 == */acquire_fixed_tuple.mjs ]]; then exit 0; fi\nexec ${JSON.stringify(process.execPath)} "$@"`);
+  executable('npx', `
+printf '%s\\n' "$*" >> "$GITHUB_WORKSPACE/commands.log"
+case "$*" in
+  *setup_sdk.mjs*)
+    [[ $CJCJ_SDK_STOCK_LLC == 1 ]]
+    if [[ $FIXTURE_FAILURE == setup ]]; then exit 56; fi
+    if [[ $FIXTURE_MISSING_SDK == 0 ]]; then mkdir -p "$HOME/.cjv/toolchains/$CJCJ_TOOLCHAIN"; fi
+    ;;
+  *install-system-deps*)
+    [[ $CJCJ_SDK_STOCK_LLC == 1 ]]
+    [[ $CJCJ_SRCBUILD_HOST_SDK == "$HOME/.cjv/toolchains/$CJCJ_TOOLCHAIN" ]]
+    [[ $CJCJ_SRCBUILD_BOOTSTRAP_SDK == "$CJCJ_SRCBUILD_HOST_SDK" ]]
+    printf 'SDK_STATE_CONSUMED\\n'
+    ;;
+  *build-shim.mjs*)
+    [[ $CANGJIE_CPP_SRC == "$CANGJIE_WORKSPACE/cangjie_compiler" ]]
+    if [[ $FIXTURE_FAILURE == shim ]]; then exit 37; fi
+    ;;
+  *compose-sdk.mjs*)
+    [[ $CANGJIE_CPP_SRC == "$CANGJIE_WORKSPACE/cangjie_compiler" ]]
+    [[ $SOURCE_SDK_VERSION == fixture-version ]]
+    printf 'PARENT_EXPORT_CONSUMED\\n'
+    ;;
+  *) exit 99 ;;
+esac`);
+  const result = spawnSync('bash', [path.join(root, 'tools/srcbuild_kkk2.sh'),
+    '--from-step', String(from), '--through-step', String(through)], {
+    encoding: 'utf8', timeout: 30000,
+    env: {...process.env, PATH: `${bin}:${process.env.PATH}`,
+      FIXTURE_FAILURE: failure, FIXTURE_MISSING_SDK: missingSdk ? '1' : '0'},
+  });
+  const timings = fs.readFileSync(path.join(state, 'kkk2-timings.tsv'), 'utf8');
+  const commands = fs.readFileSync(path.join(root, 'commands.log'), 'utf8');
+  const logs = fs.readdirSync(path.join(state, 'logs')).map(file =>
+    fs.readFileSync(path.join(state, 'logs', file), 'utf8')).join('\n');
+  console.log(`STEP_FIXTURE root=${root} product_sha256=${sha256(path.join(root, files[0]))} rc=${result.status}`);
+  return {root, result, timings, commands, logs};
+}
+
+for (const scenario of [
+  {name: 'setup failure', from: 5, through: 6, failure: 'setup', rc: 56, next: 'install-system-deps'},
+  {name: 'missing SDK', from: 5, through: 6, failure: '', missingSdk: true, rc: 1, next: 'install-system-deps'},
+  {name: 'SDK state survives', from: 5, through: 6, failure: '', rc: 0, state: 'SDK_STATE_CONSUMED'},
+  {name: 'shim failure', from: 29, through: 34, failure: 'shim', rc: 37, next: 'compose-sdk.mjs'},
+  {name: 'parent export survives', from: 29, through: 34, failure: '', rc: 0, state: 'PARENT_EXPORT_CONSUMED'},
+]) {
+  test(`source-build fail-fast: ${scenario.name}`, () => {
+    const fixture = runStepFailureFixture(scenario.from, scenario.through, scenario.failure, scenario.missingSdk);
+    const failures = [];
+    const check = (name, passed) => {
+      console.log(`TARGET_ASSERTION ${scenario.name}: ${name}=${passed}`);
+      if (!passed) failures.push(name);
+    };
+    check('step rc', fixture.result.status === scenario.rc);
+    check('TIMINGS rc', new RegExp(`^step\\t${scenario.from}\\t[^\\t]+\\t${scenario.rc}\\t`, 'm').test(fixture.timings));
+    if (scenario.next) {
+      check('next step not executed', !fixture.commands.includes(scenario.next));
+      check('no next TIMINGS record', !new RegExp(`^step\\t${scenario.through}\\t`, 'm').test(fixture.timings));
+    } else {
+      check('parent state consumed', fixture.logs.includes(scenario.state));
+      check('next step succeeds', new RegExp(`^step\\t${scenario.through}\\t[^\\t]+\\t0\\t`, 'm').test(fixture.timings));
+    }
+    if (failures.length === 0) fs.rmSync(fixture.root, {recursive: true, force: true});
+    assert.deepEqual(failures, [], fixture.result.stdout + fixture.result.stderr);
+  });
+}
+
 test('source-build CPU windows preserve explicit placement and derive their width', () => {
   const invoke = `source "$1" --lib-only\n`
     + 'test "$(explicit_cpuset 048-063)" = 48-63\n'
