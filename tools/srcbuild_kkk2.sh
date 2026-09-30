@@ -1143,19 +1143,6 @@ step_30() {
     npx --yes zx@8 "$REPO_ROOT/ci/srcbuild/steps/inject-version.mjs"
 }
 
-bootstrap_input_sha256() {
-    local path=$1 env_sha=${2:-}
-    if [[ -n $env_sha ]]; then
-        printf '%s\n' "$env_sha"
-        return 0
-    fi
-    [[ -f $path ]] || {
-        echo "bootstrap input missing: $path" >&2
-        return 1
-    }
-    sha256sum "$path" | awk '{print $1}'
-}
-
 # P12: the runtime is a declared external input, never an implicit depot lookup.
 # Declare CJCJ_BOOTSTRAP_COLOUR_RT as the absolute directory containing BOTH
 # libcangjie-runtime.so and libboundscheck.so (not an SDK root). Supply reviewed
