@@ -73,7 +73,9 @@ const hostLlvm = prepareHostLlvm();
 function completeAstInput(archive) {
   return archive && ['SHA256SUMS', 'include/cangjie',
     'include/flatbuffers/StdAstFormat_generated.h', 'schema/StdAstFormat.fbs',
-    'third_party/flatbuffers/bin/flatc'].every(name => fs.existsSync(path.join(path.dirname(archive), name)));
+    'third_party/flatbuffers/bin/flatc', 'third_party/flatbuffers/include',
+    'third_party/flatbuffers/cangjie', 'third_party/flatbuffers/modules']
+    .every(name => fs.existsSync(path.join(path.dirname(archive), name)));
 }
 
 const astFallbacks = [

@@ -19,7 +19,9 @@ export function fixture(check, target = 'linux-x64') {
     fs.writeFileSync(so, 'host fixture');
     fs.writeFileSync(ast, 'ast fixture');
     const astFiles = ['include/cangjie/AST.h', 'include/flatbuffers/StdAstFormat_generated.h',
-      'schema/StdAstFormat.fbs', 'third_party/flatbuffers/bin/flatc'];
+      'schema/StdAstFormat.fbs', 'third_party/flatbuffers/bin/flatc',
+      'third_party/flatbuffers/include/flatbuffers.h', 'third_party/flatbuffers/cangjie/libflatbuffers.a',
+      'third_party/flatbuffers/modules/flatbuffers.cjo'];
     for (const file of astFiles) {
       fs.mkdirSync(path.dirname(path.join(sdk, file)), {recursive: true});
       fs.writeFileSync(path.join(sdk, file), `ast fixture ${file}`);

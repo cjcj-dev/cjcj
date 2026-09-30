@@ -137,7 +137,8 @@ test('explicit bare ast archive is rejected before bootstrap export', () => fixt
 }));
 
 for (const name of ['include/cangjie', 'include/flatbuffers/StdAstFormat_generated.h',
-  'schema/StdAstFormat.fbs', 'third_party/flatbuffers/bin/flatc']) {
+  'schema/StdAstFormat.fbs', 'third_party/flatbuffers/bin/flatc', 'third_party/flatbuffers/include',
+  'third_party/flatbuffers/cangjie', 'third_party/flatbuffers/modules']) {
   test(`explicit AST input missing ${name} is rejected before export`, () => fixture(({sdk, run}) => {
     fs.rmSync(path.join(sdk, name), {recursive: true});
     const result = run();
