@@ -24,6 +24,7 @@ test('a changed pin reaches both release selectors and requires matching archive
   for (const relative of [
     'ci/host-toolchain-pin.mjs', 'ci/release/base-sdk-identities.json',
     'build/lib/release-component-provenance.mjs', 'build/lib/release-gate-apparatus.mjs',
+    'build/lib/targets.mjs', 'build/lib/errors.mjs',
   ]) {
     const destination = path.join(fixture, relative);
     await fs.mkdir(path.dirname(destination), {recursive: true});

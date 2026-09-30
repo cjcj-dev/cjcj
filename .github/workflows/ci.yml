@@ -11,6 +11,20 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  matrix-plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      build: ${{ steps.matrix.outputs.build }}
+      provision: ${{ steps.matrix.outputs.provision }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Export target matrix
+        id: matrix
+        run: node ci/target-matrix.mjs ci
+
   lint:
     name: Verify sources
     runs-on: ubuntu-slim
@@ -102,25 +116,13 @@ jobs:
 
   build:
     name: ${{ matrix.runner }} / Build
-    needs: fixed-llvm-tools
+    needs: [fixed-llvm-tools, matrix-plan]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
     continue-on-error: ${{ matrix.experimental }}
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - { runner: ubuntu-24.04, llvm_platform: linux_x86_64, experimental: false }
-          - { runner: ubuntu-22.04, llvm_platform: linux_x86_64, experimental: false }
-          # ubuntu-26.04 is not a platform we ship on yet, so its failures are
-          # information rather than verdicts.
-          - { runner: ubuntu-26.04, llvm_platform: linux_x86_64, experimental: true }
-          # linux-aarch64 is a release platform: it appears in the release matrix
-          # and ships as an artifact, so a build failure here has to count. It was
-          # non-gating from when this row only provisioned the official SDK; the
-          # row now runs a native cjcj build and smoke, and the exemption outlived
-          # its reason.
-          - { runner: ubuntu-24.04-arm, llvm_platform: linux_aarch64, experimental: false }
+      matrix: ${{ fromJSON(needs.matrix-plan.outputs.build) }}
     steps:
       - name: Checkout cjcj
         uses: actions/checkout@v7
@@ -253,14 +255,14 @@ jobs:
 
   # Non-gating: verifies SDK provisioning on macOS; does not build cjcj.
   provision:
+    needs: matrix-plan
     name: ${{ matrix.runner }} / Verify SDK
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 40
     continue-on-error: true
     strategy:
       fail-fast: false
-      matrix:
-        runner: [macos-latest]
+      matrix: ${{ fromJSON(needs.matrix-plan.outputs.provision) }}
     steps:
       - name: Checkout cjcj
         uses: actions/checkout@v7

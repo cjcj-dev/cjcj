@@ -4,6 +4,7 @@ import {prepareTrimpath, withSeedOptimization} from '../release/trimpath.mjs';
 // tuple, then attempt the O1 workspace build.
 
 import {checkCodegenRuntimeLayout} from '../check-codegen-runtime-layout.mjs';
+import {targetForHost} from '../../build/lib/targets.mjs';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -333,13 +334,7 @@ async function installFile(source, destination) {
   if (process.platform !== 'win32') await fs.chmod(`${destination}.new`, 0o755);
   await fs.rename(`${destination}.new`, destination);
 }
-const sdkRuntimeDirName = process.env.SDK_RUNTIME_DIR || {
-  'linux/x64': 'linux_x86_64_cjnative',
-  'linux/arm64': 'linux_aarch64_cjnative',
-  'darwin/arm64': 'darwin_aarch64_cjnative',
-  'darwin/x64': 'darwin_x86_64_cjnative',
-  'win32/x64': 'windows_x86_64_cjnative',
-}[`${process.platform}/${process.arch}`] || '';
+const sdkRuntimeDirName = process.env.SDK_RUNTIME_DIR || targetForHost()?.spec.runtimeTuple || '';
 if (!sdkRuntimeDirName) throw new Error(`unsupported host for bootstrap runtime install: ${process.platform}/${process.arch}`);
 const finalCompilerOutput = process.env.FINAL_COMPILER_DIR || '';
 const finalWindows = process.platform === 'win32' && Boolean(finalCompilerOutput);

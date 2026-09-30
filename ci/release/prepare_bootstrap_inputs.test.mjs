@@ -22,14 +22,15 @@ test('explicit tuple fallback remains usable with the same reviewed pin', () => 
   console.log('ASSERT fallback executed');
 }));
 
-test('nested kkk2 depot remains a fallback under the same reviewed pin', () => fixture(({env, fallback, run}) => {
+test('explicit depot layout does not determine input identity', () => fixture(({env, fallback, run}) => {
   delete env.CJCJ_BOOTSTRAP_TUPLE_ARTIFACT;
   delete env.CJCJ_BOOTSTRAP_COLOUR_TUPLE;
   env.CJCJ_LLVM_DEPOT_ROOT = path.join(path.dirname(fallback), 'depot');
   env.CANGJIE_COMPILER_SHA = 'c'.repeat(40);
   const nested = path.join(env.CJCJ_LLVM_DEPOT_ROOT, env.LLVM_SHA, env.CANGJIE_COMPILER_SHA);
+  env.CJCJ_BOOTSTRAP_COLOUR_TUPLE = nested;
   fs.mkdirSync(nested, {recursive: true});
-  fs.copyFileSync(path.join(fallback, 'SHA256SUMS'), path.join(nested, 'SHA256SUMS'));
+  fs.cpSync(fallback, nested, {recursive: true});
   const result = run();
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /BOOTSTRAP_VERIFIED SHA256SUMS/);

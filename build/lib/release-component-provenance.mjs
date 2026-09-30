@@ -1,3 +1,4 @@
+import {getTarget} from './targets.mjs';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -117,7 +118,8 @@ export function baseSdkDownload(platform, toolchain) {
   if (version !== RELEASE_HOST_TOOLCHAIN.replace(/^nightly-/, '') || version !== baseSdkIdentities.version) {
     throw new Error(`base SDK release has no pinned archive identity: ${version}`);
   }
-  const archive = `cangjie-sdk-${tuple.os}-${tuple.arch}-${version}${tuple.extension}`;
+  const {spec} = getTarget(platform);
+  const archive = `cangjie-sdk-${spec.sdkName}-${version}.${spec.archiveFormat}`;
   return {
     archive,
     url: `${NIGHTLY_RELEASE_BASE}/${version}/${archive}`,
