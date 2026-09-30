@@ -1504,19 +1504,40 @@ public open class GlobalOptions <: Option {
             Errorln("'--apc-split-num' cannot be used together with '--apc'.")
             return false
         }
-        if (!jobs.hasValue) { jobs = MaybeUInt64(GetHardwareConcurrency()) }
-        if (target.os == OSType.WINDOWS || target.os == OSType.DARWIN || target.os == OSType.IOS ||
-            IsObfuscationEnabled() || IsLTOEnabled() || enableCoverage) {
-            if ((target.os == OSType.WINDOWS || target.os == OSType.DARWIN || target.os == OSType.IOS) &&
-                (aggressiveParallelCompile.hasValue || aggressiveParallelCompileWithoutArg)) {
+        RefactJobs()
+        RefactAggressiveParallelCompileOption()
+        if (target.env == EnvironmentType.OHOS) {
+            if (let Some(staticStd) <- linkStaticStd) {
+                if (staticStd) {
+                    emitOptionDiag(BasicDiagKindRefactor.driver_static_std_for_ohos)
+                }
+            }
+            linkStaticStd = Some(false)
+        }
+        return true
+    }
+
+    private func RefactJobs(): Unit {
+        if (jobs.hasValue) { return }
+        jobs = MaybeUInt64(GetHardwareConcurrency())
+    }
+
+    private func RefactAggressiveParallelCompileOption(): Unit {
+        if (target.os == OSType.WINDOWS || target.os == OSType.DARWIN || target.os == OSType.IOS) {
+            if (aggressiveParallelCompile.hasValue || aggressiveParallelCompileWithoutArg) {
                 Warningln("'--apc' is not supported when targeting " + target.OSToString() + ".")
             }
-            if ((target.os == OSType.WINDOWS || target.os == OSType.DARWIN || target.os == OSType.IOS) &&
-                aggressiveParallelCompileSplitNum.hasValue) {
+            if (aggressiveParallelCompileSplitNum.hasValue) {
                 Warningln("'--apc-split-num' is not supported when targeting " + target.OSToString() + ".")
             }
             aggressiveParallelCompile = MaybeUInt64(1u64)
-        } else if (aggressiveParallelCompileSplitNum.hasValue) {
+            return
+        }
+        if (IsObfuscationEnabled() || IsLTOEnabled() || enableCoverage) {
+            aggressiveParallelCompile = MaybeUInt64(1u64)
+            return
+        }
+        if (aggressiveParallelCompileSplitNum.hasValue) {
             aggressiveParallelCompile = aggressiveParallelCompileSplitNum
             UtilsSemaphore.Get().SetCount(Int64(jobs.value + 2u64))
         } else if (!aggressiveParallelCompile.hasValue && aggressiveParallelCompileWithoutArg) {
@@ -1531,15 +1552,6 @@ public open class GlobalOptions <: Option {
             aggressiveParallelCompile = MaybeUInt64(4u64)
             UtilsSemaphore.Get().SetCount(Int64(jobs.value + 2u64))
         }
-        if (target.env == EnvironmentType.OHOS) {
-            if (let Some(staticStd) <- linkStaticStd) {
-                if (staticStd) {
-                    emitOptionDiag(BasicDiagKindRefactor.driver_static_std_for_ohos)
-                }
-            }
-            linkStaticStd = Some(false)
-        }
-        return true
     }
 
     private func CheckLTOStaticLibFormatOptions(): Bool {
