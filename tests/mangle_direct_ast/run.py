@@ -60,6 +60,7 @@ def run(args, case, single):
     env['CANGJIE_PATH'] = ':'.join(str(args.sdk / p) for p in ('modules/linux_x86_64_cjnative', 'third_party/flatbuffers/modules'))
     env['LIBRARY_PATH'] = str(args.sdk / 'lib/linux_x86_64_cjnative')
     cmd = [str(args.compiler), str(case), '--lto=full', '-O2', '--output-type=staticlib', '-o', str(out / 'output.bc')]
+    cmd += args.compiler_option
     if single: cmd += ['--cjcj-disable-mangling-concurrency']
     identity = dict(compiler=sha(args.compiler), source=sha(case), sdk=str(args.sdk),
                     libraries={str(p.relative_to(args.sdk)): sha(p) for directory in
@@ -124,6 +125,7 @@ def main():
     p.add_argument('--reference', type=Path)
     p.add_argument('--reference-is-baseline', action='store_true')
     p.add_argument('--parallelism', type=int, choices=range(1,5), default=4)
+    p.add_argument('--compiler-option', action='append', default=[])
     a = p.parse_args()
     resource.setrlimit(resource.RLIMIT_CORE,(0,0))
     cases = [(src,False) for src in sorted(a.inputs.glob('*.cj'))]
