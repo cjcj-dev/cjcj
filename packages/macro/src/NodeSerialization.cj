@@ -1085,57 +1085,62 @@ public class NodeWriter {
 
     @OverflowWrapping
     public func ExportNode(): CPointer<UInt8> {
-        bufferData.clear()
-        var fbNode: FlatBufferOffset = 0u32
-        var isSupportedNode = true
-        if (let Some(expr) <- (nodePtr as Expr)) {
-            let fbExpr = SerializeExpr(expr)
-            let nodeBase = SerializeNodeBase(expr)
-            fbNode = CreateNode(builder, nodeBase, AnyNode_EXPR, fbExpr)
-        } else if (let Some(pattern) <- (nodePtr as Pattern)) {
-            let fbPattern = SerializePattern(pattern)
-            let nodeBase = SerializeNodeBase(pattern)
-            fbNode = CreateNode(builder, nodeBase, AnyNode_PATTERN, fbPattern)
-        } else if (let Some(decl) <- (nodePtr as Decl)) {
-            let fbDecl = SerializeDecl(decl)
-            let nodeBase = SerializeNodeBase(decl)
-            fbNode = CreateNode(builder, nodeBase, AnyNode_DECL, fbDecl)
-        } else if (let Some(typeNode) <- (nodePtr as Type)) {
-            let fbType = SerializeType(typeNode)
-            let nodeBase = SerializeNodeBase(typeNode)
-            fbNode = CreateNode(builder, nodeBase, AnyNode_TYPE, fbType)
-        } else if (let Some(file) <- (nodePtr as File)) {
-            let fbFile = SerializeFile(file)
-            let nodeBase = SerializeNodeBase(file)
-            fbNode = CreateNode(builder, nodeBase, AnyNode_FILE, fbFile)
-        } else if (let Some(annotation) <- (nodePtr as Annotation)) {
-            let anno = SerializeAnnotation(annotation)
-            let nodeBase = SerializeNodeBase(annotation)
-            fbNode = CreateNode(builder, nodeBase, AnyNode_ANNOTATION, anno)
-        } else {
-            Errorln("nodePtr not supported type")
-            isSupportedNode = false
-        }
-        if (isSupportedNode) {
-            let payload = builder.Finish(fbNode)
-            appendU32LE(bufferData, UInt32(payload.size + 4))
-            for (byte in payload) {
-                bufferData.add(byte)
+        try {
+            bufferData.clear()
+            var fbNode: FlatBufferOffset = 0u32
+            var isSupportedNode = true
+            if (let Some(expr) <- (nodePtr as Expr)) {
+                let fbExpr = SerializeExpr(expr)
+                let nodeBase = SerializeNodeBase(expr)
+                fbNode = CreateNode(builder, nodeBase, AnyNode_EXPR, fbExpr)
+            } else if (let Some(pattern) <- (nodePtr as Pattern)) {
+                let fbPattern = SerializePattern(pattern)
+                let nodeBase = SerializeNodeBase(pattern)
+                fbNode = CreateNode(builder, nodeBase, AnyNode_PATTERN, fbPattern)
+            } else if (let Some(decl) <- (nodePtr as Decl)) {
+                let fbDecl = SerializeDecl(decl)
+                let nodeBase = SerializeNodeBase(decl)
+                fbNode = CreateNode(builder, nodeBase, AnyNode_DECL, fbDecl)
+            } else if (let Some(typeNode) <- (nodePtr as Type)) {
+                let fbType = SerializeType(typeNode)
+                let nodeBase = SerializeNodeBase(typeNode)
+                fbNode = CreateNode(builder, nodeBase, AnyNode_TYPE, fbType)
+            } else if (let Some(file) <- (nodePtr as File)) {
+                let fbFile = SerializeFile(file)
+                let nodeBase = SerializeNodeBase(file)
+                fbNode = CreateNode(builder, nodeBase, AnyNode_FILE, fbFile)
+            } else if (let Some(annotation) <- (nodePtr as Annotation)) {
+                let anno = SerializeAnnotation(annotation)
+                let nodeBase = SerializeNodeBase(annotation)
+                fbNode = CreateNode(builder, nodeBase, AnyNode_ANNOTATION, anno)
+            } else {
+                Errorln("nodePtr not supported type")
+                isSupportedNode = false
             }
-        }
-        let rawPtr = unsafe { LibC.malloc<UInt8>(count: bufferData.size) }
-        if (rawPtr.isNull()) {
-            Errorln("Memory Allocation Failed.")
+            if (isSupportedNode) {
+                builder.Finish(fbNode)
+                let payload = builder.GetBufferArray()
+                appendU32LE(bufferData, UInt32(payload.size + 4))
+                for (byte in payload) {
+                    bufferData.add(byte)
+                }
+            }
+            let rawPtr = unsafe { LibC.malloc<UInt8>(count: bufferData.size) }
+            if (rawPtr.isNull()) {
+                Errorln("Memory Allocation Failed.")
+                return rawPtr
+            }
+            var idx: Int64 = 0
+            unsafe {
+                while (idx < bufferData.size) {
+                    rawPtr.write(idx, bufferData[idx])
+                    idx++
+                }
+            }
             return rawPtr
+        } finally {
+            builder.close()
         }
-        var idx: Int64 = 0
-        unsafe {
-            while (idx < bufferData.size) {
-                rawPtr.write(idx, bufferData[idx])
-                idx++
-            }
-        }
-        return rawPtr
     }
 
     public func SerializeExpr(expr: Option<Expr>): FlatBufferOffset {

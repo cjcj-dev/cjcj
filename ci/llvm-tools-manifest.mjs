@@ -4,34 +4,17 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 
-// Single source of truth for llvm-tools.manifest. Platform-tuple artifacts carry
-// only the tool lineage; native source-build artifacts additionally bind the
-// runner platform, shim inputs and shim payload.
 export const LLVM_TOOLS_MANIFEST_SCHEMAS = Object.freeze({
-  core: Object.freeze([
+  tuple: Object.freeze([
+    'PLATFORM',
     'LLVM_SHA',
-    'LLC_SHA256',
-    'OPT_SHA256',
-  ]),
-  'core-lineage': Object.freeze([
-    'LLVM_SHA',
+    'CANGJIE_COMPILER_SHA',
+    'FLATBUFFERS_SHA',
     'LLC_SOURCE',
     'LLC_VERSION',
     'LLC_SHA256',
     'OPT_SOURCE',
     'OPT_VERSION',
-    'OPT_SHA256',
-    'LLD_TOOL',
-    'LLD_SOURCE',
-    'LLD_VERSION',
-    'LLD_SHA256',
-  ]),
-  native: Object.freeze([
-    'PLATFORM',
-    'LLVM_SHA',
-    'CANGJIE_COMPILER_SHA',
-    'FLATBUFFERS_SHA',
-    'LLC_SHA256',
     'OPT_SHA256',
     'LLD_TOOL',
     'LLD_SOURCE',
@@ -107,7 +90,7 @@ function assertSchema(values, schema, label) {
   }
 }
 
-export function parseLlvmToolsManifest(text, {label = 'llvm-tools.manifest', schema = 'core-or-native'} = {}) {
+export function parseLlvmToolsManifest(text, {label = 'llvm-tools.manifest', schema = 'tuple'} = {}) {
   const values = new Map();
   for (const line of text.split(/\r?\n/).filter(Boolean)) {
     const match = line.match(/^([A-Z0-9_]+)=(.+)$/);
@@ -117,51 +100,23 @@ export function parseLlvmToolsManifest(text, {label = 'llvm-tools.manifest', sch
     values.set(field, value);
   }
 
-  let selectedSchema = schema;
-  if (schema === 'core-or-native') {
-    const matching = Object.keys(LLVM_TOOLS_MANIFEST_SCHEMAS)
-      .filter((candidate) => {
-        const fields = LLVM_TOOLS_MANIFEST_SCHEMAS[candidate];
-        return fields.length === values.size && fields.every((field) => values.has(field));
-      });
-    if (matching.length !== 1) {
-      const knownFields = [...new Set(Object.values(LLVM_TOOLS_MANIFEST_SCHEMAS).flat())];
-      const unexpected = [...values.keys()].filter((field) => !knownFields.includes(field));
-      throw new Error(
-        `${label}: no manifest schema matches ${values.size} fields; ` +
-        `unexpected=${unexpected.join(',') || 'none'}`,
-      );
-    }
-    [selectedSchema] = matching;
-  }
-  assertSchema(values, selectedSchema, label);
+  assertSchema(values, schema, label);
 
   for (const [field, value] of values) {
     if (!FIELD_PATTERNS[field]?.test(value)) {
       throw new Error(`${label}: invalid ${field}: ${value}`);
     }
   }
-  if (selectedSchema === 'core-lineage') {
-    for (const tool of ['LLC', 'OPT', 'LLD']) {
-      const expectedSource = `tuple:${values.get('LLVM_SHA')}`;
-      if (values.get(`${tool}_SOURCE`) !== expectedSource) {
-        throw new Error(`${label}: ${tool}_SOURCE does not match LLVM_SHA`);
-      }
-      if (values.get(`${tool}_VERSION`).length > 512) {
-        throw new Error(`${label}: ${tool}_VERSION is longer than 512 characters`);
-      }
-    }
-  }
-  if (selectedSchema === 'native') {
+  for (const tool of ['LLC', 'OPT', 'LLD']) {
     const expectedSource = `tuple:${values.get('LLVM_SHA')}`;
-    if (values.get('LLD_SOURCE') !== expectedSource) {
-      throw new Error(`${label}: LLD_SOURCE does not match LLVM_SHA`);
+    if (values.get(`${tool}_SOURCE`) !== expectedSource) {
+      throw new Error(`${label}: ${tool}_SOURCE does not match LLVM_SHA`);
     }
-    if (values.get('LLD_VERSION').length > 512) {
-      throw new Error(`${label}: LLD_VERSION is longer than 512 characters`);
+    if (values.get(`${tool}_VERSION`).length > 512) {
+      throw new Error(`${label}: ${tool}_VERSION is longer than 512 characters`);
     }
   }
-  return {schema: selectedSchema, values};
+  return {schema, values};
 }
 
 function assertPackagedRow(row, {llvmSha, baseSdkSha256, label}) {
@@ -245,7 +200,7 @@ async function main() {
   }
   if (command !== 'validate' || !schema || !manifestFile) {
     console.error(
-      'usage: llvm-tools-manifest.mjs validate <core|core-lineage|native|core-or-native> <manifest>\n' +
+      'usage: llvm-tools-manifest.mjs validate tuple <manifest>\n' +
       '       llvm-tools-manifest.mjs validate-packaged <manifest>',
     );
     process.exit(2);

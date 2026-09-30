@@ -751,7 +751,7 @@ public class IRBuilder2 <: Resource {
                 if (chirExpression.GetExprKind() == ExprKind.STORE_ELEMENT_REF &&
                     chirExpression.GetOperand(1) == operand) {
                     let i8Type = unsafe { LLVMInt8TypeInContext(GetLLVMContext().raw) }
-                    let gep = CreateGEP(i8Type, boxedValue, ArrayList<LLVMValueRef>([GetInt64(8)]))
+                    let gep = CreateGEP(i8Type, boxedValue, ArrayList<LLVMValueRef>([GetInt64(Int64(GetPayloadOffset()))]))
                     let castToCurrentValue = CreateBitCast(gep, pointerType)
                     FixedCGTypeOfFuncArg(cgMod, operand, castToCurrentValue)
                     continue
@@ -874,7 +874,7 @@ public class IRBuilder2 <: Resource {
         return if (GetCGContext().GetCompileOptions().target.arch == ArchType.ARM32) {
             GetPtrSize() + 4u64
         } else {
-            GetPtrSize()
+            RuntimeLayout.ObjectHeaderSize
         }
     }
 
@@ -1748,7 +1748,17 @@ public class IRBuilder2 <: Resource {
         CJC_ASSERT(!aggregateType.isNull())
         let kind = unsafe { LLVMGetTypeKind(aggregateType) }
         CJC_ASSERT(kind == LLVM_STRUCT_TYPE_KIND || kind == LLVM_ARRAY_TYPE_KIND)
-        CopyAggregateTyped(aggregateType, source, destination)
+        // CJNativeIRBuilder.cpp:837-847 copies the bytes at these addresses.
+        // Debug boxing may cast an object payload to pointer-to-argument type
+        // (IRBuilder.cpp:379-385); that does not add a slot to dereference.
+        // Our typed copy needs aggregate pointers for GEP, preserving each address.
+        let sourceType = unsafe { LLVMPointerType(aggregateType, LLVMGetPointerAddressSpace(LLVMTypeOf(source))) }
+        let destinationType = unsafe {
+            LLVMPointerType(aggregateType, LLVMGetPointerAddressSpace(LLVMTypeOf(destination)))
+        }
+        let typedSource = CreateBitCast(source, sourceType, name: "typed.copy.source")
+        let typedDestination = CreateBitCast(destination, destinationType, name: "typed.copy.destination")
+        CopyAggregateTyped(aggregateType, typedSource, typedDestination)
     }
 
     private func IsCurrentLoadCTypeAggregate(): Bool {
@@ -3268,7 +3278,7 @@ public class IRBuilder2 <: Resource {
         let typeInfoType = CGType.GetOrCreateTypeInfoType(GetLLVMContext())
         let typeInfoPtrType = unsafe { LLVMPointerType(typeInfoType, 0u32) }
         let ptr = CreateStructGEP(typeInfoType, CreateBitCast(typeInfo, typeInfoPtrType),
-            6u32, name: "ti.uuid")
+            UInt32(TypeInfoLayout.uuidIndex), name: "ti.uuid")
         let uuid = CreateLoad(unsafe { LLVMInt32TypeInContext(GetLLVMContext().raw) }, ptr, name: "ti.uuid")
         LLVMSetInstructionMetadata(GetLLVMContext(), uuid, "invariant.load",
             LLVMCreateMDTuple(GetLLVMContext(), ArrayList<LLVMMetadataRef>()))
@@ -3279,7 +3289,7 @@ public class IRBuilder2 <: Resource {
         let typeInfoType = CGType.GetOrCreateTypeInfoType(GetLLVMContext())
         let typeInfoPtrType = unsafe { LLVMPointerType(typeInfoType, 0u32) }
         let ptr = CreateStructGEP(typeInfoType, CreateBitCast(typeInfo, typeInfoPtrType),
-            1u32, name: "ti.kind")
+            UInt32(TypeInfoLayout.typeIndex), name: "ti.kind")
         let kind = CreateLoad(unsafe { LLVMInt8TypeInContext(GetLLVMContext().raw) }, ptr, name: "ti.kind")
         LLVMSetInstructionMetadata(GetLLVMContext(), kind, "invariant.load",
             LLVMCreateMDTuple(GetLLVMContext(), ArrayList<LLVMMetadataRef>()))
@@ -4218,7 +4228,7 @@ public class IRBuilder2 <: Resource {
             let offsetForAutoEnv = if (IsAutoEnvType(eleType.GetOriginal())) { 2u64 } else { 0u64 }
             if (chirExpr.isSome() && eleType.GetSize().isNone()) {
                 let typeInfo = CreateTypeInfo(eleType.GetOriginal())
-                let preOffset = if (eleType.GetOriginal().IsRawArray()) { 8u64 } else { 0u64 }
+                let preOffset = if (eleType.GetOriginal().IsRawArray()) { RuntimeLayout.ArrayLengthSize } else { 0u64 }
                 var offset = CallGetFieldOffset(typeInfo, idx + offsetForAutoEnv, preOffset)
                 var skipPayloadOffset = false
                 if (let Some(currentFunction) <- cgFunction) {
@@ -4305,8 +4315,14 @@ public class IRBuilder2 <: Resource {
         // C++: CJNativeIRBuilder.cpp:1976-1983 GetPayloadFromObject; peel the AS1 GEP base with
         // SafepointIRVerifier.cpp:991-1003 uncolorIfGCPtr before deriving the payload address.
         let objectSlot = CreateBitCast(objectValue, objectSlotType, name: "obj.payload.slot")
+        let headerSlots = if (GetCGContext().GetCompileOptions().target.arch == ArchType.ARM32) {
+            1u64
+        } else {
+            CJC_ASSERT(RuntimeLayout.ObjectHeaderSize % GetPtrSize() == 0u64)
+            RuntimeLayout.ObjectHeaderSize / GetPtrSize()
+        }
         let indices = ArrayList<LLVMValueRef>()
-        indices.add(unsafe { LLVMConstInt(LLVMInt32TypeInContext(GetLLVMContext().raw), 1u64, 0) })
+        indices.add(unsafe { LLVMConstInt(LLVMInt32TypeInContext(GetLLVMContext().raw), headerSlots, 0) })
         let payload = CreateGEP(i8PtrType, objectSlot, indices, name: "obj.payload")
         TrackBasePtr(payload, objectValue)
         return payload
@@ -4640,7 +4656,7 @@ public class IRBuilder2 <: Resource {
         var elementPtr = LLVMNullValue()
         if (rawArrayCGType.GetSize().isNone()) {
             var offset = CreateBinary(ExprKind.MUL, GetSize_64(elementCHIRType), index)
-            offset = CreateBinary(ExprKind.ADD, offset, GetInt64(Int64(GetPayloadOffset() + 8u64)))
+            offset = CreateBinary(ExprKind.ADD, offset, GetInt64(Int64(GetPayloadOffset() + RuntimeLayout.ArrayLengthSize)))
             elementPtr = CreateInBoundsGEP(unsafe { LLVMInt8TypeInContext(GetLLVMContext().raw) }, array,
                 ArrayList<LLVMValueRef>([offset]))
             let arrayAddressSpace = unsafe { LLVMGetPointerAddressSpace(LLVMTypeOf(array)) }
@@ -4665,7 +4681,7 @@ public class IRBuilder2 <: Resource {
         let rawArrayCGType = CGType.GetOrCreate(cgMod, rawArrayTy)
         if (rawArrayCGType.GetSize().isNone()) {
             var offset = CreateBinary(ExprKind.MUL, GetSize_64(elementCHIRType), index)
-            offset = CreateBinary(ExprKind.ADD, offset, GetInt64(Int64(GetPayloadOffset() + 8u64)))
+            offset = CreateBinary(ExprKind.ADD, offset, GetInt64(Int64(GetPayloadOffset() + RuntimeLayout.ArrayLengthSize)))
             var fieldAddr = CreateInBoundsGEP(unsafe { LLVMInt8TypeInContext(GetLLVMContext().raw) }, array,
                 ArrayList<LLVMValueRef>([offset]))
             let arrayAddressSpace = unsafe { LLVMGetPointerAddressSpace(LLVMTypeOf(array)) }
@@ -5935,7 +5951,7 @@ public class IRBuilder2 <: Resource {
         let typeInfoType = CGType.GetOrCreateTypeInfoType(GetLLVMContext())
         let typeInfoPtrType = unsafe { LLVMPointerType(typeInfoType, 0u32) }
         let ptr = CreateStructGEP(typeInfoType, CreateBitCast(typeInfo, typeInfoPtrType),
-            7u32, name: "ti.align")
+            UInt32(TypeInfoLayout.alignIndex), name: "ti.align")
         let alignValue = CreateLoad(unsafe { LLVMInt8TypeInContext(GetLLVMContext().raw) }, ptr,
             name: "ti.align")
         LLVMSetInstructionMetadata(GetLLVMContext(), alignValue, "invariant.load",
@@ -5963,7 +5979,7 @@ public class IRBuilder2 <: Resource {
         }
         let typeInfoType = CGType.GetOrCreateTypeInfoType(GetLLVMContext())
         let typeInfoPtrType = unsafe { LLVMPointerType(typeInfoType, 0u32) }
-        let ptr = CreateStructGEP(typeInfoType, CreateBitCast(typeInfo, typeInfoPtrType), 4u32,
+        let ptr = CreateStructGEP(typeInfoType, CreateBitCast(typeInfo, typeInfoPtrType), UInt32(TypeInfoLayout.instanceSizeIndex),
             name: "ti.size")
         var sizeValue = LLVMNullValue()
         try (nameCString = unsafe { LibC.mallocCString("") }.asResource()) {
@@ -6168,7 +6184,7 @@ public class IRBuilder2 <: Resource {
         try (typedTypeInfoName = unsafe { LibC.mallocCString("") }.asResource()) {
             typedTypeInfo = unsafe { LLVMBuildBitCast(builder.raw, typeInfo, typeInfoPtrType, typedTypeInfoName.value) }
         }
-        let typeArgsPtr = CreateStructGEP(typeInfoType, typedTypeInfo, 12u32, name: "ti.typeArgs")
+        let typeArgsPtr = CreateStructGEP(typeInfoType, typedTypeInfo, UInt32(TypeInfoLayout.typeArgsIndex), name: "ti.typeArgs")
         var typeArgsRaw = LLVMNullValue()
         try (typeArgsName = unsafe { LibC.mallocCString("") }.asResource()) {
             typeArgsRaw = unsafe { LLVMBuildLoad2(builder.raw, i8PtrType, typeArgsPtr, typeArgsName.value) }
@@ -6190,7 +6206,7 @@ public class IRBuilder2 <: Resource {
         let typeInfoType = CGType.GetOrCreateTypeInfoType(GetLLVMContext())
         let typeInfoPtrType = unsafe { LLVMPointerType(typeInfoType, 0u32) }
         let typedTypeInfo = CreateBitCast(typeInfo, typeInfoPtrType)
-        let namePtr = CreateStructGEP(typeInfoType, typedTypeInfo, 0u32)
+        let namePtr = CreateStructGEP(typeInfoType, typedTypeInfo, UInt32(TypeInfoLayout.typeInfoNameIndex))
         let nameType = unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 0u32) }
         let typeInfoName = CreateLoad(nameType, namePtr, name: "ti.typeInfoName")
         LLVMSetInstructionMetadata(GetLLVMContext(), typeInfoName, "invariant.load",

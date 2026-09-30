@@ -35,7 +35,8 @@ test('bootstrap handoff consumes stage2 std and compiler and rebinds host and ta
   const f = await fixture(t);
   const result = await prepareBootstrapHandoff(f);
   assert.equal(result.compiler, path.join(f.work, 'cjcj-stage2'));
-  assert.equal(await fs.readlink(path.join(f.sdk, 'lib', f.tuple, 'core-relative.a')), 'libcangjie-std-core.a');
+  assert.equal((await fs.lstat(path.join(f.sdk, 'lib', f.tuple, 'core-relative.a'))).isFile(), true);
+  assert.equal(await fs.readFile(path.join(f.sdk, 'lib', f.tuple, 'core-relative.a'), 'utf8'), 'bootstrap std');
   assert.equal(await fs.readFile(path.join(f.sdk, 'lib', f.tuple, 'libcangjie-std-core.a'), 'utf8'), 'coloured std');
   await assert.rejects(fs.stat(path.join(f.sdk, 'stale-sdk')), {code: 'ENOENT'});
   const run = spawnSync(path.join(f.sdk, 'tools', 'bin', 'cjpm'), {encoding: 'utf8'});
@@ -159,7 +160,7 @@ test('bootstrap producer reaches actual stdx and tools subprocess entries', asyn
 });
 
 for (const hostHeap of ['12288MB', '10752MB', '5376MB']) {
-  test(`handoff keeps official host heap ${hostHeap} separate from compiler heap`, async t => {
+  test(`handoff passes recipe heap ${hostHeap} to host and compiler`, async t => {
     const f = await fixture(t);
     await fs.writeFile(path.join(f.work, 'cjcj-stage2'),
       '#!/bin/bash\nprintf "compiler heap=%s\\n" "$cjHeapSize"\n');
@@ -171,9 +172,40 @@ for (const hostHeap of ['12288MB', '10752MB', '5376MB']) {
     });
     assert.equal(run.status, 0, run.stderr);
     console.log(`HEAP_BOUNDARY_ASSERT_REACHED ${JSON.stringify(run.stdout)}`);
-    assert.equal(run.stdout, `host heap=${hostHeap}\ncompiler heap=20GB\n`);
+    assert.equal(run.stdout, `host heap=${hostHeap}\ncompiler heap=${hostHeap}\n`);
   });
 }
+
+for (const heap of ['20GB', '', undefined]) {
+  test(`handoff preserves explicit heap ${JSON.stringify(heap)}`, async t => {
+    const f = await fixture(t);
+    await fs.writeFile(path.join(f.work, 'cjcj-stage2'),
+      '#!/bin/bash\nprintf "set=%s heap=%s\\n" "${cjHeapSize+x}" "$cjHeapSize"\n');
+    await prepareBootstrapHandoff(f);
+    await assertBootstrapCompiler({sdk: f.sdk, command: path.join(f.sdk, 'bin', 'cjc')});
+    const env = {...process.env};
+    if (heap === undefined) delete env.cjHeapSize; else env.cjHeapSize = heap;
+    const run = spawnSync(path.join(f.sdk, 'bin', 'cjc'), {encoding: 'utf8', env});
+    assert.equal(run.status, 0, run.stderr);
+    console.log(`HEAP_PRESENCE_ASSERT_REACHED ${JSON.stringify(run.stdout)}`);
+    assert.equal(run.stdout, `set=${heap === undefined ? '' : 'x'} heap=${heap ?? ''}\n`);
+  });
+}
+
+test('same handoff SDK inherits each invocation heap without capturing generation environment', async t => {
+  const f = await fixture(t);
+  await fs.writeFile(path.join(f.work, 'cjcj-stage2'),
+    '#!/bin/bash\nprintf "%s\\n" "$cjHeapSize"\n');
+  await prepareBootstrapHandoff(f);
+  for (const heap of ['5376MB', '10752MB']) {
+    const run = spawnSync(path.join(f.sdk, 'bin', 'cjc'), {
+      encoding: 'utf8', env: {...process.env, cjHeapSize: heap},
+    });
+    assert.equal(run.status, 0, run.stderr);
+    console.log(`HEAP_PER_INVOCATION_ASSERT_REACHED expected=${heap} actual=${run.stdout.trim()}`);
+    assert.equal(run.stdout, `${heap}\n`);
+  }
+});
 
 test('stage3 final cjpm build consumes the resource-limited host environment', async () => {
   const stage = await fs.readFile(new URL('../../ci/srcbuild/steps/build-stage3.mjs', import.meta.url), 'utf8');
@@ -189,3 +221,46 @@ test('legacy stage2 inherits the caller heap', async () => {
   assert.match(stage, /await \$`cjpm build -j 1`/);
   assert.doesNotMatch(stage, /cjHeapSize:/);
 });
+
+
+for (const topology of ['overlapping-links', 'stage33-regular-sdk']) {
+test(`handoff materializes ${topology} on two consecutive promotions`, async t => {
+  const f = await fixture(t);
+  const relative = path.join('lib', f.tuple);
+  for (const [tree, content] of [['sdk-stage1', 'old pcre'], ['stdlib-stage2', 'stage2 pcre']]) {
+    const directory = path.join(f.work, tree, relative);
+    await fs.writeFile(path.join(directory, 'libpcre2-8.so.0.14.0'), content);
+    for (const [name, target] of [['libpcre2-8.so', 'libpcre2-8.so.0'], ['libpcre2-8.so.0', 'libpcre2-8.so.0.14.0']]) {
+      const isLink = topology === 'overlapping-links' || tree === 'stdlib-stage2';
+      if (isLink) await fs.symlink(target, path.join(directory, name));
+      else await fs.writeFile(path.join(directory, name), content);
+      assert.equal((await fs.lstat(path.join(directory, name))).isSymbolicLink(), isLink);
+    }
+  }
+  const links = async directory => {
+    const result = [];
+    for (const entry of await fs.readdir(directory, {withFileTypes: true})) {
+      const file = path.join(directory, entry.name);
+      if (entry.isSymbolicLink()) result.push(file);
+      else if (entry.isDirectory()) result.push(...await links(file));
+    }
+    return result;
+  };
+  for (let pass = 1; pass <= 2; pass++) {
+    let failure;
+    try { await prepareBootstrapHandoff(f); } catch (error) { failure = error; }
+    console.log(`HANDOFF_COMPLETION_ASSERT_REACHED pass=${pass} code=${failure?.code ?? 'OK'}`);
+    assert.equal(failure, undefined, `handoff must complete: ${failure?.stack}`);
+    for (const name of ['libpcre2-8.so', 'libpcre2-8.so.0']) {
+      const file = path.join(f.sdk, relative, name);
+      assert.equal((await fs.lstat(file)).isFile(), true, name);
+      assert.equal(await fs.readFile(file, 'utf8'), 'stage2 pcre', name);
+    }
+    assert.deepEqual(await links(f.sdk), []);
+    await assertBootstrapCompiler({sdk: f.sdk, command: path.join(f.sdk, 'bin', 'cjc')});
+    console.log(`HANDOFF_REGULAR_CONTENT_ASSERT_PASS pass=${pass}`);
+    await fs.writeFile(path.join(f.sdk, relative, 'libpcre2-8.so.0'), 'stale consumer');
+    assert.equal(await fs.readFile(path.join(f.work, 'stdlib-stage2', relative, 'libpcre2-8.so'), 'utf8'), 'stage2 pcre');
+  }
+});
+}

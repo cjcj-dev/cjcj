@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
 import crypto from 'node:crypto';
+import {platformRequirements, platformEvidence, g10Evidence} from './release-run-evidence.mjs';
+import {load as loadYaml} from './vendor/js-yaml/js-yaml.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
@@ -11,11 +13,11 @@ const DEFAULT_REPO = path.resolve(HERE, '..');
 const SHA40 = /^[0-9a-f]{40}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 const STATUSES = new Set(['MET', 'NOT_MET', 'UNKNOWN']);
-const PLATFORMS = ['linux-x64', 'linux-aarch64', 'windows-x64', 'darwin-arm64', 'darwin-x64'];
+const PLATFORM_GATES = new Set(['G3', 'G6', 'G7', 'G9']);
 const EVIDENCE_REGISTRY = 'GATE_EVIDENCE.json';
 const EVIDENCE_BINDING = 'EVIDENCE_BINDING.json';
-const DISCOVERABLE_EVIDENCE_GATES = new Set(['G2', 'G8', 'G12', 'G14']);
-const GENERIC_BINDING_GATES = new Set(['G12', 'G14']);
+const DISCOVERABLE_EVIDENCE_GATES = new Set(['G2', 'G3', 'G6', 'G7', 'G8', 'G9', 'G10', 'G12', 'G14']);
+const GENERIC_BINDING_GATES = new Set(['G3', 'G6', 'G7', 'G9', 'G10', 'G12', 'G14']);
 const G2_ARTIFACTS = [
   'runtime_dynamic',
   'runtime_static',
@@ -29,25 +31,25 @@ const GATES = Object.freeze({
   G1: {name: '冻结输入'},
   G2: {name: 'runtime/LLVM pair'},
   G3: {
-    name: '五平台 source final std',
+    name: '全平台 source final std',
     updated: true,
-    needsRun: '在相位编排和当前 pins 下跑 source producer；final-std-<platform> 5/5 成功并逐根通过 assertFinalStd',
+    needsRun: '在相位编排和当前 pins 下跑 source producer；导出集合的 host/cross final std 全部成功并逐根通过 assertFinalStd',
   },
   G4: {name: 'release DAG 单闭包', updated: true},
   G5: {name: 'package std 完整性'},
   G6: {
     name: 'LLVM tuple',
-    needsRun: '跑五 tuple producer；每格非空 llc.gz+opt.gz+manifest+shim，并让 manifest pin/双 SHA/双 version 校验通过',
+    needsRun: '跑导出集合的 LLVM tuple producer；每格非空 llc.gz+opt.gz+manifest+shim，并让 manifest pin/双 SHA/双 version 校验通过',
   },
   G7: {
     name: '组件血缘',
-    needsRun: '跑五个 package 格并归档；逐包验证 archive-level manifest、clean 单一 stamp 和全部 artifact SHA',
+    needsRun: '跑导出集合的 package 格并归档；逐包验证 archive-level manifest、clean 单一 stamp 和全部 artifact SHA',
   },
   G8: {name: '当前 full gate', updated: true},
   G9: {
-    name: '五平台 dry-run',
+    name: '全平台 dry-run',
     updated: true,
-    needsRun: '在 frozen head + 当前相位编排下跑 release dry-run；5/5 package success、smoke 15/15、Darwin LTO 阳性、10 个外向文件 checksum 全过',
+    needsRun: '在 frozen head + 当前相位编排下跑 release dry-run；导出集合的 package 全成功、全部 smoke、Darwin LTO 阳性和全部外向文件 checksum 全过',
   },
   G10: {
     name: 'selfhost 启动/小程序',
@@ -1000,7 +1002,7 @@ async function loadG12Floor(context) {
   const floor = imported.GC_RELEASE_FLOOR;
   const blockers = floor?.blocking?.map(item => item.id);
   const records = floor?.recording?.map(item => item.id);
-  if (floor?.schema !== 1 || JSON.stringify(blockers) !== JSON.stringify(['F1', 'F2', 'F3', 'F4', 'F5', 'F6']) ||
+  if (floor?.schema !== 2 || JSON.stringify(blockers) !== JSON.stringify(['F1', 'F2', 'F3', 'F4', 'F5', 'F6']) ||
       JSON.stringify(records) !== JSON.stringify(['R1', 'R2', 'R3', 'R4'])) {
     throw new GateInputError('UNKNOWN', 'frozen G12 floor does not contain exactly F1-F6 and R1-R4');
   }
@@ -1148,21 +1150,44 @@ function evaluateG12F5(rows, floor, profileName) {
 }
 
 function evaluateG12Records(remsetRows, throughputRows, phaseText, floor) {
-  const phaseNames = floor.recording.find(item => item.id === 'R1').phases;
-  const phaseUs = Object.fromEntries(phaseNames.map(name => [name, []]));
+  const r1 = floor.recording.find(item => item.id === 'R1');
+  const phaseNames = [...r1.phases, ...r1.optional_phases];
+  const phaseNs = Object.fromEntries(phaseNames.map(name => [name, []]));
+  const pauseNs = [];
   for (const line of phaseText.split(/\r?\n/)) {
-    const match = line.match(/\[GCLOG\].*\brec=phase\b.*\bname=(young\.[A-Za-z0-9_.-]+)\s+us=(\d+)\b/);
-    if (match && Object.hasOwn(phaseUs, match[1])) phaseUs[match[1]].push(g12Integer(match[2], `R1.${match[1]}`));
+    if (!line.startsWith('[GCLOG]') || !/\brec=phase\b/.test(line)) continue;
+    const match = line.match(/^\[GCLOG\] v=5 rec=phase seq=(\d+) gc_tag=([yYO-]) name=([A-Za-z0-9._-]+) kind=(pause|conc|subphase|critical) start_ns=(\d+) ns=(\d+)$/);
+    if (!match) throw new GateInputError('UNKNOWN', `R1 malformed or unsupported GCLOG phase: ${line}`);
+    const ns = g12Integer(match[6], `R1.${match[3]}.ns`);
+    // Y (major young, including preclean) and O never fill minor coverage.
+    if (match[2] !== r1.gc_tag) continue;
+    if (!Object.hasOwn(phaseNs, match[3])) {
+      if (match[4] === 'pause' || match[4] === 'conc') {
+        throw new GateInputError('UNKNOWN', `R1 unexpected minor top-level phase: ${match[3]}`);
+      }
+      continue;
+    }
+    const expectedKind = r1.pause_phases.includes(match[3]) ? 'pause' : 'conc';
+    if (match[4] !== expectedKind) {
+      throw new GateInputError('UNKNOWN', `R1 wrong kind for ${match[3]}: ${match[4]}`);
+    }
+    phaseNs[match[3]].push(ns);
+    if (match[4] === 'pause') pauseNs.push(ns);
   }
-  if (Object.values(phaseUs).some(values => values.length === 0)) {
-    throw new GateInputError('UNKNOWN', 'R1 lacks one or more four-pillar [GCLOG] phase records');
+  const missing = r1.phases.filter(name => phaseNs[name].length === 0);
+  if (missing.length > 0) {
+    throw new GateInputError('UNKNOWN', `R1 missing floor phases (no matching current producer records): ${missing.join(', ')}`);
   }
-  const phaseSums = Object.fromEntries(Object.entries(phaseUs)
+  const phaseSums = Object.fromEntries(Object.entries(phaseNs)
     .map(([name, values]) => [name, values.reduce((sum, value) => sum + value, 0)]));
-  const fourPillarTotal = Object.values(phaseSums).reduce((sum, value) => sum + value, 0);
-  if (fourPillarTotal <= 0) throw new GateInputError('UNKNOWN', 'R1 four-pillar phase total is zero');
-  const shares = Object.fromEntries(Object.entries(phaseSums)
-    .map(([name, value]) => [name, Number((value / fourPillarTotal).toFixed(6))]));
+  const totalNs = Object.values(phaseSums).reduce((sum, value) => sum + value, 0);
+  if (totalNs <= 0) throw new GateInputError('UNKNOWN', 'R1 top-level phase total is zero');
+  const shares = Object.fromEntries(Object.entries(phaseSums).map(([name, value]) => [name, {
+    count: phaseNs[name].length,
+    status: phaseNs[name].length ? 'observed' : 'not_observed',
+    total_ns: phaseNs[name].length ? value : null,
+    share: phaseNs[name].length ? Number((value / totalNs).toFixed(6)) : null,
+  }]));
 
   const defaultFys = floor.measurement.profiles.DEFAULT.full_young_scan;
   const remset = {};
@@ -1199,11 +1224,9 @@ function evaluateG12Records(remsetRows, throughputRows, phaseText, floor) {
   if (task[r3.minor_disabled_arm] <= 0) throw new GateInputError('UNKNOWN', 'R3 denominator is not positive');
   const ratio = task[r3.generational_arm] / task[r3.minor_disabled_arm];
 
-  const stw = [...phaseText.matchAll(/young collection stw time:\s*([0-9,]+)us/g)]
-    .map((match, index) => g12Integer(match[1].replaceAll(',', ''), `R4.stw[${index}]`));
-  if (stw.length === 0) throw new GateInputError('UNKNOWN', 'R4 lacks young collection STW duration lines');
+  const stw = pauseNs.map(ns => ns / 1000);
   return [
-    {id: 'R1', value: shares},
+    {id: 'R1', value: {coverage: r1.coverage, total_ns: totalNs, phases: shares}},
     {id: 'R2', value: remset},
     {id: 'R3', value: {median_task_ms: task, ratio: Number(ratio.toFixed(6))}},
     {id: 'R4', value: {samples: stw.length, median_us: g12Median(stw), max_us: Math.max(...stw)}},
@@ -1394,27 +1417,130 @@ async function evaluateG14(context) {
     {choice, expected_fys: expectedFys, samples});
 }
 
+// targets.mjs:340,359 owns release membership and readiness. Read the selected
+// checkout, not this script's checkout: --repo is also used for control arms.
+async function releaseScope(context) {
+  if (context.ref) throw new GateInputError('UNKNOWN', 'release platform contracts require a checkout, not --ref');
+  const modulePath = path.join(context.repo, 'build/lib/targets.mjs');
+  await readFile(context, 'build/lib/targets.mjs');
+  const {allReleasePlatforms, getReleasePlatform, getTarget, releasePlatformReadiness} =
+    await import(pathToFileURL(modulePath).href);
+  const platforms = allReleasePlatforms().map(key => {
+    const platform = getReleasePlatform(key);
+    const readiness = releasePlatformReadiness(key);
+    const {spec} = getTarget(platform.host);
+    return {
+      key, host: platform.host, status: readiness.status, reasons: readiness.reasons,
+      llvm_platform: spec.llvmPlatform,
+      std_tuples: [...new Set([spec.runtimeTuple, ...platform.crossTuples])],
+    };
+  });
+  const release = await readFile(context, '.github/workflows/release.yml');
+  let workflow;
+  try {
+    workflow = loadYaml(release);
+  } catch (error) {
+    throw new GateInputError('NOT_MET', `invalid release workflow YAML: ${error.message}`);
+  }
+  if (!plainObject(workflow?.jobs)) {
+    throw new GateInputError('NOT_MET', 'release workflow jobs must be a mapping');
+  }
+  const jobs = Object.entries(workflow.jobs)
+    .filter(([, job]) => job?.uses === './.github/workflows/build-release-package.yml')
+    .map(([id, job]) => ({id, key: job.with?.release_key, host: job.with?.platform,
+      llvm_platform: job.with?.llvm_platform}));
+  const expected = platforms.filter(platform => platform.status === 'buildable');
+  const failures = [];
+  if (!platforms.length || !expected.length) failures.push('empty release platform/buildable set');
+  for (const platform of expected) {
+    const matches = jobs.filter(job => job.key === platform.key);
+    if (matches.length !== 1) failures.push(`${platform.key}: expected one package job, found ${matches.length}`);
+    for (const job of matches) {
+      if (job.host !== platform.host || job.llvm_platform !== platform.llvm_platform) {
+        failures.push(`${job.id}: ${platform.key} host/LLVM mismatch (${job.host}/${job.llvm_platform})`);
+      }
+    }
+  }
+  for (const job of jobs) {
+    if (!expected.some(platform => platform.key === job.key)) failures.push(`${job.id}: unexpected release_key=${job.key || '<missing>'}`);
+  }
+  const included = platforms.filter(platform => platform.status !== 'excluded');
+  return {platforms, jobs, failures,
+    llvm_platforms: [...new Set(included.map(platform => platform.llvm_platform))],
+    std_tuples: [...new Set(included.flatMap(platform => platform.std_tuples))],
+  };
+}
+
+function scopeSummary(scope) {
+  const groups = ['buildable', 'blocked', 'excluded'].map(status => {
+    const selected = scope.platforms.filter(platform => platform.status === status);
+    return `${status}=${selected.length}[${selected.map(platform =>
+      `${platform.key}${platform.reasons.length ? ` (${platform.reasons.join('; ')})` : ''}`).join(',')}]`;
+  });
+  return `release_platforms=${scope.platforms.length}; ${groups.join('; ')}; ` +
+    `package_jobs=${scope.jobs.length}[${scope.jobs.map(job => `${job.id}:${job.key}`).join(',')}]; ` +
+    `LLVM=[${scope.llvm_platforms.join(',')}]; std_tuples=[${scope.std_tuples.join(',')}]`;
+}
+
+function evidenceRunResult(gate, result, extra = {}) {
+  return gateResult(gate, result.status,
+    `missing=${result.missing.join(',') || '<none>'}; failures=${result.failures.join(',') || '<none>'}`,
+    {...result, ...extra});
+}
+
+async function readRunResults(gate, context) {
+  try {
+    return parseEvidenceJson(await fs.readFile(path.join(context.evidence, `${gate}_RESULTS.json`), 'utf8'), `${gate}_RESULTS.json`);
+  } catch (error) {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
+async function evaluatePlatformRun(gate, context) {
+  const scope = await releaseScope(context);
+  if (scope.failures.length) return gateResult(gate, 'NOT_MET',
+    `platform/job mismatch: ${scope.failures.join('; ')}; ${scopeSummary(scope)}`, {scope});
+  context = await discoverEvidenceContext(gate, context);
+  const data = context.evidence ? await readRunResults(gate, context) : null;
+  if (!data) {
+    const missing = platformRequirements(gate, scope).map(row => `${row.id}:record`);
+    const blocked = scope.platforms.some(p => p.status === 'blocked');
+    return gateResult(gate, blocked ? 'NOT_MET' : 'UNKNOWN',
+      `NEEDS_RUN: ${GATES[gate].needsRun}; missing=${gate}_RESULTS.json,${missing.join(',')}; ${scopeSummary(scope)}`,
+      {scope, missing: [`${gate}_RESULTS.json`, ...missing]});
+  }
+  const binding = parseEvidenceJson(await readAbsolute(path.join(context.evidence, EVIDENCE_BINDING)), EVIDENCE_BINDING);
+  const result = platformEvidence(gate, scope, data, binding.payload_sha256);
+  return evidenceRunResult(gate, result, {scope});
+}
+
+async function evaluateG10(context) {
+  if (!context.evidence) return evidenceRunResult('G10', {status: 'UNKNOWN', missing: ['G10_RESULTS.json'], failures: []});
+  return evidenceRunResult('G10', g10Evidence(await readRunResults('G10', context), git(context, ['rev-parse', 'HEAD'])));
+}
+
 async function evaluateG15(context) {
-  const [python, packageWorkflow, release] = await Promise.all([
+  const [python, packageWorkflow, scope] = await Promise.all([
     readFile(context, 'build/lib/python-bundle.mjs'),
     readFile(context, '.github/workflows/build-release-package.yml'),
-    readFile(context, '.github/workflows/release.yml'),
+    releaseScope(context),
   ]);
   const version = python.match(/RELEASE_PYTHON_VERSION\s*=\s*['"](3\.11\.\d+)['"]/)?.[1] || '';
   const bundleArgs = packageWorkflow.match(/--python-bundle/g)?.length || 0;
   const verifiers = packageWorkflow.match(/verify_packaged_cjdb\.mjs/g)?.length || 0;
-  const packageJobs = release.match(/uses:\s*\.\/\.github\/workflows\/build-release-package\.yml/g)?.length || 0;
-  const structural = Boolean(version) && bundleArgs === 2 && verifiers === 2 && packageJobs === 5;
+  const packageJobs = scope.jobs.length;
+  const structural = Boolean(version) && bundleArgs === 2 && verifiers === 2 && scope.failures.length === 0;
   if (!structural) {
     return gateResult('G15', 'NOT_MET',
-      `python=${version || '<missing>'} python_bundle_args=${bundleArgs} cjdb_verifiers=${verifiers} package_jobs=${packageJobs}`);
+      `python=${version || '<missing>'} python_bundle_args=${bundleArgs} cjdb_verifiers=${verifiers} package_jobs=${packageJobs}; ${scope.failures.join('; ')}`, {scope});
   }
   const tests = runTests(context, [
     'build/test/python-bundle.test.mjs',
     'ci/srcbuild/tests/release-wire.test.mjs',
   ]);
   return gateResult('G15', tests.status,
-    `policy=A bundled Python ${version}; package_jobs=5 unix+windows verifiers=2; ${tests.detail}`);
+    `policy=A bundled Python ${version}; package_jobs=${packageJobs} unix+windows verifiers=2; ${tests.detail}; ${scopeSummary(scope)}`, {scope});
 }
 
 async function evaluateG16(context) {
@@ -1449,13 +1575,13 @@ async function evaluateG17(context) {
 }
 
 async function evaluate(gate, context) {
-  if (GATES[gate].needsRun) return gateResult(gate, 'UNKNOWN', `NEEDS_RUN: ${GATES[gate].needsRun}`);
   const evaluators = {
     G1: evaluateG1,
     G2: evaluateG2,
     G4: evaluateG4,
     G5: evaluateG5,
     G8: evaluateG8,
+    G10: evaluateG10,
     G12: evaluateG12,
     G13: contextValue => loaderlifeResult(contextValue),
     G14: evaluateG14,
@@ -1464,9 +1590,12 @@ async function evaluate(gate, context) {
     G17: evaluateG17,
   };
   try {
+    if (PLATFORM_GATES.has(gate)) return await evaluatePlatformRun(gate, context);
+    if (gate !== 'G10' && GATES[gate].needsRun) return gateResult(gate, 'UNKNOWN', `NEEDS_RUN: ${GATES[gate].needsRun}`);
     return await evaluators[gate](await discoverEvidenceContext(gate, context));
   } catch (error) {
-    if (error instanceof GateInputError) return gateResult(gate, error.kind, error.message);
+    if (error instanceof GateInputError) return gateResult(gate, error.kind,
+      `${PLATFORM_GATES.has(gate) || gate === 'G10' ? 'missing=' : ''}${error.message}`);
     return gateResult(gate, 'UNKNOWN', `unexpected evaluator error: ${error.message}`);
   }
 }

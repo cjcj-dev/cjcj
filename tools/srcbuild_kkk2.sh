@@ -613,259 +613,13 @@ run_step() {
     fi
 }
 
-fixed_tuple_is_current() {
-    local tuple_dir=${1:-$CJCJ_FIXED_LLVM_DIR}
-    local manifest="$tuple_dir/llvm-tools.manifest" manifest_llvm opt_llvm
-    [[ -s $tuple_dir/llc.gz ]] || return 1
-    [[ -s $tuple_dir/opt.gz ]] || return 1
-    [[ -s $tuple_dir/ld.lld.gz ]] || return 1
-    [[ -s $tuple_dir/cjselfhost_llvmshim.o ]] || return 1
-    [[ -s $manifest ]] || return 1
-    # shellcheck disable=SC1091
-    source "$REPO_ROOT/ci/llvm_pin.env" || return 1
-    [[ $(awk -F= '$1=="PLATFORM" {print $2}' "$manifest") == linux_x86_64 ]] || return 1
-    manifest_llvm=$(awk -F= '$1=="LLVM_SHA" {print $2}' "$manifest") || return 1
-    [[ $manifest_llvm == "$LLVM_SHA" ]] || return 1
-    opt_llvm=$(gzip -dc "$tuple_dir/opt.gz" \
-        | strings | sed -n 's/^CJLLVM-COMMIT:\([0-9a-f]\{40\}\)$/\1/p') || return 1
-    [[ $opt_llvm == "$manifest_llvm" ]] || return 1
-    [[ $(awk -F= '$1=="CANGJIE_COMPILER_SHA" {print $2}' "$manifest") == "$CANGJIE_COMPILER_SHA" ]] || return 1
-    [[ $(awk -F= '$1=="FLATBUFFERS_SHA" {print $2}' "$manifest") == "$FLATBUFFERS_SHA" ]] || return 1
-    node "$REPO_ROOT/ci/llvm-tools-manifest.mjs" validate native "$manifest" >/dev/null || return 1
-}
-
-resolve_depot_tuple_root() {
-    local depot_root=${1:-${CJCJ_LLVM_DEPOT_ROOT:-/root/llvmdepot}}
-    local nested="$depot_root/$LLVM_SHA/$CANGJIE_COMPILER_SHA"
-    local legacy="$depot_root/$LLVM_SHA"
-    local manifest_compiler
-    if [[ -d $nested/fixed-llc && -s $nested/SHA256SUMS ]]; then
-        printf '%s\n' "$nested"
-        return 0
-    fi
-    if [[ -d $legacy/fixed-llc && -s $legacy/SHA256SUMS && -s $legacy/fixed-llc/llvm-tools.manifest ]]; then
-        manifest_compiler=$(awk -F= '$1=="CANGJIE_COMPILER_SHA" {print $2}' "$legacy/fixed-llc/llvm-tools.manifest") || return 1
-        if [[ $manifest_compiler == "$CANGJIE_COMPILER_SHA" ]]; then
-            printf '%s\n' "$legacy"
-            return 0
-        fi
-        echo "fixed LLVM depot legacy layout skipped: compiler sha $manifest_compiler != pin $CANGJIE_COMPILER_SHA at $legacy" >&2
-    fi
-    return 1
-}
-
-# One layout definition shared with the GHA producer.
-source "$REPO_ROOT/ci/llvm-tuple-layout.sh"
-
-seed_fixed_tuple_from_depot() {
-    local depot_root=${1:-${CJCJ_LLVM_DEPOT_ROOT:-/root/llvmdepot}}
-    local depot tuple payload sums_sha
-    local -a payloads=(llc.gz opt.gz ld.lld.gz cjselfhost_llvmshim.o llvm-tools.manifest)
-    if [[ -z ${LLVM_SHA:-} ]]; then
-        LLVM_SHA=$(awk -F= '$1=="LLVM_SHA" {print $2}' "$REPO_ROOT/ci/llvm_pin.env") || return 1
-    fi
-    if [[ -z ${CANGJIE_COMPILER_SHA:-} ]]; then
-        CANGJIE_COMPILER_SHA=$(awk -F= '$1=="CANGJIE_COMPILER_SHA" {print $2}' "$REPO_ROOT/ci/llvm_pin.env") || return 1
-    fi
-    depot=$(resolve_depot_tuple_root "$depot_root") || {
-        echo "fixed LLVM depot seed unavailable under $depot_root/$LLVM_SHA/{${CANGJIE_COMPILER_SHA},} (missing nested or matching-legacy fixed-llc); trying pinned release" >&2
-        return 1
-    }
-    tuple="$depot/fixed-llc"
-    for payload in "${payloads[@]}"; do
-        [[ -f $tuple/$payload && ! -L $tuple/$payload ]] || {
-            echo "fixed LLVM depot seed rejected: missing or non-regular fixed-llc/$payload; trying pinned release" >&2
-            return 1
-        }
-    done
-    [[ ${LLVM_TUPLE_SUMS_SHA:-} =~ ^[0-9a-f]{64}$ ]] || {
-        echo "fixed LLVM depot seed rejected: LLVM_TUPLE_SUMS_SHA is missing or malformed; trying pinned release" >&2
-        return 1
-    }
-    sums_sha=$(sha256sum "$depot/SHA256SUMS" | awk '{print $1}') || return 1
-    [[ $sums_sha == "$LLVM_TUPLE_SUMS_SHA" ]] || {
-        echo "fixed LLVM depot seed rejected: SHA256SUMS digest disagrees with ci/llvm_pin.env at $depot; trying pinned release" >&2
-        return 1
-    }
-    if ! (cd "$depot" && sha256sum --strict -c SHA256SUMS); then
-        echo "fixed LLVM depot seed rejected: SHA256SUMS verification failed at $depot; trying pinned release" >&2
-        return 1
-    fi
-    if ! fixed_tuple_is_current "$tuple"; then
-        echo "fixed LLVM depot seed rejected: pin, manifest, and opt lineage disagree at $tuple; trying pinned release" >&2
-        return 1
-    fi
-
-    mkdir -p "$CJCJ_FIXED_LLVM_DIR"
-    for payload in "${payloads[@]}"; do
-        cp -- "$tuple/$payload" "$CJCJ_FIXED_LLVM_DIR/$payload"
-    done
-    if ! fixed_tuple_is_current; then
-        echo "fixed LLVM depot seed rejected after copy; trying pinned release" >&2
-        return 1
-    fi
-    CJCJ_SELECTED_COLOUR_TUPLE=$depot
-    echo "seeded fixed LLVM tuple from verified depot $depot"
-}
-
-checkout_exact() {
-    local directory=$1 url=$2 revision=$3
-    if [[ ! -d $directory/.git ]]; then
-        git init "$directory" || return 1
-    fi
-    if git -C "$directory" remote get-url origin >/dev/null 2>&1; then
-        git -C "$directory" remote set-url origin "$url" || return 1
-    else
-        git -C "$directory" remote add origin "$url" || return 1
-    fi
-    srcbuild_git_fetch "$directory" "$url" "$revision" || return 1
-    git -C "$directory" checkout --detach FETCH_HEAD || return 1
-    [[ $(git -C "$directory" rev-parse HEAD) == "$revision" ]]
-}
-
-checkout_sparse_exact() {
-    local directory=$1 url=$2 revision=$3 sparse_path=$4
-    if [[ ! -d $directory/.git ]]; then
-        git init "$directory" || return 1
-    fi
-    if git -C "$directory" remote get-url origin >/dev/null 2>&1; then
-        git -C "$directory" remote set-url origin "$url" || return 1
-    else
-        git -C "$directory" remote add origin "$url" || return 1
-    fi
-    git -C "$directory" sparse-checkout init --cone || return 1
-    git -C "$directory" sparse-checkout set "$sparse_path" || return 1
-    srcbuild_git_fetch "$directory" "$url" "$revision" || return 1
-    git -C "$directory" checkout --detach FETCH_HEAD || return 1
-    [[ $(git -C "$directory" rev-parse HEAD) == "$revision" ]]
-}
-
-acquire_fixed_tuple_from_release() {
-    local colour_tuple="$STATE_ROOT/colour-tuple"
-    node "$REPO_ROOT/ci/release/acquire_fixed_tuple.mjs" \
-        "${CJCJ_BOOTSTRAP_INPUTS_PIN:-$REPO_ROOT/ci/bootstrap_inputs_pin.json}" \
-        "$colour_tuple" "$LLVM_TUPLE_SUMS_SHA" || return 1
-    fixed_tuple_is_current "$colour_tuple/fixed-llc" || return 1
-    local payload
-    mkdir -p "$CJCJ_FIXED_LLVM_DIR" || return 1
-    for payload in llc.gz opt.gz ld.lld.gz cjselfhost_llvmshim.o llvm-tools.manifest; do
-        cp -- "$colour_tuple/fixed-llc/$payload" "$CJCJ_FIXED_LLVM_DIR/$payload" || return 1
-    done
-    fixed_tuple_is_current || return 1
-    CJCJ_SELECTED_COLOUR_TUPLE=$colour_tuple
-    echo "seeded fixed LLVM tuple from pinned release $colour_tuple"
-}
-
 build_fixed_tuple() {
-    # shellcheck disable=SC1091
-    source "$REPO_ROOT/ci/llvm_pin.env"
-    # Reuse requires the complete bootstrap tuple as well as the four tools.
-    # A previous four-file cache alone cannot supply --colour-tuple.
-    local cached="$STATE_ROOT/colour-tuple"
-    if fixed_tuple_is_current && [[ -f $cached/SHA256SUMS ]] \
-        && [[ $(sha256sum "$cached/SHA256SUMS" | awk '{print $1}') == "$LLVM_TUPLE_SUMS_SHA" ]] \
-        && (cd "$cached" && sha256sum --strict -c SHA256SUMS); then
-        CJCJ_SELECTED_COLOUR_TUPLE=$cached
-        echo "fixed LLVM tuple matches ci/llvm_pin.env; reusing it"
-        return
-    fi
-    if seed_fixed_tuple_from_depot "${CJCJ_LLVM_DEPOT_ROOT:-/root/llvmdepot}"; then
-        return
-    fi
     if ((DRY_RUN)); then
-        echo "DRY_RUN PREREQUISITE=fixed-llvm action=acquire-pinned-release"
+        echo "DRY_RUN PREREQUISITE=fixed-llvm action=prepare-shared-tuple"
         return
     fi
-    # Source compilation is an explicit publisher operation, never recovery for
-    # a missing/invalid cache of an already reviewed release.
-    if [[ ${CJCJ_LLVM_DEPOT_PUBLISH:-0} != 1 ]]; then
-        acquire_fixed_tuple_from_release || return 1
-        return
-    fi
-
-    export LLVM_URL LLVM_SHA CANGJIE_COMPILER_URL CANGJIE_COMPILER_SHA
-    export FLATBUFFERS_URL FLATBUFFERS_SHA
-    local build_root="$STATE_ROOT/fixed-llvm-build"
-    local llvm_fork="$build_root/llvm-fork"
-    local compiler="$build_root/cangjie-compiler"
-    local flatbuffers="$build_root/flatbuffers"
-    local llc_build="$build_root/llc-build"
-    local flatbuffers_build="$build_root/flatbuffers-build"
-    local generated="$build_root/shim-generated"
-    local llc_sha opt_sha lld_sha lld_version shim_sha
-
-    mkdir -p "$build_root"
-    checkout_exact "$llvm_fork" "$LLVM_URL" "$LLVM_SHA" || return 1
-    checkout_sparse_exact "$compiler" "$CANGJIE_COMPILER_URL" "$CANGJIE_COMPILER_SHA" schema || return 1
-    checkout_exact "$flatbuffers" "$FLATBUFFERS_URL" "$FLATBUFFERS_SHA" || return 1
-
-    cmake -G Ninja -S "$llvm_fork/llvm" -B "$llc_build" \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DLLVM_ENABLE_ASSERTIONS=OFF \
-        -DBUILD_SHARED_LIBS=OFF \
-        -DLLVM_LINK_LLVM_DYLIB=OFF \
-        -DLLVM_BUILD_LLVM_DYLIB=OFF \
-        -DLLVM_ENABLE_RTTI=OFF \
-        -DLLVM_ENABLE_LIBXML2=OFF \
-        -DLLVM_TARGETS_TO_BUILD=X86 \
-        -DLLVM_ENABLE_PROJECTS=lld \
-        -DCMAKE_C_COMPILER=clang \
-        -DCMAKE_CXX_COMPILER=clang++ \
-        '-DCMAKE_CXX_FLAGS=-gline-tables-only -include cstdint -include unordered_map -include map -include vector -include string'
-    ninja -j "$JOBS" -C "$llc_build" llc opt lld
-    for tool in llc opt ld.lld; do
-        resolved=$(readlink -f "$llc_build/bin/$tool")
-        bash "$REPO_ROOT/ci/assert_no_libxml2_needed.sh" "$resolved"
-    done
-    gzip -n -c -9 "$llc_build/bin/llc" > "$CJCJ_FIXED_LLVM_DIR/llc.gz"
-    gzip -n -c -9 "$llc_build/bin/opt" > "$CJCJ_FIXED_LLVM_DIR/opt.gz"
-    gzip -n -c -9 "$llc_build/bin/ld.lld" > "$CJCJ_FIXED_LLVM_DIR/ld.lld.gz"
-
-    cmake -G Ninja -S "$flatbuffers" -B "$flatbuffers_build" \
-        -DFLATBUFFERS_BUILD_TESTS=OFF \
-        -DFLATBUFFERS_BUILD_FLATLIB=OFF \
-        -DFLATBUFFERS_BUILD_SHAREDLIB=OFF
-    ninja -j "$JOBS" -C "$flatbuffers_build" flatc
-    mkdir -p "$generated/flatbuffers"
-    "$flatbuffers_build/flatc" --no-warnings -c -o "$generated/flatbuffers" \
-        "$compiler/schema/ModuleFormat.fbs"
-    clang++ -std=c++17 -O2 -fPIC -fno-rtti -fno-exceptions \
-        -I"$llvm_fork/llvm/include" -I"$llc_build/include" \
-        -I"$flatbuffers/include" -I"$generated" \
-        -c "$REPO_ROOT/runtime_shim/cjselfhost_llvmshim.cpp" \
-        -o "$CJCJ_FIXED_LLVM_DIR/cjselfhost_llvmshim.o"
-
-    llc_sha=$(sha256sum "$llc_build/bin/llc" | awk '{print $1}')
-    opt_sha=$(sha256sum "$llc_build/bin/opt" | awk '{print $1}')
-    lld_sha=$(sha256sum "$llc_build/bin/ld.lld" | awk '{print $1}')
-    lld_version=$("$llc_build/bin/ld.lld" --version | awk '
-        /LLVM version |^LLD / {
-            sub(/^[[:space:]]+/, "")
-            print
-            found = 1
-            exit
-        }
-        END { if (!found) exit 1 }
-    ')
-    shim_sha=$(sha256sum "$CJCJ_FIXED_LLVM_DIR/cjselfhost_llvmshim.o" | awk '{print $1}')
-    {
-        printf 'PLATFORM=linux_x86_64\n'
-        printf 'LLVM_SHA=%s\n' "$LLVM_SHA"
-        printf 'CANGJIE_COMPILER_SHA=%s\n' "$CANGJIE_COMPILER_SHA"
-        printf 'FLATBUFFERS_SHA=%s\n' "$FLATBUFFERS_SHA"
-        printf 'LLC_SHA256=%s\n' "$llc_sha"
-        printf 'OPT_SHA256=%s\n' "$opt_sha"
-        printf 'LLD_TOOL=%s\n' ld.lld
-        printf 'LLD_SOURCE=%s\n' "tuple:$LLVM_SHA"
-        printf 'LLD_VERSION=%s\n' "$lld_version"
-        printf 'LLD_SHA256=%s\n' "$lld_sha"
-        printf 'SHIM_SHA256=%s\n' "$shim_sha"
-    } > "$CJCJ_FIXED_LLVM_DIR/llvm-tools.manifest"
-    fixed_tuple_is_current || return 1
-    if [[ ${CJCJ_LLVM_DEPOT_PUBLISH:-0} == 1 ]]; then
-        publish_fixed_tuple_to_depot "${CJCJ_LLVM_DEPOT_ROOT:-/root/llvmdepot}" || return 1
-        CJCJ_SELECTED_COLOUR_TUPLE=$(resolve_depot_tuple_root "${CJCJ_LLVM_DEPOT_ROOT:-/root/llvmdepot}") || return 1
-    fi
+    node "$REPO_ROOT/ci/release/acquire_fixed_tuple.mjs" \
+        "$STATE_ROOT/colour-tuple" "$CJCJ_FIXED_LLVM_DIR"
 }
 
 run_fixed_tuple_prerequisite() {
@@ -1139,95 +893,29 @@ step_30() {
     npx --yes zx@8 "$REPO_ROOT/ci/srcbuild/steps/inject-version.mjs"
 }
 
-bootstrap_input_sha256() {
-    local path=$1 env_sha=${2:-}
-    if [[ -n $env_sha ]]; then
-        printf '%s\n' "$env_sha"
-        return 0
-    fi
-    [[ -f $path ]] || {
-        echo "bootstrap input missing: $path" >&2
-        return 1
-    }
-    sha256sum "$path" | awk '{print $1}'
-}
-
-# P12: the runtime is a declared external input, never an implicit depot lookup.
-# Declare CJCJ_BOOTSTRAP_COLOUR_RT as the absolute directory containing BOTH
-# libcangjie-runtime.so and libboundscheck.so (not an SDK root). Supply reviewed
-# CJCJ_BOOTSTRAP_COLOUR_RT_SHA256 and CJCJ_BOOTSTRAP_BOUNDSCHECK_SHA256
-# from that external artifact release. Dry-run validates the same input.
-# The runtime embedded CJRT-COMMIT must equal ci/runtime_pin.env RUNTIME_REF.
-# Expected digests come from the input provider, not from hashing an unchecked
-# file and treating that freshly computed value as its own expected identity.
-assert_bootstrap_colour_runtime() {
-    local root=$1 file expected actual stamps
-    [[ $RUNTIME_REF =~ ^[0-9a-f]{40}$ ]] || {
-        echo 'COLOUR_RT_PIN_INVALID' >&2; return 1;
-    }
-    [[ $root == /* && -d $root ]] || {
-        echo 'COLOUR_RT_INPUT_REQUIRED: set CJCJ_BOOTSTRAP_COLOUR_RT to an absolute library directory' >&2; return 1;
-    }
-    for file in libcangjie-runtime.so libboundscheck.so; do
-        if [[ $file == libcangjie-runtime.so ]]; then
-            expected=${CJCJ_BOOTSTRAP_COLOUR_RT_SHA256:-}
-        else
-            expected=${CJCJ_BOOTSTRAP_BOUNDSCHECK_SHA256:-}
-        fi
-        [[ $expected =~ ^[0-9a-f]{64}$ ]] || {
-            echo "COLOUR_RT_SHA_REQUIRED: $file" >&2; return 1;
-        }
-        [[ -f $root/$file ]] || {
-            echo "COLOUR_RT_FILE_MISSING: $root/$file" >&2; return 1;
-        }
-        actual=$(sha256sum "$root/$file") || return 1
-        actual=${actual%% *}
-        [[ $actual == "$expected" ]] || {
-            echo "COLOUR_RT_SHA_MISMATCH: $file expected=$expected actual=$actual" >&2; return 1;
-        }
-    done
-    stamps=$(LC_ALL=C strings "$root/libcangjie-runtime.so" | /usr/bin/grep -oE 'CJRT-COMMIT:[[:alnum:]_-]+' | sort -u) || {
-        echo 'COLOUR_RT_STAMP_MISSING' >&2; return 1;
-    }
-    [[ $stamps == "CJRT-COMMIT:$RUNTIME_REF" ]] || {
-        echo "COLOUR_RT_PIN_MISMATCH: expected=$RUNTIME_REF actual=$stamps" >&2; return 1;
-    }
-    echo "COLOUR_RT_INPUT_VERIFIED: path=$root commit=$RUNTIME_REF runtime_sha256=$CJCJ_BOOTSTRAP_COLOUR_RT_SHA256 boundscheck_sha256=$CJCJ_BOOTSTRAP_BOUNDSCHECK_SHA256" >&2
-}
-
 load_bootstrap_pins() {
-    resolve_host_toolchain_pin
-    # shellcheck disable=SC1091
-    source "$REPO_ROOT/ci/llvm_pin.env"
-    # shellcheck disable=SC1091
-    source "$REPO_ROOT/ci/runtime_pin.env"
-    BOOTSTRAP_HOST_SDK=${CJCJ_SRCBUILD_HOST_SDK:-${SRCBUILD_USER_HOME:-$HOME}/.cjv/toolchains/$CJCJ_TOOLCHAIN}
-    BOOTSTRAP_HOST_LLVM_SO=${CJCJ_BOOTSTRAP_HOST_LLVM_SO:-$BOOTSTRAP_HOST_SDK/third_party/llvm/lib/libLLVM-15.so}
-    BOOTSTRAP_HOST_LLVM_SHA256=$(bootstrap_input_sha256 "$BOOTSTRAP_HOST_LLVM_SO" "${CJCJ_BOOTSTRAP_HOST_LLVM_SHA256:-}") || return 1
-    if [[ -n ${CJCJ_BOOTSTRAP_AST_SUPPORT:-} ]]; then
-        BOOTSTRAP_AST_SUPPORT=$CJCJ_BOOTSTRAP_AST_SUPPORT
-    elif [[ -f $CANGJIE_BUILD_ROOT/lib/libcangjie-ast-support.a ]]; then
-        BOOTSTRAP_AST_SUPPORT=$CANGJIE_BUILD_ROOT/lib/libcangjie-ast-support.a
-    else
-        echo "bootstrap input missing: CJCJ_BOOTSTRAP_AST_SUPPORT is unset and CANGJIE_BUILD_ROOT/lib/libcangjie-ast-support.a is absent: $CANGJIE_BUILD_ROOT/lib/libcangjie-ast-support.a" >&2
-        return 1
-    fi
-    BOOTSTRAP_AST_SUPPORT_SHA256=${CJCJ_BOOTSTRAP_AST_SUPPORT_SHA256:-}
-    [[ $BOOTSTRAP_AST_SUPPORT_SHA256 =~ ^[0-9a-f]{64}$ ]] || {
-        echo 'AST_SUPPORT_SHA_REQUIRED: set CJCJ_BOOTSTRAP_AST_SUPPORT_SHA256 from the input provider' >&2; return 1;
-    }
-    BOOTSTRAP_COLOUR_TUPLE=${CJCJ_BOOTSTRAP_COLOUR_TUPLE:-${CJCJ_SELECTED_COLOUR_TUPLE:-$STATE_ROOT/colour-tuple}}
-    # Reviewed process-library digest is independent of the static tuple.
-    # shellcheck disable=SC1090
-    source "$REPO_ROOT/ci/llvm-dylib/linux_$(uname -m).env"
-    [[ $LLVM_DYLIB_SOURCE_SHA == "$LLVM_SHA" ]] || { echo 'LLVM_DYLIB_SOURCE_MISMATCH' >&2; return 1; }
-    BOOTSTRAP_COLOUR_LLVM_SO=${CJCJ_BOOTSTRAP_COLOUR_LLVM_SO:-${CJCJ_BOOTSTRAP_DYLIB_ARTIFACT:-${CJCJ_BOOTSTRAP_COLOUR_DYLIB:-$BOOTSTRAP_COLOUR_TUPLE/dylib}}/libLLVM-15.so}
-    BOOTSTRAP_COLOUR_LLVM_SHA256=$LLVM_DYLIB_SHA256
+    local prepared
+    mkdir -p "$RUNNER_TEMP"
+    prepared=$(mktemp "$RUNNER_TEMP/bootstrap-inputs.XXXXXX") || return 1
+    CJCJ_BOOTSTRAP_CJCJ_SHA=${CJCJ_BOOTSTRAP_CJCJ_SHA:-$(git -C "$REPO_ROOT" rev-parse HEAD)} \
+        node "$REPO_ROOT/ci/release/prepare_bootstrap_inputs.mjs" --shell-output "$prepared" >&2 || {
+            rm -f "$prepared"
+            return 1
+        }
+    source "$prepared"
+    rm -f "$prepared"
+    BOOTSTRAP_HOST_SDK=$CJCJ_BOOTSTRAP_BASE
+    BOOTSTRAP_HOST_LLVM_SO=$CJCJ_BOOTSTRAP_HOST_LLVM_SO
+    BOOTSTRAP_HOST_LLVM_SHA256=$CJCJ_BOOTSTRAP_HOST_LLVM_SHA256
+    BOOTSTRAP_AST_SUPPORT=$CJCJ_BOOTSTRAP_AST_SUPPORT
+    BOOTSTRAP_AST_SUPPORT_SHA256=$CJCJ_BOOTSTRAP_AST_SUPPORT_SHA256
+    BOOTSTRAP_COLOUR_TUPLE=$CJCJ_BOOTSTRAP_COLOUR_TUPLE
+    BOOTSTRAP_COLOUR_LLVM_SO=$CJCJ_BOOTSTRAP_COLOUR_LLVM_SO
+    BOOTSTRAP_COLOUR_LLVM_SHA256=$CJCJ_BOOTSTRAP_COLOUR_LLVM_SHA256
     BOOTSTRAP_STDSRC=${CJCJ_BOOTSTRAP_STDSRC:-$CANGJIE_WORKSPACE/cangjie_runtime/stdlib}
-    BOOTSTRAP_COLOUR_RT=${CJCJ_BOOTSTRAP_COLOUR_RT:-}
-    assert_bootstrap_colour_runtime "$BOOTSTRAP_COLOUR_RT" || return 1
-    BOOTSTRAP_CPP_SRC=${CJCJ_BOOTSTRAP_CPP_SRC:-${CANGJIE_CPP_SRC:-$CANGJIE_WORKSPACE/cangjie_compiler}}
-    BOOTSTRAP_CJCJ_SHA=${CJCJ_BOOTSTRAP_CJCJ_SHA:-$(git -C "$REPO_ROOT" rev-parse HEAD)}
+    BOOTSTRAP_COLOUR_RT=$CJCJ_BOOTSTRAP_COLOUR_RT
+    BOOTSTRAP_CPP_SRC=$CJCJ_BOOTSTRAP_CPP_SRC
+    BOOTSTRAP_CJCJ_SHA=$CJCJ_BOOTSTRAP_CJCJ_SHA
 }
 
 bootstrap_argv() {
@@ -1249,7 +937,7 @@ bootstrap_argv() {
         --ast-support "$BOOTSTRAP_AST_SUPPORT" \
         --ast-support-sha256 "$BOOTSTRAP_AST_SUPPORT_SHA256" \
         --colour-tuple "$BOOTSTRAP_COLOUR_TUPLE" \
-        --colour-llvm-sha "$LLVM_SHA" \
+        --colour-llvm-sha "$CJCJ_BOOTSTRAP_COLOUR_LLVM_SHA" \
         --colour-rt "$BOOTSTRAP_COLOUR_RT" \
         --host-rt "$BOOTSTRAP_HOST_SDK" \
         --stage "$stage"
@@ -1260,9 +948,6 @@ run_bootstrap_stage() {
     local stage=$1 argv
     local -a cmd
     mkdir -p "$STATE_ROOT/bootstrap-work"
-    if [[ $stage == stage0 && -z ${CJCJ_BOOTSTRAP_CPP_SRC:-} && -z ${CANGJIE_CPP_SRC:-} ]]; then
-        node "$REPO_ROOT/ci/bootstrap/prepare_cpp_headers.mjs" "$CANGJIE_WORKSPACE/cangjie_compiler" || return 1
-    fi
     argv=$(bootstrap_argv "$stage") || return 1
     eval "cmd=( $argv )" || return 1
     [[ ${#cmd[@]} -gt 0 ]] || return 1
@@ -1270,7 +955,7 @@ run_bootstrap_stage() {
 }
 
 step_31() {
-    ulimit -c unlimited || true
+    ulimit -c 0
     run_bootstrap_stage stage0
 }
 
@@ -1437,7 +1122,9 @@ if ((DRY_RUN)); then
     readonly dry_run_toolchain
     printf 'DRY_RUN host=%s target=%s jobs=%s cpuset=%s from_step=%s through_step=%s\n' \
         "$host_name" "$TARGET" "$JOBS" "$CPUSET" "$FROM_STEP" "$THROUGH_STEP"
-    build_fixed_tuple
+    if [[ $FROM_STEP != 31 && $FROM_STEP != 32 || $THROUGH_STEP != 31 && $THROUGH_STEP != 32 ]]; then
+        build_fixed_tuple
+    fi
     while IFS= read -r step; do
         [[ -n $step ]] || continue
         print_dry_step "$step" "$dry_run_toolchain"
@@ -1453,7 +1140,9 @@ printf 'RUN host=%s target=%s jobs=%s cpuset=%s from_step=%s through_step=%s\n' 
 
 # fixed-llvm is a needs: dependency of srcbuild.yml, so it completes before the
 # numbered srcbuild steps rather than being invented as an in-band step 27 build.
-run_fixed_tuple_prerequisite
+if [[ $FROM_STEP != 31 && $FROM_STEP != 32 || $THROUGH_STEP != 31 && $THROUGH_STEP != 32 ]]; then
+    run_fixed_tuple_prerequisite
+fi
 
 while IFS= read -r step; do
     [[ -n $step ]] || continue

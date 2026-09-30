@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {assertPackagedLineage} from '../../../build/lib/package-lineage.mjs';
 import {getTarget} from '../../../build/lib/targets.mjs';
+import {verifyRepeatedCjo} from '../verify-repeated-cjo.mjs';
 
 $.stdio = 'inherit';
 
@@ -171,80 +172,13 @@ await phase('selfcheck', async () => {
   }
 });
 
-await phase('selfdet', async () => {
-  console.log('[selfdet] verify compiler CJO path determinism');
-  const selfdetStarted = process.hrtime.bigint();
-  const selfdetRoot = path.join(work, 'selfdet');
-  const selfdetPackage = 'conditional_compilation';
-  const selfdetSource = path.join(root, 'packages', selfdetPackage, 'src');
-  const selfdetSourceA = path.join(selfdetRoot, 'a');
-  const selfdetSourceB = path.join(selfdetRoot, 'bbbbbbbb', 'deep');
-  if (selfdetSourceA.length === selfdetSourceB.length) {
-    throw new Error('selfdet apparatus failed: source paths must have different lengths');
-  }
-  await fs.mkdir(path.dirname(selfdetSourceA), {recursive: true});
-  await fs.mkdir(path.dirname(selfdetSourceB), {recursive: true});
-  await fs.cp(selfdetSource, selfdetSourceA, {
-    recursive: true, preserveTimestamps: true, force: false, errorOnExist: true,
-  });
-  await fs.cp(selfdetSource, selfdetSourceB, {
-    recursive: true, preserveTimestamps: true, force: false, errorOnExist: true,
-  });
-  console.log(`[selfdet] package=${selfdetPackage} source-a=${selfdetSourceA} length=${selfdetSourceA.length}`);
-  console.log(`[selfdet] package=${selfdetPackage} source-b=${selfdetSourceB} length=${selfdetSourceB.length}`);
-  console.log('[selfdet] env MRT_GCV2_MARKPAR_FORCE_SERIAL=1');
-
-  const selfdetEnv = {...process.env, MRT_GCV2_MARKPAR_FORCE_SERIAL: '1'};
-  async function compileSelfdet(sourceDir, arm, mapped) {
-    const outputDir = path.join(selfdetRoot, arm);
-    await fs.mkdir(outputDir, {recursive: true});
-    const output = path.join(outputDir, `${selfdetPackage}.a`);
-    if (mapped) {
-      const prefixMap = `${sourceDir}=/cjcj`;
-      await $({env: selfdetEnv})`${timeoutCommand} 900 ${self} --emit-chir=raw --output-type=staticlib --package ${sourceDir} --module-name cjcj --import-path ${root}/target/release --path-prefix-map=${prefixMap} --trimpath=${sourceDir} -o ${output}`;
-    } else {
-      await $({env: selfdetEnv})`${timeoutCommand} 900 ${self} --emit-chir=raw --output-type=staticlib --package ${sourceDir} --module-name cjcj --import-path ${root}/target/release -o ${output}`;
-    }
-    const cjos = (await fs.readdir(outputDir)).filter(name => name.endsWith('.cjo')).sort();
-    if (cjos.length !== 1) {
-      throw new Error(`selfdet ${arm} failed: expected exactly one CJO, found ${cjos.length}`);
-    }
-    const cjo = path.join(outputDir, cjos[0]);
-    const cjoStat = await fs.stat(cjo);
-    if (!cjoStat.isFile() || cjoStat.size === 0) {
-      throw new Error(`selfdet ${arm} failed: CJO is missing or empty: ${cjo}`);
-    }
-    console.log(`[selfdet] ${arm} cjo=${cjo} bytes=${cjoStat.size}`);
-    return cjo;
-  }
-
-  console.log('[selfdet] positive-control compile without path flags');
-  const selfdetPositiveA = await compileSelfdet(selfdetSourceA, 'positive-a', false);
-  const selfdetPositiveB = await compileSelfdet(selfdetSourceB, 'positive-b', false);
-  const selfdetPositiveCmp = await $({nothrow: true, quiet: true, stdio: 'pipe'})`cmp -s ${selfdetPositiveA} ${selfdetPositiveB}`;
-  console.log(`[selfdet] positive-control cmp-s-exit=${selfdetPositiveCmp.exitCode} expected=1`);
-  if (selfdetPositiveCmp.exitCode !== 1) {
-    throw new Error(`selfdet positive control failed: expected different CJO files, cmp exit=${selfdetPositiveCmp.exitCode}`);
-  }
-
-  console.log('[selfdet] deterministic compile with path-prefix-map and trimpath');
-  const selfdetMappedA = await compileSelfdet(selfdetSourceA, 'mapped-a', true);
-  const selfdetMappedB = await compileSelfdet(selfdetSourceB, 'mapped-b', true);
-  const selfdetMappedCmp = await $({nothrow: true, quiet: true, stdio: 'pipe'})`cmp -s ${selfdetMappedA} ${selfdetMappedB}`;
-  if (selfdetMappedCmp.exitCode !== 0) {
-    throw new Error(`selfdet determinism failed: expected identical CJO files, cmp exit=${selfdetMappedCmp.exitCode}`);
-  }
-  const selfdetMappedListing = await $({nothrow: true, quiet: true, stdio: 'pipe'})`cmp -l ${selfdetMappedA} ${selfdetMappedB}`;
-  const selfdetMappedLines = selfdetMappedListing.stdout.trim().length === 0
-    ? 0
-    : selfdetMappedListing.stdout.trim().split(/\r?\n/).length;
-  console.log(`[selfdet] mapped cmp-l-lines=${selfdetMappedLines} exit=${selfdetMappedListing.exitCode}`);
-  if (selfdetMappedListing.exitCode !== 0 || selfdetMappedLines !== 0 || selfdetMappedListing.stderr) {
-    throw new Error('selfdet determinism failed: cmp -l did not complete with zero output');
-  }
-  const selfdetWall = Number(process.hrtime.bigint() - selfdetStarted) / 1e9;
-  console.log(`[selfdet] PASS package=${selfdetPackage} positive=different mapped=byte-identical wall=${selfdetWall.toFixed(3)}s`);
-});
+await phase('selfdet', () => verifyRepeatedCjo({
+  compiler: self,
+  sourceDir: path.join(root, 'packages', 'conditional_compilation', 'src'),
+  importPath: path.join(root, 'target', 'release'),
+  outputDir: path.join(work, 'selfdet'),
+  timeoutCommand,
+}));
 
 if (noFailFast) {
   console.log('[verify] --no-fail-fast summary');

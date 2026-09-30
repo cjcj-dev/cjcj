@@ -119,7 +119,8 @@ public func CreateMacroMsg(builder: FlatBufferBuilder, contentType: UInt8,
 // MacroMsgFormat_generated.h:1333-1337 (FinishMacroMsgBuffer).
 public func FinishMacroMsgBuffer(builder: FlatBufferBuilder,
     root: FlatBufferOffset): Array<UInt8> {
-    return builder.Finish(root)
+    builder.Finish(root)
+    return builder.GetBufferArray()
 }
 
 // MacroMsgFormat_generated.h:345-986,1089-1161 (Create*Direct).

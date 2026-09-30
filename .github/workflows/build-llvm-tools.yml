@@ -34,6 +34,11 @@ on:
         required: false
         type: string
         default: all
+      platform_set:
+        description: Optional platform-tuples subset (all, windows-only, darwin-windows).
+        required: false
+        type: string
+        default: ''
       cold_cache:
         description: Empty this job's restored sccache directory before compiling (control arm).
         required: false
@@ -47,6 +52,10 @@ on:
 
 permissions:
   contents: read
+
+defaults:
+  run:
+    shell: bash
 
 jobs:
   in-process-dylib:
@@ -64,45 +73,19 @@ jobs:
     outputs:
       matrix: ${{ steps.select.outputs.matrix }}
     steps:
+      - uses: actions/checkout@v7
       - name: Select the requested tuples
         id: select
         env:
           REQUESTED: ${{ inputs.platforms || 'all' }}
           PUBLISH_TUPLE: ${{ inputs.publish_tuple }}
-        run: |
-          set -euo pipefail
-          all='[
-            {"runner":"ubuntu-22.04","platform":"linux_x86_64","llvm-targets":"X86","portability-tag":"glibc2.35"},
-            {"runner":"ubuntu-24.04-arm","platform":"linux_aarch64","llvm-targets":"AArch64","portability-tag":"glibc2.39"},
-            {"runner":"macos-15","platform":"darwin_aarch64","llvm-targets":"AArch64","portability-tag":"macos15"},
-            {"runner":"macos-15-intel","platform":"darwin_x86_64","llvm-targets":"X86","portability-tag":"macos15"}
-          ]'
-          if [ -z "$REQUESTED" ] || [ "$REQUESTED" = all ]; then
-            selected="$all"
-          else
-            selected="$(printf '%s' "$all" | jq -c --arg want "$REQUESTED" \
-              '[.[] | select(.platform as $p | ($want | split(",") | map(gsub("^ +| +$";"")) | index($p)))]')"
-          fi
-          count="$(printf '%s' "$selected" | jq 'length')"
-          # An empty matrix makes every dependent job skip while reporting nothing
-          # wrong, which is the shape this repo keeps getting bitten by.
-          if [ "$count" -eq 0 ]; then
-            echo "no tuple matched platforms=$REQUESTED" >&2
-            exit 1
-          fi
-          # Only an explicit publication builds the X86 static colour tuple.
-          # Source matrix calls consume the immutable artifact from the pin.
-          if [ "$PUBLISH_TUPLE" = true ]; then
-            selected="$(printf '%s' "$selected" | jq -c --argjson all "$all" \
-              '. + [$all[] | select(.platform == "linux_x86_64")] | unique_by(.platform)')"
-          fi
-          echo "selected $count tuple(s) for platforms=$REQUESTED"
-          printf 'matrix=%s\n' "$(printf '%s' "$selected" | jq -c '{include: .}')" >> "$GITHUB_OUTPUT"
+          PLATFORM_SET: ${{ inputs.platform_set }}
+        run: node ci/llvm-tools-matrix.mjs
 
   build-tools:
     name: ${{ matrix.platform }} / Build tools
     needs: plan
-    timeout-minutes: 120
+    timeout-minutes: ${{ matrix.platform == 'windows_x86_64' && 350 || 120 }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
@@ -128,7 +111,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: fixed-toolchain/${{ matrix.platform }}
-          key: ${{ (inputs.rebuild || inputs.cold_cache) && format('rebuild-{0}-', github.run_id) || '' }}fixed-llvm-tools-${{ matrix.platform }}-${{ matrix.portability-tag }}-${{ steps.llvm-pin.outputs.sha }}-${{ env.CANGJIE_COMPILER_SHA }}-${{ hashFiles('.github/workflows/build-fixed-llc.yml', '.github/workflows/build-llvm-tools.yml', 'ci/llvm-tools-manifest.mjs', 'runtime_shim/cjselfhost_llvmshim.cpp') }}
+          key: ${{ (inputs.rebuild || inputs.cold_cache) && format('rebuild-{0}-', github.run_id) || '' }}fixed-llvm-tools-${{ matrix.platform }}-${{ matrix.portability-tag }}-${{ steps.llvm-pin.outputs.sha }}-${{ env.CANGJIE_COMPILER_SHA }}-${{ hashFiles('ci/llvm_pin.env', 'ci/runtime_pin.env', 'ci/fetch-llvm-runtime.sh', '.github/workflows/build-fixed-llc.yml', '.github/workflows/build-llvm-tools.yml', 'ci/llvm-tools-manifest.mjs', 'build/lib/targets.mjs', 'ci/llvm-tools-matrix.mjs', 'ci/platform_tuples/**', 'build/lib/srcbuild_git.sh', 'runtime_shim/cjselfhost_llvmshim.cpp') }}
 
       # Every C++ compile below (llc, opt, flatc, the shim object) goes through
       # sccache; the report step at the end fails the job if none did.
@@ -166,7 +149,7 @@ jobs:
         run: brew install ninja
 
       - name: Checkout source repositories
-        if: steps.cache.outputs.cache-hit != 'true'
+        if: runner.os != 'Windows' && steps.cache.outputs.cache-hit != 'true'
         run: |
           git init llvm-fork
           git -C llvm-fork remote add origin "$LLVM_URL"
@@ -186,9 +169,11 @@ jobs:
           test "$(git -C flatbuffers rev-parse HEAD)" = "$FLATBUFFERS_SHA"
 
       - name: Build LLVM tools
-        if: steps.cache.outputs.cache-hit != 'true'
+        if: runner.os != 'Windows' && steps.cache.outputs.cache-hit != 'true'
         run: |
+          bash ci/fetch-llvm-runtime.sh paired-runtime
           cmake -G Ninja -S llvm-fork/llvm -B llc-build \
+            -DCANGJIE_RUNTIME_SOURCE_DIR="$PWD/paired-runtime" \
             -DCMAKE_BUILD_TYPE=Release \
             -DLLVM_ENABLE_ASSERTIONS=OFF \
             -DBUILD_SHARED_LIBS=OFF \
@@ -242,7 +227,7 @@ jobs:
           } > "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
 
       - name: Generate LLVM shim
-        if: steps.cache.outputs.cache-hit != 'true'
+        if: runner.os != 'Windows' && steps.cache.outputs.cache-hit != 'true'
         run: |
           cmake -G Ninja -S flatbuffers -B flatbuffers-build \
             -DFLATBUFFERS_BUILD_TESTS=OFF \
@@ -264,6 +249,37 @@ jobs:
           fi
           printf 'SHIM_SHA256=%s\n' "$shim_sha" >> \
             "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
+          for tool in llc opt; do
+            version="$(llc-build/bin/$tool --version | awk '/LLVM version / {sub(/^[[:space:]]+/, ""); print; found=1; exit} END {if (!found) exit 1}')"
+            prefix=$(printf '%s' "$tool" | tr '[:lower:]' '[:upper:]')
+            printf '%s_SOURCE=tuple:%s\n%s_VERSION=%s\n' "$prefix" "$LLVM_SHA" "$prefix" "$version" >> \
+              "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
+          done
+
+      - name: Prepare MSYS2/MinGW LLVM toolchain
+        if: runner.os == 'Windows' && steps.cache.outputs.cache-hit != 'true'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          path-type: inherit
+          install: >-
+            git gzip unzip file binutils
+            mingw-w64-x86_64-clang
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-ninja
+
+      - name: Build Windows LLVM tools
+        if: runner.os == 'Windows' && steps.cache.outputs.cache-hit != 'true'
+        shell: msys2 {0}
+        env:
+          TUPLE_PLATFORM: ${{ matrix.platform }}
+          LLVM_TARGETS: ${{ matrix.llvm-targets }}
+          TUPLE_ROOT: .tuple-build
+        run: |
+          bash ci/platform_tuples/fetch_sources.sh
+          bash ci/platform_tuples/build_tuple.sh
 
       - name: Report sccache
         if: always() && steps.cache.outputs.cache-hit != 'true'
@@ -274,6 +290,7 @@ jobs:
           require-compiles: ${{ job.status == 'success' }}
 
       - name: Verify LLVM tools
+        if: runner.os != 'Windows'
         run: |
           mkdir -p "$RUNNER_TEMP/fixed-llvm-tools"
           case "${{ matrix.platform }}" in
@@ -341,8 +358,13 @@ jobs:
           fi
           grep -Fx "SHIM_SHA256=$shim_sha" \
             "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
-          node ci/llvm-tools-manifest.mjs validate native \
+          node ci/llvm-tools-manifest.mjs validate tuple \
             "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
+          for tool in llc opt; do
+            version="$("$RUNNER_TEMP/fixed-llvm-tools/$tool" --version | awk '/LLVM version / {sub(/^[[:space:]]+/, ""); print; found=1; exit} END {if (!found) exit 1}')"
+            prefix=$(printf '%s' "$tool" | tr '[:lower:]' '[:upper:]')
+            grep -Fx "${prefix}_VERSION=$version" "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
+          done
           shim_exports="$(nm -C "fixed-toolchain/${{ matrix.platform }}/cjselfhost_llvmshim.o" \
             | grep -cE ' T _?(LLVMGlobalObjectAddStringAttribute|LLVMSelfhost|CJOF)')"
           test "$shim_exports" -ge 90
@@ -355,13 +377,23 @@ jobs:
             fi
           done
 
+      - name: Verify Windows LLVM payload
+        if: runner.os == 'Windows'
+        env:
+          TUPLE_PLATFORM: ${{ matrix.platform }}
+        run: |
+          for payload in llc.gz opt.gz ld.lld.gz llvm-tools.manifest cjselfhost_llvmshim.o llvm-static-libs.txt llvm-system-libs.txt; do
+            test -s "fixed-toolchain/$TUPLE_PLATFORM/$payload"
+          done
+          node ci/llvm-tools-manifest.mjs validate tuple "fixed-toolchain/$TUPLE_PLATFORM/llvm-tools.manifest"
+
       - name: Upload LLVM tools
         uses: actions/upload-artifact@v7
         with:
           name: fixed-llvm-tools-${{ matrix.platform }}
           path: fixed-toolchain/${{ matrix.platform }}
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 14
 
   static-tuple:
     outputs:

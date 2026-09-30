@@ -81,6 +81,7 @@ llvm_sha=$(make_repo llvm llvm/include/llvm/Transforms/Scalar/ReflectionInfo.h '
 };')
 compiler_sha=$(make_repo compiler schema/ModuleFormat.fbs 'table Fixture {}')
 flatbuffers_sha=$(make_repo flatbuffers CMakeLists.txt 'cmake_minimum_required(VERSION 3.16)')
+runtime_sha=$(make_repo runtime runtime/tools/generate-runtime-layout.py '# source fetch fixture')
 llvm_bare=$work/bare-llvm
 compiler_bare=$work/bare-compiler
 flatbuffers_bare=$work/bare-flatbuffers
@@ -104,6 +105,15 @@ else
 fi
 
 if [ "$skip_fetch_sources" = 0 ]; then
+    # Keep the real scripts and supply an isolated pin file for the fourth
+    # source dependency. The production fetcher still reads its adjacent pin.
+    fixture_repo=$work/fetch-repo
+    mkdir -p "$fixture_repo/ci/platform_tuples" "$fixture_repo/build/lib"
+    cp "$fetch_sources" "$fixture_repo/ci/platform_tuples/fetch_sources.sh"
+    cp "$helper" "$fixture_repo/build/lib/srcbuild_git.sh"
+    cp "$repo_root/ci/fetch-llvm-runtime.sh" "$fixture_repo/ci/"
+    printf 'RUNTIME_REF=%s\nRUNTIME_SRC_URL=file://%s\n' "$runtime_sha" "$work/bare-runtime" \
+        > "$fixture_repo/ci/runtime_pin.env"
     tuple=$work/tuple
     mkdir -p "$tuple"
     (
@@ -113,15 +123,17 @@ if [ "$skip_fetch_sources" = 0 ]; then
         export LLVM_URL="file://$llvm_bare" LLVM_SHA=$llvm_sha
         export CANGJIE_COMPILER_URL="file://$compiler_bare" CANGJIE_COMPILER_SHA=$compiler_sha
         export FLATBUFFERS_URL="file://$flatbuffers_bare" FLATBUFFERS_SHA=$flatbuffers_sha
-        GIT_TRACE=$work/sources.trace "$BASH" "$fetch_sources"
+        GIT_TRACE=$work/sources.trace "$BASH" "$fixture_repo/ci/platform_tuples/fetch_sources.sh"
     ) >"$work/sources.out" 2>"$work/sources.err"
     sources_rc=$?
     echo "ASSERT_REACHED name=fetch_sources_head"
     got_llvm=$(git -C "$tuple/llvm-project" rev-parse HEAD 2>/dev/null || true)
     got_compiler=$(git -C "$tuple/cangjie-compiler" rev-parse HEAD 2>/dev/null || true)
     got_flat=$(git -C "$tuple/flatbuffers" rev-parse HEAD 2>/dev/null || true)
+    got_runtime=$(git -C "$tuple/paired-runtime" rev-parse HEAD 2>/dev/null || true)
     if [ "$sources_rc" = 0 ] && [ "$got_llvm" = "$llvm_sha" ] \
         && [ "$got_compiler" = "$compiler_sha" ] && [ "$got_flat" = "$flatbuffers_sha" ] \
+        && [ "$got_runtime" = "$runtime_sha" ] \
         && grep -F 'SOURCE-MIRROR none, falling back to' "$work/sources.out" >/dev/null \
         && ! grep -F 'local: -A' "$work/sources.out" "$work/sources.err" >/dev/null \
         && ! grep -F 'entries[@]' "$work/sources.out" "$work/sources.err" >/dev/null \

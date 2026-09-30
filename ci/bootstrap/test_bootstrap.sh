@@ -104,7 +104,7 @@ dry_run() {
     --ast-support "$TMP/ast.a" --ast-support-sha256 "$ast_sha" \
     --colour-tuple "$TMP/colour-tuple" --colour-llvm-sha "$COLOUR_SHA" \
     --colour-rt "$TMP/colour-rt" --host-rt "$TMP/host-rt" \
-    --stage all --dry-run
+    --stage "${3:-all}" --dry-run
 }
 
 check_count() {
@@ -175,6 +175,8 @@ check_dry_contract() {
   check_count FORENSIC 0 'cjcj-stage2-forensic' "$log"
   check_count FORENSIC 0 'target/debug/bin' "$log"
   check_count FORENSIC 0 'cjpm build -j .* -g' "$log"
+  check_count TRIMPATH 1 'CMD node .*trimpath.mjs .*/cjcj-src-stage0$' "$log"
+  check_count TRIMPATH 1 'CMD node .*trimpath.mjs .*/cjcj-src-stage1$' "$log"
   echo 'PASS dry release arm has no forensic stage2'
   check_shim_call_count "$log"
   check_count SHIM 1 'CMD shim build label=stage0 .*source-object=source .*sdk=.*/sdk-stage0 .*runtime=.*/host-rt' "$log"
@@ -801,6 +803,9 @@ assert_forensic_plan() {
   done <<EOF
 forensic-output|1|OUTPUT cjcj-stage2-forensic=
 forensic-g|1|CMD cjpm build -j $jobs -g bin=
+forensic-no-trimpath|1|CMD node .*trimpath.mjs .*/cjcj-src-stage1-forensic --debug$
+release-stage0-trimpath|1|CMD node .*trimpath.mjs .*/cjcj-src-stage0$
+release-stage1-trimpath|1|CMD node .*trimpath.mjs .*/cjcj-src-stage1$
 forensic-isolation|1|ISOLATE cjcj-src from=.* dest=.*/cjcj-src-stage1-forensic[[:space:]]
 forensic-debug|2|target/debug/bin
 forensic-pickup|1|product=planned dir=.*/cjcj-src-stage1-forensic/target/debug/bin
@@ -809,7 +814,7 @@ forensic-source-stamp|1|INPUT cjcj-stage2-forensic-src path=.*cjpm.toml sha256=p
 release-pickup|1|product=planned dir=.*/cjcj-src-stage1/target/release/bin
 release-command|1|CMD cjpm build -j $jobs bin=.* cwd=.*/cjcj-src-stage1 heap=
 EOF
-  echo "ASSERTIONS total=9 failed=$failed"
+  echo "ASSERTIONS total=12 failed=$failed"
   [ "$failed" -eq 0 ]
 }
 
@@ -857,7 +862,7 @@ case "${1:-test}" in
     ;;
   dry-run)
     make_dry_fixture
-    dry_run
+    dry_run "$HOST_SHA" "$AST_SHA" "${2:-all}"
     ;;
   positive-a1)
     new_tmp

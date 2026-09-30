@@ -5,6 +5,7 @@ import std.unittest.*
 import std.unittest.testmacro.*
 import std.core.Option as CoreOption
 import std.env.getVariable
+import std.collection.ArrayList
 
 // Upstream: unittests/Option/OptionTest.cpp:18-35 (SetUp).
 // cjpm has no PROJECT_SOURCE_DIR compile definition. Tests run from the repository
@@ -42,9 +43,47 @@ private func makeTriple(arch: ArchType, vendor: Vendor, os: OSType, env: Environ
 class OptionTest {
     private var srcFile: String = ""
 
+    private func iosLtoArgs(src: String, extra: Array<String>): Array<String> {
+        let args = ArrayList<String>()
+        args.add("cjc")
+        args.add(all: extra)
+        args.add(src)
+        return args.toArray()
+    }
+
     @BeforeEach
     func setUp(): Unit {
         srcFile = optionTestSourceFile()
+    }
+
+    @TestCase
+    func ApcFrontendOutputNormalization(): Unit {
+        for (frontend in [false, true]) {
+            for (outputPath in ["packages/option/testdata", "frontend-output.bc"]) {
+                for (apc in [Array<String>(), ["--apc"], ["--apc=4"], ["--apc=1"],
+                    ["--apc-split-num", "5"]]) {
+                    let extra = ArrayList<String>()
+                    extra.add(all: ["--output-type", "staticlib", "-j", "7", "-o", outputPath])
+                    extra.add(all: apc)
+                    let parsed = parseArgs(iosLtoArgs(srcFile, extra.toArray()), frontendMode: frontend)
+                    @Expect(parsed[0], true)
+                    let opts = GlobalOptions()
+                    if (frontend) { opts.SetFrontendMode() }
+                    @Expect(opts.ParseFromArgs(parsed[1]), true)
+                    let requested = if (apc.isEmpty()) { 4u64 } else if (apc[0] == "--apc") {
+                        7u64
+                    } else if (apc[0] == "--apc=1") { 1u64 } else if (apc[0] == "--apc=4") {
+                        4u64
+                    } else { 5u64 }
+                    let expected = if (frontend && outputPath == "frontend-output.bc") { 1u64 } else {
+                        requested
+                    }
+                    println("NORMALIZED frontend=${frontend} output=${outputPath} apc=${apc} value=${opts.aggressiveParallelCompile.value} expected=${expected}")
+                    @Expect(opts.aggressiveParallelCompile.hasValue, true)
+                    @Expect(opts.aggressiveParallelCompile.value, expected)
+                }
+            }
+        }
     }
 
     @TestCase
@@ -55,6 +94,101 @@ class OptionTest {
         let succ = opts.ParseFromArgs(parsed[1])
         @Expect(succ, true)
         @Expect(opts.outputMode, OutputMode.STATIC_LIB)
+    }
+
+    @TestCase
+    func JobsNormalization(): Unit {
+        for (target in ["x86_64-unknown-linux-gnu", "x86_64-w64-mingw32", "aarch64-apple-darwin", "aarch64-apple-ios"]) {
+            for (extra in [Array<String>(), ["-j", "7"]]) {
+                println("INPUT jobs target=${target} extra=${extra}")
+                let args = ArrayList<String>()
+                args.add(all: ["--experimental", "--target", target])
+                args.add(all: extra)
+                let parsed = parseArgs(iosLtoArgs(srcFile, args.toArray()))
+                @Expect(parsed[0], true)
+                let opts = GlobalOptions()
+                @Expect(opts.ParseFromArgs(parsed[1]), true)
+                let expected = if (extra.isEmpty()) { GetHardwareConcurrency() } else { 7u64 }
+                println("NORMALIZED jobs present=${opts.jobs.hasValue} value=${opts.jobs.value} expected=${expected}")
+                @Expect(opts.jobs.hasValue, true)
+                @Expect(opts.jobs.value, expected)
+            }
+        }
+    }
+
+    @TestCase
+    func ApcDefaultNormalization(): Unit {
+        println("INPUT default-apc -j=7")
+        let parsed = parseArgs(iosLtoArgs(srcFile, ["-j", "7"]))
+        @Expect(parsed[0], true)
+        let opts = GlobalOptions()
+        @Expect(opts.ParseFromArgs(parsed[1]), true)
+        println("NORMALIZED default-apc present=${opts.aggressiveParallelCompile.hasValue} value=${opts.aggressiveParallelCompile.value}")
+        @Expect(opts.aggressiveParallelCompile.hasValue, true)
+        @Expect(opts.aggressiveParallelCompile.value, 4u64)
+    }
+
+    @TestCase
+    func ApcPlatformNormalization(): Unit {
+        for (target in ["x86_64-unknown-linux-gnu", "x86_64-w64-mingw32", "aarch64-apple-darwin", "aarch64-apple-ios"]) {
+            for (apc in [Array<String>(), ["--apc"], ["--apc=3"], ["--apc-split-num", "5"]]) {
+                println("INPUT platform target=${target} apc=${apc}")
+                let extra = ArrayList<String>()
+                extra.add(all: ["--experimental", "--target", target, "-j", "7"])
+                extra.add(all: apc)
+                let parsed = parseArgs(iosLtoArgs(srcFile, extra.toArray()))
+                @Expect(parsed[0], true)
+                let opts = GlobalOptions()
+                @Expect(opts.ParseFromArgs(parsed[1]), true)
+                let expected = if (target == "x86_64-unknown-linux-gnu") {
+                    if (apc.isEmpty()) { 4u64 } else if (apc[0] == "--apc") { 7u64 } else if (apc[0] == "--apc=3") { 3u64 } else { 5u64 }
+                } else { 1u64 }
+                println("NORMALIZED target=${target} apc=${apc} present=${opts.aggressiveParallelCompile.hasValue} value=${opts.aggressiveParallelCompile.value} expected=${expected}")
+                @Expect(opts.aggressiveParallelCompile.hasValue, true)
+                @Expect(opts.aggressiveParallelCompile.value, expected)
+            }
+        }
+    }
+
+    @TestCase
+    func ApcLtoNormalization(): Unit {
+        for (target in ["x86_64-unknown-linux-gnu", "x86_64-w64-mingw32", "aarch64-apple-darwin", "aarch64-apple-ios"]) {
+            for (apc in [Array<String>(), ["--apc"], ["--apc=3"], ["--apc-split-num", "5"]]) {
+                println("INPUT lto target=${target} apc=${apc}")
+                let extra = ArrayList<String>()
+                extra.add(all: ["--experimental", "--target", target,
+                    "--lto", "full", "--output-type", "dylib", "-j", "7"])
+                extra.add(all: apc)
+                let parsed = parseArgs(iosLtoArgs(srcFile, extra.toArray()))
+                @Expect(parsed[0], true)
+                let opts = GlobalOptions()
+                let success = opts.ParseFromArgs(parsed[1])
+                let supported = target == "x86_64-unknown-linux-gnu" || target == "aarch64-apple-ios"
+                println("NORMALIZED lto target=${target} success=${success} present=${opts.aggressiveParallelCompile.hasValue}")
+                @Expect(success, supported)
+                if (!supported) { continue }
+                println("NORMALIZED lto target=${target} value=${opts.aggressiveParallelCompile.value}")
+                @Expect(opts.aggressiveParallelCompile.value, 1u64)
+            }
+        }
+    }
+
+    @TestCase
+    func ApcCoverageNormalization(): Unit {
+        for (target in ["x86_64-unknown-linux-gnu", "x86_64-w64-mingw32", "aarch64-apple-darwin", "aarch64-apple-ios"]) {
+            for (apc in [Array<String>(), ["--apc"], ["--apc=3"], ["--apc-split-num", "5"]]) {
+                println("INPUT coverage target=${target} apc=${apc}")
+                let extra = ArrayList<String>()
+                extra.add(all: ["--experimental", "--target", target, "--coverage", "-j", "7"])
+                extra.add(all: apc)
+                let parsed = parseArgs(iosLtoArgs(srcFile, extra.toArray()))
+                @Expect(parsed[0], true)
+                let opts = GlobalOptions()
+                @Expect(opts.ParseFromArgs(parsed[1]), true)
+                println("NORMALIZED coverage target=${target} value=${opts.aggressiveParallelCompile.value}")
+                @Expect(opts.aggressiveParallelCompile.value, 1u64)
+            }
+        }
     }
 
     @TestCase
@@ -123,40 +257,7 @@ class OptionTest {
         @Expect(parsed[0], false)
     }
 
-    @TestCase
-    func PathPrefixMapDefaultsOffTest(): Unit {
-        let opts = GlobalOptions()
-        @Expect(opts.pathPrefixMaps.isEmpty(), true)
-    }
 
-    @TestCase
-    func PathPrefixMapParseTest(): Unit {
-        let parsed = parseArgs(["cjc", "--path-prefix-map=/build/root=module@v1", srcFile])
-        @Expect(parsed[0], true)
-        let opts = GlobalOptions()
-        @Expect(opts.ParseFromArgs(parsed[1]), true)
-        @Expect(opts.pathPrefixMaps.size, 1)
-        @Expect(opts.pathPrefixMaps[0][0], "/build/root")
-        @Expect(opts.pathPrefixMaps[0][1], "module@v1")
-    }
-
-    @TestCase
-    func PathPrefixMapRejectsMalformedValueTest(): Unit {
-        let parsed = parseArgs(["cjc", "--path-prefix-map=/build/root", srcFile])
-        @Expect(parsed[0], true)
-        let opts = GlobalOptions()
-        @Expect(opts.ParseFromArgs(parsed[1]), false)
-        @Expect(opts.pathPrefixMaps.isEmpty(), true)
-    }
-
-    @TestCase
-    func PathPrefixMapRejectsConflictingOldPrefixTest(): Unit {
-        let parsed = parseArgs(["cjc", "--path-prefix-map=/build/root=module@v1",
-            "--path-prefix-map=/build/root=module@v2", srcFile])
-        @Expect(parsed[0], true)
-        let opts = GlobalOptions()
-        @Expect(opts.ParseFromArgs(parsed[1]), false)
-    }
 }
 
 @Test

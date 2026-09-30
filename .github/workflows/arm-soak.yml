@@ -11,43 +11,64 @@ on:
       std_artifact:
         description: >
           Same-platform source-built final std artifact. build-release-package.yml
-          requires it and asserts it equals final-std-<platform>, so the default is
-          the only accepted value for linux-aarch64. The source-final-std job is its
+          requires it and asserts it equals final-std-<platform>. Empty selects
+          the registry-derived artifact. The source-final-std job is its
           only producer in this run.
         required: false
         type: string
-        default: final-std-linux-aarch64
+        default: ''
 
 permissions:
   contents: read
   actions: read
 
 jobs:
+  matrix-plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      targets: ${{ steps.matrix.outputs.targets }}
+      runner: ${{ steps.matrix.outputs.runner }}
+      platform: ${{ steps.matrix.outputs.platform }}
+      llvm_platform: ${{ steps.matrix.outputs.llvm_platform }}
+      sdk_runtime_dir: ${{ steps.matrix.outputs.sdk_runtime_dir }}
+      compiler_artifact: ${{ steps.matrix.outputs.compiler_artifact }}
+      std_artifact: ${{ steps.matrix.outputs.std_artifact }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Export target matrix
+        id: matrix
+        run: node ci/target-matrix.mjs arm-soak
+
   source-final-std:
+    needs: matrix-plan
     name: Build source SDK and final std artifacts
     uses: ./.github/workflows/srcbuild.yml
     with:
       build_type: relwithdebinfo
+      targets: ${{ needs.matrix-plan.outputs.targets }}
 
   package:
     name: Build Linux ARM package once
-    needs: source-final-std
+    needs: [matrix-plan, source-final-std]
     uses: ./.github/workflows/build-release-package.yml
     with:
-      runner: ubuntu-24.04-arm
-      platform: linux-aarch64
-      llvm_platform: linux_aarch64
-      sdk_runtime_dir: linux_aarch64_cjnative
-      compiler_artifact: final-compiler-linux-aarch64
-      std_artifact: ${{ inputs.std_artifact }}
+      runner: ${{ needs.matrix-plan.outputs.runner }}
+      platform: ${{ needs.matrix-plan.outputs.platform }}
+      llvm_platform: ${{ needs.matrix-plan.outputs.llvm_platform }}
+      sdk_runtime_dir: ${{ needs.matrix-plan.outputs.sdk_runtime_dir }}
+      compiler_artifact: ${{ needs.matrix-plan.outputs.compiler_artifact }}
+      std_artifact: ${{ inputs.std_artifact || needs.matrix-plan.outputs.std_artifact }}
       version: arm-soak
       verify: false
     secrets: inherit
 
   soak:
     name: Packaged smoke x${{ inputs.rounds }}
-    needs: package
-    runs-on: ubuntu-24.04-arm
+    needs: [matrix-plan, package]
+    runs-on: ${{ needs.matrix-plan.outputs.runner }}
     timeout-minutes: 300
     steps:
       - name: Checkout cjcj smoke corpus

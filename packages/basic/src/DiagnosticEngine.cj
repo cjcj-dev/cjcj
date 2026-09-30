@@ -965,7 +965,7 @@ public class DiagnosticBuilder <: Resource {
 }
 
 public class DiagnosticCache {
-    public let cachedDiags: ArrayList<Diagnostic> = ArrayList<Diagnostic>()
+    public var cachedDiags: ArrayList<Diagnostic> = ArrayList<Diagnostic>(0)
 
     public init() {}
 
@@ -979,13 +979,11 @@ public class DiagnosticCache {
     public func BackUp(diagAfter: DiagnosticEngine): Unit {
         let storedDiags = diagAfter.GetStoredDiags()
         let oldSize = cachedDiags.size
-        cachedDiags.clear()
         if (storedDiags.size > oldSize) {
-            var idx = oldSize
-            while (idx < storedDiags.size) {
-                cachedDiags.add(storedDiags[idx])
-                idx++
-            }
+            cachedDiags = ArrayList<Diagnostic>(storedDiags.size - oldSize,
+                { idx => storedDiags[oldSize + idx] })
+        } else {
+            cachedDiags.clear()
         }
     }
 

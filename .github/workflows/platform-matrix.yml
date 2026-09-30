@@ -51,6 +51,31 @@ env:
   CJ_HEAP_SIZE: 12GB
 
 jobs:
+  matrix-plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Export target matrix
+        id: matrix
+        run: node ci/target-matrix.mjs platform
+
+  matrix-scope:
+    name: Report matrix coverage scope
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Record requested coverage
+        env:
+          MATRIX_INPUTS: ${{ toJSON(inputs) }}
+        run: |
+          node ci/platform_matrix/summarize_scope.mjs
+          cat "$GITHUB_STEP_SUMMARY"
+
   darwin-source-input:
     if: ${{ inputs.darwin_verify_only }}
     uses: ./.github/workflows/verify-darwin-runtime.yml
@@ -306,44 +331,13 @@ jobs:
 
   platform:
     name: ${{ matrix.runner }} / runtime + cjcj + smoke
-    needs: [fixed-llvm-tuples, patched-cjpm, windows-runtime]
-    if: ${{ always() && !inputs.runtime_only && !inputs.std_evidence_only && !inputs.darwin_runtime_only && !inputs.darwin_host_only && !inputs.darwin_verify_only }}
+    needs: [matrix-plan, fixed-llvm-tuples, patched-cjpm, windows-runtime]
+    if: ${{ always() && needs.matrix-plan.result == 'success' && !inputs.runtime_only && !inputs.std_evidence_only && !inputs.darwin_runtime_only && !inputs.darwin_host_only && !inputs.darwin_verify_only }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 180
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - runner: macos-26
-            llvm_platform: darwin_aarch64
-            sdk_runtime_dir: darwin_aarch64_cjnative
-          - runner: macos-26-intel
-            llvm_platform: darwin_x86_64
-            sdk_runtime_dir: darwin_x86_64_cjnative
-          - runner: macos-15
-            llvm_platform: darwin_aarch64
-            sdk_runtime_dir: darwin_aarch64_cjnative
-          - runner: macos-15-intel
-            llvm_platform: darwin_x86_64
-            sdk_runtime_dir: darwin_x86_64_cjnative
-          - runner: ubuntu-24.04
-            llvm_platform: linux_x86_64
-            sdk_runtime_dir: linux_x86_64_cjnative
-          - runner: ubuntu-24.04-arm
-            llvm_platform: linux_aarch64
-            sdk_runtime_dir: linux_aarch64_cjnative
-          - runner: ubuntu-22.04
-            llvm_platform: linux_x86_64
-            sdk_runtime_dir: linux_x86_64_cjnative
-          - runner: ubuntu-22.04-arm
-            llvm_platform: linux_aarch64
-            sdk_runtime_dir: linux_aarch64_cjnative
-          - runner: windows-2025
-            llvm_platform: windows_x86_64
-            sdk_runtime_dir: windows_x86_64_cjnative
-          - runner: windows-2022
-            llvm_platform: windows_x86_64
-            sdk_runtime_dir: windows_x86_64_cjnative
+      matrix: ${{ fromJSON(needs.matrix-plan.outputs.matrix) }}
     env:
       MATRIX_RUNNER: ${{ matrix.runner }}
       SDK_RUNTIME_DIR: ${{ matrix.sdk_runtime_dir }}
@@ -404,6 +398,19 @@ jobs:
       - name: Runtime build (Linux/macOS native)
         if: always() && runner.os != 'Windows'
         run: npx --yes zx@8 ci/platform_matrix/build_runtime.mjs
+
+      - name: Preserve runtime gate diagnostics
+        if: always() && runner.os != 'Windows'
+        run: node ci/platform_matrix/collect_runtime_gate_logs.mjs
+
+      - name: Upload runtime gate diagnostics before compiler build
+        if: always() && runner.os != 'Windows'
+        uses: actions/upload-artifact@v7
+        with:
+          name: platform-runtime-gate-${{ matrix.runner }}-${{ github.run_attempt }}
+          retention-days: 7
+          if-no-files-found: warn
+          path: .platform-ci/logs/**
 
       - name: Download cross-built Windows runtime
         if: always() && runner.os == 'Windows'

@@ -4,11 +4,12 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {acquire} from './bootstrap_store.mjs';
+import {prepareColourTuple} from './bootstrap_tuple.mjs';
 import {verifyRuntime} from './colour_runtime.mjs';
 import {prepareCppHeaders} from '../bootstrap/prepare_cpp_headers.mjs';
-import {prepareHostLlvm} from './host_llvm.mjs';
-import {nativeTuplePin} from './native_tuple_pin.mjs';
+import {hostIdentity, prepareHostLlvm} from './host_llvm.mjs';
+import {bootstrapArtifact} from './bootstrap_artifact.mjs';
+import {prepareHostSdk} from './bootstrap_host_sdk.mjs';
 
 function sha256File(file) {
   return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
@@ -44,56 +45,63 @@ function findFile(root, predicate) {
   return undefined;
 }
 
-// Source consumers verify a complete runtime/std pair; the std producer verifies its seed libraries.
 export async function prepareBootstrapInputs(verifyRuntimeInput) {
-  // Native Darwin has no implicit Linux depot input. Reject before acquisition.
   if ((process.env.CJCJ_SRCBUILD_TARGET || process.platform).startsWith('darwin')
       && !process.env.CJCJ_BOOTSTRAP_DYLIB_ARTIFACT && !process.env.CJCJ_BOOTSTRAP_COLOUR_DYLIB) {
     throw new Error('DARWIN_COLOUR_ARTIFACT_MISSING');
   }
-
-  const hostSdk = process.env.CJCJ_SRCBUILD_HOST_SDK
-    || (process.env.CJCJ_TOOLCHAIN && process.env.HOME
-      ? path.join(process.env.HOME, '.cjv', 'toolchains', process.env.CJCJ_TOOLCHAIN)
-      : '');
-  const buildRoot = process.env.CANGJIE_BUILD_ROOT || '';
-
-  const base = firstExisting([hostSdk]);
-  if (!base) {
-    throw new Error(`host SDK missing (CJCJ_SRCBUILD_HOST_SDK / $HOME/.cjv/toolchains/$CJCJ_TOOLCHAIN)`);
+  const target = process.env.CJCJ_SRCBUILD_TARGET
+    || `${process.platform}-${process.platform === 'linux' && process.arch === 'arm64' ? 'aarch64' : process.arch}`;
+  const platform = {'linux-x64': 'linux_x86_64', 'linux-aarch64': 'linux_aarch64',
+    'darwin-arm64': 'darwin_aarch64', 'darwin-x64': 'darwin_x86_64'}[target];
+  if (!platform) throw new Error(`BOOTSTRAP_TARGET_UNSUPPORTED: ${target}`);
+  for (const pin of ['host_sdk_pin.env', 'llvm_pin.env', 'runtime_pin.env',
+    `ast_support/${platform}.env`, `colour-runtime/${platform}.env`, `llvm-dylib/${platform}.env`]) {
+    const pinFile = new URL(`../${pin}`, import.meta.url);
+    if (!fs.existsSync(pinFile)) continue;
+    for (const line of fs.readFileSync(pinFile, 'utf8').split('\n')) {
+      const match = /^([A-Z][A-Z0-9_]*)=(.*)$/.exec(line);
+      if (match && process.env[match[1]] === undefined) process.env[match[1]] = match[2];
+    }
   }
+  const inputsWork = process.env.CJCJ_BOOTSTRAP_INPUTS_WORK
+    || path.join(process.env.RUNNER_TEMP || process.env.CANGJIE_BUILD_ROOT || '.', 'bootstrap-inputs');
+  const buildRoot = process.env.CANGJIE_BUILD_ROOT || '';
+  const hostSdk = await prepareHostSdk(platform, inputsWork);
+  const base = hostSdk.path;
 
   // Every source cell consumes its independently pinned repaired host artifact.
+  const hostPin = hostIdentity();
+  process.env.CJCJ_BOOTSTRAP_HOST_LLVM_ARTIFACT = bootstrapArtifact(
+    process.env.CJCJ_BOOTSTRAP_HOST_LLVM_ARTIFACT, hostPin.repository, hostPin.artifact_id, inputsWork, 'HOST_LLVM');
   const hostLlvm = prepareHostLlvm();
 
-  const astSupport = pinnedInput(process.env.CJCJ_BOOTSTRAP_AST_ARTIFACT, [
-    process.env.CJCJ_BOOTSTRAP_AST_SUPPORT,
-    path.join(buildRoot, 'lib', 'libcangjie-ast-support.a'),
-    findFile(path.join(base, 'lib'), (_full, name) => name === 'libcangjie-ast-support.a'),
-  ], '', process.env.AST_SUPPORT_SHA256, 'ast-support archive SHA256');
-
-  const pinPath = process.env.CJCJ_BOOTSTRAP_INPUTS_PIN
-    || new URL('../bootstrap_inputs_pin.json', import.meta.url);
-  const inputConfig = JSON.parse(fs.readFileSync(pinPath, 'utf8'));
-  const target = process.env.CJCJ_SRCBUILD_TARGET || `${process.platform}-${process.arch}`;
-  const nativePlatform = {'darwin-arm64': 'darwin_aarch64', 'darwin-x64': 'darwin_x86_64'}[target];
-  const inputPin = nativePlatform && !process.env.CJCJ_BOOTSTRAP_INPUTS_PIN
-    ? nativeTuplePin(inputConfig, nativePlatform) : inputConfig;
-  const tupleSumsPin = inputPin.sums_sha256 || process.env.LLVM_TUPLE_SUMS_SHA || '';
-  const colourTuple = await acquire(inputPin,
-    process.env.CJCJ_BOOTSTRAP_INPUTS_WORK || path.join(process.env.RUNNER_TEMP || buildRoot || '.', 'bootstrap-inputs'), {
-      mode: process.env.CJCJ_BOOTSTRAP_SOURCE || 'release',
-      reason: process.env.CJCJ_BOOTSTRAP_SOURCE_REASON || '',
-      depot: process.env.CJCJ_BOOTSTRAP_COLOUR_TUPLE || (process.env.LLVM_SHA && process.env.CANGJIE_COMPILER_SHA
-        ? path.join(process.env.CJCJ_LLVM_DEPOT_ROOT || '/root/llvmdepot', process.env.LLVM_SHA, process.env.CANGJIE_COMPILER_SHA) : ''),
-    });
-  // The pin is reviewed source, never a digest learned from this run's download.
-  const tupleSums = path.join(colourTuple, 'SHA256SUMS');
-  if (!/^[0-9a-f]{64}$/.test(tupleSumsPin)
-      || sha256File(tupleSums) !== tupleSumsPin) {
-    throw new Error(`colour tuple SHA256SUMS disagrees with ci/llvm_pin.env: ${colourTuple}`);
+  function completeAstInput(archive) {
+    return archive && ['SHA256SUMS', 'include/cangjie',
+      'include/flatbuffers/StdAstFormat_generated.h', 'schema/StdAstFormat.fbs',
+      'third_party/flatbuffers/bin/flatc', 'third_party/flatbuffers/include',
+      'third_party/flatbuffers/cangjie', 'third_party/flatbuffers/modules']
+      .every(name => fs.existsSync(path.join(path.dirname(archive), name)));
   }
 
+  const astFallbacks = [
+    path.join(buildRoot, 'lib', 'libcangjie-ast-support.a'),
+    findFile(path.join(base, 'lib'), (_full, name) => name === 'libcangjie-ast-support.a'),
+  ].filter(completeAstInput);
+  if (!process.env.CJCJ_BOOTSTRAP_AST_ARTIFACT && !process.env.CJCJ_BOOTSTRAP_AST_SUPPORT && !firstExisting(astFallbacks)) {
+    process.env.CJCJ_BOOTSTRAP_AST_ARTIFACT = path.join(bootstrapArtifact(undefined, 'cjcj-dev/cjcj',
+      process.env.AST_SUPPORT_ARTIFACT_ID, inputsWork, 'AST_SUPPORT'), 'libcangjie-ast-support.a');
+  }
+
+  const astSupport = pinnedInput(process.env.CJCJ_BOOTSTRAP_AST_ARTIFACT || process.env.CJCJ_BOOTSTRAP_AST_SUPPORT,
+    astFallbacks, '', process.env.AST_SUPPORT_SHA256, 'ast-support archive SHA256');
+  if (!completeAstInput(astSupport)) throw new Error(`AST_SUPPORT_INPUTS_INCOMPLETE: ${astSupport}`);
+
+  const tuple = await prepareColourTuple({work: inputsWork});
+  const colourTuple = tuple.directory;
+
+  process.env.CJCJ_BOOTSTRAP_COLOUR_RT = bootstrapArtifact(process.env.CJCJ_BOOTSTRAP_COLOUR_RT,
+    'cjcj-dev/cjcj', process.env.COLOUR_RT_ARTIFACT_ID, inputsWork, 'COLOUR_RT');
   const colourRt = verifyRuntimeInput();
 
   const llvmSha = process.env.LLVM_SHA || '';
@@ -121,10 +129,10 @@ export async function prepareBootstrapInputs(verifyRuntimeInput) {
   const darwin = (process.env.CJCJ_SRCBUILD_TARGET || process.platform).startsWith('darwin');
   if (process.platform === 'linux' || darwin || process.env.CJCJ_BOOTSTRAP_DYLIB_ARTIFACT
       || process.env.CJCJ_BOOTSTRAP_COLOUR_DYLIB) {
-    const dylibRoot = process.env.CJCJ_BOOTSTRAP_DYLIB_ARTIFACT
-      || process.env.CJCJ_BOOTSTRAP_COLOUR_DYLIB
-      || path.join(process.env.CJCJ_LLVM_DEPOT_ROOT || '/root/llvmdepot',
-        llvmSha, process.env.CANGJIE_COMPILER_SHA || '', 'dylib');
+    if (process.env.LLVM_DYLIB_SOURCE_SHA !== llvmSha) throw new Error('LLVM_DYLIB_SOURCE_MISMATCH');
+    const dylibRoot = bootstrapArtifact(process.env.CJCJ_BOOTSTRAP_DYLIB_ARTIFACT
+      || process.env.CJCJ_BOOTSTRAP_COLOUR_DYLIB, 'cjcj-dev/cjcj',
+    process.env.LLVM_DYLIB_ARTIFACT_ID, inputsWork, 'LLVM_DYLIB');
     const colourLlvm = path.join(dylibRoot, darwin ? 'libLLVM.dylib' : 'libLLVM-15.so');
     const dylibPin = process.env.LLVM_DYLIB_SHA256 || '';
     if (!/^[0-9a-f]{64}$/.test(dylibPin)) throw new Error('LLVM_DYLIB_PIN_MISSING');
@@ -164,14 +172,26 @@ export async function prepareBootstrapInputs(verifyRuntimeInput) {
   };
 
   const lines = Object.entries(exported).map(([k, v]) => `${k}=${v}`);
+  const identities = {
+    host_sdk: hostSdk.sha256,
+    host_llvm: hostLlvm.sha256,
+    ast_support: sha256File(astSupport),
+    colour_tuple: tuple.identities,
+    colour_runtime: sha256File(path.join(colourRt, 'manifest.json')),
+    colour_llvm: colourInputs.CJCJ_BOOTSTRAP_COLOUR_LLVM_SHA256,
+  };
+  console.log(`BOOTSTRAP_INPUT_IDENTITIES=${JSON.stringify(identities)}`);
   if (process.env.GITHUB_ENV) {
     fs.appendFileSync(process.env.GITHUB_ENV, `${lines.join('\n')}\n`);
   }
   for (const line of lines) console.log(line);
-
+  if (process.argv[2] === '--shell-output') {
+    const quote = value => `'${String(value).replaceAll("'", "'\\''")}'`;
+    fs.writeFileSync(process.argv[3], Object.entries(exported)
+      .map(([key, value]) => `export ${key}=${quote(value)}`).join('\n') + '\n');
+  }
 }
 
-// Node resolves module symlinks; macOS /var aliases must still enter the CLI.
 if (process.argv[1] && fs.existsSync(process.argv[1])
     && fs.realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   await prepareBootstrapInputs(verifyRuntime);

@@ -67,9 +67,12 @@ for (const fail of ['', 'final-clean', 'final-build']) {
         if (tag === 'final-build') {
           const effectiveWorkspace = await fs.readFile('cjpm.toml', 'utf8');
           console.log('WINDOWS_W2_OPTIMIZATION_ASSERT_REACHED fixture_only=true');
-          const optimization = effectiveWorkspace.match(/^\s*compile-option\s*=\s*"([^"]*)"/m)?.[1];
-          assert.equal(optimization, '-O2', 'W2 optimization must be -O2');
-          assert.equal(effectiveWorkspace, workspaceToml, 'W2 must preserve the complete native release workspace');
+          // AddCangjieSource.cmake:132-136: retain O2 and trim this release root.
+          const expectedOptions = '-O2 --trimpath ' + JSON.stringify(root.replaceAll('\\', '/'));
+          const expectedWorkspace = workspaceToml.replace('compile-option = "-O2"',
+            'compile-option = ' + JSON.stringify(expectedOptions));
+          assert.equal(effectiveWorkspace, expectedWorkspace,
+            'W2 must preserve the complete native release workspace with O2 and its own trimpath');
         }
         const child = spawnSync('python3', [external, command, tag, sdkRoot, hostRoot, fail], {encoding: 'utf8'});
         assert.equal(child.error, undefined);
@@ -93,7 +96,7 @@ for (const fail of ['', 'final-clean', 'final-build']) {
       }
       assert.equal(await fs.readFile(path.join(host, 'tools/bin/libcangjie-runtime.dll'), 'utf8'), 'host DLL');
       assert.equal(await fs.readFile(path.join(root, 'final-compiler-target-sdk/bin/libcangjie-runtime.dll'), 'utf8'), 'target DLL');
-      assert.equal(await fs.readFile(path.join(root, 'commands.log'), 'utf8'), 'final-clean:cjpm clean\nfinal-build:cjc --version && cjpm build\n');
+      assert.equal(await fs.readFile(path.join(root, 'commands.log'), 'utf8'), 'final-clean:cjpm clean\nfinal-build:cjc --version && node ci/check-codegen-runtime-layout.mjs && cjpm build\n');
     }
   });
 }

@@ -27,8 +27,11 @@ Windows 解压后直接使用 `bin\cjc.exe`。
 
 ```sh
 npx --yes zx@8 ci/setup_sdk.mjs   # 安装并配置官方 SDK
+node ci/release/trimpath.mjs .     # 发布构建裁剪本次源码根路径
 cjpm build                        # 构建编译器
 ```
+
+调试构建先运行 `node ci/release/trimpath.mjs . --debug`，再运行 `cjpm build -g`，以保留源码位置。
 
 ## 文档
 

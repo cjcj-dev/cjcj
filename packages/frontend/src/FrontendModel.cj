@@ -7172,8 +7172,13 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
             exportContent: importSrcCode, exportForIncr: false,
             exportForTest: globalOptions.exportForTest, exportFuncBody: true,
             compileCjd: globalOptions.compileCjd)
-        writer.PreSaveFullExportDecls(pkg)
-        astWriters[pkg] = writer
+        try {
+            writer.PreSaveFullExportDecls(pkg)
+            astWriters[pkg] = writer
+        } catch (error: Exception) {
+            writer.close()
+            throw error
+        }
     }
 
     // ImportManager.cpp:289-320 ImportManager::ExportAST.
@@ -7188,15 +7193,27 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
                 exportContent: importSrcCode, exportForIncr: false,
                 exportForTest: globalOptions.exportForTest, exportFuncBody: true,
                 compileCjd: globalOptions.compileCjd)
-            newWriter.PreSaveFullExportDecls(pkg)
+            try {
+                newWriter.PreSaveFullExportDecls(pkg)
+            } catch (error: Exception) {
+                newWriter.close()
+                throw error
+            }
             newWriter
         }
-        writer.ExportAST(pkg)
-        return writer.AST2FB(pkg)
+        try {
+            writer.ExportAST(pkg)
+            return writer.AST2FB(pkg)
+        } finally {
+            writer.close()
+        }
     }
 
     // ImportManager.cpp:578-586 ImportManager::DeleteASTWriters.
     public func DeleteASTWriters(): Unit {
+        for ((_, writer) in astWriters) {
+            writer.close()
+        }
         astWriters.clear()
     }
 

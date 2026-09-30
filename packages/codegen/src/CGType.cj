@@ -527,8 +527,11 @@ public open class CGType {
             }
         }
         if (created) {
-            let body = ArrayList<LLVMTypeRef>()
-            body.add(unsafe { LLVMInt64TypeInContext(context.raw) })
+            let body = ArrayList<LLVMTypeRef>(Array<LLVMTypeRef>(ArrayBaseFields.ARRAY_BASE_FIELDS_NUM,
+                { _: Int64 => LLVMNullType() }))
+            // ArrayBase is the length in the payload, not the object header.
+            CJC_ASSERT(RuntimeLayout.ArrayLengthSize == 8u64)
+            body[ArrayBaseFields.ARRAY_BASE_ARRAY_LEN] = unsafe { LLVMInt64TypeInContext(context.raw) }
             SetStructTypeBody(result, body)
         }
         return result
@@ -675,25 +678,25 @@ public open class CGType {
         let typeInfoPtrTy = unsafe { LLVMPointerType(result, 0u32) }
         let extensionDefPtrPtrTy = unsafe { LLVMPointerType(CGType.GetOrCreateExtensionDefPtrType(context), 0u32) }
         let bitMapPtrTy = unsafe { LLVMPointerType(CGType.GetBitMapType(context), 0u32) }
-        let body = ArrayList<LLVMTypeRef>()
-        body.add(i8PtrTy)
-        body.add(i8Ty)
-        body.add(i8Ty)
-        body.add(i16Ty)
-        body.add(i32Ty)
-        body.add(bitMapPtrTy)
-        body.add(i32Ty)
-        body.add(i8Ty)
-        body.add(i8Ty)
-        body.add(i16Ty)
-        body.add(i32PtrTy)
-        body.add(i8PtrTy)
-        body.add(i8PtrTy)
-        body.add(i8PtrTy)
-        body.add(typeInfoPtrTy)
-        body.add(extensionDefPtrPtrTy)
-        body.add(i8PtrTy)
-        body.add(i8PtrTy)
+        let body = ArrayList<LLVMTypeRef>(Array<LLVMTypeRef>(TypeInfoLayout.FieldCount, { _: Int64 => LLVMNullType() }))
+        body[TypeInfoLayout.typeInfoNameIndex] = i8PtrTy
+        body[TypeInfoLayout.typeIndex] = i8Ty
+        body[TypeInfoLayout.flagIndex] = i8Ty
+        body[TypeInfoLayout.fieldNumIndex] = i16Ty
+        body[TypeInfoLayout.instanceSizeIndex] = i32Ty
+        body[TypeInfoLayout.gctibIndex] = bitMapPtrTy
+        body[TypeInfoLayout.uuidIndex] = i32Ty
+        body[TypeInfoLayout.alignIndex] = i8Ty
+        body[TypeInfoLayout.typeArgsNumIndex] = i8Ty
+        body[TypeInfoLayout.validInheritNumIndex] = i16Ty
+        body[TypeInfoLayout.fieldOffsetsIndex] = i32PtrTy
+        body[TypeInfoLayout.sourceGenericIndex] = i8PtrTy
+        body[TypeInfoLayout.typeArgsIndex] = i8PtrTy
+        body[TypeInfoLayout.fieldsIndex] = i8PtrTy
+        body[TypeInfoLayout.superTypeInfoIndex] = typeInfoPtrTy
+        body[TypeInfoLayout.vExtensionDataStartIndex] = extensionDefPtrPtrTy
+        body[TypeInfoLayout.mTableDescIndex] = i8PtrTy
+        body[TypeInfoLayout.reflectInfoIndex] = i8PtrTy
         SetStructTypeBody(result, body)
         return result
     }

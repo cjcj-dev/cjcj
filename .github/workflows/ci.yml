@@ -11,6 +11,20 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  matrix-plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      build: ${{ steps.matrix.outputs.build }}
+      provision: ${{ steps.matrix.outputs.provision }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Export target matrix
+        id: matrix
+        run: node ci/target-matrix.mjs ci
+
   lint:
     name: Verify sources
     runs-on: ubuntu-slim
@@ -48,7 +62,7 @@ jobs:
       # this step must keep asking the manifest.
       - name: Install release contract dependencies
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq zip unzip clang lld
+          sudo apt-get update -qq && sudo apt-get install -y -qq zip unzip clang lld libssl-dev python3 build-essential jq
           npx --yes zx@8 --version
       # package-lineage compares package bytes with the official host SDK. Load
       # the consumer's pin, not the build job's independently loaded environment.
@@ -71,7 +85,7 @@ jobs:
           # mapfile succeeds with zero lines if the manifest fails, and `node
           # --test` with no file arguments falls back to its own discovery, which
           # would pass while testing nothing.
-          test "${#FILES[@]}" -ge 26
+          test "${#FILES[@]}" -ge 85
           # A hanging test would otherwise consume this job's whole
           # timeout-minutes and end in "exceeded maximum execution time", which
           # names no test. The bound makes the runner fail the specific test by
@@ -96,31 +110,102 @@ jobs:
       - name: Verify LLVM policy
         run: test -z "$(git ls-files 'ci/prebuilt/**' 'runtime_shim/prebuilt/**')"
 
+  script-tests:
+    name: Python and shell contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout cjcj
+        uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Install script test dependencies
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq python3 build-essential binutils zip unzip
+      - name: Run registered script tests
+        run: node ci/run-registered-tests.mjs scripts "$RUNNER_TEMP/script-tests"
+      - name: Preserve script test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: script-tests
+          path: ${{ runner.temp }}/script-tests
+
+  package-tests:
+    name: Cangjie package tests (official host)
+    needs: fixed-llvm-tools
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Checkout cjcj
+        uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Download test LLVM shim
+        uses: actions/download-artifact@v8
+        with:
+          name: fixed-llvm-tools-linux_x86_64
+          path: fixed-toolchain/linux_x86_64
+      - name: Export host toolchain pin
+        run: cat ci/host_sdk_pin.env >> "$GITHUB_ENV"
+      - name: Install official test SDK
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/test-cjv"
+          curl -fsSL https://github.com/Zxilly/cjv/releases/download/v0.2.20/cjv_linux_amd64.tar.gz | tar -xz -C "$RUNNER_TEMP/test-cjv"
+          cjv_bin=$(find "$RUNNER_TEMP/test-cjv" -type f -name cjv | head -1)
+          "$cjv_bin" install "$CJCJ_TOOLCHAIN"
+      # The shim object compiles C++ against the LLVM that produced
+      # fixed-llvm-tools, so the cache key carries the same host toolchain pin
+      # the SDK above is installed from; a pin change must not reuse its objects.
+      - name: Start sccache
+        uses: ./.github/actions/sccache
+        with:
+          component: runtime-shim
+          platform: ubuntu-24.04
+          pin: ${{ env.CJCJ_TOOLCHAIN }}
+          cache-size: 1G
+      - name: Run registered Cangjie package tests
+        shell: bash
+        env:
+          CJCJ_LLVM_SHIM_O: ${{ github.workspace }}/fixed-toolchain/linux_x86_64/cjselfhost_llvmshim.o
+        run: |
+          ulimit -c 0
+          sdk="$HOME/.cjv/toolchains/$CJCJ_TOOLCHAIN"
+          source "$sdk/envsetup.sh"
+          npx --yes zx@8 runtime_shim/build_shim.mjs
+          node ci/run-registered-tests.mjs cj "$RUNNER_TEMP/package-tests"
+      - name: Report sccache
+        if: always()
+        uses: ./.github/actions/sccache-report
+        with:
+          component: runtime-shim
+          platform: ubuntu-24.04
+          require-compiles: ${{ job.status == 'success' }}
+      - name: Preserve Cangjie test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: package-tests-official-host
+          path: |
+            ${{ runner.temp }}/package-tests/results.json
+            ${{ runner.temp }}/package-tests/run.log
+            ${{ runner.temp }}/package-tests/reports
+
   fixed-llvm-tools:
     name: Build LLVM tools
     uses: ./.github/workflows/build-llvm-tools.yml
 
   build:
     name: ${{ matrix.runner }} / Build
-    needs: fixed-llvm-tools
+    needs: [fixed-llvm-tools, matrix-plan]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
     continue-on-error: ${{ matrix.experimental }}
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - { runner: ubuntu-24.04, llvm_platform: linux_x86_64, experimental: false }
-          - { runner: ubuntu-22.04, llvm_platform: linux_x86_64, experimental: false }
-          # ubuntu-26.04 is not a platform we ship on yet, so its failures are
-          # information rather than verdicts.
-          - { runner: ubuntu-26.04, llvm_platform: linux_x86_64, experimental: true }
-          # linux-aarch64 is a release platform: it appears in the release matrix
-          # and ships as an artifact, so a build failure here has to count. It was
-          # non-gating from when this row only provisioned the official SDK; the
-          # row now runs a native cjcj build and smoke, and the exemption outlived
-          # its reason.
-          - { runner: ubuntu-24.04-arm, llvm_platform: linux_aarch64, experimental: false }
+      matrix: ${{ fromJSON(needs.matrix-plan.outputs.build) }}
     steps:
       - name: Checkout cjcj
         uses: actions/checkout@v7
@@ -140,7 +225,7 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: ~/.cjv
-          key: cjv-${{ runner.os }}-${{ runner.arch }}-${{ env.CJCJ_TOOLCHAIN }}
+          key: cjv-host-tools-isolated-${{ runner.os }}-${{ runner.arch }}-${{ env.CJCJ_TOOLCHAIN }}
       - name: Restore cjpm cache
         uses: actions/cache@v6
         with:
@@ -161,7 +246,7 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: ~/.cjv
-          key: cjv-${{ runner.os }}-${{ runner.arch }}-${{ env.CJCJ_TOOLCHAIN }}
+          key: cjv-host-tools-isolated-${{ runner.os }}-${{ runner.arch }}-${{ env.CJCJ_TOOLCHAIN }}
       # Keyed by matrix.runner: the runtime .so links the builder's glibc, so a cache
       # entry built on a newer distro is unloadable on an older one (GLIBC_x.y not found).
       - name: Restore patched runtime cache
@@ -169,10 +254,17 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: dist-runtime
-          key: rt-${{ runner.os }}-${{ runner.arch }}-${{ matrix.runner }}-${{ env.RUNTIME_REF }}-${{ env.RUNTIME_VERSION }}-${{ hashFiles('ci/build_patched_runtime.mjs') }}
+          key: rt-${{ runner.os }}-${{ runner.arch }}-${{ matrix.runner }}-${{ env.RUNTIME_REF }}-${{ env.RUNTIME_VERSION }}-${{ hashFiles('ci/build_patched_runtime.mjs', 'ci/runtime-diagnostics.mjs') }}
+      - name: Initialize runtime diagnostics
+        run: |
+          dir="$GITHUB_WORKSPACE/runtime-diagnostics/${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.runner }}"
+          mkdir -p "$dir"
+          echo "RUNTIME_DIAGNOSTICS_DIR=$dir" >> "$GITHUB_ENV"
+          RUNTIME_DIAGNOSTICS_DIR="$dir" node ci/runtime-diagnostics.mjs
       - name: Install runtime dependencies
+        id: rtdeps
         if: steps.rtcache.outputs.cache-hit != 'true'
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq clang cmake make
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq clang cmake make gdb
       # The patched runtime (on a runtime cache miss) and the two shim objects
       # compile through sccache; keyed per runner because the runtime links the
       # builder's glibc, as the runtime cache key above already records.
@@ -184,18 +276,42 @@ jobs:
           pin: ${{ env.RUNTIME_REF }}
           cache-size: 1G
       - name: Build patched runtime
+        id: rtbuild
         if: steps.rtcache.outputs.cache-hit != 'true'
         env:
           RUNTIME_VERSION: ${{ env.RUNTIME_VERSION }}
         run: npx --yes zx@8 ci/build_patched_runtime.mjs "$PWD/dist-runtime"
+      - name: Record runtime workflow outcome
+        if: always() && env.RUNTIME_DIAGNOSTICS_DIR != ''
+        env:
+          RUNTIME_CACHE_HIT: ${{ steps.rtcache.outputs.cache-hit }}
+          RUNTIME_DEPENDENCY_OUTCOME: ${{ steps.rtdeps.outcome }}
+          RUNTIME_BUILD_OUTCOME: ${{ steps.rtbuild.outcome }}
+        run: node ci/runtime-diagnostics.mjs
+      - name: Upload runtime diagnostics
+        if: always() && env.RUNTIME_DIAGNOSTICS_DIR != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: runtime-diagnostics-${{ matrix.runner }}-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          path: |
+            ${{ env.RUNTIME_DIAGNOSTICS_DIR }}/**/*.json
+            ${{ env.RUNTIME_DIAGNOSTICS_DIR }}/**/*.log
+            ${{ env.RUNTIME_DIAGNOSTICS_DIR }}/**/*.rc
+            ${{ env.RUNTIME_DIAGNOSTICS_DIR }}/**/*.txt
+            ${{ env.RUNTIME_DIAGNOSTICS_DIR }}/**/*.tsv
+            ${{ env.RUNTIME_DIAGNOSTICS_DIR }}/**/*.status
+            ${{ env.RUNTIME_DIAGNOSTICS_DIR }}/**/*.sha256
       - name: Save patched runtime cache
         if: steps.rtcache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6
         with:
           path: dist-runtime
-          key: rt-${{ runner.os }}-${{ runner.arch }}-${{ matrix.runner }}-${{ env.RUNTIME_REF }}-${{ env.RUNTIME_VERSION }}-${{ hashFiles('ci/build_patched_runtime.mjs') }}
+          key: rt-${{ runner.os }}-${{ runner.arch }}-${{ matrix.runner }}-${{ env.RUNTIME_REF }}-${{ env.RUNTIME_VERSION }}-${{ hashFiles('ci/build_patched_runtime.mjs', 'ci/runtime-diagnostics.mjs') }}
+      - name: Install runtime audit dependencies
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libssl-dev
       - name: Install patched runtime
-        run: npx --yes zx@8 ci/install_patched_runtime.mjs "$PWD/dist-runtime"
+        run: npx --yes zx@8 ci/install_patched_runtime.mjs "$PWD/dist-runtime" "$PWD/patched-runtime"
       - name: Build runtime shim
         env:
           CJCJ_LLVM_SHIM_O: ${{ github.workspace }}/fixed-toolchain/${{ matrix.llvm_platform }}/cjselfhost_llvmshim.o
@@ -208,7 +324,10 @@ jobs:
           platform: ${{ matrix.runner }}
           require-compiles: ${{ job.status == 'success' }}
       - name: Build workspace
-        run: cjpm build
+        run: |
+          node ci/check-codegen-runtime-layout.mjs
+          node ci/release/trimpath.mjs .
+          node ci/with-runtime-audit.mjs -- cjpm build
       # Deploy name must be cjcj, not cjc (process-name GC stack-root exclusion -> SEGV).
       - name: Compose compiler
         run: |
@@ -219,14 +338,14 @@ jobs:
 
   # Non-gating: verifies SDK provisioning on macOS; does not build cjcj.
   provision:
+    needs: matrix-plan
     name: ${{ matrix.runner }} / Verify SDK
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 40
     continue-on-error: true
     strategy:
       fail-fast: false
-      matrix:
-        runner: [macos-latest]
+      matrix: ${{ fromJSON(needs.matrix-plan.outputs.provision) }}
     steps:
       - name: Checkout cjcj
         uses: actions/checkout@v7
@@ -238,7 +357,7 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: ~/.cjv
-          key: cjv-${{ runner.os }}-${{ runner.arch }}-${{ env.CJCJ_TOOLCHAIN }}
+          key: cjv-host-tools-isolated-${{ runner.os }}-${{ runner.arch }}-${{ env.CJCJ_TOOLCHAIN }}
       - name: Install SDK
         id: setup
         env:
@@ -251,7 +370,7 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: ~/.cjv
-          key: cjv-${{ runner.os }}-${{ runner.arch }}-${{ env.CJCJ_TOOLCHAIN }}
+          key: cjv-host-tools-isolated-${{ runner.os }}-${{ runner.arch }}-${{ env.CJCJ_TOOLCHAIN }}
       - name: Verify SDK layout
         run: |
           ls -la "$CANGJIE_HOME/bin" || true

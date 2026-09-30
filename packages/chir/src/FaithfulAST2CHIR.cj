@@ -66,10 +66,10 @@ import cjcj::incremental_compilation.{CompilationCache, IncreKind}
 import cjcj::sema.GenericInstantiation.GenericInstantiationManager
 import cjcj::utils.{ANNOTATION_VAR_POSTFIX, CFFI_FUNC_SUFFIX, CJC_ABORT, CJC_ASSERT, FileUtil,
     MAIN_INVOKE, ProfileRecorder, STATIC_INIT_FUNC, STATIC_INIT_VAR}
+import std.runtime.gc
 
 foreign {
     func CJSelfhostStrtoldToFloat32(value: CString): Float64
-    func CJ_MCC_InvokeGC(sync: Bool): Unit
 }
 
 private let USER_MAIN_MANGLED_NAME: String = "user.main"
@@ -1092,9 +1092,7 @@ public class FaithfulAST2CHIR {
         }
         CacheTopLevelDeclToGlobalSymbolTable()
         TranslateNominalDecls(node)
-        unsafe {
-            CJ_MCC_InvokeGC(true)
-        }
+        gc(heavy: true)
         TranslateInitOfGlobalVars(initOrder)
         for ((decl, def) in classDeclWithAnnotation) {
             SetAnnotationTargets(def, decl)

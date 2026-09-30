@@ -159,5 +159,6 @@ public func CreateHashedPackage(builder: FlatBufferBuilder, version: FlatBufferO
 
 public func FinishHashedPackageBuffer(builder: FlatBufferBuilder,
     root: FlatBufferOffset): Array<UInt8> {
-    return builder.Finish(root, HashedPackageIdentifier())
+    builder.Finish(root, HashedPackageIdentifier())
+    return builder.GetBufferArray()
 }

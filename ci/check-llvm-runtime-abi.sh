@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Check the three source-level constants shared by the LLVM backend and runtime.
+# Check the generated layout contract shared by the LLVM backend and runtime.
 # Missing source, an unresolvable ref, or an unreadable constant is a failure.
 
 set -uo pipefail
@@ -86,88 +86,30 @@ if ! runtime_commit=$(resolve_ref "$runtime_repo" "$runtime_ref"); then
     exit 2
 fi
 
-show_source() {
-    local repo=$1
-    local commit=$2
-    local path=$3
-
-    git -C "$repo" show "${commit}:${path}" 2>/dev/null
-}
-
-llvm_barriers=$(show_source "$llvm_repo" "$llvm_commit" \
-    llvm/lib/CodeGen/CJBarrierLowering.cpp)
-llvm_asm_printer=$(show_source "$llvm_repo" "$llvm_commit" \
-    llvm/lib/CodeGen/AsmPrinter/AsmPrinter.cpp)
-runtime_collector=$(show_source "$runtime_repo" "$runtime_commit" \
-    runtime/src/Heap/Collector/Collector.h)
-runtime_thread_local=$(show_source "$runtime_repo" "$runtime_commit" \
-    runtime/src/Mutator/ThreadLocal.h)
-runtime_base_object=$(show_source "$runtime_repo" "$runtime_commit" \
-    runtime/src/Common/BaseObject.cpp)
-
-llvm_phase=$(sed -nE 's/.*APInt\(32, ([0-9]+)\).*/\1/p' <<<"$llvm_barriers" |
-    sort -u | paste -sd, -)
-runtime_phase=$(sed -nE 's/.*GC_PHASE_INIT = ([0-9]+).*/\1/p' \
-    <<<"$runtime_collector" | sort -u | paste -sd, -)
-
-llvm_mutator_offset=$(sed -nE \
-    's/.*MutatorOffsetInCJTLS = AllocBufferOffsetInCJTLS \+ ([0-9]+).*/\1/p' \
-    <<<"$llvm_asm_printer" | sort -u | paste -sd, -)
-runtime_mutator_offset=$(awk '
-    /struct ThreadLocalData[[:space:]]*\{/ { in_struct = 1; next }
-    in_struct && /^[[:space:]]*Mutator\*[[:space:]]+mutator;/ {
-        print fields * 8
-        exit
-    }
-    in_struct && /^[[:space:]]*[A-Za-z_][^;]*;/ { fields++ }
-' <<<"$runtime_thread_local")
-
-llvm_mask_symbol_count=$(awk '
-    /getOrInsertGlobal\("g_cjLoadBadMask", I64\)/ { count++ }
-    END { print count + 0 }
-' <<<"$llvm_barriers")
-llvm_mask_load_count=$(awk '
-    /CreateLoad\(I64, MaskGV,/ { count++ }
-    END { print count + 0 }
-' <<<"$llvm_barriers")
-runtime_mask_definition_count=$(awk '
-    /extern "C" unsigned long g_cjLoadBadMask[[:space:]]*=/ { count++ }
-    END { print count + 0 }
-' <<<"$runtime_base_object")
-
-failed=0
-check_equal() {
-    local site=$1
-    local compiler_value=$2
-    local runtime_value=$3
-
-    if [[ -n $compiler_value && -n $runtime_value && \
-          $compiler_value == "$runtime_value" ]]; then
-        printf 'ABI_SITE=%s compiler=%s runtime=%s status=OK\n' \
-            "$site" "$compiler_value" "$runtime_value"
-    else
-        printf 'ABI_SITE=%s compiler=%s runtime=%s status=MISMATCH\n' \
-            "$site" "${compiler_value:-UNREADABLE}" "${runtime_value:-UNREADABLE}"
-        failed=1
-    fi
-}
-
-check_equal gc_phase_threshold "$llvm_phase" "$runtime_phase"
-check_equal cjtls_mutator_offset "$llvm_mutator_offset" "$runtime_mutator_offset"
-
-if [[ $llvm_mask_symbol_count == 1 && $llvm_mask_load_count == 1 && \
-      $runtime_mask_definition_count == 1 ]]; then
-    printf 'ABI_SITE=load_bad_mask compiler_emit=%s compiler_i64_load=%s runtime_define=%s status=OK\n' \
-        "$llvm_mask_symbol_count" "$llvm_mask_load_count" "$runtime_mask_definition_count"
-else
-    printf 'ABI_SITE=load_bad_mask compiler_emit=%s compiler_i64_load=%s runtime_define=%s status=MISMATCH\n' \
-        "$llvm_mask_symbol_count" "$llvm_mask_load_count" "$runtime_mask_definition_count"
-    failed=1
+# Read both sides at the resolved commits, never from a possibly dirty checkout.
+# The runtime generator owns the assertion list and the comparison; do not
+# duplicate its layout constants or infer offsets by counting C++ declarations.
+work=$(mktemp -d "${TMPDIR:-/tmp}/cjcj-runtime-layout.XXXXXX") || exit 2
+trap 'rm -rf "$work"' EXIT
+if ! git -C "$runtime_repo" archive "$runtime_commit" runtime | tar -x -C "$work"; then
+    printf 'ABI_PAIR=SOURCE_ERROR side=runtime\n'
+    exit 2
 fi
-
-if ((failed == 0)); then
+header="$work/CangjieRuntimeLayout.h"
+if ! git -C "$llvm_repo" show \
+    "$llvm_commit:llvm/include/llvm/CodeGen/CangjieRuntimeLayout.h" > "$header"; then
+    printf 'ABI_PAIR=SOURCE_ERROR side=llvm\n'
+    exit 2
+fi
+if python3 "$work/runtime/tools/generate-runtime-layout.py" --header "$header"; then
+    repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+    if ! python3 "$repo/ci/generate-codegen-runtime-layout.py" \
+        --runtime-root "$work" --header "$header" --check; then
+        printf 'ABI_PAIR=CODEGEN_MISMATCH llvm=%s runtime=%s\n' "$llvm_commit" "$runtime_commit"
+        exit 1
+    fi
     printf 'ABI_PAIR=OK llvm=%s runtime=%s\n' "$llvm_commit" "$runtime_commit"
 else
     printf 'ABI_PAIR=MISMATCH llvm=%s runtime=%s\n' "$llvm_commit" "$runtime_commit"
+    exit 1
 fi
-exit "$failed"

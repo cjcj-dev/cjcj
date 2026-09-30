@@ -66,13 +66,19 @@ def main():
     parser.add_argument('--colour-runtime', type=Path, required=True)
     parser.add_argument('--host-runtime', type=Path, required=True)
     parser.add_argument('--std-colour', type=Path, help='Print 1/0 for the shared std predicate')
+    parser.add_argument('--runtime-only', action='store_true',
+                        help='Require a nonempty colour/host runtime export difference')
     parser.add_argument('--runtime', type=Path)
     parser.add_argument('--std', type=Path)
     parser.add_argument('--source', help='Original std install prefix or inherited SDK')
     args = parser.parse_args()
     try:
         exports = colour_symbols(args.colour_runtime, args.host_runtime)
-        if args.std_colour is not None:
+        if args.runtime_only:
+            if args.std_colour or args.runtime or args.std or args.source:
+                parser.error('--runtime-only cannot be combined with std or pair arguments')
+            print(f'RUNTIME-COLOUR-OK colour_only_count={len(exports)}')
+        elif args.std_colour is not None:
             if args.runtime or args.std or args.source:
                 parser.error('--std-colour cannot be combined with pair arguments')
             print(int(bool(symbols(args.std_colour) & exports)))

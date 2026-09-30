@@ -596,7 +596,8 @@ func CreatePackage(builder: FlatBufferBuilder, version: FlatBufferOffset, cjoVer
 // Finish the buffer with the "CJOF" file identifier. ModuleFormat_generated.h:6706-6715
 // (FinishPackageBuffer). Returns the serialized byte image.
 func FinishPackageBuffer(builder: FlatBufferBuilder, root: FlatBufferOffset): Array<UInt8> {
-    return builder.Finish(root, MF_FILE_IDENTIFIER)
+    builder.Finish(root, MF_FILE_IDENTIFIER)
+    return builder.GetBufferArray()
 }
 
 // ConstValue union struct-member writers: a struct member is stored by offset,

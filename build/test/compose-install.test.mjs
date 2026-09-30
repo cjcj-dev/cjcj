@@ -17,11 +17,19 @@ test('compose replaces stage2 wrapper with recorded stage3 product', async t => 
   const product = path.join(root, 'cjc@cjcj');
   await fs.writeFile(product, 'stage3 final compiler fixture', {mode: 0o755});
   const lineage = {compilerSha256: await fileSha256(product), parentSha256: 'b'.repeat(64), stage: 'stage3'};
-  const installed = await installStage3Compiler({sdk, product, lineage});
+  let installed, installationError;
+  try { installed = await installStage3Compiler({sdk, product, lineage}); }
+  catch (error) { installationError = error; }
+  const frontendHash = await fileSha256(path.join(sdk, 'bin', 'cjc-frontend')).catch(() => null);
+  console.log('COMPOSE_FRONTEND_PRODUCER_TARGET', frontendHash, 'expected', lineage.compilerSha256);
+  assert.equal(frontendHash, lineage.compilerSha256, 'COMPOSE_FRONTEND_PRODUCER_TARGET');
+  assert.equal(installationError, undefined);
   console.log('COMPOSE_STAGE3_ORIGIN_ASSERT_REACHED');
   assert.equal(installed, path.join(sdk, 'bin', 'cjc'));
   assert.equal(await fs.readFile(installed, 'utf8'), 'stage3 final compiler fixture');
   assert.equal(await fileSha256(installed), lineage.compilerSha256);
+  assert.equal(await fileSha256(path.join(sdk, 'bin', 'cjc-frontend')), lineage.compilerSha256);
+  assert.equal(await fs.readlink(path.join(sdk, 'bin', 'cjc')), 'cjcj-stage1');
   await assert.rejects(fs.stat(path.join(sdk, 'bin', 'cjcj-stage2')), {code: 'ENOENT'});
 });
 
@@ -39,4 +47,23 @@ test('compose rejects a product that is not the recorded stage3 compiler', async
     /compose stage3 producer mismatch/,
   );
   console.log('COMPOSE_STAGE3_MISMATCH_ASSERT_REACHED');
+});
+
+test('compose consumer rejects an inherited official frontend after assembly', async t => {
+  const {sealStage3Compiler} = await import('../../ci/srcbuild/lib/compose-install.mjs');
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'compose-frontend-'));
+  t.after(() => fs.rm(root, {recursive: true, force: true}));
+  const sdk = path.join(root, 'sdk');
+  const product = path.join(root, 'cjc@cjcj');
+  await fs.writeFile(product, 'stage3 final compiler fixture');
+  await installStage3Compiler({sdk, product, lineage: {compilerSha256: await fileSha256(product)}});
+  await sealStage3Compiler(sdk, 'copy');
+  const frontend = path.join(sdk, 'bin/cjc-frontend');
+  await fs.unlink(frontend);
+  await fs.writeFile(frontend, 'official frontend fixture');
+  console.log('COMPILER_FRONTEND_REJECTION_TARGET');
+  await assert.rejects(sealStage3Compiler(sdk, 'copy'), /cjc-frontend: producer hash mismatch/);
+  await fs.unlink(frontend);
+  await fs.symlink('cjcj-stage1', frontend);
+  await sealStage3Compiler(sdk, 'copy');
 });

@@ -504,20 +504,28 @@ private class ToCHIR {
         srcCodeImportedVars: ArrayList<ChirGlobalVar>,
         initFuncsForConstVar: ArrayList<ChirFunction>
     ): Bool {
-        let executePlugin = ExecutePlugin(builder)
-        if (!executePlugin.SerializePackage(currentPackage)) {
-            return false
+        var succeed = true
+        // CHIR.cpp:1225-1251: the detached input outlives all four plugin steps.
+        try (executePlugin = ExecutePlugin(builder)) {
+            if (!executePlugin.SerializePackage(currentPackage)) {
+                succeed = false
+            }
+            if (succeed && !executePlugin.Execute(instance.invocation.globalOptions.pluginPaths[0])) {
+                succeed = false
+            }
+            if (succeed) {
+                if (let Some(newPackage) <- executePlugin.DeserializePluginResult(
+                    srcCodeImportedFuncs, srcCodeImportedVars, initFuncsForConstVar, maybeUnreachable)) {
+                    chirPkg = Some(newPackage)
+                } else {
+                    succeed = false
+                }
+            }
+            if (succeed && !executePlugin.FreeCachedData()) {
+                succeed = false
+            }
         }
-        if (!executePlugin.Execute(instance.invocation.globalOptions.pluginPaths[0])) {
-            return false
-        }
-        if (let Some(newPackage) <- executePlugin.DeserializePluginResult(
-            srcCodeImportedFuncs, srcCodeImportedVars, initFuncsForConstVar, maybeUnreachable)) {
-            chirPkg = Some(newPackage)
-        } else {
-            return false
-        }
-        return executePlugin.FreeCachedData()
+        return succeed
     }
 
     // C++: CHIR/CHIR.cpp:1376-1391 ToCHIR::ClearASTResources.

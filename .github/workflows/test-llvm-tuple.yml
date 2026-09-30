@@ -4,6 +4,13 @@ on:
   pull_request:
     paths:
       - 'ci/llvm*'
+      - 'ci/runtime_pin.env'
+      - 'ci/check-llvm-runtime-abi.sh'
+      - 'ci/test-runtime-layout.sh'
+      - 'ci/test-codegen-layout-sync.sh'
+      - 'ci/*codegen-runtime-layout*'
+      - 'packages/codegen/src/**'
+      - 'tests/runtime_layout/**'
       - 'ci/test-llvm-tuple*.sh'
       - 'ci/release/prepare_bootstrap_inputs*'
       - 'ci/release/prepare_bootstrap_fixture.mjs'
@@ -16,6 +23,43 @@ permissions:
   contents: read
   actions: read
 jobs:
+  layout-contract:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check pinned generated layout and precise offset faults
+        shell: bash
+        run: |
+          set -euo pipefail
+          source ci/runtime_pin.env
+          source ci/llvm_pin.env
+          for side in runtime llvm; do
+            dest="$RUNNER_TEMP/layout-sources/$side"
+            git init "$dest"
+            if [ "$side" = runtime ]; then
+              url=$RUNTIME_SRC_URL
+              ref=$RUNTIME_REF
+            else
+              url=$LLVM_URL
+              ref=$LLVM_SHA
+            fi
+            git -C "$dest" fetch --depth=1 "$url" "$ref"
+          done
+          bash ci/test-runtime-layout.sh "$RUNNER_TEMP/layout-evidence" \
+            "$RUNNER_TEMP/layout-sources/runtime" "$RUNNER_TEMP/layout-sources/llvm"
+          bash ci/test-codegen-layout-sync.sh "$RUNNER_TEMP/codegen-layout-evidence" \
+            "$RUNNER_TEMP/layout-sources/runtime" "$RUNNER_TEMP/layout-sources/llvm"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: runtime-layout-evidence
+          path: |
+            ${{ runner.temp }}/layout-evidence/*.log
+            ${{ runner.temp }}/layout-evidence/*.diff
+            ${{ runner.temp }}/layout-evidence/*.sha256
+            ${{ runner.temp }}/codegen-layout-evidence/*.log
+            ${{ runner.temp }}/codegen-layout-evidence/*.diff
+            ${{ runner.temp }}/codegen-layout-evidence/*.sha256
   dylib-contract:
     strategy:
       fail-fast: false

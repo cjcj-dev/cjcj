@@ -157,18 +157,22 @@ func LoadCCOutFunc(packageInfo: CachedASTFormat_HashedPackage, cached: Compilati
 
 public func WriteCache(pkg: Package, cachedInfo: CompilationCache, order: ArrayList<Decl>, path: String): Bool {
     let writer = HashedASTWriter()
-    writer.SetImportSpecs(pkg)
-    writer.SetLambdaCounter(cachedInfo.lambdaCounter)
-    writer.SetEnvClassCounter(cachedInfo.envClassCounter)
-    writer.SetStringLiteralCounter(cachedInfo.stringLiteralCounter)
-    writer.SetCompileArgs(cachedInfo.compileArgs)
-    writer.SetVarAndFuncDependency(cachedInfo.varAndFuncDep)
-    writer.SetCHIROptInfo(cachedInfo.chirOptInfo)
-    writer.SetVirtualFuncDep(cachedInfo.virtualFuncDep)
-    writer.SetVarInitDep(cachedInfo.varInitDepMap)
-    writer.SetCCOutFuncs(cachedInfo.ccOutFuncs)
-    writer.SetSemanticInfo(cachedInfo.semaInfo)
-    writer.SetBitcodeFilesName(cachedInfo.bitcodeFilesName)
-    writer.WriteAllDecls(cachedInfo.curPkgASTCache, cachedInfo.importedASTCache, order)
-    return FileUtil.WriteBufferToASTFile(path, writer.AST2FB(pkg.fullPackageName))
+    try {
+        writer.SetImportSpecs(pkg)
+        writer.SetLambdaCounter(cachedInfo.lambdaCounter)
+        writer.SetEnvClassCounter(cachedInfo.envClassCounter)
+        writer.SetStringLiteralCounter(cachedInfo.stringLiteralCounter)
+        writer.SetCompileArgs(cachedInfo.compileArgs)
+        writer.SetVarAndFuncDependency(cachedInfo.varAndFuncDep)
+        writer.SetCHIROptInfo(cachedInfo.chirOptInfo)
+        writer.SetVirtualFuncDep(cachedInfo.virtualFuncDep)
+        writer.SetVarInitDep(cachedInfo.varInitDepMap)
+        writer.SetCCOutFuncs(cachedInfo.ccOutFuncs)
+        writer.SetSemanticInfo(cachedInfo.semaInfo)
+        writer.SetBitcodeFilesName(cachedInfo.bitcodeFilesName)
+        writer.WriteAllDecls(cachedInfo.curPkgASTCache, cachedInfo.importedASTCache, order)
+        return FileUtil.WriteBufferToASTFile(path, writer.AST2FB(pkg.fullPackageName))
+    } finally {
+        writer.close()
+    }
 }

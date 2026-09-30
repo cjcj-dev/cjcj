@@ -2,6 +2,7 @@
 """Assemble SDK.lock.json and fail-closed verify an assembled SDK tree."""
 from __future__ import annotations
 
+from compiler_identity import verify as verify_compiler_identity
 import argparse
 import hashlib
 import json
@@ -49,7 +50,7 @@ def sha256_file(path: Path) -> str:
 
 
 def classify(rel: str) -> str:
-    if rel == LOCK_NAME:
+    if rel in (LOCK_NAME, 'compiler-lineage.json'):
         return 'sdk-meta'
     if rel == 'std-producer.json':
         return 'std'
@@ -66,7 +67,7 @@ def classify(rel: str) -> str:
 def iter_files(sdk: Path):
     for path in sorted(sdk.rglob('*')):
         rel = path.relative_to(sdk).as_posix()
-        if path.is_dir():
+        if path.is_dir() and not path.is_symlink():
             continue
         yield path, rel
 
@@ -135,6 +136,30 @@ def runtime_so_path(sdk: Path, target_tuple: str | None) -> Path | None:
     return None
 
 
+def check_symlinks(sdk: Path, errors: list, *, source: Path | None = None,
+                   lock_files: dict | None = None) -> None:
+    """Admit input-layout links at creation; consume exact lock targets at verify."""
+    for path, rel in iter_files(sdk):
+        if not path.is_symlink():
+            continue
+        target = os.readlink(path)
+        if lock_files is None:
+            original = source / rel if source is not None else None
+            admitted = rel in ALLOWED_SYMLINKS or (
+                original is not None and original.is_symlink()
+                and os.readlink(original) == target)
+        else:
+            entry = lock_files.get(rel, {})
+            admitted = entry.get('symlink') is True and entry.get('link_target') == target
+        if not admitted:
+            fail('SYMLINK', f'unregistered or changed link: {rel} -> {target}', errors)
+            continue
+        try:
+            path.resolve().relative_to(sdk)
+        except (ValueError, RuntimeError, OSError):
+            fail('SYMLINK', f'link escapes SDK or cannot resolve: {rel} -> {target}', errors)
+
+
 def build_lock(sdk: Path, role: str, identities: dict, target_tuple: str | None = None) -> dict:
     files = {}
     official = {}
@@ -192,13 +217,14 @@ def verify(sdk: Path, lock: dict, pin: dict, identities: dict, errors: list, tar
     for path, rel in iter_files(sdk):
         on_disk[rel] = path
     lock_files = lock.get('files') or {}
+    check_symlinks(sdk, errors, lock_files=lock_files)
+    if errors:
+        return
     for rel, path in on_disk.items():
         if rel == LOCK_NAME:
             continue
-        if rel not in lock_files:
+        if rel not in lock_files and not path.is_symlink():
             fail('UNDECLARED', f'file not in lock: {rel}', errors)
-        if path.is_symlink() and rel not in ALLOWED_SYMLINKS:
-            fail('SYMLINK', f'symlink not in allow-list: {rel}', errors)
     for rel in lock_files:
         if rel != LOCK_NAME and rel not in on_disk:
             fail('UNDECLARED', f'lock entry missing on disk: {rel}', errors)
@@ -211,6 +237,11 @@ def verify(sdk: Path, lock: dict, pin: dict, identities: dict, errors: list, tar
             fail('UNDECLARED', f'unknown component for {rel}', errors)
 
     role = lock.get('role')
+    if (sdk / 'compiler-lineage.json').is_file():
+        try:
+            verify_compiler_identity(sdk)
+        except (OSError, ValueError, KeyError) as error:
+            fail('COMPILER_IDENTITY', str(error), errors)
     measured = measured_cjc_sha(sdk)
     producer = std_producer_sha(sdk)
     has_std = any(
@@ -292,6 +323,8 @@ def main() -> int:
     parser.add_argument('--role', choices=('host', 'target'))
     parser.add_argument('--runtime-pin', type=Path)
     parser.add_argument('--write-lock', action='store_true')
+    parser.add_argument('--from', dest='source_sdk', type=Path,
+                        help='input SDK whose unchanged symlink layout may be recorded')
     parser.add_argument('--identities', type=Path)
     parser.add_argument('--colour-runtime-sha256')
     parser.add_argument('--target-tuple')
@@ -312,6 +345,12 @@ def main() -> int:
         role = args.role or identities.get('role')
         if role not in ('host', 'target'):
             print('SDK-VERIFY-FAIL rule=HOST_TARGET_CROSS --write-lock requires --role', file=sys.stderr)
+            return 1
+        errors = []
+        check_symlinks(sdk, errors, source=args.source_sdk.resolve() if args.source_sdk else None)
+        if errors:
+            for item in errors:
+                print(item, file=sys.stderr)
             return 1
         lock = build_lock(sdk, role, identities, args.target_tuple)
         lock_sha = write_lock(lock_path, lock)
