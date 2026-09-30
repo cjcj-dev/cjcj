@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {execFileSync} from 'node:child_process';
+import {execFileSync, spawnSync} from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
@@ -153,6 +153,38 @@ test('manifest CLI hands every gating file to the workflow consumer', () => {
   const output = execFileSync(process.execPath, ['ci/test-manifest.mjs', 'list'],
     {cwd: repoRoot, encoding: 'utf8'});
   assert.deepEqual(output.trim().split('\n'), [...GATING]);
+});
+
+test('workflow list collection preserves every gating file and enforces its floor', async () => {
+  const body = step((await workflows()).get('ci.yml'), 'Test build and release contracts');
+  const run = body.split('run: |\n')[1];
+  const prefix = run.slice(0, run.indexOf('node --test '));
+  const floor = prefix.match(/test "\$\{#FILES\[@\]\}" -ge (\d+)/);
+  assert.equal(Number(floor?.[1]), GATING_FLOOR, 'workflow floor must match the manifest floor');
+  const result = spawnSync('bash', ['-e', '-o', 'pipefail', '-c',
+    `${prefix}\nprintf '%s\\n' "\${FILES[@]}"`], {cwd: repoRoot, encoding: 'utf8'});
+  assert.equal(result.status, 0, `workflow list collection failed: ${result.stderr}`);
+  assert.deepEqual(result.stdout.trim().split('\n').slice(1), [...GATING],
+    'workflow must hand every gating file to node --test');
+});
+
+test('promoted contracts have their CI prerequisites', async () => {
+  const ci = (await workflows()).get('ci.yml');
+  assert.match(step(ci, 'Install release contract dependencies'), /apt-get install[^\n]*\bpython3\b/);
+  assert.match(step(ci, 'Install release contract dependencies'), /apt-get install[^\n]*\bjq\b/);
+  assert.match(step(ci, 'Test build and release contracts'),
+    /RELEASE_EVIDENCE_TEST_ROOT: \$\{\{ runner\.temp \}\}\/release-evidence-tests/);
+  for (const file of ['build/test/bootstrap-handoff.test.mjs',
+    'build/test/windows-final-compiler.test.mjs', 'build/test/release-evidence.test.mjs',
+    'scripts/cjcjcg_aggregate_ctype_gate.test.mjs']) {
+    assert.ok(GATING.includes(file), `${file} has its prerequisites and must be gating`);
+  }
+});
+
+test('lane scratch files stay outside the tracked source set', () => {
+  assert.equal(execFileSync('git', ['ls-files', '.lane'], {cwd: repoRoot, encoding: 'utf8'}), '');
+  assert.equal(execFileSync('git', ['check-ignore', '.lane/probe.sh'],
+    {cwd: repoRoot, encoding: 'utf8'}).trim(), '.lane/probe.sh');
 });
 
 test('ci.yml provides the publisher archive tools before running contracts', async () => {
