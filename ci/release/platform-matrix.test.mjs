@@ -39,9 +39,40 @@ test('platform failure artifacts preserve the gate and teardown raw logs', () =>
   const workflow = fs.readFileSync(path.resolve(import.meta.dirname, '../../.github/workflows/platform-matrix.yml'), 'utf8');
   const upload = workflow.slice(workflow.indexOf('- name: Upload diagnostics and key products'));
   assert.match(upload, /if: always\(\)/);
-  assert.match(upload, /runtime-source\/runtime\/\*\*\/gate_run\.log/);
-  assert.match(upload, /runtime-source\/runtime\/\*\*\/gc_unit_gate\.status/);
-  assert.match(upload, /runtime-source\/runtime\/tests\/gc_unit\/build\*\/\*\*\/\*\.log/);
+  assert.match(upload, /\.platform-ci\/logs\/\*\*/);
+  assert.match(workflow, /name: Preserve runtime gate diagnostics\n\s+if: always\(\) && runner.os != 'Windows'\n\s+run: node ci\/platform_matrix\/collect_runtime_gate_logs\.mjs/);
+});
+
+test('runtime diagnostics entry preserves teardown rc and raw gate output byte for byte', t => {
+  const root = path.resolve(import.meta.dirname, '../..');
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'runtime-gate-logs-'));
+  t.after(() => fs.rmSync(temporary, {recursive: true, force: true}));
+  const source = path.join(temporary, 'source');
+  const output = path.join(temporary, 'output');
+  const logs = new Map([
+    ['build/gate_run.log', 'GC_UNIT_GATE_FAIL: suite exited unsuccessfully (rc=127)\n'],
+    ['build/gc_unit_gate.status', 'FAIL rc=127\n'],
+    ['tests/gc_unit/build/teardown.log', 'timeout: failed to run command gdb: No such file or directory\nTEARDOWN_RC=127\n'],
+    ['tests/gc_unit/build/other_vm_exit.log', 'GC_UNIT_OTHER_VM_EXIT rc=0\n'],
+  ]);
+  for (const [relative, content] of logs) {
+    const file = path.join(source, 'runtime', relative);
+    fs.mkdirSync(path.dirname(file), {recursive: true});
+    fs.writeFileSync(file, content);
+  }
+  const result = spawnSync(process.execPath, [path.join(root, 'ci/platform_matrix/collect_runtime_gate_logs.mjs')], {
+    encoding: 'utf8', env: {...process.env, RUNTIME_SOURCE: source, PLATFORM_CI_ROOT: output},
+  });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  for (const [relative, content] of logs) {
+    assert.equal(fs.readFileSync(path.join(output, 'logs/gc-unit', relative), 'utf8'), content, `raw diagnostic invariant: ${relative}`);
+  }
+  assert.equal(result.stdout.split('\n').filter(line => line.startsWith('RUNTIME_GATE_LOG ')).length, logs.size);
+  const absent = spawnSync(process.execPath, [path.join(root, 'ci/platform_matrix/collect_runtime_gate_logs.mjs')], {
+    encoding: 'utf8', env: {...process.env, RUNTIME_SOURCE: path.join(temporary, 'absent'), PLATFORM_CI_ROOT: output},
+  });
+  assert.equal(absent.status, 0, absent.stderr);
+  assert.match(absent.stdout, /::warning::No runtime gate diagnostics found/);
 });
 
 test('runtime build entry refuses an unusable gdb and records the root cause', {timeout: 120000}, t => {

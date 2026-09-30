@@ -474,6 +474,10 @@ jobs:
         if: always()
         run: npx --yes zx@8 ci/platform_matrix/summarize_job.mjs
 
+      - name: Preserve runtime gate diagnostics
+        if: always() && runner.os != 'Windows'
+        run: node ci/platform_matrix/collect_runtime_gate_logs.mjs
+
       - name: Upload diagnostics and key products
         if: always()
         uses: actions/upload-artifact@v7
@@ -486,9 +490,3 @@ jobs:
             .platform-ci/step-summary.md
             .platform-ci/runtime-install/**
             .platform-ci/bin/**
-            runtime-source/runtime/**/gate_run.log
-            runtime-source/runtime/**/gc_unit_gate.status
-            runtime-source/runtime/tests/gc_unit/build*/**/*.log
-            runtime-source/runtime/tests/gc_unit/build*/**/*.sha256
-            runtime-source/runtime/tests/gc_unit/build*/**/gate_tally.txt
-            runtime-source/runtime/tests/gc_unit/build*/**/*.receipt
