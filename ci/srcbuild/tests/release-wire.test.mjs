@@ -181,7 +181,8 @@ test('release has one LLVM producer per tuple', async () => {
   assert.ok(jobsOf(release).some(job => job.with?.platform_set === 'windows-only'));
   assert.ok(!jobsOf(release).some(job => job.with?.platform_set === 'darwin-windows'));
   assert.ok(!jobsOf(release).some(job => job.uses === './.github/workflows/build-fixed-llc.yml'));
-  assert.ok(tuples.includes("inputs.platform_set == 'windows-only'"));
+  assert.equal(loadYaml(tuples).jobs['build-tuple'].uses, './.github/workflows/build-llvm-tools.yml');
+  assert.equal(loadYaml(tuples).jobs['build-tuple'].with.platform_set, "${{ inputs.platform_set || 'all' }}");
 
   const artifacts = [
     ...platforms.map(platform => `fixed-llvm-tools-${getTarget(platform).spec.llvmPlatform}`),
