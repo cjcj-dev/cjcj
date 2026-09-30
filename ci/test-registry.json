@@ -113,6 +113,11 @@
     "args": []
   },
   {
+    "file": "ci/release/test_qualified_language_tuple.py",
+    "executor": "python3",
+    "args": []
+  },
+  {
     "file": "ci/test-ast-support-wiring.sh",
     "executor": "manual",
     "reason": "Fault-arm tool rewrites ci/release/prepare_bootstrap_inputs.mjs in place; run only in an isolated checkout, not alongside its Node contract suite."
