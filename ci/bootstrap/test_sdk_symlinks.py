@@ -62,6 +62,26 @@ class Symlinks(unittest.TestCase):
             self.assertEqual(lock['files'][rel]['link_target'], (self.source / rel).readlink().as_posix())
         self.good(self.cli())
 
+    def test_build_preserves_input_layout(self):
+        from test_sdk_exe_symlink import write_libs, plant_runtime, plant_producer, assemble
+        libs = self.root / 'fixtures'
+        write_libs(libs)
+        base = self.root / 'build-input'
+        plant_runtime(base, libs)
+        (base / 'bin').mkdir()
+        shutil.copyfile('/bin/true', base / 'bin/cjc')
+        (base / 'bin/cjc').chmod(0o755)
+        (base / 'bin/linker').symlink_to('cjc')
+        plant_producer(base, base / 'bin/cjc')
+        target = self.root / 'assembled'
+        _, result = assemble(PRODUCT.with_name('sdk_build.sh'), base, target, libs)
+        print(f'ASSERT sdk-build-input-layout rc={result.returncode}\n{result.stdout}', flush=True)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn('SDK-BUILD-OK', result.stdout)
+        self.assertEqual((target / 'bin/linker').readlink().as_posix(), 'cjc')
+        lock = json.loads((target / 'SDK.lock.json').read_text())
+        self.assertEqual(lock['files']['bin/linker']['link_target'], 'cjc')
+
     def test_unregistered(self):
         self.good(self.cli(write=True))
         (self.sdk / 'bin/cjcj-stage9').symlink_to('cjcj-stage1')
