@@ -45,7 +45,39 @@
         "runtime/lib/darwin_aarch64_cjnative/libboundscheck.dylib": "8ea0142942b9c3aa6e18b8ed1f46ccf29b7c3b7d7ec32aa1c23d3d9a91e0cab5",
         "lib/darwin_aarch64_cjnative/libcangjie-runtime.a": "a1fc4309284064c0804b429ba43fe16cc5468ce7ea169282d87c710660b94199"
       },
-      "std_status": "pending-cjcj-473"
+      "std_status": "bootstrap-36735080995-1-11110252820-prerelease",
+      "std": {
+        "manifest_sha256": "99a3f7d211311d833cc7e7259ccb7dd63f3534013c771232152b68a61c143b24",
+        "compiler_sha256": "22ce85de38aad3a6b2d0bca6e9ab36a6d895ace5c6fe5e5ad35f1776400a5f1a",
+        "producer_sha": "30eb79a76b6e2957acee6886686283c5100d43cb",
+        "run_id": "36735080995",
+        "run_attempt": "1",
+        "archive": "darwin-std-darwin_aarch64.tar.gz",
+        "transport": {
+          "version": 1,
+          "repository": "cjcj-dev/cjcj",
+          "run": 36735080995,
+          "attempt": 1,
+          "commit": "30eb79a76b6e2957acee6886686283c5100d43cb",
+          "artifact": 11110252820,
+          "files": [
+            {
+              "path": "darwin-std-darwin_aarch64.tar.gz",
+              "mode": 420,
+              "artifact_sha256": "075f3ce330dab26654a34239329d099f90ceae08984c26ea50989939786b6974",
+              "release_sha256": "075f3ce330dab26654a34239329d099f90ceae08984c26ea50989939786b6974",
+              "asset": 601298782
+            },
+            {
+              "path": "std-manifest.json",
+              "mode": 420,
+              "artifact_sha256": "99a3f7d211311d833cc7e7259ccb7dd63f3534013c771232152b68a61c143b24",
+              "release_sha256": "99a3f7d211311d833cc7e7259ccb7dd63f3534013c771232152b68a61c143b24",
+              "asset": 601298929
+            }
+          ]
+        }
+      }
     },
     "darwin_x86_64": {
       "role": "colour-runtime-libraries",
@@ -71,35 +103,35 @@
         "runtime/lib/darwin_x86_64_cjnative/libboundscheck.dylib": "393af28c54064a0d8b1c48ac68f6b18bd83fe3161501988d5e0143b971077958",
         "lib/darwin_x86_64_cjnative/libcangjie-runtime.a": "b60cddfee45f689b1f321f009e86ec2b573f1a21f046939422b49066039c4cf9"
       },
-      "std_status": "bootstrap-36425528508-1-10974886716-prerelease",
+      "std_status": "bootstrap-36735080995-1-11113764240-prerelease",
       "std": {
-        "manifest_sha256": "e893285e3bbb3157a74037ec62d191877028fbc9bfff292508fbd6794d65b301",
-        "compiler_sha256": "d7e1a3a1eae692e0bb38240c9697541459a3e41d7790a20d3e108d909cff624b",
-        "producer_sha": "ed1b457bacf4cb6cf8600d595418e5174fd3258a",
-        "run_id": "36425528508",
+        "manifest_sha256": "488e2ac1fad5e42e3abe0ee05c82247474b221d85f71c04ae670d097a92ccf1f",
+        "compiler_sha256": "ba17dfc46ab4a9f5ed08cf05e7bea5c00d28f115013e648f5c48252e044b3deb",
+        "producer_sha": "30eb79a76b6e2957acee6886686283c5100d43cb",
+        "run_id": "36735080995",
         "run_attempt": "1",
         "archive": "darwin-std-darwin_x86_64.tar.gz",
         "transport": {
           "version": 1,
           "repository": "cjcj-dev/cjcj",
-          "run": 36425528508,
+          "run": 36735080995,
           "attempt": 1,
-          "commit": "ed1b457bacf4cb6cf8600d595418e5174fd3258a",
-          "artifact": 10974886716,
+          "commit": "30eb79a76b6e2957acee6886686283c5100d43cb",
+          "artifact": 11113764240,
           "files": [
             {
               "path": "darwin-std-darwin_x86_64.tar.gz",
               "mode": 420,
-              "artifact_sha256": "d0b4cbb178db5f3ace2c650e29c713a69bf16f660203870f27155248ffa6a00f",
-              "release_sha256": "d0b4cbb178db5f3ace2c650e29c713a69bf16f660203870f27155248ffa6a00f",
-              "asset": 595575914
+              "artifact_sha256": "18c6cb0b0e35295e2b38659476ee1fde7504297939671894f40d4b3707a17a7d",
+              "release_sha256": "18c6cb0b0e35295e2b38659476ee1fde7504297939671894f40d4b3707a17a7d",
+              "asset": 601441426
             },
             {
               "path": "std-manifest.json",
               "mode": 420,
-              "artifact_sha256": "e893285e3bbb3157a74037ec62d191877028fbc9bfff292508fbd6794d65b301",
-              "release_sha256": "e893285e3bbb3157a74037ec62d191877028fbc9bfff292508fbd6794d65b301",
-              "asset": 595576043
+              "artifact_sha256": "488e2ac1fad5e42e3abe0ee05c82247474b221d85f71c04ae670d097a92ccf1f",
+              "release_sha256": "488e2ac1fad5e42e3abe0ee05c82247474b221d85f71c04ae670d097a92ccf1f",
+              "asset": 601441519
             }
           ]
         }
