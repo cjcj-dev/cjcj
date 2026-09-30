@@ -6,6 +6,38 @@ import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {fixture} from './prepare_bootstrap_fixture.mjs';
 
+for (const downloadFails of [false, true]) {
+  test(`kkk2 pinned artifact transport ${downloadFails ? 'fails closed' : 'feeds shared verification'}`, () => fixture(({env}) => {
+    const root = path.dirname(env.STAGE1_HOST_IDENTITIES);
+    const archive = path.join(root, 'artifact.zip');
+    const zipped = spawnSync('python3', ['-c', 'import pathlib,sys,zipfile\nwith zipfile.ZipFile(sys.argv[1], "w") as archive:\n for file in pathlib.Path(sys.argv[2]).iterdir(): archive.write(file, file.name)', archive, env.CJCJ_BOOTSTRAP_HOST_LLVM_ARTIFACT], {encoding: 'utf8'});
+    assert.equal(zipped.status, 0, zipped.stderr);
+    const bin = path.join(root, 'bin');
+    fs.mkdirSync(bin);
+    fs.writeFileSync(path.join(bin, 'gh'), '#!/bin/sh\nprintf "%s\\n" "$*" > "$TRANSPORT_ARGS"\n'
+      + (downloadFails ? 'exit 23\n' : 'cat "$TRANSPORT_ARCHIVE"\n'), {mode: 0o755});
+    env.PATH = `${bin}:${env.PATH}`;
+    env.TRANSPORT_ARCHIVE = archive;
+    env.TRANSPORT_ARGS = path.join(root, 'transport.args');
+    env.CJCJ_BOOTSTRAP_HOST_LLVM_WORK = path.join(root, 'work');
+    delete env.CJCJ_BOOTSTRAP_HOST_LLVM_ARTIFACT;
+    const output = path.join(root, 'host-result.json');
+    const result = spawnSync(process.execPath, [new URL('./prepare_kkk2_host_llvm.mjs', import.meta.url).pathname, output], {env, encoding: 'utf8'});
+    assert.equal(fs.readFileSync(env.TRANSPORT_ARGS, 'utf8'), 'api repos/cjcj-dev/cjcj/actions/artifacts/456/zip\n');
+    if (downloadFails) {
+      assert.equal(result.status, 1);
+      assert.match(result.stderr, /ARTIFACT_DOWNLOAD_FAILED artifact=456 status=23/);
+      assert.equal(fs.existsSync(output), false);
+    } else {
+      assert.equal(result.status, 0, result.stderr);
+      const actual = JSON.parse(fs.readFileSync(output));
+      assert.equal(crypto.createHash('sha256').update(fs.readFileSync(actual.file)).digest('hex'), actual.sha256);
+      assert.match(result.stdout, /HOST_LLVM_VERIFIED run=123 artifact=456/);
+    }
+    console.log(`HOST_LLVM_TRANSPORT_ASSERT failure=${downloadFails} rc=${result.status}`);
+  }));
+}
+
 test('kkk2 and GHA preparation export the same host artifact digest', () => fixture(({env, run}) => {
   const output = path.join(path.dirname(env.STAGE1_HOST_IDENTITIES), 'kkk2-host.json');
   const kkk2 = spawnSync(process.execPath, [new URL('./prepare_kkk2_host_llvm.mjs', import.meta.url).pathname, output], {env, encoding: 'utf8'});
