@@ -16,8 +16,8 @@
   },
   {
     "file": "ci/bootstrap/test_colour_llvm.py",
-    "executor": "python3",
-    "args": []
+    "executor": "manual",
+    "reason": "Requires real COLOUR_LLVM_SO and HOST_LLVM_SO libraries to exercise bootstrap binding; neither is supplied by the independent script-contract job."
   },
   {
     "file": "ci/bootstrap/test_compiler_identity.py",
@@ -102,8 +102,8 @@
   },
   {
     "file": "ci/bootstrap/test_tuple_permissions.py",
-    "executor": "python3",
-    "args": []
+    "executor": "manual",
+    "reason": "Requires a real LLVM_TUPLE, assembled HOST_SDK and COLOUR_RUNTIME; permission fault arms copy and install this full paired toolchain."
   },
   {
     "file": "ci/release/test_darwin_runtime_controls.sh",
