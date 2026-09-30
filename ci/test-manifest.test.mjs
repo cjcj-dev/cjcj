@@ -315,3 +315,25 @@ test('the manifest CLI rejects a real unregistered driver and recovers', () => {
   }
   assert.equal(cli().rc, 0, 'the CLI stayed red after the probe was removed');
 });
+
+test('a driver cannot claim no executor while a workflow names it', async () => {
+  const root = await fs.mkdtemp(path.join(process.env.TMPDIR || '/tmp', 'manifest-workflow-driver-'));
+  const probe = 'tests/manual_probe/run.py';
+  const reason = 'manual driver: no workflow provisions a stage1 compiler; documented invocation '
+    + '`python3 tests/manual_probe/run.py --compiler /path/to/cjcj-stage1`';
+  try {
+    execFileSync('git', ['init', '-q', root]);
+    await fs.mkdir(path.join(root, 'tests/manual_probe'), {recursive: true});
+    await fs.mkdir(path.join(root, '.github/workflows'), {recursive: true});
+    await fs.writeFile(path.join(root, probe), 'import sys\nsys.exit(1)\n');
+    await fs.writeFile(path.join(root, '.github/workflows/ci.yml'), 'run: python3 tests/manual_probe/run.py\n');
+    assert.throws(() => validateDrivers(root, [], [{file: probe, kind: 'driver', reason}]),
+      /claims no executor but a workflow names it/);
+    // The comment form is not an invocation, which is the same rule the
+    // workflow executor check applies to registered entries.
+    await fs.writeFile(path.join(root, '.github/workflows/ci.yml'), '# run: python3 tests/manual_probe/run.py\n');
+    validateDrivers(root, [], [{file: probe, kind: 'driver', reason}]);
+  } finally {
+    await fs.rm(root, {recursive: true, force: true});
+  }
+});

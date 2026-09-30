@@ -254,6 +254,16 @@ function workflowText(root) {
     .join('\n');
 }
 
+// A workflow names this driver by repository path, or by a path that ends in
+// its own directory. A bare basename would collide with every verify.py and
+// check.py in the repository, which is a different file entirely.
+function mentions(text, file) {
+  const escape = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const directory = path.posix.join(path.posix.dirname(file), path.posix.basename(file));
+  return new RegExp(`(?:^|[\\s"'\`(/])${escape(file)}(?:$|[\\s"'\`),])`).test(text)
+    || new RegExp(`(?:^|[\\s"'\`(/])${escape(directory)}(?:$|[\\s"'\`),])`).test(text);
+}
+
 export function validateDrivers(root, registered, drivers) {
   const discovered = discoverDriverFiles(root);
   // ci/test-registry.json entries already carry an executor and a reason, so a
@@ -283,7 +293,7 @@ export function validateDrivers(root, registered, drivers) {
           throw new Error(`fixture consumer does not name it: ${entry.file} -> ${consumer}`);
         }
       }
-    } else if (new RegExp(`(?:^|[\\s"'\`(])${base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`).test(workflows)) {
+    } else if (mentions(workflows, entry.file)) {
       // The reason says no workflow provisions or runs it; a workflow naming it
       // means the classification, not the code, is what is out of date.
       throw new Error(`driver claims no executor but a workflow names it: ${entry.file}`);
