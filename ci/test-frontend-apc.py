@@ -15,8 +15,11 @@ WARNING = "'--apc' is not supported for a frontend output file."
 
 
 def sha256(path):
+    digest = hashlib.sha256()
     with Path(path).open('rb') as stream:
-        return hashlib.file_digest(stream, 'sha256').hexdigest()
+        for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def inspect_bitcode(library_path, bitcode):
