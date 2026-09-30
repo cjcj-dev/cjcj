@@ -7,8 +7,10 @@ import test from 'node:test';
 import {allTargets, ciBuildCells, ciProvisionCells, getTarget, platformTestCells, sourceBuildCells, targetForHost} from '../lib/targets.mjs';
 import {baseSdkDownload} from '../lib/release-component-provenance.mjs';
 import {resolveGateHostRuntime} from '../lib/release-gate-apparatus.mjs';
+import {readHostToolchainPin} from '../../ci/host-toolchain-pin.mjs';
 
 const root = path.resolve(import.meta.dirname, '../..');
+const baseSdkIdentities = JSON.parse(fs.readFileSync(path.join(root, 'ci/release/base-sdk-identities.json'), 'utf8'));
 const workflow = name => fs.readFileSync(path.join(root, '.github/workflows', name), 'utf8');
 const job = (text, name) => text.split(`\n  ${name}:\n`)[1]?.split(/\n  [\w-]+:\n/)[0];
 
@@ -86,8 +88,11 @@ test('every target mapping reaches archive naming, runtime lookup and native hos
   t.after(() => fs.rmSync(temp, {recursive: true, force: true}));
   for (const key of allTargets()) {
     const {spec} = getTarget(key);
-    const download = baseSdkDownload(key, 'nightly-1.2.0-alpha.20260721165458');
-    assert.equal(download.archive, `cangjie-sdk-${spec.sdkName}-1.2.0-alpha.20260721165458.${spec.archiveFormat}`, key);
+    const download = baseSdkDownload(key, readHostToolchainPin());
+    const identity = baseSdkIdentities.platforms[key];
+    assert.equal(download.archive, `cangjie-sdk-${identity.os}-${identity.arch}-${baseSdkIdentities.version}${identity.extension}`, key);
+    assert.equal(download.size, identity.size, `${key} pinned size`);
+    assert.equal(download.sha256, identity.sha256, `${key} pinned SHA-256`);
     assert.equal(targetForHost(...spec.packageHost).spec.key, key, `${key} package host`);
     const relative = `runtime/lib/${spec.runtimeTuple}/${spec.runtimeLibrary}`;
     const file = path.join(temp, relative);

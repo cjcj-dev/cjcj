@@ -5,6 +5,7 @@ import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {
   BASE_SDK_SOURCE_REASON,
+  RELEASE_HOST_TOOLCHAIN,
   SOURCE_PROVENANCE_NOT_APPLICABLE,
   SOURCE_PROVENANCE_UNRESOLVED,
   validateBaseSdkProvenance,
@@ -12,23 +13,23 @@ import {
 
 export const GATE_APPARATUS_PROVENANCE = 'GATE-APPARATUS.json';
 export const GATE_APPARATUS_COMPONENT = 'acceptance-apparatus';
-export const REVIEWED_GATE_HOST_TOOLCHAIN = 'nightly-1.2.0-alpha.20260721165458';
+export const REVIEWED_GATE_HOST_TOOLCHAIN = RELEASE_HOST_TOOLCHAIN;
 export const GATE_APPARATUS_COVERAGE = Object.freeze(['covered', 'not-covered']);
 export const GATE_HOST_MASK_SYMBOL = 'g_cjLoadBadMask';
 export const EXPECTED_GATE_HOST_MASK_SYMBOL_COUNT = 0;
 
 export const KNOWN_GATE_APPARATUS_LIMITATIONS = Object.freeze({
   text: [
-    'The acceptance gates run the self-host compiler on the 2026-07-21 nightly host runtime.',
+    'Historical observations below concern the 2026-07-21 nightly host runtime only.',
     'That runtime predates the survivor gate and GCLOG, and its PostTraceBarrier::ReadReference',
     'checks IsCurrentPointer(tmpField); current cangjie-runtime main uses !IsOldPointer instead',
     '(zc9fix, ASSERT_TOO_NARROW). Parallel bcgate and codegen smoke failures were captured in',
     'that host runtime. Replacing it with the current-generation uncoloured host changed smoke',
-    'from 13/15 to 0/15, so the gate remains on the previous released toolchain. This record is',
+    'from 13/15 to 0/15 in those historical runs. The release host now follows ci/host_sdk_pin.env.',
+    'These observations do not establish results for the current host. This record is',
     'apparatus provenance only: it does not classify future failures or relax difftest or VERIFY.',
-    'The ordinary build host now follows ci/cjpm_pin.env independently; reviewed_against and',
-    'coverage record whether this apparatus covers those host bytes, and re-review is pending',
-    'when it does not.',
+    'reviewed_against and coverage record host identity alignment only; matching the current',
+    'pin does not establish load acceptance or renew the historical findings.',
   ].join(' '),
   evidence: [
     {

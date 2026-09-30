@@ -2,6 +2,7 @@ import {getTarget} from './targets.mjs';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import {readHostToolchainPin} from '../../ci/host-toolchain-pin.mjs';
 
 export const BASE_SDK_PROVENANCE = 'BASE-SDK-PROVENANCE.json';
 export const CJPM_PROVENANCE = 'CJPM-PROVENANCE.json';
@@ -16,30 +17,11 @@ const SHA40 = /^[0-9a-f]{40}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 const NIGHTLY_RELEASE_REPOSITORY = 'https://gitcode.com/Cangjie/nightly_build';
 const NIGHTLY_RELEASE_BASE = `${NIGHTLY_RELEASE_REPOSITORY}/releases/download`;
-const PINNED_BASE_SDK_VERSION = '1.2.0-alpha.20260721165458';
-
-const baseSdkPlatforms = new Map([
-  ['linux-x64', {
-    size: 201639272,
-    sha256: '4490fd0ac553f4122b90ab6cb0d437bc6a5325fbe81e43643cc01d484a0dc0d6',
-  }],
-  ['linux-aarch64', {
-    size: 203100802,
-    sha256: '461e8d1c2f81b540d9c270c92333e57af60980e8c0e1f59b051f6c8906449320',
-  }],
-  ['darwin-x64', {
-    size: 173277379,
-    sha256: '7546e5cbf8cffce60d91f65de17c4d7fb88abb960e4238fad0a26765182eef07',
-  }],
-  ['darwin-arm64', {
-    size: 164273695,
-    sha256: '4c2b55321697bcac5da5e8ba349fc4405212c4e0f3e7105cfa78457a14810138',
-  }],
-  ['windows-x64', {
-    size: 263516382,
-    sha256: 'fa121323c4b411501690fe67169982215a7872e671df8007d85070c8afffa672',
-  }],
-]);
+export const RELEASE_HOST_TOOLCHAIN = readHostToolchainPin();
+const baseSdkIdentities = JSON.parse(await fs.readFile(
+  new URL('../../ci/release/base-sdk-identities.json', import.meta.url), 'utf8',
+));
+const baseSdkPlatforms = new Map(Object.entries(baseSdkIdentities.platforms));
 
 function requireString(value, label) {
   if (typeof value !== 'string' || value.trim() === '') throw new Error(`${label} is empty`);
@@ -133,7 +115,7 @@ export function baseSdkDownload(platform, toolchain) {
   const tuple = baseSdkPlatforms.get(platform);
   if (!tuple) throw new Error(`unsupported base SDK platform: ${platform}`);
   const version = requireString(toolchain, 'base SDK toolchain').replace(/^nightly-/, '');
-  if (version !== PINNED_BASE_SDK_VERSION) {
+  if (version !== RELEASE_HOST_TOOLCHAIN.replace(/^nightly-/, '') || version !== baseSdkIdentities.version) {
     throw new Error(`base SDK release has no pinned archive identity: ${version}`);
   }
   const {spec} = getTarget(platform);

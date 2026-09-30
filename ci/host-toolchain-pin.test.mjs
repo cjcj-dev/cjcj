@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import {baseSdkDownload} from '../build/lib/release-component-provenance.mjs';
+import {baseSdkDownload, RELEASE_HOST_TOOLCHAIN} from '../build/lib/release-component-provenance.mjs';
 import {
   hostToolchainFromCjcVersion,
   requireHostToolchain,
@@ -78,7 +78,7 @@ test('host toolchain consumers accept the value loaded from the sole pin', async
   assert.equal(requireHostToolchain({CJCJ_TOOLCHAIN: pin}), pin);
 });
 
-test('the ordinary host nightly literal has one pin and the release exception is explicit', async () => {
+test('ordinary and release host nightly literals use the host pins', async () => {
   const files = [
     ...await filesBelow(path.join(root, 'ci')),
     ...await filesBelow(path.join(root, '.github', 'workflows')),
@@ -89,7 +89,7 @@ test('the ordinary host nightly literal has one pin and the release exception is
     // The astabi behavior-triad evidence harness is pinned to the 1.2 baseline
     // SDK lib paths; it is not an ordinary host consumer.
     const isAstabiBaselineHarness = file === path.join(root, 'tools', 'astabi', 'run_behavior_triad.sh');
-    if (file === pinPath || file === cjpmPinPath || file === h48LanguagePinPath || file.endsWith('/.github/workflows/build-release-package.yml') || isAstabiBaselineHarness) continue;
+    if (file === pinPath || file === cjpmPinPath || file === h48LanguagePinPath || isAstabiBaselineHarness) continue;
     let text = await fs.readFile(file, 'utf8');
     // These are observations of past runs, not inputs to SDK selection.
     // Keep scanning the rest of each record: neither file is a pin exemption.
@@ -118,14 +118,12 @@ test('the ordinary host nightly literal has one pin and the release exception is
   assert.deepEqual(offenders, []);
   console.log(`ORDINARY-HOST-SCAN offenders=${offenders.length}`);
   const release = await fs.readFile(path.join(root, '.github', 'workflows', 'build-release-package.yml'), 'utf8');
-  assert.equal(release.match(/^  RELEASE_HOST_TOOLCHAIN: nightly-\S+$/gm)?.length, 1);
-  assert.match(release, /Five-platform 1\.3 archive hashes do not exist yet/);
-  assert.match(release, /smoke changing from 13\/15 to 0\/15/);
+  assert.ok(release.includes(srcbuildLoadCommand));
 });
 
 // Run the real scan entry in an isolated tree, not a duplicate classifier.
 // The filter prevents these integration controls from recursively spawning.
-const scanTestName = 'the ordinary host nightly literal has one pin and the release exception is explicit';
+const scanTestName = 'ordinary and release host nightly literals use the host pins';
 const competingSdk = 'nightly-' + '9.9.9-alpha.' + '20990101000000';
 const scanControls = [
   ['historical observations', null, null],
@@ -152,6 +150,7 @@ for (const [name, changedFile, mutate] of scanControls) {
       }
       for (const relative of [
         'ci/host-toolchain-pin.test.mjs', 'ci/host-toolchain-pin.mjs',
+        'ci/host_sdk_pin.env', 'ci/release/base-sdk-identities.json',
         'build/lib/release-component-provenance.mjs',
         'build/lib/targets.mjs', 'build/lib/errors.mjs',
         '.github/workflows/build-release-package.yml',
@@ -351,16 +350,29 @@ test('measured cjc version is converted to the exact nightly identity', () => {
   assert.throws(() => hostToolchainFromCjcVersion('not a compiler version'), /did not report/);
 });
 
-test('release base SDK dry-run resolves the explicit 1.2 exception, not the ordinary 1.3 host pin', async () => {
+test('release workflow selects the same host pin for setup and base SDK consumers', async t => {
   const release = await fs.readFile(path.join(root, '.github', 'workflows', 'build-release-package.yml'), 'utf8');
-  const releaseHost = release.match(/^  RELEASE_HOST_TOOLCHAIN: (\S+)$/m)?.[1];
+  const script = release.match(/- name: Load release host pin\n        shell: bash\n        run: \|\n((?:          .*\n)+)/)?.[1];
+  assert.ok(script, 'release pin loader must exist');
+  const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'release-host-pin-'));
+  t.after(() => fs.rm(temporary, {recursive: true, force: true}));
+  const githubEnv = path.join(temporary, 'github.env');
+  const result = spawnSync('bash', ['-c', script], {
+    cwd: root, encoding: 'utf8',
+    env: {...process.env, GITHUB_ENV: githubEnv, CJCJ_TOOLCHAIN: 'stale-host', RELEASE_HOST_TOOLCHAIN: 'stale-release'},
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const loaded = Object.fromEntries((await fs.readFile(githubEnv, 'utf8')).trim().split('\n').map(line => line.split('=')));
+  const releaseHost = loaded.RELEASE_HOST_TOOLCHAIN;
   const ordinaryHost = await hostPin();
-  assert.ok(releaseHost);
-  assert.notEqual(releaseHost, ordinaryHost);
+  assert.equal(releaseHost, ordinaryHost, 'release host must equal the host pin');
+  assert.equal(loaded.CJCJ_TOOLCHAIN, ordinaryHost, 'setup host must equal the host pin');
+  assert.equal(RELEASE_HOST_TOOLCHAIN, ordinaryHost, 'archive selector must equal the host pin');
   for (const platform of ['linux-x64', 'linux-aarch64', 'darwin-x64', 'darwin-arm64', 'windows-x64']) {
     assert.match(baseSdkDownload(platform, releaseHost).sha256, /^[0-9a-f]{64}$/);
   }
-  assert.throws(() => baseSdkDownload('linux-x64', ordinaryHost), /no pinned archive identity/);
+  assert.throws(() => baseSdkDownload('linux-x64', 'nightly-unregistered'), /no pinned archive identity/);
+  assert.throws(() => baseSdkDownload('unsupported', releaseHost), /unsupported base SDK platform/);
   assert.match(release, /--toolchain "\$RELEASE_HOST_TOOLCHAIN"/);
   assert.match(release, /--base-sdk-id "\$RELEASE_HOST_TOOLCHAIN"/);
 });
@@ -383,7 +395,7 @@ const HOST_TOOLCHAIN_PINS = Object.freeze({
   }),
   'ci/host_sdk_pin.env': Object.freeze({
     host: 'source-build host',
-    loaders: Object.freeze(['build-ast-support.yml', 'build-host-runtime.yml', 'srcbuild-target.yml']),
+    loaders: Object.freeze(['build-ast-support.yml', 'build-host-runtime.yml', 'build-release-package.yml', 'srcbuild-target.yml']),
   }),
 });
 
