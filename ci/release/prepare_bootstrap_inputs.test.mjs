@@ -2,8 +2,20 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 import {fixture} from './prepare_bootstrap_fixture.mjs';
+
+function repackSdk(env, dir) {
+  const packed = spawnSync('tar', ['-czf', env.CJCJ_BOOTSTRAP_HOST_SDK_ARCHIVE,
+    '-C', path.join(dir, 'official'), 'cangjie'], {encoding: 'utf8'});
+  assert.equal(packed.status, 0, packed.stderr);
+  const digest = crypto.createHash('sha256').update(fs.readFileSync(env.CJCJ_BOOTSTRAP_HOST_SDK_ARCHIVE)).digest('hex');
+  const identities = fs.readFileSync(env.STAGE1_HOST_IDENTITIES, 'utf8').replace(
+    /^# HOST_SDK_PROVENANCE (.+)$/m, (_line, json) =>
+      `# HOST_SDK_PROVENANCE ${JSON.stringify({...JSON.parse(json), sha256: digest})}`);
+  fs.writeFileSync(env.STAGE1_HOST_IDENTITIES, identities);
+}
 
 test('reviewed sums pin rejects altered tuple bytes', () => fixture(({env, fallback, run}) => {
   // Isolate the digest contract from artifact-selection policy.
@@ -136,13 +148,37 @@ for (const name of ['include/cangjie', 'include/flatbuffers/StdAstFormat_generat
   }));
 }
 
-test('bare build archive selects complete downloaded AST inputs consumed by installer', () => fixture(({env, dir, sdk, astFiles, fallback, run}) => {
+test('complete SDK library directory fallback uses the reviewed pin', () => fixture(({env, dir, sdk, astFiles, run}) => {
+  delete env.CJCJ_BOOTSTRAP_AST_SUPPORT;
+  delete env.CJCJ_BOOTSTRAP_AST_ARTIFACT;
+  env.CANGJIE_BUILD_ROOT = path.join(dir, 'empty-build');
+  const root = path.join(dir, 'official/cangjie/lib/ast-inputs');
+  fs.mkdirSync(root, {recursive: true});
+  fs.writeFileSync(path.join(root, 'libcangjie-ast-support.a'), 'ast fixture');
+  for (const name of astFiles) {
+    fs.mkdirSync(path.dirname(path.join(root, name)), {recursive: true});
+    fs.copyFileSync(path.join(sdk, name), path.join(root, name));
+  }
+  fs.writeFileSync(path.join(root, 'SHA256SUMS'), fs.readFileSync(path.join(sdk, 'SHA256SUMS'), 'utf8').replace('  ast.a', '  libcangjie-ast-support.a'));
+  repackSdk(env, dir);
+  const result = run();
+  const selected = /^CJCJ_BOOTSTRAP_AST_SUPPORT=(.+)$/m.exec(result.stdout)?.[1];
+  assert.equal(result.status, 0, result.stderr);
+  assert.ok(selected?.endsWith('/lib/ast-inputs/libcangjie-ast-support.a'), result.stdout);
+  assert.deepEqual(fs.readFileSync(selected), fs.readFileSync(path.join(root, 'libcangjie-ast-support.a')));
+  console.log('ASSERT complete SDK library AST input selected with reviewed pin');
+}));
+
+for (const location of ['build', 'SDK']) {
+test(`bare ${location} archive selects complete downloaded AST inputs consumed by installer`, () => fixture(({env, dir, sdk, astFiles, fallback, run}) => {
   delete env.CJCJ_BOOTSTRAP_AST_SUPPORT;
   delete env.CJCJ_BOOTSTRAP_AST_ARTIFACT;
   env.CANGJIE_BUILD_ROOT = fallback;
-  fs.mkdirSync(path.join(fallback, 'lib'));
-  const bare = path.join(fallback, 'lib/libcangjie-ast-support.a');
+  const libraryDir = location === 'build' ? path.join(fallback, 'lib') : path.join(dir, 'official/cangjie/lib');
+  fs.mkdirSync(libraryDir, {recursive: true});
+  const bare = path.join(libraryDir, 'libcangjie-ast-support.a');
   fs.writeFileSync(bare, 'ast fixture');
+  if (location === 'SDK') repackSdk(env, dir);
   const payload = path.join(dir, 'ast-payload');
   fs.mkdirSync(payload);
   fs.copyFileSync(bare, path.join(payload, 'libcangjie-ast-support.a'));
@@ -161,7 +197,7 @@ test('bare build archive selects complete downloaded AST inputs consumed by inst
   env.AST_TEST_ZIP = archive;
   const result = run();
   const selected = /^CJCJ_BOOTSTRAP_AST_SUPPORT=(.+)$/m.exec(result.stdout)?.[1];
-  assert.notEqual(selected, bare, 'bare archive must not be exported as SDK input');
+  assert.equal(selected?.includes('/ast_support-') ?? false, true, 'bare archive must not be exported as SDK input');
   assert.equal(result.status, 0, result.stderr);
   assert.ok(selected, result.stdout);
   const dest = path.join(dir, 'installed-sdk');
@@ -175,6 +211,7 @@ test('bare build archive selects complete downloaded AST inputs consumed by inst
   }
   console.log('ASSERT downloaded AST selection and installer payload bytes executed');
 }));
+}
 
 // Independent pins: store integrity must not replace the reviewed tuple manifest pin.
 test('reviewed tuple manifest pin rejects valid stored bytes from a different tuple', () => fixture(({env, run}) => {
