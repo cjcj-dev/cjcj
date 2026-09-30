@@ -27,7 +27,7 @@ def events(path):
         m=EVENT.search(line)
         if m:
             stamp,tid,reason,mode,collected,allocated,used,ns=m.groups()
-            rows.append(dict(line=n,timestamp=stamp,reason=reason,mode=mode,allocated=int(allocated)))
+            rows.append(dict(line=n,timestamp=stamp,reason=reason,mode=mode,allocated=int(allocated),duration_ns=int(ns)))
     raw=subprocess.run(['/usr/bin/grep','-c','-F','GC for oom: sync:',str(path)],text=True,capture_output=True)
     count=sum(e['reason']=='oom' and e['mode']=='sync' for e in rows)
     if raw.returncode not in (0,1) or count!=int(raw.stdout):

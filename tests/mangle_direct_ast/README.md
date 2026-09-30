@@ -31,3 +31,23 @@ report it separately from baseline-existing consumer cuts.
 5376MB heap, default jobs, 900s timeout, two same-baseline noise samples, three
 baseline samples and three candidate samples. Samples run sequentially to avoid
 mutual contention. Counts require completed GC log events and valid BC output.
+
+`lambda.py` separately emits RAW CHIR and decodes `Lambda.identifier` from the
+compiler's serialized result. Local lambda names can disappear before LLVM
+output, so LLVM equality alone is not a sensitive assertion for the lambda
+producer/consumer cuts. Baseline/candidate/cuts/restored use the same script and
+inputs; the ordinary/control/shapes cases must contain observed lambdas. Other
+function identifiers are a separate control assertion.
+
+Additional coverage uses `coverage/locals.cj` with the normal recipe and
+`coverage/mock.cj` with `--compiler-option=--mock=on --compiler-option=--test`.
+Keep the ordinary/parallel controls in each input directory. The mock case
+exercises the generated default-method accessor on an extend declaration.
+`coverage/annotations.cj` is retained as an explicit coverage gap: cjcj#758
+tracks its pre-mangling failure in both frozen and candidate stage1, while the
+same official compiler accepts it. It is not a passing mangler test.
+
+`phases.py KEEP_GC` applies the original #666 sequential Main Stage bounds and
+one-second clock/rounding margin. It reports GC completion-phase observations,
+not allocation stack attribution. Unknown stages or negative slack invalidate
+this extra phase ruler without converting them into a zero observation.
