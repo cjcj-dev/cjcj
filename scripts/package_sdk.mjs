@@ -28,6 +28,7 @@ import {RELEASE_MANIFEST, writeReleaseManifest} from '../build/lib/release-manif
 import {writeToolchainIdentity} from '../build/lib/toolchain-identity.mjs';
 import {assertNoVerifierReportArtifacts} from './verifier_artifact_gate.mjs';
 import {assertPackagedLineage} from '../build/lib/package-lineage.mjs';
+import {installIsolatedLlvmTuple} from '../build/lib/isolated-llvm-tuple.mjs';
 import {
   PACKAGED_LLVM_TOOL_NAMES,
   formatPackagedLlvmToolsManifest,
@@ -62,6 +63,13 @@ const crossStdDirs = (Array.isArray(argv['cross-std-dir'])
   ? argv['cross-std-dir']
   : typeof argv['cross-std-dir'] === 'string' ? [argv['cross-std-dir']] : []).map(String);
 const llvmManifest = required('llvm-manifest');
+// The official host SDK keeps its own llc/opt/lld; ci/setup_sdk.mjs publishes the
+// source-built tuple into an independent directory. This package is not the
+// official SDK -- it ships our coloured runtime and self-built std -- so the
+// stage must receive the coloured tuple from that directory. Omitting the
+// directory would silently package the official backend, which is the exact
+// mismatch this isolation exists to prevent.
+const isolatedLlvmBin = required('isolated-llvm-bin');
 const baseSdkId = typeof argv['base-sdk-id'] === 'string' ? argv['base-sdk-id'] : '';
 const baseSdkArchive = required('base-sdk-archive');
 const baseSdkProvenance = required('base-sdk-provenance');
@@ -88,6 +96,7 @@ if (runtimeLib && !await exists(runtimeLib)) { console.error(`runtime library no
 if (runtimeRoot && !await exists(runtimeRoot, 'dir')) { console.error(`runtime root not found: ${runtimeRoot}`); process.exit(2); }
 if (stdDir && !await exists(stdDir, 'dir')) { console.error(`std dir not found: ${stdDir}`); process.exit(2); }
 if (!await exists(llvmManifest)) { console.error(`LLVM manifest not found: ${llvmManifest}`); process.exit(2); }
+if (!await exists(isolatedLlvmBin, 'dir')) { console.error(`isolated LLVM tuple dir not found: ${isolatedLlvmBin}`); process.exit(2); }
 if (!await exists(baseSdkArchive)) { console.error(`base SDK archive not found: ${baseSdkArchive}`); process.exit(2); }
 if (!await exists(baseSdkProvenance)) { console.error(`base SDK provenance not found: ${baseSdkProvenance}`); process.exit(2); }
 if (!await exists(gateHostRuntime)) { console.error(`gate host runtime not found: ${gateHostRuntime}`); process.exit(2); }
@@ -888,6 +897,33 @@ function verifyNativeLlvmTool(tool, executable, {requiresFat = false} = {}) {
   }
   return {file: oneLine(fileProbe.output), loader: oneLine(loaderProbe.output), version: version.version};
 }
+
+console.log('[7a/9] install the isolated fixed LLVM tuple into the stage');
+// The stage was cloned from the official SDK, so its llc/opt/lld are the
+// official backend bytes. Replace exactly those three with the verified
+// source-built tuple; every other inherited tool keeps its base-SDK identity and
+// is audited against the base SDK below.
+const installedTupleTools = await installIsolatedLlvmTuple({
+  tupleBin: isolatedLlvmBin,
+  packagedLlvmBin: path.join(stage, path.join('third_party', 'llvm', 'bin')),
+  lldTool: expectedTupleLldTool,
+  manifestValues: inputLlvmManifest.values,
+  exeSuffix,
+  verify: async (tool, destination, stagedSha) => {
+    const evidence = verifyNativeLlvmTool(tool, destination, {requiresFat: true});
+    const versionField = {llc: 'LLC', opt: 'OPT', [expectedTupleLldTool]: 'LLD'}[tool];
+    const expectedSha = inputLlvmManifest.values.get(`${versionField}_SHA256`) || '';
+    const expectedVersion = inputLlvmManifest.values.get(`${versionField}_VERSION`) || '';
+    if (stagedSha !== expectedSha) {
+      throw new Error(`${tool}: staged sha256 ${stagedSha} does not match tuple manifest ${expectedSha}`);
+    }
+    if (expectedVersion && evidence.version !== expectedVersion) {
+      throw new Error(`${tool}: staged version ${evidence.version} does not match tuple manifest ${expectedVersion}`);
+    }
+    console.log(`  ${tool}: sha256=${stagedSha} version=${evidence.version}`);
+  },
+});
+console.log(`ISOLATED_TUPLE_INSTALLED count=${installedTupleTools.length} dir=${isolatedLlvmBin}`);
 
 console.log('[7a/9] audit packaged LLVM tool lineage');
 const llvmBinRelative = path.join('third_party', 'llvm', 'bin');
