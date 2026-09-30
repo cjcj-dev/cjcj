@@ -189,12 +189,12 @@ jobs:
           platform: ubuntu-22.04
           pin: ${{ env.RUNTIME_REF }}
           cache-size: 1G
-      - name: Fetch pinned qualified language tuple
+      - name: Fetch pinned H48 language tuple
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           python3 ci/release/publish_language_tuple.py fetch \
-            --pin ci/qualified_language_tuple_pin.json --output "$RUNNER_TEMP/h48-download"
+            --pin ci/h48_language_tuple_pin.json --output "$RUNNER_TEMP/h48-download"
       - name: Provision native gate debugger
         run: |
           sudo apt-get update -qq
@@ -289,7 +289,6 @@ jobs:
           path: |
             ci/runtime_pin.env
             ci/h48_language_tuple_pin.json
-            ci/qualified_language_tuple_pin.json
             ${{ runner.temp }}/h48-active/qualification.json
             ${{ runner.temp }}/h48-active.env
             ${{ steps.runtime-build.outcome == 'failure' && '.platform-ci/runtime-gate-diagnostics/' || '' }}
