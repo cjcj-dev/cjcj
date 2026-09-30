@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import {spawnSync} from 'node:child_process';
 import {test} from 'node:test';
 import {fixture} from './prepare_bootstrap_fixture.mjs';
@@ -17,6 +18,12 @@ function driverFixture(check) {
       fs.cpSync(path.join(repository, directory), path.join(root, directory), {recursive: true});
     }
     const driver = path.join(root, 'tools/srcbuild_kkk2.sh');
+    if (os.hostname().split('.')[0] !== 'kkk2') {
+      const bin = path.join(inputs.dir, 'driver-bin');
+      fs.mkdirSync(bin);
+      fs.writeFileSync(path.join(bin, 'hostname'), '#!/bin/sh\nprintf "kkk2\\n"\n', {mode: 0o755});
+      inputs.env.PATH = `${bin}:${inputs.env.PATH}`;
+    }
     const runDriver = (stage = 31) => spawnSync('bash', [driver,
       '--from-step', String(stage), '--through-step', String(stage), '--dry-run'],
     {env: inputs.env, encoding: 'utf8'});
