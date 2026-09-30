@@ -41,34 +41,6 @@ on:
         required: false
         type: boolean
         default: false
-    outputs:
-      final_compiler_linux_x64:
-        description: Same-run final compiler for linux-x64
-        value: ${{ jobs.artifact-contract.outputs.final_compiler_linux_x64 }}
-      final_std_linux_x64:
-        description: Linux x64 source-built std artifact
-        value: ${{ jobs.artifact-contract.outputs.final_std_linux_x64 }}
-      final_compiler_linux_aarch64:
-        description: Same-run final compiler for linux-aarch64
-        value: ${{ jobs.artifact-contract.outputs.final_compiler_linux_aarch64 }}
-      final_std_linux_aarch64:
-        description: Linux AArch64 source-built std artifact
-        value: ${{ jobs.artifact-contract.outputs.final_std_linux_aarch64 }}
-      final_compiler_darwin_x64:
-        description: Same-run final compiler for darwin-x64
-        value: ${{ jobs.artifact-contract.outputs.final_compiler_darwin_x64 }}
-      final_std_darwin_x64:
-        description: Darwin x64 source-built std artifact
-        value: ${{ jobs.artifact-contract.outputs.final_std_darwin_x64 }}
-      final_compiler_darwin_arm64:
-        description: Same-run final compiler for darwin-arm64
-        value: ${{ jobs.artifact-contract.outputs.final_compiler_darwin_arm64 }}
-      final_std_darwin_arm64:
-        description: Darwin arm64 source-built std artifact
-        value: ${{ jobs.artifact-contract.outputs.final_std_darwin_arm64 }}
-      final_std_windows_x64:
-        description: Windows x64 source-built std artifact
-        value: ${{ jobs.artifact-contract.outputs.final_std_windows_x64 }}
   workflow_dispatch:
     inputs:
       cangjie_ref:
@@ -132,38 +104,25 @@ jobs:
     outputs:
       matrix: ${{ steps.select.outputs.matrix }}
       llvm_platforms: ${{ steps.select.outputs.llvm_platforms }}
+      has_runnable: ${{ steps.select.outputs.has_runnable }}
+      has_blocked: ${{ steps.select.outputs.has_blocked }}
     steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
       - name: Select the requested targets
         id: select
         env:
           REQUESTED: ${{ inputs.targets }}
-        run: |
-          set -euo pipefail
-          all='[
-            {"target":"linux-aarch64","runner":"ubuntu-24.04-arm","llvm_platform":"linux_aarch64","static_libs":true},
-            {"target":"darwin-arm64","runner":"macos-15","llvm_platform":"darwin_aarch64","static_libs":false},
-            {"target":"darwin-x64","runner":"macos-15-intel","llvm_platform":"darwin_x86_64","static_libs":false},
-            {"target":"linux-x64","runner":"ubuntu-22.04","llvm_platform":"linux_x86_64","static_libs":true}
-          ]'
-          if [ -z "$REQUESTED" ] || [ "$REQUESTED" = all ]; then
-            selected="$all"
-          else
-            selected="$(printf '%s' "$all" | jq -c --arg want "$REQUESTED" \
-              '[.[] | select(.target as $t | ($want | split(",") | map(gsub("^ +| +$";"")) | index($t)))]')"
-          fi
-          count="$(printf '%s' "$selected" | jq 'length')"
-          # An empty matrix skips every dependent job while reporting nothing wrong.
-          if [ "$count" -eq 0 ]; then
-            echo "no target matched targets=$REQUESTED" >&2
-            exit 1
-          fi
-          echo "selected $count target(s) for targets=$REQUESTED"
-          printf 'matrix=%s\n' "$(printf '%s' "$selected" | jq -c '{include: .}')" >> "$GITHUB_OUTPUT"
-          printf 'llvm_platforms=%s\n' "$(printf '%s' "$selected" | jq -r '[.[].llvm_platform] | join(",")')" >> "$GITHUB_OUTPUT"
+        run: node ci/srcbuild/target-matrix.mjs --targets "$REQUESTED"
 
   srcbuild:
     name: ${{ matrix.target }} / source SDK
     needs: plan
+    if: needs.plan.outputs.has_runnable == 'true'
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
@@ -177,32 +136,19 @@ jobs:
       build_android: ${{ inputs.build_android || false }}
       rebuild_llvm: ${{ inputs.rebuild_llvm || false }}
 
-  artifact-contract:
-    name: Publish final std artifact contract
-    needs: srcbuild
-    runs-on: ubuntu-22.04
-    outputs:
-      final_compiler_linux_x64: ${{ steps.contract.outputs.final_compiler_linux_x64 }}
-      final_std_linux_x64: ${{ steps.contract.outputs.final_std_linux_x64 }}
-      final_compiler_linux_aarch64: ${{ steps.contract.outputs.final_compiler_linux_aarch64 }}
-      final_std_linux_aarch64: ${{ steps.contract.outputs.final_std_linux_aarch64 }}
-      final_compiler_darwin_x64: ${{ steps.contract.outputs.final_compiler_darwin_x64 }}
-      final_std_darwin_x64: ${{ steps.contract.outputs.final_std_darwin_x64 }}
-      final_compiler_darwin_arm64: ${{ steps.contract.outputs.final_compiler_darwin_arm64 }}
-      final_std_darwin_arm64: ${{ steps.contract.outputs.final_std_darwin_arm64 }}
-      final_std_windows_x64: ${{ steps.contract.outputs.final_std_windows_x64 }}
+  blocked:
+    name: Report blocked source targets
+    needs: plan
+    if: needs.plan.outputs.has_blocked == 'true'
+    runs-on: ubuntu-24.04
     steps:
-      - name: Export artifact names
-        id: contract
-        run: |
-          {
-            echo "final_compiler_linux_x64=final-compiler-linux-x64"
-            echo "final_std_linux_x64=final-std-linux-x64"
-            echo "final_compiler_linux_aarch64=final-compiler-linux-aarch64"
-            echo "final_std_linux_aarch64=final-std-linux-aarch64"
-            echo "final_compiler_darwin_x64=final-compiler-darwin-x64"
-            echo "final_std_darwin_x64=final-std-darwin-x64"
-            echo "final_compiler_darwin_arm64=final-compiler-darwin-arm64"
-            echo "final_std_darwin_arm64=final-std-darwin-arm64"
-            echo "final_std_windows_x64=final-std-windows-x64"
-          } >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Report missing source inputs
+        env:
+          REQUESTED: ${{ inputs.targets }}
+        run: node ci/srcbuild/target-matrix.mjs --targets "$REQUESTED" --require-ready

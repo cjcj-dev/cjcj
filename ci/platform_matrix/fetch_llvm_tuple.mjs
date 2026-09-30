@@ -2,6 +2,7 @@
 // Prefer the tuple artifact downloaded from this workflow run. If it is absent,
 // retain the cross-run job lookup as a recovery path.
 
+import {targetForHost} from '../../build/lib/targets.mjs';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -27,14 +28,7 @@ const branches = [...new Set([
   'ci/platform-matrix',
 ])];
 
-const platforms = {
-  'linux/x64': 'linux_x86_64',
-  'linux/arm64': 'linux_aarch64',
-  'darwin/arm64': 'darwin_aarch64',
-  'darwin/x64': 'darwin_x86_64',
-  'win32/x64': 'windows_x86_64',
-};
-const platform = platforms[`${process.platform}/${process.arch}`];
+const platform = targetForHost()?.spec.llvmPlatform;
 
 function stopBlocked(reason) {
   emitBlockedSummary(reason);
