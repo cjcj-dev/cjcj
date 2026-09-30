@@ -26,6 +26,7 @@ cmake_cmd+=(
   -DCANGJIE_BUILD_CJC=OFF -DCANGJIE_BUILD_TESTS=OFF
   -DCANGJIE_BUILD_STD_SUPPORT=ON -DCANGJIE_SKIP_BUILD_CLANG_RT=ON
 )
+unset CMAKE_TOOLCHAIN_FILE
 "${cmake_cmd[@]}" 2>&1 | tee "$out/configure.log"
 # The dependency listing is evidence of the actual build surface, not a second
 # hand-maintained list of upstream objects.
