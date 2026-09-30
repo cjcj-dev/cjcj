@@ -37,9 +37,15 @@ def check_case(case):
         'root_dynamic_registration': root.count('@CJ_MCC_OnFinalizerCreated(') == 1
         and 'finalizer.required' in root and bool(re.search(r'and i8 [^\n]+, 2\b', root))
         and bool(re.search(r'load %TypeInfo\*', root)),
-        'finalizable_allocation_keeps_type_attribute': any(
-            '"HasFinalizer"' in text for text in texts),
     }
+    type_attributes = []
+    for text in texts:
+        definition = re.search(r'^@"std.core:RegistrationFinalized.ti" = [^\n]* #(\d+)$', text, re.M)
+        if definition:
+            attributes = re.search(r'^attributes #' + definition.group(1) + r' = \{([^\n]+)', text, re.M)
+            type_attributes.append(attributes.group(1) if attributes else '')
+    checks['finalizable_allocation_keeps_type_attribute'] = bool(type_attributes) and all(
+        '"HasFinalizer"' in attributes for attributes in type_attributes)
     bridge_attributes = []
     for text in texts:
         for declaration in re.finditer(
@@ -72,7 +78,9 @@ def check_case(case):
     caught = bodies.get('_CNat18registrationCaughtHv', '')
     checks['constructor_exception_edge_retained'] = (
         bool(caught) and bool(re.search(r'invoke [^\n]*RegistrationFinalized[^\n]*<init>', caught))
-        and 'unwind label' in caught and reaches_bridge('_CNat18registrationCaughtHv', bodies))
+        and 'unwind label' in caught)
+    checks['exception_constructor_reaches_registration'] = reaches_bridge(
+        '_CNat18registrationCaughtHv', bodies)
     for assertion, passed in checks.items():
         print(f'TARGET {label} {assertion}={"PASS" if passed else "FAIL"}', flush=True)
     return {'case': label, 'status': 'PASS' if all(checks.values()) else 'FAIL', 'checks': checks}
