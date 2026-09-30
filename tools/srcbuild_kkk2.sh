@@ -631,7 +631,7 @@ fixed_tuple_is_current() {
     [[ $opt_llvm == "$manifest_llvm" ]] || return 1
     [[ $(awk -F= '$1=="CANGJIE_COMPILER_SHA" {print $2}' "$manifest") == "$CANGJIE_COMPILER_SHA" ]] || return 1
     [[ $(awk -F= '$1=="FLATBUFFERS_SHA" {print $2}' "$manifest") == "$FLATBUFFERS_SHA" ]] || return 1
-    node "$REPO_ROOT/ci/llvm-tools-manifest.mjs" validate native "$manifest" >/dev/null || return 1
+    node "$REPO_ROOT/ci/llvm-tools-manifest.mjs" validate tuple "$manifest" >/dev/null || return 1
 }
 
 resolve_depot_tuple_root() {
@@ -794,7 +794,7 @@ build_fixed_tuple() {
     local llc_build="$build_root/llc-build"
     local flatbuffers_build="$build_root/flatbuffers-build"
     local generated="$build_root/shim-generated"
-    local llc_sha opt_sha lld_sha lld_version shim_sha
+    local llc_sha opt_sha lld_sha lld_version shim_sha tool version prefix
 
     mkdir -p "$build_root"
     checkout_exact "$llvm_fork" "$LLVM_URL" "$LLVM_SHA" || return 1
@@ -865,6 +865,11 @@ build_fixed_tuple() {
         printf 'LLD_SHA256=%s\n' "$lld_sha"
         printf 'SHIM_SHA256=%s\n' "$shim_sha"
     } > "$CJCJ_FIXED_LLVM_DIR/llvm-tools.manifest"
+    for tool in llc opt; do
+        version=$("$llc_build/bin/$tool" --version | awk '/LLVM version / {sub(/^[[:space:]]+/, ""); print; found=1; exit} END {if (!found) exit 1}') || return 1
+        prefix=$(printf '%s' "$tool" | tr '[:lower:]' '[:upper:]')
+        printf '%s_SOURCE=tuple:%s\n%s_VERSION=%s\n' "$prefix" "$LLVM_SHA" "$prefix" "$version" >> "$CJCJ_FIXED_LLVM_DIR/llvm-tools.manifest"
+    done
     fixed_tuple_is_current || return 1
     if [[ ${CJCJ_LLVM_DEPOT_PUBLISH:-0} == 1 ]]; then
         publish_fixed_tuple_to_depot "${CJCJ_LLVM_DEPOT_ROOT:-/root/llvmdepot}" || return 1

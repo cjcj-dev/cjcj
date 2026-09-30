@@ -49,7 +49,7 @@ const sha256 = data => crypto.createHash('sha256').update(data).digest('hex');
 const manifestFile = path.join(fixedRoot, 'llvm-tools.manifest');
 const manifest = Object.fromEntries(parseLlvmToolsManifest(
   await fs.readFile(manifestFile, 'utf8'),
-  {label: manifestFile, schema: 'native'},
+  {label: manifestFile, schema: 'tuple'},
 ).values);
 const pins = parsePinFile(await fs.readFile(path.join(root, 'ci', 'llvm_pin.env'), 'utf8'), 'ci/llvm_pin.env');
 for (const [key, expected] of [

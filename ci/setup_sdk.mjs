@@ -203,7 +203,7 @@ if (llcPlatform && fixedLlcGz) {
     const manifestText = await fs.readFile(manifestPath, 'utf8');
     let manifest;
     try {
-      manifest = parseLlvmToolsManifest(manifestText, {label: manifestPath, schema: 'core-or-native'});
+      manifest = parseLlvmToolsManifest(manifestText, {label: manifestPath, schema: 'tuple'});
     } catch (error) {
       log(`FATAL: malformed fixed LLVM provenance manifest: ${error.message}`);
       process.exit(4);
@@ -213,7 +213,7 @@ if (llcPlatform && fixedLlcGz) {
     llvmSourceSha = manifest.get('LLVM_SHA') || '';
     const pinText = await fs.readFile(path.join(repoRoot, 'ci', 'llvm_pin.env'), 'utf8');
     const expectedFields = [['LLVM_SHA', pinText.match(/^LLVM_SHA=([0-9a-f]{40})$/m)?.[1] || '']];
-    if (parsedSchema === 'native') expectedFields.push(
+    expectedFields.push(
       ['PLATFORM', llcPlatform],
       ['CANGJIE_COMPILER_SHA', pinText.match(/^CANGJIE_COMPILER_SHA=([0-9a-f]{40})$/m)?.[1] || ''],
       ['FLATBUFFERS_SHA', pinText.match(/^FLATBUFFERS_SHA=([0-9a-f]{40})$/m)?.[1] || ''],
@@ -224,11 +224,11 @@ if (llcPlatform && fixedLlcGz) {
         process.exit(4);
       }
     }
-    if (hasFixedLld && ((parsedSchema !== 'core-lineage' && parsedSchema !== 'native') || manifest.get('LLD_TOOL') !== lldTool)) {
+    if (hasFixedLld && manifest.get('LLD_TOOL') !== lldTool) {
       log(`FATAL: fixed LLVM LLD lineage mismatch (schema=${parsedSchema} tool=${manifest.get('LLD_TOOL') || ''})`);
       process.exit(4);
     }
-    if (parsedSchema === 'native') {
+    {
       const fixedShim = path.join(path.dirname(fixedLlcGz), 'cjselfhost_llvmshim.o');
       if (!(await isFile(fixedShim))) {
         log(`FATAL: fixed LLVM shim missing: ${fixedShim}`);

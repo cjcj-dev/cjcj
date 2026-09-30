@@ -207,12 +207,9 @@ function sha256(buffer) {
 
 const parsedManifest = parseLlvmToolsManifest(await fs.readFile(fixedLlvmManifest, 'utf8'), {
   label: fixedLlvmManifest,
-  schema: 'core-or-native',
+  schema: 'tuple',
 });
 const manifest = parsedManifest.values;
-if (parsedManifest.schema !== 'core-lineage') {
-  throw new Error(`fixed LLVM tuple requires core-lineage manifest, got ${parsedManifest.schema}`);
-}
 const llvmSourceSha = manifest.get('LLVM_SHA') || '';
 const pinText = await fs.readFile(path.join('ci', 'llvm_pin.env'), 'utf8');
 const pinnedLlvmSha = pinText.match(/^LLVM_SHA=([0-9a-f]{40})$/m)?.[1] || '';

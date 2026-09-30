@@ -244,6 +244,12 @@ jobs:
           fi
           printf 'SHIM_SHA256=%s\n' "$shim_sha" >> \
             "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
+          for tool in llc opt; do
+            version="$(llc-build/bin/$tool --version | awk '/LLVM version / {sub(/^[[:space:]]+/, ""); print; found=1; exit} END {if (!found) exit 1}')"
+            prefix=$(printf '%s' "$tool" | tr '[:lower:]' '[:upper:]')
+            printf '%s_SOURCE=tuple:%s\n%s_VERSION=%s\n' "$prefix" "$LLVM_SHA" "$prefix" "$version" >> \
+              "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
+          done
 
       - name: Prepare MSYS2/MinGW LLVM toolchain
         if: runner.os == 'Windows' && steps.cache.outputs.cache-hit != 'true'
@@ -347,8 +353,13 @@ jobs:
           fi
           grep -Fx "SHIM_SHA256=$shim_sha" \
             "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
-          node ci/llvm-tools-manifest.mjs validate native \
+          node ci/llvm-tools-manifest.mjs validate tuple \
             "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
+          for tool in llc opt; do
+            version="$("$RUNNER_TEMP/fixed-llvm-tools/$tool" --version | awk '/LLVM version / {sub(/^[[:space:]]+/, ""); print; found=1; exit} END {if (!found) exit 1}')"
+            prefix=$(printf '%s' "$tool" | tr '[:lower:]' '[:upper:]')
+            grep -Fx "${prefix}_VERSION=$version" "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
+          done
           shim_exports="$(nm -C "fixed-toolchain/${{ matrix.platform }}/cjselfhost_llvmshim.o" \
             | grep -cE ' T _?(LLVMGlobalObjectAddStringAttribute|LLVMSelfhost|CJOF)')"
           test "$shim_exports" -ge 90
@@ -369,7 +380,7 @@ jobs:
           for payload in llc.gz opt.gz ld.lld.gz llvm-tools.manifest cjselfhost_llvmshim.o llvm-static-libs.txt llvm-system-libs.txt; do
             test -s "fixed-toolchain/$TUPLE_PLATFORM/$payload"
           done
-          node ci/llvm-tools-manifest.mjs validate core-lineage "fixed-toolchain/$TUPLE_PLATFORM/llvm-tools.manifest"
+          node ci/llvm-tools-manifest.mjs validate tuple "fixed-toolchain/$TUPLE_PLATFORM/llvm-tools.manifest"
 
       - name: Upload LLVM tools
         uses: actions/upload-artifact@v7

@@ -114,7 +114,7 @@ test('the repository has one fixed LLVM artifact uploader and preserves native a
   for (const input of ['ci/llvm_pin.env', 'build/lib/targets.mjs', 'ci/llvm-tools-matrix.mjs', 'ci/platform_tuples/**']) {
     assert.ok(cacheKey.includes(input), `cache identity includes ${input}`);
   }
-  assert.ok(steps.some(step => step.run?.includes('validate native')));
+  assert.ok(steps.some(step => step.run?.includes('validate tuple')));
   assert.ok(steps.some(step => step.run?.includes('assert_no_libxml2_needed.sh')));
   assert.ok(steps.some(step => step.run?.includes('bash ci/platform_tuples/build_tuple.sh')));
   assert.ok(steps.some(step => step.run?.includes('llvm-static-libs.txt')));
