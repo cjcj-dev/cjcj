@@ -1120,7 +1120,10 @@ public class Translator {
         if (!fn.IsConstructor()) {
             return
         }
-        let owner = fn.GetParentCustomTypeDef() ?? return
+        let owner = match (fn.GetParentCustomTypeDef()) {
+            case Some(value) => value
+            case None => return
+        }
         if (owner.GetPackageName() != "std.core" || owner.GetSrcCodeIdentifier() != "Object") {
             return
         }
