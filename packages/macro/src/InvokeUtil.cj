@@ -521,6 +521,7 @@ private func OpenInLinkMap(libPath: String, lmid: Int64): RuntimeHandle {
     try (path = unsafe { LibC.mallocCString(libPath) }.asResource()) {
         let realpathRes = unsafe { realpath(path.value, CString(CPointer<UInt8>())) }
         if (realpathRes.isNull()) {
+            Errorln("could not get realpath of library: " + libPath)
             return result
         }
         let rawHandle = unsafe { dlmopen(IntNative(lmid), realpathRes, RTLD_NOW_LOCAL) }
