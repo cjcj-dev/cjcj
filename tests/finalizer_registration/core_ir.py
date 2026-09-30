@@ -9,7 +9,7 @@ import shutil
 import subprocess
 import time
 
-from run import digest
+from run import digest, linked_libraries
 
 
 def compile_case(compiler, core, directory, optimization):
@@ -51,14 +51,17 @@ def main():
         (directory / 'bin').mkdir(parents=True)
         compiler = directory / 'bin/cjc-frontend'
         shutil.copy2(source, compiler)
+        linkage_rc, libraries = linked_libraries(compiler)
         identities[label] = {'source': source, 'source_sha256': digest(Path(source)),
-                             'frontend_sha256': digest(compiler)}
+                             'frontend_sha256': digest(compiler), 'ldd_rc': linkage_rc,
+                             'libraries': libraries}
         for optimization in ('O0', 'O2'):
             jobs.append((compiler, args.core, directory / optimization, optimization))
     with ThreadPoolExecutor(max_workers=4) as pool:
         results = list(pool.map(lambda values: compile_case(*values), jobs))
     (args.out / 'result.json').write_text(json.dumps({
         'identities': identities, 'jobs': os.cpu_count(), 'parallel_compilers': 4,
+        'sources': {str(path.relative_to(args.core)): digest(path) for path in args.core.rglob('*.cj')},
         'affinity': sorted(os.sched_getaffinity(0)), 'cases': results}, indent=2) + '\n')
     return 0 if all(case['rc'] == 0 for case in results) else 1
 

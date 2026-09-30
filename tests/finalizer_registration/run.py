@@ -18,6 +18,17 @@ def digest(path):
     return result.hexdigest()
 
 
+def linked_libraries(compiler):
+    linkage = subprocess.run(['ldd', str(compiler)], capture_output=True, text=True)
+    libraries = {}
+    for line in linkage.stdout.splitlines():
+        fields = line.split()
+        if len(fields) >= 3 and fields[1] == '=>' and fields[2].startswith('/'):
+            library = Path(fields[2])
+            libraries[str(library)] = digest(library)
+    return linkage.returncode, libraries
+
+
 def compile_case(compiler, source, destination, phase, optimization):
     destination.mkdir(parents=True)
     command = [str(compiler), str(source), '--no-prelude', '--experimental',
@@ -61,16 +72,10 @@ def main():
     sources = args.source or sorted(Path(__file__).parent.glob('*.cj'))
     phases = args.phase or ['raw', 'opt']
     optimizations = args.optimization or ['O0', 'O2']
-    linkage = subprocess.run(['ldd', str(args.compiler)], capture_output=True, text=True)
-    libraries = {}
-    for line in linkage.stdout.splitlines():
-        fields = line.split()
-        if len(fields) >= 3 and fields[1] == '=>' and fields[2].startswith('/'):
-            library = Path(fields[2])
-            libraries[str(library)] = digest(library)
+    linkage_rc, libraries = linked_libraries(args.compiler)
     summary = {'compiler': str(args.compiler), 'compiler_sha256': digest(args.compiler),
                'affinity': sorted(os.sched_getaffinity(0)), 'jobs': os.cpu_count(),
-               'parallel_compilers': args.workers, 'libraries': libraries, 'ldd_rc': linkage.returncode,
+               'parallel_compilers': args.workers, 'libraries': libraries, 'ldd_rc': linkage_rc,
                'cases': []}
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
         futures = [pool.submit(compile_case, args.compiler, source,

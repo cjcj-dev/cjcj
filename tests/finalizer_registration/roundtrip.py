@@ -2,11 +2,12 @@
 """Pass actual compiler CHIR to a reader linked with that product's CHIR library."""
 import argparse
 import json
+import os
 from pathlib import Path
 import subprocess
 import time
 
-from run import digest
+from run import digest, linked_libraries
 
 
 def main():
@@ -18,6 +19,7 @@ def main():
     args.out.mkdir(parents=True, exist_ok=True)
     results = []
     source_results = json.loads(args.result.read_text())
+    linkage_rc, libraries = linked_libraries(args.reader)
     for case in source_results['cases']:
         name = Path(case['source']).stem
         if name != 'root' and not (name == 'control' and case['phase'] == 'opt'):
@@ -37,6 +39,7 @@ def main():
                         'input_sha256': digest(source), 'output': output})
     (args.out / 'result.json').write_text(json.dumps({
         'compiler_sha256': source_results['compiler_sha256'], 'reader_sha256': digest(args.reader),
+        'libraries': libraries, 'ldd_rc': linkage_rc, 'affinity': sorted(os.sched_getaffinity(0)),
         'cases': results}, indent=2) + '\n')
     if not results or any(case['rc'] not in (0, 1) or 'TARGET ' not in case['output'] for case in results):
         return 2
