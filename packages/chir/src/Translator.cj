@@ -1635,21 +1635,6 @@ public class Translator {
         return castedValue
     }
 
-    private func IsUnnecessarySuperCall(node: AstNode): Bool {
-        if (let Some(callExpr) <- (node as AstCallExpr)) {
-            if (let Some(baseFunc) <- callExpr.baseFunc) {
-                if (let Some(refExpr) <- (baseFunc as AstRefExpr)) {
-                    if (refExpr.isSuper) {
-                        if (let Some(astTy) <- callExpr.GetTy()) {
-                            return astTy.IsObject()
-                        }
-                    }
-                }
-            }
-        }
-        return false
-    }
-
     // C++: TranslateBlock.cpp:12-23 CollectInstantiatedFuncNodes.
     private func CollectInstantiatedFuncNodes(nodes: ArrayList<AstNode>, genericFunc: AstFuncDecl,
         manager: GenericInstantiationManager): Unit {
@@ -1677,9 +1662,6 @@ public class Translator {
                     nodes.add(funcDecl)
                     continue
                 }
-            }
-            if (IsUnnecessarySuperCall(body)) {
-                continue
             }
             nodes.add(body)
         }
