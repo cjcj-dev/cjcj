@@ -28,6 +28,7 @@ export const GATING = Object.freeze([
   'build/test/source-matrix.test.mjs',
   'build/test/target-registry.test.mjs',
   'ci/platform_matrix/summarize_scope.test.mjs',
+  'ci/platform_matrix/llvm-tuple.test.mjs',
   'ci/release/g8.test.mjs',
   'build/test/archive.test.mjs',
   'build/test/bootstrap-handoff.test.mjs',
