@@ -8,6 +8,13 @@ reference. It also exercises incremental cold/warm execution and the full
 driver independently. Assertions continue after warning or parse failures so
 that an earlier diagnostic cannot hide the completeness assertion.
 
+Explicit files must match the single-module definition set exactly. Directory
+and omitted-output partitions must contain that set; partition-local extra
+definitions are recorded without filtering. Use `--baseline-work` with a
+baseline evidence directory to require an empty baseline/candidate definition
+set difference for every directory configuration. `--modes` and `--surfaces`
+select independent integration surfaces without changing their assertions.
+
 Run on a build host with an official host compiler SDK and paired LLVM:
 
 ```sh

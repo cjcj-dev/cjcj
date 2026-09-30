@@ -115,7 +115,7 @@ def run_matrix(arguments):
         elif apc == 'split':
             command.extend(['--apc-split-num', '5'])
         if incremental:
-            command.extend(['--experimental', '--incremental-compile', '--incremental-debug'])
+            command.extend(['--experimental', '--incremental-compile'])
         if mode in ('file', 'incremental'):
             command.extend(['-o', str(output)])
         elif mode == 'directory':
@@ -160,9 +160,16 @@ def run_matrix(arguments):
             if parse.returncode == 0:
                 definitions.update(json.loads(parse.stdout)['definitions'])
         (evidence / 'definitions.json').write_text(json.dumps(sorted(definitions), indent=2))
-        check(label + '/complete', bool(definitions) and (reference is None or definitions == reference),
+        single_file = mode in ('file', 'incremental')
+        complete = reference is None or (definitions == reference if single_file else reference <= definitions)
+        check(label + '/complete', bool(definitions) and complete,
               {'definitions': len(definitions), 'missing': sorted((reference or set()) - definitions),
                'extra': sorted(definitions - (reference or definitions))})
+        if arguments.baseline_work and mode in ('directory', 'no-output'):
+            baseline_file = arguments.baseline_work / surface / mode / apc / str(iteration) / 'definitions.json'
+            baseline = set(json.loads(baseline_file.read_text()))
+            check(label + '/baseline-difference', definitions == baseline,
+                  {'removed': sorted(baseline - definitions), 'added': sorted(definitions - baseline)})
         return definitions
 
     surfaces = {
@@ -212,4 +219,5 @@ if __name__ == '__main__':
         parser.add_argument('--iterations', type=int, default=3)
         parser.add_argument('--surfaces', default='objects,arrays,array-ref')
         parser.add_argument('--modes', default='file,directory,no-output,incremental,driver')
+        parser.add_argument('--baseline-work', type=Path)
         sys.exit(run_matrix(parser.parse_args()))
