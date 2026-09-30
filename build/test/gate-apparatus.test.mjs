@@ -54,9 +54,7 @@ test('gate apparatus records actual host bytes separately from its review covera
     },
   }, null, 2)}\n`);
   const githubEnv = path.join(root, 'github.env');
-  const currentPinText = await fs.readFile(path.resolve('ci/cjpm_pin.env'), 'utf8');
-  const currentHost = currentPinText.match(/^CJCJ_TOOLCHAIN=(\S+)$/m)?.[1];
-  assert.ok(currentHost);
+  const currentHost = 'nightly-unreviewed-control';
 
   const capture = ({toolchain, name}) => {
     const output = path.join(root, name);
@@ -73,7 +71,7 @@ test('gate apparatus records actual host bytes separately from its review covera
     return {captured, output};
   };
 
-  await t.test('a newer actual host is retained with a visible not-covered warning', async () => {
+  await t.test('a different actual host is retained with a visible not-covered warning', async () => {
     const {captured, output} = capture({toolchain: currentHost, name: 'uncovered'});
     assert.equal(captured.status, 0, captured.stderr);
     assert.match(captured.stderr, /WARNING: Gate apparatus does not cover this host configuration/);
