@@ -468,6 +468,15 @@ public func LookupHeadlessIntrinsicKind(name: String): Option<IntrinsicKind> {
 
 public func LookupCoreIntrinsicKind(name: String): Option<IntrinsicKind> {
     return match (name) {
+        case "mutexInit" => IntrinsicKind.MUTEX_INIT
+        case "mutexLock" => IntrinsicKind.CJ_MUTEX_LOCK
+        case "mutexTryLock" => IntrinsicKind.MUTEX_TRY_LOCK
+        case "mutexCheckStatus" => IntrinsicKind.MUTEX_CHECK_STATUS
+        case "mutexUnlock" => IntrinsicKind.MUTEX_UNLOCK
+        case "monitorInit" => IntrinsicKind.MONITOR_INIT
+        case "monitorWait" => IntrinsicKind.MOITIOR_WAIT
+        case "monitorNotify" => IntrinsicKind.MOITIOR_NOTIFY
+        case "monitorNotifyAll" => IntrinsicKind.MOITIOR_NOTIFY_ALL
         case "sizeOfType" => IntrinsicKind.SIZE_OF
         case "alignOfType" => IntrinsicKind.ALIGN_OF
         case "acquireRawData" => IntrinsicKind.ARRAY_ACQUIRE_RAW_DATA
@@ -700,16 +709,7 @@ public func LookupCjnativeSyncIntrinsicKind(name: String): Option<IntrinsicKind>
         case "fetchAnd" => IntrinsicKind.ATOMIC_FETCH_AND
         case "fetchOr" => IntrinsicKind.ATOMIC_FETCH_OR
         case "fetchXor" => IntrinsicKind.ATOMIC_FETCH_XOR
-        case "mutexInit" => IntrinsicKind.MUTEX_INIT
-        case "mutexLock" => IntrinsicKind.CJ_MUTEX_LOCK
-        case "mutexTryLock" => IntrinsicKind.MUTEX_TRY_LOCK
-        case "mutexCheckStatus" => IntrinsicKind.MUTEX_CHECK_STATUS
-        case "mutexUnlock" => IntrinsicKind.MUTEX_UNLOCK
         case "waitQueueInit" => IntrinsicKind.WAITQUEUE_INIT
-        case "monitorInit" => IntrinsicKind.MONITOR_INIT
-        case "monitorWait" => IntrinsicKind.MOITIOR_WAIT
-        case "monitorNotify" => IntrinsicKind.MOITIOR_NOTIFY
-        case "monitorNotifyAll" => IntrinsicKind.MOITIOR_NOTIFY_ALL
         case "multiConditionMonitorWait" => IntrinsicKind.MULTICONDITION_WAIT
         case "multiConditionMonitorNotify" => IntrinsicKind.MULTICONDITION_NOTIFY
         case "multiConditionMonitorNotifyAll" => IntrinsicKind.MULTICONDITION_NOTIFY_ALL

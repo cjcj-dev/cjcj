@@ -1,8 +1,8 @@
 package cjcj::codegen
 
 import std.collection.ArrayList
-import cjcj::chir.{CheckCustomTypeDefIsExpected, CustomType, Expression, GetElementByName, GetElementRef, LocalVar, Value}
-import cjcj::utils.REF_PACKAGE_NAME
+import cjcj::chir.{CheckCustomTypeDefIsExpected, ClassType, CustomType, Expression, GetElementByName, GetElementRef, LocalVar, Value}
+import cjcj::utils.CORE_PACKAGE_NAME
 
 // LLVM GCWriteRef::StrengthKind. Like ZGC access decorators, this belongs to
 // the access, not to the type of the value being stored.
@@ -72,9 +72,14 @@ private func GetMemberAccessStrength(irBuilder: IRBuilder2, base: Value, path: A
             let owner = field.outerDef ?? return GCWriteStrength.UNKNOWN
             // Resolve the declaring field, including inherited access through
             // WeakRef<T>. An unrelated field called _value is not a referent.
-            let isReferent = CheckCustomTypeDefIsExpected(owner, REF_PACKAGE_NAME, "WeakRefBase") &&
+            let isReferent = CheckCustomTypeDefIsExpected(owner, CORE_PACKAGE_NAME, "Reference") &&
                 field.name == "_value"
-            strength = if (isReferent) { GCWriteStrength.NO_KEEP_ALIVE } else { GCWriteStrength.STRONG }
+            let isFinal = if (let Some(classTy) <- (custom as ClassType)) {
+                IsFinalReferenceClass(classTy)
+            } else { false }
+            strength = if (isReferent && !isFinal) {
+                GCWriteStrength.NO_KEEP_ALIVE
+            } else { GCWriteStrength.STRONG }
             // ZGC parse3.cpp:317-320: initialization is an ordinary putfield.
             // Only the constructor's own receiver qualifies, not another ref.
             if (!isLoad && isReferent && path.size == 1) {
@@ -103,4 +108,49 @@ private func GetMemberAccessStrength(irBuilder: IRBuilder2, base: Value, path: A
         }
     }
     return strength
+}
+
+// Reference.queue/next and ReferenceQueue.head correspond to Java volatile
+// reference fields (Reference.java:176,186; ReferenceQueue.java:61).
+public func IsVolatileReferenceAddress(irBuilder: IRBuilder2, address: Value): Bool {
+    let local = (address as LocalVar) ?? return false
+    let expression = local.GetExpr() ?? return false
+    if (let Some(field) <- (expression as GetElementRef)) {
+        return IsVolatileReferenceMember(irBuilder, field.GetLocation(), field.GetPath())
+    }
+    if (let Some(field) <- (expression as GetElementByName)) {
+        let base = field.GetLocation()
+        let baseType = base.GetType() ?? return false
+        let path = ResolveElementPathByNames(irBuilder.GetCGModule(), baseType, field.GetNames()) ?? return false
+        return IsVolatileReferenceMember(irBuilder, base, path)
+    }
+    return false
+}
+
+public func IsVolatileReferenceMember(irBuilder: IRBuilder2, base: Value, path: ArrayList<UInt64>): Bool {
+    let baseType = base.GetType() ?? return false
+    var current = baseType.StripAllRefs()
+    for (position in 0..path.size) {
+        let index = path[position]
+        if (let Some(custom) <- (current as CustomType)) {
+            let fields = custom.GetCustomTypeDef().GetAllInstanceVars()
+            if (index >= UInt64(fields.size)) { return false }
+            let field = fields[Int64(index)]
+            if (position == path.size - 1) {
+                let owner = field.outerDef ?? return false
+                return (CheckCustomTypeDefIsExpected(owner, CORE_PACKAGE_NAME, "Reference") &&
+                    (field.name == "_queue" || field.name == "_next")) ||
+                    (CheckCustomTypeDefIsExpected(owner, CORE_PACKAGE_NAME, "ReferenceQueue") && field.name == "head")
+            }
+            let types = custom.GetInstantiatedMemberTys(irBuilder.GetCGContext().GetCHIRBuilder())
+            if (index >= UInt64(types.size)) { return false }
+            current = types[Int64(index)].StripAllRefs()
+        } else {
+            let types = CGType.GetOrCreate(irBuilder.GetCGModule(), current).GetContainedTypes()
+            let typeIndex = if (current.IsRawArray() || current.IsVArray()) { 0u64 } else { index }
+            if (typeIndex >= UInt64(types.size)) { return false }
+            current = types[Int64(typeIndex)].GetOriginal().StripAllRefs()
+        }
+    }
+    return false
 }

@@ -3168,6 +3168,23 @@ public class IRBuilder2 <: Resource {
         return callInst
     }
 
+    public func CallReferenceVolatileLoad(address: LLVMValueRef): LLVMValueRef {
+        let base = GetTrackedManagedBase(address).getOrThrow()
+        let refPlaceTy = unsafe { LLVMPointerType(CGType.GetRefType(GetLLVMContext()), 1u32) }
+        let args = ArrayList<LLVMValueRef>([base, CreatePointerCast(address, refPlaceTy),
+            GetInt32(SEQ_CST_AS_INT32)])
+        return CallMappedLLVMIntrinsic(IntrinsicKind.ATOMIC_LOAD, args, ArrayList<LLVMTypeRef>())
+    }
+
+    public func CallReferenceVolatileStore(value: LLVMValueRef, address: LLVMValueRef): LLVMValueRef {
+        let base = GetTrackedManagedBase(address).getOrThrow()
+        let refTy = CGType.GetRefType(GetLLVMContext())
+        let refPlaceTy = unsafe { LLVMPointerType(refTy, 1u32) }
+        let args = ArrayList<LLVMValueRef>([CreatePointerCast(value, refTy), base,
+            CreatePointerCast(address, refPlaceTy), GetInt32(SEQ_CST_AS_INT32)])
+        return CallMappedLLVMIntrinsic(IntrinsicKind.ATOMIC_STORE, args, ArrayList<LLVMTypeRef>())
+    }
+
     public func CallGCReadWeakRef(args: ArrayList<LLVMValueRef>): LLVMValueRef {
         CJC_ASSERT(args.size == 2)
         let refTy = CGType.GetRefType(GetLLVMContext())

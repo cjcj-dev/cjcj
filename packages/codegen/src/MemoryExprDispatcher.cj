@@ -54,6 +54,9 @@ public func HandleLoadExpr(irBuilder: IRBuilder2, load: Load): LLVMValueRef {
         let base = irBuilder.GetTrackedManagedBase(addr).getOrThrow()
         return irBuilder.CallGCReadWeakRef(ArrayList<LLVMValueRef>([base, addr]))
     }
+    if (IsVolatileReferenceAddress(irBuilder, load.GetLocation())) {
+        return irBuilder.CallReferenceVolatileLoad(value.GetRawValue())
+    }
     return irBuilder.CreateLoad(value)
 }
 
