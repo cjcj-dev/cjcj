@@ -121,6 +121,21 @@ test('every native host identity consumer returns the registry platform and libr
   }
 });
 
+for (const key of allTargets()) {
+  test(`Python preparation enforces the registry package host for ${key}`, () => {
+    const result = spawnSync(process.execPath, ['--input-type=module', '-e',
+      `Object.defineProperty(process, 'platform', {value: 'unsupported'});
+       process.argv = [process.execPath, 'ci/release/prepare_python_bundle.mjs', ${JSON.stringify(key)}, 'unused'];
+       await import('./ci/release/prepare_python_bundle.mjs');`], {
+      cwd: root, encoding: 'utf8',
+    });
+    const expected = `${key} Python must be prepared natively on ${getTarget(key).spec.packageHost.join('/')}, got unsupported/${process.arch}`;
+    assert.equal(result.status, 1);
+    assert.ok(result.stderr.includes(expected), `${key} package host rejection: ${result.stderr}`);
+    console.log(`PYTHON_PACKAGE_HOST ${expected}`);
+  });
+}
+
 test('all audited spec consumers reference registry fields without independent target tables', () => {
   const consumers = [
     ['build/lib/release-component-provenance.mjs', ['spec.sdkName', 'spec.archiveFormat']],
