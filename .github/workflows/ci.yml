@@ -96,6 +96,72 @@ jobs:
       - name: Verify LLVM policy
         run: test -z "$(git ls-files 'ci/prebuilt/**' 'runtime_shim/prebuilt/**')"
 
+  script-tests:
+    name: Python and shell contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout cjcj
+        uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Install script test dependencies
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq python3 build-essential binutils zip unzip
+      - name: Run registered script tests
+        run: node ci/run-registered-tests.mjs scripts "$RUNNER_TEMP/script-tests"
+      - name: Preserve script test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: script-tests
+          path: ${{ runner.temp }}/script-tests
+
+  package-tests:
+    name: Cangjie package tests (official host)
+    needs: fixed-llvm-tools
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Checkout cjcj
+        uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Download test LLVM shim
+        uses: actions/download-artifact@v8
+        with:
+          name: fixed-llvm-tools-linux_x86_64
+          path: fixed-toolchain/linux_x86_64
+      - name: Install official test SDK
+        shell: bash
+        run: |
+          source ci/host_sdk_pin.env
+          mkdir -p "$RUNNER_TEMP/test-cjv"
+          curl -fsSL https://github.com/Zxilly/cjv/releases/download/v0.2.20/cjv_linux_amd64.tar.gz | tar -xz -C "$RUNNER_TEMP/test-cjv"
+          cjv_bin=$(find "$RUNNER_TEMP/test-cjv" -type f -name cjv | head -1)
+          "$cjv_bin" install "$CJCJ_TOOLCHAIN"
+      - name: Run registered Cangjie package tests
+        shell: bash
+        env:
+          CJCJ_LLVM_SHIM_O: ${{ github.workspace }}/fixed-toolchain/linux_x86_64/cjselfhost_llvmshim.o
+        run: |
+          ulimit -c 0
+          source ci/host_sdk_pin.env
+          sdk="$HOME/.cjv/toolchains/$CJCJ_TOOLCHAIN"
+          source "$sdk/envsetup.sh"
+          npx --yes zx@8 runtime_shim/build_shim.mjs
+          node ci/run-registered-tests.mjs cj "$RUNNER_TEMP/package-tests"
+      - name: Preserve Cangjie test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: package-tests-official-host
+          path: |
+            ${{ runner.temp }}/package-tests/results.json
+            ${{ runner.temp }}/package-tests/run.log
+            ${{ runner.temp }}/package-tests/reports
+
   fixed-llvm-tools:
     name: Build LLVM tools
     uses: ./.github/workflows/build-llvm-tools.yml

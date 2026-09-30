@@ -2,6 +2,7 @@
 
 import {execFileSync} from 'node:child_process';
 import path from 'node:path';
+import fs from 'node:fs';
 
 // Single source of truth for which test files CI executes.
 //
@@ -22,6 +23,7 @@ import path from 'node:path';
 // reason that shows up in the diff.
 
 export const repoRoot = path.resolve(import.meta.dirname, '..');
+export const REGISTERED = Object.freeze(JSON.parse(fs.readFileSync(new URL('./test-registry.json', import.meta.url), 'utf8')));
 
 // Run by `node --test` in .github/workflows/ci.yml, via `test-manifest.mjs list`.
 export const GATING = Object.freeze([
@@ -108,6 +110,7 @@ export const GATING = Object.freeze([
   'ci/srcbuild/tests/verify-sdk.test.mjs',
   'ci/srcbuild/tests/workflow-inputs.test.mjs',
   'ci/test-manifest.test.mjs',
+  'ci/run-registered-tests.test.mjs',
   'scripts/erased_dynpayload_gate.test.mjs',
 ]);
 
@@ -209,15 +212,52 @@ export const DISCOVERY_FLOOR = 62;
 // present a dependency's own tests as unregistered contracts of ours.
 export function discoverTestFiles(root = repoRoot) {
   const listed = execFileSync(
-    'git', ['-C', root, 'ls-files', '-z', '--cached', '--others', '--exclude-standard', '*.test.mjs'],
+    'git', ['-C', root, 'ls-files', '-z', '--cached', '--others', '--exclude-standard'],
     {encoding: 'utf8'});
   const found = listed.split('\0').filter(Boolean)
-    .filter(file => !file.split('/').includes('node_modules'));
+    .filter(file => !file.split('/').includes('node_modules'))
+    .filter(file => /\.test\.mjs$|(?:^|\/)test[_.-][^/]*\.(?:py|sh)$|[._-]test\.sh$|_test\.cj$|^build\/test\/.*\.sh$/.test(file));
   return [...new Set(found)].sort();
+}
+
+export function validateManifest(root = repoRoot, registered = REGISTERED, gating = GATING, deferred = DEFERRED) {
+  const discovered = discoverTestFiles(root);
+  const files = [...gating, ...deferred.map(entry => entry.file), ...registered.map(entry => entry.file)];
+  const duplicates = files.filter((file, index) => files.indexOf(file) !== index);
+  const missing = discovered.filter(file => !files.includes(file));
+  const stale = files.filter(file => !discovered.includes(file));
+  if (duplicates.length || missing.length || stale.length) {
+    throw new Error(JSON.stringify({duplicates, unregistered: missing, phantom: stale}));
+  }
+  for (const entry of registered) {
+    if (entry.executor === 'manual') {
+      if (!entry.reason || entry.reason.trim().length < 20) throw new Error(`manual reason missing: ${entry.file}`);
+    } else if (entry.executor === 'cjpm') {
+      if (!entry.file.startsWith(`${entry.member}/src/`) || !entry.file.endsWith('_test.cj')) {
+        throw new Error(`invalid cjpm member: ${entry.file}`);
+      }
+      const workspace = fs.readFileSync(path.join(root, 'cjpm.toml'), 'utf8');
+      const members = workspace.match(/\btest-members\s*=\s*\[([^\]]*)\]/)?.[1] || '';
+      if (!members.includes(`"${entry.member}"`)) throw new Error(`member not tested: ${entry.member}`);
+      if (!fs.existsSync(path.join(root, entry.member, 'cjpm.toml'))) throw new Error(`missing member: ${entry.member}`);
+    } else if (!['python3', 'bash'].includes(entry.executor) || !Array.isArray(entry.args)) {
+      throw new Error(`invalid executor: ${entry.file}`);
+    }
+  }
+  return discovered;
 }
 
 function main(argv) {
   const command = argv[0] || 'list';
+  validateManifest();
+  if (command === 'check') {
+    console.log('manifest coverage checked in both directions');
+    return 0;
+  }
+  if (command === 'registered') {
+    console.log(JSON.stringify(REGISTERED, null, 2));
+    return 0;
+  }
   if (command === 'list') {
     // The consumer cannot tell an empty list from a short one, and `node --test`
     // with no file arguments silently falls back to its own discovery, so refuse
@@ -233,7 +273,7 @@ function main(argv) {
     for (const entry of DEFERRED) console.log(`${entry.file}\n  needs: ${entry.needs}\n  verified: ${entry.verified}`);
     return 0;
   }
-  console.error(`usage: test-manifest.mjs [list|deferred]`);
+  console.error(`usage: test-manifest.mjs [list|deferred|registered|check]`);
   return 2;
 }
 

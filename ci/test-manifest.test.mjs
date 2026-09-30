@@ -8,6 +8,8 @@ import {
   DISCOVERY_FLOOR,
   GATING,
   GATING_FLOOR,
+  REGISTERED,
+  validateManifest,
   discoverTestFiles,
   repoRoot,
 } from './test-manifest.mjs';
@@ -60,7 +62,7 @@ test('the manifest covers every test file in the repository', () => {
     `discovery found ${discovered.length} test files, floor is ${DISCOVERY_FLOOR}; `
     + 'either a test was deleted (lower DISCOVERY_FLOOR in the same commit) or discovery is broken');
 
-  const registered = [...GATING, ...DEFERRED.map(entry => entry.file)];
+  const registered = [...GATING, ...DEFERRED.map(entry => entry.file), ...REGISTERED.map(entry => entry.file)];
   assert.equal(new Set(registered).size, registered.length,
     `a test file is registered twice: ${registered.filter((file, index) => registered.indexOf(file) !== index).join(', ')}`);
 
@@ -71,6 +73,36 @@ test('the manifest covers every test file in the repository', () => {
   const phantom = registered.filter(file => !discovered.includes(file));
   assert.deepEqual(phantom, [],
     `the manifest names test files that are not in the repository:\n  ${phantom.join('\n  ')}`);
+});
+
+test('registered executors and workspace test-members cover their files', () => {
+  validateManifest();
+});
+
+test('discovery includes untracked Python, shell and Cangjie tests', async () => {
+  const root = await fs.mkdtemp(path.join(process.env.TMPDIR || '/tmp', 'manifest-discovery-'));
+  try {
+    execFileSync('git', ['init', '-q', root]);
+    const names = ['test_added.py', 'test_added.sh', 'added_test.cj', 'added.test.mjs'];
+    for (const name of names) await fs.writeFile(path.join(root, name), '');
+    assert.deepEqual(discoverTestFiles(root), [...names].sort());
+    assert.throws(() => validateManifest(root, [], [], []), /unregistered.*test_added/);
+    for (const name of names) await fs.unlink(path.join(root, name));
+    assert.throws(() => validateManifest(root, [{file: names[0], executor: 'manual', reason: 'Explicit fixture for deleted-file detection'}], [], []), /phantom.*test_added/);
+  } finally {
+    await fs.rm(root, {recursive: true, force: true});
+  }
+});
+
+test('CI invokes both registered script and pinned official cjpm consumers', async () => {
+  const ci = (await workflows()).get('ci.yml');
+  assert.match(ci, /node ci\/run-registered-tests\.mjs scripts/);
+  const job = ci.slice(ci.indexOf('  package-tests:'), ci.indexOf('  fixed-llvm-tools:'));
+  assert.match(job, /source ci\/host_sdk_pin\.env/);
+  assert.match(job, /"\$cjv_bin" install "\$CJCJ_TOOLCHAIN"/);
+  assert.match(job, /source "\$sdk\/envsetup\.sh"/);
+  assert.match(job, /node ci\/run-registered-tests\.mjs cj/);
+  assert.doesNotMatch(job, /continue-on-error|build_patched_runtime|setup_sdk\.mjs/);
 });
 
 test('the gating set does not silently shrink', () => {
