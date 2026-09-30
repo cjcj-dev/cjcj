@@ -16,6 +16,7 @@ import {
   REVIEWED_GATE_HOST_TOOLCHAIN,
   gateApparatusCoverageWarning,
   validateGateApparatusProvenance,
+  verifyGateApparatusProvenance,
 } from '../lib/release-gate-apparatus.mjs';
 
 test('gate apparatus records actual host bytes separately from its review coverage', async t => {
@@ -104,6 +105,33 @@ test('gate apparatus records actual host bytes separately from its review covera
     assert.throws(() => validateGateApparatusProvenance(sidecar, {platform: 'linux-x64'}),
       /outside the closed set/);
   });
+
+  await t.test('a changed actual host cannot inherit covered status', async () => {
+    const {captured, output} = capture({toolchain: REVIEWED_GATE_HOST_TOOLCHAIN, name: 'changed-host'});
+    assert.equal(captured.status, 0, captured.stderr);
+    const sidecar = JSON.parse(await fs.readFile(path.join(output, GATE_APPARATUS_PROVENANCE), 'utf8'));
+    sidecar.gate_host_toolchain = currentHost;
+    assert.throws(() => validateGateApparatusProvenance(sidecar, {platform: 'linux-x64'}),
+      /coverage mismatch/, 'TARGET actual host and coverage remain coupled');
+  });
+
+  for (const field of ['archive', 'runtime']) {
+    await t.test(`the retained apparatus rejects a changed ${field} digest`, async () => {
+      const {captured, output} = capture({toolchain: REVIEWED_GATE_HOST_TOOLCHAIN, name: `changed-${field}`});
+      assert.equal(captured.status, 0, captured.stderr);
+      const sidecarPath = path.join(output, GATE_APPARATUS_PROVENANCE);
+      const sidecar = JSON.parse(await fs.readFile(sidecarPath, 'utf8'));
+      if (field === 'archive') sidecar.base_sdk.archive_sha256 = '0'.repeat(64);
+      else sidecar.host_runtime.sha256 = '0'.repeat(64);
+      await fs.writeFile(sidecarPath, JSON.stringify(sidecar));
+      await assert.rejects(verifyGateApparatusProvenance({
+        runtime: path.join(output, 'gate-host-runtime.so'), sidecar: sidecarPath,
+        platform: 'linux-x64', expectedToolchain: REVIEWED_GATE_HOST_TOOLCHAIN,
+        expectedBaseSdkArchiveSha256: crypto.createHash('sha256').update(archiveBytes).digest('hex'),
+      }), field === 'archive' ? /base SDK SHA-256 mismatch/ : /host runtime SHA-256 mismatch/,
+      `TARGET ${field} digest must match retained bytes`);
+    });
+  }
 
   const environment = await fs.readFile(githubEnv, 'utf8');
   assert.match(environment, /^GATE_HOST_RUNTIME=.+gate-host-runtime\.so$/m);
