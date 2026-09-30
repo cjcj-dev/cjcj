@@ -22,7 +22,8 @@ ulimit -c 0
 python3 ci/test-frontend-apc.py \
   --compiler /path/to/cjcj-stage1 --sdk /path/to/host-sdk \
   --llvm-library /path/to/libLLVM-15.so --repo "$PWD" \
-  --core /path/to/fixed/stdlib/libs/std/core --work /path/to/evidence
+  --core /path/to/fixed/stdlib/libs/std/core --work /path/to/evidence \
+  --toolchain /path/to/paired-llvm-tuple/bin
 ```
 
 The core input must include the layout-contract additions used by
@@ -32,3 +33,8 @@ input. Each work directory must be new. The default is three executions per
 main configuration, not a repeat-until-success loop. Compiler, LLVM and host
 runtime hashes, commands, compile/parse return codes, definition sets, and
 every assertion are retained in the evidence directory.
+
+The full driver needs paired CLI tools as well as the process-local LLVM
+library. Verify a private copy of the tuple with `ci/llvm_tuple_SHA256SUMS`
+before passing its `bin` directory through `--toolchain`; an official host
+SDK's `opt` is not necessarily compatible with the generated intrinsic ABI.
