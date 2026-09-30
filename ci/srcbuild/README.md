@@ -19,3 +19,16 @@ Run `node --test build/test/source-matrix.test.mjs` to exercise the CLI and the
 actual workflow planning commands, including mixed requests and blocked-only
 requests. Workflow dependency assertions cover the scheduling edges; local tests
 do not claim to execute GitHub's scheduler or compile the SDKs.
+
+The same registry owns CI build/provision runners and the platform smoke matrix.
+`node ci/target-matrix.mjs ci|platform|arm-soak` exports those workflow inputs;
+ARM soak explicitly passes its selected source target to `srcbuild.yml`.
+`spec.packageHost` identifies the native package machine, separately from
+`spec.nodePlatform`/`nodeArch`, which describe the source build host (Windows
+packages run on Windows while their source target is cross-built on Linux).
+Target-specific archive, runtime, host LLVM and native tool fields are read from
+the registry by their consumers. Artifact names remain the producer/consumer
+contract; the unused `final_*` reusable-workflow outputs have been removed.
+
+Run `node --test build/test/target-registry.test.mjs` for workflow dispatch
+consumers, per-target archive/runtime/host checks and the audited mapping guard.

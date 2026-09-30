@@ -153,6 +153,7 @@ for (const [name, changedFile, mutate] of scanControls) {
       for (const relative of [
         'ci/host-toolchain-pin.test.mjs', 'ci/host-toolchain-pin.mjs',
         'build/lib/release-component-provenance.mjs',
+        'build/lib/targets.mjs', 'build/lib/errors.mjs',
         '.github/workflows/build-release-package.yml',
         'ci/cangjie-test/README.md', 'ci/host-runtime/release.json',
       ]) {
