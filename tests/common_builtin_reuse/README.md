@@ -5,6 +5,12 @@ with the compiler's paired host SDK environment (`CANGJIE_HOME` and
 `LD_LIBRARY_PATH`). Each independent compiler invocation uses `--jobs 192`;
 the driver runs up to four invocations concurrently.
 
+For baseline/candidate/cut/restored comparisons, pass the same
+`--common-export /path/to/valid-export` to every arm. The directory must contain
+the original root's `std.core.cjo` and `std.core.chir`. This separates the
+ordinary production assertion from downstream reuse assertions: a production
+cut cannot invalidate the common test input before those targets execute.
+
 The root and original platform fixtures are fixed copies from commit
 `f310f332b0595fb3f69a38d9f597047d20d429c0` of the finalizer registration input.
 The driver checks actual compiler return codes, nonempty CHIR, and the

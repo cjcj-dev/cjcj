@@ -122,7 +122,7 @@ def unique_builtins(path):
     return all(count == 1 for count in counts.values()) and generic_ok, {"counts": counts, "records": records}
 
 
-def run(compiler, output, jobs):
+def run(compiler, output, jobs, common_export):
     fixtures = Path(__file__).resolve().parent
     output.mkdir(parents=True, exist_ok=True)
     identity = {"compiler": str(compiler), "sha256": sha256(compiler)}
@@ -133,7 +133,14 @@ def run(compiler, output, jobs):
     ordinary_ok, ordinary_state = unique_builtins(export_cjo) if export_cjo.exists() else (False, {})
     results = [{"name": "ordinary_unique_builtins", "pass": exported["rc"] == 0 and ordinary_ok,
                 "target_executed": True, "compile": exported, "state": ordinary_state}]
-    common = (export_cjo, export_chir)
+    common_directory = common_export if common_export is not None else output / "ordinary"
+    common = (common_directory / "std.core.cjo", common_directory / "std.core.chir")
+    seed_ok, seed_state = unique_builtins(common[0])
+    if not seed_ok or not common[1].is_file():
+        raise ValueError("common fixture must contain the five original builtins and its paired CHIR")
+    (output / "common-input.json").write_text(json.dumps({"cjo_sha256": sha256(common[0]),
+                                                          "chir_sha256": sha256(common[1]),
+                                                          "state": seed_state}, indent=2) + "\n")
 
     def common_case(name, source, selected_common, mode="staticlib"):
         compiled, _ = compile_source(compiler, source, output / name, selected_common, mode)
@@ -146,11 +153,10 @@ def run(compiler, output, jobs):
 
     tasks = [("original_common", fixtures / "platform.cj", common, "staticlib"),
              ("typed_common", fixtures / "typed_platform.cj", common, "chir")]
-    if export_cjo.exists():
-        for kind, name in BUILTINS.items():
-            partial = output / ("partial-" + name + ".cjo")
-            Cjo(export_cjo).omit_top_level_builtin(kind, partial)
-            tasks.append(("partial_" + name, fixtures / "platform.cj", (partial, export_chir), "staticlib"))
+    for kind, name in BUILTINS.items():
+        partial = output / ("partial-" + name + ".cjo")
+        Cjo(common[0]).omit_top_level_builtin(kind, partial)
+        tasks.append(("partial_" + name, fixtures / "platform.cj", (partial, common[1]), "staticlib"))
     with ThreadPoolExecutor(max_workers=jobs) as pool:
         results.extend(pool.map(lambda task: common_case(*task), tasks))
 
@@ -185,5 +191,7 @@ if __name__ == "__main__":
     parser.add_argument("compiler", type=Path)
     parser.add_argument("output", type=Path)
     parser.add_argument("--jobs", type=int, default=4)
+    parser.add_argument("--common-export", type=Path)
     arguments = parser.parse_args()
-    raise SystemExit(run(arguments.compiler.resolve(), arguments.output.resolve(), arguments.jobs))
+    common_export = arguments.common_export.resolve() if arguments.common_export is not None else None
+    raise SystemExit(run(arguments.compiler.resolve(), arguments.output.resolve(), arguments.jobs, common_export))
