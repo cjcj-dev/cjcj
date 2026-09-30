@@ -20,23 +20,42 @@ public enum GCWriteStrength {
 
 public func GetAddressStoreStrength(irBuilder: IRBuilder2, address: Value,
     store: Expression): GCWriteStrength {
+    return GetAddressAccessStrength(irBuilder, address, store, false)
+}
+
+// The referent is identified by its declaring field, not by the class of
+// the receiver. Queue and chain fields use ordinary strong loads.
+public func IsWeakReferentLoad(irBuilder: IRBuilder2, address: Value, load: Expression): Bool {
+    match (GetAddressAccessStrength(irBuilder, address, load, true)) {
+        case GCWriteStrength.NO_KEEP_ALIVE => true
+        case _ => false
+    }
+}
+
+private func GetAddressAccessStrength(irBuilder: IRBuilder2, address: Value,
+    access: Expression, isLoad: Bool): GCWriteStrength {
     let local = (address as LocalVar) ?? return GCWriteStrength.UNKNOWN
     let expression = local.GetExpr() ?? return GCWriteStrength.UNKNOWN
     if (let Some(field) <- (expression as GetElementRef)) {
-        return GetMemberStoreStrength(irBuilder, field.GetLocation(), field.GetPath(), store)
+        return GetMemberAccessStrength(irBuilder, field.GetLocation(), field.GetPath(), access, isLoad)
     }
     if (let Some(field) <- (expression as GetElementByName)) {
         let base = field.GetLocation()
         let baseType = base.GetType() ?? return GCWriteStrength.UNKNOWN
         let path = ResolveElementPathByNames(irBuilder.GetCGModule(), baseType, field.GetNames()) ??
             return GCWriteStrength.UNKNOWN
-        return GetMemberStoreStrength(irBuilder, base, path, store)
+        return GetMemberAccessStrength(irBuilder, base, path, access, isLoad)
     }
     return GCWriteStrength.UNKNOWN
 }
 
 public func GetMemberStoreStrength(irBuilder: IRBuilder2, base: Value, path: ArrayList<UInt64>,
     store: Expression): GCWriteStrength {
+    return GetMemberAccessStrength(irBuilder, base, path, store, false)
+}
+
+private func GetMemberAccessStrength(irBuilder: IRBuilder2, base: Value, path: ArrayList<UInt64>,
+    access: Expression, isLoad: Bool): GCWriteStrength {
     let baseType = base.GetType() ?? return GCWriteStrength.UNKNOWN
     var current = baseType.StripAllRefs()
     var strength = GCWriteStrength.UNKNOWN
@@ -58,8 +77,8 @@ public func GetMemberStoreStrength(irBuilder: IRBuilder2, base: Value, path: Arr
             strength = if (isReferent) { GCWriteStrength.NO_KEEP_ALIVE } else { GCWriteStrength.STRONG }
             // ZGC parse3.cpp:317-320: initialization is an ordinary putfield.
             // Only the constructor's own receiver qualifies, not another ref.
-            if (isReferent && path.size == 1) {
-                if (let Some(function) <- store.GetTopLevelFunc()) {
+            if (!isLoad && isReferent && path.size == 1) {
+                if (let Some(function) <- access.GetTopLevelFunc()) {
                     if (function.IsConstructor() && function.GetNumOfParams() > 0 &&
                         function.GetParam(0).nodeId == base.nodeId) {
                         strength = GCWriteStrength.STRONG

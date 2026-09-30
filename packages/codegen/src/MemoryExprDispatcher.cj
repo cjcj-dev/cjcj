@@ -4,10 +4,8 @@ import cjcj::chir.AllocateBase
 
 import std.collection.ArrayList
 import cjcj::chir.Allocate
-import cjcj::chir.ClassType
 import cjcj::chir.Expression
 import cjcj::chir.ExprKind
-import cjcj::chir.GetElementRef
 import cjcj::chir.Load
 import cjcj::option.OptimizationLevel
 import cjcj::utils.CJC_ASSERT
@@ -50,19 +48,11 @@ public func HandleLoadExpr(irBuilder: IRBuilder2, load: Load): LLVMValueRef {
     let value = irBuilder.GetCGModule().GetMappedCGValue(load.GetLocation())
     CJC_ASSERT(value.GetCGType().getOrThrow().GetOriginal().IsRef())
     let elementType = value.GetCGType().getOrThrow().GetPointerElementType().getOrThrow().GetLLVMType()
-    if (load.GetLocation().IsLocalVar() &&
-        elementType.toUIntNative() == CGType.GetRefType(irBuilder.GetLLVMContext()).toUIntNative()) {
-        let localVar = load.GetLocation().AsLocalVar().getOrThrow()
-        if (IsGetElementRefOfClass(localVar.GetExpr().getOrThrow(), irBuilder.GetCGContext().GetCHIRBuilder())) {
-            let getElementRef = (localVar.GetExpr().getOrThrow() as GetElementRef).getOrThrow()
-            let locationType = DeRef(getElementRef.GetLocation().GetType().getOrThrow())
-            if (locationType.IsClass() &&
-                IsWeakRefClass((locationType as ClassType).getOrThrow().GetClassDef())) {
-                let addr = value.GetRawValue()
-                let base = irBuilder.GetTrackedManagedBase(addr).getOrThrow()
-                return irBuilder.CallGCReadWeakRef(ArrayList<LLVMValueRef>([base, addr]))
-            }
-        }
+    if (elementType.toUIntNative() == CGType.GetRefType(irBuilder.GetLLVMContext()).toUIntNative() &&
+        IsWeakReferentLoad(irBuilder, load.GetLocation(), load)) {
+        let addr = value.GetRawValue()
+        let base = irBuilder.GetTrackedManagedBase(addr).getOrThrow()
+        return irBuilder.CallGCReadWeakRef(ArrayList<LLVMValueRef>([base, addr]))
     }
     return irBuilder.CreateLoad(value)
 }
