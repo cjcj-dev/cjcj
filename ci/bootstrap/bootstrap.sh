@@ -519,7 +519,7 @@ rewrite_compile_option_o1() {
   [ -f "$toml" ] || die "隔离副本缺 cjpm.toml: $toml"
   o2_hits=$(/usr/bin/grep -Ec -- '^ *compile-option = "-O2([[:space:]]|")' "$toml" || true)
   if [ "$o2_hits" -gt 0 ]; then
-    cmd "host_sed_inplace 's/compile-option = \"-O2\"/compile-option = \"-O1\"/' $(printf '%q' "$toml")"
+    cmd "host_sed_inplace -E 's/^( *compile-option = \")-O2([[:space:]]|\")/\1-O1\2/' $(printf '%q' "$toml")"
   fi
   o1_hits=$(/usr/bin/grep -Ec -- '^ *compile-option = "-O1([[:space:]]|")' "$toml" || true)
   [ "$o1_hits" -ge 1 ] || die "隔离副本 cjpm.toml 的 compile-option 不是 -O1: $toml"

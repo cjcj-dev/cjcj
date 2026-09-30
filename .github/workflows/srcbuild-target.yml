@@ -435,6 +435,8 @@ jobs:
           echo 'ASSERT real-artifact host pin one-digit rejection executed'
 
       - name: Reject a one-digit native host provenance change with the real artifact
+        env:
+          TARGET_LLVM_PLATFORM: ${{ matrix.llvm_platform }}
         # Linux cells use the scoped digest rows checked above.
         if: startsWith(matrix.target, 'darwin-')
         shell: bash
@@ -443,8 +445,6 @@ jobs:
           python3 - <<'PY'
           import json, os
           from pathlib import Path
-          platforms = {'linux-x64': 'linux_x86_64', 'linux-aarch64': 'linux_aarch64',
-                       'darwin-arm64': 'darwin_aarch64', 'darwin-x64': 'darwin_x86_64'}
           target = os.environ['CJCJ_SRCBUILD_TARGET']
           prefix = '# HOST_LLVM_PROVENANCE '
           changed = count = 0
@@ -452,7 +452,7 @@ jobs:
           for line in Path('ci/bootstrap/stage1_host_identities.txt').read_text().splitlines(True):
               if line.startswith(prefix):
                   pin = json.loads(line[len(prefix):])
-                  if pin['platform'] == platforms[target]:
+                  if pin['platform'] == os.environ['TARGET_LLVM_PLATFORM']:
                       pin['sha256'] = ('1' if pin['sha256'][0] == '0' else '0') + pin['sha256'][1:]
                       line = prefix + json.dumps(pin) + '\n'
                       count += 1
