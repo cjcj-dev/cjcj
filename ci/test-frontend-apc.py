@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import time
@@ -75,7 +76,6 @@ def run_matrix(arguments):
     compiler = arguments.compiler.resolve()
     entry_dir = root / 'frontend'
     entry_dir.mkdir(exist_ok=True)
-    import shutil
     shutil.copyfile(compiler, entry_dir / 'cjcj-stage1')
     (entry_dir / 'cjcj-stage1').chmod(0o755)
     (entry_dir / 'cjc-frontend').symlink_to('cjcj-stage1')
@@ -95,9 +95,11 @@ def run_matrix(arguments):
         assertions.append(record)
         print(json.dumps(record), flush=True)
 
-    def compile_case(surface, inputs, mode, apc, iteration, reference, incremental=False):
+    def compile_case(surface, inputs, mode, apc, iteration, reference, incremental=False, execution=''):
         work = root / surface / mode / apc / str(iteration)
         work.mkdir(parents=True, exist_ok=True)
+        evidence = work / execution if execution else work
+        evidence.mkdir(parents=True, exist_ok=True)
         output = work / 'complete.bc'
         command = [str(entry_dir / ('cjc' if mode == 'driver' else 'cjc-frontend')),
                    *inputs, '--output-type=staticlib', '--jobs', str(os.cpu_count())]
@@ -117,18 +119,18 @@ def run_matrix(arguments):
             command.extend(['-o', str(work)])
         elif mode == 'driver':
             command.extend(['--save-temps', '-o', str(work / 'package.a')])
-        (work / 'command.json').write_text(json.dumps(command))
-        with (work / 'compile.log').open('w') as log:
+        (evidence / 'command.json').write_text(json.dumps(command))
+        with (evidence / 'compile.log').open('w') as log:
             try:
                 result = subprocess.run(command, cwd=work, env=environment, stdout=log,
                                         stderr=subprocess.STDOUT, timeout=900)
                 compile_rc = result.returncode
             except subprocess.TimeoutExpired:
                 compile_rc = 124
-        (work / 'compile.rc').write_text(str(compile_rc) + '\n')
-        label = f'{surface}/{mode}/{apc}/{iteration}'
+        (evidence / 'compile.rc').write_text(str(compile_rc) + '\n')
+        label = f'{surface}/{mode}/{apc}/{iteration}/{execution}'
         check(label + '/compile', compile_rc == 0, compile_rc)
-        warning_count = (work / 'compile.log').read_text().count(WARNING)
+        warning_count = (evidence / 'compile.log').read_text().count(WARNING)
         warning_expected = 1 if mode in ('file', 'incremental') and apc in ('explicit', 'bare') else 0
         check(label + '/warning', warning_count == warning_expected,
               {'count': warning_count, 'expected': warning_expected})
@@ -139,6 +141,10 @@ def run_matrix(arguments):
               else len(files) > 1, [str(path) for path in files])
         definitions = set()
         for bitcode in files:
+            if execution:
+                copied = evidence / bitcode.name
+                shutil.copyfile(bitcode, copied)
+                bitcode = copied
             parse = subprocess.run([sys.executable, str(Path(__file__).resolve()), '--inspect',
                                     str(arguments.llvm_library), str(bitcode)],
                                    env=environment, capture_output=True, text=True, timeout=120)
@@ -148,7 +154,7 @@ def run_matrix(arguments):
             check(label + '/parse/' + bitcode.name, parse.returncode == 0, parse.returncode)
             if parse.returncode == 0:
                 definitions.update(json.loads(parse.stdout)['definitions'])
-        (work / 'definitions.json').write_text(json.dumps(sorted(definitions), indent=2))
+        (evidence / 'definitions.json').write_text(json.dumps(sorted(definitions), indent=2))
         check(label + '/complete', bool(definitions) and (reference is None or definitions == reference),
               {'definitions': len(definitions), 'missing': sorted((reference or set()) - definitions),
                'extra': sorted(definitions - (reference or definitions))})
@@ -174,8 +180,9 @@ def run_matrix(arguments):
         compile_case(surface, inputs, 'file', 'one', 1, reference)
         if surface != 'arrays':
             for apc in ('default', 'explicit', 'bare'):
-                compile_case(surface, inputs, 'incremental', apc, 1, reference, True)
-                compile_case(surface, inputs, 'incremental', apc, 1, reference, True)
+                compile_case(surface, inputs, 'incremental', apc, 1, reference, True, 'cold')
+                compile_case(surface, inputs, 'incremental', apc, 1, reference, True, 'warm')
+            compile_case(surface, inputs, 'driver', 'explicit', 1, reference)
     result = {'assertions': assertions, 'failed': sum(not item['passed'] for item in assertions),
               'wall': time.monotonic() - started, 'jobs': os.cpu_count(), 'iterations': arguments.iterations}
     (root / 'result.json').write_text(json.dumps(result, indent=2))
