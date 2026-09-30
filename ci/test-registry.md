@@ -4,13 +4,14 @@
 both directions. Node contracts retain `GATING` and `DEFERRED`; Python, shell and
 Cangjie entries live in `test-registry.json`. Test naming conventions are
 `*.test.mjs`, `test_*.py`, `test-*.py`, `test_*.sh`, `test-*.sh`, `*_test.sh`,
-`*-test.sh`, `*.test.sh`, `*_test.cj`, and shell files under `build/test/`.
+`*-test.sh`, `*.test.sh`, `*_test.cj`, shell files under `build/test/`, and
+Python/shell files directly inside a nested `tests/` directory.
 Helpers such as `run.py` and `check.py` are dependencies of test drivers, not
 independently discovered test cases. Register new standalone tests using these
 names. Untracked files are included; ignored build output and node_modules are not.
 
 Each non-Node entry names a real interpreter and arguments, a cjpm workspace
-member, or `manual` with a concrete input/isolation reason. `{output}` expands
+member, an existing `workflow` command, or `manual` with a concrete input/isolation reason. `{output}` expands
 to a unique, initially absent evidence directory. Manual entries are visible
 with `node ci/test-manifest.mjs registered`; they are not counted as CI passes.
 The host-identity Python suite includes fixture coverage in CI; its optional

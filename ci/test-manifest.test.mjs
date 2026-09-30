@@ -176,6 +176,11 @@ test('no workflow runs a test file the manifest does not gate', async () => {
     for (const file of literalTestArguments(text)) {
       if (!GATING.includes(file)) offenders.push(`${name} runs ${file}, which is not in GATING`);
     }
+    for (const [, file] of text.matchAll(/(?:python3|bash)\s+([\w./-]+\.(?:py|sh))/g)) {
+      if (!/(?:^|\/)test[_.-]|[._-]test\.sh$|\/tests\//.test(file)) continue;
+      const entry = REGISTERED.find(item => item.file === file);
+      if (!entry || entry.executor === 'manual') offenders.push(`${name} executes unregistered/manual ${file}`);
+    }
   }
   assert.deepEqual(offenders, [], `\n  ${offenders.join('\n  ')}`);
 });

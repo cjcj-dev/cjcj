@@ -216,7 +216,7 @@ export function discoverTestFiles(root = repoRoot) {
     {encoding: 'utf8'});
   const found = listed.split('\0').filter(Boolean)
     .filter(file => !file.split('/').includes('node_modules'))
-    .filter(file => /\.test\.mjs$|(?:^|\/)test[_.-][^/]*\.(?:py|sh)$|[._-]test\.sh$|_test\.cj$|^build\/test\/.*\.sh$/.test(file));
+    .filter(file => /\.test\.mjs$|(?:^|\/)test[_.-][^/]*\.(?:py|sh)$|[._-]test\.sh$|_test\.cj$|^build\/test\/.*\.sh$|\/tests\/[^/]+\.(?:py|sh)$/.test(file));
   return [...new Set(found)].sort();
 }
 
@@ -232,6 +232,9 @@ export function validateManifest(root = repoRoot, registered = REGISTERED, gatin
   for (const entry of registered) {
     if (entry.executor === 'manual') {
       if (!entry.reason || entry.reason.trim().length < 20) throw new Error(`manual reason missing: ${entry.file}`);
+    } else if (entry.executor === 'workflow') {
+      const workflow = fs.readFileSync(path.join(root, entry.workflow), 'utf8');
+      if (!workflow.includes(`${entry.interpreter} ${entry.file}`)) throw new Error(`workflow does not execute: ${entry.file}`);
     } else if (entry.executor === 'cjpm') {
       if (!entry.file.startsWith(`${entry.member}/src/`) || !entry.file.endsWith('_test.cj')) {
         throw new Error(`invalid cjpm member: ${entry.file}`);

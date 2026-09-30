@@ -36,8 +36,9 @@
   },
   {
     "file": "ci/bootstrap/test_host_identity_wiring.py",
-    "executor": "manual",
-    "reason": "Fault-arm driver requires real HOST_IDENTITY_SDK and HOST_IDENTITY_LLVM; the fixture suite test_host_identities.py is run in CI separately."
+    "executor": "workflow",
+    "workflow": ".github/workflows/test-host-identities.yml",
+    "interpreter": "python3"
   },
   {
     "file": "ci/bootstrap/test_sdk_cjc_swap.py",
@@ -123,8 +124,9 @@
   },
   {
     "file": "ci/test-codegen-layout-sync.sh",
-    "executor": "manual",
-    "reason": "Requires exact pinned runtime and LLVM source repositories to construct a stale generated-layout fault arm."
+    "executor": "workflow",
+    "workflow": ".github/workflows/test-llvm-tuple.yml",
+    "interpreter": "bash"
   },
   {
     "file": "ci/test-codegen-runtime-layout.sh",
@@ -145,13 +147,15 @@
   },
   {
     "file": "ci/test-llvm-tuple-wiring.sh",
-    "executor": "manual",
-    "reason": "Fault-arm tool rewrites tuple producer and release consumer in place; CI runs the underlying layout and Node tests without concurrent source mutation."
+    "executor": "workflow",
+    "workflow": ".github/workflows/test-llvm-tuple.yml",
+    "interpreter": "bash"
   },
   {
     "file": "ci/test-runtime-layout.sh",
-    "executor": "manual",
-    "reason": "Requires pinned runtime and LLVM source repositories as positional inputs for cross-repository layout checks."
+    "executor": "workflow",
+    "workflow": ".github/workflows/test-llvm-tuple.yml",
+    "interpreter": "bash"
   },
   {
     "file": "ci/test_ast_host_workflow.py",
@@ -516,12 +520,12 @@
   {
     "file": "scripts/test_fixtures/t1_test_basic/basic_test.cj",
     "executor": "manual",
-    "reason": "Input fixture for scripts/test.mjs test discovery/build, not a workspace package; execute through that manual compiler harness."
+    "reason": "Input fixture for scripts/test_gate.mjs test discovery/build, not a workspace package; execute through that manual compiler harness."
   },
   {
     "file": "scripts/test_fixtures/t2_mock_member/mock_test.cj",
     "executor": "manual",
-    "reason": "Input fixture for scripts/test.mjs mock-member compilation, not a workspace package; execute through that manual compiler harness."
+    "reason": "Input fixture for scripts/test_gate.mjs mock-member compilation, not a workspace package; execute through that manual compiler harness."
   },
   {
     "file": "test/cjo_version_query/src/CjoHeaderVersion_test.cj",
@@ -537,6 +541,11 @@
     "file": "test/named_struct_factory/NamedStructFactory_test.cj",
     "executor": "manual",
     "reason": "Standalone compiler regression built by test/named_struct_factory/build.sh with explicitly selected candidate SDK."
+  },
+  {
+    "file": "ci/platform_matrix/tests/runtime_core_diagnostics.py",
+    "executor": "manual",
+    "reason": "Requires a same-build runtime unit ELF/SO pair, PyYAML, GDB and real core evidence; generates a core if none supplied, which is prohibited on kkk2."
   },
   {
     "file": "test/store_strength/test_checker.py",
