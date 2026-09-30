@@ -144,6 +144,10 @@ def run_matrix(arguments):
         files = sorted(work.glob('*.bc'))
         if mode == 'driver':
             files = sorted(work.rglob('*.bc'))
+            partitions = [path for path in files if not path.name.endswith('.opt.bc')]
+            check(label + '/driver-partitions', len(partitions) == 4 and
+                  sorted(path.name.split('-', 1)[0] for path in partitions) == ['0', '1', '2', '3'],
+                  [str(path) for path in partitions])
         check(label + '/output-contract', len(files) == 1 if mode in ('file', 'incremental') or apc == 'one'
               else len(files) > 1, [str(path) for path in files])
         definitions = set()
