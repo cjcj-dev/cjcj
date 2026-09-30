@@ -17,15 +17,6 @@ import cjcj::utils.FileUtil
 private let PRECHECK_CORE_PACKAGE_NAME: String = "std.core"
 private let PRECHECK_OBJECT_NAME: String = "Object"
 
-private func preCheckSameFile(left: Decl, right: Decl): Bool {
-    if (let Some(leftFile) <- left.curFile) {
-        if (let Some(rightFile) <- right.curFile) {
-            return leftFile.fileHash == rightFile.fileHash && leftFile.filePath == rightFile.filePath
-        }
-    }
-    return false
-}
-
 private func preCheckContainsFeature(features: ArrayList<String>, feature: String): Bool {
     for (value in features) {
         if (value == feature) {

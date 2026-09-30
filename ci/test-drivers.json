@@ -380,6 +380,11 @@
     "reason": "manual driver: no workflow provisions a stage1 compiler built from this tree; a process entry point, and no other file in tests names it"
   },
   {
+    "file": "tests/common_builtin_reuse/run.py",
+    "kind": "driver",
+    "reason": "manual driver: requires a product stage1 compiler and its paired SDK; runs common-part CJO/CHIR compiler inputs"
+  },
+  {
     "file": "tests/ffi_common_specific/run.sh",
     "kind": "driver",
     "reason": "manual driver: nothing under .github/workflows names it and it needs a shell script inputs only; a shell script, and no other file in tests names it"
