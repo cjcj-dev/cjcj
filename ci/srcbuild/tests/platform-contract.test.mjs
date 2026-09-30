@@ -7,6 +7,7 @@ import {buildConfig} from '../../../build/lib/config.mjs';
 import {baseEnv} from '../../../build/srcbuild/stages/common.mjs';
 import {assembleCjcLinkOption} from '../../platform_matrix/link_option.mjs';
 import {assertFinalStd} from '../lib/final-std.mjs';
+import {sourceBuildCells} from '../../../build/lib/targets.mjs';
 
 const root = path.resolve(import.meta.dirname, '../../..');
 const readWorkflow = name => fs.readFile(path.join(root, '.github/workflows', name), 'utf8');
@@ -25,12 +26,9 @@ async function invokedWorkflows(entry, stack = []) {
   return invocations;
 }
 
-// A selectable matrix cannot be a literal any more -- Actions has no way to
-// filter one -- so the tuple table moved into the plan step as JSON. It is still
-// one table in one place; it just is not YAML, and reading only the YAML form
-// leaves this file blind to every tuple.
-const planTable = text => [...text.matchAll(/^\s*all='(\[[\s\S]*?\])'\s*$/gm)]
-  .flatMap(([, json]) => JSON.parse(json));
+const planTable = text => text.includes('run: node ci/srcbuild/target-matrix.mjs')
+  ? sourceBuildCells()
+  : [...text.matchAll(/^\s*all='(\[[\s\S]*?\])'\s*$/gm)].flatMap(([, json]) => JSON.parse(json));
 
 // The values a ${{ matrix.KEY }} placeholder can take inside one workflow file.
 const matrixValues = (text, key) => [

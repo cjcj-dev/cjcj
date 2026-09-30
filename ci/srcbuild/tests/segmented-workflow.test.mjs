@@ -4,6 +4,7 @@ import path from 'node:path';
 import test from 'node:test';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
+import {sourceBuildCells} from '../../../build/lib/targets.mjs';
 
 const file = path.resolve(import.meta.dirname, '../../../.github/workflows/srcbuild-target.yml');
 const workflow = await fs.readFile(file, 'utf8');
@@ -85,10 +86,12 @@ test('each source target has an independent reusable job chain with the same sta
   assert.match(caller, /uses: \.\/\.github\/workflows\/srcbuild-target.yml/);
   assert.match(caller, /targets: \$\{\{ matrix.target \}\}/);
   assert.match(caller, /fail-fast: false/);
-  const table = text => JSON.parse(text.match(/all='(\[[\s\S]*?\])'/)[1]);
-  assert.deepEqual(table(caller), table(workflow));
-  assert.equal(table(caller).length, 4);
-  assert.match(workflow, /test "\$count" -eq 1/);
+  for (const text of [caller, workflow]) {
+    assert.match(text, /run: node ci\/srcbuild\/target-matrix.mjs --targets "\$REQUESTED"/);
+    assert.doesNotMatch(text, /all='\[/);
+  }
+  assert.equal(sourceBuildCells().length, 4);
+  assert.match(workflow, /--single --require-ready/);
   // A nested workflow must not contend with its caller's concurrency group.
   assert.doesNotMatch(workflow, /^concurrency:/m);
 });
