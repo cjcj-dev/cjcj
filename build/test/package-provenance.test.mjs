@@ -193,8 +193,18 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
     await fs.copyFile(llvmFixture, destination);
     await fs.chmod(destination, 0o755);
   }
-  await fs.appendFile(path.join(sdk, 'third_party/llvm/bin/llc'), `\0CJLLVM-COMMIT:${LLVM_SHA}\0`);
-  await fs.appendFile(path.join(sdk, 'third_party/llvm/bin/opt'), `\0CJLLVM-COMMIT:${LLVM_SHA}\0`);
+  // The official SDK keeps its own backend; the source-built tuple is published
+  // beside it, never over it. The stage is cloned from the SDK, so the packager
+  // has to carry the tuple across explicitly.
+  const isolatedLlvmBin = path.join(root, 'patched-llvm', 'bin');
+  await fs.mkdir(isolatedLlvmBin, {recursive: true});
+  for (const tool of ['llc', 'opt', 'ld.lld']) {
+    const destination = path.join(isolatedLlvmBin, tool);
+    await fs.copyFile(llvmFixture, destination);
+    await fs.chmod(destination, 0o755);
+  }
+  await fs.appendFile(path.join(isolatedLlvmBin, 'llc'), `\0CJLLVM-COMMIT:${LLVM_SHA}\0`);
+  await fs.appendFile(path.join(isolatedLlvmBin, 'opt'), `\0CJLLVM-COMMIT:${LLVM_SHA}\0`);
   // Cangjie-written: the manifest finds these tools by the runtime entry points
   // the compiler emits, so the fixture has to carry one.
   const cjpm = await write(sdk, 'tools/bin/cjpm',
@@ -251,14 +261,14 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
     `LLVM_SHA=${LLVM_SHA}`,
     `LLC_SOURCE=tuple:${LLVM_SHA}`,
     'LLC_VERSION=LLVM version 15.0.4',
-    `LLC_SHA256=${await sha256(path.join(sdk, 'third_party/llvm/bin/llc'))}`,
+    `LLC_SHA256=${await sha256(path.join(isolatedLlvmBin, 'llc'))}`,
     `OPT_SOURCE=tuple:${LLVM_SHA}`,
     'OPT_VERSION=LLVM version 15.0.4',
-    `OPT_SHA256=${await sha256(path.join(sdk, 'third_party/llvm/bin/opt'))}`,
+    `OPT_SHA256=${await sha256(path.join(isolatedLlvmBin, 'opt'))}`,
     'LLD_TOOL=ld.lld',
     `LLD_SOURCE=tuple:${LLVM_SHA}`,
     'LLD_VERSION=LLVM version 15.0.4',
-    `LLD_SHA256=${await sha256(path.join(sdk, 'third_party/llvm/bin/ld.lld'))}`,
+    `LLD_SHA256=${await sha256(path.join(isolatedLlvmBin, 'ld.lld'))}`,
     '',
   ].join('\n'));
   const baseSdkId = REVIEWED_GATE_HOST_TOOLCHAIN;
@@ -303,6 +313,7 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
     '--allow-stock-runtime',
     '--std-dir', std,
     '--llvm-manifest', llvmManifest,
+    '--isolated-llvm-bin', isolatedLlvmBin,
     '--python-bundle', pythonBundle,
     '--base-sdk-id', baseSdkId,
     '--base-sdk-archive', baseArchive,
@@ -469,16 +480,22 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
   await expectInspectionFailure('ldd',
     /package ldd bin\/cjc failed \(exit=73\): ldd forced failure/);
 
+  // The packager reads the tuple from the isolated directory, so the negative
+  // cases perturb that directory and the manifest, never the official SDK.
   const originalLlvmManifest = await fs.readFile(llvmManifest, 'utf8');
   await fs.writeFile(llvmManifest, originalLlvmManifest.replace(/^OPT_SHA256=.*$/m, `OPT_SHA256=${'0'.repeat(64)}`));
   const changedLlvm = runRaw('zx', packageArgs, {cwd: path.resolve('.')});
   assert.notEqual(changedLlvm.status, 0, 'changing one LLVM tool sha must fail closed');
-  assert.match(`${changedLlvm.stdout}\n${changedLlvm.stderr}`, /opt: packaged sha256 .* does not match tuple manifest/);
+  // The packager verifies each tool against the manifest before staging it, so a
+  // manifest that disagrees with the isolated bytes aborts before anything is
+  // copied into the stage. The lineage audit further down re-checks the staged
+  // bytes against the same manifest, so the mismatch is caught at both points.
+  assert.match(`${changedLlvm.stdout}\n${changedLlvm.stderr}`, /opt: packaged sha256 .* does not match tuple manifest|isolated opt sha256 .* does not match manifest/);
   console.log(`NEGATIVE-CHANGE-LLVM RC=${changedLlvm.status}\n${changedLlvm.stderr.trim()}`);
   await fs.writeFile(llvmManifest, originalLlvmManifest);
 
   async function expectThinTupleFailure(tool, manifestField) {
-    const executable = path.join(sdk, 'third_party', 'llvm', 'bin', tool);
+    const executable = path.join(isolatedLlvmBin, tool);
     const originalExecutable = await fs.readFile(executable);
     await fs.copyFile(thinLlvmFixture, executable);
     if (tool === 'llc' || tool === 'opt') {
@@ -503,7 +520,7 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
   await fs.writeFile(llvmManifest, originalLlvmManifest.replace(/^LLD_SHA256=.*$/m, `LLD_SHA256=${'0'.repeat(64)}`));
   const changedLld = runRaw('zx', packageArgs, {cwd: path.resolve('.')});
   assert.notEqual(changedLld.status, 0, 'changing the LTO linker sha must fail closed');
-  assert.match(`${changedLld.stdout}\n${changedLld.stderr}`, /ld\.lld: packaged sha256 .* does not match tuple manifest/);
+  assert.match(`${changedLld.stdout}\n${changedLld.stderr}`, /ld\.lld: packaged sha256 .* does not match tuple manifest|isolated ld\.lld sha256 .* does not match manifest/);
   console.log(`NEGATIVE-CHANGE-LLD RC=${changedLld.status}\n${changedLld.stderr.trim()}`);
   await fs.writeFile(llvmManifest, originalLlvmManifest);
 
