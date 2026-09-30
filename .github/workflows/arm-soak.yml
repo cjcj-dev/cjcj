@@ -33,6 +33,7 @@ jobs:
       sdk_runtime_dir: ${{ steps.matrix.outputs.sdk_runtime_dir }}
       compiler_artifact: ${{ steps.matrix.outputs.compiler_artifact }}
       std_artifact: ${{ steps.matrix.outputs.std_artifact }}
+      has_runnable: ${{ steps.matrix.outputs.has_runnable }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
@@ -44,6 +45,7 @@ jobs:
 
   source-final-std:
     needs: matrix-plan
+    if: needs.matrix-plan.outputs.has_runnable == 'true'
     name: Build source SDK and final std artifacts
     uses: ./.github/workflows/srcbuild.yml
     with:
@@ -53,6 +55,7 @@ jobs:
   package:
     name: Build Linux ARM package once
     needs: [matrix-plan, source-final-std]
+    if: needs.matrix-plan.outputs.has_runnable == 'true'
     uses: ./.github/workflows/build-release-package.yml
     with:
       runner: ${{ needs.matrix-plan.outputs.runner }}

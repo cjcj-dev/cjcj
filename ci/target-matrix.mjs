@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import {ciBuildCells, ciProvisionCells, getTarget, platformTestCells} from '../build/lib/targets.mjs';
+import {ciBuildCells, ciProvisionCells, getTarget, platformTestCells, sourceBuildCells} from '../build/lib/targets.mjs';
 
 const mode = process.argv[2];
 let outputs;
@@ -10,6 +10,7 @@ if (mode === 'ci') {
 } else if (mode === 'arm-soak') {
   const {spec, sourceBuild} = getTarget('linux-aarch64');
   outputs = {
+    has_runnable: String(sourceBuildCells().find(cell => cell.target === spec.key).status === 'runnable'),
     targets: spec.key, runner: sourceBuild.runner, platform: spec.key,
     llvm_platform: spec.llvmPlatform, sdk_runtime_dir: spec.runtimeTuple,
     compiler_artifact: `final-compiler-${spec.key}`, std_artifact: `final-std-${spec.key}`,

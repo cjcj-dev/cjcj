@@ -49,7 +49,7 @@ with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
     results = dict(pool.map(run, variants))
 (out / 'results.json').write_text(json.dumps(results, indent=2) + '\n')
 for arm, result in results.items():
-    expected = ['arm soak produces every artifact its package job downloads, each exactly once'] if arm.endswith('-cut') else []
+    expected = ['runnable source produces every package artifact exactly once'] if arm.endswith('-cut') else []
     print(f'ASSERT artifact-uniqueness arm={arm} rc={result["rc"]} failed={result["failed"]}', flush=True)
     assert result['rc'] == bool(expected) and result['failed'] == expected
     assert result['test_sha256'] == results['candidate']['test_sha256']

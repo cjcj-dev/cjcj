@@ -159,7 +159,7 @@ function expandMatrix(name, job, text, plan) {
 function jobRuns(job, inputs, plan) {
   const condition = job.match(/^ {4}if: (.+?)\s*$/m)?.[1];
   if (condition === undefined) return true;
-  const ready = condition.match(/^needs\.plan\.outputs\.(has_runnable|has_blocked) == 'true'$/);
+  const ready = condition.match(/^needs\.(?:plan|matrix-plan)\.outputs\.(has_runnable|has_blocked) == 'true'$/);
   if (ready) {
     assert.ok(plan && ready[1] in plan, `missing plan output: ${ready[1]}`);
     return plan[ready[1]] === 'true';
@@ -489,6 +489,13 @@ test('arm soak produces every artifact its package job downloads, each exactly o
   const produced = await runArtifacts('arm-soak.yml');
   const producersOf = artifact => produced.filter(([name]) => name === artifact).map(([, source]) => source);
 
+  if (plan.has_runnable === 'false') {
+    for (const artifact of required) assert.equal(producersOf(artifact).length, 0, `blocked producers of ${artifact}`);
+    assert.equal(jobRuns(packageJob, callerInputs, plan), false, 'blocked artifact consumer must not be admitted');
+    console.log(`ASSERT blocked-source-artifacts platform=${platform} producers=0 consumer=blocked`);
+    return;
+  }
+
   // The point of the whole test: demanded and produced have to be the same set.
   for (const artifact of required) assert.equal(producersOf(artifact).length, 1, `producers of ${artifact}`);
   assert.deepEqual(producersOf(demanded), ['srcbuild-target.yml']);
@@ -509,6 +516,23 @@ test('arm soak produces every artifact its package job downloads, each exactly o
   assert.equal(producerJobs.length, 1, `jobs producing ${demanded}: ${producerJobs}`);
   assert.ok(needsOf(packageJob).includes(producerJobs[0]),
     `package needs ${needsOf(packageJob)} but ${demanded} is built by ${producerJobs[0]}`);
+});
+
+test('runnable source produces every package artifact exactly once', async () => {
+  const cell = sourceBuildCells().find(entry => entry.status === 'runnable');
+  assert.ok(cell, 'a real runnable source input is required');
+  const callerInputs = new Map([['runner', cell.runner], ['platform', cell.target],
+    ['llvm_platform', cell.llvm_platform], ['compiler_artifact', `final-compiler-${cell.target}`],
+    ['std_artifact', `final-std-${cell.target}`], ['verify', 'false']]);
+  const required = failClosedDownloads(await readWorkflow('build-release-package.yml'), callerInputs);
+  assert.ok(required.includes(`final-std-${cell.target}`));
+  const produced = await runArtifacts('srcbuild.yml', new Map([['targets', cell.target]]));
+  for (const artifact of required) {
+    assert.equal(produced.filter(([name]) => name === artifact).length, 1, `runnable producers of ${artifact}`);
+  }
+  const names = produced.map(([artifact]) => artifact);
+  assert.deepEqual(names.filter((artifact, index) => names.indexOf(artifact) !== index), [], 'runnable artifact names must be unique');
+  console.log(`ASSERT runnable-source-artifacts platform=${cell.target} required=${JSON.stringify(required)}`);
 });
 
 test('source-build leaves the sccache GHA backend off and persists the disk cache as one entry per target', async () => {
