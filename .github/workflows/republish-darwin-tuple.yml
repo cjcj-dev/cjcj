@@ -1,0 +1,81 @@
+name: Republish pinned Darwin static tuples
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  package:
+    name: Package ${{ matrix.platform }} from the verified tools artifact
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: darwin_aarch64
+            artifact: 11091748471
+          - platform: darwin_x86_64
+            artifact: 11094146437
+    steps:
+      - uses: actions/checkout@v7
+      - name: Download the tools artifact recorded by the current LLVM pin run
+        uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ matrix.artifact }}
+          run-id: 36702406791
+          github-token: ${{ github.token }}
+          path: fixed-toolchain/${{ matrix.platform }}
+      - name: Package the shared ten-payload layout without rebuilding LLVM
+        shell: bash
+        env:
+          TUPLE_PLATFORM: ${{ matrix.platform }}
+        run: |
+          set -euo pipefail
+          source ci/llvm_pin.env
+          test "$LLVM_TUPLE_RUN_ID" = 36702406791
+          REPO_ROOT="$GITHUB_WORKSPACE"
+          CJCJ_FIXED_LLVM_DIR="$GITHUB_WORKSPACE/fixed-toolchain/$TUPLE_PLATFORM"
+          test -f "$CJCJ_FIXED_LLVM_DIR/llc.gz"
+          test -f "$CJCJ_FIXED_LLVM_DIR/ld64.lld.gz"
+          source ci/llvm-tuple-layout.sh
+          publish_fixed_tuple_to_depot "$RUNNER_TEMP/llvm-tuple"
+          tuple="$RUNNER_TEMP/llvm-tuple/$LLVM_SHA/$CANGJIE_COMPILER_SHA"
+          grep -qx "LLVM_SHA=$LLVM_SHA" "$tuple/MANIFEST"
+          grep -qx "PLATFORM=$TUPLE_PLATFORM" "$tuple/MANIFEST"
+          (cd "$tuple" && sha256sum --strict -c SHA256SUMS)
+          echo "STATIC_TUPLE=$tuple" >> "$GITHUB_ENV"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: static-llvm-tuple-${{ matrix.platform }}
+          path: ${{ env.STATIC_TUPLE }}
+          if-no-files-found: error
+          retention-days: 90
+  persist:
+    name: Persist ${{ matrix.platform }}
+    needs: package
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [darwin_aarch64, darwin_x86_64]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: static-llvm-tuple-${{ matrix.platform }}
+          path: ${{ runner.temp }}/static-tuple
+      - name: Persist and read back the native tuple
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          STATIC_TUPLE: ${{ runner.temp }}/static-tuple
+          TUPLE_PLATFORM: ${{ matrix.platform }}
+        run: node ci/release/publish_native_tuple.mjs
+      - uses: actions/upload-artifact@v7
+        with:
+          name: bootstrap-inputs-pin-${{ matrix.platform }}
+          path: ${{ runner.temp }}/bootstrap-inputs-pin.json
+          if-no-files-found: error
+          retention-days: 90
