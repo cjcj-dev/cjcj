@@ -45,7 +45,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: platform-matrix-${{ github.ref }}
+  group: platform-matrix-${{ github.ref }}${{ inputs.linux_native_only && '-linux-native' || '' }}
   cancel-in-progress: false
 
 env:
