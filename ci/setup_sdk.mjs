@@ -44,17 +44,18 @@ async function commandExists(command) {
 const hostOs = (await $({stdio: 'pipe'})`uname -s`).stdout.trim();
 const hostArch = (await $({stdio: 'pipe'})`uname -m`).stdout.trim();
 const hosts = {
-  'Linux/x86_64': ['cjv_linux_amd64.tar.gz', 'linux_x86_64_cjnative'],
-  'Linux/aarch64': ['cjv_linux_arm64.tar.gz', 'linux_aarch64_cjnative'],
-  'Darwin/arm64': ['cjv_darwin_arm64.tar.gz', 'darwin_aarch64_cjnative'],
-  'Darwin/x86_64': ['cjv_darwin_amd64.tar.gz', 'darwin_x86_64_cjnative'],
+  'Linux/x86_64': 'cjv_linux_amd64.tar.gz',
+  'Linux/aarch64': 'cjv_linux_arm64.tar.gz',
+  'Darwin/arm64': 'cjv_darwin_arm64.tar.gz',
+  'Darwin/x86_64': 'cjv_darwin_amd64.tar.gz',
 };
 const host = hosts[`${hostOs}/${hostArch}`];
 if (!host) {
   log(`unsupported host ${hostOs}/${hostArch}`);
   process.exit(2);
 }
-const [cjvAsset, runtimeDir] = host;
+const cjvAsset = host;
+const runtimeDir = targetForHost().spec.runtimeTuple;
 
 // 1. Bootstrap cjv.
 if (!(await commandExists('cjv'))) {
