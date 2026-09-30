@@ -116,7 +116,7 @@ for (const target of ['linux-aarch64', 'darwin-arm64', 'darwin-x64']) {
 }
 
 test('workflow supplies the target and downloads pinned host LLVM for every cell', () => {
-  const workflow = fs.readFileSync(new URL('../../.github/workflows/srcbuild.yml', import.meta.url), 'utf8');
+  const workflow = fs.readFileSync(new URL('../../.github/workflows/srcbuild-target.yml', import.meta.url), 'utf8');
   assert.ok(workflow.includes('CJCJ_SRCBUILD_TARGET: ${{ matrix.target }}'));
   for (const name of ['Load immutable bootstrap host LLVM provenance', 'Download pinned bootstrap host LLVM']) {
     const step = workflow.split(`- name: ${name}\n`)[1]?.split('\n      - name:')[0];
