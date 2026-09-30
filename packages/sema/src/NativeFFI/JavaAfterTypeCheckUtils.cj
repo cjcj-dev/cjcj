@@ -617,7 +617,7 @@ public func GetMangledJniInitCjObjectFuncName(mangler: BaseMangler, params: Arra
             toSkip--
             continue
         }
-        name += mangler.MangleAstSemanticType(param.GetTy().getOrThrow()).replace(".", "_")
+        name += mangler.MangleSemaType(param.GetTy().getOrThrow()).replace(".", "_")
     }
     return name
 }
@@ -625,7 +625,7 @@ public func GetMangledJniInitCjObjectFuncName(mangler: BaseMangler, params: Arra
 public func GetMangledJniInitCjObjectFuncName(mangler: BaseMangler, types: ArrayList<Ty>): String {
     var name = "initCJObject"
     for (ty in types) {
-        name += mangler.MangleAstSemanticType(ty).replace(".", "_")
+        name += mangler.MangleSemaType(ty).replace(".", "_")
     }
     return name
 }
@@ -634,7 +634,7 @@ public func GetMangledJniInitCjObjectFuncNameForEnum(mangler: BaseMangler, param
     funcName: String): String {
     var name = funcName + "initCJObject"
     for (param in params) {
-        name += mangler.MangleAstSemanticType(param.GetTy().getOrThrow()).replace(".", "_")
+        name += mangler.MangleSemaType(param.GetTy().getOrThrow()).replace(".", "_")
     }
     return name
 }
