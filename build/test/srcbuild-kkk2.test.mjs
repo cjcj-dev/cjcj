@@ -516,6 +516,11 @@ test('fixed tuple producer checks build-tree ld.lld through its symlink target',
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));
   const clean = path.join(repoRoot, 'build/test/fixtures/colour-ld-lld/clean');
   const bad = path.join(repoRoot, 'build/test/fixtures/colour-ld-lld/bad');
+  const llvmTool = path.join(root, 'llvm-version');
+  const compiled = spawnSync('cc', ['-x', 'c', '-', '-o', llvmTool], {
+    input: '#include <stdio.h>\nint main(void) { puts("LLVM version 15.0.4"); return 0; }\n', encoding: 'utf8',
+  });
+  assert.equal(compiled.status, 0, compiled.stderr);
   assert.equal(sha256(clean), '879294b77c945f5e7ddd821fbde7b4c2fd9bf2816987a4aed99cf80f5a569f33');
   assert.equal(sha256(bad), '29f24afc38b856aa11674d5ee87f3dfc7adcb4f31acb560d451d4b70f97947fb');
   const invoke = 'set -euo pipefail\n'
@@ -533,8 +538,8 @@ test('fixed tuple producer checks build-tree ld.lld through its symlink target',
     + '  done\n'
     + '  mkdir -p "$dest/bin"\n'
     + '  if [[ $dest == *llc-build ]]; then\n'
-    + '    cp "$CLEAN_ELF" "$dest/bin/llc"\n'
-    + '    cp "$CLEAN_ELF" "$dest/bin/opt"\n'
+    + '    cp "$LLVM_ELF" "$dest/bin/llc"\n'
+    + '    cp "$LLVM_ELF" "$dest/bin/opt"\n'
     + '    cp "$LLD_ELF" "$dest/bin/lld"\n'
     + '    ln -s lld "$dest/bin/ld.lld"\n'
     + '  else\n'
@@ -554,10 +559,10 @@ test('fixed tuple producer checks build-tree ld.lld through its symlink target',
     + 'publish_fixed_tuple_to_depot() { echo PUBLISHED; return 0; }\n'
     + 'resolve_depot_tuple_root() { printf \'%s\\n\' "$1/resolved"; }\n'
     + 'CJCJ_LLVM_DEPOT_PUBLISH=1 DRY_RUN=0 JOBS=1 REPO_ROOT=$1 STATE_ROOT=$2 '
-    + 'CJCJ_FIXED_LLVM_DIR=$3 CLEAN_ELF=$4 LLD_ELF=$5\n'
+    + 'CJCJ_FIXED_LLVM_DIR=$3 CLEAN_ELF=$4 LLD_ELF=$5 LLVM_ELF=$6\n'
     + 'mkdir -p "$CJCJ_FIXED_LLVM_DIR"\n'
     + 'build_fixed_tuple\n';
-  const run = lldElf => runBash(invoke, [repoRoot, path.join(root, 'state'), path.join(root, 'out'), clean, lldElf]);
+  const run = lldElf => runBash(invoke, [repoRoot, path.join(root, 'state'), path.join(root, 'out'), clean, lldElf, llvmTool]);
   const link = path.join(root, 'state', 'fixed-llvm-build', 'llc-build', 'bin', 'ld.lld');
   const cleanRun = run(clean);
   assert.equal(fs.lstatSync(link).isSymbolicLink(), true, 'producer fixture ld.lld must stay a symlink');
