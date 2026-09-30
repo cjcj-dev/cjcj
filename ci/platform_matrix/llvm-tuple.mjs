@@ -11,7 +11,7 @@ function sha256(buffer) {
   return crypto.createHash('sha256').update(buffer).digest('hex');
 }
 
-export async function activateLlvmTuple(fixedTools, {sdkToolPath, manifest, platform = process.platform}) {
+export async function activateLlvmTuple(fixedTools, {sdkToolPath, manifest}) {
   for (const tool of fixedTools) {
     tool.sdk = await sdkToolPath(tool.name);
     tool.expectedSha = manifest.get(tool.manifestKey) || '';
@@ -27,14 +27,14 @@ export async function activateLlvmTuple(fixedTools, {sdkToolPath, manifest, plat
     await fs.mkdir(path.dirname(tool.tuple), {recursive: true});
     tool.rollback = `${tool.sdk}.tuple.rollback`;
     await fs.writeFile(tool.tuple, tool.payload);
-    if (platform !== 'win32') await fs.chmod(tool.tuple, 0o755);
+    if (process.platform !== 'win32') await fs.chmod(tool.tuple, 0o755);
   }
 
   // The Windows tuple llc links against MinGW runtime DLLs (libstdc++-6.dll,
   // libwinpthread-1.dll; round-13/14 exit 127 = loader failure even with PATH
   // appended). Same-directory DLL resolution always wins on Windows, so copy the
   // runtime DLLs next to the tools; probe via spawnSync for a discriminating error.
-  if (platform === 'win32') {
+  if (process.platform === 'win32') {
     process.env.PATH = `${process.env.PATH};C:\\mingw64\\bin`;
     const llvmBin = path.dirname(fixedTools[0].sdk);
     for (const dll of ['libstdc++-6.dll', 'libwinpthread-1.dll', 'libgcc_s_seh-1.dll']) {
