@@ -857,6 +857,24 @@ const astInputPins = {
   campaign: 'f1bdd6b76bdd2b82e6a991a759dbd317a07244c4716e08fb1e0c69579f29f337',
 };
 
+function writeAstInputFixture(archive) {
+  const root = path.dirname(archive);
+  const canonical = path.join(root, 'libcangjie-ast-support.a');
+  if (archive !== canonical) fs.copyFileSync(archive, canonical);
+  const payloads = ['include/cangjie/AST.h', 'include/flatbuffers/StdAstFormat_generated.h',
+    'schema/StdAstFormat.fbs', 'third_party/flatbuffers/bin/flatc',
+    'third_party/flatbuffers/include/flatbuffers.h', 'third_party/flatbuffers/cangjie/libflatbuffers.a',
+    'third_party/flatbuffers/modules/flatbuffers.cjo'];
+  for (const name of payloads) {
+    fs.mkdirSync(path.dirname(path.join(root, name)), {recursive: true});
+    fs.writeFileSync(path.join(root, name), `AST input fixture ${name}\n`);
+  }
+  fs.copyFileSync('/bin/true', path.join(root, 'third_party/flatbuffers/bin/flatc'));
+  const files = [...new Set([path.basename(archive), 'libcangjie-ast-support.a', ...payloads])];
+  fs.writeFileSync(path.join(root, 'SHA256SUMS'), files.map(name =>
+    `${sha256(path.join(root, name))}  ${name}`).join('\n') + '\n');
+}
+
 // Execute the complete driver, including retained-state loading, prerequisite,
 // run_step and the final RESULT. Only external inputs live in the fixture.
 function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFailure = false, child = false, coreObserve = false, runtimeCase = 'valid', ast = 'explicit', largeContract = false, contractDefect} = {}) {
@@ -922,6 +940,7 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
   const hostIdentities = path.join(inputs, 'host-identities.txt');
   fs.writeFileSync(hostIdentities, `# HOST_LLVM_PROVENANCE ${JSON.stringify(hostPin)}\nlinux_x86_64 libLLVM-15.so ${hostSha}\n`);
   fs.writeFileSync(inputs + '/ast.a', 'ast input\n');
+  writeAstInputFixture(inputs + '/ast.a');
   const runtimePin = fs.readFileSync(path.join(root, 'ci/runtime_pin.env'), 'utf8').match(/^RUNTIME_REF=(.*)$/m)[1];
   const runtimeDir = path.join(inputs, 'external runtime');
   fs.mkdirSync(runtimeDir);
@@ -1031,6 +1050,7 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
   if (ast.startsWith('campaign') || ast === 'precedence') {
     fs.mkdirSync(path.dirname(campaignArchive), {recursive: true});
     fs.writeFileSync(campaignArchive, 'campaign ast input\n');
+    writeAstInputFixture(campaignArchive);
   }
   if (ast === 'missing' || ast.startsWith('campaign')) {
     delete env.CJCJ_BOOTSTRAP_AST_SUPPORT;

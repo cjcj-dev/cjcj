@@ -16,6 +16,7 @@ const linuxX64 = Object.freeze({
     kkk2Supported: true,
     needsStaticLibs: true, os: 'linux', arch: 'x86_64', nodePlatform: 'linux', nodeArch: 'x64',
     runtimeTuple: 'linux_x86_64_cjnative', llvmPlatform: 'linux_x86_64',
+    llvmRunner: 'ubuntu-22.04', llvmGlibc: '2.35', llvmTargets: 'X86', llvmPortability: 'glibc2.35',
     llvmBinDir: '/usr/lib/llvm-15/bin', opensslLibDir: '/usr/lib/x86_64-linux-gnu',
     loaderEnv: 'LD_LIBRARY_PATH', sharedLibrarySuffix: '.so',
     runtimeLibrary: 'libcangjie-runtime.so', fileFormat: 'ELF', fileArch: 'x86-64',
@@ -43,6 +44,7 @@ const linuxAArch64 = Object.freeze({
     kkk2Supported: false,
     needsStaticLibs: true, os: 'linux', arch: 'aarch64', nodePlatform: 'linux', nodeArch: 'arm64',
     runtimeTuple: 'linux_aarch64_cjnative', llvmPlatform: 'linux_aarch64',
+    llvmRunner: 'ubuntu-22.04-arm', llvmGlibc: '2.35', llvmTargets: 'AArch64', llvmPortability: 'glibc2.35',
     llvmBinDir: '/usr/lib/llvm-15/bin', opensslLibDir: '/usr/lib/aarch64-linux-gnu',
     loaderEnv: 'LD_LIBRARY_PATH', sharedLibrarySuffix: '.so',
     runtimeLibrary: 'libcangjie-runtime.so', fileFormat: 'ELF', fileArch: 'ARM aarch64',
@@ -70,6 +72,7 @@ const darwinArm64 = Object.freeze({
     kkk2Supported: false,
     needsStaticLibs: false, os: 'darwin', arch: 'aarch64', nodePlatform: 'darwin', nodeArch: 'arm64',
     runtimeTuple: 'darwin_aarch64_cjnative', llvmPlatform: 'darwin_aarch64',
+    llvmRunner: 'macos-15', llvmGlibc: null, llvmTargets: 'AArch64', llvmPortability: 'macos15',
     llvmBinDir: '/opt/homebrew/opt/llvm@16/bin', opensslLibDir: '/opt/homebrew/opt/openssl@3/lib',
     loaderEnv: 'DYLD_LIBRARY_PATH', sharedLibrarySuffix: '.dylib',
     runtimeLibrary: 'libcangjie-runtime.dylib', fileFormat: 'Mach-O', fileArch: 'arm64',
@@ -97,6 +100,7 @@ const darwinX64 = Object.freeze({
     kkk2Supported: false,
     needsStaticLibs: false, os: 'darwin', arch: 'x86_64', nodePlatform: 'darwin', nodeArch: 'x64',
     runtimeTuple: 'darwin_x86_64_cjnative', llvmPlatform: 'darwin_x86_64',
+    llvmRunner: 'macos-15-intel', llvmGlibc: null, llvmTargets: 'X86', llvmPortability: 'macos15',
     llvmBinDir: '/usr/local/opt/llvm@16/bin', opensslLibDir: '/usr/local/opt/openssl@3/lib',
     loaderEnv: 'DYLD_LIBRARY_PATH', sharedLibrarySuffix: '.dylib',
     runtimeLibrary: 'libcangjie-runtime.dylib', fileFormat: 'Mach-O', fileArch: 'x86_64',
@@ -121,6 +125,7 @@ const windowsX64 = Object.freeze({
     kkk2Supported: false,
     needsStaticLibs: false, os: 'windows', arch: 'x86_64', nodePlatform: 'linux', nodeArch: 'x64',
     runtimeTuple: 'windows_x86_64_cjnative', llvmPlatform: 'windows_x86_64',
+    llvmRunner: 'windows-2022', llvmGlibc: null, llvmTargets: 'AArch64;ARM;X86', llvmPortability: 'windows2022',
     hostRuntimeTuple: 'linux_x86_64_cjnative', hostRuntimeLibrary: 'libcangjie-runtime.so',
     llvmBinDir: '/usr/lib/llvm-15/bin', opensslLibDir: '/usr/lib/x86_64-linux-gnu', loaderEnv: 'LD_LIBRARY_PATH',
     sharedLibrarySuffix: '.dll', runtimeLibrary: 'libcangjie-runtime.dll',
@@ -164,6 +169,36 @@ export function getTarget(key) {
 
 export function allTargets() {
   return [...registry.keys()].sort();
+}
+
+export function llvmToolMatrix(requested = 'all', {platformSet = '', publishTuple = false} = {}) {
+  const targets = [...registry.values()].map(target => target.spec);
+  let selected;
+  if (platformSet) {
+    if (!['all', 'windows-only', 'darwin-windows'].includes(platformSet)) {
+      throw new ConfigError(`unknown LLVM platform set '${platformSet}'`);
+    }
+    selected = targets.filter(spec => platformSet === 'all'
+      || (platformSet === 'windows-only' ? spec.os === 'windows' : spec.os !== 'linux'));
+  } else if (!requested || requested === 'all') {
+    selected = targets.filter(spec => spec.os !== 'windows');
+  } else {
+    const wanted = requested.split(',').map(value => value.trim()).filter(Boolean);
+    const unknown = wanted.filter(value => !targets.some(spec => spec.llvmPlatform === value));
+    if (unknown.length) throw new ConfigError(`unknown LLVM platforms: ${unknown.join(', ')}`);
+    selected = targets.filter(spec => wanted.includes(spec.llvmPlatform));
+  }
+  if (!selected.length) throw new ConfigError(`no LLVM platforms selected from '${requested}'`);
+  if (publishTuple && !selected.some(spec => spec.key === 'linux-x64')) {
+    selected.push(getTarget('linux-x64').spec);
+  }
+  return {include: selected.map(spec => ({
+    runner: spec.llvmRunner,
+    platform: spec.llvmPlatform,
+    'llvm-targets': spec.llvmTargets,
+    'portability-tag': spec.llvmPortability,
+    glibc: spec.llvmGlibc,
+  }))};
 }
 
 export function sourceBuildCells() {

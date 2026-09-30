@@ -17,13 +17,20 @@ expected digest is calculated from downloaded bytes.
 |---|---|---|
 | Official host SDK | `HOST_SDK_PROVENANCE` in `ci/bootstrap/stage1_host_identities.txt`, matched to `ci/host_sdk_pin.env` | `CJCJ_BOOTSTRAP_HOST_SDK_ARCHIVE`, otherwise the pinned official release archive downloaded into the input work directory |
 | Repaired host LLVM | `HOST_LLVM_PROVENANCE` and platform digest in the same identities file | `CJCJ_BOOTSTRAP_HOST_LLVM_ARTIFACT`, otherwise download its pinned artifact |
-| AST support | `ci/ast_support/<platform>.env` / `AST_SUPPORT_SHA256` | explicit `CJCJ_BOOTSTRAP_AST_ARTIFACT`, then explicit `CJCJ_BOOTSTRAP_AST_SUPPORT`, then build/SDK archive, otherwise pinned artifact download |
+| AST support | `ci/ast_support/<platform>.env` / `AST_SUPPORT_SHA256` | explicit `CJCJ_BOOTSTRAP_AST_ARTIFACT`, then explicit `CJCJ_BOOTSTRAP_AST_SUPPORT`, then complete build/SDK input package, otherwise pinned artifact download |
 | Static LLVM tuple | `ci/bootstrap_inputs_pin.json` per-file digests and `ci/llvm_pin.env` independent sums digest | shared bootstrap store; release by default; explicit artifact/depot mode requires `CJCJ_BOOTSTRAP_SOURCE_REASON` |
 | Coloured runtime and std | `ci/colour-runtime/<platform>.env` manifest digest, source/run identity and every manifest member | `CJCJ_BOOTSTRAP_COLOUR_RT` artifact root, otherwise pinned artifact download |
 | In-process LLVM dylib | `ci/llvm-dylib/<platform>.env` digest/source and artifact manifest | `CJCJ_BOOTSTRAP_DYLIB_ARTIFACT` or `CJCJ_BOOTSTRAP_COLOUR_DYLIB`, otherwise pinned artifact download |
 
 An explicit missing or corrupt input fails preparation; it does not fall back
-to another path. Automatic artifact downloads require the existing `gh` transport
+to another path. The AST archive's parent directory must include the producer's
+`SHA256SUMS`, public headers, generated schema header, schema and flatbuffers
+payload. Bare implicit build/SDK archives are not SDK input packages and do not
+prevent the pinned artifact download. An explicitly selected incomplete package
+fails before exporting bootstrap inputs; consumers still verify the producer's
+original checksums.
+
+Automatic artifact downloads require the existing `gh` transport
 and `unzip`; supplying local artifact directories avoids that transport. All
 supplied directories still pass exactly the same identity checks.
 

@@ -70,18 +70,26 @@ process.env.CJCJ_BOOTSTRAP_HOST_LLVM_ARTIFACT = bootstrapArtifact(
   process.env.CJCJ_BOOTSTRAP_HOST_LLVM_ARTIFACT, hostPin.repository, hostPin.artifact_id, inputsWork, 'HOST_LLVM');
 const hostLlvm = prepareHostLlvm();
 
-if (!process.env.CJCJ_BOOTSTRAP_AST_ARTIFACT && !process.env.CJCJ_BOOTSTRAP_AST_SUPPORT && !firstExisting([
+function completeAstInput(archive) {
+  return archive && ['SHA256SUMS', 'include/cangjie',
+    'include/flatbuffers/StdAstFormat_generated.h', 'schema/StdAstFormat.fbs',
+    'third_party/flatbuffers/bin/flatc', 'third_party/flatbuffers/include',
+    'third_party/flatbuffers/cangjie', 'third_party/flatbuffers/modules']
+    .every(name => fs.existsSync(path.join(path.dirname(archive), name)));
+}
+
+const astFallbacks = [
   path.join(buildRoot, 'lib', 'libcangjie-ast-support.a'),
   findFile(path.join(base, 'lib'), (_full, name) => name === 'libcangjie-ast-support.a'),
-])) {
+].filter(completeAstInput);
+if (!process.env.CJCJ_BOOTSTRAP_AST_ARTIFACT && !process.env.CJCJ_BOOTSTRAP_AST_SUPPORT && !firstExisting(astFallbacks)) {
   process.env.CJCJ_BOOTSTRAP_AST_ARTIFACT = path.join(bootstrapArtifact(undefined, 'cjcj-dev/cjcj',
     process.env.AST_SUPPORT_ARTIFACT_ID, inputsWork, 'AST_SUPPORT'), 'libcangjie-ast-support.a');
 }
 
-const astSupport = pinnedInput(process.env.CJCJ_BOOTSTRAP_AST_ARTIFACT || process.env.CJCJ_BOOTSTRAP_AST_SUPPORT, [
-  path.join(buildRoot, 'lib', 'libcangjie-ast-support.a'),
-  findFile(path.join(base, 'lib'), (_full, name) => name === 'libcangjie-ast-support.a'),
-], '', process.env.AST_SUPPORT_SHA256, 'ast-support archive SHA256');
+const astSupport = pinnedInput(process.env.CJCJ_BOOTSTRAP_AST_ARTIFACT || process.env.CJCJ_BOOTSTRAP_AST_SUPPORT,
+  astFallbacks, '', process.env.AST_SUPPORT_SHA256, 'ast-support archive SHA256');
+if (!completeAstInput(astSupport)) throw new Error(`AST_SUPPORT_INPUTS_INCOMPLETE: ${astSupport}`);
 
 const tuple = await prepareColourTuple({work: inputsWork});
 const colourTuple = tuple.directory;

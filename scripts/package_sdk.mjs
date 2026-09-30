@@ -119,11 +119,8 @@ const isWindows = platform === 'windows-x64';
 const packageName = `cjcj-${version}-${releaseKey ? getReleasePlatform(releaseKey).archiveKey : platform}`;
 const inputLlvmManifest = parseLlvmToolsManifest(await fs.readFile(llvmManifest, 'utf8'), {
   label: llvmManifest,
-  schema: 'core-or-native',
+  schema: 'tuple',
 });
-if (inputLlvmManifest.schema !== 'core-lineage') {
-  throw new Error(`release packaging requires core-lineage LLVM manifest, got ${inputLlvmManifest.schema}`);
-}
 const expectedTupleLldTool = platform.startsWith('darwin-') ? 'ld64.lld' : 'ld.lld';
 if (inputLlvmManifest.values.get('LLD_TOOL') !== expectedTupleLldTool) {
   throw new Error(
