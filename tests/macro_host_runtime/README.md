@@ -2,7 +2,8 @@
 
 `minmac/defs.cj` defines an identity macro. `use.cj` invokes it and must produce
 `expandedById` in binary CHIR and exit normally. `repeated.cj` calls the same
-macro package twice to exercise image ownership. `plain.cj` is the no-macro
+macro package twice to exercise image ownership. `expression.cj` checks expression
+reparsing and `empty.cj` checks empty-token declaration replacement. `plain.cj` is the no-macro
 control. `run.py` evaluates every assertion even if an earlier assertion fails.
 It records compiler rc, decoded function names, ELF/runtime SHA256, process maps,
 loader bindings, CPU affinity, uptime and wall time. It uses no product probes.

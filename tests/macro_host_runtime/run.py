@@ -110,6 +110,8 @@ def main():
                for source, expected, expected_integers in [
                    ('use.cj', ['expandedById'], [258]),
                    ('repeated.cj', ['expandedFirst', 'expandedSecond'], [258, 259]),
+                   ('expression.cj', ['expressionById'], [771]),
+                   ('empty.cj', ['emptyControl'], [773]),
                    ('plain.cj', ['plainControl'], [258])]]
     return 0 if all(results) else 1
 
