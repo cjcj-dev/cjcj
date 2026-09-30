@@ -74,7 +74,14 @@ async function fixture(body, nativeHost = false) {
     if (nativeHost) await fs.copyFile(hostLlvm, path.join(sdk, 'third_party/llvm/lib/libLLVM-15.so'));
     inputs.llvmLibrary = await fileSha256(path.join(sdk, 'third_party/llvm/lib/libLLVM-15.so'));
     const llvmManifest = path.join(root, 'llvm-tools.manifest');
-    await write(llvmManifest, `LLVM_SHA=${'c'.repeat(40)}\nLLC_SHA256=${inputs.llc}\nOPT_SHA256=${inputs.opt}\n`);
+    await write(llvmManifest, Object.entries({
+      PLATFORM: 'linux_x86_64', LLVM_SHA: 'c'.repeat(40),
+      CANGJIE_COMPILER_SHA: 'd'.repeat(40), FLATBUFFERS_SHA: 'e'.repeat(40),
+      LLC_SOURCE: `tuple:${'c'.repeat(40)}`, LLC_VERSION: 'fixture llc', LLC_SHA256: inputs.llc,
+      OPT_SOURCE: `tuple:${'c'.repeat(40)}`, OPT_VERSION: 'fixture opt', OPT_SHA256: inputs.opt,
+      LLD_TOOL: 'ld.lld', LLD_SOURCE: `tuple:${'c'.repeat(40)}`, LLD_VERSION: 'fixture lld',
+      LLD_SHA256: 'f'.repeat(64), SHIM_SHA256: '0'.repeat(64),
+    }).map(([key, value]) => `${key}=${value}`).join('\n') + '\n');
     inputs.llvmManifest = await fileSha256(llvmManifest);
     await json(path.join(std, 'SOURCE-BUILD.json'), {schema: 1, source: {commit: 'b'.repeat(40)}, compilerSource: {commit: 'a'.repeat(40)}, inputs,
       products: {core: await fileSha256(path.join(std, `lib/${tuple}/libcangjie-std-core.a`))}});

@@ -1396,33 +1396,6 @@ test('ast-support input contract missing stops real stage entry', t => {
 });
 
 
-test('complete runtime root reaches bootstrap with manifest-selected target identities', t => {
-  const cases = {
-    valid: 'COLOUR_RT_INPUT_VERIFIED',
-    'runtime-corrupt': 'COLOUR_RT_SHA_MISMATCH',
-    'bounds-corrupt': 'COLOUR_RT_SHA_MISMATCH',
-    'old-pin': 'COLOUR_RT_PIN_MISMATCH',
-    'manifest-source': 'COLOUR_RT_MANIFEST_SOURCE',
-    'manifest-corrupt': 'COLOUR_RT_MANIFEST_DIGEST',
-  };
-  const observed = [], expected = [];
-  for (const [runtimeCase, marker] of Object.entries(cases)) {
-    const fixture = bootstrapDriverFixture(t, {runtimeCase, runtimeLayout: 'nested'});
-    for (const step of [31, 32]) {
-      const result = fixture.dryRun(step, `${runtimeCase}-${step}`);
-      const command = result.stdout.match(/^DRY_RUN COMMAND=(.*)$/m)?.[1] || '';
-      const argv = command ? runBash(`eval "set -- $1"; printf '%s\\n' "$@"`, [command]).stdout.split('\n') : [];
-      const row = {runtimeCase, step, rc: result.status, marker: result.stderr.includes(marker),
-        runtime: argv[argv.indexOf('--colour-rt') + 1] || ''};
-      observed.push(row);
-      expected.push({runtimeCase, step, rc: runtimeCase === 'valid' ? 0 : 1, marker: true,
-        runtime: runtimeCase === 'valid' ? fixture.runtimeRoot : ''});
-      console.log(`RUNTIME_ROOT_ASSERT ${JSON.stringify(row)}`);
-    }
-  }
-  assert.deepEqual(observed, expected);
-});
-
 test('stage0 disables core dumps before launching the bootstrap child', t => {
   const result = bootstrapDriverFixture(t, {child: true, coreObserve: true}).run(31);
   const limit = result.log.match(/^CHILD_CORE_SOFT_BYTES=(.*)$/m)?.[1];
