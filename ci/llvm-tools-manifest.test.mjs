@@ -82,9 +82,9 @@ function packagedRows() {
   }));
 }
 
-test('tuple CLI validates the source identity read from its real file input', t => {
+test('tuple CLI validates the source identity read from its real file input', testContext => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'tuple-manifest-'));
-  t.after(() => fs.rmSync(directory, {recursive: true, force: true}));
+  testContext.after(() => fs.rmSync(directory, {recursive: true, force: true}));
   const manifest = path.join(directory, 'llvm-tools.manifest');
   const command = path.join(import.meta.dirname, 'llvm-tools-manifest.mjs');
   fs.writeFileSync(manifest, tupleManifest);
