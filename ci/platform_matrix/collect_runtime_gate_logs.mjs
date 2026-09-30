@@ -4,7 +4,7 @@ import {createHash} from 'node:crypto';
 
 const source = path.join(process.env.RUNTIME_SOURCE || path.join(process.cwd(), 'runtime-source'), 'runtime');
 const output = path.join(process.env.PLATFORM_CI_ROOT || path.join(process.cwd(), '.platform-ci'), 'logs', 'gc-unit');
-const names = new Set(['gate_run.log', 'gc_unit_gate.status', 'teardown.log', 'other_vm_exit.log']);
+const names = new Set(['gate_run.log', 'gc_unit_gate.status', 'teardown.log', 'teardown.rc', 'teardown-artifacts.sha256', 'other_vm_exit.log']);
 let count = 0;
 
 async function collect(directory) {

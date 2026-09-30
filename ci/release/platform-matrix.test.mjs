@@ -57,6 +57,8 @@ test('runtime diagnostics entry preserves teardown rc and raw gate output byte f
     ['build/gate_run.log', 'GC_UNIT_GATE_FAIL: suite exited unsuccessfully (rc=127)\n'],
     ['build/gc_unit_gate.status', 'FAIL rc=127\n'],
     ['tests/gc_unit/build/teardown.log', 'timeout: failed to run command gdb: No such file or directory\nTEARDOWN_RC=127\n'],
+    ['tests/gc_unit/build/teardown.rc', '127\n'],
+    ['tests/gc_unit/build/teardown-artifacts.sha256', `${'a'.repeat(64)}  cj_gc_unit\n${'b'.repeat(64)}  libcangjie-runtime.so\n${'c'.repeat(64)}  libboundscheck.so\n`],
     ['tests/gc_unit/build/other_vm_exit.log', 'GC_UNIT_OTHER_VM_EXIT rc=0\n'],
   ]);
   for (const [relative, content] of logs) {
