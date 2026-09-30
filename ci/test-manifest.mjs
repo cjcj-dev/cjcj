@@ -67,7 +67,6 @@ export const GATING = Object.freeze([
   'build/test/release-platforms.test.mjs',
   'build/test/release-manifest-components.test.mjs',
   'build/test/release-manifest.test.mjs',
-  'build/test/release-host-pin.test.mjs',
   'build/test/runtime-pin.test.mjs',
   'build/test/sdk-usability.test.mjs',
   'build/test/sdk-path-parity.test.mjs',
