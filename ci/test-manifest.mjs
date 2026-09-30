@@ -39,6 +39,7 @@ export const GATING = Object.freeze([
   'ci/platform_matrix/summarize_scope.test.mjs',
   'ci/release/g8.test.mjs',
   'build/test/archive.test.mjs',
+  'build/test/bootstrap-handoff.test.mjs',
   'build/test/cangjie-written-tools.test.mjs',
   'build/test/cangjie-test-preparation.test.mjs',
   'build/test/compose-install.test.mjs',
@@ -58,6 +59,7 @@ export const GATING = Object.freeze([
   'build/test/provenance.test.mjs',
   'build/test/python-bundle.test.mjs',
   'build/test/rebuilt-identity.test.mjs',
+  'build/test/release-evidence.test.mjs',
   'build/test/release-platforms.test.mjs',
   'build/test/release-manifest-components.test.mjs',
   'build/test/release-manifest.test.mjs',
@@ -72,6 +74,7 @@ export const GATING = Object.freeze([
   'build/test/system-deps.test.mjs',
   'build/test/toolchain-identity.test.mjs',
   'build/test/verifier-report-mode.test.mjs',
+  'build/test/windows-final-compiler.test.mjs',
   'ci/evidence-discovery.test.mjs',
   'ci/full-gate-floor.test.mjs',
   'ci/gc-fix-floor.test.mjs',
@@ -122,6 +125,7 @@ export const GATING = Object.freeze([
   'ci/test-manifest.test.mjs',
   'ci/run-registered-tests.test.mjs',
   'scripts/erased_dynpayload_gate.test.mjs',
+  'scripts/cjcjcg_aggregate_ctype_gate.test.mjs',
 ]);
 
 // Registered, not executed. `needs` is what CI would have to provide; `verified`
@@ -138,56 +142,11 @@ export const DEFERRED = Object.freeze([
       + 'retired-marker and undefined exports rejected; versioned exports checked both ways',
   }),
   Object.freeze({
-    file: 'build/test/release-evidence.test.mjs',
-    needs: 'RELEASE_EVIDENCE_TEST_ROOT set to a path outside /tmp (the test refuses tmpfs '
-      + 'because it archives evidence that must survive); on a runner, ${{ runner.temp }} qualifies',
-    verified: 'RELEASE_EVIDENCE_TEST_ROOT=<persistent> node --test build/test/release-evidence.test.mjs '
-      + '=> tests 1 pass 1 fail 0 (2026-08-11, local)',
-  }),
-  Object.freeze({
     file: 'ci/build_patched_runtime.test.mjs',
     needs: 'the zx runtime and network access to the runtime remote -- it is not a node:test file at '
       + 'all but a zx self-test that shallow-fetches three refs and prints SELFTEST_RESULT',
     verified: 'npx --yes zx@8 ci/build_patched_runtime.test.mjs => SELFTEST_RESULT=PASS rc=0 '
       + '(2026-08-11, local)',
-  }),
-  Object.freeze({
-    file: 'build/test/bootstrap-handoff.test.mjs',
-    needs: 'python3 on the runner, like the two entries below, but reached through the product '
-      + 'code rather than the test: :84 imports build/srcbuild/stages/{tools,stdx}.mjs, and '
-      + 'build/srcbuild/stages/common.mjs:188 pythonExe() returns python3, which :195 spawns as '
-      + 'python3 build.py. The test file contains no python3 literal, so a search for the name '
-      + 'misses it; the masked-PATH sweep is what found it. Only 1 of its 8 tests needs the '
-      + 'interpreter, so wiring python3 into CI returns all eight at once',
-    verified: 'node --test build/test/bootstrap-handoff.test.mjs => tests 8 pass 8 fail 0 skipped 0 '
-      + '(2026-09-22, local, python3 3.13.3); with python3 masked off PATH => tests 8 pass 7 fail 1 '
-      + 'skipped 0, Error [BuildError]: [stdx.clean] command failed to start: python3 build.py '
-      + 'clean: spawn python3 ENOENT',
-  }),
-  Object.freeze({
-    file: 'build/test/windows-final-compiler.test.mjs',
-    needs: 'python3 on the runner. It spawns a real interpreter at :61, and no workflow installs '
-      + 'or names one: python3 and setup-python are both zero hits across .github/workflows, the '
-      + 'lint job that runs this list installs only shellcheck, and its runs-on: ubuntu-slim is a '
-      + 'label whose image is not defined in this repository, so nothing has measured whether the '
-      + 'runner has an interpreter. Absent python3 these fail ENOENT rather than skipping, which '
-      + 'would make the whole test step red for a reason none of these contracts is about. '
-      + 'Which files need python3 is settled by running every gating file with python3 masked '
-      + 'off PATH, not by grepping for the name: bootstrap-handoff reaches the interpreter '
-      + 'through product code and contains no python3 literal at all. Promote once one CI run '
-      + 'shows python3 present',
-    verified: 'node --test build/test/windows-final-compiler.test.mjs => tests 3 pass 3 fail 0 '
-      + 'skipped 0 (2026-09-22, local, python3 3.13.3); with python3 masked off PATH => '
-      + 'tests 3 pass 0 fail 3, every failure Error: spawnSync python3 ENOENT',
-  }),
-  Object.freeze({
-    file: 'scripts/cjcjcg_aggregate_ctype_gate.test.mjs',
-    needs: 'python3 on the runner, for the same reason as windows-final-compiler above: it spawns '
-      + 'the interpreter at :15 to drive scripts/cjcjcg_aggregate_ctype_gate.py, and no workflow '
-      + 'provides or references python3',
-    verified: 'node --test scripts/cjcjcg_aggregate_ctype_gate.test.mjs => tests 1 pass 1 fail 0 '
-      + 'skipped 0 (2026-09-22, local, python3 3.13.3); with python3 masked off PATH => '
-      + 'tests 1 pass 0 fail 1, Error: spawnSync python3 ENOENT',
   }),
   Object.freeze({
     file: 'ci/platform_matrix/build_windows_std_ast.test.mjs',
@@ -209,8 +168,8 @@ export const DEFERRED = Object.freeze([
 
 // Floors, not equalities: adding tests must stay frictionless, dropping them must
 // not. Lower these only together with the deletion that requires it.
-export const GATING_FLOOR = 56;
-export const DISCOVERY_FLOOR = 62;
+export const GATING_FLOOR = 85;
+export const DISCOVERY_FLOOR = 89;
 
 // git rather than a directory walk: it enumerates what a runner checks out, and
 // --exclude-standard keeps build output and scratch copies out. --others is what
