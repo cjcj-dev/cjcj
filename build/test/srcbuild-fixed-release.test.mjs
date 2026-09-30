@@ -76,6 +76,17 @@ function fixture(t, {depot = 'missing', corrupt = '', sumsMismatch = false, unav
     CJCJ_BOOTSTRAP_COLOUR_RT_SHA256: digest(runtime),
     CJCJ_BOOTSTRAP_BOUNDSCHECK_SHA256: digest(bounds),
     CJCJ_BOOTSTRAP_AST_SUPPORT: child, CJCJ_BOOTSTRAP_AST_SUPPORT_SHA256: hash(child)};
+  const hostArtifact = path.join(root, 'host-artifact');
+  fs.mkdirSync(hostArtifact);
+  fs.copyFileSync(child, path.join(hostArtifact, 'libLLVM-15.so'));
+  const hostPin = {repository: 'cjcj-dev/cjcj', run_id: '123', run_attempt: '1', artifact_id: '456',
+    source_sha: '418ace1896e22a51a6c1fa36ec29631b00301cd8', producer_sha: pin.commit,
+    platform: 'linux_x86_64', sha256: hash(child)};
+  fs.writeFileSync(path.join(hostArtifact, 'manifest.json'), JSON.stringify(hostPin));
+  env.STAGE1_HOST_IDENTITIES = path.join(root, 'host-identities.txt');
+  fs.writeFileSync(env.STAGE1_HOST_IDENTITIES,
+    `# HOST_LLVM_PROVENANCE ${JSON.stringify(hostPin)}\nlinux_x86_64 libLLVM-15.so ${hostPin.sha256}\n`);
+  env.CJCJ_BOOTSTRAP_HOST_LLVM_ARTIFACT = hostArtifact;
   for (const key of ['CJCJ_LLVM_DEPOT_PUBLISH', 'CJCJ_BOOTSTRAP_COLOUR_TUPLE', 'CJCJ_SELECTED_COLOUR_TUPLE',
     'CJCJ_BOOTSTRAP_INPUTS_PIN', 'CJCJ_SRCBUILD_CPUSET', 'CJCJ_KKK2_AFFINED']) delete env[key];
   const state = path.join(root, '.srcbuild'); fs.mkdirSync(state);

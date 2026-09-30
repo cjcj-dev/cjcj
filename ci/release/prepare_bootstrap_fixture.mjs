@@ -16,10 +16,11 @@ export function fixture(check, target = 'linux-x64') {
     const ast = path.join(sdk, 'ast.a');
     fs.writeFileSync(so, 'host fixture');
     fs.writeFileSync(ast, 'ast fixture');
+    const tupleBytes = target === 'linux-x64' ? 'reviewed fixture sums' : `reviewed fixture sums ${target}`;
     for (const d of [artifact, fallback]) {
-      fs.writeFileSync(path.join(d, 'SHA256SUMS'), 'reviewed fixture sums');
+      fs.writeFileSync(path.join(d, 'SHA256SUMS'), tupleBytes);
     }
-    const digest = crypto.createHash('sha256').update('reviewed fixture sums').digest('hex');
+    const digest = crypto.createHash('sha256').update(tupleBytes).digest('hex');
     const dylib = path.join(dir, 'dylib');
     fs.mkdirSync(dylib);
     const libraryBytes = process.env.DYLIB_TEST_FILE
