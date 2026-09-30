@@ -19,12 +19,10 @@ class DriverOptionsNormalizationTest {
             let success = opts.ParseFromArgs(args)
             println("NORMALIZED obfuscation target=${target} success=${success} enabled=${opts.IsObfuscationEnabled()} value=${opts.aggressiveParallelCompile.value}")
             @Expect(opts.IsObfuscationEnabled(), true)
-            if (target == "aarch64-apple-ios") {
-                @Expect(success, false)
-            } else {
-                @Expect(success, true)
-                @Expect(opts.aggressiveParallelCompile.value, 1u64)
-            }
+            @Expect(success, true)
+            // Obfuscation branch runs before the explicit-APC branch, so --apc=3 is
+            // normalized to 1 on every target (Option.cpp:754-758).
+            @Expect(opts.aggressiveParallelCompile.value, 1u64)
         }
     }
 }
