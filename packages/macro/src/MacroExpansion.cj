@@ -764,6 +764,38 @@ public class MacroExpansion {
         }
         let nodes = ArrayList<Node>()
         if (!invocation.newTokens.isEmpty()) {
+            let generatedParser = GeneratedParser(invocation.newTokens.toArray(), ci.GetDiag(), ci.GetDiag().GetSourceManager(),
+                attachComment: ci.GetGlobalOptions().enableAddCommentToAst,
+                parseDeclFile: ci.GetGlobalOptions().compileCjd)
+            generatedParser.SetCompileOptions(ci.GetGlobalOptions())
+            generatedParser.SetPrimaryDecl(macCall.RequireInvocation().outerDeclIdent)
+            generatedParser.EnableCustomAnno()
+            let parsedNodes = if (let Some(scopeKind) <- invocation.scopeKind) {
+                generatedParser.ParseNodes(toParsedScopeKind(scopeKind), macCall.RequireNode(),
+                    modifiers: macCall.GetModifiers(), annos: macCall.GetAnnotations())
+            } else {
+                let parsedExprKind = match (invocation.exprKind.getOrThrow()) {
+                    case ExprKind.ALL => ParsedExprKind.ALL
+                    case ExprKind.VAR_INIT => ParsedExprKind.VAR_INIT
+                    case ExprKind.INDEX_EXPR => ParsedExprKind.INDEX_EXPR
+                    case ExprKind.IF_COND_EXPR => ParsedExprKind.IF_COND_EXPR
+                    case ExprKind.WHILE_COND_EXPR => ParsedExprKind.WHILE_COND_EXPR
+                    case ExprKind.LET_PATTERN => ParsedExprKind.LET_PATTERN
+                    case ExprKind.LEFT_EXPR => ParsedExprKind.LEFT_EXPR
+                    case ExprKind.EXPR_IN_TUPLE => ParsedExprKind.EXPR_IN_TUPLE
+                    case ExprKind.EXPR_IN_IF_COND_TUPLE => ParsedExprKind.EXPR_IN_IF_COND_TUPLE
+                    case ExprKind.EXPR_IN_WHILE_COND_TUPLE => ParsedExprKind.EXPR_IN_WHILE_COND_TUPLE
+                    case ExprKind.EXPR_IN_ARRAY => ParsedExprKind.EXPR_IN_ARRAY
+                    case ExprKind.EXPR_IN_CALLSUFFIX => ParsedExprKind.EXPR_IN_CALLSUFFIX
+                    case ExprKind.EXPR_IN_ANNOTATION => ParsedExprKind.EXPR_IN_ANNOTATION
+                    case ExprKind.UNKNOWN_EXPR => ParsedExprKind.UNKNOWN_EXPR
+                }
+                generatedParser.ParseNodes(parsedExprKind, macCall.RequireNode(), modifiers: macCall.GetModifiers(),
+                    annos: macCall.GetAnnotations())
+            }
+            for (parsedNode in parsedNodes) {
+                nodes.add(parsedNode)
+            }
         }
         for (node in nodes) {
             if (node.IsInvalid()) {
