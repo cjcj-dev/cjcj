@@ -68,20 +68,27 @@ class OptionTest {
 
     @TestCase
     func JobsNormalization(): Unit {
-        for (extra in [Array<String>(), ["-j", "7"]]) {
-            let parsed = parseArgs(iosLtoArgs(srcFile, extra))
-            @Expect(parsed[0], true)
-            let opts = GlobalOptions()
-            @Expect(opts.ParseFromArgs(parsed[1]), true)
-            let expected = if (extra.isEmpty()) { GetHardwareConcurrency() } else { 7u64 }
-            println("NORMALIZED jobs present=${opts.jobs.hasValue} value=${opts.jobs.value} expected=${expected}")
-            @Expect(opts.jobs.hasValue, true)
-            @Expect(opts.jobs.value, expected)
+        for (target in ["x86_64-unknown-linux-gnu", "x86_64-w64-mingw32", "aarch64-apple-darwin", "aarch64-apple-ios"]) {
+            for (extra in [Array<String>(), ["-j", "7"]]) {
+                println("INPUT jobs target=${target} extra=${extra}")
+                let args = ArrayList<String>()
+                args.add(all: ["--experimental", "--target", target])
+                args.add(all: extra)
+                let parsed = parseArgs(iosLtoArgs(srcFile, args.toArray()))
+                @Expect(parsed[0], true)
+                let opts = GlobalOptions()
+                @Expect(opts.ParseFromArgs(parsed[1]), true)
+                let expected = if (extra.isEmpty()) { GetHardwareConcurrency() } else { 7u64 }
+                println("NORMALIZED jobs present=${opts.jobs.hasValue} value=${opts.jobs.value} expected=${expected}")
+                @Expect(opts.jobs.hasValue, true)
+                @Expect(opts.jobs.value, expected)
+            }
         }
     }
 
     @TestCase
     func ApcDefaultNormalization(): Unit {
+        println("INPUT default-apc -j=7")
         let parsed = parseArgs(iosLtoArgs(srcFile, ["-j", "7"]))
         @Expect(parsed[0], true)
         let opts = GlobalOptions()
@@ -94,7 +101,8 @@ class OptionTest {
     @TestCase
     func ApcPlatformNormalization(): Unit {
         for (target in ["x86_64-unknown-linux-gnu", "x86_64-w64-mingw32", "aarch64-apple-darwin", "aarch64-apple-ios"]) {
-            for (apc in [["--apc"], ["--apc=3"], ["--apc-split-num", "5"]]) {
+            for (apc in [Array<String>(), ["--apc"], ["--apc=3"], ["--apc-split-num", "5"]]) {
+                println("INPUT platform target=${target} apc=${apc}")
                 let extra = ArrayList<String>()
                 extra.add(all: ["--experimental", "--target", target, "-j", "7"])
                 extra.add(all: apc)
@@ -103,9 +111,9 @@ class OptionTest {
                 let opts = GlobalOptions()
                 @Expect(opts.ParseFromArgs(parsed[1]), true)
                 let expected = if (target == "x86_64-unknown-linux-gnu") {
-                    if (apc[0] == "--apc") { 7u64 } else if (apc[0] == "--apc=3") { 3u64 } else { 5u64 }
+                    if (apc.isEmpty()) { 4u64 } else if (apc[0] == "--apc") { 7u64 } else if (apc[0] == "--apc=3") { 3u64 } else { 5u64 }
                 } else { 1u64 }
-                println("NORMALIZED target=${target} apc=${apc[0]} present=${opts.aggressiveParallelCompile.hasValue} value=${opts.aggressiveParallelCompile.value} expected=${expected}")
+                println("NORMALIZED target=${target} apc=${apc} present=${opts.aggressiveParallelCompile.hasValue} value=${opts.aggressiveParallelCompile.value} expected=${expected}")
                 @Expect(opts.aggressiveParallelCompile.hasValue, true)
                 @Expect(opts.aggressiveParallelCompile.value, expected)
             }
@@ -114,27 +122,42 @@ class OptionTest {
 
     @TestCase
     func ApcLtoNormalization(): Unit {
-        for (target in ["x86_64-unknown-linux-gnu", "aarch64-apple-ios"]) {
-            let parsed = parseArgs(iosLtoArgs(srcFile, ["--experimental", "--target", target,
-                "--lto", "full", "--output-type", "dylib", "-j", "7", "--apc=3"]))
-            @Expect(parsed[0], true)
-            let opts = GlobalOptions()
-            @Expect(opts.ParseFromArgs(parsed[1]), true)
-            println("NORMALIZED lto target=${target} value=${opts.aggressiveParallelCompile.value}")
-            @Expect(opts.aggressiveParallelCompile.value, 1u64)
+        for (target in ["x86_64-unknown-linux-gnu", "x86_64-w64-mingw32", "aarch64-apple-darwin", "aarch64-apple-ios"]) {
+            for (apc in [Array<String>(), ["--apc"], ["--apc=3"], ["--apc-split-num", "5"]]) {
+                println("INPUT lto target=${target} apc=${apc}")
+                let extra = ArrayList<String>()
+                extra.add(all: ["--experimental", "--target", target,
+                    "--lto", "full", "--output-type", "dylib", "-j", "7"])
+                extra.add(all: apc)
+                let parsed = parseArgs(iosLtoArgs(srcFile, extra.toArray()))
+                @Expect(parsed[0], true)
+                let opts = GlobalOptions()
+                let success = opts.ParseFromArgs(parsed[1])
+                let supported = target == "x86_64-unknown-linux-gnu" || target == "aarch64-apple-ios"
+                println("NORMALIZED lto target=${target} success=${success} present=${opts.aggressiveParallelCompile.hasValue}")
+                @Expect(success, supported)
+                if (!supported) { continue }
+                println("NORMALIZED lto target=${target} value=${opts.aggressiveParallelCompile.value}")
+                @Expect(opts.aggressiveParallelCompile.value, 1u64)
+            }
         }
     }
 
     @TestCase
     func ApcCoverageNormalization(): Unit {
         for (target in ["x86_64-unknown-linux-gnu", "x86_64-w64-mingw32", "aarch64-apple-darwin", "aarch64-apple-ios"]) {
-            let parsed = parseArgs(iosLtoArgs(srcFile, ["--experimental", "--target", target,
-                "--coverage", "-j", "7", "--apc=3"]))
-            @Expect(parsed[0], true)
-            let opts = GlobalOptions()
-            @Expect(opts.ParseFromArgs(parsed[1]), true)
-            println("NORMALIZED coverage target=${target} value=${opts.aggressiveParallelCompile.value}")
-            @Expect(opts.aggressiveParallelCompile.value, 1u64)
+            for (apc in [Array<String>(), ["--apc"], ["--apc=3"], ["--apc-split-num", "5"]]) {
+                println("INPUT coverage target=${target} apc=${apc}")
+                let extra = ArrayList<String>()
+                extra.add(all: ["--experimental", "--target", target, "--coverage", "-j", "7"])
+                extra.add(all: apc)
+                let parsed = parseArgs(iosLtoArgs(srcFile, extra.toArray()))
+                @Expect(parsed[0], true)
+                let opts = GlobalOptions()
+                @Expect(opts.ParseFromArgs(parsed[1]), true)
+                println("NORMALIZED coverage target=${target} value=${opts.aggressiveParallelCompile.value}")
+                @Expect(opts.aggressiveParallelCompile.value, 1u64)
+            }
         }
     }
 
