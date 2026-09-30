@@ -44,7 +44,8 @@ function findFile(root, predicate) {
   return undefined;
 }
 
-const target = process.env.CJCJ_SRCBUILD_TARGET || `${process.platform}-${process.arch}`;
+const target = process.env.CJCJ_SRCBUILD_TARGET
+  || `${process.platform}-${process.platform === 'linux' && process.arch === 'arm64' ? 'aarch64' : process.arch}`;
 const platform = {'linux-x64': 'linux_x86_64', 'linux-aarch64': 'linux_aarch64',
   'darwin-arm64': 'darwin_aarch64', 'darwin-x64': 'darwin_x86_64'}[target];
 if (!platform) throw new Error(`BOOTSTRAP_TARGET_UNSUPPORTED: ${target}`);

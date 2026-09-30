@@ -1300,7 +1300,10 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
   }
   if (ast === 'wrong-sha') env.CJCJ_BOOTSTRAP_AST_SUPPORT_SHA256 = '0'.repeat(64);
   env.AST_SUPPORT_SHA256 = env.CJCJ_BOOTSTRAP_AST_SUPPORT_SHA256 ?? '';
-  if (ast === 'missing') env.CJCJ_BOOTSTRAP_AST_ARTIFACT = path.join(inputs, 'missing-ast.a');
+  if (ast === 'missing') {
+    env.CJCJ_BOOTSTRAP_AST_ARTIFACT = path.join(inputs, 'missing-ast.a');
+    env.AST_SUPPORT_SHA256 = astInputPins.explicit;
+  }
   delete env.CJCJ_BOOTSTRAP_SH;
   delete env.CJCJ_SRCBUILD_CPUSET;
   delete env.CJCJ_KKK2_AFFINED;
@@ -1484,7 +1487,7 @@ test('bootstrap driver matching pins starts real stage0 and sdk_build', t => {
   assert.ok(result.log.includes(`ASSERT cjcj-sha expected=${fixture.sourceSha} actual=${fixture.sourceSha} source=git`), result.log);
   assert.match(result.log, /\[stage0\] official cjc/);
   // The deliberately incomplete SDK ends this bounded entry test before compilation.
-  assert.match(result.log, /SDK-BUILD-FAIL .*不像 SDK（缺 bin\/cjc）/);
+  assert.match(result.log, /SDK-BUILD-FAIL llvm-so: 基线里没有同名位置 .*\/third_party\/llvm\/lib\/libLLVM-15.so/);
   console.log('OBSERVED real sdk_build input rejection after matching source pin');
   assert.equal(result.status, 1, result.stdout + result.stderr);
   assert.match(result.stdout, /STEP=31 .* rc=1 /);
