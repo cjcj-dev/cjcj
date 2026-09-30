@@ -390,6 +390,19 @@ jobs:
         if: always() && runner.os != 'Windows'
         run: npx --yes zx@8 ci/platform_matrix/build_runtime.mjs
 
+      - name: Preserve runtime gate diagnostics
+        if: always() && runner.os != 'Windows'
+        run: node ci/platform_matrix/collect_runtime_gate_logs.mjs
+
+      - name: Upload runtime gate diagnostics before compiler build
+        if: always() && runner.os != 'Windows'
+        uses: actions/upload-artifact@v7
+        with:
+          name: platform-runtime-gate-${{ matrix.runner }}-${{ github.run_attempt }}
+          retention-days: 7
+          if-no-files-found: warn
+          path: .platform-ci/logs/**
+
       - name: Download cross-built Windows runtime
         if: always() && runner.os == 'Windows'
         uses: actions/download-artifact@v8

@@ -10,6 +10,108 @@ import {allReleasePlatforms, getReleasePlatform, RELEASE_REQUIREMENTS} from '../
 const script = path.resolve(import.meta.dirname, 'platform-matrix.mjs');
 const run = args => spawnSync(process.execPath, [script, ...args], {encoding: 'utf8'});
 
+test('Linux native runtime qualifies teardown tools before invoking the gate', t => {
+  const root = path.resolve(import.meta.dirname, '../..');
+  const build = fs.readFileSync(path.join(root, 'ci/platform_matrix/build_runtime.mjs'), 'utf8');
+  assert.match(build, /apt-get install -y -qq clang cmake make gdb coreutils/);
+  const native = build.slice(build.indexOf("} else if (runtimeTarget === 'native')"), build.indexOf("} else if (process.platform === 'darwin')"));
+  assert.ok(native.indexOf('qualify_teardown_tools.sh') >= 0);
+  assert.ok(native.indexOf('qualify_teardown_tools.sh') < native.indexOf('python3 build.py build'));
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'teardown-tools-'));
+  t.after(() => fs.rmSync(temporary, {recursive: true, force: true}));
+  const log = path.join(temporary, 'tools.log');
+  const qualify = env => spawnSync('/bin/bash', [path.join(root, 'ci/platform_matrix/qualify_teardown_tools.sh'), log], {env, encoding: 'utf8'});
+  const tools = path.join(temporary, 'bin');
+  fs.mkdirSync(tools);
+  for (const tool of ['mkdir', 'dirname', 'cat']) fs.copyFileSync(`/usr/bin/${tool}`, path.join(tools, tool));
+  for (const tool of ['gdb', 'timeout']) fs.copyFileSync('/usr/bin/true', path.join(tools, tool));
+  const present = qualify({...process.env, PATH: tools});
+  assert.equal(present.status, 0, present.stdout + present.stderr);
+  assert.match(fs.readFileSync(log, 'utf8'), /GC_UNIT_TEARDOWN_TOOL_OK tool=gdb rc=0/);
+  assert.match(fs.readFileSync(log, 'utf8'), /GC_UNIT_TEARDOWN_TOOL_OK tool=timeout rc=0/);
+  fs.rmSync(path.join(tools, 'gdb'));
+  const missing = qualify({...process.env, PATH: tools});
+  assert.equal(missing.status, 127, missing.stdout + missing.stderr);
+  assert.match(fs.readFileSync(log, 'utf8'), /GC_UNIT_TEARDOWN_TOOL_FAIL tool=gdb rc=127 reason=not-found/);
+});
+
+test('platform failure artifacts preserve the gate and teardown raw logs', () => {
+  const workflow = fs.readFileSync(path.resolve(import.meta.dirname, '../../.github/workflows/platform-matrix.yml'), 'utf8');
+  const upload = workflow.slice(workflow.indexOf('- name: Upload diagnostics and key products'));
+  assert.match(upload, /if: always\(\)/);
+  assert.match(upload, /\.platform-ci\/logs\/\*\*/);
+  assert.match(workflow, /name: Preserve runtime gate diagnostics\n\s+if: always\(\) && runner.os != 'Windows'\n\s+run: node ci\/platform_matrix\/collect_runtime_gate_logs\.mjs/);
+  const early = workflow.slice(workflow.indexOf('- name: Upload runtime gate diagnostics before compiler build'), workflow.indexOf('- name: Upload runtime gate diagnostics before compiler build') + 500);
+  assert.match(early, /if: always\(\) && runner.os != 'Windows'/);
+  assert.match(early, /path: \.platform-ci\/logs\/\*\*/);
+  assert.ok(workflow.indexOf('- name: Upload runtime gate diagnostics before compiler build') < workflow.indexOf('ci/platform_matrix/build_cjcj.mjs'));
+});
+
+test('runtime diagnostics entry preserves teardown rc and raw gate output byte for byte', t => {
+  const root = path.resolve(import.meta.dirname, '../..');
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'runtime-gate-logs-'));
+  t.after(() => fs.rmSync(temporary, {recursive: true, force: true}));
+  const source = path.join(temporary, 'source');
+  const output = path.join(temporary, 'output');
+  const logs = new Map([
+    ['build/gate_run.log', 'GC_UNIT_GATE_FAIL: suite exited unsuccessfully (rc=127)\n'],
+    ['build/gc_unit_gate.status', 'FAIL rc=127\n'],
+    ['tests/gc_unit/build/teardown.log', 'timeout: failed to run command gdb: No such file or directory\nTEARDOWN_RC=127\n'],
+    ['tests/gc_unit/build/teardown.rc', '127\n'],
+    ['tests/gc_unit/build/teardown-artifacts.sha256', `${'a'.repeat(64)}  cj_gc_unit\n${'b'.repeat(64)}  libcangjie-runtime.so\n${'c'.repeat(64)}  libboundscheck.so\n`],
+    ['tests/gc_unit/build/other_vm_exit.log', 'GC_UNIT_OTHER_VM_EXIT rc=0\n'],
+  ]);
+  for (const [relative, content] of logs) {
+    const file = path.join(source, 'runtime', relative);
+    fs.mkdirSync(path.dirname(file), {recursive: true});
+    fs.writeFileSync(file, content);
+  }
+  const result = spawnSync(process.execPath, [path.join(root, 'ci/platform_matrix/collect_runtime_gate_logs.mjs')], {
+    encoding: 'utf8', env: {...process.env, RUNTIME_SOURCE: source, PLATFORM_CI_ROOT: output},
+  });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  for (const [relative, content] of logs) {
+    assert.equal(fs.readFileSync(path.join(output, 'logs/gc-unit', relative), 'utf8'), content, `raw diagnostic invariant: ${relative}`);
+  }
+  assert.equal(result.stdout.split('\n').filter(line => line.startsWith('RUNTIME_GATE_LOG ')).length, logs.size);
+  const absent = spawnSync(process.execPath, [path.join(root, 'ci/platform_matrix/collect_runtime_gate_logs.mjs')], {
+    encoding: 'utf8', env: {...process.env, RUNTIME_SOURCE: path.join(temporary, 'absent'), PLATFORM_CI_ROOT: output},
+  });
+  assert.equal(absent.status, 0, absent.stderr);
+  assert.match(absent.stdout, /::warning::No runtime gate diagnostics found/);
+});
+
+test('runtime build entry refuses an unusable gdb and records the root cause', {timeout: 120000}, t => {
+  const root = path.resolve(import.meta.dirname, '../..');
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'runtime-tool-entry-'));
+  t.after(() => fs.rmSync(temporary, {recursive: true, force: true}));
+  const source = path.join(temporary, 'source');
+  fs.mkdirSync(path.join(source, 'runtime'), {recursive: true});
+  fs.writeFileSync(path.join(source, 'runtime/build.py'), '');
+  for (const args of [['init', '-q', source], ['-C', source, '-c', 'user.name=Zxilly', '-c', 'user.email=zxilly@outlook.com', 'commit', '-q', '--allow-empty', '-m', 'fixture']]) {
+    const result = spawnSync('git', args, {encoding: 'utf8'});
+    assert.equal(result.status, 0, result.stderr);
+  }
+  const tools = path.join(temporary, 'bin');
+  fs.mkdirSync(tools);
+  const writeTool = (name, body) => fs.writeFileSync(path.join(tools, name), `#!/bin/bash\n${body}\n`, {mode: 0o755});
+  writeTool('sudo', 'exit 0');
+  writeTool('gdb', 'echo "controlled gdb unavailable" >&2; exit 127');
+  writeTool('python3', 'if [[ "$1" == "--version" ]]; then echo fixture-python; exit 0; fi\necho "$*" >> "$BUILD_CALLS"\nmkdir -p "$PLATFORM_CI_ROOT/runtime-install"\ntouch "$PLATFORM_CI_ROOT/runtime-install/libcangjie-runtime.so"');
+  const output = path.join(temporary, 'output');
+  const calls = path.join(temporary, 'build-calls');
+  const result = spawnSync('npx', ['--yes', 'zx@8', 'ci/platform_matrix/build_runtime.mjs'], {
+    cwd: root, encoding: 'utf8', timeout: 110000,
+    env: {...process.env, PATH: `${tools}${path.delimiter}${process.env.PATH}`, RUNTIME_SOURCE: source,
+      RUNTIME_REF: '', RUNTIME_TARGET: 'native', RUNTIME_TOOLCHAIN: '', PLATFORM_CI_ROOT: output,
+      BUILD_CALLS: calls, GITHUB_STEP_SUMMARY: path.join(temporary, 'summary.md')},
+  });
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(fs.readFileSync(path.join(output, 'logs/teardown-tools.log'), 'utf8'), /GC_UNIT_TEARDOWN_TOOL_FAIL tool=gdb rc=127/);
+  assert.match(fs.readFileSync(path.join(output, 'step-summary.md'), 'utf8'), /runtime — FAIL[\s\S]*exit: `1`/);
+  assert.equal(fs.existsSync(calls), false, 'unqualified teardown must not enter build.py');
+});
+
 test('probe CLI reports SDK capability independently of blocked cross-build readiness', t => {
   const sdk = fs.mkdtempSync(path.join(os.tmpdir(), 'release-probe-'));
   t.after(() => fs.rmSync(sdk, {recursive: true, force: true}));
