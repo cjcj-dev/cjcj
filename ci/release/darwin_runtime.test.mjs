@@ -9,8 +9,9 @@ import {digest} from './colour_runtime.mjs';
 
 const platform = process.env.PLATFORM || 'darwin_aarch64';
 const tuple = `${platform}_cjnative`;
-const files = [`runtime/lib/${tuple}/libcangjie-runtime.dylib`,
-  `runtime/lib/${tuple}/libboundscheck.dylib`, `lib/${tuple}/libcangjie-runtime.a`];
+const extension = platform.startsWith('linux_') ? 'so' : 'dylib';
+const files = [`runtime/lib/${tuple}/libcangjie-runtime.${extension}`,
+  `runtime/lib/${tuple}/libboundscheck.${extension}`, `lib/${tuple}/libcangjie-runtime.a`];
 const originalProduct = fileURLToPath(new URL('./darwin_runtime.mjs', import.meta.url));
 const product = process.env.DARWIN_RT_PRODUCT || originalProduct;
 function fixture(body) {
@@ -42,6 +43,10 @@ function fixture(body) {
 test('producer copies exactly the three native source libraries', () => fixture(({source, output, run}) => {
   const result = run('prepare', output, source);
   assert.equal(result.status, 0, result.stderr);
+  const manifest = JSON.parse(fs.readFileSync(path.join(output, 'manifest.json'), 'utf8'));
+  assert.equal(manifest.role, 'colour-runtime-libraries');
+  assert.equal(manifest.platform, platform);
+  if (platform === 'linux_aarch64') assert.equal(manifest.std_status, 'pending-cjcj-768');
   for (const relative of files) {
     assert.equal(digest(path.join(output, relative)), digest(path.join(source, relative)), `PRODUCER_BYTES: ${relative}`);
   }

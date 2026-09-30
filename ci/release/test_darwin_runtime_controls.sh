@@ -12,7 +12,7 @@ from pathlib import Path
 root = Path(sys.argv[1])
 for name, old, new in [
     ('producer-cut', 'fs.copyFileSync(input, output);',
-     'fs.copyFileSync(path.join(source, `runtime/lib/${tuple}/libboundscheck.dylib`), output);'),
+     'fs.copyFileSync(path.join(source, `runtime/lib/${tuple}/libboundscheck.${extension}`), output);'),
     ('consumer-cut', 'assert.equal(digest(path.join(root, relative)), manifest.files[relative], `COLOUR_RT_FILE_SHA256_MISMATCH: ${relative}`);',
      'void manifest.files[relative];'),
 ]:

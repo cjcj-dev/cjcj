@@ -40,6 +40,17 @@ for (const [platform, published] of Object.entries(release.platforms)) {
       `COLOUR_RUNTIME_PIN_MISMATCH: ${platform}; rebuild and publish the native libraries with the runtime pin`);
     console.log(`ASSERT COLOUR_RUNTIME_PIN_MATCH ${platform} ${source.pinRef}`);
   });
+  test(`published runtime scope is explicit for ${platform}`, () => {
+    if (published.role === 'colour-runtime-libraries') {
+      assert.match(published.std_status || '', /^pending-cjcj-\d+$/,
+        `COLOUR_RUNTIME_STD_STATUS: ${platform}`);
+      assert.ok(!Object.keys(published.files || {}).some(file => file.includes('libcangjie-std-')),
+        `COLOUR_RUNTIME_NATIVE_ONLY: ${platform}`);
+    } else {
+      assert.equal(published.role, undefined, `COLOUR_RUNTIME_ROLE: ${platform}`);
+      assert.equal(published.std_status, undefined, `COLOUR_RUNTIME_STD_STATUS: ${platform}`);
+    }
+  });
 }
 
 test('runtime source rejects an unauthorized override', async () => {
