@@ -530,9 +530,6 @@ public class BCHIR {
 
 public func BCHIRDefaultFunctionMangledNames(): ArrayList<String> {
     let names = ArrayList<String>()
-    names.add("rt$RegisterReferenceFinalizer")
-    names.add("rt$RunReferenceHandler")
-    names.add("rt$RunReferenceFinalizers")
     names.add("rt$ThrowArithmeticException")
     names.add("rt$ThrowOverflowException")
     names.add("rt$ThrowIndexOutOfBoundsException")
