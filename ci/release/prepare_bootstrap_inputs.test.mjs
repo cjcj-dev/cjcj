@@ -64,9 +64,14 @@ test('prepare refuses changed persistent input before exporting bootstrap enviro
 }));
 
 // Separate assertions make selection and integrity cuts independently visible.
-test('ast artifact wins over an available fallback archive', () => fixture(({env, artifact, run}) => {
+test('ast artifact wins over an available fallback archive', () => fixture(({env, artifact, run, sdk, astFiles}) => {
   const ast = path.join(artifact, 'libcangjie-ast-support.a');
   fs.writeFileSync(ast, 'ast fixture');
+  for (const name of ['SHA256SUMS', ...astFiles]) {
+    fs.mkdirSync(path.dirname(path.join(artifact, name)), {recursive: true});
+    fs.copyFileSync(path.join(sdk, name), path.join(artifact, name));
+  }
+  fs.writeFileSync(path.join(artifact, 'SHA256SUMS'), fs.readFileSync(path.join(sdk, 'SHA256SUMS'), 'utf8').replace('  ast.a', '  libcangjie-ast-support.a'));
   env.CJCJ_BOOTSTRAP_AST_ARTIFACT = ast;
   const result = run();
   assert.equal(result.status, 0, result.stderr);
@@ -89,17 +94,31 @@ test('missing selected ast artifact cannot fall back', () => fixture(({env, arti
   assert.match(result.stderr, /ENOENT/);
 }));
 
-test('kkk2 ast build directory fallback uses the reviewed pin', () => fixture(({env, fallback, run}) => {
+test('kkk2 complete ast build directory fallback uses the reviewed pin', () => fixture(({env, fallback, run, sdk, astFiles}) => {
   delete env.CJCJ_BOOTSTRAP_AST_SUPPORT;
   env.CANGJIE_BUILD_ROOT = fallback;
   fs.mkdirSync(path.join(fallback, 'lib'));
   const ast = path.join(fallback, 'lib/libcangjie-ast-support.a');
   fs.writeFileSync(ast, 'ast fixture');
+  for (const name of ['SHA256SUMS', ...astFiles]) {
+    fs.mkdirSync(path.dirname(path.join(fallback, 'lib', name)), {recursive: true});
+    fs.copyFileSync(path.join(sdk, name), path.join(fallback, 'lib', name));
+  }
+  fs.writeFileSync(path.join(fallback, 'lib/SHA256SUMS'), fs.readFileSync(path.join(sdk, 'SHA256SUMS'), 'utf8').replace('  ast.a', '  libcangjie-ast-support.a'));
   const result = run();
   assert.equal(result.status, 0, result.stderr);
   assert.ok(result.stdout.includes(`CJCJ_BOOTSTRAP_AST_SUPPORT=${ast}\n`));
   assert.ok(result.stdout.includes(`CJCJ_BOOTSTRAP_AST_SUPPORT_SHA256=${env.AST_SUPPORT_SHA256}\n`));
   console.log('ASSERT ast kkk2 fallback and reviewed digest executed');
+}));
+
+test('explicit bare ast archive is rejected before bootstrap export', () => fixture(({env, sdk, run}) => {
+  fs.unlinkSync(path.join(sdk, 'SHA256SUMS'));
+  const result = run();
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /AST_SUPPORT_INPUTS_INCOMPLETE/);
+  assert.doesNotMatch(result.stdout, /^CJCJ_BOOTSTRAP_AST_SUPPORT=/m);
+  console.log('ASSERT incomplete explicit AST input rejected before export');
 }));
 
 // Independent pins: store integrity must not replace the reviewed tuple manifest pin.
