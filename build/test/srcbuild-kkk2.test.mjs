@@ -1154,9 +1154,10 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
   fs.mkdirSync(cached);
   fs.cpSync(path.join(state, 'fixed-llc'), path.join(cached, 'fixed-llc'), {recursive: true});
   writeDepotChecksums(cached);
-  const llvmPin = path.join(root, 'ci/llvm_pin.env');
-  fs.writeFileSync(llvmPin, fs.readFileSync(llvmPin, 'utf8').replace(/^LLVM_TUPLE_SUMS_SHA=.*$/m,
-    `LLVM_TUPLE_SUMS_SHA=${sha256(path.join(cached, 'SHA256SUMS'))}`));
+  const tuplePin = path.join(root, 'ci/llvm-tuple/linux_x86_64.json');
+  const tupleDeclaration = JSON.parse(fs.readFileSync(tuplePin, 'utf8'));
+  tupleDeclaration.tuple_sums_sha256 = sha256(path.join(cached, 'SHA256SUMS'));
+  fs.writeFileSync(tuplePin, JSON.stringify(tupleDeclaration));
   const pin = path.join(root, 'ci/llvm-dylib', `linux_${os.arch() === 'x64' ? 'x86_64' : 'aarch64'}.env`);
   fs.writeFileSync(pin, fs.readFileSync(pin, 'utf8').replace(/^LLVM_DYLIB_SOURCE_SHA=.*$/m,
     `LLVM_DYLIB_SOURCE_SHA=${mismatch ? '0'.repeat(40) : llvmSha}`));
