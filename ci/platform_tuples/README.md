@@ -24,10 +24,14 @@ official SDK comparisons. The upstream environment reference is
 `cangjie_build/docs/linux.md:49` (Ubuntu 22.04 example) and `:55-61` (optional
 Ubuntu 18.04 images).
 
-Native builds retain their native manifest, dependency and shim checks. Windows
-uses `fetch_sources.sh` and `build_tuple.sh` under MSYS2, including its LLVM static
-archives and core-lineage manifest. The unified cache identity includes both
-recipes and the target registry, preventing reuse of the former split recipes.
+All platforms emit the same strict fifteen-field `tuple` manifest, binding the
+platform, three source pins, three tools' source/version/hash, linker name and
+shim hash. Partial legacy manifests are rejected. Windows can compute every
+field from the same pinned sources and its built shim; no field is exempt.
+Native dependency and shim checks remain. Windows uses `fetch_sources.sh` and
+`build_tuple.sh` under MSYS2, including its LLVM static archives. The unified
+cache identity includes both recipes and the target registry, preventing reuse
+of the former split recipes.
 
 Contract tests live in `ci/srcbuild/tests/platform-contract.test.mjs`: they execute
 the workflow plan command and assert the emitted matrix, caller subsets, and

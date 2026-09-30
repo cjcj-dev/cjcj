@@ -26,7 +26,7 @@ function fixture(t, {depot = 'missing', corrupt = '', sumsMismatch = false, unav
   const gzip = spawnSync('gzip', ['-n', '-c'], {input: raw});
   assert.equal(gzip.status, 0);
   const shim = Buffer.from('shim fixture');
-  const manifest = Buffer.from(`PLATFORM=linux_x86_64\nLLVM_SHA=${llvm}\nCANGJIE_COMPILER_SHA=${compiler}\nFLATBUFFERS_SHA=${field('FLATBUFFERS_SHA')}\nLLC_SHA256=${digest(raw)}\nOPT_SHA256=${digest(raw)}\nLLD_TOOL=ld.lld\nLLD_SOURCE=tuple:${llvm}\nLLD_VERSION=LLD 15.0.4\nLLD_SHA256=${digest(raw)}\nSHIM_SHA256=${digest(shim)}\n`);
+  const manifest = Buffer.from(`PLATFORM=linux_x86_64\nLLVM_SHA=${llvm}\nCANGJIE_COMPILER_SHA=${compiler}\nFLATBUFFERS_SHA=${field('FLATBUFFERS_SHA')}\nLLC_SOURCE=tuple:${llvm}\nLLC_VERSION=LLVM version 15.0.4\nLLC_SHA256=${digest(raw)}\nOPT_SOURCE=tuple:${llvm}\nOPT_VERSION=LLVM version 15.0.4\nOPT_SHA256=${digest(raw)}\nLLD_TOOL=ld.lld\nLLD_SOURCE=tuple:${llvm}\nLLD_VERSION=LLD 15.0.4\nLLD_SHA256=${digest(raw)}\nSHIM_SHA256=${digest(shim)}\n`);
   const files = {'MANIFEST': manifest, 'bin/llc': raw, 'bin/opt': raw, 'bin/ld.lld': raw, 'lib/STATIC_LLVM.txt': manifest,
     'fixed-llc/llc.gz': gzip.stdout, 'fixed-llc/opt.gz': gzip.stdout, 'fixed-llc/ld.lld.gz': gzip.stdout,
     'fixed-llc/cjselfhost_llvmshim.o': shim, 'fixed-llc/llvm-tools.manifest': manifest};
