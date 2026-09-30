@@ -80,7 +80,7 @@ jobs:
   build-tools:
     name: ${{ matrix.platform }} / Build tools
     needs: plan
-    timeout-minutes: 350
+    timeout-minutes: ${{ matrix.platform == 'windows_x86_64' && 350 || 120 }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
