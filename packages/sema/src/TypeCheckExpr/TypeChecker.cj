@@ -1426,11 +1426,21 @@ extend TypeChecker {
         AddDefaultFunction(pkg)
         if (pkg.fullPackageName == UTILS_CORE_PACKAGE_NAME && !pkg.files.isEmpty() &&
             !pkg.TestAttr(Attribute.IMPORTED)) {
-            AddBuiltInArrayDecl(pkg)
-            AddBuiltInVArrayDecl(pkg)
-            AddBuiltInPointerDecl(pkg)
-            AddBuiltinCFuncDecl(pkg)
-            AddBuiltInCStringDecl(pkg)
+            if (!HasSourceBuiltInDecl(pkg, BuiltInType.ARRAY)) {
+                AddBuiltInArrayDecl(pkg)
+            }
+            if (!HasSourceBuiltInDecl(pkg, BuiltInType.VARRAY)) {
+                AddBuiltInVArrayDecl(pkg)
+            }
+            if (!HasSourceBuiltInDecl(pkg, BuiltInType.POINTER)) {
+                AddBuiltInPointerDecl(pkg)
+            }
+            if (!HasSourceBuiltInDecl(pkg, BuiltInType.CFUNC)) {
+                AddBuiltinCFuncDecl(pkg)
+            }
+            if (!HasSourceBuiltInDecl(pkg, BuiltInType.CSTRING)) {
+                AddBuiltInCStringDecl(pkg)
+            }
         }
         AddDefaultParamFunctions(pkg)
         let enableMacroInLSP = if (let Some(instance) <- impl.ci) { instance.globalOptions.enableMacroInLSP } else { false }
@@ -1710,6 +1720,19 @@ extend TypeChecker {
                 BasicDiagKindRefactor.sema_objc_mirror_interoplib_must_be_imported, decl).Emit()
             decl.EnableAttr(Attribute.IS_BROKEN)
         }
+    }
+
+    private func HasSourceBuiltInDecl(pkg: Package, builtinType: BuiltInType): Bool {
+        for (file in pkg.files) {
+            for (decl in file.decls) {
+                if (let Some(builtin) <- (decl as BuiltInDecl)) {
+                    if (!builtin.TestAttr(Attribute.IMPORTED) && builtin.IsType(builtinType)) {
+                        return true
+                    }
+                }
+            }
+        }
+        return false
     }
 
     private func AddBuiltInArrayDecl(pkg: Package): Unit {
