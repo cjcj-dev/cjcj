@@ -137,26 +137,18 @@ public func IsOperatorMangleCode(code: String): Bool {
         code == "or" || code == "cl"
 }
 
-public func IsAutoBoxedBaseDecl(decl: MangleDecl): Bool {
+public func IsAutoBoxedBaseDecl(decl: Decl): Bool {
     return decl.TestAttr(Attribute.NO_MANGLE) && decl.astKind == ASTKind.CLASS_DECL
 }
 
-public func IsAutoBoxedBaseDecl(decl: Decl): Bool {
-    return IsAutoBoxedBaseDecl(ConvertAstDeclToMangle(decl))
-}
-
-public func MangleEnumElement(enumDeclMangledName: String, decl: MangleDecl): String {
-    var elementClassName = enumDeclMangledName + MANGLE_DOLLAR_PREFIX + decl.identifier
-    if (let Some(ty) <- decl.semaTy()) {
+public func MangleEnumElement(enumDeclMangledName: String, decl: Decl): String {
+    var elementClassName = enumDeclMangledName + MANGLE_DOLLAR_PREFIX + decl.identifier.Val()
+    if (let Some(ty) <- decl.GetTy()) {
         if (ty.kind == TypeKind.TYPE_FUNC) {
-            elementClassName += MANGLE_DOLLAR_PREFIX + "${ty.paramTys.size}"
+            elementClassName += MANGLE_DOLLAR_PREFIX + "${(ty as FuncTy).getOrThrow().paramTys.size}"
         }
     }
     return elementClassName
-}
-
-public func MangleEnumElement(enumDeclMangledName: String, decl: Decl): String {
-    return MangleEnumElement(enumDeclMangledName, ConvertAstDeclToMangle(decl))
 }
 
 public func GetMangledNameOfCompilerAddedClass(className: String): String {
@@ -167,17 +159,6 @@ public func ComputeMangledNameWithCustomIdentifier(decl: Decl, customIdentifier:
     let originalIdentifier = decl.identifier
     let originalMangledName = decl.mangledName
     decl.identifier = SrcIdentifier(customIdentifier)
-    decl.mangledName = ""
-    let mangledName = BaseMangler().Mangle(decl)
-    decl.identifier = originalIdentifier
-    decl.mangledName = originalMangledName
-    return mangledName
-}
-
-public func ComputeMangledNameWithCustomIdentifier(decl: MangleDecl, customIdentifier: String): String {
-    let originalIdentifier = decl.identifier
-    let originalMangledName = decl.mangledName
-    decl.identifier = customIdentifier
     decl.mangledName = ""
     let mangledName = BaseMangler().Mangle(decl)
     decl.identifier = originalIdentifier
@@ -231,24 +212,6 @@ public func IsPrimitivePrefix(ch: Byte): Bool {
     return ch == b'n' || ch == b'u' || ch == b'c' || ch == b'b' || ch == b'f' || ch == b'd' ||
         ch == b'a' || ch == b's' || ch == b'i' || ch == b'l' || ch == b'q' || ch == b'h' ||
         ch == b't' || ch == b'j' || ch == b'm' || ch == b'r' || ch == b'D' || ch == b'v'
-}
-
-public func MangleFilePrivate(decl: MangleDecl): String {
-    if (let Some(file) <- decl.curFile) {
-        let filenameLen = file.fileName.size
-        let cjExtLen: Int64 = 3
-        let maxLen: Int64 = 16
-        if (filenameLen <= maxLen + cjExtLen) {
-            let nameWithoutExt = if (filenameLen >= cjExtLen) {
-                file.fileName[0..filenameLen - cjExtLen]
-            } else {
-                file.fileName
-            }
-            return MangleName(MANGLE_DOLLAR_PREFIX + nameWithoutExt)
-        }
-        return MangleName(ToHex(file.fileHash))
-    }
-    throw IllegalArgumentException("Private declaration has no current file.")
 }
 
 public func MangleFilePrivate(decl: Decl): String {
