@@ -21,7 +21,7 @@ def inventory(root):
     files = {}
     for path in sorted(root.rglob("*")):
         require(not path.is_symlink(), f"QUALIFIED_ENTITY_REQUIRED {path}")
-        if path.is_file() and path.name != "language-tuple.json":
+        if path.is_file() and path.relative_to(root).as_posix() != "language-tuple.json":
             files[path.relative_to(root).as_posix()] = {
                 "sha256": digest(path), "mode": path.stat().st_mode & 0o777}
     return files
