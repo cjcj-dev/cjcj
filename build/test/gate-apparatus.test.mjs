@@ -75,10 +75,9 @@ test('gate apparatus records actual host bytes separately from its review covera
   await t.test('a different actual host is retained with a visible not-covered warning', async () => {
     const {captured, output} = capture({toolchain: currentHost, name: 'uncovered'});
     assert.equal(captured.status, 0, captured.stderr);
-    assert.match(captured.stderr, /WARNING: Gate apparatus does not cover this host configuration/);
-
     const sidecar = JSON.parse(await fs.readFile(path.join(output, GATE_APPARATUS_PROVENANCE), 'utf8'));
-    assert.equal(sidecar.gate_host_toolchain, currentHost);
+    assert.equal(sidecar.gate_host_toolchain, currentHost, 'TARGET producer retains the actual host');
+    assert.match(captured.stderr, /WARNING: Gate apparatus does not cover this host configuration/);
     assert.equal(sidecar.reviewed_against, REVIEWED_GATE_HOST_TOOLCHAIN);
     assert.equal(sidecar.coverage, 'not-covered');
     assert.equal(sidecar.coverage_warning, gateApparatusCoverageWarning(currentHost));
