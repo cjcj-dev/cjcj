@@ -4,6 +4,21 @@ import std.collection.*
 import cjcj::ast.*
 import cjcj::utils.{CJC_ASSERT, CJC_NULLPTR_CHECK}
 
+private func GetParentDecl(decl: FuncDecl): Option<Decl> {
+    if (let Some(body) <- decl.funcBody) {
+        if (let Some(parent) <- body.parentClassLike) {
+            return parent
+        }
+        if (let Some(parent) <- body.parentStruct) {
+            return parent
+        }
+        if (let Some(parent) <- body.parentEnum) {
+            return parent
+        }
+    }
+    return decl.outerDecl
+}
+
 private func unsupportedTy(kind: TypeKind, context: String): String {
     throw IllegalArgumentException(context + ": " + TypeKindName(kind))
 }
@@ -802,7 +817,36 @@ public open class BaseMangler {
     }
 
     public func MangleLambda(lambda: LambdaExpr, prefix: ArrayList<Node>): String {
-        let index = GetLambdaIndex(lambda, prefix, prefix.size)
+        let outerNode = if (let Some(value) <- FindOuterNodeOfLambda(prefix, prefix.size)) {
+            value
+        } else {
+            throw IllegalArgumentException("Outer container of lambda is not found.")
+        }
+        var pkgName = ""
+        if (let Some(decl) <- (outerNode as Decl)) {
+            pkgName = decl.fullPackageName
+        } else {
+            for (node in prefix) {
+                if (let Some(decl) <- (node as Decl)) {
+                    pkgName = decl.fullPackageName
+                    break
+                }
+            }
+        }
+        pkgName = ManglerContext.ReduceUnitTestPackageName(pkgName)
+        if (pkgName.isEmpty()) {
+            throw IllegalArgumentException("Package name of lambda is empty.")
+        }
+        let ctx = if (let Some(value) <- manglerCtxTable.get(pkgName)) {
+            value
+        } else {
+            throw IllegalArgumentException("Mangler context not prepared for package: " + pkgName)
+        }
+        let index = if (let Some(value) <- ctx.GetIndexOfLambda(outerNode, lambda)) {
+            value
+        } else {
+            throw IllegalArgumentException("Index of lambda is not found.")
+        }
         var mangleStr = MANGLE_CANGJIE_PREFIX + MANGLE_NESTED_PREFIX
         let genericsTypeStack = ArrayList<String>()
         mangleStr += ManglePrefix(lambda, prefix, genericsTypeStack, true)
@@ -987,80 +1031,26 @@ public open class BaseMangler {
         if (decl.astKind != ASTKind.FUNC_DECL) {
             return decl.outerDecl
         }
-        if (let Some(body) <- (decl as FuncDecl).getOrThrow().funcBody) {
-            if (let Some(parent) <- body.parentClassLike) {
-                return parent
-            }
-            if (let Some(parent) <- body.parentStruct) {
-                return parent
-            }
-            if (let Some(parent) <- body.parentEnum) {
-                return parent
-            }
-        }
-        return decl.outerDecl
-    }
-
-    private func IsLambdaOuterCandidate(node: Node): Bool {
-        if (node.astKind == ASTKind.FUNC_DECL || node.astKind == ASTKind.PRIMARY_CTOR_DECL ||
-            node.astKind == ASTKind.LAMBDA_EXPR) {
-            return true
-        }
-        if ((node.astKind == ASTKind.VAR_DECL || node.astKind == ASTKind.VAR_WITH_PATTERN_DECL) &&
-            node.TestAttr(Attribute.GLOBAL)) {
-            return true
-        }
-        if (node.astKind == ASTKind.VAR_DECL || node.astKind == ASTKind.VAR_WITH_PATTERN_DECL) {
-            if (let Some(outer) <- (node as VarDeclAbstract).getOrThrow().outerDecl) {
-                return outer.astKind == ASTKind.CLASS_DECL || outer.astKind == ASTKind.INTERFACE_DECL ||
-                    outer.astKind == ASTKind.STRUCT_DECL || outer.astKind == ASTKind.ENUM_DECL
-            }
-        }
-        return false
+        return GetParentDecl((decl as FuncDecl).getOrThrow())
     }
 
     private func FindOuterNodeOfLambda(prefix: ArrayList<Node>, stopExclusive: Int64): Option<Node> {
         var idx = stopExclusive - 1
         while (idx >= 0) {
             let prevPrefix = prefix[idx]
-            if (IsLambdaOuterCandidate(prevPrefix)) {
+            idx--
+            let variable = prevPrefix as VarDeclAbstract
+            let outerDecl = variable.flatMap({decl => decl.outerDecl})
+            if (prevPrefix.astKind == ASTKind.FUNC_DECL || prevPrefix.astKind == ASTKind.PRIMARY_CTOR_DECL ||
+                prevPrefix.astKind == ASTKind.LAMBDA_EXPR ||
+                variable.map({decl => decl.TestAttr(Attribute.GLOBAL)}).getOrDefault(false) ||
+                outerDecl.map({outer => outer.astKind == ASTKind.CLASS_DECL ||
+                    outer.astKind == ASTKind.INTERFACE_DECL || outer.astKind == ASTKind.STRUCT_DECL ||
+                    outer.astKind == ASTKind.ENUM_DECL}).getOrDefault(false)) {
                 return prevPrefix
             }
-            idx--
         }
         return None
-    }
-
-    private func GetLambdaIndex(lambda: LambdaExpr, prefix: ArrayList<Node>, stopExclusive: Int64): Int64 {
-        let outerNode = if (let Some(value) <- FindOuterNodeOfLambda(prefix, stopExclusive)) {
-            value
-        } else {
-            throw IllegalArgumentException("Outer container of lambda is not found.")
-        }
-        var pkgName = ""
-        if (let Some(decl) <- (outerNode as Decl)) {
-            pkgName = decl.fullPackageName
-        } else {
-            for (node in prefix) {
-                if (let Some(decl) <- (node as Decl)) {
-                    pkgName = decl.fullPackageName
-                    break
-                }
-            }
-        }
-        pkgName = ManglerContext.ReduceUnitTestPackageName(pkgName)
-        if (pkgName.isEmpty()) {
-            throw IllegalArgumentException("Package name of lambda is empty.")
-        }
-        let ctx = if (let Some(value) <- manglerCtxTable.get(pkgName)) {
-            value
-        } else {
-            throw IllegalArgumentException("Mangler context not prepared for package: " + pkgName)
-        }
-        if (let Some(index) <- ctx.GetIndexOfLambda(outerNode, lambda)) {
-            return index
-        }
-        throw IllegalArgumentException("Index of lambda is not found.")
     }
 
     @When[backend == "cjnative"]
