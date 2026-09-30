@@ -18,6 +18,7 @@ function driverFixture(check) {
       fs.cpSync(path.join(repository, directory), path.join(root, directory), {recursive: true});
     }
     const driver = path.join(root, 'tools/srcbuild_kkk2.sh');
+    inputs.env.NODE_OPTIONS = `${inputs.env.NODE_OPTIONS || ''} --import=${JSON.stringify(inputs.transport)}`;
     if (os.hostname().split('.')[0] !== 'kkk2') {
       const bin = path.join(inputs.dir, 'driver-bin');
       fs.mkdirSync(bin);
