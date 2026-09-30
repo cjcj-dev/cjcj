@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import {getTarget} from '../build/lib/targets.mjs';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -40,15 +41,7 @@ const rows = (await fs.readFile(manifestPath, 'utf8')).split(/\r?\n/).filter(Boo
 const platforms = new Set(rows.map(row => row.platform));
 if (platforms.size !== 1) throw new Error(`manifest has inconsistent platforms: ${[...platforms].join(',')}`);
 const platform = [...platforms][0];
-const runtimeDirs = new Map([
-  ['linux-x64', 'linux_x86_64_cjnative'],
-  ['linux-aarch64', 'linux_aarch64_cjnative'],
-  ['darwin-x64', 'darwin_x86_64_cjnative'],
-  ['darwin-arm64', 'darwin_aarch64_cjnative'],
-  ['windows-x64', 'windows_x86_64_cjnative'],
-]);
-const runtimeDir = runtimeDirs.get(platform);
-if (!runtimeDir) throw new Error(`unsupported packaged platform: ${platform}`);
+const runtimeDir = getTarget(platform).spec.runtimeTuple;
 const imported = verifyPythonImports(
   pythonArtifact,
   pythonRoot,

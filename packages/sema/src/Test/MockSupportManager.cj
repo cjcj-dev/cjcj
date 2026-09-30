@@ -2022,9 +2022,8 @@ public class MockSupportManager {
             let pkgName = ManglerContext.ReduceUnitTestPackageName(extendDecl.fullPackageName)
             let manglerCtx = mockUtils.mangler.manglerCtxTable.get(pkgName)
             CJC_ASSERT(manglerCtx.isSome())
-            let adapter = mockUtils.mangler.adapter
             manglerCtx.getOrThrow().SaveExtend2CurFile(
-                adapter.ConvertFile(extendDecl.curFile.getOrThrow()), adapter.ConvertDecl(extendDecl))
+                extendDecl.curFile.getOrThrow(), extendDecl)
         }
 
         let outerDecl: Decl = if (let Some(extendDecl) <- originalExtendDecl) {

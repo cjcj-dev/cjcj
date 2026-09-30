@@ -1,3 +1,4 @@
+import {platformTestCells} from '../../build/lib/targets.mjs';
 import { appendFileSync, readFileSync } from 'node:fs';
 
 // Read the actual platform routing and runner list, so the summary cannot keep
@@ -8,7 +9,7 @@ if (!platform) throw new Error('platform job not found');
 const condition = platform.match(/^    if: (.+)$/m)?.[1];
 if (!condition) throw new Error('platform condition not found');
 const switches = [...condition.matchAll(/!inputs\.(\w+_only)\b/g)].map(m => m[1]);
-const runners = [...platform.matchAll(/^          - runner: ([\w.-]+)\s*$/gm)].map(m => m[1]);
+const runners = platformTestCells().map(cell => cell.runner);
 if (!switches.length || !runners.length) throw new Error('platform routing or runners not found');
 const inputs = JSON.parse(process.env.MATRIX_INPUTS || '{}');
 const selected = switches.filter(key => inputs[key] === true || inputs[key] === 'true');

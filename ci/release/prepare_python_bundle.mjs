@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import {getTarget} from '../../build/lib/targets.mjs';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -21,15 +22,7 @@ const output = path.resolve(process.argv[3] || '');
 if (!platform || !process.argv[3]) {
   throw new Error('usage: prepare_python_bundle.mjs <release-platform> <output-directory>');
 }
-const hosts = new Map([
-  ['linux-x64', ['linux', 'x64']],
-  ['linux-aarch64', ['linux', 'arm64']],
-  ['darwin-x64', ['darwin', 'x64']],
-  ['darwin-arm64', ['darwin', 'arm64']],
-  ['windows-x64', ['win32', 'x64']],
-]);
-const expectedHost = hosts.get(platform);
-if (!expectedHost) throw new Error(`unsupported release platform: ${platform}`);
+const expectedHost = getTarget(platform).spec.packageHost;
 if (process.platform !== expectedHost[0] || process.arch !== expectedHost[1]) {
   throw new Error(`${platform} Python must be prepared natively on ${expectedHost.join('/')}, got ${process.platform}/${process.arch}`);
 }
