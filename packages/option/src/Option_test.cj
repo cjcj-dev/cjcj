@@ -126,6 +126,19 @@ class OptionTest {
     }
 
     @TestCase
+    func ApcCoverageNormalization(): Unit {
+        for (target in ["x86_64-unknown-linux-gnu", "x86_64-w64-mingw32", "aarch64-apple-darwin", "aarch64-apple-ios"]) {
+            let parsed = parseArgs(iosLtoArgs(srcFile, ["--experimental", "--target", target,
+                "--coverage", "-j", "7", "--apc=3"]))
+            @Expect(parsed[0], true)
+            let opts = GlobalOptions()
+            @Expect(opts.ParseFromArgs(parsed[1]), true)
+            println("NORMALIZED coverage target=${target} value=${opts.aggressiveParallelCompile.value}")
+            @Expect(opts.aggressiveParallelCompile.value, 1u64)
+        }
+    }
+
+    @TestCase
     func PgoOptionsTest01(): Unit {
         let parsed = parseArgs(["cjc", "--pgo-instr-gen=cj.profraw", srcFile])
         @Expect(parsed[0], true)
