@@ -123,7 +123,7 @@ def run_matrix(arguments):
         elif mode == 'driver':
             saved = work / 'saved'
             saved.mkdir(exist_ok=True)
-            command.extend(['--save-temps', str(saved), '-o', str(work / 'package.a')])
+            command.extend(['-V', '--save-temps', str(saved), '-o', str(work / 'package.a')])
             if arguments.toolchain:
                 command.extend(['--toolchain', str(arguments.toolchain)])
         (evidence / 'command.json').write_text(json.dumps(command))

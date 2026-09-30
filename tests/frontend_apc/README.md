@@ -36,5 +36,9 @@ every assertion are retained in the evidence directory.
 
 The full driver needs paired CLI tools as well as the process-local LLVM
 library. Verify a private copy of the tuple with `ci/llvm_tuple_SHA256SUMS`
-before passing its `bin` directory through `--toolchain`; an official host
-SDK's `opt` is not necessarily compatible with the generated intrinsic ABI.
+before using the tools. `--toolchain` selects user/linker tools, whereas this
+driver resolves `opt` and `llc` through the selected SDK's
+`third_party/llvm/bin`. Supply a qualified host tool view via `--sdk` when
+checking the full driver; an official host SDK's `opt` is not necessarily
+compatible with the generated intrinsic ABI. This compilation-only view
+does not establish runtime/std ABI compatibility for executing the output.
