@@ -1,6 +1,6 @@
 package cjcj::mangle
 
-import cjcj::ast.FuncTy
+import cjcj::ast.{FuncTy, FuncDecl}
 
 public class CHIRMangler <: BaseMangler {
     private var enableCompileTest: Bool
@@ -15,20 +15,20 @@ public class CHIRMangler <: BaseMangler {
         enableCompileTest = compileTest
     }
 
-    public override func MangleEntryFunction(funcDecl: MangleDecl): Option<String> {
-        if (enableCompileTest && funcDecl.identifier == TEST_ENTRY_NAME) {
+    public override func MangleEntryFunction(funcDecl: FuncDecl): Option<String> {
+        if (enableCompileTest && funcDecl.identifier.Val() == TEST_ENTRY_NAME) {
             return USER_MAIN_MANGLED_NAME
         }
-        if (!enableCompileTest && funcDecl.identifier == MAIN_INVOKE && funcDecl.IsStaticOrGlobal()) {
+        if (!enableCompileTest && funcDecl.identifier.Val() == MAIN_INVOKE && funcDecl.IsStaticOrGlobal()) {
             return USER_MAIN_MANGLED_NAME
         }
         return None
     }
 
     public func MangleCFuncSignature(cFuncTy: FuncTy): String {
-        var mangled = MangleAstSemanticType(cFuncTy.retTy)
+        var mangled = MangleSemaType(cFuncTy.retTy)
         for (paramTy in cFuncTy.paramTys) {
-            mangled += MangleAstSemanticType(paramTy)
+            mangled += MangleSemaType(paramTy)
         }
         return mangled
     }

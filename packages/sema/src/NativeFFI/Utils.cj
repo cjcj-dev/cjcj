@@ -3,7 +3,7 @@ package cjcj::sema.NativeFFI
 import std.collection.*
 import cjcj::ast.*
 import cjcj::ast.AnnotationKind as AstAnnotationKind
-import cjcj::mangle.{BaseMangler, MangleType}
+import cjcj::mangle.BaseMangler
 import cjcj::modules.SemaImportManager
 import cjcj::option.GetFileName as OptionGetFileName
 import cjcj::option.IsDir as OptionIsDir
@@ -471,14 +471,13 @@ public func IsThisConstructorCall(call: CallExpr): Bool {
     return false
 }
 
-// C++ src/Mangle/BaseMangler.cpp:258-296. This package-local extension avoids
-// colliding with cjcj::mangle.MangleType while preserving the C++ receiver.
+// C++ src/Mangle/BaseMangler.cpp:258-296: consume the original semantic type.
 extend BaseMangler {
     public func MangleType(ty: Ty): String {
         if (ty.kind == TypeKind.TYPE) {
             return ""
         }
-        return MangleAstSemanticType(ty)
+        return MangleSemaType(ty)
     }
 }
 
