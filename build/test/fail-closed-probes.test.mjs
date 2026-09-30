@@ -221,6 +221,27 @@ test('SDK LLVM-path grep distinguishes no match from apparatus failure', async t
   assert.equal(noMatch.matched, false);
 });
 
+// The bcgate one-sided-divergence gate must reject a failed grep rather than
+// read exit!=1 as "no divergence", and must only report a match it really saw.
+test('bcgate one-side divergence grep distinguishes no match from apparatus failure', async t => {
+  const label = coverProbeSite('bcgate one-side divergence grep');
+  const failed = await failingTool(t, 'grep');
+  await assert.rejects(
+    runGrepProbe({label, run: failed}),
+    /bcgate one-side divergence grep failed \(exit=73\): grep forced failure/,
+  );
+  const noMatch = await runGrepProbe({
+    label,
+    run: () => ({status: 1, stdout: '', stderr: ''}),
+  });
+  assert.equal(noMatch.matched, false);
+  const realMatch = await runGrepProbe({
+    label,
+    run: () => ({status: 0, stdout: 'functions present on only one side: 3\n', stderr: ''}),
+  });
+  assert.equal(realMatch.matched, true);
+});
+
 test('package rejects a failed readelf inspection', async t => {
   const label = coverProbeSite('package readelf -d bin/cjc');
   const run = await failingTool(t, 'readelf');
