@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import {readHostToolchainPin} from '../../ci/host-toolchain-pin.mjs';
 
 const repoRoot = path.resolve('.');
 const scriptPath = path.join(repoRoot, 'tools', 'srcbuild_kkk2.sh');
@@ -987,7 +988,7 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
   const sdkSource = path.join(inputs, 'official');
   fs.mkdirSync(sdkSource);
   fs.cpSync(base, path.join(sdkSource, 'cangjie'), {recursive: true});
-  const sdkArchive = 'cangjie-sdk-linux-x64-1.3.0-alpha.20260925001050.tar.gz';
+  const sdkArchive = `cangjie-sdk-linux-x64-${readHostToolchainPin().replace(/^nightly-/, '')}.tar.gz`;
   env.CJCJ_BOOTSTRAP_HOST_SDK_ARCHIVE = path.join(inputs, sdkArchive);
   const packed = spawnSync('tar', ['-czf', env.CJCJ_BOOTSTRAP_HOST_SDK_ARCHIVE, '-C', sdkSource, 'cangjie']);
   assert.equal(packed.status, 0, packed.stderr.toString());
