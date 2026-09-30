@@ -173,12 +173,13 @@ def judge(records):
 
     regular = by_kind['regular-swap']
     add('regular-cjc-replaced',
-        all(item['rc'] == 0 and item['sdk_build_ok']
+        all(item['installed_sha256'] == item['new_elf_sha256']
             and item['installed_is_symlink'] and item['installed_link'] == 'cjcj-stage1'
             and item['frontend_link'] == 'cjcj-stage1' and item['stage1_is_physical']
             and item['stage1_sha256'] == item['new_elf_sha256']
             and item['installed_sha256'] == item['new_elf_sha256']
             and item['installed_sha256'] != item['old_elf_sha256']
+            and item['rc'] == 0 and item['sdk_build_ok']
             and 'ELF' in item['verify_line'] and 'ldd' in item['verify_line']
             and '--version' in item['verify_line']
             for item in regular),
@@ -186,13 +187,16 @@ def judge(records):
         regular)
     linked = by_kind['symlink-swap']
     add('symlink-cjc-replaced',
-        all(item['rc'] == 0 and item['sdk_build_ok'] and item['stage1_is_physical']
+        all(item['installed_is_symlink'] and item['installed_link'] == 'cjcj-stage1'
+            and item['frontend_link'] == 'cjcj-stage1'
+            and item['stage1_is_physical']
             and not item['missing_slot']
             and item['installed_is_symlink'] and item['installed_link'] == 'cjcj-stage1'
             and item['frontend_link'] == 'cjcj-stage1'
             and item['stage1_sha256'] == item['new_elf_sha256']
             and item['stage1_sha256'] != item['old_elf_sha256']
             and item['installed_sha256'] == item['new_elf_sha256']
+            and item['rc'] == 0 and item['sdk_build_ok']
             and 'ELF' in item['verify_line'] and 'ldd' in item['verify_line']
             and '--version' in item['verify_line']
             for item in linked),
