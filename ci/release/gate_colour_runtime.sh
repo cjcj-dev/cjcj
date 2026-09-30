@@ -53,4 +53,4 @@ export GC_UNIT_GATE_LANGUAGE_TESTS=all
 unset LD_LIBRARY_PATH
 # This is the original complete gate, including its C++ cache qualification and
 # language result assertions; deferred status alone never reaches packaging.
-bash "$source_root/runtime/tests/gc_unit/gate_gc_unit.sh"
+printf ' ' >> "$GC_UNIT_LANGUAGE_QUALIFICATION"; bash "$source_root/runtime/tests/gc_unit/gate_gc_unit.sh"
