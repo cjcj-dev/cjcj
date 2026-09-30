@@ -71,7 +71,7 @@ jobs:
           # mapfile succeeds with zero lines if the manifest fails, and `node
           # --test` with no file arguments falls back to its own discovery, which
           # would pass while testing nothing.
-          test "${#FILES[@]}" -ge 26
+          test "${#FILES[@]}" -ge 85
           # A hanging test would otherwise consume this job's whole
           # timeout-minutes and end in "exceeded maximum execution time", which
           # names no test. The bound makes the runner fail the specific test by
