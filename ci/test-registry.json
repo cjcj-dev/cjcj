@@ -213,6 +213,11 @@
     "member": "packages/basic"
   },
   {
+    "file": "packages/basic/src/diagnostic_cache_test.cj",
+    "executor": "cjpm",
+    "member": "packages/basic"
+  },
+  {
     "file": "packages/basic/src/engine_test.cj",
     "executor": "cjpm",
     "member": "packages/basic"
