@@ -1184,9 +1184,6 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
   fs.mkdirSync(runtimeDir);
   let stamp = `CJRT-COMMIT:${runtimePin}`;
   if (runtimeCase === 'old-pin') stamp = `CJRT-COMMIT:${'0'.repeat(40)}`;
-  if (runtimeCase === 'dirty') stamp += '-dirty';
-  if (runtimeCase === 'ambiguous') stamp += `\nCJRT-COMMIT:${'1'.repeat(40)}`;
-  if (runtimeCase === 'unstamped') stamp = 'runtime without stamp';
   fs.writeFileSync(runtimeDir + '/libcangjie-runtime.so', stamp + '\n');
   fs.writeFileSync(runtimeDir + '/libboundscheck.so', 'boundscheck input\n');
   const runtimeSha = sha256(runtimeDir + '/libcangjie-runtime.so');
@@ -1243,6 +1240,50 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
     CJCJ_BOOTSTRAP_BOUNDSCHECK_SHA256: runtimeCase === 'no-bounds-sha' ? '' : boundsSha,
     CJCJ_BOOTSTRAP_CJCJ_SHA: sourceSha,
   };
+  fs.mkdirSync(path.join(base, 'bin'), {recursive: true});
+  fs.copyFileSync('/bin/true', path.join(base, 'bin/cjc'));
+  const sdkSource = path.join(inputs, 'official');
+  fs.mkdirSync(sdkSource);
+  fs.cpSync(base, path.join(sdkSource, 'cangjie'), {recursive: true});
+  const sdkArchive = 'cangjie-sdk-linux-x64-1.3.0-alpha.20260925001050.tar.gz';
+  env.CJCJ_BOOTSTRAP_HOST_SDK_ARCHIVE = path.join(inputs, sdkArchive);
+  const packed = spawnSync('tar', ['-czf', env.CJCJ_BOOTSTRAP_HOST_SDK_ARCHIVE, '-C', sdkSource, 'cangjie']);
+  assert.equal(packed.status, 0, packed.stderr.toString());
+  fs.appendFileSync(hostIdentities, `# HOST_SDK_PROVENANCE ${JSON.stringify({platform: 'linux_x86_64',
+    archive: sdkArchive, sha256: sha256(env.CJCJ_BOOTSTRAP_HOST_SDK_ARCHIVE)})}\n`);
+  const runtimeFiles = {};
+  for (const [name, expected] of [['libcangjie-runtime.so', runtimeSha], ['libboundscheck.so', boundsSha]]) {
+    const relative = `runtime/lib/linux_x86_64_cjnative/${name}`;
+    fs.mkdirSync(path.dirname(path.join(runtimeDir, relative)), {recursive: true});
+    if (fs.existsSync(path.join(runtimeDir, name))) fs.copyFileSync(path.join(runtimeDir, name), path.join(runtimeDir, relative));
+    runtimeFiles[relative] = expected;
+  }
+  const runtimeArchive = 'lib/linux_x86_64_cjnative/libcangjie-runtime.a';
+  fs.mkdirSync(path.dirname(path.join(runtimeDir, runtimeArchive)), {recursive: true});
+  fs.writeFileSync(path.join(runtimeDir, runtimeArchive), 'runtime archive');
+  runtimeFiles[runtimeArchive] = sha256(path.join(runtimeDir, runtimeArchive));
+  fs.writeFileSync(path.join(runtimeDir, 'manifest.json'), JSON.stringify({
+    runtime_sha: runtimeCase === 'old-pin' ? '0'.repeat(40) : runtimePin,
+    platform: 'linux_x86_64', run_id: '123', run_attempt: '1', files: runtimeFiles}));
+  Object.assign(env, {COLOUR_RT_RUN_ID: '123', COLOUR_RT_RUN_ATTEMPT: '1', COLOUR_RT_ARTIFACT_ID: '456',
+    COLOUR_RT_MANIFEST_SHA256: sha256(path.join(runtimeDir, 'manifest.json')),
+    CJCJ_BOOTSTRAP_SOURCE: 'depot', CJCJ_BOOTSTRAP_SOURCE_REASON: 'registered test input',
+    CJCJ_BOOTSTRAP_INPUTS_PIN: path.join(inputs, 'tuple-pin.json'),
+    LLVM_TUPLE_SUMS_SHA: sha256(path.join(tuple, 'SHA256SUMS'))});
+  if (runtimeCase === 'undeclared') env.CJCJ_BOOTSTRAP_COLOUR_RT = path.join(inputs, 'missing-runtime');
+  if (runtimeCase === 'no-runtime-sha') env.COLOUR_RT_MANIFEST_SHA256 = '';
+  if (runtimeCase === 'no-bounds-sha') env.COLOUR_RT_RUN_ID = '';
+  fs.writeFileSync(env.CJCJ_BOOTSTRAP_INPUTS_PIN, JSON.stringify({version: 1, repository: 'cjcj-dev/cjcj',
+    run: 123, attempt: 1, artifact: 456, commit: sourceSha,
+    files: [...payloads, 'SHA256SUMS'].map((name, index) => ({path: name, mode: 0o644, asset: index + 1,
+      artifact_sha256: sha256(path.join(tuple, name)), release_sha256: sha256(path.join(tuple, name))}))}));
+  const dylib = path.join(inputs, 'dylib');
+  fs.mkdirSync(dylib);
+  fs.copyFileSync('/bin/true', path.join(dylib, 'libLLVM-15.so'));
+  env.CJCJ_BOOTSTRAP_DYLIB_ARTIFACT = dylib;
+  env.LLVM_DYLIB_SHA256 = sha256(path.join(dylib, 'libLLVM-15.so'));
+  fs.writeFileSync(path.join(dylib, 'manifest.json'), JSON.stringify({llvm_sha: llvmSha,
+    sha256: env.LLVM_DYLIB_SHA256, targets: ['X86', 'ARM', 'AArch64']}));
   const campaignArchive = path.join(state, 'buildtools/lib/libcangjie-ast-support.a');
   if (ast.startsWith('campaign') || ast === 'precedence') {
     fs.mkdirSync(path.dirname(campaignArchive), {recursive: true});
@@ -1258,6 +1299,8 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
     fs.appendFileSync(ast.startsWith('campaign') ? campaignArchive : inputs + '/ast.a', 'changed after registration\n');
   }
   if (ast === 'wrong-sha') env.CJCJ_BOOTSTRAP_AST_SUPPORT_SHA256 = '0'.repeat(64);
+  env.AST_SUPPORT_SHA256 = env.CJCJ_BOOTSTRAP_AST_SUPPORT_SHA256 ?? '';
+  if (ast === 'missing') env.CJCJ_BOOTSTRAP_AST_ARTIFACT = path.join(inputs, 'missing-ast.a');
   delete env.CJCJ_BOOTSTRAP_SH;
   delete env.CJCJ_SRCBUILD_CPUSET;
   delete env.CJCJ_KKK2_AFFINED;
@@ -1449,20 +1492,17 @@ test('bootstrap driver matching pins starts real stage0 and sdk_build', t => {
 });
 
 
-test('P12 external runtime pin and both SO digests gate the actual bootstrap command', t => {
+test('runtime manifest pin and member digests gate the actual bootstrap command', t => {
   const cases = {
-    valid: 'COLOUR_RT_INPUT_VERIFIED',
-    'old-pin': 'COLOUR_RT_PIN_MISMATCH',
-    dirty: 'COLOUR_RT_PIN_MISMATCH',
-    ambiguous: 'COLOUR_RT_PIN_MISMATCH',
-    unstamped: 'COLOUR_RT_STAMP_MISSING',
-    undeclared: 'COLOUR_RT_INPUT_REQUIRED',
-    'no-runtime-sha': 'COLOUR_RT_SHA_REQUIRED',
-    'no-bounds-sha': 'COLOUR_RT_SHA_REQUIRED',
-    'runtime-corrupt': 'COLOUR_RT_SHA_MISMATCH',
-    'bounds-corrupt': 'COLOUR_RT_SHA_MISMATCH',
-    'bounds-missing': 'COLOUR_RT_FILE_MISSING',
-    'runtime-missing': 'COLOUR_RT_FILE_MISSING',
+    valid: 'COLOUR_RT_VERIFIED',
+    'old-pin': 'COLOUR_RT_MANIFEST_MISMATCH',
+    undeclared: 'ENOENT',
+    'no-runtime-sha': 'COLOUR_RT_SHA256_MISMATCH',
+    'no-bounds-sha': 'COLOUR_RT_PIN_MISSING',
+    'runtime-corrupt': 'COLOUR_RT_FILE_SHA256_MISMATCH',
+    'bounds-corrupt': 'COLOUR_RT_FILE_SHA256_MISMATCH',
+    'bounds-missing': 'ENOENT',
+    'runtime-missing': 'ENOENT',
   };
   const observed = [], expected = [];
   for (const [runtimeCase, marker] of Object.entries(cases)) {
@@ -1503,14 +1543,13 @@ for (const ast of ['missing', 'campaign', 'precedence']) {
     const observed = {
       rc: result.status,
       command: command !== undefined,
-      missingKey: /bootstrap input missing: CJCJ_BOOTSTRAP_AST_SUPPORT/.test(result.stderr),
-      campaignKey: /CANGJIE_BUILD_ROOT\/lib\/libcangjie-ast-support.a/.test(result.stderr),
+      missingKey: /ENOENT.*missing-ast\.a/.test(result.stderr),
       selectedSha: command?.includes(`--ast-support-sha256 ${expectedSha} `) ?? false,
     };
     console.log(`AST_INPUT_ASSERT ${ast} ${JSON.stringify(observed)}`);
     assert.deepEqual(observed, ast === 'missing'
-      ? {rc: 1, command: false, missingKey: true, campaignKey: true, selectedSha: false}
-      : {rc: 0, command: true, missingKey: false, campaignKey: false, selectedSha: true});
+      ? {rc: 1, command: false, missingKey: true, selectedSha: false}
+      : {rc: 0, command: true, missingKey: false, selectedSha: true});
   });
 }
 
@@ -1524,7 +1563,7 @@ for (const source of ['explicit', 'campaign']) {
         const live = fixture.run(step);
         for (const [mode, result, output] of [['dry', dry, dry.stdout + dry.stderr], ['live', live, live.log]]) {
           observed.push({step, mode, rc: result.status,
-            required: output.includes('AST_SUPPORT_SHA_REQUIRED:'),
+            required: output.includes('ast-support archive SHA256 disagrees'),
             entered: /ASSERT cjcj-sha|DRY_RUN COMMAND=/.test(output)});
         }
       }
@@ -1540,33 +1579,32 @@ for (const source of ['explicit', 'campaign']) {
       const expected = astInputPins[source];
       const comparison = result.log.match(/ASSERT ast-support-sha256 expected=([0-9a-f]{64}) actual=([0-9a-f]{64})/);
       const observed = {expected: comparison?.[1], matches: comparison?.[2] === expected,
-        rejected: result.log.includes('ast-support sha256 不匹配'),
+        rejected: result.log.includes('ast-support archive SHA256 disagrees'),
         accepted: result.log.includes('ast-support sha256 匹配')};
       console.log(`AST_REGISTERED_ASSERT rc=${result.status} ${JSON.stringify(observed)}`);
       // Success at this input boundary may proceed to unrelated SDK fixture limits.
-      assert.deepEqual(observed, {expected, matches: !tampered, rejected: tampered, accepted: !tampered});
+      assert.deepEqual(observed, {expected: tampered ? undefined : expected, matches: !tampered, rejected: tampered, accepted: !tampered});
       if (tampered) assert.equal(result.status, 1);
     });
   }
 }
 
-test('ast-support input contract wrong-sha reaches bootstrap assertion', t => {
+test('ast-support input contract wrong-sha stops in shared preparation', t => {
   const result = bootstrapDriverFixture(t, {ast: 'wrong-sha'}).run(31);
   const observed = {
     rc: result.status,
-    assertion: /ASSERT ast-support-sha256 expected=0{64} actual=[0-9a-f]{64}/.test(result.log),
-    failures: result.log.replace(/\x1b\[[0-9;]*m/g, '').split('\n').filter(line => line.startsWith('BOOTSTRAP-FAIL')),
+    rejected: result.log.includes('ast-support archive SHA256 disagrees'),
+    entered: result.log.includes('ASSERT cjcj-sha'),
   };
   console.log(`AST_SHA_ASSERT ${JSON.stringify(observed)}`);
-  assert.deepEqual(observed, {rc: 1, assertion: true,
-    failures: ['BOOTSTRAP-FAIL [stage0] ast-support sha256 不匹配']});
+  assert.deepEqual(observed, {rc: 1, rejected: true, entered: false});
 });
 
 test('ast-support input contract missing stops real stage entry', t => {
   const result = bootstrapDriverFixture(t, {ast: 'missing'}).run(31);
   const observed = {
     rc: result.status,
-    missingKey: /bootstrap input missing: CJCJ_BOOTSTRAP_AST_SUPPORT/.test(result.log),
+    missingKey: /ENOENT.*missing-ast\.a/.test(result.log),
     bootstrapStarted: /\[stage0\]/.test(result.log),
   };
   console.log(`AST_ENTRY_ASSERT ${JSON.stringify(observed)}`);

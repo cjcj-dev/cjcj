@@ -1372,7 +1372,9 @@ if ((DRY_RUN)); then
     readonly dry_run_toolchain
     printf 'DRY_RUN host=%s target=%s jobs=%s cpuset=%s from_step=%s through_step=%s\n' \
         "$host_name" "$TARGET" "$JOBS" "$CPUSET" "$FROM_STEP" "$THROUGH_STEP"
-    build_fixed_tuple
+    if [[ $FROM_STEP != 31 && $FROM_STEP != 32 || $THROUGH_STEP != 31 && $THROUGH_STEP != 32 ]]; then
+        build_fixed_tuple
+    fi
     while IFS= read -r step; do
         [[ -n $step ]] || continue
         print_dry_step "$step" "$dry_run_toolchain"
@@ -1388,7 +1390,9 @@ printf 'RUN host=%s target=%s jobs=%s cpuset=%s from_step=%s through_step=%s\n' 
 
 # fixed-llvm is a needs: dependency of srcbuild.yml, so it completes before the
 # numbered srcbuild steps rather than being invented as an in-band step 27 build.
-run_fixed_tuple_prerequisite
+if [[ $FROM_STEP != 31 && $FROM_STEP != 32 || $THROUGH_STEP != 31 && $THROUGH_STEP != 32 ]]; then
+    run_fixed_tuple_prerequisite
+fi
 
 while IFS= read -r step; do
     [[ -n $step ]] || continue

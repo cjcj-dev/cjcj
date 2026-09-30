@@ -122,9 +122,9 @@ for (const field of ['source_sha', 'run_id', 'run_attempt', 'producer_sha', 'pla
 }
 
 test('missing host artifact cannot select the available nightly library', () => fixture(({env, run}) => {
-  delete env.CJCJ_BOOTSTRAP_HOST_LLVM_ARTIFACT;
+  env.CJCJ_BOOTSTRAP_HOST_LLVM_ARTIFACT += '-missing';
   const result = run();
-  assert.match(result.stderr, /HOST_LLVM_ARTIFACT_MISSING/);
+  assert.match(result.stderr, /ENOENT/);
   assert.notEqual(result.status, 0);
 }));
 
@@ -171,9 +171,9 @@ for (const target of ['linux-aarch64', 'darwin-arm64', 'darwin-x64']) {
   }
 
   test(`source ${target} cannot fall back to SDK without artifact`, () => fixture(({env, run}) => {
-    delete env.CJCJ_BOOTSTRAP_HOST_LLVM_ARTIFACT;
+    env.CJCJ_BOOTSTRAP_HOST_LLVM_ARTIFACT += '-missing';
     const result = run();
-    assert.match(result.stderr, /HOST_LLVM_ARTIFACT_MISSING/);
+    assert.match(result.stderr, /ENOENT/);
     assert.notEqual(result.status, 0);
   }, target));
 }

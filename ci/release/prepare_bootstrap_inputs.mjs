@@ -89,8 +89,7 @@ const colourTuple = await acquire(inputPin,
   inputsWork, {
     mode: process.env.CJCJ_BOOTSTRAP_SOURCE || 'release',
     reason: process.env.CJCJ_BOOTSTRAP_SOURCE_REASON || '',
-    depot: process.env.CJCJ_BOOTSTRAP_COLOUR_TUPLE || (process.env.LLVM_SHA && process.env.CANGJIE_COMPILER_SHA
-      ? path.join(process.env.CJCJ_LLVM_DEPOT_ROOT || '/root/llvmdepot', process.env.LLVM_SHA, process.env.CANGJIE_COMPILER_SHA) : ''),
+    depot: process.env.CJCJ_BOOTSTRAP_COLOUR_TUPLE || '',
   });
 // The pin is reviewed source, never a digest learned from this run's download.
 const tupleSums = path.join(colourTuple, 'SHA256SUMS');
