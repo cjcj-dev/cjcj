@@ -52,11 +52,11 @@ export async function runCangjie(root, entries, output) {
     'runtime/lib/linux_x86_64_cjnative/libboundscheck.so'];
   const identities = Object.fromEntries(inputs.map(file => [file, digest(path.join(sdk, file))]));
   const command = [path.join(sdk, 'tools/bin/cjpm'), 'test', '-j', String(os.availableParallelism()),
-    '--no-color', '--report-format=json', `--report-path=${path.join(output, 'reports')}`,
+    '--no-color', '--report-format=xml', `--report-path=${path.join(output, 'reports')}`,
     '--target-dir', path.join(output, 'target')];
   const result = await execute(command, root, output);
   const reports = path.join(output, 'reports');
-  const reportFiles = fs.existsSync(reports) ? fs.readdirSync(reports, {recursive: true}).filter(file => file.endsWith('.json')) : [];
+  const reportFiles = fs.existsSync(reports) ? fs.readdirSync(reports, {recursive: true}).filter(file => file.endsWith('.xml')) : [];
   const executed = reportFiles.length > 0;
   return [{file: 'workspace', files: entries.map(entry => entry.file), sdk, identities, ...result,
     reportFiles, executed, rc: result.rc || (executed ? 0 : 1)}];
