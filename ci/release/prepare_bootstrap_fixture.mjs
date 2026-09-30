@@ -4,6 +4,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import {prepareRuntime, digest as runtimeDigest, runtimeFiles} from './colour_runtime.mjs';
 import {spawnSync} from 'node:child_process';
+import {readHostToolchainPin} from '../host-toolchain-pin.mjs';
 
 export function fixture(check, target = 'linux-x64') {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tuple-inputs-'));
@@ -58,10 +59,10 @@ export function fixture(check, target = 'linux-x64') {
     fs.writeFileSync(path.join(sdkSource, 'bin/cjc'), 'official compiler fixture');
     fs.writeFileSync(path.join(sdkSource, 'bin/lld'), 'official linker fixture');
     fs.symlinkSync('lld', path.join(sdkSource, 'bin/ld.lld'));
-    env.CJCJ_TOOLCHAIN = 'nightly-1.3.0-alpha.20260925001050';
+    env.CJCJ_TOOLCHAIN = readHostToolchainPin();
     const archivePlatform = {'linux-x64': 'linux-x64', 'linux-aarch64': 'linux-aarch64',
       'darwin-arm64': 'mac-aarch64', 'darwin-x64': 'mac-x64'}[target];
-    const sdkArchive = `cangjie-sdk-${archivePlatform}-1.3.0-alpha.20260925001050.tar.gz`;
+    const sdkArchive = `cangjie-sdk-${archivePlatform}-${env.CJCJ_TOOLCHAIN.replace(/^nightly-/, '')}.tar.gz`;
     env.CJCJ_BOOTSTRAP_HOST_SDK_ARCHIVE = path.join(dir, sdkArchive);
     const tar = spawnSync('tar', ['-czf', env.CJCJ_BOOTSTRAP_HOST_SDK_ARCHIVE, '-C', path.dirname(sdkSource), 'cangjie']);
     if (tar.status !== 0) throw new Error(tar.stderr.toString());
