@@ -6,6 +6,7 @@ chooses whether compiler-relative runtime and host-runtime are the same inode.
 No product hooks, preload libraries, or substitute runtime entry points are used.
 """
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 import os
@@ -107,14 +108,17 @@ def main():
     args = p.parse_args()
     here = Path(__file__).resolve().parent
     # Keep the no-macro control even when the lifecycle assertion fails.
-    results = [run(args.compiler.resolve(), here / source, expected, expected_integers, args.macro_import.resolve(),
+    cases = [('use.cj', ['expandedById'], [258]),
+             ('repeated.cj', ['expandedFirst', 'expandedSecond'], [258, 259]),
+             ('expression.cj', ['expressionById'], [771]),
+             ('empty.cj', ['emptyControl'], [773]),
+             ('plain.cj', ['plainControl'], [258])]
+    def execute(case):
+        source, expected, expected_integers = case
+        return run(args.compiler.resolve(), here / source, expected, expected_integers, args.macro_import.resolve(),
                    args.out.resolve() / source[:-3], args.host_runtime.resolve(), args.parallel)
-               for source, expected, expected_integers in [
-                   ('use.cj', ['expandedById'], [258]),
-                   ('repeated.cj', ['expandedFirst', 'expandedSecond'], [258, 259]),
-                   ('expression.cj', ['expressionById'], [771]),
-                   ('empty.cj', ['emptyControl'], [773]),
-                   ('plain.cj', ['plainControl'], [258])]]
+    with ThreadPoolExecutor(max_workers=len(cases)) as pool:
+        results = list(pool.map(execute, cases))
     return 0 if all(results) else 1
 
 
