@@ -1143,87 +1143,29 @@ step_30() {
     npx --yes zx@8 "$REPO_ROOT/ci/srcbuild/steps/inject-version.mjs"
 }
 
-# P12: the runtime is a declared external input, never an implicit depot lookup.
-# Declare CJCJ_BOOTSTRAP_COLOUR_RT as the absolute directory containing BOTH
-# libcangjie-runtime.so and libboundscheck.so (not an SDK root). Supply reviewed
-# CJCJ_BOOTSTRAP_COLOUR_RT_SHA256 and CJCJ_BOOTSTRAP_BOUNDSCHECK_SHA256
-# from that external artifact release. Dry-run validates the same input.
-# The runtime embedded CJRT-COMMIT must equal ci/runtime_pin.env RUNTIME_REF.
-# Expected digests come from the input provider, not from hashing an unchecked
-# file and treating that freshly computed value as its own expected identity.
-assert_bootstrap_colour_runtime() {
-    local root=$1 file expected actual stamps
-    [[ $RUNTIME_REF =~ ^[0-9a-f]{40}$ ]] || {
-        echo 'COLOUR_RT_PIN_INVALID' >&2; return 1;
-    }
-    [[ $root == /* && -d $root ]] || {
-        echo 'COLOUR_RT_INPUT_REQUIRED: set CJCJ_BOOTSTRAP_COLOUR_RT to an absolute library directory' >&2; return 1;
-    }
-    for file in libcangjie-runtime.so libboundscheck.so; do
-        if [[ $file == libcangjie-runtime.so ]]; then
-            expected=${CJCJ_BOOTSTRAP_COLOUR_RT_SHA256:-}
-        else
-            expected=${CJCJ_BOOTSTRAP_BOUNDSCHECK_SHA256:-}
-        fi
-        [[ $expected =~ ^[0-9a-f]{64}$ ]] || {
-            echo "COLOUR_RT_SHA_REQUIRED: $file" >&2; return 1;
-        }
-        [[ -f $root/$file ]] || {
-            echo "COLOUR_RT_FILE_MISSING: $root/$file" >&2; return 1;
-        }
-        actual=$(sha256sum "$root/$file") || return 1
-        actual=${actual%% *}
-        [[ $actual == "$expected" ]] || {
-            echo "COLOUR_RT_SHA_MISMATCH: $file expected=$expected actual=$actual" >&2; return 1;
-        }
-    done
-    stamps=$(LC_ALL=C strings "$root/libcangjie-runtime.so" | /usr/bin/grep -oE 'CJRT-COMMIT:[[:alnum:]_-]+' | sort -u) || {
-        echo 'COLOUR_RT_STAMP_MISSING' >&2; return 1;
-    }
-    [[ $stamps == "CJRT-COMMIT:$RUNTIME_REF" ]] || {
-        echo "COLOUR_RT_PIN_MISMATCH: expected=$RUNTIME_REF actual=$stamps" >&2; return 1;
-    }
-    echo "COLOUR_RT_INPUT_VERIFIED: path=$root commit=$RUNTIME_REF runtime_sha256=$CJCJ_BOOTSTRAP_COLOUR_RT_SHA256 boundscheck_sha256=$CJCJ_BOOTSTRAP_BOUNDSCHECK_SHA256" >&2
-}
-
 load_bootstrap_pins() {
-    resolve_host_toolchain_pin
-    # shellcheck disable=SC1091
-    source "$REPO_ROOT/ci/llvm_pin.env"
-    # shellcheck disable=SC1091
-    source "$REPO_ROOT/ci/runtime_pin.env"
-    BOOTSTRAP_HOST_SDK=${CJCJ_SRCBUILD_HOST_SDK:-${SRCBUILD_USER_HOME:-$HOME}/.cjv/toolchains/$CJCJ_TOOLCHAIN}
-    local host_llvm_result
+    local prepared
     mkdir -p "$RUNNER_TEMP"
-    host_llvm_result=$(mktemp "$RUNNER_TEMP/host-llvm-result.XXXXXX") || return 1
-    node "$REPO_ROOT/ci/release/prepare_kkk2_host_llvm.mjs" "$host_llvm_result" >&2 || return 1
-    BOOTSTRAP_HOST_LLVM_SO=$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1])).file)' "$host_llvm_result") || return 1
-    BOOTSTRAP_HOST_LLVM_SHA256=$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1])).sha256)' "$host_llvm_result") || return 1
-    rm -f "$host_llvm_result"
-    if [[ -n ${CJCJ_BOOTSTRAP_AST_SUPPORT:-} ]]; then
-        BOOTSTRAP_AST_SUPPORT=$CJCJ_BOOTSTRAP_AST_SUPPORT
-    elif [[ -f $CANGJIE_BUILD_ROOT/lib/libcangjie-ast-support.a ]]; then
-        BOOTSTRAP_AST_SUPPORT=$CANGJIE_BUILD_ROOT/lib/libcangjie-ast-support.a
-    else
-        echo "bootstrap input missing: CJCJ_BOOTSTRAP_AST_SUPPORT is unset and CANGJIE_BUILD_ROOT/lib/libcangjie-ast-support.a is absent: $CANGJIE_BUILD_ROOT/lib/libcangjie-ast-support.a" >&2
-        return 1
-    fi
-    BOOTSTRAP_AST_SUPPORT_SHA256=${CJCJ_BOOTSTRAP_AST_SUPPORT_SHA256:-}
-    [[ $BOOTSTRAP_AST_SUPPORT_SHA256 =~ ^[0-9a-f]{64}$ ]] || {
-        echo 'AST_SUPPORT_SHA_REQUIRED: set CJCJ_BOOTSTRAP_AST_SUPPORT_SHA256 from the input provider' >&2; return 1;
-    }
-    BOOTSTRAP_COLOUR_TUPLE=${CJCJ_BOOTSTRAP_COLOUR_TUPLE:-${CJCJ_SELECTED_COLOUR_TUPLE:-$STATE_ROOT/colour-tuple}}
-    # Reviewed process-library digest is independent of the static tuple.
-    # shellcheck disable=SC1090
-    source "$REPO_ROOT/ci/llvm-dylib/linux_$(uname -m).env"
-    [[ $LLVM_DYLIB_SOURCE_SHA == "$LLVM_SHA" ]] || { echo 'LLVM_DYLIB_SOURCE_MISMATCH' >&2; return 1; }
-    BOOTSTRAP_COLOUR_LLVM_SO=${CJCJ_BOOTSTRAP_COLOUR_LLVM_SO:-${CJCJ_BOOTSTRAP_DYLIB_ARTIFACT:-${CJCJ_BOOTSTRAP_COLOUR_DYLIB:-$BOOTSTRAP_COLOUR_TUPLE/dylib}}/libLLVM-15.so}
-    BOOTSTRAP_COLOUR_LLVM_SHA256=$LLVM_DYLIB_SHA256
+    prepared=$(mktemp "$RUNNER_TEMP/bootstrap-inputs.XXXXXX") || return 1
+    CJCJ_BOOTSTRAP_CJCJ_SHA=${CJCJ_BOOTSTRAP_CJCJ_SHA:-$(git -C "$REPO_ROOT" rev-parse HEAD)} \
+        node "$REPO_ROOT/ci/release/prepare_bootstrap_inputs.mjs" --shell-output "$prepared" >&2 || {
+            rm -f "$prepared"
+            return 1
+        }
+    source "$prepared"
+    rm -f "$prepared"
+    BOOTSTRAP_HOST_SDK=$CJCJ_BOOTSTRAP_BASE
+    BOOTSTRAP_HOST_LLVM_SO=$CJCJ_BOOTSTRAP_HOST_LLVM_SO
+    BOOTSTRAP_HOST_LLVM_SHA256=$CJCJ_BOOTSTRAP_HOST_LLVM_SHA256
+    BOOTSTRAP_AST_SUPPORT=$CJCJ_BOOTSTRAP_AST_SUPPORT
+    BOOTSTRAP_AST_SUPPORT_SHA256=$CJCJ_BOOTSTRAP_AST_SUPPORT_SHA256
+    BOOTSTRAP_COLOUR_TUPLE=$CJCJ_BOOTSTRAP_COLOUR_TUPLE
+    BOOTSTRAP_COLOUR_LLVM_SO=$CJCJ_BOOTSTRAP_COLOUR_LLVM_SO
+    BOOTSTRAP_COLOUR_LLVM_SHA256=$CJCJ_BOOTSTRAP_COLOUR_LLVM_SHA256
     BOOTSTRAP_STDSRC=${CJCJ_BOOTSTRAP_STDSRC:-$CANGJIE_WORKSPACE/cangjie_runtime/stdlib}
-    BOOTSTRAP_COLOUR_RT=${CJCJ_BOOTSTRAP_COLOUR_RT:-}
-    assert_bootstrap_colour_runtime "$BOOTSTRAP_COLOUR_RT" || return 1
-    BOOTSTRAP_CPP_SRC=${CJCJ_BOOTSTRAP_CPP_SRC:-${CANGJIE_CPP_SRC:-$CANGJIE_WORKSPACE/cangjie_compiler}}
-    BOOTSTRAP_CJCJ_SHA=${CJCJ_BOOTSTRAP_CJCJ_SHA:-$(git -C "$REPO_ROOT" rev-parse HEAD)}
+    BOOTSTRAP_COLOUR_RT=$CJCJ_BOOTSTRAP_COLOUR_RT
+    BOOTSTRAP_CPP_SRC=$CJCJ_BOOTSTRAP_CPP_SRC
+    BOOTSTRAP_CJCJ_SHA=$CJCJ_BOOTSTRAP_CJCJ_SHA
 }
 
 bootstrap_argv() {
@@ -1245,7 +1187,7 @@ bootstrap_argv() {
         --ast-support "$BOOTSTRAP_AST_SUPPORT" \
         --ast-support-sha256 "$BOOTSTRAP_AST_SUPPORT_SHA256" \
         --colour-tuple "$BOOTSTRAP_COLOUR_TUPLE" \
-        --colour-llvm-sha "$LLVM_SHA" \
+        --colour-llvm-sha "$CJCJ_BOOTSTRAP_COLOUR_LLVM_SHA" \
         --colour-rt "$BOOTSTRAP_COLOUR_RT" \
         --host-rt "$BOOTSTRAP_HOST_SDK" \
         --stage "$stage"
@@ -1256,9 +1198,6 @@ run_bootstrap_stage() {
     local stage=$1 argv
     local -a cmd
     mkdir -p "$STATE_ROOT/bootstrap-work"
-    if [[ $stage == stage0 && -z ${CJCJ_BOOTSTRAP_CPP_SRC:-} && -z ${CANGJIE_CPP_SRC:-} ]]; then
-        node "$REPO_ROOT/ci/bootstrap/prepare_cpp_headers.mjs" "$CANGJIE_WORKSPACE/cangjie_compiler" || return 1
-    fi
     argv=$(bootstrap_argv "$stage") || return 1
     eval "cmd=( $argv )" || return 1
     [[ ${#cmd[@]} -gt 0 ]] || return 1

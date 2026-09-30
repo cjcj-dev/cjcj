@@ -7,7 +7,7 @@ import {spawnSync} from 'node:child_process';
 import {fixture} from './prepare_bootstrap_fixture.mjs';
 
 for (const downloadFails of [false, true]) {
-  test(`kkk2 pinned artifact transport ${downloadFails ? 'fails closed' : 'feeds shared verification'}`, () => fixture(({env}) => {
+  test(`shared pinned artifact transport ${downloadFails ? 'fails closed' : 'feeds shared verification'}`, () => fixture(({env, run}) => {
     const root = path.dirname(env.STAGE1_HOST_IDENTITIES);
     const archive = path.join(root, 'artifact.zip');
     const zipped = spawnSync('python3', ['-c', 'import pathlib,sys,zipfile\nwith zipfile.ZipFile(sys.argv[1], "w") as archive:\n for file in pathlib.Path(sys.argv[2]).iterdir(): archive.write(file, file.name)', archive, env.CJCJ_BOOTSTRAP_HOST_LLVM_ARTIFACT], {encoding: 'utf8'});
@@ -22,7 +22,7 @@ for (const downloadFails of [false, true]) {
     env.CJCJ_BOOTSTRAP_HOST_LLVM_WORK = path.join(root, 'work');
     delete env.CJCJ_BOOTSTRAP_HOST_LLVM_ARTIFACT;
     const output = path.join(root, 'host-result.json');
-    const result = spawnSync(process.execPath, [new URL('./prepare_kkk2_host_llvm.mjs', import.meta.url).pathname, output], {env, encoding: 'utf8'});
+    const result = run(['--shell-output', output]);
     assert.equal(fs.readFileSync(env.TRANSPORT_ARGS, 'utf8'), 'api repos/cjcj-dev/cjcj/actions/artifacts/456/zip\n');
     if (downloadFails) {
       assert.equal(result.status, 1);
@@ -30,7 +30,8 @@ for (const downloadFails of [false, true]) {
       assert.equal(fs.existsSync(output), false);
     } else {
       assert.equal(result.status, 0, result.stderr);
-      const actual = JSON.parse(fs.readFileSync(output));
+      const actual = {file: /^CJCJ_BOOTSTRAP_HOST_LLVM_SO=(.+)$/m.exec(result.stdout)?.[1],
+        sha256: /^CJCJ_BOOTSTRAP_HOST_LLVM_SHA256=(.+)$/m.exec(result.stdout)?.[1]};
       assert.equal(crypto.createHash('sha256').update(fs.readFileSync(actual.file)).digest('hex'), actual.sha256);
       assert.match(result.stdout, /HOST_LLVM_VERIFIED run=123 artifact=456/);
     }
@@ -38,11 +39,12 @@ for (const downloadFails of [false, true]) {
   }));
 }
 
-test('kkk2 and GHA preparation export the same host artifact digest', () => fixture(({env, run}) => {
+test('shell and GHA preparation export the same host artifact digest', () => fixture(({env, run}) => {
   const output = path.join(path.dirname(env.STAGE1_HOST_IDENTITIES), 'kkk2-host.json');
-  const kkk2 = spawnSync(process.execPath, [new URL('./prepare_kkk2_host_llvm.mjs', import.meta.url).pathname, output], {env, encoding: 'utf8'});
+  const kkk2 = run(['--shell-output', output]);
   const gha = run();
-  const actual = kkk2.status === 0 ? JSON.parse(fs.readFileSync(output)) : {};
+  const actual = {file: /^CJCJ_BOOTSTRAP_HOST_LLVM_SO=(.+)$/m.exec(kkk2.stdout)?.[1],
+    sha256: /^CJCJ_BOOTSTRAP_HOST_LLVM_SHA256=(.+)$/m.exec(kkk2.stdout)?.[1]};
   const ghaFile = /^CJCJ_BOOTSTRAP_HOST_LLVM_SO=(.+)$/m.exec(gha.stdout)?.[1];
   const ghaSha = /^CJCJ_BOOTSTRAP_HOST_LLVM_SHA256=(.+)$/m.exec(gha.stdout)?.[1];
   const digest = file => file && crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
@@ -52,13 +54,13 @@ test('kkk2 and GHA preparation export the same host artifact digest', () => fixt
   assert.deepEqual(observed, {kkk2: 0, gha: 0, samePin: true, sameBytes: true});
 }));
 
-test('kkk2 and GHA reject the same host provenance digest change', () => fixture(({env, run}) => {
+test('shell and GHA reject the same host provenance digest change', () => fixture(({env, run}) => {
   const output = path.join(path.dirname(env.STAGE1_HOST_IDENTITIES), 'kkk2-host.json');
   const manifestFile = path.join(env.CJCJ_BOOTSTRAP_HOST_LLVM_ARTIFACT, 'manifest.json');
   const manifest = JSON.parse(fs.readFileSync(manifestFile));
   manifest.sha256 = '0'.repeat(64);
   fs.writeFileSync(manifestFile, JSON.stringify(manifest));
-  const kkk2 = spawnSync(process.execPath, [new URL('./prepare_kkk2_host_llvm.mjs', import.meta.url).pathname, output], {env, encoding: 'utf8'});
+  const kkk2 = run(['--shell-output', output]);
   const gha = run();
   const marker = 'HOST_LLVM_PROVENANCE_MISMATCH field=sha256';
   const observed = {kkk2: kkk2.status, gha: gha.status, kkk2Marker: kkk2.stderr.includes(marker),
