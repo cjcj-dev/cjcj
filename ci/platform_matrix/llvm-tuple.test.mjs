@@ -65,6 +65,18 @@ test('tuple rejects unsuccessful version probe before replacing SDK', async cont
 });
 
 const lldBinary = process.env.LLVM_TUPLE_TEST_LLD;
+for (const name of ['llc', 'opt', 'ld.lld', 'ld64.lld', 'ld.lld.exe']) {
+  test(`activation preserves staged basename ${name} without optional LLVM input`, async context => {
+    const payload = Buffer.from('#!/usr/bin/env node\nconsole.log("LLVM version fixture");\n');
+    const data = await fixture(context, name, payload, 'LLVM version fixture');
+    const result = await resultOf(data);
+    console.log(`BASENAME_ASSERT name=${name} staged=${path.basename(data.tool.tuple)} error=${result.error?.message || 'none'}`);
+    assert.equal(result.error, undefined);
+    assert.equal(path.basename(data.tool.tuple), name, `qualified staging preserves SDK basename: ${name}`);
+    assert.equal(digest(result.payload), digest(payload));
+  });
+}
+
 for (const [name, flavor] of [['ld.lld', 'gnu'], ['ld64.lld', 'darwin'], ['ld.lld.exe', 'gnu']]) {
   test(`real LLD activation preserves ${name} driver and installed payload`, {skip: !lldBinary}, async context => {
     const versionProbe = spawnSync(lldBinary, ['-flavor', flavor, '--version'], {encoding: 'utf8'});
