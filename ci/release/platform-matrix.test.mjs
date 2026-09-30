@@ -10,6 +10,38 @@ import {allReleasePlatforms, getReleasePlatform, RELEASE_REQUIREMENTS} from '../
 const script = path.resolve(import.meta.dirname, 'platform-matrix.mjs');
 const run = args => spawnSync(process.execPath, [script, ...args], {encoding: 'utf8'});
 
+test('Linux native runtime qualifies teardown tools before invoking the gate', t => {
+  const root = path.resolve(import.meta.dirname, '../..');
+  const build = fs.readFileSync(path.join(root, 'ci/platform_matrix/build_runtime.mjs'), 'utf8');
+  assert.match(build, /apt-get install -y -qq clang cmake make gdb coreutils/);
+  const native = build.slice(build.indexOf("} else if (runtimeTarget === 'native')"), build.indexOf("} else if (process.platform === 'darwin')"));
+  assert.ok(native.indexOf('qualify_teardown_tools.sh') >= 0);
+  assert.ok(native.indexOf('qualify_teardown_tools.sh') < native.indexOf('python3 build.py build'));
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'teardown-tools-'));
+  t.after(() => fs.rmSync(temporary, {recursive: true, force: true}));
+  const log = path.join(temporary, 'tools.log');
+  const qualify = env => spawnSync('/bin/bash', [path.join(root, 'ci/platform_matrix/qualify_teardown_tools.sh'), log], {env, encoding: 'utf8'});
+  const present = qualify(process.env);
+  assert.equal(present.status, 0, present.stdout + present.stderr);
+  assert.match(fs.readFileSync(log, 'utf8'), /GC_UNIT_TEARDOWN_TOOL_OK tool=gdb rc=0/);
+  assert.match(fs.readFileSync(log, 'utf8'), /GC_UNIT_TEARDOWN_TOOL_OK tool=timeout rc=0/);
+  const tools = path.join(temporary, 'bin');
+  fs.mkdirSync(tools);
+  for (const tool of ['mkdir', 'dirname', 'cat']) fs.copyFileSync(`/usr/bin/${tool}`, path.join(tools, tool));
+  const missing = qualify({...process.env, PATH: tools});
+  assert.equal(missing.status, 127, missing.stdout + missing.stderr);
+  assert.match(fs.readFileSync(log, 'utf8'), /GC_UNIT_TEARDOWN_TOOL_FAIL tool=gdb rc=127 reason=not-found/);
+});
+
+test('platform failure artifacts preserve the gate and teardown raw logs', () => {
+  const workflow = fs.readFileSync(path.resolve(import.meta.dirname, '../../.github/workflows/platform-matrix.yml'), 'utf8');
+  const upload = workflow.slice(workflow.indexOf('- name: Upload diagnostics and key products'));
+  assert.match(upload, /if: always\(\)/);
+  assert.match(upload, /runtime-source\/runtime\/\*\*\/gate_run\.log/);
+  assert.match(upload, /runtime-source\/runtime\/\*\*\/gc_unit_gate\.status/);
+  assert.match(upload, /runtime-source\/runtime\/tests\/gc_unit\/build\*\/\*\*\/\*\.log/);
+});
+
 test('probe CLI reports SDK capability independently of blocked cross-build readiness', t => {
   const sdk = fs.mkdtempSync(path.join(os.tmpdir(), 'release-probe-'));
   t.after(() => fs.rmSync(sdk, {recursive: true, force: true}));

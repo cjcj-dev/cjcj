@@ -486,3 +486,9 @@ jobs:
             .platform-ci/step-summary.md
             .platform-ci/runtime-install/**
             .platform-ci/bin/**
+            runtime-source/runtime/**/gate_run.log
+            runtime-source/runtime/**/gc_unit_gate.status
+            runtime-source/runtime/tests/gc_unit/build*/**/*.log
+            runtime-source/runtime/tests/gc_unit/build*/**/*.sha256
+            runtime-source/runtime/tests/gc_unit/build*/**/gate_tally.txt
+            runtime-source/runtime/tests/gc_unit/build*/**/*.receipt
