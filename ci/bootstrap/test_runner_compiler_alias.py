@@ -137,6 +137,12 @@ class CompilerAlias(unittest.TestCase):
         real.unlink()
 
     def test_noncompiler_links_rejected(self):
+        # Keep the compiler on the regular-input path so an older runner reaches
+        # the selected tool check instead of rejecting cjc first.
+        compiler_entry = self.sdk / 'bin/cjc'
+        compiler_entry.unlink()
+        shutil.copyfile(self.inputs['compiler'], compiler_entry)
+        compiler_entry.chmod(0o755)
         for relative in ('tools/bin/cjpm', 'third_party/llvm/bin/opt', 'third_party/llvm/bin/llc'):
             with self.subTest(relative=relative):
                 entry = self.sdk / relative
