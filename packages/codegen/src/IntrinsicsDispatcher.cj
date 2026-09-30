@@ -42,6 +42,11 @@ private func GenerateIntrinsic(irBuilder: IRBuilder2, kind: IntrinsicKind, args:
     if (kind == IntrinsicKind.PREINITIALIZE) {
         return GeneratePreInitializeIntrinsics(irBuilder)
     }
+    if (kind == IntrinsicKind.REGISTER_FINALIZER) {
+        let receiver = irBuilder.GetCGModule().GetMappedCGValue(args[0]).GetRawValue()
+        irBuilder.CallRegisterFinalizer(receiver)
+        return UnitOrNull(irBuilder, resultType)
+    }
     if (kind == IntrinsicKind.CG_UNSAFE_BEGIN || kind == IntrinsicKind.CG_UNSAFE_END) {
         return UnitOrNull(irBuilder, resultType)
     }

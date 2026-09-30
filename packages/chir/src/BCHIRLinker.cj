@@ -370,6 +370,8 @@ public class BCHIRLinker {
         let classInfo = BCHIRClassInfo()
         classInfo.mangledName = name
         if (let Some(serialized) <- pkg.GetSClass(name)) {
+            classInfo.requiresRuntimeFinalizerRegistration =
+                !serialized.finalizerKnown || !serialized.finalizer.isEmpty()
             for (superName in serialized.superClasses) {
                 LinkClass(pkg, superName)
             }
@@ -377,9 +379,14 @@ public class BCHIRLinker {
                 let superId = GetClassId(superName)
                 AddUniqueClassId(classInfo, superId)
                 if (let Some(superInfo) <- topBchir.GetClass(superId)) {
+                    classInfo.requiresRuntimeFinalizerRegistration =
+                        classInfo.requiresRuntimeFinalizerRegistration ||
+                        superInfo.requiresRuntimeFinalizerRegistration
                     for (indirectSuperId in superInfo.superClasses) {
                         AddUniqueClassId(classInfo, indirectSuperId)
                     }
+                } else {
+                    classInfo.requiresRuntimeFinalizerRegistration = true
                 }
             }
             for (methodName in serialized.vtable.keys()) {

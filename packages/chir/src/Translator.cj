@@ -1107,12 +1107,33 @@ public class Translator {
                 CurrentBlock().AppendExpression(createdExit1070)
             }
         }
+        EmitObjectInitReturn(fn, body)
         currentBlock = savedBlock
         delayExitSignal = savedDelayExitSignal
         currentFunc = None
         currentAstFuncDecl = savedAstFuncDecl
         blockGroupStack.remove(at: blockGroupStack.size - 1)
         return fn
+    }
+
+    private func EmitObjectInitReturn(fn: Function, body: BlockGroup): Unit {
+        if (!fn.IsConstructor()) {
+            return
+        }
+        let owner = fn.GetParentCustomTypeDef() ?? return
+        if (owner.GetPackageName() != "std.core" || owner.GetSrcCodeIdentifier() != "Object") {
+            return
+        }
+        for (block in body.GetBlocks()) {
+            if (let Some(exit) <- block.GetTerminator()) {
+                if (exit.GetExprKind() == ExprKind.EXIT) {
+                    let registration = builder.CreateIntrinsic(builder.context.GetUnitTy(),
+                        IntrisicCallContext(kind: IntrinsicKind.REGISTER_FINALIZER,
+                            args: ArrayList<Value>([fn.GetParam(0)])), block)
+                    registration.MoveBefore(exit)
+                }
+            }
+        }
     }
 
     private func TranslateConstructorDefaultFieldInitializers(funcDecl: AstFuncDecl, funcBody: AstFuncBody): Unit {
