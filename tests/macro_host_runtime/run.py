@@ -69,6 +69,8 @@ def run(compiler, source, expected, expected_integers, macro_import, output, hos
               'expanded_literals_in_chir': all(n in integers for n in expected_integers),
               'host_not_reinitialized': "don't support init again" not in log,
               'no_foreign_config_layout': 'coStackSize must be in range' not in log}
+    if source.stem == 'empty':
+        checks['empty_macro_removed'] = 'removedByEmpty' not in names and 772 not in integers
     bindings = []
     image_events = []
     for path in output.glob('loader.*'):
