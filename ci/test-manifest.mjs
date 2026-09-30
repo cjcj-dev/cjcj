@@ -25,6 +25,15 @@ import fs from 'node:fs';
 export const repoRoot = path.resolve(import.meta.dirname, '..');
 export const REGISTERED = Object.freeze(JSON.parse(fs.readFileSync(new URL('./test-registry.json', import.meta.url), 'utf8')));
 
+// The second axis, and the reason it exists. The name patterns above cannot see
+// tests/macro_runtime_path/run.py: a directory of fixtures with one independent
+// driver whose name says nothing about testing. So the driver axis is selected
+// by shape -- a python or shell file anywhere under a test/ or tests/ directory,
+// at any depth -- and compared against a hand-maintained table. The two sets are
+// produced by different rules on purpose. A single rule that defined both the
+// expectation and the actual set would pass on exactly the inputs it forgot.
+export const DRIVERS = Object.freeze(JSON.parse(fs.readFileSync(new URL('./test-drivers.json', import.meta.url), 'utf8')));
+
 // Run by `node --test` in .github/workflows/ci.yml, via `test-manifest.mjs list`.
 export const GATING = Object.freeze([
   'ci/platform_matrix/summarize_scope.test.mjs',
@@ -221,7 +230,69 @@ export function discoverTestFiles(root = repoRoot) {
   return [...new Set(found)].sort();
 }
 
-export function validateManifest(root = repoRoot, registered = REGISTERED, gating = GATING, deferred = DEFERRED) {
+// Axis B. Directory and extension only: no file name is consulted, so a driver
+// called run.py, check.py or compare.py is in scope whatever it is called, and a
+// new one is red before anyone remembers to classify it.
+export function discoverDriverFiles(root = repoRoot) {
+  const listed = execFileSync(
+    'git', ['-C', root, 'ls-files', '-z', '--cached', '--others', '--exclude-standard'],
+    {encoding: 'utf8'});
+  const found = listed.split('\0').filter(Boolean)
+    .filter(file => !file.split('/').includes('node_modules'))
+    .filter(file => /(?:^|\/)(?:tests?)(?:\/|$)/.test(file) && /\.(?:py|sh)$/.test(file));
+  return [...new Set(found)].sort();
+}
+
+// Every line of every workflow with its comments removed: a driver registered as
+// manual must not in fact be executed by CI, or the reason is a lie.
+function workflowText(root) {
+  const directory = path.join(root, '.github/workflows');
+  if (!fs.existsSync(directory)) return '';
+  return fs.readdirSync(directory).filter(name => name.endsWith('.yml'))
+    .map(name => fs.readFileSync(path.join(directory, name), 'utf8')
+      .split('\n').map(line => line.replace(/(^|\s)#.*$/, '$1')).join('\n'))
+    .join('\n');
+}
+
+export function validateDrivers(root, registered, drivers) {
+  const discovered = discoverDriverFiles(root);
+  // ci/test-registry.json entries already carry an executor and a reason, so a
+  // file listed there satisfies "has an executor or a written manual reason".
+  const carried = registered.map(entry => entry.file);
+  const classified = [...drivers.map(entry => entry.file), ...carried];
+  const unregistered = discovered.filter(file => !classified.includes(file));
+  const phantom = drivers.map(entry => entry.file).filter(file => !discovered.includes(file));
+  if (unregistered.length || phantom.length) {
+    throw new Error(JSON.stringify({unregisteredDrivers: unregistered, phantomDrivers: phantom}));
+  }
+  const workflows = workflowText(root);
+  for (const entry of drivers) {
+    const base = path.basename(entry.file);
+    if (!['driver', 'fixture'].includes(entry.kind)) throw new Error(`invalid driver kind: ${entry.file}`);
+    if (!entry.reason || entry.reason.trim().length < 40) {
+      throw new Error(`driver reason too short to check: ${entry.file}`);
+    }
+    if (entry.kind === 'fixture') {
+      if (!Array.isArray(entry.consumers) || !entry.consumers.length) {
+        throw new Error(`fixture names no consumer: ${entry.file}`);
+      }
+      for (const consumer of entry.consumers) {
+        if (!fs.existsSync(path.join(root, consumer))) throw new Error(`fixture consumer missing: ${entry.file} -> ${consumer}`);
+        const body = fs.readFileSync(path.join(root, consumer), 'utf8');
+        if (!body.includes(base) && !body.includes(base.replace(/\.[^.]+$/, ''))) {
+          throw new Error(`fixture consumer does not name it: ${entry.file} -> ${consumer}`);
+        }
+      }
+    } else if (new RegExp(`(?:^|[\\s"'\`(])${base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`).test(workflows)) {
+      // The reason says no workflow provisions or runs it; a workflow naming it
+      // means the classification, not the code, is what is out of date.
+      throw new Error(`driver claims no executor but a workflow names it: ${entry.file}`);
+    }
+  }
+  return discovered;
+}
+
+export function validateManifest(root = repoRoot, registered = REGISTERED, gating = GATING, deferred = DEFERRED, drivers = DRIVERS) {
   const discovered = discoverTestFiles(root);
   const files = [...gating, ...deferred.map(entry => entry.file), ...registered.map(entry => entry.file)];
   const duplicates = files.filter((file, index) => files.indexOf(file) !== index);
@@ -250,6 +321,7 @@ export function validateManifest(root = repoRoot, registered = REGISTERED, gatin
       throw new Error(`invalid executor: ${entry.file}`);
     }
   }
+  validateDrivers(root, registered, drivers);
   return discovered;
 }
 
@@ -262,6 +334,12 @@ function main(argv) {
   }
   if (command === 'registered') {
     console.log(JSON.stringify(REGISTERED, null, 2));
+    return 0;
+  }
+  if (command === 'drivers') {
+    for (const entry of DRIVERS) {
+      console.log(`${entry.kind}\t${entry.file}\t${(entry.consumers || []).join(',')}\t${entry.reason}`);
+    }
     return 0;
   }
   if (command === 'list') {
@@ -279,7 +357,7 @@ function main(argv) {
     for (const entry of DEFERRED) console.log(`${entry.file}\n  needs: ${entry.needs}\n  verified: ${entry.verified}`);
     return 0;
   }
-  console.error(`usage: test-manifest.mjs [list|deferred|registered|check]`);
+  console.error(`usage: test-manifest.mjs [list|deferred|registered|drivers|check]`);
   return 2;
 }
 
