@@ -317,6 +317,13 @@ jobs:
           run-id: ${{ env.COLOUR_RT_RUN_ID }}
           path: ${{ env.CJCJ_BOOTSTRAP_COLOUR_RT }}
 
+      - name: Acquire pinned native coloured std before source verification
+        if: runner.os == 'macOS'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RUNTIME_PLATFORM: ${{ matrix.llvm_platform }}
+        run: node ci/release/acquire_darwin_std.mjs "$CJCJ_BOOTSTRAP_COLOUR_RT" "$RUNTIME_PLATFORM"
+
       - name: Verify independent Darwin libraries and classify std input
         if: runner.os == 'macOS'
         env:
