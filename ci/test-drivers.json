@@ -430,17 +430,32 @@
     "reason": "manual driver: no workflow provisions an SDK environment (CANGJIE_HOME) and an SDK directory on the command line and a stage1 compiler built from this tree; documented invocation `python3 tests/macro_runtime_path/run.py --compiler /path/to/cjcj-stage1 \\`"
   },
   {
-    "file": "tests/mangle_task_ownership/cut.py",
+    "file": "tests/mangle_direct_ast/cut.py",
     "kind": "driver",
-    "reason": "manual driver: nothing under .github/workflows names it and it needs a process entry point inputs only; a process entry point, and no other file in tests names it"
+    "reason": "manual driver: nothing under .github/workflows names it; it rewrites one product line in an isolated source copy (TREE argument) for the cut arms described in tests/mangle_direct_ast/README.md; a process entry point"
+  },
+  {
+    "file": "tests/mangle_direct_ast/gc.py",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions the baseline and candidate compiler roots it takes on the command line; it runs the fixed #666 single-package experiment; a process entry point"
+  },
+  {
+    "file": "tests/mangle_direct_ast/lambda.py",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions an SDK environment (CANGJIE_HOME) and a stage1 compiler built from this tree; it observes lambda identifiers in product RAW CHIR; a process entry point"
+  },
+  {
+    "file": "tests/mangle_direct_ast/phases.py",
+    "kind": "driver",
+    "reason": "manual driver: nothing under .github/workflows names it and it needs only a retained keep directory produced by gc.py; a process entry point"
+  },
+  {
+    "file": "tests/mangle_direct_ast/run.py",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions an SDK environment (CANGJIE_HOME) and a stage1 compiler built from this tree; it compiles real inputs and inspects CJO declarations and LLVM definitions; a process entry point"
   },
   {
     "file": "tests/mangle_task_ownership/generate_inputs.py",
-    "kind": "driver",
-    "reason": "manual driver: nothing under .github/workflows names it and it needs a process entry point inputs only; a process entry point, and no other file in tests names it"
-  },
-  {
-    "file": "tests/mangle_task_ownership/qualify.py",
     "kind": "driver",
     "reason": "manual driver: nothing under .github/workflows names it and it needs a process entry point inputs only; a process entry point, and no other file in tests names it"
   },
