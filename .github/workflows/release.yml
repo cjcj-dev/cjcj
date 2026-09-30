@@ -39,12 +39,26 @@ permissions:
   actions: read
 
 jobs:
+  plan:
+    name: Check all source platform inputs before release
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check release source targets
+        run: node ci/srcbuild/target-matrix.mjs --targets all --require-ready
+
   # One call built all four source SDKs at once, so a stop at phase 1 had already
   # paid for the other three -- the exact thing the phase order exists to avoid.
   # Each phase now asks srcbuild for its own target only. The linux-x64 cell also
   # cross-builds final-std-windows-x64, which is why phase 3 has no source job of
   # its own and phases 1 and 2 can already consume the cross artifact.
   source-p1-linux-x64:
+    needs: plan
     name: phase 1 · linux-x64 / source SDK and final std (also cross-builds the Windows std)
     uses: ./.github/workflows/srcbuild.yml
     with:

@@ -6,6 +6,7 @@
 import {ConfigError} from './errors.mjs';
 
 const linuxX64 = Object.freeze({
+  sourceBuild: Object.freeze({runner: 'ubuntu-22.04', reasons: Object.freeze([])}),
   spec: Object.freeze({
     key: 'linux-x64', sdkName: 'linux-x64', archiveFormat: 'tar.gz',
     exeSuffix: '', outputDirSuffix: 'x86_64', crossCompile: false, needsMingw: false,
@@ -27,6 +28,9 @@ const linuxX64 = Object.freeze({
 });
 
 const linuxAArch64 = Object.freeze({
+  sourceBuild: Object.freeze({runner: 'ubuntu-24.04-arm', reasons: Object.freeze([
+    'ci/colour-runtime/linux_aarch64.env is missing; extend the coloured runtime producer to linux_aarch64: https://github.com/cjcj-dev/cjcj/issues/763',
+  ])}),
   spec: Object.freeze({
     key: 'linux-aarch64', sdkName: 'linux-aarch64', archiveFormat: 'tar.gz',
     exeSuffix: '', outputDirSuffix: 'aarch64', crossCompile: false, needsMingw: false,
@@ -48,6 +52,9 @@ const linuxAArch64 = Object.freeze({
 });
 
 const darwinArm64 = Object.freeze({
+  sourceBuild: Object.freeze({runner: 'macos-15', reasons: Object.freeze([
+    'ci/bootstrap/bootstrap.sh rejects Darwin; implement Darwin bootstrap: https://github.com/cjcj-dev/cjcj/issues/473',
+  ])}),
   spec: Object.freeze({
     key: 'darwin-arm64', sdkName: 'mac-aarch64', archiveFormat: 'tar.gz',
     exeSuffix: '', outputDirSuffix: 'aarch64', crossCompile: false, needsMingw: false,
@@ -69,6 +76,9 @@ const darwinArm64 = Object.freeze({
 });
 
 const darwinX64 = Object.freeze({
+  sourceBuild: Object.freeze({runner: 'macos-15-intel', reasons: Object.freeze([
+    'ci/bootstrap/bootstrap.sh rejects Darwin; implement Darwin bootstrap: https://github.com/cjcj-dev/cjcj/issues/473',
+  ])}),
   spec: Object.freeze({
     key: 'darwin-x64', sdkName: 'mac-x64', archiveFormat: 'tar.gz',
     exeSuffix: '', outputDirSuffix: 'x86_64', crossCompile: false, needsMingw: false,
@@ -139,6 +149,17 @@ export function getTarget(key) {
 
 export function allTargets() {
   return [...registry.keys()].sort();
+}
+
+export function sourceBuildCells() {
+  return [...registry.values()].filter(target => target.sourceBuild).map(({spec, sourceBuild}) => ({
+    target: spec.key,
+    runner: sourceBuild.runner,
+    llvm_platform: spec.llvmPlatform,
+    static_libs: spec.needsStaticLibs,
+    status: sourceBuild.reasons.length ? 'blocked' : 'runnable',
+    reasons: [...sourceBuild.reasons],
+  }));
 }
 
 export function hostContract(key) {

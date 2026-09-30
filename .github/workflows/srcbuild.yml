@@ -132,38 +132,25 @@ jobs:
     outputs:
       matrix: ${{ steps.select.outputs.matrix }}
       llvm_platforms: ${{ steps.select.outputs.llvm_platforms }}
+      has_runnable: ${{ steps.select.outputs.has_runnable }}
+      has_blocked: ${{ steps.select.outputs.has_blocked }}
     steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
       - name: Select the requested targets
         id: select
         env:
           REQUESTED: ${{ inputs.targets }}
-        run: |
-          set -euo pipefail
-          all='[
-            {"target":"linux-aarch64","runner":"ubuntu-24.04-arm","llvm_platform":"linux_aarch64","static_libs":true},
-            {"target":"darwin-arm64","runner":"macos-15","llvm_platform":"darwin_aarch64","static_libs":false},
-            {"target":"darwin-x64","runner":"macos-15-intel","llvm_platform":"darwin_x86_64","static_libs":false},
-            {"target":"linux-x64","runner":"ubuntu-22.04","llvm_platform":"linux_x86_64","static_libs":true}
-          ]'
-          if [ -z "$REQUESTED" ] || [ "$REQUESTED" = all ]; then
-            selected="$all"
-          else
-            selected="$(printf '%s' "$all" | jq -c --arg want "$REQUESTED" \
-              '[.[] | select(.target as $t | ($want | split(",") | map(gsub("^ +| +$";"")) | index($t)))]')"
-          fi
-          count="$(printf '%s' "$selected" | jq 'length')"
-          # An empty matrix skips every dependent job while reporting nothing wrong.
-          if [ "$count" -eq 0 ]; then
-            echo "no target matched targets=$REQUESTED" >&2
-            exit 1
-          fi
-          echo "selected $count target(s) for targets=$REQUESTED"
-          printf 'matrix=%s\n' "$(printf '%s' "$selected" | jq -c '{include: .}')" >> "$GITHUB_OUTPUT"
-          printf 'llvm_platforms=%s\n' "$(printf '%s' "$selected" | jq -r '[.[].llvm_platform] | join(",")')" >> "$GITHUB_OUTPUT"
+        run: node ci/srcbuild/target-matrix.mjs --targets "$REQUESTED"
 
   srcbuild:
     name: ${{ matrix.target }} / source SDK
     needs: plan
+    if: needs.plan.outputs.has_runnable == 'true'
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
@@ -176,6 +163,23 @@ jobs:
       runtime_ref: ${{ inputs.runtime_ref }}
       build_android: ${{ inputs.build_android || false }}
       rebuild_llvm: ${{ inputs.rebuild_llvm || false }}
+
+  blocked:
+    name: Report blocked source targets
+    needs: plan
+    if: needs.plan.outputs.has_blocked == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Report missing source inputs
+        env:
+          REQUESTED: ${{ inputs.targets }}
+        run: node ci/srcbuild/target-matrix.mjs --targets "$REQUESTED" --require-ready
 
   artifact-contract:
     name: Publish final std artifact contract

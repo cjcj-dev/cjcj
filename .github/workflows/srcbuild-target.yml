@@ -79,8 +79,6 @@ permissions:
 # call but one pending -- and cancel all but the newest pending one.
 
 jobs:
-  # Validate the single target passed by srcbuild.yml. The contract test keeps
-  # this platform table identical to the caller's selection table.
   plan:
     name: Select targets
     runs-on: ubuntu-24.04
@@ -88,36 +86,17 @@ jobs:
       matrix: ${{ steps.select.outputs.matrix }}
       llvm_platforms: ${{ steps.select.outputs.llvm_platforms }}
     steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
       - name: Select the requested targets
         id: select
         env:
           REQUESTED: ${{ inputs.targets }}
-        run: |
-          set -euo pipefail
-          all='[
-            {"target":"linux-aarch64","runner":"ubuntu-24.04-arm","llvm_platform":"linux_aarch64","static_libs":true},
-            {"target":"darwin-arm64","runner":"macos-15","llvm_platform":"darwin_aarch64","static_libs":false},
-            {"target":"darwin-x64","runner":"macos-15-intel","llvm_platform":"darwin_x86_64","static_libs":false},
-            {"target":"linux-x64","runner":"ubuntu-22.04","llvm_platform":"linux_x86_64","static_libs":true}
-          ]'
-          if [ -z "$REQUESTED" ] || [ "$REQUESTED" = all ]; then
-            selected="$all"
-          else
-            selected="$(printf '%s' "$all" | jq -c --arg want "$REQUESTED" \
-              '[.[] | select(.target as $t | ($want | split(",") | map(gsub("^ +| +$";"")) | index($t)))]')"
-          fi
-          count="$(printf '%s' "$selected" | jq 'length')"
-          # An empty matrix skips every dependent job while reporting nothing wrong.
-          if [ "$count" -eq 0 ]; then
-            echo "no target matched targets=$REQUESTED" >&2
-            exit 1
-          fi
-          # A matrix caller supplies exactly one target. Its jobs must never
-          # wait for another target's phase or inherit another target's failure.
-          test "$count" -eq 1 || { echo "source target workflow requires exactly one target" >&2; exit 1; }
-          echo "selected $count target(s) for targets=$REQUESTED"
-          printf 'matrix=%s\n' "$(printf '%s' "$selected" | jq -c '{include: .}')" >> "$GITHUB_OUTPUT"
-          printf 'llvm_platforms=%s\n' "$(printf '%s' "$selected" | jq -r '[.[].llvm_platform] | join(",")')" >> "$GITHUB_OUTPUT"
+        run: node ci/srcbuild/target-matrix.mjs --targets "$REQUESTED" --single --require-ready
 
   fixed-llvm:
     name: Build native LLVM tools
