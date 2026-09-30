@@ -165,6 +165,7 @@ public class BCHIRSClassInfo {
     public let superClasses: ArrayList<String> = ArrayList<String>()
     public let vtable: HashMap<String, String> = HashMap<String, String>()
     public var finalizer: String = ""
+    public var finalizerKnown: Bool = false
 
     public init() {}
 
@@ -179,6 +180,7 @@ public class BCHIRSClassInfo {
             }
         }
         out.finalizer = finalizer
+        out.finalizerKnown = finalizerKnown
         return out
     }
 }
@@ -187,6 +189,7 @@ public class BCHIRClassInfo {
     public let superClasses: ArrayList<Int64> = ArrayList<Int64>()
     public let vtable: HashMap<Int64, Int64> = HashMap<Int64, Int64>()
     public var finalizerIdx: Int64 = 0
+    public var requiresRuntimeFinalizerRegistration: Bool = true
     public var mangledName: String = ""
 
     public init() {}
@@ -202,6 +205,7 @@ public class BCHIRClassInfo {
             }
         }
         out.finalizerIdx = finalizerIdx
+        out.requiresRuntimeFinalizerRegistration = requiresRuntimeFinalizerRegistration
         out.mangledName = mangledName
         return out
     }
