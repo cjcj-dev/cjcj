@@ -1,10 +1,5 @@
 [
   {
-    "file": ".lane/test_arm_kkk2.sh",
-    "executor": "manual",
-    "reason": "Historical lane driver hard-codes private compiler, coloured SDK, SO depot and reserved cores; invoke only in that recorded apparatus."
-  },
-  {
     "file": "build/test/srcbuild_git_shell_contract.sh",
     "executor": "bash",
     "args": []
