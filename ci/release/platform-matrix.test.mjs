@@ -41,6 +41,10 @@ test('platform failure artifacts preserve the gate and teardown raw logs', () =>
   assert.match(upload, /if: always\(\)/);
   assert.match(upload, /\.platform-ci\/logs\/\*\*/);
   assert.match(workflow, /name: Preserve runtime gate diagnostics\n\s+if: always\(\) && runner.os != 'Windows'\n\s+run: node ci\/platform_matrix\/collect_runtime_gate_logs\.mjs/);
+  const early = workflow.slice(workflow.indexOf('- name: Upload runtime gate diagnostics before compiler build'), workflow.indexOf('- name: Upload runtime gate diagnostics before compiler build') + 500);
+  assert.match(early, /if: always\(\) && runner.os != 'Windows'/);
+  assert.match(early, /path: \.platform-ci\/logs\/\*\*/);
+  assert.ok(workflow.indexOf('- name: Upload runtime gate diagnostics before compiler build') < workflow.indexOf('ci/platform_matrix/build_cjcj.mjs'));
 });
 
 test('runtime diagnostics entry preserves teardown rc and raw gate output byte for byte', t => {
