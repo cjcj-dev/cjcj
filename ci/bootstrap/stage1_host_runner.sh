@@ -92,7 +92,15 @@ check_sha "$hrt/libboundscheck.so" "$decl_bounds"
 check_sha "$host/runtime/lib/$platform/libcangjie-runtime.so" "$decl_runtime"
 check_sha "$host/runtime/lib/$platform/libboundscheck.so" "$decl_bounds"
 for rel in bin/cjc tools/bin/cjpm third_party/llvm/bin/opt third_party/llvm/bin/llc; do
-  if [ ! -x "$target/$rel" ] || [ -L "$target/$rel" ]; then
+  if [ -L "$target/$rel" ]; then
+    # compiler_identity.py installs this one same-directory compiler alias.
+    # Only the private workspace runner converts it to an environment wrapper.
+    if [ "$rel" != bin/cjc ] || [ "$(readlink "$target/$rel")" != cjcj-stage1 ] ||
+       [ -L "$target/bin/cjcj-stage1" ]; then
+      fail "unsupported executable link: $rel"
+    fi
+  fi
+  if [ ! -x "$target/$rel" ]; then
     fail "regular executable required: $rel"
   fi
 done
@@ -114,6 +122,11 @@ check_sha "$target/bin/cjcj-stage1" "$compiler_sha"
 cp -p "$host/tools/bin/cjpm" "$target/tools/bin/cjpm-stage1"
 write_runner() {
   local entry=$1 real=$2 ld=$3
+  # The input aliases were validated before any installation. Unlink the alias,
+  # never truncate the compiler ELF reached through it.
+  if [ -L "$entry" ]; then
+    rm -- "$entry"
+  fi
   # Existing executable mode is retained; only the isolated SDK files are written.
   {
     printf '#!/usr/bin/env bash\n'
