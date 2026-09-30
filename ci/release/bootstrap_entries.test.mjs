@@ -20,7 +20,15 @@ function driverFixture(check) {
     const runDriver = (stage = 31) => spawnSync('bash', [driver,
       '--from-step', String(stage), '--through-step', String(stage), '--dry-run'],
     {env: inputs.env, encoding: 'utf8'});
-    check({...inputs, root, driver, runDriver});
+    const runFull = () => {
+      const result = spawnSync('bash', [driver, '--from-step', '2', '--through-step', '36'],
+        {env: inputs.env, encoding: 'utf8'});
+      const logs = path.join(root, '.srcbuild/logs');
+      const log = fs.existsSync(logs) ? fs.readdirSync(logs)
+        .map(name => fs.readFileSync(path.join(logs, name), 'utf8')).join('\n') : '';
+      return {...result, log};
+    };
+    check({...inputs, root, driver, runDriver, runFull});
   });
 }
 
@@ -56,6 +64,38 @@ test('both actual preparation entries export identical identities and consumer b
       dylib: identity(gha)?.colour_llvm, symlink: 'lld'});
     assert.notEqual(identity(gha), null);
   }
+}));
+
+test('full 2..36 entry prepares the same fixed-tool bytes before numbered steps', () => driverFixture(({root, runFull, runDriver}) => {
+  const full = runFull();
+  const bootstrap = runDriver();
+  const expected = identity(bootstrap)?.colour_tuple;
+  const actual = Object.fromEntries(Object.keys(expected || {}).filter(name => name.startsWith('fixed-llc/'))
+    .map(name => {
+      const file = path.join(root, '.srcbuild', name);
+      return [name, fs.existsSync(file) ? digest(file) : null];
+    }));
+  const observed = {prerequisite: /PREREQUISITE=fixed-llvm rc=0/.test(full.stdout),
+    numberedSteps: /STEP=2 .*rc=128/.test(full.stdout), bootstrap: bootstrap.status, actual};
+  console.log(`FULL_ENTRY_ASSERT ${JSON.stringify(observed)}`);
+  assert.deepEqual(observed, {prerequisite: true, numberedSteps: true, bootstrap: 0,
+    actual: Object.fromEntries(Object.entries(expected || {}).filter(([name]) => name.startsWith('fixed-llc/')))});
+  assert.equal(Object.keys(actual).length, 5);
+}));
+
+test('full entry rejects an incorrect tuple pin before any numbered step', () => driverFixture(({pinFile, runFull, runDriver}) => {
+  const pin = JSON.parse(fs.readFileSync(pinFile));
+  const payload = pin.files.find(file => file.path === 'fixed-llc/opt.gz');
+  payload.artifact_sha256 = payload.release_sha256 = '0'.repeat(64);
+  fs.writeFileSync(pinFile, JSON.stringify(pin));
+  const full = runFull();
+  const bootstrap = runDriver();
+  const observed = {full: full.status, bootstrap: bootstrap.status,
+    fullRejects: full.log.includes('bootstrap digest mismatch: fixed-llc/opt.gz'),
+    bootstrapRejects: bootstrap.stderr.includes('bootstrap digest mismatch: fixed-llc/opt.gz'),
+    entered: /^STEP=/m.test(full.stdout)};
+  console.log(`FULL_ENTRY_REJECTION_ASSERT ${JSON.stringify(observed)}`);
+  assert.deepEqual(observed, {full: 1, bootstrap: 1, fullRejects: true, bootstrapRejects: true, entered: false});
 }));
 
 const corruptions = [

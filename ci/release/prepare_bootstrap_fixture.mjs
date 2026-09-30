@@ -16,8 +16,13 @@ export function fixture(check, target = 'linux-x64') {
     const ast = path.join(sdk, 'ast.a');
     fs.writeFileSync(so, 'host fixture');
     fs.writeFileSync(ast, 'ast fixture');
-    for (const d of [artifact, fallback]) {
-      fs.writeFileSync(path.join(d, 'SHA256SUMS'), 'reviewed fixture sums');
+    const tupleFiles = ['SHA256SUMS', ...['llc.gz', 'opt.gz', 'ld.lld.gz', 'cjselfhost_llvmshim.o', 'llvm-tools.manifest']
+      .map(name => `fixed-llc/${name}`)];
+    for (const directory of [artifact, fallback]) {
+      for (const file of tupleFiles) {
+        fs.mkdirSync(path.dirname(path.join(directory, file)), {recursive: true});
+        fs.writeFileSync(path.join(directory, file), 'reviewed fixture sums');
+      }
     }
     const digest = crypto.createHash('sha256').update('reviewed fixture sums').digest('hex');
     const dylib = path.join(dir, 'dylib');
@@ -83,8 +88,8 @@ export function fixture(check, target = 'linux-x64') {
       COLOUR_RT_MANIFEST_SHA256: runtimeDigest(path.join(runtime, 'manifest.json'))});
     const pinFile = path.join(dir, 'pin.json');
     fs.writeFileSync(pinFile, JSON.stringify({version: 1, repository: 'cjcj-dev/cjcj', run: 123,
-      attempt: 1, artifact: 456, commit: 'b'.repeat(40), files: [{path: 'SHA256SUMS', mode: 0o644,
-      asset: 789, artifact_sha256: digest, release_sha256: digest}]}));
+      attempt: 1, artifact: 456, commit: 'b'.repeat(40), files: tupleFiles.map(file => ({path: file, mode: 0o644,
+      asset: 789, artifact_sha256: digest, release_sha256: digest}))}));
     env.CJCJ_BOOTSTRAP_INPUTS_PIN = pinFile;
     const transport = path.join(dir, 'transport.mjs');
     fs.writeFileSync(transport, `
@@ -93,12 +98,13 @@ export function fixture(check, target = 'linux-x64') {
         if (url !== 'https://api.github.com/repos/cjcj-dev/cjcj/releases/assets/789')
           throw new Error('unexpected source request: ' + url);
         console.log('FIXTURE_RELEASE_REQUEST ' + url);
+        if (process.env.FIXTURE_RELEASE_UNAVAILABLE) return new Response('', {status: 404});
         return new Response(fs.readFileSync(process.env.FIXTURE_RELEASE_FILE));
       };
     `);
     env.FIXTURE_RELEASE_FILE = path.join(artifact, 'SHA256SUMS');
     const run = (args = []) => spawnSync(process.execPath,
       ['--import', transport, new URL('./prepare_bootstrap_inputs.mjs', import.meta.url).pathname, ...args], {env, encoding: 'utf8'});
-    check({env, artifact, fallback, dylib, dylibSha, so, runtime, runtimeSource, run, pinFile, dir});
+    check({env, artifact, fallback, dylib, dylibSha, so, runtime, runtimeSource, run, pinFile, dir, transport});
   } finally { fs.rmSync(dir, {recursive: true, force: true}); }
 }

@@ -5,7 +5,8 @@ Both runners resolve bootstrap inputs with
 `ci/bootstrap/bootstrap.sh`. Actions consumes the exported environment through
 `ci/bootstrap/gha_run.sh`; kkk2's `load_bootstrap_pins` consumes the same
 resolver's quoted shell output. Preparation failures publish no bootstrap
-command. Stage 31/32 preparation does not run the separate fixed-tools publisher.
+command. The full 2..36 entry prepares native fixed tools before numbered steps
+with the same `prepareColourTuple` function used by bootstrap preparation.
 
 The resolver reads the common host SDK, LLVM, runtime, AST, runtime-artifact and
 dylib pin files for the selected target. Workflow-provided pin environment values
@@ -37,8 +38,10 @@ A depot is an explicit transport path (`CJCJ_BOOTSTRAP_COLOUR_TUPLE` with
 `CJCJ_BOOTSTRAP_SOURCE=depot`), not an identity inferred from 12/40-character
 directory names. The resolver makes no implicit `/root/llvmdepot` lookup.
 Every selected payload must match the common pin before the tuple is exported.
-The fixed-tools producer used by other source-build steps does not supply
-bootstrap's static tuple implicitly.
+The native fixed-tools preparation copies the verified tuple's `fixed-llc/`
+members to `CJCJ_FIXED_LLVM_DIR` for setup_sdk and stage3. The former kkk2 depot
+discovery and optional source-build publisher are removed. Tuple production
+belongs to the independently pinned artifact producer, not this consumer.
 
 The runtime input is the complete artifact root containing `manifest.json`,
 runtime libraries, the static archive and the manifest's std/module members.

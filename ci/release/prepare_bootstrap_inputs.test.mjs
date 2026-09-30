@@ -30,7 +30,7 @@ test('explicit depot layout does not determine input identity', () => fixture(({
   const nested = path.join(env.CJCJ_LLVM_DEPOT_ROOT, env.LLVM_SHA, env.CANGJIE_COMPILER_SHA);
   env.CJCJ_BOOTSTRAP_COLOUR_TUPLE = nested;
   fs.mkdirSync(nested, {recursive: true});
-  fs.copyFileSync(path.join(fallback, 'SHA256SUMS'), path.join(nested, 'SHA256SUMS'));
+  fs.cpSync(fallback, nested, {recursive: true});
   const result = run();
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /BOOTSTRAP_VERIFIED SHA256SUMS/);

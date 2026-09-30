@@ -3,7 +3,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import {acquire} from './bootstrap_store.mjs';
+import {prepareColourTuple} from './bootstrap_tuple.mjs';
 import {verifyRuntime} from './colour_runtime.mjs';
 import {prepareCppHeaders} from '../bootstrap/prepare_cpp_headers.mjs';
 import {hostIdentity, prepareHostLlvm} from './host_llvm.mjs';
@@ -83,21 +83,8 @@ const astSupport = pinnedInput(process.env.CJCJ_BOOTSTRAP_AST_ARTIFACT || proces
   findFile(path.join(base, 'lib'), (_full, name) => name === 'libcangjie-ast-support.a'),
 ], '', process.env.AST_SUPPORT_SHA256, 'ast-support archive SHA256');
 
-const pinPath = process.env.CJCJ_BOOTSTRAP_INPUTS_PIN
-  || new URL('../bootstrap_inputs_pin.json', import.meta.url);
-const inputPin = JSON.parse(fs.readFileSync(pinPath, 'utf8'));
-const colourTuple = await acquire(inputPin,
-  inputsWork, {
-    mode: process.env.CJCJ_BOOTSTRAP_SOURCE || 'release',
-    reason: process.env.CJCJ_BOOTSTRAP_SOURCE_REASON || '',
-    depot: process.env.CJCJ_BOOTSTRAP_COLOUR_TUPLE || '',
-  });
-// The pin is reviewed source, never a digest learned from this run's download.
-const tupleSums = path.join(colourTuple, 'SHA256SUMS');
-if (!/^[0-9a-f]{64}$/.test(process.env.LLVM_TUPLE_SUMS_SHA || '')
-    || sha256File(tupleSums) !== process.env.LLVM_TUPLE_SUMS_SHA) {
-  throw new Error(`colour tuple SHA256SUMS disagrees with ci/llvm_pin.env: ${colourTuple}`);
-}
+const tuple = await prepareColourTuple({work: inputsWork});
+const colourTuple = tuple.directory;
 
 process.env.CJCJ_BOOTSTRAP_COLOUR_RT = bootstrapArtifact(process.env.CJCJ_BOOTSTRAP_COLOUR_RT,
   'cjcj-dev/cjcj', process.env.COLOUR_RT_ARTIFACT_ID, inputsWork, 'COLOUR_RT');
@@ -175,7 +162,7 @@ const identities = {
   host_sdk: hostSdk.sha256,
   host_llvm: hostLlvm.sha256,
   ast_support: sha256File(astSupport),
-  colour_tuple: Object.fromEntries(inputPin.files.map(file => [file.path, sha256File(path.join(colourTuple, file.path))])),
+  colour_tuple: tuple.identities,
   colour_runtime: sha256File(path.join(colourRt, 'manifest.json')),
   colour_llvm: colourInputs.CJCJ_BOOTSTRAP_COLOUR_LLVM_SHA256,
 };
