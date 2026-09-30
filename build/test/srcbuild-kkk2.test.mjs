@@ -158,6 +158,7 @@ for (const scenario of [
     };
     check('step rc', fixture.result.status === scenario.rc);
     check('TIMINGS rc', new RegExp(`^step\\t${scenario.from}\\t[^\\t]+\\t${scenario.rc}\\t`, 'm').test(fixture.timings));
+    check('public step rc', new RegExp(`STEP=${scenario.from} .* rc=${scenario.rc} `).test(fixture.result.stdout));
     if (scenario.next) {
       check('next step not executed', !fixture.commands.includes(scenario.next));
       check('no next TIMINGS record', !new RegExp(`^step\\t${scenario.through}\\t`, 'm').test(fixture.timings));
