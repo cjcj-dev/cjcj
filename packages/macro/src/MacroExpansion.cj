@@ -153,7 +153,6 @@ private func CheckUnhandledMacroCall(pkg: Package, diag: DiagnosticEngine): Unit
     }
 }
 
-
 private func toParsedScopeKind(scope: ScopeKind): ParsedScopeKind {
     return match (scope) {
         case ScopeKind.TOPLEVEL => ParsedScopeKind.TOPLEVEL
@@ -764,7 +763,8 @@ public class MacroExpansion {
         }
         let nodes = ArrayList<Node>()
         if (!invocation.newTokens.isEmpty()) {
-            let generatedParser = GeneratedParser(invocation.newTokens.toArray(), ci.GetDiag(), ci.GetDiag().GetSourceManager(),
+            let generatedParser = GeneratedParser(invocation.newTokens.toArray(), ci.GetDiag(),
+                ci.GetDiag().GetSourceManager(),
                 attachComment: ci.GetGlobalOptions().enableAddCommentToAst,
                 parseDeclFile: ci.GetGlobalOptions().compileCjd)
             generatedParser.SetCompileOptions(ci.GetGlobalOptions())
