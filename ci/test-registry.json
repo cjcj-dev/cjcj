@@ -1,0 +1,550 @@
+[
+  {
+    "file": "build/test/srcbuild_git_shell_contract.sh",
+    "executor": "bash",
+    "args": []
+  },
+  {
+    "file": "ci/bootstrap/test_bootstrap.sh",
+    "executor": "bash",
+    "args": []
+  },
+  {
+    "file": "ci/bootstrap/test_colour_llvm.py",
+    "executor": "manual",
+    "reason": "Requires real COLOUR_LLVM_SO and HOST_LLVM_SO libraries to exercise bootstrap binding; neither is supplied by the independent script-contract job."
+  },
+  {
+    "file": "ci/bootstrap/test_compiler_identity.py",
+    "executor": "python3",
+    "args": []
+  },
+  {
+    "file": "ci/bootstrap/test_cpp_headers.sh",
+    "executor": "manual",
+    "reason": "Cold bootstrap integration needs pinned C++ source, host LLVM, AST archive and colour tuple; allocates a private full build worker."
+  },
+  {
+    "file": "ci/bootstrap/test_host_identities.py",
+    "executor": "python3",
+    "args": []
+  },
+  {
+    "file": "ci/bootstrap/test_host_identity_wiring.py",
+    "executor": "workflow",
+    "workflow": ".github/workflows/test-host-identities.yml",
+    "interpreter": "python3"
+  },
+  {
+    "file": "ci/bootstrap/test_sdk_cjc_swap.py",
+    "executor": "python3",
+    "args": [
+      "--output",
+      "{output}"
+    ]
+  },
+  {
+    "file": "ci/bootstrap/test_sdk_exe_symlink.py",
+    "executor": "python3",
+    "args": [
+      "--output",
+      "{output}"
+    ]
+  },
+  {
+    "file": "ci/bootstrap/test_sdk_runtime.py",
+    "executor": "python3",
+    "args": [
+      "--output",
+      "{output}"
+    ]
+  },
+  {
+    "file": "ci/bootstrap/test_sdk_shared_pair.py",
+    "executor": "python3",
+    "args": [
+      "--output",
+      "{output}"
+    ]
+  },
+  {
+    "file": "ci/bootstrap/test_sdk_std.py",
+    "executor": "python3",
+    "args": [
+      "--output",
+      "{output}"
+    ]
+  },
+  {
+    "file": "ci/bootstrap/test_sdk_symlinks.py",
+    "executor": "python3",
+    "args": []
+  },
+  {
+    "file": "ci/bootstrap/test_sdk_verify.py",
+    "executor": "python3",
+    "args": []
+  },
+  {
+    "file": "ci/bootstrap/test_stage0_cache.sh",
+    "executor": "bash",
+    "args": []
+  },
+  {
+    "file": "ci/bootstrap/test_target_runtime_link.py",
+    "executor": "manual",
+    "reason": "Requires an assembled stage1 target SDK with separately bound host libraries and pinned coloured target runtime, not the official host SDK."
+  },
+  {
+    "file": "ci/bootstrap/test_tuple_permissions.py",
+    "executor": "manual",
+    "reason": "Requires a real LLVM_TUPLE, assembled HOST_SDK and COLOUR_RUNTIME; permission fault arms copy and install this full paired toolchain."
+  },
+  {
+    "file": "ci/release/test_darwin_runtime_controls.sh",
+    "executor": "bash",
+    "args": [
+      "{output}"
+    ]
+  },
+  {
+    "file": "ci/release/test_language_tuple.py",
+    "executor": "python3",
+    "args": []
+  },
+  {
+    "file": "ci/test-ast-support-wiring.sh",
+    "executor": "manual",
+    "reason": "Fault-arm tool rewrites ci/release/prepare_bootstrap_inputs.mjs in place; run only in an isolated checkout, not alongside its Node contract suite."
+  },
+  {
+    "file": "ci/test-codegen-layout-sync.sh",
+    "executor": "workflow",
+    "workflow": ".github/workflows/test-llvm-tuple.yml",
+    "interpreter": "bash"
+  },
+  {
+    "file": "ci/test-codegen-runtime-layout.sh",
+    "executor": "manual",
+    "reason": "Requires candidate compiler, paired host SDK/libLLVM and both runtime/LLVM source repositories for ABI integration."
+  },
+  {
+    "file": "ci/test-colour-libxml2.sh",
+    "executor": "manual",
+    "reason": "Fault-arm tool rewrites workflow, srcbuild and checker files in place; optional real bad/good ld.lld controls need retained linker artifacts."
+  },
+  {
+    "file": "ci/test-llvm-tuple-layout.sh",
+    "executor": "bash",
+    "args": [
+      "{output}"
+    ]
+  },
+  {
+    "file": "ci/test-llvm-tuple-wiring.sh",
+    "executor": "workflow",
+    "workflow": ".github/workflows/test-llvm-tuple.yml",
+    "interpreter": "bash"
+  },
+  {
+    "file": "ci/test-runtime-layout.sh",
+    "executor": "workflow",
+    "workflow": ".github/workflows/test-llvm-tuple.yml",
+    "interpreter": "bash"
+  },
+  {
+    "file": "ci/test_ast_host_workflow.py",
+    "executor": "manual",
+    "reason": "Runs actual AST workflow install/build steps in a private SDK home with source downloads; needs a dedicated full-build worker and PyYAML."
+  },
+  {
+    "file": "ci/test_build_resources.py",
+    "executor": "python3",
+    "args": []
+  },
+  {
+    "file": "ci/test_phase_gc.py",
+    "executor": "manual",
+    "reason": "Requires candidate compiler, matching SDK, GDB request-state observation and baseline result.json; official SDK alone cannot exercise the compiler phase-GC implementation."
+  },
+  {
+    "file": "ci/test_std_sdk_inputs.py",
+    "executor": "manual",
+    "reason": "Integration verifier requires five positional artifacts: AST input, compiler source, build, nightly SDK and private work directory."
+  },
+  {
+    "file": "packages/ast/src/ASTToSource_test.cj",
+    "executor": "cjpm",
+    "member": "packages/ast"
+  },
+  {
+    "file": "packages/ast/src/Clone_test.cj",
+    "executor": "cjpm",
+    "member": "packages/ast"
+  },
+  {
+    "file": "packages/ast/src/Create_test.cj",
+    "executor": "cjpm",
+    "member": "packages/ast"
+  },
+  {
+    "file": "packages/ast/src/SearchPlus_test.cj",
+    "executor": "cjpm",
+    "member": "packages/ast"
+  },
+  {
+    "file": "packages/ast/src/Search_test.cj",
+    "executor": "cjpm",
+    "member": "packages/ast"
+  },
+  {
+    "file": "packages/ast/src/ToString_test.cj",
+    "executor": "cjpm",
+    "member": "packages/ast"
+  },
+  {
+    "file": "packages/ast/src/Walker_test.cj",
+    "executor": "cjpm",
+    "member": "packages/ast"
+  },
+  {
+    "file": "packages/basic/src/StringConvertor_test.cj",
+    "executor": "cjpm",
+    "member": "packages/basic"
+  },
+  {
+    "file": "packages/basic/src/engine_test.cj",
+    "executor": "cjpm",
+    "member": "packages/basic"
+  },
+  {
+    "file": "packages/basic/src/source_manager_test.cj",
+    "executor": "cjpm",
+    "member": "packages/basic"
+  },
+  {
+    "file": "packages/basic/src/utils_test.cj",
+    "executor": "cjpm",
+    "member": "packages/basic"
+  },
+  {
+    "file": "packages/chir/src/ArrayListConstStartOpt_test.cj",
+    "executor": "cjpm",
+    "member": "packages/chir"
+  },
+  {
+    "file": "packages/chir/src/BCHIRLinker_test.cj",
+    "executor": "cjpm",
+    "member": "packages/chir"
+  },
+  {
+    "file": "packages/chir/src/CHIRBuilder_test.cj",
+    "executor": "cjpm",
+    "member": "packages/chir"
+  },
+  {
+    "file": "packages/chir/src/CHIRSerialization_test.cj",
+    "executor": "cjpm",
+    "member": "packages/chir"
+  },
+  {
+    "file": "packages/chir/src/CanonicalizeStringBacking_test.cj",
+    "executor": "cjpm",
+    "member": "packages/chir"
+  },
+  {
+    "file": "packages/chir/src/DebugLocation_test.cj",
+    "executor": "cjpm",
+    "member": "packages/chir"
+  },
+  {
+    "file": "packages/chir/src/DoesNotThrow_test.cj",
+    "executor": "cjpm",
+    "member": "packages/chir"
+  },
+  {
+    "file": "packages/chir/src/DynamicDispatch_test.cj",
+    "executor": "cjpm",
+    "member": "packages/chir"
+  },
+  {
+    "file": "packages/chir/src/GlobalFuncIndex_test.cj",
+    "executor": "cjpm",
+    "member": "packages/chir"
+  },
+  {
+    "file": "packages/chir/src/InvokeOriginalCallee_test.cj",
+    "executor": "cjpm",
+    "member": "packages/chir"
+  },
+  {
+    "file": "packages/chir/src/MangleType_test.cj",
+    "executor": "cjpm",
+    "member": "packages/chir"
+  },
+  {
+    "file": "packages/chir/src/OverflowDefault_test.cj",
+    "executor": "cjpm",
+    "member": "packages/chir"
+  },
+  {
+    "file": "packages/chir/src/PrivateTypeConverter_test.cj",
+    "executor": "cjpm",
+    "member": "packages/chir"
+  },
+  {
+    "file": "packages/chir/src/SanitizerCoverage_test.cj",
+    "executor": "cjpm",
+    "member": "packages/chir"
+  },
+  {
+    "file": "packages/codegen/src/GenericPayloadProvenance_test.cj",
+    "executor": "cjpm",
+    "member": "packages/codegen"
+  },
+  {
+    "file": "packages/compiler_unittest/src/APILevelVersion_test.cj",
+    "executor": "cjpm",
+    "member": "packages/compiler_unittest"
+  },
+  {
+    "file": "packages/compiler_unittest/src/ASTPort_test.cj",
+    "executor": "cjpm",
+    "member": "packages/compiler_unittest"
+  },
+  {
+    "file": "packages/compiler_unittest/src/BasicEngine_test.cj",
+    "executor": "cjpm",
+    "member": "packages/compiler_unittest"
+  },
+  {
+    "file": "packages/compiler_unittest/src/CGModule_test.cj",
+    "executor": "cjpm",
+    "member": "packages/compiler_unittest"
+  },
+  {
+    "file": "packages/compiler_unittest/src/CanonicalizationOrder_test.cj",
+    "executor": "cjpm",
+    "member": "packages/compiler_unittest"
+  },
+  {
+    "file": "packages/compiler_unittest/src/CheckCjd_test.cj",
+    "executor": "cjpm",
+    "member": "packages/compiler_unittest"
+  },
+  {
+    "file": "packages/compiler_unittest/src/CjoVersion_test.cj",
+    "executor": "cjpm",
+    "member": "packages/compiler_unittest"
+  },
+  {
+    "file": "packages/compiler_unittest/src/ConditionalCompilation_test.cj",
+    "executor": "cjpm",
+    "member": "packages/compiler_unittest"
+  },
+  {
+    "file": "packages/compiler_unittest/src/DriverPort_test.cj",
+    "executor": "cjpm",
+    "member": "packages/compiler_unittest"
+  },
+  {
+    "file": "packages/compiler_unittest/src/ErrorMessage_test.cj",
+    "executor": "cjpm",
+    "member": "packages/compiler_unittest"
+  },
+  {
+    "file": "packages/compiler_unittest/src/GetTopOverriddenFuncDecl_test.cj",
+    "executor": "cjpm",
+    "member": "packages/compiler_unittest"
+  },
+  {
+    "file": "packages/compiler_unittest/src/Macro_MsgFormatBindings_test.cj",
+    "executor": "cjpm",
+    "member": "packages/compiler_unittest"
+  },
+  {
+    "file": "packages/compiler_unittest/src/Macro_TokenSerialization_test.cj",
+    "executor": "cjpm",
+    "member": "packages/compiler_unittest"
+  },
+  {
+    "file": "packages/compiler_unittest/src/MockDefaultPrepare_test.cj",
+    "executor": "cjpm",
+    "member": "packages/compiler_unittest"
+  },
+  {
+    "file": "packages/compiler_unittest/src/ObjCPreamble_test.cj",
+    "executor": "cjpm",
+    "member": "packages/compiler_unittest"
+  },
+  {
+    "file": "packages/compiler_unittest/src/ParseComment_test.cj",
+    "executor": "cjpm",
+    "member": "packages/compiler_unittest"
+  },
+  {
+    "file": "packages/compiler_unittest/src/ParseIncr_test.cj",
+    "executor": "cjpm",
+    "member": "packages/compiler_unittest"
+  },
+  {
+    "file": "packages/compiler_unittest/src/ParseJson_test.cj",
+    "executor": "cjpm",
+    "member": "packages/compiler_unittest"
+  },
+  {
+    "file": "packages/compiler_unittest/src/SemaTypeCheckerPort_test.cj",
+    "executor": "cjpm",
+    "member": "packages/compiler_unittest"
+  },
+  {
+    "file": "packages/compiler_unittest/src/SemaTypeChecker_test.cj",
+    "executor": "cjpm",
+    "member": "packages/compiler_unittest"
+  },
+  {
+    "file": "packages/compiler_unittest/src/UtilsPort_test.cj",
+    "executor": "cjpm",
+    "member": "packages/compiler_unittest"
+  },
+  {
+    "file": "packages/flatbuffers/src/FlatBufferBuilder_test.cj",
+    "executor": "cjpm",
+    "member": "packages/flatbuffers"
+  },
+  {
+    "file": "packages/incremental_compilation/src/CachedASTFormatBindings_test.cj",
+    "executor": "cjpm",
+    "member": "packages/incremental_compilation"
+  },
+  {
+    "file": "packages/lex/src/Lex_test.cj",
+    "executor": "cjpm",
+    "member": "packages/lex"
+  },
+  {
+    "file": "packages/mangle/src/Demangle_test.cj",
+    "executor": "cjpm",
+    "member": "packages/mangle"
+  },
+  {
+    "file": "packages/option/src/Option_test.cj",
+    "executor": "cjpm",
+    "member": "packages/option"
+  },
+  {
+    "file": "packages/parse/src/ClassRecovery_test.cj",
+    "executor": "cjpm",
+    "member": "packages/parse"
+  },
+  {
+    "file": "packages/parse/src/ForeignBlockMacro_test.cj",
+    "executor": "cjpm",
+    "member": "packages/parse"
+  },
+  {
+    "file": "packages/parse/src/GenericConstraintDuplicate_test.cj",
+    "executor": "cjpm",
+    "member": "packages/parse"
+  },
+  {
+    "file": "packages/parse/src/ParserTest_test.cj",
+    "executor": "cjpm",
+    "member": "packages/parse"
+  },
+  {
+    "file": "packages/sema/src/resolver_tests/GIMResolverIntegration_test.cj",
+    "executor": "cjpm",
+    "member": "packages/sema"
+  },
+  {
+    "file": "packages/sema/src/resolver_tests/OverrideFunctionResolver_test.cj",
+    "executor": "cjpm",
+    "member": "packages/sema"
+  },
+  {
+    "file": "packages/sema/src/resolver_tests/ResolverTestSupport_test.cj",
+    "executor": "cjpm",
+    "member": "packages/sema"
+  },
+  {
+    "file": "packages/utils/src/IncrementalCompilationLogger_test.cj",
+    "executor": "cjpm",
+    "member": "packages/utils"
+  },
+  {
+    "file": "packages/utils/src/casting_test.cj",
+    "executor": "cjpm",
+    "member": "packages/utils"
+  },
+  {
+    "file": "packages/utils/src/defect_6495340a_test.cj",
+    "executor": "cjpm",
+    "member": "packages/utils"
+  },
+  {
+    "file": "packages/utils/src/file_util_test.cj",
+    "executor": "cjpm",
+    "member": "packages/utils"
+  },
+  {
+    "file": "packages/utils/src/float_siphash_test.cj",
+    "executor": "cjpm",
+    "member": "packages/utils"
+  },
+  {
+    "file": "packages/utils/src/signal_test.cj",
+    "executor": "cjpm",
+    "member": "packages/utils"
+  },
+  {
+    "file": "packages/utils/src/task_queue_test.cj",
+    "executor": "cjpm",
+    "member": "packages/utils"
+  },
+  {
+    "file": "packages/utils/src/unicode_test.cj",
+    "executor": "cjpm",
+    "member": "packages/utils"
+  },
+  {
+    "file": "scripts/bchir_linker_test.sh",
+    "executor": "manual",
+    "reason": "Private CHIR fault/regression driver requires source copy, compiled LLVM shim, matching SDK and reserved cores; package tests have a separate CI cjpm executor."
+  },
+  {
+    "file": "scripts/test_fixtures/t1_test_basic/basic_test.cj",
+    "executor": "manual",
+    "reason": "Input fixture for scripts/test_gate.mjs test discovery/build, not a workspace package; execute through that manual compiler harness."
+  },
+  {
+    "file": "scripts/test_fixtures/t2_mock_member/mock_test.cj",
+    "executor": "manual",
+    "reason": "Input fixture for scripts/test_gate.mjs mock-member compilation, not a workspace package; execute through that manual compiler harness."
+  },
+  {
+    "file": "test/cjo_version_query/src/CjoHeaderVersion_test.cj",
+    "executor": "manual",
+    "reason": "Standalone compiler regression module outside workspace; requires candidate compiler CJO version behavior and its dedicated build recipe."
+  },
+  {
+    "file": "test/extension_def_type/ExtensionDefType_test.cj",
+    "executor": "manual",
+    "reason": "Standalone compiler regression built by test/extension_def_type/build.sh with explicitly selected candidate SDK."
+  },
+  {
+    "file": "test/named_struct_factory/NamedStructFactory_test.cj",
+    "executor": "manual",
+    "reason": "Standalone compiler regression built by test/named_struct_factory/build.sh with explicitly selected candidate SDK."
+  },
+  {
+    "file": "ci/platform_matrix/tests/runtime_core_diagnostics.py",
+    "executor": "manual",
+    "reason": "Requires a same-build runtime unit ELF/SO pair, PyYAML, GDB and real core evidence; generates a core if none supplied, which is prohibited on kkk2."
+  },
+  {
+    "file": "test/store_strength/test_checker.py",
+    "executor": "python3",
+    "args": []
+  }
+]

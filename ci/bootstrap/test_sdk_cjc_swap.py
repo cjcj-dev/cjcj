@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 """Drive sdk_build.sh --cjc against a regular bin/cjc and a same-dir symlink.
 
-Target assertion is symlink-cjc-replaced: bin/cjc -> cjcj-stage1 must be
-installed through the link, the link text must stay cjcj-stage1, and the
-referent sha256 must become the --cjc ELF. A regular bin/cjc is still replaced
-in place. A link whose referent is outside the copy must be rejected without
-changing that file. A dangling bin/cjc must still die at the existing
-[ -f bin/cjc ] gate.
+Both driver names must resolve to the supplied compiler's physical stage1
+copy. Inherited external links must not change external bytes or mtime, and
+no installed compiler entry may escape the SDK. A dangling bin/cjc must
+still die at the existing [ -f bin/cjc ] gate.
 """
 import argparse
 import hashlib
@@ -99,6 +97,7 @@ def run_case(name, product, root, libs, old_elf, new_elf, repeat):
     shutil.copyfile(old_elf, outside_elf)
     outside_elf.chmod(0o755)
     outside_before = sha256(outside_elf)
+    outside_mtime_before = outside_elf.stat().st_mtime_ns
     if kind == 'regular-swap':
         shutil.copyfile(old_elf, bin_dir / 'cjc')
         (bin_dir / 'cjc').chmod(0o755)
@@ -111,6 +110,7 @@ def run_case(name, product, root, libs, old_elf, new_elf, repeat):
         plant_producer(base, new_elf)
     elif kind == 'escape-swap':
         (bin_dir / 'cjc').symlink_to(outside_elf)
+        (bin_dir / 'cjcj-stage1').symlink_to(outside_elf)
         plant_producer(base, new_elf)
     elif kind == 'dangling-cjc':
         (bin_dir / 'cjc').symlink_to('missing-cjcj-stage1')
@@ -135,6 +135,12 @@ def run_case(name, product, root, libs, old_elf, new_elf, repeat):
         'sdk_build_ok': 'SDK-BUILD-OK' in result.stdout,
         'missing_slot': '没有名为 cjc' in result.stdout,
         'outside_refuse': '指向副本之外' in result.stdout,
+        'outside_mtime_before': outside_mtime_before,
+        'outside_mtime_after': outside_elf.stat().st_mtime_ns,
+        'stage1_is_physical': stage1.is_file() and not stage1.is_symlink(),
+        'entries_inside': all(
+            entry.resolve().is_relative_to(target.resolve())
+            for entry in (installed, frontend, stage1)),
         'dangling_gate': '缺 bin/cjc' in result.stdout,
         'replaced_line': '[cjc] 替换' in result.stdout,
         'verify_line': cjc_verify_line(result.stdout),
@@ -167,10 +173,13 @@ def judge(records):
 
     regular = by_kind['regular-swap']
     add('regular-cjc-replaced',
-        all(item['rc'] == 0 and item['sdk_build_ok'] and item['replaced_line']
-            and not item['installed_is_symlink']
+        all(item['installed_sha256'] == item['new_elf_sha256']
+            and item['installed_is_symlink'] and item['installed_link'] == 'cjcj-stage1'
+            and item['frontend_link'] == 'cjcj-stage1' and item['stage1_is_physical']
+            and item['stage1_sha256'] == item['new_elf_sha256']
             and item['installed_sha256'] == item['new_elf_sha256']
             and item['installed_sha256'] != item['old_elf_sha256']
+            and item['rc'] == 0 and item['sdk_build_ok']
             and 'ELF' in item['verify_line'] and 'ldd' in item['verify_line']
             and '--version' in item['verify_line']
             for item in regular),
@@ -178,13 +187,16 @@ def judge(records):
         regular)
     linked = by_kind['symlink-swap']
     add('symlink-cjc-replaced',
-        all(item['rc'] == 0 and item['sdk_build_ok'] and item['replaced_line']
+        all(item['installed_is_symlink'] and item['installed_link'] == 'cjcj-stage1'
+            and item['frontend_link'] == 'cjcj-stage1'
+            and item['stage1_is_physical']
             and not item['missing_slot']
             and item['installed_is_symlink'] and item['installed_link'] == 'cjcj-stage1'
             and item['frontend_link'] == 'cjcj-stage1'
             and item['stage1_sha256'] == item['new_elf_sha256']
             and item['stage1_sha256'] != item['old_elf_sha256']
             and item['installed_sha256'] == item['new_elf_sha256']
+            and item['rc'] == 0 and item['sdk_build_ok']
             and 'ELF' in item['verify_line'] and 'ldd' in item['verify_line']
             and '--version' in item['verify_line']
             for item in linked),
@@ -194,18 +206,19 @@ def judge(records):
         linked)
     escape = by_kind['escape-swap']
     add('escape-outside-unchanged',
-        all(item['rc'] != 0 and not item['sdk_build_ok']
-            and item['outside_sha256'] == item['outside_before']
+        all(item['outside_sha256'] == item['outside_before']
+            and item['outside_mtime_before'] == item['outside_mtime_after']
             and item['outside_sha256'] == item['old_elf_sha256']
             for item in escape),
         'rc=%s outside=%s before=%s refuse=%s' % (
             escape[0]['rc'], escape[0]['outside_sha256'][:16], escape[0]['outside_before'][:16],
             str(escape[0]['outside_refuse']).lower()),
         escape)
-    add('escape-seen-and-refused',
-        all(item['rc'] != 0 and item['outside_refuse']
-            and item['outside_sha256'] == item['outside_before']
-            and not item['replaced_line']
+    add('escape-installed-inside-sdk',
+        all(item['rc'] == 0 and item['sdk_build_ok'] and item['entries_inside']
+            and item['installed_link'] == 'cjcj-stage1'
+            and item['frontend_link'] == 'cjcj-stage1' and item['stage1_is_physical']
+            and item['stage1_sha256'] == item['new_elf_sha256']
             for item in escape),
         'rc=%s refuse=%s replaced=%s' % (
             escape[0]['rc'], str(escape[0]['outside_refuse']).lower(), str(escape[0]['replaced_line']).lower()),
@@ -227,6 +240,7 @@ def main():
     parser.add_argument('--old-elf', type=Path, default=Path('/bin/true'))
     parser.add_argument('--new-elf', type=Path, default=Path('/bin/echo'))
     parser.add_argument('--repeat', type=int, default=1)
+    parser.add_argument('--filter', help='print and judge only the named assertion')
     args = parser.parse_args()
     if args.repeat < 1:
         parser.error('--repeat must be >= 1')
@@ -245,6 +259,28 @@ def main():
         for kind in kinds:
             records.append(run_case('%s-%d' % (kind, repeat), product, root, libs, old_elf, new_elf, repeat))
     verdicts = judge(records)
+    producer_sdk = root / 'producer-inside-sdk'
+    producer_bin = producer_sdk / 'bin'
+    producer_bin.mkdir(parents=True)
+    producer = producer_bin / 'cjcj-stage1'
+    shutil.copyfile(new_elf, producer)
+    producer_before = sha256(producer)
+    refused = subprocess.run(
+        [sys.executable, str(product.with_name('compiler_identity.py')),
+         str(producer_sdk), '--install', str(producer)],
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    (root / 'producer-inside.log').write_text(refused.stdout)
+    verdicts.append({
+        'name': 'producer-inside-bin-refused', 'executed': True, 'n': 1,
+        'passed': refused.returncode != 0
+            and 'producer must be outside destination bin' in refused.stdout
+            and sha256(producer) == producer_before,
+        'detail': 'rc=%s producer_sha256=%s' % (refused.returncode, producer_before),
+    })
+    if args.filter:
+        verdicts = [item for item in verdicts if item['name'] == args.filter]
+        if not verdicts:
+            parser.error('unknown assertion filter')
     (root / 'results.json').write_text(json.dumps({
         'product': str(product),
         'product_sha256': sha256(product),

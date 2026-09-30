@@ -55,7 +55,7 @@ public class TypeMapper {
         let typedefNamePrefix = if (isBlock) { "Block" } else { "Func" }
         let designator = if (isBlock) { "^" } else { "*" }
         let mangler = BaseMangler()
-        let mangledName = typedefNamePrefix + MangleTypedefName(mangler.MangleAstSemanticType(funcType))
+        let mangledName = typedefNamePrefix + MangleTypedefName(mangler.MangleSemaType(funcType))
         var decl = TYPEDEF_PREFIX + toString(resultType) + "(" + designator + mangledName + ")(" 
         for (argType in argTypes) { decl += toString(argType) + "," }
         if (decl.endsWith(",")) { decl = decl[0..decl.size - 1] }

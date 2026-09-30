@@ -1,13 +1,19 @@
 import assert from 'node:assert/strict';
 import {execFileSync, spawnSync} from 'node:child_process';
 import fs from 'node:fs/promises';
+import fsSync from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import {
   DEFERRED,
   DISCOVERY_FLOOR,
+  DRIVERS,
   GATING,
   GATING_FLOOR,
+  REGISTERED,
+  validateDrivers,
+  validateManifest,
+  discoverDriverFiles,
   discoverTestFiles,
   repoRoot,
 } from './test-manifest.mjs';
@@ -60,7 +66,7 @@ test('the manifest covers every test file in the repository', () => {
     `discovery found ${discovered.length} test files, floor is ${DISCOVERY_FLOOR}; `
     + 'either a test was deleted (lower DISCOVERY_FLOOR in the same commit) or discovery is broken');
 
-  const registered = [...GATING, ...DEFERRED.map(entry => entry.file)];
+  const registered = [...GATING, ...DEFERRED.map(entry => entry.file), ...REGISTERED.map(entry => entry.file)];
   assert.equal(new Set(registered).size, registered.length,
     `a test file is registered twice: ${registered.filter((file, index) => registered.indexOf(file) !== index).join(', ')}`);
 
@@ -71,6 +77,55 @@ test('the manifest covers every test file in the repository', () => {
   const phantom = registered.filter(file => !discovered.includes(file));
   assert.deepEqual(phantom, [],
     `the manifest names test files that are not in the repository:\n  ${phantom.join('\n  ')}`);
+});
+
+test('registered executors and workspace test-members cover their files', () => {
+  validateManifest();
+});
+
+test('discovery includes untracked Python, shell and Cangjie tests', async () => {
+  const root = await fs.mkdtemp(path.join(process.env.TMPDIR || '/tmp', 'manifest-discovery-'));
+  try {
+    execFileSync('git', ['init', '-q', root]);
+    const names = ['test_added.py', 'test_added.sh', 'added_test.cj', 'added.test.mjs'];
+    for (const name of names) await fs.writeFile(path.join(root, name), '');
+    assert.deepEqual(discoverTestFiles(root), [...names].sort());
+    assert.throws(() => validateManifest(root, [], [], [], []), /unregistered.*test_added/);
+    for (const name of names) await fs.unlink(path.join(root, name));
+    assert.throws(() => validateManifest(root, [{file: names[0], executor: 'manual', reason: 'Explicit fixture for deleted-file detection'}], [], [], []), /phantom.*test_added/);
+  } finally {
+    await fs.rm(root, {recursive: true, force: true});
+  }
+});
+
+test('CI invokes both registered script and pinned official cjpm consumers', async () => {
+  const ci = (await workflows()).get('ci.yml');
+  assert.match(ci, /node ci\/run-registered-tests\.mjs scripts/);
+  const job = ci.slice(ci.indexOf('  package-tests:'), ci.indexOf('  fixed-llvm-tools:'));
+  // The pinned loader idiom is the one ci/host-toolchain-pin.test.mjs audits,
+  // so requiring it here keeps the two contracts agreeing on one spelling.
+  assert.match(job, /cat ci\/host_sdk_pin\.env >> "\$GITHUB_ENV"/);
+  assert.match(job, /"\$cjv_bin" install "\$CJCJ_TOOLCHAIN"/);
+  assert.match(job, /source "\$sdk\/envsetup\.sh"/);
+  assert.match(job, /node ci\/run-registered-tests\.mjs cj/);
+  assert.doesNotMatch(job, /continue-on-error|build_patched_runtime|setup_sdk\.mjs/);
+});
+
+test('workflow registration requires an invocation, not a comment or echoed command', async () => {
+  const root = await fs.mkdtemp(path.join(process.env.TMPDIR || '/tmp', 'manifest-workflow-'));
+  try {
+    execFileSync('git', ['init', '-q', root]);
+    await fs.writeFile(path.join(root, 'test_external.py'), '');
+    const registered = [{file: 'test_external.py', executor: 'workflow', workflow: 'ci.yml', interpreter: 'python3'}];
+    await fs.writeFile(path.join(root, 'ci.yml'), 'run: python3 test_external.py\n');
+    validateManifest(root, registered, [], [], []);
+    for (const text of ['# run: python3 test_external.py\n', 'run: echo python3 test_external.py\n']) {
+      await fs.writeFile(path.join(root, 'ci.yml'), text);
+      assert.throws(() => validateManifest(root, registered, [], [], []), /workflow does not execute/);
+    }
+  } finally {
+    await fs.rm(root, {recursive: true, force: true});
+  }
 });
 
 test('the gating set does not silently shrink', () => {
@@ -144,6 +199,11 @@ test('no workflow runs a test file the manifest does not gate', async () => {
     for (const file of literalTestArguments(text)) {
       if (!GATING.includes(file)) offenders.push(`${name} runs ${file}, which is not in GATING`);
     }
+    for (const [, file] of text.matchAll(/(?:python3|bash)\s+([\w./-]+\.(?:py|sh))/g)) {
+      if (!/(?:^|\/)test[_.-]|[._-]test\.sh$|\/tests\//.test(file)) continue;
+      const entry = REGISTERED.find(item => item.file === file);
+      if (!entry || entry.executor === 'manual') offenders.push(`${name} executes unregistered/manual ${file}`);
+    }
   }
   assert.deepEqual(offenders, [], `\n  ${offenders.join('\n  ')}`);
 });
@@ -198,4 +258,131 @@ test('ci.yml provides the publisher archive tools before running contracts', asy
   assert.match(install, /npx --yes zx@8 --version/);
   assert.ok(ci.indexOf('- name: Install release contract dependencies')
     < ci.indexOf('- name: Test build and release contracts'));
+});
+
+test('the driver axis classifies every python and shell file under a test directory', () => {
+  // The gap this axis exists for: tests/macro_runtime_path/run.py is an
+  // independent driver -- it takes --compiler/--sdk/--out, runs the compiler and
+  // exits non-zero when an assertion fails -- and no name pattern mentions it.
+  const drivers = discoverDriverFiles();
+  const named = discoverTestFiles();
+  assert.ok(drivers.includes('tests/macro_runtime_path/run.py'),
+    'the driver axis lost the nested driver it was added for');
+  assert.ok(!named.includes('tests/macro_runtime_path/run.py'),
+    'if the name axis now finds it, the two axes are not independent after all');
+  assert.ok(drivers.length >= 100, `driver axis found ${drivers.length} files, floor is 100`);
+  assert.deepEqual(validateDrivers(repoRoot, REGISTERED, DRIVERS), drivers);
+  for (const entry of DRIVERS) {
+    assert.ok(['driver', 'fixture'].includes(entry.kind), `${entry.file}: unknown kind`);
+    assert.ok(entry.reason.trim().length >= 40, `${entry.file}: reason cannot be checked`);
+    if (entry.kind === 'fixture') {
+      assert.ok(entry.consumers.length >= 1, `${entry.file}: fixture without a consumer`);
+      for (const consumer of entry.consumers) {
+        assert.ok(fsSync.existsSync(path.join(repoRoot, consumer)), `${entry.file}: missing consumer ${consumer}`);
+      }
+    }
+  }
+});
+
+test('an unregistered nested driver in the existing directory shape turns the guard red', async () => {
+  // The counterexample the name-based guard could not produce: same directory
+  // layout, same file name, same interpreter, no registration anywhere.
+  const root = await fs.mkdtemp(path.join(process.env.TMPDIR || '/tmp', 'manifest-driver-'));
+  const probe = 'tests/manual_probe/run.py';
+  try {
+    execFileSync('git', ['init', '-q', root]);
+    await fs.mkdir(path.join(root, 'tests/manual_probe'), {recursive: true});
+    await fs.writeFile(path.join(root, probe), 'import sys\nsys.exit(1)\n');
+    assert.throws(() => validateDrivers(root, [], []), /unregisteredDrivers.*manual_probe/);
+    const reason = 'manual driver: no workflow provisions a stage1 compiler; documented invocation '
+      + '`python3 tests/manual_probe/run.py --compiler /path/to/cjcj-stage1`';
+    validateDrivers(root, [], [{file: probe, kind: 'driver', reason}]);
+    // A fixture claim has to be backed by a consumer that really names the file,
+    // so "it is only a helper" cannot become a way to skip registration.
+    assert.throws(() => validateDrivers(root, [], [{file: probe, kind: 'fixture', reason,
+      consumers: ['tests/manual_probe/absent.py']}]), /fixture consumer missing/);
+    const consumer = 'tests/manual_probe/absent.py';
+    const consumerReason = 'manual driver: a helper the probe never mentions, kept registered '
+      + 'so the fixture claim below is the only thing under test';
+    await fs.writeFile(path.join(root, consumer), 'print("no reference here")\n');
+    assert.throws(() => validateDrivers(root, [], [
+      {file: probe, kind: 'fixture', reason, consumers: [consumer]},
+      {file: consumer, kind: 'driver', reason: consumerReason},
+    ]), /does not name it/);
+    await fs.writeFile(path.join(root, consumer), 'import run\nrun.main()\n');
+    validateDrivers(root, [], [
+      {file: probe, kind: 'fixture', reason, consumers: [consumer]},
+      {file: consumer, kind: 'driver', reason: consumerReason},
+    ]);
+    // Restoring the repository state turns it green again.
+    await fs.rm(path.join(root, 'tests'), {recursive: true, force: true});
+    validateDrivers(root, [], []);
+  } finally {
+    await fs.rm(root, {recursive: true, force: true});
+  }
+});
+
+test('the manifest CLI rejects a real unregistered driver and recovers', () => {
+  const work = fsSync.mkdtempSync(path.join(process.env.TMPDIR || '/tmp', 'manifest-cli-'));
+  const root = path.join(work, 'repo');
+  const probe = `tests/zz-manifest-probe-${process.pid}/run.py`;
+  const cli = () => {
+    try {
+      execFileSync(process.execPath, ['ci/test-manifest.mjs', 'check'], {cwd: root, encoding: 'utf8', stdio: 'pipe'});
+      return {rc: 0, out: ''};
+    } catch (error) {
+      return {rc: error.status, out: `${error.stdout || ''}${error.stderr || ''}`};
+    }
+  };
+  try {
+    const files = execFileSync('git', ['ls-files', '-z'], {cwd: repoRoot, encoding: 'utf8'}).split('\0').filter(Boolean);
+    fsSync.mkdirSync(root);
+    for (const file of files) {
+      const destination = path.join(root, file);
+      fsSync.mkdirSync(path.dirname(destination), {recursive: true});
+      fsSync.cpSync(path.join(repoRoot, file), destination);
+    }
+    execFileSync('git', ['init', '--quiet'], {cwd: root});
+    execFileSync('git', ['add', '--force', '.'], {cwd: root});
+    assert.equal(cli().rc, 0, 'the manifest is red before the probe is added');
+    fsSync.mkdirSync(path.dirname(path.join(root, probe)), {recursive: true});
+    fsSync.writeFileSync(path.join(root, probe), 'import sys\nsys.exit(1)\n');
+    const output = path.join(work, 'runner-results');
+    const runner = spawnSync(process.execPath,
+      ['ci/run-registered-tests.mjs', 'scripts', output, 'ci/test_build_resources.py'],
+      {cwd: repoRoot, encoding: 'utf8'});
+    assert.equal(runner.status, 0, `isolated probe polluted the shared runner: ${runner.stdout}${runner.stderr}`);
+    const report = JSON.parse(fsSync.readFileSync(path.join(output, 'results.json'), 'utf8'));
+    assert.deepEqual(report.results.map(result => [result.file, result.rc]), [['ci/test_build_resources.py', 0]]);
+    assert.match(fsSync.readFileSync(report.results[0].log, 'utf8'), /ASSERT oversized request capped to measured physical-memory budget/);
+    const red = cli();
+    assert.notEqual(red.rc, 0, 'the CLI accepted an unregistered test driver');
+    assert.match(red.out, /zz-manifest-probe-\d+\/run\.py/);
+    fsSync.rmSync(path.dirname(path.join(root, probe)), {recursive: true, force: true});
+    assert.equal(cli().rc, 0, 'the CLI stayed red after the probe was removed');
+  } finally {
+    fsSync.rmSync(work, {recursive: true, force: true});
+  }
+});
+
+test('a driver cannot claim no executor while a workflow names it', async () => {
+  const root = await fs.mkdtemp(path.join(process.env.TMPDIR || '/tmp', 'manifest-workflow-driver-'));
+  const probe = 'tests/manual_probe/run.py';
+  const reason = 'manual driver: no workflow provisions a stage1 compiler; documented invocation '
+    + '`python3 tests/manual_probe/run.py --compiler /path/to/cjcj-stage1`';
+  try {
+    execFileSync('git', ['init', '-q', root]);
+    await fs.mkdir(path.join(root, 'tests/manual_probe'), {recursive: true});
+    await fs.mkdir(path.join(root, '.github/workflows'), {recursive: true});
+    await fs.writeFile(path.join(root, probe), 'import sys\nsys.exit(1)\n');
+    await fs.writeFile(path.join(root, '.github/workflows/ci.yml'), 'run: python3 tests/manual_probe/run.py\n');
+    assert.throws(() => validateDrivers(root, [], [{file: probe, kind: 'driver', reason}]),
+      /claims no executor but a workflow names it/);
+    // The comment form is not an invocation, which is the same rule the
+    // workflow executor check applies to registered entries.
+    await fs.writeFile(path.join(root, '.github/workflows/ci.yml'), '# run: python3 tests/manual_probe/run.py\n');
+    validateDrivers(root, [], [{file: probe, kind: 'driver', reason}]);
+  } finally {
+    await fs.rm(root, {recursive: true, force: true});
+  }
 });
