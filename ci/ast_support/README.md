@@ -49,6 +49,13 @@ are printed. Windows qualification is `build-windows-runtime.yml`: it calls
 that artifact, cross-builds `std/ast.o`, then `build_windows_std_ast.mjs`
 rejects a swapped schema, header or archive before the DLL export guard.
 
+The Windows toolchain is passed explicitly to the outer CMake configure.
+`build_ast_support.sh` then removes `CMAKE_TOOLCHAIN_FILE` from the subprocess
+environment: upstream's FlatBuffers ExternalProject must build a host `flatc`,
+not a Windows `flatc.exe`, because schema generation runs on the build host.
+`node --test ci/ast-support-toolchain.test.mjs` checks this script boundary
+using real CMake configure records; it does not qualify the full AST archive.
+
 For Linux x86_64 host-pin integration evidence, run
 `python3 ci/test_ast_host_workflow.py --repo "$PWD" --work /absolute/empty/workdir`
 on a build worker with PyYAML, clang, CMake and Ninja installed. It executes the
