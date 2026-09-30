@@ -86,6 +86,22 @@ def run(args, case, single):
         checks['declarations_observed'] = bool(result['decls'])
         if args.reference:
             ref = json.loads((args.reference/tag/'result.json').read_text())
+            if args.reference_is_baseline and tag == '261_generic_extend_key':
+                # BaseMangler.cpp:1419-1421 keys extends by original Ty.String().
+                # The removed MangleType.String() returned only "Box", so the
+                # second specialization incorrectly shared the first bucket.
+                changed = []
+                for decl in ref['decls']:
+                    if decl['identifier'] == '' and decl['raw'] == '3Box<6String><:X':
+                        old = decl['export_id']
+                        suffix = 'K0_IRNat6StringEE'
+                        if not old.endswith(suffix):
+                            raise ValueError('baseline extend-index witness changed')
+                        decl['export_id'] = old[:-len(suffix)] + 'K_IRNat6StringEE'
+                        changed.append(dict(before=old, after=decl['export_id']))
+                if len(changed) != 1:
+                    raise ValueError('expected exactly one measured baseline extend-index delta')
+                result['expected_delta'] = changed
             checks['symbols_equal'] = result.get('symbols') == ref.get('symbols')
             # Compare fields independently so an unrelated assertion cannot mask
             # execution of the raw-name or export-id assertion.
@@ -106,6 +122,7 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     for key in ('compiler','sdk','inputs','output'): p.add_argument('--'+key, type=Path, required=True)
     p.add_argument('--reference', type=Path)
+    p.add_argument('--reference-is-baseline', action='store_true')
     a = p.parse_args()
     resource.setrlimit(resource.RLIMIT_CORE,(0,0))
     cases = [(src,False) for src in sorted(a.inputs.glob('*.cj'))]
