@@ -214,6 +214,8 @@ def verify(sdk: Path, lock: dict, pin: dict, identities: dict, errors: list, tar
         on_disk[rel] = path
     lock_files = lock.get('files') or {}
     check_symlinks(sdk, errors, lock_files=lock_files)
+    if errors:
+        return
     for rel, path in on_disk.items():
         if rel == LOCK_NAME:
             continue
