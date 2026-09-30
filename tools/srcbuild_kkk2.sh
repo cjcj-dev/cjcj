@@ -1206,8 +1206,13 @@ load_bootstrap_pins() {
     # shellcheck disable=SC1091
     source "$REPO_ROOT/ci/runtime_pin.env"
     BOOTSTRAP_HOST_SDK=${CJCJ_SRCBUILD_HOST_SDK:-${SRCBUILD_USER_HOME:-$HOME}/.cjv/toolchains/$CJCJ_TOOLCHAIN}
-    BOOTSTRAP_HOST_LLVM_SO=${CJCJ_BOOTSTRAP_HOST_LLVM_SO:-$BOOTSTRAP_HOST_SDK/third_party/llvm/lib/libLLVM-15.so}
-    BOOTSTRAP_HOST_LLVM_SHA256=$(bootstrap_input_sha256 "$BOOTSTRAP_HOST_LLVM_SO" "${CJCJ_BOOTSTRAP_HOST_LLVM_SHA256:-}") || return 1
+    local host_llvm_result
+    mkdir -p "$RUNNER_TEMP"
+    host_llvm_result=$(mktemp "$RUNNER_TEMP/host-llvm-result.XXXXXX") || return 1
+    node "$REPO_ROOT/ci/release/prepare_kkk2_host_llvm.mjs" "$host_llvm_result" >&2 || return 1
+    BOOTSTRAP_HOST_LLVM_SO=$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1])).file)' "$host_llvm_result") || return 1
+    BOOTSTRAP_HOST_LLVM_SHA256=$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1])).sha256)' "$host_llvm_result") || return 1
+    rm -f "$host_llvm_result"
     if [[ -n ${CJCJ_BOOTSTRAP_AST_SUPPORT:-} ]]; then
         BOOTSTRAP_AST_SUPPORT=$CJCJ_BOOTSTRAP_AST_SUPPORT
     elif [[ -f $CANGJIE_BUILD_ROOT/lib/libcangjie-ast-support.a ]]; then
