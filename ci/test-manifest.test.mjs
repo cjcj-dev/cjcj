@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {execFileSync} from 'node:child_process';
+import {execFileSync, spawnSync} from 'node:child_process';
 import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
 import path from 'node:path';
@@ -291,29 +291,46 @@ test('an unregistered nested driver in the existing directory shape turns the gu
 });
 
 test('the manifest CLI rejects a real unregistered driver and recovers', () => {
-  // Same product entry point CI runs: `node ci/test-manifest.mjs check`. The
-  // probe is an untracked file in this working tree, so discovery sees it
-  // exactly as it would see a committed one on a runner.
+  const work = fsSync.mkdtempSync(path.join(process.env.TMPDIR || '/tmp', 'manifest-cli-'));
+  const root = path.join(work, 'repo');
   const probe = `tests/zz-manifest-probe-${process.pid}/run.py`;
   const cli = () => {
     try {
-      execFileSync(process.execPath, ['ci/test-manifest.mjs', 'check'], {cwd: repoRoot, encoding: 'utf8', stdio: 'pipe'});
+      execFileSync(process.execPath, ['ci/test-manifest.mjs', 'check'], {cwd: root, encoding: 'utf8', stdio: 'pipe'});
       return {rc: 0, out: ''};
     } catch (error) {
       return {rc: error.status, out: `${error.stdout || ''}${error.stderr || ''}`};
     }
   };
-  assert.equal(cli().rc, 0, 'the manifest is red before the probe is added');
-  fsSync.mkdirSync(path.join(repoRoot, probe, '..'), {recursive: true});
   try {
-    fsSync.writeFileSync(path.join(repoRoot, probe), 'import sys\nsys.exit(1)\n');
+    const files = execFileSync('git', ['ls-files', '-z'], {cwd: repoRoot, encoding: 'utf8'}).split('\0').filter(Boolean);
+    fsSync.mkdirSync(root);
+    for (const file of files) {
+      const destination = path.join(root, file);
+      fsSync.mkdirSync(path.dirname(destination), {recursive: true});
+      fsSync.cpSync(path.join(repoRoot, file), destination);
+    }
+    execFileSync('git', ['init', '--quiet'], {cwd: root});
+    execFileSync('git', ['add', '--force', '.'], {cwd: root});
+    assert.equal(cli().rc, 0, 'the manifest is red before the probe is added');
+    fsSync.mkdirSync(path.dirname(path.join(root, probe)), {recursive: true});
+    fsSync.writeFileSync(path.join(root, probe), 'import sys\nsys.exit(1)\n');
+    const output = path.join(work, 'runner-results');
+    const runner = spawnSync(process.execPath,
+      ['ci/run-registered-tests.mjs', 'scripts', output, 'ci/test_build_resources.py'],
+      {cwd: repoRoot, encoding: 'utf8'});
+    assert.equal(runner.status, 0, `isolated probe polluted the shared runner: ${runner.stdout}${runner.stderr}`);
+    const report = JSON.parse(fsSync.readFileSync(path.join(output, 'results.json'), 'utf8'));
+    assert.deepEqual(report.results.map(result => [result.file, result.rc]), [['ci/test_build_resources.py', 0]]);
+    assert.match(fsSync.readFileSync(report.results[0].log, 'utf8'), /ASSERT oversized request capped to measured physical-memory budget/);
     const red = cli();
     assert.notEqual(red.rc, 0, 'the CLI accepted an unregistered test driver');
     assert.match(red.out, /zz-manifest-probe-\d+\/run\.py/);
+    fsSync.rmSync(path.dirname(path.join(root, probe)), {recursive: true, force: true});
+    assert.equal(cli().rc, 0, 'the CLI stayed red after the probe was removed');
   } finally {
-    fsSync.rmSync(path.dirname(probe), {recursive: true, force: true});
+    fsSync.rmSync(work, {recursive: true, force: true});
   }
-  assert.equal(cli().rc, 0, 'the CLI stayed red after the probe was removed');
 });
 
 test('a driver cannot claim no executor while a workflow names it', async () => {
