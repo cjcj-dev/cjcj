@@ -44,6 +44,37 @@ test('platform failure artifacts preserve the gate and teardown raw logs', () =>
   assert.match(upload, /runtime-source\/runtime\/tests\/gc_unit\/build\*\/\*\*\/\*\.log/);
 });
 
+test('runtime build entry refuses an unusable gdb and records the root cause', {timeout: 120000}, t => {
+  const root = path.resolve(import.meta.dirname, '../..');
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'runtime-tool-entry-'));
+  t.after(() => fs.rmSync(temporary, {recursive: true, force: true}));
+  const source = path.join(temporary, 'source');
+  fs.mkdirSync(path.join(source, 'runtime'), {recursive: true});
+  fs.writeFileSync(path.join(source, 'runtime/build.py'), '');
+  for (const args of [['init', '-q', source], ['-C', source, '-c', 'user.name=Zxilly', '-c', 'user.email=zxilly@outlook.com', 'commit', '-q', '--allow-empty', '-m', 'fixture']]) {
+    const result = spawnSync('git', args, {encoding: 'utf8'});
+    assert.equal(result.status, 0, result.stderr);
+  }
+  const tools = path.join(temporary, 'bin');
+  fs.mkdirSync(tools);
+  const writeTool = (name, body) => fs.writeFileSync(path.join(tools, name), `#!/bin/bash\n${body}\n`, {mode: 0o755});
+  writeTool('sudo', 'exit 0');
+  writeTool('gdb', 'echo "controlled gdb unavailable" >&2; exit 127');
+  writeTool('python3', 'if [[ "$1" == "--version" ]]; then echo fixture-python; exit 0; fi\necho "$*" >> "$BUILD_CALLS"\nmkdir -p "$PLATFORM_CI_ROOT/runtime-install"\ntouch "$PLATFORM_CI_ROOT/runtime-install/libcangjie-runtime.so"');
+  const output = path.join(temporary, 'output');
+  const calls = path.join(temporary, 'build-calls');
+  const result = spawnSync('npx', ['--yes', 'zx@8', 'ci/platform_matrix/build_runtime.mjs'], {
+    cwd: root, encoding: 'utf8', timeout: 110000,
+    env: {...process.env, PATH: `${tools}${path.delimiter}${process.env.PATH}`, RUNTIME_SOURCE: source,
+      RUNTIME_REF: '', RUNTIME_TARGET: 'native', RUNTIME_TOOLCHAIN: '', PLATFORM_CI_ROOT: output,
+      BUILD_CALLS: calls, GITHUB_STEP_SUMMARY: path.join(temporary, 'summary.md')},
+  });
+  assert.equal(result.status, 127, result.stdout + result.stderr);
+  assert.match(fs.readFileSync(path.join(output, 'logs/teardown-tools.log'), 'utf8'), /GC_UNIT_TEARDOWN_TOOL_FAIL tool=gdb rc=127/);
+  assert.match(fs.readFileSync(path.join(output, 'step-summary.md'), 'utf8'), /runtime — FAIL[\s\S]*exit: `127`/);
+  assert.equal(fs.existsSync(calls), false, 'unqualified teardown must not enter build.py');
+});
+
 test('probe CLI reports SDK capability independently of blocked cross-build readiness', t => {
   const sdk = fs.mkdtempSync(path.join(os.tmpdir(), 'release-probe-'));
   t.after(() => fs.rmSync(sdk, {recursive: true, force: true}));
