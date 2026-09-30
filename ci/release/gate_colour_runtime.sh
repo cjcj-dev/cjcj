@@ -48,9 +48,12 @@ export GC_UNIT_COLOUR_HOST_RUNTIME="$active/colour-host-runtime.so"
 # activate already exports GC_UNIT_CJC_RUNTIME_LIB_DIR and GCV2_RUNTIME_LIB_DIR:
 # the separate compiler host and this build's resolved target pair.
 export GC_UNIT_GATE_LANGUAGE_TESTS=all
-# setup_sdk records the official host SDK on LD_LIBRARY_PATH. The admission
-# uses the explicit directories above; that search path must not reach the suite.
+# setup_sdk records the official host SDK on PATH, LD_LIBRARY_PATH and
+# cjHeapSize. Admission uses the explicit directories above. The complete
+# gate re-runs the C++ suite, so that SDK search path must not reach it.
 unset LD_LIBRARY_PATH
+unset cjHeapSize
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 # This is the original complete gate, including its C++ cache qualification and
 # language result assertions; deferred status alone never reaches packaging.
 bash "$source_root/runtime/tests/gc_unit/gate_gc_unit.sh"
