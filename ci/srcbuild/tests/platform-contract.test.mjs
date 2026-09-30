@@ -131,13 +131,14 @@ const planTable = text => {
   return [...text.matchAll(/^\s*all='(\[[\s\S]*?\])'\s*$/gm)].flatMap(([, json]) => JSON.parse(json));
 };
 
-function matrixValues(job, text, key) {
+function matrixValues(job, text, key, plan) {
   const strategy = block(job, /^\s*strategy:\s*$/);
   assert.ok(strategy !== undefined, `matrix.${key} used outside a matrix job`);
   const dynamic = scalar(strategy, 'matrix');
   if (dynamic !== undefined) {
     assert.equal(dynamic, '${{ fromJson(needs.plan.outputs.matrix) }}');
-    return planTable(jobs(text).get('plan')).map(row => row[key]).filter(value => value !== undefined);
+    const rows = plan?.matrix ? JSON.parse(plan.matrix).include : planTable(jobs(text).get('plan'));
+    return rows.map(row => row[key]).filter(value => value !== undefined);
   }
   const matrix = block(strategy, /^\s*matrix:\s*$/);
   assert.ok(matrix !== undefined, 'literal matrix missing');
@@ -147,22 +148,50 @@ function matrixValues(job, text, key) {
     .map(([, value]) => unquote(value));
 }
 
-function expandMatrix(name, job, text) {
+function expandMatrix(name, job, text, plan) {
   const placeholder = name.match(/\$\{\{\s*matrix\.(\w+)\s*\}\}/);
   if (!placeholder) return [name];
-  const values = matrixValues(job, text, placeholder[1]);
+  const values = matrixValues(job, text, placeholder[1], plan);
   assert.ok(values.length > 0, `no matrix values for ${placeholder[1]} in ${name}`);
-  return values.flatMap(value => expandMatrix(name.replace(placeholder[0], value), job, text));
+  return values.flatMap(value => expandMatrix(name.replace(placeholder[0], value), job, text, plan));
 }
 
-function jobRuns(job, inputs) {
+function jobRuns(job, inputs, plan) {
   const condition = job.match(/^ {4}if: (.+?)\s*$/m)?.[1];
   if (condition === undefined) return true;
+  const ready = condition.match(/^needs\.plan\.outputs\.(has_runnable|has_blocked) == 'true'$/);
+  if (ready) {
+    assert.ok(plan && ready[1] in plan, `missing plan output: ${ready[1]}`);
+    return plan[ready[1]] === 'true';
+  }
+  const platforms = condition.match(/^contains\(needs\.plan\.outputs\.llvm_platforms, '(\w+)'\)(?: && inputs\.(\w+))?$/);
+  if (platforms) {
+    assert.ok(plan && 'llvm_platforms' in plan, 'missing llvm_platforms plan output');
+    return plan.llvm_platforms.split(',').includes(platforms[1])
+      && (!platforms[2] || inputs.get(platforms[2]) === 'true');
+  }
   const input = condition.match(/^inputs\.(\w+)$/);
   assert.ok(input, `unrecognized job condition: ${condition}`);
   const value = inputs.get(input[1]);
   assert.ok(value === 'true' || value === 'false', `non-boolean job input: ${condition}=${value}`);
   return value === 'true';
+}
+
+function artifactPlan(text, inputs) {
+  const planJob = jobs(text).get('plan') || jobs(text).get('matrix-plan');
+  const command = planJob && scalar(planJob, 'run');
+  if (!command?.includes('ci/srcbuild/target-matrix.mjs')
+      && !command?.includes('ci/target-matrix.mjs arm-soak')) return undefined;
+  const directory = fsSync.mkdtempSync(path.join(os.tmpdir(), 'artifact-plan-'));
+  const output = path.join(directory, 'outputs');
+  try {
+    execFileSync('bash', ['-eu', '-c', command], {cwd: root, encoding: 'utf8',
+      env: {...process.env, REQUESTED: inputs.get('targets') || 'all', GITHUB_OUTPUT: output, GITHUB_STEP_SUMMARY: ''}});
+    return Object.fromEntries(fsSync.readFileSync(output, 'utf8').trim().split('\n')
+      .map(line => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)]));
+  } finally {
+    fsSync.rmSync(directory, {recursive: true, force: true});
+  }
 }
 
 // Keep one record per actual upload/call. Never deduplicate names: the caller's
@@ -171,13 +200,27 @@ async function runArtifacts(entry, inputs = new Map(), stack = []) {
   assert.ok(!stack.includes(entry), `reusable workflow cycle: ${[...stack, entry].join(' -> ')}`);
   const text = uncommented(await readWorkflow(entry));
   const resolved = effectiveInputs(text, inputs);
+  const plan = artifactPlan(text, resolved);
   const produced = [];
   for (const job of jobs(text).values()) {
-    if (!jobRuns(job, resolved)) continue;
+    if (!jobRuns(job, resolved, plan)) continue;
     const called = scalar(job, 'uses')?.match(/^\.\/\.github\/workflows\/([\w.-]+\.yml)$/);
     if (called) {
-      const passed = mapping(block(job, /^\s*with:\s*$/));
-      produced.push(...await runArtifacts(called[1], passed, [...stack, entry]));
+      const strategy = block(job, /^\s*strategy:\s*$/);
+      const rows = strategy && scalar(strategy, 'matrix') === '${{ fromJson(needs.plan.outputs.matrix) }}'
+        ? JSON.parse(plan.matrix).include : [{}];
+      for (const row of rows) {
+        const passed = new Map([...mapping(block(job, /^\s*with:\s*$/))].map(([key, value]) => [key,
+          value.replace(/\$\{\{\s*matrix\.(\w+)\s*\}\}/g, (_, name) => {
+            assert.ok(name in row, `missing matrix.${name}`);
+            return row[name];
+          }).replace(/\$\{\{\s*needs\.(?:matrix-plan|plan)\.outputs\.(\w+)\s*\}\}/g, (_, name) => {
+            assert.ok(plan && name in plan, `missing plan output ${name}`);
+            return plan[name];
+          }).replace(/\$\{\{\s*inputs\.(\w+)(?:\s*\|\|\s*(false|'[^']*'))?\s*\}\}/g,
+            (_, name, fallback) => resolved.get(name) || unquote(fallback) || '')]));
+        produced.push(...await runArtifacts(called[1], passed, [...stack, entry]));
+      }
       continue;
     }
     for (const step of steps(job)) {
@@ -186,7 +229,7 @@ async function runArtifacts(entry, inputs = new Map(), stack = []) {
       // A step's display name precedes `with:`; read the artifact name there.
       const artifact = scalar(block(step, /^\s*with:\s*$/), 'name');
       assert.ok(artifact, `upload step ${name || ''} declares no artifact name`);
-      for (const expanded of expandMatrix(artifact, job, text)) produced.push([expanded, entry]);
+      for (const expanded of expandMatrix(artifact, job, text, plan)) produced.push([expanded, entry]);
     }
   }
   return produced;
