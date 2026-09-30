@@ -63,7 +63,9 @@ class CompilerAlias(unittest.TestCase):
         result = subprocess.run(['bash', str(self.runner), str(self.sdk), i['host'], i['host_runtime'],
                                  i['host_llvm_sha256'], i['compiler'], i['compiler_sha256'],
                                  i['run_sdk'], i['colour_llvm_sha256']], capture_output=True, text=True)
-        (self.work / 'install.log').write_text(result.stdout + result.stderr)
+        records = self.row.setdefault('installations', [])
+        (self.work / f'install-{len(records)}.log').write_text(result.stdout + result.stderr)
+        records.append({'rc': result.returncode, 'subcase': getattr(self, 'subcase', '')})
         self.row.update(install_rc=result.returncode, install_wall=time.monotonic() - start,
                         compiler_after=digest(self.sdk / 'bin/cjcj-stage1'))
         return result
@@ -119,6 +121,38 @@ class CompilerAlias(unittest.TestCase):
         self.assertEqual(self.row['compiler_after'], self.before)
         self.assertFalse((self.sdk / '.stage1-host').exists(), 'rejected before installation')
         outside.unlink()
+
+    def test_compiler_link_chain_rejected(self):
+        real = self.work / 'compiler-payload'
+        shutil.copyfile(self.inputs['compiler'], real)
+        real.chmod(0o755)
+        compiler = self.sdk / 'bin/cjcj-stage1'
+        compiler.unlink()
+        compiler.symlink_to(real)
+        result = self.install()
+        self.assertEqual(result.returncode, 1, 'compiler-link-chain-rejected')
+        self.assertRegex(result.stderr, r'STAGE1-RUNNER-FAIL (unsupported executable link:|regular executable required:) bin/cjc')
+        self.assertEqual(digest(real), self.before)
+        self.assertFalse((self.sdk / '.stage1-host').exists())
+        real.unlink()
+
+    def test_noncompiler_links_rejected(self):
+        for relative in ('tools/bin/cjpm', 'third_party/llvm/bin/opt', 'third_party/llvm/bin/llc'):
+            with self.subTest(relative=relative):
+                entry = self.sdk / relative
+                saved = entry.read_bytes()
+                entry.unlink()
+                entry.symlink_to(self.sdk / 'bin/cjcj-stage1')
+                self.subcase = relative
+                result = self.install()
+                print('ASSERT noncompiler-link-rejected', relative, result.returncode, flush=True)
+                self.assertEqual(result.returncode, 1, 'noncompiler-link-rejected')
+                self.assertRegex(result.stderr, r'STAGE1-RUNNER-FAIL (unsupported executable link:|regular executable required:) ' + relative)
+                self.assertEqual(self.row['compiler_after'], self.before)
+                self.assertFalse((self.sdk / '.stage1-host').exists())
+                entry.unlink()
+                entry.write_bytes(saved)
+                entry.chmod(0o755)
 
 
 if __name__ == '__main__':
