@@ -1442,7 +1442,10 @@ public class CompilerInstance {
                         VisitAction.WALK_CHILDREN
                     } else if (curDecl.astKind == ASTKind.MACRO_DECL) {
                         if (let Some(desugarDecl) <- curDecl.GetDesugarDecl()) {
-                            desugarDecl.mangledName = baseMangler.Mangle(desugarDecl)
+                            let convertedDesugarDecl = adapter.ConvertDecl(desugarDecl)
+                            let desugarMangledName = baseMangler.Mangle(convertedDesugarDecl)
+                            desugarDecl.mangledName = desugarMangledName
+                            convertedDesugarDecl.mangledName = desugarMangledName
                         }
                         VisitAction.WALK_CHILDREN
                     } else if (!Ty.IsTyCorrect(curDecl.GetTy())) {

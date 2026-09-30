@@ -73,10 +73,12 @@ export const GATING = Object.freeze([
   'ci/objc_darwin/run_e2e.test.mjs',
   'ci/patched-runtime-diagnostics.test.mjs',
   'ci/patched-runtime-language-defer.test.mjs',
+  'ci/official-runtime-isolation.test.mjs',
   'ci/bootstrap/prepare_cpp_headers.test.mjs',
   'ci/pin-sweep.test.mjs',
   'ci/release-pair-pin.test.mjs',
   'ci/release-gates.test.mjs',
+  'ci/smoke/smoke-runtime-isolation.test.mjs',
   'ci/release-run-evidence.test.mjs',
   // Node fixtures use mocked transport, no SDK or credentials. The publisher
   // exercises real zip/unzip; ci.yml installs both before running this list.
