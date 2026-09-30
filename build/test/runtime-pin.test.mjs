@@ -31,14 +31,14 @@ test('runtime source defaults to the checked-in pin', async () => {
   assert.equal(source.overrideRef, '');
 });
 
-for (const platform of ['darwin_aarch64', 'darwin_x86_64']) {
+const release = JSON.parse(await fs.readFile(
+  new URL('../../ci/colour-runtime/release.json', import.meta.url), 'utf8'));
+for (const [platform, published] of Object.entries(release.platforms)) {
   test(`runtime pin matches published native libraries for ${platform}`, async () => {
     const source = await resolveRuntimeSource({});
-    const release = JSON.parse(await fs.readFile(
-      new URL('../../ci/colour-runtime/release.json', import.meta.url), 'utf8'));
-    assert.equal(release.platforms[platform]?.runtime_sha, source.pinRef,
-      `DARWIN_RUNTIME_PIN_MISMATCH: ${platform}; rebuild and publish the native libraries with the runtime pin`);
-    console.log(`ASSERT DARWIN_RUNTIME_PIN_MATCH ${platform} ${source.pinRef}`);
+    assert.equal(published.runtime_sha ?? release.runtime_sha, source.pinRef,
+      `COLOUR_RUNTIME_PIN_MISMATCH: ${platform}; rebuild and publish the native libraries with the runtime pin`);
+    console.log(`ASSERT COLOUR_RUNTIME_PIN_MATCH ${platform} ${source.pinRef}`);
   });
 }
 
