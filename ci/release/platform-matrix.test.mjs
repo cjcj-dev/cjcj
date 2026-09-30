@@ -69,9 +69,9 @@ test('runtime build entry refuses an unusable gdb and records the root cause', {
       RUNTIME_REF: '', RUNTIME_TARGET: 'native', RUNTIME_TOOLCHAIN: '', PLATFORM_CI_ROOT: output,
       BUILD_CALLS: calls, GITHUB_STEP_SUMMARY: path.join(temporary, 'summary.md')},
   });
-  assert.equal(result.status, 127, result.stdout + result.stderr);
+  assert.equal(result.status, 1, result.stdout + result.stderr);
   assert.match(fs.readFileSync(path.join(output, 'logs/teardown-tools.log'), 'utf8'), /GC_UNIT_TEARDOWN_TOOL_FAIL tool=gdb rc=127/);
-  assert.match(fs.readFileSync(path.join(output, 'step-summary.md'), 'utf8'), /runtime — FAIL[\s\S]*exit: `127`/);
+  assert.match(fs.readFileSync(path.join(output, 'step-summary.md'), 'utf8'), /runtime — FAIL[\s\S]*exit: `1`/);
   assert.equal(fs.existsSync(calls), false, 'unqualified teardown must not enter build.py');
 });
 
