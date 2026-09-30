@@ -96,7 +96,12 @@ function runStepFailureFixture(from, through, failure, missingSdk = false) {
   const state = path.join(root, '.srcbuild');
   const bin = path.join(state, 'home/.local/bin');
   fs.mkdirSync(bin, {recursive: true});
-  fs.writeFileSync(path.join(state, 'kkk2-github.env'), 'CJCJ_SRCBUILD_VERSION=fixture-version\n');
+  fs.writeFileSync(path.join(state, 'kkk2-github.env'), [
+    'CJCJ_SRCBUILD_VERSION=fixture-version',
+    ...['CANGJIE_COMPILER_URL', 'RUNTIME_SRC_URL', 'TOOLS_SRC_URL', 'STDX_SRC_URL'].map(key => `${key}=https://fixture.invalid/source`),
+    ...['CANGJIE_COMPILER_SHA', 'RUNTIME_REF', 'TOOLS_REF', 'STDX_REF'].map(key => `${key}=${'1'.repeat(40)}`),
+    '',
+  ].join('\n'));
   fs.writeFileSync(path.join(state, 'kkk2-github.path'), '');
   const executable = (name, text) => {
     fs.writeFileSync(path.join(bin, name), `#!/usr/bin/env bash\nset -euo pipefail\n${text}\n`, {mode: 0o755});
@@ -126,6 +131,14 @@ case "$*" in
     [[ $SOURCE_SDK_VERSION == fixture-version ]]
     printf 'PARENT_EXPORT_CONSUMED\\n'
     ;;
+  *print-version*)
+    if [[ $FIXTURE_FAILURE == version ]]; then exit 42; fi
+    printf 'fixture-new-version\\n'
+    ;;
+  *fetch*)
+    [[ $CJCJ_SRCBUILD_VERSION == fixture-new-version ]]
+    printf 'VERSION_STATE_CONSUMED\\n'
+    ;;
   *) exit 99 ;;
 esac`);
   const result = spawnSync('bash', [path.join(root, 'tools/srcbuild_kkk2.sh'),
@@ -148,6 +161,8 @@ for (const scenario of [
   {name: 'SDK state survives', from: 5, through: 6, failure: '', rc: 0, state: 'SDK_STATE_CONSUMED'},
   {name: 'shim failure', from: 29, through: 34, failure: 'shim', rc: 37, next: 'compose-sdk.mjs'},
   {name: 'parent export survives', from: 29, through: 34, failure: '', rc: 0, state: 'PARENT_EXPORT_CONSUMED'},
+  {name: 'command substitution failure', from: 12, through: 13, failure: 'version', rc: 42, next: 'fetch'},
+  {name: 'version state survives', from: 12, through: 13, failure: '', rc: 0, state: 'VERSION_STATE_CONSUMED'},
 ]) {
   test(`source-build fail-fast: ${scenario.name}`, () => {
     const fixture = runStepFailureFixture(scenario.from, scenario.through, scenario.failure, scenario.missingSdk);
