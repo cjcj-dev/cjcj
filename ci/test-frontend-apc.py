@@ -115,13 +115,15 @@ def run_matrix(arguments):
         elif apc == 'split':
             command.extend(['--apc-split-num', '5'])
         if incremental:
-            command.append('--incremental-compile')
+            command.extend(['--experimental', '--incremental-compile', '--incremental-debug'])
         if mode in ('file', 'incremental'):
             command.extend(['-o', str(output)])
         elif mode == 'directory':
             command.extend(['-o', str(work)])
         elif mode == 'driver':
-            command.extend(['--save-temps', '-o', str(work / 'package.a')])
+            saved = work / 'saved'
+            saved.mkdir(exist_ok=True)
+            command.extend(['--save-temps', str(saved), '-o', str(work / 'package.a')])
         (evidence / 'command.json').write_text(json.dumps(command))
         with (evidence / 'compile.log').open('w') as log:
             try:
@@ -169,6 +171,8 @@ def run_matrix(arguments):
         'array-ref': [str(arguments.repo / 'tests/frontend_apc/arrays.cj'), '-O0'],
     }
     for surface, inputs in surfaces.items():
+        if surface not in arguments.surfaces.split(','):
+            continue
         reference = compile_case(surface, inputs, 'file', 'one', 0, None)
         if surface != 'arrays':
             names = ['childCount', 'newChild', 'makeNumber', 'makeReference'] if surface == 'objects' else [
@@ -176,16 +180,21 @@ def run_matrix(arguments):
             for name in names:
                 check(surface + '/reference/' + name, any(name in function for function in reference), name)
         for mode in ('file', 'directory', 'no-output'):
+            if mode not in arguments.modes.split(','):
+                continue
             for apc in ('default', 'explicit', 'bare'):
                 for iteration in range(1, arguments.iterations + 1):
                     compile_case(surface, inputs, mode, apc, iteration, reference)
-        compile_case(surface, inputs, 'file', 'split', 1, reference)
-        compile_case(surface, inputs, 'file', 'one', 1, reference)
+        if 'file' in arguments.modes.split(','):
+            compile_case(surface, inputs, 'file', 'split', 1, reference)
+            compile_case(surface, inputs, 'file', 'one', 1, reference)
         if surface != 'arrays':
-            for apc in ('default', 'explicit', 'bare'):
-                compile_case(surface, inputs, 'incremental', apc, 1, reference, True, 'cold')
-                compile_case(surface, inputs, 'incremental', apc, 1, reference, True, 'warm')
-            compile_case(surface, inputs, 'driver', 'explicit', 1, reference)
+            if 'incremental' in arguments.modes.split(','):
+                for apc in ('default', 'explicit', 'bare'):
+                    compile_case(surface, inputs, 'incremental', apc, 1, reference, True, 'cold')
+                    compile_case(surface, inputs, 'incremental', apc, 1, reference, True, 'warm')
+            if 'driver' in arguments.modes.split(','):
+                compile_case(surface, inputs, 'driver', 'explicit', 1, reference)
     result = {'assertions': assertions, 'failed': sum(not item['passed'] for item in assertions),
               'wall': time.monotonic() - started, 'jobs': os.cpu_count(), 'iterations': arguments.iterations}
     (root / 'result.json').write_text(json.dumps(result, indent=2))
@@ -201,4 +210,6 @@ if __name__ == '__main__':
         for option in ('compiler', 'sdk', 'llvm-library', 'repo', 'core', 'work'):
             parser.add_argument('--' + option, type=Path, required=True)
         parser.add_argument('--iterations', type=int, default=3)
+        parser.add_argument('--surfaces', default='objects,arrays,array-ref')
+        parser.add_argument('--modes', default='file,directory,no-output,incremental,driver')
         sys.exit(run_matrix(parser.parse_args()))
