@@ -315,21 +315,6 @@ private func preCheckIsEnumConstructor(ctx: ASTContext, sym: Symbol, names: Name
     return false
 }
 
-private func preCheckIsPrivateGlobalDifferentFile(current: Decl, previous: Decl): Bool {
-    return current.TestAttr(Attribute.GLOBAL) && current.TestAttr(Attribute.PRIVATE) &&
-        previous.TestAttr(Attribute.GLOBAL) && previous.TestAttr(Attribute.PRIVATE) &&
-        !preCheckSameFile(current, previous)
-}
-
-private func preCheckIsMultiPlatformPair(current: Decl, previous: Decl): Bool {
-    let oneIsFromCommonPart = current.TestAttr(Attribute.FROM_COMMON_PART) != previous.TestAttr(Attribute.FROM_COMMON_PART)
-    if (!oneIsFromCommonPart) {
-        return false
-    }
-    return (current.TestAttr(Attribute.COMMON) && previous.TestAttr(Attribute.SPECIFIC)) ||
-        (current.TestAttr(Attribute.SPECIFIC) && previous.TestAttr(Attribute.COMMON))
-}
-
 private func preCheckCollectDeclMapAndCheckRedefinitionForOneSymbol(
     ctx: ASTContext,
     diag: BasicDiagnosticEngine,
@@ -352,7 +337,16 @@ private func preCheckCollectDeclMapAndCheckRedefinitionForOneSymbol(
     let found = ctx.GetDeclsByName(names)
     if (!found.isEmpty()) {
         let previous = found[0]
-        if (!preCheckIsPrivateGlobalDifferentFile(decl, previous) && !preCheckIsMultiPlatformPair(decl, previous)) {
+        let privateGlobalInDifferentFile = decl.TestAttr(Attribute.GLOBAL) && decl.TestAttr(Attribute.PRIVATE) &&
+            previous.TestAttr(Attribute.GLOBAL) && previous.TestAttr(Attribute.PRIVATE) &&
+            decl.curFile != previous.curFile
+        let oneIsFromCommonPart = decl.TestAttr(Attribute.FROM_COMMON_PART) !=
+            previous.TestAttr(Attribute.FROM_COMMON_PART)
+        var multiPlat = oneIsFromCommonPart && decl.TestAttr(Attribute.COMMON) &&
+            previous.TestAttr(Attribute.SPECIFIC)
+        multiPlat = multiPlat || (oneIsFromCommonPart && decl.TestAttr(Attribute.SPECIFIC) &&
+            previous.TestAttr(Attribute.COMMON))
+        if (!privateGlobalInDifferentFile && !multiPlat) {
             DiagRedefinitionWithFoundNode(diag, decl, previous)
         }
     }
