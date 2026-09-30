@@ -60,9 +60,14 @@ with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
     results = dict(pool.map(run, variants))
 (out / 'results.json').write_text(json.dumps(results, indent=2) + '\n')
 for arm, result in results.items():
-    expected = (['arm soak produces every artifact its package job downloads, each exactly once']
-        if arm == 'blocked-consumer-cut' else
-        ['runnable source produces every package artifact exactly once'] if arm.endswith('-cut') else [])
+    expected = {
+        'same-job-cut': ['both caller subsets reach the same producer matrix and upload identity',
+            'the repository has one fixed LLVM artifact uploader and preserves native and Windows checks',
+            'runnable source produces every package artifact exactly once'],
+        'cross-job-cut': ['the repository has one fixed LLVM artifact uploader and preserves native and Windows checks',
+            'runnable source produces every package artifact exactly once'],
+        'blocked-consumer-cut': ['arm soak produces every artifact its package job downloads, each exactly once'],
+    }.get(arm, [])
     print(f'ASSERT artifact-uniqueness arm={arm} rc={result["rc"]} failed={result["failed"]}', flush=True)
     assert result['rc'] == bool(expected) and result['failed'] == expected
     assert result['test_sha256'] == results['candidate']['test_sha256']
