@@ -55,6 +55,7 @@ def main():
     parser.add_argument('--phase', choices=('raw', 'opt', 'ir'), action='append')
     parser.add_argument('--optimization', choices=('O0', 'O2'), action='append')
     parser.add_argument('--source', type=Path, action='append')
+    parser.add_argument('--workers', type=int, choices=range(1, 5), default=4)
     args = parser.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
     sources = args.source or sorted(Path(__file__).parent.glob('*.cj'))
@@ -69,9 +70,9 @@ def main():
             libraries[str(library)] = digest(library)
     summary = {'compiler': str(args.compiler), 'compiler_sha256': digest(args.compiler),
                'affinity': sorted(os.sched_getaffinity(0)), 'jobs': os.cpu_count(),
-               'parallel_compilers': 4, 'libraries': libraries, 'ldd_rc': linkage.returncode,
+               'parallel_compilers': args.workers, 'libraries': libraries, 'ldd_rc': linkage.returncode,
                'cases': []}
-    with ThreadPoolExecutor(max_workers=4) as pool:
+    with ThreadPoolExecutor(max_workers=args.workers) as pool:
         futures = [pool.submit(compile_case, args.compiler, source,
                                args.out / (source.stem + '-' + phase + '-' + optimization),
                                phase, optimization)
