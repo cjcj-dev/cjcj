@@ -199,9 +199,11 @@ def run_matrix(arguments):
             compile_case(surface, inputs, 'file', 'one', 1, reference)
         if surface != 'arrays':
             if 'incremental' in arguments.modes.split(','):
+                incremental_reference = compile_case(surface, inputs, 'incremental', 'one', 0,
+                                                     None, True, 'reference')
                 for apc in ('default', 'explicit', 'bare'):
-                    compile_case(surface, inputs, 'incremental', apc, 1, reference, True, 'cold')
-                    compile_case(surface, inputs, 'incremental', apc, 1, reference, True, 'warm')
+                    compile_case(surface, inputs, 'incremental', apc, 1, incremental_reference, True, 'cold')
+                    compile_case(surface, inputs, 'incremental', apc, 1, incremental_reference, True, 'warm')
             if 'driver' in arguments.modes.split(','):
                 compile_case(surface, inputs, 'driver', 'explicit', 1, reference)
     result = {'assertions': assertions, 'failed': sum(not item['passed'] for item in assertions),
