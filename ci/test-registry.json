@@ -1,5 +1,10 @@
 [
   {
+    "file": "ci/bootstrap/test_runner_compiler_alias.py",
+    "executor": "manual",
+    "reason": "Requires authenticated RUNNER_INPUTS and a real self-built stage1 SDK; independent script-contract fixtures cannot qualify this native compiler handoff."
+  },
+  {
     "file": "build/test/srcbuild_git_shell_contract.sh",
     "executor": "bash",
     "args": []

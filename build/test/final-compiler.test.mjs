@@ -3,7 +3,40 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import {produceFinalCompiler, consumeFinalCompiler, fileSha256, stdIdentity} from '../../ci/srcbuild/lib/final-compiler.mjs';
+import {produceFinalCompiler, consumeFinalCompiler, fileSha256, stdIdentity, payloadIdentity} from '../../ci/srcbuild/lib/final-compiler.mjs';
+
+test('std payload identity checks materialized alias bytes', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'std-payload-'));
+  t.after(() => fs.rm(root, {recursive: true, force: true}));
+  const std = path.join(root, 'std');
+  const sdk = path.join(root, 'sdk');
+  await fs.mkdir(std);
+  await fs.writeFile(path.join(std, 'libpcre2-8.so.0.14.0'), 'std dependency');
+  await fs.symlink('libpcre2-8.so.0.14.0', path.join(std, 'libpcre2-8.so.0'));
+  await fs.symlink('libpcre2-8.so.0', path.join(std, 'libpcre2-8.so'));
+  await fs.cp(std, sdk, {recursive: true, dereference: true});
+  await fs.writeFile(path.join(sdk, 'compiler-only'), 'outside the std layout');
+  const expected = await payloadIdentity(std);
+  let actual;
+  let failure;
+  try { actual = await payloadIdentity(sdk, std); } catch (error) { failure = error; }
+  t.diagnostic(`STD_PAYLOAD_ASSERT_REACHED expected=${expected} actual=${actual} code=${failure?.code ?? 'OK'}`);
+  assert.equal(actual, expected, 'materialized std must preserve every payload byte');
+  for (const name of ['libpcre2-8.so', 'libpcre2-8.so.0', 'libpcre2-8.so.0.14.0']) {
+    const installed = path.join(sdk, name);
+    const original = await fs.readFile(installed);
+    const changed = Buffer.from(original);
+    changed[0] ^= 1;
+    await fs.writeFile(installed, changed);
+    const altered = await payloadIdentity(sdk, std);
+    t.diagnostic(`STD_PAYLOAD_MUTATION_ASSERT_REACHED path=${name} equal=${altered === expected}`);
+    assert.notEqual(altered, expected, 'each materialized alias is independently verified');
+    await fs.writeFile(installed, original);
+  }
+  assert.equal(await payloadIdentity(sdk, std), expected);
+  await fs.rm(path.join(sdk, 'libpcre2-8.so'));
+  await assert.rejects(payloadIdentity(sdk, std), {code: 'ENOENT'});
+});
 
 for (const platform of ['linux-x64', 'linux-aarch64', 'darwin-x64', 'darwin-arm64', 'windows-x64']) {
   test(`final compiler producer/consumer identity: ${platform}`, async t => {

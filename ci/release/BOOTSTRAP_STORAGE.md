@@ -1,5 +1,18 @@
 # Persistent bootstrap inputs
 
+Local self-bootstrap can explicitly set
+`CJCJ_BOOTSTRAP_RUNTIME_SOURCE=local-sharedbuild` together with an absolute
+`CJCJ_BOOTSTRAP_COLOUR_RT` root and its reviewed `COLOUR_RT_MANIFEST_SHA256`.
+The unified input entry requires a `local:<producer>` manifest, the pinned
+runtime source, every manifest payload digest, and the matching `CJRT-COMMIT`
+stamp. It exports the original full root, including static libraries.
+Without that declaration, local manifests are rejected. GitHub Actions always
+rejects this source (`COLOUR_RT_LOCAL_PUBLICATION_FORBIDDEN`), including all
+publication and packaging workflows; their GHA artifact pins remain unchanged.
+Locally bootstrapped language tuples record this runtime source and its
+manifest/SO digests in provenance; this does not turn local runtime inputs into
+published GHA runtime artifacts.
+
 `build-fixed-llc.yml` is the publication entry point. In one workflow
 run it calls the existing fixed tuple producer, waits for its artifact ID, then
 publishes exactly that artifact's reviewed file list to a dedicated prerelease

@@ -1,0 +1,179 @@
+name: Source language tuple prerelease
+
+on:
+  push:
+    branches: [master]
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: source-language-tuple
+  cancel-in-progress: false
+
+jobs:
+  compiler-runtime:
+    runs-on: ubuntu-22.04
+    outputs:
+      source_sha: ${{ steps.source.outputs.sha }}
+      artifact_id: ${{ steps.artifact.outputs.artifact-id }}
+      manifest_sha256: ${{ steps.package.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Resolve runtime main once
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha=$(git ls-remote https://github.com/cjcj-dev/cangjie-runtime.git refs/heads/main | awk '{print $1}')
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "RUNTIME_REF=$sha" >> "$GITHUB_ENV"
+          echo "CANGJIE_BUILD_JOBS=$(nproc)" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v7
+        with:
+          repository: cjcj-dev/cangjie-runtime
+          ref: ${{ steps.source.outputs.sha }}
+          path: runtime-source
+      - uses: ./.github/actions/sccache
+        with:
+          component: runtime
+          platform: ubuntu-22.04
+          pin: ${{ env.RUNTIME_REF }}
+          cache-size: 1G
+      - name: Build frozen compiler runtime
+        env:
+          RUNTIME_BUILD_TYPE: relwithdebinfo
+          GC_UNIT_GATE_LANGUAGE_TESTS: defer
+          CJCJ_SOURCE_TUPLE: 1
+        run: npx --yes zx@8 ci/platform_matrix/build_runtime.mjs
+      - name: Package compiler runtime provenance
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t bounds < <(find runtime-source/runtime -type f -name libboundscheck.so)
+          test "${#bounds[@]}" = 1
+          cp "${bounds[0]}" .platform-ci/runtime-install/runtime/lib/linux_x86_64_cjnative/libboundscheck.so
+          node ci/release/colour_runtime.mjs .platform-ci/runtime-install compiler-runtime
+      - uses: actions/upload-artifact@v7
+        id: artifact
+        with:
+          name: source-tuple-compiler-runtime
+          path: compiler-runtime
+          if-no-files-found: error
+          retention-days: 7
+      - uses: ./.github/actions/sccache-report
+        if: always()
+        with:
+          component: runtime
+          platform: ubuntu-22.04
+          require-compiles: ${{ job.status == 'success' }}
+
+  source-build:
+    needs: compiler-runtime
+    uses: ./.github/workflows/srcbuild.yml
+    with:
+      targets: linux-x64
+      language_tuple: true
+      runtime_ref: ${{ needs.compiler-runtime.outputs.source_sha }}
+      runtime_artifact_id: ${{ needs.compiler-runtime.outputs.artifact_id }}
+      runtime_manifest_sha256: ${{ needs.compiler-runtime.outputs.manifest_sha256 }}
+
+  qualify-and-publish:
+    needs: [compiler-runtime, source-build]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RUNTIME_REF: ${{ needs.compiler-runtime.outputs.source_sha }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: source-language-tuple-linux-x64
+          path: package
+      - name: Restore archive modes and local aliases
+        run: |
+          set -euo pipefail
+          # Artifact transport does not preserve executable modes or aliases.
+          # The tar archive is the transport authority; extract it through the
+          # same consumer used after release download.
+          python3 - <<'PY'
+          import argparse, json, sys
+          from pathlib import Path
+          sys.path.insert(0, 'ci/release')
+          from source_language_tuple import unpack
+          from language_tuple import digest
+          p = Path('package')
+          value = json.loads((p / 'language-tuple.json').read_text())
+          archives = list(p.glob('source-language-tuple-*.tar.gz'))
+          assert len(archives) == 1
+          unpack(argparse.Namespace(archive=archives[0], archive_sha256=digest(archives[0]),
+              output=Path('transport'), manifest_sha256=digest(p / 'language-tuple.json'),
+              compiler_sha256=value['role_sha256']['compiler']))
+          import shutil
+          shutil.rmtree(p / 'tuple', ignore_errors=True)
+          shutil.move('transport/tuple', p / 'tuple')
+          PY
+      - name: Stage prerelease and read back exact release assets
+        run: |
+          python3 ci/release/publish_source_language_tuple.py stage --package package --pin source-tuple-pin.json
+          python3 ci/release/publish_source_language_tuple.py fetch --pin source-tuple-pin.json --allow-draft --output downloaded
+      - uses: actions/checkout@v7
+        with:
+          repository: cjcj-dev/cangjie-runtime
+          ref: ${{ env.RUNTIME_REF }}
+          path: runtime-source
+      - uses: ./.github/actions/sccache
+        with:
+          component: runtime
+          platform: ubuntu-22.04
+          pin: ${{ env.RUNTIME_REF }}
+          cache-size: 1G
+      - name: Build independent target runtime
+        env:
+          RUNTIME_BUILD_TYPE: relwithdebinfo
+          GC_UNIT_GATE_LANGUAGE_TESTS: defer
+          CJCJ_SOURCE_TUPLE: 1
+        run: npx --yes zx@8 ci/platform_matrix/build_runtime.mjs
+      - name: Qualify downloaded tuple with the unchanged runtime language gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t configs < <(find runtime-source/runtime/output/temp -name runtime-build-config.txt)
+          test "${#configs[@]}" = 1
+          output=$(dirname "${configs[0]}")
+          target=$(sed -n 's/^LIB_DIR=//p' "${configs[0]}")
+          test -f "$target/libcangjie-runtime.so"
+          python3 ci/release/source_language_tuple.py qualify \
+            --root downloaded/installed/tuple --runtime-source runtime-source \
+            --target "$target" --output qualification \
+            --manifest-sha256 "$(python3 -c 'import json; print(json.load(open("source-tuple-pin.json"))["manifest_sha256"])')" \
+            --compiler-sha256 "$(python3 -c 'import json; print(json.load(open("source-tuple-pin.json"))["compiler_sha256"])')" \
+            --target-runtime-sha256 "$(sha256sum "$target/libcangjie-runtime.so" | cut -d' ' -f1)" \
+            --target-boundscheck-sha256 "$(sha256sum "$target/libboundscheck.so" | cut -d' ' -f1)"
+      - name: Publish only while both source heads still match
+        run: python3 ci/release/publish_source_language_tuple.py finalize --pin source-tuple-pin.json --qualification qualification
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: source-tuple-publication-evidence
+          path: |
+            source-tuple-pin.json
+            qualification/qualification.json
+            qualification/gate.log
+            qualification/gate/*.log
+          if-no-files-found: warn
+      - uses: ./.github/actions/sccache-report
+        if: always()
+        with:
+          component: runtime
+          platform: ubuntu-22.04
+          require-compiles: ${{ job.status == 'success' }}

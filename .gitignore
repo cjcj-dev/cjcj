@@ -19,6 +19,7 @@ cjpm.lock.tmp
 /tmp/
 .DS_Store
 scripts/__pycache__/
+ci/bootstrap/__pycache__/
 
 # Stray local binaries
 /main

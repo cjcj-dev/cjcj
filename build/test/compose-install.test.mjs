@@ -29,7 +29,9 @@ test('compose replaces stage2 wrapper with recorded stage3 product', async t => 
   assert.equal(await fs.readFile(installed, 'utf8'), 'stage3 final compiler fixture');
   assert.equal(await fileSha256(installed), lineage.compilerSha256);
   assert.equal(await fileSha256(path.join(sdk, 'bin', 'cjc-frontend')), lineage.compilerSha256);
-  assert.equal(await fs.readlink(path.join(sdk, 'bin', 'cjc')), 'cjcj-stage1');
+  assert.equal(await fs.readlink(installed), 'cjcj-stage1');
+  assert.equal(await fs.readlink(path.join(sdk, 'bin', 'cjc-frontend')), 'cjcj-stage1');
+  assert.equal((await fs.lstat(path.join(sdk, 'bin', 'cjcj-stage1'))).isFile(), true);
   await assert.rejects(fs.stat(path.join(sdk, 'bin', 'cjcj-stage2')), {code: 'ENOENT'});
 });
 

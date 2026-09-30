@@ -40,14 +40,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from cmpir import normalize as _normalize, canonicalize as _canonicalize  # noqa: E402
 
 
-def env():
+def env(home=CANGJIE_HOME, host_runtime=HOST_RUNTIME, loader=None):
     e = dict(os.environ)
-    e["CANGJIE_HOME"] = CANGJIE_HOME
-    libs = [f"{CANGJIE_HOME}/third_party/llvm/lib",
-            *([HOST_RUNTIME] if HOST_RUNTIME else []),
-            TARGET_RUNTIME,
-            f"{CANGJIE_HOME}/tools/lib", e.get("LD_LIBRARY_PATH", "")]
-    e["LD_LIBRARY_PATH"] = ":".join(p for p in libs if p)
+    e["CANGJIE_HOME"] = home
+    libs = [f"{home}/third_party/llvm/lib",
+            *([host_runtime] if host_runtime else []),
+            f"{home}/runtime/lib/linux_x86_64_cjnative",
+            f"{home}/tools/lib", e.get("LD_LIBRARY_PATH", "")]
+    e["LD_LIBRARY_PATH"] = loader if loader is not None else ":".join(p for p in libs if p)
     e["cjHeapSize"] = "8GB"
     return e
 
@@ -135,6 +135,8 @@ def main():
         print(f"HARNESS: {error}", file=sys.stderr)
         return 2
     e = env()
+    base_e = env(home=os.environ.get("BCGATE_BASE_HOME", CANGJIE_HOME),
+                 loader=os.environ.get("BCGATE_BASE_LD_LIBRARY_PATH"))
     samples = sorted(Path(args.corpus).resolve().glob("*.cj"))
     if not samples:
         print(f"no .cj in {args.corpus}", file=sys.stderr)
@@ -149,7 +151,7 @@ def main():
     def process(src, work):
         """Per-sample work (independent, isolated workdirs) -> partial result. No shared state."""
         cand, cerr = emit_funcs(args.cand, src, work / "c" / src.stem, e)
-        base, berr = emit_funcs(args.base, src, work / "b" / src.stem, e)
+        base, berr = emit_funcs(args.base, src, work / "b" / src.stem, base_e)
         if cand is None or base is None:
             return {"name": src.name, "error": cerr or berr}
         shared = set(cand) & set(base)

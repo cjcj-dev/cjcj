@@ -579,7 +579,10 @@ test('Darwin selfhost link uses the source SDK dylib and libc++', () => {
   assert.doesNotMatch(link, /libLLVM-15\.so|-lstdc\+\+/);
 });
 
-test('Windows final std is cross-built by the stage2 Linux host compiler', async () => {
+// #736 moved these jobs into srcbuild-target.yml and reordered them: the
+// source-mingw job now restores the stage3 handoff before cross-building, so
+// the stage2 step name it shipped with is stale and the stage3 one is truthful.
+test('Windows final std is cross-built by the shipped stage3 Linux host compiler', async () => {
   const workflow = await fs.readFile(path.join(root, '.github/workflows/srcbuild-target.yml'), 'utf8');
   const producer = await fs.readFile(path.join(root, 'ci/srcbuild/steps/build-windows-final-std.mjs'), 'utf8');
   for (const edge of [
@@ -590,7 +593,8 @@ test('Windows final std is cross-built by the stage2 Linux host compiler', async
   ]) assert.ok(workflow.includes(edge), edge);
   for (const contract of [
     "getTarget('windows-x64')",
-    "path.join(sdk, 'bin', 'cjcj-stage2')",
+    "path.join(sdk, 'bin', 'cjcj-stage1')",
+    "lineage.stdCompilerSha256 !== lineage.compilerSha256",
     '--target windows-x86_64',
     '--target-sysroot ${mingwRoot}/',
     '--target-toolchain ${mingwBin}',

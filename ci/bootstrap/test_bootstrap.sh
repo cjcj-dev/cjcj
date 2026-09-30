@@ -157,6 +157,7 @@ check_dry_contract() {
   # not prove that cjpm receives the job count.
   check_count CJPM-EXEC-JOBS 1 "tools/bin/cjpm\\\\ build\\\\ -j\\\\ $jobs$" "$log"
   echo "PASS dry stage1 cjpm jobs=$jobs reaches execution command"
+  check_count BOOTSTRAP-STD 1 'CMD python3 .*seed_official_std.py --sdk .*/base --tuple linux_x86_64_cjnative --output .*/stdlib-stage1' "$log"
   # Use the same resource policy and requested heap as the product. Run it in
   # a subshell so the expected value does not alter the fixture environment.
   local heap

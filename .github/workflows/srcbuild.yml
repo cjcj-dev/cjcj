@@ -18,8 +18,23 @@ on:
         required: false
         type: boolean
         default: false
+      language_tuple:
+        description: Build the source language tuple from a same-run runtime artifact (Linux x64 only)
+        required: false
+        type: boolean
+        default: false
+      runtime_artifact_id:
+        description: Same-run compiler runtime artifact ID for language_tuple
+        required: false
+        type: string
+        default: ''
+      runtime_manifest_sha256:
+        description: Same-run compiler runtime manifest digest for language_tuple
+        required: false
+        type: string
+        default: ''
       runtime_ref:
-        description: Dry-run only; exact runtime commit, otherwise ci/runtime_pin.env is used
+        description: Exact runtime commit for dry-run or language_tuple; otherwise ci/runtime_pin.env is used
         required: false
         type: string
         default: ''
@@ -58,8 +73,23 @@ on:
         required: false
         type: boolean
         default: false
+      language_tuple:
+        description: Build the source language tuple from a same-run runtime artifact (Linux x64 only)
+        required: false
+        type: boolean
+        default: false
+      runtime_artifact_id:
+        description: Same-run compiler runtime artifact ID for language_tuple
+        required: false
+        type: string
+        default: ''
+      runtime_manifest_sha256:
+        description: Same-run compiler runtime manifest digest for language_tuple
+        required: false
+        type: string
+        default: ''
       runtime_ref:
-        description: Dry-run only; exact runtime commit, otherwise ci/runtime_pin.env is used
+        description: Exact runtime commit for dry-run or language_tuple; otherwise ci/runtime_pin.env is used
         required: false
         type: string
         default: ''
@@ -135,6 +165,9 @@ jobs:
       runtime_ref: ${{ inputs.runtime_ref }}
       build_android: ${{ inputs.build_android || false }}
       rebuild_llvm: ${{ inputs.rebuild_llvm || false }}
+      language_tuple: ${{ inputs.language_tuple || false }}
+      runtime_artifact_id: ${{ inputs.runtime_artifact_id }}
+      runtime_manifest_sha256: ${{ inputs.runtime_manifest_sha256 }}
 
   blocked:
     name: Report blocked source targets

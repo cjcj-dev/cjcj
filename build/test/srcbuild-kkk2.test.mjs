@@ -877,7 +877,7 @@ function writeAstInputFixture(archive) {
 
 // Execute the complete driver, including retained-state loading, prerequisite,
 // run_step and the final RESULT. Only external inputs live in the fixture.
-function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFailure = false, child = false, coreObserve = false, runtimeCase = 'valid', ast = 'explicit', largeContract = false, contractDefect} = {}) {
+function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFailure = false, child = false, coreObserve = false, runtimeCase = 'valid', runtimeLayout = 'flat', ast = 'explicit', largeContract = false, contractDefect} = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bootstrap argv '));
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));
   for (const dir of ['ci', 'build', 'tools']) {
@@ -942,8 +942,10 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
   fs.writeFileSync(inputs + '/ast.a', 'ast input\n');
   writeAstInputFixture(inputs + '/ast.a');
   const runtimePin = fs.readFileSync(path.join(root, 'ci/runtime_pin.env'), 'utf8').match(/^RUNTIME_REF=(.*)$/m)[1];
-  const runtimeDir = path.join(inputs, 'external runtime');
-  fs.mkdirSync(runtimeDir);
+  const runtimeRoot = path.join(inputs, 'external runtime');
+  const runtimeTuple = `linux_${os.arch() === 'x64' ? 'x86_64' : 'aarch64'}_cjnative`;
+  const runtimeDir = runtimeLayout === 'nested' ? path.join(runtimeRoot, 'runtime/lib', runtimeTuple) : runtimeRoot;
+  fs.mkdirSync(runtimeDir, {recursive: true});
   let stamp = `CJRT-COMMIT:${runtimePin}`;
   if (runtimeCase === 'old-pin') stamp = `CJRT-COMMIT:${'0'.repeat(40)}`;
   fs.writeFileSync(runtimeDir + '/libcangjie-runtime.so', stamp + '\n');
@@ -954,6 +956,20 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
   if (runtimeCase === 'bounds-corrupt') fs.appendFileSync(runtimeDir + '/libboundscheck.so', 'changed');
   if (runtimeCase === 'bounds-missing') fs.unlinkSync(runtimeDir + '/libboundscheck.so');
   if (runtimeCase === 'runtime-missing') fs.unlinkSync(runtimeDir + '/libcangjie-runtime.so');
+
+  let manifestSha = '';
+  if (runtimeLayout === 'nested') {
+    const manifest = path.join(runtimeRoot, 'manifest.json');
+    fs.writeFileSync(manifest, JSON.stringify({
+      runtime_sha: runtimeCase === 'manifest-source' ? '0'.repeat(40) : runtimePin,
+      platform: `linux_${os.arch() === 'x64' ? 'x86_64' : 'aarch64'}`,
+      files: {
+        [`runtime/lib/${runtimeTuple}/libcangjie-runtime.so`]: runtimeSha,
+        [`runtime/lib/${runtimeTuple}/libboundscheck.so`]: boundsSha,
+      },
+    }));
+    manifestSha = runtimeCase === 'manifest-corrupt' ? '0'.repeat(64) : sha256(manifest);
+  }
 
   fs.writeFileSync(tuple + '/MANIFEST', `LLVM_SHA=${llvmSha}\n`);
   fs.writeFileSync(tuple + '/bin/opt', `CJLLVM-COMMIT:${llvmSha}\n`);
@@ -997,7 +1013,8 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
     CJCJ_BOOTSTRAP_AST_SUPPORT: inputs + '/ast.a',
     CJCJ_BOOTSTRAP_AST_SUPPORT_SHA256: astInputPins.explicit,
     CJCJ_BOOTSTRAP_COLOUR_TUPLE: tuple,
-    CJCJ_BOOTSTRAP_COLOUR_RT: runtimeCase === 'undeclared' ? '' : runtimeDir,
+    CJCJ_BOOTSTRAP_COLOUR_RT: runtimeCase === 'undeclared' ? '' : runtimeRoot,
+    COLOUR_RT_MANIFEST_SHA256: manifestSha,
     CJCJ_BOOTSTRAP_COLOUR_RT_SHA256: runtimeCase === 'no-runtime-sha' ? '' : runtimeSha,
     CJCJ_BOOTSTRAP_BOUNDSCHECK_SHA256: runtimeCase === 'no-bounds-sha' ? '' : boundsSha,
     CJCJ_BOOTSTRAP_CJCJ_SHA: sourceSha,
@@ -1083,6 +1100,7 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
     hostArtifact,
     hostIdentities,
     runtimeDir,
+    runtimeRoot,
     sourceSha,
     dryRun(step, sample) {
       const result = spawnSync('bash', [driver, '--from-step', String(step), '--through-step', String(step), '--dry-run'],
@@ -1376,6 +1394,7 @@ test('ast-support input contract missing stops real stage entry', t => {
   console.log(`AST_ENTRY_ASSERT ${JSON.stringify(observed)}`);
   assert.deepEqual(observed, {rc: 1, missingKey: true, bootstrapStarted: false});
 });
+
 
 test('stage0 disables core dumps before launching the bootstrap child', t => {
   const result = bootstrapDriverFixture(t, {child: true, coreObserve: true}).run(31);

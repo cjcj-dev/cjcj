@@ -2,7 +2,7 @@
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import {assertBootstrapCompiler} from '../lib/bootstrap-handoff.mjs';
+import {fileSha256} from '../lib/final-compiler.mjs';
 import {writeStdProvenance} from '../../../build/lib/provenance.mjs';
 import {getTarget} from '../../../build/lib/targets.mjs';
 import {installPath, isInstalled, TARGET_TRIPLE} from '../../../build/toolchain/mingw.mjs';
@@ -32,7 +32,7 @@ if (!target.spec.crossCompile) throw new Error('windows-x64 must remain a cross 
 if (!isInstalled(buildRoot)) throw new Error(`official MinGW toolchain is incomplete under ${installPath(buildRoot)}`);
 
 const sdk = path.join(workspace, 'software', 'cangjie');
-const compiler = path.join(sdk, 'bin', 'cjcj-stage2');
+const compiler = path.join(sdk, 'bin', 'cjcj-stage1');
 const runtimeRepository = path.join(workspace, 'cangjie_runtime');
 const runtimeRoot = path.join(runtimeRepository, 'runtime');
 const runtimeOutput = path.join(runtimeRoot, 'output');
@@ -50,13 +50,16 @@ if (runtimeRef !== expectedRuntimeRef) {
 const resolvedCompiler = await fs.realpath(compiler);
 const compilerKind = (await $({stdio: 'pipe'})`file -b ${compiler}`).stdout.trim();
 if (!compilerKind.includes('ELF') || !compilerKind.includes('x86-64')) {
-  throw new Error(`stage2 host compiler has wrong format: ${compilerKind}`);
+  throw new Error(`stage3 host compiler has wrong format: ${compilerKind}`);
 }
 
 const stageEnv = {
   ...process.env,
   ARCH: 'x86_64',
   CANGJIE_HOME: sdk,
+  LD_LIBRARY_PATH: [path.join(sdk, 'runtime/lib/linux_x86_64_cjnative'),
+    path.join(sdk, 'lib/linux_x86_64_cjnative'), path.join(sdk, 'third_party/llvm/lib'),
+    path.join(sdk, 'tools/lib'), '/usr/lib/x86_64-linux-gnu'].join(path.delimiter),
   CANGJIE_VERSION: version,
   CMAKE_PREFIX_PATH: path.join(mingwRoot, TARGET_TRIPLE),
   LDFLAGS: '-fuse-ld=lld',
@@ -66,7 +69,12 @@ const stageEnv = {
 };
 const assertCompiler = async () => {
   const command = await $({env: stageEnv, stdio: 'pipe'})`command -v cjc`;
-  await assertBootstrapCompiler({sdk, command: command.stdout.trim()});
+  const lineage = JSON.parse(await fs.readFile(path.join(workspace, 'software', 'stage3-compiler.json'), 'utf8'));
+  if (await fs.realpath(command.stdout.trim()) !== resolvedCompiler
+      || await fileSha256(compiler) !== lineage.compilerSha256
+      || lineage.stdCompilerSha256 !== lineage.compilerSha256) {
+    throw new Error('Windows final std stage3 compiler identity mismatch');
+  }
 };
 await assertCompiler();
 await $({env: stageEnv})`set -o pipefail; cjc --version | head -2`;
@@ -85,7 +93,7 @@ for (const entry of await fs.readdir(runtimeOutput)) {
 }
 
 await assertCompiler();
-console.log('[windows-stage3] cross-build final std with stage2 host cjc');
+console.log('[windows-stage3] cross-build final std with stage3 host cjc');
 await fs.rm(finalStd, {recursive: true, force: true});
 await $({cwd: stdlibRoot, env: stageEnv})`python3 build.py clean`;
 await $({cwd: stdlibRoot, env: stageEnv})`python3 build.py build -t release --target windows-x86_64 --target-lib=${runtimeTarget} --target-lib=${mingwLib} --target-sysroot ${mingwRoot}/ --target-toolchain ${mingwBin}`;
@@ -95,7 +103,7 @@ await writeStdProvenance({
   sourceDir: stdlibRoot,
   installPrefix: finalStd,
   compiler,
-  note: `stage2 Linux host cjc cross-built windows-x64 std with source runtime ${runtimeRef}`,
+  note: `stage3 Linux host cjc cross-built windows-x64 std with source runtime ${runtimeRef}`,
 });
 await assertFinalStd(finalStd, target);
 

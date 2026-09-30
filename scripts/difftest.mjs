@@ -138,7 +138,7 @@ const selfLd = mergeLd(
   process.env.LD_LIBRARY_PATH || '',
 );
 const selfCompileLd = hostRuntime ? mergeLd(hostRuntime, selfLd) : selfLd;
-const refLd = mergeLd(toolchainLd(tc), process.env.LD_LIBRARY_PATH || '');
+const refLd = mergeLd(process.env.DIFFTEST_REF_LD || '', toolchainLd(tc), process.env.LD_LIBRARY_PATH || '');
 const refEnv = withEnv(process.env, {CANGJIE_HOME: tc, LD_LIBRARY_PATH: refLd});
 const selfCompileEnv = withEnv(process.env, {
   CANGJIE_HOME: selfCangjieHome,

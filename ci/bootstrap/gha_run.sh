@@ -20,9 +20,16 @@ export SDK_BUILD="$root/ci/bootstrap/sdk_build.sh"
 # the kkk2 depot). A hosted runner cannot write /root, and the publish failing
 # is fatal, so give it a workspace directory. Nothing restores it between runs.
 export STAGE0_CACHE_ROOT="${STAGE0_CACHE_ROOT:-${CANGJIE_WORKSPACE:?}/stage0depot}"
+# RUNTIME_REF has already passed prepare_bootstrap_inputs' artifact identity
+# checks. Keep that independent expectation through both SDK verification calls.
+[[ "${RUNTIME_REF:-}" =~ ^[0-9a-f]{40}$ ]] || { echo 'BOOTSTRAP_RUNTIME_REF_REQUIRED' >&2; exit 1; }
+mkdir -p "${CANGJIE_WORKSPACE:?}"
+runtime_pin="$CANGJIE_WORKSPACE/bootstrap-runtime-pin.env"
+printf 'RUNTIME_REF=%s\n' "$RUNTIME_REF" > "$runtime_pin"
 exec bash "$root/ci/bootstrap/bootstrap.sh" \
   --work "${CANGJIE_WORKSPACE:?}/bootstrap-work" \
   --src "$root" \
+  --runtime-pin "$runtime_pin" \
   --cjcj-sha "$CJCJ_BOOTSTRAP_CJCJ_SHA" \
   --stdsrc "$CANGJIE_WORKSPACE/cangjie_runtime/stdlib" \
   --cpp-src "$CJCJ_BOOTSTRAP_CPP_SRC" \
