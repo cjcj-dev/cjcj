@@ -18,6 +18,17 @@ export function fixture(check, target = 'linux-x64') {
     const ast = path.join(sdk, 'ast.a');
     fs.writeFileSync(so, 'host fixture');
     fs.writeFileSync(ast, 'ast fixture');
+    const astFiles = ['include/cangjie/AST.h', 'include/flatbuffers/StdAstFormat_generated.h',
+      'schema/StdAstFormat.fbs', 'third_party/flatbuffers/bin/flatc',
+      'third_party/flatbuffers/include/flatbuffers.h', 'third_party/flatbuffers/cangjie/libflatbuffers.a',
+      'third_party/flatbuffers/modules/flatbuffers.cjo'];
+    for (const file of astFiles) {
+      fs.mkdirSync(path.dirname(path.join(sdk, file)), {recursive: true});
+      fs.writeFileSync(path.join(sdk, file), `ast fixture ${file}`);
+    }
+    const astSums = ['ast.a', ...astFiles].map(file =>
+      `${crypto.createHash('sha256').update(fs.readFileSync(path.join(sdk, file))).digest('hex')}  ${file}`).join('\n') + '\n';
+    fs.writeFileSync(path.join(sdk, 'SHA256SUMS'), astSums);
     const tupleFiles = ['SHA256SUMS', ...['llc.gz', 'opt.gz', 'ld.lld.gz', 'cjselfhost_llvmshim.o', 'llvm-tools.manifest']
       .map(name => `fixed-llc/${name}`)];
     for (const directory of [artifact, fallback]) {
@@ -107,6 +118,6 @@ export function fixture(check, target = 'linux-x64') {
     env.FIXTURE_RELEASE_FILE = path.join(artifact, 'SHA256SUMS');
     const run = (args = []) => spawnSync(process.execPath,
       ['--import', transport, new URL('./prepare_bootstrap_inputs.mjs', import.meta.url).pathname, ...args], {env, encoding: 'utf8'});
-    check({env, artifact, fallback, dylib, dylibSha, so, runtime, runtimeSource, run, pinFile, dir, transport});
+    check({env, artifact, fallback, dylib, dylibSha, so, runtime, runtimeSource, run, pinFile, dir, transport, sdk, astFiles});
   } finally { fs.rmSync(dir, {recursive: true, force: true}); }
 }
