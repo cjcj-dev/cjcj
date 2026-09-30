@@ -1,6 +1,7 @@
 #!/usr/bin/env zx
 // Install the Cangjie bootstrap SDK and export the build environment.
 
+import {targetForHost} from '../build/lib/targets.mjs';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -43,17 +44,18 @@ async function commandExists(command) {
 const hostOs = (await $({stdio: 'pipe'})`uname -s`).stdout.trim();
 const hostArch = (await $({stdio: 'pipe'})`uname -m`).stdout.trim();
 const hosts = {
-  'Linux/x86_64': ['cjv_linux_amd64.tar.gz', 'linux_x86_64_cjnative'],
-  'Linux/aarch64': ['cjv_linux_arm64.tar.gz', 'linux_aarch64_cjnative'],
-  'Darwin/arm64': ['cjv_darwin_arm64.tar.gz', 'darwin_aarch64_cjnative'],
-  'Darwin/x86_64': ['cjv_darwin_amd64.tar.gz', 'darwin_x86_64_cjnative'],
+  'Linux/x86_64': 'cjv_linux_amd64.tar.gz',
+  'Linux/aarch64': 'cjv_linux_arm64.tar.gz',
+  'Darwin/arm64': 'cjv_darwin_arm64.tar.gz',
+  'Darwin/x86_64': 'cjv_darwin_amd64.tar.gz',
 };
 const host = hosts[`${hostOs}/${hostArch}`];
 if (!host) {
   log(`unsupported host ${hostOs}/${hostArch}`);
   process.exit(2);
 }
-const [cjvAsset, runtimeDir] = host;
+const cjvAsset = host;
+const runtimeDir = targetForHost().spec.runtimeTuple;
 
 // 1. Bootstrap cjv.
 if (!(await commandExists('cjv'))) {
@@ -149,13 +151,7 @@ if (actualHostToolchain !== toolchain) {
 // IR to llc at all (the non-gating SDK provisioning check, which exercises only the
 // official toolchain) keep the stock llc with CJCJ_SDK_STOCK_LLC=1.
 const keepStockLlc = process.env.CJCJ_SDK_LINK_INPUTS_ONLY || process.env.CJCJ_SDK_STOCK_LLC;
-const llcPlatforms = {
-  'Linux/x86_64': 'linux_x86_64',
-  'Linux/aarch64': 'linux_aarch64',
-  'Darwin/x86_64': 'darwin_x86_64',
-  'Darwin/arm64': 'darwin_aarch64',
-};
-const llcPlatform = keepStockLlc ? '' : llcPlatforms[`${hostOs}/${hostArch}`] || '';
+const llcPlatform = keepStockLlc ? '' : targetForHost()?.spec.llvmPlatform || '';
 const fixedLlcGz = process.env.FIXED_LLC_GZ || '';
 const fixedOptGz = process.env.FIXED_OPT_GZ || '';
 const lldTool = hostOs === 'Darwin' ? 'ld64.lld' : 'ld.lld';
@@ -203,7 +199,7 @@ if (llcPlatform && fixedLlcGz) {
     const manifestText = await fs.readFile(manifestPath, 'utf8');
     let manifest;
     try {
-      manifest = parseLlvmToolsManifest(manifestText, {label: manifestPath, schema: 'core-or-native'});
+      manifest = parseLlvmToolsManifest(manifestText, {label: manifestPath, schema: 'tuple'});
     } catch (error) {
       log(`FATAL: malformed fixed LLVM provenance manifest: ${error.message}`);
       process.exit(4);
@@ -213,7 +209,7 @@ if (llcPlatform && fixedLlcGz) {
     llvmSourceSha = manifest.get('LLVM_SHA') || '';
     const pinText = await fs.readFile(path.join(repoRoot, 'ci', 'llvm_pin.env'), 'utf8');
     const expectedFields = [['LLVM_SHA', pinText.match(/^LLVM_SHA=([0-9a-f]{40})$/m)?.[1] || '']];
-    if (parsedSchema === 'native') expectedFields.push(
+    expectedFields.push(
       ['PLATFORM', llcPlatform],
       ['CANGJIE_COMPILER_SHA', pinText.match(/^CANGJIE_COMPILER_SHA=([0-9a-f]{40})$/m)?.[1] || ''],
       ['FLATBUFFERS_SHA', pinText.match(/^FLATBUFFERS_SHA=([0-9a-f]{40})$/m)?.[1] || ''],
@@ -224,11 +220,11 @@ if (llcPlatform && fixedLlcGz) {
         process.exit(4);
       }
     }
-    if (hasFixedLld && ((parsedSchema !== 'core-lineage' && parsedSchema !== 'native') || manifest.get('LLD_TOOL') !== lldTool)) {
+    if (hasFixedLld && manifest.get('LLD_TOOL') !== lldTool) {
       log(`FATAL: fixed LLVM LLD lineage mismatch (schema=${parsedSchema} tool=${manifest.get('LLD_TOOL') || ''})`);
       process.exit(4);
     }
-    if (parsedSchema === 'native') {
+    {
       const fixedShim = path.join(path.dirname(fixedLlcGz), 'cjselfhost_llvmshim.o');
       if (!(await isFile(fixedShim))) {
         log(`FATAL: fixed LLVM shim missing: ${fixedShim}`);

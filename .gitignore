@@ -26,3 +26,4 @@ ci/bootstrap/__pycache__/
 
 # lane working notes live outside the repository (agent_scratch)
 .lane-notes.md
+.lane/

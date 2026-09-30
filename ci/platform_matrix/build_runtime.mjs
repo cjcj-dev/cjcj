@@ -45,7 +45,7 @@ const preinstall = path.join(process.env.RUNNER_TEMP || path.join(root, 'runtime
 
 if (process.platform === 'linux') {
   await $`sudo apt-get update -qq`;
-  await $`sudo apt-get install -y -qq clang cmake make`;
+  await $`sudo apt-get install -y -qq clang cmake make gdb coreutils`;
   if (runtimeTarget === 'windows-x86_64') {
     if (!runtimeToolchain) {
       console.error('FATAL: RUNTIME_TOOLCHAIN is required for the Windows cross target');
@@ -56,6 +56,7 @@ if (process.platform === 'linux') {
     await $({cwd: runtimeDirectory})`python3 build.py build --target ${runtimeTarget} --build-type ${buildType} --target-toolchain ${runtimeToolchain} --prefix ${preinstall} -v ${version}`;
     await $({cwd: runtimeDirectory})`python3 build.py install --prefix ${configuredInstallRoot}`;
   } else if (runtimeTarget === 'native') {
+    await $`bash ci/platform_matrix/qualify_teardown_tools.sh ${path.join(root, 'logs', 'teardown-tools.log')}`;
     await $({cwd: runtimeDirectory})`python3 build.py build --target native --build-type ${buildType} --prefix ${preinstall} -v ${version}`;
     await $({cwd: runtimeDirectory})`python3 build.py install --prefix ${installRoot}`;
   } else {

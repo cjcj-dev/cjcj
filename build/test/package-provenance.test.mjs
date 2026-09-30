@@ -258,6 +258,10 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
     '',
   ].join('\n'));
   const llvmManifest = await write(root, 'llvm-tools.manifest', [
+    'PLATFORM=linux_x86_64',
+    `CANGJIE_COMPILER_SHA=${CJCJ_SHA}`,
+    `FLATBUFFERS_SHA=${'f'.repeat(40)}`,
+    `SHIM_SHA256=${'f'.repeat(64)}`,
     `LLVM_SHA=${LLVM_SHA}`,
     `LLC_SOURCE=tuple:${LLVM_SHA}`,
     'LLC_VERSION=LLVM version 15.0.4',
