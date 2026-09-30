@@ -31,6 +31,9 @@ def download_asset(asset, output):
 
 
 def publish(args):
+    if args.qualified:
+        from qualified_language_tuple import publish as publish_qualified
+        return publish_qualified(args, gh, api_write, download_asset)
     manifest = verify(args.package / "tuple", args.manifest_sha256, args.compiler_sha256)
     require(manifest["provenance"]["execution"]["kind"] == "retained-build", "H48_RETAINED_BUILD_REQUIRED")
     source = manifest["provenance"]["sources"]["compiler"]["commit"]
@@ -113,6 +116,9 @@ def fetch(args):
     release = json.loads(gh("api", f"repos/{REPOSITORY}/releases/{int(pin['release_id'])}"))
     require(release["prerelease"] and not release["draft"] and release["tag_name"] == pin["tag"],
             "H48_PIN_RELEASE_IDENTITY")
+    if pin.get("tuple_schema") == "qualified-language-tuple":
+        from qualified_language_tuple import fetch as fetch_qualified
+        return fetch_qualified(args, pin, release, download_asset)
     require(not args.output.exists(), "H48_OUTPUT_EXISTS")
     args.output.mkdir(parents=True)
     records = {a["id"]: a for a in release["assets"]}
@@ -148,6 +154,8 @@ if __name__ == "__main__":
     producer.add_argument("--package", type=Path, required=True)
     producer.add_argument("--manifest-sha256", required=True)
     producer.add_argument("--compiler-sha256", required=True)
+    producer.add_argument("--qualified", action="store_true")
+    producer.add_argument("--target-commit", default="master")
     producer.add_argument("--resume-release-id", type=int,
                           help="Read back an already uploaded matching draft; never replace its assets")
     consumer = commands.add_parser("fetch")
