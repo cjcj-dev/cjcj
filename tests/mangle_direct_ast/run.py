@@ -123,11 +123,12 @@ def main():
     for key in ('compiler','sdk','inputs','output'): p.add_argument('--'+key, type=Path, required=True)
     p.add_argument('--reference', type=Path)
     p.add_argument('--reference-is-baseline', action='store_true')
+    p.add_argument('--parallelism', type=int, choices=range(1,5), default=4)
     a = p.parse_args()
     resource.setrlimit(resource.RLIMIT_CORE,(0,0))
     cases = [(src,False) for src in sorted(a.inputs.glob('*.cj'))]
     cases += [(a.inputs/name,True) for name in ('parallel.cj','ordinary.cj')]
-    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=a.parallelism) as pool:
         results = list(pool.map(lambda case: run(a,*case),cases))
     by_tag = {r['tag']:r for r in results}
     single_equal = {name: by_tag[name].get('symbols') == by_tag[name+'-single'].get('symbols')
