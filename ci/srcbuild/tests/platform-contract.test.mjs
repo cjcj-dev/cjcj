@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import fsSync from 'node:fs';
+import {spawnSync} from 'node:child_process';
+import {load as loadYaml} from '../../vendor/js-yaml/js-yaml.mjs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -7,9 +10,111 @@ import {buildConfig} from '../../../build/lib/config.mjs';
 import {baseEnv} from '../../../build/srcbuild/stages/common.mjs';
 import {assembleCjcLinkOption} from '../../platform_matrix/link_option.mjs';
 import {assertFinalStd} from '../lib/final-std.mjs';
+import {llvmToolMatrix} from '../../../build/lib/targets.mjs';
 
 const root = path.resolve(import.meta.dirname, '../../..');
 const readWorkflow = name => fs.readFile(path.join(root, '.github/workflows', name), 'utf8');
+const llvmWorkflow = name => loadYaml(fsSync.readFileSync(path.join(root, '.github/workflows', name), 'utf8'));
+
+const producer = llvmWorkflow('build-llvm-tools.yml');
+const wrapper = llvmWorkflow('platform-tuples.yml');
+
+function llvmPlan(requested = 'all', platformSet = '', publishTuple = false) {
+  const directory = fsSync.mkdtempSync(path.join(os.tmpdir(), 'llvm-matrix-'));
+  const output = path.join(directory, 'output');
+  try {
+    const step = producer.jobs.plan.steps.find(entry => entry.id === 'select');
+    const result = spawnSync('bash', ['-eu', '-o', 'pipefail', '-c', step.run], {
+      cwd: root, encoding: 'utf8',
+      env: {...process.env, REQUESTED: requested, PLATFORM_SET: platformSet,
+        PUBLISH_TUPLE: String(publishTuple), GITHUB_OUTPUT: output},
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const record = fsSync.readFileSync(output, 'utf8').trim();
+    assert.ok(record.startsWith('matrix='), record);
+    const matrix = JSON.parse(record.slice('matrix='.length));
+    console.log(`LLVM_MATRIX_RESULT ${JSON.stringify(matrix)}`);
+    return matrix.include;
+  } finally {
+    fsSync.rmSync(directory, {recursive: true, force: true});
+  }
+}
+
+test('producer emits the real runner and glibc baseline for all five tuples', () => {
+  const rows = llvmPlan('all', 'all');
+  assert.deepEqual(rows.map(row => [row.platform, row.runner, row.glibc]), [
+    ['linux_x86_64', 'ubuntu-22.04', '2.35'],
+    ['linux_aarch64', 'ubuntu-22.04-arm', '2.35'],
+    ['darwin_aarch64', 'macos-15', null],
+    ['darwin_x86_64', 'macos-15-intel', null],
+    ['windows_x86_64', 'windows-2022', null],
+  ]);
+});
+
+test('both caller subsets reach the same producer matrix and upload identity', () => {
+  const call = wrapper.jobs['build-tuple'];
+  assert.equal(call.uses, './.github/workflows/build-llvm-tools.yml');
+  const allCaller = llvmWorkflow('platform-matrix.yml').jobs;
+  const releaseCaller = llvmWorkflow('release.yml').jobs;
+  const subset = jobs => Object.values(jobs).find(job => job.uses === './.github/workflows/platform-tuples.yml')
+    .with?.platform_set || 'all';
+  const binding = call.with.platform_set;
+  const resolve = value => binding === "${{ inputs.platform_set || 'all' }}" ? value : binding;
+  const allRows = llvmPlan('all', resolve(subset(allCaller)));
+  const windowsRows = llvmPlan('all', resolve(subset(releaseCaller)));
+  console.log(`CALLER_IDENTITY all=${allRows.length} windows=${windowsRows.length}`);
+  assert.equal(allRows.length, 5, 'platform-matrix receives every tuple');
+  assert.equal(windowsRows.length, 1, 'release receives only its Windows tuple');
+  assert.deepEqual(windowsRows[0], allRows.find(row => row.platform === 'windows_x86_64'));
+  const uploads = producer.jobs['build-tools'].steps.filter(step => step.uses?.startsWith('actions/upload-artifact@'));
+  assert.equal(uploads.length, 1);
+  assert.equal(uploads[0].with.name, 'fixed-llvm-tools-${{ matrix.platform }}');
+  assert.equal(uploads[0].with.path, 'fixed-toolchain/${{ matrix.platform }}');
+  assert.equal(producer.jobs['build-tools'].strategy.matrix, '${{ fromJson(needs.plan.outputs.matrix) }}');
+  assert.equal(producer.jobs['build-tools']['runs-on'], '${{ matrix.runner }}');
+});
+
+test('native callers retain four tuples and explicit selections deduplicate', () => {
+  assert.equal(llvmPlan().length, 4);
+  assert.deepEqual(llvmPlan(' linux_aarch64, linux_aarch64 ').map(row => row.platform), ['linux_aarch64']);
+  assert.equal(llvmPlan('all', 'darwin-windows').length, 3);
+});
+
+test('static publication adds x64 once without dropping the requested tuple', () => {
+  assert.deepEqual(llvmPlan('darwin_aarch64', '', true).map(row => row.platform), ['darwin_aarch64', 'linux_x86_64']);
+  assert.equal(llvmPlan('linux_x86_64', '', true).length, 1);
+});
+
+test('invalid and empty selections fail before emitting a matrix', () => {
+  for (const [requested, platformSet] of [['linux_typo', ''], [' , ', ''], ['all', 'typo']]) {
+    const result = spawnSync(process.execPath, ['ci/llvm-tools-matrix.mjs'], {
+      cwd: root, encoding: 'utf8',
+      env: {...process.env, REQUESTED: requested, PLATFORM_SET: platformSet, GITHUB_OUTPUT: '', PUBLISH_TUPLE: 'false'},
+    });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /unknown LLVM|no LLVM platforms/);
+    assert.equal(result.stdout, '');
+  }
+});
+
+test('the repository has one fixed LLVM artifact uploader and preserves native and Windows checks', () => {
+  const uploaders = [];
+  for (const name of fsSync.readdirSync(path.join(root, '.github/workflows')).filter(name => name.endsWith('.yml'))) {
+    for (const job of Object.values(llvmWorkflow(name).jobs || {})) {
+      for (const step of job.steps || []) {
+        if (step.uses?.startsWith('actions/upload-artifact@') && step.with?.name?.startsWith('fixed-llvm-tools-')) {
+          uploaders.push(name);
+        }
+      }
+    }
+  }
+  assert.deepEqual(uploaders, ['build-llvm-tools.yml']);
+  const steps = producer.jobs['build-tools'].steps;
+  assert.ok(steps.some(step => step.run?.includes('validate native')));
+  assert.ok(steps.some(step => step.run?.includes('assert_no_libxml2_needed.sh')));
+  assert.ok(steps.some(step => step.run?.includes('bash ci/platform_tuples/build_tuple.sh')));
+  assert.ok(steps.some(step => step.run?.includes('llvm-static-libs.txt')));
+});
 
 const uncommented = text => text.split('\n').filter(line => !/^\s*#/.test(line)).join('\n');
 
@@ -29,8 +134,10 @@ async function invokedWorkflows(entry, stack = []) {
 // filter one -- so the tuple table moved into the plan step as JSON. It is still
 // one table in one place; it just is not YAML, and reading only the YAML form
 // leaves this file blind to every tuple.
-const planTable = text => [...text.matchAll(/^\s*all='(\[[\s\S]*?\])'\s*$/gm)]
-  .flatMap(([, json]) => JSON.parse(json));
+const planTable = text => text.includes('run: node ci/llvm-tools-matrix.mjs')
+  ? llvmToolMatrix('all', {platformSet: 'all'}).include
+  : [...text.matchAll(/^\s*all='(\[[\s\S]*?\])'\s*$/gm)]
+    .flatMap(([, json]) => JSON.parse(json));
 
 // The values a ${{ matrix.KEY }} placeholder can take inside one workflow file.
 const matrixValues = (text, key) => [
@@ -256,7 +363,7 @@ test('source-build workflow connects every native runner to its LLVM and std art
     assert.equal(row.llvm_platform, llvmPlatform, `${target} llvm_platform`);
     const tuple = planTable(fixed).find(entry => entry.platform === llvmPlatform);
     assert.ok(tuple, `LLVM producer plan has no tuple for ${llvmPlatform}`);
-    assert.equal(tuple.runner, runner, `${llvmPlatform} runner`);
+    assert.equal(tuple.runner, target === 'linux-aarch64' ? 'ubuntu-22.04-arm' : runner, `${llvmPlatform} runner`);
   }
   // The dependency, not one spelling of it: the list form appeared when the
   // matrix became selectable and a literal match would have read that as the
