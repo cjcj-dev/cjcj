@@ -66,7 +66,7 @@ export function fixture(check, target = 'linux-x64') {
       COLOUR_RT_RUN_ATTEMPT: '1', COLOUR_RT_ARTIFACT_ID: '456',
       COLOUR_RT_MANIFEST_SHA256: runtimeDigest(path.join(runtime, 'manifest.json'))});
     const pinFile = path.join(dir, 'pin.json');
-    fs.writeFileSync(pinFile, JSON.stringify({version: 1, repository: 'cjcj-dev/cjcj', run: 123,
+    fs.writeFileSync(pinFile, JSON.stringify({version: 1, platform: hostPin.platform, tuple_sums_sha256: digest, repository: 'cjcj-dev/cjcj', run: 123,
       attempt: 1, artifact: 456, commit: 'b'.repeat(40), files: [{path: 'SHA256SUMS', mode: 0o644,
       asset: 789, artifact_sha256: digest, release_sha256: digest}]}));
     env.CJCJ_BOOTSTRAP_INPUTS_PIN = pinFile;

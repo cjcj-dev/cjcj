@@ -4,12 +4,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {acquire, verify} from './bootstrap_store.mjs';
+import {tuplePin} from './tuple_pin.mjs';
 
 const [pinFile, destination, sumsSha] = process.argv.slice(2);
 if (!pinFile || !destination || !/^[a-f0-9]{64}$/.test(sumsSha || '')) {
   throw new Error('usage: acquire_fixed_tuple.mjs PIN DESTINATION LLVM_TUPLE_SUMS_SHA');
 }
-const pin = JSON.parse(fs.readFileSync(pinFile, 'utf8'));
+const pin = tuplePin('linux-x64', pinFile);
 // Share the release consumer's source selection and per-asset verification.
 const tuple = await acquire(pin, path.dirname(destination));
 try {

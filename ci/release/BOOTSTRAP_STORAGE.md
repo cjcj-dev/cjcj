@@ -23,14 +23,22 @@ reusable workflows cannot elevate a caller's token permissions:
 https://docs.github.com/en/actions/reference/workflows-and-actions/reusing-workflow-configurations.
 
 After checking the actual publication and its digests, commit the emitted
-`bootstrap-inputs-pin.json` as `ci/bootstrap_inputs_pin.json`, together with any
-corresponding `ci/llvm_pin.env` and `ci/llvm_tuple_SHA256SUMS` update. Never fill
+`bootstrap-inputs-pin.json` as `ci/llvm-tuple/<platform>.json`, adding the
+reviewed `platform` and independent `tuple_sums_sha256` fields. Never fill
 asset IDs with placeholders or compute the consumer's expected digest from an
 unreviewed download. The initial checked publication is
 [`bootstrap-35858653195-1-10748596481-prerelease`](https://github.com/cjcj-dev/cjcj/releases/tag/bootstrap-35858653195-1-10748596481-prerelease),
 from [run 35858653195, attempt 1](https://github.com/cjcj-dev/cjcj/actions/runs/35858653195).
 Its nine asset IDs and both per-file digests are recorded in
-`ci/bootstrap_inputs_pin.json`; the fixed artifact is `10748596481`.
+the historical publication; the fixed artifact was `10748596481`.
+
+`tuple_pin.mjs` maps `CJCJ_SRCBUILD_TARGET` to the same platform names used by
+`ci/llvm-dylib/`. Each platform has its own artifact, release assets and checksum
+pin. Linux x86_64 uses run 36588242795; Linux aarch64 uses run 36611013257,
+artifact 11053888167. Darwin cells fail with `LLVM_TUPLE_PIN_MISSING` until a
+reviewed publication is registered. `CJCJ_BOOTSTRAP_INPUTS_PIN` selects an explicit
+pin file, which must still declare the selected platform. The kkk2 driver selects
+linux_x86_64 explicitly. `ci/llvm_pin.env` contains source identities only.
 
 `prepare_bootstrap_inputs.mjs` defaults to Release assets. To explicitly recover
 from another source set `CJCJ_BOOTSTRAP_SOURCE=artifact` or `depot` and provide

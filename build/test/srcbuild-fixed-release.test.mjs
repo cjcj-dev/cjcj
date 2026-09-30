@@ -39,9 +39,8 @@ function fixture(t, {depot = 'missing', corrupt = '', sumsMismatch = false, unav
     const file = path.join(payload, name);
     fs.mkdirSync(path.dirname(file), {recursive: true}); fs.writeFileSync(file, bytes);
   }
-  fs.writeFileSync(path.join(root, 'ci/bootstrap_inputs_pin.json'), JSON.stringify(pin));
-  fs.writeFileSync(pinPath, pinText.replace(/^LLVM_TUPLE_SUMS_SHA=.*$/m,
-    `LLVM_TUPLE_SUMS_SHA=${sumsMismatch ? '0'.repeat(64) : digest(files.SHA256SUMS)}`));
+  fs.writeFileSync(path.join(root, 'ci/llvm-tuple/linux_x86_64.json'), JSON.stringify({...pin,
+    platform: 'linux_x86_64', tuple_sums_sha256: sumsMismatch ? '0'.repeat(64) : digest(files.SHA256SUMS)}));
   const depotRoot = path.join(root, 'depot');
   if (depot !== 'missing') {
     const selected = path.join(depotRoot, llvm, compiler);

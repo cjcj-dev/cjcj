@@ -58,7 +58,7 @@ python3 - <<'CUT'
 from pathlib import Path
 p = Path('ci/release/prepare_bootstrap_inputs.mjs')
 s = p.read_text()
-a = s.index("if (!/^[0-9a-f]{64}$/.test(process.env.LLVM_TUPLE_SUMS_SHA")
+a = s.index("if (sha256File(tupleSums) !== inputPin.tuple_sums_sha256)")
 b = s.index("\nconst colourRt", a)
 p.write_text(s[:a] + s[b:])
 CUT

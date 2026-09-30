@@ -83,5 +83,7 @@
       "release_sha256": "b26fef76ac041b4d535cc30eece6191587ca85e29b1d2df59def9d99d58ba825",
       "asset": 598672192
     }
-  ]
+  ],
+  "platform": "linux_x86_64",
+  "tuple_sums_sha256": "b26fef76ac041b4d535cc30eece6191587ca85e29b1d2df59def9d99d58ba825"
 }
