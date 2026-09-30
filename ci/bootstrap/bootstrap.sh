@@ -54,7 +54,7 @@ host_tuple_init() {
 BUILD_HOME="${HOME:-/root}"
 
 usage() {
-  echo 'bootstrap.sh --work DIR --src CJCJ_ROOT --cjcj-sha 40HEX --stdsrc STDLIB --cpp-src CANGJIE_CPP_ROOT --host-llvm-so libLLVM-15.so --host-llvm-sha256 HEX --colour-llvm-so libLLVM-15.so --colour-llvm-sha256 HEX --ast-support FILE --ast-support-sha256 HEX --colour-tuple DIR --colour-llvm-sha 40HEX --colour-rt DIR --host-rt DIR [--stage stage0|stage1|all] [--stage1-heap 20GB] [--dry-run]'
+  echo 'bootstrap.sh --work DIR --src CJCJ_ROOT --cjcj-sha 40HEX --stdsrc STDLIB --cpp-src CANGJIE_CPP_ROOT --host-llvm-so libLLVM-15.so --host-llvm-sha256 HEX --colour-llvm-so libLLVM-15.so --colour-llvm-sha256 HEX --ast-support FILE --ast-support-sha256 HEX --colour-tuple DIR --colour-llvm-sha 40HEX --colour-rt DIR --host-rt DIR [--stage stage0|stage1|stage1-initial-std|stage1-std|stage1-compiler|all] [--stage1-heap 20GB] [--dry-run]'
 }
 
 sha256() {
@@ -406,7 +406,7 @@ assert_version() {
   local label="$1" compiler="$2" sdk="$3" runtime="$4" ld
   assert_executable "$label" "$compiler"
   ld=$(sdk_ld_path "$sdk" "$runtime")
-  cmd "env -i HOME=$(printf '%q' "$BUILD_HOME") CANGJIE_HOME=$(printf '%q' "$sdk") LD_LIBRARY_PATH=$(printf '%q' "$ld") PATH=/usr/bin:/bin $(printf '%q' "$compiler") --version"
+  cmd "env -i $(compiler_cache_env)HOME=$(printf '%q' "$BUILD_HOME") CANGJIE_HOME=$(printf '%q' "$sdk") LD_LIBRARY_PATH=$(printf '%q' "$ld") PATH=/usr/bin:/bin $(printf '%q' "$compiler") --version"
   [ "$DRY" -eq 1 ] || ok "$label --version rc=0"
 }
 
@@ -447,6 +447,16 @@ assert_std_install_shape() {
   echo "ASSERT $label shape=ok Int64.ti=$ti FFI-archives=$ffi_archives${compare_prefix:+ FFI-set-equal=1}"
 }
 
+# Keep the caller's C/C++ cache configuration across the isolated build env.
+# These are build settings only; GitHub credentials are never forwarded.
+compiler_cache_env() {
+  local name value
+  for name in CMAKE_C_COMPILER_LAUNCHER CMAKE_CXX_COMPILER_LAUNCHER SCCACHE_PATH SCCACHE_DIR SCCACHE_CACHE_SIZE SCCACHE_IDLE_TIMEOUT SCCACHE_GHA_ENABLED SCCACHE_LOG SCCACHE_ERROR_LOG; do
+    eval "value=\${$name-}"
+    [ -z "$value" ] || printf '%s=%q ' "$name" "$value"
+  done
+}
+
 stdlib_build() {
   local label="$1" sdk="$2" runtime="$3" prefix="$4" compare_prefix="${5:-}" target_lib="${6:-$2/runtime/lib/$HOST_TUPLE}" ld script compiler
   source "$SRC/ci/build_resources.sh"
@@ -456,7 +466,7 @@ stdlib_build() {
   prepare_build_env
   # shellcheck disable=SC2016 # Expanded by the inner bash, not this shell.
   script='cd "$1" && rm -rf build/build && python3 build.py clean && python3 build.py build -t relwithdebinfo --jobs "$2" --target-lib="$3" && python3 build.py install --prefix "$4"'
-  cmd "env -i HOME=$(printf '%q' "$BUILD_HOME") TMPDIR=$(printf '%q' "$BUILD_TMPDIR") CANGJIE_HOME=$(printf '%q' "$sdk") LD_LIBRARY_PATH=$(printf '%q' "$ld") PATH=$(printf '%q' "$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:/usr/bin:/bin") cjHeapSize=$(printf '%q' "$STD_BUILD_HEAP") bash -c $(printf '%q' "$script") bash $(printf '%q' "$STDSRC") $(printf '%q' "$STD_BUILD_JOBS") $(printf '%q' "$target_lib") $(printf '%q' "$prefix")"
+  cmd "env -i $(compiler_cache_env)HOME=$(printf '%q' "$BUILD_HOME") TMPDIR=$(printf '%q' "$BUILD_TMPDIR") CANGJIE_HOME=$(printf '%q' "$sdk") LD_LIBRARY_PATH=$(printf '%q' "$ld") PATH=$(printf '%q' "$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:/usr/bin:/bin") cjHeapSize=$(printf '%q' "$STD_BUILD_HEAP") bash -c $(printf '%q' "$script") bash $(printf '%q' "$STDSRC") $(printf '%q' "$STD_BUILD_JOBS") $(printf '%q' "$target_lib") $(printf '%q' "$prefix")"
   assert_std_install_shape "$prefix" "$compare_prefix" "$label"
   # Match sdk_verify.measured_cjc_sha: the runner is only a launcher.
   compiler="$sdk/bin/cjc"
@@ -491,13 +501,13 @@ rewrite_compile_option_o1() {
     return 0
   fi
   [ -f "$toml" ] || die "隔离副本缺 cjpm.toml: $toml"
-  o2_hits=$(/usr/bin/grep -c -- 'compile-option = "-O2"' "$toml" || true)
+  o2_hits=$(/usr/bin/grep -Ec -- '^ *compile-option = "-O2([[:space:]]|")' "$toml" || true)
   if [ "$o2_hits" -gt 0 ]; then
-    cmd "sed -i 's/compile-option = \"-O2\"/compile-option = \"-O1\"/' $(printf '%q' "$toml")"
+    cmd "sed -E -i 's/^( *compile-option = \")-O2([[:space:]]|\")/\1-O1\2/' $(printf '%q' "$toml")"
   fi
-  o1_hits=$(/usr/bin/grep -c -- 'compile-option = "-O1"' "$toml" || true)
+  o1_hits=$(/usr/bin/grep -Ec -- '^ *compile-option = "-O1([[:space:]]|")' "$toml" || true)
   [ "$o1_hits" -ge 1 ] || die "隔离副本 cjpm.toml 的 compile-option 不是 -O1: $toml"
-  o2_hits=$(/usr/bin/grep -c -- 'compile-option = "-O2"' "$toml" || true)
+  o2_hits=$(/usr/bin/grep -Ec -- '^ *compile-option = "-O2([[:space:]]|")' "$toml" || true)
   [ "$o2_hits" -eq 0 ] || die "compile-option 仍含 -O2: $toml"
   echo "ASSERT compile-option-o1 ok file=$toml"
 }
@@ -529,15 +539,19 @@ install_stage_compiler() {
 
 cjpm_build() {
   local sdk="$1" runtime="$2" srcdir="$3" extra="$4" heap="$5" ld cjpm script
+  cmd "node $(printf '%q' "$srcdir/ci/check-codegen-runtime-layout.mjs") $(printf '%q' "$WORK/layout-sources")"
   source "$SRC/ci/build_resources.sh"
   configure_build_resources "$heap" || die "cannot determine compiler build resources"
   heap="$STD_BUILD_HEAP"
   ld=$(sdk_ld_path "$sdk" "$runtime")
   prepare_build_env
   cjpm="$sdk/tools/bin/cjpm"
+  local trim_debug=""
+  case " $extra " in *" -g "*) trim_debug=" --debug";; esac
+  cmd "node $(printf '%q' "$SRC/ci/release/trimpath.mjs") $(printf '%q' "$srcdir")$trim_debug"
   script="cd $(printf '%q' "$srcdir") && $(printf '%q' "$cjpm") build${extra:+ $extra}"
   echo "CMD cjpm build${extra:+ $extra} bin=$cjpm cwd=$srcdir heap=$heap"
-  cmd "env -i HOME=$(printf '%q' "$BUILD_HOME") TMPDIR=$(printf '%q' "$BUILD_TMPDIR") CANGJIE_HOME=$(printf '%q' "$sdk") LD_LIBRARY_PATH=$(printf '%q' "$ld") PATH=$(printf '%q' "$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:/usr/bin:/bin") cjHeapSize=$(printf '%q' "$heap") bash -c $(printf '%q' "$script")"
+  cmd "env -i $(compiler_cache_env)HOME=$(printf '%q' "$BUILD_HOME") TMPDIR=$(printf '%q' "$BUILD_TMPDIR") CANGJIE_HOME=$(printf '%q' "$sdk") LD_LIBRARY_PATH=$(printf '%q' "$ld") PATH=$(printf '%q' "$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:/usr/bin:/bin") cjHeapSize=$(printf '%q' "$heap") bash -c $(printf '%q' "$script")"
 }
 
 assert_shim_cpp_src() {
@@ -583,7 +597,7 @@ shim_build() {
   fi
   echo "CMD shim build label=$label cwd=$srcdir cpp-src=$CPP_SRC source-object=${source_object:-source} sdk=$sdk runtime=$runtime"
   cmd "rm -f $(printf '%q' "$srcdir/runtime_shim/cjselfhost_llvmshim.o") $(printf '%q' "$srcdir/runtime_shim/cjc_runtime_config.o")"
-  cmd "env -i HOME=$(printf '%q' "$BUILD_HOME") CANGJIE_HOME=$(printf '%q' "$sdk") CANGJIE_CPP_SRC=$(printf '%q' "$CPP_SRC") CJCJ_COMMIT=$(printf '%q' "$CJCJ_SHA") ${source_env}LD_LIBRARY_PATH=$(printf '%q' "$ld") PATH=$(printf '%q' "$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:$node_bin:/usr/bin:/bin") bash $(printf '%q' "$srcdir/runtime_shim/build_shim.sh")"
+  cmd "env -i $(compiler_cache_env)HOME=$(printf '%q' "$BUILD_HOME") CANGJIE_HOME=$(printf '%q' "$sdk") CANGJIE_CPP_SRC=$(printf '%q' "$CPP_SRC") CJCJ_COMMIT=$(printf '%q' "$CJCJ_SHA") ${source_env}LD_LIBRARY_PATH=$(printf '%q' "$ld") PATH=$(printf '%q' "$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:$node_bin:/usr/bin:/bin") bash $(printf '%q' "$srcdir/runtime_shim/build_shim.sh")"
   if [ "$DRY" -eq 1 ]; then
     echo "OUTPUT $label-shim-cpp path=$srcdir/runtime_shim/cjselfhost_llvmshim.o sha256=planned"
     echo "OUTPUT $label-shim-config path=$srcdir/runtime_shim/cjc_runtime_config.o sha256=planned"
@@ -641,6 +655,8 @@ stage0() {
   copy="$WORK/cjcj-src-stage0"
   isolate_cjcj_src "$copy"
   rewrite_compile_option_o1 "$copy/cjpm.toml"
+  # Cache hits bypass cjpm_build, so validate their source contract here too.
+  cmd "node $(printf '%q' "$copy/ci/check-codegen-runtime-layout.mjs") $(printf '%q' "$WORK/layout-sources")"
   if [ "$DRY" -eq 0 ]; then
     if cache_key=$(stage0_cache_key "$base" "$copy/cjpm.toml"); then
       cacheable=1
@@ -663,6 +679,11 @@ stage0() {
   fi
   prepare_stage0_run_sdk
   assert_version cjcj-stage1 "$out" "$WORK/sdk-stage0-run" "$HRT"
+  # The Linux x64 layout CI uses the actual seed, including cached seeds. Its
+  # host runtime/std stay paired; only the LLVM producer/reader use the target pin.
+  if [ "$HOST_TUPLE" = linux_x86_64_cjnative ]; then
+    cmd "bash $(printf '%q' "$copy/ci/test-codegen-runtime-layout.sh") $(printf '%q' "$out") $(printf '%q' "$sdk") $(printf '%q' "$COLOUR_LLVM_SO") $(printf '%q' "$WORK/layout-sources/llvm") $(printf '%q' "$WORK/layout-sources/runtime") $(printf '%q' "$WORK/layout-ir-stage0")"
+  fi
   if [ "$DRY" -eq 0 ] && [ "$cacheable" -eq 1 ] && [ "$cache_hit" -eq 0 ]; then
     stage0_cache_publish "$cache_key" "$out" || die 'stage0 cache 发布失败'
   fi
@@ -727,10 +748,9 @@ bootstrap_target_std() {
   cmd "rm -rf -- $(printf '%q' "$link_root")"
 }
 
-stage1() {
-  STAGE=stage1
-  echo '[stage1] cjcj-stage1 self-host + coloured LLVM; C++=RelWithDebInfo'
-  local compiler previous_std out std sdk ld
+# Each phase is also an independent GHA job. The combined CLI uses the same
+# functions, so the std-before-compiler ordering has only one implementation.
+stage1_inputs() {
   compiler=$(cat "$WORK/.cjcj-stage1" 2>/dev/null || true)
   previous_std="$WORK/stdlib-stage1"
   if [ "$DRY" -eq 1 ]; then
@@ -744,17 +764,28 @@ stage1() {
   record colour-runtime "$CRT"
   assert_llvm "$HOST_LLVM_SO" "$COLOUR_TUPLE" "$COLOUR_LLVM_SHA"
 
-  prepare_stage0_run_sdk
   out="$WORK/cjcj-stage2"
   std="$WORK/stdlib-stage2"
   sdk="$WORK/sdk-stage1"
-  echo "OUTPUT cjcj-stage2=$out"
-  echo "OUTPUT stdlib-stage2=$std"
-  # The compiler links std statically. Finish the target std before its link;
-  # replacing SDK files afterwards cannot change the std already inside the ELF.
+}
+
+stage1_initial_std() {
+  STAGE=stage1-initial-std
+  prepare_stage0_run_sdk
   bootstrap_target_std "$compiler" "$previous_std"
+}
+
+stage1_std() {
+  STAGE=stage1-std
   assemble_stage1_sdk "$sdk" "$compiler" "$previous_std"
   stdlib_build stdlib-stage2 "$sdk" "$HRT" "$std" "$previous_std"
+}
+
+stage1_compiler() {
+  STAGE=stage1-compiler
+  echo "OUTPUT cjcj-stage2=$out"
+  echo "OUTPUT stdlib-stage2=$std"
+  # The compiler links std statically: consume the completed std from its job.
   assemble_stage1_sdk "$sdk" "$compiler" "$std"
   ld=$(sdk_ld_path "$sdk" "$HRT")
   local copy seed
@@ -773,6 +804,20 @@ stage1() {
   # It does not rewrite $out. Spec: cjpm `build -g` (default off) lands in
   # target/debug; std RelWithDebInfo already passes -g via AddCangjieSource.cmake.
   stage2_forensic
+}
+
+
+stage1() {
+  STAGE=stage1
+  echo '[stage1] cjcj-stage1 self-host + coloured LLVM; C++=RelWithDebInfo'
+  local compiler previous_std out std sdk ld
+  stage1_inputs
+  case "${1:-all}" in
+    initial-std) stage1_initial_std;;
+    std) stage1_std;;
+    compiler) stage1_compiler;;
+    all) stage1_initial_std; stage1_std; stage1_compiler;;
+  esac
 }
 
 # Optional -g stage2 for line tables on cjcj packages. Default off.
@@ -835,7 +880,7 @@ main() {
   for value in WORK SRC CJCJ_SHA STDSRC HOST_LLVM_SO HOST_LLVM_SHA256 COLOUR_LLVM_SO COLOUR_LLVM_SHA256 AST_SUPPORT AST_SUPPORT_SHA256 COLOUR_TUPLE COLOUR_LLVM_SHA CRT HRT; do
     eval "[ -n \"\${$value}\" ]" || die "缺少参数 $value"
   done
-  case "$WANT" in stage0|stage1|all) ;; *) die '--stage 只能是 stage0|stage1|all';; esac
+  case "$WANT" in stage0|stage1|stage1-initial-std|stage1-std|stage1-compiler|all) ;; *) die '--stage 只能是 stage0|stage1|stage1-initial-std|stage1-std|stage1-compiler|all';; esac
   case "$WANT" in
     stage0|all) [ -n "$CPP_SRC" ] || die '缺少参数 CPP_SRC';;
   esac
@@ -845,6 +890,9 @@ main() {
   case "$WANT" in
     stage0) stage0;;
     stage1) stage1;;
+    stage1-initial-std) stage1 initial-std;;
+    stage1-std) stage1 std;;
+    stage1-compiler) stage1 compiler;;
     all) stage0; stage1;;
   esac
   echo "BOOTSTRAP-OK 到 $WANT work=$WORK"

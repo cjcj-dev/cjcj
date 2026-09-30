@@ -349,7 +349,10 @@ if [ -n "$LLVM_SO" ]; then
   install_llvm_so "$LLVM_SO"
 fi
 swap_all cjpm "$CJPM" cjpm
-swap_all cjc  "$CJC"  cjc
+if [ -n "$CJC" ]; then
+  python3 "$(dirname "${BASH_SOURCE[0]}")/compiler_identity.py" "$TO" --install "$CJC" \
+    || die 'compiler producer installation failed'
+fi
 # ⭐⭐⭐ 同轮元组：runtime 的 .so 装在 runtime/lib/<tuple>，.a 装在 lib/<tuple>
 #   CMake 真值：runtime/CMakeLists.txt:518 (shared→runtime/lib) · :799 (static→lib)
 #   Driver 真值：Linux_CJNATIVE.cj:104 静态链 -l:libcangjie-runtime.a（-L 先 lib/ 再 runtime/lib）
@@ -562,9 +565,31 @@ if [ -n "$STD" ]; then
       die "std modules 替换失败"
     fi
     echo "  [std-prefix] modules -> ${d#"$TO"/}"
+    # Require every baseline package in the selected tuple before removing seeds.
+    # The legacy aggregate libcangjie-std.a/.so is not a package: final std
+    # installs per-package libraries, so those aggregates are only pruned.
+    for relroot in "lib/$TARGET_TUPLE" "runtime/lib/$TARGET_TUPLE"; do
+      [ -d "$STD/$relroot" ] || die "std install prefix 缺目录: $relroot"
+      for seed in "$BASE/$relroot"/libcangjie-std-*; do
+        [ -e "$seed" ] || [ -L "$seed" ] || continue
+        rel="${seed#"$BASE"/}"
+        [ -f "$STD/$rel" ] || die "std install prefix 缺包: $rel"
+      done
+    done
+    # Match package_sdk.mjs: discard std seeds in every native/cross tuple,
+    # preserving non-std libraries. Never retain official packages implicitly.
+    for parent in "$TO/lib" "$TO/runtime/lib"; do
+      for tuple_dir in "$parent"/*; do
+        [ -d "$tuple_dir" ] || continue
+        for seed in "$tuple_dir"/libcangjie-std*; do
+          [ -e "$seed" ] || [ -L "$seed" ] || continue
+          rm -rf "$seed" || die "std seed 清理失败: $seed"
+        done
+      done
+    done
     n=0
     # ⭐ 两边同轮：lib/<tuple> 的 .a + runtime/lib/<tuple> 的 .so（+ FFI）
-    for relroot in lib/linux_x86_64_cjnative runtime/lib/linux_x86_64_cjnative; do
+    for relroot in "lib/$TARGET_TUPLE" "runtime/lib/$TARGET_TUPLE"; do
       [ -d "$STD/$relroot" ] || die "std install prefix 缺目录: $relroot"
       while IFS= read -r src; do
         base=$(basename "$src")
@@ -586,8 +611,8 @@ if [ -n "$STD" ]; then
     n=$((n+1))
     # ⭐ 同轮自证：core 的 .a 与 .so 必须都来自本 prefix（sha 对源）
     for pair in \
-      "lib/linux_x86_64_cjnative/libcangjie-std-core.a" \
-      "runtime/lib/linux_x86_64_cjnative/libcangjie-std-core.so"; do
+      "lib/$TARGET_TUPLE/libcangjie-std-core.a" \
+      "runtime/lib/$TARGET_TUPLE/libcangjie-std-core.so"; do
       [ -f "$STD/$pair" ] || die "std install prefix 缺 $pair"
       [ -f "$TO/$pair" ] || die "std: 替换后缺 $pair"
       s1=$(sha256sum "$STD/$pair" | awk '{print $1}')
@@ -725,7 +750,7 @@ payload = {
 }
 open(path, "w").write(json.dumps(payload))
 PY
-python3 "$_SDK_VERIFY" --sdk "$TO" --role "$ROLE" --runtime-pin "$_PIN" --identities "$_IDENT" --target-tuple "$TARGET_TUPLE" --write-lock \
+python3 "$_SDK_VERIFY" --sdk "$TO" --from "$BASE" --role "$ROLE" --runtime-pin "$_PIN" --identities "$_IDENT" --target-tuple "$TARGET_TUPLE" --write-lock \
   || { rm -f "$_IDENT"; die "sdk_verify 拒绝本枚 SDK（见 SDK-VERIFY-FAIL）"; }
 rm -f "$_IDENT"
 echo "SDK-BUILD-OK role=$ROLE from=$BASE to=$TO mask=$MASK"

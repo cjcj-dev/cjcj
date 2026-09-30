@@ -1,0 +1,25 @@
+{
+  "version": "1.3.0-alpha.20260925001050",
+  "platforms": {
+    "linux-x64": {
+      "os": "linux", "arch": "x64", "extension": ".tar.gz", "size": 204818301,
+      "sha256": "fde68a5713968f5f875e013355d73aab8bd95bb1fbfd1f1b6a29b1adcf48943b"
+    },
+    "linux-aarch64": {
+      "os": "linux", "arch": "aarch64", "extension": ".tar.gz", "size": 206550010,
+      "sha256": "471fc3738ef70f7cbbb1f0a7dfee4b6f1a54ed19fa15b6d580b000786042e79a"
+    },
+    "darwin-x64": {
+      "os": "mac", "arch": "x64", "extension": ".tar.gz", "size": 177291792,
+      "sha256": "c183258deb8f5055425ba99dce655daa4b9fc1d237bb95f356a9f0d1dd616f02"
+    },
+    "darwin-arm64": {
+      "os": "mac", "arch": "aarch64", "extension": ".tar.gz", "size": 169803592,
+      "sha256": "a60818932bc9bc258b3b93fdf568d5f83a5bb11f747bba35f9d82bbb98aa9f74"
+    },
+    "windows-x64": {
+      "os": "windows", "arch": "x64", "extension": ".zip", "size": 268606563,
+      "sha256": "904e1a7147c156b84afe03c2c01c0392a29267ae53a3847d3589e03cff96999d"
+    }
+  }
+}

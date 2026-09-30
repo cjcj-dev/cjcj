@@ -55,6 +55,12 @@ This establishes host LLVM acquisition and provenance, not complete platform
 bootstrap support. The existing bootstrap/stage1 runner platform and runtime
 identity constraints still apply independently.
 
+`tools/srcbuild_kkk2.sh` uses the same `prepareHostLlvm` verification before
+constructing bootstrap arguments. Set `CJCJ_BOOTSTRAP_HOST_LLVM_ARTIFACT` to an
+artifact directory to reuse a download; otherwise it downloads the declared
+artifact ID through the shared GitHub artifact transport. Neither a supplied
+library path nor the nightly SDK bypasses artifact provenance verification.
+
 The CI apparatus tests enter `prepare_bootstrap_inputs.mjs` and observe its
 exported library bytes and declared hash. A one-digit identity change must fail
 with `HOST_LLVM_SHA256_MISMATCH`, and provenance changes must fail with

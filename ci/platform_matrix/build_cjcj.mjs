@@ -1,13 +1,14 @@
 #!/usr/bin/env zx
+import {prepareTrimpath, withSeedOptimization} from '../release/trimpath.mjs';
 // Provision the official host nightly SDK, activate the native fixed LLVM
 // tuple, then attempt the O1 workspace build.
 
-import crypto from 'node:crypto';
+import {checkCodegenRuntimeLayout} from '../check-codegen-runtime-layout.mjs';
+import {targetForHost} from '../../build/lib/targets.mjs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import zlib from 'node:zlib';
-import {spawnSync} from 'node:child_process';
+import {activateLlvmTuple} from './llvm-tuple.mjs';
 import {parseLlvmToolsManifest} from '../llvm-tools-manifest.mjs';
 import {
   hostToolchainFromCjcVersion,
@@ -199,10 +200,6 @@ async function sdkToolPath(name) {
   if (!(await isFile(target))) throw new Error(`SDK ${name} missing: ${target}`);
   return target;
 }
-function sha256(buffer) {
-  return crypto.createHash('sha256').update(buffer).digest('hex');
-}
-
 const parsedManifest = parseLlvmToolsManifest(await fs.readFile(fixedLlvmManifest, 'utf8'), {
   label: fixedLlvmManifest,
   schema: 'core-or-native',
@@ -226,90 +223,7 @@ const fixedTools = [
   {name: 'opt', archive: fixedOptGz, manifestKey: 'OPT_SHA256', versionKey: 'OPT_VERSION'},
   {name: expectedLldTool, archive: fixedLldGz, manifestKey: 'LLD_SHA256', versionKey: 'LLD_VERSION'},
 ];
-for (const tool of fixedTools) {
-  tool.sdk = await sdkToolPath(tool.name);
-  tool.expectedSha = manifest.get(tool.manifestKey) || '';
-  if (!/^[0-9a-f]{64}$/.test(tool.expectedSha)) {
-    throw new Error(`${tool.manifestKey} missing from fixed LLVM manifest`);
-  }
-  tool.payload = zlib.gunzipSync(await fs.readFile(tool.archive));
-  const artifactSha = sha256(tool.payload);
-  if (artifactSha !== tool.expectedSha) {
-    throw new Error(`fixed ${tool.name} artifact sha mismatch (${artifactSha})`);
-  }
-  // Windows refuses to execute a PE without an .exe suffix (round-12: exit
-  // 127 on `llc.exe.tuple --version`), so keep tuple temp names ending in .exe.
-  tool.tuple = process.platform === 'win32'
-    ? `${tool.sdk.replace(/\.exe$/i, '')}.tuple.exe`
-    : `${tool.sdk}.tuple`;
-  tool.rollback = `${tool.sdk}.tuple.rollback`;
-  await fs.writeFile(tool.tuple, tool.payload);
-  if (process.platform !== 'win32') await fs.chmod(tool.tuple, 0o755);
-}
-
-// The Windows tuple llc links against MinGW runtime DLLs (libstdc++-6.dll,
-// libwinpthread-1.dll; round-13/14 exit 127 = loader failure even with PATH
-// appended). Same-directory DLL resolution always wins on Windows, so copy the
-// runtime DLLs next to the tools; probe via spawnSync for a discriminating error.
-if (process.platform === 'win32') {
-  process.env.PATH = `${process.env.PATH};C:\\mingw64\\bin`;
-  const llvmBin = path.dirname(fixedTools[0].sdk);
-  for (const dll of ['libstdc++-6.dll', 'libwinpthread-1.dll', 'libgcc_s_seh-1.dll']) {
-    for (const dir of ['C:\\mingw64\\bin', 'C:\\msys64\\mingw64\\bin', 'C:\\Program Files\\Git\\mingw64\\bin']) {
-      const cand = path.join(dir, dll);
-      if (await isFile(cand)) {
-        await fs.copyFile(cand, path.join(llvmBin, dll));
-        console.log(`staged ${dll} from ${dir}`);
-        break;
-      }
-    }
-  }
-}
-
-function probeLlvmTool(tool, phase, expectedVersion) {
-  const probe = spawnSync(tool, ['--version'], {encoding: 'utf8'});
-  console.log(`${phase} ${path.basename(tool)} probe: status=${probe.status} error=${probe.error ? probe.error.code : 'none'}`);
-  if (probe.stdout) console.log(probe.stdout.slice(0, 400));
-  if (probe.stderr) console.error(probe.stderr.slice(0, 400));
-  if (probe.status !== 0) throw new Error(`${phase} LLVM tool probe failed: ${tool}`);
-  const reportedVersion = probe.stdout.split(/\r?\n/).map(line => line.trim())
-    .find(line => /LLVM version |^LLD /.test(line)) || '';
-  if (reportedVersion !== expectedVersion) {
-    throw new Error(`${phase} LLVM tool version mismatch: ${tool} (${reportedVersion} != ${expectedVersion})`);
-  }
-}
-
-// Validate the complete tuple before changing any SDK binary.
-for (const tool of fixedTools) probeLlvmTool(tool.tuple, 'tuple', manifest.get(tool.versionKey));
-
-for (const tool of fixedTools) {
-  if (!(await isFile(`${tool.sdk}.orig`))) await fs.copyFile(tool.sdk, `${tool.sdk}.orig`);
-  await fs.rm(tool.rollback, {force: true});
-  await fs.copyFile(tool.sdk, tool.rollback);
-}
-try {
-  for (const tool of fixedTools) {
-    await fs.rm(tool.sdk, {force: true});
-    await fs.rename(tool.tuple, tool.sdk);
-  }
-  for (const tool of fixedTools) {
-    const installedSha = sha256(await fs.readFile(tool.sdk));
-    if (installedSha !== tool.expectedSha) {
-      throw new Error(`installed ${tool.name} sha mismatch (${installedSha})`);
-    }
-    probeLlvmTool(tool.sdk, 'installed', manifest.get(tool.versionKey));
-    console.log(`SDK ${tool.name} -> source-built fixed LLVM (${installedSha})`);
-  }
-} catch (error) {
-  for (const tool of fixedTools) {
-    if (await isFile(tool.rollback)) {
-      await fs.rm(tool.sdk, {force: true});
-      await fs.rename(tool.rollback, tool.sdk);
-    }
-  }
-  throw error;
-}
-for (const tool of fixedTools) await fs.rm(tool.rollback, {force: true});
+await activateLlvmTuple(fixedTools, {sdkToolPath, manifest});
 console.log(`activated fixed LLVM tuple ${process.env.PLATFORM_TUPLE || 'unknown'} at ${llvmSourceSha}: llc + opt + ${expectedLldTool}`);
 
 async function findNamedFile(directory, names) {
@@ -331,13 +245,7 @@ async function installFile(source, destination) {
   if (process.platform !== 'win32') await fs.chmod(`${destination}.new`, 0o755);
   await fs.rename(`${destination}.new`, destination);
 }
-const sdkRuntimeDirName = process.env.SDK_RUNTIME_DIR || {
-  'linux/x64': 'linux_x86_64_cjnative',
-  'linux/arm64': 'linux_aarch64_cjnative',
-  'darwin/arm64': 'darwin_aarch64_cjnative',
-  'darwin/x64': 'darwin_x86_64_cjnative',
-  'win32/x64': 'windows_x86_64_cjnative',
-}[`${process.platform}/${process.arch}`] || '';
+const sdkRuntimeDirName = process.env.SDK_RUNTIME_DIR || targetForHost()?.spec.runtimeTuple || '';
 if (!sdkRuntimeDirName) throw new Error(`unsupported host for bootstrap runtime install: ${process.platform}/${process.arch}`);
 const finalCompilerOutput = process.env.FINAL_COMPILER_DIR || '';
 const finalWindows = process.platform === 'win32' && Boolean(finalCompilerOutput);
@@ -421,8 +329,9 @@ const cjcTomlPath = path.join('packages', 'cjc', 'cjpm.toml');
 const cjcToml = await fs.readFile(cjcTomlPath, 'utf8');
 
 const cjpmToml = await fs.readFile('cjpm.toml', 'utf8');
-await fs.writeFile(path.join(root, 'cjpm.O1.toml'), cjpmToml.replace('compile-option = "-O2"', 'compile-option = "-O1"'));
+await fs.writeFile(path.join(root, 'cjpm.O1.toml'), withSeedOptimization(cjpmToml));
 await fs.copyFile(path.join(root, 'cjpm.O1.toml'), 'cjpm.toml');
+await prepareTrimpath(process.cwd());
 
 let shim;
 let build;
@@ -568,7 +477,7 @@ if (process.platform === 'win32') {
   for (const name of ['cjcj.exe', ...PRODUCT_NAMES.map((n) => `${n}.exe`)]) {
     await fs.rm(path.join('target', 'release', 'bin', name), {force: true});
   }
-  build = await runInMsys('cjpm build', 'build');
+  build = await runInMsys('node ci/check-codegen-runtime-layout.mjs && cjpm build', 'build');
   if (finalWindows && shim.exitCode === 0 && build.exitCode === 0) {
     build = await buildWindowsFinalCompiler({root, cangjieHome, hostSdk, sdkRuntimeDirName,
       cjcTomlPath, cjcToml, workspaceToml: cjpmToml, mingwCxxLinkRsp, installedRuntimeLib, fixedLlvmManifest,
@@ -579,6 +488,7 @@ if (process.platform === 'win32') {
     cjcToml, process.platform, cangjieHome, process.env.CJCJ_LLVM_LINK_RSP || ''));
   shim = await $({nothrow: true})`npx --yes zx@8 runtime_shim/build_shim.mjs`;
   console.log(`shim_rc=${shim.exitCode}; continuing to cjpm build so the platform frontier is recorded`);
+  await checkCodegenRuntimeLayout();
   build = await $({nothrow: true})`cjpm build`;
 }
 console.log(`setup_rc=${setupRc} shim_rc=${shim.exitCode} build_rc=${build.exitCode}`);

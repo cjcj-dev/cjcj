@@ -14,5 +14,6 @@
   package-configuration = {}
 
 [dependencies]
+  "cjcj::lex" = { path = "../lex" }
   "cjcj::ast" = { path = "../ast" }
   "cjcj::utils" = { path = "../utils" }

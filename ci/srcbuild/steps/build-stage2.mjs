@@ -1,5 +1,8 @@
 #!/usr/bin/env zx
 
+import {checkCodegenRuntimeLayout} from '../../check-codegen-runtime-layout.mjs';
+import {prepareTrimpath} from '../../release/trimpath.mjs';
+
 $.stdio = 'inherit';
 
 // cjcj has no upstream -O2 CHIR bug. Self-build the final compiler at -O2 with
@@ -7,5 +10,7 @@ $.stdio = 'inherit';
 console.log('[stage2] compiler');
 await $`set -o pipefail; cjc --version | head -2`;
 // Inherit the caller’s resource-limited host heap; swap does not raise the
-// official runtime’s physical-memory limit. Compiler sizing belongs to its wrapper.
+// official runtime’s physical-memory limit. Compiler wrappers preserve the recipe’s heap setting.
+await checkCodegenRuntimeLayout();
+await prepareTrimpath(process.cwd());
 await $`cjpm build -j 1`;

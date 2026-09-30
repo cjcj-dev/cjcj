@@ -3,7 +3,7 @@
 
 import crypto from 'node:crypto';
 import {installCrossRuntime} from '../ci/release/cross-runtime.mjs';
-import {getReleasePlatform} from '../build/lib/targets.mjs';
+import {getReleasePlatform, getTarget} from '../build/lib/targets.mjs';
 import {spawnSync} from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -28,6 +28,7 @@ import {RELEASE_MANIFEST, writeReleaseManifest} from '../build/lib/release-manif
 import {writeToolchainIdentity} from '../build/lib/toolchain-identity.mjs';
 import {assertNoVerifierReportArtifacts} from './verifier_artifact_gate.mjs';
 import {assertPackagedLineage} from '../build/lib/package-lineage.mjs';
+import {installIsolatedLlvmTuple} from '../build/lib/isolated-llvm-tuple.mjs';
 import {
   PACKAGED_LLVM_TOOL_NAMES,
   formatPackagedLlvmToolsManifest,
@@ -62,6 +63,13 @@ const crossStdDirs = (Array.isArray(argv['cross-std-dir'])
   ? argv['cross-std-dir']
   : typeof argv['cross-std-dir'] === 'string' ? [argv['cross-std-dir']] : []).map(String);
 const llvmManifest = required('llvm-manifest');
+// The official host SDK keeps its own llc/opt/lld; ci/setup_sdk.mjs publishes the
+// source-built tuple into an independent directory. This package is not the
+// official SDK -- it ships our coloured runtime and self-built std -- so the
+// stage must receive the coloured tuple from that directory. Omitting the
+// directory would silently package the official backend, which is the exact
+// mismatch this isolation exists to prevent.
+const isolatedLlvmBin = required('isolated-llvm-bin');
 const baseSdkId = typeof argv['base-sdk-id'] === 'string' ? argv['base-sdk-id'] : '';
 const baseSdkArchive = required('base-sdk-archive');
 const baseSdkProvenance = required('base-sdk-provenance');
@@ -88,6 +96,7 @@ if (runtimeLib && !await exists(runtimeLib)) { console.error(`runtime library no
 if (runtimeRoot && !await exists(runtimeRoot, 'dir')) { console.error(`runtime root not found: ${runtimeRoot}`); process.exit(2); }
 if (stdDir && !await exists(stdDir, 'dir')) { console.error(`std dir not found: ${stdDir}`); process.exit(2); }
 if (!await exists(llvmManifest)) { console.error(`LLVM manifest not found: ${llvmManifest}`); process.exit(2); }
+if (!await exists(isolatedLlvmBin, 'dir')) { console.error(`isolated LLVM tuple dir not found: ${isolatedLlvmBin}`); process.exit(2); }
 if (!await exists(baseSdkArchive)) { console.error(`base SDK archive not found: ${baseSdkArchive}`); process.exit(2); }
 if (!await exists(baseSdkProvenance)) { console.error(`base SDK provenance not found: ${baseSdkProvenance}`); process.exit(2); }
 if (!await exists(gateHostRuntime)) { console.error(`gate host runtime not found: ${gateHostRuntime}`); process.exit(2); }
@@ -103,16 +112,9 @@ if (!await exists(pythonBundle, 'dir')) { console.error(`Python bundle dir not f
 // .bc/.o inputs for the report-mode named metadata.
 assertNoVerifierReportArtifacts([sdk, ...[stdDir, runtimeRoot].filter(Boolean)]);
 
-const platforms = {
-  'linux-x64': ['linux_x86_64_cjnative', 'tar', ''],
-  'linux-aarch64': ['linux_aarch64_cjnative', 'tar', ''],
-  'darwin-arm64': ['darwin_aarch64_cjnative', 'tar', ''],
-  'darwin-x64': ['darwin_x86_64_cjnative', 'tar', ''],
-  'windows-x64': ['windows_x86_64_cjnative', 'zip', '.exe'],
-};
-if (!platforms[platform]) { console.error(`unsupported --platform: ${platform}`); process.exit(2); }
-const [runtimeDir, archiveType, exeSuffix] = platforms[platform];
-const runtimeLibrary = platform.startsWith('darwin-') ? 'libcangjie-runtime.dylib' : 'libcangjie-runtime.so';
+const {spec: targetSpec} = getTarget(platform);
+const {runtimeTuple: runtimeDir, exeSuffix, runtimeLibrary} = targetSpec;
+const archiveType = targetSpec.archiveFormat === 'tar.gz' ? 'tar' : 'zip';
 const isWindows = platform === 'windows-x64';
 const packageName = `cjcj-${version}-${releaseKey ? getReleasePlatform(releaseKey).archiveKey : platform}`;
 const inputLlvmManifest = parseLlvmToolsManifest(await fs.readFile(llvmManifest, 'utf8'), {
@@ -840,24 +842,10 @@ function versionLine(executable) {
   return {version: `unavailable(exit=${probe.status ?? 'spawn'}): ${detail}`.slice(0, 512), probe};
 }
 
-const requiredLlvmTools = new Map([
-  ['linux-x64', ['llc', 'opt', 'ld.lld', 'llvm-objcopy']],
-  ['linux-aarch64', ['llc', 'opt', 'ld.lld', 'llvm-objcopy']],
-  ['darwin-arm64', ['llc', 'opt', 'ld64.lld']],
-  ['darwin-x64', ['llc', 'opt', 'ld64.lld']],
-  ['windows-x64', ['llc', 'opt', 'ld.lld', 'llvm-ar']],
-]);
-const nativeFilePatterns = new Map([
-  ['linux-x64', /ELF 64-bit.*(?:x86-64|x86_64)/i],
-  ['linux-aarch64', /ELF 64-bit.*(?:ARM aarch64|aarch64)/i],
-  ['darwin-arm64', /Mach-O 64-bit.*(?:arm64|aarch64)/i],
-  ['darwin-x64', /Mach-O 64-bit.*x86_64/i],
-  ['windows-x64', /PE32\+ executable.*x86-64/i],
-]);
 
 function verifyNativeLlvmTool(tool, executable, {requiresFat = false} = {}) {
   const fileProbe = runLineageProbe('file', ['-b', executable]);
-  if (fileProbe.status !== 0 || !nativeFilePatterns.get(platform).test(fileProbe.output)) {
+  if (fileProbe.status !== 0 || !targetSpec.nativeFilePattern.test(fileProbe.output)) {
     throw new Error(`${tool}: wrong native format for ${platform}: ${oneLine(fileProbe.output)}`);
   }
   let loaderProbe;
@@ -888,6 +876,33 @@ function verifyNativeLlvmTool(tool, executable, {requiresFat = false} = {}) {
   }
   return {file: oneLine(fileProbe.output), loader: oneLine(loaderProbe.output), version: version.version};
 }
+
+console.log('[7a/9] install the isolated fixed LLVM tuple into the stage');
+// The stage was cloned from the official SDK, so its llc/opt/lld are the
+// official backend bytes. Replace exactly those three with the verified
+// source-built tuple; every other inherited tool keeps its base-SDK identity and
+// is audited against the base SDK below.
+const installedTupleTools = await installIsolatedLlvmTuple({
+  tupleBin: isolatedLlvmBin,
+  packagedLlvmBin: path.join(stage, path.join('third_party', 'llvm', 'bin')),
+  lldTool: expectedTupleLldTool,
+  manifestValues: inputLlvmManifest.values,
+  exeSuffix,
+  verify: async (tool, destination, stagedSha) => {
+    const evidence = verifyNativeLlvmTool(tool, destination, {requiresFat: true});
+    const versionField = {llc: 'LLC', opt: 'OPT', [expectedTupleLldTool]: 'LLD'}[tool];
+    const expectedSha = inputLlvmManifest.values.get(`${versionField}_SHA256`) || '';
+    const expectedVersion = inputLlvmManifest.values.get(`${versionField}_VERSION`) || '';
+    if (stagedSha !== expectedSha) {
+      throw new Error(`${tool}: staged sha256 ${stagedSha} does not match tuple manifest ${expectedSha}`);
+    }
+    if (expectedVersion && evidence.version !== expectedVersion) {
+      throw new Error(`${tool}: staged version ${evidence.version} does not match tuple manifest ${expectedVersion}`);
+    }
+    console.log(`  ${tool}: sha256=${stagedSha} version=${evidence.version}`);
+  },
+});
+console.log(`ISOLATED_TUPLE_INSTALLED count=${installedTupleTools.length} dir=${isolatedLlvmBin}`);
 
 console.log('[7a/9] audit packaged LLVM tool lineage');
 const llvmBinRelative = path.join('third_party', 'llvm', 'bin');
@@ -952,7 +967,7 @@ for (const tool of allToolNames) {
   lineageRows.push({tool, present: 'yes', source, version: version.version, sha256: digest});
 }
 
-for (const tool of requiredLlvmTools.get(platform)) {
+for (const tool of targetSpec.requiredLlvmTools) {
   const physical = physicalTools.get(tool);
   if (!physical) throw new Error(`${tool}: required by ${platform} driver but absent from package`);
   const evidence = verifyNativeLlvmTool(tool, path.join(packagedLlvmBin, physical), {
@@ -991,7 +1006,7 @@ for (const row of recordedLineage.tools.filter(row => row.present === 'yes')) {
     throw new Error(`${row.tool}: packaged manifest does not match final payload`);
   }
 }
-console.log(`LLVM_TOOL_LINEAGE_OK total=${lineageRows.length} present=${physicalTools.size} required=${requiredLlvmTools.get(platform).length}`);
+console.log(`LLVM_TOOL_LINEAGE_OK total=${lineageRows.length} present=${physicalTools.size} required=${targetSpec.requiredLlvmTools.length}`);
 
 if (compilerArtifact) {
   if (await fileSha256(binary) !== selectedCompilerSha256) throw new Error('selected final compiler changed during packaging');

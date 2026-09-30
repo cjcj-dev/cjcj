@@ -2,12 +2,12 @@
 // Prefer the tuple artifact downloaded from this workflow run. If it is absent,
 // retain the cross-run job lookup as a recovery path.
 
+import {targetForHost} from '../../build/lib/targets.mjs';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
-import fsSync from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {spawnSync} from 'node:child_process';
+import {downloadArtifact} from '../release/download_artifact.mjs';
 import {runRequiredProbe} from '../../build/lib/fail-closed-probes.mjs';
 import {emitBlockedSummary, toCommandPath} from './common.mjs';
 
@@ -28,14 +28,7 @@ const branches = [...new Set([
   'ci/platform-matrix',
 ])];
 
-const platforms = {
-  'linux/x64': 'linux_x86_64',
-  'linux/arm64': 'linux_aarch64',
-  'darwin/arm64': 'darwin_aarch64',
-  'darwin/x64': 'darwin_x86_64',
-  'win32/x64': 'windows_x86_64',
-};
-const platform = platforms[`${process.platform}/${process.arch}`];
+const platform = targetForHost()?.spec.llvmPlatform;
 
 function stopBlocked(reason) {
   emitBlockedSummary(reason);
@@ -130,10 +123,7 @@ if (entries.length) {
   const scratch = path.join(process.env.RUNNER_TEMP || process.env.TMPDIR || os.tmpdir(), `platform-ci-${platform}-tuple`);
   await fs.mkdir(scratch, {recursive: true});
   const archive = path.join(scratch, 'artifact.zip');
-  const archiveFd = fsSync.openSync(archive, 'w');
-  const download = spawnSync('gh', ['api', `repos/${repo}/actions/artifacts/${artifactId}/zip`], {stdio: ['inherit', archiveFd, 'inherit']});
-  fsSync.closeSync(archiveFd);
-  if (download.status !== 0) process.exit(download.status ?? 1);
+  downloadArtifact(repo, artifactId, archive);
 
   extracted = path.join(scratch, 'artifact');
   await fs.rm(extracted, {recursive: true, force: true});

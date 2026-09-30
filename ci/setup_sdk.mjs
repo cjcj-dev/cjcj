@@ -1,6 +1,7 @@
 #!/usr/bin/env zx
 // Install the Cangjie bootstrap SDK and export the build environment.
 
+import {targetForHost} from '../build/lib/targets.mjs';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -43,17 +44,18 @@ async function commandExists(command) {
 const hostOs = (await $({stdio: 'pipe'})`uname -s`).stdout.trim();
 const hostArch = (await $({stdio: 'pipe'})`uname -m`).stdout.trim();
 const hosts = {
-  'Linux/x86_64': ['cjv_linux_amd64.tar.gz', 'linux_x86_64_cjnative'],
-  'Linux/aarch64': ['cjv_linux_arm64.tar.gz', 'linux_aarch64_cjnative'],
-  'Darwin/arm64': ['cjv_darwin_arm64.tar.gz', 'darwin_aarch64_cjnative'],
-  'Darwin/x86_64': ['cjv_darwin_amd64.tar.gz', 'darwin_x86_64_cjnative'],
+  'Linux/x86_64': 'cjv_linux_amd64.tar.gz',
+  'Linux/aarch64': 'cjv_linux_arm64.tar.gz',
+  'Darwin/arm64': 'cjv_darwin_arm64.tar.gz',
+  'Darwin/x86_64': 'cjv_darwin_amd64.tar.gz',
 };
 const host = hosts[`${hostOs}/${hostArch}`];
 if (!host) {
   log(`unsupported host ${hostOs}/${hostArch}`);
   process.exit(2);
 }
-const [cjvAsset, runtimeDir] = host;
+const cjvAsset = host;
+const runtimeDir = targetForHost().spec.runtimeTuple;
 
 // 1. Bootstrap cjv.
 if (!(await commandExists('cjv'))) {
@@ -140,24 +142,16 @@ if (actualHostToolchain !== toolchain) {
   throw new Error(`installed base SDK identity mismatch: requested=${toolchain} actual=${actualHostToolchain}`);
 }
 
-// 2.5 Swap the SDK's optimizer, backend and (for releases) LTO linker with one
-// source-built fixed LLVM tuple.
-// The stock nightly backend materializes relocate-of-undef as a phantom GC root.
-// These static tools contain the backend fixes and have no libLLVM dependency. Keep
-// each true original once, and break a possible hardlink before replacing a binary.
+// 2.5 Verify and publish the fixed LLVM tuple outside the official SDK.
+// Official frontend IR and host code retain the official optimizer/backend/linker.
+// Rebuilt target consumers select the fixed tuple explicitly.
 // Jobs that only consume the toolchain's archives and headers as link inputs
 // (no Cangjie compilation, e.g. the Windows std-ast relink) opt out of the llc
 // requirement with CJCJ_SDK_LINK_INPUTS_ONLY=1. Jobs that never feed cjcj-generated
 // IR to llc at all (the non-gating SDK provisioning check, which exercises only the
 // official toolchain) keep the stock llc with CJCJ_SDK_STOCK_LLC=1.
 const keepStockLlc = process.env.CJCJ_SDK_LINK_INPUTS_ONLY || process.env.CJCJ_SDK_STOCK_LLC;
-const llcPlatforms = {
-  'Linux/x86_64': 'linux_x86_64',
-  'Linux/aarch64': 'linux_aarch64',
-  'Darwin/x86_64': 'darwin_x86_64',
-  'Darwin/arm64': 'darwin_aarch64',
-};
-const llcPlatform = keepStockLlc ? '' : llcPlatforms[`${hostOs}/${hostArch}`] || '';
+const llcPlatform = keepStockLlc ? '' : targetForHost()?.spec.llvmPlatform || '';
 const fixedLlcGz = process.env.FIXED_LLC_GZ || '';
 const fixedOptGz = process.env.FIXED_OPT_GZ || '';
 const lldTool = hostOs === 'Darwin' ? 'ld64.lld' : 'ld.lld';
@@ -166,10 +160,13 @@ const fixedLldGz = process.env.FIXED_LLD_GZ ||
 const hasFixedLld = Boolean(fixedLldGz && await isFile(fixedLldGz));
 const releaseNeedsLld = Boolean(process.env.RELEASE_PLATFORM);
 const sdkLlvmBin = `${cangjieHome}/third_party/llvm/bin`;
+// Keep all three tools together; publishing never mutates the official SDK.
+const isolatedLlvmBin = path.join(repoRoot, 'patched-llvm', 'bin');
+await fs.mkdir(isolatedLlvmBin, {recursive: true});
 const fixedTools = [
-  {name: 'llc', archive: fixedLlcGz, sdk: `${sdkLlvmBin}/llc`, manifestKey: 'LLC_SHA256', versionKey: 'LLC_VERSION'},
-  {name: 'opt', archive: fixedOptGz, sdk: `${sdkLlvmBin}/opt`, manifestKey: 'OPT_SHA256', versionKey: 'OPT_VERSION'},
-  {name: lldTool, archive: fixedLldGz, sdk: `${sdkLlvmBin}/${lldTool}`, manifestKey: 'LLD_SHA256', versionKey: 'LLD_VERSION'},
+  {name: 'llc', archive: fixedLlcGz, sdk: `${isolatedLlvmBin}/llc`, manifestKey: 'LLC_SHA256', versionKey: 'LLC_VERSION'},
+  {name: 'opt', archive: fixedOptGz, sdk: `${isolatedLlvmBin}/opt`, manifestKey: 'OPT_SHA256', versionKey: 'OPT_VERSION'},
+  {name: lldTool, archive: fixedLldGz, sdk: `${isolatedLlvmBin}/${lldTool}`, manifestKey: 'LLD_SHA256', versionKey: 'LLD_VERSION'},
 ];
 if (llcPlatform && fixedLlcGz) {
   if (process.env.CI && (!fixedOptGz || (releaseNeedsLld && !hasFixedLld))) {
@@ -184,8 +181,8 @@ if (llcPlatform && fixedLlcGz) {
       log(`FATAL: fixed ${tool.name} artifact missing: ${tool.archive}`);
       process.exit(4);
     }
-    if (!(await isFile(tool.sdk))) {
-      log(`FATAL: SDK ${tool.name} missing: ${tool.sdk}`);
+    if (!(await isFile(path.join(sdkLlvmBin, tool.name)))) {
+      log(`FATAL: SDK ${tool.name} missing: ${path.join(sdkLlvmBin, tool.name)}`);
       process.exit(4);
     }
   }
@@ -254,7 +251,7 @@ if (llcPlatform && fixedLlcGz) {
     expectedShas.set('llc', llcSha);
   }
 
-  // Validate the complete tuple before changing any SDK binary.
+  // Validate the complete tuple before publishing any target tool.
   for (const tool of toolsToInstall) {
     const artifactSha = (await $({stdio: 'pipe'})`gunzip -c ${tool.archive} | sha256sum`).stdout.trim().split(/\s+/)[0];
     if (artifactSha !== expectedShas.get(tool.name)) {
@@ -264,19 +261,14 @@ if (llcPlatform && fixedLlcGz) {
   }
   for (const tool of toolsToInstall) {
     const expectedSha = expectedShas.get(tool.name);
-    const currentSha = (await $({stdio: 'pipe'})`sha256sum ${tool.sdk}`).stdout.trim().split(/\s+/)[0];
-    if (currentSha !== expectedSha) {
-      if (!(await isFile(`${tool.sdk}.orig`))) await $`cp -f ${tool.sdk} ${tool.sdk}.orig`;
-      await fs.rm(tool.sdk, {force: true});
-      await $`gunzip -c ${tool.archive} > ${tool.sdk}`;
-      await $`chmod 0755 ${tool.sdk}`;
-    }
+    await $`node ${path.join(import.meta.dirname, 'install_patched_llvm_tool.mjs')} ${path.join(sdkLlvmBin, tool.name)} ${tool.archive} ${expectedSha} ${tool.sdk}`;
     const installedSha = (await $({stdio: 'pipe'})`sha256sum ${tool.sdk}`).stdout.trim().split(/\s+/)[0];
     if (installedSha !== expectedSha) {
       log(`FATAL: installed ${tool.name} sha mismatch (${installedSha})`);
       process.exit(4);
     }
-    log(`SDK ${tool.name} -> source-built fixed LLVM (${installedSha})`);
+    log(`${tool.name} -> source-built fixed LLVM (${installedSha}) path=${tool.sdk}`);
+
   }
 
   if (fixedOptGz) {

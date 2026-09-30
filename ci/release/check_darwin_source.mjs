@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 
 const [artifact, platform] = process.argv.slice(2);
 assert.ok(['darwin_aarch64', 'darwin_x86_64'].includes(platform));
-const workflow = fs.readFileSync('.github/workflows/srcbuild.yml', 'utf8');
+const workflow = fs.readFileSync('.github/workflows/srcbuild-target.yml', 'utf8');
 function command(name) {
   const start = workflow.indexOf(`      - name: ${name}\n`);
   assert.notEqual(start, -1, name);

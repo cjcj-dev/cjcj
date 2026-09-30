@@ -209,12 +209,18 @@ public func SerializePackageToCjoFlatBuffer(
         exportContent: exportContent, exportForIncr: exportForIncr, exportForTest: exportForTest,
         exportFuncBody: exportFuncBody,
         compileCjd: compileCjd)
-    writer.PreSaveFullExportDecls(pkg)
-    writer.ExportAST(pkg)
-    return writer.AST2FB(pkg)
+    try {
+        writer.PreSaveFullExportDecls(pkg)
+        writer.ExportAST(pkg)
+        return writer.AST2FB(pkg)
+    } finally {
+        writer.close()
+    }
 }
 
-public class ASTWriter {
+public class ASTWriter <: Resource {
+    public func isClosed(): Bool { return builder.isClosed() }
+    public func close(): Unit { builder.close() }
     private let builder: FlatBufferBuilder = FlatBufferBuilder()
     private let packageDepInfo: String
     private let cjoManager: SemaCjoManager
@@ -496,7 +502,8 @@ public class ASTWriter {
         builder.AddStruct(1, cjoVersion, 1)
         builder.AddOffset(0, version)
         let root = builder.EndTable()
-        let data = builder.Finish(root, CJO_FILE_IDENTIFIER)
+        builder.Finish(root, CJO_FILE_IDENTIFIER)
+        let data = builder.GetBufferArray()
         if (!VerifySemaTyContracts(data)) {
             throw IllegalStateException("serialized CJO violates the SemaTy kind/info union contract")
         }
