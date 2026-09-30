@@ -59,6 +59,7 @@ def run(args, case, single=False):
                           'MANGLE_RACE first-wait-timeout', 'MANGLE_RACE second-wait-timeout')
               if m in text]
     configured = re.search(r'MANGLE_RACE configured source=\S+ enabled=true first=(\S+) second=(\S+)', text)
+    first = configured.group(1) if configured else ''
     second = configured.group(2) if configured else ''
     published = re.search(r'MANGLE_RACE published entry=(\S+)', text)
     publisher = published.group(1) if published else ''
@@ -76,7 +77,7 @@ def run(args, case, single=False):
         # The fixture itself drove the interleaving and the product's own
         # missing-declaration check is the red.
         passed = (rc not in (0, 124) and not device and qualified and bound and bad and
-                  published is not None and publisher != second and signature and
+                  published is not None and publisher == first and first != second and signature and
                   'MANGLE_RACE second-finally-release' in text)
     elif mechanism_red:
         # Reached by the same broken invariant through a different consumer, not
@@ -86,7 +87,7 @@ def run(args, case, single=False):
         passed = rc == 0 and bc.is_file()
         if args.race and case.stem in ('parallel', 'ordinary') and not single:
             passed = (passed and not device and qualified and bound and good and reached and
-                      published is not None and publisher != second and
+                      published is not None and publisher == first and first != second and
                       'MANGLE_RACE first-resumed' in text and
                       re.search(r'MANGLE_RACE second-store entry=\S+', text) is not None)
     expected_red = red or mechanism_red
@@ -110,7 +111,7 @@ def run(args, case, single=False):
                   affinity=sorted(os.sched_getaffinity(0)), sdk=str(args.sdk), hashes=identities,
                   output_sha256=output_hash, disassemble_rc=dis_rc, symbols=symbols,
                   incomplete_observed=bad, complete_observed=good, result_assertion_reached=reached,
-                  qualified=qualified, second_entry=second, publisher_entry=publisher,
+                  qualified=qualified, first_entry=first, second_entry=second, publisher_entry=publisher,
                   consumer_entry=consumer.group(1) if consumer else '',
                   device_failures=device, target_signature=signature,
                   red_kind='fixture' if red else ('mechanism' if mechanism_red else 'none'),

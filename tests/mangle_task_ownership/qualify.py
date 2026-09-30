@@ -37,7 +37,7 @@ def main():
             if (!same || !separate || !fullTasks || decls.size % 30 == 0) {
                 throw IllegalStateException("MANGLE_FIXTURE_INELIGIBLE")
             }
-            MangleOwnershipRace.Configure(a, workers, decls[firstIndex][1].identifier.Val(), decls[secondIndex][1].identifier.Val())''')
+            MangleOwnershipRace.Configure(a, workers, decls[firstIndex][1].identifier.Val(), decls[secondIndex][1].identifier.Val(), firstIndex, secondIndex)''')
         modified = modified.replace('import cjcj::mangle.BaseMangler as RealBaseMangler',
             'import cjcj::mangle.MangleOwnershipRace\nimport cjcj::mangle.BaseMangler as RealBaseMangler')
         # The product macro route: the candidate converts through the per-task
@@ -64,7 +64,6 @@ def main():
                                 throw error
                             } finally {
                                 MangleOwnershipRace.LeaveTask()
-                                MangleOwnershipRace.Release(curDecl.identifier.Val())
                             }''')
         ordinary_begin = '                        let convertedDecl = adapter.ConvertDecl(curDecl)'
         ordinary_end = '                        mangledDecls.add(PendingMangledDecl(curDecl, mangledName))'
@@ -80,10 +79,19 @@ def main():
                             throw error
                         } finally {
                             MangleOwnershipRace.LeaveTask()
-                            MangleOwnershipRace.Release(curDecl.identifier.Val())
                         }''' + modified[end:]
         modified = modified.replace('        DoMangling(baseMangler, parallelNum, topDecls)',
             '        DoMangling(baseMangler, parallelNum, topDecls)\n        MangleOwnershipRace.Finish()')
+        walk = '            Walker(decl, visitPre: pre, visitPost: post).Walk()\n            adapter.ReleaseConvertedAst()'
+        if modified.count(walk) != 1:
+            raise SystemExit('expected one top-level product walk')
+        modified = modified.replace(walk, """            MangleOwnershipRace.BeginTop(idx)
+            try {
+                Walker(decl, visitPre: pre, visitPost: post).Walk()
+                adapter.ReleaseConvertedAst()
+            } finally {
+                MangleOwnershipRace.EndTop(idx)
+            }""")
         mangle = args.tree / 'packages/mangle/src'
         shutil.copyfile(Path(__file__).with_name('Race.cj'), mangle / 'MangleOwnershipRace.cj')
         for name, before, after in [

@@ -14,6 +14,11 @@ public class MangleOwnershipRace {
     private static let changed = NewCondition()
     // Identity of the real mangling task currently running on this thread.
     private static let currentEntry = ThreadLocal<String>()
+    private static var firstIndex: Int64 = -1
+    private static var secondIndex: Int64 = -1
+    private static var secondReady = false
+    private static var active = false
+    private static var finished = false
     private static var watched: Option<Ty> = None
     private static var firstEntry = ""
     private static var secondEntry = ""
@@ -34,8 +39,10 @@ public class MangleOwnershipRace {
         synchronized(mutex) { return mutex.condition() }
     }
 
-    public static func Configure(source: Ty, workers: Int64, first: String, second: String): Unit {
+    public static func Configure(source: Ty, workers: Int64, first: String, second: String, firstTop: Int64, secondTop: Int64): Unit {
         synchronized(mutex) {
+            firstIndex = firstTop
+            secondIndex = secondTop
             watched = source
             firstEntry = first
             secondEntry = second
@@ -44,21 +51,54 @@ public class MangleOwnershipRace {
         }
     }
 
-    // Called at the top of every real per-task entry, so the deep adapter and
-    // mangler hooks below can name the task they are running on.
+    // Gate entire real top-level walks, including prefix conversion and cache
+    // release. Run both batch prefixes without overlap, park the consumer at
+    // its qualified index, then let the producer publish. Other batches cannot
+    // populate or clear the shared adapter during this two-task window.
+    public static func BeginTop(index: Int64): Unit {
+        synchronized(mutex) {
+            if (!enabled) { return }
+            if (index == secondIndex) {
+                secondReady = true
+                changed.notifyAll()
+                while (!published) { Await("consumer-ready") }
+                println("MANGLE_SCHEDULE consumer index=${index}")
+                return
+            }
+            let prefix = (index / 30 == firstIndex / 30 && index <= firstIndex) ||
+                (index / 30 == secondIndex / 30 && index < secondIndex)
+            while (active || (!prefix && !finished) || (index == firstIndex && !secondReady)) {
+                Await("top-entry")
+            }
+            active = true
+            println("MANGLE_SCHEDULE enter index=${index}")
+        }
+    }
+
+    public static func EndTop(index: Int64): Unit {
+        synchronized(mutex) {
+            if (!enabled) { return }
+            if (index == secondIndex) {
+                released = true
+                println("MANGLE_RACE second-finally-release entry=${secondEntry}")
+            } else {
+                active = false
+                if (index == firstIndex) { finished = true }
+            }
+            changed.notifyAll()
+        }
+    }
+
+    private static func Await(point: String): Unit {
+        if (!changed.wait(timeout: Duration.minute)) {
+            waitExpired = true
+            println("MANGLE_RACE schedule-timeout point=${point}")
+            throw IllegalStateException("MANGLE_FIXTURE_INCOMPLETE")
+        }
+    }
+
     public static func EnterTask(name: String): Unit {
         currentEntry.set(Some(name))
-        synchronized(mutex) {
-            if (!enabled || name != secondEntry) { return }
-            while (!published) {
-                if (!changed.wait(timeout: Duration.minute)) {
-                    waitExpired = true
-                    println("MANGLE_RACE second-wait-timeout entry=${name}")
-                    return
-                }
-            }
-            println("MANGLE_RACE second-after-publication entry=${name}")
-        }
     }
 
     public static func LeaveTask(): Unit {
@@ -74,7 +114,7 @@ public class MangleOwnershipRace {
                 if (!refEq(expected, source)) { return }
             } else { return }
             let task = TaskName()
-            if (!published) {
+            if (!published && task == firstEntry) {
                 firstTarget = target
                 firstAdapter = adapter
                 firstTask = task
@@ -89,7 +129,7 @@ public class MangleOwnershipRace {
                     }
                 }
                 println("MANGLE_RACE first-resumed entry=${task}")
-            } else {
+            } else if (published) {
                 var same = false
                 if (let Some(first) <- firstAdapter) { same = refEq(first, adapter) }
                 println("MANGLE_RACE second-store entry=${task} sameAdapter=${same}")
@@ -125,22 +165,13 @@ public class MangleOwnershipRace {
         }
     }
 
-    public static func Release(name: String): Unit {
-        synchronized(mutex) {
-            if (!enabled || name != secondEntry) { return }
-            released = true
-            changed.notifyAll()
-            println("MANGLE_RACE second-finally-release entry=${name}")
-        }
-    }
-
     public static func Finish(): Unit {
         synchronized(mutex) {
             if (!enabled) { return }
             println("MANGLE_ASSERT consumed=${secondConsumed} entry=${secondTask} cachedFirst=${secondCachedFirst} consumerDecl=${secondHasDecl} name=${secondName}")
             println("MANGLE_ASSERT publisher=${firstTask} qualifiedFirst=${firstEntry} waitExpired=${waitExpired}")
             if (!published || !released || !secondConsumed || secondCachedFirst || !secondHasDecl ||
-                secondName.isEmpty() || waitExpired || firstTask == secondTask) {
+                secondName.isEmpty() || waitExpired || firstTask != firstEntry || secondTask != secondEntry) {
                 throw IllegalStateException("MANGLE_FIXTURE_INCOMPLETE")
             }
         }

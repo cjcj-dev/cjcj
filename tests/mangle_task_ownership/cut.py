@@ -19,7 +19,11 @@ def main():
     relative = 'packages/frontend/src/CompilerInstance.cj'
     path = args.tree / relative
     original = path.read_text()
-    candidate_route = 'baseMangler.Mangle(adapter.ConvertDecl(desugarDecl))'
+    candidate_route = """                            let convertedDesugarDecl = adapter.ConvertDecl(desugarDecl)
+                            let desugarMangledName = baseMangler.Mangle(convertedDesugarDecl)
+                            desugarDecl.mangledName = desugarMangledName
+                            convertedDesugarDecl.mangledName = desugarMangledName
+"""
     if original.count(candidate_route) != 1:
         raise SystemExit('candidate task-owned macro route is required')
     if args.kind == 'adapter':
@@ -27,7 +31,7 @@ def main():
         after = '        let adapter = baseMangler.adapter'
     else:
         before = candidate_route
-        after = 'baseMangler.Mangle(desugarDecl)'
+        after = '                            desugarDecl.mangledName = baseMangler.Mangle(desugarDecl)\n'
     if original.count(before) != 1:
         raise SystemExit('expected one real product bearing point')
     modified = original.replace(before, after)
