@@ -195,14 +195,6 @@ jobs:
         run: |
           python3 ci/release/publish_language_tuple.py fetch \
             --pin ci/h48_language_tuple_pin.json --output "$RUNNER_TEMP/h48-download"
-      - name: Load official build environment SDK pin
-        run: cat ci/host_sdk_pin.env >> "$GITHUB_ENV"
-      - name: Provision official build environment SDK
-        env:
-          CJCJ_SDK_STOCK_LLC: '1'
-        run: |
-          ulimit -c 0
-          npx --yes zx@8 ci/setup_sdk.mjs
       - name: Provision native gate debugger
         run: |
           sudo apt-get update -qq
@@ -217,6 +209,14 @@ jobs:
         run: |
           source ci/platform_matrix/runtime_core_setup.sh || echo "::warning::Core setup incomplete; see setup.log"
           npx --yes zx@8 ci/platform_matrix/build_runtime.mjs
+      - name: Load official build environment SDK pin
+        run: cat ci/host_sdk_pin.env >> "$GITHUB_ENV"
+      - name: Provision official build environment SDK
+        env:
+          CJCJ_SDK_STOCK_LLC: '1'
+        run: |
+          ulimit -c 0
+          npx --yes zx@8 ci/setup_sdk.mjs
       - name: Complete gate with pinned language tuple and same-build target
         run: |
           bash ci/release/gate_colour_runtime.sh runtime-source \
