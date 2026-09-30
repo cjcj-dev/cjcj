@@ -91,6 +91,7 @@ export const GATING = Object.freeze([
   'ci/release/android-platform.test.mjs',
   'ci/release/bootstrap_store.test.mjs',
   'ci/release/colour_runtime.test.mjs',
+  'ci/release/bootstrap_entries.test.mjs',
   'ci/release/cross-runtime.test.mjs',
   'ci/release/darwin_runtime.test.mjs',
   'ci/release/host_llvm.test.mjs',

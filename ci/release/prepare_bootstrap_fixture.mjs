@@ -5,6 +5,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import {prepareRuntime, digest as runtimeDigest, runtimeFiles} from './colour_runtime.mjs';
 import {spawnSync} from 'node:child_process';
+import {readHostToolchainPin} from '../host-toolchain-pin.mjs';
 
 export function fixture(check, target = 'linux-x64') {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tuple-inputs-'));
@@ -17,8 +18,13 @@ export function fixture(check, target = 'linux-x64') {
     const ast = path.join(sdk, 'ast.a');
     fs.writeFileSync(so, 'host fixture');
     fs.writeFileSync(ast, 'ast fixture');
-    for (const d of [artifact, fallback]) {
-      fs.writeFileSync(path.join(d, 'SHA256SUMS'), 'reviewed fixture sums');
+    const tupleFiles = ['SHA256SUMS', ...['llc.gz', 'opt.gz', 'ld.lld.gz', 'cjselfhost_llvmshim.o', 'llvm-tools.manifest']
+      .map(name => `fixed-llc/${name}`)];
+    for (const directory of [artifact, fallback]) {
+      for (const file of tupleFiles) {
+        fs.mkdirSync(path.dirname(path.join(directory, file)), {recursive: true});
+        fs.writeFileSync(path.join(directory, file), 'reviewed fixture sums');
+      }
     }
     const digest = crypto.createHash('sha256').update('reviewed fixture sums').digest('hex');
     const dylib = path.join(dir, 'dylib');
@@ -34,7 +40,7 @@ export function fixture(check, target = 'linux-x64') {
     const env = {...process.env, CJCJ_SRCBUILD_TARGET: target, CJCJ_BOOTSTRAP_COLOUR_DYLIB: dylibFallback, CJCJ_BOOTSTRAP_DYLIB_ARTIFACT: dylib, LLVM_DYLIB_SHA256: dylibSha, GITHUB_ENV: '', CJCJ_SRCBUILD_HOST_SDK: sdk,
       CJCJ_BOOTSTRAP_HOST_LLVM_SO: so, CJCJ_BOOTSTRAP_AST_SUPPORT: ast,
       CJCJ_BOOTSTRAP_SOURCE: 'depot', CJCJ_BOOTSTRAP_SOURCE_REASON: 'fixture explicit depot', CJCJ_BOOTSTRAP_INPUTS_WORK: path.join(dir, 'work'), CJCJ_BOOTSTRAP_COLOUR_TUPLE: fallback,
-      CJCJ_BOOTSTRAP_CPP_SRC: sdk, LLVM_SHA: 'a'.repeat(40),
+      CJCJ_BOOTSTRAP_CPP_SRC: sdk, LLVM_SHA: 'a'.repeat(40), LLVM_DYLIB_SOURCE_SHA: 'a'.repeat(40),
       CJCJ_BOOTSTRAP_CJCJ_SHA: 'b'.repeat(40), LLVM_TUPLE_SUMS_SHA: digest,
       AST_SUPPORT_SHA256: crypto.createHash('sha256').update('ast fixture').digest('hex')};
     const hostArtifact = path.join(dir, 'host-artifact');
@@ -49,6 +55,22 @@ export function fixture(check, target = 'linux-x64') {
     fs.writeFileSync(env.STAGE1_HOST_IDENTITIES,
       `# HOST_LLVM_PROVENANCE ${JSON.stringify(hostPin)}\n${hostPin.platform} libLLVM-15.so ${hostSha}\n`);
     env.CJCJ_BOOTSTRAP_HOST_LLVM_ARTIFACT = hostArtifact;
+    const sdkSource = path.join(dir, 'official/cangjie');
+    fs.mkdirSync(path.join(sdkSource, 'bin'), {recursive: true});
+    fs.writeFileSync(path.join(sdkSource, 'bin/cjc'), 'official compiler fixture');
+    fs.writeFileSync(path.join(sdkSource, 'bin/lld'), 'official linker fixture');
+    fs.symlinkSync('lld', path.join(sdkSource, 'bin/ld.lld'));
+    env.CJCJ_TOOLCHAIN = readHostToolchainPin();
+    const archivePlatform = {'linux-x64': 'linux-x64', 'linux-aarch64': 'linux-aarch64',
+      'darwin-arm64': 'mac-aarch64', 'darwin-x64': 'mac-x64'}[target];
+    const sdkArchive = `cangjie-sdk-${archivePlatform}-${env.CJCJ_TOOLCHAIN.replace(/^nightly-/, '')}.tar.gz`;
+    env.CJCJ_BOOTSTRAP_HOST_SDK_ARCHIVE = path.join(dir, sdkArchive);
+    const tar = spawnSync('tar', ['-czf', env.CJCJ_BOOTSTRAP_HOST_SDK_ARCHIVE, '-C', path.dirname(sdkSource), 'cangjie']);
+    if (tar.status !== 0) throw new Error(tar.stderr.toString());
+    fs.appendFileSync(env.STAGE1_HOST_IDENTITIES, `# HOST_SDK_PROVENANCE ${JSON.stringify({
+      platform: hostPin.platform, archive: sdkArchive,
+      sha256: crypto.createHash('sha256').update(fs.readFileSync(env.CJCJ_BOOTSTRAP_HOST_SDK_ARCHIVE)).digest('hex'),
+    })}\n`);
     const runtimeSource = path.join(dir, 'runtime-source');
     const runtime = path.join(dir, 'runtime');
     for (const rel of runtimeFiles) {
@@ -68,8 +90,8 @@ export function fixture(check, target = 'linux-x64') {
       COLOUR_RT_MANIFEST_SHA256: runtimeDigest(path.join(runtime, 'manifest.json'))});
     const pinFile = path.join(dir, 'pin.json');
     fs.writeFileSync(pinFile, JSON.stringify({version: 1, repository: 'cjcj-dev/cjcj', run: 123,
-      attempt: 1, artifact: 456, commit: 'b'.repeat(40), files: [{path: 'SHA256SUMS', mode: 0o644,
-      asset: 789, artifact_sha256: digest, release_sha256: digest}]}));
+      attempt: 1, artifact: 456, commit: 'b'.repeat(40), files: tupleFiles.map(file => ({path: file, mode: 0o644,
+      asset: 789, artifact_sha256: digest, release_sha256: digest}))}));
     env.CJCJ_BOOTSTRAP_INPUTS_PIN = pinFile;
     const transport = path.join(dir, 'transport.mjs');
     fs.writeFileSync(transport, `
@@ -78,12 +100,13 @@ export function fixture(check, target = 'linux-x64') {
         if (url !== 'https://api.github.com/repos/cjcj-dev/cjcj/releases/assets/789')
           throw new Error('unexpected source request: ' + url);
         console.log('FIXTURE_RELEASE_REQUEST ' + url);
+        if (process.env.FIXTURE_RELEASE_UNAVAILABLE) return new Response('', {status: 404});
         return new Response(fs.readFileSync(process.env.FIXTURE_RELEASE_FILE));
       };
     `);
     env.FIXTURE_RELEASE_FILE = path.join(artifact, 'SHA256SUMS');
-    const run = () => spawnSync(process.execPath,
-      ['--import', transport, new URL('./prepare_bootstrap_inputs.mjs', import.meta.url).pathname], {env, encoding: 'utf8'});
-    check({env, artifact, fallback, dylib, dylibSha, so, runtime, runtimeSource, run, pinFile});
+    const run = (args = []) => spawnSync(process.execPath,
+      ['--import', transport, new URL('./prepare_bootstrap_inputs.mjs', import.meta.url).pathname, ...args], {env, encoding: 'utf8'});
+    check({env, artifact, fallback, dylib, dylibSha, so, runtime, runtimeSource, run, pinFile, dir, transport});
   } finally { fs.rmSync(dir, {recursive: true, force: true}); }
 }

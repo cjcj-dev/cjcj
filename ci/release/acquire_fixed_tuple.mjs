@@ -2,26 +2,19 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import {spawnSync} from 'node:child_process';
-import {acquire, verify} from './bootstrap_store.mjs';
+import {prepareColourTuple} from './bootstrap_tuple.mjs';
 
-const [pinFile, destination, sumsSha] = process.argv.slice(2);
-if (!pinFile || !destination || !/^[a-f0-9]{64}$/.test(sumsSha || '')) {
-  throw new Error('usage: acquire_fixed_tuple.mjs PIN DESTINATION LLVM_TUPLE_SUMS_SHA');
+const [destination, fixedTools] = process.argv.slice(2);
+if (!destination || !fixedTools) {
+  throw new Error('usage: acquire_fixed_tuple.mjs DESTINATION FIXED_TOOLS');
 }
-const pin = JSON.parse(fs.readFileSync(pinFile, 'utf8'));
-// Share the release consumer's source selection and per-asset verification.
-const tuple = await acquire(pin, path.dirname(destination));
+const tuple = await prepareColourTuple({work: path.dirname(destination)});
 try {
-  verify(fs.readFileSync(path.join(tuple, 'SHA256SUMS')), sumsSha, 'LLVM_TUPLE_SUMS_SHA');
-  const checked = spawnSync('sha256sum', ['--strict', '-c', 'SHA256SUMS'], {
-    cwd: tuple, stdio: 'inherit',
-  });
-  if (checked.status !== 0) throw new Error('fixed LLVM tuple checksum verification failed');
-  // Publish only after all pinned assets and the independently pinned sums pass.
   fs.rmSync(destination, {recursive: true, force: true});
-  fs.renameSync(tuple, destination);
-  console.log(`FIXED_LLVM_RELEASE_VERIFIED ${destination} ${sumsSha}`);
+  fs.renameSync(tuple.directory, destination);
+  fs.rmSync(fixedTools, {recursive: true, force: true});
+  fs.cpSync(path.join(destination, 'fixed-llc'), fixedTools, {recursive: true});
+  console.log(`FIXED_LLVM_RELEASE_VERIFIED ${destination} ${tuple.identities.SHA256SUMS}`);
 } finally {
-  fs.rmSync(path.dirname(tuple), {recursive: true, force: true});
+  fs.rmSync(path.dirname(tuple.directory), {recursive: true, force: true});
 }

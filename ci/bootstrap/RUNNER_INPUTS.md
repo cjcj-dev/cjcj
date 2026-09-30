@@ -1,71 +1,84 @@
-# Bootstrap inputs per runner
+# Bootstrap inputs on Actions and kkk2
 
-kkk2 and GitHub Actions both exec `ci/bootstrap/bootstrap.sh` from the cjcj tree.
-They do not exec `/root/cj_build/tools/bootstrap.sh`.
+Both runners resolve bootstrap inputs with
+`ci/release/prepare_bootstrap_inputs.mjs` before entering
+`ci/bootstrap/bootstrap.sh`. Actions consumes the exported environment through
+`ci/bootstrap/gha_run.sh`; kkk2's `load_bootstrap_pins` consumes the same
+resolver's quoted shell output. Preparation failures publish no bootstrap
+command. The full 2..36 entry prepares native fixed tools before numbered steps
+with the same `prepareColourTuple` function used by bootstrap preparation.
 
-| runner | --base | --host-llvm-so | --ast-support | --colour-tuple | --colour-rt | --cpp-src | --cjcj-sha |
-|---|---|---|---|---|---|---|---|
-| kkk2 | `$HOME/.cjv/toolchains/$CJCJ_TOOLCHAIN` after `ci/setup_sdk.mjs` | same SDK `third_party/llvm/lib/libLLVM-15.so` | explicit `CJCJ_BOOTSTRAP_AST_SUPPORT` override, otherwise this campaign’s `CANGJIE_BUILD_ROOT/lib/libcangjie-ast-support.a`; missing both is an error | `/root/llvmdepot/$LLVM_SHA/$CANGJIE_COMPILER_SHA` | `/root/sodepot/$RUNTIME_REF` | `$CANGJIE_WORKSPACE/cangjie_compiler` | `git rev-parse HEAD` |
-| ubuntu-22.04 (linux-x64) | `$HOME/.cjv/toolchains/$CJCJ_TOOLCHAIN` from `ci/setup_sdk.mjs` + `ci/host_sdk_pin.env` | verified physical copy of `host-llvm-linux_x86_64`, pinned by `stage1_host_identities.txt` provenance | static-libs `CANGJIE_BUILD_ROOT/lib/libcangjie-ast-support.a` | download-artifact `fixed-llvm-tools-linux_x86_64` | explicit `CJCJ_BOOTSTRAP_COLOUR_RT`, verified against `ci/colour-runtime/` pin | `$CANGJIE_WORKSPACE/cangjie_compiler` after fetch | `GITHUB_SHA` |
-| ubuntu-24.04-arm (linux-aarch64) | same nightly install | `$base/third_party/llvm/lib/libLLVM-15.so` | static-libs archive | `fixed-llvm-tools-linux_aarch64` | same |
-| macos-15 (darwin-arm64) | same nightly install | `$base/third_party/llvm/lib/libLLVM*.dylib` or `.so` | host SDK `lib/*/libcangjie-ast-support.a` (no static-libs job) | `fixed-llvm-tools-darwin_aarch64` | same |
-| macos-15-intel (darwin-x64) | same nightly install | same dylib search | host SDK archive | `fixed-llvm-tools-darwin_x86_64` | same |
+The resolver reads the common host SDK, LLVM, runtime, AST, runtime-artifact and
+dylib pin files for the selected target. Workflow-provided pin environment values
+use the same validation as those loaded from the files. No runner-specific
+expected digest is calculated from downloaded bytes.
 
-`ci/release/prepare_bootstrap_inputs.mjs` resolves those paths, validates the ast-support
-archive against `AST_SUPPORT_SHA256`, and exports `CJCJ_BOOTSTRAP_*`.
-For the kkk2 entry, set `CJCJ_BOOTSTRAP_AST_SUPPORT_SHA256` to the independently
-registered digest supplied with the archive (for example, the matching
-`ci/ast_support/<platform>.env` pin). This is required for both an explicit path
-and the campaign cache. Missing or malformed digests fail with
-`AST_SUPPORT_SHA_REQUIRED`; do not derive the expected digest from the selected
-archive. `bootstrap.sh` compares the selected archive against that declaration.
-
-For the default fetched `--cpp-src`, both runners execute
-`ci/bootstrap/prepare_cpp_headers.mjs` before stage0. kkk2 calls it in
-`run_bootstrap_stage`; Actions calls it while resolving bootstrap inputs.
-Explicit `CJCJ_BOOTSTRAP_CPP_SRC` / `CANGJIE_CPP_SRC` trees remain supplied by the
-caller and must already satisfy `bootstrap.sh`'s header checks.
-
-| Shim include root under the fetched compiler | Producer | Source identity |
+| Input | Identity authority | Transport/cache selection |
 |---|---|---|
-| `third_party/llvm-project/llvm/include` | exact LLVM source checkout | `ci/llvm_pin.env`: `LLVM_URL`, `LLVM_SHA` |
-| `build/build/third_party/llvm/include` | LLVM CMake configure and `llvm-headers` target | same LLVM checkout |
-| `build/build/include/flatbuffers` | copy FlatBuffers public includes | `ci/llvm_pin.env`: `FLATBUFFERS_URL`, `FLATBUFFERS_SHA` |
-| `build/build/schema/flatbuffers/ModuleFormat_generated.h` | source-built `flatc --no-warnings -c` | `ci/llvm_pin.env`: `CANGJIE_COMPILER_URL`, `CANGJIE_COMPILER_SHA`, `schema/ModuleFormat.fbs`, pinned FlatBuffers |
+| Official host SDK | `HOST_SDK_PROVENANCE` in `ci/bootstrap/stage1_host_identities.txt`, matched to `ci/host_sdk_pin.env` | `CJCJ_BOOTSTRAP_HOST_SDK_ARCHIVE`, otherwise the pinned official release archive downloaded into the input work directory |
+| Repaired host LLVM | `HOST_LLVM_PROVENANCE` and platform digest in the same identities file | `CJCJ_BOOTSTRAP_HOST_LLVM_ARTIFACT`, otherwise download its pinned artifact |
+| AST support | `ci/ast_support/<platform>.env` / `AST_SUPPORT_SHA256` | explicit `CJCJ_BOOTSTRAP_AST_ARTIFACT`, then explicit `CJCJ_BOOTSTRAP_AST_SUPPORT`, then build/SDK archive, otherwise pinned artifact download |
+| Static LLVM tuple | `ci/bootstrap_inputs_pin.json` per-file digests and `ci/llvm_pin.env` independent sums digest | shared bootstrap store; release by default; explicit artifact/depot mode requires `CJCJ_BOOTSTRAP_SOURCE_REASON` |
+| Coloured runtime and std | `ci/colour-runtime/<platform>.env` manifest digest, source/run identity and every manifest member | `CJCJ_BOOTSTRAP_COLOUR_RT` artifact root, otherwise pinned artifact download |
+| In-process LLVM dylib | `ci/llvm-dylib/<platform>.env` digest/source and artifact manifest | `CJCJ_BOOTSTRAP_DYLIB_ARTIFACT` or `CJCJ_BOOTSTRAP_COLOUR_DYLIB`, otherwise pinned artifact download |
 
-This preparation builds LLVM header dependencies and flatc; it does not build
-the C++ compiler. The independent LLVM and FlatBuffers builds run concurrently.
-`build/build/shim-headers.json` records source revisions, schema and flatc hashes,
-executed commands, and a file/hash inventory of each include root.
+An explicit missing or corrupt input fails preparation; it does not fall back
+to another path. Automatic artifact downloads require the existing `gh` transport
+and `unzip`; supplying local artifact directories avoids that transport. All
+supplied directories still pass exactly the same identity checks.
 
-On a build host, with the other bootstrap inputs configured as above, run
-`bash ci/bootstrap/test_cpp_headers.sh /absolute/path/to/new-test-directory`.
-The integration test fetches a clean compiler checkout, confirms the real shim
-consumer rejects missing inputs, invokes the Actions input resolver, verifies the
-header inventory, and builds the actual shim object. It preserves logs and
-artifacts in the supplied directory. No external CPP_SRC or shim object is used.
+The official SDK is extracted from the verified archive without dereferencing
+upstream symlinks. An installed `CJCJ_SRCBUILD_HOST_SDK`, cjv installation, or
+dereferenced sharedbuild SDK is not a bootstrap base. Its archive SHA identifies
+the whole distribution and its original layout. No shared installation is
+modified. Missing platform archive pins fail with `HOST_SDK_PIN_MISSING`;
+Darwin archive pins remain pending registration by #766.
 
-## In-process LLVM (Linux bootstrap)
+A depot is an explicit transport path (`CJCJ_BOOTSTRAP_COLOUR_TUPLE` with
+`CJCJ_BOOTSTRAP_SOURCE=depot`), not an identity inferred from 12/40-character
+directory names. The resolver makes no implicit `/root/llvmdepot` lookup.
+Every selected payload must match the common pin before the tuple is exported.
+The native fixed-tools preparation copies the verified tuple's `fixed-llc/`
+members to `CJCJ_FIXED_LLVM_DIR` for setup_sdk and stage3. The former kkk2 depot
+discovery and optional source-build publisher are removed. Tuple production
+belongs to the independently pinned artifact producer, not this consumer.
 
-The static tuple retains its eight entries. `prepare_bootstrap_inputs.mjs`
-separately validates `dylib/libLLVM-15.so` against the platform pin under
-`ci/llvm-dylib/`, then exports `CJCJ_BOOTSTRAP_COLOUR_LLVM_SO` and
-`CJCJ_BOOTSTRAP_COLOUR_LLVM_SHA256`. `gha_run.sh` forwards both as
-`--colour-llvm-so` and `--colour-llvm-sha256`; the kkk2 entry uses the same
-platform digest rather than hashing an unreviewed input as its expected value.
+The runtime input is the complete artifact root containing `manifest.json`,
+runtime libraries, the static archive and the manifest's std/module members.
+The former flat two-library directory, caller-supplied
+`CJCJ_BOOTSTRAP_COLOUR_RT_SHA256` / `CJCJ_BOOTSTRAP_BOUNDSCHECK_SHA256`, and
+CJRT stamp check are no longer a separate kkk2 identity contract. Likewise,
+`AST_SUPPORT_SHA256` is the shared AST input pin;
+`CJCJ_BOOTSTRAP_AST_SUPPORT_SHA256` is a validated output for bootstrap.
 
-`bootstrap.sh` physically copies `sdk-stage0` to `sdk-stage0-run`, installs the
-pinned library, and checks both the installed identity and preserved host
-identity. The official compiler continues using `sdk-stage0`. The cjcj compiler
-runner loads LLVM from `sdk-stage0-run`; cjpm keeps the official host loader
-binding. Official `llvm-objcopy` and `llvm-ar` children also use the host
-loader binding, even when their parent cjcj process uses the pin library. The target SDK also receives the process library separately from its
-static tuple. The existing official runtime/boundscheck/LLVM identity checks
-remain in force. There is no LLVM fallback on an identity failure.
+The currently registered runtime artifact is stale relative to `runtime_pin.env`
+(#501); both entries reject that mismatch. Historical pins used for preparation
+acceptance do not change the product pins.
 
-`COLOUR_LLVM_SO=/pin/libLLVM-15.so HOST_LLVM_SO=/official/libLLVM-15.so
-python3 ci/bootstrap/test_colour_llvm.py -v` exercises the real preparation and
-runner scripts, calls LLVMContextCreate/Dispose, checks `/proc/self/maps`, and
-rejects wrong producer/consumer inputs. This device test uses a Python process
-fixture; actual stage1 compiler acceptance additionally requires its own
-loader trace and successful compilation. Run it on the build host.
+Successful preparation prints `BOOTSTRAP_INPUT_IDENTITIES=<JSON>`: the official
+archive, repaired host LLVM, AST, each tuple payload, runtime manifest and dylib
+SHA256 identities. Paths may differ between runners; this table must match
+for the same inputs. The runtime manifest transitively authenticates its members.
+The table is emitted only after all checks and C++ header preparation succeed.
+
+For the default fetched compiler source, the common resolver invokes
+`ci/bootstrap/prepare_cpp_headers.mjs` before stage0. Explicit
+`CJCJ_BOOTSTRAP_CPP_SRC` / `CANGJIE_CPP_SRC` trees are caller-owned and must
+already satisfy bootstrap's header checks. Header preparation uses pinned LLVM
+and FlatBuffers sources, builds LLVM headers and flatc concurrently, and records
+the commands and file inventory in `build/build/shim-headers.json`.
+
+The dylib is separate from the static tuple. Bootstrap installs it in the cjcj
+runner SDK while preserving the official compiler's host LLVM binding.
+`bootstrap_entries.test.mjs` executes the actual kkk2 driver and Actions resolver,
+compares identities and consumer argument bytes, and independently changes each
+input to verify rejection before command publication. These are preparation
+device tests, not stage1 compilation acceptance.
+
+Run the preparation tests on the build host:
+
+```sh
+ulimit -c 0
+node --test ci/release/bootstrap_entries.test.mjs \
+  ci/release/prepare_bootstrap_inputs.test.mjs ci/release/host_llvm.test.mjs
+```
