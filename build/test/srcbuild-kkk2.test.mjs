@@ -226,6 +226,7 @@ test('source-build records affinity from the long top-level make instead of an e
   const invoke = `${shellFunction('elapsed_seconds')}\n`
     + `${shellFunction('capture_build_child_affinity')}\n`
     + `${shellFunction('run_step')}\n`
+    + `${shellFunction('finish_step')}\n`
     + 'STATE_ROOT=$1 LOG_ROOT=$1 TIMINGS=$2 START_STAMP=fixture\n'
     + 'CPUSET=$(LC_ALL=C taskset -pc $$ | sed "s/.*: //")\n'
     + 'load_github_state() { :; }\n'
