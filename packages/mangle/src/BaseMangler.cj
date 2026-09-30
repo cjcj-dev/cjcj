@@ -1043,10 +1043,10 @@ public open class BaseMangler {
             let outerDecl = variable.flatMap({decl => decl.outerDecl})
             if (prevPrefix.astKind == ASTKind.FUNC_DECL || prevPrefix.astKind == ASTKind.PRIMARY_CTOR_DECL ||
                 prevPrefix.astKind == ASTKind.LAMBDA_EXPR ||
-                variable.map({decl => decl.TestAttr(Attribute.GLOBAL)}).getOrDefault(false) ||
+                variable.map({decl => decl.TestAttr(Attribute.GLOBAL)}).getOrDefault({ => false }) ||
                 outerDecl.map({outer => outer.astKind == ASTKind.CLASS_DECL ||
                     outer.astKind == ASTKind.INTERFACE_DECL || outer.astKind == ASTKind.STRUCT_DECL ||
-                    outer.astKind == ASTKind.ENUM_DECL}).getOrDefault(false)) {
+                    outer.astKind == ASTKind.ENUM_DECL}).getOrDefault({ => false })) {
                 return prevPrefix
             }
         }
