@@ -72,8 +72,7 @@ export function fixture(check, target = 'linux-x64') {
     fs.writeFileSync(path.join(sdkSource, 'bin/lld'), 'official linker fixture');
     fs.symlinkSync('lld', path.join(sdkSource, 'bin/ld.lld'));
     env.CJCJ_TOOLCHAIN = readHostToolchainPin();
-    const archivePlatform = {'linux-x64': 'linux-x64', 'linux-aarch64': 'linux-aarch64',
-      'darwin-arm64': 'mac-aarch64', 'darwin-x64': 'mac-x64'}[target];
+    const archivePlatform = getTarget(target).spec.sdkName;
     const sdkArchive = `cangjie-sdk-${archivePlatform}-${env.CJCJ_TOOLCHAIN.replace(/^nightly-/, '')}.tar.gz`;
     env.CJCJ_BOOTSTRAP_HOST_SDK_ARCHIVE = path.join(dir, sdkArchive);
     const tar = spawnSync('tar', ['-czf', env.CJCJ_BOOTSTRAP_HOST_SDK_ARCHIVE, '-C', path.dirname(sdkSource), 'cangjie']);
