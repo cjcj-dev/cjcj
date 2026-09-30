@@ -463,7 +463,6 @@ public class BCHIRInterpreter {
         return AllocateValue(value)
     }
 
-    // Mirrors C++ BCHIRInterpreter.cpp:1653-1664.
     private func RecordObjectInitReturn(receiver: InterpreterValue): Unit {
         if (let Some(object) <- DereferencePointer(receiver)) {
             if (object.kind == InterpreterValueKind.IOBJECT) {
@@ -477,6 +476,7 @@ public class BCHIRInterpreter {
         requiresRuntimeFinalizerRegistration = true
     }
 
+    // Mirrors C++ BCHIRInterpreter.cpp:1653-1664.
     private func AllocateValue(value: InterpreterValue): InterpreterValue {
         let pointer = arena.Allocate(value)
         if (value.kind != InterpreterValueKind.IOBJECT) {
