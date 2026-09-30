@@ -51,6 +51,10 @@ CJRT stamp check are no longer a separate kkk2 identity contract. Likewise,
 `AST_SUPPORT_SHA256` is the shared AST input pin;
 `CJCJ_BOOTSTRAP_AST_SUPPORT_SHA256` is a validated output for bootstrap.
 
+The currently registered runtime artifact is stale relative to `runtime_pin.env`
+(#501); both entries reject that mismatch. Historical pins used for preparation
+acceptance do not change the product pins.
+
 Successful preparation prints `BOOTSTRAP_INPUT_IDENTITIES=<JSON>`: the official
 archive, repaired host LLVM, AST, each tuple payload, runtime manifest and dylib
 SHA256 identities. Paths may differ between runners; this table must match
