@@ -57,6 +57,7 @@ const CXX_JOBS = new Map([
   ['srcbuild-target.yml/source-mingw', {component: 'srcbuild-mingw', pin: /env\.RUNTIME_REF/}],
   ['srcbuild-target.yml/source-windows', {component: 'srcbuild-windows', pin: /env\.RUNTIME_REF/}],
   ['ci.yml/build', {component: 'runtime', pin: /env\.RUNTIME_REF/}],
+  ['ci.yml/package-tests', {component: 'runtime-shim', pin: /env\.CJCJ_TOOLCHAIN/}],
   ['platform-matrix.yml/darwin-runtime', {component: 'runtime', pin: /env\.RUNTIME_REF/}],
   ['platform-matrix.yml/colour-runtime', {component: 'runtime', pin: /env\.RUNTIME_REF/}],
   ['platform-matrix.yml/platform', {component: 'runtime', pin: /env\.RUNTIME_REF/}],
