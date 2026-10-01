@@ -217,13 +217,19 @@ test('formal-default preparation still publishes the formal pin', () => fixture(
   assert.match(text, new RegExp(`RUNTIME_REF=${pin.RUNTIME_REF}`));
 }));
 
-test('actual stage3 entry binds source and both SDK SOs before stage2 execution', () => fixture(f => {
+for (const formal of [false, true]) {
+test(`actual stage3 entry verifies promoted SDK before stage2: ${formal ? 'formal default' : 'candidate'}`, () => fixture(f => {
   fs.mkdirSync(path.join(f.runtimeSource, 'stdlib'));
   fs.writeFileSync(path.join(f.runtimeSource, 'stdlib/README'), 'input source identity fixture');
   for (const args of [['init', '-q', f.runtimeSource], ['-C', f.runtimeSource, 'add', '.'],
     ['-C', f.runtimeSource, '-c', 'user.name=Zxilly', '-c', 'user.email=zxilly@outlook.com',
       'commit', '-q', '-m', 'runtime source identity fixture']]) ok(['git', ...args],
         {...process.env, GIT_AUTHOR_DATE: '2000-01-01T00:00:00Z', GIT_COMMITTER_DATE: '2000-01-01T00:00:00Z'});
+  if (formal) {
+    assert.ok(process.env.GC_FIX_RUNTIME_CHECKOUT, 'formal source objects required');
+    ok(['git', '-C', f.runtimeSource, 'fetch', '-q', process.env.GC_FIX_RUNTIME_CHECKOUT, pin.RUNTIME_REF]);
+    ok(['git', '-C', f.runtimeSource, 'checkout', '-q', '--detach', 'FETCH_HEAD']);
+  }
   const selected = ok(['git', '-C', f.runtimeSource, 'rev-parse', 'HEAD']);
   f.env.RUNTIME_REF = selected; f.env.CJCJ_RUNTIME_REF_OVERRIDE = selected;
   const paired = path.join(f.sdk, 'third_party/paired-runtime');
@@ -236,35 +242,68 @@ test('actual stage3 entry binds source and both SDK SOs before stage2 execution'
     fs.writeFileSync(file, JSON.stringify(data));
   }
   refreshRoot(f);
+  if (formal) useFormalRuntime(f);
   const a = assembled(f);
   const workspace = path.join(f.dir, 'stage3-workspace');
   const sdk = path.join(workspace, 'software/cangjie');
   fs.mkdirSync(path.dirname(sdk), {recursive: true});
-  fs.cpSync(a.target, sdk, {recursive: true, verbatimSymlinks: true});
+  // First promotion has no consumer SDK. Populate the real handoff producers.
+  const work = path.join(workspace, 'bootstrap-work');
+  fs.mkdirSync(work, {recursive: true});
+  const input = path.join(work, 'sdk-stage1');
+  fs.cpSync(a.target, input, {recursive: true, dereference: true});
+  const write = (rel, text) => {
+    const file = path.join(work, rel); fs.mkdirSync(path.dirname(file), {recursive: true});
+    fs.writeFileSync(file, text);
+  };
+  write('sdk-stage1/.stage1-host/binding.txt', 'host_ld=/usr/lib/x86_64-linux-gnu\n');
+  for (const rel of ['tools/bin/cjpm-stage1', 'third_party/llvm/bin/opt-stage1', 'third_party/llvm/bin/llc-stage1'])
+    write(`sdk-stage1/${rel}`, 'host tool fixture');
+  for (const name of ['cjselfhost_llvmshim.o', 'cjc_runtime_config.o'])
+    write(`cjcj-src-stage1/runtime_shim/${name}`, 'handoff object fixture');
+  write('cjcj-stage2', '#!/bin/sh\necho STAGE2_EXECUTION_BOUNDARY >&2\nexit 73\n');
+  fs.mkdirSync(path.join(work, 'stdlib-stage2/lib', tuple), {recursive: true});
+  fs.copyFileSync(path.join(input, 'lib', tuple, 'libcangjie-std-core.a'),
+    path.join(work, 'stdlib-stage2/lib', tuple, 'libcangjie-std-core.a'));
   fs.cpSync(f.runtimeSource, path.join(workspace, 'cangjie_runtime'), {recursive: true});
-  const env = {...Object.fromEntries(Object.entries(f.env).filter(([key]) => !key.startsWith('COLOUR_RT_'))), ...a.inputs, CANGJIE_WORKSPACE: workspace, GITHUB_WORKSPACE: repo,
+  const env = {...Object.fromEntries(Object.entries(f.env).filter(([key]) => !key.startsWith('COLOUR_RT_'))), ...a.inputs, CANGJIE_WORKSPACE: workspace, GITHUB_WORKSPACE: path.join(workspace, 'source'),
     CJCJ_BOOTSTRAP_WORK: path.join(workspace, 'bootstrap-work'), CJCJ_STAGE3_STDLIB_BUILD_TYPE: 'release',
     CJCJ_STAGE3_DRY_RUN: '1', CJCJ_STAGE3_DRY_RUN_FINAL_STD: path.join(workspace, 'unused-std')};
+  fs.mkdirSync(env.GITHUB_WORKSPACE, {recursive: true});
+  fs.cpSync(path.join(repo, 'ci'), path.join(env.GITHUB_WORKSPACE, 'ci'), {recursive: true});
   const command = ['npx', '--yes', 'zx@8', path.join(repo, 'ci/srcbuild/steps/build-stage3.mjs')];
   const valid = execute(command, env);
-  // Stop at the existing absent stage2 handoff. This is guard admission, not
-  // compiler execution or authorization of the synthetic SDK's std ABI.
   assert.match(valid.output, new RegExp(`BOOTSTRAP_SDK_RUNTIME_VERIFIED runtime=${selected}`), valid.output);
+  assert.match(valid.output, /STAGE2_EXECUTION_BOUNDARY/, valid.output);
   assert.notEqual(valid.status, 0);
-  fs.appendFileSync(path.join(sdk, 'runtime/lib', tuple, 'libboundscheck.so'), 'changed');
-  const bounds = execute(command, env);
-  assert.notEqual(bounds.status, 0);
-  assert.match(bounds.output, /BOOTSTRAP_SDK_RUNTIME_MISMATCH: runtime\/lib\/.*libboundscheck.so/);
-  assert.doesNotMatch(bounds.output, /BOOTSTRAP_SDK_RUNTIME_VERIFIED/);
-  console.log(`STAGE3_ENTRY_TARGET_ASSERT source=${selected} accepted-guard=${valid.status} wrong-bounds=${bounds.status} no-stage2-executed=1`);
+  console.log(`STAGE3_PROMOTION_TARGET_ASSERT identity=${formal ? 'formal' : 'candidate'} first-promotion=1`);
+  for (const [name, rel, expected] of [
+    ['runtime', `runtime/lib/${tuple}/libcangjie-runtime.so`, /BOOTSTRAP_SDK_RUNTIME_MISMATCH:.*libcangjie-runtime.so/],
+    ['bounds', `runtime/lib/${tuple}/libboundscheck.so`, /BOOTSTRAP_SDK_RUNTIME_MISMATCH:.*libboundscheck.so/],
+    ['archive', `lib/${tuple}/libcangjie-runtime.a`, /BOOTSTRAP_SDK_RUNTIME_MISMATCH:.*libcangjie-runtime.a/],
+    ['lock', 'SDK.lock.json', /BOOTSTRAP_SDK_RUNTIME_LOCK_MISMATCH: commit/],
+  ]) {
+    const file = path.join(input, rel), bytes = fs.readFileSync(file);
+    if (name === 'lock') {
+      const lock = JSON.parse(bytes); lock.components.runtime.commit = 'e'.repeat(40);
+      fs.writeFileSync(file, JSON.stringify(lock));
+    } else fs.appendFileSync(file, 'changed');
+    const wrong = execute(command, env);
+    assert.notEqual(wrong.status, 0); assert.match(wrong.output, expected, wrong.output);
+    assert.doesNotMatch(wrong.output, /STAGE2_EXECUTION_BOUNDARY|BOOTSTRAP_SDK_RUNTIME_VERIFIED/);
+    console.log(`STAGE3_REPLACEMENT_TARGET_ASSERT identity=${formal ? 'formal' : 'candidate'} wrong=${name} rejected-before-stage2=1`);
+    fs.writeFileSync(file, bytes);
+  }
   // Restore the shared pair and alter only the source HEAD.
-  fs.copyFileSync(path.join(a.libs, 'bounds.so'), path.join(sdk, 'runtime/lib', tuple, 'libboundscheck.so'));
+
   ok(['git', '-C', path.join(workspace, 'cangjie_runtime'), '-c', 'user.name=Zxilly',
     '-c', 'user.email=zxilly@outlook.com', 'commit', '--allow-empty', '-q', '-m', 'wrong source']);
   const source = execute(command, env);
   assert.notEqual(source.status, 0); assert.match(source.output, /BOOTSTRAP_RUNTIME_SOURCE_MISMATCH/);
   console.log('STAGE3_SOURCE_TARGET_ASSERT_EXECUTED');
 }));
+
+}
 
 for (const candidate of [false, true]) {
 test(`actual GHA launcher passes the validated selected file into bootstrap: ${candidate ? 'candidate' : 'formal default'}`, () => fixture(f => {
