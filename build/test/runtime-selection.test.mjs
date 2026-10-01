@@ -222,7 +222,8 @@ test('actual stage3 entry binds source and both SDK SOs before stage2 execution'
   fs.writeFileSync(path.join(f.runtimeSource, 'stdlib/README'), 'input source identity fixture');
   for (const args of [['init', '-q', f.runtimeSource], ['-C', f.runtimeSource, 'add', '.'],
     ['-C', f.runtimeSource, '-c', 'user.name=Zxilly', '-c', 'user.email=zxilly@outlook.com',
-      'commit', '-q', '-m', 'runtime source identity fixture']]) ok(['git', ...args]);
+      'commit', '-q', '-m', 'runtime source identity fixture']]) ok(['git', ...args],
+        {...process.env, GIT_AUTHOR_DATE: '2000-01-01T00:00:00Z', GIT_COMMITTER_DATE: '2000-01-01T00:00:00Z'});
   const selected = ok(['git', '-C', f.runtimeSource, 'rev-parse', 'HEAD']);
   f.env.RUNTIME_REF = selected; f.env.CJCJ_RUNTIME_REF_OVERRIDE = selected;
   const paired = path.join(f.sdk, 'third_party/paired-runtime');
