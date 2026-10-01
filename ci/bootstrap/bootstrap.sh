@@ -888,6 +888,7 @@ main() {
   RUNTIME_PIN="${RUNTIME_PIN:-$(dirname "${BASH_SOURCE[0]}")/../runtime_pin.env}"
   RUNTIME_PIN=$(realpath "$RUNTIME_PIN")
   node "$(dirname "${BASH_SOURCE[0]}")/../runtime-pin.mjs" --shell "$RUNTIME_PIN" >/dev/null || die "runtime selection rejected"
+  record runtime-pin "$RUNTIME_PIN"
   host_tuple_init
   assert_cjcj_sha
   assert_cjcj_root

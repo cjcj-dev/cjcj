@@ -53,7 +53,7 @@ function argumentsFrom(result) {
   return decoded.stdout.split('\0');
 }
 
-test('both actual preparation entries export identical identities and consumer bytes', () => driverFixture(({run, runDriver}) => {
+test('both actual preparation entries export identical identities and consumer bytes', () => driverFixture(({run, runDriver, env}) => {
   const gha = run();
   for (const stage of [31, 32]) {
     const kkk2 = runDriver(stage);
@@ -61,6 +61,7 @@ test('both actual preparation entries export identical identities and consumer b
     const input = flag => argv[argv.indexOf(flag) + 1];
     const observed = {gha: gha.status, kkk2: kkk2.status, identities: identity(kkk2),
       host: argv.includes('--host-llvm-so') ? digest(input('--host-llvm-so')) : null,
+      runtimePin: argv.includes('--runtime-pin') ? fs.readFileSync(input('--runtime-pin'), 'utf8') : null,
       ast: argv.includes('--ast-support') ? digest(input('--ast-support')) : null,
       dylib: argv.includes('--colour-llvm-so') ? digest(input('--colour-llvm-so')) : null,
       symlink: argv.includes('--base') && fs.lstatSync(path.join(input('--base'), 'bin/ld.lld')).isSymbolicLink()
@@ -68,7 +69,7 @@ test('both actual preparation entries export identical identities and consumer b
     };
     console.log(`ENTRY_IDENTITIES_ASSERT stage=${stage} ${JSON.stringify(observed)}`);
     assert.deepEqual(observed, {gha: 0, kkk2: 0, identities: identity(gha),
-      host: identity(gha)?.host_llvm, ast: identity(gha)?.ast_support,
+      host: identity(gha)?.host_llvm, runtimePin: `RUNTIME_REF=${env.RUNTIME_REF}\nRUNTIME_SRC_URL=https://github.com/cjcj-dev/cangjie-runtime.git\n`, ast: identity(gha)?.ast_support,
       dylib: identity(gha)?.colour_llvm, symlink: 'lld'});
     assert.notEqual(identity(gha), null);
   }
