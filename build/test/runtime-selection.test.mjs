@@ -455,6 +455,7 @@ test(`actual stage3 entry verifies promoted SDK before stage2: ${formal ? 'forma
     'third_party/llvm/lib/libLLVM-15.so', 'bin/cjcj-stage2', 'bin/cjc', 'bootstrap-compiler.json',
   ];
   const beforeAst = Object.fromEntries(protectedFiles.map(rel => [rel, hash(path.join(sdk, rel))]));
+  fs.writeFileSync(path.join(sdk, 'lib', tuple, 'libcangjie-ast-support.a'), 'previous AST producer');
   const astInstall = execute(['python3', path.join(repo, 'ci/install_std_sdk_inputs.py'), f.sdk, sdk, tuple]);
   assert.equal(astInstall.status, 0, astInstall.output);
   assert.equal(hash(path.join(sdk, 'lib', tuple, 'libcangjie-ast-support.a')), hash(astArchive));
