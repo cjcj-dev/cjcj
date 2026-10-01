@@ -15,7 +15,21 @@ const pin = Object.fromEntries(fs.readFileSync(path.join(repo, 'ci/runtime_pin.e
   .trim().split('\n').map(line => line.split('=')));
 function execute(command, env = process.env) {
   const result = spawnSync(command[0], command.slice(1), {env, encoding: 'utf8'});
-  return {...result, output: result.stdout + result.stderr};
+  const output = result.stdout + result.stderr;
+  if (command.at(-1)?.endsWith('/ci/srcbuild/steps/build-stage3.mjs')) {
+    // Retain the product's observed identity/status, including successful
+    // admission, rather than only the test's confirmation that it matched.
+    console.log(`STAGE3_PRODUCT_RECEIPT ${JSON.stringify({
+      rc: result.status,
+      runtime: /BOOTSTRAP_RUNTIME_CONSUMER_VERIFIED runtime=([a-f0-9]{40}) manifest=([a-f0-9]{64})/.exec(output)?.slice(1),
+      llvm: /BOOTSTRAP_BACKEND_CONSUMER_VERIFIED llvm=([a-f0-9]{40})/.exec(output)?.[1],
+      compiler: /STAGE3_COMPILER_ASSERT_PASS path=.* sha256=([a-f0-9]{64})/.exec(output)?.[1],
+      stage2: output.includes('STAGE2_EXECUTION_BOUNDARY'),
+      finalBuild: output.includes('STAGE3_DRY_RUN_REACHED_BUILD=1'),
+      rejection: /(?:BOOTSTRAP_[A-Z_]+MISMATCH[^\n]*|bootstrap compiler[^\n]*mismatch)/.exec(output)?.[0],
+    })}`);
+  }
+  return {...result, output};
 }
 function ok(command, env) {
   const result = execute(command, env);
