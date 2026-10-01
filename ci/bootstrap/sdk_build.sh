@@ -131,7 +131,7 @@ while [ $# -gt 0 ]; do
     *) die "未知参数 $1";;
   esac
 done
-node "$(dirname "${BASH_SOURCE[0]}")/../runtime-pin.mjs" --shell "${RUNTIME_PIN:-${CJCJ_BOOTSTRAP_RUNTIME_PIN:-$(dirname "${BASH_SOURCE[0]}")/../runtime_pin.env}}" >/dev/null
+node "$(dirname "${BASH_SOURCE[0]}")/../runtime-pin.mjs" --shell "${RUNTIME_PIN:-$(dirname "${BASH_SOURCE[0]}")/../runtime_pin.env}" >/dev/null || die "runtime selection rejected"
 [ -n "$FROM" ] || die "缺 --from"
 [ -n "$TO" ]   || die "缺 --to"
 [ -n "$ROLE" ] || die "缺 --host 或 --target —— ⭐ 这一条不许省：宿主/目标的着色要求相反"
@@ -720,7 +720,7 @@ done
 
 echo "[lock] SDK.lock.json + sdk_verify"
 _SDK_VERIFY="$(dirname "${BASH_SOURCE[0]}")/sdk_verify.py"
-_PIN="${RUNTIME_PIN:-${CJCJ_BOOTSTRAP_RUNTIME_PIN:-$(dirname "${BASH_SOURCE[0]}")/../runtime_pin.env}}"
+_PIN="${RUNTIME_PIN:-$(dirname "${BASH_SOURCE[0]}")/../runtime_pin.env}"
 _IDENT=$(mktemp)
 _CJC_SHA=''
 if [ -f "$TO/bin/cjcj-stage1" ]; then

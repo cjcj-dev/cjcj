@@ -148,7 +148,7 @@ async function assertStdBarriers(coreLib) {
 if (!await exists(stdlibRoot, 'dir')) throw new Error(`runtime stdlib source missing: ${stdlibRoot}`);
 
 // Bind the actual SDK inputs before executing its stage2 compiler.
-await verifyBootstrapRuntimeSdk(sdk, tuple);
+await verifyBootstrapRuntimeSdk(sdk, tuple, process.env, path.dirname(stdlibRoot));
 
 const {compiler: stage2Product, targetLd} = await prepareBootstrapHandoff({
   work: bootstrapWork, sdk, source: githubWorkspace, tuple,

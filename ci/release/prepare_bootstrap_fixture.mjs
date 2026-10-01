@@ -100,6 +100,33 @@ export function fixture(check, target = 'linux-x64') {
     Object.assign(env, {CJCJ_BOOTSTRAP_COLOUR_RT: runtime, COLOUR_RT_RUN_ID: '123',
       COLOUR_RT_RUN_ATTEMPT: '1', COLOUR_RT_ARTIFACT_ID: '456',
       COLOUR_RT_MANIFEST_SHA256: runtimeDigest(path.join(runtime, 'manifest.json'))});
+    // External candidate headers carry their actual byte/source receipt.
+    const pins = Object.fromEntries(fs.readFileSync(new URL('../llvm_pin.env', import.meta.url), 'utf8')
+      .trim().split('\n').map(line => line.split('=')));
+    const headerRoots = ['third_party/llvm-project/llvm/include', 'build/build/third_party/llvm/include',
+      'build/build/include', 'build/build/schema'];
+    const headerManifest = {};
+    for (const root of headerRoots) {
+      const file = path.join(sdk, root, 'fixture.h');
+      fs.mkdirSync(path.dirname(file), {recursive: true});
+      fs.writeFileSync(file, 'header fixture');
+      headerManifest[root] = [{path: 'fixture.h', sha256: runtimeDigest(file)}];
+    }
+    for (const file of ['schema/ModuleFormat.fbs', 'build/shim-flatbuffers/flatc']) {
+      fs.mkdirSync(path.dirname(path.join(sdk, file)), {recursive: true});
+      fs.writeFileSync(path.join(sdk, file), 'schema tool fixture');
+    }
+    const formal = Object.fromEntries(fs.readFileSync(new URL('../runtime_pin.env', import.meta.url), 'utf8')
+      .trim().split('\n').map(line => line.split('=')));
+    fs.writeFileSync(path.join(sdk, 'build/build/shim-headers.json'), JSON.stringify({
+      runtime: {url: formal.RUNTIME_SRC_URL, sha: env.RUNTIME_REF},
+      compiler: {url: pins.CANGJIE_COMPILER_URL, sha: pins.CANGJIE_COMPILER_SHA},
+      llvm: {url: pins.LLVM_URL, sha: pins.LLVM_SHA},
+      flatbuffers: {url: pins.FLATBUFFERS_URL, sha: pins.FLATBUFFERS_SHA},
+      schema: {path: 'schema/ModuleFormat.fbs', sha256: runtimeDigest(path.join(sdk, 'schema/ModuleFormat.fbs'))},
+      flatc: {path: 'build/shim-flatbuffers/flatc', sha256: runtimeDigest(path.join(sdk, 'build/shim-flatbuffers/flatc'))},
+      headers: headerManifest,
+    }));
     const pinFile = path.join(dir, 'pin.json');
     fs.writeFileSync(pinFile, JSON.stringify({version: 1, repository: 'cjcj-dev/cjcj', run: 123,
       attempt: 1, artifact: 456, commit: 'b'.repeat(40), files: tupleFiles.map(file => ({path: file, mode: 0o644,

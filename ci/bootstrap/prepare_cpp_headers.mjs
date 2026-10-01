@@ -27,6 +27,37 @@ function headers(root, relative = '') {
     });
 }
 
+export async function verifyCppHeaders(cppSrc, runtimePinFile) {
+  const selected = await resolveRuntimeSource(process.env, runtimePinFile);
+  const cpp = path.resolve(cppSrc);
+  const manifest = JSON.parse(fs.readFileSync(path.join(cpp, 'build/build/shim-headers.json'), 'utf8'));
+  const pin = readPin('llvm_pin.env');
+  for (const [name, url, sha] of [
+    ['runtime', selected.sourceUrl, selected.runtimeRef],
+    ['compiler', pin.CANGJIE_COMPILER_URL, pin.CANGJIE_COMPILER_SHA],
+    ['llvm', pin.LLVM_URL, pin.LLVM_SHA],
+    ['flatbuffers', pin.FLATBUFFERS_URL, pin.FLATBUFFERS_SHA],
+  ]) {
+    if (manifest[name]?.url !== url || manifest[name]?.sha !== sha) {
+      throw new Error(`SHIM_HEADERS_SOURCE_MISMATCH: ${name}`);
+    }
+  }
+  for (const root of ['third_party/llvm-project/llvm/include',
+    'build/build/third_party/llvm/include', 'build/build/include', 'build/build/schema']) {
+    const actual = headers(path.join(cpp, root));
+    if (!actual.length || JSON.stringify(actual) !== JSON.stringify(manifest.headers?.[root])) {
+      throw new Error(`SHIM_HEADERS_DIGEST_MISMATCH: ${root}`);
+    }
+  }
+  for (const name of ['schema', 'flatc']) {
+    const file = manifest[name];
+    if (!file?.path || digest(path.resolve(cpp, file.path)) !== file.sha256) {
+      throw new Error(`SHIM_HEADERS_DIGEST_MISMATCH: ${name}`);
+    }
+  }
+  console.log(`SHIM_HEADERS_VERIFIED runtime=${selected.runtimeRef}`);
+}
+
 export async function prepareCppHeaders(cppSrc, runtimePinFile = process.env.CJCJ_BOOTSTRAP_RUNTIME_PIN) {
   const runtimePin = await resolveRuntimeSource(process.env, runtimePinFile);
   const cpp = path.resolve(cppSrc);

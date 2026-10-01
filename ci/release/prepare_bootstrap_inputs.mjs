@@ -6,7 +6,7 @@ import path from 'node:path';
 import {prepareColourTuple} from './bootstrap_tuple.mjs';
 import {verifyRuntime} from './colour_runtime.mjs';
 import {resolveRuntimeSource, writeRuntimeSelection} from '../runtime-pin.mjs';
-import {prepareCppHeaders} from '../bootstrap/prepare_cpp_headers.mjs';
+import {prepareCppHeaders, verifyCppHeaders} from '../bootstrap/prepare_cpp_headers.mjs';
 import {hostIdentity, prepareHostLlvm} from './host_llvm.mjs';
 import {bootstrapArtifact} from './bootstrap_artifact.mjs';
 import {prepareHostSdk} from './bootstrap_host_sdk.mjs';
@@ -154,6 +154,9 @@ if (process.platform === 'linux' || darwin || process.env.CJCJ_BOOTSTRAP_DYLIB_A
 // prepared here before gha_run.sh can enter stage0.
 if (!process.env.CJCJ_BOOTSTRAP_CPP_SRC && !process.env.CANGJIE_CPP_SRC) {
   await prepareCppHeaders(cppSrc, runtimePinFile);
+} else if (runtimeSelection.overrideRef) {
+  // Candidate selection does not authorize reuse of caller-owned old headers.
+  await verifyCppHeaders(cppSrc, runtimePinFile);
 }
 
 const exported = {

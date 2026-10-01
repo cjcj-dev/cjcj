@@ -885,9 +885,9 @@ main() {
   case "$WANT" in
     stage0|all) [ -n "$CPP_SRC" ] || die '缺少参数 CPP_SRC';;
   esac
-  RUNTIME_PIN="${RUNTIME_PIN:-${CJCJ_BOOTSTRAP_RUNTIME_PIN:-$(dirname "${BASH_SOURCE[0]}")/../runtime_pin.env}}"
+  RUNTIME_PIN="${RUNTIME_PIN:-$(dirname "${BASH_SOURCE[0]}")/../runtime_pin.env}"
   RUNTIME_PIN=$(realpath "$RUNTIME_PIN")
-  node "$(dirname "${BASH_SOURCE[0]}")/../runtime-pin.mjs" --shell "$RUNTIME_PIN" >/dev/null
+  node "$(dirname "${BASH_SOURCE[0]}")/../runtime-pin.mjs" --shell "$RUNTIME_PIN" >/dev/null || die "runtime selection rejected"
   host_tuple_init
   assert_cjcj_sha
   assert_cjcj_root
