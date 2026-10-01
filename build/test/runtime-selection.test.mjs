@@ -380,7 +380,7 @@ test(`actual stage3 entry verifies promoted SDK before stage2: ${formal ? 'forma
   const backendFile = path.join(input, 'third_party/llvm/bin/opt-stage1'), backendBytes = fs.readFileSync(backendFile);
   const wrongBackend = Buffer.from(backendBytes.toString('latin1').replaceAll(`CJLLVM-COMMIT:${llvmSha}`, `CJLLVM-COMMIT:${'e'.repeat(40)}`), 'latin1');
   fs.writeFileSync(backendFile, wrongBackend);
-  fs.writeFileSync(manifestFile, manifestBytes.toString().replace(fields.OPT_SHA256, hash(backendFile)));
+  fs.writeFileSync(manifestFile, manifestBytes.toString().replace(`OPT_SHA256=${fields.OPT_SHA256}`, `OPT_SHA256=${hash(backendFile)}`));
   const mutatedPin = JSON.parse(pinBytes);
   for (const file of mutatedPin.files) file.artifact_sha256 = file.release_sha256 = hash(path.join(tupleRoot, file.path));
   fs.writeFileSync(f.pinFile, JSON.stringify(mutatedPin));
