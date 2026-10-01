@@ -92,6 +92,8 @@ export function fixture(check, target = 'linux-x64') {
       fs.writeFileSync(path.join(runtimeSource, rel), `new std fixture ${rel}`);
     }
     env.RUNTIME_REF = 'd'.repeat(40);
+    env.CJCJ_RUNTIME_REF_OVERRIDE = env.RUNTIME_REF;
+    env.CJCJ_ALLOW_RUNTIME_OVERRIDE = 'true';
     fs.writeFileSync(path.join(runtimeSource, 'SOURCE_SHA'), env.RUNTIME_REF);
     prepareRuntime(runtimeSource, runtime, {RUNTIME_REF: env.RUNTIME_REF,
       GITHUB_RUN_ID: '123', GITHUB_RUN_ATTEMPT: '1'});

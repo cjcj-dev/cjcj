@@ -933,6 +933,7 @@ bootstrap_argv() {
         "$BOOTSTRAP_SH" \
         --work "$CJCJ_BOOTSTRAP_WORK" \
         --src "$REPO_ROOT" \
+        --runtime-pin "$CJCJ_BOOTSTRAP_RUNTIME_PIN" \
         --cjcj-sha "$BOOTSTRAP_CJCJ_SHA" \
         --stdsrc "$BOOTSTRAP_STDSRC" \
         --cpp-src "$BOOTSTRAP_CPP_SRC" \
@@ -1024,7 +1025,7 @@ validate_stage_step_contracts() {
         # grep -q may exit before a pipe writer finishes. With pipefail that
         # turns a found contract into a false rejection; feed captured text
         # directly so only the match status decides the contract.
-        for flag in --work --src --cjcj-sha --stdsrc --cpp-src --base --host-llvm-so --host-llvm-sha256 \
+        for flag in --work --src --runtime-pin --cjcj-sha --stdsrc --cpp-src --base --host-llvm-so --host-llvm-sha256 \
             --colour-llvm-so --colour-llvm-sha256 --ast-support --ast-support-sha256 --colour-tuple --colour-llvm-sha \
             --colour-rt --host-rt --stage; do
             /usr/bin/grep -Fq -- "$flag" <<< "$argv_text" || missing+="$flag "

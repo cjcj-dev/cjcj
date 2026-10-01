@@ -11,7 +11,9 @@ llvm_repo=${4:?paired LLVM source}
 runtime_repo=${5:?paired runtime source}
 work=${6:?evidence directory}
 source "$repo/ci/llvm_pin.env"
-source "$repo/ci/runtime_pin.env"
+runtime_pin=${7:-${CJCJ_BOOTSTRAP_RUNTIME_PIN:-$repo/ci/runtime_pin.env}}
+selection=$(node "$repo/ci/runtime-pin.mjs" --shell "$runtime_pin")
+eval "$selection"
 mkdir -p "$work"
 work=$(cd "$work" && pwd)
 mkdir -p "$work/frontend"

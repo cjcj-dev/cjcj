@@ -100,9 +100,11 @@ if [ "${1:-}" = env ]; then
   exit 0
 fi
 
+RUNTIME_PIN=''
 FROM='' TO='' ROLE='' LLC='' OPT='' LLVM_SO='' LLVM_TUPLE='' CJPM='' CJC='' RUNTIME='' RUNTIME_COMMIT='' TARGET_TUPLE='' STD='' VERIFY_HOST_RT='' COLOUR_RUNTIME='' HOST_RUNTIME='' LINKNAME='' FORCE=0
 while [ $# -gt 0 ]; do
   case "$1" in
+    --runtime-pin) RUNTIME_PIN="${2:?}"; shift 2;;
     --from) FROM="${2:?}"; shift 2;;
     --to) TO="${2:?}"; shift 2;;
     --host) ROLE=host; shift;;
@@ -129,6 +131,7 @@ while [ $# -gt 0 ]; do
     *) die "未知参数 $1";;
   esac
 done
+node "$(dirname "${BASH_SOURCE[0]}")/../runtime-pin.mjs" --shell "${RUNTIME_PIN:-${CJCJ_BOOTSTRAP_RUNTIME_PIN:-$(dirname "${BASH_SOURCE[0]}")/../runtime_pin.env}}" >/dev/null
 [ -n "$FROM" ] || die "缺 --from"
 [ -n "$TO" ]   || die "缺 --to"
 [ -n "$ROLE" ] || die "缺 --host 或 --target —— ⭐ 这一条不许省：宿主/目标的着色要求相反"
@@ -717,7 +720,7 @@ done
 
 echo "[lock] SDK.lock.json + sdk_verify"
 _SDK_VERIFY="$(dirname "${BASH_SOURCE[0]}")/sdk_verify.py"
-_PIN="$(dirname "${BASH_SOURCE[0]}")/../runtime_pin.env"
+_PIN="${RUNTIME_PIN:-${CJCJ_BOOTSTRAP_RUNTIME_PIN:-$(dirname "${BASH_SOURCE[0]}")/../runtime_pin.env}}"
 _IDENT=$(mktemp)
 _CJC_SHA=''
 if [ -f "$TO/bin/cjcj-stage1" ]; then

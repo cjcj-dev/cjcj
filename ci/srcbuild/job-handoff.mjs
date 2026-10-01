@@ -2,6 +2,7 @@
 // Source jobs retain absolute SDK bindings and verify the producer before use.
 // Like bootstrap_store.acquire, nothing is consumable until its manifest checks.
 import fs from 'node:fs/promises';
+import {resolveRuntimeSource} from '../runtime-pin.mjs';
 import {createReadStream} from 'node:fs';
 import crypto from 'node:crypto';
 import path from 'node:path';
@@ -35,7 +36,7 @@ const tar = args => {
 };
 // Deliberately exclude PATH, cache launchers, tokens and runner command files.
 // Every consuming job installs its own dependencies and starts its own cache.
-const allowed = name => /^(CJCJ_BOOTSTRAP_[A-Z0-9_]+|CJCJ_SRCBUILD_(HOST_SDK|BOOTSTRAP_SDK)|CJCJ_TOOLCHAIN|CJCJ_ACTUAL_HOST_TOOLCHAIN|CANGJIE_HOME|CANGJIE_STDX_PATH|LD_LIBRARY_PATH|DYLD_LIBRARY_PATH|G2_IDENTITY|G2_CAMPAIGN_DIR|SOURCE_SDK_VERSION|RUNTIME_REF|RUNTIME_SRC_URL|TOOLS_REF|TOOLS_SRC_URL|STDX_REF|STDX_SRC_URL|CANGJIE_COMPILER_SHA|CANGJIE_COMPILER_URL|LLVM_SHA|LLVM_TUPLE_SUMS_SHA)$/.test(name);
+const allowed = name => /^(CJCJ_BOOTSTRAP_[A-Z0-9_]+|CJCJ_SRCBUILD_(HOST_SDK|BOOTSTRAP_SDK)|CJCJ_TOOLCHAIN|CJCJ_ACTUAL_HOST_TOOLCHAIN|CANGJIE_HOME|CANGJIE_STDX_PATH|LD_LIBRARY_PATH|DYLD_LIBRARY_PATH|G2_IDENTITY|G2_CAMPAIGN_DIR|SOURCE_SDK_VERSION|CJCJ_RUNTIME_REF_OVERRIDE|CJCJ_ALLOW_RUNTIME_OVERRIDE|RUNTIME_REF|RUNTIME_SRC_URL|TOOLS_REF|TOOLS_SRC_URL|STDX_REF|STDX_SRC_URL|CANGJIE_COMPILER_SHA|CANGJIE_COMPILER_URL|LLVM_SHA|LLVM_TUPLE_SUMS_SHA)$/.test(name);
 // MinGW is an independent producer. Its overlay must not replace the native
 // SDK, injected source version or environment when Windows std joins both arms.
 const roots = phase === 'mingw' ? ['.srcbuild/buildtools/llvm-mingw-w64']
@@ -48,6 +49,7 @@ if (mode === 'pack') {
   }
   const environment = phase === 'mingw' ? {}
     : Object.fromEntries(Object.entries(process.env).filter(([key]) => allowed(key)));
+  if (phase !== 'mingw') await resolveRuntimeSource(environment);
   for (const [key, value] of Object.entries(environment)) {
     if (/[\r\n]/.test(value)) throw new Error(`multiline handoff environment: ${key}`);
   }
@@ -80,6 +82,7 @@ if (mode === 'pack') {
   // The artifact is selected by same-run target/phase name; the identity above
   // also rejects accidental cross-target or stale-run selection before unpack.
   tar(['-xf', archive, '-C', root]);
+  if (phase !== 'mingw') await resolveRuntimeSource(record.environment);
   await fs.appendFile(required('GITHUB_ENV'), Object.entries(record.environment)
     .map(([key, value]) => `${key}=${value}\n`).join(''));
   const sdk = record.environment.CANGJIE_HOME;

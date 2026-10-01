@@ -7,6 +7,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {checkoutExactSource} from '../../build/lib/git.mjs';
 import {run} from '../../build/lib/runner.mjs';
+import {resolveRuntimeSource} from '../runtime-pin.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 function readPin(name) {
@@ -26,7 +27,8 @@ function headers(root, relative = '') {
     });
 }
 
-export async function prepareCppHeaders(cppSrc) {
+export async function prepareCppHeaders(cppSrc, runtimePinFile = process.env.CJCJ_BOOTSTRAP_RUNTIME_PIN) {
+  const runtimePin = await resolveRuntimeSource(process.env, runtimePinFile);
   const cpp = path.resolve(cppSrc);
   const pin = readPin('llvm_pin.env');
   // One compiler source identity for the whole stage chain, defined once in
@@ -45,11 +47,10 @@ export async function prepareCppHeaders(cppSrc) {
     throw new Error(`schema/ModuleFormat.fbs absent at CANGJIE_COMPILER_SHA ${pin.CANGJIE_COMPILER_SHA}: ${cpp}`);
   }
   const llvm = path.join(cpp, 'third_party/llvm-project');
-  const runtimePin = readPin('runtime_pin.env');
   const runtime = path.join(cpp, 'third_party/paired-runtime');
   const flatbuffers = path.join(cpp, 'third_party/flatbuffers');
   await checkoutExactSource(pin.LLVM_URL, llvm, pin.LLVM_SHA);
-  await checkoutExactSource(runtimePin.RUNTIME_SRC_URL, runtime, runtimePin.RUNTIME_REF);
+  await checkoutExactSource(runtimePin.sourceUrl, runtime, runtimePin.runtimeRef);
   await checkoutExactSource(pin.FLATBUFFERS_URL, flatbuffers, pin.FLATBUFFERS_SHA);
 
   const build = path.join(cpp, 'build/build');
@@ -95,7 +96,7 @@ export async function prepareCppHeaders(cppSrc) {
   const manifest = {
     compiler: {url: pin.CANGJIE_COMPILER_URL, sha: pin.CANGJIE_COMPILER_SHA},
     llvm: {url: pin.LLVM_URL, sha: pin.LLVM_SHA},
-    runtime: {url: runtimePin.RUNTIME_SRC_URL, sha: runtimePin.RUNTIME_REF},
+    runtime: {url: runtimePin.sourceUrl, sha: runtimePin.runtimeRef},
     flatbuffers: {url: pin.FLATBUFFERS_URL, sha: pin.FLATBUFFERS_SHA},
     schema: {path: 'schema/ModuleFormat.fbs', sha256: digest(schemaSource)},
     flatc: {path: path.join(flatBuild, 'flatc'), sha256: digest(path.join(flatBuild, 'flatc'))},
@@ -110,5 +111,5 @@ export async function prepareCppHeaders(cppSrc) {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   if (!process.argv[2]) throw new Error('usage: prepare_cpp_headers.mjs <fetched compiler source>');
-  await prepareCppHeaders(process.argv[2]);
+  await prepareCppHeaders(process.argv[2], process.argv[3]);
 }

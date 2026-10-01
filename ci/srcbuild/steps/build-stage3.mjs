@@ -1,6 +1,7 @@
 #!/usr/bin/env zx
 
 import {checkCodegenRuntimeLayout} from '../../check-codegen-runtime-layout.mjs';
+import {verifyBootstrapRuntimeSdk} from '../../bootstrap/runtime_sdk.mjs';
 import {prepareTrimpath} from '../../release/trimpath.mjs';
 
 import crypto from 'node:crypto';
@@ -145,6 +146,9 @@ async function assertStdBarriers(coreLib) {
 }
 
 if (!await exists(stdlibRoot, 'dir')) throw new Error(`runtime stdlib source missing: ${stdlibRoot}`);
+
+// Bind the actual SDK inputs before executing its stage2 compiler.
+await verifyBootstrapRuntimeSdk(sdk, tuple);
 
 const {compiler: stage2Product, targetLd} = await prepareBootstrapHandoff({
   work: bootstrapWork, sdk, source: githubWorkspace, tuple,
