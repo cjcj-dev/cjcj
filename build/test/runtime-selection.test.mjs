@@ -5,6 +5,7 @@ import os from 'node:os';
 import crypto from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 import test from 'node:test';
+import {sourceFetchArguments} from '../lib/git.mjs';
 import {fixture} from '../../ci/release/prepare_bootstrap_fixture.mjs';
 
 const repo = path.resolve(import.meta.dirname, '../..');
@@ -32,6 +33,25 @@ function refreshRoot(f) {
   for (const rel of Object.keys(manifest.files)) manifest.files[rel] = hash(path.join(f.runtime, rel));
   fs.writeFileSync(file, JSON.stringify(manifest));
   f.env.COLOUR_RT_MANIFEST_SHA256 = hash(file);
+}
+function useFormalRuntime(f) {
+  delete f.env.CJCJ_RUNTIME_REF_OVERRIDE; delete f.env.CJCJ_ALLOW_RUNTIME_OVERRIDE;
+  f.env.RUNTIME_REF = pin.RUNTIME_REF;
+  const file = path.join(f.runtime, 'manifest.json');
+  const manifest = JSON.parse(fs.readFileSync(file)); manifest.runtime_sha = pin.RUNTIME_REF;
+  fs.writeFileSync(file, JSON.stringify(manifest)); refreshRoot(f);
+  const headerFile = path.join(f.sdk, 'build/build/shim-headers.json');
+  const header = JSON.parse(fs.readFileSync(headerFile)); header.runtime.sha = pin.RUNTIME_REF;
+  fs.writeFileSync(headerFile, JSON.stringify(header));
+  const paired = path.join(f.sdk, 'third_party/paired-runtime');
+  fs.rmSync(paired, {recursive: true});
+  ok(['git', 'init', '-q', paired]);
+  ok(['git', '-C', paired, 'remote', 'add', 'origin', pin.RUNTIME_SRC_URL]);
+  const source = process.env.GC_FIX_RUNTIME_CHECKOUT;
+  const fetch = source ? ['fetch', '--depth', '1', source, pin.RUNTIME_REF]
+    : sourceFetchArguments(pin.RUNTIME_SRC_URL, pin.RUNTIME_REF);
+  ok(['git', '-C', paired, ...fetch]);
+  ok(['git', '-C', paired, 'checkout', '-q', '--detach', 'FETCH_HEAD']);
 }
 function assembled(f, selected = f.env.RUNTIME_REF, expectedFailure) {
   const libs = path.join(f.dir, 'elf');
@@ -108,14 +128,7 @@ function sdkConsumer(f, a) {
 }
 for (const candidate of [false, true]) {
   test(`real loader, prepare, SDK assembler and independent verifier: ${candidate ? 'authorized candidate' : 'formal default'}`, () => fixture(f => {
-    if (!candidate) {
-      delete f.env.CJCJ_RUNTIME_REF_OVERRIDE;
-      delete f.env.CJCJ_ALLOW_RUNTIME_OVERRIDE;
-      f.env.RUNTIME_REF = pin.RUNTIME_REF;
-      const manifest = path.join(f.runtime, 'manifest.json');
-      const data = JSON.parse(fs.readFileSync(manifest)); data.runtime_sha = pin.RUNTIME_REF;
-      fs.writeFileSync(manifest, JSON.stringify(data)); refreshRoot(f);
-    }
+    if (!candidate) useFormalRuntime(f);
     const loaderEnv = path.join(f.dir, 'loader.env');
     ok([process.execPath, path.join(repo, 'ci/load_runtime_pin.mjs')], {...f.env, GITHUB_ENV: loaderEnv});
     assert.match(fs.readFileSync(loaderEnv, 'utf8'), new RegExp(`RUNTIME_REF=${f.env.RUNTIME_REF}`));
@@ -195,10 +208,7 @@ test('real SDK assembly rejects a manifest-valid runtime with the wrong commit s
 }));
 
 test('formal-default preparation still publishes the formal pin', () => fixture(f => {
-  delete f.env.CJCJ_RUNTIME_REF_OVERRIDE; delete f.env.CJCJ_ALLOW_RUNTIME_OVERRIDE;
-  f.env.RUNTIME_REF = pin.RUNTIME_REF;
-  const file = path.join(f.runtime, 'manifest.json'); const manifest = JSON.parse(fs.readFileSync(file));
-  manifest.runtime_sha = pin.RUNTIME_REF; fs.writeFileSync(file, JSON.stringify(manifest)); refreshRoot(f);
+  useFormalRuntime(f);
   const result = f.run();
   const selected = path.join(f.env.CJCJ_BOOTSTRAP_INPUTS_WORK, 'runtime-selection.env');
   const text = fs.existsSync(selected) ? fs.readFileSync(selected, 'utf8') : '';

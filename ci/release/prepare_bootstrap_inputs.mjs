@@ -154,8 +154,8 @@ if (process.platform === 'linux' || darwin || process.env.CJCJ_BOOTSTRAP_DYLIB_A
 // prepared here before gha_run.sh can enter stage0.
 if (!process.env.CJCJ_BOOTSTRAP_CPP_SRC && !process.env.CANGJIE_CPP_SRC) {
   await prepareCppHeaders(cppSrc, runtimePinFile);
-} else if (runtimeSelection.overrideRef) {
-  // Candidate selection does not authorize reuse of caller-owned old headers.
+} else {
+  // Caller ownership does not authorize headers from a different source.
   await verifyCppHeaders(cppSrc, runtimePinFile);
 }
 
