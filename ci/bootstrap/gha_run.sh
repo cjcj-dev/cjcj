@@ -23,6 +23,7 @@ export STAGE0_CACHE_ROOT="${STAGE0_CACHE_ROOT:-${CANGJIE_WORKSPACE:?}/stage0depo
 exec bash "$root/ci/bootstrap/bootstrap.sh" \
   --work "${CANGJIE_WORKSPACE:?}/bootstrap-work" \
   --src "$root" \
+  --runtime-pin "${CJCJ_BOOTSTRAP_RUNTIME_PIN:?}" \
   --cjcj-sha "$CJCJ_BOOTSTRAP_CJCJ_SHA" \
   --stdsrc "$CANGJIE_WORKSPACE/cangjie_runtime/stdlib" \
   --cpp-src "$CJCJ_BOOTSTRAP_CPP_SRC" \

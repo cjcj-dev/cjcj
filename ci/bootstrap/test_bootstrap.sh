@@ -21,6 +21,8 @@ trap cleanup EXIT
 new_tmp() {
   TMP=$(mktemp -d)
   cp "$ROOT/host_tools.sh" "$ROOT/host_nm.py" "$TMP/"
+  mkdir -p "$TMP/product/ci/bootstrap"
+  cp "$ROOT/../runtime-pin.mjs" "$ROOT/../runtime_pin.env" "$TMP/product/ci/"
 }
 
 refresh_tuple_sums() {
@@ -691,8 +693,8 @@ check_dry_build_env_matrix() {
 
 fault_build_env() {
   make_dry_fixture
-  sed 's/TMPDIR=$(printf '\''%q'\'' "$BUILD_TMPDIR") //' "$PRODUCT" > "$TMP/bootstrap-no-tmpdir.sh"
-  PRODUCT="$TMP/bootstrap-no-tmpdir.sh"
+  sed 's/TMPDIR=$(printf '\''%q'\'' "$BUILD_TMPDIR") //' "$PRODUCT" > "$TMP/product/ci/bootstrap/bootstrap-no-tmpdir.sh"
+  PRODUCT="$TMP/product/ci/bootstrap/bootstrap-no-tmpdir.sh"
   dry_run > "$TMP/build-env-no-tmpdir.log"
   check_dry_contract "$TMP/build-env-no-tmpdir.log"
 }
@@ -758,31 +760,31 @@ fault_dry_stage1() {
   make_dry_fixture
   case "$arm" in
     missing)
-      sed '/^[[:space:]]*assert_executable stage1-compiler /d' "$PRODUCT" > "$TMP/bootstrap.sh"
+      sed '/^[[:space:]]*assert_executable stage1-compiler /d' "$PRODUCT" > "$TMP/product/ci/bootstrap/bootstrap.sh"
       ;;
     duplicate)
-      sed '/^[[:space:]]*assert_executable stage1-compiler /p' "$PRODUCT" > "$TMP/bootstrap.sh"
+      sed '/^[[:space:]]*assert_executable stage1-compiler /p' "$PRODUCT" > "$TMP/product/ci/bootstrap/bootstrap.sh"
       ;;
     serial)
       export CJ_JOBS=64
-      sed 's/"-j $JOBS"/"-j 1"/' "$PRODUCT" > "$TMP/bootstrap.sh"
+      sed 's/"-j $JOBS"/"-j 1"/' "$PRODUCT" > "$TMP/product/ci/bootstrap/bootstrap.sh"
       ;;
     drop-jobs)
-      sed 's/build${extra:+ $extra}"/build"/' "$PRODUCT" > "$TMP/bootstrap.sh"
+      sed 's/build${extra:+ $extra}"/build"/' "$PRODUCT" > "$TMP/product/ci/bootstrap/bootstrap.sh"
       ;;
     stale-stdlib)
-      sed 's/assemble_stage1_sdk "$sdk" "$compiler" "$std"/assemble_stage1_sdk "$sdk" "$compiler" "$previous_std"/' "$PRODUCT" > "$TMP/bootstrap.sh"
+      sed 's/assemble_stage1_sdk "$sdk" "$compiler" "$std"/assemble_stage1_sdk "$sdk" "$compiler" "$previous_std"/' "$PRODUCT" > "$TMP/product/ci/bootstrap/bootstrap.sh"
       ;;
   esac
-  PRODUCT="$TMP/bootstrap.sh"
+  PRODUCT="$TMP/product/ci/bootstrap/bootstrap.sh"
   dry_run > "$TMP/dry-stage1.log" || fail A3-run 'mutated bootstrap CLI failed before assertions'
   check_dry_contract "$TMP/dry-stage1.log"
 }
 
 fault_shim_wiring() {
   make_dry_fixture
-  sed '/^[[:space:]]*shim_build stage0 /d' "$PRODUCT" > "$TMP/bootstrap-skip-stage0-shim.sh"
-  PRODUCT="$TMP/bootstrap-skip-stage0-shim.sh"
+  sed '/^[[:space:]]*shim_build stage0 /d' "$PRODUCT" > "$TMP/product/ci/bootstrap/bootstrap-skip-stage0-shim.sh"
+  PRODUCT="$TMP/product/ci/bootstrap/bootstrap-skip-stage0-shim.sh"
   dry_run > "$TMP/skip-stage0-shim.log"
   check_shim_call_count "$TMP/skip-stage0-shim.log"
 }
@@ -826,8 +828,8 @@ check_forensic_dry() {
 
 fault_forensic_drop_g() {
   make_dry_fixture
-  sed 's/"-j \$JOBS -g"/"-j \$JOBS"/' "$PRODUCT" > "$TMP/bootstrap-no-g.sh"
-  PRODUCT="$TMP/bootstrap-no-g.sh"
+  sed 's/"-j \$JOBS -g"/"-j \$JOBS"/' "$PRODUCT" > "$TMP/product/ci/bootstrap/bootstrap-no-g.sh"
+  PRODUCT="$TMP/product/ci/bootstrap/bootstrap-no-g.sh"
   CJCJ_FORENSIC_STAGE2=1 dry_run > "$TMP/forensic-cut.log" || fail FORENSIC-CUT 'cut dry-run failed before assertion'
   assert_forensic_plan "$TMP/forensic-cut.log"
 }
@@ -916,8 +918,8 @@ case "${1:-test}" in
   fault-a4)
     new_tmp
     make_isolation_fixture
-    sed 's/cmd "env -i /cmd "/' "$PRODUCT" > "$TMP/bootstrap-no-env-i.sh"
-    run_isolation_check "$TMP/bootstrap-no-env-i.sh"
+    sed 's/cmd "env -i /cmd "/' "$PRODUCT" > "$TMP/product/ci/bootstrap/bootstrap-no-env-i.sh"
+    run_isolation_check "$TMP/product/ci/bootstrap/bootstrap-no-env-i.sh"
     ;;
   fault-build-env)
     fault_build_env
@@ -988,8 +990,8 @@ case "${1:-test}" in
   fault-llvm-so-location)
     make_dry_fixture
     make_sdk_fixture
-    sed 's|target="$canonical"|target="$TO/third_party/llvm/bin/$base"|' "$SDK_PRODUCT" > "$TMP/sdk-build-wrong-so-location.sh"
-    run_sdk_so "$TMP/sdk-build-wrong-so-location.sh" "$TMP/sdk-wrong-so"
+    sed 's|target="$canonical"|target="$TO/third_party/llvm/bin/$base"|' "$SDK_PRODUCT" > "$TMP/product/ci/bootstrap/sdk-build-wrong-so-location.sh"
+    run_sdk_so "$TMP/product/ci/bootstrap/sdk-build-wrong-so-location.sh" "$TMP/sdk-wrong-so"
     ;;
   fault-tuple-missing-opt)
     make_dry_fixture

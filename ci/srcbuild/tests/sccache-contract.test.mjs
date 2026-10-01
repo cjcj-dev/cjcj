@@ -44,6 +44,7 @@ const CXX_JOBS = new Map([
   ['build-llvm-tools.yml/build-tools', {component: 'llvm', pin: /steps\.llvm-pin\.outputs\.sha/}],
   ['build-release-package.yml/package', {component: 'runtime', pin: /env\.RUNTIME_REF/}],
   ['build-darwin-std.yml/std', {component: 'srcbuild', pin: /env\.RUNTIME_REF/}],
+  ['darwin-signal-stack-evidence.yml/signal-stack', {component: 'srcbuild', pin: /env\.RUNTIME_REF/}],
   ['build-windows-runtime.yml/build-runtime', {component: 'windows-runtime', pin: /env\.RUNTIME_REF/}],
   ['windows-runtime-export-contract.yml/native-contract', {component: 'windows-runtime', pin: /env\.RUNTIME_REF/}],
   ['windows-runtime-link.yml/link', {component: 'windows-runtime', pin: /env\.RUNTIME_REF/}],

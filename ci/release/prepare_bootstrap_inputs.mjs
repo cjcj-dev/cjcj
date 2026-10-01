@@ -6,7 +6,8 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {prepareColourTuple} from './bootstrap_tuple.mjs';
 import {verifyRuntime} from './colour_runtime.mjs';
-import {prepareCppHeaders} from '../bootstrap/prepare_cpp_headers.mjs';
+import {resolveRuntimeSource, writeRuntimeSelection} from '../runtime-pin.mjs';
+import {prepareCppHeaders, verifyCppHeaders} from '../bootstrap/prepare_cpp_headers.mjs';
 import {hostIdentity, prepareHostLlvm} from './host_llvm.mjs';
 import {bootstrapArtifact} from './bootstrap_artifact.mjs';
 import {prepareHostSdk} from './bootstrap_host_sdk.mjs';
@@ -45,7 +46,9 @@ function findFile(root, predicate) {
   return undefined;
 }
 
-export async function prepareBootstrapInputs(verifyRuntimeInput) {
+export async function prepareBootstrapInputs(verifyRuntimeInput = verifyRuntime) {
+  // A Darwin source cell must consume an independently pinned in-process colour
+  // dylib; the static tuple alone cannot satisfy it.
   if ((process.env.CJCJ_SRCBUILD_TARGET || process.platform).startsWith('darwin')
       && !process.env.CJCJ_BOOTSTRAP_DYLIB_ARTIFACT && !process.env.CJCJ_BOOTSTRAP_COLOUR_DYLIB) {
     throw new Error('DARWIN_COLOUR_ARTIFACT_MISSING');
@@ -55,7 +58,10 @@ export async function prepareBootstrapInputs(verifyRuntimeInput) {
   const platform = {'linux-x64': 'linux_x86_64', 'linux-aarch64': 'linux_aarch64',
     'darwin-arm64': 'darwin_aarch64', 'darwin-x64': 'darwin_x86_64'}[target];
   if (!platform) throw new Error(`BOOTSTRAP_TARGET_UNSUPPORTED: ${target}`);
-  for (const pin of ['host_sdk_pin.env', 'llvm_pin.env', 'runtime_pin.env',
+  const runtimeSelection = await resolveRuntimeSource();
+  process.env.RUNTIME_REF = runtimeSelection.runtimeRef;
+  process.env.RUNTIME_SRC_URL = runtimeSelection.sourceUrl;
+  for (const pin of ['host_sdk_pin.env', 'llvm_pin.env',
     `ast_support/${platform}.env`, `colour-runtime/${platform}.env`, `llvm-dylib/${platform}.env`]) {
     const pinFile = new URL(`../${pin}`, import.meta.url);
     if (!fs.existsSync(pinFile)) continue;
@@ -103,6 +109,8 @@ export async function prepareBootstrapInputs(verifyRuntimeInput) {
   process.env.CJCJ_BOOTSTRAP_COLOUR_RT = bootstrapArtifact(process.env.CJCJ_BOOTSTRAP_COLOUR_RT,
     'cjcj-dev/cjcj', process.env.COLOUR_RT_ARTIFACT_ID, inputsWork, 'COLOUR_RT');
   const colourRt = verifyRuntimeInput();
+  const runtimePinFile = path.resolve(inputsWork, 'runtime-selection.env');
+  await writeRuntimeSelection(runtimePinFile);
 
   const llvmSha = process.env.LLVM_SHA || '';
   if (!/^[0-9a-f]{40}$/.test(llvmSha)) throw new Error('LLVM_SHA pin missing');
@@ -153,11 +161,21 @@ export async function prepareBootstrapInputs(verifyRuntimeInput) {
   // Explicit external trees remain caller-owned; default fetched sources are
   // prepared here before gha_run.sh can enter stage0.
   if (!process.env.CJCJ_BOOTSTRAP_CPP_SRC && !process.env.CANGJIE_CPP_SRC) {
-    await prepareCppHeaders(cppSrc);
+    await prepareCppHeaders(cppSrc, runtimePinFile);
+  } else {
+    // Caller ownership does not authorize headers from a different source.
+    await verifyCppHeaders(cppSrc, runtimePinFile);
   }
 
   const exported = {
     ...colourInputs,
+    COLOUR_RT_RUN_ID: process.env.COLOUR_RT_RUN_ID,
+    COLOUR_RT_RUN_ATTEMPT: process.env.COLOUR_RT_RUN_ATTEMPT,
+    COLOUR_RT_ARTIFACT_ID: process.env.COLOUR_RT_ARTIFACT_ID,
+    COLOUR_RT_MANIFEST_SHA256: process.env.COLOUR_RT_MANIFEST_SHA256,
+    CJCJ_BOOTSTRAP_RUNTIME_PIN: runtimePinFile,
+    RUNTIME_REF: runtimeSelection.runtimeRef,
+    RUNTIME_SRC_URL: runtimeSelection.sourceUrl,
     CJCJ_BOOTSTRAP_BASE: path.resolve(base),
     CJCJ_BOOTSTRAP_CPP_SRC: path.resolve(cppSrc),
     CJCJ_BOOTSTRAP_CJCJ_SHA: cjcjSha,
