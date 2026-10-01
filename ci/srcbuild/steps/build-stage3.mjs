@@ -153,9 +153,6 @@ const backendIdentity = await bootstrapBackendIdentity();
 const {compiler: stage2Product, targetLd} = await prepareBootstrapHandoff({
   work: bootstrapWork, sdk, source: githubWorkspace, tuple,
 });
-// Handoff replaces the SDK and overlays stage2 std: verify the final consumer
-// before its compiler or any host tool executes.
-
 const compilerEntrySha = await sha256(path.join(sdk, 'bin', 'cjc'));
 
 const resourceOutput = await $({stdio: 'pipe'})`bash ${path.join(githubWorkspace, 'ci/build_resources.sh')} ${process.env.CJ_HEAP || '96GB'}`;
@@ -168,6 +165,8 @@ const stageEnv = {
   [target.spec.loaderEnv]: targetLd,
   PATH: `${path.join(sdk, 'bin')}:${path.join(sdk, 'tools', 'bin')}:${process.env.PATH ?? ''}`,
 };
+// Handoff has replaced the SDK and overlaid stage2 std. Admit the actual
+// consumer before executing its compiler or any native backend.
 await assertConsumerInputs(stageEnv);
 await $({cwd: githubWorkspace, env: stageEnv})`set -o pipefail; cjc --version | head -2`;
 

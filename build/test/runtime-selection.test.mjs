@@ -233,7 +233,7 @@ test(`actual stage3 entry verifies promoted SDK before stage2: ${formal ? 'forma
   const selected = ok(['git', '-C', f.runtimeSource, 'rev-parse', 'HEAD']);
   f.env.RUNTIME_REF = selected; f.env.CJCJ_RUNTIME_REF_OVERRIDE = selected;
   const paired = path.join(f.sdk, 'third_party/paired-runtime');
-  ok(['git', '-C', paired, 'fetch', '-q', f.runtimeSource, selected]);
+  ok(['git', '-C', paired, 'fetch', '--update-shallow', '-q', f.runtimeSource, selected]);
   ok(['git', '-C', paired, 'checkout', '-q', '--detach', 'FETCH_HEAD']);
   for (const [file, key] of [[path.join(f.runtime, 'manifest.json'), 'runtime_sha'],
     [path.join(f.sdk, 'build/build/shim-headers.json'), 'runtime']]) {
@@ -261,10 +261,10 @@ test(`actual stage3 entry verifies promoted SDK before stage2: ${formal ? 'forma
     fields[`${prefix}_SOURCE`] = `tuple:${llvmSha}`;
     fields[`${prefix}_VERSION`] = 'identity fixture'; fields[`${prefix}_SHA256`] = hash(backend);
     const compressed = spawnSync('gzip', ['-c', backend]); assert.equal(compressed.status, 0);
-    fs.writeFileSync(path.join(f.fallback, `${tool}.gz`), compressed.stdout);
+    fs.writeFileSync(path.join(f.fallback, 'fixed-llc', `${tool}.gz`), compressed.stdout);
   }
   fields.LLD_TOOL = 'ld.lld';
-  fs.writeFileSync(path.join(f.fallback, 'llvm-tools.manifest'), Object.entries(fields).map(([k,v]) => `${k}=${v}`).join('\n')+'\n');
+  fs.writeFileSync(path.join(f.fallback, 'fixed-llc', 'llvm-tools.manifest'), Object.entries(fields).map(([k,v]) => `${k}=${v}`).join('\n')+'\n');
   fs.writeFileSync(path.join(f.fallback, 'SHA256SUMS'), 'stage3 authenticated tuple fixture\n');
   f.env.LLVM_TUPLE_SUMS_SHA = hash(path.join(f.fallback, 'SHA256SUMS'));
   const tuplePin = JSON.parse(fs.readFileSync(f.pinFile));
@@ -283,26 +283,37 @@ test(`actual stage3 entry verifies promoted SDK before stage2: ${formal ? 'forma
     const file = path.join(work, rel); fs.mkdirSync(path.dirname(file), {recursive: true});
     fs.writeFileSync(file, text);
   };
-  write('sdk-stage1/.stage1-host/binding.txt', 'host_ld=/usr/lib/x86_64-linux-gnu\n');
-  write('sdk-stage1/tools/bin/cjpm-stage1', 'host tool fixture');
-  for (const rel of ['bin/opt-stage1', 'bin/llc-stage1', 'bin/ld.lld', 'lib/libLLVM-15.so']) {
-    const dest = path.join(input, 'third_party/llvm', rel);
-    fs.mkdirSync(path.dirname(dest), {recursive: true});
-    fs.copyFileSync(rel.startsWith('lib/') ? dylib : backend, dest);
+  for (const [root, rel, source] of [
+    [input, 'tools/bin/cjpm', '/bin/true'], [a.base, 'tools/bin/cjpm', '/bin/true'],
+    [a.base, 'third_party/llvm/lib/libLLVM-15.so', path.join(a.libs, 'host.so')],
+    [input, 'third_party/llvm/bin/opt', backend], [input, 'third_party/llvm/bin/llc', backend],
+    [input, 'third_party/llvm/bin/ld.lld', backend], [input, 'third_party/llvm/lib/libLLVM-15.so', dylib],
+  ]) {
+    const dest = path.join(root, rel); fs.mkdirSync(path.dirname(dest), {recursive: true});
+    fs.copyFileSync(source, dest); fs.chmodSync(dest, 0o755);
   }
-  // Native stage1 runner installation occurs after its full assembly check.
-  fs.rmSync(path.join(input, 'bin/cjc'));
-  write('sdk-stage1/bin/cjc', '#!/bin/sh\necho native-stage1-runner\n');
+  const runSdk = path.join(f.dir, 'run-sdk');
+  fs.mkdirSync(path.join(runSdk, 'third_party/llvm/lib'), {recursive: true});
+  fs.copyFileSync(dylib, path.join(runSdk, 'third_party/llvm/lib/libLLVM-15.so'));
+  const identities = path.join(f.dir, 'runner-identities.txt');
+  fs.writeFileSync(identities, ['libcangjie-runtime.so', 'libboundscheck.so', 'libLLVM-15.so']
+    .map(name => `linux_x86_64 ${name} ${hash(path.join(a.libs, 'host.so'))}`).join('\n')+'\n');
+  const runner = execute(['bash', path.join(repo, 'ci/bootstrap/stage1_host_runner.sh'), input, a.base, a.base,
+    hash(path.join(a.libs, 'host.so')), a.compiler, hash(a.compiler), runSdk, hash(dylib)],
+    {...f.env, STAGE1_HOST_IDENTITIES: identities});
+  assert.equal(runner.status, 0, runner.output);
+  assert.match(runner.output, /STAGE1-RUNNER-OK/);
+  console.log(`STAGE3_NATIVE_RUNNER_INPUT_ASSERT product=${hash(path.join(repo, 'ci/bootstrap/stage1_host_runner.sh'))}`);
   for (const name of ['cjselfhost_llvmshim.o', 'cjc_runtime_config.o'])
     write(`cjcj-src-stage1/runtime_shim/${name}`, 'handoff object fixture');
-  write('cjcj-stage2', '#!/bin/sh\necho STAGE2_EXECUTION_BOUNDARY >&2\nexit 73\n');
+  write('cjcj-stage2', '#!/bin/sh\necho STAGE2_EXECUTION_BOUNDARY >&2\nif [ "$FIXTURE_CONTINUE" != 1 ]; then exit 73; fi\nif [ -n "$FIXTURE_MUTATION" ]; then printf changed >> "$FIXTURE_MUTATION"; fi\nexit 0\n');
   fs.mkdirSync(path.join(work, 'stdlib-stage2/lib', tuple), {recursive: true});
   fs.copyFileSync(path.join(input, 'lib', tuple, 'libcangjie-std-core.a'),
     path.join(work, 'stdlib-stage2/lib', tuple, 'libcangjie-std-core.a'));
   fs.cpSync(f.runtimeSource, path.join(workspace, 'cangjie_runtime'), {recursive: true});
   const env = {...Object.fromEntries(Object.entries(f.env).filter(([key]) => !key.startsWith('COLOUR_RT_'))), ...a.inputs, CANGJIE_WORKSPACE: workspace, GITHUB_WORKSPACE: path.join(workspace, 'source'),
     CJCJ_BOOTSTRAP_WORK: path.join(workspace, 'bootstrap-work'), CJCJ_STAGE3_STDLIB_BUILD_TYPE: 'release',
-    CJCJ_STAGE3_DRY_RUN: '1', CJCJ_STAGE3_DRY_RUN_FINAL_STD: path.join(workspace, 'unused-std')};
+    CJCJ_BOOTSTRAP_HOST_RT: a.base, CJCJ_STAGE3_DRY_RUN: '1', CJCJ_STAGE3_DRY_RUN_FINAL_STD: path.join(workspace, 'unused-std')};
   fs.mkdirSync(env.GITHUB_WORKSPACE, {recursive: true});
   fs.cpSync(path.join(repo, 'ci'), path.join(env.GITHUB_WORKSPACE, 'ci'), {recursive: true});
   const command = ['npx', '--yes', 'zx@8', path.join(repo, 'ci/srcbuild/steps/build-stage3.mjs')];
@@ -333,6 +344,60 @@ test(`actual stage3 entry verifies promoted SDK before stage2: ${formal ? 'forma
     console.log(`STAGE3_REPLACEMENT_TARGET_ASSERT identity=${formal ? 'formal' : 'candidate'} wrong=${name} rejected-before-stage2=1`);
     fs.rmSync(file);
   }
+  for (const rel of ['bin/opt-stage1', 'bin/llc-stage1', 'bin/ld.lld', 'lib/libLLVM-15.so']) {
+    const file = path.join(input, 'third_party/llvm', rel), bytes = fs.readFileSync(file);
+    fs.appendFileSync(file, 'changed');
+    const wrong = execute(command, env);
+    assert.notEqual(wrong.status, 0); assert.match(wrong.output, /BOOTSTRAP_BACKEND_HASH_MISMATCH/, wrong.output);
+    assert.doesNotMatch(wrong.output, /STAGE2_EXECUTION_BOUNDARY/);
+    fs.writeFileSync(file, bytes);
+    console.log(`STAGE3_BACKEND_TARGET_ASSERT identity=${formal ? 'formal' : 'candidate'} wrong=${rel}`);
+  }
+  const final = env.CJCJ_STAGE3_DRY_RUN_FINAL_STD;
+  for (const [rel, text] of [
+    [`modules/${tuple}/std.cjo`, 'final module'], [`modules/${tuple}/libstd.bc`, 'final bitcode'],
+    [`lib/${tuple}/libcangjie-std-core.a`, 'new final std core'],
+    [`lib/${tuple}/libcangjie-std-coreFFI.a`, 'final ffi'],
+    [`runtime/lib/${tuple}/libcangjie-std-core.so`, 'final shared std'], ['PROVENANCE.txt', 'dry-run fixture'],
+  ]) { const file = path.join(final, rel); fs.mkdirSync(path.dirname(file), {recursive: true}); fs.writeFileSync(file, text); }
+  fs.mkdirSync(path.join(final, 'modules', tuple, 'std'));
+  const continued = {...env, FIXTURE_CONTINUE: '1'};
+  const finalControl = execute(command, continued);
+  assert.equal(finalControl.status, 0, finalControl.output);
+  assert.match(finalControl.output, /STAGE3_DRY_RUN_REACHED_BUILD=1/);
+  console.log(`STAGE3_FINAL_OVERLAY_CONTROL_ASSERT identity=${formal ? 'formal' : 'candidate'}`);
+  for (const [name, rel, expected] of [
+    ['runtime', `runtime/lib/${tuple}/libcangjie-runtime.so`, /BOOTSTRAP_SDK_RUNTIME_MISMATCH/],
+    ['bounds', `runtime/lib/${tuple}/libboundscheck.so`, /BOOTSTRAP_SDK_RUNTIME_MISMATCH/],
+    ['archive', `lib/${tuple}/libcangjie-runtime.a`, /BOOTSTRAP_SDK_RUNTIME_MISMATCH/],
+    ['lock', 'SDK.lock.json', /BOOTSTRAP_SDK_RUNTIME_LOCK_MISMATCH/],
+    ['backend', 'third_party/llvm/bin/opt-stage1', /BOOTSTRAP_BACKEND_HASH_MISMATCH/],
+    ['library', 'third_party/llvm/lib/libLLVM-15.so', /BOOTSTRAP_BACKEND_HASH_MISMATCH/],
+    ['loader', `lib/${tuple}/libLLVM-15.so`, /BOOTSTRAP_BACKEND_LOADER_MISMATCH/],
+    ['backend-runner', 'third_party/llvm/bin/opt', /BOOTSTRAP_BACKEND_RUNNER_MISMATCH/],
+    ['stage2', 'bin/cjcj-stage2', /bootstrap compiler identity mismatch/],
+    ['entry', 'bin/cjc', /bootstrap compiler identity mismatch/],
+    ['record', 'bootstrap-compiler.json', /bootstrap compiler independent producer mismatch/],
+  ]) {
+    const file = path.join(final, rel); fs.mkdirSync(path.dirname(file), {recursive: true});
+    if (name === 'record') fs.writeFileSync(file, JSON.stringify({producer: path.join(work, 'cjcj-stage2'), compilerSha256: 'e'.repeat(64)}));
+    else if (name === 'lock') { const lock = JSON.parse(fs.readFileSync(path.join(input, rel))); lock.components.runtime.commit = 'e'.repeat(40); fs.writeFileSync(file, JSON.stringify(lock)); }
+    else if (name === 'loader') fs.copyFileSync(dylib, file);
+    else fs.writeFileSync(file, 'invalid protected consumer input');
+    const wrong = execute(command, continued);
+    assert.notEqual(wrong.status, 0); assert.match(wrong.output, expected, wrong.output);
+    assert.match(wrong.output, /STAGE2_EXECUTION_BOUNDARY/);
+    assert.doesNotMatch(wrong.output, /STAGE3_DRY_RUN_REACHED_BUILD=1/);
+    fs.rmSync(file);
+    console.log(`STAGE3_FINAL_OVERLAY_TARGET_ASSERT identity=${formal ? 'formal' : 'candidate'} wrong=${name}`);
+  }
+  const producerFile = path.join(work, 'cjcj-stage2'), producerBytes = fs.readFileSync(producerFile);
+  const producerWrong = execute(command, {...continued, FIXTURE_MUTATION: producerFile});
+  assert.notEqual(producerWrong.status, 0);
+  assert.match(producerWrong.output, /bootstrap compiler independent producer mismatch/, producerWrong.output);
+  assert.doesNotMatch(producerWrong.output, /STAGE3_DRY_RUN_REACHED_BUILD=1/);
+  fs.writeFileSync(producerFile, producerBytes);
+  console.log(`STAGE3_PRODUCER_TARGET_ASSERT identity=${formal ? 'formal' : 'candidate'}`);
   // Restore the shared pair and alter only the source HEAD.
 
   ok(['git', '-C', path.join(workspace, 'cangjie_runtime'), '-c', 'user.name=Zxilly',

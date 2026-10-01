@@ -8,7 +8,7 @@ import {run} from '../../build/lib/runner.mjs';
 
 export async function verifyBootstrapRuntimeSdk(sdk, tuple, env = process.env, sourceRoot, assemblyLockSha) {
   const selection = await resolveRuntimeSource(env);
-  if (sourceRoot, assemblyLockSha) {
+  if (sourceRoot) {
     const source = await run(['git', '-C', sourceRoot, 'rev-parse', 'HEAD'], {capture: true});
     if (source.stdout.trim().toLowerCase() !== selection.runtimeRef.toLowerCase()) {
       throw new Error('BOOTSTRAP_RUNTIME_SOURCE_MISMATCH');
@@ -29,10 +29,15 @@ export async function verifyBootstrapRuntimeSdk(sdk, tuple, env = process.env, s
     if (digest(path.join(sdk, installed)) !== manifest.files[rel]) {
       throw new Error(`BOOTSTRAP_SDK_RUNTIME_MISMATCH: ${installed}`);
     }
-    const stamps = [...new Set(fs.readFileSync(path.join(sdk, installed)).toString('latin1')
-      .match(/CJRT-COMMIT:[A-Za-z0-9_-]+/g) || [])];
-    if (stamps.length !== 1 || stamps[0] !== `CJRT-COMMIT:${selection.runtimeRef}`) {
-      throw new Error(`BOOTSTRAP_SDK_RUNTIME_STAMP_MISMATCH: ${installed}`);
+    // Runtime provenance is linked into the shared/static runtime, not the
+    // boundscheck target (runtime/CMakeLists.txt:470,792). The latter is bound
+    // by its authenticated full-root and assembly-lock hashes.
+    if (path.basename(installed).startsWith('libcangjie-runtime.')) {
+      const stamps = [...new Set(fs.readFileSync(path.join(sdk, installed)).toString('latin1')
+        .match(/CJRT-COMMIT:[A-Za-z0-9_-]+/g) || [])];
+      if (stamps.length !== 1 || stamps[0] !== `CJRT-COMMIT:${selection.runtimeRef}`) {
+        throw new Error(`BOOTSTRAP_SDK_RUNTIME_STAMP_MISMATCH: ${installed}`);
+      }
     }
     if (lock.files?.[installed]?.sha256 !== manifest.files[rel]) {
       throw new Error(`BOOTSTRAP_SDK_RUNTIME_LOCK_MISMATCH: ${installed}`);

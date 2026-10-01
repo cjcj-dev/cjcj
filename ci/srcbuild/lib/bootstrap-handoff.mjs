@@ -97,7 +97,7 @@ export async function bootstrapBackendIdentity(env = process.env) {
     pinFile: env.CJCJ_BOOTSTRAP_INPUTS_PIN,
     sumsSha: env.LLVM_TUPLE_SUMS_SHA,
   });
-  const {values} = parseLlvmToolsManifest(await fs.readFile(path.join(directory, 'llvm-tools.manifest'), 'utf8'));
+  const {values} = parseLlvmToolsManifest(await fs.readFile(path.join(directory, 'fixed-llc', 'llvm-tools.manifest'), 'utf8'));
   const llvmSha = env.CJCJ_BOOTSTRAP_COLOUR_LLVM_SHA;
   const library = env.CJCJ_BOOTSTRAP_COLOUR_LLVM_SO;
   const librarySha = env.CJCJ_BOOTSTRAP_COLOUR_LLVM_SHA256;
