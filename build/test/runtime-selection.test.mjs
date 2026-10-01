@@ -64,6 +64,20 @@ function assembled(f, selected = f.env.RUNTIME_REF) {
   const base = path.join(f.dir, 'sdk-base');
   fs.mkdirSync(path.join(base, 'bin'), {recursive: true});
   fs.copyFileSync(compiler, path.join(base, 'bin/cjc'));
+  fs.writeFileSync(path.join(base, 'envsetup.sh'), '# isolated SDK fixture environment\n');
+  for (const rel of [`runtime/lib/${tuple}/libcangjie-runtime.so`, `runtime/lib/${tuple}/libboundscheck.so`]) {
+    fs.mkdirSync(path.dirname(path.join(base, rel)), {recursive: true});
+    fs.copyFileSync(path.join(libs, 'host.so'), path.join(base, rel));
+  }
+  for (const rel of [`lib/${tuple}/libcangjie-runtime.a`, `lib/${tuple}/libcangjie-std-core.a`]) {
+    fs.mkdirSync(path.dirname(path.join(base, rel)), {recursive: true});
+    fs.copyFileSync(path.join(libs, 'host.a'), path.join(base, rel));
+  }
+  fs.mkdirSync(path.join(base, 'modules', tuple), {recursive: true});
+  fs.writeFileSync(path.join(base, 'modules', tuple, 'std.core.cjo'), 'host module fixture');
+  fs.copyFileSync(path.join(libs, 'host.so'), path.join(base, 'runtime/lib', tuple, 'libcangjie-std-core.so'));
+  fs.copyFileSync(path.join(libs, 'host.so'), path.join(base, 'lib/libstdFFI.so'));
+  fs.writeFileSync(path.join(base, 'std-producer.json'), JSON.stringify({compiler_sha256: hash(compiler)}));
   const target = path.join(f.dir, 'sdk-target');
   const command = ['bash', path.join(repo, 'ci/bootstrap/sdk_build.sh'),
     '--from', base, '--to', target, '--target', tuple,
@@ -158,3 +172,13 @@ for (const [label, edit, marker] of [
     assert.doesNotMatch(result.stdout, /^CJCJ_BOOTSTRAP_RUNTIME_PIN=/m);
   }));
 }
+
+test('real prepare publishes the selected pin after full-root validation', () => fixture(f => {
+  const result = f.run();
+  const file = path.join(f.env.CJCJ_BOOTSTRAP_INPUTS_WORK, 'runtime-selection.env');
+  const record = fs.existsSync(file) ? Object.fromEntries(fs.readFileSync(file, 'utf8').trim().split('\n').map(x => x.split('='))) : {};
+  const observed = {rc: result.status, ref: record.RUNTIME_REF, url: record.RUNTIME_SRC_URL};
+  console.log(`SELECTION_PUBLICATION_TARGET_ASSERT ${JSON.stringify(observed)}`);
+  assert.deepEqual(observed, {rc: 0, ref: f.env.RUNTIME_REF, url: pin.RUNTIME_SRC_URL});
+  console.log('SELECTION_PUBLICATION_TARGET_ASSERT_EXECUTED');
+}));

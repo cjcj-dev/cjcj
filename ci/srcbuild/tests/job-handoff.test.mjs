@@ -105,3 +105,31 @@ test('independent MinGW handoff overlays only the toolchain and preserves stage3
   assert.equal(await fs.readFile(f.env.GITHUB_ENV, 'utf8'), 'SOURCE_SDK_VERSION=0.0.3\n');
   console.log('HANDOFF_ASSERT mingw=restored stage3-source=preserved stage3-environment=preserved');
 });
+
+
+test('same-run handoff retains and revalidates explicit runtime authorization and pin bytes', async t => {
+  const f = await fixture(t);
+  const selected = 'a'.repeat(40);
+  const pin = path.join(f.root, '.srcbuild/runtime-selection.env');
+  const formal = Object.fromEntries((await fs.readFile(new URL('../../runtime_pin.env', import.meta.url), 'utf8')).trim().split('\n').map(line => line.split('=')));
+  await fs.writeFile(pin, `RUNTIME_REF=${selected}\nRUNTIME_SRC_URL=${formal.RUNTIME_SRC_URL}\n`);
+  Object.assign(f.env, {CJCJ_RUNTIME_REF_OVERRIDE: selected, CJCJ_ALLOW_RUNTIME_OVERRIDE: 'true',
+    RUNTIME_REF: selected, RUNTIME_SRC_URL: formal.RUNTIME_SRC_URL, CJCJ_BOOTSTRAP_RUNTIME_PIN: pin});
+  const packed = f.run('pack');
+  assert.equal(packed.rc, 0, packed.output);
+  await fs.rm(f.root, {recursive: true}); await fs.mkdir(f.root);
+  const restored = f.run('restore');
+  assert.equal(restored.rc, 0, restored.output);
+  assert.match(await fs.readFile(f.env.GITHUB_ENV, 'utf8'), /CJCJ_ALLOW_RUNTIME_OVERRIDE=true/);
+  assert.match(await fs.readFile(pin, 'utf8'), new RegExp(selected));
+  // Same transport, same source/run identity; removing permission alone must
+  // fail at runtime authorization, before any restored environment is exported.
+  const file = path.join(f.archive, 'manifest.json');
+  const record = JSON.parse(await fs.readFile(file)); delete record.environment.CJCJ_ALLOW_RUNTIME_OVERRIDE;
+  await fs.writeFile(file, JSON.stringify(record));
+  const before = await fs.readFile(f.env.GITHUB_ENV, 'utf8');
+  const denied = f.run('restore');
+  assert.notEqual(denied.rc, 0); assert.match(denied.output, /explicit dry-run\/test authorization/);
+  assert.equal(await fs.readFile(f.env.GITHUB_ENV, 'utf8'), before);
+  console.log('HANDOFF_RUNTIME_TARGET_ASSERT retained-pin-and-authorization=1 missing-permission=rejected');
+});
