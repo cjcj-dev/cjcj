@@ -33,7 +33,7 @@ function refreshRoot(f) {
   fs.writeFileSync(file, JSON.stringify(manifest));
   f.env.COLOUR_RT_MANIFEST_SHA256 = hash(file);
 }
-function assembled(f, selected = f.env.RUNTIME_REF) {
+function assembled(f, selected = f.env.RUNTIME_REF, expectedFailure) {
   const libs = path.join(f.dir, 'elf');
   fs.mkdirSync(libs);
   const files = {
@@ -87,6 +87,12 @@ function assembled(f, selected = f.env.RUNTIME_REF) {
   const result = execute(command, f.env);
   // Inspect the actual assembler result/lock, not a synthesized resolver return.
   console.log(`SDK_SELECTION_ASSERT selected=${selected} rc=${result.status}`);
+  if (expectedFailure) {
+    assert.notEqual(result.status, 0);
+    assert.ok(result.output.includes(expectedFailure), result.output);
+    console.log(`SDK_STAMP_TARGET_ASSERT_EXECUTED ${expectedFailure}`);
+    return;
+  }
   assert.equal(result.status, 0, result.output);
   const lock = JSON.parse(fs.readFileSync(path.join(target, 'SDK.lock.json')));
   assert.equal(lock.components.runtime.commit, selected);
@@ -181,4 +187,8 @@ test('real prepare publishes the selected pin after full-root validation', () =>
   console.log(`SELECTION_PUBLICATION_TARGET_ASSERT ${JSON.stringify(observed)}`);
   assert.deepEqual(observed, {rc: 0, ref: f.env.RUNTIME_REF, url: pin.RUNTIME_SRC_URL});
   console.log('SELECTION_PUBLICATION_TARGET_ASSERT_EXECUTED');
+}));
+
+test('real SDK assembly rejects a manifest-valid runtime with the wrong commit stamp', () => fixture(f => {
+  assembled(f, 'e'.repeat(40), 'rule=RUNTIME_PIN');
 }));
