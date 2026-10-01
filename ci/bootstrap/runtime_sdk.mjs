@@ -6,9 +6,9 @@ import {resolveRuntimeSource} from '../runtime-pin.mjs';
 import {verifyRuntime, runtimeFiles, digest} from '../release/colour_runtime.mjs';
 import {run} from '../../build/lib/runner.mjs';
 
-export async function verifyBootstrapRuntimeSdk(sdk, tuple, env = process.env, sourceRoot) {
+export async function verifyBootstrapRuntimeSdk(sdk, tuple, env = process.env, sourceRoot, assemblyLockSha) {
   const selection = await resolveRuntimeSource(env);
-  if (sourceRoot) {
+  if (sourceRoot, assemblyLockSha) {
     const source = await run(['git', '-C', sourceRoot, 'rev-parse', 'HEAD'], {capture: true});
     if (source.stdout.trim().toLowerCase() !== selection.runtimeRef.toLowerCase()) {
       throw new Error('BOOTSTRAP_RUNTIME_SOURCE_MISMATCH');
@@ -16,7 +16,11 @@ export async function verifyBootstrapRuntimeSdk(sdk, tuple, env = process.env, s
   }
   const root = verifyRuntime({...env, RUNTIME_REF: selection.runtimeRef});
   const manifest = JSON.parse(fs.readFileSync(path.join(root, 'manifest.json'), 'utf8'));
-  const lock = JSON.parse(fs.readFileSync(path.join(sdk, 'SDK.lock.json'), 'utf8'));
+  const lockFile = path.join(sdk, 'SDK.lock.json');
+  if (assemblyLockSha && digest(lockFile) !== assemblyLockSha) {
+    throw new Error('BOOTSTRAP_SDK_RUNTIME_LOCK_MISMATCH: assembly lock');
+  }
+  const lock = JSON.parse(fs.readFileSync(lockFile, 'utf8'));
   if (lock.components?.runtime?.commit?.toLowerCase() !== selection.runtimeRef.toLowerCase()) {
     throw new Error('BOOTSTRAP_SDK_RUNTIME_LOCK_MISMATCH: commit');
   }
@@ -25,12 +29,17 @@ export async function verifyBootstrapRuntimeSdk(sdk, tuple, env = process.env, s
     if (digest(path.join(sdk, installed)) !== manifest.files[rel]) {
       throw new Error(`BOOTSTRAP_SDK_RUNTIME_MISMATCH: ${installed}`);
     }
+    const stamps = [...new Set(fs.readFileSync(path.join(sdk, installed)).toString('latin1')
+      .match(/CJRT-COMMIT:[A-Za-z0-9_-]+/g) || [])];
+    if (stamps.length !== 1 || stamps[0] !== `CJRT-COMMIT:${selection.runtimeRef}`) {
+      throw new Error(`BOOTSTRAP_SDK_RUNTIME_STAMP_MISMATCH: ${installed}`);
+    }
     if (lock.files?.[installed]?.sha256 !== manifest.files[rel]) {
       throw new Error(`BOOTSTRAP_SDK_RUNTIME_LOCK_MISMATCH: ${installed}`);
     }
   }
-  await run(['python3', new URL('./sdk_verify.py', import.meta.url).pathname,
-    '--sdk', sdk, '--role', 'target', '--runtime-pin', env.CJCJ_BOOTSTRAP_RUNTIME_PIN || new URL('../runtime_pin.env', import.meta.url).pathname,
-    '--target-tuple', tuple]);
-  console.log(`BOOTSTRAP_SDK_RUNTIME_VERIFIED runtime=${selection.runtimeRef} manifest=${digest(path.join(root, 'manifest.json'))}`);
+  // The assembly lock predates host-runner installation and promotion. Full
+  // SDK verification remains at sdk_build/bootstrap's assembly boundary.
+  // This admission proves only the actual runtime consumer's identity.
+  console.log(`BOOTSTRAP_RUNTIME_CONSUMER_VERIFIED runtime=${selection.runtimeRef} manifest=${digest(path.join(root, 'manifest.json'))}`);
 }

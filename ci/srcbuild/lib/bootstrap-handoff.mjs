@@ -1,12 +1,18 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import {verifyColourTuple} from '../../release/bootstrap_tuple.mjs';
+import {parseLlvmToolsManifest} from '../../llvm-tools-manifest.mjs';
 
 const sha256 = async file => crypto.createHash('sha256').update(await fs.readFile(file)).digest('hex');
 
-export async function assertBootstrapCompiler({sdk, command}) {
+export async function assertBootstrapCompiler({sdk, command, producer, producerSha256, targetLd}) {
   const identity = JSON.parse(await fs.readFile(path.join(sdk, 'bootstrap-compiler.json'), 'utf8'));
   const compiler = path.join(sdk, 'bin', 'cjcj-stage2');
+  if (producer && (await fs.realpath(identity.producer) !== await fs.realpath(producer)
+    || await sha256(producer) !== producerSha256 || identity.compilerSha256 !== producerSha256)) {
+    throw new Error('bootstrap compiler independent producer mismatch');
+  }
   const entry = path.join(sdk, 'bin', 'cjc');
   if (await fs.realpath(command) !== await fs.realpath(entry)
     || await sha256(entry) !== identity.entrySha256
@@ -14,10 +20,14 @@ export async function assertBootstrapCompiler({sdk, command}) {
     || await sha256(identity.producer) !== identity.compilerSha256) {
     throw new Error('bootstrap compiler identity mismatch');
   }
+  if (targetLd && await fs.readFile(entry, 'utf8') !== runnerText(sdk, compiler, targetLd)) {
+    throw new Error('bootstrap compiler runner binding mismatch');
+  }
   return identity;
 }
 
 const quote = value => `'${value.replaceAll("'", "'\\''")}'`;
+const runnerText = (sdk, real, ld) => `#!/usr/bin/env bash\nexport CANGJIE_HOME=${quote(sdk)}\nexport LD_LIBRARY_PATH=${quote(ld)}\nexec ${quote(real)} "$@"\n`;
 
 // stage1_host_runner.sh binds absolute paths. Rebind its managed host tool and
 // native backends when promoting the bootstrap SDK to the stage2 consumer.
@@ -57,7 +67,7 @@ export async function prepareBootstrapHandoff({work, sdk, source, tuple}) {
     '/usr/lib/x86_64-linux-gnu'].join(':');
   const runner = async (entry, real, ld) => {
     await fs.rm(entry, {force: true});
-    await fs.writeFile(entry, `#!/usr/bin/env bash\nexport CANGJIE_HOME=${quote(sdk)}\nexport LD_LIBRARY_PATH=${quote(ld)}\nexec ${quote(real)} "$@"\n`, {mode: 0o755});
+    await fs.writeFile(entry, runnerText(sdk, real, ld), {mode: 0o755});
   };
   await fs.copyFile(compiler, path.join(sdk, 'bin', 'cjcj-stage2'));
   await fs.chmod(path.join(sdk, 'bin', 'cjcj-stage2'), 0o755);
@@ -78,4 +88,59 @@ export async function prepareBootstrapHandoff({work, sdk, source, tuple}) {
     entrySha256: await sha256(path.join(sdk, 'bin', 'cjc')),
   }, null, 2)}\n`);
   return {compiler, targetLd};
+}
+
+// Expectations come from the authenticated tuple and process-library inputs,
+// independently of the promoted SDK and its pre-runner assembly lock.
+export async function bootstrapBackendIdentity(env = process.env) {
+  const {directory} = verifyColourTuple(env.CJCJ_BOOTSTRAP_COLOUR_TUPLE, {
+    pinFile: env.CJCJ_BOOTSTRAP_INPUTS_PIN,
+    sumsSha: env.LLVM_TUPLE_SUMS_SHA,
+  });
+  const {values} = parseLlvmToolsManifest(await fs.readFile(path.join(directory, 'llvm-tools.manifest'), 'utf8'));
+  const llvmSha = env.CJCJ_BOOTSTRAP_COLOUR_LLVM_SHA;
+  const library = env.CJCJ_BOOTSTRAP_COLOUR_LLVM_SO;
+  const librarySha = env.CJCJ_BOOTSTRAP_COLOUR_LLVM_SHA256;
+  const manifest = JSON.parse(await fs.readFile(path.join(path.dirname(library), 'manifest.json'), 'utf8'));
+  if (!/^[a-f0-9]{40}$/.test(llvmSha || '') || values.get('LLVM_SHA') !== llvmSha
+    || !/^[a-f0-9]{64}$/.test(librarySha || '') || await sha256(library) !== librarySha
+    || manifest.llvm_sha !== llvmSha || manifest.sha256 !== librarySha
+    || JSON.stringify(manifest.targets) !== JSON.stringify(['X86', 'ARM', 'AArch64'])) {
+    throw new Error('BOOTSTRAP_BACKEND_INPUT_MISMATCH');
+  }
+  return {llvmSha, files: {
+    'bin/opt-stage1': values.get('OPT_SHA256'),
+    'bin/llc-stage1': values.get('LLC_SHA256'),
+    [`bin/${values.get('LLD_TOOL')}`]: values.get('LLD_SHA256'),
+    [`lib/${path.basename(library)}`]: librarySha,
+  }};
+}
+
+export async function assertBootstrapBackends({sdk, targetLd, identity}) {
+  const root = path.join(sdk, 'third_party', 'llvm');
+  for (const [rel, expected] of Object.entries(identity.files)) {
+    const file = path.join(root, rel);
+    const bytes = await fs.readFile(file);
+    if (await sha256(file) !== expected) throw new Error(`BOOTSTRAP_BACKEND_HASH_MISMATCH: ${rel}`);
+    const stamps = [...new Set(bytes.toString('latin1').match(/CJLLVM-COMMIT:[A-Za-z0-9_-]+/g) || [])];
+    if (stamps.length !== 1 || stamps[0] !== `CJLLVM-COMMIT:${identity.llvmSha}`) {
+      throw new Error(`BOOTSTRAP_BACKEND_STAMP_MISMATCH: ${rel}`);
+    }
+  }
+  const library = Object.keys(identity.files).find(rel => rel.startsWith('lib/'));
+  const libraryPath = path.join(root, library);
+  const resolved = await Promise.all(targetLd.split(':').map(async dir => {
+    const file = path.join(dir, path.basename(library));
+    try { return await fs.realpath(file); } catch { return null; }
+  }));
+  if (resolved.find(Boolean) !== await fs.realpath(libraryPath)) {
+    throw new Error('BOOTSTRAP_BACKEND_LOADER_MISMATCH');
+  }
+  for (const name of ['opt', 'llc']) {
+    const entry = path.join(root, 'bin', name);
+    if (await fs.readFile(entry, 'utf8') !== runnerText(sdk, `${entry}-stage1`, targetLd)) {
+      throw new Error(`BOOTSTRAP_BACKEND_RUNNER_MISMATCH: ${name}`);
+    }
+  }
+  console.log(`BOOTSTRAP_BACKEND_CONSUMER_VERIFIED llvm=${identity.llvmSha}`);
 }

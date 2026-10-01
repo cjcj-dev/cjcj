@@ -136,7 +136,7 @@ for (const candidate of [false, true]) {
     const verified = sdkConsumer(f, a);
     console.log(`SDK_CONSUMER_ASSERT candidate=${candidate} rc=${verified.status} ${verified.output}`);
     assert.equal(verified.status, 0, verified.output);
-    assert.match(verified.output, new RegExp(`BOOTSTRAP_SDK_RUNTIME_VERIFIED runtime=${f.env.RUNTIME_REF}`));
+    assert.match(verified.output, new RegExp(`BOOTSTRAP_RUNTIME_CONSUMER_VERIFIED runtime=${f.env.RUNTIME_REF}`));
     // Host-role assembler must keep its official runtime/std independent.
     const host = path.join(f.dir, 'sdk-host');
     fs.mkdirSync(path.join(a.base, 'runtime/lib', tuple), {recursive: true});
@@ -227,7 +227,7 @@ test(`actual stage3 entry verifies promoted SDK before stage2: ${formal ? 'forma
         {...process.env, GIT_AUTHOR_DATE: '2000-01-01T00:00:00Z', GIT_COMMITTER_DATE: '2000-01-01T00:00:00Z'});
   if (formal) {
     assert.ok(process.env.GC_FIX_RUNTIME_CHECKOUT, 'formal source objects required');
-    ok(['git', '-C', f.runtimeSource, 'fetch', '-q', process.env.GC_FIX_RUNTIME_CHECKOUT, pin.RUNTIME_REF]);
+    ok(['git', '-C', f.runtimeSource, 'fetch', '--update-shallow', '-q', process.env.GC_FIX_RUNTIME_CHECKOUT, pin.RUNTIME_REF]);
     ok(['git', '-C', f.runtimeSource, 'checkout', '-q', '--detach', 'FETCH_HEAD']);
   }
   const selected = ok(['git', '-C', f.runtimeSource, 'rev-parse', 'HEAD']);
@@ -243,6 +243,33 @@ test(`actual stage3 entry verifies promoted SDK before stage2: ${formal ? 'forma
   }
   refreshRoot(f);
   if (formal) useFormalRuntime(f);
+  // Build the tuple fixtures and pass their authenticated manifest through the
+  // same preparation entry as production; no resolver results are injected.
+  const llvmSha = f.env.LLVM_SHA;
+  const backend = path.join(f.dir, 'backend');
+  const backendC = `${backend}.c`;
+  fs.writeFileSync(backendC, `const char stamp[]="CJLLVM-COMMIT:${llvmSha}"; int main(){return 0;}\n`);
+  ok(['cc', backendC, '-o', backend]);
+  const dylib = path.join(f.dylib, 'libLLVM-15.so');
+  ok(['cc', '-shared', '-fPIC', backendC, '-o', dylib]);
+  f.env.LLVM_DYLIB_SHA256 = hash(dylib);
+  fs.writeFileSync(path.join(f.dylib, 'manifest.json'), JSON.stringify({
+    llvm_sha: llvmSha, sha256: hash(dylib), targets: ['X86', 'ARM', 'AArch64']}));
+  const fields = {PLATFORM: 'linux_x86_64', LLVM_SHA: llvmSha,
+    CANGJIE_COMPILER_SHA: 'b'.repeat(40), FLATBUFFERS_SHA: 'c'.repeat(40), SHIM_SHA256: hash(backend)};
+  for (const [prefix, tool] of [['LLC', 'llc'], ['OPT', 'opt'], ['LLD', 'ld.lld']]) {
+    fields[`${prefix}_SOURCE`] = `tuple:${llvmSha}`;
+    fields[`${prefix}_VERSION`] = 'identity fixture'; fields[`${prefix}_SHA256`] = hash(backend);
+    const compressed = spawnSync('gzip', ['-c', backend]); assert.equal(compressed.status, 0);
+    fs.writeFileSync(path.join(f.fallback, `${tool}.gz`), compressed.stdout);
+  }
+  fields.LLD_TOOL = 'ld.lld';
+  fs.writeFileSync(path.join(f.fallback, 'llvm-tools.manifest'), Object.entries(fields).map(([k,v]) => `${k}=${v}`).join('\n')+'\n');
+  fs.writeFileSync(path.join(f.fallback, 'SHA256SUMS'), 'stage3 authenticated tuple fixture\n');
+  f.env.LLVM_TUPLE_SUMS_SHA = hash(path.join(f.fallback, 'SHA256SUMS'));
+  const tuplePin = JSON.parse(fs.readFileSync(f.pinFile));
+  for (const file of tuplePin.files) file.artifact_sha256 = file.release_sha256 = hash(path.join(f.fallback, file.path));
+  fs.writeFileSync(f.pinFile, JSON.stringify(tuplePin));
   const a = assembled(f);
   const workspace = path.join(f.dir, 'stage3-workspace');
   const sdk = path.join(workspace, 'software/cangjie');
@@ -257,8 +284,15 @@ test(`actual stage3 entry verifies promoted SDK before stage2: ${formal ? 'forma
     fs.writeFileSync(file, text);
   };
   write('sdk-stage1/.stage1-host/binding.txt', 'host_ld=/usr/lib/x86_64-linux-gnu\n');
-  for (const rel of ['tools/bin/cjpm-stage1', 'third_party/llvm/bin/opt-stage1', 'third_party/llvm/bin/llc-stage1'])
-    write(`sdk-stage1/${rel}`, 'host tool fixture');
+  write('sdk-stage1/tools/bin/cjpm-stage1', 'host tool fixture');
+  for (const rel of ['bin/opt-stage1', 'bin/llc-stage1', 'bin/ld.lld', 'lib/libLLVM-15.so']) {
+    const dest = path.join(input, 'third_party/llvm', rel);
+    fs.mkdirSync(path.dirname(dest), {recursive: true});
+    fs.copyFileSync(rel.startsWith('lib/') ? dylib : backend, dest);
+  }
+  // Native stage1 runner installation occurs after its full assembly check.
+  fs.rmSync(path.join(input, 'bin/cjc'));
+  write('sdk-stage1/bin/cjc', '#!/bin/sh\necho native-stage1-runner\n');
   for (const name of ['cjselfhost_llvmshim.o', 'cjc_runtime_config.o'])
     write(`cjcj-src-stage1/runtime_shim/${name}`, 'handoff object fixture');
   write('cjcj-stage2', '#!/bin/sh\necho STAGE2_EXECUTION_BOUNDARY >&2\nexit 73\n');
@@ -273,7 +307,7 @@ test(`actual stage3 entry verifies promoted SDK before stage2: ${formal ? 'forma
   fs.cpSync(path.join(repo, 'ci'), path.join(env.GITHUB_WORKSPACE, 'ci'), {recursive: true});
   const command = ['npx', '--yes', 'zx@8', path.join(repo, 'ci/srcbuild/steps/build-stage3.mjs')];
   const valid = execute(command, env);
-  assert.match(valid.output, new RegExp(`BOOTSTRAP_SDK_RUNTIME_VERIFIED runtime=${selected}`), valid.output);
+  assert.match(valid.output, new RegExp(`BOOTSTRAP_RUNTIME_CONSUMER_VERIFIED runtime=${selected}`), valid.output);
   assert.match(valid.output, /STAGE2_EXECUTION_BOUNDARY/, valid.output);
   assert.notEqual(valid.status, 0);
   console.log(`STAGE3_PROMOTION_TARGET_ASSERT identity=${formal ? 'formal' : 'candidate'} first-promotion=1`);
@@ -281,18 +315,23 @@ test(`actual stage3 entry verifies promoted SDK before stage2: ${formal ? 'forma
     ['runtime', `runtime/lib/${tuple}/libcangjie-runtime.so`, /BOOTSTRAP_SDK_RUNTIME_MISMATCH:.*libcangjie-runtime.so/],
     ['bounds', `runtime/lib/${tuple}/libboundscheck.so`, /BOOTSTRAP_SDK_RUNTIME_MISMATCH:.*libboundscheck.so/],
     ['archive', `lib/${tuple}/libcangjie-runtime.a`, /BOOTSTRAP_SDK_RUNTIME_MISMATCH:.*libcangjie-runtime.a/],
-    ['lock', 'SDK.lock.json', /BOOTSTRAP_SDK_RUNTIME_LOCK_MISMATCH: commit/],
+    ['lock', 'SDK.lock.json', /BOOTSTRAP_SDK_RUNTIME_LOCK_MISMATCH: assembly lock/],
   ]) {
-    const file = path.join(input, rel), bytes = fs.readFileSync(file);
+    // The stage1 SDK remains valid: mismatch arrives only through the real
+    // std overlay after any producer-side verification.
+    const bytes = fs.readFileSync(path.join(input, rel));
+    const file = path.join(work, 'stdlib-stage2', rel);
+    fs.mkdirSync(path.dirname(file), {recursive: true});
+    fs.writeFileSync(file, bytes);
     if (name === 'lock') {
       const lock = JSON.parse(bytes); lock.components.runtime.commit = 'e'.repeat(40);
       fs.writeFileSync(file, JSON.stringify(lock));
     } else fs.appendFileSync(file, 'changed');
     const wrong = execute(command, env);
     assert.notEqual(wrong.status, 0); assert.match(wrong.output, expected, wrong.output);
-    assert.doesNotMatch(wrong.output, /STAGE2_EXECUTION_BOUNDARY|BOOTSTRAP_SDK_RUNTIME_VERIFIED/);
+    assert.doesNotMatch(wrong.output, /STAGE2_EXECUTION_BOUNDARY|BOOTSTRAP_RUNTIME_CONSUMER_VERIFIED/);
     console.log(`STAGE3_REPLACEMENT_TARGET_ASSERT identity=${formal ? 'formal' : 'candidate'} wrong=${name} rejected-before-stage2=1`);
-    fs.writeFileSync(file, bytes);
+    fs.rmSync(file);
   }
   // Restore the shared pair and alter only the source HEAD.
 
@@ -354,7 +393,7 @@ test('actual same-run restore feeds verified root receipt to the real SDK consum
   const result = sdkConsumer({env: {}}, {target: sdk, inputs: restored});
   console.log(`HANDOFF_SDK_RECEIPT_TARGET_ASSERT rc=${result.status} manifest=${restored.COLOUR_RT_MANIFEST_SHA256} ${result.output}`);
   assert.equal(result.status, 0, result.output);
-  assert.match(result.output, new RegExp(`BOOTSTRAP_SDK_RUNTIME_VERIFIED runtime=${a.inputs.RUNTIME_REF}`));
+  assert.match(result.output, new RegExp(`BOOTSTRAP_RUNTIME_CONSUMER_VERIFIED runtime=${a.inputs.RUNTIME_REF}`));
   assert.equal(restored.COLOUR_RT_MANIFEST_SHA256, a.inputs.COLOUR_RT_MANIFEST_SHA256);
   console.log('HANDOFF_SDK_RECEIPT_TARGET_ASSERT_EXECUTED parent-fields=absent');
 }));
