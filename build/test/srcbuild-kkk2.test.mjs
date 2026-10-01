@@ -4,7 +4,8 @@ import {spawnSync} from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import test from 'node:test';
+import test, {after} from 'node:test';
+import {sourceFetchArguments} from '../lib/git.mjs';
 import {readHostToolchainPin} from '../../ci/host-toolchain-pin.mjs';
 
 const repoRoot = path.resolve('.');
@@ -980,6 +981,48 @@ function writeAstInputFixture(archive) {
 
 // Execute the complete driver, including retained-state loading, prerequisite,
 // run_step and the final RESULT. Only external inputs live in the fixture.
+// Formal controls use the actual pinned Git object, not a fabricated HEAD.
+let headerRuntimeSource;
+after(() => { if (headerRuntimeSource?.owned) fs.rmSync(headerRuntimeSource.path, {recursive: true, force: true}); });
+function writeCppHeaderFixture(root, cpp, runtimeRef) {
+  const readPin = name => Object.fromEntries(fs.readFileSync(path.join(root, 'ci', name), 'utf8')
+    .trim().split('\n').map(line => line.split('=')));
+  const llvm = readPin('llvm_pin.env'), runtime = readPin('runtime_pin.env');
+  const git = args => {
+    const r = spawnSync('git', args, {encoding: 'utf8'}); assert.equal(r.status, 0, r.stderr); return r.stdout.trim();
+  };
+  if (!headerRuntimeSource) {
+    const configured = process.env.GC_FIX_RUNTIME_CHECKOUT;
+    const source = configured || fs.mkdtempSync(path.join(os.tmpdir(), 'formal-header-runtime-'));
+    if (!configured) {
+      git(['init', '-q', source]);
+      git(['-C', source, ...sourceFetchArguments(runtime.RUNTIME_SRC_URL, runtimeRef)]);
+      git(['-C', source, 'checkout', '-q', '--detach', 'FETCH_HEAD']);
+    }
+    assert.equal(git(['-C', source, 'rev-parse', 'HEAD']), runtimeRef);
+    headerRuntimeSource = {path: source, owned: !configured};
+  }
+  const paired = path.join(cpp, 'third_party/paired-runtime');
+  git(['clone', '-q', '--no-hardlinks', headerRuntimeSource.path, paired]);
+  const roots = ['third_party/llvm-project/llvm/include', 'build/build/third_party/llvm/include',
+    'build/build/include', 'build/build/schema'];
+  const headers = {};
+  for (const root of roots) {
+    const file = path.join(cpp, root, 'fixture.h'); fs.mkdirSync(path.dirname(file), {recursive: true});
+    fs.writeFileSync(file, 'fixture header'); headers[root] = [{path: 'fixture.h', sha256: sha256(file)}];
+  }
+  const schema = 'schema/ModuleFormat.fbs', flatc = 'build/shim-flatbuffers/flatc';
+  for (const rel of [schema, flatc]) { fs.mkdirSync(path.dirname(path.join(cpp, rel)), {recursive: true}); fs.writeFileSync(path.join(cpp, rel), 'fixture tool input'); }
+  fs.writeFileSync(path.join(cpp, 'build/build/shim-headers.json'), JSON.stringify({
+    runtime: {url: runtime.RUNTIME_SRC_URL, sha: runtimeRef},
+    llvm: {url: llvm.LLVM_URL, sha: llvm.LLVM_SHA},
+    compiler: {url: llvm.CANGJIE_COMPILER_URL, sha: llvm.CANGJIE_COMPILER_SHA},
+    flatbuffers: {url: llvm.FLATBUFFERS_URL, sha: llvm.FLATBUFFERS_SHA},
+    schema: {path: schema, sha256: sha256(path.join(cpp, schema))},
+    flatc: {path: flatc, sha256: sha256(path.join(cpp, flatc))}, headers,
+  }));
+}
+
 function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFailure = false, child = false, coreObserve = false, runtimeCase = 'valid', ast = 'explicit', largeContract = false, contractDefect} = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bootstrap argv '));
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));
@@ -1045,6 +1088,7 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
   fs.writeFileSync(inputs + '/ast.a', 'ast input\n');
   writeAstInputFixture(inputs + '/ast.a');
   const runtimePin = fs.readFileSync(path.join(root, 'ci/runtime_pin.env'), 'utf8').match(/^RUNTIME_REF=(.*)$/m)[1];
+  writeCppHeaderFixture(root, inputs, runtimePin);
   const runtimeDir = path.join(inputs, 'external runtime');
   fs.mkdirSync(runtimeDir);
   let stamp = `CJRT-COMMIT:${runtimePin}`;
