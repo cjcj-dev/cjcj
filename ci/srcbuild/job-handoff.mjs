@@ -42,6 +42,17 @@ const allowed = name => /^(CJCJ_BOOTSTRAP_[A-Z0-9_]+|CJCJ_SRCBUILD_(HOST_SDK|BOO
 const roots = phase === 'mingw' ? ['.srcbuild/buildtools/llvm-mingw-w64']
   : ['.srcbuild', 'packages', 'runtime_shim', 'cjpm.toml'];
 const optional = phase === 'mingw' ? [] : ['cjpm.lock', 'target'];
+async function verifyRuntimeHandoff(environment) {
+  const selected = await resolveRuntimeSource(environment);
+  const pin = environment.CJCJ_BOOTSTRAP_RUNTIME_PIN;
+  if (selected.overrideRef && !pin) throw new Error('handoff candidate runtime pin missing');
+  if (pin) {
+    const archived = path.join(root, '.srcbuild') + path.sep;
+    if (!path.resolve(pin).startsWith(archived) || !String(await fs.realpath(pin)).startsWith(archived)) {
+      throw new Error('handoff runtime pin outside archived inputs');
+    }
+  }
+}
 if (mode === 'pack') {
   await fs.mkdir(dir, {recursive: true});
   if (dir === root || roots.some(entry => dir.startsWith(path.join(root, entry) + path.sep))) {
@@ -49,7 +60,7 @@ if (mode === 'pack') {
   }
   const environment = phase === 'mingw' ? {}
     : Object.fromEntries(Object.entries(process.env).filter(([key]) => allowed(key)));
-  if (phase !== 'mingw') await resolveRuntimeSource(environment);
+  if (phase !== 'mingw') await verifyRuntimeHandoff(environment);
   for (const [key, value] of Object.entries(environment)) {
     if (/[\r\n]/.test(value)) throw new Error(`multiline handoff environment: ${key}`);
   }
@@ -81,8 +92,9 @@ if (mode === 'pack') {
   }
   // The artifact is selected by same-run target/phase name; the identity above
   // also rejects accidental cross-target or stale-run selection before unpack.
+  if (phase !== 'mingw') await resolveRuntimeSource(record.environment, null);
   tar(['-xf', archive, '-C', root]);
-  if (phase !== 'mingw') await resolveRuntimeSource(record.environment);
+  if (phase !== 'mingw') await verifyRuntimeHandoff(record.environment);
   await fs.appendFile(required('GITHUB_ENV'), Object.entries(record.environment)
     .map(([key, value]) => `${key}=${value}\n`).join(''));
   const sdk = record.environment.CANGJIE_HOME;
