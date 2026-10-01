@@ -101,6 +101,8 @@ export async function bootstrapBackendIdentity(env = process.env) {
   const llvmSha = env.CJCJ_BOOTSTRAP_COLOUR_LLVM_SHA;
   const library = env.CJCJ_BOOTSTRAP_COLOUR_LLVM_SO;
   const librarySha = env.CJCJ_BOOTSTRAP_COLOUR_LLVM_SHA256;
+  const libraryName = process.platform === 'darwin' ? 'libLLVM.dylib' : 'libLLVM-15.so';
+  if (!library || path.basename(library) !== libraryName) throw new Error('BOOTSTRAP_BACKEND_LIBRARY_NAME_MISMATCH');
   const manifest = JSON.parse(await fs.readFile(path.join(path.dirname(library), 'manifest.json'), 'utf8'));
   if (!/^[a-f0-9]{40}$/.test(llvmSha || '') || values.get('LLVM_SHA') !== llvmSha
     || !/^[a-f0-9]{64}$/.test(librarySha || '') || await sha256(library) !== librarySha

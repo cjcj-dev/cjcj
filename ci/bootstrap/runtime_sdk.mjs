@@ -21,6 +21,7 @@ export async function verifyBootstrapRuntimeSdk(sdk, tuple, env = process.env, s
     throw new Error('BOOTSTRAP_SDK_RUNTIME_LOCK_MISMATCH: assembly lock');
   }
   const lock = JSON.parse(fs.readFileSync(lockFile, 'utf8'));
+  if (lock.role !== 'target') throw new Error('BOOTSTRAP_SDK_RUNTIME_LOCK_MISMATCH: role');
   if (lock.components?.runtime?.commit?.toLowerCase() !== selection.runtimeRef.toLowerCase()) {
     throw new Error('BOOTSTRAP_SDK_RUNTIME_LOCK_MISMATCH: commit');
   }
