@@ -24,6 +24,9 @@ export async function verifyBootstrapRuntimeSdk(sdk, tuple, env = process.env, s
   if (lock.components?.runtime?.commit?.toLowerCase() !== selection.runtimeRef.toLowerCase()) {
     throw new Error('BOOTSTRAP_SDK_RUNTIME_LOCK_MISMATCH: commit');
   }
+  if (lock.components?.runtime?.so_sha256 !== manifest.files[runtimeFiles[0]]) {
+    throw new Error('BOOTSTRAP_SDK_RUNTIME_LOCK_MISMATCH: runtime SO');
+  }
   for (const rel of runtimeFiles) {
     const installed = rel.replace('linux_x86_64_cjnative', tuple);
     if (digest(path.join(sdk, installed)) !== manifest.files[rel]) {

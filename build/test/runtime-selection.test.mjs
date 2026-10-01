@@ -207,6 +207,26 @@ test('real SDK assembly rejects a manifest-valid runtime with the wrong commit s
   assembled(f, 'e'.repeat(40), 'rule=RUNTIME_PIN');
 }));
 
+for (const rel of [`runtime/lib/${tuple}/libcangjie-runtime.so`, `lib/${tuple}/libcangjie-runtime.a`]) {
+  test(`actual runtime consumer rejects self-consistent wrong chapter: ${rel}`, () => fixture(f => {
+    const a = assembled(f);
+    const file = path.join(a.target, rel);
+    const bytes = fs.readFileSync(file);
+    const wrong = Buffer.from(bytes.toString('latin1').replaceAll(`CJRT-COMMIT:${f.env.RUNTIME_REF}`, `CJRT-COMMIT:${'e'.repeat(40)}`), 'latin1');
+    assert.notDeepEqual(wrong, bytes);
+    fs.writeFileSync(file, wrong); fs.writeFileSync(path.join(f.runtime, rel), wrong);
+    refreshRoot(f); a.inputs.COLOUR_RT_MANIFEST_SHA256 = f.env.COLOUR_RT_MANIFEST_SHA256;
+    const lockFile = path.join(a.target, 'SDK.lock.json'), lock = JSON.parse(fs.readFileSync(lockFile));
+    lock.files[rel].sha256 = hash(file);
+    if (rel.endsWith('.so')) lock.components.runtime.so_sha256 = hash(file);
+    fs.writeFileSync(lockFile, JSON.stringify(lock));
+    const rejected = sdkConsumer(f, a);
+    assert.notEqual(rejected.status, 0);
+    assert.match(rejected.output, /BOOTSTRAP_SDK_RUNTIME_STAMP_MISMATCH/, rejected.output);
+    console.log(`RUNTIME_CONSUMER_CHAPTER_TARGET_ASSERT file=${rel} self-consistent-hashes=1`);
+  }));
+}
+
 test('formal-default preparation still publishes the formal pin', () => fixture(f => {
   useFormalRuntime(f);
   const result = f.run();
@@ -353,6 +373,35 @@ test(`actual stage3 entry verifies promoted SDK before stage2: ${formal ? 'forma
     fs.writeFileSync(file, bytes);
     console.log(`STAGE3_BACKEND_TARGET_ASSERT identity=${formal ? 'formal' : 'candidate'} wrong=${rel}`);
   }
+  // A matching hash must not substitute for a matching source chapter.
+  const tupleRoot = a.inputs.CJCJ_BOOTSTRAP_COLOUR_TUPLE;
+  const manifestFile = path.join(tupleRoot, 'fixed-llc/llvm-tools.manifest');
+  const pinBytes = fs.readFileSync(f.pinFile), manifestBytes = fs.readFileSync(manifestFile);
+  const backendFile = path.join(input, 'third_party/llvm/bin/opt-stage1'), backendBytes = fs.readFileSync(backendFile);
+  const wrongBackend = Buffer.from(backendBytes.toString('latin1').replaceAll(`CJLLVM-COMMIT:${llvmSha}`, `CJLLVM-COMMIT:${'e'.repeat(40)}`), 'latin1');
+  fs.writeFileSync(backendFile, wrongBackend);
+  fs.writeFileSync(manifestFile, manifestBytes.toString().replace(fields.OPT_SHA256, hash(backendFile)));
+  const mutatedPin = JSON.parse(pinBytes);
+  for (const file of mutatedPin.files) file.artifact_sha256 = file.release_sha256 = hash(path.join(tupleRoot, file.path));
+  fs.writeFileSync(f.pinFile, JSON.stringify(mutatedPin));
+  const backendChapter = execute(command, env);
+  assert.notEqual(backendChapter.status, 0); assert.match(backendChapter.output, /BOOTSTRAP_BACKEND_STAMP_MISMATCH/, backendChapter.output);
+  assert.doesNotMatch(backendChapter.output, /STAGE2_EXECUTION_BOUNDARY/);
+  fs.writeFileSync(backendFile, backendBytes); fs.writeFileSync(manifestFile, manifestBytes); fs.writeFileSync(f.pinFile, pinBytes);
+  console.log(`STAGE3_BACKEND_CHAPTER_TARGET_ASSERT identity=${formal ? 'formal' : 'candidate'}`);
+  const libraryManifest = path.join(path.dirname(dylib), 'manifest.json');
+  const libraryBytes = fs.readFileSync(dylib), libraryManifestBytes = fs.readFileSync(libraryManifest);
+  const wrongLibrary = Buffer.from(libraryBytes.toString('latin1').replaceAll(`CJLLVM-COMMIT:${llvmSha}`, `CJLLVM-COMMIT:${'e'.repeat(40)}`), 'latin1');
+  fs.writeFileSync(dylib, wrongLibrary);
+  fs.writeFileSync(path.join(input, 'third_party/llvm/lib/libLLVM-15.so'), wrongLibrary);
+  const changedLibraryManifest = JSON.parse(libraryManifestBytes); changedLibraryManifest.sha256 = hash(dylib);
+  fs.writeFileSync(libraryManifest, JSON.stringify(changedLibraryManifest));
+  const libraryChapter = execute(command, {...env, CJCJ_BOOTSTRAP_COLOUR_LLVM_SHA256: hash(dylib)});
+  assert.notEqual(libraryChapter.status, 0); assert.match(libraryChapter.output, /BOOTSTRAP_BACKEND_STAMP_MISMATCH/, libraryChapter.output);
+  assert.doesNotMatch(libraryChapter.output, /STAGE2_EXECUTION_BOUNDARY/);
+  fs.writeFileSync(dylib, libraryBytes); fs.writeFileSync(path.join(input, 'third_party/llvm/lib/libLLVM-15.so'), libraryBytes);
+  fs.writeFileSync(libraryManifest, libraryManifestBytes);
+  console.log(`STAGE3_LIBRARY_CHAPTER_TARGET_ASSERT identity=${formal ? 'formal' : 'candidate'}`);
   const final = env.CJCJ_STAGE3_DRY_RUN_FINAL_STD;
   for (const [rel, text] of [
     [`modules/${tuple}/std.cjo`, 'final module'], [`modules/${tuple}/libstd.bc`, 'final bitcode'],
