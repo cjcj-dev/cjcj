@@ -989,8 +989,8 @@ case "${1:-test}" in
   fault-llvm-so-location)
     make_dry_fixture
     make_sdk_fixture
-    sed 's|target="$canonical"|target="$TO/third_party/llvm/bin/$base"|' "$SDK_PRODUCT" > "$TMP/sdk-build-wrong-so-location.sh"
-    run_sdk_so "$TMP/sdk-build-wrong-so-location.sh" "$TMP/sdk-wrong-so"
+    sed 's|target="$canonical"|target="$TO/third_party/llvm/bin/$base"|' "$SDK_PRODUCT" > "$TMP/product/ci/bootstrap/sdk-build-wrong-so-location.sh"
+    run_sdk_so "$TMP/product/ci/bootstrap/sdk-build-wrong-so-location.sh" "$TMP/sdk-wrong-so"
     ;;
   fault-tuple-missing-opt)
     make_dry_fixture
