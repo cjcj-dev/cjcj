@@ -205,3 +205,48 @@ test('formal-default preparation still publishes the formal pin', () => fixture(
   assert.equal(result.status, 0, result.stderr);
   assert.match(text, new RegExp(`RUNTIME_REF=${pin.RUNTIME_REF}`));
 }));
+
+test('actual stage3 entry binds source and both SDK SOs before stage2 execution', () => fixture(f => {
+  fs.mkdirSync(path.join(f.runtimeSource, 'stdlib'));
+  fs.writeFileSync(path.join(f.runtimeSource, 'stdlib/README'), 'input source identity fixture');
+  for (const args of [['init', '-q', f.runtimeSource], ['-C', f.runtimeSource, 'add', '.'],
+    ['-C', f.runtimeSource, '-c', 'user.name=Zxilly', '-c', 'user.email=zxilly@outlook.com',
+      'commit', '-q', '-m', 'runtime source identity fixture']]) ok(['git', ...args]);
+  const selected = ok(['git', '-C', f.runtimeSource, 'rev-parse', 'HEAD']);
+  f.env.RUNTIME_REF = selected; f.env.CJCJ_RUNTIME_REF_OVERRIDE = selected;
+  for (const [file, key] of [[path.join(f.runtime, 'manifest.json'), 'runtime_sha'],
+    [path.join(f.sdk, 'build/build/shim-headers.json'), 'runtime']]) {
+    const data = JSON.parse(fs.readFileSync(file));
+    if (key === 'runtime') data.runtime.sha = selected; else data[key] = selected;
+    fs.writeFileSync(file, JSON.stringify(data));
+  }
+  refreshRoot(f);
+  const a = assembled(f);
+  const workspace = path.join(f.dir, 'stage3-workspace');
+  const sdk = path.join(workspace, 'software/cangjie');
+  fs.mkdirSync(path.dirname(sdk), {recursive: true});
+  fs.cpSync(a.target, sdk, {recursive: true});
+  fs.cpSync(f.runtimeSource, path.join(workspace, 'cangjie_runtime'), {recursive: true});
+  const env = {...f.env, ...a.inputs, CANGJIE_WORKSPACE: workspace, GITHUB_WORKSPACE: repo,
+    CJCJ_BOOTSTRAP_WORK: path.join(workspace, 'bootstrap-work'), CJCJ_STAGE3_STDLIB_BUILD_TYPE: 'release',
+    CJCJ_STAGE3_DRY_RUN: '1', CJCJ_STAGE3_DRY_RUN_FINAL_STD: path.join(workspace, 'unused-std')};
+  const command = ['npx', '--yes', 'zx@8', path.join(repo, 'ci/srcbuild/steps/build-stage3.mjs')];
+  const valid = execute(command, env);
+  // Stop at the existing absent stage2 handoff. This is guard admission, not
+  // compiler execution or authorization of the synthetic SDK's std ABI.
+  assert.match(valid.output, new RegExp(`BOOTSTRAP_SDK_RUNTIME_VERIFIED runtime=${selected}`), valid.output);
+  assert.notEqual(valid.status, 0);
+  fs.appendFileSync(path.join(sdk, 'runtime/lib', tuple, 'libboundscheck.so'), 'changed');
+  const bounds = execute(command, env);
+  assert.notEqual(bounds.status, 0);
+  assert.match(bounds.output, /BOOTSTRAP_SDK_RUNTIME_MISMATCH: runtime\/lib\/.*libboundscheck.so/);
+  assert.doesNotMatch(bounds.output, /BOOTSTRAP_SDK_RUNTIME_VERIFIED/);
+  console.log(`STAGE3_ENTRY_TARGET_ASSERT source=${selected} accepted-guard=${valid.status} wrong-bounds=${bounds.status} no-stage2-executed=1`);
+  // Restore the shared pair and alter only the source HEAD.
+  fs.copyFileSync(path.join(a.libs, 'bounds.so'), path.join(sdk, 'runtime/lib', tuple, 'libboundscheck.so'));
+  ok(['git', '-C', path.join(workspace, 'cangjie_runtime'), '-c', 'user.name=Zxilly',
+    '-c', 'user.email=zxilly@outlook.com', 'commit', '--allow-empty', '-q', '-m', 'wrong source']);
+  const source = execute(command, env);
+  assert.notEqual(source.status, 0); assert.match(source.output, /BOOTSTRAP_RUNTIME_SOURCE_MISMATCH/);
+  console.log('STAGE3_SOURCE_TARGET_ASSERT_EXECUTED');
+}));
