@@ -124,7 +124,7 @@ function sdkConsumer(f, a) {
   return execute([process.execPath, '--input-type=module', '-e',
     `import {verifyBootstrapRuntimeSdk} from ${JSON.stringify(path.join(repo, 'ci/bootstrap/runtime_sdk.mjs'))};
      await verifyBootstrapRuntimeSdk(process.argv[1], process.argv[2]);`, a.target, tuple],
-  {...f.env, ...a.inputs});
+  {...Object.fromEntries(Object.entries(f.env).filter(([key]) => !key.startsWith('COLOUR_RT_'))), ...a.inputs});
 }
 for (const candidate of [false, true]) {
   test(`real loader, prepare, SDK assembler and independent verifier: ${candidate ? 'authorized candidate' : 'formal default'}`, () => fixture(f => {
@@ -242,7 +242,7 @@ test('actual stage3 entry binds source and both SDK SOs before stage2 execution'
   fs.mkdirSync(path.dirname(sdk), {recursive: true});
   fs.cpSync(a.target, sdk, {recursive: true, verbatimSymlinks: true});
   fs.cpSync(f.runtimeSource, path.join(workspace, 'cangjie_runtime'), {recursive: true});
-  const env = {...f.env, ...a.inputs, CANGJIE_WORKSPACE: workspace, GITHUB_WORKSPACE: repo,
+  const env = {...Object.fromEntries(Object.entries(f.env).filter(([key]) => !key.startsWith('COLOUR_RT_'))), ...a.inputs, CANGJIE_WORKSPACE: workspace, GITHUB_WORKSPACE: repo,
     CJCJ_BOOTSTRAP_WORK: path.join(workspace, 'bootstrap-work'), CJCJ_STAGE3_STDLIB_BUILD_TYPE: 'release',
     CJCJ_STAGE3_DRY_RUN: '1', CJCJ_STAGE3_DRY_RUN_FINAL_STD: path.join(workspace, 'unused-std')};
   const command = ['npx', '--yes', 'zx@8', path.join(repo, 'ci/srcbuild/steps/build-stage3.mjs')];
@@ -285,3 +285,37 @@ test(`actual GHA launcher passes the validated selected file into bootstrap: ${c
   console.log('GHA_RUNTIME_PIN_TARGET_ASSERT_EXECUTED no-compilation=1');
 }));
 }
+
+
+test('actual same-run restore feeds verified root receipt to the real SDK consumer without parent fields', () => fixture(f => {
+  const root = path.join(f.dir, 'handoff-workspace');
+  for (const rel of ['.srcbuild/inputs', 'packages', 'runtime_shim']) fs.mkdirSync(path.join(root, rel), {recursive: true});
+  fs.writeFileSync(path.join(root, 'cjpm.toml'), 'identity transport fixture');
+  const archivedRoot = path.join(root, '.srcbuild/inputs/runtime');
+  fs.cpSync(f.runtime, archivedRoot, {recursive: true});
+  f.runtime = archivedRoot; f.env.CJCJ_BOOTSTRAP_COLOUR_RT = archivedRoot;
+  f.env.CJCJ_BOOTSTRAP_INPUTS_WORK = path.join(root, '.srcbuild/inputs/bootstrap');
+  const a = assembled(f);
+  const sdk = path.join(root, '.srcbuild/sdk-target');
+  fs.cpSync(a.target, sdk, {recursive: true, verbatimSymlinks: true});
+  const archive = path.join(f.dir, 'handoff-artifact');
+  const file = path.join(f.dir, 'restored-env');
+  const env = {...f.env, ...a.inputs, GITHUB_WORKSPACE: root, GITHUB_SHA: '1'.repeat(40),
+    GITHUB_RUN_ID: '123', CJCJ_SRCBUILD_TARGET: 'linux-x64', GITHUB_ENV: file,
+    GITHUB_PATH: path.join(f.dir, 'restored-path')};
+  const entry = path.join(repo, 'ci/srcbuild/job-handoff.mjs');
+  ok([process.execPath, entry, 'pack', 'stage1-compiler', archive], env);
+  fs.rmSync(root, {recursive: true}); fs.mkdirSync(root);
+  const clean = Object.fromEntries(Object.entries(env).filter(([key]) =>
+    !key.startsWith('COLOUR_RT_') && !key.startsWith('CJCJ_BOOTSTRAP_') && !key.startsWith('RUNTIME_')
+      && !['CJCJ_RUNTIME_REF_OVERRIDE', 'CJCJ_ALLOW_RUNTIME_OVERRIDE'].includes(key)));
+  ok([process.execPath, entry, 'restore', 'stage1-compiler', archive], clean);
+  const restored = Object.fromEntries(fs.readFileSync(file, 'utf8').trim().split('\n')
+    .map(line => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)]));
+  const result = sdkConsumer({env: {}}, {target: sdk, inputs: restored});
+  console.log(`HANDOFF_SDK_RECEIPT_TARGET_ASSERT rc=${result.status} manifest=${restored.COLOUR_RT_MANIFEST_SHA256} ${result.output}`);
+  assert.equal(result.status, 0, result.output);
+  assert.match(result.output, new RegExp(`BOOTSTRAP_SDK_RUNTIME_VERIFIED runtime=${a.inputs.RUNTIME_REF}`));
+  assert.equal(restored.COLOUR_RT_MANIFEST_SHA256, a.inputs.COLOUR_RT_MANIFEST_SHA256);
+  console.log('HANDOFF_SDK_RECEIPT_TARGET_ASSERT_EXECUTED parent-fields=absent');
+}));

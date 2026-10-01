@@ -161,6 +161,10 @@ if (!process.env.CJCJ_BOOTSTRAP_CPP_SRC && !process.env.CANGJIE_CPP_SRC) {
 
 const exported = {
   ...colourInputs,
+  COLOUR_RT_RUN_ID: process.env.COLOUR_RT_RUN_ID,
+  COLOUR_RT_RUN_ATTEMPT: process.env.COLOUR_RT_RUN_ATTEMPT,
+  COLOUR_RT_ARTIFACT_ID: process.env.COLOUR_RT_ARTIFACT_ID,
+  COLOUR_RT_MANIFEST_SHA256: process.env.COLOUR_RT_MANIFEST_SHA256,
   CJCJ_BOOTSTRAP_RUNTIME_PIN: runtimePinFile,
   RUNTIME_REF: runtimeSelection.runtimeRef,
   RUNTIME_SRC_URL: runtimeSelection.sourceUrl,
