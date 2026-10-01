@@ -24,7 +24,7 @@ function ok(command, env) {
 }
 function exported(result) {
   assert.equal(result.status, 0, result.stderr);
-  return Object.fromEntries(result.stdout.split('\n').filter(line => /^[A-Z_]+=/.test(line))
+  return Object.fromEntries(result.stdout.split('\n').filter(line => /^[A-Z][A-Z0-9_]*=/.test(line))
     .map(line => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)]));
 }
 function refreshRoot(f) {
@@ -272,7 +272,7 @@ test('actual GHA launcher passes the validated selected file into bootstrap', ()
   const observed = /INPUT runtime-pin path=(.+) sha256=([a-f0-9]{64})/.exec(result.output);
   console.log(`GHA_RUNTIME_PIN_TARGET_ASSERT rc=${result.status} pin=${observed?.[1]} digest=${observed?.[2]}`);
   assert.deepEqual(observed ? [observed[1], observed[2]] : [],
-    [inputs.CJCJ_BOOTSTRAP_RUNTIME_PIN, hash(inputs.CJCJ_BOOTSTRAP_RUNTIME_PIN)]);
+    [inputs.CJCJ_BOOTSTRAP_RUNTIME_PIN, hash(inputs.CJCJ_BOOTSTRAP_RUNTIME_PIN)], result.output);
   // Synthetic fixture stops at the existing compiler-source qualification gate.
   assert.notEqual(result.status, 0);
   console.log('GHA_RUNTIME_PIN_TARGET_ASSERT_EXECUTED no-compilation=1');
