@@ -265,15 +265,22 @@ test('actual stage3 entry binds source and both SDK SOs before stage2 execution'
   console.log('STAGE3_SOURCE_TARGET_ASSERT_EXECUTED');
 }));
 
-test('actual GHA launcher passes the validated selected file into bootstrap', () => fixture(f => {
+for (const candidate of [false, true]) {
+test(`actual GHA launcher passes the validated selected file into bootstrap: ${candidate ? 'candidate' : 'formal default'}`, () => fixture(f => {
+  if (!candidate) useFormalRuntime(f);
   const inputs = exported(f.run());
   const env = {...f.env, ...inputs, GITHUB_WORKSPACE: repo, CANGJIE_WORKSPACE: path.join(f.dir, 'workspace')};
   const result = execute(['bash', path.join(repo, 'ci/bootstrap/gha_run.sh'), 'stage0'], env);
   const observed = /INPUT runtime-pin path=(.+) sha256=([a-f0-9]{64})/.exec(result.output);
   console.log(`GHA_RUNTIME_PIN_TARGET_ASSERT rc=${result.status} pin=${observed?.[1]} digest=${observed?.[2]}`);
-  assert.deepEqual(observed ? [observed[1], observed[2]] : [],
+  const actual = observed ? Object.fromEntries(fs.readFileSync(observed[1], 'utf8').trim().split('\n')
+    .map(line => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)])) : {};
+  assert.deepEqual([actual.RUNTIME_REF, actual.RUNTIME_SRC_URL],
+    [f.env.RUNTIME_REF, pin.RUNTIME_SRC_URL], result.output);
+  if (candidate) assert.deepEqual([observed[1], observed[2]],
     [inputs.CJCJ_BOOTSTRAP_RUNTIME_PIN, hash(inputs.CJCJ_BOOTSTRAP_RUNTIME_PIN)], result.output);
   // Synthetic fixture stops at the existing compiler-source qualification gate.
   assert.notEqual(result.status, 0);
   console.log('GHA_RUNTIME_PIN_TARGET_ASSERT_EXECUTED no-compilation=1');
 }));
+}
