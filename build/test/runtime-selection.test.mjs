@@ -442,6 +442,26 @@ test(`actual stage3 entry verifies promoted SDK before stage2: ${formal ? 'forma
   assert.equal(finalControl.status, 0, finalControl.output);
   assert.match(finalControl.output, /STAGE3_DRY_RUN_REACHED_BUILD=1/);
   console.log(`STAGE3_FINAL_OVERLAY_CONTROL_ASSERT identity=${formal ? 'formal' : 'candidate'}`);
+  // The non-dry-run AST install is a controlled conversion. Execute its real
+  // entry on this real handoff output and prove that every protected byte is
+  // unchanged, without invoking the ABI-held std/stage33 compilation.
+  const astArchive = path.join(f.sdk, 'libcangjie-ast-support.a');
+  fs.copyFileSync(f.env.CJCJ_BOOTSTRAP_AST_SUPPORT, astArchive);
+  fs.appendFileSync(path.join(f.sdk, 'SHA256SUMS'), `${hash(astArchive)}  libcangjie-ast-support.a\n`);
+  const protectedFiles = [
+    `runtime/lib/${tuple}/libcangjie-runtime.so`, `runtime/lib/${tuple}/libboundscheck.so`,
+    `lib/${tuple}/libcangjie-runtime.a`, 'SDK.lock.json',
+    ...['opt-stage1', 'llc-stage1', 'ld.lld', 'opt', 'llc'].map(name => `third_party/llvm/bin/${name}`),
+    'third_party/llvm/lib/libLLVM-15.so', 'bin/cjcj-stage2', 'bin/cjc', 'bootstrap-compiler.json',
+  ];
+  const beforeAst = Object.fromEntries(protectedFiles.map(rel => [rel, hash(path.join(sdk, rel))]));
+  const astInstall = execute(['python3', path.join(repo, 'ci/install_std_sdk_inputs.py'), f.sdk, sdk, tuple]);
+  assert.equal(astInstall.status, 0, astInstall.output);
+  assert.equal(hash(path.join(sdk, 'lib', tuple, 'libcangjie-ast-support.a')), hash(astArchive));
+  const afterAst = Object.fromEntries(protectedFiles.map(rel => [rel, hash(path.join(sdk, rel))]));
+  assert.deepEqual(afterAst, beforeAst);
+  console.log(`STAGE3_AST_CONVERSION_RECEIPT ${JSON.stringify({identity: formal ? 'formal' : 'candidate',
+    rc: astInstall.status, protected: afterAst, ast: hash(astArchive)})}`);
   for (const [name, rel, expected] of [
     ['runtime', `runtime/lib/${tuple}/libcangjie-runtime.so`, /BOOTSTRAP_SDK_RUNTIME_MISMATCH/],
     ['bounds', `runtime/lib/${tuple}/libboundscheck.so`, /BOOTSTRAP_SDK_RUNTIME_MISMATCH/],
