@@ -1,6 +1,9 @@
 name: Darwin alt signal stack evidence
 on:
   workflow_dispatch:
+  push:
+    branches: [sym/473-implement-r5848758650]
+    paths: [.github/workflows/darwin-signal-stack-evidence.yml, ci/bootstrap/signal_stack_arms.sh]
 permissions:
   contents: read
   actions: read
