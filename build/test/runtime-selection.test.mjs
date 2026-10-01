@@ -86,7 +86,7 @@ function assembled(f, selected = f.env.RUNTIME_REF, expectedFailure) {
     '--colour-runtime', path.join(libs, 'runtime.so'), '--host-runtime', path.join(libs, 'host.so')];
   const result = execute(command, f.env);
   // Inspect the actual assembler result/lock, not a synthesized resolver return.
-  console.log(`SDK_SELECTION_ASSERT selected=${selected} rc=${result.status}`);
+  console.log(`SDK_SELECTION_ASSERT selected=${selected} rc=${result.status} product=${hash(path.join(repo, 'ci/bootstrap/sdk_build.sh'))} runtime=${hash(path.join(libs, 'runtime.so'))} boundscheck=${hash(path.join(libs, 'bounds.so'))} compiler=${hash(compiler)}`);
   if (expectedFailure) {
     assert.notEqual(result.status, 0);
     assert.ok(result.output.includes(expectedFailure), result.output);
@@ -191,4 +191,17 @@ test('real prepare publishes the selected pin after full-root validation', () =>
 
 test('real SDK assembly rejects a manifest-valid runtime with the wrong commit stamp', () => fixture(f => {
   assembled(f, 'e'.repeat(40), 'rule=RUNTIME_PIN');
+}));
+
+test('formal-default preparation still publishes the formal pin', () => fixture(f => {
+  delete f.env.CJCJ_RUNTIME_REF_OVERRIDE; delete f.env.CJCJ_ALLOW_RUNTIME_OVERRIDE;
+  f.env.RUNTIME_REF = pin.RUNTIME_REF;
+  const file = path.join(f.runtime, 'manifest.json'); const manifest = JSON.parse(fs.readFileSync(file));
+  manifest.runtime_sha = pin.RUNTIME_REF; fs.writeFileSync(file, JSON.stringify(manifest)); refreshRoot(f);
+  const result = f.run();
+  const selected = path.join(f.env.CJCJ_BOOTSTRAP_INPUTS_WORK, 'runtime-selection.env');
+  const text = fs.existsSync(selected) ? fs.readFileSync(selected, 'utf8') : '';
+  console.log(`FORMAL_PUBLICATION_CONTROL_ASSERT rc=${result.status} pin=${text.trim()}`);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(text, new RegExp(`RUNTIME_REF=${pin.RUNTIME_REF}`));
 }));
