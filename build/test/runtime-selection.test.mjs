@@ -454,11 +454,21 @@ test(`actual stage3 entry verifies promoted SDK before stage2: ${formal ? 'forma
     console.log(`STAGE3_FINAL_OVERLAY_TARGET_ASSERT identity=${formal ? 'formal' : 'candidate'} wrong=${name}`);
   }
   const producerFile = path.join(work, 'cjcj-stage2'), producerBytes = fs.readFileSync(producerFile);
+  // Make the post-overlay producer, installed entity and self-record agree.
+  // Only the independent pre-handoff expectation can reject this substitution.
+  const changedProducer = Buffer.concat([producerBytes, Buffer.from('changed')]);
+  const compilerOverlay = path.join(final, 'bin/cjcj-stage2');
+  fs.mkdirSync(path.dirname(compilerOverlay), {recursive: true}); fs.writeFileSync(compilerOverlay, changedProducer);
+  const recordOverlay = path.join(final, 'bootstrap-compiler.json');
+  fs.writeFileSync(recordOverlay, JSON.stringify({producer: producerFile,
+    compilerSha256: crypto.createHash('sha256').update(changedProducer).digest('hex'),
+    entrySha256: hash(path.join(sdk, 'bin/cjc'))}));
   const producerWrong = execute(command, {...continued, FIXTURE_MUTATION: producerFile});
   assert.notEqual(producerWrong.status, 0);
   assert.match(producerWrong.output, /bootstrap compiler independent producer mismatch/, producerWrong.output);
   assert.doesNotMatch(producerWrong.output, /STAGE3_DRY_RUN_REACHED_BUILD=1/);
   fs.writeFileSync(producerFile, producerBytes);
+  fs.rmSync(compilerOverlay); fs.rmSync(recordOverlay);
   console.log(`STAGE3_PRODUCER_TARGET_ASSERT identity=${formal ? 'formal' : 'candidate'}`);
   // Restore the shared pair and alter only the source HEAD.
 
