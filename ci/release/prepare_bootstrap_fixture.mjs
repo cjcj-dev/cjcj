@@ -91,13 +91,52 @@ export function fixture(check, target = 'linux-x64') {
       fs.mkdirSync(path.dirname(path.join(runtimeSource, rel)), {recursive: true});
       fs.writeFileSync(path.join(runtimeSource, rel), `new std fixture ${rel}`);
     }
-    env.RUNTIME_REF = 'd'.repeat(40);
+    for (const args of [['init', '-q', runtimeSource], ['-C', runtimeSource, 'add', '.'],
+      ['-C', runtimeSource, '-c', 'user.name=Zxilly', '-c', 'user.email=zxilly@outlook.com',
+        'commit', '-q', '-m', 'runtime source fixture']]) {
+      const result = spawnSync('git', args, {encoding: 'utf8', env: {...process.env,
+        GIT_AUTHOR_DATE: '2000-01-01T00:00:00Z', GIT_COMMITTER_DATE: '2000-01-01T00:00:00Z'}});
+      if (result.status !== 0) throw new Error(result.stderr);
+    }
+    env.RUNTIME_REF = spawnSync('git', ['-C', runtimeSource, 'rev-parse', 'HEAD'], {encoding: 'utf8'}).stdout.trim();
+    env.CJCJ_RUNTIME_REF_OVERRIDE = env.RUNTIME_REF;
+    env.CJCJ_ALLOW_RUNTIME_OVERRIDE = 'true';
     fs.writeFileSync(path.join(runtimeSource, 'SOURCE_SHA'), env.RUNTIME_REF);
     prepareRuntime(runtimeSource, runtime, {RUNTIME_REF: env.RUNTIME_REF,
       GITHUB_RUN_ID: '123', GITHUB_RUN_ATTEMPT: '1'});
     Object.assign(env, {CJCJ_BOOTSTRAP_COLOUR_RT: runtime, COLOUR_RT_RUN_ID: '123',
       COLOUR_RT_RUN_ATTEMPT: '1', COLOUR_RT_ARTIFACT_ID: '456',
       COLOUR_RT_MANIFEST_SHA256: runtimeDigest(path.join(runtime, 'manifest.json'))});
+    // External candidate headers carry their actual byte/source receipt.
+    const pins = Object.fromEntries(fs.readFileSync(new URL('../llvm_pin.env', import.meta.url), 'utf8')
+      .trim().split('\n').map(line => line.split('=')));
+    const headerRoots = ['third_party/llvm-project/llvm/include', 'build/build/third_party/llvm/include',
+      'build/build/include', 'build/build/schema'];
+    const headerManifest = {};
+    for (const root of headerRoots) {
+      const file = path.join(sdk, root, 'fixture.h');
+      fs.mkdirSync(path.dirname(file), {recursive: true});
+      fs.writeFileSync(file, 'header fixture');
+      headerManifest[root] = [{path: 'fixture.h', sha256: runtimeDigest(file)}];
+    }
+    for (const file of ['schema/ModuleFormat.fbs', 'build/shim-flatbuffers/flatc']) {
+      fs.mkdirSync(path.dirname(path.join(sdk, file)), {recursive: true});
+      fs.writeFileSync(path.join(sdk, file), 'schema tool fixture');
+    }
+    const formal = Object.fromEntries(fs.readFileSync(new URL('../runtime_pin.env', import.meta.url), 'utf8')
+      .trim().split('\n').map(line => line.split('=')));
+    fs.writeFileSync(path.join(sdk, 'build/build/shim-headers.json'), JSON.stringify({
+      runtime: {url: formal.RUNTIME_SRC_URL, sha: env.RUNTIME_REF},
+      compiler: {url: pins.CANGJIE_COMPILER_URL, sha: pins.CANGJIE_COMPILER_SHA},
+      llvm: {url: pins.LLVM_URL, sha: pins.LLVM_SHA},
+      flatbuffers: {url: pins.FLATBUFFERS_URL, sha: pins.FLATBUFFERS_SHA},
+      schema: {path: 'schema/ModuleFormat.fbs', sha256: runtimeDigest(path.join(sdk, 'schema/ModuleFormat.fbs'))},
+      flatc: {path: 'build/shim-flatbuffers/flatc', sha256: runtimeDigest(path.join(sdk, 'build/shim-flatbuffers/flatc'))},
+      headers: headerManifest,
+    }));
+    const paired = spawnSync('git', ['clone', '-q', '--no-hardlinks', runtimeSource,
+      path.join(sdk, 'third_party/paired-runtime')], {encoding: 'utf8'});
+    if (paired.status !== 0) throw new Error(paired.stderr);
     const pinFile = path.join(dir, 'pin.json');
     fs.writeFileSync(pinFile, JSON.stringify({version: 1, repository: 'cjcj-dev/cjcj', run: 123,
       attempt: 1, artifact: 456, commit: 'b'.repeat(40), files: tupleFiles.map(file => ({path: file, mode: 0o644,

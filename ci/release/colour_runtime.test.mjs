@@ -40,6 +40,8 @@ test('missing colour runtime cannot fall back to the available host SDK', () => 
 for (const field of ['COLOUR_RT_RUN_ID', 'COLOUR_RT_RUN_ATTEMPT', 'RUNTIME_REF']) {
   test(`runtime manifest binds ${field}`, () => fixture(({env, run}) => {
     env[field] = field === 'RUNTIME_REF' ? 'e'.repeat(40) : '999';
+    // Keep selection authorized so this arm reaches the manifest guard.
+    if (field === 'RUNTIME_REF') env.CJCJ_RUNTIME_REF_OVERRIDE = env[field];
     const result = run();
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /COLOUR_RT_MANIFEST_MISMATCH/);
