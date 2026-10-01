@@ -168,6 +168,7 @@ for (const [label, edit, marker] of [
     const file = path.join(f.sdk, 'build/build/shim-headers.json'); const m = JSON.parse(fs.readFileSync(file));
     m.runtime.sha = pin.RUNTIME_REF; fs.writeFileSync(file, JSON.stringify(m));
   }, 'SHIM_HEADERS_SOURCE_MISMATCH: runtime'],
+  ['header HEAD', f => ok(['git', '-C', path.join(f.sdk, 'third_party/paired-runtime'), '-c', 'user.name=Zxilly', '-c', 'user.email=zxilly@outlook.com', 'commit', '--allow-empty', '-q', '-m', 'wrong headers source']), 'SHIM_HEADERS_SOURCE_HEAD_MISMATCH: runtime'],
   ['header bytes', f => fs.appendFileSync(path.join(f.sdk, 'build/build/include/fixture.h'), 'changed'), 'SHIM_HEADERS_DIGEST_MISMATCH'],
 ]) {
   test(`real preparation rejects ${label} at its target guard`, () => fixture(f => {
@@ -214,6 +215,9 @@ test('actual stage3 entry binds source and both SDK SOs before stage2 execution'
       'commit', '-q', '-m', 'runtime source identity fixture']]) ok(['git', ...args]);
   const selected = ok(['git', '-C', f.runtimeSource, 'rev-parse', 'HEAD']);
   f.env.RUNTIME_REF = selected; f.env.CJCJ_RUNTIME_REF_OVERRIDE = selected;
+  const paired = path.join(f.sdk, 'third_party/paired-runtime');
+  ok(['git', '-C', paired, 'fetch', '-q', f.runtimeSource, selected]);
+  ok(['git', '-C', paired, 'checkout', '-q', '--detach', 'FETCH_HEAD']);
   for (const [file, key] of [[path.join(f.runtime, 'manifest.json'), 'runtime_sha'],
     [path.join(f.sdk, 'build/build/shim-headers.json'), 'runtime']]) {
     const data = JSON.parse(fs.readFileSync(file));
@@ -225,7 +229,7 @@ test('actual stage3 entry binds source and both SDK SOs before stage2 execution'
   const workspace = path.join(f.dir, 'stage3-workspace');
   const sdk = path.join(workspace, 'software/cangjie');
   fs.mkdirSync(path.dirname(sdk), {recursive: true});
-  fs.cpSync(a.target, sdk, {recursive: true});
+  fs.cpSync(a.target, sdk, {recursive: true, verbatimSymlinks: true});
   fs.cpSync(f.runtimeSource, path.join(workspace, 'cangjie_runtime'), {recursive: true});
   const env = {...f.env, ...a.inputs, CANGJIE_WORKSPACE: workspace, GITHUB_WORKSPACE: repo,
     CJCJ_BOOTSTRAP_WORK: path.join(workspace, 'bootstrap-work'), CJCJ_STAGE3_STDLIB_BUILD_TYPE: 'release',

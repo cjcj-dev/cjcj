@@ -42,6 +42,11 @@ export async function verifyCppHeaders(cppSrc, runtimePinFile) {
       throw new Error(`SHIM_HEADERS_SOURCE_MISMATCH: ${name}`);
     }
   }
+  const runtimeHead = await run(['git', '-C', path.join(cpp, 'third_party/paired-runtime'),
+    'rev-parse', 'HEAD'], {capture: true});
+  if (runtimeHead.stdout.trim() !== selected.runtimeRef) {
+    throw new Error('SHIM_HEADERS_SOURCE_HEAD_MISMATCH: runtime');
+  }
   for (const root of ['third_party/llvm-project/llvm/include',
     'build/build/third_party/llvm/include', 'build/build/include', 'build/build/schema']) {
     const actual = headers(path.join(cpp, root));

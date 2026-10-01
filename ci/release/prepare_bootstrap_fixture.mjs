@@ -91,7 +91,14 @@ export function fixture(check, target = 'linux-x64') {
       fs.mkdirSync(path.dirname(path.join(runtimeSource, rel)), {recursive: true});
       fs.writeFileSync(path.join(runtimeSource, rel), `new std fixture ${rel}`);
     }
-    env.RUNTIME_REF = 'd'.repeat(40);
+    for (const args of [['init', '-q', runtimeSource], ['-C', runtimeSource, 'add', '.'],
+      ['-C', runtimeSource, '-c', 'user.name=Zxilly', '-c', 'user.email=zxilly@outlook.com',
+        'commit', '-q', '-m', 'runtime source fixture']]) {
+      const result = spawnSync('git', args, {encoding: 'utf8', env: {...process.env,
+        GIT_AUTHOR_DATE: '2000-01-01T00:00:00Z', GIT_COMMITTER_DATE: '2000-01-01T00:00:00Z'}});
+      if (result.status !== 0) throw new Error(result.stderr);
+    }
+    env.RUNTIME_REF = spawnSync('git', ['-C', runtimeSource, 'rev-parse', 'HEAD'], {encoding: 'utf8'}).stdout.trim();
     env.CJCJ_RUNTIME_REF_OVERRIDE = env.RUNTIME_REF;
     env.CJCJ_ALLOW_RUNTIME_OVERRIDE = 'true';
     fs.writeFileSync(path.join(runtimeSource, 'SOURCE_SHA'), env.RUNTIME_REF);
@@ -127,6 +134,9 @@ export function fixture(check, target = 'linux-x64') {
       flatc: {path: 'build/shim-flatbuffers/flatc', sha256: runtimeDigest(path.join(sdk, 'build/shim-flatbuffers/flatc'))},
       headers: headerManifest,
     }));
+    const paired = spawnSync('git', ['clone', '-q', '--no-hardlinks', runtimeSource,
+      path.join(sdk, 'third_party/paired-runtime')], {encoding: 'utf8'});
+    if (paired.status !== 0) throw new Error(paired.stderr);
     const pinFile = path.join(dir, 'pin.json');
     fs.writeFileSync(pinFile, JSON.stringify({version: 1, repository: 'cjcj-dev/cjcj', run: 123,
       attempt: 1, artifact: 456, commit: 'b'.repeat(40), files: tupleFiles.map(file => ({path: file, mode: 0o644,
