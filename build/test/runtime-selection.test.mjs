@@ -85,16 +85,7 @@ function assembled(f, selected = f.env.RUNTIME_REF, expectedFailure) {
   fs.mkdirSync(path.join(base, 'bin'), {recursive: true});
   fs.copyFileSync(compiler, path.join(base, 'bin/cjc'));
   fs.writeFileSync(path.join(base, 'envsetup.sh'), '# isolated SDK fixture environment\n');
-  test('actual runtime consumer rejects host role in assembly lock', () => fixture(f => {
-  const a = assembled(f), file = path.join(a.target, 'SDK.lock.json');
-  const lock = JSON.parse(fs.readFileSync(file)); lock.role = 'host';
-  fs.writeFileSync(file, JSON.stringify(lock));
-  const rejected = sdkConsumer(f, a); assert.notEqual(rejected.status, 0);
-  assert.match(rejected.output, /BOOTSTRAP_SDK_RUNTIME_LOCK_MISMATCH: role/, rejected.output);
-  console.log('RUNTIME_CONSUMER_ROLE_TARGET_ASSERT_EXECUTED');
-}));
-
-for (const rel of [`runtime/lib/${tuple}/libcangjie-runtime.so`, `runtime/lib/${tuple}/libboundscheck.so`]) {
+  for (const rel of [`runtime/lib/${tuple}/libcangjie-runtime.so`, `runtime/lib/${tuple}/libboundscheck.so`]) {
     fs.mkdirSync(path.dirname(path.join(base, rel)), {recursive: true});
     fs.copyFileSync(path.join(libs, 'host.so'), path.join(base, rel));
   }
@@ -214,6 +205,15 @@ test('real prepare publishes the selected pin after full-root validation', () =>
 
 test('real SDK assembly rejects a manifest-valid runtime with the wrong commit stamp', () => fixture(f => {
   assembled(f, 'e'.repeat(40), 'rule=RUNTIME_PIN');
+}));
+
+test('actual runtime consumer rejects host role in assembly lock', () => fixture(f => {
+  const a = assembled(f), file = path.join(a.target, 'SDK.lock.json');
+  const lock = JSON.parse(fs.readFileSync(file)); lock.role = 'host';
+  fs.writeFileSync(file, JSON.stringify(lock));
+  const rejected = sdkConsumer(f, a); assert.notEqual(rejected.status, 0);
+  assert.match(rejected.output, /BOOTSTRAP_SDK_RUNTIME_LOCK_MISMATCH: role/, rejected.output);
+  console.log('RUNTIME_CONSUMER_ROLE_TARGET_ASSERT_EXECUTED');
 }));
 
 for (const rel of [`runtime/lib/${tuple}/libcangjie-runtime.so`, `lib/${tuple}/libcangjie-runtime.a`]) {
