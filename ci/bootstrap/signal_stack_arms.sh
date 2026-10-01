@@ -20,7 +20,18 @@ work="$CANGJIE_WORKSPACE/bootstrap-work"
 srcdir="$work/cjcj-src-stage0"
 sdk="$work/sdk-stage0"
 runtime="$CJCJ_BOOTSTRAP_HOST_RT"
-product="$srcdir/target/release/bin/cjcj-stage1"
+# bootstrap.sh:530 resolve_cjpm_product: the workspace product is the single
+# cjcj::cjc (or cjc) binary cjpm produced, not the installed stage0 copy.
+product=""
+resolve_product() {
+  product=""
+  for candidate in "$srcdir/target/release/bin/cjcj::cjc" "$srcdir/target/release/bin/cjc"; do
+    [ -x "$candidate" ] || continue
+    [ -n "$product" ] && { echo "more than one cjpm product in $srcdir/target/release/bin" >&2; exit 1; }
+    product="$candidate"
+  done
+}
+resolve_product
 signal_cj="$srcdir/packages/utils/src/Signal.cj"
 signal_cj_candidate="$root/packages/utils/src/Signal.cj"
 out="$RUNNER_TEMP/signal-stack-arms"
@@ -51,7 +62,8 @@ rebuild() {
     DYLD_LIBRARY_PATH="$ld" PATH="$build_path" cjHeapSize="$heap" \
     bash -c "cd $(printf '%q' "$srcdir") && $(printf '%q' "$sdk/tools/bin/cjpm") build" \
     >"$out/$label.build.log" 2>&1
-  [ -x "$product" ] || { echo "rebuild $label: product missing" >&2; tail -40 "$out/$label.build.log" >&2; exit 1; }
+  resolve_product
+  [ -n "$product" ] || { echo "rebuild $label: product missing" >&2; tail -40 "$out/$label.build.log" >&2; exit 1; }
 }
 
 # run_product <label>: real driver entry, cjc --version through RunDriverMain.
