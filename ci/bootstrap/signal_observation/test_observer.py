@@ -42,16 +42,48 @@ def calibration():
 
 
 class ObserverTests(unittest.TestCase):
+    def test_ordinary_return_lifecycle(self):
+        target = Mock()
+        bp = target.BreakpointCreateByAddress.return_value
+        bp.IsValid.return_value = bp.IsEnabled.return_value = True
+        bp.GetID.return_value = 3
+        bp.GetNumLocations.return_value = 1
+        loc = bp.GetLocationAtIndex.return_value
+        loc.IsResolved.return_value = loc.IsEnabled.return_value = True
+        loc.GetID.return_value = 1
+        loc.GetAddress.return_value.GetLoadAddress.return_value = 4096
+        _, call = o.create_return(target, 4096, 19)
+        bp.SetOneShot.assert_called_once_with(False)
+        bp.SetThreadID.assert_called_once_with(19)
+        o.validate_return(call, 19, 3, 1, 4096, 19)
+        target.BreakpointDelete.return_value = True
+        target.FindBreakpointByID.return_value.IsValid.return_value = False
+        self.assertEqual(o.delete_return(target, 3), {'breakpoint_id':3, 'deleted':True, 'absent':True})
+        for args, reason in [((19, 4, 1, 4096, 19), 'RETURN_IDENTITY_MISMATCH'),
+                             ((19, 3, 2, 4096, 19), 'RETURN_IDENTITY_MISMATCH'),
+                             ((20, 3, 1, 4096, 19), 'return native thread mismatch'),
+                             ((19, 3, 1, 4097, 19), 'RETURN_PC_MISMATCH')]:
+            with self.assertRaisesRegex(RuntimeError, '^'+reason+'$'):
+                o.validate_return(call, *args)
+
+    def test_delete_failure(self):
+        for deleted, live in [(False, False), (True, True)]:
+            target = Mock()
+            target.BreakpointDelete.return_value = deleted
+            target.FindBreakpointByID.return_value.IsValid.return_value = live
+            with self.assertRaisesRegex(RuntimeError, '^RETURN_BREAKPOINT_DELETE_FAILED$'):
+                o.delete_return(target, 3)
+
     def reject(self, value, code):
         with self.assertRaisesRegex(RuntimeError, '^' + code + '$'):
             o.classify_stop(value)
 
     def test_entry(self):
-        self.assertEqual(o.classify_stop(snapshot()), [(19, 1)])
+        self.assertEqual(o.classify_stop(snapshot()), [(19, 1, 1)])
 
     def test_query_return(self):
-        self.assertEqual(o.classify_stop(snapshot(data=[2, 1])), [(19, 2)])
-        self.assertEqual(o.classify_stop(snapshot(data=[3, 1])), [(19, 3)])
+        self.assertEqual(o.classify_stop(snapshot(data=[2, 1])), [(19, 2, 1)])
+        self.assertEqual(o.classify_stop(snapshot(data=[3, 1])), [(19, 3, 1)])
 
     def test_no_threads(self):
         value = snapshot(); value['threads'] = []

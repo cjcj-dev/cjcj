@@ -69,8 +69,8 @@ def stop_snapshot(process, target, active, pending, breakpoints):
 def classify_stop(snapshot):
     if not snapshot['threads']:
         raise RuntimeError('STOP_WITHOUT_THREAD')
-    known = {bp['id']: {loc['id'] for loc in bp['locations'] if loc['resolved']}
-             for bp in snapshot['breakpoints']}
+    known = {bp['id']: {loc['id'] for loc in bp['locations'] if loc['resolved'] and loc.get('enabled', True)}
+             for bp in snapshot['breakpoints'] if bp.get('enabled', True)}
     hits = []
     for thread in snapshot['threads']:
         reason, data = thread['reason'], thread['data']
@@ -91,10 +91,41 @@ def classify_stop(snapshot):
                 raise RuntimeError('UNKNOWN_BREAKPOINT')
             if location not in known[bp_id]:
                 raise RuntimeError('UNKNOWN_BREAKPOINT_LOCATION')
-            hits.append((thread['tid'], bp_id))
+            hits.append((thread['tid'], bp_id, location))
     if not hits:
         raise RuntimeError('STOP_WITHOUT_REASON')
     return hits
+
+
+
+def create_return(target, address, tid):
+    bp = target.BreakpointCreateByAddress(address)
+    bp.SetThreadID(tid)
+    bp.SetOneShot(False)
+    if not bp.IsValid() or not bp.IsEnabled() or bp.GetNumLocations() != 1:
+        raise RuntimeError('RETURN_BREAKPOINT_NOT_UNIQUE')
+    loc = bp.GetLocationAtIndex(0)
+    if not loc.IsResolved() or not loc.IsEnabled() or loc.GetAddress().GetLoadAddress(target) != address:
+        raise RuntimeError('RETURN_BREAKPOINT_LOCATION_INVALID')
+    return bp, {'breakpoint_id': bp.GetID(), 'location_id': loc.GetID(),
+                'return_pc': address, 'thread_id': tid}
+
+
+def validate_return(call, tid, bp_id, location, pc, active):
+    if (bp_id, location) != (call['breakpoint_id'], call['location_id']):
+        raise RuntimeError('RETURN_IDENTITY_MISMATCH')
+    if tid != call['thread_id'] or tid != active:
+        raise RuntimeError('return native thread mismatch')
+    if pc != call['return_pc']:
+        raise RuntimeError('RETURN_PC_MISMATCH')
+
+
+def delete_return(target, bp_id):
+    deleted = target.BreakpointDelete(bp_id)
+    absent = not target.FindBreakpointByID(bp_id).IsValid()
+    if not deleted or not absent:
+        raise RuntimeError('RETURN_BREAKPOINT_DELETE_FAILED')
+    return {'breakpoint_id': bp_id, 'deleted': deleted, 'absent': absent}
 
 
 def continue_sync(debugger, process, record, path, capture):
@@ -227,23 +258,12 @@ def observe(debugger, command, result, internal_dict):
                     item['sha256'] = sha(name)
                 record['modules'].append(item)
 
-        registered = {}
+        exit_identity = None
 
         def capture():
-            bps = [entry, syscall, exit_bp] + [target.FindBreakpointByID(i) for i in pending]
-            snapshot = stop_snapshot(process, target, active, pending, bps)
-            # One-shot breakpoints may be removed by LLDB at the stop. Keep the
-            # identity captured before Continue while the corresponding call is pending.
-            for bp in snapshot['breakpoints']:
-                registered[bp['id']] = bp
-            live_ids = {entry.GetID(), syscall.GetID(), *pending}
-            if exit_bp is not None:
-                live_ids.add(exit_bp.GetID())
-            current_ids = {bp['id'] for bp in snapshot['breakpoints']}
-            for bp_id in live_ids - current_ids:
-                if bp_id in registered:
-                    snapshot['breakpoints'].append(dict(registered[bp_id], absent_at_capture=True))
-            return snapshot
+            bps = [target.FindBreakpointByID(bp.GetID()) for bp in (entry, syscall, exit_bp)
+                   if bp is not None] + [target.FindBreakpointByID(i) for i in pending]
+            return stop_snapshot(process, target, active, pending, bps)
 
         # Capture even a launch rejection before the exception handler can Kill.
         while process.GetState() == lldb.eStateStopped:
@@ -253,7 +273,9 @@ def observe(debugger, command, result, internal_dict):
             if time.monotonic() > deadline:
                 raise RuntimeError('observer deadline exceeded')
             hits = classify_stop(snapshot)
-            for tid, bp_id in hits:
+            if len(hits) != 1:
+                raise RuntimeError('AMBIGUOUS_RETURN')
+            for tid, bp_id, location_id in hits:
                 thread = process.GetThreadByID(tid)
                 frame = thread.GetFrameAtIndex(0)
                 if bp_id == entry.GetID():
@@ -273,9 +295,8 @@ def observe(debugger, command, result, internal_dict):
                     record['entry_backtrace'] = [str(f) for f in thread]
                     record['entry_instructions'] = str(target.ReadInstructions(frame.GetPCAddress(), 100))
                     if cfg['mode'] != 'calibrate':
-                        exit_bp = target.BreakpointCreateByAddress(record['caller_return_pc'])
-                        exit_bp.SetThreadID(tid)
-                        exit_bp.SetOneShot(True)
+                        exit_bp, exit_identity = create_return(target, record['caller_return_pc'], tid)
+                        record['exit_breakpoint'] = exit_identity
                     if syscall.GetNumLocations() != 1:
                         raise RuntimeError('real sigaltstack location not unique: ' + str(syscall.GetNumLocations()))
                     location = syscall.GetLocationAtIndex(0).GetAddress()
@@ -286,9 +307,8 @@ def observe(debugger, command, result, internal_dict):
                     images()
                     entry.SetEnabled(False)
                 elif bp_id in pending:
-                    call = pending.pop(bp_id)
-                    if tid != call['thread_id']:
-                        raise RuntimeError('return native thread mismatch')
+                    call = dict(pending[bp_id])
+                    validate_return(call, tid, bp_id, location_id, frame.GetPC(), active)
                     unsigned = reg(frame, 'w0') & 0xffffffff
                     call['rc'] = unsigned if unsigned < 0x80000000 else unsigned - 0x100000000
                     call['old'] = stack(call['old_pointer'])
@@ -309,11 +329,15 @@ def observe(debugger, command, result, internal_dict):
                         if not val.GetError().Success():
                             raise RuntimeError('same-thread errno getter failed: ' + str(val.GetError()))
                         call['errno'] = val.GetValueAsSigned()
+                    call['deletion'] = delete_return(target, bp_id)
+                    pending.pop(bp_id)
                     record['events'].append(call)
-                    target.BreakpointDelete(bp_id)
+                    persist(path, record)
                 elif exit_bp is not None and bp_id == exit_bp.GetID():
                     if tid != active or pending:
                         raise RuntimeError('Create exit without closed same-thread calls')
+                    validate_return(exit_identity, tid, bp_id, location_id, frame.GetPC(), active)
+                    record['exit_deletion'] = delete_return(target, bp_id)
                     record['exit_thread_id'] = tid
                     record['exit_pc'] = frame.GetPC()
                     exited_entry = True
@@ -327,12 +351,12 @@ def observe(debugger, command, result, internal_dict):
                         raise RuntimeError('sigaltstack caller not CreateAltSignalStack')
                     new_ptr, old_ptr = reg(frame, 'x0'), reg(frame, 'x1')
                     ret = reg(frame, 'x30')
-                    bp = target.BreakpointCreateByAddress(ret)
-                    bp.SetThreadID(tid)
-                    bp.SetOneShot(True)
-                    pending[bp.GetID()] = {'thread_id': tid, 'call_pc': frame.GetPC(), 'return_pc': ret,
+                    if exit_identity is not None and ret == exit_identity['return_pc']:
+                        raise RuntimeError('AMBIGUOUS_RETURN')
+                    bp, identity = create_return(target, ret, tid)
+                    pending[bp.GetID()] = dict(identity, **{'call_pc': frame.GetPC(),
                         'kind': 'query' if new_ptr == 0 else 'install', 'new_pointer': new_ptr,
-                        'old_pointer': old_ptr, 'in': stack(new_ptr), 'caller': str(thread.GetFrameAtIndex(1))}
+                        'old_pointer': old_ptr, 'in': stack(new_ptr), 'caller': str(thread.GetFrameAtIndex(1))})
                 else:
                     raise RuntimeError('unknown breakpoint ' + str(bp_id))
             continue_sync(debugger, process, record, path, capture)
