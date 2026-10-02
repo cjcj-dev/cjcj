@@ -40,7 +40,9 @@ class ReuseTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         start = time.monotonic()
-        cls.root = reuse.materialize(ARCHIVE, MANIFEST, SOURCE, BASE / 'relocated')
+        retained = os.environ.get('SIGNAL_REUSE_RETAINED_ROOT')
+        cls.root = Path(retained).resolve(strict=True) if retained else reuse.materialize(ARCHIVE, MANIFEST, SOURCE, BASE / 'relocated')
+        cls.retained = bool(retained)
         cls.hashes_before = {p: reuse.digest(cls.root / p) for p in reuse.IDENTITIES}
         (run.OUT / 'calibration.json').write_text(Path(os.environ['SIGNAL_REUSE_CALIBRATION']).read_text())
         run.command = boundary  # sole expensive boundary: never run LLDB/helper/product
@@ -59,7 +61,8 @@ class ReuseTests(unittest.TestCase):
                     'link_mappings': [m for m in receipt['mapping'] if m['was_link']]}
         (BASE / 'evidence.json').write_text(json.dumps(evidence, indent=2) + '\n')
         # Keep receipts; discard the copied SDKs after obtaining the result.
-        shutil.rmtree(cls.root)
+        if not cls.retained:
+            shutil.rmtree(cls.root)
 
     def target(self, label, assertion):
         print('TARGET_REACHED ' + label, flush=True)
@@ -88,7 +91,11 @@ class ReuseTests(unittest.TestCase):
         with self.assertRaises(StopAtLLDB):
             run.observe(self.root / 'candidate/cjc', 'product', 131072, root or self.root)
         self.assertEqual(len(LAUNCHES), before + 1)
-        return LAUNCHES[-1]['config']
+        # Consume the files observe actually wrote, after its final configuration.
+        config = run.OUT / 'product-131072.config.json'
+        cfg = json.loads(config.read_text())
+        self.assertEqual(cfg, LAUNCHES[-1]['config'])
+        return cfg
 
     def rejected(self, label, action, text):
         before = len(LAUNCHES)
@@ -106,6 +113,28 @@ class ReuseTests(unittest.TestCase):
         cfg = self.configure()
         self.target('process-sdk-config', lambda: self.assertEqual(cfg['environment']['CANGJIE_HOME'], str(self.root / 'sdk-stage0-run')))
         self.assertEqual(cfg['expected_libraries']['libLLVM.dylib'], reuse.IDENTITIES['sdk-stage0-run/third_party/llvm/lib/libLLVM.dylib'])
+
+    def test_13_final_llvm_directory(self):
+        cfg = self.configure()
+        directories = [Path(p) for p in cfg['environment']['DYLD_LIBRARY_PATH'].split(':')]
+        expected = self.root / 'sdk-stage0-run/third_party/llvm/lib'
+        def check():
+            self.assertEqual(directories[3], expected, 'final LLVM search directory')
+            first = next((p / 'libLLVM.dylib' for p in directories if (p / 'libLLVM.dylib').is_file()), None)
+            self.assertEqual(first, expected / 'libLLVM.dylib', 'first LLVM loader match')
+        self.target('final-llvm-directory', check)
+
+    def test_14_final_llvm_receipt(self):
+        cfg = self.configure()
+        receipt = json.loads((run.OUT / 'run-input-receipt.json').read_text())
+        sdk = str(self.root / 'sdk-stage0-run')
+        llvm = sdk + '/third_party/llvm/lib/libLLVM.dylib'
+        def check():
+            self.assertEqual(receipt['selected_libraries']['libLLVM.dylib'], llvm, 'receipt LLVM selected path')
+            self.assertEqual(receipt['roles'], {'compilation_sdk': str(self.root / 'sdk-stage0'), 'process_sdk': sdk}, 'receipt SDK roles')
+            self.assertEqual(receipt['environment'], {k: cfg['environment'][k] for k in ('CANGJIE_HOME', 'DYLD_LIBRARY_PATH')}, 'receipt final cfg environment')
+            self.assertEqual(receipt['expected_libraries']['libLLVM.dylib'], cfg['expected_libraries']['libLLVM.dylib'], 'receipt LLVM identity')
+        self.target('final-llvm-receipt', check)
 
     def test_03_old_runtime_root(self):
         relative = 'host-runtime/runtime/lib/' + reuse.TUPLE + '/libcangjie-runtime.dylib'
@@ -180,7 +209,9 @@ class ReuseTests(unittest.TestCase):
 
 if __name__ == '__main__':
     start = time.monotonic()
-    result = unittest.TextTestRunner(verbosity=2).run(unittest.defaultTestLoader.loadTestsFromTestCase(ReuseTests))
+    names = os.environ.get('SIGNAL_REUSE_TEST_NAMES')
+    suite = unittest.TestSuite(ReuseTests(name) for name in names.split(',')) if names else unittest.defaultTestLoader.loadTestsFromTestCase(ReuseTests)
+    result = unittest.TextTestRunner(verbosity=2).run(suite)
     summary = {'ran': result.testsRun, 'failures': [t.id() for t, _ in result.failures],
                'errors': [t.id() for t, _ in result.errors], 'wall': time.monotonic() - start,
                'rc': 0 if result.wasSuccessful() else 1}
