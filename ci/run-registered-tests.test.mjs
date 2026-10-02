@@ -177,3 +177,74 @@ test('prebuilt selection and XML reject wrong identity, empty execution and inco
     assert.deepEqual(inspectTargetReports([report], qualified.cases).map(c => c.assertions), [1, 5]);
   } finally { await fs.rm(work, {recursive: true, force: true}); }
 });
+
+test('runCangjie carries directed argv and fixture environment to its actual child process', async () => {
+  // These child stand-ins test transport only; the real compiler/cjpm controls
+  // are separate integration evidence, not supplied by this fixture.
+  const {runCangjie, digest} = await import('./run-registered-tests.mjs');
+  const work = await fs.mkdtemp(path.join(os.tmpdir(), 'objc-child-'));
+  const oldHome = process.env.CANGJIE_HOME;
+  const oldProducer = process.env.OBJC_PREAMBLE_PRODUCER;
+  try {
+    const root = path.join(work, 'tree');
+    const sdk = path.join(work, 'sdk');
+    const source = 'packages/compiler_unittest/src/ObjCPreamble_test.cj';
+    await fs.mkdir(path.join(root, 'scripts'), {recursive: true});
+    await fs.copyFile(path.join(repoRoot, 'scripts/objc_preamble_unit.py'), path.join(root, 'scripts/objc_preamble_unit.py'));
+    await fs.cp(path.join(repoRoot, 'scripts/objc_regcomp_fixtures'), path.join(root, 'scripts/objc_regcomp_fixtures'), {recursive: true});
+    await fs.mkdir(path.dirname(path.join(root, source)), {recursive: true});
+    await fs.copyFile(path.join(repoRoot, source), path.join(root, source));
+    await fs.mkdir(path.join(root, 'runtime_shim'));
+    await fs.writeFile(path.join(root, 'runtime_shim/cjselfhost_llvmshim.o'), 'shim');
+    spawnSync('git', ['init', '-q'], {cwd: root});
+    spawnSync('git', ['add', '.'], {cwd: root});
+    assert.equal(spawnSync('git', ['-c', 'user.name=Zxilly', '-c', 'user.email=zxilly@outlook.com', 'commit', '-qm', 'fixture'], {cwd: root}).status, 0);
+    for (const file of ['bin/cjc', 'tools/bin/cjpm', 'runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so',
+      'runtime/lib/linux_x86_64_cjnative/libboundscheck.so', 'lib/linux_x86_64_cjnative/libcangjie-std-core.a',
+      'third_party/llvm/lib/libLLVM-15.so']) {
+      await fs.mkdir(path.dirname(path.join(sdk, file)), {recursive: true});
+      await fs.writeFile(path.join(sdk, file), 'identity');
+    }
+    const producer = path.join(work, 'producer');
+    await fs.writeFile(producer, `#!/usr/bin/env python3
+import sys
+from pathlib import Path
+name=Path(sys.argv[1]).stem
+out=Path(sys.argv[sys.argv.index('--output-dir')+1])
+(out/('objc.'+name+'.cjo')).write_text(name)
+(out/(name+'.a')).write_text(name)
+`, {mode: 0o755});
+    await fs.writeFile(path.join(sdk, 'tools/bin/cjpm'), `#!/usr/bin/env python3
+import sys,os,json
+from pathlib import Path
+a=sys.argv[1:]
+p=Path(next(x.split('=',1)[1] for x in a if x.startswith('--report-path=')))
+p.mkdir(parents=True)
+(p/'observed.json').write_text(json.dumps({'args':a,'imports':os.environ.get('OBJC_PREAMBLE_IMPORTS'),'tmp':os.environ.get('TMPDIR')}))
+(p/'target.xml').write_text('<testsuite><testcase classname="cjcj::compiler_unittest.ObjCPreambleTest" name="ordinaryFrontendControl" assertions="1"/><testcase classname="cjcj::compiler_unittest.ObjCPreambleTest" name="mirrorImplementationFiles" assertions="5"/></testsuite>')
+`, {mode: 0o755});
+    const target = path.join(work, 'target');
+    const elf = path.join(target, 'release/unittest_bin/compiler_unittest@cjcj');
+    await fs.mkdir(path.dirname(elf), {recursive: true});
+    const bytes = Buffer.alloc(20); bytes.write('\x7fELF'); bytes.writeUInt16LE(62, 18);
+    await fs.writeFile(elf, bytes);
+    process.env.CANGJIE_HOME = sdk;
+    process.env.OBJC_PREAMBLE_PRODUCER = producer;
+    const output = path.join(work, 'output'); await fs.mkdir(output);
+    const results = await runCangjie(root, [{file: source, member: 'packages/compiler_unittest'}], output,
+      {member: 'packages/compiler_unittest', filter: '*ObjCPreambleTest*', skipBuild: true, targetDir: target, elfSha256: digest(elf)});
+    assert.equal(results[0].rc, 0, JSON.stringify(results));
+    assert.equal(results[0].executed, true);
+    const observed = JSON.parse(await fs.readFile(path.join(output, 'reports/observed.json')));
+    assert.ok(observed.args.includes('--skip-build'));
+    assert.equal(observed.args[observed.args.indexOf('--member') + 1], 'packages/compiler_unittest');
+    assert.equal(observed.args[observed.args.indexOf('--filter') + 1], '*ObjCPreambleTest*');
+    assert.equal(observed.imports, path.join(output, 'objc-fixture/imports'));
+    assert.equal(observed.tmp, path.join(output, 'tmp'));
+  } finally {
+    for (const [key, value] of [['CANGJIE_HOME', oldHome], ['OBJC_PREAMBLE_PRODUCER', oldProducer]]) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+    await fs.rm(work, {recursive: true, force: true});
+  }
+});
