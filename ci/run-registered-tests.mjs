@@ -164,7 +164,8 @@ export async function runCangjie(root, entries, output, selection) {
   }
   const temporary = path.join(output, 'tmp');
   fs.mkdirSync(temporary, {recursive: true});
-  const env = {...process.env, TMPDIR: temporary, OBJC_PREAMBLE_IMPORTS: path.join(fixture, 'imports')};
+  const env = {...process.env, PATH: [path.join(sdk, 'bin'), path.join(sdk, 'tools/bin'), process.env.PATH].filter(Boolean).join(path.delimiter),
+    TMPDIR: temporary, OBJC_PREAMBLE_IMPORTS: path.join(fixture, 'imports')};
   const result = await execute(command, root, output, env);
   const reports = path.join(output, 'reports');
   const reportFiles = fs.existsSync(reports) ? fs.readdirSync(reports, {recursive: true}).filter(file => file.endsWith('.xml')) : [];

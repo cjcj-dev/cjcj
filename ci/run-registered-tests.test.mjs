@@ -220,7 +220,7 @@ from pathlib import Path
 a=sys.argv[1:]
 p=Path(next(x.split('=',1)[1] for x in a if x.startswith('--report-path=')))
 p.mkdir(parents=True)
-(p/'observed.json').write_text(json.dumps({'args':a,'imports':os.environ.get('OBJC_PREAMBLE_IMPORTS'),'tmp':os.environ.get('TMPDIR')}))
+(p/'observed.json').write_text(json.dumps({'args':a,'imports':os.environ.get('OBJC_PREAMBLE_IMPORTS'),'tmp':os.environ.get('TMPDIR'),'path':os.environ.get('PATH')}))
 (p/'target.xml').write_text('<testsuite><testcase classname="cjcj::compiler_unittest.ObjCPreambleTest" name="ordinaryFrontendControl" assertions="1"/><testcase classname="cjcj::compiler_unittest.ObjCPreambleTest" name="mirrorImplementationFiles" assertions="5"/></testsuite>')
 `, {mode: 0o755});
     await fs.chmod(path.join(sdk, 'tools/bin/cjpm'), 0o755);
@@ -242,6 +242,7 @@ p.mkdir(parents=True)
     assert.equal(observed.args[observed.args.indexOf('--filter') + 1], '*ObjCPreambleTest*');
     assert.equal(observed.imports, path.join(output, 'objc-fixture/imports'));
     assert.equal(observed.tmp, path.join(output, 'tmp'));
+    assert.ok(observed.path.startsWith(`${sdk}/bin:${sdk}/tools/bin:`));
   } finally {
     for (const [key, value] of [['CANGJIE_HOME', oldHome], ['OBJC_PREAMBLE_PRODUCER', oldProducer]]) {
       if (value === undefined) delete process.env[key]; else process.env[key] = value;

@@ -55,7 +55,7 @@ P=private absolute output, producer=the same-tree release product):
 ```bash
 python3 scripts/objc_preamble_unit.py --prepare-only --build-tree "$W" \
   --sdk "$H" --producer "$producer" --out "$P/objc-fixture"
-OBJC_PREAMBLE_IMPORTS="$P/objc-fixture/imports" TMPDIR="$P/tmp" \
+PATH="$H/bin:$H/tools/bin:$PATH" OBJC_PREAMBLE_IMPORTS="$P/objc-fixture/imports" TMPDIR="$P/tmp" \
   CANGJIE_HOME="$H" "$H/tools/bin/cjpm" test -j"$(nproc)" --no-color \
   --report-format=xml --report-path="$P/reports" --target-dir "$P/test-target"
 ```
