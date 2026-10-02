@@ -185,7 +185,12 @@ class ObserverTests(unittest.TestCase):
                 self.assertEqual(saved['stop_snapshots'][0]['threads'], [])
                 return error
             process.Kill.side_effect = kill
-            with patch.dict(os.environ, SIGNAL_OBSERVER_CONFIG=str(config)), \
+            classifier = o.classify_stop
+            def classified(snapshot):
+                saved = json.loads(path.read_text())
+                self.assertEqual(saved['stop_snapshots'][0], snapshot)
+                return classifier(snapshot)
+            with patch.object(o, 'classify_stop', side_effect=classified), patch.dict(os.environ, SIGNAL_OBSERVER_CONFIG=str(config)), \
                  patch.object(lldb, 'eByteOrderLittle', 99, create=True), \
                  patch.object(lldb, 'eSymbolTypeCode', 98, create=True), \
                  patch.object(lldb, 'SBLaunchInfo', Mock(), create=True), \
