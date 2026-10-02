@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
-import {assertGitObjectProof} from './git-object-proof.mjs';
+import {assertGitObjectProof, assertRemoteObjectProof} from './git-object-proof.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -752,18 +752,7 @@ test('the cjpm pin names an object the remote actually has', {timeout: 60_000}, 
   const {CJPM_FORK_URL: url, CJPM_FORK_REF: ref} = cjpmPin;
   assert.match(ref, /^[0-9a-f]{40}$/, 'CJPM_FORK_REF must be a full sha');
 
-  const fetchUrl = resolveSourceMirror(url);
-  const probe = spawnSync('git', sourceLsRemoteArguments(url, 'HEAD'), {
-    encoding: 'utf8', timeout: 30_000,
-  });
-  assertGitObjectProof(probe, {operation: 'ls-remote', url: fetchUrl, ref: 'HEAD'});
-
-  // `git fetch --depth 1 <url> <sha>` is exactly what tools.mjs runs; --dry-run
-  // resolves the object without writing anything into this repository.
-  const fetched = spawnSync('git', sourceFetchArguments(url, ref, {dryRun: true}), {
-    encoding: 'utf8', timeout: 45_000,
-  });
-  assertGitObjectProof(fetched, {operation: 'fetch', url: fetchUrl, ref});
+  assertRemoteObjectProof(url, ref);
 
 });
 
@@ -803,7 +792,11 @@ test('Git proof local remote accepts existing object and rejects missing object'
     assert.equal(git(['-C', 'source', '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--allow-empty', '-m', 'fixture']).status, 0);
     const ref = git(['-C', 'source', 'rev-parse', 'HEAD']).stdout.trim();
     assert.equal(git(['-C', 'source', 'push', '../remote.git', 'HEAD:refs/heads/main']).status, 0);
+    assert.equal(git(['--git-dir=remote.git', 'symbolic-ref', 'HEAD', 'refs/heads/main']).status, 0);
     assert.equal(git(['init', 'consumer']).status, 0);
+    const remote = path.join(root, 'remote.git');
+    assertRemoteObjectProof(remote, ref, {cwd: path.join(root, 'consumer')});
+    assert.throws(() => assertRemoteObjectProof(remote, '0123456789012345678901234567890123456789', {cwd: path.join(root, 'consumer')}), /is not reachable/);
     const probe = git(['ls-remote', 'remote.git']);
     assertGitObjectProof(probe, {...context, operation: 'ls-remote'});
     const fetch = sha => git(['-C', 'consumer', 'fetch', '--dry-run', '--depth', '1', '../remote.git', sha]);
