@@ -203,6 +203,9 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: darwin-signal-natural-observation-${{ github.run_id }}
-          path: ${{ runner.temp }}/signal-observation
+          path: |
+            ${{ runner.temp }}/signal-observation
+            !${{ runner.temp }}/signal-observation/preparation
+            !${{ runner.temp }}/signal-observation/keep
           if-no-files-found: error
           retention-days: 30

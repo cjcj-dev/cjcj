@@ -33,7 +33,7 @@ python3 "$GITHUB_WORKSPACE/ci/bootstrap/signal_observation/run.py" product "$out
 rc=$?
 set -e
 echo "$rc" > "$out/candidate-observer.rc"
-[ "$rc" -eq 0 ] || { echo 'STOP: candidate did not qualify for the old-size arm'; exit 0; }
+[ "$rc" -eq 0 ] || { echo 'STOP: candidate did not qualify for the old-size arm'; tar -czf "$out/entities.tar.gz" -C "$out" keep; exit 0; }
 # One old-size build, only after the candidate's actual successful installation.
 python3 - "$srcdir/packages/utils/src/Signal.cj" <<'PY'
 from pathlib import Path
@@ -61,3 +61,5 @@ rc=$?
 set -e
 echo "$rc" > "$out/old-observer.rc"
 # No restoration build or extra product launch is authorized this round.
+
+tar -czf "$out/entities.tar.gz" -C "$out" keep

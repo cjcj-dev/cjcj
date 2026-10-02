@@ -74,7 +74,7 @@ const CXX_JOBS = new Map([
 // or configures one is excluded below rather than left out here.
 // `cc` needs the extra guard: a bare word boundary also matches the end of a
 // filename like src/foo.cc, and a file being copied is not a compile.
-const COMPILES = /(\bcmake\b|\bninja\b|\bmake\b|build\.py build|(?<![.\w-])cc\b|\bgcc\b|\bg\+\+|clang\+\+|\bclang\b|build_patched_runtime\.mjs|build_runtime\.mjs|test_windows_runtime_link\.mjs|build_tuple\.sh|install-static-libs|gha_run\.sh|build-stage3\.mjs|build-windows-final-std\.mjs|build-android-final-std\.mjs|build-android-runtime\.mjs|build_shim\.mjs|build_windows_std_ast\.mjs|build_ast_support\.sh|build-shim\.mjs|install-mingw)/;
+const COMPILES = /(\bcmake\b|\bninja\b|\bmake\b|build\.py build|(?<![.\w-])cc\b|\bgcc\b|\bg\+\+|clang\+\+|\bclang\b|build_patched_runtime\.mjs|build_runtime\.mjs|test_windows_runtime_link\.mjs|build_tuple\.sh|install-static-libs|gha_run\.sh|signal_observation\/(?:run\.py|prepare\.sh)|build-stage3\.mjs|build-windows-final-std\.mjs|build-android-final-std\.mjs|build-android-runtime\.mjs|build_shim\.mjs|build_windows_std_ast\.mjs|build_ast_support\.sh|build-shim\.mjs|install-mingw)/;
 // Only the package managers. Every other exclusion tried here -- the MSYS2
 // package list, --gcc-toolchain, CMAKE_C*_COMPILER=, shellcheck/actionlint --
 // was measured and carried nothing: dropping all six leaves the suite at the
