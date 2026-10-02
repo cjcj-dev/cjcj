@@ -198,6 +198,7 @@ class ObserverTests(unittest.TestCase):
             bp.IsValid.return_value = True; bp.GetID.return_value = number
             bp.IsEnabled.return_value = True; bp.GetThreadID.return_value = 19
             bp.GetNumLocations.return_value = 0
+        target.FindBreakpointByID.side_effect = lambda number: {1: target.BreakpointCreateBySBAddress.return_value, 2: target.BreakpointCreateByName.return_value}[number]
         target.Launch.return_value = process
         process.IsValid.return_value = True; process.GetProcessID.return_value = 123
         process.GetState.return_value = lldb.eStateStopped
