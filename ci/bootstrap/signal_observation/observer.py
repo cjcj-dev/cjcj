@@ -15,14 +15,148 @@ def sha(path):
         return h.hexdigest()
 
 
+def persist(path, record):
+    # Atomic replacement preserves the last complete record under the watchdog.
+    temporary = path + '.writing'
+    with open(temporary, 'w') as f:
+        json.dump(record, f, indent=2)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(temporary, path)
+
+
+def process_position(process):
+    state = process.GetState()
+    return {'state': state, 'state_name': lldb.SBDebugger.StateAsCString(state),
+            'stop_id': process.GetStopID(True)}
+
+
+def stop_snapshot(process, target, active, pending, breakpoints):
+    snapshot = dict(process_position(process), timestamp=time.time(),
+                    active_thread=active, pending=pending, threads=[], breakpoints=[])
+    selected = process.GetSelectedThread()
+    snapshot['selected_thread'] = selected.GetThreadID() if selected.IsValid() else None
+    snapshot['thread_count'] = process.GetNumThreads()
+    for thread in process:
+        reason = thread.GetStopReason()
+        item = {'tid': thread.GetThreadID(), 'reason': reason,
+                'reason_name': next((name for name in dir(lldb) if name.startswith('eStopReason')
+                                     and getattr(lldb, name) == reason), str(reason)),
+                'description': thread.GetStopDescription(4096),
+                'data': [thread.GetStopReasonDataAtIndex(i)
+                         for i in range(thread.GetStopReasonDataCount())], 'frames': []}
+        for i in range(min(2, thread.GetNumFrames())):
+            frame = thread.GetFrameAtIndex(i)
+            module = frame.GetModule()
+            item['frames'].append({'pc': frame.GetPC(), 'function': frame.GetFunctionName(),
+                                   'module': str(module.GetFileSpec().fullpath),
+                                   'uuid': module.GetUUIDString(), 'frame': str(frame)})
+        snapshot['threads'].append(item)
+    for bp in breakpoints:
+        if bp is None or not bp.IsValid():
+            continue
+        snapshot['breakpoints'].append({'id': bp.GetID(), 'enabled': bp.IsEnabled(),
+            'thread_id': bp.GetThreadID(), 'locations': [
+                {'id': bp.GetLocationAtIndex(i).GetID(),
+                 'resolved': bp.GetLocationAtIndex(i).IsResolved(),
+                 'enabled': bp.GetLocationAtIndex(i).IsEnabled(),
+                 'address': bp.GetLocationAtIndex(i).GetAddress().GetLoadAddress(target)}
+                for i in range(bp.GetNumLocations())]})
+    # No SB handles or references to mutable pending calls survive the capture.
+    return json.loads(json.dumps(snapshot))
+
+
+def classify_stop(snapshot):
+    if not snapshot['threads']:
+        raise RuntimeError('STOP_WITHOUT_THREAD')
+    known = {bp['id']: {loc['id'] for loc in bp['locations'] if loc['resolved']}
+             for bp in snapshot['breakpoints']}
+    hits = []
+    for thread in snapshot['threads']:
+        reason, data = thread['reason'], thread['data']
+        if reason in (lldb.eStopReasonNone, lldb.eStopReasonInvalid):
+            continue  # Other threads may have no stop reason; never resume an all-empty stop.
+        if reason == lldb.eStopReasonSignal:
+            raise RuntimeError('UNEXPECTED_SIGNAL')
+        if reason == lldb.eStopReasonException:
+            raise RuntimeError('UNEXPECTED_EXCEPTION')
+        if reason != lldb.eStopReasonBreakpoint:
+            raise RuntimeError('UNEXPECTED_STOP_REASON')
+        if not data:
+            raise RuntimeError('BREAKPOINT_STOP_WITHOUT_ID')
+        if len(data) % 2:
+            raise RuntimeError('MALFORMED_BREAKPOINT_DATA')
+        for bp_id, location in zip(data[::2], data[1::2]):
+            if bp_id not in known:
+                raise RuntimeError('UNKNOWN_BREAKPOINT')
+            if location not in known[bp_id]:
+                raise RuntimeError('UNKNOWN_BREAKPOINT_LOCATION')
+            hits.append((thread['tid'], bp_id))
+    if not hits:
+        raise RuntimeError('STOP_WITHOUT_REASON')
+    return hits
+
+
+def continue_sync(debugger, process, record, path, capture):
+    # SBProcess::Continue dispatches ResumeSynchronous when GetAsync() is false.
+    # Never apply the stopped/no-progress predicate to an asynchronous transition.
+    if debugger.GetAsync():
+        raise RuntimeError('ASYNC_MODE_UNQUALIFIED')
+    transition = {'before': process_position(process), 'async': False}
+    record.setdefault('continues', []).append(transition)
+    persist(path, record)
+    error = process.Continue()
+    transition['error'] = {'success': error.Success(), 'text': str(error),
+                           'code': error.GetError(), 'type': error.GetType()}
+    transition['after'] = process_position(process)
+    record.setdefault('stop_snapshots', []).append(capture())
+    persist(path, record)
+    if not transition['error']['success']:
+        raise RuntimeError('CONTINUE_REJECTED')
+    if (transition['after']['state'] == lldb.eStateStopped and
+            transition['after']['stop_id'] == transition['before']['stop_id']):
+        raise RuntimeError('CONTINUE_NO_PROGRESS')
+    if transition['after']['state'] not in (lldb.eStateStopped, lldb.eStateExited):
+        raise RuntimeError('CONTINUE_UNEXPECTED_STATE')
+
+
+def qualify_calibration(events, receipts, active, layout, process_rc):
+    if len(receipts) != 4 or len(events) != 4:
+        raise RuntimeError('CALIBRATION_RECEIPT_COUNT')
+    for event, receipt, kind in zip(events, receipts, ('query', 'valid', 'invalid', 'restore')):
+        if event['thread_id'] != active:
+            raise RuntimeError('CALIBRATION_THREAD_MISMATCH')
+        if receipt['kind'] != kind or event['kind'] != ('query' if kind == 'query' else 'install'):
+            raise RuntimeError('CALIBRATION_CALL_ORDER')
+        for key in ('rc', 'in', 'old'):
+            if event[key] != receipt[key]:
+                raise RuntimeError('CALIBRATION_RECEIPT_MISMATCH:' + key)
+        if event['rc'] != 0 and event.get('errno') != receipt['errno']:
+            raise RuntimeError('CALIBRATION_ERRNO_MISMATCH')
+    query, valid, invalid, restore = events
+    if not (query['rc'] == valid['rc'] == restore['rc'] == process_rc == 0
+            and invalid['rc'] == -1 and invalid.get('errno', 0) != 0):
+        raise RuntimeError('CALIBRATION_API_RESULTS')
+    if (query['in'] is not None or query['old'] is None or
+            query['old']['ss_flags'] & layout['SS_ONSTACK'] or
+            valid['in'] is None or not valid['in']['ss_sp'] or
+            valid['in']['ss_size'] != layout['SIGSTKSZ'] * 2 or valid['in']['ss_flags'] != 0 or
+            invalid['in'] != dict(valid['in'], ss_size=0) or
+            restore['in'] != query['old'] or
+            any(event['old'] is not None for event in (valid, invalid, restore))):
+        raise RuntimeError('CALIBRATION_API_PARAMETERS')
+
+
 def observe(debugger, command, result, internal_dict):
     cfg = json.load(open(os.environ['SIGNAL_OBSERVER_CONFIG']))
     record = {'status': 'OBSERVER_UNQUALIFIED', 'events': [], 'config': cfg,
-              'readonly_expressions': [], 'modules': []}
+              'readonly_expressions': [], 'modules': [], 'stop_snapshots': [], 'continues': []}
     path = cfg['output']
     process = None
+    capture = None
     try:
         debugger.SetAsync(False)
+        record['lldb'] = {'version': lldb.SBDebugger.GetVersionString(), 'async': debugger.GetAsync()}
         target = debugger.CreateTarget(cfg['binary'])
         if not target.IsValid() or not target.GetTriple().startswith('arm64'):
             raise RuntimeError('expected live arm64 Mach-O target: ' + target.GetTriple())
@@ -92,105 +226,101 @@ def observe(debugger, command, result, internal_dict):
                     item['sha256'] = sha(name)
                 record['modules'].append(item)
 
+        def capture():
+            bps = [entry, syscall, exit_bp] + [target.FindBreakpointByID(i) for i in pending]
+            return stop_snapshot(process, target, active, pending, bps)
+
+        # Capture even a launch rejection before the exception handler can Kill.
         while process.GetState() == lldb.eStateStopped:
+            snapshot = capture()
+            record['stop_snapshots'].append(snapshot)
+            persist(path, record)
             if time.monotonic() > deadline:
                 raise RuntimeError('observer deadline exceeded')
-            handled = False
-            for thread in process:
-                if thread.GetStopReason() != lldb.eStopReasonBreakpoint:
-                    if thread.GetStopReason() not in (lldb.eStopReasonNone, lldb.eStopReasonInvalid):
-                        raise RuntimeError('unexpected stop: ' + thread.GetStopDescription(512))
-                    continue
-                ids = [thread.GetStopReasonDataAtIndex(i) for i in range(0, thread.GetStopReasonDataCount(), 2)]
+            hits = classify_stop(snapshot)
+            for tid, bp_id in hits:
+                thread = process.GetThreadByID(tid)
                 frame = thread.GetFrameAtIndex(0)
-                tid = thread.GetThreadID()
-                for bp_id in ids:
-                    handled = True
-                    if bp_id == entry.GetID():
-                        if active is not None:
-                            raise RuntimeError('entry repeated')
-                        active = tid
-                        if cfg['mode'] == 'calibrate':
-                            layouts = [json.loads(line[len('LAYOUT '):]) for line in open(cfg['stdout']) if line.startswith('LAYOUT ')]
-                            if len(layouts) != 1:
-                                raise RuntimeError('SDK layout receipt missing')
-                            cfg['layout'] = layouts[0]
-                            if target.GetAddressByteSize() != cfg['layout']['pointer_size']:
-                                raise RuntimeError('SDK layout pointer mismatch')
-                        record['entry_thread_id'] = tid
-                        record['entry_pc'] = frame.GetPC()
-                        record['caller_return_pc'] = reg(frame, 'x30')
-                        record['entry_backtrace'] = [str(f) for f in thread]
-                        record['entry_instructions'] = str(target.ReadInstructions(frame.GetPCAddress(), 100))
-                        if cfg['mode'] != 'calibrate':
-                            exit_bp = target.BreakpointCreateByAddress(record['caller_return_pc'])
-                            exit_bp.SetThreadID(tid)
-                            exit_bp.SetOneShot(True)
-                        if syscall.GetNumLocations() != 1:
-                            raise RuntimeError('real sigaltstack location not unique: ' + str(syscall.GetNumLocations()))
-                        location = syscall.GetLocationAtIndex(0).GetAddress()
-                        record['sigaltstack_module'] = str(location.GetModule().GetFileSpec().fullpath)
-                        if 'libsystem' not in record['sigaltstack_module']:
-                            raise RuntimeError('sigaltstack is not libsystem')
-                        record['sigaltstack_instructions'] = str(target.ReadInstructions(location, 24))
-                        images()
-                        entry.SetEnabled(False)
-                    elif bp_id in pending:
-                        call = pending.pop(bp_id)
-                        if tid != call['thread_id']:
-                            raise RuntimeError('return native thread mismatch')
-                        unsigned = reg(frame, 'w0') & 0xffffffff
-                        call['rc'] = unsigned if unsigned < 0x80000000 else unsigned - 0x100000000
-                        call['old'] = stack(call['old_pointer'])
-                        if call['rc'] != 0:
-                            getters = target.FindSymbols('__error', lldb.eSymbolTypeCode)
-                            addresses = {getters.GetContextAtIndex(i).GetSymbol().GetStartAddress().GetLoadAddress(target) for i in range(getters.GetSize())}
-                            addresses.discard(lldb.LLDB_INVALID_ADDRESS)
-                            if len(addresses) != 1:
-                                raise RuntimeError('errno getter symbol not unique')
-                            getter = next(iter(addresses))
-                            expr = '*(int *)((int * (*)())0x%x)()' % getter
-                            record['readonly_expressions'].append({'thread_id': tid, 'expression': expr})
-                            opts = lldb.SBExpressionOptions()
-                            opts.SetIgnoreBreakpoints(True)
-                            opts.SetUnwindOnError(True)
-                            opts.SetTimeoutInMicroSeconds(2000000)
-                            val = frame.EvaluateExpression(expr, opts)
-                            if not val.GetError().Success():
-                                raise RuntimeError('same-thread errno getter failed: ' + str(val.GetError()))
-                            call['errno'] = val.GetValueAsSigned()
-                        record['events'].append(call)
-                        target.BreakpointDelete(bp_id)
-                    elif exit_bp is not None and bp_id == exit_bp.GetID():
-                        if tid != active or pending:
-                            raise RuntimeError('Create exit without closed same-thread calls')
-                        record['exit_thread_id'] = tid
-                        record['exit_pc'] = frame.GetPC()
-                        exited_entry = True
-                        syscall.SetEnabled(False)
-                    elif bp_id == syscall.GetID():
-                        if active is None or tid != active or (cfg['mode'] != 'calibrate' and exited_entry):
-                            continue
-                        if pending:
-                            raise RuntimeError('nested sigaltstack call')
-                        if cfg['mode'] != 'calibrate' and not any(needle in (f.GetFunctionName() or '') for f in thread):
-                            raise RuntimeError('sigaltstack caller not CreateAltSignalStack')
-                        new_ptr, old_ptr = reg(frame, 'x0'), reg(frame, 'x1')
-                        ret = reg(frame, 'x30')
-                        bp = target.BreakpointCreateByAddress(ret)
-                        bp.SetThreadID(tid)
-                        bp.SetOneShot(True)
-                        pending[bp.GetID()] = {'thread_id': tid, 'call_pc': frame.GetPC(), 'return_pc': ret,
-                            'kind': 'query' if new_ptr == 0 else 'install', 'new_pointer': new_ptr,
-                            'old_pointer': old_ptr, 'in': stack(new_ptr), 'caller': str(thread.GetFrameAtIndex(1))}
-                    else:
-                        raise RuntimeError('unknown breakpoint ' + str(bp_id))
-            if not handled:
-                raise RuntimeError('unclassified stopped process')
-            # Preserve partial evidence even if the outer 120-second watchdog kills LLDB.
-            with open(path, 'w') as f:
-                json.dump(record, f, indent=2)
-            process.Continue()
+                if bp_id == entry.GetID():
+                    if active is not None:
+                        raise RuntimeError('entry repeated')
+                    active = tid
+                    if cfg['mode'] == 'calibrate':
+                        layouts = [json.loads(line[len('LAYOUT '):]) for line in open(cfg['stdout']) if line.startswith('LAYOUT ')]
+                        if len(layouts) != 1:
+                            raise RuntimeError('SDK layout receipt missing')
+                        cfg['layout'] = layouts[0]
+                        if target.GetAddressByteSize() != cfg['layout']['pointer_size']:
+                            raise RuntimeError('SDK layout pointer mismatch')
+                    record['entry_thread_id'] = tid
+                    record['entry_pc'] = frame.GetPC()
+                    record['caller_return_pc'] = reg(frame, 'x30')
+                    record['entry_backtrace'] = [str(f) for f in thread]
+                    record['entry_instructions'] = str(target.ReadInstructions(frame.GetPCAddress(), 100))
+                    if cfg['mode'] != 'calibrate':
+                        exit_bp = target.BreakpointCreateByAddress(record['caller_return_pc'])
+                        exit_bp.SetThreadID(tid)
+                        exit_bp.SetOneShot(True)
+                    if syscall.GetNumLocations() != 1:
+                        raise RuntimeError('real sigaltstack location not unique: ' + str(syscall.GetNumLocations()))
+                    location = syscall.GetLocationAtIndex(0).GetAddress()
+                    record['sigaltstack_module'] = str(location.GetModule().GetFileSpec().fullpath)
+                    if 'libsystem' not in record['sigaltstack_module']:
+                        raise RuntimeError('sigaltstack is not libsystem')
+                    record['sigaltstack_instructions'] = str(target.ReadInstructions(location, 24))
+                    images()
+                    entry.SetEnabled(False)
+                elif bp_id in pending:
+                    call = pending.pop(bp_id)
+                    if tid != call['thread_id']:
+                        raise RuntimeError('return native thread mismatch')
+                    unsigned = reg(frame, 'w0') & 0xffffffff
+                    call['rc'] = unsigned if unsigned < 0x80000000 else unsigned - 0x100000000
+                    call['old'] = stack(call['old_pointer'])
+                    if call['rc'] != 0:
+                        getters = target.FindSymbols('__error', lldb.eSymbolTypeCode)
+                        addresses = {getters.GetContextAtIndex(i).GetSymbol().GetStartAddress().GetLoadAddress(target) for i in range(getters.GetSize())}
+                        addresses.discard(lldb.LLDB_INVALID_ADDRESS)
+                        if len(addresses) != 1:
+                            raise RuntimeError('errno getter symbol not unique')
+                        getter = next(iter(addresses))
+                        expr = '*(int *)((int * (*)())0x%x)()' % getter
+                        record['readonly_expressions'].append({'thread_id': tid, 'expression': expr})
+                        opts = lldb.SBExpressionOptions()
+                        opts.SetIgnoreBreakpoints(True)
+                        opts.SetUnwindOnError(True)
+                        opts.SetTimeoutInMicroSeconds(2000000)
+                        val = frame.EvaluateExpression(expr, opts)
+                        if not val.GetError().Success():
+                            raise RuntimeError('same-thread errno getter failed: ' + str(val.GetError()))
+                        call['errno'] = val.GetValueAsSigned()
+                    record['events'].append(call)
+                    target.BreakpointDelete(bp_id)
+                elif exit_bp is not None and bp_id == exit_bp.GetID():
+                    if tid != active or pending:
+                        raise RuntimeError('Create exit without closed same-thread calls')
+                    record['exit_thread_id'] = tid
+                    record['exit_pc'] = frame.GetPC()
+                    exited_entry = True
+                    syscall.SetEnabled(False)
+                elif bp_id == syscall.GetID():
+                    if active is None or tid != active or (cfg['mode'] != 'calibrate' and exited_entry):
+                        continue
+                    if pending:
+                        raise RuntimeError('nested sigaltstack call')
+                    if cfg['mode'] != 'calibrate' and not any(needle in (f.GetFunctionName() or '') for f in thread):
+                        raise RuntimeError('sigaltstack caller not CreateAltSignalStack')
+                    new_ptr, old_ptr = reg(frame, 'x0'), reg(frame, 'x1')
+                    ret = reg(frame, 'x30')
+                    bp = target.BreakpointCreateByAddress(ret)
+                    bp.SetThreadID(tid)
+                    bp.SetOneShot(True)
+                    pending[bp.GetID()] = {'thread_id': tid, 'call_pc': frame.GetPC(), 'return_pc': ret,
+                        'kind': 'query' if new_ptr == 0 else 'install', 'new_pointer': new_ptr,
+                        'old_pointer': old_ptr, 'in': stack(new_ptr), 'caller': str(thread.GetFrameAtIndex(1))}
+                else:
+                    raise RuntimeError('unknown breakpoint ' + str(bp_id))
+            continue_sync(debugger, process, record, path, capture)
         record['process_state'] = str(process.GetState())
         if process.GetState() != lldb.eStateExited:
             raise RuntimeError('product did not exit normally')
@@ -200,16 +330,7 @@ def observe(debugger, command, result, internal_dict):
         if cfg['mode'] == 'calibrate':
             receipts = [json.loads(line[len('RECEIPT '):]) for line in open(cfg['stdout']) if line.startswith('RECEIPT ')]
             events = record['events']
-            if len(receipts) != 4 or len(events) != 4:
-                raise RuntimeError('calibration requires exactly query/valid/invalid/restore')
-            for event, receipt in zip(events, receipts):
-                for key in ('rc', 'in', 'old'):
-                    if event[key] != receipt[key]:
-                        raise RuntimeError('LLDB/native mismatch: ' + key)
-                if event['rc'] != 0 and event.get('errno') != receipt['errno']:
-                    raise RuntimeError('LLDB/native errno mismatch')
-            if not (events[0]['rc'] == events[1]['rc'] == events[3]['rc'] == 0 and events[2]['rc'] != 0 and record['process_rc'] == 0):
-                raise RuntimeError('positive failure or successful install/restore not qualified')
+            qualify_calibration(events, receipts, active, cfg['layout'], record['process_rc'])
             record['status'] = 'CALIBRATED'
         else:
             events = record['events']
@@ -242,10 +363,16 @@ def observe(debugger, command, result, internal_dict):
         record['error'] = str(exc)
         record['traceback'] = traceback.format_exc()
         if process and process.IsValid() and process.GetState() != lldb.eStateExited:
-            process.Kill()
+            if capture:
+                record['stop_snapshots'].append(capture())
+            else:
+                record['stop_snapshots'].append(stop_snapshot(process, target, None, {}, [entry, syscall]))
+            persist(path, record)
+            killed = process.Kill()
+            record['kill'] = {'success': killed.Success(), 'error': str(killed),
+                              'after': process_position(process)}
     finally:
-        with open(path, 'w') as f:
-            json.dump(record, f, indent=2)
+        persist(path, record)
         print('SIGNAL_OBSERVATION ' + record['status'])
 
 
