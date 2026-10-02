@@ -43,10 +43,29 @@ int main(int argc, char **argv) {
     stack_t invalid = {.ss_sp=mem, .ss_size=0, .ss_flags=0}; errno=0;
     int bad = sigaltstack(&invalid, NULL); err=errno;
     receipt("invalid", &invalid, NULL, bad, err);
+    stack_t original_old = old;
+    stack_t restore_request = original_old;
+    if (original_old.ss_flags & SS_DISABLE) {
+        restore_request = valid;
+        restore_request.ss_flags = SS_DISABLE;
+    }
+    printf("RESTORE_STATE ");
+    receipt("original_old", NULL, &original_old, 0, 0);
     errno=0;
-    rc = sigaltstack(&old, NULL); err=errno;
-    receipt("restore", &old, NULL, rc, err);
+    rc = sigaltstack(&restore_request, NULL); err=errno;
+    receipt("restore", &restore_request, NULL, rc, err);
     if (rc) return 13;
+    stack_t after_restore = {0}; errno=0;
+    rc = sigaltstack(NULL, &after_restore); err=errno;
+    receipt("postquery", NULL, &after_restore, rc, err);
+    if (rc || (after_restore.ss_flags & SS_ONSTACK)) return 15;
+    if (original_old.ss_flags & SS_DISABLE) {
+        if (!(after_restore.ss_flags & SS_DISABLE)) return 16;
+    } else if (after_restore.ss_sp != original_old.ss_sp ||
+               after_restore.ss_size != original_old.ss_size ||
+               after_restore.ss_flags != original_old.ss_flags ||
+               after_restore.ss_sp == mem) return 17;
     free(mem);
+    puts("SAFE_FREE");
     return bad != 0 ? 0 : 14;
 }

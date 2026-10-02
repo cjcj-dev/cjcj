@@ -1,4 +1,4 @@
-name: Darwin retained signal observer calibration
+name: Darwin private signal observer calibration
 on:
   workflow_dispatch:
 permissions:
@@ -6,19 +6,12 @@ permissions:
   actions: read
 jobs:
   calibration:
-    name: retained-arm64-calibration-only
+    name: arm64-calibration-only
     runs-on: macos-15
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
-      - name: Copy retained calibration entities
-        uses: actions/download-artifact@v8
-        with:
-          github-token: ${{ github.token }}
-          run-id: 36957949579
-          name: darwin-signal-natural-observation-36957949579
-          path: ${{ runner.temp }}/signal-observation/retained
-      - name: Qualify retained ABI and run one native process
+      - name: Build private helper once and run one native process
         shell: bash
         run: |
           set -euo pipefail
@@ -30,19 +23,20 @@ jobs:
           retained = root / 'retained'
           identity = json.loads(pathlib.Path('ci/bootstrap/signal_observation/calibration_identity.json').read_text())
           def sha(path): return hashlib.sha256(path.read_bytes()).hexdigest()
-          actual = {str(p.relative_to(retained)): sha(p) for p in retained.rglob('*')
-                    if p.is_file() and (p.name == 'calibrator' or 'calibrator.dSYM' in p.parts)}
-          if actual != identity['files']: raise SystemExit('retained Mach-O/dSYM identity mismatch')
+          retained.mkdir(parents=True, exist_ok=True)
           binary = retained / 'calibrator'
-          binary.chmod(0o755)
           sdk = subprocess.check_output(['xcrun', '--show-sdk-path'], text=True).strip()
           xcode = subprocess.check_output(['xcodebuild', '-version'], text=True)
-          if xcode != identity['xcode']: raise SystemExit('retained Xcode ABI mismatch')
-          if sha(pathlib.Path('ci/bootstrap/signal_observation/calibrate.c')) != identity['source_sha256']:
-              raise SystemExit('calibration source mismatch')
-          if sha(pathlib.Path('ci/bootstrap/signal_observation/observer.py')) != '7020b761344e0064ae517fe2b50edb531fc9981cf96353c3f0f18347b669e70c':
-              raise SystemExit('single pinned observer identity mismatch')
-          info = {'sdkroot': sdk, 'xcode': xcode, 'identity': identity, 'actual_files': actual,
+          if xcode != identity['xcode']: raise SystemExit('Xcode ABI mismatch')
+          source = pathlib.Path('ci/bootstrap/signal_observation/calibrate.c')
+          subprocess.run(['xcrun', 'clang', '-g', '-O0', '-arch', 'arm64', '-isysroot', sdk,
+                          str(source), '-o', str(binary)], check=True)
+          subprocess.run(['dsymutil', str(binary)], check=True)
+          actual = {str(p.relative_to(retained)): sha(p) for p in retained.rglob('*') if p.is_file()}
+          if sha(pathlib.Path('ci/bootstrap/signal_observation/observer.py')) != '11fb38b66573654a14791ba25d2edaef2109c83b3dc4d501bfe28349e0821fb6':
+              raise SystemExit('observer identity mismatch')
+          info = {'sdkroot': sdk, 'xcode': xcode, 'previous_identity': identity, 'actual_files': actual,
+                  'source_sha256': sha(source),
                   'observer_sha256': sha(pathlib.Path('ci/bootstrap/signal_observation/observer.py')),
                   'runner': subprocess.check_output(['uname', '-a'], text=True),
                   'lldb': subprocess.check_output(['/usr/bin/lldb', '--version'], text=True)}
@@ -77,6 +71,7 @@ jobs:
           if rc or not pathlib.Path(cfg['output']).is_file(): raise SystemExit('LLDB unqualified: ' + str(rc))
           result = json.loads(pathlib.Path(cfg['output']).read_text())
           print('NATIVE_CALIBRATION', result['status'])
+          if 'SAFE_FREE' not in pathlib.Path(cfg['stdout']).read_text(): raise SystemExit('safe free missing')
           if result['status'] != 'CALIBRATED': raise SystemExit('stop: native calibration unqualified')
           PY
       - name: Preserve all raw calibration records

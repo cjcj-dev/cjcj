@@ -35,9 +35,10 @@ def calibration():
               {'thread_id': 19, 'kind': 'install', 'rc': 0, 'in': valid, 'old': None},
               {'thread_id': 19, 'kind': 'install', 'rc': -1, 'errno': 12,
                'in': dict(valid, ss_size=0), 'old': None},
-              {'thread_id': 19, 'kind': 'install', 'rc': 0, 'in': old, 'old': None}]
+              {'thread_id': 19, 'kind': 'install', 'rc': 0, 'in': dict(valid, ss_flags=4), 'old': None},
+              {'thread_id': 19, 'kind': 'query', 'rc': 0, 'in': None, 'old': dict(valid, ss_flags=4)}]
     receipts = [dict(copy.deepcopy(event), kind=kind, errno=event.get('errno', 0))
-                for event, kind in zip(events, ('query', 'valid', 'invalid', 'restore'))]
+                for event, kind in zip(events, ('query', 'valid', 'invalid', 'restore', 'postquery'))]
     return events, receipts
 
 
@@ -157,7 +158,37 @@ class ObserverTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, '^CONTINUE_UNEXPECTED_STATE$'): self.transition(after=(lldb.eStateRunning, 7))
 
     def qualify(self, events, receipts):
-        o.qualify_calibration(events, receipts, 19, {'SS_ONSTACK': 1, 'SIGSTKSZ': 131072}, 0)
+        o.qualify_calibration(events, receipts, 19, {'SS_ONSTACK': 1, 'SS_DISABLE': 4, 'SIGSTKSZ': 131072}, 0)
+
+    def test_enabled_restore(self):
+        events, receipts = calibration()
+        old = {'ss_sp': 8192, 'ss_size': 131072, 'ss_flags': 0}
+        events[0]['old'] = receipts[0]['old'] = old
+        events[3]['in'] = receipts[3]['in'] = old
+        events[4]['old'] = receipts[4]['old'] = old
+        self.qualify(events, receipts)
+
+    def test_postquery_failure(self):
+        events, receipts = calibration()
+        events[4]['rc'] = receipts[4]['rc'] = -1
+        events[4]['errno'] = receipts[4]['errno'] = 12
+        with self.assertRaisesRegex(RuntimeError, '^CALIBRATION_API_RESULTS$'): self.qualify(events, receipts)
+
+    def test_restore_failure(self):
+        events, receipts = calibration()
+        events[3]['rc'] = receipts[3]['rc'] = -1
+        events[3]['errno'] = receipts[3]['errno'] = 12
+        with self.assertRaisesRegex(RuntimeError, '^CALIBRATION_API_RESULTS$'): self.qualify(events, receipts)
+
+    def test_postquery_enabled(self):
+        events, receipts = calibration()
+        events[4]['old']['ss_flags'] = receipts[4]['old']['ss_flags'] = 0
+        with self.assertRaisesRegex(RuntimeError, '^CALIBRATION_RESTORE_STATE$'): self.qualify(events, receipts)
+
+    def test_restore_wrong_flags(self):
+        events, receipts = calibration()
+        events[3]['in']['ss_flags'] = receipts[3]['in']['ss_flags'] = 0
+        with self.assertRaisesRegex(RuntimeError, '^CALIBRATION_API_PARAMETERS$'): self.qualify(events, receipts)
 
     def test_complete_receipts(self): self.qualify(*calibration())
     def test_wrong_thread(self):

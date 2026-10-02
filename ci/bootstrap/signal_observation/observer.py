@@ -153,20 +153,20 @@ def continue_sync(debugger, process, record, path, capture):
 
 
 def qualify_calibration(events, receipts, active, layout, process_rc):
-    if len(receipts) != 4 or len(events) != 4:
+    if len(receipts) != 5 or len(events) != 5:
         raise RuntimeError('CALIBRATION_RECEIPT_COUNT')
-    for event, receipt, kind in zip(events, receipts, ('query', 'valid', 'invalid', 'restore')):
+    for event, receipt, kind in zip(events, receipts, ('query', 'valid', 'invalid', 'restore', 'postquery')):
         if event['thread_id'] != active:
             raise RuntimeError('CALIBRATION_THREAD_MISMATCH')
-        if receipt['kind'] != kind or event['kind'] != ('query' if kind == 'query' else 'install'):
+        if receipt['kind'] != kind or event['kind'] != ('query' if kind in ('query', 'postquery') else 'install'):
             raise RuntimeError('CALIBRATION_CALL_ORDER')
         for key in ('rc', 'in', 'old'):
             if event[key] != receipt[key]:
                 raise RuntimeError('CALIBRATION_RECEIPT_MISMATCH:' + key)
         if event['rc'] != 0 and event.get('errno') != receipt['errno']:
             raise RuntimeError('CALIBRATION_ERRNO_MISMATCH')
-    query, valid, invalid, restore = events
-    if not (query['rc'] == valid['rc'] == restore['rc'] == process_rc == 0
+    query, valid, invalid, restore, postquery = events
+    if not (query['rc'] == valid['rc'] == restore['rc'] == postquery['rc'] == process_rc == 0
             and invalid['rc'] == -1 and invalid.get('errno', 0) != 0):
         raise RuntimeError('CALIBRATION_API_RESULTS')
     if (query['in'] is not None or query['old'] is None or
@@ -174,9 +174,17 @@ def qualify_calibration(events, receipts, active, layout, process_rc):
             valid['in'] is None or not valid['in']['ss_sp'] or
             valid['in']['ss_size'] != layout['SIGSTKSZ'] * 2 or valid['in']['ss_flags'] != 0 or
             invalid['in'] != dict(valid['in'], ss_size=0) or
-            restore['in'] != query['old'] or
+            restore['in'] != (dict(valid['in'], ss_flags=layout['SS_DISABLE'])
+                              if query['old']['ss_flags'] & layout['SS_DISABLE'] else query['old']) or
             any(event['old'] is not None for event in (valid, invalid, restore))):
         raise RuntimeError('CALIBRATION_API_PARAMETERS')
+    after = postquery['old']
+    if (postquery['in'] is not None or after is None or
+            after['ss_flags'] & layout['SS_ONSTACK'] or
+            (not (after['ss_flags'] & layout['SS_DISABLE'])
+             if query['old']['ss_flags'] & layout['SS_DISABLE'] else
+             after != query['old'] or after['ss_sp'] == valid['in']['ss_sp'])):
+        raise RuntimeError('CALIBRATION_RESTORE_STATE')
 
 
 def observe(debugger, command, result, internal_dict):
