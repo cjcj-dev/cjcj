@@ -223,6 +223,7 @@ p.mkdir(parents=True)
 (p/'observed.json').write_text(json.dumps({'args':a,'imports':os.environ.get('OBJC_PREAMBLE_IMPORTS'),'tmp':os.environ.get('TMPDIR')}))
 (p/'target.xml').write_text('<testsuite><testcase classname="cjcj::compiler_unittest.ObjCPreambleTest" name="ordinaryFrontendControl" assertions="1"/><testcase classname="cjcj::compiler_unittest.ObjCPreambleTest" name="mirrorImplementationFiles" assertions="5"/></testsuite>')
 `, {mode: 0o755});
+    await fs.chmod(path.join(sdk, 'tools/bin/cjpm'), 0o755);
     const target = path.join(work, 'target');
     const elf = path.join(target, 'release/unittest_bin/compiler_unittest@cjcj');
     await fs.mkdir(path.dirname(elf), {recursive: true});
