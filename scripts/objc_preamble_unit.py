@@ -19,6 +19,62 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def prepare(tree, sdk, out, producer=None, stub_imports=None):
+    """Produce declaration inputs only; publish identity even on failure."""
+    tree, sdk, out = (Path(p).resolve() for p in (tree, sdk, out))
+    out.mkdir(parents=True, exist_ok=True)
+    record = {'tree': str(tree), 'sdk': str(sdk), 'stubs': {}}
+    try:
+        if producer is None:
+            products = [tree / 'target/release/bin' / n for n in ('cjcj::cjc', 'cjc@cjcj')]
+            products = [p for p in products if p.is_file()]
+            if len(products) != 1:
+                raise ValueError('expected exactly one same-tree release compiler')
+            producer = products[0]
+        product = out / 'cjcj-stage1'
+        if Path(producer).resolve() != product:
+            shutil.copy2(producer, product)
+        inputs = [product, sdk / 'bin/cjc', sdk / 'tools/bin/cjpm',
+                  tree / 'runtime_shim/cjselfhost_llvmshim.o']
+        inputs += sorted((sdk / 'runtime/lib/linux_x86_64_cjnative').glob('*.so'))
+        sources = [tree / 'scripts/objc_regcomp_fixtures' / (n + '.cj') for n in ('internal', 'lang')]
+        record['inputs'] = {str(p): digest(p) for p in inputs + sources}
+        record['source_sha'] = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=tree, text=True).strip()
+        imports = out / 'imports/objc'
+        imports.mkdir(parents=True, exist_ok=True)
+        env = os.environ.copy()
+        env['CANGJIE_HOME'] = str(sdk)
+        env['LD_LIBRARY_PATH'] = ':'.join(str(sdk / p) for p in (
+            'runtime/lib/linux_x86_64_cjnative', 'lib/linux_x86_64_cjnative',
+            'third_party/llvm/lib', 'tools/lib')) + ':/usr/lib/x86_64-linux-gnu'
+        if stub_imports is not None:
+            shutil.copytree(Path(stub_imports).resolve(), out / 'imports', dirs_exist_ok=True)
+        else:
+            for name, source in zip(('internal', 'lang'), sources):
+                argv = [str(product), str(source), '--import-path', str(out / 'imports'),
+                        '--output-type=staticlib', '--output-dir', str(imports),
+                        '-o', name + '.a', '--diagnostic-format=noColor']
+                with (out / (name + '.log')).open('w') as log:
+                    rc = subprocess.call(argv, cwd=out, env=env, stdout=log, stderr=subprocess.STDOUT)
+                record['stubs'][name] = {'argv': argv, 'rc': rc}
+                if rc:
+                    raise ValueError(f'{name} producer rc={rc}')
+        for name in ('internal', 'lang'):
+            for filename in ('objc.' + name + '.cjo', name + '.a'):
+                if not (imports / filename).is_file():
+                    raise ValueError('missing ' + filename)
+        record['files'] = {str(p.relative_to(out / 'imports')): digest(p)
+                           for p in sorted((out / 'imports').rglob('*')) if p.is_file()}
+        record['imports'] = str(out / 'imports')
+        record['rc'] = 0
+        return record
+    except Exception as error:
+        record.update(rc=1, error='ObjCPreamble fixture prerequisite: ' + str(error))
+        raise RuntimeError(record['error']) from error
+    finally:
+        (out / 'fixture.json').write_text(json.dumps(record, indent=2) + '\n')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--build-tree', type=Path, required=True)
@@ -28,8 +84,13 @@ def main():
                         help='use shared release declarations while linking build-tree product archives')
     parser.add_argument('--stub-imports', type=Path,
                         help='physically copy shared declaration fixture imports for differential arms')
+    parser.add_argument('--prepare-only', action='store_true')
+    parser.add_argument('--producer', type=Path)
     args = parser.parse_args()
     tree, sdk, out = (p.resolve() for p in (args.build_tree, args.sdk, args.out))
+    if args.prepare_only:
+        prepare(tree, sdk, out, args.producer)
+        return 0
     interfaces = args.interface_tree.resolve() if args.interface_tree else tree
     out.mkdir(parents=True, exist_ok=True)
     temporary = out / 'tmp'
@@ -69,34 +130,8 @@ def main():
         record['build_rc'] = subprocess.call(command, cwd=tree, env=env, stdout=log, stderr=subprocess.STDOUT)
     record['build_wall'] = time.monotonic() - start
     if record['build_rc'] == 0:
-        imports = out / 'imports/objc'
-        imports.mkdir(parents=True, exist_ok=True)
-        compiler = tree / 'target/release/bin/cjcj::cjc'
-        # Preserve the product basename required by its runtime entry selection.
-        product = out / 'cjcj-stage1'
-        shutil.copy2(compiler, product)
-        record['compiler_sha256'] = digest(product)
-        record['stubs'] = {}
-        if args.stub_imports is not None:
-            origin = args.stub_imports.resolve()
-            shutil.copytree(origin, out / 'imports', dirs_exist_ok=True)
-            record['stub_origin'] = str(origin)
-        else:
-            for name in ('internal', 'lang'):
-                stub = tree / 'scripts/objc_regcomp_fixtures' / (name + '.cj')
-                argv = [str(product), str(stub), '--import-path', str(out / 'imports'),
-                        '--output-type=staticlib', '--output-dir', str(imports),
-                        '-o', name + '.a', '--diagnostic-format=noColor']
-                with (out / (name + '.log')).open('w') as log:
-                    rc = subprocess.call(argv, cwd=out, env=env, stdout=log, stderr=subprocess.STDOUT)
-                record['stubs'][name] = {'argv': argv, 'rc': rc}
-                if rc:
-                    (out / 'result.json').write_text(json.dumps(record, indent=2) + '\n')
-                    return rc
-        record['stub_sha256'] = {
-            str(p.relative_to(out / 'imports')): digest(p)
-            for p in sorted((out / 'imports').rglob('*')) if p.is_file()
-        }
+        record['fixture'] = prepare(tree, sdk, out, producer=args.producer,
+                                    stub_imports=args.stub_imports)
         record['elf_sha256'] = digest(executable)
         loader = subprocess.run(['ldd', str(executable)], cwd=tree, env=env,
                                 text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)

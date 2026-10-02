@@ -44,6 +44,19 @@ export async function runScripts(root, entries, output) {
   return results;
 }
 
+export function validateObjCFixture(imports, files) {
+  if (!imports || !path.isAbsolute(imports) || !fs.statSync(imports).isDirectory())
+    throw new Error('invalid import root');
+  for (const name of ['internal', 'lang']) {
+    const file = `objc/objc.${name}.cjo`;
+    if (!files?.[file] || digest(path.join(imports, file)) !== files[file])
+      throw new Error(`missing or mismatched ${file}`);
+  }
+  for (const [file, sha] of Object.entries(files)) {
+    if (digest(path.join(imports, file)) !== sha) throw new Error(`mismatched ${file}`);
+  }
+}
+
 export async function runCangjie(root, entries, output) {
   const sdk = process.env.CANGJIE_HOME;
   if (!sdk) throw new Error('CANGJIE_HOME must identify the pinned official host SDK');
@@ -54,7 +67,27 @@ export async function runCangjie(root, entries, output) {
   const command = [path.join(sdk, 'tools/bin/cjpm'), 'test', '-j', String(os.availableParallelism()),
     '--no-color', '--report-format=xml', `--report-path=${path.join(output, 'reports')}`,
     '--target-dir', path.join(output, 'target')];
-  const result = await execute(command, root, output);
+  const fixture = path.join(output, 'objc-fixture');
+  const producer = process.env.OBJC_PREAMBLE_PRODUCER;
+  let preparation;
+  try {
+    if (!producer || !path.isAbsolute(producer)) throw new Error('explicit OBJC_PREAMBLE_PRODUCER is required');
+    preparation = await execute(['python3', 'scripts/objc_preamble_unit.py', '--prepare-only',
+      '--build-tree', root, '--sdk', sdk, '--producer', producer, '--out', fixture], root,
+      path.join(output, 'prepare'));
+    if (preparation.rc) throw new Error(`producer rc=${preparation.rc}`);
+    const manifest = JSON.parse(fs.readFileSync(path.join(fixture, 'fixture.json'), 'utf8'));
+    validateObjCFixture(manifest.imports, manifest.files);
+  } catch (error) {
+    const failure = {file: 'workspace', rc: 1, executed: false, preparation,
+      error: `ObjCPreamble fixture prerequisite: ${error.message}`};
+    fs.writeFileSync(path.join(output, 'prerequisite.json'), JSON.stringify(failure, null, 2));
+    return [failure];
+  }
+  const temporary = path.join(output, 'tmp');
+  fs.mkdirSync(temporary, {recursive: true});
+  const env = {...process.env, TMPDIR: temporary, OBJC_PREAMBLE_IMPORTS: path.join(fixture, 'imports')};
+  const result = await execute(command, root, output, env);
   const reports = path.join(output, 'reports');
   const reportFiles = fs.existsSync(reports) ? fs.readdirSync(reports, {recursive: true}).filter(file => file.endsWith('.xml')) : [];
   const executed = reportFiles.length > 0;

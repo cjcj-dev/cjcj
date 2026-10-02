@@ -36,3 +36,33 @@ For baseline comparison use the same runner, registry, SDK, flags and shim on
 two isolated source trees, retaining each `results.json`, `run.log` and test
 report directory. Compare failure identities, not just exit codes or counts.
 Existing failures must stay visible; this registry contains no failure allowlist.
+
+### ObjC preamble declaration inputs (Linux official host)
+
+Workspace tests require same-tree declaration modules, not a Darwin runtime.
+Build the release compiler with the pinned official host and prepared LLVM shim.
+CI builds into an explicit private target directory and requires exactly one of
+`release/bin/cjcj::cjc` or `release/bin/cjc@cjcj`, then physically copies it as
+`cjcj-stage1`. Set `OBJC_PREAMBLE_PRODUCER` to that absolute product path before
+running `node ci/run-registered-tests.mjs cj NEW_OUTPUT_DIR`. The runner prepares
+internal then lang with that producer, verifies `fixture.json` hashes, and passes
+its private imports and temporary directory to the official host's `cjpm test`.
+Preparation failure stops before cjpm and writes `prerequisite.json`.
+
+For direct workspace invocation (W=source tree, H=pinned official SDK,
+P=private absolute output, producer=the same-tree release product):
+
+```bash
+python3 scripts/objc_preamble_unit.py --prepare-only --build-tree "$W" \
+  --sdk "$H" --producer "$producer" --out "$P/objc-fixture"
+OBJC_PREAMBLE_IMPORTS="$P/objc-fixture/imports" TMPDIR="$P/tmp" \
+  CANGJIE_HOME="$H" "$H/tools/bin/cjpm" test -j"$(nproc)" --no-color \
+  --report-format=xml --report-path="$P/reports" --target-dir "$P/test-target"
+```
+
+Create `$P/tmp` before the direct invocation. Keep `fixture.json`, producer logs,
+and the modules together. The import root is `imports`, containing
+`objc/objc.internal.cjo` and `objc/objc.lang.cjo`; source directories, SDK modules,
+and `imports/objc` are not substitutes. The static archives are recorded inputs,
+not additional workspace link options. Bare tests without this prerequisite fail
+with an explicit fixture error; neither original test nor assertion is skipped.
