@@ -175,6 +175,15 @@ jobs:
           sdk="$HOME/.cjv/toolchains/$CJCJ_TOOLCHAIN"
           source "$sdk/envsetup.sh"
           npx --yes zx@8 runtime_shim/build_shim.mjs
+          cjpm build -j"$(nproc)" --target-dir "$RUNNER_TEMP/objc-producer"
+          products=()
+          for name in 'cjcj::cjc' 'cjc@cjcj'; do
+            file="$RUNNER_TEMP/objc-producer/release/bin/$name"
+            [[ ! -f "$file" ]] || products+=("$file")
+          done
+          [[ "${#products[@]}" = 1 ]]
+          cp "${products[0]}" "$RUNNER_TEMP/cjcj-stage1"
+          export OBJC_PREAMBLE_PRODUCER="$RUNNER_TEMP/cjcj-stage1"
           node ci/run-registered-tests.mjs cj "$RUNNER_TEMP/package-tests"
       - name: Report sccache
         if: always()

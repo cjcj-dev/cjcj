@@ -16,7 +16,21 @@ private let EXPECTED_OBJC_PREAMBLE = "/*\n" +
     " * Do NOT modify it manually.\n" +
     " */\n"
 
+private func PreambleImports(): String {
+    let root = getVariable("OBJC_PREAMBLE_IMPORTS") ?? ""
+    if (root.isEmpty()) {
+        throw Exception("ObjCPreamble fixture prerequisite: missing OBJC_PREAMBLE_IMPORTS; see ci/test-registry.md")
+    }
+    for (name in ["internal", "lang"]) {
+        if (!FileUtil.FileExist(root + "/objc/objc." + name + ".cjo")) {
+            throw Exception("ObjCPreamble fixture prerequisite: missing objc." + name + ".cjo in " + root)
+        }
+    }
+    return root
+}
+
 private func CompilePreambleFixture(code: String): String {
+    let imports = PreambleImports()
     let dir = getVariable("TMPDIR").getOrThrow() + "/objc-preamble-" + GenerateRandomHexString()
     let _ = FileUtil.CreateDirs(dir + "/generated/")
     let path = dir + "/input.cj"
@@ -29,7 +43,7 @@ private func CompilePreambleFixture(code: String): String {
     opts.host = HostTripleInfo()
     opts.target = HostTripleInfo()
     opts.srcFiles.add(path)
-    opts.importPaths.add(getVariable("OBJC_PREAMBLE_IMPORTS").getOrThrow())
+    opts.importPaths.add(imports)
     opts.outputMode = OutputMode.STATIC_LIB
     opts.output = dir + "/fixture.a"
     opts.outputObjCGenDir = dir + "/generated"
