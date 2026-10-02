@@ -104,6 +104,7 @@ def continue_sync(debugger, process, record, path, capture):
         raise RuntimeError('ASYNC_MODE_UNQUALIFIED')
     transition = {'before': process_position(process), 'async': False}
     record.setdefault('continues', []).append(transition)
+    record.setdefault('stop_snapshots', []).append(capture())
     persist(path, record)
     error = process.Continue()
     transition['error'] = {'success': error.Success(), 'text': str(error),

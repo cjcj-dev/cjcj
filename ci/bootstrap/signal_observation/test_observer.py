@@ -98,7 +98,9 @@ class ObserverTests(unittest.TestCase):
             path = str(Path(directory) / 'record.json')
             def resumed():
                 # The pre-action position must already be durable at the API call.
-                self.assertEqual(json.loads(Path(path).read_text())['continues'][0]['before']['stop_id'], 7)
+                saved = json.loads(Path(path).read_text())
+                self.assertEqual(saved['continues'][0]['before']['stop_id'], 7)
+                self.assertEqual(saved['stop_snapshots'][0]['stop_id'], 7)
                 return error
             process.Continue.side_effect = resumed
             try:
@@ -108,7 +110,7 @@ class ObserverTests(unittest.TestCase):
                     saved = json.loads(Path(path).read_text())
                     self.assertEqual(saved['continues'][0]['error']['success'], success)
                     self.assertEqual(saved['continues'][0]['after']['stop_id'], after[1])
-                    self.assertEqual(len(saved['stop_snapshots']), 1)
+                    self.assertEqual(len(saved['stop_snapshots']), 2)
                 self.assertEqual(process.Continue.call_count, 0 if asynchronous else 1)
 
     def test_continue_progress(self): self.transition()
