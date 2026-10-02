@@ -86,13 +86,13 @@ class ReuseTests(unittest.TestCase):
             shutil.copyfile(backup, path)
             backup.unlink()
 
-    def configure(self, root=None):
+    def configure(self, root=None, size=131072):
         before = len(LAUNCHES)
         with self.assertRaises(StopAtLLDB):
-            run.observe(self.root / 'candidate/cjc', 'product', 131072, root or self.root)
+            run.observe(self.root / 'candidate/cjc', 'product', size, root or self.root)
         self.assertEqual(len(LAUNCHES), before + 1)
         # Consume the files observe actually wrote, after its final configuration.
-        config = run.OUT / 'product-131072.config.json'
+        config = run.OUT / ('product-' + str(size) + '.config.json')
         cfg = json.loads(config.read_text())
         self.assertEqual(cfg, LAUNCHES[-1]['config'])
         return cfg
@@ -115,7 +115,7 @@ class ReuseTests(unittest.TestCase):
         self.assertEqual(cfg['expected_libraries']['libLLVM.dylib'], reuse.IDENTITIES['sdk-stage0-run/third_party/llvm/lib/libLLVM.dylib'])
 
     def test_13_final_llvm_directory(self):
-        cfg = self.configure()
+        cfg = self.configure(size=131073)
         directories = [Path(p) for p in cfg['environment']['DYLD_LIBRARY_PATH'].split(':')]
         expected = self.root / 'sdk-stage0-run/third_party/llvm/lib'
         def check():
@@ -125,7 +125,7 @@ class ReuseTests(unittest.TestCase):
         self.target('final-llvm-directory', check)
 
     def test_14_final_llvm_receipt(self):
-        cfg = self.configure()
+        cfg = self.configure(size=131074)
         receipt = json.loads((run.OUT / 'run-input-receipt.json').read_text())
         sdk = str(self.root / 'sdk-stage0-run')
         llvm = sdk + '/third_party/llvm/lib/libLLVM.dylib'
