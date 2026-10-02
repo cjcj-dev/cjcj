@@ -41,3 +41,34 @@ test('script executor preserves each real subprocess exit and output argument', 
     await fs.rm(work, {recursive: true, force: true});
   }
 });
+
+test('ObjC fixture validation accepts recorded modules and rejects each missing or changed input', async () => {
+  const {validateObjCFixture, digest} = await import('./run-registered-tests.mjs');
+  const work = await fs.mkdtemp(path.join(os.tmpdir(), 'objc-input-'));
+  const imports = path.join(work, 'imports');
+  try {
+    await fs.mkdir(path.join(imports, 'objc'), {recursive: true});
+    const files = {};
+    for (const name of ['internal', 'lang']) {
+      const file = `objc/objc.${name}.cjo`;
+      await fs.writeFile(path.join(imports, file), name);
+      files[file] = digest(path.join(imports, file));
+    }
+    validateObjCFixture(imports, files);
+    for (const root of [undefined, '', path.join(work, 'missing')]) {
+      assert.throws(() => validateObjCFixture(root, files));
+    }
+    for (const name of ['internal', 'lang']) {
+      const file = `objc/objc.${name}.cjo`;
+      await fs.rename(path.join(imports, file), path.join(work, name));
+      assert.throws(() => validateObjCFixture(imports, files));
+      await fs.rename(path.join(work, name), path.join(imports, file));
+      await fs.writeFile(path.join(imports, file), 'changed');
+      assert.throws(() => validateObjCFixture(imports, files), /mismatched/);
+      await fs.writeFile(path.join(imports, file), name);
+    }
+    validateObjCFixture(imports, files);
+  } finally {
+    await fs.rm(work, {recursive: true, force: true});
+  }
+});
