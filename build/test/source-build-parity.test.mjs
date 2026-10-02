@@ -811,3 +811,11 @@ test('Git proof local remote accepts existing object and rejects missing object'
     fs.rmSync(root, {recursive: true, force: true});
   }
 });
+
+test('Git proof actual entry rejects failed local preflight without claiming missing object', () => {
+  assert.throws(() => assertRemoteObjectProof('/nonexistent-cjcj-824-remote', '0123456789012345678901234567890123456789'), error => {
+    assert.match(error.message, /remote preflight failed/);
+    assert.doesNotMatch(error.message, /is not reachable/);
+    return true;
+  });
+});
