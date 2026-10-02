@@ -66,3 +66,20 @@ and the modules together. The import root is `imports`, containing
 and `imports/objc` are not substitutes. The static archives are recorded inputs,
 not additional workspace link options. Bare tests without this prerequisite fail
 with an explicit fixture error; neither original test nor assertion is skipped.
+
+Directed reuse is limited to the registered ObjCPreamble suite. Capture the
+SHA256 of the already built `release/unittest_bin/compiler_unittest@cjcj` ELF,
+then use the same official SDK and workspace source:
+
+```bash
+node ci/run-registered-tests.mjs cj NEW_OUTPUT_DIR \
+  --member packages/compiler_unittest --filter '*ObjCPreambleTest*' \
+  --skip-build --target-dir "$BUILT_TARGET" --elf-sha256 "$ELF_SHA256"
+```
+
+All five selection fields are required. The runner verifies the registered
+source cases, regular x86-64 ELF and expected hash before preparing imports;
+then it uses cjpm's actual member/filter/skip-build options and checks that XML
+contains exactly the source-declared executed cases. Missing, skipped, duplicate
+or unrelated execution records fail. The default invocation still tests the
+whole workspace. Directed success does not represent a whole-workspace pass.

@@ -102,7 +102,7 @@ test('workspace runner records missing producer and real preparation subprocess 
     await fs.writeFile(path.join(root, 'runtime_shim/cjselfhost_llvmshim.o'), 'shim identity');
     spawnSync('git', ['init', '-q'], {cwd: root});
     spawnSync('git', ['add', '.'], {cwd: root});
-    const commit = spawnSync('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'fixture'], {cwd: root});
+    const commit = spawnSync('git', ['-c', 'user.name=Zxilly', '-c', 'user.email=zxilly@outlook.com', 'commit', '-qm', 'fixture'], {cwd: root});
     assert.equal(commit.status, 0);
     const producer = path.join(work, 'producer');
     await fs.writeFile(producer, '#!/bin/sh\nexit 7\n', {mode: 0o755});
@@ -122,4 +122,58 @@ test('workspace runner records missing producer and real preparation subprocess 
     }
     await fs.rm(work, {recursive: true, force: true});
   }
+});
+
+test('directed parameters preserve the whole-workspace default and reject unsupported or partial selection', async () => {
+  const {parseCangjieSelection, cangjieCommand} = await import('./run-registered-tests.mjs');
+  const target = '/private/prebuilt';
+  const hash = 'a'.repeat(64);
+  const args = ['--member', 'packages/compiler_unittest', '--filter', '*ObjCPreambleTest*',
+    '--skip-build', '--target-dir', target, '--elf-sha256', hash];
+  const selected = parseCangjieSelection(args);
+  assert.equal(parseCangjieSelection([]), undefined);
+  const whole = cangjieCommand('/sdk', '/results');
+  assert.ok(!whole.includes('--member'));
+  assert.ok(!whole.includes('--filter'));
+  assert.ok(!whole.includes('--skip-build'));
+  assert.equal(whole.at(-1), '/results/target');
+  const command = cangjieCommand('/sdk', '/results', selected);
+  assert.equal(command[command.indexOf('--member') + 1], 'packages/compiler_unittest');
+  assert.equal(command[command.indexOf('--filter') + 1], '*ObjCPreambleTest*');
+  assert.equal(command[command.indexOf('--target-dir') + 1], target);
+  assert.ok(command.includes('--skip-build'));
+  for (const bad of [args.slice(0, -2), [...args, '--unknown'], [...args, '--skip-build'],
+    args.map(arg => arg === target ? 'relative' : arg), args.map(arg => arg === '*ObjCPreambleTest*' ? '*Missing*' : arg)]) {
+    assert.throws(() => parseCangjieSelection(bad));
+  }
+});
+
+test('prebuilt selection and XML reject wrong identity, empty execution and incomplete or unrelated cases', async () => {
+  const {inspectSelection, inspectTargetReports, digest} = await import('./run-registered-tests.mjs');
+  const {REGISTERED} = await import('./test-manifest.mjs');
+  const work = await fs.mkdtemp(path.join(os.tmpdir(), 'objc-selection-'));
+  try {
+    const elf = path.join(work, 'release/unittest_bin/compiler_unittest@cjcj');
+    await fs.mkdir(path.dirname(elf), {recursive: true});
+    const bytes = Buffer.alloc(20); bytes.write('\x7fELF'); bytes.writeUInt16LE(62, 18);
+    await fs.writeFile(elf, bytes);
+    const selection = {member: 'packages/compiler_unittest', filter: '*ObjCPreambleTest*',
+      targetDir: work, skipBuild: true, elfSha256: digest(elf)};
+    const qualified = inspectSelection(repoRoot, REGISTERED, selection);
+    assert.deepEqual(qualified.cases, ['ordinaryFrontendControl', 'mirrorImplementationFiles']);
+    assert.throws(() => inspectSelection(repoRoot, [], selection), /not registered/);
+    assert.throws(() => inspectSelection(repoRoot, REGISTERED, {...selection, elfSha256: '0'.repeat(64)}), /identity/);
+    await fs.writeFile(elf, 'not an ELF');
+    assert.throws(() => inspectSelection(repoRoot, REGISTERED, selection), /identity/);
+    const report = path.join(work, 'report.xml');
+    const one = '<testcase classname="cjcj::compiler_unittest.ObjCPreambleTest" name="ordinaryFrontendControl" assertions="1"/>';
+    const two = '<testcase classname="cjcj::compiler_unittest.ObjCPreambleTest" name="mirrorImplementationFiles" assertions="5"/>';
+    for (const xml of ['<testsuite/>', `<testsuite>${one}</testsuite>`, `<testsuite>${one}${one}</testsuite>`,
+      `<testsuite>${one}${two.replace('mirrorImplementationFiles', 'unrelated')}</testsuite>`]) {
+      await fs.writeFile(report, xml);
+      assert.throws(() => inspectTargetReports([report], qualified.cases), /did not execute/);
+    }
+    await fs.writeFile(report, `<testsuite>${one}${two}</testsuite>`);
+    assert.deepEqual(inspectTargetReports([report], qualified.cases).map(c => c.assertions), [1, 5]);
+  } finally { await fs.rm(work, {recursive: true, force: true}); }
 });
