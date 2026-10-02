@@ -118,6 +118,9 @@ class ReuseTests(unittest.TestCase):
         self.target('process-sdk-config', lambda: self.assertEqual(cfg['environment']['CANGJIE_HOME'], str(self.root / 'sdk-stage0-run')))
         self.assertEqual(cfg['expected_libraries']['libLLVM.dylib'], reuse.IDENTITIES['sdk-stage0-run/third_party/llvm/lib/libLLVM.dylib'])
 
+    def test_15_wrong_candidate_entity(self):
+        self.rejected('wrong-candidate-entity', lambda: run.observe(self.root / 'candidate/Signal.cj', 'product', 131072, self.root), 'candidate-path')
+
     def test_13_final_llvm_directory(self):
         cfg = self.configure(size=131073)
         directories = [Path(p) for p in cfg['environment']['DYLD_LIBRARY_PATH'].split(':')]
