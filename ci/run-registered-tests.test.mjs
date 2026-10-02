@@ -72,3 +72,54 @@ test('ObjC fixture validation accepts recorded modules and rejects each missing 
     await fs.rm(work, {recursive: true, force: true});
   }
 });
+
+test('workspace runner records missing producer and real preparation subprocess failure before cjpm', async () => {
+  const {runCangjie} = await import('./run-registered-tests.mjs');
+  const work = await fs.mkdtemp(path.join(os.tmpdir(), 'objc-prerequisite-'));
+  const oldHome = process.env.CANGJIE_HOME;
+  const oldProducer = process.env.OBJC_PREAMBLE_PRODUCER;
+  try {
+    const sdk = path.join(work, 'sdk');
+    for (const file of ['bin/cjc', 'tools/bin/cjpm',
+      'runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so',
+      'runtime/lib/linux_x86_64_cjnative/libboundscheck.so',
+      'lib/linux_x86_64_cjnative/libcangjie-std-core.a', 'third_party/llvm/lib/libLLVM-15.so']) {
+      await fs.mkdir(path.dirname(path.join(sdk, file)), {recursive: true});
+      await fs.writeFile(path.join(sdk, file), 'identity input');
+    }
+    process.env.CANGJIE_HOME = sdk;
+    delete process.env.OBJC_PREAMBLE_PRODUCER;
+    const missing = path.join(work, 'missing');
+    await fs.mkdir(missing);
+    const rejected = await runCangjie(repoRoot, [], missing);
+    assert.equal(rejected[0].executed, false);
+    assert.match(rejected[0].error, /explicit OBJC_PREAMBLE_PRODUCER/);
+    const root = path.join(work, 'tree');
+    await fs.mkdir(path.join(root, 'scripts'), {recursive: true});
+    await fs.copyFile(path.join(repoRoot, 'scripts/objc_preamble_unit.py'), path.join(root, 'scripts/objc_preamble_unit.py'));
+    await fs.cp(path.join(repoRoot, 'scripts/objc_regcomp_fixtures'), path.join(root, 'scripts/objc_regcomp_fixtures'), {recursive: true});
+    await fs.mkdir(path.join(root, 'runtime_shim'));
+    await fs.writeFile(path.join(root, 'runtime_shim/cjselfhost_llvmshim.o'), 'shim identity');
+    spawnSync('git', ['init', '-q'], {cwd: root});
+    spawnSync('git', ['add', '.'], {cwd: root});
+    const commit = spawnSync('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'fixture'], {cwd: root});
+    assert.equal(commit.status, 0);
+    const producer = path.join(work, 'producer');
+    await fs.writeFile(producer, '#!/bin/sh\nexit 7\n', {mode: 0o755});
+    process.env.OBJC_PREAMBLE_PRODUCER = producer;
+    const output = path.join(work, 'failed');
+    await fs.mkdir(output);
+    const failed = await runCangjie(root, [], output);
+    assert.equal(failed[0].executed, false);
+    assert.equal(failed[0].preparation.rc, 1);
+    const manifest = JSON.parse(await fs.readFile(path.join(output, 'objc-fixture/fixture.json')));
+    assert.equal(manifest.stubs.internal.rc, 7);
+    assert.equal(manifest.stubs.lang, undefined);
+    assert.match(manifest.error, /internal producer rc=7/);
+  } finally {
+    for (const [key, value] of [['CANGJIE_HOME', oldHome], ['OBJC_PREAMBLE_PRODUCER', oldProducer]]) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+    await fs.rm(work, {recursive: true, force: true});
+  }
+});
