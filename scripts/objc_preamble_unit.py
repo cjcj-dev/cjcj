@@ -35,10 +35,14 @@ def prepare(tree, sdk, out, producer=None, stub_imports=None):
         if Path(producer).resolve() != product:
             shutil.copy2(producer, product)
         inputs = [product, sdk / 'bin/cjc', sdk / 'tools/bin/cjpm',
-                  tree / 'runtime_shim/cjselfhost_llvmshim.o']
+                  tree / 'runtime_shim/cjselfhost_llvmshim.o',
+                  sdk / 'lib/linux_x86_64_cjnative/libcangjie-std-core.a',
+                  sdk / 'third_party/llvm/lib/libLLVM-15.so']
         inputs += sorted((sdk / 'runtime/lib/linux_x86_64_cjnative').glob('*.so'))
         sources = [tree / 'scripts/objc_regcomp_fixtures' / (n + '.cj') for n in ('internal', 'lang')]
         record['inputs'] = {str(p): digest(p) for p in inputs + sources}
+        record['sdk_files'] = {str(p.relative_to(sdk)): digest(p)
+                               for p in sorted(sdk.rglob('*')) if p.is_file()}
         record['source_sha'] = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=tree, text=True).strip()
         imports = out / 'imports/objc'
         imports.mkdir(parents=True, exist_ok=True)
