@@ -226,9 +226,23 @@ def observe(debugger, command, result, internal_dict):
                     item['sha256'] = sha(name)
                 record['modules'].append(item)
 
+        registered = {}
+
         def capture():
             bps = [entry, syscall, exit_bp] + [target.FindBreakpointByID(i) for i in pending]
-            return stop_snapshot(process, target, active, pending, bps)
+            snapshot = stop_snapshot(process, target, active, pending, bps)
+            # One-shot breakpoints may be removed by LLDB at the stop. Keep the
+            # identity captured before Continue while the corresponding call is pending.
+            for bp in snapshot['breakpoints']:
+                registered[bp['id']] = bp
+            live_ids = {entry.GetID(), syscall.GetID(), *pending}
+            if exit_bp is not None:
+                live_ids.add(exit_bp.GetID())
+            current_ids = {bp['id'] for bp in snapshot['breakpoints']}
+            for bp_id in live_ids - current_ids:
+                if bp_id in registered:
+                    snapshot['breakpoints'].append(dict(registered[bp_id], absent_at_capture=True))
+            return snapshot
 
         # Capture even a launch rejection before the exception handler can Kill.
         while process.GetState() == lldb.eStateStopped:
