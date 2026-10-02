@@ -73,7 +73,7 @@ class LifecycleEntryTests(unittest.TestCase):
         def data():
             number = sequence[min(cursor[0], len(sequence)-1)][0]
             if cursor[0] == 2:
-                if fault == 'empty' or created[0].SetOneShot.call_args.args[0]: return []
+                if fault == 'empty' or (fault in (None, 'exit') and created[0].SetOneShot.call_args.args[0]): return []
                 if fault == 'id': return [99, 1]
                 if fault == 'location': return [number, 99]
                 if fault == 'duplicate': return [number, 1, number, 1]
@@ -94,7 +94,7 @@ class LifecycleEntryTests(unittest.TestCase):
         error.GetError.return_value = error.GetType.return_value = 0
         def resume():
             cursor[0] += 1
-            if cursor[0] == 2 and created[0].SetOneShot.call_args.args[0]: live.pop(3)
+            if cursor[0] == 2 and fault in (None, 'exit') and created[0].SetOneShot.call_args.args[0]: live.pop(3)
             return error
         process.Continue.side_effect = resume
         process.Kill.return_value = error
@@ -127,6 +127,7 @@ class LifecycleEntryTests(unittest.TestCase):
 
     def test_exit_lifecycle(self):
         record, created = self.run_entry('exit')
+        self.assertIn('exit_deletion', record, record.get('error'))
         self.assertEqual(record['exit_thread_id'], 19)
         self.assertEqual(record['exit_pc'], 16384)
         self.assertTrue(record['exit_deletion']['absent'])
