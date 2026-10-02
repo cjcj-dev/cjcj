@@ -8,7 +8,7 @@ import sys
 import tempfile
 import types
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, MagicMock, patch
 
 lldb = types.ModuleType('lldb')
 for i, name in enumerate(('eStateStopped', 'eStateExited', 'eStateRunning', 'eStopReasonNone',
@@ -147,6 +147,55 @@ class ObserverTests(unittest.TestCase):
     def test_invalid_size(self):
         events, receipts = calibration(); events[2]['in']['ss_size'] = receipts[2]['in']['ss_size'] = 1
         with self.assertRaisesRegex(RuntimeError, '^CALIBRATION_API_PARAMETERS$'): self.qualify(events, receipts)
+
+    def test_pre_kill_snapshot(self):
+        debugger, target, process = Mock(), Mock(), MagicMock()
+        debugger.GetAsync.return_value = False
+        debugger.CreateTarget.return_value = target
+        target.IsValid.return_value = True; target.GetTriple.return_value = 'arm64-apple-macosx15.0.0'
+        target.GetByteOrder.return_value = 99
+        module = Mock(); target.GetModuleAtIndex.return_value = module
+        module.GetNumSymbols.return_value = 1
+        symbol = module.GetSymbolAtIndex.return_value
+        symbol.GetName.return_value = 'calibration_begin'; symbol.GetType.return_value = 98
+        symbol.GetStartAddress.return_value.GetFileAddress.return_value = 4096
+        for bp, number in ((target.BreakpointCreateBySBAddress.return_value, 1),
+                           (target.BreakpointCreateByName.return_value, 2)):
+            bp.IsValid.return_value = True; bp.GetID.return_value = number
+            bp.IsEnabled.return_value = True; bp.GetThreadID.return_value = 19
+            bp.GetNumLocations.return_value = 0
+        target.Launch.return_value = process
+        process.IsValid.return_value = True; process.GetProcessID.return_value = 123
+        process.GetState.return_value = lldb.eStateStopped
+        process.GetStopID.return_value = 7; process.GetNumThreads.return_value = 0
+        process.GetSelectedThread.return_value.IsValid.return_value = False
+        process.__iter__.return_value = iter([])
+        error = Mock(); error.Success.return_value = True
+        with tempfile.TemporaryDirectory(dir=os.environ.get('OBSERVER_TEST_ROOT')) as directory:
+            path = Path(directory) / 'record.json'
+            config = Path(directory) / 'config.json'
+            config.write_text(json.dumps({'output': str(path), 'binary': '/synthetic-calibrator',
+                                          'mode': 'calibrate', 'argv': [], 'environment': {},
+                                          'cwd': directory, 'stdout': directory+'/stdout',
+                                          'stderr': directory+'/stderr'}))
+            def kill():
+                saved = json.loads(path.read_text())
+                self.assertEqual(saved['error'], 'STOP_WITHOUT_THREAD')
+                self.assertEqual(saved['stop_snapshots'][0]['stop_id'], 7)
+                self.assertEqual(saved['stop_snapshots'][0]['threads'], [])
+                return error
+            process.Kill.side_effect = kill
+            with patch.dict(os.environ, SIGNAL_OBSERVER_CONFIG=str(config)), \
+                 patch.object(lldb, 'eByteOrderLittle', 99, create=True), \
+                 patch.object(lldb, 'eSymbolTypeCode', 98, create=True), \
+                 patch.object(lldb, 'SBLaunchInfo', Mock(), create=True), \
+                 patch.object(lldb, 'SBError', Mock(return_value=error), create=True), \
+                 patch.object(lldb.SBDebugger, 'GetVersionString', lambda: 'synthetic', create=True):
+                o.observe(debugger, '', None, {})
+            saved = json.loads(path.read_text())
+            self.assertEqual(saved['status'], 'OBSERVER_UNQUALIFIED')
+            self.assertEqual(process.Kill.call_count, 1)
+            process.Continue.assert_not_called()
 
     def test_snapshot_detached(self):
         frame = Mock(); frame.GetPC.return_value = 4096
