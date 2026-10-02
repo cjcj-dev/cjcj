@@ -40,6 +40,8 @@ jobs:
           if xcode != identity['xcode']: raise SystemExit('retained Xcode ABI mismatch')
           if sha(pathlib.Path('ci/bootstrap/signal_observation/calibrate.c')) != identity['source_sha256']:
               raise SystemExit('calibration source mismatch')
+          if sha(pathlib.Path('ci/bootstrap/signal_observation/observer.py')) != '7020b761344e0064ae517fe2b50edb531fc9981cf96353c3f0f18347b669e70c':
+              raise SystemExit('single pinned observer identity mismatch')
           info = {'sdkroot': sdk, 'xcode': xcode, 'identity': identity, 'actual_files': actual,
                   'observer_sha256': sha(pathlib.Path('ci/bootstrap/signal_observation/observer.py')),
                   'runner': subprocess.check_output(['uname', '-a'], text=True),
