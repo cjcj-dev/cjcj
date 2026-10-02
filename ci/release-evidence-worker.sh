@@ -21,7 +21,8 @@ export PATH="$root/bin:$PATH"
 export RELEASE_EVIDENCE_TEST_ROOT="$root/release-evidence-tests"
 echo "RELEASE_EVIDENCE_WORKER jq=$root/bin/jq version=$(jq --version) sha256=$expected"
 if [[ $# = 0 ]]; then
-  mapfile -t tests < <(node ci/test-manifest.mjs list)
+  test_list=$(node ci/test-manifest.mjs list)
+  mapfile -t tests <<< "$test_list"
   set -- "${tests[@]}"
 fi
 exec node --test "$@"
