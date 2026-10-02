@@ -3,35 +3,23 @@ on:
   workflow_dispatch:
   push:
     branches: [sym/473-implement-r5848758650]
-    paths: [.github/workflows/darwin-signal-stack-evidence.yml, ci/**]
+    paths: [.github/workflows/darwin-signal-stack-evidence.yml]
 permissions:
   contents: read
   actions: read
 jobs:
   signal-stack:
-    name: ${{ matrix.target }}
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 150
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: darwin-arm64
-            llvm_platform: darwin_aarch64
-            host_tuple: darwin_aarch64_cjnative
-            runner: macos-15
-          - target: darwin-x64
-            llvm_platform: darwin_x86_64
-            host_tuple: darwin_x86_64_cjnative
-            runner: macos-15-intel
+    name: darwin-arm64-natural-observation
+    runs-on: macos-15
+    timeout-minutes: 60
     env:
       CANGJIE_WORKSPACE: ${{ github.workspace }}/.srcbuild/workspace
       CANGJIE_BUILD_ROOT: ${{ github.workspace }}/.srcbuild/buildtools
-      CJCJ_SRCBUILD_TARGET: ${{ matrix.target }}
+      CJCJ_SRCBUILD_TARGET: darwin-arm64
       cjHeapSize: 4GB
       cjHeapSwap: "on"
-      HOST_TUPLE: ${{ matrix.host_tuple }}
-      LLVM_PLATFORM: ${{ matrix.llvm_platform }}
+      HOST_TUPLE: darwin_aarch64_cjnative
+      LLVM_PLATFORM: darwin_aarch64
     steps:
       - uses: actions/checkout@v7
 
@@ -58,29 +46,34 @@ jobs:
           echo "CJCJ_SRCBUILD_HOST_SDK=$host_sdk" >> "$GITHUB_ENV"
 
       - name: Install build dependencies
-        run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" install-system-deps
+        run: npx --yes zx@8 build/cli.mjs --target "darwin-arm64" install-system-deps
 
       - name: Start sccache
         uses: ./.github/actions/sccache
         with:
           component: srcbuild
-          platform: ${{ matrix.target }}
+          platform: darwin-arm64
           require-compiles: ${{ job.status == 'success' }}
           pin: ${{ env.RUNTIME_REF }}
           cache-size: 2G
+
+      - name: Qualify the native LLDB observer once
+        run: |
+          ulimit -c 0
+          python3 ci/bootstrap/signal_observation/run.py calibrate
 
       - name: Generate SDK version
         id: version
         env:
           REQUESTED_REF: ''
         run: |
-          value=$(npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" --cangjie-version "$REQUESTED_REF" print-version)
+          value=$(npx --yes zx@8 build/cli.mjs --target "darwin-arm64" --cangjie-version "$REQUESTED_REF" print-version)
           echo "value=$value" >> "$GITHUB_OUTPUT"
 
       - name: Download pinned source
         run: |
           npx --yes zx@8 build/cli.mjs \
-            --target "${{ matrix.target }}" \
+            --target "darwin-arm64" \
             --build-type "relwithdebinfo" \
             --cangjie-version "${{ steps.version.outputs.value }}" \
             fetch \
@@ -140,7 +133,7 @@ jobs:
       - name: Load pinned colour runtime provenance
         shell: bash
         env:
-          RUNTIME_PLATFORM: ${{ matrix.llvm_platform }}
+          RUNTIME_PLATFORM: darwin_aarch64
         run: |
           set -euo pipefail
           pin="ci/colour-runtime/$LLVM_PLATFORM.env"
@@ -160,7 +153,7 @@ jobs:
       - name: Load immutable AST support provenance
         shell: bash
         env:
-          AST_PLATFORM: ${{ matrix.llvm_platform }}
+          AST_PLATFORM: darwin_aarch64
         run: |
           set -euo pipefail
           # shellcheck source=/dev/null
@@ -187,25 +180,29 @@ jobs:
           CJCJ_BOOTSTRAP_AST_ARTIFACT="$RUNNER_TEMP/ast-support/libcangjie-ast-support.a" \
             node ci/release/prepare_darwin_std_inputs.mjs
 
-      - name: Compile the native stage0 compiler
-        run: bash ci/bootstrap/gha_run.sh stage0
+      - name: Prepare one candidate product without an unobserved version launch
+        run: |
+          ulimit -c 0
+          bash ci/bootstrap/signal_observation/prepare.sh
 
-      - name: Three arms over the Darwin alt signal stack constant
-        run: bash ci/bootstrap/signal_stack_arms.sh
+      - name: Observe the natural candidate and conditionally the old size once
+        run: |
+          ulimit -c 0
+          bash ci/bootstrap/signal_observation/product.sh
 
       - name: Record compiler cache activity
         if: always()
         uses: ./.github/actions/sccache-report
         with:
           component: srcbuild
-          platform: ${{ matrix.target }}
+          platform: darwin-arm64
           require-compiles: ${{ job.status == 'success' }}
 
-      - name: Upload the arm evidence
+      - name: Preserve observation and product entities
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: darwin-signal-stack-arms-${{ matrix.target }}-${{ github.run_id }}
-          path: ${{ runner.temp }}/signal-stack-arms
+          name: darwin-signal-natural-observation-${{ github.run_id }}
+          path: ${{ runner.temp }}/signal-observation
           if-no-files-found: error
           retention-days: 30
