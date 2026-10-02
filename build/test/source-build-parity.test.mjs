@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
+import {assertGitObjectProof} from './git-object-proof.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -746,8 +747,7 @@ test('package paths and archive roots match package.py', async () => {
 // local branch, and nothing said so -- the build simply kept using the older
 // pin, and the jobserver on the compiler side had no token source.
 //
-// Skipped without network rather than failing: an offline run should not turn
-// red over something it cannot check.
+// A failed or interrupted probe is not a successful reachability check.
 test('the cjpm pin names an object the remote actually has', {timeout: 60_000}, () => {
   const {CJPM_FORK_URL: url, CJPM_FORK_REF: ref} = cjpmPin;
   assert.match(ref, /^[0-9a-f]{40}$/, 'CJPM_FORK_REF must be a full sha');
@@ -756,20 +756,13 @@ test('the cjpm pin names an object the remote actually has', {timeout: 60_000}, 
   const probe = spawnSync('git', sourceLsRemoteArguments(url, 'HEAD'), {
     encoding: 'utf8', timeout: 30_000,
   });
-  if (probe.status !== 0) {
-    console.error(`SKIP pin reachability: cannot reach ${fetchUrl}`);
-    return;
-  }
+  assertGitObjectProof(probe, {operation: 'ls-remote', url: fetchUrl, ref: 'HEAD'});
 
   // `git fetch --depth 1 <url> <sha>` is exactly what tools.mjs runs; --dry-run
   // resolves the object without writing anything into this repository.
   const fetched = spawnSync('git', sourceFetchArguments(url, ref, {dryRun: true}), {
     encoding: 'utf8', timeout: 45_000,
   });
-  assert.equal(
-    fetched.status, 0,
-    `CJPM_FORK_REF ${ref} is not reachable on ${url}.\n`
-    + 'The commit is probably still on a local branch. Push it before pinning it.\n'
-    + `git said: ${(fetched.stderr || '').trim()}`,
-  );
+  assertGitObjectProof(fetched, {operation: 'fetch', url: fetchUrl, ref});
+
 });
