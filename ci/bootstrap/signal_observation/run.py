@@ -35,7 +35,7 @@ def command(argv, log, timeout=120, env=None):
     return rc
 
 
-def observe(binary, mode, size=0):
+def observe(binary, mode, size=0, entity_root=None):
     name = 'calibration' if mode == 'calibrate' else 'product-' + str(size)
     cfg = {'binary': str(binary), 'binary_sha256': digest(binary), 'mode': mode,
            'selected_size': size, 'cwd': str(OUT), 'argv': [] if mode == 'calibrate' else ['--version'],
@@ -48,12 +48,23 @@ def observe(binary, mode, size=0):
         calibration = json.loads((OUT / 'calibration.json').read_text())
         assert calibration['status'] == 'CALIBRATED'
         cfg['layout'] = calibration['config']['layout']
-        selection = select(os.environ['SIGNAL_ENTITY_ROOT'])
-        if str(binary.resolve()) != selection['binary']:
-            raise ValueError('candidate-path')
-        cfg['environment'].update(selection['environment'])
-        cfg['expected_libraries'] = selection['expected_libraries']
-        (OUT / 'run-input-receipt.json').write_text(json.dumps(selection, indent=2) + '\n')
+        if entity_root is None:
+            work = Path(os.environ['CANGJIE_WORKSPACE']) / 'bootstrap-work'
+            sdk = work / 'sdk-stage0'
+            host = Path(os.environ['CJCJ_BOOTSTRAP_HOST_RT'])
+            tuple_ = os.environ['HOST_TUPLE']
+            cfg['environment'].update(CANGJIE_HOME=str(sdk), DYLD_LIBRARY_PATH=':'.join([
+                str(host / 'lib' / tuple_), str(sdk / 'runtime/lib' / tuple_),
+                str(sdk / 'lib' / tuple_), str(sdk / 'third_party/llvm/lib')]))
+            cfg['expected_libraries'] = {n: digest(host / 'lib' / tuple_ / n)
+                for n in ('libcangjie-runtime.dylib', 'libboundscheck.dylib')}
+        else:
+            selection = select(entity_root)
+            if str(binary.resolve()) != selection['binary']:
+                raise ValueError('candidate-path')
+            cfg['environment'].update(selection['environment'])
+            cfg['expected_libraries'] = selection['expected_libraries']
+            (OUT / 'run-input-receipt.json').write_text(json.dumps(selection, indent=2) + '\n')
     config = OUT / (name + '.config.json')
     config.write_text(json.dumps(cfg, indent=2))
     env = dict(os.environ, SIGNAL_OBSERVER_CONFIG=str(config))
@@ -62,7 +73,7 @@ def observe(binary, mode, size=0):
     if rc != 0 or not Path(cfg['output']).is_file():
         raise SystemExit('OBSERVER_UNQUALIFIED LLDB rc=' + str(rc))
     result = json.loads(Path(cfg['output']).read_text())
-    if mode == 'product':
+    if mode == 'product' and entity_root is not None:
         validate_modules(result, selection)
     print(name, result['status'], flush=True)
     return result
@@ -97,7 +108,7 @@ def main():
         selection = select(os.environ['SIGNAL_ENTITY_ROOT'])
         dependency = native_dependency()
         (OUT / 'native-dependency.json').write_text(json.dumps(dependency, indent=2) + '\n')
-        result = observe(Path(selection['binary']), 'product', 131072)
+        result = observe(Path(selection['binary']), 'product', 131072, os.environ['SIGNAL_ENTITY_ROOT'])
         if result['status'] != 'INSTALLED' or result.get('process_rc') != 0:
             raise SystemExit(20)
         # Deliberately ends here: no helper, old-size build, or second launch.
