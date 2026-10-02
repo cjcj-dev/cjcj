@@ -1,11 +1,17 @@
 name: Darwin alt signal stack evidence
 on:
   workflow_dispatch:
+    inputs:
+      reuse_only:
+        description: Restore the fixed candidate for one bounded observation (requires controller authorization)
+        type: boolean
+        default: false
 permissions:
   contents: read
   actions: read
 jobs:
   signal-stack:
+    if: ${{ !inputs.reuse_only }}
     name: darwin-arm64-natural-observation
     runs-on: macos-15
     timeout-minutes: 65
@@ -216,3 +222,58 @@ jobs:
             !${{ runner.temp }}/signal-observation/keep
           if-no-files-found: error
           retention-days: 30
+
+  reuse-candidate:
+    if: ${{ inputs.reuse_only }}
+    runs-on: macos-15
+    timeout-minutes: 15
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v7
+      - name: Restore fixed entity archive without preparing or building
+        uses: actions/download-artifact@v8
+        with:
+          artifact-ids: 11210854096
+          merge-multiple: true
+          github-token: ${{ github.token }}
+          run-id: 36968856303
+          path: ${{ runner.temp }}/signal-observation/original-entities
+      - name: Restore reviewed calibration without executing helper
+        uses: actions/download-artifact@v8
+        with:
+          artifact-ids: 11209442181
+          merge-multiple: true
+          github-token: ${{ github.token }}
+          run-id: 36965303286
+          path: ${{ runner.temp }}/signal-observation/reviewed-calibration
+      - name: Verify original envelope
+        run: |
+          ulimit -c 0
+          python3 ci/bootstrap/signal_observation/admit.py
+      - name: Materialize and observe only the retained candidate once
+        shell: bash
+        run: |
+          ulimit -c 0
+          set -euo pipefail
+          original="$RUNNER_TEMP/signal-observation/original-entities"
+          destination="$RUNNER_TEMP/signal-observation/private-entities"
+          python3 ci/bootstrap/signal_observation/reuse.py materialize \
+            "$original/entities.tar.gz" "$original/keep.sha256" \
+            "$original/candidate-source.sha" "$destination"
+          export SIGNAL_ENTITY_ROOT="$destination/keep"
+          python3 ci/bootstrap/signal_observation/run.py reuse-product
+      - name: Preserve single-attempt receipts and failure facts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: darwin-signal-reuse-observation
+          path: |
+            ${{ runner.temp }}/signal-observation/*.json
+            ${{ runner.temp }}/signal-observation/*.log
+            ${{ runner.temp }}/signal-observation/*.rc
+            ${{ runner.temp }}/signal-observation/*.wall
+            ${{ runner.temp }}/signal-observation/*.stdout
+            ${{ runner.temp }}/signal-observation/*.stderr
+            ${{ runner.temp }}/signal-observation/private-entities/*receipt.json
+          if-no-files-found: error

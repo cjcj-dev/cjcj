@@ -8,6 +8,8 @@ import subprocess
 import sys
 import time
 
+from reuse import select, validate_modules, native_dependency
+
 HERE = Path(__file__).resolve().parent
 OUT = Path(os.environ['RUNNER_TEMP']) / 'signal-observation'
 OUT.mkdir(parents=True, exist_ok=True)
@@ -46,15 +48,12 @@ def observe(binary, mode, size=0):
         calibration = json.loads((OUT / 'calibration.json').read_text())
         assert calibration['status'] == 'CALIBRATED'
         cfg['layout'] = calibration['config']['layout']
-        work = Path(os.environ['CANGJIE_WORKSPACE']) / 'bootstrap-work'
-        sdk = work / 'sdk-stage0'
-        host = Path(os.environ['CJCJ_BOOTSTRAP_HOST_RT'])
-        tuple_ = os.environ['HOST_TUPLE']
-        cfg['environment'].update(CANGJIE_HOME=str(sdk), DYLD_LIBRARY_PATH=':'.join([
-            str(host / 'lib' / tuple_), str(sdk / 'runtime/lib' / tuple_),
-            str(sdk / 'lib' / tuple_), str(sdk / 'third_party/llvm/lib')]))
-        cfg['expected_libraries'] = {n: digest(host / 'lib' / tuple_ / n)
-            for n in ('libcangjie-runtime.dylib', 'libboundscheck.dylib')}
+        selection = select(os.environ['SIGNAL_ENTITY_ROOT'])
+        if str(binary.resolve()) != selection['binary']:
+            raise ValueError('candidate-path')
+        cfg['environment'].update(selection['environment'])
+        cfg['expected_libraries'] = selection['expected_libraries']
+        (OUT / 'run-input-receipt.json').write_text(json.dumps(selection, indent=2) + '\n')
     config = OUT / (name + '.config.json')
     config.write_text(json.dumps(cfg, indent=2))
     env = dict(os.environ, SIGNAL_OBSERVER_CONFIG=str(config))
@@ -63,38 +62,53 @@ def observe(binary, mode, size=0):
     if rc != 0 or not Path(cfg['output']).is_file():
         raise SystemExit('OBSERVER_UNQUALIFIED LLDB rc=' + str(rc))
     result = json.loads(Path(cfg['output']).read_text())
+    if mode == 'product':
+        validate_modules(result, selection)
     print(name, result['status'], flush=True)
     return result
 
 
-if sys.argv[1] == 'calibrate':
-    sdk = subprocess.check_output(['xcrun', '--show-sdk-path'], text=True).strip()
-    info = {'sdkroot': sdk, 'source_sha256': digest(HERE / 'calibrate.c'),
-            'observer_sha256': digest(HERE / 'observer.py'),
-            'runner': subprocess.check_output(['uname', '-a'], text=True),
-            'xcode': subprocess.check_output(['xcodebuild', '-version'], text=True)}
-    (OUT / 'sdk.json').write_text(json.dumps(info, indent=2))
-    # Record the SDK definitions and ABI-bearing clang output before running.
-    headers = sorted(Path(sdk).glob('usr/include/**/signal.h'))
-    with open(OUT / 'sdk-signal-definitions.txt', 'w') as f:
-        for path in headers:
-            lines = path.read_text(errors='replace').splitlines()
-            for i, line in enumerate(lines):
-                if any(word in line for word in ('ss_sp', 'ss_size', 'ss_flags', 'SIGSTKSZ', 'SS_DISABLE', 'SS_ONSTACK')):
-                    f.write(f'{path}:{i+1}: {line}\n')
-    clang_path = subprocess.check_output(['xcrun', '--find', 'clang'], text=True).strip()
-    clang = [os.environ['SCCACHE_PATH'], clang_path, '-isysroot', sdk, '-arch', 'arm64', '-g', '-O0']
-    rc = command(clang + [str(HERE / 'calibrate.c'), '-o', str(OUT / 'calibrator')], OUT / 'calibrator-build.log')
-    if rc: raise SystemExit('calibrator build failed')
-    rc = command(['otool', '-tvV', str(OUT / 'calibrator')], OUT / 'calibrator-assembly.txt')
-    if rc: raise SystemExit('ABI assembly failed')
-    command(['file', str(OUT / 'calibrator')], OUT / 'calibrator.file')
-    result = observe(OUT / 'calibrator', 'calibrate')
-    if result['status'] != 'CALIBRATED': raise SystemExit('stop: calibration unqualified')
-elif sys.argv[1] == 'product':
-    result = observe(Path(sys.argv[2]), 'product', int(sys.argv[3]))
-    # Only an observed successful install permits the old-size product arm.
-    if result['status'] != 'INSTALLED' or result.get('process_rc') != 0:
-        raise SystemExit(20)
-else:
-    raise SystemExit('unknown stage')
+def main():
+    if sys.argv[1] == 'calibrate':
+        sdk = subprocess.check_output(['xcrun', '--show-sdk-path'], text=True).strip()
+        info = {'sdkroot': sdk, 'source_sha256': digest(HERE / 'calibrate.c'),
+                'observer_sha256': digest(HERE / 'observer.py'),
+                'runner': subprocess.check_output(['uname', '-a'], text=True),
+                'xcode': subprocess.check_output(['xcodebuild', '-version'], text=True)}
+        (OUT / 'sdk.json').write_text(json.dumps(info, indent=2))
+        # Record the SDK definitions and ABI-bearing clang output before running.
+        headers = sorted(Path(sdk).glob('usr/include/**/signal.h'))
+        with open(OUT / 'sdk-signal-definitions.txt', 'w') as f:
+            for path in headers:
+                lines = path.read_text(errors='replace').splitlines()
+                for i, line in enumerate(lines):
+                    if any(word in line for word in ('ss_sp', 'ss_size', 'ss_flags', 'SIGSTKSZ', 'SS_DISABLE', 'SS_ONSTACK')):
+                        f.write(f'{path}:{i+1}: {line}\n')
+        clang_path = subprocess.check_output(['xcrun', '--find', 'clang'], text=True).strip()
+        clang = [os.environ['SCCACHE_PATH'], clang_path, '-isysroot', sdk, '-arch', 'arm64', '-g', '-O0']
+        rc = command(clang + [str(HERE / 'calibrate.c'), '-o', str(OUT / 'calibrator')], OUT / 'calibrator-build.log')
+        if rc: raise SystemExit('calibrator build failed')
+        rc = command(['otool', '-tvV', str(OUT / 'calibrator')], OUT / 'calibrator-assembly.txt')
+        if rc: raise SystemExit('ABI assembly failed')
+        command(['file', str(OUT / 'calibrator')], OUT / 'calibrator.file')
+        result = observe(OUT / 'calibrator', 'calibrate')
+        if result['status'] != 'CALIBRATED': raise SystemExit('stop: calibration unqualified')
+    elif sys.argv[1] == 'reuse-product':
+        selection = select(os.environ['SIGNAL_ENTITY_ROOT'])
+        dependency = native_dependency()
+        (OUT / 'native-dependency.json').write_text(json.dumps(dependency, indent=2) + '\n')
+        result = observe(Path(selection['binary']), 'product', 131072)
+        if result['status'] != 'INSTALLED' or result.get('process_rc') != 0:
+            raise SystemExit(20)
+        # Deliberately ends here: no helper, old-size build, or second launch.
+    elif sys.argv[1] == 'product':
+        result = observe(Path(sys.argv[2]), 'product', int(sys.argv[3]))
+        # Only an observed successful install permits the old-size product arm.
+        if result['status'] != 'INSTALLED' or result.get('process_rc') != 0:
+            raise SystemExit(20)
+    else:
+        raise SystemExit('unknown stage')
+
+
+if __name__ == '__main__':
+    main()
