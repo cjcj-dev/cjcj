@@ -32,7 +32,11 @@ class StopAtLLDB(Exception):
 def boundary(argv, log, timeout=120, env=None):
     assert argv[0] == '/usr/bin/lldb'
     config = json.loads(Path(env['SIGNAL_OBSERVER_CONFIG']).read_text())
-    LAUNCHES.append({'argv': argv, 'timeout': timeout, 'config': config})
+    receipt_path = run.OUT / 'run-input-receipt.json'
+    receipt = json.loads(receipt_path.read_text())
+    saved = Path(env['SIGNAL_OBSERVER_CONFIG']).with_suffix('.receipt.json')
+    shutil.copyfile(receipt_path, saved)
+    LAUNCHES.append({'argv': argv, 'timeout': timeout, 'config': config, 'receipt': receipt})
     raise StopAtLLDB()
 
 
