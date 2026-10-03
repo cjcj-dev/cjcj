@@ -3,23 +3,25 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import {fixture} from './prepare_bootstrap_fixture.mjs';
-import {digest, runtimeFiles} from './colour_runtime.mjs';
+import {digest, runtimeFiles, prepareRuntime} from './colour_runtime.mjs';
 
-function localRuntime(env, runtime) {
-  const manifestFile = path.join(runtime, 'manifest.json');
-  const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
-  const library = path.join(runtime, runtimeFiles[0]);
+function localRuntime(env, runtime, runtimeSource) {
+  const original = JSON.parse(fs.readFileSync(path.join(runtime, 'manifest.json'), 'utf8'));
+  const library = path.join(runtimeSource, runtimeFiles[0]);
   fs.appendFileSync(library, `\nCJRT-COMMIT:${env.RUNTIME_REF}\n`);
-  manifest.files[runtimeFiles[0]] = digest(library);
-  manifest.run_id = 'local:sym_cjcj_135_fixture';
-  fs.writeFileSync(manifestFile, JSON.stringify(manifest));
-  env.COLOUR_RT_MANIFEST_SHA256 = digest(manifestFile);
+  const installed = Object.fromEntries(Object.keys(original.files).map(rel =>
+    [rel, digest(path.join(runtimeSource, rel))]));
+  fs.writeFileSync(path.join(runtimeSource, 'BUILD-INPUTS.json'), JSON.stringify({
+    sourceCommit: env.RUNTIME_REF, installed}));
   env.CJCJ_BOOTSTRAP_RUNTIME_SOURCE = 'local-sharedbuild';
+  env.CJCJ_BOOTSTRAP_LOCAL_RUN = 'sym_cjcj_135_fixture';
   env.GITHUB_ACTIONS = 'false';
+  prepareRuntime(runtimeSource, runtime, env);
+  env.COLOUR_RT_MANIFEST_SHA256 = digest(path.join(runtime, 'manifest.json'));
 }
 
-test('explicit local sharedbuild root reaches the unified bootstrap consumer', () => fixture(({env, runtime, run}) => {
-  localRuntime(env, runtime);
+test('explicit local sharedbuild root reaches the unified bootstrap consumer', () => fixture(({env, runtime, runtimeSource, run}) => {
+  localRuntime(env, runtime, runtimeSource);
   const result = run();
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /COLOUR_RT_VERIFIED run=local:sym_cjcj_135_fixture artifact=local-sharedbuild/);
@@ -28,8 +30,8 @@ test('explicit local sharedbuild root reaches the unified bootstrap consumer', (
 }));
 
 for (const scenario of ['payload', 'undeclared', 'publication', 'stamp', 'source']) {
-  test(`local sharedbuild rejects ${scenario} at its identity assertion`, () => fixture(({env, runtime, run}) => {
-    localRuntime(env, runtime);
+  test(`local sharedbuild rejects ${scenario} at its identity assertion`, () => fixture(({env, runtime, runtimeSource, run}) => {
+    localRuntime(env, runtime, runtimeSource);
     let expected;
     if (scenario === 'payload') {
       fs.appendFileSync(path.join(runtime, runtimeFiles[1]), 'changed');
@@ -122,5 +124,41 @@ for (const rel of ['lib/linux_x86_64_cjnative/libcangjie-std-core.a', 'runtime/l
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /COLOUR_RT_FILE_SHA256_MISMATCH/);
     console.log(`ASSERT new std bytes copied and checked ${rel}`);
+  }));
+}
+
+for (const scenario of ['publication', 'source', 'stamp', 'payload', 'stdlib', 'module']) {
+  test(`local producer rejects ${scenario} before publishing its receipt`, () => fixture(({env, runtime, runtimeSource, run}) => {
+    localRuntime(env, runtime, runtimeSource);
+    const output = path.join(path.dirname(runtime), `producer-${scenario}`);
+    fs.mkdirSync(output);
+    let expected;
+    if (scenario === 'publication') {
+      env.GITHUB_ACTIONS = 'true';
+      expected = /COLOUR_RT_LOCAL_PUBLICATION_FORBIDDEN/;
+    } else if (scenario === 'source') {
+      env.RUNTIME_REF = 'e'.repeat(40);
+      expected = /COLOUR_RT_SOURCE_MISMATCH/;
+    } else if (scenario === 'stamp') {
+      const file = path.join(runtimeSource, runtimeFiles[0]);
+      fs.appendFileSync(file, `\nCJRT-COMMIT:${'a'.repeat(40)}\n`);
+      const receipt = path.join(runtimeSource, 'BUILD-INPUTS.json');
+      const build = JSON.parse(fs.readFileSync(receipt, 'utf8'));
+      build.installed[runtimeFiles[0]] = digest(file);
+      fs.writeFileSync(receipt, JSON.stringify(build));
+      expected = /COLOUR_RT_LOCAL_STAMP_MISMATCH/;
+    } else if (scenario === 'payload') {
+      fs.appendFileSync(path.join(runtimeSource, runtimeFiles[1]), 'changed');
+      expected = /COLOUR_RT_BUILD_PRODUCTS_MISMATCH/;
+    } else if (scenario === 'stdlib') {
+      fs.rmSync(path.join(runtimeSource, 'lib/linux_x86_64_cjnative/libcangjie-std-core.a'));
+      expected = /COLOUR_RT_STD_MISSING/;
+    } else {
+      fs.rmSync(path.join(runtimeSource, 'modules/linux_x86_64_cjnative/std.core.cjo'));
+      expected = /COLOUR_RT_MODULES_MISSING/;
+    }
+    assert.throws(() => prepareRuntime(runtimeSource, output, env), expected);
+    assert.equal(fs.existsSync(path.join(output, 'manifest.json')), false);
+    console.log(`ASSERT local producer ${scenario} rejection executed`);
   }));
 }

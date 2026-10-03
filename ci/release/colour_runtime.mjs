@@ -24,7 +24,12 @@ export function prepareRuntime(source, dest, env = process.env) {
   if (!/^[a-f0-9]{40}$/.test(env.RUNTIME_REF || '') || sourceSha !== env.RUNTIME_REF) {
     throw new Error('COLOUR_RT_SOURCE_MISMATCH');
   }
-  if (!/^\d+$/.test(env.GITHUB_RUN_ID || '') || !/^\d+$/.test(env.GITHUB_RUN_ATTEMPT || '')) {
+  const local = env.CJCJ_BOOTSTRAP_RUNTIME_SOURCE === 'local-sharedbuild';
+  if (local && env.GITHUB_ACTIONS === 'true') throw new Error('COLOUR_RT_LOCAL_PUBLICATION_FORBIDDEN');
+  if (local && !/^[A-Za-z0-9_-]+$/.test(env.CJCJ_BOOTSTRAP_LOCAL_RUN || '')) {
+    throw new Error('COLOUR_RT_LOCAL_RUN_MISSING');
+  }
+  if (!local && (!/^\d+$/.test(env.GITHUB_RUN_ID || '') || !/^\d+$/.test(env.GITHUB_RUN_ATTEMPT || ''))) {
     throw new Error('COLOUR_RT_RUN_MISSING');
   }
   function walk(dir) {
@@ -39,6 +44,9 @@ export function prepareRuntime(source, dest, env = process.env) {
     throw new Error('COLOUR_RT_STD_MISSING');
   }
   const moduleFiles = walk(path.join(source, 'modules'));
+  if (!moduleFiles.includes('modules/linux_x86_64_cjnative/std.core.cjo')) {
+    throw new Error('COLOUR_RT_MODULES_MISSING');
+  }
   const files = {};
   for (const rel of [...runtimeFiles, ...stdFiles, ...moduleFiles]) {
     const input = regularFile(source, rel);
@@ -48,13 +56,20 @@ export function prepareRuntime(source, dest, env = process.env) {
     files[rel] = digest(output);
   }
   const manifest = {runtime_sha: sourceSha, platform: 'linux_x86_64',
-    run_id: env.GITHUB_RUN_ID, run_attempt: env.GITHUB_RUN_ATTEMPT, files};
+    run_id: local ? `local:${env.CJCJ_BOOTSTRAP_LOCAL_RUN}` : env.GITHUB_RUN_ID,
+    run_attempt: local ? '1' : env.GITHUB_RUN_ATTEMPT, files};
   const receipt = path.join(source, 'BUILD-INPUTS.json');
+  if (local && !fs.existsSync(receipt)) throw new Error('COLOUR_RT_BUILD_RECEIPT_MISSING');
   if (fs.existsSync(receipt)) {
     const build = JSON.parse(fs.readFileSync(receipt, 'utf8'));
     if (build.sourceCommit !== sourceSha) throw new Error('COLOUR_RT_BUILD_SOURCE_MISMATCH');
+    if (local && JSON.stringify(Object.entries(build.installed || {}).sort()) !==
+        JSON.stringify(Object.entries(files).sort())) {
+      throw new Error('COLOUR_RT_BUILD_PRODUCTS_MISMATCH');
+    }
     manifest.build = {...build, installed: files};
   }
+  if (local) verifyLocalStamp(dest, sourceSha);
   fs.writeFileSync(path.join(dest, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
   const sha = digest(path.join(dest, 'manifest.json'));
   if (env.GITHUB_OUTPUT) fs.appendFileSync(env.GITHUB_OUTPUT, `sha256=${sha}\n`);
@@ -86,11 +101,13 @@ export function verifyRuntime(env = process.env) {
     }
   }
   if (local) {
-    const stamp = spawnSync('strings', ['-a', regularFile(root, runtimeFiles[0])], {encoding: 'utf8', maxBuffer: 64 * 1024 * 1024});
-    if (stamp.error) throw stamp.error;
-    const stamps = [...new Set((stamp.stdout || '').match(/CJRT-COMMIT:[A-Za-z0-9_-]+/g) || [])];
-    if (stamp.status !== 0 || stamps.length !== 1 || stamps[0] !== `CJRT-COMMIT:${env.RUNTIME_REF}`) {
-      throw new Error('COLOUR_RT_LOCAL_STAMP_MISMATCH');
+    verifyLocalStamp(root, env.RUNTIME_REF);
+    if (!manifest.build || manifest.build.sourceCommit !== env.RUNTIME_REF ||
+        JSON.stringify(Object.entries(manifest.build.installed || {}).sort()) !==
+        JSON.stringify(Object.entries(manifest.files || {}).sort()) ||
+        !manifest.files['lib/linux_x86_64_cjnative/libcangjie-std-core.a'] ||
+        !manifest.files['modules/linux_x86_64_cjnative/std.core.cjo']) {
+      throw new Error('COLOUR_RT_BUILD_PRODUCTS_MISMATCH');
     }
   }
   console.log(`COLOUR_RT_VERIFIED run=${manifest.run_id} artifact=${local ? 'local-sharedbuild' : env.COLOUR_RT_ARTIFACT_ID} runtime=${manifest.runtime_sha} sha256=${actual}`);
@@ -98,4 +115,14 @@ export function verifyRuntime(env = process.env) {
 }
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   prepareRuntime(process.argv[2], process.argv[3]);
+}
+
+function verifyLocalStamp(root, sourceSha) {
+  const stamp = spawnSync('strings', ['-a', regularFile(root, runtimeFiles[0])],
+    {encoding: 'utf8', maxBuffer: 64 * 1024 * 1024});
+  if (stamp.error) throw stamp.error;
+  const stamps = [...new Set((stamp.stdout || '').match(/CJRT-COMMIT:[A-Za-z0-9_-]+/g) || [])];
+  if (stamp.status !== 0 || stamps.length !== 1 || stamps[0] !== `CJRT-COMMIT:${sourceSha}`) {
+    throw new Error('COLOUR_RT_LOCAL_STAMP_MISMATCH');
+  }
 }
