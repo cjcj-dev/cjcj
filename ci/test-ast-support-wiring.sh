@@ -105,7 +105,7 @@ p = Path('ci/release/prepare_bootstrap_inputs.mjs')
 s = p.read_text()
 line = 'pinnedInput(process.env.CJCJ_BOOTSTRAP_AST_ARTIFACT || process.env.CJCJ_BOOTSTRAP_AST_SUPPORT,'
 assert s.count(line) == 1, 'ANCHOR-MISMATCH selection'
-p.write_text(s.replace(line, 'pinnedInput(process.env.CJCJ_BOOTSTRAP_AST_SUPPORT,'))
+p.write_text(s.replace(line, 'pinnedInput(process.env.CJCJ_BOOTSTRAP_AST_SUPPORT || process.env.CJCJ_BOOTSTRAP_AST_ARTIFACT,'))
 PY
 diff -u "$work/consumer.saved" "$consumer" > "$work/selection-cut.diff" || test "$?" -eq 1
 sha256sum "$consumer" > "$work/selection-cut.sha256"
