@@ -1,0 +1,82 @@
+name: Verify immutable Darwin host SDK archives
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/measure-darwin-host-sdk.yml
+      - ci/bootstrap/measure_darwin_host_sdk.sh
+permissions:
+  contents: read
+jobs:
+  archive:
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: darwin_aarch64
+            archive_platform: mac-aarch64
+            runner: macos-15
+            sample: 1
+          - platform: darwin_aarch64
+            archive_platform: mac-aarch64
+            runner: macos-15
+            sample: 2
+          - platform: darwin_x86_64
+            archive_platform: mac-x64
+            runner: macos-15-intel
+            sample: 1
+          - platform: darwin_x86_64
+            archive_platform: mac-x64
+            runner: macos-15-intel
+            sample: 2
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Load host toolchain pin
+        run: cat ci/host_sdk_pin.env >> "$GITHUB_ENV"
+      - name: Download, verify and exercise the pinned host SDK
+        env:
+          SDK_PLATFORM: ${{ matrix.platform }}
+          SDK_ARCHIVE_PLATFORM: ${{ matrix.archive_platform }}
+          SDK_SAMPLE: ${{ matrix.sample }}
+        run: bash ci/bootstrap/measure_darwin_host_sdk.sh
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: darwin-host-sdk-${{ matrix.platform }}-${{ matrix.sample }}
+          path: ${{ runner.temp }}/darwin-host-sdk/evidence
+          if-no-files-found: error
+          retention-days: 30
+  compare:
+    needs: archive
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: darwin-host-sdk-*
+          path: inputs
+      - name: Require independent downloads to match byte identities
+        run: |
+          node --input-type=module <<'JS'
+          import fs from 'node:fs';
+          import assert from 'node:assert/strict';
+          for (const platform of ['darwin_aarch64', 'darwin_x86_64']) {
+            const records = [1, 2].map(sample => JSON.parse(fs.readFileSync(`inputs/darwin-host-sdk-${platform}-${sample}/record.json`)));
+            const identity = record => ({platform: record.platform, archive: record.archive,
+              url: record.url, sha256: record.sha256, size_bytes: record.size_bytes});
+            assert.deepEqual(identity(records[0]), identity(records[1]), `SDK_DOUBLE_DOWNLOAD_MISMATCH: ${platform}`);
+            for (const record of records) {
+              assert.equal(record.self_test, 'pass');
+              assert.equal(record.bad_pin_rc, 1);
+            }
+            console.log(`# HOST_SDK_PROVENANCE ${JSON.stringify(identity(records[0]))}`);
+          }
+          JS

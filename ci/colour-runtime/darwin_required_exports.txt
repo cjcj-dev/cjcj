@@ -1,0 +1,11 @@
+# Exports the coloured Darwin std link takes from libcangjie-runtime.dylib.
+# Each name is a CJ_MCC entry the runtime advertises on Linux; the Darwin
+# CalleeSavedStub.S had no .global for them, so a pinned Darwin runtime was
+# published without them and the first std link failed on undefined symbols.
+#   cangjie-runtime runtime/src/arch/aarch64_macos/CalleeSavedStub.S:175-195
+#   cangjie-runtime runtime/src/arch/x86_64_macos/CalleeSavedStub.S:76-96
+#   cangjie-runtime runtime/src/arch/aarch64_linux/CalleeSavedStub.S:201-204
+_CJ_MCC_PackageInitBegin
+_CJ_MCC_PackageInitComplete
+_CJ_MCC_PackageInitFail
+_CJ_MCC_PackageInitAbort

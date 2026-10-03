@@ -153,6 +153,15 @@ jobs:
           echo "NM_DEFINED_RC=0"
           grep -E ' _CJ_MCC_HandleSafepoint$' colour-runtime/defined-symbols.txt
           grep -E ' _CJ_MCC_HandleReturnSafepoint$' colour-runtime/defined-symbols.txt
+      - name: Refuse a runtime without the exports the Darwin std link binds
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          set -euo pipefail
+          # cangjie-runtime#1225: the Darwin CalleeSavedStub.S carried no .global
+          # for the PackageInit entries, so a pinned pair was published that the
+          # coloured std link cannot bind. Read them out of the built dylib.
+          node ci/release/darwin_runtime.mjs exports colour-runtime "$PLATFORM" | tee colour-runtime/required-exports.log
       - uses: actions/upload-artifact@v7
         if: failure()
         with:

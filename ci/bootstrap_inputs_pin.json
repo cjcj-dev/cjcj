@@ -83,5 +83,185 @@
       "release_sha256": "541cbe81bdfd87dac61412f3c8533eb69ada9288ad07e5ad501225a52989e556",
       "asset": 600794830
     }
-  ]
+  ],
+  "platforms": {
+    "darwin_aarch64": {
+      "version": 1,
+      "repository": "cjcj-dev/cjcj",
+      "run": 36734261168,
+      "attempt": 1,
+      "commit": "8402d0610f26744f021b735d060b3febb3602d58",
+      "artifact": 11107300093,
+      "files": [
+        {
+          "path": "MANIFEST",
+          "mode": 420,
+          "artifact_sha256": "0b2586c5e921bdbe0461f10f73ff02f86b4f6f36cc3627f45126b8f569a4b34f",
+          "release_sha256": "0b2586c5e921bdbe0461f10f73ff02f86b4f6f36cc3627f45126b8f569a4b34f",
+          "asset": 601193830
+        },
+        {
+          "path": "bin/llc",
+          "mode": 493,
+          "artifact_sha256": "e708bb6111d06e89309952475fb867ec99d895056b64448e579321c8817b67be",
+          "release_sha256": "e708bb6111d06e89309952475fb867ec99d895056b64448e579321c8817b67be",
+          "asset": 601193887
+        },
+        {
+          "path": "bin/opt",
+          "mode": 493,
+          "artifact_sha256": "b53a21a3d9035629df183ceeb4b9b840bd6a11619cd8a9c9dbd737fd11b7d56f",
+          "release_sha256": "b53a21a3d9035629df183ceeb4b9b840bd6a11619cd8a9c9dbd737fd11b7d56f",
+          "asset": 601193989
+        },
+        {
+          "path": "bin/ld64.lld",
+          "mode": 493,
+          "artifact_sha256": "e0fbd0ef14dd675732df38e2a3c3751a9f9b91becceb52591f188e5566fd37c0",
+          "release_sha256": "e0fbd0ef14dd675732df38e2a3c3751a9f9b91becceb52591f188e5566fd37c0",
+          "asset": 601194118
+        },
+        {
+          "path": "lib/STATIC_LLVM.txt",
+          "mode": 420,
+          "artifact_sha256": "0b2586c5e921bdbe0461f10f73ff02f86b4f6f36cc3627f45126b8f569a4b34f",
+          "release_sha256": "0b2586c5e921bdbe0461f10f73ff02f86b4f6f36cc3627f45126b8f569a4b34f",
+          "asset": 601194253
+        },
+        {
+          "path": "fixed-llc/llc.gz",
+          "mode": 420,
+          "artifact_sha256": "9f8c236ce7963fb2dfe241f0a8491b9cd7addef8e74d31ef23f2d9201a98b8c2",
+          "release_sha256": "9f8c236ce7963fb2dfe241f0a8491b9cd7addef8e74d31ef23f2d9201a98b8c2",
+          "asset": 601194295
+        },
+        {
+          "path": "fixed-llc/opt.gz",
+          "mode": 420,
+          "artifact_sha256": "260a14b59e4c89393809488b7fa2e2237f11899dd810cd6dde09e847f5c2bcca",
+          "release_sha256": "260a14b59e4c89393809488b7fa2e2237f11899dd810cd6dde09e847f5c2bcca",
+          "asset": 601194335
+        },
+        {
+          "path": "fixed-llc/ld64.lld.gz",
+          "mode": 420,
+          "artifact_sha256": "2c12360998dd1c6ee067366da27d5a01bfb01897239bd3f4d78af0917aa2f4e6",
+          "release_sha256": "2c12360998dd1c6ee067366da27d5a01bfb01897239bd3f4d78af0917aa2f4e6",
+          "asset": 601194432
+        },
+        {
+          "path": "fixed-llc/cjselfhost_llvmshim.o",
+          "mode": 420,
+          "artifact_sha256": "124b6805a6fdb7ce8edb9adc85c09a48f3832980af634eadf43887d77218804c",
+          "release_sha256": "124b6805a6fdb7ce8edb9adc85c09a48f3832980af634eadf43887d77218804c",
+          "asset": 601194529
+        },
+        {
+          "path": "fixed-llc/llvm-tools.manifest",
+          "mode": 420,
+          "artifact_sha256": "ca619e5f3184c5740fbdc16bb285f4a3f7817244b6fa060135ed286dc364973a",
+          "release_sha256": "ca619e5f3184c5740fbdc16bb285f4a3f7817244b6fa060135ed286dc364973a",
+          "asset": 601194570
+        },
+        {
+          "path": "SHA256SUMS",
+          "mode": 420,
+          "artifact_sha256": "e70b609444da4cd678e5941f4d502b4af48e15cec84fa7b59644eadf2e9d3b6a",
+          "release_sha256": "e70b609444da4cd678e5941f4d502b4af48e15cec84fa7b59644eadf2e9d3b6a",
+          "asset": 601194607
+        }
+      ],
+      "platform": "darwin_aarch64",
+      "sums_sha256": "e70b609444da4cd678e5941f4d502b4af48e15cec84fa7b59644eadf2e9d3b6a"
+    },
+    "darwin_x86_64": {
+      "version": 1,
+      "repository": "cjcj-dev/cjcj",
+      "run": 36734261168,
+      "attempt": 1,
+      "commit": "8402d0610f26744f021b735d060b3febb3602d58",
+      "artifact": 11106830781,
+      "files": [
+        {
+          "path": "MANIFEST",
+          "mode": 420,
+          "artifact_sha256": "12973476b933af708597a881d14b304cc98545a977a173beb407c8c8903d3b75",
+          "release_sha256": "12973476b933af708597a881d14b304cc98545a977a173beb407c8c8903d3b75",
+          "asset": 601193660
+        },
+        {
+          "path": "bin/llc",
+          "mode": 493,
+          "artifact_sha256": "4e99121cd3d4bccc90802d79833faf6caa96ccd6b11e47df539fc06a1afa4cae",
+          "release_sha256": "4e99121cd3d4bccc90802d79833faf6caa96ccd6b11e47df539fc06a1afa4cae",
+          "asset": 601193736
+        },
+        {
+          "path": "bin/opt",
+          "mode": 493,
+          "artifact_sha256": "50ff11b620efca95221607de7ff8b3835b18d7c950aabe8457216591f20998a6",
+          "release_sha256": "50ff11b620efca95221607de7ff8b3835b18d7c950aabe8457216591f20998a6",
+          "asset": 601193838
+        },
+        {
+          "path": "bin/ld64.lld",
+          "mode": 493,
+          "artifact_sha256": "241c4b1fdbc00f43a4e3e7e0409a9cc314c94e4424d047743b598c183254b775",
+          "release_sha256": "241c4b1fdbc00f43a4e3e7e0409a9cc314c94e4424d047743b598c183254b775",
+          "asset": 601193941
+        },
+        {
+          "path": "lib/STATIC_LLVM.txt",
+          "mode": 420,
+          "artifact_sha256": "12973476b933af708597a881d14b304cc98545a977a173beb407c8c8903d3b75",
+          "release_sha256": "12973476b933af708597a881d14b304cc98545a977a173beb407c8c8903d3b75",
+          "asset": 601194031
+        },
+        {
+          "path": "fixed-llc/llc.gz",
+          "mode": 420,
+          "artifact_sha256": "7569def2e113d20c11a673e040dd7d23ed10cb0bb822358847b3dd4a6e84a313",
+          "release_sha256": "7569def2e113d20c11a673e040dd7d23ed10cb0bb822358847b3dd4a6e84a313",
+          "asset": 601194066
+        },
+        {
+          "path": "fixed-llc/opt.gz",
+          "mode": 420,
+          "artifact_sha256": "0b435cc8d1c163f5d0a46856f670f98df9c1528d796d4688a206328f215b9954",
+          "release_sha256": "0b435cc8d1c163f5d0a46856f670f98df9c1528d796d4688a206328f215b9954",
+          "asset": 601194173
+        },
+        {
+          "path": "fixed-llc/ld64.lld.gz",
+          "mode": 420,
+          "artifact_sha256": "d5ab81e9ad1c273b09baac70fd34e0d3b55340e2158a6dac60eb005505c4b969",
+          "release_sha256": "d5ab81e9ad1c273b09baac70fd34e0d3b55340e2158a6dac60eb005505c4b969",
+          "asset": 601194227
+        },
+        {
+          "path": "fixed-llc/cjselfhost_llvmshim.o",
+          "mode": 420,
+          "artifact_sha256": "6249a11512387709e8327696a6a8ffd7f2d991b16a2953f329ade8511a9d8865",
+          "release_sha256": "6249a11512387709e8327696a6a8ffd7f2d991b16a2953f329ade8511a9d8865",
+          "asset": 601194290
+        },
+        {
+          "path": "fixed-llc/llvm-tools.manifest",
+          "mode": 420,
+          "artifact_sha256": "0ffebe2be8ac9a9b80c98a5372826b539cd6a5b46ac3ea945613b8486a9c7327",
+          "release_sha256": "0ffebe2be8ac9a9b80c98a5372826b539cd6a5b46ac3ea945613b8486a9c7327",
+          "asset": 601194313
+        },
+        {
+          "path": "SHA256SUMS",
+          "mode": 420,
+          "artifact_sha256": "c537dde2f91cdd39c1410a593012aa9c5e4622a0ede689bfddf556706b7c8694",
+          "release_sha256": "c537dde2f91cdd39c1410a593012aa9c5e4622a0ede689bfddf556706b7c8694",
+          "asset": 601194346
+        }
+      ],
+      "platform": "darwin_x86_64",
+      "sums_sha256": "c537dde2f91cdd39c1410a593012aa9c5e4622a0ede689bfddf556706b7c8694"
+    }
+  }
 }

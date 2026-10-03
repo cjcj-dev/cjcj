@@ -1,0 +1,10 @@
+{
+  "source_sha256": "63f0f12ff46a1be235b450430e903d36e29553a7cd80fa623aefda1f5f19199f",
+  "xcode": "Xcode 16.4\nBuild version 16F6\n",
+  "files": {
+    "calibrator": "4b50d3b525383df0d4dc5966b99368cfd35986bf80707821c7627ee6b2b782cb",
+    "calibrator.dSYM/Contents/Info.plist": "cb16874304f1651ae82359664b100f17caa97a4661be59213815ca69368efd40",
+    "calibrator.dSYM/Contents/Resources/DWARF/calibrator": "f4b1a579192b86ddb1f0d53c2b3b8d53561656909dfa57be9fc209165c5a8d6f",
+    "calibrator.dSYM/Contents/Resources/Relocations/aarch64/calibrator.yml": "dfd974baacbaa487d9573978fbce33f004c36d5b0cabb92577300d638b87f592"
+  }
+}

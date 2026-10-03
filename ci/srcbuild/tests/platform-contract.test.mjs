@@ -123,24 +123,6 @@ test('the repository has one fixed LLVM artifact uploader and preserves native a
 
 const uncommented = text => text.split('\n').filter(line => !/^\s*#/.test(line)).join('\n');
 
-// One entry per reusable-workflow *call*, not per distinct file: two jobs calling
-// one producer upload its artifacts twice, so the repeat has to survive here.
-async function invokedWorkflows(entry, stack = []) {
-  assert.ok(!stack.includes(entry), `reusable workflow cycle: ${[...stack, entry].join(' -> ')}`);
-  const text = uncommented(await readWorkflow(entry));
-  const invocations = [entry];
-  for (const [, called] of text.matchAll(/uses:\s*\.\/\.github\/workflows\/([\w.-]+\.yml)/g)) {
-    invocations.push(...await invokedWorkflows(called, [...stack, entry]));
-  }
-  return invocations;
-}
-
-// A selectable matrix cannot be a literal any more -- Actions has no way to
-// filter one -- so each table moved into its plan step as JSON. It is still one
-// table in one place; it just is not YAML, and reading only the YAML form leaves
-// this file blind to every row. Two selectors are live and both are covered:
-// the fixed-LLVM producer (llvm-tools-matrix.mjs) and the source-build matrix
-// (srcbuild/target-matrix.mjs).
 const planTable = text => {
   if (text.includes('run: node ci/llvm-tools-matrix.mjs')) {
     return llvmToolMatrix('all', {platformSet: 'all'}).include;
@@ -149,45 +131,106 @@ const planTable = text => {
   return [...text.matchAll(/^\s*all='(\[[\s\S]*?\])'\s*$/gm)].flatMap(([, json]) => JSON.parse(json));
 };
 
-// The values a ${{ matrix.KEY }} placeholder can take inside one workflow file.
-const matrixValues = (text, key) => [
-  ...[...text.matchAll(new RegExp(String.raw`^\s*(?:- )?${key}: (\S+)$`, 'gm'))].map(([, value]) => value),
-  ...planTable(text).map(entry => entry[key]).filter(value => value !== undefined).map(String),
-];
+function matrixValues(job, text, key, plan) {
+  const strategy = block(job, /^\s*strategy:\s*$/);
+  assert.ok(strategy !== undefined, `matrix.${key} used outside a matrix job`);
+  const dynamic = scalar(strategy, 'matrix');
+  if (dynamic !== undefined) {
+    assert.equal(dynamic, '${{ fromJson(needs.plan.outputs.matrix) }}');
+    const rows = plan?.matrix ? JSON.parse(plan.matrix).include : planTable(jobs(text).get('plan'));
+    return rows.map(row => row[key]).filter(value => value !== undefined);
+  }
+  const matrix = block(strategy, /^\s*matrix:\s*$/);
+  assert.ok(matrix !== undefined, 'literal matrix missing');
+  const axis = scalar(matrix, key);
+  if (axis?.startsWith('[')) return axis.slice(1, -1).split(',').map(value => unquote(value.trim()));
+  return [...matrix.matchAll(new RegExp(String.raw`^\s*(?:- )?${key}: (\S+)$`, 'gm'))]
+    .map(([, value]) => unquote(value));
+}
 
-function expandMatrix(name, text, workflow = text) {
+function expandMatrix(name, job, text, plan) {
   const placeholder = name.match(/\$\{\{\s*matrix\.(\w+)\s*\}\}/);
   if (!placeholder) return [name];
-  const local = matrixValues(text, placeholder[1]);
-  const values = local.length ? local : planTable(workflow)
-    .map(entry => entry[placeholder[1]]).filter(value => value !== undefined).map(String);
+  const values = matrixValues(job, text, placeholder[1], plan);
   assert.ok(values.length > 0, `no matrix values for ${placeholder[1]} in ${name}`);
-  return values.flatMap(value => expandMatrix(name.replace(placeholder[0], value), text, workflow));
+  return values.flatMap(value => expandMatrix(name.replace(placeholder[0], value), job, text, plan));
 }
 
-// Artifact names one workflow file uploads, with its own matrix fanout expanded.
-function uploadedArtifacts(text) {
-  const names = [];
-  // Matrix values belong to the producing job. A Linux-only cross job must
-  // not multiply every native artifact by its own target declaration.
-  for (const job of jobs(text).values()) {
-    const lines = job.split('\n');
-    for (const [index, line] of lines.entries()) {
-      if (!line.includes('uses: actions/upload-artifact@')) continue;
-      const nameLine = lines.slice(index + 1, index + 10).find(entry => /^\s+name: /.test(entry));
-      assert.ok(nameLine, `upload step at line ${index + 1} declares no artifact name`);
-      names.push(...expandMatrix(nameLine.replace(/^\s+name: /, '').trim(), job, text));
-    }
+function jobRuns(job, inputs, plan) {
+  const condition = job.match(/^ {4}if: (.+?)\s*$/m)?.[1];
+  if (condition === undefined) return true;
+  const ready = condition.match(/^needs\.(?:plan|matrix-plan)\.outputs\.(has_runnable|has_blocked) == 'true'$/);
+  if (ready) {
+    assert.ok(plan && ready[1] in plan, `missing plan output: ${ready[1]}`);
+    return plan[ready[1]] === 'true';
   }
-  return names;
+  const platforms = condition.match(/^contains\(needs\.plan\.outputs\.llvm_platforms, '(\w+)'\)(?: && inputs\.(\w+))?$/);
+  if (platforms) {
+    assert.ok(plan && 'llvm_platforms' in plan, 'missing llvm_platforms plan output');
+    return plan.llvm_platforms.split(',').includes(platforms[1])
+      && (!platforms[2] || inputs.get(platforms[2]) === 'true');
+  }
+  const input = condition.match(/^inputs\.(\w+)$/);
+  assert.ok(input, `unrecognized job condition: ${condition}`);
+  const value = inputs.get(input[1]);
+  assert.ok(value === 'true' || value === 'false', `non-boolean job input: ${condition}=${value}`);
+  return value === 'true';
 }
 
-// [artifact, producing workflow] for everything a dispatch entry point uploads.
-async function runArtifacts(entry) {
+function artifactPlan(text, inputs) {
+  const planJob = jobs(text).get('plan') || jobs(text).get('matrix-plan');
+  const command = planJob && scalar(planJob, 'run');
+  if (!command?.includes('ci/srcbuild/target-matrix.mjs')
+      && !command?.includes('ci/target-matrix.mjs arm-soak')) return undefined;
+  const directory = fsSync.mkdtempSync(path.join(os.tmpdir(), 'artifact-plan-'));
+  const output = path.join(directory, 'outputs');
+  try {
+    execFileSync('bash', ['-eu', '-c', command], {cwd: root, encoding: 'utf8',
+      env: {...process.env, REQUESTED: inputs.get('targets') || 'all', GITHUB_OUTPUT: output, GITHUB_STEP_SUMMARY: ''}});
+    return Object.fromEntries(fsSync.readFileSync(output, 'utf8').trim().split('\n')
+      .map(line => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)]));
+  } finally {
+    fsSync.rmSync(directory, {recursive: true, force: true});
+  }
+}
+
+// Keep one record per actual upload/call. Never deduplicate names: the caller's
+// uniqueness assertion must still detect two uploads in one job or across jobs.
+async function runArtifacts(entry, inputs = new Map(), stack = []) {
+  assert.ok(!stack.includes(entry), `reusable workflow cycle: ${[...stack, entry].join(' -> ')}`);
+  const text = uncommented(await readWorkflow(entry));
+  const resolved = effectiveInputs(text, inputs);
+  const plan = artifactPlan(text, resolved);
   const produced = [];
-  for (const name of await invokedWorkflows(entry)) {
-    const text = uncommented(await readWorkflow(name));
-    for (const artifact of uploadedArtifacts(text)) produced.push([artifact, name]);
+  for (const job of jobs(text).values()) {
+    if (!jobRuns(job, resolved, plan)) continue;
+    const called = scalar(job, 'uses')?.match(/^\.\/\.github\/workflows\/([\w.-]+\.yml)$/);
+    if (called) {
+      const strategy = block(job, /^\s*strategy:\s*$/);
+      const rows = strategy && scalar(strategy, 'matrix') === '${{ fromJson(needs.plan.outputs.matrix) }}'
+        ? JSON.parse(plan.matrix).include : [{}];
+      for (const row of rows) {
+        const passed = new Map([...mapping(block(job, /^\s*with:\s*$/))].map(([key, value]) => [key,
+          value.replace(/\$\{\{\s*matrix\.(\w+)\s*\}\}/g, (_, name) => {
+            assert.ok(name in row, `missing matrix.${name}`);
+            return row[name];
+          }).replace(/\$\{\{\s*needs\.(?:matrix-plan|plan)\.outputs\.(\w+)\s*\}\}/g, (_, name) => {
+            assert.ok(plan && name in plan, `missing plan output ${name}`);
+            return plan[name];
+          }).replace(/\$\{\{\s*inputs\.(\w+)(?:\s*\|\|\s*(false|'[^']*'))?\s*\}\}/g,
+            (_, name, fallback) => resolved.get(name) || unquote(fallback) || '')]));
+        produced.push(...await runArtifacts(called[1], passed, [...stack, entry]));
+      }
+      continue;
+    }
+    for (const step of steps(job)) {
+      if (!step.includes('uses: actions/upload-artifact@')) continue;
+      const name = scalar(step, 'name');
+      // A step's display name precedes `with:`; read the artifact name there.
+      const artifact = scalar(block(step, /^\s*with:\s*$/), 'name');
+      assert.ok(artifact, `upload step ${name || ''} declares no artifact name`);
+      for (const expanded of expandMatrix(artifact, job, text, plan)) produced.push([expanded, entry]);
+    }
   }
   return produced;
 }
@@ -353,6 +396,14 @@ function substitute(value, inputs) {
   });
 }
 
+test('native tuple publication expands only its job matrix when enabled', async () => {
+  const disabled = await runArtifacts('build-llvm-tools.yml');
+  const enabled = await runArtifacts('build-llvm-tools.yml', new Map([['publish_native_tuple', 'true']]));
+  const native = rows => rows.map(([name]) => name).filter(name => name.startsWith('static-llvm-tuple-')).sort();
+  assert.deepEqual(native(disabled), []);
+  assert.deepEqual(native(enabled), ['static-llvm-tuple-darwin_aarch64', 'static-llvm-tuple-darwin_x86_64']);
+});
+
 test('source-build workflow connects every native runner to its LLVM and std artifact', async () => {
   const workflow = await fs.readFile(path.join(root, '.github/workflows/srcbuild-target.yml'), 'utf8');
   const fixed = await fs.readFile(path.join(root, '.github/workflows/build-llvm-tools.yml'), 'utf8');
@@ -438,6 +489,13 @@ test('arm soak produces every artifact its package job downloads, each exactly o
   const produced = await runArtifacts('arm-soak.yml');
   const producersOf = artifact => produced.filter(([name]) => name === artifact).map(([, source]) => source);
 
+  if (plan.has_runnable === 'false') {
+    for (const artifact of required) assert.equal(producersOf(artifact).length, 0, `blocked producers of ${artifact}`);
+    assert.equal(jobRuns(packageJob, callerInputs, plan), false, 'blocked artifact consumer must not be admitted');
+    console.log(`ASSERT blocked-source-artifacts platform=${platform} producers=0 consumer=blocked`);
+    return;
+  }
+
   // The point of the whole test: demanded and produced have to be the same set.
   for (const artifact of required) assert.equal(producersOf(artifact).length, 1, `producers of ${artifact}`);
   assert.deepEqual(producersOf(demanded), ['srcbuild-target.yml']);
@@ -458,6 +516,23 @@ test('arm soak produces every artifact its package job downloads, each exactly o
   assert.equal(producerJobs.length, 1, `jobs producing ${demanded}: ${producerJobs}`);
   assert.ok(needsOf(packageJob).includes(producerJobs[0]),
     `package needs ${needsOf(packageJob)} but ${demanded} is built by ${producerJobs[0]}`);
+});
+
+test('runnable source produces every package artifact exactly once', async () => {
+  const cell = sourceBuildCells().find(entry => entry.status === 'runnable');
+  assert.ok(cell, 'a real runnable source input is required');
+  const callerInputs = new Map([['runner', cell.runner], ['platform', cell.target],
+    ['llvm_platform', cell.llvm_platform], ['compiler_artifact', `final-compiler-${cell.target}`],
+    ['std_artifact', `final-std-${cell.target}`], ['verify', 'false']]);
+  const required = failClosedDownloads(await readWorkflow('build-release-package.yml'), callerInputs);
+  assert.ok(required.includes(`final-std-${cell.target}`));
+  const produced = await runArtifacts('srcbuild.yml', new Map([['targets', cell.target]]));
+  for (const artifact of required) {
+    assert.equal(produced.filter(([name]) => name === artifact).length, 1, `runnable producers of ${artifact}`);
+  }
+  const names = produced.map(([artifact]) => artifact);
+  assert.deepEqual(names.filter((artifact, index) => names.indexOf(artifact) !== index), [], 'runnable artifact names must be unique');
+  console.log(`ASSERT runnable-source-artifacts platform=${cell.target} required=${JSON.stringify(required)}`);
 });
 
 test('source-build leaves the sccache GHA backend off and persists the disk cache as one entry per target', async () => {

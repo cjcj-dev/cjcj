@@ -1,0 +1,11 @@
+[package]
+name = "signal_fixture"
+version = "0.1.0"
+cjc-version = "1.1.0"
+src-dir = "src"
+output-type = "executable"
+compile-option = "-O0 -g"
+link-option = "${SIGNAL_FIXTURE_HELPER_O}"
+
+[dependencies]
+"cjcj::utils" = { path = "../../../../packages/utils" }

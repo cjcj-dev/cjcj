@@ -1,0 +1,14 @@
+{
+  "mode": "product",
+  "selected_size": 131072,
+  "binary": "BUILD_RECEIPT_REQUIRED",
+  "binary_sha256": null,
+  "cwd": "NEW_FIXTURE_OUTPUT_REQUIRED",
+  "argv": [],
+  "stdout": "FIXTURE_STDOUT_REQUIRED",
+  "stderr": "FIXTURE_STDERR_REQUIRED",
+  "output": "FIXTURE_JSON_REQUIRED",
+  "environment": {},
+  "layout": null,
+  "expected_libraries": {}
+}
