@@ -4,7 +4,8 @@ import {spawnSync} from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import test from 'node:test';
+import test, {after} from 'node:test';
+import {sourceFetchArguments} from '../lib/git.mjs';
 import {readHostToolchainPin} from '../../ci/host-toolchain-pin.mjs';
 
 const repoRoot = path.resolve('.');
@@ -84,6 +85,108 @@ function sha256(file) {
   return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 }
 
+function runStepFailureFixture(from, through, failure, missingSdk = false) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'srcbuild-step-failure-'));
+  const files = ['tools/srcbuild_kkk2.sh', 'build/lib/srcbuild_git.sh',
+    'build/lib/targets.mjs', 'build/lib/errors.mjs', 'ci/host_sdk_pin.env',
+    'ci/srcbuild/steps/assert-host-contract.mjs'];
+  for (const file of files) {
+    fs.mkdirSync(path.dirname(path.join(root, file)), {recursive: true});
+    fs.copyFileSync(path.join(repoRoot, file), path.join(root, file));
+  }
+  const state = path.join(root, '.srcbuild');
+  const bin = path.join(state, 'home/.local/bin');
+  fs.mkdirSync(bin, {recursive: true});
+  fs.writeFileSync(path.join(state, 'kkk2-github.env'), [
+    'CJCJ_SRCBUILD_VERSION=fixture-version',
+    ...['CANGJIE_COMPILER_URL', 'RUNTIME_SRC_URL', 'TOOLS_SRC_URL', 'STDX_SRC_URL'].map(key => `${key}=https://fixture.invalid/source`),
+    ...['CANGJIE_COMPILER_SHA', 'RUNTIME_REF', 'TOOLS_REF', 'STDX_REF'].map(key => `${key}=${'1'.repeat(40)}`),
+    '',
+  ].join('\n'));
+  fs.writeFileSync(path.join(state, 'kkk2-github.path'), '');
+  const executable = (name, text) => {
+    fs.writeFileSync(path.join(bin, name), `#!/usr/bin/env bash\nset -euo pipefail\n${text}\n`, {mode: 0o755});
+  };
+  executable('hostname', 'echo kkk2');
+  executable('node', `if [[ $1 == */acquire_fixed_tuple.mjs ]]; then exit 0; fi\nexec ${JSON.stringify(process.execPath)} "$@"`);
+  executable('npx', `
+printf '%s\\n' "$*" >> "$GITHUB_WORKSPACE/commands.log"
+case "$*" in
+  *setup_sdk.mjs*)
+    [[ $CJCJ_SDK_STOCK_LLC == 1 ]]
+    if [[ $FIXTURE_FAILURE == setup ]]; then exit 56; fi
+    if [[ $FIXTURE_MISSING_SDK == 0 ]]; then mkdir -p "$HOME/.cjv/toolchains/$CJCJ_TOOLCHAIN"; fi
+    ;;
+  *install-system-deps*)
+    [[ $CJCJ_SDK_STOCK_LLC == 1 ]]
+    [[ $CJCJ_SRCBUILD_HOST_SDK == "$HOME/.cjv/toolchains/$CJCJ_TOOLCHAIN" ]]
+    [[ $CJCJ_SRCBUILD_BOOTSTRAP_SDK == "$CJCJ_SRCBUILD_HOST_SDK" ]]
+    printf 'SDK_STATE_CONSUMED\\n'
+    ;;
+  *build-shim.mjs*)
+    [[ $CANGJIE_CPP_SRC == "$CANGJIE_WORKSPACE/cangjie_compiler" ]]
+    if [[ $FIXTURE_FAILURE == shim ]]; then exit 37; fi
+    ;;
+  *compose-sdk.mjs*)
+    [[ $CANGJIE_CPP_SRC == "$CANGJIE_WORKSPACE/cangjie_compiler" ]]
+    [[ $SOURCE_SDK_VERSION == fixture-version ]]
+    printf 'PARENT_EXPORT_CONSUMED\\n'
+    ;;
+  *print-version*)
+    if [[ $FIXTURE_FAILURE == version ]]; then exit 42; fi
+    printf 'fixture-new-version\\n'
+    ;;
+  *fetch*)
+    [[ $CJCJ_SRCBUILD_VERSION == fixture-new-version ]]
+    printf 'VERSION_STATE_CONSUMED\\n'
+    ;;
+  *) exit 99 ;;
+esac`);
+  const result = spawnSync('bash', [path.join(root, 'tools/srcbuild_kkk2.sh'),
+    '--from-step', String(from), '--through-step', String(through)], {
+    encoding: 'utf8', timeout: 30000,
+    env: {...process.env, PATH: `${bin}:${process.env.PATH}`,
+      FIXTURE_FAILURE: failure, FIXTURE_MISSING_SDK: missingSdk ? '1' : '0'},
+  });
+  const timings = fs.readFileSync(path.join(state, 'kkk2-timings.tsv'), 'utf8');
+  const commands = fs.readFileSync(path.join(root, 'commands.log'), 'utf8');
+  const logs = fs.readdirSync(path.join(state, 'logs')).map(file =>
+    fs.readFileSync(path.join(state, 'logs', file), 'utf8')).join('\n');
+  console.log(`STEP_FIXTURE root=${root} product_sha256=${sha256(path.join(root, files[0]))} rc=${result.status}`);
+  return {root, result, timings, commands, logs};
+}
+
+for (const scenario of [
+  {name: 'setup failure', from: 5, through: 6, failure: 'setup', rc: 56, next: 'install-system-deps'},
+  {name: 'missing SDK', from: 5, through: 6, failure: '', missingSdk: true, rc: 1, next: 'install-system-deps'},
+  {name: 'SDK state survives', from: 5, through: 6, failure: '', rc: 0, state: 'SDK_STATE_CONSUMED'},
+  {name: 'shim failure', from: 29, through: 34, failure: 'shim', rc: 37, next: 'compose-sdk.mjs'},
+  {name: 'parent export survives', from: 29, through: 34, failure: '', rc: 0, state: 'PARENT_EXPORT_CONSUMED'},
+  {name: 'command substitution failure', from: 12, through: 13, failure: 'version', rc: 42, next: 'fetch'},
+  {name: 'version state survives', from: 12, through: 13, failure: '', rc: 0, state: 'VERSION_STATE_CONSUMED'},
+]) {
+  test(`source-build fail-fast: ${scenario.name}`, () => {
+    const fixture = runStepFailureFixture(scenario.from, scenario.through, scenario.failure, scenario.missingSdk);
+    const failures = [];
+    const check = (name, passed) => {
+      console.log(`TARGET_ASSERTION ${scenario.name}: ${name}=${passed}`);
+      if (!passed) failures.push(name);
+    };
+    check('step rc', fixture.result.status === scenario.rc);
+    check('TIMINGS rc', new RegExp(`^step\\t${scenario.from}\\t[^\\t]+\\t${scenario.rc}\\t`, 'm').test(fixture.timings));
+    check('public step rc', new RegExp(`STEP=${scenario.from} .* rc=${scenario.rc} `).test(fixture.result.stdout));
+    if (scenario.next) {
+      check('next step not executed', !fixture.commands.includes(scenario.next));
+      check('no next TIMINGS record', !new RegExp(`^step\\t${scenario.through}\\t`, 'm').test(fixture.timings));
+    } else {
+      check('parent state consumed', fixture.logs.includes(scenario.state));
+      check('next step succeeds', new RegExp(`^step\\t${scenario.through}\\t[^\\t]+\\t0\\t`, 'm').test(fixture.timings));
+    }
+    if (failures.length === 0) fs.rmSync(fixture.root, {recursive: true, force: true});
+    assert.deepEqual(failures, [], fixture.result.stdout + fixture.result.stderr);
+  });
+}
+
 test('source-build CPU windows preserve explicit placement and derive their width', () => {
   const invoke = `source "$1" --lib-only\n`
     + 'test "$(explicit_cpuset 048-063)" = 48-63\n'
@@ -140,6 +243,7 @@ test('source-build records affinity from the long top-level make instead of an e
   const invoke = `${shellFunction('elapsed_seconds')}\n`
     + `${shellFunction('capture_build_child_affinity')}\n`
     + `${shellFunction('run_step')}\n`
+    + `${shellFunction('finish_step')}\n`
     + 'STATE_ROOT=$1 LOG_ROOT=$1 TIMINGS=$2 START_STAMP=fixture\n'
     + 'CPUSET=$(LC_ALL=C taskset -pc $$ | sed "s/.*: //")\n'
     + 'load_github_state() { :; }\n'
@@ -877,6 +981,48 @@ function writeAstInputFixture(archive) {
 
 // Execute the complete driver, including retained-state loading, prerequisite,
 // run_step and the final RESULT. Only external inputs live in the fixture.
+// Formal controls use the actual pinned Git object, not a fabricated HEAD.
+let headerRuntimeSource;
+after(() => { if (headerRuntimeSource?.owned) fs.rmSync(headerRuntimeSource.path, {recursive: true, force: true}); });
+function writeCppHeaderFixture(root, cpp, runtimeRef) {
+  const readPin = name => Object.fromEntries(fs.readFileSync(path.join(root, 'ci', name), 'utf8')
+    .trim().split('\n').map(line => line.split('=')));
+  const llvm = readPin('llvm_pin.env'), runtime = readPin('runtime_pin.env');
+  const git = args => {
+    const r = spawnSync('git', args, {encoding: 'utf8'}); assert.equal(r.status, 0, r.stderr); return r.stdout.trim();
+  };
+  if (!headerRuntimeSource) {
+    const configured = process.env.GC_FIX_RUNTIME_CHECKOUT;
+    const source = configured || fs.mkdtempSync(path.join(os.tmpdir(), 'formal-header-runtime-'));
+    if (!configured) {
+      git(['init', '-q', source]);
+      git(['-C', source, ...sourceFetchArguments(runtime.RUNTIME_SRC_URL, runtimeRef)]);
+      git(['-C', source, 'checkout', '-q', '--detach', 'FETCH_HEAD']);
+    }
+    assert.equal(git(['-C', source, 'rev-parse', 'HEAD']), runtimeRef);
+    headerRuntimeSource = {path: source, owned: !configured};
+  }
+  const paired = path.join(cpp, 'third_party/paired-runtime');
+  git(['clone', '-q', '--no-hardlinks', headerRuntimeSource.path, paired]);
+  const roots = ['third_party/llvm-project/llvm/include', 'build/build/third_party/llvm/include',
+    'build/build/include', 'build/build/schema'];
+  const headers = {};
+  for (const root of roots) {
+    const file = path.join(cpp, root, 'fixture.h'); fs.mkdirSync(path.dirname(file), {recursive: true});
+    fs.writeFileSync(file, 'fixture header'); headers[root] = [{path: 'fixture.h', sha256: sha256(file)}];
+  }
+  const schema = 'schema/ModuleFormat.fbs', flatc = 'build/shim-flatbuffers/flatc';
+  for (const rel of [schema, flatc]) { fs.mkdirSync(path.dirname(path.join(cpp, rel)), {recursive: true}); fs.writeFileSync(path.join(cpp, rel), 'fixture tool input'); }
+  fs.writeFileSync(path.join(cpp, 'build/build/shim-headers.json'), JSON.stringify({
+    runtime: {url: runtime.RUNTIME_SRC_URL, sha: runtimeRef},
+    llvm: {url: llvm.LLVM_URL, sha: llvm.LLVM_SHA},
+    compiler: {url: llvm.CANGJIE_COMPILER_URL, sha: llvm.CANGJIE_COMPILER_SHA},
+    flatbuffers: {url: llvm.FLATBUFFERS_URL, sha: llvm.FLATBUFFERS_SHA},
+    schema: {path: schema, sha256: sha256(path.join(cpp, schema))},
+    flatc: {path: flatc, sha256: sha256(path.join(cpp, flatc))}, headers,
+  }));
+}
+
 function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFailure = false, child = false, coreObserve = false, runtimeCase = 'valid', ast = 'explicit', largeContract = false, contractDefect} = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bootstrap argv '));
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));
@@ -942,6 +1088,7 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
   fs.writeFileSync(inputs + '/ast.a', 'ast input\n');
   writeAstInputFixture(inputs + '/ast.a');
   const runtimePin = fs.readFileSync(path.join(root, 'ci/runtime_pin.env'), 'utf8').match(/^RUNTIME_REF=(.*)$/m)[1];
+  writeCppHeaderFixture(root, inputs, runtimePin);
   const runtimeDir = path.join(inputs, 'external runtime');
   fs.mkdirSync(runtimeDir);
   let stamp = `CJRT-COMMIT:${runtimePin}`;

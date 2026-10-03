@@ -57,6 +57,36 @@ class OptionTest {
     }
 
     @TestCase
+    func ApcFrontendOutputNormalization(): Unit {
+        for (frontend in [false, true]) {
+            for (outputPath in ["packages/option/testdata", "frontend-output.bc"]) {
+                for (apc in [Array<String>(), ["--apc"], ["--apc=4"], ["--apc=1"],
+                    ["--apc-split-num", "5"]]) {
+                    let extra = ArrayList<String>()
+                    extra.add(all: ["--output-type", "staticlib", "-j", "7", "-o", outputPath])
+                    extra.add(all: apc)
+                    let parsed = parseArgs(iosLtoArgs(srcFile, extra.toArray()), frontendMode: frontend)
+                    @Expect(parsed[0], true)
+                    let opts = GlobalOptions()
+                    if (frontend) { opts.SetFrontendMode() }
+                    @Expect(opts.ParseFromArgs(parsed[1]), true)
+                    let requested = if (apc.isEmpty()) { 4u64 } else if (apc[0] == "--apc") {
+                        7u64
+                    } else if (apc[0] == "--apc=1") { 1u64 } else if (apc[0] == "--apc=4") {
+                        4u64
+                    } else { 5u64 }
+                    let expected = if (frontend && outputPath == "frontend-output.bc") { 1u64 } else {
+                        requested
+                    }
+                    println("NORMALIZED frontend=${frontend} output=${outputPath} apc=${apc} value=${opts.aggressiveParallelCompile.value} expected=${expected}")
+                    @Expect(opts.aggressiveParallelCompile.hasValue, true)
+                    @Expect(opts.aggressiveParallelCompile.value, expected)
+                }
+            }
+        }
+    }
+
+    @TestCase
     func GlobalOptionParseFromArgsTest(): Unit {
         let parsed = parseArgs(["cjc", "--no-prelude", "--output-type", "staticlib", srcFile])
         @Expect(parsed[0], true)

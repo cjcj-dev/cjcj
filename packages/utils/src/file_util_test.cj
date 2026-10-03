@@ -554,7 +554,7 @@ class FileUtilTest {
     func readUtf8WithSignature(): Unit {
         let reason = Box<String>("")
         let content = FileUtil.ReadFileContent(
-            "/root/cj_build/cangjie_compiler/unittests/Utils/CangjieFiles/testpkg01.cj",
+            FileUtil.JoinPath(GetProjectPath(), "packages/utils/testdata/read_utf8/testpkg01.cj"),
             reason
         )
         if (let Some(text) <- content) {
@@ -570,7 +570,7 @@ class FileUtilTest {
     func readUtf8(): Unit {
         let reason = Box<String>("")
         let content = FileUtil.ReadFileContent(
-            "/root/cj_build/cangjie_compiler/unittests/Utils/CangjieFiles/pkg01.cj",
+            FileUtil.JoinPath(GetProjectPath(), "packages/utils/testdata/read_utf8/pkg01.cj"),
             reason
         )
         if (let Some(text) <- content) {
@@ -586,7 +586,7 @@ class FileUtilTest {
     func readEmptyFile(): Unit {
         let reason = Box<String>("")
         let content = FileUtil.ReadFileContent(
-            "/root/cj_build/cangjie_compiler/unittests/Utils/CangjieFiles/emptyfile.cj",
+            FileUtil.JoinPath(GetProjectPath(), "packages/utils/testdata/read_utf8/emptyfile.cj"),
             reason
         )
         if (let Some(_) <- content) {

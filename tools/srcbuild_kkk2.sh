@@ -583,14 +583,21 @@ run_step() {
     local step=$1 name=$2 function_name=$3
     local log="$LOG_ROOT/${START_STAMP}-step${step}.log"
     local stop_file="$STATE_ROOT/.affinity-${START_STAMP}-step${step}-$$.stop"
-    local start_ns end_ns wall rc monitor_pid
+    local start_ns rc monitor_pid output_fd
     start_ns=$(date +%s%N)
     capture_build_child_affinity "$$" "$step" "$stop_file" &
     monitor_pid=$!
-    set +e
+    exec {output_fd}>&1
+    trap 'rc=$?; if ((BASH_SUBSHELL == 0)); then trap - ERR; set +e; finish_step "$step" "$name" "$log" "$stop_file" "$monitor_pid" "$start_ns" "$rc" >&"$output_fd"; exec {output_fd}>&-; exit "$rc"; fi' ERR
     "$function_name" > "$log" 2>&1
-    rc=$?
-    set -e
+    trap - ERR
+    exec {output_fd}>&-
+    finish_step "$step" "$name" "$log" "$stop_file" "$monitor_pid" "$start_ns" 0
+}
+
+finish_step() {
+    local step=$1 name=$2 log=$3 stop_file=$4 monitor_pid=$5 start_ns=$6 rc=$7
+    local end_ns wall
     : > "$stop_file"
     wait "$monitor_pid" || true
     end_ns=$(date +%s%N)
@@ -926,6 +933,7 @@ bootstrap_argv() {
         "$BOOTSTRAP_SH" \
         --work "$CJCJ_BOOTSTRAP_WORK" \
         --src "$REPO_ROOT" \
+        --runtime-pin "$CJCJ_BOOTSTRAP_RUNTIME_PIN" \
         --cjcj-sha "$BOOTSTRAP_CJCJ_SHA" \
         --stdsrc "$BOOTSTRAP_STDSRC" \
         --cpp-src "$BOOTSTRAP_CPP_SRC" \
@@ -1017,7 +1025,7 @@ validate_stage_step_contracts() {
         # grep -q may exit before a pipe writer finishes. With pipefail that
         # turns a found contract into a false rejection; feed captured text
         # directly so only the match status decides the contract.
-        for flag in --work --src --cjcj-sha --stdsrc --cpp-src --base --host-llvm-so --host-llvm-sha256 \
+        for flag in --work --src --runtime-pin --cjcj-sha --stdsrc --cpp-src --base --host-llvm-so --host-llvm-sha256 \
             --colour-llvm-so --colour-llvm-sha256 --ast-support --ast-support-sha256 --colour-tuple --colour-llvm-sha \
             --colour-rt --host-rt --stage; do
             /usr/bin/grep -Fq -- "$flag" <<< "$argv_text" || missing+="$flag "
