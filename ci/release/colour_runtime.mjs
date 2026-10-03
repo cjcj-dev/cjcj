@@ -44,7 +44,7 @@ export function prepareRuntime(source, dest, env = process.env) {
     throw new Error('COLOUR_RT_STD_MISSING');
   }
   const moduleFiles = walk(path.join(source, 'modules'));
-  if (!moduleFiles.includes('modules/linux_x86_64_cjnative/std.core.cjo')) {
+  if (!moduleFiles.includes('modules/linux_x86_64_cjnative/std/std.core.cjo')) {
     throw new Error('COLOUR_RT_MODULES_MISSING');
   }
   const files = {};
@@ -106,7 +106,7 @@ export function verifyRuntime(env = process.env) {
         JSON.stringify(Object.entries(manifest.build.installed || {}).sort()) !==
         JSON.stringify(Object.entries(manifest.files || {}).sort()) ||
         !manifest.files['lib/linux_x86_64_cjnative/libcangjie-std-core.a'] ||
-        !manifest.files['modules/linux_x86_64_cjnative/std.core.cjo']) {
+        !manifest.files['modules/linux_x86_64_cjnative/std/std.core.cjo']) {
       throw new Error('COLOUR_RT_BUILD_PRODUCTS_MISMATCH');
     }
   }

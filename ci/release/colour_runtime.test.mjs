@@ -115,7 +115,7 @@ for (const rel of runtimeFiles) {
   }));
 }
 
-for (const rel of ['lib/linux_x86_64_cjnative/libcangjie-std-core.a', 'runtime/lib/linux_x86_64_cjnative/libcangjie-std-core.so', 'lib/libstdFFI.so', 'modules/linux_x86_64_cjnative/std.core.cjo']) {
+for (const rel of ['lib/linux_x86_64_cjnative/libcangjie-std-core.a', 'runtime/lib/linux_x86_64_cjnative/libcangjie-std-core.so', 'lib/libstdFFI.so', 'modules/linux_x86_64_cjnative/std/std.core.cjo']) {
   test(`new std producer and consumer bind ${rel}`, () => fixture(({runtime, runtimeSource, run}) => {
     assert.equal(fs.readFileSync(path.join(runtime, rel), 'utf8'), fs.readFileSync(path.join(runtimeSource, rel), 'utf8'));
     assert.equal(run().status, 0);
@@ -154,7 +154,7 @@ for (const scenario of ['publication', 'source', 'stamp', 'payload', 'stdlib', '
       fs.rmSync(path.join(runtimeSource, 'lib/linux_x86_64_cjnative/libcangjie-std-core.a'));
       expected = /COLOUR_RT_STD_MISSING/;
     } else {
-      fs.rmSync(path.join(runtimeSource, 'modules/linux_x86_64_cjnative/std.core.cjo'));
+      fs.rmSync(path.join(runtimeSource, 'modules/linux_x86_64_cjnative/std/std.core.cjo'));
       expected = /COLOUR_RT_MODULES_MISSING/;
     }
     assert.throws(() => prepareRuntime(runtimeSource, output, env), expected);
