@@ -385,6 +385,10 @@ private func IntrinsicKindToPackageIntrinsicKind(kind: IntrinsicKind): UInt16 {
         case IntrinsicKind.IS_SUBTYPE_TYPES => 360u16
         case IntrinsicKind.EXCLUSIVE_SCOPE => 361u16
         case IntrinsicKind.CANONICALIZE_STRING_BACKING => 362u16
+        case IntrinsicKind.REFERENCE_INVOKE_FINALIZE => 363u16
+        case IntrinsicKind.REFERENCE_WAIT_PENDING => 364u16
+        case IntrinsicKind.REFERENCE_RUNTIME_RUNNING => 365u16
+        case IntrinsicKind.REFERENCE_NANO_TIME => 366u16
 
     }
 }
