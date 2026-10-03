@@ -5,6 +5,63 @@ import path from 'node:path';
 import {fixture} from './prepare_bootstrap_fixture.mjs';
 import {digest, runtimeFiles} from './colour_runtime.mjs';
 
+function localRuntime(env, runtime) {
+  const manifestFile = path.join(runtime, 'manifest.json');
+  const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+  const library = path.join(runtime, runtimeFiles[0]);
+  fs.appendFileSync(library, `\nCJRT-COMMIT:${env.RUNTIME_REF}\n`);
+  manifest.files[runtimeFiles[0]] = digest(library);
+  manifest.run_id = 'local:sym_cjcj_135_fixture';
+  fs.writeFileSync(manifestFile, JSON.stringify(manifest));
+  env.COLOUR_RT_MANIFEST_SHA256 = digest(manifestFile);
+  env.CJCJ_BOOTSTRAP_RUNTIME_SOURCE = 'local-sharedbuild';
+  env.GITHUB_ACTIONS = 'false';
+}
+
+test('explicit local sharedbuild root reaches the unified bootstrap consumer', () => fixture(({env, runtime, run}) => {
+  localRuntime(env, runtime);
+  const result = run();
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /COLOUR_RT_VERIFIED run=local:sym_cjcj_135_fixture artifact=local-sharedbuild/);
+  assert.ok(result.stdout.includes(`CJCJ_BOOTSTRAP_COLOUR_RT=${runtime}\n`));
+  console.log('ASSERT local sharedbuild root exported by real input entry');
+}));
+
+for (const scenario of ['payload', 'undeclared', 'publication', 'stamp', 'source']) {
+  test(`local sharedbuild rejects ${scenario} at its identity assertion`, () => fixture(({env, runtime, run}) => {
+    localRuntime(env, runtime);
+    let expected;
+    if (scenario === 'payload') {
+      fs.appendFileSync(path.join(runtime, runtimeFiles[1]), 'changed');
+      expected = /COLOUR_RT_FILE_SHA256_MISMATCH/;
+    } else if (scenario === 'undeclared') {
+      delete env.CJCJ_BOOTSTRAP_RUNTIME_SOURCE;
+      expected = /COLOUR_RT_LOCAL_SOURCE_UNDECLARED/;
+    } else if (scenario === 'publication') {
+      env.GITHUB_ACTIONS = 'true';
+      expected = /COLOUR_RT_LOCAL_PUBLICATION_FORBIDDEN/;
+    } else if (scenario === 'stamp') {
+      const manifestFile = path.join(runtime, 'manifest.json');
+      const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+      const library = path.join(runtime, runtimeFiles[0]);
+      fs.appendFileSync(library, `\nCJRT-COMMIT:${'a'.repeat(40)}\n`);
+      manifest.files[runtimeFiles[0]] = digest(library);
+      fs.writeFileSync(manifestFile, JSON.stringify(manifest));
+      env.COLOUR_RT_MANIFEST_SHA256 = digest(manifestFile);
+      expected = /COLOUR_RT_LOCAL_STAMP_MISMATCH/;
+    } else {
+      env.RUNTIME_REF = 'e'.repeat(40);
+      env.CJCJ_RUNTIME_REF_OVERRIDE = env.RUNTIME_REF;
+      expected = /COLOUR_RT_MANIFEST_MISMATCH/;
+    }
+    const result = run();
+    assert.match(result.stderr, expected);
+    assert.notEqual(result.status, 0);
+    assert.doesNotMatch(result.stdout, /CJCJ_BOOTSTRAP_COLOUR_RT=/);
+    console.log(`ASSERT local ${scenario} identity rejection executed`);
+  }));
+}
+
 test('runtime pair reaches bootstrap with explicit identity and host remains separate', () => fixture(({env, runtime, runtimeSource, run}) => {
   const result = run();
   assert.equal(result.status, 0, result.stderr);

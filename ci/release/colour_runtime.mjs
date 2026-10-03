@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import {fileURLToPath} from 'node:url';
+import {spawnSync} from 'node:child_process';
 
 export const runtimeFiles = [
   'runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so',
@@ -48,6 +49,12 @@ export function prepareRuntime(source, dest, env = process.env) {
   }
   const manifest = {runtime_sha: sourceSha, platform: 'linux_x86_64',
     run_id: env.GITHUB_RUN_ID, run_attempt: env.GITHUB_RUN_ATTEMPT, files};
+  const receipt = path.join(source, 'BUILD-INPUTS.json');
+  if (fs.existsSync(receipt)) {
+    const build = JSON.parse(fs.readFileSync(receipt, 'utf8'));
+    if (build.sourceCommit !== sourceSha) throw new Error('COLOUR_RT_BUILD_SOURCE_MISMATCH');
+    manifest.build = {...build, installed: files};
+  }
   fs.writeFileSync(path.join(dest, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
   const sha = digest(path.join(dest, 'manifest.json'));
   if (env.GITHUB_OUTPUT) fs.appendFileSync(env.GITHUB_OUTPUT, `sha256=${sha}\n`);
@@ -56,16 +63,21 @@ export function prepareRuntime(source, dest, env = process.env) {
 export function verifyRuntime(env = process.env) {
   const root = env.CJCJ_BOOTSTRAP_COLOUR_RT;
   if (!root) throw new Error('COLOUR_RT_INPUT_MISSING');
-  if (!/^\d+$/.test(env.COLOUR_RT_RUN_ID || '') || !/^\d+$/.test(env.COLOUR_RT_ARTIFACT_ID || '')
-      || !/^\d+$/.test(env.COLOUR_RT_RUN_ATTEMPT || '')) throw new Error('COLOUR_RT_PIN_MISSING');
+  const local = env.CJCJ_BOOTSTRAP_RUNTIME_SOURCE === 'local-sharedbuild';
+  if (local && env.GITHUB_ACTIONS === 'true') throw new Error('COLOUR_RT_LOCAL_PUBLICATION_FORBIDDEN');
+  if (!local && (!/^\d+$/.test(env.COLOUR_RT_RUN_ID || '') || !/^\d+$/.test(env.COLOUR_RT_ARTIFACT_ID || '')
+      || !/^\d+$/.test(env.COLOUR_RT_RUN_ATTEMPT || ''))) throw new Error('COLOUR_RT_PIN_MISSING');
   const pin = env.COLOUR_RT_MANIFEST_SHA256 || '';
   const actual = digest(regularFile(root, 'manifest.json'));
   if (!/^[a-f0-9]{64}$/.test(pin) || actual !== pin) {
     throw new Error(`COLOUR_RT_SHA256_MISMATCH expected=${pin} actual=${actual}`);
   }
   const manifest = JSON.parse(fs.readFileSync(path.join(root, 'manifest.json'), 'utf8'));
-  if (manifest.runtime_sha !== env.RUNTIME_REF || manifest.platform !== 'linux_x86_64'
-      || manifest.run_id !== env.COLOUR_RT_RUN_ID || manifest.run_attempt !== env.COLOUR_RT_RUN_ATTEMPT) {
+  if (String(manifest.run_id).startsWith('local:') && !local) throw new Error('COLOUR_RT_LOCAL_SOURCE_UNDECLARED');
+  if (manifest.runtime_sha !== env.RUNTIME_REF || !/^[a-f0-9]{40}$/.test(env.RUNTIME_REF || '')
+      || manifest.platform !== 'linux_x86_64'
+      || (local ? !/^local:[A-Za-z0-9_-]+$/.test(manifest.run_id || '')
+        : manifest.run_id !== env.COLOUR_RT_RUN_ID || manifest.run_attempt !== env.COLOUR_RT_RUN_ATTEMPT)) {
     throw new Error('COLOUR_RT_MANIFEST_MISMATCH');
   }
   for (const rel of new Set([...runtimeFiles, ...Object.keys(manifest.files || {})])) {
@@ -73,7 +85,15 @@ export function verifyRuntime(env = process.env) {
       throw new Error(`COLOUR_RT_FILE_SHA256_MISMATCH: ${rel}`);
     }
   }
-  console.log(`COLOUR_RT_VERIFIED run=${manifest.run_id} artifact=${env.COLOUR_RT_ARTIFACT_ID} runtime=${manifest.runtime_sha} sha256=${actual}`);
+  if (local) {
+    const stamp = spawnSync('strings', ['-a', regularFile(root, runtimeFiles[0])], {encoding: 'utf8', maxBuffer: 64 * 1024 * 1024});
+    if (stamp.error) throw stamp.error;
+    const stamps = [...new Set((stamp.stdout || '').match(/CJRT-COMMIT:[A-Za-z0-9_-]+/g) || [])];
+    if (stamp.status !== 0 || stamps.length !== 1 || stamps[0] !== `CJRT-COMMIT:${env.RUNTIME_REF}`) {
+      throw new Error('COLOUR_RT_LOCAL_STAMP_MISMATCH');
+    }
+  }
+  console.log(`COLOUR_RT_VERIFIED run=${manifest.run_id} artifact=${local ? 'local-sharedbuild' : env.COLOUR_RT_ARTIFACT_ID} runtime=${manifest.runtime_sha} sha256=${actual}`);
   return root;
 }
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
