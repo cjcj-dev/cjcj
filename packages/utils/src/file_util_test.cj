@@ -1,9 +1,11 @@
 package cjcj::utils
 
 import std.collection.*
-import std.env.getVariable
-import std.fs.File
+import std.env.{atExit, getVariable}
+import std.fs.{File, FSException, removeIfExists}
+import std.fs.Directory as FSDirectory
 import std.process.execute
+import std.sync.Mutex
 import std.unittest.*
 import std.unittest.testmacro.*
 
@@ -13,7 +15,52 @@ private func GetProjectPath(): String {
     return getVariable("PROJECT_SOURCE_DIR") ?? "."
 }
 
-private let tempRoot = "/tmp/cangjie_selfhost_utils_tests"
+// Only createTemp's successful return grants ownership. Register the absolute
+// path for exit cleanup; use its basename to retain relative-path coverage.
+private class FileUtilFixture {
+    let root: String
+    let relativeRoot: String
+    private let mutex = Mutex()
+    private var owned = true
+
+    init(parent!: String = ".") {
+        let created = FSDirectory.createTemp(parent)
+        root = created.toString()
+        relativeRoot = created.fileName
+        try {
+            atExit({ => cleanup() })
+        } catch (e: Exception) {
+            cleanupFixturePath(root)
+            throw e
+        }
+    }
+
+    func path(name: String): String {
+        return FileUtil.JoinPath(relativeRoot, name)
+    }
+
+    func cleanup(): Unit {
+        synchronized(mutex) {
+            if (owned && cleanupFixturePath(root)) {
+                owned = false
+            }
+        }
+    }
+}
+
+// Cleanup failures remain visible without replacing an in-flight exception.
+private func cleanupFixturePath(path: String): Bool {
+    try {
+        let _ = removeIfExists(path, recursive: true)
+        return true
+    } catch (e: Exception) {
+        println("FileUtil fixture cleanup failed: ${path}: ${e}")
+        @Expect(false, true)
+        return false
+    }
+}
+
+private let fileUtilFixture = FileUtilFixture()
 
 private func resetPath(path: String): Unit {
     if (FileUtil.IsDir(path)) {
@@ -55,6 +102,16 @@ private func expectSomeString(value: Option<String>, expected: String): Unit {
     } else {
         @Expect("", expected)
     }
+}
+
+private func fixtureSignal(sync: String, event: String): Unit {
+    @Assert(execute("timeout", ["110", "sh", "-c",
+        "printf '%s\\n' \"$2\" > \"$1/events\"", "sh", sync, event]), 0)
+}
+
+private func fixtureAwait(sync: String, role: String): Unit {
+    @Assert(execute("timeout", ["110", "sh", "-c",
+        "read token < \"$1/$2\"", "sh", sync, role]), 0)
 }
 
 // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:121 TEST(UtilsTest, FileExist)
@@ -128,11 +185,14 @@ private func TransferEscapeBacktickTest(): Unit {
 private func IsDirTest(): Unit {
     @Expect(FileUtil.IsDir(GetProjectPath() + "/unittests/Utils/"), true)
     @Expect(FileUtil.IsDir("no/exist/dir"), false)
-    let dir = tempRoot + "_definitelyDirectory"
+    let dir = fileUtilFixture.path("definitelyDirectory")
     resetPath(dir)
-    ensureDir(dir)
-    @Expect(FileUtil.IsDir(dir), true)
-    let _ = FileUtil.RemoveDirectoryRecursively(dir)
+    try {
+        ensureDir(dir)
+        @Expect(FileUtil.IsDir(dir), true)
+    } finally {
+        cleanupFixturePath(dir)
+    }
 }
 
 // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:432 TEST(UtilsTest, IsDirTest)
@@ -140,13 +200,16 @@ private func IsDirTest(): Unit {
 private func IsDirTest(): Unit {
     @Expect(FileUtil.IsDir(GetProjectPath() + "/unittests/Utils/"), true)
     @Expect(FileUtil.IsDir("no/exist/dir"), false)
-    let dir = tempRoot + "_definitelyDirectory"
+    let dir = fileUtilFixture.path("definitelyDirectory")
     resetPath(dir)
-    ensureDir(dir)
-    @Expect(execute("chmod", ["-r", dir]), 0)
-    @Expect(FileUtil.IsDir(dir), true)
-    @Expect(execute("chmod", ["+r", dir]), 0)
-    let _ = FileUtil.RemoveDirectoryRecursively(dir)
+    try {
+        ensureDir(dir)
+        @Expect(execute("chmod", ["-r", dir]), 0)
+        @Expect(FileUtil.IsDir(dir), true)
+    } finally {
+        @Expect(execute("chmod", ["+r", dir]), 0)
+        cleanupFixturePath(dir)
+    }
 }
 
 // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:449 TEST(UtilsTest, JoinPathTest)
@@ -387,6 +450,88 @@ private func IsAbsolutePathAboveLengthLimit(): Unit {
 
 @Test
 class FileUtilTest {
+    // The returned fixture path is consumed by real FileUtil byte reads.
+    // External synchronization never lives under a directory this test cleans.
+    @TestCase
+    func fixtureIsolation(): Unit {
+        let fixture = FileUtilFixture()
+        let input = fixture.path("input.txt")
+        let role = getVariable("FILEUTIL_ISOLATION_ROLE") ?? ""
+        println("FIXTURE_ROOT=${fixture.root} ROLE=${role}")
+        try {
+            if (role.isEmpty()) {
+                writeText(input, "fixture-B-input")
+                let other = FileUtilFixture()
+                other.cleanup()
+            } else {
+                let sync = getVariable("FILEUTIL_ISOLATION_SYNC").getOrThrow()
+                @Assert(role == "A" || role == "B", true)
+                if (role == "A") {
+                    fixtureSignal(sync, "waiting")
+                    fixtureAwait(sync, "A")
+                    writeText(input, "fixture-A-input")
+                    fixture.cleanup()
+                    fixtureSignal(sync, "cleaned")
+                    return
+                }
+                writeText(input, "fixture-B-input")
+                fixtureSignal(sync, "ready")
+                fixtureAwait(sync, "B")
+            }
+            var actual = "<missing>"
+            let reason = Box<String>("")
+            if (let Some(text) <- FileUtil.ReadFileContent(input, reason)) {
+                actual = text
+            }
+            println("FIXTURE_ASSERT_REACHED actual=${actual}")
+            @Expect(actual, "fixture-B-input")
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @TestCase
+    func fixtureLifecycle(): Unit {
+        let fixture = FileUtilFixture()
+        let input = fixture.path("sentinel.txt")
+        writeText(input, "owned")
+        var rejected = false
+        try {
+            FSDirectory.create(fixture.root, recursive: false)
+        } catch (_: FSException) {
+            rejected = true
+        }
+        @Expect(rejected, true)
+        var creationFailed = false
+        try {
+            let _ = FileUtilFixture(parent: input)
+        } catch (_: FSException) {
+            creationFailed = true
+        }
+        @Expect(creationFailed, true)
+        let reason = Box<String>("")
+        expectSomeString(FileUtil.ReadFileContent(input, reason), "owned")
+        try {
+            try {
+                throw Exception("fixture lifecycle control")
+            } finally {
+                fixture.cleanup()
+            }
+        } catch (_: Exception) {
+            @Expect(FileUtil.FileExist(fixture.root), false)
+        }
+        println("FIXTURE_LIFECYCLE_ASSERT_REACHED root=${fixture.root}")
+    }
+
+    @TestCase
+    func fixtureExit(): Unit {
+        let fixture = FileUtilFixture()
+        writeText(fixture.path("exit.txt"), "exit-owned")
+        println("FIXTURE_EXIT_ROOT=${fixture.root}")
+        @Expect(FileUtil.FileExist(fixture.path("exit.txt")), true)
+        // Deliberately leave this owned root to the registered normal-exit cleanup.
+    }
+
     // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:113 TEST(UtilsTest, Access)
     @TestCase
     func access(): Unit {
@@ -415,7 +560,7 @@ class FileUtilTest {
     // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:187 TEST(UtilsTest, RemoveDirectoryNonExist)
     @TestCase
     func removeDirectoryNonExist(): Unit {
-        let path = tempRoot + "_not_exist"
+        let path = fileUtilFixture.path("not_exist")
         resetPath(path)
         @Expect(FileUtil.RemoveDirectoryRecursively(path), false)
     }
@@ -423,24 +568,31 @@ class FileUtilTest {
     // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:193 TEST(UtilsTest, RemoveDirectoryRemoveFile)
     @TestCase
     func removeDirectoryRemoveFile(): Unit {
-        let tempFile = tempRoot + "_file.txt"
+        let tempFile = fileUtilFixture.path("file.txt")
         resetPath(tempFile)
-        writeText(tempFile, "test")
-        @Expect(FileUtil.RemoveDirectoryRecursively(tempFile), false)
-        let _ = FileUtil.Remove(tempFile)
+        try {
+            writeText(tempFile, "test")
+            @Expect(FileUtil.RemoveDirectoryRecursively(tempFile), false)
+        } finally {
+            cleanupFixturePath(tempFile)
+        }
     }
 
     // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:204 TEST(UtilsTest, RemoveDirectorySuccess)
     @TestCase
     func removeDirectorySuccess(): Unit {
-        let base = tempRoot + "_success"
+        let base = fileUtilFixture.path("success")
         resetPath(base)
-        let nested = FileUtil.JoinPath(base, "nested")
-        ensureDir(nested)
-        writeText(FileUtil.JoinPath(nested, "file.txt"), "nested")
-        writeText(FileUtil.JoinPath(base, "root.txt"), "root")
-        @Expect(FileUtil.RemoveDirectoryRecursively(base), true)
-        @Expect(FileUtil.FileExist(base), false)
+        try {
+            let nested = FileUtil.JoinPath(base, "nested")
+            ensureDir(nested)
+            writeText(FileUtil.JoinPath(nested, "file.txt"), "nested")
+            writeText(FileUtil.JoinPath(base, "root.txt"), "root")
+            @Expect(FileUtil.RemoveDirectoryRecursively(base), true)
+            @Expect(FileUtil.FileExist(base), false)
+        } finally {
+            cleanupFixturePath(base)
+        }
     }
 
     // PORT-DEFERRED: RemoveDirectoryWithSymlinkChild and RemoveDirectoryTargetIsSymlink require
@@ -670,22 +822,25 @@ class GetAllDirsUnderCurrentPath {
     // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:770 #ifndef _WIN32 TEST(UtilsTest, GetAllDirsUnderCurrentPath)
     @TestCase
     func getAllDirsUnderCurrentPath(): Unit {
-        let base = "fileUtilsMkdir"
+        let base = fileUtilFixture.path("fileUtilsMkdir")
         resetPath(base)
-        ensureDir(FileUtil.JoinPath(base, "tmp1"))
-        var dirs = FileUtil.GetAllDirsUnderCurrentPath(base)
-        @Expect(dirs.size, 1)
-        @Expect(dirs[0], "fileUtilsMkdir/tmp1")
-        ensureDir(FileUtil.JoinPath(base, "tmp2"))
-        dirs = FileUtil.GetAllDirsUnderCurrentPath(base)
-        @Expect(dirs.size, 2)
-        @Expect(dirs.contains("fileUtilsMkdir/tmp2"), true)
-        if (let Some(absPath) <- FileUtil.GetAbsPath(base)) {
-            dirs = FileUtil.GetAllDirsUnderCurrentPath(absPath)
+        try {
+            ensureDir(FileUtil.JoinPath(base, "tmp1"))
+            var dirs = FileUtil.GetAllDirsUnderCurrentPath(base)
+            @Expect(dirs.size, 1)
+            @Expect(dirs[0], FileUtil.JoinPath(base, "tmp1"))
+            ensureDir(FileUtil.JoinPath(base, "tmp2"))
+            dirs = FileUtil.GetAllDirsUnderCurrentPath(base)
             @Expect(dirs.size, 2)
-        } else {
-            @Expect(true, false)
+            @Expect(dirs.contains(FileUtil.JoinPath(base, "tmp2")), true)
+            if (let Some(absPath) <- FileUtil.GetAbsPath(base)) {
+                dirs = FileUtil.GetAllDirsUnderCurrentPath(absPath)
+                @Expect(dirs.size, 2)
+            } else {
+                @Expect(true, false)
+            }
+        } finally {
+            cleanupFixturePath(base)
         }
-        let _ = FileUtil.RemoveDirectoryRecursively(base)
     }
 }
