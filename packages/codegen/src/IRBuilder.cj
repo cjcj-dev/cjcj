@@ -3068,6 +3068,10 @@ public class IRBuilder2 <: Resource {
         if (kind == IntrinsicKind.DECODE_STACK_TRACE) {
             CJC_ASSERT(parameters.size == 2)
             CJC_ASSERT(DeRef(args[0].GetType().getOrThrow()) is ClassType)
+            // A class pointer is one GC reference, not a struct payload with an extra base argument.
+            let capture = parameters[0]
+            parameters[0] = CGValue(CreateBitCast(capture.GetRawValue(), CGType.GetRefType(GetLLVMContext())),
+                capture.GetCGType().getOrThrow())
             let retTy = resultType.getOrThrow()
             let retCGType = CGType.GetOrCreate(cgMod, retTy)
             let resultStructTy = (retTy as StructType).getOrThrow()
