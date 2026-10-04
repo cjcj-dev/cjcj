@@ -7,6 +7,29 @@ import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {prepareTrimpath, withSeedOptimization} from './trimpath.mjs';
 
+// Match the quoted argument syntax emitted by prepareTrimpath; a source-root
+// argument may contain spaces and flag-looking text without being a flag.
+function assertDebugOption(options, debug) {
+  const tokens = options.match(/"(?:[^"\\]|\\.)*"|'[^']*'|[^\s]+/g) || [];
+  assert.equal(tokens.includes('-g'), debug);
+}
+
+for (const [name, options, debug, accepted] of [
+  ['plain release', '-O1 --trimpath /source', false, true],
+  ['plain debug', '-O1 -g', true, true],
+  ['path suffix', '-O1 --trimpath /tmp-green/source', false, true],
+  ['double quoted path', '-O1 --trimpath "/source space -g root"', false, true],
+  ['single quoted path', "-O1 --trimpath '/source space -g root'", false, true],
+  ['missing debug flag', '-O1 --trimpath "/source -g root"', true, false],
+  ['extra debug flag', '-O1 -g --trimpath "/source space"', false, false],
+  ['flag prefix', '-O1 -gextra', false, true],
+]) {
+  test(`aggregate debug-option assertion: ${name}`, () => {
+    if (accepted) assertDebugOption(options, debug);
+    else assert.throws(() => assertDebugOption(options, debug), assert.AssertionError);
+  });
+}
+
 for (const [name, options, debug, trimmed] of [
   ['release', '-O1', false, true],
   ['forensic', '-O2', true, false],
@@ -65,7 +88,7 @@ for (const [name, input, debug] of [
       // Target assertion precedes command-status checks so a guard cannot mask it.
       assert.match(options, /^-O1(?:\s|$)/, 'aggregate must send O1 to cjpm even after release preparation');
       assert.equal(options.includes('--trimpath'), !debug);
-      assert.equal(options.includes('-g'), debug);
+      assertDebugOption(options, debug);
       assert.match(output, /^override-compile-option = "-O2"$/m);
       assert.equal(await fs.readFile(file + '.O2bak', 'utf8'), before);
       assert.equal(result.status, 0, result.stdout + result.stderr);

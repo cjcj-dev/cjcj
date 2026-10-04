@@ -42,7 +42,7 @@ test('cross artifact inputs reject duplicates and unsafe names', () => {
 
 test('Android producer and package consumer are connected to the real release workflows', () => {
   const root = path.resolve(import.meta.dirname, '../..');
-  const source = fs.readFileSync(path.join(root, '.github/workflows/srcbuild.yml'), 'utf8');
+  const source = fs.readFileSync(path.join(root, '.github/workflows/srcbuild-target.yml'), 'utf8');
   const packageWorkflow = fs.readFileSync(path.join(root, '.github/workflows/build-release-package.yml'), 'utf8');
   const packager = fs.readFileSync(path.join(root, 'scripts/package_sdk.mjs'), 'utf8');
   assert.match(source, /run: npx --yes zx@8 ci\/srcbuild\/steps\/build-android-final-std\.mjs/);

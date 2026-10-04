@@ -1,3 +1,12 @@
+import {readFileSync} from 'node:fs';
+
+export function readHostToolchainPin() {
+  const text = readFileSync(new URL('./host_sdk_pin.env', import.meta.url), 'utf8');
+  const definitions = [...text.matchAll(/^CJCJ_TOOLCHAIN=(\S+)$/gm)];
+  if (definitions.length !== 1) throw new Error('ci/host_sdk_pin.env must define exactly one CJCJ_TOOLCHAIN');
+  return requireHostToolchain({CJCJ_TOOLCHAIN: definitions[0][1]});
+}
+
 export function requireHostToolchain(env = process.env) {
   const toolchain = env.CJCJ_TOOLCHAIN?.trim();
   if (!toolchain) {

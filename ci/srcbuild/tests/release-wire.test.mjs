@@ -18,19 +18,17 @@ const packageJobsOf = release => jobsOf(release)
 
 const platforms = allTargets();
 
-test('srcbuild exposes reusable inputs, outputs, and the runtime override chain', async () => {
-  const sourceBuild = await workflow('srcbuild.yml');
+test('srcbuild exposes reusable inputs, artifact uploads, and the runtime override chain', async () => {
+  const sourceBuild = await workflow('srcbuild-target.yml');
   for (const contract of [
     'workflow_call:',
     'runtime_ref:',
     'CJCJ_RUNTIME_REF_OVERRIDE: ${{ inputs.runtime_ref }}',
     'run: npx --yes zx@8 ci/load_runtime_pin.mjs',
   ]) assert.ok(sourceBuild.includes(contract), contract);
-  for (const platform of platforms) {
-    const output = `final_std_${platform.replaceAll('-', '_')}:`;
-    assert.ok(sourceBuild.includes(output), output);
-    assert.ok(sourceBuild.includes(`final-std-${platform}`), platform);
-  }
+  assert.match(sourceBuild, /name: final-std-\$\{\{ matrix.target \}\}/);
+  assert.match(sourceBuild, /name: final-std-windows-x64/);
+  assert.doesNotMatch(sourceBuild, /final_(std|compiler)_/);
 });
 
 test('release connects each platform row to its same-platform final std', async () => {
@@ -166,7 +164,7 @@ test('release package runs the packaged std checker as a bounded fail-closed ste
 
 test('all package cells consume cjpm artifacts with producer sidecars', async () => {
   const [sourceBuild, windowsCjpm, consumer] = await Promise.all([
-    workflow('srcbuild.yml'),
+    workflow('srcbuild-target.yml'),
     workflow('build-cjpm.yml'),
     workflow('build-release-package.yml'),
   ]);
@@ -183,7 +181,8 @@ test('release has one LLVM producer per tuple', async () => {
   assert.ok(jobsOf(release).some(job => job.with?.platform_set === 'windows-only'));
   assert.ok(!jobsOf(release).some(job => job.with?.platform_set === 'darwin-windows'));
   assert.ok(!jobsOf(release).some(job => job.uses === './.github/workflows/build-fixed-llc.yml'));
-  assert.ok(tuples.includes("inputs.platform_set == 'windows-only'"));
+  assert.equal(loadYaml(tuples).jobs['build-tuple'].uses, './.github/workflows/build-llvm-tools.yml');
+  assert.equal(loadYaml(tuples).jobs['build-tuple'].with.platform_set, "${{ inputs.platform_set || 'all' }}");
 
   const artifacts = [
     ...platforms.map(platform => `fixed-llvm-tools-${getTarget(platform).spec.llvmPlatform}`),
@@ -198,13 +197,12 @@ test('release has one LLVM producer per tuple', async () => {
 
 test('release packages select the named final compiler in each native phase', async () => {
   const release = await releaseWorkflow();
-  const source = await workflow('srcbuild.yml');
+  const source = await workflow('srcbuild-target.yml');
   const consumer = await workflow('build-release-package.yml');
   const jobs = packageJobsOf(release);
   for (const platform of platforms.filter(name => !getTarget(name).spec.crossCompile)) {
     const job = jobs.find(entry => entry.with?.platform === platform);
     assert.equal(job.with?.compiler_artifact, `final-compiler-${platform}`, platform);
-    assert.ok(source.includes(`final_compiler_${platform.replaceAll('-', '_')}:`), platform);
   }
   assert.match(source, /name: final-compiler-\$\{\{ matrix.target \}\}/);
   assert.ok(consumer.includes('node ci/release/select_final_compiler.mjs'));

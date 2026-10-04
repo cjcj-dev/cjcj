@@ -192,6 +192,7 @@ test('release package entry rejects a diagnostic SDK before constructing its sta
   };
   const report = path.join(root, 'report.tsv');
   markDiagnosticWorkspace({workspace: sdk, report, inventory: `${report}.artifacts.tsv`});
+  fs.mkdirSync(path.join(root, 'isolated-llvm'), {recursive: true});
   const zxProbe = spawnSync('sh', ['-c', 'command -v zx'], {encoding: 'utf8'});
   const command = zxProbe.status === 0 ? zxProbe.stdout.trim() : 'npx';
   const prefix = zxProbe.status === 0 ? [] : ['--yes', 'zx@8'];
@@ -203,6 +204,10 @@ test('release package entry rejects a diagnostic SDK before constructing its sta
     '--outdir', path.join(root, 'out'),
     '--python-bundle', pythonBundle,
     '--llvm-manifest', makeFile('llvm.manifest'),
+    // The packager reads the source-built tuple from outside the SDK; the
+    // diagnostic-workspace gate below must be what rejects this invocation, so
+    // every other required argument is present and the gate is the only trigger.
+    '--isolated-llvm-bin', path.join(root, 'isolated-llvm'),
     '--base-sdk-archive', makeFile('base.tar'),
     '--base-sdk-provenance', makeFile('base.json'),
     '--gate-host-runtime', makeFile('runtime.so'),
