@@ -10,6 +10,12 @@ public let SIGNAL_MSG_PART_ONE: String = "Windows unexpected exception code ("
 
 public let SIGNAL_MSG_PART_TWO: String = ") received."
 
+// xnu bsd/sys/signal.h: MINSIGSTKSZ=32768, SIGSTKSZ=131072; sigaltstack with a smaller
+// ss_size fails with EINVAL on macOS/iOS (upstream SignalUnix.cpp:21 assumes Linux MINSIGSTKSZ=2048).
+@When[os == "macOS" || os == "iOS"]
+private let SIGNAL_STACK_SIZE: Int64 = 131072
+
+@When[os != "macOS" && os != "iOS"]
 private let SIGNAL_STACK_SIZE: Int64 = 8192
 
 @When[os != "Windows"]

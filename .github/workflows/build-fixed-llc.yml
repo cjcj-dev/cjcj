@@ -20,6 +20,11 @@ on:
         required: false
         type: boolean
         default: false
+      publish_native_tuple:
+        description: Publish and persist both Darwin static tuples for an explicit pin update.
+        required: false
+        type: boolean
+        default: false
       publish_tuple:
         description: Publish a new static tuple candidate for an explicit pin update.
         required: false
@@ -60,6 +65,7 @@ jobs:
     with:
       platforms: ${{ inputs.platforms || 'all' }}
       publish_tuple: ${{ inputs.publish_tuple || false }}
+      publish_native_tuple: ${{ inputs.publish_native_tuple || false }}
       publish_dylib: ${{ inputs.publish_dylib || false }}
       cache-component: ${{ inputs.cache-component || 'llvm-dylib' }}
       cold_cache: ${{ inputs.cold_cache || false }}
@@ -104,6 +110,36 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: bootstrap-inputs-pin
+          path: ${{ runner.temp }}/bootstrap-inputs-pin.json
+          if-no-files-found: error
+          retention-days: 90
+
+  persist-native:
+    if: inputs.publish_native_tuple
+    needs: tuple
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [darwin_aarch64, darwin_x86_64]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: static-llvm-tuple-${{ matrix.platform }}
+          path: ${{ runner.temp }}/static-tuple
+      - name: Persist and read back the native tuple
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          STATIC_TUPLE: ${{ runner.temp }}/static-tuple
+          TUPLE_PLATFORM: ${{ matrix.platform }}
+        run: node ci/release/publish_native_tuple.mjs
+      - uses: actions/upload-artifact@v7
+        with:
+          name: bootstrap-inputs-pin-${{ matrix.platform }}
           path: ${{ runner.temp }}/bootstrap-inputs-pin.json
           if-no-files-found: error
           retention-days: 90

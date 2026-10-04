@@ -14,12 +14,16 @@ import sys
 ALLOWED_SYMLINKS = {'bin/cjc', 'bin/cjc-frontend'}
 LOCK_NAME = 'SDK.lock.json'
 SKIP_NAMES = {'.', LOCK_NAME}
-LLVM_TOOLS = (
-    'third_party/llvm/bin/llc',
-    'third_party/llvm/bin/opt',
-    'third_party/llvm/bin/ld.lld',
-    'third_party/llvm/lib/libLLVM-15.so',
-)
+def llvm_tools(target_tuple):
+    darwin = (target_tuple or "").startswith("darwin_")
+    linker = "ld64.lld" if darwin else "ld.lld"
+    library = "libLLVM.dylib" if darwin else "libLLVM-15.so"
+    return (
+        'third_party/llvm/bin/llc',
+        'third_party/llvm/bin/opt',
+        f'third_party/llvm/bin/{linker}',
+        f'third_party/llvm/lib/{library}',
+    )
 CJLLVM_RE = re.compile(rb'CJLLVM-COMMIT:([0-9a-fA-F]{40})')
 CJRT_RE = re.compile(rb'CJRT-COMMIT:([0-9a-fA-F]{40})')
 HEX64_RE = re.compile(r'^[0-9a-f]{64}$')
@@ -121,11 +125,11 @@ def manifest_llvm_sha(sdk: Path) -> str | None:
 
 def runtime_so_path(sdk: Path, target_tuple: str | None) -> Path | None:
     if target_tuple:
-        candidate = sdk / 'runtime/lib' / target_tuple / 'libcangjie-runtime.so'
+        candidate = sdk / 'runtime/lib' / target_tuple / ('libcangjie-runtime.dylib' if target_tuple.startswith('darwin_') else 'libcangjie-runtime.so')
         return candidate if candidate.is_file() else None
     found = []
     for path, rel in iter_files(sdk):
-        if Path(rel).name == 'libcangjie-runtime.so' and classify(rel) == 'runtime':
+        if Path(rel).name in ('libcangjie-runtime.so', 'libcangjie-runtime.dylib') and classify(rel) == 'runtime':
             found.append(path)
     if len(found) == 1:
         return found[0]
@@ -252,12 +256,12 @@ def verify(sdk: Path, lock: dict, pin: dict, identities: dict, errors: list, tar
             fail('STD_CJC', f'std-producer compiler {producer or "invalid"} != on-disk cjc {measured}', errors)
 
     if (sdk / 'third_party/llvm').exists():
-        missing = [rel for rel in LLVM_TOOLS if not (sdk / rel).is_file()]
+        missing = [rel for rel in llvm_tools(target_tuple) if not (sdk / rel).is_file()]
         if missing:
             fail('LLVM_TUPLE', 'missing ' + ','.join(missing), errors)
         else:
             expected = manifest_llvm_sha(sdk)
-            stamped = {rel: sorted(set(file_stamps(sdk / rel, CJLLVM_RE))) for rel in LLVM_TOOLS}
+            stamped = {rel: sorted(set(file_stamps(sdk / rel, CJLLVM_RE))) for rel in llvm_tools(target_tuple)}
             any_stamp = any(stamped.values())
             if role == 'target' and ((sdk / 'third_party/llvm/MANIFEST').is_file() or any_stamp):
                 if not expected:
@@ -286,7 +290,7 @@ def verify(sdk: Path, lock: dict, pin: dict, identities: dict, errors: list, tar
                 fail('RUNTIME_PIN', f'{rel} CJRT-COMMIT {shown} != pin {pin_commit}', errors)
     if pin_commit and role == 'host':
         for path, rel in iter_files(sdk):
-            if Path(rel).name != 'libcangjie-runtime.so' or classify(rel) != 'runtime':
+            if Path(rel).name not in ('libcangjie-runtime.so', 'libcangjie-runtime.dylib') or classify(rel) != 'runtime':
                 continue
             if pin_commit in set(file_stamps(path, CJRT_RE)):
                 fail('RUNTIME_PIN', f'host runtime {rel} carries colour pin {pin_commit}', errors)

@@ -2,6 +2,7 @@
 """Run native host identity apparatus arms with the same tests and real inputs."""
 import difflib
 import hashlib
+import shutil
 import json
 import os
 from pathlib import Path
@@ -27,10 +28,12 @@ def main():
     test = root / 'test_host_identities.py'
     platform = 'linux_' + os.uname().machine
     original = runner.read_text()
-    call = 'check_sha "$hrt/libcangjie-runtime.so" "$decl_runtime"\n'
+    call = 'check_sha "$hrt/libcangjie-runtime.${HOST_LIB_EXT}" "$decl_runtime"\n'
     assert original.count(call) == 1
     cut = original.replace(call, '')
     (out / 'runner-cut.sh').write_text(cut)
+    for helper in ('host_tools.sh', 'host_nm.py'):
+        shutil.copyfile(root / helper, out / helper)
     (out / 'cut.diff').write_text(''.join(difflib.unified_diff(
         original.splitlines(True), cut.splitlines(True),
         fromfile='a/ci/bootstrap/stage1_host_runner.sh', tofile='b/ci/bootstrap/stage1_host_runner.sh')))
@@ -75,8 +78,8 @@ def main():
                 'consumer-cut': digest(out / 'runner-cut.sh'), 'producer-cut': digest(out / 'pin-cut.txt')}
     (out / 'arms.json').write_text(json.dumps({'arms': results, 'identity': identity}, indent=2) + '\n')
     assert before == {str(p): digest(p) for p in (runner, identities, test)}
-    expected = {'candidate': [], 'consumer-cut': ['test_hrt_runtime_bytes'],
-                'producer-cut': ['test_fixed_release_triple'], 'restored': []}
+    expected = {'candidate': [], 'consumer-cut': ['test_fixed_release_hrt_runtime_byte', 'test_fixed_release_runtime_pin_bit', 'test_hrt_runtime_bytes'],
+                'producer-cut': ['test_fixed_release_host_runtime_byte', 'test_fixed_release_triple'], 'restored': []}
     for name, failures in expected.items():
         result = results[name]
         assert result['failures'] == failures, (name, result)

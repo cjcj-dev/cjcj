@@ -48,6 +48,7 @@ export function fixture(check, target = 'linux-x64') {
       llvm_sha: 'a'.repeat(40), sha256: dylibSha, targets: ['X86', 'ARM', 'AArch64']}));
     const dylibFallback = path.join(dir, 'dylib-fallback');
     fs.cpSync(dylib, dylibFallback, {recursive: true});
+    let entry = new URL('./prepare_bootstrap_inputs.mjs', import.meta.url).pathname;
     const env = {...process.env, CJCJ_SRCBUILD_TARGET: target, CJCJ_BOOTSTRAP_COLOUR_DYLIB: dylibFallback, CJCJ_BOOTSTRAP_DYLIB_ARTIFACT: dylib, LLVM_DYLIB_SHA256: dylibSha, GITHUB_ENV: '', CJCJ_SRCBUILD_HOST_SDK: sdk,
       CJCJ_BOOTSTRAP_HOST_LLVM_SO: so, CJCJ_BOOTSTRAP_AST_SUPPORT: ast,
       CJCJ_BOOTSTRAP_SOURCE: 'depot', CJCJ_BOOTSTRAP_SOURCE_REASON: 'fixture explicit depot', CJCJ_BOOTSTRAP_INPUTS_WORK: path.join(dir, 'work'), CJCJ_BOOTSTRAP_COLOUR_TUPLE: fallback,
@@ -107,6 +108,48 @@ export function fixture(check, target = 'linux-x64') {
     Object.assign(env, {CJCJ_BOOTSTRAP_COLOUR_RT: runtime, COLOUR_RT_RUN_ID: '123',
       COLOUR_RT_RUN_ATTEMPT: '1', COLOUR_RT_ARTIFACT_ID: '456',
       COLOUR_RT_MANIFEST_SHA256: runtimeDigest(path.join(runtime, 'manifest.json'))});
+    if (target.startsWith('darwin-')) {
+      const platform = hostPin.platform;
+      const tuple = `${platform}_cjnative`;
+      const nativeFiles = {};
+      for (const rel of runtimeFiles) {
+        const native = rel.replace('linux_x86_64_cjnative', tuple).replace(/\.so$/, '.dylib');
+        const dest = path.join(runtime, native);
+        fs.mkdirSync(path.dirname(dest), {recursive: true});
+        fs.writeFileSync(dest, `native input fixture ${native}`);
+        if (process.platform === 'darwin' && native.endsWith('/libcangjie-runtime.dylib')) {
+          const source = path.join(dir, 'runtime-exports.c');
+          fs.writeFileSync(source, ['Begin', 'Complete', 'Fail', 'Abort']
+            .map(suffix => `void CJ_MCC_PackageInit${suffix}(void) {}`).join('\n'));
+          const compiled = spawnSync('/usr/bin/clang', ['-dynamiclib', source, '-o', dest], {encoding: 'utf8'});
+          if (compiled.status !== 0) throw new Error(`native runtime fixture: ${compiled.stderr}`);
+        }
+        nativeFiles[native] = runtimeDigest(dest);
+      }
+      fs.writeFileSync(path.join(runtime, 'manifest.json'), JSON.stringify({role: 'colour-runtime-libraries',
+        platform, runtime_sha: env.RUNTIME_REF, run_id: '123', run_attempt: '1', files: nativeFiles}));
+      env.COLOUR_RT_MANIFEST_SHA256 = runtimeDigest(path.join(runtime, 'manifest.json'));
+      const stdFiles = {};
+      for (const rel of [`lib/${tuple}/libcangjie-std-core.a`, `runtime/lib/${tuple}/libcangjie-std-core.dylib`,
+                         'lib/libstdFFI.dylib', `modules/${tuple}/std.core.cjo`, 'std-producer.json']) {
+        const dest = path.join(runtime, rel);
+        fs.mkdirSync(path.dirname(dest), {recursive: true});
+        fs.writeFileSync(dest, rel === 'std-producer.json' ? JSON.stringify({compiler_sha256: hostSha}) : `std input fixture ${rel}`);
+        stdFiles[rel] = runtimeDigest(dest);
+      }
+      fs.writeFileSync(path.join(runtime, 'std-manifest.json'), JSON.stringify({role: 'colour-std', platform,
+        runtime_manifest_sha256: env.COLOUR_RT_MANIFEST_SHA256, compiler_sha256: hostSha,
+        producer_sha: 'b'.repeat(40), run_id: '123', run_attempt: '1', files: stdFiles}));
+      // Isolate normal reviewed configuration; production has no test-only selector.
+      const product = path.join(dir, 'product');
+      fs.cpSync(new URL('../', import.meta.url), path.join(product, 'ci'), {recursive: true});
+      fs.cpSync(new URL('../../build/', import.meta.url), path.join(product, 'build'), {recursive: true});
+      entry = path.join(product, 'ci/release/prepare_bootstrap_inputs.mjs');
+      fs.writeFileSync(path.join(product, 'ci/colour-runtime/release.json'), JSON.stringify({platforms: {[platform]: {std: {
+        manifest_sha256: runtimeDigest(path.join(runtime, 'std-manifest.json')), compiler_sha256: hostSha,
+        producer_sha: 'b'.repeat(40), run_id: '123', run_attempt: '1'}}}}));
+    }
+
     // External candidate headers carry their actual byte/source receipt.
     const pins = Object.fromEntries(fs.readFileSync(new URL('../llvm_pin.env', import.meta.url), 'utf8')
       .trim().split('\n').map(line => line.split('=')));
@@ -155,7 +198,7 @@ export function fixture(check, target = 'linux-x64') {
     `);
     env.FIXTURE_RELEASE_FILE = path.join(artifact, 'SHA256SUMS');
     const run = (args = []) => spawnSync(process.execPath,
-      ['--import', transport, new URL('./prepare_bootstrap_inputs.mjs', import.meta.url).pathname, ...args], {env, encoding: 'utf8'});
+      ['--import', transport, entry, ...args], {env, encoding: 'utf8'});
     check({env, artifact, fallback, dylib, dylibSha, so, runtime, runtimeSource, run, pinFile, dir, transport, sdk, astFiles});
   } finally { fs.rmSync(dir, {recursive: true, force: true}); }
 }

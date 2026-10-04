@@ -1,0 +1,22 @@
+{
+  "run_id": 36965303286,
+  "artifact_id": 11209442181,
+  "candidate_sha": "5919727b74210a86043ca191a8f4b60914a2443e",
+  "files": {
+    "calibration.stdout": "663923e283b0f967914118f7c300ebd61e43bdb3f6feddbaa81b98a33cd86b47",
+    "identity.json": "09bd04662f3ccaf0d25bd163b3ca3e867c9c28109bc2b199783dcbb0b2a37e8e",
+    "calibration.lldb.log": "d6430a62355043a5ed2518df2e0941b99beb01887aa1ba9aeed921f7cb97c586",
+    "calibration.json": "9012ff2b4cfc16efe4245325763bf5d9f0977f3cf0a0766941821dd975f78d5b",
+    "calibration.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "calibration.config.json": "866c96558f4ce25939b0ad1b048ac17317200098c6dc1a02f9cb2c5169530c06",
+    "execution.json": "ceec182c08ccfd01d4f84ea4e4f3e3782a4507cd818e9123c13c6c34da39a177",
+    "retained/calibrator": "e05df6be3b2b5895c90eac515e6fe8607ab3fb2c8131f4fee64a04909907e406",
+    "retained/calibrator.dSYM/Contents/Info.plist": "cb16874304f1651ae82359664b100f17caa97a4661be59213815ca69368efd40",
+    "retained/calibrator.dSYM/Contents/Resources/DWARF/calibrator": "dceea1943e513adb3e7917e843c5c91ff20d965fffac6e93b4e7362896032e1c",
+    "retained/calibrator.dSYM/Contents/Resources/Relocations/aarch64/calibrator.yml": "4f21bbf1c83bdff0e7aa8d7949b514448fecdd551014e149a03afd9268cb5b54"
+  },
+  "frozen_sources": {
+    "observer.py": "11fb38b66573654a14791ba25d2edaef2109c83b3dc4d501bfe28349e0821fb6",
+    "calibrate.c": "eb0d87593f7240d6cc99a2eb79e014f33563d1b9871592cbb8dfbdfd01d642f3"
+  }
+}

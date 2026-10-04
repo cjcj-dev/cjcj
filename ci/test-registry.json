@@ -36,6 +36,58 @@
     "interpreter": "python3"
   },
   {
+    "file": "ci/bootstrap/test_native_build_env_controls.py",
+    "executor": "workflow",
+    "workflow": ".github/workflows/bootstrap-native-host.yml",
+    "interpreter": "python3"
+  },
+  {
+    "file": "ci/bootstrap/test_native_host.sh",
+    "executor": "manual",
+    "reason": "Child entry of test_native_host_controls.py; receives the real native tuple and an arm-specific evidence directory from the workflow driver."
+  },
+  {
+    "file": "ci/bootstrap/test_native_host_controls.py",
+    "executor": "workflow",
+    "workflow": ".github/workflows/bootstrap-native-host.yml",
+    "interpreter": "python3"
+  },
+  {
+    "file": "ci/bootstrap/test_native_link_controls.py",
+    "executor": "workflow",
+    "workflow": ".github/workflows/bootstrap-native-host.yml",
+    "interpreter": "python3"
+  },
+  {
+    "file": "ci/bootstrap/test_native_runner_controls.py",
+    "executor": "workflow",
+    "workflow": ".github/workflows/bootstrap-native-host.yml",
+    "interpreter": "python3"
+  },
+  {
+    "file": "ci/bootstrap/test_native_sdk.py",
+    "executor": "manual",
+    "reason": "Child fixture and SDK integration entry of test_native_sdk_controls.py and test_darwin_std.py; needs the parent driver's native object seed and output directory."
+  },
+  {
+    "file": "ci/bootstrap/test_native_sdk_controls.py",
+    "executor": "workflow",
+    "workflow": ".github/workflows/bootstrap-native-host.yml",
+    "interpreter": "python3"
+  },
+  {
+    "file": "ci/bootstrap/test_native_std_env_controls.py",
+    "executor": "workflow",
+    "workflow": ".github/workflows/bootstrap-native-host.yml",
+    "interpreter": "python3"
+  },
+  {
+    "file": "ci/bootstrap/test_native_std_layout_controls.py",
+    "executor": "workflow",
+    "workflow": ".github/workflows/bootstrap-native-host.yml",
+    "interpreter": "python3"
+  },
+  {
     "file": "ci/bootstrap/test_sdk_cjc_swap.py",
     "executor": "python3",
     "args": [
@@ -101,6 +153,17 @@
     "reason": "Requires a real LLVM_TUPLE, assembled HOST_SDK and COLOUR_RUNTIME; permission fault arms copy and install this full paired toolchain."
   },
   {
+    "file": "ci/platform_matrix/tests/runtime_core_diagnostics.py",
+    "executor": "manual",
+    "reason": "Requires a same-build runtime unit ELF/SO pair, PyYAML, GDB and real core evidence; generates a core if none supplied, which is prohibited on kkk2."
+  },
+  {
+    "file": "ci/release/test_darwin_input_controls.py",
+    "executor": "workflow",
+    "workflow": ".github/workflows/bootstrap-native-host.yml",
+    "interpreter": "python3"
+  },
+  {
     "file": "ci/release/test_darwin_runtime_controls.sh",
     "executor": "bash",
     "args": [
@@ -108,9 +171,27 @@
     ]
   },
   {
+    "file": "ci/release/test_darwin_std.py",
+    "executor": "manual",
+    "reason": "Child entry of test_darwin_std_controls.py; requires native Mach-O compiler/runtime/std fixtures created by that macOS workflow driver."
+  },
+  {
+    "file": "ci/release/test_darwin_std_controls.py",
+    "executor": "workflow",
+    "workflow": ".github/workflows/bootstrap-native-host.yml",
+    "interpreter": "python3"
+  },
+  {
     "file": "ci/release/test_language_tuple.py",
     "executor": "python3",
     "args": []
+  },
+  {
+    "file": "ci/srcbuild/test_platform_artifact_controls.py",
+    "executor": "python3",
+    "args": [
+      "{output}"
+    ]
   },
   {
     "file": "ci/test-ast-support-wiring.sh",
@@ -129,14 +210,14 @@
     "reason": "Requires candidate compiler, paired host SDK/libLLVM and both runtime/LLVM source repositories for ABI integration."
   },
   {
-    "file": "ci/test-frontend-apc.py",
-    "executor": "manual",
-    "reason": "Requires a real candidate compiler, paired host SDK/libLLVM, fixed core input tree and private evidence directory; invocation and output contract are documented in tests/frontend_apc/README.md."
-  },
-  {
     "file": "ci/test-colour-libxml2.sh",
     "executor": "manual",
     "reason": "Fault-arm tool rewrites workflow, srcbuild and checker files in place; optional real bad/good ld.lld controls need retained linker artifacts."
+  },
+  {
+    "file": "ci/test-frontend-apc.py",
+    "executor": "manual",
+    "reason": "Requires a real candidate compiler, paired host SDK/libLLVM, fixed core input tree and private evidence directory; invocation and output contract are documented in tests/frontend_apc/README.md."
   },
   {
     "file": "ci/test-llvm-tuple-layout.sh",
@@ -551,11 +632,6 @@
     "file": "test/named_struct_factory/NamedStructFactory_test.cj",
     "executor": "manual",
     "reason": "Standalone compiler regression built by test/named_struct_factory/build.sh with explicitly selected candidate SDK."
-  },
-  {
-    "file": "ci/platform_matrix/tests/runtime_core_diagnostics.py",
-    "executor": "manual",
-    "reason": "Requires a same-build runtime unit ELF/SO pair, PyYAML, GDB and real core evidence; generates a core if none supplied, which is prohibited on kkk2."
   },
   {
     "file": "test/store_strength/test_checker.py",

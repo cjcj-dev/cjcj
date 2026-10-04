@@ -2,6 +2,7 @@
 # Purpose: build cjcj in two stages; callers: bootstrap lanes and test_bootstrap.sh.
 # Two-stage cjcj bootstrap; see ops/design/BOOTSTRAP_PATH.md.
 set -u
+source "$(dirname "${BASH_SOURCE[0]}")/host_tools.sh"
 
 RED() { printf '\033[31m%s\033[0m\n' "$*" >&2; }
 die() { RED "BOOTSTRAP-FAIL [$STAGE] $*"; exit 1; }
@@ -35,9 +36,7 @@ STAGE=init
 WANT=all
 DRY=0
 # Host tuple directories and the multiarch loader path, from the machine this
-# script runs on. Linux only: the script assumes ELF .so names, GNU find/install/
-# nm and lib/<tuple> layouts, so a Darwin host is refused here rather than
-# failing later on a path that happened to be spelled for x86_64.
+# script runs on; naming follows ci/release/host_llvm.mjs hostIdentity.
 HOST_TUPLE=''
 HOST_MULTIARCH=''
 host_tuple_init() {
@@ -46,7 +45,9 @@ host_tuple_init() {
   case "$os/$arch" in
     Linux/x86_64) HOST_TUPLE=linux_x86_64_cjnative; HOST_MULTIARCH=x86_64-linux-gnu;;
     Linux/aarch64) HOST_TUPLE=linux_aarch64_cjnative; HOST_MULTIARCH=aarch64-linux-gnu;;
-    *) die "host $os/$arch is not supported by bootstrap.sh (Linux x86_64/aarch64 only: ELF .so, GNU find/install/nm, lib/<tuple> layout)";;
+    Darwin/arm64) HOST_TUPLE=darwin_aarch64_cjnative; HOST_MULTIARCH=;;
+    Darwin/x86_64) HOST_TUPLE=darwin_x86_64_cjnative; HOST_MULTIARCH=;;
+    *) die "host $os/$arch is not supported by bootstrap.sh";;
   esac
   echo "HOST-TUPLE $HOST_TUPLE multiarch=$HOST_MULTIARCH home=$BUILD_HOME"
 }
@@ -54,21 +55,21 @@ host_tuple_init() {
 BUILD_HOME="${HOME:-/root}"
 
 usage() {
-  echo 'bootstrap.sh --work DIR --src CJCJ_ROOT --cjcj-sha 40HEX --stdsrc STDLIB --cpp-src CANGJIE_CPP_ROOT --host-llvm-so libLLVM-15.so --host-llvm-sha256 HEX --colour-llvm-so libLLVM-15.so --colour-llvm-sha256 HEX --ast-support FILE --ast-support-sha256 HEX --colour-tuple DIR --colour-llvm-sha 40HEX --colour-rt DIR --host-rt DIR [--stage stage0|stage1|stage1-initial-std|stage1-std|stage1-compiler|all] [--stage1-heap 20GB] [--dry-run]'
+  echo 'bootstrap.sh --work DIR --src CJCJ_ROOT --cjcj-sha 40HEX --stdsrc STDLIB --cpp-src CANGJIE_CPP_ROOT --host-llvm-so ${HOST_LLVM_LIBRARY} --host-llvm-sha256 HEX --colour-llvm-so ${HOST_LLVM_LIBRARY} --colour-llvm-sha256 HEX --ast-support FILE --ast-support-sha256 HEX --colour-tuple DIR --colour-llvm-sha 40HEX --colour-rt DIR --host-rt DIR [--stage stage0|stage1|stage1-initial-std|stage1-std|stage1-compiler|std|all] [--stage1-heap 20GB] [--dry-run]'
 }
 
 sha256() {
   if [ -f "$1" ]; then
-    sha256sum "$1" | awk '{print $1}'
+    host_sha256sum "$1" | awk '{print $1}'
   elif [ -d "$1" ]; then
-    find "$1" -type f -print0 | sort -z | xargs -0 sha256sum 2>/dev/null | sha256sum | awk '{print $1}'
+    host_find "$1" -type f -print0 | host_sort -z | xargs -0 "${HOST_SHA256_COMMAND}" 2>/dev/null | host_sha256sum | awk '{print $1}'
   fi
 }
 
 record() {
   local label="$1" path="$2"
   [ -e "$path" ] || die "$label 不存在: $path"
-  printf 'INPUT %s path=%s sha256=%s\n' "$label" "$(readlink -f "$path")" "$(sha256 "$path")"
+  printf 'INPUT %s path=%s sha256=%s\n' "$label" "$(host_readlink -f "$path")" "$(sha256 "$path")"
 }
 
 assert_expected_sha() {
@@ -77,8 +78,8 @@ assert_expected_sha() {
   case "$expected" in *[!0-9a-fA-F]*) die "$label 期望 sha256 不是十六进制";; esac
   actual=$(sha256 "$path")
   [ -n "$actual" ] || die "$label 无法计算 sha256: $path"
-  printf 'ASSERT %s-sha256 expected=%s actual=%s\n' "$label" "${expected,,}" "$actual"
-  [ "$actual" = "${expected,,}" ] || die "$label sha256 不匹配"
+  printf 'ASSERT %s-sha256 expected=%s actual=%s\n' "$label" "$(printf '%s' "$expected" | tr '[:upper:]' '[:lower:]')" "$actual"
+  [ "$actual" = "$(printf '%s' "$expected" | tr '[:upper:]' '[:lower:]')" ] || die "$label sha256 不匹配"
   ok "$label sha256 匹配"
 }
 
@@ -99,13 +100,13 @@ assert_colour_tuple() {
   fi
   entries=$(wc -l < "$tuple/SHA256SUMS")
   [ "$entries" -eq 10 ] || die "colour LLVM tuple SHA256SUMS 必须且只能登记 10 个 payload: entries=$entries"
-  for rel in MANIFEST bin/llc bin/opt bin/ld.lld lib/STATIC_LLVM.txt \
+  for rel in MANIFEST bin/llc bin/opt bin/${HOST_LINKER} lib/STATIC_LLVM.txt \
     fixed-llc/cjselfhost_llvmshim.o fixed-llc/llc.gz \
-    fixed-llc/opt.gz fixed-llc/ld.lld.gz fixed-llc/llvm-tools.manifest; do
+    fixed-llc/opt.gz fixed-llc/${HOST_LINKER}.gz fixed-llc/llvm-tools.manifest; do
     [ -f "$tuple/$rel" ] || die "colour LLVM tuple 缺 $rel"
     tuple_sum_has "$tuple" "$rel" || die "colour LLVM tuple SHA256SUMS 未登记 $rel"
   done
-  output=$(cd "$tuple" && sha256sum --strict -c SHA256SUMS 2>&1) || {
+  output=$(cd "$tuple" && host_sha256sum --strict -c SHA256SUMS 2>&1) || {
     printf '%s\n' "$output" >&2
     die 'colour LLVM tuple SHA256SUMS strict 校验失败'
   }
@@ -114,8 +115,8 @@ assert_colour_tuple() {
   case "$manifest_sha" in *[!0-9a-fA-F]*) die 'colour LLVM tuple MANIFEST LLVM_SHA 不是十六进制';; esac
   [ "${#expected}" -eq 40 ] || die 'colour LLVM 期望 SHA 必须是 40 位十六进制数'
   case "$expected" in *[!0-9a-fA-F]*) die 'colour LLVM 期望 SHA 不是十六进制';; esac
-  echo "ASSERT colour-manifest-sha expected=${expected,,} actual=${manifest_sha,,}"
-  [ "${manifest_sha,,}" = "${expected,,}" ] || die 'colour LLVM tuple MANIFEST LLVM_SHA 与期望值不匹配'
+  echo "ASSERT colour-manifest-sha expected=$(printf '%s' "$expected" | tr '[:upper:]' '[:lower:]') actual=$(printf '%s' "$manifest_sha" | tr '[:upper:]' '[:lower:]')"
+  [ "$(printf '%s' "$manifest_sha" | tr '[:upper:]' '[:lower:]')" = "$(printf '%s' "$expected" | tr '[:upper:]' '[:lower:]')" ] || die 'colour LLVM tuple MANIFEST LLVM_SHA 与期望值不匹配'
   output=$(strings "$tuple/bin/opt" 2>/dev/null) || die "strings 无法读取 colour LLVM opt: $tuple/bin/opt"
   stamps=$(printf '%s\n' "$output" |
     /usr/bin/grep -Eo 'CJLLVM-COMMIT:[0-9a-fA-F]{40}' || true)
@@ -123,7 +124,7 @@ assert_colour_tuple() {
   stamp_sha=${stamps#CJLLVM-COMMIT:}
   echo "ASSERT colour-opt-stamp ruler=strings token=CJLLVM-COMMIT:<40hex> hits=$stamp_hits sha=${stamp_sha:-none} file=$tuple/bin/opt"
   [ "$stamp_hits" -eq 1 ] || die "colour LLVM tuple opt 的 CJLLVM-COMMIT 章计数不是 1: hits=$stamp_hits"
-  [ "${stamp_sha,,}" = "${manifest_sha,,}" ] || die 'colour LLVM tuple opt 章与 MANIFEST LLVM_SHA 不匹配'
+  [ "$(printf '%s' "$stamp_sha" | tr '[:upper:]' '[:lower:]')" = "$(printf '%s' "$manifest_sha" | tr '[:upper:]' '[:lower:]')" ] || die 'colour LLVM tuple opt 章与 MANIFEST LLVM_SHA 不匹配'
   echo "ASSERT colour-tuple-sums ruler=sha256sum--strict status=ok file=$tuple/SHA256SUMS"
 }
 
@@ -138,7 +139,11 @@ assert_official_opt_zero() {
 
 dynsym_count() {
   local elf="$1" output
-  output=$(readelf --dyn-syms --wide "$elf" 2>/dev/null) || die "readelf 无法读取 LLVM ELF: $elf"
+  if [ "$HOST_OS" = Darwin ]; then
+    output=$(host_nm -D --defined-only "$elf" 2>/dev/null) || die "nm 无法读取 LLVM library: $elf"
+  else
+    output=$(readelf --dyn-syms --wide "$elf" 2>/dev/null) || die "readelf 无法读取 LLVM ELF: $elf"
+  fi
   printf '%s\n' "$output" | c++filt |
     awk 'index($0, "llvm::isCJTypedReadHelperCandidate(") {n++} END {print n+0}'
 }
@@ -146,11 +151,11 @@ dynsym_count() {
 assert_llvm() {
   local host="$1" tuple="$2" expected="$3" host_hits
   [ -f "$host" ] || die "host LLVM SO 不存在: $host"
-  case "$(basename "$host")" in libLLVM*.so*) ;; *) die "host LLVM SO 文件名不是 libLLVM*.so*: $host";; esac
+  case "$(basename "$host")" in libLLVM*.so*|libLLVM*.dylib) ;; *) die "host LLVM SO 文件名不是 libLLVM*.so*: $host";; esac
   assert_colour_tuple "$tuple" "$expected"
   assert_expected_sha host-llvm "$host" "$HOST_LLVM_SHA256"
   host_hits=$(dynsym_count "$host")
-  echo "ASSERT host-llvm-zero ruler=readelf--dyn-syms symbol=llvm::isCJTypedReadHelperCandidate hits=$host_hits file=$host"
+  echo "ASSERT host-llvm-zero ruler=${HOST_DYNSYM_RULER} symbol=llvm::isCJTypedReadHelperCandidate hits=$host_hits file=$host"
   [ "$host_hits" -eq 0 ] || die "host LLVM 含 colour 动态符号 hits=$host_hits"
   ok 'host LLVM 动态符号零命中，colour tuple 章与 manifest 匹配'
 }
@@ -175,10 +180,10 @@ prepare_stage0_run_sdk() {
   assert_expected_sha colour-llvm "$COLOUR_LLVM_SO" "$COLOUR_LLVM_SHA256"
   cmd "rm -rf -- $(printf '%q' "$sdk")"
   cmd "cp -aL $(printf '%q' "$WORK/sdk-stage0") $(printf '%q' "$sdk")"
-  cmd "install -m644 $(printf '%q' "$COLOUR_LLVM_SO") $(printf '%q' "$sdk/third_party/llvm/lib/libLLVM-15.so")"
+  cmd "host_install -m644 $(printf '%q' "$COLOUR_LLVM_SO") $(printf '%q' "$sdk/third_party/llvm/lib/${HOST_LLVM_LIBRARY}")"
   if [ "$DRY" -eq 0 ]; then
-    assert_expected_sha installed-colour-llvm "$sdk/third_party/llvm/lib/libLLVM-15.so" "$COLOUR_LLVM_SHA256"
-    assert_expected_sha preserved-host-llvm "$WORK/sdk-stage0/third_party/llvm/lib/libLLVM-15.so" "$HOST_LLVM_SHA256"
+    assert_expected_sha installed-colour-llvm "$sdk/third_party/llvm/lib/${HOST_LLVM_LIBRARY}" "$COLOUR_LLVM_SHA256"
+    assert_expected_sha preserved-host-llvm "$WORK/sdk-stage0/third_party/llvm/lib/${HOST_LLVM_LIBRARY}" "$HOST_LLVM_SHA256"
   fi
 }
 
@@ -211,7 +216,7 @@ assert_installed_llvm_tuple() {
 assert_path() {
   [ -e "$2" ] || die "$1 缺失: $2"
   if [ -d "$2" ]; then
-    find "$2" -type f -print -quit | /usr/bin/grep -q . || die "$1 为空: $2"
+    host_find "$2" -type f -print -quit | /usr/bin/grep -q . || die "$1 为空: $2"
   else
     [ -s "$2" ] || die "$1 为空: $2"
   fi
@@ -246,15 +251,15 @@ assert_executable() {
 
 runtime_dir() {
   local root="$1" so
-  if [ -f "$root/libcangjie-runtime.so" ]; then
-    readlink -f "$root"
+  if [ -f "$root/libcangjie-runtime.${HOST_LIB_EXT}" ]; then
+    host_readlink -f "$root"
     return
   fi
-  so=$(find "$root" -type f -name libcangjie-runtime.so -print -quit 2>/dev/null || true)
+  so=$(host_find "$root" -type f -name libcangjie-runtime.${HOST_LIB_EXT} -print -quit 2>/dev/null || true)
   if [ -n "$so" ]; then
-    dirname "$(readlink -f "$so")"
+    dirname "$(host_readlink -f "$so")"
   else
-    readlink -f "$root"
+    host_readlink -f "$root"
   fi
 }
 
@@ -263,8 +268,8 @@ tree_content_sha256() {
   [ -d "$root" ] || return 1
   (
     set -o pipefail
-    tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner \
-      -C "$root" -cf - . 2>/dev/null | sha256sum | awk '{print $1}'
+    host_tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner \
+      -C "$root" -cf - . 2>/dev/null | host_sha256sum | awk '{print $1}'
   )
 }
 
@@ -280,7 +285,7 @@ source_identity() {
       echo "STAGE0_CACHE=disabled reason=${label}-dirty" >&2
       return 2
     fi
-    printf 'git:%s' "${head,,}"
+    printf 'git:%s' "$(printf '%s' "$head" | tr '[:upper:]' '[:lower:]')"
     return 0
   fi
   if [ "$required_git" -eq 1 ]; then
@@ -306,7 +311,7 @@ stage0_cache_key() {
     return 2
   fi
   host_runtime_dir=$(runtime_dir "$HRT")
-  host_runtime_so="$host_runtime_dir/libcangjie-runtime.so"
+  host_runtime_so="$host_runtime_dir/libcangjie-runtime.${HOST_LIB_EXT}"
   [ -f "$host_runtime_so" ] || {
     echo "STAGE0_CACHE=disabled reason=host-runtime-so-missing" >&2
     return 2
@@ -331,7 +336,7 @@ stage0_cache_key() {
     "sdk_build_sha256=$(sha256 "$SDK_BUILD")" \
     "cpp_headers_sha256=$cpp_headers" \
     "cjcj_compile_options=$compile_options")
-  printf '%s' "$material" | sha256sum | awk '{print $1}'
+  printf '%s' "$material" | host_sha256sum | awk '{print $1}'
 }
 
 manifest_value() {
@@ -370,7 +375,7 @@ stage0_cache_restore() {
     return 1
   }
   rm -f -- "$out"
-  install -m0755 "$entry/cjcj-stage1" "$out" || return 1
+  host_install -m0755 "$entry/cjcj-stage1" "$out" || return 1
   [ "$(sha256 "$out")" = "$compiler_sha" ] || return 1
   echo "STAGE0_CACHE=hit key=$key path=$entry"
 }
@@ -380,7 +385,7 @@ stage0_cache_publish() {
   entry="$STAGE0_CACHE_ROOT/$key"
   mkdir -p "$STAGE0_CACHE_ROOT"
   incoming=$(mktemp -d "$STAGE0_CACHE_ROOT/.incoming-$key.XXXXXX") || return 1
-  install -m0755 "$out" "$incoming/cjcj-stage1" || return 1
+  host_install -m0755 "$out" "$incoming/cjcj-stage1" || return 1
   compiler_sha=$(sha256 "$incoming/cjcj-stage1")
   printf '%s\t%s\n' \
     format stage0-cache-v2 \
@@ -399,23 +404,23 @@ stage0_cache_publish() {
 
 sdk_ld_path() {
   local sdk="$1" runtime="$2"
-  printf '%s' "$(runtime_dir "$runtime"):$sdk/runtime/lib/$HOST_TUPLE:$sdk/lib/$HOST_TUPLE:$sdk/third_party/llvm/lib:$sdk/tools/lib:/usr/lib/$HOST_MULTIARCH"
+  printf '%s' "$(runtime_dir "$runtime"):$sdk/runtime/lib/$HOST_TUPLE:$sdk/lib/$HOST_TUPLE:$sdk/third_party/llvm/lib:$sdk/tools/lib${HOST_MULTIARCH:+:/usr/lib/$HOST_MULTIARCH}"
 }
 
 assert_version() {
   local label="$1" compiler="$2" sdk="$3" runtime="$4" ld
   assert_executable "$label" "$compiler"
   ld=$(sdk_ld_path "$sdk" "$runtime")
-  cmd "env -i $(compiler_cache_env)HOME=$(printf '%q' "$BUILD_HOME") CANGJIE_HOME=$(printf '%q' "$sdk") LD_LIBRARY_PATH=$(printf '%q' "$ld") PATH=/usr/bin:/bin $(printf '%q' "$compiler") --version"
+  cmd "env -i $(compiler_cache_env)HOME=$(printf '%q' "$BUILD_HOME") CANGJIE_HOME=$(printf '%q' "$sdk") ${HOST_LOADER_VAR}=$(printf '%q' "$ld") PATH=$(printf '%q' "$HOST_SYSTEM_PATH") $(printf '%q' "$compiler") --version"
   [ "$DRY" -eq 1 ] || ok "$label --version rc=0"
 }
 
 ffi_manifest() {
   local prefix="$1"
   {
-    find "$prefix/lib/$HOST_TUPLE" -maxdepth 1 -type f -iname '*FFI.a' -printf "lib/$HOST_TUPLE/%f\n" 2>/dev/null
-    [ -f "$prefix/lib/libstdFFI.so" ] && echo 'lib/libstdFFI.so'
-  } | sort
+    host_find "$prefix/lib/$HOST_TUPLE" -maxdepth 1 -type f -iname '*FFI.a' -printf "lib/$HOST_TUPLE/%f\n" 2>/dev/null
+    [ -f "$prefix/lib/libstdFFI.${HOST_LIB_EXT}" ] && echo "lib/libstdFFI.${HOST_LIB_EXT}"
+  } | host_sort
 }
 
 assert_std_install_shape() {
@@ -425,15 +430,15 @@ assert_std_install_shape() {
     return 0
   fi
   core_a="$prefix/lib/$HOST_TUPLE/libcangjie-std-core.a"
-  core_so="$prefix/runtime/lib/$HOST_TUPLE/libcangjie-std-core.so"
-  ffi_so="$prefix/lib/libstdFFI.so"
+  core_so="$prefix/runtime/lib/$HOST_TUPLE/libcangjie-std-core.${HOST_LIB_EXT}"
+  ffi_so="$prefix/lib/libstdFFI.${HOST_LIB_EXT}"
   if [ ! -f "$core_a" ] || [ ! -f "$core_so" ] || [ ! -f "$ffi_so" ]; then
-    die "$label install shape: core archive/shared 或 libstdFFI.so 缺失"
+    die "$label install shape: core archive/shared 或 libstdFFI.${HOST_LIB_EXT} 缺失"
   fi
-  ti=$({ nm -A --defined-only "$core_a" 2>/dev/null; nm -A --defined-only "$core_so" "$ffi_so" 2>/dev/null; } |
+  ti=$({ host_nm -A --defined-only "$core_a" 2>/dev/null; host_nm -A --defined-only "$core_so" "$ffi_so" 2>/dev/null; } |
     awk '$NF=="Int64.ti"{n++}END{print n+0}')
   [ "$ti" -gt 1 ] || die "$label install shape: Int64.ti definitions=$ti (expected >1)"
-  ffi_archives=$(find "$prefix/lib/$HOST_TUPLE" -maxdepth 1 -type f -iname '*FFI.a' -printf '.\n' 2>/dev/null | wc -l)
+  ffi_archives=$(host_find "$prefix/lib/$HOST_TUPLE" -maxdepth 1 -type f -iname '*FFI.a' -printf '.\n' 2>/dev/null | wc -l)
   [ "$ffi_archives" -gt 0 ] || die "$label install shape: FFI archive set is empty"
   if [ -n "$compare_prefix" ]; then
     [ -d "$compare_prefix" ] || die "$label compare prefix 不存在: $compare_prefix"
@@ -458,15 +463,26 @@ compiler_cache_env() {
 }
 
 stdlib_build() {
-  local label="$1" sdk="$2" runtime="$3" prefix="$4" compare_prefix="${5:-}" target_lib="${6:-$2/runtime/lib/$HOST_TUPLE}" ld script compiler
+  local label="$1" sdk="$2" runtime="$3" prefix="$4" compare_prefix="${5:-}" target_lib="${6:-$2/runtime/lib/$HOST_TUPLE}" ld script compiler cache_env native_env system_path std_path
+  system_path=$(host_std_system_path) || die "cannot determine native std toolchain"
+  std_path="$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:$system_path"
+  # build_native.sh:28-34 uses native build.py without --target-toolchain.
+  # build.py:456-491 selects clang through PATH and overwrites CC/CXX.
+  # Select AppleClang before all SDK/Homebrew tools without adding linker -B.
+  if [ "$HOST_OS" = Darwin ]; then std_path="/usr/bin:$std_path"; fi
+  cache_env=$(host_cache_env)
+  native_env=$(host_native_env) || die "cannot determine native SDKROOT"
   source "$SRC/ci/build_resources.sh"
   configure_build_resources "$HEAP" || die "cannot determine std build resources"
   cmd "python3 $(printf '%q' "$SRC/ci/install_std_sdk_inputs.py") $(printf '%q' "$(dirname "$AST_SUPPORT")") $(printf '%q' "$sdk") $(printf '%q' "$HOST_TUPLE")"
   ld=$(sdk_ld_path "$sdk" "$runtime")
+  # Native C/C++ tools must use their own LLVM/LTO libraries. The installed
+  # cjc/llc/opt runners bind their libraries individually (stage1_host_runner.sh).
+  if [ "$HOST_OS" = Darwin ]; then ld=; fi
   prepare_build_env
   # shellcheck disable=SC2016 # Expanded by the inner bash, not this shell.
   script='cd "$1" && rm -rf build/build && python3 build.py clean && python3 build.py build -t relwithdebinfo --jobs "$2" --target-lib="$3" && python3 build.py install --prefix "$4"'
-  cmd "env -i $(compiler_cache_env)HOME=$(printf '%q' "$BUILD_HOME") TMPDIR=$(printf '%q' "$BUILD_TMPDIR") CANGJIE_HOME=$(printf '%q' "$sdk") LD_LIBRARY_PATH=$(printf '%q' "$ld") PATH=$(printf '%q' "$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:/usr/bin:/bin") cjHeapSize=$(printf '%q' "$STD_BUILD_HEAP") bash -c $(printf '%q' "$script") bash $(printf '%q' "$STDSRC") $(printf '%q' "$STD_BUILD_JOBS") $(printf '%q' "$target_lib") $(printf '%q' "$prefix")"
+  cmd "env -i $(compiler_cache_env)HOME=$(printf '%q' "$BUILD_HOME") TMPDIR=$(printf '%q' "$BUILD_TMPDIR") CANGJIE_HOME=$(printf '%q' "$sdk") ${cache_env}${native_env}${HOST_LOADER_VAR}=$(printf '%q' "$ld") PATH=$(printf '%q' "$std_path") cjHeapSize=$(printf '%q' "$STD_BUILD_HEAP") bash -c $(printf '%q' "$script") bash $(printf '%q' "$STDSRC") $(printf '%q' "$STD_BUILD_JOBS") $(printf '%q' "$target_lib") $(printf '%q' "$prefix")"
   assert_std_install_shape "$prefix" "$compare_prefix" "$label"
   # Match sdk_verify.measured_cjc_sha: the runner is only a launcher.
   compiler="$sdk/bin/cjc"
@@ -503,7 +519,7 @@ rewrite_compile_option_o1() {
   [ -f "$toml" ] || die "隔离副本缺 cjpm.toml: $toml"
   o2_hits=$(/usr/bin/grep -Ec -- '^ *compile-option = "-O2([[:space:]]|")' "$toml" || true)
   if [ "$o2_hits" -gt 0 ]; then
-    cmd "sed -E -i 's/^( *compile-option = \")-O2([[:space:]]|\")/\1-O1\2/' $(printf '%q' "$toml")"
+    cmd "host_sed_inplace -E 's/^( *compile-option = \")-O2([[:space:]]|\")/\1-O1\2/' $(printf '%q' "$toml")"
   fi
   o1_hits=$(/usr/bin/grep -Ec -- '^ *compile-option = "-O1([[:space:]]|")' "$toml" || true)
   [ "$o1_hits" -ge 1 ] || die "隔离副本 cjpm.toml 的 compile-option 不是 -O1: $toml"
@@ -533,12 +549,16 @@ resolve_cjpm_product() {
 
 install_stage_compiler() {
   local seed="$1" dest="$2" link="$3"
-  cmd "install -m0755 $(printf '%q' "$seed") $(printf '%q' "$dest")"
+  cmd "host_install -m0755 $(printf '%q' "$seed") $(printf '%q' "$dest")"
   cmd "ln -sfn $(printf '%q' "$(basename "$dest")") $(printf '%q' "$link")"
 }
 
 cjpm_build() {
-  local sdk="$1" runtime="$2" srcdir="$3" extra="$4" heap="$5" ld cjpm script
+  local sdk="$1" runtime="$2" srcdir="$3" extra="$4" heap="$5" ld cjpm script native_env
+  native_env=$(host_native_env) || die "cannot determine native SDKROOT"
+  if [ "$HOST_OS" = Darwin ]; then
+    cmd "node $(printf '%q' "$SRC/ci/bootstrap/prepare_native_link.mjs") $(printf '%q' "$srcdir") $(printf '%q' "$sdk")"
+  fi
   cmd "node $(printf '%q' "$srcdir/ci/check-codegen-runtime-layout.mjs") $(printf '%q' "$WORK/layout-sources") $(printf '%q' "$RUNTIME_PIN")"
   source "$SRC/ci/build_resources.sh"
   configure_build_resources "$heap" || die "cannot determine compiler build resources"
@@ -551,7 +571,7 @@ cjpm_build() {
   cmd "node $(printf '%q' "$SRC/ci/release/trimpath.mjs") $(printf '%q' "$srcdir")$trim_debug"
   script="cd $(printf '%q' "$srcdir") && $(printf '%q' "$cjpm") build${extra:+ $extra}"
   echo "CMD cjpm build${extra:+ $extra} bin=$cjpm cwd=$srcdir heap=$heap"
-  cmd "env -i $(compiler_cache_env)HOME=$(printf '%q' "$BUILD_HOME") TMPDIR=$(printf '%q' "$BUILD_TMPDIR") CANGJIE_HOME=$(printf '%q' "$sdk") LD_LIBRARY_PATH=$(printf '%q' "$ld") PATH=$(printf '%q' "$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:/usr/bin:/bin") cjHeapSize=$(printf '%q' "$heap") bash -c $(printf '%q' "$script")"
+  cmd "env -i $(compiler_cache_env)HOME=$(printf '%q' "$BUILD_HOME") TMPDIR=$(printf '%q' "$BUILD_TMPDIR") CANGJIE_HOME=$(printf '%q' "$sdk") ${native_env}${HOST_LOADER_VAR}=$(printf '%q' "$ld") PATH=$(printf '%q' "$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:$HOST_SYSTEM_PATH") cjHeapSize=$(printf '%q' "$heap") bash -c $(printf '%q' "$script")"
 }
 
 assert_shim_cpp_src() {
@@ -560,7 +580,7 @@ assert_shim_cpp_src() {
   for rel in third_party/llvm-project/llvm/include \
     build/build/third_party/llvm/include build/build/include build/build/schema; do
     [ -d "$CPP_SRC/$rel" ] || die "--cpp-src 缺 shim 头文件目录: $CPP_SRC/$rel"
-    find "$CPP_SRC/$rel" -type f -print -quit | /usr/bin/grep -q . ||
+    host_find "$CPP_SRC/$rel" -type f -print -quit | /usr/bin/grep -q . ||
       die "--cpp-src shim 头文件目录为空: $CPP_SRC/$rel"
     echo "ASSERT shim-cpp-src exists=1 path=$CPP_SRC/$rel"
   done
@@ -570,19 +590,20 @@ assert_cjcj_sha() {
   local actual
   [ "${#CJCJ_SHA}" -eq 40 ] || die '--cjcj-sha 必须是 40 位十六进制数'
   case "$CJCJ_SHA" in *[!0-9a-fA-F]*) die '--cjcj-sha 不是十六进制';; esac
-  CJCJ_SHA=${CJCJ_SHA,,}
+  CJCJ_SHA=$(printf '%s' "$CJCJ_SHA" | tr '[:upper:]' '[:lower:]')
   actual=$(git -C "$SRC" rev-parse HEAD 2>/dev/null || true)
   if [ -n "$actual" ]; then
-    echo "ASSERT cjcj-sha expected=$CJCJ_SHA actual=${actual,,} source=git"
-    [ "${actual,,}" = "$CJCJ_SHA" ] || die 'cjcj 源码 HEAD 与 --cjcj-sha 不匹配'
+    echo "ASSERT cjcj-sha expected=$CJCJ_SHA actual=$(printf '%s' "$actual" | tr '[:upper:]' '[:lower:]') source=git"
+    [ "$(printf '%s' "$actual" | tr '[:upper:]' '[:lower:]')" = "$CJCJ_SHA" ] || die 'cjcj 源码 HEAD 与 --cjcj-sha 不匹配'
   else
     echo "ASSERT cjcj-sha expected=$CJCJ_SHA actual=unavailable source=explicit-pin"
   fi
 }
 
 shim_build() {
-  local label="$1" sdk="$2" runtime="$3" srcdir="$4" source_object="${5:-}" ld npx_path node_bin source_env=''
+  local label="$1" sdk="$2" runtime="$3" srcdir="$4" source_object="${5:-}" ld npx_path node_bin cache_env source_env=''
   ld=$(sdk_ld_path "$sdk" "$runtime")
+  cache_env=$(host_cache_env)
   npx_path=$(command -v npx 2>/dev/null || true)
   [ -x "$npx_path" ] || die "$label shim 构建需要可执行 npx"
   node_bin=$(dirname "$npx_path")
@@ -597,7 +618,7 @@ shim_build() {
   fi
   echo "CMD shim build label=$label cwd=$srcdir cpp-src=$CPP_SRC source-object=${source_object:-source} sdk=$sdk runtime=$runtime"
   cmd "rm -f $(printf '%q' "$srcdir/runtime_shim/cjselfhost_llvmshim.o") $(printf '%q' "$srcdir/runtime_shim/cjc_runtime_config.o")"
-  cmd "env -i $(compiler_cache_env)HOME=$(printf '%q' "$BUILD_HOME") CANGJIE_HOME=$(printf '%q' "$sdk") CANGJIE_CPP_SRC=$(printf '%q' "$CPP_SRC") CJCJ_COMMIT=$(printf '%q' "$CJCJ_SHA") ${source_env}LD_LIBRARY_PATH=$(printf '%q' "$ld") PATH=$(printf '%q' "$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:$node_bin:/usr/bin:/bin") bash $(printf '%q' "$srcdir/runtime_shim/build_shim.sh")"
+  cmd "env -i $(compiler_cache_env)HOME=$(printf '%q' "$BUILD_HOME") CANGJIE_HOME=$(printf '%q' "$sdk") CANGJIE_CPP_SRC=$(printf '%q' "$CPP_SRC") CJCJ_COMMIT=$(printf '%q' "$CJCJ_SHA") ${source_env}${cache_env}${HOST_LOADER_VAR}=$(printf '%q' "$ld") PATH=$(printf '%q' "$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:$node_bin:$HOST_SYSTEM_PATH") bash $(printf '%q' "$srcdir/runtime_shim/build_shim.sh")"
   if [ "$DRY" -eq 1 ]; then
     echo "OUTPUT $label-shim-cpp path=$srcdir/runtime_shim/cjselfhost_llvmshim.o sha256=planned"
     echo "OUTPUT $label-shim-config path=$srcdir/runtime_shim/cjc_runtime_config.o sha256=planned"
@@ -615,7 +636,7 @@ resolve_base_sdk() {
     sdk="/root/sdks/$BASE_SDK"
     [ -d "$sdk" ] || sdk="/root/.cjv/toolchains/$BASE_SDK"
   fi
-  sdk=$(readlink -f "$sdk" 2>/dev/null || true)
+  sdk=$(host_readlink -f "$sdk" 2>/dev/null || true)
   [ -d "$sdk" ] || die "官方 SDK 不存在: $BASE_SDK"
   echo "$sdk"
 }
@@ -641,12 +662,12 @@ stage0() {
   out="$WORK/cjcj-stage1"
   sdk="$WORK/sdk-stage0"
   echo "OUTPUT cjcj-stage1=$out"
-  cmd "bash $(printf '%q' "$SDK_BUILD") --runtime-pin $(printf '%q' "$RUNTIME_PIN") --from $(printf '%q' "$base") --to $(printf '%q' "$sdk") --host --llvm-so $(printf '%q' "$HOST_LLVM_SO") --colour-runtime $(printf '%q' "$(runtime_dir "$CRT")/libcangjie-runtime.so") --host-runtime $(printf '%q' "$(runtime_dir "$HRT")/libcangjie-runtime.so") --force"
+  cmd "bash $(printf '%q' "$SDK_BUILD") --runtime-pin $(printf '%q' "$RUNTIME_PIN") --from $(printf '%q' "$base") --to $(printf '%q' "$sdk") --host --llvm-so $(printf '%q' "$HOST_LLVM_SO") --colour-runtime $(printf '%q' "$(runtime_dir "$CRT")/libcangjie-runtime.${HOST_LIB_EXT}") --host-runtime $(printf '%q' "$(runtime_dir "$HRT")/libcangjie-runtime.${HOST_LIB_EXT}") --force"
   if [ "$DRY" -eq 0 ]; then
-    cmd "python3 $(printf '%q' "$SDK_VERIFY") --sdk $(printf '%q' "$sdk") --role host --runtime-pin $(printf '%q' "$RUNTIME_PIN")"
+    cmd "python3 $(printf '%q' "$SDK_VERIFY") --sdk $(printf '%q' "$sdk") --role host --target-tuple $(printf '%q' "$HOST_TUPLE") --runtime-pin $(printf '%q' "$RUNTIME_PIN")"
   fi
   assert_installed_llvm_so "$sdk" "$HOST_LLVM_SO"
-  cmd "install -Dm644 $(printf '%q' "$AST_SUPPORT") $(printf '%q' "$sdk/lib/$HOST_TUPLE/libcangjie-ast-support.a")"
+  cmd "host_install -Dm644 $(printf '%q' "$AST_SUPPORT") $(printf '%q' "$sdk/lib/$HOST_TUPLE/libcangjie-ast-support.a")"
   if [ "$DRY" -eq 0 ]; then
     assert_expected_sha installed-ast-support "$sdk/lib/$HOST_TUPLE/libcangjie-ast-support.a" "$AST_SUPPORT_SHA256"
   fi
@@ -694,13 +715,14 @@ stage0() {
 
 assemble_stage1_sdk() {
   local sdk="$1" compiler="$2" std="$3"
-  cmd "bash $(printf '%q' "$SDK_BUILD") --runtime-pin $(printf '%q' "$RUNTIME_PIN") --from $(printf '%q' "$WORK/sdk-stage0") --to $(printf '%q' "$sdk") --target $(printf '%q' "$HOST_TUPLE") --cjc $(printf '%q' "$compiler") --llvm-tuple $(printf '%q' "$COLOUR_TUPLE") --llvm-so $(printf '%q' "$COLOUR_LLVM_SO") --runtime $(printf '%q' "$CRT") --std $(printf '%q' "$std") --verify-host-rt $(printf '%q' "$HRT") --colour-runtime $(printf '%q' "$(runtime_dir "$CRT")/libcangjie-runtime.so") --host-runtime $(printf '%q' "$(runtime_dir "$HRT")/libcangjie-runtime.so") --force"
+  cmd "bash $(printf '%q' "$SDK_BUILD") --runtime-pin $(printf '%q' "$RUNTIME_PIN") --from $(printf '%q' "$WORK/sdk-stage0") --to $(printf '%q' "$sdk") --target $(printf '%q' "$HOST_TUPLE") --cjc $(printf '%q' "$compiler") --llvm-tuple $(printf '%q' "$COLOUR_TUPLE") --llvm-so $(printf '%q' "$COLOUR_LLVM_SO") --runtime $(printf '%q' "$CRT") --std $(printf '%q' "$std") --verify-host-rt $(printf '%q' "$HRT") --colour-runtime $(printf '%q' "$(runtime_dir "$CRT")/libcangjie-runtime.${HOST_LIB_EXT}") --host-runtime $(printf '%q' "$(runtime_dir "$HRT")/libcangjie-runtime.${HOST_LIB_EXT}") --force"
   if [ "$DRY" -eq 0 ]; then
-    cmd "python3 $(printf '%q' "$SDK_VERIFY") --sdk $(printf '%q' "$sdk") --role target --runtime-pin $(printf '%q' "$RUNTIME_PIN")"
+    cmd "python3 $(printf '%q' "$SDK_VERIFY") --sdk $(printf '%q' "$sdk") --role target --target-tuple $(printf '%q' "$HOST_TUPLE") --runtime-pin $(printf '%q' "$RUNTIME_PIN")"
   fi
   assert_installed_llvm_tuple "$sdk" "$COLOUR_TUPLE"
+
   if [ "$DRY" -eq 0 ]; then
-    assert_expected_sha target-colour-llvm "$sdk/third_party/llvm/lib/libLLVM-15.so" "$COLOUR_LLVM_SHA256"
+    assert_expected_sha target-colour-llvm "$sdk/third_party/llvm/lib/${HOST_LLVM_LIBRARY}" "$COLOUR_LLVM_SHA256"
   fi
   local compiler_sha=planned
   [ "$DRY" -eq 1 ] || compiler_sha=$(sha256 "$compiler")
@@ -715,35 +737,42 @@ bootstrap_target_std() {
   local compiler="$1" std="$2" sdk="$WORK/sdk-std-bootstrap" compiler_sha=planned target_lib
   local link_root="$WORK/std-runtime-link" native dynamic file arch
   target_lib=$(runtime_dir "$CRT")
-  cmd "bash $(printf '%q' "$SDK_BUILD") --runtime-pin $(printf '%q' "$RUNTIME_PIN") --from $(printf '%q' "$WORK/sdk-stage0") --to $(printf '%q' "$sdk") --host --llvm-tuple $(printf '%q' "$COLOUR_TUPLE") --colour-runtime $(printf '%q' "$(runtime_dir "$CRT")/libcangjie-runtime.so") --host-runtime $(printf '%q' "$(runtime_dir "$HRT")/libcangjie-runtime.so") --force"
+  cmd "bash $(printf '%q' "$SDK_BUILD") --runtime-pin $(printf '%q' "$RUNTIME_PIN") --from $(printf '%q' "$WORK/sdk-stage0") --to $(printf '%q' "$sdk") --host --llvm-tuple $(printf '%q' "$COLOUR_TUPLE") --colour-runtime $(printf '%q' "$(runtime_dir "$CRT")/libcangjie-runtime.${HOST_LIB_EXT}") --host-runtime $(printf '%q' "$(runtime_dir "$HRT")/libcangjie-runtime.${HOST_LIB_EXT}") --force"
   assert_installed_llvm_tuple "$sdk" "$COLOUR_TUPLE"
-  cmd "install -m755 $(printf '%q' "$compiler") $(printf '%q' "$sdk/bin/cjc")"
-  cmd "install -m644 $(printf '%q' "$COLOUR_LLVM_SO") $(printf '%q' "$sdk/third_party/llvm/lib/libLLVM-15.so")"
+  cmd "host_install -m755 $(printf '%q' "$compiler") $(printf '%q' "$sdk/bin/cjc")"
+  cmd "host_install -m644 $(printf '%q' "$COLOUR_LLVM_SO") $(printf '%q' "$sdk/third_party/llvm/lib/${HOST_LLVM_LIBRARY}")"
   if [ "$DRY" -eq 0 ]; then
     compiler_sha=$(sha256 "$compiler")
     record std-bootstrap-host-std "$sdk/lib/$HOST_TUPLE/libcangjie-std-core.a"
-    record std-bootstrap-host-runtime "$sdk/runtime/lib/$HOST_TUPLE/libcangjie-runtime.so"
-    record std-bootstrap-target-runtime "$target_lib/libcangjie-runtime.so"
+    record std-bootstrap-host-runtime "$sdk/runtime/lib/$HOST_TUPLE/libcangjie-runtime.${HOST_LIB_EXT}"
+    record std-bootstrap-target-runtime "$target_lib/libcangjie-runtime.${HOST_LIB_EXT}"
   fi
   cmd "bash $(printf '%q' "$STAGE1_HOST_RUNNER") $(printf '%q' "$sdk") $(printf '%q' "$WORK/sdk-stage0") $(printf '%q' "$HRT") $(printf '%q' "$HOST_LLVM_SHA256") $(printf '%q' "$compiler") $(printf '%q' "$compiler_sha") $(printf '%q' "$WORK/sdk-stage0-run") $(printf '%q' "$COLOUR_LLVM_SHA256") $(printf '%q' "$target_lib")"
   # stdlib's common-layout probe selects the FIRST runtime search path. A
   # bare --target-lib directory is too late: its fallback is the host SDK.
-  arch=${HOST_TUPLE#linux_}
+  arch=${HOST_TUPLE#${HOST_LAYOUT_OS}_}
   arch=${arch%_cjnative}
-  native="$link_root/common/linux_relwithdebinfo_$arch/lib/$HOST_TUPLE"
-  dynamic="$link_root/common/linux_relwithdebinfo_$arch/runtime/lib/$HOST_TUPLE"
+  native="$link_root/common/${HOST_LAYOUT_OS}_relwithdebinfo_$arch/lib/$HOST_TUPLE"
+  dynamic="$link_root/common/${HOST_LAYOUT_OS}_relwithdebinfo_$arch/runtime/lib/$HOST_TUPLE"
   cmd "rm -rf -- $(printf '%q' "$link_root")"
   cmd "mkdir -p $(printf '%q' "$native") $(printf '%q' "$dynamic")"
-  for file in libcangjie-aio.a cjstart.o cjld.shared.lds discard_eh_frame.lds; do
-    cmd "install -m644 $(printf '%q' "$sdk/lib/$HOST_TUPLE/$file") $(printf '%q' "$native/$file")"
+  local native_files=(libcangjie-aio.a cjstart.o)
+  if [ "$HOST_OS" = Linux ]; then
+    native_files+=(cjld.shared.lds discard_eh_frame.lds)
+  elif [ "$HOST_OS" = Darwin ]; then
+    # MakeCJNATIVEStdSharedLib.cmake:105 and MachO.cpp:124 consume this object.
+    native_files+=(section.o)
+  fi
+  for file in "${native_files[@]}"; do
+    cmd "host_install -m644 $(printf '%q' "$sdk/lib/$HOST_TUPLE/$file") $(printf '%q' "$native/$file")"
     [ "$DRY" -eq 1 ] || record std-bootstrap-native "$native/$file"
   done
-  for file in libcangjie-runtime.so libboundscheck.so; do
-    cmd "install -m644 $(printf '%q' "$target_lib/$file") $(printf '%q' "$dynamic/$file")"
+  for file in libcangjie-runtime.${HOST_LIB_EXT} libboundscheck.${HOST_LIB_EXT}; do
+    cmd "host_install -m644 $(printf '%q' "$target_lib/$file") $(printf '%q' "$dynamic/$file")"
     [ "$DRY" -eq 1 ] || record std-bootstrap-target "$dynamic/$file"
   done
   stdlib_build stdlib-stage1 "$sdk" "$HRT" "$std" "" "$link_root"
-  cmd "python3 $(printf '%q' "$(dirname "$SDK_BUILD")/std_runtime_colour.py") --colour-runtime $(printf '%q' "$(runtime_dir "$CRT")/libcangjie-runtime.so") --host-runtime $(printf '%q' "$(runtime_dir "$HRT")/libcangjie-runtime.so") --runtime $(printf '%q' "$target_lib/libcangjie-runtime.so") --std $(printf '%q' "$std/lib/$HOST_TUPLE/libcangjie-std-core.a") --source $(printf '%q' "$STDSRC")"
+  cmd "python3 $(printf '%q' "$(dirname "$SDK_BUILD")/std_runtime_colour.py") --colour-runtime $(printf '%q' "$(runtime_dir "$CRT")/libcangjie-runtime.${HOST_LIB_EXT}") --host-runtime $(printf '%q' "$(runtime_dir "$HRT")/libcangjie-runtime.${HOST_LIB_EXT}") --runtime $(printf '%q' "$target_lib/libcangjie-runtime.${HOST_LIB_EXT}") --std $(printf '%q' "$std/lib/$HOST_TUPLE/libcangjie-std-core.a") --source $(printf '%q' "$STDSRC")"
   cmd "rm -rf -- $(printf '%q' "$sdk")"
   cmd "rm -rf -- $(printf '%q' "$link_root")"
 }
@@ -848,6 +877,15 @@ stage2_forensic() {
   fi
 }
 
+stage_std() {
+  STAGE=std
+  local compiler
+  compiler=$(cat "$WORK/.cjcj-stage1" 2>/dev/null || true)
+  [ -n "$compiler" ] || die 'std producer requires completed stage0'
+  assert_executable std-producer-compiler "$compiler"
+  bootstrap_target_std "$compiler" "$WORK/stdlib-stage1"
+}
+
 main() {
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -859,7 +897,7 @@ main() {
       --cpp-src) CPP_SRC="${2:?}"; shift 2;;
       --base) BASE_SDK="${2:?}"; shift 2;;
       --host-llvm-so) HOST_LLVM_SO="${2:?}"; shift 2;;
-      --host-llvm|--host-llc) die "参数 $1 已废弃；使用 --host-llvm-so <libLLVM-15.so>";;
+      --host-llvm|--host-llc) die "参数 $1 已废弃；使用 --host-llvm-so <${HOST_LLVM_LIBRARY}>";;
       --host-llvm-sha256) HOST_LLVM_SHA256="${2:?}"; shift 2;;
       --colour-llvm-so) COLOUR_LLVM_SO="${2:?}"; shift 2;;
       --colour-llvm-sha256) COLOUR_LLVM_SHA256="${2:?}"; shift 2;;
@@ -881,7 +919,7 @@ main() {
   for value in WORK SRC CJCJ_SHA STDSRC HOST_LLVM_SO HOST_LLVM_SHA256 COLOUR_LLVM_SO COLOUR_LLVM_SHA256 AST_SUPPORT AST_SUPPORT_SHA256 COLOUR_TUPLE COLOUR_LLVM_SHA CRT HRT; do
     eval "[ -n \"\${$value}\" ]" || die "缺少参数 $value"
   done
-  case "$WANT" in stage0|stage1|stage1-initial-std|stage1-std|stage1-compiler|all) ;; *) die '--stage 只能是 stage0|stage1|stage1-initial-std|stage1-std|stage1-compiler|all';; esac
+  case "$WANT" in stage0|stage1|stage1-initial-std|stage1-std|stage1-compiler|std|all) ;; *) die '--stage 只能是 stage0|stage1|stage1-initial-std|stage1-std|stage1-compiler|std|all';; esac
   case "$WANT" in
     stage0|all) [ -n "$CPP_SRC" ] || die '缺少参数 CPP_SRC';;
   esac
@@ -895,6 +933,7 @@ main() {
   case "$WANT" in
     stage0) stage0;;
     stage1) stage1;;
+    std) stage_std;;
     stage1-initial-std) stage1 initial-std;;
     stage1-std) stage1 std;;
     stage1-compiler) stage1 compiler;;
