@@ -343,6 +343,11 @@
     "member": "packages/compiler_unittest"
   },
   {
+    "file": "packages/compiler_unittest/src/CjoValidationDiagnostic_test.cj",
+    "executor": "cjpm",
+    "member": "packages/compiler_unittest"
+  },
+  {
     "file": "packages/compiler_unittest/src/CjoVersion_test.cj",
     "executor": "cjpm",
     "member": "packages/compiler_unittest"
