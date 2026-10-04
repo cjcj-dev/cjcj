@@ -434,7 +434,7 @@ class ParserPortTest {
         let H = 40
         class A {
         }
-        interface F <: E & F{
+        interface F <: E & G{
         }
     }
 "#
@@ -451,7 +451,42 @@ class ParserPortTest {
             return VisitAction.WALK_CHILDREN
         }).Walk()
         @Expect(expectStrings(members, ["I", "E", "H", "A", "F"]), true)
-        @Expect(expectStrings(refs, ["C", "D", "E", "F"]), true)
+        @Expect(expectStrings(refs, ["C", "D", "E", "G"]), true)
+    }
+
+    @TestCase
+    func selfInheritanceRecovery(): Unit {
+        let code = #"
+    interface I <: C & D{
+        func E() {}
+        let H = 40
+        class A {
+        }
+        interface F <: E & F{
+        }
+    }
+"#
+        let parsed = parseFile(code)
+        let file = parsed[0]
+        let members = ArrayList<String>()
+        let refs = ArrayList<String>()
+        Walker(file, visitPre: { node: Node =>
+            if (let Some(decl) <- (node as Decl)) {
+                members.add(decl.identifier.Val())
+            } else if (let Some(refType) <- (node as RefType)) {
+                refs.add(refType.ref.identifier.Val())
+            }
+            return VisitAction.WALK_CHILDREN
+        }).Walk()
+        var selfInheritanceDiagnosed = false
+        for (diagnostic in parsed[1].GetCategoryDiagnostic(DiagCategory.PARSE)) {
+            if (diagnostic.rKind == DiagKindRefactor.parse_decl_cannot_inherit_their_self) {
+                selfInheritanceDiagnosed = true
+            }
+        }
+        @Expect(expectStrings(members, ["I", "E", "H", "A", "F"]), true)
+        @Expect(expectStrings(refs, ["C", "D", "E"]), true)
+        @Expect(selfInheritanceDiagnosed, true)
     }
 
     @TestCase
