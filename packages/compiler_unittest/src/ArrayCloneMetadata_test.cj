@@ -133,7 +133,9 @@ public class ArrayCloneMetadataTest {
             if (!passed) { failures++ }
         }
         check("lineage", original.objectId != clones[0].objectId && source.objectId != clone.objectId)
-        check("template_position", source.begin.fileID != 0 && source.begin.line == 3 && source.begin.column == 12 &&
+        check("template_position", source.begin.fileID != 0 &&
+            instance.GetSourceManager().GetSource(source.begin.fileID).path == path &&
+            source.end.fileID == source.begin.fileID && source.begin.line == 3 && source.begin.column == 12 &&
             source.end.line == 6 && samePosition(source.begin, source.leftSquarePos) &&
             source.rightSquarePos.line == 6 && source.rightSquarePos.column == 5)
         check("clone_position", samePosition(source.begin, clone.begin) && samePosition(source.end, clone.end) &&
