@@ -50,7 +50,8 @@ def main():
         fixture = here / (name + '.cj')
         out = args.out / name
         out.mkdir(exist_ok=True)
-        cmd = [str(bindir / 'cjc-frontend'), str(fixture), '--emit-chir=raw']
+        cmd = [str(bindir / 'cjc-frontend'), str(fixture), '--emit-chir=raw',
+               '--output-type=staticlib', '-o', str(out / 'output.chir')]
         start = time.monotonic()
         with (out / 'compile.log').open('w') as log:
             result = subprocess.run(cmd, cwd=out, env=env, stdout=log,
@@ -58,7 +59,7 @@ def main():
         text = re.sub(r'\x1b\[[0-9;]*m', '', (out / 'compile.log').read_text())
         entry_failure = (result.returncode not in (0, 1) or
                          'invalid option:' in text or 'Invalid options.' in text or
-                         'Internal Compiler Error' in text or
+                         'Internal Compiler Error' in text or "'main' is missing" in text or
                          (result.returncode == 1 and not re.search(r'(?m)^error:.*\n(?:.|\n)*' + re.escape(fixture.name) + r':\d+:\d+', text)))
         checks = {}
         if name == 'control':
