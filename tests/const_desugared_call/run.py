@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Check real compiler diagnostics after repeated operator-call desugaring."""
 import argparse
-import concurrent.futures
 import hashlib
 import json
 import os
@@ -78,9 +77,14 @@ def main():
                           fixture_sha256=sha(fixture), wall=time.monotonic()-start,
                           checks=checks)
 
-    # Independent output directories avoid shared compiler-output state.
-    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
-        record['cases'] = dict(pool.map(check, ['empty', 'nonempty', 'generic', 'control']))
+    # Validate one real product input before expanding the authorized set.
+    record['cases'] = {}
+    for name in ['empty', 'nonempty', 'generic', 'control']:
+        key, case = check(name)
+        record['cases'][key] = case
+        if name == 'empty' and not all(case['checks'].values()):
+            record['not_run'] = ['nonempty', 'generic', 'control']
+            break
     record['uptime_after'] = subprocess.check_output(['uptime'], text=True)
     record['rc'] = int(not all(all(case['checks'].values())
                                for case in record['cases'].values()))
