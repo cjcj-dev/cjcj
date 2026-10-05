@@ -59,3 +59,26 @@ dumpAST (OptionAction.cj:212). CompileStrategy.cj:419 passes that false value to
 the parser; ParseDecl.cj:127 consequently skips AttachCommentToFile. An AST dump
 consumer alone does not prove comment production. No clone fixture or product
 execution is supplied for this blocked obligation.
+
+## Non-CLI Array clone metadata
+
+`packages/compiler_unittest/src/ArrayCloneMetadata_test.cj` uses the public
+CompilerInvocation with comments enabled, O2, STATIC_LIB and nonincremental
+compilation through GENERIC_INSTANTIATION. Its single fixed source is parsed
+from a real private file. It follows genericDecl/objectId to the clone and
+checks the template Array<T>, clone Array<Int64>, token groups/positions,
+node positions, children and PrintNode(clone) independently. Qualification
+failures stop the comments arm; the marker is never relocated.
+
+After a normal product build (retain target/release and runtime_shim objects):
+
+```sh
+python3 scripts/array_clone_metadata_unit.py --build-tree /absolute/product/tree \
+  --sdk /absolute/private/host-sdk --out /absolute/private/metadata-evidence
+```
+
+This links only the test source to actual release archives. It does not build
+product source or run the full unit suite. Each product comments cut requires
+fresh archives and a new static test link. Only removing InstantiateArrayLit's
+CopyBasicInfo call should fail clone_comments and clone_print_marker; all
+controls must still pass. This is not a new CLI comment option.
