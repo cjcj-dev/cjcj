@@ -4,7 +4,7 @@ import std.collection.*
 import cjcj::ast.*
 import cjcj::ast.AnnotationKind as AstAnnotationKind
 import cjcj::modules.SemaImportManager
-import cjcj::mangle.{BaseMangler, MangleAstAdapter}
+import cjcj::mangle.{BaseMangler}
 import cjcj::sema.TypeManager
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
@@ -269,9 +269,8 @@ public class TestManager {
         }
         for (pkg in pkgs) {
             let mangler = BaseMangler()
-            let adapter = MangleAstAdapter()
-            let manglerCtx = mangler.PrepareContextForPackage(adapter.ConvertPackage(pkg))
-            adapter.CollectLocalDecls(manglerCtx, pkg)
+            let manglerCtx = mangler.PrepareContextForPackage(pkg)
+            mangler.CollectLocalDecls(manglerCtx, pkg)
             let isInExtend = ArrayList<Bool>()
             isInExtend.add(false)
 

@@ -381,7 +381,9 @@ public func ReduceMultiTypeSubst(typeManager: TypeManager, tyVars: ArrayList<Gen
         return MultiTypeSubst()
     }
     let mapping = mts.Clone()
-    let visited = ArrayList<Ty>()
+    // Upstream MultiTypeSubstUtils.cpp:226: cache per target, check every (key, target).
+    // In extend<Y> EnumTest<Y>, Y -> EnumTest<Y> is recursive, X -> EnumTest<Y> is not.
+    let gtysCache = HashMap<Ptr<Ty>, HashSet<Ptr<GenericsTy>>>()
     var mapIdx: Int64 = 0
     while (mapIdx < mts.entries.size) {
         let tyVar = mts.entries.KeyAt(mapIdx)
@@ -389,14 +391,21 @@ public func ReduceMultiTypeSubst(typeManager: TypeManager, tyVars: ArrayList<Gen
         var tyIdx: Int64 = 0
         while (tyIdx < tys.size) {
             let ty = tys.ValueAt(tyIdx)
-            if (!addTyUnique(visited, ty.value)) {
+            if (!gtysCache.contains(ty)) {
+                let gtys = HashSet<Ptr<GenericsTy>>()
+                for (genTy in GetAllGenericTys(ty.value)) {
+                    gtys.add(Ptr<GenericsTy>(genTy))
+                }
+                gtysCache[ty] = gtys
+            }
+            if (!gtysCache[ty].contains(tyVar)) {
                 tyIdx++
                 continue
             }
-            for (genTy in GetAllGenericTys(ty.value)) {
-                if (Ptr<GenericsTy>(genTy) == tyVar) {
-                    removeMapping(mapping, tyVar.value)
-                    break
+            if (let Some(targets) <- mapping.entries.get(tyVar)) {
+                targets.remove(ty)
+                if (targets.isEmpty()) {
+                    mapping.entries.remove(tyVar)
                 }
             }
             tyIdx++

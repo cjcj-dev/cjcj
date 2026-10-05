@@ -24,6 +24,8 @@ try {
   process.exit(2);
 }
 
+// Until #715 supplies matching coloured std/backend inputs, smoke uses the
+// official SDK libraries, backend and runtime, just like the host build.
 let pass = 0;
 let fail = 0;
 if (process.platform === 'win32') process.env.cjStackSize = process.env.cjStackSize || '64MB';
@@ -43,6 +45,20 @@ async function runCommand(executable, args, cwd) {
       maxBuffer: 64 * 1024 * 1024,
     });
     out = {exitCode: result.status ?? 1, stdout: result.stdout || '', stderr: result.stderr || String(result.error || ''), signal: result.signal || null};
+  }
+  // Inspect the actual compiler transcript before executing any produced sample.
+  // The official SDK supplies both its lib directory and cjstart.o to the linker.
+  if (executable === cjcj) {
+    const sdk = process.env.CANGJIE_HOME;
+    const patched = process.env.CJCJ_PATCHED_RUNTIME_LIB_DIR;
+    const lines = `${out.stdout || ''}\n${out.stderr || ''}`.split(/\r?\n/);
+    const mixed = lines.find(line => sdk &&
+      (line.includes(`${sdk}/lib/`) || line.includes(`${sdk}\\lib\\`)) &&
+      (line.includes('patched-runtime') || (patched && line.includes(patched))));
+    if (mixed) {
+      out = {exitCode: 86, stdout: out.stdout || '',
+        stderr: `${out.stderr || ''}\nSMOKE_RUNTIME_MISMATCH: official SDK std with patched runtime: ${mixed}\n`};
+    }
   }
   const ms = Math.round(performance.now() - t0);
   return {
@@ -226,7 +242,7 @@ for (const [name, wanted] of expect) {
   const runLog = path.join(work, `${name}.run.log`);
   await Promise.all([fs.rm(exe, {force: true}), fs.rm(buildLog, {force: true}), fs.rm(runLog, {force: true})]);
   console.log(`[smoke] sample ${name}`);
-  const built = await runCommand(cjcj, [src, '-o', exe]);
+  const built = await runCommand(cjcj, ['--verbose', src, '-o', exe]);
   await fs.writeFile(buildLog, `rc=${built.exitCode} signal=${built.signal ?? 'none'} ms=${built.ms}\n--- stdout ---\n${built.stdout}\n--- stderr ---\n${built.stderr}`);
   if (built.exitCode !== 0) {
     reportFailure('compile', name, built);
@@ -256,14 +272,14 @@ await fs.rm(macroBuild, {recursive: true, force: true});
 await fs.cp(path.join(here, 'macro_demo'), macroBuild, {recursive: true});
 let macroOk = true;
 let got = '';
-let result = await runCommand(cjcj, ['--compile-macro', 'def.cj'], path.join(macroBuild, 'mymacros'));
+let result = await runCommand(cjcj, ['--verbose', '--compile-macro', 'def.cj'], path.join(macroBuild, 'mymacros'));
 await fs.writeFile(path.join(work, 'macro.build.log'), `rc=${result.exitCode} signal=${result.signal ?? 'none'} ms=${result.ms}\n--- stdout ---\n${result.stdout}\n--- stderr ---\n${result.stderr}`);
 if (result.exitCode !== 0) {
   reportFailure('compile', '06_macro/package', result);
   macroOk = false;
 }
 if (macroOk) {
-  result = await runCommand(cjcj, ['main.cj', '--import-path', macroBuild, '-o', path.join(macroBuild, `app/app${exeSuffix}`)], path.join(macroBuild, 'app'));
+  result = await runCommand(cjcj, ['--verbose', 'main.cj', '--import-path', macroBuild, '-o', path.join(macroBuild, `app/app${exeSuffix}`)], path.join(macroBuild, 'app'));
   await fs.writeFile(path.join(work, 'macro.app.log'), `rc=${result.exitCode} signal=${result.signal ?? 'none'} ms=${result.ms}\n--- stdout ---\n${result.stdout}\n--- stderr ---\n${result.stderr}`);
   if (result.exitCode !== 0) {
     reportFailure('compile', '06_macro/app', result);

@@ -11,7 +11,9 @@ llvm_repo=${4:?paired LLVM source}
 runtime_repo=${5:?paired runtime source}
 work=${6:?evidence directory}
 source "$repo/ci/llvm_pin.env"
-source "$repo/ci/runtime_pin.env"
+runtime_pin=${7:-${CJCJ_BOOTSTRAP_RUNTIME_PIN:-$repo/ci/runtime_pin.env}}
+selection=$(node "$repo/ci/runtime-pin.mjs" --shell "$runtime_pin")
+eval "$selection"
 mkdir -p "$work"
 work=$(cd "$work" && pwd)
 mkdir -p "$work/frontend"
@@ -25,13 +27,24 @@ bash "$repo/ci/check-llvm-runtime-abi.sh" --llvm-repo "$llvm_repo" --llvm-ref "$
 header="$work/CangjieRuntimeLayout.h"
 git -C "$llvm_repo" show "$LLVM_SHA:llvm/include/llvm/CodeGen/CangjieRuntimeLayout.h" > "$header"
 mkdir -p "$work/core"
-git -C "$runtime_repo" archive "$RUNTIME_REF" stdlib/libs/std/core | tar -x -C "$work/core"
+git -C "$runtime_repo" archive "$RUNTIME_REF" stdlib/libs/std/core \
+    | tee "$work/runtime-core.tar" | tar -x -C "$work/core"
+git get-tar-commit-id < "$work/runtime-core.tar" > "$work/runtime-source.sha"
+actual_runtime_ref=$(cat "$work/runtime-source.sha")
+if [[ $actual_runtime_ref != "${RUNTIME_REF,,}" ]]; then
+    echo "LAYOUT_IR_RUNTIME_SOURCE_MISMATCH expected=$RUNTIME_REF actual=$actual_runtime_ref" >&2
+    exit 1
+fi
+sha256sum "$work/runtime-core.tar" > "$work/runtime-core.sha256"
+rm "$work/runtime-core.tar"
+printf 'LAYOUT_IR_RUNTIME_SOURCE_VERIFIED expected=%s actual=%s\n' "$RUNTIME_REF" "$actual_runtime_ref"
 core="$work/core/stdlib/libs/std/core"
 cp "$repo/tests/runtime_layout/raw.cj" "$core/layout_contract.cj"
 # The compiler uses the same paired LLVM dylib as the independent reader. Host
 # runtime and std stay together; the generated target code is not executed here.
 export CANGJIE_HOME="$sdk"
-export LD_LIBRARY_PATH="$(dirname "$llvm_library"):$sdk/runtime/lib/linux_x86_64_cjnative:$sdk/lib/linux_x86_64_cjnative:$sdk/third_party/llvm/lib:$sdk/tools/lib"
+LD_LIBRARY_PATH="$(dirname "$llvm_library"):$sdk/runtime/lib/linux_x86_64_cjnative:$sdk/lib/linux_x86_64_cjnative:$sdk/third_party/llvm/lib:$sdk/tools/lib"
+export LD_LIBRARY_PATH
 export cjHeapSize=32GB
 jobs=$(nproc)
 uptime > "$work/uptime-before.txt"

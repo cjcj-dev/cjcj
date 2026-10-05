@@ -6,12 +6,17 @@
 import {ConfigError} from './errors.mjs';
 
 const linuxX64 = Object.freeze({
+  sourceBuild: Object.freeze({runner: 'ubuntu-22.04', reasons: Object.freeze([])}),
   spec: Object.freeze({
     key: 'linux-x64', sdkName: 'linux-x64', archiveFormat: 'tar.gz',
+    packageHost: Object.freeze(['linux', 'x64']), hostLlvmLibrary: 'libLLVM-15.so',
+    nativeFilePattern: /ELF 64-bit.*(?:x86-64|x86_64)/i,
+    requiredLlvmTools: Object.freeze(['llc', 'opt', 'ld.lld', 'llvm-objcopy']),
     exeSuffix: '', outputDirSuffix: 'x86_64', crossCompile: false, needsMingw: false,
     kkk2Supported: true,
     needsStaticLibs: true, os: 'linux', arch: 'x86_64', nodePlatform: 'linux', nodeArch: 'x64',
     runtimeTuple: 'linux_x86_64_cjnative', llvmPlatform: 'linux_x86_64',
+    llvmRunner: 'ubuntu-22.04', llvmGlibc: '2.35', llvmTargets: 'X86', llvmPortability: 'glibc2.35',
     llvmBinDir: '/usr/lib/llvm-15/bin', opensslLibDir: '/usr/lib/x86_64-linux-gnu',
     loaderEnv: 'LD_LIBRARY_PATH', sharedLibrarySuffix: '.so',
     runtimeLibrary: 'libcangjie-runtime.so', fileFormat: 'ELF', fileArch: 'x86-64',
@@ -27,12 +32,19 @@ const linuxX64 = Object.freeze({
 });
 
 const linuxAArch64 = Object.freeze({
+  sourceBuild: Object.freeze({runner: 'ubuntu-24.04-arm', reasons: Object.freeze([
+    'ci/colour-runtime/linux_aarch64.env is missing; extend the coloured runtime producer to linux_aarch64: https://github.com/cjcj-dev/cjcj/issues/763',
+  ])}),
   spec: Object.freeze({
     key: 'linux-aarch64', sdkName: 'linux-aarch64', archiveFormat: 'tar.gz',
+    packageHost: Object.freeze(['linux', 'arm64']), hostLlvmLibrary: 'libLLVM-15.so',
+    nativeFilePattern: /ELF 64-bit.*(?:ARM aarch64|aarch64)/i,
+    requiredLlvmTools: Object.freeze(['llc', 'opt', 'ld.lld', 'llvm-objcopy']),
     exeSuffix: '', outputDirSuffix: 'aarch64', crossCompile: false, needsMingw: false,
     kkk2Supported: false,
     needsStaticLibs: true, os: 'linux', arch: 'aarch64', nodePlatform: 'linux', nodeArch: 'arm64',
     runtimeTuple: 'linux_aarch64_cjnative', llvmPlatform: 'linux_aarch64',
+    llvmRunner: 'ubuntu-22.04-arm', llvmGlibc: '2.35', llvmTargets: 'AArch64', llvmPortability: 'glibc2.35',
     llvmBinDir: '/usr/lib/llvm-15/bin', opensslLibDir: '/usr/lib/aarch64-linux-gnu',
     loaderEnv: 'LD_LIBRARY_PATH', sharedLibrarySuffix: '.so',
     runtimeLibrary: 'libcangjie-runtime.so', fileFormat: 'ELF', fileArch: 'ARM aarch64',
@@ -48,12 +60,19 @@ const linuxAArch64 = Object.freeze({
 });
 
 const darwinArm64 = Object.freeze({
+  sourceBuild: Object.freeze({runner: 'macos-15', reasons: Object.freeze([
+    'ci/bootstrap/bootstrap.sh rejects Darwin; implement Darwin bootstrap: https://github.com/cjcj-dev/cjcj/issues/473',
+  ])}),
   spec: Object.freeze({
     key: 'darwin-arm64', sdkName: 'mac-aarch64', archiveFormat: 'tar.gz',
+    packageHost: Object.freeze(['darwin', 'arm64']), hostLlvmLibrary: 'libLLVM.dylib',
+    nativeFilePattern: /Mach-O 64-bit.*(?:arm64|aarch64)/i,
+    requiredLlvmTools: Object.freeze(['llc', 'opt', 'ld64.lld']),
     exeSuffix: '', outputDirSuffix: 'aarch64', crossCompile: false, needsMingw: false,
     kkk2Supported: false,
     needsStaticLibs: false, os: 'darwin', arch: 'aarch64', nodePlatform: 'darwin', nodeArch: 'arm64',
     runtimeTuple: 'darwin_aarch64_cjnative', llvmPlatform: 'darwin_aarch64',
+    llvmRunner: 'macos-15', llvmGlibc: null, llvmTargets: 'AArch64', llvmPortability: 'macos15',
     llvmBinDir: '/opt/homebrew/opt/llvm@16/bin', opensslLibDir: '/opt/homebrew/opt/openssl@3/lib',
     loaderEnv: 'DYLD_LIBRARY_PATH', sharedLibrarySuffix: '.dylib',
     runtimeLibrary: 'libcangjie-runtime.dylib', fileFormat: 'Mach-O', fileArch: 'arm64',
@@ -69,12 +88,19 @@ const darwinArm64 = Object.freeze({
 });
 
 const darwinX64 = Object.freeze({
+  sourceBuild: Object.freeze({runner: 'macos-15-intel', reasons: Object.freeze([
+    'ci/bootstrap/bootstrap.sh rejects Darwin; implement Darwin bootstrap: https://github.com/cjcj-dev/cjcj/issues/473',
+  ])}),
   spec: Object.freeze({
     key: 'darwin-x64', sdkName: 'mac-x64', archiveFormat: 'tar.gz',
+    packageHost: Object.freeze(['darwin', 'x64']), hostLlvmLibrary: 'libLLVM.dylib',
+    nativeFilePattern: /Mach-O 64-bit.*x86_64/i,
+    requiredLlvmTools: Object.freeze(['llc', 'opt', 'ld64.lld']),
     exeSuffix: '', outputDirSuffix: 'x86_64', crossCompile: false, needsMingw: false,
     kkk2Supported: false,
     needsStaticLibs: false, os: 'darwin', arch: 'x86_64', nodePlatform: 'darwin', nodeArch: 'x64',
     runtimeTuple: 'darwin_x86_64_cjnative', llvmPlatform: 'darwin_x86_64',
+    llvmRunner: 'macos-15-intel', llvmGlibc: null, llvmTargets: 'X86', llvmPortability: 'macos15',
     llvmBinDir: '/usr/local/opt/llvm@16/bin', opensslLibDir: '/usr/local/opt/openssl@3/lib',
     loaderEnv: 'DYLD_LIBRARY_PATH', sharedLibrarySuffix: '.dylib',
     runtimeLibrary: 'libcangjie-runtime.dylib', fileFormat: 'Mach-O', fileArch: 'x86_64',
@@ -92,10 +118,14 @@ const darwinX64 = Object.freeze({
 const windowsX64 = Object.freeze({
   spec: Object.freeze({
     key: 'windows-x64', sdkName: 'windows-x64', archiveFormat: 'zip',
+    packageHost: Object.freeze(['win32', 'x64']),
+    nativeFilePattern: /PE32\+ executable.*x86-64/i,
+    requiredLlvmTools: Object.freeze(['llc', 'opt', 'ld.lld', 'llvm-ar']),
     exeSuffix: '.exe', outputDirSuffix: 'x86_64', crossCompile: true, needsMingw: true,
     kkk2Supported: false,
     needsStaticLibs: false, os: 'windows', arch: 'x86_64', nodePlatform: 'linux', nodeArch: 'x64',
     runtimeTuple: 'windows_x86_64_cjnative', llvmPlatform: 'windows_x86_64',
+    llvmRunner: 'windows-2022', llvmGlibc: null, llvmTargets: 'AArch64;ARM;X86', llvmPortability: 'windows2022',
     hostRuntimeTuple: 'linux_x86_64_cjnative', hostRuntimeLibrary: 'libcangjie-runtime.so',
     llvmBinDir: '/usr/lib/llvm-15/bin', opensslLibDir: '/usr/lib/x86_64-linux-gnu', loaderEnv: 'LD_LIBRARY_PATH',
     sharedLibrarySuffix: '.dll', runtimeLibrary: 'libcangjie-runtime.dll',
@@ -139,6 +169,82 @@ export function getTarget(key) {
 
 export function allTargets() {
   return [...registry.keys()].sort();
+}
+
+export function llvmToolMatrix(requested = 'all', {platformSet = '', publishTuple = false} = {}) {
+  const targets = [...registry.values()].map(target => target.spec);
+  let selected;
+  if (platformSet) {
+    if (!['all', 'windows-only', 'darwin-windows'].includes(platformSet)) {
+      throw new ConfigError(`unknown LLVM platform set '${platformSet}'`);
+    }
+    selected = targets.filter(spec => platformSet === 'all'
+      || (platformSet === 'windows-only' ? spec.os === 'windows' : spec.os !== 'linux'));
+  } else if (!requested || requested === 'all') {
+    selected = targets.filter(spec => spec.os !== 'windows');
+  } else {
+    const wanted = requested.split(',').map(value => value.trim()).filter(Boolean);
+    const unknown = wanted.filter(value => !targets.some(spec => spec.llvmPlatform === value));
+    if (unknown.length) throw new ConfigError(`unknown LLVM platforms: ${unknown.join(', ')}`);
+    selected = targets.filter(spec => wanted.includes(spec.llvmPlatform));
+  }
+  if (!selected.length) throw new ConfigError(`no LLVM platforms selected from '${requested}'`);
+  if (publishTuple && !selected.some(spec => spec.key === 'linux-x64')) {
+    selected.push(getTarget('linux-x64').spec);
+  }
+  return {include: selected.map(spec => ({
+    runner: spec.llvmRunner,
+    platform: spec.llvmPlatform,
+    'llvm-targets': spec.llvmTargets,
+    'portability-tag': spec.llvmPortability,
+    glibc: spec.llvmGlibc,
+  }))};
+}
+
+export function sourceBuildCells() {
+  return [...registry.values()].filter(target => target.sourceBuild).map(({spec, sourceBuild}) => ({
+    target: spec.key,
+    runner: sourceBuild.runner,
+    llvm_platform: spec.llvmPlatform,
+    static_libs: spec.needsStaticLibs,
+    status: sourceBuild.reasons.length ? 'blocked' : 'runnable',
+    reasons: [...sourceBuild.reasons],
+  }));
+}
+
+export function targetForHost(platform = process.platform, arch = process.arch) {
+  return [...registry.values()].find(({spec}) => spec.packageHost[0] === platform && spec.packageHost[1] === arch);
+}
+
+const CI_BUILD_RUNNERS = Object.freeze([
+  ['ubuntu-24.04', 'linux-x64', false],
+  ['ubuntu-22.04', 'linux-x64', false],
+  ['ubuntu-26.04', 'linux-x64', true],
+  ['ubuntu-24.04-arm', 'linux-aarch64', false],
+]);
+const PLATFORM_RUNNERS = Object.freeze([
+  ['macos-26', 'darwin-arm64'], ['macos-26-intel', 'darwin-x64'],
+  ['macos-15', 'darwin-arm64'], ['macos-15-intel', 'darwin-x64'],
+  ['ubuntu-24.04', 'linux-x64'], ['ubuntu-24.04-arm', 'linux-aarch64'],
+  ['ubuntu-22.04', 'linux-x64'], ['ubuntu-22.04-arm', 'linux-aarch64'],
+  ['windows-2025', 'windows-x64'], ['windows-2022', 'windows-x64'],
+]);
+
+export function ciBuildCells() {
+  return CI_BUILD_RUNNERS.map(([runner, target, experimental]) => ({
+    runner, llvm_platform: getTarget(target).spec.llvmPlatform, experimental,
+  }));
+}
+
+export function ciProvisionCells() {
+  return [{runner: 'macos-latest'}];
+}
+
+export function platformTestCells() {
+  return PLATFORM_RUNNERS.map(([runner, target]) => ({
+    runner, llvm_platform: getTarget(target).spec.llvmPlatform,
+    sdk_runtime_dir: getTarget(target).spec.runtimeTuple,
+  }));
 }
 
 export function hostContract(key) {
@@ -196,7 +302,7 @@ export function assertHostContract(key, {
 // What the P01-P23 chain produces today. Host SDKs: every key in the target
 // registry, each producing final-std-<target> for its own runtime tuple. Cross
 // std: ci/srcbuild/steps/build-windows-final-std.mjs runs on the linux-x64
-// source cell only (srcbuild.yml `if: matrix.target == 'linux-x64'`), so the
+// source cell only (srcbuild-target.yml source-mingw/source-android), so the
 // Windows and Android tuples are produced by the Linux source cell; Android
 // runtime and final std use ci/srcbuild/steps/build-android-final-std.mjs.
 const DAG_CROSS_STD_PRODUCERS = Object.freeze({

@@ -1,4 +1,6 @@
 import fs from 'node:fs/promises';
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
 
 const PIN_FILE = new URL('./runtime_pin.env', import.meta.url);
 
@@ -10,7 +12,7 @@ function parsePins(text) {
   }));
 }
 
-export async function resolveRuntimeSource(env = process.env) {
+export async function resolveRuntimeSource(env = process.env, pinFile = env.CJCJ_BOOTSTRAP_RUNTIME_PIN) {
   const pins = parsePins(await fs.readFile(PIN_FILE, 'utf8'));
   const overrideRef = env.CJCJ_RUNTIME_REF_OVERRIDE || '';
   const allowOverride = ['1', 'true'].includes((env.CJCJ_ALLOW_RUNTIME_OVERRIDE || '').toLowerCase());
@@ -29,6 +31,15 @@ export async function resolveRuntimeSource(env = process.env) {
   if (requestedUrl && requestedUrl !== pins.RUNTIME_SRC_URL) {
     throw new Error(`runtime source URL mismatch: environment=${requestedUrl}, pin=${pins.RUNTIME_SRC_URL}`);
   }
+  // An external pin transports a selection; it never authorizes an override.
+  // Resolve against the formal pin and explicit authorization first, then
+  // require the transported source identity to agree exactly.
+  if (pinFile) {
+    const selected = parsePins(await fs.readFile(pinFile, 'utf8'));
+    if (selected.RUNTIME_REF !== runtimeRef || selected.RUNTIME_SRC_URL !== pins.RUNTIME_SRC_URL) {
+      throw new Error(`runtime selection pin mismatch: ${pinFile}`);
+    }
+  }
   return {
     ...pins,
     runtimeRef,
@@ -36,4 +47,22 @@ export async function resolveRuntimeSource(env = process.env) {
     pinRef: pins.RUNTIME_REF,
     overrideRef,
   };
+}
+
+export async function writeRuntimeSelection(file, env = process.env) {
+  const selected = await resolveRuntimeSource(env);
+  await fs.mkdir(path.dirname(path.resolve(file)), {recursive: true});
+  await fs.writeFile(file, `RUNTIME_REF=${selected.runtimeRef}\nRUNTIME_SRC_URL=${selected.sourceUrl}\n`);
+  return selected;
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const [mode, file] = process.argv.slice(2);
+  const selected = mode === '--write' ? await writeRuntimeSelection(file)
+    : await resolveRuntimeSource(process.env, file);
+  if (mode !== '--write' && mode !== '--shell') throw new Error('usage: runtime-pin.mjs --write|--shell FILE');
+  if (mode === '--shell') {
+    const quote = value => `'${value.replaceAll("'", "'\\''")}'`;
+    console.log(`RUNTIME_REF=${quote(selected.runtimeRef)}\nRUNTIME_SRC_URL=${quote(selected.sourceUrl)}`);
+  }
 }

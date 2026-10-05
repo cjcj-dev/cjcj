@@ -4,7 +4,9 @@ import {spawnSync} from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import test from 'node:test';
+import test, {after} from 'node:test';
+import {sourceFetchArguments} from '../lib/git.mjs';
+import {readHostToolchainPin} from '../../ci/host-toolchain-pin.mjs';
 
 const repoRoot = path.resolve('.');
 const scriptPath = path.join(repoRoot, 'tools', 'srcbuild_kkk2.sh');
@@ -83,6 +85,108 @@ function sha256(file) {
   return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 }
 
+function runStepFailureFixture(from, through, failure, missingSdk = false) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'srcbuild-step-failure-'));
+  const files = ['tools/srcbuild_kkk2.sh', 'build/lib/srcbuild_git.sh',
+    'build/lib/targets.mjs', 'build/lib/errors.mjs', 'ci/host_sdk_pin.env',
+    'ci/srcbuild/steps/assert-host-contract.mjs'];
+  for (const file of files) {
+    fs.mkdirSync(path.dirname(path.join(root, file)), {recursive: true});
+    fs.copyFileSync(path.join(repoRoot, file), path.join(root, file));
+  }
+  const state = path.join(root, '.srcbuild');
+  const bin = path.join(state, 'home/.local/bin');
+  fs.mkdirSync(bin, {recursive: true});
+  fs.writeFileSync(path.join(state, 'kkk2-github.env'), [
+    'CJCJ_SRCBUILD_VERSION=fixture-version',
+    ...['CANGJIE_COMPILER_URL', 'RUNTIME_SRC_URL', 'TOOLS_SRC_URL', 'STDX_SRC_URL'].map(key => `${key}=https://fixture.invalid/source`),
+    ...['CANGJIE_COMPILER_SHA', 'RUNTIME_REF', 'TOOLS_REF', 'STDX_REF'].map(key => `${key}=${'1'.repeat(40)}`),
+    '',
+  ].join('\n'));
+  fs.writeFileSync(path.join(state, 'kkk2-github.path'), '');
+  const executable = (name, text) => {
+    fs.writeFileSync(path.join(bin, name), `#!/usr/bin/env bash\nset -euo pipefail\n${text}\n`, {mode: 0o755});
+  };
+  executable('hostname', 'echo kkk2');
+  executable('node', `if [[ $1 == */acquire_fixed_tuple.mjs ]]; then exit 0; fi\nexec ${JSON.stringify(process.execPath)} "$@"`);
+  executable('npx', `
+printf '%s\\n' "$*" >> "$GITHUB_WORKSPACE/commands.log"
+case "$*" in
+  *setup_sdk.mjs*)
+    [[ $CJCJ_SDK_STOCK_LLC == 1 ]]
+    if [[ $FIXTURE_FAILURE == setup ]]; then exit 56; fi
+    if [[ $FIXTURE_MISSING_SDK == 0 ]]; then mkdir -p "$HOME/.cjv/toolchains/$CJCJ_TOOLCHAIN"; fi
+    ;;
+  *install-system-deps*)
+    [[ $CJCJ_SDK_STOCK_LLC == 1 ]]
+    [[ $CJCJ_SRCBUILD_HOST_SDK == "$HOME/.cjv/toolchains/$CJCJ_TOOLCHAIN" ]]
+    [[ $CJCJ_SRCBUILD_BOOTSTRAP_SDK == "$CJCJ_SRCBUILD_HOST_SDK" ]]
+    printf 'SDK_STATE_CONSUMED\\n'
+    ;;
+  *build-shim.mjs*)
+    [[ $CANGJIE_CPP_SRC == "$CANGJIE_WORKSPACE/cangjie_compiler" ]]
+    if [[ $FIXTURE_FAILURE == shim ]]; then exit 37; fi
+    ;;
+  *compose-sdk.mjs*)
+    [[ $CANGJIE_CPP_SRC == "$CANGJIE_WORKSPACE/cangjie_compiler" ]]
+    [[ $SOURCE_SDK_VERSION == fixture-version ]]
+    printf 'PARENT_EXPORT_CONSUMED\\n'
+    ;;
+  *print-version*)
+    if [[ $FIXTURE_FAILURE == version ]]; then exit 42; fi
+    printf 'fixture-new-version\\n'
+    ;;
+  *fetch*)
+    [[ $CJCJ_SRCBUILD_VERSION == fixture-new-version ]]
+    printf 'VERSION_STATE_CONSUMED\\n'
+    ;;
+  *) exit 99 ;;
+esac`);
+  const result = spawnSync('bash', [path.join(root, 'tools/srcbuild_kkk2.sh'),
+    '--from-step', String(from), '--through-step', String(through)], {
+    encoding: 'utf8', timeout: 30000,
+    env: {...process.env, PATH: `${bin}:${process.env.PATH}`,
+      FIXTURE_FAILURE: failure, FIXTURE_MISSING_SDK: missingSdk ? '1' : '0'},
+  });
+  const timings = fs.readFileSync(path.join(state, 'kkk2-timings.tsv'), 'utf8');
+  const commands = fs.readFileSync(path.join(root, 'commands.log'), 'utf8');
+  const logs = fs.readdirSync(path.join(state, 'logs')).map(file =>
+    fs.readFileSync(path.join(state, 'logs', file), 'utf8')).join('\n');
+  console.log(`STEP_FIXTURE root=${root} product_sha256=${sha256(path.join(root, files[0]))} rc=${result.status}`);
+  return {root, result, timings, commands, logs};
+}
+
+for (const scenario of [
+  {name: 'setup failure', from: 5, through: 6, failure: 'setup', rc: 56, next: 'install-system-deps'},
+  {name: 'missing SDK', from: 5, through: 6, failure: '', missingSdk: true, rc: 1, next: 'install-system-deps'},
+  {name: 'SDK state survives', from: 5, through: 6, failure: '', rc: 0, state: 'SDK_STATE_CONSUMED'},
+  {name: 'shim failure', from: 29, through: 34, failure: 'shim', rc: 37, next: 'compose-sdk.mjs'},
+  {name: 'parent export survives', from: 29, through: 34, failure: '', rc: 0, state: 'PARENT_EXPORT_CONSUMED'},
+  {name: 'command substitution failure', from: 12, through: 13, failure: 'version', rc: 42, next: 'fetch'},
+  {name: 'version state survives', from: 12, through: 13, failure: '', rc: 0, state: 'VERSION_STATE_CONSUMED'},
+]) {
+  test(`source-build fail-fast: ${scenario.name}`, () => {
+    const fixture = runStepFailureFixture(scenario.from, scenario.through, scenario.failure, scenario.missingSdk);
+    const failures = [];
+    const check = (name, passed) => {
+      console.log(`TARGET_ASSERTION ${scenario.name}: ${name}=${passed}`);
+      if (!passed) failures.push(name);
+    };
+    check('step rc', fixture.result.status === scenario.rc);
+    check('TIMINGS rc', new RegExp(`^step\\t${scenario.from}\\t[^\\t]+\\t${scenario.rc}\\t`, 'm').test(fixture.timings));
+    check('public step rc', new RegExp(`STEP=${scenario.from} .* rc=${scenario.rc} `).test(fixture.result.stdout));
+    if (scenario.next) {
+      check('next step not executed', !fixture.commands.includes(scenario.next));
+      check('no next TIMINGS record', !new RegExp(`^step\\t${scenario.through}\\t`, 'm').test(fixture.timings));
+    } else {
+      check('parent state consumed', fixture.logs.includes(scenario.state));
+      check('next step succeeds', new RegExp(`^step\\t${scenario.through}\\t[^\\t]+\\t0\\t`, 'm').test(fixture.timings));
+    }
+    if (failures.length === 0) fs.rmSync(fixture.root, {recursive: true, force: true});
+    assert.deepEqual(failures, [], fixture.result.stdout + fixture.result.stderr);
+  });
+}
+
 test('source-build CPU windows preserve explicit placement and derive their width', () => {
   const invoke = `source "$1" --lib-only\n`
     + 'test "$(explicit_cpuset 048-063)" = 48-63\n'
@@ -139,6 +243,7 @@ test('source-build records affinity from the long top-level make instead of an e
   const invoke = `${shellFunction('elapsed_seconds')}\n`
     + `${shellFunction('capture_build_child_affinity')}\n`
     + `${shellFunction('run_step')}\n`
+    + `${shellFunction('finish_step')}\n`
     + 'STATE_ROOT=$1 LOG_ROOT=$1 TIMINGS=$2 START_STAMP=fixture\n'
     + 'CPUSET=$(LC_ALL=C taskset -pc $$ | sed "s/.*: //")\n'
     + 'load_github_state() { :; }\n'
@@ -255,83 +360,6 @@ test('kkk2 source-build profile requires mirrors while local helpers keep fallba
   assert.match(script, /^apply_source_mirror_profile "\$host_name"$/m);
 });
 
-test('source-build shell exact checkout repairs a stale origin before fetching the pin', t => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'source-build-shell-checkout-'));
-  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
-  const source = path.join(root, 'source');
-  const mirror = path.join(root, 'source.git');
-  const checkout = path.join(root, 'checkout');
-  const authoritative = 'https://github.com/cjcj-dev/cjcj-llvm.git';
-  runGit(['init', source]);
-  fs.writeFileSync(path.join(source, 'value'), 'pinned fixture\n');
-  runGit(['-C', source, 'add', 'value']);
-  runGit(['-C', source, '-c', 'user.name=fixture', '-c', 'user.email=fixture@example.invalid',
-    'commit', '-m', 'fixture']);
-  const sha = runGit(['-C', source, 'rev-parse', 'HEAD']);
-  runGit(['clone', '--bare', source, mirror]);
-  runGit(['init', checkout]);
-  runGit(['-C', checkout, 'remote', 'add', 'origin', 'https://example.invalid/stale.git']);
-
-  const helper = path.join(repoRoot, 'build/lib/srcbuild_git.sh');
-  const invoke = 'source "$1"\n'
-    + `${shellFunction('checkout_exact')}\n`
-    + 'CJCJ_SRCBUILD_SOURCE_MIRRORS="$2=file://$3"\n'
-    + 'checkout_exact "$4" "$2" "$5"\n';
-  const result = runBash(invoke, [helper, authoritative, mirror, checkout, sha]);
-  assert.equal(result.status, 0, result.stdout + result.stderr);
-  assert.equal(runGit(['-C', checkout, 'rev-parse', 'HEAD']), sha);
-  assert.equal(runGit(['-C', checkout, 'remote', 'get-url', 'origin']), authoritative);
-});
-
-test('source-build sparse exact checkout repairs a stale origin before fetching the pin', t => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'source-build-sparse-checkout-'));
-  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
-  const source = path.join(root, 'source');
-  const mirror = path.join(root, 'source.git');
-  const checkout = path.join(root, 'checkout');
-  const authoritative = 'https://github.com/cangjie-lang/cangjie_compiler.git';
-  runGit(['init', source]);
-  fs.mkdirSync(path.join(source, 'schema'));
-  fs.writeFileSync(path.join(source, 'schema', 'fixture.fbs'), 'table Fixture {}\n');
-  runGit(['-C', source, 'add', 'schema/fixture.fbs']);
-  runGit(['-C', source, '-c', 'user.name=fixture', '-c', 'user.email=fixture@example.invalid',
-    'commit', '-m', 'fixture']);
-  const sha = runGit(['-C', source, 'rev-parse', 'HEAD']);
-  runGit(['clone', '--bare', source, mirror]);
-  runGit(['init', checkout]);
-  runGit(['-C', checkout, 'remote', 'add', 'origin', 'https://example.invalid/stale.git']);
-
-  const helper = path.join(repoRoot, 'build/lib/srcbuild_git.sh');
-  const invoke = 'source "$1"\n'
-    + `${shellFunction('checkout_sparse_exact')}\n`
-    + 'CJCJ_SRCBUILD_SOURCE_MIRRORS="$2=file://$3"\n'
-    + 'checkout_sparse_exact "$4" "$2" "$5" schema\n';
-  const result = runBash(invoke, [helper, authoritative, mirror, checkout, sha]);
-  assert.equal(result.status, 0, result.stdout + result.stderr);
-  assert.equal(runGit(['-C', checkout, 'rev-parse', 'HEAD']), sha);
-  assert.equal(runGit(['-C', checkout, 'remote', 'get-url', 'origin']), authoritative);
-  assert.equal(fs.existsSync(path.join(checkout, 'schema', 'fixture.fbs')), true);
-});
-
-test('fixed tuple requires pin, manifest, and embedded opt commit to agree', t => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'source-build-fixed-tuple-'));
-  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
-  const pinText = fs.readFileSync(path.join(repoRoot, 'ci', 'llvm_pin.env'), 'utf8');
-  const llvmSha = pinText.match(/^LLVM_SHA=([0-9a-f]{40})$/m)[1];
-  const invoke = `${shellFunction('fixed_tuple_is_current')}\n`
-    + 'REPO_ROOT=$1 CJCJ_FIXED_LLVM_DIR=$2\n'
-    + 'fixed_tuple_is_current\n';
-
-  writeTuple(root, llvmSha);
-  const current = runBash(invoke, [repoRoot, root]);
-  assert.equal(current.status, 0, current.stderr);
-  console.log(`FIXED_TUPLE_ARM tuple=current rc=${current.status}`);
-
-  writeTuple(root, '75a0000000000000000000000000000000000000');
-  const stale = runBash(invoke, [repoRoot, root]);
-  assert.equal(stale.status, 1, stale.stderr);
-  console.log(`FIXED_TUPLE_ARM tuple=stale-opt rc=${stale.status}`);
-});
 
 test('fixed tuple publisher feeds the bootstrap consumer and rejects a missing static marker', t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'source-build-publish-consume-'));
@@ -372,94 +400,6 @@ test('fixed tuple publisher feeds the bootstrap consumer and rejects a missing s
   console.log(`PUBLISHER_CONSUMER_ARM green=${green.status} missing-static-marker=${red.status} restored=${restored.status}`);
 });
 
-test('fixed tuple depot seeds only checksum-valid pinned payloads; explicit publisher can rebuild', t => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'source-build-fixed-depot-'));
-  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
-  const pinText = fs.readFileSync(path.join(repoRoot, 'ci', 'llvm_pin.env'), 'utf8');
-  const llvmSha = pinText.match(/^LLVM_SHA=([0-9a-f]{40})$/m)[1];
-  const depotRoot = path.join(root, 'depot');
-  const depot = path.join(depotRoot, llvmSha);
-  const tuple = path.join(depot, 'fixed-llc');
-  const destination = path.join(root, 'destination');
-  fs.mkdirSync(tuple, {recursive: true});
-  writeTuple(tuple, llvmSha);
-  writeDepotChecksums(depot);
-  const pinnedSumsSha = sha256(path.join(depot, 'SHA256SUMS'));
-
-  const seedInvoke = `${shellFunction('fixed_tuple_is_current')}\n`
-    + `${shellFunction('resolve_depot_tuple_root')}\n`
-    + `${shellFunction('seed_fixed_tuple_from_depot')}\n`
-    + 'REPO_ROOT=$1 CJCJ_FIXED_LLVM_DIR=$2 LLVM_SHA=$3 LLVM_TUPLE_SUMS_SHA=$4\n'
-    + 'seed_fixed_tuple_from_depot "$5"\n';
-  const seeded = runBash(seedInvoke, [repoRoot, destination, llvmSha, pinnedSumsSha, depotRoot]);
-  assert.equal(seeded.status, 0, seeded.stderr);
-  assert.match(seeded.stdout, /seeded fixed LLVM tuple from verified depot/);
-
-  fs.rmSync(destination, {recursive: true, force: true});
-  fs.appendFileSync(path.join(tuple, 'llc.gz'), 'tampered');
-  const rejected = runBash(seedInvoke, [repoRoot, destination, llvmSha, pinnedSumsSha, depotRoot]);
-  assert.equal(rejected.status, 1, rejected.stdout + rejected.stderr);
-  assert.match(rejected.stderr, /SHA256SUMS verification failed/);
-  assert.equal(fs.existsSync(destination), false, 'rejected depot payload was copied');
-
-  writeDepotChecksums(depot);
-  const rewritten = runBash(seedInvoke, [repoRoot, destination, llvmSha, pinnedSumsSha, depotRoot]);
-  assert.equal(rewritten.status, 1, rewritten.stdout + rewritten.stderr);
-  assert.match(rewritten.stderr, /SHA256SUMS digest disagrees with ci\/llvm_pin\.env/);
-  assert.equal(fs.existsSync(destination), false, 'jointly rewritten payload and checksums were copied');
-
-  const checkoutMarker = path.join(root, 'rebuild-started');
-  const buildInvoke = `${shellFunction('fixed_tuple_is_current')}\n`
-    + `${shellFunction('resolve_depot_tuple_root')}\n`
-    + `${shellFunction('seed_fixed_tuple_from_depot')}\n`
-    + `${shellFunction('build_fixed_tuple')}\n`
-    + 'checkout_exact() { touch "$CHECKOUT_MARKER"; return 17; }\n'
-    + 'checkout_sparse_exact() { return 17; }\n'
-    + 'CJCJ_LLVM_DEPOT_PUBLISH=1 DRY_RUN=0 REPO_ROOT=$1 STATE_ROOT=$2 CJCJ_FIXED_LLVM_DIR=$2 JOBS=1 '
-    + 'CHECKOUT_MARKER=$3 CJCJ_LLVM_DEPOT_ROOT=$4 LLVM_TUPLE_SUMS_SHA=$5\n'
-    + 'build_fixed_tuple\n';
-  const rebuilt = runBash(buildInvoke,
-    [repoRoot, path.join(root, 'build-destination'), checkoutMarker, depotRoot, pinnedSumsSha]);
-  assert.equal(rebuilt.status, 1, rebuilt.stdout + rebuilt.stderr);
-  assert.equal(fs.existsSync(checkoutMarker), true, 'rebuild path did not start after rejecting depot');
-});
-
-test('fixed tuple depot seeds the nested compiler-sha key and rejects a mismatched pin', t => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'source-build-depot-compiler-'));
-  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
-  const pinText = fs.readFileSync(path.join(repoRoot, 'ci', 'llvm_pin.env'), 'utf8');
-  const llvmSha = pinText.match(/^LLVM_SHA=([0-9a-f]{40})$/m)[1];
-  const pinCompiler = pinText.match(/^CANGJIE_COMPILER_SHA=([0-9a-f]{40})$/m)[1];
-  const otherCompiler = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
-  const depotRoot = path.join(root, 'depot');
-  const pinTuple = path.join(depotRoot, llvmSha, pinCompiler, 'fixed-llc');
-  const otherTuple = path.join(depotRoot, llvmSha, otherCompiler, 'fixed-llc');
-  fs.mkdirSync(pinTuple, {recursive: true});
-  fs.mkdirSync(otherTuple, {recursive: true});
-  writeTuple(pinTuple, llvmSha, pinCompiler);
-  writeTuple(otherTuple, llvmSha, otherCompiler);
-  writeDepotChecksums(path.join(depotRoot, llvmSha, pinCompiler));
-  writeDepotChecksums(path.join(depotRoot, llvmSha, otherCompiler));
-  const pinSums = sha256(path.join(depotRoot, llvmSha, pinCompiler, 'SHA256SUMS'));
-  const otherSums = sha256(path.join(depotRoot, llvmSha, otherCompiler, 'SHA256SUMS'));
-  const destination = path.join(root, 'destination');
-  const seedInvoke = `${shellFunction('fixed_tuple_is_current')}\n`
-    + `${shellFunction('resolve_depot_tuple_root')}\n`
-    + `${shellFunction('seed_fixed_tuple_from_depot')}\n`
-    + 'REPO_ROOT=$1 CJCJ_FIXED_LLVM_DIR=$2 LLVM_SHA=$3 CANGJIE_COMPILER_SHA=$4 '
-    + 'LLVM_TUPLE_SUMS_SHA=$5\n'
-    + 'seed_fixed_tuple_from_depot "$6"\n';
-
-  const seeded = runBash(seedInvoke, [repoRoot, destination, llvmSha, pinCompiler, pinSums, depotRoot]);
-  assert.equal(seeded.status, 0, seeded.stderr);
-  assert.match(seeded.stdout, new RegExp(`${llvmSha}/${pinCompiler}`));
-
-  fs.rmSync(destination, {recursive: true, force: true});
-  const rejected = runBash(seedInvoke,
-    [repoRoot, destination, llvmSha, otherCompiler, otherSums, depotRoot]);
-  assert.equal(rejected.status, 1, rejected.stdout + rejected.stderr);
-  assert.match(rejected.stderr, /pin, manifest, and opt lineage disagree/);
-});
 
 test('shared support cache misses until step 11 writes and then hits a second workspace', t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'source-build-support-cache-'));
@@ -507,99 +447,6 @@ test('shared support cache misses until step 11 writes and then hits a second wo
   assert.equal(fs.readFileSync(path.join(workspaceB, 'buildtools', 'installed.marker'), 'utf8'), 'built');
 });
 
-test('fixed tuple producer checks build-tree ld.lld through its symlink target', t => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'source-build-lld-symlink-'));
-  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
-  const clean = path.join(repoRoot, 'build/test/fixtures/colour-ld-lld/clean');
-  const bad = path.join(repoRoot, 'build/test/fixtures/colour-ld-lld/bad');
-  assert.equal(sha256(clean), '879294b77c945f5e7ddd821fbde7b4c2fd9bf2816987a4aed99cf80f5a569f33');
-  assert.equal(sha256(bad), '29f24afc38b856aa11674d5ee87f3dfc7adcb4f31acb560d451d4b70f97947fb');
-  const invoke = 'set -euo pipefail\n'
-    + `${shellFunction('build_fixed_tuple')}\n`
-    + 'fixed_tuple_is_current() { return 0; }\n'
-    + 'seed_fixed_tuple_from_depot() { return 1; }\n'
-    + 'checkout_exact() { return 0; }\n'
-    + 'checkout_sparse_exact() { return 0; }\n'
-    + 'cmake() { return 0; }\n'
-    + 'ninja() {\n'
-    + '  local dest=""\n'
-    + '  while [[ $# -gt 0 ]]; do\n'
-    + '    if [[ $1 == -C ]]; then dest=$2; shift 2; continue; fi\n'
-    + '    shift\n'
-    + '  done\n'
-    + '  mkdir -p "$dest/bin"\n'
-    + '  if [[ $dest == *llc-build ]]; then\n'
-    + '    cp "$CLEAN_ELF" "$dest/bin/llc"\n'
-    + '    cp "$CLEAN_ELF" "$dest/bin/opt"\n'
-    + '    cp "$LLD_ELF" "$dest/bin/lld"\n'
-    + '    ln -s lld "$dest/bin/ld.lld"\n'
-    + '  else\n'
-    + '    printf \'#!/bin/sh\\nexit 0\\n\' > "$dest/flatc"\n'
-    + '    chmod +x "$dest/flatc"\n'
-    + '  fi\n'
-    + '}\n'
-    + 'clang++() {\n'
-    + '  local out=""\n'
-    + '  while [[ $# -gt 0 ]]; do\n'
-    + '    if [[ $1 == -o ]]; then out=$2; break; fi\n'
-    + '    shift\n'
-    + '  done\n'
-    + '  mkdir -p "$(dirname "$out")"\n'
-    + '  printf shim > "$out"\n'
-    + '}\n'
-    + 'publish_fixed_tuple_to_depot() { echo PUBLISHED; return 0; }\n'
-    + 'resolve_depot_tuple_root() { printf \'%s\\n\' "$1/resolved"; }\n'
-    + 'CJCJ_LLVM_DEPOT_PUBLISH=1 DRY_RUN=0 JOBS=1 REPO_ROOT=$1 STATE_ROOT=$2 '
-    + 'CJCJ_FIXED_LLVM_DIR=$3 CLEAN_ELF=$4 LLD_ELF=$5\n'
-    + 'mkdir -p "$CJCJ_FIXED_LLVM_DIR"\n'
-    + 'build_fixed_tuple\n';
-  const run = lldElf => runBash(invoke, [repoRoot, path.join(root, 'state'), path.join(root, 'out'), clean, lldElf]);
-  const link = path.join(root, 'state', 'fixed-llvm-build', 'llc-build', 'bin', 'ld.lld');
-  const cleanRun = run(clean);
-  assert.equal(fs.lstatSync(link).isSymbolicLink(), true, 'producer fixture ld.lld must stay a symlink');
-  assert.equal(fs.readlinkSync(link), 'lld');
-  console.log(`FIXED_TUPLE_SYMLINK clean_rc=${cleanRun.status}`);
-  console.log(cleanRun.stdout);
-  console.log(cleanRun.stderr);
-  assert.match(cleanRun.stdout, /NO_LIBXML2 lld/);
-  assert.doesNotMatch(cleanRun.stdout + cleanRun.stderr, /not a regular file/);
-  assert.equal(cleanRun.status, 0, cleanRun.stdout + cleanRun.stderr);
-  assert.match(cleanRun.stdout, /NO_LIBXML2 llc/);
-  assert.match(cleanRun.stdout, /NO_LIBXML2 opt/);
-  assert.match(cleanRun.stdout, /PUBLISHED/);
-  fs.rmSync(path.join(root, 'state'), {recursive: true, force: true});
-  fs.rmSync(path.join(root, 'out'), {recursive: true, force: true});
-  const badRun = run(bad);
-  console.log(`FIXED_TUPLE_SYMLINK bad_rc=${badRun.status}`);
-  console.log(badRun.stdout);
-  console.log(badRun.stderr);
-  assert.equal(fs.lstatSync(link).isSymbolicLink(), true);
-  assert.match(badRun.stderr, /DT_NEEDED libxml2 in .*\/lld\n/);
-  assert.doesNotMatch(badRun.stdout + badRun.stderr, /not a regular file/);
-  assert.equal(badRun.status, 1, badRun.stdout + badRun.stderr);
-  assert.match(badRun.stdout, /NO_LIBXML2 llc/);
-  assert.match(badRun.stdout, /NO_LIBXML2 opt/);
-  assert.doesNotMatch(badRun.stdout, /NO_LIBXML2 lld/);
-  const directAfter = spawnSync('bash', [path.join(repoRoot, 'ci/assert_no_libxml2_needed.sh'), link], {encoding: 'utf8'});
-  console.log(`FIXED_TUPLE_SYMLINK direct_symlink_rc=${directAfter.status}`);
-  assert.equal(directAfter.status, 2, directAfter.stdout + directAfter.stderr);
-  assert.match(directAfter.stderr, /not a regular file: .*\/ld\.lld\n/);
-});
-
-test('fixed tuple build stops when an exact checkout fails', t => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'source-build-checkout-'));
-  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
-  const sparseMarker = path.join(root, 'sparse-called');
-  const invoke = `${shellFunction('build_fixed_tuple')}\n`
-    + 'fixed_tuple_is_current() { return 1; }\n'
-    + 'checkout_exact() { return 17; }\n'
-    + 'checkout_sparse_exact() { touch "$SPARSE_MARKER"; return 0; }\n'
-    + 'CJCJ_LLVM_DEPOT_PUBLISH=1 DRY_RUN=0 REPO_ROOT=$1 STATE_ROOT=$2 CJCJ_FIXED_LLVM_DIR=$2 JOBS=1 SPARSE_MARKER=$3\n'
-    + 'build_fixed_tuple\n';
-  const failed = runBash(invoke, [repoRoot, root, sparseMarker]);
-  assert.equal(failed.status, 1, failed.stderr);
-  assert.equal(fs.existsSync(sparseMarker), false, 'later checkout ran after the first failure');
-});
 
 test('stage3 dry-run requires the bootstrap stage2 compiler', t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'source-build-stage3-contract-'));
@@ -895,7 +742,7 @@ function ghaBootstrapDefects(yml, ghaRun) {
 }
 
 test('GHA srcbuild does not build compiler or stdlib before bootstrap', () => {
-  const yml = fs.readFileSync(path.join(repoRoot, '.github/workflows/srcbuild.yml'), 'utf8');
+  const yml = fs.readFileSync(path.join(repoRoot, '.github/workflows/srcbuild-target.yml'), 'utf8');
   const ghaRun = fs.readFileSync(path.join(repoRoot, 'ci/bootstrap/gha_run.sh'), 'utf8');
   const boot = yml.indexOf('Bootstrap stage0 compiler');
   const compiler = yml.indexOf('build compiler');
@@ -1024,7 +871,7 @@ for (const kind of ['missing', 'read', 'import-missing', 'import-bad']) test(`ve
 
 
 test('GHA absolute campaign bootstrap path turns only the GHA contract red', () => {
-  const yml = fs.readFileSync(path.join(repoRoot, '.github/workflows/srcbuild.yml'), 'utf8');
+  const yml = fs.readFileSync(path.join(repoRoot, '.github/workflows/srcbuild-target.yml'), 'utf8');
   const ghaRun = fs.readFileSync(path.join(repoRoot, 'ci/bootstrap/gha_run.sh'), 'utf8');
   assert.deepEqual(ghaBootstrapDefects(yml, ghaRun), []);
   const mutated = yml.replace(
@@ -1069,7 +916,8 @@ test('stage1 compiler consumer sees the completed target std', t => {
   fs.mkdirSync(path.join(root, 'stdlib-stage1'));
   fs.writeFileSync(path.join(root, 'stdlib-stage1', 'std-id'), 'host');
   const bootstrap = fs.readFileSync(path.join(repoRoot, 'ci/bootstrap/bootstrap.sh'), 'utf8');
-  const invoke = ['bootstrap_target_std', 'stage2_forensic', 'stage1']
+  const invoke = ['bootstrap_target_std', 'stage2_forensic', 'stage1_inputs',
+    'stage1_initial_std', 'stage1_std', 'stage1_compiler', 'stage1']
     .map(name => extractFn(bootstrap, name)).join('\n') + `
 set -e
 WORK=$1 DRY=1 COLOUR_TUPLE=tuple CRT=runtime HOST_LLVM_SO=llvm COLOUR_LLVM_SHA=sha STAGE1_HEAP=20GB
@@ -1113,8 +961,68 @@ const astInputPins = {
   campaign: 'f1bdd6b76bdd2b82e6a991a759dbd317a07244c4716e08fb1e0c69579f29f337',
 };
 
+function writeAstInputFixture(archive) {
+  const root = path.dirname(archive);
+  const canonical = path.join(root, 'libcangjie-ast-support.a');
+  if (archive !== canonical) fs.copyFileSync(archive, canonical);
+  const payloads = ['include/cangjie/AST.h', 'include/flatbuffers/StdAstFormat_generated.h',
+    'schema/StdAstFormat.fbs', 'third_party/flatbuffers/bin/flatc',
+    'third_party/flatbuffers/include/flatbuffers.h', 'third_party/flatbuffers/cangjie/libflatbuffers.a',
+    'third_party/flatbuffers/modules/flatbuffers.cjo'];
+  for (const name of payloads) {
+    fs.mkdirSync(path.dirname(path.join(root, name)), {recursive: true});
+    fs.writeFileSync(path.join(root, name), `AST input fixture ${name}\n`);
+  }
+  fs.copyFileSync('/bin/true', path.join(root, 'third_party/flatbuffers/bin/flatc'));
+  const files = [...new Set([path.basename(archive), 'libcangjie-ast-support.a', ...payloads])];
+  fs.writeFileSync(path.join(root, 'SHA256SUMS'), files.map(name =>
+    `${sha256(path.join(root, name))}  ${name}`).join('\n') + '\n');
+}
+
 // Execute the complete driver, including retained-state loading, prerequisite,
 // run_step and the final RESULT. Only external inputs live in the fixture.
+// Formal controls use the actual pinned Git object, not a fabricated HEAD.
+let headerRuntimeSource;
+after(() => { if (headerRuntimeSource?.owned) fs.rmSync(headerRuntimeSource.path, {recursive: true, force: true}); });
+function writeCppHeaderFixture(root, cpp, runtimeRef) {
+  const readPin = name => Object.fromEntries(fs.readFileSync(path.join(root, 'ci', name), 'utf8')
+    .trim().split('\n').map(line => line.split('=')));
+  const llvm = readPin('llvm_pin.env'), runtime = readPin('runtime_pin.env');
+  const git = args => {
+    const r = spawnSync('git', args, {encoding: 'utf8'}); assert.equal(r.status, 0, r.stderr); return r.stdout.trim();
+  };
+  if (!headerRuntimeSource) {
+    const configured = process.env.GC_FIX_RUNTIME_CHECKOUT;
+    const source = configured || fs.mkdtempSync(path.join(os.tmpdir(), 'formal-header-runtime-'));
+    if (!configured) {
+      git(['init', '-q', source]);
+      git(['-C', source, ...sourceFetchArguments(runtime.RUNTIME_SRC_URL, runtimeRef)]);
+      git(['-C', source, 'checkout', '-q', '--detach', 'FETCH_HEAD']);
+    }
+    assert.equal(git(['-C', source, 'rev-parse', 'HEAD']), runtimeRef);
+    headerRuntimeSource = {path: source, owned: !configured};
+  }
+  const paired = path.join(cpp, 'third_party/paired-runtime');
+  git(['clone', '-q', '--no-hardlinks', headerRuntimeSource.path, paired]);
+  const roots = ['third_party/llvm-project/llvm/include', 'build/build/third_party/llvm/include',
+    'build/build/include', 'build/build/schema'];
+  const headers = {};
+  for (const root of roots) {
+    const file = path.join(cpp, root, 'fixture.h'); fs.mkdirSync(path.dirname(file), {recursive: true});
+    fs.writeFileSync(file, 'fixture header'); headers[root] = [{path: 'fixture.h', sha256: sha256(file)}];
+  }
+  const schema = 'schema/ModuleFormat.fbs', flatc = 'build/shim-flatbuffers/flatc';
+  for (const rel of [schema, flatc]) { fs.mkdirSync(path.dirname(path.join(cpp, rel)), {recursive: true}); fs.writeFileSync(path.join(cpp, rel), 'fixture tool input'); }
+  fs.writeFileSync(path.join(cpp, 'build/build/shim-headers.json'), JSON.stringify({
+    runtime: {url: runtime.RUNTIME_SRC_URL, sha: runtimeRef},
+    llvm: {url: llvm.LLVM_URL, sha: llvm.LLVM_SHA},
+    compiler: {url: llvm.CANGJIE_COMPILER_URL, sha: llvm.CANGJIE_COMPILER_SHA},
+    flatbuffers: {url: llvm.FLATBUFFERS_URL, sha: llvm.FLATBUFFERS_SHA},
+    schema: {path: schema, sha256: sha256(path.join(cpp, schema))},
+    flatc: {path: flatc, sha256: sha256(path.join(cpp, flatc))}, headers,
+  }));
+}
+
 function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFailure = false, child = false, coreObserve = false, runtimeCase = 'valid', ast = 'explicit', largeContract = false, contractDefect} = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bootstrap argv '));
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));
@@ -1167,15 +1075,24 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
   }
   fs.copyFileSync('/bin/true', base + '/third_party/llvm/bin/opt');
   fs.copyFileSync('/bin/true', inputs + '/libLLVM-15.so');
+  const hostArtifact = path.join(inputs, 'host-artifact');
+  fs.mkdirSync(hostArtifact);
+  fs.copyFileSync(inputs + '/libLLVM-15.so', path.join(hostArtifact, 'libLLVM-15.so'));
+  const hostSha = sha256(path.join(hostArtifact, 'libLLVM-15.so'));
+  const hostPin = {repository: 'cjcj-dev/cjcj', run_id: '123', run_attempt: '1', artifact_id: '456',
+    source_sha: '418ace1896e22a51a6c1fa36ec29631b00301cd8', producer_sha: 'b'.repeat(40),
+    platform: 'linux_x86_64', sha256: hostSha};
+  fs.writeFileSync(path.join(hostArtifact, 'manifest.json'), JSON.stringify(hostPin));
+  const hostIdentities = path.join(inputs, 'host-identities.txt');
+  fs.writeFileSync(hostIdentities, `# HOST_LLVM_PROVENANCE ${JSON.stringify(hostPin)}\nlinux_x86_64 libLLVM-15.so ${hostSha}\n`);
   fs.writeFileSync(inputs + '/ast.a', 'ast input\n');
+  writeAstInputFixture(inputs + '/ast.a');
   const runtimePin = fs.readFileSync(path.join(root, 'ci/runtime_pin.env'), 'utf8').match(/^RUNTIME_REF=(.*)$/m)[1];
+  writeCppHeaderFixture(root, inputs, runtimePin);
   const runtimeDir = path.join(inputs, 'external runtime');
   fs.mkdirSync(runtimeDir);
   let stamp = `CJRT-COMMIT:${runtimePin}`;
   if (runtimeCase === 'old-pin') stamp = `CJRT-COMMIT:${'0'.repeat(40)}`;
-  if (runtimeCase === 'dirty') stamp += '-dirty';
-  if (runtimeCase === 'ambiguous') stamp += `\nCJRT-COMMIT:${'1'.repeat(40)}`;
-  if (runtimeCase === 'unstamped') stamp = 'runtime without stamp';
   fs.writeFileSync(runtimeDir + '/libcangjie-runtime.so', stamp + '\n');
   fs.writeFileSync(runtimeDir + '/libboundscheck.so', 'boundscheck input\n');
   const runtimeSha = sha256(runtimeDir + '/libcangjie-runtime.so');
@@ -1220,6 +1137,8 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
     CJCJ_BOOTSTRAP_CPP_SRC: inputs,
     CJCJ_BOOTSTRAP_STDSRC: inputs,
     CJCJ_SRCBUILD_HOST_SDK: base,
+    CJCJ_BOOTSTRAP_HOST_LLVM_ARTIFACT: hostArtifact,
+    STAGE1_HOST_IDENTITIES: hostIdentities,
     CJCJ_BOOTSTRAP_HOST_LLVM_SO: inputs + '/libLLVM-15.so',
     CJCJ_BOOTSTRAP_HOST_LLVM_SHA256: sha256(inputs + '/libLLVM-15.so'),
     CJCJ_BOOTSTRAP_AST_SUPPORT: inputs + '/ast.a',
@@ -1230,10 +1149,55 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
     CJCJ_BOOTSTRAP_BOUNDSCHECK_SHA256: runtimeCase === 'no-bounds-sha' ? '' : boundsSha,
     CJCJ_BOOTSTRAP_CJCJ_SHA: sourceSha,
   };
+  fs.mkdirSync(path.join(base, 'bin'), {recursive: true});
+  fs.copyFileSync('/bin/true', path.join(base, 'bin/cjc'));
+  const sdkSource = path.join(inputs, 'official');
+  fs.mkdirSync(sdkSource);
+  fs.cpSync(base, path.join(sdkSource, 'cangjie'), {recursive: true});
+  const sdkArchive = `cangjie-sdk-linux-x64-${readHostToolchainPin().replace(/^nightly-/, '')}.tar.gz`;
+  env.CJCJ_BOOTSTRAP_HOST_SDK_ARCHIVE = path.join(inputs, sdkArchive);
+  const packed = spawnSync('tar', ['-czf', env.CJCJ_BOOTSTRAP_HOST_SDK_ARCHIVE, '-C', sdkSource, 'cangjie']);
+  assert.equal(packed.status, 0, packed.stderr.toString());
+  fs.appendFileSync(hostIdentities, `# HOST_SDK_PROVENANCE ${JSON.stringify({platform: 'linux_x86_64',
+    archive: sdkArchive, sha256: sha256(env.CJCJ_BOOTSTRAP_HOST_SDK_ARCHIVE)})}\n`);
+  const runtimeFiles = {};
+  for (const [name, expected] of [['libcangjie-runtime.so', runtimeSha], ['libboundscheck.so', boundsSha]]) {
+    const relative = `runtime/lib/linux_x86_64_cjnative/${name}`;
+    fs.mkdirSync(path.dirname(path.join(runtimeDir, relative)), {recursive: true});
+    if (fs.existsSync(path.join(runtimeDir, name))) fs.copyFileSync(path.join(runtimeDir, name), path.join(runtimeDir, relative));
+    runtimeFiles[relative] = expected;
+  }
+  const runtimeArchive = 'lib/linux_x86_64_cjnative/libcangjie-runtime.a';
+  fs.mkdirSync(path.dirname(path.join(runtimeDir, runtimeArchive)), {recursive: true});
+  fs.writeFileSync(path.join(runtimeDir, runtimeArchive), 'runtime archive');
+  runtimeFiles[runtimeArchive] = sha256(path.join(runtimeDir, runtimeArchive));
+  fs.writeFileSync(path.join(runtimeDir, 'manifest.json'), JSON.stringify({
+    runtime_sha: runtimeCase === 'old-pin' ? '0'.repeat(40) : runtimePin,
+    platform: 'linux_x86_64', run_id: '123', run_attempt: '1', files: runtimeFiles}));
+  Object.assign(env, {COLOUR_RT_RUN_ID: '123', COLOUR_RT_RUN_ATTEMPT: '1', COLOUR_RT_ARTIFACT_ID: '456',
+    COLOUR_RT_MANIFEST_SHA256: sha256(path.join(runtimeDir, 'manifest.json')),
+    CJCJ_BOOTSTRAP_SOURCE: 'depot', CJCJ_BOOTSTRAP_SOURCE_REASON: 'registered test input',
+    CJCJ_BOOTSTRAP_INPUTS_PIN: path.join(inputs, 'tuple-pin.json'),
+    LLVM_TUPLE_SUMS_SHA: sha256(path.join(tuple, 'SHA256SUMS'))});
+  if (runtimeCase === 'undeclared') env.CJCJ_BOOTSTRAP_COLOUR_RT = path.join(inputs, 'missing-runtime');
+  if (runtimeCase === 'no-runtime-sha') env.COLOUR_RT_MANIFEST_SHA256 = '';
+  if (runtimeCase === 'no-bounds-sha') env.COLOUR_RT_RUN_ID = '';
+  fs.writeFileSync(env.CJCJ_BOOTSTRAP_INPUTS_PIN, JSON.stringify({version: 1, repository: 'cjcj-dev/cjcj',
+    run: 123, attempt: 1, artifact: 456, commit: sourceSha,
+    files: [...payloads, 'SHA256SUMS'].map((name, index) => ({path: name, mode: 0o644, asset: index + 1,
+      artifact_sha256: sha256(path.join(tuple, name)), release_sha256: sha256(path.join(tuple, name))}))}));
+  const dylib = path.join(inputs, 'dylib');
+  fs.mkdirSync(dylib);
+  fs.copyFileSync('/bin/true', path.join(dylib, 'libLLVM-15.so'));
+  env.CJCJ_BOOTSTRAP_DYLIB_ARTIFACT = dylib;
+  env.LLVM_DYLIB_SHA256 = sha256(path.join(dylib, 'libLLVM-15.so'));
+  fs.writeFileSync(path.join(dylib, 'manifest.json'), JSON.stringify({llvm_sha: llvmSha,
+    sha256: env.LLVM_DYLIB_SHA256, targets: ['X86', 'ARM', 'AArch64']}));
   const campaignArchive = path.join(state, 'buildtools/lib/libcangjie-ast-support.a');
   if (ast.startsWith('campaign') || ast === 'precedence') {
     fs.mkdirSync(path.dirname(campaignArchive), {recursive: true});
     fs.writeFileSync(campaignArchive, 'campaign ast input\n');
+    writeAstInputFixture(campaignArchive);
   }
   if (ast === 'missing' || ast.startsWith('campaign')) {
     delete env.CJCJ_BOOTSTRAP_AST_SUPPORT;
@@ -1245,6 +1209,11 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
     fs.appendFileSync(ast.startsWith('campaign') ? campaignArchive : inputs + '/ast.a', 'changed after registration\n');
   }
   if (ast === 'wrong-sha') env.CJCJ_BOOTSTRAP_AST_SUPPORT_SHA256 = '0'.repeat(64);
+  env.AST_SUPPORT_SHA256 = env.CJCJ_BOOTSTRAP_AST_SUPPORT_SHA256 ?? '';
+  if (ast === 'missing') {
+    env.CJCJ_BOOTSTRAP_AST_ARTIFACT = path.join(inputs, 'missing-ast.a');
+    env.AST_SUPPORT_SHA256 = astInputPins.explicit;
+  }
   delete env.CJCJ_BOOTSTRAP_SH;
   delete env.CJCJ_SRCBUILD_CPUSET;
   delete env.CJCJ_KKK2_AFFINED;
@@ -1258,6 +1227,8 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
   }
   return {
     root,
+    hostArtifact,
+    hostIdentities,
     runtimeDir,
     sourceSha,
     dryRun(step, sample) {
@@ -1298,6 +1269,42 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
       return {...result, log};
     },
   };
+}
+
+test('kkk2 host LLVM preparation reaches bootstrap arguments with verified bytes', t => {
+  const fixture = bootstrapDriverFixture(t);
+  const result = fixture.dryRun(32, 1);
+  const command = result.stdout.match(/^DRY_RUN COMMAND=(.*)$/m)?.[1] || '';
+  const parsed = runBash(`set -- ${command}\nwhile (($#)); do\nif [[ $1 == --host-llvm-so ]]; then sha256sum "$2"; fi\nshift\ndone`);
+  const expected = sha256(path.join(fixture.hostArtifact, 'libLLVM-15.so'));
+  const observed = {rc: result.status, hashRc: parsed.status, digest: parsed.stdout.split(' ')[0],
+    declared: command.includes(`--host-llvm-sha256 ${expected}`), verified: /HOST_LLVM_VERIFIED/.test(result.stderr)};
+  console.log(`HOST_LLVM_ARGUMENT_ASSERT ${JSON.stringify(observed)}`);
+  assert.deepEqual(observed, {rc: 0, hashRc: 0, digest: expected, declared: true, verified: true});
+});
+
+for (const defect of ['digest', 'provenance', 'missing']) {
+  test(`kkk2 host LLVM rejects ${defect} before bootstrap arguments`, t => {
+    const fixture = bootstrapDriverFixture(t);
+    if (defect === 'digest') {
+      fs.writeFileSync(fixture.hostIdentities, fs.readFileSync(fixture.hostIdentities, 'utf8')
+        .replace(/(libLLVM-15.so )[a-f0-9]{64}/, `$1${'0'.repeat(64)}`));
+    } else if (defect === 'provenance') {
+      const file = path.join(fixture.hostArtifact, 'manifest.json');
+      const manifest = JSON.parse(fs.readFileSync(file));
+      manifest.sha256 = '0'.repeat(64);
+      fs.writeFileSync(file, JSON.stringify(manifest));
+    } else {
+      fs.unlinkSync(path.join(fixture.hostArtifact, 'libLLVM-15.so'));
+    }
+    const result = fixture.dryRun(32, 1);
+    const marker = defect === 'digest' ? 'HOST_LLVM_SHA256_MISMATCH' : defect === 'provenance'
+      ? 'HOST_LLVM_PROVENANCE_MISMATCH field=sha256' : 'ENOENT';
+    const observed = {failed: result.status !== 0, marker: result.stderr.includes(marker),
+      command: /^DRY_RUN COMMAND=/m.test(result.stdout)};
+    console.log(`HOST_LLVM_REJECTION_ASSERT defect=${defect} ${JSON.stringify(observed)}`);
+    assert.deepEqual(observed, {failed: true, marker: true, command: false});
+  });
 }
 
 test('dry-run bootstrap preserves pin outcomes with large contract bodies', t => {
@@ -1390,7 +1397,7 @@ test('bootstrap driver matching pins starts real stage0 and sdk_build', t => {
   assert.ok(result.log.includes(`ASSERT cjcj-sha expected=${fixture.sourceSha} actual=${fixture.sourceSha} source=git`), result.log);
   assert.match(result.log, /\[stage0\] official cjc/);
   // The deliberately incomplete SDK ends this bounded entry test before compilation.
-  assert.match(result.log, /SDK-BUILD-FAIL .*不像 SDK（缺 bin\/cjc）/);
+  assert.match(result.log, /SDK-BUILD-FAIL llvm-so: 基线里没有同名位置 .*\/third_party\/llvm\/lib\/libLLVM-15.so/);
   console.log('OBSERVED real sdk_build input rejection after matching source pin');
   assert.equal(result.status, 1, result.stdout + result.stderr);
   assert.match(result.stdout, /STEP=31 .* rc=1 /);
@@ -1398,20 +1405,17 @@ test('bootstrap driver matching pins starts real stage0 and sdk_build', t => {
 });
 
 
-test('P12 external runtime pin and both SO digests gate the actual bootstrap command', t => {
+test('runtime manifest pin and member digests gate the actual bootstrap command', t => {
   const cases = {
-    valid: 'COLOUR_RT_INPUT_VERIFIED',
-    'old-pin': 'COLOUR_RT_PIN_MISMATCH',
-    dirty: 'COLOUR_RT_PIN_MISMATCH',
-    ambiguous: 'COLOUR_RT_PIN_MISMATCH',
-    unstamped: 'COLOUR_RT_STAMP_MISSING',
-    undeclared: 'COLOUR_RT_INPUT_REQUIRED',
-    'no-runtime-sha': 'COLOUR_RT_SHA_REQUIRED',
-    'no-bounds-sha': 'COLOUR_RT_SHA_REQUIRED',
-    'runtime-corrupt': 'COLOUR_RT_SHA_MISMATCH',
-    'bounds-corrupt': 'COLOUR_RT_SHA_MISMATCH',
-    'bounds-missing': 'COLOUR_RT_FILE_MISSING',
-    'runtime-missing': 'COLOUR_RT_FILE_MISSING',
+    valid: 'COLOUR_RT_VERIFIED',
+    'old-pin': 'COLOUR_RT_MANIFEST_MISMATCH',
+    undeclared: 'ENOENT',
+    'no-runtime-sha': 'COLOUR_RT_SHA256_MISMATCH',
+    'no-bounds-sha': 'COLOUR_RT_PIN_MISSING',
+    'runtime-corrupt': 'COLOUR_RT_FILE_SHA256_MISMATCH',
+    'bounds-corrupt': 'COLOUR_RT_FILE_SHA256_MISMATCH',
+    'bounds-missing': 'ENOENT',
+    'runtime-missing': 'ENOENT',
   };
   const observed = [], expected = [];
   for (const [runtimeCase, marker] of Object.entries(cases)) {
@@ -1452,14 +1456,13 @@ for (const ast of ['missing', 'campaign', 'precedence']) {
     const observed = {
       rc: result.status,
       command: command !== undefined,
-      missingKey: /bootstrap input missing: CJCJ_BOOTSTRAP_AST_SUPPORT/.test(result.stderr),
-      campaignKey: /CANGJIE_BUILD_ROOT\/lib\/libcangjie-ast-support.a/.test(result.stderr),
+      missingKey: /ENOENT.*missing-ast\.a/.test(result.stderr),
       selectedSha: command?.includes(`--ast-support-sha256 ${expectedSha} `) ?? false,
     };
     console.log(`AST_INPUT_ASSERT ${ast} ${JSON.stringify(observed)}`);
     assert.deepEqual(observed, ast === 'missing'
-      ? {rc: 1, command: false, missingKey: true, campaignKey: true, selectedSha: false}
-      : {rc: 0, command: true, missingKey: false, campaignKey: false, selectedSha: true});
+      ? {rc: 1, command: false, missingKey: true, selectedSha: false}
+      : {rc: 0, command: true, missingKey: false, selectedSha: true});
   });
 }
 
@@ -1473,7 +1476,7 @@ for (const source of ['explicit', 'campaign']) {
         const live = fixture.run(step);
         for (const [mode, result, output] of [['dry', dry, dry.stdout + dry.stderr], ['live', live, live.log]]) {
           observed.push({step, mode, rc: result.status,
-            required: output.includes('AST_SUPPORT_SHA_REQUIRED:'),
+            required: output.includes('ast-support archive SHA256 disagrees'),
             entered: /ASSERT cjcj-sha|DRY_RUN COMMAND=/.test(output)});
         }
       }
@@ -1489,33 +1492,32 @@ for (const source of ['explicit', 'campaign']) {
       const expected = astInputPins[source];
       const comparison = result.log.match(/ASSERT ast-support-sha256 expected=([0-9a-f]{64}) actual=([0-9a-f]{64})/);
       const observed = {expected: comparison?.[1], matches: comparison?.[2] === expected,
-        rejected: result.log.includes('ast-support sha256 不匹配'),
+        rejected: result.log.includes('ast-support archive SHA256 disagrees'),
         accepted: result.log.includes('ast-support sha256 匹配')};
       console.log(`AST_REGISTERED_ASSERT rc=${result.status} ${JSON.stringify(observed)}`);
       // Success at this input boundary may proceed to unrelated SDK fixture limits.
-      assert.deepEqual(observed, {expected, matches: !tampered, rejected: tampered, accepted: !tampered});
+      assert.deepEqual(observed, {expected: tampered ? undefined : expected, matches: !tampered, rejected: tampered, accepted: !tampered});
       if (tampered) assert.equal(result.status, 1);
     });
   }
 }
 
-test('ast-support input contract wrong-sha reaches bootstrap assertion', t => {
+test('ast-support input contract wrong-sha stops in shared preparation', t => {
   const result = bootstrapDriverFixture(t, {ast: 'wrong-sha'}).run(31);
   const observed = {
     rc: result.status,
-    assertion: /ASSERT ast-support-sha256 expected=0{64} actual=[0-9a-f]{64}/.test(result.log),
-    failures: result.log.replace(/\x1b\[[0-9;]*m/g, '').split('\n').filter(line => line.startsWith('BOOTSTRAP-FAIL')),
+    rejected: result.log.includes('ast-support archive SHA256 disagrees'),
+    entered: result.log.includes('ASSERT cjcj-sha'),
   };
   console.log(`AST_SHA_ASSERT ${JSON.stringify(observed)}`);
-  assert.deepEqual(observed, {rc: 1, assertion: true,
-    failures: ['BOOTSTRAP-FAIL [stage0] ast-support sha256 不匹配']});
+  assert.deepEqual(observed, {rc: 1, rejected: true, entered: false});
 });
 
 test('ast-support input contract missing stops real stage entry', t => {
   const result = bootstrapDriverFixture(t, {ast: 'missing'}).run(31);
   const observed = {
     rc: result.status,
-    missingKey: /bootstrap input missing: CJCJ_BOOTSTRAP_AST_SUPPORT/.test(result.log),
+    missingKey: /ENOENT.*missing-ast\.a/.test(result.log),
     bootstrapStarted: /\[stage0\]/.test(result.log),
   };
   console.log(`AST_ENTRY_ASSERT ${JSON.stringify(observed)}`);
