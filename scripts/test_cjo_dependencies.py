@@ -51,23 +51,26 @@ class Cjo:
 
 
 def fixture():
-    # Shared global leaf reached through many local constants. The reader sees
-    # the serialized result, without constructing ASTs or calling writer helpers.
-    lines = ['package depcheck', 'public const leaf: Int64 = 1',
-             'public func diamond(): Int64 {']
-    for i in range(64):
-        lines += [f'    const left{i}: Int64 = leaf + {i}',
-                  f'    const right{i}: Int64 = leaf + {i + 1}',
-                  f'    const joined{i}: Int64 = left{i} + right{i}']
-    lines += ['    return ' + ' + '.join(f'joined{i}' for i in range(64)), '}',
-              'public func direct(): Int64 { return leaf }']
-    return '\n'.join(lines) + '\n'
+    # GlobalDeclAnalysis records calls to both private global functions in
+    # decl.dependencies (FaithfulAST2CHIR.cj:3028), unlike local const refs.
+    # leaf is pre-exported as a public const. diamond precedes left/right,
+    # which are not full-exported: its private callees prevent inline export.
+    # At diamond's SaveDecl, left/right are still unplanned, so both recursive
+    # branches reach the already serialized leaf (writer:783-788).
+    return """package depcheck
+public const leaf: Int64 = 1
+public func diamond(): Int64 { return left() + right() }
+private func left(): Int64 { return leaf }
+private func right(): Int64 { return leaf }
+public func direct(): Int64 { return leaf }
+"""
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--compiler', type=Path, required=True)
     parser.add_argument('--out', type=Path, required=True)
+    parser.add_argument('--compiler-sha256', help='Previously captured identity of a retained compiler')
     args = parser.parse_args()
     compiler, out = args.compiler.resolve(), args.out.resolve()
     out.mkdir(parents=True, exist_ok=True)
@@ -79,7 +82,7 @@ def main():
     with (out / 'compile.log').open('wb') as log:
         run = subprocess.run(command, cwd=out, stdout=log, stderr=subprocess.STDOUT, timeout=900)
     result = {'command': command, 'compile_rc': run.returncode, 'wall': time.monotonic() - start,
-              'compiler_sha256': hashlib.sha256(compiler.read_bytes()).hexdigest(),
+              'compiler_sha256': args.compiler_sha256 or hashlib.sha256(compiler.read_bytes()).hexdigest(),
               'fixture_sha256': hashlib.sha256(source.read_bytes()).hexdigest()}
     status = 2
     if run.returncode == 0:
@@ -87,6 +90,8 @@ def main():
         result['cjo_sha256'] = hashlib.sha256(data).hexdigest()
         rows = Cjo(data).declarations()
         result['declarations'] = rows
+        for row in rows:
+            print('DEPENDENCY_SHAPE ' + json.dumps(row), flush=True)
         duplicates = sum(row['duplicates'] for row in rows)
         # Always evaluate uniqueness, even when the independent coverage check fails.
         print(f"ASSERT DependenciesUnique {'PASS' if duplicates == 0 else 'FAIL'} duplicates={duplicates}", flush=True)
