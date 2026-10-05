@@ -46,6 +46,11 @@ private func allComments(node: Node): String {
         "trailing=" + commentSnapshot(node.comments.trailingComments)
 }
 
+private func recordCloneCheck(failures: ArrayList<String>, name: String, passed: Bool): Unit {
+    println("ASSERT ${name} ${if (passed) { "PASS" } else { "FAIL" }}")
+    if (!passed) { failures.add(name) }
+}
+
 @Test
 public class ArrayCloneMetadataTest {
     @TestCase
@@ -127,31 +132,27 @@ public class ArrayCloneMetadataTest {
         let sourceTy = source.GetTy().getOrThrow()
         let cloneTy = clone.GetTy().getOrThrow()
         println("OBSERVE sourceArrayId=${source.objectId} cloneArrayId=${clone.objectId} sourceTy=${sourceTy.String()} cloneTy=${cloneTy.String()}")
-        var failures: Int64 = 0
-        let check = { name: String, passed: Bool =>
-            println("ASSERT ${name} ${if (passed) { "PASS" } else { "FAIL" }}")
-            if (!passed) { failures++ }
-        }
-        check("lineage", original.objectId != clones[0].objectId && source.objectId != clone.objectId)
-        check("template_position", source.begin.fileID != 0 &&
+        let failures = ArrayList<String>()
+        recordCloneCheck(failures, "lineage", original.objectId != clones[0].objectId && source.objectId != clone.objectId)
+        recordCloneCheck(failures, "template_position", source.begin.fileID != 0 &&
             instance.GetSourceManager().GetSource(source.begin.fileID).path == path &&
             source.end.fileID == source.begin.fileID && source.begin.line == 3 && source.begin.column == 12 &&
             source.end.line == 6 && samePosition(source.begin, source.leftSquarePos) &&
             source.rightSquarePos.line == 6 && source.rightSquarePos.column == 5)
-        check("clone_position", samePosition(source.begin, clone.begin) && samePosition(source.end, clone.end) &&
+        recordCloneCheck(failures, "clone_position", samePosition(source.begin, clone.begin) && samePosition(source.end, clone.end) &&
             samePosition(source.leftSquarePos, clone.leftSquarePos) && samePosition(source.rightSquarePos, clone.rightSquarePos))
-        check("template_type", sourceTy.IsArray() && sourceTy.typeArgs.size == 1 &&
+        recordCloneCheck(failures, "template_type", sourceTy.IsArray() && sourceTy.typeArgs.size == 1 &&
             sourceTy.typeArgs[0].kind == TypeKind.TYPE_GENERICS && sourceTy.typeArgs[0].name == "T")
-        check("clone_type", cloneTy.IsArray() && cloneTy.typeArgs.size == 1 &&
+        recordCloneCheck(failures, "clone_type", cloneTy.IsArray() && cloneTy.typeArgs.size == 1 &&
             cloneTy.typeArgs[0].kind == TypeKind.TYPE_INT64)
-        check("children", source.children.size == 1 && clone.children.size == 1 &&
+        recordCloneCheck(failures, "children", source.children.size == 1 && clone.children.size == 1 &&
             clone.children[0].TyKind() == TypeKind.TYPE_INT64 &&
             source.children[0].TyKind() == TypeKind.TYPE_GENERICS)
-        check("template_marker", PrintNode(source).contains(cloneMarker))
-        check("clone_comments", allComments(clone) == allComments(source))
+        recordCloneCheck(failures, "template_marker", PrintNode(source).contains(cloneMarker))
+        recordCloneCheck(failures, "clone_comments", allComments(clone) == allComments(source))
         let rendered = PrintNode(clone)
         println("OBSERVE clonePrint=${rendered}")
-        check("clone_print_marker", rendered.contains(cloneMarker))
-        @Assert(failures == 0)
+        recordCloneCheck(failures, "clone_print_marker", rendered.contains(cloneMarker))
+        @Assert(failures.isEmpty())
     }
 }
