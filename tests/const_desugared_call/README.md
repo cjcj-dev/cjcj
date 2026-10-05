@@ -2,7 +2,7 @@
 
 Run `python3 run.py --compiler /absolute/cjcj-stage1 --sdk /absolute/host-sdk --out /absolute/results`.
 The compiler must be built from the candidate source with its matching host libraries.
-The runner copies the complete product ELF and invokes its `cjc-frontend --typecheck`
+The runner copies the complete product ELF and invokes its `cjc-frontend --emit-chir=raw`
 entry through a same-directory alias, so backend generation cannot mask Sema diagnostics.
 
 `empty`, `nonempty`, and `generic` call an instance with an Array-only `operator ()`
@@ -18,3 +18,9 @@ Specification: upstream fdd47893726b186e30b342a9a33a15ec6b6221fe,
 ConstEvaluationChecker.cpp:670, DesugarInTypeCheck.cpp:485/514,
 PartialInstantiation.cpp:788. Tests require candidate/cut/restored execution;
 source inspection alone does not establish coverage of each copied field.
+
+The VISIBLE-only option table excludes `--typecheck`. `--emit-chir=raw` is a
+visible GLOBAL option: ExecuteCompile runs through SEMA and CHIR, then skips
+code generation and result saving. Entry failures stop all arms immediately.
+Candidate/restored arms also stop on the first target failure; baseline/cut
+arms use `--observe-failures` to collect authorized target observations.

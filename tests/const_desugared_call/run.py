@@ -17,6 +17,8 @@ def sha(path):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--observe-failures', action='store_true',
+                        help='Continue target assertion failures in baseline/cut arms only')
     parser.add_argument('--compiler', required=True, type=Path)
     parser.add_argument('--sdk', required=True, type=Path)
     parser.add_argument('--out', required=True, type=Path)
@@ -48,12 +50,16 @@ def main():
         fixture = here / (name + '.cj')
         out = args.out / name
         out.mkdir(exist_ok=True)
-        cmd = [str(bindir / 'cjc-frontend'), str(fixture), '--typecheck']
+        cmd = [str(bindir / 'cjc-frontend'), str(fixture), '--emit-chir=raw']
         start = time.monotonic()
         with (out / 'compile.log').open('w') as log:
             result = subprocess.run(cmd, cwd=out, env=env, stdout=log,
                                     stderr=subprocess.STDOUT, timeout=180)
         text = re.sub(r'\x1b\[[0-9;]*m', '', (out / 'compile.log').read_text())
+        entry_failure = (result.returncode not in (0, 1) or
+                         'invalid option:' in text or 'Invalid options.' in text or
+                         'Internal Compiler Error' in text or
+                         (result.returncode == 1 and not re.search(r'(?m)^error:.*\n(?:.|\n)*' + re.escape(fixture.name) + r':\d+:\d+', text)))
         checks = {}
         if name == 'control':
             checks['ordinary_const_accepted'] = result.returncode == 0
@@ -75,6 +81,7 @@ def main():
             print(f'ASSERT {name}.{assertion} {"PASS" if passed else "FAIL"}', flush=True)
         return name, dict(command=cmd, compile_rc=result.returncode,
                           fixture_sha256=sha(fixture), wall=time.monotonic()-start,
+                          entry_failure=entry_failure,
                           checks=checks)
 
     # Validate a real process result before expanding the authorized set.
@@ -84,12 +91,13 @@ def main():
     for name in ['empty', 'nonempty', 'generic', 'control']:
         key, case = check(name)
         record['cases'][key] = case
-        if case['compile_rc'] not in (0, 1):
+        if case['entry_failure'] or (not args.observe_failures and
+                                     not all(case['checks'].values())):
             record['not_run'] = [n for n in ['empty', 'nonempty', 'generic', 'control']
                                  if n not in record['cases']]
             break
     record['uptime_after'] = subprocess.check_output(['uptime'], text=True)
-    record['rc'] = int(not all(all(case['checks'].values())
+    record['rc'] = int(bool(record.get('not_run')) or not all(not case['entry_failure'] and all(case['checks'].values())
                                for case in record['cases'].values()))
     (args.out / 'result.json').write_text(json.dumps(record, indent=2) + '\n')
     return record['rc']
