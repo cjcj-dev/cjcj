@@ -566,5 +566,10 @@
     "file": "test/store_strength/test_checker.py",
     "executor": "python3",
     "args": []
+  },
+  {
+    "file": "scripts/test_cjo_dependencies.py",
+    "executor": "manual",
+    "reason": "Requires a real candidate stage1 compiler built with the pinned official host SDK. Run python3 scripts/test_cjo_dependencies.py --compiler <stage1 ELF> --out <private fixture directory>; checks raw CJMP common CJO dependencies, including candidate, product cuts and restoration."
   }
 ]
