@@ -1,0 +1,317 @@
+import assert from 'node:assert/strict';
+import {spawnSync} from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import test from 'node:test';
+import {gzipSync} from 'node:zlib';
+import {installIsolatedLlvmTuple} from '../build/lib/isolated-llvm-tuple.mjs';
+
+const repo = path.resolve(import.meta.dirname, '..');
+const hash = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+function run(command, args, env, cwd = repo) {
+  return spawnSync(command, args, {env: {...process.env, ...env}, cwd, encoding: 'utf8'});
+}
+function ok(result) { assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`); }
+function fixture(t) {
+  const root = fs.mkdtempSync(path.join(process.env.RUNNER_TEMP || repo, 'isolation-test-'));
+  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
+  const sdk = path.join(root, 'sdk');
+  const host = path.join(sdk, 'runtime/lib/linux_x86_64_cjnative');
+  const dist = path.join(root, 'dist');
+  for (const dir of [host, dist, path.join(sdk, 'bin')]) fs.mkdirSync(dir, {recursive: true});
+  for (const [dir, value] of [[host, 7], [dist, 9]]) {
+    const source = path.join(dir, 'runtime.c');
+    fs.writeFileSync(source, `int runtime_value(void) { return ${value}; }\n`);
+    ok(run('cc', ['-shared', '-fPIC', source, '-o', path.join(dir, 'libcangjie-runtime.so')], {}));
+  }
+  const source = path.join(root, 'main.c');
+  fs.writeFileSync(source, '#include <stdio.h>\nextern int runtime_value(void);\nint main(void) { printf("runtime=%d\\n", runtime_value()); return 0; }\n');
+  const exe = path.join(sdk, 'bin/host');
+  ok(run('cc', [source, `-L${host}`, '-lcangjie-runtime', '-Wl,-rpath,$ORIGIN/../runtime/lib/linux_x86_64_cjnative', '-o', exe], {}));
+  const pin = fs.readFileSync(path.join(repo, 'ci/runtime_pin.env'), 'utf8').match(/^RUNTIME_REF=(.+)$/m)[1];
+  fs.writeFileSync(path.join(dist, 'SOURCE_SHA'), `${pin}\n`);
+  fs.writeFileSync(path.join(dist, 'libcangjie-runtime.so.sha256'), `${hash(path.join(dist, 'libcangjie-runtime.so'))}\n`);
+  const env = {CANGJIE_HOME: sdk, RUNNER_TEMP: root, LD_LIBRARY_PATH: host,
+    CJCJ_PATCHED_RUNTIME_LIB_DIR: dist, GITHUB_ENV: path.join(root, 'github-env')};
+  console.log(`FIXTURE exe=${hash(exe)} official=${hash(path.join(host, 'libcangjie-runtime.so'))} coloured=${hash(path.join(dist, 'libcangjie-runtime.so'))}`);
+  return {root, sdk, host, dist, exe, env};
+}
+function audit(f, command = f.exe, args = [], env = {}) {
+  return run(process.execPath, ['ci/with-runtime-audit.mjs', '--', command, ...args], {...f.env, ...env});
+}
+
+test('installer preserves official SDK bytes and publishes an independent runtime', t => {
+  const f = fixture(t);
+  const before = hash(path.join(f.host, 'libcangjie-runtime.so'));
+  const dest = path.join(f.root, 'patched');
+  const result = run('npx', ['--yes', 'zx@8', 'ci/install_patched_runtime.mjs', f.dist, dest], f.env);
+  ok(result);
+  const after = hash(path.join(f.host, 'libcangjie-runtime.so'));
+  console.log(`TARGET_ASSERT_EXECUTED sdk_unchanged before=${before} after=${after}`);
+  assert.equal(after, before, 'official SDK runtime must remain byte-identical');
+  const published = path.join(dest, 'lib/linux_x86_64_cjnative');
+  assert.equal(hash(path.join(published, 'libcangjie-runtime.so')), hash(path.join(f.dist, 'libcangjie-runtime.so')));
+  assert.equal(fs.readFileSync(f.env.GITHUB_ENV, 'utf8'), `CJCJ_PATCHED_RUNTIME_LIB_DIR=${published}\n`);
+  const observed = audit(f, f.exe, [], {CJCJ_PATCHED_RUNTIME_LIB_DIR: published});
+  ok(observed);
+  assert.match(observed.stdout, /runtime=7/);
+});
+
+test('actual host runtime load is accepted and recorded', t => {
+  const f = fixture(t); const result = audit(f); ok(result);
+  console.log(`TARGET_ASSERT_EXECUTED host_runtime ${result.stdout}`);
+  assert.match(result.stdout, /runtime=7/);
+  assert.match(result.stdout, /RUNTIME_LOAD .*official=1 coloured=0/);
+});
+
+test('coloured runtime path rejects the official executable before main', t => {
+  const f = fixture(t); const result = audit(f, f.exe, [], {LD_LIBRARY_PATH: f.dist});
+  console.log(`TARGET_ASSERT_EXECUTED path_rejection rc=${result.status} ${result.stdout}`);
+  assert.equal(result.status, 86);
+  assert.match(result.stdout, /OFFICIAL_RUNTIME_MISMATCH .*official=1 coloured=1/);
+  assert.doesNotMatch(result.stdout, /runtime=9/);
+});
+
+test('original in-place overwrite is rejected by hash, including an absorbed child failure', t => {
+  const f = fixture(t);
+  fs.copyFileSync(path.join(f.dist, 'libcangjie-runtime.so'), path.join(f.host, 'libcangjie-runtime.so'));
+  const result = audit(f, '/bin/sh', ['-c', '"$1"; exit 0', 'sh', f.exe]);
+  console.log(`TARGET_ASSERT_EXECUTED overwrite_rejection rc=${result.status} ${result.stdout}`);
+  assert.equal(result.status, 86);
+  assert.match(result.stdout, /OFFICIAL_RUNTIME_MISMATCH/);
+  assert.ok(result.stdout.includes(`so=${f.host}/libcangjie-runtime.so`));
+});
+
+test('rebuilt executable outside the SDK may explicitly select coloured runtime', t => {
+  const f = fixture(t); const rebuilt = path.join(f.root, 'rebuilt');
+  const source = path.join(f.root, 'rebuilt.c');
+  fs.writeFileSync(source, '#include <stdio.h>\nextern int runtime_value(void);\nint main(void) { puts("rebuilt consumer"); printf("runtime=%d\\n", runtime_value()); return 0; }\n');
+  ok(run('cc', [source, `-L${f.dist}`, '-lcangjie-runtime', '-o', rebuilt], {}));
+  const result = audit(f, rebuilt, [], {LD_LIBRARY_PATH: f.dist}); ok(result);
+  console.log(`TARGET_ASSERT_EXECUTED rebuilt_runtime ${result.stdout}`);
+  assert.match(result.stdout, /runtime=9/);
+  assert.match(result.stdout, /official=0 coloured=1/);
+});
+
+
+test('installer rejects a destination inside the official SDK before creating it', t => {
+  const f = fixture(t); const dest = path.join(f.sdk, 'forbidden');
+  const result = run('npx', ['--yes', 'zx@8', 'ci/install_patched_runtime.mjs', f.dist, dest], f.env);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /destination must be outside the official SDK/);
+  assert.equal(fs.existsSync(dest), false);
+});
+
+test('renamed coloured preload is rejected by content hash', t => {
+  const f = fixture(t); const alias = path.join(f.root, 'renamed.so');
+  fs.copyFileSync(path.join(f.dist, 'libcangjie-runtime.so'), alias);
+  const result = audit(f, f.exe, [], {LD_PRELOAD: alias});
+  console.log(`TARGET_ASSERT_EXECUTED renamed_rejection rc=${result.status} ${result.stdout}`);
+  assert.equal(result.status, 86);
+  assert.ok(result.stdout.includes(`so=${alias}`));
+});
+
+
+test('copied official executable outside SDK remains official by identity', t => {
+  const f = fixture(t); const copy = path.join(f.root, 'copied-host');
+  fs.copyFileSync(f.exe, copy);
+  const result = audit(f, copy, [], {LD_LIBRARY_PATH: f.dist});
+  console.log(`TARGET_ASSERT_EXECUTED copied_host_rejection rc=${result.status} ${result.stdout}`);
+  assert.equal(result.status, 86);
+  assert.match(result.stdout, /official=1 coloured=1/);
+});
+
+
+function optimizerFixture(t) {
+  const f = fixture(t);
+  const bin = path.join(f.sdk, 'third_party/llvm/bin');
+  fs.mkdirSync(bin, {recursive: true});
+  f.officialOpt = path.join(bin, 'opt');
+  f.patchedBin = path.join(f.root, 'patched-llvm/bin');
+  fs.mkdirSync(f.patchedBin, {recursive: true});
+  f.patchedOpt = path.join(f.patchedBin, 'opt');
+  for (const [file, text] of [[f.officialOpt, 'official optimizer executed'], [f.patchedOpt, 'coloured optimizer executed']]) {
+    const src = path.join(f.root, 'opt.c');
+    fs.writeFileSync(src, `#include <stdio.h>\nint main(void) { puts("${text}"); return 0; }\n`);
+    ok(run('cc', [src, '-o', file], {}));
+  }
+  f.compiler = path.join(f.sdk, 'bin/cjc');
+  f.rebuiltCompiler = path.join(f.root, 'rebuilt-cjc');
+  for (const [file, text] of [[f.compiler, 'official frontend'], [f.rebuiltCompiler, 'rebuilt frontend']]) {
+    const src = path.join(f.root, 'compiler.c');
+    fs.writeFileSync(src, `#include <stdio.h>\n#include <stdlib.h>\nint main(int argc, char **argv) { puts("${text}"); return argc == 2 ? (system(argv[1]) != 0) : 0; }\n`);
+    ok(run('cc', [src, '-o', file], {}));
+  }
+  for (const name of ['llc', 'ld.lld']) {
+    const src = path.join(f.root, `${name}.c`);
+    fs.writeFileSync(src, `#include <stdio.h>\nint main(void) { puts("coloured ${name} executed"); return 0; }\n`);
+    ok(run('cc', [src, '-o', path.join(f.patchedBin, name)], {}));
+    fs.copyFileSync(f.officialOpt, path.join(bin, name));
+  }
+  f.env.CJCJ_PATCHED_LLVM_BIN = f.patchedBin;
+  console.log(`COMPILER_FIXTURE official=${hash(f.compiler)} rebuilt=${hash(f.rebuiltCompiler)} opt=${hash(f.patchedOpt)} llc=${hash(path.join(f.patchedBin, 'llc'))} lld=${hash(path.join(f.patchedBin, 'ld.lld'))}`);
+  return f;
+}
+
+test('optimizer publication leaves the official optimizer byte-identical', t => {
+  const f = optimizerFixture(t); const before = hash(f.officialOpt);
+  const archive = path.join(f.root, 'opt.gz');
+  fs.writeFileSync(archive, gzipSync(fs.readFileSync(f.patchedOpt)));
+  const output = path.join(f.root, 'published-llvm/bin/opt');
+  const result = run(process.execPath, ['ci/install_patched_llvm_tool.mjs', f.officialOpt, archive, hash(f.patchedOpt), output], f.env);
+  const after = hash(f.officialOpt);
+  console.log(`TARGET_ASSERT_EXECUTED official_opt_unchanged before=${before} after=${after}`);
+  assert.equal(after, before, 'official optimizer must remain byte-identical');
+  ok(result);
+  assert.equal(hash(output), hash(f.patchedOpt));
+  assert.equal(fs.readFileSync(f.env.GITHUB_ENV, 'utf8'), `CJCJ_PATCHED_LLVM_BIN=${path.dirname(output)}\n`);
+});
+
+test('official compiler may execute its official optimizer', t => {
+  const f = optimizerFixture(t); const result = audit(f, f.compiler, [f.officialOpt]);
+  console.log(`TARGET_ASSERT_EXECUTED official_opt_allowed rc=${result.status} ${result.stdout}`);
+  ok(result);
+  assert.match(result.stdout, /official optimizer executed/);
+});
+
+test('official compiler cannot execute coloured optimizer through a shell', t => {
+  const f = optimizerFixture(t); const result = audit(f, f.compiler, [f.patchedOpt]);
+  console.log(`TARGET_ASSERT_EXECUTED official_opt_rejected rc=${result.status} ${result.stdout}`);
+  assert.equal(result.status, 86);
+  assert.match(result.stdout, /OFFICIAL_TOOLCHAIN_MISMATCH .*official_parent=1/);
+  assert.doesNotMatch(result.stdout, /coloured optimizer executed/);
+});
+
+test('overwritten SDK optimizer is rejected by hash under the official compiler', t => {
+  const f = optimizerFixture(t); fs.copyFileSync(f.patchedOpt, f.officialOpt);
+  const result = audit(f, f.compiler, [f.officialOpt]);
+  console.log(`TARGET_ASSERT_EXECUTED overwritten_opt_rejected rc=${result.status} ${result.stdout}`);
+  assert.equal(result.status, 86);
+  assert.match(result.stdout, /OFFICIAL_TOOLCHAIN_MISMATCH .*official_parent=1/);
+});
+
+test('rebuilt compiler may explicitly execute the isolated optimizer', t => {
+  const f = optimizerFixture(t); const result = audit(f, f.rebuiltCompiler, [f.patchedOpt]);
+  console.log(`TARGET_ASSERT_EXECUTED rebuilt_opt_allowed rc=${result.status} ${result.stdout}`);
+  ok(result);
+  assert.match(result.stdout, /coloured optimizer executed/);
+  assert.match(result.stdout, /LLVM_TOOL_LOAD .*official_parent=0/);
+});
+
+
+for (const name of ['llc', 'ld.lld']) {
+  test(`${name} publication leaves the official tool byte-identical`, t => {
+    const f = optimizerFixture(t);
+    const host = path.join(f.sdk, 'third_party/llvm/bin', name);
+    const target = path.join(f.patchedBin, name);
+    const before = hash(host); const archive = path.join(f.root, `${name}.gz`);
+    fs.writeFileSync(archive, gzipSync(fs.readFileSync(target)));
+    const output = path.join(f.root, 'published-llvm/bin', name);
+    const result = run(process.execPath, ['ci/install_patched_llvm_tool.mjs', host, archive, hash(target), output], f.env);
+    console.log(`TARGET_ASSERT_EXECUTED ${name}_unchanged before=${before} after=${hash(host)}`);
+    assert.equal(hash(host), before, 'official tool must remain byte-identical');
+    ok(result);
+    assert.equal(hash(output), hash(target));
+  });
+  test(`official compiler cannot execute isolated ${name}`, t => {
+    const f = optimizerFixture(t); const tool = path.join(f.patchedBin, name);
+    const result = audit(f, f.compiler, [tool]);
+    console.log(`TARGET_ASSERT_EXECUTED ${name}_rejected rc=${result.status} ${result.stdout}`);
+    assert.equal(result.status, 86);
+    assert.match(result.stdout, /OFFICIAL_TOOLCHAIN_MISMATCH .*official_parent=1/);
+  });
+}
+
+// The release packager is the second consumer of the isolated tuple: it clones
+// the official SDK into a stage, so the stage starts with the official backend
+// bytes. The published cjcj SDK must carry the coloured tuple its own runtime
+// and std were built with, and the official SDK it was cloned from must stay
+// untouched -- these cases pin both halves, so dropping either side turns red.
+function releaseFixture(t) {
+  const f = optimizerFixture(t);
+  f.stageLlvmBin = path.join(f.root, 'stage/third_party/llvm/bin');
+  fs.mkdirSync(f.stageLlvmBin, {recursive: true});
+  f.manifestValues = new Map();
+  for (const name of ['llc', 'opt', 'ld.lld']) {
+    const official = path.join(f.sdk, 'third_party/llvm/bin', name);
+    if (!fs.existsSync(official)) fs.copyFileSync(f.officialOpt, official);
+    fs.copyFileSync(official, path.join(f.stageLlvmBin, name));
+    f.manifestValues.set(name === 'ld.lld' ? 'LLD_SHA256' : `${name.toUpperCase()}_SHA256`, hash(path.join(f.patchedBin, name)));
+  }
+  f.install = () => installIsolatedLlvmTuple({
+    tupleBin: f.patchedBin, packagedLlvmBin: f.stageLlvmBin, lldTool: 'ld.lld',
+    manifestValues: f.manifestValues, verify: async () => {},
+  });
+  return f;
+}
+
+test('release stage receives the coloured tuple from the isolated directory', async t => {
+  const f = releaseFixture(t);
+  const installed = await f.install();
+  // `stagedSha256` is the digest the installer read back off the stage after its
+  // own rename -- the same value the packaging lineage audit re-reads. Assert on
+  // that, then confirm it independently against the isolated source bytes.
+  console.log(`TARGET_ASSERT_EXECUTED stage_tuple count=${installed.length} ${installed.map(i => `${i.tool}:${i.stagedSha256.slice(0, 12)}`).join(' ')}`);
+  assert.equal(installed.length, 3);
+  for (const tool of installed) {
+    assert.equal(tool.stagedSha256, hash(path.join(f.patchedBin, tool.tool)),
+      `staged ${tool.tool} must be the coloured tuple, not the inherited official tool`);
+    assert.equal(tool.stagedSha256, hash(tool.destination));
+    assert.ok(tool.matches, `installer must report ${tool.tool} as matching the manifest`);
+  }
+});
+
+test('release packaging leaves the official SDK backend byte-identical', async t => {
+  const f = releaseFixture(t);
+  const names = ['llc', 'opt', 'ld.lld'];
+  const before = new Map(names.map(n => [n, hash(path.join(f.sdk, 'third_party/llvm/bin', n))]));
+  // Presence-only existence check first, so a missing tool cannot be mistaken for
+  // an unchanged one and mask the target identity assertion below.
+  for (const name of names) {
+    assert.ok(fs.existsSync(path.join(f.sdk, 'third_party/llvm/bin', name)), `official ${name} must exist`);
+  }
+  await f.install();
+  for (const [name, digest] of before) {
+    const now = hash(path.join(f.sdk, 'third_party/llvm/bin', name));
+    console.log(`TARGET_ASSERT_EXECUTED official_${name}_unchanged before=${digest.slice(0, 12)} after=${now.slice(0, 12)}`);
+    assert.equal(now, digest, `packaging must not overwrite the official ${name}`);
+    assert.notEqual(now, hash(path.join(f.patchedBin, name)),
+      `the official ${name} must not have become the coloured tool`);
+  }
+});
+
+test('release packaging reports a staged tool that does not reach the manifest digest', async t => {
+  const f = releaseFixture(t);
+  // A stage whose tools are not the tuple is the exact state the previous
+  // in-place design left behind: the packager must surface the per-tool verdict
+  // as data the caller asserts on, not bury it in a throw.
+  const installed = await installIsolatedLlvmTuple({
+    tupleBin: f.patchedBin, packagedLlvmBin: f.stageLlvmBin, lldTool: 'ld.lld',
+    manifestValues: f.manifestValues, verify: async () => {},
+  });
+  const verdicts = installed.map(i => `${i.tool}=${i.matches ? 'match' : 'MISMATCH'}`).join(' ');
+  console.log(`TARGET_ASSERT_EXECUTED stage_tuple_verdicts ${verdicts}`);
+  for (const tool of installed) {
+    assert.equal(tool.stagedSha256, tool.expectedSha256,
+      `${tool.tool}: the installer read the stage back as the manifest digest`);
+    assert.equal(tool.stagedSha256, hash(tool.destination),
+      `${tool.tool}: the reported digest must describe the staged file`);
+  }
+});
+
+test('release packaging refuses a tuple whose bytes do not match the manifest', async t => {
+  const f = releaseFixture(t);
+  f.manifestValues.set('OPT_SHA256', hash(f.officialOpt));
+  await assert.rejects(f.install(), /opt sha256 .* does not match manifest/);
+  console.log('TARGET_ASSERT_EXECUTED tuple_sha_mismatch_rejected');
+});
+
+test('release packaging refuses to guess when the isolated directory is absent', async t => {
+  const f = releaseFixture(t);
+  await assert.rejects(installIsolatedLlvmTuple({
+    tupleBin: '', packagedLlvmBin: f.stageLlvmBin, lldTool: 'ld.lld',
+    manifestValues: f.manifestValues, verify: async () => {},
+  }), /isolated LLVM tuple directory is required/);
+  console.log('TARGET_ASSERT_EXECUTED tuple_dir_required');
+});

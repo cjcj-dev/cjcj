@@ -35,12 +35,10 @@ from pathlib import Path
 import sys
 p = Path(sys.argv[1])
 text = p.read_text()
-old = '  link-option = ""'
-if text.count(old) != 1:
-    raise SystemExit("expected one empty CHIR link-option in the private copy")
-p.write_text(text.replace(old,
-    '  link-option = "runtime_shim/cjselfhost_llvmshim.o '
-    '${CANGJIE_HOME}/third_party/llvm/lib/libLLVM-15.so -lstdc++"', 1))
+expected = ('  link-option = "runtime_shim/cjselfhost_llvmshim.o '
+    '${CANGJIE_HOME}/third_party/llvm/lib/libLLVM-15.so -lstdc++"')
+if text.count(expected) != 1:
+    raise SystemExit("expected the CHIR shim/LLVM link-option in the private copy")
 PY
 
 export PATH="$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:/usr/bin:/bin"
@@ -60,7 +58,7 @@ date -Ins > "$evidence_dir/build.before"
 uptime > "$evidence_dir/uptime.before"
 cd "$source_dir"
 set +e
-taskset -c "$cores" timeout -k 10 1800 cjpm test -g -i -j 8 \
+taskset -c "$cores" timeout -k 10 1800 cjpm test -g -i -j "$(nproc)" \
     --member=packages/chir --filter "$test_filter" --target-dir "$target_dir" \
     --no-color > "$evidence_dir/test.log" 2>&1
 rc=$?

@@ -100,9 +100,11 @@ if [ "${1:-}" = env ]; then
   exit 0
 fi
 
+RUNTIME_PIN=''
 FROM='' TO='' ROLE='' LLC='' OPT='' LLVM_SO='' LLVM_TUPLE='' CJPM='' CJC='' RUNTIME='' RUNTIME_COMMIT='' TARGET_TUPLE='' STD='' VERIFY_HOST_RT='' COLOUR_RUNTIME='' HOST_RUNTIME='' LINKNAME='' FORCE=0
 while [ $# -gt 0 ]; do
   case "$1" in
+    --runtime-pin) RUNTIME_PIN="${2:?}"; shift 2;;
     --from) FROM="${2:?}"; shift 2;;
     --to) TO="${2:?}"; shift 2;;
     --host) ROLE=host; shift;;
@@ -129,6 +131,7 @@ while [ $# -gt 0 ]; do
     *) die "未知参数 $1";;
   esac
 done
+node "$(dirname "${BASH_SOURCE[0]}")/../runtime-pin.mjs" --shell "${RUNTIME_PIN:-$(dirname "${BASH_SOURCE[0]}")/../runtime_pin.env}" >/dev/null || die "runtime selection rejected"
 [ -n "$FROM" ] || die "缺 --from"
 [ -n "$TO" ]   || die "缺 --to"
 [ -n "$ROLE" ] || die "缺 --host 或 --target —— ⭐ 这一条不许省：宿主/目标的着色要求相反"
@@ -349,7 +352,10 @@ if [ -n "$LLVM_SO" ]; then
   install_llvm_so "$LLVM_SO"
 fi
 swap_all cjpm "$CJPM" cjpm
-swap_all cjc  "$CJC"  cjc
+if [ -n "$CJC" ]; then
+  python3 "$(dirname "${BASH_SOURCE[0]}")/compiler_identity.py" "$TO" --install "$CJC" \
+    || die 'compiler producer installation failed'
+fi
 # ⭐⭐⭐ 同轮元组：runtime 的 .so 装在 runtime/lib/<tuple>，.a 装在 lib/<tuple>
 #   CMake 真值：runtime/CMakeLists.txt:518 (shared→runtime/lib) · :799 (static→lib)
 #   Driver 真值：Linux_CJNATIVE.cj:104 静态链 -l:libcangjie-runtime.a（-L 先 lib/ 再 runtime/lib）
@@ -714,7 +720,7 @@ done
 
 echo "[lock] SDK.lock.json + sdk_verify"
 _SDK_VERIFY="$(dirname "${BASH_SOURCE[0]}")/sdk_verify.py"
-_PIN="$(dirname "${BASH_SOURCE[0]}")/../runtime_pin.env"
+_PIN="${RUNTIME_PIN:-$(dirname "${BASH_SOURCE[0]}")/../runtime_pin.env}"
 _IDENT=$(mktemp)
 _CJC_SHA=''
 if [ -f "$TO/bin/cjcj-stage1" ]; then
@@ -747,7 +753,7 @@ payload = {
 }
 open(path, "w").write(json.dumps(payload))
 PY
-python3 "$_SDK_VERIFY" --sdk "$TO" --role "$ROLE" --runtime-pin "$_PIN" --identities "$_IDENT" --target-tuple "$TARGET_TUPLE" --write-lock \
+python3 "$_SDK_VERIFY" --sdk "$TO" --from "$BASE" --role "$ROLE" --runtime-pin "$_PIN" --identities "$_IDENT" --target-tuple "$TARGET_TUPLE" --write-lock \
   || { rm -f "$_IDENT"; die "sdk_verify 拒绝本枚 SDK（见 SDK-VERIFY-FAIL）"; }
 rm -f "$_IDENT"
 echo "SDK-BUILD-OK role=$ROLE from=$BASE to=$TO mask=$MASK"

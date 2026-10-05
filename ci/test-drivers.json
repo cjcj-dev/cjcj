@@ -1,0 +1,596 @@
+[
+  {
+    "file": "test/array_copy_size/check.py",
+    "kind": "fixture",
+    "consumers": [
+      "test/array_copy_size/run.sh"
+    ],
+    "reason": "loaded or run as a child process by test/array_copy_size/run.sh; not an entry point on its own (a python module)"
+  },
+  {
+    "file": "test/array_copy_size/run.sh",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions an SDK environment (CANGJIE_HOME); a shell script, and no other file in test names it"
+  },
+  {
+    "file": "test/cjoffi_probe/generate_read_surface.py",
+    "kind": "driver",
+    "reason": "manual driver: nothing under .github/workflows names it and it needs a process entry point inputs only; a process entry point, and no other file in test names it"
+  },
+  {
+    "file": "test/deprecated_diagnostic/run.py",
+    "kind": "driver",
+    "reason": "manual driver: nothing under .github/workflows names it and it needs a python module inputs only; a python module, and no other file in test names it"
+  },
+  {
+    "file": "test/deprecated_diagnostic/tables.py",
+    "kind": "driver",
+    "reason": "manual driver: nothing under .github/workflows names it and it needs a python module inputs only; a python module, and no other file in test names it"
+  },
+  {
+    "file": "test/does_not_throw/check.py",
+    "kind": "fixture",
+    "consumers": [
+      "test/does_not_throw/run.py"
+    ],
+    "reason": "loaded or run as a child process by test/does_not_throw/run.py; not an entry point on its own (a process entry point)"
+  },
+  {
+    "file": "test/does_not_throw/run.py",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions an SDK environment (CANGJIE_HOME) and an SDK directory on the command line and a stage1 compiler built from this tree and a private LLVM tool build; documented invocation `python3 test/does_not_throw/run.py --compiler /path/to/cjcj-stage1 --sdk /path/to/sdk-host --out /path/to/evidence`"
+  },
+  {
+    "file": "test/does_not_throw/unit.sh",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions an SDK environment (CANGJIE_HOME) and cjpm from a paired SDK; documented invocation `python3 test/does_not_throw/run.py --compiler /path/to/cjcj-stage1 --sdk /path/to/sdk-host --out /path/to/evidence`"
+  },
+  {
+    "file": "test/extension_def_type/build.sh",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions an SDK environment (CANGJIE_HOME) and cjpm from a paired SDK; documented invocation `bash test/extension_def_type/build.sh /absolute/product/tree /absolute/test-elf /absolute/assertions/libLLVM-15.so /absolute/assertions/cjselfhost_llv`"
+  },
+  {
+    "file": "test/fast_math_ir/check.py",
+    "kind": "fixture",
+    "consumers": [
+      "test/fast_math_ir/run.sh"
+    ],
+    "reason": "loaded or run as a child process by test/fast_math_ir/run.sh; not an entry point on its own (a process entry point)"
+  },
+  {
+    "file": "test/fast_math_ir/run.sh",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions an SDK environment (CANGJIE_HOME) and a private LLVM tool build; a shell script, and no other file in test names it"
+  },
+  {
+    "file": "test/generic_this_payload/check.py",
+    "kind": "fixture",
+    "consumers": [
+      "test/generic_this_payload/run.sh"
+    ],
+    "reason": "loaded or run as a child process by test/generic_this_payload/run.sh; not an entry point on its own (a process entry point)"
+  },
+  {
+    "file": "test/generic_this_payload/run.sh",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions an SDK environment (CANGJIE_HOME); documented invocation `bash test/generic_this_payload/run.sh /absolute/cjcj-stage1 /absolute/evidence`"
+  },
+  {
+    "file": "test/get_type_by_mangled_name/check.py",
+    "kind": "fixture",
+    "consumers": [
+      "test/get_type_by_mangled_name/run.sh"
+    ],
+    "reason": "loaded or run as a child process by test/get_type_by_mangled_name/run.sh; not an entry point on its own (a process entry point)"
+  },
+  {
+    "file": "test/get_type_by_mangled_name/run.sh",
+    "kind": "driver",
+    "reason": "manual driver: nothing under .github/workflows names it and it needs a shell script inputs only; a shell script, and no other file in test names it"
+  },
+  {
+    "file": "test/heap_string_literals/check_init_ir.py",
+    "kind": "driver",
+    "reason": "manual driver: nothing under .github/workflows names it and it needs a python module inputs only; a python module, and no other file in test names it"
+  },
+  {
+    "file": "test/heap_string_literals/check_ir.py",
+    "kind": "fixture",
+    "consumers": [
+      "test/heap_string_literals/run.sh"
+    ],
+    "reason": "loaded or run as a child process by test/heap_string_literals/run.sh; not an entry point on its own (a process entry point)"
+  },
+  {
+    "file": "test/heap_string_literals/exceptions/run.sh",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions an SDK environment (CANGJIE_HOME) and clang and a linkable toolchain; a shell script, and no other file in test names it"
+  },
+  {
+    "file": "test/heap_string_literals/library/execute.sh",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions an SDK environment (CANGJIE_HOME); a shell script, and no other file in test names it"
+  },
+  {
+    "file": "test/heap_string_literals/library/identities.py",
+    "kind": "fixture",
+    "consumers": [
+      "test/heap_string_literals/library/run.sh"
+    ],
+    "reason": "loaded or run as a child process by test/heap_string_literals/library/run.sh; not an entry point on its own (a python module)"
+  },
+  {
+    "file": "test/heap_string_literals/library/run.sh",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions an SDK environment (CANGJIE_HOME) and binutils nm and clang and a linkable toolchain; a shell script, and no other file in test names it"
+  },
+  {
+    "file": "test/heap_string_literals/library/verify_failure.py",
+    "kind": "driver",
+    "reason": "manual driver: nothing under .github/workflows names it and it needs a python module inputs only; a python module, and no other file in test names it"
+  },
+  {
+    "file": "test/heap_string_literals/run.sh",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions an SDK environment (CANGJIE_HOME) and binutils readelf and binutils nm and clang and a linkable toolchain; a shell script, and no other file in test names it"
+  },
+  {
+    "file": "test/heap_string_literals/unload/run.sh",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions an SDK environment (CANGJIE_HOME) and clang and a linkable toolchain; a shell script, and no other file in test names it"
+  },
+  {
+    "file": "test/ios_lto_gate/check.py",
+    "kind": "driver",
+    "reason": "manual driver: nothing under .github/workflows names it and it needs a process entry point inputs only; a process entry point, and no other file in test names it"
+  },
+  {
+    "file": "test/lambda_alias_cache/run.sh",
+    "kind": "driver",
+    "reason": "manual driver: nothing under .github/workflows names it and it needs a shell script inputs only; a shell script, and no other file in test names it"
+  },
+  {
+    "file": "test/macho_lto_staticlib/run.py",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions an SDK environment (CANGJIE_HOME) and an SDK directory on the command line and a private LLVM tool build; documented invocation `python3 test/macho_lto_staticlib/run.py \\`"
+  },
+  {
+    "file": "test/macro_instance_stack/run_arms.sh",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions an SDK environment (CANGJIE_HOME) and cjpm from a paired SDK; a shell script, and no other file in test names it"
+  },
+  {
+    "file": "test/named_struct_factory/build.sh",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions an SDK environment (CANGJIE_HOME) and cjpm from a paired SDK; documented invocation `bash test/named_struct_factory/build.sh /absolute/product/tree /absolute/test-elf /absolute/assertions/libLLVM-15.so /absolute/assertions/cjselfhost_l`"
+  },
+  {
+    "file": "test/reduce_multi_type_subst/run.py",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions an SDK environment (CANGJIE_HOME) and an SDK directory on the command line; a process entry point, and no other file in test names it"
+  },
+  {
+    "file": "test/runtime_param_layout/compare.py",
+    "kind": "fixture",
+    "consumers": [
+      "test/runtime_param_layout/run.sh"
+    ],
+    "reason": "loaded or run as a child process by test/runtime_param_layout/run.sh; not an entry point on its own (a python module)"
+  },
+  {
+    "file": "test/runtime_param_layout/generate.py",
+    "kind": "fixture",
+    "consumers": [
+      "test/runtime_param_layout/run.sh"
+    ],
+    "reason": "loaded or run as a child process by test/runtime_param_layout/run.sh; not an entry point on its own (a process entry point)"
+  },
+  {
+    "file": "test/runtime_param_layout/run.sh",
+    "kind": "driver",
+    "reason": "manual driver: nothing under .github/workflows names it and it needs a shell script inputs only; documented invocation `bash test/runtime_param_layout/run.sh \"$candidate_repo\" \"$runtime_header\" \\`"
+  },
+  {
+    "file": "test/soft_heap_config/check_transport.py",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions a stage1 compiler built from this tree and a private LLVM tool build; a process entry point, and no other file in test names it"
+  },
+  {
+    "file": "test/soft_heap_config/run.py",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions a stage1 compiler built from this tree; a process entry point, and no other file in test names it"
+  },
+  {
+    "file": "test/store_strength/check_elf.py",
+    "kind": "driver",
+    "reason": "manual driver: nothing under .github/workflows names it and it needs a process entry point inputs only; a process entry point, and no other file in test names it"
+  },
+  {
+    "file": "test/store_strength/check_ir.py",
+    "kind": "fixture",
+    "consumers": [
+      "test/store_strength/run.sh",
+      "test/store_strength/run_aggregate.sh",
+      "test/store_strength/test_checker.py"
+    ],
+    "reason": "loaded or run as a child process by test/store_strength/run.sh, test/store_strength/run_aggregate.sh, test/store_strength/test_checker.py; not an entry point on its own (a process entry point)"
+  },
+  {
+    "file": "test/store_strength/run.sh",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions an SDK environment (CANGJIE_HOME); a shell script, and no other file in test names it"
+  },
+  {
+    "file": "test/store_strength/run_aggregate.sh",
+    "kind": "driver",
+    "reason": "manual driver: nothing under .github/workflows names it and it needs a shell script inputs only; a shell script, and no other file in test names it"
+  },
+  {
+    "file": "test/store_strength/setup_sdk.py",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions a stage1 compiler built from this tree; a process entry point, and no other file in test names it"
+  },
+  {
+    "file": "test/store_strength/test_checker.py",
+    "kind": "driver",
+    "reason": "manual driver: nothing under .github/workflows names it and it needs a process entry point inputs only; a process entry point, and no other file in test names it"
+  },
+  {
+    "file": "test/unreachable_diag/check.py",
+    "kind": "driver",
+    "reason": "manual driver: nothing under .github/workflows names it and it needs a python module inputs only; a python module, and no other file in test names it"
+  },
+  {
+    "file": "test/unreachable_successors/check.py",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions an SDK environment (CANGJIE_HOME) and a stage1 compiler built from this tree; a process entry point, and no other file in test names it"
+  },
+  {
+    "file": "tests/android_api/run.py",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions a stage1 compiler built from this tree; a process entry point, and no other file in tests names it"
+  },
+  {
+    "file": "tests/bchir_constant/compare.py",
+    "kind": "driver",
+    "reason": "manual driver: nothing under .github/workflows names it and it needs a process entry point inputs only; a process entry point, and no other file in tests names it"
+  },
+  {
+    "file": "tests/bchir_constant/run.py",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions an SDK environment (CANGJIE_HOME) and an SDK directory on the command line; a process entry point, and no other file in tests names it"
+  },
+  {
+    "file": "tests/bchir_constant/verify.py",
+    "kind": "driver",
+    "reason": "manual driver: nothing under .github/workflows names it and it needs a process entry point inputs only; a process entry point, and no other file in tests names it"
+  },
+  {
+    "file": "tests/bchir_constant/verify_declarations.py",
+    "kind": "driver",
+    "reason": "manual driver: nothing under .github/workflows names it and it needs a process entry point inputs only; a process entry point, and no other file in tests names it"
+  },
+  {
+    "file": "tests/check_expression_dispatch/run.py",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions an SDK environment (CANGJIE_HOME) and an SDK directory on the command line and cjpm from a paired SDK; documented invocation `python3 tests/check_expression_dispatch/run.py --build-tree /path/to/tree --sdk /path/to/sdk --out /path/to/evidence/dispatch`"
+  },
+  {
+    "file": "tests/check_other_expression_dispatch/run.py",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions an SDK environment (CANGJIE_HOME) and an SDK directory on the command line and cjpm from a paired SDK; documented invocation `python3 tests/check_other_expression_dispatch/run.py --build-tree TREE --sdk SDK --out OUT`"
+  },
+  {
+    "file": "tests/check_terminator_dispatch/run.py",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions an SDK environment (CANGJIE_HOME) and an SDK directory on the command line and cjpm from a paired SDK; documented invocation `python3 tests/check_terminator_dispatch/run.py --build-tree /path/to/tree --sdk /path/to/sdk --out /path/to/evidence`"
+  },
+  {
+    "file": "tests/chir_builder/compare.py",
+    "kind": "driver",
+    "reason": "manual driver: nothing under .github/workflows names it and it needs a process entry point inputs only; a process entry point, and no other file in tests names it"
+  },
+  {
+    "file": "tests/chir_builder/decoded_compare.py",
+    "kind": "fixture",
+    "consumers": [
+      "tests/vtable_attributes/run.py"
+    ],
+    "reason": "loaded or run as a child process by tests/vtable_attributes/run.py; not an entry point on its own (a process entry point)"
+  },
+  {
+    "file": "tests/chir_builder/instrument_head_insertion.py",
+    "kind": "driver",
+    "reason": "manual driver: nothing under .github/workflows names it and it needs a process entry point inputs only; a process entry point, and no other file in tests names it"
+  },
+  {
+    "file": "tests/chir_builder/serializer_queue.py",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions a stage1 compiler built from this tree; a process entry point, and no other file in tests names it"
+  },
+  {
+    "file": "tests/chir_builder/verify_insertion_arms.py",
+    "kind": "driver",
+    "reason": "manual driver: nothing under .github/workflows names it and it needs a process entry point inputs only; a process entry point, and no other file in tests names it"
+  },
+  {
+    "file": "tests/const_eval/instrument.py",
+    "kind": "driver",
+    "reason": "manual driver: nothing under .github/workflows names it and it needs a process entry point inputs only; a process entry point, and no other file in tests names it"
+  },
+  {
+    "file": "tests/const_eval/run.py",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions an SDK environment (CANGJIE_HOME) and an SDK directory on the command line; a process entry point, and no other file in tests names it"
+  },
+  {
+    "file": "tests/const_eval/verify.py",
+    "kind": "driver",
+    "reason": "manual driver: nothing under .github/workflows names it and it needs a process entry point inputs only; a process entry point, and no other file in tests names it"
+  },
+  {
+    "file": "tests/cpointer_stride/run.sh",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions an SDK environment (CANGJIE_HOME); documented invocation `bash tests/cpointer_stride/run.sh TARGET_SDK COLOURED_RUNTIME_LIB_DIR OUTPUT_DIR`"
+  },
+  {
+    "file": "tests/debug_aggregate_copy/run.py",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions an SDK environment (CANGJIE_HOME) and a stage1 compiler built from this tree; documented invocation `cjHeapSize=32GB python3 tests/debug_aggregate_copy/run.py \\`"
+  },
+  {
+    "file": "tests/devirtualization/run.py",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions a stage1 compiler built from this tree; a process entry point, and no other file in tests names it"
+  },
+  {
+    "file": "tests/driver_hash_style/run.py",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions an SDK environment (CANGJIE_HOME) and an SDK directory on the command line and cjpm from a paired SDK; documented invocation `python3 tests/driver_hash_style/run.py --tree \"$PWD\" --sdk \"$CANGJIE_HOME\" --out /path/to/evidence`"
+  },
+  {
+    "file": "tests/dynamic_dispatch_uses/run.py",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions a stage1 compiler built from this tree; a process entry point, and no other file in tests names it"
+  },
+  {
+    "file": "tests/enum_const_cast/verify.py",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions a stage1 compiler built from this tree; documented invocation `python3 tests/enum_const_cast/verify.py --compiler /path/to/cjcj-stage1 --out /path/to/evidence`"
+  },
+  {
+    "file": "tests/expression_families/classify_chir.py",
+    "kind": "driver",
+    "reason": "manual driver: nothing under .github/workflows names it and it needs a process entry point inputs only; a process entry point, and no other file in tests names it"
+  },
+  {
+    "file": "tests/expression_families/compare_chir.py",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions cjpm from a paired SDK; a process entry point, and no other file in tests names it"
+  },
+  {
+    "file": "tests/expression_families/compare_semantic.py",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions cjpm from a paired SDK; a process entry point, and no other file in tests names it"
+  },
+  {
+    "file": "tests/expression_families/verify.py",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions a stage1 compiler built from this tree; a process entry point, and no other file in tests names it"
+  },
+  {
+    "file": "tests/common_builtin_reuse/run.py",
+    "kind": "driver",
+    "reason": "manual driver: requires a product stage1 compiler and its paired SDK; runs common-part CJO/CHIR compiler inputs"
+  },
+  {
+    "file": "tests/ffi_common_specific/run.sh",
+    "kind": "driver",
+    "reason": "manual driver: nothing under .github/workflows names it and it needs a shell script inputs only; a shell script, and no other file in tests names it"
+  },
+  {
+    "file": "tests/instantiate_value/run.py",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions an SDK environment (CANGJIE_HOME) and an SDK directory on the command line and cjpm from a paired SDK; documented invocation `python3 tests/instantiate_value/run.py --build-tree /path/to/product-tree \\`"
+  },
+  {
+    "file": "tests/instantiate_value/stage.py",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions an SDK environment (CANGJIE_HOME) and an SDK directory on the command line and a stage1 compiler built from this tree; documented invocation `python3 tests/instantiate_value/run.py --build-tree /path/to/product-tree \\`"
+  },
+  {
+    "file": "tests/invisible_extend_member/run.py",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions an SDK environment (CANGJIE_HOME) and an SDK directory on the command line and a stage1 compiler built from this tree; a process entry point, and no other file in tests names it"
+  },
+  {
+    "file": "tests/java_aftertypecheck/cache_identity.py",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions a stage1 compiler built from this tree; a process entry point, and no other file in tests names it"
+  },
+  {
+    "file": "tests/java_aftertypecheck/run.py",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions a stage1 compiler built from this tree; a process entry point, and no other file in tests names it"
+  },
+  {
+    "file": "tests/java_javagen/run.py",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions a stage1 compiler built from this tree; a process entry point, and no other file in tests names it"
+  },
+  {
+    "file": "tests/lto_reflection/check.py",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions an SDK environment (CANGJIE_HOME) and a stage1 compiler built from this tree; a process entry point, and no other file in tests names it"
+  },
+  {
+    "file": "tests/macro_host_runtime/run.py",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions a stage1 compiler built from this tree; documented invocation `python3 tests/macro_host_runtime/run.py \\`"
+  },
+  {
+    "file": "tests/macro_runtime_path/run.py",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions an SDK environment (CANGJIE_HOME) and an SDK directory on the command line and a stage1 compiler built from this tree; documented invocation `python3 tests/macro_runtime_path/run.py --compiler /path/to/cjcj-stage1 \\`"
+  },
+  {
+    "file": "tests/mangle_direct_ast/cut.py",
+    "kind": "driver",
+    "reason": "manual driver: nothing under .github/workflows names it; it rewrites one product line in an isolated source copy (TREE argument) for the cut arms described in tests/mangle_direct_ast/README.md; a process entry point"
+  },
+  {
+    "file": "tests/mangle_direct_ast/gc.py",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions the baseline and candidate compiler roots it takes on the command line; it runs the fixed #666 single-package experiment; a process entry point"
+  },
+  {
+    "file": "tests/mangle_direct_ast/lambda.py",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions an SDK environment (CANGJIE_HOME) and a stage1 compiler built from this tree; it observes lambda identifiers in product RAW CHIR; a process entry point"
+  },
+  {
+    "file": "tests/mangle_direct_ast/phases.py",
+    "kind": "driver",
+    "reason": "manual driver: nothing under .github/workflows names it and it needs only a retained keep directory produced by gc.py; a process entry point"
+  },
+  {
+    "file": "tests/mangle_direct_ast/run.py",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions an SDK environment (CANGJIE_HOME) and a stage1 compiler built from this tree; it compiles real inputs and inspects CJO declarations and LLVM definitions; a process entry point"
+  },
+  {
+    "file": "tests/mangle_task_ownership/generate_inputs.py",
+    "kind": "driver",
+    "reason": "manual driver: nothing under .github/workflows names it and it needs a process entry point inputs only; a process entry point, and no other file in tests names it"
+  },
+  {
+    "file": "tests/mangle_task_ownership/run.py",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions an SDK environment (CANGJIE_HOME) and an SDK directory on the command line and a stage1 compiler built from this tree and a private LLVM tool build; a process entry point, and no other file in tests names it"
+  },
+  {
+    "file": "tests/mangle_task_ownership/single_package.py",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions an SDK environment (CANGJIE_HOME) and a private LLVM tool build; a process entry point, and no other file in tests names it"
+  },
+  {
+    "file": "tests/memory_expression_dispatch/run.py",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions an SDK environment (CANGJIE_HOME) and an SDK directory on the command line and cjpm from a paired SDK; a process entry point, and no other file in tests names it"
+  },
+  {
+    "file": "tests/nested_array_heap/run.py",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions an SDK environment (CANGJIE_HOME) and an SDK directory on the command line and a stage1 compiler built from this tree; a process entry point, and no other file in tests names it"
+  },
+  {
+    "file": "tests/objc_builtin_construction/run.py",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions a stage1 compiler built from this tree; documented invocation `python3 tests/objc_builtin_construction/run.py \\`"
+  },
+  {
+    "file": "tests/objcmirror_inline/run.py",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions an SDK environment (CANGJIE_HOME) and an SDK directory on the command line; documented invocation `python3 tests/objcmirror_inline/run.py --tree /path/to/candidate \\`"
+  },
+  {
+    "file": "tests/property_annotation/verify.py",
+    "kind": "driver",
+    "reason": "manual driver: nothing under .github/workflows names it and it needs a process entry point inputs only; documented invocation `python3 verify.py output.chir`"
+  },
+  {
+    "file": "tests/rawarray_debug/check.py",
+    "kind": "fixture",
+    "consumers": [
+      "tests/rawarray_debug/run.py"
+    ],
+    "reason": "loaded or run as a child process by tests/rawarray_debug/run.py; not an entry point on its own (a process entry point)"
+  },
+  {
+    "file": "tests/rawarray_debug/run.py",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions an SDK environment (CANGJIE_HOME) and a stage1 compiler built from this tree and binutils readelf; a process entry point, and no other file in tests names it"
+  },
+  {
+    "file": "tests/reflection_metadata/run.py",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions an SDK environment (CANGJIE_HOME) and an SDK directory on the command line and a stage1 compiler built from this tree and a private LLVM tool build; a process entry point, and no other file in tests names it"
+  },
+  {
+    "file": "tests/removed_path_option/run.py",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions a stage1 compiler built from this tree; a process entry point, and no other file in tests names it"
+  },
+  {
+    "file": "tests/sealed_hierarchy/incremental.py",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions an SDK environment (CANGJIE_HOME) and an SDK directory on the command line and a stage1 compiler built from this tree; a process entry point, and no other file in tests names it"
+  },
+  {
+    "file": "tests/sealed_hierarchy/run.py",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions an SDK environment (CANGJIE_HOME) and an SDK directory on the command line and a stage1 compiler built from this tree; a process entry point, and no other file in tests names it"
+  },
+  {
+    "file": "tests/sret_reuse/compare.py",
+    "kind": "driver",
+    "reason": "manual driver: nothing under .github/workflows names it and it needs a process entry point inputs only; a process entry point, and no other file in tests names it"
+  },
+  {
+    "file": "tests/sret_reuse/verify.py",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions a stage1 compiler built from this tree; a process entry point, and no other file in tests names it"
+  },
+  {
+    "file": "tests/stage1_memory/check.py",
+    "kind": "driver",
+    "reason": "manual driver: nothing under .github/workflows names it and it needs a process entry point inputs only; a process entry point, and no other file in tests names it"
+  },
+  {
+    "file": "tests/temp_file_signal_safe/allocations.gdb.py",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions a gdb with the python command interface; documented invocation `python3 tests/temp_file_signal_safe/run.py --tree \"$PWD\" --sdk \"$CANGJIE_HOME\" --out /root/<lane>/evidence/green`"
+  },
+  {
+    "file": "tests/temp_file_signal_safe/reinit_signal.gdb.py",
+    "kind": "fixture",
+    "consumers": [
+      "tests/temp_file_signal_safe/reinit_signal.py"
+    ],
+    "reason": "loaded or run as a child process by tests/temp_file_signal_safe/reinit_signal.py; not an entry point on its own (a python module)"
+  },
+  {
+    "file": "tests/temp_file_signal_safe/reinit_signal.py",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions a gdb with the python command interface and an SDK environment (CANGJIE_HOME) and an SDK directory on the command line; documented invocation `python3 tests/temp_file_signal_safe/run.py --tree \"$PWD\" --sdk \"$CANGJIE_HOME\" --out /root/<lane>/evidence/green`"
+  },
+  {
+    "file": "tests/temp_file_signal_safe/run.py",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions an SDK environment (CANGJIE_HOME) and an SDK directory on the command line and a stage1 compiler built from this tree; documented invocation `python3 tests/temp_file_signal_safe/run.py --tree \"$PWD\" --sdk \"$CANGJIE_HOME\" --out /root/<lane>/evidence/green`"
+  },
+  {
+    "file": "tests/trivial_statics/check.py",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions an SDK environment (CANGJIE_HOME) and a stage1 compiler built from this tree; documented invocation `python3 tests/trivial_statics/check.py \\`"
+  },
+  {
+    "file": "tests/varray_location/check.py",
+    "kind": "fixture",
+    "consumers": [
+      "tests/varray_location/run.py"
+    ],
+    "reason": "loaded or run as a child process by tests/varray_location/run.py; not an entry point on its own (a process entry point)"
+  },
+  {
+    "file": "tests/varray_location/run.py",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions an SDK environment (CANGJIE_HOME) and an SDK directory on the command line and a stage1 compiler built from this tree; documented invocation `python3 tests/varray_location/run.py --compiler /absolute/cjcj-stage1 \\`"
+  },
+  {
+    "file": "tests/vtable_attributes/run.py",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions a stage1 compiler built from this tree; a process entry point, and no other file in tests names it"
+  }
+]

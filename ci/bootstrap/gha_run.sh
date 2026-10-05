@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-stage=${1:?stage0|stage1}
+stage=${1:?stage0|stage1-initial-std|stage1-std|stage1-compiler}
 root=${GITHUB_WORKSPACE:?}
 : "${CJCJ_BOOTSTRAP_BASE:?}"
 : "${CJCJ_BOOTSTRAP_HOST_LLVM_SO:?}"
@@ -23,6 +23,7 @@ export STAGE0_CACHE_ROOT="${STAGE0_CACHE_ROOT:-${CANGJIE_WORKSPACE:?}/stage0depo
 exec bash "$root/ci/bootstrap/bootstrap.sh" \
   --work "${CANGJIE_WORKSPACE:?}/bootstrap-work" \
   --src "$root" \
+  --runtime-pin "${CJCJ_BOOTSTRAP_RUNTIME_PIN:?}" \
   --cjcj-sha "$CJCJ_BOOTSTRAP_CJCJ_SHA" \
   --stdsrc "$CANGJIE_WORKSPACE/cangjie_runtime/stdlib" \
   --cpp-src "$CJCJ_BOOTSTRAP_CPP_SRC" \

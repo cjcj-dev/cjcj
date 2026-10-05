@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
+import {assertGitObjectProof, assertRemoteObjectProof} from './git-object-proof.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -746,30 +747,75 @@ test('package paths and archive roots match package.py', async () => {
 // local branch, and nothing said so -- the build simply kept using the older
 // pin, and the jobserver on the compiler side had no token source.
 //
-// Skipped without network rather than failing: an offline run should not turn
-// red over something it cannot check.
+// A failed or interrupted probe is not a successful reachability check.
 test('the cjpm pin names an object the remote actually has', {timeout: 60_000}, () => {
   const {CJPM_FORK_URL: url, CJPM_FORK_REF: ref} = cjpmPin;
   assert.match(ref, /^[0-9a-f]{40}$/, 'CJPM_FORK_REF must be a full sha');
 
-  const fetchUrl = resolveSourceMirror(url);
-  const probe = spawnSync('git', sourceLsRemoteArguments(url, 'HEAD'), {
-    encoding: 'utf8', timeout: 30_000,
-  });
-  if (probe.status !== 0) {
-    console.error(`SKIP pin reachability: cannot reach ${fetchUrl}`);
-    return;
-  }
+  assertRemoteObjectProof(url, ref);
 
-  // `git fetch --depth 1 <url> <sha>` is exactly what tools.mjs runs; --dry-run
-  // resolves the object without writing anything into this repository.
-  const fetched = spawnSync('git', sourceFetchArguments(url, ref, {dryRun: true}), {
-    encoding: 'utf8', timeout: 45_000,
+});
+
+const context = {operation: 'fetch', url: 'controlled-local-remote', ref: 'controlled-pin'};
+function rejects(result, pattern) {
+  assert.throws(() => assertGitObjectProof(result, context), error => {
+    assert.match(error.message, pattern);
+    assert.match(error.message, /status=.*signal=.*error=.*stderr=/);
+    assert.doesNotMatch(error.message, /is not reachable/);
+    return true;
   });
-  assert.equal(
-    fetched.status, 0,
-    `CJPM_FORK_REF ${ref} is not reachable on ${url}.\n`
-    + 'The commit is probably still on a local branch. Push it before pinning it.\n'
-    + `git said: ${(fetched.stderr || '').trim()}`,
-  );
+}
+test('Git proof timeout preserves ETIMEDOUT and does not claim missing object', () => {
+  const result = spawnSync(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {timeout: 100, encoding: 'utf8'});
+  assert.equal(result.error?.code, 'ETIMEDOUT');
+  rejects(result, /Git timed out/);
+});
+test('Git proof startup failure preserves ENOENT', () => {
+  const result = spawnSync('/nonexistent-cjcj-824-git', [], {encoding: 'utf8'});
+  assert.equal(result.error?.code, 'ENOENT');
+  rejects(result, /failed to start or complete/);
+});
+test('Git proof signal termination preserves SIGTERM', () => {
+  const result = spawnSync(process.execPath, ['-e', 'process.kill(process.pid, "SIGTERM")'], {encoding: 'utf8'});
+  assert.equal(result.signal, 'SIGTERM');
+  rejects(result, /terminated by signal/);
+});
+test('Git proof missing exit status cannot pass', () => {
+  rejects({status: null, signal: null, stderr: ''}, /no exit status/);
+});
+test('Git proof local remote accepts existing object and rejects missing object', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'git-proof-'));
+  const git = args => spawnSync('git', args, {cwd: root, encoding: 'utf8', timeout: 5000});
+  try {
+    assert.equal(git(['init', '--bare', 'remote.git']).status, 0);
+    assert.equal(git(['init', 'source']).status, 0);
+    assert.equal(git(['-C', 'source', '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--allow-empty', '-m', 'fixture']).status, 0);
+    const ref = git(['-C', 'source', 'rev-parse', 'HEAD']).stdout.trim();
+    assert.equal(git(['-C', 'source', 'push', '../remote.git', 'HEAD:refs/heads/main']).status, 0);
+    assert.equal(git(['--git-dir=remote.git', 'symbolic-ref', 'HEAD', 'refs/heads/main']).status, 0);
+    assert.equal(git(['init', 'consumer']).status, 0);
+    const remote = path.join(root, 'remote.git');
+    assertRemoteObjectProof(remote, ref, {cwd: path.join(root, 'consumer')});
+    assert.throws(() => assertRemoteObjectProof(remote, '0123456789012345678901234567890123456789', {cwd: path.join(root, 'consumer')}), /is not reachable/);
+    const probe = git(['ls-remote', 'remote.git']);
+    assertGitObjectProof(probe, {...context, operation: 'ls-remote'});
+    const fetch = sha => git(['-C', 'consumer', 'fetch', '--dry-run', '--depth', '1', '../remote.git', sha]);
+    assertGitObjectProof(fetch(ref), {...context, ref});
+    const missing = fetch('0123456789012345678901234567890123456789');
+    assert.notEqual(missing.status, 0);
+    assert.equal(missing.error, undefined);
+    assert.equal(missing.signal, null);
+    assert.throws(() => assertGitObjectProof(missing, context), /is not reachable/);
+    assert.throws(() => assertGitObjectProof({...probe, status: 128}, {...context, operation: 'ls-remote'}), /remote preflight failed/);
+  } finally {
+    fs.rmSync(root, {recursive: true, force: true});
+  }
+});
+
+test('Git proof actual entry rejects failed local preflight without claiming missing object', () => {
+  assert.throws(() => assertRemoteObjectProof('/nonexistent-cjcj-824-remote', '0123456789012345678901234567890123456789'), error => {
+    assert.match(error.message, /remote preflight failed/);
+    assert.doesNotMatch(error.message, /is not reachable/);
+    return true;
+  });
 });
