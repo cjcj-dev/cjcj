@@ -15,6 +15,49 @@ def sha(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def classify(text, rc, fixture):
+    """Keep diagnostic identity, execution status and location independent."""
+    text = re.sub(r'\x1b\[[0-9;]*m', '', text)
+    if rc not in (0, 1) or re.search(r'Internal Compiler Error|Segmentation fault|Assertion.*failed|terminate called', text, re.I):
+        return 'INTERNAL_OR_EXECUTION_FAILURE', []
+    if re.search(r"invalid option:|Invalid options\.|'main' is missing", text):
+        return 'ENTRY_FAILURE', []
+    if rc == 0:
+        return 'COMPILE_SUCCESS', []
+    blocks = [b for b in re.split(r'(?m)(?=^(?:error|warning):)', text)
+              if b.startswith('error:')]
+    targets = []
+    for block in blocks:
+        if not block.startswith("error: expected 'const' expression\n"):
+            continue
+        normal = ("expressions of type 'Array' are not constant" in block and
+                  re.search(re.escape(fixture) + r':\d+:\d+:', block))
+        zero = (re.search(r'(?m)^\s*==> :0:0:', block) and
+                re.search(r"note: consider add type annotation 'VArray<Int64, \$\d+>' to use value array", block))
+        if normal or zero:
+            targets.append(block)
+    count = re.search(r'(\d+) errors? generated, (\d+) errors? printed\.', text)
+    if not targets or len(targets) != len(blocks) or not count or any(int(v) != len(targets) for v in count.groups()):
+        return 'UNKNOWN_FAIL', []
+    bad = any(re.search(r'(?m)^\s*==> :0:0:', b) for b in targets)
+    return ('TARGET_CONST_BAD_LOCATION' if bad else 'TARGET_CONST'), targets
+
+
+def const_checks(text, rc, fixture, name):
+    classification, targets = classify(text, rc, fixture)
+    if name == 'control':
+        checks = {'ordinary_const_accepted': classification == 'COMPILE_SUCCESS'}
+    else:
+        locations = [re.search(re.escape(fixture) + r':(\d+):(\d+):', b) for b in targets]
+        checks = {
+            'array_rejected_as_nonconstant': classification in ('TARGET_CONST', 'TARGET_CONST_BAD_LOCATION'),
+            'diagnostic_on_call_site': bool(locations) and all(
+                p is not None and int(p[1]) == 9 and int(p[2]) > 0 for p in locations),
+            'no_internal_error': classification != 'INTERNAL_OR_EXECUTION_FAILURE',
+        }
+    return classification, checks
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--observe-failures', action='store_true',
@@ -57,32 +100,13 @@ def main():
             result = subprocess.run(cmd, cwd=out, env=env, stdout=log,
                                     stderr=subprocess.STDOUT, timeout=180)
         text = re.sub(r'\x1b\[[0-9;]*m', '', (out / 'compile.log').read_text())
-        entry_failure = (result.returncode not in (0, 1) or
-                         'invalid option:' in text or 'Invalid options.' in text or
-                         'Internal Compiler Error' in text or "'main' is missing" in text or
-                         (result.returncode == 1 and not re.search(r'(?m)^error:.*\n(?:.|\n)*' + re.escape(fixture.name) + r':\d+:\d+', text)))
-        checks = {}
-        if name == 'control':
-            checks['ordinary_const_accepted'] = result.returncode == 0
-        else:
-            # Separate verdict and location assertions: neither masks the other.
-            diagnostics = re.split(r'(?m)(?=^(?:error|warning):)', text)
-            array_diagnostics = [d for d in diagnostics
-                                 if d.startswith("error: expected 'const' expression")
-                                 and "expressions of type 'Array' are not constant" in d]
-            checks['array_rejected_as_nonconstant'] = (
-                result.returncode == 1 and bool(array_diagnostics))
-            # Bind the location to the Array error, not a note or unrelated error.
-            locations = [re.search(re.escape(fixture.name) + r':(\d+):(\d+)', d)
-                         for d in array_diagnostics]
-            checks['diagnostic_on_call_site'] = bool(locations) and all(
-                p is not None and int(p[1]) == 9 and int(p[2]) > 0 for p in locations)
-            checks['no_internal_error'] = 'Internal Compiler Error' not in text
+        classification, checks = const_checks(text, result.returncode, fixture.name, name)
+        entry_failure = classification in ('ENTRY_FAILURE', 'INTERNAL_OR_EXECUTION_FAILURE', 'UNKNOWN_FAIL')
         for assertion, passed in checks.items():
             print(f'ASSERT {name}.{assertion} {"PASS" if passed else "FAIL"}', flush=True)
         return name, dict(command=cmd, compile_rc=result.returncode,
                           fixture_sha256=sha(fixture), wall=time.monotonic()-start,
-                          entry_failure=entry_failure,
+                          entry_failure=entry_failure, classification=classification,
                           checks=checks)
 
     # Validate a real process result before expanding the authorized set.

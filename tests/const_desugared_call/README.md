@@ -37,3 +37,25 @@ symbol definitions, or native entry function are needed. Each case explicitly
 writes its CHIR in its own output directory. The ordinary scalar control must
 return zero through this complete path. Missing-main diagnostics are entry
 failures in every arm, including baseline and deliberate cuts.
+
+Diagnostic classification is separate from the target assertions. A compiler
+exit of 1 without a recognized diagnostic is UNKNOWN_FAIL and stops the batch.
+Invalid options and missing main remain ENTRY_FAILURE; ICE and abnormal exit
+remain INTERNAL_OR_EXECUTION_FAILURE. The zero-position Array diagnostic is
+TARGET_CONST_BAD_LOCATION only when the same error block contains the exact
+const error, `==> :0:0:` and the VArray<Int64, $N> note, with generated/printed
+error counts matching all error blocks. It passes the rejection identity check
+and fails the call-site position check. Notes from another error or warning
+cannot supply this identity. Normal diagnostics still require the Array hint
+and fixture position. Successful baseline/cut compilations still fail the two
+target assertions, and every assertion is printed independently.
+
+The Array-specific CopyBasicInfo has a separate comments-fidelity obligation;
+its location fields are also copied by the common InstantiateExpr tail. The
+four const fixtures do not establish Array cloning. A clone marker test cannot
+currently be admitted through this compiler CLI: enableAddCommentToAst defaults
+to false (Option.cj:325), has no enabling assignment, and --dump-ast only sets
+dumpAST (OptionAction.cj:212). CompileStrategy.cj:419 passes that false value to
+the parser; ParseDecl.cj:127 consequently skips AttachCommentToFile. An AST dump
+consumer alone does not prove comment production. No clone fixture or product
+execution is supplied for this blocked obligation.
