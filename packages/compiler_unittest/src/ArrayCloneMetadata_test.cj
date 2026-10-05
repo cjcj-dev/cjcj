@@ -51,6 +51,16 @@ private func recordCloneCheck(failures: ArrayList<String>, name: String, passed:
     if (!passed) { failures.add(name) }
 }
 
+private func isCoreArray(ty: Ty): Bool {
+    if (let Some(structTy) <- (ty as StructTy)) {
+        if (let Some(decl) <- structTy.declPtr) {
+            println("OBSERVE arrayDecl=${decl.fullPackageName}.${decl.identifier.Val()} id=${decl.objectId}")
+            return ty.IsStructArray() && decl.fullPackageName == "std.core" && decl.identifier == "Array"
+        }
+    }
+    return false
+}
+
 @Test
 public class ArrayCloneMetadataTest {
     @TestCase
@@ -141,9 +151,9 @@ public class ArrayCloneMetadataTest {
             source.rightSquarePos.line == 6 && source.rightSquarePos.column == 5)
         recordCloneCheck(failures, "clone_position", samePosition(source.begin, clone.begin) && samePosition(source.end, clone.end) &&
             samePosition(source.leftSquarePos, clone.leftSquarePos) && samePosition(source.rightSquarePos, clone.rightSquarePos))
-        recordCloneCheck(failures, "template_type", sourceTy.IsArray() && sourceTy.typeArgs.size == 1 &&
+        recordCloneCheck(failures, "template_type", isCoreArray(sourceTy) && sourceTy.typeArgs.size == 1 &&
             sourceTy.typeArgs[0].kind == TypeKind.TYPE_GENERICS && sourceTy.typeArgs[0].name == "T")
-        recordCloneCheck(failures, "clone_type", cloneTy.IsArray() && cloneTy.typeArgs.size == 1 &&
+        recordCloneCheck(failures, "clone_type", isCoreArray(cloneTy) && cloneTy.typeArgs.size == 1 &&
             cloneTy.typeArgs[0].kind == TypeKind.TYPE_INT64)
         recordCloneCheck(failures, "children", source.children.size == 1 && clone.children.size == 1 &&
             clone.children[0].TyKind() == TypeKind.TYPE_INT64 &&
