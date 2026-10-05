@@ -1119,6 +1119,7 @@ public class PartialInstantiation {
 
     private static func InstantiateArrayLit(source: ArrayLit, visitor: (Node, Node) -> Unit): ArrayLit {
         let target = ArrayLit()
+        CopyBasicInfo(source, target)
         target.leftSquarePos = source.leftSquarePos
         for (child in source.children) {
             target.children.add(InstantiateExpr(child, visitor))
