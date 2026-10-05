@@ -77,13 +77,16 @@ def main():
                           fixture_sha256=sha(fixture), wall=time.monotonic()-start,
                           checks=checks)
 
-    # Validate one real product input before expanding the authorized set.
+    # Validate a real process result before expanding the authorized set.
+    # Verdict failures are the observations in baseline/cut arms; a crash stops
+    # dependent cases and remains a failure to execute.
     record['cases'] = {}
     for name in ['empty', 'nonempty', 'generic', 'control']:
         key, case = check(name)
         record['cases'][key] = case
-        if name == 'empty' and not all(case['checks'].values()):
-            record['not_run'] = ['nonempty', 'generic', 'control']
+        if case['compile_rc'] not in (0, 1):
+            record['not_run'] = [n for n in ['empty', 'nonempty', 'generic', 'control']
+                                 if n not in record['cases']]
             break
     record['uptime_after'] = subprocess.check_output(['uptime'], text=True)
     record['rc'] = int(not all(all(case['checks'].values())
