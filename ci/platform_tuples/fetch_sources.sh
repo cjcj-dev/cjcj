@@ -26,6 +26,9 @@ fetch_exact() {
     test "$(git -C "$dest" rev-parse HEAD)" = "$sha"
 }
 
+# Validate the private pair before fetching even LLVM.
+bash "$repo_root/ci/fetch-llvm-runtime.sh" --check-input "$root/paired-runtime"
+
 fetch_exact "${LLVM_URL:?}" "${LLVM_SHA:?}" "$root/llvm-project"
 bash "$repo_root/ci/fetch-llvm-runtime.sh" "$root/paired-runtime"
 # The cjcj-llvm fork (in-tree demangler, getUNDEF fix) predates the 7-operand
