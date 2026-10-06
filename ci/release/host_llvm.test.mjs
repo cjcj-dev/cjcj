@@ -18,15 +18,20 @@ for (const downloadFails of [false, true]) {
       + (downloadFails ? 'exit 23\n' : 'cat "$TRANSPORT_ARCHIVE"\n'), {mode: 0o755});
     env.PATH = `${bin}:${env.PATH}`;
     env.TRANSPORT_ARCHIVE = archive;
+    env.BOOTSTRAP_ARCHIVES_PIN = path.join(root, 'archive-pin.json');
+    fs.writeFileSync(env.BOOTSTRAP_ARCHIVES_PIN, JSON.stringify({version: 1, artifacts: {
+      456: {repository: 'cjcj-dev/cjcj', asset: 789, prerelease: true,
+        release_sha256: crypto.createHash('sha256').update(fs.readFileSync(archive)).digest('hex')},
+    }}));
     env.TRANSPORT_ARGS = path.join(root, 'transport.args');
     env.CJCJ_BOOTSTRAP_HOST_LLVM_WORK = path.join(root, 'work');
     delete env.CJCJ_BOOTSTRAP_HOST_LLVM_ARTIFACT;
     const output = path.join(root, 'host-result.json');
     const result = run(['--shell-output', output]);
-    assert.equal(fs.readFileSync(env.TRANSPORT_ARGS, 'utf8'), 'api repos/cjcj-dev/cjcj/actions/artifacts/456/zip\n');
+    assert.equal(fs.readFileSync(env.TRANSPORT_ARGS, 'utf8'), 'api repos/cjcj-dev/cjcj/releases/assets/789 -H Accept: application/octet-stream\n');
     if (downloadFails) {
       assert.equal(result.status, 1);
-      assert.match(result.stderr, /ARTIFACT_DOWNLOAD_FAILED artifact=456 status=23/);
+      assert.match(result.stderr, /PERSISTENT_ARCHIVE_DOWNLOAD_FAILED artifact=456 status=23/);
       assert.equal(fs.existsSync(output), false);
     } else {
       assert.equal(result.status, 0, result.stderr);

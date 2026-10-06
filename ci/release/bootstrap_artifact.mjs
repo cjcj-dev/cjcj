@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
-import {downloadArtifact} from './download_artifact.mjs';
+import {downloadPinned} from './download_pinned.mjs';
 
 export function bootstrapArtifact(selected, repository, artifactId, work, label) {
   if (selected) return selected;
@@ -11,7 +11,7 @@ export function bootstrapArtifact(selected, repository, artifactId, work, label)
   fs.mkdirSync(work, {recursive: true});
   const scratch = fs.mkdtempSync(path.join(work, `${label.toLowerCase()}-`));
   const archive = path.join(scratch, 'artifact.zip');
-  downloadArtifact(repository, artifactId, archive);
+  downloadPinned(repository, artifactId, archive);
   const artifact = path.join(scratch, 'artifact');
   const extracted = spawnSync('unzip', ['-q', archive, '-d', artifact], {stdio: 'inherit'});
   if (extracted.error) throw extracted.error;
