@@ -35,16 +35,21 @@ function fixture(fn) {
 for (const entry of ['cli', 'bootstrap']) {
   test(`${entry}: persistent producer bytes reach the consumer`, () => fixture(({run}) => {
     const result = run(entry);
-    assert.equal(result.status, 0, result.stderr);
+    const file = path.join(result.destination, 'manifest.json');
+    const observed = {rc: result.status, bytes: entry === 'cli'
+      ? (fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null)
+      : (/CONSUMER=(.*)/.exec(result.stdout)?.[1] ?? null)};
+    console.log(`TARGET ${entry} acceptance ${JSON.stringify(observed)}`);
+    assert.deepEqual(observed, {rc: 0, bytes: 'reviewed producer bytes'},
+      'verified producer bytes must reach consumer');
     assert.match(result.stdout, /PERSISTENT_ARCHIVE_VERIFIED artifact=456 asset=789 sha256=[a-f0-9]{64}/);
-    assert.equal(entry === 'cli' ? fs.readFileSync(path.join(result.destination, 'manifest.json'), 'utf8')
-      : /CONSUMER=(.*)/.exec(result.stdout)?.[1], 'reviewed producer bytes');
     console.log(`ASSERT ${entry} verified producer bytes reached consumer`);
   }));
   test(`${entry}: tampered sha256 pin rejects before extraction; restored pin passes`, () => fixture(({pin, save, run}) => {
     const original = pin.artifacts[456].release_sha256;
     pin.artifacts[456].release_sha256 = 'f'.repeat(64); save();
     const rejected = run(entry);
+    console.log(`TARGET ${entry} pin rejection rc=${rejected.status}`);
     assert.notEqual(rejected.status, 0, 'tampered sha256 must reject');
     assert.match(rejected.stderr, /bootstrap digest mismatch: artifact-456.zip/);
     if (entry === 'cli') assert.deepEqual(fs.readdirSync(rejected.destination), []);
@@ -57,6 +62,7 @@ for (const entry of ['cli', 'bootstrap']) {
   test(`${entry}: tampered asset bytes reject at the reviewed sha256`, () => fixture(({zip, run}) => {
     fs.appendFileSync(zip, 'changed producer bytes');
     const result = run(entry);
+    console.log(`TARGET ${entry} asset rejection rc=${result.status}`);
     assert.notEqual(result.status, 0, 'tampered asset must reject');
     assert.match(result.stderr, /bootstrap digest mismatch: artifact-456.zip/);
     console.log(`ASSERT ${entry} corrupted producer rejected at target digest`);
