@@ -45,6 +45,7 @@ for (const field of ['COLOUR_RT_RUN_ID', 'COLOUR_RT_RUN_ATTEMPT', 'RUNTIME_REF']
     const result = run();
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /COLOUR_RT_MANIFEST_MISMATCH/);
+    console.log(`ASSERT runtime manifest ${field} mismatch rejected by product consumer`);
   }));
 }
 for (const rel of runtimeFiles) {
