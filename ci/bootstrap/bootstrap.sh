@@ -230,11 +230,12 @@ assert_path() {
 }
 
 cmd() {
-  local rc
+  local rc started=$SECONDS
   echo "CMD $*"
   [ "$DRY" -eq 1 ] && return 0
-  eval "$*" && return 0
-  rc=$?
+  if eval "$*"; then rc=0; else rc=$?; fi
+  echo "STEP_RESULT stage=$STAGE rc=$rc wall=$((SECONDS-started))"
+  [ "$rc" -eq 0 ] && return 0
   RED "BOOTSTRAP-FAIL [$STAGE] 命令失败 rc=$rc: $*"
   exit "$rc"
 }
@@ -795,7 +796,9 @@ stage1_std() {
 }
 
 stage1_compiler() {
+  local started=$SECONDS
   STAGE=stage1-compiler
+  echo "STAGE_BEGIN stage=stage2-compiler epoch=$(date +%s)"
   echo "OUTPUT cjcj-stage2=$out"
   echo "OUTPUT stdlib-stage2=$std"
   # The compiler links std statically: consume the completed std from its job.
@@ -817,6 +820,7 @@ stage1_compiler() {
   # It does not rewrite $out. Spec: cjpm `build -g` (default off) lands in
   # target/debug; std RelWithDebInfo already passes -g via AddCangjieSource.cmake.
   stage2_forensic
+  echo "STAGE_RESULT stage=stage2-compiler rc=0 wall=$((SECONDS-started))"
 }
 
 
