@@ -12,11 +12,13 @@ function pin(file) {
   return Object.fromEntries(fs.readFileSync(path.join(repo, 'ci', file), 'utf8')
     .split(/\r?\n/).filter(line => /^[A-Z_]+=/.test(line)).map(line => line.split('=')));
 }
-export async function checkCodegenRuntimeLayout(sourceRoot = path.join(repo, 'target/layout-sources'), runtimePin = process.env.CJCJ_BOOTSTRAP_RUNTIME_PIN) {
+export async function checkCodegenRuntimeLayout(sourceRoot = path.join(repo, 'target/layout-sources'), runtimePin = process.env.CJCJ_BOOTSTRAP_RUNTIME_PIN, llvmSha) {
   const llvm = pin('llvm_pin.env');
+  llvmSha ??= llvm.LLVM_SHA;
+  if (!/^[0-9a-f]{40}$/.test(llvmSha)) throw new Error('LLVM source must be an explicit 40-digit SHA');
   const runtime = await resolveRuntimeSource(process.env, runtimePin);
   const sources = [
-    ['llvm', llvm.LLVM_URL, llvm.LLVM_SHA],
+    ['llvm', llvm.LLVM_URL, llvmSha],
     ['runtime', runtime.sourceUrl, runtime.runtimeRef],
   ];
   // Reuse only commit-addressed sources. The checker reads git objects, never
@@ -28,9 +30,9 @@ export async function checkCodegenRuntimeLayout(sourceRoot = path.join(repo, 'ta
     if (present.exitCode !== 0) await checkoutExactSource(url, dest, sha);
   }));
   await run(['bash', path.join(repo, 'ci/check-llvm-runtime-abi.sh').replaceAll('\\', '/'),
-    '--llvm-repo', path.join(sourceRoot, 'llvm'), '--llvm-ref', llvm.LLVM_SHA,
+    '--llvm-repo', path.join(sourceRoot, 'llvm'), '--llvm-ref', llvmSha,
     '--runtime-repo', path.join(sourceRoot, 'runtime'), '--runtime-ref', runtime.runtimeRef]);
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  await checkCodegenRuntimeLayout(process.argv[2], process.argv[3]);
+  await checkCodegenRuntimeLayout(process.argv[2], process.argv[3], process.argv[4]);
 }
