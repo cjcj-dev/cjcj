@@ -32,6 +32,13 @@ STAGE1_HOST_RUNNER="${STAGE1_HOST_RUNNER:-$(dirname "${BASH_SOURCE[0]}")/stage1_
 STAGE0_CACHE_ROOT="${STAGE0_CACHE_ROOT:-/root/stage0depot}"
 BUILD_TMPDIR=''
 STAGE=init
+STAGE1_ELF=''
+STAGE1_SHA256=''
+HOST_SDK=''
+RUNTIME_SHA=''
+CHECK_ONLY=0
+HOST_IDENTITIES=''
+HOST_IDENTITIES_SHA256=''
 WANT=all
 DRY=0
 # Host tuple directories and the multiarch loader path, from the machine this
@@ -54,7 +61,7 @@ host_tuple_init() {
 BUILD_HOME="${HOME:-/root}"
 
 usage() {
-  echo 'bootstrap.sh --work DIR --src CJCJ_ROOT --cjcj-sha 40HEX --stdsrc STDLIB --cpp-src CANGJIE_CPP_ROOT --host-llvm-so libLLVM-15.so --host-llvm-sha256 HEX --colour-llvm-so libLLVM-15.so --colour-llvm-sha256 HEX --ast-support FILE --ast-support-sha256 HEX --colour-tuple DIR --colour-llvm-sha 40HEX --colour-rt DIR --host-rt DIR [--stage stage0|stage1|stage1-initial-std|stage1-std|stage1-compiler|all] [--stage1-heap 20GB] [--dry-run]'
+  echo 'bootstrap.sh --work DIR --src CJCJ_ROOT --cjcj-sha 40HEX --stdsrc STDLIB --cpp-src CANGJIE_CPP_ROOT --host-llvm-so libLLVM-15.so --host-llvm-sha256 HEX --colour-llvm-so libLLVM-15.so --colour-llvm-sha256 HEX --ast-support FILE --ast-support-sha256 HEX --colour-tuple DIR --colour-llvm-sha 40HEX --colour-rt DIR --host-rt DIR [--stage supplied-stage1|stage0|stage1|stage1-initial-std|stage1-std|stage1-compiler|all] [--stage1-heap 20GB] [--dry-run]'
 }
 
 sha256() {
@@ -224,7 +231,8 @@ cmd() {
   [ "$DRY" -eq 1 ] && return 0
   eval "$*" && return 0
   rc=$?
-  die "命令失败 rc=$rc: $*"
+  RED "BOOTSTRAP-FAIL [$STAGE] 命令失败 rc=$rc: $*"
+  exit "$rc"
 }
 
 prepare_build_env() {
@@ -848,9 +856,66 @@ stage2_forensic() {
   fi
 }
 
+# Supplied-stage1 uses exactly the existing initial std, SDK and compiler
+# recipes. There is no stage0 rebuild, second std rebuild, or stage3 here.
+supplied_stage1_validate() {
+  local value actual
+  for value in STAGE1_ELF STAGE1_SHA256 HOST_SDK RUNTIME_SHA HOST_IDENTITIES HOST_IDENTITIES_SHA256; do
+    [ -n "${!value}" ] || die "缺少参数 $value (supplied-stage1)"
+  done
+  [[ "$RUNTIME_SHA" =~ ^[0-9a-f]{40}$ ]] || die 'runtime SHA must be 40 lowercase hex digits'
+  actual=$(node "$(dirname "${BASH_SOURCE[0]}")/../runtime-pin.mjs" --shell "$RUNTIME_PIN") || die 'runtime selection rejected'
+  printf '%s\n' "$actual" | /usr/bin/grep -Fx "RUNTIME_REF='$RUNTIME_SHA'" >/dev/null || die 'runtime SHA differs from runtime pin'
+  [ -z "${LD_LIBRARY_PATH:-}" ] || die 'mixed domain: inherited LD_LIBRARY_PATH must be empty'
+  [ -z "${CANGJIE_HOME:-}" ] || die 'mixed domain: inherited CANGJIE_HOME must be empty'
+  assert_expected_sha host-identities "$HOST_IDENTITIES" "$HOST_IDENTITIES_SHA256"
+  export STAGE1_HOST_IDENTITIES="$HOST_IDENTITIES"
+  HOST_SDK=$(realpath -e "$HOST_SDK") || die 'missing host SDK'
+  WORK=$(realpath -m "$WORK")
+  case "$WORK" in /|/root|/root/sdks|/root/sdks/*|/root/.cjv|/root/.cjv/*) die 'private work directory required';; esac
+  case "$HOST_SDK/" in "$WORK/"*) die 'host SDK must be outside work directory';; esac
+  [ ! -e "$WORK" ] || die 'supplied-stage1 refuses an existing work directory'
+  [ -x "$STAGE1_ELF" ] || die 'stage1 ELF is not executable'
+  readelf -h "$STAGE1_ELF" >/dev/null || die 'stage1 input must be ELF'
+  assert_expected_sha stage1 "$STAGE1_ELF" "$STAGE1_SHA256"
+  assert_expected_sha host-llvm "$HOST_LLVM_SO" "$HOST_LLVM_SHA256"
+  assert_expected_sha colour-llvm "$COLOUR_LLVM_SO" "$COLOUR_LLVM_SHA256"
+  assert_expected_sha ast-support "$AST_SUPPORT" "$AST_SUPPORT_SHA256"
+  assert_colour_tuple "$COLOUR_TUPLE" "$COLOUR_LLVM_SHA"
+  # The assembler verifies the runtime commit and colour against these inputs.
+  strings "$(runtime_dir "$CRT")/libcangjie-runtime.so" | /usr/bin/grep -Fx "CJRT-COMMIT:$RUNTIME_SHA" >/dev/null || die 'runtime artifact commit differs from explicit SHA'
+  [ -f "$STDSRC/build.py" ] || die 'missing std source build.py'
+  [ -x "$HOST_SDK/tools/bin/cjpm" ] || die 'missing host cjpm'
+  echo 'SUPPLIED-STAGE1-INPUTS-OK (identity/domain checks only; no compilation)'
+}
+
+supplied_stage1() {
+  local out std sdk compiler previous_std
+  cmd "mkdir -p $(printf '%q' "$WORK")"
+  cmd "cp -aL $(printf '%q' "$HOST_SDK") $(printf '%q' "$WORK/sdk-stage0")"
+  cmd "install -m755 $(printf '%q' "$STAGE1_ELF") $(printf '%q' "$WORK/cjcj-stage1")"
+  printf '%s\n' "$WORK/cjcj-stage1" > "$WORK/.cjcj-stage1"
+  stage1_inputs
+  stage1_initial_std
+  # The full std just produced is the stage2 compiler's static-link input.
+  std="$previous_std"
+  stage1_compiler
+  STAGE=stage2-smoke
+  printf 'main(): Int64 { return 0 }\n' > "$WORK/main.cj"
+  cmd "env -i HOME=$(printf '%q' "$BUILD_HOME") CANGJIE_HOME=$(printf '%q' "$sdk") PATH=$(printf '%q' "$sdk/bin:/usr/bin:/bin") LD_LIBRARY_PATH=$(printf '%q' "$(sdk_ld_path "$sdk" "$CRT")") $(printf '%q' "$out") $(printf '%q' "$WORK/main.cj") -o $(printf '%q' "$WORK/main")"
+  cmd "env -i PATH=/usr/bin:/bin LD_LIBRARY_PATH=$(printf '%q' "$(runtime_dir "$CRT"):$sdk/lib/$HOST_TUPLE") $(printf '%q' "$WORK/main")"
+}
+
 main() {
   while [ $# -gt 0 ]; do
     case "$1" in
+      --host-identities) HOST_IDENTITIES="${2:?}"; shift 2;;
+      --host-identities-sha256) HOST_IDENTITIES_SHA256="${2:?}"; shift 2;;
+      --stage1-elf) STAGE1_ELF="${2:?}"; shift 2;;
+      --stage1-sha256) STAGE1_SHA256="${2:?}"; shift 2;;
+      --host-sdk) HOST_SDK="${2:?}"; shift 2;;
+      --runtime-sha) RUNTIME_SHA="${2:?}"; shift 2;;
+      --check-only) CHECK_ONLY=1; shift;;
       --work) WORK="${2:?}"; shift 2;;
       --runtime-pin) RUNTIME_PIN="${2:?}"; shift 2;;
       --src) SRC="${2:?}"; shift 2;;
@@ -881,7 +946,7 @@ main() {
   for value in WORK SRC CJCJ_SHA STDSRC HOST_LLVM_SO HOST_LLVM_SHA256 COLOUR_LLVM_SO COLOUR_LLVM_SHA256 AST_SUPPORT AST_SUPPORT_SHA256 COLOUR_TUPLE COLOUR_LLVM_SHA CRT HRT; do
     eval "[ -n \"\${$value}\" ]" || die "缺少参数 $value"
   done
-  case "$WANT" in stage0|stage1|stage1-initial-std|stage1-std|stage1-compiler|all) ;; *) die '--stage 只能是 stage0|stage1|stage1-initial-std|stage1-std|stage1-compiler|all';; esac
+  case "$WANT" in supplied-stage1|stage0|stage1|stage1-initial-std|stage1-std|stage1-compiler|all) ;; *) die '--stage 只能是 stage0|stage1|stage1-initial-std|stage1-std|stage1-compiler|all';; esac
   case "$WANT" in
     stage0|all) [ -n "$CPP_SRC" ] || die '缺少参数 CPP_SRC';;
   esac
@@ -892,7 +957,15 @@ main() {
   host_tuple_init
   assert_cjcj_sha
   assert_cjcj_root
+  if [ "$WANT" = supplied-stage1 ]; then
+    [ "$DRY" -eq 0 ] || die 'use --check-only for supplied-stage1 static validation'
+    supplied_stage1_validate
+    [ "$CHECK_ONLY" -eq 0 ] || return 0
+  elif [ "$CHECK_ONLY" -eq 1 ]; then
+    die '--check-only requires --stage supplied-stage1'
+  fi
   case "$WANT" in
+    supplied-stage1) supplied_stage1;;
     stage0) stage0;;
     stage1) stage1;;
     stage1-initial-std) stage1 initial-std;;

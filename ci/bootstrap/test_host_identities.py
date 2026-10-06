@@ -34,7 +34,7 @@ class HostIdentity(unittest.TestCase):
         for sdk in (self.host, self.target, self.run_sdk):
             for rel in (self.runtime, Path('third_party/llvm/lib'), Path('third_party/llvm/bin'), Path('bin'), Path('tools/bin')):
                 (sdk / rel).mkdir(parents=True)
-            for rel in ('bin/cjc', 'tools/bin/cjpm', 'third_party/llvm/bin/llc', 'third_party/llvm/bin/opt'):
+            for rel in ('bin/cjc', 'tools/bin/cjpm', 'third_party/llvm/bin/llc', 'third_party/llvm/bin/opt', 'third_party/llvm/bin/ld.lld'):
                 shutil.copyfile('/bin/true', sdk / rel)
                 (sdk / rel).chmod(0o755)
         self.hrt.mkdir()
