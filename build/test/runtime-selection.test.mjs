@@ -401,19 +401,6 @@ test(`actual stage3 entry verifies promoted SDK before stage2: ${formal ? 'forma
     fs.writeFileSync(file, bytes);
     console.log(`STAGE3_BACKEND_TARGET_ASSERT identity=${formal ? 'formal' : 'candidate'} wrong=${rel}`);
   }
-  // A runner is authenticated by its consumer binding, independently of ELF bytes.
-  for (const name of ['opt', 'llc', 'ld.lld']) {
-    const rel = `third_party/llvm/bin/${name}`;
-    const file = path.join(work, 'stdlib-stage2', rel);
-    fs.mkdirSync(path.dirname(file), {recursive: true});
-    fs.writeFileSync(file, '#!/usr/bin/env bash\nexport LD_LIBRARY_PATH=/wrong-binding\nexec /wrong-backend "$@"\n');
-    const wrong = execute(command, env);
-    assert.notEqual(wrong.status, 0);
-    assert.ok(wrong.output.includes(`BOOTSTRAP_BACKEND_RUNNER_MISMATCH: ${name}`), wrong.output);
-    assert.doesNotMatch(wrong.output, /STAGE2_EXECUTION_BOUNDARY/);
-    fs.rmSync(file);
-    console.log(`STAGE3_BACKEND_RUNNER_TARGET_ASSERT identity=${formal ? 'formal' : 'candidate'} wrong=${name}`);
-  }
   // A matching hash must not substitute for a matching source chapter.
   const tupleRoot = a.inputs.CJCJ_BOOTSTRAP_COLOUR_TUPLE;
   const manifestFile = path.join(tupleRoot, 'fixed-llc/llvm-tools.manifest');
@@ -485,7 +472,9 @@ test(`actual stage3 entry verifies promoted SDK before stage2: ${formal ? 'forma
     ['backend', 'third_party/llvm/bin/opt-stage1', /BOOTSTRAP_BACKEND_HASH_MISMATCH/],
     ['library', 'third_party/llvm/lib/libLLVM-15.so', /BOOTSTRAP_BACKEND_HASH_MISMATCH/],
     ['loader', `lib/${tuple}/libLLVM-15.so`, /BOOTSTRAP_BACKEND_LOADER_MISMATCH/],
-    ['backend-runner', 'third_party/llvm/bin/opt', /BOOTSTRAP_BACKEND_RUNNER_MISMATCH/],
+    // Handoff rewrites input runners: mutate the final overlay to test consumer bindings.
+    ['backend-runner', 'third_party/llvm/bin/opt', /BOOTSTRAP_BACKEND_RUNNER_MISMATCH: opt/],
+    ['llc-runner', 'third_party/llvm/bin/llc', /BOOTSTRAP_BACKEND_RUNNER_MISMATCH: llc/],
     ['lld-backend', 'third_party/llvm/bin/ld.lld-stage1', /BOOTSTRAP_BACKEND_HASH_MISMATCH: bin\/ld\.lld-stage1/],
     ['lld-runner', 'third_party/llvm/bin/ld.lld', /BOOTSTRAP_BACKEND_RUNNER_MISMATCH: ld\.lld/],
     ['stage2', 'bin/cjcj-stage2', /bootstrap compiler identity mismatch/],
