@@ -43,12 +43,14 @@ esac
 dest=$1
 
 verify_clean() {
-    local top
+    local top status
     top=$(git -C "$dest" rev-parse --show-toplevel) \
         || reject 'private runtime destination is not a Git worktree'
     [[ $(cd "$dest" && pwd -P) == "$(cd "$top" && pwd -P)" ]] \
         || reject 'private runtime destination must be the Git worktree root'
-    [[ -z $(git -C "$dest" status --porcelain --untracked-files=all) ]] \
+    status=$(git -C "$dest" status --porcelain --untracked-files=all) \
+        || reject 'cannot inspect private runtime checkout'
+    [[ -z $status ]] \
         || reject 'private runtime checkout is dirty'
 }
 

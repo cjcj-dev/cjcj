@@ -37,3 +37,33 @@ Contract tests live in `ci/srcbuild/tests/platform-contract.test.mjs`: they exec
 the workflow plan command and assert the emitted matrix, caller subsets, and
 single upload definition. They do not claim to execute GitHub's scheduler or
 rebuild LLVM on every target.
+
+Private tool producers can explicitly pair a candidate LLVM with a runtime
+without changing the formal `ci/runtime_pin.env` default. Pass all three values
+to both `fetch_sources.sh` and `build_tuple.sh`:
+
+```sh
+export CJCJ_LLVM_RUNTIME_MODE=private
+export CJCJ_LLVM_RUNTIME_URL=https://github.com/cjcj-dev/cangjie-runtime.git
+export CJCJ_LLVM_RUNTIME_SHA=4909b2dec1af7f522133c6401e2ce960b0ef511d
+# The approved private pairing for this runtime is LLVM
+# 20a76c752153ca2f56b3f65b205653f7f60e8869; set LLVM_SHA explicitly as usual.
+bash ci/platform_tuples/fetch_sources.sh
+bash ci/platform_tuples/build_tuple.sh
+```
+
+Do not combine these with `RUNTIME_REF`/`RUNTIME_SRC_URL`. Missing, malformed,
+or unapproved private inputs fail before any tuple fetch. A private checkout
+must be clean (including untracked files), and its actual HEAD is checked again
+before LLVM configure. Fetch errors never fall back to the formal pin. With
+these three variables unset, the existing formal pin behavior is preserved.
+The existing source mirror transport policy remains available for isolated
+local Git fixtures. No release workflow or release pin opts into private mode.
+Consumers must bind the approved LLVM/runtime pair and the reviewed cjcj producer
+commit themselves; this interface does not authorize publication or runtime use.
+
+`python3 ci/test_llvm_runtime_input.py --work <new-lane-directory>
+--runtime-mirror <local-git-tree>` runs real fetch entries against local transports.
+The mirror must contain the formal pin and the explicit private commit above.
+The build-entry test records the real first CMake arguments and stops there;
+it does not claim to configure/build LLVM or run a native GitHub job.
