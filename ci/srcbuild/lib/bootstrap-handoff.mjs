@@ -44,7 +44,7 @@ export async function prepareBootstrapHandoff({work, sdk, source, tuple}) {
   for (const file of [compiler, path.join(std, 'lib', tuple, 'libcangjie-std-core.a'),
     path.join(inputSdk, '.stage1-host', 'binding.txt'),
     path.join(inputSdk, 'tools', 'bin', 'cjpm-stage1'),
-    ...['opt', 'llc'].map(name => path.join(inputSdk, 'third_party', 'llvm', 'bin', `${name}-stage1`)),
+    ...['opt', 'llc', 'ld.lld'].map(name => path.join(inputSdk, 'third_party', 'llvm', 'bin', `${name}-stage1`)),
     ...objects.map(name => path.join(shim, name))]) {
     if (!(await fs.stat(file)).isFile()) throw new Error(`bootstrap handoff input is not a file: ${file}`);
   }
@@ -75,7 +75,7 @@ export async function prepareBootstrapHandoff({work, sdk, source, tuple}) {
   // inherit its environment; only their loader bindings differ here.
   await runner(path.join(sdk, 'bin', 'cjc'), path.join(sdk, 'bin', 'cjcj-stage2'), targetLd);
   await runner(path.join(sdk, 'tools', 'bin', 'cjpm'), path.join(sdk, 'tools', 'bin', 'cjpm-stage1'), binding.host_ld);
-  for (const name of ['opt', 'llc']) {
+  for (const name of ['opt', 'llc', 'ld.lld']) {
     await runner(path.join(sdk, 'third_party', 'llvm', 'bin', name),
       path.join(sdk, 'third_party', 'llvm', 'bin', `${name}-stage1`), targetLd);
   }
@@ -113,7 +113,7 @@ export async function bootstrapBackendIdentity(env = process.env) {
   return {llvmSha, files: {
     'bin/opt-stage1': values.get('OPT_SHA256'),
     'bin/llc-stage1': values.get('LLC_SHA256'),
-    [`bin/${values.get('LLD_TOOL')}`]: values.get('LLD_SHA256'),
+    [`bin/${values.get('LLD_TOOL')}-stage1`]: values.get('LLD_SHA256'),
     [`lib/${path.basename(library)}`]: librarySha,
   }};
 }
@@ -138,7 +138,7 @@ export async function assertBootstrapBackends({sdk, targetLd, identity}) {
   if (resolved.find(Boolean) !== await fs.realpath(libraryPath)) {
     throw new Error('BOOTSTRAP_BACKEND_LOADER_MISMATCH');
   }
-  for (const name of ['opt', 'llc']) {
+  for (const name of ['opt', 'llc', 'ld.lld']) {
     const entry = path.join(root, 'bin', name);
     if (await fs.readFile(entry, 'utf8') !== runnerText(sdk, `${entry}-stage1`, targetLd)) {
       throw new Error(`BOOTSTRAP_BACKEND_RUNNER_MISMATCH: ${name}`);
