@@ -64,6 +64,7 @@ BUILD_HOME="${HOME:-/root}"
 
 usage() {
   echo 'bootstrap.sh --work DIR --src CJCJ_ROOT --cjcj-sha 40HEX --stdsrc STDLIB --cpp-src CANGJIE_CPP_ROOT --host-llvm-so libLLVM-15.so --host-llvm-sha256 HEX --colour-llvm-so libLLVM-15.so --colour-llvm-sha256 HEX --ast-support FILE --ast-support-sha256 HEX --colour-tuple DIR --colour-llvm-sha 40HEX --colour-rt DIR --host-rt DIR [--stage supplied-stage1|stage0|stage1|stage1-initial-std|stage1-std|stage1-compiler|all] [--stage1-heap 20GB] [--dry-run]'
+  echo 'colour runtime gate: --colour-gate-source RUNTIME_ROOT --colour-gate-install INSTALL_ROOT (supplied-stage1 only)'
   echo 'supplied-stage1 additionally requires --stage1-elf FILE --stage1-sha256 64HEX --host-sdk DIR --runtime-sha 40HEX --host-identities FILE --host-identities-sha256 64HEX; optional --check-only (no work creation)'
 }
 
@@ -873,7 +874,7 @@ supplied_stage1_validate() {
     actual=$(git -C "$COLOUR_GATE_SOURCE" rev-parse HEAD) || die 'colour gate source must be a Git checkout'
     [ "$actual" = "$RUNTIME_SHA" ] || die 'colour gate source differs from runtime SHA'
     [ "$(realpath "$STDSRC")" = "$(realpath "$COLOUR_GATE_SOURCE/stdlib")" ] || die 'colour gate requires the runtime checkout stdlib'
-    git -C "$COLOUR_GATE_SOURCE" diff --quiet HEAD -- stdlib || die 'colour gate stdlib source is modified'
+    [ -z "$(git -C "$COLOUR_GATE_SOURCE" status --porcelain -- stdlib)" ] || die 'colour gate stdlib source is modified'
   fi
   actual=$(node "$(dirname "${BASH_SOURCE[0]}")/../runtime-pin.mjs" --shell "$RUNTIME_PIN") || die 'runtime selection rejected'
   printf '%s\n' "$actual" | /usr/bin/grep -Fx "RUNTIME_REF='$RUNTIME_SHA'" >/dev/null || die 'runtime SHA differs from runtime pin'
@@ -968,6 +969,7 @@ main() {
   for value in WORK SRC CJCJ_SHA STDSRC HOST_LLVM_SO HOST_LLVM_SHA256 COLOUR_LLVM_SO COLOUR_LLVM_SHA256 AST_SUPPORT AST_SUPPORT_SHA256 COLOUR_TUPLE COLOUR_LLVM_SHA CRT HRT; do
     eval "[ -n \"\${$value}\" ]" || die "缺少参数 $value"
   done
+  [ -z "$COLOUR_GATE_SOURCE$COLOUR_GATE_INSTALL" ] || [ "$WANT" = supplied-stage1 ] || die 'colour gate requires supplied-stage1'
   case "$WANT" in supplied-stage1|stage0|stage1|stage1-initial-std|stage1-std|stage1-compiler|all) ;; *) die '--stage 只能是 stage0|stage1|stage1-initial-std|stage1-std|stage1-compiler|all';; esac
   case "$WANT" in
     stage0|all) [ -n "$CPP_SRC" ] || die '缺少参数 CPP_SRC';;

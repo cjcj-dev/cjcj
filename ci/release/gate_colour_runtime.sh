@@ -41,6 +41,11 @@ target=$(bash "$source_root/runtime/build/resolve_runtime_output.sh" "$source_ro
 if [[ $same_source == 1 ]]; then
   # sdk_build/sdk_verify produced this SDK in the supplied-stage1 entry. Bind
   # its actual installed std and runtime to the artifacts selected by the gate.
+  for directory in lib/linux_x86_64_cjnative modules/linux_x86_64_cjnative runtime/lib/linux_x86_64_cjnative; do
+    while IFS= read -r -d '' file; do
+      cmp "$file" "$sdk/${file#"$std/"}"
+    done < <(find "$std/$directory" -maxdepth 1 -type f \( -name 'libcangjie-std-*' -o -name 'std.*.cjo' \) -print0)
+  done
   cmp "$std/lib/linux_x86_64_cjnative/libcangjie-std-core.a" "$sdk/lib/linux_x86_64_cjnative/libcangjie-std-core.a"
   cmp "$target/libcangjie-runtime.so" "$sdk/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so"
   cmp "$target/libboundscheck.so" "$sdk/runtime/lib/linux_x86_64_cjnative/libboundscheck.so"

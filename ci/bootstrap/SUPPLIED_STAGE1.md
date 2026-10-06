@@ -33,3 +33,10 @@ Tool domains follow the 1478 domain-table: cjc uses host runtime + compiler LLVM
 opt/llc/ld.lld must have static LLVM and load only their target LLVM tool directory;
 llvm-objcopy/llvm-ar use the official host domain; GNU ar/ld use an empty LD path.
 Target runtime is used for output linking and execution, not native tool loading.
+
+For the colour runtime packaging gate, add `--colour-gate-source RUNTIME_ROOT`
+and `--colour-gate-install INSTALL_ROOT`. The std source must be that clean
+runtime checkout's `stdlib`, and its commit must match `--runtime-sha`. After
+initial std and SDK assembly, the entry runs the unchanged complete native gate
+with the assembled SDK's std and the same-build runtime pair. A gate failure
+stops stage2. The input-only check does not run this gate or establish a verdict.
