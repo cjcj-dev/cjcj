@@ -546,8 +546,9 @@ install_stage_compiler() {
 }
 
 cjpm_build() {
-  local sdk="$1" runtime="$2" srcdir="$3" extra="$4" heap="$5" ld cjpm script
-  cmd "node $(printf '%q' "$srcdir/ci/check-codegen-runtime-layout.mjs") $(printf '%q' "$WORK/layout-sources") $(printf '%q' "$RUNTIME_PIN")"
+  local sdk="$1" runtime="$2" srcdir="$3" extra="$4" heap="$5" ld cjpm script llvm_arg=''
+  [ "$WANT" != supplied-stage1 ] || llvm_arg=" $(printf '%q' "$COLOUR_LLVM_SHA")"
+  cmd "node $(printf '%q' "$srcdir/ci/check-codegen-runtime-layout.mjs") $(printf '%q' "$WORK/layout-sources") $(printf '%q' "$RUNTIME_PIN")$llvm_arg"
   source "$SRC/ci/build_resources.sh"
   configure_build_resources "$heap" || die "cannot determine compiler build resources"
   heap="$STD_BUILD_HEAP"
@@ -893,6 +894,7 @@ supplied_stage1() {
   local out std sdk compiler previous_std
   cmd "mkdir -p $(printf '%q' "$WORK")"
   cmd "cp -aL $(printf '%q' "$HOST_SDK") $(printf '%q' "$WORK/sdk-stage0")"
+  cmd "python3 $(printf '%q' "$SRC/ci/install_std_sdk_inputs.py") $(printf '%q' "$(dirname "$AST_SUPPORT")") $(printf '%q' "$WORK/sdk-stage0") $(printf '%q' "$HOST_TUPLE")"
   cmd "install -m755 $(printf '%q' "$STAGE1_ELF") $(printf '%q' "$WORK/cjcj-stage1")"
   printf '%s\n' "$WORK/cjcj-stage1" > "$WORK/.cjcj-stage1"
   stage1_inputs
