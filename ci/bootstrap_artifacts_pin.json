@@ -1,0 +1,131 @@
+{
+  "version": 1,
+  "artifacts": {
+    "10856835608": {
+      "repository": "cjcj-dev/cjcj",
+      "asset": 588030033,
+      "release_sha256": "b69a398955e0134673b4bcbe374166b3ff315ccac743f654a09e5a1e0a8495bf",
+      "prerelease": true,
+      "tag": "colour-runtime-4c4cbf53b444-36111967695-1-prerelease"
+    },
+    "11043263560": {
+      "repository": "cjcj-dev/cjcj",
+      "asset": 598573170,
+      "release_sha256": "190cd8f0d5222bd4ac935fb03eaf19c06cb289221fbaaa7a4d333395eb514e0e",
+      "prerelease": true,
+      "tag": "colour-runtime-darwin-9733dfc09d29-36589624699-1-prerelease"
+    },
+    "11043728499": {
+      "repository": "cjcj-dev/cjcj",
+      "asset": 598573171,
+      "release_sha256": "e69e0ed7804dec83d09759d7d776f501e0e93b38089ad007b91d2939d033763e",
+      "prerelease": true,
+      "tag": "colour-runtime-darwin-9733dfc09d29-36589624699-1-prerelease"
+    },
+    "11092820792": {
+      "repository": "cjcj-dev/cjcj",
+      "asset": 600806885,
+      "release_sha256": "bd639fbe6e72f4af013c620c81be765ab2e61cf3c43880620abed7299c747737",
+      "prerelease": true,
+      "tag": "llvm-dylib-7ed574d4ba6f-36702406791-1-prerelease"
+    },
+    "11091422710": {
+      "repository": "cjcj-dev/cjcj",
+      "asset": 600806883,
+      "release_sha256": "d9f198e26cf09e6bd6e879b525c250a7dc78ddca0536079e7b0129fc454f9a06",
+      "prerelease": true,
+      "tag": "llvm-dylib-7ed574d4ba6f-36702406791-1-prerelease"
+    },
+    "11093681275": {
+      "repository": "cjcj-dev/cjcj",
+      "asset": 600806877,
+      "release_sha256": "e795b88274bd3429ed74b4bf34e6c0d60761130ed91c1e9dc3321bcff077e51f",
+      "prerelease": true,
+      "tag": "llvm-dylib-7ed574d4ba6f-36702406791-1-prerelease"
+    },
+    "11093362788": {
+      "repository": "cjcj-dev/cjcj",
+      "asset": 600806886,
+      "release_sha256": "f7e6ac405048e5327457155491c03527403483ab49cef7695f37475ac95a434f",
+      "prerelease": true,
+      "tag": "llvm-dylib-7ed574d4ba6f-36702406791-1-prerelease"
+    },
+    "10922780083": {
+      "repository": "cjcj-dev/cjcj",
+      "asset": 592031001,
+      "release_sha256": "f041a6958c70d617f2f2416289935b82eeca5da0be977db092ae09e19ec563c6",
+      "prerelease": true,
+      "tag": "host-runtime-nightly-20260925001050-36290987795-1-prerelease"
+    },
+    "10922550686": {
+      "repository": "cjcj-dev/cjcj",
+      "asset": 592031008,
+      "release_sha256": "28f88a764b0995443041d9b54f2bf7ba5a087af4fe04acda9d13703e57105e1f",
+      "prerelease": true,
+      "tag": "host-runtime-nightly-20260925001050-36290987795-1-prerelease"
+    },
+    "10816257564": {
+      "repository": "cjcj-dev/cjcj",
+      "asset": 616604342,
+      "release_sha256": "1f5f83f41793f9634368e17a0021040e17682d2e85c208db039d4503c1983447",
+      "prerelease": true,
+      "tag": "bootstrap-input-archives-857-prerelease"
+    },
+    "10816018149": {
+      "repository": "cjcj-dev/cjcj",
+      "asset": 616604765,
+      "release_sha256": "174c2b642c7ad879a77a4eadbd57f1ff2aaebe721ec242da2d1b6a3d8699d639",
+      "prerelease": true,
+      "tag": "bootstrap-input-archives-857-prerelease"
+    },
+    "10816552640": {
+      "repository": "cjcj-dev/cjcj",
+      "asset": 616605182,
+      "release_sha256": "f5a30af7f049d2e29eb0798bca5c48536ac5073606b462723243200a830ca9e6",
+      "prerelease": true,
+      "tag": "bootstrap-input-archives-857-prerelease"
+    },
+    "10816590496": {
+      "repository": "cjcj-dev/cjcj",
+      "asset": 616605567,
+      "release_sha256": "48162596f2b66e3c26b17a5d43f4577c5c88ae8253933eb0f677be162c501a2a",
+      "prerelease": true,
+      "tag": "bootstrap-input-archives-857-prerelease"
+    },
+    "10778964263": {
+      "repository": "cjcj-dev/cjcj",
+      "asset": 616606322,
+      "release_sha256": "3a732a6fbab1cd09bb470374c2fb1b186668228477b92a12a98bb0227cb21806",
+      "prerelease": true,
+      "tag": "bootstrap-input-archives-857-prerelease"
+    },
+    "10910534726": {
+      "repository": "cjcj-dev/cjcj",
+      "asset": 616608049,
+      "release_sha256": "6f6ce4049844b61b3e9495b96cba2103c634b12e113ed18df97c90a42c1b6584",
+      "prerelease": true,
+      "tag": "bootstrap-input-archives-857-prerelease"
+    },
+    "10911891505": {
+      "repository": "cjcj-dev/cjcj",
+      "asset": 616609688,
+      "release_sha256": "a1ef4cffc916d131a78b427a6dc282ee8b3442756ede56978bff8ef5695e32f7",
+      "prerelease": true,
+      "tag": "bootstrap-input-archives-857-prerelease"
+    },
+    "10911914734": {
+      "repository": "cjcj-dev/cjcj",
+      "asset": 616610610,
+      "release_sha256": "6a512a7d034fdfad1dd03d92343b72b8d3bf27b7a39fc8202911a99f6873ff1d",
+      "prerelease": true,
+      "tag": "bootstrap-input-archives-857-prerelease"
+    },
+    "11094086618": {
+      "repository": "cjcj-dev/cjcj",
+      "asset": 616611803,
+      "release_sha256": "f5c4c64115ce0ed9f1d10561eb4ebb44dec5d460f45b0c4c3b0ededd82c8f6ff",
+      "prerelease": true,
+      "tag": "bootstrap-input-archives-857-prerelease"
+    }
+  }
+}
