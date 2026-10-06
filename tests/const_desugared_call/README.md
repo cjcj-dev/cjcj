@@ -73,7 +73,7 @@ failures stop the comments arm; the marker is never relocated.
 After a normal product build (retain target/release and runtime_shim objects):
 
 ```sh
-python3 scripts/array_clone_metadata_unit.py --build-tree /absolute/product/tree \
+python3 scripts/test_array_clone_metadata_unit.py --build-tree /absolute/product/tree \
   --sdk /absolute/private/host-sdk --out /absolute/private/metadata-evidence
 ```
 

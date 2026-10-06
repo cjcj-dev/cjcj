@@ -581,5 +581,20 @@
     "file": "ci/test-llvm-runtime-chain.sh",
     "executor": "manual",
     "reason": "Requires explicit lane work directory, real fixed runtime Git mirror, and local other-source Git fixture; observes the real tuple CMake boundary without an LLVM build."
+  },
+  {
+    "file": "ci/bootstrap/test_supplied_stage1.sh",
+    "executor": "manual",
+    "reason": "Linux x86_64/aarch64 real-input bootstrap contract; requires BOOTSTRAP_CHECK_LOG_DIR and the complete pinned supplied-stage1 arguments from ci/bootstrap/bootstrap.sh, including a stage1 ELF and host SDK. No workflow provisions this tuple."
+  },
+  {
+    "file": "packages/compiler_unittest/src/ArrayCloneMetadata_test.cj",
+    "executor": "cjpm",
+    "member": "packages/compiler_unittest"
+  },
+  {
+    "file": "scripts/test_array_clone_metadata_unit.py",
+    "executor": "manual",
+    "reason": "Manual bounded Linux ArrayCloneMetadata test links this registered compiler_unittest source against existing release archives; invoke python3 scripts/test_array_clone_metadata_unit.py --build-tree /path/to/product --sdk /path/to/paired-sdk --out /path/to/private-evidence. No workflow provisions these archives."
   }
 ]
