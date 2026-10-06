@@ -98,6 +98,34 @@
       "release_sha256": "3a732a6fbab1cd09bb470374c2fb1b186668228477b92a12a98bb0227cb21806",
       "prerelease": true,
       "tag": "bootstrap-input-archives-857-prerelease"
+    },
+    "10910534726": {
+      "repository": "cjcj-dev/cjcj",
+      "asset": 616608049,
+      "release_sha256": "6f6ce4049844b61b3e9495b96cba2103c634b12e113ed18df97c90a42c1b6584",
+      "prerelease": true,
+      "tag": "bootstrap-input-archives-857-prerelease"
+    },
+    "10911891505": {
+      "repository": "cjcj-dev/cjcj",
+      "asset": 616609688,
+      "release_sha256": "a1ef4cffc916d131a78b427a6dc282ee8b3442756ede56978bff8ef5695e32f7",
+      "prerelease": true,
+      "tag": "bootstrap-input-archives-857-prerelease"
+    },
+    "10911914734": {
+      "repository": "cjcj-dev/cjcj",
+      "asset": 616610610,
+      "release_sha256": "6a512a7d034fdfad1dd03d92343b72b8d3bf27b7a39fc8202911a99f6873ff1d",
+      "prerelease": true,
+      "tag": "bootstrap-input-archives-857-prerelease"
+    },
+    "11094086618": {
+      "repository": "cjcj-dev/cjcj",
+      "asset": 616611803,
+      "release_sha256": "f5c4c64115ce0ed9f1d10561eb4ebb44dec5d460f45b0c4c3b0ededd82c8f6ff",
+      "prerelease": true,
+      "tag": "bootstrap-input-archives-857-prerelease"
     }
   }
 }

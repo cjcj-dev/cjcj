@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
 import {verify} from './bootstrap_store.mjs';
 
 export function archivePin(repository, artifactId) {
@@ -33,7 +34,7 @@ export function downloadPinned(repository, artifactId, archive) {
   }
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname)) {
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const [repository, artifactId, destination] = process.argv.slice(2);
   if (!destination) throw new Error('usage: download_pinned.mjs repository artifact-id destination');
   fs.mkdirSync(destination, {recursive: true});
