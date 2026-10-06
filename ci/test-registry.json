@@ -91,11 +91,6 @@
     "args": []
   },
   {
-    "file": "ci/bootstrap/test_supplied_stage1.sh",
-    "executor": "manual",
-    "reason": "Linux x86_64/aarch64 real-input bootstrap contract; requires BOOTSTRAP_CHECK_LOG_DIR and the complete pinned supplied-stage1 arguments from ci/bootstrap/bootstrap.sh, including a stage1 ELF and host SDK. No workflow provisions this tuple."
-  },
-  {
     "file": "ci/bootstrap/test_target_runtime_link.py",
     "executor": "manual",
     "reason": "Requires an assembled stage1 target SDK with separately bound host libraries and pinned coloured target runtime, not the official host SDK."
@@ -104,11 +99,6 @@
     "file": "ci/bootstrap/test_tuple_permissions.py",
     "executor": "manual",
     "reason": "Requires a real LLVM_TUPLE, assembled HOST_SDK and COLOUR_RUNTIME; permission fault arms copy and install this full paired toolchain."
-  },
-  {
-    "file": "ci/platform_matrix/tests/runtime_core_diagnostics.py",
-    "executor": "manual",
-    "reason": "Requires a same-build runtime unit ELF/SO pair, PyYAML, GDB and real core evidence; generates a core if none supplied, which is prohibited on kkk2."
   },
   {
     "file": "ci/release/test_darwin_runtime_controls.sh",
@@ -139,19 +129,14 @@
     "reason": "Requires candidate compiler, paired host SDK/libLLVM and both runtime/LLVM source repositories for ABI integration."
   },
   {
-    "file": "ci/test-colour-libxml2.sh",
-    "executor": "manual",
-    "reason": "Fault-arm tool rewrites workflow, srcbuild and checker files in place; optional real bad/good ld.lld controls need retained linker artifacts."
-  },
-  {
     "file": "ci/test-frontend-apc.py",
     "executor": "manual",
     "reason": "Requires a real candidate compiler, paired host SDK/libLLVM, fixed core input tree and private evidence directory; invocation and output contract are documented in tests/frontend_apc/README.md."
   },
   {
-    "file": "ci/test-llvm-runtime-chain.sh",
+    "file": "ci/test-colour-libxml2.sh",
     "executor": "manual",
-    "reason": "Requires explicit lane work directory, real fixed runtime Git mirror, and local other-source Git fixture; observes the real tuple CMake boundary without an LLVM build."
+    "reason": "Fault-arm tool rewrites workflow, srcbuild and checker files in place; optional real bad/good ld.lld controls need retained linker artifacts."
   },
   {
     "file": "ci/test-llvm-tuple-layout.sh",
@@ -181,11 +166,6 @@
     "file": "ci/test_build_resources.py",
     "executor": "python3",
     "args": []
-  },
-  {
-    "file": "ci/test_llvm_runtime_input.py",
-    "executor": "manual",
-    "reason": "Real fixed runtime commits and an explicitly supplied local Git transport mirror/work directory are required; stops at the first tuple CMake boundary without an LLVM build."
   },
   {
     "file": "ci/test_phase_gc.py",
@@ -339,11 +319,6 @@
   },
   {
     "file": "packages/compiler_unittest/src/ASTPort_test.cj",
-    "executor": "cjpm",
-    "member": "packages/compiler_unittest"
-  },
-  {
-    "file": "packages/compiler_unittest/src/ArrayCloneMetadata_test.cj",
     "executor": "cjpm",
     "member": "packages/compiler_unittest"
   },
@@ -558,11 +533,6 @@
     "reason": "Private CHIR fault/regression driver requires source copy, compiled LLVM shim, matching SDK and reserved cores; package tests have a separate CI cjpm executor."
   },
   {
-    "file": "scripts/test_cjo_dependencies.py",
-    "executor": "manual",
-    "reason": "Requires a real candidate stage1 compiler built with the pinned official host SDK. Run python3 scripts/test_cjo_dependencies.py --compiler <stage1 ELF> --out <private fixture directory>; checks raw CJMP common CJO dependencies, including candidate, product cuts and restoration."
-  },
-  {
     "file": "scripts/test_fixtures/t1_test_basic/basic_test.cj",
     "executor": "manual",
     "reason": "Input fixture for scripts/test_gate.mjs test discovery/build, not a workspace package; execute through that manual compiler harness."
@@ -588,8 +558,43 @@
     "reason": "Standalone compiler regression built by test/named_struct_factory/build.sh with explicitly selected candidate SDK."
   },
   {
+    "file": "ci/platform_matrix/tests/runtime_core_diagnostics.py",
+    "executor": "manual",
+    "reason": "Requires a same-build runtime unit ELF/SO pair, PyYAML, GDB and real core evidence; generates a core if none supplied, which is prohibited on kkk2."
+  },
+  {
     "file": "test/store_strength/test_checker.py",
     "executor": "python3",
     "args": []
+  },
+  {
+    "file": "scripts/test_cjo_dependencies.py",
+    "executor": "manual",
+    "reason": "Requires a real candidate stage1 compiler built with the pinned official host SDK. Run python3 scripts/test_cjo_dependencies.py --compiler <stage1 ELF> --out <private fixture directory>; checks raw CJMP common CJO dependencies, including candidate, product cuts and restoration."
+  },
+  {
+    "file": "ci/test_llvm_runtime_input.py",
+    "executor": "manual",
+    "reason": "Real fixed runtime commits and an explicitly supplied local Git transport mirror/work directory are required; stops at the first tuple CMake boundary without an LLVM build."
+  },
+  {
+    "file": "ci/test-llvm-runtime-chain.sh",
+    "executor": "manual",
+    "reason": "Requires explicit lane work directory, real fixed runtime Git mirror, and local other-source Git fixture; observes the real tuple CMake boundary without an LLVM build."
+  },
+  {
+    "file": "ci/bootstrap/test_supplied_stage1.sh",
+    "executor": "manual",
+    "reason": "Linux x86_64/aarch64 real-input bootstrap contract; requires BOOTSTRAP_CHECK_LOG_DIR and the complete pinned supplied-stage1 arguments from ci/bootstrap/bootstrap.sh, including a stage1 ELF and host SDK. No workflow provisions this tuple."
+  },
+  {
+    "file": "packages/compiler_unittest/src/ArrayCloneMetadata_test.cj",
+    "executor": "cjpm",
+    "member": "packages/compiler_unittest"
+  },
+  {
+    "file": "scripts/array_clone_metadata_unit.py",
+    "executor": "manual",
+    "reason": "Manual bounded Linux ArrayCloneMetadata test links this registered compiler_unittest source against existing release archives; invoke python3 scripts/array_clone_metadata_unit.py --build-tree /path/to/product --sdk /path/to/paired-sdk --out /path/to/private-evidence. No workflow provisions these archives."
   }
 ]
