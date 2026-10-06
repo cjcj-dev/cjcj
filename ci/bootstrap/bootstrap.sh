@@ -62,6 +62,7 @@ BUILD_HOME="${HOME:-/root}"
 
 usage() {
   echo 'bootstrap.sh --work DIR --src CJCJ_ROOT --cjcj-sha 40HEX --stdsrc STDLIB --cpp-src CANGJIE_CPP_ROOT --host-llvm-so libLLVM-15.so --host-llvm-sha256 HEX --colour-llvm-so libLLVM-15.so --colour-llvm-sha256 HEX --ast-support FILE --ast-support-sha256 HEX --colour-tuple DIR --colour-llvm-sha 40HEX --colour-rt DIR --host-rt DIR [--stage supplied-stage1|stage0|stage1|stage1-initial-std|stage1-std|stage1-compiler|all] [--stage1-heap 20GB] [--dry-run]'
+  echo 'supplied-stage1 additionally requires --stage1-elf FILE --stage1-sha256 64HEX --host-sdk DIR --runtime-sha 40HEX --host-identities FILE --host-identities-sha256 64HEX; optional --check-only (no work creation)'
 }
 
 sha256() {
