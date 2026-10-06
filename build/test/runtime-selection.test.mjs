@@ -391,14 +391,28 @@ test(`actual stage3 entry verifies promoted SDK before stage2: ${formal ? 'forma
   assert.notEqual(wrongName.status, 0); assert.match(wrongName.output, /BOOTSTRAP_BACKEND_LIBRARY_NAME_MISMATCH/, wrongName.output);
   assert.doesNotMatch(wrongName.output, /STAGE2_EXECUTION_BOUNDARY/);
   console.log(`STAGE3_LIBRARY_NAME_TARGET_ASSERT identity=${formal ? 'formal' : 'candidate'}`);
-  for (const rel of ['bin/opt-stage1', 'bin/llc-stage1', 'bin/ld.lld', 'lib/libLLVM-15.so']) {
+  for (const rel of ['bin/opt-stage1', 'bin/llc-stage1', 'bin/ld.lld-stage1', 'lib/libLLVM-15.so']) {
     const file = path.join(input, 'third_party/llvm', rel), bytes = fs.readFileSync(file);
     fs.appendFileSync(file, 'changed');
     const wrong = execute(command, env);
-    assert.notEqual(wrong.status, 0); assert.match(wrong.output, /BOOTSTRAP_BACKEND_HASH_MISMATCH/, wrong.output);
+    assert.notEqual(wrong.status, 0);
+    assert.ok(wrong.output.includes(`BOOTSTRAP_BACKEND_HASH_MISMATCH: ${rel}`), wrong.output);
     assert.doesNotMatch(wrong.output, /STAGE2_EXECUTION_BOUNDARY/);
     fs.writeFileSync(file, bytes);
     console.log(`STAGE3_BACKEND_TARGET_ASSERT identity=${formal ? 'formal' : 'candidate'} wrong=${rel}`);
+  }
+  // A runner is authenticated by its consumer binding, independently of ELF bytes.
+  for (const name of ['opt', 'llc', 'ld.lld']) {
+    const rel = `third_party/llvm/bin/${name}`;
+    const file = path.join(work, 'stdlib-stage2', rel);
+    fs.mkdirSync(path.dirname(file), {recursive: true});
+    fs.writeFileSync(file, '#!/usr/bin/env bash\nexport LD_LIBRARY_PATH=/wrong-binding\nexec /wrong-backend "$@"\n');
+    const wrong = execute(command, env);
+    assert.notEqual(wrong.status, 0);
+    assert.ok(wrong.output.includes(`BOOTSTRAP_BACKEND_RUNNER_MISMATCH: ${name}`), wrong.output);
+    assert.doesNotMatch(wrong.output, /STAGE2_EXECUTION_BOUNDARY/);
+    fs.rmSync(file);
+    console.log(`STAGE3_BACKEND_RUNNER_TARGET_ASSERT identity=${formal ? 'formal' : 'candidate'} wrong=${name}`);
   }
   // A matching hash must not substitute for a matching source chapter.
   const tupleRoot = a.inputs.CJCJ_BOOTSTRAP_COLOUR_TUPLE;
@@ -451,7 +465,7 @@ test(`actual stage3 entry verifies promoted SDK before stage2: ${formal ? 'forma
   const protectedFiles = [
     `runtime/lib/${tuple}/libcangjie-runtime.so`, `runtime/lib/${tuple}/libboundscheck.so`,
     `lib/${tuple}/libcangjie-runtime.a`, 'SDK.lock.json',
-    ...['opt-stage1', 'llc-stage1', 'ld.lld', 'opt', 'llc'].map(name => `third_party/llvm/bin/${name}`),
+    ...['opt-stage1', 'llc-stage1', 'ld.lld-stage1', 'ld.lld', 'opt', 'llc'].map(name => `third_party/llvm/bin/${name}`),
     'third_party/llvm/lib/libLLVM-15.so', 'bin/cjcj-stage2', 'bin/cjc', 'bootstrap-compiler.json',
   ];
   const beforeAst = Object.fromEntries(protectedFiles.map(rel => [rel, hash(path.join(sdk, rel))]));
@@ -472,6 +486,8 @@ test(`actual stage3 entry verifies promoted SDK before stage2: ${formal ? 'forma
     ['library', 'third_party/llvm/lib/libLLVM-15.so', /BOOTSTRAP_BACKEND_HASH_MISMATCH/],
     ['loader', `lib/${tuple}/libLLVM-15.so`, /BOOTSTRAP_BACKEND_LOADER_MISMATCH/],
     ['backend-runner', 'third_party/llvm/bin/opt', /BOOTSTRAP_BACKEND_RUNNER_MISMATCH/],
+    ['lld-backend', 'third_party/llvm/bin/ld.lld-stage1', /BOOTSTRAP_BACKEND_HASH_MISMATCH: bin\/ld\.lld-stage1/],
+    ['lld-runner', 'third_party/llvm/bin/ld.lld', /BOOTSTRAP_BACKEND_RUNNER_MISMATCH: ld\.lld/],
     ['stage2', 'bin/cjcj-stage2', /bootstrap compiler identity mismatch/],
     ['entry', 'bin/cjc', /bootstrap compiler identity mismatch/],
     ['record', 'bootstrap-compiler.json', /bootstrap compiler independent producer mismatch/],
