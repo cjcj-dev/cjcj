@@ -593,8 +593,8 @@
     "member": "packages/compiler_unittest"
   },
   {
-    "file": "scripts/array_clone_metadata_unit.py",
+    "file": "scripts/test_array_clone_metadata_unit.py",
     "executor": "manual",
-    "reason": "Manual bounded Linux ArrayCloneMetadata test links this registered compiler_unittest source against existing release archives; invoke python3 scripts/array_clone_metadata_unit.py --build-tree /path/to/product --sdk /path/to/paired-sdk --out /path/to/private-evidence. No workflow provisions these archives."
+    "reason": "Manual bounded Linux ArrayCloneMetadata test links this registered compiler_unittest source against existing release archives; invoke python3 scripts/test_array_clone_metadata_unit.py --build-tree /path/to/product --sdk /path/to/paired-sdk --out /path/to/private-evidence. No workflow provisions these archives."
   }
 ]
