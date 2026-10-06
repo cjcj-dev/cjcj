@@ -445,7 +445,8 @@ public class ConcurrencyBudget {
     private func ReleaseAllAtExit(): Unit {
         synchronized(mutex) {
             if ((getVariable("CJCJ_JOBSERVER_TRACE") ?? "") == "1") {
-                println("CJCJ_JOBSERVER acquired=${acquiredCount} released=${releasedCount} " +
+                // Keep CLI stdout available for version and dependency-scan protocols.
+                eprintln("CJCJ_JOBSERVER acquired=${acquiredCount} released=${releasedCount} " +
                     "active=${activeCount} peak=${peakActiveCount} held_tokens=${heldTokens.size}")
             }
             for (token in heldTokens) {
