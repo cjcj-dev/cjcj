@@ -37,6 +37,8 @@ STAGE1_SHA256=''
 HOST_SDK=''
 RUNTIME_SHA=''
 CHECK_ONLY=0
+COLOUR_GATE_SOURCE=''
+COLOUR_GATE_INSTALL=''
 HOST_IDENTITIES=''
 HOST_IDENTITIES_SHA256=''
 WANT=all
@@ -866,6 +868,13 @@ supplied_stage1_validate() {
     [ -n "${!value}" ] || die "缺少参数 $value (supplied-stage1)"
   done
   [[ "$RUNTIME_SHA" =~ ^[0-9a-f]{40}$ ]] || die 'runtime SHA must be 40 lowercase hex digits'
+  if [ -n "$COLOUR_GATE_SOURCE$COLOUR_GATE_INSTALL" ]; then
+    [ -n "$COLOUR_GATE_SOURCE" ] && [ -n "$COLOUR_GATE_INSTALL" ] || die 'both colour gate inputs required'
+    actual=$(git -C "$COLOUR_GATE_SOURCE" rev-parse HEAD) || die 'colour gate source must be a Git checkout'
+    [ "$actual" = "$RUNTIME_SHA" ] || die 'colour gate source differs from runtime SHA'
+    [ "$(realpath "$STDSRC")" = "$(realpath "$COLOUR_GATE_SOURCE/stdlib")" ] || die 'colour gate requires the runtime checkout stdlib'
+    git -C "$COLOUR_GATE_SOURCE" diff --quiet HEAD -- stdlib || die 'colour gate stdlib source is modified'
+  fi
   actual=$(node "$(dirname "${BASH_SOURCE[0]}")/../runtime-pin.mjs" --shell "$RUNTIME_PIN") || die 'runtime selection rejected'
   printf '%s\n' "$actual" | /usr/bin/grep -Fx "RUNTIME_REF='$RUNTIME_SHA'" >/dev/null || die 'runtime SHA differs from runtime pin'
   [ -z "${LD_LIBRARY_PATH:-}" ] || die 'mixed domain: inherited LD_LIBRARY_PATH must be empty'
@@ -902,6 +911,14 @@ supplied_stage1() {
   stage1_initial_std
   # The full std just produced is the stage2 compiler's static-link input.
   std="$previous_std"
+  if [ -n "$COLOUR_GATE_SOURCE" ]; then
+    # The complete gate consumes this entry's full same-source std, before the
+    # stage2 build or any publication. Assembly keeps compiler host and target
+    # runtime domains separate through the existing runner.
+    STAGE=colour-runtime-gate
+    assemble_stage1_sdk "$sdk" "$compiler" "$std"
+    cmd "bash $(printf '%q' "$SRC/ci/release/gate_colour_runtime.sh") --same-source $(printf '%q' "$COLOUR_GATE_SOURCE") $(printf '%q' "$sdk") $(printf '%q' "$(runtime_dir "$HRT")") $(printf '%q' "$COLOUR_GATE_INSTALL") $(printf '%q' "$std")"
+  fi
   stage1_compiler
   STAGE=stage2-smoke
   printf 'main(): Int64 { return 0 }\n' > "$WORK/main.cj"
@@ -918,6 +935,8 @@ main() {
       --stage1-sha256) STAGE1_SHA256="${2:?}"; shift 2;;
       --host-sdk) HOST_SDK="${2:?}"; shift 2;;
       --runtime-sha) RUNTIME_SHA="${2:?}"; shift 2;;
+      --colour-gate-source) COLOUR_GATE_SOURCE="${2:?}"; shift 2;;
+      --colour-gate-install) COLOUR_GATE_INSTALL="${2:?}"; shift 2;;
       --check-only) CHECK_ONLY=1; shift;;
       --work) WORK="${2:?}"; shift 2;;
       --runtime-pin) RUNTIME_PIN="${2:?}"; shift 2;;
