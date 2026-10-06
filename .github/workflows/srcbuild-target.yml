@@ -265,13 +265,10 @@ jobs:
           echo "CJCJ_BOOTSTRAP_HOST_LLVM_ARTIFACT=$GITHUB_WORKSPACE/.srcbuild/inputs/bootstrap-host-llvm" >> "$GITHUB_ENV"
 
       - name: Download pinned bootstrap host LLVM
-        uses: actions/download-artifact@v8
-        with:
-          artifact-ids: ${{ env.HOST_LLVM_ARTIFACT_ID }}
-          merge-multiple: true
-          github-token: ${{ github.token }}
-          run-id: ${{ env.HOST_LLVM_RUN_ID }}
-          path: ${{ env.CJCJ_BOOTSTRAP_HOST_LLVM_ARTIFACT }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node ci/release/download_pinned.mjs cjcj-dev/cjcj "${{ env.HOST_LLVM_ARTIFACT_ID }}" "${{ env.CJCJ_BOOTSTRAP_HOST_LLVM_ARTIFACT }}"
 
       - name: Load immutable in-process LLVM dylib provenance
         if: runner.os == 'Linux' || runner.os == 'macOS'
@@ -289,13 +286,10 @@ jobs:
 
       - name: Download pinned in-process LLVM dylib
         if: runner.os == 'Linux' || runner.os == 'macOS'
-        uses: actions/download-artifact@v8
-        with:
-          artifact-ids: ${{ env.LLVM_DYLIB_ARTIFACT_ID }}
-          merge-multiple: true
-          github-token: ${{ github.token }}
-          run-id: ${{ env.LLVM_DYLIB_RUN_ID }}
-          path: ${{ env.CJCJ_BOOTSTRAP_DYLIB_ARTIFACT }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node ci/release/download_pinned.mjs cjcj-dev/cjcj "${{ env.LLVM_DYLIB_ARTIFACT_ID }}" "${{ env.CJCJ_BOOTSTRAP_DYLIB_ARTIFACT }}"
 
       - name: Load pinned colour runtime provenance
         shell: bash
@@ -309,13 +303,10 @@ jobs:
           echo "CJCJ_BOOTSTRAP_COLOUR_RT=$GITHUB_WORKSPACE/.srcbuild/inputs/colour-runtime" >> "$GITHUB_ENV"
 
       - name: Download pinned colour runtime pair
-        uses: actions/download-artifact@v8
-        with:
-          artifact-ids: ${{ env.COLOUR_RT_ARTIFACT_ID }}
-          merge-multiple: true
-          github-token: ${{ github.token }}
-          run-id: ${{ env.COLOUR_RT_RUN_ID }}
-          path: ${{ env.CJCJ_BOOTSTRAP_COLOUR_RT }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node ci/release/download_pinned.mjs cjcj-dev/cjcj "${{ env.COLOUR_RT_ARTIFACT_ID }}" "${{ env.CJCJ_BOOTSTRAP_COLOUR_RT }}"
 
       - name: Verify independent Darwin libraries and classify std input
         if: runner.os == 'macOS'
@@ -348,13 +339,10 @@ jobs:
           cat "ci/ast_support/${AST_PLATFORM}.env" >> "$GITHUB_ENV"
 
       - name: Download AST support archive
-        uses: actions/download-artifact@v8
-        with:
-          artifact-ids: ${{ env.AST_SUPPORT_ARTIFACT_ID }}
-          merge-multiple: true
-          github-token: ${{ github.token }}
-          run-id: ${{ env.AST_SUPPORT_RUN_ID }}
-          path: ${{ github.workspace }}/.srcbuild/inputs/ast-support
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node ci/release/download_pinned.mjs cjcj-dev/cjcj "${{ env.AST_SUPPORT_ARTIFACT_ID }}" "${{ github.workspace }}/.srcbuild/inputs/ast-support"
 
       # set -a: `source` alone makes shell variables, and prepare_bootstrap_inputs
       # reads LLVM_SHA from its environment -- without the export every host

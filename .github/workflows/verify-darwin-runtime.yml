@@ -23,13 +23,10 @@ jobs:
         run: |
           cat ci/runtime_pin.env >> "$GITHUB_ENV"
           cat "ci/colour-runtime/$PLATFORM.env" >> "$GITHUB_ENV"
-      - uses: actions/download-artifact@v8
-        with:
-          artifact-ids: ${{ env.COLOUR_RT_ARTIFACT_ID }}
-          merge-multiple: true
-          github-token: ${{ github.token }}
-          run-id: ${{ env.COLOUR_RT_RUN_ID }}
-          path: colour-runtime
+      - name: Download verified prerelease input
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node ci/release/download_pinned.mjs cjcj-dev/cjcj "${{ env.COLOUR_RT_ARTIFACT_ID }}" "colour-runtime"
       - name: Exercise producer manifests and consumer cuts on downloaded native bytes
         env:
           DARWIN_RT_NATIVE_SOURCE: colour-runtime
