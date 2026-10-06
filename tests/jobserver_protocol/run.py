@@ -14,6 +14,7 @@ def main():
     parser.add_argument('--compiler', type=Path, required=True)
     parser.add_argument('--source', type=Path, required=True)
     parser.add_argument('--out', type=Path, required=True)
+    parser.add_argument('--only', choices=['version', 'scan'])
     args = parser.parse_args()
     compiler = args.compiler.resolve(strict=True)
     source = args.source.resolve(strict=True)
@@ -26,7 +27,9 @@ def main():
 
     runs = {}
     for name, flags in [('version', ['-v']),
-                        ('scan', ['--scan-dependency', str(source)])]:
+                        ('scan', ['-p', str(source), '--scan-dependency'])]:
+        if args.only and args.only != name:
+            continue
         for trace in (False, True):
             label = f'{name}-{"on" if trace else "off"}'
             fifo = args.out / (label + '.fifo')
