@@ -78,14 +78,14 @@ def main():
             check(name + '-' + suffix + '-protocol', valid, 'complete stdout consumed')
         diagnostic = re.findall(
             r'^CJCJ_JOBSERVER acquired=(\d+) released=(\d+) active=(\d+) '
-            r'peak=(\d+) held_tokens=(\d+)$', on['stderr'], re.M)
+            r'peak=(\d+) held_tokens=(\d+)$', on['stdout'] + on['stderr'], re.M)
         check(name + '-diagnostic-channel', len(diagnostic) == 1 and
               'CJCJ_JOBSERVER' not in on['stdout'], 'atexit statistics exclusively on stderr')
         check(name + '-trace-off', 'CJCJ_JOBSERVER' not in off['stdout'] + off['stderr'],
               'no statistics with trace unset')
         check(name + '-lease-balance', len(diagnostic) == 1 and
               diagnostic[0][0] == diagnostic[0][1] and diagnostic[0][2] == '0' and
-              diagnostic[0][4] == '0', f'stderr statistics={diagnostic}')
+              diagnostic[0][4] == '0', f'exit statistics={diagnostic}')
 
     record = dict(compiler=str(compiler),
                   compiler_sha256=hashlib.sha256(compiler.read_bytes()).hexdigest(),
