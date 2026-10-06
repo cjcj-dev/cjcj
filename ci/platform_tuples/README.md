@@ -67,3 +67,7 @@ commit themselves; this interface does not authorize publication or runtime use.
 The mirror must contain the formal pin and the explicit private commit above.
 The build-entry test records the real first CMake arguments and stops there;
 it does not claim to configure/build LLVM or run a native GitHub job.
+
+`bash ci/test-llvm-runtime-chain.sh <new-lane-directory> <runtime-mirror>
+<other-source-mirror>` passes the same tuple directly from source fetch
+to the build entry and checks the runtime HEAD at the emitted CMake path.

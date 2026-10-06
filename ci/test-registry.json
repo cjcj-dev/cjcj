@@ -576,5 +576,10 @@
     "file": "ci/test_llvm_runtime_input.py",
     "executor": "manual",
     "reason": "Real fixed runtime commits and an explicitly supplied local Git transport mirror/work directory are required; stops at the first tuple CMake boundary without an LLVM build."
+  },
+  {
+    "file": "ci/test-llvm-runtime-chain.sh",
+    "executor": "manual",
+    "reason": "Requires explicit lane work directory, real fixed runtime Git mirror, and local other-source Git fixture; observes the real tuple CMake boundary without an LLVM build."
   }
 ]
