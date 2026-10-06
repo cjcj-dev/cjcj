@@ -917,6 +917,7 @@ supplied_stage1() {
   # The full std just produced is the stage2 compiler's static-link input.
   std="$previous_std"
   if [ -n "$COLOUR_GATE_SOURCE" ]; then
+    cmd "printf '%s\n' $(printf '%q' "$RUNTIME_SHA") > $(printf '%q' "$std/STDLIB_SOURCE_SHA")"
     # The complete gate consumes this entry's full same-source std, before the
     # stage2 build or any publication. Assembly keeps compiler host and target
     # runtime domains separate through the existing runner.

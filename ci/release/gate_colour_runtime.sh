@@ -39,6 +39,9 @@ export GCV2_RUNTIME_CONFIG
 GCV2_RUNTIME_CONFIG=$(sed -n 's/^CONFIG_ID=//p' "$manifest")
 target=$(bash "$source_root/runtime/build/resolve_runtime_output.sh" "$source_root/runtime" "$GCV2_RUNTIME_CONFIG")
 if [[ $same_source == 1 ]]; then
+  source_sha=$(git -C "$source_root" rev-parse HEAD)
+  test "$(cat "$std/STDLIB_SOURCE_SHA")" = "$source_sha"
+  strings "$target/libcangjie-runtime.so" | grep -Fx "CJRT-COMMIT:$source_sha" >/dev/null
   # sdk_build/sdk_verify produced this SDK in the supplied-stage1 entry. Bind
   # its actual installed std and runtime to the artifacts selected by the gate.
   for directory in lib/linux_x86_64_cjnative modules/linux_x86_64_cjnative runtime/lib/linux_x86_64_cjnative; do
