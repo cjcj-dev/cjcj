@@ -425,6 +425,11 @@
     "reason": "manual driver: no workflow provisions a stage1 compiler built from this tree; a process entry point, and no other file in tests names it"
   },
   {
+    "file": "tests/jobserver_protocol/run.py",
+    "kind": "driver",
+    "reason": "Manual Linux FIFO protocol driver; no workflow provisions a product compiler with jobserver tracing. Invoke python3 tests/jobserver_protocol/run.py --compiler /path/to/cjcj-stage1 --source /path/to/package --out /path/to/private-evidence."
+  },
+  {
     "file": "tests/lto_reflection/check.py",
     "kind": "driver",
     "reason": "manual driver: no workflow provisions an SDK environment (CANGJIE_HOME) and a stage1 compiler built from this tree; a process entry point, and no other file in tests names it"
@@ -597,10 +602,5 @@
     "file": "tests/vtable_attributes/run.py",
     "kind": "driver",
     "reason": "manual driver: no workflow provisions a stage1 compiler built from this tree; a process entry point, and no other file in tests names it"
-  },
-  {
-    "file": "scripts/array_clone_metadata_unit.py",
-    "kind": "driver",
-    "reason": "Manual bounded #698 non-CLI test: links only ArrayCloneMetadata_test.cj to existing release product archives; requires --build-tree, --sdk and --out. Never runs cjpm test."
   }
 ]
