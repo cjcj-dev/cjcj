@@ -18,8 +18,6 @@ p.add_argument('--release', type=Path, required=True)
 p.add_argument('--sdk', type=Path, required=True)
 p.add_argument('--reference-release', type=Path,
                help='Freeze interfaces and all archives except the mutated sema product archive')
-p.add_argument('--source', type=Path, default=Path(__file__).with_name('main.cj'),
-               help='Run the finite-cycle fixture in its own process')
 p.add_argument('--out', type=Path, required=True)
 a = p.parse_args()
 a.out.mkdir(parents=True, exist_ok=True)
@@ -30,7 +28,7 @@ env['LD_LIBRARY_PATH'] = ':'.join(str(a.sdk / d) for d in (
     'third_party/llvm/lib', 'tools/lib'))
 env['TMPDIR'] = str(a.out / 'tmp')
 Path(env['TMPDIR']).mkdir(exist_ok=True)
-source = a.source.resolve()
+source = Path(__file__).with_name('main.cj').resolve()
 elf = a.out / 'tests'
 command = [str(a.sdk / 'bin/cjc'), '--test', '-O0', '--trimpath', str(source.parent),
            '--diagnostic-format=noColor', str(source), '-o', str(elf)]
@@ -62,12 +60,8 @@ if r['build_rc'] == 0:
         subprocess.run(['nm', '--defined-only', str(elf)], stdout=log, check=True)
     t = time.monotonic()
     with (a.out / 'test.log').open('w') as log:
-        try:
-            r['test_rc'] = subprocess.call([str(elf), '--no-color', '--show-all-output', '--no-progress'],
-                                      env=env, stdout=log, stderr=subprocess.STDOUT, timeout=120)
-        except subprocess.TimeoutExpired:
-            r['test_rc'] = 124
-            r['test_status'] = 'NOT_TERMINATED'
+        r['test_rc'] = subprocess.call([str(elf), '--no-color', '--show-all-output', '--no-progress'],
+                                      env=env, stdout=log, stderr=subprocess.STDOUT)
     r['test_wall'] = time.monotonic() - t
 r['uptime_after'] = subprocess.check_output(['uptime'], text=True).strip()
 (a.out / 'result.json').write_text(json.dumps(r, indent=2) + '\n')

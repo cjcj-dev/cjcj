@@ -4,6 +4,15 @@ import std.collection.*
 import cjcj::ast.*
 import cjcj::utils.CJC_NULLPTR_CHECK
 
+private func containsTy(values: ArrayList<Ty>, ty: Ty): Bool {
+    for (value in values) {
+        if (SameTy(value, ty)) {
+            return true
+        }
+    }
+    return false
+}
+
 private func containsGeneric(values: ArrayList<GenericsTy>, tyVar: GenericsTy): Bool {
     for (value in values) {
         if (Ptr<GenericsTy>(value) == Ptr<GenericsTy>(tyVar)) {
@@ -18,6 +27,14 @@ private func addGenericUnique(values: ArrayList<GenericsTy>, tyVar: GenericsTy):
         return false
     }
     values.add(tyVar)
+    return true
+}
+
+private func addTyUnique(values: ArrayList<Ty>, ty: Ty): Bool {
+    if (containsTy(values, ty)) {
+        return false
+    }
+    values.add(ty)
     return true
 }
 
@@ -337,16 +354,14 @@ public func GetDeclTypeParams(decl: Decl): ArrayList<Ty> {
 
 public func GetAllGenericTys(ty: Ty): ArrayList<GenericsTy> {
     let res = ArrayList<GenericsTy>()
-    let visited = HashSet<Ptr<Ty>>()
+    let visited = ArrayList<Ty>()
     let queue = ArrayList<Ty>()
     queue.add(ty)
     var idx: Int64 = 0
     while (idx < queue.size) {
         let curTy = queue[idx]
         idx++
-        // Match upstream Ptr identity: structural equality can merge distinct objects
-        // and recurse through cyclic type arguments. Generics remain leaves.
-        if (!visited.add(Ptr<Ty>(curTy))) {
+        if (!addTyUnique(visited, curTy)) {
             continue
         }
         if (let Some(genTy) <- (curTy as GenericsTy)) {

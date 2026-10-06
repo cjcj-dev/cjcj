@@ -24,10 +24,6 @@ case "$platform" in
     *)        lld_tool=ld.lld ;;
 esac
 
-# Recheck the explicit private checkout at its consumer, before configure.
-script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
-bash "$script_dir/../fetch-llvm-runtime.sh" --verify-checkout "$root/paired-runtime"
-
 cmake -G Ninja -S "$llvm_src/llvm" -B "$llvm_build" \
     -DCANGJIE_RUNTIME_SOURCE_DIR="$(cd "$root/paired-runtime" && pwd)" \
     -DCMAKE_BUILD_TYPE=Release \

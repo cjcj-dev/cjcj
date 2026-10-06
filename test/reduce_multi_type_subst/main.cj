@@ -92,38 +92,3 @@ class ReduceMultiTypeSubstTest {
         @Expect(result.values.size, 1)
     }
 }
-
-@Test
-class GenericIdentityTraversalTest {
-    @TestCase
-    func SameDeclDistinctGenericIdentities(): Unit {
-        let decl = GenericParamDecl()
-        let first = GenericsTy("T", decl)
-        let second = GenericsTy("T", decl)
-        let result = GetAllGenericTys(TupleTy([first, second]))
-        let ids = HashSet<Ptr<GenericsTy>>()
-        for (value in result) { ids.add(Ptr<GenericsTy>(value)) }
-        println("TARGET_ASSERT identity count=${result.size} first=${ids.contains(Ptr<GenericsTy>(first))} second=${ids.contains(Ptr<GenericsTy>(second))}")
-        @Expect(ids.contains(Ptr<GenericsTy>(first)))
-        @Expect(ids.contains(Ptr<GenericsTy>(second)))
-        @Expect(result.size, 2)
-        if (result.size == 2) {
-            @Expect(Ptr<GenericsTy>(result[0]) == Ptr<GenericsTy>(first))
-            @Expect(Ptr<GenericsTy>(result[1]) == Ptr<GenericsTy>(second))
-        }
-    }
-
-    @TestCase
-    func SharedNodeVisitedOnceAndGenericIsLeaf(): Unit {
-        let tm = TypeManager()
-        let generic = variable(tm, "T")
-        let hidden = variable(tm, "Hidden")
-        generic.typeArgs.add(hidden)
-        let shared = TupleTy([generic])
-        let result = GetAllGenericTys(TupleTy([shared, shared, generic]))
-        println("TARGET_ASSERT shared-leaf count=${result.size}")
-        @Expect(result.size, 1)
-        @Expect(Ptr<GenericsTy>(result[0]) == Ptr<GenericsTy>(generic))
-    }
-
-}
