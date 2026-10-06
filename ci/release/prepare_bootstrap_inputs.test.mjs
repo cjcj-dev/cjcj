@@ -193,9 +193,15 @@ test(`bare ${location} archive selects complete downloaded AST inputs consumed b
   assert.equal(zip.status, 0, zip.stderr);
   const bin = path.join(dir, 'transport-bin');
   fs.mkdirSync(bin);
-  fs.writeFileSync(path.join(bin, 'gh'), '#!/bin/sh\n[ "$1" = api ] && [ "$2" = "repos/cjcj-dev/cjcj/actions/artifacts/$AST_SUPPORT_ARTIFACT_ID/zip" ] || exit 91\ncat "$AST_TEST_ZIP"\n', {mode: 0o755});
+  fs.writeFileSync(path.join(bin, 'gh'), '#!/bin/sh\n[ "$1" = api ] && [ "$2" = "repos/cjcj-dev/cjcj/releases/assets/789" ] || exit 91\ncat "$AST_TEST_ZIP"\n', {mode: 0o755});
   env.PATH = `${bin}:${env.PATH}`;
   env.AST_TEST_ZIP = archive;
+  env.AST_SUPPORT_ARTIFACT_ID = '456';
+  env.BOOTSTRAP_ARCHIVES_PIN = path.join(dir, 'archive-pin.json');
+  fs.writeFileSync(env.BOOTSTRAP_ARCHIVES_PIN, JSON.stringify({version: 1, artifacts: {
+    [env.AST_SUPPORT_ARTIFACT_ID]: {repository: 'cjcj-dev/cjcj', asset: 789, prerelease: true,
+      release_sha256: crypto.createHash('sha256').update(fs.readFileSync(archive)).digest('hex')},
+  }}));
   const result = run();
   const selected = /^CJCJ_BOOTSTRAP_AST_SUPPORT=(.+)$/m.exec(result.stdout)?.[1];
   assert.equal(selected?.includes('/ast_support-') ?? false, true, 'bare archive must not be exported as SDK input');

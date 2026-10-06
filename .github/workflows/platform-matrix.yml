@@ -216,13 +216,10 @@ jobs:
             .platform-ci/runtime-install
       - name: Load same-generation AST SDK inputs
         run: cat ci/ast_support/linux_x86_64.env >> "$GITHUB_ENV"
-      - uses: actions/download-artifact@v8
-        with:
-          artifact-ids: ${{ env.AST_SUPPORT_ARTIFACT_ID }}
-          merge-multiple: true
-          github-token: ${{ github.token }}
-          run-id: ${{ env.AST_SUPPORT_RUN_ID }}
-          path: ${{ runner.temp }}/ast-support
+      - name: Download verified prerelease input
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node ci/release/download_pinned.mjs cjcj-dev/cjcj "${{ env.AST_SUPPORT_ARTIFACT_ID }}" "${{ runner.temp }}/ast-support"
       - name: Rebuild and install alpha.06 std with coloured cjc
         run: |
           bash ci/release/build_colour_std.sh runtime-source "$RUNNER_TEMP/h48-active" \
