@@ -1,12 +1,13 @@
 #!/usr/bin/env zx
 import fs from 'node:fs';
 import path from 'node:path';
-import {execFileSync} from 'node:child_process';
+import {execFileSync, spawnSync} from 'node:child_process';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import {read, write, hash} from './identity.mjs';
 import {capture} from './capture.mjs';
 import {prepare} from './prepare.mjs';
 import {prelaunch} from './first-build.mjs';
+import {expectHeaderRejection} from './offline-target.mjs';
 
 const [rootArg, inputArg] = process.argv.slice(2);
 const root = path.resolve(rootArg), input = path.resolve(inputArg);
@@ -92,7 +93,7 @@ const drift = recipe('drift');
 const header = path.join(root, 'SDK-A/usr/include/sys/signal.h');
 const bytes = fs.readFileSync(header);
 fs.appendFileSync(header, 'CHANGED_ONLY_CONSUMED_HEADER');
-runCase('post-prepare-header-drift', () => prelaunch(drift, auth(drift), legacyDir, 0, archiveHash), 'apple-header-drift');
+runCase('post-prepare-header-drift', () => expectHeaderRejection(prelaunch, [drift, auth(drift), legacyDir, 0, archiveHash]), null);
 // Candidate-new consumer cut: same recipe, same byte mutation, same test target.
 // The expected rejection disappears at the actual prelaunch association call.
 try {
@@ -100,15 +101,18 @@ try {
   if (!text.includes('  association(recipe, capture);')) throw new Error('cut-anchor');
   fs.writeFileSync(firstBuild, text.replace('  association(recipe, capture);', '  // controlled consumer cut: association omitted'));
   fs.writeFileSync(path.join(root, 'consumer-cut.diff'), '--- first-build.mjs\n+++ first-build.mjs\n@@\n-  association(recipe, capture);\n+  // controlled consumer cut: association omitted\n');
-  const cut = await import(pathToFileURL(firstBuild).href + '?consumer-cut');
-  let rejected = false, result;
-  try {result = cut.prelaunch(drift, auth(drift), legacyDir, 0, archiveHash);} catch (e) {if (e.message === 'apple-header-drift') rejected = true; else throw e;}
-  const targetRc = rejected ? 0 : 1;
-  console.log(`TARGET_ASSERTION consumer-cut expected=apple-header-drift actual=${result?.status} ${targetRc ? 'FAIL' : 'PASS'}`);
+  const target = new URL('./offline-target.mjs', import.meta.url).href;
+  const code = `import {prelaunch} from ${JSON.stringify(pathToFileURL(firstBuild).href)}; import {expectHeaderRejection} from ${JSON.stringify(target)}; expectHeaderRejection(prelaunch, ${JSON.stringify([drift, auth(drift), legacyDir, 0, archiveHash])});`;
+  const result = spawnSync(process.execPath, ['--input-type=module', '-e', code], {encoding: 'utf8'});
+  fs.writeFileSync(path.join(root, 'cut.stdout'), result.stdout ?? '');
+  fs.writeFileSync(path.join(root, 'cut.stderr'), result.stderr ?? '');
+  process.stdout.write(result.stdout ?? '');
+  const targetRc = result.status;
   results.push({name: 'consumer-cut', status: 'ran', rc: targetRc, expected: 'apple-header-drift',
-    observed: result, target_reached: true, ok: targetRc === 1, entry_sha256: hash(firstBuild)});
+    observed: result.stdout, target_reached: true, ok: targetRc === 1, entry_sha256: hash(firstBuild)});
   write(path.join(root, 'cut.rc.json'), {rc: targetRc});
-  if (targetRc !== 1 || result.status !== 'AUTHORIZED_BOUNDARY_NOT_LAUNCHED') throw new Error('cut-not-causal');
+  if (targetRc !== 1 || !result.stdout.includes('TARGET_ASSERTION apple-header-drift actual=AUTHORIZED_BOUNDARY_NOT_LAUNCHED FAIL') ||
+    !result.stderr.includes('TARGET_ASSERTION:apple-header-drift')) throw new Error('cut-not-causal');
 } finally {fs.writeFileSync(firstBuild, before); fs.writeFileSync(header, bytes);}
 runCase('restored', () => {
   const a = auth(drift); let result;
