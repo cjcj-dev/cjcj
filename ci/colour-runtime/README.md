@@ -35,7 +35,7 @@ The language SDK keeps the original f228 runtime, as specified by runtime
 `runtime/tests/gc_unit/LANGUAGE_TOOLCHAIN.md:37–43`.
 
 Bootstrap callers with an already assembled build SDK use
-`gate_colour_runtime.mjs --build-sdk RUNTIME_SOURCE BUILD_SDK NEW_PRIVATE_DIR
+`npx --yes zx@8 ci/release/gate_colour_runtime.mjs --build-sdk RUNTIME_SOURCE BUILD_SDK NEW_PRIVATE_DIR
 RUNTIME_INSTALL`. `NEW_PRIVATE_DIR-language` must not exist. The ordinary
 producer entry still assembles its build SDK from the H48 tuple; both entries
 use the same qualified language download and unchanged complete runtime gate.
