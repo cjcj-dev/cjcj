@@ -354,6 +354,13 @@ test(`actual stage3 entry verifies promoted SDK before stage2: ${formal ? 'forma
   fs.mkdirSync(path.join(work, 'stdlib-stage2/lib', tuple), {recursive: true});
   fs.copyFileSync(path.join(input, 'lib', tuple, 'libcangjie-std-core.a'),
     path.join(work, 'stdlib-stage2/lib', tuple, 'libcangjie-std-core.a'));
+  // Publish through the production entry so handoff authenticates the actual
+  // stage1 compiler, stage2 compiler and installed std prefix.
+  fs.copyFileSync(a.compiler, path.join(work, 'cjcj-stage1'));
+  write('stdlib-stage2/std-producer.json', JSON.stringify({compiler_sha256: hash(a.compiler)}) + '\n');
+  const publishStd = () => ok(['node', path.join(repo, 'ci/bootstrap/publish-std-output.mjs'),
+    work, path.join(work, 'stdlib-stage2'), path.join(work, 'cjcj-stage1'), tuple], f.env);
+  publishStd();
   fs.cpSync(f.runtimeSource, path.join(workspace, 'cangjie_runtime'), {recursive: true});
   const env = {...Object.fromEntries(Object.entries(f.env).filter(([key]) => !key.startsWith('COLOUR_RT_'))), ...a.inputs, CANGJIE_WORKSPACE: workspace, GITHUB_WORKSPACE: path.join(workspace, 'source'),
     CJCJ_BOOTSTRAP_WORK: path.join(workspace, 'bootstrap-work'), CJCJ_STAGE3_STDLIB_BUILD_TYPE: 'release',
@@ -382,11 +389,13 @@ test(`actual stage3 entry verifies promoted SDK before stage2: ${formal ? 'forma
       const lock = JSON.parse(bytes); lock.components.runtime.commit = 'e'.repeat(40);
       fs.writeFileSync(file, JSON.stringify(lock));
     } else fs.appendFileSync(file, 'changed');
+    publishStd();
     const wrong = execute(command, env);
     assert.notEqual(wrong.status, 0); assert.match(wrong.output, expected, wrong.output);
     assert.doesNotMatch(wrong.output, /STAGE2_EXECUTION_BOUNDARY|BOOTSTRAP_RUNTIME_CONSUMER_VERIFIED/);
     console.log(`STAGE3_REPLACEMENT_TARGET_ASSERT identity=${formal ? 'formal' : 'candidate'} wrong=${name} rejected-before-stage2=1`);
     fs.rmSync(file);
+    publishStd();
   }
   const wrongName = execute(command, {...env, CJCJ_BOOTSTRAP_COLOUR_LLVM_SO: path.join(path.dirname(dylib), 'wrong-library.so')});
   assert.notEqual(wrongName.status, 0); assert.match(wrongName.output, /BOOTSTRAP_BACKEND_LIBRARY_NAME_MISMATCH/, wrongName.output);
