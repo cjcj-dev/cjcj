@@ -45,7 +45,19 @@ def prepare(tree, sdk, out, producer=None, stub_imports=None):
         record['inputs'] = {str(p): digest(p) for p in inputs + sources}
         record['sdk_files'] = {str(p.relative_to(sdk)): digest(p)
                                for p in sorted(sdk.rglob('*')) if p.is_file()}
-        record['source_sha'] = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=tree, text=True).strip()
+        identity_argv = ['git', 'rev-parse', 'HEAD']
+        identity_log = out / 'input_identity.log'
+        record.update(rc=None, argv=identity_argv)
+        record['logs']['input_identity'] = str(identity_log)
+        record['identity'] = {'argv': identity_argv, 'rc': None, 'log': str(identity_log)}
+        with identity_log.open('w') as log:
+            identity = subprocess.run(identity_argv, cwd=tree, text=True,
+                                      stdout=subprocess.PIPE, stderr=log)
+            log.write(identity.stdout)
+        record['rc'] = identity.returncode
+        record['identity']['rc'] = identity.returncode
+        identity.check_returncode()
+        record['source_sha'] = identity.stdout.strip()
         record['phase'] = 'copy_imports'
         imports = out / 'imports/objc'
         imports.mkdir(parents=True, exist_ok=True)

@@ -169,6 +169,36 @@ for (const scenario of [
   });
 }
 
+test('fixture diagnostics preserve the real Git identity subprocess failure through the workspace runner', async () => {
+  const {runCangjie, digest} = await import('./run-registered-tests.mjs');
+  await prerequisiteFixture(async ({work, root, producer, script}) => {
+    await fs.writeFile(producer, '#!/bin/sh\nexit 0\n', {mode: 0o755});
+    await fs.rm(path.join(root, '.git'), {recursive: true});
+    const output = path.join(work, 'git-failed');
+    await fs.mkdir(output);
+    const [failed] = await runCangjie(root, [], output);
+    const saved = JSON.parse(await fs.readFile(path.join(output, 'prerequisite.json')));
+    let manifest;
+    try { manifest = JSON.parse(await fs.readFile(path.join(output, 'objc-fixture/fixture.json'))); }
+    catch { /* The diagnostic invariant below includes manifest publication. */ }
+    const argv = ['git', 'rev-parse', 'HEAD'];
+    const log = path.join(output, 'objc-fixture/input_identity.log');
+    console.log(`TARGET_GIT_IDENTITY rc=${manifest?.rc} nested=${manifest?.identity?.rc} script=${digest(script)}`);
+    assert.deepEqual({phase: manifest?.phase, rc: manifest?.rc, argv: manifest?.argv,
+      identity: manifest?.identity, logs: manifest?.logs, fixture: saved.fixture},
+    {phase: 'input_identity', rc: 128, argv, identity: {argv, rc: 128, log},
+      logs: {input_identity: log}, fixture: manifest}, 'target raw Git subprocess status and consumer fidelity');
+    assert.deepEqual(failed.fixture, manifest);
+    assert.equal(failed.executed, false);
+    assert.equal(failed.preparation.rc, 1);
+    assert.equal(failed.rc, 1);
+    assert.equal(manifest.exception_type, 'CalledProcessError');
+    assert.match(manifest.exception_text, /128/);
+    assert.match(await fs.readFile(log, 'utf8'), /fatal: not a git repository/);
+    assert.deepEqual(manifest.stubs, {});
+  });
+});
+
 test('official host always uploads preparation and fixture diagnostic evidence', async () => {
   const workflow = await fs.readFile(path.join(repoRoot, '.github/workflows/ci.yml'), 'utf8');
   const section = workflow.slice(workflow.indexOf('      - name: Preserve Cangjie test results'), workflow.indexOf('  fixed-llvm-tools:'));
