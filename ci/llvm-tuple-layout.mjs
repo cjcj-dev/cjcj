@@ -34,7 +34,7 @@ export async function publishFixedTupleToDepot(depotRoot, env = process.env) {
     printf 'CANGJIE_COMPILER_SHA=%s\n' ${CANGJIE_COMPILER_SHA}
     printf 'RECIPE_CJCJ_SHA=%s\n' ${recipeSha}
     printf 'DEPOT_ROLE=byte-identical mirror\n'
-  } > ${`${depot}/MANIFEST`}`;
+  } > ${`${depot}/MANIFEST`} || exit 1`;
   process.stderr.write(written.stderr);
   if (written.exitCode !== 0) return 1;
   if ((await command(['cp', '--', `${depot}/MANIFEST`, `${depot}/lib/STATIC_LLVM.txt`])).exitCode !== 0) return 1;
@@ -44,8 +44,9 @@ export async function publishFixedTupleToDepot(depotRoot, env = process.env) {
   const sums = await $({quiet: true, nothrow: true, env})`cd ${depot} && sha256sum -- ${files} > SHA256SUMS`;
   process.stderr.write(sums.stderr);
   if (sums.exitCode !== 0) return 1;
-  console.log(`published fixed LLVM tuple to depot ${depot}`);
-  return 0;
+  // Preserve the shell builtin's output and final function status, including
+  // stdout failures. This status also reaches callers running with set -e.
+  return (await command(['echo', `published fixed LLVM tuple to depot ${depot}`])).exitCode;
 }
 const entryIndex = process.argv.findIndex((arg, i) => i > 0 && path.resolve(arg) === fileURLToPath(import.meta.url));
 if (entryIndex !== -1) process.exitCode = await publishFixedTupleToDepot(process.argv[entryIndex + 1]);

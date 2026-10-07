@@ -10,6 +10,7 @@ export function exportBranches(source) {
   if (!array) throw Error('missing payload array');
   const payloads = array[2].trim().split(/\s+/);
   let loop = null, manifest = false, sums = false, manifestPrints = 0;
+  const lastManifestPrint = lines.findLastIndex(line => line.trim().startsWith('printf '));
   const add = (kind, index, text, inputs) => rows.push({kind, line: index + 1, source: text, inputs});
   for (const [index, text] of lines.entries()) {
     const value = text.trim();
@@ -80,7 +81,6 @@ export function exportBranches(source) {
       } else if (value.startsWith('} >')) {
         add('error:manifest-redirect', index, text, [
           {fixture: 'manifest-directory', expected: 1},
-          {fail: {command: 'printf', occurrence: manifestPrints}, expected: 1},
         ]);
         manifest = false;
       } else if (value.startsWith(') ||')) {
@@ -94,8 +94,22 @@ export function exportBranches(source) {
     }
     // The sha256sum is the subshell's final command; its status reaches || return.
     if (sums && (value.startsWith('sha256sum ') || value.startsWith('"./'))) continue;
-    if (manifest && value.startsWith('printf ')) { manifestPrints++; continue; }
-    if (/^(?:local |publish_fixed_tuple_to_depot\(\) \{|echo |\})/.test(value)) continue;
+    // The entire group is the left operand of ||: errexit is suppressed inside
+    // it, even in a set -e caller. Only its last printf determines group status.
+    if (manifest && value.startsWith('printf ')) {
+      manifestPrints++;
+      add('status:manifest-printf', index, text, [{
+        fail: {command: 'printf', occurrence: manifestPrints},
+        expected: index === lastManifestPrint ? 1 : 0,
+      }]);
+      continue;
+    }
+    // The function's final command status is returned to its set -e caller.
+    if (value.startsWith('echo ')) {
+      add('error:final-echo', index, text, [{fail: {command: 'echo', occurrence: 1}, expected: 19}]);
+      continue;
+    }
+    if (/^(?:local |publish_fixed_tuple_to_depot\(\) \{|\})/.test(value)) continue;
     throw Error(`unrecognized source at ${index + 1}: ${value}`);
   }
   if (!rows.some(row => row.kind === 'default:root')) throw Error('missing default root');

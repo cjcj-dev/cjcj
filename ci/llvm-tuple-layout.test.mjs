@@ -87,24 +87,24 @@ if (process.env.TUPLE_DIFFERENTIAL === '1') test('tuple source-derived full tabl
     const depotRoot = args[0] || env.CJCJ_LLVM_DEPOT_ROOT || '/root/llvmdepot';
     const tuple = `${depotRoot}/${env.LLVM_SHA || ''}/${env.CANGJIE_COMPILER_SHA || ''}`;
     const old = path.join(work, 'retired-entry.bash');
-    fs.writeFileSync(old, source + '\npublish_fixed_tuple_to_depot "$@"\n');
+    fs.writeFileSync(old, 'set -e\n' + source + '\npublish_fixed_tuple_to_depot "$@"\n');
     const tools = ['git', 'mkdir', 'cp', 'gzip', 'chmod', 'sha256sum'];
     const real = Object.fromEntries(tools.map(tool => [tool, command(['bash', '-c', 'command -v "$1"', 'resolve-tool', tool]).stdout.trim()]));
     const bin = path.join(work, 'bin'); fs.mkdirSync(bin);
-    if (input.fail && !['cd', 'printf'].includes(input.fail.command)) {
+    if (input.fail && !['cd', 'printf', 'echo'].includes(input.fail.command)) {
       const tool = input.fail.command, state = path.join(work, 'counter');
       const trace = path.join(work, 'argv.json');
       const wrapper = `#!/usr/bin/env node\nimport fs from 'node:fs';\nimport {spawnSync} from 'node:child_process';\nconst state = ${JSON.stringify(state)};\nconst n = fs.existsSync(state) ? Number(fs.readFileSync(state, 'utf8')) + 1 : 1;\nfs.writeFileSync(state, String(n));\nif (n === ${input.fail.occurrence}) {\nfs.writeFileSync(${JSON.stringify(trace)}, JSON.stringify(process.argv.slice(2)));\nconsole.error(${JSON.stringify(`fixture command error: ${tool}`)}); process.exit(19);\n}\nconst result = spawnSync(${JSON.stringify(real[tool])}, process.argv.slice(2), {stdio: 'inherit'});\nif (result.error) throw result.error; process.exit(result.status);\n`;
       fs.writeFileSync(path.join(bin, tool), wrapper, {mode: 0o755});
       env.PATH = `${bin}:${env.PATH}`;
     }
-    if (input.fail?.command === 'cd' || input.fail?.command === 'printf') {
+    if (['cd', 'printf', 'echo'].includes(input.fail?.command)) {
       const bashEnv = path.join(work, 'bash-env');
       if (input.fail.command === 'cd') fs.writeFileSync(bashEnv, "cd() { printf '%s\\n' 'fixture command error: cd' >&2; return 19; }\n");
-      else {
+      else if (input.fail.command === 'printf') {
         const state = path.join(work, 'printf-counter');
         fs.writeFileSync(bashEnv, `printf() { local count=0; if [[ -f '${state}' ]]; then read -r count < '${state}' || :; fi; count=$((count + 1)); builtin printf '%s\\n' "$count" > '${state}'; if [[ $count == ${input.fail.occurrence} ]]; then builtin printf '%s\\n' 'fixture command error: printf' >&2; return 19; fi; builtin printf "$@"; }\n`);
-      }
+      } else fs.writeFileSync(bashEnv, "echo() { builtin printf '%s\\n' 'fixture command error: echo' >&2; return 19; }\n");
       env.BASH_ENV = bashEnv;
     }
     const prepare = () => {
@@ -130,6 +130,8 @@ if (process.env.TUPLE_DIFFERENTIAL === '1') test('tuple source-derived full tabl
       const sums = result.status === 0 ? fs.readFileSync(path.join(tuple, 'SHA256SUMS'), 'utf8') : null;
       arms[name] = {rc: result.status, stdout: normalize(result.stdout), stderr: normalize(result.stderr), trace, sums};
       fs.writeFileSync(path.join(work, `${name}.json`), JSON.stringify(arms[name], null, 2));
+      // A green comparison without an observed fault is not a positive control.
+      if (input.fail) assert.match(arms[name].stderr, new RegExp(`fixture command error: ${input.fail.command}`), `${name} must execute injected ${input.fail.command}`);
     }
     results.push({...entry, arms});
     fs.writeFileSync(path.join(evidence, 'results.json'), JSON.stringify(results, null, 2));
