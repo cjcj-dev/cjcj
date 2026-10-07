@@ -17,8 +17,14 @@ const sdkProduct=process.env.SDK_BUILD_PRODUCT || here+'/sdk_build.sh';
 const {Bootstrap}=await import(pathToFileURL(product.replace(/\.sh$/,'.mjs')));
 const out=fs.mkdtempSync(path.join(process.env.TMPDIR||os.tmpdir(),'bootstrap-contract-'));
 let f;
+let invocation=0;
 const invoke=(entry,args,env={})=>{
   const result=spawnSync(entry.endsWith('.sh')?'bash':process.execPath,[entry,...args],{env:{...process.env,...env},encoding:'utf8',maxBuffer:16*1024*1024});
+  if(process.env.BOOTSTRAP_TEST_EVIDENCE) {
+    const evidence=path.resolve(process.env.BOOTSTRAP_TEST_EVIDENCE);fs.mkdirSync(evidence,{recursive:true});const label=String(++invocation).padStart(3,'0');
+    fs.writeFileSync(evidence+'/'+label+'.log',(result.stdout||'')+(result.stderr||''));
+    fs.writeFileSync(evidence+'/'+label+'.json',JSON.stringify({entry,args,rc:result.status,error:result.error?.message||null},null,2)+'\n');
+  }
   assert.equal(result.error,undefined);assert.notEqual(result.status,null);return {...result,text:result.stdout+result.stderr};
 };
 const count=(text,regexp,n,label)=>{const found=text.split('\n').filter(line=>regexp.test(line)).length;assert.equal(found,n,`${label} count=${found} expected=${n}`);};
@@ -63,14 +69,14 @@ function checkDry(result,stage='all') {
   count(text,/--verify-host-rt /,2,'HOST-RT');count(text,/stage1_host_runner.sh .*sdk-stage1 .*sdk-stage0 .*host-rt/,2,'HOST-RUNNER');
   assert.match(text,/sdk_build.sh .*--to .*sdk-std-bootstrap --host --llvm-tuple/);assert.match(text,/std_runtime_colour.mjs --colour-runtime .* --std .*stdlib-stage1/);
   const firstStd=text.indexOf('ASSERT stdlib-stage1 shape=planned'),secondStd=text.indexOf('ASSERT stdlib-stage2 shape=planned');
-  const firstAssembly=text.indexOf('--std '+f.out+'/stdlib-stage1'),secondAssembly=text.indexOf('--std '+f.out+'/stdlib-stage2');
+  const firstAssembly=text.indexOf('--std '+f.out+'/work/stdlib-stage1'),secondAssembly=text.indexOf('--std '+f.out+'/work/stdlib-stage2');
   assert.ok(firstStd>=0&&firstAssembly>firstStd&&secondStd>firstAssembly&&secondAssembly>secondStd,'STD precedes its consuming compiler assembly');
   const order=text.split('\n').flatMap(line=>{
     if (/^\[stage[01]\]/.test(line))return [line.startsWith('[stage0]')?'stage0':'stage1'];
     if (/^ASSERT stdlib-stage1 shape=planned/.test(line))return ['initial-std-built'];
     if (/^CMD rm -rf -- .*\/sdk-std-bootstrap$/.test(line))return ['bootstrap-sdk-removed'];
     if (/^CMD rm -rf -- .*\/std-runtime-link$/.test(line))return ['runtime-link-cleared'];
-    if (/^CMD .*sdk_build\.sh .*--to .*\/sdk-stage1 --target /.test(line))return [line.includes('--std '+f.out+'/stdlib-stage1 ')?'assemble-old':line.includes('--std '+f.out+'/stdlib-stage2 ')?'assemble-new':'assemble-unexpected'];
+    if (/^CMD .*sdk_build\.sh .*--to .*\/sdk-stage1 --target /.test(line))return [line.includes('--std '+f.out+'/work/stdlib-stage1 ')?'assemble-old':line.includes('--std '+f.out+'/work/stdlib-stage2 ')?'assemble-new':'assemble-unexpected'];
     if (/^ASSERT stage1-compiler executable=planned/.test(line))return ['executable'];
     if (/^ASSERT stdlib-stage2 shape=planned/.test(line))return ['stdlib-built'];
     return [];
