@@ -3,6 +3,7 @@
 // Keep the machine identity separate from the selected compilation target.
 import fs from 'node:fs';
 import path from 'node:path';
+import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {getTarget} from '../../build/lib/targets.mjs';
 
@@ -33,6 +34,18 @@ export function nativeHost() {
   });
 }
 
+// Capture the native child's real rc; callers may inspect failures explicitly.
+export function execute(command, args, {check = true, ...options} = {}) {
+  const result = spawnSync(command, args, {encoding:'utf8', maxBuffer:128 * 1024 * 1024, ...options});
+  if (result.error) throw result.error;
+  const out = {stdout:result.stdout || '', stderr:result.stderr || '', exitCode:result.status, signal:result.signal};
+  if (check && (out.exitCode !== 0 || out.signal)) {
+    const error = new Error(`${command} rc=${out.exitCode} signal=${out.signal || 'none'} ${out.stderr.trim()}`);
+    error.exitCode = out.exitCode; throw error;
+  }
+  return out;
+}
+
 // The GNU utilities preserve the existing manifest and cache byte formats.
 // zx interpolates each argument separately; filenames never become shell code.
 export async function fileTool(tool, args) {
@@ -40,7 +53,7 @@ export async function fileTool(tool, args) {
     throw new Error(`BOOTSTRAP_FILE_TOOL_UNSUPPORTED ${tool}`);
   }
   const command = `${nativeHost().os === 'darwin' ? 'g' : ''}${tool}`;
-  return $`${command} ${args}`.quiet();
+  return execute(command, args);
 }
 
 // Candidate host_nm.py:9-32, preserving the native tool's actual return code.
@@ -50,7 +63,7 @@ export async function readSymbols(args) {
     ? args.map(arg => arg === '-D' ? '-g' : arg === '--defined-only' ? '-U' : arg)
     : args;
   const command = darwin ? ['xcrun', 'nm'] : ['nm'];
-  const result = await $`${command} ${translated}`.quiet().nothrow();
+  const result = execute(command[0], [...command.slice(1), ...translated], {check:false});
   const stdout = darwin
     ? result.stdout.replace(/^(.*\s[A-Za-z?]\s+)_([^\s]+)(\r?)$/gm, '$1$2$3')
     : result.stdout;
@@ -71,7 +84,7 @@ export function compilerCacheEnvironment() {
 // Official Option.cpp consumes SDKROOT for Darwin native system libraries.
 export async function nativeEnvironment() {
   if (nativeHost().os !== 'darwin') return {};
-  const root = process.env.SDKROOT || (await $`xcrun --sdk macosx --show-sdk-path`.quiet()).stdout.trim();
+  const root = process.env.SDKROOT || execute('xcrun', ['--sdk', 'macosx', '--show-sdk-path']).stdout.trim();
   if (!fs.statSync(root).isDirectory()) throw new Error(`BOOTSTRAP_SDKROOT_MISSING ${root}`);
   return {SDKROOT: root};
 }
@@ -81,7 +94,7 @@ export async function nativeEnvironment() {
 export async function stdSystemPath() {
   const host = nativeHost();
   if (host.os !== 'darwin') return host.systemPath;
-  const prefix = (await $`brew --prefix llvm@16`.quiet()).stdout.trim();
+  const prefix = execute('brew', ['--prefix', 'llvm@16']).stdout.trim();
   fs.accessSync(path.join(prefix, 'bin', 'llvm-ranlib'), fs.constants.X_OK);
   return `${prefix}/bin:${host.systemPath}`;
 }

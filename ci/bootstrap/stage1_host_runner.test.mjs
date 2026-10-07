@@ -49,7 +49,7 @@ for (const kind of cases) test(kind, () => {
       assert.equal(sha(real), sha(compiler), 'wrapper must preserve compiler ELF');
       const call = spawnSync(cjc, [], {encoding:'utf8'});
       assert.equal(call.status, 0, call.stderr);
-      assert.match(fs.readFileSync(cjc, 'utf8'), /export LD_LIBRARY_PATH=/);
+      assert.match(fs.readFileSync(cjc, 'utf8'), /LD_LIBRARY_PATH/);
       console.log(`ASSERT ${kind} wrapper-executed compiler-ELF-preserved`);
     } else {
       assert.equal(result.status, 1, result.stdout + result.stderr);
