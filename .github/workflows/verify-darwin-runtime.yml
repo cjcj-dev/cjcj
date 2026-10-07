@@ -1,12 +1,22 @@
 name: Verify published Darwin runtime input
 on:
   workflow_dispatch:
+    inputs:
+      apple_input:
+        description: Private Apple input admission only
+        type: choice
+        default: none
+        options: [none, green, controls]
+      apple_deadline:
+        description: Authorized absolute UTC epoch
+        type: string
   workflow_call:
 permissions:
   contents: read
   actions: read
 jobs:
   source-input:
+    if: ${{ inputs.apple_input == '' || inputs.apple_input == 'none' }}
     strategy:
       fail-fast: false
       matrix:
@@ -45,4 +55,30 @@ jobs:
         with:
           name: darwin-source-evidence-${{ matrix.platform }}
           path: evidence
+          if-no-files-found: error
+  apple-input:
+    if: ${{ github.event_name == 'workflow_dispatch' && (inputs.apple_input == 'green' || inputs.apple_input == 'controls') }}
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Load immutable Apple input pins
+        run: npx --yes zx@8 ci/bootstrap/apple_input/load-pins.mjs
+      - uses: ./.github/actions/sccache
+        with:
+          component: runtime
+          platform: darwin-aarch64
+          pin: ${{ env.RUNTIME_REF }}
+      - name: Actual Apple header collection and admission
+        env:
+          APPLE_BATCH_MODE: ${{ inputs.apple_input }}
+          APPLE_BATCH_DEADLINE: ${{ inputs.apple_deadline }}
+        run: npx --yes zx@8 ci/bootstrap/apple_input/darwin-batch.mjs
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: apple-input-${{ inputs.apple_input }}-${{ github.run_id }}
+          path: evidence/apple-input
           if-no-files-found: error
