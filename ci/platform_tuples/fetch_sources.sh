@@ -27,10 +27,10 @@ fetch_exact() {
 }
 
 # Validate the private pair before fetching even LLVM.
-bash "$repo_root/ci/fetch-llvm-runtime.sh" --check-input "$root/paired-runtime"
+npx --yes zx@8 "$repo_root/ci/fetch-llvm-runtime.mjs" --check-input "$root/paired-runtime"
 
 fetch_exact "${LLVM_URL:?}" "${LLVM_SHA:?}" "$root/llvm-project"
-bash "$repo_root/ci/fetch-llvm-runtime.sh" "$root/paired-runtime"
+npx --yes zx@8 "$repo_root/ci/fetch-llvm-runtime.mjs" "$root/paired-runtime"
 # The cjcj-llvm fork (in-tree demangler, getUNDEF fix) predates the 7-operand
 # reflection enum; its llc consumes cjcj bitcode regardless (proven on the
 # linux_x86_64 tuple).  Log the enum shape for the record, do not assert it.

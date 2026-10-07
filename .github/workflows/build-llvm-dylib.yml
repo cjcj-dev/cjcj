@@ -67,7 +67,7 @@ jobs:
           git -C llvm-fork fetch --depth=1 origin "$LLVM_SHA"
           git -C llvm-fork checkout --detach FETCH_HEAD
           test "$(git -C llvm-fork rev-parse HEAD)" = "$LLVM_SHA"
-          bash ci/fetch-llvm-runtime.sh paired-runtime
+          npx --yes zx@8 ci/fetch-llvm-runtime.mjs paired-runtime
           cmake -G Ninja -S llvm-fork/llvm -B dylib-build \
             -DCANGJIE_RUNTIME_SOURCE_DIR="$PWD/paired-runtime" \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
