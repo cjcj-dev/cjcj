@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import path from 'node:path';
 
-const entry = process.env.ABI_CLI_TEST_ENTRY || path.join(import.meta.dirname, 'check-llvm-runtime-abi.mjs');
+const entry = path.join(import.meta.dirname, 'check-llvm-runtime-abi.mjs');
 const invoke = args => spawnSync('npx', ['--yes', 'zx@8', entry, ...args], {encoding: 'utf8'});
 
 for (const name of ['llvm_repo', 'llvm_ref', 'runtime_repo', 'runtime_ref']) {
