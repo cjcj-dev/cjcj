@@ -95,6 +95,7 @@ public class CHIR2BCHIR {
             if (let Some(finalizer) <- classDef.GetFinalizer()) {
                 info.finalizer = finalizer.GetIdentifierWithoutPrefix()
             }
+            info.finalizerKnown = true
             CollectMethods(classDef, info)
             AddClassInfo(BCHIRMangledName(classDef), info)
         }

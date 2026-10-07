@@ -1107,12 +1107,36 @@ public class Translator {
                 CurrentBlock().AppendExpression(createdExit1070)
             }
         }
+        EmitObjectInitReturn(fn, body)
         currentBlock = savedBlock
         delayExitSignal = savedDelayExitSignal
         currentFunc = None
         currentAstFuncDecl = savedAstFuncDecl
         blockGroupStack.remove(at: blockGroupStack.size - 1)
         return fn
+    }
+
+    private func EmitObjectInitReturn(fn: Function, body: BlockGroup): Unit {
+        if (!fn.IsConstructor()) {
+            return
+        }
+        let owner = match (fn.GetParentCustomTypeDef()) {
+            case Some(value) => value
+            case None => return
+        }
+        if (owner.GetPackageName() != "std.core" || owner.GetSrcCodeIdentifier() != "Object") {
+            return
+        }
+        for (block in body.GetBlocks()) {
+            if (let Some(exit) <- block.GetTerminator()) {
+                if (exit.GetExprKind() == ExprKind.EXIT) {
+                    let registration = builder.CreateIntrinsic(builder.context.GetUnitTy(),
+                        IntrisicCallContext(kind: IntrinsicKind.REGISTER_FINALIZER,
+                            args: ArrayList<Value>([fn.GetParam(0)])), block)
+                    registration.MoveBefore(exit)
+                }
+            }
+        }
     }
 
     private func TranslateConstructorDefaultFieldInitializers(funcDecl: AstFuncDecl, funcBody: AstFuncBody): Unit {
@@ -1611,21 +1635,6 @@ public class Translator {
         return castedValue
     }
 
-    private func IsUnnecessarySuperCall(node: AstNode): Bool {
-        if (let Some(callExpr) <- (node as AstCallExpr)) {
-            if (let Some(baseFunc) <- callExpr.baseFunc) {
-                if (let Some(refExpr) <- (baseFunc as AstRefExpr)) {
-                    if (refExpr.isSuper) {
-                        if (let Some(astTy) <- callExpr.GetTy()) {
-                            return astTy.IsObject()
-                        }
-                    }
-                }
-            }
-        }
-        return false
-    }
-
     // C++: TranslateBlock.cpp:12-23 CollectInstantiatedFuncNodes.
     private func CollectInstantiatedFuncNodes(nodes: ArrayList<AstNode>, genericFunc: AstFuncDecl,
         manager: GenericInstantiationManager): Unit {
@@ -1653,9 +1662,6 @@ public class Translator {
                     nodes.add(funcDecl)
                     continue
                 }
-            }
-            if (IsUnnecessarySuperCall(body)) {
-                continue
             }
             nodes.add(body)
         }

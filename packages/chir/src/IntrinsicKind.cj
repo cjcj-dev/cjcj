@@ -88,6 +88,7 @@ public enum IntrinsicKind {
     | LOG | LOG2 | LOG10 | SQRT | ROUND | POW | POWI | BIT_CAST | PREINITIALIZE | OBJECT_AS | IS_NULL
     | GET_TYPE_FOR_TYPE_PARAMETER | IS_SUBTYPE_TYPES | EXCLUSIVE_SCOPE
     | CANONICALIZE_STRING_BACKING
+    | REGISTER_FINALIZER
 }
 
 public func IntrinsicKindName(kind: IntrinsicKind): String {
@@ -455,6 +456,7 @@ public func IntrinsicKindName(kind: IntrinsicKind): String {
         case IntrinsicKind.IS_SUBTYPE_TYPES => "IS_SUBTYPE_TYPES"
         case IntrinsicKind.EXCLUSIVE_SCOPE => "EXCLUSIVE_SCOPE"
         case IntrinsicKind.CANONICALIZE_STRING_BACKING => "CANONICALIZE_STRING_BACKING"
+        case IntrinsicKind.REGISTER_FINALIZER => "REGISTER_FINALIZER"
     }
 }
 

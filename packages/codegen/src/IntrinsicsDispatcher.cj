@@ -10,6 +10,8 @@ import cjcj::chir.TryIntrinsic
 import cjcj::chir.NeedCheckArrayBound
 import cjcj::chir.RawArrayType
 import cjcj::chir.Function
+import cjcj::chir.AllocateBase
+import cjcj::chir.ClassType
 import cjcj::chir.Type
 import cjcj::chir.Value
 import cjcj::utils.CJC_ASSERT
@@ -33,6 +35,28 @@ public func GenerateIntrinsic(irBuilder: IRBuilder2, chirExpr: Expression): LLVM
     return LLVMNullValue()
 }
 
+private func IsExactNonFinalizableReceiver(receiver: Value): Bool {
+    if (let Some(classType) <- (receiver.GetType().getOrThrow().StripAllRefs() as ClassType)) {
+        let classDef = classType.GetClassDef()
+        if (!classDef.CanBeInherited()) {
+            return classDef.GetFinalizer().isNone()
+        }
+    }
+    if (let Some(local) <- receiver.AsLocalVar()) {
+        if (let Some(expression) <- local.GetExpr()) {
+            if (let Some(allocation) <- (expression as AllocateBase)) {
+                if (let Some(classType) <- (allocation.GetType() as ClassType)) {
+                    return classType.GetClassDef().GetFinalizer().isNone()
+                }
+            }
+            if (expression.GetExprKind() == ExprKind.CLASS_STATIC_CAST) {
+                return IsExactNonFinalizableReceiver(expression.GetOperand(0))
+            }
+        }
+    }
+    return false
+}
+
 private func GenerateIntrinsic(irBuilder: IRBuilder2, kind: IntrinsicKind, args: ArrayList<Value>,
     typeArgs: ArrayList<Type>, resultType: Option<Type>, needArrayBoundCheck: Bool,
     topLevelFunc: Option<Function>): LLVMValueRef {
@@ -41,6 +65,13 @@ private func GenerateIntrinsic(irBuilder: IRBuilder2, kind: IntrinsicKind, args:
     }
     if (kind == IntrinsicKind.PREINITIALIZE) {
         return GeneratePreInitializeIntrinsics(irBuilder)
+    }
+    if (kind == IntrinsicKind.REGISTER_FINALIZER) {
+        if (!IsExactNonFinalizableReceiver(args[0])) {
+            let receiver = irBuilder.GetCGModule().GetMappedCGValue(args[0]).GetRawValue()
+            irBuilder.CallRegisterFinalizer(receiver)
+        }
+        return UnitOrNull(irBuilder, resultType)
     }
     if (kind == IntrinsicKind.CG_UNSAFE_BEGIN || kind == IntrinsicKind.CG_UNSAFE_END) {
         return UnitOrNull(irBuilder, resultType)
