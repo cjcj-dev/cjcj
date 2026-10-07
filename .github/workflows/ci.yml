@@ -201,6 +201,10 @@ jobs:
             ${{ runner.temp }}/package-tests/results.json
             ${{ runner.temp }}/package-tests/run.log
             ${{ runner.temp }}/package-tests/reports
+            ${{ runner.temp }}/package-tests/prepare
+            ${{ runner.temp }}/package-tests/objc-fixture/fixture.json
+            ${{ runner.temp }}/package-tests/objc-fixture/*.log
+            ${{ runner.temp }}/package-tests/prerequisite.json
 
   fixed-llvm-tools:
     name: Build LLVM tools
