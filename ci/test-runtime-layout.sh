@@ -19,7 +19,7 @@ for side in runtime llvm; do
     git -C "$work/$side" -c user.name=Zxilly -c user.email=zxilly@outlook.com commit -qm 'test: pinned layout snapshot'
 done
 check() {
-    bash "$repo/ci/check-llvm-runtime-abi.sh" \
+    npx --yes zx@8 "$repo/ci/check-llvm-runtime-abi.mjs" \
         --runtime-repo "$work/runtime" --runtime-ref HEAD \
         --llvm-repo "$work/llvm" --llvm-ref HEAD
 }
