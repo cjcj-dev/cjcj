@@ -29,7 +29,7 @@ export async function checkCodegenRuntimeLayout(sourceRoot = path.join(repo, 'ta
       {check: false, capture: true, logOutput: false});
     if (present.exitCode !== 0) await checkoutExactSource(url, dest, sha);
   }));
-  await run(['bash', path.join(repo, 'ci/check-llvm-runtime-abi.sh').replaceAll('\\', '/'),
+  await run(['npx', '--yes', 'zx@8', path.join(repo, 'ci/check-llvm-runtime-abi.mjs').replaceAll('\\', '/'),
     '--llvm-repo', path.join(sourceRoot, 'llvm'), '--llvm-ref', llvmSha,
     '--runtime-repo', path.join(sourceRoot, 'runtime'), '--runtime-ref', runtime.runtimeRef]);
 }

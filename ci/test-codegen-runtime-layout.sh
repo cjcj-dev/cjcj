@@ -22,7 +22,7 @@ cmp "$compiler" "$work/frontend/cjcj-stage1"
 ln -sfn cjcj-stage1 "$work/frontend/cjc-frontend"
 compiler="$work/frontend/cjc-frontend"
 # The source check includes the generated Cangjie file, not just the LLVM copy.
-bash "$repo/ci/check-llvm-runtime-abi.sh" --llvm-repo "$llvm_repo" --llvm-ref "$LLVM_SHA" \
+npx --yes zx@8 "$repo/ci/check-llvm-runtime-abi.mjs" --llvm-repo "$llvm_repo" --llvm-ref "$LLVM_SHA" \
     --runtime-repo "$runtime_repo" --runtime-ref "$RUNTIME_REF" > "$work/pairing.log" 2>&1
 header="$work/CangjieRuntimeLayout.h"
 git -C "$llvm_repo" show "$LLVM_SHA:llvm/include/llvm/CodeGen/CangjieRuntimeLayout.h" > "$header"
