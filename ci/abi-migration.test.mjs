@@ -13,9 +13,9 @@ function command(args, options = {}) {
   return result;
 }
 function oldSource() {
-  const result = command(['git', '-C', root, 'show', `b597f8618c6c2c555c9c23b57be3fc83c2e225e9:${oldName}`]);
-  assert.equal(result.status, 0, result.stderr);
-  return result.stdout;
+  // Byte-for-byte retired source at b597f8618c6c2c555c9c23b57be3fc83c2e225e9.
+  // A data fixture keeps mechanical export available in depth-one CI checkouts.
+  return fs.readFileSync(new URL('./fixtures/llvm-runtime-abi-baseline.txt', import.meta.url), 'utf8');
 }
 const source = oldSource();
 const rows = exportBranches(source);
