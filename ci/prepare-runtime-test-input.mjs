@@ -42,5 +42,7 @@ if (mode === '--run') {
   if (GATING.length < GATING_FLOOR) throw new Error('empty or incomplete Node test manifest');
   const result = await $({cwd: repoRoot, env: {...process.env, GC_FIX_RUNTIME_CHECKOUT: checkout}, nothrow: true})
     `node --test --test-timeout=300000 ${GATING}`;
+  process.stdout.write(result.stdout);
+  process.stderr.write(result.stderr);
   process.exitCode = result.exitCode;
 }
