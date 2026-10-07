@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env zx
 
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -10,6 +10,8 @@ import {prepareCppHeaders, verifyCppHeaders} from '../bootstrap/prepare_cpp_head
 import {hostIdentity, prepareHostLlvm} from './host_llvm.mjs';
 import {bootstrapArtifact} from './bootstrap_artifact.mjs';
 import {prepareHostSdk} from './bootstrap_host_sdk.mjs';
+import {nativeHost} from '../bootstrap/host_tools.mjs';
+import {getTarget} from '../../build/lib/targets.mjs';
 
 function sha256File(file) {
   return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
@@ -47,9 +49,12 @@ function findFile(root, predicate) {
 
 const target = process.env.CJCJ_SRCBUILD_TARGET
   || `${process.platform}-${process.platform === 'linux' && process.arch === 'arm64' ? 'aarch64' : process.arch}`;
-const platform = {'linux-x64': 'linux_x86_64', 'linux-aarch64': 'linux_aarch64',
-  'darwin-arm64': 'darwin_aarch64', 'darwin-x64': 'darwin_x86_64'}[target];
-if (!platform) throw new Error(`BOOTSTRAP_TARGET_UNSUPPORTED: ${target}`);
+const native = nativeHost();
+const {spec: sourceSpec} = getTarget(target);
+if (sourceSpec.llvmPlatform !== native.platform) {
+  throw new Error(`BOOTSTRAP_HOST_TARGET_MISMATCH: source=${target} host=${native.platform}`);
+}
+const platform = sourceSpec.llvmPlatform;
 const runtimeSelection = await resolveRuntimeSource();
 process.env.RUNTIME_REF = runtimeSelection.runtimeRef;
 process.env.RUNTIME_SRC_URL = runtimeSelection.sourceUrl;
@@ -126,14 +131,14 @@ if (!/^[0-9a-f]{40}$/.test(cjcjSha)) throw new Error('cjcj sha missing (GITHUB_S
 // never falls back after a missing file or identity mismatch.
 const colourInputs = {};
 // Select the library for the source cell, as for the independent host LLVM.
-const darwin = (process.env.CJCJ_SRCBUILD_TARGET || process.platform).startsWith('darwin');
+const darwin = native.os === 'darwin';
 if (process.platform === 'linux' || darwin || process.env.CJCJ_BOOTSTRAP_DYLIB_ARTIFACT
     || process.env.CJCJ_BOOTSTRAP_COLOUR_DYLIB) {
   if (process.env.LLVM_DYLIB_SOURCE_SHA !== llvmSha) throw new Error('LLVM_DYLIB_SOURCE_MISMATCH');
   const dylibRoot = bootstrapArtifact(process.env.CJCJ_BOOTSTRAP_DYLIB_ARTIFACT
     || process.env.CJCJ_BOOTSTRAP_COLOUR_DYLIB, 'cjcj-dev/cjcj',
   process.env.LLVM_DYLIB_ARTIFACT_ID, inputsWork, 'LLVM_DYLIB');
-  const colourLlvm = path.join(dylibRoot, darwin ? 'libLLVM.dylib' : 'libLLVM-15.so');
+  const colourLlvm = path.join(dylibRoot, native.library);
   const dylibPin = process.env.LLVM_DYLIB_SHA256 || '';
   if (!/^[0-9a-f]{64}$/.test(dylibPin)) throw new Error('LLVM_DYLIB_PIN_MISSING');
   if (!fs.existsSync(colourLlvm)) throw new Error(`LLVM_DYLIB_MISSING: ${colourLlvm}`);

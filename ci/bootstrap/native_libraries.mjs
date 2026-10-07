@@ -13,7 +13,7 @@ export function nativeSymbols(file, {runtime = false, defined = false, archive =
     let name = (fields.at(-1) || '').split('@', 1)[0];
     if (native.os === 'darwin' && name.startsWith('_')) name = name.slice(1);
     return {type, name, line};
-  }).filter(symbol => /^[A-Za-z?]$/.test(symbol.type || ''));
+  }).filter(symbol => /^[A-Za-z?]$/.test(symbol.type || '') && (!runtime || !['U','w','v'].includes(symbol.type)));
 }
 export function runtimeDir(root) {
   const native = nativeHost();

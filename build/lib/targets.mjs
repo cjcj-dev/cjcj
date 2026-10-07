@@ -60,9 +60,7 @@ const linuxAArch64 = Object.freeze({
 });
 
 const darwinArm64 = Object.freeze({
-  sourceBuild: Object.freeze({runner: 'macos-15', reasons: Object.freeze([
-    'ci/bootstrap/bootstrap.sh rejects Darwin; implement Darwin bootstrap: https://github.com/cjcj-dev/cjcj/issues/473',
-  ])}),
+  sourceBuild: Object.freeze({runner: 'macos-15', reasons: Object.freeze([])}),
   spec: Object.freeze({
     key: 'darwin-arm64', sdkName: 'mac-aarch64', archiveFormat: 'tar.gz',
     packageHost: Object.freeze(['darwin', 'arm64']), hostLlvmLibrary: 'libLLVM.dylib',
@@ -88,9 +86,7 @@ const darwinArm64 = Object.freeze({
 });
 
 const darwinX64 = Object.freeze({
-  sourceBuild: Object.freeze({runner: 'macos-15-intel', reasons: Object.freeze([
-    'ci/bootstrap/bootstrap.sh rejects Darwin; implement Darwin bootstrap: https://github.com/cjcj-dev/cjcj/issues/473',
-  ])}),
+  sourceBuild: Object.freeze({runner: 'macos-15-intel', reasons: Object.freeze([])}),
   spec: Object.freeze({
     key: 'darwin-x64', sdkName: 'mac-x64', archiveFormat: 'tar.gz',
     packageHost: Object.freeze(['darwin', 'x64']), hostLlvmLibrary: 'libLLVM.dylib',
