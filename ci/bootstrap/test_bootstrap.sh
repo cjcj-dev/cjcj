@@ -4,6 +4,7 @@
 set -u
 
 ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+case "${1:-test}" in test|dry-run|check-dry-*|check-shim-wiring|check-forensic-dry|check-std-compiler-identity|check-tuple-with-so|check-exit-receipts|check-sdk-literal-prefix|check-build-env|positive-a[14]|positive-build-env|positive-compile-option-o1|fault-a[1-4]*|fault-build-env|fault-dry-*|fault-forensic-*|fault-host-*|fault-ast-*|fault-colour-*|fault-llvm-*|fault-tuple-*|fault-old-*|fault-cjpm-*|fault-src-*|fault-compile-*|fault-product-*|fault-shim-*|ruler-control) exec node "$ROOT/test_bootstrap.mjs" "$@";; esac
 PRODUCT="${BOOTSTRAP_PRODUCT:-$ROOT/bootstrap.sh}"
 SDK_PRODUCT="${SDK_BUILD_PRODUCT:-$ROOT/sdk_build.sh}"
 TMP=

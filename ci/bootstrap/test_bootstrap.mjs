@@ -117,6 +117,14 @@ function checkForensic(result) {
   console.log('ASSERTIONS total=12 failed='+failed);assert.equal(failed,0,'forensic and release assertions all executed');
 }
 async function mode(name,args=[]) {
+  if(['positive-build-env','check-build-env'].includes(name))return mode('check-dry-build-env');
+  // Runtime-layout CLI fixtures retain their original assertions and are not
+  // source-function tests. Keep that existing harness until its own migration.
+  if(/^(positive-runtime-|fault-runtime-|check-runtime-layouts$)/.test(name)) {
+    const result=invoke(here+'/test_bootstrap.sh',[name,...args]);process.stdout.write(result.text);process.exitCode=result.status;return;
+  }
+  if(name==='positive-a1'){shape();return;}
+  if(name==='fault-a1') {fs.copyFileSync(f.host,`${f.base}/runtime/lib/${f.native.tuple}/libcangjie-std-core${f.native.librarySuffix}`);shape();return;}
   if(name==='check-exit-receipts') {
     for(const script of args.length?args:['run.sh','exceptions/run.sh','library/run.sh','library/execute.sh','unload/run.sh']) {
       const receipts=out+'/receipts/'+script;fs.mkdirSync(receipts,{recursive:true});
@@ -134,7 +142,7 @@ async function mode(name,args=[]) {
     const target=checkSdk(['--host','--std',prefix]);
     for(const rel of ['lib/'+f.native.tuple+'/libcangjie-std-core.a','runtime/lib/'+f.native.tuple+'/libcangjie-std-core'+f.native.librarySuffix,'lib/libstdFFI'+f.native.librarySuffix,'modules/'+f.native.tuple+'/std.core.cjo'])assert.deepEqual(fs.readFileSync(target+'/'+rel),fs.readFileSync(prefix+'/'+rel));return;
   }
-  if(['positive-a4','positive-build-env','check-build-env','check-std-compiler-identity','fault-a4'].includes(name)) {
+  if(['positive-a4','check-std-compiler-identity','fault-a4'].includes(name)) {
     let b=prepareStdBuild();
     process.env.LEAK_ME='must-not-cross';
     if(name==='fault-a4') {
@@ -153,6 +161,13 @@ async function mode(name,args=[]) {
   if(name==='dry-run'){const result=dry(args[0]||'all');process.stdout.write(result.text);process.exitCode=result.status;return;}
   if(['check-dry-contract','check-dry-build-env','check-shim-wiring'].includes(name)){
     checkDry(dry());
+    if(name==='check-dry-build-env') {
+      for(const env of [{HOME:undefined,TMPDIR:undefined},{HOME:out+'/caller home[333]',TMPDIR:undefined},{HOME:out+'/caller home[333]',TMPDIR:out+'/caller tmp[333]'}]) {
+        for(const value of Object.values(env).filter(Boolean))fs.mkdirSync(value,{recursive:true});
+        const childEnv={...process.env,...env};for(const key of ['HOME','TMPDIR'])if(childEnv[key]===undefined)delete childEnv[key];
+        const result=spawnSync(process.execPath,[here+'/test_bootstrap.mjs','check-dry-contract'],{env:childEnv,encoding:'utf8',maxBuffer:16*1024*1024});assert.equal(result.status,0,result.stdout+result.stderr);process.stdout.write(result.stdout);
+      }
+    }
     if(name==='check-dry-build-env') for(const stage of ['stage1-initial-std','stage1-std','stage1-compiler']) {const result=dry(stage);checkDry(result,stage);const lines=result.stdout.split('\n').filter(line=>/^CMD env -i /.test(line)&&(/python3 build.py build/.test(line)||/tools\/bin\/cjpm build/.test(line)));assert.equal(lines.length,1);assert.match(lines[0],stage==='stage1-initial-std'?/stdlib-stage1/:stage==='stage1-std'?/stdlib-stage2/:/cjcj-src-stage1/);}
     return;
   }
@@ -191,9 +206,9 @@ async function mode(name,args=[]) {
   }
   if(name==='fault-llvm-so-location') {
     fs.appendFileSync(f.hostLlvm,'changed input bytes');
-    const entry=cutProduct('sdk_build.mjs',s=>s.replace("path.join(to,'third_party/llvm/lib',name)","path.join(to,'third_party/llvm/bin',name)"));
+    const entry=cutProduct('sdk_build.mjs',s=>s.replace('let target = canonical;',"let target = path.join(to,'third_party/llvm/bin',name);"));
     const result=invoke(entry,['--from',f.base,'--to',out+'/sdk-wrong-so','--host','--llvm-so',f.hostLlvm,'--colour-runtime',f.colour,'--host-runtime',f.host]);
-    assert.equal(result.status,0,result.text);assert.deepEqual(fs.readFileSync(out+'/sdk-wrong-so/third_party/llvm/lib/'+f.native.library),fs.readFileSync(f.hostLlvm));return;
+    process.stdout.write(result.text);process.exitCode=result.status;return;
   }
   if(name==='fault-cjpm-toml')fs.rmSync(f.out+'/src/cjpm.toml');
   else if(name==='fault-src-file'){f.args[f.args.indexOf('--src')+1]=f.out+'/src/main.cj';}
@@ -214,13 +229,23 @@ async function mode(name,args=[]) {
   else if(name==='fault-old-host-llvm'||name==='fault-old-colour-llc'){const result=invoke(product,[name==='fault-old-host-llvm'?'--host-llvm':'--colour-llc','obsolete']);process.stdout.write(result.text);process.exitCode=result.status;return;}
   else if(name==='test'){
     checkDry(dry());shape();
+    for(const positive of ['check-dry-build-env','check-std-compiler-identity','check-tuple-with-so','check-exit-receipts','check-sdk-literal-prefix','positive-a4','positive-compile-option-o1','check-forensic-dry','check-runtime-layouts']) {
+      const result=invoke(here+'/test_bootstrap.mjs',[positive]);assert.equal(result.status,0,result.text);process.stdout.write(result.stdout);
+    }
+    const installed=checkSdk(['--host','--llvm-so',f.hostLlvm]);
+    assert.deepEqual(fs.readFileSync(installed+'/third_party/llvm/lib/'+f.native.library),fs.readFileSync(f.hostLlvm));
+    for(const name of ['llc','opt'])assert.deepEqual(fs.readFileSync(installed+'/third_party/llvm/bin/'+name),fs.readFileSync(f.base+'/third_party/llvm/bin/'+name));
+    fs.rmSync(installed,{recursive:true,force:true});
+    const tupleInstalled=checkSdk(['--host','--llvm-tuple',f.tuple]);
+    for(const rel of tuplePayloads(f.native))assert.deepEqual(fs.readFileSync(tupleInstalled+'/third_party/llvm/'+rel),fs.readFileSync(f.tuple+'/'+rel));
     const toml=f.out+'/src/cjpm.toml',b=new Bootstrap([]);b.rewriteO1(toml);b.rewriteO1(toml);assert.match(fs.readFileSync(toml,'utf8'),/"-O1"/);
-    for(const [kind,pattern] of [['fault-host-sha',/host-llvm sha256 不匹配/],['fault-ast-sha',/ast-support sha256 不匹配/],['fault-colour-ruler',/章计数不是 1/],['fault-colour-stamp-duplicate',/章计数不是 1/],['fault-colour-stamp-mismatch',/章与 MANIFEST/],['fault-colour-sha',/MANIFEST LLVM_SHA/],['fault-tuple-missing-opt',/缺或未登记 bin\/opt/],['fault-tuple-sums',/SHA256SUMS strict/],['fault-tuple-extra-entry',/10 个 payload/],['fault-cjpm-toml',/--src 缺少 cjpm.toml/],['fault-src-file',/--src 缺少 cjpm.toml/],['fault-compile-option',/compile-option 不是 -O1/],['fault-product-missing',/产物缺失/]]){
+    for(const [kind,pattern] of [['fault-a1',/Int64.ti definitions=1/],['fault-a1-missing-core-archive',/install shape/],['fault-a1-missing-core-shared',/install shape/],['fault-a1-missing-ffi-shared',/install shape/],['fault-a2',/命令失败 rc=23/],['fault-a3',/stage1-compiler/],['fault-dry-stage1-missing',/A3 count=0/],['fault-dry-stage1-duplicate',/A3 count=4/],['fault-dry-stage1-stale-stdlib',/STD precedes|stage1 SDK assembly sequence/],['fault-dry-stage1-serial',/CJPM-JOBS/],['fault-dry-stage1-drop-jobs',/stage1 execution receives configured jobs/],['fault-a4',/命令失败 rc=44/],['fault-build-env',/TMPDIR/],['fault-runtime-stamp',/runtime CJRT-COMMIT 不匹配/],['fault-host-sha',/host-llvm sha256 不匹配/],['fault-ast-sha',/ast-support sha256 不匹配/],['fault-host-colour',/host LLVM 含 colour 动态符号 hits=1/],['fault-colour-ruler',/章计数不是 1/],['fault-colour-stamp-duplicate',/章计数不是 1/],['fault-colour-stamp-mismatch',/章与 MANIFEST/],['fault-colour-sha',/MANIFEST LLVM_SHA/],['fault-llvm-so-location',/llvm-so 安装后 sha256 不一致/],['fault-tuple-missing-opt',/缺或未登记 bin\/opt/],['fault-tuple-sums',/SHA256SUMS strict/],['fault-tuple-extra-entry',/10 个 payload/],['fault-old-host-llvm',/参数 --host-llvm 已废弃/],['fault-old-colour-llc',/参数 --colour-llc 已废弃/],['fault-cjpm-toml',/--src 缺少 cjpm.toml/],['fault-src-file',/--src 必须是含 cjpm.toml/],['fault-compile-option',/compile-option 不是 -O1/],['fault-product-missing',/产物缺失/],['fault-shim-wiring',/SHIM count=1/],['fault-forensic-drop-g',/forensic and release assertions all executed/]]){
       const result=invoke(here+'/test_bootstrap.mjs',[kind]);assert.equal(result.status,1,result.text);assert.match(result.text,pattern);console.log('PASS precise-red '+kind);
     }
     for(const entry of ['test_stage0_cache.mjs','test_sdk_verify.py','test_sdk_symlinks.py','test_sdk_runtime.py','test_sdk_shared_pair.py','test_sdk_std.py','test_sdk_exe_symlink.py','test_sdk_cjc_swap.py']){
       const executor=entry.endsWith('.py')?'python3':process.execPath;
-      const result=spawnSync(executor,[here+'/'+entry],{encoding:'utf8',env:process.env,maxBuffer:16*1024*1024});assert.equal(result.status,0,result.stdout+result.stderr);process.stdout.write(result.stdout);
+      const needsOutput=['test_sdk_runtime.py','test_sdk_shared_pair.py','test_sdk_std.py','test_sdk_exe_symlink.py','test_sdk_cjc_swap.py'].includes(entry);
+      const result=spawnSync(executor,[here+'/'+entry,...(needsOutput?['--output',out+'/'+entry+'.evidence']:[])],{encoding:'utf8',env:process.env,maxBuffer:16*1024*1024});assert.equal(result.status,0,result.stdout+result.stderr);process.stdout.write(result.stdout);
     }
     console.log('PASS bootstrap native plan and SDK rejection controls');return;
   } else if(!name.startsWith('fault-'))throw new Error('unknown bootstrap contract mode: '+name);

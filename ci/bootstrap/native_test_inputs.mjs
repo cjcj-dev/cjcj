@@ -45,7 +45,7 @@ export function prepareNativeTestInputs(out, repo) {
   const base=path.join(out,'base'),prefix=path.join(out,'std-prefix');
   copy(officialTool,'base/bin/cjc'); copy(officialTool,'base/tools/bin/cjpm');
   for (const name of ['llc','opt',native.linker]) copy(officialTool,'base/third_party/llvm/bin/'+name);
-  copy(hostLlvm,'base/third_party/llvm/lib/'+native.library);
+  copy(build('base-'+native.library,'int baseline_llvm_symbol;','library'),'base/third_party/llvm/lib/'+native.library);
   for (const root of ['base','std-prefix']) {
     copy(root==='base'?officialStd:colouredStd,`${root}/lib/${native.tuple}/libcangjie-std-core.a`);
     copy(stdShared,`${root}/runtime/lib/${native.tuple}/libcangjie-std-core${native.librarySuffix}`);

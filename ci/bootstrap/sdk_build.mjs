@@ -139,9 +139,13 @@ export function buildSdk(args) {
     const src = options['llvm-so'], name = path.basename(src);
     const valid = native.os === 'darwin' ? /^libLLVM.*\.dylib$/ : /^libLLVM.*\.so/;
     if (!valid.test(name)) fail(`--llvm-so 文件名不符合 ${native.format}: ${src}`);
-    const dst = path.join(to,'third_party/llvm/lib',name);
-    if (!file(dst)) fail(`llvm-so: 基线里没有同名位置 ${dst}`);
-    safeDestination(dst,'llvm-so'); copy(src,dst);
+    const canonical = path.join(to,'third_party/llvm/lib',name);
+    let target = canonical;
+    if (!file(canonical)) fail(`llvm-so: 基线里没有同名位置 ${canonical}`);
+    safeDestination(canonical,'llvm-so'); copy(src,target);
+    // As in main install_llvm_so, verify the canonical consumer location, not
+    // merely the location passed to copy(). Keep producer and consumer distinct.
+    if (sha256File(src) !== sha256File(canonical)) fail('llvm-so 安装后 sha256 不一致');
   }
   swap('cjpm', options.cjpm);
   if (options.cjc) execute('python3', [path.join(here,'compiler_identity.py'), to, '--install', options.cjc]);
