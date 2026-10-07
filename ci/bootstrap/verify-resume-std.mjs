@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
+import {readRuntimeCommit} from './runtime-provenance.mjs';
 
 const entry = fileURLToPath(import.meta.url);
 const entryIndex = process.argv.findIndex(value => path.resolve(value) === entry);
@@ -30,7 +31,7 @@ const runtime = path.join(work, 'sdk-stage1/runtime/lib/linux_x86_64_cjnative/li
 const bytes = fs.readFileSync(runtime);
 const runtimeSha = createHash('sha256').update(bytes).digest('hex');
 if (runtimeSha !== lock.components.runtime.so_sha256) throw Error('RESUME_SDK_RUNTIME_HASH_MISMATCH');
-if (!bytes.includes(Buffer.from(`CJRT-COMMIT:${lock.components.runtime.commit}\0`))) {
+if (readRuntimeCommit(bytes) !== lock.components.runtime.commit) {
   throw Error('RESUME_SDK_RUNTIME_MISMATCH');
 }
 const sourceTree = await git(`${lock.components.runtime.commit}:stdlib`);
