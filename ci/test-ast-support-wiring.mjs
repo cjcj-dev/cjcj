@@ -1,12 +1,14 @@
 #!/usr/bin/env zx
 // Device-only fault arms: execute the actual bootstrap-input process each time.
-import {fs, path, assert, repo, requireArgument, run, capture, hash, diff, replace, equalFiles} from './entry-common.mjs';
+import {fs, path, assert, repo, requireArgument, run, capture, exit, hash, diff, replace, equalFiles} from './entry-common.mjs';
 const requiredArguments = {"0": [5, "empty evidence directory"]};
 const required = index => requireArgument(index, ...requiredArguments[index]);
 const work = path.resolve(required(0, 'empty evidence directory'));
 fs.mkdirSync(work);
 const consumer = 'ci/release/prepare_bootstrap_inputs.mjs';
-assert.equal((await capture(['git', 'status', '--porcelain', '--', consumer])).stdout.trim(), '', 'consumer must be clean');
+const status = await capture(['git', 'status', '--porcelain', '--', consumer], {check: false});
+process.stderr.write(status.stderr);
+if (status.stdout.trim()) { console.error('consumer must be clean'); exit(1); }
 fs.copyFileSync(path.join(repo, consumer), path.join(work, 'consumer.saved'));
 function restore() {
   fs.copyFileSync(path.join(work, 'consumer.saved'), path.join(repo, consumer));

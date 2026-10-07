@@ -4,9 +4,10 @@ import {fs, path, assert, repo, requireArgument, run, capture} from './entry-com
 const requiredArguments = {"0": [7, "new work directory"], "1": [8, "actual runtime Git transport mirror"], "2": [9, "other-source Git transport fixture"]};
 const required = index => requireArgument(index, ...requiredArguments[index]);
 const work = path.resolve(required(0, 'new work directory'));
-const runtimeMirror = fs.realpathSync(required(1, 'actual runtime Git transport mirror'));
-const otherMirror = fs.realpathSync(required(2, 'other-source Git transport fixture'));
-fs.mkdirSync(work);
+const runtimeArgument = required(1), otherArgument = required(2);
+await run(['mkdir', work]);
+const runtimeMirror = fs.realpathSync(runtimeArgument);
+const otherMirror = fs.realpathSync(otherArgument);
 const otherSha = (await capture(['git', '-C', otherMirror, 'rev-parse', 'HEAD'])).stdout.trim();
 const runtimeSha = '4909b2dec1af7f522133c6401e2ce960b0ef511d';
 const runtimeUrl = 'https://github.com/cjcj-dev/cangjie-runtime.git';
