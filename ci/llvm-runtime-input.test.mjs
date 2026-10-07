@@ -28,7 +28,7 @@ for (const [name, select] of [
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'llvm-runtime-input-'));
     t.after(() => fs.rmSync(root, {recursive: true, force: true}));
     const product = fixture(root, table);
-    const row = table.rows.find(select);
+    const row = table.rows.find(row => row.kind === 'guard-error' && select(row));
     assert.ok(row, 'source-derived branch exists');
     // The uppercase guard witness is selected by its derived alphabet, not by
     // a parallel handcrafted argument list.
