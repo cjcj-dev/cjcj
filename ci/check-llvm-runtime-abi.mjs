@@ -8,12 +8,12 @@ const args = cliArgs.slice();
 for (let i = 0; i < args.length; i++) {
   const arg = args[i];
   if (arg === '-h' || arg === '--help') { process.stdout.write(usage); process.exit(0); }
-  const key = arg.replace(/^--/, '').replaceAll('-', '_');
-  if (!arg.startsWith('--') || !keys.includes(key)) {
+  if (!keys.some(key => arg === `--${key.replaceAll('_', '-')}`)) {
     const quoted = await capture(['bash', '-c', 'printf "%q" "$1"', 'abi-argument', arg]);
     console.error(`ABI_PAIR=INVALID_ARGUMENT argument=${quoted.stdout}`);
     process.stderr.write(usage); process.exit(2);
   }
+  const key = arg.slice(2).replaceAll('-', '_');
   if (!args[i + 1]) { console.error(`ABI_PAIR=INVALID_ARGUMENT missing_value=${arg}`); process.exit(2); }
   values[key] = key.endsWith('_repo') ? path.resolve(args[++i]) : args[++i];
 }
