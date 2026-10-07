@@ -80,7 +80,8 @@ class RuntimeInput(unittest.TestCase):
                 del env[key]
         env['TUPLE_ROOT'] = str(root or WORK / label)
         env['GIT_TRACE'] = str(WORK / f'{label}.trace')
-        result = subprocess.run(['bash', str(REPO / script), *map(str, argv)],
+        command = ['npx', '--yes', 'zx@8'] if script.endswith('.mjs') else ['bash']
+        result = subprocess.run([*command, str(REPO / script), *map(str, argv)],
                                 env=env, cwd=WORK, capture_output=True, text=True)
         (WORK / f'{label}.log').write_text(result.stdout + result.stderr)
         (WORK / f'{label}.rc').write_text(f'{result.returncode}\n')
@@ -223,7 +224,7 @@ class RuntimeInput(unittest.TestCase):
         self.target('build_dirty_no_cmake', capture.exists(), False)
 
     def test_direct_fetch_validation(self):
-        result = self.run_script('direct-invalid', 'ci/fetch-llvm-runtime.sh',
+        result = self.run_script('direct-invalid', 'ci/fetch-llvm-runtime.mjs',
                                  {**private_env, 'CJCJ_LLVM_RUNTIME_SHA': 'short'},
                                  argv=(WORK / 'direct-runtime',))
         self.target('direct_fetch_invalid_rejected', result.returncode, 1)

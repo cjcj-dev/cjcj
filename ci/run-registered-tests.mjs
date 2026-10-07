@@ -35,7 +35,8 @@ export async function runScripts(root, entries, output) {
       const temporary = path.join(directory, 'tmp');
       fs.mkdirSync(temporary, {recursive: true});
       const args = entry.args.map(arg => arg.replaceAll('{output}', path.join(directory, 'output')));
-      const result = await execute([entry.executor, entry.file, ...args], root, directory,
+      const command = entry.executor === 'zx' ? ['npx', '--yes', 'zx@8', entry.file, ...args] : [entry.executor, entry.file, ...args];
+      const result = await execute(command, root, directory,
         {...process.env, TMPDIR: temporary, PYTHONDONTWRITEBYTECODE: '1'});
       results[index] = {file: entry.file, sha256: digest(path.join(root, entry.file)), ...result};
       console.log(`TEST_RESULT file=${entry.file} rc=${result.rc} log=${result.log}`);

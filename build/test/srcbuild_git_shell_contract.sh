@@ -111,7 +111,7 @@ if [ "$skip_fetch_sources" = 0 ]; then
     mkdir -p "$fixture_repo/ci/platform_tuples" "$fixture_repo/build/lib"
     cp "$fetch_sources" "$fixture_repo/ci/platform_tuples/fetch_sources.sh"
     cp "$helper" "$fixture_repo/build/lib/srcbuild_git.sh"
-    cp "$repo_root/ci/fetch-llvm-runtime.sh" "$fixture_repo/ci/"
+    cp "$repo_root/ci/fetch-llvm-runtime.mjs" "$repo_root/ci/script-common.mjs" "$fixture_repo/ci/"
     printf 'RUNTIME_REF=%s\nRUNTIME_SRC_URL=file://%s\n' "$runtime_sha" "$work/bare-runtime" \
         > "$fixture_repo/ci/runtime_pin.env"
     tuple=$work/tuple

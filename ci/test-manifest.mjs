@@ -193,7 +193,7 @@ export function discoverTestFiles(root = repoRoot) {
     {encoding: 'utf8'});
   const found = listed.split('\0').filter(Boolean)
     .filter(file => !file.split('/').includes('node_modules'))
-    .filter(file => /\.test\.mjs$|(?:^|\/)test[_.-][^/]*\.(?:py|sh)$|[._-]test\.sh$|_test\.cj$|^build\/test\/.*\.sh$|\/tests\/[^/]+\.(?:py|sh)$/.test(file));
+    .filter(file => /\.test\.mjs$|(?:^|\/)test[_.-][^/]*\.(?:py|sh)$|(?:^|\/)test-(?!manifest\.mjs$)[^/]*\.mjs$|[._-]test\.sh$|_test\.cj$|^build\/test\/.*\.sh$|\/tests\/[^/]+\.(?:py|sh)$/.test(file));
   return [...new Set(found)].sort();
 }
 
@@ -294,7 +294,7 @@ export function validateManifest(root = repoRoot, registered = REGISTERED, gatin
       const members = workspace.match(/\btest-members\s*=\s*\[([^\]]*)\]/)?.[1] || '';
       if (!members.includes(`"${entry.member}"`)) throw new Error(`member not tested: ${entry.member}`);
       if (!fs.existsSync(path.join(root, entry.member, 'cjpm.toml'))) throw new Error(`missing member: ${entry.member}`);
-    } else if (!['python3', 'bash'].includes(entry.executor) || !Array.isArray(entry.args)) {
+    } else if (!['python3', 'bash', 'zx'].includes(entry.executor) || !Array.isArray(entry.args)) {
       throw new Error(`invalid executor: ${entry.file}`);
     }
   }

@@ -103,7 +103,7 @@ async function assertStdBarriers(coreLib) {
   const output = await $({stdio: 'pipe'})`objdump -drwC ${coreLib}`;
   // LLVM #96 removed GCPhase guards. The retired phase-shape write checker
   // cannot observe the new store-mask protocol. This checks only the read side;
-  // source layout compatibility is checked by check-llvm-runtime-abi.sh.
+  // source layout compatibility is checked by check-llvm-runtime-abi.mjs.
   const lines = output.stdout.split('\n');
   const symbols = [
     '_CNat6String7indexOfHRNatY0_E',

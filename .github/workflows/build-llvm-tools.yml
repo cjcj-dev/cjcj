@@ -106,7 +106,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: fixed-toolchain/${{ matrix.platform }}
-          key: ${{ (inputs.rebuild || inputs.cold_cache) && format('rebuild-{0}-', github.run_id) || '' }}fixed-llvm-tools-${{ matrix.platform }}-${{ matrix.portability-tag }}-${{ steps.llvm-pin.outputs.sha }}-${{ env.CANGJIE_COMPILER_SHA }}-${{ hashFiles('ci/llvm_pin.env', 'ci/runtime_pin.env', 'ci/fetch-llvm-runtime.sh', '.github/workflows/build-fixed-llc.yml', '.github/workflows/build-llvm-tools.yml', 'ci/llvm-tools-manifest.mjs', 'build/lib/targets.mjs', 'ci/llvm-tools-matrix.mjs', 'ci/platform_tuples/**', 'build/lib/srcbuild_git.sh', 'runtime_shim/cjselfhost_llvmshim.cpp') }}
+          key: ${{ (inputs.rebuild || inputs.cold_cache) && format('rebuild-{0}-', github.run_id) || '' }}fixed-llvm-tools-${{ matrix.platform }}-${{ matrix.portability-tag }}-${{ steps.llvm-pin.outputs.sha }}-${{ env.CANGJIE_COMPILER_SHA }}-${{ hashFiles('ci/llvm_pin.env', 'ci/runtime_pin.env', 'ci/fetch-llvm-runtime.mjs', '.github/workflows/build-fixed-llc.yml', '.github/workflows/build-llvm-tools.yml', 'ci/llvm-tools-manifest.mjs', 'build/lib/targets.mjs', 'ci/llvm-tools-matrix.mjs', 'ci/platform_tuples/**', 'build/lib/srcbuild_git.sh', 'runtime_shim/cjselfhost_llvmshim.cpp') }}
 
       # Every C++ compile below (llc, opt, flatc, the shim object) goes through
       # sccache; the report step at the end fails the job if none did.
@@ -166,7 +166,7 @@ jobs:
       - name: Build LLVM tools
         if: runner.os != 'Windows' && steps.cache.outputs.cache-hit != 'true'
         run: |
-          bash ci/fetch-llvm-runtime.sh paired-runtime
+          npx --yes zx@8 ci/fetch-llvm-runtime.mjs paired-runtime
           cmake -G Ninja -S llvm-fork/llvm -B llc-build \
             -DCANGJIE_RUNTIME_SOURCE_DIR="$PWD/paired-runtime" \
             -DCMAKE_BUILD_TYPE=Release \
@@ -410,8 +410,8 @@ jobs:
           source ci/llvm_pin.env
           REPO_ROOT="$GITHUB_WORKSPACE"
           CJCJ_FIXED_LLVM_DIR="$GITHUB_WORKSPACE/fixed-toolchain/linux_x86_64"
-          source ci/llvm-tuple-layout.sh
-          publish_fixed_tuple_to_depot "$RUNNER_TEMP/llvm-tuple"
+          export REPO_ROOT CJCJ_FIXED_LLVM_DIR LLVM_SHA CANGJIE_COMPILER_SHA
+          npx --yes zx@8 ci/llvm-tuple-layout.mjs "$RUNNER_TEMP/llvm-tuple"
           tuple="$RUNNER_TEMP/llvm-tuple/$LLVM_SHA/$CANGJIE_COMPILER_SHA"
           (cd "$tuple" && sha256sum --strict -c SHA256SUMS)
           echo "LLVM_TUPLE_SUMS_SHA=$(sha256sum "$tuple/SHA256SUMS" | awk '{print $1}')" | tee -a "$GITHUB_STEP_SUMMARY"

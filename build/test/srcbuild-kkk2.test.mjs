@@ -375,10 +375,10 @@ test('fixed tuple publisher feeds the bootstrap consumer and rejects a missing s
   fs.writeFileSync(path.join(source, 'llc.gz'), compressed.stdout);
   const depotRoot = path.join(root, 'depot');
   const depot = path.join(depotRoot, llvmSha, compilerSha);
-  const published = runBash('source "$1/ci/llvm-tuple-layout.sh"\n'
-    + 'REPO_ROOT=$1 CJCJ_FIXED_LLVM_DIR=$2 LLVM_SHA=$3 CANGJIE_COMPILER_SHA=$4\n'
-    + 'publish_fixed_tuple_to_depot "$5"\n',
-  [repoRoot, source, llvmSha, compilerSha, depotRoot]);
+  const published = spawnSync('npx', ['--yes', 'zx@8', path.join(repoRoot, 'ci/llvm-tuple-layout.mjs'), depotRoot], {
+    encoding: 'utf8', env: {...process.env, REPO_ROOT: repoRoot, CJCJ_FIXED_LLVM_DIR: source,
+      LLVM_SHA: llvmSha, CANGJIE_COMPILER_SHA: compilerSha},
+  });
   assert.equal(published.status, 0, published.stdout + published.stderr);
   assert.deepEqual(fs.readFileSync(path.join(depot, 'bin', 'llc')), llc);
   assert.deepEqual(fs.readFileSync(path.join(depot, 'bin', 'opt')),
