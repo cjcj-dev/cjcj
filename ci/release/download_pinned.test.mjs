@@ -106,6 +106,7 @@ test('colour entry separates pinned language SDK from same-build SDK', () => {
     put('source/runtime/tests/gc_unit/language_toolchain_qualification.json', '{}');
     put('source/runtime/tests/gc_unit/gate_gc_unit.sh', `#!/bin/bash
 set -eu
+echo "TARGET SDK domains build=$GC_UNIT_BUILD_SDK language=$GC_UNIT_LANGUAGE_SDK"
 [[ "$GC_UNIT_BUILD_SDK" == "$TEST_ROOT/build" ]]
 [[ "$GC_UNIT_LANGUAGE_SDK" != "$GC_UNIT_BUILD_SDK" ]]
 [[ "$(cat "$GC_UNIT_LANGUAGE_SDK/bin/cjc")" == 'qualified compiler' ]]
@@ -145,7 +146,7 @@ supplied_stage1
       ...process.env, PATH: `${root}/bin:${process.env.PATH}`, BOOTSTRAP_ARCHIVES_PIN: pin,
       TEST_ARCHIVE: archive, TEST_TARGET: target, TEST_ROOT: root,
     }});
-    assert.equal(supplied.status, 0, supplied.stderr);
+    assert.equal(supplied.status, 0, supplied.stdout + supplied.stderr);
     assert.match(supplied.stdout, /TARGET independent SDK inputs reached actual gate consumer/);
     assert.match(supplied.stdout, /TARGET bootstrap gate completed before stage2/);
     assert.ok(fs.existsSync(path.join(root, 'bootstrap-work/colour-gate-active-language/sdk/bin/cjc')));
