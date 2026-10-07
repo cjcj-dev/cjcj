@@ -35,7 +35,7 @@ try {
   if (process.platform !== 'darwin' || process.arch !== 'arm64') throw new Error('runner-platform');
   const developer = '/Applications/Xcode_16.4.app/Contents/Developer';
   if (!fs.existsSync(developer)) throw new Error('runner-image-Xcode16.4-missing');
-  const metadataEnv = {...process.env, DEVELOPER_DIR: developer};
+  const metadataEnv = {PATH: process.env.PATH, HOME: root, TMPDIR: process.env.RUNNER_TEMP, DEVELOPER_DIR: developer};
   const xcode = command('xcode-version', ['/usr/bin/xcodebuild', '-version'], {env: metadataEnv});
   const sdkVersion = command('sdk-version', ['/usr/bin/xcrun', '--sdk', 'macosx', '--show-sdk-version'], {env: metadataEnv}).trim();
   const origin = fs.realpathSync(command('sdk-root', ['/usr/bin/xcrun', '--sdk', 'macosx', '--show-sdk-path'], {env: metadataEnv}).trim());

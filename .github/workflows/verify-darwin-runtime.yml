@@ -58,7 +58,7 @@ jobs:
           if-no-files-found: error
   apple-input:
     if: ${{ github.event_name == 'workflow_dispatch' && (inputs.apple_input == 'green' || inputs.apple_input == 'controls') }}
-    runs-on: macos-latest
+    runs-on: macos-15
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
