@@ -803,7 +803,7 @@ stage1_compiler() {
   STAGE=stage1-compiler
   echo "STAGE_BEGIN stage=stage2-compiler epoch=$(date +%s)"
   echo "OUTPUT cjcj-stage2=$out"
-  echo "OUTPUT stdlib-stage2=$std"
+  echo "OUTPUT bootstrap-std=$std"
   # The compiler links std statically: consume the completed std from its job.
   assemble_stage1_sdk "$sdk" "$compiler" "$std"
   ld=$(sdk_ld_path "$sdk" "$HRT")
@@ -819,6 +819,7 @@ stage1_compiler() {
     [ -d "$std" ] || die 'stage1 未产出 stdlib-stage2'
   fi
   assert_version cjcj-stage2 "$out" "$sdk" "$CRT"
+  cmd "npx --yes zx@8 $(printf '%q' "$SRC/ci/bootstrap/publish-std-output.mjs") $(printf '%q' "$WORK") $(printf '%q' "$std") $(printf '%q' "$compiler") $(printf '%q' "$HOST_TUPLE")"
   # Forensic arm is opt-in and runs only after the release compiler is installed.
   # It does not rewrite $out. Spec: cjpm `build -g` (default off) lands in
   # target/debug; std RelWithDebInfo already passes -g via AddCangjieSource.cmake.
@@ -939,15 +940,7 @@ supplied_stage1() {
   fi
   # The full std just produced is the stage2 compiler's static-link input.
   std="$previous_std"
-  if [ -n "$COLOUR_GATE_SOURCE" ]; then
-    cmd "printf '%s\n' $(printf '%q' "$RUNTIME_SHA") > $(printf '%q' "$std/STDLIB_SOURCE_SHA")"
-    # The complete gate consumes this entry's full same-source std, before the
-    # stage2 build or any publication. Assembly keeps compiler host and target
-    # runtime domains separate through the existing runner.
-    STAGE=colour-runtime-gate
-    assemble_stage1_sdk "$sdk" "$compiler" "$std"
-    cmd "bash $(printf '%q' "$SRC/ci/release/gate_colour_runtime.sh") --same-source $(printf '%q' "$COLOUR_GATE_SOURCE") $(printf '%q' "$sdk") $(printf '%q' "$(runtime_dir "$HRT")") $(printf '%q' "$COLOUR_GATE_INSTALL") $(printf '%q' "$std")"
-  fi
+  if [ -n "${COLOUR_GATE_SOURCE:-}${COLOUR_GATE_INSTALL:-}" ]; then STAGE=colour-runtime-gate; assemble_stage1_sdk "$sdk" "$compiler" "$std"; cmd "npx --yes zx@8 $(printf '%q' "$SRC/ci/release/gate_colour_runtime.mjs") --build-sdk $(printf '%q' "${COLOUR_GATE_SOURCE:?colour gate source}") $(printf '%q' "$sdk") $(printf '%q' "$WORK/colour-gate-active") $(printf '%q' "${COLOUR_GATE_INSTALL:?colour gate install}")"; fi
   stage1_compiler
   STAGE=stage2-smoke
   printf 'main(): Int64 { return 0 }\n' > "$WORK/main.cj"

@@ -126,6 +126,13 @@
       "release_sha256": "f5c4c64115ce0ed9f1d10561eb4ebb44dec5d460f45b0c4c3b0ededd82c8f6ff",
       "prerelease": true,
       "tag": "bootstrap-input-archives-857-prerelease"
+    },
+    "1504": {
+      "repository": "cjcj-dev/cjcj",
+      "asset": 617346116,
+      "release_sha256": "3f241ea59535ed1ea8d4494312ceffb4453e2c758bcdbcb99a39c84c2ad59f90",
+      "prerelease": true,
+      "tag": "qualified-language-sdk-1504-878-prerelease"
     }
   }
 }
