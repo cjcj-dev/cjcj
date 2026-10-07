@@ -21,7 +21,7 @@ export function prepareNativeTestInputs(out, repo) {
   const host=build('host'+native.librarySuffix,'int common_symbol;','library');
   const colour=build('colour'+native.librarySuffix,`int common_symbol; int g_cjLoadBadMask; const char stamp[]="CJRT-COMMIT:${runtimePin}";`,'library');
   const hostLlvm=copy(host,native.library);
-  const colourLlvm=build('colour-'+native.library,`const char stamp[]="CJLLVM-COMMIT:${llvmSha}";`,'library');
+  const colourLlvm=copy(build('colour-'+native.library,`const char stamp[]="CJLLVM-COMMIT:${llvmSha}";`,'library'),'colour-llvm/'+native.library);
   const tool=build('tool',`const char stamp[]="CJLLVM-COMMIT:${llvmSha}"; int main(void){return 0;}`,'executable');
   const officialTool=build('official-tool','int main(void){return 0;}','executable');
   const ti = `int ti __asm__("${native.os === 'darwin' ? '_' : ''}Int64.ti");`;

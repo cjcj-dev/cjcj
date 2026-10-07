@@ -11,6 +11,7 @@ import {hostIdentity, prepareHostLlvm} from './host_llvm.mjs';
 import {bootstrapArtifact} from './bootstrap_artifact.mjs';
 import {prepareHostSdk} from './bootstrap_host_sdk.mjs';
 import {getTarget} from '../../build/lib/targets.mjs';
+import {nativeHost} from '../bootstrap/host_tools.mjs';
 import {prepareDarwinStdInput} from './prepare_darwin_std_input.mjs';
 
 function sha256File(file) {
@@ -51,7 +52,9 @@ const target = process.env.CJCJ_SRCBUILD_TARGET
   || `${process.platform}-${process.platform === 'linux' && process.arch === 'arm64' ? 'aarch64' : process.arch}`;
 const {spec: sourceSpec} = getTarget(target);
 if (!['linux', 'darwin'].includes(sourceSpec.os)) throw new Error(`BOOTSTRAP_TARGET_UNSUPPORTED: ${target}`);
-const platform = sourceSpec.llvmPlatform;
+const host = nativeHost();
+if (sourceSpec.runtimeTuple !== host.tuple) throw new Error(`BOOTSTRAP_NATIVE_TARGET_MISMATCH: target=${sourceSpec.runtimeTuple} host=${host.tuple}`);
+const platform = host.platform;
 const runtimeSelection = await resolveRuntimeSource();
 process.env.RUNTIME_REF = runtimeSelection.runtimeRef;
 process.env.RUNTIME_SRC_URL = runtimeSelection.sourceUrl;
