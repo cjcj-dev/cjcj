@@ -14,12 +14,16 @@ export function exportBranches(source) {
       if (!body.includes('(($# < 2))') || !body.includes('[[ -z $2 ]]')) throw Error('unrecognized value guard');
       add('case:value', match, [{args: [labels], target: 'missing_value'}, {args: [labels, ''], target: 'empty_value'},
         {args: [labels, 'VALUE'], target: 'assignment', key: assignment[1]},
-        {args: [labels, '--help'], target: 'flag_as_value', key: assignment[1]}]);
+        {args: [labels, '--help'], target: 'flag_as_value', key: assignment[1]},
+        {args: [labels, ''], target: 'duplicate_last_empty', key: assignment[1]}]);
     } else if (body.includes('usage') && body.includes('exit 0')) {
       add('case:help', match, labels.split('|').map(label => ({args: [label], target: 'help'})));
     } else if (labels === '*' && body.includes('exit 2')) {
       add('case:unknown', match, ['--unknown', '', 'two words', "a'b", '$x', 'é'].map(value => ({args: [value], target: 'unknown'})));
     } else throw Error(`unrecognized case: ${labels}`);
+  }
+  for (const match of source.matchAll(/^(llvm_repo|llvm_ref|runtime_repo|runtime_ref)=$/gm)) {
+    add('default:empty', match, [{args: [], target: 'all_defaults'}, {omit: match[1], target: 'unset_default'}]);
   }
   const required = /for required in ([\w ]+); do\n([\s\S]*?)\ndone/.exec(source);
   if (!required || !required[2].includes('[[ -z ${!required} ]]')) throw Error('unrecognized required loop');

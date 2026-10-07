@@ -78,9 +78,12 @@ if (process.env.ABI_DIFFERENTIAL === '1') test('ABI full source-derived decision
   for (const row of rows) for (const trigger of row.triggers) {
     let values = {...base}, args, env = {...process.env}; delete env.TMPDIR;
     fs.writeFileSync(output, validOutput);
-    if (row.kind.startsWith('case:')) {
+    if (row.kind.startsWith('case:') || trigger.args) {
       args = trigger.args;
-      if (trigger.key) { values[trigger.key] = args[1]; args = argv(values); }
+      if (trigger.key) {
+        if (trigger.target === 'duplicate_last_empty') args = [...argv(values), ...args];
+        else { values[trigger.key] = args[1]; args = argv(values); }
+      }
     } else if (trigger.omit) { delete values[trigger.omit]; args = argv(values); }
     else {
       if (trigger.mode === 'bad-ref') values[`${trigger.side}_ref`] = 'not-a-ref';
