@@ -37,6 +37,8 @@ STAGE1_SHA256=''
 HOST_SDK=''
 RUNTIME_SHA=''
 CHECK_ONLY=0
+RESUME_COLOUR_GATE=0
+RESUME_STD_SUMS=''
 COLOUR_GATE_SOURCE=''
 COLOUR_GATE_INSTALL=''
 HOST_IDENTITIES=''
@@ -890,7 +892,22 @@ supplied_stage1_validate() {
   WORK=$(realpath -m "$WORK")
   case "$WORK" in /|/root|/root/sdks|/root/sdks/*|/root/.cjv|/root/.cjv/*) die 'private work directory required';; esac
   case "$HOST_SDK/" in "$WORK/"*) die 'host SDK must be outside work directory';; esac
-  [ ! -e "$WORK" ] || die 'supplied-stage1 refuses an existing work directory'
+  if [ "$RESUME_COLOUR_GATE" -eq 1 ]; then
+    [ -n "$COLOUR_GATE_SOURCE" ] || die 'resume requires the complete colour gate'
+    [ -f "$RESUME_STD_SUMS" ] || die 'resume requires captured same-source std hashes'
+    [ "$(cat "$WORK/stdlib-stage1/STDLIB_SOURCE_SHA")" = "$RUNTIME_SHA" ] || die 'resume std source mismatch'
+    (cd "$WORK/stdlib-stage1" && sha256sum -c "$RESUME_STD_SUMS") || die 'resume std hashes differ'
+    python3 - "$WORK/sdk-stage1/SDK.lock.json" "$STAGE1_SHA256" "$RUNTIME_SHA" <<'PYLOCK'
+import json, sys
+lock = json.load(open(sys.argv[1]))
+assert lock['components']['cjc']['sha256'] == sys.argv[2]
+assert lock['components']['runtime']['commit'] == sys.argv[3]
+PYLOCK
+    [ "$?" -eq 0 ] || die 'resume SDK input identity mismatch'
+    assert_expected_sha resumed-stage1 "$WORK/cjcj-stage1" "$STAGE1_SHA256"
+  else
+    [ ! -e "$WORK" ] || die 'supplied-stage1 refuses an existing work directory'
+  fi
   [ -x "$STAGE1_ELF" ] || die 'stage1 ELF is not executable'
   readelf -h "$STAGE1_ELF" >/dev/null || die 'stage1 input must be ELF'
   assert_expected_sha stage1 "$STAGE1_ELF" "$STAGE1_SHA256"
@@ -907,13 +924,18 @@ supplied_stage1_validate() {
 
 supplied_stage1() {
   local out std sdk compiler previous_std
-  cmd "mkdir -p $(printf '%q' "$WORK")"
-  cmd "cp -aL $(printf '%q' "$HOST_SDK") $(printf '%q' "$WORK/sdk-stage0")"
-  cmd "python3 $(printf '%q' "$SRC/ci/install_std_sdk_inputs.py") $(printf '%q' "$(dirname "$AST_SUPPORT")") $(printf '%q' "$WORK/sdk-stage0") $(printf '%q' "$HOST_TUPLE")"
-  cmd "install -m755 $(printf '%q' "$STAGE1_ELF") $(printf '%q' "$WORK/cjcj-stage1")"
-  printf '%s\n' "$WORK/cjcj-stage1" > "$WORK/.cjcj-stage1"
-  stage1_inputs
-  stage1_initial_std
+  if [ "$RESUME_COLOUR_GATE" -eq 1 ]; then
+    stage1_inputs
+    echo 'RESUME colour-runtime-gate: captured same-source std and SDK inputs verified'
+  else
+    cmd "mkdir -p $(printf '%q' "$WORK")"
+    cmd "cp -aL $(printf '%q' "$HOST_SDK") $(printf '%q' "$WORK/sdk-stage0")"
+    cmd "python3 $(printf '%q' "$SRC/ci/install_std_sdk_inputs.py") $(printf '%q' "$(dirname "$AST_SUPPORT")") $(printf '%q' "$WORK/sdk-stage0") $(printf '%q' "$HOST_TUPLE")"
+    cmd "install -m755 $(printf '%q' "$STAGE1_ELF") $(printf '%q' "$WORK/cjcj-stage1")"
+    printf '%s\n' "$WORK/cjcj-stage1" > "$WORK/.cjcj-stage1"
+    stage1_inputs
+    stage1_initial_std
+  fi
   # The full std just produced is the stage2 compiler's static-link input.
   std="$previous_std"
   if [ -n "$COLOUR_GATE_SOURCE" ]; then
@@ -943,6 +965,7 @@ main() {
       --runtime-sha) RUNTIME_SHA="${2:?}"; shift 2;;
       --colour-gate-source) COLOUR_GATE_SOURCE="${2:?}"; shift 2;;
       --colour-gate-install) COLOUR_GATE_INSTALL="${2:?}"; shift 2;;
+      --resume-colour-gate) RESUME_COLOUR_GATE=1; RESUME_STD_SUMS="${2:?captured std sha256 file}"; shift 2;;
       --check-only) CHECK_ONLY=1; shift;;
       --work) WORK="${2:?}"; shift 2;;
       --runtime-pin) RUNTIME_PIN="${2:?}"; shift 2;;
@@ -975,6 +998,7 @@ main() {
     eval "[ -n \"\${$value}\" ]" || die "缺少参数 $value"
   done
   [ -z "$COLOUR_GATE_SOURCE$COLOUR_GATE_INSTALL" ] || [ "$WANT" = supplied-stage1 ] || die 'colour gate requires supplied-stage1'
+  [ "$RESUME_COLOUR_GATE" -eq 0 ] || [ "$WANT" = supplied-stage1 ] || die 'resume requires supplied-stage1'
   case "$WANT" in supplied-stage1|stage0|stage1|stage1-initial-std|stage1-std|stage1-compiler|all) ;; *) die '--stage 只能是 stage0|stage1|stage1-initial-std|stage1-std|stage1-compiler|all';; esac
   case "$WANT" in
     stage0|all) [ -n "$CPP_SRC" ] || die '缺少参数 CPP_SRC';;
