@@ -84,12 +84,44 @@ try {
   state.phase = 'collection'; save();
   const deps = path.join(evidence, 'helper.deps');
   fs.writeFileSync(deps, command('clang-dependencies', depArgv, {cwd: output, env: environment}));
+  const preprocessArgv = depArgv.map(a => a === '-M' ? '-E' : a);
+  const preprocessed = command('clang-preprocessed', preprocessArgv, {cwd: output, env: environment});
+  // Read the definition from this consumer's actual include chain. Line markers
+  // preserve the original header location, rather than naming a known SDK type.
+  let currentFile = null, currentLine = 0;
+  const definitions = [];
+  const lines = preprocessed.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const marker = lines[i].match(/^#\s+(\d+)\s+"([^"]+)"/);
+    if (marker) {currentFile = marker[2]; currentLine = Number(marker[1]); continue;}
+    const definition = lines[i].match(/\bstruct\s+([A-Za-z_]\w*)\s*\{/);
+    if (definition && definition[1].endsWith('sigaltstack')) definitions.push({name: definition[1], file: currentFile, line: currentLine,
+      preprocessed_line: i + 1});
+    currentLine++;
+  }
+  write(path.join(evidence, 'stack-definitions.json'), definitions);
+  if (definitions.length !== 1 || !definitions[0].file?.startsWith(apple + path.sep))
+    throw new Error('actual-stack-definition');
+  const definition = definitions[0];
+  console.log(`STACK_DEFINITION ${definition.file}:${definition.line} struct ${definition.name}`);
   const layoutArgv = dependencyArgv(compilation).map(a => a === '-M' ? '-fsyntax-only' : a);
   layoutArgv.push('-Xclang', '-fdump-record-layouts-complete');
   write(path.join(evidence, 'layout-invocation.json'), {argv: layoutArgv, cwd: output, environment});
   const layoutRaw = command('clang-layout', layoutArgv, {cwd: output, env: environment});
   const blocks = layoutRaw.split('*** Dumping AST Record Layout');
-  const stack = blocks.find(b => /\| struct sigaltstack\s/.test(b));
+  const selectStack = name => blocks.filter(b => b.split('\n').some(line =>
+    line.match(/^\s*0\s*\| struct ([A-Za-z_]\w*)\s*$/)?.[1] === name));
+  const selected = selectStack(definition.name);
+  write(path.join(evidence, 'stack-selector.json'), {definition, matches: selected.length,
+    argv: preprocessArgv, cwd: output, environment});
+  fs.writeFileSync(path.join(evidence, 'stack-selected.stdout'), selected.join('\n'));
+  // Positive raw-output control plus a falsifiable exact-name negative control.
+  const wrongName = definition.name + '_different_type';
+  const mismatch = selectStack(wrongName).length;
+  write(path.join(evidence, 'stack-selector-control.json'), {wrongName, matches: mismatch});
+  if (mismatch !== 0) throw new Error('actual-stack-selector-control');
+  console.log('STACK_SELECTOR_DIFFERENT_TYPE REJECT matches=' + mismatch);
+  const stack = selected.length === 1 ? selected[0] : null;
   if (!stack || !/0\s*\|\s+void \* ss_sp/.test(stack) || !/8\s*\|\s+.* ss_size/.test(stack) ||
       !/16\s*\|\s+int ss_flags/.test(stack) || !/sizeof=24, align=8/.test(stack)) throw new Error('actual-stack-layout');
   const capturePath = path.join(evidence, 'capture.json');
@@ -97,7 +129,7 @@ try {
     tools: {clang, xcrun: '/usr/bin/xcrun', xcodebuild: '/usr/bin/xcodebuild'}, layout, xcode, sdk_version: sdkVersion,
     batch: 'GHA-' + process.env.GITHUB_RUN_ID, started_at: state.started_at, finished_at: new Date().toISOString(),
     argv: [depArgv], cwd: output, environment, consumer: {source, argv: compilation, cwd: output, environment},
-    raw_outputs: [path.join(evidence, 'layout-invocation.json'), ...['xcode-version', 'sdk-version', 'sdk-root', 'clang-version', 'clang-dependencies', 'clang-layout'].flatMap(n =>
+    raw_outputs: [path.join(evidence, 'layout-invocation.json'), path.join(evidence, 'stack-definitions.json'), path.join(evidence, 'stack-selector.json'), path.join(evidence, 'stack-selected.stdout'), ...['xcode-version', 'sdk-version', 'sdk-root', 'clang-version', 'clang-dependencies', 'clang-preprocessed', 'clang-layout'].flatMap(n =>
       [path.join(evidence, n + '.stdout'), path.join(evidence, n + '.stderr')])]}, capturePath);
   state.phase = 'bind'; save();
   bindPrepared(recipePath, capturePath, legacyDir);
@@ -117,8 +149,8 @@ try {
     if (!matched) throw new Error('target-not-observed');
   }
   state.phase = 'admission'; save();
-  if (mode === 'green') run('green', 'BOUNDARY');
-  else {
+  run('green', 'BOUNDARY');
+  {
     const header = read(capturePath).headers.find(h => h.path.endsWith('/pthread.h')).path;
     const bytes = fs.readFileSync(header);
     try {fs.appendFileSync(header, '\n/* authorized consumer header drift */\n'); run('header-drift', 'apple-header-drift');}
