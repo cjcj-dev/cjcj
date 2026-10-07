@@ -1,4 +1,4 @@
-name: Bootstrap native host route
+name: Bootstrap native host consumers
 on:
   workflow_dispatch:
 permissions:
@@ -11,10 +11,13 @@ jobs:
         include:
           - runner: macos-15
             tuple: darwin_aarch64_cjnative
+            mode: sdk
           - runner: macos-15-intel
             tuple: darwin_x86_64_cjnative
+            mode: sdk
           - runner: ubuntu-24.04-arm
             tuple: linux_aarch64_cjnative
+            mode: route
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 10
     steps:
@@ -24,13 +27,17 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Execute the four real host-admission arms
+      - name: Execute bounded native consumer recipes
         run: |
           ulimit -c 0
-          npx --yes zx@8 ci/bootstrap/test_host_route.mjs "$RUNNER_TEMP/host-route" 227b34ad4c1b78b3eebfe0605570d6d8b398e579 '${{ matrix.tuple }}'
+          if [ '${{ matrix.mode }}' = route ]; then
+            npx --yes zx@8 ci/bootstrap/test_host_route.mjs "$RUNNER_TEMP/native-consumers" a65c82b648b32f9f3fcbeaf9cb84825852129af3 '${{ matrix.tuple }}'
+          else
+            node ci/bootstrap/test_native_sdk_chain.mjs "$RUNNER_TEMP/native-consumers"
+          fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: host-route-${{ matrix.tuple }}
-          path: ${{ runner.temp }}/host-route
+          name: native-consumers-${{ matrix.tuple }}
+          path: ${{ runner.temp }}/native-consumers
           if-no-files-found: error
