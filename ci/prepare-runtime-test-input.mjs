@@ -6,8 +6,9 @@ import {resolveRuntimeSource} from './runtime-pin.mjs';
 import {sourceFetchArguments} from '../build/lib/git.mjs';
 import {GATING, GATING_FLOOR, repoRoot, validateManifest} from './test-manifest.mjs';
 
-const [destination, mode] = process.argv.slice(2);
-if (!destination || (mode && mode !== '--run') || process.argv.length > 5)
+const [destination, ...extra] = argv._;
+const mode = argv.run === true ? '--run' : undefined;
+if (!destination || extra.length || (argv.run !== undefined && argv.run !== true))
   throw new Error('usage: prepare-runtime-test-input.mjs CHECKOUT_DIR [--run]');
 const checkout = path.resolve(destination);
 if (/[\r\n]/.test(checkout)) throw new Error('checkout path must be a single environment line');
