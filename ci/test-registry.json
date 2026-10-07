@@ -146,10 +146,10 @@
     ]
   },
   {
-    "file": "ci/test-llvm-tuple-wiring.sh",
+    "file": "ci/test-llvm-tuple-wiring.test.mjs",
     "executor": "workflow",
     "workflow": ".github/workflows/test-llvm-tuple.yml",
-    "interpreter": "bash"
+    "interpreter": "npx --yes zx@8"
   },
   {
     "file": "ci/test-runtime-layout.sh",

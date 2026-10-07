@@ -410,8 +410,8 @@ jobs:
           source ci/llvm_pin.env
           REPO_ROOT="$GITHUB_WORKSPACE"
           CJCJ_FIXED_LLVM_DIR="$GITHUB_WORKSPACE/fixed-toolchain/linux_x86_64"
-          source ci/llvm-tuple-layout.sh
-          publish_fixed_tuple_to_depot "$RUNNER_TEMP/llvm-tuple"
+          REPO_ROOT="$REPO_ROOT" CJCJ_FIXED_LLVM_DIR="$CJCJ_FIXED_LLVM_DIR" LLVM_SHA="$LLVM_SHA" CANGJIE_COMPILER_SHA="$CANGJIE_COMPILER_SHA" \
+            npx --yes zx@8 ci/llvm-tuple-layout.mjs "$RUNNER_TEMP/llvm-tuple"
           tuple="$RUNNER_TEMP/llvm-tuple/$LLVM_SHA/$CANGJIE_COMPILER_SHA"
           (cd "$tuple" && sha256sum --strict -c SHA256SUMS)
           echo "LLVM_TUPLE_SUMS_SHA=$(sha256sum "$tuple/SHA256SUMS" | awk '{print $1}')" | tee -a "$GITHUB_STEP_SUMMARY"
