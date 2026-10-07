@@ -50,6 +50,7 @@ export function prepareNativeTestInputs(out, repo) {
     copy(root==='base'?officialStd:colouredStd,`${root}/lib/${native.tuple}/libcangjie-std-core.a`);
     copy(stdShared,`${root}/runtime/lib/${native.tuple}/libcangjie-std-core${native.librarySuffix}`);
     copy(host,`${root}/lib/libstdFFI${native.librarySuffix}`);
+    copy(officialStd,`${root}/lib/${native.tuple}/libfixtureFFI.a`);
     put(`${root}/modules/${native.tuple}/std.core.cjo`,'module fixture\n');
     put(`${root}/std-producer.json`,JSON.stringify({compiler_sha256:sha256File(officialTool)})+'\n');
   }

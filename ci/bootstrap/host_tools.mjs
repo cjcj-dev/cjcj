@@ -74,7 +74,7 @@ export async function readSymbols(args) {
 export function compilerCacheEnvironment() {
   const names = [
     'CMAKE_C_COMPILER_LAUNCHER', 'CMAKE_CXX_COMPILER_LAUNCHER', 'CMAKE_ASM_COMPILER_LAUNCHER',
-    'SCCACHE_DIR', 'SCCACHE_CACHE_SIZE', 'SCCACHE_IDLE_TIMEOUT',
+    'SCCACHE_PATH', 'SCCACHE_DIR', 'SCCACHE_CACHE_SIZE', 'SCCACHE_IDLE_TIMEOUT',
     'SCCACHE_GHA_ENABLED', 'SCCACHE_LOG', 'SCCACHE_ERROR_LOG',
   ];
   return Object.fromEntries(names.filter(name => process.env[name])

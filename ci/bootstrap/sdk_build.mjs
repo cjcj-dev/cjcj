@@ -65,6 +65,7 @@ export function buildSdk(args) {
   for (const name of ['from','to','role']) if (!options[name]) fail(`缺 --${name}`);
   const tuple = options.tuple || native.tuple;
   if (!/^[a-z0-9]+_[a-z0-9_]+_cjnative$/.test(tuple)) fail('invalid target tuple');
+  if (options['llvm-tuple'] && (options.llc || options.opt)) fail('--llvm-tuple 已包含 llc/opt，不可再混用 --llc/--opt');
   let commit = (options['runtime-commit'] || '').toLowerCase();
   if (commit && (!options.runtime || !/^[0-9a-f]{40}$/.test(commit))) fail('--runtime-commit must be a clean 40hex with --runtime');
   let verifyHostDir = '';
@@ -250,7 +251,8 @@ export function buildSdk(args) {
     const exe = path.join(to,rel); if (!exists(exe) && !link(exe)) continue;
     const format = execute('file',['-bL',exe]).stdout;
     if (!format.includes(native.format)) fail(`${exe} 不是 ${native.format}`);
-    const deps = execute(native.os === 'darwin' ? 'otool' : 'ldd', native.os === 'darwin' ? ['-L',exe] : [exe], {env});
+    const deps = execute(native.os === 'darwin' ? 'otool' : 'ldd', native.os === 'darwin' ? ['-L',exe] : [exe], {env,check:false});
+    if (deps.exitCode !== 0 && !(native.os === 'linux' && format.includes('statically linked'))) fail(`${exe} native dependency tool rc=${deps.exitCode}: ${deps.stderr}`);
     if (deps.stdout.includes('not found') || deps.stderr.includes('not found')) fail(`${exe} 在 SDK 环境下有未解析依赖`);
     if (rel !== 'bin/cjc' || options.role === 'host') execute(exe,['--version'],{env});
     console.log(`SDK-BUILD-SHA ${rel} ${sha256File(exe)}`);

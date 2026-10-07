@@ -56,7 +56,7 @@ export class Bootstrap {
   mutate(label, action) { console.log('CMD ' + label); if (!this.DRY) action(); }
   sha(p) {
     if (file(p)) return sha256File(p);
-    if (directory(p)) return hash(findFiles(p,()=>true).filter(file).map(f => `${sha256File(f)}  ${f}\n`).join(''));
+    if (directory(p)) return hash(findFiles(p,()=>true).filter(f => fs.lstatSync(f).isFile()).map(f => `${sha256File(f)}  ${f}\n`).join(''));
     return '';
   }
   record(label,p) { if (!exists(p)) this.die(`${label} 不存在: ${p}`); console.log(`INPUT ${label} path=${fs.realpathSync(p)} sha256=${this.sha(p)}`); }
@@ -102,8 +102,9 @@ export class Bootstrap {
     if (hits) this.die(`official LLVM opt 含 colour commit 章 hits=${hits}`);
   }
   assertPath(label,p) {
-    if (!exists(p)) this.die(`${label} 不存在: ${p}`);
-    console.log(`ASSERT ${label} exists=1 path=${p}`);
+    if (!exists(p)) this.die(`${label} 缺失: ${p}`);
+    if (directory(p) ? !findFiles(p,()=>true).some(f=>fs.lstatSync(f).isFile()) : fs.statSync(p).size === 0) this.die(`${label} 为空: ${p}`);
+    console.log(`ASSERT ${label} exists=1 sha256=${this.sha(p)}`);
   }
   assertExecutable(label,p) {
     if (this.DRY) { console.log(`ASSERT ${label} executable=planned path=${p}`); return; }
@@ -118,10 +119,16 @@ export class Bootstrap {
     if (!file(target) || expected !== actual) this.die('host LLVM SO 安装后 sha256 不一致');
   }
   assertInstalledTuple(sdk,tuple) {
-    for (const line of read(path.join(tuple,'SHA256SUMS')).trimEnd().split('\n')) {
+    const lines=read(path.join(tuple,'SHA256SUMS')).trimEnd().split('\n').filter(Boolean);
+    if (!lines.length) this.die('colour LLVM tuple 安装断言没有清单输入');
+    for (const line of lines) {
       const [expected,rel]=line.split('  ./'), target=path.join(sdk,'third_party/llvm',rel);
       if (this.DRY) console.log(`ASSERT installed-colour-tuple sha256=planned expected=${expected} target=${target}`);
       else { const actual=this.sha(target); console.log(`ASSERT installed-colour-tuple expected=${expected} actual=${actual} target=${target}`); if (!file(target) || actual !== expected) this.die(`colour LLVM tuple 安装后 sha256 不一致: ${rel}`); }
+    }
+    if (!this.DRY) {
+      const installed=path.join(sdk,'third_party/llvm/SHA256SUMS');
+      if (!file(installed) || !fs.readFileSync(path.join(tuple,'SHA256SUMS')).equals(fs.readFileSync(installed))) this.die('colour LLVM tuple 安装后 SHA256SUMS 不一致或缺失');
     }
   }
   install(source,target,mode) { this.mutate(`install -m${mode.toString(8)} ${quote(source)} ${quote(target)}`,()=>{ fs.mkdirSync(path.dirname(target),{recursive:true}); fs.copyFileSync(source,target); fs.chmodSync(target,mode); }); }
@@ -189,7 +196,7 @@ export class Bootstrap {
     const compiler=file(sdk+'/bin/cjcj-stage1') ? sdk+'/bin/cjcj-stage1' : sdk+'/bin/cjc';
     if (file(compiler) || this.DRY) this.mutate(`write ${prefix}/std-producer.json compiler=${compiler}`,()=>fs.writeFileSync(prefix+'/std-producer.json',JSON.stringify({compiler_sha256:sha256File(compiler)})+'\n'));
   }
-  assertRoot() { if (!directory(this.SRC) || !file(this.SRC+'/cjpm.toml')) this.die(`--src 缺少 cjpm.toml: ${this.SRC}`); console.log(`ASSERT cjcj-root cjpm.toml=1 path=${this.SRC}/cjpm.toml`); }
+  assertRoot() { if (!directory(this.SRC)) this.die(`--src 必须是含 cjpm.toml 的 cjcj 仓根，拒绝单文件: ${this.SRC}`); if (!file(this.SRC+'/cjpm.toml')) this.die(`--src 缺少 cjpm.toml: ${this.SRC}`); console.log(`ASSERT cjcj-root cjpm.toml=1 path=${this.SRC}/cjpm.toml`); }
   assertSourceSha() {
     if (!/^[0-9a-fA-F]{40}$/.test(this.CJCJ_SHA)) this.die('--cjcj-sha 必须是 40 位十六进制数');
     this.CJCJ_SHA=this.CJCJ_SHA.toLowerCase();
