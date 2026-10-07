@@ -8,7 +8,7 @@ import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const [outArg, base, expected] = process.argv.slice(2);
+const [outArg, base, expected] = argv._;
 if (!outArg || !/^[0-9a-f]{40}$/.test(base || '')
     || !/^(linux|darwin)_(x86_64|aarch64)_cjnative$/.test(expected || '')) {
   throw new Error('usage: test_host_route.mjs ABSOLUTE_OUT BASE_SHA EXPECTED_NATIVE_TUPLE');
