@@ -56,7 +56,7 @@ if (process.platform === 'linux') {
     await $({cwd: runtimeDirectory})`python3 build.py build --target ${runtimeTarget} --build-type ${buildType} --target-toolchain ${runtimeToolchain} --prefix ${preinstall} -v ${version}`;
     await $({cwd: runtimeDirectory})`python3 build.py install --prefix ${configuredInstallRoot}`;
   } else if (runtimeTarget === 'native') {
-    await $`bash ci/platform_matrix/qualify_teardown_tools.sh ${path.join(root, 'logs', 'teardown-tools.log')}`;
+    await $`npx --yes zx@8 ${toCommandPath(path.join(import.meta.dirname, 'qualify_teardown_tools.mjs'))} ${toCommandPath(path.join(root, 'logs', 'teardown-tools.log'))}`;
     await $({cwd: runtimeDirectory})`python3 build.py build --target native --build-type ${buildType} --prefix ${preinstall} -v ${version}`;
     await $({cwd: runtimeDirectory})`python3 build.py install --prefix ${installRoot}`;
   } else {
