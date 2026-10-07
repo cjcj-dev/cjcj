@@ -71,3 +71,22 @@ for (const [name, select] of [
     });
   });
 }
+
+
+test('private root guard preserves legal trailing path whitespace', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'llvm-runtime-input-'));
+  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
+  const left = fixture(path.join(root, 'baseline'), table, {baseline: true});
+  const right = fixture(path.join(root, 'candidate'), table);
+  const row = table.rows.find(row => row.inputs.some(input => input.fixture === 'root-trailing-space'));
+  assert.ok(row, 'root equality guard is mechanically derived from source');
+  const inputs = row.inputs.filter(input => input.fixture.startsWith('root-trailing-'));
+  assert.equal(inputs.length, 2);
+  inputs.forEach((input, i) => {
+    const baseline = left.execute(input, i);
+    const candidate = right.execute(input, i);
+    console.log(`ASSERT_REACHED path whitespace entry=${candidate.entrySha256} baseline=${JSON.stringify(baseline.normalized)} candidate=${JSON.stringify(candidate.normalized)}`);
+    assert.deepEqual(candidate.normalized, baseline.normalized, 'root path bytes must survive command substitution');
+    assert.equal(candidate.rc, 0, 'legal clean worktree root is accepted');
+  });
+});

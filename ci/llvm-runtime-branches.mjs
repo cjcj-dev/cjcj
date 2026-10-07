@@ -70,7 +70,10 @@ export function exportBranches(source) {
         inputs = [undefined, '', 'https://example.invalid/runtime.git']
           .map(value => input({...privateEnv, [urlGuard[1]]: value}));
       } else if (/pwd -P/.test(expression)) {
-        inputs = [input(privateEnv, [check, '$DEST'], 'subdirectory')];
+        // The root equality predicate consumes paths verbatim; include valid
+        // whitespace suffixes alongside its rejecting subdirectory witness.
+        inputs = ['subdirectory', 'root-trailing-space', 'root-trailing-tab']
+          .map(fixture => input(privateEnv, [check, '$DEST'], fixture));
       } else if (/-z\s+\$status/.test(expression)) {
         inputs = ['tracked-dirty', 'untracked-dirty'].map(fixture => input(privateEnv, [check, '$DEST'], fixture));
       } else if (/rev-parse HEAD/.test(expression)) {

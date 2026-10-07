@@ -51,6 +51,8 @@ export function fixture(root, table, {baseline = false} = {}) {
   cleanEnv.CJCJ_SRCBUILD_REQUIRE_MIRRORS = '1';
   const execute = (input, index) => {
     let dest = path.join(root, `dest-${index}`);
+    if (input.fixture === 'root-trailing-space') dest += ' ';
+    if (input.fixture === 'root-trailing-tab') dest += '\t';
     if (input.fixture !== 'absent') {
       if (input.fixture === 'destination-file') fs.writeFileSync(dest, 'not a directory\n');
       else if (input.fixture === 'unborn' || input.fixture === 'checkout-conflict') {

@@ -52,10 +52,10 @@ const dest = args[0];
 async function verifyClean() {
   const top = await capture(['git', '-C', dest, 'rev-parse', '--show-toplevel'], {check: false});
   if (top.exitCode !== 0) reject('private runtime destination is not a Git worktree');
-  if (fs.realpathSync(dest) !== fs.realpathSync(top.stdout.trim())) reject('private runtime destination must be the Git worktree root');
+  if (fs.realpathSync(dest) !== fs.realpathSync(top.stdout.replace(/\n+$/, ''))) reject('private runtime destination must be the Git worktree root');
   const status = await capture(['git', '-C', dest, 'status', '--porcelain', '--untracked-files=all'], {check: false});
   if (status.exitCode !== 0) reject('cannot inspect private runtime checkout');
-  if (status.stdout.trim()) reject('private runtime checkout is dirty');
+  if (status.stdout.replace(/\n+$/, '')) reject('private runtime checkout is dirty');
 }
 if (privateInput && fs.existsSync(dest)) await verifyClean();
 if (operation === 'check') process.exit(0);
@@ -64,7 +64,7 @@ if (operation === 'verify') {
     await verifyClean();
     // The old [[ $(git ...) == SHA ]] consumes stdout even if Git fails;
     // its comparison, rather than the substitution, owns the error exit.
-    if ((await capture(['git', '-C', dest, 'rev-parse', 'HEAD'], {check: false})).stdout.trim() !== runtimeSha) reject('private runtime checkout HEAD differs from requested SHA');
+    if ((await capture(['git', '-C', dest, 'rev-parse', 'HEAD'], {check: false})).stdout.replace(/\n+$/, '') !== runtimeSha) reject('private runtime checkout HEAD differs from requested SHA');
     console.log(`LLVM_RUNTIME_IDENTITY mode=private sha=${runtimeSha} source=${fs.realpathSync(dest)}`);
   }
   process.exit(0);
@@ -74,7 +74,7 @@ if (operation === 'verify') {
 await run(['git', 'init', dest]);
 await run(['bash', '-c', 'set -euo pipefail; source "$1"; srcbuild_git_fetch "$2" "$3" "$4"', 'fetch-runtime', path.join(repo, 'build/lib/srcbuild_git.sh'), dest, runtimeUrl, runtimeSha]);
 await run(['git', '-C', dest, 'checkout', '--detach', 'FETCH_HEAD']);
-if ((await capture(['git', '-C', dest, 'rev-parse', 'HEAD'], {check: false})).stdout.trim() !== runtimeSha) process.exit(1);
+if ((await capture(['git', '-C', dest, 'rev-parse', 'HEAD'], {check: false})).stdout.replace(/\n+$/, '') !== runtimeSha) process.exit(1);
 if (privateInput) {
   await verifyClean();
   console.log(`LLVM_RUNTIME_IDENTITY mode=private sha=${runtimeSha} source=${fs.realpathSync(dest)}`);
