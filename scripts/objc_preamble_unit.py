@@ -23,7 +23,8 @@ def prepare(tree, sdk, out, producer=None, stub_imports=None):
     """Produce declaration inputs only; publish identity even on failure."""
     tree, sdk, out = (Path(p).resolve() for p in (tree, sdk, out))
     out.mkdir(parents=True, exist_ok=True)
-    record = {'tree': str(tree), 'sdk': str(sdk), 'stubs': {}}
+    record = {'tree': str(tree), 'sdk': str(sdk), 'stubs': {},
+              'phase': 'copy', 'rc': None, 'argv': None, 'logs': {}, 'error': None}
     try:
         if producer is None:
             products = [tree / 'target/release/bin' / n for n in ('cjcj::cjc', 'cjc@cjcj')]
@@ -34,6 +35,7 @@ def prepare(tree, sdk, out, producer=None, stub_imports=None):
         product = out / 'cjcj-stage1'
         if Path(producer).resolve() != product:
             shutil.copy2(producer, product)
+        record['phase'] = 'input_identity'
         inputs = [product, sdk / 'bin/cjc', sdk / 'tools/bin/cjpm',
                   tree / 'runtime_shim/cjselfhost_llvmshim.o',
                   sdk / 'lib/linux_x86_64_cjnative/libcangjie-std-core.a',
@@ -44,6 +46,7 @@ def prepare(tree, sdk, out, producer=None, stub_imports=None):
         record['sdk_files'] = {str(p.relative_to(sdk)): digest(p)
                                for p in sorted(sdk.rglob('*')) if p.is_file()}
         record['source_sha'] = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=tree, text=True).strip()
+        record['phase'] = 'copy_imports'
         imports = out / 'imports/objc'
         imports.mkdir(parents=True, exist_ok=True)
         env = os.environ.copy()
@@ -58,11 +61,16 @@ def prepare(tree, sdk, out, producer=None, stub_imports=None):
                 argv = [str(product), str(source), '--import-path', str(out / 'imports'),
                         '--output-type=staticlib', '--output-dir', str(imports),
                         '-o', name + '.a', '--diagnostic-format=noColor']
-                with (out / (name + '.log')).open('w') as log:
+                record.update(phase='execute', rc=None, argv=argv)
+                log_path = out / (name + '.log')
+                record['logs'][name] = str(log_path)
+                with log_path.open('w') as log:
                     rc = subprocess.call(argv, cwd=out, env=env, stdout=log, stderr=subprocess.STDOUT)
-                record['stubs'][name] = {'argv': argv, 'rc': rc}
+                record['rc'] = rc
+                record['stubs'][name] = {'argv': argv, 'rc': rc, 'log': str(log_path)}
                 if rc:
                     raise ValueError(f'{name} producer rc={rc}')
+        record['phase'] = 'verify_products'
         for name in ('internal', 'lang'):
             for filename in ('objc.' + name + '.cjo', name + '.a'):
                 if not (imports / filename).is_file():
@@ -70,10 +78,11 @@ def prepare(tree, sdk, out, producer=None, stub_imports=None):
         record['files'] = {str(p.relative_to(out / 'imports')): digest(p)
                            for p in sorted((out / 'imports').rglob('*')) if p.is_file()}
         record['imports'] = str(out / 'imports')
-        record['rc'] = 0
+        record.update(phase='complete', rc=0)
         return record
     except Exception as error:
-        record.update(rc=1, error='ObjCPreamble fixture prerequisite: ' + str(error))
+        record.update(error='ObjCPreamble fixture prerequisite: ' + str(error),
+                      exception_type=type(error).__name__, exception_text=str(error))
         raise RuntimeError(record['error']) from error
     finally:
         (out / 'fixture.json').write_text(json.dumps(record, indent=2) + '\n')
