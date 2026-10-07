@@ -24,6 +24,12 @@ test('Linux native runtime qualifies teardown tools before invoking the gate', t
   assert.equal(resolved.status, 0, resolved.stdout + resolved.stderr);
   const zx = resolved.stdout.trim();
   const qualify = env => spawnSync(process.execPath, [zx, path.join(root, 'ci/platform_matrix/qualify_teardown_tools.mjs'), log], {env, encoding: 'utf8'});
+  const product = path.join(root, 'ci/platform_matrix/qualify_teardown_tools.mjs');
+  const original = fs.readFileSync(product);
+  const noArgument = spawnSync(process.execPath, [zx, product], {encoding: 'utf8'});
+  assert.equal(noArgument.status, 1, noArgument.stdout + noArgument.stderr);
+  assert.match(noArgument.stderr, /usage: qualify_teardown_tools\.mjs LOG/);
+  assert.deepEqual(fs.readFileSync(product), original, 'argument parsing must never truncate the script itself');
   const tools = path.join(temporary, 'bin');
   fs.mkdirSync(tools);
   // zx resolves bash from PATH; keep the shell while isolating the gate tools.
@@ -37,6 +43,10 @@ test('Linux native runtime qualifies teardown tools before invoking the gate', t
   const unusable = qualify({...process.env, PATH: tools});
   assert.equal(unusable.status, 23, unusable.stdout + unusable.stderr);
   assert.match(fs.readFileSync(log, 'utf8'), /controlled timeout version failure\nGC_UNIT_TEARDOWN_TOOL_FAIL tool=timeout rc=23/);
+  fs.rmSync(path.join(tools, 'timeout'));
+  const missingTimeout = qualify({...process.env, PATH: tools});
+  assert.equal(missingTimeout.status, 127, missingTimeout.stdout + missingTimeout.stderr);
+  assert.match(fs.readFileSync(log, 'utf8'), /GC_UNIT_TEARDOWN_TOOL_FAIL tool=timeout rc=127 reason=not-found/);
   fs.rmSync(path.join(tools, 'gdb'));
   const missing = qualify({...process.env, PATH: tools});
   assert.equal(missing.status, 127, missing.stdout + missing.stderr);
