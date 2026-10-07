@@ -31,13 +31,16 @@ const build = await run(['bash', path.join(repo, 'ci/platform_tuples/build_tuple
 fs.writeFileSync(path.join(work, 'build.rc'), `${build.exitCode}\n`);
 console.log(`CHAIN_ASSERT_REACHED first_cmake_boundary actual=${build.exitCode} expected=86`);
 assert.equal(build.exitCode, 86); console.log('CHAIN_ASSERT_PASS first_cmake_boundary');
-const command = JSON.parse(fs.readFileSync(path.join(work, 'cmake.json'), 'utf8'));
-const actual = command.filter(arg => arg.startsWith('-DCANGJIE_RUNTIME_SOURCE_DIR='));
-const expected = [`-DCANGJIE_RUNTIME_SOURCE_DIR=${fs.realpathSync(selected)}`];
-console.log(`CHAIN_ASSERT_REACHED cmake_runtime_source actual=${JSON.stringify(actual)} expected=${JSON.stringify(expected)}`);
-assert.deepEqual(actual, expected, 'cmake_runtime_source');
-const consumed = (await capture(['git', '-C', actual[0].split('=')[1], 'rev-parse', 'HEAD'])).stdout.trim();
-console.log(`CHAIN_ASSERT_REACHED consumed_head actual=${consumed} expected=${runtimeSha}`);
-assert.equal(consumed, runtimeSha, 'consumed_head');
-assert.equal((await capture(['git', '-C', selected, 'status', '--porcelain'])).stdout.trim(), '');
-console.log('CHAIN_ASSERT_PASS cmake_runtime_source consumed_head clean');
+await run(['python3', '-', path.join(work, 'cmake.json'), selected, runtimeSha], {input: String.raw`import json,subprocess,sys
+from pathlib import Path
+command=json.loads(Path(sys.argv[1]).read_text())
+actual=[x for x in command if x.startswith('-DCANGJIE_RUNTIME_SOURCE_DIR=')]
+expected=['-DCANGJIE_RUNTIME_SOURCE_DIR='+str(Path(sys.argv[2]).resolve())]
+print(f'CHAIN_ASSERT_REACHED cmake_runtime_source actual={actual!r} expected={expected!r}', flush=True)
+assert actual==expected, 'cmake_runtime_source'
+selected=actual[0].split('=',1)[1]
+head=subprocess.check_output(['git','-C',selected,'rev-parse','HEAD'],text=True).strip()
+print(f'CHAIN_ASSERT_REACHED consumed_head actual={head} expected={sys.argv[3]}',flush=True)
+assert head==sys.argv[3], 'consumed_head'
+assert not subprocess.check_output(['git','-C',selected,'status','--porcelain']).strip()
+print('CHAIN_ASSERT_PASS cmake_runtime_source consumed_head clean')`});

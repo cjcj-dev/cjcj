@@ -5,14 +5,15 @@ process.env.LC_ALL = 'C';
 const work = path.resolve(required(0, 'EMPTY_WORK_DIRECTORY'));
 fs.mkdirSync(work);
 const producer = 'ci/llvm-tuple-layout.mjs';
-const consumer = 'ci/release/prepare_bootstrap_inputs.mjs';
+// The tuple consumer moved here; fault the real module used by preparation.
+const consumer = 'ci/release/bootstrap_tuple.mjs';
 for (const [file, name] of [[producer, 'producer'], [consumer, 'consumer']]) fs.copyFileSync(path.join(repo, file), path.join(work, `${name}.saved`));
 function restore() {
   fs.copyFileSync(path.join(work, 'producer.saved'), path.join(repo, producer));
   fs.copyFileSync(path.join(work, 'consumer.saved'), path.join(repo, consumer));
 }
 const layout = arm => run([...zxCommand(path.join(repo, 'ci/test-llvm-tuple-layout.mjs')), path.join(work, `producer-${arm}`)], {log: path.join(work, `producer-${arm}.log`), check: false});
-const consume = arm => run(['node', '--test', '--test-reporter=tap', '--test-name-pattern=^(?!ast ).*(tuple|depot|persistent)', consumer.replace('.mjs', '.test.mjs')], {log: path.join(work, `${arm}.log`), check: false});
+const consume = arm => run(['node', '--test', '--test-reporter=tap', '--test-name-pattern=^(?!ast ).*(tuple|depot|persistent)', 'ci/release/prepare_bootstrap_inputs.test.mjs'], {log: path.join(work, `${arm}.log`), check: false});
 try {
   await hash([producer, consumer], path.join(work, 'green.sha256'));
   assert.equal((await layout('green')).exitCode, 0);
@@ -33,8 +34,8 @@ try {
   for (const pattern of [/ERR_ASSERTION/, /^# pass 4$/m, /^# fail 2$/m]) assert.match(consumerCut.stdall, pattern);
   restore();
   const source = fs.readFileSync(path.join(repo, consumer), 'utf8');
-  const a = source.indexOf("if (!/^[0-9a-f]{64}$/.test(process.env.LLVM_TUPLE_SUMS_SHA");
-  const b = source.indexOf('\nconst colourRt', a);
+  const a = source.indexOf("if (!/^[0-9a-f]{64}$/.test(sumsSha");
+  const b = source.indexOf('\n  const identities', a);
   assert(a >= 0 && b > a);
   fs.writeFileSync(path.join(repo, consumer), source.slice(0, a) + source.slice(b));
   await diff(path.join(work, 'consumer.saved'), path.join(repo, consumer), path.join(work, 'pin-cut.diff'));
