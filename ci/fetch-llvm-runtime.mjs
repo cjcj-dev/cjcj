@@ -13,7 +13,7 @@ function pin(file) {
     }));
 }
 async function capture(command, {check = true} = {}) {
-  const result = await $({cwd: repo, nothrow: true, quiet: true})`${command}`;
+  const result = await $({cwd: process.cwd(), nothrow: true, quiet: true})`${command}`;
   // Shell command substitutions forward stderr even when successful.
   process.stderr.write(result.stderr);
   if (check && result.exitCode !== 0) process.exit(result.exitCode);
@@ -48,7 +48,7 @@ let operation = 'fetch';
 if (args[0] === '--check-input') { operation = 'check'; args.shift(); }
 else if (args[0] === '--verify-checkout') { operation = 'verify'; args.shift(); }
 if (args.length !== 1 || !args[0]) reject('expected one paired runtime destination');
-const dest = path.resolve(args[0]);
+const dest = args[0];
 async function verifyClean() {
   const top = await capture(['git', '-C', dest, 'rev-parse', '--show-toplevel'], {check: false});
   if (top.exitCode !== 0) reject('private runtime destination is not a Git worktree');

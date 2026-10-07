@@ -83,7 +83,8 @@ export function exportBranches(source) {
     add('guard-error', match.index, match[0], inputs);
   }
   for (const match of source.matchAll(/^(operation=\w+|private=\d+)$/gm)) {
-    add('default', match.index, match[0], [input({}, ['$DEST']), input(privateEnv, ['$DEST'])]);
+    add('default', match.index, match[0], [input({}, ['$DEST']), input(privateEnv, ['$DEST']),
+      ...(match[0].startsWith('operation=') ? [input({}, ['relative destination']), input({}, ['--unknown'])] : [])]);
   }
   // Expand condition axes mechanically, including both sides of && and the
   // operation's successful/unsuccessful exit routes.
