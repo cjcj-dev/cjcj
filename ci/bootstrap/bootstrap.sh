@@ -902,6 +902,7 @@ supplied_stage1() {
   stage1_initial_std
   # The full std just produced is the stage2 compiler's static-link input.
   std="$previous_std"
+  if [ -n "${COLOUR_GATE_SOURCE:-}${COLOUR_GATE_INSTALL:-}" ]; then STAGE=colour-runtime-gate; assemble_stage1_sdk "$sdk" "$compiler" "$std"; cmd "bash $(printf '%q' "$SRC/ci/release/gate_colour_runtime.sh") --build-sdk $(printf '%q' "${COLOUR_GATE_SOURCE:?colour gate source}") $(printf '%q' "$sdk") $(printf '%q' "$WORK/colour-gate-active") $(printf '%q' "${COLOUR_GATE_INSTALL:?colour gate install}")"; fi
   stage1_compiler
   STAGE=stage2-smoke
   printf 'main(): Int64 { return 0 }\n' > "$WORK/main.cj"
@@ -917,6 +918,7 @@ main() {
       --stage1-elf) STAGE1_ELF="${2:?}"; shift 2;;
       --stage1-sha256) STAGE1_SHA256="${2:?}"; shift 2;;
       --host-sdk) HOST_SDK="${2:?}"; shift 2;;
+      --colour-gate-source) COLOUR_GATE_SOURCE="${2:?}"; shift 2;; --colour-gate-install) COLOUR_GATE_INSTALL="${2:?}"; shift 2;;
       --runtime-sha) RUNTIME_SHA="${2:?}"; shift 2;;
       --check-only) CHECK_ONLY=1; shift;;
       --work) WORK="${2:?}"; shift 2;;

@@ -124,6 +124,37 @@ echo 'TARGET independent SDK inputs reached actual gate consumer'
         ...process.env, PATH: `${root}/bin:${process.env.PATH}`, BOOTSTRAP_ARCHIVES_PIN: pin,
         TEST_ARCHIVE: archive, TEST_TARGET: target, TEST_ROOT: root,
       }});
+    // Execute supplied_stage1 itself. Only earlier compiler/std production is
+    // substituted; its command runner, caller line, gate, transport verifier and
+    // downstream input assertions remain the real composition path.
+    const bootstrap = new URL('../bootstrap/bootstrap.sh', import.meta.url).pathname;
+    const supplied = spawnSync('bash', ['-c', `
+source "$1"
+WORK="$TEST_ROOT/bootstrap-work"; SRC="$2"
+COLOUR_GATE_SOURCE="$TEST_ROOT/source"; COLOUR_GATE_INSTALL="$TEST_ROOT/installed"
+HOST_SDK="$TEST_ROOT/build"; STAGE1_ELF="$TEST_ROOT/payload/sdk/bin/cjc"
+AST_SUPPORT="$TEST_ROOT/unused"; HOST_TUPLE=linux_x86_64_cjnative
+mkdir -p "$WORK"
+stage1_inputs() { sdk="$TEST_ROOT/build"; compiler="$STAGE1_ELF"; previous_std="$TEST_ROOT/std"; }
+stage1_initial_std() { :; }
+assemble_stage1_sdk() { [[ "$1" == "$TEST_ROOT/build" && "$3" == "$TEST_ROOT/std" ]]; }
+stage1_compiler() { echo 'TARGET bootstrap gate completed before stage2'; exit 0; }
+supplied_stage1
+`, 'bootstrap-fixture', bootstrap, new URL('../..', import.meta.url).pathname], {encoding: 'utf8', env: {
+      ...process.env, PATH: `${root}/bin:${process.env.PATH}`, BOOTSTRAP_ARCHIVES_PIN: pin,
+      TEST_ARCHIVE: archive, TEST_TARGET: target, TEST_ROOT: root,
+    }});
+    assert.equal(supplied.status, 0, supplied.stderr);
+    assert.match(supplied.stdout, /TARGET independent SDK inputs reached actual gate consumer/);
+    assert.match(supplied.stdout, /TARGET bootstrap gate completed before stage2/);
+    assert.ok(fs.existsSync(path.join(root, 'bootstrap-work/colour-gate-active-language/sdk/bin/cjc')));
+    console.log('TARGET bootstrap supplied_stage1 actual caller accepted --build-sdk');
+    const legacy = spawnSync('bash', [new URL('./gate_colour_runtime.sh', import.meta.url).pathname,
+      '--same-source', 'unused-source', 'unused-sdk', 'unused-host', 'unused-install', 'unused-std'],
+      {encoding: 'utf8'});
+    assert.equal(legacy.status, 2);
+    assert.match(legacy.stderr, /COLOUR_RT_GATE_INTERFACE unsupported=--same-source/);
+    console.log('TARGET legacy --same-source precisely rejected rc=2 before admission');
     const accepted = run('accepted');
     assert.equal(accepted.status, 0, accepted.stderr);
     assert.match(accepted.stdout, /TARGET independent SDK inputs reached actual gate consumer/);

@@ -2,6 +2,7 @@
 # Complete the unchanged runtime gate with independent build/language SDKs.
 set -euo pipefail
 ulimit -c 0
+[[ ${1:-} != --* || ${1:-} == --build-sdk ]] || { echo "COLOUR_RT_GATE_INTERFACE unsupported=${1}" >&2; exit 2; }
 build_sdk_mode=0
 if [[ ${1:-} == --build-sdk ]]; then
   build_sdk_mode=1
