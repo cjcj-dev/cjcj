@@ -2,6 +2,7 @@
 // Real frontend -> bitcode -> independent LLVM DataLayout/IR assertions.
 import {fs, path, repo, pin, required, run, capture, hash, equalFiles, cliArgs, isMain} from './script-common.mjs';
 import {resolveRuntimeSource} from './runtime-pin.mjs';
+import {spawnSync} from 'node:child_process';
 // Preserve the old entry's core limit for compiler and LLVM-reader children.
 $.prefix = 'ulimit -c 0; ' + $.prefix;
 let compiler = required(0, 'candidate compiler');
@@ -26,7 +27,14 @@ fs.mkdirSync(path.join(work, 'core'), {recursive: true});
 const archive = path.join(work, 'runtime-core.tar');
 await run(['git', '-C', runtimeRepo, 'archive', '-o', archive, RUNTIME_REF, 'stdlib/libs/std/core']);
 await run(['tar', '-xf', archive, '-C', path.join(work, 'core')]);
-const actualRuntimeRef = (await capture(['git', 'get-tar-commit-id'], {input: fs.readFileSync(archive)})).stdout.trim();
+// This reader exits after the tar header. A file descriptor preserves the old
+// stdin redirection without an EPIPE from streaming the unused archive tail.
+const archiveFd = fs.openSync(archive, 'r');
+let identity;
+try { identity = spawnSync('git', ['get-tar-commit-id'], {stdio: [archiveFd, 'pipe', 'pipe'], encoding: 'utf8'}); }
+finally { fs.closeSync(archiveFd); }
+if (identity.status !== 0) { process.stderr.write(identity.stderr || identity.error?.message || 'tar identity failed'); process.exit(identity.status ?? 1); }
+const actualRuntimeRef = identity.stdout.trim();
 fs.writeFileSync(path.join(work, 'runtime-source.sha'), `${actualRuntimeRef}\n`);
 if (actualRuntimeRef !== RUNTIME_REF.toLowerCase()) {
   console.error(`LAYOUT_IR_RUNTIME_SOURCE_MISMATCH expected=${RUNTIME_REF} actual=${actualRuntimeRef}`); process.exit(1);
