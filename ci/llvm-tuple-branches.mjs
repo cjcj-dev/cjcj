@@ -66,6 +66,14 @@ export function exportBranches(source) {
       } else if (/^(mkdir|cp|gzip|chmod|cd) /.test(value)) {
         const command = value.split(' ')[0];
         const inputs = (loop || [null]).map((payload, i) => ({fail: {command, occurrence: i + 1}, payload, expected: 1}));
+        if (command === 'mkdir') inputs.push({fixture: 'depot-file', expected: 1});
+        if (command === 'cp' && loop) {
+          inputs.push(...loop.map(payload => ({fixture: 'missing-payload', payload, expected: 1})));
+          const directory = /"\$(\w+)\/\$/.exec(value)?.[1];
+          if (!directory) throw Error('unsupported input directory');
+          inputs.push({env: {[directory]: null}, expected: 1}, {env: {[directory]: ''}, expected: 1});
+        }
+        if (command === 'gzip') inputs.push(...loop.map(payload => ({fixture: 'corrupt-gzip', payload, expected: 1})));
         // The second cp site follows all copies in the first loop.
         if (command === 'cp' && !loop) inputs[0].fail.occurrence = payloads.length + 1;
         add(`error:${command}`, index, text, inputs);

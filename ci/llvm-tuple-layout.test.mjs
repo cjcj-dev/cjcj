@@ -74,6 +74,8 @@ if (process.env.TUPLE_DIFFERENTIAL === '1') test('tuple source-derived full tabl
     assert.equal(command(['git', '-C', unborn, 'init', '-q']).status, 0);
     const replacements = {$DEPOT: path.join(root, 'depot'), $ARG: path.join(root, "explicit depot ' $ é"), $NONGIT: nongit, $MISSING: missing, $UNBORN: unborn};
     const input = entry.input;
+    if (input.fixture === 'missing-payload') fs.unlinkSync(path.join(identity.CJCJ_FIXED_LLVM_DIR, input.payload));
+    if (input.fixture === 'corrupt-gzip') fs.writeFileSync(path.join(identity.CJCJ_FIXED_LLVM_DIR, `${input.payload}.gz`), 'not gzip\n');
     const env = {...process.env, ...identity, LC_ALL: 'C'};
     delete env.CJCJ_LLVM_DEPOT_ROOT;
     delete env.BASH_ENV;
@@ -113,6 +115,7 @@ if (process.env.TUPLE_DIFFERENTIAL === '1') test('tuple source-derived full tabl
       if (input.fixture === 'manifest-directory' || input.fixture === 'sums-directory') {
         fs.mkdirSync(path.join(tuple, input.fixture === 'manifest-directory' ? 'MANIFEST' : 'SHA256SUMS'), {recursive: true});
       }
+      if (input.fixture === 'depot-file') fs.writeFileSync(depotRoot, 'obstructed depot\n');
     };
     // Strip only shell source locations from redirect errors; keep all command
     // diagnostics and all stdout. Both entries use exactly the same fixture paths.
