@@ -8,14 +8,14 @@ llvm=${3:?LLVM repository}
 source "$repo/ci/runtime_pin.env"
 source "$repo/ci/llvm_pin.env"
 mkdir -p "$work/product/ci" "$work/product/packages/codegen/src"
-for file in check-llvm-runtime-abi.sh generate-codegen-runtime-layout.py runtime_pin.env llvm_pin.env; do
+for file in check-llvm-runtime-abi.mjs generate-codegen-runtime-layout.py runtime_pin.env llvm_pin.env; do
     cp "$repo/ci/$file" "$work/product/ci/$file"
 done
 output="$work/product/packages/codegen/src/RuntimeLayout.cj"
 cp "$repo/packages/codegen/src/RuntimeLayout.cj" "$output"
 cp "$output" "$work/original.cj"
 check() {
-    bash "$work/product/ci/check-llvm-runtime-abi.sh" \
+    npx --yes zx@8 "$work/product/ci/check-llvm-runtime-abi.mjs" \
         --runtime-repo "$runtime" --runtime-ref "$RUNTIME_REF" \
         --llvm-repo "$llvm" --llvm-ref "$LLVM_SHA"
 }

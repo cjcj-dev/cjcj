@@ -5,7 +5,7 @@ on:
     paths:
       - 'ci/llvm*'
       - 'ci/runtime_pin.env'
-      - 'ci/check-llvm-runtime-abi.sh'
+      - 'ci/check-llvm-runtime-abi.mjs'
       - 'ci/test-runtime-layout.sh'
       - 'ci/test-codegen-layout-sync.sh'
       - 'ci/*codegen-runtime-layout*'
