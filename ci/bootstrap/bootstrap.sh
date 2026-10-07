@@ -810,7 +810,7 @@ stage1_compiler() {
     [ -d "$std" ] || die 'stage1 未产出 stdlib-stage2'
   fi
   assert_version cjcj-stage2 "$out" "$sdk" "$CRT"
-  cmd "zx $(printf '%q' "$SRC/ci/bootstrap/publish-std-output.mjs") $(printf '%q' "$WORK") $(printf '%q' "$std") $(printf '%q' "$compiler") $(printf '%q' "$HOST_TUPLE")"
+  cmd "npx --yes zx@8 $(printf '%q' "$SRC/ci/bootstrap/publish-std-output.mjs") $(printf '%q' "$WORK") $(printf '%q' "$std") $(printf '%q' "$compiler") $(printf '%q' "$HOST_TUPLE")"
   # Forensic arm is opt-in and runs only after the release compiler is installed.
   # It does not rewrite $out. Spec: cjpm `build -g` (default off) lands in
   # target/debug; std RelWithDebInfo already passes -g via AddCangjieSource.cmake.
