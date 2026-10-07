@@ -4,8 +4,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
+import {fileURLToPath} from 'node:url';
 
-const [work, sums, runtimeSource, selected, compilerSha] = process.argv.slice(2);
+const entry = fileURLToPath(import.meta.url);
+const entryIndex = process.argv.findIndex(value => path.resolve(value) === entry);
+const [work, sums, runtimeSource, selected, compilerSha] = process.argv.slice(entryIndex + 1);
 const std = path.join(work, 'stdlib-stage1');
 const origin = fs.readFileSync(path.join(std, 'STDLIB_SOURCE_SHA'), 'utf8').trim();
 if (![origin, selected].every(value => /^[0-9a-f]{40}$/.test(value))) throw Error('RESUME_STD_SOURCE_INVALID');
@@ -25,9 +28,11 @@ if (producer.compiler_sha256 !== compilerSha) throw Error('RESUME_STD_COMPILER_M
 // with the selected target. Neither lock nor source stamp is rewritten here.
 const runtime = path.join(work, 'sdk-stage1/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so');
 const bytes = fs.readFileSync(runtime);
+const runtimeSha = createHash('sha256').update(bytes).digest('hex');
+if (runtimeSha !== lock.components.runtime.so_sha256) throw Error('RESUME_SDK_RUNTIME_HASH_MISMATCH');
 if (!bytes.includes(Buffer.from(`CJRT-COMMIT:${lock.components.runtime.commit}\0`))) {
   throw Error('RESUME_SDK_RUNTIME_MISMATCH');
 }
 const sourceTree = await git(`${lock.components.runtime.commit}:stdlib`);
 if (sourceTree !== originalTree) throw Error('RESUME_SDK_STD_TREE_MISMATCH');
-console.log(`RESUME_STD_IDENTITY source=${origin} tree=${originalTree} selected_runtime=${selected} retained_runtime=${lock.components.runtime.commit} runtime_sha256=${createHash('sha256').update(bytes).digest('hex')}`);
+console.log(`RESUME_STD_IDENTITY source=${origin} tree=${originalTree} selected_runtime=${selected} retained_runtime=${lock.components.runtime.commit} runtime_sha256=${runtimeSha}`);
