@@ -22,7 +22,7 @@ switch (env.CJCJ_LLVM_RUNTIME_MODE || '') {
 const args = cliArgs.slice();
 let operation = 'fetch';
 if (args[0] === '--check-input') { operation = 'check'; args.shift(); }
-if (args[0] === '--verify-checkout') { operation = 'verify'; args.shift(); }
+else if (args[0] === '--verify-checkout') { operation = 'verify'; args.shift(); }
 if (args.length !== 1 || !args[0]) reject('expected one paired runtime destination');
 const dest = path.resolve(args[0]);
 async function verifyClean() {

@@ -37,6 +37,7 @@ export const DRIVERS = Object.freeze(JSON.parse(fs.readFileSync(new URL('./test-
 // Run by `node --test` in .github/workflows/ci.yml, via `test-manifest.mjs list`.
 export const GATING = Object.freeze([
   'ci/check-llvm-runtime-abi.test.mjs',
+  'ci/fetch-llvm-runtime.test.mjs',
   'ci/release/download_pinned.test.mjs',
   'build/test/source-matrix.test.mjs',
   'build/test/target-registry.test.mjs',
