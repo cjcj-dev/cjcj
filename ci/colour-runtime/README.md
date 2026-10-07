@@ -18,14 +18,30 @@ published configuration selected by the installed runtime digest and verified
 by the runtime's output resolver. Staging and earlier configurations are not
 package inputs. Files are copied, never linked.
 
-The producer fetches the pinned H48 prerelease in `ci/h48_language_tuple_pin.json`.
-Its native build runs the existing gate in `defer` mode, then
-`ci/release/gate_colour_runtime.sh` activates a private SDK with the same target
-pair and runs the complete gate in `all` mode before packaging. The H48 compiler
-uses its separately pinned official host runtime; its generated executables use
-the newly built coloured target runtime. The runner installs gdb for the native
-teardown proof. H48's partial source provenance remains documented in
-`ci/release/H48_LANGUAGE_TUPLE.md` and tracked by #135.
+The producer fetches the pinned H48 prerelease to assemble its build SDK with
+its same-build target pair. `ci/release/gate_colour_runtime.mjs` separately
+fetches artifact key `1504` in `ci/bootstrap_artifacts_pin.json` through
+`download_pinned.mjs`. That prerelease holds the unwrapped, qualified language
+SDK, including `host/compiler`, original runtime and unchanged `SDK.lock.json`.
+Its archive provenance records the #1504 qualification lane, retained kkk2 SDK
+path and measured component hashes. The runtime's checked-in qualification
+remains the admission authority; the archive does not replace it.
+
+The gate transmits `GC_UNIT_BUILD_SDK`, `GC_UNIT_LANGUAGE_SDK`,
+`GC_UNIT_CJC_RUNTIME_LIB_DIR`, `GC_UNIT_LANGUAGE_QUALIFICATION`,
+`GC_UNIT_COLOUR_CHECKER`, `GC_UNIT_COLOUR_HOST_RUNTIME` and
+`GCV2_RUNTIME_LIB_DIR`. Only the build SDK must contain the tested target SOs.
+The language SDK keeps the original f228 runtime, as specified by runtime
+`runtime/tests/gc_unit/LANGUAGE_TOOLCHAIN.md:37–43`.
+
+Bootstrap callers with an already assembled build SDK use
+`npx --yes zx@8 ci/release/gate_colour_runtime.mjs --build-sdk RUNTIME_SOURCE BUILD_SDK NEW_PRIVATE_DIR
+RUNTIME_INSTALL`. `NEW_PRIVATE_DIR-language` must not exist. The ordinary
+producer entry still assembles its build SDK from the H48 tuple; both entries
+use the same qualified language download and unchanged complete runtime gate.
+The runner installs gdb for the native teardown proof. H48's partial source
+provenance remains documented in `ci/release/H48_LANGUAGE_TUPLE.md` and tracked
+by #135.
 
 Artifacts expire after seven days. `release.json` records the matching
 prerelease (tag, asset IDs, archive and manifest digests). Consumers still
@@ -54,3 +70,12 @@ runtime and boundscheck are a separate, unchanged SDK extraction described in
 and executes the actual source workflow shell entries. It verifies platform
 pin presence, exact platform-specific rejection when that pin is removed,
 restoration, library verification and the missing-std classification.
+
+The fixed qualified language SDK is preserved in prerelease
+`qualified-language-sdk-1504-878-prerelease`, selected by artifact key `1504`
+in `ci/bootstrap_artifacts_pin.json`. Its original component and compiler-host
+identities, source lane and retained qualification runs are recorded in
+[qualified-language-sdk-1504-provenance.json](qualified-language-sdk-1504-provenance.json).
+The tested target runtime is measured independently of this fixed language
+SDK. Updating the production runtime pin and all platform release assets is
+tracked separately in #863; it does not change the language SDK identities.
