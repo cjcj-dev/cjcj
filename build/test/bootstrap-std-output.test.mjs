@@ -38,6 +38,7 @@ async function fixture(recipe) {
   await write('std/std-producer.json', JSON.stringify({compiler_sha256: hash('fixture stage1 compiler')}));
   await write('std/modules/full-prefix-member', 'another std member');
   await write('work/sdk-stage1/.stage1-host/binding.txt', 'host_ld=/fixture/host\n');
+  await write('work/sdk-stage1/bin/cjc', '#!/bin/bash\nexit 0\n');
   await write(`work/sdk-stage1/lib/${tuple}/libcangjie-std-core.a`, 'old sdk std');
   for (const rel of ['tools/bin/cjpm-stage1', ...['opt', 'llc', 'ld.lld'].map(n => `third_party/llvm/bin/${n}-stage1`)]) {
     await write(`work/sdk-stage1/${rel}`, '#!/bin/bash\nexit 0\n');
