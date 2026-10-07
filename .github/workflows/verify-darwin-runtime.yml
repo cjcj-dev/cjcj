@@ -66,8 +66,9 @@ jobs:
           fetch-depth: 0
       - name: Actual Apple header collection and admission
         env:
+          APPLE_BATCH_MODE: ${{ inputs.apple_input }}
           APPLE_BATCH_DEADLINE: ${{ inputs.apple_deadline }}
-        run: npx --yes zx@8 ci/bootstrap/apple_input/darwin-batch.mjs "${{ inputs.apple_input }}"
+        run: npx --yes zx@8 ci/bootstrap/apple_input/darwin-batch.mjs
       - uses: actions/upload-artifact@v7
         if: always()
         with:

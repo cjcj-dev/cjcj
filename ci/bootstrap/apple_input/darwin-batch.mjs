@@ -8,7 +8,7 @@ import {read, write, hash, dependencyArgv} from './identity.mjs';
 import {prepare, bindPrepared} from './prepare.mjs';
 import {capture} from './capture.mjs';
 
-const [mode = 'green'] = process.argv.slice(2);
+const mode = process.env.APPLE_BATCH_MODE;
 if (!['green', 'controls'].includes(mode)) throw new Error('mode');
 const root = path.resolve(process.env.RUNNER_TEMP, 'apple-input-' + process.env.GITHUB_RUN_ID);
 const evidence = path.resolve('evidence/apple-input');
