@@ -794,7 +794,7 @@ stage1_std() {
 stage1_compiler() {
   STAGE=stage1-compiler
   echo "OUTPUT cjcj-stage2=$out"
-  echo "OUTPUT stdlib-stage2=$std"
+  echo "OUTPUT bootstrap-std=$std"
   # The compiler links std statically: consume the completed std from its job.
   assemble_stage1_sdk "$sdk" "$compiler" "$std"
   ld=$(sdk_ld_path "$sdk" "$HRT")
@@ -810,6 +810,7 @@ stage1_compiler() {
     [ -d "$std" ] || die 'stage1 未产出 stdlib-stage2'
   fi
   assert_version cjcj-stage2 "$out" "$sdk" "$CRT"
+  cmd "npx --yes zx@8 $(printf '%q' "$SRC/ci/bootstrap/publish-std-output.mjs") $(printf '%q' "$WORK") $(printf '%q' "$std") $(printf '%q' "$compiler") $(printf '%q' "$HOST_TUPLE")"
   # Forensic arm is opt-in and runs only after the release compiler is installed.
   # It does not rewrite $out. Spec: cjpm `build -g` (default off) lands in
   # target/debug; std RelWithDebInfo already passes -g via AddCangjieSource.cmake.

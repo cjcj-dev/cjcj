@@ -4,6 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import test from 'node:test';
+import crypto from 'node:crypto';
+import {publishBootstrapStdOutput} from '../../ci/bootstrap/std-output.mjs';
 import {prepareBootstrapHandoff, assertBootstrapCompiler} from '../../ci/srcbuild/lib/bootstrap-handoff.mjs';
 
 async function fixture(t) {
@@ -23,12 +25,17 @@ async function fixture(t) {
   await write(path.join(inputSdk, 'lib', tuple, 'libcangjie-std-core.a'), 'bootstrap std');
   await write(path.join(inputSdk, '.stage1-host', 'binding.txt'), 'host_ld=/host/runtime:/host/llvm\n');
   await write(path.join(inputSdk, 'tools', 'bin', 'cjpm-stage1'), '#!/bin/bash\nprintf "cjpm home=%s ld=%s\\n" "$CANGJIE_HOME" "$LD_LIBRARY_PATH"\n"$CANGJIE_HOME/bin/cjc"\n');
-  for (const name of ['opt', 'llc']) await write(path.join(inputSdk, 'third_party', 'llvm', 'bin', `${name}-stage1`), '#!/bin/bash\nprintf "backend home=%s ld=%s\\n" "$CANGJIE_HOME" "$LD_LIBRARY_PATH"\n');
+  for (const name of ['opt', 'llc', 'ld.lld']) await write(path.join(inputSdk, 'third_party', 'llvm', 'bin', `${name}-stage1`), '#!/bin/bash\nprintf "backend home=%s ld=%s\\n" "$CANGJIE_HOME" "$LD_LIBRARY_PATH"\n');
   for (const name of ['cjselfhost_llvmshim.o', 'cjc_runtime_config.o']) await write(path.join(work, 'cjcj-src-stage1', 'runtime_shim', name), name);
   await fs.symlink('libcangjie-std-core.a', path.join(inputSdk, 'lib', tuple, 'core-relative.a'));
   await write(path.join(inputSdk, 'bin', 'cjc'), '#!/bin/bash\nprintf "old-stage1 compiler\\n"\n');
   await write(path.join(sdk, 'stale-sdk'), 'old pipeline');
-  return {root, work, sdk, source, tuple};
+  await write(path.join(work, 'cjcj-stage1'), 'stage1 compiler');
+  await write(path.join(work, 'stdlib-stage2', 'std-producer.json'), JSON.stringify({compiler_sha256: crypto.createHash('sha256').update('stage1 compiler').digest('hex')}));
+  const f = {root, work, sdk, source, tuple};
+  f.publish = () => publishBootstrapStdOutput({...f, prefix: path.join(work, 'stdlib-stage2'), compiler: path.join(work, 'cjcj-stage1')});
+  await f.publish();
+  return f;
 }
 
 test('bootstrap handoff consumes stage2 std and compiler and rebinds host and target processes', async t => {
@@ -104,6 +111,7 @@ test('bootstrap producer reaches actual stdx and tools subprocess entries', asyn
     assert.equal(built.status, 0, built.stderr);
   }
   await fs.appendFile(path.join(f.work, 'cjcj-stage2'), `cat "$CANGJIE_HOME/lib/${f.tuple}/libcangjie-std-core.a"\n`);
+  await f.publish();
   await prepareBootstrapHandoff(f);
   const pin = (await fs.readFile(new URL('../../ci/cjpm_pin.env', import.meta.url), 'utf8')).match(/^CJPM_FORK_REF=(.+)$/m)[1];
   await write(path.join(fakeBin, 'git'), `#!/bin/sh\ncase "$1" in rev-parse) printf '%s\\n' '${pin}' ;; esac\n`);
@@ -166,6 +174,7 @@ for (const hostHeap of ['12288MB', '10752MB', '5376MB']) {
       '#!/bin/bash\nprintf "compiler heap=%s\\n" "$cjHeapSize"\n');
     await fs.writeFile(path.join(f.work, 'sdk-stage1', 'tools', 'bin', 'cjpm-stage1'),
       '#!/bin/bash\nprintf "host heap=%s\\n" "$cjHeapSize"\n"$CANGJIE_HOME/bin/cjc"\n');
+    await f.publish();
     await prepareBootstrapHandoff(f);
     const run = spawnSync(path.join(f.sdk, 'tools', 'bin', 'cjpm'), {
       encoding: 'utf8', env: {...process.env, cjHeapSize: hostHeap},
@@ -181,6 +190,7 @@ for (const heap of ['20GB', '', undefined]) {
     const f = await fixture(t);
     await fs.writeFile(path.join(f.work, 'cjcj-stage2'),
       '#!/bin/bash\nprintf "set=%s heap=%s\\n" "${cjHeapSize+x}" "$cjHeapSize"\n');
+    await f.publish();
     await prepareBootstrapHandoff(f);
     await assertBootstrapCompiler({sdk: f.sdk, command: path.join(f.sdk, 'bin', 'cjc')});
     const env = {...process.env};
@@ -196,6 +206,7 @@ test('same handoff SDK inherits each invocation heap without capturing generatio
   const f = await fixture(t);
   await fs.writeFile(path.join(f.work, 'cjcj-stage2'),
     '#!/bin/bash\nprintf "%s\\n" "$cjHeapSize"\n');
+  await f.publish();
   await prepareBootstrapHandoff(f);
   for (const heap of ['5376MB', '10752MB']) {
     const run = spawnSync(path.join(f.sdk, 'bin', 'cjc'), {
@@ -246,6 +257,7 @@ test(`handoff materializes ${topology} on two consecutive promotions`, async t =
     }
     return result;
   };
+  await f.publish();
   for (let pass = 1; pass <= 2; pass++) {
     let failure;
     try { await prepareBootstrapHandoff(f); } catch (error) { failure = error; }
