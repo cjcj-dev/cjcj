@@ -80,8 +80,7 @@ class RuntimeInput(unittest.TestCase):
                 del env[key]
         env['TUPLE_ROOT'] = str(root or WORK / label)
         env['GIT_TRACE'] = str(WORK / f'{label}.trace')
-        command = (['npx', '--yes', 'zx@8'] if script.endswith('.mjs') else ['bash'])
-        result = subprocess.run([*command, str(REPO / script), *map(str, argv)],
+        result = subprocess.run([*(['npx', '--yes', 'zx@8'] if script.endswith('.mjs') else ['bash']), str(REPO / script), *map(str, argv)],
                                 env=env, cwd=WORK, capture_output=True, text=True)
         (WORK / f'{label}.log').write_text(result.stdout + result.stderr)
         (WORK / f'{label}.rc').write_text(f'{result.returncode}\n')
