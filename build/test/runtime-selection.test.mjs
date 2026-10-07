@@ -1,3 +1,4 @@
+import {pinnedRemote} from '../../ci/fixtures/git/pinned-remote.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -61,7 +62,7 @@ function useFormalRuntime(f) {
   fs.rmSync(paired, {recursive: true});
   ok(['git', 'init', '-q', paired]);
   ok(['git', '-C', paired, 'remote', 'add', 'origin', pin.RUNTIME_SRC_URL]);
-  const source = process.env.GC_FIX_RUNTIME_CHECKOUT;
+  const source = process.env.GC_FIX_RUNTIME_CHECKOUT || pinnedRemote(f.dir, 'runtime', pin.RUNTIME_REF);
   const fetch = source ? ['fetch', '--depth', '1', source, pin.RUNTIME_REF]
     : sourceFetchArguments(pin.RUNTIME_SRC_URL, pin.RUNTIME_REF);
   ok(['git', '-C', paired, ...fetch]);

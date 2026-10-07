@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import test, {after, before} from 'node:test';
+import test, {after, beforeEach} from 'node:test';
 import {
   gcFixWeakSourceShapePresent,
   GC_FIX_SOURCE,
@@ -13,17 +13,23 @@ import {
 import {resolveRuntimeSource} from './runtime-pin.mjs';
 import {sourceFetchArguments} from '../build/lib/git.mjs';
 
+import {pinnedRemote} from './fixtures/git/pinned-remote.mjs';
+
 let checkout;
 let checkoutOwned = false;
 let actualHeader;
 
 function git(root, ...arguments_) {
   const result = spawnSync('git', ['-C', root, ...arguments_], {encoding: 'utf8'});
-  assert.equal(result.status, 0, `git ${arguments_.join(' ')}: ${(result.stderr || '').trim()}`);
+  const detail = `git ${arguments_.join(' ')}: status=${result.status} signal=${result.signal ?? 'null'} error=${result.error?.code ?? 'none'} stderr=${(result.stderr || '').trim()}`;
+  if (result.status !== 0) console.error(`GC_FIX_CHECKOUT_FAILURE ${detail}`);
+  assert.equal(result.status, 0, detail);
   return result.stdout.trim();
 }
 
-before(async () => {
+beforeEach(async () => {
+  if (checkoutOwned) fs.rmSync(checkout, {recursive: true, force: true});
+  checkoutOwned = false;
   const {runtimeRef, sourceUrl} = await resolveRuntimeSource();
   const configuredCheckout = process.env.GC_FIX_RUNTIME_CHECKOUT;
   if (configuredCheckout) {
@@ -33,7 +39,8 @@ before(async () => {
     checkoutOwned = true;
     git(checkout, 'init', '--quiet');
     git(checkout, 'remote', 'add', 'origin', sourceUrl);
-    git(checkout, ...sourceFetchArguments(sourceUrl, runtimeRef), '--quiet');
+    const remote = pinnedRemote(checkout, 'runtime', runtimeRef);
+    git(checkout, ...sourceFetchArguments(remote, runtimeRef), '--quiet');
     git(checkout, 'checkout', '--quiet', '--detach', 'FETCH_HEAD');
   }
   const checkoutHead = git(checkout, 'rev-parse', 'HEAD');
