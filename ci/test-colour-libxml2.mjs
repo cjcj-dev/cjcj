@@ -5,7 +5,8 @@ process.env.LC_ALL = 'C';
 const work = path.resolve(required(0, 'EMPTY_WORK_DIRECTORY'));
 const bad = cliArgs[1] || '', good = cliArgs[2] || '';
 fs.mkdirSync(work);
-const yml = '.github/workflows/build-llvm-tools.yml', src = 'tools/srcbuild_kkk2.sh', checker = 'ci/assert_no_libxml2_needed.sh';
+const yml = '.github/workflows/build-llvm-tools.yml', src = 'ci/platform_tuples/build_tuple.sh', checker = 'ci/assert_no_libxml2_needed.sh';
+// Source-build now acquires a tuple; the active producer owns this flag.
 const token = '-DLLVM_ENABLE_LIBXML2=OFF';
 for (const [file, name] of [[yml, 'yml'], [src, 'src'], [checker, 'checker']]) fs.copyFileSync(path.join(repo, file), path.join(work, `${name}.saved`));
 function restore() {
@@ -13,12 +14,11 @@ function restore() {
 }
 function recipe(log) {
   let error;
-  if (!fs.readFileSync(path.join(repo, 'ci/platform_tuples/build_tuple.sh'), 'utf8').includes(token)) error = 'MISSING_LIBXML2_OFF anchor';
   for (const file of [yml, src]) {
     if (error) break;
     const source = fs.readFileSync(path.join(repo, file), 'utf8');
     if (!source.includes(token)) error = `MISSING_LIBXML2_OFF ${file}`;
-    else if (!source.includes('assert_no_libxml2_needed.sh')) error = `MISSING_NEEDED_CHECK ${file}`;
+    else if (file === yml && !source.includes('assert_no_libxml2_needed.sh')) error = `MISSING_NEEDED_CHECK ${file}`;
   }
   fs.writeFileSync(path.join(work, log), `${error || 'RECIPE_LIBXML2_OFF_PRESENT'}\n`);
   return error ? 1 : 0;
