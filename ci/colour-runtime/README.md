@@ -70,3 +70,12 @@ runtime and boundscheck are a separate, unchanged SDK extraction described in
 and executes the actual source workflow shell entries. It verifies platform
 pin presence, exact platform-specific rejection when that pin is removed,
 restoration, library verification and the missing-std classification.
+
+The fixed qualified language SDK is preserved in prerelease
+`qualified-language-sdk-1504-878-prerelease`, selected by artifact key `1504`
+in `ci/bootstrap_artifacts_pin.json`. Its original component and compiler-host
+identities, source lane and retained qualification runs are recorded in
+[qualified-language-sdk-1504-provenance.json](qualified-language-sdk-1504-provenance.json).
+The current target selection includes the complete
+[runtime commit span](runtime-0d6e-span.md); this does not change the fixed
+language SDK lock or component identities.
