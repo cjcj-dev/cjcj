@@ -358,7 +358,7 @@ test(`actual stage3 entry verifies promoted SDK before stage2: ${formal ? 'forma
   // stage1 compiler, stage2 compiler and installed std prefix.
   fs.copyFileSync(a.compiler, path.join(work, 'cjcj-stage1'));
   write('stdlib-stage2/std-producer.json', JSON.stringify({compiler_sha256: hash(a.compiler)}) + '\n');
-  const publishStd = () => ok(['node', path.join(repo, 'ci/bootstrap/publish-std-output.mjs'),
+  const publishStd = () => ok(['npx', '--yes', 'zx@8', path.join(repo, 'ci/bootstrap/publish-std-output.mjs'),
     work, path.join(work, 'stdlib-stage2'), path.join(work, 'cjcj-stage1'), tuple], f.env);
   publishStd();
   fs.cpSync(f.runtimeSource, path.join(workspace, 'cangjie_runtime'), {recursive: true});
