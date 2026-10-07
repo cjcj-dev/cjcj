@@ -91,7 +91,18 @@ check_sha "$hrt/libcangjie-runtime.so" "$decl_runtime"
 check_sha "$hrt/libboundscheck.so" "$decl_bounds"
 check_sha "$host/runtime/lib/$platform/libcangjie-runtime.so" "$decl_runtime"
 check_sha "$host/runtime/lib/$platform/libboundscheck.so" "$decl_bounds"
-for rel in bin/cjc tools/bin/cjpm third_party/llvm/bin/opt third_party/llvm/bin/llc; do
+cjc_alias=false
+if [ -L "$target/bin/cjc" ]; then
+  [ "$(readlink "$target/bin/cjc")" = cjcj-stage1 ] || fail 'unsupported compiler alias: bin/cjc'
+  if [ ! -f "$target/bin/cjcj-stage1" ] || [ ! -x "$target/bin/cjcj-stage1" ] || [ -L "$target/bin/cjcj-stage1" ]; then
+    fail 'regular executable required: bin/cjcj-stage1'
+  fi
+  check_sha "$target/bin/cjcj-stage1" "$compiler_sha"
+  cjc_alias=true
+elif [ ! -f "$target/bin/cjc" ] || [ ! -x "$target/bin/cjc" ]; then
+  fail 'regular executable required: bin/cjc'
+fi
+for rel in tools/bin/cjpm third_party/llvm/bin/opt third_party/llvm/bin/llc; do
   if [ ! -x "$target/$rel" ] || [ -L "$target/$rel" ]; then
     fail "regular executable required: $rel"
   fi
@@ -130,6 +141,10 @@ write_runner() {
   } > "$entry"
   chmod +x "$entry"
 }
+# Unlink the admitted alias before redirecting: never overwrite its ELF referent.
+if [ "$cjc_alias" = true ]; then
+  rm "$target/bin/cjc"
+fi
 write_runner "$target/bin/cjc" "$target/bin/cjcj-stage1" "$compiler_ld"
 write_runner "$target/tools/bin/cjpm" "$target/tools/bin/cjpm-stage1" "$host_ld"
 for name in opt llc ld.lld; do
