@@ -97,8 +97,8 @@ function cutProduct(relative,transform) {
   fs.writeFileSync(dest+'/ci/bootstrap/'+relative,changed);
   return dest+'/ci/bootstrap/'+relative;
 }
-function sdk(args,extra=[]) {return invoke(sdkProduct,['--from',f.base,'--to',out+'/sdk-test',...args,'--colour-runtime',f.colour,'--host-runtime',f.host,...extra]);}
-function checkSdk(args,extra=[]) {const result=sdk(args,extra);assert.equal(result.status,0,result.text);assert.match(result.stdout,/SDK-BUILD-OK/);return out+'/sdk-test';}
+function sdk(args,extra=[],target=out+'/sdk-test') {return invoke(sdkProduct,['--from',f.base,'--to',target,...args,'--colour-runtime',f.colour,'--host-runtime',f.host,...extra]);}
+function checkSdk(args,extra=[],target=out+'/sdk-test') {const result=sdk(args,extra,target);assert.equal(result.status,0,result.text);assert.match(result.stdout,/SDK-BUILD-OK/);return target;}
 function prepareStdBuild() {
   const program=`import os, pathlib, shutil, sys\nexpected_sdk = ${JSON.stringify(f.base)}\nif os.environ.get('LEAK_ME'): raise SystemExit(44)\nif os.environ.get('CANGJIE_HOME') != expected_sdk: raise SystemExit(45)\nif len(sys.argv)>1 and sys.argv[1]=='build':\n    target = next((x.split('=',1)[1] for x in sys.argv if x.startswith('--target-lib=')), '')\n    if target != expected_sdk+'/runtime/lib/${f.native.tuple}': raise SystemExit(46)\nif len(sys.argv)>1 and sys.argv[1]=='install':\n    prefix=pathlib.Path(sys.argv[sys.argv.index('--prefix')+1])\n    for rel in ['lib/${f.native.tuple}/libcangjie-std-core.a','runtime/lib/${f.native.tuple}/libcangjie-std-core${f.native.librarySuffix}','lib/${f.native.tuple}/libfixtureFFI.a','lib/libstdFFI${f.native.librarySuffix}']:\n        dest=prefix/rel; dest.parent.mkdir(parents=True,exist_ok=True); shutil.copyfile(pathlib.Path(expected_sdk)/rel,dest)\n`;
   fs.writeFileSync(f.out+'/stdsrc/build.py',program);
@@ -139,7 +139,7 @@ async function mode(name,args=[]) {
   }
   if(name==='check-sdk-literal-prefix') {
     const prefix=out+'/std [literal]';fs.cpSync(f.base,prefix,{recursive:true});
-    const target=checkSdk(['--host','--std',prefix]);
+    const target=checkSdk(['--host','--std',prefix],[],out+'/sdk [literal]');
     for(const rel of ['lib/'+f.native.tuple+'/libcangjie-std-core.a','runtime/lib/'+f.native.tuple+'/libcangjie-std-core'+f.native.librarySuffix,'lib/libstdFFI'+f.native.librarySuffix,'modules/'+f.native.tuple+'/std.core.cjo'])assert.deepEqual(fs.readFileSync(target+'/'+rel),fs.readFileSync(prefix+'/'+rel));return;
   }
   if(['positive-a4','check-std-compiler-identity','fault-a4'].includes(name)) {

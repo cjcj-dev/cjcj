@@ -10,6 +10,7 @@ const importedFiles = Object.freeze([
 export const vendorFiles = Object.freeze([...importedFiles,
   'bootstrap.mjs', 'sdk_build.mjs', 'sdk_verify.mjs', 'native_libraries.mjs',
   'host_tools.mjs', 'std_runtime_colour.mjs', 'stage1_host_runner.mjs',
+  'test_bootstrap.mjs', 'native_test_inputs.mjs',
 ]);
 
 function git(repo, args) {
