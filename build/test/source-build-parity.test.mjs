@@ -1,3 +1,4 @@
+import {pinnedRemote} from '../../ci/fixtures/git/pinned-remote.mjs';
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {assertGitObjectProof, assertRemoteObjectProof} from './git-object-proof.mjs';
@@ -748,11 +749,14 @@ test('package paths and archive roots match package.py', async () => {
 // pin, and the jobserver on the compiler side had no token source.
 //
 // A failed or interrupted probe is not a successful reachability check.
-test('the cjpm pin names an object the remote actually has', {timeout: 60_000}, () => {
+test('the cjpm pin names an object the remote actually has', {timeout: 60_000}, t => {
   const {CJPM_FORK_URL: url, CJPM_FORK_REF: ref} = cjpmPin;
   assert.match(ref, /^[0-9a-f]{40}$/, 'CJPM_FORK_REF must be a full sha');
 
-  assertRemoteObjectProof(url, ref);
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cjpm-pin-'));
+  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
+  const remote = pinnedRemote(root, 'tools', ref);
+  assertRemoteObjectProof(remote, ref);
 
 });
 

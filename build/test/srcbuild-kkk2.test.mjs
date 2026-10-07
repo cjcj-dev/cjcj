@@ -1,3 +1,4 @@
+import {pinnedRemote} from '../../ci/fixtures/git/pinned-remote.mjs';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import {spawnSync} from 'node:child_process';
@@ -996,7 +997,8 @@ function writeCppHeaderFixture(root, cpp, runtimeRef) {
     const source = configured || fs.mkdtempSync(path.join(os.tmpdir(), 'formal-header-runtime-'));
     if (!configured) {
       git(['init', '-q', source]);
-      git(['-C', source, ...sourceFetchArguments(runtime.RUNTIME_SRC_URL, runtimeRef)]);
+      const remote = pinnedRemote(source, 'runtime', runtimeRef);
+      git(['-C', source, ...sourceFetchArguments(remote, runtimeRef)]);
       git(['-C', source, 'checkout', '-q', '--detach', 'FETCH_HEAD']);
     }
     assert.equal(git(['-C', source, 'rev-parse', 'HEAD']), runtimeRef);
