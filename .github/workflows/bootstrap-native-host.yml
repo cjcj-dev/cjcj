@@ -1,6 +1,11 @@
 name: Bootstrap native host consumers
 on:
   workflow_dispatch:
+    inputs:
+      sdk_only:
+        description: Correct SDK consumers after a carrier change; do not repeat route arms
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
@@ -28,6 +33,7 @@ jobs:
         with:
           node-version: '22'
       - name: Execute bounded native consumer recipes
+        if: ${{ !inputs.sdk_only || matrix.mode == 'sdk' }}
         run: |
           ulimit -c 0
           if [ '${{ matrix.mode }}' = route ]; then
@@ -36,7 +42,7 @@ jobs:
             node ci/bootstrap/test_native_sdk_chain.mjs "$RUNNER_TEMP/native-consumers"
           fi
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: ${{ always() && (!inputs.sdk_only || matrix.mode == 'sdk') }}
         with:
           name: native-consumers-${{ matrix.tuple }}
           path: ${{ runner.temp }}/native-consumers
