@@ -4,7 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
-import {read, write, hash, dependencyArgv} from './identity.mjs';
+import {read, write, hash, dependencies, dependencyArgv} from './identity.mjs';
 import {prepare, bindPrepared} from './prepare.mjs';
 import {capture} from './capture.mjs';
 
@@ -162,11 +162,28 @@ try {
   state.phase = 'admission'; save();
   run('green', 'BOUNDARY');
   {
-    const header = read(capturePath).headers.find(h => h.path.endsWith('/pthread.h')).path;
-    const bytes = fs.readFileSync(header);
-    try {fs.appendFileSync(header, '\n/* authorized consumer header drift */\n'); run('header-drift', 'apple-header-drift');}
-    finally {fs.writeFileSync(header, bytes);}
-    run('header-restored', 'BOUNDARY');
+    const cap = read(capturePath);
+    const closure = new Set(dependencies(fs.readFileSync(cap.dependencies.path, 'utf8'))
+      .map(p => fs.realpathSync(p)));
+    function selectHeader(container, basename = null) {
+      const candidates = cap[container].filter(ref => closure.has(ref.path) &&
+        (basename ? path.basename(ref.path) === basename : path.extname(ref.path) === '.h'))
+        .sort((a, b) => a.path.localeCompare(b.path));
+      if (!candidates.length || (basename && candidates.length !== 1))
+        throw new Error('apple-cut-target-unresolved:' + container);
+      return candidates[0];
+    }
+    const cuts = [
+      {name: 'external-header', container: 'external_headers', ref: selectHeader('external_headers', 'pthread.h'), expected: 'apple-external-header-drift'},
+      {name: 'header', container: 'headers', ref: selectHeader('headers'), expected: 'apple-header-drift'},
+    ];
+    write(path.join(evidence, 'header-cut-targets.json'), cuts);
+    for (const cut of cuts) {
+      const bytes = fs.readFileSync(cut.ref.path);
+      try {fs.appendFileSync(cut.ref.path, '\n/* authorized consumer header drift */\n'); run(cut.name + '-drift', cut.expected);}
+      finally {fs.writeFileSync(cut.ref.path, bytes);}
+      run(cut.name + '-restored', 'BOUNDARY');
+    }
     const otherHome = path.join(root, 'other-home'); fs.mkdirSync(otherHome);
     try {const r = read(recipePath); r.environment.HOME = otherHome; r.inputs.environment.HOME = otherHome; write(recipePath, r);
       run('environment-drift', 'apple-consumer-binding');}
