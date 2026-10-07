@@ -34,7 +34,9 @@ export function exportBranches(source) {
       const offset = block.index + block[0].indexOf(block[2]) + arm.index;
       let inputs;
       if (block === modeCase) {
-        inputs = label === "''" ? [input(), input({[mode]: ''})]
+        inputs = label === "''" ? [input(), input({[mode]: ''}),
+          ...[...arm[2].matchAll(/runtime_\w+=\$(\w+)/g)].flatMap(item =>
+            ['', 'inherited'].map(value => input({[item[1]]: value})))]
           : label === '*' ? [input({[mode]: '__unknown__'})]
           : [input({...privateEnv, [mode]: label})];
       } else {
