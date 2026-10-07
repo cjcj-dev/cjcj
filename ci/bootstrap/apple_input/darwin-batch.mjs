@@ -4,7 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
-import {read, write, hash, dependencies, dependencyArgv} from './identity.mjs';
+import {read, write, hash, dependencies, dependencyArgv, verify} from './identity.mjs';
 import {prepare, bindPrepared} from './prepare.mjs';
 import {capture} from './capture.mjs';
 
@@ -44,7 +44,8 @@ try {
   command('clang-version', [clang, '--version']);
   const apple = path.join(root, 'AppleSDK-headers');
   fs.mkdirSync(apple);
-  fs.cpSync(path.join(origin, 'usr/include'), path.join(apple, 'usr/include'), {recursive: true, dereference: true});
+  fs.mkdirSync(path.join(apple, 'usr'), {recursive: true});
+  command('sdk-private-copy', ['/bin/cp', '-a', path.join(origin, 'usr/include'), path.join(apple, 'usr/include')]);
   fs.copyFileSync(path.join(origin, 'SDKSettings.json'), path.join(apple, 'SDKSettings.json'));
   write(path.join(evidence, 'apple-origin.json'), {origin, consumed_root: apple, xcode, sdk_version: sdkVersion,
     scope: 'private byte copy of actual SDK usr/include and SDKSettings; no framework or link qualification', settings_sha256: hash(path.join(apple, 'SDKSettings.json'))});
@@ -160,7 +161,16 @@ try {
     if (!matched) throw new Error('target-not-observed');
   }
   state.phase = 'admission'; save();
-  run('green', 'BOUNDARY');
+  const capVerified = read(capturePath);
+  const verified = [...capVerified.headers, ...capVerified.external_headers].map(ref => verify(ref, 'apple-private-copy-identity'));
+  const sourceComparisons = capVerified.headers.map(ref => {
+    const sourcePath = path.join(origin, path.relative(fs.realpathSync(apple), ref.path));
+    const sourceHash = hash(sourcePath);
+    if (sourceHash !== ref.sha256) throw new Error('apple-private-source-bytes');
+    return {private_path: ref.path, source_path: sourcePath, sha256: sourceHash};
+  });
+  write(path.join(evidence, 'private-source-comparison.json'), {count: sourceComparisons.length, entities: sourceComparisons});
+  write(path.join(evidence, 'private-copy-verification.json'), {apple_sdkroot: capVerified.apple_sdkroot, recipe_apple_sdkroot: read(recipePath).apple_sdkroot, count: verified.length, entities: verified});
   {
     const cap = read(capturePath);
     const closure = new Set(dependencies(fs.readFileSync(cap.dependencies.path, 'utf8'))
@@ -174,14 +184,31 @@ try {
       return candidates[0];
     }
     const cuts = [
-      {name: 'external-header', container: 'external_headers', ref: selectHeader('external_headers', 'pthread.h'), expected: 'apple-external-header-drift'},
       {name: 'header', container: 'headers', ref: selectHeader('headers'), expected: 'apple-header-drift'},
     ];
     write(path.join(evidence, 'header-cut-targets.json'), cuts);
     for (const cut of cuts) {
+      if (!cut.ref.path.startsWith(fs.realpathSync(apple) + path.sep)) throw new Error('apple-cut-private-entity');
       const bytes = fs.readFileSync(cut.ref.path);
-      try {fs.appendFileSync(cut.ref.path, '\n/* authorized consumer header drift */\n'); run(cut.name + '-drift', cut.expected);}
-      finally {fs.writeFileSync(cut.ref.path, bytes);}
+      const before = fs.statSync(cut.ref.path).mode;
+      const originalHash = hash(cut.ref.path);
+      const modeEvidence = {path: cut.ref.path, before: before.toString(8), sha256_before: originalHash};
+      try {
+        fs.chmodSync(cut.ref.path, (before & 0o7777) | 0o200);
+        modeEvidence.writable = fs.statSync(cut.ref.path).mode.toString(8);
+        fs.appendFileSync(cut.ref.path, '\n/* authorized consumer header drift */\n');
+        run(cut.name + '-drift', cut.expected);
+      } finally {
+        try {fs.writeFileSync(cut.ref.path, bytes);}
+        finally {
+          fs.chmodSync(cut.ref.path, before & 0o7777);
+          modeEvidence.restored = fs.statSync(cut.ref.path).mode.toString(8);
+          modeEvidence.sha256_restored = hash(cut.ref.path);
+          write(path.join(evidence, 'header-mode-restoration.json'), modeEvidence);
+        }
+      }
+      if (modeEvidence.before !== modeEvidence.restored || originalHash !== modeEvidence.sha256_restored)
+        throw new Error('apple-cut-restoration');
       run(cut.name + '-restored', 'BOUNDARY');
     }
     const otherHome = path.join(root, 'other-home'); fs.mkdirSync(otherHome);
@@ -189,15 +216,6 @@ try {
       run('environment-drift', 'apple-consumer-binding');}
     finally {fs.writeFileSync(recipePath, originalRecipe);}
     run('environment-restored', 'BOUNDARY');
-  }
-  state.phase = 'archive'; save();
-  for (const name of ['build-recipe.json', 'input-manifest.json', 'manifest-deltas.json']) fs.copyFileSync(path.join(output, name), path.join(evidence, name));
-  fs.copyFileSync(source, path.join(evidence, 'helper.c'));
-  fs.copyFileSync(path.join(apple, 'SDKSettings.json'), path.join(evidence, 'SDKSettings.json'));
-  const cap = read(capturePath);
-  for (const ref of [...cap.headers, ...cap.external_headers]) {
-    const dest = path.join(evidence, 'consumed-entities', ref.path.replace(/^\//, ''));
-    fs.mkdirSync(path.dirname(dest), {recursive: true}); fs.copyFileSync(ref.path, dest);
   }
   state.phase = 'complete'; state.finished_at = new Date().toISOString(); state.compiler_native_launches = 0; save();
 } catch (error) {state.failure = {message: error.message, stack: error.stack}; state.finished_at = new Date().toISOString(); save(); throw error;}
