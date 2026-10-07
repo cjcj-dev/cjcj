@@ -10,7 +10,8 @@ for (let i = 0; i < args.length; i++) {
   if (arg === '-h' || arg === '--help') { process.stdout.write(usage); process.exit(0); }
   const key = arg.replace(/^--/, '').replaceAll('-', '_');
   if (!arg.startsWith('--') || !keys.includes(key)) {
-    console.error(`ABI_PAIR=INVALID_ARGUMENT argument=${arg}`);
+    const quoted = await capture(['bash', '-c', 'printf "%q" "$1"', 'abi-argument', arg]);
+    console.error(`ABI_PAIR=INVALID_ARGUMENT argument=${quoted.stdout}`);
     process.stderr.write(usage); process.exit(2);
   }
   if (!args[i + 1]) { console.error(`ABI_PAIR=INVALID_ARGUMENT missing_value=${arg}`); process.exit(2); }

@@ -13,6 +13,9 @@ export const cliArgs = process.argv.slice(entryIndex + 1);
 export const isMain = url => process.argv.slice(1).some(arg => path.resolve(arg) === fileURLToPath(url));
 export const repo = path.resolve(import.meta.dirname, '..');
 export const toCommandPath = target => target.replaceAll('\\', '/');
+// Normalize Windows command paths, preserving backslashes in scalar arguments
+// (for example an invalid CLI option whose diagnostic must quote it verbatim).
+const commandArgs = command => command.map(arg => /^[A-Za-z]:[\\/]/.test(arg) ? toCommandPath(arg) : arg);
 export const zxCommand = file => ['npx', '--yes', 'zx@8', file];
 export function pin(file) {
   return Object.fromEntries(fs.readFileSync(file, 'utf8').split(/\r?\n/)
@@ -22,7 +25,7 @@ export function pin(file) {
     }));
 }
 export async function run(command, {cwd = repo, env = process.env, log, input, check = true} = {}) {
-  const result = await $({cwd, env, input, nothrow: true, quiet: true})`${command.map(toCommandPath)}`;
+  const result = await $({cwd, env, input, nothrow: true, quiet: true})`${commandArgs(command)}`;
   if (log) fs.writeFileSync(log, result.stdall);
   else {
     process.stdout.write(result.stdout);
@@ -36,7 +39,7 @@ export async function run(command, {cwd = repo, env = process.env, log, input, c
 }
 export async function capture(command, options = {}) {
   const result = await $({cwd: options.cwd ?? repo, env: options.env ?? process.env,
-    input: options.input, nothrow: true, quiet: true})`${command.map(toCommandPath)}`;
+    input: options.input, nothrow: true, quiet: true})`${commandArgs(command)}`;
   if (options.check !== false && result.exitCode !== 0) {
     process.stderr.write(result.stderr);
     process.exitCode = result.exitCode;
