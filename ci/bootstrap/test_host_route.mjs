@@ -17,11 +17,13 @@ if (!path.isAbsolute(outArg)) throw new Error('absolute evidence directory requi
 const out = path.resolve(outArg);
 fs.mkdirSync(out, {recursive: true});
 const sha = (await $`git -C ${root} rev-parse HEAD`.quiet()).stdout.trim();
-const rel = 'ci/bootstrap/bootstrap.sh';
+const rel = 'ci/bootstrap/bootstrap.mjs';
+const launcher = 'ci/bootstrap/bootstrap.sh';
+const launcherBytes = fs.readFileSync(path.join(root, launcher), 'utf8');
 const original = fs.readFileSync(path.join(root, rel), 'utf8');
-const baseline = (await $`git -C ${root} show ${`${base}:${rel}`}`.quiet()).stdout;
-const cut = original.replace(/^  host_tuple_init$/m, '  : # route control: disconnect the real main consumer');
-if (cut === original || (original.match(/^  host_tuple_init$/gm) || []).length !== 1) {
+const baseline = (await $`git -C ${root} show ${`${base}:${launcher}`}`.quiet()).stdout;
+const cut = original.replace(/^    this.host_tuple_init\(\);$/m, '    // route control: disconnect the real main consumer');
+if (cut === original || (original.match(/^    this.host_tuple_init\(\);$/gm) || []).length !== 1) {
   throw new Error('unique bearing main call required');
 }
 const hash = content => crypto.createHash('sha256').update(content).digest('hex');
@@ -48,15 +50,17 @@ const nonCarriers = ['ci/bootstrap/gha_run.sh', 'ci/bootstrap/host_tools.mjs',
   'ci/runtime_pin.env', 'ci/runtime-pin.mjs', 'build/lib/targets.mjs', 'build/lib/errors.mjs'];
 const results = {};
 try {
-  for (const [arm, content] of Object.entries({baseline, candidate: original, cut, restored: original})) {
+  for (const [arm, content] of Object.entries({baseline: original, candidate: original, cut, restored: original})) {
     const evidence = path.join(out, arm);
     fs.mkdirSync(evidence);
     fs.writeFileSync(path.join(source, rel), content);
+    fs.writeFileSync(path.join(source, launcher), arm === 'baseline' ? baseline : launcherBytes);
     if (arm === 'cut') {
       const diff = (await $`git -C ${source} diff -- ${rel}`.quiet()).stdout;
       fs.writeFileSync(path.join(out, 'cut.diff'), diff);
     }
-    fs.writeFileSync(path.join(evidence, 'bootstrap.sh'), content);
+    fs.writeFileSync(path.join(evidence, 'bootstrap.mjs'), content);
+    fs.writeFileSync(path.join(evidence, 'bootstrap.sh'), arm === 'baseline' ? baseline : launcherBytes);
     const host = spawnSync('uname', ['-sm'], {encoding: 'utf8'});
     if (host.error || host.status !== 0) throw new Error('native uname failed');
     fs.writeFileSync(path.join(evidence, 'host.txt'), host.stdout);
@@ -74,7 +78,7 @@ try {
     fs.writeFileSync(path.join(evidence, 'assertion.log'), assertion + `${passed ? 'PASS' : 'FAIL'} native-host-route\n`);
     const expectedRc = arm === 'cut' || (arm === 'baseline' && expected.startsWith('darwin_')) ? 1 : 0;
     const record = {entry_rc: entryRc, assertion_rc: passed ? 0 : 1, expected_rc: expectedRc,
-      assertions: 1, observed, target_assertion: true, carrier_sha256: hash(content),
+      assertions: 1, observed, target_assertion: true, carrier_sha256: hash(content + '\0' + (arm === 'baseline' ? baseline : launcherBytes)),
       fixture_sha256: fixtureHash, wall: Number(process.hrtime.bigint() - started) / 1e9,
       noncarriers: Object.fromEntries(nonCarriers.map(file => [file, hash(fs.readFileSync(path.join(source, file)))]))};
     results[arm] = record;
@@ -88,6 +92,7 @@ try {
   }
 } finally {
   fs.writeFileSync(path.join(source, rel), original);
+  fs.writeFileSync(path.join(source, launcher), launcherBytes);
   await $`git -C ${root} worktree remove ${source}`.quiet();
 }
 if (results.candidate.carrier_sha256 !== results.restored.carrier_sha256
