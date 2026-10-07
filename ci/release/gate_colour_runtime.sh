@@ -53,6 +53,10 @@ fi
 cmp "$target/libcangjie-runtime.so" "$build_sdk/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so"
 cmp "$target/libboundscheck.so" "$build_sdk/runtime/lib/linux_x86_64_cjnative/libboundscheck.so"
 language_inputs="$active-language"
+if [[ -e "$language_inputs" ]]; then
+  echo "COLOUR_RT_LANGUAGE_DEST_EXISTS $language_inputs" >&2
+  exit 2
+fi
 node "$repo/ci/release/download_pinned.mjs" cjcj-dev/cjcj 1504 "$language_inputs"
 export GC_UNIT_BUILD_SDK="$build_sdk"
 export GC_UNIT_LANGUAGE_SDK="$language_inputs/sdk"
