@@ -198,7 +198,7 @@ export function discoverTestFiles(root = repoRoot) {
   const found = listed.split('\0').filter(Boolean)
     .filter(file => !file.split('/').includes('node_modules'))
     .filter(file => /\.test\.mjs$|(?:^|\/)test[_.-][^/]*\.(?:py|sh)$|[._-]test\.sh$|_test\.cj$|^build\/test\/.*\.sh$|\/tests\/[^/]+\.(?:py|sh)$/.test(file)
-      || (/(?:^|\/)test[_.-][^/]*\.mjs$/.test(file)
+      || (/^ci\/test-[^/]*\.mjs$/.test(file)
         && /^#!\/usr\/bin\/env zx(?:\r?\n|$)/.test(fs.readFileSync(path.join(root, file), 'utf8'))));
   return [...new Set(found)].sort();
 }
