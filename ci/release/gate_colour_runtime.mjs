@@ -5,7 +5,9 @@ import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 
-const args = process.argv.slice(process.argv.indexOf(fileURLToPath(import.meta.url)) + 1);
+const entry = fileURLToPath(import.meta.url);
+const entryIndex = process.argv.findIndex(value => path.resolve(value) === entry);
+const args = process.argv.slice(entryIndex + 1);
 if (args[0]?.startsWith('--') && args[0] !== '--build-sdk') {
   console.error(`COLOUR_RT_GATE_INTERFACE unsupported=${args[0]}`);
   process.exit(2);
