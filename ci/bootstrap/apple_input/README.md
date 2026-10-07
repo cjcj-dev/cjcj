@@ -57,3 +57,13 @@ remaining timeout/reserve and exact child/descendant ownership and timeout
 cleanup proved under a separately authorized short-child budget. TIMEOUT rc
 and LAUNCH_ERROR errno must be retained. None of those process-management
 capabilities is claimed or tested by this zero-product-execution package.
+
+`node producer-batch.mjs new-private-output materialized-input` is the separate
+four-recipe producer supplement: cut the capture's pre-write snapshot call,
+restore and verify required-header rejection plus both legal launch boundaries,
+then reject Settings drift and tool/raw-output drift. The last recipe uses one
+prepared manifest with two independently restored entity mutations (xcrun and
+raw output); it never launches. The cut runs the same producer-target assertion
+in a child process and saves its original rc and emitted manifest. This is a
+candidate-new-line apparatus cut, not a frozen-main product cut. Its scope is
+synthetic relationship qualification only; historical calibration remains intact.
