@@ -605,9 +605,21 @@ public func IsCoreFutureClass(classDef: ClassDef): Bool {
 }
 
 public func IsSyncRelatedClass(classDef: ClassDef): Bool {
-    return CheckCustomTypeDefIsExpected(classDef, SYNC_PACKAGE_NAME, STD_LIB_MONITOR) ||
-        CheckCustomTypeDefIsExpected(classDef, SYNC_PACKAGE_NAME, STD_LIB_MUTEX) ||
+    return CheckCustomTypeDefIsExpected(classDef, CORE_PACKAGE_NAME, "ReferenceMonitor") ||
+        CheckCustomTypeDefIsExpected(classDef, CORE_PACKAGE_NAME, "ReferenceMutex") ||
         CheckCustomTypeDefIsExpected(classDef, SYNC_PACKAGE_NAME, STD_LIB_WAIT_QUEUE)
+}
+
+public func IsFinalReferenceClass(classTy: ClassType): Bool {
+    var current: Option<ClassType> = Some(classTy)
+    while (current.isSome()) {
+        let ty = current.getOrThrow()
+        if (CheckCustomTypeDefIsExpected(ty.GetClassDef(), CORE_PACKAGE_NAME, "FinalReference")) {
+            return true
+        }
+        current = ty.GetSuperClassTy()
+    }
+    return false
 }
 
 public func IsWeakRefClass(classDef: ClassDef): Bool {
