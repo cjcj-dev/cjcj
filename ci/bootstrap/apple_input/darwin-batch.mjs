@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import {spawnSync} from 'node:child_process';
-import {pathToFileURL} from 'node:url';
+import {fileURLToPath} from 'node:url';
 import {read, write, hash, dependencyArgv} from './identity.mjs';
 import {prepare, bindPrepared} from './prepare.mjs';
 import {capture} from './capture.mjs';
@@ -48,17 +48,13 @@ try {
   fs.copyFileSync(path.join(origin, 'SDKSettings.json'), path.join(apple, 'SDKSettings.json'));
   write(path.join(evidence, 'apple-origin.json'), {origin, consumed_root: apple, xcode, sdk_version: sdkVersion,
     scope: 'private byte copy of actual SDK usr/include and SDKSettings; no framework or link qualification', settings_sha256: hash(path.join(apple, 'SDKSettings.json'))});
-  const fixture = 'ci/bootstrap/signal_observation/native_fixture';
-  const legacyDir = path.join(root, 'legacy'); fs.mkdirSync(legacyDir);
-  const pins = read(new URL('./legacy-pins.json', import.meta.url));
-  for (const name of Object.keys(pins.files)) fs.writeFileSync(path.join(legacyDir, name),
-    command('materialize-' + name, ['git', 'show', pins.head + ':' + fixture + '/' + name]));
+  // These exact immutable inputs are packaged from the authorized local Git
+  // objects; the pinned validators below independently verify every entity.
+  command('materialize-pinned-inputs', ['/usr/bin/tar', '-xzf',
+    fileURLToPath(new URL('./pinned-inputs.tar.gz', import.meta.url)), '-C', root]);
+  const legacyDir = path.join(root, 'legacy');
   const frozen = read(path.join(legacyDir, 'frozen-inputs.json'));
   const sourceRoot = path.join(root, 'source');
-  for (const item of frozen.inventory) {
-    const p = path.join(sourceRoot, item.relative); fs.mkdirSync(path.dirname(p), {recursive: true});
-    fs.writeFileSync(p, command('source-' + state.commands.length, ['git', 'show', frozen.source_head + ':' + item.relative]));
-  }
   const archive = path.join(root, 'official-sdk.tar.gz');
   const url = 'https://gitcode.com/Cangjie/nightly_build/releases/download/1.3.0-alpha.20260925001050/cangjie-sdk-mac-aarch64-1.3.0-alpha.20260925001050.tar.gz';
   command('sdk-download', ['/usr/bin/curl', '--fail', '--location', '--max-time', '300', '--output', archive, url]);

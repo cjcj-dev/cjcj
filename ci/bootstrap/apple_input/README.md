@@ -100,3 +100,25 @@ collection. This batch establishes apparatus causality only. It cannot establish
 that the actual compiler dependency closure was collected or that an Apple build
 works. No compiler or native target is dispatched. Cut restoration checks bytes;
 there is no seventh post-cut execution under the six-recipe allowance.
+
+The private `apple_input` dispatch option in `verify-darwin-runtime.yml` runs
+`zx darwin-batch.mjs` on the authorized official macOS carrier. Existing workflow
+calls and ordinary dispatches retain the published-runtime jobs. `green` runs one
+admission; `controls` runs SDK pthread.h drift, restoration, a valid HOME change,
+and restoration. The collector copies actual SDK header bytes into a private root,
+prepares the fixed helper, runs its exact preprocessing command with clang `-M`,
+and collects clang record-layout output without compiling or running a native
+binary. Full official Cangjie archive transport and the immutable legacy validators
+remain in use; no synthetic SDK substitution is made. Each failure preserves its
+original command rc/signal/errno and stops dependent work. Results only qualify
+admission and never qualify a native build.
+
+`pinned-inputs.tar.gz` contains the four byte-identical legacy inputs from local
+845a and the source inventory from e121, identified by `legacy-pins.json` and the
+immutable frozen inventory. The Git objects are not assumed to be available from
+remote checkout. Materialization does not update those originals. New capture
+and original stdout/stderr, actual argv/environment/cwd, runner identity, consumed
+headers and receipts are uploaded as evidence. The job requires the frozen
+Xcode 16.4 (16F6) / SDK 15.5; a runner image lacking it stops before product entry,
+without accepting a different tool identity. Layout evidence is newly collected;
+historical header null, layout and qualification records remain unchanged.
