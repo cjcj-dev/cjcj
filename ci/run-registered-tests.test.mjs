@@ -73,8 +73,7 @@ test('ObjC fixture validation accepts recorded modules and rejects each missing 
   }
 });
 
-test('workspace runner records missing producer and real preparation subprocess failure before cjpm', async () => {
-  const {runCangjie} = await import('./run-registered-tests.mjs');
+async function prerequisiteFixture(body) {
   const work = await fs.mkdtemp(path.join(os.tmpdir(), 'objc-prerequisite-'));
   const oldHome = process.env.CANGJIE_HOME;
   const oldProducer = process.env.OBJC_PREAMBLE_PRODUCER;
@@ -88,39 +87,124 @@ test('workspace runner records missing producer and real preparation subprocess 
       await fs.writeFile(path.join(sdk, file), 'identity input');
     }
     process.env.CANGJIE_HOME = sdk;
-    delete process.env.OBJC_PREAMBLE_PRODUCER;
-    const missing = path.join(work, 'missing');
-    await fs.mkdir(missing);
-    const rejected = await runCangjie(repoRoot, [], missing);
-    assert.equal(rejected[0].executed, false);
-    assert.match(rejected[0].error, /explicit OBJC_PREAMBLE_PRODUCER/);
     const root = path.join(work, 'tree');
     await fs.mkdir(path.join(root, 'scripts'), {recursive: true});
-    await fs.copyFile(path.join(repoRoot, 'scripts/objc_preamble_unit.py'), path.join(root, 'scripts/objc_preamble_unit.py'));
+    // Execute the unchanged production script through the actual runner.
+    const script = path.join(root, 'scripts/objc_preamble_unit.py');
+    await fs.copyFile(path.join(repoRoot, 'scripts/objc_preamble_unit.py'), script);
     await fs.cp(path.join(repoRoot, 'scripts/objc_regcomp_fixtures'), path.join(root, 'scripts/objc_regcomp_fixtures'), {recursive: true});
     await fs.mkdir(path.join(root, 'runtime_shim'));
-    await fs.writeFile(path.join(root, 'runtime_shim/cjselfhost_llvmshim.o'), 'shim identity');
-    spawnSync('git', ['init', '-q'], {cwd: root});
-    spawnSync('git', ['add', '.'], {cwd: root});
-    const commit = spawnSync('git', ['-c', 'user.name=Zxilly', '-c', 'user.email=zxilly@outlook.com', 'commit', '-qm', 'fixture'], {cwd: root});
-    assert.equal(commit.status, 0);
+    const shim = path.join(root, 'runtime_shim/cjselfhost_llvmshim.o');
+    await fs.writeFile(shim, 'shim identity');
+    for (const args of [['init', '-q'], ['add', '.'],
+      ['-c', 'user.name=Zxilly', '-c', 'user.email=zxilly@outlook.com', 'commit', '-qm', 'fixture']]) {
+      const result = spawnSync('git', args, {cwd: root});
+      assert.equal(result.status, 0, String(result.stderr));
+    }
     const producer = path.join(work, 'producer');
-    await fs.writeFile(producer, '#!/bin/sh\nexit 7\n', {mode: 0o755});
     process.env.OBJC_PREAMBLE_PRODUCER = producer;
-    const output = path.join(work, 'failed');
-    await fs.mkdir(output);
-    const failed = await runCangjie(root, [], output);
-    assert.equal(failed[0].executed, false);
-    assert.equal(failed[0].preparation.rc, 1);
-    const manifest = JSON.parse(await fs.readFile(path.join(output, 'objc-fixture/fixture.json')));
-    assert.equal(manifest.stubs.internal.rc, 7);
-    assert.equal(manifest.stubs.lang, undefined);
-    assert.match(manifest.error, /internal producer rc=7/);
+    await body({work, root, producer, shim, script});
   } finally {
     for (const [key, value] of [['CANGJIE_HOME', oldHome], ['OBJC_PREAMBLE_PRODUCER', oldProducer]]) {
       if (value === undefined) delete process.env[key]; else process.env[key] = value;
     }
     await fs.rm(work, {recursive: true, force: true});
+  }
+}
+
+test('workspace runner records missing producer before cjpm', async () => {
+  const {runCangjie} = await import('./run-registered-tests.mjs');
+  await prerequisiteFixture(async ({work, root}) => {
+    delete process.env.OBJC_PREAMBLE_PRODUCER;
+    const output = path.join(work, 'missing');
+    await fs.mkdir(output);
+    const [rejected] = await runCangjie(root, [], output);
+    assert.equal(rejected.executed, false);
+    assert.match(rejected.error, /explicit OBJC_PREAMBLE_PRODUCER/);
+  });
+});
+
+for (const scenario of [
+  {name: 'input identity', phase: 'input_identity', rc: null, text: /cjselfhost_llvmshim/},
+  {name: 'execution exit', phase: 'execute', rc: 7, text: /internal producer rc=7/},
+  {name: 'missing products', phase: 'verify_products', rc: 0, text: /missing objc.internal.cjo/},
+]) {
+  test(`fixture diagnostics preserve ${scenario.name} through the workspace runner`, async () => {
+    const {runCangjie, digest} = await import('./run-registered-tests.mjs');
+    await prerequisiteFixture(async ({work, root, producer, shim, script}) => {
+      await fs.writeFile(producer, `#!/bin/sh\nprintf 'PRODUCER_DIAGNOSTIC\\n'\nexit ${scenario.rc ?? 0}\n`, {mode: 0o755});
+      if (scenario.rc === null) await fs.rm(shim);
+      const output = path.join(work, 'failed');
+      await fs.mkdir(output);
+      const [failed] = await runCangjie(root, [], output);
+      const saved = JSON.parse(await fs.readFile(path.join(output, 'prerequisite.json')));
+      // Do not let a missing-file exception hide this target assertion.
+      let manifest;
+      try { manifest = JSON.parse(await fs.readFile(path.join(output, 'objc-fixture/fixture.json'))); }
+      catch { /* Absence is checked at the same diagnostic invariant below. */ }
+      console.log(`TARGET_DIAGNOSTIC phase=${scenario.phase} manifest=${Boolean(manifest)} consumer=${Boolean(saved.fixture)} script=${digest(script)}`);
+      assert.deepEqual({phase: manifest?.phase, rc: manifest?.rc, fixture: saved.fixture},
+        {phase: scenario.phase, rc: scenario.rc, fixture: manifest}, 'target diagnostic phase, raw rc and consumer fidelity');
+      assert.deepEqual(saved.fixture, failed.fixture);
+      assert.equal(failed.executed, false);
+      assert.equal(failed.preparation.rc, 1);
+      assert.equal(failed.rc, 1);
+      assert.equal(failed.fixtureManifestPath, path.join(output, 'objc-fixture/fixture.json'));
+      assert.match(manifest.error, scenario.text);
+      assert.match(manifest.exception_text, scenario.text);
+      assert.ok(manifest.exception_type);
+      if (scenario.phase === 'input_identity') {
+        assert.equal(manifest.argv, null);
+        assert.deepEqual(manifest.logs, {});
+        assert.deepEqual(manifest.stubs, {});
+      } else {
+        const name = scenario.phase === 'execute' ? 'internal' : 'lang';
+        assert.deepEqual(manifest.argv, manifest.stubs[name].argv);
+        assert.equal(manifest.stubs.internal.rc, scenario.phase === 'execute' ? 7 : 0);
+        assert.equal(manifest.logs[name], manifest.stubs[name].log);
+        assert.match(await fs.readFile(manifest.logs[name], 'utf8'), /PRODUCER_DIAGNOSTIC/);
+        if (scenario.phase === 'execute') assert.equal(manifest.stubs.lang, undefined);
+      }
+    });
+  });
+}
+
+test('fixture diagnostics preserve the real Git identity subprocess failure through the workspace runner', async () => {
+  const {runCangjie, digest} = await import('./run-registered-tests.mjs');
+  await prerequisiteFixture(async ({work, root, producer, script}) => {
+    await fs.writeFile(producer, '#!/bin/sh\nexit 0\n', {mode: 0o755});
+    await fs.rm(path.join(root, '.git'), {recursive: true});
+    const output = path.join(work, 'git-failed');
+    await fs.mkdir(output);
+    const [failed] = await runCangjie(root, [], output);
+    const saved = JSON.parse(await fs.readFile(path.join(output, 'prerequisite.json')));
+    let manifest;
+    try { manifest = JSON.parse(await fs.readFile(path.join(output, 'objc-fixture/fixture.json'))); }
+    catch { /* The diagnostic invariant below includes manifest publication. */ }
+    const argv = ['git', 'rev-parse', 'HEAD'];
+    const log = path.join(output, 'objc-fixture/input_identity.log');
+    console.log(`TARGET_GIT_IDENTITY rc=${manifest?.rc} nested=${manifest?.identity?.rc} script=${digest(script)}`);
+    assert.deepEqual({phase: manifest?.phase, rc: manifest?.rc, argv: manifest?.argv,
+      identity: manifest?.identity, logs: manifest?.logs, fixture: saved.fixture},
+    {phase: 'input_identity', rc: 128, argv, identity: {argv, rc: 128, log},
+      logs: {input_identity: log}, fixture: manifest}, 'target raw Git subprocess status and consumer fidelity');
+    assert.deepEqual(failed.fixture, manifest);
+    assert.equal(failed.executed, false);
+    assert.equal(failed.preparation.rc, 1);
+    assert.equal(failed.rc, 1);
+    assert.equal(manifest.exception_type, 'CalledProcessError');
+    assert.match(manifest.exception_text, /128/);
+    assert.match(await fs.readFile(log, 'utf8'), /fatal: not a git repository/);
+    assert.deepEqual(manifest.stubs, {});
+  });
+});
+
+test('official host always uploads preparation and fixture diagnostic evidence', async () => {
+  const workflow = await fs.readFile(path.join(repoRoot, '.github/workflows/ci.yml'), 'utf8');
+  const section = workflow.slice(workflow.indexOf('      - name: Preserve Cangjie test results'), workflow.indexOf('  fixed-llvm-tools:'));
+  assert.match(section, /if: always\(\)/);
+  for (const file of ['prepare', 'objc-fixture/fixture.json', 'objc-fixture/*.log', 'prerequisite.json']) {
+    assert.ok(section.includes('package-tests/' + file), file);
   }
 });
 

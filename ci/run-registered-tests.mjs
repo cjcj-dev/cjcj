@@ -147,17 +147,26 @@ export async function runCangjie(root, entries, output, selection) {
   const fixture = path.join(output, 'objc-fixture');
   const producer = process.env.OBJC_PREAMBLE_PRODUCER;
   let preparation;
+  let fixtureManifest;
+  let fixtureManifestError;
+  const fixtureManifestPath = path.join(fixture, 'fixture.json');
   try {
     if (selection) qualified = inspectSelection(root, entries, selection);
     if (!producer || !path.isAbsolute(producer)) throw new Error('explicit OBJC_PREAMBLE_PRODUCER is required');
     preparation = await execute(['python3', 'scripts/objc_preamble_unit.py', '--prepare-only',
       '--build-tree', root, '--sdk', sdk, '--producer', producer, '--out', fixture], root,
       path.join(output, 'prepare'));
+    try {
+      fixtureManifest = JSON.parse(fs.readFileSync(fixtureManifestPath, 'utf8'));
+    } catch (error) { fixtureManifestError = error.message; }
     if (preparation.rc) throw new Error(`producer rc=${preparation.rc}`);
-    const manifest = JSON.parse(fs.readFileSync(path.join(fixture, 'fixture.json'), 'utf8'));
-    validateObjCFixture(manifest.imports, manifest.files);
+    if (fixtureManifestError) throw new Error(`fixture manifest: ${fixtureManifestError}`);
+    if (fixtureManifest.phase !== 'complete' || fixtureManifest.rc !== 0 || fixtureManifest.error)
+      throw new Error('fixture manifest does not record successful preparation');
+    validateObjCFixture(fixtureManifest.imports, fixtureManifest.files);
   } catch (error) {
     const failure = {file: 'workspace', rc: 1, executed: false, preparation,
+      fixture: fixtureManifest, fixtureManifestPath, fixtureManifestError,
       error: `ObjCPreamble fixture prerequisite: ${error.message}`};
     fs.writeFileSync(path.join(output, 'prerequisite.json'), JSON.stringify(failure, null, 2));
     return [failure];
@@ -179,7 +188,7 @@ export async function runCangjie(root, entries, output, selection) {
   } catch (error) { executionError = error.message; }
   const executed = selection ? !executionError && selectedCases?.length === qualified.cases.length : reportFiles.length > 0;
   return [{file: 'workspace', files: entries.map(entry => entry.file), sdk, identities, ...result,
-    reportFiles, selection, qualified, selectedCases, executionError, preparation, executed, rc: result.rc || (executed ? 0 : 1)}];
+    reportFiles, selection, qualified, selectedCases, executionError, preparation, fixture: fixtureManifest, fixtureManifestPath, executed, rc: result.rc || (executed ? 0 : 1)}];
 }
 
 export async function main(argv) {
