@@ -26,11 +26,23 @@ env -u LD_LIBRARY_PATH -u CANGJIE_HOME bash "$product" "$@" --check-only > "$che
 positive=$?
 set -e
 printf 'missing=%s missing_stage1=%s mixed=%s positive=%s\n' "$missing" "$missing_stage1" "$mixed" "$positive" | tee "$checks/check.rc"
-[[ "$missing" != 0 ]] && grep -q '缺少参数 WORK' "$checks/missing.log" || { echo 'ASSERT missing-required-parameter FAIL'; exit 1; }
+if [[ "$missing" = 0 ]] || ! grep -q '缺少参数 WORK' "$checks/missing.log"; then
+  echo 'ASSERT missing-required-parameter FAIL'
+  exit 1
+fi
 echo 'ASSERT missing-required-parameter PASS'
-[[ "$missing_stage1" != 0 ]] && grep -q '缺少参数 STAGE1_ELF' "$checks/missing-stage1.log" || { echo 'ASSERT missing-stage1-pin FAIL'; exit 1; }
+if [[ "$missing_stage1" = 0 ]] || ! grep -q '缺少参数 STAGE1_ELF' "$checks/missing-stage1.log"; then
+  echo 'ASSERT missing-stage1-pin FAIL'
+  exit 1
+fi
 echo 'ASSERT missing-stage1-pin PASS'
-[[ "$mixed" != 0 ]] && grep -q 'mixed domain: inherited LD_LIBRARY_PATH' "$checks/mixed.log" || { echo 'ASSERT mixed-domain-rejected FAIL'; exit 1; }
+if [[ "$mixed" = 0 ]] || ! grep -q 'mixed domain: inherited LD_LIBRARY_PATH' "$checks/mixed.log"; then
+  echo 'ASSERT mixed-domain-rejected FAIL'
+  exit 1
+fi
 echo 'ASSERT mixed-domain-rejected PASS'
-[[ "$positive" = 0 ]] && grep -q '^SUPPLIED-STAGE1-INPUTS-OK' "$checks/positive.log" || { echo 'ASSERT pinned-inputs-accepted FAIL'; exit 1; }
+if [[ "$positive" != 0 ]] || ! grep -q '^SUPPLIED-STAGE1-INPUTS-OK' "$checks/positive.log"; then
+  echo 'ASSERT pinned-inputs-accepted FAIL'
+  exit 1
+fi
 echo 'ASSERT pinned-inputs-accepted PASS'

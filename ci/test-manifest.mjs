@@ -96,6 +96,7 @@ export const GATING = Object.freeze([
   'ci/patched-runtime-language-defer.test.mjs',
   'ci/official-runtime-isolation.test.mjs',
   'ci/bootstrap/prepare_cpp_headers.test.mjs',
+  'ci/bootstrap/stage1_host_runner.test.mjs',
   'ci/pin-sweep.test.mjs',
   'ci/release-pair-pin.test.mjs',
   'ci/release-gates.test.mjs',
