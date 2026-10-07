@@ -68,7 +68,7 @@ in a child process and saves its original rc and emitted manifest. This is a
 candidate-new-line apparatus cut, not a frozen-main product cut. Its scope is
 synthetic relationship qualification only; historical calibration remains intact.
 
-A1 repair (unexecuted pending a new bounded validation contract): a new capture
+A1 repair: a new capture
 requires `consumer.source` (absolute actual helper path), `consumer.argv` (the
 clang compilation argv without sccache), `consumer.cwd`, `consumer.environment`,
 and collection `cwd`. The original dependency invocation must equal that compile
@@ -87,3 +87,16 @@ recipe again and bind the capture. An unbound recipe has no header_capture and
 cannot pass the first-build entry. This permits collection before the first
 compilation without a Mach-O or BUILT receipt. This two-stage path has not been
 executed in the exhausted nine-recipe contract.
+
+`node consumer-batch.mjs output materialized-input` is a six-recipe private
+consumer supplement using the pinned helper and a recipe produced by real
+`prepare(..., null)` then `bindPrepared`. Set `APPLE_BATCH_DEADLINE` to the
+contract's absolute epoch. It tests admission, pthread.h byte drift and recovery,
+a legal HOME change and recovery, and a candidate-new-line consumer cut with
+the same target module. Every successful admission reaches both launch boundaries.
+The tools, SDK, layout and dependency output are explicitly synthetic; the list
+is derived from this helper's direct includes and is **not** a clang dependency
+collection. This batch establishes apparatus causality only. It cannot establish
+that the actual compiler dependency closure was collected or that an Apple build
+works. No compiler or native target is dispatched. Cut restoration checks bytes;
+there is no seventh post-cut execution under the six-recipe allowance.
