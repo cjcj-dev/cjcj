@@ -135,6 +135,7 @@ COLOUR_GATE_SOURCE="$TEST_ROOT/source"; COLOUR_GATE_INSTALL="$TEST_ROOT/installe
 HOST_SDK="$TEST_ROOT/build"; STAGE1_ELF="$TEST_ROOT/payload/sdk/bin/cjc"
 AST_SUPPORT="$TEST_ROOT/unused"; HOST_TUPLE=linux_x86_64_cjnative
 mkdir -p "$WORK"
+python3() { if [[ "$1" == */ci/install_std_sdk_inputs.py ]]; then return 0; fi; command python3 "$@"; }
 stage1_inputs() { sdk="$TEST_ROOT/build"; compiler="$STAGE1_ELF"; previous_std="$TEST_ROOT/std"; }
 stage1_initial_std() { :; }
 assemble_stage1_sdk() { [[ "$1" == "$TEST_ROOT/build" && "$3" == "$TEST_ROOT/std" ]]; }
