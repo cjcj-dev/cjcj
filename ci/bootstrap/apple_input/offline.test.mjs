@@ -37,7 +37,7 @@ for (const name of ['A', 'B']) {
   put(path.join(apple, 'usr/include/signal.h'), '#include <sys/signal.h>\n');
   put(path.join(apple, 'usr/include/sys/signal.h'), 'SYNTHETIC_HEADER_BYTES\n');
   const deps = path.join(root, name + '.deps');
-  put(deps, 'probe.o: ' + path.join(apple, 'usr/include/signal.h') + ' \\\n+ ' + path.join(apple, 'usr/include/sys/signal.h') + '\n');
+  put(deps, 'probe.o: ' + path.join(apple, 'usr/include/signal.h') + ' \\\n ' + path.join(apple, 'usr/include/sys/signal.h') + '\n');
   const layoutFile = path.join(root, name + '.layout'); put(layoutFile, JSON.stringify(layout));
   const raw = path.join(root, name + '.versions'); put(raw, 'SYNTHETIC_VERSION_OUTPUT_NOT_REAL_SDK');
   const spec = {apple_sdkroot: apple, dependencies_path: deps, layout_path: layoutFile,
