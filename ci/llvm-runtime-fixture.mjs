@@ -75,7 +75,7 @@ export function fixture(root, table, {baseline = false} = {}) {
           fs.writeFileSync(path.join(dest, '.git/hooks/post-checkout'),
             `#!/usr/bin/env node\nimport('node:child_process').then(({spawnSync}) => {\nconst result = spawnSync('git', ${JSON.stringify(['-C', dest, ...action])}, {stdio: 'inherit'});\nprocess.exit(result.status);\n});\n`, {mode: 0o755});
         }
-        else if (input.fixture !== 'clean') throw new Error(`unknown fixture ${input.fixture}`);
+        else if (!['clean', 'root-trailing-space', 'root-trailing-tab'].includes(input.fixture)) throw new Error(`unknown fixture ${input.fixture}`);
       }
     }
     const env = {...cleanEnv};
