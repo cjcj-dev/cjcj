@@ -35,7 +35,7 @@ export async function publishFixedTupleToDepot(depotRoot, env = process.env) {
   const files = ['./MANIFEST', './bin/llc', './bin/opt', './bin/ld.lld', './lib/STATIC_LLVM.txt',
     './fixed-llc/llc.gz', './fixed-llc/opt.gz', './fixed-llc/ld.lld.gz',
     './fixed-llc/cjselfhost_llvmshim.o', './fixed-llc/llvm-tools.manifest'];
-  const sums = await $({quiet: true, nothrow: true, env, cwd: depot})`sha256sum -- ${files} > SHA256SUMS`;
+  const sums = await $({quiet: true, nothrow: true, env})`cd ${depot} && sha256sum -- ${files} > SHA256SUMS`;
   process.stderr.write(sums.stderr);
   if (sums.exitCode !== 0) return 1;
   console.log(`published fixed LLVM tuple to depot ${depot}`);
