@@ -2,7 +2,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import {fileURLToPath} from 'node:url';
 
 const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const fileHash = async file => hash(await fs.readFile(file));
@@ -69,10 +68,4 @@ export async function readBootstrapStdOutput({work, tuple}) {
   }
   console.log(`BOOTSTRAP_STD_OUTPUT_VERIFIED prefix=${actual.prefix} sha256=${actual.prefixSha256}`);
   return actual;
-}
-
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const [work, prefix, compiler, tuple] = process.argv.slice(2);
-  if (!work || !prefix || !compiler || !tuple) throw new Error('usage: std-output.mjs WORK PREFIX COMPILER TUPLE');
-  await publishBootstrapStdOutput({work, prefix, compiler, tuple});
 }

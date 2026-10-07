@@ -31,6 +31,7 @@ async function fixture(recipe) {
   };
   const compiler = '#!/bin/bash\ncat "$CANGJIE_HOME/lib/linux_x86_64_cjnative/libcangjie-std-core.a"\n';
   await write('work/cjcj-stage1', 'fixture stage1 compiler');
+  await write('stage1-input', 'fixture stage1 compiler');
   await write('work/.cjcj-stage1', `${work}/cjcj-stage1\n`);
   await write('seed', compiler);
   await write(`std/lib/${tuple}/libcangjie-std-core.a`, `std bytes from ${recipe}`);
@@ -47,7 +48,7 @@ async function fixture(recipe) {
 WORK=${quote(work)}; SRC=${quote(repo)}; FIXTURE=${quote(root)}
 CJCJ_SHA=fixture; STDSRC=fixture; CPP_SRC=fixture; HOST_LLVM_SO=fixture; HOST_LLVM_SHA256=fixture
 COLOUR_LLVM_SO=fixture; COLOUR_LLVM_SHA256=fixture; AST_SUPPORT=fixture; AST_SUPPORT_SHA256=fixture
-COLOUR_TUPLE=fixture; COLOUR_LLVM_SHA=fixture; CRT=fixture; HRT=fixture; HOST_SDK=fixture; STAGE1_ELF=fixture
+COLOUR_TUPLE=fixture; COLOUR_LLVM_SHA=fixture; CRT=fixture; HRT=fixture; HOST_SDK=fixture; STAGE1_ELF="$FIXTURE/stage1-input"
 record() { :; }; assert_llvm() { :; }; assert_cjcj_sha() { :; }; assert_cjcj_root() { :; }
 host_tuple_init() { HOST_TUPLE=${tuple}; }; supplied_stage1_validate() { :; }
 stage0() { :; }; prepare_stage0_run_sdk() { :; }; assemble_stage1_sdk() { :; }
