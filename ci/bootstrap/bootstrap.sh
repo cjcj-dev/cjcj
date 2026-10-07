@@ -651,7 +651,7 @@ stage0() {
   out="$WORK/cjcj-stage1"
   sdk="$WORK/sdk-stage0"
   echo "OUTPUT cjcj-stage1=$out"
-  cmd "npx --yes zx@8 $(printf '%q' "$SDK_BUILD") --runtime-pin $(printf '%q' "$RUNTIME_PIN") --from $(printf '%q' "$base") --to $(printf '%q' "$sdk") --host --llvm-so $(printf '%q' "$HOST_LLVM_SO") --colour-runtime $(printf '%q' "$(runtime_dir "$CRT")/libcangjie-runtime.so") --host-runtime $(printf '%q' "$(runtime_dir "$HRT")/libcangjie-runtime.so") --force"
+  cmd "bash $(printf '%q' "$SDK_BUILD") --runtime-pin $(printf '%q' "$RUNTIME_PIN") --from $(printf '%q' "$base") --to $(printf '%q' "$sdk") --host --llvm-so $(printf '%q' "$HOST_LLVM_SO") --colour-runtime $(printf '%q' "$(runtime_dir "$CRT")/libcangjie-runtime.so") --host-runtime $(printf '%q' "$(runtime_dir "$HRT")/libcangjie-runtime.so") --force"
   if [ "$DRY" -eq 0 ]; then
     cmd "python3 $(printf '%q' "$SDK_VERIFY") --sdk $(printf '%q' "$sdk") --role host --runtime-pin $(printf '%q' "$RUNTIME_PIN")"
   fi
@@ -704,7 +704,7 @@ stage0() {
 
 assemble_stage1_sdk() {
   local sdk="$1" compiler="$2" std="$3"
-  cmd "npx --yes zx@8 $(printf '%q' "$SDK_BUILD") --runtime-pin $(printf '%q' "$RUNTIME_PIN") --from $(printf '%q' "$WORK/sdk-stage0") --to $(printf '%q' "$sdk") --target $(printf '%q' "$HOST_TUPLE") --cjc $(printf '%q' "$compiler") --llvm-tuple $(printf '%q' "$COLOUR_TUPLE") --llvm-so $(printf '%q' "$COLOUR_LLVM_SO") --runtime $(printf '%q' "$CRT") --std $(printf '%q' "$std") --verify-host-rt $(printf '%q' "$HRT") --colour-runtime $(printf '%q' "$(runtime_dir "$CRT")/libcangjie-runtime.so") --host-runtime $(printf '%q' "$(runtime_dir "$HRT")/libcangjie-runtime.so") --force"
+  cmd "bash $(printf '%q' "$SDK_BUILD") --runtime-pin $(printf '%q' "$RUNTIME_PIN") --from $(printf '%q' "$WORK/sdk-stage0") --to $(printf '%q' "$sdk") --target $(printf '%q' "$HOST_TUPLE") --cjc $(printf '%q' "$compiler") --llvm-tuple $(printf '%q' "$COLOUR_TUPLE") --llvm-so $(printf '%q' "$COLOUR_LLVM_SO") --runtime $(printf '%q' "$CRT") --std $(printf '%q' "$std") --verify-host-rt $(printf '%q' "$HRT") --colour-runtime $(printf '%q' "$(runtime_dir "$CRT")/libcangjie-runtime.so") --host-runtime $(printf '%q' "$(runtime_dir "$HRT")/libcangjie-runtime.so") --force"
   if [ "$DRY" -eq 0 ]; then
     cmd "python3 $(printf '%q' "$SDK_VERIFY") --sdk $(printf '%q' "$sdk") --role target --runtime-pin $(printf '%q' "$RUNTIME_PIN")"
   fi
@@ -714,7 +714,7 @@ assemble_stage1_sdk() {
   fi
   local compiler_sha=planned
   [ "$DRY" -eq 1 ] || compiler_sha=$(sha256 "$compiler")
-  cmd "npx --yes zx@8 $(printf '%q' "$STAGE1_HOST_RUNNER") $(printf '%q' "$sdk") $(printf '%q' "$WORK/sdk-stage0") $(printf '%q' "$HRT") $(printf '%q' "$HOST_LLVM_SHA256") $(printf '%q' "$compiler") $(printf '%q' "$compiler_sha") $(printf '%q' "$WORK/sdk-stage0-run") $(printf '%q' "$COLOUR_LLVM_SHA256")"
+  cmd "bash $(printf '%q' "$STAGE1_HOST_RUNNER") $(printf '%q' "$sdk") $(printf '%q' "$WORK/sdk-stage0") $(printf '%q' "$HRT") $(printf '%q' "$HOST_LLVM_SHA256") $(printf '%q' "$compiler") $(printf '%q' "$compiler_sha") $(printf '%q' "$WORK/sdk-stage0-run") $(printf '%q' "$COLOUR_LLVM_SHA256")"
   assert_executable stage1-compiler "$sdk/bin/cjc"
 }
 
@@ -725,7 +725,7 @@ bootstrap_target_std() {
   local compiler="$1" std="$2" sdk="$WORK/sdk-std-bootstrap" compiler_sha=planned target_lib
   local link_root="$WORK/std-runtime-link" native dynamic file arch
   target_lib=$(runtime_dir "$CRT")
-  cmd "npx --yes zx@8 $(printf '%q' "$SDK_BUILD") --runtime-pin $(printf '%q' "$RUNTIME_PIN") --from $(printf '%q' "$WORK/sdk-stage0") --to $(printf '%q' "$sdk") --host --llvm-tuple $(printf '%q' "$COLOUR_TUPLE") --colour-runtime $(printf '%q' "$(runtime_dir "$CRT")/libcangjie-runtime.so") --host-runtime $(printf '%q' "$(runtime_dir "$HRT")/libcangjie-runtime.so") --force"
+  cmd "bash $(printf '%q' "$SDK_BUILD") --runtime-pin $(printf '%q' "$RUNTIME_PIN") --from $(printf '%q' "$WORK/sdk-stage0") --to $(printf '%q' "$sdk") --host --llvm-tuple $(printf '%q' "$COLOUR_TUPLE") --colour-runtime $(printf '%q' "$(runtime_dir "$CRT")/libcangjie-runtime.so") --host-runtime $(printf '%q' "$(runtime_dir "$HRT")/libcangjie-runtime.so") --force"
   assert_installed_llvm_tuple "$sdk" "$COLOUR_TUPLE"
   cmd "install -m755 $(printf '%q' "$compiler") $(printf '%q' "$sdk/bin/cjc")"
   cmd "install -m644 $(printf '%q' "$COLOUR_LLVM_SO") $(printf '%q' "$sdk/third_party/llvm/lib/libLLVM-15.so")"
@@ -735,7 +735,7 @@ bootstrap_target_std() {
     record std-bootstrap-host-runtime "$sdk/runtime/lib/$HOST_TUPLE/libcangjie-runtime.so"
     record std-bootstrap-target-runtime "$target_lib/libcangjie-runtime.so"
   fi
-  cmd "npx --yes zx@8 $(printf '%q' "$STAGE1_HOST_RUNNER") $(printf '%q' "$sdk") $(printf '%q' "$WORK/sdk-stage0") $(printf '%q' "$HRT") $(printf '%q' "$HOST_LLVM_SHA256") $(printf '%q' "$compiler") $(printf '%q' "$compiler_sha") $(printf '%q' "$WORK/sdk-stage0-run") $(printf '%q' "$COLOUR_LLVM_SHA256") $(printf '%q' "$target_lib")"
+  cmd "bash $(printf '%q' "$STAGE1_HOST_RUNNER") $(printf '%q' "$sdk") $(printf '%q' "$WORK/sdk-stage0") $(printf '%q' "$HRT") $(printf '%q' "$HOST_LLVM_SHA256") $(printf '%q' "$compiler") $(printf '%q' "$compiler_sha") $(printf '%q' "$WORK/sdk-stage0-run") $(printf '%q' "$COLOUR_LLVM_SHA256") $(printf '%q' "$target_lib")"
   # stdlib's common-layout probe selects the FIRST runtime search path. A
   # bare --target-lib directory is too late: its fallback is the host SDK.
   arch=${HOST_TUPLE#linux_}
@@ -810,7 +810,7 @@ stage1_compiler() {
     [ -d "$std" ] || die 'stage1 未产出 stdlib-stage2'
   fi
   assert_version cjcj-stage2 "$out" "$sdk" "$CRT"
-  cmd "npx --yes zx@8 $(printf '%q' "$SRC/ci/bootstrap/publish-std-output.mjs") $(printf '%q' "$WORK") $(printf '%q' "$std") $(printf '%q' "$compiler") $(printf '%q' "$HOST_TUPLE")"
+  cmd "bash $(printf '%q' "$SRC/ci/bootstrap/publish-std-output.mjs") $(printf '%q' "$WORK") $(printf '%q' "$std") $(printf '%q' "$compiler") $(printf '%q' "$HOST_TUPLE")"
   # Forensic arm is opt-in and runs only after the release compiler is installed.
   # It does not rewrite $out. Spec: cjpm `build -g` (default off) lands in
   # target/debug; std RelWithDebInfo already passes -g via AddCangjieSource.cmake.
@@ -903,7 +903,7 @@ supplied_stage1() {
   stage1_initial_std
   # The full std just produced is the stage2 compiler's static-link input.
   std="$previous_std"
-  if [ -n "${COLOUR_GATE_SOURCE:-}${COLOUR_GATE_INSTALL:-}" ]; then STAGE=colour-runtime-gate; assemble_stage1_sdk "$sdk" "$compiler" "$std"; cmd "npx --yes zx@8 $(printf '%q' "$SRC/ci/release/gate_colour_runtime.mjs") --build-sdk $(printf '%q' "${COLOUR_GATE_SOURCE:?colour gate source}") $(printf '%q' "$sdk") $(printf '%q' "$WORK/colour-gate-active") $(printf '%q' "${COLOUR_GATE_INSTALL:?colour gate install}")"; fi
+  if [ -n "${COLOUR_GATE_SOURCE:-}${COLOUR_GATE_INSTALL:-}" ]; then STAGE=colour-runtime-gate; assemble_stage1_sdk "$sdk" "$compiler" "$std"; cmd "bash $(printf '%q' "$SRC/ci/release/gate_colour_runtime.mjs") --build-sdk $(printf '%q' "${COLOUR_GATE_SOURCE:?colour gate source}") $(printf '%q' "$sdk") $(printf '%q' "$WORK/colour-gate-active") $(printf '%q' "${COLOUR_GATE_INSTALL:?colour gate install}")"; fi
   stage1_compiler
   STAGE=stage2-smoke
   printf 'main(): Int64 { return 0 }\n' > "$WORK/main.cj"
