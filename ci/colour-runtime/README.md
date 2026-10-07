@@ -76,6 +76,6 @@ The fixed qualified language SDK is preserved in prerelease
 in `ci/bootstrap_artifacts_pin.json`. Its original component and compiler-host
 identities, source lane and retained qualification runs are recorded in
 [qualified-language-sdk-1504-provenance.json](qualified-language-sdk-1504-provenance.json).
-The current target selection includes the complete
-[runtime commit span](runtime-0d6e-span.md); this does not change the fixed
-language SDK lock or component identities.
+The tested target runtime is measured independently of this fixed language
+SDK. Updating the production runtime pin and all platform release assets is
+tracked separately in #863; it does not change the language SDK identities.
