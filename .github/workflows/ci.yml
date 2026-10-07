@@ -74,6 +74,8 @@ jobs:
           curl -fsSL https://github.com/Zxilly/cjv/releases/download/v0.2.20/cjv_linux_amd64.tar.gz | tar -xz -C "$RUNNER_TEMP/lineage-cjv"
           cjv_bin=$(find "$RUNNER_TEMP/lineage-cjv" -type f -name cjv | head -1)
           "$cjv_bin" install "$CJCJ_TOOLCHAIN"
+      - name: Prepare pinned runtime contract input
+        run: npx --yes zx@8 ci/prepare-runtime-test-input.mjs "$RUNNER_TEMP/runtime-contract-input"
       - name: Test build and release contracts
         shell: bash
         env:
