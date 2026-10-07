@@ -169,6 +169,22 @@ for (const scenario of [
   });
 }
 
+// Scope deterministic Git diagnostics to this failure fixture. The workspace
+// runner and its Python/Git children inherit these values unchanged.
+async function withGitDiagnosticLocale(body) {
+  const keys = ['LC_ALL', 'LANG', 'LANGUAGE'];
+  const inherited = keys.map(key => process.env[key]);
+  try {
+    for (const key of keys) process.env[key] = 'C';
+    return await body();
+  } finally {
+    keys.forEach((key, index) => {
+      if (inherited[index] === undefined) delete process.env[key];
+      else process.env[key] = inherited[index];
+    });
+  }
+}
+
 test('fixture diagnostics preserve the real Git identity subprocess failure through the workspace runner', async () => {
   const {runCangjie, digest} = await import('./run-registered-tests.mjs');
   await prerequisiteFixture(async ({work, root, producer, script}) => {
@@ -176,7 +192,9 @@ test('fixture diagnostics preserve the real Git identity subprocess failure thro
     await fs.rm(path.join(root, '.git'), {recursive: true});
     const output = path.join(work, 'git-failed');
     await fs.mkdir(output);
-    const [failed] = await runCangjie(root, [], output);
+    const inheritedLocale = ['LC_ALL', 'LANG', 'LANGUAGE'].map(key => process.env[key]);
+    const [failed] = await withGitDiagnosticLocale(() => runCangjie(root, [], output));
+    assert.deepEqual(['LC_ALL', 'LANG', 'LANGUAGE'].map(key => process.env[key]), inheritedLocale);
     const saved = JSON.parse(await fs.readFile(path.join(output, 'prerequisite.json')));
     let manifest;
     try { manifest = JSON.parse(await fs.readFile(path.join(output, 'objc-fixture/fixture.json'))); }
