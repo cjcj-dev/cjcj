@@ -9,12 +9,13 @@ export async function publishFixedTupleToDepot(depotRoot, env = process.env) {
   const depot = `${depotRoot}/${LLVM_SHA}/${CANGJIE_COMPILER_SHA}`;
   const tuple = `${depot}/fixed-llc`;
   if (!LLVM_SHA || !CANGJIE_COMPILER_SHA) return 1;
-  const command = async (args, options = {}) => {
-    const result = await $({quiet: true, nothrow: true, env, ...options})`${args}`;
+  const command = async (args, {capture = false} = {}) => {
+    const result = await $({quiet: true, nothrow: true, env})`${args}`;
     process.stderr.write(result.stderr);
+    if (!capture) process.stdout.write(result.stdout);
     return result;
   };
-  const recipe = await command(['git', '-C', REPO_ROOT, 'rev-parse', 'HEAD']);
+  const recipe = await command(['git', '-C', REPO_ROOT, 'rev-parse', 'HEAD'], {capture: true});
   if (recipe.exitCode !== 0) return 1;
   const recipeSha = recipe.stdout.replace(/\n+$/, '');
   if ((await command(['mkdir', '-p', tuple, `${depot}/bin`, `${depot}/lib`])).exitCode !== 0) return 1;
@@ -27,8 +28,13 @@ export async function publishFixedTupleToDepot(depotRoot, env = process.env) {
     if (result.exitCode !== 0) return 1;
     if ((await command(['chmod', '+x', `${depot}/bin/${payload}`])).exitCode !== 0) return 1;
   }
-  const manifest = `PLATFORM=linux_x86_64\nLLVM_SHA=${LLVM_SHA}\nCANGJIE_COMPILER_SHA=${CANGJIE_COMPILER_SHA}\nRECIPE_CJCJ_SHA=${recipeSha}\nDEPOT_ROLE=byte-identical mirror\n`;
-  const written = await $({quiet: true, nothrow: true, env})`printf '%s' ${manifest} > ${`${depot}/MANIFEST`}`;
+  const written = await $({quiet: true, nothrow: true, env})`{
+    printf 'PLATFORM=linux_x86_64\n'
+    printf 'LLVM_SHA=%s\n' ${LLVM_SHA}
+    printf 'CANGJIE_COMPILER_SHA=%s\n' ${CANGJIE_COMPILER_SHA}
+    printf 'RECIPE_CJCJ_SHA=%s\n' ${recipeSha}
+    printf 'DEPOT_ROLE=byte-identical mirror\n'
+  } > ${`${depot}/MANIFEST`}`;
   process.stderr.write(written.stderr);
   if (written.exitCode !== 0) return 1;
   if ((await command(['cp', '--', `${depot}/MANIFEST`, `${depot}/lib/STATIC_LLVM.txt`])).exitCode !== 0) return 1;

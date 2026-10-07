@@ -9,7 +9,7 @@ export function exportBranches(source) {
   const array = source.match(/local -a (\w+)=\(([^)]+)\)/);
   if (!array) throw Error('missing payload array');
   const payloads = array[2].trim().split(/\s+/);
-  let loop = null, manifest = false, sums = false;
+  let loop = null, manifest = false, sums = false, manifestPrints = 0;
   const add = (kind, index, text, inputs) => rows.push({kind, line: index + 1, source: text, inputs});
   for (const [index, text] of lines.entries()) {
     const value = text.trim();
@@ -70,7 +70,10 @@ export function exportBranches(source) {
         if (command === 'cp' && !loop) inputs[0].fail.occurrence = payloads.length + 1;
         add(`error:${command}`, index, text, inputs);
       } else if (value.startsWith('} >')) {
-        add('error:manifest-redirect', index, text, [{fixture: 'manifest-directory', expected: 1}]);
+        add('error:manifest-redirect', index, text, [
+          {fixture: 'manifest-directory', expected: 1},
+          {fail: {command: 'printf', occurrence: manifestPrints}, expected: 1},
+        ]);
         manifest = false;
       } else if (value.startsWith(') ||')) {
         add('error:checksum-subshell', index, text, [
@@ -83,7 +86,7 @@ export function exportBranches(source) {
     }
     // The sha256sum is the subshell's final command; its status reaches || return.
     if (sums && (value.startsWith('sha256sum ') || value.startsWith('"./'))) continue;
-    if (manifest && value.startsWith('printf ')) continue;
+    if (manifest && value.startsWith('printf ')) { manifestPrints++; continue; }
     if (/^(?:local |publish_fixed_tuple_to_depot\(\) \{|echo |\})/.test(value)) continue;
     throw Error(`unrecognized source at ${index + 1}: ${value}`);
   }

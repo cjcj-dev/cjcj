@@ -26,7 +26,7 @@ function run(name, args) {
   assert.equal(result.signal, null);
   return result;
 }
-const layout = name => run(name, ['bash', 'ci/test-llvm-tuple-layout.sh', path.join(work, name)]);
+const layout = name => run(name, ['node', '--test', '--test-reporter=tap', '--test-name-pattern=^real tuple publisher emits', 'ci/llvm-tuple-layout.test.mjs']);
 const consume = name => run(name, ['node', '--test', '--test-reporter=tap', `--test-name-pattern=${pattern}`, 'ci/release/prepare_bootstrap_inputs.test.mjs']);
 function cut(file, before, after, name) {
   const source = fs.readFileSync(file, 'utf8');
@@ -42,12 +42,14 @@ fs.writeFileSync(path.join(work, 'green.sha256'), greenHashes);
 try {
   assert.equal(layout('producer-green').status, 0);
   assert.equal(consume('consumer-green').status, 0);
-  // Redirect the actual publisher output to the wrong payload. The script still
-  // succeeds; the ten-file contract, not a command failure, must turn red.
-  cut(producer, "`${depot}/lib/STATIC_LLVM.txt`])).exitCode", "`${depot}/lib/WRONG_STATIC_LLVM.txt`])).exitCode", 'producer-cut');
+  // The publisher still succeeds and all listed digests remain valid. Only its
+  // actual ten-payload result changes, reaching the target count assertion.
+  cut(producer, "'./lib/STATIC_LLVM.txt',", '', 'producer-cut');
   const red = layout('producer-cut');
   assert.notEqual(red.status, 0);
-  assert.match(red.stdout + red.stderr, /STATIC_LLVM\.txt/);
+  assert.match(red.stdout, /ERR_ASSERTION/);
+  assert.match(red.stdout, /9 !== 10/);
+  assert.match(red.stdout, /^# fail 1$/m);
   restore();
   cut(consumer, "mode: process.env.CJCJ_BOOTSTRAP_SOURCE || 'release',", "mode: process.env.CJCJ_BOOTSTRAP_SOURCE || 'depot',", 'consumer-cut');
   const consumerRed = consume('consumer-cut');

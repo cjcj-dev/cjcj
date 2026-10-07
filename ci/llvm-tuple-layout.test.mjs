@@ -89,21 +89,26 @@ if (process.env.TUPLE_DIFFERENTIAL === '1') test('tuple source-derived full tabl
     const tools = ['git', 'mkdir', 'cp', 'gzip', 'chmod', 'sha256sum'];
     const real = Object.fromEntries(tools.map(tool => [tool, command(['bash', '-c', 'command -v "$1"', 'resolve-tool', tool]).stdout.trim()]));
     const bin = path.join(work, 'bin'); fs.mkdirSync(bin);
-    if (input.fail && input.fail.command !== 'cd') {
+    if (input.fail && !['cd', 'printf'].includes(input.fail.command)) {
       const tool = input.fail.command, state = path.join(work, 'counter');
       const trace = path.join(work, 'argv.json');
       const wrapper = `#!/usr/bin/env node\nimport fs from 'node:fs';\nimport {spawnSync} from 'node:child_process';\nconst state = ${JSON.stringify(state)};\nconst n = fs.existsSync(state) ? Number(fs.readFileSync(state, 'utf8')) + 1 : 1;\nfs.writeFileSync(state, String(n));\nif (n === ${input.fail.occurrence}) {\nfs.writeFileSync(${JSON.stringify(trace)}, JSON.stringify(process.argv.slice(2)));\nconsole.error(${JSON.stringify(`fixture command error: ${tool}`)}); process.exit(19);\n}\nconst result = spawnSync(${JSON.stringify(real[tool])}, process.argv.slice(2), {stdio: 'inherit'});\nif (result.error) throw result.error; process.exit(result.status);\n`;
       fs.writeFileSync(path.join(bin, tool), wrapper, {mode: 0o755});
       env.PATH = `${bin}:${env.PATH}`;
     }
-    if (input.fail?.command === 'cd') {
+    if (input.fail?.command === 'cd' || input.fail?.command === 'printf') {
       const bashEnv = path.join(work, 'bash-env');
-      fs.writeFileSync(bashEnv, "cd() { printf '%s\\n' 'fixture command error: cd' >&2; return 19; }\n");
+      if (input.fail.command === 'cd') fs.writeFileSync(bashEnv, "cd() { printf '%s\\n' 'fixture command error: cd' >&2; return 19; }\n");
+      else {
+        const state = path.join(work, 'printf-counter');
+        fs.writeFileSync(bashEnv, `printf() { local count=0; if [[ -f '${state}' ]]; then read -r count < '${state}' || :; fi; count=$((count + 1)); builtin printf '%s\\n' "$count" > '${state}'; if [[ $count == ${input.fail.occurrence} ]]; then builtin printf '%s\\n' 'fixture command error: printf' >&2; return 19; fi; builtin printf "$@"; }\n`);
+      }
       env.BASH_ENV = bashEnv;
     }
     const prepare = () => {
       if (depotRoot !== '/root/llvmdepot') fs.rmSync(depotRoot, {recursive: true, force: true});
       fs.rmSync(path.join(work, 'counter'), {force: true});
+      fs.rmSync(path.join(work, 'printf-counter'), {force: true});
       fs.rmSync(path.join(work, 'argv.json'), {force: true});
       if (input.fixture === 'manifest-directory' || input.fixture === 'sums-directory') {
         fs.mkdirSync(path.join(tuple, input.fixture === 'manifest-directory' ? 'MANIFEST' : 'SHA256SUMS'), {recursive: true});
