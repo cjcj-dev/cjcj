@@ -30,13 +30,16 @@ test('script executor preserves each real subprocess exit and output argument', 
   try {
     await fs.writeFile(path.join(work, 'test_green.py'), 'print("CONTROL_GREEN")\n');
     await fs.writeFile(path.join(work, 'test_red.sh'), 'printf "%s\\n" "$1"\nexit 7\n');
+    await fs.writeFile(path.join(work, 'test_red.mjs'), 'console.log(argv._[0]); process.exitCode = 7;\n');
     const results = await runScripts(work, [
       {file: 'test_green.py', executor: 'python3', args: []},
       {file: 'test_red.sh', executor: 'bash', args: ['{output}']},
+      {file: 'test_red.mjs', executor: 'zx', args: ['{output}']},
     ], path.join(work, 'logs'));
-    assert.deepEqual(results.map(result => result.rc), [0, 7]);
+    assert.deepEqual(results.map(result => result.rc), [0, 7, 7]);
     assert.match(await fs.readFile(results[0].log, 'utf8'), /CONTROL_GREEN/);
     assert.equal((await fs.readFile(results[1].log, 'utf8')).trim(), path.join(work, 'logs/test_red.sh/output'));
+    assert.equal((await fs.readFile(results[2].log, 'utf8')).trim(), path.join(work, 'logs/test_red.mjs/output'));
   } finally {
     await fs.rm(work, {recursive: true, force: true});
   }

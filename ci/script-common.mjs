@@ -4,9 +4,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import assert from 'node:assert/strict';
+import {fileURLToPath} from 'node:url';
 export {fs, path, assert};
-export const cliArgs = globalThis.argv?._.map(String) ?? process.argv.slice(2);
-export const isMain = url => process.argv.slice(1).some(arg => path.resolve(arg) === new URL(url).pathname);
+// argv._ intentionally drops named options. These entries own their parsers,
+// so retain the raw tail after the ESM entry (node and zx have different prefixes).
+const entryIndex = process.argv.findIndex((arg, index) => index > 0 && arg.endsWith('.mjs'));
+export const cliArgs = process.argv.slice(entryIndex + 1);
+export const isMain = url => process.argv.slice(1).some(arg => path.resolve(arg) === fileURLToPath(url));
 export const repo = path.resolve(import.meta.dirname, '..');
 export const toCommandPath = target => target.replaceAll('\\', '/');
 export const zxCommand = file => ['npx', '--yes', 'zx@8', file];
@@ -29,10 +33,6 @@ export async function run(command, {cwd = repo, env = process.env, log, input, c
     throw new Error(`${command[0]} exited ${result.exitCode}${log ? ` (see ${log})` : ''}`);
   }
   return result;
-}
-export async function text(command, options = {}) {
-  const result = await run(command, {...options, log: undefined});
-  return result.stdout.trimEnd();
 }
 export async function capture(command, options = {}) {
   const result = await $({cwd: options.cwd ?? repo, env: options.env ?? process.env,

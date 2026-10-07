@@ -14,7 +14,7 @@ for (let i = 0; i < args.length; i++) {
     process.stderr.write(usage); process.exit(2);
   }
   if (!args[i + 1]) { console.error(`ABI_PAIR=INVALID_ARGUMENT missing_value=${arg}`); process.exit(2); }
-  values[key] = args[++i];
+  values[key] = key.endsWith('_repo') ? path.resolve(args[++i]) : args[++i];
 }
 for (const key of keys) if (!values[key]) { console.error(`ABI_PAIR=INVALID_ARGUMENT missing=${key}`); process.exit(2); }
 const commits = {};

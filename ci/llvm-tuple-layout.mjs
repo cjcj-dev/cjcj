@@ -1,12 +1,11 @@
 #!/usr/bin/env zx
 // Shared ten-payload publisher for GHA and the kkk2 depot.
-import {fs, path, repo, pin, capture, run, cliArgs, isMain} from './script-common.mjs';
-import {fileURLToPath} from 'node:url';
+import {fs, path, repo, pin, capture, cliArgs, isMain} from './script-common.mjs';
 import {gunzipSync} from 'node:zlib';
 export async function publishFixedTupleToDepot(depotRoot = process.env.CJCJ_LLVM_DEPOT_ROOT || '/root/llvmdepot', env = process.env) {
   const {LLVM_SHA, CANGJIE_COMPILER_SHA, CJCJ_FIXED_LLVM_DIR, REPO_ROOT = repo} = env;
   if (!LLVM_SHA || !CANGJIE_COMPILER_SHA) throw new Error('missing tuple identities');
-  const recipeSha = (await capture(['git', '-C', REPO_ROOT, 'rev-parse', 'HEAD'])).stdout.trim();
+  const recipeSha = (await capture(['git', '-C', path.resolve(REPO_ROOT), 'rev-parse', 'HEAD'])).stdout.trim();
   const depot = path.join(depotRoot, LLVM_SHA, CANGJIE_COMPILER_SHA);
   const tuple = path.join(depot, 'fixed-llc');
   for (const dir of [tuple, path.join(depot, 'bin'), path.join(depot, 'lib')]) fs.mkdirSync(dir, {recursive: true});

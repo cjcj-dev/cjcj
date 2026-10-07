@@ -24,7 +24,7 @@ let operation = 'fetch';
 if (args[0] === '--check-input') { operation = 'check'; args.shift(); }
 if (args[0] === '--verify-checkout') { operation = 'verify'; args.shift(); }
 if (args.length !== 1 || !args[0]) reject('expected one paired runtime destination');
-const dest = args[0];
+const dest = path.resolve(args[0]);
 async function verifyClean() {
   const top = await capture(['git', '-C', dest, 'rev-parse', '--show-toplevel'], {check: false});
   if (top.exitCode !== 0) reject('private runtime destination is not a Git worktree');
