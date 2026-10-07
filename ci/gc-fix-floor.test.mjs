@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import test, {after, before} from 'node:test';
+import test, {after, beforeEach} from 'node:test';
 import {
   gcFixWeakSourceShapePresent,
   GC_FIX_SOURCE,
@@ -27,7 +27,9 @@ function git(root, ...arguments_) {
   return result.stdout.trim();
 }
 
-before(async () => {
+beforeEach(async () => {
+  if (checkoutOwned) fs.rmSync(checkout, {recursive: true, force: true});
+  checkoutOwned = false;
   const {runtimeRef, sourceUrl} = await resolveRuntimeSource();
   const configuredCheckout = process.env.GC_FIX_RUNTIME_CHECKOUT;
   if (configuredCheckout) {
