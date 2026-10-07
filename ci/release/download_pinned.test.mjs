@@ -74,3 +74,68 @@ test('missing persistent pin refuses artifact fallback', () => fixture(({pin, sa
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /PERSISTENT_ARCHIVE_PIN_MISSING artifact=456/);
 }));
+
+// Run the real colour composition entry; substitute only transport and the
+// downstream runtime gate so its received inputs can be asserted independently.
+test('colour entry separates pinned language SDK from same-build SDK', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'colour-entry-'));
+  try {
+    const put = (rel, bytes, mode = 0o644) => {
+      const file = path.join(root, rel); fs.mkdirSync(path.dirname(file), {recursive: true});
+      fs.writeFileSync(file, bytes, {mode}); return file;
+    };
+    const target = path.join(root, 'target');
+    for (const name of ['libcangjie-runtime.so', 'libboundscheck.so']) {
+      put(`target/${name}`, `tested ${name}`);
+      put(`installed/runtime/lib/linux_x86_64_cjnative/${name}`, `tested ${name}`);
+      put(`build/runtime/lib/linux_x86_64_cjnative/${name}`, `tested ${name}`);
+      put(`payload/sdk/runtime/lib/linux_x86_64_cjnative/${name}`, `fixed ${name}`);
+    }
+    put('payload/sdk/bin/cjc', 'qualified compiler', 0o755);
+    put('payload/sdk/host/compiler/libcangjie-runtime.so', 'qualified host');
+    const archive = path.join(root, 'language.zip');
+    assert.equal(spawnSync('zip', ['-qr', archive, 'sdk'], {cwd: path.join(root, 'payload')}).status, 0);
+    const pin = put('pin.json', JSON.stringify({version: 1, artifacts: {1504: {
+      repository: 'cjcj-dev/cjcj', asset: 789, prerelease: true,
+      release_sha256: digest(fs.readFileSync(archive)),
+    }}}));
+    put('bin/gh', '#!/bin/sh\ncat "$TEST_ARCHIVE"\n', 0o755);
+    put('source/runtime/output/temp/config/runtime-build-config.txt',
+      `CONFIG_ID=config\nRUNTIME_SHA256=${digest(fs.readFileSync(path.join(target, 'libcangjie-runtime.so')))}\n`);
+    put('source/runtime/build/resolve_runtime_output.sh', '#!/bin/sh\nprintf "%s\\n" "$TEST_TARGET"\n', 0o755);
+    put('source/runtime/tests/gc_unit/language_toolchain_qualification.json', '{}');
+    put('source/runtime/tests/gc_unit/gate_gc_unit.sh', `#!/bin/bash
+set -eu
+[[ "$GC_UNIT_BUILD_SDK" == "$TEST_ROOT/build" ]]
+[[ "$GC_UNIT_LANGUAGE_SDK" != "$GC_UNIT_BUILD_SDK" ]]
+[[ "$(cat "$GC_UNIT_LANGUAGE_SDK/bin/cjc")" == 'qualified compiler' ]]
+[[ "$CJC" == "$GC_UNIT_LANGUAGE_SDK/bin/cjc" ]]
+[[ "$GC_UNIT_CJC_RUNTIME_LIB_DIR" == "$GC_UNIT_LANGUAGE_SDK/host/compiler" ]]
+[[ "$GC_UNIT_COLOUR_HOST_RUNTIME" == "$GC_UNIT_CJC_RUNTIME_LIB_DIR/libcangjie-runtime.so" ]]
+[[ "$GC_UNIT_LANGUAGE_QUALIFICATION" == "$TEST_ROOT/source/runtime/tests/gc_unit/language_toolchain_qualification.json" ]]
+[[ -f "$GC_UNIT_COLOUR_CHECKER" ]]
+[[ "$GCV2_RUNTIME_LIB_DIR" == "$TEST_TARGET" ]]
+[[ "$GC_UNIT_GATE_LANGUAGE_TESTS" == all ]]
+echo 'TARGET independent SDK inputs reached actual gate consumer'
+`, 0o755);
+    const run = suffix => spawnSync('bash', [new URL('./gate_colour_runtime.sh', import.meta.url).pathname,
+      '--build-sdk', path.join(root, 'source'), path.join(root, 'build'),
+      path.join(root, suffix), path.join(root, 'installed')], {encoding: 'utf8', env: {
+        ...process.env, PATH: `${root}/bin:${process.env.PATH}`, BOOTSTRAP_ARCHIVES_PIN: pin,
+        TEST_ARCHIVE: archive, TEST_TARGET: target, TEST_ROOT: root,
+      }});
+    const accepted = run('accepted');
+    assert.equal(accepted.status, 0, accepted.stderr);
+    assert.match(accepted.stdout, /TARGET independent SDK inputs reached actual gate consumer/);
+    console.log(accepted.stdout.trim());
+    put('build/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so', 'wrong build target');
+    const rejected = run('rejected');
+    assert.notEqual(rejected.status, 0);
+    assert.doesNotMatch(rejected.stdout, /TARGET independent SDK/);
+    console.log(`TARGET mismatched build runtime rejected rc=${rejected.status}`);
+    put('build/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so', 'tested libcangjie-runtime.so');
+    const restored = run('restored');
+    assert.equal(restored.status, 0, restored.stderr);
+    assert.match(restored.stdout, /TARGET independent SDK inputs reached actual gate consumer/);
+  } finally { fs.rmSync(root, {recursive: true, force: true}); }
+});
