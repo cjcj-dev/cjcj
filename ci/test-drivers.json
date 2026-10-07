@@ -315,6 +315,16 @@
     "reason": "manual driver: nothing under .github/workflows names it and it needs a process entry point inputs only; a process entry point, and no other file in tests names it"
   },
   {
+    "file": "tests/common_builtin_reuse/run.py",
+    "kind": "driver",
+    "reason": "manual driver: requires a product stage1 compiler and its paired SDK; runs common-part CJO/CHIR compiler inputs"
+  },
+  {
+    "file": "tests/const_desugared_call/run.py",
+    "kind": "driver",
+    "reason": "Manual directed compiler regression requires an isolated stage1 product ELF, its host SDK and an initially absent output directory; run.py --compiler PRODUCT --sdk SDK --out OUTPUT checks nonconstant Array diagnostics after repeated operator-call desugaring."
+  },
+  {
     "file": "tests/const_eval/instrument.py",
     "kind": "driver",
     "reason": "manual driver: nothing under .github/workflows names it and it needs a process entry point inputs only; a process entry point, and no other file in tests names it"
@@ -378,11 +388,6 @@
     "file": "tests/expression_families/verify.py",
     "kind": "driver",
     "reason": "manual driver: no workflow provisions a stage1 compiler built from this tree; a process entry point, and no other file in tests names it"
-  },
-  {
-    "file": "tests/common_builtin_reuse/run.py",
-    "kind": "driver",
-    "reason": "manual driver: requires a product stage1 compiler and its paired SDK; runs common-part CJO/CHIR compiler inputs"
   },
   {
     "file": "tests/ffi_common_specific/run.sh",
@@ -592,5 +597,10 @@
     "file": "tests/vtable_attributes/run.py",
     "kind": "driver",
     "reason": "manual driver: no workflow provisions a stage1 compiler built from this tree; a process entry point, and no other file in tests names it"
+  },
+  {
+    "file": "tests/jobserver_protocol/run.py",
+    "kind": "driver",
+    "reason": "Manual Linux FIFO protocol driver; no workflow provisions a product compiler with jobserver tracing. Invoke python3 tests/jobserver_protocol/run.py --compiler /path/to/cjcj-stage1 --source /path/to/package --out /path/to/private-evidence."
   }
 ]

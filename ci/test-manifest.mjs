@@ -36,6 +36,9 @@ export const DRIVERS = Object.freeze(JSON.parse(fs.readFileSync(new URL('./test-
 
 // Run by `node --test` in .github/workflows/ci.yml, via `test-manifest.mjs list`.
 export const GATING = Object.freeze([
+  'ci/abi-migration.test.mjs',
+  'ci/llvm-runtime-input.test.mjs',
+  'ci/release/download_pinned.test.mjs',
   'build/test/source-matrix.test.mjs',
   'build/test/target-registry.test.mjs',
   'ci/platform_matrix/summarize_scope.test.mjs',
@@ -43,6 +46,7 @@ export const GATING = Object.freeze([
   'ci/release/g8.test.mjs',
   'build/test/archive.test.mjs',
   'build/test/bootstrap-handoff.test.mjs',
+  'build/test/bootstrap-std-output.test.mjs',
   'build/test/cangjie-written-tools.test.mjs',
   'build/test/cangjie-test-preparation.test.mjs',
   'build/test/compose-install.test.mjs',
@@ -95,6 +99,7 @@ export const GATING = Object.freeze([
   'ci/patched-runtime-language-defer.test.mjs',
   'ci/official-runtime-isolation.test.mjs',
   'ci/bootstrap/prepare_cpp_headers.test.mjs',
+  'ci/bootstrap/stage1_host_runner.test.mjs',
   'ci/pin-sweep.test.mjs',
   'ci/release-pair-pin.test.mjs',
   'ci/release-gates.test.mjs',

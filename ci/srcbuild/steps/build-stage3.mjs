@@ -103,7 +103,7 @@ async function assertStdBarriers(coreLib) {
   const output = await $({stdio: 'pipe'})`objdump -drwC ${coreLib}`;
   // LLVM #96 removed GCPhase guards. The retired phase-shape write checker
   // cannot observe the new store-mask protocol. This checks only the read side;
-  // source layout compatibility is checked by check-llvm-runtime-abi.sh.
+  // source layout compatibility is checked by check-llvm-runtime-abi.mjs.
   const lines = output.stdout.split('\n');
   const symbols = [
     '_CNat6String7indexOfHRNatY0_E',
@@ -150,7 +150,7 @@ const stage2Producer = path.join(bootstrapWork, 'cjcj-stage2');
 const stage2Sha = await sha256(stage2Producer);
 const assemblyLockSha = await sha256(path.join(bootstrapWork, 'sdk-stage1', 'SDK.lock.json'));
 const backendIdentity = await bootstrapBackendIdentity();
-const {compiler: stage2Product, targetLd} = await prepareBootstrapHandoff({
+const {compiler: stage2Product, targetLd, stdOutput} = await prepareBootstrapHandoff({
   work: bootstrapWork, sdk, source: githubWorkspace, tuple,
 });
 const compilerEntrySha = await sha256(path.join(sdk, 'bin', 'cjc'));
@@ -183,6 +183,8 @@ console.log('STAGE3_RUNTIME_ASSERT_PASS colour=1');
 const bootstrapCore = path.join(sdk, 'lib', tuple, 'libcangjie-std-core.a');
 if (!await exists(bootstrapCore)) throw new Error(`bootstrap std core missing: ${bootstrapCore}`);
 const bootstrapCoreSha = await sha256(bootstrapCore);
+if (bootstrapCoreSha !== stdOutput.coreSha256) throw new Error('STAGE3_BOOTSTRAP_STD_CORE_MISMATCH');
+console.log(`STAGE3_BOOTSTRAP_STD_CONSUMED prefix=${stdOutput.prefix} core=${bootstrapCoreSha}`);
 
 console.log('[stage3] rebuild final std with stage2');
 if (dryRun) {

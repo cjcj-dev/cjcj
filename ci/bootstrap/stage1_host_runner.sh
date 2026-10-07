@@ -91,7 +91,18 @@ check_sha "$hrt/libcangjie-runtime.so" "$decl_runtime"
 check_sha "$hrt/libboundscheck.so" "$decl_bounds"
 check_sha "$host/runtime/lib/$platform/libcangjie-runtime.so" "$decl_runtime"
 check_sha "$host/runtime/lib/$platform/libboundscheck.so" "$decl_bounds"
-for rel in bin/cjc tools/bin/cjpm third_party/llvm/bin/opt third_party/llvm/bin/llc; do
+cjc_alias=false
+if [ -L "$target/bin/cjc" ]; then
+  [ "$(readlink "$target/bin/cjc")" = cjcj-stage1 ] || fail 'unsupported compiler alias: bin/cjc'
+  if [ ! -f "$target/bin/cjcj-stage1" ] || [ ! -x "$target/bin/cjcj-stage1" ] || [ -L "$target/bin/cjcj-stage1" ]; then
+    fail 'regular executable required: bin/cjcj-stage1'
+  fi
+  check_sha "$target/bin/cjcj-stage1" "$compiler_sha"
+  cjc_alias=true
+elif [ ! -f "$target/bin/cjc" ] || [ ! -x "$target/bin/cjc" ]; then
+  fail 'regular executable required: bin/cjc'
+fi
+for rel in tools/bin/cjpm third_party/llvm/bin/opt third_party/llvm/bin/llc; do
   if [ ! -x "$target/$rel" ] || [ -L "$target/$rel" ]; then
     fail "regular executable required: $rel"
   fi
@@ -102,7 +113,14 @@ backend_runtime="${9:-$target/runtime/lib/$platform}"
 if [ ! -f "$backend_runtime/libcangjie-runtime.so" ] || [ ! -f "$backend_runtime/libboundscheck.so" ]; then
   fail "missing backend runtime: $backend_runtime"
 fi
-target_ld="$backend_runtime:$target/lib/$platform:$target/third_party/llvm/lib:$target/tools/lib:/usr/lib/$multiarch"
+# build_tuple publishes static LLVM tools: CRT is link input, never a
+# native tool loader input. Refuse a shared LLVM backend rather than mix domains.
+for name in opt llc ld.lld; do
+  [ -f "$target/third_party/llvm/bin/$name" ] || fail "missing backend: $name"
+  dynamic=$(readelf -d "$target/third_party/llvm/bin/$name") || fail "not an ELF backend: $name"
+  [[ "$dynamic" != *libLLVM* ]] || fail "backend must use static LLVM: $name"
+done
+target_ld="$target/third_party/llvm/lib"
 state="$target/.stage1-host"
 [ ! -e "$state" ] || fail 'runner already installed; reassemble the workspace SDK'
 mkdir "$state"
@@ -123,9 +141,13 @@ write_runner() {
   } > "$entry"
   chmod +x "$entry"
 }
+# Unlink the admitted alias before redirecting: never overwrite its ELF referent.
+if [ "$cjc_alias" = true ]; then
+  rm "$target/bin/cjc"
+fi
 write_runner "$target/bin/cjc" "$target/bin/cjcj-stage1" "$compiler_ld"
 write_runner "$target/tools/bin/cjpm" "$target/tools/bin/cjpm-stage1" "$host_ld"
-for name in opt llc; do
+for name in opt llc ld.lld; do
   cp -p "$target/third_party/llvm/bin/$name" "$target/third_party/llvm/bin/$name-stage1"
   write_runner "$target/third_party/llvm/bin/$name" "$target/third_party/llvm/bin/$name-stage1" "$target_ld"
 done
@@ -136,6 +158,12 @@ for name in llvm-objcopy llvm-ar; do
     cp -p "$target/third_party/llvm/bin/$name" "$target/third_party/llvm/bin/$name-stage1"
     write_runner "$target/third_party/llvm/bin/$name" "$target/third_party/llvm/bin/$name-stage1" "$host_ld"
   fi
+done
+# GNU tools resolve through SDK/bin in ToolChain.cj and must not inherit
+# compiler LLVM/HRT. Preserve the actual system executables, then bind an empty LD.
+for name in ar ld; do
+  cp -L -p "/usr/bin/$name" "$state/$name"
+  write_runner "$target/bin/$name" "$state/$name" ''
 done
 sha256sum "$compiler" "$host/runtime/lib/$platform/"*.so \
   "$host/third_party/llvm/lib/libLLVM-15.so" "$run_sdk/third_party/llvm/lib/libLLVM-15.so" "$host/tools/bin/cjpm" \

@@ -3,6 +3,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import {verifyColourTuple} from '../../release/bootstrap_tuple.mjs';
 import {parseLlvmToolsManifest} from '../../llvm-tools-manifest.mjs';
+import {readBootstrapStdOutput} from '../../bootstrap/std-output.mjs';
 
 const sha256 = async file => crypto.createHash('sha256').update(await fs.readFile(file)).digest('hex');
 
@@ -37,14 +38,15 @@ export async function prepareBootstrapHandoff({work, sdk, source, tuple}) {
   source = path.resolve(source);
   const inputSdk = path.join(work, 'sdk-stage1');
   const compiler = path.join(work, 'cjcj-stage2');
-  const std = path.join(work, 'stdlib-stage2');
+  const stdOutput = await readBootstrapStdOutput({work, tuple});
+  const std = stdOutput.prefix;
   const shim = path.join(work, 'cjcj-src-stage1', 'runtime_shim');
   const objects = ['cjselfhost_llvmshim.o', 'cjc_runtime_config.o'];
   // Check every producer before replacing the consumer tree.
   for (const file of [compiler, path.join(std, 'lib', tuple, 'libcangjie-std-core.a'),
     path.join(inputSdk, '.stage1-host', 'binding.txt'),
     path.join(inputSdk, 'tools', 'bin', 'cjpm-stage1'),
-    ...['opt', 'llc'].map(name => path.join(inputSdk, 'third_party', 'llvm', 'bin', `${name}-stage1`)),
+    ...['opt', 'llc', 'ld.lld'].map(name => path.join(inputSdk, 'third_party', 'llvm', 'bin', `${name}-stage1`)),
     ...objects.map(name => path.join(shim, name))]) {
     if (!(await fs.stat(file)).isFile()) throw new Error(`bootstrap handoff input is not a file: ${file}`);
   }
@@ -75,7 +77,7 @@ export async function prepareBootstrapHandoff({work, sdk, source, tuple}) {
   // inherit its environment; only their loader bindings differ here.
   await runner(path.join(sdk, 'bin', 'cjc'), path.join(sdk, 'bin', 'cjcj-stage2'), targetLd);
   await runner(path.join(sdk, 'tools', 'bin', 'cjpm'), path.join(sdk, 'tools', 'bin', 'cjpm-stage1'), binding.host_ld);
-  for (const name of ['opt', 'llc']) {
+  for (const name of ['opt', 'llc', 'ld.lld']) {
     await runner(path.join(sdk, 'third_party', 'llvm', 'bin', name),
       path.join(sdk, 'third_party', 'llvm', 'bin', `${name}-stage1`), targetLd);
   }
@@ -87,7 +89,7 @@ export async function prepareBootstrapHandoff({work, sdk, source, tuple}) {
     compilerSha256: await sha256(compiler),
     entrySha256: await sha256(path.join(sdk, 'bin', 'cjc')),
   }, null, 2)}\n`);
-  return {compiler, targetLd};
+  return {compiler, targetLd, stdOutput};
 }
 
 // Expectations come from the authenticated tuple and process-library inputs,
@@ -113,7 +115,7 @@ export async function bootstrapBackendIdentity(env = process.env) {
   return {llvmSha, files: {
     'bin/opt-stage1': values.get('OPT_SHA256'),
     'bin/llc-stage1': values.get('LLC_SHA256'),
-    [`bin/${values.get('LLD_TOOL')}`]: values.get('LLD_SHA256'),
+    [`bin/${values.get('LLD_TOOL')}-stage1`]: values.get('LLD_SHA256'),
     [`lib/${path.basename(library)}`]: librarySha,
   }};
 }
@@ -138,7 +140,7 @@ export async function assertBootstrapBackends({sdk, targetLd, identity}) {
   if (resolved.find(Boolean) !== await fs.realpath(libraryPath)) {
     throw new Error('BOOTSTRAP_BACKEND_LOADER_MISMATCH');
   }
-  for (const name of ['opt', 'llc']) {
+  for (const name of ['opt', 'llc', 'ld.lld']) {
     const entry = path.join(root, 'bin', name);
     if (await fs.readFile(entry, 'utf8') !== runnerText(sdk, `${entry}-stage1`, targetLd)) {
       throw new Error(`BOOTSTRAP_BACKEND_RUNNER_MISMATCH: ${name}`);

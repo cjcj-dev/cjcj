@@ -909,6 +909,8 @@ load_bootstrap_pins() {
             rm -f "$prepared"
             return 1
         }
+    # Generated shell exports from the validated prepare_bootstrap_inputs.mjs result.
+    # shellcheck source=/dev/null
     source "$prepared"
     rm -f "$prepared"
     BOOTSTRAP_HOST_SDK=$CJCJ_BOOTSTRAP_BASE

@@ -1,3 +1,4 @@
+import {pinnedRemote} from '../../ci/fixtures/git/pinned-remote.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -61,7 +62,7 @@ function useFormalRuntime(f) {
   fs.rmSync(paired, {recursive: true});
   ok(['git', 'init', '-q', paired]);
   ok(['git', '-C', paired, 'remote', 'add', 'origin', pin.RUNTIME_SRC_URL]);
-  const source = process.env.GC_FIX_RUNTIME_CHECKOUT;
+  const source = process.env.GC_FIX_RUNTIME_CHECKOUT || pinnedRemote(f.dir, 'runtime', pin.RUNTIME_REF);
   const fetch = source ? ['fetch', '--depth', '1', source, pin.RUNTIME_REF]
     : sourceFetchArguments(pin.RUNTIME_SRC_URL, pin.RUNTIME_REF);
   ok(['git', '-C', paired, ...fetch]);
@@ -321,7 +322,8 @@ test(`actual stage3 entry verifies promoted SDK before stage2: ${formal ? 'forma
   const work = path.join(workspace, 'bootstrap-work');
   fs.mkdirSync(work, {recursive: true});
   const input = path.join(work, 'sdk-stage1');
-  fs.cpSync(a.target, input, {recursive: true, dereference: true});
+  // Preserve the installed compiler aliases as same-directory relative links.
+  fs.cpSync(a.target, input, {recursive: true, verbatimSymlinks: true});
   const write = (rel, text) => {
     const file = path.join(work, rel); fs.mkdirSync(path.dirname(file), {recursive: true});
     fs.writeFileSync(file, text);
@@ -353,6 +355,13 @@ test(`actual stage3 entry verifies promoted SDK before stage2: ${formal ? 'forma
   fs.mkdirSync(path.join(work, 'stdlib-stage2/lib', tuple), {recursive: true});
   fs.copyFileSync(path.join(input, 'lib', tuple, 'libcangjie-std-core.a'),
     path.join(work, 'stdlib-stage2/lib', tuple, 'libcangjie-std-core.a'));
+  // Publish through the production entry so handoff authenticates the actual
+  // stage1 compiler, stage2 compiler and installed std prefix.
+  fs.copyFileSync(a.compiler, path.join(work, 'cjcj-stage1'));
+  write('stdlib-stage2/std-producer.json', JSON.stringify({compiler_sha256: hash(a.compiler)}) + '\n');
+  const publishStd = () => ok(['npx', '--yes', 'zx@8', path.join(repo, 'ci/bootstrap/publish-std-output.mjs'),
+    work, path.join(work, 'stdlib-stage2'), path.join(work, 'cjcj-stage1'), tuple], f.env);
+  publishStd();
   fs.cpSync(f.runtimeSource, path.join(workspace, 'cangjie_runtime'), {recursive: true});
   const env = {...Object.fromEntries(Object.entries(f.env).filter(([key]) => !key.startsWith('COLOUR_RT_'))), ...a.inputs, CANGJIE_WORKSPACE: workspace, GITHUB_WORKSPACE: path.join(workspace, 'source'),
     CJCJ_BOOTSTRAP_WORK: path.join(workspace, 'bootstrap-work'), CJCJ_STAGE3_STDLIB_BUILD_TYPE: 'release',
@@ -381,21 +390,24 @@ test(`actual stage3 entry verifies promoted SDK before stage2: ${formal ? 'forma
       const lock = JSON.parse(bytes); lock.components.runtime.commit = 'e'.repeat(40);
       fs.writeFileSync(file, JSON.stringify(lock));
     } else fs.appendFileSync(file, 'changed');
+    publishStd();
     const wrong = execute(command, env);
     assert.notEqual(wrong.status, 0); assert.match(wrong.output, expected, wrong.output);
     assert.doesNotMatch(wrong.output, /STAGE2_EXECUTION_BOUNDARY|BOOTSTRAP_RUNTIME_CONSUMER_VERIFIED/);
     console.log(`STAGE3_REPLACEMENT_TARGET_ASSERT identity=${formal ? 'formal' : 'candidate'} wrong=${name} rejected-before-stage2=1`);
     fs.rmSync(file);
+    publishStd();
   }
   const wrongName = execute(command, {...env, CJCJ_BOOTSTRAP_COLOUR_LLVM_SO: path.join(path.dirname(dylib), 'wrong-library.so')});
   assert.notEqual(wrongName.status, 0); assert.match(wrongName.output, /BOOTSTRAP_BACKEND_LIBRARY_NAME_MISMATCH/, wrongName.output);
   assert.doesNotMatch(wrongName.output, /STAGE2_EXECUTION_BOUNDARY/);
   console.log(`STAGE3_LIBRARY_NAME_TARGET_ASSERT identity=${formal ? 'formal' : 'candidate'}`);
-  for (const rel of ['bin/opt-stage1', 'bin/llc-stage1', 'bin/ld.lld', 'lib/libLLVM-15.so']) {
+  for (const rel of ['bin/opt-stage1', 'bin/llc-stage1', 'bin/ld.lld-stage1', 'lib/libLLVM-15.so']) {
     const file = path.join(input, 'third_party/llvm', rel), bytes = fs.readFileSync(file);
     fs.appendFileSync(file, 'changed');
     const wrong = execute(command, env);
-    assert.notEqual(wrong.status, 0); assert.match(wrong.output, /BOOTSTRAP_BACKEND_HASH_MISMATCH/, wrong.output);
+    assert.notEqual(wrong.status, 0);
+    assert.ok(wrong.output.includes(`BOOTSTRAP_BACKEND_HASH_MISMATCH: ${rel}`), wrong.output);
     assert.doesNotMatch(wrong.output, /STAGE2_EXECUTION_BOUNDARY/);
     fs.writeFileSync(file, bytes);
     console.log(`STAGE3_BACKEND_TARGET_ASSERT identity=${formal ? 'formal' : 'candidate'} wrong=${rel}`);
@@ -451,7 +463,7 @@ test(`actual stage3 entry verifies promoted SDK before stage2: ${formal ? 'forma
   const protectedFiles = [
     `runtime/lib/${tuple}/libcangjie-runtime.so`, `runtime/lib/${tuple}/libboundscheck.so`,
     `lib/${tuple}/libcangjie-runtime.a`, 'SDK.lock.json',
-    ...['opt-stage1', 'llc-stage1', 'ld.lld', 'opt', 'llc'].map(name => `third_party/llvm/bin/${name}`),
+    ...['opt-stage1', 'llc-stage1', 'ld.lld-stage1', 'ld.lld', 'opt', 'llc'].map(name => `third_party/llvm/bin/${name}`),
     'third_party/llvm/lib/libLLVM-15.so', 'bin/cjcj-stage2', 'bin/cjc', 'bootstrap-compiler.json',
   ];
   const beforeAst = Object.fromEntries(protectedFiles.map(rel => [rel, hash(path.join(sdk, rel))]));
@@ -471,7 +483,11 @@ test(`actual stage3 entry verifies promoted SDK before stage2: ${formal ? 'forma
     ['backend', 'third_party/llvm/bin/opt-stage1', /BOOTSTRAP_BACKEND_HASH_MISMATCH/],
     ['library', 'third_party/llvm/lib/libLLVM-15.so', /BOOTSTRAP_BACKEND_HASH_MISMATCH/],
     ['loader', `lib/${tuple}/libLLVM-15.so`, /BOOTSTRAP_BACKEND_LOADER_MISMATCH/],
-    ['backend-runner', 'third_party/llvm/bin/opt', /BOOTSTRAP_BACKEND_RUNNER_MISMATCH/],
+    // Handoff rewrites input runners: mutate the final overlay to test consumer bindings.
+    ['backend-runner', 'third_party/llvm/bin/opt', /BOOTSTRAP_BACKEND_RUNNER_MISMATCH: opt/],
+    ['llc-runner', 'third_party/llvm/bin/llc', /BOOTSTRAP_BACKEND_RUNNER_MISMATCH: llc/],
+    ['lld-backend', 'third_party/llvm/bin/ld.lld-stage1', /BOOTSTRAP_BACKEND_HASH_MISMATCH: bin\/ld\.lld-stage1/],
+    ['lld-runner', 'third_party/llvm/bin/ld.lld', /BOOTSTRAP_BACKEND_RUNNER_MISMATCH: ld\.lld/],
     ['stage2', 'bin/cjcj-stage2', /bootstrap compiler identity mismatch/],
     ['entry', 'bin/cjc', /bootstrap compiler identity mismatch/],
     ['record', 'bootstrap-compiler.json', /bootstrap compiler independent producer mismatch/],
