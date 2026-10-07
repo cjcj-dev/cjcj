@@ -897,15 +897,7 @@ supplied_stage1_validate() {
   if [ "$RESUME_COLOUR_GATE" -eq 1 ]; then
     [ -n "$COLOUR_GATE_SOURCE" ] || die 'resume requires the complete colour gate'
     [ -f "$RESUME_STD_SUMS" ] || die 'resume requires captured same-source std hashes'
-    [ "$(cat "$WORK/stdlib-stage1/STDLIB_SOURCE_SHA")" = "$RUNTIME_SHA" ] || die 'resume std source mismatch'
-    (cd "$WORK/stdlib-stage1" && sha256sum -c "$RESUME_STD_SUMS") || die 'resume std hashes differ'
-    python3 - "$WORK/sdk-stage1/SDK.lock.json" "$STAGE1_SHA256" "$RUNTIME_SHA" <<'PYLOCK'
-import json, sys
-lock = json.load(open(sys.argv[1]))
-assert lock['components']['cjc']['sha256'] == sys.argv[2]
-assert lock['components']['runtime']['commit'] == sys.argv[3]
-PYLOCK
-    [ "$?" -eq 0 ] || die 'resume SDK input identity mismatch'
+    npx --yes zx@8 "$SRC/ci/bootstrap/verify-resume-std.mjs" "$WORK" "$RESUME_STD_SUMS" "$COLOUR_GATE_SOURCE" "$RUNTIME_SHA" "$STAGE1_SHA256" || die 'resume retained input identity mismatch'
     assert_expected_sha resumed-stage1 "$WORK/cjcj-stage1" "$STAGE1_SHA256"
   else
     [ ! -e "$WORK" ] || die 'supplied-stage1 refuses an existing work directory'
