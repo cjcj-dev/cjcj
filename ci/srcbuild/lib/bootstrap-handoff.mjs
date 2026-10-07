@@ -3,6 +3,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import {verifyColourTuple} from '../../release/bootstrap_tuple.mjs';
 import {parseLlvmToolsManifest} from '../../llvm-tools-manifest.mjs';
+import {readBootstrapStdOutput} from '../../bootstrap/std-output.mjs';
 
 const sha256 = async file => crypto.createHash('sha256').update(await fs.readFile(file)).digest('hex');
 
@@ -37,7 +38,8 @@ export async function prepareBootstrapHandoff({work, sdk, source, tuple}) {
   source = path.resolve(source);
   const inputSdk = path.join(work, 'sdk-stage1');
   const compiler = path.join(work, 'cjcj-stage2');
-  const std = path.join(work, 'stdlib-stage2');
+  const stdOutput = await readBootstrapStdOutput({work, tuple});
+  const std = stdOutput.prefix;
   const shim = path.join(work, 'cjcj-src-stage1', 'runtime_shim');
   const objects = ['cjselfhost_llvmshim.o', 'cjc_runtime_config.o'];
   // Check every producer before replacing the consumer tree.
@@ -87,7 +89,7 @@ export async function prepareBootstrapHandoff({work, sdk, source, tuple}) {
     compilerSha256: await sha256(compiler),
     entrySha256: await sha256(path.join(sdk, 'bin', 'cjc')),
   }, null, 2)}\n`);
-  return {compiler, targetLd};
+  return {compiler, targetLd, stdOutput};
 }
 
 // Expectations come from the authenticated tuple and process-library inputs,
