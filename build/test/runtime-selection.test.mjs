@@ -321,7 +321,8 @@ test(`actual stage3 entry verifies promoted SDK before stage2: ${formal ? 'forma
   const work = path.join(workspace, 'bootstrap-work');
   fs.mkdirSync(work, {recursive: true});
   const input = path.join(work, 'sdk-stage1');
-  fs.cpSync(a.target, input, {recursive: true, dereference: true});
+  // Preserve the installed compiler aliases as same-directory relative links.
+  fs.cpSync(a.target, input, {recursive: true, verbatimSymlinks: true});
   const write = (rel, text) => {
     const file = path.join(work, rel); fs.mkdirSync(path.dirname(file), {recursive: true});
     fs.writeFileSync(file, text);
