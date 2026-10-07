@@ -1,4 +1,4 @@
-Run `ci/test-codegen-runtime-layout.mjs COMPILER HOST_SDK PAIRED_LIBLLVM LLVM_REPO RUNTIME_REPO OUTPUT`.
+Run `npx --yes zx@8 ci/test-codegen-runtime-layout.mjs COMPILER HOST_SDK PAIRED_LIBLLVM LLVM_REPO RUNTIME_REPO OUTPUT`.
 The compiler must be the real candidate product; the runner copies it into a private
 `cjc-frontend` entry. Bootstrap stage0 runs this on Linux x64, including seed cache hits. The two source repositories
 must contain the commits named by the pins. The host SDK supplies its matching runtime

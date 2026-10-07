@@ -2,7 +2,8 @@
 // Real frontend -> bitcode -> independent LLVM DataLayout/IR assertions.
 import {fs, path, repo, pin, required, run, capture, hash, equalFiles, cliArgs, isMain} from './script-common.mjs';
 import {resolveRuntimeSource} from './runtime-pin.mjs';
-import os from 'node:os';
+// Preserve the old entry's core limit for compiler and LLVM-reader children.
+$.prefix = 'ulimit -c 0; ' + $.prefix;
 let compiler = required(0, 'candidate compiler');
 const sdk = required(1, 'host SDK'), llvmLibrary = required(2, 'paired libLLVM');
 const llvmRepo = required(3, 'paired LLVM source'), runtimeRepo = required(4, 'paired runtime source');
