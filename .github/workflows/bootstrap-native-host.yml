@@ -1,0 +1,36 @@
+name: Bootstrap native host route
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  route:
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - runner: macos-15
+            tuple: darwin_aarch64_cjnative
+          - runner: macos-15-intel
+            tuple: darwin_x86_64_cjnative
+          - runner: ubuntu-24.04-arm
+            tuple: linux_aarch64_cjnative
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Execute the four real host-admission arms
+        run: |
+          ulimit -c 0
+          npx --yes zx@8 ci/bootstrap/test_host_route.mjs "$RUNNER_TEMP/host-route" 227b34ad4c1b78b3eebfe0605570d6d8b398e579 '${{ matrix.tuple }}'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: host-route-${{ matrix.tuple }}
+          path: ${{ runner.temp }}/host-route
+          if-no-files-found: error

@@ -53,6 +53,7 @@ host_tuple_init() {
   case "$os/$arch" in
     Linux/x86_64) HOST_TUPLE=linux_x86_64_cjnative; HOST_MULTIARCH=x86_64-linux-gnu;;
     Linux/aarch64) HOST_TUPLE=linux_aarch64_cjnative; HOST_MULTIARCH=aarch64-linux-gnu;;
+    Darwin/arm64|Darwin/x86_64) HOST_TUPLE=$(node "$(dirname "${BASH_SOURCE[0]}")/host_tools.mjs" tuple) || die 'native host tuple selection failed'; HOST_MULTIARCH=;;
     *) die "host $os/$arch is not supported by bootstrap.sh (Linux x86_64/aarch64 only: ELF .so, GNU find/install/nm, lib/<tuple> layout)";;
   esac
   echo "HOST-TUPLE $HOST_TUPLE multiarch=$HOST_MULTIARCH home=$BUILD_HOME"

@@ -1,7 +1,6 @@
 #!/usr/bin/env zx
 // Native bootstrap conventions: host_llvm.mjs:9 and build_tuple.sh:23.
 // Keep the machine identity separate from the selected compilation target.
-import {$} from 'zx';
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -88,8 +87,9 @@ export async function stdSystemPath() {
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  if (process.argv.length !== 3 || process.argv[2] !== 'identity') {
-    throw new Error('usage: host_tools.mjs identity');
+  if (process.argv.length !== 3 || !['identity', 'tuple'].includes(process.argv[2])) {
+    throw new Error('usage: host_tools.mjs identity|tuple');
   }
-  console.log(JSON.stringify(nativeHost()));
+  const host = nativeHost();
+  console.log(process.argv[2] === 'tuple' ? host.tuple : JSON.stringify(host));
 }
