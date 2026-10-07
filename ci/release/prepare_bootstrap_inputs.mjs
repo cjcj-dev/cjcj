@@ -10,8 +10,8 @@ import {prepareCppHeaders, verifyCppHeaders} from '../bootstrap/prepare_cpp_head
 import {hostIdentity, prepareHostLlvm} from './host_llvm.mjs';
 import {bootstrapArtifact} from './bootstrap_artifact.mjs';
 import {prepareHostSdk} from './bootstrap_host_sdk.mjs';
-import {nativeHost} from '../bootstrap/host_tools.mjs';
 import {getTarget} from '../../build/lib/targets.mjs';
+import {prepareDarwinStdInput} from './prepare_darwin_std_input.mjs';
 
 function sha256File(file) {
   return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
@@ -49,11 +49,8 @@ function findFile(root, predicate) {
 
 const target = process.env.CJCJ_SRCBUILD_TARGET
   || `${process.platform}-${process.platform === 'linux' && process.arch === 'arm64' ? 'aarch64' : process.arch}`;
-const native = nativeHost();
 const {spec: sourceSpec} = getTarget(target);
-if (sourceSpec.llvmPlatform !== native.platform) {
-  throw new Error(`BOOTSTRAP_HOST_TARGET_MISMATCH: source=${target} host=${native.platform}`);
-}
+if (!['linux', 'darwin'].includes(sourceSpec.os)) throw new Error(`BOOTSTRAP_TARGET_UNSUPPORTED: ${target}`);
 const platform = sourceSpec.llvmPlatform;
 const runtimeSelection = await resolveRuntimeSource();
 process.env.RUNTIME_REF = runtimeSelection.runtimeRef;
@@ -105,6 +102,10 @@ const colourTuple = tuple.directory;
 
 process.env.CJCJ_BOOTSTRAP_COLOUR_RT = bootstrapArtifact(process.env.CJCJ_BOOTSTRAP_COLOUR_RT,
   'cjcj-dev/cjcj', process.env.COLOUR_RT_ARTIFACT_ID, inputsWork, 'COLOUR_RT');
+if (sourceSpec.os === 'darwin') {
+  process.env.CJCJ_BOOTSTRAP_COLOUR_RT = await prepareDarwinStdInput(
+    process.env.CJCJ_BOOTSTRAP_COLOUR_RT, platform, inputsWork);
+}
 const colourRt = verifyRuntime();
 const runtimePinFile = path.resolve(inputsWork, 'runtime-selection.env');
 await writeRuntimeSelection(runtimePinFile);
@@ -131,14 +132,14 @@ if (!/^[0-9a-f]{40}$/.test(cjcjSha)) throw new Error('cjcj sha missing (GITHUB_S
 // never falls back after a missing file or identity mismatch.
 const colourInputs = {};
 // Select the library for the source cell, as for the independent host LLVM.
-const darwin = native.os === 'darwin';
+const darwin = sourceSpec.os === 'darwin';
 if (process.platform === 'linux' || darwin || process.env.CJCJ_BOOTSTRAP_DYLIB_ARTIFACT
     || process.env.CJCJ_BOOTSTRAP_COLOUR_DYLIB) {
   if (process.env.LLVM_DYLIB_SOURCE_SHA !== llvmSha) throw new Error('LLVM_DYLIB_SOURCE_MISMATCH');
   const dylibRoot = bootstrapArtifact(process.env.CJCJ_BOOTSTRAP_DYLIB_ARTIFACT
     || process.env.CJCJ_BOOTSTRAP_COLOUR_DYLIB, 'cjcj-dev/cjcj',
   process.env.LLVM_DYLIB_ARTIFACT_ID, inputsWork, 'LLVM_DYLIB');
-  const colourLlvm = path.join(dylibRoot, native.library);
+  const colourLlvm = path.join(dylibRoot, sourceSpec.hostLlvmLibrary);
   const dylibPin = process.env.LLVM_DYLIB_SHA256 || '';
   if (!/^[0-9a-f]{64}$/.test(dylibPin)) throw new Error('LLVM_DYLIB_PIN_MISSING');
   if (!fs.existsSync(colourLlvm)) throw new Error(`LLVM_DYLIB_MISSING: ${colourLlvm}`);

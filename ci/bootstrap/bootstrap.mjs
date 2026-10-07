@@ -343,7 +343,7 @@ export class Bootstrap {
     const common=`${root}/common/${this.native.os}_relwithdebinfo_${this.native.arch}`,native=`${common}/lib/${this.HOST_TUPLE}`,dynamic=`${common}/runtime/lib/${this.HOST_TUPLE}`;
     this.remove(root); this.mkdir(native); this.mkdir(dynamic);
     // Darwin toolchain has no GNU linker scripts. Preserve Linux's four inputs.
-    const files=this.native.os === 'darwin' ? ['libcangjie-aio.a','cjstart.o'] : ['libcangjie-aio.a','cjstart.o','cjld.shared.lds','discard_eh_frame.lds'];
+    const files=this.native.os === 'darwin' ? ['libcangjie-aio.a','cjstart.o','section.o'] : ['libcangjie-aio.a','cjstart.o','cjld.shared.lds','discard_eh_frame.lds'];
     for (const name of files) { this.install(`${sdk}/lib/${this.HOST_TUPLE}/${name}`,native+'/'+name,0o644); if (!this.DRY) this.record('std-bootstrap-native',native+'/'+name); }
     for (const name of [this.native.runtimeLibrary,`libboundscheck${this.native.librarySuffix}`]) { this.install(target+'/'+name,dynamic+'/'+name,0o644); if (!this.DRY) this.record('std-bootstrap-target',dynamic+'/'+name); }
     await this.stdlibBuild('stdlib-stage1',sdk,this.HRT,std,'',root);

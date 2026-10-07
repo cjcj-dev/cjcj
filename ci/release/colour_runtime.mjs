@@ -1,7 +1,10 @@
+#!/usr/bin/env zx
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import {fileURLToPath} from 'node:url';
+import {darwinRuntime} from './darwin_runtime.mjs';
+import {getTarget} from '../../build/lib/targets.mjs';
 
 export const runtimeFiles = [
   'runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so',
@@ -54,6 +57,10 @@ export function prepareRuntime(source, dest, env = process.env) {
   console.log(`COLOUR_RT_MANIFEST_SHA256=${sha}`);
 }
 export function verifyRuntime(env = process.env) {
+  const target = env.CJCJ_SRCBUILD_TARGET || `${process.platform}-${process.platform === 'linux' && process.arch === 'arm64' ? 'aarch64' : process.arch}`;
+  const {spec} = getTarget(target);
+  if (spec.os === 'darwin') return darwinRuntime('source', env.CJCJ_BOOTSTRAP_COLOUR_RT, spec.llvmPlatform);
+
   const root = env.CJCJ_BOOTSTRAP_COLOUR_RT;
   if (!root) throw new Error('COLOUR_RT_INPUT_MISSING');
   if (!/^\d+$/.test(env.COLOUR_RT_RUN_ID || '') || !/^\d+$/.test(env.COLOUR_RT_ARTIFACT_ID || '')
