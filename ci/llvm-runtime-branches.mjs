@@ -75,7 +75,8 @@ export function exportBranches(source) {
         inputs = ['tracked-dirty', 'untracked-dirty'].map(fixture => input(privateEnv, [check, '$DEST'], fixture));
       } else if (/rev-parse HEAD/.test(expression)) {
         const verify = operations.find(item => item[2] === 'verify')[1].trim();
-        inputs = [input({...privateEnv, [shaGuard[1]]: 'b'.repeat(length)}, [verify, '$DEST'], 'clean')];
+        inputs = [input({...privateEnv, [shaGuard[1]]: 'b'.repeat(length)}, [verify, '$DEST'], 'clean'),
+          input(privateEnv, [verify, '$DEST'], 'unborn')];
       } else throw new Error(`unsupported predicate ${expression}`);
     } else if (/rev-parse --show-toplevel[^\n]*\)\s*\\?\s*\|\|\s*$/.test(before)) {
       inputs = [input(privateEnv, [check, '$DEST'], 'nongit')];
@@ -101,6 +102,33 @@ export function exportBranches(source) {
       inputs.push(input({}, ['$DEST']), input(privateEnv, ['$DEST']));
     } else inputs = [input({}, ['$DEST']), input(privateEnv, ['$DEST'])];
     add('control', match.index, expression, inputs);
+  }
+  // set -e also exposes errors without an explicit reject. Discover those
+  // commands from source, including the final test's command substitution.
+  for (const match of source.matchAll(/^(git init .*|srcbuild_git_fetch .*|git -C .* checkout .*|test .*\$\(git .*rev-parse HEAD\).*|source .*|\s+source .*)$/gm)) {
+    const command = match[0].trim();
+    let inputs;
+    if (/^test /.test(command)) {
+      if (!/^test "\$\(git -C "\$dest" rev-parse HEAD\)" = "\$runtime_sha"$/.test(command)) {
+        throw new Error(`unsupported final guard ${command}`);
+      }
+      inputs = [input({}, ['$DEST']), input(privateEnv, ['$DEST']),
+        ...['checkout-head-drift', 'checkout-head-missing'].flatMap(fixture =>
+          [input({}, ['$DEST'], fixture), input(privateEnv, ['$DEST'], fixture)])];
+    } else if (/^git init /.test(command)) {
+      inputs = [input({}, ['$DEST']), input({}, ['$DEST'], 'destination-file')];
+    } else if (/^srcbuild_git_fetch /.test(command)) {
+      inputs = [input(privateEnv, ['$DEST']),
+        input({...privateEnv, [shaGuard[1]]: 'b'.repeat(length)}, ['$DEST'])];
+    } else if (/ checkout /.test(command)) {
+      inputs = [input({}, ['$DEST']), input({}, ['$DEST'], 'checkout-conflict')];
+    } else if (/^source /.test(command)) {
+      // Required source files are fixed repository inputs, not CLI/env axes.
+      // Include their successful execution; missing repository inputs are not
+      // legitimate runtime inputs and have no parity claim.
+      inputs = [input({}, ['$DEST'])];
+    } else throw new Error(`unclassified implicit exit ${command}`);
+    add(/^test /.test(command) ? 'final-sha-guard' : 'command-exit', match.index, command, inputs);
   }
   return {mode, privateEnv, shaVariable: shaGuard[1], urlVariable: urlGuard[1], rows};
 }

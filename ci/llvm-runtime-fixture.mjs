@@ -30,6 +30,10 @@ export function fixture(root, table, {baseline = false} = {}) {
   git('-C', origin, 'add', '.');
   git('-C', origin, '-c', 'user.name=Zxilly', '-c', 'user.email=zxilly@outlook.com', 'commit', '-qm', 'runtime transport fixture');
   const sha = git('-C', origin, 'rev-parse', 'HEAD');
+  git('-C', origin, '-c', 'user.name=Zxilly', '-c', 'user.email=zxilly@outlook.com',
+    'commit', '--allow-empty', '-qm', 'alternate HEAD for checkout guard');
+  const alternate = git('-C', origin, 'rev-parse', 'HEAD');
+  git('-C', origin, 'reset', '--hard', sha);
   const copy = path.join(root, 'entry');
   fs.mkdirSync(path.join(copy, 'ci'), {recursive: true});
   fs.mkdirSync(path.join(copy, 'build/lib'), {recursive: true});
@@ -48,13 +52,27 @@ export function fixture(root, table, {baseline = false} = {}) {
   const execute = (input, index) => {
     let dest = path.join(root, `dest-${index}`);
     if (input.fixture !== 'absent') {
-      if (input.fixture === 'nongit') fs.mkdirSync(dest);
+      if (input.fixture === 'destination-file') fs.writeFileSync(dest, 'not a directory\n');
+      else if (input.fixture === 'unborn' || input.fixture === 'checkout-conflict') {
+        git('init', '-q', dest);
+        if (input.fixture === 'checkout-conflict') fs.writeFileSync(path.join(dest, 'tracked'), 'local contents\n');
+      }
+      else if (input.fixture === 'nongit') fs.mkdirSync(dest);
       else {
         git('clone', '-q', '--no-hardlinks', origin, dest);
         if (input.fixture === 'subdirectory') { dest = path.join(dest, 'nested'); fs.mkdirSync(dest); }
         else if (input.fixture === 'tracked-dirty') fs.writeFileSync(path.join(dest, 'tracked'), 'changed\n');
         else if (input.fixture === 'untracked-dirty') fs.writeFileSync(path.join(dest, 'untracked'), 'changed\n');
         else if (input.fixture === 'corrupt-index') fs.writeFileSync(path.join(dest, '.git/index'), 'invalid index\n');
+        else if (input.fixture.startsWith('checkout-head-')) {
+          // A real post-checkout hook changes real Git state after a successful
+          // checkout. Neither Git nor the product entry is mocked/replaced.
+          git('-C', dest, 'fetch', '-q', origin, alternate);
+          const action = input.fixture === 'checkout-head-drift'
+            ? ['update-ref', 'HEAD', alternate] : ['update-ref', '-d', 'HEAD'];
+          fs.writeFileSync(path.join(dest, '.git/hooks/post-checkout'),
+            `#!/usr/bin/env node\nimport('node:child_process').then(({spawnSync}) => {\nconst result = spawnSync('git', ${JSON.stringify(['-C', dest, ...action])}, {stdio: 'inherit'});\nprocess.exit(result.status);\n});\n`, {mode: 0o755});
+        }
         else if (input.fixture !== 'clean') throw new Error(`unknown fixture ${input.fixture}`);
       }
     }

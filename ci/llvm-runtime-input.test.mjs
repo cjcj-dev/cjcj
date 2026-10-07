@@ -32,7 +32,8 @@ for (const [name, select] of [
     assert.ok(row, 'source-derived branch exists');
     // The uppercase guard witness is selected by its derived alphabet, not by
     // a parallel handcrafted argument list.
-    const inputs = name.includes('uppercase') ? row.inputs.filter(input => /[A-F]/.test(input.env[table.shaVariable] || '')) : row.inputs;
+    const inputs = name.includes('uppercase') ? row.inputs.filter(input => /[A-F]/.test(input.env[table.shaVariable] || ''))
+      : name.includes('mismatched HEAD') ? row.inputs.filter(input => input.fixture === 'clean') : row.inputs;
     assert.ok(inputs.length);
     inputs.forEach((input, i) => {
       const result = product.execute(input, i);
@@ -40,6 +41,33 @@ for (const [name, select] of [
       console.log(`ASSERT_REACHED ${name} entry=${result.entrySha256} rc=${result.rc} stderr=${JSON.stringify(result.stderr)}`);
       assert.deepEqual({rc: result.rc, stdout: result.stdout, stderr: result.stderr},
         {rc: 1, stdout: '', stderr: `LLVM_RUNTIME_INPUT_ERROR: ${message}\n`}, name);
+    });
+  });
+}
+
+for (const [name, select] of [
+  ['private verify preserves the comparison exit when HEAD cannot be read',
+    row => row.kind === 'guard-error' && row.inputs.some(input => input.fixture === 'unborn')],
+  ['fetch final SHA guard consumes mismatched and unreadable real HEAD',
+    row => row.kind === 'final-sha-guard'],
+]) {
+  test(name, t => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'llvm-runtime-input-'));
+    t.after(() => fs.rmSync(root, {recursive: true, force: true}));
+    const left = fixture(path.join(root, 'baseline'), table, {baseline: true});
+    const right = fixture(path.join(root, 'candidate'), table);
+    const row = table.rows.find(select);
+    assert.ok(row, 'error exit is mechanically derived from source');
+    const inputs = row.inputs.filter(input => input.fixture === 'unborn' || input.fixture.startsWith('checkout-head-'));
+    assert.ok(inputs.length, 'derived error witnesses exist');
+    inputs.forEach((input, i) => {
+      const baseline = left.execute(input, i);
+      const candidate = right.execute(input, i);
+      console.log(`ASSERT_REACHED ${name} entry=${candidate.entrySha256} baseline=${JSON.stringify(baseline.normalized)} candidate=${JSON.stringify(candidate.normalized)}`);
+      assert.deepEqual(candidate.normalized, baseline.normalized, name);
+      assert.equal(candidate.rc, 1, 'comparison owns exit 1');
+      assert.doesNotMatch(candidate.stdout, /LLVM_RUNTIME_IDENTITY/, 'failed guard cannot emit identity');
+      if (input.fixture === 'unborn') assert.match(candidate.stderr, /LLVM_RUNTIME_INPUT_ERROR: private runtime checkout HEAD differs/);
     });
   });
 }

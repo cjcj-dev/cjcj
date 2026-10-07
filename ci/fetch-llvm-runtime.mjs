@@ -62,7 +62,9 @@ if (operation === 'check') process.exit(0);
 if (operation === 'verify') {
   if (privateInput) {
     await verifyClean();
-    if ((await capture(['git', '-C', dest, 'rev-parse', 'HEAD'])).stdout.trim() !== runtimeSha) reject('private runtime checkout HEAD differs from requested SHA');
+    // The old [[ $(git ...) == SHA ]] consumes stdout even if Git fails;
+    // its comparison, rather than the substitution, owns the error exit.
+    if ((await capture(['git', '-C', dest, 'rev-parse', 'HEAD'], {check: false})).stdout.trim() !== runtimeSha) reject('private runtime checkout HEAD differs from requested SHA');
     console.log(`LLVM_RUNTIME_IDENTITY mode=private sha=${runtimeSha} source=${fs.realpathSync(dest)}`);
   }
   process.exit(0);
@@ -72,7 +74,7 @@ if (operation === 'verify') {
 await run(['git', 'init', dest]);
 await run(['bash', '-c', 'set -euo pipefail; source "$1"; srcbuild_git_fetch "$2" "$3" "$4"', 'fetch-runtime', path.join(repo, 'build/lib/srcbuild_git.sh'), dest, runtimeUrl, runtimeSha]);
 await run(['git', '-C', dest, 'checkout', '--detach', 'FETCH_HEAD']);
-if ((await capture(['git', '-C', dest, 'rev-parse', 'HEAD'])).stdout.trim() !== runtimeSha) process.exit(1);
+if ((await capture(['git', '-C', dest, 'rev-parse', 'HEAD'], {check: false})).stdout.trim() !== runtimeSha) process.exit(1);
 if (privateInput) {
   await verifyClean();
   console.log(`LLVM_RUNTIME_IDENTITY mode=private sha=${runtimeSha} source=${fs.realpathSync(dest)}`);
