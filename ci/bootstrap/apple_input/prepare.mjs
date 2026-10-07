@@ -8,10 +8,19 @@ export function prepare(source, output, inputs, legacyDirectory, capturePath, tr
   requireValue(transportArchive === null || inputs.kind === 'SYNTHETIC_TRANSPORT_ONLY', 'transport-label');
   legacy(legacyDirectory, 'prepare', [source, output, inputs], transportArchive);
   const recipePath = path.join(output, 'build-recipe.json');
+  // A genuine dependency collection must use this prepared source and cwd.
+  // Stop here until the separately authorized collector supplies its output.
+  if (capturePath === null) return read(recipePath);
+  return bindPrepared(recipePath, capturePath, legacyDirectory, transportArchive);
+}
+
+export function bindPrepared(recipePath, capturePath, legacyDirectory, transportArchive = null) {
+  legacy(legacyDirectory, 'prelaunch', [recipePath], transportArchive);
   const recipe = read(recipePath);
+  requireValue(transportArchive === null || recipe.inputs.kind === 'SYNTHETIC_TRANSPORT_ONLY', 'transport-label');
   const capture = read(capturePath);
   recipe.header_capture = entity(capturePath);
-  recipe.apple_input = snapshot(inputs.apple_sdkroot, capture);
+  recipe.apple_input = snapshot(recipe.inputs.apple_sdkroot, capture);
   association(recipe, capture);
   recipe.kind = transportArchive === null ? 'PREPARED_NOT_AUTHORIZED' : 'SYNTHETIC_TRANSPORT_ONLY';
   recipe.qualification = null;

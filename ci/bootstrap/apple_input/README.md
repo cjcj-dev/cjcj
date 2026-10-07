@@ -67,3 +67,23 @@ raw output); it never launches. The cut runs the same producer-target assertion
 in a child process and saves its original rc and emitted manifest. This is a
 candidate-new-line apparatus cut, not a frozen-main product cut. Its scope is
 synthetic relationship qualification only; historical calibration remains intact.
+
+A1 repair (unexecuted pending a new bounded validation contract): a new capture
+requires `consumer.source` (absolute actual helper path), `consumer.argv` (the
+clang compilation argv without sccache), `consumer.cwd`, `consumer.environment`,
+and collection `cwd`. The original dependency invocation must equal that compile
+argv with `-c` replaced by `-M` and the output pair removed. Source bytes must
+appear in the dependency output and match the generated recipe's helper; all
+remaining options, clang identity, cwd and environment must match consumption.
+The old probe-based offline fixtures are incompatible and cannot qualify this
+repair. No guessed list of additional header names is used.
+
+For genuine collection using the prepared cwd, call `prepare(..., null)` to
+materialize the pinned source and recipe without Apple admission. Under a
+separate collection authorization, collect dependencies of that recipe's actual
+helper with its compilation options and environment. Then call
+`bindPrepared(recipePath, capturePath, legacyDirectory)` to validate the pinned
+recipe again and bind the capture. An unbound recipe has no header_capture and
+cannot pass the first-build entry. This permits collection before the first
+compilation without a Mach-O or BUILT receipt. This two-stage path has not been
+executed in the exhausted nine-recipe contract.

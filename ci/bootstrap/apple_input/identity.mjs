@@ -28,6 +28,35 @@ export function dependencies(raw) {
     .map(s => s.replace(/\\(.)/g, '$1'));
 }
 
+// Derive the dependency invocation from the actual compilation, preserving
+// every preprocessing option. No probe source or guessed header inventory.
+export function dependencyArgv(argv) {
+  requireValue(argv.filter(a => a === '-c').length === 1 &&
+    argv.filter(a => a === '-o').length === 1, 'apple-consumer-command');
+  const result = [];
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === '-o') { i++; continue; }
+    result.push(argv[i] === '-c' ? '-M' : argv[i]);
+  }
+  return result;
+}
+
+function consumerSnapshot(capture, depPaths) {
+  const consumer = capture.consumer;
+  requireValue(consumer && path.isAbsolute(consumer.cwd) &&
+    equal(consumer.environment, capture.collection.environment) &&
+    path.resolve(consumer.cwd) === capture.collection.cwd,
+  'apple-consumer-context');
+  verify(consumer.source, 'apple-consumer-source-drift');
+  requireValue(consumer.argv.filter(a => a === consumer.source.path).length === 1 &&
+    consumer.argv[0] === capture.tools.clang.path &&
+    equal(capture.collection.argv.filter(a => a[0] === capture.tools.clang.path),
+      [dependencyArgv(consumer.argv)]), 'apple-consumer-dependency-command');
+  requireValue(depPaths.map(p => fs.realpathSync(p)).includes(consumer.source.path),
+    'apple-consumer-dependency-source');
+  return consumer;
+}
+
 export function snapshot(root, capture) {
   const resolved = fs.realpathSync(root);
   requireValue(path.isAbsolute(root), 'apple-sdkroot-absolute');
@@ -42,6 +71,7 @@ export function snapshot(root, capture) {
   verify(capture.layout_evidence, 'apple-layout-drift');
   for (const ref of capture.collection.raw_outputs) verify(ref, 'apple-raw-output-drift');
   const depPaths = dependencies(fs.readFileSync(capture.dependencies.path, 'utf8'));
+  const consumer = consumerSnapshot(capture, depPaths);
   const sdkPaths = depPaths.map(p => fs.realpathSync(p)).filter(p => p.startsWith(resolved + path.sep));
   const headers = capture.headers.map(ref => {
     requireValue(ref.path.startsWith(resolved + path.sep), 'header-isysroot');
@@ -61,7 +91,7 @@ export function snapshot(root, capture) {
   requireValue(equal([...new Set(depPaths.map(p => fs.realpathSync(p)))].sort(),
     [...headers, ...external].map(r => r.path).sort()), 'apple-complete-dependencies');
   return {apple_sdkroot: resolved, sdk_settings: settings, headers, tools,
-    external_headers: external,
+    external_headers: external, consumer,
     dependencies: capture.dependencies, layout_evidence: capture.layout_evidence,
     layout: capture.layout, source_ref: capture.source_ref, collection: capture.collection};
 }
@@ -74,6 +104,18 @@ export function association(recipe, capture) {
     argv[argv.indexOf('-isysroot') + 1] === actual.apple_sdkroot &&
     fs.realpathSync(recipe.inputs.clang) === actual.tools.clang.path &&
     argv[1] === recipe.inputs.clang, 'header-isysroot');
+  const consumer = actual.consumer;
+  const sourceIndex = argv.indexOf('-c') + 1;
+  requireValue(sourceIndex > 0 && hash(argv[sourceIndex]) === consumer.source.sha256,
+    'apple-consumer-source');
+  // Preparation relocates the identical source to output/source. Only that
+  // source operand and output operand may differ from collection compilation.
+  const collected = dependencyArgv(consumer.argv);
+  const consumed = dependencyArgv(argv.slice(1));
+  consumed[consumed.indexOf('-M') + 1] = consumer.source.path;
+  requireValue(equal(collected, consumed) &&
+    fs.realpathSync(recipe.steps[0].cwd) === consumer.cwd &&
+    equal(recipe.environment, consumer.environment), 'apple-consumer-binding');
   requireValue(equal(recipe.apple_input, actual), 'apple-input-drift');
   return actual;
 }

@@ -19,7 +19,10 @@ export function capture(spec, destination) {
     dependencies: entity(spec.dependencies_path), layout_evidence: entity(spec.layout_path),
     layout: spec.layout, xcode: spec.xcode, sdk_version: spec.sdk_version,
     source_ref: spec.batch, captured_at: spec.finished_at, qualification: null,
-    collection: {argv: spec.argv, environment: spec.environment,
+    consumer: {source: entity(spec.consumer.source),
+      cwd: path.resolve(spec.consumer.cwd), argv: spec.consumer.argv,
+      environment: spec.consumer.environment},
+    collection: {argv: spec.argv, cwd: path.resolve(spec.cwd), environment: spec.environment,
       started_at: spec.started_at, finished_at: spec.finished_at, batch: spec.batch,
       raw_outputs: spec.raw_outputs.map(entity)}};
   requireValue(spec.argv.some(argv => argv.includes('-isysroot') && argv[argv.indexOf('-isysroot') + 1] === root), 'capture-isysroot-argv');
