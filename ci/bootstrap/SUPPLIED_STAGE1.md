@@ -40,3 +40,12 @@ runtime checkout's `stdlib`, and its commit must match `--runtime-sha`. After
 initial std and SDK assembly, the entry runs the unchanged complete native gate
 with the assembled SDK's std and the same-build runtime pair. A gate failure
 stops stage2. The input-only check does not run this gate or establish a verdict.
+
+To continue an interrupted colour gate with its completed same-source std, use
+`--resume-colour-gate SHA256_FILE` and the original private `--work` directory.
+The captured file must identify the completed std artifacts with sha256sum
+records. The entry verifies these records, the std source commit, the SDK lock's
+compiler/runtime identities and the actual stage1 ELF before reusing them.
+It then assembles/verifies the SDK through the normal recipe, runs the complete
+gate and, only after success, builds stage2. This option requires the colour gate
+inputs and `--stage supplied-stage1`; it does not authorize another execution.
