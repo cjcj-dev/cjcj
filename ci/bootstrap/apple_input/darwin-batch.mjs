@@ -89,16 +89,27 @@ try {
   // Read the definition from this consumer's actual include chain. Line markers
   // preserve the original header location, rather than naming a known SDK type.
   let currentFile = null, currentLine = 0;
-  const definitions = [];
+  const locations = [];
   const lines = preprocessed.split('\n');
   for (let i = 0; i < lines.length; i++) {
     const marker = lines[i].match(/^#\s+(\d+)\s+"([^"]+)"/);
-    if (marker) {currentFile = marker[2]; currentLine = Number(marker[1]); continue;}
-    const definition = lines[i].match(/\bstruct\s+([A-Za-z_]\w*)\s*\{/);
-    if (definition && definition[1].endsWith('sigaltstack')) definitions.push({name: definition[1], file: currentFile, line: currentLine,
-      preprocessed_line: i + 1});
+    if (marker) {currentFile = marker[2]; currentLine = Number(marker[1]); locations.push(null); continue;}
+    locations.push({file: currentFile, line: currentLine, preprocessed_line: i + 1});
     currentLine++;
   }
+  // Anchor in the type actually used by this consumer, then follow its typedef
+  // to exactly one tagged definition. Whitespace may span source lines.
+  const consumerUses = lines.flatMap((line, i) => locations[i]?.file === source &&
+    /\bstack_t\s+[A-Za-z_]\w*/.test(line) ? [{...locations[i], text: line}] : []);
+  const text = lines.join('\n');
+  const locationAt = offset => locations[text.slice(0, offset).split('\n').length - 1];
+  const aliases = [...text.matchAll(/\btypedef\s+struct\s+([A-Za-z_]\w*)\s+stack_t\s*;/g)]
+    .map(m => ({name: m[1], ...locationAt(m.index)}));
+  if (!consumerUses.length || aliases.length !== 1 || !aliases[0].file?.startsWith(apple + path.sep))
+    throw new Error('actual-stack-consumer-type');
+  const definitions = [...text.matchAll(/\bstruct\s+([A-Za-z_]\w*)\s*\{/g)]
+    .filter(m => m[1] === aliases[0].name)
+    .map(m => ({name: m[1], ...locationAt(m.index), typedef: aliases[0], consumer_uses: consumerUses}));
   write(path.join(evidence, 'stack-definitions.json'), definitions);
   if (definitions.length !== 1 || !definitions[0].file?.startsWith(apple + path.sep))
     throw new Error('actual-stack-definition');
