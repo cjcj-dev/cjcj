@@ -113,18 +113,18 @@
     "args": []
   },
   {
-    "file": "ci/test-ast-support-wiring.sh",
+    "file": "ci/test-ast-support-wiring.mjs",
     "executor": "manual",
     "reason": "Fault-arm tool rewrites ci/release/prepare_bootstrap_inputs.mjs in place; run only in an isolated checkout, not alongside its Node contract suite."
   },
   {
-    "file": "ci/test-codegen-layout-sync.sh",
+    "file": "ci/test-codegen-layout-sync.mjs",
     "executor": "workflow",
     "workflow": ".github/workflows/test-llvm-tuple.yml",
-    "interpreter": "bash"
+    "interpreter": "npx --yes zx@8"
   },
   {
-    "file": "ci/test-codegen-runtime-layout.sh",
+    "file": "ci/test-codegen-runtime-layout.mjs",
     "executor": "manual",
     "reason": "Requires candidate compiler, paired host SDK/libLLVM and both runtime/LLVM source repositories for ABI integration."
   },
@@ -134,13 +134,13 @@
     "reason": "Requires a real candidate compiler, paired host SDK/libLLVM, fixed core input tree and private evidence directory; invocation and output contract are documented in tests/frontend_apc/README.md."
   },
   {
-    "file": "ci/test-colour-libxml2.sh",
+    "file": "ci/test-colour-libxml2.mjs",
     "executor": "manual",
     "reason": "Fault-arm tool rewrites workflow, srcbuild and checker files in place; optional real bad/good ld.lld controls need retained linker artifacts."
   },
   {
-    "file": "ci/test-llvm-tuple-layout.sh",
-    "executor": "bash",
+    "file": "ci/test-llvm-tuple-layout.mjs",
+    "executor": "zx",
     "args": [
       "{output}"
     ]
@@ -152,10 +152,10 @@
     "interpreter": "npx --yes zx@8"
   },
   {
-    "file": "ci/test-runtime-layout.sh",
+    "file": "ci/test-runtime-layout.mjs",
     "executor": "workflow",
     "workflow": ".github/workflows/test-llvm-tuple.yml",
-    "interpreter": "bash"
+    "interpreter": "npx --yes zx@8"
   },
   {
     "file": "ci/test_ast_host_workflow.py",
@@ -578,7 +578,7 @@
     "reason": "Real fixed runtime commits and an explicitly supplied local Git transport mirror/work directory are required; stops at the first tuple CMake boundary without an LLVM build."
   },
   {
-    "file": "ci/test-llvm-runtime-chain.sh",
+    "file": "ci/test-llvm-runtime-chain.mjs",
     "executor": "manual",
     "reason": "Requires explicit lane work directory, real fixed runtime Git mirror, and local other-source Git fixture; observes the real tuple CMake boundary without an LLVM build."
   },

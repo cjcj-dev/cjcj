@@ -6,8 +6,8 @@ on:
       - 'ci/llvm*'
       - 'ci/runtime_pin.env'
       - 'ci/check-llvm-runtime-abi.mjs'
-      - 'ci/test-runtime-layout.sh'
-      - 'ci/test-codegen-layout-sync.sh'
+      - 'ci/test-runtime-layout.mjs'
+      - 'ci/test-codegen-layout-sync.mjs'
       - 'ci/*codegen-runtime-layout*'
       - 'packages/codegen/src/**'
       - 'tests/runtime_layout/**'
@@ -45,9 +45,9 @@ jobs:
             fi
             git -C "$dest" fetch --depth=1 "$url" "$ref"
           done
-          bash ci/test-runtime-layout.sh "$RUNNER_TEMP/layout-evidence" \
+          npx --yes zx@8 ci/test-runtime-layout.mjs "$RUNNER_TEMP/layout-evidence" \
             "$RUNNER_TEMP/layout-sources/runtime" "$RUNNER_TEMP/layout-sources/llvm"
-          bash ci/test-codegen-layout-sync.sh "$RUNNER_TEMP/codegen-layout-evidence" \
+          npx --yes zx@8 ci/test-codegen-layout-sync.mjs "$RUNNER_TEMP/codegen-layout-evidence" \
             "$RUNNER_TEMP/layout-sources/runtime" "$RUNNER_TEMP/layout-sources/llvm"
       - uses: actions/upload-artifact@v7
         if: always()
@@ -128,7 +128,7 @@ jobs:
           set -euo pipefail
           test "$(sha256sum "$RUNNER_TEMP/tuple/SHA256SUMS" | cut -d' ' -f1)" = "$LLVM_TUPLE_SUMS_SHA"
           cmp ci/llvm_tuple_SHA256SUMS "$RUNNER_TEMP/tuple/SHA256SUMS"
-          bash ci/test-llvm-tuple-layout.sh "$RUNNER_TEMP/layout-test" "$RUNNER_TEMP/tuple"
+          npx --yes zx@8 ci/test-llvm-tuple-layout.mjs "$RUNNER_TEMP/layout-test" "$RUNNER_TEMP/tuple"
       - name: Exercise bootstrap input consumer
         run: node --test ci/release/prepare_bootstrap_inputs.test.mjs ci/release/prepare_llvm_dylib.test.mjs ci/release/colour_runtime.test.mjs
       - name: Cut producer and consumer script wiring

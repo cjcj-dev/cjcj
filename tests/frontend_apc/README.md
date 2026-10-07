@@ -27,7 +27,7 @@ python3 ci/test-frontend-apc.py \
 ```
 
 The core input must include the layout-contract additions used by
-`ci/test-codegen-runtime-layout.sh`; retain and hash this fixed input tree.
+`ci/test-codegen-runtime-layout.mjs`; retain and hash this fixed input tree.
 The explicit array/reference fixture is separate from that historical core
 input. Each work directory must be new. The default is three executions per
 main configuration, not a repeat-until-success loop. Compiler, LLVM and host
