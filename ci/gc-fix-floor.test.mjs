@@ -13,6 +13,8 @@ import {
 import {resolveRuntimeSource} from './runtime-pin.mjs';
 import {sourceFetchArguments} from '../build/lib/git.mjs';
 
+import {pinnedRemote} from './fixtures/git/pinned-remote.mjs';
+
 let checkout;
 let checkoutOwned = false;
 let actualHeader;
@@ -35,7 +37,8 @@ before(async () => {
     checkoutOwned = true;
     git(checkout, 'init', '--quiet');
     git(checkout, 'remote', 'add', 'origin', sourceUrl);
-    git(checkout, ...sourceFetchArguments(sourceUrl, runtimeRef), '--quiet');
+    const remote = pinnedRemote(checkout, 'runtime', runtimeRef);
+    git(checkout, ...sourceFetchArguments(remote, runtimeRef), '--quiet');
     git(checkout, 'checkout', '--quiet', '--detach', 'FETCH_HEAD');
   }
   const checkoutHead = git(checkout, 'rev-parse', 'HEAD');
