@@ -67,7 +67,7 @@ if (process.env.ABI_DIFFERENTIAL === '1') test('ABI full source-derived decision
   const empty = commit(path.join(evidence, 'empty'), {'unrelated': 'empty'});
   const mismatch = commit(path.join(evidence, 'mismatch'), {'runtime/tools/generate-runtime-layout.py': "import sys\nprint('RUNTIME_FIXTURE=MISMATCH')\nsys.exit(1)\n"});
   fs.mkdirSync(path.join(product, 'packages/codegen/src'), {recursive: true});
-  const rendered = command(['python3', path.join(product, 'ci/generate-codegen-runtime-layout.py'), '--runtime-root', runtime,
+  const rendered = command(['python3', path.join(product, 'ci/generate-codegen-runtime-layout.py'), '--runtime-root', runtime, '--write',
     '--header', path.join(llvm, 'llvm/include/llvm/CodeGen/CangjieRuntimeLayout.h'), '--output', path.join(product, 'packages/codegen/src/RuntimeLayout.cj')]);
   assert.equal(rendered.status, 0, rendered.stderr);
   const output = path.join(product, 'packages/codegen/src/RuntimeLayout.cj');
