@@ -19,7 +19,9 @@ let actualHeader;
 
 function git(root, ...arguments_) {
   const result = spawnSync('git', ['-C', root, ...arguments_], {encoding: 'utf8'});
-  assert.equal(result.status, 0, `git ${arguments_.join(' ')}: ${(result.stderr || '').trim()}`);
+  const detail = `git ${arguments_.join(' ')}: status=${result.status} signal=${result.signal ?? 'null'} error=${result.error?.code ?? 'none'} stderr=${(result.stderr || '').trim()}`;
+  if (result.status !== 0) console.error(`GC_FIX_CHECKOUT_FAILURE ${detail}`);
+  assert.equal(result.status, 0, detail);
   return result.stdout.trim();
 }
 
