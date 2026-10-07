@@ -40,11 +40,11 @@ test('default source plan retains every cell and dispatches only runnable inputs
   assert.equal(result.status, 0);
   const cells = JSON.parse(result.outputs.cells).include;
   assert.deepEqual(cells.map(cell => cell.target).sort(), ['darwin-arm64', 'darwin-x64', 'linux-aarch64', 'linux-x64']);
-  assert.deepEqual(JSON.parse(result.outputs.matrix).include.map(cell => cell.target), ['linux-x64'], 'runnable matrix excludes missing-input cells');
-  assert.deepEqual(JSON.parse(result.outputs.blocked).include.map(cell => cell.target).sort(), ['darwin-arm64', 'darwin-x64', 'linux-aarch64']);
+  assert.deepEqual(JSON.parse(result.outputs.matrix).include.map(cell => cell.target), ['linux-x64', 'darwin-arm64', 'darwin-x64'], 'native source routes retain independent input guards');
+  assert.deepEqual(JSON.parse(result.outputs.blocked).include.map(cell => cell.target).sort(), ['linux-aarch64']);
   for (const cell of cells) assert.match(result.summary, new RegExp(`\\| ${cell.target} \\| ${cell.status} \\|`));
   assert.match(result.summary, /linux_aarch64.env.*issues\/763/);
-  assert.match(result.summary, /Darwin.*issues\/473/);
+  for (const target of ['darwin-arm64','darwin-x64']) assert.equal(cells.find(cell => cell.target === target).status, 'runnable');
 });
 
 test('ready singleton remains schedulable with its native LLVM and runner', t => {
@@ -57,7 +57,7 @@ test('ready singleton remains schedulable with its native LLVM and runner', t =>
 });
 
 test('each blocked singleton fails before LLVM dispatch and names its owner', t => {
-  for (const [target, owner] of [['linux-aarch64', '763'], ['darwin-arm64', '473'], ['darwin-x64', '473']]) {
+  for (const [target, owner] of [['linux-aarch64', '763']]) {
     const result = run(t, ['--targets', target, '--single', '--require-ready']);
     assert.equal(result.status, 1, `${target} blocked exit`);
     assert.equal(result.outputs.has_runnable, 'false');
@@ -81,7 +81,7 @@ test('single entry rejects a multi-target request', t => {
 });
 
 test('selection handles whitespace, duplicates and mixed readiness without losing blocked cells', t => {
-  const result = run(t, ['--targets', ' linux-x64, darwin-arm64, linux-x64 ']);
+  const result = run(t, ['--targets', ' linux-x64, linux-aarch64, linux-x64 ']);
   assert.equal(result.status, 0);
   assert.equal(JSON.parse(result.outputs.cells).include.length, 2);
   assert.equal(result.outputs.has_runnable, 'true');
@@ -91,14 +91,13 @@ test('selection handles whitespace, duplicates and mixed readiness without losin
 test('srcbuild workflow selection executes the shared planner', t => {
   const result = run(t, ['all'], workflowStep('srcbuild.yml', 'Select the requested targets'));
   assert.equal(result.status, 0);
-  assert.deepEqual(JSON.parse(result.outputs.matrix).include.map(cell => cell.target), ['linux-x64']);
+  assert.deepEqual(JSON.parse(result.outputs.matrix).include.map(cell => cell.target), ['linux-x64', 'darwin-arm64', 'darwin-x64']);
   assert.equal(JSON.parse(result.outputs.cells).include.length, 4);
 });
 
 test('srcbuild blocked reporting executes and fails with every blocked owner', t => {
   const result = run(t, ['all'], workflowStep('srcbuild.yml', 'Report missing source inputs'));
   assert.equal(result.status, 1, 'blocked reporting must fail the workflow');
-  assert.match(result.stderr, /issues\/473/);
   assert.match(result.stderr, /issues\/763/);
 });
 

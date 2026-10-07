@@ -3,9 +3,13 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {spawnSync} from 'node:child_process';
 
-export const vendorFiles = Object.freeze([
+const importedFiles = Object.freeze([
   'bootstrap.sh', 'sdk_build.sh', 'test_bootstrap.sh',
   'stage1_host_runner.sh', 'stage1_host_identities.txt',
+]);
+export const vendorFiles = Object.freeze([...importedFiles,
+  'bootstrap.mjs', 'sdk_build.mjs', 'sdk_verify.mjs', 'native_libraries.mjs',
+  'host_tools.mjs', 'std_runtime_colour.mjs', 'stage1_host_runner.mjs',
 ]);
 
 function git(repo, args) {
@@ -34,7 +38,7 @@ export function checkVendor({sourceRepo = process.cwd(), commit = 'HEAD', consum
   for (const name of vendorFiles) {
     const item = {name, errors: []};
     const values = records.split('\n').filter(line => line.startsWith(`TOOLS_${name}=`));
-    if (values.length !== 1 || !/^[0-9a-f]{64}$/.test(values[0].slice(values[0].indexOf('=') + 1))) {
+    if (importedFiles.includes(name) && (values.length !== 1 || !/^[0-9a-f]{64}$/.test(values[0].slice(values[0].indexOf('=') + 1)))) {
       item.errors.push({kind: 'import-record'});
     }
     const relative = `ci/bootstrap/${name}`;

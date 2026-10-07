@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {nativeHost, execute} from './host_tools.mjs';
-import {sha256File, verifySdk} from './sdk_verify.mjs';
+import {sha256File, verifySdk, iterFiles} from './sdk_verify.mjs';
 import {nativeSymbols, runtimeDir, findFiles, validateTuple, colourExports, assertColourPair} from './native_libraries.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const exists = file => fs.existsSync(file);
@@ -93,6 +93,15 @@ export function buildSdk(args) {
   // would silently remove current main's compiler identity mechanism.
   fs.cpSync(base, to, {recursive:true, preserveTimestamps:true, verbatimSymlinks:true});
   if (link(to) || fs.realpathSync(to) === base || !file(path.join(to,'bin/cjc'))) fail('副本不是独立完整 SDK');
+  // Darwin SDK dependencies are materialized as in the fixed candidate's
+  // cp -aL layout. Preserve main's same-directory compiler producer aliases.
+  if (native.os === 'darwin') for (const [entry,relative] of iterFiles(to)) {
+    if (!link(entry) || ['bin/cjc','bin/cjc-frontend'].includes(relative)) continue;
+    const real = fs.realpathSync(entry);
+    const temporary = path.join(path.dirname(entry), '.materialized-' + path.basename(entry));
+    fs.cpSync(real, temporary, {recursive:true,dereference:true,preserveTimestamps:true});
+    fs.unlinkSync(entry); fs.renameSync(temporary,entry);
+  }
   const inside = resolved => resolved.startsWith(to + path.sep);
   function safeDestination(dst, label) {
     if (link(dst)) {
@@ -264,5 +273,5 @@ export function buildSdk(args) {
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try { process.exitCode = buildSdk(process.argv.slice(2)); }
-  catch (error) { console.error(error.message); process.exitCode = error.exitCode ?? 1; }
+  catch (error) { console.error(error.message); if (error.signal) process.kill(process.pid,error.signal); else process.exitCode = error.exitCode ?? 1; }
 }

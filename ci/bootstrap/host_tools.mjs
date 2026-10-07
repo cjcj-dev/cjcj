@@ -41,7 +41,7 @@ export function execute(command, args, {check = true, ...options} = {}) {
   const out = {stdout:result.stdout || '', stderr:result.stderr || '', exitCode:result.status, signal:result.signal};
   if (check && (out.exitCode !== 0 || out.signal)) {
     const error = new Error(`${command} rc=${out.exitCode} signal=${out.signal || 'none'} ${out.stderr.trim()}`);
-    error.exitCode = out.exitCode; throw error;
+    error.exitCode = out.exitCode; error.signal = out.signal; throw error;
   }
   return out;
 }
