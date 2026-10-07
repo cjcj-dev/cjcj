@@ -118,7 +118,7 @@ set -eu
 [[ "$GC_UNIT_GATE_LANGUAGE_TESTS" == all ]]
 echo 'TARGET independent SDK inputs reached actual gate consumer'
 `, 0o755);
-    const run = suffix => spawnSync('bash', [new URL('./gate_colour_runtime.sh', import.meta.url).pathname,
+    const run = suffix => spawnSync('npx', ['--yes', 'zx@8', new URL('./gate_colour_runtime.mjs', import.meta.url).pathname,
       '--build-sdk', path.join(root, 'source'), path.join(root, 'build'),
       path.join(root, suffix), path.join(root, 'installed')], {encoding: 'utf8', env: {
         ...process.env, PATH: `${root}/bin:${process.env.PATH}`, BOOTSTRAP_ARCHIVES_PIN: pin,
@@ -150,7 +150,7 @@ supplied_stage1
     assert.match(supplied.stdout, /TARGET bootstrap gate completed before stage2/);
     assert.ok(fs.existsSync(path.join(root, 'bootstrap-work/colour-gate-active-language/sdk/bin/cjc')));
     console.log('TARGET bootstrap supplied_stage1 actual caller accepted --build-sdk');
-    const legacy = spawnSync('bash', [new URL('./gate_colour_runtime.sh', import.meta.url).pathname,
+    const legacy = spawnSync('npx', ['--yes', 'zx@8', new URL('./gate_colour_runtime.mjs', import.meta.url).pathname,
       '--same-source', 'unused-source', 'unused-sdk', 'unused-host', 'unused-install', 'unused-std'],
       {encoding: 'utf8'});
     assert.equal(legacy.status, 2);

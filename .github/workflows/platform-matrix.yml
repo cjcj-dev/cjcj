@@ -211,7 +211,7 @@ jobs:
           npx --yes zx@8 ci/platform_matrix/build_runtime.mjs
       - name: Complete gate with pinned language tuple and same-build target
         run: |
-          bash ci/release/gate_colour_runtime.sh runtime-source \
+          npx --yes zx@8 ci/release/gate_colour_runtime.mjs runtime-source \
             "$RUNNER_TEMP/h48-download/installed/tuple" "$RUNNER_TEMP/h48-active" \
             .platform-ci/runtime-install
       - name: Load same-generation AST SDK inputs
