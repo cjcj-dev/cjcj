@@ -64,6 +64,13 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+      - name: Load immutable Apple input pins
+        run: npx --yes zx@8 ci/bootstrap/apple_input/load-pins.mjs
+      - uses: ./.github/actions/sccache
+        with:
+          component: runtime
+          platform: darwin-aarch64
+          pin: ${{ env.RUNTIME_REF }}
       - name: Actual Apple header collection and admission
         env:
           APPLE_BATCH_MODE: ${{ inputs.apple_input }}
