@@ -8,6 +8,7 @@ import path from 'node:path';
 import test, {after} from 'node:test';
 import {sourceFetchArguments} from '../lib/git.mjs';
 import {readHostToolchainPin} from '../../ci/host-toolchain-pin.mjs';
+import {writeTransportPlans} from './fixtures/bootstrap-transport-plans.mjs';
 
 const repoRoot = path.resolve('.');
 const scriptPath = path.join(repoRoot, 'tools', 'srcbuild_kkk2.sh');
@@ -883,13 +884,40 @@ test('GHA absolute campaign bootstrap path turns only the GHA contract red', () 
 });
 
 
-test('bootstrap entries bind the vendored SDK builder instead of a campaign path', () => {
+test('bootstrap entries bind the vendored SDK builder instead of a campaign path', async t => {
   const bootstrap = fs.readFileSync(path.join(repoRoot, 'ci/bootstrap/bootstrap.sh'), 'utf8');
   assert.ok(bootstrap.includes('SDK_BUILD="${SDK_BUILD:-$(dirname "${BASH_SOURCE[0]}")/sdk_build.sh}"'));
   assert.ok(!bootstrap.includes('/root/cj_build/tools/sdk_build.sh'));
   assert.match(extractFn(script, 'run_bootstrap_stage'), /SDK_BUILD="\$REPO_ROOT\/ci\/bootstrap\/sdk_build.sh" "\$\{cmd\[@\]\}"/);
-  const gha = fs.readFileSync(path.join(repoRoot, 'ci/bootstrap/gha_run.sh'), 'utf8');
-  assert.match(gha, /export SDK_BUILD="\$root\/ci\/bootstrap\/sdk_build.sh"/);
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gha-bootstrap-child-'));
+  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
+  const {file: plans, bundle} = await writeTransportPlans(root);
+  fs.mkdirSync(path.join(root, 'ci/bootstrap'), {recursive: true});
+  const observed = path.join(root, 'child.json');
+  const recorder = path.join(root, 'record.mjs');
+  fs.writeFileSync(recorder, `import fs from 'node:fs';\nfs.writeFileSync(process.env.OBSERVED, JSON.stringify({argv: process.argv.slice(2), sdkBuild: process.env.SDK_BUILD, plans: process.env.CJCJ_BOOTSTRAP_SDK_PLANS, intents: process.env.CJCJ_BOOTSTRAP_SDK_INTENTS}));\nprocess.exit(Number(process.env.CHILD_RC));\n`);
+  fs.writeFileSync(path.join(root, 'ci/bootstrap/bootstrap.sh'), `exec '${process.execPath}' '${recorder}' "$@"\n`);
+  const inputs = Object.fromEntries(['RUNTIME_PIN', 'CJCJ_SHA', 'CPP_SRC', 'BASE', 'HOST_LLVM_SO', 'HOST_LLVM_SHA256',
+    'COLOUR_LLVM_SO', 'COLOUR_LLVM_SHA256', 'AST_SUPPORT', 'AST_SUPPORT_SHA256', 'COLOUR_TUPLE',
+    'COLOUR_LLVM_SHA', 'COLOUR_RT', 'HOST_RT'].map(name => [`CJCJ_BOOTSTRAP_${name}`, path.join(root, name)]));
+  for (const [stage, rc] of [['stage0', 0], ['stage1-initial-std', 0], ['stage1-std', 0], ['stage1-compiler', 7]]) {
+    // Execute the public shell entry, then the real gha-run module and plan
+    // preparation. Only the expensive native child is an observation fixture.
+    const child = spawnSync('bash', [path.join(repoRoot, 'ci/bootstrap/gha_run.sh'), stage], {encoding: 'utf8', env: {
+      ...process.env, ...inputs, GITHUB_WORKSPACE: root, CANGJIE_WORKSPACE: path.join(root, 'workspace'),
+      CJCJ_BOOTSTRAP_SDK_PLANS: plans, CJCJ_BOOTSTRAP_SDK_INTENTS: '', SDK_BUILD: '/retired/campaign/sdk_build.sh',
+      OBSERVED: observed, CHILD_RC: String(rc),
+    }});
+    const result = JSON.parse(fs.readFileSync(observed, 'utf8'));
+    console.log(`GHA_CHILD_BINDING_ASSERT_REACHED stage=${stage} rc=${child.status} result=${JSON.stringify(result)}`);
+    assert.equal(result.sdkBuild, path.join(root, 'ci/bootstrap/sdk_build.sh'), 'actual child SDK_BUILD binding');
+    assert.equal(result.plans, path.join(root, 'workspace/sdk-plans/bootstrap.json'), 'actual child frozen bundle environment');
+    assert.equal(result.argv[result.argv.indexOf('--sdk-plans') + 1], result.plans, 'actual child frozen bundle argument');
+    assert.deepEqual(JSON.parse(fs.readFileSync(result.plans)), bundle, 'all frozen phases reach the child');
+    assert.equal(result.intents, undefined, 'child cannot regenerate intent selectors');
+    assert.equal(result.argv.at(-1), stage);
+    assert.equal(child.status, rc, `child exit protection: ${child.stderr}`);
+  }
 });
 
 
