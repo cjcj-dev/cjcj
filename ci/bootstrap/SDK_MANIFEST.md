@@ -146,7 +146,7 @@ the initial assembly. Reuse cannot substitute the legacy payload-only check.
 resolves every phase's selectors before production. Its intent schema is
 `bootstrap-sdk-intents-v1` with exactly the eight `phases` keys. All phases must
 belong to one lane/platform. The first three use host role, the remaining
-three use target role; only stage3 may declare `stage: "final"`.
+five use target role; only stage3 may declare `stage: "final"`.
 Both file-bundle and directory consumers require all eight valid plans before
 selecting a phase. The stage label alone is not final compiler/std qualification;
 the pending final adapters must preserve the existing final lineage checks.
@@ -163,10 +163,15 @@ components use `inputOnly: true`; this installation selection does not change
 the producer receipt identity or authorize omission of any installed SDK role.
 The stage2 handoff consumes the stage2 plan and checks its compiler, std and
 shim outputs instead of copying and editing an SDK after assembly.
-These additions remain unqualified: standard source sync refused the local
-shallow repository twice, including after a normal unshallow fetch returned 0.
-No stage build or new test was executed, and this candidate is not ready to
-replace in-flight stage2 or to execute held stage33.
+The complete-bundle generator and SDK phase selector have directed integration
+coverage: changing either product's selected producer directories fails the
+identity assertion while the independent direct-plan control stays successful.
+Stage compiler selection has corresponding controls for two installed target
+compilers, the wrong stage3 parent, and a noncompiler role that actually installs
+a second compiler. The last case uses authenticated native C apparatus outputs;
+it does not qualify Cangjie stage3 behavior. The native stage compiler adapter
+remains under implementation and is not ready to replace in-flight stage2 or
+to execute held stage33.
 
 Final compose migration and producer-to-phase intent generation remain
 incomplete. Existing
@@ -182,8 +187,8 @@ this candidate has completed those migrations.
 | Linux aarch64 | Native LLVM/std adapters; sharedbuild compiler/runtime remain x86_64 | Adapter coverage incomplete |
 | Darwin x86_64 / aarch64 | Native LLVM recipe shape exists | Native colour/load verifier and caller migration incomplete; assembly explicitly refuses |
 | Windows x86_64 | Declared platform and unknown/unimplemented adapter refusal | Native tuple/static archive adapter and verifier incomplete; assembly explicitly refuses |
-| Bootstrap / GHA / kkk2 driver | Frozen phase-plan argument and assembly call routing | Bundle generation and end-to-end execution incomplete |
-| Final SDK compose / bootstrap handoff | Existing stage3 install/seal consumers located | Full manifest migration incomplete |
+| Bootstrap / GHA / kkk2 driver | Complete-bundle generation before dispatch and phase assembly routing | Directed generator/selector controls passed; full workflow execution incomplete |
+| Final SDK compose / bootstrap handoff | Handoff consumes a stage2 manifest and its lock; stage3 caller uses the canonical compiler alias | Final std overlay, compose and remaining caller migration incomplete |
 | Existing release target matrix | Existing native/cross target declarations remain | Target adaptations not complete; no Linux result may be extrapolated |
 
 The integration tests use small independently committed C sources with the
