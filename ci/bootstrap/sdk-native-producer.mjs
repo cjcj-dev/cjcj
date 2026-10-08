@@ -204,7 +204,10 @@ async function std(request) {
   const artifacts = path.join(directory, 'artifacts'); await fs.mkdir(artifacts);
   await run(['python3', 'build.py', 'build', '-t', 'relwithdebinfo', '--jobs', String(os.availableParallelism()), `--target-lib=${link}`], {cwd: stdlib, env});
   await run(['python3', 'build.py', 'install', '--prefix', artifacts], {cwd: stdlib, env});
-  for (const rel of [`modules/${tuple}/std/core/core.Int64.ti`, `lib/${tuple}/libcangjie-std-core.a`, `runtime/lib/${tuple}/libcangjie-std-core.so`, 'lib/libstdFFI.so']) {
+  // AddCangjieSource.cmake installs package CJO/bitcode, not a synthetic
+  // per-type .ti tree. Require the actual core module and both native forms.
+  for (const rel of [`modules/${tuple}/std/std.core.cjo`, `modules/${tuple}/std/libstd.core.bc`,
+    `lib/${tuple}/libcangjie-std-core.a`, `runtime/lib/${tuple}/libcangjie-std-core.so`, 'lib/libstdFFI.so']) {
     if (!(await fs.stat(path.join(artifacts, rel))).isFile()) reject('STD_INSTALL_SHAPE', component.id, rel);
   }
   await atomicJson(path.join(artifacts, 'std-producer.json'), {compiler_sha256: await fileDigest(compilerFile),
