@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import {resolveRuntimeSource} from '../runtime-pin.mjs';
 import {verifyRuntime, runtimeFiles, digest} from '../release/colour_runtime.mjs';
 import {run} from '../../build/lib/runner.mjs';
-import {objectId} from './sdk-manifest.mjs';
+import {objectId, execute} from './sdk-manifest.mjs';
 
 export async function verifyBootstrapRuntimeSdk(sdk, tuple, env = process.env, sourceRoot, assemblyLockSha, producerManifest) {
   if (producerManifest) {
@@ -38,6 +38,14 @@ export async function verifyBootstrapRuntimeSdk(sdk, tuple, env = process.env, s
         const stamps = [...new Set(fs.readFileSync(path.join(sdk, rel)).toString('latin1').match(/CJRT-COMMIT:[A-Za-z0-9_-]+/g) || [])];
         if (stamps.length !== 1 || stamps[0] !== `CJRT-COMMIT:${runtimeRef}`) throw new Error(`BOOTSTRAP_SDK_RUNTIME_STAMP_MISMATCH: ${rel}`);
       }
+    }
+    const shared = path.join(sdk, 'runtime/lib', tuple, 'libcangjie-runtime.so');
+    const archive = path.join(sdk, 'lib', tuple, 'libcangjie-runtime.a');
+    const masks = text => text.split('\n').filter(line => /\bg_cjLoadBadMask(?:@@?\S+)?$/.test(line)).length;
+    const sharedMasks = masks((await execute('nm', ['-D', '--defined-only', shared])).stdout);
+    const archiveMasks = masks((await execute('nm', ['--defined-only', archive])).stdout);
+    if (sharedMasks !== 1 || archiveMasks < 1) {
+      throw new Error(`BOOTSTRAP_SDK_RUNTIME_COLOUR_PAIR_MISMATCH: shared_masks=${sharedMasks} archive_masks=${archiveMasks}`);
     }
     console.log(`BOOTSTRAP_RUNTIME_PRODUCER_CONSUMER_VERIFIED runtime=${runtimeRef} plan=${producerManifest.planSha256}`);
     return;
