@@ -328,10 +328,10 @@ export async function readOutput(directory, component, identity) {
   }
   return {...record, receiptSha256: done, directory};
 }
-export async function sealOutput(directory, component, identity, execution) {
+export async function sealOutput(directory, component, identity, execution, presealedFiles) {
   if (execution.rc !== 0 || execution.status !== 'complete') reject('PRODUCER_FAILURE', component.id, 'cannot seal failed producer');
   const artifacts = path.join(directory, 'artifacts');
-  const files = await inventory(artifacts, {links: true});
+  const files = presealedFiles || await inventory(artifacts, {links: true});
   if (!Object.keys(files).length) reject('MISSING_ARTIFACT', component.id, 'empty output');
   const record = {schema: OUTPUT_SCHEMA, status: 'complete', rc: execution.rc, component,
     ...identity, artifacts, files, execution};

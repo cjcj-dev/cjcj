@@ -50,16 +50,19 @@ async function official(component, directory, identity) {
   if (lock.schema !== 'sharedbuild-official-sdk-v1' || lock.role !== 'host' || lock.version !== source.version
     || !lock.files || !Object.keys(lock.files).length) reject('DISTRIBUTION_LOCK', component.id, 'requires complete official sharedbuild distribution lock');
   const artifacts = path.join(directory, 'artifacts'); await fs.mkdir(artifacts);
+  const files = Object.create(null);
   for (const [rel, entry] of Object.entries(lock.files)) {
     const file = await physicalPath(source.root, rel, component.id);
     if (!(await fs.lstat(file)).isFile()) reject('DISTRIBUTION_FILE', component.id, rel);
     const destination = path.join(artifacts, rel); await fs.mkdir(path.dirname(destination), {recursive: true});
     await fs.copyFile(file, destination); await fs.chmod(destination, (await fs.stat(file)).mode & 0o777);
     if (await fileDigest(destination) !== entry.sha256) reject('DISTRIBUTION_DIGEST', component.id, rel);
+    const stat = await fs.stat(destination);
+    files[rel] = {type: 'file', sha256: entry.sha256, size: stat.size, mode: stat.mode & 0o777};
   }
   if (await fileDigest(source.lock) !== source.lockSha256) reject('DISTRIBUTION_LOCK', component.id, 'source lock changed during copy');
   return sealOutput(directory, component, identity, {status: 'complete', rc: 0, kind: 'official-distribution-copy',
-    distribution: {version: source.version, lockSha256: source.lockSha256, reason: source.reason}});
+    distribution: {version: source.version, lockSha256: source.lockSha256, reason: source.reason}}, files);
 }
 async function sharedbuild(component, directory, identity, plan, resumeFailed, outputs) {
   const {engine, engineSha256} = component.producer;
@@ -118,14 +121,27 @@ async function sharedbuild(component, directory, identity, plan, resumeFailed, o
     || canonical(actualRecipe.dependency_build_ids) !== canonical(identity.dependencies)) reject('PRODUCER_RECIPE', component.id, 'actual producer recipe differs from frozen closure');
   if (completion.status !== 'complete' || completion.rc !== 0 || completion.source_sha !== component.source.commit
     || completion.source_tree !== component.source.tree) reject('SOURCE_CHECKOUT', component.id, 'sharedbuild actual source/completion mismatch');
+  const files = await readJson(await physicalPath(cache, 'artifact-manifest.json', component.id));
+  const nativeManifest = await fs.readFile(await physicalPath(cache, 'MANIFEST.sha256', component.id), 'utf8');
+  if (!nativeManifest.split('\n').includes(`${await fileDigest(path.join(cache, 'artifact-manifest.json'))}  artifact-manifest.json`)) reject('COMPLETION', component.id, 'producer artifact metadata does not match the native seal');
+  for (const [rel, row] of Object.entries(files)) {
+    if (!nativeManifest.split('\n').includes(`${row.sha256}  artifacts/${rel}`)) reject('COMPLETION', component.id, `native artifact digest mismatch ${rel}`);
+  }
   await fs.rename(path.join(cache, 'artifacts'), path.join(directory, 'artifacts'));
   if (component.roles.includes('compiler')) {
     await execute(component.config.tools.python3.path, [component.config.tools.compilerIdentity.path, path.join(directory, 'artifacts'),
       '--install', path.join(directory, 'artifacts/cjcj-stage1')]);
+    await execute(component.config.tools.python3.path, [component.config.tools.compilerIdentity.path, path.join(directory, 'artifacts'),
+      '--expected-producer-sha256', files['cjcj-stage1'].sha256]);
+    files['bin/cjcj-stage1'] = {...files['cjcj-stage1'], mode: 0o755};
+    for (const name of ['cjc', 'cjc-frontend']) files[`bin/${name}`] = {
+      type: 'symlink', target: 'cjcj-stage1', size: Buffer.byteLength('cjcj-stage1'), mode: 0o777, sha256: files['cjcj-stage1'].sha256};
+    const lineage = path.join(directory, 'artifacts/compiler-lineage.json'), stat = await fs.stat(lineage);
+    files['compiler-lineage.json'] = {type: 'file', size: stat.size, mode: stat.mode & 0o777, sha256: await fileDigest(lineage)};
   }
   return sealOutput(directory, component, identity, {...result, status: 'complete', kind,
     producerBuildId: completion.build_id, actualWork: completion.work,
-    source: {commit: completion.source_sha, tree: completion.source_tree, changes: completion.source_changes}});
+    source: {commit: completion.source_sha, tree: completion.source_tree, changes: completion.source_changes}}, files);
 }
 async function native(component, directory, identity, outputs) {
   await verifyProducer(component);
