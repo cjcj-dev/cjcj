@@ -69,7 +69,7 @@ resolve_cjpm_product() { printf '%s\\n' "$FIXTURE/seed"; }
 assert_executable() { test -x "$2"; }; assert_version() { :; }; stage2_forensic() { :; }
 sdk_ld_path() { printf '/fixture/loader'; }
 cmd() { case "$1" in python3*|env*|cp*) printf 'FIXTURE_NATIVE_BOUNDARY %s\\n' "$1";; *) eval "$1" || exit $?;; esac; }
-main --stage ${recipe}
+main --stage ${recipe} --sdk-plans ${quote(native.plans)}
 `;
   const run = spawnSync('bash', ['-c', script], {encoding: 'utf8'});
   await fs.writeFile(path.join(root, 'producer.log'), run.stdout + run.stderr);

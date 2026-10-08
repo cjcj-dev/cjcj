@@ -132,7 +132,7 @@ test('bootstrap producer reaches actual stdx and tools subprocess entries', asyn
   await prepareBootstrapHandoff(f);
   const pin = (await fs.readFile(new URL('../../ci/cjpm_pin.env', import.meta.url), 'utf8')).match(/^CJPM_FORK_REF=(.+)$/m)[1];
   await write(path.join(fakeBin, 'git'), `#!/bin/sh\ncase "$1" in rev-parse) printf '%s\\n' '${pin}' ;; esac\n`);
-  const previous = Object.fromEntries(['PATH', 'CJCJ_SRCBUILD_HOST_SDK', 'CANGJIE_BUILD_DRY_RUN'].map(key => [key, process.env[key]]));
+  const previous = Object.fromEntries(['PATH', 'CJCJ_SRCBUILD_HOST_SDK', 'CANGJIE_BUILD_DRY_RUN', 'CJCJ_VERIFIER_LLVM_DIS'].map(key => [key, process.env[key]]));
   t.after(() => {
     for (const [key, value] of Object.entries(previous)) {
       if (value === undefined) delete process.env[key]; else process.env[key] = value;
@@ -140,6 +140,12 @@ test('bootstrap producer reaches actual stdx and tools subprocess entries', asyn
   });
   process.env.PATH = `${fakeBin}:${process.env.PATH}`;
   process.env.CJCJ_SRCBUILD_HOST_SDK = host;
+  if (!process.env.CJCJ_VERIFIER_LLVM_DIS) {
+    const dis = spawnSync('sh', ['-c', 'command -v llvm-dis || command -v llvm-dis-18 || command -v llvm-dis-17 || command -v llvm-dis-16 || command -v llvm-dis-15 || command -v llvm-dis-14'], {encoding: 'utf8'});
+    assert.equal(dis.status, 0, 'package verifier needs a real llvm-dis input');
+    process.env.CJCJ_VERIFIER_LLVM_DIS = dis.stdout.trim();
+  }
+  console.log(`SDK_PACKAGE_LLVM_DIS path=${process.env.CJCJ_VERIFIER_LLVM_DIS} sha256=${await fileDigest(process.env.CJCJ_VERIFIER_LLVM_DIS)}`);
   delete process.env.CANGJIE_BUILD_DRY_RUN;
   const officialSdkRoot = path.join(f.root, 'official-sdk');
   await write(path.join(officialSdkRoot, 'tools', 'bin', 'cjpm'), 'official skeleton');
