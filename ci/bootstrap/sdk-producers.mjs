@@ -145,7 +145,18 @@ async function native(component, directory, identity, outputs) {
       if (process.env[key]) env[key] = process.env[key];
     }
   }
-  const result = await runProducer([component.config.tools.node.path, executable, request], {cwd: directory, env, log});
+  let result;
+  try { result = await runProducer([component.config.tools.node.path, executable, request], {cwd: directory, env, log}); }
+  catch (error) {
+    const records = (await fs.readFile(log, 'utf8')).split('\n').flatMap(line => {
+      try { const row = JSON.parse(line); return row.event === 'native-command-result' && (row.rc !== 0 || row.signal) ? [row] : []; }
+      catch { return []; }
+    });
+    const actual = records.at(-1);
+    if (actual) throw Object.assign(new Error(`NATIVE_PRODUCER_FAILED command=${actual.command} rc=${actual.rc} signal=${actual.signal} wrapper_rc=${error.rc} log=${log}`),
+      {rc: actual.rc, signal: actual.signal, wrapperRc: error.rc});
+    throw error;
+  }
   const after = await sourceIdentity(source, component.source, component.id, component.config.tools.git.path);
   return sealOutput(directory, component, identity, {...result, status: 'complete', kind: component.producer.adapter, before, source: after});
 }
@@ -187,6 +198,7 @@ export async function produceComponent(plan, component, identity, outputs, {resu
         : await native(component, directory, identity, outputs);
     await atomicJson(state, {status: 'complete', buildId: identity.buildId, rc: 0}); return output;
   } catch (error) {
-    await atomicJson(state, {status: 'failed', buildId: identity.buildId, rc: error.rc ?? null, error: error.message}); throw error;
+    await atomicJson(state, {status: 'failed', buildId: identity.buildId, rc: error.rc ?? null,
+      ...(error.signal ? {signal: error.signal} : {}), ...(error.wrapperRc !== undefined ? {wrapperRc: error.wrapperRc} : {}), error: error.message}); throw error;
   }
 }

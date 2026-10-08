@@ -21,11 +21,13 @@ const run = async (argv, options = {}) => {
   argv = [...argv];
   if (!path.isAbsolute(argv[0])) argv[0] = tool(argv[0]);
   console.log(canonical({argv, cwd: options.cwd}).trim());
+  const started = performance.now();
   const result = await new Promise((resolve, rejectPromise) => {
     const child = spawn(argv[0], argv.slice(1), {...options, stdio: 'inherit'});
     child.once('error', rejectPromise); child.once('exit', (rc, signal) => resolve({rc, signal}));
   });
-  if (result.rc !== 0 || result.signal) throw new Error(`native producer rc=${result.rc} signal=${result.signal} command=${argv[0]}`);
+  console.log(canonical({event: 'native-command-result', command: argv[0], ...result, wall: (performance.now() - started) / 1000}).trim());
+  if (result.rc !== 0 || result.signal) throw Object.assign(new Error(`native producer rc=${result.rc} signal=${result.signal} command=${argv[0]}`), result);
   return result;
 };
 async function fetchIdentity(input, target, label) {
@@ -196,5 +198,5 @@ export async function nativeProducer(request) {
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try { await nativeProducer(await readJson(process.argv[2])); }
-  catch (error) { console.error(error.message); process.exitCode = 1; }
+  catch (error) { console.error(error.message); process.exitCode = Number.isInteger(error.rc) && error.rc > 0 ? error.rc : 1; }
 }
