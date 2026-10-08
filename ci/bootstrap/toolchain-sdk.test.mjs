@@ -158,14 +158,14 @@ test('ordinary payload replacement cannot be blessed by rewriting the installati
 });
 test('same-source stamped but uncoloured runtime archive cannot accompany the coloured shared runtime', async () => {
   const f = await fixture(); const good = await invoke(f); assert.equal(good.rc, 0, good.stderr);
-  const root = f.identities.get('runtime').directory, archive = path.join(root, 'artifacts/lib', tuple, 'libcangjie-runtime.a');
+  const root = f.identities.get('runtime').directory, archive = path.join(root, 'artifacts/install/lib', tuple, 'libcangjie-runtime.a');
   const archiveBytes = await fs.readFile(archive), receiptPath = path.join(root, 'output.json'), donePath = path.join(root, 'DONE');
   const receiptBytes = await fs.readFile(receiptPath), doneBytes = await fs.readFile(donePath);
   const object = path.join(f.root, 'uncoloured-runtime.o');
   assert.equal((await command(['cc', '-c', '-fPIC', `-DCJRT_SHA="${f.sources.runtime.commit}"`,
     path.join(f.sources.runtime.repo, 'runtime.c'), '-o', object])).rc, 0);
   await fs.unlink(archive); assert.equal((await command(['ar', 'rcs', archive, object])).rc, 0);
-  const receipt = JSON.parse(receiptBytes), row = receipt.files[`lib/${tuple}/libcangjie-runtime.a`];
+  const receipt = JSON.parse(receiptBytes), row = receipt.files[`install/lib/${tuple}/libcangjie-runtime.a`];
   row.sha256 = await fileDigest(archive); row.size = (await fs.stat(archive)).size;
   await atomicJson(receiptPath, receipt); await fs.writeFile(donePath, `${await fileDigest(receiptPath)}\n`);
   f.out = path.join(f.root, 'wrong-runtime-pair'); const rejected = await invoke(f); observed(rejected, 'runtime-static-colour');
@@ -310,7 +310,8 @@ test('transported receipts retain original build origin and frozen digest withou
   for (const component of f.plan.components) {
     const original = f.identities.get(component.id).directory, destination = path.join(f.root, 'received', component.id);
     await fs.mkdir(destination, {recursive: true});
-    await fs.cp(path.join(original, 'artifacts'), path.join(destination, 'artifacts'), {recursive: true, dereference: false});
+    await fs.cp(path.join(original, 'artifacts'), path.join(destination, 'artifacts'),
+      {recursive: true, dereference: false, verbatimSymlinks: true});
     for (const name of ['output.json', 'DONE']) await fs.copyFile(path.join(original, name), path.join(destination, name));
     records[component.id] = await fs.readFile(path.join(destination, 'output.json'));
     Object.assign(component.producer, {receipt: destination, originBuildRoot: originalRoot,
@@ -373,7 +374,7 @@ test('bootstrap phase reuse binds installed plan and manifest before returning a
   const argv = [process.execPath, path.join(here, 'bootstrap-sdk.mjs'), '--plans', plans,
     '--phase', 'stage1-initial', '--out', f.out];
   const normal = await command(argv); observed(normal, 'phase-reuse'); assert.equal(normal.rc, 0, normal.stderr);
-  assert.equal(JSON.parse(normal.stdout.trim()).reused, true);
+  assert.equal(JSON.parse(normal.stdout.trim().split('\n').at(-1)).reused, true);
   const installedPlan = path.join(f.out, 'SDK.plan.json'), original = await fs.readFile(installedPlan);
   const changed = JSON.parse(original); changed.lane = 'another-owner'; await atomicJson(installedPlan, changed);
   const rejected = await command(argv); observed(rejected, 'phase-plan-binding');
