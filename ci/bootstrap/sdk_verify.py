@@ -225,6 +225,16 @@ def verify(sdk: Path, lock: dict, pin: dict, identities: dict, errors: list, tar
         if rel != LOCK_NAME and rel not in on_disk:
             fail('UNDECLARED', f'lock entry missing on disk: {rel}', errors)
     for rel, entry in lock_files.items():
+        path = on_disk.get(rel)
+        if path is not None and rel != LOCK_NAME:
+            if bool(entry.get('symlink')) != path.is_symlink():
+                fail('PAYLOAD_TYPE', f'type differs from sealed lock: {rel}', errors)
+            if not path.is_symlink() and path.is_file() and (
+                    ('size' in entry and path.stat().st_size != entry['size']) or
+                    ('mode' in entry and path.stat().st_mode & 0o777 != entry['mode'])):
+                fail('PAYLOAD_TYPE', f'size/mode differs from sealed lock: {rel}', errors)
+            if not path.is_file() or not HEX64_RE.fullmatch(entry.get('sha256') or '') or sha256_file(path) != entry.get('sha256'):
+                fail('PAYLOAD_DIGEST', f'content differs from sealed lock: {rel}', errors)
         if entry.get('component') == 'official-retain' and rel not in (lock.get('official_retain') or {}):
             fail('UNDECLARED', f'official-retain without reason: {rel}', errors)
         if entry.get('component') not in {
