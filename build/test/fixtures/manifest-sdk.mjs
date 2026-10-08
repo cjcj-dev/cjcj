@@ -29,7 +29,7 @@ const elf = async (file, script, stamp = '') => {
   run(['cc', '-x', 'c', '-', '-o', file], {input: source});
 };
 
-export async function manifestSdkFixture({root, compiler, prefix, inputSdk, shimSource, role = 'target', runtimeInput, rewriteInputs = true}) {
+export async function manifestSdkFixture({root, compiler, prefix, inputSdk, shimSource, role = 'target', runtimeInput, rewriteInputs = true, hostPhases = true}) {
   const firstExecution = executions.length;
   const generation = await fs.mkdtemp(path.join(root, 'manifest-input-'));
   const source = path.join(generation, 'source'); await fs.mkdir(source);
@@ -108,9 +108,10 @@ export async function manifestSdkFixture({root, compiler, prefix, inputSdk, shim
   run(['python3','-B',tools.compilerIdentity.path,artifacts,'--install',path.join(generation,'compiler')]);
   for(const name of ['cjpm','opt','llc','ld.lld']) await elf(path.join(artifacts,name==='cjpm'?'tools/bin/cjpm':`third_party/llvm/bin/${name}`),await fs.readFile(path.join(source,`${name}.sh`),'utf8'),name==='cjpm'?'':`CJLLVM-COMMIT:${identity.commit}`);
   const runtime=path.join(artifacts,'runtime/lib',tuple,'libcangjie-runtime.so'); await fs.mkdir(path.dirname(runtime),{recursive:true});
-  run(['cc','-shared','-fPIC',`-DSOURCE_SHA="${identity.commit}"`,...(role==='target'?['-DCOLOUR']:[]),path.join(source,'runtime.c'),'-o',runtime]);
+  const runtimeDefines = role === 'target' ? [`-DSOURCE_SHA="${identity.commit}"`, '-DCOLOUR'] : [];
+  run(['cc','-shared','-fPIC',...runtimeDefines,path.join(source,'runtime.c'),'-o',runtime]);
   const runtimeObject = path.join(generation,'runtime.o');
-  run(['cc','-c','-fPIC',`-DSOURCE_SHA="${identity.commit}"`,...(role==='target'?['-DCOLOUR']:[]),path.join(source,'runtime.c'),'-o',runtimeObject]);
+  run(['cc','-c','-fPIC',...runtimeDefines,path.join(source,'runtime.c'),'-o',runtimeObject]);
   await fs.mkdir(path.join(artifacts,'lib',tuple),{recursive:true});
   run(['ar','rcs',path.join(artifacts,'lib',tuple,'libcangjie-runtime.a'),runtimeObject]);
   let colourRuntime=runtimeInput?path.join(runtimeInput.root,runtimePaths[0]):runtime;
@@ -146,6 +147,11 @@ export async function manifestSdkFixture({root, compiler, prefix, inputSdk, shim
   const receipt=await sealOutput(directory,component,ids.get(component.id),{status:'complete',rc:0,kind:'native-consumer-fixture',before,source:after,
     commands:executions.slice(firstExecution)});
   Object.assign(component.producer,{receipt:directory,receiptSha256:receipt.receiptSha256,originBuildRoot:plan.buildRoot});
+  // Host phases have their own clean native receipt and uncoloured runtime.
+  // Changing just a target plan's role would preserve the wrong producer.
+  const hostPlan = role === 'target' && hostPhases
+    ? (await manifestSdkFixture({root,compiler,prefix,inputSdk,shimSource,role:'host',rewriteInputs:false,hostPhases:false})).plan
+    : plan;
   // Work inputs are real sealed bytes, not a digest fabricated by the test.
   if(rewriteInputs) {
     await fs.copyFile(path.join(generation,'compiler'),compiler);
@@ -153,7 +159,7 @@ export async function manifestSdkFixture({root, compiler, prefix, inputSdk, shim
     await fs.chmod(path.join(prefix,'lib',tuple,'libcangjie-std-core.a'),(await fs.stat(core)).mode & 0o777);
     await fs.copyFile(path.join(artifacts,'std-producer.json'),path.join(prefix,'std-producer.json'));
   }
-  const phases=Object.fromEntries(BOOTSTRAP_PHASES.map(phase=>[phase,{...structuredClone(plan),
+  const phases=Object.fromEntries(BOOTSTRAP_PHASES.map(phase=>[phase,{...structuredClone(['stage0','stage0-run','std-bootstrap'].includes(phase)?hostPlan:plan),
     role:['stage0','stage0-run','std-bootstrap'].includes(phase)?'host':'target',
     stage:phase==='stage3'?'final':['stage2','stage3-std'].includes(phase)?'stage2':'stage1'}]));
   const plans=path.join(generation,'plans.json');await atomicJson(plans,validateBootstrapPlans({schema:'bootstrap-sdk-plans-v1',phases}));
