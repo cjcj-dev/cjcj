@@ -7,6 +7,7 @@ import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {gzipSync} from 'node:zlib';
 import {fileDigest, inventory, atomicJson, buildIdentities, sealOutput, sourceIdentity, ROLES} from '../../../ci/bootstrap/sdk-manifest.mjs';
+import {resolvePlan} from '../../../ci/bootstrap/toolchain-sdk.mjs';
 import {BOOTSTRAP_PHASES, validateBootstrapPlans} from '../../../ci/bootstrap/freeze-bootstrap-plans.mjs';
 
 const tuple = 'linux_x86_64_cjnative';
@@ -29,7 +30,43 @@ const elf = async (file, script, stamp = '') => {
   run(['cc', '-x', 'c', '-', '-o', file], {input: source});
 };
 
+// A real official distribution is an input, never a stamp minted from small C.
+// This helper only constructs one domain. The bundle caller selects each phase.
+async function officialInputs(root, target) {
+  const file = process.env.SDK_CONSUMER_INPUT_PLAN;
+  if (!file) throw new Error('SDK_CONSUMER_INPUT_PLAN: a retained real official distribution plan is required');
+  const retained = JSON.parse(await fs.readFile(file, 'utf8'));
+  const original = retained.components.find(c => c.source.kind === 'distribution' && c.producer.adapter === 'official');
+  if (!original) throw new Error('SDK_CONSUMER_INPUT_PLAN: official distribution component missing');
+  const component = structuredClone(original);
+  component.roles = [...ROLES];
+  component.install = [{from:'',to:'', ...(target ? {exclude:[
+    'bin/cjc','bin/cjc-frontend','bin/cjcj-stage1','compiler-lineage.json','std-producer.json',
+    'modules','lib','runtime','third_party/llvm','tools/bin/cjpm','share/cjcj/runtime_shim',
+  ]} : {})}];
+  const {receipt, receiptSha256, originBuildRoot, ...producer} = component.producer;
+  component.producer = producer;
+  const buildRoot = path.join(process.env.SDK_CONSUMER_TEST_ROOT || root, 'official-input-builds');
+  const plan = {schema:'toolchain-sdk-plan-v1',lane:'native-consumer-fixture',role:'host',stage:'stage1',
+    platform:retained.platform,buildRoot,components:[component],verification:structuredClone(retained.verification)};
+  const manifest = await resolvePlan(plan);
+  const row = manifest.components[component.id];
+  Object.assign(component.producer,{receipt:row.directory,receiptSha256:row.receiptSha256,originBuildRoot:buildRoot});
+  return {component, verification:plan.verification, buildRoot};
+}
+
+export async function officialHostPlan(root, verification) {
+  const input = await officialInputs(root, false);
+  const plan = {schema:'toolchain-sdk-plan-v1',lane:'native-consumer-fixture',role:'host',stage:'stage1',
+    platform:'linux_x86_64',buildRoot:input.buildRoot,components:[input.component],
+    verification:verification || input.verification};
+  const planFile = path.join(root,'official-host.plan.json');
+  await atomicJson(planFile,plan);
+  return {plan,planFile,receipt:JSON.parse(await fs.readFile(path.join(input.component.producer.receipt,'output.json'),'utf8'))};
+}
+
 export async function manifestSdkFixture({root, compiler, prefix, inputSdk, shimSource, role = 'target', runtimeInput, rewriteInputs = true}) {
+  if (role === 'host') return officialHostPlan(root);
   const firstExecution = executions.length;
   const generation = await fs.mkdtemp(path.join(root, 'manifest-input-'));
   const source = path.join(generation, 'source'); await fs.mkdir(source);
@@ -46,12 +83,8 @@ export async function manifestSdkFixture({root, compiler, prefix, inputSdk, shim
     await write(path.join(source, `${name}.sh`), script);
   }
   const identity = await commit(source);
-  const official = path.join(generation, 'official');
-  await write(path.join(official, 'envsetup.sh'), 'export CANGJIE_HOME="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"\nexport PATH="$CANGJIE_HOME/bin:$CANGJIE_HOME/tools/bin:$CANGJIE_HOME/third_party/llvm/bin:$PATH"\nexport LD_LIBRARY_PATH="$CANGJIE_HOME/runtime/lib/linux_x86_64_cjnative:$CANGJIE_HOME/lib/linux_x86_64_cjnative:$CANGJIE_HOME/third_party/llvm/lib:$CANGJIE_HOME/tools/lib"\n');
-  await write(path.join(official, 'retained-host-tool.txt'), 'explicit native fixture official retention\n');
-  const lock = path.join(generation, 'official.lock.json');
-  await atomicJson(lock, {schema: 'sharedbuild-official-sdk-v1', role: 'host', version: 'native-consumer-fixture', files: await inventory(official)});
-  const host = path.join(generation, 'host-runtime.so'); run(['cc', '-shared', '-fPIC', path.join(source, 'runtime.c'), '-o', host]);
+  const officialInput = await officialInputs(root, true);
+  const host = officialInput.verification.hostRuntime.path;
   const pin = path.join(generation, 'runtime.env'); await write(pin, `RUNTIME_REF=${identity.commit}\n`);
   const tools = {};
   for (const name of ['python3','node','git','bash','tar','cmake','clang','clang++','cc','ar']) {
@@ -62,11 +95,8 @@ export async function manifestSdkFixture({root, compiler, prefix, inputSdk, shim
     sha256: await fileDigest(new URL('../../../ci/bootstrap/compiler_identity.py', import.meta.url))};
   const plan = {schema:'toolchain-sdk-plan-v1',lane:'native-consumer-fixture',role,stage:'stage2',platform:'linux_x86_64',
     buildRoot:path.join(generation,'builds'),components:[],verification:{runtimePin:{path:pin,sha256:await fileDigest(pin)},
-      colourRuntime:{path:host,sha256:await fileDigest(host)},hostRuntime:{path:host,sha256:await fileDigest(host)},hostRuntimeDir:generation}};
-  plan.components.push({id:'official',roles:['official-host'],domain:'host',source:{kind:'distribution',root:official,lock,
-    lockSha256:await fileDigest(lock),version:'native-consumer-fixture',reason:'declared native fixture retained host input'},
-    config:{host:plan.platform,target:plan.platform,options:{},tools:{}},producer:{adapter:'official',version:'a'.repeat(40)},
-    dependencies:[],install:[{from:'',to:''}]});
+      colourRuntime:{path:host,sha256:await fileDigest(host)},hostRuntime:{path:host,sha256:await fileDigest(host)},hostRuntimeDir:officialInput.verification.hostRuntimeDir}};
+  plan.components.push(officialInput.component);
   let runtimeComponent;
   if (runtimeInput) {
     const repo = await fs.realpath(runtimeInput.sourceRoot);
@@ -153,8 +183,10 @@ export async function manifestSdkFixture({root, compiler, prefix, inputSdk, shim
     await fs.chmod(path.join(prefix,'lib',tuple,'libcangjie-std-core.a'),(await fs.stat(core)).mode & 0o777);
     await fs.copyFile(path.join(artifacts,'std-producer.json'),path.join(prefix,'std-producer.json'));
   }
-  const phases=Object.fromEntries(BOOTSTRAP_PHASES.map(phase=>[phase,{...structuredClone(plan),
-    role:['stage0','stage0-run','std-bootstrap'].includes(phase)?'host':'target',
+  const hostInput = await officialHostPlan(generation, {...officialInput.verification,
+    runtimePin:structuredClone(plan.verification.runtimePin),colourRuntime:structuredClone(plan.verification.colourRuntime)});
+  const phases=Object.fromEntries(BOOTSTRAP_PHASES.map(phase=>[phase,{...structuredClone(
+    ['stage0','stage0-run','std-bootstrap'].includes(phase)?hostInput.plan:plan),
     stage:phase==='stage3'?'final':['stage2','stage3-std'].includes(phase)?'stage2':'stage1'}]));
   const plans=path.join(generation,'plans.json');await atomicJson(plans,validateBootstrapPlans({schema:'bootstrap-sdk-plans-v1',phases}));
   const planFile=path.join(generation,'plan.json');await atomicJson(planFile,plan);

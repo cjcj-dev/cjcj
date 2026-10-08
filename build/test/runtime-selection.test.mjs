@@ -173,7 +173,7 @@ for (const candidate of [false, true]) {
     }
     fs.mkdirSync(path.join(hostStdInput, 'modules', tuple), {recursive: true});
     fs.writeFileSync(path.join(hostStdInput, 'modules', tuple, 'std.core.cjo'), 'independent host std fixture');
-    const hostPlan = await manifestSdkFixture({root:f.dir,compiler:hostInput,prefix:hostStdInput,inputSdk:a.base,role:'host',rewriteInputs:false});
+    const hostPlan = await manifestSdkFixture({root:f.dir,role:'host'});
     const h = execute(['bash', path.join(repo, 'ci/bootstrap/sdk_build.sh'), '--plan', hostPlan.planFile, '--to', host], f.env);
     assert.equal(h.status, 0, h.output);
     assert.equal(hash(path.join(host, 'runtime/lib', tuple, 'libcangjie-runtime.so')), hostPlan.receipt.files[`runtime/lib/${tuple}/libcangjie-runtime.so`].sha256);
