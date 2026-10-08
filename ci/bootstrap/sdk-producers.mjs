@@ -58,7 +58,7 @@ async function official(component, directory, identity) {
   return sealOutput(directory, component, identity, {status: 'complete', rc: 0, kind: 'official-distribution-copy',
     distribution: {version: source.version, lockSha256: source.lockSha256, reason: source.reason}});
 }
-async function sharedbuild(component, directory, identity, plan) {
+async function sharedbuild(component, directory, identity, plan, resumeFailed) {
   const {engine, engineSha256, recipe} = component.producer;
   if (await fileDigest(engine) !== engineSha256) reject('PRODUCER_IDENTITY', component.id, 'sharedbuild engine digest');
   const spec = await readJson(recipe);
@@ -73,7 +73,7 @@ async function sharedbuild(component, directory, identity, plan) {
   const log = path.join(directory, 'logs', 'sharedbuild.log');
   const result = await runProducer(['python3', engine, '--remote', '--root', path.join(plan.buildRoot, 'shared-cache'),
     '--lane', path.basename(plan.buildRoot), 'build', '--recipe', recipe, '--work', path.join(plan.buildRoot, 'shared-work'),
-    '--copy-to', path.join(directory, 'sharedbuild-output')], {cwd: directory, env: process.env, log});
+    '--copy-to', path.join(directory, 'sharedbuild-output'), ...(resumeFailed ? ['--resume'] : [])], {cwd: directory, env: process.env, log});
   const cache = path.join(directory, 'sharedbuild-output');
   const completion = await readJson(path.join(cache, 'completion.json'));
   if (completion.status !== 'complete' || completion.rc !== 0 || completion.source_sha !== component.source.commit
@@ -100,7 +100,7 @@ async function native(component, directory, identity, outputs) {
   const after = await sourceIdentity(source, component.source, component.id);
   return sealOutput(directory, component, identity, {...result, status: 'complete', kind: component.producer.adapter, before, source: after});
 }
-export async function produceComponent(plan, component, identity, outputs) {
+export async function produceComponent(plan, component, identity, outputs, {resumeFailed = false} = {}) {
   const directory = identity.directory;
   if (component.producer.receipt) {
     // A sealed adapter consumes an actual prior producer record. It cannot
@@ -115,7 +115,18 @@ export async function produceComponent(plan, component, identity, outputs) {
   // Preserve failures and don't automatically repeat a failed producer.
   try {
     const previous = await readJson(state);
-    if (previous.status !== 'complete') reject('PRODUCER_PREVIOUS_FAILURE', component.id, `state=${previous.status}; requires an explicit same-input recovery`);
+    if (previous.buildId !== identity.buildId) reject('COMPLETION', component.id, 'failed work belongs to another build id');
+    if (previous.status !== 'complete' && !resumeFailed) reject('PRODUCER_PREVIOUS_FAILURE', component.id, `state=${previous.status}; requires an explicit same-input recovery`);
+    if (resumeFailed) {
+      // Preserve the original state/logs and partial payload. Native build dirs
+      // stay in place; only an incomplete install is moved out of the way.
+      const attempt = path.join(directory, 'logs', `recovery-${Date.now()}`); await fs.mkdir(attempt);
+      await fs.copyFile(state, path.join(attempt, 'state.json'));
+      for (const name of ['artifacts', 'sharedbuild-output']) {
+        try { await fs.rename(path.join(directory, name), path.join(attempt, name)); }
+        catch (error) { if (error.code !== 'ENOENT') throw error; }
+      }
+    }
   } catch (error) { if (error.code !== 'ENOENT') throw error; }
   await atomicJson(state, {status: 'building', buildId: identity.buildId});
   try {
@@ -123,7 +134,7 @@ export async function produceComponent(plan, component, identity, outputs) {
       if (await fileDigest(tool.path) !== tool.sha256) reject('TOOL_IDENTITY', component.id, name);
     }
     const output = component.producer.adapter === 'official' ? await official(component, directory, identity)
-      : component.producer.adapter.startsWith('sharedbuild-') ? await sharedbuild(component, directory, identity, plan)
+      : component.producer.adapter.startsWith('sharedbuild-') ? await sharedbuild(component, directory, identity, plan, resumeFailed)
         : await native(component, directory, identity, outputs);
     await atomicJson(state, {status: 'complete', buildId: identity.buildId, rc: 0}); return output;
   } catch (error) {

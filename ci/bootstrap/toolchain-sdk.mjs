@@ -8,6 +8,7 @@ import {PLAN_SCHEMA, RESOLVED_SCHEMA, validatePlan, buildIdentities, topological
   readOutput, resolveFiles, readJson, atomicJson, canonical, objectId, fileDigest,
   physicalPath, reject, withLock, PLATFORMS, execute, relative} from './sdk-manifest.mjs';
 import {produceComponent} from './sdk-producers.mjs';
+import {verifyBootstrapRuntimeSdk} from './runtime_sdk.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 async function requiredInput(input, label) {
@@ -54,6 +55,15 @@ async function verifySdk(sdk, plan, manifest) {
   // verifier's --write-lock is no longer the authority for payload identity.
   await execute('python3', [path.join(here, 'sdk_verify.py'), '--sdk', sdk, '--role', plan.role,
     '--runtime-pin', plan.verification.runtimePin.path, '--target-tuple', tuple]);
+  if (plan.role === 'target' && plan.verification.runtimeManifest) {
+    await verifyBootstrapRuntimeSdk(sdk, tuple, {
+      ...process.env, RUNTIME_REF: plan.components.find(component => component.roles.includes('runtime') && component.domain === 'target').source.commit,
+      COLOUR_RT_ROOT: plan.verification.runtimeManifest.root,
+      COLOUR_RT_MANIFEST_SHA256: plan.verification.runtimeManifest.sha256,
+      COLOUR_RT_RUN_ID: plan.verification.runtimeManifest.runId,
+      COLOUR_RT_RUN_ATTEMPT: plan.verification.runtimeManifest.runAttempt,
+    });
+  }
   if (!plan.platform.startsWith('linux_')) reject('VERIFIER_PLATFORM', plan.platform, 'native Darwin/Windows colour verifier migration remains required');
   await execute('python3', [path.join(here, 'std_runtime_colour.py'),
     '--colour-runtime', plan.verification.colourRuntime.path, '--host-runtime', plan.verification.hostRuntime.path,
@@ -80,11 +90,22 @@ async function verifySdk(sdk, plan, manifest) {
 }
 function installLock(plan, manifest) {
   const components = Object.fromEntries(plan.components.map(component => [component.id, component]));
-  const classified = role => ({compiler: 'cjc', 'llvm-tools': 'llvm', 'llvm-dylib': 'llvm', ast: 'std',
-    'official-host': 'official-retain', ...Object.fromEntries(['std', 'runtime', 'boundscheck', 'cjpm'].map(value => [value, value]))})[role];
+  // Preserve sdk_verify's semantic classification even for retained official
+  // files. Declaring the distribution must not bypass std/compiler pairing.
+  const classify = rel => {
+    if (/^bin\/(cjc|cjcj-stage1|cjc-frontend)$/.test(rel)) return 'cjc';
+    if (rel === 'compiler-lineage.json') return 'sdk-meta';
+    if (rel === 'std-producer.json' || rel.startsWith('modules/')) return 'std';
+    if (rel.startsWith('tools/bin/cjpm')) return 'cjpm';
+    if (rel.startsWith('third_party/llvm/')) return 'llvm';
+    if (/\/(?:libcangjie-runtime|libboundscheck)/.test(rel)) return rel.includes('libboundscheck') ? 'boundscheck' : 'runtime';
+    if (rel.startsWith('runtime/include/')) return 'runtime';
+    if (rel.startsWith('lib/') || rel.startsWith('runtime/lib/')) return 'std';
+    return 'official-retain';
+  };
   const files = Object.fromEntries(Object.entries(manifest.files).map(([rel, entry]) => [rel, {
     sha256: entry.sha256, size: entry.size, mode: entry.mode, type: entry.type,
-    component: classified(components[entry.component].roles[0]),
+    component: classify(rel),
     symlink: entry.type === 'symlink', ...(entry.type === 'symlink' ? {link_target: entry.target} : {}),
     producer: {build_id: entry.buildId, receipt_sha256: entry.receiptSha256, source: components[entry.component].source},
   }]));
@@ -98,7 +119,7 @@ function installLock(plan, manifest) {
       llvm_tuple: {sha256: llvm?.source.commit || null},
       cjc: {sha256: (manifest.files['bin/cjcj-stage1'] || manifest.files['bin/cjc'])?.sha256}}};
 }
-export async function resolvePlan(plan, {dryRun = false} = {}) {
+export async function resolvePlan(plan, {dryRun = false, resumeFailed = false} = {}) {
   validatePlan(plan);
   const identities = buildIdentities(plan), outputs = new Map();
   if (dryRun) return {schema: 'toolchain-sdk-dry-run-v1', planSha256: objectId(plan),
@@ -112,7 +133,7 @@ export async function resolvePlan(plan, {dryRun = false} = {}) {
       try { output = await readOutput(directory, component, identity); }
       catch (error) {
         if (error.code !== 'ENOENT') throw error;
-        output = await produceComponent(plan, component, identity, outputs);
+        output = await produceComponent(plan, component, identity, outputs, {resumeFailed});
       }
       outputs.set(component.id, output);
       console.log(`SDK_COMPONENT_READY component=${component.id} build_id=${output.buildId} receipt=${output.receiptSha256}`);
@@ -128,18 +149,18 @@ export async function resolvePlan(plan, {dryRun = false} = {}) {
   await atomicJson(path.join(plan.buildRoot, `resolved-${manifest.planSha256}.json`), manifest);
   return manifest;
 }
-export async function assembleSdk(plan, out, {dryRun = false} = {}) {
+export async function assembleSdk(plan, out, {dryRun = false, resumeFailed = false} = {}) {
   validatePlan(plan);
   // Refuse unsupported verification BEFORE running any producer.
   if (!plan.platform.startsWith('linux_') && !dryRun) reject('VERIFIER_PLATFORM', plan.platform, 'native verifier migration incomplete');
-  const result = await resolvePlan(plan, {dryRun});
-  if (dryRun) return result;
+  if (dryRun) return resolvePlan(plan, {dryRun});
   const parent = await fs.realpath(path.dirname(out)); out = path.join(parent, path.basename(out));
   if (out === '/root/sdks' || out.startsWith('/root/sdks/') || out === '/root/.cjv' || out.startsWith('/root/.cjv/')) reject('SHARED_INSTALL', 'sdk', out);
   if (out === plan.buildRoot || out.startsWith(`${plan.buildRoot}${path.sep}`)) reject('INSTALL', 'sdk', 'destination overlaps build root');
   return withLock(`${out}.lock`, async () => {
     try { await fs.lstat(out); reject('DESTINATION_EXISTS', 'sdk', out); }
     catch (error) { if (error.code !== 'ENOENT') throw error; }
+    const result = await resolvePlan(plan, {resumeFailed});
     const staging = `${out}.staging-${crypto.randomUUID()}`; await fs.mkdir(staging);
     try {
       await copyArtifacts(staging, result);
@@ -166,11 +187,12 @@ export async function main(args = process.argv.slice(2)) {
   const {values} = parseArgs({args, strict: true, options: {
     plan: {type: 'string'}, out: {type: 'string'}, 'dry-run': {type: 'boolean', default: false},
     resolve: {type: 'boolean', default: false},
+    'resume-failed': {type: 'boolean', default: false},
   }});
   if (!values.plan || (!values.out && !values.resolve && !values['dry-run'])) throw new Error('usage: toolchain-sdk.mjs --plan JSON --out PRIVATE_SDK [--dry-run] [--resolve]');
   const plan = await readJson(values.plan);
-  const result = values.resolve ? await resolvePlan(plan, {dryRun: values['dry-run']})
-    : await assembleSdk(plan, values.out, {dryRun: values['dry-run']});
+  const options = {dryRun: values['dry-run'], resumeFailed: values['resume-failed']};
+  const result = values.resolve ? await resolvePlan(plan, options) : await assembleSdk(plan, values.out, options);
   console.log(canonical(result).trim()); return result;
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

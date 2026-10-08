@@ -108,6 +108,30 @@ export function validatePlan(plan) {
       absolute(producer.engine, id); absolute(producer.recipe, id);
       if (!HEX64.test(producer.engineSha256)) reject('ADAPTER', id, 'sharedbuild engine hash required');
       if (config.host !== 'linux_x86_64' || config.target !== 'linux_x86_64') reject('ADAPTER_PLATFORM', id, 'existing sharedbuild supports Linux x86_64');
+      fields(config.options, ['parameters', 'optimization'], [], id);
+      if (!['O0', 'O1', 'Release'].includes(config.options.optimization)) reject('CONFIG', id, 'sharedbuild optimization');
+      if (!config.tools.builder) reject('CONFIG', id, 'pinned builder required');
+    }
+    if (producer.adapter === 'official' && Object.keys(config.options).length) reject('CONFIG', id, 'official copy has no build options');
+    if (producer.adapter === 'bootstrap-std') {
+      fields(config.options, ['sdkDependency', 'compilerDependency', 'runtimeDependency', 'llvmToolsDependency', 'llvmDylibDependency',
+        'astDependency', 'heap', 'targetLibRelative'], ['launcher'], id);
+      for (const key of ['sdkDependency', 'compilerDependency', 'runtimeDependency', 'llvmToolsDependency', 'llvmDylibDependency', 'astDependency']) {
+        if (!component.dependencies.includes(config.options[key])) reject('DEPENDENCY', id, `option ${key} not in closure`);
+      }
+      relative(config.options.targetLibRelative, id, {empty: true});
+      if (!/^\d+GB$/.test(config.options.heap)) reject('CONFIG', id, 'heap');
+    }
+    if (['llvm-tools', 'llvm-dylib'].includes(producer.adapter)) {
+      fields(config.options, ['targets', 'runtimeDependency'], ['compilerSource', 'flatbuffersSource', 'launcher'], id);
+      if (!component.dependencies.includes(config.options.runtimeDependency)) reject('DEPENDENCY', id, 'LLVM runtime input not in closure');
+      if (!['X86;ARM;AArch64', 'AArch64', 'X86'].includes(config.options.targets)) reject('CONFIG', id, 'LLVM targets');
+      if (producer.adapter === 'llvm-tools') {
+        for (const key of ['compilerSource', 'flatbuffersSource']) {
+          fields(config.options[key], ['repo', 'commit', 'tree'], [], id);
+          if (!HEX40.test(config.options[key].commit) || !HEX40.test(config.options[key].tree) || !config.options[key].repo) reject('SOURCE', id, key);
+        }
+      }
     }
     if (['bootstrap-std', 'llvm-tools', 'llvm-dylib'].includes(producer.adapter)) absolute(producer.repository, id);
     if (producer.adapter === 'bootstrap-std' && !plan.platform.startsWith('linux_')) reject('ADAPTER_PLATFORM', id, 'bootstrap.sh std recipe is Linux only');
@@ -124,8 +148,12 @@ export function validatePlan(plan) {
   for (const role of ROLES) if (!roles.has(role)) reject('MISSING_COMPONENT', role, 'complete SDK plan required');
   for (const component of plan.components) for (const dep of component.dependencies) if (!ids.has(dep)) reject('DEPENDENCY', component.id, `unknown ${dep}`);
   topological(plan);
-  const llvm = plan.components.filter(component => component.domain === 'target' && component.roles.some(role => ['llvm-tools', 'llvm-dylib'].includes(role)));
-  if (new Set(llvm.map(component => `${component.source.kind}:${component.source.commit}:${component.source.tree}`)).size > 1) reject('LLVM_SOURCE', 'llvm', 'tools and dylib must declare the same LLVM commit/tree');
+  for (const domain of ['host', 'target']) {
+    const llvm = plan.components.filter(component => component.domain === domain && component.roles.some(role => ['llvm-tools', 'llvm-dylib'].includes(role)));
+    if (new Set(llvm.map(component => `${component.source.kind}:${component.source.commit}:${component.source.tree}:${component.source.lockSha256 || ''}`)).size > 1) reject('LLVM_SOURCE', 'llvm', `${domain} tools and dylib must declare the same LLVM commit/tree or official distribution`);
+    const buildRuntimeDependencies = llvm.map(component => component.config.options.runtimeDependency).filter(Boolean);
+    if (new Set(buildRuntimeDependencies).size > 1) reject('LLVM_DEPENDENCY', 'llvm', `${domain} producers use different paired runtime inputs`);
+  }
   fields(plan.verification, ['runtimePin', 'colourRuntime', 'hostRuntime'], ['hostRuntimeDir', 'runtimeManifest', 'hostSdk', 'hostSdkLockSha256'], 'verification');
   for (const key of ['runtimePin', 'colourRuntime', 'hostRuntime']) {
     const input = plan.verification[key]; fields(input, ['path', 'sha256'], [], key);
@@ -133,6 +161,12 @@ export function validatePlan(plan) {
   }
   if (plan.role === 'target' && !plan.verification.hostRuntimeDir) reject('DOMAIN', 'verification', 'target execution needs explicit host runtime directory');
   if (plan.verification.hostRuntimeDir) absolute(plan.verification.hostRuntimeDir, 'hostRuntimeDir');
+  if (plan.verification.runtimeManifest) {
+    fields(plan.verification.runtimeManifest, ['root', 'sha256', 'runId', 'runAttempt'], [], 'runtimeManifest');
+    absolute(plan.verification.runtimeManifest.root, 'runtimeManifest');
+    if (!HEX64.test(plan.verification.runtimeManifest.sha256) || !/^\d+$/.test(plan.verification.runtimeManifest.runId)
+      || !/^\d+$/.test(plan.verification.runtimeManifest.runAttempt)) reject('VERIFICATION', 'runtimeManifest', 'frozen identity');
+  }
   return plan;
 }
 export function topological(plan) {
@@ -200,9 +234,14 @@ export async function withLock(directory, action) {
   await fs.mkdir(path.dirname(directory), {recursive: true});
   // mkdir is atomic on native Linux, Darwin and Windows. A crash leaves a
   // conservative lock requiring explicit operator cleanup, never a false hit.
+  const start = Date.now();
   while (true) {
     try { await fs.mkdir(directory); break; }
-    catch (error) { if (error.code !== 'EEXIST') throw error; await new Promise(resolve => setTimeout(resolve, 100)); }
+    catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+      if (Date.now() - start > 180 * 60 * 1000) reject('LOCK_TIMEOUT', 'lock', directory);
+      await new Promise(resolve => setTimeout(resolve, 250));
+    }
   }
   try {
     await atomicJson(path.join(directory, 'owner.json'), {pid: process.pid, hostname: os.hostname(), start: new Date().toISOString()});
@@ -219,6 +258,9 @@ export async function readOutput(directory, component, identity) {
       !== canonical({...component, producer: {...component.producer, receipt: undefined}})
     || canonical(record.dependencies) !== canonical(identity.dependencies)) reject('COMPLETION', component.id, 'successful exact producer record required');
   if (!record.files || !Object.keys(record.files).length || record.artifacts !== path.join(directory, 'artifacts')) reject('COMPLETION', component.id, 'sealed artifact directory missing');
+  if (component.source.kind === 'git' && (record.execution?.source?.commit !== component.source.commit
+    || record.execution?.source?.tree !== component.source.tree)) reject('SOURCE_COMPLETION', component.id, 'actual producer source identity missing');
+  if (component.source.kind === 'distribution' && record.execution?.distribution?.lockSha256 !== component.source.lockSha256) reject('SOURCE_COMPLETION', component.id, 'actual distribution identity missing');
   for (const [rel, row] of Object.entries(record.files)) {
     relative(rel, component.id);
     if (!['file', 'symlink'].includes(row.type) || !HEX64.test(row.sha256) || !Number.isSafeInteger(row.size) || row.size < 0
