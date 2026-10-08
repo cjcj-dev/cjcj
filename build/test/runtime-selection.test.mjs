@@ -97,23 +97,8 @@ async function assembled(f, selected = f.env.RUNTIME_REF, expectedFailure) {
   fs.writeFileSync(path.join(f.runtime, 'std-producer.json'), JSON.stringify({compiler_sha256: hash(compiler)}));
   refreshRoot(f);
   const inputs = exported(f.run());
-  const base = path.join(f.dir, 'sdk-base');
-  fs.mkdirSync(path.join(base, 'bin'), {recursive: true});
-  fs.copyFileSync(compiler, path.join(base, 'bin/cjc'));
-  fs.writeFileSync(path.join(base, 'envsetup.sh'), '# isolated SDK fixture environment\n');
-  for (const rel of [`runtime/lib/${tuple}/libcangjie-runtime.so`, `runtime/lib/${tuple}/libboundscheck.so`]) {
-    fs.mkdirSync(path.dirname(path.join(base, rel)), {recursive: true});
-    fs.copyFileSync(path.join(libs, 'host.so'), path.join(base, rel));
-  }
-  for (const rel of [`lib/${tuple}/libcangjie-runtime.a`, `lib/${tuple}/libcangjie-std-core.a`]) {
-    fs.mkdirSync(path.dirname(path.join(base, rel)), {recursive: true});
-    fs.copyFileSync(path.join(libs, 'host.a'), path.join(base, rel));
-  }
-  fs.mkdirSync(path.join(base, 'modules', tuple), {recursive: true});
-  fs.writeFileSync(path.join(base, 'modules', tuple, 'std.core.cjo'), 'host module fixture');
-  fs.copyFileSync(path.join(libs, 'host.so'), path.join(base, 'runtime/lib', tuple, 'libcangjie-std-core.so'));
-  fs.copyFileSync(path.join(libs, 'host.so'), path.join(base, 'lib/libstdFFI.so'));
-  fs.writeFileSync(path.join(base, 'std-producer.json'), JSON.stringify({compiler_sha256: hash(compiler)}));
+  const retained = JSON.parse(fs.readFileSync(process.env.SDK_CONSUMER_INPUT_PLAN,'utf8'));
+  const base = retained.components.find(c => c.source.kind === 'distribution').source.root;
   const target = path.join(f.dir, 'sdk-target');
   const script = path.join(f.dir, 'compiler-input.sh');
   fs.writeFileSync(script, '#!/bin/sh\nprintf "native fixture compiler\\n"\n');
@@ -162,17 +147,6 @@ for (const candidate of [false, true]) {
     assert.match(verified.output, new RegExp(`BOOTSTRAP_RUNTIME_CONSUMER_VERIFIED runtime=${f.env.RUNTIME_REF}`));
     // Host-role assembler must keep its official runtime/std independent.
     const host = path.join(f.dir, 'sdk-host');
-    fs.mkdirSync(path.join(a.base, 'runtime/lib', tuple), {recursive: true});
-    fs.copyFileSync(path.join(a.libs, 'host.so'), path.join(a.base, 'runtime/lib', tuple, 'libcangjie-runtime.so'));
-    const hostInput = path.join(f.dir, 'host-compiler.sh');
-    fs.writeFileSync(hostInput, '#!/bin/sh\nprintf "host fixture compiler\\n"\n');
-    const hostStdInput = path.join(f.dir, 'host-std-plan-input');
-    for (const rel of [`lib/${tuple}/libcangjie-std-core.a`, 'std-producer.json']) {
-      fs.mkdirSync(path.dirname(path.join(hostStdInput, rel)), {recursive: true});
-      fs.copyFileSync(path.join(a.base, rel), path.join(hostStdInput, rel));
-    }
-    fs.mkdirSync(path.join(hostStdInput, 'modules', tuple), {recursive: true});
-    fs.writeFileSync(path.join(hostStdInput, 'modules', tuple, 'std.core.cjo'), 'independent host std fixture');
     const hostPlan = await manifestSdkFixture({root:f.dir,role:'host'});
     const h = execute(['bash', path.join(repo, 'ci/bootstrap/sdk_build.sh'), '--plan', hostPlan.planFile, '--to', host], f.env);
     assert.equal(h.status, 0, h.output);
