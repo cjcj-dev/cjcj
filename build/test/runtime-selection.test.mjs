@@ -166,10 +166,18 @@ for (const candidate of [false, true]) {
     fs.copyFileSync(path.join(a.libs, 'host.so'), path.join(a.base, 'runtime/lib', tuple, 'libcangjie-runtime.so'));
     const hostInput = path.join(f.dir, 'host-compiler.sh');
     fs.writeFileSync(hostInput, '#!/bin/sh\nprintf "host fixture compiler\\n"\n');
-    const hostPlan = await manifestSdkFixture({root:f.dir,compiler:hostInput,prefix:a.base,inputSdk:a.base,role:'host',rewriteInputs:false});
+    const hostStdInput = path.join(f.dir, 'host-std-plan-input');
+    for (const rel of [`lib/${tuple}/libcangjie-std-core.a`, 'std-producer.json']) {
+      fs.mkdirSync(path.dirname(path.join(hostStdInput, rel)), {recursive: true});
+      fs.copyFileSync(path.join(a.base, rel), path.join(hostStdInput, rel));
+    }
+    fs.mkdirSync(path.join(hostStdInput, 'modules', tuple), {recursive: true});
+    fs.writeFileSync(path.join(hostStdInput, 'modules', tuple, 'std.core.cjo'), 'independent host std fixture');
+    const hostPlan = await manifestSdkFixture({root:f.dir,compiler:hostInput,prefix:hostStdInput,inputSdk:a.base,role:'host',rewriteInputs:false});
     const h = execute(['bash', path.join(repo, 'ci/bootstrap/sdk_build.sh'), '--plan', hostPlan.planFile, '--to', host], f.env);
     assert.equal(h.status, 0, h.output);
-    assert.equal(hash(path.join(host, 'runtime/lib', tuple, 'libcangjie-runtime.so')), hash(hostPlan.plan.verification.hostRuntime.path));
+    assert.equal(hash(path.join(host, 'runtime/lib', tuple, 'libcangjie-runtime.so')), hostPlan.receipt.files[`runtime/lib/${tuple}/libcangjie-runtime.so`].sha256);
+    assert.notEqual(hash(path.join(host, 'runtime/lib', tuple, 'libcangjie-runtime.so')), hash(path.join(a.target, 'runtime/lib', tuple, 'libcangjie-runtime.so')), 'host and target runtime producers remain independent');
     console.log(`HOST_CONTROL_ASSERT rc=${h.status}`);
   }));
 }

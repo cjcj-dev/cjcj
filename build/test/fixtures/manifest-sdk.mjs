@@ -78,7 +78,7 @@ export async function manifestSdkFixture({root, compiler, prefix, inputSdk, shim
     plan.components.push(runtimeComponent);
   }
   const runtimePaths=[`runtime/lib/${tuple}/libcangjie-runtime.so`,`runtime/lib/${tuple}/libboundscheck.so`,`lib/${tuple}/libcangjie-runtime.a`];
-  const component = {id:'native',roles:ROLES.filter(r=>r!=='official-host'&&(!runtimeInput||!['runtime','boundscheck'].includes(r))),domain:'target',source:identity,
+  const component = {id:'native',roles:ROLES.filter(r=>r!=='official-host'&&(!runtimeInput||!['runtime','boundscheck'].includes(r))),domain:role==='host'?'host':'target',source:identity,
     config:{host:plan.platform,target:plan.platform,tools,options:{parameters:{fixture:'native-consumer'},optimization:'Release',
       sdkDependency:'official',jobs:64,heap:'32GB',inputBindings:{},outputs:['bin/cjcj-stage1']}},
     producer:{adapter:'sharedbuild-runtime-default',version:identity.commit,repository:source,
