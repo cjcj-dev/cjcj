@@ -73,6 +73,7 @@ export function validatePlan(plan) {
   if (plan.schema !== PLAN_SCHEMA || !['host', 'target'].includes(plan.role)
     || !PLATFORMS[plan.platform] || !['seed', 'stage1', 'stage2', 'final'].includes(plan.stage)) reject('SCHEMA', 'plan', 'version/role/platform/stage');
   absolute(plan.buildRoot, 'buildRoot');
+  if (['/root/sdks', '/root/.cjv'].some(root => plan.buildRoot === root || plan.buildRoot.startsWith(`${root}/`))) reject('SHARED_INSTALL', 'buildRoot', 'shared SDK trees are read-only');
   if (!Array.isArray(plan.components) || !plan.components.length) reject('SCHEMA', 'components', 'empty');
   const ids = new Set();
   const roles = new Set();
@@ -233,6 +234,20 @@ export async function physicalPath(root, relativePath, component) {
     if ((await fs.lstat(current)).isSymbolicLink()) reject('LINK_ESCAPE', component, current);
   }
   return current;
+}
+export async function physicalBuildRoot(root) {
+  let existing = path.resolve(root);
+  while (true) {
+    try {
+      if (await fs.realpath(existing) !== existing) reject('LINK_ESCAPE', 'buildRoot', existing);
+      return;
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+      const parent = path.dirname(existing);
+      if (parent === existing) throw error;
+      existing = parent;
+    }
+  }
 }
 export async function inventory(root, {links = false} = {}) {
   const rows = Object.create(null);

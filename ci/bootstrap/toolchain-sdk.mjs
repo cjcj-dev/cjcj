@@ -6,7 +6,7 @@ import {parseArgs} from 'node:util';
 import {fileURLToPath} from 'node:url';
 import {PLAN_SCHEMA, RESOLVED_SCHEMA, validatePlan, buildIdentities, topological,
   readOutput, resolveFiles, readJson, atomicJson, canonical, objectId, fileDigest,
-  physicalPath, reject, withLock, PLATFORMS, execute, relative} from './sdk-manifest.mjs';
+  physicalPath, physicalBuildRoot, reject, withLock, PLATFORMS, execute, relative} from './sdk-manifest.mjs';
 import {produceComponent} from './sdk-producers.mjs';
 import {verifyBootstrapRuntimeSdk} from './runtime_sdk.mjs';
 
@@ -44,8 +44,11 @@ async function copyArtifacts(staging, manifest) {
       await fs.symlink(entry.target, destination);
     } else {
       const source = await physicalPath(entry.artifacts, entry.source, entry.component);
-      if (!(await fs.lstat(source)).isFile()) reject('PAYLOAD_TYPE', entry.component, entry.source);
+      const before = await fs.lstat(source);
+      if (!before.isFile()) reject('PAYLOAD_TYPE', entry.component, entry.source);
       await fs.copyFile(source, destination, fs.constants.COPYFILE_EXCL);
+      const after = await fs.lstat(source);
+      if (!after.isFile() || ['dev', 'ino', 'size', 'mtimeMs', 'ctimeMs'].some(name => before[name] !== after[name])) reject('COPY_SOURCE_CHANGED', entry.component, entry.source);
       await fs.chmod(destination, entry.mode);
     }
   }
@@ -138,6 +141,7 @@ export async function resolvePlan(plan, {dryRun = false, resumeFailed = false} =
   const identities = buildIdentities(plan), outputs = new Map();
   if (dryRun) return {schema: 'toolchain-sdk-dry-run-v1', planSha256: objectId(plan),
     components: topological(plan).map(component => ({component: component.id, adapter: component.producer.adapter, ...identities.get(component.id)}))};
+  await physicalBuildRoot(plan.buildRoot);
   for (const [name, input] of Object.entries(plan.verification)) if (input?.path) await requiredInput(input, name);
   for (const component of topological(plan)) {
     const identity = identities.get(component.id);
