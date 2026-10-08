@@ -15,6 +15,7 @@ async function fixture(t) {
   if (!process.env.SDK_CONSUMER_TEST_ROOT) t.after(() => fs.rm(root, {recursive: true, force: true}));
   const work = path.join(root, 'bootstrap-work');
   const sdk = path.join(root, 'software', 'cangjie');
+  await fs.mkdir(path.dirname(sdk), {recursive: true});
   const source = path.join(root, 'source');
   const tuple = 'linux_x86_64_cjnative';
   const write = async (name, contents) => {
