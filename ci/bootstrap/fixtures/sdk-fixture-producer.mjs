@@ -16,8 +16,21 @@ const mkdir = async file => { await fs.mkdir(path.dirname(file), {recursive: tru
 const write = async (rel, text) => fs.writeFile(await mkdir(path.join(output, rel)), text);
 const sha = async file => crypto.createHash('sha256').update(await fs.readFile(file)).digest('hex');
 if (options.mode === 'fail') { console.error('FIXTURE_PRODUCER_FAILURE rc=17'); process.exit(17); }
+let mode = options.mode;
+if (mode === 'runtime-fail-once') {
+  // Model a failed incremental build step inside its declared work directory,
+  // without changing source, recipe, tool bytes or external fixture inputs.
+  const marker = path.join(build, 'first-attempt-failed');
+  try { await fs.access(marker); }
+  catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+    await fs.writeFile(marker, 'deliberate fixture failure\n');
+    console.error('FIXTURE_PRODUCER_FAILURE rc=17'); process.exit(17);
+  }
+  mode = 'runtime';
+}
 const tuple = 'linux_x86_64_cjnative';
-if (options.mode === 'runtime') {
+if (mode === 'runtime') {
   const shared = await mkdir(path.join(output, 'install/runtime/lib', tuple, 'libcangjie-runtime.so'));
   run(['cc', '-shared', '-fPIC', `-DCJRT_SHA="${env.SB_SHA}"`, '-DFIXTURE_COLOUR=1', 'runtime.c', '-o', shared]);
   run(['cc', '-c', '-fPIC', `-DCJRT_SHA="${env.SB_SHA}"`, '-DFIXTURE_COLOUR=1', 'runtime.c', '-o', path.join(build, 'runtime.o')]);

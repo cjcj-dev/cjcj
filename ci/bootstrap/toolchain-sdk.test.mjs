@@ -208,8 +208,30 @@ test('failed producer preserves actual rc and never publishes or starts dependen
   runtime.config.options.parameters.mode = 'fail'; const identities = buildIdentities(f.plan);
   const result = await invoke(f); observed(result, 'producer-failure'); assert.notEqual(result.rc, 0); assert.match(result.stderr, /BUILD_FAILED rc=17/);
   const state = await readJson(path.join(identities.get('runtime').directory, 'state.json')); assert.equal(state.status, 'failed');
+  assert.equal(state.rc, 17);
   await assert.rejects(fs.access(path.join(identities.get('runtime').directory, 'DONE'))); await assert.rejects(fs.access(path.join(identities.get('std').directory, 'state.json')));
   await assert.rejects(fs.access(f.out));
+});
+
+test('explicit same-input incremental recovery preserves failure evidence and publishes only after success', async () => {
+  const f = await fixture(); f.plan.components.find(component => component.id === 'runtime').config.options.parameters.mode = 'runtime-fail-once';
+  const identity = buildIdentities(f.plan).get('runtime'), planSha = objectId(f.plan);
+  const failed = await invoke(f); observed(failed, 'same-input-failure'); assert.notEqual(failed.rc, 0); assert.match(failed.stderr, /BUILD_FAILED rc=17/);
+  const statePath = path.join(identity.directory, 'state.json'), failedState = await fs.readFile(statePath);
+  assert.equal(JSON.parse(failedState).rc, 17); await assert.rejects(fs.access(f.out));
+  await assert.rejects(fs.access(path.join(identity.directory, 'DONE')));
+  const denied = await invoke(f); observed(denied, 'implicit-retry-refused'); assert.notEqual(denied.rc, 0);
+  assert.match(denied.stderr, /rule=PRODUCER_PREVIOUS_FAILURE component=runtime/);
+  assert.deepEqual(await fs.readFile(statePath), failedState);
+  const restored = await invoke(f, ['--resume-failed']); observed(restored, 'same-input-recovery'); assert.equal(restored.rc, 0, restored.stderr);
+  assert.equal(objectId(f.plan), planSha); assert.equal((await readJson(statePath)).buildId, identity.buildId);
+  assert.equal((await readJson(statePath)).status, 'complete');
+  const recovery = (await fs.readdir(path.join(identity.directory, 'logs'))).find(name => name.startsWith('recovery-'));
+  assert.ok(recovery); assert.deepEqual(await fs.readFile(path.join(identity.directory, 'logs', recovery, 'state.json')), failedState);
+  const receipt = await readJson(path.join(identity.directory, 'output.json'));
+  const events = await fs.readdir(path.join(receipt.execution.actualWork, 'logs'));
+  assert.ok(events.some(name => name.startsWith('failed-')), 'native original failure directory must survive explicit recovery');
+  assert.equal(receipt.rc, 0); assert.equal(receipt.execution.rc, 0);
 });
 
 async function resealFixtureRecord(directory, record) {
