@@ -195,6 +195,29 @@ export function validatePlan(plan) {
     if (runtime.length !== 1 || boundscheck.length !== 1 || runtime[0].id !== boundscheck[0].id) reject('RUNTIME_PAIR', 'runtime', 'target runtime/archive/boundscheck require one actual producer receipt');
   }
   for (const component of plan.components) for (const dep of component.dependencies) if (!ids.has(dep)) reject('DEPENDENCY', component.id, `unknown ${dep}`);
+  const byId = new Map(plan.components.map(component => [component.id, component]));
+  for (const component of plan.components) {
+    const options = component.config.options;
+    if (component.producer.adapter === 'bootstrap-std') {
+      const seed = byId.get(options.sdkDependency), ast = byId.get(options.astDependency);
+      if (seed?.source.kind !== 'distribution' || seed.domain !== 'host'
+        || !byId.get(options.compilerDependency)?.roles.includes('compiler')
+        || !byId.get(options.runtimeDependency)?.roles.includes('runtime')
+        || !byId.get(options.llvmToolsDependency)?.roles.includes('llvm-tools')
+        || !byId.get(options.llvmDylibDependency)?.roles.includes('llvm-dylib')
+        || ast?.producer.adapter !== 'ast-support' || !ast.roles.includes('ast')) {
+        reject('DEPENDENCY_ROLE', component.id, 'std requires complete typed seed/compiler/runtime/LLVM/AST producer inputs');
+      }
+    }
+    if (component.producer.adapter === 'ast-support' || component.producer.adapter.startsWith('sharedbuild-')) {
+      const seed = byId.get(options.sdkDependency);
+      if (seed?.source.kind !== 'distribution' || seed.domain !== 'host') reject('DEPENDENCY_ROLE', component.id, 'producer requires an official host distribution dependency');
+    }
+    if (['llvm-tools', 'llvm-dylib'].includes(component.producer.adapter)) {
+      const runtime = byId.get(options.runtimeDependency);
+      if (runtime?.source.kind !== 'git' || !runtime.roles.includes('runtime')) reject('DEPENDENCY_ROLE', component.id, 'LLVM requires a declared runtime source producer');
+    }
+  }
   topological(plan);
   for (const domain of ['host', 'target']) {
     const llvm = plan.components.filter(component => component.domain === domain && component.roles.some(role => ['llvm-tools', 'llvm-dylib'].includes(role)));
