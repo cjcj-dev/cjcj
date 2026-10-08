@@ -137,7 +137,7 @@ this candidate has completed those migrations.
 
 | Platform/caller | Current implementation | Qualification |
 | --- | --- | --- |
-| Linux x86_64 standalone manifest entry | Sharedbuild seed/runtime, native LLVM/std, install and existing checks | Tests not yet run; genuine Cangjie compile/run pending |
+| Linux x86_64 standalone manifest entry | Sharedbuild seed/runtime, native LLVM/std, install and existing checks | Sixteen CLI/sharedbuild fixture cases passed, including three repaired fixture preconditions; genuine Cangjie compile/run and native producer qualification pending |
 | Linux aarch64 | Native LLVM/std adapters; sharedbuild compiler/runtime remain x86_64 | Adapter coverage incomplete |
 | Darwin x86_64 / aarch64 | Native LLVM recipe shape exists | Native colour/load verifier and caller migration incomplete; assembly explicitly refuses |
 | Windows x86_64 | Declared platform and unknown/unimplemented adapter refusal | Native tuple/static archive adapter and verifier incomplete; assembly explicitly refuses |
@@ -147,7 +147,14 @@ this candidate has completed those migrations.
 
 The integration tests use small independently committed C sources with the
 real sharedbuild and SDK CLI. They can prove the assembly apparatus and its
-identity refusal, not Cangjie compiler or runtime GC behavior. The separate
-required genuine toolchain validation, producer/consumer cut arms, existing
-SDK regressions and native runner matrix remain required. Shared SDKs,
+identity refusal, not Cangjie compiler or runtime GC behavior.
+`sdk-boundary.test.mjs` consumes a retained successful fixture using explicit
+`SDK_BOUNDARY_PLAN` and `SDK_BOUNDARY_ROOT` paths. Its producer and consumer
+cases preserve the exact frozen plan and original compiled payloads while
+substituting one ordinary module. Removing the producer's original-inventory
+handoff or the consumer's ordinary digest check changes the actual SDK CLI
+result and fails the corresponding target assertion. Both cuts leave the
+normal-input control successful and restore the original inputs afterward.
+The separate required genuine toolchain validation, legacy assembly caller
+migration and native runner matrix remain required. Shared SDKs,
 in-flight #863, release/latest approvals and paired ABI holds are unchanged.
