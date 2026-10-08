@@ -322,8 +322,11 @@ export async function readOutput(directory, component, identity) {
   // bytes. A separate later fileDigest could authenticate a replacement while
   // returning the previously parsed record to the consumer.
   const bytes = await fs.readFile(file);
-  const record = JSON.parse(bytes);
   const done = (await fs.readFile(await physicalPath(directory, 'DONE', component.id), 'utf8')).trim();
+  return parseOutputReceipt(bytes, done, directory, component, identity);
+}
+export function parseOutputReceipt(bytes, done, directory, component, identity) {
+  const record = JSON.parse(bytes);
   const withoutLocator = value => {
     const {receipt, receiptSha256, originBuildRoot, ...producer} = value.producer;
     return {...value, producer};
@@ -345,7 +348,8 @@ export async function readOutput(directory, component, identity) {
     if (!['file', 'symlink'].includes(row.type) || !HEX64.test(row.sha256) || !Number.isSafeInteger(row.size) || row.size < 0
       || !Number.isInteger(row.mode) || row.mode < 0 || row.mode > 0o777) reject('COMPLETION', component.id, `invalid artifact ${rel}`);
   }
-  return {...record, receiptSha256: done, originDirectory: record.directory, directory, artifacts: path.join(directory, 'artifacts')};
+  return {...record, receiptSha256: done, receiptJson: bytes.toString('utf8'),
+    originDirectory: record.directory, directory, artifacts: path.join(directory, 'artifacts')};
 }
 export async function sealOutput(directory, component, identity, execution, presealedFiles) {
   if (execution.rc !== 0 || execution.status !== 'complete') reject('PRODUCER_FAILURE', component.id, 'cannot seal failed producer');

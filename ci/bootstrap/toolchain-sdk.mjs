@@ -5,7 +5,7 @@ import crypto from 'node:crypto';
 import {parseArgs} from 'node:util';
 import {fileURLToPath} from 'node:url';
 import {PLAN_SCHEMA, RESOLVED_SCHEMA, validatePlan, buildIdentities, topological,
-  readOutput, resolveFiles, readJson, atomicJson, canonical, objectId, fileDigest,
+  readOutput, parseOutputReceipt, resolveFiles, readJson, atomicJson, canonical, objectId, fileDigest,
   physicalPath, physicalBuildRoot, reject, withLock, PLATFORMS, execute, relative} from './sdk-manifest.mjs';
 import {produceComponent} from './sdk-producers.mjs';
 import {verifyBootstrapRuntimeSdk} from './runtime_sdk.mjs';
@@ -18,6 +18,7 @@ function verifyResolvedIdentities(plan, manifest) {
     return identity;
   };
   const actual = manifest.components || {};
+  const receipts = new Map();
   if (canonical(Object.keys(actual).sort()) !== canonical(plan.components.map(component => component.id).sort())) {
     reject('RESOLVED_IDENTITY', 'sdk', 'actual component membership differs from frozen plan');
   }
@@ -38,6 +39,9 @@ function verifyResolvedIdentities(plan, manifest) {
       || (component.source.kind === 'distribution' && row.execution?.distribution?.lockSha256 !== component.source.lockSha256)) {
       reject('RESOLVED_IDENTITY', component.id, 'actual producer/dependency closure differs from frozen plan');
     }
+    if (typeof row.receiptJson !== 'string') reject('RESOLVED_RECEIPT', component.id, 'original authenticated producer receipt missing');
+    receipts.set(component.id, parseOutputReceipt(Buffer.from(row.receiptJson), row.receiptSha256,
+      directory, component, identity));
   }
   for (const [rel, file] of Object.entries(manifest.files || {})) {
     const component = plan.components.find(value => value.id === file.component), row = actual[file.component];
@@ -51,6 +55,11 @@ function verifyResolvedIdentities(plan, manifest) {
       return [mapping.to, suffix].filter(Boolean).join('/') === rel;
     });
     if (!mapped) reject('RESOLVED_IDENTITY', component.id, `artifact is outside frozen install mapping: ${rel}`);
+  }
+  // A receipt label alone is not a content commitment. Reconstruct the file
+  // map from the original authenticated metadata, without reading payloads.
+  if (canonical(manifest.files) !== canonical(resolveFiles(plan, receipts))) {
+    reject('RESOLVED_PAYLOAD', 'sdk', 'actual install map differs from authenticated producer inventories');
   }
 }
 async function requiredInput(input, label) {
@@ -219,6 +228,7 @@ export async function resolvePlan(plan, {dryRun = false, resumeFailed = false} =
     platform: plan.platform, stage: plan.stage,
     components: Object.fromEntries([...outputs].map(([id, output]) => [id, {buildId: output.buildId,
       directory: output.directory, originDirectory: output.originDirectory, receiptSha256: output.receiptSha256, source: output.component.source,
+      receiptJson: output.receiptJson,
       config: output.component.config, producer: output.component.producer, dependencies: output.dependencies,
       status: output.status, rc: output.rc, execution: output.execution}])),
     files: resolveFiles(plan, outputs)};
