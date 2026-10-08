@@ -163,7 +163,7 @@ export async function resolvePlan(plan, {dryRun = false, resumeFailed = false} =
   const manifest = {schema: RESOLVED_SCHEMA, status: 'complete', rc: 0, planSha256: objectId(plan), role: plan.role,
     platform: plan.platform, stage: plan.stage,
     components: Object.fromEntries([...outputs].map(([id, output]) => [id, {buildId: output.buildId,
-      directory: output.directory, receiptSha256: output.receiptSha256, source: output.component.source,
+      directory: output.directory, originDirectory: output.originDirectory, receiptSha256: output.receiptSha256, source: output.component.source,
       config: output.component.config, producer: output.component.producer, dependencies: output.dependencies,
       status: output.status, rc: output.rc, execution: output.execution}])),
     files: resolveFiles(plan, outputs)};

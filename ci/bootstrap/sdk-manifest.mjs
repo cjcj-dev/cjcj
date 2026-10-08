@@ -103,11 +103,14 @@ export function validatePlan(plan) {
       fields(tool, ['path', 'sha256'], [], `${id}/${name}`);
       absolute(tool.path, id); if (!HEX64.test(tool.sha256)) reject('CONFIG', id, 'tool digest');
     }
-    fields(producer, ['adapter', 'version'], ['receipt', 'engine', 'engineSha256', 'recipe', 'repository'], id);
+    fields(producer, ['adapter', 'version'], ['receipt', 'receiptSha256', 'originBuildRoot', 'engine', 'engineSha256', 'recipe', 'repository'], id);
     if (!ADAPTERS.includes(producer.adapter) || !HEX40.test(producer.version)) reject('ADAPTER', id, 'unknown adapter/version');
     if (producer.adapter === 'official' && source.kind !== 'distribution') reject('ADAPTER', id, 'official adapter needs distribution');
     if (producer.adapter !== 'official' && source.kind !== 'git') reject('ADAPTER', id, 'source producer needs Git identity');
-    if (producer.receipt) absolute(producer.receipt, id);
+    if (producer.receipt) {
+      absolute(producer.receipt, id); absolute(producer.originBuildRoot, id);
+      if (!HEX64.test(producer.receiptSha256)) reject('COMPLETION', id, 'frozen receipt digest required');
+    } else if (producer.receiptSha256 || producer.originBuildRoot) reject('COMPLETION', id, 'origin/receipt digest without a receipt');
     if (producer.adapter.startsWith('sharedbuild-')) {
       absolute(producer.engine, id); absolute(producer.recipe, id);
       absolute(producer.repository, id);
@@ -215,11 +218,11 @@ export function buildIdentities(plan) {
   const identities = new Map();
   for (const component of topological(plan)) {
     const dependencies = Object.fromEntries(component.dependencies.map(id => [id, identities.get(id).buildId]));
-    const {receipt, ...producer} = component.producer;
+    const {receipt, receiptSha256, originBuildRoot, ...producer} = component.producer;
     // Native debug records and std metadata can contain their work path.
     // Until every existing producer has a verified path normalization recipe,
     // a different physical build root is a different configuration identity.
-    const recipeId = objectId({...component, producer, dependencies, buildRoot: plan.buildRoot});
+    const recipeId = objectId({...component, producer, dependencies, buildRoot: originBuildRoot || plan.buildRoot});
     const sourceId = component.source.commit || component.source.lockSha256;
     identities.set(component.id, {recipeId, buildId: `${component.id}/${sourceId}/${recipeId}`,
       directory: path.join(plan.buildRoot, component.id, sourceId, recipeId), dependencies});
@@ -317,12 +320,19 @@ export async function readOutput(directory, component, identity) {
   const file = await physicalPath(directory, 'output.json', component.id);
   const record = await readJson(file);
   const done = (await fs.readFile(await physicalPath(directory, 'DONE', component.id), 'utf8')).trim();
-  if (done !== await fileDigest(file) || record.schema !== OUTPUT_SCHEMA || record.status !== 'complete' || record.rc !== 0
+  const withoutLocator = value => {
+    const {receipt, receiptSha256, originBuildRoot, ...producer} = value.producer;
+    return {...value, producer};
+  };
+  if (done !== await fileDigest(file) || (component.producer.receipt && done !== component.producer.receiptSha256)
+    || record.schema !== OUTPUT_SCHEMA || record.status !== 'complete' || record.rc !== 0
     || record.buildId !== identity.buildId || record.recipeId !== identity.recipeId
-    || canonical({...record.component, producer: {...record.component.producer, receipt: undefined}})
-      !== canonical({...component, producer: {...component.producer, receipt: undefined}})
+    || canonical(withoutLocator(record.component)) !== canonical(withoutLocator(component))
     || canonical(record.dependencies) !== canonical(identity.dependencies)) reject('COMPLETION', component.id, 'successful exact producer record required');
-  if (!record.files || !Object.keys(record.files).length || record.artifacts !== path.join(directory, 'artifacts')) reject('COMPLETION', component.id, 'sealed artifact directory missing');
+  const origin = component.producer.receipt ? path.join(component.producer.originBuildRoot, component.id,
+    component.source.commit || component.source.lockSha256, identity.recipeId) : identity.directory;
+  if (!record.files || !Object.keys(record.files).length || record.directory !== origin
+    || record.artifacts !== path.join(origin, 'artifacts')) reject('COMPLETION', component.id, 'actual sealed producer directory differs');
   if (component.source.kind === 'git' && (record.execution?.source?.commit !== component.source.commit
     || record.execution?.source?.tree !== component.source.tree)) reject('SOURCE_COMPLETION', component.id, 'actual producer source identity missing');
   if (component.source.kind === 'distribution' && record.execution?.distribution?.lockSha256 !== component.source.lockSha256) reject('SOURCE_COMPLETION', component.id, 'actual distribution identity missing');
@@ -331,7 +341,7 @@ export async function readOutput(directory, component, identity) {
     if (!['file', 'symlink'].includes(row.type) || !HEX64.test(row.sha256) || !Number.isSafeInteger(row.size) || row.size < 0
       || !Number.isInteger(row.mode) || row.mode < 0 || row.mode > 0o777) reject('COMPLETION', component.id, `invalid artifact ${rel}`);
   }
-  return {...record, receiptSha256: done, directory};
+  return {...record, receiptSha256: done, originDirectory: record.directory, directory, artifacts: path.join(directory, 'artifacts')};
 }
 export async function sealOutput(directory, component, identity, execution, presealedFiles) {
   if (execution.rc !== 0 || execution.status !== 'complete') reject('PRODUCER_FAILURE', component.id, 'cannot seal failed producer');
