@@ -7,7 +7,7 @@ import os from 'node:os';
 import {gzipSync} from 'node:zlib';
 import {spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
-import {execute, fileDigest, readJson, atomicJson, canonical, sourceIdentity, reject, PLATFORMS} from './sdk-manifest.mjs';
+import {execute, fileDigest, readJson, atomicJson, canonical, sourceIdentity, reject, PLATFORMS, inventory} from './sdk-manifest.mjs';
 import {parseLlvmToolsManifest} from '../llvm-tools-manifest.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -193,6 +193,15 @@ async function astSupport(request) {
   optionsOnly(options, ['sdkDependency', 'flatbuffersSource', 'launcher'], component.id);
   const seed = dependencies[options.sdkDependency];
   if (seed?.component.source.kind !== 'distribution' || seed.component.domain !== 'host') reject('PRODUCER_DEPENDENCY', component.id, 'AST needs the declared official FlatBuffers SDK');
+  // This subset crosses the existing AST install boundary unchanged. Bind
+  // membership and bytes to the seed receipt before the legacy producer can
+  // issue a new checksum list; never rescan the entire host SDK here.
+  const prefix = 'third_party/flatbuffers/';
+  const expected = Object.fromEntries(Object.entries(seed.files).filter(([rel]) => rel.startsWith(prefix))
+    .map(([rel, row]) => [rel.slice(prefix.length), row]));
+  if (!Object.keys(expected).length || canonical(await inventory(path.join(seed.artifacts, 'third_party/flatbuffers'))) !== canonical(expected)) {
+    reject('DEPENDENCY_DIGEST', component.id, 'official FlatBuffers subset differs from its presealed producer inventory');
+  }
   // This is the existing AST workflow's pinned nested source input. No CMake
   // source patch or guessed artifact-source stamp replaces the two Git reads.
   const flatbuffers = await fetchIdentity(options.flatbuffersSource, path.join(source, 'third_party/flatbuffers'), 'ast-flatbuffers');
