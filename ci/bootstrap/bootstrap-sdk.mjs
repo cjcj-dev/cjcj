@@ -5,12 +5,13 @@ import {parseArgs} from 'node:util';
 import {fileURLToPath} from 'node:url';
 import {assembleSdk, verifyManifestSdk} from './toolchain-sdk.mjs';
 import {readJson, objectId, fileDigest, reject, validatePlan} from './sdk-manifest.mjs';
+import {validateBootstrapPlans} from './freeze-bootstrap-plans.mjs';
 export async function assembleBootstrapPhase({plans, phase, out, dryRun = false}) {
   if (!['stage0', 'stage0-run', 'std-bootstrap', 'stage1-initial', 'stage1-std', 'stage3'].includes(phase)) reject('BOOTSTRAP_PHASE', phase, 'unknown stage');
   let plan;
   if ((await fs.stat(plans)).isDirectory()) plan = await readJson(path.join(plans, `${phase}.json`));
   else {
-    const bundle = await readJson(plans);
+    const bundle = validateBootstrapPlans(await readJson(plans));
     if (bundle.schema !== 'bootstrap-sdk-plans-v1' || !bundle.phases?.[phase]) reject('BOOTSTRAP_PHASE', phase, 'complete frozen phase plan missing');
     plan = bundle.phases[phase];
   }
