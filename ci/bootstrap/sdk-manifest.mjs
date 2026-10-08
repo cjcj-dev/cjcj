@@ -162,6 +162,10 @@ export function validatePlan(plan) {
       if (!config.tools[tool]) reject('CONFIG', id, `std producer tool ${tool} must be frozen`);
     }
     if (['bootstrap-std', 'llvm-tools', 'llvm-dylib'].includes(producer.adapter)) absolute(producer.repository, id);
+    if (config.options.launcher !== undefined) {
+      absolute(config.options.launcher, id);
+      if (config.tools.launcher?.path !== config.options.launcher) reject('CONFIG', id, 'launcher executable must be frozen with its digest before building');
+    }
     if (producer.adapter === 'bootstrap-std' && !plan.platform.startsWith('linux_')) reject('ADAPTER_PLATFORM', id, 'bootstrap.sh std recipe is Linux only');
     if (['llvm-tools', 'llvm-dylib'].includes(producer.adapter) && plan.platform === 'windows_x86_64' && !producer.receipt) reject('ADAPTER_PLATFORM', id, 'Windows native tuple adapter not yet migrated; requires a sealed Windows producer receipt');
     if (!Array.isArray(component.dependencies) || component.dependencies.some(dep => !NAME.test(dep))

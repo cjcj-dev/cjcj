@@ -190,6 +190,10 @@ export async function nativeProducer(request) {
   const platform = PLATFORMS[component.config.host];
   if (!platform || platform[0] !== process.platform || platform[1] !== process.arch) reject('PRODUCER_PLATFORM', component.id, `needs ${component.config.host}`);
   if (os.availableParallelism() < 64 && process.env.GITHUB_ACTIONS !== 'true') reject('PRODUCER_RESOURCES', component.id, 'at least 64 native build CPUs');
+  if (process.env.GITHUB_ACTIONS === 'true' && !component.producer.receipt
+    && (!component.config.options.launcher || !/^sccache(?:\.exe)?$/.test(path.basename(component.config.options.launcher)))) {
+    reject('PRODUCER_CACHE', component.id, 'official GHA native C++ builds require a frozen sccache launcher');
+  }
   await sourceIdentity(request.source, component.source, component.id, tool('git'));
   if (component.producer.adapter === 'bootstrap-std') await std(request);
   else if (['llvm-tools', 'llvm-dylib'].includes(component.producer.adapter)) await llvm(request);
