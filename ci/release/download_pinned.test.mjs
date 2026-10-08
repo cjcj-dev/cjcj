@@ -253,11 +253,14 @@ supplied_stage1
     assert.match(legacy.stderr, /COLOUR_RT_GATE_INTERFACE unsupported=--same-source/);
     console.log('TARGET legacy --same-source precisely rejected rc=2 before admission');
     const accepted = run('accepted');
-    assert.equal(accepted.status, 0, accepted.stderr);
-    assert.match(accepted.stdout, /TARGET independent SDK inputs reached actual gate consumer/);
-    assert.match(accepted.stdout, new RegExp(`PERSISTENT_ARCHIVE_VERIFIED .*source=${archiveSource}`));
+    const acceptance = {rc: accepted.status,
+      consumerReached: /TARGET independent SDK inputs reached actual gate consumer/.test(accepted.stdout),
+      verifiedSource: new RegExp(`PERSISTENT_ARCHIVE_VERIFIED .*source=${archiveSource}`).test(accepted.stdout),
+      networkStarted: fs.existsSync(path.join(root, 'network-started'))};
+    console.log(`TARGET colour ${archiveSource} acceptance ${JSON.stringify(acceptance)}`);
+    assert.deepEqual(acceptance, {rc: 0, consumerReached: true, verifiedSource: true,
+      networkStarted: archiveSource === 'network'}, 'colour entry must pass selected archive bytes to consumer');
     if (archiveSource === 'local-archive') {
-      assert.equal(fs.existsSync(path.join(root, 'network-started')), false);
       const original = fs.readFileSync(archive);
       fs.appendFileSync(archive, 'corrupted local language archive');
       const badCache = run('bad-cache');
@@ -271,7 +274,7 @@ supplied_stage1
       assert.match(badCache.stderr, /bootstrap digest mismatch: artifact-1504.zip/);
       fs.writeFileSync(archive, original);
       console.log('ASSERT colour cache digest rejection reached; original bytes restored');
-    } else assert.equal(fs.existsSync(path.join(root, 'network-started')), true);
+    }
     console.log(accepted.stdout.trim());
     put('build/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so', 'wrong build target');
     const rejected = run('rejected');
