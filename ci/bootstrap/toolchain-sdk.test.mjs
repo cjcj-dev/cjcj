@@ -304,4 +304,14 @@ test('bootstrap phase reuse binds installed plan and manifest before returning a
   assert.notEqual(rejected.rc, 0); assert.match(rejected.stderr, /rule=INSTALL_BINDING component=sdk/);
   await fs.writeFile(installedPlan, original);
   const restored = await command(argv); observed(restored, 'phase-plan-restored'); assert.equal(restored.rc, 0, restored.stderr);
+  const module = path.join(f.out, `modules/${tuple}/std/core/core.Int64.ti`);
+  const moduleBytes = await fs.readFile(module), lockPath = path.join(f.out, 'SDK.lock.json');
+  const lockBytes = await fs.readFile(lockPath), lock = JSON.parse(lockBytes);
+  const changedModule = Buffer.from(moduleBytes); changedModule[0] ^= 1; await fs.writeFile(module, changedModule);
+  lock.files[`modules/${tuple}/std/core/core.Int64.ti`].sha256 = await fileDigest(module);
+  await atomicJson(lockPath, lock);
+  const rewritten = await command(argv); observed(rewritten, 'phase-lock-rewrite');
+  assert.notEqual(rewritten.rc, 0); assert.match(rewritten.stderr, /rule=MANIFEST_BINDING/);
+  await fs.writeFile(module, moduleBytes); await fs.writeFile(lockPath, lockBytes);
+  const recovered = await command(argv); observed(recovered, 'phase-lock-restored'); assert.equal(recovered.rc, 0, recovered.stderr);
 });
