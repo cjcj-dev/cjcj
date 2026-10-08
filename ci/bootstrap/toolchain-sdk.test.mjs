@@ -156,6 +156,24 @@ test('ordinary payload replacement cannot be blessed by rewriting the installati
   assert.notEqual(changed.rc, 0); assert.match(changed.stderr, /rule=PAYLOAD_(DIGEST|TYPE).*core.Int64.ti/); await assert.rejects(fs.access(f.out));
   await fs.writeFile(module, original); const restored = await invoke(f); observed(restored, 'ordinary-restored'); assert.equal(restored.rc, 0, restored.stderr);
 });
+test('same-source stamped but uncoloured runtime archive cannot accompany the coloured shared runtime', async () => {
+  const f = await fixture(); const good = await invoke(f); assert.equal(good.rc, 0, good.stderr);
+  const root = f.identities.get('runtime').directory, archive = path.join(root, 'artifacts/lib', tuple, 'libcangjie-runtime.a');
+  const archiveBytes = await fs.readFile(archive), receiptPath = path.join(root, 'output.json'), donePath = path.join(root, 'DONE');
+  const receiptBytes = await fs.readFile(receiptPath), doneBytes = await fs.readFile(donePath);
+  const object = path.join(f.root, 'uncoloured-runtime.o');
+  assert.equal((await command(['cc', '-c', '-fPIC', `-DCJRT_SHA="${f.sources.runtime.commit}"`,
+    path.join(f.sources.runtime.repo, 'runtime.c'), '-o', object])).rc, 0);
+  await fs.unlink(archive); assert.equal((await command(['ar', 'rcs', archive, object])).rc, 0);
+  const receipt = JSON.parse(receiptBytes), row = receipt.files[`lib/${tuple}/libcangjie-runtime.a`];
+  row.sha256 = await fileDigest(archive); row.size = (await fs.stat(archive)).size;
+  await atomicJson(receiptPath, receipt); await fs.writeFile(donePath, `${await fileDigest(receiptPath)}\n`);
+  f.out = path.join(f.root, 'wrong-runtime-pair'); const rejected = await invoke(f); observed(rejected, 'runtime-static-colour');
+  assert.notEqual(rejected.rc, 0); assert.match(rejected.stderr, /BOOTSTRAP_SDK_RUNTIME_COLOUR_PAIR_MISMATCH: shared_masks=1 archive_masks=0/);
+  await assert.rejects(fs.access(f.out));
+  await fs.writeFile(archive, archiveBytes); await fs.writeFile(receiptPath, receiptBytes); await fs.writeFile(donePath, doneBytes);
+  const restored = await invoke(f); observed(restored, 'runtime-static-colour-restored'); assert.equal(restored.rc, 0, restored.stderr);
+});
 test('mixed frozen LLVM sources, cycles and incomplete plans reject before producing', async () => {
   const f = await fixture();
   for (const [name, mutate, rule] of [
