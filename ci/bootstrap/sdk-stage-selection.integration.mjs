@@ -9,6 +9,7 @@ import test from 'node:test';
 
 const exec = promisify(execFile);
 const here = path.dirname(fileURLToPath(import.meta.url));
+const product = process.env.SDK_SELECTION_PRODUCT_ROOT || here;
 if (!process.env.SDK_STAGE_PLAN) throw new Error('SDK_STAGE_PLAN must identify the genuine retained stage compiler input plan');
 const original = JSON.parse(await fs.readFile(process.env.SDK_STAGE_PLAN, 'utf8'));
 const root = await fs.mkdtemp(path.join(path.dirname(process.env.SDK_STAGE_PLAN), 'selection-'));
@@ -16,7 +17,7 @@ const stage = original.components.find(component => component.producer.adapter =
 if (!stage) throw new Error('stage compiler producer absent');
 async function invoke(plan, name, dry = true) {
   const input = path.join(root, `${name}.json`); await fs.writeFile(input, JSON.stringify(plan));
-  const argv = [path.join(here, 'toolchain-sdk.mjs'), '--plan', input, '--out', path.join(root, `${name}-sdk`), ...(dry ? ['--dry-run'] : [])];
+  const argv = [path.join(product, 'toolchain-sdk.mjs'), '--plan', input, '--out', path.join(root, `${name}-sdk`), ...(dry ? ['--dry-run'] : [])];
   try { return {...await exec(process.execPath, argv), rc: 0}; }
   catch (error) { return {stdout: error.stdout, stderr: error.stderr, rc: error.code}; }
 }
