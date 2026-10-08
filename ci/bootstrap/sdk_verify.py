@@ -263,7 +263,7 @@ def verify(sdk: Path, lock: dict, pin: dict, identities: dict, errors: list, tar
         if entry.get('component') == 'official-retain' and rel not in (lock.get('official_retain') or {}):
             fail('UNDECLARED', f'official-retain without reason: {rel}', errors)
         if entry.get('component') not in {
-            'cjc', 'std', 'runtime', 'llvm', 'cjpm', 'boundscheck', 'official-retain', 'sdk-meta',
+            'cjc', 'std', 'runtime', 'llvm', 'cjpm', 'boundscheck', 'ast', 'official-retain', 'sdk-meta',
         }:
             fail('UNDECLARED', f'unknown component for {rel}', errors)
 

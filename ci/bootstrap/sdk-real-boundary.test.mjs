@@ -14,6 +14,22 @@ assert.ok(planFile && sdk && evidence, 'SDK_REAL_PLAN/SDK_REAL_SDK/SDK_REAL_EVID
 const product = process.env.SDK_MANIFEST_PRODUCT || path.join(here, 'toolchain-sdk.mjs');
 const plan = await readJson(planFile), manifest = await readJson(path.join(sdk, 'SDK.manifest.json'));
 const identities = buildIdentities(plan), planSha = objectId(plan);
+test('genuine native receipt files keep their semantic owners in the installation lock', async () => {
+  const lock = await readJson(path.join(sdk, 'SDK.lock.json'));
+  for (const [rel, row] of Object.entries(manifest.files)) {
+    const component = plan.components.find(value => value.id === row.component);
+    if (component.source.kind !== 'git') continue;
+    console.log(`TARGET_ASSERTION_EXECUTED native-owner file=${rel} owner=${lock.files[rel].component}`);
+    assert.notEqual(lock.files[rel].component, 'official-retain', `source producer owns ${rel}`);
+    assert.equal(lock.files[rel].producer.source.commit, component.source.commit);
+  }
+  for (const [rel, owner] of [['bin/cjfilt', 'cjc'], ['include/RuntimeAPI.h', 'runtime']]) {
+    assert.equal(lock.files[rel]?.component, owner, `native semantic owner: ${rel}`);
+  }
+  const ast = Object.keys(manifest.files).find(rel => rel.startsWith('include/cangjie/'));
+  assert.ok(ast, 'genuine AST header installed');
+  assert.equal(lock.files[ast].component, 'ast');
+});
 async function invoke(root, name) {
   const out = path.join(root, name), log = path.join(root, `${name}.log`), fd = await fs.open(log, 'wx');
   const started = new Date().toISOString(), start = performance.now();

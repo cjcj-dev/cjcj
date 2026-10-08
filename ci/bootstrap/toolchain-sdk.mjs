@@ -211,7 +211,7 @@ function installLock(plan, manifest) {
   const components = Object.fromEntries(plan.components.map(component => [component.id, component]));
   // Preserve sdk_verify's semantic classification even for retained official
   // files. Declaring the distribution must not bypass std/compiler pairing.
-  const classify = rel => {
+  const classify = (rel, component) => {
     if (/^bin\/(cjc|cjcj-stage1|cjc-frontend)$/.test(rel)) return 'cjc';
     if (rel === 'compiler-lineage.json') return 'sdk-meta';
     if (rel === 'std-producer.json' || rel.startsWith('modules/')) return 'std';
@@ -220,11 +220,19 @@ function installLock(plan, manifest) {
     if (/\/(?:libcangjie-runtime|libboundscheck)/.test(rel)) return rel.includes('libboundscheck') ? 'boundscheck' : 'runtime';
     if (rel.startsWith('runtime/include/')) return 'runtime';
     if (rel.startsWith('lib/') || rel.startsWith('runtime/lib/')) return 'std';
-    return 'official-retain';
+    if (component.source.kind === 'distribution') return 'official-retain';
+    // Native producers also install files outside the legacy directory
+    // prefixes (runtime headers, cjfilt, AST headers and schemas). Their
+    // authenticated receipt owns these files; they are not official retains.
+    for (const [role, semantic] of [['compiler', 'cjc'], ['runtime', 'runtime'],
+      ['ast', 'ast'], ['std', 'std'], ['llvm-tools', 'llvm'], ['llvm-dylib', 'llvm'], ['cjpm', 'cjpm']]) {
+      if (component.roles.includes(role)) return semantic;
+    }
+    reject('INSTALL_COMPONENT', component.id, `no semantic owner for ${rel}`);
   };
   const files = Object.fromEntries(Object.entries(manifest.files).map(([rel, entry]) => [rel, {
     sha256: entry.sha256, size: entry.size, mode: entry.mode, type: entry.type,
-    component: classify(rel),
+    component: classify(rel, components[entry.component]),
     symlink: entry.type === 'symlink', ...(entry.type === 'symlink' ? {link_target: entry.target} : {}),
     producer: {build_id: entry.buildId, receipt_sha256: entry.receiptSha256, source: components[entry.component].source},
   }]));
