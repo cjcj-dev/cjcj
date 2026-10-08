@@ -16,7 +16,9 @@ const fixture = process.env.SDK_PHASE_OBSERVATION;
 if (!fixture) throw new Error('SDK_PHASE_OBSERVATION must name the retained complete-plan fixture');
 const observation = JSON.parse(await fs.readFile(fixture, 'utf8'));
 const original = JSON.parse(await fs.readFile(path.join(path.dirname(fixture), 'bundle.frozen.json'), 'utf8'));
-const root = await fs.mkdtemp(path.join(path.dirname(fixture), 'handoff-'));
+const root = process.env.SDK_PHASE_WORK_ROOT;
+if (!root) throw new Error('SDK_PHASE_WORK_ROOT must name the fixed private arm workspace');
+await fs.mkdir(root, {recursive: true});
 const command = async (...args) => {
   try { const result = await exec(process.execPath, args); return {...result, rc: 0}; }
   catch (error) { return {rc: error.code, stdout: error.stdout, stderr: error.stderr}; }
@@ -38,6 +40,7 @@ test('generated complete bundle delivers the selected phase identities to the re
   const phases = structuredClone(original);
   phases.phases.stage2.buildRoot = path.join(root, 'stage2-distinct-producers');
   await fs.writeFile(input, JSON.stringify(phases));
+  await fs.rm(bundle, {force: true});
   const prepared = await command(path.join(product, 'prepare-bootstrap-plans.mjs'), '--plans', input, '--out', bundle);
   assert.equal(prepared.rc, 0, prepared.stderr);
   const selected = await command(path.join(product, 'bootstrap-sdk.mjs'), '--plans', bundle,

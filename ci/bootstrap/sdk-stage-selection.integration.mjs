@@ -12,7 +12,9 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const product = process.env.SDK_SELECTION_PRODUCT_ROOT || here;
 if (!process.env.SDK_STAGE_PLAN) throw new Error('SDK_STAGE_PLAN must identify the genuine retained stage compiler input plan');
 const original = JSON.parse(await fs.readFile(process.env.SDK_STAGE_PLAN, 'utf8'));
-const root = await fs.mkdtemp(path.join(path.dirname(process.env.SDK_STAGE_PLAN), 'selection-'));
+const root = process.env.SDK_SELECTION_WORK_ROOT;
+if (!root) throw new Error('SDK_SELECTION_WORK_ROOT must name the fixed private arm workspace');
+await fs.mkdir(root, {recursive: true});
 const stage = original.components.find(component => component.producer.adapter === 'bootstrap-compiler');
 if (!stage) throw new Error('stage compiler producer absent');
 async function invoke(plan, name, dry = true) {
@@ -51,6 +53,7 @@ test('noncompiler role cannot install a second physical compiler through authent
   plan.buildRoot = path.join(root, 'collision-producers');
   const runtime = plan.components.find(component => component.roles.includes('runtime') && component.domain === 'target');
   runtime.install.push({from: `install/runtime/lib/${plan.platform}_cjnative/libcangjie-runtime.so`, to: 'bin/cjc'});
+  await fs.rm(path.join(root, 'physical-conflict-sdk'), {recursive: true, force: true});
   const result = await invoke(plan, 'physical-conflict', false);
   console.log(`TARGET_ASSERTION_EXECUTED stage-physical-conflict rc=${result.rc} diagnostic=${result.stderr.trim()}`);
   assert.notEqual(result.rc, 0); assert.match(result.stderr, /DUPLICATE_INSTALL.*bin\/cjc/);
