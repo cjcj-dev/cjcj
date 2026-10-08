@@ -79,13 +79,21 @@ Before any checkout/build, each identity resolves to:
 ```
 
 Recipe IDs include configuration, pinned producer and tools, and dependency
-build IDs. Sharedbuild also retains its exact native work under
+build IDs. The physical build root participates until all producers normalize
+their path-dependent output. A transported receipt declares its original
+`producer.originBuildRoot` and frozen `producer.receiptSha256`; its original
+source/build directory record remains byte-identical. The current receipt
+directory is a separate entity locator, not a replacement for producer origin.
+Sharedbuild also retains its exact native work under
 `shared-work/<kind>/<full SHA>/<native recipe ID>`, separately from the sealed
 cache. Both the cache key and physical work key use the existing OS lock.
 Failed work and original exit codes remain available. Failed components stop
 their dependents and do not receive `DONE`. `--resume-failed` is an explicit
 same-input recovery request; it never changes the plan or discards failure
 evidence. Completed native work can restore a collected success cache.
+Ordinary sharedbuild `--copy-to` retains entity integrity validation. Only
+`--copy-manifest-to` transfers original digests to the SDK install boundary;
+the two modes are mutually exclusive.
 
 Only sealed artifact files are mapped into the SDK. Overlapping destinations,
 reserved metadata paths, path escapes and directory links are refused.

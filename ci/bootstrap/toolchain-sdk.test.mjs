@@ -164,6 +164,10 @@ test('mixed frozen LLVM sources, cycles and incomplete plans reject before produ
     ['missing std', plan => { plan.components = plan.components.filter(value => value.id !== 'std'); }, /rule=MISSING_COMPONENT/],
     ['unknown adapter', plan => { plan.components[1].producer.adapter = 'shell-command'; }, /rule=ADAPTER/],
     ['path escape', plan => { plan.components[1].install[0].to = '../escape'; }, /rule=PATH/],
+    ['unpaired boundscheck', plan => {
+      const runtime = plan.components.find(value => value.id === 'runtime');
+      runtime.roles = ['runtime']; const other = clone(runtime); other.id = 'bounds-only'; other.roles = ['boundscheck']; plan.components.push(other);
+    }, /rule=RUNTIME_PAIR/],
   ]) {
     const bad = clone(f.plan); mutate(bad); await atomicJson(f.planFile, bad);
     const result = await command([process.execPath, product, '--plan', f.planFile, '--out', f.out]); observed(result, name);
@@ -258,4 +262,30 @@ test('a collected success cache restores the same completed work without rerunni
   assert.equal(restored.rc, 0, restored.stderr);
   assert.deepEqual(await fs.readdir(path.join(work, 'logs')), logBefore);
   assert.equal((await readJson(path.join(directory, 'output.json'))).execution.actualWork, work);
+});
+
+test('transported receipts retain original build origin and frozen digest without source copies or producers', async () => {
+  const f = await fixture(); const initial = await invoke(f); assert.equal(initial.rc, 0, initial.stderr);
+  const originalRoot = f.plan.buildRoot, records = {};
+  for (const component of f.plan.components) {
+    const original = f.identities.get(component.id).directory, destination = path.join(f.root, 'received', component.id);
+    await fs.mkdir(destination, {recursive: true});
+    await fs.cp(path.join(original, 'artifacts'), path.join(destination, 'artifacts'), {recursive: true, dereference: false});
+    for (const name of ['output.json', 'DONE']) await fs.copyFile(path.join(original, name), path.join(destination, name));
+    records[component.id] = await fs.readFile(path.join(destination, 'output.json'));
+    Object.assign(component.producer, {receipt: destination, originBuildRoot: originalRoot,
+      receiptSha256: await fileDigest(path.join(destination, 'output.json'))});
+  }
+  f.plan.buildRoot = path.join(f.root, 'consumer-build-root'); f.out = path.join(f.root, 'sdk-transported');
+  const transported = await invoke(f); observed(transported, 'transported-receipts'); assert.equal(transported.rc, 0, transported.stderr);
+  const manifest = await readJson(path.join(f.out, 'SDK.manifest.json'));
+  for (const component of f.plan.components) {
+    assert.equal(manifest.components[component.id].originDirectory, f.identities.get(component.id).directory);
+    assert.equal(manifest.components[component.id].buildId, f.identities.get(component.id).buildId);
+    assert.deepEqual(await fs.readFile(path.join(component.producer.receipt, 'output.json')), records[component.id]);
+    await assert.rejects(fs.access(buildIdentities(f.plan).get(component.id).directory));
+  }
+  f.plan.components.find(value => value.id === 'runtime').producer.receiptSha256 = 'e'.repeat(64);
+  f.out = path.join(f.root, 'wrong-receipt-sdk'); const changed = await invoke(f); observed(changed, 'receipt-digest');
+  assert.notEqual(changed.rc, 0); assert.match(changed.stderr, /rule=COMPLETION component=runtime/);
 });
