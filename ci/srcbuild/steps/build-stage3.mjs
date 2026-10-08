@@ -76,7 +76,8 @@ async function assertStage2Compiler(stageEnv, stage2Sha) {
 }
 
 async function assertConsumerInputs(stageEnv) {
-  await verifyBootstrapRuntimeSdk(sdk, tuple, process.env, path.dirname(stdlibRoot), assemblyLockSha);
+  const producerManifest = JSON.parse(await fs.readFile(path.join(sdk, 'SDK.manifest.json'), 'utf8'));
+  await verifyBootstrapRuntimeSdk(sdk, tuple, process.env, path.dirname(stdlibRoot), assemblyLockSha, producerManifest);
   await assertBootstrapBackends({sdk, targetLd, identity: backendIdentity});
   await assertStage2Compiler(stageEnv, stage2Sha);
 }

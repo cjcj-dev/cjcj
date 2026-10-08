@@ -21,6 +21,12 @@ export async function verifyBootstrapRuntimeSdk(sdk, tuple, env = process.env, s
       || digest(path.join(sdk, 'SDK.manifest.json')) !== lock.manifest_sha256) throw new Error('BOOTSTRAP_RUNTIME_PRODUCER_MANIFEST_BINDING');
     const runtimeRef = lock.components?.runtime?.commit;
     if (!/^[0-9a-f]{40}$/.test(runtimeRef || '') || lock.role !== 'target') throw new Error('BOOTSTRAP_RUNTIME_PRODUCER_MANIFEST');
+    if (sourceRoot) {
+      const source = await execute('git', ['-C', sourceRoot, 'rev-parse', 'HEAD']);
+      if (source.stdout.trim().toLowerCase() !== runtimeRef.toLowerCase()) {
+        throw new Error('BOOTSTRAP_RUNTIME_SOURCE_MISMATCH');
+      }
+    }
     const pair = producerManifest.files?.[runtimeFiles[0].replace('linux_x86_64_cjnative', tuple)];
     for (const base of runtimeFiles) {
       const rel = base.replace('linux_x86_64_cjnative', tuple), row = producerManifest.files?.[rel];
