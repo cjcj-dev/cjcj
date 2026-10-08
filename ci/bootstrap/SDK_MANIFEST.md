@@ -68,8 +68,12 @@ this module does not implement source synchronization.
 
 The adapter set is `official`, `sharedbuild-stage1`,
 `sharedbuild-runtime-default`, `sharedbuild-runtime-testable`, `bootstrap-std`,
-`llvm-tools`, and `llvm-dylib`. The last three reuse the existing native
-CMake/Ninja, LLVM shim and std `build.py` recipes. Sharedbuild adapters invoke
+`llvm-tools`, `llvm-dylib`, and `ast-support`. Native adapters reuse the existing
+CMake/Ninja, LLVM shim, std `build.py` and `build_ast_support.sh` recipes. The
+AST adapter freezes the compiler and nested FlatBuffers source identities and
+the official host SDK dependency; it returns the complete archive, headers,
+schema and FlatBuffers module inventory needed by the existing std installer.
+Sharedbuild adapters invoke
 the existing sharedbuild engine. Their builder is the actual `.mjs` file;
 companion shell wrappers cannot substitute an unpinned implementation.
 

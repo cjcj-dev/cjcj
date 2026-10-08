@@ -23,7 +23,7 @@ export const PLATFORMS = Object.freeze({
 });
 export const ADAPTERS = Object.freeze(['official', 'sharedbuild-stage1',
   'sharedbuild-runtime-default', 'sharedbuild-runtime-testable', 'bootstrap-std',
-  'llvm-tools', 'llvm-dylib']);
+  'llvm-tools', 'llvm-dylib', 'ast-support']);
 const HEX40 = /^[0-9a-f]{40}$/;
 const HEX64 = /^[0-9a-f]{64}$/;
 const NAME = /^[a-z][a-z0-9-]*$/;
@@ -146,6 +146,17 @@ export function validatePlan(plan) {
       relative(config.options.targetLibRelative, id, {empty: true});
       if (!/^\d+GB$/.test(config.options.heap)) reject('CONFIG', id, 'heap');
     }
+    if (producer.adapter === 'ast-support') {
+      fields(config.options, ['sdkDependency', 'flatbuffersSource'], ['launcher'], id);
+      if (!component.roles.includes('ast') || !component.dependencies.includes(config.options.sdkDependency)) reject('DEPENDENCY', id, 'AST requires its explicit official SDK dependency');
+      fields(config.options.flatbuffersSource, ['repo', 'commit', 'tree'], [], id);
+      if (!HEX40.test(config.options.flatbuffersSource.commit) || !HEX40.test(config.options.flatbuffersSource.tree)
+        || !config.options.flatbuffersSource.repo) reject('SOURCE', id, 'AST FlatBuffers input');
+      for (const tool of ['node', 'bash', 'cmake', 'ninja', 'clang', 'clang++', 'git', 'python3', 'nm', 'getconf']) {
+        if (!config.tools[tool]) reject('CONFIG', id, `AST producer tool ${tool} must be frozen`);
+      }
+      if (plan.platform === 'windows_x86_64' && !producer.receipt) reject('ADAPTER_PLATFORM', id, 'AST cross-toolchain adapter not yet migrated');
+    }
     if (['llvm-tools', 'llvm-dylib'].includes(producer.adapter)) {
       fields(config.options, ['targets', 'runtimeDependency'], ['compilerSource', 'flatbuffersSource', 'launcher'], id);
       if (!component.dependencies.includes(config.options.runtimeDependency)) reject('DEPENDENCY', id, 'LLVM runtime input not in closure');
@@ -161,7 +172,7 @@ export function validatePlan(plan) {
     if (producer.adapter === 'bootstrap-std') for (const tool of ['node', 'python3', 'cmake', 'ninja', 'clang', 'clang++', 'ar', 'git']) {
       if (!config.tools[tool]) reject('CONFIG', id, `std producer tool ${tool} must be frozen`);
     }
-    if (['bootstrap-std', 'llvm-tools', 'llvm-dylib'].includes(producer.adapter)) absolute(producer.repository, id);
+    if (['bootstrap-std', 'llvm-tools', 'llvm-dylib', 'ast-support'].includes(producer.adapter)) absolute(producer.repository, id);
     if (config.options.launcher !== undefined) {
       absolute(config.options.launcher, id);
       if (config.tools.launcher?.path !== config.options.launcher) reject('CONFIG', id, 'launcher executable must be frozen with its digest before building');

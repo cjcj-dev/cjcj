@@ -188,6 +188,36 @@ async function std(request) {
     compiler_build_id: compiler.buildId, runtime_build_id: runtime.buildId, source_commit: component.source.commit,
     source_tree: component.source.tree, stage: 'completed-std', producer: component.producer});
 }
+async function astSupport(request) {
+  const {component, source, directory, dependencies} = request, options = component.config.options;
+  optionsOnly(options, ['sdkDependency', 'flatbuffersSource', 'launcher'], component.id);
+  const seed = dependencies[options.sdkDependency];
+  if (seed?.component.source.kind !== 'distribution' || seed.component.domain !== 'host') reject('PRODUCER_DEPENDENCY', component.id, 'AST needs the declared official FlatBuffers SDK');
+  // This is the existing AST workflow's pinned nested source input. No CMake
+  // source patch or guessed artifact-source stamp replaces the two Git reads.
+  const flatbuffers = await fetchIdentity(options.flatbuffersSource, path.join(source, 'third_party/flatbuffers'), 'ast-flatbuffers');
+  const frozenTools = path.join(directory, 'build', 'ast-tools'); await fs.mkdir(frozenTools, {recursive: true});
+  for (const [name, input] of Object.entries(component.config.tools)) {
+    const destination = path.join(frozenTools, name);
+    try { await fs.symlink(input.path, destination); } catch (error) { if (error.code !== 'EEXIST') throw error; }
+  }
+  const artifacts = path.join(directory, 'artifacts');
+  const env = {...process.env, PATH: `${frozenTools}:/usr/bin:/bin`, NM: tool('nm')};
+  if (options.launcher) {
+    env.CMAKE_C_COMPILER_LAUNCHER = options.launcher;
+    env.CMAKE_CXX_COMPILER_LAUNCHER = options.launcher;
+  }
+  await run(['bash', path.join(component.producer.repository, 'ci/build_ast_support.sh'), source,
+    path.join(directory, 'build', 'ast'), artifacts, seed.artifacts], {env});
+  for (const rel of ['libcangjie-ast-support.a', 'include/cangjie', 'include/flatbuffers/StdAstFormat_generated.h',
+    'schema/StdAstFormat.fbs', 'third_party/flatbuffers/bin/flatc', 'SHA256SUMS']) {
+    await fs.access(path.join(artifacts, rel));
+  }
+  await sourceIdentity(flatbuffers, options.flatbuffersSource, 'ast-flatbuffers', tool('git'));
+  await atomicJson(path.join(artifacts, 'ast-producer.json'), {source: component.source,
+    flatbuffers: options.flatbuffersSource, official_sdk_build_id: seed.buildId,
+    producer: component.producer, buildId: request.identity.buildId});
+}
 export async function nativeProducer(request) {
   activeRequest = request;
   const {component} = request;
@@ -200,6 +230,7 @@ export async function nativeProducer(request) {
   }
   await sourceIdentity(request.source, component.source, component.id, tool('git'));
   if (component.producer.adapter === 'bootstrap-std') await std(request);
+  else if (component.producer.adapter === 'ast-support') await astSupport(request);
   else if (['llvm-tools', 'llvm-dylib'].includes(component.producer.adapter)) await llvm(request);
   else reject('ADAPTER', component.id, component.producer.adapter);
   await sourceIdentity(request.source, component.source, component.id, tool('git'));
