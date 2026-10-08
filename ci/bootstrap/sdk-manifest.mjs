@@ -249,7 +249,10 @@ export function validatePlan(plan) {
     if (component.producer.adapter === 'bootstrap-compiler') {
       const selected = options.sdkComponents.map(id => byId.get(id));
       for (const role of ROLES) if (!selected.some(dep => dep?.roles.includes(role))) reject('DEPENDENCY_ROLE', component.id, `input SDK is missing ${role}`);
-      const compiler = selected.filter(dep => dep && installsCompiler(dep));
+      // Directory mappings state scope, not an inventory. Typed candidates
+      // can be selected here; resolveFiles checks every authenticated payload
+      // for a second physical owner before the private build SDK is admitted.
+      const compiler = selected.filter(dep => dep?.roles.includes('compiler') && installsCompiler(dep));
       if (compiler.length !== 1) reject('DEPENDENCY_ROLE', component.id, 'input SDK requires exactly one installed compiler producer');
       // The native stage adapter consumes bin/cjcj-stage1 and a source-authored
       // receipt, not the stock compiler in an opaque official distribution.
