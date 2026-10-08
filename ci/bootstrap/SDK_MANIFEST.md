@@ -160,7 +160,7 @@ this candidate has completed those migrations.
 
 | Platform/caller | Current implementation | Qualification |
 | --- | --- | --- |
-| Linux x86_64 standalone manifest entry | Sharedbuild seed/runtime, native LLVM/std, install and existing checks | Sixteen CLI/sharedbuild fixture cases passed, including three repaired fixture preconditions; genuine Cangjie compile/run and native producer qualification pending |
+| Linux x86_64 standalone manifest entry | Sharedbuild seed/runtime/compiler, native LLVM tools/dylib/auxiliary, AST/std, install and existing checks | Genuine official host seed assembled and compiled/ran a Cangjie program. All eight target components sealed successfully, but target SDK installation failed validation; target compile/run and genuine mixing/restoration remain NOT_RUN |
 | Linux aarch64 | Native LLVM/std adapters; sharedbuild compiler/runtime remain x86_64 | Adapter coverage incomplete |
 | Darwin x86_64 / aarch64 | Native LLVM recipe shape exists | Native colour/load verifier and caller migration incomplete; assembly explicitly refuses |
 | Windows x86_64 | Declared platform and unknown/unimplemented adapter refusal | Native tuple/static archive adapter and verifier incomplete; assembly explicitly refuses |
@@ -181,3 +181,18 @@ normal-input control successful and restore the original inputs afterward.
 The separate required genuine toolchain validation, legacy assembly caller
 migration and native runner matrix remain required. Shared SDKs,
 in-flight #863, release/latest approvals and paired ABI holds are unchanged.
+
+The first complete target installation exposed an `installLock()` classification
+defect: source-built AST/runtime headers, schema and `cjfilt` fall through to
+`official-retain`, whose justification is only present on distribution inputs.
+The existing verifier refused them with `UNDECLARED`; no target SDK was
+published. The successful component receipts and the failed staging tree are
+retained. Fixing classification must preserve the original artifact sources and
+the verifier's official-retention rule, rather than inventing retention reasons
+or rewriting the lock to bless an installation.
+
+`sdk-real-boundary.test.mjs` is prepared for a retained genuine target SDK. It
+substitutes an ordinary native module and an official LLVM dylib separately,
+checks precise refusal and absence of publication, restores original producer
+bytes, and invokes the same assembler again. These cases have not run because
+the target installation above failed; fixture results do not substitute for them.
