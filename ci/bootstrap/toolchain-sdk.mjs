@@ -62,6 +62,8 @@ async function verifySdk(sdk, plan, manifest) {
   // verifier's --write-lock is no longer the authority for payload identity.
   await execute('python3', [path.join(here, 'sdk_verify.py'), '--sdk', sdk, '--role', plan.role,
     '--runtime-pin', plan.verification.runtimePin.path, '--target-tuple', tuple]);
+  if (plan.role === 'target') await verifyBootstrapRuntimeSdk(sdk, tuple, {}, undefined,
+    await fileDigest(path.join(sdk, 'SDK.lock.json')), manifest);
   const dylib = plan.components.find(component => component.domain === 'target' && component.roles.includes('llvm-dylib'));
   if (dylib?.source.kind === 'git') {
     const libraryRoot = path.join(sdk, 'third_party/llvm/lib');
@@ -162,7 +164,8 @@ export async function resolvePlan(plan, {dryRun = false, resumeFailed = false} =
     platform: plan.platform, stage: plan.stage,
     components: Object.fromEntries([...outputs].map(([id, output]) => [id, {buildId: output.buildId,
       directory: output.directory, receiptSha256: output.receiptSha256, source: output.component.source,
-      config: output.component.config, producer: output.component.producer, dependencies: output.dependencies}])),
+      config: output.component.config, producer: output.component.producer, dependencies: output.dependencies,
+      status: output.status, rc: output.rc, execution: output.execution}])),
     files: resolveFiles(plan, outputs)};
   await fs.mkdir(plan.buildRoot, {recursive: true});
   await atomicJson(path.join(plan.buildRoot, `resolved-${manifest.planSha256}.json`), manifest);
