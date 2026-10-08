@@ -84,19 +84,15 @@ async function fixture() {
     ['std', ['std'], sources.std, 'std', ['official', 'compiler', 'runtime'], [{from: '', to: ''}]],
   ]) {
     const recipe = path.join(root, `${id}.recipe.json`);
+    const expectedOutputs = {'runtime': [`install/runtime/lib/${tuple}/libcangjie-runtime.so`], compiler: ['bin/cjcj-stage1'],
+      'llvm-tools': ['bin/opt'], 'llvm-dylib': ['libLLVM-15.so'], std: ['std-producer.json']}[id];
     plan.components.push({id, roles, domain: 'target', source, config: {host: plan.platform, target: plan.platform,
-      options: {parameters: {mode}, optimization: 'Release'}, tools: {builder: {path: builder, sha256: await fileDigest(builder)}}},
+      options: {parameters: {mode}, optimization: 'Release', sdkDependency: 'official',
+        inputBindings: id === 'std' ? {compiler: {dependency: 'compiler', artifact: 'bin/cjcj-stage1'}} : {}, outputs: expectedOutputs},
+      tools: {builder: {path: builder, sha256: await fileDigest(builder)}}},
       producer: {adapter: 'sharedbuild-runtime-default', version: producerVersion, engine, engineSha256: await fileDigest(engine), recipe}, dependencies, install});
   }
   const identities = buildIdentities(plan);
-  for (const component of plan.components.slice(1)) {
-    const inputs = component.id === 'std' ? {compiler: path.join(identities.get('compiler').directory, 'artifacts/bin/cjcj-stage1')} : {};
-    const outputs = {'runtime': [`install/runtime/lib/${tuple}/libcangjie-runtime.so`], compiler: ['bin/cjcj-stage1'],
-      'llvm-tools': ['bin/opt'], 'llvm-dylib': ['libLLVM-15.so'], std: ['std-producer.json']}[component.id];
-    await atomicJson(component.producer.recipe, {kind: 'runtime-default', sha: component.source.commit, repo: component.source.repo, sdk: seed,
-      optimization: 'Release', builder, inputs, outputs, parameters: component.config.options.parameters,
-      host: plan.platform, target: plan.platform, dependency_build_ids: identities.get(component.id).dependencies});
-  }
   const planFile = path.join(root, 'plan.json'); await atomicJson(planFile, plan);
   return {root, plan, planFile, identities, out: path.join(root, 'sdk'), sources};
 }
@@ -177,12 +173,6 @@ test('same-key parallel SDK requests serialize the producer and publish separate
 test('failed producer preserves actual rc and never publishes or starts dependents', async () => {
   const f = await fixture(); const runtime = f.plan.components.find(value => value.id === 'runtime');
   runtime.config.options.parameters.mode = 'fail'; const identities = buildIdentities(f.plan);
-  for (const component of f.plan.components.slice(1)) {
-    const spec = await readJson(component.producer.recipe); spec.parameters = component.config.options.parameters;
-    spec.dependency_build_ids = identities.get(component.id).dependencies;
-    if (component.id === 'std') spec.inputs.compiler = path.join(identities.get('compiler').directory, 'artifacts/bin/cjcj-stage1');
-    await atomicJson(component.producer.recipe, spec);
-  }
   const result = await invoke(f); observed(result, 'producer-failure'); assert.notEqual(result.rc, 0); assert.match(result.stderr, /BUILD_FAILED rc=17/);
   const state = await readJson(path.join(identities.get('runtime').directory, 'state.json')); assert.equal(state.status, 'failed');
   await assert.rejects(fs.access(path.join(identities.get('runtime').directory, 'DONE'))); await assert.rejects(fs.access(path.join(identities.get('std').directory, 'state.json')));

@@ -5,15 +5,28 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import {gzipSync} from 'node:zlib';
+import {spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {execute, fileDigest, readJson, atomicJson, canonical, sourceIdentity, reject, PLATFORMS} from './sdk-manifest.mjs';
 import {parseLlvmToolsManifest} from '../llvm-tools-manifest.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+let activeRequest;
+const tool = name => {
+  const declared = activeRequest.component.config.tools[name];
+  if (!declared) reject('TOOL_IDENTITY', activeRequest.component.id, `missing tool ${name}`);
+  return declared.path;
+};
 const run = async (argv, options = {}) => {
+  argv = [...argv];
+  if (!path.isAbsolute(argv[0])) argv[0] = tool(argv[0]);
   console.log(canonical({argv, cwd: options.cwd}).trim());
-  const result = await execute(argv[0], argv.slice(1), {...options, maxBuffer: 64 * 1024 * 1024});
-  process.stdout.write(result.stdout); process.stderr.write(result.stderr); return result;
+  const result = await new Promise((resolve, rejectPromise) => {
+    const child = spawn(argv[0], argv.slice(1), {...options, stdio: 'inherit'});
+    child.once('error', rejectPromise); child.once('exit', (rc, signal) => resolve({rc, signal}));
+  });
+  if (result.rc !== 0 || result.signal) throw new Error(`native producer rc=${result.rc} signal=${result.signal} command=${argv[0]}`);
+  return result;
 };
 async function fetchIdentity(input, target, label) {
   if (!input || !/^[0-9a-f]{40}$/.test(input.commit) || !/^[0-9a-f]{40}$/.test(input.tree) || !input.repo) reject('SOURCE', label, 'full dependency source identity');
@@ -44,7 +57,8 @@ async function llvm(request) {
   const flags = '-include cstdint -include unordered_map -include map -include vector -include string';
   const cmake = ['cmake', '-G', 'Ninja', '-S', path.join(source, 'llvm'), '-B', build,
     `-DCANGJIE_RUNTIME_SOURCE_DIR=${paired}`, `-DCMAKE_BUILD_TYPE=${dylib ? 'RelWithDebInfo' : 'Release'}`,
-    '-DCMAKE_C_COMPILER=clang', '-DCMAKE_CXX_COMPILER=clang++', '-DLLVM_ENABLE_ASSERTIONS=OFF',
+    `-DCMAKE_C_COMPILER=${tool('clang')}`, `-DCMAKE_CXX_COMPILER=${tool('clang++')}`,
+    `-DCMAKE_MAKE_PROGRAM=${tool('ninja')}`, '-DLLVM_ENABLE_ASSERTIONS=OFF',
     '-DLLVM_ENABLE_RTTI=OFF', '-DBUILD_SHARED_LIBS=OFF', '-DLLVM_LINK_LLVM_DYLIB=OFF',
     `-DLLVM_BUILD_LLVM_DYLIB=${dylib ? 'ON' : 'OFF'}`, `-DLLVM_TARGETS_TO_BUILD=${options.targets}`,
     `-DLLVM_ENABLE_PROJECTS=${dylib ? '' : 'lld'}`, `-DCMAKE_CXX_FLAGS=${dylib ? '' : '-gline-tables-only '}${flags}`];
@@ -61,7 +75,7 @@ async function llvm(request) {
   if (dylib) {
     const library = component.config.target.startsWith('darwin_') ? 'libLLVM.dylib' : 'libLLVM-15.so';
     await fs.copyFile(path.join(build, 'lib', library), path.join(artifacts, library));
-    const symbols = (await run([path.join(build, 'bin', 'llvm-nm'), '--defined-only', path.join(build, 'lib', library)])).stdout;
+    const symbols = (await execute(path.join(build, 'bin', 'llvm-nm'), ['--defined-only', path.join(build, 'lib', library)], {maxBuffer: 64 * 1024 * 1024})).stdout;
     if (!symbols.includes('LLVMInitializeX86TargetInfo')) reject('LLVM_TARGETS', component.id, 'X86 target symbol missing');
     await fs.writeFile(path.join(artifacts, 'defined-symbols.txt'), symbols);
     await atomicJson(path.join(artifacts, 'manifest.json'), {llvm_sha: component.source.commit,
@@ -72,13 +86,14 @@ async function llvm(request) {
     const flatbuffers = await fetchIdentity(options.flatbuffersSource, path.join(directory, 'source-inputs', 'flatbuffers'), 'flatbuffers');
     const flatBuild = path.join(directory, 'build', 'flatbuffers');
     await run(['cmake', '-G', 'Ninja', '-S', flatbuffers, '-B', flatBuild, '-DFLATBUFFERS_BUILD_TESTS=OFF',
+      `-DCMAKE_C_COMPILER=${tool('clang')}`, `-DCMAKE_CXX_COMPILER=${tool('clang++')}`, `-DCMAKE_MAKE_PROGRAM=${tool('ninja')}`,
       '-DFLATBUFFERS_BUILD_FLATLIB=OFF', '-DFLATBUFFERS_BUILD_SHAREDLIB=OFF',
       ...(options.launcher ? [`-DCMAKE_C_COMPILER_LAUNCHER=${options.launcher}`, `-DCMAKE_CXX_COMPILER_LAUNCHER=${options.launcher}`] : [])]);
     await run(['cmake', '--build', flatBuild, '--target', 'flatc', '-j', String(os.availableParallelism())]);
     const generated = path.join(directory, 'build', 'generated'); await fs.mkdir(path.join(generated, 'flatbuffers'), {recursive: true});
     await run([path.join(flatBuild, 'flatc'), '--no-warnings', '-c', '-o', path.join(generated, 'flatbuffers'), path.join(compiler, 'schema/ModuleFormat.fbs')]);
     const fixed = path.join(artifacts, 'fixed-llc'); await fs.mkdir(fixed, {recursive: true});
-    await run([...(options.launcher ? [options.launcher] : []), 'clang++', '-std=c++17', '-O2', '-fPIC', '-fno-rtti', '-fno-exceptions',
+    await run([...(options.launcher ? [options.launcher] : []), tool('clang++'), '-std=c++17', '-O2', '-fPIC', '-fno-rtti', '-fno-exceptions',
       `-I${source}/llvm/include`, `-I${build}/include`, `-I${flatbuffers}/include`, `-I${generated}`,
       '-c', path.join(component.producer.repository, 'runtime_shim/cjselfhost_llvmshim.cpp'), '-o', path.join(fixed, 'cjselfhost_llvmshim.o')]);
     const lld = component.config.target.startsWith('darwin_') ? 'ld64.lld' : 'ld.lld';
@@ -87,7 +102,7 @@ async function llvm(request) {
     await fs.mkdir(path.join(artifacts, 'bin')); await fs.mkdir(path.join(artifacts, 'lib'));
     for (const [tool, prefix] of [['llc', 'LLC'], ['opt', 'OPT'], [lld, 'LLD']]) {
       const binary = path.join(build, 'bin', tool);
-      const version = (await run([binary, '--version'])).stdout.split('\n').map(line => line.trim()).find(line => /LLVM version |^LLD /.test(line));
+      const version = (await execute(binary, ['--version'])).stdout.split('\n').map(line => line.trim()).find(line => /LLVM version |^LLD /.test(line));
       if (!version) reject('LLVM_VERSION', component.id, tool);
       values[`${prefix}_SOURCE`] = `tuple:${component.source.commit}`;
       values[`${prefix}_VERSION`] = version; values[`${prefix}_SHA256`] = await fileDigest(binary);
@@ -121,19 +136,41 @@ async function std(request) {
   const targetLib = path.join(runtime.artifacts, options.targetLibRelative || '');
   const hostRuntime = path.join(seed.artifacts, 'runtime/lib', tuple);
   if (!/^\d+GB$/.test(options.heap || '')) reject('PRODUCER_OPTIONS', component.id, 'explicit compiler heap');
-  const env = {...process.env, CANGJIE_HOME: sdk, PATH: `${sdk}/bin:${sdk}/tools/bin:${sdk}/third_party/llvm/bin:/usr/lib/ccache:/usr/bin:/bin`,
+  const frozenTools = path.join(directory, 'build', 'frozen-tools'); await fs.mkdir(frozenTools, {recursive: true});
+  for (const [name, input] of Object.entries(component.config.tools)) {
+    const destination = path.join(frozenTools, name);
+    try { await fs.symlink(input.path, destination); } catch (error) { if (error.code !== 'EEXIST') throw error; }
+  }
+  const env = {...process.env, CANGJIE_HOME: sdk, PATH: `${sdk}/bin:${sdk}/tools/bin:${sdk}/third_party/llvm/bin:${frozenTools}:/usr/bin:/bin`,
+    CC: tool('clang'), CXX: tool('clang++'), AR: tool('ar'),
     LD_LIBRARY_PATH: `${hostRuntime}:${sdk}/third_party/llvm/lib:${sdk}/tools/lib`, cjHeapSize: options.heap,
     TMPDIR: path.join(directory, 'build', 'tmp'), CANGJIE_BUILD_JOBS: String(os.availableParallelism()), CMAKE_BUILD_PARALLEL_LEVEL: String(os.availableParallelism())};
   await fs.mkdir(env.TMPDIR, {recursive: true});
   // Native backend tools and the in-process library must come from the same
   // explicit target LLVM output. Managed compiler loading keeps host runtime.
-  for (const [dependencyName, destination] of [[options.llvmToolsDependency, 'third_party/llvm'], [options.llvmDylibDependency, 'third_party/llvm/lib'], [options.astDependency, 'lib']]) {
+  for (const [dependencyName, destination] of [[options.llvmToolsDependency, 'third_party/llvm'], [options.llvmDylibDependency, 'third_party/llvm/lib']]) {
     const dependency = dependencies[dependencyName]; if (!dependency) reject('PRODUCER_DEPENDENCY', component.id, dependencyName);
     await fs.cp(dependency.artifacts, path.join(sdk, destination), {recursive: true, dereference: false, force: true});
   }
+  const ast = dependencies[options.astDependency]; if (!ast) reject('PRODUCER_DEPENDENCY', component.id, options.astDependency);
+  await run(['python3', path.join(component.producer.repository, 'ci/install_std_sdk_inputs.py'), ast.artifacts, sdk, tuple]);
+  // Preserve bootstrap_target_std's first-probe common layout. The target
+  // pair must be found before build.py can fall back to the host SDK.
+  const link = path.join(directory, 'build', 'std-runtime-link');
+  const arch = component.config.target.slice('linux_'.length);
+  const common = path.join(link, 'common', `linux_relwithdebinfo_${arch}`);
+  const native = path.join(common, 'lib', tuple), dynamic = path.join(common, 'runtime/lib', tuple);
+  await fs.mkdir(native, {recursive: true}); await fs.mkdir(dynamic, {recursive: true});
+  for (const file of ['libcangjie-aio.a', 'cjstart.o', 'cjld.shared.lds', 'discard_eh_frame.lds']) {
+    await fs.copyFile(path.join(sdk, 'lib', tuple, file), path.join(native, file));
+  }
+  const dynamicSource = await fs.stat(path.join(targetLib, 'runtime/lib', tuple)).then(() => path.join(targetLib, 'runtime/lib', tuple)).catch(error => {
+    if (error.code !== 'ENOENT') throw error; return targetLib;
+  });
+  for (const file of ['libcangjie-runtime.so', 'libboundscheck.so']) await fs.copyFile(path.join(dynamicSource, file), path.join(dynamic, file));
   const stdlib = path.join(source, 'stdlib');
   const artifacts = path.join(directory, 'artifacts'); await fs.mkdir(artifacts);
-  await run(['python3', 'build.py', 'build', '-t', 'relwithdebinfo', '--jobs', String(os.availableParallelism()), `--target-lib=${targetLib}`], {cwd: stdlib, env});
+  await run(['python3', 'build.py', 'build', '-t', 'relwithdebinfo', '--jobs', String(os.availableParallelism()), `--target-lib=${link}`], {cwd: stdlib, env});
   await run(['python3', 'build.py', 'install', '--prefix', artifacts], {cwd: stdlib, env});
   for (const rel of [`modules/${tuple}/std/core/core.Int64.ti`, `lib/${tuple}/libcangjie-std-core.a`, `runtime/lib/${tuple}/libcangjie-std-core.so`, 'lib/libstdFFI.so']) {
     if (!(await fs.stat(path.join(artifacts, rel))).isFile()) reject('STD_INSTALL_SHAPE', component.id, rel);
@@ -143,6 +180,7 @@ async function std(request) {
     source_tree: component.source.tree, stage: 'completed-std', producer: component.producer});
 }
 export async function nativeProducer(request) {
+  activeRequest = request;
   const {component} = request;
   const platform = PLATFORMS[component.config.host];
   if (!platform || platform[0] !== process.platform || platform[1] !== process.arch) reject('PRODUCER_PLATFORM', component.id, `needs ${component.config.host}`);

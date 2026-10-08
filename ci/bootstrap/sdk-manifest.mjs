@@ -5,6 +5,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import os from 'node:os';
 import {execFile} from 'node:child_process';
+import {spawn} from 'node:child_process';
 import {promisify} from 'node:util';
 
 export const execute = promisify(execFile);
@@ -109,9 +110,19 @@ export function validatePlan(plan) {
       absolute(producer.engine, id); absolute(producer.recipe, id);
       if (!HEX64.test(producer.engineSha256)) reject('ADAPTER', id, 'sharedbuild engine hash required');
       if (config.host !== 'linux_x86_64' || config.target !== 'linux_x86_64') reject('ADAPTER_PLATFORM', id, 'existing sharedbuild supports Linux x86_64');
-      fields(config.options, ['parameters', 'optimization'], [], id);
+      fields(config.options, ['parameters', 'optimization', 'sdkDependency', 'inputBindings', 'outputs'], [], id);
       if (!['O0', 'O1', 'Release'].includes(config.options.optimization)) reject('CONFIG', id, 'sharedbuild optimization');
       if (!config.tools.builder) reject('CONFIG', id, 'pinned builder required');
+      if (!component.dependencies.includes(config.options.sdkDependency)) reject('DEPENDENCY', id, 'sharedbuild SDK input not in closure');
+      fields(config.options.inputBindings, [], Object.keys(config.options.inputBindings), id);
+      for (const [name, binding] of Object.entries(config.options.inputBindings)) {
+        if (!/^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(name)) reject('CONFIG', id, 'invalid input name');
+        fields(binding, ['dependency', 'artifact'], [], id);
+        if (!component.dependencies.includes(binding.dependency)) reject('DEPENDENCY', id, `input ${name} not in closure`);
+        relative(binding.artifact, id);
+      }
+      if (!Array.isArray(config.options.outputs) || !config.options.outputs.length) reject('CONFIG', id, 'explicit expected outputs required');
+      config.options.outputs.forEach(output => relative(output, id));
     }
     if (producer.adapter === 'official' && Object.keys(config.options).length) reject('CONFIG', id, 'official copy has no build options');
     if (producer.adapter === 'bootstrap-std') {
@@ -133,6 +144,10 @@ export function validatePlan(plan) {
           if (!HEX40.test(config.options[key].commit) || !HEX40.test(config.options[key].tree) || !config.options[key].repo) reject('SOURCE', id, key);
         }
       }
+      for (const tool of ['cmake', 'ninja', 'clang', 'clang++', 'git']) if (!config.tools[tool]) reject('CONFIG', id, `native producer tool ${tool} must be frozen`);
+    }
+    if (producer.adapter === 'bootstrap-std') for (const tool of ['python3', 'cmake', 'ninja', 'clang', 'clang++', 'ar', 'git']) {
+      if (!config.tools[tool]) reject('CONFIG', id, `std producer tool ${tool} must be frozen`);
     }
     if (['bootstrap-std', 'llvm-tools', 'llvm-dylib'].includes(producer.adapter)) absolute(producer.repository, id);
     if (producer.adapter === 'bootstrap-std' && !plan.platform.startsWith('linux_')) reject('ADAPTER_PLATFORM', id, 'bootstrap.sh std recipe is Linux only');
@@ -233,6 +248,23 @@ export async function inventory(root, {links = false} = {}) {
 }
 export async function withLock(directory, action) {
   await fs.mkdir(path.dirname(directory), {recursive: true});
+  if (process.platform === 'linux') {
+    // The existing Linux producer lock is an OS flock. Keep its lifetime tied
+    // to this pipe: interruption closes stdin and releases the lock, including
+    // when the SDK process dies before it can write an owner record.
+    const child = spawn('flock', ['-x', directory, process.execPath, '-e',
+      'process.stdout.write("LOCK_READY\\n"); process.stdin.resume();'], {stdio: ['pipe', 'pipe', 'pipe']});
+    let diagnostic = '';
+    child.stderr.on('data', chunk => { diagnostic += chunk; });
+    const exited = new Promise(resolve => child.once('exit', (rc, signal) => resolve({rc, signal})));
+    await new Promise((resolve, rejectPromise) => {
+      child.once('error', rejectPromise);
+      child.stdout.once('data', chunk => String(chunk).includes('LOCK_READY') ? resolve() : rejectPromise(new Error('lock handshake')));
+      child.once('exit', (rc, signal) => rejectPromise(new Error(`LOCK_FAILED rc=${rc} signal=${signal} ${diagnostic}`)));
+    });
+    try { return await action(); }
+    finally { child.stdin.end(); await exited; }
+  }
   // mkdir is atomic on native Linux, Darwin and Windows. A crash leaves a
   // conservative lock requiring explicit operator cleanup, never a false hit.
   const start = Date.now();

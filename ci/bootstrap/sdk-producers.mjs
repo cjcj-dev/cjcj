@@ -58,18 +58,29 @@ async function official(component, directory, identity) {
   return sealOutput(directory, component, identity, {status: 'complete', rc: 0, kind: 'official-distribution-copy',
     distribution: {version: source.version, lockSha256: source.lockSha256, reason: source.reason}});
 }
-async function sharedbuild(component, directory, identity, plan, resumeFailed) {
+async function sharedbuild(component, directory, identity, plan, resumeFailed, outputs) {
   const {engine, engineSha256, recipe} = component.producer;
   if (await fileDigest(engine) !== engineSha256) reject('PRODUCER_IDENTITY', component.id, 'sharedbuild engine digest');
-  const spec = await readJson(recipe);
   const kind = component.producer.adapter.replace('sharedbuild-', '').replace('stage1', 'cjcj-stage1');
-  if (spec.kind !== kind || spec.sha !== component.source.commit || spec.repo !== component.source.repo
-    || spec.host !== component.config.host || spec.target !== component.config.target
-    || canonical(spec.dependency_build_ids) !== canonical(identity.dependencies)
-    || canonical(spec.parameters) !== canonical(component.config.options.parameters)
-    || spec.optimization !== component.config.options.optimization) reject('PRODUCER_RECIPE', component.id, 'sharedbuild recipe does not match frozen component/dependencies');
-  if (await fileDigest(spec.builder) !== component.config.tools.builder?.sha256
-    || spec.builder !== component.config.tools.builder.path) reject('PRODUCER_RECIPE', component.id, 'builder must be pinned');
+  const options = component.config.options;
+  const sdkOutput = outputs.get(options.sdkDependency), sdkSource = sdkOutput?.component.source;
+  if (sdkSource?.kind !== 'distribution' || sdkOutput.component.domain !== 'host') reject('PRODUCER_RECIPE', component.id, 'sharedbuild requires an explicit official host SDK dependency');
+  if (await fileDigest(sdkSource.lock) !== sdkSource.lockSha256) reject('PRODUCER_RECIPE', component.id, 'host SDK lock changed');
+  const inputs = {}, expectedInputHashes = {};
+  for (const [name, binding] of Object.entries(options.inputBindings)) {
+    const dependency = outputs.get(binding.dependency), entry = dependency?.files[binding.artifact];
+    if (entry?.type !== 'file') reject('PRODUCER_RECIPE', component.id, `missing physical dependency artifact ${name}`);
+    inputs[name] = await physicalPath(dependency.artifacts, binding.artifact, component.id);
+    expectedInputHashes[name] = entry.sha256;
+    if (await fileDigest(inputs[name]) !== entry.sha256) reject('DEPENDENCY_DIGEST', component.id, name);
+  }
+  // The JSON is an emitted request, not another mutable source of input
+  // authority. Every producer parameter comes from the frozen plan/receipts.
+  const spec = {kind, sha: component.source.commit, repo: component.source.repo, sdk: sdkSource.root,
+    builder: component.config.tools.builder.path, inputs, outputs: options.outputs,
+    parameters: options.parameters, optimization: options.optimization, host: component.config.host,
+    target: component.config.target, dependency_build_ids: identity.dependencies};
+  await atomicJson(recipe, spec);
   const log = path.join(directory, 'logs', 'sharedbuild.log');
   let result;
   try {
@@ -89,6 +100,13 @@ async function sharedbuild(component, directory, identity, plan, resumeFailed) {
   }
   const cache = path.join(directory, 'sharedbuild-output');
   const completion = await readJson(path.join(cache, 'completion.json'));
+  const actualRecipe = await readJson(path.join(cache, 'recipe.json'));
+  if (actualRecipe.source_sha !== component.source.commit || actualRecipe.source_tree !== component.source.tree
+    || actualRecipe.engine_sha256 !== engineSha256 || actualRecipe.builder_sha256 !== component.config.tools.builder.sha256
+    || actualRecipe.sdk.lock_sha256 !== sdkSource.lockSha256 || actualRecipe.sdk.version !== sdkSource.version
+    || canonical(actualRecipe.inputs) !== canonical(expectedInputHashes) || canonical(actualRecipe.outputs) !== canonical(options.outputs)
+    || canonical(actualRecipe.parameters) !== canonical(options.parameters)
+    || canonical(actualRecipe.dependency_build_ids) !== canonical(identity.dependencies)) reject('PRODUCER_RECIPE', component.id, 'actual producer recipe differs from frozen closure');
   if (completion.status !== 'complete' || completion.rc !== 0 || completion.source_sha !== component.source.commit
     || completion.source_tree !== component.source.tree) reject('SOURCE_CHECKOUT', component.id, 'sharedbuild actual source/completion mismatch');
   await fs.rename(path.join(cache, 'artifacts'), path.join(directory, 'artifacts'));
@@ -109,7 +127,17 @@ async function native(component, directory, identity, outputs) {
     dependencies: Object.fromEntries(component.dependencies.map(id => [id, outputs.get(id)]))});
   const executable = path.join(component.producer.repository, 'ci/bootstrap/sdk-native-producer.mjs');
   const log = path.join(directory, 'logs', `${component.producer.adapter}.log`);
-  const result = await runProducer([process.execPath, executable, request], {cwd: directory, env: process.env, log});
+  const env = {PATH: '/usr/bin:/bin', LANG: 'C.UTF-8', HOME: path.join(directory, 'home'), TMPDIR: path.join(directory, 'build/tmp')};
+  for (const name of ['HOME', 'TMPDIR']) await fs.mkdir(env[name], {recursive: true});
+  // GHA's existing sccache setup needs its service configuration, but compiler
+  // flags, PATH and loader variables never leak from a caller into a recipe.
+  if (process.env.GITHUB_ACTIONS === 'true') {
+    env.GITHUB_ACTIONS = 'true';
+    for (const key of ['SCCACHE_DIR', 'SCCACHE_CACHE_SIZE', 'SCCACHE_IDLE_TIMEOUT', 'SCCACHE_GHA_ENABLED', 'ACTIONS_CACHE_URL', 'ACTIONS_RUNTIME_URL', 'ACTIONS_RUNTIME_TOKEN']) {
+      if (process.env[key]) env[key] = process.env[key];
+    }
+  }
+  const result = await runProducer([process.execPath, executable, request], {cwd: directory, env, log});
   const after = await sourceIdentity(source, component.source, component.id);
   return sealOutput(directory, component, identity, {...result, status: 'complete', kind: component.producer.adapter, before, source: after});
 }
@@ -147,7 +175,7 @@ export async function produceComponent(plan, component, identity, outputs, {resu
       if (await fileDigest(tool.path) !== tool.sha256) reject('TOOL_IDENTITY', component.id, name);
     }
     const output = component.producer.adapter === 'official' ? await official(component, directory, identity)
-      : component.producer.adapter.startsWith('sharedbuild-') ? await sharedbuild(component, directory, identity, plan, resumeFailed)
+      : component.producer.adapter.startsWith('sharedbuild-') ? await sharedbuild(component, directory, identity, plan, resumeFailed, outputs)
         : await native(component, directory, identity, outputs);
     await atomicJson(state, {status: 'complete', buildId: identity.buildId, rc: 0}); return output;
   } catch (error) {

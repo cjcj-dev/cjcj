@@ -209,6 +209,31 @@ def fail(code: str, message: str, errors: list) -> None:
 
 
 def verify(sdk: Path, lock: dict, pin: dict, identities: dict, errors: list, target_tuple: str | None = None) -> None:
+    if lock.get('plan_sha256') or (sdk / 'SDK.manifest.json').exists():
+        try:
+            manifest_path = sdk / 'SDK.manifest.json'
+            plan_path = sdk / 'SDK.plan.json'
+            manifest = json.loads(manifest_path.read_text())
+            plan = json.loads(plan_path.read_text())
+            if (manifest.get('schema') != 'toolchain-sdk-resolved-v1' or manifest.get('status') != 'complete'
+                    or manifest.get('rc') != 0 or plan.get('schema') != 'toolchain-sdk-plan-v1'
+                    or sha256_file(manifest_path) != lock.get('manifest_sha256')
+                    or sha256_file(plan_path) != lock.get('plan_sha256')
+                    or manifest.get('planSha256') != lock.get('plan_sha256')):
+                fail('MANIFEST_BINDING', 'plan/resolved/lock identity mismatch', errors)
+            declared = manifest.get('files') or {}
+            expected = set(declared) | {'SDK.plan.json', 'SDK.manifest.json'}
+            if set(lock.get('files') or {}) != expected:
+                fail('MANIFEST_BINDING', 'lock membership differs from sealed manifest', errors)
+            for rel, row in declared.items():
+                installed = (lock.get('files') or {}).get(rel, {})
+                if (installed.get('sha256') != row.get('sha256') or installed.get('size') != row.get('size')
+                        or installed.get('mode') != row.get('mode') or installed.get('type') != row.get('type')
+                        or installed.get('producer', {}).get('build_id') != row.get('buildId')
+                        or installed.get('producer', {}).get('receipt_sha256') != row.get('receiptSha256')):
+                    fail('MANIFEST_BINDING', f'lock differs from sealed producer artifact: {rel}', errors)
+        except (OSError, ValueError, TypeError) as error:
+            fail('MANIFEST_BINDING', str(error), errors)
     on_disk = {}
     for path, rel in iter_files(sdk):
         on_disk[rel] = path
@@ -348,6 +373,9 @@ def main() -> int:
     pin = load_pin(args.runtime_pin) if args.runtime_pin else {}
     lock_path = sdk / LOCK_NAME
     if args.write_lock:
+        if (sdk / 'SDK.manifest.json').exists():
+            print('SDK-VERIFY-FAIL rule=MANIFEST_BINDING manifest SDK locks are written from presealed producer inputs by toolchain-sdk', file=sys.stderr)
+            return 1
         role = args.role or identities.get('role')
         if role not in ('host', 'target'):
             print('SDK-VERIFY-FAIL rule=HOST_TARGET_CROSS --write-lock requires --role', file=sys.stderr)
