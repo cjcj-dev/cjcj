@@ -318,13 +318,17 @@ export async function withLock(directory, action) {
 }
 export async function readOutput(directory, component, identity) {
   const file = await physicalPath(directory, 'output.json', component.id);
-  const record = await readJson(file);
+  // The parsed record and its authenticated digest must refer to the same
+  // bytes. A separate later fileDigest could authenticate a replacement while
+  // returning the previously parsed record to the consumer.
+  const bytes = await fs.readFile(file);
+  const record = JSON.parse(bytes);
   const done = (await fs.readFile(await physicalPath(directory, 'DONE', component.id), 'utf8')).trim();
   const withoutLocator = value => {
     const {receipt, receiptSha256, originBuildRoot, ...producer} = value.producer;
     return {...value, producer};
   };
-  if (done !== await fileDigest(file) || (component.producer.receipt && done !== component.producer.receiptSha256)
+  if (done !== sha256(bytes) || (component.producer.receipt && done !== component.producer.receiptSha256)
     || record.schema !== OUTPUT_SCHEMA || record.status !== 'complete' || record.rc !== 0
     || record.buildId !== identity.buildId || record.recipeId !== identity.recipeId
     || canonical(withoutLocator(record.component)) !== canonical(withoutLocator(component))
