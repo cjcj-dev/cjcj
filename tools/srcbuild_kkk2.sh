@@ -938,6 +938,7 @@ bootstrap_argv() {
         --runtime-pin "$CJCJ_BOOTSTRAP_RUNTIME_PIN" \
         --cjcj-sha "$BOOTSTRAP_CJCJ_SHA" \
         --stdsrc "$BOOTSTRAP_STDSRC" \
+        --sdk-plans "${CJCJ_BOOTSTRAP_SDK_PLANS:?missing frozen bootstrap SDK plan bundle}" \
         --cpp-src "$BOOTSTRAP_CPP_SRC" \
         --base "$BOOTSTRAP_HOST_SDK" \
         --host-llvm-so "$BOOTSTRAP_HOST_LLVM_SO" \

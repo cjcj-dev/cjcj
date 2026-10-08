@@ -26,6 +26,7 @@ exec bash "$root/ci/bootstrap/bootstrap.sh" \
   --runtime-pin "${CJCJ_BOOTSTRAP_RUNTIME_PIN:?}" \
   --cjcj-sha "$CJCJ_BOOTSTRAP_CJCJ_SHA" \
   --stdsrc "$CANGJIE_WORKSPACE/cangjie_runtime/stdlib" \
+  --sdk-plans "${CJCJ_BOOTSTRAP_SDK_PLANS:?missing frozen bootstrap SDK plan bundle}" \
   --cpp-src "$CJCJ_BOOTSTRAP_CPP_SRC" \
   --base "$CJCJ_BOOTSTRAP_BASE" \
   --host-llvm-so "$CJCJ_BOOTSTRAP_HOST_LLVM_SO" \
