@@ -113,7 +113,9 @@ test('local archive: verified read-only bytes reach the real extraction consumer
 }));
 
 test('local archive: wrong digest rejects before unzip or network at the target assertion', () => fixture(({zip, run}) => {
-  fs.appendFileSync(zip, 'corrupted cache');
+  // Keep the ZIP extractable so disabling verification cannot hide the target
+  // behind an unzip error. Its comment is part of the pinned archive digest.
+  assert.equal(spawnSync('zip', ['-q', '-z', zip], {input: 'unreviewed cache comment\n'}).status, 0);
   const result = run('cli', zip);
   const observed = {rejected: result.status !== 0, commands: result.commands,
     extracted: fs.readdirSync(result.destination)};
@@ -262,7 +264,7 @@ supplied_stage1
       networkStarted: archiveSource === 'network'}, 'colour entry must pass selected archive bytes to consumer');
     if (archiveSource === 'local-archive') {
       const original = fs.readFileSync(archive);
-      fs.appendFileSync(archive, 'corrupted local language archive');
+      assert.equal(spawnSync('zip', ['-q', '-z', archive], {input: 'unreviewed language archive comment\n'}).status, 0);
       const badCache = run('bad-cache');
       const observed = {rejected: badCache.status !== 0,
         consumerStarted: /TARGET independent SDK/.test(badCache.stdout),
