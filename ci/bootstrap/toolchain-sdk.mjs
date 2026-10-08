@@ -159,7 +159,7 @@ export async function verifyManifestSdk(sdk, plan, manifest) {
     '--runtime', path.join(sdk, 'runtime/lib', tuple, 'libcangjie-runtime.so'),
     '--std', path.join(sdk, 'lib', tuple, 'libcangjie-std-core.a'), '--source', 'resolved-manifest']);
   const runtime = path.join(sdk, 'runtime/lib', tuple, 'libcangjie-runtime.so');
-  const symbols = (await execute('nm', ['-D', '--defined-only', runtime])).stdout;
+  const symbols = (await execute('nm', ['-D', '--defined-only', runtime], {maxBuffer: 64 * 1024 * 1024})).stdout;
   const masks = symbols.split('\n').filter(line => /\bg_cjLoadBadMask(?:@@?\S+)?$/.test(line)).length;
   if (masks !== (plan.role === 'target' ? 1 : 0)) reject('RUNTIME_COLOUR', 'runtime', `role=${plan.role} masks=${masks}`);
   const tools = ['third_party/llvm/bin/llc', 'third_party/llvm/bin/opt', 'third_party/llvm/bin/ld.lld', 'tools/bin/cjpm', 'bin/cjc'];

@@ -42,8 +42,8 @@ export async function verifyBootstrapRuntimeSdk(sdk, tuple, env = process.env, s
     const shared = path.join(sdk, 'runtime/lib', tuple, 'libcangjie-runtime.so');
     const archive = path.join(sdk, 'lib', tuple, 'libcangjie-runtime.a');
     const masks = text => text.split('\n').filter(line => /\bg_cjLoadBadMask(?:@@?\S+)?$/.test(line)).length;
-    const sharedMasks = masks((await execute('nm', ['-D', '--defined-only', shared])).stdout);
-    const archiveMasks = masks((await execute('nm', ['--defined-only', archive])).stdout);
+    const sharedMasks = masks((await execute('nm', ['-D', '--defined-only', shared], {maxBuffer: 64 * 1024 * 1024})).stdout);
+    const archiveMasks = masks((await execute('nm', ['--defined-only', archive], {maxBuffer: 64 * 1024 * 1024})).stdout);
     if (sharedMasks !== 1 || archiveMasks < 1) {
       throw new Error(`BOOTSTRAP_SDK_RUNTIME_COLOUR_PAIR_MISMATCH: shared_masks=${sharedMasks} archive_masks=${archiveMasks}`);
     }
