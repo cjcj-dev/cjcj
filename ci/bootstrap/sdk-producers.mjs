@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
+import {randomUUID} from 'node:crypto';
 import {canonical, execute, fileDigest, readJson, reject, sourceIdentity,
   readOutput, sealOutput, physicalPath, PLATFORMS, atomicJson} from './sdk-manifest.mjs';
 
@@ -19,7 +20,7 @@ export async function runProducer(argv, {cwd, env, log}) {
     });
     await output.write(canonical(result));
     if (result.rc !== 0 || result.signal) throw Object.assign(new Error(`SDK_PRODUCER_FAILED rc=${result.rc} signal=${result.signal} log=${log}`), result);
-    return result;
+    return {...result, log};
   } finally { await output.close(); }
 }
 async function verifyProducer(component) {
@@ -87,7 +88,7 @@ async function sharedbuild(component, directory, identity, plan, resumeFailed, o
     tools: Object.fromEntries(Object.entries(component.config.tools).filter(([name]) => name !== 'builder')),
     jobs: options.jobs, heap: options.heap};
   await atomicJson(recipe, spec);
-  const log = path.join(directory, 'logs', 'sharedbuild.log');
+  const log = path.join(directory, 'logs', `sharedbuild-${randomUUID()}.log`);
   let result;
   try {
     result = await runProducer([component.config.tools.python3.path, engine, '--remote', '--root', path.join(plan.buildRoot, 'shared-cache'),
@@ -134,7 +135,7 @@ async function native(component, directory, identity, outputs) {
   await atomicJson(request, {component, identity, source, directory,
     dependencies: Object.fromEntries(component.dependencies.map(id => [id, outputs.get(id)]))});
   const executable = path.join(component.producer.repository, 'ci/bootstrap/sdk-native-producer.mjs');
-  const log = path.join(directory, 'logs', `${component.producer.adapter}.log`);
+  const log = path.join(directory, 'logs', `${component.producer.adapter}-${randomUUID()}.log`);
   const env = {PATH: '/usr/bin:/bin', LANG: 'C.UTF-8', HOME: path.join(directory, 'home'), TMPDIR: path.join(directory, 'build/tmp')};
   for (const name of ['HOME', 'TMPDIR']) await fs.mkdir(env[name], {recursive: true});
   // GHA's existing sccache setup needs its service configuration, but compiler
