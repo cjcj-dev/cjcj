@@ -72,7 +72,7 @@ async function fixture() {
   const frozenTools = {};
   for (const name of ['python3', 'node', 'git', 'bash', 'tar', 'cmake', 'clang', 'clang++', 'cc', 'ar']) {
     const location = (await execute('sh', ['-c', 'command -v "$1"', 'fixture-tool', name])).stdout.trim();
-    frozenTools[name] = {path: await fs.realpath(location), sha256: await fileDigest(location)};
+    frozenTools[name] = {path: path.resolve(location), sha256: await fileDigest(location)};
   }
   const plan = {schema: PLAN_SCHEMA, lane: 'sym_cjcj_918_implement_r6061418558', role: 'target', stage: 'stage1', platform: 'linux_x86_64', buildRoot: path.join(root, 'builds'),
     verification: {runtimePin: {path: pin, sha256: await fileDigest(pin)}, colourRuntime: {path: colour, sha256: await fileDigest(colour)},

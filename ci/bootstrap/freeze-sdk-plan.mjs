@@ -22,7 +22,10 @@ async function gitInput(input, label) {
 async function frozenFile(input, label) {
   if (Object.keys(input).some(name => !['path', 'sha256'].includes(name))) reject('FREEZE_INPUT', label, 'unknown file input field');
   absolute(input.path, label);
-  const file = await fs.realpath(input.path), digest = await fileDigest(file);
+  // Executable aliases such as clang++ and ccache/clang derive their driver
+  // mode from argv[0]. Freeze the requested invocation path and resolved bytes;
+  // replacing the path with realpath would change the producer command.
+  const file = path.resolve(input.path), digest = await fileDigest(file);
   if (input.sha256 && input.sha256 !== digest) reject('FREEZE_INPUT', label, 'provided digest differs from actual input');
   return {path: file, sha256: digest};
 }
