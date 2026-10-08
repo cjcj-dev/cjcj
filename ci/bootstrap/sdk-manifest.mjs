@@ -210,7 +210,10 @@ export function buildIdentities(plan) {
   for (const component of topological(plan)) {
     const dependencies = Object.fromEntries(component.dependencies.map(id => [id, identities.get(id).buildId]));
     const {receipt, ...producer} = component.producer;
-    const recipeId = objectId({...component, producer, dependencies});
+    // Native debug records and std metadata can contain their work path.
+    // Until every existing producer has a verified path normalization recipe,
+    // a different physical build root is a different configuration identity.
+    const recipeId = objectId({...component, producer, dependencies, buildRoot: plan.buildRoot});
     const sourceId = component.source.commit || component.source.lockSha256;
     identities.set(component.id, {recipeId, buildId: `${component.id}/${sourceId}/${recipeId}`,
       directory: path.join(plan.buildRoot, component.id, sourceId, recipeId), dependencies});

@@ -114,6 +114,8 @@ test('actual CLI dry-run resolves complete full-SHA/config/dependency directorie
   await assert.rejects(fs.access(f.plan.buildRoot)); await assert.rejects(fs.access(f.out));
   const changed = clone(f.plan); changed.components[1].config.options.parameters.extra = 'different';
   assert.notEqual(buildIdentities(changed).get('runtime').directory, f.identities.get('runtime').directory);
+  const relocated = clone(f.plan); relocated.buildRoot = path.join(f.root, 'other-build-root');
+  assert.notEqual(buildIdentities(relocated).get('runtime').recipeId, f.identities.get('runtime').recipeId);
 });
 test('actual SDK entry builds missing producers, accepts different repository SHAs and reuses successful receipts', async () => {
   const f = await fixture(); const result = await invoke(f); observed(result, 'full-entry');
