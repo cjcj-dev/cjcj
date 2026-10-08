@@ -186,3 +186,73 @@ test('failed producer preserves actual rc and never publishes or starts dependen
   await assert.rejects(fs.access(path.join(identities.get('runtime').directory, 'DONE'))); await assert.rejects(fs.access(path.join(identities.get('std').directory, 'state.json')));
   await assert.rejects(fs.access(f.out));
 });
+
+async function resealFixtureRecord(directory, record) {
+  await atomicJson(path.join(directory, 'output.json'), record);
+  await fs.writeFile(path.join(directory, 'DONE'), `${await fileDigest(path.join(directory, 'output.json'))}\n`);
+}
+test('wrong compiler std reaches the existing installed compiler lineage guard and recovers', async () => {
+  const f = await fixture(); const good = await invoke(f); assert.equal(good.rc, 0, good.stderr);
+  const directory = f.identities.get('std').directory;
+  const file = path.join(directory, 'artifacts/std-producer.json'), bytes = await fs.readFile(file);
+  const record = await readJson(path.join(directory, 'output.json'));
+  await atomicJson(file, {compiler_sha256: 'e'.repeat(64)});
+  record.files['std-producer.json'].sha256 = await fileDigest(file);
+  record.files['std-producer.json'].size = (await fs.stat(file)).size;
+  await resealFixtureRecord(directory, record);
+  f.out = path.join(f.root, 'wrong-std'); const wrong = await invoke(f); observed(wrong, 'std-wrong-compiler');
+  assert.notEqual(wrong.rc, 0); assert.match(wrong.stderr, /rule=STD_CJC.*on-disk cjc/);
+  await assert.rejects(fs.access(f.out));
+  await fs.writeFile(file, bytes); record.files['std-producer.json'].sha256 = await fileDigest(file);
+  record.files['std-producer.json'].size = bytes.length; await resealFixtureRecord(directory, record);
+  const restored = await invoke(f); observed(restored, 'std-compiler-restored'); assert.equal(restored.rc, 0, restored.stderr);
+});
+test('forged actual source completion rejects before consuming artifacts', async () => {
+  const f = await fixture(); assert.equal((await invoke(f)).rc, 0);
+  const directory = f.identities.get('runtime').directory, record = await readJson(path.join(directory, 'output.json'));
+  const original = clone(record); record.execution.source.commit = f.sources.compiler.commit;
+  await resealFixtureRecord(directory, record);
+  f.out = path.join(f.root, 'forged-source'); const wrong = await invoke(f); observed(wrong, 'forged-actual-source');
+  assert.notEqual(wrong.rc, 0); assert.match(wrong.stderr, /rule=SOURCE_COMPLETION component=runtime/);
+  await assert.rejects(fs.access(f.out));
+  await resealFixtureRecord(directory, original); const restored = await invoke(f); observed(restored, 'source-restored'); assert.equal(restored.rc, 0, restored.stderr);
+});
+test('duplicate destinations and a source directory symlink never publish an SDK', async () => {
+  const f = await fixture(); assert.equal((await invoke(f)).rc, 0);
+  const original = clone(f.plan); f.out = path.join(f.root, 'duplicate-sdk');
+  f.plan.components.find(value => value.id === 'compiler').install.push({from: 'cjcj-stage1', to: 'bin/cjcj-stage1'});
+  const duplicate = await invoke(f); observed(duplicate, 'duplicate-install');
+  assert.notEqual(duplicate.rc, 0); assert.match(duplicate.stderr, /rule=DUPLICATE_INSTALL component=compiler/);
+  await assert.rejects(fs.access(f.out));
+  f.plan = original;
+  const artifacts = path.join(f.identities.get('runtime').directory, 'artifacts'), saved = `${artifacts}-saved`;
+  await fs.rename(artifacts, saved); await fs.symlink(saved, artifacts);
+  f.out = path.join(f.root, 'symlink-sdk'); const escaped = await invoke(f); observed(escaped, 'source-root-link');
+  assert.notEqual(escaped.rc, 0); assert.match(escaped.stderr, /rule=LINK_ESCAPE component=runtime/);
+  await assert.rejects(fs.access(f.out));
+  await fs.unlink(artifacts); await fs.rename(saved, artifacts);
+  const restored = await invoke(f); observed(restored, 'source-link-restored'); assert.equal(restored.rc, 0, restored.stderr);
+});
+test('different frozen configurations sharing a request hint cannot overwrite producer requests', async () => {
+  const f = await fixture(), other = clone(f.plan);
+  other.components.find(value => value.id === 'runtime').config.options.parameters.mode = 'fail';
+  const secondPlan = path.join(f.root, 'other-plan.json'); await atomicJson(secondPlan, other);
+  const [normal, failed] = await Promise.all([invoke(f), command([process.execPath, product, '--plan', secondPlan, '--out', path.join(f.root, 'sdk-failed')])]);
+  observed(normal, 'different-config-normal'); observed(failed, 'different-config-failure');
+  assert.equal(normal.rc, 0, normal.stderr); assert.notEqual(failed.rc, 0); assert.match(failed.stderr, /BUILD_FAILED rc=17/);
+  const second = buildIdentities(other).get('runtime').directory;
+  assert.notEqual(second, f.identities.get('runtime').directory);
+  assert.equal((await readJson(path.join(second, 'sharedbuild-request.json'))).parameters.mode, 'fail');
+  assert.equal((await readJson(path.join(f.identities.get('runtime').directory, 'sharedbuild-request.json'))).parameters.mode, 'runtime');
+});
+test('a collected success cache restores the same completed work without rerunning its producer', async () => {
+  const f = await fixture(); assert.equal((await invoke(f)).rc, 0);
+  const directory = f.identities.get('runtime').directory, record = await readJson(path.join(directory, 'output.json'));
+  const work = record.execution.actualWork, logBefore = await fs.readdir(path.join(work, 'logs'));
+  await fs.rename(directory, `${directory}-collected`);
+  await fs.rename(path.join(f.plan.buildRoot, 'shared-cache', record.execution.producerBuildId), path.join(f.root, 'collected-shared-cache'));
+  f.out = path.join(f.root, 'sdk-restored-cache'); const restored = await invoke(f); observed(restored, 'completed-work-recovery');
+  assert.equal(restored.rc, 0, restored.stderr);
+  assert.deepEqual(await fs.readdir(path.join(work, 'logs')), logBefore);
+  assert.equal((await readJson(path.join(directory, 'output.json'))).execution.actualWork, work);
+});
