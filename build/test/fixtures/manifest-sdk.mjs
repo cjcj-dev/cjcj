@@ -29,7 +29,7 @@ const elf = async (file, script, stamp = '') => {
   run(['cc', '-x', 'c', '-', '-o', file], {input: source});
 };
 
-export async function manifestSdkFixture({root, compiler, prefix, inputSdk, shimSource, role = 'target'}) {
+export async function manifestSdkFixture({root, compiler, prefix, inputSdk, shimSource, role = 'target', runtimeInput, rewriteInputs = true}) {
   const firstExecution = executions.length;
   const generation = await fs.mkdtemp(path.join(root, 'manifest-input-'));
   const source = path.join(generation, 'source'); await fs.mkdir(source);
@@ -67,13 +67,35 @@ export async function manifestSdkFixture({root, compiler, prefix, inputSdk, shim
     lockSha256:await fileDigest(lock),version:'native-consumer-fixture',reason:'declared native fixture retained host input'},
     config:{host:plan.platform,target:plan.platform,options:{},tools:{}},producer:{adapter:'official',version:'a'.repeat(40)},
     dependencies:[],install:[{from:'',to:''}]});
-  const component = {id:'native',roles:ROLES.filter(r=>r!=='official-host'),domain:'target',source:identity,
+  let runtimeComponent;
+  if (runtimeInput) {
+    const repo = await fs.realpath(runtimeInput.sourceRoot);
+    const runtimeIdentity = {kind:'git',repo,commit:run(['git','-C',repo,'rev-parse','HEAD']),tree:run(['git','-C',repo,'rev-parse','HEAD^{tree}'])};
+    runtimeComponent = {id:'runtime',roles:['runtime','boundscheck'],domain:'target',source:runtimeIdentity,
+      config:{host:plan.platform,target:plan.platform,tools,options:{parameters:{fixture:'received-runtime'},optimization:'Release',sdkDependency:'official',jobs:64,heap:'32GB',inputBindings:{},outputs:[`runtime/lib/${tuple}/libcangjie-runtime.so`]}},
+      producer:{adapter:'sharedbuild-runtime-default',version:runtimeIdentity.commit,repository:repo,engine:path.join(generation,'unexecuted-engine.py'),engineSha256:'a'.repeat(64),recipe:path.join(generation,'runtime.received.recipe.json')},
+      dependencies:['official'],install:[{from:'',to:''}]};
+    plan.components.push(runtimeComponent);
+  }
+  const runtimePaths=[`runtime/lib/${tuple}/libcangjie-runtime.so`,`runtime/lib/${tuple}/libboundscheck.so`,`lib/${tuple}/libcangjie-runtime.a`];
+  const component = {id:'native',roles:ROLES.filter(r=>r!=='official-host'&&(!runtimeInput||!['runtime','boundscheck'].includes(r))),domain:'target',source:identity,
     config:{host:plan.platform,target:plan.platform,tools,options:{parameters:{fixture:'native-consumer'},optimization:'Release',
       sdkDependency:'official',jobs:64,heap:'32GB',inputBindings:{},outputs:['bin/cjcj-stage1']}},
     producer:{adapter:'sharedbuild-runtime-default',version:identity.commit,repository:source,
       engine:path.join(generation,'unexecuted-engine.py'),engineSha256:'a'.repeat(64),recipe:path.join(generation,'received.recipe.json')},
-    dependencies:['official'],install:[{from:'',to:''}]};
+    dependencies:runtimeInput?['official','runtime']:['official'],install:[{from:'',to:'',...(runtimeInput?{exclude:runtimePaths}:{})}]};
   plan.components.push(component);
+  if(runtimeComponent) {
+    const runtimeIds=buildIdentities(plan), runtimeDirectory=runtimeIds.get('runtime').directory;
+    const before=await sourceIdentity(runtimeComponent.source.repo,runtimeComponent.source,'runtime');
+    for(const rel of runtimePaths) {
+      const destination=path.join(runtimeDirectory,'artifacts',rel);
+      await fs.mkdir(path.dirname(destination),{recursive:true});await fs.copyFile(path.join(runtimeInput.root,rel),destination);
+    }
+    const receipt=await sealOutput(runtimeDirectory,runtimeComponent,runtimeIds.get('runtime'),{status:'complete',rc:0,kind:'prepared-runtime-fixture-copy',before,
+      source:await sourceIdentity(runtimeComponent.source.repo,runtimeComponent.source,'runtime')});
+    Object.assign(runtimeComponent.producer,{receipt:runtimeDirectory,receiptSha256:receipt.receiptSha256,originBuildRoot:plan.buildRoot});
+  }
   const ids=buildIdentities(plan), directory=ids.get(component.id).directory, artifacts=path.join(directory,'artifacts');
   await fs.mkdir(artifacts,{recursive:true});
   const before = await sourceIdentity(source, identity, 'native');
@@ -87,7 +109,12 @@ export async function manifestSdkFixture({root, compiler, prefix, inputSdk, shim
   run(['cc','-c','-fPIC',`-DSOURCE_SHA="${identity.commit}"`,...(role==='target'?['-DCOLOUR']:[]),path.join(source,'runtime.c'),'-o',runtimeObject]);
   await fs.mkdir(path.join(artifacts,'lib',tuple),{recursive:true});
   run(['ar','rcs',path.join(artifacts,'lib',tuple,'libcangjie-runtime.a'),runtimeObject]);
-  plan.verification.colourRuntime = {path:runtime,sha256:await fileDigest(runtime)};
+  let colourRuntime=runtimeInput?path.join(runtimeInput.root,runtimePaths[0]):runtime;
+  if(role==='host') {
+    colourRuntime=path.join(generation,'colour-reference.so');
+    run(['cc','-shared','-fPIC','-DCOLOUR',`-DSOURCE_SHA="${identity.commit}"`,path.join(source,'runtime.c'),'-o',colourRuntime]);
+  }
+  plan.verification.colourRuntime = {path:colourRuntime,sha256:await fileDigest(colourRuntime)};
   await fs.copyFile(host,path.join(path.dirname(runtime),'libboundscheck.so'));
   const object=path.join(generation,'std.o');run(['cc','-c','-fPIC',path.join(source,'std.c'),'-o',object]);
   const core=path.join(artifacts,'lib',tuple,'libcangjie-std-core.a');await fs.mkdir(path.dirname(core),{recursive:true});await fs.rm(core,{force:true});
@@ -116,15 +143,18 @@ export async function manifestSdkFixture({root, compiler, prefix, inputSdk, shim
     commands:executions.slice(firstExecution)});
   Object.assign(component.producer,{receipt:directory,receiptSha256:receipt.receiptSha256,originBuildRoot:plan.buildRoot});
   // Work inputs are real sealed bytes, not a digest fabricated by the test.
-  await fs.copyFile(path.join(generation,'compiler'),compiler);
-  await fs.copyFile(core,path.join(prefix,'lib',tuple,'libcangjie-std-core.a'));
-  await fs.copyFile(path.join(artifacts,'std-producer.json'),path.join(prefix,'std-producer.json'));
+  if(rewriteInputs) {
+    await fs.copyFile(path.join(generation,'compiler'),compiler);
+    await fs.copyFile(core,path.join(prefix,'lib',tuple,'libcangjie-std-core.a'));
+    await fs.chmod(path.join(prefix,'lib',tuple,'libcangjie-std-core.a'),(await fs.stat(core)).mode & 0o777);
+    await fs.copyFile(path.join(artifacts,'std-producer.json'),path.join(prefix,'std-producer.json'));
+  }
   const phases=Object.fromEntries(BOOTSTRAP_PHASES.map(phase=>[phase,{...structuredClone(plan),
     role:['stage0','stage0-run','std-bootstrap'].includes(phase)?'host':'target',
     stage:phase==='stage3'?'final':['stage2','stage3-std'].includes(phase)?'stage2':'stage1'}]));
   const plans=path.join(generation,'plans.json');await atomicJson(plans,validateBootstrapPlans({schema:'bootstrap-sdk-plans-v1',phases}));
   const planFile=path.join(generation,'plan.json');await atomicJson(planFile,plan);
   console.log(`NATIVE_CONSUMER_RECEIPT ${JSON.stringify({plans,planFile,directory,receiptSha256:receipt.receiptSha256,
-    compilerSha256:await fileDigest(compiler),source:identity})}`);
-  return {plans,plan,planFile,receipt,compilerSha256:await fileDigest(compiler),coreSha256:await fileDigest(core),generation};
+    compilerSha256:await fileDigest(path.join(generation,'compiler')),source:identity})}`);
+  return {plans,plan,planFile,receipt,compiler:path.join(generation,'compiler'),compilerSha256:await fileDigest(path.join(generation,'compiler')),coreSha256:await fileDigest(core),generation};
 }

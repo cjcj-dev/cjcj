@@ -9,6 +9,7 @@ import {readHostToolchainPin} from '../host-toolchain-pin.mjs';
 
 export function fixture(check, target = 'linux-x64') {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tuple-inputs-'));
+  let pending;
   try {
     const sdk = path.join(dir, 'sdk');
     const artifact = path.join(dir, 'artifact');
@@ -156,6 +157,11 @@ export function fixture(check, target = 'linux-x64') {
     env.FIXTURE_RELEASE_FILE = path.join(artifact, 'SHA256SUMS');
     const run = (args = []) => spawnSync(process.execPath,
       ['--import', transport, new URL('./prepare_bootstrap_inputs.mjs', import.meta.url).pathname, ...args], {env, encoding: 'utf8'});
-    check({env, artifact, fallback, dylib, dylibSha, so, runtime, runtimeSource, run, pinFile, dir, transport, sdk, astFiles});
-  } finally { fs.rmSync(dir, {recursive: true, force: true}); }
+    const result = check({env, artifact, fallback, dylib, dylibSha, so, runtime, runtimeSource, run, pinFile, dir, transport, sdk, astFiles});
+    if (result && typeof result.then === 'function') {
+      pending = result.finally(() => fs.rmSync(dir, {recursive: true, force: true}));
+      return pending;
+    }
+    return result;
+  } finally { if (!pending) fs.rmSync(dir, {recursive: true, force: true}); }
 }

@@ -1,3 +1,4 @@
+import {manifestSdkFixture} from './fixtures/manifest-sdk.mjs';
 import {pinnedRemote} from '../../ci/fixtures/git/pinned-remote.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -68,7 +69,7 @@ function useFormalRuntime(f) {
   ok(['git', '-C', paired, ...fetch]);
   ok(['git', '-C', paired, 'checkout', '-q', '--detach', 'FETCH_HEAD']);
 }
-function assembled(f, selected = f.env.RUNTIME_REF, expectedFailure) {
+async function assembled(f, selected = f.env.RUNTIME_REF, expectedFailure) {
   const libs = path.join(f.dir, 'elf');
   fs.mkdirSync(libs);
   const files = {
@@ -114,11 +115,18 @@ function assembled(f, selected = f.env.RUNTIME_REF, expectedFailure) {
   fs.copyFileSync(path.join(libs, 'host.so'), path.join(base, 'lib/libstdFFI.so'));
   fs.writeFileSync(path.join(base, 'std-producer.json'), JSON.stringify({compiler_sha256: hash(compiler)}));
   const target = path.join(f.dir, 'sdk-target');
-  const command = ['bash', path.join(repo, 'ci/bootstrap/sdk_build.sh'),
-    '--from', base, '--to', target, '--target', tuple,
-    '--runtime-pin', inputs.CJCJ_BOOTSTRAP_RUNTIME_PIN, '--runtime', f.runtime,
-    '--runtime-commit', selected, '--std', f.runtime, '--cjc', compiler,
-    '--colour-runtime', path.join(libs, 'runtime.so'), '--host-runtime', path.join(libs, 'host.so')];
+  const script = path.join(f.dir, 'compiler-input.sh');
+  fs.writeFileSync(script, '#!/bin/sh\nprintf "native fixture compiler\\n"\n');
+  const stdInput = path.join(f.dir, 'std-plan-input');
+  for (const rel of [`lib/${tuple}/libcangjie-std-core.a`, 'std-producer.json']) {
+    fs.mkdirSync(path.dirname(path.join(stdInput, rel)), {recursive: true});
+    fs.copyFileSync(path.join(f.runtime, rel), path.join(stdInput, rel));
+  }
+  fs.mkdirSync(path.join(stdInput, 'modules', tuple), {recursive: true});
+  fs.writeFileSync(path.join(stdInput, 'modules', tuple, 'std.core.cjo'), 'declared native std fixture');
+  const native = await manifestSdkFixture({root:f.dir,compiler:script,prefix:stdInput,inputSdk:base,rewriteInputs:false,
+    runtimeInput:{root:f.runtime,sourceRoot:path.join(f.sdk,'third_party/paired-runtime')}});
+  const command = ['bash', path.join(repo, 'ci/bootstrap/sdk_build.sh'), '--plan', native.planFile, '--to', target];
   const result = execute(command, f.env);
   // Inspect the actual assembler result/lock, not a synthesized resolver return.
   console.log(`SDK_SELECTION_ASSERT selected=${selected} rc=${result.status} product=${hash(path.join(repo, 'ci/bootstrap/sdk_build.sh'))} runtime=${hash(path.join(libs, 'runtime.so'))} boundscheck=${hash(path.join(libs, 'bounds.so'))} compiler=${hash(compiler)}`);
@@ -133,7 +141,7 @@ function assembled(f, selected = f.env.RUNTIME_REF, expectedFailure) {
   assert.equal(lock.components.runtime.commit, selected);
   assert.equal(lock.files[`runtime/lib/${tuple}/libboundscheck.so`].sha256, hash(path.join(libs, 'bounds.so')));
   console.log(`SDK_SELECTION_LOCK runtime=${lock.components.runtime.commit} lock=${hash(path.join(target, 'SDK.lock.json'))}`);
-  return {inputs, target, libs, command, compiler, base};
+  return {inputs, target, libs, command, compiler: native.compiler, base, plan: native.plan, planFile: native.planFile};
 }
 function sdkConsumer(f, a) {
   return execute([process.execPath, '--input-type=module', '-e',
@@ -142,12 +150,12 @@ function sdkConsumer(f, a) {
   {...Object.fromEntries(Object.entries(f.env).filter(([key]) => !key.startsWith('COLOUR_RT_'))), ...a.inputs});
 }
 for (const candidate of [false, true]) {
-  test(`real loader, prepare, SDK assembler and independent verifier: ${candidate ? 'authorized candidate' : 'formal default'}`, () => fixture(f => {
+  test(`real loader, prepare, SDK assembler and independent verifier: ${candidate ? 'authorized candidate' : 'formal default'}`, () => fixture(async f => {
     if (!candidate) useFormalRuntime(f);
     const loaderEnv = path.join(f.dir, 'loader.env');
     ok([process.execPath, path.join(repo, 'ci/load_runtime_pin.mjs')], {...f.env, GITHUB_ENV: loaderEnv});
     assert.match(fs.readFileSync(loaderEnv, 'utf8'), new RegExp(`RUNTIME_REF=${f.env.RUNTIME_REF}`));
-    const a = assembled(f);
+    const a = await assembled(f);
     const verified = sdkConsumer(f, a);
     console.log(`SDK_CONSUMER_ASSERT candidate=${candidate} rc=${verified.status} ${verified.output}`);
     assert.equal(verified.status, 0, verified.output);
@@ -156,11 +164,12 @@ for (const candidate of [false, true]) {
     const host = path.join(f.dir, 'sdk-host');
     fs.mkdirSync(path.join(a.base, 'runtime/lib', tuple), {recursive: true});
     fs.copyFileSync(path.join(a.libs, 'host.so'), path.join(a.base, 'runtime/lib', tuple, 'libcangjie-runtime.so'));
-    const h = execute(['bash', path.join(repo, 'ci/bootstrap/sdk_build.sh'), '--from', a.base,
-      '--to', host, '--host', '--runtime-pin', a.inputs.CJCJ_BOOTSTRAP_RUNTIME_PIN,
-      '--colour-runtime', path.join(a.libs, 'runtime.so'), '--host-runtime', path.join(a.libs, 'host.so')], f.env);
+    const hostInput = path.join(f.dir, 'host-compiler.sh');
+    fs.writeFileSync(hostInput, '#!/bin/sh\nprintf "host fixture compiler\\n"\n');
+    const hostPlan = await manifestSdkFixture({root:f.dir,compiler:hostInput,prefix:a.base,inputSdk:a.base,role:'host',rewriteInputs:false});
+    const h = execute(['bash', path.join(repo, 'ci/bootstrap/sdk_build.sh'), '--plan', hostPlan.planFile, '--to', host], f.env);
     assert.equal(h.status, 0, h.output);
-    assert.equal(hash(path.join(host, 'runtime/lib', tuple, 'libcangjie-runtime.so')), hash(path.join(a.libs, 'host.so')));
+    assert.equal(hash(path.join(host, 'runtime/lib', tuple, 'libcangjie-runtime.so')), hash(hostPlan.plan.verification.hostRuntime.path));
     console.log(`HOST_CONTROL_ASSERT rc=${h.status}`);
   }));
 }
@@ -174,8 +183,8 @@ for (const [label, corrupt, marker] of [
     fs.writeFileSync(file, JSON.stringify(lock));
   }, 'BOOTSTRAP_SDK_RUNTIME_LOCK_MISMATCH: runtime/lib/'],
 ]) {
-  test(`actual SDK consumer rejects changed ${label}`, () => fixture(f => {
-    const a = assembled(f); corrupt(f, a);
+  test(`actual SDK consumer rejects changed ${label}`, () => fixture(async f => {
+    const a = await assembled(f); corrupt(f, a);
     const result = sdkConsumer(f, a);
     console.log(`SDK_MISMATCH_ASSERT ${label} rc=${result.status} marker=${marker}`);
     assert.notEqual(result.status, 0);
@@ -199,7 +208,7 @@ for (const [label, edit, marker] of [
   ['header HEAD', f => ok(['git', '-C', path.join(f.sdk, 'third_party/paired-runtime'), '-c', 'user.name=Zxilly', '-c', 'user.email=zxilly@outlook.com', 'commit', '--allow-empty', '-q', '-m', 'wrong headers source']), 'SHIM_HEADERS_SOURCE_HEAD_MISMATCH: runtime'],
   ['header bytes', f => fs.appendFileSync(path.join(f.sdk, 'build/build/include/fixture.h'), 'changed'), 'SHIM_HEADERS_DIGEST_MISMATCH'],
 ]) {
-  test(`real preparation rejects ${label} at its target guard`, () => fixture(f => {
+  test(`real preparation rejects ${label} at its target guard`, () => fixture(async f => {
     edit(f); const result = f.run();
     console.log(`SELECTION_REJECTION_ASSERT ${label} rc=${result.status}`);
     assert.notEqual(result.status, 0);
@@ -208,7 +217,7 @@ for (const [label, edit, marker] of [
   }));
 }
 
-test('real prepare publishes the selected pin after full-root validation', () => fixture(f => {
+test('real prepare publishes the selected pin after full-root validation', () => fixture(async f => {
   const result = f.run();
   const file = path.join(f.env.CJCJ_BOOTSTRAP_INPUTS_WORK, 'runtime-selection.env');
   const record = fs.existsSync(file) ? Object.fromEntries(fs.readFileSync(file, 'utf8').trim().split('\n').map(x => x.split('='))) : {};
@@ -218,12 +227,12 @@ test('real prepare publishes the selected pin after full-root validation', () =>
   console.log('SELECTION_PUBLICATION_TARGET_ASSERT_EXECUTED');
 }));
 
-test('real SDK assembly rejects a manifest-valid runtime with the wrong commit stamp', () => fixture(f => {
-  assembled(f, 'e'.repeat(40), 'rule=RUNTIME_PIN');
+test('real SDK assembly rejects a manifest-valid runtime with the wrong commit stamp', () => fixture(async f => {
+  await assembled(f, 'e'.repeat(40), 'rule=RUNTIME_PIN');
 }));
 
-test('actual runtime consumer rejects host role in assembly lock', () => fixture(f => {
-  const a = assembled(f), file = path.join(a.target, 'SDK.lock.json');
+test('actual runtime consumer rejects host role in assembly lock', () => fixture(async f => {
+  const a = await assembled(f), file = path.join(a.target, 'SDK.lock.json');
   const lock = JSON.parse(fs.readFileSync(file)); lock.role = 'host';
   fs.writeFileSync(file, JSON.stringify(lock));
   const rejected = sdkConsumer(f, a); assert.notEqual(rejected.status, 0);
@@ -232,8 +241,8 @@ test('actual runtime consumer rejects host role in assembly lock', () => fixture
 }));
 
 for (const rel of [`runtime/lib/${tuple}/libcangjie-runtime.so`, `lib/${tuple}/libcangjie-runtime.a`]) {
-  test(`actual runtime consumer rejects self-consistent wrong chapter: ${rel}`, () => fixture(f => {
-    const a = assembled(f);
+  test(`actual runtime consumer rejects self-consistent wrong chapter: ${rel}`, () => fixture(async f => {
+    const a = await assembled(f);
     const file = path.join(a.target, rel);
     const bytes = fs.readFileSync(file);
     const wrong = Buffer.from(bytes.toString('latin1').replaceAll(`CJRT-COMMIT:${f.env.RUNTIME_REF}`, `CJRT-COMMIT:${'e'.repeat(40)}`), 'latin1');
@@ -251,7 +260,7 @@ for (const rel of [`runtime/lib/${tuple}/libcangjie-runtime.so`, `lib/${tuple}/l
   }));
 }
 
-test('formal-default preparation still publishes the formal pin', () => fixture(f => {
+test('formal-default preparation still publishes the formal pin', () => fixture(async f => {
   useFormalRuntime(f);
   const result = f.run();
   const selected = path.join(f.env.CJCJ_BOOTSTRAP_INPUTS_WORK, 'runtime-selection.env');
@@ -262,7 +271,7 @@ test('formal-default preparation still publishes the formal pin', () => fixture(
 }));
 
 for (const formal of [false, true]) {
-test(`actual stage3 entry verifies promoted SDK before stage2: ${formal ? 'formal default' : 'candidate'}`, () => fixture(f => {
+test(`actual stage3 entry verifies promoted SDK before stage2: ${formal ? 'formal default' : 'candidate'}`, () => fixture(async f => {
   fs.mkdirSync(path.join(f.runtimeSource, 'stdlib'));
   fs.writeFileSync(path.join(f.runtimeSource, 'stdlib/README'), 'input source identity fixture');
   for (const args of [['init', '-q', f.runtimeSource], ['-C', f.runtimeSource, 'add', '.'],
@@ -314,7 +323,7 @@ test(`actual stage3 entry verifies promoted SDK before stage2: ${formal ? 'forma
   const tuplePin = JSON.parse(fs.readFileSync(f.pinFile));
   for (const file of tuplePin.files) file.artifact_sha256 = file.release_sha256 = hash(path.join(f.fallback, file.path));
   fs.writeFileSync(f.pinFile, JSON.stringify(tuplePin));
-  const a = assembled(f);
+  const a = await assembled(f);
   const workspace = path.join(f.dir, 'stage3-workspace');
   const sdk = path.join(workspace, 'software/cangjie');
   fs.mkdirSync(path.dirname(sdk), {recursive: true});
@@ -533,7 +542,7 @@ test(`actual stage3 entry verifies promoted SDK before stage2: ${formal ? 'forma
 }
 
 for (const candidate of [false, true]) {
-test(`actual GHA launcher passes the validated selected file into bootstrap: ${candidate ? 'candidate' : 'formal default'}`, () => fixture(f => {
+test(`actual GHA launcher passes the validated selected file into bootstrap: ${candidate ? 'candidate' : 'formal default'}`, () => fixture(async f => {
   if (!candidate) useFormalRuntime(f);
   const inputs = exported(f.run());
   const env = {...f.env, ...inputs, GITHUB_WORKSPACE: repo, CANGJIE_WORKSPACE: path.join(f.dir, 'workspace')};
@@ -553,7 +562,7 @@ test(`actual GHA launcher passes the validated selected file into bootstrap: ${c
 }
 
 
-test('actual same-run restore feeds verified root receipt to the real SDK consumer without parent fields', () => fixture(f => {
+test('actual same-run restore feeds verified root receipt to the real SDK consumer without parent fields', () => fixture(async f => {
   const root = path.join(f.dir, 'handoff-workspace');
   for (const rel of ['.srcbuild/inputs', 'packages', 'runtime_shim']) fs.mkdirSync(path.join(root, rel), {recursive: true});
   fs.writeFileSync(path.join(root, 'cjpm.toml'), 'identity transport fixture');
@@ -561,7 +570,7 @@ test('actual same-run restore feeds verified root receipt to the real SDK consum
   fs.cpSync(f.runtime, archivedRoot, {recursive: true});
   f.runtime = archivedRoot; f.env.CJCJ_BOOTSTRAP_COLOUR_RT = archivedRoot;
   f.env.CJCJ_BOOTSTRAP_INPUTS_WORK = path.join(root, '.srcbuild/inputs/bootstrap');
-  const a = assembled(f);
+  const a = await assembled(f);
   const sdk = path.join(root, '.srcbuild/sdk-target');
   fs.cpSync(a.target, sdk, {recursive: true, verbatimSymlinks: true});
   const archive = path.join(f.dir, 'handoff-artifact');
