@@ -6,7 +6,7 @@ import os from 'node:os';
 import {fileURLToPath} from 'node:url';
 import {spawn} from 'node:child_process';
 import {PLAN_SCHEMA, validatePlan, buildIdentities, objectId, readJson, atomicJson, fileDigest,
-  execute, ROLES} from './sdk-manifest.mjs';
+  execute, ROLES, sourceIdentity, registeredSourceIdentity} from './sdk-manifest.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const product = process.env.SDK_MANIFEST_PRODUCT || path.join(here, 'toolchain-sdk.mjs');
@@ -393,6 +393,15 @@ test('bootstrap phase reuse binds installed plan and manifest before returning a
   await fs.writeFile(plans, completeBundle);
   const normal = await command(argv); observed(normal, 'phase-reuse'); assert.equal(normal.rc, 0, normal.stderr);
   assert.equal(JSON.parse(normal.stdout.trim().split('\n').at(-1)).reused, true);
+  const phaseDirectory = path.join(f.root, 'phase-directory'); await fs.mkdir(phaseDirectory);
+  const directoryArgv = [...argv]; directoryArgv[directoryArgv.indexOf('--plans') + 1] = phaseDirectory;
+  for (const [name, frozen] of Object.entries(JSON.parse(completeBundle).phases)) await atomicJson(path.join(phaseDirectory, `${name}.json`), frozen);
+  await fs.rm(path.join(phaseDirectory, 'stage3.json'));
+  const missingFile = await command(directoryArgv); observed(missingFile, 'phase-directory-completeness');
+  assert.notEqual(missingFile.rc, 0); assert.match(missingFile.stderr, /rule=BOOTSTRAP_PHASES component=stage3/);
+  await atomicJson(path.join(phaseDirectory, 'stage3.json'), JSON.parse(completeBundle).phases.stage3);
+  const directoryRestored = await command(directoryArgv); observed(directoryRestored, 'phase-directory-restored');
+  assert.equal(directoryRestored.rc, 0, directoryRestored.stderr);
   const installedPlan = path.join(f.out, 'SDK.plan.json'), original = await fs.readFile(installedPlan);
   const changed = JSON.parse(original); changed.lane = 'another-owner'; await atomicJson(installedPlan, changed);
   const rejected = await command(argv); observed(rejected, 'phase-plan-binding');
@@ -409,6 +418,28 @@ test('bootstrap phase reuse binds installed plan and manifest before returning a
   assert.notEqual(rewritten.rc, 0); assert.match(rewritten.stderr, /rule=MANIFEST_BINDING/);
   await fs.writeFile(module, moduleBytes); await fs.writeFile(lockPath, lockBytes);
   const recovered = await command(argv); observed(recovered, 'phase-lock-restored'); assert.equal(recovered.rc, 0, recovered.stderr);
+});
+
+test('registered source transformation accepts only the precomputed bytes and exact tracked change', async () => {
+  const root = await fs.mkdtemp(path.join(testRoot, 'source-transform-'));
+  const expected = await sourceRepository(root, 'source'), rel = 'identity.txt', file = path.join(expected.repo, rel);
+  const original = await fs.readFile(file), transformed = Buffer.from('registered package mapping\n');
+  const changes = {[rel]: {sha256: objectId('unused'), mode: (await fs.stat(file)).mode & 0o777}};
+  await fs.writeFile(file, transformed); changes[rel].sha256 = await fileDigest(file);
+  await assert.rejects(sourceIdentity(expected.repo, expected, 'ast-flatbuffers'), /rule=SOURCE_CHECKOUT/);
+  const actual = await registeredSourceIdentity(expected.repo, expected, 'ast-flatbuffers', changes);
+  console.log(`TARGET_ASSERTION_EXECUTED source-registered status=${JSON.stringify(actual.status)}`);
+  assert.equal(actual.registeredChanges[rel].sha256, changes[rel].sha256);
+  await fs.appendFile(file, 'undeclared modification\n');
+  await assert.rejects(registeredSourceIdentity(expected.repo, expected, 'ast-flatbuffers', changes), /rule=SOURCE_TRANSFORM component=ast-flatbuffers.*registered result differs/);
+  console.log('TARGET_ASSERTION_EXECUTED source-transform-bytes rejected');
+  await fs.writeFile(file, transformed); await fs.writeFile(path.join(expected.repo, 'undeclared.txt'), 'extra');
+  await assert.rejects(registeredSourceIdentity(expected.repo, expected, 'ast-flatbuffers', changes), /rule=SOURCE_TRANSFORM component=ast-flatbuffers.*unexpected source changes/);
+  console.log('TARGET_ASSERTION_EXECUTED source-transform-extra rejected');
+  await fs.rm(path.join(expected.repo, 'undeclared.txt'));
+  const restored = await registeredSourceIdentity(expected.repo, expected, 'ast-flatbuffers', changes);
+  assert.equal(restored.tree, expected.tree); console.log('TARGET_ASSERTION_EXECUTED source-transform-restored accepted');
+  await fs.writeFile(file, original); await sourceIdentity(expected.repo, expected, 'ast-flatbuffers');
 });
 
 test('complete bootstrap intent freezer binds all six phases and rejects an omitted phase before production', async () => {

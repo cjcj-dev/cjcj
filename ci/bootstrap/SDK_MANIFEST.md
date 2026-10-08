@@ -73,6 +73,14 @@ CMake/Ninja, LLVM shim, std `build.py` and `build_ast_support.sh` recipes. The
 AST adapter freezes the compiler and nested FlatBuffers source identities and
 the official host SDK dependency; it returns the complete archive, headers,
 schema and FlatBuffers module inventory needed by the existing std installer.
+For compiler revisions whose existing ExternalProject applies the package
+mapping patch, declare `flatbuffersTransform: "cangjie-package-mapping-v1"`.
+The adapter runs that pinned source script on a private copy before building
+and records input, script and expected output digests. Only the exact tracked
+`src/idl_gen_cangjie.cpp` result is accepted afterwards; extra changes, different
+bytes or mode changes still fail. Both original Git identities remain recorded.
+The std build SDK removes the official host LLVM directory before installing
+the target tools and dylib; its native binutils remain separate frozen inputs.
 Sharedbuild adapters invoke
 the existing sharedbuild engine. Their builder is the actual `.mjs` file;
 companion shell wrappers cannot substitute an unpinned implementation.

@@ -135,8 +135,13 @@ async function std(request) {
     || !runtime?.component.roles.includes('runtime')) reject('PRODUCER_DEPENDENCY', component.id, 'std needs explicit host seed/compiler/target runtime');
   const sdk = path.join(directory, 'build', 'sdk'); await fs.mkdir(sdk, {recursive: true});
   await fs.cp(seed.artifacts, sdk, {recursive: true, dereference: false});
+  // This is a target backend installation, not an overlay on host LLVM.
+  // Leaving the official llvm-ar/other dynamic tools beside the target
+  // libLLVM lets CMake select an incompatible archiver by PATH. Native
+  // binutils come from the separately frozen tool inputs below.
+  await fs.rm(path.join(sdk, 'third_party/llvm'), {recursive: true, force: true});
   const compilerFile = path.join(compiler.artifacts, 'bin/cjcj-stage1');
-  await run(['python3', path.join(here, 'compiler_identity.py'), sdk, '--install', compilerFile]);
+  await run(['python3', '-B', path.join(here, 'compiler_identity.py'), sdk, '--install', compilerFile]);
   const tuple = PLATFORMS[component.config.target][2];
   const targetLib = path.join(runtime.artifacts, options.targetLibRelative || '');
   const hostRuntime = path.join(seed.artifacts, 'runtime/lib', tuple);
