@@ -3,8 +3,8 @@ import path from 'node:path';
 import fs from 'node:fs/promises';
 import {parseArgs} from 'node:util';
 import {fileURLToPath} from 'node:url';
-import {assembleSdk} from './toolchain-sdk.mjs';
-import {readJson, objectId, fileDigest, execute, reject, validatePlan} from './sdk-manifest.mjs';
+import {assembleSdk, verifyManifestSdk} from './toolchain-sdk.mjs';
+import {readJson, objectId, fileDigest, reject, validatePlan} from './sdk-manifest.mjs';
 export async function assembleBootstrapPhase({plans, phase, out, dryRun = false}) {
   if (!['stage0', 'stage0-run', 'std-bootstrap', 'stage1-initial', 'stage1-std', 'stage3'].includes(phase)) reject('BOOTSTRAP_PHASE', phase, 'unknown stage');
   let plan;
@@ -19,8 +19,7 @@ export async function assembleBootstrapPhase({plans, phase, out, dryRun = false}
   try {
     const lock = await readJson(path.join(out, 'SDK.lock.json'));
     if (lock.plan_sha256 !== objectId(plan)) reject('BOOTSTRAP_PHASE', phase, 'existing SDK belongs to another frozen plan; use a distinct destination');
-    await execute('python3', [fileURLToPath(new URL('./sdk_verify.py', import.meta.url)), '--sdk', out,
-      '--role', plan.role, '--runtime-pin', plan.verification.runtimePin.path, '--target-tuple', `${plan.platform}_cjnative`]);
+    await verifyManifestSdk(out, plan, await readJson(path.join(out, 'SDK.manifest.json')));
     return {out, reused: true, planSha256: objectId(plan), lockSha256: await fileDigest(path.join(out, 'SDK.lock.json'))};
   } catch (error) { if (error.code !== 'ENOENT') throw error; }
   return assembleSdk(plan, out);

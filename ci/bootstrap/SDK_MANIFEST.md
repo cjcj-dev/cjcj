@@ -111,7 +111,9 @@ stage0-run, std-bootstrap, stage1-initial, stage1-std, and stage3. Every phase
 is a complete frozen SDK plan. The bootstrap CLI accepts `--sdk-plans`;
 GHA and the kkk2 source-build driver consume `CJCJ_BOOTSTRAP_SDK_PLANS`.
 Different std stages use different installation directories. Reuse requires
-the same frozen plan and successful existing SDK verification.
+the same frozen plan, its successful resolved manifest and installed lock to
+agree, then runs the same SDK, runtime-pair, LLVM C API and lineage checks as
+the initial assembly. Reuse cannot substitute the legacy payload-only check.
 
 Phase bundle generation from CI producer receipts, final compose/handoff
 migration and stage2/stage3 producer adapters are still incomplete. Existing

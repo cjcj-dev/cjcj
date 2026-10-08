@@ -289,3 +289,19 @@ test('transported receipts retain original build origin and frozen digest withou
   f.out = path.join(f.root, 'wrong-receipt-sdk'); const changed = await invoke(f); observed(changed, 'receipt-digest');
   assert.notEqual(changed.rc, 0); assert.match(changed.stderr, /rule=COMPLETION component=runtime/);
 });
+
+test('bootstrap phase reuse binds installed plan and manifest before returning an existing SDK', async () => {
+  const f = await fixture(); const initial = await invoke(f); assert.equal(initial.rc, 0, initial.stderr);
+  const plans = path.join(f.root, 'phases.json');
+  await atomicJson(plans, {schema: 'bootstrap-sdk-plans-v1', phases: {'stage1-initial': f.plan}});
+  const argv = [process.execPath, path.join(here, 'bootstrap-sdk.mjs'), '--plans', plans,
+    '--phase', 'stage1-initial', '--out', f.out];
+  const normal = await command(argv); observed(normal, 'phase-reuse'); assert.equal(normal.rc, 0, normal.stderr);
+  assert.equal(JSON.parse(normal.stdout.trim()).reused, true);
+  const installedPlan = path.join(f.out, 'SDK.plan.json'), original = await fs.readFile(installedPlan);
+  const changed = JSON.parse(original); changed.lane = 'another-owner'; await atomicJson(installedPlan, changed);
+  const rejected = await command(argv); observed(rejected, 'phase-plan-binding');
+  assert.notEqual(rejected.rc, 0); assert.match(rejected.stderr, /rule=INSTALL_BINDING component=sdk/);
+  await fs.writeFile(installedPlan, original);
+  const restored = await command(argv); observed(restored, 'phase-plan-restored'); assert.equal(restored.rc, 0, restored.stderr);
+});

@@ -56,7 +56,19 @@ async function copyArtifacts(staging, manifest) {
   // source cannot be blessed by generating a new lock from the copied bytes.
   // sdk_verify hashes these installed bytes against the presealed lock once.
 }
-async function verifySdk(sdk, plan, manifest) {
+export async function verifyManifestSdk(sdk, plan, manifest) {
+  validatePlan(plan);
+  const planSha256 = objectId(plan), manifestSha256 = objectId(manifest);
+  const lock = await readJson(path.join(sdk, 'SDK.lock.json'));
+  if (manifest.schema !== RESOLVED_SCHEMA || manifest.status !== 'complete' || manifest.rc !== 0
+    || manifest.planSha256 !== planSha256 || manifest.role !== plan.role
+    || manifest.platform !== plan.platform || manifest.stage !== plan.stage
+    || lock.plan_sha256 !== planSha256 || lock.manifest_sha256 !== manifestSha256
+    || objectId(await readJson(path.join(sdk, 'SDK.plan.json'))) !== planSha256
+    || objectId(await readJson(path.join(sdk, 'SDK.manifest.json'))) !== manifestSha256) {
+    reject('INSTALL_BINDING', 'sdk', 'installed plan, successful manifest and lock must agree');
+  }
+  for (const [name, input] of Object.entries(plan.verification)) if (input?.path) await requiredInput(input, name);
   const tuple = PLATFORMS[plan.platform][2];
   // Keep existing colour/ABI/lineage and native loadability checks. The legacy
   // verifier's --write-lock is no longer the authority for payload identity.
@@ -194,7 +206,7 @@ export async function assembleSdk(plan, out, {dryRun = false, resumeFailed = fal
         sha256: await fileDigest(path.join(staging, name)), component: 'sdk-meta', symlink: false,
         producer: {plan_sha256: result.planSha256, manifest_sha256: objectId(result)}};
       await atomicJson(path.join(staging, 'SDK.lock.json'), lock);
-      await verifySdk(staging, plan, result);
+      await verifyManifestSdk(staging, plan, result);
       for (const [name, input] of Object.entries(plan.verification)) if (input?.path) await requiredInput(input, name);
       await fs.rename(staging, out);
       console.log(`SDK-BUILD-OK role=${plan.role} plan=${result.planSha256} manifest=${objectId(result)} to=${out}`);
