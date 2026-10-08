@@ -81,6 +81,12 @@ and records input, script and expected output digests. Only the exact tracked
 bytes or mode changes still fail. Both original Git identities remain recorded.
 The std build SDK removes the official host LLVM directory before installing
 the target tools and dylib; its native binutils remain separate frozen inputs.
+The existing LLVM CMake adapter also supports `auxiliaryOnly: true`, producing
+the required static `llvm-objcopy` and `llvm-ar` with their own sealed receipt.
+Declare that component as `llvm-tools` from the same LLVM commit/tree, map its
+`bin` into `third_party/llvm/bin`, and name it in std's
+`llvmAuxiliaryDependency` and dependency list. This preserves the strict
+ten-payload tuple contract while binding auxiliary tools to their actual source.
 Sharedbuild adapters invoke
 the existing sharedbuild engine. Their builder is the actual `.mjs` file;
 companion shell wrappers cannot substitute an unpinned implementation.
@@ -135,7 +141,16 @@ the same frozen plan, its successful resolved manifest and installed lock to
 agree, then runs the same SDK, runtime-pair, LLVM C API and lineage checks as
 the initial assembly. Reuse cannot substitute the legacy payload-only check.
 
-Phase bundle generation from CI producer receipts, final compose/handoff
+`freeze-bootstrap-plans.mjs --intent SIX_PHASE_INTENTS --out NEW_BUNDLE`
+resolves every phase's selectors before production. Its intent schema is
+`bootstrap-sdk-intents-v1` with exactly the six `phases` keys. All phases must
+belong to one lane/platform. The first three use host role, the remaining
+three use target role; only stage3 may declare `stage: "final"`.
+Both file-bundle and directory consumers require all six valid plans before
+selecting a phase. The stage label alone is not final compiler/std qualification;
+the pending final adapters must preserve the existing final lineage checks.
+
+CI wiring for phase bundle generation from producer receipts, final compose/handoff
 migration and stage2/stage3 producer adapters are still incomplete. Existing
 bootstrap source orchestration has not yet all moved into the fixed producer
 directories. Do not run the old bootstrap flow with loose artifacts and assume
