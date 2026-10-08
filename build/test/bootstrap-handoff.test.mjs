@@ -11,8 +11,8 @@ import {publishBootstrapStdOutput} from '../../ci/bootstrap/std-output.mjs';
 import {prepareBootstrapHandoff, assertBootstrapCompiler} from '../../ci/srcbuild/lib/bootstrap-handoff.mjs';
 
 async function fixture(t) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'bootstrap-handoff-'));
-  t.after(() => fs.rm(root, {recursive: true, force: true}));
+  const root = await fs.mkdtemp(path.join(process.env.SDK_CONSUMER_TEST_ROOT || os.tmpdir(), 'bootstrap-handoff-'));
+  if (!process.env.SDK_CONSUMER_TEST_ROOT) t.after(() => fs.rm(root, {recursive: true, force: true}));
   const work = path.join(root, 'bootstrap-work');
   const sdk = path.join(root, 'software', 'cangjie');
   const source = path.join(root, 'source');

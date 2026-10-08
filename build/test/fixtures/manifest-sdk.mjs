@@ -10,9 +10,11 @@ import {fileDigest, inventory, atomicJson, buildIdentities, sealOutput, sourceId
 import {BOOTSTRAP_PHASES, validateBootstrapPlans} from '../../../ci/bootstrap/freeze-bootstrap-plans.mjs';
 
 const tuple = 'linux_x86_64_cjnative';
+const executions = [];
 const write = async (file, bytes) => { await fs.mkdir(path.dirname(file), {recursive: true}); await fs.writeFile(file, bytes); };
 const run = (args, options = {}) => {
   const r = spawnSync(args[0], args.slice(1), {encoding: 'utf8', ...options});
+  executions.push({argv: args, rc: r.status, signal: r.signal});
   if (r.error || r.status !== 0) throw new Error(`native fixture command=${JSON.stringify(args)} rc=${r.status} ${r.stderr}`);
   return r.stdout.trim();
 };
@@ -28,6 +30,7 @@ const elf = async (file, script, stamp = '') => {
 };
 
 export async function manifestSdkFixture({root, compiler, prefix, inputSdk, shimSource, role = 'target'}) {
+  const firstExecution = executions.length;
   const generation = await fs.mkdtemp(path.join(root, 'manifest-input-'));
   const source = path.join(generation, 'source'); await fs.mkdir(source);
   run(['git', 'init', '-q', source]);
@@ -109,7 +112,8 @@ export async function manifestSdkFixture({root, compiler, prefix, inputSdk, shim
   await write(path.join(artifacts,'lib',tuple,'libcangjie-ast-support.a'),'native AST fixture');
   if(shimSource) await fs.cp(path.join(source,'shim'),path.join(artifacts,'share/cjcj/runtime_shim'),{recursive:true});
   const after=await sourceIdentity(source,identity,'native');
-  const receipt=await sealOutput(directory,component,ids.get(component.id),{status:'complete',rc:0,kind:'native-consumer-fixture',before,source:after});
+  const receipt=await sealOutput(directory,component,ids.get(component.id),{status:'complete',rc:0,kind:'native-consumer-fixture',before,source:after,
+    commands:executions.slice(firstExecution)});
   Object.assign(component.producer,{receipt:directory,receiptSha256:receipt.receiptSha256,originBuildRoot:plan.buildRoot});
   // Work inputs are real sealed bytes, not a digest fabricated by the test.
   await fs.copyFile(path.join(generation,'compiler'),compiler);
@@ -120,5 +124,7 @@ export async function manifestSdkFixture({root, compiler, prefix, inputSdk, shim
     stage:phase==='stage3'?'final':['stage2','stage3-std'].includes(phase)?'stage2':'stage1'}]));
   const plans=path.join(generation,'plans.json');await atomicJson(plans,validateBootstrapPlans({schema:'bootstrap-sdk-plans-v1',phases}));
   const planFile=path.join(generation,'plan.json');await atomicJson(planFile,plan);
+  console.log(`NATIVE_CONSUMER_RECEIPT ${JSON.stringify({plans,planFile,directory,receiptSha256:receipt.receiptSha256,
+    compilerSha256:await fileDigest(compiler),source:identity})}`);
   return {plans,plan,planFile,receipt,compilerSha256:await fileDigest(compiler),coreSha256:await fileDigest(core),generation};
 }
