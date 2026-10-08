@@ -33,7 +33,8 @@ export async function buildStageCompiler(request, run) {
       originBuildRoot: original.producer.originBuildRoot || plan.buildRoot};
     return produced;
   });
-  const inputPlan = {...plan, stage: options.stage === 'stage2' ? 'stage1' : 'stage2', components};
+  const inputPlan = {...plan, buildRoot: path.join(directory, 'build', 'dependency-cache'),
+    stage: options.stage === 'stage2' ? 'stage1' : 'stage2', components};
   const sdk = path.join(directory, 'build', 'sdk');
   await assembleSdk(inputPlan, sdk);
   const manifest = await readJson(path.join(sdk, 'SDK.manifest.json'));
@@ -64,7 +65,7 @@ export async function buildStageCompiler(request, run) {
     CJCJ_LLVM_SHIM_O: path.join(sdk, 'third_party/llvm/fixed-llc/cjselfhost_llvmshim.o'),
     CJCJ_COMMIT: component.source.commit, CC: tools.clang.path, CXX: tools['clang++'].path,
     CANGJIE_BUILD_JOBS: String(os.availableParallelism()), CMAKE_BUILD_PARALLEL_LEVEL: String(os.availableParallelism()),
-    cjHeapSize: options.heap, PATH: `${sdk}/bin:${sdk}/tools/bin:${sdk}/third_party/llvm/bin:/usr/bin:/bin`};
+    cjHeapSize: options.heap, PATH: `${sdk}/bin:${sdk}/tools/bin:${sdk}/third_party/llvm/bin:${[...new Set(Object.values(tools).map(input => path.dirname(input.path)))].join(':')}:/usr/bin:/bin`};
   if (options.launcher) env.CMAKE_C_COMPILER_LAUNCHER = env.CMAKE_CXX_COMPILER_LAUNCHER = options.launcher;
   await run(['node', path.join(source, 'ci/check-codegen-runtime-layout.mjs'), path.join(directory, 'build/layout-sources'), options.runtimePin.path], {cwd: source, env});
   await run(['zx', path.join(source, 'runtime_shim/build_shim.mjs')], {cwd: source, env});

@@ -5,6 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import {fileURLToPath} from 'node:url';
 import {spawn} from 'node:child_process';
+import {BOOTSTRAP_PHASES} from './freeze-bootstrap-plans.mjs';
 import {PLAN_SCHEMA, validatePlan, buildIdentities, objectId, readJson, atomicJson, fileDigest,
   execute, ROLES, sourceIdentity, registeredSourceIdentity} from './sdk-manifest.mjs';
 
@@ -330,10 +331,10 @@ test('transported receipts retain original build origin and frozen digest withou
   // receipt differs from the one frozen before assembly. Reuse must compare
   // the actual source closure, not just internally consistent installation.
   const plans = path.join(f.root, 'transported-phases.json');
-  const phases = Object.fromEntries(['stage0', 'stage0-run', 'std-bootstrap', 'stage1-initial', 'stage1-std', 'stage3']
+  const phases = Object.fromEntries(BOOTSTRAP_PHASES
     .map(phase => [phase, {...clone(f.plan),
       role: ['stage0', 'stage0-run', 'std-bootstrap'].includes(phase) ? 'host' : 'target',
-      stage: phase === 'stage3' ? 'final' : f.plan.stage}]));
+      stage: phase === 'stage3' ? 'final' : ['stage2', 'stage3-std'].includes(phase) ? 'stage2' : f.plan.stage}]));
   await atomicJson(plans, {schema: 'bootstrap-sdk-plans-v1', phases});
   const manifestPath = path.join(f.out, 'SDK.manifest.json'), lockPath = path.join(f.out, 'SDK.lock.json');
   const manifestBytes = await fs.readFile(manifestPath), lockBytes = await fs.readFile(lockPath);
@@ -374,10 +375,10 @@ test('transported receipts retain original build origin and frozen digest withou
 test('bootstrap phase reuse binds installed plan and manifest before returning an existing SDK', async () => {
   const f = await fixture(); const initial = await invoke(f); assert.equal(initial.rc, 0, initial.stderr);
   const plans = path.join(f.root, 'phases.json');
-  const phases = Object.fromEntries(['stage0', 'stage0-run', 'std-bootstrap', 'stage1-initial', 'stage1-std', 'stage3']
+  const phases = Object.fromEntries(BOOTSTRAP_PHASES
     .map(phase => [phase, {...clone(f.plan),
       role: ['stage0', 'stage0-run', 'std-bootstrap'].includes(phase) ? 'host' : 'target',
-      stage: phase === 'stage3' ? 'final' : f.plan.stage}]));
+      stage: phase === 'stage3' ? 'final' : ['stage2', 'stage3-std'].includes(phase) ? 'stage2' : f.plan.stage}]));
   await atomicJson(plans, {schema: 'bootstrap-sdk-plans-v1', phases});
   const argv = [process.execPath, path.join(here, 'bootstrap-sdk.mjs'), '--plans', plans,
     '--phase', 'stage1-initial', '--out', f.out];
@@ -442,17 +443,17 @@ test('registered source transformation accepts only the precomputed bytes and ex
   await fs.writeFile(file, original); await sourceIdentity(expected.repo, expected, 'ast-flatbuffers');
 });
 
-test('complete bootstrap intent freezer binds all six phases and rejects an omitted phase before production', async () => {
+test('complete bootstrap intent freezer binds all eight phases and rejects an omitted phase before production', async () => {
   const f = await fixture();
-  const phases = Object.fromEntries(['stage0', 'stage0-run', 'std-bootstrap', 'stage1-initial', 'stage1-std', 'stage3']
+  const phases = Object.fromEntries(BOOTSTRAP_PHASES
     .map(phase => [phase, {...clone(f.plan), schema: 'toolchain-sdk-intent-v1',
       role: ['stage0', 'stage0-run', 'std-bootstrap'].includes(phase) ? 'host' : 'target',
-      stage: phase === 'stage3' ? 'final' : f.plan.stage}]));
+      stage: phase === 'stage3' ? 'final' : ['stage2', 'stage3-std'].includes(phase) ? 'stage2' : f.plan.stage}]));
   const intent = path.join(f.root, 'bundle.intent.json'), bundle = path.join(f.root, 'bundle.frozen.json');
   await atomicJson(intent, {schema: 'bootstrap-sdk-intents-v1', phases});
   const argv = [process.execPath, path.join(here, 'freeze-bootstrap-plans.mjs'), '--intent', intent, '--out', bundle];
-  const frozen = await command(argv); observed(frozen, 'freeze-six-phases'); assert.equal(frozen.rc, 0, frozen.stderr);
-  const result = await readJson(bundle); assert.equal(Object.keys(result.phases).length, 6);
+  const frozen = await command(argv); observed(frozen, 'freeze-eight-phases'); assert.equal(frozen.rc, 0, frozen.stderr);
+  const result = await readJson(bundle); assert.equal(Object.keys(result.phases).length, 8);
   for (const plan of Object.values(result.phases)) {
     validatePlan(plan); assert.equal(plan.components.find(component => component.id === 'runtime').source.commit, f.sources.runtime.commit);
   }

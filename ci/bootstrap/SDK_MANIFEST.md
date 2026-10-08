@@ -133,7 +133,8 @@ the ordinary byte check. Manifest SDK locks cannot be re-created with
 
 `bootstrap-sdk.mjs` reads either a directory of phase plans or one
 `bootstrap-sdk-plans-v1` JSON bundle with `phases`. Current phases are stage0,
-stage0-run, std-bootstrap, stage1-initial, stage1-std, and stage3. Every phase
+stage0-run, std-bootstrap, stage1-initial, stage1-std, stage2, stage3-std,
+and stage3. Every phase
 is a complete frozen SDK plan. The bootstrap CLI accepts `--sdk-plans`;
 GHA and the kkk2 source-build driver consume `CJCJ_BOOTSTRAP_SDK_PLANS`.
 Different std stages use different installation directories. Reuse requires
@@ -141,17 +142,34 @@ the same frozen plan, its successful resolved manifest and installed lock to
 agree, then runs the same SDK, runtime-pair, LLVM C API and lineage checks as
 the initial assembly. Reuse cannot substitute the legacy payload-only check.
 
-`freeze-bootstrap-plans.mjs --intent SIX_PHASE_INTENTS --out NEW_BUNDLE`
+`freeze-bootstrap-plans.mjs --intent EIGHT_PHASE_INTENTS --out NEW_BUNDLE`
 resolves every phase's selectors before production. Its intent schema is
-`bootstrap-sdk-intents-v1` with exactly the six `phases` keys. All phases must
+`bootstrap-sdk-intents-v1` with exactly the eight `phases` keys. All phases must
 belong to one lane/platform. The first three use host role, the remaining
 three use target role; only stage3 may declare `stage: "final"`.
-Both file-bundle and directory consumers require all six valid plans before
+Both file-bundle and directory consumers require all eight valid plans before
 selecting a phase. The stage label alone is not final compiler/std qualification;
 the pending final adapters must preserve the existing final lineage checks.
 
-CI wiring for phase bundle generation from producer receipts, final compose/handoff
-migration and stage2/stage3 producer adapters are still incomplete. Existing
+`prepare-bootstrap-plans.mjs` now generates the frozen bundle from complete
+phase intents or materializes and validates an existing bundle. GHA and the
+kkk2 driver call it before dispatch; generation never builds a phase or invents
+a missing receipt. `CJCJ_BOOTSTRAP_SDK_INTENTS` and
+`CJCJ_BOOTSTRAP_SDK_PLANS` are exclusive input alternatives.
+
+The candidate stage compiler adapter consumes a complete authenticated SDK,
+then invokes the existing layout/shim/trimpath/cjpm recipes. Build-only parent
+components use `inputOnly: true`; this installation selection does not change
+the producer receipt identity or authorize omission of any installed SDK role.
+The stage2 handoff consumes the stage2 plan and checks its compiler, std and
+shim outputs instead of copying and editing an SDK after assembly.
+These additions remain unqualified: standard source sync refused the local
+shallow repository twice, including after a normal unshallow fetch returned 0.
+No stage build or new test was executed, and this candidate is not ready to
+replace in-flight stage2 or to execute held stage33.
+
+Final compose migration and producer-to-phase intent generation remain
+incomplete. Existing
 bootstrap source orchestration has not yet all moved into the fixed producer
 directories. Do not run the old bootstrap flow with loose artifacts and assume
 this candidate has completed those migrations.
