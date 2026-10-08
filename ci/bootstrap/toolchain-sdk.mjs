@@ -74,11 +74,13 @@ async function verifySdk(sdk, plan, manifest) {
   }
   if (plan.role === 'target' && plan.verification.runtimeManifest) {
     await verifyBootstrapRuntimeSdk(sdk, tuple, {
-      ...process.env, RUNTIME_REF: plan.components.find(component => component.roles.includes('runtime') && component.domain === 'target').source.commit,
-      COLOUR_RT_ROOT: plan.verification.runtimeManifest.root,
+      CJCJ_BOOTSTRAP_RUNTIME_PIN: plan.verification.runtimePin.path,
+      RUNTIME_REF: plan.components.find(component => component.roles.includes('runtime') && component.domain === 'target').source.commit,
+      CJCJ_BOOTSTRAP_COLOUR_RT: plan.verification.runtimeManifest.root,
       COLOUR_RT_MANIFEST_SHA256: plan.verification.runtimeManifest.sha256,
       COLOUR_RT_RUN_ID: plan.verification.runtimeManifest.runId,
       COLOUR_RT_RUN_ATTEMPT: plan.verification.runtimeManifest.runAttempt,
+      COLOUR_RT_ARTIFACT_ID: plan.verification.runtimeManifest.artifactId,
     });
   }
   if (!plan.platform.startsWith('linux_')) reject('VERIFIER_PLATFORM', plan.platform, 'native Darwin/Windows colour verifier migration remains required');

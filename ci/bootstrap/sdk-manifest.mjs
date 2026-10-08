@@ -179,7 +179,7 @@ export function validatePlan(plan) {
     const buildRuntimeDependencies = llvm.map(component => component.config.options.runtimeDependency).filter(Boolean);
     if (new Set(buildRuntimeDependencies).size > 1) reject('LLVM_DEPENDENCY', 'llvm', `${domain} producers use different paired runtime inputs`);
   }
-  fields(plan.verification, ['runtimePin', 'colourRuntime', 'hostRuntime'], ['hostRuntimeDir', 'runtimeManifest', 'hostSdk', 'hostSdkLockSha256'], 'verification');
+  fields(plan.verification, ['runtimePin', 'colourRuntime', 'hostRuntime'], ['hostRuntimeDir', 'runtimeManifest'], 'verification');
   for (const key of ['runtimePin', 'colourRuntime', 'hostRuntime']) {
     const input = plan.verification[key]; fields(input, ['path', 'sha256'], [], key);
     absolute(input.path, key); if (!HEX64.test(input.sha256)) reject('VERIFICATION', key, 'frozen hash required');
@@ -187,10 +187,11 @@ export function validatePlan(plan) {
   if (plan.role === 'target' && !plan.verification.hostRuntimeDir) reject('DOMAIN', 'verification', 'target execution needs explicit host runtime directory');
   if (plan.verification.hostRuntimeDir) absolute(plan.verification.hostRuntimeDir, 'hostRuntimeDir');
   if (plan.verification.runtimeManifest) {
-    fields(plan.verification.runtimeManifest, ['root', 'sha256', 'runId', 'runAttempt'], [], 'runtimeManifest');
+    fields(plan.verification.runtimeManifest, ['root', 'sha256', 'runId', 'runAttempt', 'artifactId'], [], 'runtimeManifest');
     absolute(plan.verification.runtimeManifest.root, 'runtimeManifest');
     if (!HEX64.test(plan.verification.runtimeManifest.sha256) || !/^\d+$/.test(plan.verification.runtimeManifest.runId)
-      || !/^\d+$/.test(plan.verification.runtimeManifest.runAttempt)) reject('VERIFICATION', 'runtimeManifest', 'frozen identity');
+      || !/^\d+$/.test(plan.verification.runtimeManifest.runAttempt)
+      || !/^\d+$/.test(plan.verification.runtimeManifest.artifactId)) reject('VERIFICATION', 'runtimeManifest', 'frozen identity');
   }
   return plan;
 }
