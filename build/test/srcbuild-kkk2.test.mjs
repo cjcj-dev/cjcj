@@ -889,7 +889,8 @@ test('bootstrap entries bind the vendored SDK builder instead of a campaign path
   assert.ok(bootstrap.includes('SDK_BUILD="${SDK_BUILD:-$(dirname "${BASH_SOURCE[0]}")/sdk_build.sh}"'));
   assert.ok(!bootstrap.includes('/root/cj_build/tools/sdk_build.sh'));
   assert.match(extractFn(script, 'run_bootstrap_stage'), /SDK_BUILD="\$REPO_ROOT\/ci\/bootstrap\/sdk_build.sh" "\$\{cmd\[@\]\}"/);
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gha-bootstrap-child-'));
+  const root = process.env.GHA_BINDING_TEST_ROOT || fs.mkdtempSync(path.join(os.tmpdir(), 'gha-bootstrap-child-'));
+  fs.mkdirSync(root, {recursive: true});
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));
   const {file: plans, bundle} = await writeTransportPlans(root);
   fs.mkdirSync(path.join(root, 'ci/bootstrap'), {recursive: true});
