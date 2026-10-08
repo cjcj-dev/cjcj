@@ -71,9 +71,22 @@ async function sharedbuild(component, directory, identity, plan, resumeFailed) {
   if (await fileDigest(spec.builder) !== component.config.tools.builder?.sha256
     || spec.builder !== component.config.tools.builder.path) reject('PRODUCER_RECIPE', component.id, 'builder must be pinned');
   const log = path.join(directory, 'logs', 'sharedbuild.log');
-  const result = await runProducer(['python3', engine, '--remote', '--root', path.join(plan.buildRoot, 'shared-cache'),
-    '--lane', path.basename(plan.buildRoot), 'build', '--recipe', recipe, '--work', path.join(plan.buildRoot, 'shared-work'),
-    '--copy-to', path.join(directory, 'sharedbuild-output'), ...(resumeFailed ? ['--resume'] : [])], {cwd: directory, env: process.env, log});
+  let result;
+  try {
+    result = await runProducer(['python3', engine, '--remote', '--root', path.join(plan.buildRoot, 'shared-cache'),
+      '--lane', plan.lane, 'build', '--recipe', recipe, '--work', path.join(plan.buildRoot, 'shared-work'),
+      '--copy-to', path.join(directory, 'sharedbuild-output'), ...(resumeFailed ? ['--resume'] : [])], {cwd: directory, env: process.env, log});
+  } catch (error) {
+    const records = (await fs.readFile(log, 'utf8')).split('\n').flatMap(line => {
+      try { const row = JSON.parse(line); return row.event === 'build-result' ? [row] : []; } catch { return []; }
+    });
+    const actual = records.at(-1);
+    if (actual && actual.rc !== 0) {
+      throw Object.assign(new Error(`BUILD_FAILED rc=${actual.rc} wrapper_rc=${error.rc} evidence=${actual.result} log=${actual.build_log}`),
+        {rc: actual.rc, wrapperRc: error.rc, evidence: actual.result});
+    }
+    throw error;
+  }
   const cache = path.join(directory, 'sharedbuild-output');
   const completion = await readJson(path.join(cache, 'completion.json'));
   if (completion.status !== 'complete' || completion.rc !== 0 || completion.source_sha !== component.source.commit

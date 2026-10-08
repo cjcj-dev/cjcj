@@ -67,7 +67,8 @@ export function absolute(value, label) {
   return value;
 }
 export function validatePlan(plan) {
-  fields(plan, ['schema', 'role', 'platform', 'stage', 'buildRoot', 'components', 'verification'], [], 'plan');
+  fields(plan, ['schema', 'lane', 'role', 'platform', 'stage', 'buildRoot', 'components', 'verification'], [], 'plan');
+  if (!/^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(plan.lane || '')) reject('SCHEMA', 'lane', 'explicit owner required');
   if (plan.schema !== PLAN_SCHEMA || !['host', 'target'].includes(plan.role)
     || !PLATFORMS[plan.platform] || !['seed', 'stage1', 'stage2', 'final'].includes(plan.stage)) reject('SCHEMA', 'plan', 'version/role/platform/stage');
   absolute(plan.buildRoot, 'buildRoot');

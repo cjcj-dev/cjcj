@@ -1,0 +1,190 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import os from 'node:os';
+import {fileURLToPath} from 'node:url';
+import {spawn} from 'node:child_process';
+import {PLAN_SCHEMA, validatePlan, buildIdentities, objectId, readJson, atomicJson, fileDigest,
+  execute, ROLES} from './sdk-manifest.mjs';
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const product = process.env.SDK_MANIFEST_PRODUCT || path.join(here, 'toolchain-sdk.mjs');
+const engine = process.env.SDK_SHAREDBUILD_ENGINE;
+const testRoot = process.env.SDK_MANIFEST_TEST_ROOT;
+const tuple = 'linux_x86_64_cjnative';
+const command = async argv => {
+  try { return {rc: 0, ...(await execute(argv[0], argv.slice(1), {maxBuffer: 8 * 1024 * 1024}))}; }
+  catch (error) { return {rc: error.code, stdout: error.stdout || '', stderr: error.stderr || '', error: error.message}; }
+};
+const write = async (file, content) => { await fs.mkdir(path.dirname(file), {recursive: true}); await fs.writeFile(file, content); };
+const clone = value => structuredClone(value);
+const fixtureSources = {
+  'runtime.c': '#ifndef CJRT_SHA\n#define CJRT_SHA "official"\n#endif\nconst char provenance[]="CJRT-COMMIT:" CJRT_SHA; int official_symbol=1;\n#ifdef FIXTURE_COLOUR\nint g_cjLoadBadMask=1;\n#endif\n',
+  'boundscheck.c': 'int boundscheck_fixture(void){return 0;}\n',
+  'std.c': '#ifdef FIXTURE_COLOUR\nextern int g_cjLoadBadMask; int std_fixture(void){return g_cjLoadBadMask;}\n#else\nint std_fixture(void){return 0;}\n#endif\n',
+  'tool.c': '#include <stdio.h>\n#ifndef CJLLVM_SHA\n#define CJLLVM_SHA "official"\n#endif\nconst char llvm_origin[]="CJLLVM-COMMIT:" CJLLVM_SHA; int main(void){puts("fixture tool version 1"); return 0;}\n',
+  'llvm.c': '#ifndef CJLLVM_SHA\n#define CJLLVM_SHA "official"\n#endif\nconst char llvm_origin[]="CJLLVM-COMMIT:" CJLLVM_SHA; int LLVMInitializeX86TargetInfo(void){return 0;}\n',
+};
+async function sourceRepository(root, name) {
+  const repo = path.join(root, name); await fs.mkdir(repo);
+  for (const [rel, content] of Object.entries(fixtureSources)) await write(path.join(repo, rel), content);
+  await write(path.join(repo, 'identity.txt'), name);
+  for (const args of [['init', '-q', repo], ['-C', repo, 'add', '.'], ['-C', repo, '-c', 'user.name=Zxilly', '-c', 'user.email=zxilly@outlook.com', 'commit', '-qm', 'fixture input']]) {
+    const result = await command(['git', ...args]); assert.equal(result.rc, 0, result.stderr);
+  }
+  return {kind: 'git', repo, commit: (await execute('git', ['-C', repo, 'rev-parse', 'HEAD'])).stdout.trim(),
+    tree: (await execute('git', ['-C', repo, 'rev-parse', 'HEAD^{tree}'])).stdout.trim()};
+}
+async function fixture() {
+  assert.ok(engine && testRoot, 'SDK_SHAREDBUILD_ENGINE and SDK_MANIFEST_TEST_ROOT must name remote isolated inputs');
+  const root = await fs.mkdtemp(path.join(testRoot, 'sdk-manifest-'));
+  const sources = {};
+  for (const name of ['runtime', 'compiler', 'llvm', 'std']) sources[name] = await sourceRepository(root, name);
+  const native = path.join(root, 'native'); await fs.mkdir(native);
+  const official = path.join(root, 'official');
+  for (const rel of ['bin/cjc', 'bin/cjc-frontend', 'tools/bin/cjpm', 'third_party/llvm/bin/llc', 'third_party/llvm/bin/opt', 'third_party/llvm/bin/ld.lld']) {
+    const target = path.join(official, rel); await fs.mkdir(path.dirname(target), {recursive: true});
+    const result = await command(['cc', path.join(sources.compiler.repo, 'tool.c'), '-o', target]); assert.equal(result.rc, 0, result.stderr);
+  }
+  for (const [src, rel] of [['runtime.c', `runtime/lib/${tuple}/libcangjie-runtime.so`], ['boundscheck.c', `runtime/lib/${tuple}/libboundscheck.so`],
+    ['std.c', `runtime/lib/${tuple}/libcangjie-std-core.so`], ['llvm.c', 'third_party/llvm/lib/libLLVM-15.so']]) {
+    const target = path.join(official, rel); await fs.mkdir(path.dirname(target), {recursive: true});
+    const result = await command(['cc', '-shared', '-fPIC', path.join(sources.runtime.repo, src), '-o', target]); assert.equal(result.rc, 0, result.stderr);
+  }
+  assert.equal((await command(['cc', '-c', path.join(sources.std.repo, 'std.c'), '-o', path.join(native, 'std.o')])).rc, 0);
+  await fs.mkdir(path.join(official, 'lib', tuple), {recursive: true});
+  assert.equal((await command(['ar', 'rcs', path.join(official, 'lib', tuple, 'libcangjie-std-core.a'), path.join(native, 'std.o')])).rc, 0);
+  await write(path.join(official, 'lib', tuple, 'libcangjie-ast-support.a'), 'official AST fixture archive');
+  await write(path.join(official, 'modules', tuple, 'std/core/core.Int64.ti'), 'official module');
+  await write(path.join(official, 'envsetup.sh'), 'export CANGJIE_HOME="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"\nexport PATH="$CANGJIE_HOME/bin:$CANGJIE_HOME/tools/bin:$CANGJIE_HOME/third_party/llvm/bin:$PATH"\nexport LD_LIBRARY_PATH="$CANGJIE_HOME/runtime/lib/linux_x86_64_cjnative:$CANGJIE_HOME/third_party/llvm/lib:$CANGJIE_HOME/tools/lib"\n');
+  const seedResult = await command(['python3', engine, '--remote', '--root', path.join(root, 'seed-cache'), '--lane', 'sdk-fixture', 'sdk-publish', '--source', official, '--version', 'fixture-official']);
+  assert.equal(seedResult.rc, 0, seedResult.stderr);
+  const seed = seedResult.stdout.trim(), seedLock = path.join(seed, 'SDK.lock.json');
+  const colour = path.join(native, 'colour.so');
+  assert.equal((await command(['cc', '-shared', '-fPIC', '-DFIXTURE_COLOUR=1', path.join(sources.runtime.repo, 'runtime.c'), '-o', colour])).rc, 0);
+  const pin = path.join(root, 'runtime.env'); await write(pin, `RUNTIME_REF=${sources.runtime.commit}\n`);
+  const builder = path.join(here, 'fixtures/sdk-fixture-producer.mjs');
+  const producerVersion = (await execute('git', ['-C', path.dirname(engine), 'rev-parse', 'HEAD'])).stdout.trim();
+  const plan = {schema: PLAN_SCHEMA, lane: 'sym_cjcj_918_implement_r6061418558', role: 'target', stage: 'stage1', platform: 'linux_x86_64', buildRoot: path.join(root, 'builds'),
+    verification: {runtimePin: {path: pin, sha256: await fileDigest(pin)}, colourRuntime: {path: colour, sha256: await fileDigest(colour)},
+      hostRuntime: {path: path.join(seed, `runtime/lib/${tuple}/libcangjie-runtime.so`), sha256: await fileDigest(path.join(seed, `runtime/lib/${tuple}/libcangjie-runtime.so`))},
+      hostRuntimeDir: path.join(seed, 'runtime/lib', tuple)}, components: []};
+  const retained = {id: 'official', roles: ['ast', 'cjpm', 'official-host'], domain: 'host', source: {kind: 'distribution',
+    root: seed, lock: seedLock, version: 'fixture-official', lockSha256: await fileDigest(seedLock), reason: 'explicit native fixture official host retention'},
+    config: {host: plan.platform, target: plan.platform, options: {}, tools: {}}, producer: {adapter: 'official', version: producerVersion}, dependencies: [],
+    install: [{from: '', to: '', exclude: ['bin', 'lib', 'runtime', 'modules', 'third_party']},
+      {from: `lib/${tuple}/libcangjie-ast-support.a`, to: `lib/${tuple}/libcangjie-ast-support.a`}]};
+  plan.components.push(retained);
+  for (const [id, roles, source, mode, dependencies, install] of [
+    ['runtime', ['runtime', 'boundscheck'], sources.runtime, 'runtime', ['official'], [{from: 'install', to: ''}]],
+    ['compiler', ['compiler'], sources.compiler, 'compiler', ['official'], [{from: 'bin', to: 'bin'}, {from: 'compiler-lineage.json', to: 'compiler-lineage.json'}]],
+    ['llvm-tools', ['llvm-tools'], sources.llvm, 'llvm-tools', ['official', 'runtime'], [{from: '', to: 'third_party/llvm'}]],
+    ['llvm-dylib', ['llvm-dylib'], sources.llvm, 'llvm-dylib', ['official', 'runtime'], [{from: 'libLLVM-15.so', to: 'third_party/llvm/lib/libLLVM-15.so'}]],
+    ['std', ['std'], sources.std, 'std', ['official', 'compiler', 'runtime'], [{from: '', to: ''}]],
+  ]) {
+    const recipe = path.join(root, `${id}.recipe.json`);
+    plan.components.push({id, roles, domain: 'target', source, config: {host: plan.platform, target: plan.platform,
+      options: {parameters: {mode}, optimization: 'Release'}, tools: {builder: {path: builder, sha256: await fileDigest(builder)}}},
+      producer: {adapter: 'sharedbuild-runtime-default', version: producerVersion, engine, engineSha256: await fileDigest(engine), recipe}, dependencies, install});
+  }
+  const identities = buildIdentities(plan);
+  for (const component of plan.components.slice(1)) {
+    const inputs = component.id === 'std' ? {compiler: path.join(identities.get('compiler').directory, 'artifacts/bin/cjcj-stage1')} : {};
+    const outputs = {'runtime': [`install/runtime/lib/${tuple}/libcangjie-runtime.so`], compiler: ['bin/cjcj-stage1'],
+      'llvm-tools': ['bin/opt'], 'llvm-dylib': ['libLLVM-15.so'], std: ['std-producer.json']}[component.id];
+    await atomicJson(component.producer.recipe, {kind: 'runtime-default', sha: component.source.commit, repo: component.source.repo, sdk: seed,
+      optimization: 'Release', builder, inputs, outputs, parameters: component.config.options.parameters,
+      host: plan.platform, target: plan.platform, dependency_build_ids: identities.get(component.id).dependencies});
+  }
+  const planFile = path.join(root, 'plan.json'); await atomicJson(planFile, plan);
+  return {root, plan, planFile, identities, out: path.join(root, 'sdk'), sources};
+}
+async function invoke(f, args = []) { await atomicJson(f.planFile, f.plan); return command([process.execPath, product, '--plan', f.planFile, '--out', f.out, ...args]); }
+function observed(result, label) { console.log(`TARGET_ASSERTION_EXECUTED ${label} rc=${result.rc}`); }
+
+test('actual CLI dry-run resolves complete full-SHA/config/dependency directories without building', async () => {
+  const f = await fixture(); const result = await invoke(f, ['--dry-run']); observed(result, 'dry-run');
+  assert.equal(result.rc, 0, result.stderr); const data = JSON.parse(result.stdout.trim());
+  assert.ok(data.components.every(value => value.directory.includes(f.plan.components.find(component => component.id === value.component).source.commit || f.plan.components[0].source.lockSha256)));
+  await assert.rejects(fs.access(f.plan.buildRoot)); await assert.rejects(fs.access(f.out));
+  const changed = clone(f.plan); changed.components[1].config.options.parameters.extra = 'different';
+  assert.notEqual(buildIdentities(changed).get('runtime').directory, f.identities.get('runtime').directory);
+});
+test('actual SDK entry builds missing producers, accepts different repository SHAs and reuses successful receipts', async () => {
+  const f = await fixture(); const result = await invoke(f); observed(result, 'full-entry');
+  assert.equal(result.rc, 0, result.stderr); assert.match(result.stdout, /SDK-BUILD-OK/);
+  assert.notEqual(f.sources.runtime.commit, f.sources.compiler.commit);
+  const manifest = await readJson(path.join(f.out, 'SDK.manifest.json'));
+  assert.equal(manifest.components.runtime.source.commit, f.sources.runtime.commit);
+  assert.equal(manifest.components['llvm-dylib'].source.commit, f.sources.llvm.commit);
+  const runtime = await readJson(path.join(f.identities.get('runtime').directory, 'output.json'));
+  assert.equal(runtime.execution.rc, 0); assert.match(await fs.readFile(path.join(f.identities.get('runtime').directory, 'logs/sharedbuild.log'), 'utf8'), /FIXTURE_PRODUCER_EXECUTED mode=runtime/);
+  const before = await fs.stat(path.join(f.identities.get('runtime').directory, 'output.json'));
+  f.out = path.join(f.root, 'sdk-second'); const repeat = await invoke(f); observed(repeat, 'cache'); assert.equal(repeat.rc, 0, repeat.stderr);
+  assert.equal((await fs.stat(path.join(f.identities.get('runtime').directory, 'output.json'))).mtimeMs, before.mtimeMs);
+});
+test('new opt plus old libLLVM is rejected by the real installed-source assertion', async () => {
+  const f = await fixture(); const good = await invoke(f); assert.equal(good.rc, 0, good.stderr);
+  const component = f.plan.components.find(value => value.id === 'llvm-dylib');
+  const root = f.identities.get(component.id).directory;
+  const library = path.join(root, 'artifacts/libLLVM-15.so'); const original = await fs.readFile(library);
+  // An internally sealed but semantically wrong output reaches LLVM_TUPLE,
+  // independently of the ordinary payload corruption guard.
+  const bytes = Buffer.from(original); const token = Buffer.from(f.sources.llvm.commit); const at = bytes.indexOf(token); assert.ok(at >= 0);
+  bytes.set(Buffer.from('e'.repeat(40)), at); await fs.writeFile(library, bytes);
+  const output = await readJson(path.join(root, 'output.json')); output.files['libLLVM-15.so'].sha256 = await fileDigest(library);
+  await atomicJson(path.join(root, 'output.json'), output); await fs.writeFile(path.join(root, 'DONE'), `${await fileDigest(path.join(root, 'output.json'))}\n`);
+  f.out = path.join(f.root, 'mixed-sdk'); const mixed = await invoke(f); observed(mixed, 'llvm-mixed-stamp');
+  assert.notEqual(mixed.rc, 0); assert.match(mixed.stderr, /rule=LLVM_TUPLE.*libLLVM-15.so/); await assert.rejects(fs.access(f.out));
+  await fs.writeFile(library, original); output.files['libLLVM-15.so'].sha256 = await fileDigest(library);
+  await atomicJson(path.join(root, 'output.json'), output); await fs.writeFile(path.join(root, 'DONE'), `${await fileDigest(path.join(root, 'output.json'))}\n`);
+  const restored = await invoke(f); observed(restored, 'llvm-restored'); assert.equal(restored.rc, 0, restored.stderr);
+});
+test('ordinary payload replacement cannot be blessed by rewriting the installation lock', async () => {
+  const f = await fixture(); assert.equal((await invoke(f)).rc, 0);
+  const root = f.identities.get('std').directory, module = path.join(root, 'artifacts', `modules/${tuple}/std/core/core.Int64.ti`);
+  const original = await fs.readFile(module); await fs.writeFile(module, 'replaced payload');
+  f.out = path.join(f.root, 'changed-sdk'); const changed = await invoke(f); observed(changed, 'ordinary-digest');
+  assert.notEqual(changed.rc, 0); assert.match(changed.stderr, /rule=PAYLOAD_(DIGEST|TYPE).*core.Int64.ti/); await assert.rejects(fs.access(f.out));
+  await fs.writeFile(module, original); const restored = await invoke(f); observed(restored, 'ordinary-restored'); assert.equal(restored.rc, 0, restored.stderr);
+});
+test('mixed frozen LLVM sources, cycles and incomplete plans reject before producing', async () => {
+  const f = await fixture();
+  for (const [name, mutate, rule] of [
+    ['LLVM declaration', plan => { plan.components.find(value => value.id === 'llvm-dylib').source = clone(f.sources.compiler); }, /rule=LLVM_SOURCE/],
+    ['cycle', plan => { plan.components.find(value => value.id === 'compiler').dependencies.push('std'); }, /rule=DEPENDENCY_CYCLE/],
+    ['missing std', plan => { plan.components = plan.components.filter(value => value.id !== 'std'); }, /rule=MISSING_COMPONENT/],
+    ['unknown adapter', plan => { plan.components[1].producer.adapter = 'shell-command'; }, /rule=ADAPTER/],
+    ['path escape', plan => { plan.components[1].install[0].to = '../escape'; }, /rule=PATH/],
+  ]) {
+    const bad = clone(f.plan); mutate(bad); await atomicJson(f.planFile, bad);
+    const result = await command([process.execPath, product, '--plan', f.planFile, '--out', f.out]); observed(result, name);
+    assert.notEqual(result.rc, 0); assert.match(result.stderr, rule); await assert.rejects(fs.access(f.plan.buildRoot));
+  }
+});
+test('same-key parallel SDK requests serialize the producer and publish separate complete SDKs', async () => {
+  const f = await fixture();
+  const run = out => command([process.execPath, product, '--plan', f.planFile, '--out', out]);
+  const [first, second] = await Promise.all([run(f.out), run(path.join(f.root, 'sdk-other'))]); observed(first, 'concurrent-first'); observed(second, 'concurrent-second');
+  assert.equal(first.rc, 0, first.stderr); assert.equal(second.rc, 0, second.stderr);
+  assert.equal(await fileDigest(path.join(f.out, 'SDK.manifest.json')), await fileDigest(path.join(f.root, 'sdk-other/SDK.manifest.json')));
+  for (const component of f.plan.components.slice(1)) {
+    const log = await fs.readFile(path.join(f.identities.get(component.id).directory, 'logs/sharedbuild.log'), 'utf8');
+    assert.equal((log.match(/FIXTURE_PRODUCER_EXECUTED/g) || []).length, 1, component.id);
+  }
+});
+test('failed producer preserves actual rc and never publishes or starts dependents', async () => {
+  const f = await fixture(); const runtime = f.plan.components.find(value => value.id === 'runtime');
+  runtime.config.options.parameters.mode = 'fail'; const identities = buildIdentities(f.plan);
+  for (const component of f.plan.components.slice(1)) {
+    const spec = await readJson(component.producer.recipe); spec.parameters = component.config.options.parameters;
+    spec.dependency_build_ids = identities.get(component.id).dependencies;
+    if (component.id === 'std') spec.inputs.compiler = path.join(identities.get('compiler').directory, 'artifacts/bin/cjcj-stage1');
+    await atomicJson(component.producer.recipe, spec);
+  }
+  const result = await invoke(f); observed(result, 'producer-failure'); assert.notEqual(result.rc, 0); assert.match(result.stderr, /BUILD_FAILED rc=17/);
+  const state = await readJson(path.join(identities.get('runtime').directory, 'state.json')); assert.equal(state.status, 'failed');
+  await assert.rejects(fs.access(path.join(identities.get('runtime').directory, 'DONE'))); await assert.rejects(fs.access(path.join(identities.get('std').directory, 'state.json')));
+  await assert.rejects(fs.access(f.out));
+});
