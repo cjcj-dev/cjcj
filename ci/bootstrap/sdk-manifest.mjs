@@ -171,6 +171,11 @@ export function validatePlan(plan) {
     }
   }
   for (const role of ROLES) if (!roles.has(role)) reject('MISSING_COMPONENT', role, 'complete SDK plan required');
+  if (plan.role === 'target') {
+    const runtime = plan.components.filter(component => component.domain === 'target' && component.roles.includes('runtime'));
+    const boundscheck = plan.components.filter(component => component.domain === 'target' && component.roles.includes('boundscheck'));
+    if (runtime.length !== 1 || boundscheck.length !== 1 || runtime[0].id !== boundscheck[0].id) reject('RUNTIME_PAIR', 'runtime', 'target runtime/archive/boundscheck require one actual producer receipt');
+  }
   for (const component of plan.components) for (const dep of component.dependencies) if (!ids.has(dep)) reject('DEPENDENCY', component.id, `unknown ${dep}`);
   topological(plan);
   for (const domain of ['host', 'target']) {

@@ -150,7 +150,8 @@ test('new opt plus old libLLVM is rejected by the real installed-source assertio
 test('ordinary payload replacement cannot be blessed by rewriting the installation lock', async () => {
   const f = await fixture(); assert.equal((await invoke(f)).rc, 0);
   const root = f.identities.get('std').directory, module = path.join(root, 'artifacts', `modules/${tuple}/std/core/core.Int64.ti`);
-  const original = await fs.readFile(module); await fs.writeFile(module, 'replaced payload');
+  const original = await fs.readFile(module), replacement = Buffer.from(original);
+  replacement[0] ^= 1; await fs.writeFile(module, replacement);
   f.out = path.join(f.root, 'changed-sdk'); const changed = await invoke(f); observed(changed, 'ordinary-digest');
   assert.notEqual(changed.rc, 0); assert.match(changed.stderr, /rule=PAYLOAD_(DIGEST|TYPE).*core.Int64.ti/); await assert.rejects(fs.access(f.out));
   await fs.writeFile(module, original); const restored = await invoke(f); observed(restored, 'ordinary-restored'); assert.equal(restored.rc, 0, restored.stderr);

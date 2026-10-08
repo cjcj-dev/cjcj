@@ -96,7 +96,7 @@ async function sharedbuild(component, directory, identity, plan, resumeFailed, o
   try {
     result = await runProducer([component.config.tools.python3.path, engine, '--remote', '--root', path.join(plan.buildRoot, 'shared-cache'),
       '--lane', plan.lane, 'build', '--recipe', recipe, '--work', path.join(plan.buildRoot, 'shared-work'),
-      '--copy-to', path.join(directory, 'sharedbuild-output'), ...(resumeFailed ? ['--resume'] : [])], {cwd: directory, env: process.env, log});
+      '--copy-manifest-to', path.join(directory, 'sharedbuild-output'), ...(resumeFailed ? ['--resume'] : [])], {cwd: directory, env: process.env, log});
   } catch (error) {
     const records = (await fs.readFile(log, 'utf8')).split('\n').flatMap(line => {
       try { const row = JSON.parse(line); return row.event === 'build-result' ? [row] : []; } catch { return []; }

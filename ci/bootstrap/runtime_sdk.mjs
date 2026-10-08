@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import {resolveRuntimeSource} from '../runtime-pin.mjs';
 import {verifyRuntime, runtimeFiles, digest} from '../release/colour_runtime.mjs';
 import {run} from '../../build/lib/runner.mjs';
+import {objectId} from './sdk-manifest.mjs';
 
 export async function verifyBootstrapRuntimeSdk(sdk, tuple, env = process.env, sourceRoot, assemblyLockSha, producerManifest) {
   if (producerManifest) {
@@ -16,15 +17,19 @@ export async function verifyBootstrapRuntimeSdk(sdk, tuple, env = process.env, s
     const lockFile = path.join(sdk, 'SDK.lock.json');
     if (!assemblyLockSha || digest(lockFile) !== assemblyLockSha) throw new Error('BOOTSTRAP_SDK_RUNTIME_LOCK_MISMATCH: assembly lock');
     const lock = JSON.parse(fs.readFileSync(lockFile, 'utf8'));
+    if (lock.manifest_sha256 !== objectId(producerManifest) || lock.plan_sha256 !== producerManifest.planSha256
+      || digest(path.join(sdk, 'SDK.manifest.json')) !== lock.manifest_sha256) throw new Error('BOOTSTRAP_RUNTIME_PRODUCER_MANIFEST_BINDING');
     const runtimeRef = lock.components?.runtime?.commit;
     if (!/^[0-9a-f]{40}$/.test(runtimeRef || '') || lock.role !== 'target') throw new Error('BOOTSTRAP_RUNTIME_PRODUCER_MANIFEST');
+    const pair = producerManifest.files?.[runtimeFiles[0].replace('linux_x86_64_cjnative', tuple)];
     for (const base of runtimeFiles) {
       const rel = base.replace('linux_x86_64_cjnative', tuple), row = producerManifest.files?.[rel];
       const component = producerManifest.components?.[row?.component];
-      if (!row || row.type !== 'file' || component?.status !== 'complete' || component?.rc !== 0
+      if (!row || row.type !== 'file' || row.component !== pair?.component || row.buildId !== pair?.buildId
+        || row.receiptSha256 !== pair?.receiptSha256 || component?.status !== 'complete' || component?.rc !== 0
         || component.source?.kind !== 'git' || component.execution?.source?.commit !== component.source.commit
         || component.execution?.source?.tree !== component.source.tree
-        || row.buildId !== component.buildId || row.receiptSha256 !== component.receiptSha256
+        || component.source.commit !== runtimeRef || row.buildId !== component.buildId || row.receiptSha256 !== component.receiptSha256
         || lock.files?.[rel]?.sha256 !== row.sha256 || digest(path.join(sdk, rel)) !== row.sha256) {
         throw new Error(`BOOTSTRAP_SDK_RUNTIME_MISMATCH: ${rel}`);
       }
