@@ -285,6 +285,28 @@ test('transported receipts retain original build origin and frozen digest withou
     assert.deepEqual(await fs.readFile(path.join(component.producer.receipt, 'output.json')), records[component.id]);
     await assert.rejects(fs.access(buildIdentities(f.plan).get(component.id).directory));
   }
+  // Top-level hashes and payload rows can agree while a non-runtime producer
+  // receipt differs from the one frozen before assembly. Reuse must compare
+  // the actual source closure, not just internally consistent installation.
+  const plans = path.join(f.root, 'transported-phases.json');
+  await atomicJson(plans, {schema: 'bootstrap-sdk-plans-v1', phases: {'stage1-initial': f.plan}});
+  const manifestPath = path.join(f.out, 'SDK.manifest.json'), lockPath = path.join(f.out, 'SDK.lock.json');
+  const manifestBytes = await fs.readFile(manifestPath), lockBytes = await fs.readFile(lockPath);
+  const changedManifest = JSON.parse(manifestBytes), changedLock = JSON.parse(lockBytes);
+  changedManifest.components.compiler.receiptSha256 = 'e'.repeat(64);
+  for (const [rel, file] of Object.entries(changedManifest.files)) if (file.component === 'compiler') {
+    file.receiptSha256 = 'e'.repeat(64); changedLock.files[rel].producer.receipt_sha256 = file.receiptSha256;
+  }
+  await atomicJson(manifestPath, changedManifest);
+  changedLock.manifest_sha256 = objectId(changedManifest);
+  changedLock.files['SDK.manifest.json'].sha256 = await fileDigest(manifestPath);
+  await atomicJson(lockPath, changedLock);
+  const reuseArgs = [process.execPath, path.join(here, 'bootstrap-sdk.mjs'), '--plans', plans,
+    '--phase', 'stage1-initial', '--out', f.out];
+  const wrongOrigin = await command(reuseArgs); observed(wrongOrigin, 'phase-frozen-receipt');
+  assert.notEqual(wrongOrigin.rc, 0); assert.match(wrongOrigin.stderr, /rule=RESOLVED_IDENTITY component=compiler/);
+  await fs.writeFile(manifestPath, manifestBytes); await fs.writeFile(lockPath, lockBytes);
+  const recovered = await command(reuseArgs); observed(recovered, 'phase-receipt-restored'); assert.equal(recovered.rc, 0, recovered.stderr);
   f.plan.components.find(value => value.id === 'runtime').producer.receiptSha256 = 'e'.repeat(64);
   f.out = path.join(f.root, 'wrong-receipt-sdk'); const changed = await invoke(f); observed(changed, 'receipt-digest');
   assert.notEqual(changed.rc, 0); assert.match(changed.stderr, /rule=COMPLETION component=runtime/);
