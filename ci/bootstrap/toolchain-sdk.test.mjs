@@ -66,6 +66,12 @@ async function fixture() {
   const pin = path.join(root, 'runtime.env'); await write(pin, `RUNTIME_REF=${sources.runtime.commit}\n`);
   const builder = path.join(here, 'fixtures/sdk-fixture-producer.mjs');
   const producerVersion = (await execute('git', ['-C', path.dirname(engine), 'rev-parse', 'HEAD'])).stdout.trim();
+  const producerRoot = (await execute('git', ['-C', path.dirname(engine), 'rev-parse', '--show-toplevel'])).stdout.trim();
+  const frozenTools = {};
+  for (const name of ['python3', 'node', 'git', 'bash', 'tar', 'cmake', 'clang', 'clang++', 'cc', 'ar']) {
+    const location = (await execute('sh', ['-c', 'command -v "$1"', 'fixture-tool', name])).stdout.trim();
+    frozenTools[name] = {path: await fs.realpath(location), sha256: await fileDigest(location)};
+  }
   const plan = {schema: PLAN_SCHEMA, lane: 'sym_cjcj_918_implement_r6061418558', role: 'target', stage: 'stage1', platform: 'linux_x86_64', buildRoot: path.join(root, 'builds'),
     verification: {runtimePin: {path: pin, sha256: await fileDigest(pin)}, colourRuntime: {path: colour, sha256: await fileDigest(colour)},
       hostRuntime: {path: path.join(seed, `runtime/lib/${tuple}/libcangjie-runtime.so`), sha256: await fileDigest(path.join(seed, `runtime/lib/${tuple}/libcangjie-runtime.so`))},
@@ -84,13 +90,13 @@ async function fixture() {
     ['std', ['std'], sources.std, 'std', ['official', 'compiler', 'runtime'], [{from: '', to: ''}]],
   ]) {
     const recipe = path.join(root, `${id}.recipe.json`);
-    const expectedOutputs = {'runtime': [`install/runtime/lib/${tuple}/libcangjie-runtime.so`], compiler: ['bin/cjcj-stage1'],
+    const expectedOutputs = {'runtime': [`install/runtime/lib/${tuple}/libcangjie-runtime.so`], compiler: ['cjcj-stage1'],
       'llvm-tools': ['bin/opt'], 'llvm-dylib': ['libLLVM-15.so'], std: ['std-producer.json']}[id];
     plan.components.push({id, roles, domain: 'target', source, config: {host: plan.platform, target: plan.platform,
-      options: {parameters: {mode}, optimization: 'Release', sdkDependency: 'official',
+      options: {parameters: {mode}, optimization: 'Release', sdkDependency: 'official', jobs: os.availableParallelism(), heap: '32GB',
         inputBindings: id === 'std' ? {compiler: {dependency: 'compiler', artifact: 'bin/cjcj-stage1'}} : {}, outputs: expectedOutputs},
-      tools: {builder: {path: builder, sha256: await fileDigest(builder)}}},
-      producer: {adapter: 'sharedbuild-runtime-default', version: producerVersion, engine, engineSha256: await fileDigest(engine), recipe}, dependencies, install});
+      tools: {...frozenTools, ...(id === 'compiler' ? {compilerIdentity: {path: path.join(here, 'compiler_identity.py'), sha256: await fileDigest(path.join(here, 'compiler_identity.py'))}} : {}), builder: {path: builder, sha256: await fileDigest(builder)}}},
+      producer: {adapter: 'sharedbuild-runtime-default', version: producerVersion, repository: producerRoot, engine, engineSha256: await fileDigest(engine), recipe}, dependencies, install});
   }
   const identities = buildIdentities(plan);
   const planFile = path.join(root, 'plan.json'); await atomicJson(planFile, plan);
@@ -115,7 +121,7 @@ test('actual SDK entry builds missing producers, accepts different repository SH
   assert.equal(manifest.components.runtime.source.commit, f.sources.runtime.commit);
   assert.equal(manifest.components['llvm-dylib'].source.commit, f.sources.llvm.commit);
   const runtime = await readJson(path.join(f.identities.get('runtime').directory, 'output.json'));
-  assert.equal(runtime.execution.rc, 0); assert.match(await fs.readFile(path.join(f.identities.get('runtime').directory, 'logs/sharedbuild.log'), 'utf8'), /FIXTURE_PRODUCER_EXECUTED mode=runtime/);
+  assert.equal(runtime.execution.rc, 0); assert.match(await fs.readFile(path.join(f.identities.get('runtime').directory, 'sharedbuild-output/build.log'), 'utf8'), /FIXTURE_PRODUCER_EXECUTED mode=runtime/);
   const before = await fs.stat(path.join(f.identities.get('runtime').directory, 'output.json'));
   f.out = path.join(f.root, 'sdk-second'); const repeat = await invoke(f); observed(repeat, 'cache'); assert.equal(repeat.rc, 0, repeat.stderr);
   assert.equal((await fs.stat(path.join(f.identities.get('runtime').directory, 'output.json'))).mtimeMs, before.mtimeMs);
@@ -166,7 +172,7 @@ test('same-key parallel SDK requests serialize the producer and publish separate
   assert.equal(first.rc, 0, first.stderr); assert.equal(second.rc, 0, second.stderr);
   assert.equal(await fileDigest(path.join(f.out, 'SDK.manifest.json')), await fileDigest(path.join(f.root, 'sdk-other/SDK.manifest.json')));
   for (const component of f.plan.components.slice(1)) {
-    const log = await fs.readFile(path.join(f.identities.get(component.id).directory, 'logs/sharedbuild.log'), 'utf8');
+    const log = await fs.readFile(path.join(f.identities.get(component.id).directory, 'sharedbuild-output/build.log'), 'utf8');
     assert.equal((log.match(/FIXTURE_PRODUCER_EXECUTED/g) || []).length, 1, component.id);
   }
 });

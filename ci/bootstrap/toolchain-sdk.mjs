@@ -34,8 +34,12 @@ async function copyArtifacts(staging, manifest) {
     const destination = path.join(staging, rel);
     await fs.mkdir(path.dirname(destination), {recursive: true});
     if (entry.type === 'symlink') {
+      const parent = path.posix.dirname(entry.source);
+      if (parent !== '.') await physicalPath(entry.artifacts, parent, entry.component);
+      else if (await fs.realpath(entry.artifacts) !== path.resolve(entry.artifacts)) reject('LINK_ESCAPE', entry.component, entry.artifacts);
       const source = path.join(entry.artifacts, entry.source);
       if (!(await fs.lstat(source)).isSymbolicLink() || await fs.readlink(source) !== entry.target) reject('PAYLOAD_TYPE', entry.component, entry.source);
+      if (!((await fs.realpath(source)).startsWith(`${entry.artifacts}${path.sep}`))) reject('LINK_ESCAPE', entry.component, entry.source);
       if (path.isAbsolute(entry.target) || !path.resolve(path.dirname(destination), entry.target).startsWith(`${staging}${path.sep}`)) reject('LINK_ESCAPE', entry.component, rel);
       await fs.symlink(entry.target, destination);
     } else {

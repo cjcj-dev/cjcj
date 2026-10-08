@@ -59,7 +59,9 @@ async function official(component, directory, identity) {
     distribution: {version: source.version, lockSha256: source.lockSha256, reason: source.reason}});
 }
 async function sharedbuild(component, directory, identity, plan, resumeFailed, outputs) {
-  const {engine, engineSha256, recipe} = component.producer;
+  const {engine, engineSha256} = component.producer;
+  const recipe = path.join(directory, 'sharedbuild-request.json');
+  await verifyProducer(component);
   if (await fileDigest(engine) !== engineSha256) reject('PRODUCER_IDENTITY', component.id, 'sharedbuild engine digest');
   const kind = component.producer.adapter.replace('sharedbuild-', '').replace('stage1', 'cjcj-stage1');
   const options = component.config.options;
@@ -79,12 +81,14 @@ async function sharedbuild(component, directory, identity, plan, resumeFailed, o
   const spec = {kind, sha: component.source.commit, repo: component.source.repo, sdk: sdkSource.root,
     builder: component.config.tools.builder.path, inputs, outputs: options.outputs,
     parameters: options.parameters, optimization: options.optimization, host: component.config.host,
-    target: component.config.target, dependency_build_ids: identity.dependencies};
+    target: component.config.target, dependency_build_ids: identity.dependencies,
+    tools: Object.fromEntries(Object.entries(component.config.tools).filter(([name]) => name !== 'builder')),
+    jobs: options.jobs, heap: options.heap};
   await atomicJson(recipe, spec);
   const log = path.join(directory, 'logs', 'sharedbuild.log');
   let result;
   try {
-    result = await runProducer(['python3', engine, '--remote', '--root', path.join(plan.buildRoot, 'shared-cache'),
+    result = await runProducer([component.config.tools.python3.path, engine, '--remote', '--root', path.join(plan.buildRoot, 'shared-cache'),
       '--lane', plan.lane, 'build', '--recipe', recipe, '--work', path.join(plan.buildRoot, 'shared-work'),
       '--copy-to', path.join(directory, 'sharedbuild-output'), ...(resumeFailed ? ['--resume'] : [])], {cwd: directory, env: process.env, log});
   } catch (error) {
@@ -106,12 +110,14 @@ async function sharedbuild(component, directory, identity, plan, resumeFailed, o
     || actualRecipe.sdk.lock_sha256 !== sdkSource.lockSha256 || actualRecipe.sdk.version !== sdkSource.version
     || canonical(actualRecipe.inputs) !== canonical(expectedInputHashes) || canonical(actualRecipe.outputs) !== canonical(options.outputs)
     || canonical(actualRecipe.parameters) !== canonical(options.parameters)
+    || canonical(actualRecipe.tools) !== canonical(spec.tools) || actualRecipe.builder_companion
+    || actualRecipe.jobs !== options.jobs || actualRecipe.heap !== options.heap
     || canonical(actualRecipe.dependency_build_ids) !== canonical(identity.dependencies)) reject('PRODUCER_RECIPE', component.id, 'actual producer recipe differs from frozen closure');
   if (completion.status !== 'complete' || completion.rc !== 0 || completion.source_sha !== component.source.commit
     || completion.source_tree !== component.source.tree) reject('SOURCE_CHECKOUT', component.id, 'sharedbuild actual source/completion mismatch');
   await fs.rename(path.join(cache, 'artifacts'), path.join(directory, 'artifacts'));
-  if (kind === 'cjcj-stage1') {
-    await execute('python3', [path.join(repository, 'ci/bootstrap/compiler_identity.py'), path.join(directory, 'artifacts'),
+  if (component.roles.includes('compiler')) {
+    await execute(component.config.tools.python3.path, [component.config.tools.compilerIdentity.path, path.join(directory, 'artifacts'),
       '--install', path.join(directory, 'artifacts/cjcj-stage1')]);
   }
   return sealOutput(directory, component, identity, {...result, status: 'complete', kind,

@@ -23,11 +23,8 @@ if (options.mode === 'runtime') {
   run(['ar', 'rcs', await mkdir(path.join(output, 'install/lib', tuple, 'libcangjie-runtime.a')), path.join(build, 'runtime.o')]);
   run(['cc', '-shared', '-fPIC', 'boundscheck.c', '-o', await mkdir(path.join(output, 'install/runtime/lib', tuple, 'libboundscheck.so'))]);
 } else if (options.mode === 'compiler') {
-  const binary = await mkdir(path.join(output, 'bin/cjcj-stage1'));
+  const binary = await mkdir(path.join(output, 'cjcj-stage1'));
   run(['cc', `-DCJLLVM_SHA="${env.SB_SHA}"`, 'tool.c', '-o', binary]);
-  for (const name of ['cjc', 'cjc-frontend']) await fs.symlink('cjcj-stage1', path.join(output, 'bin', name));
-  const digest = await sha(binary);
-  await write('compiler-lineage.json', JSON.stringify({producer_sha256: digest, installed_sha256: digest, source: env.SB_SOURCE, transformation: 'copy'}) + '\n');
 } else if (options.mode === 'std') {
   run(['cc', '-c', '-fPIC', '-DFIXTURE_COLOUR=1', 'std.c', '-o', path.join(build, 'std.o')]);
   run(['ar', 'rcs', await mkdir(path.join(output, 'lib', tuple, 'libcangjie-std-core.a')), path.join(build, 'std.o')]);

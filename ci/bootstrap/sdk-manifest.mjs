@@ -108,11 +108,18 @@ export function validatePlan(plan) {
     if (producer.receipt) absolute(producer.receipt, id);
     if (producer.adapter.startsWith('sharedbuild-')) {
       absolute(producer.engine, id); absolute(producer.recipe, id);
+      absolute(producer.repository, id);
       if (!HEX64.test(producer.engineSha256)) reject('ADAPTER', id, 'sharedbuild engine hash required');
       if (config.host !== 'linux_x86_64' || config.target !== 'linux_x86_64') reject('ADAPTER_PLATFORM', id, 'existing sharedbuild supports Linux x86_64');
-      fields(config.options, ['parameters', 'optimization', 'sdkDependency', 'inputBindings', 'outputs'], [], id);
+      fields(config.options, ['parameters', 'optimization', 'sdkDependency', 'inputBindings', 'outputs', 'jobs', 'heap'], [], id);
       if (!['O0', 'O1', 'Release'].includes(config.options.optimization)) reject('CONFIG', id, 'sharedbuild optimization');
       if (!config.tools.builder) reject('CONFIG', id, 'pinned builder required');
+      if (!config.tools.builder.path.endsWith('.mjs')) reject('CONFIG', id, 'freeze the actual ESM builder, not a companion launcher');
+      for (const tool of ['python3', 'node', 'git', 'bash', 'tar', 'cmake', 'clang', 'clang++', 'cc', 'ar']) {
+        if (!config.tools[tool]) reject('CONFIG', id, `sharedbuild tool ${tool} must be frozen`);
+      }
+      if (component.roles.includes('compiler') && !config.tools.compilerIdentity) reject('CONFIG', id, 'compiler installation implementation must be frozen');
+      if (!Number.isInteger(config.options.jobs) || config.options.jobs < 64 || !/^\d+GB$/.test(config.options.heap)) reject('CONFIG', id, 'explicit full-core jobs and heap required');
       if (!component.dependencies.includes(config.options.sdkDependency)) reject('DEPENDENCY', id, 'sharedbuild SDK input not in closure');
       fields(config.options.inputBindings, [], Object.keys(config.options.inputBindings), id);
       for (const [name, binding] of Object.entries(config.options.inputBindings)) {
