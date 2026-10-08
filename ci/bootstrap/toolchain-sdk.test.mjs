@@ -95,7 +95,7 @@ async function fixture() {
     const expectedOutputs = {'runtime': [`install/runtime/lib/${tuple}/libcangjie-runtime.so`], compiler: ['cjcj-stage1'],
       'llvm-tools': ['bin/opt'], 'llvm-dylib': ['libLLVM-15.so'], std: ['std-producer.json']}[id];
     plan.components.push({id, roles, domain: 'target', source, config: {host: plan.platform, target: plan.platform,
-      options: {parameters: {mode}, optimization: 'Release', sdkDependency: 'official', jobs: os.availableParallelism(), heap: '32GB',
+      options: {parameters: {mode, ...(id === 'llvm-tools' ? {compilerSha: sources.compiler.commit, flatbuffersSha: sources.std.commit} : {})}, optimization: 'Release', sdkDependency: 'official', jobs: os.availableParallelism(), heap: '32GB',
         inputBindings: id === 'std' ? {compiler: {dependency: 'compiler', artifact: 'bin/cjcj-stage1'}} : {}, outputs: expectedOutputs},
       tools: {...frozenTools, ...(id === 'compiler' ? {compilerIdentity: {path: path.join(here, 'compiler_identity.py'), sha256: await fileDigest(path.join(here, 'compiler_identity.py'))}} : {}), builder: {path: builder, sha256: await fileDigest(builder)}}},
       producer: {adapter: 'sharedbuild-runtime-default', version: producerVersion, repository: producerRoot, engine, engineSha256: await fileDigest(engine), recipe}, dependencies, install});

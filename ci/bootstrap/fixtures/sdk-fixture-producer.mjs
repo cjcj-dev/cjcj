@@ -5,6 +5,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import crypto from 'node:crypto';
+import {gzipSync} from 'node:zlib';
 const env = process.env, output = env.SB_OUTPUT, build = env.TMPDIR;
 const options = JSON.parse(await fs.readFile(env.SB_PARAMETERS, 'utf8'));
 const run = args => {
@@ -32,9 +33,23 @@ if (options.mode === 'runtime') {
   await write(`modules/${tuple}/std/core/core.Int64.ti`, 'fixture module\n');
   await write('std-producer.json', JSON.stringify({compiler_sha256: await sha(path.join(env.SB_INPUTS, 'compiler'))}) + '\n');
 } else if (options.mode === 'llvm-tools') {
-  for (const name of ['llc', 'opt', 'ld.lld']) run(['cc', `-DCJLLVM_SHA="${env.SB_SHA}"`, 'tool.c', '-o', await mkdir(path.join(output, 'bin', name))]);
-  await write('MANIFEST', `PLATFORM=linux_x86_64\nLLVM_SHA=${env.SB_SHA}\n`);
+  const values = {PLATFORM: 'linux_x86_64', LLVM_SHA: env.SB_SHA,
+    CANGJIE_COMPILER_SHA: options.compilerSha, FLATBUFFERS_SHA: options.flatbuffersSha};
+  for (const [name, prefix] of [['llc', 'LLC'], ['opt', 'OPT'], ['ld.lld', 'LLD']]) {
+    const binary = await mkdir(path.join(output, 'bin', name));
+    run(['cc', `-DCJLLVM_SHA="${env.SB_SHA}"`, 'tool.c', '-o', binary]);
+    await write(`fixed-llc/${name}.gz`, gzipSync(await fs.readFile(binary)));
+    values[`${prefix}_SOURCE`] = `tuple:${env.SB_SHA}`; values[`${prefix}_VERSION`] = 'fixture tool version 1';
+    values[`${prefix}_SHA256`] = await sha(binary);
+  }
+  const manifest = `PLATFORM=linux_x86_64\nLLVM_SHA=${env.SB_SHA}\n`;
+  await write('MANIFEST', manifest); await write('lib/STATIC_LLVM.txt', manifest);
   await write('fixed-llc/cjselfhost_llvmshim.o', 'fixture AST shim\n');
+  values.LLD_TOOL = 'ld.lld'; values.SHIM_SHA256 = await sha(path.join(output, 'fixed-llc/cjselfhost_llvmshim.o'));
+  await write('fixed-llc/llvm-tools.manifest', Object.entries(values).map(([name, value]) => `${name}=${value}\n`).join(''));
+  const files = ['MANIFEST', 'bin/llc', 'bin/opt', 'bin/ld.lld', 'lib/STATIC_LLVM.txt',
+    'fixed-llc/cjselfhost_llvmshim.o', 'fixed-llc/llc.gz', 'fixed-llc/opt.gz', 'fixed-llc/ld.lld.gz', 'fixed-llc/llvm-tools.manifest'];
+  await write('SHA256SUMS', (await Promise.all(files.map(async rel => `${await sha(path.join(output, rel))}  ./${rel}\n`))).join(''));
 } else if (options.mode === 'llvm-dylib') {
   run(['cc', '-shared', '-fPIC', `-DCJLLVM_SHA="${env.SB_SHA}"`, 'llvm.c', '-o', await mkdir(path.join(output, 'libLLVM-15.so'))]);
   await write('manifest.json', JSON.stringify({llvm_sha: env.SB_SHA, sha256: await sha(path.join(output, 'libLLVM-15.so'))}) + '\n');

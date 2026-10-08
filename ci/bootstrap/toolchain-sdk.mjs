@@ -9,6 +9,7 @@ import {PLAN_SCHEMA, RESOLVED_SCHEMA, validatePlan, buildIdentities, topological
   physicalPath, physicalBuildRoot, reject, withLock, PLATFORMS, execute, relative} from './sdk-manifest.mjs';
 import {produceComponent} from './sdk-producers.mjs';
 import {verifyBootstrapRuntimeSdk} from './runtime_sdk.mjs';
+import {parseLlvmToolsManifest} from '../llvm-tools-manifest.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 function verifyResolvedIdentities(plan, manifest) {
@@ -111,6 +112,35 @@ async function copyArtifacts(staging, manifest) {
   // source cannot be blessed by generating a new lock from the copied bytes.
   // sdk_verify hashes these installed bytes against the presealed lock once.
 }
+async function verifyInstalledLlvmTuple(sdk, plan, manifest) {
+  const component = plan.components.find(value => value.domain === 'target' && value.roles.includes('llvm-tools'));
+  if (!component || component.source.kind !== 'git') return;
+  const root = path.join(sdk, 'third_party/llvm'), lld = plan.platform.startsWith('darwin_') ? 'ld64.lld' : 'ld.lld';
+  const required = ['MANIFEST', 'bin/llc', 'bin/opt', `bin/${lld}`, 'lib/STATIC_LLVM.txt',
+    'fixed-llc/cjselfhost_llvmshim.o', 'fixed-llc/llc.gz', 'fixed-llc/opt.gz',
+    `fixed-llc/${lld}.gz`, 'fixed-llc/llvm-tools.manifest'];
+  const sums = new Map();
+  for (const line of (await fs.readFile(path.join(root, 'SHA256SUMS'), 'utf8')).trimEnd().split('\n')) {
+    const match = line.match(/^([a-f0-9]{64})  (?:\.\/)?(.+)$/);
+    if (!match || sums.has(match[2])) reject('LLVM_TUPLE_MANIFEST', component.id, `invalid or duplicate checksum row: ${line}`);
+    relative(match[2], component.id); sums.set(match[2], match[1]);
+  }
+  if (sums.size !== required.length) reject('LLVM_TUPLE_MANIFEST', component.id, 'requires the existing complete ten-payload tuple');
+  for (const rel of required) {
+    const file = manifest.files[`third_party/llvm/${rel}`];
+    if (!file || file.component !== component.id || file.sha256 !== sums.get(rel)) reject('LLVM_TUPLE_MANIFEST', component.id, `missing/mismatched tuple member: ${rel}`);
+  }
+  const {values} = parseLlvmToolsManifest(await fs.readFile(path.join(root, 'fixed-llc/llvm-tools.manifest'), 'utf8'));
+  if (values.get('PLATFORM') !== plan.platform || values.get('LLVM_SHA') !== component.source.commit
+    || values.get('LLD_TOOL') !== lld
+    || (component.config.options.compilerSource && values.get('CANGJIE_COMPILER_SHA') !== component.config.options.compilerSource.commit)
+    || (component.config.options.flatbuffersSource && values.get('FLATBUFFERS_SHA') !== component.config.options.flatbuffersSource.commit)) {
+    reject('LLVM_TUPLE_MANIFEST', component.id, 'tuple producer/source/configuration differs');
+  }
+  for (const [rel, field] of [['bin/llc', 'LLC_SHA256'], ['bin/opt', 'OPT_SHA256'], [`bin/${lld}`, 'LLD_SHA256'], ['fixed-llc/cjselfhost_llvmshim.o', 'SHIM_SHA256']]) {
+    if (values.get(field) !== sums.get(rel)) reject('LLVM_TUPLE_MANIFEST', component.id, `tuple identity differs: ${rel}`);
+  }
+}
 export async function verifyManifestSdk(sdk, plan, manifest) {
   validatePlan(plan);
   const planSha256 = objectId(plan), manifestSha256 = objectId(manifest);
@@ -130,6 +160,7 @@ export async function verifyManifestSdk(sdk, plan, manifest) {
   // verifier's --write-lock is no longer the authority for payload identity.
   await execute('python3', [path.join(here, 'sdk_verify.py'), '--sdk', sdk, '--role', plan.role,
     '--runtime-pin', plan.verification.runtimePin.path, '--target-tuple', tuple]);
+  await verifyInstalledLlvmTuple(sdk, plan, manifest);
   if (plan.role === 'target') await verifyBootstrapRuntimeSdk(sdk, tuple, {}, undefined,
     await fileDigest(path.join(sdk, 'SDK.lock.json')), manifest);
   const dylib = plan.components.find(component => component.domain === 'target' && component.roles.includes('llvm-dylib'));
