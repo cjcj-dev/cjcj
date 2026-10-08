@@ -576,3 +576,75 @@ test('actual same-run restore feeds verified root receipt to the real SDK consum
   assert.equal(restored.COLOUR_RT_MANIFEST_SHA256, a.inputs.COLOUR_RT_MANIFEST_SHA256);
   console.log('HANDOFF_SDK_RECEIPT_TARGET_ASSERT_EXECUTED parent-fields=absent');
 }));
+
+// Genuine retained inputs have local producer receipts, rather than the GHA
+// metadata used by the prepare transport fixture above. Exercise that actual
+// consumer branch without manufacturing an artifact run or rebuilding inputs.
+for (const role of ['host', 'target']) {
+  test(`retained ${role} producer inputs reach SDK assembly and independent runtime verification`, async t => {
+    const input = process.env.SDK_CONSUMER_INPUT_PLAN;
+    assert.ok(input, 'a retained real input plan is required');
+    const root = fs.mkdtempSync(path.join(process.env.SDK_CONSUMER_TEST_ROOT || os.tmpdir(), `retained-${role}-`));
+    if (!process.env.SDK_CONSUMER_TEST_ROOT) t.after(() => fs.rmSync(root, {recursive:true,force:true}));
+    const retained = JSON.parse(fs.readFileSync(input,'utf8'));
+    let planFile, hostReceipt;
+    if (role === 'host') {
+      const host = await manifestSdkFixture({root,role:'host'});
+      planFile = host.planFile; hostReceipt = host.receipt;
+    } else {
+      assert.equal(retained.role,'target');
+      assert.ok(retained.components.every(c => c.producer.receipt), 'this case reuses completed real producers only');
+      retained.buildRoot = path.join(root,'builds');
+      planFile = path.join(root,'target.plan.json');
+      fs.writeFileSync(planFile,JSON.stringify(retained));
+    }
+    const sdk = path.join(root,'sdk');
+    const assembled = execute(['bash',path.join(repo,'ci/bootstrap/sdk_build.sh'),'--plan',planFile,'--to',sdk]);
+    fs.writeFileSync(path.join(root,'assembly.log'),assembled.output);
+    fs.writeFileSync(path.join(root,'assembly.rc'),String(assembled.status)+'\n');
+    console.log(`RETAINED_ASSEMBLY_TARGET_ASSERT role=${role} rc=${assembled.status} sdk=${sdk}`);
+    assert.equal(assembled.status,0,assembled.output);
+    const lockFile = path.join(sdk,'SDK.lock.json');
+    const manifest = JSON.parse(fs.readFileSync(path.join(sdk,'SDK.manifest.json')));
+    const runtime = path.join(sdk,'runtime/lib',tuple,'libcangjie-runtime.so');
+    if (role === 'host') {
+      const expected = hostReceipt.files[`runtime/lib/${tuple}/libcangjie-runtime.so`].sha256;
+      console.log(`RETAINED_HOST_RUNTIME_ASSERT actual=${hash(runtime)} expected=${expected}`);
+      assert.equal(hash(runtime),expected,'host bytes come from the actual official distribution receipt');
+      assert.notEqual(hash(runtime),retained.verification.colourRuntime.sha256,'host remains independent of target colour runtime');
+      return;
+    }
+    const selected = execute([process.execPath,path.join(repo,'ci/load_runtime_pin.mjs')]);
+    assert.equal(selected.status,0,selected.output);
+    const lock = JSON.parse(fs.readFileSync(lockFile));
+    console.log(`RETAINED_SELECTION_ASSERT selected=${pin.RUNTIME_REF} actual=${lock.components.runtime.commit}`);
+    assert.equal(lock.components.runtime.commit,pin.RUNTIME_REF);
+    const {verifyBootstrapRuntimeSdk} = await import('../../ci/bootstrap/runtime_sdk.mjs');
+    const assemblyLockSha = hash(lockFile);
+    const observed = async () => {
+      try { await verifyBootstrapRuntimeSdk(sdk,tuple,{},undefined,assemblyLockSha,manifest); return {accepted:true}; }
+      catch(error) { return {accepted:false,error:error.message}; }
+    };
+    const control = await observed();
+    console.log(`RETAINED_RUNTIME_CONTROL_ASSERT ${JSON.stringify(control)}`);
+    assert.equal(control.accepted,true,control.error);
+    for (const [label,relative,marker] of [
+      ['boundscheck',`runtime/lib/${tuple}/libboundscheck.so`,'BOOTSTRAP_SDK_RUNTIME_MISMATCH:'],
+      ['runtime',`runtime/lib/${tuple}/libcangjie-runtime.so`,'BOOTSTRAP_SDK_RUNTIME_MISMATCH:'],
+      ['archive',`lib/${tuple}/libcangjie-runtime.a`,'BOOTSTRAP_SDK_RUNTIME_MISMATCH:'],
+      ['lock','SDK.lock.json','BOOTSTRAP_SDK_RUNTIME_LOCK_MISMATCH: assembly lock'],
+    ]) {
+      const file=path.join(sdk,relative),original=fs.readFileSync(file);
+      try {
+        fs.appendFileSync(file,'changed consumer input');
+        const result=await observed();
+        console.log(`RETAINED_RUNTIME_REJECTION_ASSERT label=${label} ${JSON.stringify(result)}`);
+        assert.equal(result.accepted,false,label);
+        assert.ok(result.error.startsWith(marker),result.error);
+      } finally { fs.writeFileSync(file,original); }
+    }
+    const restored = await observed();
+    console.log(`RETAINED_RUNTIME_RESTORED_ASSERT ${JSON.stringify(restored)}`);
+    assert.equal(restored.accepted,true,restored.error);
+  });
+}
