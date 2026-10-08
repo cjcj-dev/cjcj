@@ -8,16 +8,19 @@ import {PLAN_SCHEMA, validatePlan, buildIdentities, readJson, execute, fileDiges
   canonical, reject, absolute} from './sdk-manifest.mjs';
 
 async function gitInput(input, label) {
+  if (Object.keys(input).some(name => !['kind', 'repo', 'ref', 'commit', 'tree'].includes(name))) reject('FREEZE_INPUT', label, 'unknown Git input field');
   absolute(input.repo, label);
   if (!input.ref && (!input.commit || !input.tree)) reject('FREEZE_INPUT', label, 'explicit Git ref or complete commit/tree required');
   const ref = input.ref || input.commit;
   if (typeof ref !== 'string' || !ref || ref.startsWith('-') || /[\0\r\n]/.test(ref)) reject('FREEZE_INPUT', label, 'invalid Git selector');
   const read = async suffix => (await execute('git', ['-C', input.repo, 'rev-parse', '--verify', `${ref}${suffix}`])).stdout.trim();
-  const commit = await read('^{commit}'), tree = await read('^{tree}');
+  const commit = await read('^{commit}');
+  const tree = (await execute('git', ['-C', input.repo, 'rev-parse', '--verify', `${commit}^{tree}`])).stdout.trim();
   if ((input.commit && input.commit !== commit) || (input.tree && input.tree !== tree)) reject('FREEZE_INPUT', label, 'provided source identity differs from repository');
   return {repo: await fs.realpath(input.repo), commit, tree};
 }
 async function frozenFile(input, label) {
+  if (Object.keys(input).some(name => !['path', 'sha256'].includes(name))) reject('FREEZE_INPUT', label, 'unknown file input field');
   absolute(input.path, label);
   const file = await fs.realpath(input.path), digest = await fileDigest(file);
   if (input.sha256 && input.sha256 !== digest) reject('FREEZE_INPUT', label, 'provided digest differs from actual input');
@@ -39,6 +42,7 @@ export async function freezeSdkPlan(intent) {
     if (producer.repository) {
       const identity = await gitInput({repo: producer.repository, ref: producer.ref || producer.version}, `${component.id}/producer`);
       if (producer.version && producer.version !== identity.commit) reject('FREEZE_INPUT', component.id, 'producer version differs');
+      if ((await execute('git', ['-C', identity.repo, 'rev-parse', 'HEAD'])).stdout.trim() !== identity.commit) reject('FREEZE_INPUT', component.id, 'producer checkout differs from selected version');
       if ((await execute('git', ['-C', identity.repo, 'status', '--porcelain', '--untracked-files=all'])).stdout.trim()) reject('FREEZE_INPUT', component.id, 'producer repository is dirty');
       producer.repository = identity.repo; producer.version = identity.commit;
       delete producer.ref;
