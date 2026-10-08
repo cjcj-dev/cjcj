@@ -158,7 +158,7 @@ export async function verifyManifestSdk(sdk, plan, manifest) {
   const tuple = PLATFORMS[plan.platform][2];
   // Keep existing colour/ABI/lineage and native loadability checks. The legacy
   // verifier's --write-lock is no longer the authority for payload identity.
-  await execute('python3', [path.join(here, 'sdk_verify.py'), '--sdk', sdk, '--role', plan.role,
+  await execute('python3', ['-B', path.join(here, 'sdk_verify.py'), '--sdk', sdk, '--role', plan.role,
     '--runtime-pin', plan.verification.runtimePin.path, '--target-tuple', tuple]);
   await verifyInstalledLlvmTuple(sdk, plan, manifest);
   if (plan.role === 'target') await verifyBootstrapRuntimeSdk(sdk, tuple, {}, undefined,

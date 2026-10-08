@@ -17,8 +17,8 @@ export async function main(args = process.argv.slice(2)) {
     if (hostLock.role !== 'host' || targetLock.role !== 'target') reject('DOMAIN', 'env', 'requires host and target SDK locks');
     const tuple = (await readJson(path.join(target, 'SDK.plan.json'))).platform + '_cjnative';
     const hostRuntime = path.join(host, 'runtime/lib', tuple);
-    await execute('python3', [fileURLToPath(new URL('./sdk_verify.py', import.meta.url)), '--sdk', host, '--role', 'host']);
-    await execute('python3', [fileURLToPath(new URL('./sdk_verify.py', import.meta.url)), '--sdk', target, '--role', 'target']);
+    await execute('python3', ['-B', fileURLToPath(new URL('./sdk_verify.py', import.meta.url)), '--sdk', host, '--role', 'host']);
+    await execute('python3', ['-B', fileURLToPath(new URL('./sdk_verify.py', import.meta.url)), '--sdk', target, '--role', 'target']);
     console.log(`export CANGJIE_HOME=${shellQuote(target)}`);
     console.log(`export PATH=${shellQuote(`${target}/bin:${target}/tools/bin:${target}/third_party/llvm/bin`)}:$PATH`);
     console.log(`export LD_LIBRARY_PATH=${shellQuote(hostRuntime)}:${shellQuote(`${target}/third_party/llvm/lib:${target}/tools/lib`)}`);
