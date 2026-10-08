@@ -160,7 +160,7 @@ this candidate has completed those migrations.
 
 | Platform/caller | Current implementation | Qualification |
 | --- | --- | --- |
-| Linux x86_64 standalone manifest entry | Sharedbuild seed/runtime/compiler, native LLVM tools/dylib/auxiliary, AST/std, install and existing checks | Genuine official host seed assembled and compiled/ran a Cangjie program. All eight target components sealed successfully, but target SDK installation failed validation; target compile/run and genuine mixing/restoration remain NOT_RUN |
+| Linux x86_64 standalone manifest entry | Sharedbuild seed/runtime/compiler, native LLVM tools/dylib/auxiliary, AST/std, install and existing checks | Genuine host seed and eight-component target SDK assembled and compiled/ran a Cangjie program. Target ordinary-module substitution and LLVM mixing were precisely refused; restoring original producer bytes passed. Native installation ownership was tested against authenticated producer receipts |
 | Linux aarch64 | Native LLVM/std adapters; sharedbuild compiler/runtime remain x86_64 | Adapter coverage incomplete |
 | Darwin x86_64 / aarch64 | Native LLVM recipe shape exists | Native colour/load verifier and caller migration incomplete; assembly explicitly refuses |
 | Windows x86_64 | Declared platform and unknown/unimplemented adapter refusal | Native tuple/static archive adapter and verifier incomplete; assembly explicitly refuses |
@@ -183,16 +183,25 @@ migration and native runner matrix remain required. Shared SDKs,
 in-flight #863, release/latest approvals and paired ABI holds are unchanged.
 
 The first complete target installation exposed an `installLock()` classification
-defect: source-built AST/runtime headers, schema and `cjfilt` fall through to
+defect: source-built AST/runtime headers, schema and `cjfilt` fell through to
 `official-retain`, whose justification is only present on distribution inputs.
-The existing verifier refused them with `UNDECLARED`; no target SDK was
-published. The successful component receipts and the failed staging tree are
-retained. Fixing classification must preserve the original artifact sources and
-the verifier's official-retention rule, rather than inventing retention reasons
-or rewriting the lock to bless an installation.
+The existing verifier refused that installation with `UNDECLARED`. Classification
+now uses the authenticated producer's roles for native files outside the legacy
+prefixes. `cjfilt` and the top-level runtime headers belong to the runtime
+producer, and AST headers/schema belong to the AST producer. Only distribution
+inputs can fall back to official retention; unknown source roles are refused.
+The successful original receipts were reused without changing their source
+commits or producer identities.
 
-`sdk-real-boundary.test.mjs` is prepared for a retained genuine target SDK. It
+`sdk-real-boundary.test.mjs` consumes a retained genuine target SDK. It
 substitutes an ordinary native module and an official LLVM dylib separately,
 checks precise refusal and absence of publication, restores original producer
-bytes, and invokes the same assembler again. These cases have not run because
-the target installation above failed; fixture results do not substitute for them.
+bytes, and invokes the same assembler again. Both cases passed on the genuine
+Linux x86_64 SDK. A native-owner case independently reads the frozen runtime
+plan and authenticated receipt before assembling a new SDK and observing its
+lock. Changing the installer to label native runtime files as AST files fails
+that case at the `bin/cjfilt` owner assertion; restoration passes. Disabling the
+ordinary digest check similarly fails the genuine substituted-module assertion.
+These results qualify those SDK assembly boundaries; the incomplete stage
+adapters, legacy assembly callers and other platform rows above still require
+implementation and their own execution evidence.
