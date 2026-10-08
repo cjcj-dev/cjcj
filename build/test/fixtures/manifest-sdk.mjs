@@ -84,7 +84,7 @@ export async function manifestSdkFixture({root, compiler, prefix, inputSdk, shim
   if (shimSource) await fs.cp(shimSource, path.join(source, 'shim'), {recursive: true});
   const runtimeText = '#ifndef SOURCE_SHA\n#define SOURCE_SHA "official"\n#endif\nconst char provenance[]="CJRT-COMMIT:" SOURCE_SHA;\n#ifdef COLOUR\nint g_cjLoadBadMask;\n#endif\nint runtime_fixture;\n';
   await write(path.join(source, 'runtime.c'), runtimeText);
-  await write(path.join(source, 'std.c'), role === 'target' ? 'extern int g_cjLoadBadMask; int *std_reference=&g_cjLoadBadMask;\n' : 'int host_std;\n');
+  await write(path.join(source, 'std.c'), 'extern int g_cjLoadBadMask; int *std_reference=&g_cjLoadBadMask;\n');
   for (const [rel, name] of [['tools/bin/cjpm-stage1','cjpm']]) {
     let script; try { script = await fs.readFile(path.join(inputSdk, rel), 'utf8'); } catch (e) { if(e.code !== 'ENOENT') throw e; script = 'printf "fixture tool version 1\\n"'; }
     await write(path.join(source, `${name}.sh`), script);
@@ -119,7 +119,7 @@ export async function manifestSdkFixture({root, compiler, prefix, inputSdk, shim
     plan.components.push(runtimeComponent);
   }
   const runtimePaths=[`runtime/lib/${tuple}/libcangjie-runtime.so`,`runtime/lib/${tuple}/libboundscheck.so`,`lib/${tuple}/libcangjie-runtime.a`];
-  const component = {id:'native',roles:ROLES.filter(r=>!['official-host','llvm-tools','llvm-dylib','ast'].includes(r)&&(!runtimeInput||!['runtime','boundscheck'].includes(r))),domain:role==='host'?'host':'target',source:identity,
+  const component = {id:'native',roles:ROLES.filter(r=>!['official-host','llvm-tools','llvm-dylib','ast'].includes(r)&&(!runtimeInput||!['runtime','boundscheck'].includes(r))),domain:'target',source:identity,
     config:{host:plan.platform,target:plan.platform,tools,options:{parameters:{fixture:'native-consumer'},optimization:'Release',
       sdkDependency:'official',jobs:64,heap:'32GB',inputBindings:{},outputs:['bin/cjcj-stage1']}},
     producer:{adapter:'sharedbuild-runtime-default',version:identity.commit,repository:source,
@@ -151,12 +151,8 @@ export async function manifestSdkFixture({root, compiler, prefix, inputSdk, shim
   await fs.mkdir(path.join(artifacts,'lib',tuple),{recursive:true});
   run(['ar','rcs',path.join(artifacts,'lib',tuple,'libcangjie-runtime.a'),runtimeObject]);
   let colourRuntime=runtimeInput?path.join(runtimeInput.root,runtimePaths[0]):runtime;
-  if(role==='host') {
-    colourRuntime=path.join(generation,'colour-reference.so');
-    run(['cc','-shared','-fPIC','-DCOLOUR',`-DSOURCE_SHA="${identity.commit}"`,path.join(source,'runtime.c'),'-o',colourRuntime]);
-  }
   plan.verification.colourRuntime = {path:colourRuntime,sha256:await fileDigest(colourRuntime)};
-  await fs.copyFile(host,path.join(path.dirname(runtime),'libboundscheck.so'));
+  run(['cc','-shared','-fPIC','-x','c','-','-o',path.join(path.dirname(runtime),'libboundscheck.so')],{input:'int boundscheck_fixture;\n'});
   const object=path.join(generation,'std.o');run(['cc','-c','-fPIC',path.join(source,'std.c'),'-o',object]);
   const core=path.join(artifacts,'lib',tuple,'libcangjie-std-core.a');await fs.mkdir(path.dirname(core),{recursive:true});await fs.rm(core,{force:true});
   run(['ar','rcs',core,object]); await write(path.join(artifacts,'std-producer.json'),JSON.stringify({compiler_sha256:await fileDigest(path.join(generation,'compiler'))}));
