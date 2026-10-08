@@ -9,6 +9,8 @@ import {spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {execute, fileDigest, readJson, atomicJson, canonical, sourceIdentity, registeredSourceIdentity, reject, PLATFORMS, inventory} from './sdk-manifest.mjs';
 import {parseLlvmToolsManifest} from '../llvm-tools-manifest.mjs';
+import {buildStageCompiler} from './sdk-stage-producer.mjs';
+import {writeStdProvenance} from '../../build/lib/provenance.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 let activeRequest;
@@ -142,12 +144,17 @@ async function llvm(request) {
 async function std(request) {
   const {component, source, directory, dependencies} = request, options = component.config.options;
   optionsOnly(options, ['sdkDependency', 'compilerDependency', 'runtimeDependency', 'llvmToolsDependency', 'llvmDylibDependency',
-    'astDependency', 'heap', 'targetLibRelative', 'launcher', 'llvmAuxiliaryDependency'], component.id);
+    'astDependency', 'heap', 'targetLibRelative', 'launcher', 'llvmAuxiliaryDependency', 'compilerRuntime', 'previousStdDependency', 'provenance'], component.id);
   const seed = dependencies[options.sdkDependency], compiler = dependencies[options.compilerDependency], runtime = dependencies[options.runtimeDependency];
   if (!seed?.component.roles.includes('official-host') || !compiler?.component.roles.includes('compiler')
     || !runtime?.component.roles.includes('runtime')) reject('PRODUCER_DEPENDENCY', component.id, 'std needs explicit host seed/compiler/target runtime');
   const sdk = path.join(directory, 'build', 'sdk'); await fs.mkdir(sdk, {recursive: true});
   await fs.cp(seed.artifacts, sdk, {recursive: true, dereference: false});
+  if (options.previousStdDependency) {
+    const previous = dependencies[options.previousStdDependency];
+    if (!previous?.component.roles.includes('std')) reject('PRODUCER_DEPENDENCY', component.id, 'full previous std receipt required');
+    await fs.cp(previous.artifacts, sdk, {recursive: true, dereference: false, verbatimSymlinks: true, force: true});
+  }
   // This is a target backend installation, not an overlay on host LLVM.
   // Leaving the official llvm-ar/other dynamic tools beside the target
   // libLLVM lets CMake select an incompatible archiver by PATH. Native
@@ -166,7 +173,7 @@ async function std(request) {
   }
   const env = {...process.env, CANGJIE_HOME: sdk, PATH: `${sdk}/bin:${sdk}/tools/bin:${sdk}/third_party/llvm/bin:${frozenTools}:/usr/bin:/bin`,
     CC: tool('clang'), CXX: tool('clang++'), AR: tool('ar'),
-    LD_LIBRARY_PATH: `${hostRuntime}:${sdk}/third_party/llvm/lib:${sdk}/tools/lib`, cjHeapSize: options.heap,
+    LD_LIBRARY_PATH: `${options.compilerRuntime === 'target' ? path.join(runtime.artifacts, options.targetLibRelative, 'runtime/lib', tuple) : hostRuntime}:${sdk}/third_party/llvm/lib:${sdk}/tools/lib`, cjHeapSize: options.heap,
     TMPDIR: path.join(directory, 'build', 'tmp'), CANGJIE_BUILD_JOBS: String(os.availableParallelism()), CMAKE_BUILD_PARALLEL_LEVEL: String(os.availableParallelism())};
   if (options.launcher) {
     env.CMAKE_C_COMPILER_LAUNCHER = options.launcher;
@@ -213,6 +220,7 @@ async function std(request) {
   await atomicJson(path.join(artifacts, 'std-producer.json'), {compiler_sha256: await fileDigest(compilerFile),
     compiler_build_id: compiler.buildId, runtime_build_id: runtime.buildId, source_commit: component.source.commit,
     source_tree: component.source.tree, stage: 'completed-std', producer: component.producer});
+  if (options.provenance) await writeStdProvenance({sourceDir: stdlib, installPrefix: artifacts, buildSdk: sdk, compiler: compilerFile});
 }
 async function astSupport(request) {
   const {component, source, directory, dependencies} = request, options = component.config.options;
@@ -285,10 +293,14 @@ export async function nativeProducer(request) {
   }
   await sourceIdentity(request.source, component.source, component.id, tool('git'));
   if (component.producer.adapter === 'bootstrap-std') await std(request);
+  else if (component.producer.adapter === 'bootstrap-compiler') await buildStageCompiler(request, run);
   else if (component.producer.adapter === 'ast-support') await astSupport(request);
   else if (['llvm-tools', 'llvm-dylib'].includes(component.producer.adapter)) await llvm(request);
   else reject('ADAPTER', component.id, component.producer.adapter);
-  await sourceIdentity(request.source, component.source, component.id, tool('git'));
+  if (component.producer.adapter === 'bootstrap-compiler') {
+    await registeredSourceIdentity(request.source, component.source, component.id,
+      (await readJson(path.join(request.directory, 'native-execution.json'))).sourceChanges, tool('git'));
+  } else await sourceIdentity(request.source, component.source, component.id, tool('git'));
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try { await nativeProducer(await readJson(process.argv[2])); }

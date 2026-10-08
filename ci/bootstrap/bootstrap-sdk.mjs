@@ -6,8 +6,7 @@ import {fileURLToPath} from 'node:url';
 import {assembleSdk, verifyManifestSdk} from './toolchain-sdk.mjs';
 import {readJson, objectId, fileDigest, reject, validatePlan} from './sdk-manifest.mjs';
 import {validateBootstrapPlans, BOOTSTRAP_PHASES} from './freeze-bootstrap-plans.mjs';
-export async function assembleBootstrapPhase({plans, phase, out, dryRun = false}) {
-  if (!['stage0', 'stage0-run', 'std-bootstrap', 'stage1-initial', 'stage1-std', 'stage3'].includes(phase)) reject('BOOTSTRAP_PHASE', phase, 'unknown stage');
+export async function readBootstrapPlans(plans) {
   let input;
   if ((await fs.stat(plans)).isDirectory()) {
     const phases = {};
@@ -17,7 +16,11 @@ export async function assembleBootstrapPhase({plans, phase, out, dryRun = false}
     }
     input = {schema: 'bootstrap-sdk-plans-v1', phases};
   } else input = await readJson(plans);
-  const bundle = validateBootstrapPlans(input), plan = bundle.phases[phase];
+  return validateBootstrapPlans(input);
+}
+export async function assembleBootstrapPhase({plans, phase, out, dryRun = false}) {
+  if (!BOOTSTRAP_PHASES.includes(phase)) reject('BOOTSTRAP_PHASE', phase, 'unknown stage');
+  const bundle = await readBootstrapPlans(plans), plan = bundle.phases[phase];
   validatePlan(plan);
   if (dryRun) return assembleSdk(plan, out, {dryRun});
   try {

@@ -5,7 +5,7 @@ import {spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {randomUUID} from 'node:crypto';
 import {canonical, execute, fileDigest, readJson, reject, sourceIdentity,
-  readOutput, sealOutput, physicalPath, PLATFORMS, atomicJson} from './sdk-manifest.mjs';
+  readOutput, sealOutput, physicalPath, PLATFORMS, atomicJson, registeredSourceIdentity} from './sdk-manifest.mjs';
 
 const repository = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
 export async function runProducer(argv, {cwd, env, log}) {
@@ -143,12 +143,12 @@ async function sharedbuild(component, directory, identity, plan, resumeFailed, o
     producerBuildId: completion.build_id, actualWork: completion.work,
     source: {commit: completion.source_sha, tree: completion.source_tree, changes: completion.source_changes}}, files);
 }
-async function native(component, directory, identity, outputs) {
+async function native(component, directory, identity, outputs, plan) {
   await verifyProducer(component);
   const source = await checkout(component, directory);
   const before = await sourceIdentity(source, component.source, component.id, component.config.tools.git.path);
   const request = path.join(directory, 'request.json');
-  await atomicJson(request, {component, identity, source, directory,
+  await atomicJson(request, {component, identity, source, directory, plan,
     dependencies: Object.fromEntries(component.dependencies.map(id => [id, outputs.get(id)]))});
   const executable = path.join(component.producer.repository, 'ci/bootstrap/sdk-native-producer.mjs');
   const log = path.join(directory, 'logs', `${component.producer.adapter}-${randomUUID()}.log`);
@@ -174,7 +174,13 @@ async function native(component, directory, identity, outputs) {
       {rc: actual.rc, signal: actual.signal, wrapperRc: error.rc});
     throw error;
   }
-  const after = await sourceIdentity(source, component.source, component.id, component.config.tools.git.path);
+  let changes;
+  if (component.producer.adapter === 'bootstrap-compiler') {
+    changes = (await readJson(path.join(directory, 'native-execution.json'))).sourceChanges;
+    if (Object.keys(changes || {}).some(rel => rel !== 'cjpm.toml')) reject('SOURCE_TRANSFORM', component.id, 'stage compiler only permits its pinned trimpath transform');
+  }
+  const after = changes ? await registeredSourceIdentity(source, component.source, component.id, changes, component.config.tools.git.path)
+    : await sourceIdentity(source, component.source, component.id, component.config.tools.git.path);
   return sealOutput(directory, component, identity, {...result, status: 'complete', kind: component.producer.adapter, before, source: after});
 }
 export async function produceComponent(plan, component, identity, outputs, {resumeFailed = false} = {}) {
@@ -212,7 +218,7 @@ export async function produceComponent(plan, component, identity, outputs, {resu
     }
     const output = component.producer.adapter === 'official' ? await official(component, directory, identity)
       : component.producer.adapter.startsWith('sharedbuild-') ? await sharedbuild(component, directory, identity, plan, resumeFailed, outputs)
-        : await native(component, directory, identity, outputs);
+        : await native(component, directory, identity, outputs, plan);
     await atomicJson(state, {status: 'complete', buildId: identity.buildId, rc: 0}); return output;
   } catch (error) {
     await atomicJson(state, {status: 'failed', buildId: identity.buildId, rc: error.rc ?? null,

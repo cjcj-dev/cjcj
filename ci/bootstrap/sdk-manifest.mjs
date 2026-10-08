@@ -23,7 +23,7 @@ export const PLATFORMS = Object.freeze({
 });
 export const ADAPTERS = Object.freeze(['official', 'sharedbuild-stage1',
   'sharedbuild-runtime-default', 'sharedbuild-runtime-testable', 'bootstrap-std',
-  'llvm-tools', 'llvm-dylib', 'ast-support']);
+  'llvm-tools', 'llvm-dylib', 'ast-support', 'bootstrap-compiler']);
 const HEX40 = /^[0-9a-f]{40}$/;
 const HEX64 = /^[0-9a-f]{64}$/;
 const NAME = /^[a-z][a-z0-9-]*$/;
@@ -78,13 +78,14 @@ export function validatePlan(plan) {
   const ids = new Set();
   const roles = new Set();
   for (const component of plan.components) {
-    fields(component, ['id', 'roles', 'domain', 'source', 'config', 'producer', 'dependencies', 'install'], [], 'component');
+    fields(component, ['id', 'roles', 'domain', 'source', 'config', 'producer', 'dependencies', 'install'], ['inputOnly'], 'component');
     const {id, source, config, producer} = component;
     if (!NAME.test(id) || ids.has(id)) reject('COMPONENT', id, 'duplicate/invalid id');
     ids.add(id);
     if (!['host', 'target'].includes(component.domain) || !Array.isArray(component.roles)
       || !component.roles.length || component.roles.some(role => !ROLES.includes(role))) reject('COMPONENT', id, 'domain/roles');
-    component.roles.forEach(role => roles.add(role));
+    if (component.inputOnly !== undefined && component.inputOnly !== true) reject('COMPONENT', id, 'inputOnly must be true when present');
+    if (!component.inputOnly) component.roles.forEach(role => roles.add(role));
     fields(source, ['kind'], ['repo', 'commit', 'tree', 'version', 'root', 'lock', 'lockSha256', 'reason'], id);
     if (source.kind === 'git') {
       if (!HEX40.test(source.commit) || !HEX40.test(source.tree) || typeof source.repo !== 'string' || !source.repo) reject('SOURCE', id, 'full Git commit/tree/repository required');
@@ -139,7 +140,10 @@ export function validatePlan(plan) {
     if (producer.adapter === 'official' && Object.keys(config.options).length) reject('CONFIG', id, 'official copy has no build options');
     if (producer.adapter === 'bootstrap-std') {
       fields(config.options, ['sdkDependency', 'compilerDependency', 'runtimeDependency', 'llvmToolsDependency', 'llvmDylibDependency',
-        'astDependency', 'heap', 'targetLibRelative'], ['launcher', 'llvmAuxiliaryDependency'], id);
+        'astDependency', 'heap', 'targetLibRelative'], ['launcher', 'llvmAuxiliaryDependency', 'compilerRuntime', 'previousStdDependency', 'provenance'], id);
+      if (config.options.compilerRuntime && !['host', 'target'].includes(config.options.compilerRuntime)) reject('CONFIG', id, 'compilerRuntime must select a declared host or target domain');
+      if (config.options.previousStdDependency && !component.dependencies.includes(config.options.previousStdDependency)) reject('DEPENDENCY', id, 'previous std must be in the dependency closure');
+      if (config.options.provenance !== undefined && config.options.provenance !== true) reject('CONFIG', id, 'provenance must be true when present');
       if (config.options.llvmAuxiliaryDependency && !component.dependencies.includes(config.options.llvmAuxiliaryDependency)) reject('DEPENDENCY', id, 'auxiliary LLVM tools not in closure');
       for (const key of ['sdkDependency', 'compilerDependency', 'runtimeDependency', 'llvmToolsDependency', 'llvmDylibDependency', 'astDependency']) {
         if (!component.dependencies.includes(config.options[key])) reject('DEPENDENCY', id, `option ${key} not in closure`);
@@ -158,6 +162,19 @@ export function validatePlan(plan) {
         if (!config.tools[tool]) reject('CONFIG', id, `AST producer tool ${tool} must be frozen`);
       }
       if (plan.platform === 'windows_x86_64' && !producer.receipt) reject('ADAPTER_PLATFORM', id, 'AST cross-toolchain adapter not yet migrated');
+    }
+    if (producer.adapter === 'bootstrap-compiler') {
+      fields(config.options, ['sdkComponents', 'stage', 'heap', 'runtimePin'], ['launcher'], id);
+      if (!['stage2', 'stage3'].includes(config.options.stage) || !/^\d+GB$/.test(config.options.heap)
+        || !component.roles.includes('compiler') || !Array.isArray(config.options.sdkComponents)
+        || new Set(config.options.sdkComponents).size !== config.options.sdkComponents.length
+        || config.options.sdkComponents.some(dep => !component.dependencies.includes(dep))) reject('CONFIG', id, 'stage compiler needs an explicit complete input SDK selection');
+      fields(config.options.runtimePin, ['path', 'sha256'], [], id);
+      absolute(config.options.runtimePin.path, id);
+      if (!HEX64.test(config.options.runtimePin.sha256)) reject('CONFIG', id, 'runtime pin must be frozen');
+      for (const name of ['node', 'zx', 'git', 'bash', 'python3', 'clang', 'clang++']) if (!config.tools[name]) reject('CONFIG', id, `stage producer tool ${name} must be frozen`);
+      absolute(producer.repository, id);
+      if (!plan.platform.startsWith('linux_')) reject('ADAPTER_PLATFORM', id, 'native stage compiler recipe migration incomplete outside Linux');
     }
     if (['llvm-tools', 'llvm-dylib'].includes(producer.adapter)) {
       fields(config.options, ['targets', 'runtimeDependency'], ['compilerSource', 'flatbuffersSource', 'launcher', 'auxiliaryOnly'], id);
@@ -193,8 +210,8 @@ export function validatePlan(plan) {
   }
   for (const role of ROLES) if (!roles.has(role)) reject('MISSING_COMPONENT', role, 'complete SDK plan required');
   if (plan.role === 'target') {
-    const runtime = plan.components.filter(component => component.domain === 'target' && component.roles.includes('runtime'));
-    const boundscheck = plan.components.filter(component => component.domain === 'target' && component.roles.includes('boundscheck'));
+    const runtime = plan.components.filter(component => !component.inputOnly && component.domain === 'target' && component.roles.includes('runtime'));
+    const boundscheck = plan.components.filter(component => !component.inputOnly && component.domain === 'target' && component.roles.includes('boundscheck'));
     if (runtime.length !== 1 || boundscheck.length !== 1 || runtime[0].id !== boundscheck[0].id) reject('RUNTIME_PAIR', 'runtime', 'target runtime/archive/boundscheck require one actual producer receipt');
   }
   for (const component of plan.components) for (const dep of component.dependencies) if (!ids.has(dep)) reject('DEPENDENCY', component.id, `unknown ${dep}`);
@@ -217,6 +234,13 @@ export function validatePlan(plan) {
           || auxiliary.domain !== tools.domain || auxiliary.source.commit !== tools.source.commit
           || auxiliary.source.tree !== tools.source.tree) reject('DEPENDENCY_ROLE', component.id, 'auxiliary tools must use the same target LLVM source');
       }
+      if (options.previousStdDependency && !byId.get(options.previousStdDependency)?.roles.includes('std')) reject('DEPENDENCY_ROLE', component.id, 'previousStdDependency must name a full std producer');
+    }
+    if (component.producer.adapter === 'bootstrap-compiler') {
+      const selected = options.sdkComponents.map(id => byId.get(id));
+      for (const role of ROLES) if (!selected.some(dep => dep?.roles.includes(role))) reject('DEPENDENCY_ROLE', component.id, `input SDK is missing ${role}`);
+      const compiler = selected.filter(dep => dep?.roles.includes('compiler'));
+      if (compiler.length !== 1 || (options.stage === 'stage3' && compiler[0].producer.adapter !== 'bootstrap-compiler')) reject('DEPENDENCY_ROLE', component.id, 'stage3 requires exactly one stage2 compiler producer');
     }
     if (component.producer.adapter === 'ast-support' || component.producer.adapter.startsWith('sharedbuild-')) {
       const seed = byId.get(options.sdkDependency);
@@ -269,7 +293,8 @@ export function buildIdentities(plan) {
     // Native debug records and std metadata can contain their work path.
     // Until every existing producer has a verified path normalization recipe,
     // a different physical build root is a different configuration identity.
-    const recipeId = objectId({...component, producer, dependencies, buildRoot: originBuildRoot || plan.buildRoot});
+    const {inputOnly, ...produced} = component;
+    const recipeId = objectId({...produced, producer, dependencies, buildRoot: originBuildRoot || plan.buildRoot});
     const sourceId = component.source.commit || component.source.lockSha256;
     identities.set(component.id, {recipeId, buildId: `${component.id}/${sourceId}/${recipeId}`,
       directory: path.join(plan.buildRoot, component.id, sourceId, recipeId), dependencies});
@@ -395,7 +420,8 @@ export function parseOutputReceipt(bytes, done, directory, component, identity) 
   const record = JSON.parse(bytes);
   const withoutLocator = value => {
     const {receipt, receiptSha256, originBuildRoot, ...producer} = value.producer;
-    return {...value, producer};
+    const {inputOnly, ...produced} = value;
+    return {...produced, producer};
   };
   if (done !== sha256(bytes) || (component.producer.receipt && done !== component.producer.receiptSha256)
     || record.schema !== OUTPUT_SCHEMA || record.status !== 'complete' || record.rc !== 0
@@ -431,6 +457,7 @@ export async function sealOutput(directory, component, identity, execution, pres
 export function resolveFiles(plan, outputs) {
   const files = Object.create(null);
   for (const component of plan.components) {
+    if (component.inputOnly) continue;
     const output = outputs.get(component.id);
     for (const mapping of component.install) {
       let matched = 0;

@@ -8,13 +8,13 @@ import {freezeSdkPlan} from './freeze-sdk-plan.mjs';
 import {canonical, readJson, reject, validatePlan} from './sdk-manifest.mjs';
 
 export const BOOTSTRAP_PHASES = Object.freeze([
-  'stage0', 'stage0-run', 'std-bootstrap', 'stage1-initial', 'stage1-std', 'stage3',
+  'stage0', 'stage0-run', 'std-bootstrap', 'stage1-initial', 'stage1-std', 'stage2', 'stage3-std', 'stage3',
 ]);
 export function validateBootstrapPlans(bundle) {
   if (bundle?.schema !== 'bootstrap-sdk-plans-v1' || !bundle.phases
     || Object.keys(bundle).some(key => !['schema', 'phases'].includes(key))
     || canonical(Object.keys(bundle.phases).sort()) !== canonical([...BOOTSTRAP_PHASES].sort())) {
-    reject('BOOTSTRAP_PHASES', 'bundle', 'the complete six-phase frozen bundle is required');
+    reject('BOOTSTRAP_PHASES', 'bundle', 'the complete eight-phase frozen bundle is required');
   }
   const identities = new Map();
   for (const phase of BOOTSTRAP_PHASES) {
@@ -26,6 +26,7 @@ export function validateBootstrapPlans(bundle) {
     if (plan.role !== expectedRole) reject('BOOTSTRAP_PHASES', phase, `requires ${expectedRole} domain`);
     if (phase === 'stage3' && plan.stage !== 'final') reject('BOOTSTRAP_PHASES', phase, 'stage3 requires a final-stage plan');
     if (phase !== 'stage3' && plan.stage === 'final') reject('BOOTSTRAP_PHASES', phase, 'an intermediate SDK cannot declare final qualification');
+    if (['stage2', 'stage3-std'].includes(phase) && plan.stage !== 'stage2') reject('BOOTSTRAP_PHASES', phase, 'requires a stage2 consumer plan');
   }
   return bundle;
 }
@@ -33,7 +34,7 @@ export async function freezeBootstrapPlans(intent) {
   if (intent?.schema !== 'bootstrap-sdk-intents-v1' || !intent.phases
     || Object.keys(intent).some(key => !['schema', 'phases'].includes(key))
     || canonical(Object.keys(intent.phases).sort()) !== canonical([...BOOTSTRAP_PHASES].sort())) {
-    reject('BOOTSTRAP_PHASES', 'intent', 'all six phase intents must be declared before freezing');
+    reject('BOOTSTRAP_PHASES', 'intent', 'all eight phase intents must be declared before freezing');
   }
   const phases = {};
   // Resolve all selectors now. Build adapters still own their normal DAGs;
