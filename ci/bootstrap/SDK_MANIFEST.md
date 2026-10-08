@@ -33,6 +33,14 @@ they never acquire a fabricated Git source identity. Different repositories
 may have different source commits. LLVM tools and dylib in each domain must
 declare the same LLVM source and paired runtime dependency.
 
+Resolved component records retain the original producer receipt JSON as well
+as its digest. The verifier authenticates those exact original bytes, checks
+their source/configuration/dependency closure against the frozen plan and
+reconstructs the installation file map from their inventories. An internally
+consistent rewritten manifest and lock cannot attribute replacement bytes to
+an unchanged producer receipt. This consumes small metadata without rescanning
+the producer's payload directory, and remains possible after work collection.
+
 Tools carry physical absolute paths and SHA-256 digests. Configuration includes
 host/target and adapter-specific options. The plan cannot contain an executable
 shell command or choose an unknown adapter. Schema and graph validation happen

@@ -58,8 +58,12 @@ function verifyResolvedIdentities(plan, manifest) {
   }
   // A receipt label alone is not a content commitment. Reconstruct the file
   // map from the original authenticated metadata, without reading payloads.
-  if (canonical(manifest.files) !== canonical(resolveFiles(plan, receipts))) {
-    reject('RESOLVED_PAYLOAD', 'sdk', 'actual install map differs from authenticated producer inventories');
+  const sealedFiles = resolveFiles(plan, receipts);
+  if (canonical(manifest.files) !== canonical(sealedFiles)) {
+    const rel = [...new Set([...Object.keys(manifest.files || {}), ...Object.keys(sealedFiles)])]
+      .find(file => canonical(manifest.files?.[file]) !== canonical(sealedFiles[file]));
+    reject('RESOLVED_PAYLOAD', sealedFiles[rel]?.component || manifest.files?.[rel]?.component || 'sdk',
+      `actual install map differs from authenticated producer inventory: ${rel}`);
   }
 }
 async function requiredInput(input, label) {
