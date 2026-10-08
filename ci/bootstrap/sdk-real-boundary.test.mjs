@@ -5,7 +5,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {spawn} from 'node:child_process';
-import {readJson, buildIdentities, fileDigest, objectId} from './sdk-manifest.mjs';
+import {readJson, readOutput, buildIdentities, fileDigest, objectId} from './sdk-manifest.mjs';
 import {verifyManifestSdk} from './toolchain-sdk.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -15,20 +15,43 @@ const product = process.env.SDK_MANIFEST_PRODUCT || path.join(here, 'toolchain-s
 const plan = await readJson(planFile), manifest = await readJson(path.join(sdk, 'SDK.manifest.json'));
 const identities = buildIdentities(plan), planSha = objectId(plan);
 test('genuine native receipt files keep their semantic owners in the installation lock', async () => {
-  const lock = await readJson(path.join(sdk, 'SDK.lock.json'));
-  for (const [rel, row] of Object.entries(manifest.files)) {
-    const component = plan.components.find(value => value.id === row.component);
-    if (component.source.kind !== 'git') continue;
-    console.log(`TARGET_ASSERTION_EXECUTED native-owner file=${rel} owner=${lock.files[rel].component}`);
-    assert.notEqual(lock.files[rel].component, 'official-retain', `source producer owns ${rel}`);
-    assert.equal(lock.files[rel].producer.source.commit, component.source.commit);
+  // Expected provenance comes from the frozen plan and authenticated producer
+  // receipt, independently of the installation being observed.
+  const expected = [];
+  for (const [rel, role] of [['bin/cjfilt', 'runtime'], ['include/RuntimeAPI.h', 'runtime']]) {
+    const component = plan.components.find(value => value.source.kind === 'git' && value.roles.includes(role));
+    assert.ok(component, `frozen ${role} producer`);
+    const identity = identities.get(component.id);
+    const output = await readOutput(component.producer.receipt || identity.directory, component, identity);
+    const mapping = component.install.find(value => rel === value.to || rel.startsWith(`${value.to}/`) || value.to === '');
+    assert.ok(mapping, `frozen install mapping for ${rel}`);
+    const suffix = mapping.to ? rel.slice(mapping.to.length + 1) : rel;
+    const source = [mapping.from, suffix].filter(Boolean).join('/');
+    assert.ok(output.files[source], `authenticated receipt contains ${source}`);
+    expected.push({rel, role, component, identity, output, source});
   }
-  for (const [rel, owner] of [['bin/cjfilt', 'cjc'], ['include/RuntimeAPI.h', 'runtime']]) {
-    assert.equal(lock.files[rel]?.component, owner, `native semantic owner: ${rel}`);
+  const root = await fs.mkdtemp(path.join(evidence, 'native-owner-'));
+  const assembled = await invoke(root, 'assembled');
+  assert.equal(assembled.rc, 0, assembled.text);
+  try {
+    const lock = await readJson(path.join(assembled.out, 'SDK.lock.json'));
+    for (const {rel, role, component, identity, output, source} of expected) {
+      console.log(`TARGET_ASSERTION_EXECUTED native-owner file=${rel} owner=${lock.files[rel]?.component} expected=${role}`);
+      assert.equal(lock.files[rel]?.component, role, `native semantic owner: ${rel}`);
+      assert.equal(lock.files[rel].producer.source.commit, component.source.commit);
+      assert.equal(lock.files[rel].producer.build_id, identity.buildId);
+      assert.equal(lock.files[rel].producer.receipt_sha256, output.receiptSha256);
+      assert.equal(lock.files[rel].sha256, output.files[source].sha256);
+    }
+    const ast = Object.keys(manifest.files).find(rel => rel.startsWith('include/cangjie/'));
+    assert.ok(ast, 'genuine AST header installed');
+    assert.equal(lock.files[ast].component, 'ast');
+    for (const name of ['SDK.plan.json', 'SDK.manifest.json', 'SDK.lock.json']) {
+      await fs.copyFile(path.join(assembled.out, name), path.join(root, name));
+    }
+  } finally {
+    await fs.rm(assembled.out, {recursive: true});
   }
-  const ast = Object.keys(manifest.files).find(rel => rel.startsWith('include/cangjie/'));
-  assert.ok(ast, 'genuine AST header installed');
-  assert.equal(lock.files[ast].component, 'ast');
 });
 async function invoke(root, name) {
   const out = path.join(root, name), log = path.join(root, `${name}.log`), fd = await fs.open(log, 'wx');
