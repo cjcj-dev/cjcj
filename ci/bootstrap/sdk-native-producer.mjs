@@ -50,7 +50,7 @@ function optionsOnly(options, names, label) {
 async function llvm(request) {
   const {component, source, directory, dependencies} = request;
   const options = component.config.options, dylib = component.producer.adapter === 'llvm-dylib';
-  optionsOnly(options, ['targets', 'runtimeDependency', 'compilerSource', 'flatbuffersSource', 'launcher'], component.id);
+  optionsOnly(options, ['targets', 'runtimeDependency', 'compilerSource', 'flatbuffersSource', 'launcher', 'auxiliaryOnly'], component.id);
   if (options.targets !== 'X86;ARM;AArch64') reject('PRODUCER_OPTIONS', component.id, 'complete LLVM C API target set required');
   const runtime = dependencies[options.runtimeDependency];
   if (!runtime?.component.roles.includes('runtime') || runtime.component.source.kind !== 'git') reject('PRODUCER_DEPENDENCY', component.id, 'paired runtime Git producer');
@@ -72,8 +72,21 @@ async function llvm(request) {
     cmake.push(`-DCMAKE_C_COMPILER_LAUNCHER=${launcher.path}`, `-DCMAKE_CXX_COMPILER_LAUNCHER=${launcher.path}`);
   }
   await run(cmake);
-  await run(['cmake', '--build', build, '--target', ...(dylib ? ['LLVM', 'llvm-nm'] : ['llc', 'opt', 'lld']), '-j', String(os.availableParallelism())]);
+  await run(['cmake', '--build', build, '--target', ...(dylib ? ['LLVM', 'llvm-nm'] : options.auxiliaryOnly ? ['llvm-objcopy', 'llvm-ar'] : ['llc', 'opt', 'lld']), '-j', String(os.availableParallelism())]);
   const artifacts = path.join(directory, 'artifacts'); await fs.mkdir(artifacts, {recursive: true});
+  if (options.auxiliaryOnly) {
+    await fs.mkdir(path.join(artifacts, 'bin'));
+    const tools = {};
+    for (const name of ['llvm-objcopy', 'llvm-ar']) {
+      const binary = path.join(build, 'bin', name), destination = path.join(artifacts, 'bin', name);
+      await fs.copyFile(binary, destination); await fs.chmod(destination, 0o755);
+      tools[name] = {sha256: await fileDigest(destination), version: (await execute(binary, ['--version'])).stdout.trim()};
+    }
+    await atomicJson(path.join(artifacts, 'auxiliary-producer.json'), {source: component.source, tools,
+      producer: component.producer, buildId: request.identity.buildId});
+    await sourceIdentity(paired, runtime.component.source, 'llvm-runtime', tool('git'));
+    return;
+  }
   if (dylib) {
     const library = component.config.target.startsWith('darwin_') ? 'libLLVM.dylib' : 'libLLVM-15.so';
     await fs.copyFile(path.join(build, 'lib', library), path.join(artifacts, library));
@@ -129,7 +142,7 @@ async function llvm(request) {
 async function std(request) {
   const {component, source, directory, dependencies} = request, options = component.config.options;
   optionsOnly(options, ['sdkDependency', 'compilerDependency', 'runtimeDependency', 'llvmToolsDependency', 'llvmDylibDependency',
-    'astDependency', 'heap', 'targetLibRelative', 'launcher'], component.id);
+    'astDependency', 'heap', 'targetLibRelative', 'launcher', 'llvmAuxiliaryDependency'], component.id);
   const seed = dependencies[options.sdkDependency], compiler = dependencies[options.compilerDependency], runtime = dependencies[options.runtimeDependency];
   if (!seed?.component.roles.includes('official-host') || !compiler?.component.roles.includes('compiler')
     || !runtime?.component.roles.includes('runtime')) reject('PRODUCER_DEPENDENCY', component.id, 'std needs explicit host seed/compiler/target runtime');
@@ -165,6 +178,11 @@ async function std(request) {
   for (const [dependencyName, destination] of [[options.llvmToolsDependency, 'third_party/llvm'], [options.llvmDylibDependency, 'third_party/llvm/lib']]) {
     const dependency = dependencies[dependencyName]; if (!dependency) reject('PRODUCER_DEPENDENCY', component.id, dependencyName);
     await fs.cp(dependency.artifacts, path.join(sdk, destination), {recursive: true, dereference: false, force: true});
+  }
+  if (options.llvmAuxiliaryDependency) {
+    const auxiliary = dependencies[options.llvmAuxiliaryDependency];
+    if (!auxiliary?.component.config.options.auxiliaryOnly) reject('PRODUCER_DEPENDENCY', component.id, 'declared auxiliary LLVM producer');
+    await fs.cp(path.join(auxiliary.artifacts, 'bin'), path.join(sdk, 'third_party/llvm/bin'), {recursive: true, dereference: false, force: true});
   }
   const ast = dependencies[options.astDependency]; if (!ast) reject('PRODUCER_DEPENDENCY', component.id, options.astDependency);
   await run(['python3', path.join(component.producer.repository, 'ci/install_std_sdk_inputs.py'), ast.artifacts, sdk, tuple]);

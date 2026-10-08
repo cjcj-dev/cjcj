@@ -139,7 +139,8 @@ export function validatePlan(plan) {
     if (producer.adapter === 'official' && Object.keys(config.options).length) reject('CONFIG', id, 'official copy has no build options');
     if (producer.adapter === 'bootstrap-std') {
       fields(config.options, ['sdkDependency', 'compilerDependency', 'runtimeDependency', 'llvmToolsDependency', 'llvmDylibDependency',
-        'astDependency', 'heap', 'targetLibRelative'], ['launcher'], id);
+        'astDependency', 'heap', 'targetLibRelative'], ['launcher', 'llvmAuxiliaryDependency'], id);
+      if (config.options.llvmAuxiliaryDependency && !component.dependencies.includes(config.options.llvmAuxiliaryDependency)) reject('DEPENDENCY', id, 'auxiliary LLVM tools not in closure');
       for (const key of ['sdkDependency', 'compilerDependency', 'runtimeDependency', 'llvmToolsDependency', 'llvmDylibDependency', 'astDependency']) {
         if (!component.dependencies.includes(config.options[key])) reject('DEPENDENCY', id, `option ${key} not in closure`);
       }
@@ -159,10 +160,11 @@ export function validatePlan(plan) {
       if (plan.platform === 'windows_x86_64' && !producer.receipt) reject('ADAPTER_PLATFORM', id, 'AST cross-toolchain adapter not yet migrated');
     }
     if (['llvm-tools', 'llvm-dylib'].includes(producer.adapter)) {
-      fields(config.options, ['targets', 'runtimeDependency'], ['compilerSource', 'flatbuffersSource', 'launcher'], id);
+      fields(config.options, ['targets', 'runtimeDependency'], ['compilerSource', 'flatbuffersSource', 'launcher', 'auxiliaryOnly'], id);
+      if (config.options.auxiliaryOnly !== undefined && (producer.adapter !== 'llvm-tools' || config.options.auxiliaryOnly !== true)) reject('CONFIG', id, 'auxiliaryOnly is the fixed LLVM archiver/objcopy producer');
       if (!component.dependencies.includes(config.options.runtimeDependency)) reject('DEPENDENCY', id, 'LLVM runtime input not in closure');
       if (config.options.targets !== 'X86;ARM;AArch64') reject('CONFIG', id, 'existing LLVM C API contract requires X86, ARM and AArch64');
-      if (producer.adapter === 'llvm-tools') {
+      if (producer.adapter === 'llvm-tools' && !config.options.auxiliaryOnly) {
         for (const key of ['compilerSource', 'flatbuffersSource']) {
           fields(config.options[key], ['repo', 'commit', 'tree'], [], id);
           if (!HEX40.test(config.options[key].commit) || !HEX40.test(config.options[key].tree) || !config.options[key].repo) reject('SOURCE', id, key);
@@ -208,6 +210,12 @@ export function validatePlan(plan) {
         || !byId.get(options.llvmDylibDependency)?.roles.includes('llvm-dylib')
         || ast?.producer.adapter !== 'ast-support' || !ast.roles.includes('ast')) {
         reject('DEPENDENCY_ROLE', component.id, 'std requires complete typed seed/compiler/runtime/LLVM/AST producer inputs');
+      }
+      if (options.llvmAuxiliaryDependency) {
+        const auxiliary = byId.get(options.llvmAuxiliaryDependency), tools = byId.get(options.llvmToolsDependency);
+        if (auxiliary?.producer.adapter !== 'llvm-tools' || !auxiliary.config.options.auxiliaryOnly
+          || auxiliary.domain !== tools.domain || auxiliary.source.commit !== tools.source.commit
+          || auxiliary.source.tree !== tools.source.tree) reject('DEPENDENCY_ROLE', component.id, 'auxiliary tools must use the same target LLVM source');
       }
     }
     if (component.producer.adapter === 'ast-support' || component.producer.adapter.startsWith('sharedbuild-')) {
