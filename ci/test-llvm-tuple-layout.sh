@@ -3,7 +3,6 @@
 set -euo pipefail
 export LC_ALL=C
 REPO_ROOT=$(cd "$(dirname "$0")/.." && pwd)
-source "$REPO_ROOT/ci/llvm-tuple-layout.sh"
 source "$REPO_ROOT/ci/llvm_pin.env"
 work=${1:?usage: test-llvm-tuple-layout.sh EMPTY_WORK_DIRECTORY}
 mkdir "$work"
@@ -19,7 +18,7 @@ else
     done
     printf 'fixture shim\n' > "$CJCJ_FIXED_LLVM_DIR/cjselfhost_llvmshim.o"
     printf 'fixture manifest\n' > "$CJCJ_FIXED_LLVM_DIR/llvm-tools.manifest"
-    publish_fixed_tuple_to_depot "$work/depot"
+    REPO_ROOT="$REPO_ROOT" CJCJ_FIXED_LLVM_DIR="$CJCJ_FIXED_LLVM_DIR" LLVM_SHA="$LLVM_SHA" CANGJIE_COMPILER_SHA="$CANGJIE_COMPILER_SHA" npx --yes zx@8 "$REPO_ROOT/ci/llvm-tuple-layout.mjs" "$work/depot"
     tuple="$work/depot/$LLVM_SHA/$CANGJIE_COMPILER_SHA"
 fi
 check() { (cd "$tuple" && sha256sum --strict -c SHA256SUMS); }

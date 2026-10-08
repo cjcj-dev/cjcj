@@ -1,3 +1,4 @@
+import {pinnedRemote} from '../../ci/fixtures/git/pinned-remote.mjs';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import {spawnSync} from 'node:child_process';
@@ -375,9 +376,8 @@ test('fixed tuple publisher feeds the bootstrap consumer and rejects a missing s
   fs.writeFileSync(path.join(source, 'llc.gz'), compressed.stdout);
   const depotRoot = path.join(root, 'depot');
   const depot = path.join(depotRoot, llvmSha, compilerSha);
-  const published = runBash('source "$1/ci/llvm-tuple-layout.sh"\n'
-    + 'REPO_ROOT=$1 CJCJ_FIXED_LLVM_DIR=$2 LLVM_SHA=$3 CANGJIE_COMPILER_SHA=$4\n'
-    + 'publish_fixed_tuple_to_depot "$5"\n',
+  const published = runBash('REPO_ROOT=$1 CJCJ_FIXED_LLVM_DIR=$2 LLVM_SHA=$3 CANGJIE_COMPILER_SHA=$4 '
+    + 'npx --yes zx@8 "$1/ci/llvm-tuple-layout.mjs" "$5"\n',
   [repoRoot, source, llvmSha, compilerSha, depotRoot]);
   assert.equal(published.status, 0, published.stdout + published.stderr);
   assert.deepEqual(fs.readFileSync(path.join(depot, 'bin', 'llc')), llc);
@@ -996,7 +996,8 @@ function writeCppHeaderFixture(root, cpp, runtimeRef) {
     const source = configured || fs.mkdtempSync(path.join(os.tmpdir(), 'formal-header-runtime-'));
     if (!configured) {
       git(['init', '-q', source]);
-      git(['-C', source, ...sourceFetchArguments(runtime.RUNTIME_SRC_URL, runtimeRef)]);
+      const remote = pinnedRemote(source, 'runtime', runtimeRef);
+      git(['-C', source, ...sourceFetchArguments(remote, runtimeRef)]);
       git(['-C', source, 'checkout', '-q', '--detach', 'FETCH_HEAD']);
     }
     assert.equal(git(['-C', source, 'rev-parse', 'HEAD']), runtimeRef);

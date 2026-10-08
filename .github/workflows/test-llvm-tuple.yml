@@ -132,7 +132,7 @@ jobs:
       - name: Exercise bootstrap input consumer
         run: node --test ci/release/prepare_bootstrap_inputs.test.mjs ci/release/prepare_llvm_dylib.test.mjs ci/release/colour_runtime.test.mjs
       - name: Cut producer and consumer script wiring
-        run: bash ci/test-llvm-tuple-wiring.sh "$RUNNER_TEMP/wiring-test"
+        run: npx --yes zx@8 ci/test-llvm-tuple-wiring.test.mjs "$RUNNER_TEMP/wiring-test"
       - uses: actions/upload-artifact@v7
         if: always()
         with:
