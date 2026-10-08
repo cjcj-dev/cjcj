@@ -330,7 +330,11 @@ test('transported receipts retain original build origin and frozen digest withou
   // receipt differs from the one frozen before assembly. Reuse must compare
   // the actual source closure, not just internally consistent installation.
   const plans = path.join(f.root, 'transported-phases.json');
-  await atomicJson(plans, {schema: 'bootstrap-sdk-plans-v1', phases: {'stage1-initial': f.plan}});
+  const phases = Object.fromEntries(['stage0', 'stage0-run', 'std-bootstrap', 'stage1-initial', 'stage1-std', 'stage3']
+    .map(phase => [phase, {...clone(f.plan),
+      role: ['stage0', 'stage0-run', 'std-bootstrap'].includes(phase) ? 'host' : 'target',
+      stage: phase === 'stage3' ? 'final' : f.plan.stage}]));
+  await atomicJson(plans, {schema: 'bootstrap-sdk-plans-v1', phases});
   const manifestPath = path.join(f.out, 'SDK.manifest.json'), lockPath = path.join(f.out, 'SDK.lock.json');
   const manifestBytes = await fs.readFile(manifestPath), lockBytes = await fs.readFile(lockPath);
   const changedManifest = JSON.parse(manifestBytes), changedLock = JSON.parse(lockBytes);
