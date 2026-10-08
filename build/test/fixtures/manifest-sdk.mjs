@@ -71,6 +71,10 @@ export async function manifestSdkFixture({root, compiler, prefix, inputSdk, shim
   if (runtimeInput) {
     const repo = await fs.realpath(runtimeInput.sourceRoot);
     const runtimeIdentity = {kind:'git',repo,commit:run(['git','-C',repo,'rev-parse','HEAD']),tree:run(['git','-C',repo,'rev-parse','HEAD^{tree}'])};
+    // The pin belongs to the separately supplied runtime, not the native
+    // compiler fixture's independent source commit.
+    await write(pin, `RUNTIME_REF=${runtimeIdentity.commit}\n`);
+    plan.verification.runtimePin.sha256 = await fileDigest(pin);
     runtimeComponent = {id:'runtime',roles:['runtime','boundscheck'],domain:'target',source:runtimeIdentity,
       config:{host:plan.platform,target:plan.platform,tools,options:{parameters:{fixture:'received-runtime'},optimization:'Release',sdkDependency:'official',jobs:64,heap:'32GB',inputBindings:{},outputs:[`runtime/lib/${tuple}/libcangjie-runtime.so`]}},
       producer:{adapter:'sharedbuild-runtime-default',version:runtimeIdentity.commit,repository:repo,engine:path.join(generation,'unexecuted-engine.py'),engineSha256:'a'.repeat(64),recipe:path.join(generation,'runtime.received.recipe.json')},
