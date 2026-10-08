@@ -614,11 +614,14 @@ for (const role of ['host', 'target']) {
       assert.notEqual(hash(runtime),retained.verification.colourRuntime.sha256,'host remains independent of target colour runtime');
       return;
     }
-    const selected = execute([process.execPath,path.join(repo,'ci/load_runtime_pin.mjs')]);
+    const selectionFile=path.join(root,'selection.env');
+    const selected = execute([process.execPath,path.join(repo,'ci/load_runtime_pin.mjs')],{...process.env,GITHUB_ENV:selectionFile});
     assert.equal(selected.status,0,selected.output);
     const lock = JSON.parse(fs.readFileSync(lockFile));
-    console.log(`RETAINED_SELECTION_ASSERT selected=${pin.RUNTIME_REF} actual=${lock.components.runtime.commit}`);
-    assert.equal(lock.components.runtime.commit,pin.RUNTIME_REF);
+    const actualSelection=/^RUNTIME_REF=(.+)$/m.exec(fs.readFileSync(selectionFile,'utf8'))?.[1];
+    console.log(`RETAINED_SELECTION_ASSERT selected=${actualSelection} actual=${lock.components.runtime.commit}`);
+    assert.equal(actualSelection,pin.RUNTIME_REF);
+    assert.equal(lock.components.runtime.commit,actualSelection);
     const {verifyBootstrapRuntimeSdk} = await import('../../ci/bootstrap/runtime_sdk.mjs');
     const assemblyLockSha = hash(lockFile);
     const observed = async () => {
