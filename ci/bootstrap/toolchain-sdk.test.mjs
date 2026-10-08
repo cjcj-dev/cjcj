@@ -374,7 +374,11 @@ test('transported receipts retain original build origin and frozen digest withou
 test('bootstrap phase reuse binds installed plan and manifest before returning an existing SDK', async () => {
   const f = await fixture(); const initial = await invoke(f); assert.equal(initial.rc, 0, initial.stderr);
   const plans = path.join(f.root, 'phases.json');
-  await atomicJson(plans, {schema: 'bootstrap-sdk-plans-v1', phases: {'stage1-initial': f.plan}});
+  const phases = Object.fromEntries(['stage0', 'stage0-run', 'std-bootstrap', 'stage1-initial', 'stage1-std', 'stage3']
+    .map(phase => [phase, {...clone(f.plan),
+      role: ['stage0', 'stage0-run', 'std-bootstrap'].includes(phase) ? 'host' : 'target',
+      stage: phase === 'stage3' ? 'final' : f.plan.stage}]));
+  await atomicJson(plans, {schema: 'bootstrap-sdk-plans-v1', phases});
   const argv = [process.execPath, path.join(here, 'bootstrap-sdk.mjs'), '--plans', plans,
     '--phase', 'stage1-initial', '--out', f.out];
   const completeBundle = await fs.readFile(plans);
