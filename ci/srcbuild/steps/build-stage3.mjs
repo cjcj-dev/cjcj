@@ -72,7 +72,7 @@ async function assertStage2Compiler(stageEnv, stage2Sha) {
   const command = await $({cwd: githubWorkspace, env: stageEnv, stdio: 'pipe'})`command -v cjc`;
   await assertBootstrapCompiler({sdk, command: command.stdout.trim(),
     producer: stage2Product, producerSha256: stage2Sha, targetLd});
-  console.log(`STAGE3_COMPILER_ASSERT_PASS path=${path.join(sdk, 'bin', 'cjcj-stage2')} sha256=${stage2Sha}`);
+  console.log(`STAGE3_COMPILER_ASSERT_PASS path=${path.join(sdk, 'bin', 'cjcj-stage1')} sha256=${stage2Sha}`);
 }
 
 async function assertConsumerInputs(stageEnv) {
@@ -148,9 +148,8 @@ if (!await exists(stdlibRoot, 'dir')) throw new Error(`runtime stdlib source mis
 
 const stage2Producer = path.join(bootstrapWork, 'cjcj-stage2');
 const stage2Sha = await sha256(stage2Producer);
-const assemblyLockSha = await sha256(path.join(bootstrapWork, 'sdk-stage1', 'SDK.lock.json'));
 const backendIdentity = await bootstrapBackendIdentity();
-const {compiler: stage2Product, targetLd, stdOutput} = await prepareBootstrapHandoff({
+const {compiler: stage2Product, targetLd, stdOutput, assemblyLockSha} = await prepareBootstrapHandoff({
   work: bootstrapWork, sdk, source: githubWorkspace, tuple,
 });
 const compilerEntrySha = await sha256(path.join(sdk, 'bin', 'cjc'));
@@ -203,7 +202,7 @@ if (dryRun) {
     sourceDir: stdlibRoot,
     installPrefix: finalStd,
     buildSdk: sdk,
-    compiler: path.join(sdk, 'bin', 'cjcj-stage2'),
+    compiler: path.join(sdk, 'bin', 'cjcj-stage1'),
   });
 }
 
