@@ -113,7 +113,7 @@ async function copyArtifacts(staging, manifest) {
   // sdk_verify hashes these installed bytes against the presealed lock once.
 }
 async function verifyInstalledLlvmTuple(sdk, plan, manifest) {
-  const component = plan.components.find(value => value.domain === 'target' && value.roles.includes('llvm-tools'));
+  const component = plan.components.find(value => value.id === manifest.files['third_party/llvm/bin/opt']?.component);
   if (!component || component.source.kind !== 'git') return;
   const root = path.join(sdk, 'third_party/llvm'), lld = plan.platform.startsWith('darwin_') ? 'ld64.lld' : 'ld.lld';
   const required = ['MANIFEST', 'bin/llc', 'bin/opt', `bin/${lld}`, 'lib/STATIC_LLVM.txt',
@@ -163,10 +163,10 @@ export async function verifyManifestSdk(sdk, plan, manifest) {
   await verifyInstalledLlvmTuple(sdk, plan, manifest);
   if (plan.role === 'target') await verifyBootstrapRuntimeSdk(sdk, tuple, {}, undefined,
     await fileDigest(path.join(sdk, 'SDK.lock.json')), manifest);
-  const dylib = plan.components.find(component => component.domain === 'target' && component.roles.includes('llvm-dylib'));
+  const library = plan.platform.startsWith('darwin_') ? 'libLLVM.dylib' : 'libLLVM-15.so';
+  const dylib = plan.components.find(component => component.id === manifest.files[`third_party/llvm/lib/${library}`]?.component);
   if (dylib?.source.kind === 'git') {
     const libraryRoot = path.join(sdk, 'third_party/llvm/lib');
-    const library = plan.platform.startsWith('darwin_') ? 'libLLVM.dylib' : 'libLLVM-15.so';
     const libraryEntry = manifest.files[`third_party/llvm/lib/${library}`];
     if (!libraryEntry || !manifest.files['third_party/llvm/lib/manifest.json']) reject('MISSING_ARTIFACT', dylib.id, 'dylib library and actual producer manifest required');
     await execute('python3', [path.join(here, '../llvm-dylib/verify.py'), libraryRoot, dylib.source.commit,
@@ -228,9 +228,9 @@ function installLock(plan, manifest) {
     symlink: entry.type === 'symlink', ...(entry.type === 'symlink' ? {link_target: entry.target} : {}),
     producer: {build_id: entry.buildId, receipt_sha256: entry.receiptSha256, source: components[entry.component].source},
   }]));
-  const runtime = plan.components.find(component => component.domain === 'target' && component.roles.includes('runtime'));
-  const llvm = plan.components.find(component => component.domain === 'target' && component.roles.includes('llvm-tools'));
   const runtimeFile = manifest.files[`runtime/lib/${PLATFORMS[plan.platform][2]}/libcangjie-runtime.so`];
+  const runtime = components[runtimeFile?.component];
+  const llvm = components[manifest.files['third_party/llvm/bin/opt']?.component];
   return {version: 1, role: plan.role, plan_sha256: objectId(plan), manifest_sha256: objectId(manifest), files,
     official_retain: Object.fromEntries(Object.entries(files).filter(([, row]) => row.component === 'official-retain')
       .map(([rel, row]) => [rel, row.producer.source.reason])),
