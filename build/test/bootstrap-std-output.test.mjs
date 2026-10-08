@@ -6,6 +6,8 @@ import os from 'node:os';
 import crypto from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 import test from 'node:test';
+import {manifestSdkFixture} from './fixtures/manifest-sdk.mjs';
+import {fileDigest} from '../../ci/bootstrap/sdk-manifest.mjs';
 import {prepareBootstrapHandoff} from '../../ci/srcbuild/lib/bootstrap-handoff.mjs';
 
 const repo = path.resolve(import.meta.dirname, '../..');
@@ -29,7 +31,7 @@ async function fixture(recipe) {
     await fs.mkdir(path.dirname(file), {recursive: true});
     await fs.writeFile(file, bytes, {mode: 0o755});
   };
-  const compiler = '#!/bin/bash\ncat "$CANGJIE_HOME/lib/linux_x86_64_cjnative/libcangjie-std-core.a"\n';
+  const compiler = '#!/bin/bash\ncat "$CANGJIE_HOME/modules/consumer-std.txt"\n';
   await write('work/cjcj-stage1', 'fixture stage1 compiler');
   await write('stage1-input', 'fixture stage1 compiler');
   await write('work/.cjcj-stage1', `${work}/cjcj-stage1\n`);
@@ -37,6 +39,7 @@ async function fixture(recipe) {
   await write(`std/lib/${tuple}/libcangjie-std-core.a`, `std bytes from ${recipe}`);
   await write('std/std-producer.json', JSON.stringify({compiler_sha256: hash('fixture stage1 compiler')}));
   await write('std/modules/full-prefix-member', 'another std member');
+  await write('std/modules/consumer-std.txt', `std bytes from ${recipe}`);
   await write('work/sdk-stage1/.stage1-host/binding.txt', 'host_ld=/fixture/host\n');
   await write('work/sdk-stage1/bin/cjc', '#!/bin/bash\nexit 0\n');
   await write(`work/sdk-stage1/lib/${tuple}/libcangjie-std-core.a`, 'old sdk std');
@@ -46,6 +49,11 @@ async function fixture(recipe) {
   for (const name of ['cjselfhost_llvmshim.o', 'cjc_runtime_config.o']) {
     await write(`work/cjcj-src-stage1/runtime_shim/${name}`, `fixture ${name}`);
   }
+  const native = await manifestSdkFixture({root, compiler: path.join(root, 'seed'), prefix: path.join(root, 'std'),
+    inputSdk: path.join(work, 'sdk-stage1'), shimSource: path.join(work, 'cjcj-src-stage1/runtime_shim')});
+  // All stage names refer to the actual fixture ELF that produced this std
+  // receipt; no historical smoke/compiler result is borrowed here.
+  for (const rel of ['work/cjcj-stage1', 'stage1-input']) await fs.copyFile(path.join(root, 'seed'), path.join(root, rel));
   const script = `source ${quote(path.join(repo, 'ci/bootstrap/bootstrap.sh'))}
 WORK=${quote(work)}; SRC=${quote(repo)}; FIXTURE=${quote(root)}
 CJCJ_SHA=fixture; STDSRC=fixture; CPP_SRC=fixture; HOST_LLVM_SO=fixture; HOST_LLVM_SHA256=fixture
@@ -67,7 +75,7 @@ main --stage ${recipe}
   await fs.writeFile(path.join(root, 'producer.log'), run.stdout + run.stderr);
   await fs.writeFile(path.join(root, 'producer.rc'), `${run.status}\n`);
   assert.equal(run.status, 0, run.stdout + run.stderr);
-  const f = {root, work, tuple, sdk: path.join(root, 'consumer-sdk'), source: path.join(root, 'source')};
+  const f = {root, work, tuple, plans: native.plans, sdk: path.join(root, 'consumer-sdk'), source: path.join(root, 'source')};
   f.recordFile = path.join(work, 'bootstrap-std-output.json');
   f.record = JSON.parse(await fs.readFile(f.recordFile, 'utf8'));
   return f;
@@ -82,13 +90,16 @@ for (const recipe of ['all', 'supplied-stage1']) {
     assert.equal(f.record.prefix, expected);
     if (recipe === 'supplied-stage1') await assert.rejects(fs.stat(path.join(f.work, 'stdlib-stage2')), {code: 'ENOENT'});
     const result = await prepareBootstrapHandoff(f);
-    const run = spawnSync(path.join(f.sdk, 'bin', 'cjc'), {encoding: 'utf8'});
+    const run = spawnSync(path.join(f.sdk, 'bin', 'cjc'), {encoding: 'utf8', env: {...process.env, CANGJIE_HOME: f.sdk, LD_LIBRARY_PATH: result.targetLd}});
     await fs.writeFile(path.join(f.root, 'consumer.log'), run.stdout + run.stderr);
     await fs.writeFile(path.join(f.root, 'consumer.rc'), `${run.status}\n`);
     console.log(`STD_CONSUMER_ASSERT_REACHED recipe=${recipe} prefix=${result.stdOutput.prefix} bytes=${run.stdout}`);
     assert.equal(run.status, 0, run.stderr);
     assert.equal(run.stdout, `std bytes from ${recipe}`);
     assert.equal(await fs.readFile(path.join(f.sdk, 'modules/full-prefix-member'), 'utf8'), 'another std member');
+    assert.equal(await fileDigest(path.join(f.sdk, 'lib', f.tuple, 'libcangjie-std-core.a')), f.record.coreSha256, 'actual complete std core identity');
+    const installed = JSON.parse(await fs.readFile(path.join(f.sdk, 'SDK.manifest.json'), 'utf8'));
+    assert.equal(installed.files['bin/cjc'].sha256, f.record.stage2Sha256, 'actual compiler input identity');
   });
 }
 
@@ -117,6 +128,7 @@ for (const mutation of ['prefix', 'compiler', 'stage2', 'std-byte']) {
     });
     assert.equal(await fs.readFile(path.join(f.sdk, 'sentinel'), 'utf8'), 'preserve consumer');
     await restore();
+    await fs.rm(f.sdk, {recursive: true});
     await prepareBootstrapHandoff(f);
     console.log(`STD_ADMISSION_RESTORED_PASS mutation=${mutation}`);
   });

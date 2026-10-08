@@ -5,6 +5,8 @@ import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import test from 'node:test';
 import crypto from 'node:crypto';
+import {manifestSdkFixture} from './fixtures/manifest-sdk.mjs';
+import {fileDigest} from '../../ci/bootstrap/sdk-manifest.mjs';
 import {publishBootstrapStdOutput} from '../../ci/bootstrap/std-output.mjs';
 import {prepareBootstrapHandoff, assertBootstrapCompiler} from '../../ci/srcbuild/lib/bootstrap-handoff.mjs';
 
@@ -29,11 +31,23 @@ async function fixture(t) {
   for (const name of ['cjselfhost_llvmshim.o', 'cjc_runtime_config.o']) await write(path.join(work, 'cjcj-src-stage1', 'runtime_shim', name), name);
   await fs.symlink('libcangjie-std-core.a', path.join(inputSdk, 'lib', tuple, 'core-relative.a'));
   await write(path.join(inputSdk, 'bin', 'cjc'), '#!/bin/bash\nprintf "old-stage1 compiler\\n"\n');
-  await write(path.join(sdk, 'stale-sdk'), 'old pipeline');
+  await write(path.join(work, 'stdlib-stage2', 'modules', 'consumer-std.txt'), 'coloured std');
   await write(path.join(work, 'cjcj-stage1'), 'stage1 compiler');
   await write(path.join(work, 'stdlib-stage2', 'std-producer.json'), JSON.stringify({compiler_sha256: crypto.createHash('sha256').update('stage1 compiler').digest('hex')}));
   const f = {root, work, sdk, source, tuple};
-  f.publish = () => publishBootstrapStdOutput({...f, prefix: path.join(work, 'stdlib-stage2'), compiler: path.join(work, 'cjcj-stage1')});
+  f.publish = async () => {
+    // Preserve the mutable scenario script separately from its native ELF.
+    const bytes = await fs.readFile(path.join(work, 'cjcj-stage2'));
+    if (bytes.subarray(0, 2).toString() === '#!') f.compilerScript = bytes;
+    await fs.writeFile(path.join(work, 'cjcj-stage2'), f.compilerScript);
+    const native = await manifestSdkFixture({root, compiler: path.join(work, 'cjcj-stage2'),
+      prefix: path.join(work, 'stdlib-stage2'), inputSdk, shimSource: path.join(work, 'cjcj-src-stage1/runtime_shim')});
+    f.plans = native.plans; f.producer = path.join(work, 'cjcj-stage2'); f.producerSha256 = native.compilerSha256;
+    await fs.copyFile(f.producer, path.join(work, 'cjcj-stage1'));
+    await publishBootstrapStdOutput({...f, prefix: path.join(work, 'stdlib-stage2'), compiler: path.join(work, 'cjcj-stage1')});
+  };
+  f.consumerEnv = targetLd => ({...process.env, CANGJIE_HOME: sdk, LD_LIBRARY_PATH: targetLd});
+  await write(path.join(work, 'stdlib-stage2', 'lib', tuple, 'core-relative.a'), 'bootstrap std');
   await f.publish();
   return f;
 }
@@ -44,13 +58,13 @@ test('bootstrap handoff consumes stage2 std and compiler and rebinds host and ta
   assert.equal(result.compiler, path.join(f.work, 'cjcj-stage2'));
   assert.equal((await fs.lstat(path.join(f.sdk, 'lib', f.tuple, 'core-relative.a'))).isFile(), true);
   assert.equal(await fs.readFile(path.join(f.sdk, 'lib', f.tuple, 'core-relative.a'), 'utf8'), 'bootstrap std');
-  assert.equal(await fs.readFile(path.join(f.sdk, 'lib', f.tuple, 'libcangjie-std-core.a'), 'utf8'), 'coloured std');
+  assert.equal(await fileDigest(path.join(f.sdk, 'lib', f.tuple, 'libcangjie-std-core.a')), await fileDigest(path.join(f.work, 'stdlib-stage2/lib', f.tuple, 'libcangjie-std-core.a')));
   await assert.rejects(fs.stat(path.join(f.sdk, 'stale-sdk')), {code: 'ENOENT'});
-  const run = spawnSync(path.join(f.sdk, 'tools', 'bin', 'cjpm'), {encoding: 'utf8'});
+  const run = spawnSync(path.join(f.sdk, 'tools', 'bin', 'cjpm'), {encoding: 'utf8', env: f.consumerEnv(result.targetLd)});
   assert.equal(run.status, 0, run.stderr);
-  assert.equal(run.stdout, `cjpm home=${f.sdk} ld=/host/runtime:/host/llvm\ncompiler home=${f.sdk} ld=${result.targetLd}\n`);
+  assert.equal(run.stdout, `cjpm home=${f.sdk} ld=${result.targetLd}\ncompiler home=${f.sdk} ld=${result.targetLd}\n`);
   for (const name of ['opt', 'llc']) {
-    const backend = spawnSync(path.join(f.sdk, 'third_party', 'llvm', 'bin', name), {encoding: 'utf8'});
+    const backend = spawnSync(path.join(f.sdk, 'third_party', 'llvm', 'bin', name), {encoding: 'utf8', env: f.consumerEnv(result.targetLd)});
     assert.equal(backend.status, 0, backend.stderr);
     assert.equal(backend.stdout, `backend home=${f.sdk} ld=${result.targetLd}\n`);
   }
@@ -60,6 +74,8 @@ test('bootstrap handoff consumes stage2 std and compiler and rebinds host and ta
 
 test('missing bootstrap stage2 compiler cannot consume an unrelated old product', async t => {
   const f = await fixture(t);
+  await fs.mkdir(f.sdk, {recursive: true});
+  await fs.writeFile(path.join(f.sdk, 'stale-sdk'), 'old pipeline');
   await fs.rm(path.join(f.work, 'cjcj-stage2'));
   await assert.rejects(prepareBootstrapHandoff(f), {code: 'ENOENT'});
   assert.equal(await fs.readFile(path.join(f.sdk, 'stale-sdk'), 'utf8'), 'old pipeline');
@@ -72,19 +88,19 @@ for (const mutation of ['none', 'entry', 'installed', 'producer', 'command']) {
     let command = path.join(f.sdk, 'bin', 'cjc');
     const files = {
       entry: command,
-      installed: path.join(f.sdk, 'bin', 'cjcj-stage2'),
+      installed: path.join(f.sdk, 'bin', 'cjcj-stage1'),
       producer: path.join(f.work, 'cjcj-stage2'),
     };
     if (files[mutation]) await fs.appendFile(files[mutation], '\n# replaced input\n');
     if (mutation === 'command') command = path.join(f.work, 'sdk-stage1', 'bin', 'cjc');
     if (mutation === 'none') {
-      const identity = await assertBootstrapCompiler({sdk: f.sdk, command});
+      const identity = await assertBootstrapCompiler({...f, command});
       assert.equal(identity.producer, path.join(f.work, 'cjcj-stage2'));
-      const result = spawnSync(command, {encoding: 'utf8'});
+      const result = spawnSync(command, {encoding: 'utf8', env: f.consumerEnv('/fixture/target')});
       assert.equal(result.status, 0, result.stderr);
       assert.match(result.stdout, /compiler home=/);
     } else {
-      await assert.rejects(assertBootstrapCompiler({sdk: f.sdk, command}), /bootstrap compiler identity mismatch/);
+      await assert.rejects(assertBootstrapCompiler({...f, command}), /bootstrap compiler independent producer mismatch/);
     }
   });
 }
@@ -110,7 +126,7 @@ test('bootstrap producer reaches actual stdx and tools subprocess entries', asyn
     const built = spawnSync('cc', ['-shared', '-fPIC', '-x', 'c', '-', '-o', output], {input: source, encoding: 'utf8'});
     assert.equal(built.status, 0, built.stderr);
   }
-  await fs.appendFile(path.join(f.work, 'cjcj-stage2'), `cat "$CANGJIE_HOME/lib/${f.tuple}/libcangjie-std-core.a"\n`);
+  f.compilerScript = Buffer.from(f.compilerScript.toString() + 'cat "$CANGJIE_HOME/modules/consumer-std.txt"\n');
   await f.publish();
   await prepareBootstrapHandoff(f);
   const pin = (await fs.readFile(new URL('../../ci/cjpm_pin.env', import.meta.url), 'utf8')).match(/^CJPM_FORK_REF=(.+)$/m)[1];
@@ -156,7 +172,7 @@ test('bootstrap producer reaches actual stdx and tools subprocess entries', asyn
   await fs.mkdir(path.join(config.repoPath('stdx'), 'target', f.tuple), {recursive: true});
   await packageStage.run(config);
   console.log('SDK_PACKAGE_ORIGIN_ASSERT_REACHED');
-  assert.equal(await fs.readFile(path.join(f.sdk, 'lib', f.tuple, 'libcangjie-std-core.a'), 'utf8'), 'coloured std');
+  assert.equal(await fileDigest(path.join(f.sdk, 'lib', f.tuple, 'libcangjie-std-core.a')), await fileDigest(path.join(f.work, 'stdlib-stage2/lib', f.tuple, 'libcangjie-std-core.a')));
   assert.ok((await fs.readFile(path.join(f.sdk, 'tools', 'bin', 'cjpm'), 'utf8')).includes(`compiler home=${f.sdk}`));
   const invocations = (await fs.readFile(trace, 'utf8')).trim().split('\n').map(JSON.parse);
   assert.equal(invocations.length, 1 + tools.toolsFor(config).length);
@@ -177,7 +193,7 @@ for (const hostHeap of ['12288MB', '10752MB', '5376MB']) {
     await f.publish();
     await prepareBootstrapHandoff(f);
     const run = spawnSync(path.join(f.sdk, 'tools', 'bin', 'cjpm'), {
-      encoding: 'utf8', env: {...process.env, cjHeapSize: hostHeap},
+      encoding: 'utf8', env: {...f.consumerEnv('/fixture/target'), cjHeapSize: hostHeap},
     });
     assert.equal(run.status, 0, run.stderr);
     console.log(`HEAP_BOUNDARY_ASSERT_REACHED ${JSON.stringify(run.stdout)}`);
@@ -192,8 +208,8 @@ for (const heap of ['20GB', '', undefined]) {
       '#!/bin/bash\nprintf "set=%s heap=%s\\n" "${cjHeapSize+x}" "$cjHeapSize"\n');
     await f.publish();
     await prepareBootstrapHandoff(f);
-    await assertBootstrapCompiler({sdk: f.sdk, command: path.join(f.sdk, 'bin', 'cjc')});
-    const env = {...process.env};
+    await assertBootstrapCompiler({...f, command: path.join(f.sdk, 'bin', 'cjc')});
+    const env = f.consumerEnv('/fixture/target');
     if (heap === undefined) delete env.cjHeapSize; else env.cjHeapSize = heap;
     const run = spawnSync(path.join(f.sdk, 'bin', 'cjc'), {encoding: 'utf8', env});
     assert.equal(run.status, 0, run.stderr);
@@ -210,7 +226,7 @@ test('same handoff SDK inherits each invocation heap without capturing generatio
   await prepareBootstrapHandoff(f);
   for (const heap of ['5376MB', '10752MB']) {
     const run = spawnSync(path.join(f.sdk, 'bin', 'cjc'), {
-      encoding: 'utf8', env: {...process.env, cjHeapSize: heap},
+      encoding: 'utf8', env: {...f.consumerEnv('/fixture/target'), cjHeapSize: heap},
     });
     assert.equal(run.status, 0, run.stderr);
     console.log(`HEAP_PER_INVOCATION_ASSERT_REACHED expected=${heap} actual=${run.stdout.trim()}`);
@@ -268,10 +284,13 @@ test(`handoff materializes ${topology} on two consecutive promotions`, async t =
       assert.equal((await fs.lstat(file)).isFile(), true, name);
       assert.equal(await fs.readFile(file, 'utf8'), 'stage2 pcre', name);
     }
-    assert.deepEqual(await links(f.sdk), []);
-    await assertBootstrapCompiler({sdk: f.sdk, command: path.join(f.sdk, 'bin', 'cjc')});
+    assert.deepEqual((await links(f.sdk)).sort(), ['cjc', 'cjc-frontend'].map(name => path.join(f.sdk, 'bin', name)).sort());
+    await assertBootstrapCompiler({...f, command: path.join(f.sdk, 'bin', 'cjc')});
     console.log(`HANDOFF_REGULAR_CONTENT_ASSERT_PASS pass=${pass}`);
+    // Reuse is authenticated; a corrupt installed payload must be rejected.
     await fs.writeFile(path.join(f.sdk, relative, 'libpcre2-8.so.0'), 'stale consumer');
+    await assert.rejects(prepareBootstrapHandoff(f), /PAYLOAD/);
+    await fs.writeFile(path.join(f.sdk, relative, 'libpcre2-8.so.0'), 'stage2 pcre');
     assert.equal(await fs.readFile(path.join(f.work, 'stdlib-stage2', relative, 'libpcre2-8.so'), 'utf8'), 'stage2 pcre');
   }
 });
