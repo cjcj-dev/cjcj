@@ -144,14 +144,14 @@ export function validatePlan(plan) {
     if (['llvm-tools', 'llvm-dylib'].includes(producer.adapter)) {
       fields(config.options, ['targets', 'runtimeDependency'], ['compilerSource', 'flatbuffersSource', 'launcher'], id);
       if (!component.dependencies.includes(config.options.runtimeDependency)) reject('DEPENDENCY', id, 'LLVM runtime input not in closure');
-      if (!['X86;ARM;AArch64', 'AArch64', 'X86'].includes(config.options.targets)) reject('CONFIG', id, 'LLVM targets');
+      if (config.options.targets !== 'X86;ARM;AArch64') reject('CONFIG', id, 'existing LLVM C API contract requires X86, ARM and AArch64');
       if (producer.adapter === 'llvm-tools') {
         for (const key of ['compilerSource', 'flatbuffersSource']) {
           fields(config.options[key], ['repo', 'commit', 'tree'], [], id);
           if (!HEX40.test(config.options[key].commit) || !HEX40.test(config.options[key].tree) || !config.options[key].repo) reject('SOURCE', id, key);
         }
       }
-      for (const tool of ['cmake', 'ninja', 'clang', 'clang++', 'git']) if (!config.tools[tool]) reject('CONFIG', id, `native producer tool ${tool} must be frozen`);
+      for (const tool of ['cmake', 'ninja', 'clang', 'clang++', 'git', ...(producer.adapter === 'llvm-dylib' ? ['python3'] : [])]) if (!config.tools[tool]) reject('CONFIG', id, `native producer tool ${tool} must be frozen`);
     }
     if (producer.adapter === 'bootstrap-std') for (const tool of ['python3', 'cmake', 'ninja', 'clang', 'clang++', 'ar', 'git']) {
       if (!config.tools[tool]) reject('CONFIG', id, `std producer tool ${tool} must be frozen`);

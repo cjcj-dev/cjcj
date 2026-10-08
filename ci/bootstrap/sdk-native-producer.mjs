@@ -49,7 +49,7 @@ async function llvm(request) {
   const {component, source, directory, dependencies} = request;
   const options = component.config.options, dylib = component.producer.adapter === 'llvm-dylib';
   optionsOnly(options, ['targets', 'runtimeDependency', 'compilerSource', 'flatbuffersSource', 'launcher'], component.id);
-  if (!['X86;ARM;AArch64', 'AArch64', 'X86'].includes(options.targets)) reject('PRODUCER_OPTIONS', component.id, 'LLVM target set');
+  if (options.targets !== 'X86;ARM;AArch64') reject('PRODUCER_OPTIONS', component.id, 'complete LLVM C API target set required');
   const runtime = dependencies[options.runtimeDependency];
   if (!runtime?.component.roles.includes('runtime') || runtime.component.source.kind !== 'git') reject('PRODUCER_DEPENDENCY', component.id, 'paired runtime Git producer');
   const paired = await fetchIdentity(runtime.component.source, path.join(directory, 'source-inputs', 'runtime'), 'llvm-runtime');
@@ -76,11 +76,14 @@ async function llvm(request) {
     const library = component.config.target.startsWith('darwin_') ? 'libLLVM.dylib' : 'libLLVM-15.so';
     await fs.copyFile(path.join(build, 'lib', library), path.join(artifacts, library));
     const symbols = (await execute(path.join(build, 'bin', 'llvm-nm'), ['--defined-only', path.join(build, 'lib', library)], {maxBuffer: 64 * 1024 * 1024})).stdout;
-    if (!symbols.includes('LLVMInitializeX86TargetInfo')) reject('LLVM_TARGETS', component.id, 'X86 target symbol missing');
     await fs.writeFile(path.join(artifacts, 'defined-symbols.txt'), symbols);
     await atomicJson(path.join(artifacts, 'manifest.json'), {llvm_sha: component.source.commit,
       sha256: await fileDigest(path.join(artifacts, library)), platform: component.config.target, library,
       targets: options.targets.split(';'), producer: {version: component.producer.version, buildId: request.identity.buildId}});
+    await run(['python3', path.join(component.producer.repository, 'ci/llvm-dylib/verify.py'), artifacts, component.source.commit,
+      await fileDigest(path.join(artifacts, library))], {env: {...process.env,
+        LLVM_NM: path.join(build, 'bin', 'llvm-nm'),
+        LD_LIBRARY_PATH: path.join(runtime.artifacts, 'install/runtime/lib', PLATFORMS[component.config.target][2])}});
   } else {
     const compiler = await fetchIdentity(options.compilerSource, path.join(directory, 'source-inputs', 'compiler'), 'llvm-schema');
     const flatbuffers = await fetchIdentity(options.flatbuffersSource, path.join(directory, 'source-inputs', 'flatbuffers'), 'flatbuffers');

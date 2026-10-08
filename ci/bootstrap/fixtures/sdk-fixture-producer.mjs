@@ -37,5 +37,6 @@ if (options.mode === 'runtime') {
   await write('fixed-llc/cjselfhost_llvmshim.o', 'fixture AST shim\n');
 } else if (options.mode === 'llvm-dylib') {
   run(['cc', '-shared', '-fPIC', `-DCJLLVM_SHA="${env.SB_SHA}"`, 'llvm.c', '-o', await mkdir(path.join(output, 'libLLVM-15.so'))]);
+  await write('manifest.json', JSON.stringify({llvm_sha: env.SB_SHA, sha256: await sha(path.join(output, 'libLLVM-15.so'))}) + '\n');
 } else throw new Error('unknown fixture producer mode');
 console.log(`FIXTURE_PRODUCER_EXECUTED mode=${options.mode} actual_sha=${env.SB_SHA}`);

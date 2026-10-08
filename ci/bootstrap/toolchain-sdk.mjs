@@ -59,6 +59,16 @@ async function verifySdk(sdk, plan, manifest) {
   // verifier's --write-lock is no longer the authority for payload identity.
   await execute('python3', [path.join(here, 'sdk_verify.py'), '--sdk', sdk, '--role', plan.role,
     '--runtime-pin', plan.verification.runtimePin.path, '--target-tuple', tuple]);
+  const dylib = plan.components.find(component => component.domain === 'target' && component.roles.includes('llvm-dylib'));
+  if (dylib?.source.kind === 'git') {
+    const libraryRoot = path.join(sdk, 'third_party/llvm/lib');
+    const library = plan.platform.startsWith('darwin_') ? 'libLLVM.dylib' : 'libLLVM-15.so';
+    const libraryEntry = manifest.files[`third_party/llvm/lib/${library}`];
+    if (!libraryEntry || !manifest.files['third_party/llvm/lib/manifest.json']) reject('MISSING_ARTIFACT', dylib.id, 'dylib library and actual producer manifest required');
+    await execute('python3', [path.join(here, '../llvm-dylib/verify.py'), libraryRoot, dylib.source.commit,
+      libraryEntry.sha256], {env: {...process.env,
+        LD_LIBRARY_PATH: path.join(sdk, 'runtime/lib', tuple)}});
+  }
   if (plan.role === 'target' && plan.verification.runtimeManifest) {
     await verifyBootstrapRuntimeSdk(sdk, tuple, {
       ...process.env, RUNTIME_REF: plan.components.find(component => component.roles.includes('runtime') && component.domain === 'target').source.commit,
