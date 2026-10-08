@@ -65,9 +65,13 @@ test('bootstrap handoff consumes stage2 std and compiler and rebinds host and ta
   assert.equal(run.status, 0, run.stderr);
   assert.equal(run.stdout, `cjpm home=${f.sdk} ld=${result.targetLd}\ncompiler home=${f.sdk} ld=${result.targetLd}\n`);
   for (const name of ['opt', 'llc']) {
-    const backend = spawnSync(path.join(f.sdk, 'third_party', 'llvm', 'bin', name), {encoding: 'utf8', env: f.consumerEnv(result.targetLd)});
+    const backend = spawnSync(path.join(f.sdk, 'third_party', 'llvm', 'bin', name), ['--version'], {encoding: 'utf8', env: f.consumerEnv(result.targetLd)});
     assert.equal(backend.status, 0, backend.stderr);
-    assert.equal(backend.stdout, `backend home=${f.sdk} ld=${result.targetLd}\n`);
+    assert.match(backend.stdout, /LLVM version/);
+    const installed = JSON.parse(await fs.readFile(path.join(f.sdk,'SDK.manifest.json'),'utf8'));
+    const entry = installed.files[`third_party/llvm/bin/${name}`];
+    assert.equal(await fileDigest(path.join(f.sdk,'third_party/llvm/bin',name)),entry.sha256,'actual target backend producer bytes');
+    assert.equal(installed.components[entry.component].source.kind,'git');
   }
   assert.equal(await fs.readFile(path.join(f.source, 'runtime_shim', 'cjselfhost_llvmshim.o'), 'utf8'), 'cjselfhost_llvmshim.o');
   assert.match(await fs.readFile(path.join(f.work, 'sdk-stage1', 'bin', 'cjc'), 'utf8'), /old-stage1 compiler/);
@@ -177,6 +181,16 @@ test('bootstrap producer reaches actual stdx and tools subprocess entries', asyn
   await stdx.run(config);
   await tools.run(config);
   await fs.mkdir(path.join(config.repoPath('stdx'), 'target', f.tuple), {recursive: true});
+  // The package gate supports a disassembler inside its actual candidate root.
+  // Bind a real llvm-dis and assemble legal bitcode, rather than fake metadata
+  // output or relying on the #922 environment-default path.
+  const disassembler = process.env.CJCJ_VERIFIER_LLVM_DIS;
+  const assembler = disassembler.replace('llvm-dis','llvm-as');
+  const bc = path.join(f.sdk,'modules','package-input.bc');
+  const assembled = spawnSync(assembler,['-o',bc],{input:'define i32 @package_input() { ret i32 0 }\n',encoding:'utf8'});
+  assert.equal(assembled.status,0,assembled.stderr);
+  await fs.copyFile(disassembler,path.join(f.sdk,'third_party/llvm/bin/llvm-dis'));
+  console.log(`SDK_PACKAGE_BITCODE path=${bc} sha256=${await fileDigest(bc)} assembler=${assembler}`);
   await packageStage.run(config);
   console.log('SDK_PACKAGE_ORIGIN_ASSERT_REACHED');
   assert.equal(await fileDigest(path.join(f.sdk, 'lib', f.tuple, 'libcangjie-std-core.a')), await fileDigest(path.join(f.work, 'stdlib-stage2/lib', f.tuple, 'libcangjie-std-core.a')));
