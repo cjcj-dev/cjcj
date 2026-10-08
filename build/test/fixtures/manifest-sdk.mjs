@@ -42,7 +42,7 @@ async function officialInputs(root, target, backend = false) {
   component.roles = [...ROLES];
   component.install = [{from:'',to:'', ...(target ? {exclude:[
     'bin/cjc','bin/cjc-frontend','bin/cjcj-stage1','compiler-lineage.json','std-producer.json',
-    'modules','lib','runtime','third_party/llvm','tools/bin/cjpm','share/cjcj/runtime_shim',
+    'modules','lib','runtime','include','schema','third_party/llvm','tools/bin/cjpm','share/cjcj/runtime_shim',
   ]} : backend ? {exclude:['third_party/llvm','include/cangjie','include/flatbuffers','schema','lib/linux_x86_64_cjnative/libcangjie-ast-support.a']} : {})}];
   const {receipt, receiptSha256, originBuildRoot, ...producer} = component.producer;
   component.producer = producer;
