@@ -73,7 +73,10 @@ if (fs.existsSync(languageInputs)) {
   console.error(`COLOUR_RT_LANGUAGE_DEST_EXISTS ${languageInputs}`);
   process.exit(2);
 }
-await run(process.execPath, [path.join(repo, 'ci/release/download_pinned.mjs'),
+// This input belongs only to the qualified language archive, not other pins.
+const archiveArgs = Object.hasOwn(process.env, 'COLOUR_GATE_LANGUAGE_ARCHIVE')
+  ? ['--archive', process.env.COLOUR_GATE_LANGUAGE_ARCHIVE] : [];
+await run(process.execPath, [path.join(repo, 'ci/release/download_pinned.mjs'), ...archiveArgs,
   'cjcj-dev/cjcj', '1504', languageInputs], env);
 const languageSdk = path.join(languageInputs, 'sdk');
 const host = path.join(languageSdk, 'host/compiler');
