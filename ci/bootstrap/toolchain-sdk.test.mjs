@@ -377,6 +377,16 @@ test('bootstrap phase reuse binds installed plan and manifest before returning a
   await atomicJson(plans, {schema: 'bootstrap-sdk-plans-v1', phases: {'stage1-initial': f.plan}});
   const argv = [process.execPath, path.join(here, 'bootstrap-sdk.mjs'), '--plans', plans,
     '--phase', 'stage1-initial', '--out', f.out];
+  const completeBundle = await fs.readFile(plans);
+  await atomicJson(plans, {schema: 'bootstrap-sdk-plans-v1', phases: {'stage1-initial': f.plan}});
+  const incomplete = await command(argv); observed(incomplete, 'phase-complete-bundle');
+  assert.notEqual(incomplete.rc, 0); assert.match(incomplete.stderr, /rule=BOOTSTRAP_PHASES component=bundle/);
+  await fs.writeFile(plans, completeBundle);
+  phases.stage3.stage = 'stage1';
+  await atomicJson(plans, {schema: 'bootstrap-sdk-plans-v1', phases});
+  const wrongStage = await command(argv); observed(wrongStage, 'phase-final-qualification');
+  assert.notEqual(wrongStage.rc, 0); assert.match(wrongStage.stderr, /rule=BOOTSTRAP_PHASES component=stage3/);
+  await fs.writeFile(plans, completeBundle);
   const normal = await command(argv); observed(normal, 'phase-reuse'); assert.equal(normal.rc, 0, normal.stderr);
   assert.equal(JSON.parse(normal.stdout.trim().split('\n').at(-1)).reused, true);
   const installedPlan = path.join(f.out, 'SDK.plan.json'), original = await fs.readFile(installedPlan);
