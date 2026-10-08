@@ -43,9 +43,11 @@ test('stage3 rejects the stage1 adapter as its parent through the real entry', a
   assert.notEqual(result.rc, 0); assert.match(result.stderr, /DEPENDENCY_ROLE.*actual stage2 compiler/);
 });
 test('noncompiler role cannot install a second physical compiler through authenticated assembly', async () => {
-  const plan = structuredClone(original);
-  plan.components = plan.components.filter(component => component.id !== stage.id);
-  for (const component of plan.components) delete component.inputOnly;
+  if (!process.env.SDK_COLLISION_OBSERVATION) throw new Error('SDK_COLLISION_OBSERVATION must name the retained native apparatus input');
+  // Declare the conflicting mapping before production. Existing real SDK
+  // receipts are immutable and must never be resealed to fit a changed plan.
+  const {plan} = JSON.parse(await fs.readFile(process.env.SDK_COLLISION_OBSERVATION, 'utf8'));
+  plan.buildRoot = path.join(root, 'collision-producers');
   const runtime = plan.components.find(component => component.roles.includes('runtime') && component.domain === 'target');
   runtime.install.push({from: `install/runtime/lib/${plan.platform}_cjnative/libcangjie-runtime.so`, to: 'bin/cjc'});
   const result = await invoke(plan, 'physical-conflict', false);
