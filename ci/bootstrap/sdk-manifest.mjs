@@ -48,6 +48,16 @@ export async function atomicJson(file, value) {
 export function reject(rule, component, detail) {
   throw new Error(`SDK_MANIFEST_REJECT rule=${rule} component=${component} ${detail}`);
 }
+// Project an install mapping onto the physical compiler names consumed by
+// compiler_identity and the std/stage adapters. Distribution role inventories
+// describe their retained contents; excluded bin entries are not consumers.
+function installsCompiler(component) {
+  return component.install.some(mapping => ['bin/cjc', 'bin/cjc-frontend', 'bin/cjcj-stage1'].some(target => {
+    if (mapping.to && target !== mapping.to && !target.startsWith(`${mapping.to}/`)) return false;
+    const suffix = mapping.to === target ? '' : mapping.to ? target.slice(mapping.to.length + 1) : target;
+    return !(mapping.exclude || []).some(excluded => suffix === excluded || suffix.startsWith(`${excluded}/`));
+  }));
+}
 function fields(object, required, optional, label) {
   if (!object || typeof object !== 'object' || Array.isArray(object)
     || required.some(key => !(key in object))
@@ -239,8 +249,13 @@ export function validatePlan(plan) {
     if (component.producer.adapter === 'bootstrap-compiler') {
       const selected = options.sdkComponents.map(id => byId.get(id));
       for (const role of ROLES) if (!selected.some(dep => dep?.roles.includes(role))) reject('DEPENDENCY_ROLE', component.id, `input SDK is missing ${role}`);
-      const compiler = selected.filter(dep => dep?.roles.includes('compiler'));
-      if (compiler.length !== 1 || (options.stage === 'stage3' && compiler[0].producer.adapter !== 'bootstrap-compiler')) reject('DEPENDENCY_ROLE', component.id, 'stage3 requires exactly one stage2 compiler producer');
+      const compiler = selected.filter(dep => dep && installsCompiler(dep));
+      if (compiler.length !== 1) reject('DEPENDENCY_ROLE', component.id, 'input SDK requires exactly one installed compiler producer');
+      // The native stage adapter consumes bin/cjcj-stage1 and a source-authored
+      // receipt, not the stock compiler in an opaque official distribution.
+      if (compiler[0].domain !== 'target' || compiler[0].source.kind !== 'git' || !compiler[0].roles.includes('compiler')) reject('DEPENDENCY_ROLE', component.id, 'input compiler requires the target Git producer contract');
+      if (options.stage === 'stage3' && (compiler[0].producer.adapter !== 'bootstrap-compiler'
+        || compiler[0].config.options.stage !== 'stage2')) reject('DEPENDENCY_ROLE', component.id, 'stage3 requires the actual stage2 compiler producer');
     }
     if (component.producer.adapter === 'ast-support' || component.producer.adapter.startsWith('sharedbuild-')) {
       const seed = byId.get(options.sdkDependency);

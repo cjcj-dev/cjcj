@@ -451,7 +451,9 @@ test('complete bootstrap intent freezer binds all eight phases and rejects an om
       stage: phase === 'stage3' ? 'final' : ['stage2', 'stage3-std'].includes(phase) ? 'stage2' : f.plan.stage}]));
   const intent = path.join(f.root, 'bundle.intent.json'), bundle = path.join(f.root, 'bundle.frozen.json');
   await atomicJson(intent, {schema: 'bootstrap-sdk-intents-v1', phases});
-  const argv = [process.execPath, path.join(here, 'freeze-bootstrap-plans.mjs'), '--intent', intent, '--out', bundle];
+  await atomicJson(path.join(f.root, 'phase-observation.json'), {intent, plan: f.plan,
+    expected: Object.fromEntries(f.identities)});
+  const argv = [process.execPath, path.join(here, 'prepare-bootstrap-plans.mjs'), '--intents', intent, '--out', bundle];
   const frozen = await command(argv); observed(frozen, 'freeze-eight-phases'); assert.equal(frozen.rc, 0, frozen.stderr);
   const result = await readJson(bundle); assert.equal(Object.keys(result.phases).length, 8);
   for (const plan of Object.values(result.phases)) {

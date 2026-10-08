@@ -67,7 +67,8 @@ export async function buildStageCompiler(request, run) {
     CANGJIE_BUILD_JOBS: String(os.availableParallelism()), CMAKE_BUILD_PARALLEL_LEVEL: String(os.availableParallelism()),
     cjHeapSize: options.heap, PATH: `${sdk}/bin:${sdk}/tools/bin:${sdk}/third_party/llvm/bin:${[...new Set(Object.values(tools).map(input => path.dirname(input.path)))].join(':')}:/usr/bin:/bin`};
   if (options.launcher) env.CMAKE_C_COMPILER_LAUNCHER = env.CMAKE_CXX_COMPILER_LAUNCHER = options.launcher;
-  await run(['node', path.join(source, 'ci/check-codegen-runtime-layout.mjs'), path.join(directory, 'build/layout-sources'), options.runtimePin.path], {cwd: source, env});
+  const llvm = manifest.components[manifest.files['third_party/llvm/bin/llc'].component].source;
+  await run(['node', path.join(source, 'ci/check-codegen-runtime-layout.mjs'), path.join(directory, 'build/layout-sources'), options.runtimePin.path, llvm.commit], {cwd: source, env});
   await run(['zx', path.join(source, 'runtime_shim/build_shim.mjs')], {cwd: source, env});
   const config = path.join(source, 'cjpm.toml'), before = await fs.readFile(config);
   await prepareTrimpath(source);
