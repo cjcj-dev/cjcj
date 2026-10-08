@@ -25,20 +25,22 @@ export async function runProducer(argv, {cwd, env, log}) {
 async function verifyProducer(component) {
   const producerRoot = component.producer.repository;
   if (!producerRoot) return;
-  const actual = (await execute('git', ['-C', producerRoot, 'rev-parse', 'HEAD'])).stdout.trim();
+  const git = component.config.tools.git.path;
+  const actual = (await execute(git, ['-C', producerRoot, 'rev-parse', 'HEAD'])).stdout.trim();
   if (actual !== component.producer.version
-    || (await execute('git', ['-C', producerRoot, 'status', '--porcelain', '--untracked-files=all'])).stdout.trim()) reject('PRODUCER_IDENTITY', component.id, `expected clean ${component.producer.version}; actual ${actual}`);
+    || (await execute(git, ['-C', producerRoot, 'status', '--porcelain', '--untracked-files=all'])).stdout.trim()) reject('PRODUCER_IDENTITY', component.id, `expected clean ${component.producer.version}; actual ${actual}`);
 }
 async function checkout(component, directory) {
+  const git = component.config.tools.git.path;
   const source = path.join(directory, 'source');
   try { await fs.access(source); }
   catch {
     await fs.mkdir(source);
-    await execute('git', ['init', '-q', source]);
-    await execute('git', ['-C', source, 'fetch', '--no-tags', '--depth=1', component.source.repo, component.source.commit]);
-    await execute('git', ['-C', source, 'checkout', '--detach', '--quiet', component.source.commit]);
+    await execute(git, ['init', '-q', source]);
+    await execute(git, ['-C', source, 'fetch', '--no-tags', '--depth=1', component.source.repo, component.source.commit]);
+    await execute(git, ['-C', source, 'checkout', '--detach', '--quiet', component.source.commit]);
   }
-  await sourceIdentity(source, component.source, component.id); return source;
+  await sourceIdentity(source, component.source, component.id, git); return source;
 }
 async function official(component, directory, identity) {
   const source = component.source;
@@ -127,7 +129,7 @@ async function sharedbuild(component, directory, identity, plan, resumeFailed, o
 async function native(component, directory, identity, outputs) {
   await verifyProducer(component);
   const source = await checkout(component, directory);
-  const before = await sourceIdentity(source, component.source, component.id);
+  const before = await sourceIdentity(source, component.source, component.id, component.config.tools.git.path);
   const request = path.join(directory, 'request.json');
   await atomicJson(request, {component, identity, source, directory,
     dependencies: Object.fromEntries(component.dependencies.map(id => [id, outputs.get(id)]))});
@@ -143,8 +145,8 @@ async function native(component, directory, identity, outputs) {
       if (process.env[key]) env[key] = process.env[key];
     }
   }
-  const result = await runProducer([process.execPath, executable, request], {cwd: directory, env, log});
-  const after = await sourceIdentity(source, component.source, component.id);
+  const result = await runProducer([component.config.tools.node.path, executable, request], {cwd: directory, env, log});
+  const after = await sourceIdentity(source, component.source, component.id, component.config.tools.git.path);
   return sealOutput(directory, component, identity, {...result, status: 'complete', kind: component.producer.adapter, before, source: after});
 }
 export async function produceComponent(plan, component, identity, outputs, {resumeFailed = false} = {}) {

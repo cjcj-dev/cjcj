@@ -31,7 +31,7 @@ const run = async (argv, options = {}) => {
 async function fetchIdentity(input, target, label) {
   if (!input || !/^[0-9a-f]{40}$/.test(input.commit) || !/^[0-9a-f]{40}$/.test(input.tree) || !input.repo) reject('SOURCE', label, 'full dependency source identity');
   await fs.mkdir(target, {recursive: true});
-  try { await sourceIdentity(target, input, label); }
+  try { await sourceIdentity(target, input, label, tool('git')); }
   catch (error) {
     // Only initialize a genuinely new source directory. A mismatched existing
     // checkout is never reset or repurposed under another source identity.
@@ -40,7 +40,7 @@ async function fetchIdentity(input, target, label) {
     await run(['git', '-C', target, 'fetch', '--depth=1', '--no-tags', input.repo, input.commit]);
     await run(['git', '-C', target, 'checkout', '--quiet', '--detach', input.commit]);
   }
-  await sourceIdentity(target, input, label); return target;
+  await sourceIdentity(target, input, label, tool('git')); return target;
 }
 function optionsOnly(options, names, label) {
   if (Object.keys(options).some(key => !names.includes(key))) reject('PRODUCER_OPTIONS', label, 'unknown option');
@@ -120,9 +120,9 @@ async function llvm(request) {
     const payloads = ['MANIFEST', `bin/${lld}`, 'bin/llc', 'bin/opt', 'lib/STATIC_LLVM.txt', 'fixed-llc/llc.gz', 'fixed-llc/opt.gz',
       `fixed-llc/${lld}.gz`, 'fixed-llc/cjselfhost_llvmshim.o', 'fixed-llc/llvm-tools.manifest'];
     await fs.writeFile(path.join(artifacts, 'SHA256SUMS'), (await Promise.all(payloads.map(async rel => `${await fileDigest(path.join(artifacts, rel))}  ./${rel}\n`))).join(''));
-    await sourceIdentity(compiler, options.compilerSource, 'llvm-schema'); await sourceIdentity(flatbuffers, options.flatbuffersSource, 'flatbuffers');
+    await sourceIdentity(compiler, options.compilerSource, 'llvm-schema', tool('git')); await sourceIdentity(flatbuffers, options.flatbuffersSource, 'flatbuffers', tool('git'));
   }
-  await sourceIdentity(paired, runtime.component.source, 'llvm-runtime');
+  await sourceIdentity(paired, runtime.component.source, 'llvm-runtime', tool('git'));
 }
 async function std(request) {
   const {component, source, directory, dependencies} = request, options = component.config.options;
@@ -188,11 +188,11 @@ export async function nativeProducer(request) {
   const platform = PLATFORMS[component.config.host];
   if (!platform || platform[0] !== process.platform || platform[1] !== process.arch) reject('PRODUCER_PLATFORM', component.id, `needs ${component.config.host}`);
   if (os.availableParallelism() < 64 && process.env.GITHUB_ACTIONS !== 'true') reject('PRODUCER_RESOURCES', component.id, 'at least 64 native build CPUs');
-  await sourceIdentity(request.source, component.source, component.id);
+  await sourceIdentity(request.source, component.source, component.id, tool('git'));
   if (component.producer.adapter === 'bootstrap-std') await std(request);
   else if (['llvm-tools', 'llvm-dylib'].includes(component.producer.adapter)) await llvm(request);
   else reject('ADAPTER', component.id, component.producer.adapter);
-  await sourceIdentity(request.source, component.source, component.id);
+  await sourceIdentity(request.source, component.source, component.id, tool('git'));
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try { await nativeProducer(await readJson(process.argv[2])); }

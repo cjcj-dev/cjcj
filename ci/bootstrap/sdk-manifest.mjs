@@ -151,9 +151,9 @@ export function validatePlan(plan) {
           if (!HEX40.test(config.options[key].commit) || !HEX40.test(config.options[key].tree) || !config.options[key].repo) reject('SOURCE', id, key);
         }
       }
-      for (const tool of ['cmake', 'ninja', 'clang', 'clang++', 'git', ...(producer.adapter === 'llvm-dylib' ? ['python3'] : [])]) if (!config.tools[tool]) reject('CONFIG', id, `native producer tool ${tool} must be frozen`);
+      for (const tool of ['node', 'cmake', 'ninja', 'clang', 'clang++', 'git', ...(producer.adapter === 'llvm-dylib' ? ['python3'] : [])]) if (!config.tools[tool]) reject('CONFIG', id, `native producer tool ${tool} must be frozen`);
     }
-    if (producer.adapter === 'bootstrap-std') for (const tool of ['python3', 'cmake', 'ninja', 'clang', 'clang++', 'ar', 'git']) {
+    if (producer.adapter === 'bootstrap-std') for (const tool of ['node', 'python3', 'cmake', 'ninja', 'clang', 'clang++', 'ar', 'git']) {
       if (!config.tools[tool]) reject('CONFIG', id, `std producer tool ${tool} must be frozen`);
     }
     if (['bootstrap-std', 'llvm-tools', 'llvm-dylib'].includes(producer.adapter)) absolute(producer.repository, id);
@@ -215,8 +215,8 @@ export function buildIdentities(plan) {
   }
   return identities;
 }
-export async function sourceIdentity(root, expected, component) {
-  const git = async (...args) => (await execute('git', ['-C', root, ...args])).stdout.trim();
+export async function sourceIdentity(root, expected, component, executable = 'git') {
+  const git = async (...args) => (await execute(executable, ['-C', root, ...args])).stdout.trim();
   const identity = {commit: await git('rev-parse', 'HEAD'), tree: await git('rev-parse', 'HEAD^{tree}'),
     status: await git('status', '--porcelain', '--untracked-files=all')};
   if (identity.commit !== expected.commit || identity.tree !== expected.tree || identity.status) reject('SOURCE_CHECKOUT', component, canonical(identity).trim());
