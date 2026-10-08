@@ -147,7 +147,8 @@ export function validatePlan(plan) {
       if (!/^\d+GB$/.test(config.options.heap)) reject('CONFIG', id, 'heap');
     }
     if (producer.adapter === 'ast-support') {
-      fields(config.options, ['sdkDependency', 'flatbuffersSource'], ['launcher'], id);
+      fields(config.options, ['sdkDependency', 'flatbuffersSource'], ['launcher', 'flatbuffersTransform'], id);
+      if (config.options.flatbuffersTransform !== undefined && config.options.flatbuffersTransform !== 'cangjie-package-mapping-v1') reject('SOURCE_TRANSFORM', id, 'unknown FlatBuffers transformation');
       if (!component.roles.includes('ast') || !component.dependencies.includes(config.options.sdkDependency)) reject('DEPENDENCY', id, 'AST requires its explicit official SDK dependency');
       fields(config.options.flatbuffersSource, ['repo', 'commit', 'tree'], [], id);
       if (!HEX40.test(config.options.flatbuffersSource.commit) || !HEX40.test(config.options.flatbuffersSource.tree)
@@ -273,6 +274,25 @@ export async function sourceIdentity(root, expected, component, executable = 'gi
     status: await git('status', '--porcelain', '--untracked-files=all')};
   if (identity.commit !== expected.commit || identity.tree !== expected.tree || identity.status) reject('SOURCE_CHECKOUT', component, canonical(identity).trim());
   return identity;
+}
+// Only an explicitly registered, precomputed source transformation may differ
+// from its Git tree. The normal clean-source guard has no such exception.
+export async function registeredSourceIdentity(root, expected, component, changes, executable = 'git') {
+  const git = async (...args) => (await execute(executable, ['-C', root, ...args])).stdout;
+  const identity = {commit: (await git('rev-parse', 'HEAD')).trim(), tree: (await git('rev-parse', 'HEAD^{tree}')).trim(),
+    status: await git('status', '--porcelain', '-z', '--untracked-files=all')};
+  if (identity.commit !== expected.commit || identity.tree !== expected.tree) reject('SOURCE_CHECKOUT', component, canonical(identity).trim());
+  const wanted = Object.keys(changes).sort().map(rel => ` M ${rel}`).sort();
+  const actual = identity.status.split('\0').filter(Boolean).sort();
+  if (canonical(actual) !== canonical(wanted)) reject('SOURCE_TRANSFORM', component, `unexpected source changes ${canonical(actual).trim()}`);
+  for (const [rel, row] of Object.entries(changes)) {
+    relative(rel, component);
+    const file = await physicalPath(root, rel, component), stat = await fs.lstat(file);
+    if (!stat.isFile() || (stat.mode & 0o777) !== row.mode || await fileDigest(file) !== row.sha256) {
+      reject('SOURCE_TRANSFORM', component, `registered result differs: ${rel}`);
+    }
+  }
+  return {...identity, registeredChanges: changes};
 }
 export async function physicalPath(root, relativePath, component) {
   relative(relativePath, component);

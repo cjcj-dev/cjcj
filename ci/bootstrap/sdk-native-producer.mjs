@@ -7,7 +7,7 @@ import os from 'node:os';
 import {gzipSync} from 'node:zlib';
 import {spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
-import {execute, fileDigest, readJson, atomicJson, canonical, sourceIdentity, reject, PLATFORMS, inventory} from './sdk-manifest.mjs';
+import {execute, fileDigest, readJson, atomicJson, canonical, sourceIdentity, registeredSourceIdentity, reject, PLATFORMS, inventory} from './sdk-manifest.mjs';
 import {parseLlvmToolsManifest} from '../llvm-tools-manifest.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -190,7 +190,7 @@ async function std(request) {
 }
 async function astSupport(request) {
   const {component, source, directory, dependencies} = request, options = component.config.options;
-  optionsOnly(options, ['sdkDependency', 'flatbuffersSource', 'launcher'], component.id);
+  optionsOnly(options, ['sdkDependency', 'flatbuffersSource', 'launcher', 'flatbuffersTransform'], component.id);
   const seed = dependencies[options.sdkDependency];
   if (seed?.component.source.kind !== 'distribution' || seed.component.domain !== 'host') reject('PRODUCER_DEPENDENCY', component.id, 'AST needs the declared official FlatBuffers SDK');
   // This subset crosses the existing AST install boundary unchanged. Bind
@@ -202,9 +202,27 @@ async function astSupport(request) {
   if (!Object.keys(expected).length || canonical(await inventory(path.join(seed.artifacts, 'third_party/flatbuffers'))) !== canonical(expected)) {
     reject('DEPENDENCY_DIGEST', component.id, 'official FlatBuffers subset differs from its presealed producer inventory');
   }
-  // This is the existing AST workflow's pinned nested source input. No CMake
-  // source patch or guessed artifact-source stamp replaces the two Git reads.
+  // This is the existing AST workflow's pinned nested source input.
   const flatbuffers = await fetchIdentity(options.flatbuffersSource, path.join(source, 'third_party/flatbuffers'), 'ast-flatbuffers');
+  let transformation;
+  if (options.flatbuffersTransform !== undefined) {
+    if (options.flatbuffersTransform !== 'cangjie-package-mapping-v1') reject('SOURCE_TRANSFORM', component.id, 'unknown transformation');
+    // The pinned compiler's ExternalProject PATCH_COMMAND modifies this one
+    // file. Derive and record its exact expected result before building; do
+    // not infer permitted changes from whatever the producer leaves behind.
+    const rel = 'src/idl_gen_cangjie.cpp', original = path.join(flatbuffers, rel);
+    const script = path.join(source, 'third_party/cmake/ApplyCangjieIdlPackagePatch.cmake');
+    const expectedRoot = path.join(directory, 'build', 'registered-flatbuffers');
+    const expectedFile = path.join(expectedRoot, rel);
+    await fs.mkdir(path.dirname(expectedFile), {recursive: true});
+    await fs.copyFile(original, expectedFile);
+    await run(['cmake', `-DFLATBUFFERS_SRC=${expectedRoot}`, '-P', script]);
+    transformation = {name: options.flatbuffersTransform, script: {source: component.source, path: 'third_party/cmake/ApplyCangjieIdlPackagePatch.cmake', sha256: await fileDigest(script)},
+      input: {source: options.flatbuffersSource, path: rel, sha256: await fileDigest(original)},
+      changes: {[rel]: {sha256: await fileDigest(expectedFile), mode: (await fs.stat(original)).mode & 0o777}}};
+    if (transformation.input.sha256 === transformation.changes[rel].sha256) reject('SOURCE_TRANSFORM', component.id, 'declared transformation did not change the original');
+    await atomicJson(path.join(directory, 'logs', 'registered-source-transform.json'), transformation);
+  }
   const frozenTools = path.join(directory, 'build', 'ast-tools'); await fs.mkdir(frozenTools, {recursive: true});
   for (const [name, input] of Object.entries(component.config.tools)) {
     const destination = path.join(frozenTools, name);
@@ -222,9 +240,11 @@ async function astSupport(request) {
     'schema/StdAstFormat.fbs', 'third_party/flatbuffers/bin/flatc', 'SHA256SUMS']) {
     await fs.access(path.join(artifacts, rel));
   }
-  await sourceIdentity(flatbuffers, options.flatbuffersSource, 'ast-flatbuffers', tool('git'));
+  const flatbuffersAfter = transformation
+    ? await registeredSourceIdentity(flatbuffers, options.flatbuffersSource, 'ast-flatbuffers', transformation.changes, tool('git'))
+    : await sourceIdentity(flatbuffers, options.flatbuffersSource, 'ast-flatbuffers', tool('git'));
   await atomicJson(path.join(artifacts, 'ast-producer.json'), {source: component.source,
-    flatbuffers: options.flatbuffersSource, official_sdk_build_id: seed.buildId,
+    flatbuffers: options.flatbuffersSource, flatbuffersAfter, transformation, official_sdk_build_id: seed.buildId,
     producer: component.producer, buildId: request.identity.buildId});
 }
 export async function nativeProducer(request) {
