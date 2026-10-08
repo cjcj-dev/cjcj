@@ -150,6 +150,10 @@ async function std(request) {
     CC: tool('clang'), CXX: tool('clang++'), AR: tool('ar'),
     LD_LIBRARY_PATH: `${hostRuntime}:${sdk}/third_party/llvm/lib:${sdk}/tools/lib`, cjHeapSize: options.heap,
     TMPDIR: path.join(directory, 'build', 'tmp'), CANGJIE_BUILD_JOBS: String(os.availableParallelism()), CMAKE_BUILD_PARALLEL_LEVEL: String(os.availableParallelism())};
+  if (options.launcher) {
+    env.CMAKE_C_COMPILER_LAUNCHER = options.launcher;
+    env.CMAKE_CXX_COMPILER_LAUNCHER = options.launcher;
+  }
   await fs.mkdir(env.TMPDIR, {recursive: true});
   // Native backend tools and the in-process library must come from the same
   // explicit target LLVM output. Managed compiler loading keeps host runtime.
