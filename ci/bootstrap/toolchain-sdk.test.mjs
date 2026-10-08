@@ -406,3 +406,28 @@ test('bootstrap phase reuse binds installed plan and manifest before returning a
   await fs.writeFile(module, moduleBytes); await fs.writeFile(lockPath, lockBytes);
   const recovered = await command(argv); observed(recovered, 'phase-lock-restored'); assert.equal(recovered.rc, 0, recovered.stderr);
 });
+
+test('complete bootstrap intent freezer binds all six phases and rejects an omitted phase before production', async () => {
+  const f = await fixture();
+  const phases = Object.fromEntries(['stage0', 'stage0-run', 'std-bootstrap', 'stage1-initial', 'stage1-std', 'stage3']
+    .map(phase => [phase, {...clone(f.plan), schema: 'toolchain-sdk-intent-v1',
+      role: ['stage0', 'stage0-run', 'std-bootstrap'].includes(phase) ? 'host' : 'target',
+      stage: phase === 'stage3' ? 'final' : f.plan.stage}]));
+  const intent = path.join(f.root, 'bundle.intent.json'), bundle = path.join(f.root, 'bundle.frozen.json');
+  await atomicJson(intent, {schema: 'bootstrap-sdk-intents-v1', phases});
+  const argv = [process.execPath, path.join(here, 'freeze-bootstrap-plans.mjs'), '--intent', intent, '--out', bundle];
+  const frozen = await command(argv); observed(frozen, 'freeze-six-phases'); assert.equal(frozen.rc, 0, frozen.stderr);
+  const result = await readJson(bundle); assert.equal(Object.keys(result.phases).length, 6);
+  for (const plan of Object.values(result.phases)) {
+    validatePlan(plan); assert.equal(plan.components.find(component => component.id === 'runtime').source.commit, f.sources.runtime.commit);
+  }
+  const dry = await command([process.execPath, path.join(here, 'bootstrap-sdk.mjs'), '--plans', bundle,
+    '--phase', 'stage1-initial', '--out', f.out, '--dry-run']);
+  observed(dry, 'frozen-bundle-real-phase-entry'); assert.equal(dry.rc, 0, dry.stderr);
+  await assert.rejects(fs.access(f.plan.buildRoot)); await assert.rejects(fs.access(f.out));
+  delete phases.stage3; await atomicJson(intent, {schema: 'bootstrap-sdk-intents-v1', phases});
+  argv[argv.length - 1] = path.join(f.root, 'incomplete.frozen.json');
+  const incomplete = await command(argv); observed(incomplete, 'freeze-missing-phase');
+  assert.notEqual(incomplete.rc, 0); assert.match(incomplete.stderr, /rule=BOOTSTRAP_PHASES component=intent/);
+  await assert.rejects(fs.access(argv.at(-1)));
+});
