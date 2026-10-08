@@ -92,8 +92,7 @@ async function verifySdk(sdk, plan, manifest) {
   const symbols = (await execute('nm', ['-D', '--defined-only', runtime])).stdout;
   const masks = symbols.split('\n').filter(line => /\bg_cjLoadBadMask(?:@@?\S+)?$/.test(line)).length;
   if (masks !== (plan.role === 'target' ? 1 : 0)) reject('RUNTIME_COLOUR', 'runtime', `role=${plan.role} masks=${masks}`);
-  const tools = ['third_party/llvm/bin/llc', 'third_party/llvm/bin/opt', 'third_party/llvm/bin/ld.lld', 'tools/bin/cjpm'];
-  if (plan.role === 'host') tools.push('bin/cjc');
+  const tools = ['third_party/llvm/bin/llc', 'third_party/llvm/bin/opt', 'third_party/llvm/bin/ld.lld', 'tools/bin/cjpm', 'bin/cjc'];
   for (const rel of tools) {
     if (!manifest.files[rel]) reject('MISSING_ARTIFACT', 'tools', rel);
     const binary = path.join(sdk, rel);
@@ -104,7 +103,7 @@ async function verifySdk(sdk, plan, manifest) {
     const script = 'set -e; source "$1/envsetup.sh"; if [ -n "$2" ]; then export LD_LIBRARY_PATH="$2${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"; fi; exec "${@:3}"';
     const loaded = (await execute('bash', ['-c', script, 'sdk-verify', sdk, host, 'ldd', binary])).stdout;
     if (loaded.includes('not found')) reject('EXECUTABLE_LOAD', 'tools', `${rel}: ${loaded.trim()}`);
-    await execute('bash', ['-c', script, 'sdk-verify', sdk, host, binary, '--version']);
+    if (rel !== 'bin/cjc' || plan.role === 'host') await execute('bash', ['-c', script, 'sdk-verify', sdk, host, binary, '--version']);
   }
 }
 function installLock(plan, manifest) {
