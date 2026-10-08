@@ -11,6 +11,48 @@ import {produceComponent} from './sdk-producers.mjs';
 import {verifyBootstrapRuntimeSdk} from './runtime_sdk.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+function verifyResolvedIdentities(plan, manifest) {
+  const identities = buildIdentities(plan);
+  const withoutLocator = producer => {
+    const {receipt, receiptSha256, originBuildRoot, ...identity} = producer;
+    return identity;
+  };
+  const actual = manifest.components || {};
+  if (canonical(Object.keys(actual).sort()) !== canonical(plan.components.map(component => component.id).sort())) {
+    reject('RESOLVED_IDENTITY', 'sdk', 'actual component membership differs from frozen plan');
+  }
+  for (const component of plan.components) {
+    const row = actual[component.id], identity = identities.get(component.id), producer = component.producer;
+    const directory = producer.receipt || identity.directory;
+    const origin = producer.receipt ? path.join(producer.originBuildRoot, component.id,
+      component.source.commit || component.source.lockSha256, identity.recipeId) : identity.directory;
+    if (row.status !== 'complete' || row.rc !== 0 || row.buildId !== identity.buildId
+      || row.directory !== directory || row.originDirectory !== origin
+      || canonical(row.source) !== canonical(component.source) || canonical(row.config) !== canonical(component.config)
+      || !row.producer || canonical(withoutLocator(row.producer)) !== canonical(withoutLocator(producer))
+      || canonical(row.dependencies) !== canonical(identity.dependencies)
+      || !/^[a-f0-9]{64}$/.test(row.receiptSha256 || '')
+      || (producer.receipt && row.receiptSha256 !== producer.receiptSha256)
+      || (component.source.kind === 'git' && (row.execution?.source?.commit !== component.source.commit
+        || row.execution?.source?.tree !== component.source.tree))
+      || (component.source.kind === 'distribution' && row.execution?.distribution?.lockSha256 !== component.source.lockSha256)) {
+      reject('RESOLVED_IDENTITY', component.id, 'actual producer/dependency closure differs from frozen plan');
+    }
+  }
+  for (const [rel, file] of Object.entries(manifest.files || {})) {
+    const component = plan.components.find(value => value.id === file.component), row = actual[file.component];
+    if (!component || file.buildId !== row.buildId || file.receiptSha256 !== row.receiptSha256
+      || file.artifacts !== path.join(row.directory, 'artifacts')) reject('RESOLVED_IDENTITY', file.component, `artifact receipt differs: ${rel}`);
+    relative(rel, component.id); relative(file.source, component.id);
+    const mapped = component.install.some(mapping => {
+      if (mapping.from && file.source !== mapping.from && !file.source.startsWith(`${mapping.from}/`)) return false;
+      const suffix = mapping.from === file.source ? '' : mapping.from ? file.source.slice(mapping.from.length + 1) : file.source;
+      if ((mapping.exclude || []).some(excluded => suffix === excluded || suffix.startsWith(`${excluded}/`))) return false;
+      return [mapping.to, suffix].filter(Boolean).join('/') === rel;
+    });
+    if (!mapped) reject('RESOLVED_IDENTITY', component.id, `artifact is outside frozen install mapping: ${rel}`);
+  }
+}
 async function requiredInput(input, label) {
   if (await fileDigest(input.path) !== input.sha256) reject('VERIFICATION_INPUT', label, 'frozen verification input changed');
 }
@@ -68,6 +110,7 @@ export async function verifyManifestSdk(sdk, plan, manifest) {
     || objectId(await readJson(path.join(sdk, 'SDK.manifest.json'))) !== manifestSha256) {
     reject('INSTALL_BINDING', 'sdk', 'installed plan, successful manifest and lock must agree');
   }
+  verifyResolvedIdentities(plan, manifest);
   for (const [name, input] of Object.entries(plan.verification)) if (input?.path) await requiredInput(input, name);
   const tuple = PLATFORMS[plan.platform][2];
   // Keep existing colour/ABI/lineage and native loadability checks. The legacy
@@ -179,6 +222,7 @@ export async function resolvePlan(plan, {dryRun = false, resumeFailed = false} =
       config: output.component.config, producer: output.component.producer, dependencies: output.dependencies,
       status: output.status, rc: output.rc, execution: output.execution}])),
     files: resolveFiles(plan, outputs)};
+  verifyResolvedIdentities(plan, manifest);
   await fs.mkdir(plan.buildRoot, {recursive: true});
   await atomicJson(path.join(plan.buildRoot, `resolved-${manifest.planSha256}.json`), manifest);
   return manifest;
