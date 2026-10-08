@@ -1,0 +1,131 @@
+# Frozen toolchain SDK inputs
+
+`toolchain-sdk.mjs` accepts one complete frozen plan. `sdk_build.sh` delegates to
+that entry; the former loose component flags are rejected. All destinations are
+private, initially absent directories. A successful SDK is published by rename
+only after its installed bytes and the existing semantic checks pass.
+
+This candidate remains under implementation. The matrix below records the
+current adapter coverage; it is not a release qualification or an ABI approval.
+
+## Inputs and identities
+
+The three records have different meanings:
+
+| Record | Meaning | Created by |
+| --- | --- | --- |
+| `toolchain-sdk-plan-v1` | Frozen sources, configurations, tools and dependency graph | Input freezer or caller before building |
+| `toolchain-sdk-output-v1` and `DONE` | Actual successful producer execution and complete artifact inventory | Producer adapter after successful execution |
+| `toolchain-sdk-resolved-v1` | Exact output receipts and SDK installation mappings | Resolver after every dependency completes |
+| `SDK.lock.json` | Installation membership, original digests and semantic identities | Assembly before validation |
+
+Each plan names `lane`, `role`, `platform`, `stage`, absolute `buildRoot`,
+`components`, and `verification`. Components name `id`, `roles`, `domain`,
+`source`, `config`, `producer`, `dependencies`, and explicit `install` mappings.
+The required component roles are compiler, std, runtime, boundscheck,
+llvm-tools, llvm-dylib, ast, cjpm, and official-host. They may share a producer,
+but no role may be omitted.
+
+Git sources carry repository, full commit and tree. Official distributions
+carry their already published distribution version, root, complete lock digest
+and retained-file reason. Distribution inputs belong to the host domain;
+they never acquire a fabricated Git source identity. Different repositories
+may have different source commits. LLVM tools and dylib in each domain must
+declare the same LLVM source and paired runtime dependency.
+
+Tools carry physical absolute paths and SHA-256 digests. Configuration includes
+host/target and adapter-specific options. The plan cannot contain an executable
+shell command or choose an unknown adapter. Schema and graph validation happen
+before producer execution. `sdk-manifest.mjs::validatePlan` is the authoritative
+versioned field and adapter contract.
+
+An optional input convenience uses the same structure with
+`schema=toolchain-sdk-intent-v1`: Git `ref` replaces commit/tree, producer
+`ref` is resolved in its explicit repository, and tool/verification digests can
+be omitted. The freezer reads and records actual inputs; it does not build or
+attribute existing loose artifacts to a source commit.
+
+```text
+zx ci/bootstrap/freeze-sdk-plan.mjs --intent intent.json --out new-plan.json
+zx ci/bootstrap/toolchain-sdk.mjs --plan new-plan.json --dry-run
+zx ci/bootstrap/toolchain-sdk.mjs --plan new-plan.json --out /private/new-sdk
+```
+
+Freezing must run where the producer/source repositories and tool paths will
+actually be used. Local source paths do not authorize a source transport to a
+different machine. The separately reviewed repo sync supplies remote source;
+this module does not implement source synchronization.
+
+## Producers and directories
+
+The adapter set is `official`, `sharedbuild-stage1`,
+`sharedbuild-runtime-default`, `sharedbuild-runtime-testable`, `bootstrap-std`,
+`llvm-tools`, and `llvm-dylib`. The last three reuse the existing native
+CMake/Ninja, LLVM shim and std `build.py` recipes. Sharedbuild adapters invoke
+the existing sharedbuild engine. Their builder is the actual `.mjs` file;
+companion shell wrappers cannot substitute an unpinned implementation.
+
+Sharedbuild options declare optimization, parameters, official SDK dependency,
+file input bindings, expected outputs, jobs and heap. Each file binding names
+a dependency and its sealed relative artifact. The request is emitted inside
+the current identity directory. The external `producer.recipe` path is a
+retained request hint, not a concurrent mutable input or output authority.
+
+Before any checkout/build, each identity resolves to:
+
+```text
+<buildRoot>/<component>/<full source SHA or distribution lock SHA>/<recipe ID>/
+  source/ build/ artifacts/ logs/
+```
+
+Recipe IDs include configuration, pinned producer and tools, and dependency
+build IDs. Sharedbuild also retains its exact native work under
+`shared-work/<kind>/<full SHA>/<native recipe ID>`, separately from the sealed
+cache. Both the cache key and physical work key use the existing OS lock.
+Failed work and original exit codes remain available. Failed components stop
+their dependents and do not receive `DONE`. `--resume-failed` is an explicit
+same-input recovery request; it never changes the plan or discards failure
+evidence. Completed native work can restore a collected success cache.
+
+Only sealed artifact files are mapped into the SDK. Overlapping destinations,
+reserved metadata paths, path escapes and directory links are refused.
+Internal file aliases retain the existing compiler alias semantics. Ordinary
+installed bytes are hashed once against producer-time digests by `sdk_verify`;
+targeted LLVM/runtime/lineage checks remain separate and are not replaced by
+the ordinary byte check. Manifest SDK locks cannot be re-created with
+`sdk_verify.py --write-lock` after assembly.
+
+## Bootstrap phase handoff
+
+`bootstrap-sdk.mjs` reads either a directory of phase plans or one
+`bootstrap-sdk-plans-v1` JSON bundle with `phases`. Current phases are stage0,
+stage0-run, std-bootstrap, stage1-initial, stage1-std, and stage3. Every phase
+is a complete frozen SDK plan. The bootstrap CLI accepts `--sdk-plans`;
+GHA and the kkk2 source-build driver consume `CJCJ_BOOTSTRAP_SDK_PLANS`.
+Different std stages use different installation directories. Reuse requires
+the same frozen plan and successful existing SDK verification.
+
+Phase bundle generation from CI producer receipts, final compose/handoff
+migration and stage2/stage3 producer adapters are still incomplete. Existing
+bootstrap source orchestration has not yet all moved into the fixed producer
+directories. Do not run the old bootstrap flow with loose artifacts and assume
+this candidate has completed those migrations.
+
+## Coverage and remaining qualification
+
+| Platform/caller | Current implementation | Qualification |
+| --- | --- | --- |
+| Linux x86_64 standalone manifest entry | Sharedbuild seed/runtime, native LLVM/std, install and existing checks | Tests not yet run; genuine Cangjie compile/run pending |
+| Linux aarch64 | Native LLVM/std adapters; sharedbuild compiler/runtime remain x86_64 | Adapter coverage incomplete |
+| Darwin x86_64 / aarch64 | Native LLVM recipe shape exists | Native colour/load verifier and caller migration incomplete; assembly explicitly refuses |
+| Windows x86_64 | Declared platform and unknown/unimplemented adapter refusal | Native tuple/static archive adapter and verifier incomplete; assembly explicitly refuses |
+| Bootstrap / GHA / kkk2 driver | Frozen phase-plan argument and assembly call routing | Bundle generation and end-to-end execution incomplete |
+| Final SDK compose / bootstrap handoff | Existing stage3 install/seal consumers located | Full manifest migration incomplete |
+| Existing release target matrix | Existing native/cross target declarations remain | Target adaptations not complete; no Linux result may be extrapolated |
+
+The integration tests use small independently committed C sources with the
+real sharedbuild and SDK CLI. They can prove the assembly apparatus and its
+identity refusal, not Cangjie compiler or runtime GC behavior. The separate
+required genuine toolchain validation, producer/consumer cut arms, existing
+SDK regressions and native runner matrix remain required. Shared SDKs,
+in-flight #863, release/latest approvals and paired ABI holds are unchanged.

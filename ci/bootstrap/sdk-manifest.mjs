@@ -98,6 +98,7 @@ export function validatePlan(plan) {
       || !config.options || typeof config.options !== 'object' || Array.isArray(config.options)) reject('CONFIG', id, 'host/target/options');
     if (!config.tools || typeof config.tools !== 'object' || Array.isArray(config.tools)) reject('CONFIG', id, 'tools');
     for (const [name, tool] of Object.entries(config.tools)) {
+      if (!/^[A-Za-z0-9][A-Za-z0-9_.+-]*$/.test(name)) reject('CONFIG', id, `invalid tool name ${name}`);
       fields(tool, ['path', 'sha256'], [], `${id}/${name}`);
       absolute(tool.path, id); if (!HEX64.test(tool.sha256)) reject('CONFIG', id, 'tool digest');
     }
@@ -234,7 +235,7 @@ export async function physicalPath(root, relativePath, component) {
   return current;
 }
 export async function inventory(root, {links = false} = {}) {
-  const rows = {};
+  const rows = Object.create(null);
   const realRoot = await fs.realpath(root);
   if (realRoot !== path.resolve(root)) reject('LINK_ESCAPE', 'inventory', root);
   async function visit(prefix = '') {
@@ -320,7 +321,7 @@ export async function sealOutput(directory, component, identity, execution) {
   return readOutput(directory, component, identity);
 }
 export function resolveFiles(plan, outputs) {
-  const files = {};
+  const files = Object.create(null);
   for (const component of plan.components) {
     const output = outputs.get(component.id);
     for (const mapping of component.install) {
