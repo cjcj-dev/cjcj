@@ -53,10 +53,10 @@ test('genuine native receipt files keep their semantic owners in the installatio
     await fs.rm(assembled.out, {recursive: true});
   }
 });
-async function invoke(root, name) {
+async function invoke(root, name, input = planFile) {
   const out = path.join(root, name), log = path.join(root, `${name}.log`), fd = await fs.open(log, 'wx');
   const started = new Date().toISOString(), start = performance.now();
-  const args = [product, '--plan', planFile, '--out', out];
+  const args = [product, '--plan', input, '--out', out];
   const result = await new Promise((resolve, reject) => {
     const child = spawn(process.execPath, args, {stdio: ['ignore', fd.fd, fd.fd]});
     child.once('error', reject); child.once('exit', (rc, signal) => resolve({rc, signal}));
@@ -66,6 +66,28 @@ async function invoke(root, name) {
     started, finished: new Date().toISOString(), wall: (performance.now() - start) / 1000, ...result, log, planSha}, null, 2) + '\n');
   return {...result, out, log, text: await fs.readFile(log, 'utf8')};
 }
+
+test('genuine cross-repository sources are accepted while forged producer and source receipts are refused', async () => {
+  const gitSources = plan.components.filter(component => component.source.kind === 'git');
+  assert.ok(new Set(gitSources.map(component => component.source.commit)).size > 1,
+    'the retained genuine SDK has independent repository source commits');
+  await verifyManifestSdk(sdk, plan, manifest);
+  for (const [name, id, change] of [
+    ['wrong-compiler-producer', 'compiler', component => { component.producer.version = '0'.repeat(40); }],
+    ['false-runtime-tree', 'runtime', component => { component.source.tree = '0'.repeat(40); }],
+  ]) {
+    const root = await fs.mkdtemp(path.join(evidence, `${name}-`)), input = path.join(root, 'plan.json');
+    const rejectedPlan = structuredClone(plan);
+    change(rejectedPlan.components.find(component => component.id === id));
+    await fs.writeFile(input, JSON.stringify(rejectedPlan) + '\n');
+    const result = await invoke(root, 'rejected', input);
+    console.log(`TARGET_ASSERTION_EXECUTED ${name} component=${id} rc=${result.rc}`);
+    assert.notEqual(result.rc, 0, `the authentic ${id} receipt must refuse the forged identity`);
+    assert.match(result.text, new RegExp(`rule=COMPLETION component=${id} `));
+    await assert.rejects(fs.access(result.out));
+    assert.equal(objectId(await readJson(planFile)), planSha, 'original plan stayed frozen');
+  }
+});
 
 for (const boundary of ['ordinary-module', 'mixed-llvm']) {
   test(`genuine SDK ${boundary} refuses publication and restores through the actual assembler`, async () => {
