@@ -127,3 +127,5 @@ then it uses cjpm's actual member/filter/skip-build options and checks that XML
 contains exactly the source-declared executed cases. Missing, skipped, duplicate
 or unrelated execution records fail. The default invocation still tests the
 whole workspace. Directed success does not represent a whole-workspace pass.
+
+SDK export tests also bind compiler XML2 2.14.0 to its pinned GNOME source archive and actual compiler CMake dependency recipe, then check its installation through a real SDK assembly. Input-only reader ownership is checked through the same CLI. The private Python dependency preparer is a production entry, not a test; its source receipt does not certify an LLDB consumer.

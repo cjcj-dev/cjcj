@@ -55,7 +55,7 @@ test('fixed compiler schema reaches the real SDK resolver with its source bytes'
   assert.equal(manifest.files['schema/StdxChirFormat.fbs'].buildId, output.buildId);
 });
 
-for (const id of ['compiler-securec', 'llvm-release-tools', 'llvm-release-libraries', 'llvm-release-layout']) {
+for (const id of ['compiler-securec', 'compiler-xml2', 'llvm-release-tools', 'llvm-release-libraries', 'llvm-release-layout']) {
   test(`${id} reaches the real SDK resolver with its native release exports`, async () => {
     assert.ok(process.env.SDK_EXPORT_PLAN && process.env.SDK_EXPORT_ROOT, 'explicit private sealed input plan and evidence parent required');
     const plan = JSON.parse(await fs.readFile(process.env.SDK_EXPORT_PLAN, 'utf8'));
@@ -82,7 +82,8 @@ for (const id of ['compiler-securec', 'llvm-release-tools', 'llvm-release-librar
     }
     const input = path.join(root, 'plan.json'); await fs.writeFile(input, JSON.stringify(plan));
     const destination = path.join(root, 'sdk');
-    const operation = id === 'llvm-release-layout' ? ['--out', destination] : ['--resolve'];
+    const installedSdk = ['llvm-release-layout', 'compiler-xml2'].includes(id);
+    const operation = installedSdk ? ['--out', destination] : ['--resolve'];
     const child = spawnSync(component.config.tools.node.path, [path.join(repository, 'ci/bootstrap/toolchain-sdk.mjs'), '--plan', input, ...operation], {encoding: 'utf8', maxBuffer: 32 * 1024 * 1024});
     await fs.writeFile(path.join(root, 'resolver.log'), child.stdout + child.stderr);
     await fs.writeFile(path.join(root, 'resolver-result.json'), JSON.stringify({rc: child.status, signal: child.signal, repository, producer: component.producer}));
@@ -92,6 +93,11 @@ for (const id of ['compiler-securec', 'llvm-release-tools', 'llvm-release-librar
       const native = path.join(identity.directory, 'build/boundscheck/libboundscheck.so');
       assert.equal(output.files['libsecurec.so']?.sha256, await fileDigest(native), 'securec must be the actual native boundscheck export');
       assert.equal(output.files['libsecurec.so']?.type, 'file');
+    } else if (id === 'compiler-xml2') {
+      const native = path.join(identity.directory, 'build/xml2/third_party/xml2/lib/libxml2.so.2.14.0');
+      assert.equal(output.files['lib/libxml2.so.2.14.0']?.sha256, await fileDigest(native), 'XML2 must be the actual compiler dependency export');
+      assert.equal(output.files['lib/libxml2.so']?.target, 'libxml2.so.16');
+      assert.equal(output.files['lib/libxml2.so.16']?.target, 'libxml2.so.2.14.0');
     } else if (id === 'llvm-release-tools') {
       for (const name of ['lld', 'lli', 'llvm-link', 'llvm-lto', 'llvm-lto2', 'llvm-cov', 'llvm-profdata', 'llvm-profgen', 'llvm-symbolizer', 'llvm-objdump']) {
         assert.equal(output.files[`bin/${name}`]?.sha256, await fileDigest(path.join(identity.directory, 'build/tools/bin', name)), `native ${name} export`);
@@ -110,10 +116,10 @@ for (const id of ['compiler-securec', 'llvm-release-tools', 'llvm-release-librar
     }
     console.log(`NATIVE_SDK_STATUS_ASSERT_REACHED component=${id} evidence=${root}`);
     assert.equal(child.status, 0, child.stdout + child.stderr);
-    const manifest = id === 'llvm-release-layout' ? JSON.parse(await fs.readFile(path.join(destination, 'SDK.manifest.json'), 'utf8'))
+    const manifest = installedSdk ? JSON.parse(await fs.readFile(path.join(destination, 'SDK.manifest.json'), 'utf8'))
       : JSON.parse(child.stdout.trimEnd().split('\n').at(-1));
     console.log(`NATIVE_INSTALL_ASSERT_REACHED component=${id} evidence=${root}`);
-    const published = id === 'compiler-securec' ? 'runtime/lib/linux_x86_64_cjnative/libsecurec.so' : id === 'llvm-release-libraries' ? 'third_party/llvm/lib/libLTO.so.15' : 'third_party/llvm/bin/llvm-cov';
+    const published = id === 'compiler-securec' ? 'runtime/lib/linux_x86_64_cjnative/libsecurec.so' : id === 'compiler-xml2' ? 'third_party/llvm/lib/libxml2.so.2.14.0' : id === 'llvm-release-libraries' ? 'third_party/llvm/lib/libLTO.so.15' : 'third_party/llvm/bin/llvm-cov';
     assert.ok(manifest.files[published], `actual SDK consumer must retain ${published}`);
     // Preserve original receipts/artifacts/results; these completed native
     // intermediates are no longer referenced by an executing product.
