@@ -369,6 +369,7 @@ async function compilerXml2(request) {
   // official archive; both source trees and the original recipe stay intact.
   await fs.writeFile(path.join(projection, 'CMakeLists.txt'), `cmake_minimum_required(VERSION 3.16)\nproject(CompilerXml2 C CXX)\nset(CANGJIE_XML2_SOURCE_DIR "${extracted}")\ninclude("${recipe}")\n`);
   await run(['cmake', '-G', 'Ninja', '-S', projection, '-B', build,
+    '-DCMAKE_BUILD_TYPE=Release', `-DCMAKE_TOOLCHAIN_FILE=${path.join(source, 'cmake/linux_toolchain.cmake')}`,
     `-DCMAKE_MAKE_PROGRAM=${tool('ninja')}`, `-DCMAKE_C_COMPILER=${tool('clang')}`, `-DCMAKE_CXX_COMPILER=${tool('clang++')}`],
   {env: {...process.env, CC: tool('clang'), CXX: tool('clang++'), CMAKE_BUILD_PARALLEL_LEVEL: String(os.availableParallelism())}});
   const artifacts = path.join(directory, 'artifacts'); await fs.mkdir(path.join(artifacts, 'lib'), {recursive: true});
@@ -379,6 +380,7 @@ async function compilerXml2(request) {
   }
   await atomicJson(path.join(artifacts, 'xml2-producer.json'), {source: component.source, archive,
     recipe: {path: 'third_party/cmake/Xml2.cmake', sha256: await fileDigest(recipe)},
+    toolchain: {path: 'cmake/linux_toolchain.cmake', sha256: await fileDigest(path.join(source, 'cmake/linux_toolchain.cmake'))},
     host: component.config.host, target: component.config.target, producer: component.producer, buildId: request.identity.buildId});
   if (await fileDigest(archive.path) !== archive.sha256) reject('DEPENDENCY_DIGEST', component.id, 'libxml2 archive changed during production');
 }
