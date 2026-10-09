@@ -143,7 +143,7 @@ export async function manifestSdkFixture({root, compiler, prefix, inputSdk, shim
   await fs.cp(path.join(source,'std'),artifacts,{recursive:true,dereference:true});
   await elf(path.join(generation,'compiler'),await fs.readFile(path.join(source,'compiler.sh'),'utf8'));
   run(['python3','-B',tools.compilerIdentity.path,artifacts,'--install',path.join(generation,'compiler')]);
-  for(const name of ['cjpm']) await elf(path.join(artifacts,name==='cjpm'?'tools/bin/cjpm':`third_party/llvm/bin/${name}`),await fs.readFile(path.join(source,`${name}.sh`),'utf8'),name==='cjpm'?'':`CJLLVM-COMMIT:${identity.commit}`);
+  await elf(path.join(artifacts,'tools/bin/cjpm'),await fs.readFile(path.join(source,'cjpm.sh'),'utf8'));
   const runtime=path.join(artifacts,'runtime/lib',tuple,'libcangjie-runtime.so'); await fs.mkdir(path.dirname(runtime),{recursive:true});
   run(['cc','-shared','-fPIC',`-DSOURCE_SHA="${identity.commit}"`,...(role==='target'?['-DCOLOUR']:[]),path.join(source,'runtime.c'),'-o',runtime]);
   const runtimeObject = path.join(generation,'runtime.o');

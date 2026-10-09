@@ -581,7 +581,8 @@ test('actual same-run restore feeds verified root receipt to the real SDK consum
 // metadata used by the prepare transport fixture above. Exercise that actual
 // consumer branch without manufacturing an artifact run or rebuilding inputs.
 for (const role of ['host', 'target']) {
-  test(`retained ${role} producer inputs reach SDK assembly and independent runtime verification`, async t => {
+  const behavior = role === 'host' ? 'official runtime isolation' : 'independent runtime verification';
+  test(`retained ${role} producer inputs reach SDK assembly and ${behavior}`, async t => {
     const input = process.env.SDK_CONSUMER_INPUT_PLAN;
     assert.ok(input, 'a retained real input plan is required');
     const root = fs.mkdtempSync(path.join(process.env.SDK_CONSUMER_TEST_ROOT || os.tmpdir(), `retained-${role}-`));
