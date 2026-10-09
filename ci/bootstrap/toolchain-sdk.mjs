@@ -196,8 +196,8 @@ export async function verifyManifestSdk(sdk, plan, manifest) {
   if (masks !== (plan.role === 'target' ? 1 : 0)) reject('RUNTIME_COLOUR', 'runtime', `role=${plan.role} masks=${masks}`);
   // Reader qualification binds the real installed executables to their own
   // producer receipt; an old tuple receipt cannot acquire these members.
-  for (const component of plan.components.filter(c => c.config.options.bitcodeReadersOnly
-    || manifest.files['third_party/llvm/bitcode-readers.json']?.component === c.id)) {
+  for (const component of plan.components.filter(c => !c.inputOnly && (c.config.options.bitcodeReadersOnly
+    || manifest.files['third_party/llvm/bitcode-readers.json']?.component === c.id))) {
     const rel = 'third_party/llvm/bitcode-readers.json', row = manifest.files[rel];
     if (!row || row.component !== component.id) reject('LLVM_READERS', component.id, 'missing sealed reader metadata');
     const readers = await readJson(path.join(sdk, rel));

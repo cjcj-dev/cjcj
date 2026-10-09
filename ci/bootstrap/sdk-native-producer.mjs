@@ -299,6 +299,16 @@ async function llvmReleaseLayout(request) {
   if (version.some(part => !part)) reject('SOURCE', component.id, 'LLVM source version required');
   for (const alias of [`libLLVM-${version.join('.')}.so`, 'libLLVM.so']) await fs.symlink(`libLLVM-${version[0]}.so`, path.join(artifacts, 'lib', alias));
   if (options.librariesDependency) await copyDependency('librariesDependency');
+  const readerInput = dependencies[options.readersDependency];
+  const readerFile = path.join(artifacts, 'bitcode-readers.json');
+  const readerRecord = await readJson(readerFile);
+  const {receipt, receiptSha256, originBuildRoot, ...readerProducer} = readerInput.component.producer;
+  if (canonical(readerRecord.source) !== canonical(readerInput.component.source)
+    || canonical(readerRecord.producer) !== canonical(readerProducer) || readerRecord.buildId !== readerInput.buildId
+    || canonical(readerRecord.targets) !== canonical(['llvm-dis', 'llvm-as'])) reject('LLVM_READERS', component.id, 'input reader provenance differs');
+  for (const name of readerRecord.targets) if (readerRecord.tools[name]?.sha256 !== readerInput.files[`bin/${name}`]?.sha256) reject('LLVM_READERS', component.id, `input reader digest differs: ${name}`);
+  await atomicJson(readerFile, {...readerRecord, source: component.source, producer: component.producer,
+    buildId: request.identity.buildId, origin: {record: readerRecord, receiptSha256: readerInput.receiptSha256}});
   const sumsFile = path.join(artifacts, 'SHA256SUMS');
   const originalSums = await fs.readFile(sumsFile, 'utf8');
   for (const line of originalSums.trimEnd().split('\n')) {
