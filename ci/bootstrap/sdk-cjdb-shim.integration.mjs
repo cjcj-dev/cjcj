@@ -42,14 +42,17 @@ test('fixed Cjo schema generates a complete shim and reads a real CJOF package',
     await run([clang, '-shared', object, `-L${llvmBuild}/lib`, '-lLLVM-15',
       `-Wl,-rpath,${llvmBuild}/lib`, '-o', so]);
     const soSha256 = await digest(so);
+    const identities = {partialStatus: 'unsealed qualification input', repository,
+      object: {path: object, sha256: await digest(object)},
+      shim: {path: so, sha256: soSha256}, probe: 'NOT_LINKED',
+      llvm: {path: path.join(llvmBuild, 'lib/libLLVM-15.so'), sha256: await digest(path.join(llvmBuild, 'lib/libLLVM-15.so'))},
+      cjo: {path: cjo, sha256: await digest(cjo)}};
+    await fs.writeFile(path.join(output, 'identities.json'), JSON.stringify(identities, null, 2));
     const probe = path.join(output, 'surface_probe');
     await run([clang, '-std=c++17', '-O2', '-DCJOF_SCHEMA_CJO=1',
       `-I${flatbuffers}/include`, `-I${output}`, path.join(repository, 'test/cjoffi_probe/surface_probe.cpp'),
       `-L${output}`, '-lcjofshim', `-Wl,-rpath,${output}`, '-o', probe]);
-    const identities = {partialStatus: 'unsealed qualification input', repository,
-      shim: {path: so, sha256: soSha256}, probe: {path: probe, sha256: await digest(probe)},
-      llvm: {path: path.join(llvmBuild, 'lib/libLLVM-15.so'), sha256: await digest(path.join(llvmBuild, 'lib/libLLVM-15.so'))},
-      cjo: {path: cjo, sha256: await digest(cjo)}};
+    identities.probe = {path: probe, sha256: await digest(probe)};
     await fs.writeFile(path.join(output, 'identities.json'), JSON.stringify(identities, null, 2));
     await run(['/usr/bin/ldd', probe]);
     const result = await run([probe, cjo], {env: {...process.env, LD_DEBUG: 'libs'}});
