@@ -23,7 +23,7 @@ export const PLATFORMS = Object.freeze({
 });
 export const ADAPTERS = Object.freeze(['official', 'sharedbuild-stage1',
   'sharedbuild-runtime-default', 'sharedbuild-runtime-testable', 'bootstrap-std',
-  'llvm-tools', 'llvm-dylib', 'llvm-release-layout', 'ast-support', 'compiler-schema', 'compiler-boundscheck', 'compiler-xml2', 'bootstrap-compiler']);
+  'llvm-tools', 'llvm-dylib', 'llvm-release-layout', 'ast-support', 'compiler-schema', 'compiler-boundscheck', 'compiler-xml2', 'llvm-cjdb', 'bootstrap-compiler']);
 const HEX40 = /^[0-9a-f]{40}$/;
 const HEX64 = /^[0-9a-f]{64}$/;
 const NAME = /^[a-z][a-z0-9-]*$/;
@@ -173,6 +173,27 @@ export function validatePlan(plan) {
       for (const name of ['node', 'git', 'cmake', 'ninja', 'clang', 'clang++', 'tar']) if (!config.tools[name]) reject('CONFIG', id, `XML2 producer tool ${name} must be frozen`);
       absolute(producer.repository, id);
     }
+    if (producer.adapter === 'llvm-cjdb') {
+      fields(config.options, ['compilerSource', 'boundscheckSource', 'flatbuffersSource', 'runtimeDependency', 'python', 'xml2Archive', 'libedit'], ['launcher'], id);
+      for (const key of ['compilerSource', 'boundscheckSource', 'flatbuffersSource']) {
+        fields(config.options[key], ['repo', 'commit', 'tree'], [], id);
+        if (!HEX40.test(config.options[key].commit) || !HEX40.test(config.options[key].tree) || !config.options[key].repo) reject('SOURCE', id, key);
+      }
+      if (!component.dependencies.includes(config.options.runtimeDependency) || !component.roles.includes('llvm-tools') || !component.roles.includes('llvm-dylib')
+        || config.host !== 'linux_x86_64' || config.target !== 'linux_x86_64') reject('CONFIG', id, 'native complete CJDB LLVM closure required');
+      fields(config.options.python, ['root', 'receipt', 'sha256'], [], id);
+      absolute(config.options.python.root, id); absolute(config.options.python.receipt, id);
+      if (!HEX64.test(config.options.python.sha256)) reject('SOURCE', id, 'Python receipt digest');
+      fields(config.options.xml2Archive, ['path', 'sha256', 'url', 'version'], [], id);
+      absolute(config.options.xml2Archive.path, id);
+      if (config.options.xml2Archive.version !== '2.14.0' || config.options.xml2Archive.sha256 !== '3e2ed89d81d210322d70b35460166d4ea285e5bb017576972a1d76a09631985c') reject('SOURCE', id, 'fixed XML2 source');
+      fields(config.options.libedit, ['root', 'files', 'distribution'], [], id);
+      absolute(config.options.libedit.root, id);
+      if (!Object.keys(config.options.libedit.files).length) reject('SOURCE', id, 'actual libedit development input required');
+      for (const [rel, row] of Object.entries(config.options.libedit.files)) { relative(rel, id); if (!HEX64.test(row.sha256)) reject('SOURCE', id, 'libedit file digest'); }
+      for (const name of ['node', 'git', 'cmake', 'ninja', 'clang', 'clang++', 'tar', 'swig', 'launcher']) if (!config.tools[name]) reject('CONFIG', id, `CJDB producer tool ${name} must be frozen`);
+      absolute(producer.repository, id);
+    }
     if (producer.adapter === 'llvm-release-layout') {
       fields(config.options, ['toolsDependency', 'dylibDependency', 'auxiliaryDependency', 'readersDependency', 'releaseDependency', 'compilerSource', 'flatbuffersSource'], ['librariesDependency'], id);
       for (const [key, dependency] of Object.entries(config.options)) if (key.endsWith('Dependency') && !component.dependencies.includes(dependency)) reject('DEPENDENCY', id, 'release layout input not in closure');
@@ -303,7 +324,7 @@ export function validatePlan(plan) {
       const seed = byId.get(options.sdkDependency);
       if (seed?.source.kind !== 'distribution' || seed.domain !== 'host') reject('DEPENDENCY_ROLE', component.id, 'producer requires an official host distribution dependency');
     }
-    if (['llvm-tools', 'llvm-dylib'].includes(component.producer.adapter)) {
+    if (['llvm-tools', 'llvm-dylib', 'llvm-cjdb'].includes(component.producer.adapter)) {
       const runtime = byId.get(options.runtimeDependency);
       if (runtime?.source.kind !== 'git' || !runtime.roles.includes('runtime')) reject('DEPENDENCY_ROLE', component.id, 'LLVM requires a declared runtime source producer');
     }

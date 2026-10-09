@@ -10,6 +10,7 @@ import {fileURLToPath} from 'node:url';
 import {execute, fileDigest, readJson, atomicJson, canonical, sourceIdentity, registeredSourceIdentity, reject, PLATFORMS, inventory} from './sdk-manifest.mjs';
 import {parseLlvmToolsManifest} from '../llvm-tools-manifest.mjs';
 import {buildStageCompiler} from './sdk-stage-producer.mjs';
+import {buildCjdb} from './sdk-cjdb-producer.mjs';
 import {writeStdProvenance} from '../../build/lib/provenance.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -458,6 +459,7 @@ export async function nativeProducer(request) {
   else if (component.producer.adapter === 'llvm-release-layout') await llvmReleaseLayout(request);
   else if (component.producer.adapter === 'compiler-boundscheck') await compilerBoundscheck(request);
   else if (component.producer.adapter === 'compiler-xml2') await compilerXml2(request);
+  else if (component.producer.adapter === 'llvm-cjdb') await buildCjdb(request, {run, tool, fetchIdentity, execute});
   else if (component.producer.adapter === 'compiler-schema') {
     const schemas = ['StdAstFormat.fbs', 'StdxChirFormat.fbs'];
     const artifacts = path.join(request.directory, 'artifacts');

@@ -51,7 +51,10 @@ async function official(component, directory, identity) {
     || !lock.files || !Object.keys(lock.files).length) reject('DISTRIBUTION_LOCK', component.id, 'requires complete official sharedbuild distribution lock');
   const artifacts = path.join(directory, 'artifacts'); await fs.mkdir(artifacts);
   const files = Object.create(null);
+  // Copy physical files first, then preserve authenticated contained aliases.
+  // Old file-only locks remain readable; new locks describe native link types.
   for (const [rel, entry] of Object.entries(lock.files)) {
+    if (entry.type === 'symlink') continue;
     const file = await physicalPath(source.root, rel, component.id);
     if (!(await fs.lstat(file)).isFile()) reject('DISTRIBUTION_FILE', component.id, rel);
     const destination = path.join(artifacts, rel); await fs.mkdir(path.dirname(destination), {recursive: true});
@@ -60,6 +63,18 @@ async function official(component, directory, identity) {
     const stat = await fs.stat(destination);
     files[rel] = {type: 'file', sha256: entry.sha256, size: stat.size, mode: stat.mode & 0o777};
   }
+  for (const [rel, entry] of Object.entries(lock.files)) {
+    if (entry.type !== 'symlink') continue;
+    const parent = path.dirname(rel);
+    const sourceParent = parent === '.' ? await fs.realpath(source.root) : await physicalPath(source.root, parent, component.id);
+    const file = path.join(sourceParent, path.basename(rel));
+    if (!(await fs.lstat(file)).isSymbolicLink() || await fs.readlink(file) !== entry.target
+      || path.isAbsolute(entry.target) || !(await fs.realpath(file)).startsWith(`${await fs.realpath(source.root)}${path.sep}`)) reject('DISTRIBUTION_LINK', component.id, rel);
+    const destination = path.join(artifacts, rel); await fs.mkdir(path.dirname(destination), {recursive: true});
+    await fs.symlink(entry.target, destination);
+    files[rel] = {type: 'symlink', target: entry.target, size: Buffer.byteLength(entry.target), mode: 0o777, sha256: entry.sha256};
+  }
+  for (const [rel, row] of Object.entries(files)) if (await fileDigest(path.join(artifacts, rel)) !== row.sha256) reject('DISTRIBUTION_DIGEST', component.id, rel);
   if (await fileDigest(source.lock) !== source.lockSha256) reject('DISTRIBUTION_LOCK', component.id, 'source lock changed during copy');
   return sealOutput(directory, component, identity, {status: 'complete', rc: 0, kind: 'official-distribution-copy',
     distribution: {version: source.version, lockSha256: source.lockSha256, reason: source.reason}}, files);
