@@ -1,71 +1,82 @@
-name: CI
+name: Fixed 07c6 eight-failure diagnosis
 
 on:
-  push:
-    branches: [master]
-  pull_request:
   workflow_dispatch:
 
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+permissions:
+  contents: read
 
+# This branch is diagnostic-only. Push and pull_request must not run any job.
+# The workflow is not the tested checkout: release-gates reads the original YAML.
 jobs:
-  matrix-plan:
-    runs-on: ubuntu-24.04
-    outputs:
-      build: ${{ steps.matrix.outputs.build }}
-      provision: ${{ steps.matrix.outputs.provision }}
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-      - name: Export target matrix
-        id: matrix
-        run: node ci/target-matrix.mjs ci
-
-  lint:
-    name: Verify sources
+  diagnose:
+    name: Original AST and release-gates files
     runs-on: ubuntu-slim
     timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: tested-source
+    env:
+      DIAGNOSTIC_EVIDENCE: ${{ runner.temp }}/eight-failures-evidence
+      RELEASE_EVIDENCE_TEST_ROOT: ${{ runner.temp }}/release-evidence-tests
+      CJCJ_TEST_EVIDENCE: ${{ runner.temp }}/srcbuild-driver-evidence
     steps:
-      - name: Checkout cjcj
+      - name: Checkout immutable tested source
         uses: actions/checkout@v7
-      - name: Run actionlint
+        with:
+          ref: 07c6ca0a6168ce2e33a72c559d2a0d5f2f363e68
+          path: tested-source
+      - name: Record tested source and native runner identity
+        shell: bash
         run: |
-          bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
-          ./actionlint -color
-      # The script list is discovered, never written out: the literal list this
-      # replaced named two scripts, and every one of the other seven was added
-      # after the list was last edited. Severity is info rather than error
-      # because SC2086 -- unquoted expansion -- is an info-level check, so error
-      # and warning both look past the class this gate exists to catch.
-      # .shellcheckrc holds the two repository-wide exemptions and why.
-      - name: Run ShellCheck
+          mkdir -p "$DIAGNOSTIC_EVIDENCE" "$CJCJ_TEST_EVIDENCE"
+          test "$(git rev-parse HEAD)" = 07c6ca0a6168ce2e33a72c559d2a0d5f2f363e68
+          git diff --exit-code HEAD --
+          {
+            printf 'workflow_sha=%s\nworkflow_ref=%s\nrun_id=%s\nattempt=%s\n' "$GITHUB_SHA" "$GITHUB_WORKFLOW_REF" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
+            git rev-parse HEAD 'HEAD^{tree}'
+            git status --porcelain
+            git ls-files -s ci/ast-support-toolchain.test.mjs ci/release-gates.test.mjs .github/workflows
+            uname -a
+            cat /etc/os-release
+            node --version
+            node -e 'const os=require("node:os"); console.log(JSON.stringify({node:process.version,execPath:process.execPath,availableParallelism:os.availableParallelism(),cpus:os.cpus().length,totalmem:os.totalmem(),freemem:os.freemem(),expectedNode:"v24.21.0",nodeMatches:process.version==="v24.21.0"}))'
+            for file in /sys/fs/cgroup/cpu.max /sys/fs/cgroup/cpuset.cpus.effective /sys/fs/cgroup/memory.max /sys/fs/cgroup/memory.current; do
+              printf '\n%s\n' "$file"
+              if [[ -r "$file" ]]; then cat "$file"; else printf 'UNAVAILABLE\n'; fi
+            done
+          } | tee "$DIAGNOSTIC_EVIDENCE/before.txt"
+      # Retain the original preceding dependency installation, without running
+      # unrelated lint/test jobs or adding suspected missing cmake/ninja inputs.
+      - name: Install original ShellCheck dependency
         shell: bash
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
           shellcheck --version
-          mapfile -t SCRIPTS < <(git ls-files '*.sh')
-          echo "shellcheck covers ${#SCRIPTS[@]} scripts"
-          test "${#SCRIPTS[@]}" -ge 9
-          shellcheck --severity=info "${SCRIPTS[@]}"
-      - name: Verify zx syntax
-        run: |
-          find ci runtime_shim scripts -type f -name '*.mjs' -print0 \
-            | xargs -0 -n1 node --check
-      # Driven by ci/test-manifest.mjs, never by a literal list here: the four
-      # steps this replaced named eight of the repository's twenty-eight test
-      # files, and the other twenty ran nowhere. ci/test-manifest.test.mjs holds
-      # both ends of that -- every test file must be in a manifest bucket, and
-      # this step must keep asking the manifest.
       - name: Install release contract dependencies
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq zip unzip clang lld libssl-dev python3 build-essential jq
           npm exec --yes --package=zx@8 -- node ci/test-zx.mjs prepare "$RUNNER_TEMP/test-zx.json"
-      # package-lineage compares package bytes with the official host SDK. Load
-      # the consumer's pin, not the build job's independently loaded environment.
+      - name: Record prepared tool identities
+        shell: bash
+        run: |
+          cp "$RUNNER_TEMP/test-zx.json" "$DIAGNOSTIC_EVIDENCE/test-zx.json"
+          node --input-type=module -e 'import {verifiedTool} from "./ci/test-zx.mjs"; const tool=verifiedTool(); console.log(JSON.stringify(tool)); if(tool.version!=="8.8.5") throw new Error("DIAGNOSTIC_ZX_VERSION_CHANGED: expected 8.8.5; stop before tests")'
+          {
+            for tool in node npm npx bash git python3 clang clang++ cc c++ ld.lld cmake ninja make zip unzip jq shellcheck; do
+              printf '\nTOOL %s\n' "$tool"
+              if command -v "$tool"; then
+                set +e
+                "$tool" --version
+                rc=$?
+                set -e
+                printf 'version_rc=%s\n' "$rc"
+              else
+                printf 'NOT_FOUND\n'
+              fi
+            done
+          } > "$DIAGNOSTIC_EVIDENCE/tools.txt" 2>&1
+          cat "$DIAGNOSTIC_EVIDENCE/tools.txt"
       - name: Install official lineage input
         shell: bash
         run: |
@@ -76,329 +87,70 @@ jobs:
           "$cjv_bin" install "$CJCJ_TOOLCHAIN"
       - name: Prepare pinned runtime contract input
         run: node ci/test-zx.mjs run "$RUNNER_TEMP/test-zx-bin" npx --yes zx@8 ci/prepare-runtime-test-input.mjs "$RUNNER_TEMP/runtime-contract-input"
-      - name: Test build and release contracts
+      - name: Stream both complete original test files
         shell: bash
-        env:
-          RELEASE_EVIDENCE_TEST_ROOT: ${{ runner.temp }}/release-evidence-tests
-          CJCJ_TEST_EVIDENCE: ${{ runner.temp }}/srcbuild-driver-evidence
         run: |
-          mapfile -t FILES < <(node ci/test-manifest.mjs list)
-          echo "manifest gates ${#FILES[@]} test files"
-          # mapfile succeeds with zero lines if the manifest fails, and `node
-          # --test` with no file arguments falls back to its own discovery, which
-          # would pass while testing nothing.
-          test "${#FILES[@]}" -ge 85
-          # A hanging test would otherwise consume this job's whole
-          # timeout-minutes and end in "exceeded maximum execution time", which
-          # names no test. The bound makes the runner fail the specific test by
-          # name instead. It is not a way to pass over a hang -- a timeout here is
-          # a failure. 300s is ~150x the whole suite's normal 2s; a test that
-          # genuinely needs longer says so with its own {timeout}, which wins.
-          CJCJ_TEST_ZX_LOG="$CJCJ_TEST_EVIDENCE/zx-calls.jsonl" node ci/test-zx.mjs run "$RUNNER_TEMP/test-zx-bin" node --test --test-timeout=300000 "${FILES[@]}"
-      - name: Preserve srcbuild driver evidence
+          git diff --exit-code HEAD --
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          import {spawn} from 'node:child_process';
+          import {testEnvironment} from './ci/test-zx.mjs';
+          const evidence = process.env.DIAGNOSTIC_EVIDENCE;
+          const env = testEnvironment(path.join(process.env.RUNNER_TEMP, 'test-zx-bin'), {
+            ...process.env,
+            CJCJ_TEST_ZX_LOG: path.join(process.env.CJCJ_TEST_EVIDENCE, 'zx-calls.jsonl'),
+          });
+          const args = ['--test', '--test-reporter=tap', '--test-timeout=300000',
+            'ci/ast-support-toolchain.test.mjs', 'ci/release-gates.test.mjs'];
+          const command = [process.execPath, ...args];
+          const started = new Date().toISOString();
+          const start = performance.now();
+          const stdout = fs.openSync(path.join(evidence, 'tests.tap'), 'w');
+          const stderr = fs.openSync(path.join(evidence, 'tests.stderr'), 'w');
+          fs.writeFileSync(path.join(evidence, 'start.json'), JSON.stringify({
+            command, cwd: process.cwd(), started, source: '07c6ca0a6168ce2e33a72c559d2a0d5f2f363e68',
+            node: process.version, expectedNode: 'v24.21.0', nodeMatches: process.version === 'v24.21.0',
+          }, null, 2) + '\n');
+          // Default Node scheduling is unchanged. No name filter or extra concurrency.
+          const child = spawn(process.execPath, args, {env, stdio: ['inherit', 'pipe', 'pipe']});
+          let spawnError = null;
+          child.on('error', error => { spawnError = String(error); });
+          child.stdout.on('data', data => { fs.writeSync(stdout, data); process.stdout.write(data); });
+          child.stderr.on('data', data => { fs.writeSync(stderr, data); process.stderr.write(data); });
+          child.on('exit', (code, signal) => {
+            // Capture the test process itself, before stream draining or artifact steps.
+            fs.writeFileSync(path.join(evidence, 'tests.rc'), code === null ? 'NOT_EXITED\n' : `${code}\n`);
+            fs.writeFileSync(path.join(evidence, 'exit.json'), JSON.stringify({
+              pid: child.pid, code, signal, ended: new Date().toISOString(), wallMs: performance.now() - start,
+            }, null, 2) + '\n');
+          });
+          child.on('close', (code, signal) => {
+            fs.closeSync(stdout);
+            fs.closeSync(stderr);
+            fs.writeFileSync(path.join(evidence, 'result.json'), JSON.stringify({
+              command, pid: child.pid, started, ended: new Date().toISOString(),
+              code, signal, spawnError, wallMs: performance.now() - start,
+            }, null, 2) + '\n');
+            process.exitCode = code === 0 && !spawnError && !signal ? 0 : (code || 1);
+          });
+          NODE
+      - name: Record source after execution without rerunning tests
+        if: always()
+        shell: bash
+        run: |
+          {
+            git rev-parse HEAD 'HEAD^{tree}'
+            git status --porcelain
+            git diff --stat HEAD --
+          } > "$DIAGNOSTIC_EVIDENCE/after.txt"
+          git diff --exit-code HEAD --
+      - name: Preserve complete diagnostic output
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: srcbuild-driver-evidence
-          path: ${{ runner.temp }}/srcbuild-driver-evidence
-          if-no-files-found: warn
-      - name: Audit pin reachability
-        run: node ci/pin-sweep.mjs --remote
-      - name: Verify smoke assets
-        run: |
-          test "$(find ci/smoke -maxdepth 1 -name '*.cj' | wc -l)" -ge 5
-          test -f ci/smoke/macro_demo/mymacros/def.cj
-          test -f ci/smoke/macro_demo/app/main.cj
-      - name: Verify LLVM policy
-        run: test -z "$(git ls-files 'ci/prebuilt/**' 'runtime_shim/prebuilt/**')"
-
-  script-tests:
-    name: Python and shell contracts
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-      - name: Checkout cjcj
-        uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
-        with:
-          node-version: '22'
-      - name: Install script test dependencies
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq python3 build-essential binutils zip unzip
-      - name: Run registered script tests
-        run: node ci/run-registered-tests.mjs scripts "$RUNNER_TEMP/script-tests"
-      - name: Preserve script test results
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: script-tests
-          path: ${{ runner.temp }}/script-tests
-
-  package-tests:
-    name: Cangjie package tests (official host)
-    needs: fixed-llvm-tools
-    runs-on: ubuntu-24.04
-    timeout-minutes: 90
-    steps:
-      - name: Checkout cjcj
-        uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
-        with:
-          node-version: '22'
-      - name: Download test LLVM shim
-        uses: actions/download-artifact@v8
-        with:
-          name: fixed-llvm-tools-linux_x86_64
-          path: fixed-toolchain/linux_x86_64
-      - name: Export host toolchain pin
-        run: cat ci/host_sdk_pin.env >> "$GITHUB_ENV"
-      - name: Install official test SDK
-        shell: bash
-        run: |
-          mkdir -p "$RUNNER_TEMP/test-cjv"
-          curl -fsSL https://github.com/Zxilly/cjv/releases/download/v0.2.20/cjv_linux_amd64.tar.gz | tar -xz -C "$RUNNER_TEMP/test-cjv"
-          cjv_bin=$(find "$RUNNER_TEMP/test-cjv" -type f -name cjv | head -1)
-          "$cjv_bin" install "$CJCJ_TOOLCHAIN"
-      # The shim object compiles C++ against the LLVM that produced
-      # fixed-llvm-tools, so the cache key carries the same host toolchain pin
-      # the SDK above is installed from; a pin change must not reuse its objects.
-      - name: Start sccache
-        uses: ./.github/actions/sccache
-        with:
-          component: runtime-shim
-          platform: ubuntu-24.04
-          pin: ${{ env.CJCJ_TOOLCHAIN }}
-          cache-size: 1G
-      - name: Run registered Cangjie package tests
-        shell: bash
-        env:
-          CJCJ_LLVM_SHIM_O: ${{ github.workspace }}/fixed-toolchain/linux_x86_64/cjselfhost_llvmshim.o
-        run: |
-          ulimit -c 0
-          sdk="$HOME/.cjv/toolchains/$CJCJ_TOOLCHAIN"
-          source "$sdk/envsetup.sh"
-          npx --yes zx@8 runtime_shim/build_shim.mjs
-          cjpm build -j"$(nproc)" --target-dir "$RUNNER_TEMP/objc-producer"
-          products=()
-          for name in 'cjcj::cjc' 'cjc@cjcj'; do
-            file="$RUNNER_TEMP/objc-producer/release/bin/$name"
-            [[ ! -f "$file" ]] || products+=("$file")
-          done
-          [[ "${#products[@]}" = 1 ]]
-          cp "${products[0]}" "$RUNNER_TEMP/cjcj-stage1"
-          export OBJC_PREAMBLE_PRODUCER="$RUNNER_TEMP/cjcj-stage1"
-          node ci/run-registered-tests.mjs cj "$RUNNER_TEMP/package-tests"
-      - name: Report sccache
-        if: always()
-        uses: ./.github/actions/sccache-report
-        with:
-          component: runtime-shim
-          platform: ubuntu-24.04
-          require-compiles: ${{ job.status == 'success' }}
-      - name: Preserve Cangjie test results
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: package-tests-official-host
+          name: eight-failures-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            ${{ runner.temp }}/package-tests/results.json
-            ${{ runner.temp }}/package-tests/run.log
-            ${{ runner.temp }}/package-tests/reports
-            ${{ runner.temp }}/package-tests/prepare
-            ${{ runner.temp }}/package-tests/objc-fixture/fixture.json
-            ${{ runner.temp }}/package-tests/objc-fixture/*.log
-            ${{ runner.temp }}/package-tests/prerequisite.json
-
-  fixed-llvm-tools:
-    name: Build LLVM tools
-    uses: ./.github/workflows/build-llvm-tools.yml
-
-  build:
-    name: ${{ matrix.runner }} / Build
-    needs: [fixed-llvm-tools, matrix-plan]
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 120
-    continue-on-error: ${{ matrix.experimental }}
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.matrix-plan.outputs.build) }}
-    steps:
-      - name: Checkout cjcj
-        uses: actions/checkout@v7
-      - name: Load host toolchain pin
-        shell: bash
-        run: cat ci/cjpm_pin.env >> "$GITHUB_ENV"
-      - name: Load runtime pin
-        shell: bash
-        run: cat ci/runtime_pin.env >> "$GITHUB_ENV"
-      - name: Download LLVM tools
-        uses: actions/download-artifact@v8
-        with:
-          name: fixed-llvm-tools-${{ matrix.llvm_platform }}
-          path: fixed-toolchain/${{ matrix.llvm_platform }}
-      - name: Restore SDK cache
-        id: sdkcache
-        uses: actions/cache/restore@v6
-        with:
-          path: ~/.cjv
-          key: cjv-host-tools-isolated-${{ runner.os }}-${{ runner.arch }}-${{ env.CJCJ_TOOLCHAIN }}
-      - name: Restore cjpm cache
-        uses: actions/cache@v6
-        with:
-          path: target
-          key: cjpm-${{ runner.os }}-${{ matrix.runner }}-${{ env.CJCJ_TOOLCHAIN }}-${{ github.sha }}
-          restore-keys: |
-            cjpm-${{ runner.os }}-${{ matrix.runner }}-${{ env.CJCJ_TOOLCHAIN }}-
-      - name: Install SDK
-        id: setup
-        env:
-          GITCODE_API_KEY: ${{ secrets.GITCODE_API_KEY }}
-          FIXED_LLC_GZ: ${{ github.workspace }}/fixed-toolchain/${{ matrix.llvm_platform }}/llc.gz
-          FIXED_OPT_GZ: ${{ github.workspace }}/fixed-toolchain/${{ matrix.llvm_platform }}/opt.gz
-        run: npx --yes zx@8 ci/setup_sdk.mjs
-      # Save only after a successful install so a partial ~/.cjv is never cached.
-      - name: Save SDK cache
-        if: steps.setup.outcome == 'success' && steps.sdkcache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v6
-        with:
-          path: ~/.cjv
-          key: cjv-host-tools-isolated-${{ runner.os }}-${{ runner.arch }}-${{ env.CJCJ_TOOLCHAIN }}
-      # Keyed by matrix.runner: the runtime .so links the builder's glibc, so a cache
-      # entry built on a newer distro is unloadable on an older one (GLIBC_x.y not found).
-      - name: Restore patched runtime cache
-        id: rtcache
-        uses: actions/cache/restore@v6
-        with:
-          path: dist-runtime
-          key: rt-${{ runner.os }}-${{ runner.arch }}-${{ matrix.runner }}-${{ env.RUNTIME_REF }}-${{ env.RUNTIME_VERSION }}-${{ hashFiles('ci/build_patched_runtime.mjs', 'ci/runtime-diagnostics.mjs') }}
-      - name: Initialize runtime diagnostics
-        run: |
-          dir="$GITHUB_WORKSPACE/runtime-diagnostics/${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.runner }}"
-          mkdir -p "$dir"
-          echo "RUNTIME_DIAGNOSTICS_DIR=$dir" >> "$GITHUB_ENV"
-          RUNTIME_DIAGNOSTICS_DIR="$dir" node ci/runtime-diagnostics.mjs
-      - name: Install runtime dependencies
-        id: rtdeps
-        if: steps.rtcache.outputs.cache-hit != 'true'
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq clang cmake make gdb
-      # The patched runtime (on a runtime cache miss) and the two shim objects
-      # compile through sccache; keyed per runner because the runtime links the
-      # builder's glibc, as the runtime cache key above already records.
-      - name: Start sccache
-        uses: ./.github/actions/sccache
-        with:
-          component: runtime
-          platform: ${{ matrix.runner }}
-          pin: ${{ env.RUNTIME_REF }}
-          cache-size: 1G
-      - name: Build patched runtime
-        id: rtbuild
-        if: steps.rtcache.outputs.cache-hit != 'true'
-        env:
-          RUNTIME_VERSION: ${{ env.RUNTIME_VERSION }}
-        run: npx --yes zx@8 ci/build_patched_runtime.mjs "$PWD/dist-runtime"
-      - name: Record runtime workflow outcome
-        if: always() && env.RUNTIME_DIAGNOSTICS_DIR != ''
-        env:
-          RUNTIME_CACHE_HIT: ${{ steps.rtcache.outputs.cache-hit }}
-          RUNTIME_DEPENDENCY_OUTCOME: ${{ steps.rtdeps.outcome }}
-          RUNTIME_BUILD_OUTCOME: ${{ steps.rtbuild.outcome }}
-        run: node ci/runtime-diagnostics.mjs
-      - name: Upload runtime diagnostics
-        if: always() && env.RUNTIME_DIAGNOSTICS_DIR != ''
-        uses: actions/upload-artifact@v7
-        with:
-          name: runtime-diagnostics-${{ matrix.runner }}-${{ github.run_id }}-${{ github.run_attempt }}
+            ${{ runner.temp }}/eight-failures-evidence
+            ${{ runner.temp }}/srcbuild-driver-evidence
           if-no-files-found: error
-          path: |
-            ${{ env.RUNTIME_DIAGNOSTICS_DIR }}/**/*.json
-            ${{ env.RUNTIME_DIAGNOSTICS_DIR }}/**/*.log
-            ${{ env.RUNTIME_DIAGNOSTICS_DIR }}/**/*.rc
-            ${{ env.RUNTIME_DIAGNOSTICS_DIR }}/**/*.txt
-            ${{ env.RUNTIME_DIAGNOSTICS_DIR }}/**/*.tsv
-            ${{ env.RUNTIME_DIAGNOSTICS_DIR }}/**/*.status
-            ${{ env.RUNTIME_DIAGNOSTICS_DIR }}/**/*.sha256
-      - name: Save patched runtime cache
-        if: steps.rtcache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v6
-        with:
-          path: dist-runtime
-          key: rt-${{ runner.os }}-${{ runner.arch }}-${{ matrix.runner }}-${{ env.RUNTIME_REF }}-${{ env.RUNTIME_VERSION }}-${{ hashFiles('ci/build_patched_runtime.mjs', 'ci/runtime-diagnostics.mjs') }}
-      - name: Install runtime audit dependencies
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq libssl-dev
-      - name: Install patched runtime
-        run: npx --yes zx@8 ci/install_patched_runtime.mjs "$PWD/dist-runtime" "$PWD/patched-runtime"
-      - name: Build runtime shim
-        env:
-          CJCJ_LLVM_SHIM_O: ${{ github.workspace }}/fixed-toolchain/${{ matrix.llvm_platform }}/cjselfhost_llvmshim.o
-        run: npx --yes zx@8 runtime_shim/build_shim.mjs
-      - name: Report sccache
-        if: always()
-        uses: ./.github/actions/sccache-report
-        with:
-          component: runtime
-          platform: ${{ matrix.runner }}
-          require-compiles: ${{ job.status == 'success' }}
-      - name: Build workspace
-        run: |
-          node ci/check-codegen-runtime-layout.mjs
-          node ci/release/trimpath.mjs .
-          node ci/with-runtime-audit.mjs -- cjpm build
-      # Deploy name must be cjcj, not cjc (process-name GC stack-root exclusion -> SEGV).
-      - name: Compose compiler
-        run: |
-          test -f "target/release/bin/cjcj::cjc"
-          cp "target/release/bin/cjcj::cjc" "target/release/bin/cjcj"
-      - name: Run smoke tests
-        run: npx --yes zx@8 ci/smoke/run_smoke.mjs "$PWD/target/release/bin/cjcj"
-
-  # Non-gating: verifies SDK provisioning on macOS; does not build cjcj.
-  provision:
-    needs: matrix-plan
-    name: ${{ matrix.runner }} / Verify SDK
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 40
-    continue-on-error: true
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.matrix-plan.outputs.provision) }}
-    steps:
-      - name: Checkout cjcj
-        uses: actions/checkout@v7
-      - name: Load host toolchain pin
-        shell: bash
-        run: cat ci/cjpm_pin.env >> "$GITHUB_ENV"
-      - name: Restore SDK cache
-        id: sdkcache
-        uses: actions/cache/restore@v6
-        with:
-          path: ~/.cjv
-          key: cjv-host-tools-isolated-${{ runner.os }}-${{ runner.arch }}-${{ env.CJCJ_TOOLCHAIN }}
-      - name: Install SDK
-        id: setup
-        env:
-          GITCODE_API_KEY: ${{ secrets.GITCODE_API_KEY }}
-          # This job never compiles with cjcj, so it has no fixed-llc artifact to swap in.
-          CJCJ_SDK_STOCK_LLC: '1'
-        run: npx --yes zx@8 ci/setup_sdk.mjs
-      - name: Save SDK cache
-        if: steps.setup.outcome == 'success' && steps.sdkcache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v6
-        with:
-          path: ~/.cjv
-          key: cjv-host-tools-isolated-${{ runner.os }}-${{ runner.arch }}-${{ env.CJCJ_TOOLCHAIN }}
-      - name: Verify SDK layout
-        run: |
-          ls -la "$CANGJIE_HOME/bin" || true
-          file "$CANGJIE_HOME/bin/cjc" || true
-          ls "$CANGJIE_HOME/runtime/lib" || true
-      - name: Verify official compiler
-        run: |
-          set -x
-          if [ "$(uname -s)" = "Darwin" ]; then xattr -dr com.apple.quarantine "$CANGJIE_HOME" || true; fi
-          # shellcheck disable=SC1091
-          source "$CANGJIE_HOME/envsetup.sh"
-          echo 'main(): Int64 { println("provision ok"); return 0 }' > "$RUNNER_TEMP/p.cj"
-          cjc "$RUNNER_TEMP/p.cj" -o "$RUNNER_TEMP/p" && "$RUNNER_TEMP/p"
-
-# Adding a build platform requires a matching matrix item in build-fixed-llc.yml and
-# downloading that platform's fixed-llvm-tools artifact above.
