@@ -16,11 +16,17 @@ jobs:
     defaults:
       run:
         working-directory: tested-source
-    env:
-      DIAGNOSTIC_EVIDENCE: ${{ runner.temp }}/eight-failures-evidence
-      RELEASE_EVIDENCE_TEST_ROOT: ${{ runner.temp }}/release-evidence-tests
-      CJCJ_TEST_EVIDENCE: ${{ runner.temp }}/srcbuild-driver-evidence
     steps:
+      - name: Initialize diagnostic paths before checkout
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/eight-failures-evidence" "$RUNNER_TEMP/srcbuild-driver-evidence"
+          {
+            printf 'DIAGNOSTIC_EVIDENCE=%s/eight-failures-evidence\n' "$RUNNER_TEMP"
+            printf 'RELEASE_EVIDENCE_TEST_ROOT=%s/release-evidence-tests\n' "$RUNNER_TEMP"
+            printf 'CJCJ_TEST_EVIDENCE=%s/srcbuild-driver-evidence\n' "$RUNNER_TEMP"
+          } >> "$GITHUB_ENV"
       - name: Checkout immutable tested source
         uses: actions/checkout@v7
         with:
@@ -138,13 +144,21 @@ jobs:
       - name: Record source after execution without rerunning tests
         if: always()
         shell: bash
+        working-directory: ${{ github.workspace }}
         run: |
+          # Do not depend on successful initialization or checkout for collection.
+          evidence="$RUNNER_TEMP/eight-failures-evidence"
+          mkdir -p "$evidence"
+          if [[ ! -e tested-source/.git ]]; then
+            printf 'SOURCE_CHECKOUT_NOT_AVAILABLE\n' > "$evidence/after.txt"
+            exit 1
+          fi
           {
-            git rev-parse HEAD 'HEAD^{tree}'
-            git status --porcelain
-            git diff --stat HEAD --
-          } > "$DIAGNOSTIC_EVIDENCE/after.txt"
-          git diff --exit-code HEAD --
+            git -C tested-source rev-parse HEAD 'HEAD^{tree}'
+            git -C tested-source status --porcelain
+            git -C tested-source diff --stat HEAD --
+          } > "$evidence/after.txt"
+          git -C tested-source diff --exit-code HEAD --
       - name: Preserve complete diagnostic output
         if: always()
         uses: actions/upload-artifact@v7
