@@ -9,6 +9,7 @@ import test from 'node:test';
 import {buildCjdb} from './sdk-cjdb-producer.mjs';
 import {verifyCjdbPythonConfiguration, verifyCjdbPythonInstallation} from './sdk-cjdb-python.mjs';
 import {fileDigest, sourceIdentity, readJson, atomicJson} from './sdk-manifest.mjs';
+import {exportCjdbPythonClosure} from './sdk-cjdb-python-closure.mjs';
 import {CJDB_INPUTS} from './sdk-cjdb-qualification.mjs';
 
 const partial = process.env.CJDB_PYTHON_PARTIAL;
@@ -112,6 +113,10 @@ test('producer artifacts reach real LLDB Interpreter and Development',
     await atomicJson(path.join(output,'python-configuration.json'),configuration);
     console.log('TARGET_ASSERTIONS_EXECUTED CJDB_PYTHON_IDENTITY');
     if(configureOnly)return;
+    await finishCjdbPythonQualification({partial,output,roots,request,childBuild,nativeRoot,childEnv,execute});
+  });
+
+export async function finishCjdbPythonQualification({partial,output,roots,request,childBuild,nativeRoot,childEnv,execute}) {
     // The exact five generated native source inputs remain explicit read-only
     // qualification dependencies; their identities are recorded individually.
     const generated={};
@@ -130,10 +135,9 @@ test('producer artifacts reach real LLDB Interpreter and Development',
       try { await fs.access(from); } catch(e){if(e.code==='ENOENT')continue;throw e;}
       await fs.cp(from,path.join(nativeRoot,rel),{recursive:true,verbatimSymlinks:true});
     }
-    await fs.mkdir(path.join(output,'install/tools/lib'),{recursive:true});
-    for(const name of ['libcangjie-frontend.so','libcangjie-lsp.so'])
-      await fs.copyFile(path.join(fixedBuild,'lib',name),path.join(output,'install/tools/lib',name));
+    const closure=await exportCjdbPythonClosure(partial,path.join(output,'install'),execute);
+    await atomicJson(path.join(output,'python-closure.json'),closure);
     const installation=await verifyCjdbPythonInstallation(request.component.config.options.python.root,nativeRoot,execute);
     await atomicJson(path.join(output,'python-installation.json'),installation);
     console.log('TARGET_ASSERTIONS_EXECUTED CJDB_PYTHON_IMPORT debugger-create-valid-destroy');
-  });
+}
