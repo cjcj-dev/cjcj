@@ -177,10 +177,18 @@ test('smoke retains all six business outcomes and package/smoke identities remai
   const workflow = loadYaml(await fs.readFile(path.join(repo, '.github/workflows/ci.yml'), 'utf8'));
   const upload = workflow.jobs.build.steps.find(step => step.name === 'Preserve smoke producer evidence');
   const root = upload.with.path.replace('${{ runner.temp }}/smoke-tests', r.work);
-  for (const file of [path.join(r.work, 'smoke-result.json'),
-    ...r.calls.flatMap(call => [call.file, call.producer.saved, ...call.inputs.map(input => input.saved)])]) {
+  const covered = (file, uploadRoot) => file === uploadRoot || file.startsWith(uploadRoot + path.sep);
+  const resultFile = path.join(r.work, 'smoke-result.json');
+  assert.ok((await fs.stat(resultFile)).isFile());
+  // Positive boundary control uses the real saved result, not a synthetic path.
+  assert.ok(covered(resultFile, resultFile), 'target legal single-file smoke result upload');
+  target('smoke_single_file_upload_passed', {file: resultFile});
+  assert.ok(covered(resultFile, root), `target smoke result upload coverage: ${resultFile}`);
+  target('smoke_result_upload_passed', {file: resultFile, root});
+  for (const file of r.calls.flatMap(call => [call.producer.saved, ...call.inputs.map(input => input.saved), call.file])) {
     assert.ok((await fs.stat(file)).isFile());
-    assert.ok(file.startsWith(root + path.sep), `target smoke upload covers actual entity: ${file}`);
+    target('smoke_entity_upload_checked', {file, root, covered: covered(file, root)});
+    assert.ok(covered(file, root), `target smoke upload covers actual entity: ${file}`);
   }
 });
 
