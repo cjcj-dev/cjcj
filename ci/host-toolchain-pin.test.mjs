@@ -406,7 +406,7 @@ test('ordinary CI and source-build hosts use the same nightly', async () => {
   const ordinary = await fs.readFile(cjpmPinPath, 'utf8');
   const definitions = ordinary.match(/^CJCJ_TOOLCHAIN=\S+$/gm) ?? [];
   assert.equal(definitions.length, 1, 'ordinary host must define exactly one toolchain');
-  assert.equal(parseHostToolchainPin(ordinary), await hostPin(),
+  assert.equal(parseHostToolchainPin(ordinary.split(/\r?\n/).filter(line => line.startsWith('CJCJ_TOOLCHAIN')).join('\n')), await hostPin(),
     'CJCJ_TOOLCHAIN must be equal in ci/cjpm_pin.env and ci/host_sdk_pin.env');
 });
 
