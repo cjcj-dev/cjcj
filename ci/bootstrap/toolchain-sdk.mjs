@@ -222,6 +222,16 @@ export async function verifyManifestSdk(sdk, plan, manifest) {
     // envsetup is the existing SDK loading contract. Paths are passed as
     // positional arguments to a constant shell body, never evaluated as code.
     if (['third_party/llvm/bin/llvm-dis', 'third_party/llvm/bin/llvm-as'].includes(rel)) {
+      const owner = plan.components.find(component => component.id === manifest.files[rel].component);
+      if (owner?.producer.adapter === 'llvm-cjdb') {
+        // BuildCJDB's regular cjnative graph links the shared LLVM. Readers
+        // must load that same installed native library in the independent SDK.
+        const env = {PATH:'/usr/bin:/bin',LANG:'C',LC_ALL:'C',LD_LIBRARY_PATH:[path.join(sdk,'third_party/llvm/lib'),path.join(sdk,'tools/lib'),path.join(sdk,'runtime/lib',tuple)].join(':')};
+        const loaded = (await execute('/usr/bin/ldd',[binary],{env})).stdout;
+        if (loaded.includes('not found') || !loaded.split('\n').some(line => line.includes('libLLVM-15.so') && line.includes(path.join(sdk,'third_party/llvm/lib')))) reject('LLVM_READER_DOMAIN',owner.id,`${rel}: ${loaded.trim()}`);
+        await execute(binary,['--version'],{env});
+        continue;
+      }
       // Native readers link static LLVM and run in the host system domain.
       // Target envsetup/library paths must not select their dependencies.
       const env = {PATH: '/usr/bin:/bin', LANG: 'C', LC_ALL: 'C'};
