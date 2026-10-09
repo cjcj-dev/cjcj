@@ -739,6 +739,144 @@ test('package paths and archive roots match package.py', async () => {
   }
 });
 
+test('package retains compiler and pcre relative links after input removal', async () => {
+  const {root, config} = makeFixture();
+  try {
+    const input = path.join(config.repoPath('compiler'), config.target.primaryCompilerOutput());
+    const tuple = 'linux_x86_64_cjnative';
+    file(input, ['bin', 'cjcj-stage1'], 'managed compiler');
+    for (const name of ['cjc', 'cjc-frontend']) fs.symlinkSync('cjcj-stage1', path.join(input, 'bin', name));
+    for (const sdk of [input, config.officialSdkRoot]) {
+      file(sdk, ['runtime', 'lib', tuple, 'libpcre2-8.so.0.14.0'], 'producer pcre');
+      fs.symlinkSync('libpcre2-8.so.0.14.0', path.join(sdk, 'runtime', 'lib', tuple, 'libpcre2-8.so.0'));
+      fs.symlinkSync('libpcre2-8.so.0', path.join(sdk, 'runtime', 'lib', tuple, 'libpcre2-8.so'));
+    }
+    file(config.officialSdkRoot, ['bin', 'cjc'], 'official compiler');
+    fs.symlinkSync('cjc', path.join(config.officialSdkRoot, 'bin', 'cjc-frontend'));
+    let archives, packageError;
+    try { archives = await packageStage.run(config); } catch (error) { packageError = error; }
+    const staged = path.join(config.softwareDir, 'cangjie');
+    console.log('PACKAGE_RELATIVE_COMPILER_ASSERT_REACHED');
+    assert.equal(fs.readlinkSync(path.join(staged, 'bin', 'cjc')), 'cjcj-stage1', packageError?.message);
+    assert.equal(fs.readlinkSync(path.join(staged, 'bin', 'cjc-frontend')), 'cjcj-stage1');
+    console.log('PACKAGE_RELATIVE_PCRE_ASSERT_REACHED');
+    assert.equal(fs.readlinkSync(path.join(staged, 'runtime', 'lib', tuple, 'libpcre2-8.so')), 'libpcre2-8.so.0');
+    assert.ifError(packageError);
+    const extracted = directory(root, 'extracted');
+    await runCommand(['tar', '-xzf', archives[0], '-C', extracted]);
+    fs.rmSync(input, {recursive: true, force: true});
+    fs.rmSync(staged, {recursive: true, force: true});
+    console.log('PACKAGE_INPUT_INDEPENDENCE_ASSERT_REACHED');
+    const published = path.join(extracted, 'cangjie');
+    for (const name of ['cjc', 'cjc-frontend']) assert.equal(fs.readFileSync(path.join(published, 'bin', name), 'utf8'), 'managed compiler');
+    assert.equal(fs.readFileSync(path.join(published, 'runtime', 'lib', tuple, 'libpcre2-8.so'), 'utf8'), 'producer pcre');
+  } finally { fs.rmSync(root, {recursive: true, force: true}); }
+});
+
+test('package retains pcre and stdx links independently of compiler aliases', async () => {
+  const {root, config} = makeFixture();
+  try {
+    const input = path.join(config.repoPath('compiler'), config.target.primaryCompilerOutput());
+    const tuple = 'linux_x86_64_cjnative';
+    for (const sdk of [input, config.officialSdkRoot]) {
+      file(sdk, ['runtime', 'lib', tuple, 'libpcre2-8.so.0.14.0'], 'producer pcre');
+      fs.symlinkSync('libpcre2-8.so.0.14.0', path.join(sdk, 'runtime', 'lib', tuple, 'libpcre2-8.so.0'));
+      fs.symlinkSync('libpcre2-8.so.0', path.join(sdk, 'runtime', 'lib', tuple, 'libpcre2-8.so'));
+    }
+    const stdxInput = path.join(config.repoPath('stdx'), 'target', config.target.stdxTargetSubdir());
+    file(stdxInput, ['target.bc'], 'producer stdx');
+    fs.symlinkSync('target.bc', path.join(stdxInput, 'module.bc'));
+    let archives, packageError;
+    try { archives = await packageStage.run(config); } catch (error) { packageError = error; }
+    const staged = path.join(config.softwareDir, 'cangjie');
+    console.log('PACKAGE_INDEPENDENT_PCRE_ASSERT_REACHED');
+    assert.equal(fs.readlinkSync(path.join(staged, 'runtime', 'lib', tuple, 'libpcre2-8.so')), 'libpcre2-8.so.0', packageError?.message);
+    assert.equal(fs.readlinkSync(path.join(staged, 'runtime', 'lib', tuple, 'libpcre2-8.so.0')), 'libpcre2-8.so.0.14.0');
+    assert.ifError(packageError);
+    const stdxStaged = path.join(config.softwareDir, path.basename(stdxInput));
+    console.log('PACKAGE_RELATIVE_STDX_ASSERT_REACHED');
+    assert.equal(fs.readlinkSync(path.join(stdxStaged, 'module.bc')), 'target.bc');
+    const extracted = directory(root, 'extracted');
+    for (const archive of archives) await runCommand(['tar', '-xzf', archive, '-C', extracted]);
+    for (const directory of [input, stdxInput, staged, stdxStaged]) fs.rmSync(directory, {recursive: true, force: true});
+    assert.equal(fs.readFileSync(path.join(extracted, 'cangjie', 'runtime', 'lib', tuple, 'libpcre2-8.so'), 'utf8'), 'producer pcre');
+    assert.equal(fs.readFileSync(path.join(extracted, path.basename(stdxInput), 'module.bc'), 'utf8'), 'producer stdx');
+  } finally { fs.rmSync(root, {recursive: true, force: true}); }
+});
+
+test('package rejects the exact missing native target payload path', async () => {
+  const {root, config} = makeFixture();
+  try {
+    const relative = ['modules', 'linux_x86_64_cjnative', 'std', 'std.core.cjo'];
+    file(config.officialSdkRoot, relative, 'official payload');
+    const input = path.join(config.repoPath('compiler'), config.target.primaryCompilerOutput());
+    file(input, relative, 'produced native module');
+    await packageStage.run(config);
+    fs.rmSync(path.join(input, ...relative));
+    console.log('PACKAGE_MISSING_NATIVE_ASSERT_REACHED');
+    await assert.rejects(packageStage.run(config), /missing-official-path\tmodules\/linux_x86_64_cjnative\/std\/std.core.cjo/);
+    file(input, relative, 'produced native module');
+    await packageStage.run(config);
+    assert.ok(fs.existsSync(path.join(config.softwareDir, 'cangjie', ...relative)));
+  } finally { fs.rmSync(root, {recursive: true, force: true}); }
+});
+
+test('Linux package excludes only the optional Windows target roots', async () => {
+  const {root, config} = makeFixture();
+  try {
+    file(config.officialSdkRoot, ['lib', 'windows_x86_64_cjnative', 'libcangjie-std-core.a'], 'Windows reference');
+    file(config.officialSdkRoot, ['modules', 'windows_x86_64_cjnative', 'std', 'std.core.cjo'], 'Windows reference');
+    const input = path.join(config.repoPath('compiler'), config.target.primaryCompilerOutput());
+    for (const name of ['lib', 'modules']) directory(input, name);
+    let packageError;
+    try { await packageStage.run(config); } catch (error) { packageError = error; }
+    console.log('LINUX_OPTIONAL_WINDOWS_ASSERT_REACHED');
+    assert.ifError(packageError);
+    file(config.officialSdkRoot, ['lib', 'windows_x86_64_cjnative-extra', 'required.a'], 'ordinary required payload');
+    console.log('LINUX_EXACT_TARGET_ROOT_ASSERT_REACHED');
+    await assert.rejects(packageStage.run(config), /missing-official-path\tlib\/windows_x86_64_cjnative-extra/);
+  } finally { fs.rmSync(root, {recursive: true, force: true}); }
+});
+
+test('Windows package still requires its complete target libraries and modules', async () => {
+  const f = makeFixture();
+  try {
+    const config = buildConfig({workspace: f.config.workspace, buildRoot: f.config.buildRoot,
+      officialSdkRoot: f.config.officialSdkRoot, targetKey: 'windows-x64', cangjieVersion: '1.2.3'});
+    const input = directory(config.repoPath('compiler'), config.target.primaryCompilerOutput());
+    file(input, ['envsetup.sh']);
+    for (const relative of [['cjpm', 'dist', 'cjpm'], ['cjfmt', 'build', 'build', 'bin', 'cjfmt'],
+      ['hyperlangExtension', 'target', 'bin', 'main'], ['cangjie-language-server', 'output', 'bin', 'LSPServer']]) {
+      const source = path.join(config.repoPath('tools'), ...relative); fs.copyFileSync(source, `${source}.exe`);
+    }
+    file(config.repoPath('stdx'), ['target', config.target.stdxTargetSubdir(), 'module.cjo']);
+    const paths = [['lib', 'windows_x86_64_cjnative', 'libcangjie-std-core.a'],
+      ['modules', 'windows_x86_64_cjnative', 'std', 'std.core.cjo']];
+    for (const relative of paths) { file(config.officialSdkRoot, relative, 'Windows reference'); file(input, relative, 'Windows producer'); }
+    await packageStage.run(config);
+    for (const relative of paths) {
+      fs.rmSync(path.join(input, ...relative));
+      console.log(`WINDOWS_REQUIRED_TARGET_ASSERT_REACHED path=${relative.join('/')}`);
+      await assert.rejects(packageStage.run(config), error => error.message.includes(`missing-official-path\t${relative.join('/')}`));
+      file(input, relative, 'Windows producer');
+    }
+    await packageStage.run(config);
+  } finally { fs.rmSync(f.root, {recursive: true, force: true}); }
+});
+
+test('package rejects an extra link outside the published SDK', async () => {
+  const {root, config} = makeFixture();
+  try {
+    const input = path.join(config.repoPath('compiler'), config.target.primaryCompilerOutput());
+    file(root, ['outside'], 'external dependency');
+    fs.symlinkSync(path.join(root, 'outside'), path.join(input, 'external'));
+    console.log('PACKAGE_EXTERNAL_LINK_ASSERT_REACHED');
+    await assert.rejects(packageStage.run(config), /package-link-outside\texternal\t/);
+    fs.rmSync(path.join(input, 'external'));
+    await packageStage.run(config);
+  } finally { fs.rmSync(root, {recursive: true, force: true}); }
+});
+
 // A pinned sha that is only reachable in someone's local clone builds fine for
 // them and fails for everyone else. tools.mjs fetches it with `git fetch
 // --depth 1 <url> <sha>`, which resolves nothing when the object is not

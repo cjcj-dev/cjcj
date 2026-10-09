@@ -209,6 +209,31 @@ def fail(code: str, message: str, errors: list) -> None:
 
 
 def verify(sdk: Path, lock: dict, pin: dict, identities: dict, errors: list, target_tuple: str | None = None) -> None:
+    if lock.get('plan_sha256') or (sdk / 'SDK.manifest.json').exists():
+        try:
+            manifest_path = sdk / 'SDK.manifest.json'
+            plan_path = sdk / 'SDK.plan.json'
+            manifest = json.loads(manifest_path.read_text())
+            plan = json.loads(plan_path.read_text())
+            if (manifest.get('schema') != 'toolchain-sdk-resolved-v1' or manifest.get('status') != 'complete'
+                    or manifest.get('rc') != 0 or plan.get('schema') != 'toolchain-sdk-plan-v1'
+                    or sha256_file(manifest_path) != lock.get('manifest_sha256')
+                    or sha256_file(plan_path) != lock.get('plan_sha256')
+                    or manifest.get('planSha256') != lock.get('plan_sha256')):
+                fail('MANIFEST_BINDING', 'plan/resolved/lock identity mismatch', errors)
+            declared = manifest.get('files') or {}
+            expected = set(declared) | {'SDK.plan.json', 'SDK.manifest.json'}
+            if set(lock.get('files') or {}) != expected:
+                fail('MANIFEST_BINDING', 'lock membership differs from sealed manifest', errors)
+            for rel, row in declared.items():
+                installed = (lock.get('files') or {}).get(rel, {})
+                if (installed.get('sha256') != row.get('sha256') or installed.get('size') != row.get('size')
+                        or installed.get('mode') != row.get('mode') or installed.get('type') != row.get('type')
+                        or installed.get('producer', {}).get('build_id') != row.get('buildId')
+                        or installed.get('producer', {}).get('receipt_sha256') != row.get('receiptSha256')):
+                    fail('MANIFEST_BINDING', f'lock differs from sealed producer artifact: {rel}', errors)
+        except (OSError, ValueError, TypeError) as error:
+            fail('MANIFEST_BINDING', str(error), errors)
     on_disk = {}
     for path, rel in iter_files(sdk):
         on_disk[rel] = path
@@ -225,10 +250,20 @@ def verify(sdk: Path, lock: dict, pin: dict, identities: dict, errors: list, tar
         if rel != LOCK_NAME and rel not in on_disk:
             fail('UNDECLARED', f'lock entry missing on disk: {rel}', errors)
     for rel, entry in lock_files.items():
+        path = on_disk.get(rel)
+        if path is not None and rel != LOCK_NAME:
+            if bool(entry.get('symlink')) != path.is_symlink():
+                fail('PAYLOAD_TYPE', f'type differs from sealed lock: {rel}', errors)
+            if not path.is_symlink() and path.is_file() and (
+                    ('size' in entry and path.stat().st_size != entry['size']) or
+                    ('mode' in entry and path.stat().st_mode & 0o777 != entry['mode'])):
+                fail('PAYLOAD_TYPE', f'size/mode differs from sealed lock: {rel}', errors)
+            if not path.is_file() or not HEX64_RE.fullmatch(entry.get('sha256') or '') or sha256_file(path) != entry.get('sha256'):
+                fail('PAYLOAD_DIGEST', f'content differs from sealed lock: {rel}', errors)
         if entry.get('component') == 'official-retain' and rel not in (lock.get('official_retain') or {}):
             fail('UNDECLARED', f'official-retain without reason: {rel}', errors)
         if entry.get('component') not in {
-            'cjc', 'std', 'runtime', 'llvm', 'cjpm', 'boundscheck', 'official-retain', 'sdk-meta',
+            'cjc', 'std', 'runtime', 'llvm', 'cjpm', 'boundscheck', 'ast', 'official-retain', 'sdk-meta',
         }:
             fail('UNDECLARED', f'unknown component for {rel}', errors)
 
@@ -338,6 +373,9 @@ def main() -> int:
     pin = load_pin(args.runtime_pin) if args.runtime_pin else {}
     lock_path = sdk / LOCK_NAME
     if args.write_lock:
+        if (sdk / 'SDK.manifest.json').exists():
+            print('SDK-VERIFY-FAIL rule=MANIFEST_BINDING manifest SDK locks are written from presealed producer inputs by toolchain-sdk', file=sys.stderr)
+            return 1
         role = args.role or identities.get('role')
         if role not in ('host', 'target'):
             print('SDK-VERIFY-FAIL rule=HOST_TARGET_CROSS --write-lock requires --role', file=sys.stderr)

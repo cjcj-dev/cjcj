@@ -931,6 +931,8 @@ bootstrap_argv() {
     local stage=$1
     load_bootstrap_pins || return 1
     [[ $stage == stage0 || $stage == stage1 ]] || return 1
+    CJCJ_BOOTSTRAP_SDK_PLANS=$(node "$REPO_ROOT/ci/bootstrap/prepare-bootstrap-plans.mjs" --env --path-only) || return $?
+    unset CJCJ_BOOTSTRAP_SDK_INTENTS
     printf '%q ' \
         "$BOOTSTRAP_SH" \
         --work "$CJCJ_BOOTSTRAP_WORK" \
@@ -938,6 +940,7 @@ bootstrap_argv() {
         --runtime-pin "$CJCJ_BOOTSTRAP_RUNTIME_PIN" \
         --cjcj-sha "$BOOTSTRAP_CJCJ_SHA" \
         --stdsrc "$BOOTSTRAP_STDSRC" \
+        --sdk-plans "${CJCJ_BOOTSTRAP_SDK_PLANS:?missing frozen bootstrap SDK plan bundle}" \
         --cpp-src "$BOOTSTRAP_CPP_SRC" \
         --base "$BOOTSTRAP_HOST_SDK" \
         --host-llvm-so "$BOOTSTRAP_HOST_LLVM_SO" \

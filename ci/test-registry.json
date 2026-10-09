@@ -5,6 +5,26 @@
     "args": []
   },
   {
+    "file": "ci/bootstrap/sdk-boundary.test.mjs",
+    "executor": "manual",
+    "reason": "Run node --test ci/bootstrap/sdk-boundary.test.mjs only with SDK_BOUNDARY_PLAN naming a retained successful Linux x86_64 fixture plan and SDK_BOUNDARY_ROOT naming an existing private evidence parent. Requires its original producer receipts, seals, shared cache and compiled ordinary module; invokes the same-tree toolchain-sdk.mjs. Exclusively own the entire plan build/cache/artifact closure: producer and consumer arms replace payload bytes and rename component directories before restoration. CI supplies none of these private inputs; never use shared installations or another active lane's inputs. Registration is NOT_RUN, not a CI pass."
+  },
+  {
+    "file": "ci/bootstrap/sdk-real-boundary.test.mjs",
+    "executor": "manual",
+    "reason": "Run node --test ci/bootstrap/sdk-real-boundary.test.mjs only with SDK_REAL_PLAN, SDK_REAL_SDK and an existing SDK_REAL_EVIDENCE parent naming genuine private Linux x86_64 products, complete SDK.manifest, original cross-repository receipts and official distribution payloads. Requires native runtime/AST owners, std.core.cjo and libLLVM-15.so; a small C fixture is not a substitute. Exclusively own the plan's producer artifacts and evidence/assembly outputs: arms move and replace original payloads, reassemble and restore them. SDK_MANIFEST_PRODUCT optionally selects the assembler CLI; direct verification still imports same-tree modules, so retain both identities. CI does not provision these inputs; exclude shared installations and active lanes. Registration is NOT_RUN, not SDK qualification or a CI pass."
+  },
+  {
+    "file": "ci/bootstrap/toolchain-sdk.test.mjs",
+    "executor": "manual",
+    "reason": "Run node --test ci/bootstrap/toolchain-sdk.test.mjs only with SDK_SHAREDBUILD_ENGINE from an independently owned clean Git checkout and SDK_MANIFEST_TEST_ROOT naming an existing private writable parent. Requires Linux x86_64 native compilation/loading and python3, node, git, bash, tar, cmake, clang, clang++, cc, ar plus nm for SDK verification. Fixtures compile ELF/shared libraries/archives even before the dry-run case, then invoke the real engine and SDK assembler; SDK_MANIFEST_PRODUCT optionally selects the CLI. Exclusively own fixture source repositories, plans, receipts, seed/shared caches, build artifacts and SDK/evidence outputs under the private root; failure/recovery arms mutate them. CI supplies neither engine nor root. Registration is NOT_RUN, not a CI pass or full real SDK qualification."
+  },
+  {
+    "file": "ci/bootstrap/sdk-export.test.mjs",
+    "executor": "manual",
+    "reason": "Run node --test ci/bootstrap/sdk-export.test.mjs only with SDK_EXPORT_PLAN naming the private sealed supplemental Linux x86_64 plan (including fixed compiler 174db8f40d5efddee63c47a3162bbf676bc227a0 schemas, securec, compiler XML2 2.14.0 with its pinned official source archive, LLVM release tools/libraries/layout and all original authenticated receipts), SDK_EXPORT_RUNTIME_SOURCE naming the retained clean Git checkout matching the plan runtime commit/tree, and SDK_EXPORT_ROOT naming an existing private evidence parent. Requires at least 64 available native CPUs, frozen Node/Git tools and same-tree SDK producer/resolver. Existing receipts/source inputs are read-only; writes are confined to fresh schema/native-resolver directories under SDK_EXPORT_ROOT. Cut arms change only an independently owned isolated product checkout, never shared installations or original input receipts. CI does not provision these inputs; registration is NOT_RUN, not complete SDK qualification."
+  },
+  {
     "file": "ci/bootstrap/test_bootstrap.sh",
     "executor": "bash",
     "args": []
