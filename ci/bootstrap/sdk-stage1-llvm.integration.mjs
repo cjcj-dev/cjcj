@@ -7,6 +7,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {spawnSync} from 'node:child_process';
 import {produceComponent} from './sdk-producers.mjs';
 import {fileDigest, execute, inventory, readJson, atomicJson} from './sdk-manifest.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -40,6 +41,24 @@ for (const [directory, rel] of [[official, 'bin/cjc'], [official, 'bin/cjc-front
   await fs.mkdir(path.dirname(path.join(directory, rel)), {recursive: true});
   await cc([path.join(root, 'probe.c'), path.join(directory, llvmRel), '-ldl', '-o', path.join(directory, rel)]);
 }
+// Controlled ELF observes the kernel argv and actual target library. It does
+// not emulate lld's dispatcher; the real installed lld is exercised separately.
+await write(path.join(root, 'entry-probe.c'), `#include <stdio.h>\n#include <string.h>\nextern const char *fixture_llvm_domain(void);\nint main(int argc,char **argv){printf("ENTRY_DOMAIN=%s\\n",fixture_llvm_domain());for(int i=0;i<argc;i++){printf("ARGV_HEX=");for(const unsigned char *p=(unsigned char*)argv[i];*p;p++)printf("%02x",*p);puts("");}return argc>1&&!strcmp(argv[1],"--exit=37")?37:0;}\n`);
+const entryProbe = path.join(native, 'third_party/llvm/libexec/entry-probe');
+await fs.mkdir(path.dirname(entryProbe), {recursive: true});
+await cc([path.join(root, 'entry-probe.c'), path.join(native, llvmRel), '-o', entryProbe]);
+await fs.copyFile(entryProbe, path.join(native, 'third_party/llvm/bin/plain-probe'));
+await fs.symlink('../libexec/entry-probe', path.join(native, 'third_party/llvm/bin/entry-probe'));
+await fs.symlink('entry-probe', path.join(native, 'third_party/llvm/bin/entry-alias'));
+// This is real host-installed lld, NOT a qualified fixed-53ce native receipt.
+// An optional already-qualified executable may be supplied without building it.
+const lldInput = process.env.STAGE1_REAL_LLD || '/usr/bin/ld.lld';
+await fs.copyFile(await fs.realpath(lldInput), path.join(native, 'third_party/llvm/bin/lld'));
+await fs.chmod(path.join(native, 'third_party/llvm/bin/lld'), 0o755);
+for (const name of ['ld.lld', 'ld64.lld', 'lld-link', 'wasm-ld']) await fs.symlink('lld', path.join(native, 'third_party/llvm/bin', name));
+await write(path.join(root, 'lld-input-identity.json'), JSON.stringify({requested: lldInput, physical: await fs.realpath(lldInput),
+  sha256: await fileDigest(lldInput), fixed53ceQualified: Boolean(process.env.STAGE1_REAL_LLD),
+  version: (await execute(lldInput, ['--version'])).stdout}));
 await write(path.join(native, 'shim.c'), 'int fixture_shim(void){return 53;}\n');
 await fs.mkdir(path.dirname(path.join(native, shimRel)), {recursive: true});
 await cc(['-c', path.join(native, 'shim.c'), '-o', path.join(native, shimRel)]);
@@ -163,4 +182,59 @@ test('actual adapter refuses an altered ordinary native input before invoking th
     assert.equal(wrong.result?.rc, 1); assert.match(wrong.log, /STAGE1_LLVM_BYTES.*include\/fixture.h/);
   } finally {await fs.writeFile(file, bytes);}
   const restored = await arm('restored-native-header-bytes'); assert.equal(restored.result?.rc, 0, restored.log);
+});
+
+test('native executable invocation and relative aliases retain argv0, arguments, exits and loader domains', async () => {
+  const normal = await arm('native-entry-contract');
+  assert.equal(normal.result?.rc, 0, normal.log);
+  const domains = await readJson(path.join(normal.result.work, 'stage1-domains.json'));
+  const bin = path.join(domains.sdk, 'third_party/llvm/bin');
+  const observations = [];
+  const capture = (file, args, childEnv = process.env) => {
+    const r = spawnSync(file, args, {env: childEnv, encoding: 'utf8'});
+    return {file, args, status: r.status, signal: r.signal, error: r.error?.message, stdout: r.stdout, stderr: r.stderr};
+  };
+  // Collect every positive domain/control before checking the target assertions,
+  // so an argv0 cut cannot hide independent host/target evidence behind a skip.
+  const host = capture(path.join(domains.sdk, 'bin/cjc'), []);
+  const target = capture(path.join(bin, 'llc'), []);
+  for (const name of ['plain-probe', 'entry-probe', 'entry-alias']) {
+    for (const args of [['space argument', '', '@relative.rsp', '--literal=$x'], ['--exit=37', 'retained argument']]) {
+      observations.push({...capture(path.join(bin, name), args), kind: 'argv'});
+    }
+  }
+  for (const [name, args] of [['lld', ['-flavor', 'gnu', '--version']], ['ld.lld', ['--version']],
+    ['ld64.lld', ['--version']], ['lld-link', ['/help']], ['wasm-ld', ['--version']]]) {
+    const raw = capture(path.join(native, 'third_party/llvm/bin', name), args);
+    observations.push({...capture(path.join(bin, name), args), kind: 'real-lld', raw});
+  }
+  await atomicJson(path.join(normal.directory, 'native-entry-observations.json'), {host, target, observations,
+    lldInput: await readJson(path.join(root, 'lld-input-identity.json'))});
+  console.log(`TARGET_ASSERTION_EXECUTED native-host-domain status=${host.status}`);
+  assert.equal(host.status, 0, host.stderr); assert.match(host.stdout, /DOMAIN value=HOST origin=.*shared-cache\/official-sdk/);
+  console.log(`TARGET_ASSERTION_EXECUTED native-target-domain status=${target.status}`);
+  assert.equal(target.status, 0, target.stderr); assert.match(target.stdout, /DOMAIN value=TARGET origin=.*stage1-link-sdk/);
+  const failures = [];
+  for (const row of observations) {
+    console.log(`TARGET_ASSERTION_EXECUTED native-${row.kind} entry=${path.basename(row.file)} status=${row.status}`);
+    try {
+      if (row.kind === 'argv') {
+        const argv = [...row.stdout.matchAll(/^ARGV_HEX=(.*)$/gm)].map(match => Buffer.from(match[1], 'hex').toString());
+        assert.deepEqual(argv, [row.file, ...row.args], 'native argv0 and every argument must preserve the invoked entry');
+        assert.equal(row.status, row.args[0] === '--exit=37' ? 37 : 0, 'native exit must propagate');
+        assert.match(row.stdout, /ENTRY_DOMAIN=TARGET/, 'aliases outside bin must retain the target loader domain');
+      } else {
+        assert.equal(row.raw.status, 0, 'raw real-lld positive control must run');
+        assert.equal(row.status, row.raw.status, 'real-lld alias must retain flavor dispatch');
+        assert.equal(row.stdout, row.raw.stdout, 'real-lld output must match the original entry');
+        assert.equal(row.stderr, row.raw.stderr, 'real-lld diagnostics must match the original entry');
+      }
+    } catch (error) { failures.push(`${path.basename(row.file)}: ${error.message}`); }
+  }
+  for (const [name, link] of [['entry-probe', '../libexec/entry-probe'], ['entry-alias', 'entry-probe'],
+    ['ld.lld', 'lld'], ['ld64.lld', 'lld'], ['lld-link', 'lld'], ['wasm-ld', 'lld']]) {
+    assert.equal(await fs.readlink(path.join(bin, name)), link, 'relative alias text remains intact');
+  }
+  assert.deepEqual(failures, [], 'NATIVE_ENTRY_CONTRACT: native argv0/alias/argument/exit/domain assertions');
+  console.log(`TARGET_ASSERTION_EXECUTED NATIVE_ENTRY_CONTRACT observations=${observations.length} failures=0`);
 });
