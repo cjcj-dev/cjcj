@@ -1,0 +1,83 @@
+[
+  {
+    "id": "official",
+    "recipeId": "8c0a118a6f422d81b1f6372644c414b83af58562dee19bc1df1db885f460e0d7",
+    "buildId": "official/ec9b5ab4b7a84cb71e4b9023d40353723be8108e4ee6d110d07e9ec32d92de19/8c0a118a6f422d81b1f6372644c414b83af58562dee19bc1df1db885f460e0d7",
+    "directory": "/root/sym_cjcj_918_implement_r6087361232/retained-builds/official/ec9b5ab4b7a84cb71e4b9023d40353723be8108e4ee6d110d07e9ec32d92de19/8c0a118a6f422d81b1f6372644c414b83af58562dee19bc1df1db885f460e0d7",
+    "dependencies": {},
+    "receipt": "MISSING",
+    "production": "NOT_RUN"
+  },
+  {
+    "id": "runtime",
+    "recipeId": "de4fd4914ee98e4c7b26979747cb52f3d1ca5ebeb62749d6e074c369e4b2c99a",
+    "buildId": "runtime/9733dfc09d29eca27d19cc3937a149838b4e3322/de4fd4914ee98e4c7b26979747cb52f3d1ca5ebeb62749d6e074c369e4b2c99a",
+    "directory": "/root/sym_cjcj_918_implement_r6087361232/retained-builds/runtime/9733dfc09d29eca27d19cc3937a149838b4e3322/de4fd4914ee98e4c7b26979747cb52f3d1ca5ebeb62749d6e074c369e4b2c99a",
+    "dependencies": {
+      "official": "official/ec9b5ab4b7a84cb71e4b9023d40353723be8108e4ee6d110d07e9ec32d92de19/8c0a118a6f422d81b1f6372644c414b83af58562dee19bc1df1db885f460e0d7"
+    },
+    "receipt": "MISSING",
+    "production": "NOT_RUN"
+  },
+  {
+    "id": "llvm-cjdb",
+    "recipeId": "fdf586bbcf1ddec7e6b19b8ee5b49b6a48670f1f6b630f1547944cf7f2433d15",
+    "buildId": "llvm-cjdb/53ce96a7b9d243dc7fa05ff6a9b56ea0ef94c057/fdf586bbcf1ddec7e6b19b8ee5b49b6a48670f1f6b630f1547944cf7f2433d15",
+    "directory": "/root/sym_cjcj_918_implement_r6087361232/retained-builds/llvm-cjdb/53ce96a7b9d243dc7fa05ff6a9b56ea0ef94c057/fdf586bbcf1ddec7e6b19b8ee5b49b6a48670f1f6b630f1547944cf7f2433d15",
+    "dependencies": {
+      "runtime": "runtime/9733dfc09d29eca27d19cc3937a149838b4e3322/de4fd4914ee98e4c7b26979747cb52f3d1ca5ebeb62749d6e074c369e4b2c99a"
+    },
+    "receipt": "MISSING",
+    "production": "NOT_RUN"
+  },
+  {
+    "id": "ast",
+    "recipeId": "6b78c5132db4b98021b08e398c3980eed2a02e551b9d5dfcafb784dae8445f7b",
+    "buildId": "ast/174db8f40d5efddee63c47a3162bbf676bc227a0/6b78c5132db4b98021b08e398c3980eed2a02e551b9d5dfcafb784dae8445f7b",
+    "directory": "/root/sym_cjcj_918_implement_r6087361232/retained-builds/ast/174db8f40d5efddee63c47a3162bbf676bc227a0/6b78c5132db4b98021b08e398c3980eed2a02e551b9d5dfcafb784dae8445f7b",
+    "dependencies": {
+      "official": "official/ec9b5ab4b7a84cb71e4b9023d40353723be8108e4ee6d110d07e9ec32d92de19/8c0a118a6f422d81b1f6372644c414b83af58562dee19bc1df1db885f460e0d7"
+    },
+    "receipt": "MISSING",
+    "production": "NOT_RUN"
+  },
+  {
+    "id": "compiler-schema",
+    "recipeId": "f7b33c75d9d9a88f9e6ae18fcb84bf427f07f1ebfa19ba94073a787a8cd732c1",
+    "buildId": "compiler-schema/174db8f40d5efddee63c47a3162bbf676bc227a0/f7b33c75d9d9a88f9e6ae18fcb84bf427f07f1ebfa19ba94073a787a8cd732c1",
+    "directory": "/root/sym_cjcj_918_implement_r6087361232/retained-builds/compiler-schema/174db8f40d5efddee63c47a3162bbf676bc227a0/f7b33c75d9d9a88f9e6ae18fcb84bf427f07f1ebfa19ba94073a787a8cd732c1",
+    "dependencies": {},
+    "receipt": "MISSING",
+    "production": "NOT_RUN"
+  },
+  {
+    "id": "compiler",
+    "recipeId": "4a511480b007d564b1cc5e23457d99a5721b2c66337cdaa0668a18f4952d62f8",
+    "buildId": "compiler/4d05592c3b0a05b3ab4d554a379e3885faf25cf2/4a511480b007d564b1cc5e23457d99a5721b2c66337cdaa0668a18f4952d62f8",
+    "directory": "/root/sym_cjcj_918_implement_r6087361232/retained-builds/compiler/4d05592c3b0a05b3ab4d554a379e3885faf25cf2/4a511480b007d564b1cc5e23457d99a5721b2c66337cdaa0668a18f4952d62f8",
+    "dependencies": {
+      "official": "official/ec9b5ab4b7a84cb71e4b9023d40353723be8108e4ee6d110d07e9ec32d92de19/8c0a118a6f422d81b1f6372644c414b83af58562dee19bc1df1db885f460e0d7",
+      "llvm-cjdb": "llvm-cjdb/53ce96a7b9d243dc7fa05ff6a9b56ea0ef94c057/fdf586bbcf1ddec7e6b19b8ee5b49b6a48670f1f6b630f1547944cf7f2433d15",
+      "ast": "ast/174db8f40d5efddee63c47a3162bbf676bc227a0/6b78c5132db4b98021b08e398c3980eed2a02e551b9d5dfcafb784dae8445f7b",
+      "compiler-schema": "compiler-schema/174db8f40d5efddee63c47a3162bbf676bc227a0/f7b33c75d9d9a88f9e6ae18fcb84bf427f07f1ebfa19ba94073a787a8cd732c1"
+    },
+    "receipt": "MISSING",
+    "production": "NOT_RUN"
+  },
+  {
+    "id": "std",
+    "recipeId": "b6292978f6a7796ffc1a41b0b2bc51cf37bc72e9c18b40e00fc56aa34a786f02",
+    "buildId": "std/9733dfc09d29eca27d19cc3937a149838b4e3322/b6292978f6a7796ffc1a41b0b2bc51cf37bc72e9c18b40e00fc56aa34a786f02",
+    "directory": "/root/sym_cjcj_918_implement_r6087361232/retained-builds/std/9733dfc09d29eca27d19cc3937a149838b4e3322/b6292978f6a7796ffc1a41b0b2bc51cf37bc72e9c18b40e00fc56aa34a786f02",
+    "dependencies": {
+      "official": "official/ec9b5ab4b7a84cb71e4b9023d40353723be8108e4ee6d110d07e9ec32d92de19/8c0a118a6f422d81b1f6372644c414b83af58562dee19bc1df1db885f460e0d7",
+      "compiler": "compiler/4d05592c3b0a05b3ab4d554a379e3885faf25cf2/4a511480b007d564b1cc5e23457d99a5721b2c66337cdaa0668a18f4952d62f8",
+      "runtime": "runtime/9733dfc09d29eca27d19cc3937a149838b4e3322/de4fd4914ee98e4c7b26979747cb52f3d1ca5ebeb62749d6e074c369e4b2c99a",
+      "llvm-cjdb": "llvm-cjdb/53ce96a7b9d243dc7fa05ff6a9b56ea0ef94c057/fdf586bbcf1ddec7e6b19b8ee5b49b6a48670f1f6b630f1547944cf7f2433d15",
+      "ast": "ast/174db8f40d5efddee63c47a3162bbf676bc227a0/6b78c5132db4b98021b08e398c3980eed2a02e551b9d5dfcafb784dae8445f7b",
+      "compiler-schema": "compiler-schema/174db8f40d5efddee63c47a3162bbf676bc227a0/f7b33c75d9d9a88f9e6ae18fcb84bf427f07f1ebfa19ba94073a787a8cd732c1"
+    },
+    "receipt": "MISSING",
+    "production": "NOT_RUN"
+  }
+]

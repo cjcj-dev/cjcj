@@ -1,0 +1,93 @@
+[
+  {
+    "name": "baseline-tools-setup",
+    "file": "/usr/bin/bash",
+    "args": [
+      "-c",
+      "cd '/root/sym_cjcj_918_implement_r6087361232/evidence/remaining' && pwd && git clone --no-hardlinks --no-checkout '/root/sym_cjcj_918_implement_r6087361232/retained-tools' '/root/sym_cjcj_918_implement_r6087361232/evidence/remaining/baseline-tools' && cd '/root/sym_cjcj_918_implement_r6087361232/evidence/remaining/baseline-tools' && pwd && git switch -c sym/918-fixed-b497 b497dffaaf9f20c3c71b6911eaf6d854b43caeeb"
+    ],
+    "started": "2026-10-09T19:13:27.527Z",
+    "wall": 0.160413881,
+    "rc": 0,
+    "signal": null
+  },
+  {
+    "name": "baseline-native-entry",
+    "file": "/usr/local/bin/node",
+    "args": [
+      "--test",
+      "--test-name-pattern=formal stage1 producer feeds|native executable invocation",
+      "/root/sym_cjcj_918_implement_r6087361232/retained-cjcj/ci/bootstrap/sdk-stage1-llvm.integration.mjs"
+    ],
+    "started": "2026-10-09T19:13:27.747Z",
+    "wall": 2.171762252,
+    "rc": 1,
+    "signal": null
+  },
+  {
+    "name": "affected-existing-case",
+    "file": "/usr/local/bin/node",
+    "args": [
+      "--test",
+      "--test-name-pattern=formal stage1 producer feeds",
+      "/root/sym_cjcj_918_implement_r6087361232/retained-cjcj/ci/bootstrap/sdk-stage1-llvm.integration.mjs"
+    ],
+    "started": "2026-10-09T19:13:29.920Z",
+    "wall": 1.034272371,
+    "rc": 0,
+    "signal": null
+  },
+  {
+    "name": "identity-retained-cjcj",
+    "file": "/usr/bin/bash",
+    "args": [
+      "-c",
+      "cd '/root/sym_cjcj_918_implement_r6087361232/retained-cjcj' && pwd && git rev-parse HEAD && git status --porcelain --untracked-files=all"
+    ],
+    "started": "2026-10-09T19:13:30.956Z",
+    "wall": 0.016537720000000262,
+    "rc": 0,
+    "signal": null
+  },
+  {
+    "name": "identity-retained-tools",
+    "file": "/usr/bin/bash",
+    "args": [
+      "-c",
+      "cd '/root/sym_cjcj_918_implement_r6087361232/retained-tools' && pwd && git rev-parse HEAD && git status --porcelain --untracked-files=all"
+    ],
+    "started": "2026-10-09T19:13:30.974Z",
+    "wall": 0.007248172000000067,
+    "rc": 0,
+    "signal": null
+  },
+  {
+    "name": "freeze",
+    "file": "/usr/local/bin/node",
+    "args": [
+      "/root/sym_cjcj_918_implement_r6087361232/retained-cjcj/ci/bootstrap/freeze-sdk-plan.mjs",
+      "--intent",
+      "/root/sym_cjcj_918_implement_r6087361232/evidence/remaining/native-entry.intent.json",
+      "--out",
+      "/root/sym_cjcj_918_implement_r6087361232/evidence/remaining/native-entry.plan.json"
+    ],
+    "started": "2026-10-09T19:13:30.983Z",
+    "wall": 0.9798191459999999,
+    "rc": 0,
+    "signal": null
+  },
+  {
+    "name": "dry-run",
+    "file": "/usr/local/bin/node",
+    "args": [
+      "/root/sym_cjcj_918_implement_r6087361232/retained-cjcj/ci/bootstrap/toolchain-sdk.mjs",
+      "--plan",
+      "/root/sym_cjcj_918_implement_r6087361232/evidence/remaining/native-entry.plan.json",
+      "--dry-run"
+    ],
+    "started": "2026-10-09T19:13:31.964Z",
+    "wall": 0.04820801800000027,
+    "rc": 0,
+    "signal": null
+  }
+]
