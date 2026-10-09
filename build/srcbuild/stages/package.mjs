@@ -131,7 +131,7 @@ async function packageMainSdk(config) {
     && fs.realpathSync(compilerOutput) === fs.realpathSync(cangjieDir);
   if (!sameDirectory) {
     fs.rmSync(cangjieDir, {recursive: true, force: true});
-    fs.cpSync(compilerOutput, cangjieDir, {recursive: true, dereference: false, preserveTimestamps: true});
+    fs.cpSync(compilerOutput, cangjieDir, {recursive: true, dereference: false, verbatimSymlinks: true, preserveTimestamps: true});
   }
   organizeSdkTree(config, cangjieDir);
   if (config.target.spec.os !== 'windows') {
@@ -159,7 +159,7 @@ async function packageStdx(config) {
   requireDir(stdxDir, {stage: 'package.stdx'});
   const staged = path.join(ensureDir(config.softwareDir), path.basename(stdxDir));
   fs.rmSync(staged, {recursive: true, force: true});
-  fs.cpSync(stdxDir, staged, {recursive: true, dereference: false, preserveTimestamps: true});
+  fs.cpSync(stdxDir, staged, {recursive: true, dereference: false, verbatimSymlinks: true, preserveTimestamps: true});
   return makeArchive(
     config,
     staged,

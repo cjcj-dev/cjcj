@@ -280,7 +280,7 @@ async function astSupport(request) {
   await run(['bash', path.join(component.producer.repository, 'ci/build_ast_support.sh'), source,
     path.join(directory, 'build', 'ast'), artifacts, seed.artifacts], {env});
   for (const rel of ['libcangjie-ast-support.a', 'include/cangjie', 'include/flatbuffers/StdAstFormat_generated.h',
-    'schema/StdAstFormat.fbs', 'third_party/flatbuffers/bin/flatc', 'SHA256SUMS']) {
+    'schema/StdAstFormat.fbs', 'schema/StdxChirFormat.fbs', 'third_party/flatbuffers/bin/flatc', 'SHA256SUMS']) {
     await fs.access(path.join(artifacts, rel));
   }
   const flatbuffersAfter = transformation

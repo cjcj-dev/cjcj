@@ -1,8 +1,10 @@
 # Test execution registry
 
 `node ci/test-manifest.mjs check` compares discovered tests and registrations in
-both directions. Node contracts retain `GATING` and `DEFERRED`; Python, shell and
-Cangjie entries live in `test-registry.json`. Test naming conventions are
+both directions. Default Node contracts live in `GATING`; `DEFERRED` records
+their required inputs and actual prior invocation results. Python, shell,
+Cangjie and environment-bound manual Node entries live in `test-registry.json`.
+Test naming conventions are
 `*.test.mjs`, `test_*.py`, `test-*.py`, `test_*.sh`, `test-*.sh`, `*_test.sh`,
 `*-test.sh`, `*.test.sh`, `*_test.cj`, shell files under `build/test/`, and
 Python/shell files directly inside a nested `tests/` directory.
@@ -10,12 +12,44 @@ Helpers such as `run.py` and `check.py` are dependencies of test drivers, not
 independently discovered test cases. Register new standalone tests using these
 names. Untracked files are included; ignored build output and node_modules are not.
 
-Each non-Node entry names a real interpreter and arguments, a cjpm workspace
+Each registry entry names a real interpreter and arguments, a cjpm workspace
 member, an existing `workflow` command, or `manual` with a concrete input/isolation reason. `{output}` expands
 to a unique, initially absent evidence directory. Manual entries are visible
 with `node ci/test-manifest.mjs registered`; they are not counted as CI passes.
 The host-identity Python suite includes fixture coverage in CI; its optional
 real fixed-release SDK/LLVM arm remains manual and reports a unittest skip.
+
+### Private SDK integration inputs
+
+These three Node tests were previously unregistered, rather than part of the
+automatic execution set. They use the existing `manual` executor because the
+workflow supplies neither their private inputs nor exclusive mutation domains.
+Registration leaves `GATING` and `DEFERRED` unchanged. `list` still emits only
+`GATING`; `registered` exposes these entries, and the script/cjpm runners exclude
+`manual`. Their execution status is **NOT_RUN** until a separate execution
+contract provides the inputs and records actual results; manifest success
+proves registration coverage, not that these SDK tests passed.
+
+Run each entry from the source-tree root with the command below after binding
+absolute input paths and creating its private evidence/test parent. Current
+fixtures require Linux x86_64. Keep source/engine, plan, receipts and product
+identities with results. All transitive build/cache/artifact paths must belong
+to the isolated execution owner; a private evidence directory alone is
+insufficient. Never point them at shared SDK installations or another active
+lane's inputs.
+
+| Entry | Required inputs and execution conditions | Exclusive write domain |
+|---|---|---|
+| `node --test ci/bootstrap/sdk-boundary.test.mjs` | `SDK_BOUNDARY_PLAN`: retained successful fixture plan with original producer `output.json`, seals, shared cache and compiled `core.Int64.ti`; `SDK_BOUNDARY_ROOT`: existing evidence parent. Calls same-tree `toolchain-sdk.mjs`; no CLI override. | Entire plan build/cache/artifact closure and assembly/evidence outputs. Producer and consumer arms replace original bytes, rename a component directory and restore both. |
+| `node --test ci/bootstrap/sdk-real-boundary.test.mjs` | `SDK_REAL_PLAN`, `SDK_REAL_SDK`: genuine complete SDK with `SDK.manifest.json`, cross-repository receipts, runtime `bin/cjfilt`/`RuntimeAPI.h`, AST headers, original `std.core.cjo`, `libLLVM-15.so` and official distribution payloads; `SDK_REAL_EVIDENCE`: existing evidence parent. A small C fixture cannot replace these products. | Original producer artifacts plus temporary/reassembled SDK and evidence outputs. Arms move/replace ordinary and LLVM payloads, restore them and remove duplicate assemblies. |
+| `node --test ci/bootstrap/toolchain-sdk.test.mjs` | `SDK_SHAREDBUILD_ENGINE`: engine in an independently owned clean Git checkout, whose HEAD and engine digest are captured; `SDK_MANIFEST_TEST_ROOT`: existing writable private parent. Requires `python3`, `node`, `git`, `bash`, `tar`, `cmake`, `clang`, `clang++`, `cc`, `ar`, and verification `nm`/native loading. Even its dry-run case first compiles fixture ELF/shared libraries/archives. | Fixture source Git repositories, plans, receipts, seed/shared caches, native builds, SDKs and evidence under the private root; concurrent requests and failure/recovery arms mutate that closure. |
+
+The real-boundary and toolchain tests allow `SDK_MANIFEST_PRODUCT` to select
+the assembler CLI. Their direct verification imports remain same-tree modules;
+record both identities. The boundary test always invokes the same-tree CLI.
+Missing required inputs fail rather than skip. Manual registration is based on
+these dependencies, not an assertion failure, and does not qualify full SDK
+production or authorize a new engine/SDK build.
 
 CI runs `node ci/run-registered-tests.mjs scripts NEW_OUTPUT_DIR` with four
 independent workers. The Cangjie job sources the official `host_sdk_pin.env`
