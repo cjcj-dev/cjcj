@@ -317,6 +317,14 @@ export async function nativeProducer(request) {
   }
   await sourceIdentity(request.source, component.source, component.id, tool('git'));
   if (component.producer.adapter === 'bootstrap-std') await std(request);
+  else if (component.producer.adapter === 'compiler-schema') {
+    const schemas = ['StdAstFormat.fbs', 'StdxChirFormat.fbs'];
+    const artifacts = path.join(request.directory, 'artifacts');
+    await fs.mkdir(path.join(artifacts, 'schema'), {recursive: true});
+    for (const name of schemas) await fs.copyFile(path.join(request.source, 'schema', name), path.join(artifacts, 'schema', name));
+    await atomicJson(path.join(artifacts, 'schema-producer.json'), {source: component.source, schemas,
+      host: component.config.host, target: component.config.target, producer: component.producer, buildId: request.identity.buildId});
+  }
   else if (component.producer.adapter === 'bootstrap-compiler') await buildStageCompiler(request, run);
   else if (component.producer.adapter === 'ast-support') await astSupport(request);
   else if (['llvm-tools', 'llvm-dylib'].includes(component.producer.adapter)) await llvm(request);

@@ -23,7 +23,7 @@ export const PLATFORMS = Object.freeze({
 });
 export const ADAPTERS = Object.freeze(['official', 'sharedbuild-stage1',
   'sharedbuild-runtime-default', 'sharedbuild-runtime-testable', 'bootstrap-std',
-  'llvm-tools', 'llvm-dylib', 'ast-support', 'bootstrap-compiler']);
+  'llvm-tools', 'llvm-dylib', 'ast-support', 'compiler-schema', 'bootstrap-compiler']);
 const HEX40 = /^[0-9a-f]{40}$/;
 const HEX64 = /^[0-9a-f]{64}$/;
 const NAME = /^[a-z][a-z0-9-]*$/;
@@ -148,6 +148,12 @@ export function validatePlan(plan) {
       config.options.outputs.forEach(output => relative(output, id));
     }
     if (producer.adapter === 'official' && Object.keys(config.options).length) reject('CONFIG', id, 'official copy has no build options');
+    if (producer.adapter === 'compiler-schema') {
+      fields(config.options, [], [], id);
+      if (!component.roles.includes('ast')) reject('CONFIG', id, 'compiler schemas require an AST owner');
+      for (const name of ['node', 'git']) if (!config.tools[name]) reject('CONFIG', id, `schema producer tool ${name} must be frozen`);
+      absolute(producer.repository, id);
+    }
     if (producer.adapter === 'bootstrap-std') {
       fields(config.options, ['sdkDependency', 'compilerDependency', 'runtimeDependency', 'llvmToolsDependency', 'llvmDylibDependency',
         'astDependency', 'heap', 'targetLibRelative'], ['launcher', 'llvmAuxiliaryDependency', 'compilerRuntime', 'previousStdDependency', 'provenance'], id);
