@@ -1,0 +1,79 @@
+name: Darwin native input consumers
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  native-input:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {runner: macos-15, target: darwin-arm64, platform: darwin_aarch64, build_runtime: true}
+          - {runner: macos-15-intel, target: darwin-x64, platform: darwin_x86_64, build_runtime: true}
+          - {runner: macos-26, target: darwin-arm64, platform: darwin_aarch64, build_runtime: false}
+          - {runner: macos-26-intel, target: darwin-x64, platform: darwin_x86_64, build_runtime: false}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    env:
+      CJCJ_SRCBUILD_TARGET: ${{ matrix.target }}
+      DARWIN_BUILD_RUNTIME: ${{ matrix.build_runtime }}
+      RUNTIME_BUILD_TYPE: relwithdebinfo
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check host and target guard before tools and input preparation
+        run: node --test ci/release/darwin_consumer_boundary.test.mjs
+      - name: Load pinned runtime source
+        run: cat ci/runtime_pin.env >> "$GITHUB_ENV"
+      - uses: actions/checkout@v7
+        if: matrix.build_runtime
+        with:
+          repository: cjcj-dev/cangjie-runtime
+          ref: ${{ env.RUNTIME_REF }}
+          path: runtime-source
+      - uses: ./.github/actions/sccache
+        with:
+          component: darwin-consumer
+          platform: ${{ matrix.platform }}
+          pin: ${{ env.RUNTIME_REF }}
+          cache-size: 1G
+      - name: Build or acquire native inputs and consume their actual loaded libraries
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ulimit -c 0
+          export CANGJIE_BUILD_JOBS=$(sysctl -n hw.logicalcpu)
+          npx --yes zx@8 ci/release/darwin_consumer_ci.mjs "$RUNNER_TEMP/darwin-inputs"
+      - name: Qualify the actual Mach-O loading target with cut and restored consumer
+        run: |
+          ulimit -c 0
+          node ci/release/test_darwin_loader_controls.mjs "$RUNNER_TEMP/darwin-inputs"
+      - name: Qualify Darwin identity and Mach-O rejection on native producer bytes
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          ulimit -c 0
+          node ci/release/test_darwin_llvm_controls.mjs "$RUNNER_TEMP/darwin-inputs/llvm-controls"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: darwin-input-consumer-${{ matrix.runner }}
+          path: |
+            ${{ runner.temp }}/darwin-inputs
+            .platform-ci/logs
+            .platform-ci/step-summary.md
+            runtime-source/runtime/CMakebuild/**/CMakeCache.txt
+            runtime-source/runtime/CMakebuild/**/CMakeFiles/CMakeConfigureLog.yaml
+            runtime-source/runtime/CMakebuild/**/CMakeFiles/CMakeOutput.log
+            runtime-source/runtime/CMakebuild/**/CMakeFiles/CMakeError.log
+          if-no-files-found: error
+      - uses: ./.github/actions/sccache-report
+        if: always()
+        with:
+          component: darwin-consumer
+          platform: ${{ matrix.platform }}
+          require-compiles: ${{ job.status == 'success' }}
