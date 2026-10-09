@@ -107,7 +107,7 @@
     "targetOutputPresent": false
   },
   "package": {
-    "entry": "scripts/package_sdk.mjs",
+    "entry": "tar archive -> independent unpack -> verifyManifestSdk -> actual stage1/std/tools consumers",
     "status": "NOT_RUN",
     "required": [
       "real full target SDK successful manifest and lock",
@@ -119,7 +119,7 @@
       "cjdb startup/Python import/loader origin",
       "independent full std consumer compile and execution"
     ],
-    "adapterGap": "No plan-v1 package declaration field/adapter; this companion is an explicit obligation, not an executable package recipe or receipt."
+    "adapterGap": "None for the archive successor: plan-v1 correctly rejects package description fields. Original rejected input and rc preserved; no schema widening or package_sdk/release validator for stage1."
   },
   "nextStages": {
     "stage2": "only after the actual stage1 SDK and corresponding std complete; existing sdk-stage-producer consumes frozen sdkComponents",

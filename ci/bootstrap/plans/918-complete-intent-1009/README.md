@@ -17,14 +17,17 @@ Seven expected producer receipts are missing. No build root or resolved
 manifest was created. Build identities in `component-matrix.json` are expected
 identities emitted by the existing identity function, not success receipts.
 
-The complete production request remains **blocked**. Adding the explicit
-package declaration (`complete-production.intent.json`) to the actual formal
-freezer returns `SDK_MANIFEST_REJECT rule=SCHEMA component=plan`, rc=1.
-The existing plan-v1 schema accepts only one platform and no package field or
-package adapter. `production-scope.json` preserves the SDK/package obligations,
-Windows and other platform coverage, and existing holds; it is not an executable
-replacement schema. Independent input review must decide the required adapter
-work and production authorization. No scope was removed to call this complete.
+The complete production request remains **blocked**, because the new native,
+stage1 and full std receipts are missing and production is held. Adding a
+package description to plan-v1 (`complete-production.intent.json`) returned
+`SDK_MANIFEST_REJECT rule=SCHEMA component=plan`, rc=1. This is correct strict
+schema rejection, not an adapter defect. The original input and rc are retained.
+The existing tar archive -> independent new-directory extraction ->
+`verifyManifestSdk` with the same plan/manifest/lock -> actual consumers already
+expresses this successor; no package component or relaxed schema is needed.
+`production-scope.json` retains Windows/other platforms and all existing holds.
+The current Linux stage1 wiring rework is in `../918-stage1-llvm-rework-1009/`;
+its limited fixture qualification does not authorize real production.
 
 ## Production graph and installation ownership
 

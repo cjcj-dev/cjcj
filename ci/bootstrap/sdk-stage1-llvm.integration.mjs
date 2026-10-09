@@ -15,6 +15,8 @@ assert.ok(root && toolsRepo, 'explicit remote fixture root and clean candidate t
 const write = async (file, bytes, mode) => { await fs.mkdir(path.dirname(file), {recursive: true}); await fs.writeFile(file, bytes, mode ? {mode} : {}); };
 const cc = async args => execute('/usr/bin/cc', args);
 const source = path.join(root, 'fixture-source'), official = path.join(root, 'fixture-official'), native = path.join(root, 'fixture-native');
+const reuse = process.env.STAGE1_FIXTURE_REUSE === '1';
+if (!reuse) {
 await fs.mkdir(root, {recursive: true});
 await write(path.join(source, 'cjpm.toml'), '[package]\ncompile-option = ""\n');
 await write(path.join(source, 'packages/codegen/cjpm.toml'), await fs.readFile(path.join(here, '../../packages/codegen/cjpm.toml')));
@@ -22,9 +24,11 @@ await write(path.join(source, 'runtime_shim/cjc_runtime_config.c'), 'int fixture
 await execute('/usr/bin/git', ['init', '-q', source]);
 await execute('/usr/bin/git', ['-C', source, 'add', '.']);
 await execute('/usr/bin/git', ['-C', source, '-c', 'user.name=Zxilly', '-c', 'user.email=zxilly@outlook.com', 'commit', '-qm', 'controlled stage1 source fixture']);
+}
 const commit = (await execute('/usr/bin/git', ['-C', source, 'rev-parse', 'HEAD'])).stdout.trim();
 const tree = (await execute('/usr/bin/git', ['-C', source, 'rev-parse', 'HEAD^{tree}'])).stdout.trim();
 const llvmRel = 'third_party/llvm/lib/libLLVM-15.so', shimRel = 'third_party/llvm/fixed-llc/cjselfhost_llvmshim.o';
+if (!reuse) {
 for (const [directory, domain] of [[official, 'HOST'], [native, 'TARGET']]) {
   await write(path.join(directory, 'library.c'), `const char *fixture_llvm_domain(void){return "${domain}";}\n`);
   await fs.mkdir(path.dirname(path.join(directory, llvmRel)), {recursive: true});
@@ -41,18 +45,22 @@ await fs.mkdir(path.dirname(path.join(native, shimRel)), {recursive: true});
 await cc(['-c', path.join(native, 'shim.c'), '-o', path.join(native, shimRel)]);
 await write(path.join(native, 'third_party/llvm/include/fixture.h'), '// target include fixture\n');
 await fs.symlink('libLLVM-15.so', path.join(native, 'third_party/llvm/lib/libLLVM.so'));
+}
 const nativeProducer = {adapter: 'llvm-cjdb', version: commit};
 const nativeBuild = `controlled-fixture-${commit}`;
 const stamp = {llvm_sha: commit, sha256: await fileDigest(path.join(native, llvmRel)), producer: {version: commit, buildId: nativeBuild}};
+if (!reuse) {
 await atomicJson(path.join(native, 'third_party/llvm/lib/manifest.json'), stamp);
 await write(path.join(native, 'third_party/llvm/fixed-llc/llvm-tools.manifest'), `LLVM_SHA=${commit}\nSHIM_SHA256=${await fileDigest(path.join(native, shimRel))}\n`);
+}
 const nativeFiles = await inventory(native, {links: true});
 const nativeComponent = {id: 'fixture-native', domain: 'target', roles: ['llvm-tools', 'llvm-dylib'], source: {kind: 'git', repo: source, commit, tree}, producer: nativeProducer};
 // The stand-in cjpm consumes the unchanged product link-option, runs host cjc
 // and target llc via the adapter, then links a small real ELF with that input.
 const cjpm = `#!${process.execPath}\nimport fs from 'node:fs/promises';import path from 'node:path';import {spawnSync} from 'node:child_process';\nconst sdk=process.env.CANGJIE_HOME;\nfunction run(argv){console.log('FIXTURE_COMMAND '+JSON.stringify(argv));const r=spawnSync(argv[0],argv.slice(1),{env:process.env,encoding:'utf8'});process.stdout.write(r.stdout||'');process.stderr.write(r.stderr||'');if(r.status!==0)process.exit(r.status||1);}\nrun([path.join(sdk,'bin/cjc')]);run([path.join(sdk,'third_party/llvm/bin/llc')]);\nconst text=await fs.readFile('packages/codegen/cjpm.toml','utf8');const link=text.match(/link-option = "([^"\\n]+)"/)[1].replaceAll('$'+'{CANGJIE_HOME}',sdk);\nawait fs.mkdir('target/release/bin',{recursive:true});await fs.writeFile('target/release/link-command.json',JSON.stringify(link));\nrun(['/usr/bin/cc',${JSON.stringify(path.join(root, 'probe.c'))},...link.split(' '),'-ldl','-o','target/release/bin/cjcj::cjc']);\n`;
-await write(path.join(official, 'tools/bin/cjpm'), cjpm, 0o755);
-const hostLock = path.join(official, 'SDK.lock.json'); await atomicJson(hostLock, {fixture: 'official-host-domain'});
+if (!reuse) await write(path.join(official, 'tools/bin/cjpm'), cjpm, 0o755);
+const hostLock = path.join(official, 'SDK.lock.json');
+if (!reuse) await atomicJson(hostLock, {fixture: 'official-host-domain'});
 const hostSource = {kind: 'distribution', root: official, lock: hostLock, lockSha256: await fileDigest(hostLock)};
 const observer = path.join(here, 'fixtures/sdk-stage1-observer.mjs');
 const producerVersion = (await execute('/usr/bin/git', ['-C', toolsRepo, 'rev-parse', 'HEAD'])).stdout.trim();
@@ -68,7 +76,7 @@ async function arm(name, mutate = () => {}) {
   const component = structuredClone(base), projection = {component: nativeComponent, files: structuredClone(nativeFiles), artifacts: native, buildId: nativeBuild,
     receiptSha256: 'controlled-fixture-not-a-success-receipt'};
   mutate(component, projection);
-  const directory = path.join(root, name);
+  const directory = path.join(root, `${process.env.STAGE1_ARM_PREFIX || ''}${name}`);
   const identity = {directory, buildId: `controlled-${name}`, dependencies: {'fixture-native': nativeBuild}};
   let failure;
   try { await produceComponent({buildRoot: root, lane: 'controlled-stage1'}, component, identity,
