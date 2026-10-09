@@ -742,7 +742,7 @@ test('package paths and archive roots match package.py', async () => {
 test('package retains compiler and pcre relative links after input removal', async () => {
   const {root, config} = makeFixture();
   try {
-    const input = config.target.primaryCompilerOutput();
+    const input = path.join(config.repoPath('compiler'), config.target.primaryCompilerOutput());
     const tuple = 'linux_x86_64_cjnative';
     file(input, ['bin', 'cjcj-stage1'], 'managed compiler');
     for (const name of ['cjc', 'cjc-frontend']) fs.symlinkSync('cjcj-stage1', path.join(input, 'bin', name));
@@ -778,7 +778,7 @@ test('package rejects the exact missing Windows payload path', async () => {
   try {
     const relative = ['modules', 'windows_x86_64_cjnative', 'std', 'std.core.cjo'];
     file(config.officialSdkRoot, relative, 'official payload');
-    const input = config.target.primaryCompilerOutput();
+    const input = path.join(config.repoPath('compiler'), config.target.primaryCompilerOutput());
     file(input, relative, 'produced Windows module');
     await packageStage.run(config);
     fs.rmSync(path.join(input, ...relative));
@@ -793,7 +793,7 @@ test('package rejects the exact missing Windows payload path', async () => {
 test('package rejects an extra link outside the published SDK', async () => {
   const {root, config} = makeFixture();
   try {
-    const input = config.target.primaryCompilerOutput();
+    const input = path.join(config.repoPath('compiler'), config.target.primaryCompilerOutput());
     file(root, ['outside'], 'external dependency');
     fs.symlinkSync(path.join(root, 'outside'), path.join(input, 'external'));
     console.log('PACKAGE_EXTERNAL_LINK_ASSERT_REACHED');
