@@ -20,6 +20,11 @@
     "reason": "Run node --test ci/bootstrap/toolchain-sdk.test.mjs only with SDK_SHAREDBUILD_ENGINE from an independently owned clean Git checkout and SDK_MANIFEST_TEST_ROOT naming an existing private writable parent. Requires Linux x86_64 native compilation/loading and python3, node, git, bash, tar, cmake, clang, clang++, cc, ar plus nm for SDK verification. Fixtures compile ELF/shared libraries/archives even before the dry-run case, then invoke the real engine and SDK assembler; SDK_MANIFEST_PRODUCT optionally selects the CLI. Exclusively own fixture source repositories, plans, receipts, seed/shared caches, build artifacts and SDK/evidence outputs under the private root; failure/recovery arms mutate them. CI supplies neither engine nor root. Registration is NOT_RUN, not a CI pass or full real SDK qualification."
   },
   {
+    "file": "ci/bootstrap/sdk-export.test.mjs",
+    "executor": "manual",
+    "reason": "Run node --test ci/bootstrap/sdk-export.test.mjs only with SDK_EXPORT_PLAN naming the private sealed supplemental Linux x86_64 plan (including fixed compiler 174db8f40d5efddee63c47a3162bbf676bc227a0 schemas and all original authenticated receipts) and SDK_EXPORT_ROOT naming an existing private evidence parent. Requires at least 64 available native CPUs, frozen Node/Git tools and same-tree SDK producer/resolver. Existing receipts/source inputs are read-only; writes are confined to fresh schema-resolver directories under SDK_EXPORT_ROOT. Cut arms change only an independently owned isolated product checkout, never shared installations or original input receipts. CI does not provision these inputs; registration is NOT_RUN, not complete SDK qualification."
+  },
+  {
     "file": "ci/bootstrap/test_bootstrap.sh",
     "executor": "bash",
     "args": []

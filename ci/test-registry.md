@@ -44,6 +44,16 @@ lane's inputs.
 | `node --test ci/bootstrap/sdk-real-boundary.test.mjs` | `SDK_REAL_PLAN`, `SDK_REAL_SDK`: genuine complete SDK with `SDK.manifest.json`, cross-repository receipts, runtime `bin/cjfilt`/`RuntimeAPI.h`, AST headers, original `std.core.cjo`, `libLLVM-15.so` and official distribution payloads; `SDK_REAL_EVIDENCE`: existing evidence parent. A small C fixture cannot replace these products. | Original producer artifacts plus temporary/reassembled SDK and evidence outputs. Arms move/replace ordinary and LLVM payloads, restore them and remove duplicate assemblies. |
 | `node --test ci/bootstrap/toolchain-sdk.test.mjs` | `SDK_SHAREDBUILD_ENGINE`: engine in an independently owned clean Git checkout, whose HEAD and engine digest are captured; `SDK_MANIFEST_TEST_ROOT`: existing writable private parent. Requires `python3`, `node`, `git`, `bash`, `tar`, `cmake`, `clang`, `clang++`, `cc`, `ar`, and verification `nm`/native loading. Even its dry-run case first compiles fixture ELF/shared libraries/archives. | Fixture source Git repositories, plans, receipts, seed/shared caches, native builds, SDKs and evidence under the private root; concurrent requests and failure/recovery arms mutate that closure. |
 
+`ci/bootstrap/sdk-export.test.mjs` is a separate manual producer/export check.
+It requires `SDK_EXPORT_PLAN` (a private sealed supplemental Linux plan with
+fixed compiler `174db8f40d5efddee63c47a3162bbf676bc227a0` schema source and all
+authenticated receipts), `SDK_EXPORT_ROOT` (an existing private evidence parent),
+at least 64 available CPUs and the plan's frozen Node/Git tools. It invokes the
+same-tree producer through the real SDK resolver CLI. Existing receipts and
+sources remain read-only; fresh `schema-resolver-*` directories and isolated
+product cut checkouts are its write domain. CI does not provide these inputs;
+registration is NOT_RUN and does not qualify the complete SDK.
+
 The real-boundary and toolchain tests allow `SDK_MANIFEST_PRODUCT` to select
 the assembler CLI. Their direct verification imports remain same-tree modules;
 record both identities. The boundary test always invokes the same-tree CLI.
