@@ -140,6 +140,7 @@ export const GATING = Object.freeze([
   'ci/run-registered-tests.test.mjs',
   'scripts/erased_dynpayload_gate.test.mjs',
   'scripts/cjcjcg_aggregate_ctype_gate.test.mjs',
+  'ci/producer-evidence.test.mjs',
 ]);
 
 // Registered, not executed. `needs` is what CI would have to provide; `verified`

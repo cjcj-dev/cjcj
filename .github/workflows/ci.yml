@@ -87,7 +87,7 @@ jobs:
           path: ${{ runner.temp }}/contract-plan
       - name: Install release contract dependencies
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq zip unzip clang lld libssl-dev python3 build-essential jq cmake ninja-build
+          sudo apt-get update -qq && sudo apt-get install -y -qq zip unzip clang lld libssl-dev python3 build-essential git gdb jq cmake ninja-build
           npm exec --yes --package=zx@8 -- node ci/test-zx.mjs prepare "$RUNNER_TEMP/test-zx.json"
       # package-lineage compares package bytes with the official host SDK. Load
       # the consumer's pin, not the build job's independently loaded environment.
@@ -107,6 +107,7 @@ jobs:
           CONTRACT_GROUP: ${{ matrix.group }}
           RELEASE_EVIDENCE_TEST_ROOT: ${{ runner.temp }}/release-evidence-tests
           CJCJ_TEST_EVIDENCE: ${{ runner.temp }}/srcbuild-driver-evidence
+          PRODUCER_EVIDENCE_TEST_ROOT: ${{ runner.temp }}/producer-evidence-tests
         run: |
           node ci/contract-shards.mjs run "$RUNNER_TEMP/contract-plan/contract-plan.json" "$CONTRACT_GROUP" "$RUNNER_TEMP/contract-result"
       - name: Preserve contract group evidence
@@ -123,6 +124,14 @@ jobs:
           name: srcbuild-driver-evidence-${{ matrix.group }}
           path: ${{ runner.temp }}/srcbuild-driver-evidence
           if-no-files-found: warn
+      - name: Preserve producer qualification evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: producer-qualification-${{ matrix.group }}
+          path: ${{ runner.temp }}/producer-evidence-tests
+          if-no-files-found: warn
+          include-hidden-files: true
 
   source-audits:
     name: Pin reachability and source policy
@@ -252,13 +261,14 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: package-tests-official-host
+          if-no-files-found: warn
+          include-hidden-files: true
           path: |
             ${{ runner.temp }}/package-tests/results.json
             ${{ runner.temp }}/package-tests/run.log
             ${{ runner.temp }}/package-tests/reports
             ${{ runner.temp }}/package-tests/prepare
-            ${{ runner.temp }}/package-tests/objc-fixture/fixture.json
-            ${{ runner.temp }}/package-tests/objc-fixture/*.log
+            ${{ runner.temp }}/package-tests/objc-fixture
             ${{ runner.temp }}/package-tests/prerequisite.json
 
   fixed-llvm-tools:
@@ -402,7 +412,15 @@ jobs:
           test -f "target/release/bin/cjcj::cjc"
           cp "target/release/bin/cjcj::cjc" "target/release/bin/cjcj"
       - name: Run smoke tests
-        run: npx --yes zx@8 ci/smoke/run_smoke.mjs "$PWD/target/release/bin/cjcj"
+        run: npx --yes zx@8 ci/smoke/run_smoke.mjs "$PWD/target/release/bin/cjcj" "$RUNNER_TEMP/smoke-tests"
+      - name: Preserve smoke producer evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: smoke-producer-evidence-${{ matrix.runner }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/smoke-tests
+          if-no-files-found: warn
+          include-hidden-files: true
 
   # Non-gating: verifies SDK provisioning on macOS; does not build cjcj.
   provision:

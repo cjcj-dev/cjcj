@@ -255,6 +255,32 @@ test('promoted contracts have their CI prerequisites', async () => {
   }
 });
 
+test('producer evidence qualification and full smoke artifacts are wired without enabling diagnostics', async () => {
+  const ci = loadYaml(await fs.readFile(path.join(workflowDir, 'ci.yml'), 'utf8'));
+  const contracts = ci.jobs.contracts;
+  const install = contracts.steps.find(s => s.name === 'Install release contract dependencies');
+  for (const dependency of ['build-essential', 'gdb', 'python3', 'git'])
+    assert.ok(install.run.split(/\s+/).includes(dependency), dependency);
+  assert.ok(GATING.includes('ci/producer-evidence.test.mjs'));
+  const run = contracts.steps.find(s => s.name === 'Test build and release contracts');
+  assert.equal(run.env.PRODUCER_EVIDENCE_TEST_ROOT, '${{ runner.temp }}/producer-evidence-tests');
+  const qualification = contracts.steps.find(s => s.name === 'Preserve producer qualification evidence');
+  assert.equal(qualification.if, 'always()');
+  assert.equal(qualification.with.path, run.env.PRODUCER_EVIDENCE_TEST_ROOT);
+  assert.equal(qualification.with['include-hidden-files'], true);
+  const smoke = ci.jobs.build.steps.find(s => s.name === 'Run smoke tests');
+  assert.match(smoke.run, /"\$RUNNER_TEMP\/smoke-tests"/);
+  const upload = ci.jobs.build.steps.find(s => s.name === 'Preserve smoke producer evidence');
+  assert.equal(upload.if, 'always()');
+  assert.equal(upload.with.path, '${{ runner.temp }}/smoke-tests');
+  assert.equal(upload.with['include-hidden-files'], true);
+  assert.equal(upload.with['if-no-files-found'], 'warn');
+  for (const [name, job] of Object.entries(ci.jobs)) {
+    assert.doesNotMatch(JSON.stringify(job.env || {}), /runner\.temp/, `job-level context: ${name}`);
+    assert.doesNotMatch(JSON.stringify(job), /CJCJ_DIAGNOSTIC_CALL/, `normal execution: ${name}`);
+  }
+});
+
 test('lane scratch files stay outside the tracked source set', () => {
   assert.equal(execFileSync('git', ['ls-files', '.lane'], {cwd: repoRoot, encoding: 'utf8'}), '');
   assert.equal(execFileSync('git', ['check-ignore', '.lane/probe.sh'],

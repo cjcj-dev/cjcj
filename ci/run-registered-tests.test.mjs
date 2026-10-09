@@ -82,16 +82,19 @@ async function prerequisiteFixture(body) {
     for (const file of ['bin/cjc', 'tools/bin/cjpm',
       'runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so',
       'runtime/lib/linux_x86_64_cjnative/libboundscheck.so',
-      'lib/linux_x86_64_cjnative/libcangjie-std-core.a', 'third_party/llvm/lib/libLLVM-15.so']) {
+      'modules/linux_x86_64_cjnative/std/std.core.cjo', 'lib/linux_x86_64_cjnative/libcangjie-std-core.a', 'third_party/llvm/lib/libLLVM-15.so']) {
       await fs.mkdir(path.dirname(path.join(sdk, file)), {recursive: true});
       await fs.writeFile(path.join(sdk, file), 'identity input');
     }
     process.env.CANGJIE_HOME = sdk;
+    await fs.mkdir(path.join(sdk, 'tools/lib'), {recursive: true});
     const root = path.join(work, 'tree');
     await fs.mkdir(path.join(root, 'scripts'), {recursive: true});
     // Execute the unchanged production script through the actual runner.
     const script = path.join(root, 'scripts/objc_preamble_unit.py');
     await fs.copyFile(path.join(repoRoot, 'scripts/objc_preamble_unit.py'), script);
+    await fs.mkdir(path.join(root, 'ci'), {recursive: true});
+    await fs.copyFile(path.join(repoRoot, 'ci/producer-evidence.mjs'), path.join(root, 'ci/producer-evidence.mjs'));
     await fs.cp(path.join(repoRoot, 'scripts/objc_regcomp_fixtures'), path.join(root, 'scripts/objc_regcomp_fixtures'), {recursive: true});
     await fs.mkdir(path.join(root, 'runtime_shim'));
     const shim = path.join(root, 'runtime_shim/cjselfhost_llvmshim.o');
@@ -221,9 +224,11 @@ test('official host always uploads preparation and fixture diagnostic evidence',
   const workflow = await fs.readFile(path.join(repoRoot, '.github/workflows/ci.yml'), 'utf8');
   const section = workflow.slice(workflow.indexOf('      - name: Preserve Cangjie test results'), workflow.indexOf('  fixed-llvm-tools:'));
   assert.match(section, /if: always\(\)/);
-  for (const file of ['prepare', 'objc-fixture/fixture.json', 'objc-fixture/*.log', 'prerequisite.json']) {
-    assert.ok(section.includes('package-tests/' + file), file);
+  for (const file of ['prepare', 'objc-fixture', 'prerequisite.json']) {
+    assert.ok(section.split('\n').some(line => line.trim() === '${{ runner.temp }}/package-tests/' + file), file);
   }
+  assert.match(section, /include-hidden-files: true/);
+  assert.match(section, /if-no-files-found: warn/);
 });
 
 test('directed parameters preserve the whole-workspace default and reject unsupported or partial selection', async () => {
@@ -293,6 +298,8 @@ test('runCangjie carries directed argv and fixture environment to its actual chi
     const source = 'packages/compiler_unittest/src/ObjCPreamble_test.cj';
     await fs.mkdir(path.join(root, 'scripts'), {recursive: true});
     await fs.copyFile(path.join(repoRoot, 'scripts/objc_preamble_unit.py'), path.join(root, 'scripts/objc_preamble_unit.py'));
+    await fs.mkdir(path.join(root, 'ci'), {recursive: true});
+    await fs.copyFile(path.join(repoRoot, 'ci/producer-evidence.mjs'), path.join(root, 'ci/producer-evidence.mjs'));
     await fs.cp(path.join(repoRoot, 'scripts/objc_regcomp_fixtures'), path.join(root, 'scripts/objc_regcomp_fixtures'), {recursive: true});
     await fs.mkdir(path.dirname(path.join(root, source)), {recursive: true});
     await fs.copyFile(path.join(repoRoot, source), path.join(root, source));
@@ -303,10 +310,11 @@ test('runCangjie carries directed argv and fixture environment to its actual chi
     assert.equal(spawnSync('git', ['-c', 'user.name=Zxilly', '-c', 'user.email=zxilly@outlook.com', 'commit', '-qm', 'fixture'], {cwd: root}).status, 0);
     for (const file of ['bin/cjc', 'tools/bin/cjpm', 'runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so',
       'runtime/lib/linux_x86_64_cjnative/libboundscheck.so', 'lib/linux_x86_64_cjnative/libcangjie-std-core.a',
-      'third_party/llvm/lib/libLLVM-15.so']) {
+      'modules/linux_x86_64_cjnative/std/std.core.cjo', 'third_party/llvm/lib/libLLVM-15.so']) {
       await fs.mkdir(path.dirname(path.join(sdk, file)), {recursive: true});
       await fs.writeFile(path.join(sdk, file), 'identity');
     }
+    await fs.mkdir(path.join(sdk, 'tools/lib'), {recursive: true});
     const producer = path.join(work, 'producer');
     await fs.writeFile(producer, `#!/usr/bin/env python3
 import sys
