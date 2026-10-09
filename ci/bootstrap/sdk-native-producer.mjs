@@ -354,6 +354,34 @@ async function compilerBoundscheck(request) {
     host: component.config.host, target: component.config.target, producer: component.producer, buildId: request.identity.buildId});
   await sourceIdentity(boundscheck, input, 'compiler-boundscheck', tool('git'));
 }
+async function compilerXml2(request) {
+  const {component, source, directory} = request;
+  const archive = component.config.options.archive;
+  if (await fileDigest(archive.path) !== archive.sha256) reject('DEPENDENCY_DIGEST', component.id, 'libxml2 source archive');
+  const extracted = path.join(directory, 'source-inputs/libxml2');
+  await fs.mkdir(extracted, {recursive: true});
+  await run(['tar', '-xJf', archive.path, '--strip-components=1', '-C', extracted]);
+  const projection = path.join(directory, 'build/xml2-source'), build = path.join(directory, 'build/xml2');
+  await fs.mkdir(projection, {recursive: true});
+  const recipe = path.join(source, 'third_party/cmake/Xml2.cmake');
+  // Execute the compiler's actual dependency recipe, including its nested
+  // CMake build/install. Only the source acquisition is replaced by a pinned
+  // official archive; both source trees and the original recipe stay intact.
+  await fs.writeFile(path.join(projection, 'CMakeLists.txt'), `cmake_minimum_required(VERSION 3.16)\nproject(CompilerXml2 C CXX)\nset(CANGJIE_XML2_SOURCE_DIR "${extracted}")\ninclude("${recipe}")\n`);
+  await run(['cmake', '-G', 'Ninja', '-S', projection, '-B', build,
+    `-DCMAKE_MAKE_PROGRAM=${tool('ninja')}`, `-DCMAKE_C_COMPILER=${tool('clang')}`, `-DCMAKE_CXX_COMPILER=${tool('clang++')}`],
+  {env: {...process.env, CC: tool('clang'), CXX: tool('clang++'), CMAKE_BUILD_PARALLEL_LEVEL: String(os.availableParallelism())}});
+  const artifacts = path.join(directory, 'artifacts'); await fs.mkdir(path.join(artifacts, 'lib'), {recursive: true});
+  for (const name of ['libxml2.so', 'libxml2.so.16', 'libxml2.so.2.14.0']) {
+    const input = path.join(build, 'third_party/xml2/lib', name), output = path.join(artifacts, 'lib', name);
+    if ((await fs.lstat(input)).isSymbolicLink()) await fs.symlink(await fs.readlink(input), output);
+    else await fs.copyFile(input, output);
+  }
+  await atomicJson(path.join(artifacts, 'xml2-producer.json'), {source: component.source, archive,
+    recipe: {path: 'third_party/cmake/Xml2.cmake', sha256: await fileDigest(recipe)},
+    host: component.config.host, target: component.config.target, producer: component.producer, buildId: request.identity.buildId});
+  if (await fileDigest(archive.path) !== archive.sha256) reject('DEPENDENCY_DIGEST', component.id, 'libxml2 archive changed during production');
+}
 async function astSupport(request) {
   const {component, source, directory, dependencies} = request, options = component.config.options;
   optionsOnly(options, ['sdkDependency', 'flatbuffersSource', 'launcher', 'flatbuffersTransform'], component.id);
@@ -427,6 +455,7 @@ export async function nativeProducer(request) {
   if (component.producer.adapter === 'bootstrap-std') await std(request);
   else if (component.producer.adapter === 'llvm-release-layout') await llvmReleaseLayout(request);
   else if (component.producer.adapter === 'compiler-boundscheck') await compilerBoundscheck(request);
+  else if (component.producer.adapter === 'compiler-xml2') await compilerXml2(request);
   else if (component.producer.adapter === 'compiler-schema') {
     const schemas = ['StdAstFormat.fbs', 'StdxChirFormat.fbs'];
     const artifacts = path.join(request.directory, 'artifacts');

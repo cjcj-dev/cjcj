@@ -23,7 +23,7 @@ export const PLATFORMS = Object.freeze({
 });
 export const ADAPTERS = Object.freeze(['official', 'sharedbuild-stage1',
   'sharedbuild-runtime-default', 'sharedbuild-runtime-testable', 'bootstrap-std',
-  'llvm-tools', 'llvm-dylib', 'llvm-release-layout', 'ast-support', 'compiler-schema', 'compiler-boundscheck', 'bootstrap-compiler']);
+  'llvm-tools', 'llvm-dylib', 'llvm-release-layout', 'ast-support', 'compiler-schema', 'compiler-boundscheck', 'compiler-xml2', 'bootstrap-compiler']);
 const HEX40 = /^[0-9a-f]{40}$/;
 const HEX64 = /^[0-9a-f]{64}$/;
 const NAME = /^[a-z][a-z0-9-]*$/;
@@ -160,6 +160,17 @@ export function validatePlan(plan) {
       if (!HEX40.test(config.options.boundscheckSource.commit) || !HEX40.test(config.options.boundscheckSource.tree) || !config.options.boundscheckSource.repo) reject('SOURCE', id, 'boundscheck input identity');
       if (!component.roles.includes('compiler') || config.host !== 'linux_x86_64' || config.target !== 'linux_x86_64') reject('CONFIG', id, 'compiler support export currently requires the native Linux target');
       for (const name of ['node', 'git', 'cmake', 'ninja', 'clang', 'clang++']) if (!config.tools[name]) reject('CONFIG', id, `boundscheck producer tool ${name} must be frozen`);
+      absolute(producer.repository, id);
+    }
+    if (producer.adapter === 'compiler-xml2') {
+      fields(config.options, ['archive'], [], id);
+      fields(config.options.archive, ['path', 'sha256', 'url', 'version'], [], id);
+      absolute(config.options.archive.path, id);
+      if (config.options.archive.version !== '2.14.0'
+        || config.options.archive.sha256 !== '3e2ed89d81d210322d70b35460166d4ea285e5bb017576972a1d76a09631985c'
+        || config.options.archive.url !== 'https://download.gnome.org/sources/libxml2/2.14/libxml2-2.14.0.tar.xz') reject('SOURCE', id, 'fixed official libxml2 archive required');
+      if (!component.roles.includes('compiler') || config.host !== 'linux_x86_64' || config.target !== 'linux_x86_64') reject('CONFIG', id, 'compiler XML2 support requires the native Linux target');
+      for (const name of ['node', 'git', 'cmake', 'ninja', 'clang', 'clang++', 'tar']) if (!config.tools[name]) reject('CONFIG', id, `XML2 producer tool ${name} must be frozen`);
       absolute(producer.repository, id);
     }
     if (producer.adapter === 'llvm-release-layout') {
