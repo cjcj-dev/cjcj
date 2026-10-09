@@ -7,6 +7,7 @@ import test from 'node:test';
 import crypto from 'node:crypto';
 import {manifestSdkFixture} from './fixtures/manifest-sdk.mjs';
 import {fileDigest} from '../../ci/bootstrap/sdk-manifest.mjs';
+import {capturePackageStdInput, assertPublishedPackageStd} from './fixtures/package-observation.mjs';
 import {publishBootstrapStdOutput} from '../../ci/bootstrap/std-output.mjs';
 import {prepareBootstrapHandoff, assertBootstrapCompiler} from '../../ci/srcbuild/lib/bootstrap-handoff.mjs';
 
@@ -136,12 +137,6 @@ test('bootstrap producer reaches actual stdx and tools subprocess entries', asyn
   });
   process.env.PATH = `${fakeBin}:${process.env.PATH}`;
   process.env.CJCJ_SRCBUILD_HOST_SDK = host;
-  if (!process.env.CJCJ_VERIFIER_LLVM_DIS) {
-    const dis = spawnSync('sh', ['-c', 'command -v llvm-dis || command -v llvm-dis-18 || command -v llvm-dis-17 || command -v llvm-dis-16 || command -v llvm-dis-15 || command -v llvm-dis-14'], {encoding: 'utf8'});
-    assert.equal(dis.status, 0, 'package verifier needs a real llvm-dis input');
-    process.env.CJCJ_VERIFIER_LLVM_DIS = dis.stdout.trim();
-  }
-  console.log(`SDK_PACKAGE_LLVM_DIS path=${process.env.CJCJ_VERIFIER_LLVM_DIS} sha256=${await fileDigest(process.env.CJCJ_VERIFIER_LLVM_DIS)}`);
   delete process.env.CANGJIE_BUILD_DRY_RUN;
   const officialSdkRoot = host;
   const original = buildConfig({workspace: f.root, buildRoot: f.root, consumerSdk: f.sdk, officialSdkRoot});
@@ -172,11 +167,13 @@ test('bootstrap producer reaches actual stdx and tools subprocess entries', asyn
   await stdx.run(config);
   await tools.run(config);
   await fs.mkdir(path.join(config.repoPath('stdx'), 'target', f.tuple), {recursive: true});
-  // The package gate supports a disassembler inside its actual candidate root.
-  // Bind a real llvm-dis and assemble legal bitcode, rather than fake metadata
-  // output or relying on the #922 environment-default path.
-  const disassembler = process.env.CJCJ_VERIFIER_LLVM_DIS;
-  const assembler = disassembler.replace('llvm-dis','llvm-as');
+  const invocations = (await fs.readFile(trace, 'utf8')).trim().split('\n').map(JSON.parse);
+  assert.equal(invocations.length, 1 + tools.toolsFor(config).length);
+  for (const row of invocations) {
+    console.log(`CONSUMER_ORIGIN_ASSERT_REACHED ${row.cwd}`);
+    assert.ok(row.compiler.includes(`compiler home=${f.sdk}`), JSON.stringify(row));
+    assert.ok(row.compiler.endsWith('coloured std'), JSON.stringify(row));
+  }
   // Package itself needs the completed Cangjie producers, independently of
   // the small-C child-process apparatus above. Preserve every input receipt.
   assert.ok(retained.components.every(c => c.producer.receipt));
@@ -188,23 +185,17 @@ test('bootstrap producer reaches actual stdx and tools subprocess entries', asyn
     '--plan', packagePlan, '--to', packageSdk], {encoding:'utf8'});
   console.log(`SDK_PACKAGE_REAL_INPUT_ASSERT rc=${assembly.status} sdk=${packageSdk}`);
   assert.equal(assembly.status,0,assembly.stdout+assembly.stderr);
-  const beforePackageStd = await fileDigest(path.join(packageSdk,'lib',f.tuple,'libcangjie-std-core.a'));
-  const bc = path.join(packageSdk,'modules','package-input.bc');
-  const assembled = spawnSync(assembler,['-o',bc],{input:'define i32 @package_input() { ret i32 0 }\n',encoding:'utf8'});
-  assert.equal(assembled.status,0,assembled.stderr);
-  await fs.copyFile(disassembler,path.join(packageSdk,'third_party/llvm/bin/llvm-dis'));
-  console.log(`SDK_PACKAGE_BITCODE path=${bc} sha256=${await fileDigest(bc)} assembler=${assembler}`);
-  await packageStage.run({...config,consumerSdk:packageSdk});
-  console.log('SDK_PACKAGE_ORIGIN_ASSERT_REACHED');
-  assert.equal(await fileDigest(path.join(f.sdk, 'lib', f.tuple, 'libcangjie-std-core.a')), beforePackageStd);
-  assert.ok((await fs.readFile(path.join(f.sdk, 'tools', 'bin', 'cjpm'), 'utf8')).includes(`compiler home=${f.sdk}`));
-  const invocations = (await fs.readFile(trace, 'utf8')).trim().split('\n').map(JSON.parse);
-  assert.equal(invocations.length, 1 + tools.toolsFor(config).length);
-  for (const row of invocations) {
-    console.log(`CONSUMER_ORIGIN_ASSERT_REACHED ${row.cwd}`);
-    assert.ok(row.compiler.includes(`compiler home=${f.sdk}`), JSON.stringify(row));
-    assert.ok(row.compiler.endsWith('coloured std'), JSON.stringify(row));
-  }
+  // Snapshot the complete std owner's installed files and producer identity,
+  // then observe package's published tree, independently of the handoff SDK.
+  const packageInput = await capturePackageStdInput(packageSdk);
+  await packageStage.run({...config, consumerSdk: packageSdk});
+  await assertPublishedPackageStd({config, input: packageInput});
+  const publishedSdk = path.join(config.softwareDir, 'cangjie');
+  console.log(`SDK_PACKAGE_TOOLS_ORIGIN_ASSERT_REACHED sdk=${publishedSdk}`);
+  assert.equal(await fileDigest(path.join(publishedSdk, 'tools', 'bin', 'cjpm')),
+    await fileDigest(path.join(config.repoPath('tools'), 'cjpm', 'dist', 'cjpm')));
+  assert.ok((await fs.readFile(path.join(publishedSdk, 'tools', 'bin', 'cjpm'), 'utf8')).includes(`compiler home=${f.sdk}`));
+
 });
 
 for (const hostHeap of ['12288MB', '10752MB', '5376MB']) {
