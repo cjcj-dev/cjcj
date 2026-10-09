@@ -7,7 +7,7 @@ import test,{after} from 'node:test';
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
-import {prepareQualification,exportQualification,verifyQualificationCertificate,CJDB_INPUTS} from './sdk-cjdb-qualification.mjs';
+import {prepareQualification,exportQualification,verifyQualificationCertificate,verifyInstalledQualification,CJDB_INPUTS} from './sdk-cjdb-qualification.mjs';
 import {readJson,inventory,fileDigest,atomicJson} from './sdk-manifest.mjs';
 
 const request=await readJson(process.env.CJDB_REQUEST), root=process.env.CJDB_QUALIFICATION_EVIDENCE;
@@ -80,5 +80,35 @@ test('fixed LLVM project invokes the preconfigure gate and retains the actual di
   assert.deepEqual(Object.keys(pre.body.generated).sort(),Object.keys(CJDB_INPUTS).sort());
   const configuredText=await fs.readFile(path.join(root,'llvm-project-configuration/build.ninja'),'utf8');
   assert.ok(configuredText.includes(`${request.component.source.commit}-dirty`),'configuration must retain actual old dirty stamp');
+});
+test('real hook rejects an extra ignored input and restores the original source status',async()=>{
+  const extra=path.join(roots.llvm,'utils/native-qualification-deliberate-extra.o');
+  const git=request.component.config.tools.git.path;
+  const before=command('source-status-before',[git,'-C',roots.llvm,'status','--porcelain','-z','--untracked-files=all']);assert.equal(before.status,0,before.stderr);
+  const bytes=Buffer.from('deliberately unexpected qualification input\n');
+  await fs.writeFile(path.join(root,'extra-input-original.bin'),bytes);
+  await fs.writeFile(extra,bytes,{flag:'wx'});
+  try{
+    const isolated=await prepareQualification(request,roots,path.join(root,'extra-input-qualification'));
+    const rejected=command('extra-input-hook',[request.component.config.tools.cmake.path,'-P',isolated.hook]);
+    await fs.writeFile(path.join(root,'extra-input.log'),rejected.stdout+rejected.stderr);
+    console.log('CJDB_EXTRA_INPUT_ASSERT_REACHED');
+    assert.equal(rejected.status,1);assert.match(rejected.stderr,/CJDB_SOURCE_STATUS.*native-qualification-deliberate-extra/);
+  }finally{await fs.unlink(extra);}
+  const restored=command('source-status-restored',[git,'-C',roots.llvm,'status','--porcelain','-z','--untracked-files=all']);assert.equal(restored.status,0,restored.stderr);assert.equal(restored.stdout,before.stdout);
+});
+test('formal installation qualification consumer rejects a wrong mapping of the genuine capsule',async()=>{
+  if(!certificate){const r=command('preconfigure-hook',[request.component.config.tools.cmake.path,'-P',prepared.hook]);assert.equal(r.status,0,r.stderr);const artifacts=path.join(root,'dependency-capsule');certificate=await exportQualification(prepared.contractFile,artifacts);files=await inventory(artifacts);}
+  // The projection deliberately has no native output schema/status/rc. It is
+  // only the actual qualification capsule passed to the formal guard, never
+  // a fabricated successful LLVM receipt or a complete SDK manifest.
+  const projection={buildId:request.identity.buildId,directory,files,execution:{generatedInputs:certificate},scope:'genuine-dependency-qualification-only'};
+  const manifest={components:{[request.component.id]:{receiptJson:JSON.stringify(projection)}},files:Object.fromEntries(Object.entries(files).map(([rel,row])=>[rel,{...row,component:request.component.id,buildId:request.identity.buildId}]))};
+  const plan={components:[request.component]},capsule=path.join(root,'dependency-capsule');
+  await verifyInstalledQualification(capsule,plan,manifest);
+  const wrong=structuredClone(manifest);wrong.files['native-inputs/qualification.json'].component='wrong-owner';
+  console.log('CJDB_INSTALL_MAPPING_ASSERT_REACHED');
+  await assert.rejects(verifyInstalledQualification(capsule,plan,wrong),/CJDB_QUALIFICATION_INSTALL.*required installed qualification/);
+  await atomicJson(path.join(root,'qualification-only-projection.json'),manifest);
 });
 after(async()=>{await atomicJson(path.join(root,'commands.json'),records);});

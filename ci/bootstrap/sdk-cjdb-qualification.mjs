@@ -46,6 +46,12 @@ async function checkSource(root, expected, git, label, allowed=[]) {
     status:(await run('status','--porcelain','-z','--untracked-files=all')).split('\0').filter(Boolean).sort()};
   if (canonical(pin(actual)) !== canonical(pin(expected))) reject('CJDB_SOURCE_IDENTITY',label,'HEAD/tree differ');
   if (canonical(actual.status) !== canonical(allowed.map(rel=>`?? ${rel}`).sort())) reject('CJDB_SOURCE_STATUS',label,canonical(actual.status).trim());
+  if(label==='llvm'){
+    // git status respects .gitignore. Count all non-tracked files as well,
+    // so an extra ignored object cannot bypass the exact-five requirement.
+    actual.untracked=(await run('ls-files','--others','-z')).split('\0').filter(Boolean).sort();
+    if(canonical(actual.untracked)!==canonical([...allowed].sort()))reject('CJDB_SOURCE_STATUS',label,`all untracked: ${canonical(actual.untracked).trim()}`);
+  }
   return actual;
 }
 export async function qualifyGeneratedInputs(contractFile, phase) {
@@ -124,6 +130,7 @@ export function verifyQualificationCertificate(component, buildId, certificate, 
   for (const [label,expected] of [['llvm',component.source],['compiler',component.config.options.compilerSource],['bounds',component.config.options.boundscheckSource]]) {
     const actual=body[label], allowed=label==='llvm'?Object.keys(CJDB_INPUTS):label==='bounds'?['CMakeLists.txt']:[];
     if (!actual || canonical(pin(actual))!==canonical(pin(expected)) || canonical(actual.status)!==canonical(allowed.map(rel=>`?? ${rel}`).sort())) fail(`${label} actual source identity/status differs`);
+    if(label==='llvm' && canonical(actual.untracked)!==canonical([...allowed].sort()))fail('LLVM all-untracked identity differs');
   }
   if (canonical(Object.keys(body.generated||{}).sort())!==canonical(Object.keys(CJDB_INPUTS).sort())) fail('exact five generated entities required');
   if (!body.demangler || ![body.demangler.cacheSha256,body.demangler.buildGraphSha256,...Object.values(body.rules||{})].every(value=>/^[a-f0-9]{64}$/.test(value))
