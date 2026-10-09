@@ -45,7 +45,7 @@ export async function buildCjdb(request, {run, tool, fetchIdentity, execute: req
   const launcher = tool('launcher'), jobs = String(os.availableParallelism());
   const prefix = [options.python.root, libedit.root, path.join(build, 'third_party/xml2')].join(';');
   const llvmArgs = [`-DCANGJIE_RUNTIME_SOURCE_DIR=${paired}`, `-DCMAKE_C_COMPILER_LAUNCHER=${launcher}`, `-DCMAKE_CXX_COMPILER_LAUNCHER=${launcher}`,
-    '-DCMAKE_CXX_FLAGS=-include cstdint -include unordered_map -include map -include vector -include string', '-DLLVM_PARALLEL_LINK_JOBS=8'];
+    '-DLLVM_PARALLEL_LINK_JOBS=8'];
   const env = {...process.env, PATH: `${path.join(options.python.root, 'bin')}:${path.dirname(tool('clang'))}:/usr/lib/ccache:/usr/bin:/bin`,
     CCACHE_DIR: '/root/.ccache', CCACHE_BASEDIR: directory, CCACHE_NOHASHDIR: '1', CMAKE_BUILD_PARALLEL_LEVEL: jobs,
     CMAKE_C_COMPILER_LAUNCHER:launcher, CMAKE_CXX_COMPILER_LAUNCHER:launcher,
