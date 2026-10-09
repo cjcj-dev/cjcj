@@ -39,7 +39,7 @@ async function fixture(t) {
       official: {receiptJson: JSON.stringify({component: {domain: 'host', roles: ['std', 'cjpm']}})},
     }}));
   const input = await capturePackageStdInput(sdk);
-  await fs.cp(sdk, published, {recursive: true, dereference: false});
+  await fs.cp(sdk, published, {recursive: true, dereference: false, verbatimSymlinks: true});
   return {sdk, config, published, input};
 }
 
