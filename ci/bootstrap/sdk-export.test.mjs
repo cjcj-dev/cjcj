@@ -63,7 +63,9 @@ for (const id of ['compiler-securec', 'llvm-release-tools', 'llvm-release-librar
       await execute(component.config.tools.git.path, ['-C', paired, 'checkout', '--quiet', '--detach', runtime.source.commit]);
     }
     const input = path.join(root, 'plan.json'); await fs.writeFile(input, JSON.stringify(plan));
-    const child = spawnSync(component.config.tools.node.path, [path.join(repository, 'ci/bootstrap/toolchain-sdk.mjs'), '--plan', input, '--resolve'], {encoding: 'utf8', maxBuffer: 32 * 1024 * 1024});
+    const destination = path.join(root, 'sdk');
+    const operation = id === 'llvm-release-layout' ? ['--out', destination] : ['--resolve'];
+    const child = spawnSync(component.config.tools.node.path, [path.join(repository, 'ci/bootstrap/toolchain-sdk.mjs'), '--plan', input, ...operation], {encoding: 'utf8', maxBuffer: 32 * 1024 * 1024});
     await fs.writeFile(path.join(root, 'resolver.log'), child.stdout + child.stderr);
     await fs.writeFile(path.join(root, 'resolver-result.json'), JSON.stringify({rc: child.status, signal: child.signal, repository, producer: component.producer}));
     const output = JSON.parse(await fs.readFile(path.join(identity.directory, 'output.json'), 'utf8'));
@@ -88,8 +90,10 @@ for (const id of ['compiler-securec', 'llvm-release-tools', 'llvm-release-librar
       assert.equal(readers.origin.receiptSha256, plan.components.find(c => c.id === 'llvm-readers').producer.receiptSha256);
       assert.equal(output.files['bin/llvm-dis'].sha256, readers.tools['llvm-dis'].sha256);
     }
+    console.log(`NATIVE_SDK_STATUS_ASSERT_REACHED component=${id} evidence=${root}`);
     assert.equal(child.status, 0, child.stdout + child.stderr);
-    const manifest = JSON.parse(child.stdout.trimEnd().split('\n').at(-1));
+    const manifest = id === 'llvm-release-layout' ? JSON.parse(await fs.readFile(path.join(destination, 'SDK.manifest.json'), 'utf8'))
+      : JSON.parse(child.stdout.trimEnd().split('\n').at(-1));
     console.log(`NATIVE_INSTALL_ASSERT_REACHED component=${id} evidence=${root}`);
     const published = id === 'compiler-securec' ? 'runtime/lib/linux_x86_64_cjnative/libsecurec.so' : id === 'llvm-release-libraries' ? 'third_party/llvm/lib/libLTO.so.15' : 'third_party/llvm/bin/llvm-cov';
     assert.ok(manifest.files[published], `actual SDK consumer must retain ${published}`);
