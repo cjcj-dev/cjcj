@@ -7,6 +7,7 @@ import {gzipSync} from 'node:zlib';
 import {fileDigest, readJson, atomicJson, inventory, sourceIdentity, registeredSourceIdentity, reject, canonical} from './sdk-manifest.mjs';
 import {parseLlvmToolsManifest} from '../llvm-tools-manifest.mjs';
 import {prepareQualification, exportQualification} from './sdk-cjdb-qualification.mjs';
+import {verifyCjdbPythonConfiguration, verifyCjdbPythonInstallation} from './sdk-cjdb-python.mjs';
 
 // Match the fixed CJDB graph's Release, assertions-off, dump-off LLVM.
 // LLVM's extern-template consumers must see the same NDEBUG configuration.
@@ -69,6 +70,10 @@ export async function buildCjdb(request, {run, tool, fetchIdentity, execute: req
   const llvmArgs = [`-DCANGJIE_RUNTIME_SOURCE_DIR=${paired}`, `-DCMAKE_C_COMPILER_LAUNCHER=${launcher}`, `-DCMAKE_CXX_COMPILER_LAUNCHER=${launcher}`,
     '-DLLVM_PARALLEL_LINK_JOBS=8', `-DCMAKE_PROJECT_LLVM_INCLUDE_BEFORE=${qualification.hook}`, `-DCJ_LLVM_COMMIT=${component.source.commit}`];
   const env = {...process.env, PATH: `${path.join(options.python.root, 'bin')}:${path.dirname(tool('clang'))}:/usr/lib/ccache:/usr/bin:/bin`,
+    // BuildCJDB does not forward the parent's Python cache to ExternalProject.
+    // CMake FindPython's environment root hint is inherited by its real child
+    // and selects Interpreter + Development together (including the ABI).
+    Python3_ROOT_DIR: options.python.root,
     CCACHE_DIR: '/root/.ccache', CCACHE_BASEDIR: directory, CCACHE_NOHASHDIR: '1', CMAKE_BUILD_PARALLEL_LEVEL: jobs,
     CMAKE_C_COMPILER_LAUNCHER:launcher, CMAKE_CXX_COMPILER_LAUNCHER:launcher,
     LD_LIBRARY_PATH: `${path.join(options.python.root, 'lib')}:${path.join(libedit.root, 'lib/x86_64-linux-gnu')}`};
@@ -87,6 +92,8 @@ export async function buildCjdb(request, {run, tool, fetchIdentity, execute: req
   // these through the same graph before invoking its complete install rules.
   await run(['cmake', '--build', build, '-j', jobs], {env});
   await run(['cmake', '--install', build], {env});
+  const pythonConfiguration = await verifyCjdbPythonConfiguration(options.python.root,
+    path.join(build, 'third_party/lldb-build'), requestExecute);
   // Recheck the same physical source and producer inputs before sealing. The
   // configure-time record cannot be replaced by a post-build observation.
   const artifacts = path.join(directory, 'artifacts'); await fs.mkdir(artifacts);
@@ -138,6 +145,8 @@ export async function buildCjdb(request, {run, tool, fetchIdentity, execute: req
   await fs.mkdir(path.join(artifacts, 'native-closure'), {recursive: true});
   await fs.cp(rawLldb, path.join(artifacts, 'native-closure/lldb'), {recursive: true, verbatimSymlinks: true});
   await fs.cp(options.python.root, path.join(artifacts, 'native-closure/python'), {recursive: true, verbatimSymlinks: true});
+  const pythonInstallation = await verifyCjdbPythonInstallation(options.python.root, nativeRoot, requestExecute);
+  await atomicJson(path.join(artifacts, 'cjdb-python.json'), {pythonConfiguration, pythonInstallation});
   // Bind the bootstrap shim and tuple metadata to these native executables,
   // headers and schema. No RTTI-OFF tuple contributes bytes to this install.
   const generatedHeaders = path.join(directory, 'build/shim-schema');
