@@ -49,11 +49,17 @@ test('producer root reaches real LLDB Interpreter and Development',
     const fetchIdentity=async (input,unused,label)=>{
       const target=label==='cjdb-boundscheck' || label==='cjdb-flatbuffers'
         ? path.join(sources,'compiler/third_party',label.slice(5)) : path.join(sources,label.slice(5));
-      try { await fs.access(path.join(target,'.git')); }
+      const marker=path.join(sources,`${label}.identity.json`);
+      try { await fs.access(marker); }
       catch {
-        await execute('/usr/bin/git',['clone','--no-hardlinks','--no-checkout',input.repo,target]);
+        await fs.mkdir(target,{recursive:true});
+        await execute('/usr/bin/git',['init',target]);
+        // Frozen commits can be unreferenced in a private bare source locator.
+        // Fetch that exact commit; clone's advertised refs do not cover it.
+        await execute('/usr/bin/git',['-C',target,'fetch','--no-tags',input.repo,input.commit]);
         await execute('/usr/bin/git',['-C',target,'checkout','--detach',input.commit]);
         await sourceIdentity(target,input,label);
+        await atomicJson(marker,{commit:input.commit,tree:input.tree});
       }
       assert.equal((await execute('/usr/bin/git',['-C',target,'rev-parse','HEAD'])).stdout.trim(),input.commit);
       assert.equal((await execute('/usr/bin/git',['-C',target,'rev-parse','HEAD^{tree}'])).stdout.trim(),input.tree);
