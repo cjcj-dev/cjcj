@@ -21,7 +21,12 @@ export async function capturePackageStdInput(sdk) {
   const root = await fs.realpath(sdk);
   const manifest = JSON.parse(await fs.readFile(path.join(root, 'SDK.manifest.json'), 'utf8'));
   const owners = new Set(Object.entries(manifest.components)
-    .filter(([, component]) => JSON.parse(component.receiptJson).component.roles.includes('std'))
+    .filter(([, component]) => {
+      const producer = JSON.parse(component.receiptJson).component;
+      // The official host distribution declares every role. Its retained
+      // tools are replaced by package, and are not target std output.
+      return producer.domain === 'target' && producer.roles.includes('std');
+    })
     .map(([id]) => id));
   const files = Object.entries(manifest.files).filter(([, row]) => owners.has(row.component))
     .sort(([a], [b]) => a.localeCompare(b))

@@ -28,9 +28,16 @@ async function fixture(t) {
   await fs.symlink('libcangjie-std-core.a', path.join(sdk, link));
   files[link] = {type: 'symlink', target: 'libcangjie-std-core.a',
     sha256: await fileDigest(path.join(sdk, link)), component: 'std'};
+  await fs.mkdir(path.join(sdk, 'tools', 'bin'), {recursive: true});
+  await fs.writeFile(path.join(sdk, 'tools', 'bin', 'cjpm'), 'host distribution tool');
+  files['tools/bin/cjpm'] = {type: 'file', component: 'official',
+    sha256: await fileDigest(path.join(sdk, 'tools', 'bin', 'cjpm'))};
   // This is an observer fixture schema, not a sealed SDK producer receipt.
   await fs.writeFile(path.join(sdk, 'SDK.manifest.json'), JSON.stringify({files,
-    components: {std: {receiptJson: JSON.stringify({component: {roles: ['std']}})}}}));
+    components: {
+      std: {receiptJson: JSON.stringify({component: {domain: 'target', roles: ['std']}})},
+      official: {receiptJson: JSON.stringify({component: {domain: 'host', roles: ['std', 'cjpm']}})},
+    }}));
   const input = await capturePackageStdInput(sdk);
   await fs.cp(sdk, published, {recursive: true, dereference: false});
   return {sdk, config, published, input};
@@ -39,6 +46,7 @@ async function fixture(t) {
 test('package observer accepts distinct publication with complete std and identity', async t => {
   const f = await fixture(t);
   assert.equal(f.input.files.length, payloads.length + 1);
+  await fs.writeFile(path.join(f.published, 'tools', 'bin', 'cjpm'), 'built tool replacing host tool');
   await assertPublishedPackageStd(f);
 });
 
