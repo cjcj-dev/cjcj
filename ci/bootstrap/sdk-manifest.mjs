@@ -23,7 +23,7 @@ export const PLATFORMS = Object.freeze({
 });
 export const ADAPTERS = Object.freeze(['official', 'sharedbuild-stage1',
   'sharedbuild-runtime-default', 'sharedbuild-runtime-testable', 'bootstrap-std',
-  'llvm-tools', 'llvm-dylib', 'llvm-release-layout', 'ast-support', 'compiler-schema', 'bootstrap-compiler']);
+  'llvm-tools', 'llvm-dylib', 'llvm-release-layout', 'ast-support', 'compiler-schema', 'compiler-boundscheck', 'bootstrap-compiler']);
 const HEX40 = /^[0-9a-f]{40}$/;
 const HEX64 = /^[0-9a-f]{64}$/;
 const NAME = /^[a-z][a-z0-9-]*$/;
@@ -152,6 +152,14 @@ export function validatePlan(plan) {
       fields(config.options, [], [], id);
       if (!component.roles.includes('ast')) reject('CONFIG', id, 'compiler schemas require an AST owner');
       for (const name of ['node', 'git']) if (!config.tools[name]) reject('CONFIG', id, `schema producer tool ${name} must be frozen`);
+      absolute(producer.repository, id);
+    }
+    if (producer.adapter === 'compiler-boundscheck') {
+      fields(config.options, ['boundscheckSource'], ['launcher'], id);
+      fields(config.options.boundscheckSource, ['repo', 'commit', 'tree'], [], id);
+      if (!HEX40.test(config.options.boundscheckSource.commit) || !HEX40.test(config.options.boundscheckSource.tree) || !config.options.boundscheckSource.repo) reject('SOURCE', id, 'boundscheck input identity');
+      if (!component.roles.includes('boundscheck') || config.host !== 'linux_x86_64' || config.target !== 'linux_x86_64') reject('CONFIG', id, 'compiler boundscheck export currently requires the native Linux target');
+      for (const name of ['node', 'git', 'cmake', 'ninja', 'clang', 'clang++']) if (!config.tools[name]) reject('CONFIG', id, `boundscheck producer tool ${name} must be frozen`);
       absolute(producer.repository, id);
     }
     if (producer.adapter === 'llvm-release-layout') {

@@ -59,7 +59,7 @@ export async function freezeSdkPlan(intent) {
       producer.receiptSha256 = receipt.sha256;
     }
     for (const [name, value] of Object.entries(component.config.tools || {})) component.config.tools[name] = await frozenFile(value, `${component.id}/${name}`);
-    for (const name of ['compilerSource', 'flatbuffersSource']) {
+    for (const name of ['compilerSource', 'flatbuffersSource', 'boundscheckSource']) {
       if (component.config.options[name]) component.config.options[name] = await gitInput(component.config.options[name], `${component.id}/${name}`);
     }
   }

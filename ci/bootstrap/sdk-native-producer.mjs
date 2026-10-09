@@ -328,6 +328,32 @@ async function llvmReleaseLayout(request) {
     version: version.join('.'), host: component.config.host, target: component.config.target,
     producer: component.producer, buildId: request.identity.buildId});
 }
+async function compilerBoundscheck(request) {
+  const {component, source, directory} = request;
+  const input = component.config.options.boundscheckSource;
+  const boundscheck = await fetchIdentity(input, path.join(directory, 'source-inputs/boundscheck'), 'compiler-boundscheck');
+  const recipe = path.join(source, 'third_party/cmake/BoundsCheck.cmake');
+  const parent = await fs.readFile(path.join(source, 'CMakeLists.txt'), 'utf8');
+  if (!parent.includes('RENAME libsecurec${CMAKE_SHARED_LIBRARY_SUFFIX}')) reject('SOURCE', component.id, 'compiler securec export recipe required');
+  // Compiler preparation normally installs this CMake recipe over the vendor
+  // tree. Project into the build directory to keep both fixed Git inputs clean.
+  const projection = path.join(directory, 'build/boundscheck-source');
+  await fs.cp(boundscheck, projection, {recursive: true, dereference: false, verbatimSymlinks: true,
+    filter: file => path.basename(file) !== '.git'});
+  await fs.copyFile(recipe, path.join(projection, 'CMakeLists.txt'));
+  const build = path.join(directory, 'build/boundscheck');
+  await run(['cmake', '-G', 'Ninja', '-S', projection, '-B', build, '-DCMAKE_BUILD_TYPE=Release',
+    `-DCMAKE_C_COMPILER=${tool('clang')}`, `-DCMAKE_CXX_COMPILER=${tool('clang++')}`, `-DCMAKE_MAKE_PROGRAM=${tool('ninja')}`,
+    ...(component.config.options.launcher ? [`-DCMAKE_C_COMPILER_LAUNCHER=${tool('launcher')}`] : [])]);
+  await run(['cmake', '--build', build, '--target', 'boundscheck', '-j', String(os.availableParallelism())]);
+  const artifacts = path.join(directory, 'artifacts'); await fs.mkdir(artifacts);
+  await fs.copyFile(path.join(build, 'libboundscheck.so'), path.join(artifacts, 'libsecurec.so'));
+  await atomicJson(path.join(artifacts, 'securec-producer.json'), {source: component.source, boundscheck: input,
+    recipe: {path: 'third_party/cmake/BoundsCheck.cmake', sha256: await fileDigest(recipe)},
+    export: {from: 'libboundscheck.so', to: 'libsecurec.so', definition: 'CMakeLists.txt'},
+    host: component.config.host, target: component.config.target, producer: component.producer, buildId: request.identity.buildId});
+  await sourceIdentity(boundscheck, input, 'compiler-boundscheck', tool('git'));
+}
 async function astSupport(request) {
   const {component, source, directory, dependencies} = request, options = component.config.options;
   optionsOnly(options, ['sdkDependency', 'flatbuffersSource', 'launcher', 'flatbuffersTransform'], component.id);
@@ -393,13 +419,14 @@ export async function nativeProducer(request) {
   const platform = PLATFORMS[component.config.host];
   if (!platform || platform[0] !== process.platform || platform[1] !== process.arch) reject('PRODUCER_PLATFORM', component.id, `needs ${component.config.host}`);
   if (os.availableParallelism() < 64 && process.env.GITHUB_ACTIONS !== 'true') reject('PRODUCER_RESOURCES', component.id, 'at least 64 native build CPUs');
-  if (process.env.GITHUB_ACTIONS === 'true' && !component.producer.receipt
+  if (process.env.GITHUB_ACTIONS === 'true' && !['compiler-schema', 'llvm-release-layout'].includes(component.producer.adapter) && !component.producer.receipt
     && (!component.config.options.launcher || !/^sccache(?:\.exe)?$/.test(path.basename(component.config.options.launcher)))) {
     reject('PRODUCER_CACHE', component.id, 'official GHA native C++ builds require a frozen sccache launcher');
   }
   await sourceIdentity(request.source, component.source, component.id, tool('git'));
   if (component.producer.adapter === 'bootstrap-std') await std(request);
   else if (component.producer.adapter === 'llvm-release-layout') await llvmReleaseLayout(request);
+  else if (component.producer.adapter === 'compiler-boundscheck') await compilerBoundscheck(request);
   else if (component.producer.adapter === 'compiler-schema') {
     const schemas = ['StdAstFormat.fbs', 'StdxChirFormat.fbs'];
     const artifacts = path.join(request.directory, 'artifacts');
