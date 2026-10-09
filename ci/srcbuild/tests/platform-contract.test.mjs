@@ -17,6 +17,46 @@ const root = path.resolve(import.meta.dirname, '../../..');
 const readWorkflow = name => fs.readFile(path.join(root, '.github/workflows', name), 'utf8');
 const llvmWorkflow = name => loadYaml(fsSync.readFileSync(path.join(root, '.github/workflows', name), 'utf8'));
 
+test('Linux complete gate inherits workflow authentication for its real archive consumer', () => {
+  const workflow = llvmWorkflow('platform-matrix.yml');
+  assert.deepEqual(workflow.permissions, {contents: 'read', actions: 'read'});
+  const steps = workflow.jobs['colour-runtime'].steps;
+  const downloads = steps.filter(step => /publish_language_tuple\.py fetch|gate_colour_runtime\.mjs|download_pinned\.mjs/.test(step.run || ''));
+  assert.equal(downloads.length, 3);
+  for (const step of downloads) assert.equal(step.env?.GH_TOKEN, '${{ github.token }}', `DOWNLOAD_STEP_AUTH ${step.name}`);
+  const step = downloads.find(step => step.run.includes('gate_colour_runtime.mjs'));
+  const fixture = fsSync.mkdtempSync(path.join(os.tmpdir(), 'workflow-gate-auth-'));
+  const put = (name, content, mode = 0o644) => { const file = path.join(fixture, name); fsSync.mkdirSync(path.dirname(file), {recursive: true}); fsSync.writeFileSync(file, content, {mode}); };
+  try {
+    const target = path.join(fixture, 'target');
+    put('target/libcangjie-runtime.so', 'fixture runtime'); put('target/libboundscheck.so', 'fixture bounds');
+    const runtimeHash = execFileSync('sha256sum', [path.join(target, 'libcangjie-runtime.so')], {encoding: 'utf8'}).split(' ')[0];
+    put('runtime-source/runtime/output/temp/fixture/runtime-build-config.txt', `CONFIG_ID=fixture\nRUNTIME_SHA256=${runtimeHash}\nBOUNDSCHECK_SHA256=fixture\n`);
+    put('.platform-ci/runtime-install/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so', 'fixture runtime');
+    put('h48-download/installed/tuple/placeholder', 'fixture');
+    put('archive/sdk/placeholder', 'fixture language SDK');
+    const zip = spawnSync('zip', ['-qr', path.join(fixture, 'language.zip'), 'sdk'], {cwd: path.join(fixture, 'archive'), encoding: 'utf8'});
+    assert.equal(zip.status, 0, zip.stderr);
+    const zipHash = execFileSync('sha256sum', [path.join(fixture, 'language.zip')], {encoding: 'utf8'}).split(' ')[0];
+    put('pin.json', JSON.stringify({version: 1, artifacts: {'1504': {repository: 'cjcj-dev/cjcj', asset: 1504, release_sha256: zipHash, prerelease: true}}}));
+    fsSync.mkdirSync(path.join(fixture, 'ci/release'), {recursive: true});
+    for (const file of ['gate_colour_runtime.mjs', 'download_pinned.mjs', 'bootstrap_store.mjs']) fsSync.copyFileSync(path.join(root, 'ci/release', file), path.join(fixture, 'ci/release', file));
+    put('ci/h48_language_tuple_pin.json', JSON.stringify({manifest_sha256: 'fixture', compiler_sha256: 'fixture'}));
+    put('bin/gh', '#!/bin/sh\n[ "$GH_TOKEN" = fixture-nonsecret ] || exit 4\n[ "$1" = api ] && [ "$2" = repos/cjcj-dev/cjcj/releases/assets/1504 ] || exit 9\nprintf "AUTH_INHERITED\\n" > "$FIXTURE_ROOT/auth-reached"\nexec /bin/cat "$FIXTURE_ROOT/language.zip"\n', 0o755);
+    put('bin/python3', '#!/bin/sh\nwhile [ "$#" -gt 0 ]; do if [ "$1" = --output ]; then shift; out=$1; fi; shift; done\nmkdir -p "$out/sdk/runtime/lib/linux_x86_64_cjnative"\ncp "$FIXTURE_ROOT"/target/* "$out/sdk/runtime/lib/linux_x86_64_cjnative/"\nprintf "FIXTURE_ACTIVATED=1\\n"\n', 0o755);
+    put('bin/bash', '#!/bin/sh\ncase "$1" in */resolve_runtime_output.sh) printf "%s\\n" "$FIXTURE_ROOT/target";; */gate_gc_unit.sh) test -f "$FIXTURE_ROOT/auth-reached"; printf "FIXTURE_GATE_REACHED\\n";; *) exec /bin/bash "$@";; esac\n', 0o755);
+    const env = {...process.env, PATH: `${path.join(fixture, 'bin')}:${process.env.PATH}`, RUNNER_TEMP: fixture, FIXTURE_ROOT: fixture, BOOTSTRAP_ARCHIVES_PIN: path.join(fixture, 'pin.json'), npm_config_offline: 'true'};
+    delete env.GH_TOKEN; delete env.GITHUB_TOKEN;
+    for (const [key, value] of Object.entries(step.env)) { assert.equal(value, '${{ github.token }}'); env[key] = 'fixture-nonsecret'; }
+    const result = spawnSync('/bin/bash', ['-eu', '-o', 'pipefail', '-c', step.run], {cwd: fixture, env, encoding: 'utf8'});
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert(fsSync.existsSync(path.join(fixture, 'auth-reached')), 'REAL_DOWNLOAD_GH_INHERITANCE');
+    assert.match(result.stdout, /PERSISTENT_ARCHIVE_VERIFIED artifact=1504/);
+    assert.match(result.stdout, /FIXTURE_GATE_REACHED/);
+    console.log('WORKFLOW_AUTH_REAL_GATE_DOWNLOAD_PASS fixture-only no product execution');
+  } finally { fsSync.rmSync(fixture, {recursive: true, force: true}); }
+});
+
 const producer = llvmWorkflow('build-llvm-tools.yml');
 const wrapper = llvmWorkflow('platform-tuples.yml');
 
