@@ -139,6 +139,7 @@ export function validatePlan(plan) {
       if (!Number.isInteger(config.options.jobs) || config.options.jobs < 64 || !/^\d+GB$/.test(config.options.heap)) reject('CONFIG', id, 'explicit full-core jobs and heap required');
       if (!component.dependencies.includes(config.options.sdkDependency)) reject('DEPENDENCY', id, 'sharedbuild SDK input not in closure');
       fields(config.options.inputBindings, [], Object.keys(config.options.inputBindings), id);
+      if ('official-host-lock.json' in config.options.inputBindings) reject('PRODUCER_RECIPE', id, 'original official host lock input is reserved');
       for (const [name, binding] of Object.entries(config.options.inputBindings)) {
         if (!/^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(name)) reject('CONFIG', id, 'invalid input name');
         fields(binding, ['dependency', 'artifact'], [], id);
