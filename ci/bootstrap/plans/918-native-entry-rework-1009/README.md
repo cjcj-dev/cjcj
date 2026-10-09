@@ -43,7 +43,9 @@ invoked argv0. Assertions are not normalized or weakened. Unaffected prior
 qualification arms are reused with their original identities and limitations.
 
 `stage1.plan.json` is the actual formal freeze output; freeze and dry-run each
-returned0. It binds the new adapter digest and new producer/dependency build IDs.
+returned0. Its identical retained copy is at
+`/root/sym_cjcj_918_implement_r6087361232/retained-inputs/native-entry.plan.json`;
+the original commands remain in the evidence. It binds the new adapter digest and new producer/dependency build IDs.
 The product source4d05592c, LLVM53ce, runtime/std9733 and official compiler174db
 identities, original nightly1009 distribution lock and payload remain unchanged.
 All seven new genuine receipts are MISSING; no success receipt is synthesized.

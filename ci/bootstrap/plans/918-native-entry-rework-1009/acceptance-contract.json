@@ -3,7 +3,7 @@
   "executionAuthorized": false,
   "status": "NOT_RUN-complete-new-SDK-absent",
   "plan": {
-    "path": "/root/sym_cjcj_918_implement_r6087361232/evidence/remaining/native-entry.plan.json",
+    "path": "/root/sym_cjcj_918_implement_r6087361232/retained-inputs/native-entry.plan.json",
     "sha256": "e1c7b0c5ab17acab6bc24d9adec08f1d440695f883a277717f09c2ee62c20e48"
   },
   "manifest": {
@@ -21,7 +21,7 @@
         "node",
         "/root/sym_cjcj_918_implement_r6087361232/retained-cjcj/ci/bootstrap/toolchain-sdk.mjs",
         "--plan",
-        "/root/sym_cjcj_918_implement_r6087361232/evidence/remaining/native-entry.plan.json",
+        "/root/sym_cjcj_918_implement_r6087361232/retained-inputs/native-entry.plan.json",
         "--out",
         "/root/sym_cjcj_918_implement_r6087361232/sdk-stage1"
       ],
@@ -92,7 +92,7 @@
         "-e",
         "import fs from 'node:fs/promises';import path from 'node:path';import {verifyManifestSdk} from '/root/sym_cjcj_918_implement_r6087361232/retained-cjcj/ci/bootstrap/toolchain-sdk.mjs';const [sdk,planFile,original]=process.argv.slice(1);for(const n of ['SDK.plan.json','SDK.manifest.json','SDK.lock.json']){if(!(await fs.readFile(path.join(sdk,n))).equals(await fs.readFile(path.join(original,n))))throw new Error('archive binding changed '+n)}await verifyManifestSdk(sdk,JSON.parse(await fs.readFile(planFile)),JSON.parse(await fs.readFile(path.join(original,'SDK.manifest.json'))));",
         "/root/sym_cjcj_918_implement_r6087361232/sdk-stage1-unpacked",
-        "/root/sym_cjcj_918_implement_r6087361232/evidence/remaining/native-entry.plan.json",
+        "/root/sym_cjcj_918_implement_r6087361232/retained-inputs/native-entry.plan.json",
         "/root/sym_cjcj_918_implement_r6087361232/keep/archive-inputs"
       ],
       "status": "NOT_RUN",
