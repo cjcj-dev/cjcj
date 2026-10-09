@@ -51,6 +51,7 @@ export async function buildCjdb(request, {run, tool, fetchIdentity, execute: req
     CMAKE_C_COMPILER_LAUNCHER:launcher, CMAKE_CXX_COMPILER_LAUNCHER:launcher,
     LD_LIBRARY_PATH: `${path.join(options.python.root, 'lib')}:${path.join(libedit.root, 'lib/x86_64-linux-gnu')}`};
   await run(['cmake', '-G', 'Ninja', '-S', compiler, '-B', build, '-DCMAKE_BUILD_TYPE=Release',
+    '-DCMAKE_SYSTEM_PROCESSOR=x86_64',
     `-DCMAKE_TOOLCHAIN_FILE=${path.join(compiler, 'cmake/linux_toolchain.cmake')}`, `-DCMAKE_C_COMPILER=${tool('clang')}`, `-DCMAKE_CXX_COMPILER=${tool('clang++')}`,
     `-DCMAKE_MAKE_PROGRAM=${tool('ninja')}`, `-DCMAKE_C_COMPILER_LAUNCHER=${launcher}`, `-DCMAKE_CXX_COMPILER_LAUNCHER=${launcher}`,
     '-DCANGJIE_BUILD_CJC=ON', '-DCANGJIE_BUILD_STD_SUPPORT=ON', '-DCANGJIE_BUILD_TESTS=OFF', '-DCANGJIE_BUILD_CJDB=ON',
