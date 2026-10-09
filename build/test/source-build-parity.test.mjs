@@ -739,6 +739,70 @@ test('package paths and archive roots match package.py', async () => {
   }
 });
 
+test('package retains compiler and pcre relative links after input removal', async () => {
+  const {root, config} = makeFixture();
+  try {
+    const input = config.target.primaryCompilerOutput();
+    const tuple = 'linux_x86_64_cjnative';
+    file(input, ['bin', 'cjcj-stage1'], 'managed compiler');
+    for (const name of ['cjc', 'cjc-frontend']) fs.symlinkSync('cjcj-stage1', path.join(input, 'bin', name));
+    for (const sdk of [input, config.officialSdkRoot]) {
+      file(sdk, ['runtime', 'lib', tuple, 'libpcre2-8.so.0.14.0'], 'producer pcre');
+      fs.symlinkSync('libpcre2-8.so.0.14.0', path.join(sdk, 'runtime', 'lib', tuple, 'libpcre2-8.so.0'));
+      fs.symlinkSync('libpcre2-8.so.0', path.join(sdk, 'runtime', 'lib', tuple, 'libpcre2-8.so'));
+    }
+    file(config.officialSdkRoot, ['bin', 'cjc'], 'official compiler');
+    fs.symlinkSync('cjc', path.join(config.officialSdkRoot, 'bin', 'cjc-frontend'));
+    let archives, packageError;
+    try { archives = await packageStage.run(config); } catch (error) { packageError = error; }
+    const staged = path.join(config.softwareDir, 'cangjie');
+    console.log('PACKAGE_RELATIVE_COMPILER_ASSERT_REACHED');
+    assert.equal(fs.readlinkSync(path.join(staged, 'bin', 'cjc')), 'cjcj-stage1', packageError?.message);
+    assert.equal(fs.readlinkSync(path.join(staged, 'bin', 'cjc-frontend')), 'cjcj-stage1');
+    console.log('PACKAGE_RELATIVE_PCRE_ASSERT_REACHED');
+    assert.equal(fs.readlinkSync(path.join(staged, 'runtime', 'lib', tuple, 'libpcre2-8.so')), 'libpcre2-8.so.0');
+    assert.ifError(packageError);
+    const extracted = directory(root, 'extracted');
+    await runCommand(['tar', '-xzf', archives[0], '-C', extracted]);
+    fs.rmSync(input, {recursive: true, force: true});
+    fs.rmSync(staged, {recursive: true, force: true});
+    console.log('PACKAGE_INPUT_INDEPENDENCE_ASSERT_REACHED');
+    const published = path.join(extracted, 'cangjie');
+    for (const name of ['cjc', 'cjc-frontend']) assert.equal(fs.readFileSync(path.join(published, 'bin', name), 'utf8'), 'managed compiler');
+    assert.equal(fs.readFileSync(path.join(published, 'runtime', 'lib', tuple, 'libpcre2-8.so'), 'utf8'), 'producer pcre');
+  } finally { fs.rmSync(root, {recursive: true, force: true}); }
+});
+
+test('package rejects the exact missing Windows payload path', async () => {
+  const {root, config} = makeFixture();
+  try {
+    const relative = ['modules', 'windows_x86_64_cjnative', 'std', 'std.core.cjo'];
+    file(config.officialSdkRoot, relative, 'official payload');
+    const input = config.target.primaryCompilerOutput();
+    file(input, relative, 'produced Windows module');
+    await packageStage.run(config);
+    fs.rmSync(path.join(input, ...relative));
+    console.log('PACKAGE_MISSING_WINDOWS_ASSERT_REACHED');
+    await assert.rejects(packageStage.run(config), /missing-official-path\tmodules\/windows_x86_64_cjnative\/std\/std.core.cjo/);
+    file(input, relative, 'produced Windows module');
+    await packageStage.run(config);
+    assert.ok(fs.existsSync(path.join(config.softwareDir, 'cangjie', ...relative)));
+  } finally { fs.rmSync(root, {recursive: true, force: true}); }
+});
+
+test('package rejects an extra link outside the published SDK', async () => {
+  const {root, config} = makeFixture();
+  try {
+    const input = config.target.primaryCompilerOutput();
+    file(root, ['outside'], 'external dependency');
+    fs.symlinkSync(path.join(root, 'outside'), path.join(input, 'external'));
+    console.log('PACKAGE_EXTERNAL_LINK_ASSERT_REACHED');
+    await assert.rejects(packageStage.run(config), /package-link-outside\texternal\t/);
+    fs.rmSync(path.join(input, 'external'));
+    await packageStage.run(config);
+  } finally { fs.rmSync(root, {recursive: true, force: true}); }
+});
+
 // A pinned sha that is only reachable in someone's local clone builds fine for
 // them and fails for everyone else. tools.mjs fetches it with `git fetch
 // --depth 1 <url> <sha>`, which resolves nothing when the object is not
