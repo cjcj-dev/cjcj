@@ -117,7 +117,7 @@
       "id": "stage1-link-and-full-std-consumer",
       "argv": [
         "/root/sym_cjcj_918_implement_r6086353010/sdk-stage1-unpacked/bin/cjc",
-        "/root/sym_cjcj_918_implement_r6086353010/retained-cjcj/ci/smoke/01_hello.cj",
+        "/root/sym_cjcj_918_implement_r6086353010/retained-inputs/endpoint.cj",
         "-o",
         "/root/sym_cjcj_918_implement_r6086353010/acceptance/hello",
         "--verbose"
@@ -152,7 +152,7 @@
         "actual loaded target runtime/std/LLVM paths and producer hashes",
         "stdout hello and own rc; stop if compiler predecessor fails"
       ],
-      "expectedStdout": "hello from cjcj\n"
+      "expectedStdout": "SDK_STAGE1_STD_ENDPOINT\n"
     },
     {
       "id": "official-cjpm-domain",
@@ -245,6 +245,107 @@
           "whenMissingOrAmbiguous": "stop before launch; record NOT_RUN; no host path fallback"
         }
       }
+    },
+    {
+      "id": "cjc-frontend-alias-consumer",
+      "argv": [
+        "/root/sym_cjcj_918_implement_r6086353010/sdk-stage1-unpacked/bin/cjc-frontend",
+        "/root/sym_cjcj_918_implement_r6086353010/retained-inputs/endpoint.cj",
+        "-o",
+        "/root/sym_cjcj_918_implement_r6086353010/acceptance/frontend-endpoint",
+        "--verbose"
+      ],
+      "env": {
+        "CANGJIE_HOME": "/root/sym_cjcj_918_implement_r6086353010/sdk-stage1-unpacked",
+        "LD_LIBRARY_PATH": "/root/sym_cjcj_918_implement_r6086353010/retained-inputs/official-1009/runtime/lib/linux_x86_64_cjnative:/root/sym_cjcj_918_implement_r6086353010/sdk-stage1-unpacked/third_party/llvm/lib:/root/sym_cjcj_918_implement_r6086353010/retained-inputs/official-1009/lib/linux_x86_64_cjnative:/root/sym_cjcj_918_implement_r6086353010/retained-inputs/official-1009/tools/lib",
+        "PATH": "/root/sym_cjcj_918_implement_r6086353010/sdk-stage1-unpacked/bin:/root/sym_cjcj_918_implement_r6086353010/sdk-stage1-unpacked/third_party/llvm/bin:/usr/bin:/bin",
+        "LD_DEBUG": "libs"
+      },
+      "status": "NOT_RUN",
+      "requiredEvidence": [
+        "actual link argv selects unpacked full std and same receipt LLVM",
+        "ELF readelf dynamic dependencies",
+        "compiler runtime loads official host runtime and target libLLVM; record actual origin/hash",
+        "no successful --version substitutes compiling an actual std consumer",
+        "installed canonical frontend alias agrees with stage1 receipt; real compile"
+      ],
+      "expectedStdProducer": "std: original source9733 and actual compiler dependency ID from component-matrix.json; full installed modules and archives must be present"
+    },
+    {
+      "argv": [
+        "/root/sym_cjcj_918_implement_r6086353010/sdk-stage1-unpacked/third_party/llvm/bin/llvm-dis",
+        "/root/sym_cjcj_918_implement_r6086353010/sdk-stage1-unpacked/modules/linux_x86_64_cjnative/std/libstd.core.bc",
+        "-o",
+        "/root/sym_cjcj_918_implement_r6086353010/acceptance/std-core.ll"
+      ],
+      "env": {
+        "LD_LIBRARY_PATH": "/root/sym_cjcj_918_implement_r6086353010/sdk-stage1-unpacked/third_party/llvm/lib:/root/sym_cjcj_918_implement_r6086353010/sdk-stage1-unpacked/tools/lib:/root/sym_cjcj_918_implement_r6086353010/sdk-stage1-unpacked/runtime/lib/linux_x86_64_cjnative:/root/sym_cjcj_918_implement_r6086353010/sdk-stage1-unpacked/lib/linux_x86_64_cjnative",
+        "LD_DEBUG": "libs"
+      },
+      "assertion": "actual full std bitcode enters same53ce installed reader",
+      "status": "NOT_RUN",
+      "rc": null,
+      "id": "std-bitcode-read",
+      "requiredEvidence": [
+        "actual full std bc from successful std producer enters installed same-source native reader; tool rc and loaded paths/hash",
+        "native reader/opt/llc qualification remains NOT_RUN; failed predecessor stops later steps"
+      ]
+    },
+    {
+      "argv": [
+        "/root/sym_cjcj_918_implement_r6086353010/sdk-stage1-unpacked/third_party/llvm/bin/llvm-as",
+        "/root/sym_cjcj_918_implement_r6086353010/acceptance/std-core.ll",
+        "-o",
+        "/root/sym_cjcj_918_implement_r6086353010/acceptance/std-core.bc"
+      ],
+      "env": {
+        "LD_LIBRARY_PATH": "/root/sym_cjcj_918_implement_r6086353010/sdk-stage1-unpacked/third_party/llvm/lib:/root/sym_cjcj_918_implement_r6086353010/sdk-stage1-unpacked/tools/lib:/root/sym_cjcj_918_implement_r6086353010/sdk-stage1-unpacked/runtime/lib/linux_x86_64_cjnative:/root/sym_cjcj_918_implement_r6086353010/sdk-stage1-unpacked/lib/linux_x86_64_cjnative",
+        "LD_DEBUG": "libs"
+      },
+      "status": "NOT_RUN",
+      "rc": null,
+      "id": "std-bitcode-write",
+      "requiredEvidence": [
+        "actual full std bc from successful std producer enters installed same-source native reader; tool rc and loaded paths/hash",
+        "native reader/opt/llc qualification remains NOT_RUN; failed predecessor stops later steps"
+      ]
+    },
+    {
+      "argv": [
+        "/root/sym_cjcj_918_implement_r6086353010/sdk-stage1-unpacked/third_party/llvm/bin/opt",
+        "-disable-output",
+        "/root/sym_cjcj_918_implement_r6086353010/acceptance/std-core.bc"
+      ],
+      "env": {
+        "LD_LIBRARY_PATH": "/root/sym_cjcj_918_implement_r6086353010/sdk-stage1-unpacked/third_party/llvm/lib:/root/sym_cjcj_918_implement_r6086353010/sdk-stage1-unpacked/tools/lib:/root/sym_cjcj_918_implement_r6086353010/sdk-stage1-unpacked/runtime/lib/linux_x86_64_cjnative:/root/sym_cjcj_918_implement_r6086353010/sdk-stage1-unpacked/lib/linux_x86_64_cjnative",
+        "LD_DEBUG": "libs"
+      },
+      "status": "NOT_RUN",
+      "rc": null,
+      "id": "std-bitcode-opt",
+      "requiredEvidence": [
+        "actual full std bc from successful std producer enters installed same-source native reader; tool rc and loaded paths/hash",
+        "native reader/opt/llc qualification remains NOT_RUN; failed predecessor stops later steps"
+      ]
+    },
+    {
+      "argv": [
+        "/root/sym_cjcj_918_implement_r6086353010/sdk-stage1-unpacked/third_party/llvm/bin/llc",
+        "/root/sym_cjcj_918_implement_r6086353010/acceptance/std-core.bc",
+        "-o",
+        "/root/sym_cjcj_918_implement_r6086353010/acceptance/std-core.s"
+      ],
+      "env": {
+        "LD_LIBRARY_PATH": "/root/sym_cjcj_918_implement_r6086353010/sdk-stage1-unpacked/third_party/llvm/lib:/root/sym_cjcj_918_implement_r6086353010/sdk-stage1-unpacked/tools/lib:/root/sym_cjcj_918_implement_r6086353010/sdk-stage1-unpacked/runtime/lib/linux_x86_64_cjnative:/root/sym_cjcj_918_implement_r6086353010/sdk-stage1-unpacked/lib/linux_x86_64_cjnative",
+        "LD_DEBUG": "libs"
+      },
+      "status": "NOT_RUN",
+      "rc": null,
+      "id": "std-bitcode-llc",
+      "requiredEvidence": [
+        "actual full std bc from successful std producer enters installed same-source native reader; tool rc and loaded paths/hash",
+        "native reader/opt/llc qualification remains NOT_RUN; failed predecessor stops later steps"
+      ]
     }
   ],
   "failurePolicy": "first unknown failure stops dependent successors; record own rc/signal and NOT_RUN; no retries or weakened invariants",
@@ -267,5 +368,12 @@
     "stage33",
     "formal pin",
     "release/latest"
-  ]
+  ],
+  "endpoint": {
+    "path": "/root/sym_cjcj_918_implement_r6086353010/retained-inputs/endpoint.cj",
+    "sha256": "8a98551f0869eaea5cd8a440245086e611fc0bdb8dfef391734a18a3ac593044",
+    "source": "endpoint.cj in this delivery commit",
+    "isRealConsumerInput": true,
+    "status": "INPUT_RETAINED; genuine compiler execution NOT_RUN"
+  }
 }
