@@ -155,8 +155,12 @@ export function validatePlan(plan) {
       absolute(producer.repository, id);
     }
     if (producer.adapter === 'llvm-release-layout') {
-      fields(config.options, ['toolsDependency', 'dylibDependency', 'auxiliaryDependency', 'readersDependency', 'releaseDependency'], ['librariesDependency'], id);
-      for (const dependency of Object.values(config.options)) if (!component.dependencies.includes(dependency)) reject('DEPENDENCY', id, 'release layout input not in closure');
+      fields(config.options, ['toolsDependency', 'dylibDependency', 'auxiliaryDependency', 'readersDependency', 'releaseDependency', 'compilerSource', 'flatbuffersSource'], ['librariesDependency'], id);
+      for (const [key, dependency] of Object.entries(config.options)) if (key.endsWith('Dependency') && !component.dependencies.includes(dependency)) reject('DEPENDENCY', id, 'release layout input not in closure');
+      for (const key of ['compilerSource', 'flatbuffersSource']) {
+        fields(config.options[key], ['repo', 'commit', 'tree'], [], id);
+        if (!HEX40.test(config.options[key].commit) || !HEX40.test(config.options[key].tree) || !config.options[key].repo) reject('SOURCE', id, key);
+      }
       if (!component.roles.includes('llvm-tools') || !component.roles.includes('llvm-dylib')) reject('CONFIG', id, 'release layout owns the complete LLVM tuple');
       for (const name of ['node', 'git']) if (!config.tools[name]) reject('CONFIG', id, `layout producer tool ${name} must be frozen`);
       absolute(producer.repository, id);

@@ -299,6 +299,14 @@ async function llvmReleaseLayout(request) {
   if (version.some(part => !part)) reject('SOURCE', component.id, 'LLVM source version required');
   for (const alias of [`libLLVM-${version.join('.')}.so`, 'libLLVM.so']) await fs.symlink(`libLLVM-${version[0]}.so`, path.join(artifacts, 'lib', alias));
   if (options.librariesDependency) await copyDependency('librariesDependency');
+  const sumsFile = path.join(artifacts, 'SHA256SUMS');
+  const originalSums = await fs.readFile(sumsFile, 'utf8');
+  for (const line of originalSums.trimEnd().split('\n')) {
+    const match = line.match(/^([a-f0-9]{64})  (?:\.\/)?(.+)$/);
+    if (!match || await fileDigest(path.join(artifacts, match[2])) !== match[1]) reject('DEPENDENCY_DIGEST', component.id, 'fixed bootstrap tuple changed during release layout');
+  }
+  const readers = ['bin/llvm-dis', 'bin/llvm-as', 'bitcode-readers.json'];
+  await fs.writeFile(sumsFile, originalSums + (await Promise.all(readers.map(async rel => `${await fileDigest(path.join(artifacts, rel))}  ./${rel}\n`))).join(''));
   await atomicJson(path.join(artifacts, 'release-layout.json'), {source: component.source, inputs,
     version: version.join('.'), host: component.config.host, target: component.config.target,
     producer: component.producer, buildId: request.identity.buildId});
