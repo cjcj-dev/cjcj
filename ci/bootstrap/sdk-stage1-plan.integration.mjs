@@ -18,3 +18,9 @@ test('formal frozen plan requires shim and libLLVM to select the same native pro
  assert.equal(wrong.status,1);assert.match(wrong.stderr,/rule=STAGE1_LLVM component=compiler/);
  const restored=await invoke('restored');assert.equal(restored.status,0,restored.stderr);
 });
+test('formal plan reserves the authenticated original official host lock input', async () => {
+ const normal=await invoke('host-lock-normal');assert.equal(normal.status,0,normal.stderr);
+ const wrong=await invoke('host-lock-override',p=>{p.components.find(c=>c.id==='compiler').config.options.inputBindings['official-host-lock.json']={dependency:'ast',artifact:'arbitrary.json'};});
+ assert.equal(wrong.status,1);assert.match(wrong.stderr,/rule=PRODUCER_RECIPE component=compiler.*reserved/);
+ const restored=await invoke('host-lock-restored');assert.equal(restored.status,0,restored.stderr);
+});
