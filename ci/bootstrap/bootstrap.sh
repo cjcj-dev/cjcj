@@ -878,7 +878,7 @@ supplied_stage1_validate() {
   done
   [[ "$RUNTIME_SHA" =~ ^[0-9a-f]{40}$ ]] || die 'runtime SHA must be 40 lowercase hex digits'
   if [ -n "$COLOUR_GATE_SOURCE$COLOUR_GATE_INSTALL" ]; then
-    [ -n "$COLOUR_GATE_SOURCE" ] && [ -n "$COLOUR_GATE_INSTALL" ] || die 'both colour gate inputs required'
+    if [ -z "$COLOUR_GATE_SOURCE" ] || [ -z "$COLOUR_GATE_INSTALL" ]; then die 'both colour gate inputs required'; fi
     actual=$(git -C "$COLOUR_GATE_SOURCE" rev-parse HEAD) || die 'colour gate source must be a Git checkout'
     [ "$actual" = "$RUNTIME_SHA" ] || die 'colour gate source differs from runtime SHA'
     [ "$(realpath "$STDSRC")" = "$(realpath "$COLOUR_GATE_SOURCE/stdlib")" ] || die 'colour gate requires the runtime checkout stdlib'

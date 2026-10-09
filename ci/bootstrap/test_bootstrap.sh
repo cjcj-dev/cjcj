@@ -55,8 +55,9 @@ make_colour_tuple() {
 }
 
 make_std_sdk_inputs_fixture() {
-  mkdir -p "$TMP/src/ci" "$TMP/include" "$TMP/schema" "$TMP/third_party/flatbuffers/bin"
+  mkdir -p "$TMP/src/ci/bootstrap" "$TMP/include" "$TMP/schema" "$TMP/third_party/flatbuffers/bin"
   cp "$ROOT/../install_std_sdk_inputs.py" "$ROOT/../build_resources.sh" "$TMP/src/ci/"
+  cp "$ROOT/std-receipt.mjs" "$TMP/src/ci/bootstrap/"
   printf 'ast\n' > "$TMP/ast.a"
   if [ -n "${BOOTSTRAP_AST_ARCHIVE:-}" ]; then
     cp "$BOOTSTRAP_AST_ARCHIVE" "$TMP/ast.a"
@@ -629,6 +630,7 @@ make_isolation_fixture() {
   local root="$TMP/isolation" sdk="$TMP/isolation/sdk" prefix="$TMP/isolation/std"
   make_std_sdk_inputs_fixture
   mkdir -p "$root/src/build/build" "$sdk/bin" "$sdk/runtime/lib/linux_x86_64_cjnative" "$root/rt"
+  cp /bin/true "$sdk/bin/cjc"
   printf 'runtime\n' > "$root/rt/libcangjie-runtime.so"
   printf '%s\n' \
     'import os, pathlib, sys' \
@@ -648,10 +650,17 @@ make_isolation_fixture() {
     '        prefix / "runtime/lib/linux_x86_64_cjnative/libcangjie-std-core.so",' \
     '        prefix / "lib/linux_x86_64_cjnative/libnetFFI.a",' \
     '        prefix / "lib/libstdFFI.so",' \
+    '        prefix / "modules/linux_x86_64_cjnative/std.core.cjo",' \
     '    ]' \
     '    for path in files:' \
     '        path.parent.mkdir(parents=True, exist_ok=True)' \
     '        path.touch()' > "$root/src/build.py"
+  # Real private Git source identity; generated work/build directories are not
+  # source inputs. Keep STDSRC below the repository root like runtime/stdlib.
+  printf '/src/build/\n/src/work/\n/sdk/\n/rt/\n/std/\n' > "$root/.gitignore"
+  git -C "$root" init -q
+  git -C "$root" add .gitignore src/build.py
+  git -C "$root" -c user.name=Fixture -c user.email=fixture@example.invalid commit -qm 'fixture std source'
   make_fake_nm
 }
 
