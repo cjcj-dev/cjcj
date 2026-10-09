@@ -10,6 +10,7 @@ import {PLAN_SCHEMA, RESOLVED_SCHEMA, validatePlan, buildIdentities, topological
 import {produceComponent} from './sdk-producers.mjs';
 import {verifyBootstrapRuntimeSdk} from './runtime_sdk.mjs';
 import {parseLlvmToolsManifest} from '../llvm-tools-manifest.mjs';
+import {verifyOfficialPayload} from './sdk-official-payload.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 function verifyResolvedIdentities(plan, manifest) {
@@ -155,6 +156,7 @@ export async function verifyManifestSdk(sdk, plan, manifest) {
     reject('INSTALL_BINDING', 'sdk', 'installed plan, successful manifest and lock must agree');
   }
   verifyResolvedIdentities(plan, manifest);
+  await verifyOfficialPayload(plan,manifest);
   for (const [name, input] of Object.entries(plan.verification)) if (input?.path) await requiredInput(input, name);
   const tuple = PLATFORMS[plan.platform][2];
   // Keep existing colour/ABI/lineage and native loadability checks. The legacy
@@ -315,6 +317,7 @@ export async function resolvePlan(plan, {dryRun = false, resumeFailed = false} =
       config: output.component.config, producer: output.component.producer, dependencies: output.dependencies,
       status: output.status, rc: output.rc, execution: output.execution}])),
     files: resolveFiles(plan, outputs)};
+  await verifyOfficialPayload(plan,manifest);
   verifyResolvedIdentities(plan, manifest);
   await fs.mkdir(plan.buildRoot, {recursive: true});
   await atomicJson(path.join(plan.buildRoot, `resolved-${manifest.planSha256}.json`), manifest);

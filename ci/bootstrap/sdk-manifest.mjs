@@ -340,7 +340,8 @@ export function validatePlan(plan) {
     const buildRuntimeDependencies = llvm.map(component => component.config.options.runtimeDependency).filter(Boolean);
     if (new Set(buildRuntimeDependencies).size > 1) reject('LLVM_DEPENDENCY', 'llvm', `${domain} producers use different paired runtime inputs`);
   }
-  fields(plan.verification, ['runtimePin', 'colourRuntime', 'hostRuntime'], ['hostRuntimeDir', 'runtimeManifest'], 'verification');
+  fields(plan.verification, ['runtimePin', 'colourRuntime', 'hostRuntime'], ['hostRuntimeDir', 'runtimeManifest', 'officialPayload'], 'verification');
+  if(plan.verification.officialPayload){fields(plan.verification.officialPayload,['path','sha256'],[],'officialPayload');absolute(plan.verification.officialPayload.path,'officialPayload');if(!HEX64.test(plan.verification.officialPayload.sha256))reject('VERIFICATION','officialPayload','frozen inventory projection hash required');}
   for (const key of ['runtimePin', 'colourRuntime', 'hostRuntime']) {
     const input = plan.verification[key]; fields(input, ['path', 'sha256'], [], key);
     absolute(input.path, key); if (!HEX64.test(input.sha256)) reject('VERIFICATION', key, 'frozen hash required');
