@@ -182,5 +182,5 @@ test('compiler alias exception requires both relative entries and the physical s
   await assertSdkPathParity(candidate, {officialRoot: official});
   fs.unlinkSync(path.join(candidate, 'bin/cjc-frontend'));
   put(candidate, 'bin/cjc-frontend');
-  await assert.rejects(assertSdkPathParity(candidate, {officialRoot: official}), /type-mismatch\tbin\/cjc/);
+  await assert.rejects(assertSdkPathParity(candidate, {officialRoot: official}), /type-mismatch\tbin\/cjc\t/);
 });
