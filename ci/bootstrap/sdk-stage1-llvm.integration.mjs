@@ -155,3 +155,12 @@ test('actual adapter authenticates the original host lock as well as its derived
   assert.equal(wrong.result?.rc, 1); assert.match(wrong.log, /STAGE1_LLVM.*official host identity/);
   const restored = await arm('restored-original-host-lock'); assert.equal(restored.result?.rc, 0, restored.log);
 });
+test('actual adapter refuses an altered ordinary native input before invoking the build', async () => {
+  const file = path.join(native, 'third_party/llvm/include/fixture.h'), bytes = await fs.readFile(file);
+  await fs.appendFile(file, '// deliberately altered original native byte\n');
+  try {
+    const wrong = await arm('wrong-native-header-bytes');
+    assert.equal(wrong.result?.rc, 1); assert.match(wrong.log, /STAGE1_LLVM_BYTES.*include\/fixture.h/);
+  } finally {await fs.writeFile(file, bytes);}
+  const restored = await arm('restored-native-header-bytes'); assert.equal(restored.result?.rc, 0, restored.log);
+});
