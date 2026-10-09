@@ -52,7 +52,7 @@ function optionsOnly(options, names, label) {
 async function llvm(request) {
   const {component, source, directory, dependencies} = request;
   const options = component.config.options, dylib = component.producer.adapter === 'llvm-dylib';
-  optionsOnly(options, ['targets', 'runtimeDependency', 'compilerSource', 'flatbuffersSource', 'launcher', 'auxiliaryOnly'], component.id);
+  optionsOnly(options, ['targets', 'runtimeDependency', 'compilerSource', 'flatbuffersSource', 'launcher', 'auxiliaryOnly', 'bitcodeReadersOnly'], component.id);
   if (options.targets !== 'X86;ARM;AArch64') reject('PRODUCER_OPTIONS', component.id, 'complete LLVM C API target set required');
   const runtime = dependencies[options.runtimeDependency];
   if (!runtime?.component.roles.includes('runtime') || runtime.component.source.kind !== 'git') reject('PRODUCER_DEPENDENCY', component.id, 'paired runtime Git producer');
@@ -74,17 +74,18 @@ async function llvm(request) {
     cmake.push(`-DCMAKE_C_COMPILER_LAUNCHER=${launcher.path}`, `-DCMAKE_CXX_COMPILER_LAUNCHER=${launcher.path}`);
   }
   await run(cmake);
-  await run(['cmake', '--build', build, '--target', ...(dylib ? ['LLVM', 'llvm-nm'] : options.auxiliaryOnly ? ['llvm-objcopy', 'llvm-ar'] : ['llc', 'opt', 'lld']), '-j', String(os.availableParallelism())]);
+  await run(['cmake', '--build', build, '--target', ...(dylib ? ['LLVM', 'llvm-nm'] : options.bitcodeReadersOnly ? ['llvm-dis', 'llvm-as'] : options.auxiliaryOnly ? ['llvm-objcopy', 'llvm-ar'] : ['llc', 'opt', 'lld', 'llvm-dis', 'llvm-as']), '-j', String(os.availableParallelism())]);
   const artifacts = path.join(directory, 'artifacts'); await fs.mkdir(artifacts, {recursive: true});
-  if (options.auxiliaryOnly) {
+  if (options.auxiliaryOnly || options.bitcodeReadersOnly) {
     await fs.mkdir(path.join(artifacts, 'bin'));
     const tools = {};
-    for (const name of ['llvm-objcopy', 'llvm-ar']) {
+    const targets = options.bitcodeReadersOnly ? ['llvm-dis', 'llvm-as'] : ['llvm-objcopy', 'llvm-ar'];
+    for (const name of targets) {
       const binary = path.join(build, 'bin', name), destination = path.join(artifacts, 'bin', name);
       await fs.copyFile(binary, destination); await fs.chmod(destination, 0o755);
       tools[name] = {sha256: await fileDigest(destination), version: (await execute(binary, ['--version'])).stdout.trim()};
     }
-    await atomicJson(path.join(artifacts, 'auxiliary-producer.json'), {source: component.source, tools,
+    await atomicJson(path.join(artifacts, options.bitcodeReadersOnly ? 'bitcode-readers.json' : 'auxiliary-producer.json'), {source: component.source, targets, tools,
       producer: component.producer, buildId: request.identity.buildId});
     await sourceIdentity(paired, runtime.component.source, 'llvm-runtime', tool('git'));
     return;
@@ -129,12 +130,20 @@ async function llvm(request) {
       await fs.copyFile(binary, path.join(artifacts, 'bin', tool)); await fs.chmod(path.join(artifacts, 'bin', tool), 0o755);
       await fs.writeFile(path.join(fixed, `${tool}.gz`), gzipSync(await fs.readFile(binary), {level: 9}));
     }
+    const readers = {};
+    for (const name of ['llvm-dis', 'llvm-as']) {
+      const destination = path.join(artifacts, 'bin', name);
+      await fs.copyFile(path.join(build, 'bin', name), destination); await fs.chmod(destination, 0o755);
+      readers[name] = {sha256: await fileDigest(destination), version: (await execute(destination, ['--version'])).stdout.trim()};
+    }
+    await atomicJson(path.join(artifacts, 'bitcode-readers.json'), {source: component.source, targets: ['llvm-dis', 'llvm-as'],
+      tools: readers, producer: component.producer, buildId: request.identity.buildId});
     values.LLD_TOOL = lld; values.SHIM_SHA256 = await fileDigest(path.join(fixed, 'cjselfhost_llvmshim.o'));
     const text = Object.entries(values).map(([key, value]) => `${key}=${value}\n`).join('');
     parseLlvmToolsManifest(text); await fs.writeFile(path.join(fixed, 'llvm-tools.manifest'), text);
     const manifest = `PLATFORM=${component.config.target}\nLLVM_SHA=${component.source.commit}\nCANGJIE_COMPILER_SHA=${options.compilerSource.commit}\nRECIPE_CJCJ_SHA=${component.producer.version}\nDEPOT_ROLE=producer output\n`;
     await fs.writeFile(path.join(artifacts, 'MANIFEST'), manifest); await fs.writeFile(path.join(artifacts, 'lib/STATIC_LLVM.txt'), manifest);
-    const payloads = ['MANIFEST', `bin/${lld}`, 'bin/llc', 'bin/opt', 'lib/STATIC_LLVM.txt', 'fixed-llc/llc.gz', 'fixed-llc/opt.gz',
+    const payloads = ['bin/llvm-dis', 'bin/llvm-as', 'bitcode-readers.json', 'MANIFEST', `bin/${lld}`, 'bin/llc', 'bin/opt', 'lib/STATIC_LLVM.txt', 'fixed-llc/llc.gz', 'fixed-llc/opt.gz',
       `fixed-llc/${lld}.gz`, 'fixed-llc/cjselfhost_llvmshim.o', 'fixed-llc/llvm-tools.manifest'];
     await fs.writeFile(path.join(artifacts, 'SHA256SUMS'), (await Promise.all(payloads.map(async rel => `${await fileDigest(path.join(artifacts, rel))}  ./${rel}\n`))).join(''));
     await sourceIdentity(compiler, options.compilerSource, 'llvm-schema', tool('git')); await sourceIdentity(flatbuffers, options.flatbuffersSource, 'flatbuffers', tool('git'));

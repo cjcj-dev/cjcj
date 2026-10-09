@@ -125,7 +125,8 @@ async function verifyInstalledLlvmTuple(sdk, plan, manifest) {
     if (!match || sums.has(match[2])) reject('LLVM_TUPLE_MANIFEST', component.id, `invalid or duplicate checksum row: ${line}`);
     relative(match[2], component.id); sums.set(match[2], match[1]);
   }
-  if (sums.size !== required.length) reject('LLVM_TUPLE_MANIFEST', component.id, 'requires the existing complete ten-payload tuple');
+  if (manifest.files['third_party/llvm/bitcode-readers.json']?.component === component.id) required.push('bin/llvm-dis', 'bin/llvm-as', 'bitcode-readers.json');
+  if (sums.size !== required.length) reject('LLVM_TUPLE_MANIFEST', component.id, 'requires the complete sealed producer tuple');
   for (const rel of required) {
     const file = manifest.files[`third_party/llvm/${rel}`];
     if (!file || file.component !== component.id || file.sha256 !== sums.get(rel)) reject('LLVM_TUPLE_MANIFEST', component.id, `missing/mismatched tuple member: ${rel}`);
@@ -193,7 +194,25 @@ export async function verifyManifestSdk(sdk, plan, manifest) {
   const symbols = (await execute('nm', ['-D', '--defined-only', runtime], {maxBuffer: 64 * 1024 * 1024})).stdout;
   const masks = symbols.split('\n').filter(line => /\bg_cjLoadBadMask(?:@@?\S+)?$/.test(line)).length;
   if (masks !== (plan.role === 'target' ? 1 : 0)) reject('RUNTIME_COLOUR', 'runtime', `role=${plan.role} masks=${masks}`);
-  const tools = ['third_party/llvm/bin/llc', 'third_party/llvm/bin/opt', 'third_party/llvm/bin/ld.lld', 'tools/bin/cjpm', 'bin/cjc'];
+  // Reader qualification binds the real installed executables to their own
+  // producer receipt; an old tuple receipt cannot acquire these members.
+  for (const component of plan.components.filter(c => c.config.options.bitcodeReadersOnly
+    || manifest.files['third_party/llvm/bitcode-readers.json']?.component === c.id)) {
+    const rel = 'third_party/llvm/bitcode-readers.json', row = manifest.files[rel];
+    if (!row || row.component !== component.id) reject('LLVM_READERS', component.id, 'missing sealed reader metadata');
+    const readers = await readJson(path.join(sdk, rel));
+    const {receipt, receiptSha256, originBuildRoot, ...producer} = component.producer;
+    if (canonical(readers.source) !== canonical(component.source)
+      || canonical(readers.producer) !== canonical(producer)
+      || readers.buildId !== row.buildId
+      || canonical(readers.targets) !== canonical(['llvm-dis', 'llvm-as'])) reject('LLVM_READERS', component.id, 'reader recipe/source identity differs');
+    for (const name of readers.targets) {
+      const member = manifest.files[`third_party/llvm/bin/${name}`];
+      if (!member || member.component !== component.id || member.buildId !== row.buildId
+        || member.sha256 !== readers.tools[name]?.sha256) reject('LLVM_READERS', component.id, `missing/mismatched reader: ${name}`);
+    }
+  }
+  const tools = ['third_party/llvm/bin/llc', 'third_party/llvm/bin/opt', 'third_party/llvm/bin/ld.lld', 'tools/bin/cjpm', 'bin/cjc', ...['llvm-dis', 'llvm-as'].filter(name => manifest.files[`third_party/llvm/bin/${name}`]).map(name => `third_party/llvm/bin/${name}`)];
   for (const rel of tools) {
     if (!manifest.files[rel]) reject('MISSING_ARTIFACT', 'tools', rel);
     const binary = path.join(sdk, rel);
