@@ -232,6 +232,8 @@ test('promoted contracts have their CI prerequisites', async () => {
   const ci = (await workflows()).get('ci.yml');
   assert.match(step(ci, 'Install release contract dependencies'), /apt-get install[^\n]*\bpython3\b/);
   assert.match(step(ci, 'Install release contract dependencies'), /apt-get install[^\n]*\bjq\b/);
+  assert.match(step(ci, 'Install release contract dependencies'), /apt-get install[^\n]*\bcmake\b/);
+  assert.match(step(ci, 'Install release contract dependencies'), /apt-get install[^\n]*\bninja-build\b/);
   assert.match(step(ci, 'Test build and release contracts'),
     /RELEASE_EVIDENCE_TEST_ROOT: \$\{\{ runner\.temp \}\}\/release-evidence-tests/);
   for (const file of ['build/test/bootstrap-handoff.test.mjs',
