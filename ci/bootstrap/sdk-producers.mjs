@@ -113,7 +113,10 @@ async function sharedbuild(component, directory, identity, plan, resumeFailed, o
     // Derive the capsule from the original sealed inventory, never from an
     // installed SDK. The adapter verifies these bytes before the first build.
     const archive = path.join(directory, 'target-llvm.tar'), contract = path.join(directory, 'target-llvm.json');
-    await execute(component.config.tools.tar.path, ['-cf', archive, '-C', native.artifacts, ...roots.filter(root => Object.keys(files).some(rel => rel.startsWith(`${root}/`)))]);
+    const members = path.join(directory, 'target-llvm.members');
+    await fs.writeFile(members, Object.keys(files).sort().join('\n')+'\n');
+    await execute(component.config.tools.tar.path, ['-cf', archive, '-C', native.artifacts,
+      '--mtime=@0', '--owner=0', '--group=0', '--numeric-owner', '--no-recursion', '--verbatim-files-from', '-T', members]);
     await atomicJson(contract, {schema: 'stage1-target-llvm-v1', source: native.component.source,
       producer: native.component.producer, buildId: native.buildId, receiptSha256: native.receiptSha256,
       hostLockSha256: sdkSource.lockSha256, files});
