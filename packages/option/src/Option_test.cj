@@ -6,6 +6,79 @@ import std.unittest.testmacro.*
 import std.core.Option as CoreOption
 import std.env.getVariable
 import std.collection.ArrayList
+import std.convert.*
+import std.fs.File
+import std.process.executeWithOutput
+
+// The syscall return status qualifies the OS domain, never the expected count.
+// Count a separate textual OS observation instead of copying the product's
+// mask bit loop or calling GetHardwareConcurrency / option normalization.
+@When[os == "Linux"]
+private func optionTestCpuListCount(list: String): UInt64 {
+    var count = 0u64
+    for (item in list.trimAscii().split(",")) {
+        let bounds = item.split("-")
+        let first = UInt64.parse(bounds[0])
+        let last = if (bounds.size == 1) { first } else { UInt64.parse(bounds[1]) }
+        if (last < first) { throw IllegalStateException("invalid OS CPU list") }
+        count += last - first + 1u64
+    }
+    if (count == 0u64) { throw IllegalStateException("unqualified empty OS CPU list") }
+    return count
+}
+
+@When[os == "Linux"]
+private func optionTestHardwareConcurrency(): UInt64 {
+    // Match only the ABI capacity whose success/failure selects the product
+    // domain. A larger mask would hide EINVAL on kernels with >1024 CPU IDs.
+    var probe = VArray<UInt8, $128>({ _: Int64 => 0u8 })
+    let rc = unsafe { sched_getaffinity(0, UIntNative(probe.size), inout probe) }
+    if (rc == 0) {
+        let status = String.fromUtf8(File.readFrom("/proc/self/status"))
+        for (line in status.split("\n")) {
+            if (!line.startsWith("Cpus_allowed_list:")) { continue }
+            let count = optionTestCpuListCount(line.split(":")[1])
+            println("HARDWARE_ORACLE domain=affinity syscallRc=${rc} independentCount=${count}")
+            return count
+        }
+        throw IllegalStateException("UNQUALIFIED affinity domain: missing OS affinity list")
+    }
+    // Linux libc's get_nprocs fast path reads this online list, irrespective
+    // of taskset. If it is unavailable, /proc/stat and final serial fallback
+    // are not independently qualified here: fail visibly rather than skip.
+    try {
+        let count = optionTestCpuListCount(String.fromUtf8(File.readFrom("/sys/devices/system/cpu/online")))
+        println("HARDWARE_ORACLE domain=online-fallback syscallRc=${rc} independentCount=${count}")
+        return count
+    } catch (e: Exception) {
+        throw IllegalStateException("UNQUALIFIED online/proc/serial fallback domain: ${e}")
+    }
+}
+
+@When[os == "macOS"]
+private func optionTestHardwareConcurrency(): UInt64 {
+    let (rc, output, _) = executeWithOutput("sysctl", ["-n", "hw.logicalcpu"])
+    if (rc != 0) { throw IllegalStateException("sysctl CPU query failed") }
+    return UInt64.parse(String.fromUtf8(output).trimAscii())
+}
+
+@When[os != "Linux" && os != "macOS" && os != "Windows"]
+private func optionTestHardwareConcurrency(): UInt64 {
+    // OptionSupport's unsupported-host contract is serial execution.
+    return 1u64
+}
+
+@When[os == "Windows"]
+private func optionTestHardwareConcurrency(): UInt64 {
+    let (rc, output, _) = executeWithOutput("powershell", ["-NoProfile", "-Command",
+        "(Get-CimInstance Win32_Processor | Measure-Object -Property NumberOfLogicalProcessors -Sum).Sum"])
+    if (rc != 0) { throw IllegalStateException("Windows CPU query failed") }
+    return UInt64.parse(String.fromUtf8(output).trimAscii())
+}
+
+private func hardwareLimited(request: UInt64, hardware: UInt64): UInt64 {
+    return if (request < hardware) { request } else { hardware }
+}
 
 // Upstream: unittests/Option/OptionTest.cpp:18-35 (SetUp).
 // cjpm has no PROJECT_SOURCE_DIR compile definition. Tests run from the repository
@@ -58,6 +131,7 @@ class OptionTest {
 
     @TestCase
     func ApcFrontendOutputNormalization(): Unit {
+        let hardware = optionTestHardwareConcurrency()
         for (frontend in [false, true]) {
             for (outputPath in ["packages/option/testdata", "frontend-output.bc"]) {
                 for (apc in [Array<String>(), ["--apc"], ["--apc=4"], ["--apc=1"],
@@ -71,9 +145,9 @@ class OptionTest {
                     if (frontend) { opts.SetFrontendMode() }
                     @Expect(opts.ParseFromArgs(parsed[1]), true)
                     let requested = if (apc.isEmpty()) { 4u64 } else if (apc[0] == "--apc") {
-                        7u64
+                        hardwareLimited(7u64, hardware)
                     } else if (apc[0] == "--apc=1") { 1u64 } else if (apc[0] == "--apc=4") {
-                        4u64
+                        hardwareLimited(4u64, hardware)
                     } else { 5u64 }
                     let expected = if (frontend && outputPath == "frontend-output.bc") { 1u64 } else {
                         requested
@@ -98,6 +172,7 @@ class OptionTest {
 
     @TestCase
     func JobsNormalization(): Unit {
+        let hardware = optionTestHardwareConcurrency()
         for (target in ["x86_64-unknown-linux-gnu", "x86_64-w64-mingw32", "aarch64-apple-darwin", "aarch64-apple-ios"]) {
             for (extra in [Array<String>(), ["-j", "7"]]) {
                 println("INPUT jobs target=${target} extra=${extra}")
@@ -108,7 +183,7 @@ class OptionTest {
                 @Expect(parsed[0], true)
                 let opts = GlobalOptions()
                 @Expect(opts.ParseFromArgs(parsed[1]), true)
-                let expected = if (extra.isEmpty()) { GetHardwareConcurrency() } else { 7u64 }
+                let expected = if (extra.isEmpty()) { hardware } else { hardwareLimited(7u64, hardware) }
                 println("NORMALIZED jobs present=${opts.jobs.hasValue} value=${opts.jobs.value} expected=${expected}")
                 @Expect(opts.jobs.hasValue, true)
                 @Expect(opts.jobs.value, expected)
@@ -130,6 +205,7 @@ class OptionTest {
 
     @TestCase
     func ApcPlatformNormalization(): Unit {
+        let hardware = optionTestHardwareConcurrency()
         for (target in ["x86_64-unknown-linux-gnu", "x86_64-w64-mingw32", "aarch64-apple-darwin", "aarch64-apple-ios"]) {
             for (apc in [Array<String>(), ["--apc"], ["--apc=3"], ["--apc-split-num", "5"]]) {
                 println("INPUT platform target=${target} apc=${apc}")
@@ -141,11 +217,37 @@ class OptionTest {
                 let opts = GlobalOptions()
                 @Expect(opts.ParseFromArgs(parsed[1]), true)
                 let expected = if (target == "x86_64-unknown-linux-gnu") {
-                    if (apc.isEmpty()) { 4u64 } else if (apc[0] == "--apc") { 7u64 } else if (apc[0] == "--apc=3") { 3u64 } else { 5u64 }
+                    if (apc.isEmpty()) { 4u64 } else if (apc[0] == "--apc") { hardwareLimited(7u64, hardware) } else if (apc[0] == "--apc=3") { hardwareLimited(3u64, hardware) } else { 5u64 }
                 } else { 1u64 }
                 println("NORMALIZED target=${target} apc=${apc} present=${opts.aggressiveParallelCompile.hasValue} value=${opts.aggressiveParallelCompile.value} expected=${expected}")
                 @Expect(opts.aggressiveParallelCompile.hasValue, true)
                 @Expect(opts.aggressiveParallelCompile.value, expected)
+            }
+        }
+    }
+
+    @TestCase
+    func HardwareParallelismBounds(): Unit {
+        let hardware = optionTestHardwareConcurrency()
+        @Assert(hardware > 0u64)
+        for (request in [1u64, hardware, hardware + 1u64, 7u64]) {
+            let expected = hardwareLimited(request, hardware)
+            for (apc in [Array<String>(), ["--apc"], ["--apc=${request}"], ["--apc-split-num", "5"]]) {
+                let extra = ArrayList<String>()
+                extra.add(all: ["--experimental", "--target", "x86_64-unknown-linux-gnu", "-j", "${request}"])
+                extra.add(all: apc)
+                let parsed = parseArgs(iosLtoArgs(srcFile, extra.toArray()))
+                @Assert(parsed[0], true)
+                let opts = GlobalOptions()
+                @Assert(opts.ParseFromArgs(parsed[1]), true)
+                let expectedApc = if (apc.isEmpty()) { 4u64 } else if (apc[0] == "--apc-split-num") {
+                    5u64
+                } else { expected }
+                println("HARDWARE_BOUND H=${hardware} request=${request} apc=${apc} jobs=${opts.jobs.value} expectedJobs=${expected} partitions=${opts.aggressiveParallelCompile.value} expectedPartitions=${expectedApc}")
+                @Expect(opts.jobs.hasValue, true)
+                @Expect(opts.jobs.value, expected)
+                @Expect(opts.aggressiveParallelCompile.hasValue, true)
+                @Expect(opts.aggressiveParallelCompile.value, expectedApc)
             }
         }
     }

@@ -4,8 +4,19 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import {runScripts} from './run-registered-tests.mjs';
+import {runScripts, cangjieEnvironment} from './run-registered-tests.mjs';
 import {repoRoot} from './test-manifest.mjs';
+
+test('workspace SDK loading domain precedes and preserves the inherited tools and library tail', () => {
+  const inherited = {PATH: '/control/bin', LD_LIBRARY_PATH: '/control/lib:/other/lib', KEEP: 'control'};
+  const env = cangjieEnvironment('/official/sdk', inherited);
+  assert.equal(env.PATH, '/official/sdk/bin:/official/sdk/tools/bin:/control/bin');
+  assert.equal(env.LD_LIBRARY_PATH, '/official/sdk/third_party/llvm/lib:/official/sdk/runtime/lib/linux_x86_64_cjnative:/official/sdk/tools/lib:/control/lib:/other/lib');
+  assert.equal(env.KEEP, 'control');
+  assert.equal(inherited.LD_LIBRARY_PATH, '/control/lib:/other/lib');
+  assert.equal(cangjieEnvironment('/official/sdk', {}).LD_LIBRARY_PATH,
+    '/official/sdk/third_party/llvm/lib:/official/sdk/runtime/lib/linux_x86_64_cjnative:/official/sdk/tools/lib');
+});
 
 test('script CLI executes the registered resource-selector assertions', async () => {
   const work = await fs.mkdtemp(path.join(os.tmpdir(), 'registered-cli-'));
@@ -289,7 +300,9 @@ test('runCangjie carries directed argv and fixture environment to its actual chi
   // These child stand-ins test transport only; the real compiler/cjpm controls
   // are separate integration evidence, not supplied by this fixture.
   const {runCangjie, digest} = await import('./run-registered-tests.mjs');
-  const work = await fs.mkdtemp(path.join(os.tmpdir(), 'objc-child-'));
+  const evidence = process.env.PRODUCER_EVIDENCE_TEST_ROOT;
+  if (evidence) await fs.mkdir(evidence, {recursive: true});
+  const work = await fs.mkdtemp(path.join(evidence || os.tmpdir(), 'objc-child-'));
   const oldHome = process.env.CANGJIE_HOME;
   const oldProducer = process.env.OBJC_PREAMBLE_PRODUCER;
   try {
@@ -330,7 +343,7 @@ from pathlib import Path
 a=sys.argv[1:]
 p=Path(next(x.split('=',1)[1] for x in a if x.startswith('--report-path=')))
 p.mkdir(parents=True)
-(p/'observed.json').write_text(json.dumps({'args':a,'imports':os.environ.get('OBJC_PREAMBLE_IMPORTS'),'tmp':os.environ.get('TMPDIR'),'path':os.environ.get('PATH')}))
+(p/'observed.json').write_text(json.dumps({'args':a,'imports':os.environ.get('OBJC_PREAMBLE_IMPORTS'),'tmp':os.environ.get('TMPDIR'),'path':os.environ.get('PATH'),'ld':os.environ.get('LD_LIBRARY_PATH')}))
 (p/'target.xml').write_text('<testsuite><testcase classname="cjcj::compiler_unittest.ObjCPreambleTest" name="ordinaryFrontendControl" assertions="1"/><testcase classname="cjcj::compiler_unittest.ObjCPreambleTest" name="mirrorImplementationFiles" assertions="5"/></testsuite>')
 `, {mode: 0o755});
     await fs.chmod(path.join(sdk, 'tools/bin/cjpm'), 0o755);
@@ -353,10 +366,29 @@ p.mkdir(parents=True)
     assert.equal(observed.imports, path.join(output, 'objc-fixture/imports'));
     assert.equal(observed.tmp, path.join(output, 'tmp'));
     assert.ok(observed.path.startsWith(`${sdk}/bin:${sdk}/tools/bin:`));
+    assert.ok(observed.ld.startsWith(`${sdk}/third_party/llvm/lib:${sdk}/runtime/lib/linux_x86_64_cjnative:${sdk}/tools/lib`));
+    assert.equal(results[0].loadingDomain, observed.ld);
+    const fixture = results[0].fixture;
+    assert.equal(fixture.phase, 'complete');
+    for (const [name, stub] of Object.entries(fixture.stubs)) {
+      assert.equal(stub.collector_process_rc, 0);
+      assert.equal(stub.child_rc, 0);
+      const summary = JSON.parse(await fs.readFile(stub.summary_path));
+      assert.equal(summary.invocation_id, stub.invocation_id);
+      assert.equal(summary.collector_rc, 0);
+      const call = JSON.parse(await fs.readFile(path.join(summary.directory, 'call.json')));
+      assert.equal(call.child_rc, 0);
+      assert.equal(digest(call.producer.saved), digest(producer));
+      assert.ok(call.inputs.some(input => input.path === path.join(sdk, 'modules/linux_x86_64_cjnative/std/std.core.cjo') && input.saved),
+        'target combined runner retains declared SDK module entity');
+      console.log(`COMBINED_RUNNER_PRODUCER_ASSERT ${JSON.stringify({name, summary: stub.summary_path,
+        call: path.join(summary.directory, 'call.json'), child: call.child_rc, collector: summary.collector_rc, loadingDomain: observed.ld})}`);
+    }
+    await fs.writeFile(path.join(work, 'combined-result.json'), JSON.stringify({results, observed}, null, 2));
   } finally {
     for (const [key, value] of [['CANGJIE_HOME', oldHome], ['OBJC_PREAMBLE_PRODUCER', oldProducer]]) {
       if (value === undefined) delete process.env[key]; else process.env[key] = value;
     }
-    await fs.rm(work, {recursive: true, force: true});
+    if (!evidence) await fs.rm(work, {recursive: true, force: true});
   }
 });
