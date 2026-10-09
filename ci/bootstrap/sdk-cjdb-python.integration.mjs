@@ -17,7 +17,7 @@ const sources = process.env.CJDB_PYTHON_SOURCES;
 const configureOnly = process.env.CJDB_PYTHON_CONFIGURE_ONLY === '1';
 const repository = path.resolve(import.meta.dirname,'../..');
 
-test('producer root reaches real LLDB Interpreter and Development',
+test('producer artifacts reach real LLDB Interpreter and Development',
   {skip:!partial || !output || !sources}, async () => {
     await fs.mkdir(output,{recursive:true});
     const commands=[];

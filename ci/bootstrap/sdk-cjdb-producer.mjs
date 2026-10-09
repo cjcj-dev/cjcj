@@ -67,13 +67,18 @@ export async function buildCjdb(request, {run, tool, fetchIdentity, execute: req
   const qualification = await prepareQualification(request,{llvm,compiler,bounds,build,demangler:path.join(build,'cangjie-demangler')},path.join(directory,'native-qualification'));
   const launcher = tool('launcher'), jobs = String(os.availableParallelism());
   const prefix = [options.python.root, libedit.root, path.join(build, 'third_party/xml2')].join(';');
+  // BuildCJDB.cmake consumes LLVM_BUILD_ARG directly. Keep this list in the
+  // parent cache: the LLVM foreach's temporary variable hides it only while
+  // iterating CANGJIE_LLVM_BUILD_ARGS, then the LLDB recipe sees the cache again.
+  // Explicit artifacts also support CMake versions that do not enumerate 3.11.
+  const lldbPythonArgs = [
+    `-DPython3_EXECUTABLE=${path.join(options.python.root, 'bin/python3.11')}`,
+    `-DPython3_INCLUDE_DIR=${path.join(options.python.root, 'include/python3.11')}`,
+    `-DPython3_LIBRARY=${path.join(options.python.root, 'lib/libpython3.11.so')}`,
+  ];
   const llvmArgs = [`-DCANGJIE_RUNTIME_SOURCE_DIR=${paired}`, `-DCMAKE_C_COMPILER_LAUNCHER=${launcher}`, `-DCMAKE_CXX_COMPILER_LAUNCHER=${launcher}`,
     '-DLLVM_PARALLEL_LINK_JOBS=8', `-DCMAKE_PROJECT_LLVM_INCLUDE_BEFORE=${qualification.hook}`, `-DCJ_LLVM_COMMIT=${component.source.commit}`];
   const env = {...process.env, PATH: `${path.join(options.python.root, 'bin')}:${path.dirname(tool('clang'))}:/usr/lib/ccache:/usr/bin:/bin`,
-    // BuildCJDB does not forward the parent's Python cache to ExternalProject.
-    // CMake FindPython's environment root hint is inherited by its real child
-    // and selects Interpreter + Development together (including the ABI).
-    Python3_ROOT_DIR: options.python.root,
     CCACHE_DIR: '/root/.ccache', CCACHE_BASEDIR: directory, CCACHE_NOHASHDIR: '1', CMAKE_BUILD_PARALLEL_LEVEL: jobs,
     CMAKE_C_COMPILER_LAUNCHER:launcher, CMAKE_CXX_COMPILER_LAUNCHER:launcher,
     LD_LIBRARY_PATH: `${path.join(options.python.root, 'lib')}:${path.join(libedit.root, 'lib/x86_64-linux-gnu')}`};
@@ -83,7 +88,8 @@ export async function buildCjdb(request, {run, tool, fetchIdentity, execute: req
     '-DCANGJIE_BUILD_CJC=ON', '-DCANGJIE_BUILD_STD_SUPPORT=ON', '-DCANGJIE_BUILD_TESTS=OFF', '-DCANGJIE_BUILD_CJDB=ON',
     '-DCANGJIE_LLVM_BUILD_TYPE=Release', '-DCANGJIE_CJDB_BUILD_TYPE=Release', `-DCANGJIE_CJNATIVE_SOURCE_DIR=${llvm}`,
     `-DCANGJIE_RUNTIME_SOURCE_DIR=${paired}`, `-DCANGJIE_XML2_SOURCE_DIR=${xml2}`, `-DCMAKE_PREFIX_PATH=${prefix}`,
-    `-DPython3_EXECUTABLE=${path.join(options.python.root, 'bin/python3.11')}`, `-DCANGJIE_LLVM_BUILD_ARGS=${llvmArgs.join(';')}`,
+    `-DPython3_EXECUTABLE=${path.join(options.python.root, 'bin/python3.11')}`,
+    `-DLLVM_BUILD_ARG=${lldbPythonArgs.join(';')}`, `-DCANGJIE_LLVM_BUILD_ARGS=${llvmArgs.join(';')}`,
     '-DCANGJIE_LINK_JOB_POOL=8', `-DCMAKE_INSTALL_PREFIX=${installed}`], {env});
   // Query the real graph before production; no hand-maintained object subset.
   await run(['ninja', '-C', build, '-t', 'query', 'lldb'], {env});

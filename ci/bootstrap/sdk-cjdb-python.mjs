@@ -7,7 +7,7 @@ import {fileDigest, reject} from './sdk-manifest.mjs';
 export async function verifyCjdbPythonConfiguration(pythonRoot, lldbBuild, execute) {
   const interpreter = path.join(pythonRoot, 'bin/python3.11');
   const {stdout} = await execute(interpreter, ['-B', '-c',
-    'import json,sys,sysconfig; print(json.dumps(dict(executable=sys.executable,version=sys.version,include=sysconfig.get_path("include"),library=sysconfig.get_config_var("LIBDIR")+"/"+sysconfig.get_config_var("LDLIBRARY"),suffix=sysconfig.get_config_var("EXT_SUFFIX"))))'],
+    'import json,sys,sysconfig; print(json.dumps(dict(executable=sys.executable,version=sys.version,include=sysconfig.get_path("include"),library=sys.prefix+"/lib/"+sysconfig.get_config_var("LDLIBRARY"),suffix=sysconfig.get_config_var("EXT_SUFFIX"))))'],
   {env: {...process.env, PYTHONDONTWRITEBYTECODE:'1', LD_LIBRARY_PATH:path.join(pythonRoot,'lib')}});
   const selected = JSON.parse(stdout);
   const cache = await fs.readFile(path.join(lldbBuild, 'CMakeCache.txt'), 'utf8');
