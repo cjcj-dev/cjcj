@@ -8,6 +8,24 @@ import {buildIdentities, fileDigest, execute, sourceIdentity} from './sdk-manife
 
 const repository = fileURLToPath(new URL('../..', import.meta.url));
 
+test('input-only readers cannot remove the installed SDK reader qualification', async () => {
+  assert.ok(process.env.SDK_EXPORT_PLAN && process.env.SDK_EXPORT_ROOT, 'explicit private sealed input plan and evidence parent required');
+  const plan = JSON.parse(await fs.readFile(process.env.SDK_EXPORT_PLAN, 'utf8'));
+  const root = await fs.mkdtemp(path.join(process.env.SDK_EXPORT_ROOT, 'reader-owner-resolver-'));
+  plan.buildRoot = path.join(root, 'builds');
+  plan.components = plan.components.filter(c => !['llvm-release-layout', 'llvm-release-tools', 'llvm-release-libraries'].includes(c.id));
+  for (const c of plan.components.filter(c => ['llvm-tools', 'llvm-dylib', 'llvm-auxiliary'].includes(c.id))) c.inputOnly = false;
+  assert.equal(plan.components.find(c => c.id === 'llvm-readers')?.inputOnly, true);
+  const input = path.join(root, 'plan.json'); await fs.writeFile(input, JSON.stringify(plan));
+  const node = plan.components.find(c => c.id === 'llvm-readers').config.tools.node.path;
+  const child = spawnSync(node, [path.join(repository, 'ci/bootstrap/toolchain-sdk.mjs'), '--plan', input, '--out', path.join(root, 'sdk')], {encoding: 'utf8', maxBuffer: 32 * 1024 * 1024});
+  await fs.writeFile(path.join(root, 'resolver.log'), child.stdout + child.stderr);
+  await fs.writeFile(path.join(root, 'resolver-result.json'), JSON.stringify({rc: child.status, signal: child.signal, repository}));
+  console.log(`INSTALLED_READER_OWNER_ASSERT_REACHED evidence=${root} resolver_rc=${child.status}`);
+  assert.notEqual(child.status, 0, 'input-only reader receipts must not qualify an SDK with no installed reader owner');
+  assert.match(child.stderr, /SDK-BUILD-FAIL LLVM_READERS .*missing installed reader owner/);
+});
+
 test('fixed compiler schema reaches the real SDK resolver with its source bytes', async () => {
   assert.ok(process.env.SDK_EXPORT_PLAN && process.env.SDK_EXPORT_ROOT, 'explicit private sealed input plan and evidence parent required');
   const plan = JSON.parse(await fs.readFile(process.env.SDK_EXPORT_PLAN, 'utf8'));
