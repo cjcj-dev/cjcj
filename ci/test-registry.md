@@ -46,11 +46,11 @@ lane's inputs.
 
 `ci/bootstrap/sdk-export.test.mjs` is a separate manual producer/export check.
 It requires `SDK_EXPORT_PLAN` (a private sealed supplemental Linux plan with
-fixed compiler `174db8f40d5efddee63c47a3162bbf676bc227a0` schema source and all
-authenticated receipts), `SDK_EXPORT_ROOT` (an existing private evidence parent),
+fixed compiler `174db8f40d5efddee63c47a3162bbf676bc227a0` schema source, securec and LLVM release receipts), `SDK_EXPORT_RUNTIME_SOURCE`
+(a retained clean Git checkout matching the runtime commit/tree), `SDK_EXPORT_ROOT` (an existing private evidence parent),
 at least 64 available CPUs and the plan's frozen Node/Git tools. It invokes the
 same-tree producer through the real SDK resolver CLI. Existing receipts and
-sources remain read-only; fresh `schema-resolver-*` directories and isolated
+sources remain read-only; fresh schema/native resolver directories and isolated
 product cut checkouts are its write domain. CI does not provide these inputs;
 registration is NOT_RUN and does not qualify the complete SDK.
 
