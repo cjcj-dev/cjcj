@@ -219,7 +219,11 @@ async function std(request) {
   // explicit target LLVM output. Managed compiler loading keeps host runtime.
   for (const [dependencyName, destination] of [[options.llvmToolsDependency, 'third_party/llvm'], [options.llvmDylibDependency, 'third_party/llvm/lib']]) {
     const dependency = dependencies[dependencyName]; if (!dependency) reject('PRODUCER_DEPENDENCY', component.id, dependencyName);
-    await fs.cp(dependency.artifacts, path.join(sdk, destination), {recursive: true, dereference: false, force: true});
+    const native = dependency.component.producer.adapter === 'llvm-cjdb';
+    await fs.cp(native ? path.join(dependency.artifacts, destination) : dependency.artifacts, path.join(sdk, destination), {recursive: true, dereference: false, verbatimSymlinks: true, force: true});
+    if (native && destination === 'third_party/llvm') {
+      for (const rel of ['tools', 'runtime']) await fs.cp(path.join(dependency.artifacts, rel), path.join(sdk, rel), {recursive:true, verbatimSymlinks:true, force:true});
+    }
   }
   if (options.llvmAuxiliaryDependency) {
     const auxiliary = dependencies[options.llvmAuxiliaryDependency];
