@@ -1,0 +1,38 @@
+{
+  "schema": "918-install-expectations-v1",
+  "status": "planned-not-resolved",
+  "source": "4d05592c3b0a05b3ab4d554a379e3885faf25cf2",
+  "nativeSource": {
+    "commit": "53ce96a7b9d243dc7fa05ff6a9b56ea0ef94c057",
+    "kind": "git",
+    "repo": "/root/sym_cjcj_918_implement_r6077105353/inputs/llvm",
+    "tree": "3d80836504be22f5b06228db0e2c39c2d0d11c81"
+  },
+  "roots": {
+    "third_party/llvm": "llvm-cjdb",
+    "native-closure": "llvm-cjdb",
+    "tools/native-members": "llvm-cjdb",
+    "runtime/lib/linux_x86_64_cjnative/libsecurec.so": "llvm-cjdb",
+    "runtime/pair-and-static": "runtime",
+    "std/full": "std",
+    "include/AST-and-flatbuffers-generated": "ast",
+    "schema/StdxChirFormat.fbs": "compiler-schema",
+    "bin/cjcj-stage1": "compiler",
+    "official-rest": "official"
+  },
+  "nativeTools": [
+    "tools/bin/cjdb",
+    "tools/bin/LSPMacroServer",
+    "tools/bin/chir-dis",
+    "tools/lib/libcangjie-frontend.so",
+    "tools/lib/libcangjie-lsp.so",
+    "tools/script/cangjie_cjdb.py"
+  ],
+  "history": {
+    "runtime": "runtime/9733dfc09d29eca27d19cc3937a149838b4e3322/9e6ce531c765c6e7e3bf42ecd9c660f8d01b8eb6633b39f52f2c0c582a901bf1",
+    "std": "std/9733dfc09d29eca27d19cc3937a149838b4e3322/c976de69cac903a385e954b2d7b62056bf3b55c4c4af70a460af0cc22b5fe009",
+    "ast": "ast/174db8f40d5efddee63c47a3162bbf676bc227a0/342a1bf4bf3be113feea2735c934dc9e333c89b6202657690f65fe62dbf5afcc"
+  },
+  "noSuccessfulNativeReceipt": true,
+  "ownershipFinalCheck": "resolveFiles requires actual native complete output; never executed here"
+}

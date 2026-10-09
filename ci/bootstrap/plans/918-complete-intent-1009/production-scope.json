@@ -1,0 +1,421 @@
+{
+  "schema": "918-production-scope-v1",
+  "status": "input-preparation-only",
+  "source": "4d05592c3b0a05b3ab4d554a379e3885faf25cf2",
+  "tools": "d6edd90ad2da183e9ff5711af699d4b3921f42eb",
+  "productExecutionAuthorized": false,
+  "platforms": [
+    {
+      "platform": "linux_x86_64",
+      "status": "formal-stage1-input-frozen-artifacts-missing",
+      "required": [
+        "official-host-with-original-identity",
+        "paired-runtime-boundscheck-static-archive",
+        "complete-same-source-LLVM-LLDB-frontend-LSP-Python",
+        "stage1-compiler",
+        "AST-flatbuffers-and-schema",
+        "compiler-produced-full-std",
+        "SDK-manifest-lock-semantic-checks",
+        "package-independent-unpack-and-use"
+      ]
+    },
+    {
+      "platform": "linux_aarch64",
+      "status": "adapter-and-production-not-qualified",
+      "required": [
+        "official-host-with-original-identity",
+        "paired-runtime-boundscheck-static-archive",
+        "complete-same-source-LLVM-LLDB-frontend-LSP-Python",
+        "stage1-compiler",
+        "AST-flatbuffers-and-schema",
+        "compiler-produced-full-std",
+        "SDK-manifest-lock-semantic-checks",
+        "package-independent-unpack-and-use"
+      ]
+    },
+    {
+      "platform": "darwin_x86_64",
+      "status": "adapter-and-production-not-qualified",
+      "required": [
+        "official-host-with-original-identity",
+        "paired-runtime-boundscheck-static-archive",
+        "complete-same-source-LLVM-LLDB-frontend-LSP-Python",
+        "stage1-compiler",
+        "AST-flatbuffers-and-schema",
+        "compiler-produced-full-std",
+        "SDK-manifest-lock-semantic-checks",
+        "package-independent-unpack-and-use"
+      ]
+    },
+    {
+      "platform": "darwin_aarch64",
+      "status": "adapter-and-production-not-qualified",
+      "required": [
+        "official-host-with-original-identity",
+        "paired-runtime-boundscheck-static-archive",
+        "complete-same-source-LLVM-LLDB-frontend-LSP-Python",
+        "stage1-compiler",
+        "AST-flatbuffers-and-schema",
+        "compiler-produced-full-std",
+        "SDK-manifest-lock-semantic-checks",
+        "package-independent-unpack-and-use"
+      ]
+    },
+    {
+      "platform": "windows_x86_64",
+      "status": "adapter-and-production-not-qualified",
+      "required": [
+        "official-host-with-original-identity",
+        "paired-runtime-boundscheck-static-archive",
+        "complete-same-source-LLVM-LLDB-frontend-LSP-Python",
+        "stage1-compiler",
+        "AST-flatbuffers-and-schema",
+        "compiler-produced-full-std",
+        "SDK-manifest-lock-semantic-checks",
+        "package-independent-unpack-and-use"
+      ]
+    }
+  ],
+  "crossTargets": {
+    "windows_x86_64_cjnative": {
+      "status": "pending-paired-Windows-runtime-std-and-complete-tuple",
+      "linuxExclusionRoots": [
+        "lib/windows_x86_64_cjnative",
+        "runtime/lib/windows_x86_64_cjnative",
+        "modules/windows_x86_64_cjnative"
+      ],
+      "remainsRequiredForWindows": true
+    },
+    "otherCrossTargets": {
+      "status": "retain-existing-release-matrix-pending",
+      "anchor": ".github/workflows/release.yml:241"
+    }
+  },
+  "sdkEnd": {
+    "entry": "ci/bootstrap/toolchain-sdk.mjs --plan inputs/complete-final.plan.json --out /root/sym_cjcj_918_implement_r6085769397/sdk-stage1",
+    "status": "NOT_RUN",
+    "checks": [
+      "resolveFiles unique authenticated physical owner",
+      "officialPlatformPayload complete publisher inventory, Linux excludes only Windows three roots",
+      "sdk_verify.py existing identity/payload/link checks",
+      "verifyBootstrapRuntimeSdk paired dynamic/static colour",
+      "std_runtime_colour.py host/target distinction",
+      "compiler_identity.py and std-producer compiler/runtime build IDs",
+      "installed same-source LLVM readers and generated native qualification",
+      "tool versions/load domain from actual installed outputs"
+    ],
+    "targetOutputPresent": false
+  },
+  "package": {
+    "entry": "scripts/package_sdk.mjs",
+    "status": "NOT_RUN",
+    "required": [
+      "real full target SDK successful manifest and lock",
+      "actual source-built full std and lineage",
+      "complete LLVM/native LLDB/frontend/LSP/Python provenance",
+      "paired cross-platform runtime/std when retained",
+      "independent archive/unpack inventory and contained relative aliases",
+      "cjc/frontend/cjpm native-tool smoke",
+      "cjdb startup/Python import/loader origin",
+      "independent full std consumer compile and execution"
+    ],
+    "adapterGap": "No plan-v1 package declaration field/adapter; this companion is an explicit obligation, not an executable package recipe or receipt."
+  },
+  "nextStages": {
+    "stage2": "only after the actual stage1 SDK and corresponding std complete; existing sdk-stage-producer consumes frozen sdkComponents",
+    "stage3": "must depend on actual stage2 producer and corresponding std; no backwards stage1 dependency"
+  },
+  "consumers": [
+    {
+      "issue": "cjcj#715",
+      "inputs": [
+        "compiler",
+        "std",
+        "runtime",
+        "llvm-cjdb",
+        "ast",
+        "compiler-schema"
+      ],
+      "newPinAuthorized": false,
+      "qualification": "NOT_RUN"
+    },
+    {
+      "issue": "cjcj#501",
+      "inputs": [
+        "compiler",
+        "std",
+        "runtime",
+        "llvm-cjdb",
+        "ast",
+        "compiler-schema"
+      ],
+      "newPinAuthorized": false,
+      "qualification": "NOT_RUN"
+    }
+  ],
+  "holds": [
+    "independent full input review",
+    "1454 prerequisite and paired ABI hold",
+    "STD_CJC",
+    "stage33",
+    "release/latest",
+    "no CI/push/main before review"
+  ],
+  "peak": "UNKNOWN for this new combination; old 30GiB estimate is not evidence",
+  "removedSplitFamily": [
+    {
+      "id": "llvm-tools",
+      "source": {
+        "commit": "7ed574d4ba6ff1ebeceeb339ab4795e0141e4a60",
+        "kind": "git",
+        "repo": "/root/sym_cjcj_918_implement_r6065114950/sources/llvm",
+        "tree": "04e9f2f2155942af65770e48a3e864cc2cb4b2b6"
+      },
+      "producer": {
+        "adapter": "llvm-tools",
+        "originBuildRoot": "/root/sym_cjcj_918_implement_r6065114950/target-builds",
+        "receipt": "/root/sym_cjcj_918_implement_r6066708628/keep/builds/llvm-tools/7ed574d4ba6ff1ebeceeb339ab4795e0141e4a60/4fd9e0046906d1e64bdea03c1d4818440933109e237ff83647ba8a57d9b68f58",
+        "receiptSha256": "a646f8a6086b492a190df403d01d51e18a83586a053b3ac43bbd5e5b7a7cc511",
+        "repository": "/root/sym_cjcj_918_implement_r6065114950/cjcj",
+        "version": "8ab3685a8b7f771d34ad23d4c89d6c79f180f614"
+      },
+      "install": [
+        {
+          "from": "",
+          "to": "third_party/llvm"
+        }
+      ],
+      "replacement": "complete llvm-cjdb native export, no inputOnly; old receipt remains historical"
+    },
+    {
+      "id": "llvm-dylib",
+      "source": {
+        "commit": "7ed574d4ba6ff1ebeceeb339ab4795e0141e4a60",
+        "kind": "git",
+        "repo": "/root/sym_cjcj_918_implement_r6065114950/sources/llvm",
+        "tree": "04e9f2f2155942af65770e48a3e864cc2cb4b2b6"
+      },
+      "producer": {
+        "adapter": "llvm-dylib",
+        "originBuildRoot": "/root/sym_cjcj_918_implement_r6065114950/target-builds",
+        "receipt": "/root/sym_cjcj_918_implement_r6066708628/keep/builds/llvm-dylib/7ed574d4ba6ff1ebeceeb339ab4795e0141e4a60/703fb4db3a86be6e6995352f9826b27de8ac23a90b08da9ed56564ed6e57704c",
+        "receiptSha256": "4e5444669312cd4d146849c06b80acf2c6b9d32aa1b4bee3c7900544e0c3f039",
+        "repository": "/root/sym_cjcj_918_implement_r6065114950/cjcj",
+        "version": "8ab3685a8b7f771d34ad23d4c89d6c79f180f614"
+      },
+      "install": [
+        {
+          "from": "",
+          "to": "third_party/llvm/lib"
+        }
+      ],
+      "replacement": "complete llvm-cjdb native export, no inputOnly; old receipt remains historical"
+    },
+    {
+      "id": "llvm-auxiliary",
+      "source": {
+        "commit": "7ed574d4ba6ff1ebeceeb339ab4795e0141e4a60",
+        "kind": "git",
+        "repo": "/root/sym_cjcj_918_implement_r6065114950/sources/llvm",
+        "tree": "04e9f2f2155942af65770e48a3e864cc2cb4b2b6"
+      },
+      "producer": {
+        "adapter": "llvm-tools",
+        "originBuildRoot": "/root/sym_cjcj_918_implement_r6065114950/target-builds",
+        "receipt": "/root/sym_cjcj_918_implement_r6066708628/keep/builds/llvm-auxiliary/7ed574d4ba6ff1ebeceeb339ab4795e0141e4a60/ea74faf18ca6157e1f52f71f012a505713d0d04e6a50bc33414951f0b67f2f6f",
+        "receiptSha256": "f3bc4dfb80b64c2fb55000d4000b90a141e28638c6f32c9a4cb1492e34490ff7",
+        "repository": "/root/sym_cjcj_918_implement_r6065114950/auxiliary-producer",
+        "version": "0f93d3e0f1a9dcf7e2f23a91804a2403bee32039"
+      },
+      "install": [
+        {
+          "from": "bin",
+          "to": "third_party/llvm/bin"
+        },
+        {
+          "from": "auxiliary-producer.json",
+          "to": "third_party/llvm/auxiliary-producer.json"
+        }
+      ],
+      "replacement": "complete llvm-cjdb native export, no inputOnly; old receipt remains historical"
+    },
+    {
+      "id": "llvm-readers",
+      "source": {
+        "commit": "7ed574d4ba6ff1ebeceeb339ab4795e0141e4a60",
+        "kind": "git",
+        "repo": "/root/sym_cjcj_918_implement_r6065114950/sources/llvm",
+        "tree": "04e9f2f2155942af65770e48a3e864cc2cb4b2b6"
+      },
+      "producer": {
+        "adapter": "llvm-tools",
+        "originBuildRoot": "/root/sym_cjcj_918_implement_r6073770708/reader-builds",
+        "receipt": "/root/sym_cjcj_918_implement_r6073770708/keep/reader-builds/llvm-readers/7ed574d4ba6ff1ebeceeb339ab4795e0141e4a60/2cd63f63f92b3188a108caaf997d555f548412869c9145610bdd65798ce690ef",
+        "receiptSha256": "65ab46a3c2d54dc52d0805cb8ddf1cf3e0a979d9651e763dbe19a4f65db953cf",
+        "repository": "/root/sym_cjcj_918_implement_r6073770708/cjcj",
+        "version": "4132c0d51100e2662df1eacd9304c3b3df156bdf"
+      },
+      "install": [
+        {
+          "from": "bin",
+          "to": "third_party/llvm/bin"
+        },
+        {
+          "from": "bitcode-readers.json",
+          "to": "third_party/llvm/bitcode-readers.json"
+        }
+      ],
+      "replacement": "complete llvm-cjdb native export, no inputOnly; old receipt remains historical"
+    },
+    {
+      "id": "llvm-release-tools",
+      "source": {
+        "commit": "7ed574d4ba6ff1ebeceeb339ab4795e0141e4a60",
+        "kind": "git",
+        "repo": "/root/sym_cjcj_918_implement_r6073770708/llvm",
+        "tree": "04e9f2f2155942af65770e48a3e864cc2cb4b2b6"
+      },
+      "producer": {
+        "adapter": "llvm-tools",
+        "originBuildRoot": "/root/sym_cjcj_918_implement_r6074725041/builds",
+        "receipt": "/root/sym_cjcj_918_implement_r6074725041/keep/builds/llvm-release-tools/7ed574d4ba6ff1ebeceeb339ab4795e0141e4a60/e759cc25fd89fee10bd5873f60686e6789ac3d3a79408243d058c155acb80026",
+        "receiptSha256": "401a3821cca11a06c68bf377b108334c6fa5d212afd45d1138233bd1ea80e7e4",
+        "repository": "/root/sym_cjcj_918_implement_r6074725041/cjcj",
+        "version": "090b9aa5cfdb73c26bd528bf621fdec97383b787"
+      },
+      "install": [
+        {
+          "from": "bin/lld",
+          "to": "third_party/llvm/bin/lld"
+        },
+        {
+          "from": "bin/ld64.lld",
+          "to": "third_party/llvm/bin/ld64.lld"
+        },
+        {
+          "from": "bin/lld-link",
+          "to": "third_party/llvm/bin/lld-link"
+        },
+        {
+          "from": "bin/lli",
+          "to": "third_party/llvm/bin/lli"
+        },
+        {
+          "from": "bin/llvm-link",
+          "to": "third_party/llvm/bin/llvm-link"
+        },
+        {
+          "from": "bin/llvm-lto",
+          "to": "third_party/llvm/bin/llvm-lto"
+        },
+        {
+          "from": "bin/llvm-lto2",
+          "to": "third_party/llvm/bin/llvm-lto2"
+        },
+        {
+          "from": "bin/llvm-cov",
+          "to": "third_party/llvm/bin/llvm-cov"
+        },
+        {
+          "from": "bin/llvm-profdata",
+          "to": "third_party/llvm/bin/llvm-profdata"
+        },
+        {
+          "from": "bin/llvm-profgen",
+          "to": "third_party/llvm/bin/llvm-profgen"
+        },
+        {
+          "from": "bin/llvm-symbolizer",
+          "to": "third_party/llvm/bin/llvm-symbolizer"
+        },
+        {
+          "from": "bin/llvm-objdump",
+          "to": "third_party/llvm/bin/llvm-objdump"
+        },
+        {
+          "from": "bin/llvm-addr2line",
+          "to": "third_party/llvm/bin/llvm-addr2line"
+        },
+        {
+          "from": "bin/llvm-otool",
+          "to": "third_party/llvm/bin/llvm-otool"
+        },
+        {
+          "from": "release-tools.json",
+          "to": "third_party/llvm/release-tools.json"
+        }
+      ],
+      "replacement": "complete llvm-cjdb native export, no inputOnly; old receipt remains historical"
+    },
+    {
+      "id": "llvm-release-libraries",
+      "source": {
+        "commit": "7ed574d4ba6ff1ebeceeb339ab4795e0141e4a60",
+        "kind": "git",
+        "repo": "/root/sym_cjcj_918_implement_r6073770708/llvm",
+        "tree": "04e9f2f2155942af65770e48a3e864cc2cb4b2b6"
+      },
+      "producer": {
+        "adapter": "llvm-tools",
+        "originBuildRoot": "/root/sym_cjcj_918_implement_r6074725041/builds",
+        "receipt": "/root/sym_cjcj_918_implement_r6074725041/keep/builds/llvm-release-libraries/7ed574d4ba6ff1ebeceeb339ab4795e0141e4a60/14c8d3c01b2d8a50bc0dcfe8153683435eec325cc2bb39c4a8bc6ee3a781e45e",
+        "receiptSha256": "70de01b051c051a37d9ded6a9c4747853bbb1ea85ee304a3901b47ca6fb39298",
+        "repository": "/root/sym_cjcj_918_implement_r6074725041/cjcj",
+        "version": "313e62b88795194ac9e551d04528b45a02b67c62"
+      },
+      "install": [
+        {
+          "from": "lib",
+          "to": "third_party/llvm/lib"
+        },
+        {
+          "from": "release-libraries.json",
+          "to": "third_party/llvm/release-libraries.json"
+        }
+      ],
+      "replacement": "complete llvm-cjdb native export, no inputOnly; old receipt remains historical"
+    },
+    {
+      "id": "llvm-release-layout",
+      "source": {
+        "commit": "7ed574d4ba6ff1ebeceeb339ab4795e0141e4a60",
+        "kind": "git",
+        "repo": "/root/sym_cjcj_918_implement_r6073770708/llvm",
+        "tree": "04e9f2f2155942af65770e48a3e864cc2cb4b2b6"
+      },
+      "producer": {
+        "adapter": "llvm-release-layout",
+        "originBuildRoot": "/root/sym_cjcj_918_implement_r6074725041/builds",
+        "receipt": "/root/sym_cjcj_918_implement_r6074725041/keep/builds/llvm-release-layout/7ed574d4ba6ff1ebeceeb339ab4795e0141e4a60/1120f65f00e406340afd055b4acbc54fba7d8e717c622712b5e724bb1189eacf",
+        "receiptSha256": "63208ea08fb8c45e4789ef549d2de5058c1af1c614820d662778f65ac2745362",
+        "repository": "/root/sym_cjcj_918_implement_r6074725041/cjcj",
+        "version": "313e62b88795194ac9e551d04528b45a02b67c62"
+      },
+      "install": [
+        {
+          "from": "",
+          "to": "third_party/llvm"
+        }
+      ],
+      "replacement": "complete llvm-cjdb native export, no inputOnly; old receipt remains historical"
+    }
+  ],
+  "supportReplacement": [
+    {
+      "old": "compiler-securec",
+      "path": "runtime/lib/linux_x86_64_cjnative/libsecurec.so",
+      "newOwner": "llvm-cjdb",
+      "source": "2ae82839ecaaa7d031e66ccbd2076d671acfd615",
+      "anchor": "ci/bootstrap/sdk-cjdb-producer.mjs:119",
+      "status": "expected-native-output-missing"
+    },
+    {
+      "old": "compiler-xml2",
+      "path": "third_party/llvm/lib/libxml2.so*",
+      "newOwner": "llvm-cjdb",
+      "anchor": "174db compiler third_party/cmake/BuildCJDB.cmake:218",
+      "archive": "3e2ed89d81d210322d70b35460166d4ea285e5bb017576972a1d76a09631985c",
+      "status": "expected-native-output-missing"
+    }
+  ]
+}

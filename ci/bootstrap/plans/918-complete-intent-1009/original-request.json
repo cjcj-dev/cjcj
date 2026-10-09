@@ -1,0 +1,1818 @@
+{
+  "originalRequest": "/root/cj_build/agent_scratch/918-qualification-53ce/collected/request-input.json",
+  "plan": {
+    "buildRoot": "/root/918_qualification_53ce/builds",
+    "components": [
+      {
+        "config": {
+          "host": "linux_x86_64",
+          "options": {},
+          "target": "linux_x86_64",
+          "tools": {}
+        },
+        "dependencies": [],
+        "domain": "host",
+        "id": "official",
+        "install": [
+          {
+            "exclude": [
+              "modules",
+              "third_party/llvm",
+              "schema",
+              "include/cangjie",
+              "include/flatbuffers",
+              "compiler-lineage.json",
+              "std-producer.json",
+              "bin/cjc",
+              "bin/cjc-frontend",
+              "bin/cjcj-stage1",
+              "bin/cjfilt",
+              "lib/libstdFFI.so",
+              "lib/linux_x86_64_cjnative/cjld.lds",
+              "lib/linux_x86_64_cjnative/cjld.shared.lds",
+              "lib/linux_x86_64_cjnative/cjstart.o",
+              "lib/linux_x86_64_cjnative/cld.lds",
+              "lib/linux_x86_64_cjnative/discard_eh_frame.lds",
+              "lib/linux_x86_64_cjnative/libboundscheck-static.a",
+              "lib/linux_x86_64_cjnative/libboundscheck.so",
+              "lib/linux_x86_64_cjnative/libcangjie-aio.a",
+              "lib/linux_x86_64_cjnative/libcangjie-runtime.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-argopt.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-ast.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-astFFI.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-binary.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-collection.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-collection.concurrent.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-collection.concurrentFFI.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-concurrent.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-console.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-convert.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-convertFFI.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-core.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-coreFFI.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-crypto.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-crypto.cipher.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-crypto.digest.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-database.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-database.sql.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-deriving.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-deriving.api.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-deriving.builtins.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-deriving.impl.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-deriving.resolve.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-env.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-envFFI.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-fs.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-fsFFI.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-interop.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-io.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-math.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-math.numeric.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-mathFFI.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-net.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-netFFI.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-objectpool.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-objectpoolFFI.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-overflow.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-posix.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-posixFFI.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-process.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-processFFI.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-random.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-randomFFI.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-ref.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-reflect.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-regex.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-regexFFI.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-runtime.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-runtimeFFI.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-sort.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-sync.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-time.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-timeFFI.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-unicode.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-unittest.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-unittest.common.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-unittest.diff.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-unittest.mock.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-unittest.mock.internal.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-unittest.mock.mockmacro.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-unittest.prop_test.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-unittest.testmacro.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std-unittestFFI.a",
+              "lib/linux_x86_64_cjnative/libcangjie-std.a",
+              "lib/linux_x86_64_cjnative/libcangjie-thread.a",
+              "lib/windows_x86_64_cjnative/libboundscheck-static.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-argopt.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-ast.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-astFFI.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-binary.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-collection.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-collection.concurrent.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-collection.concurrentFFI.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-concurrent.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-console.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-convert.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-convertFFI.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-core.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-coreFFI.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-crypto.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-crypto.cipher.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-crypto.digest.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-database.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-database.sql.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-deriving.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-deriving.api.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-deriving.builtins.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-deriving.impl.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-deriving.resolve.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-env.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-envFFI.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-fs.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-fsFFI.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-interop.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-io.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-math.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-math.numeric.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-mathFFI.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-net.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-netFFI.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-objectpool.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-objectpoolFFI.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-overflow.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-posix.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-posixFFI.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-process.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-processFFI.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-random.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-randomFFI.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-ref.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-reflect.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-regex.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-regexFFI.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-runtime.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-runtimeFFI.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-sort.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-sync.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-time.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-timeFFI.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-unicode.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-unittest.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-unittest.common.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-unittest.diff.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-unittest.mock.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-unittest.mock.internal.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-unittest.mock.mockmacro.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-unittest.prop_test.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-unittest.testmacro.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std-unittestFFI.a",
+              "lib/windows_x86_64_cjnative/libcangjie-std.a",
+              "runtime/lib/linux_x86_64_cjnative/libboundscheck.so",
+              "runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so",
+              "runtime/lib/linux_x86_64_cjnative/libcangjie-std-argopt.so",
+              "runtime/lib/linux_x86_64_cjnative/libcangjie-std-ast.so",
+              "runtime/lib/linux_x86_64_cjnative/libcangjie-std-binary.so",
+              "runtime/lib/linux_x86_64_cjnative/libcangjie-std-collection.concurrent.so",
+              "runtime/lib/linux_x86_64_cjnative/libcangjie-std-collection.so",
+              "runtime/lib/linux_x86_64_cjnative/libcangjie-std-concurrent.so",
+              "runtime/lib/linux_x86_64_cjnative/libcangjie-std-console.so",
+              "runtime/lib/linux_x86_64_cjnative/libcangjie-std-convert.so",
+              "runtime/lib/linux_x86_64_cjnative/libcangjie-std-core.so",
+              "runtime/lib/linux_x86_64_cjnative/libcangjie-std-crypto.cipher.so",
+              "runtime/lib/linux_x86_64_cjnative/libcangjie-std-crypto.digest.so",
+              "runtime/lib/linux_x86_64_cjnative/libcangjie-std-crypto.so",
+              "runtime/lib/linux_x86_64_cjnative/libcangjie-std-database.so",
+              "runtime/lib/linux_x86_64_cjnative/libcangjie-std-database.sql.so",
+              "runtime/lib/linux_x86_64_cjnative/libcangjie-std-deriving.api.so",
+              "runtime/lib/linux_x86_64_cjnative/libcangjie-std-deriving.builtins.so",
+              "runtime/lib/linux_x86_64_cjnative/libcangjie-std-deriving.impl.so",
+              "runtime/lib/linux_x86_64_cjnative/libcangjie-std-deriving.resolve.so",
+              "runtime/lib/linux_x86_64_cjnative/libcangjie-std-deriving.so",
+              "runtime/lib/linux_x86_64_cjnative/libcangjie-std-env.so",
+              "runtime/lib/linux_x86_64_cjnative/libcangjie-std-fs.so",
+              "runtime/lib/linux_x86_64_cjnative/libcangjie-std-interop.so",
+              "runtime/lib/linux_x86_64_cjnative/libcangjie-std-io.so",
+              "runtime/lib/linux_x86_64_cjnative/libcangjie-std-math.numeric.so",
+              "runtime/lib/linux_x86_64_cjnative/libcangjie-std-math.so",
+              "runtime/lib/linux_x86_64_cjnative/libcangjie-std-net.so",
+              "runtime/lib/linux_x86_64_cjnative/libcangjie-std-objectpool.so",
+              "runtime/lib/linux_x86_64_cjnative/libcangjie-std-overflow.so",
+              "runtime/lib/linux_x86_64_cjnative/libcangjie-std-posix.so",
+              "runtime/lib/linux_x86_64_cjnative/libcangjie-std-process.so",
+              "runtime/lib/linux_x86_64_cjnative/libcangjie-std-random.so",
+              "runtime/lib/linux_x86_64_cjnative/libcangjie-std-ref.so",
+              "runtime/lib/linux_x86_64_cjnative/libcangjie-std-reflect.so",
+              "runtime/lib/linux_x86_64_cjnative/libcangjie-std-regex.so",
+              "runtime/lib/linux_x86_64_cjnative/libcangjie-std-runtime.so",
+              "runtime/lib/linux_x86_64_cjnative/libcangjie-std-sort.so",
+              "runtime/lib/linux_x86_64_cjnative/libcangjie-std-sync.so",
+              "runtime/lib/linux_x86_64_cjnative/libcangjie-std-time.so",
+              "runtime/lib/linux_x86_64_cjnative/libcangjie-std-unicode.so",
+              "runtime/lib/linux_x86_64_cjnative/libcangjie-std-unittest.common.so",
+              "runtime/lib/linux_x86_64_cjnative/libcangjie-std-unittest.diff.so",
+              "runtime/lib/linux_x86_64_cjnative/libcangjie-std-unittest.mock.internal.so",
+              "runtime/lib/linux_x86_64_cjnative/libcangjie-std-unittest.mock.mockmacro.so",
+              "runtime/lib/linux_x86_64_cjnative/libcangjie-std-unittest.mock.so",
+              "runtime/lib/linux_x86_64_cjnative/libcangjie-std-unittest.prop_test.so",
+              "runtime/lib/linux_x86_64_cjnative/libcangjie-std-unittest.so",
+              "runtime/lib/linux_x86_64_cjnative/libcangjie-std-unittest.testmacro.so",
+              "runtime/lib/linux_x86_64_cjnative/libcangjie-std.so",
+              "runtime/lib/linux_x86_64_cjnative/libcangjie-trace.so",
+              "runtime/lib/linux_x86_64_cjnative/libpcre2-8.so",
+              "runtime/lib/linux_x86_64_cjnative/libpcre2-8.so.0",
+              "runtime/lib/linux_x86_64_cjnative/libpcre2-8.so.0.14.0",
+              "runtime/lib/linux_x86_64_cjnative/libsecurec.so",
+              "third_party/llvm/lib/libboundscheck.so"
+            ],
+            "from": "",
+            "to": ""
+          }
+        ],
+        "producer": {
+          "adapter": "official",
+          "originBuildRoot": "/root/sym_cjcj_918_implement_r6065114950/target-builds",
+          "receipt": "/root/sym_cjcj_918_implement_r6066708628/keep/builds/official/3e634272cc6fe9ba0dc5c47d44b16015175cf68e199784e936b03b1c9062c89a/351f428808127e73f0e529feac342e1629dd1947dbfc8beba41124a1aafd7627",
+          "receiptSha256": "245f20298c9bf37f2f63e0168671438936a9661c6135e66bc3c22e8824caab9d",
+          "repository": "/root/sym_cjcj_918_implement_r6065114950/cjcj",
+          "version": "8ab3685a8b7f771d34ad23d4c89d6c79f180f614"
+        },
+        "roles": [
+          "compiler",
+          "std",
+          "runtime",
+          "boundscheck",
+          "llvm-tools",
+          "llvm-dylib",
+          "ast",
+          "cjpm",
+          "official-host"
+        ],
+        "source": {
+          "kind": "distribution",
+          "lock": "/root/sharedbuild/official-sdk/nightly-1.3.0-alpha.20261005010028/f15562c80d0316ae59a892f0d3bd3e9084299e274417de04e28684caa527441e/SDK.lock.json",
+          "lockSha256": "3e634272cc6fe9ba0dc5c47d44b16015175cf68e199784e936b03b1c9062c89a",
+          "reason": "official host seed, including its original compiler, std, LLVM, AST and cjpm",
+          "root": "/root/sharedbuild/official-sdk/nightly-1.3.0-alpha.20261005010028/f15562c80d0316ae59a892f0d3bd3e9084299e274417de04e28684caa527441e",
+          "version": "nightly-1.3.0-alpha.20261005010028"
+        }
+      },
+      {
+        "config": {
+          "host": "linux_x86_64",
+          "options": {
+            "heap": "48GB",
+            "inputBindings": {},
+            "jobs": 192,
+            "optimization": "Release",
+            "outputs": [
+              "install/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so",
+              "install/runtime/lib/linux_x86_64_cjnative/libboundscheck.so",
+              "install/lib/linux_x86_64_cjnative/libcangjie-runtime.a"
+            ],
+            "parameters": {
+              "cmake_args": [],
+              "product": "sdk"
+            },
+            "sdkDependency": "official"
+          },
+          "target": "linux_x86_64",
+          "tools": {
+            "ar": {
+              "path": "/usr/bin/ar",
+              "sha256": "5b394f8752fde1776992d405d76034d5017b24b9b922bedaeeaff8cc344ef044"
+            },
+            "bash": {
+              "path": "/usr/bin/bash",
+              "sha256": "59474588a312b6b6e73e5a42a59bf71e62b55416b6c9d5e4a6e1c630c2a9ecd4"
+            },
+            "builder": {
+              "path": "/root/sym_cjcj_918_implement_r6065114950/tools/ts/src/sharedbuild/runtime.mjs",
+              "sha256": "efe50b63c482c896e04a2709c089350fb03bcb619497e5c7ff93f054e006f1c6"
+            },
+            "cc": {
+              "path": "/usr/bin/cc",
+              "sha256": "821af3c74506283c179ca413bb33e6b528805a4dd8a5c09df125e5ad560a9e89"
+            },
+            "ccache": {
+              "path": "/usr/bin/ccache",
+              "sha256": "892c37ccf83c263cc518355911814448745d5d9f5f29e8b176a2d36b2b75d9a6"
+            },
+            "clang": {
+              "path": "/usr/bin/clang",
+              "sha256": "31925065812631303cf9af9a30b2f56427d2102667a87a9fb4ba03a306104589"
+            },
+            "clang++": {
+              "path": "/usr/bin/clang++",
+              "sha256": "31925065812631303cf9af9a30b2f56427d2102667a87a9fb4ba03a306104589"
+            },
+            "cmake": {
+              "path": "/usr/bin/cmake",
+              "sha256": "fd22547781b64bb2db04370970b93db1f3fada1e41e60873b015ee0747009fc0"
+            },
+            "find": {
+              "path": "/usr/bin/find",
+              "sha256": "791b89c8bffb8101fd7d4d212b80af66a2332834b05a42721104eb47e8fa2eb1"
+            },
+            "getconf": {
+              "path": "/usr/bin/getconf",
+              "sha256": "036757cca72d3c5659e1ec5e76aeea86598053ac4b96be3572d1e6a6348c0624"
+            },
+            "git": {
+              "path": "/usr/bin/git",
+              "sha256": "587ef21868c948b883993e23209b86a72a6ddc06aab1545c697ffc31075acd4a"
+            },
+            "ninja": {
+              "path": "/usr/bin/ninja",
+              "sha256": "a9ddfbf7e365a2e5026ed44f9173e498e37d8b71ec5e259b2c2a684f16cfa862"
+            },
+            "node": {
+              "path": "/usr/local/bin/node",
+              "sha256": "34bc6627675906f8431892630b5e91fc4cc9f1e03ce15e9716025aa551e5c823"
+            },
+            "python3": {
+              "path": "/usr/bin/python3",
+              "sha256": "a2f33a6e006989270f4340528eb61f8f97366e00a5d1b602ac8672ea44fc56ae"
+            },
+            "tar": {
+              "path": "/usr/bin/tar",
+              "sha256": "fd0d62eed19efd3e115aa1be44160f89d777cd1e6d6d8eb0ce7c8bdc879f59e2"
+            }
+          }
+        },
+        "dependencies": [
+          "official"
+        ],
+        "domain": "target",
+        "id": "runtime",
+        "install": [
+          {
+            "from": "install",
+            "to": ""
+          },
+          {
+            "from": "lib/libboundscheck.so",
+            "to": "lib/linux_x86_64_cjnative/libboundscheck.so"
+          }
+        ],
+        "producer": {
+          "adapter": "sharedbuild-runtime-default",
+          "engine": "/root/sym_cjcj_918_implement_r6065114950/tools/ts/src/sharedbuild/main.py",
+          "engineSha256": "9cf10eb313a946915abf7da44cb8768fcbd476b3cca0be2875668adcbf805b45",
+          "originBuildRoot": "/root/sym_cjcj_918_implement_r6065114950/target-builds",
+          "receipt": "/root/sym_cjcj_918_implement_r6066708628/keep/builds/runtime/9733dfc09d29eca27d19cc3937a149838b4e3322/9e6ce531c765c6e7e3bf42ecd9c660f8d01b8eb6633b39f52f2c0c582a901bf1",
+          "receiptSha256": "760914bfd76d7a48708a8c34defa02c9dc197685b9480121ab6c87e8e2663922",
+          "recipe": "/root/sym_cjcj_918_implement_r6065114950/inputs/runtime.request.json",
+          "repository": "/root/sym_cjcj_918_implement_r6065114950/tools",
+          "version": "b1bda3ab7294c6334766042ab90592e50edd1c40"
+        },
+        "roles": [
+          "runtime",
+          "boundscheck"
+        ],
+        "source": {
+          "commit": "9733dfc09d29eca27d19cc3937a149838b4e3322",
+          "kind": "git",
+          "repo": "/root/sym_cjcj_918_implement_r6065114950/sources/runtime",
+          "tree": "e44cf3b4791b5a0f91df78251b6805f5c68e5963"
+        }
+      },
+      {
+        "config": {
+          "host": "linux_x86_64",
+          "options": {
+            "compilerSource": {
+              "commit": "7b41219eb5d0003d949cabbf9b076d21e03faa03",
+              "repo": "/root/sym_cjcj_918_implement_r6065114950/sources/llvm-schema",
+              "tree": "0ef0bb733294225220a2ba12d04a996871b3c9f1"
+            },
+            "flatbuffersSource": {
+              "commit": "c3e4d69cbd5950e43f775ba76eadb30750d6e0b7",
+              "repo": "/root/sym_cjcj_918_implement_r6065114950/sources/flatbuffers",
+              "tree": "4a76afadb32db8f41426c9f3f3138dcca456e707"
+            },
+            "launcher": "/usr/bin/ccache",
+            "runtimeDependency": "runtime",
+            "targets": "X86;ARM;AArch64"
+          },
+          "target": "linux_x86_64",
+          "tools": {
+            "ar": {
+              "path": "/usr/bin/ar",
+              "sha256": "5b394f8752fde1776992d405d76034d5017b24b9b922bedaeeaff8cc344ef044"
+            },
+            "bash": {
+              "path": "/usr/bin/bash",
+              "sha256": "59474588a312b6b6e73e5a42a59bf71e62b55416b6c9d5e4a6e1c630c2a9ecd4"
+            },
+            "clang": {
+              "path": "/usr/bin/clang",
+              "sha256": "31925065812631303cf9af9a30b2f56427d2102667a87a9fb4ba03a306104589"
+            },
+            "clang++": {
+              "path": "/usr/bin/clang++",
+              "sha256": "31925065812631303cf9af9a30b2f56427d2102667a87a9fb4ba03a306104589"
+            },
+            "cmake": {
+              "path": "/usr/bin/cmake",
+              "sha256": "fd22547781b64bb2db04370970b93db1f3fada1e41e60873b015ee0747009fc0"
+            },
+            "getconf": {
+              "path": "/usr/bin/getconf",
+              "sha256": "036757cca72d3c5659e1ec5e76aeea86598053ac4b96be3572d1e6a6348c0624"
+            },
+            "git": {
+              "path": "/usr/bin/git",
+              "sha256": "587ef21868c948b883993e23209b86a72a6ddc06aab1545c697ffc31075acd4a"
+            },
+            "launcher": {
+              "path": "/usr/bin/ccache",
+              "sha256": "892c37ccf83c263cc518355911814448745d5d9f5f29e8b176a2d36b2b75d9a6"
+            },
+            "ninja": {
+              "path": "/usr/bin/ninja",
+              "sha256": "a9ddfbf7e365a2e5026ed44f9173e498e37d8b71ec5e259b2c2a684f16cfa862"
+            },
+            "nm": {
+              "path": "/usr/bin/nm",
+              "sha256": "ed6565c132d6f20019ff3f050043dc1b2b8bc2e8b3b94c1ffe3f34436431a5a4"
+            },
+            "node": {
+              "path": "/usr/local/bin/node",
+              "sha256": "34bc6627675906f8431892630b5e91fc4cc9f1e03ce15e9716025aa551e5c823"
+            },
+            "python3": {
+              "path": "/usr/bin/python3",
+              "sha256": "a2f33a6e006989270f4340528eb61f8f97366e00a5d1b602ac8672ea44fc56ae"
+            }
+          }
+        },
+        "dependencies": [
+          "runtime"
+        ],
+        "domain": "target",
+        "id": "llvm-tools",
+        "inputOnly": true,
+        "install": [
+          {
+            "from": "",
+            "to": "third_party/llvm"
+          }
+        ],
+        "producer": {
+          "adapter": "llvm-tools",
+          "originBuildRoot": "/root/sym_cjcj_918_implement_r6065114950/target-builds",
+          "receipt": "/root/sym_cjcj_918_implement_r6066708628/keep/builds/llvm-tools/7ed574d4ba6ff1ebeceeb339ab4795e0141e4a60/4fd9e0046906d1e64bdea03c1d4818440933109e237ff83647ba8a57d9b68f58",
+          "receiptSha256": "a646f8a6086b492a190df403d01d51e18a83586a053b3ac43bbd5e5b7a7cc511",
+          "repository": "/root/sym_cjcj_918_implement_r6065114950/cjcj",
+          "version": "8ab3685a8b7f771d34ad23d4c89d6c79f180f614"
+        },
+        "roles": [
+          "llvm-tools"
+        ],
+        "source": {
+          "commit": "7ed574d4ba6ff1ebeceeb339ab4795e0141e4a60",
+          "kind": "git",
+          "repo": "/root/sym_cjcj_918_implement_r6065114950/sources/llvm",
+          "tree": "04e9f2f2155942af65770e48a3e864cc2cb4b2b6"
+        }
+      },
+      {
+        "config": {
+          "host": "linux_x86_64",
+          "options": {
+            "launcher": "/usr/bin/ccache",
+            "runtimeDependency": "runtime",
+            "targets": "X86;ARM;AArch64"
+          },
+          "target": "linux_x86_64",
+          "tools": {
+            "ar": {
+              "path": "/usr/bin/ar",
+              "sha256": "5b394f8752fde1776992d405d76034d5017b24b9b922bedaeeaff8cc344ef044"
+            },
+            "bash": {
+              "path": "/usr/bin/bash",
+              "sha256": "59474588a312b6b6e73e5a42a59bf71e62b55416b6c9d5e4a6e1c630c2a9ecd4"
+            },
+            "clang": {
+              "path": "/usr/bin/clang",
+              "sha256": "31925065812631303cf9af9a30b2f56427d2102667a87a9fb4ba03a306104589"
+            },
+            "clang++": {
+              "path": "/usr/bin/clang++",
+              "sha256": "31925065812631303cf9af9a30b2f56427d2102667a87a9fb4ba03a306104589"
+            },
+            "cmake": {
+              "path": "/usr/bin/cmake",
+              "sha256": "fd22547781b64bb2db04370970b93db1f3fada1e41e60873b015ee0747009fc0"
+            },
+            "getconf": {
+              "path": "/usr/bin/getconf",
+              "sha256": "036757cca72d3c5659e1ec5e76aeea86598053ac4b96be3572d1e6a6348c0624"
+            },
+            "git": {
+              "path": "/usr/bin/git",
+              "sha256": "587ef21868c948b883993e23209b86a72a6ddc06aab1545c697ffc31075acd4a"
+            },
+            "launcher": {
+              "path": "/usr/bin/ccache",
+              "sha256": "892c37ccf83c263cc518355911814448745d5d9f5f29e8b176a2d36b2b75d9a6"
+            },
+            "ninja": {
+              "path": "/usr/bin/ninja",
+              "sha256": "a9ddfbf7e365a2e5026ed44f9173e498e37d8b71ec5e259b2c2a684f16cfa862"
+            },
+            "nm": {
+              "path": "/usr/bin/nm",
+              "sha256": "ed6565c132d6f20019ff3f050043dc1b2b8bc2e8b3b94c1ffe3f34436431a5a4"
+            },
+            "node": {
+              "path": "/usr/local/bin/node",
+              "sha256": "34bc6627675906f8431892630b5e91fc4cc9f1e03ce15e9716025aa551e5c823"
+            },
+            "python3": {
+              "path": "/usr/bin/python3",
+              "sha256": "a2f33a6e006989270f4340528eb61f8f97366e00a5d1b602ac8672ea44fc56ae"
+            }
+          }
+        },
+        "dependencies": [
+          "runtime"
+        ],
+        "domain": "target",
+        "id": "llvm-dylib",
+        "inputOnly": true,
+        "install": [
+          {
+            "from": "",
+            "to": "third_party/llvm/lib"
+          }
+        ],
+        "producer": {
+          "adapter": "llvm-dylib",
+          "originBuildRoot": "/root/sym_cjcj_918_implement_r6065114950/target-builds",
+          "receipt": "/root/sym_cjcj_918_implement_r6066708628/keep/builds/llvm-dylib/7ed574d4ba6ff1ebeceeb339ab4795e0141e4a60/703fb4db3a86be6e6995352f9826b27de8ac23a90b08da9ed56564ed6e57704c",
+          "receiptSha256": "4e5444669312cd4d146849c06b80acf2c6b9d32aa1b4bee3c7900544e0c3f039",
+          "repository": "/root/sym_cjcj_918_implement_r6065114950/cjcj",
+          "version": "8ab3685a8b7f771d34ad23d4c89d6c79f180f614"
+        },
+        "roles": [
+          "llvm-dylib"
+        ],
+        "source": {
+          "commit": "7ed574d4ba6ff1ebeceeb339ab4795e0141e4a60",
+          "kind": "git",
+          "repo": "/root/sym_cjcj_918_implement_r6065114950/sources/llvm",
+          "tree": "04e9f2f2155942af65770e48a3e864cc2cb4b2b6"
+        }
+      },
+      {
+        "config": {
+          "host": "linux_x86_64",
+          "options": {
+            "auxiliaryOnly": true,
+            "launcher": "/usr/bin/ccache",
+            "runtimeDependency": "runtime",
+            "targets": "X86;ARM;AArch64"
+          },
+          "target": "linux_x86_64",
+          "tools": {
+            "ar": {
+              "path": "/usr/bin/ar",
+              "sha256": "5b394f8752fde1776992d405d76034d5017b24b9b922bedaeeaff8cc344ef044"
+            },
+            "bash": {
+              "path": "/usr/bin/bash",
+              "sha256": "59474588a312b6b6e73e5a42a59bf71e62b55416b6c9d5e4a6e1c630c2a9ecd4"
+            },
+            "clang": {
+              "path": "/usr/bin/clang",
+              "sha256": "31925065812631303cf9af9a30b2f56427d2102667a87a9fb4ba03a306104589"
+            },
+            "clang++": {
+              "path": "/usr/bin/clang++",
+              "sha256": "31925065812631303cf9af9a30b2f56427d2102667a87a9fb4ba03a306104589"
+            },
+            "cmake": {
+              "path": "/usr/bin/cmake",
+              "sha256": "fd22547781b64bb2db04370970b93db1f3fada1e41e60873b015ee0747009fc0"
+            },
+            "getconf": {
+              "path": "/usr/bin/getconf",
+              "sha256": "036757cca72d3c5659e1ec5e76aeea86598053ac4b96be3572d1e6a6348c0624"
+            },
+            "git": {
+              "path": "/usr/bin/git",
+              "sha256": "587ef21868c948b883993e23209b86a72a6ddc06aab1545c697ffc31075acd4a"
+            },
+            "launcher": {
+              "path": "/usr/bin/ccache",
+              "sha256": "892c37ccf83c263cc518355911814448745d5d9f5f29e8b176a2d36b2b75d9a6"
+            },
+            "ninja": {
+              "path": "/usr/bin/ninja",
+              "sha256": "a9ddfbf7e365a2e5026ed44f9173e498e37d8b71ec5e259b2c2a684f16cfa862"
+            },
+            "nm": {
+              "path": "/usr/bin/nm",
+              "sha256": "ed6565c132d6f20019ff3f050043dc1b2b8bc2e8b3b94c1ffe3f34436431a5a4"
+            },
+            "node": {
+              "path": "/usr/local/bin/node",
+              "sha256": "34bc6627675906f8431892630b5e91fc4cc9f1e03ce15e9716025aa551e5c823"
+            },
+            "python3": {
+              "path": "/usr/bin/python3",
+              "sha256": "a2f33a6e006989270f4340528eb61f8f97366e00a5d1b602ac8672ea44fc56ae"
+            }
+          }
+        },
+        "dependencies": [
+          "runtime"
+        ],
+        "domain": "target",
+        "id": "llvm-auxiliary",
+        "inputOnly": true,
+        "install": [
+          {
+            "from": "bin",
+            "to": "third_party/llvm/bin"
+          },
+          {
+            "from": "auxiliary-producer.json",
+            "to": "third_party/llvm/auxiliary-producer.json"
+          }
+        ],
+        "producer": {
+          "adapter": "llvm-tools",
+          "originBuildRoot": "/root/sym_cjcj_918_implement_r6065114950/target-builds",
+          "receipt": "/root/sym_cjcj_918_implement_r6066708628/keep/builds/llvm-auxiliary/7ed574d4ba6ff1ebeceeb339ab4795e0141e4a60/ea74faf18ca6157e1f52f71f012a505713d0d04e6a50bc33414951f0b67f2f6f",
+          "receiptSha256": "f3bc4dfb80b64c2fb55000d4000b90a141e28638c6f32c9a4cb1492e34490ff7",
+          "repository": "/root/sym_cjcj_918_implement_r6065114950/auxiliary-producer",
+          "version": "0f93d3e0f1a9dcf7e2f23a91804a2403bee32039"
+        },
+        "roles": [
+          "llvm-tools"
+        ],
+        "source": {
+          "commit": "7ed574d4ba6ff1ebeceeb339ab4795e0141e4a60",
+          "kind": "git",
+          "repo": "/root/sym_cjcj_918_implement_r6065114950/sources/llvm",
+          "tree": "04e9f2f2155942af65770e48a3e864cc2cb4b2b6"
+        }
+      },
+      {
+        "config": {
+          "host": "linux_x86_64",
+          "options": {
+            "heap": "48GB",
+            "inputBindings": {
+              "llvm-shim.o": {
+                "artifact": "fixed-llc/cjselfhost_llvmshim.o",
+                "dependency": "llvm-tools"
+              }
+            },
+            "jobs": 192,
+            "optimization": "O1",
+            "outputs": [
+              "cjcj-stage1"
+            ],
+            "parameters": {
+              "compile_flags": ""
+            },
+            "sdkDependency": "official"
+          },
+          "target": "linux_x86_64",
+          "tools": {
+            "ar": {
+              "path": "/usr/bin/ar",
+              "sha256": "5b394f8752fde1776992d405d76034d5017b24b9b922bedaeeaff8cc344ef044"
+            },
+            "bash": {
+              "path": "/usr/bin/bash",
+              "sha256": "59474588a312b6b6e73e5a42a59bf71e62b55416b6c9d5e4a6e1c630c2a9ecd4"
+            },
+            "builder": {
+              "path": "/root/sym_cjcj_918_implement_r6065114950/tools-compiler/ts/src/sharedbuild/cjcj-stage1.mjs",
+              "sha256": "f3a22c095c6b992363a78f584c41aa8ad87b38e0eae607e75200609b92a993f2"
+            },
+            "cc": {
+              "path": "/usr/bin/cc",
+              "sha256": "821af3c74506283c179ca413bb33e6b528805a4dd8a5c09df125e5ad560a9e89"
+            },
+            "ccache": {
+              "path": "/usr/bin/ccache",
+              "sha256": "892c37ccf83c263cc518355911814448745d5d9f5f29e8b176a2d36b2b75d9a6"
+            },
+            "clang": {
+              "path": "/usr/bin/clang",
+              "sha256": "31925065812631303cf9af9a30b2f56427d2102667a87a9fb4ba03a306104589"
+            },
+            "clang++": {
+              "path": "/usr/bin/clang++",
+              "sha256": "31925065812631303cf9af9a30b2f56427d2102667a87a9fb4ba03a306104589"
+            },
+            "cmake": {
+              "path": "/usr/bin/cmake",
+              "sha256": "fd22547781b64bb2db04370970b93db1f3fada1e41e60873b015ee0747009fc0"
+            },
+            "compilerIdentity": {
+              "path": "/root/sym_cjcj_918_implement_r6065114950/cjcj/ci/bootstrap/compiler_identity.py",
+              "sha256": "2ae130ef7aa4e5128dfba9f3e5fc4db3cb3683abf0da02474fef612e1619ce2d"
+            },
+            "find": {
+              "path": "/usr/bin/find",
+              "sha256": "791b89c8bffb8101fd7d4d212b80af66a2332834b05a42721104eb47e8fa2eb1"
+            },
+            "getconf": {
+              "path": "/usr/bin/getconf",
+              "sha256": "036757cca72d3c5659e1ec5e76aeea86598053ac4b96be3572d1e6a6348c0624"
+            },
+            "git": {
+              "path": "/usr/bin/git",
+              "sha256": "587ef21868c948b883993e23209b86a72a6ddc06aab1545c697ffc31075acd4a"
+            },
+            "ninja": {
+              "path": "/usr/bin/ninja",
+              "sha256": "a9ddfbf7e365a2e5026ed44f9173e498e37d8b71ec5e259b2c2a684f16cfa862"
+            },
+            "node": {
+              "path": "/usr/local/bin/node",
+              "sha256": "34bc6627675906f8431892630b5e91fc4cc9f1e03ce15e9716025aa551e5c823"
+            },
+            "python3": {
+              "path": "/usr/bin/python3",
+              "sha256": "a2f33a6e006989270f4340528eb61f8f97366e00a5d1b602ac8672ea44fc56ae"
+            },
+            "tar": {
+              "path": "/usr/bin/tar",
+              "sha256": "fd0d62eed19efd3e115aa1be44160f89d777cd1e6d6d8eb0ce7c8bdc879f59e2"
+            }
+          }
+        },
+        "dependencies": [
+          "official",
+          "llvm-tools"
+        ],
+        "domain": "target",
+        "id": "compiler",
+        "install": [
+          {
+            "from": "bin",
+            "to": "bin"
+          },
+          {
+            "from": "compiler-lineage.json",
+            "to": "compiler-lineage.json"
+          }
+        ],
+        "producer": {
+          "adapter": "sharedbuild-stage1",
+          "engine": "/root/sym_cjcj_918_implement_r6065114950/tools-compiler/ts/src/sharedbuild/main.py",
+          "engineSha256": "2be9b4053cb2de624ecf31685760159e38ea573e1e76eaea13faa9429430cac2",
+          "originBuildRoot": "/root/sym_cjcj_918_implement_r6065114950/target-builds",
+          "receipt": "/root/sym_cjcj_918_implement_r6066708628/keep/builds/compiler/8ab3685a8b7f771d34ad23d4c89d6c79f180f614/951efcf30daad546d05d003b3167a5650ce0a348bf3537397fc4ef0d3ed5da09",
+          "receiptSha256": "69ef76b29ec13c8d3e57a7fe6dde570fe4fb40b9330720dba6c2066627ce7a66",
+          "recipe": "/root/sym_cjcj_918_implement_r6065114950/inputs/compiler.request.json",
+          "repository": "/root/sym_cjcj_918_implement_r6065114950/tools-compiler",
+          "version": "7bab956b9be4f5051ad03ab28ddf5939822ff50e"
+        },
+        "roles": [
+          "compiler"
+        ],
+        "source": {
+          "commit": "8ab3685a8b7f771d34ad23d4c89d6c79f180f614",
+          "kind": "git",
+          "repo": "/root/sym_cjcj_918_implement_r6065114950/cjcj",
+          "tree": "03d293dced0b4c1c6dcc367f741c76d2ac6c1ace"
+        }
+      },
+      {
+        "config": {
+          "host": "linux_x86_64",
+          "options": {
+            "flatbuffersSource": {
+              "commit": "c3e4d69cbd5950e43f775ba76eadb30750d6e0b7",
+              "repo": "/root/sym_cjcj_918_implement_r6065114950/sources/flatbuffers",
+              "tree": "4a76afadb32db8f41426c9f3f3138dcca456e707"
+            },
+            "flatbuffersTransform": "cangjie-package-mapping-v1",
+            "launcher": "/usr/bin/ccache",
+            "sdkDependency": "official"
+          },
+          "target": "linux_x86_64",
+          "tools": {
+            "ar": {
+              "path": "/usr/bin/ar",
+              "sha256": "5b394f8752fde1776992d405d76034d5017b24b9b922bedaeeaff8cc344ef044"
+            },
+            "bash": {
+              "path": "/usr/bin/bash",
+              "sha256": "59474588a312b6b6e73e5a42a59bf71e62b55416b6c9d5e4a6e1c630c2a9ecd4"
+            },
+            "clang": {
+              "path": "/usr/bin/clang",
+              "sha256": "31925065812631303cf9af9a30b2f56427d2102667a87a9fb4ba03a306104589"
+            },
+            "clang++": {
+              "path": "/usr/bin/clang++",
+              "sha256": "31925065812631303cf9af9a30b2f56427d2102667a87a9fb4ba03a306104589"
+            },
+            "cmake": {
+              "path": "/usr/bin/cmake",
+              "sha256": "fd22547781b64bb2db04370970b93db1f3fada1e41e60873b015ee0747009fc0"
+            },
+            "getconf": {
+              "path": "/usr/bin/getconf",
+              "sha256": "036757cca72d3c5659e1ec5e76aeea86598053ac4b96be3572d1e6a6348c0624"
+            },
+            "git": {
+              "path": "/usr/bin/git",
+              "sha256": "587ef21868c948b883993e23209b86a72a6ddc06aab1545c697ffc31075acd4a"
+            },
+            "launcher": {
+              "path": "/usr/bin/ccache",
+              "sha256": "892c37ccf83c263cc518355911814448745d5d9f5f29e8b176a2d36b2b75d9a6"
+            },
+            "ninja": {
+              "path": "/usr/bin/ninja",
+              "sha256": "a9ddfbf7e365a2e5026ed44f9173e498e37d8b71ec5e259b2c2a684f16cfa862"
+            },
+            "nm": {
+              "path": "/usr/bin/nm",
+              "sha256": "ed6565c132d6f20019ff3f050043dc1b2b8bc2e8b3b94c1ffe3f34436431a5a4"
+            },
+            "node": {
+              "path": "/usr/local/bin/node",
+              "sha256": "34bc6627675906f8431892630b5e91fc4cc9f1e03ce15e9716025aa551e5c823"
+            },
+            "python3": {
+              "path": "/usr/bin/python3",
+              "sha256": "a2f33a6e006989270f4340528eb61f8f97366e00a5d1b602ac8672ea44fc56ae"
+            }
+          }
+        },
+        "dependencies": [
+          "official"
+        ],
+        "domain": "target",
+        "id": "ast",
+        "install": [
+          {
+            "from": "libcangjie-ast-support.a",
+            "to": "lib/linux_x86_64_cjnative/libcangjie-ast-support.a"
+          },
+          {
+            "from": "include",
+            "to": "include"
+          },
+          {
+            "from": "schema",
+            "to": "schema"
+          }
+        ],
+        "producer": {
+          "adapter": "ast-support",
+          "originBuildRoot": "/root/sym_cjcj_918_implement_r6065114950/target-builds",
+          "receipt": "/root/sym_cjcj_918_implement_r6066708628/keep/builds/ast/174db8f40d5efddee63c47a3162bbf676bc227a0/342a1bf4bf3be113feea2735c934dc9e333c89b6202657690f65fe62dbf5afcc",
+          "receiptSha256": "71d451e48cc500b303479b27a9c588113fd2aaeba3cb9be1633cdcd4cc034a23",
+          "repository": "/root/sym_cjcj_918_implement_r6065114950/entry",
+          "version": "3421cbb7fb5fa5160310b9a34647e492773d0003"
+        },
+        "roles": [
+          "ast"
+        ],
+        "source": {
+          "commit": "174db8f40d5efddee63c47a3162bbf676bc227a0",
+          "kind": "git",
+          "repo": "/root/sym_cjcj_918_implement_r6065114950/sources/compiler",
+          "tree": "6f25a2072a9d8eeef8d32d050293e58690434920"
+        }
+      },
+      {
+        "config": {
+          "host": "linux_x86_64",
+          "options": {
+            "astDependency": "ast",
+            "compilerDependency": "compiler",
+            "heap": "48GB",
+            "launcher": "/usr/bin/ccache",
+            "llvmAuxiliaryDependency": "llvm-auxiliary",
+            "llvmDylibDependency": "llvm-dylib",
+            "llvmToolsDependency": "llvm-tools",
+            "runtimeDependency": "runtime",
+            "sdkDependency": "official",
+            "targetLibRelative": "install"
+          },
+          "target": "linux_x86_64",
+          "tools": {
+            "ar": {
+              "path": "/usr/bin/ar",
+              "sha256": "5b394f8752fde1776992d405d76034d5017b24b9b922bedaeeaff8cc344ef044"
+            },
+            "bash": {
+              "path": "/usr/bin/bash",
+              "sha256": "59474588a312b6b6e73e5a42a59bf71e62b55416b6c9d5e4a6e1c630c2a9ecd4"
+            },
+            "clang": {
+              "path": "/usr/bin/clang",
+              "sha256": "31925065812631303cf9af9a30b2f56427d2102667a87a9fb4ba03a306104589"
+            },
+            "clang++": {
+              "path": "/usr/bin/clang++",
+              "sha256": "31925065812631303cf9af9a30b2f56427d2102667a87a9fb4ba03a306104589"
+            },
+            "cmake": {
+              "path": "/usr/bin/cmake",
+              "sha256": "fd22547781b64bb2db04370970b93db1f3fada1e41e60873b015ee0747009fc0"
+            },
+            "getconf": {
+              "path": "/usr/bin/getconf",
+              "sha256": "036757cca72d3c5659e1ec5e76aeea86598053ac4b96be3572d1e6a6348c0624"
+            },
+            "git": {
+              "path": "/usr/bin/git",
+              "sha256": "587ef21868c948b883993e23209b86a72a6ddc06aab1545c697ffc31075acd4a"
+            },
+            "launcher": {
+              "path": "/usr/bin/ccache",
+              "sha256": "892c37ccf83c263cc518355911814448745d5d9f5f29e8b176a2d36b2b75d9a6"
+            },
+            "ninja": {
+              "path": "/usr/bin/ninja",
+              "sha256": "a9ddfbf7e365a2e5026ed44f9173e498e37d8b71ec5e259b2c2a684f16cfa862"
+            },
+            "nm": {
+              "path": "/usr/bin/nm",
+              "sha256": "ed6565c132d6f20019ff3f050043dc1b2b8bc2e8b3b94c1ffe3f34436431a5a4"
+            },
+            "node": {
+              "path": "/usr/local/bin/node",
+              "sha256": "34bc6627675906f8431892630b5e91fc4cc9f1e03ce15e9716025aa551e5c823"
+            },
+            "python3": {
+              "path": "/usr/bin/python3",
+              "sha256": "a2f33a6e006989270f4340528eb61f8f97366e00a5d1b602ac8672ea44fc56ae"
+            }
+          }
+        },
+        "dependencies": [
+          "official",
+          "compiler",
+          "runtime",
+          "llvm-tools",
+          "llvm-dylib",
+          "ast",
+          "llvm-auxiliary"
+        ],
+        "domain": "target",
+        "id": "std",
+        "install": [
+          {
+            "exclude": [
+              "lib/linux_x86_64_cjnative/libboundscheck.so",
+              "third_party"
+            ],
+            "from": "",
+            "to": ""
+          }
+        ],
+        "producer": {
+          "adapter": "bootstrap-std",
+          "originBuildRoot": "/root/sym_cjcj_918_implement_r6065114950/target-builds",
+          "receipt": "/root/sym_cjcj_918_implement_r6066708628/keep/builds/std/9733dfc09d29eca27d19cc3937a149838b4e3322/c976de69cac903a385e954b2d7b62056bf3b55c4c4af70a460af0cc22b5fe009",
+          "receiptSha256": "cb0834de0ff56f381fbbf382227ba5eaa1ad9a77aa8ee6492d0ca6d9f19c1cee",
+          "repository": "/root/sym_cjcj_918_implement_r6065114950/std-shape-producer",
+          "version": "cf91603908f2b5c67dca6b01a2b3d1f7bcf5ff9f"
+        },
+        "roles": [
+          "std"
+        ],
+        "source": {
+          "commit": "9733dfc09d29eca27d19cc3937a149838b4e3322",
+          "kind": "git",
+          "repo": "/root/sym_cjcj_918_implement_r6065114950/sources/runtime",
+          "tree": "e44cf3b4791b5a0f91df78251b6805f5c68e5963"
+        }
+      },
+      {
+        "config": {
+          "host": "linux_x86_64",
+          "options": {
+            "bitcodeReadersOnly": true,
+            "launcher": "/usr/bin/ccache",
+            "runtimeDependency": "runtime",
+            "targets": "X86;ARM;AArch64"
+          },
+          "target": "linux_x86_64",
+          "tools": {
+            "ar": {
+              "path": "/usr/bin/ar",
+              "sha256": "5b394f8752fde1776992d405d76034d5017b24b9b922bedaeeaff8cc344ef044"
+            },
+            "bash": {
+              "path": "/usr/bin/bash",
+              "sha256": "59474588a312b6b6e73e5a42a59bf71e62b55416b6c9d5e4a6e1c630c2a9ecd4"
+            },
+            "clang": {
+              "path": "/usr/bin/clang",
+              "sha256": "31925065812631303cf9af9a30b2f56427d2102667a87a9fb4ba03a306104589"
+            },
+            "clang++": {
+              "path": "/usr/bin/clang++",
+              "sha256": "31925065812631303cf9af9a30b2f56427d2102667a87a9fb4ba03a306104589"
+            },
+            "cmake": {
+              "path": "/usr/bin/cmake",
+              "sha256": "fd22547781b64bb2db04370970b93db1f3fada1e41e60873b015ee0747009fc0"
+            },
+            "getconf": {
+              "path": "/usr/bin/getconf",
+              "sha256": "036757cca72d3c5659e1ec5e76aeea86598053ac4b96be3572d1e6a6348c0624"
+            },
+            "git": {
+              "path": "/usr/bin/git",
+              "sha256": "587ef21868c948b883993e23209b86a72a6ddc06aab1545c697ffc31075acd4a"
+            },
+            "launcher": {
+              "path": "/usr/bin/ccache",
+              "sha256": "892c37ccf83c263cc518355911814448745d5d9f5f29e8b176a2d36b2b75d9a6"
+            },
+            "ninja": {
+              "path": "/usr/bin/ninja",
+              "sha256": "a9ddfbf7e365a2e5026ed44f9173e498e37d8b71ec5e259b2c2a684f16cfa862"
+            },
+            "nm": {
+              "path": "/usr/bin/nm",
+              "sha256": "ed6565c132d6f20019ff3f050043dc1b2b8bc2e8b3b94c1ffe3f34436431a5a4"
+            },
+            "node": {
+              "path": "/usr/local/bin/node",
+              "sha256": "34bc6627675906f8431892630b5e91fc4cc9f1e03ce15e9716025aa551e5c823"
+            },
+            "python3": {
+              "path": "/usr/bin/python3",
+              "sha256": "a2f33a6e006989270f4340528eb61f8f97366e00a5d1b602ac8672ea44fc56ae"
+            }
+          }
+        },
+        "dependencies": [
+          "runtime"
+        ],
+        "domain": "target",
+        "id": "llvm-readers",
+        "inputOnly": true,
+        "install": [
+          {
+            "from": "bin",
+            "to": "third_party/llvm/bin"
+          },
+          {
+            "from": "bitcode-readers.json",
+            "to": "third_party/llvm/bitcode-readers.json"
+          }
+        ],
+        "producer": {
+          "adapter": "llvm-tools",
+          "originBuildRoot": "/root/sym_cjcj_918_implement_r6073770708/reader-builds",
+          "receipt": "/root/sym_cjcj_918_implement_r6073770708/keep/reader-builds/llvm-readers/7ed574d4ba6ff1ebeceeb339ab4795e0141e4a60/2cd63f63f92b3188a108caaf997d555f548412869c9145610bdd65798ce690ef",
+          "receiptSha256": "65ab46a3c2d54dc52d0805cb8ddf1cf3e0a979d9651e763dbe19a4f65db953cf",
+          "repository": "/root/sym_cjcj_918_implement_r6073770708/cjcj",
+          "version": "4132c0d51100e2662df1eacd9304c3b3df156bdf"
+        },
+        "roles": [
+          "llvm-tools"
+        ],
+        "source": {
+          "commit": "7ed574d4ba6ff1ebeceeb339ab4795e0141e4a60",
+          "kind": "git",
+          "repo": "/root/sym_cjcj_918_implement_r6065114950/sources/llvm",
+          "tree": "04e9f2f2155942af65770e48a3e864cc2cb4b2b6"
+        }
+      },
+      {
+        "config": {
+          "host": "linux_x86_64",
+          "options": {},
+          "target": "linux_x86_64",
+          "tools": {
+            "git": {
+              "path": "/usr/bin/git",
+              "sha256": "587ef21868c948b883993e23209b86a72a6ddc06aab1545c697ffc31075acd4a"
+            },
+            "node": {
+              "path": "/usr/local/bin/node",
+              "sha256": "34bc6627675906f8431892630b5e91fc4cc9f1e03ce15e9716025aa551e5c823"
+            }
+          }
+        },
+        "dependencies": [],
+        "domain": "target",
+        "id": "compiler-schema",
+        "install": [
+          {
+            "from": "schema/StdxChirFormat.fbs",
+            "to": "schema/StdxChirFormat.fbs"
+          },
+          {
+            "from": "schema-producer.json",
+            "to": "schema-producer.json"
+          }
+        ],
+        "producer": {
+          "adapter": "compiler-schema",
+          "originBuildRoot": "/root/sym_cjcj_918_implement_r6074725041/builds",
+          "receipt": "/root/sym_cjcj_918_implement_r6074725041/keep/builds/compiler-schema/174db8f40d5efddee63c47a3162bbf676bc227a0/dafc7bdf758fff54646586b62040a99ecfa223aedb740a1cf5c2b8c2ff967713",
+          "receiptSha256": "8cf83fb39ed42d7bc23d0422e4b6aaab1d3285572b803d9614dfdfb73be25218",
+          "repository": "/root/sym_cjcj_918_implement_r6074725041/cjcj",
+          "version": "090b9aa5cfdb73c26bd528bf621fdec97383b787"
+        },
+        "roles": [
+          "ast"
+        ],
+        "source": {
+          "commit": "174db8f40d5efddee63c47a3162bbf676bc227a0",
+          "kind": "git",
+          "repo": "/root/sym_cjcj_918_implement_r6074725041/compiler-source",
+          "tree": "6f25a2072a9d8eeef8d32d050293e58690434920"
+        }
+      },
+      {
+        "config": {
+          "host": "linux_x86_64",
+          "options": {
+            "launcher": "/usr/bin/ccache",
+            "releaseToolsOnly": true,
+            "runtimeDependency": "runtime",
+            "targets": "X86;ARM;AArch64"
+          },
+          "target": "linux_x86_64",
+          "tools": {
+            "ar": {
+              "path": "/usr/bin/ar",
+              "sha256": "5b394f8752fde1776992d405d76034d5017b24b9b922bedaeeaff8cc344ef044"
+            },
+            "bash": {
+              "path": "/usr/bin/bash",
+              "sha256": "59474588a312b6b6e73e5a42a59bf71e62b55416b6c9d5e4a6e1c630c2a9ecd4"
+            },
+            "clang": {
+              "path": "/usr/bin/clang",
+              "sha256": "31925065812631303cf9af9a30b2f56427d2102667a87a9fb4ba03a306104589"
+            },
+            "clang++": {
+              "path": "/usr/bin/clang++",
+              "sha256": "31925065812631303cf9af9a30b2f56427d2102667a87a9fb4ba03a306104589"
+            },
+            "cmake": {
+              "path": "/usr/bin/cmake",
+              "sha256": "fd22547781b64bb2db04370970b93db1f3fada1e41e60873b015ee0747009fc0"
+            },
+            "getconf": {
+              "path": "/usr/bin/getconf",
+              "sha256": "036757cca72d3c5659e1ec5e76aeea86598053ac4b96be3572d1e6a6348c0624"
+            },
+            "git": {
+              "path": "/usr/bin/git",
+              "sha256": "587ef21868c948b883993e23209b86a72a6ddc06aab1545c697ffc31075acd4a"
+            },
+            "launcher": {
+              "path": "/usr/bin/ccache",
+              "sha256": "892c37ccf83c263cc518355911814448745d5d9f5f29e8b176a2d36b2b75d9a6"
+            },
+            "ninja": {
+              "path": "/usr/bin/ninja",
+              "sha256": "a9ddfbf7e365a2e5026ed44f9173e498e37d8b71ec5e259b2c2a684f16cfa862"
+            },
+            "nm": {
+              "path": "/usr/bin/nm",
+              "sha256": "ed6565c132d6f20019ff3f050043dc1b2b8bc2e8b3b94c1ffe3f34436431a5a4"
+            },
+            "node": {
+              "path": "/usr/local/bin/node",
+              "sha256": "34bc6627675906f8431892630b5e91fc4cc9f1e03ce15e9716025aa551e5c823"
+            },
+            "python3": {
+              "path": "/usr/bin/python3",
+              "sha256": "a2f33a6e006989270f4340528eb61f8f97366e00a5d1b602ac8672ea44fc56ae"
+            }
+          }
+        },
+        "dependencies": [
+          "runtime"
+        ],
+        "domain": "target",
+        "id": "llvm-release-tools",
+        "inputOnly": true,
+        "install": [
+          {
+            "from": "bin/lld",
+            "to": "third_party/llvm/bin/lld"
+          },
+          {
+            "from": "bin/ld64.lld",
+            "to": "third_party/llvm/bin/ld64.lld"
+          },
+          {
+            "from": "bin/lld-link",
+            "to": "third_party/llvm/bin/lld-link"
+          },
+          {
+            "from": "bin/lli",
+            "to": "third_party/llvm/bin/lli"
+          },
+          {
+            "from": "bin/llvm-link",
+            "to": "third_party/llvm/bin/llvm-link"
+          },
+          {
+            "from": "bin/llvm-lto",
+            "to": "third_party/llvm/bin/llvm-lto"
+          },
+          {
+            "from": "bin/llvm-lto2",
+            "to": "third_party/llvm/bin/llvm-lto2"
+          },
+          {
+            "from": "bin/llvm-cov",
+            "to": "third_party/llvm/bin/llvm-cov"
+          },
+          {
+            "from": "bin/llvm-profdata",
+            "to": "third_party/llvm/bin/llvm-profdata"
+          },
+          {
+            "from": "bin/llvm-profgen",
+            "to": "third_party/llvm/bin/llvm-profgen"
+          },
+          {
+            "from": "bin/llvm-symbolizer",
+            "to": "third_party/llvm/bin/llvm-symbolizer"
+          },
+          {
+            "from": "bin/llvm-objdump",
+            "to": "third_party/llvm/bin/llvm-objdump"
+          },
+          {
+            "from": "bin/llvm-addr2line",
+            "to": "third_party/llvm/bin/llvm-addr2line"
+          },
+          {
+            "from": "bin/llvm-otool",
+            "to": "third_party/llvm/bin/llvm-otool"
+          },
+          {
+            "from": "release-tools.json",
+            "to": "third_party/llvm/release-tools.json"
+          }
+        ],
+        "producer": {
+          "adapter": "llvm-tools",
+          "originBuildRoot": "/root/sym_cjcj_918_implement_r6074725041/builds",
+          "receipt": "/root/sym_cjcj_918_implement_r6074725041/keep/builds/llvm-release-tools/7ed574d4ba6ff1ebeceeb339ab4795e0141e4a60/e759cc25fd89fee10bd5873f60686e6789ac3d3a79408243d058c155acb80026",
+          "receiptSha256": "401a3821cca11a06c68bf377b108334c6fa5d212afd45d1138233bd1ea80e7e4",
+          "repository": "/root/sym_cjcj_918_implement_r6074725041/cjcj",
+          "version": "090b9aa5cfdb73c26bd528bf621fdec97383b787"
+        },
+        "roles": [
+          "llvm-tools"
+        ],
+        "source": {
+          "commit": "7ed574d4ba6ff1ebeceeb339ab4795e0141e4a60",
+          "kind": "git",
+          "repo": "/root/sym_cjcj_918_implement_r6073770708/llvm",
+          "tree": "04e9f2f2155942af65770e48a3e864cc2cb4b2b6"
+        }
+      },
+      {
+        "config": {
+          "host": "linux_x86_64",
+          "options": {
+            "launcher": "/usr/bin/ccache",
+            "releaseLibrariesOnly": true,
+            "runtimeDependency": "runtime",
+            "targets": "X86;ARM;AArch64"
+          },
+          "target": "linux_x86_64",
+          "tools": {
+            "ar": {
+              "path": "/usr/bin/ar",
+              "sha256": "5b394f8752fde1776992d405d76034d5017b24b9b922bedaeeaff8cc344ef044"
+            },
+            "bash": {
+              "path": "/usr/bin/bash",
+              "sha256": "59474588a312b6b6e73e5a42a59bf71e62b55416b6c9d5e4a6e1c630c2a9ecd4"
+            },
+            "clang": {
+              "path": "/usr/bin/clang",
+              "sha256": "31925065812631303cf9af9a30b2f56427d2102667a87a9fb4ba03a306104589"
+            },
+            "clang++": {
+              "path": "/usr/bin/clang++",
+              "sha256": "31925065812631303cf9af9a30b2f56427d2102667a87a9fb4ba03a306104589"
+            },
+            "cmake": {
+              "path": "/usr/bin/cmake",
+              "sha256": "fd22547781b64bb2db04370970b93db1f3fada1e41e60873b015ee0747009fc0"
+            },
+            "getconf": {
+              "path": "/usr/bin/getconf",
+              "sha256": "036757cca72d3c5659e1ec5e76aeea86598053ac4b96be3572d1e6a6348c0624"
+            },
+            "git": {
+              "path": "/usr/bin/git",
+              "sha256": "587ef21868c948b883993e23209b86a72a6ddc06aab1545c697ffc31075acd4a"
+            },
+            "launcher": {
+              "path": "/usr/bin/ccache",
+              "sha256": "892c37ccf83c263cc518355911814448745d5d9f5f29e8b176a2d36b2b75d9a6"
+            },
+            "ninja": {
+              "path": "/usr/bin/ninja",
+              "sha256": "a9ddfbf7e365a2e5026ed44f9173e498e37d8b71ec5e259b2c2a684f16cfa862"
+            },
+            "nm": {
+              "path": "/usr/bin/nm",
+              "sha256": "ed6565c132d6f20019ff3f050043dc1b2b8bc2e8b3b94c1ffe3f34436431a5a4"
+            },
+            "node": {
+              "path": "/usr/local/bin/node",
+              "sha256": "34bc6627675906f8431892630b5e91fc4cc9f1e03ce15e9716025aa551e5c823"
+            },
+            "python3": {
+              "path": "/usr/bin/python3",
+              "sha256": "a2f33a6e006989270f4340528eb61f8f97366e00a5d1b602ac8672ea44fc56ae"
+            }
+          }
+        },
+        "dependencies": [
+          "runtime"
+        ],
+        "domain": "target",
+        "id": "llvm-release-libraries",
+        "inputOnly": true,
+        "install": [
+          {
+            "from": "lib",
+            "to": "third_party/llvm/lib"
+          },
+          {
+            "from": "release-libraries.json",
+            "to": "third_party/llvm/release-libraries.json"
+          }
+        ],
+        "producer": {
+          "adapter": "llvm-tools",
+          "originBuildRoot": "/root/sym_cjcj_918_implement_r6074725041/builds",
+          "receipt": "/root/sym_cjcj_918_implement_r6074725041/keep/builds/llvm-release-libraries/7ed574d4ba6ff1ebeceeb339ab4795e0141e4a60/14c8d3c01b2d8a50bc0dcfe8153683435eec325cc2bb39c4a8bc6ee3a781e45e",
+          "receiptSha256": "70de01b051c051a37d9ded6a9c4747853bbb1ea85ee304a3901b47ca6fb39298",
+          "repository": "/root/sym_cjcj_918_implement_r6074725041/cjcj",
+          "version": "313e62b88795194ac9e551d04528b45a02b67c62"
+        },
+        "roles": [
+          "llvm-tools"
+        ],
+        "source": {
+          "commit": "7ed574d4ba6ff1ebeceeb339ab4795e0141e4a60",
+          "kind": "git",
+          "repo": "/root/sym_cjcj_918_implement_r6073770708/llvm",
+          "tree": "04e9f2f2155942af65770e48a3e864cc2cb4b2b6"
+        }
+      },
+      {
+        "config": {
+          "host": "linux_x86_64",
+          "options": {
+            "auxiliaryDependency": "llvm-auxiliary",
+            "compilerSource": {
+              "commit": "7b41219eb5d0003d949cabbf9b076d21e03faa03",
+              "repo": "/root/sym_cjcj_918_implement_r6065114950/sources/llvm-schema",
+              "tree": "0ef0bb733294225220a2ba12d04a996871b3c9f1"
+            },
+            "dylibDependency": "llvm-dylib",
+            "flatbuffersSource": {
+              "commit": "c3e4d69cbd5950e43f775ba76eadb30750d6e0b7",
+              "repo": "/root/sym_cjcj_918_implement_r6065114950/sources/flatbuffers",
+              "tree": "4a76afadb32db8f41426c9f3f3138dcca456e707"
+            },
+            "librariesDependency": "llvm-release-libraries",
+            "readersDependency": "llvm-readers",
+            "releaseDependency": "llvm-release-tools",
+            "toolsDependency": "llvm-tools"
+          },
+          "target": "linux_x86_64",
+          "tools": {
+            "git": {
+              "path": "/usr/bin/git",
+              "sha256": "587ef21868c948b883993e23209b86a72a6ddc06aab1545c697ffc31075acd4a"
+            },
+            "node": {
+              "path": "/usr/local/bin/node",
+              "sha256": "34bc6627675906f8431892630b5e91fc4cc9f1e03ce15e9716025aa551e5c823"
+            }
+          }
+        },
+        "dependencies": [
+          "llvm-tools",
+          "llvm-dylib",
+          "llvm-auxiliary",
+          "llvm-readers",
+          "llvm-release-tools",
+          "llvm-release-libraries"
+        ],
+        "domain": "target",
+        "id": "llvm-release-layout",
+        "install": [
+          {
+            "from": "",
+            "to": "third_party/llvm"
+          }
+        ],
+        "producer": {
+          "adapter": "llvm-release-layout",
+          "originBuildRoot": "/root/sym_cjcj_918_implement_r6074725041/builds",
+          "receipt": "/root/sym_cjcj_918_implement_r6074725041/keep/builds/llvm-release-layout/7ed574d4ba6ff1ebeceeb339ab4795e0141e4a60/1120f65f00e406340afd055b4acbc54fba7d8e717c622712b5e724bb1189eacf",
+          "receiptSha256": "63208ea08fb8c45e4789ef549d2de5058c1af1c614820d662778f65ac2745362",
+          "repository": "/root/sym_cjcj_918_implement_r6074725041/cjcj",
+          "version": "313e62b88795194ac9e551d04528b45a02b67c62"
+        },
+        "roles": [
+          "llvm-tools",
+          "llvm-dylib"
+        ],
+        "source": {
+          "commit": "7ed574d4ba6ff1ebeceeb339ab4795e0141e4a60",
+          "kind": "git",
+          "repo": "/root/sym_cjcj_918_implement_r6073770708/llvm",
+          "tree": "04e9f2f2155942af65770e48a3e864cc2cb4b2b6"
+        }
+      },
+      {
+        "config": {
+          "host": "linux_x86_64",
+          "options": {
+            "boundscheckSource": {
+              "commit": "2ae82839ecaaa7d031e66ccbd2076d671acfd615",
+              "repo": "/root/sym_cjcj_918_implement_r6074725041/boundscheck-source",
+              "tree": "99609d60f58d96a846104652d5f03201b20460bc"
+            },
+            "launcher": "/usr/bin/ccache"
+          },
+          "target": "linux_x86_64",
+          "tools": {
+            "ar": {
+              "path": "/usr/bin/ar",
+              "sha256": "5b394f8752fde1776992d405d76034d5017b24b9b922bedaeeaff8cc344ef044"
+            },
+            "bash": {
+              "path": "/usr/bin/bash",
+              "sha256": "59474588a312b6b6e73e5a42a59bf71e62b55416b6c9d5e4a6e1c630c2a9ecd4"
+            },
+            "clang": {
+              "path": "/usr/bin/clang",
+              "sha256": "31925065812631303cf9af9a30b2f56427d2102667a87a9fb4ba03a306104589"
+            },
+            "clang++": {
+              "path": "/usr/bin/clang++",
+              "sha256": "31925065812631303cf9af9a30b2f56427d2102667a87a9fb4ba03a306104589"
+            },
+            "cmake": {
+              "path": "/usr/bin/cmake",
+              "sha256": "fd22547781b64bb2db04370970b93db1f3fada1e41e60873b015ee0747009fc0"
+            },
+            "getconf": {
+              "path": "/usr/bin/getconf",
+              "sha256": "036757cca72d3c5659e1ec5e76aeea86598053ac4b96be3572d1e6a6348c0624"
+            },
+            "git": {
+              "path": "/usr/bin/git",
+              "sha256": "587ef21868c948b883993e23209b86a72a6ddc06aab1545c697ffc31075acd4a"
+            },
+            "launcher": {
+              "path": "/usr/bin/ccache",
+              "sha256": "892c37ccf83c263cc518355911814448745d5d9f5f29e8b176a2d36b2b75d9a6"
+            },
+            "ninja": {
+              "path": "/usr/bin/ninja",
+              "sha256": "a9ddfbf7e365a2e5026ed44f9173e498e37d8b71ec5e259b2c2a684f16cfa862"
+            },
+            "nm": {
+              "path": "/usr/bin/nm",
+              "sha256": "ed6565c132d6f20019ff3f050043dc1b2b8bc2e8b3b94c1ffe3f34436431a5a4"
+            },
+            "node": {
+              "path": "/usr/local/bin/node",
+              "sha256": "34bc6627675906f8431892630b5e91fc4cc9f1e03ce15e9716025aa551e5c823"
+            },
+            "python3": {
+              "path": "/usr/bin/python3",
+              "sha256": "a2f33a6e006989270f4340528eb61f8f97366e00a5d1b602ac8672ea44fc56ae"
+            }
+          }
+        },
+        "dependencies": [],
+        "domain": "target",
+        "id": "compiler-securec",
+        "install": [
+          {
+            "from": "libsecurec.so",
+            "to": "runtime/lib/linux_x86_64_cjnative/libsecurec.so"
+          },
+          {
+            "from": "securec-producer.json",
+            "to": "securec-producer.json"
+          }
+        ],
+        "producer": {
+          "adapter": "compiler-boundscheck",
+          "originBuildRoot": "/root/sym_cjcj_918_implement_r6074725041/builds",
+          "receipt": "/root/sym_cjcj_918_implement_r6074725041/keep/builds/compiler-securec/174db8f40d5efddee63c47a3162bbf676bc227a0/8123e896a2d3fed6dd8b5fb9dd2fe6ffb975caded044becfd52f1102fcefef7e",
+          "receiptSha256": "e683407a981136924a065a74ddf6e3b004f6ce1eed39bac23bf586da37f7af39",
+          "repository": "/root/sym_cjcj_918_implement_r6074725041/securec-product",
+          "version": "ed738c002ed89220c49bc3d109da4be9c94215dc"
+        },
+        "roles": [
+          "compiler"
+        ],
+        "source": {
+          "commit": "174db8f40d5efddee63c47a3162bbf676bc227a0",
+          "kind": "git",
+          "repo": "/root/sym_cjcj_918_implement_r6074725041/compiler-source",
+          "tree": "6f25a2072a9d8eeef8d32d050293e58690434920"
+        }
+      },
+      {
+        "config": {
+          "host": "linux_x86_64",
+          "options": {
+            "archive": {
+              "path": "/root/sym_cjcj_918_implement_r6074725041/deps/libxml2/libxml2-2.14.0.tar.xz",
+              "sha256": "3e2ed89d81d210322d70b35460166d4ea285e5bb017576972a1d76a09631985c",
+              "url": "https://download.gnome.org/sources/libxml2/2.14/libxml2-2.14.0.tar.xz",
+              "version": "2.14.0"
+            }
+          },
+          "target": "linux_x86_64",
+          "tools": {
+            "ar": {
+              "path": "/usr/bin/ar",
+              "sha256": "5b394f8752fde1776992d405d76034d5017b24b9b922bedaeeaff8cc344ef044"
+            },
+            "bash": {
+              "path": "/usr/bin/bash",
+              "sha256": "59474588a312b6b6e73e5a42a59bf71e62b55416b6c9d5e4a6e1c630c2a9ecd4"
+            },
+            "clang": {
+              "path": "/usr/bin/clang",
+              "sha256": "31925065812631303cf9af9a30b2f56427d2102667a87a9fb4ba03a306104589"
+            },
+            "clang++": {
+              "path": "/usr/bin/clang++",
+              "sha256": "31925065812631303cf9af9a30b2f56427d2102667a87a9fb4ba03a306104589"
+            },
+            "cmake": {
+              "path": "/usr/bin/cmake",
+              "sha256": "fd22547781b64bb2db04370970b93db1f3fada1e41e60873b015ee0747009fc0"
+            },
+            "getconf": {
+              "path": "/usr/bin/getconf",
+              "sha256": "036757cca72d3c5659e1ec5e76aeea86598053ac4b96be3572d1e6a6348c0624"
+            },
+            "git": {
+              "path": "/usr/bin/git",
+              "sha256": "587ef21868c948b883993e23209b86a72a6ddc06aab1545c697ffc31075acd4a"
+            },
+            "launcher": {
+              "path": "/usr/bin/ccache",
+              "sha256": "892c37ccf83c263cc518355911814448745d5d9f5f29e8b176a2d36b2b75d9a6"
+            },
+            "ninja": {
+              "path": "/usr/bin/ninja",
+              "sha256": "a9ddfbf7e365a2e5026ed44f9173e498e37d8b71ec5e259b2c2a684f16cfa862"
+            },
+            "nm": {
+              "path": "/usr/bin/nm",
+              "sha256": "ed6565c132d6f20019ff3f050043dc1b2b8bc2e8b3b94c1ffe3f34436431a5a4"
+            },
+            "node": {
+              "path": "/usr/local/bin/node",
+              "sha256": "34bc6627675906f8431892630b5e91fc4cc9f1e03ce15e9716025aa551e5c823"
+            },
+            "python3": {
+              "path": "/usr/bin/python3",
+              "sha256": "a2f33a6e006989270f4340528eb61f8f97366e00a5d1b602ac8672ea44fc56ae"
+            },
+            "tar": {
+              "path": "/usr/bin/tar",
+              "sha256": "fd0d62eed19efd3e115aa1be44160f89d777cd1e6d6d8eb0ce7c8bdc879f59e2"
+            }
+          }
+        },
+        "dependencies": [],
+        "domain": "target",
+        "id": "compiler-xml2",
+        "install": [
+          {
+            "from": "lib",
+            "to": "third_party/llvm/lib"
+          },
+          {
+            "from": "xml2-producer.json",
+            "to": "third_party/llvm/xml2-producer.json"
+          }
+        ],
+        "producer": {
+          "adapter": "compiler-xml2",
+          "originBuildRoot": "/root/sym_cjcj_918_implement_r6074725041/builds",
+          "receipt": "/root/sym_cjcj_918_implement_r6074725041/keep/builds/compiler-xml2/174db8f40d5efddee63c47a3162bbf676bc227a0/e48d4e5b821997376e0c2e062760d0dc5a50eafa01e8fc03b0da80cde9050ee5",
+          "receiptSha256": "96a2eaa799a4748b87b39f5e10ffe3b3d5b6773a0675fb7cce1e0985134076c5",
+          "repository": "/root/sym_cjcj_918_implement_r6074725041/xml-hardened-product",
+          "version": "faa6ddffeaabe492fb5b96cb0583483fec671158"
+        },
+        "roles": [
+          "compiler"
+        ],
+        "source": {
+          "commit": "174db8f40d5efddee63c47a3162bbf676bc227a0",
+          "kind": "git",
+          "repo": "/root/sym_cjcj_918_implement_r6074725041/compiler-source",
+          "tree": "6f25a2072a9d8eeef8d32d050293e58690434920"
+        }
+      },
+      {
+        "config": {
+          "host": "linux_x86_64",
+          "options": {
+            "boundscheckSource": {
+              "commit": "2ae82839ecaaa7d031e66ccbd2076d671acfd615",
+              "repo": "/root/sym_cjcj_918_implement_r6077105353/inputs/boundscheck",
+              "tree": "99609d60f58d96a846104652d5f03201b20460bc"
+            },
+            "compilerSource": {
+              "commit": "174db8f40d5efddee63c47a3162bbf676bc227a0",
+              "repo": "/root/sym_cjcj_918_implement_r6077105353/inputs/compiler",
+              "tree": "6f25a2072a9d8eeef8d32d050293e58690434920"
+            },
+            "flatbuffersSource": {
+              "commit": "c3e4d69cbd5950e43f775ba76eadb30750d6e0b7",
+              "repo": "/root/sym_cjcj_918_implement_r6077105353/inputs/flatbuffers",
+              "tree": "4a76afadb32db8f41426c9f3f3138dcca456e707"
+            },
+            "launcher": "/usr/bin/ccache",
+            "libedit": {
+              "distribution": {
+                "archives": {
+                  "libedit-dev": {
+                    "path": "/root/sym_cjcj_918_implement_r6077105353/deps/libedit/libedit-dev_3.1-20210910-1build1_amd64.deb",
+                    "sha256": "6b8f4c32a81aafc56edb7b332c76cad0c84854ef3105d1d64df16dbad7e9a8fd"
+                  },
+                  "libedit2": {
+                    "path": "/root/sym_cjcj_918_implement_r6077105353/deps/libedit/libedit2_3.1-20210910-1build1_amd64.deb",
+                    "sha256": "fb8783bdf0a59aaabf4e9b29192170f6cc17aa2eb94bc672c15add37ff39525b"
+                  }
+                },
+                "repository": "Ubuntu jammy/main amd64",
+                "version": "3.1-20210910-1build1"
+              },
+              "files": {
+                "include/editline/readline.h": {
+                  "sha256": "33c8a6d1528850b6d1f80a61943ccf182e786abddb8f2887e910354746a24ff7"
+                },
+                "include/histedit.h": {
+                  "sha256": "71d6fbc923abdba890f17e187f26c5a5a87cdf7402434ed915e335e6ca766b6b"
+                },
+                "lib/x86_64-linux-gnu/libedit.so.2.0.68": {
+                  "sha256": "81dbdf431b1d828bad9e2511b562310bd3f0bdb1bad998775406d2784426fd66"
+                }
+              },
+              "root": "/root/sym_cjcj_918_implement_r6077105353/deps/libedit/install/usr"
+            },
+            "python": {
+              "receipt": "/root/sym_cjcj_918_implement_r6074725041/keep/deps/python3.11/receipt.json",
+              "root": "/root/sym_cjcj_918_implement_r6074725041/keep/deps/python3.11/install",
+              "sha256": "04d1ac85859107706acd706db53c382c840f7fa6deb78377c54045ec8db74e93"
+            },
+            "runtimeDependency": "runtime",
+            "runtimeSource": {
+              "commit": "9733dfc09d29eca27d19cc3937a149838b4e3322",
+              "repo": "/root/sym_cjcj_918_implement_r6077105353/inputs/runtime",
+              "tree": "e44cf3b4791b5a0f91df78251b6805f5c68e5963"
+            },
+            "xml2Archive": {
+              "path": "/root/sym_cjcj_918_implement_r6074725041/keep/deps/libxml2/libxml2-2.14.0.tar.xz",
+              "sha256": "3e2ed89d81d210322d70b35460166d4ea285e5bb017576972a1d76a09631985c",
+              "url": "https://download.gnome.org/sources/libxml2/2.14/libxml2-2.14.0.tar.xz",
+              "version": "2.14.0"
+            }
+          },
+          "target": "linux_x86_64",
+          "tools": {
+            "ar": {
+              "path": "/usr/bin/ar",
+              "sha256": "5b394f8752fde1776992d405d76034d5017b24b9b922bedaeeaff8cc344ef044"
+            },
+            "bash": {
+              "path": "/usr/bin/bash",
+              "sha256": "59474588a312b6b6e73e5a42a59bf71e62b55416b6c9d5e4a6e1c630c2a9ecd4"
+            },
+            "clang": {
+              "path": "/usr/bin/clang",
+              "sha256": "31925065812631303cf9af9a30b2f56427d2102667a87a9fb4ba03a306104589"
+            },
+            "clang++": {
+              "path": "/usr/bin/clang++",
+              "sha256": "31925065812631303cf9af9a30b2f56427d2102667a87a9fb4ba03a306104589"
+            },
+            "cmake": {
+              "path": "/usr/bin/cmake",
+              "sha256": "fd22547781b64bb2db04370970b93db1f3fada1e41e60873b015ee0747009fc0"
+            },
+            "getconf": {
+              "path": "/usr/bin/getconf",
+              "sha256": "036757cca72d3c5659e1ec5e76aeea86598053ac4b96be3572d1e6a6348c0624"
+            },
+            "git": {
+              "path": "/usr/bin/git",
+              "sha256": "587ef21868c948b883993e23209b86a72a6ddc06aab1545c697ffc31075acd4a"
+            },
+            "launcher": {
+              "path": "/usr/bin/ccache",
+              "sha256": "892c37ccf83c263cc518355911814448745d5d9f5f29e8b176a2d36b2b75d9a6"
+            },
+            "ninja": {
+              "path": "/usr/bin/ninja",
+              "sha256": "a9ddfbf7e365a2e5026ed44f9173e498e37d8b71ec5e259b2c2a684f16cfa862"
+            },
+            "nm": {
+              "path": "/usr/bin/nm",
+              "sha256": "ed6565c132d6f20019ff3f050043dc1b2b8bc2e8b3b94c1ffe3f34436431a5a4"
+            },
+            "node": {
+              "path": "/usr/local/bin/node",
+              "sha256": "34bc6627675906f8431892630b5e91fc4cc9f1e03ce15e9716025aa551e5c823"
+            },
+            "python3": {
+              "path": "/usr/bin/python3",
+              "sha256": "a2f33a6e006989270f4340528eb61f8f97366e00a5d1b602ac8672ea44fc56ae"
+            },
+            "swig": {
+              "path": "/usr/bin/swig",
+              "sha256": "d2600912223e0b36ecf78e188dc031e89123c86f7f330f943b26b560e88d9404"
+            },
+            "tar": {
+              "path": "/usr/bin/tar",
+              "sha256": "fd0d62eed19efd3e115aa1be44160f89d777cd1e6d6d8eb0ce7c8bdc879f59e2"
+            }
+          }
+        },
+        "dependencies": [
+          "runtime"
+        ],
+        "domain": "target",
+        "id": "llvm-cjdb",
+        "inputOnly": true,
+        "install": [
+          {
+            "from": "",
+            "to": ""
+          }
+        ],
+        "producer": {
+          "adapter": "llvm-cjdb",
+          "repository": "/root/918_qualification_53ce/product",
+          "version": "4d05592c3b0a05b3ab4d554a379e3885faf25cf2"
+        },
+        "roles": [
+          "llvm-tools",
+          "llvm-dylib"
+        ],
+        "source": {
+          "commit": "53ce96a7b9d243dc7fa05ff6a9b56ea0ef94c057",
+          "kind": "git",
+          "repo": "/root/sym_cjcj_918_implement_r6077105353/inputs/llvm",
+          "tree": "3d80836504be22f5b06228db0e2c39c2d0d11c81"
+        }
+      }
+    ],
+    "lane": "sym_cjcj_918_implement_r6077105353",
+    "platform": "linux_x86_64",
+    "role": "target",
+    "schema": "toolchain-sdk-plan-v1",
+    "stage": "stage1",
+    "verification": {
+      "colourRuntime": {
+        "path": "/root/sym_cjcj_918_implement_r6066708628/keep/inputs/colour-runtime.so",
+        "sha256": "81f00f7e07caeffc8341b0f7063fd023900a75f15103450a0df1e00b802e9f36"
+      },
+      "hostRuntime": {
+        "path": "/root/sharedbuild/official-sdk/nightly-1.3.0-alpha.20261005010028/f15562c80d0316ae59a892f0d3bd3e9084299e274417de04e28684caa527441e/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so",
+        "sha256": "7807eb3036add6a373f5c09215bdc94634360d24a3b1e68d3d3ccd9f2a3b3022"
+      },
+      "hostRuntimeDir": "/root/sharedbuild/official-sdk/nightly-1.3.0-alpha.20261005010028/f15562c80d0316ae59a892f0d3bd3e9084299e274417de04e28684caa527441e/runtime/lib/linux_x86_64_cjnative",
+      "runtimePin": {
+        "path": "/root/sym_cjcj_918_implement_r6066708628/keep/inputs/runtime_pin.env",
+        "sha256": "ca2f46415f17e9430bafc817133fc974dc9978cfe4f4c68911ca650e7e4a306a"
+      }
+    }
+  }
+}
