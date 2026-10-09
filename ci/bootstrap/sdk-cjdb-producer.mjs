@@ -3,7 +3,9 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
+import {gzipSync} from 'node:zlib';
 import {fileDigest, readJson, atomicJson, inventory, sourceIdentity, registeredSourceIdentity, reject} from './sdk-manifest.mjs';
+import {parseLlvmToolsManifest} from '../llvm-tools-manifest.mjs';
 
 export async function buildCjdb(request, {run, tool, fetchIdentity, execute: requestExecute}) {
   const {component, source: llvmReference, directory, dependencies} = request;
@@ -108,6 +110,37 @@ export async function buildCjdb(request, {run, tool, fetchIdentity, execute: req
   await fs.mkdir(path.join(artifacts, 'native-closure'), {recursive: true});
   await fs.cp(rawLldb, path.join(artifacts, 'native-closure/lldb'), {recursive: true, verbatimSymlinks: true});
   await fs.cp(options.python.root, path.join(artifacts, 'native-closure/python'), {recursive: true, verbatimSymlinks: true});
+  // Bind the bootstrap shim and tuple metadata to these native executables,
+  // headers and schema. No RTTI-OFF tuple contributes bytes to this install.
+  const generatedHeaders = path.join(directory, 'build/shim-schema');
+  await fs.mkdir(path.join(generatedHeaders, 'flatbuffers'), {recursive:true});
+  await run([path.join(build, 'third_party/flatbuffers/flatc'), '--no-warnings', '-c', '-o', path.join(generatedHeaders, 'flatbuffers'), path.join(compiler, 'schema/ModuleFormat.fbs')], {env});
+  const fixed = path.join(nativeRoot, 'fixed-llc'); await fs.mkdir(fixed);
+  await run([launcher, tool('clang++'), '-std=c++17', '-O2', '-fPIC', '-fno-rtti', '-fno-exceptions',
+    `-I${llvm}/llvm/include`, `-I${llvmBuild}/include`, `-I${flatbuffers}/include`, `-I${generatedHeaders}`,
+    '-c', path.join(component.producer.repository, 'runtime_shim/cjselfhost_llvmshim.cpp'), '-o', path.join(fixed,'cjselfhost_llvmshim.o')], {env});
+  const values = {PLATFORM:component.config.target,LLVM_SHA:component.source.commit,CANGJIE_COMPILER_SHA:options.compilerSource.commit,FLATBUFFERS_SHA:options.flatbuffersSource.commit};
+  for (const [name,prefix] of [['llc','LLC'],['opt','OPT'],['ld.lld','LLD']]) {
+    const binary=path.join(nativeRoot,'bin',name), result=await requestExecute(binary,['--version'],{env:{...env,LD_LIBRARY_PATH:path.join(nativeRoot,'lib')}});
+    const version=result.stdout.split('\n').map(line=>line.trim()).find(line=>/LLVM version |^LLD /.test(line));
+    if(!version)reject('LLVM_VERSION',component.id,name);
+    values[`${prefix}_SOURCE`]=`tuple:${component.source.commit}`; values[`${prefix}_VERSION`]=version; values[`${prefix}_SHA256`]=await fileDigest(binary);
+    await fs.writeFile(path.join(fixed,`${name}.gz`),gzipSync(await fs.readFile(binary),{level:9}));
+  }
+  values.LLD_TOOL='ld.lld';values.SHIM_SHA256=await fileDigest(path.join(fixed,'cjselfhost_llvmshim.o'));
+  const tupleText=Object.entries(values).map(([key,value])=>`${key}=${value}\n`).join('');parseLlvmToolsManifest(tupleText);
+  await fs.writeFile(path.join(fixed,'llvm-tools.manifest'),tupleText);
+  const readers={};for(const name of ['llvm-dis','llvm-as'])readers[name]={sha256:await fileDigest(path.join(nativeRoot,'bin',name)),version:(await requestExecute(path.join(nativeRoot,'bin',name),['--version'],{env:{...env,LD_LIBRARY_PATH:path.join(nativeRoot,'lib')}})).stdout.trim()};
+  await atomicJson(path.join(nativeRoot,'bitcode-readers.json'),{source:component.source,targets:['llvm-dis','llvm-as'],tools:readers,producer:component.producer,buildId:request.identity.buildId});
+  const tupleIdentity=`PLATFORM=${component.config.target}\nLLVM_SHA=${component.source.commit}\nCANGJIE_COMPILER_SHA=${options.compilerSource.commit}\nRECIPE_CJCJ_SHA=${component.producer.version}\nLLVM_ENABLE_RTTI=ON\nLLVM_LINK_LLVM_DYLIB=ON\nDEPOT_ROLE=producer output\n`;
+  await fs.writeFile(path.join(nativeRoot,'MANIFEST'),tupleIdentity);
+  // Retain the existing tuple metadata path; its contents declare this actual
+  // native shared-library configuration rather than claiming static linkage.
+  await fs.writeFile(path.join(nativeRoot,'lib/STATIC_LLVM.txt'),tupleIdentity);
+  const tupleMembers=['bin/llvm-dis','bin/llvm-as','bitcode-readers.json','MANIFEST','bin/ld.lld','bin/llc','bin/opt','lib/STATIC_LLVM.txt','fixed-llc/llc.gz','fixed-llc/opt.gz','fixed-llc/ld.lld.gz','fixed-llc/cjselfhost_llvmshim.o','fixed-llc/llvm-tools.manifest'];
+  await fs.writeFile(path.join(nativeRoot,'SHA256SUMS'),(await Promise.all(tupleMembers.map(async rel=>`${await fileDigest(path.join(nativeRoot,rel))}  ./${rel}\n`))).join(''));
+  const dylib=path.join(nativeRoot,'lib/libLLVM-15.so');
+  await atomicJson(path.join(nativeRoot,'lib/manifest.json'),{llvm_sha:component.source.commit,sha256:await fileDigest(dylib),platform:component.config.target,library:'libLLVM-15.so',targets:['X86','ARM','AArch64'],producer:{version:component.producer.version,buildId:request.identity.buildId}});
   // Boundscheck's official source has no CMakeLists.txt; the compiler adds
   // its own unchanged recipe as an authenticated generated build input.
   const boundsStatus = (await requestExecute(tool('git'), ['-C', bounds, 'status', '--porcelain', '-z', '--untracked-files=all'])).stdout;
