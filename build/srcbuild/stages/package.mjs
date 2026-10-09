@@ -143,7 +143,7 @@ async function packageMainSdk(config) {
   // A failed parity check must not leave a stale archive from an earlier run
   // looking publishable in software/.
   fs.rmSync(archivePath(config, archiveBase), {force: true});
-  const parity = await assertSdkPathParity(cangjieDir, {officialRoot: config.officialSdkRoot});
+  const parity = await assertSdkPathParity(cangjieDir, {officialRoot: config.officialSdkRoot, target: config.target.spec.key});
   logger.info(
     'SDK_PATH_PARITY_PASS official=%s candidate=%s required=%d extra=%d',
     parity.officialRoot,

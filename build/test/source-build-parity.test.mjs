@@ -804,18 +804,18 @@ test('package retains pcre and stdx links independently of compiler aliases', as
   } finally { fs.rmSync(root, {recursive: true, force: true}); }
 });
 
-test('package rejects the exact missing Windows payload path', async () => {
+test('package rejects the exact missing native target payload path', async () => {
   const {root, config} = makeFixture();
   try {
-    const relative = ['modules', 'windows_x86_64_cjnative', 'std', 'std.core.cjo'];
+    const relative = ['modules', 'linux_x86_64_cjnative', 'std', 'std.core.cjo'];
     file(config.officialSdkRoot, relative, 'official payload');
     const input = path.join(config.repoPath('compiler'), config.target.primaryCompilerOutput());
-    file(input, relative, 'produced Windows module');
+    file(input, relative, 'produced native module');
     await packageStage.run(config);
     fs.rmSync(path.join(input, ...relative));
-    console.log('PACKAGE_MISSING_WINDOWS_ASSERT_REACHED');
-    await assert.rejects(packageStage.run(config), /missing-official-path\tmodules\/windows_x86_64_cjnative\/std\/std.core.cjo/);
-    file(input, relative, 'produced Windows module');
+    console.log('PACKAGE_MISSING_NATIVE_ASSERT_REACHED');
+    await assert.rejects(packageStage.run(config), /missing-official-path\tmodules\/linux_x86_64_cjnative\/std\/std.core.cjo/);
+    file(input, relative, 'produced native module');
     await packageStage.run(config);
     assert.ok(fs.existsSync(path.join(config.softwareDir, 'cangjie', ...relative)));
   } finally { fs.rmSync(root, {recursive: true, force: true}); }

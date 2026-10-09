@@ -51,8 +51,15 @@ export function collectRelativePaths(root, {excludedSubtrees = []} = {}) {
   return Object.freeze(entries);
 }
 
-export function compareSdkPathSets(officialRoot, candidateRoot) {
-  const officialEntries = collectRelativePaths(officialRoot, {excludedSubtrees: OFFICIAL_PATH_EXCLUSIONS});
+export function compareSdkPathSets(officialRoot, candidateRoot, {target} = {}) {
+  const exclusions = [...OFFICIAL_PATH_EXCLUSIONS];
+  // Linux releases can contain optional Windows cross-target modules. The
+  // native Linux SDK contract does not require those two exact target roots.
+  // Windows and unspecified targets retain the complete reference inventory.
+  if (['linux-x64', 'linux-aarch64'].includes(target)) {
+    exclusions.push('lib/windows_x86_64_cjnative', 'modules/windows_x86_64_cjnative');
+  }
+  const officialEntries = collectRelativePaths(officialRoot, {excludedSubtrees: exclusions});
   const candidateEntries = collectRelativePaths(candidateRoot);
   const official = new Map(officialEntries.map(entry => [entry.relativePath, entry]));
   const candidate = new Map(candidateEntries.map(entry => [entry.relativePath, entry]));
@@ -94,14 +101,14 @@ function describeEntry(type, symlinkTarget) {
   return type === 'symlink' ? `${type}->${symlinkTarget}` : type;
 }
 
-export async function assertSdkPathParity(candidateRoot, {officialRoot} = {}) {
+export async function assertSdkPathParity(candidateRoot, {officialRoot, target} = {}) {
   const referenceRoot = path.resolve(officialRoot || await pinnedOfficialSdkRoot());
   const depotLock = path.join(referenceRoot, 'SDK.lock.json');
   if (fs.existsSync(depotLock)
     && JSON.parse(fs.readFileSync(depotLock, 'utf8')).schema === 'sharedbuild-official-sdk-v1') {
     throw new BuildError('package.sdk-path-parity', 'REFERENCE_BOUNDARY: use the original archive payload, not a materialized sharedbuild depot');
   }
-  const result = compareSdkPathSets(referenceRoot, candidateRoot);
+  const result = compareSdkPathSets(referenceRoot, candidateRoot, {target});
   for (const entry of result.candidateEntries) {
     if (entry.type !== 'symlink') continue;
     const file = path.join(candidateRoot, entry.relativePath);
