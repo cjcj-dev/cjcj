@@ -480,6 +480,8 @@ stdlib_build() {
   cmd "python3 $(printf '%q' "$SRC/ci/install_std_sdk_inputs.py") $(printf '%q' "$(dirname "$AST_SUPPORT")") $(printf '%q' "$sdk") $(printf '%q' "$HOST_TUPLE")"
   ld=$(sdk_ld_path "$sdk" "$runtime")
   prepare_build_env
+  compiler="$sdk/bin/cjc"; [ ! -f "$sdk/bin/cjcj-stage1" ] || compiler="$sdk/bin/cjcj-stage1"
+  cmd "node $(printf '%q' "$SRC/ci/bootstrap/std-receipt.mjs") begin $(printf '%q' "$prefix") $(printf '%q' "$STDSRC") $(printf '%q' "$compiler")"
   # shellcheck disable=SC2016 # Expanded by the inner bash, not this shell.
   script='cd "$1" && rm -rf build/build && python3 build.py clean && python3 build.py build -t relwithdebinfo --jobs "$2" --target-lib="$3" && python3 build.py install --prefix "$4"'
   cmd "env -i $(compiler_cache_env)HOME=$(printf '%q' "$BUILD_HOME") TMPDIR=$(printf '%q' "$BUILD_TMPDIR") CANGJIE_HOME=$(printf '%q' "$sdk") LD_LIBRARY_PATH=$(printf '%q' "$ld") PATH=$(printf '%q' "$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:/usr/bin:/bin") cjHeapSize=$(printf '%q' "$STD_BUILD_HEAP") bash -c $(printf '%q' "$script") bash $(printf '%q' "$STDSRC") $(printf '%q' "$STD_BUILD_JOBS") $(printf '%q' "$target_lib") $(printf '%q' "$prefix")"
@@ -487,9 +489,7 @@ stdlib_build() {
   # Match sdk_verify.measured_cjc_sha: the runner is only a launcher.
   compiler="$sdk/bin/cjc"
   [ ! -f "$sdk/bin/cjcj-stage1" ] || compiler="$sdk/bin/cjcj-stage1"
-  if [ -f "$compiler" ] || [ "$DRY" -eq 1 ]; then
-    cmd "python3 -c 'import hashlib,json,sys; h=hashlib.sha256(open(sys.argv[1],\"rb\").read()).hexdigest(); open(sys.argv[2],\"w\").write(json.dumps({\"compiler_sha256\":h})+chr(10))' $(printf '%q' "$compiler") $(printf '%q' "$prefix/std-producer.json")"
-  fi
+  cmd "node $(printf '%q' "$SRC/ci/bootstrap/std-receipt.mjs") finish $(printf '%q' "$prefix") $(printf '%q' "$STDSRC") $(printf '%q' "$compiler")"
 }
 
 assert_cjcj_root() {

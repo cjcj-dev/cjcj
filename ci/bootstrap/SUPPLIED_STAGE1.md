@@ -43,9 +43,17 @@ stops stage2. The input-only check does not run this gate or establish a verdict
 
 To continue an interrupted colour gate with its completed same-source std, use
 `--resume-colour-gate SHA256_FILE` and the original private `--work` directory.
-The captured file must identify the completed std artifacts with sha256sum
-records. The entry verifies these records, the std source commit, the SDK lock's
-compiler/runtime identities and the actual stage1 ELF before reusing them.
+The captured file supplies additional sha256sum records; it is not a substitute
+for the complete producer receipt. A successful std installation now records its
+actual clean source commit/tree and compiler bytes, checked before and after the
+build, in `std-producer.json` and `STDLIB_SOURCE_SHA`. The receipt covers every
+installed prefix entry (including modules, libraries, runtime libraries and link
+targets); resume rejects additions, omissions and byte/type/mode changes before
+SDK assembly. An interrupted build leaves an incomplete marker and cannot be
+resumed as a completed installation. Legacy prefixes without this complete
+receipt are not silently recertified from expected pins or the current files.
+The entry also verifies the captured hashes, source-tree compatibility, SDK
+lock compiler/runtime identities and actual stage1 ELF before reuse.
 It then assembles/verifies the SDK through the normal recipe, runs the complete
 gate and, only after success, builds stage2. This option requires the colour gate
 inputs and `--stage supplied-stage1`; it does not authorize another execution.

@@ -146,6 +146,11 @@ export const GATING = Object.freeze([
 // wiring one of these in is a decision about CI shape, not a re-investigation.
 export const DEFERRED = Object.freeze([
   Object.freeze({
+    file: 'ci/bootstrap/std-receipt.test.mjs',
+    needs: 'Linux ELF /bin/true, bash, git, python3, readelf, strings, sha256sum and an already cached zx@8 via offline npx; uses a private temporary fixture prefix and real bootstrap CLI --check-only, never a stage2 build',
+    verified: '2026-10-09 kkk2 node ci/bootstrap/std-receipt.test.mjs rc=0; fresh stdlib_build receipt plus 18 real resume CLI normal/rejection/recovery calls; explicit fixture, not real std/compiler production',
+  }),
+  Object.freeze({
     file: 'build/test/runtime-colour.test.mjs',
     needs: 'Node and git, plus cc with shared/PIC support, an ELF linker with version-script '
       + 'support, python3, and nm --defined-only dynamic export inspection; the current CI '

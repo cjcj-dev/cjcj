@@ -6,6 +6,7 @@ import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {readRuntimeCommit} from './runtime-provenance.mjs';
+import {verify} from './std-receipt.mjs';
 
 const entry = fileURLToPath(import.meta.url);
 const entryIndex = process.argv.findIndex(value => path.resolve(value) === entry);
@@ -17,13 +18,14 @@ const git = async revision => {
   const result = await $({verbose: false})`ulimit -c 0; git -C ${runtimeSource} rev-parse ${revision}`;
   return result.stdout.trim();
 };
+const producer = verify(std);
 const originalTree = await git(`${origin}:stdlib`);
+if (producer.source_tree !== originalTree) throw Error('RESUME_STD_SOURCE_TREE_MISMATCH');
 const selectedTree = await git(`${selected}:stdlib`);
 if (originalTree !== selectedTree) throw Error('RESUME_STD_TREE_MISMATCH');
 await $({cwd: std, verbose: false})`ulimit -c 0; sha256sum -c ${path.resolve(sums)}`;
 const lock = JSON.parse(fs.readFileSync(path.join(work, 'sdk-stage1/SDK.lock.json'), 'utf8'));
 if (lock.components.cjc.sha256 !== compilerSha) throw Error('RESUME_SDK_COMPILER_MISMATCH');
-const producer = JSON.parse(fs.readFileSync(path.join(std, 'std-producer.json'), 'utf8'));
 if (producer.compiler_sha256 !== compilerSha) throw Error('RESUME_STD_COMPILER_MISMATCH');
 // Validate the retained SDK against its own recorded runtime, then rebuild it
 // with the selected target. Neither lock nor source stamp is rewritten here.
