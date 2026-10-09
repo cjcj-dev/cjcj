@@ -1,0 +1,270 @@
+{
+  "schema": "918-end-acceptance-contract-v1",
+  "status": "FROZEN_INPUT_ONLY",
+  "currentExecutionAuthorized": false,
+  "plan": {
+    "path": "/root/sym_cjcj_918_implement_r6086353010/inputs/stage1.plan.json",
+    "sha256": "1f7d1bf1d9350a115204b8e2826c5f8cb4514336051a31c24fb90b5e872d48fa"
+  },
+  "inputs": {
+    "sdk": "/root/sym_cjcj_918_implement_r6086353010/sdk-stage1",
+    "archive": "/root/sym_cjcj_918_implement_r6086353010/keep/sdk-stage1.tar.gz",
+    "unpack": "/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack",
+    "unpacked": "/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack/sdk-stage1",
+    "endpoint": "/root/sym_cjcj_918_implement_r6086353010/cjcj/ci/bootstrap/plans/918-stage1-llvm-rework-1009/endpoint.cj",
+    "consumerOutput": "/root/sym_cjcj_918_implement_r6086353010/keep/end-consumers",
+    "manifest": "/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack/sdk-stage1/SDK.manifest.json",
+    "lock": "/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack/sdk-stage1/SDK.lock.json"
+  },
+  "preconditions": [
+    "all seven authentic producer receipts; no native success fabricated",
+    "independent complete implementation/input review",
+    "new explicit production/resource contract; >=35GiB plus actual work set; no silent lowering",
+    "kkk2 wf/box; core soft/hard0; per-command own rc and first unknown failure stops successors",
+    "consumer output directory newly created before compiler entry; retain stdout/stderr/link argv/load traces and original result identities"
+  ],
+  "commands": [
+    {
+      "name": "assemble-through-existing-entry",
+      "argv": [
+        "node",
+        "/root/sym_cjcj_918_implement_r6086353010/cjcj/ci/bootstrap/toolchain-sdk.mjs",
+        "--plan",
+        "/root/sym_cjcj_918_implement_r6086353010/inputs/stage1.plan.json",
+        "--out",
+        "/root/sym_cjcj_918_implement_r6086353010/sdk-stage1"
+      ],
+      "precondition": "explicit independent review plus separate actual product production contract; seven genuine receipts or authorized missing builds; same fixed sources",
+      "status": "NOT_RUN",
+      "rc": null
+    },
+    {
+      "name": "exclusive-tar-archive",
+      "argv": [
+        "node",
+        "--input-type=module",
+        "--eval",
+        "import fs from 'node:fs/promises';import {spawn} from 'node:child_process';await fs.mkdir(\"/root/sym_cjcj_918_implement_r6086353010/keep\",{recursive:true});const fd=await fs.open(\"/root/sym_cjcj_918_implement_r6086353010/keep/sdk-stage1.tar.gz\",'wx');try{await new Promise((resolve,reject)=>{const p=spawn('tar',['-czf','-','-C',\"/root/sym_cjcj_918_implement_r6086353010\",'sdk-stage1'],{stdio:['ignore',fd.fd,'inherit']});p.on('error',reject);p.on('exit',(rc,signal)=>rc===0&&!signal?resolve():reject(new Error('archive rc='+rc+' signal='+signal)));});}finally{await fd.close();}"
+      ],
+      "precondition": "real SDK complete; archive absent; preserve original SDK and all package-relative links; no --dereference, no overlay, no replacement",
+      "status": "NOT_RUN",
+      "rc": null
+    },
+    {
+      "name": "independent-extraction",
+      "argv": [
+        "node",
+        "--input-type=module",
+        "--eval",
+        "import fs from 'node:fs/promises';import {spawn} from 'node:child_process';await fs.mkdir(\"/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack\");await new Promise((resolve,reject)=>{const p=spawn('tar',['-xzf',\"/root/sym_cjcj_918_implement_r6086353010/keep/sdk-stage1.tar.gz\",'-C',\"/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack\"],{stdio:'inherit'});p.on('error',reject);p.on('exit',(rc,signal)=>rc===0&&!signal?resolve():reject(new Error('unpack rc='+rc+' signal='+signal)));});"
+      ],
+      "precondition": "new directory absent; archive from preceding successful command",
+      "status": "NOT_RUN",
+      "rc": null
+    },
+    {
+      "name": "verify-same-plan-manifest-lock",
+      "argv": [
+        "node",
+        "--input-type=module",
+        "--eval",
+        "import {verifyManifestSdk} from \"/root/sym_cjcj_918_implement_r6086353010/cjcj/ci/bootstrap/toolchain-sdk.mjs\";import {readJson} from \"/root/sym_cjcj_918_implement_r6086353010/cjcj/ci/bootstrap/sdk-manifest.mjs\";const p=await readJson(\"/root/sym_cjcj_918_implement_r6086353010/inputs/stage1.plan.json\"),m=await readJson(\"/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack/sdk-stage1/SDK.manifest.json\");await verifyManifestSdk(\"/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack/sdk-stage1\",p,m);"
+      ],
+      "precondition": "do not modify archive members, SDK.plan.json, SDK.manifest.json or SDK.lock.json",
+      "status": "NOT_RUN",
+      "rc": null
+    },
+    {
+      "name": "compiler-dependent-library-names",
+      "argv": [
+        "readelf",
+        "-d",
+        "/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack/sdk-stage1/bin/cjcj-stage1"
+      ],
+      "assertion": "record actual DT_NEEDED separately from build link argv and loader-origin evidence",
+      "status": "NOT_RUN",
+      "rc": null
+    },
+    {
+      "name": "stage1-compiler-and-std-consumer",
+      "argv": [
+        "/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack/sdk-stage1/bin/cjc",
+        "/root/sym_cjcj_918_implement_r6086353010/cjcj/ci/bootstrap/plans/918-stage1-llvm-rework-1009/endpoint.cj",
+        "-o",
+        "/root/sym_cjcj_918_implement_r6086353010/keep/end-consumers/endpoint"
+      ],
+      "env": {
+        "CANGJIE_HOME": "/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack/sdk-stage1",
+        "LD_LIBRARY_PATH": "/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack/sdk-stage1/third_party/llvm/lib:/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack/sdk-stage1/tools/lib:/root/sym_cjcj_918_implement_r6086353010/inputs/official-1009/runtime/lib/linux_x86_64_cjnative:/root/sym_cjcj_918_implement_r6086353010/inputs/official-1009/lib/linux_x86_64_cjnative",
+        "LD_DEBUG": "libs"
+      },
+      "assertion": "actual source4d compiler loads target same53ce libLLVM and the official host runtime; exact real loaded paths and hashes required; inspect compile/link output separately",
+      "status": "NOT_RUN",
+      "rc": null
+    },
+    {
+      "name": "paired-target-program",
+      "argv": [
+        "/root/sym_cjcj_918_implement_r6086353010/keep/end-consumers/endpoint"
+      ],
+      "env": {
+        "CANGJIE_HOME": "/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack/sdk-stage1",
+        "LD_LIBRARY_PATH": "/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack/sdk-stage1/third_party/llvm/lib:/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack/sdk-stage1/tools/lib:/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack/sdk-stage1/runtime/lib/linux_x86_64_cjnative:/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack/sdk-stage1/lib/linux_x86_64_cjnative",
+        "LD_DEBUG": "libs"
+      },
+      "assertion": "rc0 and SDK_STAGE1_STD_ENDPOINT; actual paired9733 runtime/std library paths/hashes; compiler result enters this assertion",
+      "status": "NOT_RUN",
+      "rc": null
+    },
+    {
+      "name": "frontend-entry-consumer",
+      "argv": [
+        "/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack/sdk-stage1/bin/cjc-frontend",
+        "/root/sym_cjcj_918_implement_r6086353010/cjcj/ci/bootstrap/plans/918-stage1-llvm-rework-1009/endpoint.cj",
+        "-o",
+        "/root/sym_cjcj_918_implement_r6086353010/keep/end-consumers/frontend-endpoint"
+      ],
+      "env": {
+        "CANGJIE_HOME": "/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack/sdk-stage1",
+        "LD_LIBRARY_PATH": "/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack/sdk-stage1/third_party/llvm/lib:/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack/sdk-stage1/tools/lib:/root/sym_cjcj_918_implement_r6086353010/inputs/official-1009/runtime/lib/linux_x86_64_cjnative:/root/sym_cjcj_918_implement_r6086353010/inputs/official-1009/lib/linux_x86_64_cjnative",
+        "LD_DEBUG": "libs"
+      },
+      "assertion": "installed frontend alias must be same actual stage1 producer; real compilation not merely --version",
+      "status": "NOT_RUN",
+      "rc": null
+    },
+    {
+      "name": "official-cjpm-startup",
+      "argv": [
+        "/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack/sdk-stage1/tools/bin/cjpm",
+        "--version"
+      ],
+      "env": {
+        "CANGJIE_HOME": "/root/sym_cjcj_918_implement_r6086353010/inputs/official-1009",
+        "LD_LIBRARY_PATH": "/root/sym_cjcj_918_implement_r6086353010/inputs/official-1009/runtime/lib/linux_x86_64_cjnative:/root/sym_cjcj_918_implement_r6086353010/inputs/official-1009/lib/linux_x86_64_cjnative:/root/sym_cjcj_918_implement_r6086353010/inputs/official-1009/third_party/llvm/lib:/root/sym_cjcj_918_implement_r6086353010/inputs/official-1009/tools/lib",
+        "LD_DEBUG": "libs"
+      },
+      "assertion": "startup/loader qualification only; authenticate installed bytes from original host receipt and actual loaded libraries exclusively from official host; does not prove cjpm build",
+      "status": "NOT_RUN",
+      "rc": null
+    },
+    {
+      "name": "std-bitcode-read",
+      "argv": [
+        "/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack/sdk-stage1/third_party/llvm/bin/llvm-dis",
+        "/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack/sdk-stage1/modules/linux_x86_64_cjnative/std/libstd.core.bc",
+        "-o",
+        "/root/sym_cjcj_918_implement_r6086353010/keep/end-consumers/std-core.ll"
+      ],
+      "env": {
+        "LD_LIBRARY_PATH": "/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack/sdk-stage1/third_party/llvm/lib:/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack/sdk-stage1/tools/lib:/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack/sdk-stage1/runtime/lib/linux_x86_64_cjnative:/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack/sdk-stage1/lib/linux_x86_64_cjnative",
+        "LD_DEBUG": "libs"
+      },
+      "assertion": "actual full std bitcode enters same53ce installed reader",
+      "status": "NOT_RUN",
+      "rc": null
+    },
+    {
+      "name": "std-bitcode-write",
+      "argv": [
+        "/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack/sdk-stage1/third_party/llvm/bin/llvm-as",
+        "/root/sym_cjcj_918_implement_r6086353010/keep/end-consumers/std-core.ll",
+        "-o",
+        "/root/sym_cjcj_918_implement_r6086353010/keep/end-consumers/std-core.bc"
+      ],
+      "env": {
+        "LD_LIBRARY_PATH": "/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack/sdk-stage1/third_party/llvm/lib:/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack/sdk-stage1/tools/lib:/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack/sdk-stage1/runtime/lib/linux_x86_64_cjnative:/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack/sdk-stage1/lib/linux_x86_64_cjnative"
+      },
+      "status": "NOT_RUN",
+      "rc": null
+    },
+    {
+      "name": "std-bitcode-opt",
+      "argv": [
+        "/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack/sdk-stage1/third_party/llvm/bin/opt",
+        "-disable-output",
+        "/root/sym_cjcj_918_implement_r6086353010/keep/end-consumers/std-core.bc"
+      ],
+      "env": {
+        "LD_LIBRARY_PATH": "/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack/sdk-stage1/third_party/llvm/lib:/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack/sdk-stage1/tools/lib:/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack/sdk-stage1/runtime/lib/linux_x86_64_cjnative:/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack/sdk-stage1/lib/linux_x86_64_cjnative"
+      },
+      "status": "NOT_RUN",
+      "rc": null
+    },
+    {
+      "name": "std-bitcode-llc",
+      "argv": [
+        "/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack/sdk-stage1/third_party/llvm/bin/llc",
+        "/root/sym_cjcj_918_implement_r6086353010/keep/end-consumers/std-core.bc",
+        "-o",
+        "/root/sym_cjcj_918_implement_r6086353010/keep/end-consumers/std-core.s"
+      ],
+      "env": {
+        "LD_LIBRARY_PATH": "/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack/sdk-stage1/third_party/llvm/lib:/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack/sdk-stage1/tools/lib:/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack/sdk-stage1/runtime/lib/linux_x86_64_cjnative:/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack/sdk-stage1/lib/linux_x86_64_cjnative"
+      },
+      "status": "NOT_RUN",
+      "rc": null
+    },
+    {
+      "name": "lld-startup",
+      "argv": [
+        "/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack/sdk-stage1/third_party/llvm/bin/ld.lld",
+        "--version"
+      ],
+      "env": {
+        "LD_LIBRARY_PATH": "/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack/sdk-stage1/third_party/llvm/lib:/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack/sdk-stage1/tools/lib:/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack/sdk-stage1/runtime/lib/linux_x86_64_cjnative:/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack/sdk-stage1/lib/linux_x86_64_cjnative",
+        "LD_DEBUG": "libs"
+      },
+      "assertion": "startup and loader only; same-source stamp/receipt plus actual libraries required",
+      "status": "NOT_RUN",
+      "rc": null
+    },
+    {
+      "name": "cjdb-startup",
+      "argv": [
+        "/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack/sdk-stage1/tools/bin/cjdb",
+        "--batch",
+        "-o",
+        "version",
+        "-o",
+        "quit"
+      ],
+      "env": {
+        "CANGJIE_HOME": "/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack/sdk-stage1",
+        "LD_LIBRARY_PATH": "/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack/sdk-stage1/third_party/llvm/lib:/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack/sdk-stage1/tools/lib:/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack/sdk-stage1/runtime/lib/linux_x86_64_cjnative:/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack/sdk-stage1/lib/linux_x86_64_cjnative",
+        "LD_DEBUG": "libs"
+      },
+      "assertion": "actual packaged LLDB/IntelFeatures/frontend/LSP/native libraries loaded from authenticated SDK inputs",
+      "status": "NOT_RUN",
+      "rc": null
+    },
+    {
+      "name": "lldb-python-import",
+      "argv": [
+        "/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack/sdk-stage1/third_party/llvm/bin/python3.11",
+        "-c",
+        "import lldb; d=lldb.SBDebugger.Create(); print(d.GetVersionString()); lldb.SBDebugger.Destroy(d)"
+      ],
+      "env": {
+        "CANGJIE_HOME": "/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack/sdk-stage1",
+        "LD_LIBRARY_PATH": "/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack/sdk-stage1/third_party/llvm/lib:/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack/sdk-stage1/tools/lib:/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack/sdk-stage1/runtime/lib/linux_x86_64_cjnative:/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack/sdk-stage1/lib/linux_x86_64_cjnative",
+        "PYTHONPATH": "/root/sym_cjcj_918_implement_r6086353010/keep/independent-unpack/sdk-stage1/third_party/llvm/lib/python3.11/site-packages",
+        "LD_DEBUG": "libs"
+      },
+      "assertion": "actual LLDB Python bindings and interpreter/library from original native receipt; no system binding substitution",
+      "status": "NOT_RUN",
+      "rc": null
+    }
+  ],
+  "platformScope": "original five platforms and cross-target requirements retained; only Linux adapter fixtures qualified",
+  "holds": [
+    "ABI",
+    "1454",
+    "STD_CJC",
+    "stage33",
+    "formal-pin",
+    "release",
+    "latest",
+    "no GHA/CI/push/PR/main in this round"
+  ]
+}

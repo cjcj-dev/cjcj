@@ -1,0 +1,622 @@
+[
+  {
+    "id": "official",
+    "source": {
+      "kind": "distribution",
+      "lock": "/root/sym_cjcj_918_implement_r6086353010/retained-inputs/official-1009.lock.json",
+      "lockSha256": "ec9b5ab4b7a84cb71e4b9023d40353723be8108e4ee6d110d07e9ec32d92de19",
+      "reason": "actual verified publisher asset234013, private original payload",
+      "root": "/root/sym_cjcj_918_implement_r6086353010/retained-inputs/official-1009",
+      "version": "1.3.0-alpha.20261009001050"
+    },
+    "producer": {
+      "adapter": "official",
+      "repository": "/root/sym_cjcj_918_implement_r6086353010/retained-cjcj",
+      "version": "5d7eef2bc2150b315db0df71d72298ca201591a0"
+    },
+    "config": {
+      "host": "linux_x86_64",
+      "options": {},
+      "target": "linux_x86_64",
+      "tools": {}
+    },
+    "identity": {
+      "recipeId": "103714018ada29081b9c37edc679966a7ac98bb385d08d23c3f88a5bc889e9ee",
+      "buildId": "official/ec9b5ab4b7a84cb71e4b9023d40353723be8108e4ee6d110d07e9ec32d92de19/103714018ada29081b9c37edc679966a7ac98bb385d08d23c3f88a5bc889e9ee",
+      "directory": "/root/sym_cjcj_918_implement_r6086353010/retained-builds/official/ec9b5ab4b7a84cb71e4b9023d40353723be8108e4ee6d110d07e9ec32d92de19/103714018ada29081b9c37edc679966a7ac98bb385d08d23c3f88a5bc889e9ee",
+      "dependencies": {}
+    },
+    "receipt": "MISSING"
+  },
+  {
+    "id": "runtime",
+    "source": {
+      "commit": "9733dfc09d29eca27d19cc3937a149838b4e3322",
+      "kind": "git",
+      "repo": "/root/sym_cjcj_918_implement_r6086353010/retained-inputs/source-9733dfc09d29eca27d19cc3937a149838b4e3322.git",
+      "tree": "e44cf3b4791b5a0f91df78251b6805f5c68e5963"
+    },
+    "producer": {
+      "adapter": "sharedbuild-runtime-default",
+      "engine": "/root/sym_cjcj_918_implement_r6086353010/retained-tools/ts/src/sharedbuild/main.py",
+      "engineSha256": "2be9b4053cb2de624ecf31685760159e38ea573e1e76eaea13faa9429430cac2",
+      "recipe": "/root/sym_cjcj_918_implement_r6086353010/retained-inputs/runtime.request.json",
+      "repository": "/root/sym_cjcj_918_implement_r6086353010/retained-tools",
+      "version": "b497dffaaf9f20c3c71b6911eaf6d854b43caeeb"
+    },
+    "config": {
+      "host": "linux_x86_64",
+      "options": {
+        "heap": "48GB",
+        "inputBindings": {},
+        "jobs": 192,
+        "optimization": "Release",
+        "outputs": [
+          "install/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so",
+          "install/runtime/lib/linux_x86_64_cjnative/libboundscheck.so",
+          "install/lib/linux_x86_64_cjnative/libcangjie-runtime.a"
+        ],
+        "parameters": {
+          "cmake_args": [],
+          "product": "sdk"
+        },
+        "sdkDependency": "official"
+      },
+      "target": "linux_x86_64",
+      "tools": {
+        "ar": {
+          "path": "/usr/bin/ar",
+          "sha256": "5b394f8752fde1776992d405d76034d5017b24b9b922bedaeeaff8cc344ef044"
+        },
+        "bash": {
+          "path": "/usr/bin/bash",
+          "sha256": "59474588a312b6b6e73e5a42a59bf71e62b55416b6c9d5e4a6e1c630c2a9ecd4"
+        },
+        "builder": {
+          "path": "/root/sym_cjcj_918_implement_r6086353010/retained-tools/ts/src/sharedbuild/runtime.mjs",
+          "sha256": "efe50b63c482c896e04a2709c089350fb03bcb619497e5c7ff93f054e006f1c6"
+        },
+        "cc": {
+          "path": "/usr/bin/cc",
+          "sha256": "821af3c74506283c179ca413bb33e6b528805a4dd8a5c09df125e5ad560a9e89"
+        },
+        "ccache": {
+          "path": "/usr/bin/ccache",
+          "sha256": "892c37ccf83c263cc518355911814448745d5d9f5f29e8b176a2d36b2b75d9a6"
+        },
+        "clang": {
+          "path": "/usr/bin/clang",
+          "sha256": "31925065812631303cf9af9a30b2f56427d2102667a87a9fb4ba03a306104589"
+        },
+        "clang++": {
+          "path": "/usr/bin/clang++",
+          "sha256": "31925065812631303cf9af9a30b2f56427d2102667a87a9fb4ba03a306104589"
+        },
+        "cmake": {
+          "path": "/usr/bin/cmake",
+          "sha256": "fd22547781b64bb2db04370970b93db1f3fada1e41e60873b015ee0747009fc0"
+        },
+        "find": {
+          "path": "/usr/bin/find",
+          "sha256": "791b89c8bffb8101fd7d4d212b80af66a2332834b05a42721104eb47e8fa2eb1"
+        },
+        "getconf": {
+          "path": "/usr/bin/getconf",
+          "sha256": "036757cca72d3c5659e1ec5e76aeea86598053ac4b96be3572d1e6a6348c0624"
+        },
+        "git": {
+          "path": "/usr/bin/git",
+          "sha256": "587ef21868c948b883993e23209b86a72a6ddc06aab1545c697ffc31075acd4a"
+        },
+        "ninja": {
+          "path": "/usr/bin/ninja",
+          "sha256": "a9ddfbf7e365a2e5026ed44f9173e498e37d8b71ec5e259b2c2a684f16cfa862"
+        },
+        "node": {
+          "path": "/usr/local/bin/node",
+          "sha256": "34bc6627675906f8431892630b5e91fc4cc9f1e03ce15e9716025aa551e5c823"
+        },
+        "python3": {
+          "path": "/usr/bin/python3",
+          "sha256": "a2f33a6e006989270f4340528eb61f8f97366e00a5d1b602ac8672ea44fc56ae"
+        },
+        "tar": {
+          "path": "/usr/bin/tar",
+          "sha256": "fd0d62eed19efd3e115aa1be44160f89d777cd1e6d6d8eb0ce7c8bdc879f59e2"
+        }
+      }
+    },
+    "identity": {
+      "recipeId": "00e23139d44c53843e24abac40c0b80616485728be380005c672a1849916842f",
+      "buildId": "runtime/9733dfc09d29eca27d19cc3937a149838b4e3322/00e23139d44c53843e24abac40c0b80616485728be380005c672a1849916842f",
+      "directory": "/root/sym_cjcj_918_implement_r6086353010/retained-builds/runtime/9733dfc09d29eca27d19cc3937a149838b4e3322/00e23139d44c53843e24abac40c0b80616485728be380005c672a1849916842f",
+      "dependencies": {
+        "official": "official/ec9b5ab4b7a84cb71e4b9023d40353723be8108e4ee6d110d07e9ec32d92de19/103714018ada29081b9c37edc679966a7ac98bb385d08d23c3f88a5bc889e9ee"
+      }
+    },
+    "receipt": "MISSING"
+  },
+  {
+    "id": "llvm-cjdb",
+    "source": {
+      "commit": "53ce96a7b9d243dc7fa05ff6a9b56ea0ef94c057",
+      "kind": "git",
+      "repo": "/root/sym_cjcj_918_implement_r6086353010/retained-inputs/source-53ce96a7b9d243dc7fa05ff6a9b56ea0ef94c057.git",
+      "tree": "3d80836504be22f5b06228db0e2c39c2d0d11c81"
+    },
+    "producer": {
+      "adapter": "llvm-cjdb",
+      "repository": "/root/sym_cjcj_918_implement_r6086353010/retained-cjcj",
+      "version": "5d7eef2bc2150b315db0df71d72298ca201591a0"
+    },
+    "config": {
+      "host": "linux_x86_64",
+      "options": {
+        "boundscheckSource": {
+          "commit": "2ae82839ecaaa7d031e66ccbd2076d671acfd615",
+          "repo": "/root/sym_cjcj_918_implement_r6086353010/retained-inputs/source-2ae82839ecaaa7d031e66ccbd2076d671acfd615.git",
+          "tree": "99609d60f58d96a846104652d5f03201b20460bc"
+        },
+        "compilerSource": {
+          "commit": "174db8f40d5efddee63c47a3162bbf676bc227a0",
+          "repo": "/root/sym_cjcj_918_implement_r6086353010/retained-inputs/source-174db8f40d5efddee63c47a3162bbf676bc227a0.git",
+          "tree": "6f25a2072a9d8eeef8d32d050293e58690434920"
+        },
+        "flatbuffersSource": {
+          "commit": "c3e4d69cbd5950e43f775ba76eadb30750d6e0b7",
+          "repo": "/root/sym_cjcj_918_implement_r6086353010/retained-inputs/source-c3e4d69cbd5950e43f775ba76eadb30750d6e0b7.git",
+          "tree": "4a76afadb32db8f41426c9f3f3138dcca456e707"
+        },
+        "launcher": "/usr/bin/ccache",
+        "libedit": {
+          "distribution": {
+            "archives": {
+              "libedit-dev": {
+                "path": "/root/sym_cjcj_918_implement_r6086353010/retained-inputs/libedit-dev_3.1-20210910-1build1_amd64.deb",
+                "sha256": "6b8f4c32a81aafc56edb7b332c76cad0c84854ef3105d1d64df16dbad7e9a8fd"
+              },
+              "libedit2": {
+                "path": "/root/sym_cjcj_918_implement_r6086353010/retained-inputs/libedit2_3.1-20210910-1build1_amd64.deb",
+                "sha256": "fb8783bdf0a59aaabf4e9b29192170f6cc17aa2eb94bc672c15add37ff39525b"
+              }
+            },
+            "repository": "Ubuntu jammy/main amd64",
+            "version": "3.1-20210910-1build1"
+          },
+          "files": {
+            "include/editline/readline.h": {
+              "sha256": "33c8a6d1528850b6d1f80a61943ccf182e786abddb8f2887e910354746a24ff7"
+            },
+            "include/histedit.h": {
+              "sha256": "71d6fbc923abdba890f17e187f26c5a5a87cdf7402434ed915e335e6ca766b6b"
+            },
+            "lib/x86_64-linux-gnu/libedit.so.2.0.68": {
+              "sha256": "81dbdf431b1d828bad9e2511b562310bd3f0bdb1bad998775406d2784426fd66"
+            }
+          },
+          "root": "/root/sym_cjcj_918_implement_r6086353010/retained-inputs/libedit"
+        },
+        "python": {
+          "receipt": "/root/sym_cjcj_918_implement_r6086353010/retained-inputs/python.receipt.json",
+          "root": "/root/sym_cjcj_918_implement_r6086353010/retained-inputs/python-3.11",
+          "sha256": "04d1ac85859107706acd706db53c382c840f7fa6deb78377c54045ec8db74e93"
+        },
+        "runtimeDependency": "runtime",
+        "runtimeSource": {
+          "commit": "9733dfc09d29eca27d19cc3937a149838b4e3322",
+          "repo": "/root/sym_cjcj_918_implement_r6086353010/retained-inputs/source-9733dfc09d29eca27d19cc3937a149838b4e3322.git",
+          "tree": "e44cf3b4791b5a0f91df78251b6805f5c68e5963"
+        },
+        "xml2Archive": {
+          "path": "/root/sym_cjcj_918_implement_r6086353010/retained-inputs/libxml2-2.14.0.tar.xz",
+          "sha256": "3e2ed89d81d210322d70b35460166d4ea285e5bb017576972a1d76a09631985c",
+          "url": "https://download.gnome.org/sources/libxml2/2.14/libxml2-2.14.0.tar.xz",
+          "version": "2.14.0"
+        }
+      },
+      "target": "linux_x86_64",
+      "tools": {
+        "ar": {
+          "path": "/usr/bin/ar",
+          "sha256": "5b394f8752fde1776992d405d76034d5017b24b9b922bedaeeaff8cc344ef044"
+        },
+        "bash": {
+          "path": "/usr/bin/bash",
+          "sha256": "59474588a312b6b6e73e5a42a59bf71e62b55416b6c9d5e4a6e1c630c2a9ecd4"
+        },
+        "clang": {
+          "path": "/usr/bin/clang",
+          "sha256": "31925065812631303cf9af9a30b2f56427d2102667a87a9fb4ba03a306104589"
+        },
+        "clang++": {
+          "path": "/usr/bin/clang++",
+          "sha256": "31925065812631303cf9af9a30b2f56427d2102667a87a9fb4ba03a306104589"
+        },
+        "cmake": {
+          "path": "/usr/bin/cmake",
+          "sha256": "fd22547781b64bb2db04370970b93db1f3fada1e41e60873b015ee0747009fc0"
+        },
+        "getconf": {
+          "path": "/usr/bin/getconf",
+          "sha256": "036757cca72d3c5659e1ec5e76aeea86598053ac4b96be3572d1e6a6348c0624"
+        },
+        "git": {
+          "path": "/usr/bin/git",
+          "sha256": "587ef21868c948b883993e23209b86a72a6ddc06aab1545c697ffc31075acd4a"
+        },
+        "launcher": {
+          "path": "/usr/bin/ccache",
+          "sha256": "892c37ccf83c263cc518355911814448745d5d9f5f29e8b176a2d36b2b75d9a6"
+        },
+        "ninja": {
+          "path": "/usr/bin/ninja",
+          "sha256": "a9ddfbf7e365a2e5026ed44f9173e498e37d8b71ec5e259b2c2a684f16cfa862"
+        },
+        "nm": {
+          "path": "/usr/bin/nm",
+          "sha256": "ed6565c132d6f20019ff3f050043dc1b2b8bc2e8b3b94c1ffe3f34436431a5a4"
+        },
+        "node": {
+          "path": "/usr/local/bin/node",
+          "sha256": "34bc6627675906f8431892630b5e91fc4cc9f1e03ce15e9716025aa551e5c823"
+        },
+        "python3": {
+          "path": "/usr/bin/python3",
+          "sha256": "a2f33a6e006989270f4340528eb61f8f97366e00a5d1b602ac8672ea44fc56ae"
+        },
+        "swig": {
+          "path": "/usr/bin/swig",
+          "sha256": "d2600912223e0b36ecf78e188dc031e89123c86f7f330f943b26b560e88d9404"
+        },
+        "tar": {
+          "path": "/usr/bin/tar",
+          "sha256": "fd0d62eed19efd3e115aa1be44160f89d777cd1e6d6d8eb0ce7c8bdc879f59e2"
+        }
+      }
+    },
+    "identity": {
+      "recipeId": "1731c8418b99de1a0f169d315d6cfe2cc231ae103d746dc2b55ae553c9193d63",
+      "buildId": "llvm-cjdb/53ce96a7b9d243dc7fa05ff6a9b56ea0ef94c057/1731c8418b99de1a0f169d315d6cfe2cc231ae103d746dc2b55ae553c9193d63",
+      "directory": "/root/sym_cjcj_918_implement_r6086353010/retained-builds/llvm-cjdb/53ce96a7b9d243dc7fa05ff6a9b56ea0ef94c057/1731c8418b99de1a0f169d315d6cfe2cc231ae103d746dc2b55ae553c9193d63",
+      "dependencies": {
+        "runtime": "runtime/9733dfc09d29eca27d19cc3937a149838b4e3322/00e23139d44c53843e24abac40c0b80616485728be380005c672a1849916842f"
+      }
+    },
+    "receipt": "MISSING"
+  },
+  {
+    "id": "ast",
+    "source": {
+      "commit": "174db8f40d5efddee63c47a3162bbf676bc227a0",
+      "kind": "git",
+      "repo": "/root/sym_cjcj_918_implement_r6086353010/retained-inputs/source-174db8f40d5efddee63c47a3162bbf676bc227a0.git",
+      "tree": "6f25a2072a9d8eeef8d32d050293e58690434920"
+    },
+    "producer": {
+      "adapter": "ast-support",
+      "repository": "/root/sym_cjcj_918_implement_r6086353010/retained-cjcj",
+      "version": "5d7eef2bc2150b315db0df71d72298ca201591a0"
+    },
+    "config": {
+      "host": "linux_x86_64",
+      "options": {
+        "flatbuffersSource": {
+          "commit": "c3e4d69cbd5950e43f775ba76eadb30750d6e0b7",
+          "repo": "/root/sym_cjcj_918_implement_r6086353010/retained-inputs/source-c3e4d69cbd5950e43f775ba76eadb30750d6e0b7.git",
+          "tree": "4a76afadb32db8f41426c9f3f3138dcca456e707"
+        },
+        "flatbuffersTransform": "cangjie-package-mapping-v1",
+        "launcher": "/usr/bin/ccache",
+        "sdkDependency": "official"
+      },
+      "target": "linux_x86_64",
+      "tools": {
+        "ar": {
+          "path": "/usr/bin/ar",
+          "sha256": "5b394f8752fde1776992d405d76034d5017b24b9b922bedaeeaff8cc344ef044"
+        },
+        "bash": {
+          "path": "/usr/bin/bash",
+          "sha256": "59474588a312b6b6e73e5a42a59bf71e62b55416b6c9d5e4a6e1c630c2a9ecd4"
+        },
+        "clang": {
+          "path": "/usr/bin/clang",
+          "sha256": "31925065812631303cf9af9a30b2f56427d2102667a87a9fb4ba03a306104589"
+        },
+        "clang++": {
+          "path": "/usr/bin/clang++",
+          "sha256": "31925065812631303cf9af9a30b2f56427d2102667a87a9fb4ba03a306104589"
+        },
+        "cmake": {
+          "path": "/usr/bin/cmake",
+          "sha256": "fd22547781b64bb2db04370970b93db1f3fada1e41e60873b015ee0747009fc0"
+        },
+        "getconf": {
+          "path": "/usr/bin/getconf",
+          "sha256": "036757cca72d3c5659e1ec5e76aeea86598053ac4b96be3572d1e6a6348c0624"
+        },
+        "git": {
+          "path": "/usr/bin/git",
+          "sha256": "587ef21868c948b883993e23209b86a72a6ddc06aab1545c697ffc31075acd4a"
+        },
+        "launcher": {
+          "path": "/usr/bin/ccache",
+          "sha256": "892c37ccf83c263cc518355911814448745d5d9f5f29e8b176a2d36b2b75d9a6"
+        },
+        "ninja": {
+          "path": "/usr/bin/ninja",
+          "sha256": "a9ddfbf7e365a2e5026ed44f9173e498e37d8b71ec5e259b2c2a684f16cfa862"
+        },
+        "nm": {
+          "path": "/usr/bin/nm",
+          "sha256": "ed6565c132d6f20019ff3f050043dc1b2b8bc2e8b3b94c1ffe3f34436431a5a4"
+        },
+        "node": {
+          "path": "/usr/local/bin/node",
+          "sha256": "34bc6627675906f8431892630b5e91fc4cc9f1e03ce15e9716025aa551e5c823"
+        },
+        "python3": {
+          "path": "/usr/bin/python3",
+          "sha256": "a2f33a6e006989270f4340528eb61f8f97366e00a5d1b602ac8672ea44fc56ae"
+        }
+      }
+    },
+    "identity": {
+      "recipeId": "9a2d1b3548f847e343bc75adb156deddc3888792d0634aef8392cd7762ed3af9",
+      "buildId": "ast/174db8f40d5efddee63c47a3162bbf676bc227a0/9a2d1b3548f847e343bc75adb156deddc3888792d0634aef8392cd7762ed3af9",
+      "directory": "/root/sym_cjcj_918_implement_r6086353010/retained-builds/ast/174db8f40d5efddee63c47a3162bbf676bc227a0/9a2d1b3548f847e343bc75adb156deddc3888792d0634aef8392cd7762ed3af9",
+      "dependencies": {
+        "official": "official/ec9b5ab4b7a84cb71e4b9023d40353723be8108e4ee6d110d07e9ec32d92de19/103714018ada29081b9c37edc679966a7ac98bb385d08d23c3f88a5bc889e9ee"
+      }
+    },
+    "receipt": "MISSING"
+  },
+  {
+    "id": "compiler-schema",
+    "source": {
+      "commit": "174db8f40d5efddee63c47a3162bbf676bc227a0",
+      "kind": "git",
+      "repo": "/root/sym_cjcj_918_implement_r6086353010/retained-inputs/source-174db8f40d5efddee63c47a3162bbf676bc227a0.git",
+      "tree": "6f25a2072a9d8eeef8d32d050293e58690434920"
+    },
+    "producer": {
+      "adapter": "compiler-schema",
+      "repository": "/root/sym_cjcj_918_implement_r6086353010/retained-cjcj",
+      "version": "5d7eef2bc2150b315db0df71d72298ca201591a0"
+    },
+    "config": {
+      "host": "linux_x86_64",
+      "options": {},
+      "target": "linux_x86_64",
+      "tools": {
+        "git": {
+          "path": "/usr/bin/git",
+          "sha256": "587ef21868c948b883993e23209b86a72a6ddc06aab1545c697ffc31075acd4a"
+        },
+        "node": {
+          "path": "/usr/local/bin/node",
+          "sha256": "34bc6627675906f8431892630b5e91fc4cc9f1e03ce15e9716025aa551e5c823"
+        }
+      }
+    },
+    "identity": {
+      "recipeId": "df84741c6ff06338f735dab83848843296b34b72c2d2f6cae73eb4c9ea5c6544",
+      "buildId": "compiler-schema/174db8f40d5efddee63c47a3162bbf676bc227a0/df84741c6ff06338f735dab83848843296b34b72c2d2f6cae73eb4c9ea5c6544",
+      "directory": "/root/sym_cjcj_918_implement_r6086353010/retained-builds/compiler-schema/174db8f40d5efddee63c47a3162bbf676bc227a0/df84741c6ff06338f735dab83848843296b34b72c2d2f6cae73eb4c9ea5c6544",
+      "dependencies": {}
+    },
+    "receipt": "MISSING"
+  },
+  {
+    "id": "compiler",
+    "source": {
+      "commit": "4d05592c3b0a05b3ab4d554a379e3885faf25cf2",
+      "kind": "git",
+      "repo": "/root/sym_cjcj_918_implement_r6086353010/retained-cjcj",
+      "tree": "84f6c8bd16ef9be457a3b37448391506cc2ab4d3"
+    },
+    "producer": {
+      "adapter": "sharedbuild-stage1",
+      "engine": "/root/sym_cjcj_918_implement_r6086353010/retained-tools/ts/src/sharedbuild/main.py",
+      "engineSha256": "2be9b4053cb2de624ecf31685760159e38ea573e1e76eaea13faa9429430cac2",
+      "recipe": "/root/sym_cjcj_918_implement_r6086353010/retained-inputs/compiler.request.json",
+      "repository": "/root/sym_cjcj_918_implement_r6086353010/retained-tools",
+      "version": "b497dffaaf9f20c3c71b6911eaf6d854b43caeeb"
+    },
+    "config": {
+      "host": "linux_x86_64",
+      "options": {
+        "heap": "48GB",
+        "inputBindings": {
+          "llvm-shim.o": {
+            "artifact": "third_party/llvm/fixed-llc/cjselfhost_llvmshim.o",
+            "dependency": "llvm-cjdb"
+          }
+        },
+        "jobs": 192,
+        "optimization": "O1",
+        "outputs": [
+          "cjcj-stage1"
+        ],
+        "parameters": {
+          "compile_flags": ""
+        },
+        "sdkDependency": "official",
+        "targetLlvmDependency": "llvm-cjdb"
+      },
+      "target": "linux_x86_64",
+      "tools": {
+        "ar": {
+          "path": "/usr/bin/ar",
+          "sha256": "5b394f8752fde1776992d405d76034d5017b24b9b922bedaeeaff8cc344ef044"
+        },
+        "bash": {
+          "path": "/usr/bin/bash",
+          "sha256": "59474588a312b6b6e73e5a42a59bf71e62b55416b6c9d5e4a6e1c630c2a9ecd4"
+        },
+        "builder": {
+          "path": "/root/sym_cjcj_918_implement_r6086353010/retained-tools/ts/src/sharedbuild/cjcj-stage1.mjs",
+          "sha256": "95819cf1a1f76a42732724c62317a9f442f25d8493f2f1ea8e23357d56a5bbf2"
+        },
+        "cc": {
+          "path": "/usr/bin/cc",
+          "sha256": "821af3c74506283c179ca413bb33e6b528805a4dd8a5c09df125e5ad560a9e89"
+        },
+        "ccache": {
+          "path": "/usr/bin/ccache",
+          "sha256": "892c37ccf83c263cc518355911814448745d5d9f5f29e8b176a2d36b2b75d9a6"
+        },
+        "clang": {
+          "path": "/usr/bin/clang",
+          "sha256": "31925065812631303cf9af9a30b2f56427d2102667a87a9fb4ba03a306104589"
+        },
+        "clang++": {
+          "path": "/usr/bin/clang++",
+          "sha256": "31925065812631303cf9af9a30b2f56427d2102667a87a9fb4ba03a306104589"
+        },
+        "cmake": {
+          "path": "/usr/bin/cmake",
+          "sha256": "fd22547781b64bb2db04370970b93db1f3fada1e41e60873b015ee0747009fc0"
+        },
+        "compilerIdentity": {
+          "path": "/root/sym_cjcj_918_implement_r6086353010/retained-cjcj/ci/bootstrap/compiler_identity.py",
+          "sha256": "2ae130ef7aa4e5128dfba9f3e5fc4db3cb3683abf0da02474fef612e1619ce2d"
+        },
+        "find": {
+          "path": "/usr/bin/find",
+          "sha256": "791b89c8bffb8101fd7d4d212b80af66a2332834b05a42721104eb47e8fa2eb1"
+        },
+        "getconf": {
+          "path": "/usr/bin/getconf",
+          "sha256": "036757cca72d3c5659e1ec5e76aeea86598053ac4b96be3572d1e6a6348c0624"
+        },
+        "git": {
+          "path": "/usr/bin/git",
+          "sha256": "587ef21868c948b883993e23209b86a72a6ddc06aab1545c697ffc31075acd4a"
+        },
+        "ninja": {
+          "path": "/usr/bin/ninja",
+          "sha256": "a9ddfbf7e365a2e5026ed44f9173e498e37d8b71ec5e259b2c2a684f16cfa862"
+        },
+        "node": {
+          "path": "/usr/local/bin/node",
+          "sha256": "34bc6627675906f8431892630b5e91fc4cc9f1e03ce15e9716025aa551e5c823"
+        },
+        "python3": {
+          "path": "/usr/bin/python3",
+          "sha256": "a2f33a6e006989270f4340528eb61f8f97366e00a5d1b602ac8672ea44fc56ae"
+        },
+        "tar": {
+          "path": "/usr/bin/tar",
+          "sha256": "fd0d62eed19efd3e115aa1be44160f89d777cd1e6d6d8eb0ce7c8bdc879f59e2"
+        }
+      }
+    },
+    "identity": {
+      "recipeId": "c790b8ebf04e37fadc7f41b8fbfe889e3a8f421ebb803a75fc263f62df1360d7",
+      "buildId": "compiler/4d05592c3b0a05b3ab4d554a379e3885faf25cf2/c790b8ebf04e37fadc7f41b8fbfe889e3a8f421ebb803a75fc263f62df1360d7",
+      "directory": "/root/sym_cjcj_918_implement_r6086353010/retained-builds/compiler/4d05592c3b0a05b3ab4d554a379e3885faf25cf2/c790b8ebf04e37fadc7f41b8fbfe889e3a8f421ebb803a75fc263f62df1360d7",
+      "dependencies": {
+        "official": "official/ec9b5ab4b7a84cb71e4b9023d40353723be8108e4ee6d110d07e9ec32d92de19/103714018ada29081b9c37edc679966a7ac98bb385d08d23c3f88a5bc889e9ee",
+        "llvm-cjdb": "llvm-cjdb/53ce96a7b9d243dc7fa05ff6a9b56ea0ef94c057/1731c8418b99de1a0f169d315d6cfe2cc231ae103d746dc2b55ae553c9193d63",
+        "ast": "ast/174db8f40d5efddee63c47a3162bbf676bc227a0/9a2d1b3548f847e343bc75adb156deddc3888792d0634aef8392cd7762ed3af9",
+        "compiler-schema": "compiler-schema/174db8f40d5efddee63c47a3162bbf676bc227a0/df84741c6ff06338f735dab83848843296b34b72c2d2f6cae73eb4c9ea5c6544"
+      }
+    },
+    "receipt": "MISSING"
+  },
+  {
+    "id": "std",
+    "source": {
+      "commit": "9733dfc09d29eca27d19cc3937a149838b4e3322",
+      "kind": "git",
+      "repo": "/root/sym_cjcj_918_implement_r6086353010/retained-inputs/source-9733dfc09d29eca27d19cc3937a149838b4e3322.git",
+      "tree": "e44cf3b4791b5a0f91df78251b6805f5c68e5963"
+    },
+    "producer": {
+      "adapter": "bootstrap-std",
+      "repository": "/root/sym_cjcj_918_implement_r6086353010/retained-cjcj",
+      "version": "5d7eef2bc2150b315db0df71d72298ca201591a0"
+    },
+    "config": {
+      "host": "linux_x86_64",
+      "options": {
+        "astDependency": "ast",
+        "compilerDependency": "compiler",
+        "compilerRuntime": "host",
+        "heap": "48GB",
+        "launcher": "/usr/bin/ccache",
+        "llvmDylibDependency": "llvm-cjdb",
+        "llvmToolsDependency": "llvm-cjdb",
+        "runtimeDependency": "runtime",
+        "sdkDependency": "official",
+        "targetLibRelative": "install"
+      },
+      "target": "linux_x86_64",
+      "tools": {
+        "ar": {
+          "path": "/usr/bin/ar",
+          "sha256": "5b394f8752fde1776992d405d76034d5017b24b9b922bedaeeaff8cc344ef044"
+        },
+        "bash": {
+          "path": "/usr/bin/bash",
+          "sha256": "59474588a312b6b6e73e5a42a59bf71e62b55416b6c9d5e4a6e1c630c2a9ecd4"
+        },
+        "clang": {
+          "path": "/usr/bin/clang",
+          "sha256": "31925065812631303cf9af9a30b2f56427d2102667a87a9fb4ba03a306104589"
+        },
+        "clang++": {
+          "path": "/usr/bin/clang++",
+          "sha256": "31925065812631303cf9af9a30b2f56427d2102667a87a9fb4ba03a306104589"
+        },
+        "cmake": {
+          "path": "/usr/bin/cmake",
+          "sha256": "fd22547781b64bb2db04370970b93db1f3fada1e41e60873b015ee0747009fc0"
+        },
+        "getconf": {
+          "path": "/usr/bin/getconf",
+          "sha256": "036757cca72d3c5659e1ec5e76aeea86598053ac4b96be3572d1e6a6348c0624"
+        },
+        "git": {
+          "path": "/usr/bin/git",
+          "sha256": "587ef21868c948b883993e23209b86a72a6ddc06aab1545c697ffc31075acd4a"
+        },
+        "launcher": {
+          "path": "/usr/bin/ccache",
+          "sha256": "892c37ccf83c263cc518355911814448745d5d9f5f29e8b176a2d36b2b75d9a6"
+        },
+        "ninja": {
+          "path": "/usr/bin/ninja",
+          "sha256": "a9ddfbf7e365a2e5026ed44f9173e498e37d8b71ec5e259b2c2a684f16cfa862"
+        },
+        "nm": {
+          "path": "/usr/bin/nm",
+          "sha256": "ed6565c132d6f20019ff3f050043dc1b2b8bc2e8b3b94c1ffe3f34436431a5a4"
+        },
+        "node": {
+          "path": "/usr/local/bin/node",
+          "sha256": "34bc6627675906f8431892630b5e91fc4cc9f1e03ce15e9716025aa551e5c823"
+        },
+        "python3": {
+          "path": "/usr/bin/python3",
+          "sha256": "a2f33a6e006989270f4340528eb61f8f97366e00a5d1b602ac8672ea44fc56ae"
+        }
+      }
+    },
+    "identity": {
+      "recipeId": "348f14d0ff0a1aa0f7c398bc69906c39d947ca93b98a238ca7cebcbb6854363c",
+      "buildId": "std/9733dfc09d29eca27d19cc3937a149838b4e3322/348f14d0ff0a1aa0f7c398bc69906c39d947ca93b98a238ca7cebcbb6854363c",
+      "directory": "/root/sym_cjcj_918_implement_r6086353010/retained-builds/std/9733dfc09d29eca27d19cc3937a149838b4e3322/348f14d0ff0a1aa0f7c398bc69906c39d947ca93b98a238ca7cebcbb6854363c",
+      "dependencies": {
+        "official": "official/ec9b5ab4b7a84cb71e4b9023d40353723be8108e4ee6d110d07e9ec32d92de19/103714018ada29081b9c37edc679966a7ac98bb385d08d23c3f88a5bc889e9ee",
+        "compiler": "compiler/4d05592c3b0a05b3ab4d554a379e3885faf25cf2/c790b8ebf04e37fadc7f41b8fbfe889e3a8f421ebb803a75fc263f62df1360d7",
+        "runtime": "runtime/9733dfc09d29eca27d19cc3937a149838b4e3322/00e23139d44c53843e24abac40c0b80616485728be380005c672a1849916842f",
+        "llvm-cjdb": "llvm-cjdb/53ce96a7b9d243dc7fa05ff6a9b56ea0ef94c057/1731c8418b99de1a0f169d315d6cfe2cc231ae103d746dc2b55ae553c9193d63",
+        "ast": "ast/174db8f40d5efddee63c47a3162bbf676bc227a0/9a2d1b3548f847e343bc75adb156deddc3888792d0634aef8392cd7762ed3af9",
+        "compiler-schema": "compiler-schema/174db8f40d5efddee63c47a3162bbf676bc227a0/df84741c6ff06338f735dab83848843296b34b72c2d2f6cae73eb4c9ea5c6544"
+      }
+    },
+    "receipt": "MISSING"
+  }
+]
