@@ -19,5 +19,5 @@ test('the real workflow selector chooses the independently measured Linux publis
 test('the workflow selector retains the unverified other-platform identity',()=>{
   const selected=spawnSync(process.execPath,[path.join(repository,'ci/host-toolchain-pin.mjs'),'--github-env','--platform','linux_aarch64'],{encoding:'utf8'});
   assert.equal(selected.status,0,selected.stderr);
-  assert.equal(selected.stdout.trim(),'CJCJ_TOOLCHAIN=nightly-1.3.0-alpha.20260925010001');
+  assert.equal(selected.stdout.trim(),'CJCJ_TOOLCHAIN=nightly-1.3.0-alpha.20260925001050');
 });
