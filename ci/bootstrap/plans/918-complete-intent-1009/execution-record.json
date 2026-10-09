@@ -1,0 +1,66 @@
+{
+  "schema": "918-nonbuild-execution-v1",
+  "host": "kkk2",
+  "wrapper": "/root/cj_build/tools/cjops control wf-kkk2 sh sym_cjcj_918_implement_r6085769397",
+  "transport": "bash /root/cj_build/tools/box.sh kkk2",
+  "coreSoftHard": 0,
+  "executedProductBuilds": 0,
+  "resolveAssemblyPackage": "NOT_RUN",
+  "commands": [
+    {
+      "name": "freeze-first",
+      "entry": "node cjcj/ci/bootstrap/freeze-sdk-plan.mjs --intent inputs/complete.intent.json --out inputs/complete.plan.json",
+      "rc": 1,
+      "evidence": "freeze.log",
+      "classification": "preparation: declared53ce locator held7ed/no53ce object"
+    },
+    {
+      "name": "freeze-corrected",
+      "entry": "same formal freezer, actual existing53ce locator",
+      "rc": 0,
+      "evidence": "freeze-corrected.log"
+    },
+    {
+      "name": "freeze-final",
+      "entry": "node cjcj/ci/bootstrap/freeze-sdk-plan.mjs --intent inputs/complete.intent.json --out inputs/complete-final.plan.json",
+      "rc": 0,
+      "evidence": "freeze-final.log",
+      "change": "same fixed53ce object retained in lane-private bare repository"
+    },
+    {
+      "name": "dry-run",
+      "entry": "node cjcj/ci/bootstrap/toolchain-sdk.mjs --plan inputs/complete-final.plan.json --dry-run",
+      "rc": 0,
+      "evidence": "dry-run.log"
+    },
+    {
+      "name": "wrong-source",
+      "entry": "node cjcj/ci/bootstrap/toolchain-sdk.mjs --plan inputs/wrong-source.plan.json --dry-run",
+      "rc": 1,
+      "evidence": "wrong-source.log",
+      "expectedRule": "LLVM_SOURCE"
+    },
+    {
+      "name": "production-intent-first",
+      "entry": "node cjcj/ci/bootstrap/freeze-sdk-plan.mjs --intent inputs/complete-production.intent.json --out inputs/complete-production.plan.json",
+      "rc": 1,
+      "evidence": "production-intent.log",
+      "classification": "preparation: upload destination accidentally local absolute path; input absent"
+    },
+    {
+      "name": "production-intent-corrected",
+      "entry": "same formal freezer, transmitted complete-production.intent.json adds package declaration",
+      "rc": 1,
+      "evidence": "production-intent-corrected.log",
+      "rule": "SCHEMA",
+      "classification": "existing formal schema cannot express package declaration; no successor production"
+    },
+    {
+      "name": "input-check",
+      "entry": "input-specific inline Node using existing buildIdentities/topological and fs.access only",
+      "rc": 0,
+      "evidence": "input-check.log",
+      "summary": "7 expected receipts missing; buildRoot absent"
+    }
+  ]
+}
