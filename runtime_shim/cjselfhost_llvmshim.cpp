@@ -84,7 +84,13 @@
 #include "llvm/Transforms/Utils/ValueMapper.h"
 #include "llvm/IR/Value.h"
 
+// The caller selects its fixed compiler schema; never infer it from files.
+// Legacy llvm_pin.env / prepare_cpp_headers callers retain ModuleFormat.
+#if defined(CJOF_SCHEMA_CJO)
+#include "flatbuffers/CjoFormat_generated.h"
+#else
 #include "flatbuffers/ModuleFormat_generated.h"
+#endif
 #include "llvm/Analysis/CallGraph.h"
 
 using namespace llvm;

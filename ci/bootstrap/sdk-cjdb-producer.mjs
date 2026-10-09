@@ -8,6 +8,20 @@ import {fileDigest, readJson, atomicJson, inventory, sourceIdentity, registeredS
 import {parseLlvmToolsManifest} from '../llvm-tools-manifest.mjs';
 import {prepareQualification, exportQualification} from './sdk-cjdb-qualification.mjs';
 
+// The complete CJDB recipe uses compiler174db8's CjoFormat contract.
+// Keep this exact generation/compilation step callable for partial qualification;
+// it does not build or seal a native component.
+export async function compileCjdbShim({flatc, compiler, llvm, llvmBuild, flatbuffers,
+  generatedHeaders, repository, object, clang, launcher, env}, run) {
+  await fs.mkdir(path.join(generatedHeaders, 'flatbuffers'), {recursive: true});
+  await run([flatc, '--no-warnings', '-c', '-o', path.join(generatedHeaders, 'flatbuffers'),
+    path.join(compiler, 'schema/CjoFormat.fbs')], {env});
+  await run([...(launcher ? [launcher] : []), clang, '-std=c++17', '-O2', '-fPIC', '-fno-rtti', '-fno-exceptions',
+    '-DCJOF_SCHEMA_CJO=1', `-I${llvm}/llvm/include`, `-I${llvmBuild}/include`,
+    `-I${flatbuffers}/include`, `-I${generatedHeaders}`,
+    '-c', path.join(repository, 'runtime_shim/cjselfhost_llvmshim.cpp'), '-o', object], {env});
+}
+
 export async function buildCjdb(request, {run, tool, fetchIdentity, execute: requestExecute}) {
   const {component, source: llvmReference, directory, dependencies} = request;
   const options = component.config.options;
@@ -121,12 +135,10 @@ export async function buildCjdb(request, {run, tool, fetchIdentity, execute: req
   // Bind the bootstrap shim and tuple metadata to these native executables,
   // headers and schema. No RTTI-OFF tuple contributes bytes to this install.
   const generatedHeaders = path.join(directory, 'build/shim-schema');
-  await fs.mkdir(path.join(generatedHeaders, 'flatbuffers'), {recursive:true});
-  await run([path.join(build, 'bin/flatc'), '--no-warnings', '-c', '-o', path.join(generatedHeaders, 'flatbuffers'), path.join(compiler, 'schema/ModuleFormat.fbs')], {env});
   const fixed = path.join(nativeRoot, 'fixed-llc'); await fs.mkdir(fixed);
-  await run([launcher, tool('clang++'), '-std=c++17', '-O2', '-fPIC', '-fno-rtti', '-fno-exceptions',
-    `-I${llvm}/llvm/include`, `-I${llvmBuild}/include`, `-I${flatbuffers}/include`, `-I${generatedHeaders}`,
-    '-c', path.join(component.producer.repository, 'runtime_shim/cjselfhost_llvmshim.cpp'), '-o', path.join(fixed,'cjselfhost_llvmshim.o')], {env});
+  await compileCjdbShim({flatc: path.join(build, 'bin/flatc'), compiler, llvm, llvmBuild, flatbuffers,
+    generatedHeaders, repository: component.producer.repository,
+    object: path.join(fixed, 'cjselfhost_llvmshim.o'), clang: tool('clang++'), launcher, env}, run);
   const values = {PLATFORM:component.config.target,LLVM_SHA:component.source.commit,CANGJIE_COMPILER_SHA:options.compilerSource.commit,FLATBUFFERS_SHA:options.flatbuffersSource.commit};
   for (const [name,prefix] of [['llc','LLC'],['opt','OPT'],['ld.lld','LLD']]) {
     const binary=path.join(nativeRoot,'bin',name), result=await requestExecute(binary,['--version'],{env:{...env,LD_LIBRARY_PATH:path.join(nativeRoot,'lib')}});
