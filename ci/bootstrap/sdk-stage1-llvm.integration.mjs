@@ -60,8 +60,9 @@ const nativeComponent = {id: 'fixture-native', domain: 'target', roles: ['llvm-t
 const cjpm = `#!${process.execPath}\nimport fs from 'node:fs/promises';import path from 'node:path';import {spawnSync} from 'node:child_process';\nconst sdk=process.env.CANGJIE_HOME;\nfunction run(argv){console.log('FIXTURE_COMMAND '+JSON.stringify(argv));const r=spawnSync(argv[0],argv.slice(1),{env:process.env,encoding:'utf8'});process.stdout.write(r.stdout||'');process.stderr.write(r.stderr||'');if(r.status!==0)process.exit(r.status||1);}\nrun([path.join(sdk,'bin/cjc')]);run([path.join(sdk,'third_party/llvm/bin/llc')]);\nconst text=await fs.readFile('packages/codegen/cjpm.toml','utf8');const link=text.match(/link-option = "([^"\\n]+)"/)[1].replaceAll('$'+'{CANGJIE_HOME}',sdk);\nawait fs.mkdir('target/release/bin',{recursive:true});await fs.writeFile('target/release/link-command.json',JSON.stringify(link));\nrun(['/usr/bin/cc',${JSON.stringify(path.join(root, 'probe.c'))},...link.split(' '),'-ldl','-o','target/release/bin/cjcj::cjc']);\n`;
 if (!reuse) await write(path.join(official, 'tools/bin/cjpm'), cjpm, 0o755);
 const hostLock = path.join(official, 'SDK.lock.json');
-if (!reuse) await atomicJson(hostLock, {fixture: 'official-host-domain'});
-const hostSource = {kind: 'distribution', root: official, lock: hostLock, lockSha256: await fileDigest(hostLock)};
+if (!reuse) await atomicJson(hostLock, {schema: 'sharedbuild-official-sdk-v1', role: 'host', version: 'controlled-official',
+  fixture: 'official-host-domain', files: await inventory(official)});
+const hostSource = {kind: 'distribution', root: official, lock: hostLock, lockSha256: await fileDigest(hostLock), version: 'controlled-official'};
 const observer = path.join(here, 'fixtures/sdk-stage1-observer.mjs');
 const producerVersion = (await execute('/usr/bin/git', ['-C', toolsRepo, 'rev-parse', 'HEAD'])).stdout.trim();
 const builder = path.join(toolsRepo, 'ts/src/sharedbuild/cjcj-stage1.mjs');
@@ -80,7 +81,7 @@ async function arm(name, mutate = () => {}) {
   const identity = {directory, buildId: `controlled-${name}`, dependencies: {'fixture-native': nativeBuild}};
   let failure;
   try { await produceComponent({buildRoot: root, lane: 'controlled-stage1'}, component, identity,
-    new Map([['fixture-host', {component: {source: hostSource, domain: 'host'}, files: {}}], ['fixture-native', projection],
+    new Map([['fixture-host', {component: {source: hostSource, domain: 'host'}, files: {}, artifacts: official}], ['fixture-native', projection],
       ['fixture-other', {...projection, component: {...nativeComponent, id: 'fixture-other', source: {...nativeComponent.source, commit: '0'.repeat(40)}}}]])); }
   catch (error) { failure = error; }
   assert.ok(failure, 'controlled executor must stop before product sealing');
@@ -99,7 +100,7 @@ test('formal stage1 producer feeds one target native capsule and actual isolated
   assert.equal(domains.nativeBuildId, nativeBuild);
   assert.equal(domains.llvmSha256, nativeFiles[llvmRel].sha256);
   assert.equal(domains.shimSha256, nativeFiles[shimRel].sha256);
-  assert.match(normal.log, new RegExp(`DOMAIN value=HOST origin=${official}/third_party/llvm/lib/libLLVM-15.so`));
+  assert.match(normal.log, /DOMAIN value=HOST origin=.*shared-cache\/official-sdk\/controlled-official\/[^/]+\/third_party\/llvm\/lib\/libLLVM-15.so/);
   assert.match(normal.log, /DOMAIN value=TARGET origin=.*stage1-link-sdk\/third_party\/llvm\/lib\/libLLVM-15.so/);
   const link = await readJson(path.join(normal.result.work, 'artifacts/release/link-command.json'));
   assert.ok(link.includes(`${domains.sdk}/${llvmRel}`), 'product-authored link-option uses target libLLVM');

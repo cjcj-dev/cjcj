@@ -89,7 +89,29 @@ async function sharedbuild(component, directory, identity, plan, resumeFailed, o
   const sdkOutput = outputs.get(options.sdkDependency), sdkSource = sdkOutput?.component.source;
   if (sdkSource?.kind !== 'distribution' || sdkOutput.component.domain !== 'host') reject('PRODUCER_RECIPE', component.id, 'sharedbuild requires an explicit official host SDK dependency');
   if (await fileDigest(sdkSource.lock) !== sdkSource.lockSha256) reject('PRODUCER_RECIPE', component.id, 'host SDK lock changed');
+  // Official publisher locks need not be inside the distribution root and
+  // are not sharedbuild cache seals. Use its existing sdk-publish producer to
+  // create the engine's own full, physical host copy; retain the original lock
+  // as an independent request input rather than relabeling it as that seal.
+  const hostLog = path.join(directory, 'logs', `host-publish-${randomUUID()}.log`);
+  await runProducer([component.config.tools.python3.path, engine, '--remote', '--root', path.join(plan.buildRoot, 'shared-cache'),
+    '--lane', plan.lane, 'sdk-publish', '--source', sdkOutput.artifacts, '--version', sdkSource.version], {cwd: directory, env: process.env, log: hostLog});
+  const sdkRoot = (await fs.readFile(hostLog, 'utf8')).split('\n').find(line => line.startsWith(`${path.join(plan.buildRoot, 'shared-cache', 'official-sdk')}/`));
+  if (!sdkRoot) reject('PRODUCER_RECIPE', component.id, 'official publisher did not return its sealed private host directory');
+  const adapterHostLock = await readJson(path.join(sdkRoot, 'SDK.lock.json'));
+  if (adapterHostLock.schema !== 'sharedbuild-official-sdk-v1' || adapterHostLock.role !== 'host'
+    || adapterHostLock.version !== sdkSource.version || adapterHostLock.source !== sdkOutput.artifacts
+    || await fileDigest(sdkSource.lock) !== sdkSource.lockSha256) reject('PRODUCER_RECIPE', component.id, 'official host publication differs from frozen source');
+  const publisherFiles = files => Object.fromEntries(Object.entries(files).filter(([name]) => !['SDK.lock.json', 'MANIFEST.sha256', 'DONE'].includes(name)).map(([name, row]) => [name, row.sha256]));
+  if (canonical(publisherFiles(adapterHostLock.files)) !== canonical(publisherFiles((await readJson(sdkSource.lock)).files))) {
+    reject('PRODUCER_RECIPE', component.id, 'official host bytes differ from original distribution lock');
+  }
+  const adapterHostLockSha256 = await fileDigest(path.join(sdkRoot, 'SDK.lock.json'));
   const inputs = {}, expectedInputHashes = {};
+  const originalHostLock = path.join(directory, 'official-host-lock.json');
+  await fs.copyFile(sdkSource.lock, originalHostLock);
+  inputs['official-host-lock.json'] = originalHostLock;
+  expectedInputHashes['official-host-lock.json'] = sdkSource.lockSha256;
   for (const [name, binding] of Object.entries(options.inputBindings)) {
     const dependency = outputs.get(binding.dependency), entry = dependency?.files[binding.artifact];
     if (entry?.type !== 'file') reject('PRODUCER_RECIPE', component.id, `missing physical dependency artifact ${name}`);
@@ -119,14 +141,14 @@ async function sharedbuild(component, directory, identity, plan, resumeFailed, o
       '--mtime=@0', '--owner=0', '--group=0', '--numeric-owner', '--no-recursion', '--verbatim-files-from', '-T', members]);
     await atomicJson(contract, {schema: 'stage1-target-llvm-v1', source: native.component.source,
       producer: native.component.producer, buildId: native.buildId, receiptSha256: native.receiptSha256,
-      hostLockSha256: sdkSource.lockSha256, files});
+      hostLockSha256: adapterHostLockSha256, hostSourceLockSha256: sdkSource.lockSha256, files});
     for (const [name, file] of [['target-llvm.tar', archive], ['target-llvm.json', contract]]) {
       inputs[name] = file; expectedInputHashes[name] = await fileDigest(file);
     }
   }
   // The JSON is an emitted request, not another mutable source of input
   // authority. Every producer parameter comes from the frozen plan/receipts.
-  const spec = {kind, sha: component.source.commit, repo: component.source.repo, sdk: sdkSource.root,
+  const spec = {kind, sha: component.source.commit, repo: component.source.repo, sdk: sdkRoot,
     builder: component.config.tools.builder.path, inputs, outputs: options.outputs,
     parameters: options.parameters, optimization: options.optimization, host: component.config.host,
     target: component.config.target, dependency_build_ids: identity.dependencies,
@@ -155,7 +177,7 @@ async function sharedbuild(component, directory, identity, plan, resumeFailed, o
   const actualRecipe = await readJson(path.join(cache, 'recipe.json'));
   if (actualRecipe.source_sha !== component.source.commit || actualRecipe.source_tree !== component.source.tree
     || actualRecipe.engine_sha256 !== engineSha256 || actualRecipe.builder_sha256 !== component.config.tools.builder.sha256
-    || actualRecipe.sdk.lock_sha256 !== sdkSource.lockSha256 || actualRecipe.sdk.version !== sdkSource.version
+    || actualRecipe.sdk.lock_sha256 !== adapterHostLockSha256 || actualRecipe.sdk.version !== sdkSource.version
     || canonical(actualRecipe.inputs) !== canonical(expectedInputHashes) || canonical(actualRecipe.outputs) !== canonical(options.outputs)
     || canonical(actualRecipe.parameters) !== canonical(options.parameters)
     || canonical(actualRecipe.tools) !== canonical(spec.tools) || actualRecipe.builder_companion

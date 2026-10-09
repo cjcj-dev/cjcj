@@ -4,7 +4,18 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {spawn} from 'node:child_process';
-const args = process.argv.slice(2), spec = JSON.parse(await fs.readFile(args[args.indexOf('--recipe') + 1], 'utf8'));
+const args = process.argv.slice(2);
+if (args.includes('sdk-publish')) {
+  // Exercise the existing real publisher on the small official fixture; this
+  // is a physical host copy, not a native/product success receipt.
+  const main = path.join(process.env.STAGE1_TOOLS_REPO, 'ts/src/sharedbuild/main.py');
+  const result = await new Promise((resolve, reject) => {
+    const p = spawn('/usr/bin/python3', [main, ...args], {stdio: 'inherit'});
+    p.once('error', reject); p.once('exit', (rc, signal) => resolve({rc, signal}));
+  });
+  process.exit(result.rc ?? 1);
+}
+const spec = JSON.parse(await fs.readFile(args[args.indexOf('--recipe') + 1], 'utf8'));
 const directory = path.dirname(args[args.indexOf('--recipe') + 1]);
 const work = path.join(directory, 'fixture-work'), inputs = path.join(work, 'inputs'), output = path.join(work, 'artifacts');
 await fs.mkdir(inputs, {recursive: true}); await fs.mkdir(output);
