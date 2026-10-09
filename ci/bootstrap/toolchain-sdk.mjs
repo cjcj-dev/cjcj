@@ -212,7 +212,7 @@ export async function verifyManifestSdk(sdk, plan, manifest) {
         || member.sha256 !== readers.tools[name]?.sha256) reject('LLVM_READERS', component.id, `missing/mismatched reader: ${name}`);
     }
   }
-  const tools = ['third_party/llvm/bin/llc', 'third_party/llvm/bin/opt', 'third_party/llvm/bin/ld.lld', 'tools/bin/cjpm', 'bin/cjc', ...['llvm-dis', 'llvm-as'].filter(name => manifest.files[`third_party/llvm/bin/${name}`]).map(name => `third_party/llvm/bin/${name}`)];
+  const tools = ['third_party/llvm/bin/llc', 'third_party/llvm/bin/opt', 'third_party/llvm/bin/ld.lld', 'tools/bin/cjpm', 'bin/cjc', ...(manifest.files['third_party/llvm/bitcode-readers.json'] ? ['third_party/llvm/bin/llvm-dis', 'third_party/llvm/bin/llvm-as'] : [])];
   for (const rel of tools) {
     if (!manifest.files[rel]) reject('MISSING_ARTIFACT', 'tools', rel);
     const binary = path.join(sdk, rel);
