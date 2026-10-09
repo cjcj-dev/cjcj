@@ -57,7 +57,7 @@ await fs.copyFile(await fs.realpath(lldInput), path.join(native, 'third_party/ll
 await fs.chmod(path.join(native, 'third_party/llvm/bin/lld'), 0o755);
 for (const name of ['ld.lld', 'ld64.lld', 'lld-link', 'wasm-ld']) await fs.symlink('lld', path.join(native, 'third_party/llvm/bin', name));
 await write(path.join(root, 'lld-input-identity.json'), JSON.stringify({requested: lldInput, physical: await fs.realpath(lldInput),
-  sha256: await fileDigest(lldInput), fixed53ceQualified: Boolean(process.env.STAGE1_REAL_LLD),
+  sha256: await fileDigest(lldInput), fixed53ceQualification: 'NOT_ESTABLISHED_BY_FIXTURE',
   version: (await execute(lldInput, ['--version'])).stdout}));
 await write(path.join(native, 'shim.c'), 'int fixture_shim(void){return 53;}\n');
 await fs.mkdir(path.dirname(path.join(native, shimRel)), {recursive: true});
