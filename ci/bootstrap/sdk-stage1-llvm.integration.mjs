@@ -190,9 +190,10 @@ test('native executable invocation and relative aliases retain argv0, arguments,
   const domains = await readJson(path.join(normal.result.work, 'stage1-domains.json'));
   const bin = path.join(domains.sdk, 'third_party/llvm/bin');
   const observations = [];
-  const capture = (file, args, childEnv = process.env) => {
-    const r = spawnSync(file, args, {env: childEnv, encoding: 'utf8'});
-    return {file, args, status: r.status, signal: r.signal, error: r.error?.message, stdout: r.stdout, stderr: r.stderr};
+  const callerEnv = {...process.env, CANGJIE_HOME: domains.sdk, LD_LIBRARY_PATH: domains.hostLd};
+  const capture = (file, args, childEnv = callerEnv, argv0 = file) => {
+    const r = spawnSync(file, args, {env: childEnv, argv0, encoding: 'utf8'});
+    return {file, argv0, args, loader: childEnv.LD_LIBRARY_PATH, status: r.status, signal: r.signal, error: r.error?.message, stdout: r.stdout, stderr: r.stderr};
   };
   // Collect every positive domain/control before checking the target assertions,
   // so an argv0 cut cannot hide independent host/target evidence behind a skip.
@@ -205,7 +206,7 @@ test('native executable invocation and relative aliases retain argv0, arguments,
   }
   for (const [name, args] of [['lld', ['-flavor', 'gnu', '--version']], ['ld.lld', ['--version']],
     ['ld64.lld', ['--version']], ['lld-link', ['/help']], ['wasm-ld', ['--version']]]) {
-    const raw = capture(path.join(native, 'third_party/llvm/bin', name), args);
+    const raw = capture(path.join(native, 'third_party/llvm/bin', name), args, callerEnv, path.join(bin, name));
     observations.push({...capture(path.join(bin, name), args), kind: 'real-lld', raw});
   }
   await atomicJson(path.join(normal.directory, 'native-entry-observations.json'), {host, target, observations,
