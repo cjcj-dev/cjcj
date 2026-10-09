@@ -74,13 +74,13 @@ async function llvm(request) {
     cmake.push(`-DCMAKE_C_COMPILER_LAUNCHER=${launcher.path}`, `-DCMAKE_CXX_COMPILER_LAUNCHER=${launcher.path}`);
   }
   await run(cmake);
-  const releaseTargets = ['lld', 'lli', 'llvm-link', 'llvm-lto', 'llvm-lto2', 'llvm-cov', 'llvm-profdata', 'llvm-profgen', 'llvm-symbolizer', 'llvm-objdump'];
+  const releaseTargets = ['lld', 'lli', 'llvm-link', 'llvm-lto', 'llvm-lto2', 'llvm-cov', 'llvm-profdata', 'llvm-profgen', 'llvm-symbolizer', 'llvm-objdump', 'llvm-addr2line', 'llvm-otool'];
   await run(['cmake', '--build', build, '--target', ...(dylib ? ['LLVM', 'llvm-nm'] : options.releaseToolsOnly ? releaseTargets : options.bitcodeReadersOnly ? ['llvm-dis', 'llvm-as'] : options.auxiliaryOnly ? ['llvm-objcopy', 'llvm-ar'] : ['llc', 'opt', 'lld', 'llvm-dis', 'llvm-as']), '-j', String(os.availableParallelism())]);
   const artifacts = path.join(directory, 'artifacts'); await fs.mkdir(artifacts, {recursive: true});
   if (options.releaseToolsOnly) {
     // These are native targets and aliases from the LLVM/lld CMake graph,
     // independently sealed from the bootstrap tuple and completed readers.
-    const binaries = ['lld', 'ld.lld', 'ld64.lld', 'lld-link', ...releaseTargets.slice(1), 'llvm-addr2line', 'llvm-otool'];
+    const binaries = ['lld', 'ld.lld', 'ld64.lld', 'lld-link', ...releaseTargets.slice(1)];
     await fs.mkdir(path.join(artifacts, 'bin'));
     for (const name of binaries) {
       await fs.copyFile(path.join(build, 'bin', name), path.join(artifacts, 'bin', name));

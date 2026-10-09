@@ -138,7 +138,7 @@ test('bootstrap producer reaches actual stdx and tools subprocess entries', asyn
   process.env.PATH = `${fakeBin}:${process.env.PATH}`;
   process.env.CJCJ_SRCBUILD_HOST_SDK = host;
   delete process.env.CANGJIE_BUILD_DRY_RUN;
-  const officialSdkRoot = host;
+  const officialSdkRoot = process.env.SDK_CONSUMER_REFERENCE_ROOT || host;
   const original = buildConfig({workspace: f.root, buildRoot: f.root, consumerSdk: f.sdk, officialSdkRoot});
   const dependencies = path.join(f.root, 'dependencies');
   await fs.mkdir(dependencies);
