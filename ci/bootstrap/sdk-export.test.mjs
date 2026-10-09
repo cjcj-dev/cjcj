@@ -23,7 +23,7 @@ test('input-only readers cannot remove the installed SDK reader qualification', 
   await fs.writeFile(path.join(root, 'resolver-result.json'), JSON.stringify({rc: child.status, signal: child.signal, repository}));
   console.log(`INSTALLED_READER_OWNER_ASSERT_REACHED evidence=${root} resolver_rc=${child.status}`);
   assert.notEqual(child.status, 0, 'input-only reader receipts must not qualify an SDK with no installed reader owner');
-  assert.match(child.stderr, /SDK-BUILD-FAIL LLVM_READERS .*missing installed reader owner/);
+  assert.match(child.stderr, /SDK_MANIFEST_REJECT rule=LLVM_READERS .*missing installed reader owner/);
 });
 
 test('fixed compiler schema reaches the real SDK resolver with its source bytes', async () => {
