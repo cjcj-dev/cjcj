@@ -20,6 +20,7 @@ const directory = path.dirname(args[args.indexOf('--recipe') + 1]);
 const work = path.join(directory, 'fixture-work'), inputs = path.join(work, 'inputs'), output = path.join(work, 'artifacts');
 await fs.mkdir(inputs, {recursive: true}); await fs.mkdir(output);
 for (const [name, input] of Object.entries(spec.inputs)) await fs.copyFile(input, path.join(inputs, name));
+if (process.env.STAGE1_FIXTURE_WRONG_ORIGINAL_LOCK) await fs.appendFile(path.join(inputs, 'official-host-lock.json'), '\ncontrolled invalid input\n');
 await fs.writeFile(path.join(work, 'parameters.json'), JSON.stringify(spec.parameters));
 const tuple = 'linux_x86_64_cjnative';
 const hostLd = [path.join(spec.sdk, 'runtime/lib', tuple), path.join(spec.sdk, 'lib', tuple),

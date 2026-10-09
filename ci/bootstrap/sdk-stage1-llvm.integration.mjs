@@ -139,3 +139,19 @@ test('actual adapter rejects an incorrect official host loader domain and recove
   assert.equal(wrong.result?.rc, 1); assert.match(wrong.log, /STAGE1_HOST_DOMAIN/);
   const restored = await arm('restored-host-domain'); assert.equal(restored.result?.rc, 0, restored.log);
 });
+test('formal host publisher refuses substituted bytes against the original host lock and recovers', async () => {
+  const file = path.join(official, llvmRel), bytes = await fs.readFile(file);
+  await fs.copyFile(path.join(native, llvmRel), file);
+  try {
+    const wrong = await arm('wrong-host-publisher-bytes');
+    assert.match(wrong.failure.message, /PRODUCER_RECIPE.*original distribution lock/);
+    assert.equal(wrong.result, undefined, 'adapter must not start with altered host bytes');
+  } finally {await fs.writeFile(file, bytes);}
+  const restored = await arm('restored-host-publisher-bytes'); assert.equal(restored.result?.rc, 0, restored.log);
+});
+test('actual adapter authenticates the original host lock as well as its derived private seal', async () => {
+  process.env.STAGE1_FIXTURE_WRONG_ORIGINAL_LOCK = '1';
+  let wrong; try {wrong = await arm('wrong-original-host-lock');} finally {delete process.env.STAGE1_FIXTURE_WRONG_ORIGINAL_LOCK;}
+  assert.equal(wrong.result?.rc, 1); assert.match(wrong.log, /STAGE1_LLVM.*official host identity/);
+  const restored = await arm('restored-original-host-lock'); assert.equal(restored.result?.rc, 0, restored.log);
+});
