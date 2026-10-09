@@ -8,6 +8,7 @@ import {spawnSync} from 'node:child_process';
 import test from 'node:test';
 import {sourceFetchArguments} from '../lib/git.mjs';
 import {fixture} from '../../ci/release/prepare_bootstrap_fixture.mjs';
+import {zxCommand, verifiedTool} from '../../ci/test-zx.mjs';
 
 const repo = path.resolve(import.meta.dirname, '../..');
 const hash = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
@@ -38,6 +39,7 @@ function observedStage3Fixture(formal, fn) {
   finally { observe({kind: 'case-end'}); observation = undefined; }
 }
 function execute(command, env = process.env, mutation = 'prepare') {
+  if (command[1] === '--cjcj-test-zx') command = zxCommand(command.slice(2), env);
   let result;
   if (observation) {
     const id = ++callSequence;
@@ -299,6 +301,31 @@ test('formal-default preparation still publishes the formal pin', () => fixture(
   assert.match(text, new RegExp(`RUNTIME_REF=${pin.RUNTIME_REF}`));
 }));
 
+test('prepared zx rejects substituted identity and restores actual CLI without npx', () => {
+  const tool = verifiedTool();
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zx identity '));
+  try {
+    const receipt = path.join(root, 'receipt.json');
+    const blocked = path.join(root, 'npx');
+    fs.writeFileSync(blocked, '#!/bin/sh\necho unexpected-npx >&2\nexit 91\n', {mode: 0o755});
+    const env = {...process.env, PATH: `${root}${path.delimiter}${process.env.PATH}`, CJCJ_TEST_ZX_RECEIPT: receipt};
+    const privatePackage = path.join(root, 'zx');
+    fs.cpSync(path.dirname(tool.packageFile), privatePackage, {recursive: true});
+    const privateTool = {...tool, packageFile: path.join(privatePackage, 'package.json'),
+      cli: path.join(privatePackage, path.relative(path.dirname(tool.packageFile), tool.cli))};
+    fs.writeFileSync(receipt, JSON.stringify(privateTool));
+    const bytes = fs.readFileSync(privateTool.cli);
+    fs.appendFileSync(privateTool.cli, '\n// deliberately changed tool identity\n');
+    assert.throws(() => execute([process.execPath, '--cjcj-test-zx', '--version'], env), /identity mismatch: cliSha256/);
+    fs.writeFileSync(privateTool.cli, bytes);
+    const restored = execute([process.execPath, '--cjcj-test-zx', '--version'], env);
+    assert.equal(restored.status, 0, restored.output);
+    assert.equal(restored.stdout.trim(), tool.version);
+    assert.doesNotMatch(restored.output, /unexpected-npx/);
+    console.log(`TEST_ZX_IDENTITY_ASSERT substituted=rejected restored=accepted version=${tool.version}`);
+  } finally { fs.rmSync(root, {recursive: true, force: true}); }
+});
+
 for (const formal of [false, true]) {
 test(`actual stage3 entry verifies promoted SDK before stage2: ${formal ? 'formal default' : 'candidate'}`, () => observedStage3Fixture(formal, f => {
   fs.mkdirSync(path.join(f.runtimeSource, 'stdlib'));
@@ -401,7 +428,7 @@ test(`actual stage3 entry verifies promoted SDK before stage2: ${formal ? 'forma
   // stage1 compiler, stage2 compiler and installed std prefix.
   fs.copyFileSync(a.compiler, path.join(work, 'cjcj-stage1'));
   write('stdlib-stage2/std-producer.json', JSON.stringify({compiler_sha256: hash(a.compiler)}) + '\n');
-  const publishStd = () => ok(['npx', '--yes', 'zx@8', path.join(repo, 'ci/bootstrap/publish-std-output.mjs'),
+  const publishStd = () => ok([process.execPath, '--cjcj-test-zx', path.join(repo, 'ci/bootstrap/publish-std-output.mjs'),
     work, path.join(work, 'stdlib-stage2'), path.join(work, 'cjcj-stage1'), tuple], f.env);
   publishStd();
   fs.cpSync(f.runtimeSource, path.join(workspace, 'cangjie_runtime'), {recursive: true});
@@ -410,7 +437,7 @@ test(`actual stage3 entry verifies promoted SDK before stage2: ${formal ? 'forma
     CJCJ_BOOTSTRAP_HOST_RT: a.base, CJCJ_STAGE3_DRY_RUN: '1', CJCJ_STAGE3_DRY_RUN_FINAL_STD: path.join(workspace, 'unused-std')};
   fs.mkdirSync(env.GITHUB_WORKSPACE, {recursive: true});
   fs.cpSync(path.join(repo, 'ci'), path.join(env.GITHUB_WORKSPACE, 'ci'), {recursive: true});
-  const command = ['npx', '--yes', 'zx@8', path.join(repo, 'ci/srcbuild/steps/build-stage3.mjs')];
+  const command = [process.execPath, '--cjcj-test-zx', path.join(repo, 'ci/srcbuild/steps/build-stage3.mjs')];
   preparationCheckpoint('runtime-tuple-sdk-runner-and-source');
   const valid = execute(command, env, 'first-promotion');
   assert.match(valid.output, new RegExp(`BOOTSTRAP_RUNTIME_CONSUMER_VERIFIED runtime=${selected}`), valid.output);

@@ -255,7 +255,7 @@ test('ci.yml provides the publisher archive tools before running contracts', asy
   // Android package fixtures compile AArch64 objects and link shared libraries.
   assert.match(install, /apt-get install[^\n]*\bclang\b/);
   assert.match(install, /apt-get install[^\n]*\blld\b/);
-  assert.match(install, /npx --yes zx@8 --version/);
+  assert.match(install, /npm exec --yes --package=zx@8 -- node ci\/test-zx\.mjs prepare "\$RUNNER_TEMP\/test-zx\.json"/);
   assert.ok(ci.indexOf('- name: Install release contract dependencies')
     < ci.indexOf('- name: Test build and release contracts'));
 });
