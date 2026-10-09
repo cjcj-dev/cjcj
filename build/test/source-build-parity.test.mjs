@@ -773,6 +773,37 @@ test('package retains compiler and pcre relative links after input removal', asy
   } finally { fs.rmSync(root, {recursive: true, force: true}); }
 });
 
+test('package retains pcre and stdx links independently of compiler aliases', async () => {
+  const {root, config} = makeFixture();
+  try {
+    const input = path.join(config.repoPath('compiler'), config.target.primaryCompilerOutput());
+    const tuple = 'linux_x86_64_cjnative';
+    for (const sdk of [input, config.officialSdkRoot]) {
+      file(sdk, ['runtime', 'lib', tuple, 'libpcre2-8.so.0.14.0'], 'producer pcre');
+      fs.symlinkSync('libpcre2-8.so.0.14.0', path.join(sdk, 'runtime', 'lib', tuple, 'libpcre2-8.so.0'));
+      fs.symlinkSync('libpcre2-8.so.0', path.join(sdk, 'runtime', 'lib', tuple, 'libpcre2-8.so'));
+    }
+    const stdxInput = path.join(config.repoPath('stdx'), 'target', config.target.stdxTargetSubdir());
+    file(stdxInput, ['target.bc'], 'producer stdx');
+    fs.symlinkSync('target.bc', path.join(stdxInput, 'module.bc'));
+    let archives, packageError;
+    try { archives = await packageStage.run(config); } catch (error) { packageError = error; }
+    const staged = path.join(config.softwareDir, 'cangjie');
+    console.log('PACKAGE_INDEPENDENT_PCRE_ASSERT_REACHED');
+    assert.equal(fs.readlinkSync(path.join(staged, 'runtime', 'lib', tuple, 'libpcre2-8.so')), 'libpcre2-8.so.0', packageError?.message);
+    assert.equal(fs.readlinkSync(path.join(staged, 'runtime', 'lib', tuple, 'libpcre2-8.so.0')), 'libpcre2-8.so.0.14.0');
+    assert.ifError(packageError);
+    const stdxStaged = path.join(config.softwareDir, path.basename(stdxInput));
+    console.log('PACKAGE_RELATIVE_STDX_ASSERT_REACHED');
+    assert.equal(fs.readlinkSync(path.join(stdxStaged, 'module.bc')), 'target.bc');
+    const extracted = directory(root, 'extracted');
+    for (const archive of archives) await runCommand(['tar', '-xzf', archive, '-C', extracted]);
+    for (const directory of [input, stdxInput, staged, stdxStaged]) fs.rmSync(directory, {recursive: true, force: true});
+    assert.equal(fs.readFileSync(path.join(extracted, 'cangjie', 'runtime', 'lib', tuple, 'libpcre2-8.so'), 'utf8'), 'producer pcre');
+    assert.equal(fs.readFileSync(path.join(extracted, path.basename(stdxInput), 'module.bc'), 'utf8'), 'producer stdx');
+  } finally { fs.rmSync(root, {recursive: true, force: true}); }
+});
+
 test('package rejects the exact missing Windows payload path', async () => {
   const {root, config} = makeFixture();
   try {
