@@ -35,7 +35,8 @@ export async function runScripts(root, entries, output) {
       const temporary = path.join(directory, 'tmp');
       fs.mkdirSync(temporary, {recursive: true});
       const args = entry.args.map(arg => arg.replaceAll('{output}', path.join(directory, 'output')));
-      const result = await execute([entry.executor, entry.file, ...args], root, directory,
+      const command = entry.executor === 'zx' ? ['npx', '--yes', 'zx@8', entry.file, ...args] : [entry.executor, entry.file, ...args];
+      const result = await execute(command, root, directory,
         {...process.env, TMPDIR: temporary, PYTHONDONTWRITEBYTECODE: '1'});
       results[index] = {file: entry.file, sha256: digest(path.join(root, entry.file)), ...result};
       console.log(`TEST_RESULT file=${entry.file} rc=${result.rc} log=${result.log}`);
@@ -197,7 +198,7 @@ export async function main(argv) {
   const selection = group === 'cj' ? parseCangjieSelection(parameters) : undefined;
   if (!['scripts', 'cj'].includes(group) || !destination) throw new Error('usage: run-registered-tests.mjs scripts|cj NEW_OUTPUT_DIR [test-file]');
   validateManifest();
-  const entries = REGISTERED.filter(entry => group === 'cj' ? entry.executor === 'cjpm' : ['python3', 'bash'].includes(entry.executor))
+  const entries = REGISTERED.filter(entry => group === 'cj' ? entry.executor === 'cjpm' : ['python3', 'bash', 'zx'].includes(entry.executor))
     .filter(entry => !only || entry.file === only);
   if (!entries.length || (group === 'cj' && only)) throw new Error('empty or unsupported test selection');
   const output = path.resolve(destination);

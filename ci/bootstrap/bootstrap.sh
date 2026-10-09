@@ -692,7 +692,7 @@ stage0() {
   # The Linux x64 layout CI uses the actual seed, including cached seeds. Its
   # host runtime/std stay paired; only the LLVM producer/reader use the target pin.
   if [ "$HOST_TUPLE" = linux_x86_64_cjnative ]; then
-    cmd "bash $(printf '%q' "$copy/ci/test-codegen-runtime-layout.sh") $(printf '%q' "$out") $(printf '%q' "$sdk") $(printf '%q' "$COLOUR_LLVM_SO") $(printf '%q' "$WORK/layout-sources/llvm") $(printf '%q' "$WORK/layout-sources/runtime") $(printf '%q' "$WORK/layout-ir-stage0") $(printf '%q' "$RUNTIME_PIN")"
+    cmd "npx --yes zx@8 $(printf '%q' "$copy/ci/test-codegen-runtime-layout.mjs") $(printf '%q' "$out") $(printf '%q' "$sdk") $(printf '%q' "$COLOUR_LLVM_SO") $(printf '%q' "$WORK/layout-sources/llvm") $(printf '%q' "$WORK/layout-sources/runtime") $(printf '%q' "$WORK/layout-ir-stage0") $(printf '%q' "$RUNTIME_PIN")"
   fi
   if [ "$DRY" -eq 0 ] && [ "$cacheable" -eq 1 ] && [ "$cache_hit" -eq 0 ]; then
     stage0_cache_publish "$cache_key" "$out" || die 'stage0 cache 发布失败'
