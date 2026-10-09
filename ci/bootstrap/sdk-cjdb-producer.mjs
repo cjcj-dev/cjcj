@@ -11,7 +11,9 @@ export async function buildCjdb(request, {run, tool, fetchIdentity, execute: req
   const llvm = await fetchIdentity({...component.source, repo: llvmReference}, path.join(directory, 'source-inputs/llvm'), 'cjdb-llvm');
   const runtime = dependencies[options.runtimeDependency];
   if (runtime?.component.source.kind !== 'git' || !runtime.component.roles.includes('runtime')) reject('PRODUCER_DEPENDENCY', component.id, 'paired runtime Git source required');
-  const paired = await fetchIdentity(runtime.component.source, path.join(directory, 'source-inputs/runtime'), 'cjdb-runtime');
+  const runtimeSource = options.runtimeSource || runtime.component.source;
+  if (runtimeSource.commit !== runtime.component.source.commit || runtimeSource.tree !== runtime.component.source.tree) reject('PRODUCER_DEPENDENCY', component.id, 'runtime source locator differs from sealed dependency');
+  const paired = await fetchIdentity(runtimeSource, path.join(directory, 'source-inputs/runtime'), 'cjdb-runtime');
   const compiler = await fetchIdentity(options.compilerSource, path.join(directory, 'source-inputs/compiler'), 'cjdb-compiler');
   const bounds = await fetchIdentity(options.boundscheckSource, path.join(compiler, 'third_party/boundscheck'), 'cjdb-boundscheck');
   const flatbuffers = await fetchIdentity(options.flatbuffersSource, path.join(compiler, 'third_party/flatbuffers'), 'cjdb-flatbuffers');
@@ -30,7 +32,7 @@ export async function buildCjdb(request, {run, tool, fetchIdentity, execute: req
   // Precompute the two source edits made by the unchanged compiler recipes.
   // Their expected bytes are registered before CMake can touch the inputs.
   const boundsRel = 'CMakeLists.txt';
-  const boundsChanges = {[boundsRel]: {sha256: await fileDigest(path.join(compiler, 'third_party/cmake/BoundsCheck.cmake')), mode: (await fs.stat(path.join(bounds, boundsRel))).mode & 0o777}};
+  const boundsChanges = {[boundsRel]: {sha256: await fileDigest(path.join(compiler, 'third_party/cmake/BoundsCheck.cmake')), mode: 0o644}};
   const flatRel = 'src/idl_gen_cangjie.cpp', projection = path.join(directory, 'build/flatbuffers-transform');
   await fs.mkdir(path.join(projection, 'src'), {recursive: true});
   await fs.copyFile(path.join(flatbuffers, flatRel), path.join(projection, flatRel));
@@ -82,7 +84,11 @@ export async function buildCjdb(request, {run, tool, fetchIdentity, execute: req
   await fs.mkdir(path.join(artifacts, 'native-closure'), {recursive: true});
   await fs.cp(rawLldb, path.join(artifacts, 'native-closure/lldb'), {recursive: true, verbatimSymlinks: true});
   await fs.cp(options.python.root, path.join(artifacts, 'native-closure/python'), {recursive: true, verbatimSymlinks: true});
-  const boundsAfter = await registeredSourceIdentity(bounds, options.boundscheckSource, 'cjdb-boundscheck', boundsChanges, tool('git'));
+  // Boundscheck's official source has no CMakeLists.txt; the compiler adds
+  // its own unchanged recipe as an authenticated generated build input.
+  const boundsStatus = (await requestExecute(tool('git'), ['-C', bounds, 'status', '--porcelain', '-z', '--untracked-files=all'])).stdout;
+  if (boundsStatus !== '?? CMakeLists.txt\0' || await fileDigest(path.join(bounds, boundsRel)) !== boundsChanges[boundsRel].sha256) reject('SOURCE_TRANSFORM', component.id, 'unexpected boundscheck generated recipe');
+  const boundsAfter = {commit: options.boundscheckSource.commit, tree: options.boundscheckSource.tree, generated: boundsChanges};
   const flatAfter = await registeredSourceIdentity(flatbuffers, options.flatbuffersSource, 'cjdb-flatbuffers', flatChanges, tool('git'));
   const generatedInputs = {
     'utils/demangle/CangjieDemangle.h': path.join(build, 'cangjie-demangler/include/CangjieDemangle.h'),
@@ -100,7 +106,7 @@ export async function buildCjdb(request, {run, tool, fetchIdentity, execute: req
   const status = (await requestExecute(tool('git'), ['-C', llvm, 'status', '--porcelain', '-z', '--untracked-files=all'])).stdout.split('\0').filter(Boolean).sort();
   if (JSON.stringify(status) !== JSON.stringify(Object.keys(generated).map(rel => `?? ${rel}`).sort())) reject('SOURCE_TRANSFORM', component.id, `unexpected native generated source changes ${JSON.stringify(status)}`);
   await sourceIdentity(compiler, options.compilerSource, 'cjdb-compiler', tool('git'));
-  await sourceIdentity(paired, runtime.component.source, 'cjdb-runtime', tool('git'));
+  await sourceIdentity(paired, runtimeSource, 'cjdb-runtime', tool('git'));
   await atomicJson(path.join(artifacts, 'cjdb-producer.json'), {source: component.source, compiler: options.compilerSource, runtime: runtime.component.source,
     boundsAfter, flatAfter, generated, python: options.python, libedit, xml2: archive, producer: component.producer, buildId: request.identity.buildId,
     entry: 'CANGJIE_BUILD_CJDB', targets: ['lldb','cjdb'], build, installed, jobs:Number(jobs), rtti:true});

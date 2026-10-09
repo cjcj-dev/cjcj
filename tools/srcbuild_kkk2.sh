@@ -40,7 +40,7 @@ read_host_toolchain_pin() {
         echo "CJCJ_TOOLCHAIN is missing from $HOST_TOOLCHAIN_PIN" >&2
         return 1
     }
-    printf '%s\n' "$toolchain"
+    node "$REPO_ROOT/ci/host-toolchain-pin.mjs" --file "$HOST_TOOLCHAIN_PIN"
 }
 
 resolve_host_toolchain_pin() {

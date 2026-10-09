@@ -90,7 +90,7 @@ function sha256(file) {
 function runStepFailureFixture(from, through, failure, missingSdk = false) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'srcbuild-step-failure-'));
   const files = ['tools/srcbuild_kkk2.sh', 'build/lib/srcbuild_git.sh',
-    'build/lib/targets.mjs', 'build/lib/errors.mjs', 'ci/host_sdk_pin.env',
+    'build/lib/targets.mjs', 'build/lib/errors.mjs', 'ci/host_sdk_pin.env', 'ci/host-toolchain-pin.mjs',
     'ci/srcbuild/steps/assert-host-contract.mjs'];
   for (const file of files) {
     fs.mkdirSync(path.dirname(path.join(root, file)), {recursive: true});

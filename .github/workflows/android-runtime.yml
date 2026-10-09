@@ -33,6 +33,7 @@ jobs:
         shell: bash
         run: |
           source ci/host_sdk_pin.env
+          export CJCJ_TOOLCHAIN="$(node ci/host-toolchain-pin.mjs)"
           mkdir -p "$RUNNER_TEMP/lineage-cjv"
           curl -fsSL https://github.com/Zxilly/cjv/releases/download/v0.2.20/cjv_linux_amd64.tar.gz | tar -xz -C "$RUNNER_TEMP/lineage-cjv"
           cjv_bin=$(find "$RUNNER_TEMP/lineage-cjv" -type f -name cjv | head -1)

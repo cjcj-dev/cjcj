@@ -115,7 +115,7 @@ export function baseSdkDownload(platform, toolchain) {
   const tuple = baseSdkPlatforms.get(platform);
   if (!tuple) throw new Error(`unsupported base SDK platform: ${platform}`);
   const version = requireString(toolchain, 'base SDK toolchain').replace(/^nightly-/, '');
-  if (version !== RELEASE_HOST_TOOLCHAIN.replace(/^nightly-/, '') || version !== baseSdkIdentities.version) {
+  if (version !== readHostToolchainPin(platform).replace(/^nightly-/, '') || version !== (tuple.version || baseSdkIdentities.version)) {
     throw new Error(`base SDK release has no pinned archive identity: ${version}`);
   }
   const {spec} = getTarget(platform);

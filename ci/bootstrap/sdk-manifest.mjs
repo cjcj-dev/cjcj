@@ -174,13 +174,17 @@ export function validatePlan(plan) {
       absolute(producer.repository, id);
     }
     if (producer.adapter === 'llvm-cjdb') {
-      fields(config.options, ['compilerSource', 'boundscheckSource', 'flatbuffersSource', 'runtimeDependency', 'python', 'xml2Archive', 'libedit'], ['launcher'], id);
+      fields(config.options, ['compilerSource', 'boundscheckSource', 'flatbuffersSource', 'runtimeDependency', 'python', 'xml2Archive', 'libedit'], ['launcher', 'runtimeSource'], id);
       for (const key of ['compilerSource', 'boundscheckSource', 'flatbuffersSource']) {
         fields(config.options[key], ['repo', 'commit', 'tree'], [], id);
         if (!HEX40.test(config.options[key].commit) || !HEX40.test(config.options[key].tree) || !config.options[key].repo) reject('SOURCE', id, key);
       }
       if (!component.dependencies.includes(config.options.runtimeDependency) || !component.roles.includes('llvm-tools') || !component.roles.includes('llvm-dylib')
         || config.host !== 'linux_x86_64' || config.target !== 'linux_x86_64') reject('CONFIG', id, 'native complete CJDB LLVM closure required');
+      if (config.options.runtimeSource) {
+        fields(config.options.runtimeSource, ['repo', 'commit', 'tree'], [], id);
+        if (!HEX40.test(config.options.runtimeSource.commit) || !HEX40.test(config.options.runtimeSource.tree) || !config.options.runtimeSource.repo) reject('SOURCE', id, 'runtime locator identity');
+      }
       fields(config.options.python, ['root', 'receipt', 'sha256'], [], id);
       absolute(config.options.python.root, id); absolute(config.options.python.receipt, id);
       if (!HEX64.test(config.options.python.sha256)) reject('SOURCE', id, 'Python receipt digest');

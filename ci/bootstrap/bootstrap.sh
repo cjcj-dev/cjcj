@@ -303,7 +303,7 @@ stage0_cache_key() {
   local base="$1" rewritten_toml="$2" cjcj_identity host_runtime_dir host_runtime_so
   local host_nightly compile_options cpp_headers material rel
   cjcj_identity=$(source_identity cjcj "$SRC" 1) || return $?
-  host_nightly=$(awk -F= '$1 == "CJCJ_TOOLCHAIN" {print $2}' "$SRC/ci/host_sdk_pin.env" 2>/dev/null || true)
+  host_nightly=$(node "$SRC/ci/host-toolchain-pin.mjs")
   if [ -z "$host_nightly" ]; then
     echo 'STAGE0_CACHE=disabled reason=host-nightly-pin-missing' >&2
     return 2
