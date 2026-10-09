@@ -65,7 +65,7 @@ export async function buildCjdb(request, {run, tool, fetchIdentity, execute: req
   await run(['cmake', '--build', build, '-j', jobs], {env});
   await run(['cmake', '--install', build], {env});
   const artifacts = path.join(directory, 'artifacts'); await fs.mkdir(artifacts);
-  const llvmBuild = path.join(build, 'cjnative-prefix/src/cjnative-build');
+  const llvmBuild = path.join(build, 'third_party/cjnative-prefix/src/cjnative-build');
   const llvmCache = await fs.readFile(path.join(llvmBuild, 'CMakeCache.txt'), 'utf8');
   const cacheValue = name => llvmCache.match(new RegExp(`^${name}:[^=]+=([^\\n]*)$`, 'm'))?.[1];
   if (cacheValue('LLVM_ENABLE_RTTI') !== 'ON' || cacheValue('LLVM_BUILD_LLVM_DYLIB') !== 'ON'
@@ -114,7 +114,7 @@ export async function buildCjdb(request, {run, tool, fetchIdentity, execute: req
   // headers and schema. No RTTI-OFF tuple contributes bytes to this install.
   const generatedHeaders = path.join(directory, 'build/shim-schema');
   await fs.mkdir(path.join(generatedHeaders, 'flatbuffers'), {recursive:true});
-  await run([path.join(build, 'third_party/flatbuffers/flatc'), '--no-warnings', '-c', '-o', path.join(generatedHeaders, 'flatbuffers'), path.join(compiler, 'schema/ModuleFormat.fbs')], {env});
+  await run([path.join(build, 'bin/flatc'), '--no-warnings', '-c', '-o', path.join(generatedHeaders, 'flatbuffers'), path.join(compiler, 'schema/ModuleFormat.fbs')], {env});
   const fixed = path.join(nativeRoot, 'fixed-llc'); await fs.mkdir(fixed);
   await run([launcher, tool('clang++'), '-std=c++17', '-O2', '-fPIC', '-fno-rtti', '-fno-exceptions',
     `-I${llvm}/llvm/include`, `-I${llvmBuild}/include`, `-I${flatbuffers}/include`, `-I${generatedHeaders}`,
