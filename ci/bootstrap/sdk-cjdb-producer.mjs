@@ -8,6 +8,12 @@ import {fileDigest, readJson, atomicJson, inventory, sourceIdentity, registeredS
 import {parseLlvmToolsManifest} from '../llvm-tools-manifest.mjs';
 import {prepareQualification, exportQualification} from './sdk-cjdb-qualification.mjs';
 
+// Match the fixed CJDB graph's Release, assertions-off, dump-off LLVM.
+// LLVM's extern-template consumers must see the same NDEBUG configuration.
+export const CJDB_SHIM_CXX_FLAGS = Object.freeze([
+  '-std=c++17', '-O2', '-fPIC', '-fno-rtti', '-fno-exceptions', '-DNDEBUG', '-DCJOF_SCHEMA_CJO=1',
+]);
+
 // The complete CJDB recipe uses compiler174db8's CjoFormat contract.
 // Keep this exact generation/compilation step callable for partial qualification;
 // it does not build or seal a native component.
@@ -16,8 +22,8 @@ export async function compileCjdbShim({flatc, compiler, llvm, llvmBuild, flatbuf
   await fs.mkdir(path.join(generatedHeaders, 'flatbuffers'), {recursive: true});
   await run([flatc, '--no-warnings', '-c', '-o', path.join(generatedHeaders, 'flatbuffers'),
     path.join(compiler, 'schema/CjoFormat.fbs')], {env});
-  await run([...(launcher ? [launcher] : []), clang, '-std=c++17', '-O2', '-fPIC', '-fno-rtti', '-fno-exceptions',
-    '-DCJOF_SCHEMA_CJO=1', `-I${llvm}/llvm/include`, `-I${llvmBuild}/include`,
+  await run([...(launcher ? [launcher] : []), clang, ...CJDB_SHIM_CXX_FLAGS,
+    `-I${llvm}/llvm/include`, `-I${llvmBuild}/include`,
     `-I${flatbuffers}/include`, `-I${generatedHeaders}`,
     '-c', path.join(repository, 'runtime_shim/cjselfhost_llvmshim.cpp'), '-o', object], {env});
 }
@@ -187,6 +193,6 @@ export async function buildCjdb(request, {run, tool, fetchIdentity, execute: req
   await atomicJson(path.join(artifacts, 'cjdb-producer.json'), {source: component.source, compiler: options.compilerSource, runtime: runtime.component.source,
     boundsAfter, flatAfter, generated, python: options.python, libedit, xml2: archive, producer: component.producer, buildId: request.identity.buildId,
     entry: 'CANGJIE_BUILD_CJDB', targets: ['lldb','cjdb'], build, installed, jobs:Number(jobs),
-    llvmConfiguration:{rtti:cacheValue('LLVM_ENABLE_RTTI'), dylib:cacheValue('LLVM_BUILD_LLVM_DYLIB'), targets:cacheValue('LLVM_TARGETS_TO_BUILD')},
+    llvmConfiguration:{rtti:cacheValue('LLVM_ENABLE_RTTI'), dylib:cacheValue('LLVM_BUILD_LLVM_DYLIB'), targets:cacheValue('LLVM_TARGETS_TO_BUILD'), shimCxxFlags:CJDB_SHIM_CXX_FLAGS},
     llvmCacheSha256:await fileDigest(path.join(llvmBuild,'CMakeCache.txt'))});
 }

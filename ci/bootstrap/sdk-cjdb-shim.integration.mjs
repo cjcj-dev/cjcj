@@ -6,7 +6,7 @@ import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import test from 'node:test';
-import {compileCjdbShim} from './sdk-cjdb-producer.mjs';
+import {compileCjdbShim, CJDB_SHIM_CXX_FLAGS} from './sdk-cjdb-producer.mjs';
 
 const partial = process.env.CJDB_SHIM_PARTIAL;
 const output = process.env.CJDB_SHIM_OUTPUT;
@@ -42,14 +42,14 @@ test('fixed Cjo schema generates a complete shim and reads a real CJOF package',
     await run([clang, '-shared', object, `-L${llvmBuild}/lib`, '-lLLVM-15',
       `-Wl,-rpath,${llvmBuild}/lib`, '-o', so]);
     const soSha256 = await digest(so);
-    const identities = {partialStatus: 'unsealed qualification input', repository,
+    const identities = {partialStatus: 'unsealed qualification input', repository, cxxFlags: CJDB_SHIM_CXX_FLAGS,
       object: {path: object, sha256: await digest(object)},
       shim: {path: so, sha256: soSha256}, probe: 'NOT_LINKED',
       llvm: {path: path.join(llvmBuild, 'lib/libLLVM-15.so'), sha256: await digest(path.join(llvmBuild, 'lib/libLLVM-15.so'))},
       cjo: {path: cjo, sha256: await digest(cjo)}};
     await fs.writeFile(path.join(output, 'identities.json'), JSON.stringify(identities, null, 2));
     const probe = path.join(output, 'surface_probe');
-    await run([clang, '-std=c++17', '-O2', '-DCJOF_SCHEMA_CJO=1',
+    await run([clang, ...CJDB_SHIM_CXX_FLAGS,
       `-I${flatbuffers}/include`, `-I${output}`, path.join(repository, 'test/cjoffi_probe/surface_probe.cpp'),
       `-L${output}`, '-lcjofshim', `-Wl,-rpath,${output}`, '-o', probe]);
     identities.probe = {path: probe, sha256: await digest(probe)};
@@ -62,12 +62,16 @@ test('fixed Cjo schema generates a complete shim and reads a real CJOF package',
     assert.match(result, /^RESULT\tD\tchecks=[1-9][0-9]*\tgroups=[1-9][0-9]*\t/m,
       'target CJOF read surface equality');
     assert.match(result, /SUMMARY\tN=1\tA=0\tB=0\tC=0\tD=1\tUNKNOWN=0/);
+    assert.doesNotMatch(result, /^(?:DIFF|MEMORY_ALERT)\t/m);
     const invalid = path.join(output, 'invalid.cjo');
     const bytes = await fs.readFile(cjo); bytes[4] ^= 1;
     await fs.writeFile(invalid, bytes);
     const rejected = await run([probe, invalid], {expected: 2});
     console.log(rejected.trim());
+    assert.match(rejected, /^RESULT\t\?\tchecks=0\tgroups=0\t/m,
+      'target Verify and View both reject the actual incorrect CJOF identifier');
     assert.match(rejected, /SUMMARY\tN=1\tA=0\tB=0\tC=0\tD=0\tUNKNOWN=1/,
       'target incorrect CJOF identifier rejected');
+    assert.doesNotMatch(rejected, /^(?:DIFF|MEMORY_ALERT)\t/m);
     console.log('TARGET_ASSERTIONS_EXECUTED schema-compile read-equality invalid-identifier');
   });
