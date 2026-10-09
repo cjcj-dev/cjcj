@@ -983,7 +983,11 @@ function writeAstInputFixture(archive) {
 // run_step and the final RESULT. Only external inputs live in the fixture.
 // Formal controls use the actual pinned Git object, not a fabricated HEAD.
 let headerRuntimeSource;
-after(() => { if (headerRuntimeSource?.owned) fs.rmSync(headerRuntimeSource.path, {recursive: true, force: true}); });
+let headerRuntimeTemplate;
+after(() => {
+  if (headerRuntimeTemplate) fs.rmSync(headerRuntimeTemplate.root, {recursive: true, force: true});
+  if (headerRuntimeSource?.owned) fs.rmSync(headerRuntimeSource.path, {recursive: true, force: true});
+});
 function writeCppHeaderFixture(root, cpp, runtimeRef) {
   const readPin = name => Object.fromEntries(fs.readFileSync(path.join(root, 'ci', name), 'utf8')
     .trim().split('\n').map(line => line.split('=')));
@@ -1003,8 +1007,25 @@ function writeCppHeaderFixture(root, cpp, runtimeRef) {
     assert.equal(git(['-C', source, 'rev-parse', 'HEAD']), runtimeRef);
     headerRuntimeSource = {path: source, owned: !configured};
   }
+  if (!headerRuntimeTemplate) {
+    const started = performance.now();
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'header-runtime-template-'));
+    const source = path.join(root, 'source');
+    git(['clone', '-q', '--no-hardlinks', headerRuntimeSource.path, source]);
+    assert.equal(git(['-C', source, 'rev-parse', 'HEAD']), runtimeRef);
+    assert.equal(git(['-C', source, 'status', '--porcelain']), '');
+    assert(!fs.existsSync(path.join(source, '.git/objects/info/alternates')));
+    headerRuntimeTemplate = {root, source, ref: runtimeRef};
+    console.log(`FIXTURE_RUNTIME_TEMPLATE ${JSON.stringify({runtimeRef, wallMs: performance.now() - started})}`);
+  }
+  assert.equal(headerRuntimeTemplate.ref, runtimeRef);
   const paired = path.join(cpp, 'third_party/paired-runtime');
-  git(['clone', '-q', '--no-hardlinks', headerRuntimeSource.path, paired]);
+  // Copy the authenticated private template physically: no shared inodes,
+  // alternates or links to another case, and no repeated Git checkout work.
+  fs.mkdirSync(paired, {recursive: true});
+  const copied = spawnSync('cp', ['-a', `${headerRuntimeTemplate.source}/.`, paired], {encoding: 'utf8'});
+  assert.equal(copied.status, 0, copied.stderr);
+  assert.equal(git(['-C', paired, 'rev-parse', 'HEAD']), runtimeRef);
   const roots = ['third_party/llvm-project/llvm/include', 'build/build/third_party/llvm/include',
     'build/build/include', 'build/build/schema'];
   const headers = {};
@@ -1025,11 +1046,26 @@ function writeCppHeaderFixture(root, cpp, runtimeRef) {
 }
 
 function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFailure = false, child = false, coreObserve = false, runtimeCase = 'valid', ast = 'explicit', largeContract = false, contractDefect} = {}) {
+  const started = performance.now();
+  const preparation = {case: t.name, copyMs: 0, gitMs: 0, sdkMs: 0, copyBytes: 0, excludedGitPackBytes: 0};
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bootstrap argv '));
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));
   for (const dir of ['ci', 'build', 'tools']) {
-    fs.cpSync(path.join(repoRoot, dir), path.join(root, dir), {recursive: true});
+    fs.cpSync(path.join(repoRoot, dir), path.join(root, dir), {recursive: true, filter(source) {
+      const stat = fs.statSync(source);
+      // These immutable test-only object packs are consumed by this test
+      // process's pinnedRemote helper, never by the copied production driver.
+      // Keep every production file and the helper itself, not a dependency
+      // allowlist. Each case still owns physical copies of all mutable inputs.
+      if (stat.isFile() && path.dirname(source) === path.join(repoRoot, 'ci/fixtures/git') && /\.pack(?:\.\d+)?$/.test(path.basename(source))) {
+        preparation.excludedGitPackBytes += stat.size;
+        return false;
+      }
+      if (stat.isFile()) preparation.copyBytes += stat.size;
+      return true;
+    }});
   }
+  preparation.copyMs = performance.now() - started;
   const driver = path.join(root, 'tools/srcbuild_kkk2.sh');
   if (largeContract) {
     // Comments leave the executable contract unchanged. Exceed pipe capacity
@@ -1089,7 +1125,9 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
   fs.writeFileSync(inputs + '/ast.a', 'ast input\n');
   writeAstInputFixture(inputs + '/ast.a');
   const runtimePin = fs.readFileSync(path.join(root, 'ci/runtime_pin.env'), 'utf8').match(/^RUNTIME_REF=(.*)$/m)[1];
+  const gitStarted = performance.now();
   writeCppHeaderFixture(root, inputs, runtimePin);
+  preparation.gitMs = performance.now() - gitStarted;
   const runtimeDir = path.join(inputs, 'external runtime');
   fs.mkdirSync(runtimeDir);
   let stamp = `CJRT-COMMIT:${runtimePin}`;
@@ -1226,6 +1264,9 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
     }
     env.CJCJ_BOOTSTRAP_SH = entry;
   }
+  preparation.totalMs = performance.now() - started;
+  preparation.sdkMs = preparation.totalMs - preparation.copyMs - preparation.gitMs;
+  console.log(`FIXTURE_PREPARE ${JSON.stringify(preparation)}`);
   return {
     root,
     hostArtifact,
@@ -1233,8 +1274,10 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
     runtimeDir,
     sourceSha,
     dryRun(step, sample) {
+      const driverStarted = performance.now();
       const result = spawnSync('bash', [driver, '--from-step', String(step), '--through-step', String(step), '--dry-run'],
         {encoding: 'utf8', env});
+      console.log(`FIXTURE_DRIVER ${JSON.stringify({case: t.name, step, sample, wallMs: performance.now() - driverStarted, rc: result.status, signal: result.signal})}`);
       if (process.env.CJCJ_TEST_EVIDENCE) {
         const out = path.join(process.env.CJCJ_TEST_EVIDENCE, t.name.replaceAll(/[^a-zA-Z0-9]+/g, '-'), String(sample));
         fs.mkdirSync(out, {recursive: true});
@@ -1246,11 +1289,13 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
       return result;
     },
     run(step, childRc = 0) {
+      const driverStarted = performance.now();
       const result = spawnSync('bash', [...(coreObserve ? [
         // Bounded positive control: never enable unlimited cores or induce a fault.
         '-c', 'ulimit -c 1 || exit; printf "CONTROL_CORE_KIB=%s\\n" "$(ulimit -c)"; exec bash "$@"', 'core-limit-control',
       ] : []), driver, '--from-step', String(step), '--through-step', String(step)],
         {encoding: 'utf8', env: {...env, CHILD_RC: String(childRc)}});
+      console.log(`FIXTURE_DRIVER ${JSON.stringify({case: t.name, step, mode: 'run', wallMs: performance.now() - driverStarted, rc: result.status, signal: result.signal})}`);
       const logs = path.join(state, 'logs');
       const logFile = fs.readdirSync(logs).find(name => name.endsWith(`-step${step}.log`));
       assert.ok(logFile, result.stdout + result.stderr);
@@ -1271,6 +1316,42 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
     },
   };
 }
+
+test('bootstrap fixture physical copies isolate dependency removal and restoration', t => {
+  const left = bootstrapDriverFixture(t);
+  const right = bootstrapDriverFixture(t);
+  const relative = 'ci/release/prepare_bootstrap_inputs.mjs';
+  const leftFile = path.join(left.root, relative), rightFile = path.join(right.root, relative);
+  const bytes = fs.readFileSync(leftFile);
+  assert.deepEqual(fs.readFileSync(rightFile), bytes);
+  const a = fs.statSync(leftFile), b = fs.statSync(rightFile);
+  assert(a.dev !== b.dev || a.ino !== b.ino, 'cases must not share a mutable inode');
+  const pairedRelative = 'inputs/third_party/paired-runtime';
+  const leftHead = path.join(left.root, pairedRelative, '.git/HEAD');
+  const rightHead = path.join(right.root, pairedRelative, '.git/HEAD');
+  const headBytes = fs.readFileSync(leftHead);
+  assert.deepEqual(fs.readFileSync(rightHead), headBytes);
+  const leftGit = fs.statSync(leftHead), rightGit = fs.statSync(rightHead);
+  assert(leftGit.dev !== rightGit.dev || leftGit.ino !== rightGit.ino, 'case Git metadata must not share an inode');
+  fs.writeFileSync(leftHead, 'deliberately invalid fixture HEAD\n');
+  assert.deepEqual(fs.readFileSync(rightHead), headBytes, 'Git mutation must not leak to another case');
+  assert.deepEqual(fs.readFileSync(path.join(headerRuntimeTemplate.source, '.git/HEAD')), headBytes, 'Git mutation must not poison immutable template');
+  fs.writeFileSync(leftHead, headBytes);
+  const normal = left.dryRun(31, 'isolation-normal');
+  assert.equal(normal.status, 0, normal.stdout + normal.stderr);
+  fs.unlinkSync(leftFile);
+  const rejected = left.dryRun(31, 'isolation-missing');
+  assert.equal(rejected.status, 1, rejected.stdout + rejected.stderr);
+  assert.match(rejected.stderr, /Cannot find module.*prepare_bootstrap_inputs\.mjs/);
+  assert.doesNotMatch(rejected.stdout, /^DRY_RUN COMMAND=/m);
+  assert.deepEqual(fs.readFileSync(rightFile), bytes, 'missing dependency must not affect another case');
+  const control = right.dryRun(31, 'isolation-control');
+  assert.equal(control.status, 0, control.stdout + control.stderr);
+  fs.writeFileSync(leftFile, bytes, {mode: a.mode & 0o777});
+  const restored = left.dryRun(31, 'isolation-restored');
+  assert.equal(restored.status, 0, restored.stdout + restored.stderr);
+  console.log('FIXTURE_ISOLATION normal=0 missing=1 independent=0 restored=0 target=prepare_bootstrap_inputs');
+});
 
 test('kkk2 host LLVM preparation reaches bootstrap arguments with verified bytes', t => {
   const fixture = bootstrapDriverFixture(t);
