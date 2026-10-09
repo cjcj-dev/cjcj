@@ -63,8 +63,15 @@ export async function buildCjdb(request, {run, tool, fetchIdentity, execute: req
   await run(['cmake', '--build', build, '-j', jobs], {env});
   await run(['cmake', '--install', build], {env});
   const artifacts = path.join(directory, 'artifacts'); await fs.mkdir(artifacts);
+  const llvmBuild = path.join(build, 'cjnative-prefix/src/cjnative-build');
+  const llvmCache = await fs.readFile(path.join(llvmBuild, 'CMakeCache.txt'), 'utf8');
+  const cacheValue = name => llvmCache.match(new RegExp(`^${name}:[^=]+=([^\\n]*)$`, 'm'))?.[1];
+  if (cacheValue('LLVM_ENABLE_RTTI') !== 'ON' || cacheValue('LLVM_BUILD_LLVM_DYLIB') !== 'ON'
+    || cacheValue('LLVM_TARGETS_TO_BUILD') !== 'X86;ARM;AArch64') reject('CJDB_CONFIGURATION', component.id, 'actual native cache must retain RTTI, dylib and all declared targets');
   // Export whole native installation roots, preserving every native alias and
   // Python module. The SDK plan decides ownership outside these roots.
+  await fs.mkdir(path.join(artifacts, 'third_party'), {recursive:true});
+  await fs.cp(path.join(build, 'third_party/llvm'), path.join(artifacts, 'third_party/llvm'), {recursive:true, verbatimSymlinks:true, preserveTimestamps:true});
   for (const rel of ['third_party/llvm', 'tools']) {
     await fs.mkdir(path.dirname(path.join(artifacts, rel)), {recursive: true});
     await fs.cp(path.join(installed, rel), path.join(artifacts, rel), {recursive: true, verbatimSymlinks: true, preserveTimestamps: true});
@@ -126,5 +133,7 @@ export async function buildCjdb(request, {run, tool, fetchIdentity, execute: req
   await sourceIdentity(paired, runtimeSource, 'cjdb-runtime', tool('git'));
   await atomicJson(path.join(artifacts, 'cjdb-producer.json'), {source: component.source, compiler: options.compilerSource, runtime: runtime.component.source,
     boundsAfter, flatAfter, generated, python: options.python, libedit, xml2: archive, producer: component.producer, buildId: request.identity.buildId,
-    entry: 'CANGJIE_BUILD_CJDB', targets: ['lldb','cjdb'], build, installed, jobs:Number(jobs), rtti:true});
+    entry: 'CANGJIE_BUILD_CJDB', targets: ['lldb','cjdb'], build, installed, jobs:Number(jobs),
+    llvmConfiguration:{rtti:cacheValue('LLVM_ENABLE_RTTI'), dylib:cacheValue('LLVM_BUILD_LLVM_DYLIB'), targets:cacheValue('LLVM_TARGETS_TO_BUILD')},
+    llvmCacheSha256:await fileDigest(path.join(llvmBuild,'CMakeCache.txt'))});
 }
