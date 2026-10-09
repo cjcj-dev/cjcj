@@ -17,6 +17,39 @@ const pin = Object.fromEntries(fs.readFileSync(path.join(repo, 'ci/runtime_pin.e
   .trim().split('\n').map(line => line.split('=')));
 let observation;
 let callSequence = 0;
+function resources() {
+  const read = file => { try { return fs.readFileSync(file, 'utf8').trim(); } catch { return 'UNKNOWN'; } };
+  const cgroup = read('/proc/self/cgroup');
+  const unified = /^0::(.*)$/m.exec(cgroup)?.[1];
+  const cgroupRoot = unified === undefined ? undefined : path.join('/sys/fs/cgroup', unified);
+  const control = name => cgroupRoot === undefined ? 'UNKNOWN' : read(path.join(cgroupRoot, name));
+  return {node: process.version, availableParallelism: os.availableParallelism(),
+    cpuScope: 'test-process-only', cpu: process.cpuUsage(), usage: process.resourceUsage(),
+    io: read('/proc/self/io'), status: read('/proc/self/status'), cgroup,
+    cgroupRoot: cgroupRoot ?? 'UNKNOWN', cpuMax: control('cpu.max'),
+    cpuset: control('cpuset.cpus.effective'),
+    memoryMax: control('memory.max'), memoryCurrent: control('memory.current')};
+}
+function copyRuntime(source, destination, phase) {
+  const started = performance.now();
+  const before = resources();
+  let files = 0, bytes = 0;
+  observe({kind: 'copy-begin', phase, source, destination, resources: before});
+  try {
+    fs.cpSync(source, destination, {recursive: true, verbatimSymlinks: true,
+      filter: file => {
+        const stat = fs.lstatSync(file);
+        if (stat.isFile()) { files++; bytes += stat.size; }
+        return true;
+      }});
+    observe({kind: 'copy-end', phase, source, destination, operationRc: 0,
+      files, bytes, wallMs: performance.now() - started, resources: resources()});
+  } catch (error) {
+    observe({kind: 'copy-end', phase, source, destination, operationRc: 1,
+      files, bytes, wallMs: performance.now() - started, error: error.message, resources: resources()});
+    throw error;
+  }
+}
 function observe(event) {
   if (!observation) return;
   const record = {time: new Date().toISOString(), identity: observation.identity, ...event};
@@ -34,9 +67,9 @@ function observedStage3Fixture(formal, fn) {
   fs.mkdirSync(process.env.CJCJ_TEST_EVIDENCE, {recursive: true});
   const root = fs.mkdtempSync(path.join(process.env.CJCJ_TEST_EVIDENCE, `runtime-selection-${process.pid}-`));
   observation = {root, identity: formal ? 'formal' : 'candidate', phaseStart: performance.now()};
-  observe({kind: 'prepare-begin', phase: 'fixture'});
+  observe({kind: 'prepare-begin', phase: 'fixture', resources: resources()});
   try { return fixture(f => { preparationCheckpoint('fixture'); return fn(f); }); }
-  finally { observe({kind: 'case-end'}); observation = undefined; }
+  finally { observe({kind: 'case-end', resources: resources()}); observation = undefined; }
 }
 function execute(command, env = process.env, mutation = 'prepare') {
   if (command[1] === '--cjcj-test-zx') command = zxCommand(command.slice(2), env);
@@ -47,11 +80,11 @@ function execute(command, env = process.env, mutation = 'prepare') {
     const stderr = path.join(observation.root, `${id}.stderr`);
     const out = fs.openSync(stdout, 'wx'), err = fs.openSync(stderr, 'wx');
     const started = performance.now();
-    observe({kind: 'begin', id, mutation, argv: command, stdout, stderr});
+    observe({kind: 'begin', id, mutation, argv: command, stdout, stderr, resources: resources()});
     try {
       result = spawnSync(command[0], command.slice(1), {env, encoding: 'utf8', stdio: ['pipe', out, err]});
       observe({kind: 'end', id, mutation, wallMs: performance.now() - started,
-        status: result.status, signal: result.signal, error: result.error?.message});
+        status: result.status, signal: result.signal, error: result.error?.message, resources: resources()});
     } finally { fs.closeSync(out); fs.closeSync(err); }
     result.stdout = fs.readFileSync(stdout, 'utf8');
     result.stderr = fs.readFileSync(stderr, 'utf8');
@@ -89,7 +122,7 @@ function refreshRoot(f) {
   fs.writeFileSync(file, JSON.stringify(manifest));
   f.env.COLOUR_RT_MANIFEST_SHA256 = hash(file);
 }
-function useFormalRuntime(f) {
+function useFormalRuntime(f, materializedSource) {
   delete f.env.CJCJ_RUNTIME_REF_OVERRIDE; delete f.env.CJCJ_ALLOW_RUNTIME_OVERRIDE;
   f.env.RUNTIME_REF = pin.RUNTIME_REF;
   const file = path.join(f.runtime, 'manifest.json');
@@ -100,6 +133,17 @@ function useFormalRuntime(f) {
   fs.writeFileSync(headerFile, JSON.stringify(header));
   const paired = path.join(f.sdk, 'third_party/paired-runtime');
   fs.rmSync(paired, {recursive: true});
+  if (materializedSource) {
+    const head = ok(['git', '-C', materializedSource, 'rev-parse', 'HEAD']);
+    const tree = ok(['git', '-C', materializedSource, 'rev-parse', 'HEAD^{tree}']);
+    assert.equal(head, pin.RUNTIME_REF);
+    copyRuntime(materializedSource, paired, 'paired-runtime');
+    ok(['git', '-C', paired, 'remote', 'add', 'origin', pin.RUNTIME_SRC_URL]);
+    assert.equal(ok(['git', '-C', paired, 'rev-parse', 'HEAD']), head);
+    assert.equal(ok(['git', '-C', paired, 'rev-parse', 'HEAD^{tree}']), tree);
+    assert.equal(ok(['git', '-C', paired, 'status', '--porcelain', '--untracked-files=no']), '');
+    return;
+  }
   ok(['git', 'init', '-q', paired]);
   ok(['git', '-C', paired, 'remote', 'add', 'origin', pin.RUNTIME_SRC_URL]);
   const source = process.env.GC_FIX_RUNTIME_CHECKOUT || pinnedRemote(f.dir, 'runtime', pin.RUNTIME_REF);
@@ -362,8 +406,10 @@ test(`actual stage3 entry verifies promoted SDK before stage2: ${formal ? 'forma
   const selected = ok(['git', '-C', f.runtimeSource, 'rev-parse', 'HEAD']);
   f.env.RUNTIME_REF = selected; f.env.CJCJ_RUNTIME_REF_OVERRIDE = selected;
   const paired = path.join(f.sdk, 'third_party/paired-runtime');
-  ok(['git', '-C', paired, 'fetch', '--update-shallow', '-q', f.runtimeSource, selected]);
-  ok(['git', '-C', paired, 'checkout', '-q', '--detach', 'FETCH_HEAD']);
+  if (!formal) {
+    ok(['git', '-C', paired, 'fetch', '--update-shallow', '-q', f.runtimeSource, selected]);
+    ok(['git', '-C', paired, 'checkout', '-q', '--detach', 'FETCH_HEAD']);
+  }
   for (const [file, key] of [[path.join(f.runtime, 'manifest.json'), 'runtime_sha'],
     [path.join(f.sdk, 'build/build/shim-headers.json'), 'runtime']]) {
     const data = JSON.parse(fs.readFileSync(file));
@@ -371,7 +417,7 @@ test(`actual stage3 entry verifies promoted SDK before stage2: ${formal ? 'forma
     fs.writeFileSync(file, JSON.stringify(data));
   }
   refreshRoot(f);
-  if (formal) useFormalRuntime(f);
+  if (formal) useFormalRuntime(f, f.runtimeSource);
   preparationCheckpoint('runtime-identity');
   // Build the tuple fixtures and pass their authenticated manifest through the
   // same preparation entry as production; no resolver results are injected.
@@ -451,7 +497,27 @@ test(`actual stage3 entry verifies promoted SDK before stage2: ${formal ? 'forma
   const publishStd = () => ok([process.execPath, '--cjcj-test-zx', path.join(repo, 'ci/bootstrap/publish-std-output.mjs'),
     work, path.join(work, 'stdlib-stage2'), path.join(work, 'cjcj-stage1'), tuple], f.env);
   publishStd();
-  fs.cpSync(f.runtimeSource, path.join(workspace, 'cangjie_runtime'), {recursive: true});
+  const workspaceRuntime = path.join(workspace, 'cangjie_runtime');
+  copyRuntime(f.runtimeSource, workspaceRuntime, 'stage3-runtime');
+  const sourceTree = ok(['git', '-C', f.runtimeSource, 'rev-parse', 'HEAD^{tree}']);
+  assert.equal(ok(['git', '-C', workspaceRuntime, 'rev-parse', 'HEAD']), selected);
+  assert.equal(ok(['git', '-C', workspaceRuntime, 'rev-parse', 'HEAD^{tree}']), sourceTree);
+  const probe = ok(['git', '-C', f.runtimeSource, 'ls-files']).split('\n')
+    .find(rel => fs.lstatSync(path.join(f.runtimeSource, rel)).isFile());
+  assert.ok(probe, 'materialized runtime contains a tracked regular file');
+  const sourceFile = path.join(f.runtimeSource, probe), copyFile = path.join(workspaceRuntime, probe);
+  const original = fs.readFileSync(copyFile), sourceHash = hash(sourceFile);
+  fs.appendFileSync(copyFile, '\ncase-private mutation\n');
+  assert.equal(hash(sourceFile), sourceHash, 'runtime copy mutation must not change its source');
+  assert.equal(hash(path.join(paired, probe)), sourceHash, 'runtime copy mutation must not change paired headers');
+  fs.writeFileSync(copyFile, original);
+  const pairedFile = path.join(paired, probe), pairedOriginal = fs.readFileSync(pairedFile);
+  fs.appendFileSync(pairedFile, '\npaired-private mutation\n');
+  assert.equal(hash(sourceFile), sourceHash, 'paired copy mutation must not change its source');
+  assert.equal(hash(copyFile), sourceHash, 'paired copy mutation must not change stage3 source');
+  fs.writeFileSync(pairedFile, pairedOriginal);
+  assert.equal(ok(['git', '-C', workspaceRuntime, 'status', '--porcelain', '--untracked-files=no']), '');
+  console.log(`RUNTIME_MATERIALIZATION_ISOLATION_ASSERT identity=${formal ? 'formal' : 'candidate'} source=${selected} tree=${sourceTree} probe=${probe}`);
   const env = {...Object.fromEntries(Object.entries(f.env).filter(([key]) => !key.startsWith('COLOUR_RT_'))), ...a.inputs, CANGJIE_WORKSPACE: workspace, GITHUB_WORKSPACE: path.join(workspace, 'source'),
     CJCJ_BOOTSTRAP_WORK: path.join(workspace, 'bootstrap-work'), CJCJ_STAGE3_STDLIB_BUILD_TYPE: 'release',
     CJCJ_BOOTSTRAP_HOST_RT: a.base, CJCJ_STAGE3_DRY_RUN: '1', CJCJ_STAGE3_DRY_RUN_FINAL_STD: path.join(workspace, 'unused-std')};
