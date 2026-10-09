@@ -41,7 +41,7 @@ const source = path.join(root, 'source'), build = path.join(root, 'build'), inst
 for (const dir of [source, build]) fs.mkdirSync(dir);
 run(['/bin/tar', '-xJf', archive, '--strip-components=1', '-C', source]);
 run([path.join(source, 'configure'), `--prefix=${install}`, '--enable-shared', '--with-ensurepip=no'], build,
-  {CC: '/usr/bin/cc', LDFLAGS: '-Wl,-rpath,\$$ORIGIN/../lib'});
+  {CC: '/usr/bin/cc', LDFLAGS: '-Wl,-rpath,\\$$ORIGIN/../lib'});
 run(['/usr/bin/make', '-j', String(os.availableParallelism())], build);
 run(['/usr/bin/make', 'install', '-j', String(os.availableParallelism())], build);
 const interpreter = path.join(install, 'bin/python3.11');
