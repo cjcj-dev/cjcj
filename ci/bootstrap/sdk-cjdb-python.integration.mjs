@@ -9,7 +9,7 @@ import test from 'node:test';
 import {buildCjdb} from './sdk-cjdb-producer.mjs';
 import {verifyCjdbPythonConfiguration, verifyCjdbPythonInstallation} from './sdk-cjdb-python.mjs';
 import {fileDigest, sourceIdentity, readJson, atomicJson} from './sdk-manifest.mjs';
-import {exportCjdbPythonClosure} from './sdk-cjdb-python-closure.mjs';
+import {exportCjdbPythonClosure, cjdbPythonClosureSources} from './sdk-cjdb-python-closure.mjs';
 import {CJDB_INPUTS} from './sdk-cjdb-qualification.mjs';
 
 const partial = process.env.CJDB_PYTHON_PARTIAL;
@@ -129,13 +129,10 @@ export async function finishCjdbPythonQualification({partial,output,roots,reques
     await execute('/usr/bin/ninja',['-C',childBuild,'-t','query','liblldb'],{env:childEnv});
     await execute('/usr/bin/cmake',['--build',childBuild,'-j',String(os.availableParallelism())],{env:childEnv});
     await execute('/usr/bin/cmake',['--install',childBuild],{env:childEnv});
-    // Use the product's normal export shape, without sealing or alias repair.
-    for(const rel of ['bin','lib','include','share']){
-      const from=path.join(request.component.config.options.python.root,rel);
-      try { await fs.access(from); } catch(e){if(e.code==='ENOENT')continue;throw e;}
-      await fs.cp(from,path.join(nativeRoot,rel),{recursive:true,verbatimSymlinks:true});
-    }
-    const closure=await exportCjdbPythonClosure(partial,path.join(output,'install'),execute);
+    const closureSources = await cjdbPythonClosureSources(nativeRoot,
+      path.join(childBuild,'install_manifest.txt'),request.component.config.options.python.root);
+    await atomicJson(path.join(output,'python-closure-sources.json'),closureSources);
+    const closure=await exportCjdbPythonClosure(partial,path.join(output,'install'),execute,closureSources);
     await atomicJson(path.join(output,'python-closure.json'),closure);
     const installation=await verifyCjdbPythonInstallation(request.component.config.options.python.root,nativeRoot,execute);
     await atomicJson(path.join(output,'python-installation.json'),installation);
