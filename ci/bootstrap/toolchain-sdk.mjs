@@ -219,6 +219,15 @@ export async function verifyManifestSdk(sdk, plan, manifest) {
     if (!(await execute('file', ['-bL', binary])).stdout.includes('ELF')) reject('EXECUTABLE_FORMAT', 'tools', rel);
     // envsetup is the existing SDK loading contract. Paths are passed as
     // positional arguments to a constant shell body, never evaluated as code.
+    if (['third_party/llvm/bin/llvm-dis', 'third_party/llvm/bin/llvm-as'].includes(rel)) {
+      // Native readers link static LLVM and run in the host system domain.
+      // Target envsetup/library paths must not select their dependencies.
+      const env = {PATH: '/usr/bin:/bin', LANG: 'C', LC_ALL: 'C'};
+      const loaded = (await execute('/usr/bin/ldd', [binary], {env})).stdout;
+      if (loaded.includes('not found') || /libLLVM|libcangjie/.test(loaded)) reject('LLVM_READER_DOMAIN', 'tools', `${rel}: ${loaded.trim()}`);
+      await execute(binary, ['--version'], {env});
+      continue;
+    }
     const host = plan.verification.hostRuntimeDir || '';
     const script = 'set -e; source "$1/envsetup.sh"; if [ -n "$2" ]; then export LD_LIBRARY_PATH="$2${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"; fi; exec "${@:3}"';
     const loaded = (await execute('bash', ['-c', script, 'sdk-verify', sdk, host, 'ldd', binary])).stdout;
