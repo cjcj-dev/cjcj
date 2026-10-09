@@ -4,6 +4,8 @@ import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
+import {load as loadYaml} from './vendor/js-yaml/js-yaml.mjs';
+import {makePlan, validatePlan, GROUPS} from './contract-shards.mjs';
 import {
   DEFERRED,
   DISCOVERY_FLOOR,
@@ -149,20 +151,20 @@ test('ci.yml runs the manifest rather than a literal file list', async () => {
   // GATING and still not be handed to node if ci.yml has its own list.
   const ci = (await workflows()).get('ci.yml');
   assert.ok(ci, 'ci.yml is missing');
-  assert.match(ci, /ci\/test-manifest\.mjs list/,
+  assert.match(ci, /ci\/contract-shards\.mjs plan/,
     'ci.yml no longer drives its test step from the manifest');
   assert.deepEqual(literalTestArguments(ci), [],
     'ci.yml names test files literally again; drive the list from ci/test-manifest.mjs instead');
   // Without it a hanging test spends the job's whole timeout-minutes and the
   // failure names no test. package-std-integrity.test.mjs hangs in about 8% of
   // batch runs on the shared box, cause unknown, and it is in this list.
-  assert.match(step(ci, 'Test build and release contracts'), /--test-timeout=\d+/,
-    'the test step lost its timeout; a hang would go unattributed for the whole job');
+  assert.match(step(ci, 'Test build and release contracts'), /ci\/contract-shards\.mjs run/);
+  assert.match(await fs.readFile(path.join(repoRoot, 'ci/contract-shards.mjs'), 'utf8'), /--test-timeout=300000/);
 });
 
 test('Verify sources provisions the lineage consumer pin before running contracts', async () => {
   const ci = (await workflows()).get('ci.yml');
-  const lint = ci.slice(ci.indexOf('  lint:'), ci.indexOf('  fixed-llvm-tools:'));
+  const lint = ci.slice(ci.indexOf('  contracts:'), ci.indexOf('  source-audits:'));
   const install = step(lint, 'Install official lineage input');
   assert.match(install, /source ci\/host_sdk_pin\.env/,
     'lineage fixtures must use the same pin as pinnedOfficialSdkRoot');
@@ -215,17 +217,27 @@ test('manifest CLI hands every gating file to the workflow consumer', () => {
   assert.deepEqual(output.trim().split('\n'), [...GATING]);
 });
 
-test('workflow list collection preserves every gating file and enforces its floor', async () => {
-  const body = step((await workflows()).get('ci.yml'), 'Test build and release contracts');
-  const run = body.split('run: |\n')[1];
-  const prefix = run.slice(0, run.lastIndexOf('\n', run.indexOf('node --test ')) + 1);
-  const floor = prefix.match(/test "\$\{#FILES\[@\]\}" -ge (\d+)/);
-  assert.equal(Number(floor?.[1]), GATING_FLOOR, 'workflow floor must match the manifest floor');
-  const result = spawnSync('bash', ['-e', '-o', 'pipefail', '-c',
-    `${prefix}\nprintf '%s\\n' "\${FILES[@]}"`], {cwd: repoRoot, encoding: 'utf8'});
-  assert.equal(result.status, 0, `workflow list collection failed: ${result.stderr}`);
-  assert.deepEqual(result.stdout.trim().split('\n').slice(1), [...GATING],
-    'workflow must hand every gating file to node --test');
+test('workflow DAG preserves every manifest file and independently prepares all four groups', async () => {
+  const ci = loadYaml(await fs.readFile(path.join(workflowDir, 'ci.yml'), 'utf8'));
+  const jobs = ci.jobs;
+  assert.deepEqual(jobs.contracts.strategy.matrix.group, Array.from({length: GROUPS}, (_, i) => i));
+  assert.equal(jobs.contracts.strategy['fail-fast'], false);
+  assert.equal(jobs.contracts['runs-on'], 'ubuntu-slim');
+  assert.equal(jobs.contracts['timeout-minutes'], 10);
+  assert.equal(jobs.contracts.needs, 'contract-plan');
+  assert.equal(jobs.lint.name, 'Verify sources');
+  assert.equal(jobs.lint.if, 'always()');
+  assert.deepEqual(jobs.lint.needs, ['static-checks', 'contract-plan', 'contracts', 'source-audits']);
+  assert.ok(jobs.lint.steps.some(s => /job.result!=="success"/.test(s.run || '')));
+  assert.ok(jobs.lint.steps.some(s => /contract-shards.mjs summary/.test(s.run || '')));
+  assert.ok(jobs.contracts.steps.some(s => s.uses?.startsWith('actions/checkout@')));
+  assert.ok(jobs.contracts.steps.some(s => /prepare-runtime-test-input/.test(s.run || '')));
+  assert.ok(jobs.contracts.steps.some(s => /test-zx.mjs prepare/.test(s.run || '')));
+  assert.ok(jobs.contracts.steps.some(s => s.if === 'always()' && s.with?.name === 'contract-group-${{ matrix.group }}'));
+  assert.equal(jobs.contracts['continue-on-error'], undefined);
+  const plan = makePlan([...GATING], {head:'a'.repeat(40),tree:'b'.repeat(40)});
+  assert.deepEqual(validatePlan(plan, [...GATING]).files, [...GATING]);
+  assert.equal(new Set(plan.groups.flatMap(group => group.files)).size, GATING.length);
 });
 
 test('promoted contracts have their CI prerequisites', async () => {

@@ -136,6 +136,7 @@ export const GATING = Object.freeze([
   'ci/srcbuild/tests/verify-sdk.test.mjs',
   'ci/srcbuild/tests/workflow-inputs.test.mjs',
   'ci/test-manifest.test.mjs',
+  'ci/contract-shards.test.mjs',
   'ci/run-registered-tests.test.mjs',
   'scripts/erased_dynpayload_gate.test.mjs',
   'scripts/cjcjcg_aggregate_ctype_gate.test.mjs',
