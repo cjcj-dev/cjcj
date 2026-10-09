@@ -826,6 +826,8 @@ test('Linux package excludes only the optional Windows target roots', async () =
   try {
     file(config.officialSdkRoot, ['lib', 'windows_x86_64_cjnative', 'libcangjie-std-core.a'], 'Windows reference');
     file(config.officialSdkRoot, ['modules', 'windows_x86_64_cjnative', 'std', 'std.core.cjo'], 'Windows reference');
+    const input = path.join(config.repoPath('compiler'), config.target.primaryCompilerOutput());
+    for (const name of ['lib', 'modules']) directory(input, name);
     let packageError;
     try { await packageStage.run(config); } catch (error) { packageError = error; }
     console.log('LINUX_OPTIONAL_WINDOWS_ASSERT_REACHED');

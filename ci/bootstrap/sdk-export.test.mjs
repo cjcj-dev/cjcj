@@ -14,7 +14,7 @@ test('input-only readers cannot remove the installed SDK reader qualification', 
   const root = await fs.mkdtemp(path.join(process.env.SDK_EXPORT_ROOT, 'reader-owner-resolver-'));
   plan.buildRoot = path.join(root, 'builds');
   plan.components = plan.components.filter(c => !['llvm-release-layout', 'llvm-release-tools', 'llvm-release-libraries'].includes(c.id));
-  for (const c of plan.components.filter(c => ['llvm-tools', 'llvm-dylib', 'llvm-auxiliary'].includes(c.id))) c.inputOnly = false;
+  for (const c of plan.components.filter(c => ['llvm-tools', 'llvm-dylib', 'llvm-auxiliary'].includes(c.id))) delete c.inputOnly;
   assert.equal(plan.components.find(c => c.id === 'llvm-readers')?.inputOnly, true);
   const input = path.join(root, 'plan.json'); await fs.writeFile(input, JSON.stringify(plan));
   const node = plan.components.find(c => c.id === 'llvm-readers').config.tools.node.path;
