@@ -1,0 +1,16 @@
+name: Darwin native input consumers
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  registration-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Reject execution of the registration-only version
+        shell: bash
+        run: |
+          printf '%s\n' 'This version only registers the Darwin workflow. Select the approved candidate branch to execute its reviewed workflow.'
+          exit 1
