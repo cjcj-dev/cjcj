@@ -187,12 +187,13 @@ export function validatePlan(plan) {
       if (!plan.platform.startsWith('linux_')) reject('ADAPTER_PLATFORM', id, 'native stage compiler recipe migration incomplete outside Linux');
     }
     if (['llvm-tools', 'llvm-dylib'].includes(producer.adapter)) {
-      fields(config.options, ['targets', 'runtimeDependency'], ['compilerSource', 'flatbuffersSource', 'launcher', 'auxiliaryOnly', 'bitcodeReadersOnly'], id);
+      fields(config.options, ['targets', 'runtimeDependency'], ['compilerSource', 'flatbuffersSource', 'launcher', 'auxiliaryOnly', 'bitcodeReadersOnly', 'releaseToolsOnly'], id);
       if (config.options.auxiliaryOnly !== undefined && (producer.adapter !== 'llvm-tools' || config.options.auxiliaryOnly !== true)) reject('CONFIG', id, 'auxiliaryOnly is the fixed LLVM archiver/objcopy producer');
       if (config.options.bitcodeReadersOnly !== undefined && (producer.adapter !== 'llvm-tools' || config.options.bitcodeReadersOnly !== true || config.options.auxiliaryOnly)) reject('CONFIG', id, 'bitcodeReadersOnly is the exclusive fixed LLVM dis/as producer');
+      if (config.options.releaseToolsOnly !== undefined && (producer.adapter !== 'llvm-tools' || config.options.releaseToolsOnly !== true || config.options.auxiliaryOnly || config.options.bitcodeReadersOnly)) reject('CONFIG', id, 'releaseToolsOnly requires the complete release tool producer');
       if (!component.dependencies.includes(config.options.runtimeDependency)) reject('DEPENDENCY', id, 'LLVM runtime input not in closure');
       if (config.options.targets !== 'X86;ARM;AArch64') reject('CONFIG', id, 'existing LLVM C API contract requires X86, ARM and AArch64');
-      if (producer.adapter === 'llvm-tools' && !config.options.auxiliaryOnly && !config.options.bitcodeReadersOnly) {
+      if (producer.adapter === 'llvm-tools' && !config.options.auxiliaryOnly && !config.options.bitcodeReadersOnly && !config.options.releaseToolsOnly) {
         for (const key of ['compilerSource', 'flatbuffersSource']) {
           fields(config.options[key], ['repo', 'commit', 'tree'], [], id);
           if (!HEX40.test(config.options[key].commit) || !HEX40.test(config.options[key].tree) || !config.options[key].repo) reject('SOURCE', id, key);
