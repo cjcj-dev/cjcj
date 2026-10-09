@@ -13,7 +13,11 @@ export async function exportCjdbPythonClosure(partial, install, execute) {
   const root = path.join(partial, 'artifacts');
   const candidates = Object.keys(receipt.files).filter(rel =>
     /^(?:third_party\/llvm\/lib\/|tools\/lib\/|runtime\/lib\/)/.test(rel)
-    && !rel.includes('/python') && !/^liblldb/.test(path.basename(rel)) && /\.so(?:\.|$)/.test(rel));
+    && !rel.includes('/python') && !/^liblldb/.test(path.basename(rel)) && /\.so(?:\.|$)/.test(rel))
+    // The loader searches the native lib directory. Prefer its formal alias
+    // to an identically named runtime entity, then copy the alias target too.
+    .sort((a,b) => Number(!a.startsWith('third_party/llvm/lib/'))
+      - Number(!b.startsWith('third_party/llvm/lib/')) || a.localeCompare(b));
   const byName = new Map();
   for (const rel of candidates) {
     const name = path.basename(rel);
