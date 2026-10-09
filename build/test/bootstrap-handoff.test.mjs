@@ -115,21 +115,14 @@ test('bootstrap producer reaches actual stdx and tools subprocess entries', asyn
   const stdx = await import('../srcbuild/stages/stdx.mjs');
   const packageStage = await import('../srcbuild/stages/package.mjs');
   const f = await fixture(t);
-  const host = path.join(f.root, 'host-sdk');
+  const retained = JSON.parse(await fs.readFile(process.env.SDK_CONSUMER_INPUT_PLAN, 'utf8'));
+  const host = retained.components.find(c => c.source.kind === 'distribution').source.root;
   const fakeBin = path.join(f.root, 'external-fixtures');
   const trace = path.join(f.root, 'compiler-invocations.jsonl');
   const write = async (file, data, mode = 0o755) => {
     await fs.mkdir(path.dirname(file), {recursive: true});
     await fs.writeFile(file, data, {mode});
   };
-  // Actual ELF symbol tables exercise the existing runtime-split precondition.
-  for (const [sdkRoot, source] of [[host, 'int host_runtime;'],
-    [path.join(f.work, 'sdk-stage1'), 'long g_cjLoadBadMask;']]) {
-    const output = path.join(sdkRoot, 'runtime', 'lib', f.tuple, 'libcangjie-runtime.so');
-    await fs.mkdir(path.dirname(output), {recursive: true});
-    const built = spawnSync('cc', ['-shared', '-fPIC', '-x', 'c', '-', '-o', output], {input: source, encoding: 'utf8'});
-    assert.equal(built.status, 0, built.stderr);
-  }
   f.compilerScript = Buffer.from(f.compilerScript.toString() + 'cat "$CANGJIE_HOME/modules/consumer-std.txt"\n');
   await f.publish();
   await prepareBootstrapHandoff(f);
@@ -150,8 +143,7 @@ test('bootstrap producer reaches actual stdx and tools subprocess entries', asyn
   }
   console.log(`SDK_PACKAGE_LLVM_DIS path=${process.env.CJCJ_VERIFIER_LLVM_DIS} sha256=${await fileDigest(process.env.CJCJ_VERIFIER_LLVM_DIS)}`);
   delete process.env.CANGJIE_BUILD_DRY_RUN;
-  const officialSdkRoot = path.join(f.root, 'official-sdk');
-  await write(path.join(officialSdkRoot, 'tools', 'bin', 'cjpm'), 'official skeleton');
+  const officialSdkRoot = host;
   const original = buildConfig({workspace: f.root, buildRoot: f.root, consumerSdk: f.sdk, officialSdkRoot});
   const dependencies = path.join(f.root, 'dependencies');
   await fs.mkdir(dependencies);
@@ -185,14 +177,26 @@ test('bootstrap producer reaches actual stdx and tools subprocess entries', asyn
   // output or relying on the #922 environment-default path.
   const disassembler = process.env.CJCJ_VERIFIER_LLVM_DIS;
   const assembler = disassembler.replace('llvm-dis','llvm-as');
-  const bc = path.join(f.sdk,'modules','package-input.bc');
+  // Package itself needs the completed Cangjie producers, independently of
+  // the small-C child-process apparatus above. Preserve every input receipt.
+  assert.ok(retained.components.every(c => c.producer.receipt));
+  retained.buildRoot = path.join(f.root, 'package-builds');
+  const packagePlan = path.join(f.root, 'package.plan.json');
+  await fs.writeFile(packagePlan, JSON.stringify(retained));
+  const packageSdk = path.join(f.root, 'package-sdk');
+  const assembly = spawnSync('bash', [new URL('../../ci/bootstrap/sdk_build.sh', import.meta.url).pathname,
+    '--plan', packagePlan, '--to', packageSdk], {encoding:'utf8'});
+  console.log(`SDK_PACKAGE_REAL_INPUT_ASSERT rc=${assembly.status} sdk=${packageSdk}`);
+  assert.equal(assembly.status,0,assembly.stdout+assembly.stderr);
+  const beforePackageStd = await fileDigest(path.join(packageSdk,'lib',f.tuple,'libcangjie-std-core.a'));
+  const bc = path.join(packageSdk,'modules','package-input.bc');
   const assembled = spawnSync(assembler,['-o',bc],{input:'define i32 @package_input() { ret i32 0 }\n',encoding:'utf8'});
   assert.equal(assembled.status,0,assembled.stderr);
-  await fs.copyFile(disassembler,path.join(f.sdk,'third_party/llvm/bin/llvm-dis'));
+  await fs.copyFile(disassembler,path.join(packageSdk,'third_party/llvm/bin/llvm-dis'));
   console.log(`SDK_PACKAGE_BITCODE path=${bc} sha256=${await fileDigest(bc)} assembler=${assembler}`);
-  await packageStage.run(config);
+  await packageStage.run({...config,consumerSdk:packageSdk});
   console.log('SDK_PACKAGE_ORIGIN_ASSERT_REACHED');
-  assert.equal(await fileDigest(path.join(f.sdk, 'lib', f.tuple, 'libcangjie-std-core.a')), await fileDigest(path.join(f.work, 'stdlib-stage2/lib', f.tuple, 'libcangjie-std-core.a')));
+  assert.equal(await fileDigest(path.join(f.sdk, 'lib', f.tuple, 'libcangjie-std-core.a')), beforePackageStd);
   assert.ok((await fs.readFile(path.join(f.sdk, 'tools', 'bin', 'cjpm'), 'utf8')).includes(`compiler home=${f.sdk}`));
   const invocations = (await fs.readFile(trace, 'utf8')).trim().split('\n').map(JSON.parse);
   assert.equal(invocations.length, 1 + tools.toolsFor(config).length);
