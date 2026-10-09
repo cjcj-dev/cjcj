@@ -42,3 +42,11 @@ test('official aliases reach the real resolver install map', async () => {
   assert.equal(manifest.files['tools/bin/cjdb'].sha256, manifest.files['third_party/llvm/bin/lldb'].sha256);
   assert.equal(manifest.files['bin/cjc'].type, 'file', 'physical compiler control remains a file');
 });
+
+test('official physical compiler is a working independent control', async () => {
+  const {root, output} = await resolveOfficial();
+  const child = spawnSync(path.join(output.artifacts, 'bin/cjc'), ['-v'], {encoding: 'utf8'});
+  await fs.writeFile(path.join(root, 'compiler-control.json'), JSON.stringify({rc:child.status, stdout:child.stdout, stderr:child.stderr}));
+  assert.equal(child.status, 0, child.stderr);
+  assert.match(child.stdout + child.stderr, /1\.3\.0-alpha\.20261009001050/);
+});
