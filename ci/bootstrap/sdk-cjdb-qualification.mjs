@@ -15,10 +15,10 @@ export const CJDB_INPUTS = Object.freeze({
   'utils/boundscheck/lib/x86_64/libboundscheck.so': ['build', 'lib/libboundscheck.so'],
 });
 const pin = source => ({commit:source.commit, tree:source.tree});
-const fixed = {llvm:'7ed574d4ba6ff1ebeceeb339ab4795e0141e4a60', compiler:'174db8f40d5efddee63c47a3162bbf676bc227a0', bounds:'2ae82839ecaaa7d031e66ccbd2076d671acfd615'};
+const fixed = {llvm:'53ce96a7b9d243dc7fa05ff6a9b56ea0ef94c057', llvmTree:'3d80836504be22f5b06228db0e2c39c2d0d11c81', compiler:'174db8f40d5efddee63c47a3162bbf676bc227a0', bounds:'2ae82839ecaaa7d031e66ccbd2076d671acfd615'};
 export function qualificationRecipe(component) {
   const options = component.config.options;
-  if (component.source.commit !== fixed.llvm || options.compilerSource.commit !== fixed.compiler
+  if (component.source.commit !== fixed.llvm || component.source.tree !== fixed.llvmTree || options.compilerSource.commit !== fixed.compiler
     || options.boundscheckSource.commit !== fixed.bounds) reject('CJDB_QUALIFICATION_SCOPE',component.id,'qualification applies only to the declared fixed native graph');
   return {schema:CJDB_QUALIFICATION, llvm:pin(component.source), compiler:pin(options.compilerSource), bounds:pin(options.boundscheckSource),
     demangler:{source:'compiler:demangler', entry:'CMakeLists.txt:cangjie-demangler', configuration:'Release', install:'cangjie-demangler'},
