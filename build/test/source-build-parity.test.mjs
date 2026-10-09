@@ -821,6 +821,47 @@ test('package rejects the exact missing native target payload path', async () =>
   } finally { fs.rmSync(root, {recursive: true, force: true}); }
 });
 
+test('Linux package excludes only the optional Windows target roots', async () => {
+  const {root, config} = makeFixture();
+  try {
+    file(config.officialSdkRoot, ['lib', 'windows_x86_64_cjnative', 'libcangjie-std-core.a'], 'Windows reference');
+    file(config.officialSdkRoot, ['modules', 'windows_x86_64_cjnative', 'std', 'std.core.cjo'], 'Windows reference');
+    let packageError;
+    try { await packageStage.run(config); } catch (error) { packageError = error; }
+    console.log('LINUX_OPTIONAL_WINDOWS_ASSERT_REACHED');
+    assert.ifError(packageError);
+    file(config.officialSdkRoot, ['lib', 'windows_x86_64_cjnative-extra', 'required.a'], 'ordinary required payload');
+    console.log('LINUX_EXACT_TARGET_ROOT_ASSERT_REACHED');
+    await assert.rejects(packageStage.run(config), /missing-official-path\tlib\/windows_x86_64_cjnative-extra/);
+  } finally { fs.rmSync(root, {recursive: true, force: true}); }
+});
+
+test('Windows package still requires its complete target libraries and modules', async () => {
+  const f = makeFixture();
+  try {
+    const config = buildConfig({workspace: f.config.workspace, buildRoot: f.config.buildRoot,
+      officialSdkRoot: f.config.officialSdkRoot, targetKey: 'windows-x64', cangjieVersion: '1.2.3'});
+    const input = directory(config.repoPath('compiler'), config.target.primaryCompilerOutput());
+    file(input, ['envsetup.sh']);
+    for (const relative of [['cjpm', 'dist', 'cjpm'], ['cjfmt', 'build', 'build', 'bin', 'cjfmt'],
+      ['hyperlangExtension', 'target', 'bin', 'main'], ['cangjie-language-server', 'output', 'bin', 'LSPServer']]) {
+      const source = path.join(config.repoPath('tools'), ...relative); fs.copyFileSync(source, `${source}.exe`);
+    }
+    file(config.repoPath('stdx'), ['target', config.target.stdxTargetSubdir(), 'module.cjo']);
+    const paths = [['lib', 'windows_x86_64_cjnative', 'libcangjie-std-core.a'],
+      ['modules', 'windows_x86_64_cjnative', 'std', 'std.core.cjo']];
+    for (const relative of paths) { file(config.officialSdkRoot, relative, 'Windows reference'); file(input, relative, 'Windows producer'); }
+    await packageStage.run(config);
+    for (const relative of paths) {
+      fs.rmSync(path.join(input, ...relative));
+      console.log(`WINDOWS_REQUIRED_TARGET_ASSERT_REACHED path=${relative.join('/')}`);
+      await assert.rejects(packageStage.run(config), error => error.message.includes(`missing-official-path\t${relative.join('/')}`));
+      file(input, relative, 'Windows producer');
+    }
+    await packageStage.run(config);
+  } finally { fs.rmSync(f.root, {recursive: true, force: true}); }
+});
+
 test('package rejects an extra link outside the published SDK', async () => {
   const {root, config} = makeFixture();
   try {
