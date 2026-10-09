@@ -25,13 +25,12 @@ jobs:
         id: matrix
         run: node ci/target-matrix.mjs ci
 
-  lint:
-    name: Verify sources
+  static-checks:
+    name: Static source checks
     runs-on: ubuntu-slim
     timeout-minutes: 10
     steps:
-      - name: Checkout cjcj
-        uses: actions/checkout@v7
+      - uses: actions/checkout@v7
       - name: Run actionlint
         run: |
           bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
@@ -55,15 +54,41 @@ jobs:
         run: |
           find ci runtime_shim scripts -type f -name '*.mjs' -print0 \
             | xargs -0 -n1 node --check
-      # Driven by ci/test-manifest.mjs, never by a literal list here: the four
-      # steps this replaced named eight of the repository's twenty-eight test
-      # files, and the other twenty ran nowhere. ci/test-manifest.test.mjs holds
-      # both ends of that -- every test file must be in a manifest bucket, and
-      # this step must keep asking the manifest.
+
+  contract-plan:
+    runs-on: ubuntu-slim
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Export complete validated manifest plan
+        run: |
+          node ci/test-manifest.mjs list > "$RUNNER_TEMP/contract-files.txt"
+          node ci/contract-shards.mjs plan "$RUNNER_TEMP/contract-plan.json" "$RUNNER_TEMP/contract-files.txt"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: contract-plan
+          path: ${{ runner.temp }}/contract-plan.json
+          if-no-files-found: error
+
+  contracts:
+    name: Contracts group ${{ matrix.group }}
+    needs: contract-plan
+    runs-on: ubuntu-slim
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [0, 1, 2, 3]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: contract-plan
+          path: ${{ runner.temp }}/contract-plan
       - name: Install release contract dependencies
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq zip unzip clang lld libssl-dev python3 build-essential jq
-          npx --yes zx@8 --version
+          sudo apt-get update -qq && sudo apt-get install -y -qq zip unzip clang lld libssl-dev python3 build-essential git gdb jq cmake ninja-build
+          npm exec --yes --package=zx@8 -- node ci/test-zx.mjs prepare "$RUNNER_TEMP/test-zx.json"
       # package-lineage compares package bytes with the official host SDK. Load
       # the consumer's pin, not the build job's independently loaded environment.
       - name: Install official lineage input
@@ -75,33 +100,45 @@ jobs:
           cjv_bin=$(find "$RUNNER_TEMP/lineage-cjv" -type f -name cjv | head -1)
           "$cjv_bin" install "$CJCJ_TOOLCHAIN"
       - name: Prepare pinned runtime contract input
-        run: npx --yes zx@8 ci/prepare-runtime-test-input.mjs "$RUNNER_TEMP/runtime-contract-input"
+        run: node ci/test-zx.mjs run "$RUNNER_TEMP/test-zx-bin" npx --yes zx@8 ci/prepare-runtime-test-input.mjs "$RUNNER_TEMP/runtime-contract-input"
       - name: Test build and release contracts
         shell: bash
         env:
+          CONTRACT_GROUP: ${{ matrix.group }}
           RELEASE_EVIDENCE_TEST_ROOT: ${{ runner.temp }}/release-evidence-tests
           CJCJ_TEST_EVIDENCE: ${{ runner.temp }}/srcbuild-driver-evidence
+          PRODUCER_EVIDENCE_TEST_ROOT: ${{ runner.temp }}/producer-evidence-tests
         run: |
-          mapfile -t FILES < <(node ci/test-manifest.mjs list)
-          echo "manifest gates ${#FILES[@]} test files"
-          # mapfile succeeds with zero lines if the manifest fails, and `node
-          # --test` with no file arguments falls back to its own discovery, which
-          # would pass while testing nothing.
-          test "${#FILES[@]}" -ge 85
-          # A hanging test would otherwise consume this job's whole
-          # timeout-minutes and end in "exceeded maximum execution time", which
-          # names no test. The bound makes the runner fail the specific test by
-          # name instead. It is not a way to pass over a hang -- a timeout here is
-          # a failure. 300s is ~150x the whole suite's normal 2s; a test that
-          # genuinely needs longer says so with its own {timeout}, which wins.
-          node --test --test-timeout=300000 "${FILES[@]}"
+          node ci/contract-shards.mjs run "$RUNNER_TEMP/contract-plan/contract-plan.json" "$CONTRACT_GROUP" "$RUNNER_TEMP/contract-result"
+      - name: Preserve contract group evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: contract-group-${{ matrix.group }}
+          path: ${{ runner.temp }}/contract-result
+          if-no-files-found: error
       - name: Preserve srcbuild driver evidence
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: srcbuild-driver-evidence
+          name: srcbuild-driver-evidence-${{ matrix.group }}
           path: ${{ runner.temp }}/srcbuild-driver-evidence
           if-no-files-found: warn
+      - name: Preserve producer qualification evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: producer-qualification-${{ matrix.group }}
+          path: ${{ runner.temp }}/producer-evidence-tests
+          if-no-files-found: warn
+          include-hidden-files: true
+
+  source-audits:
+    name: Pin reachability and source policy
+    runs-on: ubuntu-slim
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
       - name: Audit pin reachability
         run: node ci/pin-sweep.mjs --remote
       - name: Verify smoke assets
@@ -111,6 +148,31 @@ jobs:
           test -f ci/smoke/macro_demo/app/main.cj
       - name: Verify LLVM policy
         run: test -z "$(git ls-files 'ci/prebuilt/**' 'runtime_shim/prebuilt/**')"
+
+
+  lint:
+    name: Verify sources
+    if: always()
+    needs: [static-checks, contract-plan, contracts, source-audits]
+    runs-on: ubuntu-slim
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Require every source job to succeed
+        env:
+          REQUIRED_JOBS: ${{ toJSON(needs) }}
+        run: |
+          node -e 'const jobs=JSON.parse(process.env.REQUIRED_JOBS); if(Object.values(jobs).some(job=>job.result!=="success")) { console.error(jobs); process.exit(1); }'
+      - uses: actions/download-artifact@v8
+        with:
+          name: contract-plan
+          path: ${{ runner.temp }}/contract-plan
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: contract-group-*
+          path: ${{ runner.temp }}/contract-results
+      - name: Verify exact coverage and real Node outcomes
+        run: node ci/contract-shards.mjs summary "$RUNNER_TEMP/contract-plan/contract-plan.json" "$RUNNER_TEMP/contract-results"
 
   script-tests:
     name: Python and shell contracts
@@ -199,13 +261,14 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: package-tests-official-host
+          if-no-files-found: warn
+          include-hidden-files: true
           path: |
             ${{ runner.temp }}/package-tests/results.json
             ${{ runner.temp }}/package-tests/run.log
             ${{ runner.temp }}/package-tests/reports
             ${{ runner.temp }}/package-tests/prepare
-            ${{ runner.temp }}/package-tests/objc-fixture/fixture.json
-            ${{ runner.temp }}/package-tests/objc-fixture/*.log
+            ${{ runner.temp }}/package-tests/objc-fixture
             ${{ runner.temp }}/package-tests/prerequisite.json
 
   fixed-llvm-tools:
@@ -349,7 +412,15 @@ jobs:
           test -f "target/release/bin/cjcj::cjc"
           cp "target/release/bin/cjcj::cjc" "target/release/bin/cjcj"
       - name: Run smoke tests
-        run: npx --yes zx@8 ci/smoke/run_smoke.mjs "$PWD/target/release/bin/cjcj"
+        run: npx --yes zx@8 ci/smoke/run_smoke.mjs "$PWD/target/release/bin/cjcj" "$RUNNER_TEMP/smoke-tests"
+      - name: Preserve smoke producer evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: smoke-producer-evidence-${{ matrix.runner }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/smoke-tests
+          if-no-files-found: warn
+          include-hidden-files: true
 
   # Non-gating: verifies SDK provisioning on macOS; does not build cjcj.
   provision:

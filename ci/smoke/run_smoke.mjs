@@ -6,6 +6,7 @@ import {existsSync} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
+import {preserveCall, diagnose, runDirect} from '../producer-evidence.mjs';
 
 const cjcj = argv._[0];
 if (!cjcj) {
@@ -28,12 +29,38 @@ try {
 // official SDK libraries, backend and runtime, just like the host build.
 let pass = 0;
 let fail = 0;
+const sampleStates = Object.fromEntries(['01_hello', '02_generics', '03_closures', '04_iface_enum', '05_ffi', '06_macro']
+  .map(name => [name, {compile: 'NOT_RUN', run: 'NOT_RUN'}]));
+async function saveParent(rc = null) {
+  const file = path.join(work, 'smoke-result.json');
+  await fs.writeFile(`${file}.tmp`, JSON.stringify({parent_rc: rc, pass, fail, samples: sampleStates,
+    upload: {state: 'NOT_RUN', rc: null}}, null, 2) + '\n');
+  await fs.rename(`${file}.tmp`, file);
+}
+await saveParent();
 if (process.platform === 'win32') process.env.cjStackSize = process.env.cjStackSize || '64MB';
 
 async function runCommand(executable, args, cwd) {
   const t0 = performance.now();
   let out;
-  if (process.platform !== 'win32') {
+  let evidence;
+  if (executable === cjcj) {
+    const source = args.find(arg => arg.endsWith('.cj'));
+    const name = source === 'def.cj' ? '06_macro/package' : source === 'main.cj' ? '06_macro/app' : path.basename(source, '.cj');
+    try {
+      evidence = await preserveCall({command: [executable, ...args], cwd: cwd || process.cwd(),
+        role: 'smoke', name, root: path.join(work, 'producer-evidence'), sourceTree: path.resolve(here, '../..')});
+    } catch (error) {
+      return {exitCode: 74, signal: null, stdout: '', stderr: `PRESERVATION_FAILED: ${error.message}\n`,
+        prerequisiteFailure: true, evidence: error.evidence?.directory, ms: Math.round(performance.now() - t0)};
+    }
+  }
+  if (evidence?.record.diagnostic) {
+    out = await diagnose(evidence);
+  } else if (evidence && process.platform !== 'win32') {
+    const result = await runDirect(evidence);
+    out = {...result, exitCode: result.collector_rc};
+  } else if (process.platform !== 'win32') {
     out = await $({cwd, nothrow: true, quiet: true})`${executable} ${args}`;
   } else {
     const line = [`"${executable}"`, ...args.map((arg) => `"${arg}"`)].join(' ');
@@ -44,8 +71,10 @@ async function runCommand(executable, args, cwd) {
       windowsVerbatimArguments: true,
       maxBuffer: 64 * 1024 * 1024,
     });
-    out = {exitCode: result.status ?? 1, stdout: result.stdout || '', stderr: result.stderr || String(result.error || ''), signal: result.signal || null};
+    out = {exitCode: result.status ?? 1, stdout: result.stdout || '', stderr: result.stderr || String(result.error || ''), signal: result.signal || null,
+      launcher: {argv0: 'cmd.exe', argv: ['/d', '/s', '/c', `"${line}"`]}};
   }
+  if (evidence && process.platform === 'win32' && !evidence.record.diagnostic) await evidence.finish(out);
   // Inspect the actual compiler transcript before executing any produced sample.
   // The official SDK supplies both its lib directory and cjstart.o to the linker.
   if (executable === cjcj) {
@@ -67,7 +96,17 @@ async function runCommand(executable, args, cwd) {
     stderr: out.stderr || '',
     signal: out.signal ?? null,
     ms,
+    evidence: evidence?.directory,
+    evidenceState: evidence?.record.state,
+    cancelled: evidence?.record.cancellation_signal,
   };
+}
+
+async function stopCollectorFailure(result) {
+  if (result.cancelled || result.prerequisiteFailure || ['DEBUGGER_FAILED', 'DIAGNOSTIC_REJECTED'].includes(result.evidenceState)) {
+    await saveParent(result.exitCode);
+    process.exit(result.exitCode);
+  }
 }
 
 function reportFailure(kind, name, result) {
@@ -243,13 +282,18 @@ for (const [name, wanted] of expect) {
   await Promise.all([fs.rm(exe, {force: true}), fs.rm(buildLog, {force: true}), fs.rm(runLog, {force: true})]);
   console.log(`[smoke] sample ${name}`);
   const built = await runCommand(cjcj, ['--verbose', src, '-o', exe]);
+  sampleStates[name].compile = {rc: built.exitCode, signal: built.signal, evidence: built.evidence, state: built.evidenceState};
+  await saveParent();
   await fs.writeFile(buildLog, `rc=${built.exitCode} signal=${built.signal ?? 'none'} ms=${built.ms}\n--- stdout ---\n${built.stdout}\n--- stderr ---\n${built.stderr}`);
+  await stopCollectorFailure(built);
   if (built.exitCode !== 0) {
     reportFailure('compile', name, built);
     fail++;
     continue;
   }
   const ran = await runCommand(exe, []);
+  sampleStates[name].run = {rc: ran.exitCode, signal: ran.signal};
+  await saveParent();
   await fs.writeFile(runLog, `rc=${ran.exitCode} signal=${ran.signal ?? 'none'} ms=${ran.ms}\n--- stdout ---\n${ran.stdout}\n--- stderr ---\n${ran.stderr}`);
   // Normalize CRLF before comparing: Windows println emits \r\n, and the
   // expectations encode line structure, not the OS newline byte sequence.
@@ -273,14 +317,20 @@ await fs.cp(path.join(here, 'macro_demo'), macroBuild, {recursive: true});
 let macroOk = true;
 let got = '';
 let result = await runCommand(cjcj, ['--verbose', '--compile-macro', 'def.cj'], path.join(macroBuild, 'mymacros'));
+sampleStates['06_macro'].compile = {package: {rc: result.exitCode, signal: result.signal, evidence: result.evidence}, app: 'NOT_RUN'};
+await saveParent();
 await fs.writeFile(path.join(work, 'macro.build.log'), `rc=${result.exitCode} signal=${result.signal ?? 'none'} ms=${result.ms}\n--- stdout ---\n${result.stdout}\n--- stderr ---\n${result.stderr}`);
+await stopCollectorFailure(result);
 if (result.exitCode !== 0) {
   reportFailure('compile', '06_macro/package', result);
   macroOk = false;
 }
 if (macroOk) {
   result = await runCommand(cjcj, ['--verbose', 'main.cj', '--import-path', macroBuild, '-o', path.join(macroBuild, `app/app${exeSuffix}`)], path.join(macroBuild, 'app'));
+  sampleStates['06_macro'].compile.app = {rc: result.exitCode, signal: result.signal, evidence: result.evidence};
+  await saveParent();
   await fs.writeFile(path.join(work, 'macro.app.log'), `rc=${result.exitCode} signal=${result.signal ?? 'none'} ms=${result.ms}\n--- stdout ---\n${result.stdout}\n--- stderr ---\n${result.stderr}`);
+  await stopCollectorFailure(result);
   if (result.exitCode !== 0) {
     reportFailure('compile', '06_macro/app', result);
     if (process.platform === 'win32') {
@@ -298,6 +348,8 @@ if (macroOk) {
 }
 if (macroOk) {
   result = await runCommand(path.join(macroBuild, `app/app${exeSuffix}`), []);
+  sampleStates['06_macro'].run = {rc: result.exitCode, signal: result.signal};
+  await saveParent();
   await fs.writeFile(path.join(work, 'macro.run.log'), `rc=${result.exitCode} signal=${result.signal ?? 'none'} ms=${result.ms}\n--- stdout ---\n${result.stdout}\n--- stderr ---\n${result.stderr}`);
   got = result.stdout.replace(/\r\n/g, '\n').replace(/\n$/, '');
   if (result.exitCode !== 0) {
@@ -319,3 +371,4 @@ if (macroOk) {
 
 console.log(`[smoke] summary: pass=${pass} fail=${fail} workdir=${work}`);
 process.exitCode = fail === 0 ? 0 : 1;
+await saveParent(process.exitCode);

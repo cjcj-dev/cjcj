@@ -37,6 +37,10 @@ STAGE1_SHA256=''
 HOST_SDK=''
 RUNTIME_SHA=''
 CHECK_ONLY=0
+RESUME_COLOUR_GATE=0
+RESUME_STD_SUMS=''
+COLOUR_GATE_SOURCE=''
+COLOUR_GATE_INSTALL=''
 HOST_IDENTITIES=''
 HOST_IDENTITIES_SHA256=''
 WANT=all
@@ -62,6 +66,8 @@ BUILD_HOME="${HOME:-/root}"
 
 usage() {
   echo 'bootstrap.sh --work DIR --src CJCJ_ROOT --cjcj-sha 40HEX --stdsrc STDLIB --cpp-src CANGJIE_CPP_ROOT --host-llvm-so libLLVM-15.so --host-llvm-sha256 HEX --colour-llvm-so libLLVM-15.so --colour-llvm-sha256 HEX --ast-support FILE --ast-support-sha256 HEX --colour-tuple DIR --colour-llvm-sha 40HEX --colour-rt DIR --host-rt DIR [--stage supplied-stage1|stage0|stage1|stage1-initial-std|stage1-std|stage1-compiler|all] [--stage1-heap 20GB] [--dry-run]'
+  echo 'resume completed same-source std: --resume-colour-gate captured-sha256-file (original private work directory)'
+  echo 'colour runtime gate: --colour-gate-source RUNTIME_ROOT --colour-gate-install INSTALL_ROOT (supplied-stage1 only)'
   echo 'supplied-stage1 additionally requires --stage1-elf FILE --stage1-sha256 64HEX --host-sdk DIR --runtime-sha 40HEX --host-identities FILE --host-identities-sha256 64HEX; optional --check-only (no work creation)'
 }
 
@@ -227,11 +233,12 @@ assert_path() {
 }
 
 cmd() {
-  local rc
+  local rc started=$SECONDS
   echo "CMD $*"
   [ "$DRY" -eq 1 ] && return 0
-  eval "$*" && return 0
-  rc=$?
+  if eval "$*"; then rc=0; else rc=$?; fi
+  echo "STEP_RESULT stage=$STAGE rc=$rc wall=$((SECONDS-started))"
+  [ "$rc" -eq 0 ] && return 0
   RED "BOOTSTRAP-FAIL [$STAGE] 命令失败 rc=$rc: $*"
   exit "$rc"
 }
@@ -473,6 +480,8 @@ stdlib_build() {
   cmd "python3 $(printf '%q' "$SRC/ci/install_std_sdk_inputs.py") $(printf '%q' "$(dirname "$AST_SUPPORT")") $(printf '%q' "$sdk") $(printf '%q' "$HOST_TUPLE")"
   ld=$(sdk_ld_path "$sdk" "$runtime")
   prepare_build_env
+  compiler="$sdk/bin/cjc"; [ ! -f "$sdk/bin/cjcj-stage1" ] || compiler="$sdk/bin/cjcj-stage1"
+  cmd "node $(printf '%q' "$SRC/ci/bootstrap/std-receipt.mjs") begin $(printf '%q' "$prefix") $(printf '%q' "$STDSRC") $(printf '%q' "$compiler")"
   # shellcheck disable=SC2016 # Expanded by the inner bash, not this shell.
   script='cd "$1" && rm -rf build/build && python3 build.py clean && python3 build.py build -t relwithdebinfo --jobs "$2" --target-lib="$3" && python3 build.py install --prefix "$4"'
   cmd "env -i $(compiler_cache_env)HOME=$(printf '%q' "$BUILD_HOME") TMPDIR=$(printf '%q' "$BUILD_TMPDIR") CANGJIE_HOME=$(printf '%q' "$sdk") LD_LIBRARY_PATH=$(printf '%q' "$ld") PATH=$(printf '%q' "$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:/usr/bin:/bin") cjHeapSize=$(printf '%q' "$STD_BUILD_HEAP") bash -c $(printf '%q' "$script") bash $(printf '%q' "$STDSRC") $(printf '%q' "$STD_BUILD_JOBS") $(printf '%q' "$target_lib") $(printf '%q' "$prefix")"
@@ -480,9 +489,7 @@ stdlib_build() {
   # Match sdk_verify.measured_cjc_sha: the runner is only a launcher.
   compiler="$sdk/bin/cjc"
   [ ! -f "$sdk/bin/cjcj-stage1" ] || compiler="$sdk/bin/cjcj-stage1"
-  if [ -f "$compiler" ] || [ "$DRY" -eq 1 ]; then
-    cmd "python3 -c 'import hashlib,json,sys; h=hashlib.sha256(open(sys.argv[1],\"rb\").read()).hexdigest(); open(sys.argv[2],\"w\").write(json.dumps({\"compiler_sha256\":h})+chr(10))' $(printf '%q' "$compiler") $(printf '%q' "$prefix/std-producer.json")"
-  fi
+  cmd "node $(printf '%q' "$SRC/ci/bootstrap/std-receipt.mjs") finish $(printf '%q' "$prefix") $(printf '%q' "$STDSRC") $(printf '%q' "$compiler")"
 }
 
 assert_cjcj_root() {
@@ -792,7 +799,9 @@ stage1_std() {
 }
 
 stage1_compiler() {
+  local started=$SECONDS
   STAGE=stage1-compiler
+  echo "STAGE_BEGIN stage=stage2-compiler epoch=$(date +%s)"
   echo "OUTPUT cjcj-stage2=$out"
   echo "OUTPUT bootstrap-std=$std"
   # The compiler links std statically: consume the completed std from its job.
@@ -815,6 +824,7 @@ stage1_compiler() {
   # It does not rewrite $out. Spec: cjpm `build -g` (default off) lands in
   # target/debug; std RelWithDebInfo already passes -g via AddCangjieSource.cmake.
   stage2_forensic
+  echo "STAGE_RESULT stage=stage2-compiler rc=0 wall=$((SECONDS-started))"
 }
 
 
@@ -867,6 +877,13 @@ supplied_stage1_validate() {
     [ -n "${!value}" ] || die "缺少参数 $value (supplied-stage1)"
   done
   [[ "$RUNTIME_SHA" =~ ^[0-9a-f]{40}$ ]] || die 'runtime SHA must be 40 lowercase hex digits'
+  if [ -n "$COLOUR_GATE_SOURCE$COLOUR_GATE_INSTALL" ]; then
+    if [ -z "$COLOUR_GATE_SOURCE" ] || [ -z "$COLOUR_GATE_INSTALL" ]; then die 'both colour gate inputs required'; fi
+    actual=$(git -C "$COLOUR_GATE_SOURCE" rev-parse HEAD) || die 'colour gate source must be a Git checkout'
+    [ "$actual" = "$RUNTIME_SHA" ] || die 'colour gate source differs from runtime SHA'
+    [ "$(realpath "$STDSRC")" = "$(realpath "$COLOUR_GATE_SOURCE/stdlib")" ] || die 'colour gate requires the runtime checkout stdlib'
+    [ -z "$(git -C "$COLOUR_GATE_SOURCE" status --porcelain -- stdlib)" ] || die 'colour gate stdlib source is modified'
+  fi
   actual=$(node "$(dirname "${BASH_SOURCE[0]}")/../runtime-pin.mjs" --shell "$RUNTIME_PIN") || die 'runtime selection rejected'
   printf '%s\n' "$actual" | /usr/bin/grep -Fx "RUNTIME_REF='$RUNTIME_SHA'" >/dev/null || die 'runtime SHA differs from runtime pin'
   [ -z "${LD_LIBRARY_PATH:-}" ] || die 'mixed domain: inherited LD_LIBRARY_PATH must be empty'
@@ -877,7 +894,14 @@ supplied_stage1_validate() {
   WORK=$(realpath -m "$WORK")
   case "$WORK" in /|/root|/root/sdks|/root/sdks/*|/root/.cjv|/root/.cjv/*) die 'private work directory required';; esac
   case "$HOST_SDK/" in "$WORK/"*) die 'host SDK must be outside work directory';; esac
-  [ ! -e "$WORK" ] || die 'supplied-stage1 refuses an existing work directory'
+  if [ "$RESUME_COLOUR_GATE" -eq 1 ]; then
+    [ -n "$COLOUR_GATE_SOURCE" ] || die 'resume requires the complete colour gate'
+    [ -f "$RESUME_STD_SUMS" ] || die 'resume requires captured same-source std hashes'
+    npx --yes zx@8 "$SRC/ci/bootstrap/verify-resume-std.mjs" "$WORK" "$RESUME_STD_SUMS" "$COLOUR_GATE_SOURCE" "$RUNTIME_SHA" "$STAGE1_SHA256" || die 'resume retained input identity mismatch'
+    assert_expected_sha resumed-stage1 "$WORK/cjcj-stage1" "$STAGE1_SHA256"
+  else
+    [ ! -e "$WORK" ] || die 'supplied-stage1 refuses an existing work directory'
+  fi
   [ -x "$STAGE1_ELF" ] || die 'stage1 ELF is not executable'
   readelf -h "$STAGE1_ELF" >/dev/null || die 'stage1 input must be ELF'
   assert_expected_sha stage1 "$STAGE1_ELF" "$STAGE1_SHA256"
@@ -894,13 +918,18 @@ supplied_stage1_validate() {
 
 supplied_stage1() {
   local out std sdk compiler previous_std
-  cmd "mkdir -p $(printf '%q' "$WORK")"
-  cmd "cp -aL $(printf '%q' "$HOST_SDK") $(printf '%q' "$WORK/sdk-stage0")"
-  cmd "python3 $(printf '%q' "$SRC/ci/install_std_sdk_inputs.py") $(printf '%q' "$(dirname "$AST_SUPPORT")") $(printf '%q' "$WORK/sdk-stage0") $(printf '%q' "$HOST_TUPLE")"
-  cmd "install -m755 $(printf '%q' "$STAGE1_ELF") $(printf '%q' "$WORK/cjcj-stage1")"
-  printf '%s\n' "$WORK/cjcj-stage1" > "$WORK/.cjcj-stage1"
-  stage1_inputs
-  stage1_initial_std
+  if [ "$RESUME_COLOUR_GATE" -eq 1 ]; then
+    stage1_inputs
+    echo 'RESUME colour-runtime-gate: captured same-source std and SDK inputs verified'
+  else
+    cmd "mkdir -p $(printf '%q' "$WORK")"
+    cmd "cp -aL $(printf '%q' "$HOST_SDK") $(printf '%q' "$WORK/sdk-stage0")"
+    cmd "python3 $(printf '%q' "$SRC/ci/install_std_sdk_inputs.py") $(printf '%q' "$(dirname "$AST_SUPPORT")") $(printf '%q' "$WORK/sdk-stage0") $(printf '%q' "$HOST_TUPLE")"
+    cmd "install -m755 $(printf '%q' "$STAGE1_ELF") $(printf '%q' "$WORK/cjcj-stage1")"
+    printf '%s\n' "$WORK/cjcj-stage1" > "$WORK/.cjcj-stage1"
+    stage1_inputs
+    stage1_initial_std
+  fi
   # The full std just produced is the stage2 compiler's static-link input.
   std="$previous_std"
   if [ -n "${COLOUR_GATE_SOURCE:-}${COLOUR_GATE_INSTALL:-}" ]; then STAGE=colour-runtime-gate; assemble_stage1_sdk "$sdk" "$compiler" "$std"; cmd "npx --yes zx@8 $(printf '%q' "$SRC/ci/release/gate_colour_runtime.mjs") --build-sdk $(printf '%q' "${COLOUR_GATE_SOURCE:?colour gate source}") $(printf '%q' "$sdk") $(printf '%q' "$WORK/colour-gate-active") $(printf '%q' "${COLOUR_GATE_INSTALL:?colour gate install}")"; fi
@@ -919,8 +948,10 @@ main() {
       --stage1-elf) STAGE1_ELF="${2:?}"; shift 2;;
       --stage1-sha256) STAGE1_SHA256="${2:?}"; shift 2;;
       --host-sdk) HOST_SDK="${2:?}"; shift 2;;
-      --colour-gate-source) COLOUR_GATE_SOURCE="${2:?}"; shift 2;; --colour-gate-install) COLOUR_GATE_INSTALL="${2:?}"; shift 2;;
       --runtime-sha) RUNTIME_SHA="${2:?}"; shift 2;;
+      --colour-gate-source) COLOUR_GATE_SOURCE="${2:?}"; shift 2;;
+      --colour-gate-install) COLOUR_GATE_INSTALL="${2:?}"; shift 2;;
+      --resume-colour-gate) RESUME_COLOUR_GATE=1; RESUME_STD_SUMS="${2:?captured std sha256 file}"; shift 2;;
       --check-only) CHECK_ONLY=1; shift;;
       --work) WORK="${2:?}"; shift 2;;
       --runtime-pin) RUNTIME_PIN="${2:?}"; shift 2;;
@@ -952,6 +983,8 @@ main() {
   for value in WORK SRC CJCJ_SHA STDSRC HOST_LLVM_SO HOST_LLVM_SHA256 COLOUR_LLVM_SO COLOUR_LLVM_SHA256 AST_SUPPORT AST_SUPPORT_SHA256 COLOUR_TUPLE COLOUR_LLVM_SHA CRT HRT; do
     eval "[ -n \"\${$value}\" ]" || die "缺少参数 $value"
   done
+  [ -z "$COLOUR_GATE_SOURCE$COLOUR_GATE_INSTALL" ] || [ "$WANT" = supplied-stage1 ] || die 'colour gate requires supplied-stage1'
+  [ "$RESUME_COLOUR_GATE" -eq 0 ] || [ "$WANT" = supplied-stage1 ] || die 'resume requires supplied-stage1'
   case "$WANT" in supplied-stage1|stage0|stage1|stage1-initial-std|stage1-std|stage1-compiler|all) ;; *) die '--stage 只能是 stage0|stage1|stage1-initial-std|stage1-std|stage1-compiler|all';; esac
   case "$WANT" in
     stage0|all) [ -n "$CPP_SRC" ] || die '缺少参数 CPP_SRC';;

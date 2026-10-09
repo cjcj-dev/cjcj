@@ -983,7 +983,13 @@ function writeAstInputFixture(archive) {
 // run_step and the final RESULT. Only external inputs live in the fixture.
 // Formal controls use the actual pinned Git object, not a fabricated HEAD.
 let headerRuntimeSource;
-after(() => { if (headerRuntimeSource?.owned) fs.rmSync(headerRuntimeSource.path, {recursive: true, force: true}); });
+let headerRuntimeTemplate;
+let bootstrapTemplate;
+after(() => {
+  if (bootstrapTemplate) fs.rmSync(bootstrapTemplate.root, {recursive: true, force: true});
+  if (headerRuntimeTemplate) fs.rmSync(headerRuntimeTemplate.root, {recursive: true, force: true});
+  if (headerRuntimeSource?.owned) fs.rmSync(headerRuntimeSource.path, {recursive: true, force: true});
+});
 function writeCppHeaderFixture(root, cpp, runtimeRef) {
   const readPin = name => Object.fromEntries(fs.readFileSync(path.join(root, 'ci', name), 'utf8')
     .trim().split('\n').map(line => line.split('=')));
@@ -1003,8 +1009,31 @@ function writeCppHeaderFixture(root, cpp, runtimeRef) {
     assert.equal(git(['-C', source, 'rev-parse', 'HEAD']), runtimeRef);
     headerRuntimeSource = {path: source, owned: !configured};
   }
+  if (!headerRuntimeTemplate) {
+    const started = performance.now();
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'header-runtime-template-'));
+    const source = path.join(root, 'source');
+    assert.equal(git(['-C', headerRuntimeSource.path, 'status', '--porcelain']), '');
+    fs.mkdirSync(source);
+    // verifyCppHeaders reads HEAD plus the separately inventoried fixture headers,
+    // not this runtime worktree. Retain the authentic commit/tree/blob database
+    // in independent metadata without materializing thousands of unused files.
+    git(['clone', '-q', '--bare', '--no-hardlinks', headerRuntimeSource.path, path.join(source, '.git')]);
+    git(['-C', source, 'config', 'core.bare', 'false']);
+    assert.equal(git(['-C', source, 'rev-parse', 'HEAD']), runtimeRef);
+    assert.equal(git(['-C', source, 'rev-parse', 'HEAD^{tree}']), git(['-C', headerRuntimeSource.path, 'rev-parse', 'HEAD^{tree}']));
+    assert(!fs.existsSync(path.join(source, '.git/objects/info/alternates')));
+    headerRuntimeTemplate = {root, source, ref: runtimeRef};
+    console.log(`FIXTURE_RUNTIME_TEMPLATE ${JSON.stringify({runtimeRef, wallMs: performance.now() - started})}`);
+  }
+  assert.equal(headerRuntimeTemplate.ref, runtimeRef);
   const paired = path.join(cpp, 'third_party/paired-runtime');
-  git(['clone', '-q', '--no-hardlinks', headerRuntimeSource.path, paired]);
+  // Copy the authenticated private template physically: no shared inodes,
+  // alternates or links to another case, and no repeated Git checkout work.
+  fs.mkdirSync(paired, {recursive: true});
+  const copied = spawnSync('cp', ['-a', `${headerRuntimeTemplate.source}/.`, paired], {encoding: 'utf8'});
+  assert.equal(copied.status, 0, copied.stderr);
+  assert.equal(git(['-C', paired, 'rev-parse', 'HEAD']), runtimeRef);
   const roots = ['third_party/llvm-project/llvm/include', 'build/build/third_party/llvm/include',
     'build/build/include', 'build/build/schema'];
   const headers = {};
@@ -1024,33 +1053,27 @@ function writeCppHeaderFixture(root, cpp, runtimeRef) {
   }));
 }
 
-function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFailure = false, child = false, coreObserve = false, runtimeCase = 'valid', ast = 'explicit', largeContract = false, contractDefect} = {}) {
+function produceBootstrapTemplate() {
+  const started = performance.now();
+  const preparation = {case: 'immutable-bootstrap-inputs', copyMs: 0, gitMs: 0, sdkMs: 0, copyBytes: 0, excludedGitPackBytes: 0};
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bootstrap argv '));
-  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
   for (const dir of ['ci', 'build', 'tools']) {
-    fs.cpSync(path.join(repoRoot, dir), path.join(root, dir), {recursive: true});
+    fs.cpSync(path.join(repoRoot, dir), path.join(root, dir), {recursive: true, filter(source) {
+      const stat = fs.statSync(source);
+      // These immutable test-only object packs are consumed by this test
+      // process's pinnedRemote helper, never by the copied production driver.
+      // Keep every production file and the helper itself, not a dependency
+      // allowlist. Each case still owns physical copies of all mutable inputs.
+      if (stat.isFile() && path.dirname(source) === path.join(repoRoot, 'ci/fixtures/git') && /\.pack(?:\.\d+)?$/.test(path.basename(source))) {
+        preparation.excludedGitPackBytes += stat.size;
+        return false;
+      }
+      if (stat.isFile()) preparation.copyBytes += stat.size;
+      return true;
+    }});
   }
+  preparation.copyMs = performance.now() - started;
   const driver = path.join(root, 'tools/srcbuild_kkk2.sh');
-  if (largeContract) {
-    // Comments leave the executable contract unchanged. Exceed pipe capacity
-    // so early-exit text readers cannot rely on the writer winning a race.
-    const padding = `    # ${'contract documentation '.repeat(8192)}\n`;
-    fs.writeFileSync(driver, fs.readFileSync(driver, 'utf8').replace(
-      /^(bootstrap_argv|step_31|step_32|step_34)\(\) \{[\s\S]*?^\}/gm,
-      body => body.slice(0, -1) + padding + '}'));
-  }
-  if (contractDefect) {
-    fs.writeFileSync(driver, fs.readFileSync(driver, 'utf8').replace(
-      new RegExp(`^${contractDefect.functionName}\\(\\) \\{[\\s\\S]*?^\\}`, 'm'),
-      body => body.replace(contractDefect.from, contractDefect.to)));
-  }
-  if (empty || partialFailure) {
-    const text = fs.readFileSync(driver, 'utf8');
-    fs.writeFileSync(driver, text.replace(/^bootstrap_argv\(\) \{[\s\S]*?^\}/m,
-      partialFailure
-        ? 'bootstrap_argv() {\n    printf \'%q \' "$BOOTSTRAP_SH"\n    return 1\n}'
-        : 'bootstrap_argv() {\n    return 0\n}'));
-  }
   const state = path.join(root, '.srcbuild');
   fs.mkdirSync(path.join(state, 'fixed-llc'), {recursive: true});
   fs.writeFileSync(path.join(state, 'kkk2-github.env'), '');
@@ -1067,7 +1090,7 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
     `LLVM_TUPLE_SUMS_SHA=${sha256(path.join(cached, 'SHA256SUMS'))}`));
   const pin = path.join(root, 'ci/llvm-dylib', `linux_${os.arch() === 'x64' ? 'x86_64' : 'aarch64'}.env`);
   fs.writeFileSync(pin, fs.readFileSync(pin, 'utf8').replace(/^LLVM_DYLIB_SOURCE_SHA=.*$/m,
-    `LLVM_DYLIB_SOURCE_SHA=${mismatch ? '0'.repeat(40) : llvmSha}`));
+    `LLVM_DYLIB_SOURCE_SHA=${llvmSha}`));
   const inputs = path.join(root, 'inputs');
   const base = path.join(inputs, 'base');
   const tuple = path.join(inputs, 'tuple');
@@ -1089,19 +1112,16 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
   fs.writeFileSync(inputs + '/ast.a', 'ast input\n');
   writeAstInputFixture(inputs + '/ast.a');
   const runtimePin = fs.readFileSync(path.join(root, 'ci/runtime_pin.env'), 'utf8').match(/^RUNTIME_REF=(.*)$/m)[1];
+  const gitStarted = performance.now();
   writeCppHeaderFixture(root, inputs, runtimePin);
+  preparation.gitMs = performance.now() - gitStarted;
   const runtimeDir = path.join(inputs, 'external runtime');
   fs.mkdirSync(runtimeDir);
   let stamp = `CJRT-COMMIT:${runtimePin}`;
-  if (runtimeCase === 'old-pin') stamp = `CJRT-COMMIT:${'0'.repeat(40)}`;
   fs.writeFileSync(runtimeDir + '/libcangjie-runtime.so', stamp + '\n');
   fs.writeFileSync(runtimeDir + '/libboundscheck.so', 'boundscheck input\n');
   const runtimeSha = sha256(runtimeDir + '/libcangjie-runtime.so');
   const boundsSha = sha256(runtimeDir + '/libboundscheck.so');
-  if (runtimeCase === 'runtime-corrupt') fs.appendFileSync(runtimeDir + '/libcangjie-runtime.so', 'changed');
-  if (runtimeCase === 'bounds-corrupt') fs.appendFileSync(runtimeDir + '/libboundscheck.so', 'changed');
-  if (runtimeCase === 'bounds-missing') fs.unlinkSync(runtimeDir + '/libboundscheck.so');
-  if (runtimeCase === 'runtime-missing') fs.unlinkSync(runtimeDir + '/libcangjie-runtime.so');
 
   fs.writeFileSync(tuple + '/MANIFEST', `LLVM_SHA=${llvmSha}\n`);
   fs.writeFileSync(tuple + '/bin/opt', `CJLLVM-COMMIT:${llvmSha}\n`);
@@ -1145,9 +1165,9 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
     CJCJ_BOOTSTRAP_AST_SUPPORT: inputs + '/ast.a',
     CJCJ_BOOTSTRAP_AST_SUPPORT_SHA256: astInputPins.explicit,
     CJCJ_BOOTSTRAP_COLOUR_TUPLE: tuple,
-    CJCJ_BOOTSTRAP_COLOUR_RT: runtimeCase === 'undeclared' ? '' : runtimeDir,
-    CJCJ_BOOTSTRAP_COLOUR_RT_SHA256: runtimeCase === 'no-runtime-sha' ? '' : runtimeSha,
-    CJCJ_BOOTSTRAP_BOUNDSCHECK_SHA256: runtimeCase === 'no-bounds-sha' ? '' : boundsSha,
+    CJCJ_BOOTSTRAP_COLOUR_RT: runtimeDir,
+    CJCJ_BOOTSTRAP_COLOUR_RT_SHA256: runtimeSha,
+    CJCJ_BOOTSTRAP_BOUNDSCHECK_SHA256: boundsSha,
     CJCJ_BOOTSTRAP_CJCJ_SHA: sourceSha,
   };
   fs.mkdirSync(path.join(base, 'bin'), {recursive: true});
@@ -1173,6 +1193,107 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
   fs.writeFileSync(path.join(runtimeDir, runtimeArchive), 'runtime archive');
   runtimeFiles[runtimeArchive] = sha256(path.join(runtimeDir, runtimeArchive));
   fs.writeFileSync(path.join(runtimeDir, 'manifest.json'), JSON.stringify({
+    runtime_sha: runtimePin,
+    platform: 'linux_x86_64', run_id: '123', run_attempt: '1', files: runtimeFiles}));
+  Object.assign(env, {COLOUR_RT_RUN_ID: '123', COLOUR_RT_RUN_ATTEMPT: '1', COLOUR_RT_ARTIFACT_ID: '456',
+    COLOUR_RT_MANIFEST_SHA256: sha256(path.join(runtimeDir, 'manifest.json')),
+    CJCJ_BOOTSTRAP_SOURCE: 'depot', CJCJ_BOOTSTRAP_SOURCE_REASON: 'registered test input',
+    CJCJ_BOOTSTRAP_INPUTS_PIN: path.join(inputs, 'tuple-pin.json'),
+    LLVM_TUPLE_SUMS_SHA: sha256(path.join(tuple, 'SHA256SUMS'))});
+  fs.writeFileSync(env.CJCJ_BOOTSTRAP_INPUTS_PIN, JSON.stringify({version: 1, repository: 'cjcj-dev/cjcj',
+    run: 123, attempt: 1, artifact: 456, commit: sourceSha,
+    files: [...payloads, 'SHA256SUMS'].map((name, index) => ({path: name, mode: 0o644, asset: index + 1,
+      artifact_sha256: sha256(path.join(tuple, name)), release_sha256: sha256(path.join(tuple, name))}))}));
+  const dylib = path.join(inputs, 'dylib');
+  fs.mkdirSync(dylib);
+  fs.copyFileSync('/bin/true', path.join(dylib, 'libLLVM-15.so'));
+  env.CJCJ_BOOTSTRAP_DYLIB_ARTIFACT = dylib;
+  env.LLVM_DYLIB_SHA256 = sha256(path.join(dylib, 'libLLVM-15.so'));
+  fs.writeFileSync(path.join(dylib, 'manifest.json'), JSON.stringify({llvm_sha: llvmSha,
+    sha256: env.LLVM_DYLIB_SHA256, targets: ['X86', 'ARM', 'AArch64']}));
+  preparation.totalMs = performance.now() - started;
+  preparation.sdkMs = preparation.totalMs - preparation.copyMs - preparation.gitMs;
+  console.log(`FIXTURE_PREPARE ${JSON.stringify(preparation)}`);
+  return {root, env, sourceSha};
+}
+
+function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFailure = false, child = false, coreObserve = false, runtimeCase = 'valid', ast = 'explicit', largeContract = false, contractDefect} = {}) {
+  if (!bootstrapTemplate) {
+    const started = performance.now();
+    bootstrapTemplate = produceBootstrapTemplate();
+    console.log(`FIXTURE_PRODUCTION ${JSON.stringify({wallMs: performance.now() - started})}`);
+  }
+  const started = performance.now();
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bootstrap argv '));
+  t.after(() => {
+    const cleanupStart = performance.now();
+    fs.rmSync(root, {recursive: true, force: true});
+    console.log(`FIXTURE_CLEANUP ${JSON.stringify({case: t.name, wallMs: performance.now() - cleanupStart})}`);
+  });
+  const copied = spawnSync('cp', ['-a', `${bootstrapTemplate.root}/.`, root], {encoding: 'utf8'});
+  assert.equal(copied.status, 0, copied.stderr);
+  const materializeMs = performance.now() - started;
+  const env = Object.fromEntries(Object.entries(bootstrapTemplate.env).map(([key, value]) =>
+    [key, typeof value === 'string' ? value.replaceAll(bootstrapTemplate.root, root) : value]));
+  const driver = path.join(root, 'tools/srcbuild_kkk2.sh');
+  const state = path.join(root, '.srcbuild');
+  const inputs = path.join(root, 'inputs');
+  const base = path.join(inputs, 'base');
+  const tuple = path.join(inputs, 'tuple');
+  const hostArtifact = path.join(inputs, 'host-artifact');
+  const hostIdentities = path.join(inputs, 'host-identities.txt');
+  const runtimeDir = path.join(inputs, 'external runtime');
+  const runtimePin = fs.readFileSync(path.join(root, 'ci/runtime_pin.env'), 'utf8').match(/^RUNTIME_REF=(.*)$/m)[1];
+  const llvmSha = fs.readFileSync(path.join(root, 'ci/llvm_pin.env'), 'utf8').match(/^LLVM_SHA=(.*)$/m)[1];
+  const sourceSha = bootstrapTemplate.sourceSha;
+  const payloads = ['MANIFEST', 'bin/opt', 'bin/llc', 'bin/ld.lld', 'lib/STATIC_LLVM.txt',
+    'fixed-llc/cjselfhost_llvmshim.o', 'fixed-llc/llc.gz', 'fixed-llc/opt.gz', 'fixed-llc/ld.lld.gz', 'fixed-llc/llvm-tools.manifest'];
+  if (largeContract) {
+    // Comments leave the executable contract unchanged. Exceed pipe capacity
+    // so early-exit text readers cannot rely on the writer winning a race.
+    const padding = `    # ${'contract documentation '.repeat(8192)}\n`;
+    fs.writeFileSync(driver, fs.readFileSync(driver, 'utf8').replace(
+      /^(bootstrap_argv|step_31|step_32|step_34)\(\) \{[\s\S]*?^\}/gm,
+      body => body.slice(0, -1) + padding + '}'));
+  }
+  if (contractDefect) {
+    fs.writeFileSync(driver, fs.readFileSync(driver, 'utf8').replace(
+      new RegExp(`^${contractDefect.functionName}\\(\\) \\{[\\s\\S]*?^\\}`, 'm'),
+      body => body.replace(contractDefect.from, contractDefect.to)));
+  }
+  if (empty || partialFailure) {
+    const text = fs.readFileSync(driver, 'utf8');
+    fs.writeFileSync(driver, text.replace(/^bootstrap_argv\(\) \{[\s\S]*?^\}/m,
+      partialFailure
+        ? 'bootstrap_argv() {\n    printf \'%q \' "$BOOTSTRAP_SH"\n    return 1\n}'
+        : 'bootstrap_argv() {\n    return 0\n}'));
+  }
+  const pin = path.join(root, 'ci/llvm-dylib', `linux_${os.arch() === 'x64' ? 'x86_64' : 'aarch64'}.env`);
+  fs.writeFileSync(pin, fs.readFileSync(pin, 'utf8').replace(/^LLVM_DYLIB_SOURCE_SHA=.*$/m,
+    `LLVM_DYLIB_SOURCE_SHA=${mismatch ? '0'.repeat(40) : llvmSha}`));
+  let stamp = `CJRT-COMMIT:${runtimePin}`;
+  if (runtimeCase === 'old-pin') stamp = `CJRT-COMMIT:${'0'.repeat(40)}`;
+  fs.writeFileSync(runtimeDir + '/libcangjie-runtime.so', stamp + '\n');
+  fs.writeFileSync(runtimeDir + '/libboundscheck.so', 'boundscheck input\n');
+  const runtimeSha = sha256(runtimeDir + '/libcangjie-runtime.so');
+  const boundsSha = sha256(runtimeDir + '/libboundscheck.so');
+  if (runtimeCase === 'runtime-corrupt') fs.appendFileSync(runtimeDir + '/libcangjie-runtime.so', 'changed');
+  if (runtimeCase === 'bounds-corrupt') fs.appendFileSync(runtimeDir + '/libboundscheck.so', 'changed');
+  if (runtimeCase === 'bounds-missing') fs.unlinkSync(runtimeDir + '/libboundscheck.so');
+  if (runtimeCase === 'runtime-missing') fs.unlinkSync(runtimeDir + '/libcangjie-runtime.so');
+  const runtimeFiles = {};
+  for (const [name, expected] of [['libcangjie-runtime.so', runtimeSha], ['libboundscheck.so', boundsSha]]) {
+    const relative = `runtime/lib/linux_x86_64_cjnative/${name}`;
+    fs.mkdirSync(path.dirname(path.join(runtimeDir, relative)), {recursive: true});
+    fs.rmSync(path.join(runtimeDir, relative), {force: true});
+    if (fs.existsSync(path.join(runtimeDir, name))) fs.copyFileSync(path.join(runtimeDir, name), path.join(runtimeDir, relative));
+    runtimeFiles[relative] = expected;
+  }
+  const runtimeArchive = 'lib/linux_x86_64_cjnative/libcangjie-runtime.a';
+  fs.mkdirSync(path.dirname(path.join(runtimeDir, runtimeArchive)), {recursive: true});
+  fs.writeFileSync(path.join(runtimeDir, runtimeArchive), 'runtime archive');
+  runtimeFiles[runtimeArchive] = sha256(path.join(runtimeDir, runtimeArchive));
+  fs.writeFileSync(path.join(runtimeDir, 'manifest.json'), JSON.stringify({
     runtime_sha: runtimeCase === 'old-pin' ? '0'.repeat(40) : runtimePin,
     platform: 'linux_x86_64', run_id: '123', run_attempt: '1', files: runtimeFiles}));
   Object.assign(env, {COLOUR_RT_RUN_ID: '123', COLOUR_RT_RUN_ATTEMPT: '1', COLOUR_RT_ARTIFACT_ID: '456',
@@ -1187,13 +1308,6 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
     run: 123, attempt: 1, artifact: 456, commit: sourceSha,
     files: [...payloads, 'SHA256SUMS'].map((name, index) => ({path: name, mode: 0o644, asset: index + 1,
       artifact_sha256: sha256(path.join(tuple, name)), release_sha256: sha256(path.join(tuple, name))}))}));
-  const dylib = path.join(inputs, 'dylib');
-  fs.mkdirSync(dylib);
-  fs.copyFileSync('/bin/true', path.join(dylib, 'libLLVM-15.so'));
-  env.CJCJ_BOOTSTRAP_DYLIB_ARTIFACT = dylib;
-  env.LLVM_DYLIB_SHA256 = sha256(path.join(dylib, 'libLLVM-15.so'));
-  fs.writeFileSync(path.join(dylib, 'manifest.json'), JSON.stringify({llvm_sha: llvmSha,
-    sha256: env.LLVM_DYLIB_SHA256, targets: ['X86', 'ARM', 'AArch64']}));
   const campaignArchive = path.join(state, 'buildtools/lib/libcangjie-ast-support.a');
   if (ast.startsWith('campaign') || ast === 'precedence') {
     fs.mkdirSync(path.dirname(campaignArchive), {recursive: true});
@@ -1226,6 +1340,7 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
     }
     env.CJCJ_BOOTSTRAP_SH = entry;
   }
+  console.log(`FIXTURE_MATERIALIZE ${JSON.stringify({case: t.name, materializeMs, variantMs: performance.now() - started - materializeMs, totalMs: performance.now() - started})}`);
   return {
     root,
     hostArtifact,
@@ -1233,8 +1348,10 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
     runtimeDir,
     sourceSha,
     dryRun(step, sample) {
+      const driverStarted = performance.now();
       const result = spawnSync('bash', [driver, '--from-step', String(step), '--through-step', String(step), '--dry-run'],
         {encoding: 'utf8', env});
+      console.log(`FIXTURE_DRIVER ${JSON.stringify({case: t.name, step, sample, wallMs: performance.now() - driverStarted, rc: result.status, signal: result.signal})}`);
       if (process.env.CJCJ_TEST_EVIDENCE) {
         const out = path.join(process.env.CJCJ_TEST_EVIDENCE, t.name.replaceAll(/[^a-zA-Z0-9]+/g, '-'), String(sample));
         fs.mkdirSync(out, {recursive: true});
@@ -1246,11 +1363,13 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
       return result;
     },
     run(step, childRc = 0) {
+      const driverStarted = performance.now();
       const result = spawnSync('bash', [...(coreObserve ? [
         // Bounded positive control: never enable unlimited cores or induce a fault.
         '-c', 'ulimit -c 1 || exit; printf "CONTROL_CORE_KIB=%s\\n" "$(ulimit -c)"; exec bash "$@"', 'core-limit-control',
       ] : []), driver, '--from-step', String(step), '--through-step', String(step)],
         {encoding: 'utf8', env: {...env, CHILD_RC: String(childRc)}});
+      console.log(`FIXTURE_DRIVER ${JSON.stringify({case: t.name, step, mode: 'run', wallMs: performance.now() - driverStarted, rc: result.status, signal: result.signal})}`);
       const logs = path.join(state, 'logs');
       const logFile = fs.readdirSync(logs).find(name => name.endsWith(`-step${step}.log`));
       assert.ok(logFile, result.stdout + result.stderr);
@@ -1271,6 +1390,58 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
     },
   };
 }
+
+test('bootstrap fixture physical copies isolate dependency removal and restoration', t => {
+  const left = bootstrapDriverFixture(t);
+  const right = bootstrapDriverFixture(t);
+  const relative = 'ci/release/prepare_bootstrap_inputs.mjs';
+  const leftFile = path.join(left.root, relative), rightFile = path.join(right.root, relative);
+  const bytes = fs.readFileSync(leftFile);
+  assert.deepEqual(fs.readFileSync(rightFile), bytes);
+  const a = fs.statSync(leftFile), b = fs.statSync(rightFile);
+  assert(a.dev !== b.dev || a.ino !== b.ino, 'cases must not share a mutable inode');
+  const pairedRelative = 'inputs/third_party/paired-runtime';
+  const leftHead = path.join(left.root, pairedRelative, '.git/HEAD');
+  const rightHead = path.join(right.root, pairedRelative, '.git/HEAD');
+  const headBytes = fs.readFileSync(leftHead);
+  assert.deepEqual(fs.readFileSync(rightHead), headBytes);
+  const leftGit = fs.statSync(leftHead), rightGit = fs.statSync(rightHead);
+  assert(leftGit.dev !== rightGit.dev || leftGit.ino !== rightGit.ino, 'case Git metadata must not share an inode');
+  fs.writeFileSync(leftHead, 'deliberately invalid fixture HEAD\n');
+  assert.deepEqual(fs.readFileSync(rightHead), headBytes, 'Git mutation must not leak to another case');
+  assert.deepEqual(fs.readFileSync(path.join(headerRuntimeTemplate.source, '.git/HEAD')), headBytes, 'Git mutation must not poison immutable template');
+  fs.writeFileSync(leftHead, headBytes);
+  const normal = left.dryRun(31, 'isolation-normal');
+  assert.equal(normal.status, 0, normal.stdout + normal.stderr);
+  const paired = path.join(left.root, pairedRelative);
+  const realHead = runGit(['-C', paired, 'rev-parse', 'HEAD']);
+  const realTree = runGit(['-C', paired, 'rev-parse', 'HEAD^{tree}']);
+  const alternate = runGit(['-C', paired, '-c', 'user.name=Zxilly', '-c', 'user.email=zxilly@outlook.com',
+    'commit-tree', realTree, '-m', 'independent wrong fixture identity']);
+  runGit(['-C', paired, 'update-ref', 'HEAD', alternate]);
+  const wrongHead = left.dryRun(31, 'isolation-wrong-head');
+  assert.equal(wrongHead.status, 1, wrongHead.stdout + wrongHead.stderr);
+  assert.match(wrongHead.stderr, /SHIM_HEADERS_SOURCE_HEAD_MISMATCH/);
+  assert.equal(runGit(['-C', path.join(right.root, pairedRelative), 'rev-parse', 'HEAD']), realHead);
+  assert.equal(runGit(['-C', headerRuntimeTemplate.source, 'rev-parse', 'HEAD']), realHead);
+  runGit(['-C', paired, 'update-ref', 'HEAD', realHead]);
+  const restoredHead = left.dryRun(31, 'isolation-restored-head');
+  assert.equal(restoredHead.status, 0, restoredHead.stdout + restoredHead.stderr);
+  assert.equal(runGit(['-C', paired, 'rev-parse', 'HEAD^{tree}']), realTree);
+  console.log('FIXTURE_GIT_IDENTITY normal=0 wrong-real-commit=1 restored=0 independent=unchanged');
+  fs.unlinkSync(leftFile);
+  const rejected = left.dryRun(31, 'isolation-missing');
+  assert.equal(rejected.status, 1, rejected.stdout + rejected.stderr);
+  assert.match(rejected.stderr, /Cannot find module.*prepare_bootstrap_inputs\.mjs/);
+  assert.doesNotMatch(rejected.stdout, /^DRY_RUN COMMAND=/m);
+  assert.deepEqual(fs.readFileSync(rightFile), bytes, 'missing dependency must not affect another case');
+  const control = right.dryRun(31, 'isolation-control');
+  assert.equal(control.status, 0, control.stdout + control.stderr);
+  fs.writeFileSync(leftFile, bytes, {mode: a.mode & 0o777});
+  const restored = left.dryRun(31, 'isolation-restored');
+  assert.equal(restored.status, 0, restored.stdout + restored.stderr);
+  console.log('FIXTURE_ISOLATION normal=0 missing=1 independent=0 restored=0 target=prepare_bootstrap_inputs');
+});
 
 test('kkk2 host LLVM preparation reaches bootstrap arguments with verified bytes', t => {
   const fixture = bootstrapDriverFixture(t);

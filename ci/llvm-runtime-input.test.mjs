@@ -4,10 +4,32 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {exportBranches} from './llvm-runtime-branches.mjs';
-import {fixture, originalSource} from './llvm-runtime-fixture.mjs';
+import {fixture, originalSource, prepareOriginalSource, command, repo, base} from './llvm-runtime-fixture.mjs';
 
 const source = originalSource();
 const table = exportBranches(source);
+test('fixed historical input is rejected when missing and recovered through preparation', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'llvm-history-'));
+  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
+  assert.equal(command(['git', 'init', '-q', root]).rc, 0);
+  assert.throws(() => originalSource(root), /LLVM_RUNTIME_HISTORY_MISSING:/);
+  const previous = process.env.CJCJ_SRCBUILD_SOURCE_MIRRORS;
+  const required = process.env.CJCJ_SRCBUILD_REQUIRE_MIRRORS;
+  try {
+    process.env.CJCJ_SRCBUILD_SOURCE_MIRRORS = `https://github.com/cjcj-dev/cjcj.git=file://${repo}`;
+    process.env.CJCJ_SRCBUILD_REQUIRE_MIRRORS = '1';
+    prepareOriginalSource(root);
+    assert.equal(originalSource(root), source);
+    // A second preparation must reuse the authenticated objects without fetching.
+    process.env.CJCJ_SRCBUILD_SOURCE_MIRRORS = `https://github.com/cjcj-dev/cjcj.git=file://${root}/missing`;
+    prepareOriginalSource(root);
+    assert.equal(originalSource(root), source);
+    console.log(`HISTORY_INPUT_ASSERT missing=rejected restored=accepted offline=accepted commit=${base}`);
+  } finally {
+    if (previous === undefined) delete process.env.CJCJ_SRCBUILD_SOURCE_MIRRORS; else process.env.CJCJ_SRCBUILD_SOURCE_MIRRORS = previous;
+    if (required === undefined) delete process.env.CJCJ_SRCBUILD_REQUIRE_MIRRORS; else process.env.CJCJ_SRCBUILD_REQUIRE_MIRRORS = required;
+  }
+});
 test('branch exporter loses exactly the removed source case arm', () => {
   const arm = /^\s*\*\) reject '[^']+' ;;\n/m.exec(source);
   assert.ok(arm, 'source contains the default environment case arm');

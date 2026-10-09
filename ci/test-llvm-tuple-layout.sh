@@ -18,7 +18,7 @@ else
     done
     printf 'fixture shim\n' > "$CJCJ_FIXED_LLVM_DIR/cjselfhost_llvmshim.o"
     printf 'fixture manifest\n' > "$CJCJ_FIXED_LLVM_DIR/llvm-tools.manifest"
-    REPO_ROOT="$REPO_ROOT" CJCJ_FIXED_LLVM_DIR="$CJCJ_FIXED_LLVM_DIR" LLVM_SHA="$LLVM_SHA" CANGJIE_COMPILER_SHA="$CANGJIE_COMPILER_SHA" npx --yes zx@8 "$REPO_ROOT/ci/llvm-tuple-layout.mjs" "$work/depot"
+    (export REPO_ROOT CJCJ_FIXED_LLVM_DIR LLVM_SHA CANGJIE_COMPILER_SHA; npx --yes zx@8 "$REPO_ROOT/ci/llvm-tuple-layout.mjs" "$work/depot")
     tuple="$work/depot/$LLVM_SHA/$CANGJIE_COMPILER_SHA"
 fi
 check() { (cd "$tuple" && sha256sum --strict -c SHA256SUMS); }

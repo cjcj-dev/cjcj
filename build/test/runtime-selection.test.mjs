@@ -8,14 +8,87 @@ import {spawnSync} from 'node:child_process';
 import test from 'node:test';
 import {sourceFetchArguments} from '../lib/git.mjs';
 import {fixture} from '../../ci/release/prepare_bootstrap_fixture.mjs';
+import {zxCommand, verifiedTool, testEnvironment} from '../../ci/test-zx.mjs';
 
 const repo = path.resolve(import.meta.dirname, '../..');
 const hash = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 const tuple = 'linux_x86_64_cjnative';
 const pin = Object.fromEntries(fs.readFileSync(path.join(repo, 'ci/runtime_pin.env'), 'utf8')
   .trim().split('\n').map(line => line.split('=')));
-function execute(command, env = process.env) {
-  const result = spawnSync(command[0], command.slice(1), {env, encoding: 'utf8'});
+let observation;
+let callSequence = 0;
+function resources() {
+  const read = file => { try { return fs.readFileSync(file, 'utf8').trim(); } catch { return 'UNKNOWN'; } };
+  const cgroup = read('/proc/self/cgroup');
+  const unified = /^0::(.*)$/m.exec(cgroup)?.[1];
+  const cgroupRoot = unified === undefined ? undefined : path.join('/sys/fs/cgroup', unified);
+  const control = name => cgroupRoot === undefined ? 'UNKNOWN' : read(path.join(cgroupRoot, name));
+  return {node: process.version, availableParallelism: os.availableParallelism(),
+    cpuScope: 'test-process-only', cpu: process.cpuUsage(), usage: process.resourceUsage(),
+    io: read('/proc/self/io'), status: read('/proc/self/status'), cgroup,
+    cgroupRoot: cgroupRoot ?? 'UNKNOWN', cpuMax: control('cpu.max'),
+    cpuset: control('cpuset.cpus.effective'),
+    memoryMax: control('memory.max'), memoryCurrent: control('memory.current')};
+}
+function copyRuntime(source, destination, phase) {
+  const started = performance.now();
+  const before = resources();
+  let files = 0, bytes = 0;
+  observe({kind: 'copy-begin', phase, source, destination, resources: before});
+  try {
+    fs.cpSync(source, destination, {recursive: true, verbatimSymlinks: true,
+      filter: file => {
+        const stat = fs.lstatSync(file);
+        if (stat.isFile()) { files++; bytes += stat.size; }
+        return true;
+      }});
+    observe({kind: 'copy-end', phase, source, destination, operationRc: 0,
+      files, bytes, wallMs: performance.now() - started, resources: resources()});
+  } catch (error) {
+    observe({kind: 'copy-end', phase, source, destination, operationRc: 1,
+      files, bytes, wallMs: performance.now() - started, error: error.message, resources: resources()});
+    throw error;
+  }
+}
+function observe(event) {
+  if (!observation) return;
+  const record = {time: new Date().toISOString(), identity: observation.identity, ...event};
+  fs.appendFileSync(path.join(observation.root, 'events.jsonl'), JSON.stringify(record) + '\n');
+  console.log(`RUNTIME_SELECTION_CAPTURE ${JSON.stringify(record)}`);
+}
+function preparationCheckpoint(phase) {
+  if (!observation) return;
+  const now = performance.now();
+  observe({kind: 'prepare', phase, wallMs: now - observation.phaseStart});
+  observation.phaseStart = now;
+}
+function observedStage3Fixture(formal, fn) {
+  if (!process.env.CJCJ_TEST_EVIDENCE) return fixture(fn);
+  fs.mkdirSync(process.env.CJCJ_TEST_EVIDENCE, {recursive: true});
+  const root = fs.mkdtempSync(path.join(process.env.CJCJ_TEST_EVIDENCE, `runtime-selection-${process.pid}-`));
+  observation = {root, identity: formal ? 'formal' : 'candidate', phaseStart: performance.now()};
+  observe({kind: 'prepare-begin', phase: 'fixture', resources: resources()});
+  try { return fixture(f => { preparationCheckpoint('fixture'); return fn(f); }); }
+  finally { observe({kind: 'case-end', resources: resources()}); observation = undefined; }
+}
+function execute(command, env = process.env, mutation = 'prepare') {
+  if (command[1] === '--cjcj-test-zx') command = zxCommand(command.slice(2), env);
+  let result;
+  if (observation) {
+    const id = ++callSequence;
+    const stdout = path.join(observation.root, `${id}.stdout`);
+    const stderr = path.join(observation.root, `${id}.stderr`);
+    const out = fs.openSync(stdout, 'wx'), err = fs.openSync(stderr, 'wx');
+    const started = performance.now();
+    observe({kind: 'begin', id, mutation, argv: command, stdout, stderr, resources: resources()});
+    try {
+      result = spawnSync(command[0], command.slice(1), {env, encoding: 'utf8', stdio: ['pipe', out, err]});
+      observe({kind: 'end', id, mutation, wallMs: performance.now() - started,
+        status: result.status, signal: result.signal, error: result.error?.message, resources: resources()});
+    } finally { fs.closeSync(out); fs.closeSync(err); }
+    result.stdout = fs.readFileSync(stdout, 'utf8');
+    result.stderr = fs.readFileSync(stderr, 'utf8');
+  } else result = spawnSync(command[0], command.slice(1), {env, encoding: 'utf8'});
   const output = result.stdout + result.stderr;
   if (command.at(-1)?.endsWith('/ci/srcbuild/steps/build-stage3.mjs')) {
     // Retain the product's observed identity/status, including successful
@@ -49,7 +122,7 @@ function refreshRoot(f) {
   fs.writeFileSync(file, JSON.stringify(manifest));
   f.env.COLOUR_RT_MANIFEST_SHA256 = hash(file);
 }
-function useFormalRuntime(f) {
+function useFormalRuntime(f, materializedSource) {
   delete f.env.CJCJ_RUNTIME_REF_OVERRIDE; delete f.env.CJCJ_ALLOW_RUNTIME_OVERRIDE;
   f.env.RUNTIME_REF = pin.RUNTIME_REF;
   const file = path.join(f.runtime, 'manifest.json');
@@ -60,6 +133,17 @@ function useFormalRuntime(f) {
   fs.writeFileSync(headerFile, JSON.stringify(header));
   const paired = path.join(f.sdk, 'third_party/paired-runtime');
   fs.rmSync(paired, {recursive: true});
+  if (materializedSource) {
+    const head = ok(['git', '-C', materializedSource, 'rev-parse', 'HEAD']);
+    const tree = ok(['git', '-C', materializedSource, 'rev-parse', 'HEAD^{tree}']);
+    assert.equal(head, pin.RUNTIME_REF);
+    copyRuntime(materializedSource, paired, 'paired-runtime');
+    ok(['git', '-C', paired, 'remote', 'add', 'origin', pin.RUNTIME_SRC_URL]);
+    assert.equal(ok(['git', '-C', paired, 'rev-parse', 'HEAD']), head);
+    assert.equal(ok(['git', '-C', paired, 'rev-parse', 'HEAD^{tree}']), tree);
+    assert.equal(ok(['git', '-C', paired, 'status', '--porcelain', '--untracked-files=no']), '');
+    return;
+  }
   ok(['git', 'init', '-q', paired]);
   ok(['git', '-C', paired, 'remote', 'add', 'origin', pin.RUNTIME_SRC_URL]);
   const source = process.env.GC_FIX_RUNTIME_CHECKOUT || pinnedRemote(f.dir, 'runtime', pin.RUNTIME_REF);
@@ -261,8 +345,53 @@ test('formal-default preparation still publishes the formal pin', () => fixture(
   assert.match(text, new RegExp(`RUNTIME_REF=${pin.RUNTIME_REF}`));
 }));
 
+test('prepared zx rejects substituted identity and restores actual CLI without npx', () => {
+  const tool = verifiedTool();
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zx identity '));
+  try {
+    const receipt = path.join(root, 'receipt.json');
+    const blocked = path.join(root, 'npx');
+    fs.writeFileSync(blocked, '#!/bin/sh\necho unexpected-npx >&2\nexit 91\n', {mode: 0o755});
+    const env = {...process.env, PATH: `${root}${path.delimiter}${process.env.PATH}`, CJCJ_TEST_ZX_RECEIPT: receipt};
+    const privatePackage = path.join(root, 'zx');
+    fs.cpSync(path.dirname(tool.packageFile), privatePackage, {recursive: true});
+    const privateTool = {...tool, packageFile: path.join(privatePackage, 'package.json'),
+      cli: path.join(privatePackage, path.relative(path.dirname(tool.packageFile), tool.cli))};
+    fs.writeFileSync(receipt, JSON.stringify(privateTool));
+    const bytes = fs.readFileSync(privateTool.cli);
+    fs.appendFileSync(privateTool.cli, '\n// deliberately changed tool identity\n');
+    assert.throws(() => execute([process.execPath, '--cjcj-test-zx', '--version'], env), /identity mismatch: cliSha256/);
+    fs.writeFileSync(privateTool.cli, bytes);
+    const restored = execute([process.execPath, '--cjcj-test-zx', '--version'], env);
+    assert.equal(restored.status, 0, restored.output);
+    assert.equal(restored.stdout.trim(), tool.version);
+    assert.doesNotMatch(restored.output, /unexpected-npx/);
+    console.log(`TEST_ZX_IDENTITY_ASSERT substituted=rejected restored=accepted version=${tool.version}`);
+  } finally { fs.rmSync(root, {recursive: true, force: true}); }
+});
+
+test('test-domain zx adapters preserve nested shell exits and reject other packages', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zx adapter '));
+  try {
+    const env = testEnvironment(path.join(root, 'bin'));
+    const run = args => spawnSync('npx', args, {env, encoding: 'utf8'});
+    const rejected = run(['--yes', 'other-package@8', '--version']);
+    assert.equal(rejected.status, 1);
+    assert.match(rejected.stderr, /unsupported test npx syntax or package/);
+    const nested = spawnSync('bash', ['-c', 'npx --yes zx@8 --eval \'const r = await $({nothrow: true})`zx --eval "process.exit(37)"`; if (r.exitCode !== 37) throw new Error("nested child status"); process.exit(r.exitCode)\''], {env, encoding: 'utf8'});
+    assert.equal(nested.status, 37, nested.stderr);
+    const resolved = run(['--yes', '--package=zx@8', '-c', 'command -v zx']);
+    assert.equal(resolved.status, 0, resolved.stderr);
+    assert.equal(resolved.stdout.trim(), path.join(root, 'bin/zx'));
+    const nodeEntry = spawnSync(process.execPath, [resolved.stdout.trim(), '--version'], {env, encoding: 'utf8'});
+    assert.equal(nodeEntry.status, 0, nodeEntry.stderr);
+    assert.equal(nodeEntry.stdout.trim(), verifiedTool().version);
+    console.log('TEST_ZX_ADAPTER_ASSERT other-package=1 nested=37 node-entry=0');
+  } finally { fs.rmSync(root, {recursive: true, force: true}); }
+});
+
 for (const formal of [false, true]) {
-test(`actual stage3 entry verifies promoted SDK before stage2: ${formal ? 'formal default' : 'candidate'}`, () => fixture(f => {
+test(`actual stage3 entry verifies promoted SDK before stage2: ${formal ? 'formal default' : 'candidate'}`, () => observedStage3Fixture(formal, f => {
   fs.mkdirSync(path.join(f.runtimeSource, 'stdlib'));
   fs.writeFileSync(path.join(f.runtimeSource, 'stdlib/README'), 'input source identity fixture');
   for (const args of [['init', '-q', f.runtimeSource], ['-C', f.runtimeSource, 'add', '.'],
@@ -277,8 +406,10 @@ test(`actual stage3 entry verifies promoted SDK before stage2: ${formal ? 'forma
   const selected = ok(['git', '-C', f.runtimeSource, 'rev-parse', 'HEAD']);
   f.env.RUNTIME_REF = selected; f.env.CJCJ_RUNTIME_REF_OVERRIDE = selected;
   const paired = path.join(f.sdk, 'third_party/paired-runtime');
-  ok(['git', '-C', paired, 'fetch', '--update-shallow', '-q', f.runtimeSource, selected]);
-  ok(['git', '-C', paired, 'checkout', '-q', '--detach', 'FETCH_HEAD']);
+  if (!formal) {
+    ok(['git', '-C', paired, 'fetch', '--update-shallow', '-q', f.runtimeSource, selected]);
+    ok(['git', '-C', paired, 'checkout', '-q', '--detach', 'FETCH_HEAD']);
+  }
   for (const [file, key] of [[path.join(f.runtime, 'manifest.json'), 'runtime_sha'],
     [path.join(f.sdk, 'build/build/shim-headers.json'), 'runtime']]) {
     const data = JSON.parse(fs.readFileSync(file));
@@ -286,7 +417,8 @@ test(`actual stage3 entry verifies promoted SDK before stage2: ${formal ? 'forma
     fs.writeFileSync(file, JSON.stringify(data));
   }
   refreshRoot(f);
-  if (formal) useFormalRuntime(f);
+  if (formal) useFormalRuntime(f, f.runtimeSource);
+  preparationCheckpoint('runtime-identity');
   // Build the tuple fixtures and pass their authenticated manifest through the
   // same preparation entry as production; no resolver results are injected.
   const llvmSha = f.env.LLVM_SHA;
@@ -314,7 +446,9 @@ test(`actual stage3 entry verifies promoted SDK before stage2: ${formal ? 'forma
   const tuplePin = JSON.parse(fs.readFileSync(f.pinFile));
   for (const file of tuplePin.files) file.artifact_sha256 = file.release_sha256 = hash(path.join(f.fallback, file.path));
   fs.writeFileSync(f.pinFile, JSON.stringify(tuplePin));
+  preparationCheckpoint('tuple');
   const a = assembled(f);
+  preparationCheckpoint('sdk-assembly');
   const workspace = path.join(f.dir, 'stage3-workspace');
   const sdk = path.join(workspace, 'software/cangjie');
   fs.mkdirSync(path.dirname(sdk), {recursive: true});
@@ -348,6 +482,7 @@ test(`actual stage3 entry verifies promoted SDK before stage2: ${formal ? 'forma
     {...f.env, STAGE1_HOST_IDENTITIES: identities});
   assert.equal(runner.status, 0, runner.output);
   assert.match(runner.output, /STAGE1-RUNNER-OK/);
+  preparationCheckpoint('native-runner');
   console.log(`STAGE3_NATIVE_RUNNER_INPUT_ASSERT product=${hash(path.join(repo, 'ci/bootstrap/stage1_host_runner.sh'))}`);
   for (const name of ['cjselfhost_llvmshim.o', 'cjc_runtime_config.o'])
     write(`cjcj-src-stage1/runtime_shim/${name}`, 'handoff object fixture');
@@ -359,17 +494,38 @@ test(`actual stage3 entry verifies promoted SDK before stage2: ${formal ? 'forma
   // stage1 compiler, stage2 compiler and installed std prefix.
   fs.copyFileSync(a.compiler, path.join(work, 'cjcj-stage1'));
   write('stdlib-stage2/std-producer.json', JSON.stringify({compiler_sha256: hash(a.compiler)}) + '\n');
-  const publishStd = () => ok(['npx', '--yes', 'zx@8', path.join(repo, 'ci/bootstrap/publish-std-output.mjs'),
+  const publishStd = () => ok([process.execPath, '--cjcj-test-zx', path.join(repo, 'ci/bootstrap/publish-std-output.mjs'),
     work, path.join(work, 'stdlib-stage2'), path.join(work, 'cjcj-stage1'), tuple], f.env);
   publishStd();
-  fs.cpSync(f.runtimeSource, path.join(workspace, 'cangjie_runtime'), {recursive: true});
+  const workspaceRuntime = path.join(workspace, 'cangjie_runtime');
+  copyRuntime(f.runtimeSource, workspaceRuntime, 'stage3-runtime');
+  const sourceTree = ok(['git', '-C', f.runtimeSource, 'rev-parse', 'HEAD^{tree}']);
+  assert.equal(ok(['git', '-C', workspaceRuntime, 'rev-parse', 'HEAD']), selected);
+  assert.equal(ok(['git', '-C', workspaceRuntime, 'rev-parse', 'HEAD^{tree}']), sourceTree);
+  const probe = ok(['git', '-C', f.runtimeSource, 'ls-files']).split('\n')
+    .find(rel => fs.lstatSync(path.join(f.runtimeSource, rel)).isFile());
+  assert.ok(probe, 'materialized runtime contains a tracked regular file');
+  const sourceFile = path.join(f.runtimeSource, probe), copyFile = path.join(workspaceRuntime, probe);
+  const original = fs.readFileSync(copyFile), sourceHash = hash(sourceFile);
+  fs.appendFileSync(copyFile, '\ncase-private mutation\n');
+  assert.equal(hash(sourceFile), sourceHash, 'runtime copy mutation must not change its source');
+  assert.equal(hash(path.join(paired, probe)), sourceHash, 'runtime copy mutation must not change paired headers');
+  fs.writeFileSync(copyFile, original);
+  const pairedFile = path.join(paired, probe), pairedOriginal = fs.readFileSync(pairedFile);
+  fs.appendFileSync(pairedFile, '\npaired-private mutation\n');
+  assert.equal(hash(sourceFile), sourceHash, 'paired copy mutation must not change its source');
+  assert.equal(hash(copyFile), sourceHash, 'paired copy mutation must not change stage3 source');
+  fs.writeFileSync(pairedFile, pairedOriginal);
+  assert.equal(ok(['git', '-C', workspaceRuntime, 'status', '--porcelain', '--untracked-files=no']), '');
+  console.log(`RUNTIME_MATERIALIZATION_ISOLATION_ASSERT identity=${formal ? 'formal' : 'candidate'} source=${selected} tree=${sourceTree} probe=${probe}`);
   const env = {...Object.fromEntries(Object.entries(f.env).filter(([key]) => !key.startsWith('COLOUR_RT_'))), ...a.inputs, CANGJIE_WORKSPACE: workspace, GITHUB_WORKSPACE: path.join(workspace, 'source'),
     CJCJ_BOOTSTRAP_WORK: path.join(workspace, 'bootstrap-work'), CJCJ_STAGE3_STDLIB_BUILD_TYPE: 'release',
     CJCJ_BOOTSTRAP_HOST_RT: a.base, CJCJ_STAGE3_DRY_RUN: '1', CJCJ_STAGE3_DRY_RUN_FINAL_STD: path.join(workspace, 'unused-std')};
   fs.mkdirSync(env.GITHUB_WORKSPACE, {recursive: true});
   fs.cpSync(path.join(repo, 'ci'), path.join(env.GITHUB_WORKSPACE, 'ci'), {recursive: true});
-  const command = ['npx', '--yes', 'zx@8', path.join(repo, 'ci/srcbuild/steps/build-stage3.mjs')];
-  const valid = execute(command, env);
+  const command = [process.execPath, '--cjcj-test-zx', path.join(repo, 'ci/srcbuild/steps/build-stage3.mjs')];
+  preparationCheckpoint('runtime-tuple-sdk-runner-and-source');
+  const valid = execute(command, env, 'first-promotion');
   assert.match(valid.output, new RegExp(`BOOTSTRAP_RUNTIME_CONSUMER_VERIFIED runtime=${selected}`), valid.output);
   assert.match(valid.output, /STAGE2_EXECUTION_BOUNDARY/, valid.output);
   assert.notEqual(valid.status, 0);
@@ -391,21 +547,21 @@ test(`actual stage3 entry verifies promoted SDK before stage2: ${formal ? 'forma
       fs.writeFileSync(file, JSON.stringify(lock));
     } else fs.appendFileSync(file, 'changed');
     publishStd();
-    const wrong = execute(command, env);
+    const wrong = execute(command, env, `stage1-overlay:${name}`);
     assert.notEqual(wrong.status, 0); assert.match(wrong.output, expected, wrong.output);
     assert.doesNotMatch(wrong.output, /STAGE2_EXECUTION_BOUNDARY|BOOTSTRAP_RUNTIME_CONSUMER_VERIFIED/);
     console.log(`STAGE3_REPLACEMENT_TARGET_ASSERT identity=${formal ? 'formal' : 'candidate'} wrong=${name} rejected-before-stage2=1`);
     fs.rmSync(file);
     publishStd();
   }
-  const wrongName = execute(command, {...env, CJCJ_BOOTSTRAP_COLOUR_LLVM_SO: path.join(path.dirname(dylib), 'wrong-library.so')});
+  const wrongName = execute(command, {...env, CJCJ_BOOTSTRAP_COLOUR_LLVM_SO: path.join(path.dirname(dylib), 'wrong-library.so')}, 'library-name');
   assert.notEqual(wrongName.status, 0); assert.match(wrongName.output, /BOOTSTRAP_BACKEND_LIBRARY_NAME_MISMATCH/, wrongName.output);
   assert.doesNotMatch(wrongName.output, /STAGE2_EXECUTION_BOUNDARY/);
   console.log(`STAGE3_LIBRARY_NAME_TARGET_ASSERT identity=${formal ? 'formal' : 'candidate'}`);
   for (const rel of ['bin/opt-stage1', 'bin/llc-stage1', 'bin/ld.lld-stage1', 'lib/libLLVM-15.so']) {
     const file = path.join(input, 'third_party/llvm', rel), bytes = fs.readFileSync(file);
     fs.appendFileSync(file, 'changed');
-    const wrong = execute(command, env);
+    const wrong = execute(command, env, `backend-bytes:${rel}`);
     assert.notEqual(wrong.status, 0);
     assert.ok(wrong.output.includes(`BOOTSTRAP_BACKEND_HASH_MISMATCH: ${rel}`), wrong.output);
     assert.doesNotMatch(wrong.output, /STAGE2_EXECUTION_BOUNDARY/);
@@ -423,7 +579,7 @@ test(`actual stage3 entry verifies promoted SDK before stage2: ${formal ? 'forma
   const mutatedPin = JSON.parse(pinBytes);
   for (const file of mutatedPin.files) file.artifact_sha256 = file.release_sha256 = hash(path.join(tupleRoot, file.path));
   fs.writeFileSync(f.pinFile, JSON.stringify(mutatedPin));
-  const backendChapter = execute(command, env);
+  const backendChapter = execute(command, env, 'backend-chapter');
   assert.notEqual(backendChapter.status, 0); assert.match(backendChapter.output, /BOOTSTRAP_BACKEND_STAMP_MISMATCH/, backendChapter.output);
   assert.doesNotMatch(backendChapter.output, /STAGE2_EXECUTION_BOUNDARY/);
   fs.writeFileSync(backendFile, backendBytes); fs.writeFileSync(manifestFile, manifestBytes); fs.writeFileSync(f.pinFile, pinBytes);
@@ -435,7 +591,7 @@ test(`actual stage3 entry verifies promoted SDK before stage2: ${formal ? 'forma
   fs.writeFileSync(path.join(input, 'third_party/llvm/lib/libLLVM-15.so'), wrongLibrary);
   const changedLibraryManifest = JSON.parse(libraryManifestBytes); changedLibraryManifest.sha256 = hash(dylib);
   fs.writeFileSync(libraryManifest, JSON.stringify(changedLibraryManifest));
-  const libraryChapter = execute(command, {...env, CJCJ_BOOTSTRAP_COLOUR_LLVM_SHA256: hash(dylib)});
+  const libraryChapter = execute(command, {...env, CJCJ_BOOTSTRAP_COLOUR_LLVM_SHA256: hash(dylib)}, 'library-chapter');
   assert.notEqual(libraryChapter.status, 0); assert.match(libraryChapter.output, /BOOTSTRAP_BACKEND_STAMP_MISMATCH/, libraryChapter.output);
   assert.doesNotMatch(libraryChapter.output, /STAGE2_EXECUTION_BOUNDARY/);
   fs.writeFileSync(dylib, libraryBytes); fs.writeFileSync(path.join(input, 'third_party/llvm/lib/libLLVM-15.so'), libraryBytes);
@@ -450,7 +606,7 @@ test(`actual stage3 entry verifies promoted SDK before stage2: ${formal ? 'forma
   ]) { const file = path.join(final, rel); fs.mkdirSync(path.dirname(file), {recursive: true}); fs.writeFileSync(file, text); }
   fs.mkdirSync(path.join(final, 'modules', tuple, 'std'));
   const continued = {...env, FIXTURE_CONTINUE: '1'};
-  const finalControl = execute(command, continued);
+  const finalControl = execute(command, continued, 'final-control');
   assert.equal(finalControl.status, 0, finalControl.output);
   assert.match(finalControl.output, /STAGE3_DRY_RUN_REACHED_BUILD=1/);
   console.log(`STAGE3_FINAL_OVERLAY_CONTROL_ASSERT identity=${formal ? 'formal' : 'candidate'}`);
@@ -497,7 +653,7 @@ test(`actual stage3 entry verifies promoted SDK before stage2: ${formal ? 'forma
     else if (name === 'lock') { const lock = JSON.parse(fs.readFileSync(path.join(input, rel))); lock.components.runtime.commit = 'e'.repeat(40); fs.writeFileSync(file, JSON.stringify(lock)); }
     else if (name === 'loader') fs.copyFileSync(dylib, file);
     else fs.writeFileSync(file, 'invalid protected consumer input');
-    const wrong = execute(command, continued);
+    const wrong = execute(command, continued, `final-overlay:${name}`);
     assert.notEqual(wrong.status, 0); assert.match(wrong.output, expected, wrong.output);
     assert.match(wrong.output, /STAGE2_EXECUTION_BOUNDARY/);
     assert.doesNotMatch(wrong.output, /STAGE3_DRY_RUN_REACHED_BUILD=1/);
@@ -514,7 +670,7 @@ test(`actual stage3 entry verifies promoted SDK before stage2: ${formal ? 'forma
   fs.writeFileSync(recordOverlay, JSON.stringify({producer: producerFile,
     compilerSha256: crypto.createHash('sha256').update(changedProducer).digest('hex'),
     entrySha256: hash(path.join(sdk, 'bin/cjc'))}));
-  const producerWrong = execute(command, {...continued, FIXTURE_MUTATION: producerFile});
+  const producerWrong = execute(command, {...continued, FIXTURE_MUTATION: producerFile}, 'producer-overlay');
   assert.notEqual(producerWrong.status, 0);
   assert.match(producerWrong.output, /bootstrap compiler independent producer mismatch/, producerWrong.output);
   assert.doesNotMatch(producerWrong.output, /STAGE3_DRY_RUN_REACHED_BUILD=1/);
@@ -525,7 +681,7 @@ test(`actual stage3 entry verifies promoted SDK before stage2: ${formal ? 'forma
 
   ok(['git', '-C', path.join(workspace, 'cangjie_runtime'), '-c', 'user.name=Zxilly',
     '-c', 'user.email=zxilly@outlook.com', 'commit', '--allow-empty', '-q', '-m', 'wrong source']);
-  const source = execute(command, env);
+  const source = execute(command, env, 'source-head');
   assert.notEqual(source.status, 0); assert.match(source.output, /BOOTSTRAP_RUNTIME_SOURCE_MISMATCH/);
   console.log('STAGE3_SOURCE_TARGET_ASSERT_EXECUTED');
 }));

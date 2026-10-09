@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env zx
 import {spawn, spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import fs from 'node:fs';
@@ -114,6 +114,23 @@ export function cangjieCommand(sdk, output, selection) {
   return command;
 }
 
+export function cangjieEnvironment(sdk, inherited = process.env) {
+  return {...inherited,
+    PATH: [path.join(sdk, 'bin'), path.join(sdk, 'tools/bin'), inherited.PATH].filter(Boolean).join(path.delimiter),
+    LD_LIBRARY_PATH: [path.join(sdk, 'third_party/llvm/lib'),
+      path.join(sdk, 'runtime/lib/linux_x86_64_cjnative'), path.join(sdk, 'tools/lib'),
+      inherited.LD_LIBRARY_PATH].filter(Boolean).join(path.delimiter)};
+}
+
+// All workspace cjpm children use the same SDK loading domain. Export this
+// execution boundary so bounded integrations can exercise real member targets
+// without broadening the registered CLI's directed-selection contract.
+export async function executeCangjie(command, root, output, sdk, inherited = process.env) {
+  const env = cangjieEnvironment(sdk, inherited);
+  const result = await execute(command, root, output, env);
+  return {...result, loadingDomain: env.LD_LIBRARY_PATH};
+}
+
 export function inspectTargetReports(files, cases) {
   // The producer already requires Python; use its standard XML parser rather
   // than accepting a nonempty directory as evidence that selected cases ran.
@@ -140,7 +157,7 @@ export async function runCangjie(root, entries, output, selection) {
   if (!sdk) throw new Error('CANGJIE_HOME must identify the pinned official host SDK');
   const inputs = ['bin/cjc', 'tools/bin/cjpm',
     'runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so',
-    'runtime/lib/linux_x86_64_cjnative/libboundscheck.so'];
+    'runtime/lib/linux_x86_64_cjnative/libboundscheck.so', 'third_party/llvm/lib/libLLVM-15.so'];
   const identities = Object.fromEntries(inputs.map(file => [file, digest(path.join(sdk, file))]));
   const command = cangjieCommand(sdk, output, selection);
   let qualified;
@@ -173,9 +190,9 @@ export async function runCangjie(root, entries, output, selection) {
   }
   const temporary = path.join(output, 'tmp');
   fs.mkdirSync(temporary, {recursive: true});
-  const env = {...process.env, PATH: [path.join(sdk, 'bin'), path.join(sdk, 'tools/bin'), process.env.PATH].filter(Boolean).join(path.delimiter),
+  const env = {...process.env,
     TMPDIR: temporary, OBJC_PREAMBLE_IMPORTS: path.join(fixture, 'imports')};
-  const result = await execute(command, root, output, env);
+  const result = await executeCangjie(command, root, output, sdk, env);
   const reports = path.join(output, 'reports');
   const reportFiles = fs.existsSync(reports) ? fs.readdirSync(reports, {recursive: true}).filter(file => file.endsWith('.xml')) : [];
   let selectedCases;
