@@ -147,6 +147,35 @@ test('bootstrap still rejects unsupported optimization and prefix lookalikes', a
   }
 });
 
+test('trimpath rejects wrong authenticated runtime identity and recovers isolated input', async t => {
+  const configured = process.env.GC_FIX_RUNTIME_CHECKOUT;
+  assert.ok(configured, 'formal runtime preparation must supply GC_FIX_RUNTIME_CHECKOUT');
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'trimpath-runtime-'));
+  t.after(() => fs.rm(root, {recursive: true, force: true}));
+  const copy = path.join(root, 'runtime');
+  const git = (...args) => {
+    const result = spawnSync('git', args, {encoding: 'utf8'});
+    assert.equal(result.status, 0, result.stderr);
+    return result.stdout.trim();
+  };
+  git('clone', '--no-hardlinks', configured, copy);
+  const ref = git('-C', copy, 'rev-parse', 'HEAD');
+  const origin = git('-C', configured, 'remote', 'get-url', 'origin');
+  git('-C', copy, 'remote', 'set-url', 'origin', origin);
+  git('-C', copy, '-c', 'user.name=Zxilly', '-c', 'user.email=zxilly@outlook.com', 'commit', '--allow-empty', '-qm', 'wrong runtime fixture identity');
+  process.env.GC_FIX_RUNTIME_CHECKOUT = copy;
+  try {
+    await assert.rejects(trimpathLayoutFixture(path.join(root, 'wrong')), /runtime input HEAD/);
+    git('-C', copy, 'reset', '--hard', ref);
+    const restored = await trimpathLayoutFixture(path.join(root, 'restored'));
+    const mirror = new URL(restored.mirrors.runtime);
+    assert.equal(git('--git-dir', mirror.pathname, 'rev-parse', 'HEAD'), ref);
+    await fs.rm(copy, {recursive: true, force: true});
+    assert.equal(git('--git-dir', mirror.pathname, 'rev-parse', 'HEAD'), ref, 'input removal must not invalidate the private mirror');
+    console.log(`TRIMPATH_INPUT_ASSERT wrong=rejected restored=accepted isolated=accepted commit=${ref}`);
+  } finally { process.env.GC_FIX_RUNTIME_CHECKOUT = configured; }
+});
+
 test('srcbuild entry sends prepared O1 configuration to cjpm', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'seed-entry '));
   try {
