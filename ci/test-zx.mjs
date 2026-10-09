@@ -51,7 +51,47 @@ export function zxCommand(args, env = process.env) {
   const tool = verifiedTool(env);
   return [tool.node, tool.cli, ...args];
 }
+export function adapterRun(kind, args) {
+  const tool = verifiedTool();
+  if (kind === 'npx') {
+    if (args.length === 4 && args[0] === '--yes' && args[1] === '--package=zx@8'
+        && args[2] === '-c' && args[3] === 'command -v zx') {
+      console.log(path.join(process.env.CJCJ_TEST_ZX_BIN, 'zx'));
+      return;
+    }
+    if (args[0] !== '--yes' || args[1] !== 'zx@8') fail('unsupported test npx syntax or package');
+    args = args.slice(2);
+  } else if (kind !== 'zx') fail('unsupported adapter');
+  const event = {time: new Date().toISOString(), pid: process.pid, kind, cwd: process.cwd(),
+    argv: [tool.node, tool.cli, ...args], cliSha256: tool.cliSha256};
+  const record = value => {
+    if (process.env.CJCJ_TEST_ZX_LOG) fs.appendFileSync(process.env.CJCJ_TEST_ZX_LOG, JSON.stringify(value) + '\n');
+  };
+  const start = performance.now();
+  record({...event, event: 'begin'});
+  const result = spawnSync(tool.node, [tool.cli, ...args], {stdio: 'inherit'});
+  record({...event, event: 'end', wallMs: performance.now() - start, status: result.status,
+    signal: result.signal, error: result.error?.message});
+  if (result.signal) process.kill(process.pid, result.signal);
+  else process.exitCode = result.status ?? 1;
+}
+export function testEnvironment(directory, env = process.env) {
+  const tool = verifiedTool(env);
+  fs.mkdirSync(directory, {recursive: true});
+  if (env.CJCJ_TEST_ZX_LOG) fs.mkdirSync(path.dirname(env.CJCJ_TEST_ZX_LOG), {recursive: true});
+  for (const kind of ['npx', 'zx']) {
+    const text = `#!${tool.node}\nimport(${JSON.stringify(import.meta.url)}).then(m => m.adapterRun(${JSON.stringify(kind)}, process.argv.slice(2))).catch(e => { console.error(e.message); process.exitCode = 1; });\n`;
+    fs.writeFileSync(path.join(directory, kind), text, {mode: 0o755});
+  }
+  return {...env, CJCJ_TEST_ZX_BIN: directory, PATH: `${directory}${path.delimiter}${env.PATH || ''}`};
+}
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  if (process.argv[2] !== 'prepare' || process.argv.length !== 4) fail('usage: test-zx.mjs prepare RECEIPT');
-  prepare(process.argv[3]);
+  const [mode, directory, ...args] = process.argv.slice(2);
+  if (mode === 'prepare' && directory && !args.length) prepare(directory);
+  else if (mode === 'run' && directory && args.length) {
+    const env = testEnvironment(path.resolve(directory));
+    const result = spawnSync(args[0], args.slice(1), {env, stdio: 'inherit'});
+    if (result.signal) process.kill(process.pid, result.signal);
+    else process.exitCode = result.status ?? 1;
+  } else fail('usage: test-zx.mjs prepare RECEIPT | run PRIVATE_BIN COMMAND [ARGS...]');
 }

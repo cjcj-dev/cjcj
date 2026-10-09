@@ -75,7 +75,7 @@ jobs:
           cjv_bin=$(find "$RUNNER_TEMP/lineage-cjv" -type f -name cjv | head -1)
           "$cjv_bin" install "$CJCJ_TOOLCHAIN"
       - name: Prepare pinned runtime contract input
-        run: npx --yes zx@8 ci/prepare-runtime-test-input.mjs "$RUNNER_TEMP/runtime-contract-input"
+        run: node ci/test-zx.mjs run "$RUNNER_TEMP/test-zx-bin" npx --yes zx@8 ci/prepare-runtime-test-input.mjs "$RUNNER_TEMP/runtime-contract-input"
       - name: Test build and release contracts
         shell: bash
         env:
@@ -94,7 +94,7 @@ jobs:
           # name instead. It is not a way to pass over a hang -- a timeout here is
           # a failure. 300s is ~150x the whole suite's normal 2s; a test that
           # genuinely needs longer says so with its own {timeout}, which wins.
-          node --test --test-timeout=300000 "${FILES[@]}"
+          CJCJ_TEST_ZX_LOG="$CJCJ_TEST_EVIDENCE/zx-calls.jsonl" node ci/test-zx.mjs run "$RUNNER_TEMP/test-zx-bin" node --test --test-timeout=300000 "${FILES[@]}"
       - name: Preserve srcbuild driver evidence
         if: always()
         uses: actions/upload-artifact@v7

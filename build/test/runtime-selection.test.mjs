@@ -8,7 +8,7 @@ import {spawnSync} from 'node:child_process';
 import test from 'node:test';
 import {sourceFetchArguments} from '../lib/git.mjs';
 import {fixture} from '../../ci/release/prepare_bootstrap_fixture.mjs';
-import {zxCommand, verifiedTool} from '../../ci/test-zx.mjs';
+import {zxCommand, verifiedTool, testEnvironment} from '../../ci/test-zx.mjs';
 
 const repo = path.resolve(import.meta.dirname, '../..');
 const hash = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
@@ -323,6 +323,26 @@ test('prepared zx rejects substituted identity and restores actual CLI without n
     assert.equal(restored.stdout.trim(), tool.version);
     assert.doesNotMatch(restored.output, /unexpected-npx/);
     console.log(`TEST_ZX_IDENTITY_ASSERT substituted=rejected restored=accepted version=${tool.version}`);
+  } finally { fs.rmSync(root, {recursive: true, force: true}); }
+});
+
+test('test-domain zx adapters preserve nested shell exits and reject other packages', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zx adapter '));
+  try {
+    const env = testEnvironment(path.join(root, 'bin'));
+    const run = args => spawnSync('npx', args, {env, encoding: 'utf8'});
+    const rejected = run(['--yes', 'other-package@8', '--version']);
+    assert.equal(rejected.status, 1);
+    assert.match(rejected.stderr, /unsupported test npx syntax or package/);
+    const nested = spawnSync('bash', ['-c', 'npx --yes zx@8 --eval \'const r = await $({nothrow: true})`zx --eval "process.exit(37)"`; if (r.exitCode !== 37) throw new Error("nested child status"); process.exit(r.exitCode)\''], {env, encoding: 'utf8'});
+    assert.equal(nested.status, 37, nested.stderr);
+    const resolved = run(['--yes', '--package=zx@8', '-c', 'command -v zx']);
+    assert.equal(resolved.status, 0, resolved.stderr);
+    assert.equal(resolved.stdout.trim(), path.join(root, 'bin/zx'));
+    const nodeEntry = spawnSync(process.execPath, [resolved.stdout.trim(), '--version'], {env, encoding: 'utf8'});
+    assert.equal(nodeEntry.status, 0, nodeEntry.stderr);
+    assert.equal(nodeEntry.stdout.trim(), verifiedTool().version);
+    console.log('TEST_ZX_ADAPTER_ASSERT other-package=1 nested=37 node-entry=0');
   } finally { fs.rmSync(root, {recursive: true, force: true}); }
 });
 

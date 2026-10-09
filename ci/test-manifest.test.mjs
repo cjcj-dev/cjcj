@@ -218,7 +218,7 @@ test('manifest CLI hands every gating file to the workflow consumer', () => {
 test('workflow list collection preserves every gating file and enforces its floor', async () => {
   const body = step((await workflows()).get('ci.yml'), 'Test build and release contracts');
   const run = body.split('run: |\n')[1];
-  const prefix = run.slice(0, run.indexOf('node --test '));
+  const prefix = run.slice(0, run.lastIndexOf('\n', run.indexOf('node --test ')) + 1);
   const floor = prefix.match(/test "\$\{#FILES\[@\]\}" -ge (\d+)/);
   assert.equal(Number(floor?.[1]), GATING_FLOOR, 'workflow floor must match the manifest floor');
   const result = spawnSync('bash', ['-e', '-o', 'pipefail', '-c',
