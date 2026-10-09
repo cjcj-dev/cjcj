@@ -23,7 +23,7 @@ export const PLATFORMS = Object.freeze({
 });
 export const ADAPTERS = Object.freeze(['official', 'sharedbuild-stage1',
   'sharedbuild-runtime-default', 'sharedbuild-runtime-testable', 'bootstrap-std',
-  'llvm-tools', 'llvm-dylib', 'ast-support', 'compiler-schema', 'bootstrap-compiler']);
+  'llvm-tools', 'llvm-dylib', 'llvm-release-layout', 'ast-support', 'compiler-schema', 'bootstrap-compiler']);
 const HEX40 = /^[0-9a-f]{40}$/;
 const HEX64 = /^[0-9a-f]{64}$/;
 const NAME = /^[a-z][a-z0-9-]*$/;
@@ -154,6 +154,13 @@ export function validatePlan(plan) {
       for (const name of ['node', 'git']) if (!config.tools[name]) reject('CONFIG', id, `schema producer tool ${name} must be frozen`);
       absolute(producer.repository, id);
     }
+    if (producer.adapter === 'llvm-release-layout') {
+      fields(config.options, ['toolsDependency', 'dylibDependency', 'auxiliaryDependency', 'readersDependency', 'releaseDependency'], ['librariesDependency'], id);
+      for (const dependency of Object.values(config.options)) if (!component.dependencies.includes(dependency)) reject('DEPENDENCY', id, 'release layout input not in closure');
+      if (!component.roles.includes('llvm-tools') || !component.roles.includes('llvm-dylib')) reject('CONFIG', id, 'release layout owns the complete LLVM tuple');
+      for (const name of ['node', 'git']) if (!config.tools[name]) reject('CONFIG', id, `layout producer tool ${name} must be frozen`);
+      absolute(producer.repository, id);
+    }
     if (producer.adapter === 'bootstrap-std') {
       fields(config.options, ['sdkDependency', 'compilerDependency', 'runtimeDependency', 'llvmToolsDependency', 'llvmDylibDependency',
         'astDependency', 'heap', 'targetLibRelative'], ['launcher', 'llvmAuxiliaryDependency', 'compilerRuntime', 'previousStdDependency', 'provenance'], id);
@@ -193,13 +200,14 @@ export function validatePlan(plan) {
       if (!plan.platform.startsWith('linux_')) reject('ADAPTER_PLATFORM', id, 'native stage compiler recipe migration incomplete outside Linux');
     }
     if (['llvm-tools', 'llvm-dylib'].includes(producer.adapter)) {
-      fields(config.options, ['targets', 'runtimeDependency'], ['compilerSource', 'flatbuffersSource', 'launcher', 'auxiliaryOnly', 'bitcodeReadersOnly', 'releaseToolsOnly'], id);
+      fields(config.options, ['targets', 'runtimeDependency'], ['compilerSource', 'flatbuffersSource', 'launcher', 'auxiliaryOnly', 'bitcodeReadersOnly', 'releaseToolsOnly', 'releaseLibrariesOnly'], id);
       if (config.options.auxiliaryOnly !== undefined && (producer.adapter !== 'llvm-tools' || config.options.auxiliaryOnly !== true)) reject('CONFIG', id, 'auxiliaryOnly is the fixed LLVM archiver/objcopy producer');
       if (config.options.bitcodeReadersOnly !== undefined && (producer.adapter !== 'llvm-tools' || config.options.bitcodeReadersOnly !== true || config.options.auxiliaryOnly)) reject('CONFIG', id, 'bitcodeReadersOnly is the exclusive fixed LLVM dis/as producer');
       if (config.options.releaseToolsOnly !== undefined && (producer.adapter !== 'llvm-tools' || config.options.releaseToolsOnly !== true || config.options.auxiliaryOnly || config.options.bitcodeReadersOnly)) reject('CONFIG', id, 'releaseToolsOnly requires the complete release tool producer');
+      if (config.options.releaseLibrariesOnly !== undefined && (producer.adapter !== 'llvm-tools' || config.options.releaseLibrariesOnly !== true || config.options.auxiliaryOnly || config.options.bitcodeReadersOnly || config.options.releaseToolsOnly)) reject('CONFIG', id, 'releaseLibrariesOnly requires an exclusive native release library producer');
       if (!component.dependencies.includes(config.options.runtimeDependency)) reject('DEPENDENCY', id, 'LLVM runtime input not in closure');
       if (config.options.targets !== 'X86;ARM;AArch64') reject('CONFIG', id, 'existing LLVM C API contract requires X86, ARM and AArch64');
-      if (producer.adapter === 'llvm-tools' && !config.options.auxiliaryOnly && !config.options.bitcodeReadersOnly && !config.options.releaseToolsOnly) {
+      if (producer.adapter === 'llvm-tools' && !config.options.auxiliaryOnly && !config.options.bitcodeReadersOnly && !config.options.releaseToolsOnly && !config.options.releaseLibrariesOnly) {
         for (const key of ['compilerSource', 'flatbuffersSource']) {
           fields(config.options[key], ['repo', 'commit', 'tree'], [], id);
           if (!HEX40.test(config.options[key].commit) || !HEX40.test(config.options[key].tree) || !config.options[key].repo) reject('SOURCE', id, key);

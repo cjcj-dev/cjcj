@@ -52,7 +52,7 @@ function optionsOnly(options, names, label) {
 async function llvm(request) {
   const {component, source, directory, dependencies} = request;
   const options = component.config.options, dylib = component.producer.adapter === 'llvm-dylib';
-  optionsOnly(options, ['targets', 'runtimeDependency', 'compilerSource', 'flatbuffersSource', 'launcher', 'auxiliaryOnly', 'bitcodeReadersOnly', 'releaseToolsOnly'], component.id);
+  optionsOnly(options, ['targets', 'runtimeDependency', 'compilerSource', 'flatbuffersSource', 'launcher', 'auxiliaryOnly', 'bitcodeReadersOnly', 'releaseToolsOnly', 'releaseLibrariesOnly'], component.id);
   if (options.targets !== 'X86;ARM;AArch64') reject('PRODUCER_OPTIONS', component.id, 'complete LLVM C API target set required');
   const runtime = dependencies[options.runtimeDependency];
   if (!runtime?.component.roles.includes('runtime') || runtime.component.source.kind !== 'git') reject('PRODUCER_DEPENDENCY', component.id, 'paired runtime Git producer');
@@ -65,7 +65,7 @@ async function llvm(request) {
     `-DCMAKE_MAKE_PROGRAM=${tool('ninja')}`, '-DLLVM_ENABLE_ASSERTIONS=OFF',
     '-DLLVM_ENABLE_RTTI=OFF', '-DBUILD_SHARED_LIBS=OFF', '-DLLVM_LINK_LLVM_DYLIB=OFF',
     `-DLLVM_BUILD_LLVM_DYLIB=${dylib ? 'ON' : 'OFF'}`, `-DLLVM_TARGETS_TO_BUILD=${options.targets}`,
-    `-DLLVM_ENABLE_PROJECTS=${dylib ? '' : 'lld'}`, `-DCMAKE_CXX_FLAGS=${dylib ? '' : '-gline-tables-only '}${flags}`];
+    `-DLLVM_ENABLE_PROJECTS=${dylib ? '' : options.releaseLibrariesOnly ? 'clang' : 'lld'}`, `-DCMAKE_CXX_FLAGS=${dylib ? '' : '-gline-tables-only '}${flags}`];
   if (dylib) cmake.push('-DCMAKE_C_FLAGS_RELWITHDEBINFO=-O2 -g1 -DNDEBUG', '-DCMAKE_CXX_FLAGS_RELWITHDEBINFO=-O2 -g1 -DNDEBUG');
   else cmake.push('-DLLVM_ENABLE_LIBXML2=OFF');
   if (options.launcher) {
@@ -75,16 +75,26 @@ async function llvm(request) {
   }
   await run(cmake);
   const releaseTargets = ['lld', 'lli', 'llvm-link', 'llvm-lto', 'llvm-lto2', 'llvm-cov', 'llvm-profdata', 'llvm-profgen', 'llvm-symbolizer', 'llvm-objdump', 'llvm-addr2line', 'llvm-otool'];
-  await run(['cmake', '--build', build, '--target', ...(dylib ? ['LLVM', 'llvm-nm'] : options.releaseToolsOnly ? releaseTargets : options.bitcodeReadersOnly ? ['llvm-dis', 'llvm-as'] : options.auxiliaryOnly ? ['llvm-objcopy', 'llvm-ar'] : ['llc', 'opt', 'lld', 'llvm-dis', 'llvm-as']), '-j', String(os.availableParallelism())]);
+  await run(['cmake', '--build', build, '--target', ...(dylib ? ['LLVM', 'llvm-nm'] : options.releaseLibrariesOnly ? ['LTO', 'clang-cpp'] : options.releaseToolsOnly ? releaseTargets : options.bitcodeReadersOnly ? ['llvm-dis', 'llvm-as'] : options.auxiliaryOnly ? ['llvm-objcopy', 'llvm-ar'] : ['llc', 'opt', 'lld', 'llvm-dis', 'llvm-as']), '-j', String(os.availableParallelism())]);
   const artifacts = path.join(directory, 'artifacts'); await fs.mkdir(artifacts, {recursive: true});
+  if (options.releaseLibrariesOnly) {
+    await fs.mkdir(path.join(artifacts, 'lib'));
+    for (const name of ['libLTO.so.15', 'libclang-cpp.so.15']) await fs.copyFile(path.join(build, 'lib', name), path.join(artifacts, 'lib', name));
+    await fs.symlink('libLTO.so.15', path.join(artifacts, 'lib/libLTO.so'));
+    await atomicJson(path.join(artifacts, 'release-libraries.json'), {source: component.source, targets: ['LTO', 'clang-cpp'],
+      host: component.config.host, target: component.config.target, producer: component.producer, buildId: request.identity.buildId});
+    await sourceIdentity(paired, runtime.component.source, 'llvm-runtime', tool('git'));
+    return;
+  }
   if (options.releaseToolsOnly) {
     // These are native targets and aliases from the LLVM/lld CMake graph,
     // independently sealed from the bootstrap tuple and completed readers.
     const binaries = ['lld', 'ld.lld', 'ld64.lld', 'lld-link', ...releaseTargets.slice(1)];
     await fs.mkdir(path.join(artifacts, 'bin'));
     for (const name of binaries) {
-      await fs.copyFile(path.join(build, 'bin', name), path.join(artifacts, 'bin', name));
-      await fs.chmod(path.join(artifacts, 'bin', name), 0o755);
+      const input = path.join(build, 'bin', name), output = path.join(artifacts, 'bin', name);
+      if ((await fs.lstat(input)).isSymbolicLink()) await fs.symlink(await fs.readlink(input), output);
+      else { await fs.copyFile(input, output); await fs.chmod(output, 0o755); }
     }
     await atomicJson(path.join(artifacts, 'release-tools.json'), {source: component.source, targets: releaseTargets, binaries,
       host: component.config.host, target: component.config.target, producer: component.producer, buildId: request.identity.buildId});
@@ -246,6 +256,53 @@ async function std(request) {
     source_tree: component.source.tree, stage: 'completed-std', producer: component.producer});
   if (options.provenance) await writeStdProvenance({sourceDir: stdlib, installPrefix: artifacts, buildSdk: sdk, compiler: compilerFile});
 }
+async function llvmReleaseLayout(request) {
+  const {component, dependencies, directory, source} = request;
+  const options = component.config.options;
+  const artifacts = path.join(directory, 'artifacts'); await fs.mkdir(artifacts);
+  const inputs = {};
+  async function copyDependency(key, prefix = '', omit = []) {
+    const output = dependencies[options[key]];
+    if (!output || output.component.source.commit !== component.source.commit
+      || output.component.config.host !== component.config.host || output.component.config.target !== component.config.target) {
+      reject('PRODUCER_DEPENDENCY', component.id, `paired LLVM source/host/target required: ${key}`);
+    }
+    inputs[key] = {buildId: output.buildId, receiptSha256: output.receiptSha256};
+    for (const [rel, row] of Object.entries(output.files)) {
+      if (omit.includes(rel)) continue;
+      const input = path.join(output.artifacts, rel), target = path.join(artifacts, prefix, rel);
+      if (await fileDigest(input) !== row.sha256) reject('DEPENDENCY_DIGEST', component.id, `${key}/${rel}`);
+      await fs.mkdir(path.dirname(target), {recursive: true});
+      try { await fs.lstat(target); reject('PRODUCER_DEPENDENCY', component.id, `duplicate export ${prefix}/${rel}`); }
+      catch (error) { if (error.code !== 'ENOENT') throw error; }
+      if (row.type === 'symlink') {
+        if (await fs.readlink(input) !== row.target) reject('DEPENDENCY_DIGEST', component.id, `${key}/${rel} link`);
+        await fs.symlink(row.target, target);
+      } else { await fs.copyFile(input, target); await fs.chmod(target, row.mode); }
+    }
+  }
+  await copyDependency('toolsDependency');
+  await copyDependency('dylibDependency', 'lib');
+  await copyDependency('auxiliaryDependency');
+  await copyDependency('readersDependency');
+  // The fixed bootstrap checksum tuple authenticates the old lld bytes.
+  // Reuse that native executable as the release graph's canonical lld name;
+  // its ld.lld alias still hashes to the exact bootstrap tuple member.
+  await fs.rename(path.join(artifacts, 'bin/ld.lld'), path.join(artifacts, 'bin/lld'));
+  await fs.symlink('lld', path.join(artifacts, 'bin/ld.lld'));
+  await copyDependency('releaseDependency', '', ['bin/lld', 'bin/ld.lld', 'bin/ld64.lld', 'bin/lld-link']);
+  const lldGraph = await fs.readFile(path.join(source, 'lld/tools/lld/CMakeLists.txt'), 'utf8');
+  if (!lldGraph.includes('lld-link ld.lld ld64.lld wasm-ld')) reject('SOURCE', component.id, 'release lld alias graph changed');
+  for (const alias of ['ld64.lld', 'lld-link']) await fs.symlink('lld', path.join(artifacts, 'bin', alias));
+  const cmake = await fs.readFile(path.join(source, 'llvm/CMakeLists.txt'), 'utf8');
+  const version = ['MAJOR', 'MINOR', 'PATCH'].map(part => cmake.match(new RegExp(`set\\(LLVM_VERSION_${part} ([0-9]+)\\)`))?.[1]);
+  if (version.some(part => !part)) reject('SOURCE', component.id, 'LLVM source version required');
+  for (const alias of [`libLLVM-${version.join('.')}.so`, 'libLLVM.so']) await fs.symlink(`libLLVM-${version[0]}.so`, path.join(artifacts, 'lib', alias));
+  if (options.librariesDependency) await copyDependency('librariesDependency');
+  await atomicJson(path.join(artifacts, 'release-layout.json'), {source: component.source, inputs,
+    version: version.join('.'), host: component.config.host, target: component.config.target,
+    producer: component.producer, buildId: request.identity.buildId});
+}
 async function astSupport(request) {
   const {component, source, directory, dependencies} = request, options = component.config.options;
   optionsOnly(options, ['sdkDependency', 'flatbuffersSource', 'launcher', 'flatbuffersTransform'], component.id);
@@ -317,6 +374,7 @@ export async function nativeProducer(request) {
   }
   await sourceIdentity(request.source, component.source, component.id, tool('git'));
   if (component.producer.adapter === 'bootstrap-std') await std(request);
+  else if (component.producer.adapter === 'llvm-release-layout') await llvmReleaseLayout(request);
   else if (component.producer.adapter === 'compiler-schema') {
     const schemas = ['StdAstFormat.fbs', 'StdxChirFormat.fbs'];
     const artifacts = path.join(request.directory, 'artifacts');
