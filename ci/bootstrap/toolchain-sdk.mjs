@@ -11,6 +11,7 @@ import {produceComponent} from './sdk-producers.mjs';
 import {verifyBootstrapRuntimeSdk} from './runtime_sdk.mjs';
 import {parseLlvmToolsManifest} from '../llvm-tools-manifest.mjs';
 import {verifyOfficialPayload} from './sdk-official-payload.mjs';
+import {verifyInstalledQualification} from './sdk-cjdb-qualification.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 function verifyResolvedIdentities(plan, manifest) {
@@ -157,6 +158,7 @@ export async function verifyManifestSdk(sdk, plan, manifest) {
   }
   verifyResolvedIdentities(plan, manifest);
   await verifyOfficialPayload(plan,manifest);
+  await verifyInstalledQualification(sdk,plan,manifest);
   for (const [name, input] of Object.entries(plan.verification)) if (input?.path) await requiredInput(input, name);
   const tuple = PLATFORMS[plan.platform][2];
   // Keep existing colour/ABI/lineage and native loadability checks. The legacy

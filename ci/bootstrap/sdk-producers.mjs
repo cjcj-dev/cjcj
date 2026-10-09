@@ -196,7 +196,9 @@ async function native(component, directory, identity, outputs, plan) {
   }
   const after = changes ? await registeredSourceIdentity(source, component.source, component.id, changes, component.config.tools.git.path)
     : await sourceIdentity(source, component.source, component.id, component.config.tools.git.path);
-  return sealOutput(directory, component, identity, {...result, status: 'complete', kind: component.producer.adapter, before, source: after});
+  const qualification = component.producer.adapter === 'llvm-cjdb'
+    ? {generatedInputs:(await readJson(path.join(directory,'native-execution.json'))).generatedInputs} : {};
+  return sealOutput(directory, component, identity, {...result, ...qualification, status: 'complete', kind: component.producer.adapter, before, source: after});
 }
 export async function produceComponent(plan, component, identity, outputs, {resumeFailed = false} = {}) {
   const directory = identity.directory;

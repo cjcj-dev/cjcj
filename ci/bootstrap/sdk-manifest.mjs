@@ -7,6 +7,7 @@ import os from 'node:os';
 import {execFile} from 'node:child_process';
 import {spawn} from 'node:child_process';
 import {promisify} from 'node:util';
+import {qualificationRecipe, verifyQualificationCertificate} from './sdk-cjdb-qualification.mjs';
 
 export const execute = promisify(execFile);
 export const PLAN_SCHEMA = 'toolchain-sdk-plan-v1';
@@ -377,7 +378,8 @@ export function buildIdentities(plan) {
     // Until every existing producer has a verified path normalization recipe,
     // a different physical build root is a different configuration identity.
     const {inputOnly, ...produced} = component;
-    const recipeId = objectId({...produced, producer, dependencies, buildRoot: originBuildRoot || plan.buildRoot});
+    const qualification = producer.adapter === 'llvm-cjdb' ? {generatedInputs:qualificationRecipe(component)} : {};
+    const recipeId = objectId({...produced, producer, dependencies, ...qualification, buildRoot: originBuildRoot || plan.buildRoot});
     const sourceId = component.source.commit || component.source.lockSha256;
     identities.set(component.id, {recipeId, buildId: `${component.id}/${sourceId}/${recipeId}`,
       directory: path.join(plan.buildRoot, component.id, sourceId, recipeId), dependencies});
@@ -523,6 +525,7 @@ export function parseOutputReceipt(bytes, done, directory, component, identity) 
     if (!['file', 'symlink'].includes(row.type) || !HEX64.test(row.sha256) || !Number.isSafeInteger(row.size) || row.size < 0
       || !Number.isInteger(row.mode) || row.mode < 0 || row.mode > 0o777) reject('COMPLETION', component.id, `invalid artifact ${rel}`);
   }
+  if (component.producer.adapter === 'llvm-cjdb') verifyQualificationCertificate(component,identity.buildId,record.execution.generatedInputs,record.files,record.directory);
   return {...record, receiptSha256: done, receiptJson: bytes.toString('utf8'),
     originDirectory: record.directory, directory, artifacts: path.join(directory, 'artifacts')};
 }
@@ -531,6 +534,7 @@ export async function sealOutput(directory, component, identity, execution, pres
   const artifacts = path.join(directory, 'artifacts');
   const files = presealedFiles || await inventory(artifacts, {links: true});
   if (!Object.keys(files).length) reject('MISSING_ARTIFACT', component.id, 'empty output');
+  if (component.producer.adapter === 'llvm-cjdb') verifyQualificationCertificate(component,identity.buildId,execution.generatedInputs,files,directory);
   const record = {schema: OUTPUT_SCHEMA, status: 'complete', rc: execution.rc, component,
     ...identity, artifacts, files, execution};
   await atomicJson(path.join(directory, 'output.json'), record);

@@ -6,6 +6,7 @@ import os from 'node:os';
 import {gzipSync} from 'node:zlib';
 import {fileDigest, readJson, atomicJson, inventory, sourceIdentity, registeredSourceIdentity, reject} from './sdk-manifest.mjs';
 import {parseLlvmToolsManifest} from '../llvm-tools-manifest.mjs';
+import {prepareQualification, qualifyGeneratedInputs, CJDB_QUALIFICATION} from './sdk-cjdb-qualification.mjs';
 
 export async function buildCjdb(request, {run, tool, fetchIdentity, execute: requestExecute}) {
   const {component, source: llvmReference, directory, dependencies} = request;
@@ -42,10 +43,11 @@ export async function buildCjdb(request, {run, tool, fetchIdentity, execute: req
   const flatChanges = {[flatRel]: {sha256: await fileDigest(path.join(projection, flatRel)), mode: (await fs.stat(path.join(flatbuffers, flatRel))).mode & 0o777}};
   await atomicJson(path.join(directory, 'logs/registered-source-transforms.json'), {boundsChanges, flatChanges});
   const build = path.join(directory, 'build/compiler'), installed = path.join(directory, 'build/install');
+  const qualification = await prepareQualification(request,{llvm,compiler,bounds,build,demangler:path.join(build,'cangjie-demangler')},path.join(directory,'native-qualification'));
   const launcher = tool('launcher'), jobs = String(os.availableParallelism());
   const prefix = [options.python.root, libedit.root, path.join(build, 'third_party/xml2')].join(';');
   const llvmArgs = [`-DCANGJIE_RUNTIME_SOURCE_DIR=${paired}`, `-DCMAKE_C_COMPILER_LAUNCHER=${launcher}`, `-DCMAKE_CXX_COMPILER_LAUNCHER=${launcher}`,
-    '-DLLVM_PARALLEL_LINK_JOBS=8'];
+    '-DLLVM_PARALLEL_LINK_JOBS=8', `-DCMAKE_PROJECT_LLVM_INCLUDE_BEFORE=${qualification.hook}`, `-DCJ_LLVM_COMMIT=${component.source.commit}`];
   const env = {...process.env, PATH: `${path.join(options.python.root, 'bin')}:${path.dirname(tool('clang'))}:/usr/lib/ccache:/usr/bin:/bin`,
     CCACHE_DIR: '/root/.ccache', CCACHE_BASEDIR: directory, CCACHE_NOHASHDIR: '1', CMAKE_BUILD_PARALLEL_LEVEL: jobs,
     CMAKE_C_COMPILER_LAUNCHER:launcher, CMAKE_CXX_COMPILER_LAUNCHER:launcher,
@@ -65,12 +67,23 @@ export async function buildCjdb(request, {run, tool, fetchIdentity, execute: req
   // these through the same graph before invoking its complete install rules.
   await run(['cmake', '--build', build, '-j', jobs], {env});
   await run(['cmake', '--install', build], {env});
+  // Recheck the same physical source and producer inputs before sealing. The
+  // configure-time record cannot be replaced by a post-build observation.
+  const postQualification = await qualifyGeneratedInputs(qualification.contractFile,'preseal');
+  const certificate = {schema:CJDB_QUALIFICATION,preconfigure:await readJson(path.join(directory,'native-qualification/preconfigure.json')),preseal:postQualification};
   const artifacts = path.join(directory, 'artifacts'); await fs.mkdir(artifacts);
+  for(const [rel,row] of Object.entries(postQualification.body.generated)){
+    const destination=path.join(artifacts,row.artifact);await fs.mkdir(path.dirname(destination),{recursive:true});
+    await fs.copyFile(path.join(llvm,rel),destination);await fs.chmod(destination,row.mode);
+  }
+  await atomicJson(path.join(artifacts,'native-inputs/qualification.json'),certificate);
+  await atomicJson(path.join(directory,'native-execution.json'),{generatedInputs:certificate});
   const llvmBuild = path.join(build, 'third_party/cjnative-prefix/src/cjnative-build');
   const llvmCache = await fs.readFile(path.join(llvmBuild, 'CMakeCache.txt'), 'utf8');
   const cacheValue = name => llvmCache.match(new RegExp(`^${name}:[^=]+=([^\\n]*)$`, 'm'))?.[1];
   if (cacheValue('LLVM_ENABLE_RTTI') !== 'ON' || cacheValue('LLVM_BUILD_LLVM_DYLIB') !== 'ON'
-    || cacheValue('LLVM_TARGETS_TO_BUILD') !== 'X86;ARM;AArch64') reject('CJDB_CONFIGURATION', component.id, 'actual native cache must retain RTTI, dylib and all declared targets');
+    || cacheValue('LLVM_TARGETS_TO_BUILD') !== 'X86;ARM;AArch64' || cacheValue('CJ_LLVM_COMMIT') !== component.source.commit
+    || cacheValue('CMAKE_PROJECT_LLVM_INCLUDE_BEFORE') !== qualification.hook) reject('CJDB_CONFIGURATION', component.id, 'actual native cache must retain RTTI, dylib, baseline, qualification hook and all declared targets');
   // Export whole native installation roots, preserving every native alias and
   // Python module. The SDK plan decides ownership outside these roots.
   await fs.mkdir(path.join(artifacts, 'third_party'), {recursive:true});
