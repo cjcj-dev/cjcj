@@ -158,7 +158,7 @@ export function validatePlan(plan) {
       fields(config.options, ['boundscheckSource'], ['launcher'], id);
       fields(config.options.boundscheckSource, ['repo', 'commit', 'tree'], [], id);
       if (!HEX40.test(config.options.boundscheckSource.commit) || !HEX40.test(config.options.boundscheckSource.tree) || !config.options.boundscheckSource.repo) reject('SOURCE', id, 'boundscheck input identity');
-      if (!component.roles.includes('boundscheck') || config.host !== 'linux_x86_64' || config.target !== 'linux_x86_64') reject('CONFIG', id, 'compiler boundscheck export currently requires the native Linux target');
+      if (!component.roles.includes('compiler') || config.host !== 'linux_x86_64' || config.target !== 'linux_x86_64') reject('CONFIG', id, 'compiler support export currently requires the native Linux target');
       for (const name of ['node', 'git', 'cmake', 'ninja', 'clang', 'clang++']) if (!config.tools[name]) reject('CONFIG', id, `boundscheck producer tool ${name} must be frozen`);
       absolute(producer.repository, id);
     }
