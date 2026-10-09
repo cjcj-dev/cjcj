@@ -4,9 +4,9 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import {gzipSync} from 'node:zlib';
-import {fileDigest, readJson, atomicJson, inventory, sourceIdentity, registeredSourceIdentity, reject} from './sdk-manifest.mjs';
+import {fileDigest, readJson, atomicJson, inventory, sourceIdentity, registeredSourceIdentity, reject, canonical} from './sdk-manifest.mjs';
 import {parseLlvmToolsManifest} from '../llvm-tools-manifest.mjs';
-import {prepareQualification, qualifyGeneratedInputs, CJDB_QUALIFICATION} from './sdk-cjdb-qualification.mjs';
+import {prepareQualification, exportQualification} from './sdk-cjdb-qualification.mjs';
 
 export async function buildCjdb(request, {run, tool, fetchIdentity, execute: requestExecute}) {
   const {component, source: llvmReference, directory, dependencies} = request;
@@ -69,20 +69,14 @@ export async function buildCjdb(request, {run, tool, fetchIdentity, execute: req
   await run(['cmake', '--install', build], {env});
   // Recheck the same physical source and producer inputs before sealing. The
   // configure-time record cannot be replaced by a post-build observation.
-  const postQualification = await qualifyGeneratedInputs(qualification.contractFile,'preseal');
-  const certificate = {schema:CJDB_QUALIFICATION,preconfigure:await readJson(path.join(directory,'native-qualification/preconfigure.json')),preseal:postQualification};
   const artifacts = path.join(directory, 'artifacts'); await fs.mkdir(artifacts);
-  for(const [rel,row] of Object.entries(postQualification.body.generated)){
-    const destination=path.join(artifacts,row.artifact);await fs.mkdir(path.dirname(destination),{recursive:true});
-    await fs.copyFile(path.join(llvm,rel),destination);await fs.chmod(destination,row.mode);
-  }
-  await atomicJson(path.join(artifacts,'native-inputs/qualification.json'),certificate);
+  const certificate=await exportQualification(qualification.contractFile,artifacts);
   await atomicJson(path.join(directory,'native-execution.json'),{generatedInputs:certificate});
   const llvmBuild = path.join(build, 'third_party/cjnative-prefix/src/cjnative-build');
   const llvmCache = await fs.readFile(path.join(llvmBuild, 'CMakeCache.txt'), 'utf8');
   const cacheValue = name => llvmCache.match(new RegExp(`^${name}:[^=]+=([^\\n]*)$`, 'm'))?.[1];
   if (cacheValue('LLVM_ENABLE_RTTI') !== 'ON' || cacheValue('LLVM_BUILD_LLVM_DYLIB') !== 'ON'
-    || cacheValue('LLVM_TARGETS_TO_BUILD') !== 'X86;ARM;AArch64' || cacheValue('CJ_LLVM_COMMIT') !== component.source.commit
+    || canonical(cacheValue('LLVM_TARGETS_TO_BUILD')?.split(';').sort()) !== canonical(['X86','ARM','AArch64'].sort()) || cacheValue('CJ_LLVM_COMMIT') !== component.source.commit
     || cacheValue('CMAKE_PROJECT_LLVM_INCLUDE_BEFORE') !== qualification.hook) reject('CJDB_CONFIGURATION', component.id, 'actual native cache must retain RTTI, dylib, baseline, qualification hook and all declared targets');
   // Export whole native installation roots, preserving every native alias and
   // Python module. The SDK plan decides ownership outside these roots.

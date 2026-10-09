@@ -99,6 +99,16 @@ export async function qualifyGeneratedInputs(contractFile, phase) {
   console.log(`CJDB_GENERATED_INPUTS_ASSERT_REACHED phase=${phase} files=${Object.keys(generated).length} identity=${objectId(body)}`);
   return record;
 }
+export async function exportQualification(contractFile, artifacts) {
+  const contract=await readJson(contractFile), post=await qualifyGeneratedInputs(contractFile,'preseal');
+  const certificate={schema:CJDB_QUALIFICATION,preconfigure:await readJson(path.join(contract.outputDirectory,'preconfigure.json')),preseal:post};
+  for(const [rel,row] of Object.entries(post.body.generated)){
+    const destination=path.join(artifacts,row.artifact);await fs.mkdir(path.dirname(destination),{recursive:true});
+    await fs.copyFile(path.join(contract.roots.llvm,rel),destination);await fs.chmod(destination,row.mode);
+  }
+  await atomicJson(path.join(artifacts,'native-inputs/qualification.json'),certificate);
+  return certificate;
+}
 export function verifyQualificationCertificate(component, buildId, certificate, files, directory) {
   const fail = detail => reject('CJDB_QUALIFICATION_RECEIPT',component.id,detail);
   if (!certificate || certificate.schema!==CJDB_QUALIFICATION || certificate.preconfigure?.phase!=='preconfigure'
@@ -141,6 +151,11 @@ export async function verifyInstalledQualification(sdk, plan, manifest) {
         || !(await fs.lstat(path.join(sdk,rel))).isFile() || await fileDigest(path.join(sdk,rel))!==expected.sha256) reject('CJDB_QUALIFICATION_INSTALL',component.id,`required installed qualification: ${rel}`);
     }
     if(canonical(await readJson(path.join(sdk,'native-inputs/qualification.json')))!==canonical(certificate))reject('CJDB_QUALIFICATION_INSTALL',component.id,'installed certificate differs');
+    for(const [rel,row] of Object.entries(manifest.files)){
+      if ((rel.startsWith('third_party/llvm/') || rel.startsWith('native-closure/') || rel==='tools/bin/cjdb'
+        || /^tools\/lib\/(?:liblldb|libcangjie-(?:frontend|lsp))/.test(rel)) && row.component!==component.id)
+        reject('CJDB_QUALIFICATION_INSTALL',component.id,`mixed native LLVM/LLDB producer: ${rel}`);
+    }
   }
 }
 if(process.argv[1] && path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
