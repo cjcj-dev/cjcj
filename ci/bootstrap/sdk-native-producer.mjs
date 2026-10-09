@@ -294,6 +294,13 @@ async function llvmReleaseLayout(request) {
   const lldGraph = await fs.readFile(path.join(source, 'lld/tools/lld/CMakeLists.txt'), 'utf8');
   if (!lldGraph.includes('lld-link ld.lld ld64.lld wasm-ld')) reject('SOURCE', component.id, 'release lld alias graph changed');
   for (const alias of ['ld64.lld', 'lld-link']) await fs.symlink('lld', path.join(artifacts, 'bin', alias));
+  for (const [alias, target, definition] of [['llvm-addr2line', 'llvm-symbolizer', 'llvm/tools/llvm-symbolizer/CMakeLists.txt'],
+    ['llvm-otool', 'llvm-objdump', 'llvm/tools/llvm-objdump/CMakeLists.txt']]) {
+    if (!(await fs.readFile(path.join(source, definition), 'utf8')).includes(`add_llvm_tool_symlink(${alias} ${target})`)
+      || await fileDigest(path.join(artifacts, 'bin', alias)) !== await fileDigest(path.join(artifacts, 'bin', target))) reject('SOURCE', component.id, `release alias differs: ${alias}`);
+    await fs.unlink(path.join(artifacts, 'bin', alias));
+    await fs.symlink(target, path.join(artifacts, 'bin', alias));
+  }
   const cmake = await fs.readFile(path.join(source, 'llvm/CMakeLists.txt'), 'utf8');
   const version = ['MAJOR', 'MINOR', 'PATCH'].map(part => cmake.match(new RegExp(`set\\(LLVM_VERSION_${part} ([0-9]+)\\)`))?.[1]);
   if (version.some(part => !part)) reject('SOURCE', component.id, 'LLVM source version required');
