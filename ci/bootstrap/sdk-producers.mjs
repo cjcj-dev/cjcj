@@ -97,6 +97,30 @@ async function sharedbuild(component, directory, identity, plan, resumeFailed, o
     expectedInputHashes[name] = entry.sha256;
     if (await fileDigest(inputs[name]) !== entry.sha256) reject('DEPENDENCY_DIGEST', component.id, name);
   }
+  if (component.producer.adapter === 'sharedbuild-stage1') {
+    const native = outputs.get(options.targetLlvmDependency);
+    const shim = options.inputBindings['llvm-shim.o'];
+    if (native?.component.producer.adapter !== 'llvm-cjdb' || native.component.domain !== 'target'
+      || shim?.dependency !== native.component.id || native.buildId !== identity.dependencies[native.component.id]) {
+      reject('STAGE1_LLVM', component.id, 'missing same-recipe target native dependency');
+    }
+    const roots = ['third_party/llvm', 'tools', 'runtime'];
+    const files = Object.fromEntries(Object.entries(native.files).filter(([rel]) => roots.some(root => rel.startsWith(`${root}/`))));
+    for (const rel of ['third_party/llvm/fixed-llc/cjselfhost_llvmshim.o', 'third_party/llvm/lib/libLLVM-15.so',
+      'third_party/llvm/fixed-llc/llvm-tools.manifest', 'third_party/llvm/lib/manifest.json']) {
+      if (!files[rel]) reject('STAGE1_LLVM', component.id, `native receipt missing ${rel}`);
+    }
+    // Derive the capsule from the original sealed inventory, never from an
+    // installed SDK. The adapter verifies these bytes before the first build.
+    const archive = path.join(directory, 'target-llvm.tar'), contract = path.join(directory, 'target-llvm.json');
+    await execute(component.config.tools.tar.path, ['-cf', archive, '-C', native.artifacts, ...roots.filter(root => Object.keys(files).some(rel => rel.startsWith(`${root}/`)))]);
+    await atomicJson(contract, {schema: 'stage1-target-llvm-v1', source: native.component.source,
+      producer: native.component.producer, buildId: native.buildId, receiptSha256: native.receiptSha256,
+      hostLockSha256: sdkSource.lockSha256, files});
+    for (const [name, file] of [['target-llvm.tar', archive], ['target-llvm.json', contract]]) {
+      inputs[name] = file; expectedInputHashes[name] = await fileDigest(file);
+    }
+  }
   // The JSON is an emitted request, not another mutable source of input
   // authority. Every producer parameter comes from the frozen plan/receipts.
   const spec = {kind, sha: component.source.commit, repo: component.source.repo, sdk: sdkSource.root,

@@ -128,7 +128,7 @@ export function validatePlan(plan) {
       absolute(producer.repository, id);
       if (!HEX64.test(producer.engineSha256)) reject('ADAPTER', id, 'sharedbuild engine hash required');
       if (config.host !== 'linux_x86_64' || config.target !== 'linux_x86_64') reject('ADAPTER_PLATFORM', id, 'existing sharedbuild supports Linux x86_64');
-      fields(config.options, ['parameters', 'optimization', 'sdkDependency', 'inputBindings', 'outputs', 'jobs', 'heap'], [], id);
+      fields(config.options, ['parameters', 'optimization', 'sdkDependency', 'inputBindings', 'outputs', 'jobs', 'heap'], ['targetLlvmDependency'], id);
       if (!['O0', 'O1', 'Release'].includes(config.options.optimization)) reject('CONFIG', id, 'sharedbuild optimization');
       if (!config.tools.builder) reject('CONFIG', id, 'pinned builder required');
       if (!config.tools.builder.path.endsWith('.mjs')) reject('CONFIG', id, 'freeze the actual ESM builder, not a companion launcher');
@@ -328,6 +328,17 @@ export function validatePlan(plan) {
     if (component.producer.adapter === 'ast-support' || component.producer.adapter.startsWith('sharedbuild-')) {
       const seed = byId.get(options.sdkDependency);
       if (seed?.source.kind !== 'distribution' || seed.domain !== 'host') reject('DEPENDENCY_ROLE', component.id, 'producer requires an official host distribution dependency');
+    }
+    if (component.producer.adapter === 'sharedbuild-stage1') {
+      const native = byId.get(options.targetLlvmDependency);
+      const shim = options.inputBindings['llvm-shim.o'];
+      if (!component.dependencies.includes(options.targetLlvmDependency) || native?.domain !== 'target'
+        || native.producer.adapter !== 'llvm-cjdb' || native.source.kind !== 'git'
+        || !native.roles.includes('llvm-tools') || !native.roles.includes('llvm-dylib')
+        || shim?.dependency !== native.id || shim.artifact !== 'third_party/llvm/fixed-llc/cjselfhost_llvmshim.o') {
+        reject('STAGE1_LLVM', component.id, 'stage1 shim and complete target LLVM require one native producer dependency');
+      }
+      if (['target-llvm.tar', 'target-llvm.json'].some(name => name in options.inputBindings)) reject('STAGE1_LLVM', component.id, 'native capsule names are reserved');
     }
     if (['llvm-tools', 'llvm-dylib', 'llvm-cjdb'].includes(component.producer.adapter)) {
       const runtime = byId.get(options.runtimeDependency);
