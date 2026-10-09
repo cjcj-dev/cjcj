@@ -69,6 +69,23 @@ export async function buildCjdb(request, {run, tool, fetchIdentity, execute: req
     await fs.mkdir(path.dirname(path.join(artifacts, rel)), {recursive: true});
     await fs.cp(path.join(installed, rel), path.join(artifacts, rel), {recursive: true, verbatimSymlinks: true, preserveTimestamps: true});
   }
+  // The native LLDB install supplies its binding module; its declared Python
+  // supplies the interpreter, shared library and standard library. Merge the
+  // complete Python install so the relocatable binding keeps working away
+  // from the private dependency prefix. Export the actual libedit dependency
+  // alongside the native loader's libraries, retaining its relative aliases.
+  const nativeRoot = path.join(artifacts, 'third_party/llvm');
+  for (const rel of ['bin', 'lib', 'include', 'share']) {
+    const input = path.join(options.python.root, rel);
+    try { await fs.lstat(input); } catch (e) { if(e.code==='ENOENT')continue; throw e; }
+    await fs.cp(input, path.join(nativeRoot, rel), {recursive:true, verbatimSymlinks:true, preserveTimestamps:true});
+  }
+  const editLibrary = path.join(libedit.root, 'lib/x86_64-linux-gnu');
+  for (const name of (await fs.readdir(editLibrary)).filter(name => /^libedit\.so(?:\.|$)/.test(name))) {
+    const input = path.join(editLibrary, name), output = path.join(nativeRoot, 'lib', name), stat = await fs.lstat(input);
+    if (stat.isSymbolicLink()) await fs.symlink(await fs.readlink(input), output);
+    else await fs.copyFile(input, output);
+  }
   // BuildCJDB's installed links point to the canonical runtime boundscheck.
   const runtimeRel = 'runtime/lib/linux_x86_64_cjnative'; await fs.mkdir(path.join(artifacts, runtimeRel), {recursive: true});
   await fs.copyFile(path.join(build, 'lib/libboundscheck.so'), path.join(artifacts, runtimeRel, 'libboundscheck.so'));
