@@ -379,7 +379,7 @@ test('verifier tool selection reaches source-build package and SDK usability con
     try { await packageStage.run(config); } catch (error) { message = error.message; }
     t.diagnostic(`PACKAGE_ENV_SELECTION_ASSERT ${message}`);
     assert.match(message, /rejected 1 file.*cj\.verifier\.mode=report/, 'package environment selection reaches metadata rejection');
-    assert.equal(fs.existsSync(config.softwareDir), false, 'reject before archive staging');
+    assert.deepEqual(fs.readdirSync(config.softwareDir), [], 'reject before archive staging');
     const usability = runSdkUsability(parseArguments(['--sdk', output]));
     assert.equal(usability.results[0].id, 'U0_VERIFIER_ARTIFACTS');
     assert.equal(usability.results[0].state, STATES.FAIL);
