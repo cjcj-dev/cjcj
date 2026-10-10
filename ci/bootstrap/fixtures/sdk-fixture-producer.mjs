@@ -30,27 +30,44 @@ if (mode === 'runtime-fail-once') {
   mode = 'runtime';
 }
 const tuple = 'linux_x86_64_cjnative';
+const colourFlags = (options.coloured ?? options.role !== 'host') ? ['-DFIXTURE_COLOUR=1'] : [];
+const runtimeSha = options.role === 'host' ? 'official' : env.SB_SHA;
 if (mode === 'runtime') {
-  const shared = await mkdir(path.join(output, 'install/runtime/lib', tuple, 'libcangjie-runtime.so'));
-  run(['cc', '-shared', '-fPIC', `-DCJRT_SHA="${env.SB_SHA}"`, '-DFIXTURE_COLOUR=1', 'runtime.c', '-o', shared]);
-  run(['cc', '-c', '-fPIC', `-DCJRT_SHA="${env.SB_SHA}"`, '-DFIXTURE_COLOUR=1', 'runtime.c', '-o', path.join(build, 'runtime.o')]);
-  run(['ar', 'rcs', await mkdir(path.join(output, 'install/lib', tuple, 'libcangjie-runtime.a')), path.join(build, 'runtime.o')]);
-  run(['cc', '-shared', '-fPIC', 'boundscheck.c', '-o', await mkdir(path.join(output, 'install/runtime/lib', tuple, 'libboundscheck.so'))]);
+  const prefix = options.runtimeLayout === 'flat' ? '' : 'install';
+  const dynamic = options.runtimeLayout === 'flat' ? '' : `install/runtime/lib/${tuple}`;
+  const shared = await mkdir(path.join(output, dynamic, 'libcangjie-runtime.so'));
+  run(['cc', '-shared', '-fPIC', `-DCJRT_SHA="${runtimeSha}"`, ...colourFlags, 'runtime.c',
+    ...(options.versioned ? ['-Wl,--version-script=versions.map'] : []), '-o', shared]);
+  run(['cc', '-c', '-fPIC', `-DCJRT_SHA="${runtimeSha}"`, ...colourFlags, 'runtime.c', '-o', path.join(build, 'runtime.o')]);
+  run(['ar', 'rcs', await mkdir(path.join(output, prefix, 'lib', tuple, 'libcangjie-runtime.a')), path.join(build, 'runtime.o')]);
+  run(['cc', '-shared', '-fPIC', 'boundscheck.c', '-o', await mkdir(path.join(output, dynamic, 'libboundscheck.so'))]);
+  if (options.runtimeLayout === 'nested-static') for (const name of ['libcangjie-runtime.so', 'libboundscheck.so']) {
+    run(['cc', '-shared', '-fPIC', 'inherited.c', '-o', await mkdir(path.join(output, 'install/lib', tuple, name))]);
+  }
 } else if (options.mode === 'compiler') {
   const binary = await mkdir(path.join(output, 'cjcj-stage1'));
-  run(['cc', `-DCJLLVM_SHA="${env.SB_SHA}"`, 'tool.c', '-o', binary]);
+  if (options.copyBinary) {
+    await fs.copyFile(path.join(env.SB_SOURCE, 'fixture-product'), binary);
+    await fs.chmod(binary, 0o755);
+  } else run(['cc', `-DCJLLVM_SHA="${env.SB_SHA}"`, 'tool.c', '-o', binary]);
+  if (options.nonElf) await fs.writeFile(binary, 'not an ELF\n');
 } else if (options.mode === 'std') {
-  run(['cc', '-c', '-fPIC', '-DFIXTURE_COLOUR=1', 'std.c', '-o', path.join(build, 'std.o')]);
-  run(['ar', 'rcs', await mkdir(path.join(output, 'lib', tuple, 'libcangjie-std-core.a')), path.join(build, 'std.o')]);
-  run(['cc', '-shared', '-fPIC', '-DFIXTURE_COLOUR=1', 'std.c', '-o', await mkdir(path.join(output, 'runtime/lib', tuple, 'libcangjie-std-core.so'))]);
+  run(['cc', '-c', '-fPIC', ...colourFlags, options.staticSource || 'std.c', '-o', path.join(build, 'std.o')]);
+  for (const name of options.packages || ['core']) {
+    run(['ar', 'rcs', await mkdir(path.join(output, 'lib', tuple, `libcangjie-std-${name}.a`)), path.join(build, 'std.o')]);
+    run(['cc', '-shared', '-fPIC', ...colourFlags, 'std.c', '-o', await mkdir(path.join(output, 'runtime/lib', tuple, `libcangjie-std-${name}.so`))]);
+  }
+  if (options.includeFfi) run(['cc', '-shared', '-fPIC', ...colourFlags, 'std.c', '-o', await mkdir(path.join(output, 'lib/libstdFFI.so'))]);
   await write(`modules/${tuple}/std/core/core.Int64.ti`, 'fixture module\n');
   await write('std-producer.json', JSON.stringify({compiler_sha256: await sha(path.join(env.SB_INPUTS, 'compiler'))}) + '\n');
+  if (options.omit) await fs.unlink(path.join(output, options.omit));
 } else if (options.mode === 'llvm-tools') {
   const values = {PLATFORM: 'linux_x86_64', LLVM_SHA: env.SB_SHA,
     CANGJIE_COMPILER_SHA: options.compilerSha, FLATBUFFERS_SHA: options.flatbuffersSha};
   for (const [name, prefix] of [['llc', 'LLC'], ['opt', 'OPT'], ['ld.lld', 'LLD']]) {
     const binary = await mkdir(path.join(output, 'bin', name));
     run(['cc', `-DCJLLVM_SHA="${env.SB_SHA}"`, 'tool.c', '-o', binary]);
+    if (options.toolMode !== undefined) await fs.chmod(binary, options.toolMode);
     await write(`fixed-llc/${name}.gz`, gzipSync(await fs.readFile(binary)));
     values[`${prefix}_SOURCE`] = `tuple:${env.SB_SHA}`; values[`${prefix}_VERSION`] = 'fixture tool version 1';
     values[`${prefix}_SHA256`] = await sha(binary);
