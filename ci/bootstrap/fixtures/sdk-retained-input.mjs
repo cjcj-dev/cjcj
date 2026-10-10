@@ -84,7 +84,9 @@ export async function assertSelectedSdkBytes(f, runtimeSdk, stdSdk, colouredSdk,
   if (provenance) {
     const compiler = f.files['bin/cjcj-stage1'] || f.files['bin/cjc'];
     assert.ok(compiler, 'complete real compiler input required; NOT_RUN');
-    const original = await readJson(path.join(provenance.artifacts, provenance.source));
+    const provenanceFile = path.join(provenance.artifacts, provenance.source);
+    assert.equal(await fileDigest(provenanceFile), provenance.sha256, 'original sealed std provenance bytes required; NOT_RUN');
+    const original = await readJson(provenanceFile);
     assert.equal(original.compiler_sha256, compiler.sha256, 'real plan must keep STD_CJC valid before the colour target; NOT_RUN');
   }
 }
