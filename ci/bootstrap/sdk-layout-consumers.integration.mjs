@@ -9,7 +9,7 @@ import {fileURLToPath} from 'node:url';
 import {fixture, command} from './fixtures/sdk-plan-fixture.mjs';
 import {readJson, atomicJson, fileDigest} from './sdk-manifest.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url));
-const assemble = f => command(['bash', path.join(here, 'sdk_build.sh'), '--plan', f.planFile, '--to', f.out]);
+const assemble = (f, args = []) => command(['bash', path.join(here, 'sdk_build.sh'), '--plan', f.planFile, '--to', f.out, ...args]);
 async function observe(f, label, result) {
   await atomicJson(path.join(f.root, `${label}.json`), result);
   console.log(`CONSUMER_TARGET_ASSERT_REACHED ${label} rc=${result.rc} evidence=${f.root} stderr=${JSON.stringify(result.stderr)}`);
@@ -33,7 +33,7 @@ test('frozen official consumer rejects a changed source mode before sealing its 
   } finally { await fs.chmod(file, mode); }
   assert.equal(await fileDigest(official.source.lock), lockSha);
   f.out = path.join(f.root, 'restored-mode-sdk');
-  const restored = await observe(f, 'official-mode-restored', await assemble(f)); assert.equal(restored.rc, 0, restored.stderr);
+  const restored = await observe(f, 'official-mode-restored', await assemble(f, ['--resume-failed'])); assert.equal(restored.rc, 0, restored.stderr);
 });
 
 test('real sharedbuild recipe consumes the complete sealed entity layout', async () => {
