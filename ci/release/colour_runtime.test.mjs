@@ -10,7 +10,9 @@ test('runtime pair reaches bootstrap with explicit identity and host remains sep
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /COLOUR_RT_VERIFIED run=123 artifact=456/);
   assert.ok(result.stdout.includes(`CJCJ_BOOTSTRAP_COLOUR_RT=${runtime}\n`));
-  assert.ok(result.stdout.includes(`CJCJ_BOOTSTRAP_HOST_RT=${env.CJCJ_SRCBUILD_HOST_SDK}\n`));
+  const base = /^CJCJ_BOOTSTRAP_BASE=(.+)$/m.exec(result.stdout)?.[1];
+  assert.notEqual(base, env.CJCJ_SRCBUILD_HOST_SDK);
+  assert.ok(result.stdout.includes(`CJCJ_BOOTSTRAP_HOST_RT=${base}\n`));
   for (const rel of runtimeFiles) {
     assert.equal(digest(path.join(runtime, rel)), digest(path.join(runtimeSource, rel)));
     assert.equal(fs.lstatSync(path.join(runtime, rel)).isFile(), true);
@@ -29,15 +31,17 @@ test('runtime pin tampering fails only runtime identity assertion', () => fixtur
 }));
 
 test('missing colour runtime cannot fall back to the available host SDK', () => fixture(({env, run}) => {
-  delete env.CJCJ_BOOTSTRAP_COLOUR_RT;
+  env.CJCJ_BOOTSTRAP_COLOUR_RT += '-missing';
   const result = run();
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /COLOUR_RT_INPUT_MISSING/);
+  assert.match(result.stderr, /ENOENT/);
 }));
 
 for (const field of ['COLOUR_RT_RUN_ID', 'COLOUR_RT_RUN_ATTEMPT', 'RUNTIME_REF']) {
   test(`runtime manifest binds ${field}`, () => fixture(({env, run}) => {
     env[field] = field === 'RUNTIME_REF' ? 'e'.repeat(40) : '999';
+    // Keep selection authorized so this arm reaches the manifest guard.
+    if (field === 'RUNTIME_REF') env.CJCJ_RUNTIME_REF_OVERRIDE = env[field];
     const result = run();
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /COLOUR_RT_MANIFEST_MISMATCH/);

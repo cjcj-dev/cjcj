@@ -1,5 +1,5 @@
 #!/usr/bin/env zx
-// Verify and install a source-built runtime into this job's SDK tree.
+// Verify and publish a source-built runtime outside the official host SDK.
 
 import fs from 'node:fs/promises';
 import crypto from 'node:crypto';
@@ -9,7 +9,7 @@ import {resolveRuntimeSource} from './runtime-pin.mjs';
 $.stdio = 'inherit';
 
 const dist = argv._[0];
-if (!dist) throw new Error('usage: install_patched_runtime.mjs <runtime-artifact-dir>');
+if (!dist) throw new Error('usage: install_patched_runtime.mjs <runtime-artifact-dir> [install-root]');
 const cangjieHome = process.env.CANGJIE_HOME;
 if (!cangjieHome) throw new Error('CANGJIE_HOME is required');
 
@@ -38,11 +38,39 @@ const sourceFileSha = crypto.createHash('sha256').update(await fs.readFile(sourc
 const expectedFileSha = (await fs.readFile(`${source}.sha256`, 'utf8')).trim().split(/\s+/)[0];
 if (sourceFileSha !== expectedFileSha) throw new Error('source runtime sha mismatch');
 
-const destination = path.join(cangjieHome, 'runtime', 'lib', runtimeDir, runtimeLibrary);
-await fs.access(destination);
+const installRoot = path.resolve(argv._[1] || 'patched-runtime');
+const sdkRoot = await fs.realpath(cangjieHome);
+let ancestor = installRoot;
+while (true) {
+  try { ancestor = await fs.realpath(ancestor); break; }
+  catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+    ancestor = path.dirname(ancestor);
+  }
+}
+if (ancestor === sdkRoot || ancestor.startsWith(`${sdkRoot}${path.sep}`)) {
+  throw new Error('patched runtime destination must be outside the official SDK');
+}
+await fs.mkdir(installRoot, {recursive: true});
+const realInstallRoot = await fs.realpath(installRoot);
+if (realInstallRoot === sdkRoot || realInstallRoot.startsWith(`${sdkRoot}${path.sep}`)) {
+  throw new Error('patched runtime destination must be outside the official SDK');
+}
+const destinationDir = path.join(realInstallRoot, 'lib', runtimeDir);
+await fs.mkdir(destinationDir, {recursive: true});
+const realDestinationDir = await fs.realpath(destinationDir);
+if (!realDestinationDir.startsWith(`${realInstallRoot}${path.sep}`)) {
+  throw new Error('patched runtime destination escapes its independent directory');
+}
+const destination = path.join(realDestinationDir, runtimeLibrary);
 await fs.copyFile(source, `${destination}.new`);
 await fs.chmod(`${destination}.new`, 0o755);
 await fs.rename(`${destination}.new`, destination);
 const destinationSha = crypto.createHash('sha256').update(await fs.readFile(destination)).digest('hex');
 if (destinationSha !== sourceFileSha) throw new Error('installed runtime sha mismatch');
 console.log(`[runtime] installed ${runtimeRef} -> ${destination}`);
+
+// Explicit opt-in for rebuilt consumers; never alter the host loader environment.
+if (process.env.GITHUB_ENV) {
+  await fs.appendFile(process.env.GITHUB_ENV, `CJCJ_PATCHED_RUNTIME_LIB_DIR=${realDestinationDir}\n`);
+}

@@ -2,6 +2,7 @@
 
 import crypto from 'node:crypto';
 import {evaluateG11Evidence} from './release-g11.mjs';
+import {platformRequirements, platformEvidence, g10Evidence} from './release-run-evidence.mjs';
 import {load as loadYaml} from './vendor/js-yaml/js-yaml.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -16,8 +17,8 @@ const STATUSES = new Set(['MET', 'NOT_MET', 'UNKNOWN']);
 const PLATFORM_GATES = new Set(['G3', 'G6', 'G7', 'G9']);
 const EVIDENCE_REGISTRY = 'GATE_EVIDENCE.json';
 const EVIDENCE_BINDING = 'EVIDENCE_BINDING.json';
-const DISCOVERABLE_EVIDENCE_GATES = new Set(['G2', 'G8', 'G12', 'G14']);
-const GENERIC_BINDING_GATES = new Set(['G12', 'G14']);
+const DISCOVERABLE_EVIDENCE_GATES = new Set(['G2', 'G3', 'G6', 'G7', 'G8', 'G9', 'G10', 'G12', 'G14']);
+const GENERIC_BINDING_GATES = new Set(['G3', 'G6', 'G7', 'G9', 'G10', 'G12', 'G14']);
 const G2_ARTIFACTS = [
   'runtime_dynamic',
   'runtime_static',
@@ -1002,7 +1003,7 @@ async function loadG12Floor(context) {
   const floor = imported.GC_RELEASE_FLOOR;
   const blockers = floor?.blocking?.map(item => item.id);
   const records = floor?.recording?.map(item => item.id);
-  if (floor?.schema !== 1 || JSON.stringify(blockers) !== JSON.stringify(['F1', 'F2', 'F3', 'F4', 'F5', 'F6']) ||
+  if (floor?.schema !== 2 || JSON.stringify(blockers) !== JSON.stringify(['F1', 'F2', 'F3', 'F4', 'F5', 'F6']) ||
       JSON.stringify(records) !== JSON.stringify(['R1', 'R2', 'R3', 'R4'])) {
     throw new GateInputError('UNKNOWN', 'frozen G12 floor does not contain exactly F1-F6 and R1-R4');
   }
@@ -1150,21 +1151,44 @@ function evaluateG12F5(rows, floor, profileName) {
 }
 
 function evaluateG12Records(remsetRows, throughputRows, phaseText, floor) {
-  const phaseNames = floor.recording.find(item => item.id === 'R1').phases;
-  const phaseUs = Object.fromEntries(phaseNames.map(name => [name, []]));
+  const r1 = floor.recording.find(item => item.id === 'R1');
+  const phaseNames = [...r1.phases, ...r1.optional_phases];
+  const phaseNs = Object.fromEntries(phaseNames.map(name => [name, []]));
+  const pauseNs = [];
   for (const line of phaseText.split(/\r?\n/)) {
-    const match = line.match(/\[GCLOG\].*\brec=phase\b.*\bname=(young\.[A-Za-z0-9_.-]+)\s+us=(\d+)\b/);
-    if (match && Object.hasOwn(phaseUs, match[1])) phaseUs[match[1]].push(g12Integer(match[2], `R1.${match[1]}`));
+    if (!line.startsWith('[GCLOG]') || !/\brec=phase\b/.test(line)) continue;
+    const match = line.match(/^\[GCLOG\] v=5 rec=phase seq=(\d+) gc_tag=([yYO-]) name=([A-Za-z0-9._-]+) kind=(pause|conc|subphase|critical) start_ns=(\d+) ns=(\d+)$/);
+    if (!match) throw new GateInputError('UNKNOWN', `R1 malformed or unsupported GCLOG phase: ${line}`);
+    const ns = g12Integer(match[6], `R1.${match[3]}.ns`);
+    // Y (major young, including preclean) and O never fill minor coverage.
+    if (match[2] !== r1.gc_tag) continue;
+    if (!Object.hasOwn(phaseNs, match[3])) {
+      if (match[4] === 'pause' || match[4] === 'conc') {
+        throw new GateInputError('UNKNOWN', `R1 unexpected minor top-level phase: ${match[3]}`);
+      }
+      continue;
+    }
+    const expectedKind = r1.pause_phases.includes(match[3]) ? 'pause' : 'conc';
+    if (match[4] !== expectedKind) {
+      throw new GateInputError('UNKNOWN', `R1 wrong kind for ${match[3]}: ${match[4]}`);
+    }
+    phaseNs[match[3]].push(ns);
+    if (match[4] === 'pause') pauseNs.push(ns);
   }
-  if (Object.values(phaseUs).some(values => values.length === 0)) {
-    throw new GateInputError('UNKNOWN', 'R1 lacks one or more four-pillar [GCLOG] phase records');
+  const missing = r1.phases.filter(name => phaseNs[name].length === 0);
+  if (missing.length > 0) {
+    throw new GateInputError('UNKNOWN', `R1 missing floor phases (no matching current producer records): ${missing.join(', ')}`);
   }
-  const phaseSums = Object.fromEntries(Object.entries(phaseUs)
+  const phaseSums = Object.fromEntries(Object.entries(phaseNs)
     .map(([name, values]) => [name, values.reduce((sum, value) => sum + value, 0)]));
-  const fourPillarTotal = Object.values(phaseSums).reduce((sum, value) => sum + value, 0);
-  if (fourPillarTotal <= 0) throw new GateInputError('UNKNOWN', 'R1 four-pillar phase total is zero');
-  const shares = Object.fromEntries(Object.entries(phaseSums)
-    .map(([name, value]) => [name, Number((value / fourPillarTotal).toFixed(6))]));
+  const totalNs = Object.values(phaseSums).reduce((sum, value) => sum + value, 0);
+  if (totalNs <= 0) throw new GateInputError('UNKNOWN', 'R1 top-level phase total is zero');
+  const shares = Object.fromEntries(Object.entries(phaseSums).map(([name, value]) => [name, {
+    count: phaseNs[name].length,
+    status: phaseNs[name].length ? 'observed' : 'not_observed',
+    total_ns: phaseNs[name].length ? value : null,
+    share: phaseNs[name].length ? Number((value / totalNs).toFixed(6)) : null,
+  }]));
 
   const defaultFys = floor.measurement.profiles.DEFAULT.full_young_scan;
   const remset = {};
@@ -1201,11 +1225,9 @@ function evaluateG12Records(remsetRows, throughputRows, phaseText, floor) {
   if (task[r3.minor_disabled_arm] <= 0) throw new GateInputError('UNKNOWN', 'R3 denominator is not positive');
   const ratio = task[r3.generational_arm] / task[r3.minor_disabled_arm];
 
-  const stw = [...phaseText.matchAll(/young collection stw time:\s*([0-9,]+)us/g)]
-    .map((match, index) => g12Integer(match[1].replaceAll(',', ''), `R4.stw[${index}]`));
-  if (stw.length === 0) throw new GateInputError('UNKNOWN', 'R4 lacks young collection STW duration lines');
+  const stw = pauseNs.map(ns => ns / 1000);
   return [
-    {id: 'R1', value: shares},
+    {id: 'R1', value: {coverage: r1.coverage, total_ns: totalNs, phases: shares}},
     {id: 'R2', value: remset},
     {id: 'R3', value: {median_task_ms: task, ratio: Number(ratio.toFixed(6))}},
     {id: 'R4', value: {samples: stw.length, median_us: g12Median(stw), max_us: Math.max(...stw)}},
@@ -1461,12 +1483,42 @@ function scopeSummary(scope) {
     `LLVM=[${scope.llvm_platforms.join(',')}]; std_tuples=[${scope.std_tuples.join(',')}]`;
 }
 
+function evidenceRunResult(gate, result, extra = {}) {
+  return gateResult(gate, result.status,
+    `missing=${result.missing.join(',') || '<none>'}; failures=${result.failures.join(',') || '<none>'}`,
+    {...result, ...extra});
+}
+
+async function readRunResults(gate, context) {
+  try {
+    return parseEvidenceJson(await fs.readFile(path.join(context.evidence, `${gate}_RESULTS.json`), 'utf8'), `${gate}_RESULTS.json`);
+  } catch (error) {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
 async function evaluatePlatformRun(gate, context) {
   const scope = await releaseScope(context);
-  const status = scope.failures.length ? 'NOT_MET' : 'UNKNOWN';
-  const detail = scope.failures.length ? `platform/job mismatch: ${scope.failures.join('; ')}` :
-    `NEEDS_RUN: ${GATES[gate].needsRun}`;
-  return gateResult(gate, status, `${detail}; ${scopeSummary(scope)}`, {scope});
+  if (scope.failures.length) return gateResult(gate, 'NOT_MET',
+    `platform/job mismatch: ${scope.failures.join('; ')}; ${scopeSummary(scope)}`, {scope});
+  context = await discoverEvidenceContext(gate, context);
+  const data = context.evidence ? await readRunResults(gate, context) : null;
+  if (!data) {
+    const missing = platformRequirements(gate, scope).map(row => `${row.id}:record`);
+    const blocked = scope.platforms.some(p => p.status === 'blocked');
+    return gateResult(gate, blocked ? 'NOT_MET' : 'UNKNOWN',
+      `NEEDS_RUN: ${GATES[gate].needsRun}; missing=${gate}_RESULTS.json,${missing.join(',')}; ${scopeSummary(scope)}`,
+      {scope, missing: [`${gate}_RESULTS.json`, ...missing]});
+  }
+  const binding = parseEvidenceJson(await readAbsolute(path.join(context.evidence, EVIDENCE_BINDING)), EVIDENCE_BINDING);
+  const result = platformEvidence(gate, scope, data, binding.payload_sha256);
+  return evidenceRunResult(gate, result, {scope});
+}
+
+async function evaluateG10(context) {
+  if (!context.evidence) return evidenceRunResult('G10', {status: 'UNKNOWN', missing: ['G10_RESULTS.json'], failures: []});
+  return evidenceRunResult('G10', g10Evidence(await readRunResults('G10', context), git(context, ['rev-parse', 'HEAD'])));
 }
 
 async function evaluateG15(context) {
@@ -1530,6 +1582,7 @@ async function evaluate(gate, context) {
     G4: evaluateG4,
     G5: evaluateG5,
     G8: evaluateG8,
+    G10: evaluateG10,
     G12: evaluateG12,
     G13: contextValue => loaderlifeResult(contextValue),
     G14: evaluateG14,
@@ -1543,10 +1596,11 @@ async function evaluate(gate, context) {
       return gateResult(gate, result.status, result.value, {failures: result.failures || []});
     }
     if (PLATFORM_GATES.has(gate)) return await evaluatePlatformRun(gate, context);
-    if (GATES[gate].needsRun) return gateResult(gate, 'UNKNOWN', `NEEDS_RUN: ${GATES[gate].needsRun}`);
+    if (gate !== 'G10' && GATES[gate].needsRun) return gateResult(gate, 'UNKNOWN', `NEEDS_RUN: ${GATES[gate].needsRun}`);
     return await evaluators[gate](await discoverEvidenceContext(gate, context));
   } catch (error) {
-    if (error instanceof GateInputError) return gateResult(gate, error.kind, error.message);
+    if (error instanceof GateInputError) return gateResult(gate, error.kind,
+      `${PLATFORM_GATES.has(gate) || gate === 'G10' ? 'missing=' : ''}${error.message}`);
     return gateResult(gate, 'UNKNOWN', `unexpected evaluator error: ${error.message}`);
   }
 }

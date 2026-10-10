@@ -176,7 +176,7 @@ test('platform gates consume every registry row and retain explicit run requirem
   for (const name of platformGates) {
     const {result, value} = gate(repo, name);
     t.diagnostic(`${name}: real CLI rc=${result.status}, status=${value.status}`);
-    assert.equal(result.status, name === 'G15' ? 0 : 2, JSON.stringify(value));
+    assert.equal(result.status, name === 'G15' ? 0 : value.scope.platforms.some(p => p.status === 'blocked') ? 1 : 2, JSON.stringify(value));
     assert.deepEqual(value.scope.platforms.map(row => row.key), allReleasePlatforms());
     for (const row of value.scope.platforms) {
       assert.equal(row.status, releasePlatformReadiness(row.key).status);
@@ -217,7 +217,7 @@ test('new registry platform makes each dependent gate red until its package job 
     .replace("        needs.package-p5-darwin-x64.result == 'success' &&", "        needs.fixture-new-package.result == 'success' &&\n        needs.package-p5-darwin-x64.result == 'success' &&"));
   for (const name of platformGates) {
     const {result, value} = gate(root, name);
-    assert.equal(result.status, name === 'G15' ? 0 : 2, JSON.stringify(value));
+    assert.equal(result.status, name === 'G15' ? 0 : value.scope.platforms.some(p => p.status === 'blocked') ? 1 : 2, JSON.stringify(value));
     assert.equal(value.scope.failures.length, 0);
     assert.ok(value.scope.jobs.some(job => job.key === 'fixture-new-platform'));
   }
@@ -297,7 +297,7 @@ test('new blocked and excluded registry rows remain visible without inventing pa
         excluded: 'fixture documented exclusion'}),`));
   for (const name of platformGates) {
     const {result, value} = gate(root, name);
-    assert.equal(result.status, name === 'G15' ? 0 : 2, JSON.stringify(value));
+    assert.equal(result.status, name === 'G15' ? 0 : value.scope.platforms.some(p => p.status === 'blocked') ? 1 : 2, JSON.stringify(value));
     const blocked = value.scope.platforms.find(row => row.key === 'fixture-blocked');
     assert.equal(blocked.status, 'blocked');
     assert.ok(value.scope.std_tuples.includes('fixture_unproduced_tuple'));

@@ -1,0 +1,92 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {exportBranches} from './llvm-runtime-branches.mjs';
+import {fixture, originalSource} from './llvm-runtime-fixture.mjs';
+
+const source = originalSource();
+const table = exportBranches(source);
+test('branch exporter loses exactly the removed source case arm', () => {
+  const arm = /^\s*\*\) reject '[^']+' ;;\n/m.exec(source);
+  assert.ok(arm, 'source contains the default environment case arm');
+  const modified = source.replace(arm[0], '\n');
+  const reduced = exportBranches(modified);
+  console.log(`ASSERT_REACHED exporter rows=${table.rows.length} removed=${reduced.rows.length}`);
+  assert.equal(reduced.rows.length, table.rows.length - 1);
+  assert.deepEqual(reduced.rows.filter(row => row.kind === 'case-arm').map(row => row.source),
+    table.rows.filter(row => row.kind === 'case-arm' && !row.source.startsWith('*)')).map(row => row.source));
+});
+
+for (const [name, select] of [
+  ['private SHA guard rejects uppercase at the real entry', row => row.source.includes('complete lowercase')],
+  ['private mixed-mode guard preserves explicit empty environment inputs', row => row.source.includes('do not mix')],
+  ['private checkout consumer rejects mismatched HEAD', row => row.source.includes('HEAD differs')],
+]) {
+  test(name, t => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'llvm-runtime-input-'));
+    t.after(() => fs.rmSync(root, {recursive: true, force: true}));
+    const product = fixture(root, table);
+    const row = table.rows.find(row => row.kind === 'guard-error' && select(row));
+    assert.ok(row, 'source-derived branch exists');
+    // The uppercase guard witness is selected by its derived alphabet, not by
+    // a parallel handcrafted argument list.
+    const inputs = name.includes('uppercase') ? row.inputs.filter(input => /[A-F]/.test(input.env[table.shaVariable] || ''))
+      : name.includes('mismatched HEAD') ? row.inputs.filter(input => input.fixture === 'clean') : row.inputs;
+    assert.ok(inputs.length);
+    inputs.forEach((input, i) => {
+      const result = product.execute(input, i);
+      const message = /reject '([^']+)'/.exec(row.source)[1];
+      console.log(`ASSERT_REACHED ${name} entry=${result.entrySha256} rc=${result.rc} stderr=${JSON.stringify(result.stderr)}`);
+      assert.deepEqual({rc: result.rc, stdout: result.stdout, stderr: result.stderr},
+        {rc: 1, stdout: '', stderr: `LLVM_RUNTIME_INPUT_ERROR: ${message}\n`}, name);
+    });
+  });
+}
+
+for (const [name, select] of [
+  ['private verify preserves the comparison exit when HEAD cannot be read',
+    row => row.kind === 'guard-error' && row.inputs.some(input => input.fixture === 'unborn')],
+  ['fetch final SHA guard consumes mismatched and unreadable real HEAD',
+    row => row.kind === 'final-sha-guard'],
+]) {
+  test(name, t => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'llvm-runtime-input-'));
+    t.after(() => fs.rmSync(root, {recursive: true, force: true}));
+    const left = fixture(path.join(root, 'baseline'), table, {baseline: true});
+    const right = fixture(path.join(root, 'candidate'), table);
+    const row = table.rows.find(select);
+    assert.ok(row, 'error exit is mechanically derived from source');
+    const inputs = row.inputs.filter(input => input.fixture === 'unborn' || input.fixture.startsWith('checkout-head-'));
+    assert.ok(inputs.length, 'derived error witnesses exist');
+    inputs.forEach((input, i) => {
+      const baseline = left.execute(input, i);
+      const candidate = right.execute(input, i);
+      console.log(`ASSERT_REACHED ${name} entry=${candidate.entrySha256} baseline=${JSON.stringify(baseline.normalized)} candidate=${JSON.stringify(candidate.normalized)}`);
+      assert.deepEqual(candidate.normalized, baseline.normalized, name);
+      assert.equal(candidate.rc, 1, 'comparison owns exit 1');
+      assert.doesNotMatch(candidate.stdout, /LLVM_RUNTIME_IDENTITY/, 'failed guard cannot emit identity');
+      if (input.fixture === 'unborn') assert.match(candidate.stderr, /LLVM_RUNTIME_INPUT_ERROR: private runtime checkout HEAD differs/);
+    });
+  });
+}
+
+
+test('private root guard preserves legal trailing path whitespace', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'llvm-runtime-input-'));
+  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
+  const left = fixture(path.join(root, 'baseline'), table, {baseline: true});
+  const right = fixture(path.join(root, 'candidate'), table);
+  const row = table.rows.find(row => row.inputs.some(input => input.fixture === 'root-trailing-space'));
+  assert.ok(row, 'root equality guard is mechanically derived from source');
+  const inputs = row.inputs.filter(input => input.fixture.startsWith('root-trailing-'));
+  assert.equal(inputs.length, 2);
+  inputs.forEach((input, i) => {
+    const baseline = left.execute(input, i);
+    const candidate = right.execute(input, i);
+    console.log(`ASSERT_REACHED path whitespace entry=${candidate.entrySha256} baseline=${JSON.stringify(baseline.normalized)} candidate=${JSON.stringify(candidate.normalized)}`);
+    assert.deepEqual(candidate.normalized, baseline.normalized, 'root path bytes must survive command substitution');
+    assert.equal(candidate.rc, 0, 'legal clean worktree root is accepted');
+  });
+});

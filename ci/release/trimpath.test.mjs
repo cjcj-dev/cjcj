@@ -4,8 +4,32 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
-import {fileURLToPath} from 'node:url';
+import {fileURLToPath, pathToFileURL} from 'node:url';
+import {trimpathLayoutFixture} from './trimpath-layout-fixture.mjs';
 import {prepareTrimpath, withSeedOptimization} from './trimpath.mjs';
+
+// Match the quoted argument syntax emitted by prepareTrimpath; a source-root
+// argument may contain spaces and flag-looking text without being a flag.
+function assertDebugOption(options, debug) {
+  const tokens = options.match(/"(?:[^"\\]|\\.)*"|'[^']*'|[^\s]+/g) || [];
+  assert.equal(tokens.includes('-g'), debug);
+}
+
+for (const [name, options, debug, accepted] of [
+  ['plain release', '-O1 --trimpath /source', false, true],
+  ['plain debug', '-O1 -g', true, true],
+  ['path suffix', '-O1 --trimpath /tmp-green/source', false, true],
+  ['double quoted path', '-O1 --trimpath "/source space -g root"', false, true],
+  ['single quoted path', "-O1 --trimpath '/source space -g root'", false, true],
+  ['missing debug flag', '-O1 --trimpath "/source -g root"', true, false],
+  ['extra debug flag', '-O1 -g --trimpath "/source space"', false, false],
+  ['flag prefix', '-O1 -gextra', false, true],
+]) {
+  test(`aggregate debug-option assertion: ${name}`, () => {
+    if (accepted) assertDebugOption(options, debug);
+    else assert.throws(() => assertDebugOption(options, debug), assert.AssertionError);
+  });
+}
 
 for (const [name, options, debug, trimmed] of [
   ['release', '-O1', false, true],
@@ -65,7 +89,7 @@ for (const [name, input, debug] of [
       // Target assertion precedes command-status checks so a guard cannot mask it.
       assert.match(options, /^-O1(?:\s|$)/, 'aggregate must send O1 to cjpm even after release preparation');
       assert.equal(options.includes('--trimpath'), !debug);
-      assert.equal(options.includes('-g'), debug);
+      assertDebugOption(options, debug);
       assert.match(output, /^override-compile-option = "-O2"$/m);
       assert.equal(await fs.readFile(file + '.O2bak', 'utf8'), before);
       assert.equal(result.status, 0, result.stdout + result.stderr);
@@ -135,7 +159,9 @@ test('srcbuild entry sends prepared O1 configuration to cjpm', async () => {
     await fs.writeFile(path.join(root, 'cjpm.toml'), 'compile-option = "-O2"\n');
     await prepareTrimpath(root);
     const before = await fs.readFile(path.join(root, 'cjpm.toml'), 'utf8');
-    const entry = new URL('../srcbuild/steps/build-stage1.mjs', import.meta.url).href;
+    const fixture = await trimpathLayoutFixture(root);
+    console.log('LAYOUT-SOURCES cold private=' + fixture.cache);
+    const entry = pathToFileURL(path.join(fixture.source, 'ci/srcbuild/steps/build-stage1.mjs')).href;
     // Substitute only the external command runner; import the complete real
     // entry module. This test proves the configuration sent to cjpm, not a build.
     const script = `
@@ -151,12 +177,23 @@ test('srcbuild entry sends prepared O1 configuration to cjpm', async () => {
       catch (error) { if (error !== stop) throw error; }
     `;
     const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
-      cwd: root, encoding: 'utf8', env: {...process.env,
+      cwd: root, encoding: 'utf8', timeout: 120_000, env: {...fixture.env,
         CANGJIE_WORKSPACE: root, GITHUB_WORKSPACE: root, CJCJ_SRCBUILD_TARGET: 'linux-x64',
         CJCJ_SRCBUILD_HOST_SDK: path.join(root, 'host'), CJCJ_SRCBUILD_HOST_CJC: '/unused/configuration-only',
       },
     });
-    assert.equal(result.status, 0, result.stdout + result.stderr);
+    const trace = result.stdout + result.stderr;
+    console.log(trace);
+    // Observe the real Git consumer before checking command status: a broken
+    // binding must fail here even when it also prevents the ABI/cjpm boundary.
+    for (const side of ['llvm', 'runtime']) {
+      const fetch = `fetch --depth 1 ${fixture.mirrors[side]} ${fixture.refs[side]}`;
+      assert.equal(trace.split(fetch).length - 1, 1, `layout ${side} fetch uses its exact private mirror`);
+    }
+    assert.doesNotMatch(trace, /falling back to|fetch[^\n]*https:\/\//);
+    assert.match(trace, /ABI_PAIR=OK/);
+    assert.match(trace, /CODEGEN_LAYOUT=OK/);
+    assert.equal(result.status, 0, trace);
     assert.match(result.stdout, /OBSERVED cjpm build configuration/);
     assert.equal(await fs.readFile(path.join(root, 'observed.toml'), 'utf8'),
       before.replace('compile-option = "-O2', 'compile-option = "-O1'));

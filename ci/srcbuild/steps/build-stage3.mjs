@@ -1,6 +1,7 @@
 #!/usr/bin/env zx
 
 import {checkCodegenRuntimeLayout} from '../../check-codegen-runtime-layout.mjs';
+import {verifyBootstrapRuntimeSdk} from '../../bootstrap/runtime_sdk.mjs';
 import {prepareTrimpath} from '../../release/trimpath.mjs';
 
 import crypto from 'node:crypto';
@@ -11,7 +12,7 @@ import {writeStdProvenance} from '../../../build/lib/provenance.mjs';
 import {getTarget} from '../../../build/lib/targets.mjs';
 import {assertFinalStd} from '../lib/final-std.mjs';
 import {resolveProductBinary} from '../lib/product-binary.mjs';
-import {prepareBootstrapHandoff} from '../lib/bootstrap-handoff.mjs';
+import {prepareBootstrapHandoff, assertBootstrapCompiler, bootstrapBackendIdentity, assertBootstrapBackends} from '../lib/bootstrap-handoff.mjs';
 import {assertColouredRuntime} from '../lib/runtime-colour.mjs';
 import {stdIdentity} from '../lib/final-compiler.mjs';
 
@@ -68,17 +69,16 @@ async function findProductBinary(phase) {
 }
 
 async function assertStage2Compiler(stageEnv, stage2Sha) {
-  const installed = path.join(sdk, 'bin', 'cjcj-stage2');
-  const linked = path.join(sdk, 'bin', 'cjc');
-  const resolvedLink = await fs.realpath(linked);
-  const resolvedInstalled = await fs.realpath(installed);
   const command = await $({cwd: githubWorkspace, env: stageEnv, stdio: 'pipe'})`command -v cjc`;
-  const resolvedCommand = await fs.realpath(command.stdout.trim());
-  const installedSha = await sha256(installed);
-  if (resolvedCommand !== resolvedLink || installedSha !== stage2Sha || await sha256(linked) !== compilerEntrySha) {
-    throw new Error(`stage2 compiler assertion failed: link=${resolvedLink}, command=${resolvedCommand}, expected=${resolvedInstalled}, sha=${installedSha}`);
-  }
-  console.log(`STAGE3_COMPILER_ASSERT_PASS path=${resolvedInstalled} sha256=${installedSha}`);
+  await assertBootstrapCompiler({sdk, command: command.stdout.trim(),
+    producer: stage2Product, producerSha256: stage2Sha, targetLd});
+  console.log(`STAGE3_COMPILER_ASSERT_PASS path=${path.join(sdk, 'bin', 'cjcj-stage2')} sha256=${stage2Sha}`);
+}
+
+async function assertConsumerInputs(stageEnv) {
+  await verifyBootstrapRuntimeSdk(sdk, tuple, process.env, path.dirname(stdlibRoot), assemblyLockSha);
+  await assertBootstrapBackends({sdk, targetLd, identity: backendIdentity});
+  await assertStage2Compiler(stageEnv, stage2Sha);
 }
 
 async function assertStdBarriers(coreLib) {
@@ -103,7 +103,7 @@ async function assertStdBarriers(coreLib) {
   const output = await $({stdio: 'pipe'})`objdump -drwC ${coreLib}`;
   // LLVM #96 removed GCPhase guards. The retired phase-shape write checker
   // cannot observe the new store-mask protocol. This checks only the read side;
-  // source layout compatibility is checked by check-llvm-runtime-abi.sh.
+  // source layout compatibility is checked by check-llvm-runtime-abi.mjs.
   const lines = output.stdout.split('\n');
   const symbols = [
     '_CNat6String7indexOfHRNatY0_E',
@@ -146,10 +146,13 @@ async function assertStdBarriers(coreLib) {
 
 if (!await exists(stdlibRoot, 'dir')) throw new Error(`runtime stdlib source missing: ${stdlibRoot}`);
 
-const {compiler: stage2Product, targetLd} = await prepareBootstrapHandoff({
+const stage2Producer = path.join(bootstrapWork, 'cjcj-stage2');
+const stage2Sha = await sha256(stage2Producer);
+const assemblyLockSha = await sha256(path.join(bootstrapWork, 'sdk-stage1', 'SDK.lock.json'));
+const backendIdentity = await bootstrapBackendIdentity();
+const {compiler: stage2Product, targetLd, stdOutput} = await prepareBootstrapHandoff({
   work: bootstrapWork, sdk, source: githubWorkspace, tuple,
 });
-const stage2Sha = await sha256(stage2Product);
 const compilerEntrySha = await sha256(path.join(sdk, 'bin', 'cjc'));
 
 const resourceOutput = await $({stdio: 'pipe'})`bash ${path.join(githubWorkspace, 'ci/build_resources.sh')} ${process.env.CJ_HEAP || '96GB'}`;
@@ -162,7 +165,9 @@ const stageEnv = {
   [target.spec.loaderEnv]: targetLd,
   PATH: `${path.join(sdk, 'bin')}:${path.join(sdk, 'tools', 'bin')}:${process.env.PATH ?? ''}`,
 };
-await assertStage2Compiler(stageEnv, stage2Sha);
+// Handoff has replaced the SDK and overlaid stage2 std. Admit the actual
+// consumer before executing its compiler or any native backend.
+await assertConsumerInputs(stageEnv);
 await $({cwd: githubWorkspace, env: stageEnv})`set -o pipefail; cjc --version | head -2`;
 
 const runtime = path.join(sdk, 'runtime', 'lib', tuple, target.spec.runtimeLibrary);
@@ -178,6 +183,8 @@ console.log('STAGE3_RUNTIME_ASSERT_PASS colour=1');
 const bootstrapCore = path.join(sdk, 'lib', tuple, 'libcangjie-std-core.a');
 if (!await exists(bootstrapCore)) throw new Error(`bootstrap std core missing: ${bootstrapCore}`);
 const bootstrapCoreSha = await sha256(bootstrapCore);
+if (bootstrapCoreSha !== stdOutput.coreSha256) throw new Error('STAGE3_BOOTSTRAP_STD_CORE_MISMATCH');
+console.log(`STAGE3_BOOTSTRAP_STD_CONSUMED prefix=${stdOutput.prefix} core=${bootstrapCoreSha}`);
 
 console.log('[stage3] rebuild final std with stage2');
 if (dryRun) {
@@ -186,9 +193,10 @@ if (dryRun) {
 } else {
   await $`python3 ${path.join(githubWorkspace, 'ci/install_std_sdk_inputs.py')} ${path.dirname(process.env.CJCJ_BOOTSTRAP_AST_SUPPORT)} ${sdk} ${tuple}`;
   await fs.rm(finalStd, {recursive: true, force: true});
+  await assertConsumerInputs(stageEnv);
   await $({cwd: stdlibRoot, env: stageEnv})`python3 build.py clean`;
   await fs.rm(path.join(stdlibRoot, 'build', 'build'), {recursive: true, force: true});
-  await assertStage2Compiler(stageEnv, stage2Sha);
+  await assertConsumerInputs(stageEnv);
   await $({cwd: stdlibRoot, env: stageEnv})`python3 build.py build -t ${stdlibBuildType} -j ${resources.STD_BUILD_JOBS} --target native --target-lib=${runtimeTarget} --target-lib=${target.spec.opensslLibDir}`;
   await $({cwd: stdlibRoot, env: stageEnv})`python3 build.py install --prefix ${finalStd}`;
   await writeStdProvenance({
@@ -217,7 +225,7 @@ if (consumedCoreSha !== finalCoreSha) {
 console.log(`STAGE3_STD_INPUT_ASSERT_PASS bootstrap_sha256=${bootstrapCoreSha} final_sha256=${finalCoreSha} sdk_sha256=${consumedCoreSha}`);
 
 console.log('[stage3] clean final compiler with stage2 + final std');
-await assertStage2Compiler(stageEnv, stage2Sha);
+await assertConsumerInputs(stageEnv);
 if (dryRun) {
   console.log('[stage3][dry-run] cjpm clean; cjpm build -j 1');
   console.log('STAGE3_DRY_RUN_REACHED_BUILD=1');

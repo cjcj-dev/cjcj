@@ -40,13 +40,10 @@ jobs:
           with open(os.environ['GITHUB_ENV'], 'a') as out:
               out.write(f"SDK_ARCHIVE={pin['archive']}\nSDK_SHA256={pin['sha256']}\nSDK_VERSION={version}\n")
           PY
-      - uses: actions/download-artifact@v8
-        with:
-          artifact-ids: ${{ env.HOST_LLVM_ARTIFACT_ID }}
-          run-id: ${{ env.HOST_LLVM_RUN_ID }}
-          github-token: ${{ github.token }}
-          merge-multiple: true
-          path: ${{ runner.temp }}/host-llvm
+      - name: Download verified prerelease input
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node ci/release/download_pinned.mjs cjcj-dev/cjcj "${{ env.HOST_LLVM_ARTIFACT_ID }}" "${{ runner.temp }}/host-llvm"
       - name: Get the fixed official SDK archive
         shell: bash
         run: |

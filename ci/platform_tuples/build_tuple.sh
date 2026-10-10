@@ -24,6 +24,10 @@ case "$platform" in
     *)        lld_tool=ld.lld ;;
 esac
 
+# Recheck the explicit private checkout at its consumer, before configure.
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
+npx --yes zx@8 "$script_dir/../fetch-llvm-runtime.mjs" --verify-checkout "$root/paired-runtime"
+
 cmake -G Ninja -S "$llvm_src/llvm" -B "$llvm_build" \
     -DCANGJIE_RUNTIME_SOURCE_DIR="$(cd "$root/paired-runtime" && pwd)" \
     -DCMAKE_BUILD_TYPE=Release \
@@ -94,6 +98,10 @@ llc_version="$(llvm_tool_version "$llvm_build/bin/llc$exe")"
 opt_version="$(llvm_tool_version "$llvm_build/bin/opt$exe")"
 lld_version="$(llvm_tool_version "$llvm_build/bin/$lld_tool$exe")"
 {
+    printf 'PLATFORM=%s\n' "$platform"
+    printf 'CANGJIE_COMPILER_SHA=%s\n' "${CANGJIE_COMPILER_SHA:?}"
+    printf 'FLATBUFFERS_SHA=%s\n' "${FLATBUFFERS_SHA:?}"
+    printf 'SHIM_SHA256=%s\n' "$(sha256_file "$output/cjselfhost_llvmshim.o")"
     printf 'LLVM_SHA=%s\n' "${LLVM_SHA:?LLVM_SHA is required}"
     printf 'LLC_SOURCE=tuple:%s\n' "$LLVM_SHA"
     printf 'LLC_VERSION=%s\n' "$llc_version"
@@ -124,7 +132,7 @@ grep -Fx "LLD_TOOL=$lld_tool" "$output/llvm-tools.manifest"
 grep -Fx "LLD_SOURCE=tuple:$LLVM_SHA" "$output/llvm-tools.manifest"
 grep -Fx "LLD_VERSION=$lld_version" "$output/llvm-tools.manifest"
 grep -Fx "LLD_SHA256=$(sha256_file "$root/verify/$lld_tool$exe")" "$output/llvm-tools.manifest"
-node ci/llvm-tools-manifest.mjs validate core-lineage "$output/llvm-tools.manifest"
+node ci/llvm-tools-manifest.mjs validate tuple "$output/llvm-tools.manifest"
 file "$output/cjselfhost_llvmshim.o"
 
 if command -v llvm-nm >/dev/null 2>&1; then

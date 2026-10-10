@@ -7,8 +7,6 @@ import cjcj::ast.PrintNode
 import cjcj::chir.TypeValue
 import cjcj::mangle.BaseMangler as RealBaseMangler
 import cjcj::mangle.CHIRMangler as RealCHIRMangler
-import cjcj::mangle.MangleAstAdapter as RealMangleAstAdapter
-import cjcj::mangle.MangleDecl as RealMangleDecl
 import cjcj::mangle.ManglerContext as RealManglerContext
 import cjcj::sema.CompilerInstance as FaithfulSemaCompilerInstance
 import cjcj::sema.GenericInstantiation.GenericInstantiationManager
@@ -289,7 +287,6 @@ public class CompilerInstance {
         // GenericInstantiationContext.cpp:35-43 retires the borrowed override cache.
         OverrideFunctionResolver.ClearCache()
         mangler.ClearManglerCtxTable()
-        mangler.adapter = RealMangleAstAdapter()
         try (recorder = ProfileRecorder("ClearASTResources", "DestroyASTResources")) {
             let info = ToBeDestroyInfo()
             // 2) TypeChecker first (holds AST / TypeManager refs).
@@ -671,7 +668,6 @@ public class CompilerInstance {
             gim = Some(GenericInstantiationManager(faithfulSemaInstance.getOrThrow(), testManager.getOrThrow().GetImpl()))
         }
         let semaInstance = faithfulSemaInstance.getOrThrow()
-        semaInstance.mangler.adapter = RealMangleAstAdapter()
         semaInstance.mangler.ClearManglerCtxTable()
         semaInstance.typeManager.ReleaseSemaQueryCaches()
         gc(heavy: true)
@@ -712,13 +708,10 @@ public class CompilerInstance {
 
     public func PerformMangling(): Bool {
         mangler = RealCHIRMangler(invocation.globalOptions.enableCompileTest)
-        let adapter = mangler.adapter
-        PrepareManglerContexts(mangler, adapter)
-        adapter.ReleaseConvertedAst()
+        PrepareManglerContexts(mangler)
         mangler.lambdaCounter = Int64(cachedInfo.lambdaCounter)
         ManglingHelpFunction(mangler)
         cachedInfo.lambdaCounter = UInt64(mangler.lambdaCounter)
-        mangler.adapter = RealMangleAstAdapter()
         mangler.ClearManglerCtxTable()
         if (!srcPkgs.isEmpty() && invocation.globalOptions.NeedDumpAST()) {
             DumpAST(GetSourcePackages(), invocation.globalOptions.output, "mangle", dumpToScreen: invocation.globalOptions.dumpToScreen)
@@ -1307,7 +1300,6 @@ public class CompilerInstance {
         cachedInfo.semaInfo = info
     }
 
-
     private func WriteCachedInfo(): Bool {
         if (srcPkgs.isEmpty()) {
             return true
@@ -1349,24 +1341,15 @@ public class CompilerInstance {
         return true
     }
 
-    private func PrepareManglerContexts(baseMangler: RealBaseMangler, adapter: RealMangleAstAdapter): Unit {
-        for (pkg in GetPackages()) {
-            let pkgName = RealManglerContext.ReduceUnitTestPackageName(pkg.fullPackageName)
-            let ctx = if (let Some(value) <- baseMangler.manglerCtxTable.get(pkgName)) {
-                value
-            } else {
-                baseMangler.PrepareContextForPackage(adapter.ConvertPackage(pkg))
-            }
-            adapter.CollectLocalDecls(ctx, pkg)
-        }
+    private func PrepareManglerContexts(baseMangler: RealBaseMangler): Unit {
         for (pkg in importManager.getOrThrow().GetAllImportedPackages()) {
             let pkgName = RealManglerContext.ReduceUnitTestPackageName(pkg.fullPackageName)
             let ctx = if (let Some(value) <- baseMangler.manglerCtxTable.get(pkgName)) {
                 value
             } else {
-                baseMangler.PrepareContextForPackage(adapter.ConvertPackage(pkg))
+                baseMangler.PrepareContextForPackage(pkg)
             }
-            adapter.CollectLocalDecls(ctx, pkg)
+            baseMangler.CollectLocalDecls(ctx, pkg)
         }
     }
 
@@ -1427,7 +1410,6 @@ public class CompilerInstance {
         end: Int64
     ): ArrayList<PendingMangledDecl> {
         let mangledDecls = ArrayList<PendingMangledDecl>()
-        let adapter = RealMangleAstAdapter()
         let prefix = ArrayList<Node>()
         var idx = start
         while (idx < end) {
@@ -1435,23 +1417,21 @@ public class CompilerInstance {
             let decl = decls[idx][1]
             let pre = { node: Node =>
                 let filteredPrefix = getMangleFilteredPrefix(prefix)
-                let convertedPrefix = convertManglePrefix(adapter, filteredPrefix)
                 let action = if (let Some(curDecl) <- (node as Decl)) {
                     curDecl.fullPackageName = pkgName
                     if (curDecl.astKind == ASTKind.MAIN_DECL) {
                         VisitAction.WALK_CHILDREN
                     } else if (curDecl.astKind == ASTKind.MACRO_DECL) {
                         if (let Some(desugarDecl) <- curDecl.GetDesugarDecl()) {
-                            desugarDecl.mangledName = baseMangler.Mangle(desugarDecl)
+                            let desugarMangledName = baseMangler.Mangle(desugarDecl)
+                            desugarDecl.mangledName = desugarMangledName
                         }
                         VisitAction.WALK_CHILDREN
                     } else if (!Ty.IsTyCorrect(curDecl.GetTy())) {
                         VisitAction.SKIP_CHILDREN
                     } else {
-                        let convertedDecl = adapter.ConvertDecl(curDecl)
-                        let mangledName = baseMangler.Mangle(convertedDecl, convertedPrefix)
+                        let mangledName = baseMangler.Mangle(curDecl, filteredPrefix)
                         curDecl.mangledName = mangledName
-                        convertedDecl.mangledName = mangledName
                         mangledDecls.add(PendingMangledDecl(curDecl, mangledName))
                         VisitAction.WALK_CHILDREN
                     }
@@ -1459,10 +1439,8 @@ public class CompilerInstance {
                     if (lambda.TestAttr(Attribute.GENERIC) || !Ty.IsTyCorrect(lambda.GetTy())) {
                         VisitAction.SKIP_CHILDREN
                     } else {
-                        let convertedLambda = adapter.ConvertLambdaExpr(lambda)
-                        let mangledName = baseMangler.MangleLambda(convertedLambda, convertedPrefix)
+                        let mangledName = baseMangler.MangleLambda(lambda, filteredPrefix)
                         lambda.mangledName = mangledName
-                        convertedLambda.mangledName = mangledName
                         VisitAction.WALK_CHILDREN
                     }
                 } else if (let Some(_) <- (node as Annotation)) {
@@ -1478,7 +1456,6 @@ public class CompilerInstance {
                 VisitAction.KEEP_DECISION
             }
             Walker(decl, visitPre: pre, visitPost: post).Walk()
-            adapter.ReleaseConvertedAst()
             idx++
         }
         return mangledDecls
@@ -1542,16 +1519,6 @@ public class CompilerInstance {
             filteredPrefix.add(node)
         }
         filteredPrefix
-    }
-
-    private func convertManglePrefix(adapter: RealMangleAstAdapter, prefix: ArrayList<Node>): ArrayList<RealMangleDecl> {
-        let convertedPrefix = ArrayList<RealMangleDecl>()
-        for (node in prefix) {
-            if (let Some(convertedNode) <- adapter.ConvertNode(node)) {
-                convertedPrefix.add(convertedNode)
-            }
-        }
-        convertedPrefix
     }
 
     private func collectCHIRDeclSummary(chirPkg: CHIRPackage, decl: Decl): Unit {

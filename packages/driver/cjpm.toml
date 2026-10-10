@@ -10,7 +10,7 @@
   output-type = "static"
   compile-option = ""
   override-compile-option = ""
-  link-option = ""
+  link-option = "runtime_shim/cjselfhost_llvmshim.o ${CANGJIE_HOME}/third_party/llvm/lib/libLLVM-15.so -lstdc++"
   package-configuration = {}
 
 [dependencies]

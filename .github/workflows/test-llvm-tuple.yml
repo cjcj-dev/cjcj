@@ -5,7 +5,7 @@ on:
     paths:
       - 'ci/llvm*'
       - 'ci/runtime_pin.env'
-      - 'ci/check-llvm-runtime-abi.sh'
+      - 'ci/check-llvm-runtime-abi.mjs'
       - 'ci/test-runtime-layout.sh'
       - 'ci/test-codegen-layout-sync.sh'
       - 'ci/*codegen-runtime-layout*'
@@ -79,13 +79,10 @@ jobs:
           source ci/llvm-dylib/${{ matrix.platform }}.env
           test "$LLVM_DYLIB_SOURCE_SHA" = "$LLVM_SHA"
           cat ci/llvm_pin.env ci/llvm-dylib/${{ matrix.platform }}.env >> "$GITHUB_ENV"
-      - uses: actions/download-artifact@v8
-        with:
-          artifact-ids: ${{ env.LLVM_DYLIB_ARTIFACT_ID }}
-          github-token: ${{ github.token }}
-          run-id: ${{ env.LLVM_DYLIB_RUN_ID }}
-          merge-multiple: true
-          path: ${{ runner.temp }}/dylib
+      - name: Download verified prerelease input
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node ci/release/download_pinned.mjs cjcj-dev/cjcj "${{ env.LLVM_DYLIB_ARTIFACT_ID }}" "${{ runner.temp }}/dylib"
       - name: Verify downloaded library and manifest rejection
         run: |
           set -euo pipefail
@@ -122,13 +119,10 @@ jobs:
       - uses: actions/checkout@v7
       - name: Read reviewed artifact pin
         run: cat ci/llvm_pin.env >> "$GITHUB_ENV"
-      - uses: actions/download-artifact@v8
-        with:
-          artifact-ids: ${{ env.LLVM_TUPLE_ARTIFACT_ID }}
-          github-token: ${{ github.token }}
-          run-id: ${{ env.LLVM_TUPLE_RUN_ID }}
-          merge-multiple: true
-          path: ${{ runner.temp }}/tuple
+      - name: Download verified prerelease input
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node ci/release/download_pinned.mjs cjcj-dev/cjcj "${{ env.LLVM_TUPLE_ARTIFACT_ID }}" "${{ runner.temp }}/tuple"
       - name: Check reviewed digest and precise layout fault
         run: |
           set -euo pipefail
@@ -138,7 +132,7 @@ jobs:
       - name: Exercise bootstrap input consumer
         run: node --test ci/release/prepare_bootstrap_inputs.test.mjs ci/release/prepare_llvm_dylib.test.mjs ci/release/colour_runtime.test.mjs
       - name: Cut producer and consumer script wiring
-        run: bash ci/test-llvm-tuple-wiring.sh "$RUNNER_TEMP/wiring-test"
+        run: npx --yes zx@8 ci/test-llvm-tuple-wiring.test.mjs "$RUNNER_TEMP/wiring-test"
       - uses: actions/upload-artifact@v7
         if: always()
         with:

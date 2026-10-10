@@ -4,15 +4,6 @@ import std.collection.*
 import cjcj::ast.*
 import cjcj::utils.CJC_NULLPTR_CHECK
 
-private func containsTy(values: ArrayList<Ty>, ty: Ty): Bool {
-    for (value in values) {
-        if (SameTy(value, ty)) {
-            return true
-        }
-    }
-    return false
-}
-
 private func containsGeneric(values: ArrayList<GenericsTy>, tyVar: GenericsTy): Bool {
     for (value in values) {
         if (Ptr<GenericsTy>(value) == Ptr<GenericsTy>(tyVar)) {
@@ -27,14 +18,6 @@ private func addGenericUnique(values: ArrayList<GenericsTy>, tyVar: GenericsTy):
         return false
     }
     values.add(tyVar)
-    return true
-}
-
-private func addTyUnique(values: ArrayList<Ty>, ty: Ty): Bool {
-    if (containsTy(values, ty)) {
-        return false
-    }
-    values.add(ty)
     return true
 }
 
@@ -354,14 +337,16 @@ public func GetDeclTypeParams(decl: Decl): ArrayList<Ty> {
 
 public func GetAllGenericTys(ty: Ty): ArrayList<GenericsTy> {
     let res = ArrayList<GenericsTy>()
-    let visited = ArrayList<Ty>()
+    let visited = HashSet<Ptr<Ty>>()
     let queue = ArrayList<Ty>()
     queue.add(ty)
     var idx: Int64 = 0
     while (idx < queue.size) {
         let curTy = queue[idx]
         idx++
-        if (!addTyUnique(visited, curTy)) {
+        // Match upstream Ptr identity: structural equality can merge distinct objects
+        // and recurse through cyclic type arguments. Generics remain leaves.
+        if (!visited.add(Ptr<Ty>(curTy))) {
             continue
         }
         if (let Some(genTy) <- (curTy as GenericsTy)) {
@@ -381,7 +366,9 @@ public func ReduceMultiTypeSubst(typeManager: TypeManager, tyVars: ArrayList<Gen
         return MultiTypeSubst()
     }
     let mapping = mts.Clone()
-    let visited = ArrayList<Ty>()
+    // Upstream MultiTypeSubstUtils.cpp:226: cache per target, check every (key, target).
+    // In extend<Y> EnumTest<Y>, Y -> EnumTest<Y> is recursive, X -> EnumTest<Y> is not.
+    let gtysCache = HashMap<Ptr<Ty>, HashSet<Ptr<GenericsTy>>>()
     var mapIdx: Int64 = 0
     while (mapIdx < mts.entries.size) {
         let tyVar = mts.entries.KeyAt(mapIdx)
@@ -389,14 +376,21 @@ public func ReduceMultiTypeSubst(typeManager: TypeManager, tyVars: ArrayList<Gen
         var tyIdx: Int64 = 0
         while (tyIdx < tys.size) {
             let ty = tys.ValueAt(tyIdx)
-            if (!addTyUnique(visited, ty.value)) {
+            if (!gtysCache.contains(ty)) {
+                let gtys = HashSet<Ptr<GenericsTy>>()
+                for (genTy in GetAllGenericTys(ty.value)) {
+                    gtys.add(Ptr<GenericsTy>(genTy))
+                }
+                gtysCache[ty] = gtys
+            }
+            if (!gtysCache[ty].contains(tyVar)) {
                 tyIdx++
                 continue
             }
-            for (genTy in GetAllGenericTys(ty.value)) {
-                if (Ptr<GenericsTy>(genTy) == tyVar) {
-                    removeMapping(mapping, tyVar.value)
-                    break
+            if (let Some(targets) <- mapping.entries.get(tyVar)) {
+                targets.remove(ty)
+                if (targets.isEmpty()) {
+                    mapping.entries.remove(tyVar)
                 }
             }
             tyIdx++
