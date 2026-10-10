@@ -260,7 +260,10 @@ test('verifier tool selection preserves explicit override and ordered root disco
       () => scanVerifierReportArtifacts([artifacts], {llvmDis: explicit}),
       () => assertNoVerifierReportArtifacts([artifacts], {llvmDis: explicit}),
       () => writeDiagnosticInventory({workspace: root, report: reportPath(root), inventory: path.join(root, 'inventory.tsv'), artifactRoots: [artifacts], llvmDis: explicit}),
-    ]) assert.deepEqual(observeScan(action), {llvmDis: explicit, matches: 0});
+    ]) {
+      assert.deepEqual(observeScan(action), {llvmDis: explicit, matches: 0});
+      fs.rmSync(path.join(root, VERIFIER_DIAGNOSTIC_MARKER), {force: true});
+    }
     const cli = spawnSync(process.execPath, [path.join(repoRoot, 'scripts', 'verifier_artifact_gate.mjs'),
       '--root', artifacts, '--llvm-dis', explicit], {encoding: 'utf8'});
     assert.equal(cli.status, 0, cli.stderr);
@@ -353,25 +356,27 @@ test('verifier tool selection qualifies real bitcode through environment and CLI
   await withEnvironment({CJCJ_VERIFIER_LLVM_DIS: llvmDis}, async () => {
     const clean = path.join(fixtures, 'clean.bc');
     const report = path.join(fixtures, 'report.bc');
-    const observed = observeScan(() => assertNoVerifierReportArtifacts([clean]));
+    // Match the existing single-file artifact test: ancestor markers apply to
+    // workspace roots; this test qualifies bitcode inspection on individual files.
+    const observed = observeScan(() => assertNoVerifierReportArtifacts([clean], {checkAncestors: false}));
     t.diagnostic(`REAL_ENV_SELECTION_ASSERT ${JSON.stringify(observed)}`);
     assert.deepEqual(observed, {llvmDis, matches: 0}, 'real environment tool selection');
-    assert.throws(() => assertNoVerifierReportArtifacts([report]), /rejected 1 file.*cj\.verifier\.mode=report/);
+    assert.throws(() => assertNoVerifierReportArtifacts([report], {checkAncestors: false}), /rejected 1 file.*cj\.verifier\.mode=report/);
     const inventory = path.join(root, 'inventory.tsv');
     const listed = writeDiagnosticInventory({workspace: root, report: reportPath(root), inventory, artifactRoots: [fixtures]});
     assert.deepEqual(listed.matches.map(match => match.path), [report]);
     fs.rmSync(listed.marker);
     const gate = path.join(repoRoot, 'scripts', 'verifier_artifact_gate.mjs');
     for (const [input, status, output] of [[clean, 0, /pass candidates=1 matches=0/], [report, 1, /rejected 1 file.*cj\.verifier\.mode=report/]]) {
-      const cli = spawnSync(process.execPath, [gate, '--root', input], {encoding: 'utf8'});
+      const cli = spawnSync(process.execPath, [gate, '--root', input, '--no-ancestor-markers'], {encoding: 'utf8'});
       t.diagnostic(`REAL_BITCODE_CLI input=${input} status=${cli.status} signal=${cli.signal} error=${cli.error?.code || 'none'} ${cli.stdout.trim()} ${cli.stderr.trim()}`);
       assert.equal(cli.status, status, cli.stdout + cli.stderr);
       assert.match(cli.stdout + cli.stderr, output);
     }
     const incompatible = path.join(root, 'incompatible.bc');
     fs.writeFileSync(incompatible, Buffer.from([0x42, 0x43, 0xc0, 0xde, 1]));
-    t.diagnostic(`REAL_INCOMPATIBLE_RESULT ${JSON.stringify(observeScan(() => assertNoVerifierReportArtifacts([incompatible])))}`);
-    assert.throws(() => assertNoVerifierReportArtifacts([incompatible]), /llvm-dis could not inspect/);
+    t.diagnostic(`REAL_INCOMPATIBLE_RESULT ${JSON.stringify(observeScan(() => assertNoVerifierReportArtifacts([incompatible], {checkAncestors: false})))}`);
+    assert.throws(() => assertNoVerifierReportArtifacts([incompatible], {checkAncestors: false}), /llvm-dis could not inspect/);
   });
 });
 
