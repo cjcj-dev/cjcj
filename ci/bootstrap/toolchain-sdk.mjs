@@ -173,10 +173,14 @@ export async function verifyManifestSdk(sdk, plan, manifest) {
     reject('INSTALL_BINDING', 'sdk', 'installed plan, successful manifest and lock must agree');
   }
   verifyResolvedIdentities(plan, manifest);
+  for (const [name, input] of Object.entries(plan.verification)) if (input?.path) await requiredInput(input, name);
+  // Authenticate the local lock against sealed producer metadata before any
+  // payload qualification. Reuse the legacy verifier's single binding implementation.
+  await execute('python3', ['-B', path.join(here, 'sdk_verify.py'), '--sdk', sdk,
+    '--role', plan.role, '--binding-only']);
   await verifyPayload(sdk, manifest);
   await verifyOfficialPayload(plan,manifest);
   await verifyInstalledQualification(sdk,plan,manifest);
-  for (const [name, input] of Object.entries(plan.verification)) if (input?.path) await requiredInput(input, name);
   const tuple = PLATFORMS[plan.platform][2];
   // Keep existing colour/ABI/lineage and native loadability checks. The legacy
   // verifier's --write-lock is no longer the authority for payload identity.

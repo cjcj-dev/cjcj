@@ -239,7 +239,7 @@ def fail(code: str, message: str, errors: list) -> None:
     errors.append(f'SDK-VERIFY-FAIL rule={code} {message}')
 
 
-def verify(sdk: Path, lock: dict, pin: dict, identities: dict, errors: list, target_tuple: str | None = None) -> None:
+def verify_manifest_binding(sdk: Path, lock: dict, errors: list) -> None:
     if lock.get('plan_sha256') or (sdk / 'SDK.manifest.json').exists():
         try:
             manifest_path = sdk / 'SDK.manifest.json'
@@ -269,6 +269,12 @@ def verify(sdk: Path, lock: dict, pin: dict, identities: dict, errors: list, tar
                     fail('MANIFEST_BINDING', f'directory identity differs from sealed producer artifact: {rel}', errors)
         except (OSError, ValueError, TypeError) as error:
             fail('MANIFEST_BINDING', str(error), errors)
+
+
+def verify(sdk: Path, lock: dict, pin: dict, identities: dict, errors: list, target_tuple: str | None = None) -> None:
+    verify_manifest_binding(sdk, lock, errors)
+    if errors:
+        return
     on_disk = {}
     for path, rel in iter_files(sdk):
         on_disk[rel] = path
@@ -285,6 +291,9 @@ def verify(sdk: Path, lock: dict, pin: dict, identities: dict, errors: list, tar
     for rel in lock_files:
         if rel != LOCK_NAME and rel not in on_disk:
             fail('UNDECLARED', f'lock entry missing on disk: {rel}', errors)
+    # Directory identities require a complete global member domain.
+    if errors:
+        return
     for rel, entry in lock_files.items():
         path = on_disk.get(rel)
         if path is not None and rel != LOCK_NAME:
@@ -401,6 +410,8 @@ def main() -> int:
     parser.add_argument('--role', choices=('host', 'target'))
     parser.add_argument('--runtime-pin', type=Path)
     parser.add_argument('--write-lock', action='store_true')
+    parser.add_argument('--binding-only', action='store_true',
+                        help='authenticate manifest/lock identity before payload qualification')
     parser.add_argument('--from', dest='source_sdk', type=Path,
                         help='input SDK whose unchanged symlink layout may be recorded')
     parser.add_argument('--identities', type=Path)
@@ -445,7 +456,13 @@ def main() -> int:
             print(f'SDK-VERIFY-FAIL rule=HOST_TARGET_CROSS lock.role={lock.get("role")} arg={args.role}', file=sys.stderr)
             return 1
     errors = []
-    verify(sdk, lock, pin, identities, errors, args.target_tuple)
+    if args.binding_only:
+        if args.write_lock or not lock.get('plan_sha256'):
+            fail('MANIFEST_BINDING', 'binding-only requires an existing manifest SDK lock', errors)
+        else:
+            verify_manifest_binding(sdk, lock, errors)
+    else:
+        verify(sdk, lock, pin, identities, errors, args.target_tuple)
     if errors:
         for item in errors:
             print(item, file=sys.stderr)
