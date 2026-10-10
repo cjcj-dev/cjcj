@@ -36,7 +36,7 @@ async function legacy(f, label, create = false) {
 }
 async function publisher(f, label) {
   return observe(f, label, await command(['python3', engine, '--remote', '--root', f.cache,
-    'sdk-publish', '--source', f.source, '--version', 'layout-test']));
+    '--lane', 'sym_cjcj_934_implement_r6098289478', 'sdk-publish', '--source', f.source, '--version', 'layout-test']));
 }
 const good = result => assert.equal(result.rc, 0, result.stderr);
 function rejected(result, rule, rel) {
@@ -139,7 +139,8 @@ for (const kind of ['bytes', 'target', 'members']) {
     // .incoming transaction appears, hence after the source snapshot. This is
     // filesystem observation, not interposition or a callback in the product.
     await fs.writeFile(path.join(f.source, 'lib/copy-window.bin'), Buffer.alloc(32 * 1024 * 1024, 41));
-    const args = [engine, '--remote', '--root', f.cache, 'sdk-publish', '--source', f.source, '--version', 'layout-test'];
+    const args = [engine, '--remote', '--root', f.cache, '--lane', 'sym_cjcj_934_implement_r6098289478',
+      'sdk-publish', '--source', f.source, '--version', 'layout-test'];
     const child = spawn('python3', args, {stdio: ['ignore', 'pipe', 'pipe']});
     let stdout = '', stderr = '', completed = false;
     child.stdout.on('data', bytes => { stdout += bytes; }); child.stderr.on('data', bytes => { stderr += bytes; });
