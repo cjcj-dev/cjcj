@@ -293,13 +293,13 @@ def verify(sdk: Path, lock: dict, pin: dict, identities: dict, errors: list, tar
                     fail('PAYLOAD_TYPE', f'directory differs from sealed lock: {rel}', errors)
                 if entry.get('members') != members or any(name not in lock_files for name in members):
                     fail('PAYLOAD_MEMBERS', f'directory members differ from sealed lock: {rel}', errors)
-                continue
-            if not path.is_symlink() and path.is_file() and (
-                    ('size' in entry and path.stat().st_size != entry['size']) or
-                    ('mode' in entry and path.stat().st_mode & 0o777 != entry['mode'])):
-                fail('PAYLOAD_TYPE', f'size/mode differs from sealed lock: {rel}', errors)
-            if not path.is_file() or not HEX64_RE.fullmatch(entry.get('sha256') or '') or sha256_file(path) != entry.get('sha256'):
-                fail('PAYLOAD_DIGEST', f'content differs from sealed lock: {rel}', errors)
+            else:
+                if not path.is_symlink() and path.is_file() and (
+                        ('size' in entry and path.stat().st_size != entry['size']) or
+                        ('mode' in entry and path.stat().st_mode & 0o777 != entry['mode'])):
+                    fail('PAYLOAD_TYPE', f'size/mode differs from sealed lock: {rel}', errors)
+                if not path.is_file() or not HEX64_RE.fullmatch(entry.get('sha256') or '') or sha256_file(path) != entry.get('sha256'):
+                    fail('PAYLOAD_DIGEST', f'content differs from sealed lock: {rel}', errors)
         if entry.get('component') == 'official-retain' and rel not in (lock.get('official_retain') or {}):
             fail('UNDECLARED', f'official-retain without reason: {rel}', errors)
         if entry.get('component') not in {
