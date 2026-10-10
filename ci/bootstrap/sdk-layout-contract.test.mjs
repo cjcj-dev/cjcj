@@ -78,10 +78,11 @@ for (const [name, target] of [['external', '../outside'], ['cycle', '.'], ['dang
   });
 }
 
-for (const kind of ['target', 'missing', 'tamper', 'extra', 'empty-directory', 'type']) {
+for (const kind of ['target', 'missing', 'tamper', 'extra', 'empty-directory', 'type', 'member-declaration']) {
   test(`legacy sealed directory rejects ${kind} without rewriting its lock`, async () => {
     const f = await legacyInput(`legacy-${kind}`); good(await legacy(f, `${kind}-control`, true));
     const lock = await fileDigest(path.join(f.sdk, 'SDK.lock.json'));
+    const lockBytes = await fs.readFile(path.join(f.sdk, 'SDK.lock.json'));
     const member = path.join(f.sdk, 'lib/member.h'), bytes = await fs.readFile(member);
     if (kind === 'target') { await fs.unlink(path.join(f.sdk, 'include')); await fs.symlink('./lib', path.join(f.sdk, 'include')); }
     if (kind === 'missing') await fs.unlink(member);
@@ -89,14 +90,20 @@ for (const kind of ['target', 'missing', 'tamper', 'extra', 'empty-directory', '
     if (kind === 'extra') await write(path.join(f.sdk, 'lib/extra.h'), 'extra');
     if (kind === 'empty-directory') await fs.rmdir(path.join(f.sdk, 'lib/empty'));
     if (kind === 'type') { await fs.unlink(path.join(f.sdk, 'include')); await fs.writeFile(path.join(f.sdk, 'include'), 'lib'); }
+    if (kind === 'member-declaration') {
+      const declared = JSON.parse(lockBytes); declared.files.include.members = [];
+      await atomicJson(path.join(f.sdk, 'SDK.lock.json'), declared);
+    }
     const rule = {target: 'SYMLINK', missing: 'PAYLOAD_MEMBERS', tamper: 'PAYLOAD_DIGEST', extra: 'PAYLOAD_MEMBERS',
-      'empty-directory': 'PAYLOAD_MEMBERS', type: 'PAYLOAD_TYPE'}[kind];
+      'empty-directory': 'PAYLOAD_MEMBERS', type: 'PAYLOAD_TYPE', 'member-declaration': 'PAYLOAD_MEMBERS'}[kind];
     rejected(await legacy(f, `${kind}-target`), rule, kind === 'tamper' ? 'include/member.h' : 'include');
-    assert.equal(await fileDigest(path.join(f.sdk, 'SDK.lock.json')), lock);
+    if (kind !== 'member-declaration') assert.equal(await fileDigest(path.join(f.sdk, 'SDK.lock.json')), lock);
     if (kind === 'target' || kind === 'type') { await fs.unlink(path.join(f.sdk, 'include')); await fs.symlink('lib', path.join(f.sdk, 'include')); }
     if (kind === 'missing' || kind === 'tamper') await fs.writeFile(member, bytes);
     if (kind === 'extra') await fs.unlink(path.join(f.sdk, 'lib/extra.h'));
     if (kind === 'empty-directory') await fs.mkdir(path.join(f.sdk, 'lib/empty'));
+    if (kind === 'member-declaration') await fs.writeFile(path.join(f.sdk, 'SDK.lock.json'), lockBytes);
+    assert.equal(await fileDigest(path.join(f.sdk, 'SDK.lock.json')), lock);
     good(await legacy(f, `${kind}-restored`));
   });
 }
