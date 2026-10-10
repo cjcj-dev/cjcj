@@ -17,9 +17,25 @@ export async function bootstrapFixture() {
     'ci/host_sdk_pin.env', 'ci/runtime-pin.mjs', 'ci/runtime_pin.env']) {
     compiler[rel] = await fs.readFile(path.join(repo, rel));
   }
-  // Keep the dry-run command path at the actual product tree; it is never an
-  // incomplete legacy SDK or a second implementation of bootstrap-sdk.
-  for (const name of ['bootstrap-sdk.mjs']) compiler[`ci/bootstrap/${name}`] = await fs.readFile(path.join(here, name));
+  // Preserve the actual phase entry and its local module closure under SRC.
+  // The logged bootstrap call is executable too; a copied entry without its
+  // imports must never fail at loading instead of reaching the phase assertion.
+  const copied = new Set();
+  async function moduleClosure(file) {
+    file = path.resolve(file);
+    assert.ok(file.startsWith(`${repo}${path.sep}`), 'product module must belong to this cjcj checkout');
+    if (copied.has(file)) return;
+    copied.add(file);
+    const bytes = await fs.readFile(file); compiler[path.relative(repo, file)] = bytes;
+    for (const match of bytes.toString().matchAll(/(?:from\s*|import\s*\(\s*)['"](\.[^'"]+\.mjs)['"]/g)) {
+      await moduleClosure(path.resolve(path.dirname(file), match[1]));
+    }
+  }
+  await moduleClosure(path.join(here, 'bootstrap-sdk.mjs'));
+  // Non-module command dependencies of the copied phase verifier are original
+  // files as well. They are never replaced by success stand-ins.
+  for (const rel of ['ci/bootstrap/sdk_verify.py', 'ci/bootstrap/compiler_identity.py',
+    'ci/bootstrap/std_runtime_colour.py', 'ci/llvm-dylib/verify.py']) compiler[rel] = await fs.readFile(path.join(repo, rel));
   const host = await fixture({role: 'host', sources: {compiler}});
   const target = await fixture({sources: {compiler}});
   good(await assemble(host, 'host-plan-input'));
@@ -32,7 +48,7 @@ export async function bootstrapFixture() {
   }
   const stdsrc = path.join(root, 'stdsrc'); await write(path.join(stdsrc, 'build.py'), '# native bootstrap observer input\n');
   const ast = path.join(root, 'ast-input');
-  await write(path.join(ast, 'libcangjie-ast-support.a'), 'controlled AST fixture\n');
+  await write(path.join(ast, 'libcangjie-ast-support.a'), await fs.readFile(path.join(host.out, 'lib', tuple, 'libcangjie-ast-support.a')));
   await fs.mkdir(path.join(ast, 'third_party/flatbuffers/bin'), {recursive: true});
   await fs.copyFile('/bin/true', path.join(ast, 'third_party/flatbuffers/bin/flatc'));
   for (const directory of ['include', 'schema']) await write(path.join(ast, directory, 'fixture.h'), 'AST input\n');
@@ -42,6 +58,17 @@ export async function bootstrapFixture() {
   for (const phase of BOOTSTRAP_PHASES) {
     const selected = ['stage0', 'stage0-run', 'std-bootstrap'].includes(phase) ? host : target;
     const plan = structuredClone(selected.plan);
+    if (['stage0-run', 'std-bootstrap'].includes(phase)) {
+      // cjcj/initial std execute with the host runtime/std pair, while their
+      // native LLVM inputs come from the exact declared target LLVM source.
+      // These remain real recipes; no target receipt is relabelled as host.
+      for (const id of ['llvm-tools', 'llvm-dylib']) {
+        const component = plan.components.find(row => row.id === id);
+        const native = target.plan.components.find(row => row.id === id);
+        component.source = structuredClone(native.source);
+        component.config.options.parameters = structuredClone(native.config.options.parameters);
+      }
+    }
     // Distinct std generation is declared before identities are computed;
     // this is a recipe input, never a copied success receipt.
     if (phase === 'stage1-std') plan.components.find(row => row.id === 'std').config.options.parameters.generation = 'second';
@@ -51,7 +78,7 @@ export async function bootstrapFixture() {
   const bundle = validateBootstrapPlans({schema: 'bootstrap-sdk-plans-v1', phases});
   const plans = path.join(root, 'bundle.frozen.json'); await atomicJson(plans, bundle);
   const colourTuple = path.join(identities.get('llvm-tools').directory, 'artifacts');
-  const hostSo = path.join(host.plan.components.find(row => row.id === 'official').source.root, 'third_party/llvm/lib/libLLVM-15.so');
+  const hostSo = path.join(host.out, 'third_party/llvm/lib/libLLVM-15.so');
   const colourSo = path.join(identities.get('llvm-dylib').directory, 'artifacts/libLLVM-15.so');
   return {root, host, target, bundle, plans, src, cpp, stdsrc, ast,
     work: path.join(root, 'work'), colourTuple, hostSo, colourSo,
@@ -69,7 +96,7 @@ export function bootstrapArgs(f, phase = 'all') {
     '--host-rt', f.hostRuntime, '--sdk-plans', f.plans, '--runtime-pin', f.target.plan.verification.runtimePin.path,
     '--stage', phase, '--dry-run'];
 }
-export async function phaseIdentities(f, phase, productRoot = here) {
+export async function phaseIdentities(f, phase, productRoot = path.join(f.src, 'ci/bootstrap')) {
   const result = await observe(f.host, `phase-${phase}-identities`, [process.execPath, path.join(productRoot, 'bootstrap-sdk.mjs'),
     '--plans', f.plans, '--phase', phase, '--out', path.join(f.root, `phase-${phase}`), '--dry-run']);
   good(result);

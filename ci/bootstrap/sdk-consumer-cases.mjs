@@ -260,6 +260,7 @@ async function stdSuite() {
       }
       for (const rel of ['lib/libstdFFI.so', 'std-producer.json', 'modules']) std.install.push({from: rel, to: rel});
       f.out = path.join(f.root, 'sdk [output]');
+      f.plan.buildRoot = path.join(f.root, 'std builds [source]');
       const result = await assemble(f, `std-${role}-${missing.replaceAll('/', '_') || 'complete'}`, product);
       if (missing) {
         rejected(result, /rule=MISSING_ARTIFACT component=std/); assert.match(result.stderr, new RegExp(omit.replaceAll('.', '\\.')));

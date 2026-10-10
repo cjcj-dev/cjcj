@@ -21,7 +21,8 @@ export async function prepareSdkTestInputs({engine, root, environmentFile}) {
   assert.equal(await git(['status', '--porcelain', '--untracked-files=all']), '', 'test engine checkout must be clean and privately owned');
   assert.equal(path.relative(repo, engine), 'ts/src/sharedbuild/main.py');
   const tools = {};
-  for (const name of ['python3', 'node', 'git', 'bash', 'tar', 'cmake', 'clang', 'clang++', 'cc', 'c++', 'ar', 'ld', 'nm', 'file', 'ldd', 'getconf']) {
+  for (const name of ['python3', 'node', 'npx', 'git', 'bash', 'tar', 'cmake', 'clang', 'clang++', 'cc', 'c++',
+    'ar', 'ld', 'nm', 'file', 'ldd', 'getconf', 'readelf', 'c++filt', 'strings', 'rsync', 'sha256sum', 'find', 'sort', 'xargs']) {
     const location = (await execute('sh', ['-c', 'command -v "$1"', 'sdk-test-prepare', name])).stdout.trim();
     assert.ok(path.isAbsolute(location), `missing native SDK test dependency: ${name}`);
     await fs.access(location, fs.constants.X_OK);

@@ -761,7 +761,7 @@ test('GHA srcbuild does not build compiler or stdlib before bootstrap', () => {
 
 // Exercise the same CLI used for the checkout contract, including rejection controls.
 const contractCLI = path.join(repoRoot, 'ci/bootstrap/vendor_contract.mjs');
-const contractNames = ['bootstrap.sh', 'sdk_build.sh', 'test_bootstrap.sh', 'stage1_host_runner.sh', 'stage1_host_identities.txt'];
+const {vendorFiles: contractNames} = await import('../../ci/bootstrap/vendor_contract.mjs');
 function contractRun(sourceRepo, commit = 'HEAD', consumerRoot = sourceRepo) {
   const run = spawnSync(process.execPath, [contractCLI, '--source-repo', sourceRepo, '--commit', commit, '--consumer-root', consumerRoot], {encoding: 'utf8'});
   assert.equal(run.error, undefined);
@@ -773,7 +773,11 @@ function contractFixture(t) {
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));
   const source = path.join(root, 'source');
   fs.mkdirSync(path.join(source, 'ci/bootstrap'), {recursive: true});
-  for (const name of [...contractNames, 'SOURCE.env']) fs.copyFileSync(path.join(repoRoot, 'ci/bootstrap', name), path.join(source, 'ci/bootstrap', name));
+  for (const name of [...contractNames, 'SOURCE.env']) {
+    const target = path.join(source, 'ci/bootstrap', name);
+    fs.mkdirSync(path.dirname(target), {recursive: true});
+    fs.copyFileSync(path.join(repoRoot, 'ci/bootstrap', name), target);
+  }
   const git = (...args) => runGit(['-C', source, ...args]);
   git('init', '-b', 'main');
   git('config', 'user.name', 'Zxilly');

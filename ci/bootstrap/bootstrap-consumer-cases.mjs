@@ -105,7 +105,7 @@ async function dryContract(log, f, env = process.env) {
     if (/^\[stage[01]\]/.test(line)) return [line.slice(1, 7)];
     if (/^CMD node .*bootstrap-sdk\.mjs /.test(line)) return ['phase:' + line.match(/--phase (\S+)/)[1]];
     if (/^ASSERT stage1-compiler executable=planned/.test(line)) return ['executable'];
-    if (/^ASSERT stdlib-stage[12] shape=planned/.test(line)) return [line.includes('stage1') ? 'initial-std-built' : 'stdlib-built'];
+    if (/^ASSERT stdlib-stage[12] shape=planned/.test(line)) return [line.startsWith('ASSERT stdlib-stage1 ') ? 'initial-std-built' : 'stdlib-built'];
     if (/^CMD rm -rf -- .*\/std-runtime-link$/.test(line)) return ['runtime-link-cleared'];
     if (/^CMD rm -rf -- .*\/sdk-std-bootstrap$/.test(line)) return ['bootstrap-sdk-removed'];
     return [];
@@ -114,7 +114,7 @@ async function dryContract(log, f, env = process.env) {
   assert.deepEqual(sequence, ['stage0', 'phase:stage0', 'phase:stage0-run', 'stage1', 'phase:stage0-run', 'phase:std-bootstrap',
     'runtime-link-cleared', 'initial-std-built', 'bootstrap-sdk-removed', 'runtime-link-cleared', 'phase:stage1-initial',
     'executable', 'stdlib-built', 'phase:stage1-std', 'executable']);
-  for (const phase of ['stage0', 'stage0-run', 'std-bootstrap', 'stage1-initial', 'stage1-std']) await phaseIdentities(f, phase, process.env.SDK_PHASE_PRODUCT_ROOT || here);
+  for (const phase of ['stage0', 'stage0-run', 'std-bootstrap', 'stage1-initial', 'stage1-std']) await phaseIdentities(f, phase, process.env.SDK_PHASE_PRODUCT_ROOT || path.join(f.src, 'ci/bootstrap'));
   const oldStd = buildIdentities(f.bundle.phases['stage1-initial']).get('std');
   const newStd = buildIdentities(f.bundle.phases['stage1-std']).get('std');
   assert.notEqual(oldStd.buildId, newStd.buildId, 'the second std phase cannot reuse the stale std generation');
@@ -136,7 +136,15 @@ async function forensicContract(log, f) {
   ];
   const failures = [];
   for (const [label, n, pattern] of assertions) try {count(log, label, n, pattern);} catch (error) {failures.push(error.message);}
-  console.log(`ASSERTIONS total=${assertions.length} failed=${failures.length}`);
+  // Observe the command that actually receives the flag, in addition to the
+  // human-readable diagnostic emitted by cjpm_build.
+  try {
+    const commands = log.split('\n').filter(line => /^CMD env -i /.test(line) && / bash -c /.test(line)
+      && line.includes('/cjcj-src-stage1-forensic'));
+    assert.equal(commands.length, 1);
+    assert.ok(commands[0].includes(`build\\ -j\\ ${jobs}\\ -g`), 'actual forensic cjpm command must receive -g');
+  } catch (error) {failures.push(error.message);}
+  console.log(`ASSERTIONS total=${assertions.length + 1} failed=${failures.length}`);
   assert.deepEqual(failures, []);
 }
 async function exitReceipts(script) {
@@ -232,6 +240,7 @@ async function sourceContract() {
 async function literalStd() {
   const f = await fixture({role: 'host', sourceNames: {std: 'std [literal]'}, parameters: {std: {packages: ['core', 'sort', 'collection.concurrentFFI'], includeFfi: true}}});
   currentRoot = f.root; f.out = path.join(f.root, 'sdk [literal]');
+  f.plan.buildRoot = path.join(f.root, 'std builds [literal]');
   good(await assemble(f, 'literal-std', sdkProduct));
   const {manifest, outputs} = await installedMembers(f, ['std']);
   for (const rel of ['lib/libstdFFI.so', `lib/${tuple}/libcangjie-std-core.a`, `runtime/lib/${tuple}/libcangjie-std-core.so`, `modules/${tuple}/std/core/core.Int64.ti`]) {
@@ -239,6 +248,7 @@ async function literalStd() {
     assert.equal(await fileDigest(path.join(f.out, rel)), outputs.get('std').files[rel].sha256);
   }
   assert.ok(f.sources.std.repo.includes('std [literal]'));
+  assert.ok(outputs.get('std').artifacts.includes('std builds [literal]'));
   good(await verify(f, 'literal-std-verifiers'));
   console.log('PASS STD-LITERAL-PREFIX real installer accepts spaces and brackets; installed bytes match');
 }
@@ -416,7 +426,10 @@ async function faultExecutable() {
 }
 async function faultIsolation() {
   const f = await bootstrapFixture(); currentRoot = f.root;
-  const entry = await cut(f, 'drop-env-isolation', 'cmd "env -i ', 'cmd "');
+  const lines = (await fs.readFile(product, 'utf8')).split('\n');
+  const stdCommand = lines.find(line => line.startsWith('  cmd "env -i ') && line.includes('cjHeapSize=$(printf \'%q\' "$STD_BUILD_HEAP")'));
+  assert.ok(stdCommand, 'product std environment command cut anchor missing');
+  const entry = await cut(f, 'drop-env-isolation', stdCommand, stdCommand.replace('env -i ', ''));
   return isolation('runner', entry);
 }
 async function missingProduct() {
@@ -460,7 +473,7 @@ for (const name of ['build-env', 'host-sha', 'ast-sha', 'ast-bytes', 'host-colou
 const preciseFault = {
   'fault-a1': /install shape: Int64.ti definitions=1/, 'fault-a1-missing-core-archive': /install shape: core archive\/shared 或 libstdFFI.so 缺失/,
   'fault-a1-missing-core-shared': /install shape: core archive\/shared 或 libstdFFI.so 缺失/, 'fault-a1-missing-ffi-shared': /install shape: core archive\/shared 或 libstdFFI.so 缺失/,
-  'fault-a2': /命令失败 rc=23/, 'fault-a3': /stage1-compiler 缺失或不可执行/,
+  'fault-a2': /命令失败 rc=23/, 'fault-a3': /stage1-compiler.*(?:不存在|不可执行)/,
   'fault-a4': /BOOTSTRAP-FAIL.*命令失败 rc=44/,
   'fault-build-env': /isolated command missing HOME\/TMPDIR/,
   'fault-runtime-stamp': /rule=RUNTIME_PIN|BOOTSTRAP_SDK_RUNTIME_STAMP_MISMATCH/,

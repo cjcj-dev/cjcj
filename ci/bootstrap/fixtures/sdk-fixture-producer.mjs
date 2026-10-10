@@ -68,7 +68,7 @@ if (mode === 'runtime') {
     run(['cc', '-shared', '-fPIC', ...colourFlags, 'std.c', '-o', await mkdir(path.join(output, 'runtime/lib', tuple, `libcangjie-std-${name}.so`))]);
   }
   if (options.includeFfi) run(['cc', '-shared', '-fPIC', ...colourFlags, 'std.c', '-o', await mkdir(path.join(output, 'lib/libstdFFI.so'))]);
-  await write(`modules/${tuple}/std/core/core.Int64.ti`, 'fixture module\n');
+  await write(`modules/${tuple}/std/core/core.Int64.ti`, `fixture module generation=${options.generation || 'initial'}\n`);
   await write('std-producer.json', JSON.stringify({compiler_sha256: await sha(path.join(env.SB_INPUTS, 'compiler'))}) + '\n');
   if (options.omit) await fs.unlink(path.join(output, options.omit));
 } else if (options.mode === 'llvm-tools') {
