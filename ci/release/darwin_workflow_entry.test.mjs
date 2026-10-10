@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {spawnSync} from 'node:child_process';
 import test from 'node:test';
 import {load as loadYaml} from '../vendor/js-yaml/js-yaml.mjs';
 
@@ -74,7 +77,15 @@ test('Node boundary pin loading and actual input consumption retain reviewed com
     'Build or acquire native inputs and consume their actual loaded libraries',
   ]) {
     observed('DARWIN_REVIEWED_CONSUMPTION', actualNamed(name));
-    assert.deepEqual(actualNamed(name), originalNamed(name), 'DARWIN_REVIEWED_CONSUMPTION');
+    const expected = {...originalNamed(name)};
+    if (name === 'Build or acquire native inputs and consume their actual loaded libraries') {
+      // This exact run is the sole authorized command change from the fixture.
+      expected.run = 'ulimit -c 0\n'
+        + 'CANGJIE_BUILD_JOBS=$(sysctl -n hw.logicalcpu)\n'
+        + 'export CANGJIE_BUILD_JOBS\n'
+        + 'npx --yes zx@8 ci/release/darwin_consumer_ci.mjs "$RUNNER_TEMP/darwin-inputs"\n';
+    }
+    assert.deepEqual(actualNamed(name), expected, 'DARWIN_REVIEWED_CONSUMPTION');
   }
 });
 
@@ -117,4 +128,60 @@ test('entry adds no steps or side effects and preserves reviewed execution order
   observed('DARWIN_STEP_SCOPE_AND_ORDER', {actual, positions});
   assert.ok(positions.every((position, index) => position >= 0
     && (index === 0 || position > positions[index - 1])), 'DARWIN_STEP_SCOPE_AND_ORDER');
+});
+
+function runConsumerStep(sysctlRc) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'darwin-entry-shell-'));
+  try {
+    const command = path.join(root, 'controlled-command.mjs');
+    fs.writeFileSync(command, `#!${process.execPath}
+import fs from 'node:fs';
+import path from 'node:path';
+if (path.basename(process.argv[1]) === 'sysctl') {
+  fs.writeFileSync(process.env.SYSCTL_OBSERVATION, JSON.stringify(process.argv.slice(2)));
+  console.log(process.env.SYSCTL_JOBS);
+  process.exit(Number(process.env.SYSCTL_RC));
+}
+fs.writeFileSync(process.env.NPX_OBSERVATION, JSON.stringify({
+  jobs: process.env.CANGJIE_BUILD_JOBS, argv: process.argv.slice(2)
+}));
+`, {mode: 0o755});
+    for (const name of ['sysctl', 'npx']) fs.symlinkSync(command, path.join(root, name));
+    const script = path.join(root, 'workflow-run');
+    // Execute the deployed YAML's actual run with GitHub's unspecified-shell
+    // bash -e {0} semantics. Commands control inputs/observe continuation only.
+    fs.writeFileSync(script, actualNamed('Build or acquire native inputs and consume their actual loaded libraries').run);
+    const sysctlObservation = path.join(root, 'sysctl.json');
+    const npxObservation = path.join(root, 'npx.json');
+    const env = {...process.env, PATH: `${root}:${process.env.PATH}`,
+      RUNNER_TEMP: root, SYSCTL_RC: String(sysctlRc), SYSCTL_JOBS: '17',
+      SYSCTL_OBSERVATION: sysctlObservation, NPX_OBSERVATION: npxObservation};
+    delete env.CANGJIE_BUILD_JOBS;
+    const result = spawnSync('bash', ['-e', script], {env, encoding: 'utf8', timeout: 10000});
+    if (result.error) throw result.error;
+    return {rc: result.status, signal: result.signal,
+      sysctl: fs.existsSync(sysctlObservation) ? JSON.parse(fs.readFileSync(sysctlObservation, 'utf8')) : null,
+      npx: fs.existsSync(npxObservation) ? JSON.parse(fs.readFileSync(npxObservation, 'utf8')) : null,
+      expectedArgv: ['--yes', 'zx@8', 'ci/release/darwin_consumer_ci.mjs', `${root}/darwin-inputs`]};
+  } finally {
+    fs.rmSync(root, {recursive: true, force: true});
+  }
+}
+
+test('actual consumer shell exports successful sysctl jobs to the original npx argv', () => {
+  const result = runConsumerStep(0);
+  observed('DARWIN_JOBS_ENVIRONMENT', result);
+  assert.deepEqual(result.sysctl, ['-n', 'hw.logicalcpu'], 'DARWIN_SYSCTL_INPUT');
+  assert.equal(result.signal, null, 'DARWIN_SHELL_SIGNAL');
+  assert.equal(result.rc, 0, 'DARWIN_SUCCESS_STATUS');
+  assert.deepEqual(result.npx, {jobs: '17', argv: result.expectedArgv}, 'DARWIN_JOBS_ENVIRONMENT');
+});
+
+test('actual consumer shell propagates sysctl failure before starting npx', () => {
+  const result = runConsumerStep(23);
+  observed('DARWIN_SYSCTL_FAILURE_PROPAGATION', result);
+  assert.deepEqual(result.sysctl, ['-n', 'hw.logicalcpu'], 'DARWIN_SYSCTL_INPUT');
+  assert.equal(result.signal, null, 'DARWIN_SHELL_SIGNAL');
+  // One combined target judges both the producer status and continuation.
+  assert.deepEqual({rc: result.rc, npx: result.npx}, {rc: 23, npx: null}, 'DARWIN_SYSCTL_FAILURE_PROPAGATION');
 });

@@ -51,7 +51,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           ulimit -c 0
-          export CANGJIE_BUILD_JOBS=$(sysctl -n hw.logicalcpu)
+          CANGJIE_BUILD_JOBS=$(sysctl -n hw.logicalcpu)
+          export CANGJIE_BUILD_JOBS
           npx --yes zx@8 ci/release/darwin_consumer_ci.mjs "$RUNNER_TEMP/darwin-inputs"
       - name: Qualify the actual Mach-O loading target with cut and restored consumer
         run: |
