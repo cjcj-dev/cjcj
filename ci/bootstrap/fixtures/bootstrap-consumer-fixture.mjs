@@ -1,0 +1,96 @@
+#!/usr/bin/env zx
+// Bootstrap tests consume the same complete plans and genuine small native
+// producers as SDK consumers. This contains no SDK assembler or receipt writer.
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
+import {fixture, assemble, good, observe, tuple, readJson, fileDigest, atomicJson} from './sdk-consumer-fixture.mjs';
+import {buildIdentities, validatePlan, resolveFiles, readOutput} from '../sdk-manifest.mjs';
+import {BOOTSTRAP_PHASES, validateBootstrapPlans} from '../freeze-bootstrap-plans.mjs';
+const here = path.dirname(fileURLToPath(new URL('../bootstrap.sh', import.meta.url)));
+const repo = path.resolve(here, '../..');
+export const write = async (file, bytes) => {await fs.mkdir(path.dirname(file), {recursive: true}); await fs.writeFile(file, bytes);};
+export async function bootstrapFixture() {
+  const compiler = {'cjpm.toml': 'compile-option = "-O2"\n', 'main.cj': 'main() {}\n'};
+  for (const rel of ['ci/build_resources.sh', 'ci/install_std_sdk_inputs.py', 'ci/host-toolchain-pin.mjs',
+    'ci/host_sdk_pin.env', 'ci/runtime-pin.mjs', 'ci/runtime_pin.env']) {
+    compiler[rel] = await fs.readFile(path.join(repo, rel));
+  }
+  // Keep the dry-run command path at the actual product tree; it is never an
+  // incomplete legacy SDK or a second implementation of bootstrap-sdk.
+  for (const name of ['bootstrap-sdk.mjs']) compiler[`ci/bootstrap/${name}`] = await fs.readFile(path.join(here, name));
+  const host = await fixture({role: 'host', sources: {compiler}});
+  const target = await fixture({sources: {compiler}});
+  good(await assemble(host, 'host-plan-input'));
+  good(await assemble(target, 'target-plan-input'));
+  const identities = buildIdentities(target.plan);
+  const root = host.root, src = host.sources.compiler.repo;
+  const cpp = path.join(root, 'cpp-src');
+  for (const rel of ['third_party/llvm-project/llvm/include', 'build/build/third_party/llvm/include', 'build/build/include', 'build/build/schema']) {
+    await write(path.join(cpp, rel, 'fixture.h'), '// controlled header fixture\n');
+  }
+  const stdsrc = path.join(root, 'stdsrc'); await write(path.join(stdsrc, 'build.py'), '# native bootstrap observer input\n');
+  const ast = path.join(root, 'ast-input');
+  await write(path.join(ast, 'libcangjie-ast-support.a'), 'controlled AST fixture\n');
+  await fs.mkdir(path.join(ast, 'third_party/flatbuffers/bin'), {recursive: true});
+  await fs.copyFile('/bin/true', path.join(ast, 'third_party/flatbuffers/bin/flatc'));
+  for (const directory of ['include', 'schema']) await write(path.join(ast, directory, 'fixture.h'), 'AST input\n');
+  await write(path.join(ast, 'SHA256SUMS'), (await Promise.all(['libcangjie-ast-support.a', 'third_party/flatbuffers/bin/flatc'].map(async rel =>
+    `${await fileDigest(path.join(ast, rel))}  ${rel}\n`))).join(''));
+  const phases = {};
+  for (const phase of BOOTSTRAP_PHASES) {
+    const selected = ['stage0', 'stage0-run', 'std-bootstrap'].includes(phase) ? host : target;
+    const plan = structuredClone(selected.plan);
+    // Distinct std generation is declared before identities are computed;
+    // this is a recipe input, never a copied success receipt.
+    if (phase === 'stage1-std') plan.components.find(row => row.id === 'std').config.options.parameters.generation = 'second';
+    plan.stage = phase === 'stage3' ? 'final' : ['stage2', 'stage3-std'].includes(phase) ? 'stage2' : 'stage1';
+    phases[phase] = validatePlan(plan);
+  }
+  const bundle = validateBootstrapPlans({schema: 'bootstrap-sdk-plans-v1', phases});
+  const plans = path.join(root, 'bundle.frozen.json'); await atomicJson(plans, bundle);
+  const colourTuple = path.join(identities.get('llvm-tools').directory, 'artifacts');
+  const hostSo = path.join(host.plan.components.find(row => row.id === 'official').source.root, 'third_party/llvm/lib/libLLVM-15.so');
+  const colourSo = path.join(identities.get('llvm-dylib').directory, 'artifacts/libLLVM-15.so');
+  return {root, host, target, bundle, plans, src, cpp, stdsrc, ast,
+    work: path.join(root, 'work'), colourTuple, hostSo, colourSo,
+    hostSha: await fileDigest(hostSo), colourSoSha: await fileDigest(colourSo),
+    astFile: path.join(ast, 'libcangjie-ast-support.a'), astSha: await fileDigest(path.join(ast, 'libcangjie-ast-support.a')),
+    colourSha: target.sources.llvm.commit, sourceSha: host.sources.compiler.commit,
+    hostRuntime: path.join(host.out, 'runtime/lib', tuple), colourRuntime: path.join(target.out, 'runtime/lib', tuple)};
+}
+export function bootstrapArgs(f, phase = 'all') {
+  return ['--work', f.work, '--src', f.src, '--cjcj-sha', f.sourceSha, '--stdsrc', f.stdsrc, '--cpp-src', f.cpp,
+    '--base', f.host.plan.components.find(row => row.id === 'official').source.root,
+    '--host-llvm-so', f.hostSo, '--host-llvm-sha256', f.hostSha, '--colour-llvm-so', f.colourSo,
+    '--colour-llvm-sha256', f.colourSoSha, '--ast-support', f.astFile, '--ast-support-sha256', f.astSha,
+    '--colour-tuple', f.colourTuple, '--colour-llvm-sha', f.colourSha, '--colour-rt', f.colourRuntime,
+    '--host-rt', f.hostRuntime, '--sdk-plans', f.plans, '--runtime-pin', f.target.plan.verification.runtimePin.path,
+    '--stage', phase, '--dry-run'];
+}
+export async function phaseIdentities(f, phase, productRoot = here) {
+  const result = await observe(f.host, `phase-${phase}-identities`, [process.execPath, path.join(productRoot, 'bootstrap-sdk.mjs'),
+    '--plans', f.plans, '--phase', phase, '--out', path.join(f.root, `phase-${phase}`), '--dry-run']);
+  good(result);
+  const rows = JSON.parse(result.stdout.trim().split('\n').at(-1)).components;
+  const expected = buildIdentities(f.bundle.phases[phase]);
+  console.log(`ASSERT bootstrap-phase-identities executed phase=${phase} rows=${JSON.stringify(rows)}`);
+  assert.deepEqual(Object.fromEntries(rows.map(row => [row.component, {buildId: row.buildId, directory: row.directory, dependencies: row.dependencies}])),
+    Object.fromEntries([...expected].map(([id, row]) => [id, {buildId: row.buildId, directory: row.directory, dependencies: row.dependencies}])));
+  await assert.rejects(fs.access(path.join(f.root, `phase-${phase}`)));
+}
+export async function installedMembers(f, roles) {
+  const manifest = await readJson(path.join(f.out, 'SDK.manifest.json'));
+  const outputs = new Map();
+  for (const component of f.plan.components) {
+    const identity = f.identities.get(component.id);
+    outputs.set(component.id, await readOutput(component.producer.receipt || identity.directory, component, identity));
+  }
+  const declared = resolveFiles(f.plan, outputs);
+  for (const [rel, row] of Object.entries(declared)) if (roles.some(role => f.plan.components.find(c => c.id === row.component).roles.includes(role))) {
+    assert.deepEqual(manifest.files[rel], row);
+    if (row.type !== 'directory') assert.equal(await fileDigest(path.join(f.out, rel)), row.sha256, rel);
+  }
+  return {manifest, outputs, declared};
+}

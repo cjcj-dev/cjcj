@@ -31,7 +31,7 @@ if (mode === 'runtime-fail-once') {
 }
 const tuple = 'linux_x86_64_cjnative';
 const colourFlags = (options.coloured ?? options.role !== 'host') ? ['-DFIXTURE_COLOUR=1'] : [];
-const runtimeSha = options.role === 'host' ? 'official' : env.SB_SHA;
+  const runtimeSha = options.runtimeStamp || (options.role === 'host' ? 'official' : env.SB_SHA);
 if (mode === 'runtime') {
   const prefix = options.runtimeLayout === 'flat' ? '' : 'install';
   const dynamic = options.runtimeLayout === 'flat' ? '' : `install/runtime/lib/${tuple}`;
@@ -41,6 +41,16 @@ if (mode === 'runtime') {
   run(['cc', '-c', '-fPIC', `-DCJRT_SHA="${runtimeSha}"`, ...colourFlags, 'runtime.c', '-o', path.join(build, 'runtime.o')]);
   run(['ar', 'rcs', await mkdir(path.join(output, prefix, 'lib', tuple, 'libcangjie-runtime.a')), path.join(build, 'runtime.o')]);
   run(['cc', '-shared', '-fPIC', 'boundscheck.c', '-o', await mkdir(path.join(output, dynamic, 'libboundscheck.so'))]);
+  if (options.copyRuntimeInputs) for (const name of ['libcangjie-runtime.so', 'libboundscheck.so']) {
+    await fs.copyFile(path.join(env.SB_INPUTS, name), path.join(output, dynamic, name));
+  }
+  if (options.dualLayout) {
+    run(['cc', '-shared', '-fPIC', `-DCJRT_SHA="${options.secondaryStamp || env.SB_SHA}"`, ...colourFlags, 'runtime.c',
+      '-o', await mkdir(path.join(output, 'libcangjie-runtime.so'))]);
+    if (!options.omitFlatBounds) run(['cc', '-shared', '-fPIC', 'boundscheck.c', '-o', await mkdir(path.join(output, 'libboundscheck.so'))]);
+    if (options.extraNested) run(['cc', '-shared', '-fPIC', `-DCJRT_SHA="${env.SB_SHA}"`, ...colourFlags, 'runtime.c',
+      '-o', await mkdir(path.join(output, 'install/runtime/lib/linux_aarch64_cjnative/libcangjie-runtime.so'))]);
+  }
   if (options.runtimeLayout === 'nested-static') for (const name of ['libcangjie-runtime.so', 'libboundscheck.so']) {
     run(['cc', '-shared', '-fPIC', 'inherited.c', '-o', await mkdir(path.join(output, 'install/lib', tuple, name))]);
   }
@@ -81,7 +91,7 @@ if (mode === 'runtime') {
     'fixed-llc/cjselfhost_llvmshim.o', 'fixed-llc/llc.gz', 'fixed-llc/opt.gz', 'fixed-llc/ld.lld.gz', 'fixed-llc/llvm-tools.manifest'];
   await write('SHA256SUMS', (await Promise.all(files.map(async rel => `${await sha(path.join(output, rel))}  ./${rel}\n`))).join(''));
 } else if (options.mode === 'llvm-dylib') {
-  run(['cc', '-shared', '-fPIC', `-DCJLLVM_SHA="${env.SB_SHA}"`, 'llvm.c', '-o', await mkdir(path.join(output, 'libLLVM-15.so'))]);
+  run(['cc', '-shared', '-fPIC', `-DCJLLVM_SHA="${env.SB_SHA}"`, ...(options.revision ? [`-DFIXTURE_REV="${options.revision}"`] : []), 'llvm.c', '-o', await mkdir(path.join(output, 'libLLVM-15.so'))]);
   await write('manifest.json', JSON.stringify({llvm_sha: env.SB_SHA, sha256: await sha(path.join(output, 'libLLVM-15.so'))}) + '\n');
 } else throw new Error('unknown fixture producer mode');
 console.log(`FIXTURE_PRODUCER_EXECUTED mode=${options.mode} actual_sha=${env.SB_SHA}`);

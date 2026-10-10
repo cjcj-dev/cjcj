@@ -455,11 +455,18 @@ async function tupleSuite() {
       let same = false, executable = false;
       try { same = await fileDigest(installed) === receipt.files[`bin/${name}`].sha256; executable = !!((await fs.stat(installed)).mode & 0o111); } catch (error) { if (error.code !== 'ENOENT') throw error; }
       observations.push({tool: name, same_bytes: same, executable, source_mode: receipt.files[`bin/${name}`].sourceMode});
-      assert.equal(receipt.files[`bin/${name}`].sourceMode, mode);
-      assert.equal(await fileDigest(source), receipt.files[`bin/${name}`].sha256);
     }
     console.log('ASSERT tuple-installed-executable executed ' + JSON.stringify(observations));
     assert.ok(observations.every(row => row.same_bytes && row.executable), result.stdout + result.stderr);
+    for (const name of ['llc', 'opt', 'ld.lld']) {
+      const directory = f.identities.get('llvm-tools').directory;
+      const native = await readJson(path.join(directory, 'sharedbuild-output/artifact-manifest.json'));
+      const receipt = await readJson(path.join(directory, 'output.json'));
+      assert.equal(native[`bin/${name}`].mode, mode, 'original native source mode is independent of adapter output');
+      assert.equal(receipt.files[`bin/${name}`].sourceMode, mode);
+      assert.equal(receipt.files[`bin/${name}`].sha256, native[`bin/${name}`].sha256);
+      assert.equal(await fileDigest(path.join(directory, 'artifacts/bin', name)), native[`bin/${name}`].sha256);
+    }
     good(result); good(await verify(f, 'tuple-mode-verifiers')); return f.root;
   });
 }

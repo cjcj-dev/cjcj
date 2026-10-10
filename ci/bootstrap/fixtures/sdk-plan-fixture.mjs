@@ -23,6 +23,7 @@ const fixtureSources = {
   'std.c': '#ifdef FIXTURE_COLOUR\nextern int g_cjLoadBadMask; int std_fixture(void){return g_cjLoadBadMask;}\n#else\nint std_fixture(void){return 0;}\n#endif\n',
   'tool.c': '#include <stdio.h>\n#ifndef CJLLVM_SHA\n#define CJLLVM_SHA "official"\n#endif\nconst char llvm_origin[]="CJLLVM-COMMIT:" CJLLVM_SHA; int main(void){puts("fixture tool version 1"); return 0;}\n',
   'llvm.c': '#include <stdlib.h>\n#ifndef CJLLVM_SHA\n#define CJLLVM_SHA "official"\n#endif\nconst char llvm_origin[]="CJLLVM-COMMIT:" CJLLVM_SHA;\n' +
+    '#ifndef FIXTURE_REV\n#define FIXTURE_REV "initial"\n#endif\nconst char fixture_library_revision[]=FIXTURE_REV;\n' +
     ['X86', 'ARM', 'AArch64'].flatMap(target => ['TargetInfo', 'Target', 'TargetMC', 'AsmPrinter', 'AsmParser'].map(part => `void LLVMInitialize${target}${part}(void){}\n`)).join('') +
     'void *LLVMContextCreate(void){return malloc(1);} void LLVMContextDispose(void *p){free(p);}\n',
 };
@@ -36,13 +37,13 @@ export async function sourceRepository(root, name, overrides = {}) {
   return {kind: 'git', repo, commit: (await execute('git', ['-C', repo, 'rev-parse', 'HEAD'])).stdout.trim(),
     tree: (await execute('git', ['-C', repo, 'rev-parse', 'HEAD^{tree}'])).stdout.trim()};
 }
-export async function fixture({role = 'target', sources: sourceOverrides = {}, parameters = {}, prepareOfficial,
+export async function fixture({role = 'target', sources: sourceOverrides = {}, sourceNames = {}, parameters = {}, prepareOfficial,
   colourReference = 'runtime.c', runtimeLayout} = {}) {
   assert.ok(engine && testRoot, 'SDK_SHAREDBUILD_ENGINE and SDK_MANIFEST_TEST_ROOT must name remote isolated inputs');
   assert.ok(['host', 'target'].includes(role));
   const root = await fs.mkdtemp(path.join(testRoot, 'sdk-manifest-'));
   const sources = {};
-  for (const name of ['runtime', 'compiler', 'llvm', 'std']) sources[name] = await sourceRepository(root, name, sourceOverrides[name]);
+  for (const name of ['runtime', 'compiler', 'llvm', 'std']) sources[name] = await sourceRepository(root, sourceNames[name] || name, sourceOverrides[name]);
   const native = path.join(root, 'native'); await fs.mkdir(native);
   const official = path.join(root, 'official');
   for (const rel of ['bin/cjc', 'bin/cjc-frontend', 'tools/bin/cjpm', 'third_party/llvm/bin/llc', 'third_party/llvm/bin/opt', 'third_party/llvm/bin/ld.lld']) {
