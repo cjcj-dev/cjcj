@@ -18,6 +18,7 @@ export const command = async argv => {
 const write = async (file, content) => { await fs.mkdir(path.dirname(file), {recursive: true}); await fs.writeFile(file, content); };
 const fixtureSources = {
   'runtime.c': '#ifndef CJRT_SHA\n#define CJRT_SHA "official"\n#endif\nconst char provenance[]="CJRT-COMMIT:" CJRT_SHA; int official_symbol=1;\n#ifdef FIXTURE_COLOUR\nint g_cjLoadBadMask=1;\n#endif\n',
+  'alias-tool.c': '#include <stdio.h>\n#include <string.h>\n#include <unistd.h>\nstatic const char *base(const char *p){const char *s=strrchr(p,47);return s?s+1:p;}\nint main(int argc,char **argv){if(argc>1&&!strcmp(argv[1],"--version")){puts("fixture alias tool version 1");return 0;} char physical[4096];ssize_t n=readlink("/proc/self/exe",physical,sizeof(physical)-1);if(n<0)return 2;physical[n]=0;printf("argv0=%s physical=%s\\n",base(argv[0]),base(physical));return 0;}\n',
   'boundscheck.c': 'int boundscheck_fixture(void){return 0;}\n',
   'std.c': '#ifdef FIXTURE_COLOUR\nextern int g_cjLoadBadMask; int std_fixture(void){return g_cjLoadBadMask;}\n#else\nint std_fixture(void){return 0;}\n#endif\n',
   'tool.c': '#include <stdio.h>\n#ifndef CJLLVM_SHA\n#define CJLLVM_SHA "official"\n#endif\nconst char llvm_origin[]="CJLLVM-COMMIT:" CJLLVM_SHA; int main(void){puts("fixture tool version 1"); return 0;}\n',
