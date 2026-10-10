@@ -5,7 +5,7 @@ import {spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {randomUUID} from 'node:crypto';
 import {canonical, execute, fileDigest, readJson, reject, sourceIdentity,
-  readOutput, sealOutput, physicalPath, PLATFORMS, atomicJson, registeredSourceIdentity} from './sdk-manifest.mjs';
+  readOutput, sealOutput, physicalPath, PLATFORMS, atomicJson, registeredSourceIdentity, inventory} from './sdk-manifest.mjs';
 
 const repository = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
 export async function runProducer(argv, {cwd, env, log}) {
@@ -49,8 +49,39 @@ async function official(component, directory, identity) {
   const lock = await readJson(source.lock);
   if (lock.schema !== 'sharedbuild-official-sdk-v1' || lock.role !== 'host' || lock.version !== source.version
     || !lock.files || !Object.keys(lock.files).length) reject('DISTRIBUTION_LOCK', component.id, 'requires complete official sharedbuild distribution lock');
+  if (lock.layoutVersion !== undefined && (lock.layoutVersion !== 1 || !lock.source_layout)) reject('DISTRIBUTION_LOCK', component.id, 'missing authenticated source layout');
+  for (const [rel, row] of Object.entries(lock.source_layout || {})) {
+    if (!['file', 'directory'].includes(row.type) || !Number.isInteger(row.mode) || row.mode < 0 || row.mode > 0o777) reject('DISTRIBUTION_LAYOUT', component.id, `invalid source entity ${rel}`);
+  }
+  const sourceDirectories = Object.entries(lock.source_layout || {}).filter(([, row]) => row.type === 'directory');
+  const expectedEntities = Object.fromEntries(Object.entries(lock.source_layout || {}).map(([rel, row]) => [rel,
+    row.type === 'directory' ? {type: 'directory', mode: row.mode & ~0o222, sha256: null}
+      : {type: 'file', mode: row.mode & ~0o222, size: row.size, sha256: row.sha256}]));
+  const checkLayout = async () => {
+    if (!lock.source_layout) return; // Genuine historical file-only publisher locks.
+    for (const [rel, row] of Object.entries(lock.files)) {
+      const file = await physicalPath(source.root, rel, component.id), stat = await fs.stat(file);
+      if (stat.size !== row.size || (stat.mode & 0o777) !== row.mode) reject('DISTRIBUTION_FILE', component.id, `size/mode ${rel}`);
+      if (await fileDigest(file) !== row.sha256) reject('DISTRIBUTION_DIGEST', component.id, rel);
+    }
+    const actual = await inventory(source.root, {links: true, directories: true});
+    for (const name of ['SDK.lock.json', 'MANIFEST.sha256', 'DONE']) delete actual[name];
+    if (canonical(actual) !== canonical(expectedEntities)) reject('DISTRIBUTION_LAYOUT', component.id, 'materialized membership/type/content/mode differs from frozen source layout');
+    const declaredFiles = Object.fromEntries(Object.entries(expectedEntities).filter(([, row]) => row.type === 'file'));
+    const lockFiles = Object.fromEntries(Object.entries(lock.files).map(([rel, row]) => [rel,
+      {type: row.type || 'file', mode: row.mode, size: row.size, sha256: row.sha256}]));
+    if (canonical(lockFiles) !== canonical(declaredFiles)) reject('DISTRIBUTION_LAYOUT', component.id, 'file lock differs from authenticated source layout');
+  };
+  await checkLayout();
   const artifacts = path.join(directory, 'artifacts'); await fs.mkdir(artifacts);
   const files = Object.create(null);
+  for (const [rel, row] of sourceDirectories.sort(([a], [b]) => a.split('/').length - b.split('/').length)) {
+    const sourceDirectory = await physicalPath(source.root, rel, component.id);
+    if (!(await fs.stat(sourceDirectory)).isDirectory()) reject('DISTRIBUTION_LAYOUT', component.id, rel);
+    await fs.mkdir(path.join(artifacts, rel), {recursive: true});
+    files[rel] = {type: 'directory', sha256: null, mode: row.mode & ~0o222,
+      sourceMode: row.mode, modeTransform: 'readonly'};
+  }
   // Copy physical files first, then preserve authenticated contained aliases.
   // Old file-only locks remain readable; new locks describe native link types.
   for (const [rel, entry] of Object.entries(lock.files)) {
@@ -81,7 +112,9 @@ async function official(component, directory, identity) {
     await fs.symlink(entry.target, destination);
     files[rel] = {type: 'symlink', target: entry.target, size: Buffer.byteLength(entry.target), mode: 0o777, sha256: entry.sha256};
   }
-  for (const [rel, row] of Object.entries(files)) if (await fileDigest(path.join(artifacts, rel)) !== row.sha256) reject('DISTRIBUTION_DIGEST', component.id, rel);
+  for (const [rel, row] of Object.entries(files)) if (row.type !== 'directory' && await fileDigest(path.join(artifacts, rel)) !== row.sha256) reject('DISTRIBUTION_DIGEST', component.id, rel);
+  await checkLayout();
+  for (const [rel] of sourceDirectories.reverse()) await fs.chmod(path.join(artifacts, rel), files[rel].mode);
   if (await fileDigest(source.lock) !== source.lockSha256) reject('DISTRIBUTION_LOCK', component.id, 'source lock changed during copy');
   return sealOutput(directory, component, identity, {status: 'complete', rc: 0, kind: 'official-distribution-copy',
     distribution: {version: source.version, lockSha256: source.lockSha256, reason: source.reason}}, files);

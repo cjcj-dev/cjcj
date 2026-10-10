@@ -449,7 +449,7 @@ export async function physicalBuildRoot(root) {
     }
   }
 }
-export async function inventory(root, {links = false} = {}) {
+export async function inventory(root, {links = false, directories = false} = {}) {
   const rows = Object.create(null);
   const realRoot = await fs.realpath(root);
   if (realRoot !== path.resolve(root)) reject('LINK_ESCAPE', 'inventory', root);
@@ -457,7 +457,10 @@ export async function inventory(root, {links = false} = {}) {
     for (const name of (await fs.readdir(path.join(root, prefix))).sort()) {
       const rel = prefix ? `${prefix}/${name}` : name; relative(rel, 'inventory');
       const file = path.join(root, rel), stat = await fs.lstat(file);
-      if (stat.isDirectory()) await visit(rel);
+      if (stat.isDirectory()) {
+        if (directories) rows[rel] = {type: 'directory', mode: stat.mode & 0o777, sha256: null};
+        await visit(rel);
+      }
       else if (stat.isFile()) rows[rel] = {type: 'file', size: stat.size, mode: stat.mode & 0o777, sha256: await fileDigest(file)};
       else if (links && stat.isSymbolicLink()) {
         const target = await fs.readlink(file);
@@ -534,7 +537,8 @@ export function parseOutputReceipt(bytes, done, directory, component, identity) 
   if (component.source.kind === 'distribution' && record.execution?.distribution?.lockSha256 !== component.source.lockSha256) reject('SOURCE_COMPLETION', component.id, 'actual distribution identity missing');
   for (const [rel, row] of Object.entries(record.files)) {
     relative(rel, component.id);
-    if (!['file', 'symlink'].includes(row.type) || !HEX64.test(row.sha256) || !Number.isSafeInteger(row.size) || row.size < 0
+    if (!(row.type === 'directory' ? row.sha256 === null && row.size === undefined :
+        ['file', 'symlink'].includes(row.type) && HEX64.test(row.sha256) && Number.isSafeInteger(row.size) && row.size >= 0)
       || !Number.isInteger(row.mode) || row.mode < 0 || row.mode > 0o777) reject('COMPLETION', component.id, `invalid artifact ${rel}`);
   }
   if (component.producer.adapter === 'llvm-cjdb') verifyQualificationCertificate(component,identity.buildId,record.execution.generatedInputs,record.files,record.directory);
@@ -575,7 +579,7 @@ export function resolveFiles(plan, outputs) {
   }
   for (const target of Object.keys(files)) {
     for (const parent of target.split('/').slice(0, -1).map((_, index) => target.split('/').slice(0, index + 1).join('/'))) {
-      if (files[parent]) reject('INSTALL', files[target].component, `file/directory collision ${parent}`);
+      if (files[parent] && files[parent].type !== 'directory') reject('INSTALL', files[target].component, `file/directory collision ${parent}`);
     }
   }
   return files;

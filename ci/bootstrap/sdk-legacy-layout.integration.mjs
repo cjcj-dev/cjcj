@@ -63,7 +63,8 @@ test(`legacy legal ${kind} alias survives the real publisher and frozen SDK entr
   assert.equal(installedStat.mode & 0o777, sealed.mode);
   assert.equal(publishedLock.source_layout[rel].target, target, 'original alias provenance is authenticated');
   if (kind === 'directory') {
-    assert.equal(observations.installedLock, undefined);
+    assert.equal(observations.installedLock.type, 'directory');
+    assert.equal(observations.installedLock.mode, publishedLock.source_layout[rel].mode & 0o555);
     assert.ok(Object.keys(publishedLock.files).some(name => name.startsWith('include/')));
   } else assert.equal(observations.installedLock.type, 'file');
   const inputVersion = await command([original, '--version']);

@@ -81,8 +81,7 @@ def iter_files(sdk: Path):
                 if descend:
                     yield from walk(path, ancestors | {target}, True)
             elif path.is_dir():
-                if through_alias:
-                    yield path, rel
+                yield path, rel
                 yield from walk(path, ancestors | {path.resolve()}, through_alias)
             else:
                 yield path, rel
@@ -206,6 +205,7 @@ def build_lock(sdk: Path, role: str, identities: dict, target_tuple: str | None 
             entry['link_target'] = os.readlink(path)
             entry['resolved_target'] = path.resolve().relative_to(sdk).as_posix()
         if path.is_dir():
+            entry['mode'] = path.stat().st_mode & 0o777
             entry['members'] = sorted(name for name in payload if name.startswith(rel + '/'))
         files[rel] = entry
         if component == 'official-retain':
@@ -219,7 +219,7 @@ def build_lock(sdk: Path, role: str, identities: dict, target_tuple: str | None 
         runtime_commit = commits[0] if len(commits) == 1 else None
         runtime_digest = sha256_file(runtime_path)
     lock = {
-        'version': 1,
+        'version': 2,
         'role': role,
         'files': files,
         'official_retain': official,
@@ -263,6 +263,10 @@ def verify(sdk: Path, lock: dict, pin: dict, identities: dict, errors: list, tar
                         or installed.get('producer', {}).get('build_id') != row.get('buildId')
                         or installed.get('producer', {}).get('receipt_sha256') != row.get('receiptSha256')):
                     fail('MANIFEST_BINDING', f'lock differs from sealed producer artifact: {rel}', errors)
+                if row.get('type') == 'directory' and (
+                        installed.get('source_mode') != row.get('sourceMode') or installed.get('mode_transform') != row.get('modeTransform')
+                        or installed.get('members') != sorted(name for name in declared if name.startswith(rel + '/'))):
+                    fail('MANIFEST_BINDING', f'directory identity differs from sealed producer artifact: {rel}', errors)
         except (OSError, ValueError, TypeError) as error:
             fail('MANIFEST_BINDING', str(error), errors)
     on_disk = {}
@@ -272,10 +276,11 @@ def verify(sdk: Path, lock: dict, pin: dict, identities: dict, errors: list, tar
     check_symlinks(sdk, errors, lock_files=lock_files)
     if errors:
         return
+    parents = {str(parent) for rel in lock_files for parent in Path(rel).parents if str(parent) != '.'}
     for rel, path in on_disk.items():
         if rel == LOCK_NAME:
             continue
-        if rel not in lock_files and not path.is_symlink():
+        if rel not in lock_files and not path.is_symlink() and not (path.is_dir() and (rel in parents or lock.get('version', 1) == 1)):
             fail('UNDECLARED', f'file not in lock: {rel}', errors)
     for rel in lock_files:
         if rel != LOCK_NAME and rel not in on_disk:
@@ -291,7 +296,9 @@ def verify(sdk: Path, lock: dict, pin: dict, identities: dict, errors: list, tar
                 members = sorted(name for name in on_disk if name.startswith(rel + '/'))
                 if not path.is_dir() or entry.get('sha256') is not None:
                     fail('PAYLOAD_TYPE', f'directory differs from sealed lock: {rel}', errors)
-                if entry.get('members') != members or any(name not in lock_files for name in members):
+                if (lock.get('version', 1) >= 2 or 'mode' in entry) and (not isinstance(entry.get('mode'), int) or path.stat().st_mode & 0o777 != entry.get('mode')):
+                    fail('PAYLOAD_MODE', f'directory mode differs from sealed lock: {rel}', errors)
+                if entry.get('members') != members or any(name not in lock_files and name not in parents for name in members):
                     fail('PAYLOAD_MEMBERS', f'directory members differ from sealed lock: {rel}', errors)
             else:
                 if not path.is_symlink() and path.is_file() and (

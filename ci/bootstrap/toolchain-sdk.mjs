@@ -79,6 +79,9 @@ export async function verifyPayload(sdk, manifest) {
       if (!stat.isSymbolicLink() || await fs.readlink(file) !== entry.target) reject('PAYLOAD_TYPE', entry.component, rel);
       const resolved = await fs.realpath(file);
       if (!resolved.startsWith(`${sdk}${path.sep}`)) reject('LINK_ESCAPE', entry.component, rel);
+    } else if (entry.type === 'directory') {
+      if (!stat.isDirectory() || stat.isSymbolicLink() || (stat.mode & 0o777) !== entry.mode) reject('PAYLOAD_MODE', entry.component, rel);
+      continue;
     } else {
       if (!stat.isFile() || stat.isSymbolicLink() || stat.size !== entry.size || (stat.mode & 0o777) !== entry.mode) reject('PAYLOAD_TYPE', entry.component, rel);
     }
@@ -88,7 +91,15 @@ export async function verifyPayload(sdk, manifest) {
 async function copyArtifacts(staging, manifest) {
   // These are the only payload copies. Every destination has exactly one
   // presealed producer source; no baseline directory copy can bypass the list.
+  const directories = Object.entries(manifest.files).filter(([, entry]) => entry.type === 'directory');
+  for (const [rel, entry] of directories.sort(([a], [b]) => a.split('/').length - b.split('/').length)) {
+    const source = await physicalPath(entry.artifacts, entry.source, entry.component);
+    const stat = await fs.lstat(source);
+    if (!stat.isDirectory() || (stat.mode & 0o777) !== entry.mode) reject('PAYLOAD_MODE', entry.component, entry.source);
+    await fs.mkdir(path.join(staging, rel), {recursive: true});
+  }
   for (const [rel, entry] of Object.entries(manifest.files)) {
+    if (entry.type === 'directory') continue;
     const destination = path.join(staging, rel);
     await fs.mkdir(path.dirname(destination), {recursive: true});
     if (entry.type === 'symlink') {
@@ -109,6 +120,11 @@ async function copyArtifacts(staging, manifest) {
       if (!after.isFile() || ['dev', 'ino', 'size', 'mtimeMs', 'ctimeMs'].some(name => before[name] !== after[name])) reject('COPY_SOURCE_CHANGED', entry.component, entry.source);
       await fs.chmod(destination, entry.mode);
     }
+  }
+  for (const [rel, entry] of directories.reverse()) {
+    const source = await physicalPath(entry.artifacts, entry.source, entry.component);
+    if (((await fs.stat(source)).mode & 0o777) !== entry.mode) reject('PAYLOAD_MODE', entry.component, entry.source);
+    await fs.chmod(path.join(staging, rel), entry.mode);
   }
   // Hash the installed bytes once against producer-time digests. A changing
   // source cannot be blessed by generating a new lock from the copied bytes.
@@ -157,6 +173,7 @@ export async function verifyManifestSdk(sdk, plan, manifest) {
     reject('INSTALL_BINDING', 'sdk', 'installed plan, successful manifest and lock must agree');
   }
   verifyResolvedIdentities(plan, manifest);
+  await verifyPayload(sdk, manifest);
   await verifyOfficialPayload(plan,manifest);
   await verifyInstalledQualification(sdk,plan,manifest);
   for (const [name, input] of Object.entries(plan.verification)) if (input?.path) await requiredInput(input, name);
@@ -277,13 +294,15 @@ function installLock(plan, manifest) {
   const files = Object.fromEntries(Object.entries(manifest.files).map(([rel, entry]) => [rel, {
     sha256: entry.sha256, size: entry.size, mode: entry.mode, type: entry.type,
     component: classify(rel, components[entry.component]),
+    ...(entry.type === 'directory' ? {members: Object.keys(manifest.files).filter(name => name.startsWith(rel + '/')).sort(),
+      source_mode: entry.sourceMode, mode_transform: entry.modeTransform} : {}),
     symlink: entry.type === 'symlink', ...(entry.type === 'symlink' ? {link_target: entry.target} : {}),
     producer: {build_id: entry.buildId, receipt_sha256: entry.receiptSha256, source: components[entry.component].source},
   }]));
   const runtimeFile = manifest.files[`runtime/lib/${PLATFORMS[plan.platform][2]}/libcangjie-runtime.so`];
   const runtime = components[runtimeFile?.component];
   const llvm = components[manifest.files['third_party/llvm/bin/opt']?.component];
-  return {version: 1, role: plan.role, plan_sha256: objectId(plan), manifest_sha256: objectId(manifest), files,
+  return {version: 2, role: plan.role, plan_sha256: objectId(plan), manifest_sha256: objectId(manifest), files,
     official_retain: Object.fromEntries(Object.entries(files).filter(([, row]) => row.component === 'official-retain')
       .map(([rel, row]) => [rel, row.producer.source.reason])),
     components: {runtime: {commit: runtime?.source.commit || null, so_sha256: runtimeFile?.sha256},
