@@ -25,7 +25,7 @@ const fixtureSources = {
     ['X86', 'ARM', 'AArch64'].flatMap(target => ['TargetInfo', 'Target', 'TargetMC', 'AsmPrinter', 'AsmParser'].map(part => `void LLVMInitialize${target}${part}(void){}\n`)).join('') +
     'void *LLVMContextCreate(void){return malloc(1);} void LLVMContextDispose(void *p){free(p);}\n',
 };
-async function sourceRepository(root, name) {
+export async function sourceRepository(root, name) {
   const repo = path.join(root, name); await fs.mkdir(repo);
   for (const [rel, content] of Object.entries(fixtureSources)) await write(path.join(repo, rel), content);
   await write(path.join(repo, 'identity.txt'), name);

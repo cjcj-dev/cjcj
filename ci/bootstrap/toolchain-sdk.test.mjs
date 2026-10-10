@@ -14,7 +14,7 @@ const product = process.env.SDK_MANIFEST_PRODUCT || path.join(here, 'toolchain-s
 const engine = process.env.SDK_SHAREDBUILD_ENGINE;
 const testRoot = process.env.SDK_MANIFEST_TEST_ROOT;
 const tuple = 'linux_x86_64_cjnative';
-import {fixture, command} from './fixtures/sdk-plan-fixture.mjs';
+import {fixture, command, sourceRepository} from './fixtures/sdk-plan-fixture.mjs';
 const clone = value => structuredClone(value);
 async function invoke(f, args = []) { await atomicJson(f.planFile, f.plan); return command([process.execPath, product, '--plan', f.planFile, '--out', f.out, ...args]); }
 function observed(result, label) { console.log(`TARGET_ASSERTION_EXECUTED ${label} rc=${result.rc}`); }
