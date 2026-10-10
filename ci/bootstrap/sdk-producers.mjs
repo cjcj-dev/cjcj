@@ -232,6 +232,21 @@ async function sharedbuild(component, directory, identity, plan, resumeFailed, o
     if (!nativeManifest.split('\n').includes(`${row.sha256}  artifacts/${rel}`)) reject('COMPLETION', component.id, `native artifact digest mismatch ${rel}`);
   }
   await fs.rename(path.join(cache, 'artifacts'), path.join(directory, 'artifacts'));
+  // The legacy tuple installer admits data-mode tools and installs them as
+  // executables. Preserve the native producer inventory before this adapter's
+  // final output seal; never amend the sharedbuild receipt or source payload.
+  if (component.roles.includes('llvm-tools')) {
+    for (const name of ['llc', 'opt', 'ld.lld']) {
+      const rel = `bin/${name}`, row = files[rel];
+      if (!row) continue; // Complete membership is checked by SDK verification.
+      const file = await physicalPath(path.join(directory, 'artifacts'), rel, component.id);
+      if (!row.type || row.type === 'file') {
+        const installedMode = row.mode | 0o111;
+        await fs.chmod(file, installedMode);
+        files[rel] = {...row, sourceMode: row.mode, modeTransform: 'executable', mode: installedMode};
+      }
+    }
+  }
   if (component.roles.includes('compiler')) {
     await execute(component.config.tools.python3.path, [component.config.tools.compilerIdentity.path, path.join(directory, 'artifacts'),
       '--install', path.join(directory, 'artifacts/cjcj-stage1')]);

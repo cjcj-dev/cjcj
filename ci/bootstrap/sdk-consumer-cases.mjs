@@ -11,16 +11,17 @@ const {values} = parseArgs({options: {
   'new-elf': {type: 'string', default: '/bin/echo'}, repeat: {type: 'string', default: '1'},
   filter: {type: 'string'}, 'fixtures-from': {type: 'string'},
   'real-coloured-sdk': {type: 'string'}, 'real-official-sdk': {type: 'string'},
+  'real-coloured-plan': {type: 'string'}, 'real-official-plan': {type: 'string'},
+  'real-official-std-plan': {type: 'string'}, 'real-coloured-std-plan': {type: 'string'},
 }});
 const repeats = Number(values.repeat);
 assert.ok(Number.isSafeInteger(repeats) && repeats > 0, '--repeat must be a positive integer');
 assert.ok(process.env.SDK_MANIFEST_TEST_ROOT && process.env.SDK_SHAREDBUILD_ENGINE,
   'SDK_MANIFEST_TEST_ROOT and SDK_SHAREDBUILD_ENGINE must name private fixed inputs');
-// Raw SDK directories cannot supply the frozen producer identities required by
-// the four real-SDK assembly arms. Keep this unfinished migration visible;
-// running only the colour predicate would weaken their original protection.
-assert.ok(!values['real-coloured-sdk'] && !values['real-official-sdk'],
-  'REAL_SDK_PLAN_MIGRATION_REQUIRED: real SDK assembly arms need their original complete frozen plans and producer receipts; NOT_RUN');
+const realOptions = ['real-coloured-sdk', 'real-official-sdk', 'real-coloured-plan', 'real-official-plan',
+  'real-official-std-plan', 'real-coloured-std-plan'];
+const realRequested = realOptions.some(key => values[key]);
+if (realRequested) for (const key of realOptions) assert.ok(values[key], `real SDK assembly input missing: --${key}; NOT_RUN`);
 if (values.output) {
   await fs.mkdir(path.resolve(values.output), {recursive: true});
   assert.equal((await fs.readdir(path.resolve(values.output))).length, 0, 'output must be empty');
@@ -399,6 +400,7 @@ async function runtimeSuite() {
   for (const [name, [variant, role, stdVariant, expected]] of Object.entries(pairs)) {
     await runtimeCase(name, [tuple], variant, role, stdVariant, expected, /STD-RUNTIME-COLOUR-MISMATCH/);
   }
+  if (realRequested) await realRuntimeSuite();
   // Exercise the same std predicate CLI used by the real stage producer, on
   // the actual producer archives. Symbol-boundary observations remain separate
   // from an SDK build marker and cover definitions, undefined/versioned names.
@@ -417,7 +419,51 @@ async function runtimeSuite() {
     });
   }
 }
-const suites = {exe: exeSuite, swap: swapSuite, identity: identitySuite, 'input-layout': inputLayoutSuite, pair: pairSuite, std: stdSuite, runtime: runtimeSuite};
+async function realRuntimeSuite() {
+  const {retainedSdkInput, assertSelectedSdkBytes} = await import('./fixtures/sdk-retained-input.mjs');
+  const coloured = path.resolve(values['real-coloured-sdk']), official = path.resolve(values['real-official-sdk']);
+  for (const [name, rtSdk, stdSdk, role, expected] of [
+    ['real-coloured', coloured, coloured, 'target', 0], ['real-official', official, official, 'host', 0],
+    ['real-official-std', coloured, official, 'target', 1], ['real-coloured-std', official, coloured, 'host', 1],
+  ]) await target(name, async () => {
+    const f = await retainedSdkInput(values[`${name}-plan`], role, name);
+    await assertSelectedSdkBytes(f, rtSdk, stdSdk);
+    const result = await assemble(f, name, product);
+    if (expected === 0) {
+      good(result); good(await verify(f, `${name}-both-verifiers`));
+      for (const [sdk, rel] of [[rtSdk, `runtime/lib/${tuple}/libcangjie-runtime.so`], [stdSdk, `lib/${tuple}/libcangjie-std-core.a`]]) {
+        assert.equal(await fileDigest(path.join(f.out, rel)), await fileDigest(path.join(sdk, rel)));
+      }
+    } else {
+      rejected(result, /STD-RUNTIME-COLOUR-MISMATCH/);
+      assert.match(result.stderr, /std_sha256=[a-f0-9]{64}/);
+      assert.match(result.stderr, /std_source=resolved-manifest/);
+      await assert.rejects(fs.access(f.out));
+    }
+    return f.root;
+  });
+}
+async function tupleSuite() {
+  for (const mode of [0o644, 0o755]) await target(mode === 0o644 ? 'test_tuple_tools_execute_after_install' : 'test_executable_tuple_control', async () => {
+    const f = await fixture({role: 'host', parameters: {'llvm-tools': {toolMode: mode}}});
+    const result = await assemble(f, `tuple-mode-${mode.toString(8)}`, process.env.BOOTSTRAP_SDK_PRODUCT || product);
+    const observations = [];
+    for (const name of ['llc', 'opt', 'ld.lld']) {
+      const source = path.join(f.identities.get('llvm-tools').directory, 'artifacts/bin', name);
+      const installed = path.join(f.out, 'third_party/llvm/bin', name);
+      const receipt = await readJson(path.join(f.identities.get('llvm-tools').directory, 'output.json'));
+      let same = false, executable = false;
+      try { same = await fileDigest(installed) === receipt.files[`bin/${name}`].sha256; executable = !!((await fs.stat(installed)).mode & 0o111); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+      observations.push({tool: name, same_bytes: same, executable, source_mode: receipt.files[`bin/${name}`].sourceMode});
+      assert.equal(receipt.files[`bin/${name}`].sourceMode, mode);
+      assert.equal(await fileDigest(source), receipt.files[`bin/${name}`].sha256);
+    }
+    console.log('ASSERT tuple-installed-executable executed ' + JSON.stringify(observations));
+    assert.ok(observations.every(row => row.same_bytes && row.executable), result.stdout + result.stderr);
+    good(result); good(await verify(f, 'tuple-mode-verifiers')); return f.root;
+  });
+}
+const suites = {exe: exeSuite, swap: swapSuite, identity: identitySuite, 'input-layout': inputLayoutSuite, pair: pairSuite, std: stdSuite, runtime: runtimeSuite, tuple: tupleSuite};
 try {
   assert.ok(suites[values.suite], `unknown suite: ${values.suite}`);
   for (let i = 0; i < repeats; ++i) await suites[values.suite]();
