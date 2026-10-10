@@ -312,6 +312,12 @@ test('verifier tool selection retains fail-closed and artifact controls', async 
   assert.equal(JSON.parse(fs.readFileSync(result.marker, 'utf8')).artifactCount, 2);
   assert.equal(fs.readFileSync(inventory, 'utf8').trim().split('\n').length, 3);
   assert.throws(() => assertNoVerifierReportArtifacts([artifacts], {llvmDis: reportTool}), /workspace is not a formal artifact source/);
+  fs.rmSync(result.marker);
+  const markerCli = spawnSync(process.execPath, [path.join(repoRoot, 'scripts', 'verifier_artifact_gate.mjs'),
+    '--root', root, '--mark-running', '--report', reportPath(root), '--inventory', inventory], {encoding: 'utf8'});
+  assert.equal(markerCli.status, 0, markerCli.stderr);
+  assert.match(markerCli.stdout, /VERIFIER_DIAGNOSTIC_MARKER=/);
+  assert.equal(JSON.parse(fs.readFileSync(result.marker, 'utf8')).status, 'running');
 });
 
 test('verifier tool selection qualifies real bitcode through environment and CLI', async t => {
