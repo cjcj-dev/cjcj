@@ -40,8 +40,9 @@ export async function assertSelectedSdkBytes(f, runtimeSdk, stdSdk, colouredSdk,
     .concat(f.files['std-producer.json'] ? ['std-producer.json'] : [])]] ) {
     assert.ok(selected.length, `complete ${role} input members required`);
     const sourceManifest = await readJson(path.join(sdk, 'SDK.manifest.json'));
-    const sourcePlan = await readJson(path.join(sdk, 'SDK.plan.json'));
+    const sourcePlan = validatePlan(await readJson(path.join(sdk, 'SDK.plan.json')));
     const sourceLock = await readJson(path.join(sdk, 'SDK.lock.json'));
+    assert.equal(sourceManifest.status, 'complete'); assert.equal(sourceManifest.rc, 0);
     assert.equal(await fileDigest(path.join(sdk, 'SDK.manifest.json')), sourceLock.manifest_sha256);
     assert.equal(await fileDigest(path.join(sdk, 'SDK.plan.json')), sourceLock.plan_sha256);
     const owner = Object.values(f.files).find(row => f.plan.components.find(c => c.id === row.component)?.roles.includes(role));
@@ -64,6 +65,7 @@ export async function assertSelectedSdkBytes(f, runtimeSdk, stdSdk, colouredSdk,
       assert.equal(row.sha256, actual, `${rel}: supplied plan must select the requested real SDK entity`);
       const selectedComponent = f.plan.components.find(c => c.id === row.component);
       const originalComponent = sourcePlan.components.find(c => c.id === original.component);
+      assert.ok(selectedComponent && originalComponent, `${rel}: original complete component identity required; NOT_RUN`);
       assert.deepEqual(selectedComponent.source, originalComponent.source, `${rel}: real producer source identity`);
       assert.equal(row.buildId, original.buildId, `${rel}: original producer build identity`);
       assert.equal(row.receiptSha256, original.receiptSha256, `${rel}: original producer receipt identity`);
