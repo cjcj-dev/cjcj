@@ -57,10 +57,17 @@ async function official(component, directory, identity) {
     if (entry.type === 'symlink') continue;
     const file = await physicalPath(source.root, rel, component.id);
     if (!(await fs.lstat(file)).isFile()) reject('DISTRIBUTION_FILE', component.id, rel);
+    const sourceStat = await fs.stat(file);
+    if (('size' in entry && sourceStat.size !== entry.size)
+      || ('mode' in entry && (sourceStat.mode & 0o777) !== entry.mode)) reject('DISTRIBUTION_FILE', component.id, `size/mode ${rel}`);
+    if (await fileDigest(file) !== entry.sha256) reject('DISTRIBUTION_DIGEST', component.id, rel);
     const destination = path.join(artifacts, rel); await fs.mkdir(path.dirname(destination), {recursive: true});
     await fs.copyFile(file, destination); await fs.chmod(destination, (await fs.stat(file)).mode & 0o777);
     if (await fileDigest(destination) !== entry.sha256) reject('DISTRIBUTION_DIGEST', component.id, rel);
     const stat = await fs.stat(destination);
+    const after = await fs.stat(file);
+    if (after.size !== sourceStat.size || (after.mode & 0o777) !== (sourceStat.mode & 0o777)
+      || await fileDigest(file) !== entry.sha256) reject('DISTRIBUTION_DIGEST', component.id, `source changed ${rel}`);
     files[rel] = {type: 'file', sha256: entry.sha256, size: stat.size, mode: stat.mode & 0o777};
   }
   for (const [rel, entry] of Object.entries(lock.files)) {
