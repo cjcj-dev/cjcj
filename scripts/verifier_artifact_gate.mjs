@@ -51,8 +51,10 @@ function metadataIsReport(ir) {
   });
 }
 
-function findLlvmDis(roots, explicit = process.env.CJCJ_VERIFIER_LLVM_DIS || '') {
-  const candidates = [explicit];
+function findLlvmDis(roots, explicit) {
+  // Wrappers and the CLI can pass an empty option. It means no explicit tool,
+  // so consume the environment declaration before the existing root discovery.
+  const candidates = [explicit || process.env.CJCJ_VERIFIER_LLVM_DIS || ''];
   for (const root of roots) {
     candidates.push(
       path.join(root, 'third_party', 'llvm', 'bin', 'llvm-dis'),
@@ -75,7 +77,7 @@ export function diagnosticMarkerInAncestors(start) {
   }
 }
 
-export function scanVerifierReportArtifacts(roots, {llvmDis = ''} = {}) {
+export function scanVerifierReportArtifacts(roots, {llvmDis} = {}) {
   const normalizedRoots = roots.map(root => path.resolve(root));
   const candidates = [...new Set(normalizedRoots.flatMap(root => walkArtifacts(root)))].sort();
   if (!candidates.length) return {candidates: [], matches: [], llvmDis: ''};
@@ -99,7 +101,7 @@ export function scanVerifierReportArtifacts(roots, {llvmDis = ''} = {}) {
   return {candidates, matches, llvmDis: disassembler};
 }
 
-export function writeDiagnosticInventory({workspace, report, inventory, artifactRoots = [workspace], llvmDis = ''}) {
+export function writeDiagnosticInventory({workspace, report, inventory, artifactRoots = [workspace], llvmDis}) {
   const scan = scanVerifierReportArtifacts(artifactRoots, {llvmDis});
   const rows = ['sha256\tpath', ...scan.matches.map(match => `${match.sha256}\t${match.path}`)];
   fs.writeFileSync(inventory, `${rows.join('\n')}\n`);
@@ -126,7 +128,7 @@ export function markDiagnosticWorkspace({workspace, report, inventory}) {
   return marker;
 }
 
-export function assertNoVerifierReportArtifacts(roots, {llvmDis = '', checkAncestors = true} = {}) {
+export function assertNoVerifierReportArtifacts(roots, {llvmDis, checkAncestors = true} = {}) {
   const normalizedRoots = roots.map(root => path.resolve(root));
   if (checkAncestors) {
     for (const root of normalizedRoots) {
