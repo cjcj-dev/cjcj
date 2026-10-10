@@ -69,3 +69,23 @@ test('real sharedbuild recipe consumes the complete sealed entity layout', async
     const restored = await call(`recipe-${kind}-restored`); assert.equal(restored.rc, 0, restored.stderr);
   }
 });
+
+test('independent sharedbuild directory mode target reaches the sealed layout consumer', async () => {
+  const f = await fixture(); const assembled = await observe(f, 'independent-directory-control-assembly', await assemble(f));
+  assert.equal(assembled.rc, 0, assembled.stderr);
+  const recipe = path.join(f.identities.get('runtime').directory, 'sharedbuild-request.json');
+  const sdk = (await readJson(recipe)).sdk, directory = path.join(sdk, 'tools');
+  const mode = (await fs.stat(directory)).mode & 0o777, lock = path.join(sdk, 'SDK.lock.json'), originalLock = await fileDigest(lock);
+  const invoke = label => command(['python3', process.env.SDK_SHAREDBUILD_ENGINE, '--remote', '--root',
+    path.join(f.plan.buildRoot, 'shared-cache'), '--lane', f.plan.lane, 'build', '--recipe', recipe,
+    '--work', path.join(f.plan.buildRoot, 'shared-work')]).then(result => observe(f, label, result));
+  const control = await invoke('independent-directory-control'); assert.equal(control.rc, 0, control.stderr);
+  await fs.chmod(directory, mode ^ 0o100);
+  try {
+    const target = await invoke('independent-directory-target');
+    assert.equal(target.rc, 1, 'the actual recipe consumer must refuse changed directory permissions');
+    assert.match(target.stderr, /SDK_LOCK_REJECT materialized membership\/type\/content\/mode/);
+  } finally { await fs.chmod(directory, mode); }
+  assert.equal(await fileDigest(lock), originalLock);
+  const restored = await invoke('independent-directory-restored'); assert.equal(restored.rc, 0, restored.stderr);
+});
