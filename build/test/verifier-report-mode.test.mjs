@@ -202,6 +202,21 @@ function observeScan(action) {
   }
 }
 
+// A failed target must not hide another real product call in the same matrix.
+// Await each subtest because the fixtures and process environment are shared.
+async function selectionObservation(t, name, action) {
+  await t.test(name, async observation => {
+    observation.diagnostic(`OBSERVATION_BEGIN ${name}`);
+    try {
+      await action(observation);
+      observation.diagnostic(`OBSERVATION_STATUS ${name} PASS`);
+    } catch (error) {
+      observation.diagnostic(`OBSERVATION_STATUS ${name} FAIL ${error.message}`);
+      throw error;
+    }
+  });
+}
+
 test('verifier tool selection consumes environment through every public wrapper and CLI', async t => {
   const root = fixture(t);
   const artifacts = selectionInput(root);
@@ -218,31 +233,38 @@ test('verifier tool selection consumes environment through every public wrapper 
         ['assert', () => assertNoVerifierReportArtifacts([artifacts], options)],
         ['inventory', () => writeDiagnosticInventory({workspace: root, report, inventory, artifactRoots: [artifacts], ...options})],
       ]) {
-        const observed = observeScan(action);
-        fs.rmSync(path.join(root, VERIFIER_DIAGNOSTIC_MARKER), {force: true});
-        t.diagnostic(`ENV_SELECTION_ASSERT ${entry}/${label} ${JSON.stringify(observed)}`);
-        assert.deepEqual(observed, {llvmDis: envTool, matches: 0}, `environment tool selection: ${entry}/${label}`);
+        await selectionObservation(t, `${entry}/${label}`, observation => {
+          const observed = observeScan(action);
+          fs.rmSync(path.join(root, VERIFIER_DIAGNOSTIC_MARKER), {force: true});
+          observation.diagnostic(`ENV_SELECTION_ASSERT ${entry}/${label} ${JSON.stringify(observed)}`);
+          assert.deepEqual(observed, {llvmDis: envTool, matches: 0}, `environment tool selection: ${entry}/${label}`);
+        });
       }
     }
     for (const args of [[], ['--llvm-dis', '']]) {
       for (const mode of ['gate', 'inventory']) {
-        const result = spawnSync(process.execPath, [path.join(repoRoot, 'scripts', 'verifier_artifact_gate.mjs'),
-          '--root', artifacts, ...args,
-          ...(mode === 'inventory' ? ['--write-inventory', '--report', report, '--inventory', inventory] : []),
-        ], {encoding: 'utf8'});
-        t.diagnostic(`ENV_SELECTION_ASSERT CLI/${mode} status=${result.status} ${result.stderr.trim()}`);
-        assert.equal(result.status, 0, `environment tool selection: CLI/${mode}: ${result.stderr}`);
-        assert.match(result.stdout, mode === 'inventory' ? /matches=0/ : /pass candidates=1 matches=0/);
-        if (mode === 'inventory') fs.rmSync(path.join(artifacts, VERIFIER_DIAGNOSTIC_MARKER));
+        await selectionObservation(t, `CLI/${mode}/${args.length ? 'empty' : 'omitted'}`, observation => {
+          const result = spawnSync(process.execPath, [path.join(repoRoot, 'scripts', 'verifier_artifact_gate.mjs'),
+            '--root', artifacts, ...args,
+            ...(mode === 'inventory' ? ['--write-inventory', '--report', report, '--inventory', inventory] : []),
+          ], {encoding: 'utf8'});
+          if (mode === 'inventory') fs.rmSync(path.join(artifacts, VERIFIER_DIAGNOSTIC_MARKER), {force: true});
+          observation.diagnostic(`ENV_SELECTION_ASSERT CLI/${mode} status=${result.status} signal=${result.signal} error=${result.error?.code || 'none'} ${result.stdout.trim()} ${result.stderr.trim()}`);
+          assert.equal(result.status, 0, `environment tool selection: CLI/${mode}: ${result.stderr}`);
+          assert.match(result.stdout, mode === 'inventory' ? /matches=0/ : /pass candidates=1 matches=0/);
+        });
       }
     }
   });
-  const calls = fs.readFileSync(path.join(root, 'tool-calls.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
-  t.diagnostic(`SELECTED_TOOL_PROCESS_CALLS ${JSON.stringify(calls)}`);
-  assert.equal(calls.length, 16, 'each wrapper/CLI must actually execute the selected tool');
-  assert.ok(calls.every(call => call.tool === 'environment.mjs'
-    && JSON.stringify(call.args) === JSON.stringify([path.join(artifacts, 'input.bc'), '-o', '-'])));
-  assert.equal(fs.readFileSync(inventory, 'utf8'), 'sha256\tpath\n');
+  await selectionObservation(t, 'wrapper process arguments and inventory', observation => {
+    const callsFile = path.join(root, 'tool-calls.jsonl');
+    const calls = fs.existsSync(callsFile) ? fs.readFileSync(callsFile, 'utf8').trim().split('\n').map(JSON.parse) : [];
+    observation.diagnostic(`SELECTED_TOOL_PROCESS_CALLS ${JSON.stringify(calls)}`);
+    assert.equal(calls.length, 16, 'each wrapper/CLI must actually execute the selected tool');
+    assert.ok(calls.every(call => call.tool === 'environment.mjs'
+      && JSON.stringify(call.args) === JSON.stringify([path.join(artifacts, 'input.bc'), '-o', '-'])));
+    assert.equal(fs.readFileSync(inventory, 'utf8'), 'sha256\tpath\n');
+  });
 });
 
 test('verifier tool selection preserves explicit override and ordered root discovery', async t => {
@@ -270,19 +292,28 @@ test('verifier tool selection preserves explicit override and ordered root disco
     // An invalid explicit path retains root discovery, without consulting the
     // environment after an explicit nonempty declaration.
     assert.equal(scanVerifierReportArtifacts([root], {llvmDis: path.join(root, 'absent')}).llvmDis, discovered[0]);
-    assert.throws(() => scanVerifierReportArtifacts([root]), /rc=19.*selection fixture failure/);
+    await selectionObservation(t, 'environment priority over root discovery', observation => {
+      observation.diagnostic(`ENV_PRIORITY_ASSERT ${JSON.stringify(observeScan(() => scanVerifierReportArtifacts([root])))}`);
+      assert.throws(() => scanVerifierReportArtifacts([root]), /rc=19.*selection fixture failure/);
+    });
   });
   fs.rmSync(path.join(root, VERIFIER_DIAGNOSTIC_MARKER), {force: true});
   await withEnvironment({CJCJ_VERIFIER_LLVM_DIS: undefined}, async () => {
     for (const tool of discovered) {
-      const observed = assertNoVerifierReportArtifacts([root]);
-      assert.equal(observed.llvmDis, tool);
-      assert.equal(observed.matches.length, 0);
+      await selectionObservation(t, `root discovery/${path.relative(root, tool)}`, observation => {
+        const observed = assertNoVerifierReportArtifacts([root]);
+        observation.diagnostic(`ROOT_DISCOVERY_ASSERT ${JSON.stringify({llvmDis: observed.llvmDis, matches: observed.matches.length})}`);
+        assert.equal(observed.llvmDis, tool);
+        assert.equal(observed.matches.length, 0);
+      });
       fs.rmSync(tool);
     }
   });
   await withEnvironment({CJCJ_VERIFIER_LLVM_DIS: path.join(root, 'missing-env')}, async () => {
-    assert.throws(() => scanVerifierReportArtifacts([artifacts]), /llvm-dis not found/);
+    await selectionObservation(t, 'missing environment tool', observation => {
+      observation.diagnostic(`MISSING_ENV_ASSERT ${JSON.stringify(observeScan(() => scanVerifierReportArtifacts([artifacts])))}`);
+      assert.throws(() => scanVerifierReportArtifacts([artifacts]), /llvm-dis not found/);
+    });
   });
 });
 
@@ -358,25 +389,37 @@ test('verifier tool selection qualifies real bitcode through environment and CLI
     const report = path.join(fixtures, 'report.bc');
     // Match the existing single-file artifact test: ancestor markers apply to
     // workspace roots; this test qualifies bitcode inspection on individual files.
-    const observed = observeScan(() => assertNoVerifierReportArtifacts([clean], {checkAncestors: false}));
-    t.diagnostic(`REAL_ENV_SELECTION_ASSERT ${JSON.stringify(observed)}`);
-    assert.deepEqual(observed, {llvmDis, matches: 0}, 'real environment tool selection');
-    assert.throws(() => assertNoVerifierReportArtifacts([report], {checkAncestors: false}), /rejected 1 file.*cj\.verifier\.mode=report/);
+    await selectionObservation(t, 'real clean file environment selection', observation => {
+      const observed = observeScan(() => assertNoVerifierReportArtifacts([clean], {checkAncestors: false}));
+      observation.diagnostic(`REAL_ENV_SELECTION_ASSERT ${JSON.stringify(observed)}`);
+      assert.deepEqual(observed, {llvmDis, matches: 0}, 'real environment tool selection');
+    });
+    await selectionObservation(t, 'real report file rejection', observation => {
+      observation.diagnostic(`REAL_REPORT_ASSERT ${JSON.stringify(observeScan(() => assertNoVerifierReportArtifacts([report], {checkAncestors: false})))}`);
+      assert.throws(() => assertNoVerifierReportArtifacts([report], {checkAncestors: false}), /rejected 1 file.*cj\.verifier\.mode=report/);
+    });
     const inventory = path.join(root, 'inventory.tsv');
-    const listed = writeDiagnosticInventory({workspace: root, report: reportPath(root), inventory, artifactRoots: [fixtures]});
-    assert.deepEqual(listed.matches.map(match => match.path), [report]);
-    fs.rmSync(listed.marker);
+    await selectionObservation(t, 'real directory inventory', observation => {
+      const listed = writeDiagnosticInventory({workspace: root, report: reportPath(root), inventory, artifactRoots: [fixtures]});
+      fs.rmSync(listed.marker);
+      observation.diagnostic(`REAL_INVENTORY_ASSERT ${JSON.stringify({llvmDis: listed.llvmDis, matches: listed.matches})}`);
+      assert.deepEqual(listed.matches.map(match => match.path), [report]);
+    });
     const gate = path.join(repoRoot, 'scripts', 'verifier_artifact_gate.mjs');
     for (const [input, status, output] of [[clean, 0, /pass candidates=1 matches=0/], [report, 1, /rejected 1 file.*cj\.verifier\.mode=report/]]) {
-      const cli = spawnSync(process.execPath, [gate, '--root', input, '--no-ancestor-markers'], {encoding: 'utf8'});
-      t.diagnostic(`REAL_BITCODE_CLI input=${input} status=${cli.status} signal=${cli.signal} error=${cli.error?.code || 'none'} ${cli.stdout.trim()} ${cli.stderr.trim()}`);
-      assert.equal(cli.status, status, cli.stdout + cli.stderr);
-      assert.match(cli.stdout + cli.stderr, output);
+      await selectionObservation(t, `real CLI/${path.basename(input)}`, observation => {
+        const cli = spawnSync(process.execPath, [gate, '--root', input, '--no-ancestor-markers'], {encoding: 'utf8'});
+        observation.diagnostic(`REAL_BITCODE_CLI input=${input} status=${cli.status} signal=${cli.signal} error=${cli.error?.code || 'none'} ${cli.stdout.trim()} ${cli.stderr.trim()}`);
+        assert.equal(cli.status, status, cli.stdout + cli.stderr);
+        assert.match(cli.stdout + cli.stderr, output);
+      });
     }
     const incompatible = path.join(root, 'incompatible.bc');
     fs.writeFileSync(incompatible, Buffer.from([0x42, 0x43, 0xc0, 0xde, 1]));
-    t.diagnostic(`REAL_INCOMPATIBLE_RESULT ${JSON.stringify(observeScan(() => assertNoVerifierReportArtifacts([incompatible], {checkAncestors: false})))}`);
-    assert.throws(() => assertNoVerifierReportArtifacts([incompatible], {checkAncestors: false}), /llvm-dis could not inspect/);
+    await selectionObservation(t, 'real incompatible file rejection', observation => {
+      observation.diagnostic(`REAL_INCOMPATIBLE_RESULT ${JSON.stringify(observeScan(() => assertNoVerifierReportArtifacts([incompatible], {checkAncestors: false})))}`);
+      assert.throws(() => assertNoVerifierReportArtifacts([incompatible], {checkAncestors: false}), /llvm-dis could not inspect/);
+    });
   });
 });
 
@@ -389,26 +432,33 @@ test('verifier tool selection reaches package, SDK usability and performance con
   const llvmDis = selectionTool(root, 'report.mjs', {ir: '!cj.verifier.mode = !{!7}\n!7 = !{!"report"}\n'});
   await withEnvironment({CJCJ_VERIFIER_LLVM_DIS: llvmDis}, async () => {
     const config = buildConfig({workspace, buildRoot: path.join(root, 'build')});
-    let message = '';
-    try { await packageStage.run(config); } catch (error) { message = error.message; }
-    t.diagnostic(`PACKAGE_ENV_SELECTION_ASSERT ${message}`);
-    assert.match(message, /rejected 1 file.*cj\.verifier\.mode=report/, 'package environment selection reaches metadata rejection');
-    assert.deepEqual(fs.readdirSync(config.softwareDir), [], 'reject before archive staging');
-    const usability = runSdkUsability(parseArguments(['--sdk', output]));
-    assert.equal(usability.results[0].id, 'U0_VERIFIER_ARTIFACTS');
-    assert.equal(usability.results[0].state, STATES.FAIL);
-    assert.match(usability.results[0].detail, /rejected 1 file.*cj\.verifier\.mode=report/);
-    assert.ok(usability.results.slice(1).every(entry => entry.state === STATES.UNKNOWN));
+    await selectionObservation(t, 'consumer/package', async observation => {
+      let message = '';
+      try { await packageStage.run(config); } catch (error) { message = error.message; }
+      observation.diagnostic(`PACKAGE_ENV_SELECTION_ASSERT ${message}`);
+      assert.match(message, /rejected 1 file.*cj\.verifier\.mode=report/, 'package environment selection reaches metadata rejection');
+      assert.deepEqual(fs.readdirSync(config.softwareDir), [], 'reject before archive staging');
+    });
+    await selectionObservation(t, 'consumer/usability', observation => {
+      const usability = runSdkUsability(parseArguments(['--sdk', output]));
+      observation.diagnostic(`USABILITY_ENV_SELECTION_ASSERT ${JSON.stringify(usability.results)}`);
+      assert.equal(usability.results[0].id, 'U0_VERIFIER_ARTIFACTS');
+      assert.equal(usability.results[0].state, STATES.FAIL);
+      assert.match(usability.results[0].detail, /rejected 1 file.*cj\.verifier\.mode=report/);
+      assert.ok(usability.results.slice(1).every(entry => entry.state === STATES.UNKNOWN));
+    });
     const compiler = path.join(output, 'bin', 'cjc');
     fs.mkdirSync(path.dirname(compiler));
     fs.writeFileSync(compiler, `#!${process.execPath}\nprocess.exitCode = 0;\n`);
     fs.chmodSync(compiler, 0o755);
     const work = path.join(root, 'performance-work');
-    const performance = spawnSync('bash', [path.join(repoRoot, 'scripts', 'perfincr_cycle_smoke.sh'), compiler, work, '1'], {encoding: 'utf8'});
-    t.diagnostic(`PERFORMANCE_ENV_SELECTION_ASSERT status=${performance.status} signal=${performance.signal} error=${performance.error?.code || 'none'} ${performance.stderr.trim()}`);
-    assert.equal(performance.status, 1, performance.stdout + performance.stderr);
-    assert.match(performance.stderr, /rejected 1 file.*cj\.verifier\.mode=report/);
-    assert.equal(fs.existsSync(work), false);
+    await selectionObservation(t, 'consumer/performance', observation => {
+      const performance = spawnSync('bash', [path.join(repoRoot, 'scripts', 'perfincr_cycle_smoke.sh'), compiler, work, '1'], {encoding: 'utf8'});
+      observation.diagnostic(`PERFORMANCE_ENV_SELECTION_ASSERT status=${performance.status} signal=${performance.signal} error=${performance.error?.code || 'none'} ${performance.stderr.trim()}`);
+      assert.equal(performance.status, 1, performance.stdout + performance.stderr);
+      assert.match(performance.stderr, /rejected 1 file.*cj\.verifier\.mode=report/);
+      assert.equal(fs.existsSync(work), false);
+    });
 
     const python = path.join(root, 'python');
     const isolated = path.join(root, 'isolated-llvm');
@@ -427,14 +477,20 @@ test('verifier tool selection reaches package, SDK usability and performance con
       outdir, 'python-bundle': python, 'isolated-llvm-bin': isolated, ...inputs,
       'cjpm-source-repo': 'https://example.invalid/cjpm.git', 'cjpm-source-sha': 'a'.repeat(40),
     }).flatMap(([name, value]) => [`--${name}`, value]);
-    const release = spawnSync('zx', [path.join(repoRoot, 'scripts', 'package_sdk.mjs'), ...args], {encoding: 'utf8', timeout: 30_000});
-    t.diagnostic(`RELEASE_ENV_SELECTION_ASSERT status=${release.status} signal=${release.signal} error=${release.error?.code || 'none'} ${release.stderr?.trim()}`);
-    assert.equal(release.status, 1, release.stdout + release.stderr);
-    assert.match(release.stderr, /rejected 1 file.*cj\.verifier\.mode=report/);
-    assert.equal(fs.existsSync(outdir), false);
+    await selectionObservation(t, 'consumer/release', observation => {
+      const release = spawnSync('zx', [path.join(repoRoot, 'scripts', 'package_sdk.mjs'), ...args], {encoding: 'utf8', timeout: 30_000});
+      observation.diagnostic(`RELEASE_ENV_SELECTION_ASSERT status=${release.status} signal=${release.signal} error=${release.error?.code || 'none'} ${release.stderr?.trim()}`);
+      assert.equal(release.status, 1, release.stdout + release.stderr);
+      assert.match(release.stderr, /rejected 1 file.*cj\.verifier\.mode=report/);
+      assert.equal(fs.existsSync(outdir), false);
+    });
   });
-  const calls = fs.readFileSync(path.join(root, 'tool-calls.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
-  assert.equal(calls.length, 4, 'all four real consumers execute the environment tool');
+  await selectionObservation(t, 'consumer process calls', observation => {
+    const callsFile = path.join(root, 'tool-calls.jsonl');
+    const calls = fs.existsSync(callsFile) ? fs.readFileSync(callsFile, 'utf8').trim().split('\n').map(JSON.parse) : [];
+    observation.diagnostic(`CONSUMER_TOOL_PROCESS_CALLS ${JSON.stringify(calls)}`);
+    assert.equal(calls.length, 4, 'all four real consumers execute the environment tool');
+  });
 });
 
 test('source-build package entry rejects a diagnostic workspace before archiving', async t => {
