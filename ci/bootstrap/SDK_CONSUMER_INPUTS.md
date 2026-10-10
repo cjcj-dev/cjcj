@@ -92,6 +92,10 @@ types, modes and directory member sets are admitted explicitly as well.
 public cases remain. The dry fixture uses real small native producer outputs and
 a complete eight-phase bundle. The phase entry's dry results are compared against
 the selected complete plan's producer build IDs, directories and dependencies.
+The same five reached phases also use the normal bootstrap phase CLI: its
+successful installed manifest is compared with the original authenticated
+producer receipts, and initial/second std installed module bytes must differ.
+Computed dry identities alone are insufficient for this assertion.
 The logged bootstrap call order distinguishes stage1-initial from stage1-std,
 with separate std generation recipe identities. The release and forensic actual
 command arguments, source isolation, O1 transform, declared source changes,

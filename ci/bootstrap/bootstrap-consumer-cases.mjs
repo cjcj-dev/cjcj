@@ -146,10 +146,15 @@ async function dryContract(log, f, env = process.env) {
   assert.deepEqual(sequence, ['stage0', 'phase:stage0', 'phase:stage0-run', 'stage1', 'phase:stage0-run', 'phase:std-bootstrap',
     'runtime-link-cleared', 'initial-std-built', 'bootstrap-sdk-removed', 'runtime-link-cleared', 'phase:stage1-initial',
     'executable', 'stdlib-built', 'phase:stage1-std', 'executable']);
-  for (const phase of ['stage0', 'stage0-run', 'std-bootstrap', 'stage1-initial', 'stage1-std']) await phaseIdentities(f, phase, process.env.SDK_PHASE_PRODUCT_ROOT || path.join(f.src, 'ci/bootstrap'));
+  const phaseResults = {};
+  for (const phase of ['stage0', 'stage0-run', 'std-bootstrap', 'stage1-initial', 'stage1-std']) {
+    phaseResults[phase] = await phaseIdentities(f, phase, process.env.SDK_PHASE_PRODUCT_ROOT || path.join(f.src, 'ci/bootstrap'));
+  }
   const oldStd = buildIdentities(f.bundle.phases['stage1-initial']).get('std');
   const newStd = buildIdentities(f.bundle.phases['stage1-std']).get('std');
   assert.notEqual(oldStd.buildId, newStd.buildId, 'the second std phase cannot reuse the stale std generation');
+  assert.notEqual(phaseResults['stage1-initial'].stdModuleSha256, phaseResults['stage1-std'].stdModuleSha256,
+    'the real second std producer result must differ from the initial installed std');
 }
 async function forensicContract(log, f) {
   const jobs = await configuredJobs();

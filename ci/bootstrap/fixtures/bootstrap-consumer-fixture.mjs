@@ -6,7 +6,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {fixture, assemble, good, observe, tuple, readJson, fileDigest, atomicJson} from './sdk-consumer-fixture.mjs';
-import {buildIdentities, validatePlan, resolveFiles, readOutput} from '../sdk-manifest.mjs';
+import {buildIdentities, validatePlan, resolveFiles, readOutput, objectId} from '../sdk-manifest.mjs';
 import {BOOTSTRAP_PHASES, validateBootstrapPlans} from '../freeze-bootstrap-plans.mjs';
 const here = path.dirname(fileURLToPath(new URL('../bootstrap.sh', import.meta.url)));
 const repo = path.resolve(here, '../..');
@@ -96,16 +96,39 @@ export function bootstrapArgs(f, phase = 'all') {
     '--host-rt', f.hostRuntime, '--sdk-plans', f.plans, '--runtime-pin', f.target.plan.verification.runtimePin.path,
     '--stage', phase, '--dry-run'];
 }
+let phaseSequence = 0;
 export async function phaseIdentities(f, phase, productRoot = path.join(f.src, 'ci/bootstrap')) {
-  const result = await observe(f.host, `phase-${phase}-identities`, [process.execPath, path.join(productRoot, 'bootstrap-sdk.mjs'),
-    '--plans', f.plans, '--phase', phase, '--out', path.join(f.root, `phase-${phase}`), '--dry-run']);
+  const label = `phase-${phase}-${++phaseSequence}`, dryOut = path.join(f.root, `${label}-dry`);
+  const result = await observe(f.host, `${label}-identities`, [process.execPath, path.join(productRoot, 'bootstrap-sdk.mjs'),
+    '--plans', f.plans, '--phase', phase, '--out', dryOut, '--dry-run']);
   good(result);
   const rows = JSON.parse(result.stdout.trim().split('\n').at(-1)).components;
   const expected = buildIdentities(f.bundle.phases[phase]);
   console.log(`ASSERT bootstrap-phase-identities executed phase=${phase} rows=${JSON.stringify(rows)}`);
   assert.deepEqual(Object.fromEntries(rows.map(row => [row.component, {buildId: row.buildId, directory: row.directory, dependencies: row.dependencies}])),
     Object.fromEntries([...expected].map(([id, row]) => [id, {buildId: row.buildId, directory: row.directory, dependencies: row.dependencies}])));
-  await assert.rejects(fs.access(path.join(f.root, `phase-${phase}`)));
+  await assert.rejects(fs.access(dryOut));
+  // Observe the same phase through its normal product entry too. A computed
+  // dry ID alone cannot prove that its producer result enters installation.
+  const out = path.join(f.root, `${label}-sdk`);
+  good(await observe(f.host, `${label}-assemble`, [process.execPath, path.join(productRoot, 'bootstrap-sdk.mjs'),
+    '--plans', f.plans, '--phase', phase, '--out', out]));
+  const manifest = await readJson(path.join(out, 'SDK.manifest.json'));
+  assert.equal(manifest.planSha256, objectId(f.bundle.phases[phase]));
+  const outputs = new Map();
+  for (const component of f.bundle.phases[phase].components) {
+    const identity = expected.get(component.id);
+    const receipt = await readOutput(component.producer.receipt || identity.directory, component, identity);
+    outputs.set(component.id, receipt);
+    assert.equal(manifest.components[component.id].buildId, receipt.buildId);
+    assert.equal(manifest.components[component.id].receiptSha256, receipt.receiptSha256);
+  }
+  const files = resolveFiles(f.bundle.phases[phase], outputs);
+  assert.deepEqual(manifest.files, {...files});
+  const module = `modules/${tuple}/std/core/core.Int64.ti`, installed = await fileDigest(path.join(out, module));
+  assert.equal(installed, files[module].sha256, 'selected phase std producer bytes must enter installation');
+  console.log(`ASSERT bootstrap-phase-result executed phase=${phase} std_build_id=${outputs.get('std').buildId} std_module_sha256=${installed}`);
+  return {stdModuleSha256: installed, stdBuildId: outputs.get('std').buildId};
 }
 export async function installedMembers(f, roles) {
   const manifest = await readJson(path.join(f.out, 'SDK.manifest.json'));
