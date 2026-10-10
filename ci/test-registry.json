@@ -17,7 +17,17 @@
   {
     "file": "ci/bootstrap/sdk-legacy-layout.integration.mjs",
     "executor": "manual",
-    "reason": "Run node --test ci/bootstrap/sdk-legacy-layout.integration.mjs with SDK_LEGACY_LAYOUT_KIND=file or directory, SDK_SHAREDBUILD_ENGINE naming a clean fixed compatible tools checkout, and SDK_MANIFEST_TEST_ROOT naming an existing exclusively owned private Linux x86_64 directory. Reuses the real small native plan producer fixture; requires cc/ar/clang/clang++/cmake/git/node/python3/tar/nm and the actual frozen sdk_build.sh entry. Run both layout kinds independently. The legal-alias invariant is currently failing and must remain asserted; this manual registration supplies no CI pass and does not exclude or replace any legacy SDK test. Publisher inputs, sealed receipts, plans, SDKs and failures are retained under the private root. No shared installations or old failed production directories."
+    "reason": "Run node --test ci/bootstrap/sdk-legacy-layout.integration.mjs with SDK_LEGACY_LAYOUT_KIND=file or directory, SDK_SHAREDBUILD_ENGINE naming a clean fixed compatible tools checkout, and SDK_MANIFEST_TEST_ROOT naming an existing exclusively owned private Linux x86_64 directory. Reuses the real small native plan producer fixture; requires cc/ar/clang/clang++/cmake/git/node/python3/tar/nm and the actual frozen sdk_build.sh entry. Run both layout kinds independently. Asserts authenticated materialized bytes/modes/provenance, observed argv0 and physical-name behavior, relocated independent execution and the cjc relative-link exception; this manual registration supplies no CI pass and does not exclude or replace any legacy SDK test. Publisher inputs, sealed receipts, plans, SDKs and failures are retained under the private root. No shared installations or old failed production directories."
+  },
+  {
+    "file": "ci/bootstrap/sdk-layout-contract.test.mjs",
+    "executor": "manual",
+    "reason": "Run node --test ci/bootstrap/sdk-layout-contract.test.mjs with SDK_SHAREDBUILD_ENGINE naming an exclusively owned fixed tools checkout and SDK_MANIFEST_TEST_ROOT naming a private existing Linux evidence root. Real legacy verifier and publisher CLIs assert typed directory members, complete entity copies, unsafe-link refusal and bounded source mutation after .incoming creation. Tests retain original locks and per-command rc/output; no product hooks, shared SDK writes or resealing substitutions. SDK_VERIFY_PRODUCT optionally selects an actual verifier source for causal cuts. Registration is NOT_RUN, not full SDK qualification."
+  },
+  {
+    "file": "ci/bootstrap/sdk-layout-consumers.integration.mjs",
+    "executor": "manual",
+    "reason": "Run node --test ci/bootstrap/sdk-layout-consumers.integration.mjs with SDK_SHAREDBUILD_ENGINE naming a clean fixed private tools Git checkout and SDK_MANIFEST_TEST_ROOT naming a private existing Linux x86_64 parent. Requires the real small cc/ar/clang/git/node/python3 producer fixture and frozen SDK entry. Authenticates original distribution modes before copying, and real sharedbuild recipe consumption of sealed membership, modes, bytes and link-free entities. Negative arms mutate exclusively owned depots and recover exact bytes/modes under original locks; official failed-copy recovery explicitly uses --resume-failed. Registration is NOT_RUN, not native/full SDK qualification."
   },
   {
     "file": "ci/bootstrap/toolchain-sdk.test.mjs",
