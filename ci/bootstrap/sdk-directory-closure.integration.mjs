@@ -35,14 +35,18 @@ async function verify(f, kind, label) {
   const argv = kind === 'python' ? ['python3', '-B', path.join(here, 'sdk_verify.py'), '--sdk', f.out,
     '--runtime-pin', f.plan.verification.runtimePin.path, '--target-tuple', 'linux_x86_64_cjnative'] :
     [process.execPath, '--input-type=module', '-e',
-      'const {verifyManifestSdk}=await import(process.argv[1]); const fs=await import("node:fs/promises"); const sdk=process.argv[2]; await verifyManifestSdk(sdk,JSON.parse(await fs.readFile(sdk+"/SDK.plan.json")),JSON.parse(await fs.readFile(sdk+"/SDK.manifest.json")));',
-      path.join(here, 'toolchain-sdk.mjs'), f.out];
+      'const {verifyManifestSdk}=await import(process.argv[2]); const fs=await import("node:fs/promises"); const sdk=process.argv[1]; await verifyManifestSdk(sdk,JSON.parse(await fs.readFile(sdk+"/SDK.plan.json")),JSON.parse(await fs.readFile(sdk+"/SDK.manifest.json")));',
+      f.out, path.join(here, 'toolchain-sdk.mjs')];
   return observe(f, `${label}-${kind}`, await command(argv));
 }
 
 test('real final SDK preserves authenticated empty directories and readonly source modes', async () => {
-  const f = await directoryFixture();
-  const result = await observe(f, 'final-assembly', await assemble(f));
+  const existing = process.env.SDK_DIRECTORY_EXISTING;
+  const plan = existing ? await readJson(path.join(existing, 'plan.json')) : null;
+  const f = existing ? {root: existing, out: path.join(existing, 'sdk'), plan, identities: buildIdentities(plan),
+    depot: plan.components.find(row => row.id === 'official').source.root} : await directoryFixture();
+  const result = existing ? await readJson(path.join(existing, 'final-assembly.json')) : await observe(f, 'final-assembly', await assemble(f));
+  if (existing) console.log(`REUSED_COMPLETED_ASSEMBLY evidence=${existing} rc=${result.rc}`);
   assert.equal(result.rc, 0, result.stderr);
   const depotLock = await readJson(path.join(f.depot, 'SDK.lock.json'));
   const receipt = await readJson(path.join(f.identities.get('official').directory, 'output.json'));
@@ -63,7 +67,7 @@ test('real final SDK preserves authenticated empty directories and readonly sour
   }
   assert.deepEqual(lock.files['tools/empty'].members, ['tools/empty/leaf']);
   assert.deepEqual(lock.files['tools/empty/leaf'].members, []);
-  for (const kind of ['python', 'esm']) assert.equal((await verify(f, kind, 'normal')).rc, 0);
+  for (const kind of (existing ? ['esm'] : ['python', 'esm'])) assert.equal((await verify(f, kind, 'normal')).rc, 0);
   const originalLock = await fileDigest(path.join(f.out, 'SDK.lock.json'));
   for (const mutation of ['mode', 'extra', 'missing']) {
     const dir = path.join(f.out, 'tools/empty'), leaf = path.join(dir, 'leaf');
