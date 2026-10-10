@@ -49,6 +49,9 @@ export async function evaluateG11Evidence(root, head) {
       Math.min(...arms.map(a => Date.parse(a.finished_at))), 'arms did not run in the same period');
     for (const key of recipeKeys) requireEvidence(equal(identities[0][key], identities[1][key]),
       `different comparison recipe: ${key}`);
+    // compare.py uses dict.get: absent and null both mean no environment recipe.
+    requireEvidence(equal(identities[0].environment_recipe_sha256 ?? null,
+      identities[1].environment_recipe_sha256 ?? null), 'different environment recipe');
     requireEvidence(Array.isArray(manifest.allowances), 'missing Q54-C allowances');
     const allowances = new Map();
     for (const row of manifest.allowances) {

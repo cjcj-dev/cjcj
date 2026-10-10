@@ -37,7 +37,7 @@ The campaign owner writes `ARCHIVE/G11.json`:
 Intervals come from campaign execution records, not file modification times.
 The runtime maps are the full maps emitted by `run.py`; SDK hashes must match
 those records. Both arms must overlap, use distinct compiler identities,
-identical comparison recipe fields from `compare.py:12-14`, and identical
+identical comparison recipe fields from `compare.py:12-16`, and identical
 nonempty case sets in each suite. Missing, stale, inconsistent or incomplete
 records yield UNKNOWN. Each official failure requires an individual reason;
 an allowance for anything outside the measured official failure set is invalid.
@@ -45,6 +45,12 @@ A selfhost-only failure yields NOT_MET, and cannot be waived. Complete,
 qualified evidence with no selfhost-only failures yields MET. Common failures
 are licensed observations, not passed test cases. A newly skipped selfhost
 case cannot establish MET. G10 and other release gates remain independent.
+
+The comparison includes `environment_recipe_sha256`. Equal concrete values
+qualify; absent and JSON null both mean no environment recipe, so two absent
+fields, two nulls, or absent/null qualify too. Different values, including a
+concrete value paired with absent or null, yield UNKNOWN. This optional field
+does not add an environment-presence or hash-format requirement.
 
 This is an evidence consumer, not proof of archive authenticity. The campaign
 owner is responsible for recording the correct official and final selfhost SDK

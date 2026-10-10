@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
+import {createHash} from 'node:crypto';
 import test from 'node:test';
 
 const repo = path.resolve(import.meta.dirname, '..');
@@ -27,8 +28,8 @@ async function fixture(t) {
       uptime_after: '13:00 load average: 1, 1, 1'};
     for (const suite of suites) {
       files[`${arm}/${suite}/cases.json`] = [
-        {name: 'success', category: 'pass', timeout_failure: false},
-        {name: 'baseline-failure', category: 'fail', timeout_failure: false}];
+        {name: 'success', status: 'PASS', category: 'pass', timeout_failure: false},
+        {name: 'baseline-failure', status: 'FAIL', category: 'fail', timeout_failure: false}];
       files[`${arm}/${suite}/summary.json`] = {status: 'ran', rc: 1, complete: true, total: 2,
         counts: {pass: 1, fail: 1, skip: 0, not_run: 0}};
     }
@@ -41,10 +42,12 @@ async function runFixture(f, mode = 'G11') {
   for (const [relative, contents] of Object.entries(f.files)) {
     const file = path.join(f.root, relative);
     await fs.mkdir(path.dirname(file), {recursive: true});
-    await fs.writeFile(file, JSON.stringify(contents));
+    await fs.writeFile(file, typeof contents === 'string' ? contents : JSON.stringify(contents));
   }
-  const result = spawnSync(process.execPath, [cli, mode, '--repo', repo, '--evidence', f.root, '--json'], {encoding: 'utf8'});
+  const result = spawnSync(process.execPath, [cli, mode, '--repo', repo, '--evidence', f.root, '--json'],
+    {encoding: 'utf8', timeout: 30000});
   assert.equal(result.error, undefined);
+  assert.equal(result.signal, null);
   const output = JSON.parse(result.stdout);
   return {rc: result.status, row: mode === 'all' ? output.find(row => row.gate === 'G11') : output};
 }
@@ -64,6 +67,50 @@ test('G11 actual CLI consumes all three suites and Q54-C official reasons', asyn
   assert.match(row.value, /selfhost_only_failures=0; official_allowances=3/);
   assert.doesNotMatch(JSON.stringify(row), /29060/);
 });
+const environmentHash = createHash('sha256').update(
+  await fs.readFile(path.join(repo, 'ci/cangjie-test/environment.py'))).digest('hex');
+const environmentPairs = [
+  ['same hash', environmentHash, environmentHash, true],
+  ['both null', null, null, true],
+  ['both absent', undefined, undefined, true],
+  ['absent-null', undefined, null, true],
+  ['null-absent', null, undefined, true],
+  ['different hash', environmentHash, digest('f'), false],
+  ['hash-null', environmentHash, null, false],
+  ['null-hash', null, environmentHash, false],
+  ['hash-absent', environmentHash, undefined, false],
+  ['absent-hash', undefined, environmentHash, false],
+];
+for (const [name, official, selfhost, accepted] of environmentPairs) {
+  test(`G11 environment recipe ${name} agrees with fixed comparator through CLI`, async t => {
+    const f = await fixture(t);
+    for (const [arm, value] of [['official', official], ['selfhost', selfhost]]) {
+      if (value !== undefined) f.files[`${arm}/identity.json`].environment_recipe_sha256 = value;
+    }
+    const {rc, row} = await runFixture(f);
+    const comparison = spawnSync('python3', [path.join(repo, 'ci/cangjie-test/compare.py'),
+      path.join(f.root, 'official'), path.join(f.root, 'selfhost'), path.join(f.root, 'comparison.json')],
+    {encoding: 'utf8', timeout: 30000, env: {...process.env, PYTHONDONTWRITEBYTECODE: '1'}});
+    assert.equal(comparison.error, undefined);
+    assert.equal(comparison.signal, null);
+    assert.equal(comparison.status, accepted ? 0 : 1, comparison.stderr);
+    if (!accepted) assert.match(comparison.stderr, /ValueError: different environment recipe/);
+    t.diagnostic(`environment target reached: ${name}; comparator_rc=${comparison.status}; CLI_rc=${rc}; status=${row.status}; value=${row.value}`);
+    assert.equal(row.status, accepted ? 'MET' : 'UNKNOWN', JSON.stringify(row));
+    assert.equal(rc, accepted ? 0 : 2);
+    assert.match(row.value, accepted ? /same-recipe/ : /different environment recipe/);
+  });
+}
+test('G11 all-gates CLI rejects different environment recipe', async t => {
+  const f = await fixture(t);
+  f.files['official/identity.json'].environment_recipe_sha256 = environmentHash;
+  f.files['selfhost/identity.json'].environment_recipe_sha256 = null;
+  const {rc, row} = await runFixture(f, 'all');
+  t.diagnostic(`all-gates environment target reached: status=${row.status}; value=${row.value}`);
+  assert.equal(row.status, 'UNKNOWN', JSON.stringify(row));
+  assert.match(row.value, /different environment recipe/);
+  assert.equal(rc, 0); // The aggregate CLI reports rows without a per-gate exit code.
+});
 for (const suite of suites) test(`G11 ${suite} selfhost-only failure reaches target verdict`, async t => {
   const f = await fixture(t);
   changeCase(f, suite, 'fail');
@@ -81,6 +128,8 @@ test('G11 timeout failure cannot disappear through comparator exclusion', async 
   assert.deepEqual(row.failures, [{suite: 'LLT', name: 'success'}]);
 });
 const invalid = {
+  'missing identity': f => {delete f.files['selfhost/identity.json'];},
+  'malformed identity JSON': f => {f.files['selfhost/identity.json'] = '{';},
   'missing suite': f => {delete f.files['selfhost/LLT/cases.json'];},
   'empty suite': f => {f.files['selfhost/LLT/cases.json'] = [];},
   'different recipe': f => {f.files['selfhost/identity.json'].jobs = 24;},
