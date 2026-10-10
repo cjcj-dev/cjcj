@@ -78,7 +78,7 @@ for (const [name, target] of [['external', '../outside'], ['cycle', '.'], ['dang
   });
 }
 
-for (const kind of ['target', 'missing', 'tamper', 'extra', 'empty-directory', 'type', 'member-declaration', 'directory-mode', 'missing-mode']) {
+for (const kind of ['target', 'missing', 'tamper', 'extra', 'extra-empty-directory', 'empty-directory', 'type', 'member-declaration', 'directory-mode', 'missing-mode']) {
   test(`legacy sealed directory rejects ${kind} without rewriting its lock`, async () => {
     const f = await legacyInput(`legacy-${kind}`); good(await legacy(f, `${kind}-control`, true));
     const lock = await fileDigest(path.join(f.sdk, 'SDK.lock.json'));
@@ -88,6 +88,7 @@ for (const kind of ['target', 'missing', 'tamper', 'extra', 'empty-directory', '
     if (kind === 'missing') await fs.unlink(member);
     if (kind === 'tamper') await fs.writeFile(member, 'tampered header\n');
     if (kind === 'extra') await write(path.join(f.sdk, 'lib/extra.h'), 'extra');
+    if (kind === 'extra-empty-directory') await fs.mkdir(path.join(f.sdk, 'lib/extra-empty'));
     if (kind === 'empty-directory') await fs.rmdir(path.join(f.sdk, 'lib/empty'));
     if (kind === 'type') { await fs.unlink(path.join(f.sdk, 'include')); await fs.writeFile(path.join(f.sdk, 'include'), 'lib'); }
     if (kind === 'directory-mode') await fs.chmod(path.join(f.sdk, 'lib'), 0o655);
@@ -99,13 +100,16 @@ for (const kind of ['target', 'missing', 'tamper', 'extra', 'empty-directory', '
       const declared = JSON.parse(lockBytes); declared.files.include.members = [];
       await atomicJson(path.join(f.sdk, 'SDK.lock.json'), declared);
     }
-    const rule = {target: 'SYMLINK', missing: 'PAYLOAD_MEMBERS', tamper: 'PAYLOAD_DIGEST', extra: 'PAYLOAD_MEMBERS',
-      'empty-directory': 'PAYLOAD_MEMBERS', type: 'PAYLOAD_TYPE', 'member-declaration': 'PAYLOAD_MEMBERS', 'directory-mode': 'PAYLOAD_MODE', 'missing-mode': 'PAYLOAD_MODE'}[kind];
-    rejected(await legacy(f, `${kind}-target`), rule, kind === 'tamper' ? 'include/member.h' : 'include');
+    const rule = {target: 'SYMLINK', missing: 'UNDECLARED', tamper: 'PAYLOAD_DIGEST', extra: 'UNDECLARED', 'extra-empty-directory': 'UNDECLARED',
+      'empty-directory': 'UNDECLARED', type: 'PAYLOAD_TYPE', 'member-declaration': 'PAYLOAD_MEMBERS', 'directory-mode': 'PAYLOAD_MODE', 'missing-mode': 'PAYLOAD_MODE'}[kind];
+    const result = await legacy(f, `${kind}-target`);
+    rejected(result, rule, kind === 'tamper' ? 'include/member.h' : 'include');
+    if (rule === 'UNDECLARED') assert.ok(!result.stderr.includes('rule=PAYLOAD_'), result.stderr);
     if (!['member-declaration', 'missing-mode'].includes(kind)) assert.equal(await fileDigest(path.join(f.sdk, 'SDK.lock.json')), lock);
     if (kind === 'target' || kind === 'type') { await fs.unlink(path.join(f.sdk, 'include')); await fs.symlink('lib', path.join(f.sdk, 'include')); }
     if (kind === 'missing' || kind === 'tamper') await fs.writeFile(member, bytes);
     if (kind === 'extra') await fs.unlink(path.join(f.sdk, 'lib/extra.h'));
+    if (kind === 'extra-empty-directory') await fs.rmdir(path.join(f.sdk, 'lib/extra-empty'));
     if (kind === 'empty-directory') await fs.mkdir(path.join(f.sdk, 'lib/empty'));
     if (kind === 'directory-mode') await fs.chmod(path.join(f.sdk, 'lib'), 0o755);
     if (kind === 'member-declaration' || kind === 'missing-mode') await fs.writeFile(path.join(f.sdk, 'SDK.lock.json'), lockBytes);

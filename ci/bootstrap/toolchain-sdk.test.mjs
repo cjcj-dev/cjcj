@@ -324,6 +324,8 @@ test('bootstrap phase reuse binds installed plan and manifest before returning a
   const moduleBytes = await fs.readFile(module), lockPath = path.join(f.out, 'SDK.lock.json');
   const lockBytes = await fs.readFile(lockPath), lock = JSON.parse(lockBytes);
   const changedModule = Buffer.from(moduleBytes); changedModule[0] ^= 1; await fs.writeFile(module, changedModule);
+  const payloadOnly = await command(argv); observed(payloadOnly, 'phase-payload-only');
+  assert.notEqual(payloadOnly.rc, 0); assert.match(payloadOnly.stderr, /rule=PAYLOAD_DIGEST/);
   lock.files[`modules/${tuple}/std/core/core.Int64.ti`].sha256 = await fileDigest(module);
   await atomicJson(lockPath, lock);
   const rewritten = await command(argv); observed(rewritten, 'phase-lock-rewrite');
