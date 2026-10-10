@@ -366,7 +366,7 @@ test('verifier tool selection qualifies real bitcode through environment and CLI
   });
 });
 
-test('verifier tool selection reaches source-build package and SDK usability consumers', async t => {
+test('verifier tool selection reaches package, SDK usability and performance consumers', async t => {
   const root = fixture(t);
   const workspace = path.join(root, 'workspace');
   const output = path.join(workspace, 'cangjie_compiler', 'output');
@@ -385,9 +385,41 @@ test('verifier tool selection reaches source-build package and SDK usability con
     assert.equal(usability.results[0].state, STATES.FAIL);
     assert.match(usability.results[0].detail, /rejected 1 file.*cj\.verifier\.mode=report/);
     assert.ok(usability.results.slice(1).every(entry => entry.state === STATES.UNKNOWN));
+    const compiler = path.join(output, 'bin', 'cjc');
+    fs.mkdirSync(path.dirname(compiler));
+    fs.writeFileSync(compiler, `#!${process.execPath}\nprocess.exitCode = 0;\n`);
+    fs.chmodSync(compiler, 0o755);
+    const work = path.join(root, 'performance-work');
+    const performance = spawnSync('bash', [path.join(repoRoot, 'scripts', 'perfincr_cycle_smoke.sh'), compiler, work, '1'], {encoding: 'utf8'});
+    assert.equal(performance.status, 1, performance.stdout + performance.stderr);
+    assert.match(performance.stderr, /rejected 1 file.*cj\.verifier\.mode=report/);
+    assert.equal(fs.existsSync(work), false);
+
+    const python = path.join(root, 'python');
+    const isolated = path.join(root, 'isolated-llvm');
+    fs.mkdirSync(python);
+    fs.mkdirSync(isolated);
+    const inputs = Object.fromEntries([
+      'llvm-manifest', 'base-sdk-archive', 'base-sdk-provenance', 'gate-host-runtime',
+      'gate-apparatus-provenance', 'cjpm-provenance',
+    ].map(name => {
+      const file = path.join(root, name);
+      fs.writeFileSync(file, 'fixture');
+      return [name, file];
+    }));
+    const outdir = path.join(root, 'release-out');
+    const args = Object.entries({sdk: output, binary: compiler, version: 'fixture', platform: 'linux-x64',
+      outdir, 'python-bundle': python, 'isolated-llvm-bin': isolated, ...inputs,
+      'cjpm-source-repo': 'https://example.invalid/cjpm.git', 'cjpm-source-sha': 'a'.repeat(40),
+    }).flatMap(([name, value]) => [`--${name}`, value]);
+    const release = spawnSync('zx', [path.join(repoRoot, 'scripts', 'package_sdk.mjs'), ...args], {encoding: 'utf8', timeout: 30_000});
+    t.diagnostic(`RELEASE_ENV_SELECTION_ASSERT status=${release.status} ${release.stderr?.trim()}`);
+    assert.equal(release.status, 1, release.stdout + release.stderr);
+    assert.match(release.stderr, /rejected 1 file.*cj\.verifier\.mode=report/);
+    assert.equal(fs.existsSync(outdir), false);
   });
   const calls = fs.readFileSync(path.join(root, 'tool-calls.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
-  assert.equal(calls.length, 2, 'both real consumers execute the environment tool');
+  assert.equal(calls.length, 4, 'all four real consumers execute the environment tool');
 });
 
 test('source-build package entry rejects a diagnostic workspace before archiving', async t => {
