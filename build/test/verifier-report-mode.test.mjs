@@ -238,6 +238,7 @@ test('verifier tool selection consumes environment through every public wrapper 
     }
   });
   const calls = fs.readFileSync(path.join(root, 'tool-calls.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
+  t.diagnostic(`SELECTED_TOOL_PROCESS_CALLS ${JSON.stringify(calls)}`);
   assert.equal(calls.length, 16, 'each wrapper/CLI must actually execute the selected tool');
   assert.ok(calls.every(call => call.tool === 'environment.mjs'
     && JSON.stringify(call.args) === JSON.stringify([path.join(artifacts, 'input.bc'), '-o', '-'])));
@@ -363,11 +364,13 @@ test('verifier tool selection qualifies real bitcode through environment and CLI
     const gate = path.join(repoRoot, 'scripts', 'verifier_artifact_gate.mjs');
     for (const [input, status, output] of [[clean, 0, /pass candidates=1 matches=0/], [report, 1, /rejected 1 file.*cj\.verifier\.mode=report/]]) {
       const cli = spawnSync(process.execPath, [gate, '--root', input], {encoding: 'utf8'});
+      t.diagnostic(`REAL_BITCODE_CLI input=${input} status=${cli.status} signal=${cli.signal} error=${cli.error?.code || 'none'} ${cli.stdout.trim()} ${cli.stderr.trim()}`);
       assert.equal(cli.status, status, cli.stdout + cli.stderr);
       assert.match(cli.stdout + cli.stderr, output);
     }
     const incompatible = path.join(root, 'incompatible.bc');
     fs.writeFileSync(incompatible, Buffer.from([0x42, 0x43, 0xc0, 0xde, 1]));
+    t.diagnostic(`REAL_INCOMPATIBLE_RESULT ${JSON.stringify(observeScan(() => assertNoVerifierReportArtifacts([incompatible])))}`);
     assert.throws(() => assertNoVerifierReportArtifacts([incompatible]), /llvm-dis could not inspect/);
   });
 });
@@ -397,6 +400,7 @@ test('verifier tool selection reaches package, SDK usability and performance con
     fs.chmodSync(compiler, 0o755);
     const work = path.join(root, 'performance-work');
     const performance = spawnSync('bash', [path.join(repoRoot, 'scripts', 'perfincr_cycle_smoke.sh'), compiler, work, '1'], {encoding: 'utf8'});
+    t.diagnostic(`PERFORMANCE_ENV_SELECTION_ASSERT status=${performance.status} signal=${performance.signal} error=${performance.error?.code || 'none'} ${performance.stderr.trim()}`);
     assert.equal(performance.status, 1, performance.stdout + performance.stderr);
     assert.match(performance.stderr, /rejected 1 file.*cj\.verifier\.mode=report/);
     assert.equal(fs.existsSync(work), false);
@@ -419,7 +423,7 @@ test('verifier tool selection reaches package, SDK usability and performance con
       'cjpm-source-repo': 'https://example.invalid/cjpm.git', 'cjpm-source-sha': 'a'.repeat(40),
     }).flatMap(([name, value]) => [`--${name}`, value]);
     const release = spawnSync('zx', [path.join(repoRoot, 'scripts', 'package_sdk.mjs'), ...args], {encoding: 'utf8', timeout: 30_000});
-    t.diagnostic(`RELEASE_ENV_SELECTION_ASSERT status=${release.status} ${release.stderr?.trim()}`);
+    t.diagnostic(`RELEASE_ENV_SELECTION_ASSERT status=${release.status} signal=${release.signal} error=${release.error?.code || 'none'} ${release.stderr?.trim()}`);
     assert.equal(release.status, 1, release.stdout + release.stderr);
     assert.match(release.stderr, /rejected 1 file.*cj\.verifier\.mode=report/);
     assert.equal(fs.existsSync(outdir), false);
