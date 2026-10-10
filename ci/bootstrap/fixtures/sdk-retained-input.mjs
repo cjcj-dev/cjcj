@@ -23,12 +23,21 @@ export async function retainedSdkInput(planFile, role, label) {
     [id, {directory: row.directory, receiptSha256: row.receiptSha256, buildId: row.buildId}])));
   return {root, plan, identities, outputs, files: resolveFiles(plan, outputs), planFile: path.join(root, 'plan.json'), out: path.join(root, 'sdk')};
 }
-export async function assertSelectedSdkBytes(f, runtimeSdk, stdSdk) {
+export async function assertSelectedSdkBytes(f, runtimeSdk, stdSdk, colouredSdk, officialSdk) {
   const tuple = 'linux_x86_64_cjnative';
+  // Both rulers are the explicit real entities, independently of which pair
+  // this arm selects. An unrelated colour fixture cannot qualify a real arm.
+  for (const [name, sdk] of [['colourRuntime', colouredSdk], ['hostRuntime', officialSdk]]) {
+    const input = f.plan.verification[name];
+    assert.ok(input?.path && sdk, `real ${name} identity required; NOT_RUN`);
+    assert.equal(await fileDigest(input.path), input.sha256);
+    assert.equal(input.sha256, await fileDigest(path.join(sdk, `runtime/lib/${tuple}/libcangjie-runtime.so`)));
+  }
   for (const [sdk, role, selected] of [[runtimeSdk, 'runtime', [`runtime/lib/${tuple}/libcangjie-runtime.so`,
     `runtime/lib/${tuple}/libboundscheck.so`, `lib/${tuple}/libcangjie-runtime.a`]],
   [stdSdk, 'std', Object.keys(f.files).filter(rel => /^(lib|runtime\/lib|modules)\//.test(rel)
-    && (rel.includes('libcangjie-std-') || /FFI/.test(rel) || rel.startsWith('modules/')))]] ) {
+    && (rel.includes('libcangjie-std-') || /FFI/.test(rel) || rel.startsWith('modules/')))
+    .concat(f.files['std-producer.json'] ? ['std-producer.json'] : [])]] ) {
     assert.ok(selected.length, `complete ${role} input members required`);
     const sourceManifest = await readJson(path.join(sdk, 'SDK.manifest.json'));
     const sourcePlan = await readJson(path.join(sdk, 'SDK.plan.json'));
@@ -40,7 +49,16 @@ export async function assertSelectedSdkBytes(f, runtimeSdk, stdSdk) {
     for (const rel of selected) {
       const row = f.files[rel], original = sourceManifest.files[rel];
       assert.ok(row && original, `${role} member missing: ${rel}; NOT_RUN`);
-      if (row.type === 'directory') continue;
+      const stat = await fs.lstat(path.join(sdk, rel));
+      assert.equal(stat.isSymbolicLink() ? 'symlink' : stat.isDirectory() ? 'directory' : 'file', original.type);
+      assert.equal(stat.mode & 0o777, original.mode, `${rel}: original SDK mode`);
+      assert.equal(row.mode, original.mode, `${rel}: selected producer mode`);
+      if (row.type === 'directory') {
+        assert.ok(stat.isDirectory(), `${rel}: actual original directory required`);
+        assert.deepEqual(Object.keys(f.files).filter(name => name.startsWith(rel + '/')).sort(),
+          Object.keys(sourceManifest.files).filter(name => name.startsWith(rel + '/')).sort(), `${rel}: original directory members`);
+        continue;
+      }
       const actual = await fileDigest(path.join(sdk, rel));
       assert.equal(actual, original.sha256, `${sdk}: ${rel} original SDK bytes`);
       assert.equal(row.sha256, actual, `${rel}: supplied plan must select the requested real SDK entity`);
@@ -52,8 +70,19 @@ export async function assertSelectedSdkBytes(f, runtimeSdk, stdSdk) {
     }
     if (role === 'std') {
       const wanted = Object.keys(sourceManifest.files).filter(rel => /^(lib|runtime\/lib|modules)\//.test(rel)
-        && (rel.includes('libcangjie-std-') || /FFI/.test(rel) || rel.startsWith('modules/'))).sort();
+        && (rel.includes('libcangjie-std-') || /FFI/.test(rel) || rel.startsWith('modules/')))
+        .concat(sourceManifest.files['std-producer.json'] ? ['std-producer.json'] : []).sort();
       assert.deepEqual(selected.sort(), wanted, 'the real complete std set is retained, including modules and FFI');
     }
+  }
+  // Reject an invalid non-target prerequisite as an input failure, never as
+  // the expected colour refusal. Do not rewrite provenance to fit a compiler.
+  const provenance = f.files['std-producer.json'];
+  assert.ok(provenance || f.plan.role === 'host', 'target real std requires original compiler provenance; NOT_RUN');
+  if (provenance) {
+    const compiler = f.files['bin/cjcj-stage1'] || f.files['bin/cjc'];
+    assert.ok(compiler, 'complete real compiler input required; NOT_RUN');
+    const original = await readJson(path.join(provenance.artifacts, provenance.source));
+    assert.equal(original.compiler_sha256, compiler.sha256, 'real plan must keep STD_CJC valid before the colour target; NOT_RUN');
   }
 }

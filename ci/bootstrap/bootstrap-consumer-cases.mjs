@@ -5,7 +5,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import os from 'node:os';
 import {fileURLToPath} from 'node:url';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
@@ -28,7 +27,11 @@ async function command(label, argv, options = {}) {
   try { result = {rc: 0, ...(await exec(argv[0], argv.slice(1), {...options, maxBuffer: 16 * 1024 * 1024}))}; }
   catch (error) { result = {rc: error.code ?? null, signal: error.signal ?? null, killed: error.killed ?? false,
     stdout: error.stdout || '', stderr: error.stderr || '', error: error.message}; }
-  await atomicJson(path.join(root, `${label}.json`), {argv, ...result});
+  // Matrix calls can share a fixture root and label. Preserve every original
+  // command receipt instead of overwriting an earlier environment arm.
+  const evidenceFile = path.join(root, `${String(receipts.length + 1).padStart(4, '0')}-${label}.json`);
+  result.evidenceFile = evidenceFile;
+  await atomicJson(evidenceFile, {argv, ...result});
   receipts.push({label, argv, ...result, evidence: root});
   if (result.stdout) process.stdout.write(result.stdout);
   if (result.stderr) process.stderr.write(result.stderr);
@@ -69,8 +72,14 @@ async function environmentContract(log, f, env = process.env) {
   count(log, 'env-planned', 4, new RegExp('^BUILD-ENV planned HOME=' + escapeRegex(home) + ' TMPDIR=' + escapeRegex(tmp) + '$'));
 }
 const escapeRegex = text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+async function configuredJobs(env = process.env) {
+  if (env.CJ_JOBS) return env.CJ_JOBS;
+  const result = await command('configured-cj-jobs', ['getconf', '_NPROCESSORS_ONLN'], {env}); good(result);
+  assert.match(result.stdout.trim(), /^[1-9][0-9]*$/);
+  return result.stdout.trim();
+}
 async function dryContract(log, f, env = process.env) {
-  const jobs = env.CJ_JOBS || String(os.availableParallelism());
+  const jobs = await configuredJobs(env);
   for (const [label, n, pattern] of [
     ['shape', 2, /shape=planned Int64.ti>1 FFI-archives>0/], ['ffi-set', 1, /FFI-set-equals=/],
     ['stage1-version', 1, /cjcj-stage1 --version/], ['stage2-version', 1, /cjcj-stage2 --version/],
@@ -78,6 +87,7 @@ async function dryContract(log, f, env = process.env) {
     ['cjpm-diagnostic', 2, /^CMD cjpm build/], ['stage0-cjpm', 1, /^CMD cjpm build bin=/],
     ['stage1-jobs', 1, new RegExp(`^CMD cjpm build -j ${jobs} bin=`)],
     ['source-isolation', 2, /^ISOLATE cjcj-src from=/], ['O1', 1, /^ASSERT compile-option-o1 planned/],
+    ['O1-command', 1, /^CMD sed -i .*compile-option = "-O1"/],
     ['release-no-forensic', 0, /cjcj-stage2-forensic|target\/debug\/bin|cjpm build -j .* -g/],
     ['trimpath-stage0', 1, /^CMD node .*trimpath.mjs .*\/cjcj-src-stage0$/],
     ['trimpath-stage1', 1, /^CMD node .*trimpath.mjs .*\/cjcj-src-stage1$/],
@@ -101,6 +111,28 @@ async function dryContract(log, f, env = process.env) {
   assert.ok(stage1.includes(`cjHeapSize=${heap} bash -c `));
   count(log, 'stage1-heap', 1, new RegExp(`^CMD cjpm build -j ${jobs} .* heap=${heap}$`));
   await environmentContract(log, f, env);
+  const shimCommands = log.split('\n').filter(line => /^CMD env -i /.test(line) && line.includes('runtime_shim/build_shim.sh'));
+  assert.equal(shimCommands.length, 2);
+  for (const line of shimCommands) assert.ok(line.includes(`CJCJ_COMMIT=${f.sourceSha} `), 'shim must receive the frozen compiler source identity');
+  assert.ok(shimCommands[0].includes(`CANGJIE_HOME=${f.work}/sdk-stage0 `) && shimCommands[0].includes(f.hostRuntime));
+  assert.ok(shimCommands[1].includes(`CANGJIE_HOME=${f.work}/sdk-stage1 `) && shimCommands[1].includes(f.colourRuntime));
+  assert.ok(shimCommands[1].includes(`CJCJ_LLVM_SHIM_O=${f.work}/sdk-stage1/third_party/llvm/fixed-llc/cjselfhost_llvmshim.o `));
+  const stdCommands = log.split('\n').filter(line => /^CMD env -i /.test(line) && / bash -c /.test(line) && line.includes(f.stdsrc));
+  assert.equal(stdCommands.length, 2);
+  for (const line of stdCommands) {
+    assert.ok(line.includes('rm\\ -rf\\ build/build'), 'std must clean its prior build tree');
+    assert.ok(line.includes('--target-lib'), 'std must receive the declared runtime input');
+  }
+  assert.ok(stdCommands[0].includes(`CANGJIE_HOME=${f.work}/sdk-std-bootstrap `));
+  assert.ok(stdCommands[0].endsWith(` ${f.work}/std-runtime-link ${f.work}/stdlib-stage1`));
+  assert.ok(stdCommands[1].endsWith(` ${f.work}/sdk-stage1-initial/runtime/lib/${tuple} ${f.work}/stdlib-stage2`));
+  const runnerCommands = log.split('\n').filter(line => /^CMD bash .*stage1_host_runner.sh /.test(line));
+  assert.deepEqual(runnerCommands.map(line => line.match(/stage1_host_runner.sh (\S+)/)[1]),
+    [`${f.work}/sdk-std-bootstrap`, `${f.work}/sdk-stage1-initial`, `${f.work}/sdk-stage1`]);
+  for (const line of runnerCommands) assert.ok(line.includes(` ${f.work}/sdk-stage0 ${f.hostRuntime} ${f.hostSha} `));
+  const stdColour = log.split('\n').filter(line => /^CMD python3 .*std_runtime_colour.py /.test(line));
+  assert.equal(stdColour.length, 1);
+  assert.ok(stdColour[0].includes(`--colour-runtime ${f.colourRuntime}/libcangjie-runtime.so --host-runtime ${f.hostRuntime}/libcangjie-runtime.so --runtime ${f.colourRuntime}/libcangjie-runtime.so --std ${f.work}/stdlib-stage1/lib/${tuple}/libcangjie-std-core.a`));
   const sequence = log.split('\n').flatMap(line => {
     if (/^\[stage[01]\]/.test(line)) return [line.slice(1, 7)];
     if (/^CMD node .*bootstrap-sdk\.mjs /.test(line)) return ['phase:' + line.match(/--phase (\S+)/)[1]];
@@ -120,7 +152,7 @@ async function dryContract(log, f, env = process.env) {
   assert.notEqual(oldStd.buildId, newStd.buildId, 'the second std phase cannot reuse the stale std generation');
 }
 async function forensicContract(log, f) {
-  const jobs = process.env.CJ_JOBS || String(os.availableParallelism());
+  const jobs = await configuredJobs();
   const assertions = [
     ['forensic-output', 1, /^OUTPUT cjcj-stage2-forensic=/],
     ['forensic-g', 1, new RegExp(`^CMD cjpm build -j ${jobs} -g bin=`)],
@@ -444,7 +476,7 @@ async function innerRuntimeRc() {
   await write(child, 'console.error("CONTROLLED_CHILD_RC1"); process.exit(1);\n');
   const result = await command('runtime-inner-rc', [process.execPath, child, '--plan', f.planFile, '--to', f.out]);
   assert.equal(result.rc, 1); assert.match(result.stderr, /CONTROLLED_CHILD_RC1/);
-  console.error(`TEST-FAIL [runtime-flat] sdk_build rc=${result.rc} log=${f.root}/runtime-inner-rc.json`);
+  console.error(`TEST-FAIL [runtime-flat] sdk_build rc=${result.rc} log=${result.evidenceFile}`);
   return result;
 }
 const faults = {

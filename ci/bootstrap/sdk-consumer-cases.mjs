@@ -428,7 +428,7 @@ async function realRuntimeSuite() {
     ['real-official-std', coloured, official, 'target', 1], ['real-coloured-std', official, coloured, 'host', 1],
   ]) await target(name, async () => {
     const f = await retainedSdkInput(values[`${name}-plan`], role, name);
-    await assertSelectedSdkBytes(f, rtSdk, stdSdk);
+    await assertSelectedSdkBytes(f, rtSdk, stdSdk, coloured, official);
     const result = await assemble(f, name, product);
     if (expected === 0) {
       good(result); good(await verify(f, `${name}-both-verifiers`));

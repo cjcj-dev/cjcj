@@ -79,6 +79,12 @@ requested SDK's original bytes, source identity, build ID and receipt digest.
 The real SDK's plan/manifest/lock binding is also checked. Normal arms run full
 assembly and both verifiers; mixed arms must reach the exact std colour refusal
 with the non-target inputs valid. No real SDK is produced to fill missing inputs.
+The independent host/colour rulers must match the two explicit SDK entities.
+Original std-producer provenance must match the selected compiler before
+assembly, including mixed arms; it is never rewritten to manufacture this
+precondition. A missing compatible original compiler/std receipt is a NOT_RUN
+input blocker, not the expected colour rejection. Selected source SDK entity
+types, modes and directory member sets are admitted explicitly as well.
 
 ## Bootstrap public contracts
 
