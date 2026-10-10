@@ -90,7 +90,7 @@ for (const kind of ['target', 'missing', 'tamper', 'extra', 'extra-empty-directo
     if (kind === 'extra') await write(path.join(f.sdk, 'lib/extra.h'), 'extra');
     if (kind === 'extra-empty-directory') await fs.mkdir(path.join(f.sdk, 'lib/extra-empty'));
     if (kind === 'empty-directory') await fs.rmdir(path.join(f.sdk, 'lib/empty'));
-    if (kind === 'type') { await fs.unlink(path.join(f.sdk, 'include')); await fs.writeFile(path.join(f.sdk, 'include'), 'lib'); }
+    if (kind === 'type') { await fs.unlink(path.join(f.sdk, 'include')); await fs.cp(path.join(f.sdk, 'lib'), path.join(f.sdk, 'include'), {recursive: true}); }
     if (kind === 'directory-mode') await fs.chmod(path.join(f.sdk, 'lib'), 0o655);
     if (kind === 'missing-mode') {
       const declared = JSON.parse(lockBytes); delete declared.files.include.mode;
@@ -106,7 +106,7 @@ for (const kind of ['target', 'missing', 'tamper', 'extra', 'extra-empty-directo
     rejected(result, rule, kind === 'tamper' ? 'include/member.h' : 'include');
     if (rule === 'UNDECLARED') assert.ok(!result.stderr.includes('rule=PAYLOAD_'), result.stderr);
     if (!['member-declaration', 'missing-mode'].includes(kind)) assert.equal(await fileDigest(path.join(f.sdk, 'SDK.lock.json')), lock);
-    if (kind === 'target' || kind === 'type') { await fs.unlink(path.join(f.sdk, 'include')); await fs.symlink('lib', path.join(f.sdk, 'include')); }
+    if (kind === 'target' || kind === 'type') { await fs.rm(path.join(f.sdk, 'include'), {recursive: true}); await fs.symlink('lib', path.join(f.sdk, 'include')); }
     if (kind === 'missing' || kind === 'tamper') await fs.writeFile(member, bytes);
     if (kind === 'extra') await fs.unlink(path.join(f.sdk, 'lib/extra.h'));
     if (kind === 'extra-empty-directory') await fs.rmdir(path.join(f.sdk, 'lib/extra-empty'));

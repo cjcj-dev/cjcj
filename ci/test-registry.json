@@ -631,5 +631,10 @@
     "file": "scripts/test_array_clone_metadata_unit.py",
     "executor": "manual",
     "reason": "Manual bounded Linux ArrayCloneMetadata test links this registered compiler_unittest source against existing release archives; invoke python3 scripts/test_array_clone_metadata_unit.py --build-tree /path/to/product --sdk /path/to/paired-sdk --out /path/to/private-evidence. No workflow provisions these archives."
+  },
+  {
+    "file": "ci/bootstrap/sdk-directory-closure.integration.mjs",
+    "executor": "manual",
+    "reason": "Run node --test with SDK_SHAREDBUILD_ENGINE naming a clean fixed private tools checkout and SDK_MANIFEST_TEST_ROOT and TMPDIR naming existing private directories. Requires the real small Linux x86_64 cc/ar/clang/git/node/python3 fixture and actual sdk_build.sh. Asserts source directory modes, readonly projection, original receipt and manifest provenance, empty-directory installation, both verifiers and independent final control. Inputs and failure evidence remain exclusively owned. Registration is NOT_RUN, not CI or full SDK qualification."
   }
 ]
