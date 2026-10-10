@@ -272,7 +272,7 @@ test('verifier tool selection preserves explicit override and ordered root disco
     assert.equal(scanVerifierReportArtifacts([root], {llvmDis: path.join(root, 'absent')}).llvmDis, discovered[0]);
     assert.throws(() => scanVerifierReportArtifacts([root]), /rc=19.*selection fixture failure/);
   });
-  fs.rmSync(path.join(root, VERIFIER_DIAGNOSTIC_MARKER));
+  fs.rmSync(path.join(root, VERIFIER_DIAGNOSTIC_MARKER), {force: true});
   await withEnvironment({CJCJ_VERIFIER_LLVM_DIS: undefined}, async () => {
     for (const tool of discovered) {
       const observed = assertNoVerifierReportArtifacts([root]);
