@@ -13,7 +13,7 @@ const testRoot = process.env.SDK_MANIFEST_TEST_ROOT;
 const tuple = 'linux_x86_64_cjnative';
 export const command = async argv => {
   try { return {rc: 0, ...(await execute(argv[0], argv.slice(1), {maxBuffer: 8 * 1024 * 1024}))}; }
-  catch (error) { return {rc: error.code, stdout: error.stdout || '', stderr: error.stderr || '', error: error.message}; }
+  catch (error) { return {rc: error.code ?? null, signal: error.signal ?? null, killed: error.killed ?? false, stdout: error.stdout || '', stderr: error.stderr || '', error: error.message}; }
 };
 const write = async (file, content) => { await fs.mkdir(path.dirname(file), {recursive: true}); await fs.writeFile(file, content); };
 const fixtureSources = {

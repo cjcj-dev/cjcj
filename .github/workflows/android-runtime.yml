@@ -28,6 +28,12 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: '22'
+      - name: Prepare SDK consumer dependencies
+        if: matrix.arm == 'candidate'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq build-essential binutils clang cmake file git
+      - name: Qualify frozen SDK test engine and private inputs
+        if: matrix.arm == 'candidate'
+        run: node ci/bootstrap/prepare-sdk-test-inputs.mjs --engine "$SDK_SHAREDBUILD_ENGINE" --root "$RUNNER_TEMP/sdk-consumer-inputs" --environment-file "$GITHUB_ENV"
       - name: Install official lineage test input
         if: matrix.arm == 'candidate'
         shell: bash

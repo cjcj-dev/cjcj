@@ -62,10 +62,12 @@ jobs:
       # this step must keep asking the manifest.
       - name: Install release contract dependencies
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq zip unzip clang lld libssl-dev python3 build-essential jq
+          sudo apt-get update -qq && sudo apt-get install -y -qq zip unzip clang lld libssl-dev python3 build-essential jq cmake binutils file
           npx --yes zx@8 --version
       # package-lineage compares package bytes with the official host SDK. Load
       # the consumer's pin, not the build job's independently loaded environment.
+      - name: Qualify frozen SDK test engine and private inputs
+        run: node ci/bootstrap/prepare-sdk-test-inputs.mjs --engine "$SDK_SHAREDBUILD_ENGINE" --root "$RUNNER_TEMP/sdk-contract-inputs" --environment-file "$GITHUB_ENV"
       - name: Install official lineage input
         shell: bash
         run: |
@@ -124,7 +126,9 @@ jobs:
         with:
           node-version: '22'
       - name: Install script test dependencies
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq python3 build-essential binutils zip unzip
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq python3 build-essential binutils zip unzip clang cmake file
+      - name: Qualify frozen SDK test engine and private inputs
+        run: node ci/bootstrap/prepare-sdk-test-inputs.mjs --engine "$SDK_SHAREDBUILD_ENGINE" --root "$RUNNER_TEMP/sdk-script-inputs" --environment-file "$GITHUB_ENV"
       - name: Run registered script tests
         run: node ci/run-registered-tests.mjs scripts "$RUNNER_TEMP/script-tests"
       - name: Preserve script test results

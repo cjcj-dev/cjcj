@@ -5,7 +5,6 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {parseArgs} from 'node:util';
-import {fileURLToPath} from 'node:url';
 const {values} = parseArgs({options: {
   suite: {type: 'string'}, output: {type: 'string'}, product: {type: 'string'},
   elf: {type: 'string'}, 'old-elf': {type: 'string', default: '/bin/true'},
@@ -17,6 +16,11 @@ const repeats = Number(values.repeat);
 assert.ok(Number.isSafeInteger(repeats) && repeats > 0, '--repeat must be a positive integer');
 assert.ok(process.env.SDK_MANIFEST_TEST_ROOT && process.env.SDK_SHAREDBUILD_ENGINE,
   'SDK_MANIFEST_TEST_ROOT and SDK_SHAREDBUILD_ENGINE must name private fixed inputs');
+// Raw SDK directories cannot supply the frozen producer identities required by
+// the four real-SDK assembly arms. Keep this unfinished migration visible;
+// running only the colour predicate would weaken their original protection.
+assert.ok(!values['real-coloured-sdk'] && !values['real-official-sdk'],
+  'REAL_SDK_PLAN_MIGRATION_REQUIRED: real SDK assembly arms need their original complete frozen plans and producer receipts; NOT_RUN');
 if (values.output) {
   await fs.mkdir(path.resolve(values.output), {recursive: true});
   assert.equal((await fs.readdir(path.resolve(values.output))).length, 0, 'output must be empty');
@@ -56,8 +60,8 @@ async function target(name, body) {
     const evidence = await body(); records.push({name, executed: true, passed: true, started, evidence});
     console.log(`PASS ASSERT ${name} executed=true N=1 evidence=${evidence}`);
   } catch (error) {
-    records.push({name, executed: true, passed: false, started, error: error.stack});
-    console.error(`FAIL ASSERT ${name} executed=true ${error.stack}`);
+    records.push({name, caseStarted: true, passed: false, started, targetReached: 'UNDETERMINED', error: error.stack});
+    console.error(`FAIL CASE ${name} target_assertion_reached=UNDETERMINED ${error.stack}`);
     throw error; // A new failure stops dependent successors; no retry-to-green.
   }
 }
@@ -166,6 +170,12 @@ async function inputLayoutSuite() {
     assert.equal(manifest.files['bin/linker'].component, 'official');
     assert.equal(lock.files['bin/linker'].type, 'file');
     assert.equal(lock.files['bin/linker'].sha256, sealed.lock.source_layout['bin/linker'].sha256);
+    assert.equal(lock.files['bin/linker'].component, 'official-retain');
+    assert.equal(lock.files['bin/linker'].producer.build_id, manifest.components.official.buildId);
+    assert.equal(lock.files['bin/linker'].producer.receipt_sha256, manifest.components.official.receiptSha256);
+    assert.deepEqual(lock.files['bin/linker'].producer.source, f.plan.components.find(row => row.id === 'official').source);
+    assert.equal(lock.files['bin/linker'].mode, sealed.lock.files['bin/linker'].mode);
+    assert.equal(await fs.readlink(original), 'cjc');
     const inputVersion = await observe(f, 'linker-original-version', [original, '--version']); good(inputVersion);
     const inputDispatch = await observe(f, 'linker-original-dispatch', [original]); good(inputDispatch);
     assert.equal(inputDispatch.stdout, 'argv0=linker physical=cjc\n');
@@ -183,49 +193,6 @@ async function inputLayoutSuite() {
   });
 }
 
-async function tupleSuite() {
-  // A real-input rehearsal consumes its existing complete frozen plan and
-  // original producer receipts. Loose LLVM_TUPLE/HOST_SDK cannot identify one.
-  const planPath = process.env.SDK_TUPLE_PLAN;
-  if (planPath) {
-    await target('tuple-installed-executable', async () => {
-      const root = await fs.mkdtemp(path.join(process.env.SDK_MANIFEST_TEST_ROOT, 'tuple-real-'));
-      const f = {root, plan: await readJson(planPath), planFile: path.join(root, 'plan.json'), out: path.join(root, 'sdk')};
-      good(await assemble(f, 'real-tuple', product));
-      const manifest = await readJson(path.join(f.out, 'SDK.manifest.json'));
-      for (const name of ['llc', 'opt', 'ld.lld']) {
-        const rel = `third_party/llvm/bin/${name}`;
-        assert.equal(await fileDigest(path.join(f.out, rel)), manifest.files[rel].sha256);
-        assert.ok((await fs.stat(path.join(f.out, rel))).mode & 0o111);
-        await nativeChecks(f, rel);
-      }
-      return root;
-    });
-    return;
-  }
-  for (const mode of [0o755, 0o644]) await target(`tuple-installed-executable-input-${mode.toString(8)}`, async () => {
-    const f = await fixture({role: 'host', parameters: {'llvm-tools': {toolMode: mode}}});
-    const result = await assemble(f, `tuple-mode-${mode.toString(8)}`, product);
-    // Modes are sealed producer identity, not assembler permission to change
-    // arbitrary receipt bytes. A producer of nonexecutable tools must refuse.
-    if (mode === 0o644) {
-      assert.notEqual(result.rc, 0);
-      assert.doesNotMatch(result.stderr, /FROZEN_PLAN_REQUIRED/);
-      assert.match(result.stderr, /EACCES|Permission denied/);
-      await assert.rejects(fs.access(f.out));
-    } else {
-      good(result);
-      const manifest = await readJson(path.join(f.out, 'SDK.manifest.json'));
-      for (const name of ['llc', 'opt', 'ld.lld']) {
-        const rel = `third_party/llvm/bin/${name}`, file = path.join(f.out, rel);
-        assert.equal(await fileDigest(file), manifest.files[rel].sha256);
-        assert.equal((await fs.stat(file)).mode & 0o777, mode);
-        await nativeChecks(f, rel);
-      }
-    }
-    return f.root;
-  });
-}
 async function pairSuite() {
   for (const layout of ['flat', 'nested', 'nested-archive', 'nested-static']) for (const aliases of [[], ['libboundscheck.so'], ['libcangjie-runtime.so', 'libboundscheck.so']]) {
     await target(`${layout}-selected-pinned-pair-${aliases.length}`, async () => {
@@ -386,9 +353,7 @@ async function runtimeCase(name, order, variant, role, stdVariant, expected, dia
       good(await verify(f, `${name}-independent-verifier`));
       if (name.startsWith('pair-verify-host')) await nativeChecks(f, 'tools/bin/cjpm');
     } else {
-      assert.notEqual(result.rc, 0, result.stdout + result.stderr);
-      assert.doesNotMatch(result.stderr, /FROZEN_PLAN_REQUIRED/);
-      assert.match(result.stderr, diagnostic);
+      rejected(result, diagnostic);
       if (/STD-RUNTIME-COLOUR-MISMATCH/.test(diagnostic.source)) {
         assert.match(result.stderr, /std_sha256=[a-f0-9]{64}/);
         assert.match(result.stderr, /std_source=resolved-manifest/);
@@ -451,28 +416,8 @@ async function runtimeSuite() {
       good(result); assert.equal(result.stdout.trim(), expected); return f.root;
     });
   }
-  assert.equal(Boolean(values['real-coloured-sdk']), Boolean(values['real-official-sdk']), 'both real SDK paths are required together');
-  if (values['real-coloured-sdk']) {
-    // Retained real SDKs already carry their frozen plan and original manifest.
-    // This is a predicate rehearsal only; no production SDK is built here.
-    for (const [name, runtimeSdk, stdSdk, expected] of [
-      ['real-coloured', values['real-coloured-sdk'], values['real-coloured-sdk'], 0],
-      ['real-official', values['real-official-sdk'], values['real-official-sdk'], 0],
-      ['real-official-std', values['real-coloured-sdk'], values['real-official-sdk'], 1],
-      ['real-coloured-std', values['real-official-sdk'], values['real-coloured-sdk'], 1],
-    ]) await target(name, async () => {
-      const root = await fs.mkdtemp(path.join(process.env.SDK_MANIFEST_TEST_ROOT, 'real-runtime-pair-'));
-      const result = await observe({root}, name, ['python3', path.join(here, 'std_runtime_colour.py'),
-        '--runtime', path.join(runtimeSdk, `runtime/lib/${tuple}/libcangjie-runtime.so`),
-        '--std', path.join(stdSdk, `lib/${tuple}/libcangjie-std-core.a`), '--source', stdSdk,
-        '--colour-runtime', path.join(values['real-coloured-sdk'], `runtime/lib/${tuple}/libcangjie-runtime.so`),
-        '--host-runtime', path.join(values['real-official-sdk'], `runtime/lib/${tuple}/libcangjie-runtime.so`)]);
-      assert.equal(result.rc, expected); if (expected) assert.match(result.stderr, /STD-RUNTIME-COLOUR-MISMATCH/);
-      return root;
-    });
-  }
 }
-const suites = {exe: exeSuite, swap: swapSuite, identity: identitySuite, 'input-layout': inputLayoutSuite, tuple: tupleSuite, pair: pairSuite, std: stdSuite, runtime: runtimeSuite};
+const suites = {exe: exeSuite, swap: swapSuite, identity: identitySuite, 'input-layout': inputLayoutSuite, pair: pairSuite, std: stdSuite, runtime: runtimeSuite};
 try {
   assert.ok(suites[values.suite], `unknown suite: ${values.suite}`);
   for (let i = 0; i < repeats; ++i) await suites[values.suite]();

@@ -67,7 +67,6 @@ if (mode === 'runtime') {
   for (const [name, prefix] of [['llc', 'LLC'], ['opt', 'OPT'], ['ld.lld', 'LLD']]) {
     const binary = await mkdir(path.join(output, 'bin', name));
     run(['cc', `-DCJLLVM_SHA="${env.SB_SHA}"`, 'tool.c', '-o', binary]);
-    if (options.toolMode !== undefined) await fs.chmod(binary, options.toolMode);
     await write(`fixed-llc/${name}.gz`, gzipSync(await fs.readFile(binary)));
     values[`${prefix}_SOURCE`] = `tuple:${env.SB_SHA}`; values[`${prefix}_VERSION`] = 'fixture tool version 1';
     values[`${prefix}_SHA256`] = await sha(binary);

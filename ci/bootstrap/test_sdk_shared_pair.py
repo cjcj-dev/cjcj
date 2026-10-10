@@ -6,4 +6,4 @@ import sys
 
 if __name__ == '__main__':
     os.execvp('node', ['node', str(Path(__file__).with_name('sdk-consumer-cases.mjs')),
-                       '--suite', 'pair', *sys.argv[1:]])
+                       '--suite', 'pair', '--repeat', '3', *sys.argv[1:]])
