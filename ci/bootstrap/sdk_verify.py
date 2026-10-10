@@ -61,11 +61,32 @@ def classify(rel: str) -> str:
 
 
 def iter_files(sdk: Path):
-    for path in sorted(sdk.rglob('*')):
-        rel = path.relative_to(sdk).as_posix()
-        if path.is_dir() and not path.is_symlink():
-            continue
-        yield path, rel
+    """Enumerate alias members too, without following unsafe links or cycles.
+
+    Invalid links are yielded for check_symlinks to diagnose, never traversed.
+    Directory membership includes empty directories so their removal is visible.
+    """
+    def walk(directory, ancestors, through_alias=False):
+        for path in sorted(directory.iterdir()):
+            rel = path.relative_to(sdk).as_posix()
+            if path.is_symlink():
+                yield path, rel
+                descend = False
+                try:
+                    target = path.resolve(strict=True)
+                    target.relative_to(sdk)
+                    descend = target.is_dir() and target not in ancestors
+                except (ValueError, RuntimeError, OSError):
+                    pass
+                if descend:
+                    yield from walk(path, ancestors | {target}, True)
+            elif path.is_dir():
+                if through_alias:
+                    yield path, rel
+                yield from walk(path, ancestors | {path.resolve()}, through_alias)
+            else:
+                yield path, rel
+    yield from walk(sdk, {sdk.resolve()})
 
 
 def load_pin(path: Path) -> dict:
@@ -151,7 +172,12 @@ def check_symlinks(sdk: Path, errors: list, *, source: Path | None = None,
             fail('SYMLINK', f'unregistered or changed link: {rel} -> {target}', errors)
             continue
         try:
-            path.resolve().relative_to(sdk)
+            resolved = path.resolve(strict=True)
+            resolved.relative_to(sdk)
+            if resolved.is_dir() and resolved in {parent.resolve() for parent in path.parents if parent == sdk or sdk in parent.parents}:
+                raise ValueError('directory cycle')
+            if not resolved.is_dir() and not resolved.is_file():
+                raise ValueError('unsupported link target')
         except (ValueError, RuntimeError, OSError):
             fail('SYMLINK', f'link escapes SDK or cannot resolve: {rel} -> {target}', errors)
 
@@ -159,7 +185,8 @@ def check_symlinks(sdk: Path, errors: list, *, source: Path | None = None,
 def build_lock(sdk: Path, role: str, identities: dict, target_tuple: str | None = None) -> dict:
     files = {}
     official = {}
-    for path, rel in iter_files(sdk):
+    payload = dict((rel, path) for path, rel in iter_files(sdk))
+    for rel, path in payload.items():
         if rel == LOCK_NAME:
             continue
         component = classify(rel)
@@ -169,6 +196,7 @@ def build_lock(sdk: Path, role: str, identities: dict, target_tuple: str | None 
             if target.is_file():
                 digest = sha256_file(target)
         entry = {
+            'type': 'directory' if path.is_dir() else 'file',
             'sha256': digest,
             'component': component,
             'symlink': path.is_symlink(),
@@ -176,6 +204,9 @@ def build_lock(sdk: Path, role: str, identities: dict, target_tuple: str | None 
         }
         if path.is_symlink():
             entry['link_target'] = os.readlink(path)
+            entry['resolved_target'] = path.resolve().relative_to(sdk).as_posix()
+        if path.is_dir():
+            entry['members'] = sorted(name for name in payload if name.startswith(rel + '/'))
         files[rel] = entry
         if component == 'official-retain':
             official[rel] = identities.get('official_retain_reason', 'copied from --from baseline; not replaced this assembly')
@@ -254,6 +285,15 @@ def verify(sdk: Path, lock: dict, pin: dict, identities: dict, errors: list, tar
         if path is not None and rel != LOCK_NAME:
             if bool(entry.get('symlink')) != path.is_symlink():
                 fail('PAYLOAD_TYPE', f'type differs from sealed lock: {rel}', errors)
+            if path.is_symlink() and 'resolved_target' in entry and path.resolve().relative_to(sdk).as_posix() != entry['resolved_target']:
+                fail('SYMLINK', f'resolved target differs from sealed lock: {rel}', errors)
+            if entry.get('type') == 'directory':
+                members = sorted(name for name in on_disk if name.startswith(rel + '/'))
+                if not path.is_dir() or entry.get('sha256') is not None:
+                    fail('PAYLOAD_TYPE', f'directory differs from sealed lock: {rel}', errors)
+                if entry.get('members') != members or any(name not in lock_files for name in members):
+                    fail('PAYLOAD_MEMBERS', f'directory members differ from sealed lock: {rel}', errors)
+                continue
             if not path.is_symlink() and path.is_file() and (
                     ('size' in entry and path.stat().st_size != entry['size']) or
                     ('mode' in entry and path.stat().st_mode & 0o777 != entry['mode'])):
