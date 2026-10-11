@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
+import {load as loadYaml, dump as dumpYaml} from './vendor/js-yaml/js-yaml.mjs';
 import {
   DEFERRED,
   DISCOVERY_FLOOR,
@@ -11,6 +12,7 @@ import {
   GATING,
   GATING_FLOOR,
   REGISTERED,
+  WORKFLOW_TEST_SOURCES,
   validateDrivers,
   validateManifest,
   discoverDriverFiles,
@@ -56,6 +58,20 @@ function literalTestArguments(text) {
     }
   }
   return named;
+}
+
+function sourceGating(name, text) {
+  const registration = WORKFLOW_TEST_SOURCES.find(entry => entry.workflow === name);
+  if (!registration) return [];
+  const workflow = loadYaml(text);
+  const jobs = Object.values(workflow.jobs);
+  assert.match(registration.source_sha, /^[0-9a-f]{40}$/, 'WORKFLOW_TEST_SOURCE_SHA');
+  for (const job of jobs) {
+    assert.deepEqual(job.steps[0], {
+      uses: 'actions/checkout@v7', with: {ref: registration.source_sha},
+    }, 'WORKFLOW_TEST_SOURCE_CHECKOUT');
+  }
+  return registration.gating;
 }
 
 test('the manifest covers every test file in the repository', () => {
@@ -196,8 +212,11 @@ test('ci.yml discovers the shell scripts it lints instead of listing them', asyn
 test('no workflow runs a test file the manifest does not gate', async () => {
   const offenders = [];
   for (const [name, text] of await workflows()) {
+    const sourceFiles = sourceGating(name, text);
     for (const file of literalTestArguments(text)) {
-      if (!GATING.includes(file)) offenders.push(`${name} runs ${file}, which is not in GATING`);
+      if (!GATING.includes(file) && !sourceFiles.includes(file)) {
+        offenders.push(`${name} runs ${file}, which is not in its source's GATING`);
+      }
     }
     for (const [, file] of text.matchAll(/(?:python3|bash)\s+([\w./-]+\.(?:py|sh))/g)) {
       if (!/(?:^|\/)test[_.-]|[._-]test\.sh$|\/tests\//.test(file)) continue;
@@ -206,6 +225,19 @@ test('no workflow runs a test file the manifest does not gate', async () => {
     }
   }
   assert.deepEqual(offenders, [], `\n  ${offenders.join('\n  ')}`);
+});
+
+test('fixed-source workflow registration rejects missing or drifting checkout and stays scoped', async () => {
+  const name = 'darwin-input-consumers.yml';
+  const text = (await workflows()).get(name);
+  assert.deepEqual(sourceGating(name, text), ['ci/release/darwin_consumer_boundary.test.mjs']);
+  assert.deepEqual(sourceGating('other.yml', text), []);
+  for (const withValue of [undefined, {ref: 'master'},
+    {ref: '0'.repeat(40)}, {ref: WORKFLOW_TEST_SOURCES[0].source_sha, path: 'other-source'}]) {
+    const parsed = loadYaml(text);
+    parsed.jobs['native-input'].steps[0].with = withValue;
+    assert.throws(() => sourceGating(name, dumpYaml(parsed)), /WORKFLOW_TEST_SOURCE_CHECKOUT/);
+  }
 });
 
 

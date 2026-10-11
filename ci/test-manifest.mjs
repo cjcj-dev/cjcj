@@ -25,6 +25,16 @@ import fs from 'node:fs';
 export const repoRoot = path.resolve(import.meta.dirname, '..');
 export const REGISTERED = Object.freeze(JSON.parse(fs.readFileSync(new URL('./test-registry.json', import.meta.url), 'utf8')));
 
+// These tests execute in a separately checked-out, fixed product tree. They
+// cannot be in this branch's GATING file list: that would execute a different
+// source identity (or a file that is absent here). The manifest test checks the
+// actual first checkout before recognizing this workflow-specific registration.
+export const WORKFLOW_TEST_SOURCES = Object.freeze([
+  {workflow: 'darwin-input-consumers.yml',
+    source_sha: '255d8c7e1f5e70be69b4cf3e9091514cfb1a4d09',
+    gating: ['ci/release/darwin_consumer_boundary.test.mjs']},
+]);
+
 // The second axis, and the reason it exists. The name patterns above cannot see
 // tests/macro_runtime_path/run.py: a directory of fixtures with one independent
 // driver whose name says nothing about testing. So the driver axis is selected
@@ -36,6 +46,7 @@ export const DRIVERS = Object.freeze(JSON.parse(fs.readFileSync(new URL('./test-
 
 // Run by `node --test` in .github/workflows/ci.yml, via `test-manifest.mjs list`.
 export const GATING = Object.freeze([
+  'ci/release/darwin_workflow_entry.test.mjs',
   'ci/llvm-tuple-layout.test.mjs',
   'ci/abi-migration.test.mjs',
   'ci/llvm-runtime-input.test.mjs',
