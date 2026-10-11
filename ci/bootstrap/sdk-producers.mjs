@@ -129,6 +129,11 @@ async function official(component, directory, identity) {
   await checkLayout();
   for (const [rel] of sourceDirectories.reverse()) await fs.chmod(path.join(artifacts, rel), files[rel].mode);
   if (await fileDigest(source.lock) !== source.lockSha256) reject('DISTRIBUTION_LOCK', component.id, 'source lock changed during copy');
+  // Authenticate the actual copy before publishing any successful receipt.
+  // A valid source does not imply that a legacy file declaration copied it all.
+  const copiedIdentity = await verifyOfficialSdkIdentity({root: artifacts, version: source.version,
+    archive: officialIdentity.archive.path, platform: officialIdentity.platform, readonly});
+  if (canonical(copiedIdentity) !== canonical(officialIdentity)) reject('OFFICIAL_IDENTITY', component.id, 'copied payload identity differs from authenticated source');
   return sealOutput(directory, component, identity, {status: 'complete', rc: 0, kind: 'official-distribution-copy',
     officialIdentity, officialMaterialization: readonly ? 'readonly' : 'verbatim', distribution: {version: source.version, lockSha256: source.lockSha256, reason: source.reason}}, files);
 }
