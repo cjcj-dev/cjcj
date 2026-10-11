@@ -7,7 +7,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {fixture, command} from './fixtures/sdk-plan-fixture.mjs';
-import {readJson, atomicJson, fileDigest} from './sdk-manifest.mjs';
+import {readJson, atomicJson, fileDigest, canonical, objectId, sha256} from './sdk-manifest.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const assemble = (f, args = []) => command(['bash', path.join(here, 'sdk_build.sh'), '--plan', f.planFile, '--to', f.out, ...args]);
 async function observe(f, label, result) {
@@ -15,6 +15,87 @@ async function observe(f, label, result) {
   console.log(`CONSUMER_TARGET_ASSERT_REACHED ${label} rc=${result.rc} evidence=${f.root} stderr=${JSON.stringify(result.stderr)}`);
   return result;
 }
+
+async function recipeInput(label) {
+  const f = await fixture();
+  const assembled = await observe(f, `${label}-qualification`, await assemble(f));
+  assert.equal(assembled.rc, 0, `RECIPE_INPUT_QUALIFICATION ${assembled.stderr}`);
+  const recipe = await readJson(path.join(f.identities.get('runtime').directory, 'sharedbuild-request.json'));
+  return {...f, recipe};
+}
+async function consumeSdk(f, sdk, label) {
+  const recipe = path.join(f.root, `${label}-recipe.json`);
+  // This is a new public CLI request, not a changed frozen component plan or
+  // a rewritten successful output receipt. The original recipe is retained.
+  await atomicJson(recipe, {...f.recipe, sdk});
+  return observe(f, label, await command(['python3', process.env.SDK_SHAREDBUILD_ENGINE,
+    '--remote', '--root', path.join(f.root, `${label}-cache`), '--lane', f.plan.lane,
+    'build', '--recipe', recipe, '--work', path.join(f.root, `${label}-work`)]));
+}
+async function historicalSdk(f, marked, label) {
+  const sdk = path.join(f.root, label), original = await readJson(path.join(f.recipe.sdk, 'SDK.lock.json'));
+  await fs.mkdir(sdk);
+  const files = Object.fromEntries(Object.entries(original.files).map(([rel, row]) => [rel, {sha256: row.sha256}]));
+  for (const rel of Object.keys(files)) {
+    await fs.mkdir(path.dirname(path.join(sdk, rel)), {recursive: true});
+    await fs.copyFile(path.join(f.recipe.sdk, rel), path.join(sdk, rel));
+    await fs.chmod(path.join(sdk, rel), (await fs.stat(path.join(f.recipe.sdk, rel))).mode & 0o777);
+  }
+  const distribution = {version: 'historical-file-only', files: Object.fromEntries(Object.entries(files).map(([rel, row]) => [rel, row.sha256]))};
+  // Standalone historical-format distribution input, authored before it is
+  // consumed. No output.json, execution record or successful producer receipt
+  // is created. SDK DONE authenticates this input's metadata bytes only.
+  const lock = {schema: 'sharedbuild-official-sdk-v1', role: 'host', version: distribution.version,
+    distribution_sha256: objectId(distribution), files, ...(marked ? {layoutVersion: 1} : {})};
+  await fs.writeFile(path.join(sdk, 'SDK.lock.json'), canonical(lock));
+  const inventory = {...distribution.files, 'SDK.lock.json': await fileDigest(path.join(sdk, 'SDK.lock.json'))};
+  const manifest = Object.keys(inventory).sort().map(rel => `${inventory[rel]}  ${rel}\n`).join('');
+  await fs.writeFile(path.join(sdk, 'MANIFEST.sha256'), manifest);
+  await fs.writeFile(path.join(sdk, 'DONE'), `${sha256(manifest)}\n`);
+  return sdk;
+}
+
+test('marked SDK without source layout reaches the public recipe consumer rejection', async () => {
+  const f = await recipeInput('marker'), sdk = await historicalSdk(f, true, 'marked-no-layout');
+  const before = await fs.readFile(path.join(sdk, 'SDK.lock.json'));
+  const result = await consumeSdk(f, sdk, 'marked-no-layout-target');
+  console.log(`TARGET_ASSERTION_BEGIN source-layout-marker rc=${result.rc} stderr=${JSON.stringify(result.stderr)}`);
+  assert.deepEqual({rc: result.rc, diagnostics: result.stderr.split('\n').filter(line => line.startsWith('ERROR:'))},
+    {rc: 1, diagnostics: ['ERROR: SDK_LOCK_REJECT missing source layout']},
+    'source-layout-marker: real CLI must reject specifically at the marked layout obligation');
+  console.log('TARGET_ASSERTION_PASS source-layout-marker');
+  assert.deepEqual(await fs.readFile(path.join(sdk, 'SDK.lock.json')), before);
+});
+
+test('historical unmarked file-only SDK remains a legal public recipe consumer control', async () => {
+  const f = await recipeInput('historical'), sdk = await historicalSdk(f, false, 'unmarked-file-only');
+  const before = await fs.readFile(path.join(sdk, 'SDK.lock.json'));
+  const result = await consumeSdk(f, sdk, 'unmarked-file-only-control');
+  console.log(`TARGET_ASSERTION_BEGIN historical-file-only-control rc=${result.rc}`);
+  assert.equal(result.rc, 0, result.stderr);
+  console.log('TARGET_ASSERTION_PASS historical-file-only-control');
+  assert.deepEqual(await fs.readFile(path.join(sdk, 'SDK.lock.json')), before);
+});
+
+test('publisher reserved metadata remains excluded in the public recipe consumer control', async () => {
+  const f = await recipeInput('reserved-metadata'), source = path.join(f.root, 'retained-metadata-source');
+  await fs.cp(path.join(f.root, 'official'), source, {recursive: true});
+  for (const name of ['SDK.lock.json', 'MANIFEST.sha256', 'DONE']) await fs.writeFile(path.join(source, name), `retained input ${name}\n`);
+  const published = await observe(f, 'reserved-metadata-publisher', await command(['python3', process.env.SDK_SHAREDBUILD_ENGINE,
+    '--remote', '--root', path.join(f.root, 'reserved-metadata-depot'), '--lane', f.plan.lane,
+    'sdk-publish', '--source', source, '--version', 'reserved-metadata-control']));
+  assert.equal(published.rc, 0, published.stderr);
+  const sdk = published.stdout.trim(), lock = await readJson(path.join(sdk, 'SDK.lock.json'));
+  const result = await consumeSdk(f, sdk, 'reserved-metadata-consumer-control');
+  console.log(`TARGET_ASSERTION_BEGIN reserved-metadata-control rc=${result.rc}`);
+  assert.equal(result.rc, 0, result.stderr);
+  assert.equal(lock.layoutVersion, 1); assert.ok(lock.source_layout);
+  for (const name of ['SDK.lock.json', 'MANIFEST.sha256', 'DONE']) {
+    assert.equal(Object.hasOwn(lock.files, name), false);
+    assert.equal(Object.hasOwn(lock.source_layout, name), false);
+  }
+  console.log('TARGET_ASSERTION_PASS reserved-metadata-control');
+});
 
 test('frozen official consumer rejects a changed source mode before sealing its copy', async () => {
   const f = await fixture(); const original = await observe(f, 'official-control', await assemble(f));
