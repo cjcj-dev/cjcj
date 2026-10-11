@@ -8,7 +8,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
-import {bootstrapFixture, bootstrapArgs, phaseIdentities, installedMembers, write} from './fixtures/bootstrap-consumer-fixture.mjs';
+import {bootstrapFixture, bootstrapArgs, qualifyBootstrapPhases, phaseIdentities, installedMembers, write} from './fixtures/bootstrap-consumer-fixture.mjs';
 import {fixture, assemble, verify, good, rejected, fileDigest, readJson, atomicJson, tuple} from './fixtures/sdk-consumer-fixture.mjs';
 import {buildIdentities, objectId} from './sdk-manifest.mjs';
 const exec = promisify(execFile), here = path.dirname(fileURLToPath(import.meta.url));
@@ -147,6 +147,7 @@ async function dryContract(log, f, env = process.env) {
     'runtime-link-cleared', 'initial-std-built', 'bootstrap-sdk-removed', 'runtime-link-cleared', 'phase:stage1-initial',
     'executable', 'stdlib-built', 'phase:stage1-std', 'executable']);
   const phaseResults = {};
+  await qualifyBootstrapPhases(f, ['stage0', 'stage0-run', 'std-bootstrap', 'stage1-initial', 'stage1-std']);
   for (const phase of ['stage0', 'stage0-run', 'std-bootstrap', 'stage1-initial', 'stage1-std']) {
     phaseResults[phase] = await phaseIdentities(f, phase, process.env.SDK_PHASE_PRODUCT_ROOT || path.join(f.src, 'ci/bootstrap'));
   }
@@ -537,6 +538,15 @@ const preciseFault = {
   'fault-shim-wiring': /bootstrap-shim/, 'fault-forensic-drop-g': /forensic-g|forensic-trimpath/,
 };
 const positives = {
+  'check-phase-results': async () => {
+    const f = await bootstrapFixture(); currentRoot = f.root;
+    const phases = ['stage1-initial', 'stage1-std'];
+    await qualifyBootstrapPhases(f, phases);
+    const initial = f.phaseQualifications.get(phases[0]), next = f.phaseQualifications.get(phases[1]);
+    assert.notEqual(initial.stdBuildId, next.stdBuildId, 'independent legal phases require distinct genuine std producer identities');
+    assert.notEqual(initial.stdModuleSha256, next.stdModuleSha256, 'independent legal phases require distinct installed std bytes');
+    for (const phase of phases) await phaseIdentities(f, phase, process.env.SDK_PHASE_PRODUCT_ROOT || path.join(f.src, 'ci/bootstrap'));
+  },
   'check-std-compiler-identity': async () => {good(await isolation('direct')); good(await isolation('runner'));},
   'check-tuple-with-so': tupleWithSo, 'check-exit-receipts': () => exitReceipts(args[1]), 'check-sdk-literal-prefix': literalStd,
   'check-dry-contract': async () => {const f = await bootstrapFixture(); currentRoot = f.root; await dryContract(await dry(f), f);},

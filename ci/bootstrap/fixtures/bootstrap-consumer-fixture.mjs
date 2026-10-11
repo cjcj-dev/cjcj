@@ -97,38 +97,89 @@ export function bootstrapArgs(f, phase = 'all') {
     '--stage', phase, '--dry-run'];
 }
 let phaseSequence = 0;
+export async function qualifyBootstrapPhases(f, phases) {
+  f.phaseQualifications ||= new Map();
+  // Use the direct SDK CLI, independently of bootstrap-sdk's phase selector.
+  // Complete every permitted alternate phase before running a selected-phase
+  // target. A wrong selection must not be rejected merely for absent receipts.
+  for (const phase of phases) {
+    if (f.phaseQualifications.has(phase)) continue;
+    const plan = f.bundle.phases[phase], expected = buildIdentities(plan);
+    const label = `phase-${phase}-qualification`, planFile = path.join(f.root, `${label}.json`);
+    const out = path.join(f.root, `${label}-sdk`);
+    await atomicJson(planFile, plan);
+    const result = await observe(f.host, `${label}-assembly`, [process.execPath,
+      path.join(f.src, 'ci/bootstrap/toolchain-sdk.mjs'), '--plan', planFile, '--out', out]);
+    good(result); // A failing legal control is a contract/input failure, never a phase cut success.
+    const manifest = await readJson(path.join(out, 'SDK.manifest.json')), outputs = new Map();
+    assert.equal(manifest.planSha256, objectId(plan));
+    for (const component of plan.components) {
+      const receipt = await readOutput(component.producer.receipt || expected.get(component.id).directory,
+        component, expected.get(component.id));
+      outputs.set(component.id, receipt);
+      assert.equal(manifest.components[component.id].buildId, receipt.buildId);
+      assert.equal(manifest.components[component.id].receiptSha256, receipt.receiptSha256);
+    }
+    const files = resolveFiles(plan, outputs), module = `modules/${tuple}/std/core/core.Int64.ti`;
+    assert.deepEqual(manifest.files, {...files});
+    const stdModuleSha256 = await fileDigest(path.join(out, module));
+    const compilerSha256 = await fileDigest(path.join(out, 'bin/cjc'));
+    const stdProducer = await readJson(path.join(out, 'std-producer.json'));
+    assert.equal(stdModuleSha256, files[module].sha256);
+    assert.equal(stdProducer.compiler_sha256, compilerSha256, `PHASE_CONTROL_STD_CJC phase=${phase}`);
+    const qualified = {phase, planSha256: objectId(plan), stdModuleSha256, compilerSha256,
+      stdCompilerSha256: stdProducer.compiler_sha256, stdBuildId: outputs.get('std').buildId,
+      files, receipts: Object.fromEntries([...outputs].map(([id, receipt]) => [id,
+        {buildId: receipt.buildId, receiptSha256: receipt.receiptSha256}]))};
+    f.phaseQualifications.set(phase, qualified);
+    await atomicJson(path.join(f.root, `${label}-result.json`), qualified);
+    console.log(`PHASE_INPUT_QUALIFIED ${JSON.stringify(qualified)}`);
+  }
+}
+async function phaseObservation(operation) {
+  try { return {value: await operation()}; }
+  catch (error) { return {error: {code: error.code ?? null, message: error.message}}; }
+}
 export async function phaseIdentities(f, phase, productRoot = path.join(f.src, 'ci/bootstrap')) {
-  const label = `phase-${phase}-${++phaseSequence}`, dryOut = path.join(f.root, `${label}-dry`);
-  const result = await observe(f.host, `${label}-identities`, [process.execPath, path.join(productRoot, 'bootstrap-sdk.mjs'),
+  const qualified = f.phaseQualifications?.get(phase);
+  assert.ok(qualified, `phase ${phase} and all cut alternates must be independently qualified first`);
+  const label = `phase-${phase}-${++phaseSequence}`, out = path.join(f.root, `${label}-sdk`);
+  const result = await observe(f.host, `${label}-assemble`, [process.execPath, path.join(productRoot, 'bootstrap-sdk.mjs'),
+    '--plans', f.plans, '--phase', phase, '--out', out]);
+  // Read actual output before any fatal assertion. Missing output is recorded,
+  // not thrown by a stat/readFile that would hide the selected-phase assertion.
+  const manifest = await phaseObservation(() => readJson(path.join(out, 'SDK.manifest.json')));
+  const std = await phaseObservation(() => fileDigest(path.join(out, `modules/${tuple}/std/core/core.Int64.ti`)));
+  const compiler = await phaseObservation(() => fileDigest(path.join(out, 'bin/cjc')));
+  const producer = await phaseObservation(() => readJson(path.join(out, 'std-producer.json')));
+  const observation = {phase, result, manifest, std, compiler, producer};
+  await atomicJson(path.join(f.root, `${label}-observation.json`), observation);
+  console.log(`PHASE_RESULT_OBSERVED ${JSON.stringify(observation)}`);
+  assert.equal(result.rc, 0, `PHASE_RESULT_EXECUTION_QUALIFICATION: a missing receipt/loading/STD_CJC failure is not phase selection evidence: ${result.stderr}`);
+  const actual = {planSha256: manifest.value?.planSha256, stdModuleSha256: std.value,
+    compilerSha256: compiler.value, stdCompilerSha256: producer.value?.compiler_sha256,
+    stdBuildId: manifest.value?.components.std?.buildId};
+  const wanted = {planSha256: qualified.planSha256, stdModuleSha256: qualified.stdModuleSha256,
+    compilerSha256: qualified.compilerSha256, stdCompilerSha256: qualified.stdCompilerSha256, stdBuildId: qualified.stdBuildId};
+  console.log(`TARGET_ASSERTION_BEGIN bootstrap-phase-result phase=${phase} actual=${JSON.stringify(actual)} expected=${JSON.stringify(wanted)}`);
+  assert.deepEqual(actual, wanted, 'bootstrap-phase-result: selected phase must install its own authenticated std and compiler identities');
+  console.log(`TARGET_ASSERTION_PASS bootstrap-phase-result phase=${phase}`);
+  assert.deepEqual(manifest.value.files, {...qualified.files});
+  for (const [id, receipt] of Object.entries(qualified.receipts)) {
+    assert.equal(manifest.value.components[id].buildId, receipt.buildId);
+    assert.equal(manifest.value.components[id].receiptSha256, receipt.receiptSha256);
+  }
+  const dryOut = path.join(f.root, `${label}-dry`);
+  const dryResult = await observe(f.host, `${label}-identities`, [process.execPath, path.join(productRoot, 'bootstrap-sdk.mjs'),
     '--plans', f.plans, '--phase', phase, '--out', dryOut, '--dry-run']);
-  good(result);
-  const rows = JSON.parse(result.stdout.trim().split('\n').at(-1)).components;
+  good(dryResult);
+  const rows = JSON.parse(dryResult.stdout.trim().split('\n').at(-1)).components;
   const expected = buildIdentities(f.bundle.phases[phase]);
   console.log(`ASSERT bootstrap-phase-identities executed phase=${phase} rows=${JSON.stringify(rows)}`);
   assert.deepEqual(Object.fromEntries(rows.map(row => [row.component, {buildId: row.buildId, directory: row.directory, dependencies: row.dependencies}])),
     Object.fromEntries([...expected].map(([id, row]) => [id, {buildId: row.buildId, directory: row.directory, dependencies: row.dependencies}])));
   await assert.rejects(fs.access(dryOut));
-  // Observe the same phase through its normal product entry too. A computed
-  // dry ID alone cannot prove that its producer result enters installation.
-  const out = path.join(f.root, `${label}-sdk`);
-  good(await observe(f.host, `${label}-assemble`, [process.execPath, path.join(productRoot, 'bootstrap-sdk.mjs'),
-    '--plans', f.plans, '--phase', phase, '--out', out]));
-  const manifest = await readJson(path.join(out, 'SDK.manifest.json'));
-  assert.equal(manifest.planSha256, objectId(f.bundle.phases[phase]));
-  const outputs = new Map();
-  for (const component of f.bundle.phases[phase].components) {
-    const identity = expected.get(component.id);
-    const receipt = await readOutput(component.producer.receipt || identity.directory, component, identity);
-    outputs.set(component.id, receipt);
-    assert.equal(manifest.components[component.id].buildId, receipt.buildId);
-    assert.equal(manifest.components[component.id].receiptSha256, receipt.receiptSha256);
-  }
-  const files = resolveFiles(f.bundle.phases[phase], outputs);
-  assert.deepEqual(manifest.files, {...files});
-  const module = `modules/${tuple}/std/core/core.Int64.ti`, installed = await fileDigest(path.join(out, module));
-  assert.equal(installed, files[module].sha256, 'selected phase std producer bytes must enter installation');
-  console.log(`ASSERT bootstrap-phase-result executed phase=${phase} std_build_id=${outputs.get('std').buildId} std_module_sha256=${installed}`);
-  return {stdModuleSha256: installed, stdBuildId: outputs.get('std').buildId};
+  return {stdModuleSha256: actual.stdModuleSha256, stdBuildId: actual.stdBuildId};
 }
 export async function installedMembers(f, roles) {
   const manifest = await readJson(path.join(f.out, 'SDK.manifest.json'));
