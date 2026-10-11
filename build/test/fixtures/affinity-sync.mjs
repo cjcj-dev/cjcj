@@ -28,7 +28,7 @@ if (path.basename(process.argv[1]) === 'taskset') {
 } else {
   const timeoutMs = Number(process.argv[2]);
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) throw new Error('invalid fixture timeout');
-  // make executes this recipe directly; the PID is read, never synthesized.
+  // The recipe shell execs this helper, so its parent is the real make.
   fs.writeFileSync(ready, `${process.ppid}\n`);
   const state = await new Promise(resolve => {
     let timer;

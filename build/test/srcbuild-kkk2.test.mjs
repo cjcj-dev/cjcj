@@ -243,7 +243,7 @@ function runAffinityFixture(t) {
   const helper = path.join(repoRoot, 'build/test/fixtures/affinity-sync.mjs');
   const wrapper = fs.readFileSync(helper, 'utf8').replace(/^#![^\n]+/, `#!${process.execPath}`);
   fs.writeFileSync(path.join(fakeBin, 'taskset'), wrapper, {mode: 0o755});
-  fs.writeFileSync(path.join(root, 'Makefile'), `all:\n\t"${process.execPath}" "${helper}" 15000\n`);
+  fs.writeFileSync(path.join(root, 'Makefile'), `all:\n\texec "${process.execPath}" "${helper}" 15000\n`);
   const invoke = `${shellFunction('elapsed_seconds')}\n`
     + `${shellFunction('capture_build_child_affinity')}\n`
     + `${shellFunction('run_step')}\n`
@@ -293,7 +293,7 @@ test('source-build affinity fixture releases real make on an observation timeout
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'source-build-affinity-timeout-'));
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));
   const helper = path.join(repoRoot, 'build/test/fixtures/affinity-sync.mjs');
-  fs.writeFileSync(path.join(root, 'Makefile'), `all:\n\t"${process.execPath}" "${helper}" 100\n`);
+  fs.writeFileSync(path.join(root, 'Makefile'), `all:\n\texec "${process.execPath}" "${helper}" 100\n`);
   const result = spawnSync('/usr/bin/make', ['-C', root, 'DESTDIR=', 'all'], {
     encoding: 'utf8', timeout: 5000,
     env: {...process.env, AFFINITY_FIXTURE_ROOT: root},
