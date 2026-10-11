@@ -153,7 +153,7 @@ export async function qualifyBootstrapPhases(f, phases) {
     assert.equal(stdProducer.compiler_sha256, compilerSha256, `PHASE_CONTROL_STD_CJC phase=${phase}`);
     const qualified = {phase, planSha256: objectId(plan), stdModuleSha256, compilerSha256,
       stdCompilerSha256: stdProducer.compiler_sha256, stdBuildId: outputs.get('std').buildId,
-      files, receipts: Object.fromEntries([...outputs].map(([id, receipt]) => [id,
+      files: {...files}, receipts: Object.fromEntries([...outputs].map(([id, receipt]) => [id,
         {buildId: receipt.buildId, receiptSha256: receipt.receiptSha256}]))};
     f.phaseQualifications.set(phase, qualified);
     const qualificationFile = path.join(f.root, `${label}-result.json`);
