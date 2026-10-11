@@ -102,23 +102,66 @@ test('publisher reserved metadata remains excluded in the public recipe consumer
 });
 
 test('frozen official consumer rejects a changed source mode before sealing its copy', async () => {
-  const f = await fixture(); const original = await observe(f, 'official-control', await assemble(f));
+  const f = await fixture({privateOfficial: true});
+  const original = await observe(f, 'official-control', await assemble(f));
   assert.equal(original.rc, 0, original.stderr);
   const official = f.plan.components.find(row => row.id === 'official'), directory = f.identities.get('official').directory;
-  const file = path.join(official.source.root, 'tools/bin/cjpm'), mode = (await fs.stat(file)).mode & 0o777;
+  const file = path.join(official.source.root, 'tools/bin/cjpm');
+  const retainedFile = path.join(f.originalOfficialSource.root, 'tools/bin/cjpm');
+  const fields = async input => {
+    const stat = await fs.lstat(input, {bigint: true});
+    return {device: String(stat.dev), inode: String(stat.ino), links: String(stat.nlink),
+      mode: Number(stat.mode & 0o777n), size: String(stat.size), mtime: String(stat.mtimeNs),
+      regular: stat.isFile(), sha256: await fileDigest(input)};
+  };
+  const before = await fields(file), retainedBefore = await fields(retainedFile);
+  assert.equal(await fs.realpath(file), file, 'mode target must be a physical private file');
+  assert.ok(file.startsWith(`${await fs.realpath(f.root)}${path.sep}`), 'mode target must belong to this fixture');
+  assert.equal(before.regular, true); assert.equal(before.links, '1', 'no hard-linked source surrogate');
+  assert.notDeepEqual([before.device, before.inode], [retainedBefore.device, retainedBefore.inode], 'private source must not alias retained input');
   const lockSha = await fileDigest(official.source.lock);
-  await fs.rename(directory, `${directory}-saved`); await fs.chmod(file, mode ^ 0o100);
+  const retainedLockSha = await fileDigest(f.originalOfficialSource.lock);
+  const saved = `${directory}-saved`, rejected = `${directory}-mode-rejected`;
   f.out = path.join(f.root, 'changed-mode-sdk');
-  let bad;
+  let savedDirectory = false;
   try {
-    bad = await observe(f, 'official-mode-target', await assemble(f));
-    assert.notEqual(bad.rc, 0, bad.stderr);
-    assert.match(bad.stderr, /rule=DISTRIBUTION_FILE component=official size\/mode tools\/bin\/cjpm/);
+    await fs.rename(directory, saved); savedDirectory = true;
+    await fs.chmod(file, before.mode ^ 0o100);
+    const bad = await observe(f, 'official-mode-target', await assemble(f));
+    // Read the unrelated retained control while the private source is changed.
+    // Record both observations before a fatal assertion can obscure either.
+    const retainedDuring = await fields(retainedFile);
+    await atomicJson(path.join(f.root, 'official-mode-observation.json'), {before, retainedBefore, retainedDuring, bad});
+    console.log(`TARGET_ASSERTION_BEGIN official-source-mode rc=${bad.rc} retained=${JSON.stringify(retainedDuring)}`);
+    assert.equal(bad.rc, 1, bad.stderr);
+    const expected = `official archive payload mismatch: tools/bin/cjpm mode expected=${before.mode} actual=${before.mode ^ 0o100}`;
+    assert.ok(bad.stderr.includes('OFFICIAL_IDENTITY') && bad.stderr.includes(expected), bad.stderr);
+    console.log('TARGET_ASSERTION_PASS official-source-mode');
     await assert.rejects(fs.access(f.out));
-  } finally { await fs.chmod(file, mode); }
+    console.log('TARGET_ASSERTION_BEGIN retained-source-unchanged');
+    assert.deepEqual(retainedDuring, retainedBefore, 'negative source test must leave retained input unchanged');
+    assert.equal(await fileDigest(f.originalOfficialSource.lock), retainedLockSha);
+    console.log('TARGET_ASSERTION_PASS retained-source-unchanged');
+  } finally {
+    // Protect every mutation, including rename/chmod failures before execution.
+    // Keep a failed attempt intact; restore the original successful directory.
+    try { await fs.chmod(file, before.mode); }
+    finally {
+      if (savedDirectory) {
+        try { await fs.rename(directory, rejected); }
+        catch (error) { if (error.code !== 'ENOENT') throw error; }
+        await fs.rename(saved, directory);
+      }
+    }
+  }
+  assert.deepEqual(await fields(file), before, 'private source fields restored');
+  assert.deepEqual(await fields(retainedFile), retainedBefore);
+  assert.equal(await fileDigest(f.originalOfficialSource.lock), retainedLockSha);
   assert.equal(await fileDigest(official.source.lock), lockSha);
   f.out = path.join(f.root, 'restored-mode-sdk');
-  const restored = await observe(f, 'official-mode-restored', await assemble(f, ['--resume-failed'])); assert.equal(restored.rc, 0, restored.stderr);
+  const restored = await observe(f, 'official-mode-restored', await assemble(f));
+  assert.equal(restored.rc, 0, restored.stderr);
+  console.log('TARGET_ASSERTION_PASS official-source-mode-restored');
 });
 
 test('real sharedbuild recipe consumes the complete sealed entity layout', async () => {

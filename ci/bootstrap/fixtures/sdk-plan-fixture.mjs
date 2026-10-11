@@ -9,7 +9,7 @@ import {fileURLToPath} from 'node:url';
 import {PLAN_SCHEMA, buildIdentities, execute, fileDigest, atomicJson} from '../sdk-manifest.mjs';
 import {freezeSdkPlan} from '../freeze-sdk-plan.mjs';
 import {SDK_TEST_ENGINE_COMMIT, SDK_TEST_ENGINE_TREE} from '../prepare-sdk-test-inputs.mjs';
-import {officialFixtureSource, unavailableOfficialMutation} from './sdk-official-fixture.mjs';
+import {officialFixtureSource, privateOfficialFixtureSource, unavailableOfficialMutation} from './sdk-official-fixture.mjs';
 const here = path.dirname(fileURLToPath(new URL('../toolchain-sdk.mjs', import.meta.url)));
 const engine = process.env.SDK_SHAREDBUILD_ENGINE;
 const testRoot = process.env.SDK_MANIFEST_TEST_ROOT;
@@ -41,18 +41,17 @@ export async function sourceRepository(root, name, overrides = {}) {
     tree: (await execute('git', ['-C', repo, 'rev-parse', 'HEAD^{tree}'])).stdout.trim()};
 }
 export async function fixture({role = 'target', sources: sourceOverrides = {}, sourceNames = {}, parameters = {}, prepareOfficial,
-  colourReference = 'runtime.c', runtimeLayout} = {}) {
+  colourReference = 'runtime.c', runtimeLayout, privateOfficial = false} = {}) {
   assert.ok(engine && testRoot, 'SDK_SHAREDBUILD_ENGINE and SDK_MANIFEST_TEST_ROOT must name remote isolated inputs');
   assert.ok(['host', 'target'].includes(role));
   // A callback that modifies the official release cannot borrow its proof.
   // Keep those cases pending rather than call their targets on illegal inputs.
   if (prepareOfficial) unavailableOfficialMutation('prepareOfficial changes the authenticated release payload');
-  const officialSource = await officialFixtureSource();
+  const originalOfficialSource = await officialFixtureSource();
   const root = await fs.mkdtemp(path.join(testRoot, 'sdk-manifest-'));
   const sources = {};
   for (const name of ['runtime', 'compiler', 'llvm', 'std']) sources[name] = await sourceRepository(root, sourceNames[name] || name, sourceOverrides[name]);
   const native = path.join(root, 'native'); await fs.mkdir(native);
-  const seed = officialSource.root;
   const colour = path.join(native, 'colour.so');
   assert.equal((await command(['cc', '-shared', '-fPIC', '-DFIXTURE_COLOUR=1', path.join(sources.runtime.repo, colourReference), '-o', colour])).rc, 0);
   const pin = path.join(root, 'runtime.env'); await write(pin, `RUNTIME_REF=${sources.runtime.commit}\n`);
@@ -62,6 +61,9 @@ export async function fixture({role = 'target', sources: sourceOverrides = {}, s
   assert.equal(producerVersion, SDK_TEST_ENGINE_COMMIT);
   assert.equal((await execute('git', ['-C', producerRoot, 'rev-parse', 'HEAD^{tree}'])).stdout.trim(), SDK_TEST_ENGINE_TREE);
   assert.equal((await execute('git', ['-C', producerRoot, 'status', '--porcelain', '--untracked-files=all'])).stdout.trim(), '');
+  const officialSource = privateOfficial
+    ? await privateOfficialFixtureSource(originalOfficialSource, root, engine) : originalOfficialSource;
+  const seed = officialSource.root;
   const frozenTools = {};
   for (const name of ['python3', 'node', 'git', 'bash', 'tar', 'cmake', 'clang', 'clang++', 'cc', 'ar']) {
     const location = (await execute('sh', ['-c', 'command -v "$1"', 'fixture-tool', name])).stdout.trim();
@@ -76,7 +78,11 @@ export async function fixture({role = 'target', sources: sourceOverrides = {}, s
   const retained = {id: 'official', roles: ['cjpm', 'official-host'], domain: 'host', source: officialSource,
     config: {host: plan.platform, target: plan.platform, options: {}, tools: {git: frozenTools.git}},
     producer: {adapter: 'official', version: productVersion, repository: productRepository}, dependencies: [],
-    install: [{from: '', to: '', exclude: ['bin', 'lib', 'runtime', 'modules', 'third_party']}]};
+    // This small native fixture consumes cjpm/envsetup and their host support,
+    // but supplies its own compiler/runtime/std/LLVM/AST. The real cjdb alias
+    // requires the excluded official LLDB, outside this fixture's consumers.
+    // Full official and real cjdb suites use their own complete install maps.
+    install: [{from: '', to: '', exclude: ['bin', 'lib', 'runtime', 'modules', 'third_party', 'tools/bin/cjdb']}]};
   plan.components.push(retained);
   for (const [id, roles, source, mode, dependencies, install] of [
     ['ast', ['ast'], sources.std, 'ast', ['official'], [{from: 'libcangjie-ast-support.a', to: `lib/${tuple}/libcangjie-ast-support.a`}]],
@@ -102,5 +108,5 @@ export async function fixture({role = 'target', sources: sourceOverrides = {}, s
   const {plan: frozen} = await freezeSdkPlan({...plan, schema: 'toolchain-sdk-intent-v1'});
   const identities = buildIdentities(frozen);
   const planFile = path.join(root, 'plan.json'); await atomicJson(planFile, frozen);
-  return {root, plan: frozen, planFile, identities, out: path.join(root, 'sdk'), sources, officialSource};
+  return {root, plan: frozen, planFile, identities, out: path.join(root, 'sdk'), sources, officialSource, originalOfficialSource};
 }
