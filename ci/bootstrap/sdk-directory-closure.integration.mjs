@@ -6,7 +6,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {fixture, command} from './fixtures/sdk-plan-fixture.mjs';
-import {atomicJson, readJson, fileDigest, buildIdentities} from './sdk-manifest.mjs';
+import {atomicJson, readJson, fileDigest, buildIdentities, readOutput, objectId} from './sdk-manifest.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url));
 async function observe(f, label, result) {
   await atomicJson(path.join(f.root, `${label}.json`), result);
@@ -40,6 +40,65 @@ async function verify(f, kind, label) {
   return observe(f, `${label}-${kind}`, await command(argv));
 }
 
+// Observe failures too: an absent installed directory must reach the directory
+// obligation assertion, rather than throw from stat or an earlier rc assertion.
+async function capture(operation) {
+  try { return {value: await operation()}; }
+  catch (error) { return {error: {code: error.code ?? null, message: error.message}}; }
+}
+async function directoryObservation(root, rel) {
+  return capture(async () => {
+    const stat = await fs.lstat(path.join(root, rel));
+    return {type: stat.isDirectory() ? 'directory' : stat.isSymbolicLink() ? 'symlink' : 'file', mode: stat.mode & 0o777};
+  });
+}
+async function emptyDirectoryResult(f, result) {
+  const component = f.plan.components.find(row => row.id === 'official');
+  const identity = f.identities.get('official');
+  const source = await capture(() => readJson(path.join(f.depot, 'SDK.lock.json')));
+  const receipt = await capture(() => readOutput(component.producer.receipt || identity.directory, component, identity));
+  const resolved = await capture(() => readJson(path.join(f.plan.buildRoot, `resolved-${objectId(f.plan)}.json`)));
+  const manifest = await capture(() => readJson(path.join(f.out, 'SDK.manifest.json')));
+  const lock = await capture(() => readJson(path.join(f.out, 'SDK.lock.json')));
+  const parent = path.dirname(f.out), prefix = `${path.basename(f.out)}.staging-`;
+  const names = await capture(() => fs.readdir(parent));
+  const staging = (names.value || []).filter(name => name.startsWith(prefix) && !name.endsWith('.failure.json'));
+  const rows = [];
+  for (const [rel, sourceMode] of [['tools/empty', 0o750], ['tools/empty/leaf', 0o751]]) {
+    rows.push({rel, sourceMode, source: source.value?.source_layout?.[rel], receipt: receipt.value?.files[rel],
+      resolved: resolved.value?.files[rel], manifest: manifest.value?.files[rel], lock: lock.value?.files[rel],
+      artifact: receipt.value ? await directoryObservation(receipt.value.artifacts, rel) : null,
+      installed: await directoryObservation(f.out, rel),
+      staging: await Promise.all(staging.map(async name => ({root: path.join(parent, name),
+        directory: await directoryObservation(path.join(parent, name), rel)})))});
+  }
+  const observed = {assembly: result, source, receipt, resolved, manifest, lock, rows};
+  await atomicJson(path.join(f.root, 'empty-directory-observation.json'), observed);
+  console.log(`DIRECTORY_RESULT_OBSERVED ${JSON.stringify(observed)}`);
+  // These are input qualifications, evaluated only after all product results
+  // are saved. They distinguish missing receipts or unrelated producer failures
+  // from the authenticated directory preservation obligation.
+  for (const row of rows) assert.equal(row.source?.type, 'directory', `DIRECTORY_INPUT_QUALIFICATION ${row.rel}`);
+  assert.ok(receipt.value, `DIRECTORY_RECEIPT_QUALIFICATION ${JSON.stringify(receipt.error)} assembly=${JSON.stringify(result)}`);
+  const directoryFailure = result.rc === 1 && rows.some(({rel}) =>
+    result.stderr.split('\n').some(line => line.includes(rel) &&
+      (/rule=PAYLOAD_(?:TYPE|MODE|MEMBERS)\b/.test(line) || /ENOENT.*(?:lstat|stat|chmod)/.test(line))));
+  assert.ok(result.rc === 0 || directoryFailure,
+    `DIRECTORY_ASSEMBLY_UNRELATED_FAILURE ${JSON.stringify(result)}`);
+  const preserved = rows.every(row => {
+    const mode = row.sourceMode & ~0o222;
+    const sealed = entry => entry?.type === 'directory' && entry.sha256 === null && entry.mode === mode;
+    return row.source.mode === row.sourceMode && sealed(row.receipt) && sealed(row.resolved)
+      && row.artifact?.value?.type === 'directory' && row.artifact.value.mode === mode
+      && sealed(row.manifest) && sealed(row.lock)
+      && row.installed.value?.type === 'directory' && row.installed.value.mode === mode;
+  });
+  console.log(`TARGET_ASSERTION_BEGIN authenticated-empty-directory-preservation rc=${result.rc} preserved=${preserved}`);
+  assert.equal(preserved, true, 'authenticated-empty-directory-preservation: original source, producer, resolved manifest and installed SDK must retain both directories');
+  console.log('TARGET_ASSERTION_PASS authenticated-empty-directory-preservation');
+  return {receipt: receipt.value, manifest: manifest.value, lock: lock.value, depotLock: source.value};
+}
+
 test('real final SDK preserves authenticated empty directories and readonly source modes', async () => {
   const existing = process.env.SDK_DIRECTORY_EXISTING;
   const plan = existing ? await readJson(path.join(existing, 'plan.json')) : null;
@@ -47,11 +106,8 @@ test('real final SDK preserves authenticated empty directories and readonly sour
     depot: plan.components.find(row => row.id === 'official').source.root} : await directoryFixture();
   const result = existing ? await readJson(path.join(existing, 'final-assembly.json')) : await observe(f, 'final-assembly', await assemble(f));
   if (existing) console.log(`REUSED_COMPLETED_ASSEMBLY evidence=${existing} rc=${result.rc}`);
+  const {depotLock, receipt, manifest, lock} = await emptyDirectoryResult(f, result);
   assert.equal(result.rc, 0, result.stderr);
-  const depotLock = await readJson(path.join(f.depot, 'SDK.lock.json'));
-  const receipt = await readJson(path.join(f.identities.get('official').directory, 'output.json'));
-  const manifest = await readJson(path.join(f.out, 'SDK.manifest.json'));
-  const lock = await readJson(path.join(f.out, 'SDK.lock.json'));
   for (const [rel, sourceMode] of [['tools/empty', 0o750], ['tools/empty/leaf', 0o751]]) {
     const expectedMode = sourceMode & ~0o222;
     const row = {rel, source: depotLock.source_layout[rel], receipt: receipt.files[rel], manifest: manifest.files[rel], lock: lock.files[rel],
