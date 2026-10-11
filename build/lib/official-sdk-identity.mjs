@@ -142,7 +142,7 @@ export async function verifyOfficialSdkIdentity({root, version, archive, platfor
     throw new Error('OFFICIAL_IDENTITY original archive differs from pinned release');
   }
   const {spec} = getTarget(platform);
-  const payload = await execute('python3', ['-c', archivePayload, archive, root, readonly ? '1' : '0', `cjc${spec.exeSuffix}`],
+  const payload = await execute('python3', ['-I', '-c', archivePayload, archive, root, readonly ? '1' : '0', `cjc${spec.exeSuffix}`],
     {maxBuffer: 1024 * 1024, timeout: 120000});
   const compiler = JSON.parse(payload.stdout);
   const environment = {...process.env, CANGJIE_HOME: root};
