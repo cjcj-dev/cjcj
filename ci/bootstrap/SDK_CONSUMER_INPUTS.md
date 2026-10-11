@@ -8,14 +8,13 @@ There is no loose `--from`/`--std`/`--llvm-tuple` assembly route.
 All entries require a private `SDK_MANIFEST_TEST_ROOT`, private `TMPDIR` and an
 already provisioned `SDK_SHAREDBUILD_ENGINE`. The qualifier
 `prepare-sdk-test-inputs.mjs` checks the actual private tools checkout at commit
-`629d2f5bf3deb8df90e9c9e155a8f914c7d6c801`, tree
-`cebdae8acc5349a285ddc5f0f605aa64b1909ca9`, including HEAD, tree, clean status and
+`662b51ce8e4337a5fb034ed8d2cf46e1de26eb00`, tree
+`5bbb4acfbdfaf4ebf02d9a8b3204ca44a7545489`, including HEAD, tree, clean status and
 `ts/src/sharedbuild/main.py` path. It qualifies this supplied entity; it does not
 supply or download an engine.
-The currently retained private checkout is
-`/root/cj_build/tools_wt/sym_cjcj_934_implement_r6098289478`; its engine entry is
-`ts/src/sharedbuild/main.py`. Local existence does not provision that checkout
-or its dependencies on a later execution host.
+Supply a complete, clean private checkout of this fixed candidate; its engine
+entry is `ts/src/sharedbuild/main.py`. An older retained checkout does not
+qualify this combination or provision its dependencies on an execution host.
 
 For subsequent authorized private execution, use that fixed tools entity and
 its existing `main.py` transport (`transport` at lines 629–641): the engine

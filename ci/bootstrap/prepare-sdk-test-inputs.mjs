@@ -8,8 +8,8 @@ import {parseArgs} from 'node:util';
 import {fileURLToPath} from 'node:url';
 import {execute, fileDigest, atomicJson} from './sdk-manifest.mjs';
 
-export const SDK_TEST_ENGINE_COMMIT = '629d2f5bf3deb8df90e9c9e155a8f914c7d6c801';
-export const SDK_TEST_ENGINE_TREE = 'cebdae8acc5349a285ddc5f0f605aa64b1909ca9';
+export const SDK_TEST_ENGINE_COMMIT = '662b51ce8e4337a5fb034ed8d2cf46e1de26eb00';
+export const SDK_TEST_ENGINE_TREE = '5bbb4acfbdfaf4ebf02d9a8b3204ca44a7545489';
 export async function prepareSdkTestInputs({engine, root, environmentFile}) {
   assert.ok(engine && root, 'a provisioned fixed SDK_SHAREDBUILD_ENGINE and private root are required');
   assert.ok(path.isAbsolute(engine) && path.isAbsolute(root), 'engine and root must be absolute');
