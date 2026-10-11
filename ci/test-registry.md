@@ -5,12 +5,15 @@ both directions. Default Node contracts live in `GATING`; `DEFERRED` records
 their required inputs and actual prior invocation results. Python, shell,
 Cangjie and environment-bound manual Node entries live in `test-registry.json`.
 Test naming conventions are
-`*.test.mjs`, `test_*.py`, `test-*.py`, `test_*.sh`, `test-*.sh`, `*_test.sh`,
+`*.test.mjs`, `*.integration.mjs`, `test_*.py`, `test-*.py`, `test_*.sh`, `test-*.sh`, `*_test.sh`,
 `*-test.sh`, `*.test.sh`, `*_test.cj`, shell files under `build/test/`, and
 Python/shell files directly inside a nested `tests/` directory.
 Helpers such as `run.py` and `check.py` are dependencies of test drivers, not
 independently discovered test cases. Register new standalone tests using these
 names. Untracked files are included; ignored build output and node_modules are not.
+
+Node integration tests with private prerequisites can be registered as `manual`;
+name-based discovery does not make them gating or execute them.
 
 Each registry entry names a real interpreter and arguments, a cjpm workspace
 member, an existing `workflow` command, or `manual` with a concrete input/isolation reason. `{output}` expands

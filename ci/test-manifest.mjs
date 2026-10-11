@@ -198,7 +198,8 @@ export function discoverTestFiles(root = repoRoot) {
     {encoding: 'utf8'});
   const found = listed.split('\0').filter(Boolean)
     .filter(file => !file.split('/').includes('node_modules'))
-    .filter(file => /\.test\.mjs$|(?:^|\/)test[_.-][^/]*\.(?:py|sh)$|[._-]test\.sh$|_test\.cj$|^build\/test\/.*\.sh$|\/tests\/[^/]+\.(?:py|sh)$/.test(file));
+    .filter(file => fs.existsSync(path.join(root, file)))
+    .filter(file => /\.(?:test|integration)\.mjs$|(?:^|\/)test[_.-][^/]*\.(?:py|sh)$|[._-]test\.sh$|_test\.cj$|^build\/test\/.*\.sh$|\/tests\/[^/]+\.(?:py|sh)$/.test(file));
   return [...new Set(found)].sort();
 }
 
