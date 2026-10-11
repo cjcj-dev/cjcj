@@ -9,11 +9,14 @@ import {validateOfficialSdkProof, officialIdentityVerifier} from '../../../build
 export async function officialFixtureSource(planFile = process.env.SDK_OFFICIAL_PLAN) {
   assert.ok(planFile && path.isAbsolute(planFile), 'SDK_FIXTURE_NOT_RUN: supply an absolute retained SDK_OFFICIAL_PLAN');
   const plan = validatePlan(await readJson(planFile));
+  assert.equal(plan.role, 'host');
+  assert.equal(plan.platform, 'linux_x86_64');
   assert.equal(plan.components.length, 1, 'SDK_FIXTURE_NOT_RUN: retained official input must be a one-component plan');
   const component = plan.components[0];
   assert.equal(component.producer.adapter, 'official');
   assert.equal(component.source.kind, 'distribution');
   assert.equal(component.domain, 'host');
+  assert.ok(component.roles.includes('official-host'));
   assert.equal(component.source.version, '1.3.0-alpha.20261009001050', 'SDK_FIXTURE_NOT_RUN: this input contract retains the real 1009 release');
   await officialFixtureLock(component.source);
   return structuredClone(component.source);
@@ -26,6 +29,7 @@ export async function officialFixtureLock(source) {
   assert.equal(lock.role, 'host');
   assert.equal(lock.version, source.version);
   validateOfficialSdkProof(lock.officialIdentity, source.version);
+  assert.equal(lock.officialIdentity.platform, 'linux-x64');
   return lock;
 }
 
