@@ -305,7 +305,10 @@ def verify(sdk: Path, lock: dict, pin: dict, identities: dict, errors: list, tar
                 members = sorted(name for name in on_disk if name.startswith(rel + '/'))
                 if not path.is_dir() or entry.get('sha256') is not None:
                     fail('PAYLOAD_TYPE', f'directory differs from sealed lock: {rel}', errors)
-                if (lock.get('version', 1) >= 2 or 'mode' in entry) and (not isinstance(entry.get('mode'), int) or path.stat().st_mode & 0o777 != entry.get('mode')):
+                # Typed directories always need a preauthenticated permission
+                # identity, independent of the lock version (bool is not a mode).
+                mode = entry.get('mode')
+                if type(mode) is not int or not 0 <= mode <= 0o777 or path.stat().st_mode & 0o777 != mode:
                     fail('PAYLOAD_MODE', f'directory mode differs from sealed lock: {rel}', errors)
                 if entry.get('members') != members or any(name not in lock_files and name not in parents for name in members):
                     fail('PAYLOAD_MEMBERS', f'directory members differ from sealed lock: {rel}', errors)

@@ -1,0 +1,65 @@
+{
+  "components": {
+    "cjc": {
+      "sha256": "f924713f31f9c71a53410e38a37d41e460c916776108873ee01649681162535c"
+    },
+    "llvm_tuple": {
+      "sha256": null
+    },
+    "runtime": {
+      "commit": null,
+      "so_sha256": null
+    }
+  },
+  "files": {
+    "bin/cjc": {
+      "component": "cjc",
+      "producer": {},
+      "sha256": "f924713f31f9c71a53410e38a37d41e460c916776108873ee01649681162535c",
+      "symlink": false,
+      "type": "file"
+    },
+    "include": {
+      "component": "official-retain",
+      "link_target": "lib",
+      "members": [
+        "include/empty",
+        "include/member.h"
+      ],
+      "producer": {},
+      "resolved_target": "lib",
+      "sha256": null,
+      "symlink": true,
+      "type": "directory"
+    },
+    "include/empty": {
+      "component": "official-retain",
+      "members": [],
+      "producer": {},
+      "sha256": null,
+      "symlink": false,
+      "type": "directory"
+    },
+    "include/member.h": {
+      "component": "official-retain",
+      "producer": {},
+      "sha256": "3cebab52c9a382cf4bd7504cc889cdfaa1b17a9de29dc0561b0f6276614f828b",
+      "symlink": false,
+      "type": "file"
+    },
+    "lib/member.h": {
+      "component": "std",
+      "producer": {},
+      "sha256": "3cebab52c9a382cf4bd7504cc889cdfaa1b17a9de29dc0561b0f6276614f828b",
+      "symlink": false,
+      "type": "file"
+    }
+  },
+  "official_retain": {
+    "include": "copied from --from baseline; not replaced this assembly",
+    "include/empty": "copied from --from baseline; not replaced this assembly",
+    "include/member.h": "copied from --from baseline; not replaced this assembly"
+  },
+  "role": "host",
+  "version": 1
+}

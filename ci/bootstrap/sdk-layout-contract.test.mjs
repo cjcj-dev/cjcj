@@ -50,6 +50,59 @@ async function legacyInput(label, target = 'lib') {
   return f;
 }
 
+// Verbatim retained R2 lock from Review6098747736/raw-inputs/legacy-lock.json.
+// Its original payload bytes are recorded in that review's layout-gaps.mjs.
+// Never call --write-lock or fill in modes on this retained input.
+async function historicalPayload(label) {
+  const work = await fs.mkdtemp(path.join(root, `${label}-`)), sdk = path.join(work, 'sdk');
+  await write(path.join(sdk, 'bin/cjc'), 'small fixture compiler input\n');
+  await fs.chmod(path.join(sdk, 'bin/cjc'), 0o755);
+  await write(path.join(sdk, 'lib/member.h'), 'frozen header\n');
+  await fs.mkdir(path.join(sdk, 'lib/empty'));
+  for (const rel of ['lib', 'lib/empty']) await fs.chmod(path.join(sdk, rel), 0o755);
+  return {work, sdk};
+}
+async function retainedLegacyInput(label) {
+  const f = await historicalPayload(label);
+  await fs.symlink('lib', path.join(f.sdk, 'include'));
+  const lockBytes = await fs.readFile(path.join(here, 'fixtures/sdk-legacy-directory-lock.json'));
+  await fs.writeFile(path.join(f.sdk, 'SDK.lock.json'), lockBytes);
+  return {...f, lockBytes};
+}
+
+test('retained v1 typed-directory lock without mode is rejected directly and stays unchanged', async () => {
+  const f = await retainedLegacyInput('retained-directory-no-mode');
+  for (const [label, mode] of [['original', 0o755], ['changed', 0o655], ['restored', 0o755]]) {
+    await fs.chmod(path.join(f.sdk, 'lib'), mode);
+    const result = await legacy(f, `retained-no-mode-${label}`);
+    rejected(result, 'PAYLOAD_MODE', 'include');
+    assert.deepEqual(result.stderr.split('\n').filter(line => line.includes('SDK-VERIFY-FAIL')), [
+      'SDK-VERIFY-FAIL rule=PAYLOAD_MODE directory mode differs from sealed lock: include',
+      'SDK-VERIFY-FAIL rule=PAYLOAD_MODE directory mode differs from sealed lock: include/empty',
+    ], 'original lock must fail on missing directory identity, without unrelated diagnostics');
+    assert.deepEqual(await fs.readFile(path.join(f.sdk, 'SDK.lock.json')), f.lockBytes);
+  }
+});
+
+for (const typed of [false, true]) {
+  test(`historical ${typed ? 'typed' : 'untyped'} file-only lock remains a legal direct input`, async () => {
+    const f = await historicalPayload(`file-only-${typed}`);
+    // Separate control SDK and independently authored historical file-only lock.
+    // This is not a repair or a reseal of the retained directory lock.
+    const original = await readJson(path.join(here, 'fixtures/sdk-legacy-directory-lock.json'));
+    const files = Object.fromEntries(['bin/cjc', 'lib/member.h'].map(rel => [rel, {
+      sha256: original.files[rel].sha256, component: original.files[rel].component,
+      symlink: false, producer: {}, ...(typed ? {type: 'file'} : {}),
+    }]));
+    await atomicJson(path.join(f.sdk, 'SDK.lock.json'), {
+      version: 1, role: 'host', files, official_retain: {}, components: original.components,
+    });
+    const controlBytes = await fs.readFile(path.join(f.sdk, 'SDK.lock.json'));
+    good(await legacy(f, `file-only-${typed}-control`));
+    assert.deepEqual(await fs.readFile(path.join(f.sdk, 'SDK.lock.json')), controlBytes);
+  });
+}
+
 test('legacy directory alias locks its target, typed members and every member digest', async () => {
   const f = await legacyInput('legacy-positive'); good(await legacy(f, 'write-lock', true));
   const lock = await readJson(path.join(f.sdk, 'SDK.lock.json'));
@@ -58,11 +111,51 @@ test('legacy directory alias locks its target, typed members and every member di
   assert.equal(lock.files.include.link_target, 'lib'); assert.equal(lock.files.include.resolved_target, 'lib');
   assert.deepEqual(lock.files.include.members, ['include/empty', 'include/member.h']);
   assert.equal(lock.files['include/empty'].type, 'directory');
+  assert.equal(lock.version, 2);
+  assert.equal(lock.files.include.mode, (await fs.stat(path.join(f.sdk, 'include'))).mode & 0o777);
+  assert.equal(lock.files['include/empty'].mode, (await fs.stat(path.join(f.sdk, 'include/empty'))).mode & 0o777);
   assert.equal(lock.files['include/member.h'].sha256, await fileDigest(path.join(f.source, 'lib/member.h')));
   good(await legacy(f, 'verify'));
   await fs.rename(f.source, `${f.source}-removed`); await fs.rename(f.sdk, `${f.sdk}-moved`); f.sdk += '-moved';
   good(await legacy(f, 'relocated-verify'));
 });
+
+for (const version of [undefined, 1, 2]) {
+  for (const [label, jsonMode, diskMode] of [
+    ['missing', undefined, 0o755], ['false', 'false', 0], ['true', 'true', 1],
+    ['null', 'null', 0o755], ['string', '"493"', 0o755], ['float', '493.0', 0o755],
+    ['negative', '-1', 0o755], ['out-of-range', '512', 0o755],
+  ]) {
+    test(`typed-directory mode ${label} is ineligible with version ${version ?? 'absent'}`, async () => {
+      const f = await legacyInput(`mode-schema-${version ?? 'absent'}-${label}`);
+      good(await legacy(f, 'mode-schema-control', true));
+      const lockPath = path.join(f.sdk, 'SDK.lock.json'), validBytes = await fs.readFile(lockPath);
+      const synthetic = JSON.parse(validBytes);
+      const originalMode = synthetic.files.lib.mode;
+      if (version === undefined) delete synthetic.version; else synthetic.version = version;
+      synthetic.files.lib.mode = diskMode;
+      // A separate synthetic schema input, never substituted for the original
+      // R2 lock above. Keep 493.0 as JSON float text to exercise Python typing.
+      delete synthetic.files.include.mode;
+      if (jsonMode !== undefined) synthetic.files.include.mode = 'MODE_SCHEMA_VALUE';
+      const declared = JSON.stringify(synthetic).replace('"MODE_SCHEMA_VALUE"', jsonMode ?? 'null');
+      await fs.writeFile(lockPath, declared);
+      await fs.chmod(path.join(f.sdk, 'lib'), diskMode);
+      try {
+        const result = await legacy(f, `mode-schema-${label}-target`);
+        rejected(result, 'PAYLOAD_MODE', 'include');
+        assert.deepEqual(result.stderr.split('\n').filter(line => line.includes('SDK-VERIFY-FAIL')), [
+          'SDK-VERIFY-FAIL rule=PAYLOAD_MODE directory mode differs from sealed lock: include',
+        ]);
+        assert.equal(await fs.readFile(lockPath, 'utf8'), declared);
+      } finally {
+        await fs.chmod(path.join(f.sdk, 'lib'), originalMode);
+        await fs.writeFile(lockPath, validBytes);
+      }
+      good(await legacy(f, 'mode-schema-restored'));
+    });
+  }
+}
 
 for (const [name, target] of [['external', '../outside'], ['cycle', '.'], ['dangling', 'missing']]) {
   test(`legacy creation rejects ${name} directory alias and restores`, async () => {
