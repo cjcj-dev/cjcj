@@ -8,7 +8,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
-import {bootstrapFixture, bootstrapArgs, qualifyBootstrapPhases, phaseIdentities, installedMembers, write} from './fixtures/bootstrap-consumer-fixture.mjs';
+import {bootstrapFixture, bootstrapArgs, loadPhaseResultFixture, qualifyBootstrapPhases, phaseIdentities, installedMembers, write} from './fixtures/bootstrap-consumer-fixture.mjs';
 import {fixture, assemble, verify, good, rejected, fileDigest, readJson, atomicJson, tuple} from './fixtures/sdk-consumer-fixture.mjs';
 import {buildIdentities, objectId} from './sdk-manifest.mjs';
 const exec = promisify(execFile), here = path.dirname(fileURLToPath(import.meta.url));
@@ -542,7 +542,8 @@ const positives = {
     const phases = ['stage1-initial', 'stage1-std'];
     const selectedPhases = args[1] ? [args[1]] : phases;
     assert.ok(selectedPhases.every(phase => phases.includes(phase)), 'check-phase-results accepts stage1-initial or stage1-std');
-    const f = await bootstrapFixture(); currentRoot = f.root;
+    const f = process.env.SDK_PHASE_INPUT ? await loadPhaseResultFixture(process.env.SDK_PHASE_INPUT) : await bootstrapFixture();
+    currentRoot = f.root;
     await qualifyBootstrapPhases(f, phases);
     const initial = f.phaseQualifications.get(phases[0]), next = f.phaseQualifications.get(phases[1]);
     assert.notEqual(initial.stdBuildId, next.stdBuildId, 'independent legal phases require distinct genuine std producer identities');

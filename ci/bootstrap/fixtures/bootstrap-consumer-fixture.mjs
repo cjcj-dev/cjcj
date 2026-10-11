@@ -97,8 +97,23 @@ export function bootstrapArgs(f, phase = 'all') {
     '--stage', phase, '--dry-run'];
 }
 let phaseSequence = 0;
+export async function loadPhaseResultFixture(input) {
+  const saved = await readJson(input);
+  assert.equal(path.resolve(input), path.join(saved.root, 'phase-causal-input.json'), 'original phase input descriptor must remain under its fixture root');
+  assert.equal(saved.plans, path.join(saved.root, 'bundle.frozen.json'));
+  const bundle = validateBootstrapPlans(await readJson(saved.plans));
+  assert.equal(saved.hostRoot, saved.root);
+  assert.equal(saved.src, bundle.phases.stage0.components.find(component => component.id === 'compiler').source.repo);
+  return {root: saved.root, plans: saved.plans, src: saved.src, host: {root: saved.hostRoot}, bundle};
+}
 export async function qualifyBootstrapPhases(f, phases) {
   f.phaseQualifications ||= new Map();
+  // Test input locator only. It does not contain a plan, receipt or success
+  // claim; all original objects below are read and qualified independently.
+  const input = path.join(f.root, 'phase-causal-input.json');
+  const descriptor = {root: f.root, plans: f.plans, src: f.src, hostRoot: f.host.root};
+  try { assert.deepEqual(await readJson(input), descriptor); }
+  catch (error) { if (error.code !== 'ENOENT') throw error; await atomicJson(input, descriptor); }
   // Use the direct SDK CLI, independently of bootstrap-sdk's phase selector.
   // Complete every permitted alternate phase before running a selected-phase
   // target. A wrong selection must not be rejected merely for absent receipts.
@@ -107,9 +122,18 @@ export async function qualifyBootstrapPhases(f, phases) {
     const plan = f.bundle.phases[phase], expected = buildIdentities(plan);
     const label = `phase-${phase}-qualification`, planFile = path.join(f.root, `${label}.json`);
     const out = path.join(f.root, `${label}-sdk`);
-    await atomicJson(planFile, plan);
-    const result = await observe(f.host, `${label}-assembly`, [process.execPath,
-      path.join(f.src, 'ci/bootstrap/toolchain-sdk.mjs'), '--plan', planFile, '--out', out]);
+    try { assert.deepEqual(await readJson(planFile), plan); }
+    catch (error) { if (error.code !== 'ENOENT') throw error; await atomicJson(planFile, plan); }
+    const argv = [process.execPath, path.join(f.src, 'ci/bootstrap/toolchain-sdk.mjs'), '--plan', planFile, '--out', out];
+    let result;
+    try {
+      result = await readJson(path.join(f.host.root, `${label}-assembly.json`));
+      assert.deepEqual(result.argv, argv, 'retained qualification must come from the exact direct SDK entry and original input');
+      console.log(`PHASE_REUSED_QUALIFICATION phase=${phase} evidence=${f.host.root} rc=${result.rc}`);
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+      result = await observe(f.host, `${label}-assembly`, argv);
+    }
     good(result); // A failing legal control is a contract/input failure, never a phase cut success.
     const manifest = await readJson(path.join(out, 'SDK.manifest.json')), outputs = new Map();
     assert.equal(manifest.planSha256, objectId(plan));
@@ -132,7 +156,9 @@ export async function qualifyBootstrapPhases(f, phases) {
       files, receipts: Object.fromEntries([...outputs].map(([id, receipt]) => [id,
         {buildId: receipt.buildId, receiptSha256: receipt.receiptSha256}]))};
     f.phaseQualifications.set(phase, qualified);
-    await atomicJson(path.join(f.root, `${label}-result.json`), qualified);
+    const qualificationFile = path.join(f.root, `${label}-result.json`);
+    try { assert.deepEqual(await readJson(qualificationFile), qualified); }
+    catch (error) { if (error.code !== 'ENOENT') throw error; await atomicJson(qualificationFile, qualified); }
     console.log(`PHASE_INPUT_QUALIFIED ${JSON.stringify(qualified)}`);
   }
 }
@@ -143,8 +169,11 @@ async function phaseObservation(operation) {
 export async function phaseIdentities(f, phase, productRoot = path.join(f.src, 'ci/bootstrap')) {
   const qualified = f.phaseQualifications?.get(phase);
   assert.ok(qualified, `phase ${phase} and all cut alternates must be independently qualified first`);
-  const label = `phase-${phase}-${++phaseSequence}`, out = path.join(f.root, `${label}-sdk`);
-  const result = await observe(f.host, `${label}-assemble`, [process.execPath, path.join(productRoot, 'bootstrap-sdk.mjs'),
+  const label = `phase-${phase}-${++phaseSequence}`, armRoot = process.env.SDK_PHASE_WORK_ROOT || f.root;
+  assert.ok(path.isAbsolute(armRoot), 'SDK_PHASE_WORK_ROOT must name an exclusively owned absolute arm directory');
+  await fs.mkdir(armRoot, {recursive: true});
+  const out = path.join(armRoot, `${label}-sdk`);
+  const result = await observe({root: armRoot}, `${label}-assemble`, [process.execPath, path.join(productRoot, 'bootstrap-sdk.mjs'),
     '--plans', f.plans, '--phase', phase, '--out', out]);
   // Read actual output before any fatal assertion. Missing output is recorded,
   // not thrown by a stat/readFile that would hide the selected-phase assertion.
@@ -153,7 +182,7 @@ export async function phaseIdentities(f, phase, productRoot = path.join(f.src, '
   const compiler = await phaseObservation(() => fileDigest(path.join(out, 'bin/cjc')));
   const producer = await phaseObservation(() => readJson(path.join(out, 'std-producer.json')));
   const observation = {phase, result, manifest, std, compiler, producer};
-  await atomicJson(path.join(f.root, `${label}-observation.json`), observation);
+  await atomicJson(path.join(armRoot, `${label}-observation.json`), observation);
   console.log(`PHASE_RESULT_OBSERVED ${JSON.stringify(observation)}`);
   assert.equal(result.rc, 0, `PHASE_RESULT_EXECUTION_QUALIFICATION: a missing receipt/loading/STD_CJC failure is not phase selection evidence: ${result.stderr}`);
   const actual = {planSha256: manifest.value?.planSha256, stdModuleSha256: std.value,
@@ -169,8 +198,8 @@ export async function phaseIdentities(f, phase, productRoot = path.join(f.src, '
     assert.equal(manifest.value.components[id].buildId, receipt.buildId);
     assert.equal(manifest.value.components[id].receiptSha256, receipt.receiptSha256);
   }
-  const dryOut = path.join(f.root, `${label}-dry`);
-  const dryResult = await observe(f.host, `${label}-identities`, [process.execPath, path.join(productRoot, 'bootstrap-sdk.mjs'),
+  const dryOut = path.join(armRoot, `${label}-dry`);
+  const dryResult = await observe({root: armRoot}, `${label}-identities`, [process.execPath, path.join(productRoot, 'bootstrap-sdk.mjs'),
     '--plans', f.plans, '--phase', phase, '--out', dryOut, '--dry-run']);
   good(dryResult);
   const rows = JSON.parse(dryResult.stdout.trim().split('\n').at(-1)).components;

@@ -100,6 +100,20 @@ Use a conditional phase-selector cut that substitutes the already qualified
 the changed installed plan/std identity must cause the named target to fail.
 Run the lawful `stage1-std` control separately so a red target cannot hide it.
 
+The first normal `check-phase-results` preparation writes only an input locator
+`phase-causal-input.json` under its fixture root. Reuse that exact locator with
+`SDK_PHASE_INPUT` for subsequent target/control/cut/restore commands. It names
+the original bundle and source; it is not a plan or producer receipt. Existing
+qualification command evidence must name the exact direct CLI/plan/output;
+original plan copies and qualification results must compare equal, not be
+overwritten. Actual receipts and installed STD_CJC are read again. A retained
+qualification is explicitly logged, never relabelled as current production.
+Set a distinct `SDK_PHASE_WORK_ROOT` for every arm and `SDK_PHASE_PRODUCT_ROOT`
+to that arm's private product module root. Current selected-phase assembly,
+observations and dry-run records stay in that arm directory. Keep the original
+fixture source/plan/receipts unchanged: changing its copied product modules
+would change the compiler recipe identity and invalidate the comparison.
+
 Each authorized cut needs its exact diff and product Git identity, unchanged
 test source identity across normal/cut/restore, target failure stack and
 `TARGET_ASSERTION_BEGIN` observation plus the actual assertion outcome.
