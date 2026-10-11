@@ -1,5 +1,10 @@
 [
   {
+    "file": "ci/bootstrap/sdk-official-preseal.test.mjs",
+    "executor": "manual",
+    "reason": "Run node --test ci/bootstrap/sdk-official-preseal.test.mjs with SDK_PRESEAL_PLAN pointing to a retained authenticated complete real official single-component plan, SDK_PRESEAL_ROOT an exclusively owned private root, and SDK_PRESEAL_ARM a unique causal-arm name. Reuses the exact original archive and real compiler without downloads or shared SDK writes. Requires an existing complete marked receipt for the read-only consumer control. Complete legacy fresh/cache/prior and incomplete-copy seal-order assertions retain all product results. Causal arms cut only isolated product source; the complete legacy receipt is reused under the same input. Registration is NOT_RUN, not full SDK/ABI/stage1 qualification."
+  },
+  {
     "file": "ci/bootstrap/sdk-official-identity.test.mjs",
     "executor": "manual",
     "reason": "Run node --test ci/bootstrap/sdk-official-identity.test.mjs only with SDK_IDENTITY_FIXTURE naming an explicitly synthetic-native-identity input record, SDK_IDENTITY_EVIDENCE naming an exclusively owned private evidence directory, and SDK_SHAREDBUILD_ENGINE naming the paired fixed tools implementation. Requires the retained native compiler/archive fixture, trusted same-tree private fixture policy pins, frozen ordinary builder/tools, and the genuine pre-fix product-emitted legacy receipt referenced by the fixture. Product CLIs publish and consume full inputs, resolve fresh/cache/prior receipts, and retain per-command results; controlled arms mutate only private locks and isolated product source. CI supplies none of these inputs. Registration is NOT_RUN, never real official SDK qualification, full SDK acceptance, or permission to download or rebuild shared inputs."
