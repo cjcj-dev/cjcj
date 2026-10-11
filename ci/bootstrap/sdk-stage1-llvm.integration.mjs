@@ -45,8 +45,11 @@ await fs.mkdir(path.dirname(path.join(native, llvmRel)), {recursive: true});
 await cc(['-shared', '-fPIC', '-Wl,-soname,libLLVM-15.so', path.join(native, 'library.c'), '-ldl', '-o', path.join(native, llvmRel)]);
 const probe = '#define _GNU_SOURCE\n#include <stdio.h>\n#include <stdlib.h>\n#include <dlfcn.h>\nextern const char *fixture_llvm_domain(void);\nint main(void){Dl_info i;dladdr(fixture_llvm_domain,&i);printf("DOMAIN value=%s origin=%s home=%s\\n",fixture_llvm_domain(),i.dli_fname,getenv("CANGJIE_HOME"));return 0;}\n';
 await write(path.join(root, 'probe.c'), probe);
-await fs.mkdir(path.dirname(path.join(native, 'third_party/llvm/bin/llc')), {recursive: true});
-await cc([path.join(root, 'probe.c'), path.join(native, llvmRel), '-ldl', '-o', path.join(native, 'third_party/llvm/bin/llc')]);
+// Do not masquerade as llc: this ELF does not compile Cangjie bitcode. With no
+// llc/opt in this projection, the real compiler's existing backend search falls
+// back to its own authenticated host installation (CJNATIVEBackend).
+await fs.mkdir(path.dirname(path.join(native, 'third_party/llvm/bin/domain-probe')), {recursive: true});
+await cc([path.join(root, 'probe.c'), path.join(native, llvmRel), '-ldl', '-o', path.join(native, 'third_party/llvm/bin/domain-probe')]);
 // Controlled ELF observes the kernel argv and actual target library. It does
 // not emulate lld's dispatcher; the real installed lld is exercised separately.
 await write(path.join(root, 'entry-probe.c'), `#include <stdio.h>\n#include <string.h>\nextern const char *fixture_llvm_domain(void);\nint main(int argc,char **argv){printf("ENTRY_DOMAIN=%s\\n",fixture_llvm_domain());for(int i=0;i<argc;i++){printf("ARGV_HEX=");for(const unsigned char *p=(unsigned char*)argv[i];*p;p++)printf("%02x",*p);puts("");}return argc>1&&!strcmp(argv[1],"--exit=37")?37:0;}\n`);
@@ -103,7 +106,9 @@ const base = {id: 'fixture-stage1', roles: [], source: {kind: 'git', repo: sourc
   config: {host: 'linux_x86_64', target: 'linux_x86_64', tools: frozenTools, options: {
     sdkDependency: 'fixture-host', targetLlvmDependency: 'fixture-native', inputBindings: {'llvm-shim.o': {dependency: 'fixture-native', artifact: shimRel}},
     parameters: {compile_flags: ''}, optimization: 'O1', outputs: ['cjcj-stage1'], jobs: 192, heap: '48GB'}}};
-async function arm(name, mutate = () => {}) {
+let normalEstablished = false;
+const requireNormal = () => assert.equal(normalEstablished, true, 'SDK_FIXTURE_NOT_RUN: genuine HOST/Cangjie normal must complete before negative/control arms');
+async function arm(name, mutate = () => {}, hostDependency = hostOutput) {
   const component = structuredClone(base), projection = {component: nativeComponent, files: structuredClone(nativeFiles), artifacts: native, buildId: nativeBuild,
     receiptSha256: 'controlled-fixture-not-a-success-receipt'};
   mutate(component, projection);
@@ -111,7 +116,7 @@ async function arm(name, mutate = () => {}) {
   const identity = {directory, buildId: `controlled-${name}`, dependencies: {'fixture-native': nativeBuild}};
   let failure;
   try { await produceComponent({buildRoot: root, lane: 'controlled-stage1'}, component, identity,
-    new Map([['fixture-host', hostOutput], ['fixture-native', projection],
+    new Map([['fixture-host', hostDependency], ['fixture-native', projection],
       ['fixture-other', {...projection, component: {...nativeComponent, id: 'fixture-other', source: {...nativeComponent.source, commit: '0'.repeat(40)}}}]])); }
   catch (error) { failure = error; }
   assert.ok(failure, 'controlled executor must stop before product sealing');
@@ -119,7 +124,11 @@ async function arm(name, mutate = () => {}) {
   const log = (await Promise.all(logs.map(name => fs.readFile(path.join(directory, 'logs', name), 'utf8')))).join('');
   await write(path.join(directory, 'combined.log'), log);
   let result; try { result = await readJson(path.join(directory, 'fixture-adapter-result.json')); } catch {}
-  console.log(`TARGET_ASSERTION_EXECUTED ${name} adapter_rc=${result?.rc ?? 'not-started'} wrapper_rc=${failure.rc ?? 'guard'}`);
+  for (const file of ['output.json', 'DONE']) {
+    try { await fs.access(path.join(directory, file)); assert.fail(`observer must not emit a successful stage1 ${file}`); }
+    catch (error) { if (error.code !== 'ENOENT') throw error; }
+  }
+  console.log(`STAGE1_ARM_OBSERVED ${name} adapter_rc=${result?.rc ?? 'not-started'} wrapper_rc=${failure.rc ?? 'guard'}`);
   return {component, directory, result, log, failure};
 }
 test('formal stage1 producer feeds one target native capsule and actual isolated adapter consumption', async () => {
@@ -139,21 +148,29 @@ test('formal stage1 producer feeds one target native capsule and actual isolated
   assert.ok(linkOption(codegenToml).replaceAll('${CANGJIE_HOME}', domains.sdk).includes(`${domains.sdk}/${llvmRel}`));
   const product = path.join(normal.result.work, 'artifacts/cjcj-stage1');
   const deps = await execute('/usr/bin/readelf', ['-d', product]);
-  assert.match(deps.stdout, /NEEDED.*libLLVM-15.so/);
-  const loaded = await execute(product, [], {env: {...process.env, CANGJIE_HOME: domains.sdk, LD_LIBRARY_PATH: domains.targetLd}});
-  assert.match(loaded.stdout, /DOMAIN value=TARGET origin=.*stage1-link-sdk/);
-  assert.match(loaded.stdout, /TARGET_FFI_RESULT domain=53 shim=53/, 'Cangjie calls the actual target library and same-recipe shim');
+  const loadEnv = {...process.env, CANGJIE_HOME: domains.sdk, LD_LIBRARY_PATH: domains.targetLd};
+  for (const key of ['LD_PRELOAD', 'LD_AUDIT']) delete loadEnv[key];
+  const loaded = spawnSync(product, [], {env: loadEnv, encoding: 'utf8'});
   await write(path.join(normal.directory, 'actual-dependencies.log'), deps.stdout);
-  await write(path.join(normal.directory, 'actual-load.log'), loaded.stdout);
+  await write(path.join(normal.directory, 'actual-load.log'), (loaded.stdout || '') + (loaded.stderr || ''));
+  await atomicJson(path.join(normal.directory, 'actual-load.json'), {file: product, argv: [], loader: loadEnv.LD_LIBRARY_PATH,
+    rc: loaded.status, signal: loaded.signal, error: loaded.error?.message, stdout: loaded.stdout, stderr: loaded.stderr});
   await write(path.join(normal.directory, 'fixture-product.sha256'), await fileDigest(product));
-  console.log('TARGET_ASSERTION_EXECUTED target-link-and-runtime-domain value=TARGET');
+  console.log(`TARGET_ASSERTION_EXECUTED target-link-and-runtime-domain rc=${loaded.status}`);
+  assert.match(deps.stdout, /NEEDED.*libLLVM-15.so/);
+  assert.match(loaded.stdout || '', /DOMAIN value=TARGET origin=.*stage1-link-sdk/);
+  assert.match(loaded.stdout || '', /TARGET_FFI_RESULT domain=53 shim=53/, 'Cangjie calls the actual target library and same-recipe shim');
+  assert.equal(loaded.status, 0, loaded.stderr);
+  normalEstablished = true;
 });
 test('formal producer refuses a shim from another dependency and accepts recovery', async () => {
+  requireNormal();
   const wrong = await arm('wrong-shim-dependency', component => {component.config.options.inputBindings['llvm-shim.o'].dependency = 'fixture-other';});
   assert.match(wrong.failure.message, /STAGE1_LLVM.*same-recipe/);
   const restored = await arm('restored-shim-dependency'); assert.equal(restored.result?.rc, 0, restored.log);
 });
 test('actual adapter rejects mixed libLLVM source and accepts restored input', async () => {
+  requireNormal();
   const changed = {...stamp, llvm_sha: '0'.repeat(40)};
   await atomicJson(path.join(native, 'third_party/llvm/lib/manifest.json'), changed);
   try {
@@ -168,12 +185,14 @@ test('actual adapter rejects mixed libLLVM source and accepts restored input', a
   const restored = await arm('restored-libLLVM-source'); assert.equal(restored.result?.rc, 0, restored.log);
 });
 test('actual adapter rejects an incorrect official host loader domain and recovers', async () => {
+  requireNormal();
   process.env.STAGE1_FIXTURE_WRONG_DOMAIN = '1';
   let wrong; try { wrong = await arm('wrong-host-domain'); } finally { delete process.env.STAGE1_FIXTURE_WRONG_DOMAIN; }
   assert.equal(wrong.result?.rc, 1); assert.match(wrong.log, /STAGE1_HOST_DOMAIN/);
   const restored = await arm('restored-host-domain'); assert.equal(restored.result?.rc, 0, restored.log);
 });
 test('formal host publisher refuses substituted bytes against the original host lock and recovers', async () => {
+  requireNormal();
   const rel = 'tools/bin/cjpm'; // A guaranteed genuine HOST member, never a fake LLVM path.
   const file = path.join(official, rel), bytes = await fs.readFile(file), mode = (await fs.stat(file)).mode & 0o777;
   const original = path.join(hostSource.root, rel), originalDigest = await fileDigest(original), originalLock = await fileDigest(hostSource.lock);
@@ -192,12 +211,14 @@ test('formal host publisher refuses substituted bytes against the original host 
   const restored = await arm('restored-host-publisher-bytes'); assert.equal(restored.result?.rc, 0, restored.log);
 });
 test('actual adapter authenticates the original host lock as well as its derived private seal', async () => {
+  requireNormal();
   process.env.STAGE1_FIXTURE_WRONG_ORIGINAL_LOCK = '1';
   let wrong; try {wrong = await arm('wrong-original-host-lock');} finally {delete process.env.STAGE1_FIXTURE_WRONG_ORIGINAL_LOCK;}
   assert.equal(wrong.result?.rc, 1); assert.match(wrong.log, /STAGE1_LLVM.*official host identity/);
   const restored = await arm('restored-original-host-lock'); assert.equal(restored.result?.rc, 0, restored.log);
 });
 test('actual adapter refuses an altered ordinary native input before invoking the build', async () => {
+  requireNormal();
   const file = path.join(native, 'third_party/llvm/include/fixture.h'), bytes = await fs.readFile(file);
   await fs.appendFile(file, '// deliberately altered original native byte\n');
   try {
@@ -208,6 +229,7 @@ test('actual adapter refuses an altered ordinary native input before invoking th
 });
 
 test('native executable invocation and relative aliases retain argv0, arguments, exits and loader domains', async () => {
+  requireNormal();
   const normal = await arm('native-entry-contract');
   assert.equal(normal.result?.rc, 0, normal.log);
   const domains = await readJson(path.join(normal.result.work, 'stage1-domains.json'));
@@ -222,7 +244,7 @@ test('native executable invocation and relative aliases retain argv0, arguments,
   // so an argv0 cut cannot hide independent host/target evidence behind a skip.
   const host = capture(path.join(domains.sdk, 'bin/cjc'), ['-v']);
   const hostObservations = await observeStage1Host(domains, hostOutput, normal.directory);
-  const target = capture(path.join(bin, 'llc'), []);
+  const target = capture(path.join(bin, 'domain-probe'), []);
   for (const name of ['plain-probe', 'entry-probe', 'entry-alias']) {
     for (const args of [['space argument', '', '@relative.rsp', '--literal=$x'], ['--exit=37', 'retained argument']]) {
       observations.push({...capture(path.join(bin, name), args), kind: 'argv'});
@@ -263,4 +285,17 @@ test('native executable invocation and relative aliases retain argv0, arguments,
   }
   assert.deepEqual(failures, [], 'NATIVE_ENTRY_CONTRACT: native argv0/alias/argument/exit/domain assertions');
   console.log(`TARGET_ASSERTION_EXECUTED NATIVE_ENTRY_CONTRACT observations=${observations.length} failures=0`);
+});
+
+test('formal producer requires the genuine official execution proof before invoking the adapter', async () => {
+  requireNormal();
+  // A deliberately invalid dependency is only a negative input, never a success.
+  const invalid = {...hostOutput, execution: {...hostOutput.execution, officialIdentity: null}};
+  const wrong = await arm('missing-host-proof', undefined, invalid);
+  console.log('TARGET_ASSERTION_EXECUTED missing-host-proof');
+  assert.match(wrong.failure.message, /OFFICIAL_IDENTITY.*official dependency lacks source proof/);
+  assert.equal(wrong.result, undefined, 'adapter must not start without the real official proof');
+  const restored = await arm('restored-host-proof');
+  assert.equal(restored.result?.rc, 0, restored.log);
+  assert.equal(restored.failure.rc, 73);
 });
