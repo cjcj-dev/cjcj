@@ -4,10 +4,20 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {spawn} from 'node:child_process';
+import assert from 'node:assert/strict';
+import {officialFixtureSource, officialFixtureLock} from './sdk-official-fixture.mjs';
 const args = process.argv.slice(2);
 if (args.includes('sdk-publish')) {
-  // Exercise the existing real publisher on the small official fixture; this
-  // is a physical host copy, not a native/product success receipt.
+  // Forward the product's genuine identity request. The old small HOST ELF
+  // fixture is not an official release and cannot supply this prerequisite.
+  const source = await officialFixtureSource();
+  const lock = await officialFixtureLock(source);
+  const requestIndex = args.indexOf('--official-identity-request');
+  assert.ok(requestIndex >= 0 && args[requestIndex + 1], 'SDK_FIXTURE_NOT_RUN: genuine official identity request required');
+  const request = JSON.parse(await fs.readFile(args[requestIndex + 1], 'utf8'));
+  assert.equal(args[args.indexOf('--version') + 1], source.version, 'SDK_FIXTURE_NOT_RUN: preserve the real official release version');
+  assert.equal(request.input.archive, lock.officialIdentity.archive.path);
+  assert.equal(request.input.platform, lock.officialIdentity.platform);
   const main = path.join(process.env.STAGE1_TOOLS_REPO, 'ts/src/sharedbuild/main.py');
   const result = await new Promise((resolve, reject) => {
     const p = spawn('/usr/bin/python3', [main, ...args], {stdio: 'inherit'});

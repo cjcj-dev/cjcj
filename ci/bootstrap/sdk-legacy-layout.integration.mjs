@@ -8,6 +8,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import test from 'node:test';
 import {fixture, command} from './fixtures/sdk-plan-fixture.mjs';
+import {officialFixtureRequest} from './fixtures/sdk-official-fixture.mjs';
 import {atomicJson, readJson, fileDigest} from './sdk-manifest.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -17,7 +18,7 @@ assert.ok(['file', 'directory'].includes(kind), 'SDK_LEGACY_LAYOUT_KIND=file|dir
 test(`legacy legal ${kind} alias survives the real publisher and frozen SDK entry`, async () => {
   const f = await fixture();
   const source = path.join(f.root, 'alias-input');
-  await fs.cp(path.join(f.root, 'official'), source, {recursive: true});
+  await fs.cp(f.plan.components.find(row => row.id === 'official').source.root, source, {recursive: true});
   const rel = kind === 'file' ? 'tools/bin/cjpm-alias' : 'include';
   const target = kind === 'file' ? 'cjpm' : 'tools';
   const compiler = f.plan.components.find(component => component.id === 'compiler');
@@ -27,15 +28,17 @@ test(`legacy legal ${kind} alias survives the real publisher and frozen SDK entr
   await fs.symlink(target, path.join(source, rel));
   const official = f.plan.components.find(component => component.id === 'official');
   const python = f.plan.components.find(component => component.id === 'runtime').config.tools.python3.path;
+  const request = path.join(f.root, 'layout-official-request.json');
+  await officialFixtureRequest(official.source, request);
   const args = [python, process.env.SDK_SHAREDBUILD_ENGINE, '--remote', '--root', path.join(f.root, 'layout-publisher'),
-    '--lane', f.plan.lane, 'sdk-publish', '--source', source, '--version', `fixture-legal-${kind}-alias`];
+    '--lane', f.plan.lane, 'sdk-publish', '--source', source, '--version', official.source.version, '--official-identity-request', request];
   const published = await command(args);
   await atomicJson(path.join(f.root, 'layout-publisher-result.json'), {args, ...published});
   console.log(`LEGACY_LAYOUT_PUBLISHER_ASSERT_REACHED kind=${kind} rc=${published.rc} source=${source} evidence=${f.root}`);
   assert.equal(published.rc, 0, `legal ${kind} alias must remain publishable: ${published.stderr}`);
   const root = published.stdout.trim();
   official.source = {...official.source, root, lock: path.join(root, 'SDK.lock.json'),
-    version: `fixture-legal-${kind}-alias`, lockSha256: await fileDigest(path.join(root, 'SDK.lock.json'))};
+    lockSha256: await fileDigest(path.join(root, 'SDK.lock.json'))};
   await atomicJson(f.planFile, f.plan);
   const entry = process.env.SDK_BUILD_PRODUCT || path.join(here, 'sdk_build.sh');
   const commandLine = ['bash', entry, '--plan', f.planFile, '--to', f.out];

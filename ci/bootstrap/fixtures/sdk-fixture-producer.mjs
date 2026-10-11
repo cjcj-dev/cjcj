@@ -54,6 +54,11 @@ if (mode === 'runtime') {
   if (options.runtimeLayout === 'nested-static') for (const name of ['libcangjie-runtime.so', 'libboundscheck.so']) {
     run(['cc', '-shared', '-fPIC', 'inherited.c', '-o', await mkdir(path.join(output, 'install/lib', tuple, name))]);
   }
+} else if (options.mode === 'ast') {
+  // An ordinary native archive belongs to this real fixture recipe. It is
+  // never added to, or claimed as a member of, the official distribution.
+  run(['cc', '-c', '-fPIC', 'std.c', '-o', path.join(build, 'ast.o')]);
+  run(['ar', 'rcs', await mkdir(path.join(output, 'libcangjie-ast-support.a')), path.join(build, 'ast.o')]);
 } else if (options.mode === 'compiler') {
   const binary = await mkdir(path.join(output, 'cjcj-stage1'));
   if (options.copyBinary) {

@@ -7,6 +7,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {fixture, command} from './sdk-plan-fixture.mjs';
 import {atomicJson, readJson, fileDigest, buildIdentities} from '../sdk-manifest.mjs';
+import {officialFixtureRequest} from './sdk-official-fixture.mjs';
 
 export const here = path.dirname(fileURLToPath(new URL('../sdk_build.sh', import.meta.url)));
 export const tuple = 'linux_x86_64_cjnative';
@@ -57,14 +58,18 @@ export async function nativeChecks(f, rel) {
   return {file, load, version};
 }
 export async function publish(f, source, label) {
+  const original = f.plan.components.find(row => row.id === 'official').source;
+  const request = path.join(f.root, `${label}-official-request.json`);
+  await officialFixtureRequest(original, request);
   return observe(f, label, ['python3', process.env.SDK_SHAREDBUILD_ENGINE, '--remote', '--root',
-    path.join(f.root, `${label}-cache`), '--lane', f.plan.lane, 'sdk-publish', '--source', source, '--version', label]);
+    path.join(f.root, `${label}-cache`), '--lane', f.plan.lane, 'sdk-publish', '--source', source,
+    '--version', original.version, '--official-identity-request', request]);
 }
 export async function retainPublished(f, source, label, mappings = []) {
   const result = await publish(f, source, label); good(result);
   const root = result.stdout.trim(), lock = path.join(root, 'SDK.lock.json');
   const official = f.plan.components.find(row => row.id === 'official');
-  official.source = {...official.source, root, lock, version: label, lockSha256: await fileDigest(lock)};
+  official.source = {...official.source, root, lock, lockSha256: await fileDigest(lock)};
   official.install.push(...mappings);
   return {root, lock: await readJson(lock)};
 }

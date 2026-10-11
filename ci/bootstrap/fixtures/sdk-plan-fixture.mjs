@@ -7,6 +7,9 @@ import path from 'node:path';
 import os from 'node:os';
 import {fileURLToPath} from 'node:url';
 import {PLAN_SCHEMA, buildIdentities, execute, fileDigest, atomicJson} from '../sdk-manifest.mjs';
+import {freezeSdkPlan} from '../freeze-sdk-plan.mjs';
+import {SDK_TEST_ENGINE_COMMIT, SDK_TEST_ENGINE_TREE} from '../prepare-sdk-test-inputs.mjs';
+import {officialFixtureSource, unavailableOfficialMutation} from './sdk-official-fixture.mjs';
 const here = path.dirname(fileURLToPath(new URL('../toolchain-sdk.mjs', import.meta.url)));
 const engine = process.env.SDK_SHAREDBUILD_ENGINE;
 const testRoot = process.env.SDK_MANIFEST_TEST_ROOT;
@@ -41,38 +44,24 @@ export async function fixture({role = 'target', sources: sourceOverrides = {}, s
   colourReference = 'runtime.c', runtimeLayout} = {}) {
   assert.ok(engine && testRoot, 'SDK_SHAREDBUILD_ENGINE and SDK_MANIFEST_TEST_ROOT must name remote isolated inputs');
   assert.ok(['host', 'target'].includes(role));
+  // A callback that modifies the official release cannot borrow its proof.
+  // Keep those cases pending rather than call their targets on illegal inputs.
+  if (prepareOfficial) unavailableOfficialMutation('prepareOfficial changes the authenticated release payload');
+  const officialSource = await officialFixtureSource();
   const root = await fs.mkdtemp(path.join(testRoot, 'sdk-manifest-'));
   const sources = {};
   for (const name of ['runtime', 'compiler', 'llvm', 'std']) sources[name] = await sourceRepository(root, sourceNames[name] || name, sourceOverrides[name]);
   const native = path.join(root, 'native'); await fs.mkdir(native);
-  const official = path.join(root, 'official');
-  for (const rel of ['bin/cjc', 'bin/cjc-frontend', 'tools/bin/cjpm', 'third_party/llvm/bin/llc', 'third_party/llvm/bin/opt', 'third_party/llvm/bin/ld.lld']) {
-    const target = path.join(official, rel); await fs.mkdir(path.dirname(target), {recursive: true});
-    const result = await command(['cc', path.join(sources.compiler.repo, 'tool.c'), '-o', target]); assert.equal(result.rc, 0, result.stderr);
-  }
-  for (const [src, rel] of [['runtime.c', `runtime/lib/${tuple}/libcangjie-runtime.so`], ['boundscheck.c', `runtime/lib/${tuple}/libboundscheck.so`],
-    ['std.c', `runtime/lib/${tuple}/libcangjie-std-core.so`], ['llvm.c', 'third_party/llvm/lib/libLLVM-15.so']]) {
-    const target = path.join(official, rel); await fs.mkdir(path.dirname(target), {recursive: true});
-    const result = await command(['cc', '-shared', '-fPIC', path.join(sources.runtime.repo, src), '-o', target]); assert.equal(result.rc, 0, result.stderr);
-  }
-  assert.equal((await command(['cc', '-c', path.join(sources.std.repo, 'std.c'), '-o', path.join(native, 'std.o')])).rc, 0);
-  await fs.mkdir(path.join(official, 'lib', tuple), {recursive: true});
-  assert.equal((await command(['ar', 'rcs', path.join(official, 'lib', tuple, 'libcangjie-std-core.a'), path.join(native, 'std.o')])).rc, 0);
-  await write(path.join(official, 'lib', tuple, 'libcangjie-ast-support.a'), 'official AST fixture archive');
-  await write(path.join(official, 'modules', tuple, 'std/core/core.Int64.ti'), 'official module');
-  await write(path.join(official, 'envsetup.sh'), 'export CANGJIE_HOME="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"\nexport PATH="$CANGJIE_HOME/bin:$CANGJIE_HOME/tools/bin:$CANGJIE_HOME/third_party/llvm/bin:$PATH"\nexport LD_LIBRARY_PATH="$CANGJIE_HOME/runtime/lib/linux_x86_64_cjnative:$CANGJIE_HOME/third_party/llvm/lib:$CANGJIE_HOME/tools/lib"\n');
-  // Mutations happen before the real publisher authenticates this source.
-  // They cannot amend an output receipt or relabel an old incomplete SDK.
-  if (prepareOfficial) await prepareOfficial({root, official, sources});
-  const seedResult = await command(['python3', engine, '--remote', '--root', path.join(root, 'seed-cache'), '--lane', 'sdk-fixture', 'sdk-publish', '--source', official, '--version', 'fixture-official']);
-  assert.equal(seedResult.rc, 0, seedResult.stderr);
-  const seed = seedResult.stdout.trim(), seedLock = path.join(seed, 'SDK.lock.json');
+  const seed = officialSource.root;
   const colour = path.join(native, 'colour.so');
   assert.equal((await command(['cc', '-shared', '-fPIC', '-DFIXTURE_COLOUR=1', path.join(sources.runtime.repo, colourReference), '-o', colour])).rc, 0);
   const pin = path.join(root, 'runtime.env'); await write(pin, `RUNTIME_REF=${sources.runtime.commit}\n`);
   const builder = path.join(here, 'fixtures/sdk-fixture-producer.mjs');
   const producerVersion = (await execute('git', ['-C', path.dirname(engine), 'rev-parse', 'HEAD'])).stdout.trim();
   const producerRoot = (await execute('git', ['-C', path.dirname(engine), 'rev-parse', '--show-toplevel'])).stdout.trim();
+  assert.equal(producerVersion, SDK_TEST_ENGINE_COMMIT);
+  assert.equal((await execute('git', ['-C', producerRoot, 'rev-parse', 'HEAD^{tree}'])).stdout.trim(), SDK_TEST_ENGINE_TREE);
+  assert.equal((await execute('git', ['-C', producerRoot, 'status', '--porcelain', '--untracked-files=all'])).stdout.trim(), '');
   const frozenTools = {};
   for (const name of ['python3', 'node', 'git', 'bash', 'tar', 'cmake', 'clang', 'clang++', 'cc', 'ar']) {
     const location = (await execute('sh', ['-c', 'command -v "$1"', 'fixture-tool', name])).stdout.trim();
@@ -82,13 +71,15 @@ export async function fixture({role = 'target', sources: sourceOverrides = {}, s
     verification: {runtimePin: {path: pin, sha256: await fileDigest(pin)}, colourRuntime: {path: colour, sha256: await fileDigest(colour)},
       hostRuntime: {path: path.join(seed, `runtime/lib/${tuple}/libcangjie-runtime.so`), sha256: await fileDigest(path.join(seed, `runtime/lib/${tuple}/libcangjie-runtime.so`))},
       hostRuntimeDir: path.join(seed, 'runtime/lib', tuple)}, components: []};
-  const retained = {id: 'official', roles: ['ast', 'cjpm', 'official-host'], domain: 'host', source: {kind: 'distribution',
-    root: seed, lock: seedLock, version: 'fixture-official', lockSha256: await fileDigest(seedLock), reason: 'explicit native fixture official host retention'},
-    config: {host: plan.platform, target: plan.platform, options: {}, tools: {}}, producer: {adapter: 'official', version: producerVersion}, dependencies: [],
-    install: [{from: '', to: '', exclude: ['bin', 'lib', 'runtime', 'modules', 'third_party']},
-      {from: `lib/${tuple}/libcangjie-ast-support.a`, to: `lib/${tuple}/libcangjie-ast-support.a`}]};
+  const productRepository = path.resolve(here, '../..');
+  const productVersion = (await execute('git', ['-C', productRepository, 'rev-parse', 'HEAD'])).stdout.trim();
+  const retained = {id: 'official', roles: ['cjpm', 'official-host'], domain: 'host', source: officialSource,
+    config: {host: plan.platform, target: plan.platform, options: {}, tools: {git: frozenTools.git}},
+    producer: {adapter: 'official', version: productVersion, repository: productRepository}, dependencies: [],
+    install: [{from: '', to: '', exclude: ['bin', 'lib', 'runtime', 'modules', 'third_party']}]};
   plan.components.push(retained);
   for (const [id, roles, source, mode, dependencies, install] of [
+    ['ast', ['ast'], sources.std, 'ast', ['official'], [{from: 'libcangjie-ast-support.a', to: `lib/${tuple}/libcangjie-ast-support.a`}]],
     ['runtime', ['runtime', 'boundscheck'], sources.runtime, 'runtime', ['official'], runtimeLayout === 'flat'
       ? [{from: 'libcangjie-runtime.so', to: `runtime/lib/${tuple}/libcangjie-runtime.so`},
         {from: 'libboundscheck.so', to: `runtime/lib/${tuple}/libboundscheck.so`}, {from: 'lib', to: 'lib'}]
@@ -100,7 +91,7 @@ export async function fixture({role = 'target', sources: sourceOverrides = {}, s
     ['std', ['std'], sources.std, 'std', ['official', 'compiler', 'runtime'], [{from: '', to: ''}]],
   ]) {
     const recipe = path.join(root, `${id}.recipe.json`);
-    const expectedOutputs = {'runtime': [runtimeLayout === 'flat' ? 'libcangjie-runtime.so' : `install/runtime/lib/${tuple}/libcangjie-runtime.so`], compiler: ['cjcj-stage1'],
+    const expectedOutputs = {ast: ['libcangjie-ast-support.a'], 'runtime': [runtimeLayout === 'flat' ? 'libcangjie-runtime.so' : `install/runtime/lib/${tuple}/libcangjie-runtime.so`], compiler: ['cjcj-stage1'],
       'llvm-tools': ['bin/opt'], 'llvm-dylib': ['libLLVM-15.so'], std: ['std-producer.json']}[id];
     plan.components.push({id, roles, domain: role, source, config: {host: plan.platform, target: plan.platform,
       options: {parameters: {mode, ...(role === 'host' ? {role} : {}), ...(id === 'runtime' && runtimeLayout ? {runtimeLayout} : {}), ...(id === 'llvm-tools' ? {compilerSha: sources.compiler.commit, flatbuffersSha: sources.std.commit} : {}), ...parameters[id]}, optimization: 'Release', sdkDependency: 'official', jobs: os.availableParallelism(), heap: '32GB',
@@ -108,7 +99,8 @@ export async function fixture({role = 'target', sources: sourceOverrides = {}, s
       tools: {...frozenTools, ...(id === 'compiler' ? {compilerIdentity: {path: path.join(here, 'compiler_identity.py'), sha256: await fileDigest(path.join(here, 'compiler_identity.py'))}} : {}), builder: {path: builder, sha256: await fileDigest(builder)}}},
       producer: {adapter: 'sharedbuild-runtime-default', version: producerVersion, repository: producerRoot, engine, engineSha256: await fileDigest(engine), recipe}, dependencies, install});
   }
-  const identities = buildIdentities(plan);
-  const planFile = path.join(root, 'plan.json'); await atomicJson(planFile, plan);
-  return {root, plan, planFile, identities, out: path.join(root, 'sdk'), sources};
+  const {plan: frozen} = await freezeSdkPlan({...plan, schema: 'toolchain-sdk-intent-v1'});
+  const identities = buildIdentities(frozen);
+  const planFile = path.join(root, 'plan.json'); await atomicJson(planFile, frozen);
+  return {root, plan: frozen, planFile, identities, out: path.join(root, 'sdk'), sources, officialSource};
 }

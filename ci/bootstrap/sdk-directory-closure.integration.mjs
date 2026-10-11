@@ -6,6 +6,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {fixture, command} from './fixtures/sdk-plan-fixture.mjs';
+import {officialFixtureRequest} from './fixtures/sdk-official-fixture.mjs';
 import {atomicJson, readJson, fileDigest, buildIdentities, readOutput, objectId} from './sdk-manifest.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url));
 async function observe(f, label, result) {
@@ -15,17 +16,20 @@ async function observe(f, label, result) {
 }
 async function directoryFixture() {
   const f = await fixture(), source = path.join(f.root, 'directory-input');
-  await fs.cp(path.join(f.root, 'official'), source, {recursive: true});
+  await fs.cp(f.plan.components.find(row => row.id === 'official').source.root, source, {recursive: true});
   await fs.mkdir(path.join(source, 'tools/empty/leaf'), {recursive: true});
   await fs.chmod(path.join(source, 'tools/empty'), 0o750);
   await fs.chmod(path.join(source, 'tools/empty/leaf'), 0o751);
+  const original = f.plan.components.find(row => row.id === 'official').source;
+  const request = path.join(f.root, 'directory-official-request.json');
+  await officialFixtureRequest(original, request);
   const published = await observe(f, 'publisher', await command(['python3', process.env.SDK_SHAREDBUILD_ENGINE,
     '--remote', '--root', path.join(f.root, 'directory-cache'), '--lane', f.plan.lane,
-    'sdk-publish', '--source', source, '--version', 'directory-closure']));
+    'sdk-publish', '--source', source, '--version', original.version, '--official-identity-request', request]));
   assert.equal(published.rc, 0, published.stderr);
   const root = published.stdout.trim(), lock = path.join(root, 'SDK.lock.json');
   const official = f.plan.components.find(row => row.id === 'official');
-  official.source = {...official.source, root, lock, version: 'directory-closure', lockSha256: await fileDigest(lock)};
+  official.source = {...official.source, root, lock, lockSha256: await fileDigest(lock)};
   f.identities = buildIdentities(f.plan);
   await atomicJson(f.planFile, f.plan);
   return {...f, source, depot: root};

@@ -81,7 +81,7 @@ async function installedCompiler(f, label) {
 }
 async function badPublisher(kind, slot = 'bin/cjc') {
   const f = await host(), source = path.join(f.root, 'bad-source');
-  await fs.cp(path.join(f.inputRoot || f.root, 'official'), source, {recursive: true});
+  await fs.cp(f.plan.components.find(row => row.id === 'official').source.root, source, {recursive: true});
   const file = path.join(source, slot); await fs.unlink(file);
   const outside = path.join(f.root, 'outside-compiler');
   await fs.copyFile(values['old-elf'], outside);
@@ -93,7 +93,7 @@ async function badPublisher(kind, slot = 'bin/cjc') {
   assert.match(result.stderr, new RegExp(path.basename(slot)));
   assert.deepEqual({sha256: await fileDigest(outside), mtimeNs: (await fs.stat(outside, {bigint: true})).mtimeNs.toString()}, before);
   await assert.rejects(fs.access(f.out));
-  await fs.unlink(file); await fs.copyFile(path.join(f.root, 'official', slot), file);
+  await fs.unlink(file); await fs.copyFile(path.join(f.plan.components.find(row => row.id === 'official').source.root, slot), file);
   const restored = await retainPublished(f, source, `${kind}-restored`); assert.ok(restored.lock.source_layout[slot]);
   await installedCompiler(f, `${kind}-restored-assembly`);
   return f.root;
@@ -118,7 +118,7 @@ async function swapSuite() {
   assert.notEqual(oldHash, newHash, 'old and new ELF must differ');
   for (const kind of ['regular', 'symlink']) await target(`${kind}-cjc-replaced`, async () => {
     const f = await host(values['new-elf']), source = path.join(f.root, `${kind}-input`);
-    await fs.cp(path.join(f.inputRoot || f.root, 'official'), source, {recursive: true});
+    await fs.cp(f.plan.components.find(row => row.id === 'official').source.root, source, {recursive: true});
     for (const name of ['cjc', 'cjc-frontend']) await fs.unlink(path.join(source, 'bin', name));
     if (kind === 'regular') for (const name of ['cjc', 'cjc-frontend']) await fs.copyFile(values['old-elf'], path.join(source, 'bin', name));
     else {
@@ -155,7 +155,7 @@ async function identitySuite() {
 async function inputLayoutSuite() {
   await target('sdk-build-input-layout', async () => {
     const f = await host(), source = path.join(f.root, 'linker-input');
-    await fs.cp(path.join(f.inputRoot || f.root, 'official'), source, {recursive: true});
+    await fs.cp(f.plan.components.find(row => row.id === 'official').source.root, source, {recursive: true});
     const cjc = path.join(source, 'bin/cjc');
     good(await observe(f, 'original-linker-compile', ['cc', path.join(f.sources.compiler.repo, 'alias-tool.c'), '-o', cjc]));
     await fs.symlink('cjc', path.join(source, 'bin/linker'));

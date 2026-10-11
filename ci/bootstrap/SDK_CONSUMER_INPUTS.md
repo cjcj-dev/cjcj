@@ -142,3 +142,47 @@ by their existing owners and are not established by the small identity fixture.
 The established `nightly-` installation prefix is normalized by the existing
 release contract; the exact request is also bound in `requestedVersion`. An
 alias for a different release is still rejected.
+
+## Retained real official fixture input
+
+Also supply `SDK_OFFICIAL_PLAN` (or `prepare-sdk-test-inputs.mjs --official-plan`)
+with a normally frozen, one-component plan for the real
+`1.3.0-alpha.20261009001050` distribution. Its existing source, archive proof,
+version and lock binding remain intact. The qualifier exports that plan path
+alongside the fixed engine and private roots. It only qualifies the input
+metadata; it does not mint a proof or qualify SDK payloads, colour, ABI or stages.
+The original distribution and lock are read-only, including when their lock is
+outside the distribution root.
+
+`fixtures/sdk-plan-fixture.mjs` retains that source directly and freezes its
+native fixture plan through `freezeSdkPlan`. The actual official producer still
+performs full source/copy authentication before sealing; sharedbuild publishes
+its private host dependency with the product's genuine identity request. The
+native compiler, runtime, LLVM, std and AST fixture archive are produced by the
+ordinary native recipe, not inserted into an official release. These small
+native results do not qualify a complete compiler, native capsule or SDK.
+`fixtures/sdk-consumer-fixture.mjs` uses the same official request and version;
+its label only names private cache and evidence files. Directory/layout callers
+likewise retain the release version rather than invent a publisher tag.
+
+The old `prepareOfficial` callbacks modify the official payload (additional
+std/FFI/tuple/runtime members or synthetic runtime aliases). They cannot borrow
+1009's proof. Preparation reports `SDK_FIXTURE_NOT_RUN` before invoking those
+callbacks or compiling their native inputs. Their original assertions are kept.
+A later execution must provide a legal non-target input contract; an early
+identity rejection does not exercise any of their original target assertions.
+The following other cases also remain NOT_RUN, with their existing assertions:
+
+| Existing target | Missing legal prerequisite |
+| --- | --- |
+| Consumer swap and input-layout source cases | Replacing official cjc/cjpm or adding bin/linker does not match the original archive. |
+| Directory closure and added empty directories | The synthetic tools/empty/leaf layout and its chosen modes are not in the retained archive. |
+| Legacy file/directory aliases | Added cjpm aliases and the compiled alias dispatcher are not original archive entities. Real cjdb alias tests are a separate official input domain. |
+| Historical unmarked and marked layout consumer controls | A hand-authored historical lock without the real official proof cannot serve as a successful official control. Marker assertions require independent legal input qualification. |
+| Stage1 small ELF/domain observer | The original controlled-official cjc/cjpm/HOST library and `DOMAIN=HOST` observations are incompatible with a genuine official release. The observer only forwards genuine version/archive/request inputs; it supplies no replacement proof. Keep the original stage1 assertions pending instead of accepting an identity refusal as their result. |
+
+Source preparation alone does not authorize any of these domains or their
+payload copies/builds. In the #942 one-GiB contract only the original official
+host selector and small input/plan/source preparation are admitted. Native,
+full host/target SDK, alias/payload three-arm production and this qualifier's
+causal validation need their corresponding explicit execution/resource scope.

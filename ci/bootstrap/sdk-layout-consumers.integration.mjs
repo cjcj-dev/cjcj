@@ -7,6 +7,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {fixture, command} from './fixtures/sdk-plan-fixture.mjs';
+import {officialFixtureRequest} from './fixtures/sdk-official-fixture.mjs';
 import {readJson, atomicJson, fileDigest, canonical, objectId, sha256} from './sdk-manifest.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const assemble = (f, args = []) => command(['bash', path.join(here, 'sdk_build.sh'), '--plan', f.planFile, '--to', f.out, ...args]);
@@ -79,11 +80,14 @@ test('historical unmarked file-only SDK remains a legal public recipe consumer c
 
 test('publisher reserved metadata remains excluded in the public recipe consumer control', async () => {
   const f = await recipeInput('reserved-metadata'), source = path.join(f.root, 'retained-metadata-source');
-  await fs.cp(path.join(f.root, 'official'), source, {recursive: true});
+  await fs.cp(f.plan.components.find(row => row.id === 'official').source.root, source, {recursive: true});
   for (const name of ['SDK.lock.json', 'MANIFEST.sha256', 'DONE']) await fs.writeFile(path.join(source, name), `retained input ${name}\n`);
+  const original = f.plan.components.find(row => row.id === 'official').source;
+  const request = path.join(f.root, 'reserved-metadata-official-request.json');
+  await officialFixtureRequest(original, request);
   const published = await observe(f, 'reserved-metadata-publisher', await command(['python3', process.env.SDK_SHAREDBUILD_ENGINE,
     '--remote', '--root', path.join(f.root, 'reserved-metadata-depot'), '--lane', f.plan.lane,
-    'sdk-publish', '--source', source, '--version', 'reserved-metadata-control']));
+    'sdk-publish', '--source', source, '--version', original.version, '--official-identity-request', request]));
   assert.equal(published.rc, 0, published.stderr);
   const sdk = published.stdout.trim(), lock = await readJson(path.join(sdk, 'SDK.lock.json'));
   const result = await consumeSdk(f, sdk, 'reserved-metadata-consumer-control');
