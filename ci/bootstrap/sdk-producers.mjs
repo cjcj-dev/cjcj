@@ -61,7 +61,12 @@ async function official(component, directory, identity) {
   for (const [rel, row] of Object.entries(lock.source_layout || {})) {
     if (!['file', 'directory'].includes(row.type) || !Number.isInteger(row.mode) || row.mode < 0 || row.mode > 0o777) reject('DISTRIBUTION_LAYOUT', component.id, `invalid source entity ${rel}`);
   }
-  const sourceDirectories = Object.entries(lock.source_layout || {}).filter(([, row]) => row.type === 'directory');
+  const readonly = lock.layoutVersion === 1 || lock.officialMaterialization === 'readonly';
+  // Legacy file-only locks have no directory table. The archive identity has
+  // just authenticated this complete source; preserve its real directories
+  // through the existing inventory/copy path, including empty directories.
+  const sourceDirectories = Object.entries(lock.source_layout || await inventory(source.root, {links: true, directories: true}))
+    .filter(([, row]) => row.type === 'directory');
   const expectedEntities = Object.fromEntries(Object.entries(lock.source_layout || {}).map(([rel, row]) => [rel,
     row.type === 'directory' ? {type: 'directory', mode: row.mode & ~0o222, sha256: null}
       : {type: 'file', mode: row.mode & ~0o222, size: row.size, sha256: row.sha256}]));
@@ -87,8 +92,8 @@ async function official(component, directory, identity) {
     const sourceDirectory = await physicalPath(source.root, rel, component.id);
     if (!(await fs.stat(sourceDirectory)).isDirectory()) reject('DISTRIBUTION_LAYOUT', component.id, rel);
     await fs.mkdir(path.join(artifacts, rel), {recursive: true});
-    files[rel] = {type: 'directory', sha256: null, mode: row.mode & ~0o222,
-      sourceMode: row.mode, modeTransform: 'readonly'};
+    files[rel] = {type: 'directory', sha256: null, mode: readonly ? row.mode & ~0o222 : row.mode,
+      sourceMode: row.mode, modeTransform: readonly ? 'readonly' : 'identity'};
   }
   // Copy physical files first, then preserve authenticated contained aliases.
   // Old file-only locks remain readable; new locks describe native link types.
@@ -125,7 +130,7 @@ async function official(component, directory, identity) {
   for (const [rel] of sourceDirectories.reverse()) await fs.chmod(path.join(artifacts, rel), files[rel].mode);
   if (await fileDigest(source.lock) !== source.lockSha256) reject('DISTRIBUTION_LOCK', component.id, 'source lock changed during copy');
   return sealOutput(directory, component, identity, {status: 'complete', rc: 0, kind: 'official-distribution-copy',
-    officialIdentity, officialMaterialization: lock.layoutVersion === 1 || lock.officialMaterialization === 'readonly' ? 'readonly' : 'verbatim', distribution: {version: source.version, lockSha256: source.lockSha256, reason: source.reason}}, files);
+    officialIdentity, officialMaterialization: readonly ? 'readonly' : 'verbatim', distribution: {version: source.version, lockSha256: source.lockSha256, reason: source.reason}}, files);
 }
 async function sharedbuild(component, directory, identity, plan, resumeFailed, outputs) {
   const {engine, engineSha256} = component.producer;
