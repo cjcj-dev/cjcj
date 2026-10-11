@@ -186,3 +186,55 @@ payload copies/builds. In the #942 one-GiB contract only the original official
 host selector and small input/plan/source preparation are admitted. Native,
 full host/target SDK, alias/payload three-arm production and this qualifier's
 causal validation need their corresponding explicit execution/resource scope.
+
+## #942 bounded fixture closure and private source-mode rework
+
+The new rework window supersedes the preceding one-GiB execution scope only for
+the explicitly authorized representative chains. It does not qualify the whole
+SDK package or authorize any of the other pending input migrations above.
+
+The ordinary small fixture retains the full authenticated official component
+as its build dependency. Its installation projection excludes `bin`, `lib`,
+`runtime`, `modules`, `third_party`, and now `tools/bin/cjdb`. The first five
+roots are replaced by the same genuine small native recipes as before; the
+last entry is a newly inherited real-release debugger alias pointing at the
+excluded `third_party/llvm/bin/lldb`. The old synthetic fixture had no such
+alias and none of its original consumers requests cjdb/LLDB. It still retains
+`envsetup.sh`, cjpm, tools support libraries and other unchanged root members.
+Its native LLVM recipe produces llc/opt/ld.lld and its LLVM library; it does not
+produce LLDB. This projection is exclusive to `sdk-plan-fixture.mjs`. The
+separate complete official payload, official alias and real cjdb suites retain
+their complete install declarations and strict link verification.
+
+| Installed inputs | Old small fixture / real release migration | Rework and transitive consumers |
+| --- | --- | --- |
+| envsetup, tools/bin/cjpm, tools support | retained | retained; assembler load/version checks and sdk-consumer nativeChecks |
+| official bin/lib/runtime/modules/third_party | excluded | unchanged native compiler/runtime/std/LLVM outputs; sealed recipe dependencies still use the full official component |
+| tools/bin/cjdb -> ../../third_party/llvm/bin/lldb | absent in original small fixture; inherited by real release migration with target excluded | excluded only from this small installation; no original small consumer; full official/cjdb tests remain complete |
+| lib/tuple/libcangjie-ast-support.a | native AST recipe in migrated fixture | unchanged cc/ar recipe -> sharedbuild receipt -> frozen install -> host assembly -> both verifiers -> bootstrap AST read |
+
+The changed-source-mode case requests `fixture({privateOfficial: true})`.
+Before freezing, the fixed sharedbuild publisher authenticates the original
+source/archive and creates an owner-local physical read-only copy plus its new
+lock. The publisher's ordinary `copytree(..., symlinks=False)` materializes
+aliases and creates files independently; no source hard links or directory
+symlink surrogate is used. The fixture's new frozen source/root/lock binding
+then passes the normal complete assembly before a private cjpm mode change.
+The consumer checks physical containment and file identity before mutation,
+and observes the retained cjpm content/mode/mtime and retained lock during the
+mutation and after restoration. The target requires rc=1 and the precise
+`OFFICIAL_IDENTITY official archive payload mismatch: tools/bin/cjpm mode
+expected=... actual=...` diagnostic, with no installed output and unchanged
+locks. This tests unauthorized release mode changes before success sealing;
+it does not bypass full identity to reach the later DISTRIBUTION_FILE check.
+The verifier now reports the differing payload attributes without changing
+its comparison, accepted identities, archive pins or proof format.
+
+The saved successful component directory and chmod are protected by the same
+exception scope. A failed new attempt is preserved under `-mode-rejected`;
+the original successful directory is restored at its original identity path.
+Restored assembly uses that original binding and cache honestly, rather than
+calling the restored output a fresh production. No shared source, original
+lock/proof/archive or other lane record is amended by this case. Dynamic normal,
+cut and recovery evidence remains required; source and syntax checks alone do
+not establish that either verifier or the bootstrap AST consumer ran.

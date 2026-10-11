@@ -115,7 +115,7 @@ if actual!=expected:
     wanted,found=expected.get(bad,{}),actual.get(bad,{})
     fields=sorted(k for k in set(wanted)|set(found) if wanted.get(k)!=found.get(k))
     detail=' '.join(k+' expected='+str(wanted.get(k))+' actual='+str(found.get(k)) for k in fields)
-    raise ValueError('official archive payload mismatch: '+bad+' '+detail)
+    raise ValueError('OFFICIAL_IDENTITY official archive payload mismatch: '+bad+' '+detail)
 print(json.dumps(expected[compilerRel],sort_keys=True))
 `;
 export function validateOfficialSdkProof(proof, version) {
