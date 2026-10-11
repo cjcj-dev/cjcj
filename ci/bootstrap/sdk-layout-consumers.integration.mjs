@@ -60,8 +60,8 @@ test('marked SDK without source layout reaches the public recipe consumer reject
   const before = await fs.readFile(path.join(sdk, 'SDK.lock.json'));
   const result = await consumeSdk(f, sdk, 'marked-no-layout-target');
   console.log(`TARGET_ASSERTION_BEGIN source-layout-marker rc=${result.rc} stderr=${JSON.stringify(result.stderr)}`);
-  assert.deepEqual({rc: result.rc, diagnostics: result.stderr.split('\n').filter(line => line.startsWith('ERROR:'))},
-    {rc: 1, diagnostics: ['ERROR: SDK_LOCK_REJECT missing source layout']},
+  assert.deepEqual({rc: result.rc, diagnostics: result.stderr.split('\n').filter(line => line.startsWith('SHAREDBUILD_ERROR '))},
+    {rc: 1, diagnostics: ['SHAREDBUILD_ERROR SDK_LOCK_REJECT missing source layout']},
     'source-layout-marker: real CLI must reject specifically at the marked layout obligation');
   console.log('TARGET_ASSERTION_PASS source-layout-marker');
   assert.deepEqual(await fs.readFile(path.join(sdk, 'SDK.lock.json')), before);
