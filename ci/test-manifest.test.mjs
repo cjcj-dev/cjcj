@@ -354,6 +354,18 @@ test('an unregistered nested driver in the existing directory shape turns the gu
   }
 });
 
+function copyTrackedSource(root) {
+  const files = execFileSync('git', ['ls-files', '-z'], {cwd: repoRoot, encoding: 'utf8'}).split('\0').filter(Boolean);
+  fsSync.mkdirSync(root);
+  for (const file of files) {
+    const destination = path.join(root, file);
+    fsSync.mkdirSync(path.dirname(destination), {recursive: true});
+    fsSync.cpSync(path.join(repoRoot, file), destination);
+  }
+  execFileSync('git', ['init', '--quiet'], {cwd: root});
+  execFileSync('git', ['add', '--force', '.'], {cwd: root});
+}
+
 test('the manifest CLI rejects a real unregistered driver and recovers', () => {
   const work = fsSync.mkdtempSync(path.join(process.env.TMPDIR || '/tmp', 'manifest-cli-'));
   const root = path.join(work, 'repo');
@@ -367,15 +379,7 @@ test('the manifest CLI rejects a real unregistered driver and recovers', () => {
     }
   };
   try {
-    const files = execFileSync('git', ['ls-files', '-z'], {cwd: repoRoot, encoding: 'utf8'}).split('\0').filter(Boolean);
-    fsSync.mkdirSync(root);
-    for (const file of files) {
-      const destination = path.join(root, file);
-      fsSync.mkdirSync(path.dirname(destination), {recursive: true});
-      fsSync.cpSync(path.join(repoRoot, file), destination);
-    }
-    execFileSync('git', ['init', '--quiet'], {cwd: root});
-    execFileSync('git', ['add', '--force', '.'], {cwd: root});
+    copyTrackedSource(root);
     assert.equal(cli().rc, 0, 'the manifest is red before the probe is added');
     fsSync.mkdirSync(path.dirname(path.join(root, probe)), {recursive: true});
     fsSync.writeFileSync(path.join(root, probe), 'import sys\nsys.exit(1)\n');
@@ -392,6 +396,20 @@ test('the manifest CLI rejects a real unregistered driver and recovers', () => {
     assert.match(red.out, /zz-manifest-probe-\d+\/run\.py/);
     fsSync.rmSync(path.dirname(path.join(root, probe)), {recursive: true, force: true});
     assert.equal(cli().rc, 0, 'the CLI stayed red after the probe was removed');
+  } finally {
+    fsSync.rmSync(work, {recursive: true, force: true});
+  }
+});
+
+test('manifest CLI validates integration registration without executing manual files', () => {
+  const work = fsSync.mkdtempSync(path.join(process.env.TMPDIR || '/tmp', 'manifest-integration-cli-'));
+  const root = path.join(work, 'repo');
+  const cli = () => {
+    const result = spawnSync(process.execPath, ['ci/test-manifest.mjs', 'check'], {cwd: root, encoding: 'utf8'});
+    return {rc: result.status, out: `${result.stdout || ''}${result.stderr || ''}`};
+  };
+  try {
+    copyTrackedSource(root);
     const integration = `ci/zz-manifest-${process.pid}.integration.mjs`;
     const integrationPath = path.join(root, integration);
     const registryPath = path.join(root, 'ci/test-registry.json');
