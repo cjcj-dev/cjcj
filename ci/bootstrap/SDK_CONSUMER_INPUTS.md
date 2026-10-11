@@ -117,3 +117,29 @@ Every changed/new consumer is NOT_RUN under the current source-only contract.
 Syntax parsing and source mapping do not establish equivalence, complete
 behavior qualification, an effective causal cut, or any platform/native/std/
 stage/SDK/final strict parity acceptance.
+
+
+# Official source admission (#927 paired candidate)
+
+The tools publisher and this resolver use the same
+`build/lib/official-sdk-identity.mjs` contract, backed by the existing platform
+release pins and cjc version parser. Original archive bytes, complete logical
+payload and actual cjc version are verified before publication/copy and before
+accepting any cached or prior successful official receipt. The receipt retains
+`execution.officialIdentity` and the original verbatim/read-only
+materialization. Embedded installed receipts validate the pinned proof; installed
+admission also consumes the actual original official receipt and payload.
+
+An old receipt or lock without that proof stays historical and is rejected.
+Regenerate a new identity through the normal private publisher/producer and
+propagate dependency IDs; never amend old output/DONE/mtime or swap a label.
+The sharedbuild adapter emits an explicit original-archive request and a
+trusted verifier policy from its pinned cjcj producer, then includes the policy
+in the real build recipe. Supply this paired checkout on the host. Directory
+keys, repeated lock labels, and LLVM/LLDB versions cannot establish an official
+SDK release. Full SDK, ABI, STD_CJC and loadability qualification remain required
+by their existing owners and are not established by the small identity fixture.
+
+The established `nightly-` installation prefix is normalized by the existing
+release contract; the exact request is also bound in `requestedVersion`. An
+alias for a different release is still rejected.

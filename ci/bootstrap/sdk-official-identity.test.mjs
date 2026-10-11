@@ -24,7 +24,7 @@ async function command(label, argv) {
   try { const row = await execute(argv[0], argv.slice(1), {maxBuffer: 4 * 1024 * 1024}); result = {rc: 0, ...row}; }
   catch (error) { result = {rc: error.code, stdout: error.stdout || '', stderr: error.stderr || '', signal: error.signal || null}; }
   await atomicJson(path.join(evidence, `${label}.json`), {argv, ...result});
-  console.log(`TARGET_ASSERTION_EXECUTED ${label} rc=${result.rc} stdout=${JSON.stringify(result.stdout)} stderr=${JSON.stringify(result.stderr)}`);
+  console.log(`TARGET_ASSERTION_EXECUTED ${label} rc=${result.rc} result=${path.join(evidence, `${label}.json`)} stderr=${JSON.stringify(result.stderr)}`);
   return result;
 }
 const good = row => assert.equal(row.rc, 0, row.stderr);
@@ -62,14 +62,28 @@ async function build(label, sdkRoot) {
 }
 test('publisher rejects only a conflicting request tag before naming or successful sealing', async () => {
   good(await publish('publisher-fresh-control', fixture.version));
-  const bad = await publish('publisher-wrong-tag', fixture.wrongVersion);
-  rejectIdentity(bad);
   good(await publish('publisher-cache-control', fixture.version));
+  const alias = await publish('publisher-legitimate-nightly-alias', `nightly-${fixture.version}`); good(alias);
+  good(await build('recipe-legitimate-nightly-alias', alias.stdout.trim()));
+  good(await resolve('resolver-legitimate-nightly-alias', plan(alias.stdout.trim(), path.join(alias.stdout.trim(), 'SDK.lock.json'), `nightly-${fixture.version}`, 'resolve-legitimate-alias')));
   assert.equal(await fileDigest(path.join(fixture.source, 'bin/cjc')), sourceCjc);
+  const bad = await publish('publisher-wrong-tag', fixture.wrongVersion);
+  const badAlias = await publish('publisher-wrong-nightly-alias', `nightly-${fixture.wrongVersion}`);
+  console.log(`TARGET_ASSERTION_EXECUTED publisher-reject-tags rc=${bad.rc},${badAlias.rc}`);
+  assert.deepEqual([bad, badAlias].map(row => row.rc !== 0), [true, true], 'conflicting exact and nightly alias tags were accepted');
+  for (const row of [bad, badAlias]) rejectIdentity(row);
 });
 test('ordinary recipe consumption rejects a self-consistent wrong tagged marked and legacy seal', async () => {
   const normal = await build('recipe-fresh-control', sdk); good(normal);
   good(await build('recipe-cache-control', sdk));
+  const legacyRoot = path.join(evidence, 'valid-legacy'); await fs.cp(sdk, legacyRoot, {recursive: true});
+  const legacyLock = JSON.parse(sourceLock); delete legacyLock.layoutVersion; delete legacyLock.source_layout;
+  legacyLock.distribution_sha256 = objectId({version: legacyLock.version, files: Object.fromEntries(Object.entries(legacyLock.files).map(([rel, row]) => [rel, row.sha256])), officialIdentity: legacyLock.officialIdentity});
+  await fs.chmod(path.join(legacyRoot, 'SDK.lock.json'), 0o644); await atomicJson(path.join(legacyRoot, 'SDK.lock.json'), legacyLock);
+  good(await command('seal-valid-legacy', ['python3', '-c', 'import importlib.util,pathlib,sys;s=importlib.util.spec_from_file_location("sb",sys.argv[1]);m=importlib.util.module_from_spec(s);s.loader.exec_module(m);m.seal(pathlib.Path(sys.argv[2]))', engine, legacyRoot]));
+  good(await build('recipe-valid-legacy-control', legacyRoot));
+  good(await resolve('resolver-valid-legacy-control', plan(legacyRoot, path.join(legacyRoot, 'SDK.lock.json'), fixture.version, 'resolve-valid-legacy')));
+  const wrongResults = [];
   for (const layout of ['marked', 'legacy']) {
     const root = path.join(evidence, `wrong-${layout}`); await fs.cp(sdk, root, {recursive: true});
     const lock = JSON.parse(sourceLock); lock.version = fixture.wrongVersion;
@@ -79,14 +93,22 @@ test('ordinary recipe consumption rejects a self-consistent wrong tagged marked 
     await fs.chmod(path.join(root, 'SDK.lock.json'), 0o644); await atomicJson(path.join(root, 'SDK.lock.json'), lock);
     good(await command(`seal-${layout}`, ['python3', '-c',
       'import importlib.util,pathlib,sys;s=importlib.util.spec_from_file_location("sb",sys.argv[1]);m=importlib.util.module_from_spec(s);s.loader.exec_module(m);m.seal(pathlib.Path(sys.argv[2]))', engine, root]));
-    const result = await build(`recipe-wrong-${layout}`, root); rejectIdentity(result);
+    const result = await build(`recipe-wrong-${layout}`, root); wrongResults.push(result);
   }
+  console.log(`TARGET_ASSERTION_EXECUTED recipe-reject-marked-and-legacy rc=${wrongResults.map(row => row.rc).join(',')}`);
+  assert.deepEqual(wrongResults.map(row => row.rc !== 0), [true, true], 'ordinary recipe accepted wrong marked/legacy identity');
+  for (const row of wrongResults) rejectIdentity(row);
 });
 test('resolver fresh official producer rejects wrong label before producing a successful receipt', async () => {
   const p = plan(sdk, path.join(sdk, 'SDK.lock.json'), fixture.version, 'resolve-fresh');
   const normal = await resolve('resolve-fresh-control', p); good(normal);
   const actual = JSON.parse(normal.stdout.trim().split('\n').at(-1));
   assert.equal(actual.proof.compiler.version, fixture.version);
+  assert.equal(actual.files['bin/cjc'].sha256, sourceCjc);
+  assert.equal(actual.files['include/member.h'].sha256, actual.files['lib/member.h'].sha256);
+  assert.equal(actual.files['lib/empty'].mode, 0o750 & ~0o222);
+  assert.equal(actual.files['include/empty'].type, 'directory');
+  console.log('NON_CUT_CONTROLS_EXECUTED compiler-bytes alias-bytes directory-type readonly-mode');
   const wrongLock = path.join(evidence, 'fresh-wrong.lock.json');
   const lock = JSON.parse(sourceLock); lock.version = fixture.wrongVersion;
   await atomicJson(wrongLock, lock);
@@ -108,13 +130,16 @@ test('resolver cache and original prior-receipt admission reject missing proof w
   const before = await fs.readFile(path.join(directory, 'output.json'));
   const done = await fs.readFile(path.join(directory, 'DONE'));
   const stat = await fs.stat(path.join(directory, 'output.json'));
-  const result = await resolve('resolver-legacy-cache-missing-proof', p); rejectIdentity(result);
+  const normal = plan(sdk, path.join(sdk, 'SDK.lock.json'), fixture.version, 'resolve-fresh');
+  good(await resolve('resolver-new-cache-control', normal));
+  const result = await resolve('resolver-legacy-cache-missing-proof', p);
   const component = p.components[0], identity = buildIdentities(p).get('official');
   component.producer = {...component.producer, receipt: directory, receiptSha256: done.toString().trim(), originBuildRoot: p.buildRoot};
-  const prior = await resolve('resolver-legacy-prior-missing-proof', p); rejectIdentity(prior);
+  const prior = await resolve('resolver-legacy-prior-missing-proof', p);
+  console.log(`TARGET_ASSERTION_EXECUTED resolver-reject-cache-and-prior rc=${result.rc},${prior.rc}`);
+  assert.deepEqual([result, prior].map(row => row.rc !== 0), [true, true], 'resolver accepted original successful cache/prior receipt without source proof');
+  for (const row of [result, prior]) rejectIdentity(row);
   assert.deepEqual(await fs.readFile(path.join(directory, 'output.json')), before);
   assert.equal((await fs.stat(path.join(directory, 'output.json'))).mtimeMs, stat.mtimeMs);
   assert.deepEqual(await fs.readFile(path.join(directory, 'DONE')), done);
-  const normal = plan(sdk, path.join(sdk, 'SDK.lock.json'), fixture.version, 'resolve-fresh');
-  good(await resolve('resolver-new-cache-control', normal));
 });

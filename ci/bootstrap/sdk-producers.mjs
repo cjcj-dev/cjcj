@@ -55,7 +55,7 @@ async function official(component, directory, identity) {
     archive: lock.officialIdentity?.archive?.path || lock.archive?.path,
     platform: lock.officialIdentity?.platform || ({linux_x86_64: 'linux-x64', linux_aarch64: 'linux-aarch64',
       darwin_x86_64: 'darwin-x64', darwin_aarch64: 'darwin-arm64', windows_x86_64: 'windows-x64'})[lock.platform],
-    readonly: lock.layoutVersion === 1});
+    readonly: lock.layoutVersion === 1 || lock.officialMaterialization === 'readonly'});
   if (lock.officialIdentity && canonical(lock.officialIdentity) !== canonical(officialIdentity)) reject('OFFICIAL_IDENTITY', component.id, 'publisher identity differs');
   if (lock.layoutVersion !== undefined && (lock.layoutVersion !== 1 || !lock.source_layout)) reject('DISTRIBUTION_LOCK', component.id, 'missing authenticated source layout');
   for (const [rel, row] of Object.entries(lock.source_layout || {})) {
@@ -125,7 +125,7 @@ async function official(component, directory, identity) {
   for (const [rel] of sourceDirectories.reverse()) await fs.chmod(path.join(artifacts, rel), files[rel].mode);
   if (await fileDigest(source.lock) !== source.lockSha256) reject('DISTRIBUTION_LOCK', component.id, 'source lock changed during copy');
   return sealOutput(directory, component, identity, {status: 'complete', rc: 0, kind: 'official-distribution-copy',
-    officialIdentity, officialMaterialization: lock.layoutVersion === 1 ? 'readonly' : 'verbatim', distribution: {version: source.version, lockSha256: source.lockSha256, reason: source.reason}}, files);
+    officialIdentity, officialMaterialization: lock.layoutVersion === 1 || lock.officialMaterialization === 'readonly' ? 'readonly' : 'verbatim', distribution: {version: source.version, lockSha256: source.lockSha256, reason: source.reason}}, files);
 }
 async function sharedbuild(component, directory, identity, plan, resumeFailed, outputs) {
   const {engine, engineSha256} = component.producer;

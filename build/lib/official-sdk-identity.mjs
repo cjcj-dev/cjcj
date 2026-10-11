@@ -116,10 +116,10 @@ if actual!=expected:
 print(json.dumps(expected[compilerRel],sort_keys=True))
 `;
 export function validateOfficialSdkProof(proof, version) {
-  if (proof?.schema !== 'official-sdk-identity-v1' || proof.version !== version
-    || proof.compiler?.version !== version || proof.compiler?.rc !== 0
+  if (proof?.schema !== 'official-sdk-identity-v1' || proof.requestedVersion !== version
+    || proof.version !== version.replace(/^nightly-/, '') || proof.compiler?.version !== proof.version || proof.compiler?.rc !== 0
     || !/^[a-f0-9]{64}$/.test(proof.compiler?.sha256 || '')
-    || hostToolchainFromCjcVersion(proof.compiler?.stdout || '') !== `nightly-${version}`) {
+    || hostToolchainFromCjcVersion(proof.compiler?.stdout || '') !== `nightly-${proof.version}`) {
     throw new Error('OFFICIAL_IDENTITY matching release/archive/compiler proof required');
   }
   const expected = baseSdkDownload(proof.platform, version);
@@ -133,7 +133,7 @@ export function validateOfficialSdkProof(proof, version) {
 export async function verifyOfficialSdkIdentity({root, version, archive, platform, readonly = false}) {
   // Keep the exact request: aliases cannot excuse a conflicting lock tag.
   const expected = baseSdkDownload(platform, version);
-  if (version !== expected.version) throw new Error('OFFICIAL_IDENTITY requested version is not the release version');
+  if (version.replace(/^nightly-/, '') !== expected.version) throw new Error('OFFICIAL_IDENTITY requested version is not the release version');
   if (!archive || !path.isAbsolute(archive) || path.basename(archive) !== expected.archive) {
     throw new Error('OFFICIAL_IDENTITY original archive locator/name required');
   }
@@ -153,8 +153,8 @@ export async function verifyOfficialSdkIdentity({root, version, archive, platfor
     {env: environment, timeout: 30000, maxBuffer: 1024 * 1024});
   if (await digest(path.join(root, 'bin', `cjc${spec.exeSuffix}`)) !== compiler.sha256) throw new Error('OFFICIAL_IDENTITY compiler changed during version verification');
   const actualVersion = hostToolchainFromCjcVersion(result.stdout).slice('nightly-'.length);
-  if (actualVersion !== version) throw new Error(`OFFICIAL_IDENTITY compiler mismatch: requested=${version} actual=${actualVersion}`);
-  return {schema: 'official-sdk-identity-v1', platform, version,
+  if (actualVersion !== expected.version) throw new Error(`OFFICIAL_IDENTITY compiler mismatch: requested=${version} actual=${actualVersion}`);
+  return {schema: 'official-sdk-identity-v1', platform, version: expected.version, requestedVersion: version,
     archive: {path: archive, sha256: expected.sha256, size: expected.size,
       repository: expected.releaseRepository, url: expected.url},
     compiler: {version: actualVersion, sha256: compiler.sha256, stdout: result.stdout, rc: 0}};
