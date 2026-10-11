@@ -9,7 +9,7 @@ import {spawn} from 'node:child_process';
 import {promisify} from 'node:util';
 import {qualificationRecipe, verifyQualificationCertificate} from './sdk-cjdb-qualification.mjs';
 
-import {verifyOfficialSdkIdentity} from '../../build/lib/official-sdk-identity.mjs';
+import {verifyOfficialSdkIdentity, validateOfficialSdkProof} from '../../build/lib/official-sdk-identity.mjs';
 
 export const execute = promisify(execFile);
 export const PLAN_SCHEMA = 'toolchain-sdk-plan-v1';
@@ -546,10 +546,7 @@ export function parseOutputReceipt(bytes, done, directory, component, identity) 
   if (component.source.kind === 'git' && (record.execution?.source?.commit !== component.source.commit
     || record.execution?.source?.tree !== component.source.tree)) reject('SOURCE_COMPLETION', component.id, 'actual producer source identity missing');
   if (component.source.kind === 'distribution' && record.execution?.distribution?.lockSha256 !== component.source.lockSha256) reject('SOURCE_COMPLETION', component.id, 'actual distribution identity missing');
-  if (component.source.kind === 'distribution' && (!record.execution?.officialIdentity
-    || record.execution.officialIdentity.version !== component.source.version
-    || record.execution.officialIdentity.compiler?.version !== component.source.version
-    || record.execution.officialIdentity.compiler?.rc !== 0)) reject('OFFICIAL_IDENTITY', component.id, 'receipt lacks matching release/compiler proof');
+  if (component.source.kind === 'distribution') validateOfficialSdkProof(record.execution?.officialIdentity, component.source.version);
   for (const [rel, row] of Object.entries(record.files)) {
     relative(rel, component.id);
     if (!(row.type === 'directory' ? row.sha256 === null && row.size === undefined :

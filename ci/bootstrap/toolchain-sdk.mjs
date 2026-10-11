@@ -173,6 +173,14 @@ export async function verifyManifestSdk(sdk, plan, manifest) {
     reject('INSTALL_BINDING', 'sdk', 'installed plan, successful manifest and lock must agree');
   }
   verifyResolvedIdentities(plan, manifest);
+  // Embedded receipts retain their producer identity, but installation admission
+  // must also consume the actual original official receipt/payload proof.
+  const identities = buildIdentities(plan);
+  for (const component of plan.components.filter(row => row.source.kind === 'distribution')) {
+    const identity = identities.get(component.id);
+    const output = await readOutput(component.producer.receipt || identity.directory, component, identity);
+    if (output.receiptSha256 !== manifest.components[component.id].receiptSha256) reject('OFFICIAL_IDENTITY', component.id, 'installed receipt differs from actual official producer');
+  }
   for (const [name, input] of Object.entries(plan.verification)) if (input?.path) await requiredInput(input, name);
   // Authenticate the local lock against sealed producer metadata before any
   // payload qualification. Reuse the legacy verifier's single binding implementation.

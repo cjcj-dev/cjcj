@@ -115,6 +115,21 @@ if actual!=expected:
     raise ValueError('official archive payload mismatch: '+bad)
 print(json.dumps(expected[compilerRel],sort_keys=True))
 `;
+export function validateOfficialSdkProof(proof, version) {
+  if (proof?.schema !== 'official-sdk-identity-v1' || proof.version !== version
+    || proof.compiler?.version !== version || proof.compiler?.rc !== 0
+    || !/^[a-f0-9]{64}$/.test(proof.compiler?.sha256 || '')
+    || hostToolchainFromCjcVersion(proof.compiler?.stdout || '') !== `nightly-${version}`) {
+    throw new Error('OFFICIAL_IDENTITY matching release/archive/compiler proof required');
+  }
+  const expected = baseSdkDownload(proof.platform, version);
+  if (proof.archive?.sha256 !== expected.sha256 || proof.archive?.size !== expected.size
+    || proof.archive?.repository !== expected.releaseRepository || proof.archive?.url !== expected.url
+    || !path.isAbsolute(proof.archive?.path || '') || path.basename(proof.archive.path) !== expected.archive) {
+    throw new Error('OFFICIAL_IDENTITY proof differs from pinned original release');
+  }
+  return proof;
+}
 export async function verifyOfficialSdkIdentity({root, version, archive, platform, readonly = false}) {
   // Keep the exact request: aliases cannot excuse a conflicting lock tag.
   const expected = baseSdkDownload(platform, version);
