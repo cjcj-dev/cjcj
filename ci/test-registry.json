@@ -641,5 +641,75 @@
     "file": "ci/bootstrap/sdk-directory-closure.integration.mjs",
     "executor": "manual",
     "reason": "Run node --test with SDK_SHAREDBUILD_ENGINE naming a clean fixed private tools checkout and SDK_MANIFEST_TEST_ROOT and TMPDIR naming existing private directories. Requires the real small Linux x86_64 cc/ar/clang/git/node/python3 fixture and actual sdk_build.sh. Asserts source directory modes, readonly projection, original receipt and manifest provenance, empty-directory installation, both verifiers and independent final control. Inputs and failure evidence remain exclusively owned. Registration is NOT_RUN, not CI or full SDK qualification."
+  },
+  {
+    "file": "ci/bootstrap/sdk-bitcode-readers.integration.mjs",
+    "executor": "manual",
+    "reason": "SDK bitcode-reader publication: run node --test ci/bootstrap/sdk-bitcode-readers.integration.mjs with SDK_READER_PLAN and SDK_READER_EVIDENCE; optional SDK_READER_INVALID_PLAN and SDK_READER_PRODUCT. Requires Retained actual native producer receipts and sealed llvm-as/llvm-dis executable and semantic identities. Same-tree SDK CLI publishes and inspects the receipt-backed SDK. Isolation: Fresh assembled SDKs and per-command logs/results under the private evidence root. CI does not provision this private input closure. Registration is NOT_RUN, not a CI pass or complete SDK qualification; no shared SDK writes or new input production is authorized by registration."
+  },
+  {
+    "file": "ci/bootstrap/sdk-cjdb-python-closure.integration.mjs",
+    "executor": "manual",
+    "reason": "CJDB Python installation closure: run node --test ci/bootstrap/sdk-cjdb-python-closure.integration.mjs with CJDB_CLOSURE_PREVIOUS and CJDB_CLOSURE_OUTPUT; CJDB_CLOSURE_ARM=normal, import or refuse. Requires Completed prior normal-config qualification with install_manifest.txt, import-artifacts.json, original sealed native receipt, Python 3.11 and actual LLDB installation; readelf and ldconfig. Imports real lldb bindings and creates/destroys SBDebugger. Isolation: Entire private output parent including sibling sources.json and normal/install; refusal arms copy/mutate/restore only owner installations. CI does not provision this private input closure. Registration is NOT_RUN, not a CI pass or complete SDK qualification; no shared SDK writes or new input production is authorized by registration."
+  },
+  {
+    "file": "ci/bootstrap/sdk-cjdb-python.integration.mjs",
+    "executor": "manual",
+    "reason": "CJDB Python producer/child configuration: run node --test ci/bootstrap/sdk-cjdb-python.integration.mjs with CJDB_PYTHON_PARTIAL, CJDB_PYTHON_OUTPUT and CJDB_PYTHON_SOURCES; optional CJDB_PYTHON_CONFIGURE_ONLY=1. Requires Real partial request/native prerequisite build, fixed compiler/LLVM/runtime/boundscheck/flatbuffers Git locators, Python receipt/root, CMake/Ninja/ccache/Clang. Default execution builds and installs LLDB and loads its Python bindings; configure-only still configures the real parent and child. Isolation: Owner source clones, identities, parent/child build graphs, installation and evidence; original partial inputs read-only. CI does not provision this private input closure. Registration is NOT_RUN, not a CI pass or complete SDK qualification; no shared SDK writes or new input production is authorized by registration."
+  },
+  {
+    "file": "ci/bootstrap/sdk-cjdb-qualification.integration.mjs",
+    "executor": "manual",
+    "reason": "CJDB generated-input qualification: run node --test ci/bootstrap/sdk-cjdb-qualification.integration.mjs with CJDB_REQUEST and CJDB_QUALIFICATION_EVIDENCE. Requires Retained real partial native request, fixed source checkouts, demangler archive, boundscheck library and generated five-byte closure, actual CMake native configure recipe. Invokes real preconfigure/preseal hooks and configures the fixed LLVM project without a full build. Isolation: Exclusive input LLVM source domain for temporary extra ignored-file mutation/restoration; isolated clone, configuration and capsule/evidence outputs. CI does not provision this private input closure. Registration is NOT_RUN, not a CI pass or complete SDK qualification; no shared SDK writes or new input production is authorized by registration."
+  },
+  {
+    "file": "ci/bootstrap/sdk-cjdb-shim.integration.mjs",
+    "executor": "manual",
+    "reason": "CJDB schema/shim read surface: run node --test ci/bootstrap/sdk-cjdb-shim.integration.mjs with CJDB_SHIM_PARTIAL, CJDB_SHIM_OUTPUT and CJDB_SHIM_CJO. Requires Retained partial native build with actual flatc, compiler/flatbuffers/LLVM sources and headers, built libLLVM-15.so and a real CJOF package; /usr/bin/clang++, ldd. Compiles and loads the shim and independent surface_probe. Isolation: Private generated headers, object/shared library/probe, invalid CJOF copy and identity/command evidence; original partial/CJO read-only. CI does not provision this private input closure. Registration is NOT_RUN, not a CI pass or complete SDK qualification; no shared SDK writes or new input production is authorized by registration."
+  },
+  {
+    "file": "ci/bootstrap/sdk-cjdb-tuple.integration.mjs",
+    "executor": "manual",
+    "reason": "CJDB fixed-tuple qualification: run node ci/bootstrap/sdk-cjdb-tuple.integration.mjs with CJDB_REQUEST and CJDB_QUALIFICATION_EVIDENCE. Requires Actual fixed-53ce LLVM/174db compiler request with build identity, real generated inputs, demangler/boundscheck products and frozen CMake/Node/Git tools. This is a plain Node assertion script, not a node:test suite; invokes real hooks and certificate/install consumers. Isolation: Exclusive request LLVM source domain for securec.h mutation/restoration plus private qualification/capsule/evidence outputs. CI does not provision this private input closure. Registration is NOT_RUN, not a CI pass or complete SDK qualification; no shared SDK writes or new input production is authorized by registration."
+  },
+  {
+    "file": "ci/bootstrap/sdk-official.integration.mjs",
+    "executor": "manual",
+    "reason": "SDK official alias producer/resolver: run node --test ci/bootstrap/sdk-official.integration.mjs with SDK_OFFICIAL_PLAN and SDK_OFFICIAL_EVIDENCE. Requires Privately verified real Linux x86_64 publisher distribution and authenticated lock for 1.3.0-alpha.20261009001050. Invokes actual official producer/resolver and runs the physical compiler -v control. Isolation: Private per-test plan/build roots, receipts, resolver outputs and evidence; original distribution read-only. CI does not provision this private input closure. Registration is NOT_RUN, not a CI pass or complete SDK qualification; no shared SDK writes or new input production is authorized by registration."
+  },
+  {
+    "file": "ci/bootstrap/sdk-payload.integration.mjs",
+    "executor": "manual",
+    "reason": "SDK Linux official payload completeness: run node --test ci/bootstrap/sdk-payload.integration.mjs with SDK_OFFICIAL_PLAN and SDK_OFFICIAL_EVIDENCE. Requires Actual publisher distribution inventory/lock and source payload. Real resolver first completes official production then rejects a deliberately missing cjdb installation. Isolation: Private expected inventory, modified plan, producer build root and resolver evidence; original publisher input read-only. CI does not provision this private input closure. Registration is NOT_RUN, not a CI pass or complete SDK qualification; no shared SDK writes or new input production is authorized by registration."
+  },
+  {
+    "file": "ci/bootstrap/sdk-phase-handoff.integration.mjs",
+    "executor": "manual",
+    "reason": "SDK bootstrap phase identity handoff: run node --test ci/bootstrap/sdk-phase-handoff.integration.mjs with SDK_PHASE_OBSERVATION and SDK_PHASE_WORK_ROOT; optional SDK_PHASE_PRODUCT_ROOT. Requires Retained complete-plan fixture observation with adjacent bundle.frozen.json and its frozen source/tool/plan identity closure. Runs toolchain-sdk, prepare-bootstrap-plans and bootstrap-sdk real CLIs in dry-run mode; dry-run still requires genuine plan inputs. Isolation: Private direct/generated plans, bundle and assembly destinations; retained producer inputs read-only. CI does not provision this private input closure. Registration is NOT_RUN, not a CI pass or complete SDK qualification; no shared SDK writes or new input production is authorized by registration."
+  },
+  {
+    "file": "ci/bootstrap/sdk-runtime-source.integration.mjs",
+    "executor": "manual",
+    "reason": "SDK runtime source admission: run node --test ci/bootstrap/sdk-runtime-source.integration.mjs with SDK_RUNTIME_SOURCE_SDK, SDK_RUNTIME_SOURCE_ROOT and SDK_RUNTIME_WRONG_SOURCE; optional SDK_RUNTIME_SOURCE_PRODUCT. Requires Genuine retained SDK.manifest.json/SDK.lock.json and runtime payload, matching fixed runtime Git source plus independent wrong Git source. Imports actual runtime verifier and observes its rejection. Isolation: Input SDK/source trees remain read-only; use privately owned inputs and retain invocation evidence. CI does not provision this private input closure. Registration is NOT_RUN, not a CI pass or complete SDK qualification; no shared SDK writes or new input production is authorized by registration."
+  },
+  {
+    "file": "ci/bootstrap/sdk-stage-selection.integration.mjs",
+    "executor": "manual",
+    "reason": "SDK installed stage compiler selection: run node --test ci/bootstrap/sdk-stage-selection.integration.mjs with SDK_STAGE_PLAN, SDK_SELECTION_WORK_ROOT and SDK_COLLISION_OBSERVATION; optional SDK_SELECTION_PRODUCT_ROOT. Requires Genuine retained stage compiler plan and native collision apparatus with original receipts/source/tools. Real SDK CLI checks stage1/stage3 dry plans and performs collision production/assembly. Isolation: Private modified plans, collision producer builds and SDK/evidence destinations; no mutation/resealing of retained receipts. CI does not provision this private input closure. Registration is NOT_RUN, not a CI pass or complete SDK qualification; no shared SDK writes or new input production is authorized by registration."
+  },
+  {
+    "file": "ci/bootstrap/sdk-stage1-llvm.integration.mjs",
+    "executor": "manual",
+    "reason": "SDK stage1 host/target LLVM domain: run node --test ci/bootstrap/sdk-stage1-llvm.integration.mjs with STAGE1_FIXTURE_ROOT and STAGE1_TOOLS_REPO; optional STAGE1_REAL_LLD, STAGE1_FIXTURE_REUSE and STAGE1_ARM_PREFIX. Requires Clean fixed private tools Git checkout with real sharedbuild main.py/cjcj-stage1.mjs; Linux x86_64 cc, git, Python, readelf and real installed lld. Compiles small native ELF fixtures and invokes actual stage1 adapter through fixtures/sdk-stage1-observer.mjs; never a full Cangjie/native receipt. Isolation: Entire private fixture root including source Git, original host lock, host/target bytes, shared cache, adapter work and failure/restoration evidence. CI does not provision this private input closure. Registration is NOT_RUN, not a CI pass or complete SDK qualification; no shared SDK writes or new input production is authorized by registration."
+  },
+  {
+    "file": "ci/bootstrap/sdk-stage1-plan.integration.mjs",
+    "executor": "manual",
+    "reason": "SDK formal stage1 producer recipe: run node --test ci/bootstrap/sdk-stage1-plan.integration.mjs with STAGE1_FROZEN_PLAN and STAGE1_PLAN_EVIDENCE. Requires Actual frozen production plan with source/tool/host identities and native shim/libLLVM bindings. Calls same-tree SDK CLI --dry-run for normal, wrong-dependency/reserved-host-lock and restored plans. Isolation: Private plan copies, CLI logs and result JSON; frozen plan and its inputs read-only. CI does not provision this private input closure. Registration is NOT_RUN, not a CI pass or complete SDK qualification; no shared SDK writes or new input production is authorized by registration."
+  },
+  {
+    "file": "ci/host-toolchain-official.integration.mjs",
+    "executor": "manual",
+    "reason": "Host workflow publisher selection: run node --test ci/host-toolchain-official.integration.mjs with SDK_OFFICIAL_PLAN. Requires Real private Linux publisher distribution with executable bin/cjc to measure -v independently; same-tree host-toolchain-pin.mjs workflow selector. Existing pinned old CI SDK is not this measured publisher input. Isolation: Distribution/plan read-only; private invocation evidence; other-platform selector remains an independent control. CI does not provision this private input closure. Registration is NOT_RUN, not a CI pass or complete SDK qualification; no shared SDK writes or new input production is authorized by registration."
   }
 ]
