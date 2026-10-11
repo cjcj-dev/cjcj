@@ -232,7 +232,7 @@ test('kkk2 dry-run rejects windows-x64 and unknown target before P10', () => {
   assert.match(aarch64.stderr, /required host linux\/arm64/);
 });
 
-function runAffinityFixture(t, timeoutMs = 15000, capture = 'capture_build_child_affinity') {
+function runAffinityFixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'source-build-affinity-'));
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));
   const timings = path.join(root, 'timings.tsv');
@@ -243,9 +243,9 @@ function runAffinityFixture(t, timeoutMs = 15000, capture = 'capture_build_child
   const helper = path.join(repoRoot, 'build/test/fixtures/affinity-sync.mjs');
   const wrapper = fs.readFileSync(helper, 'utf8').replace(/^#![^\n]+/, `#!${process.execPath}`);
   fs.writeFileSync(path.join(fakeBin, 'taskset'), wrapper, {mode: 0o755});
-  fs.writeFileSync(path.join(root, 'Makefile'), `all:\n\t"${process.execPath}" "${helper}" ${timeoutMs}\n`);
+  fs.writeFileSync(path.join(root, 'Makefile'), `all:\n\t"${process.execPath}" "${helper}" 15000\n`);
   const invoke = `${shellFunction('elapsed_seconds')}\n`
-    + `${shellFunction(capture)}\n`
+    + `${shellFunction('capture_build_child_affinity')}\n`
     + `${shellFunction('run_step')}\n`
     + `${shellFunction('finish_step')}\n`
     + 'STATE_ROOT=$1 LOG_ROOT=$1 TIMINGS=$2 START_STAMP=fixture\n'
@@ -267,6 +267,9 @@ function runAffinityFixture(t, timeoutMs = 15000, capture = 'capture_build_child
   const pid = fs.readFileSync(path.join(root, 'make.pid'), 'utf8').trim();
   const outcome = fs.readFileSync(path.join(root, 'outcome'), 'utf8').trim();
   console.log(`AFFINITY_FIXTURE product_sha256=${sha256(scriptPath)} make_pid=${pid} outcome=${outcome} rc=${result.status}\n${record}`);
+  if (fs.existsSync(path.join(root, 'query.json'))) {
+    console.log(`AFFINITY_QUERY ${fs.readFileSync(path.join(root, 'query.json'), 'utf8')}`);
+  }
   return {record, pid, outcome};
 }
 
@@ -284,6 +287,39 @@ test('source-build records affinity from the long top-level make instead of an e
     assert.equal(outcome, 'observed');
     assert.match(record, new RegExp(`^affinity\\tstep=10\\tpid=${pid}\\t`, 'm'));
   });
+});
+
+test('source-build affinity fixture releases real make on an observation timeout', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'source-build-affinity-timeout-'));
+  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
+  const helper = path.join(repoRoot, 'build/test/fixtures/affinity-sync.mjs');
+  fs.writeFileSync(path.join(root, 'Makefile'), `all:\n\t"${process.execPath}" "${helper}" 100\n`);
+  const result = spawnSync('/usr/bin/make', ['-C', root, 'DESTDIR=', 'all'], {
+    encoding: 'utf8', timeout: 5000,
+    env: {...process.env, AFFINITY_FIXTURE_ROOT: root},
+  });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.equal(fs.readFileSync(path.join(root, 'outcome'), 'utf8'), 'timeout\n');
+  assert.equal(fs.existsSync(path.join(root, 'observed')), false);
+  console.log('TARGET_ASSERTION no observation released real make rc=0');
+});
+
+test('source-build affinity fixture forwards a failed real taskset query unchanged', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'source-build-affinity-taskset-'));
+  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
+  const wrapper = path.join(root, 'taskset');
+  fs.copyFileSync(path.join(repoRoot, 'build/test/fixtures/affinity-sync.mjs'), wrapper);
+  const args = ['-pc', '2147483647'];
+  const actual = spawnSync('/usr/bin/taskset', args, {encoding: 'utf8'});
+  const forwarded = spawnSync(process.execPath, [wrapper, ...args], {
+    encoding: 'utf8', env: {...process.env, AFFINITY_FIXTURE_ROOT: root},
+  });
+  assert.notEqual(actual.status, 0);
+  assert.equal(forwarded.status, actual.status);
+  assert.equal(forwarded.stdout, actual.stdout);
+  assert.equal(forwarded.stderr, actual.stderr);
+  assert.equal(fs.existsSync(path.join(root, 'observed')), false);
+  console.log(`TARGET_ASSERTION real taskset failure forwarded rc=${actual.status}`);
 });
 
 test('source-build shell fetch uses the selected mirror and keeps canonical origin', t => {

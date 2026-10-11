@@ -18,6 +18,9 @@ if (path.basename(process.argv[1]) === 'taskset') {
   // Only a successful real query of this live top-level make releases it.
   if (result.status === 0 && args.length === 2 && args[0] === '-pc'
       && fs.existsSync(ready) && args[1] === fs.readFileSync(ready, 'utf8').trim()) {
+    fs.writeFileSync(path.join(root, 'query.json'), JSON.stringify({
+      pid: args[1], rc: result.status, stdout: result.stdout.toString(), stderr: result.stderr.toString(),
+    }));
     fs.writeFileSync(observed, `${args[1]}\n`);
   }
   if (result.signal) process.kill(process.pid, result.signal);
