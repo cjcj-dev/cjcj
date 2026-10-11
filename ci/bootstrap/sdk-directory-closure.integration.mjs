@@ -78,10 +78,11 @@ async function emptyDirectoryResult(f, result) {
   // These are input qualifications, evaluated only after all product results
   // are saved. They distinguish missing receipts or unrelated producer failures
   // from the authenticated directory preservation obligation.
-  for (const row of rows) assert.equal(row.source?.type, 'directory', `DIRECTORY_INPUT_QUALIFICATION ${row.rel}`);
+  for (const row of rows) assert.deepEqual({type: row.source?.type, mode: row.source?.mode},
+    {type: 'directory', mode: row.sourceMode}, `DIRECTORY_INPUT_QUALIFICATION ${row.rel}`);
   assert.ok(receipt.value, `DIRECTORY_RECEIPT_QUALIFICATION ${JSON.stringify(receipt.error)} assembly=${JSON.stringify(result)}`);
   const directoryFailure = result.rc === 1 && rows.some(({rel}) =>
-    result.stderr.split('\n').some(line => line.includes(rel) &&
+    result.stderr.split('\n').some(line => (line.endsWith(` ${rel}`) || line.includes(`/${rel}'`) || line.includes(`/${rel}"`)) &&
       (/rule=PAYLOAD_(?:TYPE|MODE|MEMBERS)\b/.test(line) || /ENOENT.*(?:lstat|stat|chmod)/.test(line))));
   assert.ok(result.rc === 0 || directoryFailure,
     `DIRECTORY_ASSEMBLY_UNRELATED_FAILURE ${JSON.stringify(result)}`);

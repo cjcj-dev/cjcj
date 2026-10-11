@@ -539,13 +539,17 @@ const preciseFault = {
 };
 const positives = {
   'check-phase-results': async () => {
-    const f = await bootstrapFixture(); currentRoot = f.root;
     const phases = ['stage1-initial', 'stage1-std'];
+    const selectedPhases = args[1] ? [args[1]] : phases;
+    assert.ok(selectedPhases.every(phase => phases.includes(phase)), 'check-phase-results accepts stage1-initial or stage1-std');
+    const f = await bootstrapFixture(); currentRoot = f.root;
     await qualifyBootstrapPhases(f, phases);
     const initial = f.phaseQualifications.get(phases[0]), next = f.phaseQualifications.get(phases[1]);
     assert.notEqual(initial.stdBuildId, next.stdBuildId, 'independent legal phases require distinct genuine std producer identities');
     assert.notEqual(initial.stdModuleSha256, next.stdModuleSha256, 'independent legal phases require distinct installed std bytes');
-    for (const phase of phases) await phaseIdentities(f, phase, process.env.SDK_PHASE_PRODUCT_ROOT || path.join(f.src, 'ci/bootstrap'));
+    // Each phase can be invoked independently, so a target red cannot prevent
+    // the legal alternate-phase control from running in its own command.
+    for (const phase of selectedPhases) await phaseIdentities(f, phase, process.env.SDK_PHASE_PRODUCT_ROOT || path.join(f.src, 'ci/bootstrap'));
   },
   'check-std-compiler-identity': async () => {good(await isolation('direct')); good(await isolation('runner'));},
   'check-tuple-with-so': tupleWithSo, 'check-exit-receipts': () => exitReceipts(args[1]), 'check-sdk-literal-prefix': literalStd,

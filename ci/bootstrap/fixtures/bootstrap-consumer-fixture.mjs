@@ -158,7 +158,7 @@ export async function phaseIdentities(f, phase, productRoot = path.join(f.src, '
   assert.equal(result.rc, 0, `PHASE_RESULT_EXECUTION_QUALIFICATION: a missing receipt/loading/STD_CJC failure is not phase selection evidence: ${result.stderr}`);
   const actual = {planSha256: manifest.value?.planSha256, stdModuleSha256: std.value,
     compilerSha256: compiler.value, stdCompilerSha256: producer.value?.compiler_sha256,
-    stdBuildId: manifest.value?.components.std?.buildId};
+    stdBuildId: manifest.value?.components?.std?.buildId};
   const wanted = {planSha256: qualified.planSha256, stdModuleSha256: qualified.stdModuleSha256,
     compilerSha256: qualified.compilerSha256, stdCompilerSha256: qualified.stdCompilerSha256, stdBuildId: qualified.stdBuildId};
   console.log(`TARGET_ASSERTION_BEGIN bootstrap-phase-result phase=${phase} actual=${JSON.stringify(actual)} expected=${JSON.stringify(wanted)}`);
