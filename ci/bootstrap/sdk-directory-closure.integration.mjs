@@ -52,7 +52,7 @@ async function directoryObservation(root, rel) {
     return {type: stat.isDirectory() ? 'directory' : stat.isSymbolicLink() ? 'symlink' : 'file', mode: stat.mode & 0o777};
   });
 }
-async function emptyDirectoryResult(f, result) {
+async function emptyDirectoryResult(f, result, assemblyOrigin) {
   const component = f.plan.components.find(row => row.id === 'official');
   const identity = f.identities.get('official');
   const source = await capture(() => readJson(path.join(f.depot, 'SDK.lock.json')));
@@ -72,7 +72,7 @@ async function emptyDirectoryResult(f, result) {
       staging: await Promise.all(staging.map(async name => ({root: path.join(parent, name),
         directory: await directoryObservation(path.join(parent, name), rel)})))});
   }
-  const observed = {assembly: result, source, receipt, resolved, manifest, lock, rows};
+  const observed = {assemblyOrigin, assembly: result, source, receipt, resolved, manifest, lock, rows};
   await atomicJson(path.join(f.root, 'empty-directory-observation.json'), observed);
   console.log(`DIRECTORY_RESULT_OBSERVED ${JSON.stringify(observed)}`);
   // These are input qualifications, evaluated only after all product results
@@ -107,7 +107,9 @@ test('real final SDK preserves authenticated empty directories and readonly sour
     depot: plan.components.find(row => row.id === 'official').source.root} : await directoryFixture();
   const result = existing ? await readJson(path.join(existing, 'final-assembly.json')) : await observe(f, 'final-assembly', await assemble(f));
   if (existing) console.log(`REUSED_COMPLETED_ASSEMBLY evidence=${existing} rc=${result.rc}`);
-  const {depotLock, receipt, manifest, lock} = await emptyDirectoryResult(f, result);
+  const {depotLock, receipt, manifest, lock} = await emptyDirectoryResult(f, result, existing
+    ? {kind: 'retained-assembly', file: path.join(existing, 'final-assembly.json')}
+    : {kind: 'current-cli', argv: ['bash', path.join(here, 'sdk_build.sh'), '--plan', f.planFile, '--to', f.out]});
   assert.equal(result.rc, 0, result.stderr);
   for (const [rel, sourceMode] of [['tools/empty', 0o750], ['tools/empty/leaf', 0o751]]) {
     const expectedMode = sourceMode & ~0o222;

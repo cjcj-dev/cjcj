@@ -79,6 +79,11 @@ The target still demands complete producer-to-install preservation, including
 normal assembly success afterward. Staging observations never substitute for
 successful installation. Both verifiers and the original provenance/member
 assertions remain after the preservation target.
+For producer/installation cuts, leave `SDK_DIRECTORY_EXISTING` unset so the
+actual assembly runs in every arm. The existing reuse option is retained for
+observing an already completed input and its verifiers; evidence now identifies
+that origin explicitly as `retained-assembly`. It is not current assembly
+causality, even if its preservation assertion passes.
 
 Before any selected-phase target, the direct `toolchain-sdk.mjs` CLI completes
 both legal phase plans. `readOutput` authenticates their actual original receipt
@@ -110,7 +115,7 @@ Do not resample already completed unrelated groups.
 | cjcj `sdk-producers.mjs:76–84` | Official directory copy/declaration; authenticated-empty target |
 | cjcj `toolchain-sdk.mjs:94–128` | Actual directory creation/mode installation; authenticated-empty target |
 | tools `main.py:253–254` at fixed629d | Actual marker consumer rejection; marked-no-layout target |
-| tools `main.py:232` at fixed629d | Published layout marker; emitted-marker assertion in publisher control |
+| tools `main.py:231` at fixed629d | Published layout marker; emitted-marker assertion in publisher control |
 | cjcj `bootstrap-sdk.mjs:23` | Actual selected plan; normal installed-phase target with lawful alternate |
 
 These product lines already exist at this round's frozen inputs. Some were
