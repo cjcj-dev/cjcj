@@ -7,6 +7,8 @@ import {randomUUID} from 'node:crypto';
 import {canonical, execute, fileDigest, readJson, reject, sourceIdentity,
   readOutput, sealOutput, physicalPath, PLATFORMS, atomicJson, registeredSourceIdentity, inventory} from './sdk-manifest.mjs';
 
+import {verifyOfficialSdkIdentity, officialIdentityVerifier} from '../../build/lib/official-sdk-identity.mjs';
+
 const repository = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
 export async function runProducer(argv, {cwd, env, log}) {
   const output = await fs.open(log, 'a');
@@ -49,6 +51,12 @@ async function official(component, directory, identity) {
   const lock = await readJson(source.lock);
   if (lock.schema !== 'sharedbuild-official-sdk-v1' || lock.role !== 'host' || lock.version !== source.version
     || !lock.files || !Object.keys(lock.files).length) reject('DISTRIBUTION_LOCK', component.id, 'requires complete official sharedbuild distribution lock');
+  const officialIdentity = await verifyOfficialSdkIdentity({root: source.root, version: source.version,
+    archive: lock.officialIdentity?.archive?.path || lock.archive?.path,
+    platform: lock.officialIdentity?.platform || ({linux_x86_64: 'linux-x64', linux_aarch64: 'linux-aarch64',
+      darwin_x86_64: 'darwin-x64', darwin_aarch64: 'darwin-arm64', windows_x86_64: 'windows-x64'})[lock.platform],
+    readonly: lock.layoutVersion === 1});
+  if (lock.officialIdentity && canonical(lock.officialIdentity) !== canonical(officialIdentity)) reject('OFFICIAL_IDENTITY', component.id, 'publisher identity differs');
   if (lock.layoutVersion !== undefined && (lock.layoutVersion !== 1 || !lock.source_layout)) reject('DISTRIBUTION_LOCK', component.id, 'missing authenticated source layout');
   for (const [rel, row] of Object.entries(lock.source_layout || {})) {
     if (!['file', 'directory'].includes(row.type) || !Number.isInteger(row.mode) || row.mode < 0 || row.mode > 0o777) reject('DISTRIBUTION_LAYOUT', component.id, `invalid source entity ${rel}`);
@@ -117,7 +125,7 @@ async function official(component, directory, identity) {
   for (const [rel] of sourceDirectories.reverse()) await fs.chmod(path.join(artifacts, rel), files[rel].mode);
   if (await fileDigest(source.lock) !== source.lockSha256) reject('DISTRIBUTION_LOCK', component.id, 'source lock changed during copy');
   return sealOutput(directory, component, identity, {status: 'complete', rc: 0, kind: 'official-distribution-copy',
-    distribution: {version: source.version, lockSha256: source.lockSha256, reason: source.reason}}, files);
+    officialIdentity, officialMaterialization: lock.layoutVersion === 1 ? 'readonly' : 'verbatim', distribution: {version: source.version, lockSha256: source.lockSha256, reason: source.reason}}, files);
 }
 async function sharedbuild(component, directory, identity, plan, resumeFailed, outputs) {
   const {engine, engineSha256} = component.producer;
@@ -133,9 +141,16 @@ async function sharedbuild(component, directory, identity, plan, resumeFailed, o
   // are not sharedbuild cache seals. Use its existing sdk-publish producer to
   // create the engine's own full, physical host copy; retain the original lock
   // as an independent request input rather than relabeling it as that seal.
+  const sdkIdentityVerifier = await officialIdentityVerifier();
+  const identityRequest = path.join(directory, 'official-identity-request.json');
+  const officialIdentity = sdkOutput.execution.officialIdentity;
+  if (!officialIdentity) reject('OFFICIAL_IDENTITY', component.id, 'official dependency lacks source proof');
+  await atomicJson(identityRequest, {verifier: sdkIdentityVerifier, input: {archive: officialIdentity.archive.path,
+    platform: officialIdentity.platform, readonly: sdkOutput.execution.officialMaterialization === 'readonly'}});
   const hostLog = path.join(directory, 'logs', `host-publish-${randomUUID()}.log`);
   await runProducer([component.config.tools.python3.path, engine, '--remote', '--root', path.join(plan.buildRoot, 'shared-cache'),
-    '--lane', plan.lane, 'sdk-publish', '--source', sdkOutput.artifacts, '--version', sdkSource.version], {cwd: directory, env: process.env, log: hostLog});
+    '--lane', plan.lane, 'sdk-publish', '--source', sdkOutput.artifacts, '--version', sdkSource.version,
+      '--official-identity-request', identityRequest], {cwd: directory, env: process.env, log: hostLog});
   const sdkRoot = (await fs.readFile(hostLog, 'utf8')).split('\n').find(line => line.startsWith(`${path.join(plan.buildRoot, 'shared-cache', 'official-sdk')}/`));
   if (!sdkRoot) reject('PRODUCER_RECIPE', component.id, 'official publisher did not return its sealed private host directory');
   const adapterHostLock = await readJson(path.join(sdkRoot, 'SDK.lock.json'));
@@ -188,7 +203,7 @@ async function sharedbuild(component, directory, identity, plan, resumeFailed, o
   }
   // The JSON is an emitted request, not another mutable source of input
   // authority. Every producer parameter comes from the frozen plan/receipts.
-  const spec = {kind, sha: component.source.commit, repo: component.source.repo, sdk: sdkRoot,
+  const spec = {sdkIdentityVerifier, kind, sha: component.source.commit, repo: component.source.repo, sdk: sdkRoot,
     builder: component.config.tools.builder.path, inputs, outputs: options.outputs,
     parameters: options.parameters, optimization: options.optimization, host: component.config.host,
     target: component.config.target, dependency_build_ids: identity.dependencies,
