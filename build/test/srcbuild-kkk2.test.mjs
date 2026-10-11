@@ -232,7 +232,7 @@ test('kkk2 dry-run rejects windows-x64 and unknown target before P10', () => {
   assert.match(aarch64.stderr, /required host linux\/arm64/);
 });
 
-test('source-build records affinity from the long top-level make instead of an earlier short make', t => {
+function runAffinityFixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'source-build-affinity-'));
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));
   const timings = path.join(root, 'timings.tsv');
@@ -240,7 +240,10 @@ test('source-build records affinity from the long top-level make instead of an e
   fs.mkdirSync(fakeBin);
   fs.copyFileSync('/usr/bin/sleep', path.join(fakeBin, 'make'));
   fs.chmodSync(path.join(fakeBin, 'make'), 0o755);
-  fs.writeFileSync(path.join(root, 'Makefile'), 'all:\n\tsleep 1.5\n');
+  const helper = path.join(repoRoot, 'build/test/fixtures/affinity-sync.mjs');
+  const wrapper = fs.readFileSync(helper, 'utf8').replace(/^#![^\n]+/, `#!${process.execPath}`);
+  fs.writeFileSync(path.join(fakeBin, 'taskset'), wrapper, {mode: 0o755});
+  fs.writeFileSync(path.join(root, 'Makefile'), `all:\n\texec "${process.execPath}" "${helper}" 15000\n`);
   const invoke = `${shellFunction('elapsed_seconds')}\n`
     + `${shellFunction('capture_build_child_affinity')}\n`
     + `${shellFunction('run_step')}\n`
@@ -251,16 +254,72 @@ test('source-build records affinity from the long top-level make instead of an e
     + 'step_10() {\n'
     + '  "$STATE_ROOT/fake-bin/make" 1 &\n'
     + '  short_pid=$!\n'
-    + '  sleep 0.05\n'
-    + '  taskset -c "$CPUSET" make -C "$STATE_ROOT" DESTDIR= RPATH_LIST=/usr/lib all\n'
+    + '  taskset -c "$CPUSET" /usr/bin/make -C "$STATE_ROOT" DESTDIR= RPATH_LIST=/usr/lib all\n'
     + '  wait "$short_pid"\n'
     + '}\n'
     + 'run_step 10 build-support-libraries step_10\n';
-  const result = runBash(invoke, [root, timings]);
+  const result = spawnSync('bash', ['-c', invoke, 'bash', root, timings], {
+    encoding: 'utf8', timeout: 25000,
+    env: {...process.env, PATH: `${fakeBin}:${process.env.PATH}`, AFFINITY_FIXTURE_ROOT: root},
+  });
   assert.equal(result.status, 0, result.stdout + result.stderr);
   const record = fs.readFileSync(timings, 'utf8');
-  assert.match(record, /^affinity\tstep=10\tpid=[0-9]+\tcommand=make\trequested=([^\t]+)\tactual=\1\targs=.*DESTDIR=/m);
-  assert.doesNotMatch(record, /args=.*fake-bin\/make 1/);
+  const pid = fs.readFileSync(path.join(root, 'make.pid'), 'utf8').trim();
+  const outcome = fs.readFileSync(path.join(root, 'outcome'), 'utf8').trim();
+  console.log(`AFFINITY_FIXTURE product_sha256=${sha256(scriptPath)} make_pid=${pid} outcome=${outcome} rc=${result.status}\n${record}`);
+  if (fs.existsSync(path.join(root, 'query.json'))) {
+    console.log(`AFFINITY_QUERY ${fs.readFileSync(path.join(root, 'query.json'), 'utf8')}`);
+  }
+  return {record, pid, outcome};
+}
+
+test('source-build records affinity from the long top-level make instead of an earlier short make', async t => {
+  const {record, pid, outcome} = runAffinityFixture(t);
+  await t.test('records actual affinity and DESTDIR', () => {
+    console.log('TARGET_ASSERTION affinity record reached');
+    assert.match(record, /^affinity\tstep=10\tpid=[0-9]+\tcommand=make\trequested=([^\t]+)\tactual=\1\targs=.*DESTDIR=/m);
+  });
+  await t.test('excludes the earlier short make', () => {
+    console.log('TARGET_ASSERTION short make exclusion reached');
+    assert.doesNotMatch(record, /args=.*fake-bin\/make 1/);
+  });
+  await t.test('observes the actual held make before releasing its recipe', () => {
+    assert.equal(outcome, 'observed');
+    assert.match(record, new RegExp(`^affinity\\tstep=10\\tpid=${pid}\\t`, 'm'));
+  });
+});
+
+test('source-build affinity fixture releases real make on an observation timeout', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'source-build-affinity-timeout-'));
+  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
+  const helper = path.join(repoRoot, 'build/test/fixtures/affinity-sync.mjs');
+  fs.writeFileSync(path.join(root, 'Makefile'), `all:\n\texec "${process.execPath}" "${helper}" 100\n`);
+  const result = spawnSync('/usr/bin/make', ['-C', root, 'DESTDIR=', 'all'], {
+    encoding: 'utf8', timeout: 5000,
+    env: {...process.env, AFFINITY_FIXTURE_ROOT: root},
+  });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.equal(fs.readFileSync(path.join(root, 'outcome'), 'utf8'), 'timeout\n');
+  assert.equal(fs.existsSync(path.join(root, 'observed')), false);
+  console.log('TARGET_ASSERTION no observation released real make rc=0');
+});
+
+test('source-build affinity fixture forwards a failed real taskset query unchanged', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'source-build-affinity-taskset-'));
+  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
+  const wrapper = path.join(root, 'taskset');
+  fs.copyFileSync(path.join(repoRoot, 'build/test/fixtures/affinity-sync.mjs'), wrapper);
+  const args = ['-pc', '2147483647'];
+  const actual = spawnSync('/usr/bin/taskset', args, {encoding: 'utf8'});
+  const forwarded = spawnSync(process.execPath, [wrapper, ...args], {
+    encoding: 'utf8', env: {...process.env, AFFINITY_FIXTURE_ROOT: root},
+  });
+  assert.notEqual(actual.status, 0);
+  assert.equal(forwarded.status, actual.status);
+  assert.equal(forwarded.stdout, actual.stdout);
+  assert.equal(forwarded.stderr, actual.stderr);
+  assert.equal(fs.existsSync(path.join(root, 'observed')), false);
+  console.log(`TARGET_ASSERTION real taskset failure forwarded rc=${actual.status}`);
 });
 
 test('source-build shell fetch uses the selected mirror and keeps canonical origin', t => {
