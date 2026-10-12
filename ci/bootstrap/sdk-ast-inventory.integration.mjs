@@ -6,7 +6,6 @@ import {spawnSync} from 'node:child_process';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {readJson, readOutput, buildIdentities, fileDigest, canonical} from './sdk-manifest.mjs';
-import {produceComponent} from './sdk-producers.mjs';
 
 const repository = fileURLToPath(new URL('../..', import.meta.url));
 const planFile = process.env.SDK_AST_PLAN, evidence = process.env.SDK_AST_EVIDENCE;
@@ -16,6 +15,7 @@ const official = plan.components.find(c => c.producer.adapter === 'official');
 const ast = plan.components.find(c => c.producer.adapter === 'ast-support');
 const seed = await readOutput(identities.get(official.id).directory, official, identities.get(official.id));
 const product = process.env.SDK_AST_PRODUCT || repository;
+const {produceComponent} = await import(path.join(product, 'ci/bootstrap/sdk-producers.mjs'));
 const head = spawnSync('/usr/bin/git', ['-C', product, 'rev-parse', 'HEAD'], {encoding: 'utf8'});
 assert.equal(head.status, 0, head.stderr);
 await fs.mkdir(evidence, {recursive: true});
@@ -50,7 +50,7 @@ async function invocation(name, dependency = seed, producer = ast) {
   return result;
 }
 
-if (!process.env.SDK_AST_PRODUCT) test('AST real normal receipt preserves complete readonly FlatBuffers deployment', async () => {
+test('AST real normal receipt preserves complete readonly FlatBuffers deployment', async () => {
   const output = await readOutput(identities.get(ast.id).directory, ast, identities.get(ast.id));
   const rows = Object.entries(seed.files).filter(([rel]) => rel === subset || rel.startsWith(`${subset}/`));
   console.log(`AST_NORMAL_TARGET_ASSERT_REACHED members=${rows.length} receipt=${output.receiptSha256}`);
