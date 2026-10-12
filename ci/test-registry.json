@@ -1,5 +1,10 @@
 [
   {
+    "file": "ci/bootstrap/sdk-ast-inventory.integration.mjs",
+    "executor": "manual",
+    "reason": "Run node --test with SDK_AST_PLAN naming a genuine successful frozen official/AST closure, SDK_AST_EVIDENCE naming a fresh exclusively owned private directory. Runs real producer adapters, changes and restores owned FlatBuffers members/modes/bytes, and validates source-mode receipt mutations. SDK_AST_PRODUCT selects a separately committed clean cut product for causal arms. Requires fixed publisher archive/identity, at least 64 native CPUs and all frozen inputs; CI supplies none. Registration is NOT_RUN, not AST qualification."
+  },
+  {
     "file": "ci/bootstrap/sdk-cjdb-fixed-graph.test.mjs",
     "executor": "manual",
     "reason": "Run node --test ci/bootstrap/sdk-cjdb-fixed-graph.test.mjs with SDK_CJDB_GRAPH_PLAN naming a retained complete frozen native-stage1 plan. Exercises the same-tree buildIdentities and qualificationRecipe fixed-graph guards; reads plan data without building, publishing or minting receipts. Candidate, isolated product guard cut and restoration require explicit owner-private evidence. CI does not provision this plan. Registration is NOT_RUN, not native production or complete SDK qualification."
