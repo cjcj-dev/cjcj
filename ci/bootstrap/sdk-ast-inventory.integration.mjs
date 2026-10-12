@@ -67,9 +67,10 @@ test('AST real normal receipt preserves complete readonly FlatBuffers deployment
 for (const kind of ['missing-member', 'directory-mode', 'file-bytes', 'receipt-source-mode', 'receipt-member', 'receipt-deployed-mode']) {
   test(`AST adapter precisely refuses ${kind}`, async () => {
     const dependency = structuredClone(seed), directory = path.join(seed.artifacts, dirRel), file = path.join(seed.artifacts, fileRel);
+    const savedDirectory = path.join(evidence, 'saved-flatbuffers-pch');
     const mode = (await fs.stat(directory)).mode & 0o777, bytes = await fs.readFile(file), fileMode = (await fs.stat(file)).mode & 0o777;
     try {
-      if (kind === 'missing-member') await fs.rename(directory, `${directory}.sdk945-saved`);
+      if (kind === 'missing-member') await fs.rename(directory, savedDirectory);
       if (kind === 'directory-mode') await fs.chmod(directory, mode | 0o200);
       if (kind === 'file-bytes') { await fs.chmod(file, fileMode | 0o200); await fs.writeFile(file, Buffer.concat([bytes, Buffer.from('\n// sdk945 mutation\n')])); await fs.chmod(file, fileMode); }
       if (kind === 'receipt-source-mode') dependency.files[dirRel].sourceMode ^= 0o200;
@@ -81,7 +82,7 @@ for (const kind of ['missing-member', 'directory-mode', 'file-bytes', 'receipt-s
       assert.match(result.log, /SDK_MANIFEST_REJECT rule=DEPENDENCY_DIGEST/, `${kind}: rejection must reach the dependency assertion`);
       assert.doesNotMatch(result.log, /"command".*cmake/, 'illegal dependency must be rejected before CMake');
     } finally {
-      if (kind === 'missing-member') await fs.rename(`${directory}.sdk945-saved`, directory);
+      if (kind === 'missing-member') await fs.rename(savedDirectory, directory);
       if (kind === 'directory-mode') await fs.chmod(directory, mode);
       if (kind === 'file-bytes') { await fs.chmod(file, fileMode | 0o200); await fs.writeFile(file, bytes); await fs.chmod(file, fileMode); }
     }
