@@ -28,6 +28,11 @@ async function invocation(name, dependency = seed, producer = ast) {
   const retained = arm.components.find(c => c.id === official.id);
   retained.producer = {...retained.producer, receipt: seed.directory, receiptSha256: seed.receiptSha256, originBuildRoot: plan.buildRoot};
   const component = arm.components.find(c => c.id === producer.id);
+  if (producer.id === official.id) {
+    delete component.producer.receipt;
+    delete component.producer.receiptSha256;
+    delete component.producer.originBuildRoot;
+  }
   component.producer = {...component.producer, repository: product, version: head.stdout.trim()};
   const identity = buildIdentities(arm).get(component.id);
   let output, error;
