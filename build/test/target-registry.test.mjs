@@ -88,9 +88,9 @@ test('every target mapping reaches archive naming, runtime lookup and native hos
   t.after(() => fs.rmSync(temp, {recursive: true, force: true}));
   for (const key of allTargets()) {
     const {spec} = getTarget(key);
-    const download = baseSdkDownload(key, readHostToolchainPin());
+    const download = baseSdkDownload(key, readHostToolchainPin(key));
     const identity = baseSdkIdentities.platforms[key];
-    assert.equal(download.archive, `cangjie-sdk-${identity.os}-${identity.arch}-${baseSdkIdentities.version}${identity.extension}`, key);
+    assert.equal(download.archive, `cangjie-sdk-${identity.os}-${identity.arch}-${identity.version || baseSdkIdentities.version}${identity.extension}`, key);
     assert.equal(download.size, identity.size, `${key} pinned size`);
     assert.equal(download.sha256, identity.sha256, `${key} pinned SHA-256`);
     assert.equal(targetForHost(...spec.packageHost).spec.key, key, `${key} package host`);

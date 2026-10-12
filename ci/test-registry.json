@@ -596,5 +596,10 @@
     "file": "scripts/test_array_clone_metadata_unit.py",
     "executor": "manual",
     "reason": "Manual bounded Linux ArrayCloneMetadata test links this registered compiler_unittest source against existing release archives; invoke python3 scripts/test_array_clone_metadata_unit.py --build-tree /path/to/product --sdk /path/to/paired-sdk --out /path/to/private-evidence. No workflow provisions these archives."
+  },
+  {
+    "file": "ci/bootstrap/sdk-official.integration.mjs",
+    "executor": "manual",
+    "reason": "Official archive alias origin and materialized publisher consumption: run node --test ci/bootstrap/sdk-official.integration.mjs with SDK_OFFICIAL_PLAN and SDK_OFFICIAL_EVIDENCE. Requires the regular fixed publisher readonly output, original pinned archive and private authenticated one-component plan. Checks original cjdb/lldb members and bytes, real producer entity inventory, resolver source/receipt binding and an independent physical compiler byte/version control. Owner-private evidence and entity copies only; registration is NOT_RUN, not CI or full SDK qualification."
   }
 ]

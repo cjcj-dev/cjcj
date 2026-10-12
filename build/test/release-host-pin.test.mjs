@@ -13,7 +13,7 @@ test('release archive and apparatus selectors consume the source host pin', () =
   assert.equal(RELEASE_HOST_TOOLCHAIN, pin);
   assert.equal(REVIEWED_GATE_HOST_TOOLCHAIN, pin);
   for (const platform of ['linux-x64', 'linux-aarch64', 'darwin-x64', 'darwin-arm64', 'windows-x64']) {
-    assert.equal(baseSdkDownload(platform, pin).version, pin.replace(/^nightly-/, ''));
+    assert.equal(baseSdkDownload(platform, readHostToolchainPin(platform)).version, readHostToolchainPin(platform).replace(/^nightly-/, ''));
   }
 });
 
@@ -54,6 +54,7 @@ test('a changed pin reaches both release selectors and requires matching archive
   const identityPath = path.join(fixture, 'ci/release/base-sdk-identities.json');
   const identities = JSON.parse(await fs.readFile(identityPath, 'utf8'));
   identities.version = 'control';
+  delete identities.platforms['linux-x64'].version;
   await fs.writeFile(identityPath, JSON.stringify(identities));
   const registered = run();
   assert.equal(registered.error, undefined);

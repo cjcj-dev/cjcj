@@ -83,3 +83,5 @@ then it uses cjpm's actual member/filter/skip-build options and checks that XML
 contains exactly the source-declared executed cases. Missing, skipped, duplicate
 or unrelated execution records fail. The default invocation still tests the
 whole workspace. Directed success does not represent a whole-workspace pass.
+
+Official alias origin/materialized deployment integration: `ci/bootstrap/sdk-official.integration.mjs`, manual. Supply `SDK_OFFICIAL_PLAN` and `SDK_OFFICIAL_EVIDENCE` for a regular private publisher readonly output and its pinned original archive. The three tests retain producer alias member bytes/modes, resolver source/receipt consumption, and independent physical compiler bytes/version. Registration is NOT_RUN; it does not publish or qualify a complete SDK.

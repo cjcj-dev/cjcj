@@ -102,7 +102,9 @@ jobs:
         run: |
           set -euo pipefail
           cat ci/host_sdk_pin.env >> "$GITHUB_ENV"
+          node ci/host-toolchain-pin.mjs --github-env >> "$GITHUB_ENV"
           source ci/host_sdk_pin.env
+          export CJCJ_TOOLCHAIN="$(node ci/host-toolchain-pin.mjs)"
           echo "RELEASE_HOST_TOOLCHAIN=$CJCJ_TOOLCHAIN" >> "$GITHUB_ENV"
 
       - name: Validate same-platform final std contract
