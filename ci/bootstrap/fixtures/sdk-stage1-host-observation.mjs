@@ -14,10 +14,16 @@ export async function observeStage1Host(domains, officialOutput, directory) {
     .map(rel => path.join(hostSdk, rel)).join(':');
   const expectedTargetLd = ['third_party/llvm/lib', 'tools/lib', 'runtime/lib/' + tuple, 'lib/' + tuple]
     .map(rel => path.join(sdk, rel)).join(':');
+  const libraryRoots = ['runtime/lib/' + tuple + '/', 'lib/' + tuple + '/', 'third_party/llvm/lib/', 'tools/lib/'];
+  const libraryNames = new Set(Object.keys(officialOutput.files)
+    .filter(rel => libraryRoots.some(root => rel.startsWith(root)) && /\.so(?:\.|$)/.test(path.basename(rel)))
+    .map(rel => path.basename(rel)));
   const observations = [];
   for (const [rel, args] of [['bin/cjc', ['-v']], ['bin/cjc-frontend', ['-v']], ['tools/bin/cjpm', ['--version']]]) {
     const physical = await fs.realpath(path.join(hostSdk, rel));
     const interpreter = await execute('/usr/bin/readelf', ['-l', physical]);
+    const loaderPath = interpreter.stdout.match(/Requesting program interpreter:\s*([^\]]+)/)?.[1];
+    const loader = loaderPath ? {path: loaderPath, physical: await fs.realpath(loaderPath), sha256: await fileDigest(loaderPath)} : null;
     const elf = (await fs.readFile(physical)).subarray(0, 4).toString('hex');
     const sha256 = await fileDigest(physical);
     const run = (file, home) => {
@@ -32,10 +38,10 @@ export async function observeStage1Host(domains, officialOutput, directory) {
     // glibc reports objects actually initialized, rather than search candidates.
     for (const match of wrapped.stderr.matchAll(/calling init:\s*(\S+)/g)) {
       const file = match[1];
-      if (!file.startsWith(hostSdk + path.sep) && !file.startsWith(sdk + path.sep)) continue;
+      if (!file.startsWith(hostSdk + path.sep) && !file.startsWith(sdk + path.sep) && !libraryNames.has(path.basename(file))) continue;
       loaded.push({file, physical: await fs.realpath(file), rel: path.relative(hostSdk, file), sha256: await fileDigest(file)});
     }
-    observations.push({rel, physical, elf, sha256, interpreter: interpreter.stdout, raw, wrapped, loaded});
+    observations.push({rel, physical, elf, sha256, interpreter: interpreter.stdout, loader, raw, wrapped, loaded});
   }
   await atomicJson(path.join(directory, 'official-host-observations.json'), {hostSdk, sdk, hostLd, targetLd,
     officialReceiptSha256: officialOutput.receiptSha256, officialIdentity: officialOutput.execution.officialIdentity, observations});
