@@ -61,11 +61,31 @@ def classify(rel: str) -> str:
 
 
 def iter_files(sdk: Path):
-    for path in sorted(sdk.rglob('*')):
-        rel = path.relative_to(sdk).as_posix()
-        if path.is_dir() and not path.is_symlink():
-            continue
-        yield path, rel
+    """Enumerate alias members too, without following unsafe links or cycles.
+
+    Invalid links are yielded for check_symlinks to diagnose, never traversed.
+    Directory membership includes empty directories so their removal is visible.
+    """
+    def walk(directory, ancestors, through_alias=False):
+        for path in sorted(directory.iterdir()):
+            rel = path.relative_to(sdk).as_posix()
+            if path.is_symlink():
+                yield path, rel
+                descend = False
+                try:
+                    target = path.resolve(strict=True)
+                    target.relative_to(sdk)
+                    descend = target.is_dir() and target not in ancestors
+                except (ValueError, RuntimeError, OSError):
+                    pass
+                if descend:
+                    yield from walk(path, ancestors | {target}, True)
+            elif path.is_dir():
+                yield path, rel
+                yield from walk(path, ancestors | {path.resolve()}, through_alias)
+            else:
+                yield path, rel
+    yield from walk(sdk, {sdk.resolve()})
 
 
 def load_pin(path: Path) -> dict:
@@ -151,7 +171,12 @@ def check_symlinks(sdk: Path, errors: list, *, source: Path | None = None,
             fail('SYMLINK', f'unregistered or changed link: {rel} -> {target}', errors)
             continue
         try:
-            path.resolve().relative_to(sdk)
+            resolved = path.resolve(strict=True)
+            resolved.relative_to(sdk)
+            if resolved.is_dir() and resolved in {parent.resolve() for parent in path.parents if parent == sdk or sdk in parent.parents}:
+                raise ValueError('directory cycle')
+            if not resolved.is_dir() and not resolved.is_file():
+                raise ValueError('unsupported link target')
         except (ValueError, RuntimeError, OSError):
             fail('SYMLINK', f'link escapes SDK or cannot resolve: {rel} -> {target}', errors)
 
@@ -159,7 +184,8 @@ def check_symlinks(sdk: Path, errors: list, *, source: Path | None = None,
 def build_lock(sdk: Path, role: str, identities: dict, target_tuple: str | None = None) -> dict:
     files = {}
     official = {}
-    for path, rel in iter_files(sdk):
+    payload = dict((rel, path) for path, rel in iter_files(sdk))
+    for rel, path in payload.items():
         if rel == LOCK_NAME:
             continue
         component = classify(rel)
@@ -169,6 +195,7 @@ def build_lock(sdk: Path, role: str, identities: dict, target_tuple: str | None 
             if target.is_file():
                 digest = sha256_file(target)
         entry = {
+            'type': 'directory' if path.is_dir() else 'file',
             'sha256': digest,
             'component': component,
             'symlink': path.is_symlink(),
@@ -176,6 +203,10 @@ def build_lock(sdk: Path, role: str, identities: dict, target_tuple: str | None 
         }
         if path.is_symlink():
             entry['link_target'] = os.readlink(path)
+            entry['resolved_target'] = path.resolve().relative_to(sdk).as_posix()
+        if path.is_dir():
+            entry['mode'] = path.stat().st_mode & 0o777
+            entry['members'] = sorted(name for name in payload if name.startswith(rel + '/'))
         files[rel] = entry
         if component == 'official-retain':
             official[rel] = identities.get('official_retain_reason', 'copied from --from baseline; not replaced this assembly')
@@ -188,7 +219,7 @@ def build_lock(sdk: Path, role: str, identities: dict, target_tuple: str | None 
         runtime_commit = commits[0] if len(commits) == 1 else None
         runtime_digest = sha256_file(runtime_path)
     lock = {
-        'version': 1,
+        'version': 2,
         'role': role,
         'files': files,
         'official_retain': official,
@@ -208,7 +239,42 @@ def fail(code: str, message: str, errors: list) -> None:
     errors.append(f'SDK-VERIFY-FAIL rule={code} {message}')
 
 
+def verify_manifest_binding(sdk: Path, lock: dict, errors: list) -> None:
+    if lock.get('plan_sha256') or (sdk / 'SDK.manifest.json').exists():
+        try:
+            manifest_path = sdk / 'SDK.manifest.json'
+            plan_path = sdk / 'SDK.plan.json'
+            manifest = json.loads(manifest_path.read_text())
+            plan = json.loads(plan_path.read_text())
+            if (manifest.get('schema') != 'toolchain-sdk-resolved-v1' or manifest.get('status') != 'complete'
+                    or manifest.get('rc') != 0 or plan.get('schema') != 'toolchain-sdk-plan-v1'
+                    or sha256_file(manifest_path) != lock.get('manifest_sha256')
+                    or sha256_file(plan_path) != lock.get('plan_sha256')
+                    or manifest.get('planSha256') != lock.get('plan_sha256')):
+                fail('MANIFEST_BINDING', 'plan/resolved/lock identity mismatch', errors)
+            declared = manifest.get('files') or {}
+            expected = set(declared) | {'SDK.plan.json', 'SDK.manifest.json'}
+            if set(lock.get('files') or {}) != expected:
+                fail('MANIFEST_BINDING', 'lock membership differs from sealed manifest', errors)
+            for rel, row in declared.items():
+                installed = (lock.get('files') or {}).get(rel, {})
+                if (installed.get('sha256') != row.get('sha256') or installed.get('size') != row.get('size')
+                        or installed.get('mode') != row.get('mode') or installed.get('type') != row.get('type')
+                        or installed.get('producer', {}).get('build_id') != row.get('buildId')
+                        or installed.get('producer', {}).get('receipt_sha256') != row.get('receiptSha256')):
+                    fail('MANIFEST_BINDING', f'lock differs from sealed producer artifact: {rel}', errors)
+                if row.get('type') == 'directory' and (
+                        installed.get('source_mode') != row.get('sourceMode') or installed.get('mode_transform') != row.get('modeTransform')
+                        or installed.get('members') != sorted(name for name in declared if name.startswith(rel + '/'))):
+                    fail('MANIFEST_BINDING', f'directory identity differs from sealed producer artifact: {rel}', errors)
+        except (OSError, ValueError, TypeError) as error:
+            fail('MANIFEST_BINDING', str(error), errors)
+
+
 def verify(sdk: Path, lock: dict, pin: dict, identities: dict, errors: list, target_tuple: str | None = None) -> None:
+    verify_manifest_binding(sdk, lock, errors)
+    if errors:
+        return
     on_disk = {}
     for path, rel in iter_files(sdk):
         on_disk[rel] = path
@@ -216,19 +282,47 @@ def verify(sdk: Path, lock: dict, pin: dict, identities: dict, errors: list, tar
     check_symlinks(sdk, errors, lock_files=lock_files)
     if errors:
         return
+    parents = {str(parent) for rel in lock_files for parent in Path(rel).parents if str(parent) != '.'}
     for rel, path in on_disk.items():
         if rel == LOCK_NAME:
             continue
-        if rel not in lock_files and not path.is_symlink():
+        if rel not in lock_files and not path.is_symlink() and not (path.is_dir() and (rel in parents or lock.get('version', 1) == 1)):
             fail('UNDECLARED', f'file not in lock: {rel}', errors)
     for rel in lock_files:
         if rel != LOCK_NAME and rel not in on_disk:
             fail('UNDECLARED', f'lock entry missing on disk: {rel}', errors)
+    # Directory identities require a complete global member domain.
+    if errors:
+        return
     for rel, entry in lock_files.items():
+        path = on_disk.get(rel)
+        if path is not None and rel != LOCK_NAME:
+            if bool(entry.get('symlink')) != path.is_symlink():
+                fail('PAYLOAD_TYPE', f'type differs from sealed lock: {rel}', errors)
+            if path.is_symlink() and 'resolved_target' in entry and path.resolve().relative_to(sdk).as_posix() != entry['resolved_target']:
+                fail('SYMLINK', f'resolved target differs from sealed lock: {rel}', errors)
+            if entry.get('type') == 'directory':
+                members = sorted(name for name in on_disk if name.startswith(rel + '/'))
+                if not path.is_dir() or entry.get('sha256') is not None:
+                    fail('PAYLOAD_TYPE', f'directory differs from sealed lock: {rel}', errors)
+                # Typed directories always need a preauthenticated permission
+                # identity, independent of the lock version (bool is not a mode).
+                mode = entry.get('mode')
+                if type(mode) is not int or not 0 <= mode <= 0o777 or path.stat().st_mode & 0o777 != mode:
+                    fail('PAYLOAD_MODE', f'directory mode differs from sealed lock: {rel}', errors)
+                if entry.get('members') != members or any(name not in lock_files and name not in parents for name in members):
+                    fail('PAYLOAD_MEMBERS', f'directory members differ from sealed lock: {rel}', errors)
+            else:
+                if not path.is_symlink() and path.is_file() and (
+                        ('size' in entry and path.stat().st_size != entry['size']) or
+                        ('mode' in entry and path.stat().st_mode & 0o777 != entry['mode'])):
+                    fail('PAYLOAD_TYPE', f'size/mode differs from sealed lock: {rel}', errors)
+                if not path.is_file() or not HEX64_RE.fullmatch(entry.get('sha256') or '') or sha256_file(path) != entry.get('sha256'):
+                    fail('PAYLOAD_DIGEST', f'content differs from sealed lock: {rel}', errors)
         if entry.get('component') == 'official-retain' and rel not in (lock.get('official_retain') or {}):
             fail('UNDECLARED', f'official-retain without reason: {rel}', errors)
         if entry.get('component') not in {
-            'cjc', 'std', 'runtime', 'llvm', 'cjpm', 'boundscheck', 'official-retain', 'sdk-meta',
+            'cjc', 'std', 'runtime', 'llvm', 'cjpm', 'boundscheck', 'ast', 'official-retain', 'sdk-meta',
         }:
             fail('UNDECLARED', f'unknown component for {rel}', errors)
 
@@ -319,6 +413,8 @@ def main() -> int:
     parser.add_argument('--role', choices=('host', 'target'))
     parser.add_argument('--runtime-pin', type=Path)
     parser.add_argument('--write-lock', action='store_true')
+    parser.add_argument('--binding-only', action='store_true',
+                        help='authenticate manifest/lock identity before payload qualification')
     parser.add_argument('--from', dest='source_sdk', type=Path,
                         help='input SDK whose unchanged symlink layout may be recorded')
     parser.add_argument('--identities', type=Path)
@@ -338,6 +434,9 @@ def main() -> int:
     pin = load_pin(args.runtime_pin) if args.runtime_pin else {}
     lock_path = sdk / LOCK_NAME
     if args.write_lock:
+        if (sdk / 'SDK.manifest.json').exists():
+            print('SDK-VERIFY-FAIL rule=MANIFEST_BINDING manifest SDK locks are written from presealed producer inputs by toolchain-sdk', file=sys.stderr)
+            return 1
         role = args.role or identities.get('role')
         if role not in ('host', 'target'):
             print('SDK-VERIFY-FAIL rule=HOST_TARGET_CROSS --write-lock requires --role', file=sys.stderr)
@@ -360,7 +459,13 @@ def main() -> int:
             print(f'SDK-VERIFY-FAIL rule=HOST_TARGET_CROSS lock.role={lock.get("role")} arg={args.role}', file=sys.stderr)
             return 1
     errors = []
-    verify(sdk, lock, pin, identities, errors, args.target_tuple)
+    if args.binding_only:
+        if args.write_lock or not lock.get('plan_sha256'):
+            fail('MANIFEST_BINDING', 'binding-only requires an existing manifest SDK lock', errors)
+        else:
+            verify_manifest_binding(sdk, lock, errors)
+    else:
+        verify(sdk, lock, pin, identities, errors, args.target_tuple)
     if errors:
         for item in errors:
             print(item, file=sys.stderr)

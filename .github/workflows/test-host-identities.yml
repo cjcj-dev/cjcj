@@ -26,6 +26,7 @@ jobs:
           test "$(uname -m)" = aarch64
           node ci/release/host_llvm.mjs env >> "$GITHUB_ENV"
           source ci/host_sdk_pin.env
+          export CJCJ_TOOLCHAIN="$(node ci/host-toolchain-pin.mjs)"
           export CJCJ_TOOLCHAIN
           python3 - <<'PY'
           import json, os

@@ -131,7 +131,7 @@ async function packageMainSdk(config) {
     && fs.realpathSync(compilerOutput) === fs.realpathSync(cangjieDir);
   if (!sameDirectory) {
     fs.rmSync(cangjieDir, {recursive: true, force: true});
-    fs.cpSync(compilerOutput, cangjieDir, {recursive: true, dereference: false, preserveTimestamps: true});
+    fs.cpSync(compilerOutput, cangjieDir, {recursive: true, dereference: false, verbatimSymlinks: true, preserveTimestamps: true});
   }
   organizeSdkTree(config, cangjieDir);
   if (config.target.spec.os !== 'windows') {
@@ -143,7 +143,7 @@ async function packageMainSdk(config) {
   // A failed parity check must not leave a stale archive from an earlier run
   // looking publishable in software/.
   fs.rmSync(archivePath(config, archiveBase), {force: true});
-  const parity = await assertSdkPathParity(cangjieDir, {officialRoot: config.officialSdkRoot});
+  const parity = await assertSdkPathParity(cangjieDir, {officialRoot: config.officialSdkRoot, target: config.target.spec.key});
   logger.info(
     'SDK_PATH_PARITY_PASS official=%s candidate=%s required=%d extra=%d',
     parity.officialRoot,
@@ -159,7 +159,7 @@ async function packageStdx(config) {
   requireDir(stdxDir, {stage: 'package.stdx'});
   const staged = path.join(ensureDir(config.softwareDir), path.basename(stdxDir));
   fs.rmSync(staged, {recursive: true, force: true});
-  fs.cpSync(stdxDir, staged, {recursive: true, dereference: false, preserveTimestamps: true});
+  fs.cpSync(stdxDir, staged, {recursive: true, dereference: false, verbatimSymlinks: true, preserveTimestamps: true});
   return makeArchive(
     config,
     staged,

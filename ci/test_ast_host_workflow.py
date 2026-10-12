@@ -30,7 +30,7 @@ shutil.copytree(repo / 'ci', work / 'ci')
 workflow = repo / '.github/workflows/build-ast-support.yml'
 shutil.copyfile(workflow, work / 'workflow.yml')
 steps = yaml.safe_load(workflow.read_text())['jobs']['build']['steps']
-expected = dict(line.split('=', 1) for line in (repo / 'ci/host_sdk_pin.env').read_text().splitlines() if '=' in line)['CJCJ_TOOLCHAIN']
+expected = subprocess.check_output(['node', str(repo / 'ci/host-toolchain-pin.mjs')], text=True).strip()
 env = {k: v for k, v in os.environ.items() if k not in ('CJCJ_TOOLCHAIN', 'AST_FLATBUFFERS_SDK')}
 env.update(GITHUB_ENV=str(work / 'github.env'), RUNNER_TEMP=str(work / 'temp'), PS4='+ ')
 Path(env['GITHUB_ENV']).touch()

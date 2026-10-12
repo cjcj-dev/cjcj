@@ -164,3 +164,23 @@ test('missing or non-directory official samples fail closed', async t => {
     /SDK directory missing/,
   );
 });
+
+test('depot seal metadata is rejected as an archive reference', async t => {
+  const {official, candidate} = fixture(t);
+  put(official, 'SDK.lock.json', JSON.stringify({schema: 'sharedbuild-official-sdk-v1'}));
+  put(official, 'DONE');
+  put(official, 'MANIFEST.json');
+  await assert.rejects(assertSdkPathParity(candidate, {officialRoot: official}), /REFERENCE_BOUNDARY/);
+});
+
+test('compiler alias exception requires both relative entries and the physical stage producer', async t => {
+  const {official, candidate} = fixture(t);
+  put(official, 'bin/cjc');
+  fs.symlinkSync('cjc', path.join(official, 'bin/cjc-frontend'));
+  put(candidate, 'bin/cjcj-stage1');
+  for (const name of ['cjc', 'cjc-frontend']) fs.symlinkSync('cjcj-stage1', path.join(candidate, 'bin', name));
+  await assertSdkPathParity(candidate, {officialRoot: official});
+  fs.unlinkSync(path.join(candidate, 'bin/cjc-frontend'));
+  put(candidate, 'bin/cjc-frontend');
+  await assert.rejects(assertSdkPathParity(candidate, {officialRoot: official}), /type-mismatch\tbin\/cjc\t/);
+});

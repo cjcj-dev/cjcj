@@ -1,0 +1,235 @@
+{
+  "schema": "918-input-readiness-v1",
+  "planSha256": "4b496335d59a3b239fd63054773e0a2d160dc2624e206faed8886224612937df",
+  "status": "planned-not-built",
+  "rows": [
+    {
+      "id": "official",
+      "roles": [
+        "compiler",
+        "std",
+        "runtime",
+        "boundscheck",
+        "llvm-tools",
+        "llvm-dylib",
+        "ast",
+        "cjpm",
+        "official-host"
+      ],
+      "domain": "host",
+      "source": {
+        "kind": "distribution",
+        "lock": "/root/sym_cjcj_918_implement_r6077105353/official/SDK.lock.json",
+        "lockSha256": "ec9b5ab4b7a84cb71e4b9023d40353723be8108e4ee6d110d07e9ec32d92de19",
+        "reason": "actual verified publisher asset234013, private original payload",
+        "root": "/root/sym_cjcj_918_implement_r6077105353/official/payload/cangjie",
+        "version": "1.3.0-alpha.20261009001050"
+      },
+      "producer": {
+        "adapter": "official",
+        "repository": "/root/sym_cjcj_918_implement_r6085769397/cjcj",
+        "version": "4d05592c3b0a05b3ab4d554a379e3885faf25cf2"
+      },
+      "identity": {
+        "recipeId": "30fc170d0682d04e3ad968fde14089d7fc1b860df69c826e5101dc9e8062e1e5",
+        "buildId": "official/ec9b5ab4b7a84cb71e4b9023d40353723be8108e4ee6d110d07e9ec32d92de19/30fc170d0682d04e3ad968fde14089d7fc1b860df69c826e5101dc9e8062e1e5",
+        "directory": "/root/sym_cjcj_918_implement_r6085769397/builds/official/ec9b5ab4b7a84cb71e4b9023d40353723be8108e4ee6d110d07e9ec32d92de19/30fc170d0682d04e3ad968fde14089d7fc1b860df69c826e5101dc9e8062e1e5",
+        "dependencies": {}
+      },
+      "expectedReceiptStatus": "missing",
+      "action": "reuse actual 1009 publisher bytes; normal new distribution-copy receipt required; old host receipt identity unchanged",
+      "configurationAndInstall": "complete-final.plan.json component official"
+    },
+    {
+      "id": "runtime",
+      "roles": [
+        "runtime",
+        "boundscheck"
+      ],
+      "domain": "target",
+      "source": {
+        "commit": "9733dfc09d29eca27d19cc3937a149838b4e3322",
+        "kind": "git",
+        "repo": "/root/sym_cjcj_918_implement_r6077105353/inputs/runtime",
+        "tree": "e44cf3b4791b5a0f91df78251b6805f5c68e5963"
+      },
+      "producer": {
+        "adapter": "sharedbuild-runtime-default",
+        "engine": "/root/sym_cjcj_918_implement_r6085769397/tools/ts/src/sharedbuild/main.py",
+        "engineSha256": "2be9b4053cb2de624ecf31685760159e38ea573e1e76eaea13faa9429430cac2",
+        "recipe": "/root/sym_cjcj_918_implement_r6085769397/inputs/runtime.request.json",
+        "repository": "/root/sym_cjcj_918_implement_r6085769397/tools",
+        "version": "d6edd90ad2da183e9ff5711af699d4b3921f42eb"
+      },
+      "identity": {
+        "recipeId": "cd98a050fc52432b6e307179993f4b3b8eb10e72c3ae64926835625367497b00",
+        "buildId": "runtime/9733dfc09d29eca27d19cc3937a149838b4e3322/cd98a050fc52432b6e307179993f4b3b8eb10e72c3ae64926835625367497b00",
+        "directory": "/root/sym_cjcj_918_implement_r6085769397/builds/runtime/9733dfc09d29eca27d19cc3937a149838b4e3322/cd98a050fc52432b6e307179993f4b3b8eb10e72c3ae64926835625367497b00",
+        "dependencies": {
+          "official": "official/ec9b5ab4b7a84cb71e4b9023d40353723be8108e4ee6d110d07e9ec32d92de19/30fc170d0682d04e3ad968fde14089d7fc1b860df69c826e5101dc9e8062e1e5"
+        }
+      },
+      "expectedReceiptStatus": "missing",
+      "action": "normal production required; no old receipt relabeling",
+      "configurationAndInstall": "complete-final.plan.json component runtime"
+    },
+    {
+      "id": "llvm-cjdb",
+      "roles": [
+        "llvm-tools",
+        "llvm-dylib"
+      ],
+      "domain": "target",
+      "source": {
+        "commit": "53ce96a7b9d243dc7fa05ff6a9b56ea0ef94c057",
+        "kind": "git",
+        "repo": "/root/sym_cjcj_918_implement_r6085769397/inputs/llvm.git",
+        "tree": "3d80836504be22f5b06228db0e2c39c2d0d11c81"
+      },
+      "producer": {
+        "adapter": "llvm-cjdb",
+        "repository": "/root/sym_cjcj_918_implement_r6085769397/cjcj",
+        "version": "4d05592c3b0a05b3ab4d554a379e3885faf25cf2"
+      },
+      "identity": {
+        "recipeId": "d021f87a96842fc5d931dca39999ec44aa46e85eada40f86be1b409ab6d008b8",
+        "buildId": "llvm-cjdb/53ce96a7b9d243dc7fa05ff6a9b56ea0ef94c057/d021f87a96842fc5d931dca39999ec44aa46e85eada40f86be1b409ab6d008b8",
+        "directory": "/root/sym_cjcj_918_implement_r6085769397/builds/llvm-cjdb/53ce96a7b9d243dc7fa05ff6a9b56ea0ef94c057/d021f87a96842fc5d931dca39999ec44aa46e85eada40f86be1b409ab6d008b8",
+        "dependencies": {
+          "runtime": "runtime/9733dfc09d29eca27d19cc3937a149838b4e3322/cd98a050fc52432b6e307179993f4b3b8eb10e72c3ae64926835625367497b00"
+        }
+      },
+      "expectedReceiptStatus": "missing",
+      "action": "normal production required; no old receipt relabeling",
+      "configurationAndInstall": "complete-final.plan.json component llvm-cjdb"
+    },
+    {
+      "id": "ast",
+      "roles": [
+        "ast"
+      ],
+      "domain": "target",
+      "source": {
+        "commit": "174db8f40d5efddee63c47a3162bbf676bc227a0",
+        "kind": "git",
+        "repo": "/root/sym_cjcj_918_implement_r6077105353/inputs/compiler",
+        "tree": "6f25a2072a9d8eeef8d32d050293e58690434920"
+      },
+      "producer": {
+        "adapter": "ast-support",
+        "repository": "/root/sym_cjcj_918_implement_r6085769397/cjcj",
+        "version": "4d05592c3b0a05b3ab4d554a379e3885faf25cf2"
+      },
+      "identity": {
+        "recipeId": "6eb1b752e69ee14292a0dcfdb7f3031ad0830cb1715c5157814591ba1ddb30b8",
+        "buildId": "ast/174db8f40d5efddee63c47a3162bbf676bc227a0/6eb1b752e69ee14292a0dcfdb7f3031ad0830cb1715c5157814591ba1ddb30b8",
+        "directory": "/root/sym_cjcj_918_implement_r6085769397/builds/ast/174db8f40d5efddee63c47a3162bbf676bc227a0/6eb1b752e69ee14292a0dcfdb7f3031ad0830cb1715c5157814591ba1ddb30b8",
+        "dependencies": {
+          "official": "official/ec9b5ab4b7a84cb71e4b9023d40353723be8108e4ee6d110d07e9ec32d92de19/30fc170d0682d04e3ad968fde14089d7fc1b860df69c826e5101dc9e8062e1e5"
+        }
+      },
+      "expectedReceiptStatus": "missing",
+      "action": "normal production required; no old receipt relabeling",
+      "configurationAndInstall": "complete-final.plan.json component ast"
+    },
+    {
+      "id": "compiler-schema",
+      "roles": [
+        "ast"
+      ],
+      "domain": "target",
+      "source": {
+        "commit": "174db8f40d5efddee63c47a3162bbf676bc227a0",
+        "kind": "git",
+        "repo": "/root/sym_cjcj_918_implement_r6077105353/inputs/compiler",
+        "tree": "6f25a2072a9d8eeef8d32d050293e58690434920"
+      },
+      "producer": {
+        "adapter": "compiler-schema",
+        "repository": "/root/sym_cjcj_918_implement_r6085769397/cjcj",
+        "version": "4d05592c3b0a05b3ab4d554a379e3885faf25cf2"
+      },
+      "identity": {
+        "recipeId": "1efe50eb85897ae1332d8ec937c9b1fcc7e04760101bfa189a162635b54473da",
+        "buildId": "compiler-schema/174db8f40d5efddee63c47a3162bbf676bc227a0/1efe50eb85897ae1332d8ec937c9b1fcc7e04760101bfa189a162635b54473da",
+        "directory": "/root/sym_cjcj_918_implement_r6085769397/builds/compiler-schema/174db8f40d5efddee63c47a3162bbf676bc227a0/1efe50eb85897ae1332d8ec937c9b1fcc7e04760101bfa189a162635b54473da",
+        "dependencies": {}
+      },
+      "expectedReceiptStatus": "missing",
+      "action": "normal production required; no old receipt relabeling",
+      "configurationAndInstall": "complete-final.plan.json component compiler-schema"
+    },
+    {
+      "id": "compiler",
+      "roles": [
+        "compiler"
+      ],
+      "domain": "target",
+      "source": {
+        "commit": "4d05592c3b0a05b3ab4d554a379e3885faf25cf2",
+        "kind": "git",
+        "repo": "/root/sym_cjcj_918_implement_r6085769397/cjcj",
+        "tree": "84f6c8bd16ef9be457a3b37448391506cc2ab4d3"
+      },
+      "producer": {
+        "adapter": "sharedbuild-stage1",
+        "engine": "/root/sym_cjcj_918_implement_r6085769397/tools/ts/src/sharedbuild/main.py",
+        "engineSha256": "2be9b4053cb2de624ecf31685760159e38ea573e1e76eaea13faa9429430cac2",
+        "recipe": "/root/sym_cjcj_918_implement_r6085769397/inputs/compiler.request.json",
+        "repository": "/root/sym_cjcj_918_implement_r6085769397/tools",
+        "version": "d6edd90ad2da183e9ff5711af699d4b3921f42eb"
+      },
+      "identity": {
+        "recipeId": "2bf4f71a5835a2d909690d9ebaff5724916ccae706659910b8c17798e65c2eef",
+        "buildId": "compiler/4d05592c3b0a05b3ab4d554a379e3885faf25cf2/2bf4f71a5835a2d909690d9ebaff5724916ccae706659910b8c17798e65c2eef",
+        "directory": "/root/sym_cjcj_918_implement_r6085769397/builds/compiler/4d05592c3b0a05b3ab4d554a379e3885faf25cf2/2bf4f71a5835a2d909690d9ebaff5724916ccae706659910b8c17798e65c2eef",
+        "dependencies": {
+          "official": "official/ec9b5ab4b7a84cb71e4b9023d40353723be8108e4ee6d110d07e9ec32d92de19/30fc170d0682d04e3ad968fde14089d7fc1b860df69c826e5101dc9e8062e1e5",
+          "llvm-cjdb": "llvm-cjdb/53ce96a7b9d243dc7fa05ff6a9b56ea0ef94c057/d021f87a96842fc5d931dca39999ec44aa46e85eada40f86be1b409ab6d008b8",
+          "ast": "ast/174db8f40d5efddee63c47a3162bbf676bc227a0/6eb1b752e69ee14292a0dcfdb7f3031ad0830cb1715c5157814591ba1ddb30b8",
+          "compiler-schema": "compiler-schema/174db8f40d5efddee63c47a3162bbf676bc227a0/1efe50eb85897ae1332d8ec937c9b1fcc7e04760101bfa189a162635b54473da"
+        }
+      },
+      "expectedReceiptStatus": "missing",
+      "action": "normal production required; no old receipt relabeling",
+      "configurationAndInstall": "complete-final.plan.json component compiler"
+    },
+    {
+      "id": "std",
+      "roles": [
+        "std"
+      ],
+      "domain": "target",
+      "source": {
+        "commit": "9733dfc09d29eca27d19cc3937a149838b4e3322",
+        "kind": "git",
+        "repo": "/root/sym_cjcj_918_implement_r6077105353/inputs/runtime",
+        "tree": "e44cf3b4791b5a0f91df78251b6805f5c68e5963"
+      },
+      "producer": {
+        "adapter": "bootstrap-std",
+        "repository": "/root/sym_cjcj_918_implement_r6085769397/cjcj",
+        "version": "4d05592c3b0a05b3ab4d554a379e3885faf25cf2"
+      },
+      "identity": {
+        "recipeId": "addc641c381d3fb9b83ac6d4be463aca195f55ea0f03d086eb35c23905874e30",
+        "buildId": "std/9733dfc09d29eca27d19cc3937a149838b4e3322/addc641c381d3fb9b83ac6d4be463aca195f55ea0f03d086eb35c23905874e30",
+        "directory": "/root/sym_cjcj_918_implement_r6085769397/builds/std/9733dfc09d29eca27d19cc3937a149838b4e3322/addc641c381d3fb9b83ac6d4be463aca195f55ea0f03d086eb35c23905874e30",
+        "dependencies": {
+          "official": "official/ec9b5ab4b7a84cb71e4b9023d40353723be8108e4ee6d110d07e9ec32d92de19/30fc170d0682d04e3ad968fde14089d7fc1b860df69c826e5101dc9e8062e1e5",
+          "compiler": "compiler/4d05592c3b0a05b3ab4d554a379e3885faf25cf2/2bf4f71a5835a2d909690d9ebaff5724916ccae706659910b8c17798e65c2eef",
+          "runtime": "runtime/9733dfc09d29eca27d19cc3937a149838b4e3322/cd98a050fc52432b6e307179993f4b3b8eb10e72c3ae64926835625367497b00",
+          "llvm-cjdb": "llvm-cjdb/53ce96a7b9d243dc7fa05ff6a9b56ea0ef94c057/d021f87a96842fc5d931dca39999ec44aa46e85eada40f86be1b409ab6d008b8",
+          "ast": "ast/174db8f40d5efddee63c47a3162bbf676bc227a0/6eb1b752e69ee14292a0dcfdb7f3031ad0830cb1715c5157814591ba1ddb30b8",
+          "compiler-schema": "compiler-schema/174db8f40d5efddee63c47a3162bbf676bc227a0/1efe50eb85897ae1332d8ec937c9b1fcc7e04760101bfa189a162635b54473da"
+        }
+      },
+      "expectedReceiptStatus": "missing",
+      "action": "normal production required; no old receipt relabeling",
+      "configurationAndInstall": "complete-final.plan.json component std"
+    }
+  ],
+  "buildRootExists": false,
+  "sdkAssembly": "NOT_RUN",
+  "package": "NOT_RUN"
+}

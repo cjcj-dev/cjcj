@@ -61,6 +61,7 @@ export const GATING = Object.freeze([
   'build/test/git.test.mjs',
   'build/test/hle-artifact.test.mjs',
   'build/test/package-lineage.test.mjs',
+  'build/test/package-observation.test.mjs',
   'build/test/package-provenance.test.mjs',
   'build/test/package-safety.test.mjs',
   'build/test/package-std-integrity.test.mjs',
@@ -197,7 +198,8 @@ export function discoverTestFiles(root = repoRoot) {
     {encoding: 'utf8'});
   const found = listed.split('\0').filter(Boolean)
     .filter(file => !file.split('/').includes('node_modules'))
-    .filter(file => /\.test\.mjs$|(?:^|\/)test[_.-][^/]*\.(?:py|sh)$|[._-]test\.sh$|_test\.cj$|^build\/test\/.*\.sh$|\/tests\/[^/]+\.(?:py|sh)$/.test(file));
+    .filter(file => fs.existsSync(path.join(root, file)))
+    .filter(file => /\.(?:test|integration)\.mjs$|(?:^|\/)test[_.-][^/]*\.(?:py|sh)$|[._-]test\.sh$|_test\.cj$|^build\/test\/.*\.sh$|\/tests\/[^/]+\.(?:py|sh)$/.test(file));
   return [...new Set(found)].sort();
 }
 

@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {parseHostToolchainPin} from '../../ci/host-toolchain-pin.mjs';
 
 export const PACKAGED_TOOL_NAMES = Object.freeze([
   'cjpm', 'cjfmt', 'hle', 'LSPServer', 'cjcov', 'cjtrace-recover',
@@ -71,9 +72,7 @@ export function hostSdkPinPath() {
 
 export async function readHostSdkPinToolchain(pinFile = hostSdkPinPath()) {
   const text = await fs.readFile(pinFile, 'utf8');
-  const match = text.match(/^CJCJ_TOOLCHAIN=(\S+)$/m);
-  if (!match) throw new Error(`CJCJ_TOOLCHAIN missing from ${pinFile}`);
-  return match[1];
+  return parseHostToolchainPin(text);
 }
 
 export async function pinnedOfficialSdkRoot(pinFile = hostSdkPinPath()) {

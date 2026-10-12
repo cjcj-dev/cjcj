@@ -107,7 +107,9 @@ jobs:
           persist-credentials: false
 
       - name: Load host toolchain pin
-        run: cat ci/host_sdk_pin.env >> "$GITHUB_ENV"
+        run: |
+          cat ci/host_sdk_pin.env >> "$GITHUB_ENV"
+          node ci/host-toolchain-pin.mjs --github-env >> "$GITHUB_ENV"
 
       - name: Load source pins
         run: |

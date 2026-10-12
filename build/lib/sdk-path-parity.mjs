@@ -51,8 +51,15 @@ export function collectRelativePaths(root, {excludedSubtrees = []} = {}) {
   return Object.freeze(entries);
 }
 
-export function compareSdkPathSets(officialRoot, candidateRoot) {
-  const officialEntries = collectRelativePaths(officialRoot, {excludedSubtrees: OFFICIAL_PATH_EXCLUSIONS});
+export function compareSdkPathSets(officialRoot, candidateRoot, {target} = {}) {
+  const exclusions = [...OFFICIAL_PATH_EXCLUSIONS];
+  // Linux releases can contain optional Windows cross-target modules. The
+  // native Linux SDK contract does not require those two exact target roots.
+  // Windows and unspecified targets retain the complete reference inventory.
+  if (['linux-x64', 'linux-aarch64'].includes(target)) {
+    exclusions.push('lib/windows_x86_64_cjnative', 'modules/windows_x86_64_cjnative');
+  }
+  const officialEntries = collectRelativePaths(officialRoot, {excludedSubtrees: exclusions});
   const candidateEntries = collectRelativePaths(candidateRoot);
   const official = new Map(officialEntries.map(entry => [entry.relativePath, entry]));
   const candidate = new Map(candidateEntries.map(entry => [entry.relativePath, entry]));
@@ -61,6 +68,14 @@ export function compareSdkPathSets(officialRoot, candidateRoot) {
   const typeMismatches = officialEntries.flatMap(officialEntry => {
     const candidateEntry = candidate.get(officialEntry.relativePath);
     if (!candidateEntry) return [];
+    // The managed compiler has two public entries into one authenticated
+    // stage compiler. This exact relative relationship is the release ABI;
+    // it does not exempt other symlinks (including pcre) from type parity.
+    if (['bin/cjc', 'bin/cjc-frontend'].includes(officialEntry.relativePath)
+      && candidateEntry.type === 'symlink' && candidateEntry.symlinkTarget === 'cjcj-stage1'
+      && candidate.get('bin/cjcj-stage1')?.type === 'file'
+      && candidate.get('bin/cjc')?.symlinkTarget === 'cjcj-stage1'
+      && candidate.get('bin/cjc-frontend')?.symlinkTarget === 'cjcj-stage1') return [];
     if (officialEntry.type === candidateEntry.type
       && officialEntry.symlinkTarget === candidateEntry.symlinkTarget) return [];
     return [Object.freeze({
@@ -86,9 +101,26 @@ function describeEntry(type, symlinkTarget) {
   return type === 'symlink' ? `${type}->${symlinkTarget}` : type;
 }
 
-export async function assertSdkPathParity(candidateRoot, {officialRoot} = {}) {
+export async function assertSdkPathParity(candidateRoot, {officialRoot, target} = {}) {
   const referenceRoot = path.resolve(officialRoot || await pinnedOfficialSdkRoot());
-  const result = compareSdkPathSets(referenceRoot, candidateRoot);
+  const depotLock = path.join(referenceRoot, 'SDK.lock.json');
+  if (fs.existsSync(depotLock)
+    && JSON.parse(fs.readFileSync(depotLock, 'utf8')).schema === 'sharedbuild-official-sdk-v1') {
+    throw new BuildError('package.sdk-path-parity', 'REFERENCE_BOUNDARY: use the original archive payload, not a materialized sharedbuild depot');
+  }
+  const result = compareSdkPathSets(referenceRoot, candidateRoot, {target});
+  for (const entry of result.candidateEntries) {
+    if (entry.type !== 'symlink') continue;
+    const file = path.join(candidateRoot, entry.relativePath);
+    const root = fs.realpathSync(candidateRoot);
+    let resolved;
+    try { resolved = fs.realpathSync(file); } catch {
+      throw new BuildError('package.sdk-path-parity', `package-link-invalid\t${entry.relativePath}\t${entry.symlinkTarget}`);
+    }
+    if (path.isAbsolute(entry.symlinkTarget) || !resolved.startsWith(`${root}${path.sep}`)) {
+      throw new BuildError('package.sdk-path-parity', `package-link-outside\t${entry.relativePath}\t${entry.symlinkTarget}`);
+    }
+  }
   if (result.missingInCandidate.length || result.typeMismatches.length) {
     const differences = [
       ...result.missingInCandidate.map(relative => `missing-official-path\t${relative}`),

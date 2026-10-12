@@ -71,14 +71,18 @@ class CompilerIdentityTest(unittest.TestCase):
     def test_shell_assembly(self):
         if COMPILER:
             self.skipTest('real compiler identity rehearsal uses installer, not fixture runtime')
-        process = subprocess.run(['bash', str(HERE / 'sdk_build.sh'), '--from', str(self.base),
-                                  '--to', str(self.sdk), '--host', '--cjc', str(self.product),
-                                  '--colour-runtime', str(self.colour), '--host-runtime', str(self.host)],
+        output = self.root / 'plan-identity'
+        process = subprocess.run(['node', str(HERE / 'sdk-consumer-cases.mjs'), '--suite', 'identity',
+                                  '--elf', str(self.product), '--output', str(output)],
                                  capture_output=True, text=True)
+        print(process.stdout + process.stderr, flush=True)
         self.assertEqual(process.returncode, 0, process.stdout + process.stderr)
+        record = json.loads((output / 'identity-result.json').read_text())
+        self.sdk = Path(record['sdk'])
         actual = sha(self.sdk / 'bin/cjc-frontend')
         print('SDK_SHELL_FRONTEND_TARGET', actual, 'expected', sha(self.product))
         self.assertEqual(actual, sha(self.product), 'SDK_SHELL_FRONTEND_TARGET producer identity')
+        self.assertEqual(record['producer'], sha(self.product))
         self.assertEqual(os.readlink(self.sdk / 'bin/cjc-frontend'), 'cjcj-stage1')
         self.assertEqual(sha(self.sdk / 'bin/cjc'), sha(self.product))
 

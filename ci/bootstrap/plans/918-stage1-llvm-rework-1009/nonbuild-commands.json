@@ -1,0 +1,29 @@
+[
+  {
+    "name": "freeze",
+    "argv": [
+      "/usr/local/bin/node",
+      "/root/sym_cjcj_918_implement_r6086353010/retained-cjcj/ci/bootstrap/freeze-sdk-plan.mjs",
+      "--intent",
+      "/root/sym_cjcj_918_implement_r6086353010/retained-inputs/stage1-delivery.intent.json",
+      "--out",
+      "/root/sym_cjcj_918_implement_r6086353010/retained-inputs/stage1-delivery.plan.json"
+    ],
+    "rc": 0,
+    "signal": null,
+    "wall": 0.991345009
+  },
+  {
+    "name": "dry-run",
+    "argv": [
+      "/usr/local/bin/node",
+      "/root/sym_cjcj_918_implement_r6086353010/retained-cjcj/ci/bootstrap/toolchain-sdk.mjs",
+      "--plan",
+      "/root/sym_cjcj_918_implement_r6086353010/retained-inputs/stage1-delivery.plan.json",
+      "--dry-run"
+    ],
+    "rc": 0,
+    "signal": null,
+    "wall": 0.04425935400000003
+  }
+]

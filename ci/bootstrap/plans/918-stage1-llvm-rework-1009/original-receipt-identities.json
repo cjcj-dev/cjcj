@@ -1,0 +1,423 @@
+{
+  "schema": "918-receipt-reuse-v1",
+  "policy": "old source/producer/configuration/dependency/build IDs unchanged; no old output receipt attached to the new plan",
+  "host": {
+    "status": "complete",
+    "rc": 0,
+    "buildId": "official-current/ec9b5ab4b7a84cb71e4b9023d40353723be8108e4ee6d110d07e9ec32d92de19/1034b5873274633b002366f92c54f07c36f281a7d350ab6ed50dd166d9b48d8d",
+    "component": {
+      "config": {
+        "host": "linux_x86_64",
+        "options": {},
+        "target": "linux_x86_64",
+        "tools": {}
+      },
+      "dependencies": [],
+      "domain": "host",
+      "id": "official-current",
+      "install": [
+        {
+          "from": "",
+          "to": ""
+        }
+      ],
+      "producer": {
+        "adapter": "official",
+        "repository": "/root/sym_cjcj_918_implement_r6077105353/cjcj",
+        "version": "7d21aa9ed98771d381295689756b7e16f6cbe4cd"
+      },
+      "roles": [
+        "compiler",
+        "std",
+        "runtime",
+        "boundscheck",
+        "llvm-tools",
+        "llvm-dylib",
+        "ast",
+        "cjpm",
+        "official-host"
+      ],
+      "source": {
+        "kind": "distribution",
+        "lock": "/root/sym_cjcj_918_implement_r6077105353/official/SDK.lock.json",
+        "lockSha256": "ec9b5ab4b7a84cb71e4b9023d40353723be8108e4ee6d110d07e9ec32d92de19",
+        "reason": "actual verified publisher asset234013, private original payload",
+        "root": "/root/sym_cjcj_918_implement_r6077105353/official/payload/cangjie",
+        "version": "1.3.0-alpha.20261009001050"
+      }
+    },
+    "dependencies": {},
+    "originalReceipt": "/root/sym_cjcj_918_implement_r6077105353/host-bound-builds/official-current/ec9b5ab4b7a84cb71e4b9023d40353723be8108e4ee6d110d07e9ec32d92de19/1034b5873274633b002366f92c54f07c36f281a7d350ab6ed50dd166d9b48d8d/output.json",
+    "reused": "original publisher lock/payload as source, successful package identity retained; receipt not relabeled",
+    "newReceipt": "official producer 4d/private buildRoot/filtered installation changes recipe ID: normal copy/seal required"
+  },
+  "oldComponents": [
+    {
+      "id": "official",
+      "source": {
+        "kind": "distribution",
+        "lock": "/root/sharedbuild/official-sdk/nightly-1.3.0-alpha.20261005010028/f15562c80d0316ae59a892f0d3bd3e9084299e274417de04e28684caa527441e/SDK.lock.json",
+        "lockSha256": "3e634272cc6fe9ba0dc5c47d44b16015175cf68e199784e936b03b1c9062c89a",
+        "reason": "official host seed, including its original compiler, std, LLVM, AST and cjpm",
+        "root": "/root/sharedbuild/official-sdk/nightly-1.3.0-alpha.20261005010028/f15562c80d0316ae59a892f0d3bd3e9084299e274417de04e28684caa527441e",
+        "version": "nightly-1.3.0-alpha.20261005010028"
+      },
+      "producer": {
+        "adapter": "official",
+        "originBuildRoot": "/root/sym_cjcj_918_implement_r6065114950/target-builds",
+        "receipt": "/root/sym_cjcj_918_implement_r6066708628/keep/builds/official/3e634272cc6fe9ba0dc5c47d44b16015175cf68e199784e936b03b1c9062c89a/351f428808127e73f0e529feac342e1629dd1947dbfc8beba41124a1aafd7627",
+        "receiptSha256": "245f20298c9bf37f2f63e0168671438936a9661c6135e66bc3c22e8824caab9d",
+        "repository": "/root/sym_cjcj_918_implement_r6065114950/cjcj",
+        "version": "8ab3685a8b7f771d34ad23d4c89d6c79f180f614"
+      },
+      "dependencies": [],
+      "configurationIn": "original-request.json",
+      "reuse": "historical unchanged record; new dependencies/producer/source/layout require genuine new producer receipt"
+    },
+    {
+      "id": "runtime",
+      "source": {
+        "commit": "9733dfc09d29eca27d19cc3937a149838b4e3322",
+        "kind": "git",
+        "repo": "/root/sym_cjcj_918_implement_r6065114950/sources/runtime",
+        "tree": "e44cf3b4791b5a0f91df78251b6805f5c68e5963"
+      },
+      "producer": {
+        "adapter": "sharedbuild-runtime-default",
+        "engine": "/root/sym_cjcj_918_implement_r6065114950/tools/ts/src/sharedbuild/main.py",
+        "engineSha256": "9cf10eb313a946915abf7da44cb8768fcbd476b3cca0be2875668adcbf805b45",
+        "originBuildRoot": "/root/sym_cjcj_918_implement_r6065114950/target-builds",
+        "receipt": "/root/sym_cjcj_918_implement_r6066708628/keep/builds/runtime/9733dfc09d29eca27d19cc3937a149838b4e3322/9e6ce531c765c6e7e3bf42ecd9c660f8d01b8eb6633b39f52f2c0c582a901bf1",
+        "receiptSha256": "760914bfd76d7a48708a8c34defa02c9dc197685b9480121ab6c87e8e2663922",
+        "recipe": "/root/sym_cjcj_918_implement_r6065114950/inputs/runtime.request.json",
+        "repository": "/root/sym_cjcj_918_implement_r6065114950/tools",
+        "version": "b1bda3ab7294c6334766042ab90592e50edd1c40"
+      },
+      "dependencies": [
+        "official"
+      ],
+      "configurationIn": "original-request.json",
+      "reuse": "historical unchanged record; new dependencies/producer/source/layout require genuine new producer receipt"
+    },
+    {
+      "id": "llvm-tools",
+      "source": {
+        "commit": "7ed574d4ba6ff1ebeceeb339ab4795e0141e4a60",
+        "kind": "git",
+        "repo": "/root/sym_cjcj_918_implement_r6065114950/sources/llvm",
+        "tree": "04e9f2f2155942af65770e48a3e864cc2cb4b2b6"
+      },
+      "producer": {
+        "adapter": "llvm-tools",
+        "originBuildRoot": "/root/sym_cjcj_918_implement_r6065114950/target-builds",
+        "receipt": "/root/sym_cjcj_918_implement_r6066708628/keep/builds/llvm-tools/7ed574d4ba6ff1ebeceeb339ab4795e0141e4a60/4fd9e0046906d1e64bdea03c1d4818440933109e237ff83647ba8a57d9b68f58",
+        "receiptSha256": "a646f8a6086b492a190df403d01d51e18a83586a053b3ac43bbd5e5b7a7cc511",
+        "repository": "/root/sym_cjcj_918_implement_r6065114950/cjcj",
+        "version": "8ab3685a8b7f771d34ad23d4c89d6c79f180f614"
+      },
+      "dependencies": [
+        "runtime"
+      ],
+      "configurationIn": "original-request.json",
+      "reuse": "historical unchanged record; new dependencies/producer/source/layout require genuine new producer receipt"
+    },
+    {
+      "id": "llvm-dylib",
+      "source": {
+        "commit": "7ed574d4ba6ff1ebeceeb339ab4795e0141e4a60",
+        "kind": "git",
+        "repo": "/root/sym_cjcj_918_implement_r6065114950/sources/llvm",
+        "tree": "04e9f2f2155942af65770e48a3e864cc2cb4b2b6"
+      },
+      "producer": {
+        "adapter": "llvm-dylib",
+        "originBuildRoot": "/root/sym_cjcj_918_implement_r6065114950/target-builds",
+        "receipt": "/root/sym_cjcj_918_implement_r6066708628/keep/builds/llvm-dylib/7ed574d4ba6ff1ebeceeb339ab4795e0141e4a60/703fb4db3a86be6e6995352f9826b27de8ac23a90b08da9ed56564ed6e57704c",
+        "receiptSha256": "4e5444669312cd4d146849c06b80acf2c6b9d32aa1b4bee3c7900544e0c3f039",
+        "repository": "/root/sym_cjcj_918_implement_r6065114950/cjcj",
+        "version": "8ab3685a8b7f771d34ad23d4c89d6c79f180f614"
+      },
+      "dependencies": [
+        "runtime"
+      ],
+      "configurationIn": "original-request.json",
+      "reuse": "historical unchanged record; new dependencies/producer/source/layout require genuine new producer receipt"
+    },
+    {
+      "id": "llvm-auxiliary",
+      "source": {
+        "commit": "7ed574d4ba6ff1ebeceeb339ab4795e0141e4a60",
+        "kind": "git",
+        "repo": "/root/sym_cjcj_918_implement_r6065114950/sources/llvm",
+        "tree": "04e9f2f2155942af65770e48a3e864cc2cb4b2b6"
+      },
+      "producer": {
+        "adapter": "llvm-tools",
+        "originBuildRoot": "/root/sym_cjcj_918_implement_r6065114950/target-builds",
+        "receipt": "/root/sym_cjcj_918_implement_r6066708628/keep/builds/llvm-auxiliary/7ed574d4ba6ff1ebeceeb339ab4795e0141e4a60/ea74faf18ca6157e1f52f71f012a505713d0d04e6a50bc33414951f0b67f2f6f",
+        "receiptSha256": "f3bc4dfb80b64c2fb55000d4000b90a141e28638c6f32c9a4cb1492e34490ff7",
+        "repository": "/root/sym_cjcj_918_implement_r6065114950/auxiliary-producer",
+        "version": "0f93d3e0f1a9dcf7e2f23a91804a2403bee32039"
+      },
+      "dependencies": [
+        "runtime"
+      ],
+      "configurationIn": "original-request.json",
+      "reuse": "historical unchanged record; new dependencies/producer/source/layout require genuine new producer receipt"
+    },
+    {
+      "id": "compiler",
+      "source": {
+        "commit": "8ab3685a8b7f771d34ad23d4c89d6c79f180f614",
+        "kind": "git",
+        "repo": "/root/sym_cjcj_918_implement_r6065114950/cjcj",
+        "tree": "03d293dced0b4c1c6dcc367f741c76d2ac6c1ace"
+      },
+      "producer": {
+        "adapter": "sharedbuild-stage1",
+        "engine": "/root/sym_cjcj_918_implement_r6065114950/tools-compiler/ts/src/sharedbuild/main.py",
+        "engineSha256": "2be9b4053cb2de624ecf31685760159e38ea573e1e76eaea13faa9429430cac2",
+        "originBuildRoot": "/root/sym_cjcj_918_implement_r6065114950/target-builds",
+        "receipt": "/root/sym_cjcj_918_implement_r6066708628/keep/builds/compiler/8ab3685a8b7f771d34ad23d4c89d6c79f180f614/951efcf30daad546d05d003b3167a5650ce0a348bf3537397fc4ef0d3ed5da09",
+        "receiptSha256": "69ef76b29ec13c8d3e57a7fe6dde570fe4fb40b9330720dba6c2066627ce7a66",
+        "recipe": "/root/sym_cjcj_918_implement_r6065114950/inputs/compiler.request.json",
+        "repository": "/root/sym_cjcj_918_implement_r6065114950/tools-compiler",
+        "version": "7bab956b9be4f5051ad03ab28ddf5939822ff50e"
+      },
+      "dependencies": [
+        "official",
+        "llvm-tools"
+      ],
+      "configurationIn": "original-request.json",
+      "reuse": "historical unchanged record; new dependencies/producer/source/layout require genuine new producer receipt"
+    },
+    {
+      "id": "ast",
+      "source": {
+        "commit": "174db8f40d5efddee63c47a3162bbf676bc227a0",
+        "kind": "git",
+        "repo": "/root/sym_cjcj_918_implement_r6065114950/sources/compiler",
+        "tree": "6f25a2072a9d8eeef8d32d050293e58690434920"
+      },
+      "producer": {
+        "adapter": "ast-support",
+        "originBuildRoot": "/root/sym_cjcj_918_implement_r6065114950/target-builds",
+        "receipt": "/root/sym_cjcj_918_implement_r6066708628/keep/builds/ast/174db8f40d5efddee63c47a3162bbf676bc227a0/342a1bf4bf3be113feea2735c934dc9e333c89b6202657690f65fe62dbf5afcc",
+        "receiptSha256": "71d451e48cc500b303479b27a9c588113fd2aaeba3cb9be1633cdcd4cc034a23",
+        "repository": "/root/sym_cjcj_918_implement_r6065114950/entry",
+        "version": "3421cbb7fb5fa5160310b9a34647e492773d0003"
+      },
+      "dependencies": [
+        "official"
+      ],
+      "configurationIn": "original-request.json",
+      "reuse": "historical unchanged record; new dependencies/producer/source/layout require genuine new producer receipt"
+    },
+    {
+      "id": "std",
+      "source": {
+        "commit": "9733dfc09d29eca27d19cc3937a149838b4e3322",
+        "kind": "git",
+        "repo": "/root/sym_cjcj_918_implement_r6065114950/sources/runtime",
+        "tree": "e44cf3b4791b5a0f91df78251b6805f5c68e5963"
+      },
+      "producer": {
+        "adapter": "bootstrap-std",
+        "originBuildRoot": "/root/sym_cjcj_918_implement_r6065114950/target-builds",
+        "receipt": "/root/sym_cjcj_918_implement_r6066708628/keep/builds/std/9733dfc09d29eca27d19cc3937a149838b4e3322/c976de69cac903a385e954b2d7b62056bf3b55c4c4af70a460af0cc22b5fe009",
+        "receiptSha256": "cb0834de0ff56f381fbbf382227ba5eaa1ad9a77aa8ee6492d0ca6d9f19c1cee",
+        "repository": "/root/sym_cjcj_918_implement_r6065114950/std-shape-producer",
+        "version": "cf91603908f2b5c67dca6b01a2b3d1f7bcf5ff9f"
+      },
+      "dependencies": [
+        "official",
+        "compiler",
+        "runtime",
+        "llvm-tools",
+        "llvm-dylib",
+        "ast",
+        "llvm-auxiliary"
+      ],
+      "configurationIn": "original-request.json",
+      "reuse": "historical unchanged record; new dependencies/producer/source/layout require genuine new producer receipt"
+    },
+    {
+      "id": "llvm-readers",
+      "source": {
+        "commit": "7ed574d4ba6ff1ebeceeb339ab4795e0141e4a60",
+        "kind": "git",
+        "repo": "/root/sym_cjcj_918_implement_r6065114950/sources/llvm",
+        "tree": "04e9f2f2155942af65770e48a3e864cc2cb4b2b6"
+      },
+      "producer": {
+        "adapter": "llvm-tools",
+        "originBuildRoot": "/root/sym_cjcj_918_implement_r6073770708/reader-builds",
+        "receipt": "/root/sym_cjcj_918_implement_r6073770708/keep/reader-builds/llvm-readers/7ed574d4ba6ff1ebeceeb339ab4795e0141e4a60/2cd63f63f92b3188a108caaf997d555f548412869c9145610bdd65798ce690ef",
+        "receiptSha256": "65ab46a3c2d54dc52d0805cb8ddf1cf3e0a979d9651e763dbe19a4f65db953cf",
+        "repository": "/root/sym_cjcj_918_implement_r6073770708/cjcj",
+        "version": "4132c0d51100e2662df1eacd9304c3b3df156bdf"
+      },
+      "dependencies": [
+        "runtime"
+      ],
+      "configurationIn": "original-request.json",
+      "reuse": "historical unchanged record; new dependencies/producer/source/layout require genuine new producer receipt"
+    },
+    {
+      "id": "compiler-schema",
+      "source": {
+        "commit": "174db8f40d5efddee63c47a3162bbf676bc227a0",
+        "kind": "git",
+        "repo": "/root/sym_cjcj_918_implement_r6074725041/compiler-source",
+        "tree": "6f25a2072a9d8eeef8d32d050293e58690434920"
+      },
+      "producer": {
+        "adapter": "compiler-schema",
+        "originBuildRoot": "/root/sym_cjcj_918_implement_r6074725041/builds",
+        "receipt": "/root/sym_cjcj_918_implement_r6074725041/keep/builds/compiler-schema/174db8f40d5efddee63c47a3162bbf676bc227a0/dafc7bdf758fff54646586b62040a99ecfa223aedb740a1cf5c2b8c2ff967713",
+        "receiptSha256": "8cf83fb39ed42d7bc23d0422e4b6aaab1d3285572b803d9614dfdfb73be25218",
+        "repository": "/root/sym_cjcj_918_implement_r6074725041/cjcj",
+        "version": "090b9aa5cfdb73c26bd528bf621fdec97383b787"
+      },
+      "dependencies": [],
+      "configurationIn": "original-request.json",
+      "reuse": "historical unchanged record; new dependencies/producer/source/layout require genuine new producer receipt"
+    },
+    {
+      "id": "llvm-release-tools",
+      "source": {
+        "commit": "7ed574d4ba6ff1ebeceeb339ab4795e0141e4a60",
+        "kind": "git",
+        "repo": "/root/sym_cjcj_918_implement_r6073770708/llvm",
+        "tree": "04e9f2f2155942af65770e48a3e864cc2cb4b2b6"
+      },
+      "producer": {
+        "adapter": "llvm-tools",
+        "originBuildRoot": "/root/sym_cjcj_918_implement_r6074725041/builds",
+        "receipt": "/root/sym_cjcj_918_implement_r6074725041/keep/builds/llvm-release-tools/7ed574d4ba6ff1ebeceeb339ab4795e0141e4a60/e759cc25fd89fee10bd5873f60686e6789ac3d3a79408243d058c155acb80026",
+        "receiptSha256": "401a3821cca11a06c68bf377b108334c6fa5d212afd45d1138233bd1ea80e7e4",
+        "repository": "/root/sym_cjcj_918_implement_r6074725041/cjcj",
+        "version": "090b9aa5cfdb73c26bd528bf621fdec97383b787"
+      },
+      "dependencies": [
+        "runtime"
+      ],
+      "configurationIn": "original-request.json",
+      "reuse": "historical unchanged record; new dependencies/producer/source/layout require genuine new producer receipt"
+    },
+    {
+      "id": "llvm-release-libraries",
+      "source": {
+        "commit": "7ed574d4ba6ff1ebeceeb339ab4795e0141e4a60",
+        "kind": "git",
+        "repo": "/root/sym_cjcj_918_implement_r6073770708/llvm",
+        "tree": "04e9f2f2155942af65770e48a3e864cc2cb4b2b6"
+      },
+      "producer": {
+        "adapter": "llvm-tools",
+        "originBuildRoot": "/root/sym_cjcj_918_implement_r6074725041/builds",
+        "receipt": "/root/sym_cjcj_918_implement_r6074725041/keep/builds/llvm-release-libraries/7ed574d4ba6ff1ebeceeb339ab4795e0141e4a60/14c8d3c01b2d8a50bc0dcfe8153683435eec325cc2bb39c4a8bc6ee3a781e45e",
+        "receiptSha256": "70de01b051c051a37d9ded6a9c4747853bbb1ea85ee304a3901b47ca6fb39298",
+        "repository": "/root/sym_cjcj_918_implement_r6074725041/cjcj",
+        "version": "313e62b88795194ac9e551d04528b45a02b67c62"
+      },
+      "dependencies": [
+        "runtime"
+      ],
+      "configurationIn": "original-request.json",
+      "reuse": "historical unchanged record; new dependencies/producer/source/layout require genuine new producer receipt"
+    },
+    {
+      "id": "llvm-release-layout",
+      "source": {
+        "commit": "7ed574d4ba6ff1ebeceeb339ab4795e0141e4a60",
+        "kind": "git",
+        "repo": "/root/sym_cjcj_918_implement_r6073770708/llvm",
+        "tree": "04e9f2f2155942af65770e48a3e864cc2cb4b2b6"
+      },
+      "producer": {
+        "adapter": "llvm-release-layout",
+        "originBuildRoot": "/root/sym_cjcj_918_implement_r6074725041/builds",
+        "receipt": "/root/sym_cjcj_918_implement_r6074725041/keep/builds/llvm-release-layout/7ed574d4ba6ff1ebeceeb339ab4795e0141e4a60/1120f65f00e406340afd055b4acbc54fba7d8e717c622712b5e724bb1189eacf",
+        "receiptSha256": "63208ea08fb8c45e4789ef549d2de5058c1af1c614820d662778f65ac2745362",
+        "repository": "/root/sym_cjcj_918_implement_r6074725041/cjcj",
+        "version": "313e62b88795194ac9e551d04528b45a02b67c62"
+      },
+      "dependencies": [
+        "llvm-tools",
+        "llvm-dylib",
+        "llvm-auxiliary",
+        "llvm-readers",
+        "llvm-release-tools",
+        "llvm-release-libraries"
+      ],
+      "configurationIn": "original-request.json",
+      "reuse": "historical unchanged record; new dependencies/producer/source/layout require genuine new producer receipt"
+    },
+    {
+      "id": "compiler-securec",
+      "source": {
+        "commit": "174db8f40d5efddee63c47a3162bbf676bc227a0",
+        "kind": "git",
+        "repo": "/root/sym_cjcj_918_implement_r6074725041/compiler-source",
+        "tree": "6f25a2072a9d8eeef8d32d050293e58690434920"
+      },
+      "producer": {
+        "adapter": "compiler-boundscheck",
+        "originBuildRoot": "/root/sym_cjcj_918_implement_r6074725041/builds",
+        "receipt": "/root/sym_cjcj_918_implement_r6074725041/keep/builds/compiler-securec/174db8f40d5efddee63c47a3162bbf676bc227a0/8123e896a2d3fed6dd8b5fb9dd2fe6ffb975caded044becfd52f1102fcefef7e",
+        "receiptSha256": "e683407a981136924a065a74ddf6e3b004f6ce1eed39bac23bf586da37f7af39",
+        "repository": "/root/sym_cjcj_918_implement_r6074725041/securec-product",
+        "version": "ed738c002ed89220c49bc3d109da4be9c94215dc"
+      },
+      "dependencies": [],
+      "configurationIn": "original-request.json",
+      "reuse": "historical unchanged record; new dependencies/producer/source/layout require genuine new producer receipt"
+    },
+    {
+      "id": "compiler-xml2",
+      "source": {
+        "commit": "174db8f40d5efddee63c47a3162bbf676bc227a0",
+        "kind": "git",
+        "repo": "/root/sym_cjcj_918_implement_r6074725041/compiler-source",
+        "tree": "6f25a2072a9d8eeef8d32d050293e58690434920"
+      },
+      "producer": {
+        "adapter": "compiler-xml2",
+        "originBuildRoot": "/root/sym_cjcj_918_implement_r6074725041/builds",
+        "receipt": "/root/sym_cjcj_918_implement_r6074725041/keep/builds/compiler-xml2/174db8f40d5efddee63c47a3162bbf676bc227a0/e48d4e5b821997376e0c2e062760d0dc5a50eafa01e8fc03b0da80cde9050ee5",
+        "receiptSha256": "96a2eaa799a4748b87b39f5e10ffe3b3d5b6773a0675fb7cce1e0985134076c5",
+        "repository": "/root/sym_cjcj_918_implement_r6074725041/xml-hardened-product",
+        "version": "faa6ddffeaabe492fb5b96cb0583483fec671158"
+      },
+      "dependencies": [],
+      "configurationIn": "original-request.json",
+      "reuse": "historical unchanged record; new dependencies/producer/source/layout require genuine new producer receipt"
+    },
+    {
+      "id": "llvm-cjdb",
+      "source": {
+        "commit": "53ce96a7b9d243dc7fa05ff6a9b56ea0ef94c057",
+        "kind": "git",
+        "repo": "/root/sym_cjcj_918_implement_r6077105353/inputs/llvm",
+        "tree": "3d80836504be22f5b06228db0e2c39c2d0d11c81"
+      },
+      "producer": {
+        "adapter": "llvm-cjdb",
+        "repository": "/root/918_qualification_53ce/product",
+        "version": "4d05592c3b0a05b3ab4d554a379e3885faf25cf2"
+      },
+      "dependencies": [
+        "runtime"
+      ],
+      "configurationIn": "original-request.json",
+      "reuse": "no successful output.json; qualification evidence only"
+    }
+  ],
+  "recipeField": {
+    "status": "declared future paths; not executed or claimed present",
+    "actualConsumer": "sdk-producers.mjs:84 writes sharedbuild-request.json directly from frozen config and dependency receipts; producer.recipe is schema-required but not read by this adapter",
+    "runtime": "/root/sym_cjcj_918_implement_r6085769397/inputs/runtime.request.json",
+    "compiler": "/root/sym_cjcj_918_implement_r6085769397/inputs/compiler.request.json"
+  }
+}
