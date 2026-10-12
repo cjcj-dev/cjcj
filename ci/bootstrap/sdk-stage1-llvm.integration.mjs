@@ -81,9 +81,8 @@ const hostComponent = {id: 'fixture-host', roles: ['official-host', 'cjpm'], dom
   config: {host: 'linux_x86_64', target: 'linux_x86_64', tools: {}, options: {}}};
 const hostPlan = {buildRoot: path.join(root, 'official-build'), lane: 'controlled-stage1', components: [hostComponent]};
 const hostIdentity = buildIdentities(hostPlan).get(hostComponent.id);
-const hostOutput = reuse ? await readOutput(hostIdentity.directory, hostComponent, hostIdentity)
-  : await produceComponent(hostPlan, hostComponent, hostIdentity, new Map());
-const official = hostOutput.artifacts;
+let hostOutput;
+const official = path.join(hostIdentity.directory, 'artifacts');
 const observer = path.join(here, 'fixtures/sdk-stage1-observer.mjs');
 const producerVersion = (await execute('/usr/bin/git', ['-C', toolsRepo, 'rev-parse', 'HEAD'])).stdout.trim();
 assert.equal(producerVersion, SDK_TEST_ENGINE_COMMIT, 'fixed read-only tools candidate required');
@@ -123,6 +122,32 @@ async function arm(name, mutate = () => {}, hostDependency = hostOutput) {
 }
 test('formal stage1 producer feeds one target native capsule and actual isolated adapter consumption', async () => {
   const sourceLock = await readJson(hostSource.lock);
+  // Observe the genuine source bytes before entering the protected producer.
+  const sourceCompilerSha256 = await fileDigest(path.join(hostSource.root, 'bin/cjc'));
+  await atomicJson(path.join(root, 'official-source-control.json'), {sourceCompilerSha256,
+    expected: sourceLock.files['bin/cjc'].sha256});
+  assert.equal(sourceCompilerSha256, sourceLock.files['bin/cjc'].sha256, 'independent genuine source compiler byte control');
+  console.log('CONTROL_ASSERTION_EXECUTED official-source-compiler-bytes');
+  let producerFailure;
+  try {
+    hostOutput = reuse ? await readOutput(hostIdentity.directory, hostComponent, hostIdentity)
+      : await produceComponent(hostPlan, hostComponent, hostIdentity, new Map());
+  } catch (error) { producerFailure = error; }
+  if (producerFailure) {
+    // Preserve the original exception and producer state. Never feed rejected
+    // output.json to a positive dependency or convert an arbitrary failure to red.
+    await atomicJson(path.join(root, 'official-producer-rejection.json'), {
+      name: producerFailure.name, message: producerFailure.message,
+      rc: producerFailure.rc ?? null, code: producerFailure.code ?? null,
+      signal: producerFailure.signal ?? null, wrapperRc: producerFailure.wrapperRc ?? null,
+      stack: producerFailure.stack, producerState: await readJson(path.join(hostIdentity.directory, 'state.json'))});
+    assert.equal(reuse, false, 'producer cut requires a fresh actual producer, never receipt reuse');
+    console.log('TARGET_ASSERTION_EXECUTED official-producer-authentication-rejection');
+    assert.equal(producerFailure.message, 'OFFICIAL_IDENTITY matching release/archive/compiler proof required',
+      'only the actual missing-proof authentication rejection is the producer-cut target');
+    assert.equal(producerFailure.rc, undefined, 'proof rejection is an original JS exception, not a fabricated child rc');
+    throw producerFailure;
+  }
   const compilerSha256 = await fileDigest(path.join(official, 'bin/cjc'));
   await atomicJson(path.join(root, 'official-producer-observations.json'), {receiptSha256: hostOutput.receiptSha256,
     execution: hostOutput.execution, compilerSha256, compilerRow: hostOutput.files['bin/cjc']});
