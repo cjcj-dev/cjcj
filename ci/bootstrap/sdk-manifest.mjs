@@ -524,8 +524,37 @@ export async function readOutput(directory, component, identity) {
     const actual = await verifyOfficialSdkIdentity({root: output.artifacts, version: component.source.version,
       archive: proof.archive?.path, platform: proof.platform, readonly: output.execution.officialMaterialization === 'readonly'});
     if (canonical(actual) !== canonical(proof)) reject('OFFICIAL_IDENTITY', component.id, 'receipt source identity differs from actual official payload');
+    await officialInventory(output);
   }
   return output;
+}
+// Receipt provenance and deployed entities have different shapes. Authenticate
+// the former against the frozen publisher lock before projecting the latter.
+export async function officialInventory(output) {
+  const {component, execution, files} = output, source = component.source;
+  if (source.kind !== 'distribution' || await fileDigest(source.lock) !== source.lockSha256) {
+    reject('DEPENDENCY_DIGEST', component.id, 'official publisher lock differs');
+  }
+  const lock = await readJson(source.lock);
+  const readonly = lock.layoutVersion === 1 || lock.officialMaterialization === 'readonly';
+  if (execution.officialMaterialization !== (readonly ? 'readonly' : 'verbatim')) {
+    reject('DEPENDENCY_DIGEST', component.id, 'official materialization differs from publisher');
+  }
+  const directories = Object.entries(lock.source_layout || await inventory(source.root, {links: true, directories: true}))
+    .filter(([, row]) => row.type === 'directory');
+  const expected = Object.fromEntries(Object.entries(lock.files).map(([rel, row]) => [rel,
+    row.type === 'symlink' ? {type: 'symlink', target: row.target, size: Buffer.byteLength(row.target), mode: 0o777, sha256: row.sha256}
+      : {type: 'file', size: row.size, mode: row.mode, sha256: row.sha256}]));
+  for (const [rel, row] of directories) expected[rel] = {type: 'directory', sha256: null,
+    mode: readonly ? row.mode & ~0o222 : row.mode, sourceMode: row.mode,
+    modeTransform: readonly ? 'readonly' : 'identity'};
+  if (canonical(files) !== canonical(expected)) {
+    reject('DEPENDENCY_DIGEST', component.id, 'official receipt membership/type/content/source mode projection differs from publisher');
+  }
+  return Object.fromEntries(Object.entries(expected).map(([rel, row]) => {
+    const {sourceMode, modeTransform, ...deployed} = row;
+    return [rel, deployed];
+  }));
 }
 export function parseOutputReceipt(bytes, done, directory, component, identity) {
   const record = JSON.parse(bytes);

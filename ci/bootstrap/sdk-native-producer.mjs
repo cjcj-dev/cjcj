@@ -7,7 +7,7 @@ import os from 'node:os';
 import {gzipSync} from 'node:zlib';
 import {spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
-import {execute, fileDigest, readJson, atomicJson, canonical, sourceIdentity, registeredSourceIdentity, reject, PLATFORMS, inventory} from './sdk-manifest.mjs';
+import {execute, fileDigest, readJson, atomicJson, canonical, sourceIdentity, registeredSourceIdentity, reject, PLATFORMS, inventory, officialInventory} from './sdk-manifest.mjs';
 import {parseLlvmToolsManifest} from '../llvm-tools-manifest.mjs';
 import {buildStageCompiler} from './sdk-stage-producer.mjs';
 import {buildCjdb} from './sdk-cjdb-producer.mjs';
@@ -397,12 +397,19 @@ async function astSupport(request) {
   // This subset crosses the existing AST install boundary unchanged. Bind
   // membership and bytes to the seed receipt before the legacy producer can
   // issue a new checksum list; never rescan the entire host SDK here.
-  const prefix = 'third_party/flatbuffers/';
-  const expected = Object.fromEntries(Object.entries(seed.files).filter(([rel]) => rel.startsWith(prefix))
-    .map(([rel, row]) => [rel.slice(prefix.length), row]));
-  if (!Object.keys(expected).length || canonical(await inventory(path.join(seed.artifacts, 'third_party/flatbuffers'))) !== canonical(expected)) {
-    reject('DEPENDENCY_DIGEST', component.id, 'official FlatBuffers subset differs from its presealed producer inventory');
-  }
+  const root = 'third_party/flatbuffers', prefix = `${root}/`;
+  const expected = Object.fromEntries(Object.entries(await officialInventory(seed))
+    .filter(([rel]) => rel === root || rel.startsWith(prefix))
+    .map(([rel, row]) => [rel === root ? '' : rel.slice(prefix.length), row]));
+  const verifyFlatbuffers = async artifacts => {
+    const directory = path.join(artifacts, root), stat = await fs.lstat(directory);
+    const actual = await inventory(directory, {links: true, directories: true});
+    actual[''] = {type: stat.isDirectory() ? 'directory' : 'file', mode: stat.mode & 0o777, sha256: null};
+    if (!Object.keys(expected).length || canonical(actual) !== canonical(expected)) {
+      reject('DEPENDENCY_DIGEST', component.id, 'official FlatBuffers subset differs from its presealed producer inventory');
+    }
+  };
+  await verifyFlatbuffers(seed.artifacts);
   // This is the existing AST workflow's pinned nested source input.
   const flatbuffers = await fetchIdentity(options.flatbuffersSource, path.join(source, 'third_party/flatbuffers'), 'ast-flatbuffers');
   let transformation;
@@ -437,6 +444,9 @@ async function astSupport(request) {
   }
   await run(['bash', path.join(component.producer.repository, 'ci/build_ast_support.sh'), source,
     path.join(directory, 'build', 'ast'), artifacts, seed.artifacts], {env});
+  await officialInventory(seed);
+  await verifyFlatbuffers(seed.artifacts);
+  await verifyFlatbuffers(artifacts);
   for (const rel of ['libcangjie-ast-support.a', 'include/cangjie', 'include/flatbuffers/StdAstFormat_generated.h',
     'schema/StdAstFormat.fbs', 'schema/StdxChirFormat.fbs', 'third_party/flatbuffers/bin/flatc', 'SHA256SUMS']) {
     await fs.access(path.join(artifacts, rel));

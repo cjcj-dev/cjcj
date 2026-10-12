@@ -327,7 +327,9 @@ async function native(component, directory, identity, outputs, plan) {
     : await sourceIdentity(source, component.source, component.id, component.config.tools.git.path);
   const qualification = component.producer.adapter === 'llvm-cjdb'
     ? {generatedInputs:(await readJson(path.join(directory,'native-execution.json'))).generatedInputs} : {};
-  return sealOutput(directory, component, identity, {...result, ...qualification, status: 'complete', kind: component.producer.adapter, before, source: after});
+  const files = component.producer.adapter === 'ast-support'
+    ? await inventory(path.join(directory, 'artifacts'), {links: true, directories: true}) : undefined;
+  return sealOutput(directory, component, identity, {...result, ...qualification, status: 'complete', kind: component.producer.adapter, before, source: after}, files);
 }
 export async function produceComponent(plan, component, identity, outputs, {resumeFailed = false} = {}) {
   const directory = identity.directory;
