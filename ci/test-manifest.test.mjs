@@ -483,3 +483,15 @@ test('manifest CLI validates integration registration without executing manual f
   }
 });
 
+
+function copyTrackedSource(root) {
+  const files = execFileSync('git', ['ls-files', '-z'], {cwd: repoRoot, encoding: 'utf8'}).split('\0').filter(Boolean);
+  fsSync.mkdirSync(root);
+  for (const file of files) {
+    const destination = path.join(root, file);
+    fsSync.mkdirSync(path.dirname(destination), {recursive: true});
+    fsSync.cpSync(path.join(repoRoot, file), destination);
+  }
+  execFileSync('git', ['init', '--quiet'], {cwd: root});
+  execFileSync('git', ['add', '--force', '.'], {cwd: root});
+}
