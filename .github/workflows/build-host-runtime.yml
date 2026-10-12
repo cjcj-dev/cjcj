@@ -20,7 +20,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Load official host SDK pin
-        run: cat ci/host_sdk_pin.env >> "$GITHUB_ENV"
+        run: |
+          cat ci/host_sdk_pin.env >> "$GITHUB_ENV"
+          node ci/host-toolchain-pin.mjs --github-env >> "$GITHUB_ENV"
       - name: Provision official host SDK
         run: npx --yes zx@8 ci/setup_sdk.mjs
       - name: Extract and verify the official pair

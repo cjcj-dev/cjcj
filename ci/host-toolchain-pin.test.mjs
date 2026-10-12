@@ -7,6 +7,8 @@ import test from 'node:test';
 import {baseSdkDownload, RELEASE_HOST_TOOLCHAIN} from '../build/lib/release-component-provenance.mjs';
 import {
   hostToolchainFromCjcVersion,
+  parseHostToolchainPin,
+  readHostToolchainPin,
   requireHostToolchain,
   requireMatchingBaseSdkToolchain,
 } from './host-toolchain-pin.mjs';
@@ -32,10 +34,7 @@ async function filesBelow(directory) {
 }
 
 async function hostPin() {
-  const text = await fs.readFile(pinPath, 'utf8');
-  const match = text.match(/^CJCJ_TOOLCHAIN=(\S+)$/m);
-  assert.ok(match, 'ci/host_sdk_pin.env must define CJCJ_TOOLCHAIN');
-  return match[1];
+  return parseHostToolchainPin(await fs.readFile(pinPath, 'utf8'));
 }
 
 async function runSrcbuildHostResolver({
@@ -51,6 +50,7 @@ async function runSrcbuildHostResolver({
     await fs.mkdir(path.dirname(fixtureScript), {recursive: true});
     await fs.mkdir(path.join(fixture, 'ci'), {recursive: true});
     await fs.copyFile(path.join(root, 'tools', 'srcbuild_kkk2.sh'), fixtureScript);
+    await fs.copyFile(path.join(root, 'ci/host-toolchain-pin.mjs'), path.join(fixture, 'ci/host-toolchain-pin.mjs'));
     await fs.writeFile(path.join(fixture, 'ci', 'host_sdk_pin.env'), pin);
     await fs.writeFile(path.join(fixture, 'ci', 'cjpm_pin.env'), pin);
     await fs.writeFile(
@@ -369,7 +369,7 @@ test('release workflow selects the same host pin for setup and base SDK consumer
   assert.equal(loaded.CJCJ_TOOLCHAIN, ordinaryHost, 'setup host must equal the host pin');
   assert.equal(RELEASE_HOST_TOOLCHAIN, ordinaryHost, 'archive selector must equal the host pin');
   for (const platform of ['linux-x64', 'linux-aarch64', 'darwin-x64', 'darwin-arm64', 'windows-x64']) {
-    assert.match(baseSdkDownload(platform, releaseHost).sha256, /^[0-9a-f]{64}$/);
+    assert.match(baseSdkDownload(platform, readHostToolchainPin(platform)).sha256, /^[0-9a-f]{64}$/);
   }
   assert.throws(() => baseSdkDownload('linux-x64', 'nightly-unregistered'), /no pinned archive identity/);
   assert.throws(() => baseSdkDownload('unsupported', releaseHost), /unsupported base SDK platform/);
@@ -406,7 +406,7 @@ test('ordinary CI and source-build hosts use the same nightly', async () => {
   const ordinary = await fs.readFile(cjpmPinPath, 'utf8');
   const definitions = ordinary.match(/^CJCJ_TOOLCHAIN=\S+$/gm) ?? [];
   assert.equal(definitions.length, 1, 'ordinary host must define exactly one toolchain');
-  assert.equal(definitions[0].slice('CJCJ_TOOLCHAIN='.length), await hostPin(),
+  assert.equal(parseHostToolchainPin(ordinary.split(/\r?\n/).filter(line => line.startsWith('CJCJ_TOOLCHAIN')).join('\n')), await hostPin(),
     'CJCJ_TOOLCHAIN must be equal in ci/cjpm_pin.env and ci/host_sdk_pin.env');
 });
 
@@ -446,4 +446,15 @@ test('every CJCJ_TOOLCHAIN definition names a host and has measured consumers', 
     assert.ok(observed.length > 0, `${file} has no consumer; delete it or wire it, do not leave it readable`);
     console.log(`HOST-TOOLCHAIN-PIN ${file} host="${host}" loaders=${observed.join(',')}`);
   }
+});
+
+// The imported Linux override must reach the actual source-build loader too.
+test('source-build pin loader consumes the platform override from the real pin parser', async () => {
+  const result = await runSrcbuildHostResolver({
+    pin: 'CJCJ_TOOLCHAIN=nightly-default.fixture\nCJCJ_TOOLCHAIN_LINUX_X86_64=nightly-platform.fixture\n',
+    readerOnly: true,
+  });
+  console.log(`HOST_PLATFORM_LOADER_RESULT rc=${result.status} value=${result.stdout.trim()}`);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout.trim(), 'nightly-platform.fixture');
 });
