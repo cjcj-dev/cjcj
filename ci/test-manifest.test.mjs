@@ -386,3 +386,100 @@ test('a driver cannot claim no executor while a workflow names it', async () => 
     await fs.rm(root, {recursive: true, force: true});
   }
 });
+
+test('integration discovery validates tracked, untracked and deleted source files', async () => {
+  const root = await fs.mkdtemp(path.join(process.env.TMPDIR || '/tmp', 'manifest-integration-'));
+  const tracked = 'nested/arbitrary.integration.mjs';
+  const added = 'new-contract.integration.mjs';
+  const entry = file => ({file, executor: 'manual', reason: 'Private integration input is deliberately unavailable to CI'});
+  try {
+    execFileSync('git', ['init', '-q', root]);
+    await fs.mkdir(path.join(root, 'nested'), {recursive: true});
+    await fs.writeFile(path.join(root, tracked), '');
+    execFileSync('git', ['-C', root, 'add', tracked]);
+    await fs.writeFile(path.join(root, added), '');
+    await fs.mkdir(path.join(root, 'node_modules/dependency'), {recursive: true});
+    await fs.writeFile(path.join(root, 'node_modules/dependency/vendor.integration.mjs'), '');
+    await fs.writeFile(path.join(root, 'ordinary.mjs'), '');
+    const found = discoverTestFiles(root);
+    console.log(`INTEGRATION_DISCOVERY_RESULT ${JSON.stringify(found)}`);
+    assert.deepEqual(found, [tracked, added].sort(), 'integration files must come from actual Git source discovery');
+    assert.deepEqual(validateManifest(root, [entry(tracked), entry(added)], [], [], []), found);
+    assert.throws(() => validateManifest(root, [entry(tracked)], [], [], []), /unregistered.*new-contract/);
+    assert.throws(() => validateManifest(root, [entry(tracked), entry(added), entry(added)], [], [], []), /duplicates.*new-contract/);
+    await fs.unlink(path.join(root, tracked));
+    assert.throws(() => validateManifest(root, [entry(tracked), entry(added)], [], [], []), /phantom.*arbitrary/);
+    await fs.writeFile(path.join(root, tracked), '');
+    await fs.unlink(path.join(root, added));
+    assert.throws(() => validateManifest(root, [entry(tracked), entry(added)], [], [], []), /phantom.*new-contract/);
+    assert.throws(() => validateManifest(root, [entry(tracked), entry('absent.integration.mjs')], [], [], []), /phantom.*absent/);
+    assert.deepEqual(validateManifest(root, [entry(tracked)], [], [], []), [tracked]);
+  } finally {
+    await fs.rm(root, {recursive: true, force: true});
+  }
+});
+
+
+test('manifest CLI validates integration registration without executing manual files', () => {
+  const work = fsSync.mkdtempSync(path.join(process.env.TMPDIR || '/tmp', 'manifest-integration-cli-'));
+  const root = path.join(work, 'repo');
+  const cli = () => {
+    const result = spawnSync(process.execPath, ['ci/test-manifest.mjs', 'check'], {cwd: root, encoding: 'utf8'});
+    return {rc: result.status, out: `${result.stdout || ''}${result.stderr || ''}`};
+  };
+  try {
+    copyTrackedSource(root);
+    const integration = `ci/zz-manifest-${process.pid}.integration.mjs`;
+    const integrationPath = path.join(root, integration);
+    const registryPath = path.join(root, 'ci/test-registry.json');
+    const originalRegistry = fsSync.readFileSync(registryPath, 'utf8');
+    const registry = JSON.parse(originalRegistry);
+    const entry = {file: integration, executor: 'manual', reason: 'Exclusively owned integration fixture; CI has no private inputs'};
+    const writeRegistry = entries => fsSync.writeFileSync(registryPath, JSON.stringify(entries));
+    const observe = (label, result) => {
+      console.log(`INTEGRATION_CLI_RESULT ${label} ${JSON.stringify(result)}`);
+      return result;
+    };
+    fsSync.writeFileSync(integrationPath, 'throw new Error("MANUAL_INTEGRATION_MUST_NOT_EXECUTE");\n');
+    const missing = observe('unregistered', cli());
+    assert.notEqual(missing.rc, 0, 'CLI must reject a new unregistered integration');
+    assert.match(missing.out, /unregistered.*zz-manifest-\d+\.integration/);
+    writeRegistry([...registry, entry]);
+    const complete = observe('complete', cli());
+    assert.equal(complete.rc, 0, 'CLI must accept a real registered integration');
+    const manualOutput = path.join(work, 'manual-control');
+    const manualControl = spawnSync(process.execPath,
+      ['ci/run-registered-tests.mjs', 'scripts', manualOutput, 'ci/test_build_resources.py'],
+      {cwd: root, encoding: 'utf8'});
+    console.log(`INTEGRATION_RUNNER_RESULT rc=${manualControl.status} ${manualControl.stdout}${manualControl.stderr}`);
+    assert.equal(manualControl.status, 0, 'manual integration registration must not execute that integration');
+    const manualReport = JSON.parse(fsSync.readFileSync(path.join(manualOutput, 'results.json'), 'utf8'));
+    assert.deepEqual(manualReport.results.map(result => [result.file, result.rc]), [['ci/test_build_resources.py', 0]]);
+    writeRegistry([...registry, entry, entry]);
+    const duplicate = observe('duplicate', cli());
+    assert.notEqual(duplicate.rc, 0, 'CLI must reject duplicate integration registrations');
+    assert.match(duplicate.out, /duplicates.*zz-manifest-\d+\.integration/);
+    writeRegistry([...registry, entry]);
+    fsSync.unlinkSync(integrationPath);
+    const deleted = observe('deleted-untracked', cli());
+    assert.notEqual(deleted.rc, 0, 'CLI must reject a deleted integration');
+    assert.match(deleted.out, /phantom.*zz-manifest-\d+\.integration/);
+    fsSync.writeFileSync(integrationPath, '');
+    execFileSync('git', ['add', integration], {cwd: root});
+    assert.equal(observe('tracked-complete', cli()).rc, 0);
+    fsSync.unlinkSync(integrationPath);
+    const trackedDeleted = observe('deleted-tracked', cli());
+    assert.notEqual(trackedDeleted.rc, 0, 'CLI must reject a deleted tracked integration');
+    assert.match(trackedDeleted.out, /phantom.*zz-manifest-\d+\.integration/);
+    fsSync.writeFileSync(integrationPath, '');
+    assert.equal(observe('restored', cli()).rc, 0, 'CLI must recover after restoring the same file and registry');
+    execFileSync('git', ['rm', '--cached', integration], {cwd: root});
+    fsSync.unlinkSync(integrationPath);
+    fsSync.writeFileSync(registryPath, originalRegistry);
+    assert.equal(observe('original-restored', cli()).rc, 0);
+
+  } finally {
+    fsSync.rmSync(work, {recursive: true, force: true});
+  }
+});
+
