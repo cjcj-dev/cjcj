@@ -34,28 +34,18 @@ const tree = (await execute('/usr/bin/git', ['-C', source, 'rev-parse', 'HEAD^{t
 const llvmRel = 'third_party/llvm/lib/libLLVM-15.so', shimRel = 'third_party/llvm/fixed-llc/cjselfhost_llvmshim.o';
 if (!reuse) {
 // Only the TARGET loader device is synthetic. No HOST tool/library is replaced.
-await write(path.join(native, 'library.c'), `#define _GNU_SOURCE
-#include <stdio.h>
-#include <stdlib.h>
-#include <dlfcn.h>
-const char *fixture_llvm_domain(void){return "TARGET";}
-int fixture_observe_target(void){Dl_info i;if(!dladdr(fixture_llvm_domain,&i))return 1;printf("DOMAIN value=%s origin=%s home=%s\\n",fixture_llvm_domain(),i.dli_fname,getenv("CANGJIE_HOME"));return 53;}
-`);
 await fs.mkdir(path.dirname(path.join(native, llvmRel)), {recursive: true});
-await cc(['-shared', '-fPIC', '-Wl,-soname,libLLVM-15.so', path.join(native, 'library.c'), '-ldl', '-o', path.join(native, llvmRel)]);
-const probe = '#define _GNU_SOURCE\n#include <stdio.h>\n#include <stdlib.h>\n#include <dlfcn.h>\nextern const char *fixture_llvm_domain(void);\nint main(void){Dl_info i;dladdr(fixture_llvm_domain,&i);printf("DOMAIN value=%s origin=%s home=%s\\n",fixture_llvm_domain(),i.dli_fname,getenv("CANGJIE_HOME"));return 0;}\n';
-await write(path.join(root, 'probe.c'), probe);
+await cc(['-shared', '-fPIC', '-Wl,-soname,libLLVM-15.so', path.join(source, 'native-fixture/library.c'), '-ldl', '-o', path.join(native, llvmRel)]);
 // Do not masquerade as llc: this ELF does not compile Cangjie bitcode. With no
 // llc/opt in this projection, the real compiler's existing backend search falls
 // back to its own authenticated host installation (CJNATIVEBackend).
 await fs.mkdir(path.dirname(path.join(native, 'third_party/llvm/bin/domain-probe')), {recursive: true});
-await cc([path.join(root, 'probe.c'), path.join(native, llvmRel), '-ldl', '-o', path.join(native, 'third_party/llvm/bin/domain-probe')]);
+await cc([path.join(source, 'native-fixture/domain-probe.c'), path.join(native, llvmRel), '-ldl', '-o', path.join(native, 'third_party/llvm/bin/domain-probe')]);
 // Controlled ELF observes the kernel argv and actual target library. It does
 // not emulate lld's dispatcher; the real installed lld is exercised separately.
-await write(path.join(root, 'entry-probe.c'), `#include <stdio.h>\n#include <string.h>\nextern const char *fixture_llvm_domain(void);\nint main(int argc,char **argv){printf("ENTRY_DOMAIN=%s\\n",fixture_llvm_domain());for(int i=0;i<argc;i++){printf("ARGV_HEX=");for(const unsigned char *p=(unsigned char*)argv[i];*p;p++)printf("%02x",*p);puts("");}return argc>1&&!strcmp(argv[1],"--exit=37")?37:0;}\n`);
 const entryProbe = path.join(native, 'third_party/llvm/libexec/entry-probe');
 await fs.mkdir(path.dirname(entryProbe), {recursive: true});
-await cc([path.join(root, 'entry-probe.c'), path.join(native, llvmRel), '-o', entryProbe]);
+await cc([path.join(source, 'native-fixture/entry-probe.c'), path.join(native, llvmRel), '-o', entryProbe]);
 await fs.copyFile(entryProbe, path.join(native, 'third_party/llvm/bin/plain-probe'));
 await fs.symlink('../libexec/entry-probe', path.join(native, 'third_party/llvm/bin/entry-probe'));
 await fs.symlink('entry-probe', path.join(native, 'third_party/llvm/bin/entry-alias'));
@@ -68,10 +58,10 @@ for (const name of ['ld.lld', 'ld64.lld', 'lld-link', 'wasm-ld']) await fs.symli
 await write(path.join(root, 'lld-input-identity.json'), JSON.stringify({requested: lldInput, physical: await fs.realpath(lldInput),
   sha256: await fileDigest(lldInput), fixed53ceQualification: 'NOT_ESTABLISHED_BY_FIXTURE',
   version: (await execute(lldInput, ['--version'])).stdout}));
-await write(path.join(native, 'shim.c'), 'int fixture_shim(void){return 53;}\n');
 await fs.mkdir(path.dirname(path.join(native, shimRel)), {recursive: true});
-await cc(['-c', path.join(native, 'shim.c'), '-o', path.join(native, shimRel)]);
-await write(path.join(native, 'third_party/llvm/include/fixture.h'), '// target include fixture\n');
+await cc(['-c', path.join(source, 'native-fixture/shim.c'), '-o', path.join(native, shimRel)]);
+await fs.mkdir(path.join(native, 'third_party/llvm/include'), {recursive: true});
+await fs.copyFile(path.join(source, 'native-fixture/fixture.h'), path.join(native, 'third_party/llvm/include/fixture.h'));
 await fs.symlink('libLLVM-15.so', path.join(native, 'third_party/llvm/lib/libLLVM.so'));
 }
 const nativeProducer = {adapter: 'llvm-cjdb', version: commit};
@@ -175,7 +165,7 @@ test('actual adapter rejects mixed libLLVM source and accepts restored input', a
   await atomicJson(path.join(native, 'third_party/llvm/lib/manifest.json'), changed);
   try {
     const wrong = await arm('wrong-libLLVM-source');
-    // Original receipt digest must reject a changed source byte before a tuple
+    // Original device inventory digest must reject a changed source byte before a tuple
     // claim is read. A distinct controlled projection below tests the tuple.
     assert.notEqual(wrong.result?.rc, 0); assert.match(wrong.log, /STAGE1_LLVM_BYTES/);
     const changedRow = {...nativeFiles['third_party/llvm/lib/manifest.json'], sha256: await fileDigest(path.join(native, 'third_party/llvm/lib/manifest.json'))};
@@ -195,19 +185,31 @@ test('formal host publisher refuses substituted bytes against the original host 
   requireNormal();
   const rel = 'tools/bin/cjpm'; // A guaranteed genuine HOST member, never a fake LLVM path.
   const file = path.join(official, rel), bytes = await fs.readFile(file), mode = (await fs.stat(file)).mode & 0o777;
-  const original = path.join(hostSource.root, rel), originalDigest = await fileDigest(original), originalLock = await fileDigest(hostSource.lock);
+  const original = path.join(hostSource.root, rel);
+  const state = async file => {
+    const stat = await fs.stat(file, {bigint: true});
+    return {dev: String(stat.dev), ino: String(stat.ino), nlink: String(stat.nlink), mode: Number(stat.mode & 0o777n),
+      size: String(stat.size), mtimeNs: String(stat.mtimeNs), sha256: await fileDigest(file)};
+  };
+  const before = {source: await state(original), lock: await state(hostSource.lock)}, privateState = await state(file);
+  assert.ok((await fs.realpath(file)).startsWith(hostIdentity.directory + path.sep), 'only mutate this owner producer copy');
+  assert.notEqual(`${privateState.dev}:${privateState.ino}`, `${before.source.dev}:${before.source.ino}`, 'no shared inode with retained source');
+  assert.equal(privateState.nlink, '1', 'negative input is an independent physical file');
+  let during;
   try {
     await fs.chmod(file, mode | 0o200);
     await fs.copyFile(path.join(native, llvmRel), file);
     const wrong = await arm('wrong-host-publisher-bytes');
     assert.equal(wrong.failure.rc, 1, wrong.log);
     assert.match(wrong.log, /OFFICIAL_IDENTITY.*tools\/bin\/cjpm/);
-    assert.equal(await fileDigest(original), originalDigest, 'retained official source stays unchanged during rejection');
-    assert.equal(await fileDigest(hostSource.lock), originalLock, 'retained official lock stays unchanged');
+    during = {source: await state(original), lock: await state(hostSource.lock)};
+    await atomicJson(path.join(root, 'host-publisher-source-during.json'), {before, privateState, during});
+    assert.deepEqual(during, before, 'retained official source and lock stay unchanged during rejection');
     assert.equal(wrong.result, undefined, 'adapter must not start with altered host bytes');
   } finally {await fs.writeFile(file, bytes); await fs.chmod(file, mode);}
-  assert.equal(await fileDigest(original), originalDigest);
-  assert.equal(await fileDigest(hostSource.lock), originalLock);
+  const after = {source: await state(original), lock: await state(hostSource.lock)};
+  await atomicJson(path.join(root, 'host-publisher-source-control.json'), {before, privateState, during, after});
+  assert.deepEqual(after, before, 'retained original identity/metadata remain unchanged after recovery');
   const restored = await arm('restored-host-publisher-bytes'); assert.equal(restored.result?.rc, 0, restored.log);
 });
 test('actual adapter authenticates the original host lock as well as its derived private seal', async () => {
