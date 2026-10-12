@@ -122,7 +122,20 @@ async function arm(name, mutate = () => {}, hostDependency = hostOutput) {
   return {component, directory, result, log, failure};
 }
 test('formal stage1 producer feeds one target native capsule and actual isolated adapter consumption', async () => {
+  const sourceLock = await readJson(hostSource.lock);
+  const compilerSha256 = await fileDigest(path.join(official, 'bin/cjc'));
+  await atomicJson(path.join(root, 'official-producer-observations.json'), {receiptSha256: hostOutput.receiptSha256,
+    execution: hostOutput.execution, compilerSha256, compilerRow: hostOutput.files['bin/cjc']});
+  assert.equal(compilerSha256, sourceLock.files['bin/cjc'].sha256, 'independent genuine compiler byte control');
+  console.log('TARGET_ASSERTION_EXECUTED official-producer-proof');
+  assert.deepEqual(hostOutput.execution.officialIdentity, sourceLock.officialIdentity, 'real official producer emits its authenticated proof');
   const normal = await arm('normal');
+  // Inspect the product-emitted input before an adapter failure can obscure the
+  // assertion that the original host lock, rather than its cache seal, was sent.
+  const request = await readJson(path.join(normal.directory, 'sharedbuild-request.json'));
+  console.log('TARGET_ASSERTION_EXECUTED original-host-lock-input');
+  assert.equal(await fileDigest(request.inputs['official-host-lock.json']), hostSource.lockSha256,
+    'actual producer input retains the original official lock identity');
   assert.equal(normal.result?.rc, 0, normal.log);
   assert.equal(normal.failure.rc, 73, 'controlled observation stops before completion');
   const domains = await readJson(path.join(normal.result.work, 'stage1-domains.json'));
