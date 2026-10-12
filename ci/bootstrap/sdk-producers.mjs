@@ -1,0 +1,375 @@
+// Adapt the existing producer recipes; plans never contain executable commands.
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import {spawn} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
+import {randomUUID} from 'node:crypto';
+import {canonical, execute, fileDigest, readJson, reject, sourceIdentity,
+  readOutput, sealOutput, physicalPath, PLATFORMS, atomicJson, registeredSourceIdentity, inventory} from './sdk-manifest.mjs';
+
+import {verifyOfficialSdkIdentity, officialIdentityVerifier} from '../../build/lib/official-sdk-identity.mjs';
+
+const repository = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
+export async function runProducer(argv, {cwd, env, log}) {
+  const output = await fs.open(log, 'a');
+  const start = performance.now();
+  await output.write(`${canonical({argv, cwd, started: new Date().toISOString()})}`);
+  try {
+    const result = await new Promise((resolve, rejectPromise) => {
+      const child = spawn(argv[0], argv.slice(1), {cwd, env, stdio: ['ignore', output.fd, output.fd]});
+      child.once('error', rejectPromise);
+      child.once('exit', (rc, signal) => resolve({rc, signal, wall: (performance.now() - start) / 1000}));
+    });
+    await output.write(canonical(result));
+    if (result.rc !== 0 || result.signal) throw Object.assign(new Error(`SDK_PRODUCER_FAILED rc=${result.rc} signal=${result.signal} log=${log}`), result);
+    return {...result, log};
+  } finally { await output.close(); }
+}
+async function verifyProducer(component) {
+  const producerRoot = component.producer.repository;
+  if (!producerRoot) return;
+  const git = component.config.tools.git.path;
+  const actual = (await execute(git, ['-C', producerRoot, 'rev-parse', 'HEAD'])).stdout.trim();
+  if (actual !== component.producer.version
+    || (await execute(git, ['-C', producerRoot, 'status', '--porcelain', '--untracked-files=all'])).stdout.trim()) reject('PRODUCER_IDENTITY', component.id, `expected clean ${component.producer.version}; actual ${actual}`);
+}
+async function checkout(component, directory) {
+  const git = component.config.tools.git.path;
+  const source = path.join(directory, 'source');
+  try { await fs.access(source); }
+  catch {
+    await fs.mkdir(source);
+    await execute(git, ['init', '-q', source]);
+    await execute(git, ['-C', source, 'fetch', '--no-tags', '--depth=1', component.source.repo, component.source.commit]);
+    await execute(git, ['-C', source, 'checkout', '--detach', '--quiet', component.source.commit]);
+  }
+  await sourceIdentity(source, component.source, component.id, git); return source;
+}
+async function official(component, directory, identity) {
+  const source = component.source;
+  if (await fileDigest(source.lock) !== source.lockSha256) reject('DISTRIBUTION_LOCK', component.id, 'frozen official lock changed');
+  const lock = await readJson(source.lock);
+  if (lock.schema !== 'sharedbuild-official-sdk-v1' || lock.role !== 'host' || lock.version !== source.version
+    || !lock.files || !Object.keys(lock.files).length) reject('DISTRIBUTION_LOCK', component.id, 'requires complete official sharedbuild distribution lock');
+  const officialIdentity = await verifyOfficialSdkIdentity({root: source.root, version: source.version,
+    archive: lock.officialIdentity?.archive?.path || lock.archive?.path,
+    platform: lock.officialIdentity?.platform || ({linux_x86_64: 'linux-x64', linux_aarch64: 'linux-aarch64',
+      darwin_x86_64: 'darwin-x64', darwin_aarch64: 'darwin-arm64', windows_x86_64: 'windows-x64'})[lock.platform],
+    readonly: lock.layoutVersion === 1 || lock.officialMaterialization === 'readonly'});
+  if (lock.officialIdentity && canonical(lock.officialIdentity) !== canonical(officialIdentity)) reject('OFFICIAL_IDENTITY', component.id, 'publisher identity differs');
+  if (lock.layoutVersion !== undefined && (lock.layoutVersion !== 1 || !lock.source_layout)) reject('DISTRIBUTION_LOCK', component.id, 'missing authenticated source layout');
+  for (const [rel, row] of Object.entries(lock.source_layout || {})) {
+    if (!['file', 'directory'].includes(row.type) || !Number.isInteger(row.mode) || row.mode < 0 || row.mode > 0o777) reject('DISTRIBUTION_LAYOUT', component.id, `invalid source entity ${rel}`);
+  }
+  const readonly = lock.layoutVersion === 1 || lock.officialMaterialization === 'readonly';
+  // Legacy file-only locks have no directory table. The archive identity has
+  // just authenticated this complete source; preserve its real directories
+  // through the existing inventory/copy path, including empty directories.
+  const sourceDirectories = Object.entries(lock.source_layout || await inventory(source.root, {links: true, directories: true}))
+    .filter(([, row]) => row.type === 'directory');
+  const expectedEntities = Object.fromEntries(Object.entries(lock.source_layout || {}).map(([rel, row]) => [rel,
+    row.type === 'directory' ? {type: 'directory', mode: row.mode & ~0o222, sha256: null}
+      : {type: 'file', mode: row.mode & ~0o222, size: row.size, sha256: row.sha256}]));
+  const checkLayout = async () => {
+    if (!lock.source_layout) return; // Genuine historical file-only publisher locks.
+    for (const [rel, row] of Object.entries(lock.files)) {
+      const file = await physicalPath(source.root, rel, component.id), stat = await fs.stat(file);
+      if (stat.size !== row.size || (stat.mode & 0o777) !== row.mode) reject('DISTRIBUTION_FILE', component.id, `size/mode ${rel}`);
+      if (await fileDigest(file) !== row.sha256) reject('DISTRIBUTION_DIGEST', component.id, rel);
+    }
+    const actual = await inventory(source.root, {links: true, directories: true});
+    for (const name of ['SDK.lock.json', 'MANIFEST.sha256', 'DONE']) delete actual[name];
+    if (canonical(actual) !== canonical(expectedEntities)) reject('DISTRIBUTION_LAYOUT', component.id, 'materialized membership/type/content/mode differs from frozen source layout');
+    const declaredFiles = Object.fromEntries(Object.entries(expectedEntities).filter(([, row]) => row.type === 'file'));
+    const lockFiles = Object.fromEntries(Object.entries(lock.files).map(([rel, row]) => [rel,
+      {type: row.type || 'file', mode: row.mode, size: row.size, sha256: row.sha256}]));
+    if (canonical(lockFiles) !== canonical(declaredFiles)) reject('DISTRIBUTION_LAYOUT', component.id, 'file lock differs from authenticated source layout');
+  };
+  await checkLayout();
+  const artifacts = path.join(directory, 'artifacts'); await fs.mkdir(artifacts);
+  const files = Object.create(null);
+  for (const [rel, row] of sourceDirectories.sort(([a], [b]) => a.split('/').length - b.split('/').length)) {
+    const sourceDirectory = await physicalPath(source.root, rel, component.id);
+    if (!(await fs.stat(sourceDirectory)).isDirectory()) reject('DISTRIBUTION_LAYOUT', component.id, rel);
+    await fs.mkdir(path.join(artifacts, rel), {recursive: true});
+    files[rel] = {type: 'directory', sha256: null, mode: readonly ? row.mode & ~0o222 : row.mode,
+      sourceMode: row.mode, modeTransform: readonly ? 'readonly' : 'identity'};
+  }
+  // Copy physical files first, then preserve authenticated contained aliases.
+  // Old file-only locks remain readable; new locks describe native link types.
+  for (const [rel, entry] of Object.entries(lock.files)) {
+    if (entry.type === 'symlink') continue;
+    const file = await physicalPath(source.root, rel, component.id);
+    if (!(await fs.lstat(file)).isFile()) reject('DISTRIBUTION_FILE', component.id, rel);
+    const sourceStat = await fs.stat(file);
+    if (('size' in entry && sourceStat.size !== entry.size)
+      || ('mode' in entry && (sourceStat.mode & 0o777) !== entry.mode)) reject('DISTRIBUTION_FILE', component.id, `size/mode ${rel}`);
+    if (await fileDigest(file) !== entry.sha256) reject('DISTRIBUTION_DIGEST', component.id, rel);
+    const destination = path.join(artifacts, rel); await fs.mkdir(path.dirname(destination), {recursive: true});
+    await fs.copyFile(file, destination); await fs.chmod(destination, (await fs.stat(file)).mode & 0o777);
+    if (await fileDigest(destination) !== entry.sha256) reject('DISTRIBUTION_DIGEST', component.id, rel);
+    const stat = await fs.stat(destination);
+    const after = await fs.stat(file);
+    if (after.size !== sourceStat.size || (after.mode & 0o777) !== (sourceStat.mode & 0o777)
+      || await fileDigest(file) !== entry.sha256) reject('DISTRIBUTION_DIGEST', component.id, `source changed ${rel}`);
+    files[rel] = {type: 'file', sha256: entry.sha256, size: stat.size, mode: stat.mode & 0o777};
+  }
+  for (const [rel, entry] of Object.entries(lock.files)) {
+    if (entry.type !== 'symlink') continue;
+    const parent = path.dirname(rel);
+    const sourceParent = parent === '.' ? await fs.realpath(source.root) : await physicalPath(source.root, parent, component.id);
+    const file = path.join(sourceParent, path.basename(rel));
+    if (!(await fs.lstat(file)).isSymbolicLink() || await fs.readlink(file) !== entry.target
+      || path.isAbsolute(entry.target) || !(await fs.realpath(file)).startsWith(`${await fs.realpath(source.root)}${path.sep}`)) reject('DISTRIBUTION_LINK', component.id, rel);
+    const destination = path.join(artifacts, rel); await fs.mkdir(path.dirname(destination), {recursive: true});
+    await fs.symlink(entry.target, destination);
+    files[rel] = {type: 'symlink', target: entry.target, size: Buffer.byteLength(entry.target), mode: 0o777, sha256: entry.sha256};
+  }
+  for (const [rel, row] of Object.entries(files)) if (row.type !== 'directory' && await fileDigest(path.join(artifacts, rel)) !== row.sha256) reject('DISTRIBUTION_DIGEST', component.id, rel);
+  await checkLayout();
+  for (const [rel] of sourceDirectories.reverse()) await fs.chmod(path.join(artifacts, rel), files[rel].mode);
+  if (await fileDigest(source.lock) !== source.lockSha256) reject('DISTRIBUTION_LOCK', component.id, 'source lock changed during copy');
+  // Authenticate the actual copy before publishing any successful receipt.
+  // A valid source does not imply that a legacy file declaration copied it all.
+  const copiedIdentity = await verifyOfficialSdkIdentity({root: artifacts, version: source.version,
+    archive: officialIdentity.archive.path, platform: officialIdentity.platform, readonly});
+  if (canonical(copiedIdentity) !== canonical(officialIdentity)) reject('OFFICIAL_IDENTITY', component.id, 'copied payload identity differs from authenticated source');
+  return sealOutput(directory, component, identity, {status: 'complete', rc: 0, kind: 'official-distribution-copy',
+    officialIdentity, officialMaterialization: readonly ? 'readonly' : 'verbatim', distribution: {version: source.version, lockSha256: source.lockSha256, reason: source.reason}}, files);
+}
+async function sharedbuild(component, directory, identity, plan, resumeFailed, outputs) {
+  const {engine, engineSha256} = component.producer;
+  const recipe = path.join(directory, 'sharedbuild-request.json');
+  await verifyProducer(component);
+  if (await fileDigest(engine) !== engineSha256) reject('PRODUCER_IDENTITY', component.id, 'sharedbuild engine digest');
+  const kind = component.producer.adapter.replace('sharedbuild-', '').replace('stage1', 'cjcj-stage1');
+  const options = component.config.options;
+  const sdkOutput = outputs.get(options.sdkDependency), sdkSource = sdkOutput?.component.source;
+  if (sdkSource?.kind !== 'distribution' || sdkOutput.component.domain !== 'host') reject('PRODUCER_RECIPE', component.id, 'sharedbuild requires an explicit official host SDK dependency');
+  if (await fileDigest(sdkSource.lock) !== sdkSource.lockSha256) reject('PRODUCER_RECIPE', component.id, 'host SDK lock changed');
+  // Official publisher locks need not be inside the distribution root and
+  // are not sharedbuild cache seals. Use its existing sdk-publish producer to
+  // create the engine's own full, physical host copy; retain the original lock
+  // as an independent request input rather than relabeling it as that seal.
+  const sdkIdentityVerifier = await officialIdentityVerifier();
+  const identityRequest = path.join(directory, 'official-identity-request.json');
+  const officialIdentity = sdkOutput.execution.officialIdentity;
+  if (!officialIdentity) reject('OFFICIAL_IDENTITY', component.id, 'official dependency lacks source proof');
+  await atomicJson(identityRequest, {verifier: sdkIdentityVerifier, input: {archive: officialIdentity.archive.path,
+    platform: officialIdentity.platform, readonly: sdkOutput.execution.officialMaterialization === 'readonly'}});
+  const hostLog = path.join(directory, 'logs', `host-publish-${randomUUID()}.log`);
+  await runProducer([component.config.tools.python3.path, engine, '--remote', '--root', path.join(plan.buildRoot, 'shared-cache'),
+    '--lane', plan.lane, 'sdk-publish', '--source', sdkOutput.artifacts, '--version', sdkSource.version,
+      '--official-identity-request', identityRequest], {cwd: directory, env: process.env, log: hostLog});
+  const sdkRoot = (await fs.readFile(hostLog, 'utf8')).split('\n').find(line => line.startsWith(`${path.join(plan.buildRoot, 'shared-cache', 'official-sdk')}/`));
+  if (!sdkRoot) reject('PRODUCER_RECIPE', component.id, 'official publisher did not return its sealed private host directory');
+  const adapterHostLock = await readJson(path.join(sdkRoot, 'SDK.lock.json'));
+  if (adapterHostLock.schema !== 'sharedbuild-official-sdk-v1' || adapterHostLock.role !== 'host'
+    || adapterHostLock.version !== sdkSource.version || adapterHostLock.source !== sdkOutput.artifacts
+    || await fileDigest(sdkSource.lock) !== sdkSource.lockSha256) reject('PRODUCER_RECIPE', component.id, 'official host publication differs from frozen source');
+  const publisherFiles = files => Object.fromEntries(Object.entries(files).filter(([name]) => !['SDK.lock.json', 'MANIFEST.sha256', 'DONE'].includes(name)).map(([name, row]) => [name, row.sha256]));
+  if (canonical(publisherFiles(adapterHostLock.files)) !== canonical(publisherFiles((await readJson(sdkSource.lock)).files))) {
+    reject('PRODUCER_RECIPE', component.id, 'official host bytes differ from original distribution lock');
+  }
+  const adapterHostLockSha256 = await fileDigest(path.join(sdkRoot, 'SDK.lock.json'));
+  const inputs = {}, expectedInputHashes = {};
+  const originalHostLock = path.join(directory, 'official-host-lock.json');
+  await fs.copyFile(sdkSource.lock, originalHostLock);
+  inputs['official-host-lock.json'] = originalHostLock;
+  expectedInputHashes['official-host-lock.json'] = sdkSource.lockSha256;
+  for (const [name, binding] of Object.entries(options.inputBindings)) {
+    const dependency = outputs.get(binding.dependency), entry = dependency?.files[binding.artifact];
+    if (entry?.type !== 'file') reject('PRODUCER_RECIPE', component.id, `missing physical dependency artifact ${name}`);
+    inputs[name] = await physicalPath(dependency.artifacts, binding.artifact, component.id);
+    expectedInputHashes[name] = entry.sha256;
+    if (await fileDigest(inputs[name]) !== entry.sha256) reject('DEPENDENCY_DIGEST', component.id, name);
+  }
+  if (component.producer.adapter === 'sharedbuild-stage1') {
+    const native = outputs.get(options.targetLlvmDependency);
+    const shim = options.inputBindings['llvm-shim.o'];
+    if (native?.component.producer.adapter !== 'llvm-cjdb' || native.component.domain !== 'target'
+      || shim?.dependency !== native.component.id || native.buildId !== identity.dependencies[native.component.id]) {
+      reject('STAGE1_LLVM', component.id, 'missing same-recipe target native dependency');
+    }
+    const roots = ['third_party/llvm', 'tools', 'runtime'];
+    const files = Object.fromEntries(Object.entries(native.files).filter(([rel]) => roots.some(root => rel.startsWith(`${root}/`))));
+    for (const rel of ['third_party/llvm/fixed-llc/cjselfhost_llvmshim.o', 'third_party/llvm/lib/libLLVM-15.so',
+      'third_party/llvm/fixed-llc/llvm-tools.manifest', 'third_party/llvm/lib/manifest.json']) {
+      if (!files[rel]) reject('STAGE1_LLVM', component.id, `native receipt missing ${rel}`);
+    }
+    // Derive the capsule from the original sealed inventory, never from an
+    // installed SDK. The adapter verifies these bytes before the first build.
+    const archive = path.join(directory, 'target-llvm.tar'), contract = path.join(directory, 'target-llvm.json');
+    const members = path.join(directory, 'target-llvm.members');
+    await fs.writeFile(members, Object.keys(files).sort().join('\n')+'\n');
+    await execute(component.config.tools.tar.path, ['-cf', archive, '-C', native.artifacts,
+      '--mtime=@0', '--owner=0', '--group=0', '--numeric-owner', '--no-recursion', '--verbatim-files-from', '-T', members]);
+    await atomicJson(contract, {schema: 'stage1-target-llvm-v1', source: native.component.source,
+      producer: native.component.producer, buildId: native.buildId, receiptSha256: native.receiptSha256,
+      hostLockSha256: adapterHostLockSha256, hostSourceLockSha256: sdkSource.lockSha256, files});
+    for (const [name, file] of [['target-llvm.tar', archive], ['target-llvm.json', contract]]) {
+      inputs[name] = file; expectedInputHashes[name] = await fileDigest(file);
+    }
+  }
+  // The JSON is an emitted request, not another mutable source of input
+  // authority. Every producer parameter comes from the frozen plan/receipts.
+  const spec = {sdkIdentityVerifier, kind, sha: component.source.commit, repo: component.source.repo, sdk: sdkRoot,
+    builder: component.config.tools.builder.path, inputs, outputs: options.outputs,
+    parameters: options.parameters, optimization: options.optimization, host: component.config.host,
+    target: component.config.target, dependency_build_ids: identity.dependencies,
+    tools: Object.fromEntries(Object.entries(component.config.tools).filter(([name]) => name !== 'builder')),
+    jobs: options.jobs, heap: options.heap};
+  await atomicJson(recipe, spec);
+  const log = path.join(directory, 'logs', `sharedbuild-${randomUUID()}.log`);
+  let result;
+  try {
+    result = await runProducer([component.config.tools.python3.path, engine, '--remote', '--root', path.join(plan.buildRoot, 'shared-cache'),
+      '--lane', plan.lane, 'build', '--recipe', recipe, '--work', path.join(plan.buildRoot, 'shared-work'),
+      '--copy-manifest-to', path.join(directory, 'sharedbuild-output'), ...(resumeFailed ? ['--resume'] : [])], {cwd: directory, env: process.env, log});
+  } catch (error) {
+    const records = (await fs.readFile(log, 'utf8')).split('\n').flatMap(line => {
+      try { const row = JSON.parse(line); return row.event === 'build-result' ? [row] : []; } catch { return []; }
+    });
+    const actual = records.at(-1);
+    if (actual && actual.rc !== 0) {
+      throw Object.assign(new Error(`BUILD_FAILED rc=${actual.rc} wrapper_rc=${error.rc} evidence=${actual.result} log=${actual.build_log}`),
+        {rc: actual.rc, wrapperRc: error.rc, evidence: actual.result});
+    }
+    throw error;
+  }
+  const cache = path.join(directory, 'sharedbuild-output');
+  const completion = await readJson(path.join(cache, 'completion.json'));
+  const actualRecipe = await readJson(path.join(cache, 'recipe.json'));
+  if (actualRecipe.source_sha !== component.source.commit || actualRecipe.source_tree !== component.source.tree
+    || actualRecipe.engine_sha256 !== engineSha256 || actualRecipe.builder_sha256 !== component.config.tools.builder.sha256
+    || actualRecipe.sdk.lock_sha256 !== adapterHostLockSha256 || actualRecipe.sdk.version !== sdkSource.version
+    || canonical(actualRecipe.inputs) !== canonical(expectedInputHashes) || canonical(actualRecipe.outputs) !== canonical(options.outputs)
+    || canonical(actualRecipe.parameters) !== canonical(options.parameters)
+    || canonical(actualRecipe.tools) !== canonical(spec.tools) || actualRecipe.builder_companion
+    || actualRecipe.jobs !== options.jobs || actualRecipe.heap !== options.heap
+    || canonical(actualRecipe.dependency_build_ids) !== canonical(identity.dependencies)) reject('PRODUCER_RECIPE', component.id, 'actual producer recipe differs from frozen closure');
+  if (completion.status !== 'complete' || completion.rc !== 0 || completion.source_sha !== component.source.commit
+    || completion.source_tree !== component.source.tree) reject('SOURCE_CHECKOUT', component.id, 'sharedbuild actual source/completion mismatch');
+  const files = await readJson(await physicalPath(cache, 'artifact-manifest.json', component.id));
+  const nativeManifest = await fs.readFile(await physicalPath(cache, 'MANIFEST.sha256', component.id), 'utf8');
+  if (!nativeManifest.split('\n').includes(`${await fileDigest(path.join(cache, 'artifact-manifest.json'))}  artifact-manifest.json`)) reject('COMPLETION', component.id, 'producer artifact metadata does not match the native seal');
+  for (const [rel, row] of Object.entries(files)) {
+    if (!nativeManifest.split('\n').includes(`${row.sha256}  artifacts/${rel}`)) reject('COMPLETION', component.id, `native artifact digest mismatch ${rel}`);
+  }
+  await fs.rename(path.join(cache, 'artifacts'), path.join(directory, 'artifacts'));
+  // The legacy tuple installer admits data-mode tools and installs them as
+  // executables. Preserve the native producer inventory before this adapter's
+  // final output seal; never amend the sharedbuild receipt or source payload.
+  if (component.roles.includes('llvm-tools')) {
+    for (const name of ['llc', 'opt', 'ld.lld']) {
+      const rel = `bin/${name}`, row = files[rel];
+      if (!row) continue; // Complete membership is checked by SDK verification.
+      const file = await physicalPath(path.join(directory, 'artifacts'), rel, component.id);
+      if (!row.type || row.type === 'file') {
+        const installedMode = row.mode | 0o111;
+        await fs.chmod(file, installedMode);
+        files[rel] = {...row, sourceMode: row.mode, modeTransform: 'executable', mode: installedMode};
+      }
+    }
+  }
+  if (component.roles.includes('compiler')) {
+    await execute(component.config.tools.python3.path, [component.config.tools.compilerIdentity.path, path.join(directory, 'artifacts'),
+      '--install', path.join(directory, 'artifacts/cjcj-stage1')]);
+    await execute(component.config.tools.python3.path, [component.config.tools.compilerIdentity.path, path.join(directory, 'artifacts'),
+      '--expected-producer-sha256', files['cjcj-stage1'].sha256]);
+    files['bin/cjcj-stage1'] = {...files['cjcj-stage1'], mode: 0o755};
+    for (const name of ['cjc', 'cjc-frontend']) files[`bin/${name}`] = {
+      type: 'symlink', target: 'cjcj-stage1', size: Buffer.byteLength('cjcj-stage1'), mode: 0o777, sha256: files['cjcj-stage1'].sha256};
+    const lineage = path.join(directory, 'artifacts/compiler-lineage.json'), stat = await fs.stat(lineage);
+    files['compiler-lineage.json'] = {type: 'file', size: stat.size, mode: stat.mode & 0o777, sha256: await fileDigest(lineage)};
+  }
+  return sealOutput(directory, component, identity, {...result, status: 'complete', kind,
+    producerBuildId: completion.build_id, actualWork: completion.work,
+    source: {commit: completion.source_sha, tree: completion.source_tree, changes: completion.source_changes}}, files);
+}
+async function native(component, directory, identity, outputs, plan) {
+  await verifyProducer(component);
+  const source = await checkout(component, directory);
+  const before = await sourceIdentity(source, component.source, component.id, component.config.tools.git.path);
+  const request = path.join(directory, 'request.json');
+  await atomicJson(request, {component, identity, source, directory, plan,
+    dependencies: Object.fromEntries(component.dependencies.map(id => [id, outputs.get(id)]))});
+  const executable = path.join(component.producer.repository, 'ci/bootstrap/sdk-native-producer.mjs');
+  const log = path.join(directory, 'logs', `${component.producer.adapter}-${randomUUID()}.log`);
+  const env = {PATH: '/usr/bin:/bin', LANG: 'C.UTF-8', HOME: path.join(directory, 'home'), TMPDIR: path.join(directory, 'build/tmp')};
+  for (const name of ['HOME', 'TMPDIR']) await fs.mkdir(env[name], {recursive: true});
+  // GHA's existing sccache setup needs its service configuration, but compiler
+  // flags, PATH and loader variables never leak from a caller into a recipe.
+  if (process.env.GITHUB_ACTIONS === 'true') {
+    env.GITHUB_ACTIONS = 'true';
+    for (const key of ['SCCACHE_DIR', 'SCCACHE_CACHE_SIZE', 'SCCACHE_IDLE_TIMEOUT', 'SCCACHE_GHA_ENABLED', 'ACTIONS_CACHE_URL', 'ACTIONS_RUNTIME_URL', 'ACTIONS_RUNTIME_TOKEN']) {
+      if (process.env[key]) env[key] = process.env[key];
+    }
+  }
+  let result;
+  try { result = await runProducer([component.config.tools.node.path, executable, request], {cwd: directory, env, log}); }
+  catch (error) {
+    const records = (await fs.readFile(log, 'utf8')).split('\n').flatMap(line => {
+      try { const row = JSON.parse(line); return row.event === 'native-command-result' && (row.rc !== 0 || row.signal) ? [row] : []; }
+      catch { return []; }
+    });
+    const actual = records.at(-1);
+    if (actual) throw Object.assign(new Error(`NATIVE_PRODUCER_FAILED command=${actual.command} rc=${actual.rc} signal=${actual.signal} wrapper_rc=${error.rc} log=${log}`),
+      {rc: actual.rc, signal: actual.signal, wrapperRc: error.rc});
+    throw error;
+  }
+  let changes;
+  if (component.producer.adapter === 'bootstrap-compiler') {
+    changes = (await readJson(path.join(directory, 'native-execution.json'))).sourceChanges;
+    if (Object.keys(changes || {}).some(rel => rel !== 'cjpm.toml')) reject('SOURCE_TRANSFORM', component.id, 'stage compiler only permits its pinned trimpath transform');
+  }
+  const after = changes ? await registeredSourceIdentity(source, component.source, component.id, changes, component.config.tools.git.path)
+    : await sourceIdentity(source, component.source, component.id, component.config.tools.git.path);
+  const qualification = component.producer.adapter === 'llvm-cjdb'
+    ? {generatedInputs:(await readJson(path.join(directory,'native-execution.json'))).generatedInputs} : {};
+  const files = component.producer.adapter === 'ast-support'
+    ? await inventory(path.join(directory, 'artifacts'), {links: true, directories: true}) : undefined;
+  return sealOutput(directory, component, identity, {...result, ...qualification, status: 'complete', kind: component.producer.adapter, before, source: after}, files);
+}
+export async function produceComponent(plan, component, identity, outputs, {resumeFailed = false} = {}) {
+  const directory = identity.directory;
+  if (component.producer.receipt) {
+    // A sealed adapter consumes an actual prior producer record. It cannot
+    // mint a source identity for a loose file after the build.
+    const output = await readOutput(component.producer.receipt, component, identity);
+    return output;
+  }
+  await fs.mkdir(directory, {recursive: true});
+  await fs.mkdir(path.join(directory, 'logs'), {recursive: true});
+  await fs.mkdir(path.join(directory, 'build'), {recursive: true});
+  const state = path.join(directory, 'state.json');
+  // Preserve failures and don't automatically repeat a failed producer.
+  try {
+    const previous = await readJson(state);
+    if (previous.buildId !== identity.buildId) reject('COMPLETION', component.id, 'failed work belongs to another build id');
+    if (previous.status !== 'complete' && !resumeFailed) reject('PRODUCER_PREVIOUS_FAILURE', component.id, `state=${previous.status}; requires an explicit same-input recovery`);
+    if (resumeFailed) {
+      // Preserve the original state/logs and partial payload. Native build dirs
+      // stay in place; only an incomplete install is moved out of the way.
+      const attempt = path.join(directory, 'logs', `recovery-${Date.now()}`); await fs.mkdir(attempt);
+      await fs.copyFile(state, path.join(attempt, 'state.json'));
+      for (const name of ['artifacts', 'sharedbuild-output']) {
+        try { await fs.rename(path.join(directory, name), path.join(attempt, name)); }
+        catch (error) { if (error.code !== 'ENOENT') throw error; }
+      }
+    }
+  } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  await atomicJson(state, {status: 'building', buildId: identity.buildId});
+  try {
+    for (const [name, tool] of Object.entries(component.config.tools)) {
+      if (await fileDigest(tool.path) !== tool.sha256) reject('TOOL_IDENTITY', component.id, name);
+    }
+    const output = component.producer.adapter === 'official' ? await official(component, directory, identity)
+      : component.producer.adapter.startsWith('sharedbuild-') ? await sharedbuild(component, directory, identity, plan, resumeFailed, outputs)
+        : await native(component, directory, identity, outputs, plan);
+    await atomicJson(state, {status: 'complete', buildId: identity.buildId, rc: 0}); return output;
+  } catch (error) {
+    await atomicJson(state, {status: 'failed', buildId: identity.buildId, rc: error.rc ?? null,
+      ...(error.signal ? {signal: error.signal} : {}), ...(error.wrapperRc !== undefined ? {wrapperRc: error.wrapperRc} : {}), error: error.message}); throw error;
+  }
+}
