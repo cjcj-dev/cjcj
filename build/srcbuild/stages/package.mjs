@@ -75,6 +75,11 @@ function organizeSdkTree(config, destination) {
   const cjpm = requireFile(path.join(toolsRoot, 'cjpm', 'dist', `cjpm${suffix}`), {stage: 'package.cjpm'});
   copyInto(cjpm, toolsBin, {stage: 'package.cjpm'});
 
+  const cjcompat = requireFile(path.join(toolsRoot, 'cjcompat', 'dist', 'bin', `cjcompat${suffix}`), {
+    stage: 'package.cjcompat',
+  });
+  copyInto(cjcompat, toolsBin, {stage: 'package.cjcompat'});
+
   const cjfmt = requireFile(path.join(toolsRoot, 'cjfmt', 'build', 'build', 'bin', `cjfmt${suffix}`), {
     stage: 'package.cjfmt',
   });

@@ -55,14 +55,14 @@ test('every commit-valued pin is inventoried and paired with its clone URL', () 
     pins.map(pin => [pin.key, pin.authorityRef, pin.mainlineRef]).sort((a, b) => a[0].localeCompare(b[0])),
     [
       ['CANGJIE_COMPILER_SHA', 'refs/heads/main', 'refs/heads/main'],
-      ['CJPM_FORK_REF', 'refs/heads/fix/cjpm-fixed', 'refs/heads/main'],
+      ['CJPM_FORK_REF', 'refs/heads/main', 'refs/heads/main'],
       ['COMPILER_REF', 'refs/heads/main', 'refs/heads/main'],
       ['FLATBUFFERS_SHA', 'refs/heads/master', 'refs/heads/master'],
       ['LLVM_SHA', 'refs/heads/main', 'refs/heads/main'],
       ['LOADERLIFE_MIN_REF', 'refs/heads/main', 'refs/heads/main'],
       ['RUNTIME_REF', 'refs/heads/main', 'refs/heads/main'],
       ['STDX_REF', 'refs/heads/main', 'refs/heads/main'],
-      ['TOOLS_REF', 'refs/heads/fix/demangler-cstdint', 'refs/heads/main'],
+      ['TOOLS_REF', 'refs/heads/main', 'refs/heads/main'],
     ],
   );
   assert.equal(
