@@ -20,7 +20,7 @@ private func CollectAllDefs(ty: Type, builder: CHIRBuilder): ArrayList<CustomTyp
     return defs
 }
 
-private func SearchRealCalleeInVtable(ty: Type, invoke: InvokeBase, builder: CHIRBuilder): Option<Function> {
+private func SearchRealCalleeInVtable(ty: Type, invoke: DynamicDispatchBase, builder: CHIRBuilder): Option<Function> {
     let allDefs = CollectAllDefs(ty, builder)
     let srcParentTypeInRT = invoke.GetInstSrcParentCustomTypeOfMethod(builder)
     var replaceTable = HashMap<GenericType, Type>()
@@ -123,10 +123,10 @@ private func GetInstFuncTypeFromContext(fn: Function, context: FuncCallContext, 
 }
 
 private class DevirtualizationRewriteInfo {
-    let invoke: InvokeBase
+    let invoke: DynamicDispatchBase
     let realCallee: Function
     let thisType: Type
-    init(invoke: InvokeBase, realCallee: Function, thisType: Type) {
+    init(invoke: DynamicDispatchBase, realCallee: Function, thisType: Type) {
         this.invoke = invoke
         this.realCallee = realCallee
         this.thisType = thisType
@@ -168,18 +168,44 @@ public class Devirtualization {
 
     public func RunOnFuncs(funcs: ArrayList<Function>): Unit {
         rewriteInfos.clear()
-        for (fn in funcs) { RunOnFunc(fn) }
+        for (fn in funcs) {
+            RunOnFuncForInvoke(fn)
+            RunOnFuncForInvokeStatic(fn)
+        }
         RewriteToApply(rewriteInfos)
     }
 
-    private func RunOnFunc(fn: Function): Unit {
+    // Upstream 2a468452 Devirtualization.cpp:227-254.
+    private func ResolveStaticCallee(invoke: InvokeStaticBase): Option<Function> {
+        let rttiExpr = (invoke.GetRTTIValue() as LocalVar).getOrThrow().GetExpr().getOrThrow()
+        // RTTI(value) is only known at run time.
+        if (!(rttiExpr is GetRTTIStatic)) { return None }
+        let thisType = invoke.GetThisType().getOrThrow().StripAllRefs()
+        if (thisType.IsGeneric() || thisType.IsThis()) { return None }
+        return SearchRealCalleeInVtable(thisType, invoke, builder)
+    }
+
+    private func RunOnFuncForInvokeStatic(fn: Function): Unit {
+        Visitor.Visit(fn, { expr =>
+            if (expr.IsInvokeStaticBase()) {
+                let invoke = InvokeStaticBase(expr)
+                if (let Some(realCallee) <- ResolveStaticCallee(invoke)) {
+                    rewriteInfos.add(DevirtualizationRewriteInfo(invoke, realCallee,
+                        invoke.GetThisType().getOrThrow()))
+                }
+            }
+            return VisitResult.CONTINUE
+        })
+    }
+
+    private func RunOnFuncForInvoke(fn: Function): Unit {
         var result = analysisWrapper.CheckFuncResult(fn)
         if (result.isNone()) { result = frozenStates.get(fn) ?? None }
         let analysisResult = result ?? return
         let tryCollect = { state: TypeDomain, invoke: InvokeBase =>
             let obj = state.CheckAbstractObjectRefBy(invoke.GetObject()) ?? return
             let value = state.CheckAbstractValue(obj) ?? return
-            let found = FindFinalCalleeAndThisType(value, invoke)
+            let found = ResolveNonStaticCalleeAndThisType(value, invoke)
             if (found[0].isNone() || found[1].isNone()) { return }
             rewriteInfos.add(DevirtualizationRewriteInfo(invoke, found[0].getOrThrow(), found[1].getOrThrow()))
         }
@@ -217,7 +243,7 @@ public class Devirtualization {
         if (!lhs.GetType().getOrThrow().IsPrimitive() || !rhs.GetType().getOrThrow().IsPrimitive()) { return false }
         let invoke = info.invoke.GetRawExpr()
         let parent = invoke.GetParentBlock().getOrThrow()
-        let next: Option<Block> = if (let Some(term) <- (invoke as TryInvoke)) { Some(term.GetSuccessBlock()) } else { None }
+        let next = invoke.GetSuccessAndErrorBlocks()[0]
         let binary = builder.CreateBinaryExpression(kind, invoke.GetResultType().getOrThrow(), lhs, rhs, parent)
         binary.SetDebugLocation(invoke.GetDebugLocation())
         invoke.ReplaceWith(binary)
@@ -257,18 +283,21 @@ public class Devirtualization {
                 realFunc = instFunc
                 instRetTy = instFunc.GetFuncType().getOrThrow().GetReturnType()
             }
-            var instParentTy = GetInstParentCustomTyOfCallee(realFunc, context.args, context.thisType, builder) ??
-                realFunc.GetFuncType().getOrThrow().GetParamType(0)
-            instParentTy = AddRefIfNeeded(instParentTy, realFunc)
             let parent = invoke.GetParentBlock().getOrThrow()
-            let (converted, expressions) = TypeCastOrBoxIfNeeded(context.args[0], instParentTy, builder, parent)
-            if (!refEq(converted, context.args[0])) {
-                for (expression in expressions) { expression.MoveBefore(invoke) }
-                context.args[0] = converted
+            if (invoke is Invoke || invoke is TryInvoke) {
+                var instParentTy = GetInstParentCustomTyOfCallee(realFunc, context.args, context.thisType, builder) ??
+                    realFunc.GetFuncType().getOrThrow().GetParamType(0)
+                instParentTy = AddRefIfNeeded(instParentTy, realFunc)
+                let (converted, expressions) = TypeCastOrBoxIfNeeded(context.args[0], instParentTy, builder, parent)
+                if (!refEq(converted, context.args[0])) {
+                    for (expression in expressions) { expression.MoveBefore(invoke) }
+                    context.args[0] = converted
+                }
             }
-            let call: Expression = if (let Some(term) <- (invoke as TryInvoke)) {
+            let (successBlock, errorBlock) = invoke.GetSuccessAndErrorBlocks()
+            let call: Expression = if (successBlock.isSome() && errorBlock.isSome()) {
                 builder.CreateTryApply(instRetTy, realFunc, context,
-                    term.GetSuccessBlock(), term.GetErrorBlock(), parent)
+                    successBlock.getOrThrow(), errorBlock.getOrThrow(), parent)
             } else {
                 builder.CreateApply(instRetTy, realFunc, context, parent)
             }
@@ -301,6 +330,7 @@ public class Devirtualization {
             newFunc.SetDebugLocation(fn.GetDebugLocation())
             newFunc.AppendAttributeInfo(fn.GetAttributeInfo())
             newFunc.DisableAttr(Attribute.GENERIC)
+            newFunc.DisableAttr(Attribute.STATIC)
             if (!context.instTypeArgs.isEmpty()) {
                 newFunc.EnableAttr(Attribute.GENERIC_INSTANTIATED)
             }
@@ -361,7 +391,7 @@ public class Devirtualization {
         return all
     }
 
-    private func FindFinalCalleeAndThisType(state: TypeValue, invoke: InvokeBase): (Option<Function>, Option<Type>) {
+    private func ResolveNonStaticCalleeAndThisType(state: TypeValue, invoke: InvokeBase): (Option<Function>, Option<Type>) {
         let specific = state.GetSpecificType()
         if (!specific.CanBeInherited() || state.GetTypeKind() == DevirtualTyKind.EXACTLY) {
             let target = SearchRealCalleeInVtable(specific, invoke, builder).getOrThrow()
