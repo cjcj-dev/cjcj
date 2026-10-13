@@ -2841,6 +2841,10 @@ class CHIRDeserializerImpl {
             case 360u16 => IntrinsicKind.IS_SUBTYPE_TYPES
             case 361u16 => IntrinsicKind.EXCLUSIVE_SCOPE
             case 362u16 => IntrinsicKind.CANONICALIZE_STRING_BACKING
+            case 363u16 => IntrinsicKind.REFERENCE_INVOKE_FINALIZE
+            case 364u16 => IntrinsicKind.REFERENCE_WAIT_PENDING
+            case 365u16 => IntrinsicKind.REFERENCE_RUNTIME_RUNNING
+            case 366u16 => IntrinsicKind.REFERENCE_NANO_TIME
             case _ =>
                 CJC_ABORT()
                 IntrinsicKind.NOT_INTRINSIC

@@ -234,7 +234,8 @@ public func GenerateStore(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValu
         return boxRetStore
     }
     return CreateTypedStoreForAddress(irBuilder, value, addr,
-        strength: GetAddressStoreStrength(irBuilder, addrOperand, chirExpr))
+        strength: GetAddressStoreStrength(irBuilder, addrOperand, chirExpr),
+        isVolatileReference: IsVolatileReferenceAddress(irBuilder, addrOperand))
 }
 
 private func TryGenerateBoxRetValueStore(irBuilder: IRBuilder2, chirExpr: Expression, valueOperand: Value,
@@ -285,7 +286,11 @@ private func TryGenerateBoxRetValueStore(irBuilder: IRBuilder2, chirExpr: Expres
 }
 
 public func CreateTypedStoreForAddress(irBuilder: IRBuilder2, value: CGValue, addr: CGValue,
-    boxType!: Option<Type> = None, strength!: GCWriteStrength = GCWriteStrength.UNKNOWN): LLVMValueRef {
+    boxType!: Option<Type> = None, strength!: GCWriteStrength = GCWriteStrength.UNKNOWN,
+    isVolatileReference!: Bool = false): LLVMValueRef {
+    if (isVolatileReference) {
+        return irBuilder.CallReferenceVolatileStore(value.GetRawValue(), addr.GetRawValue())
+    }
     ReportTypedStoreDestinationProvenance(irBuilder, value, addr)
     if (let Some(genericStore) <- irBuilder.TryCreateGenericStore(value, addr, boxType: boxType, strength: strength)) {
         return genericStore
@@ -726,7 +731,8 @@ public func GenerateStoreElementRef(irBuilder: IRBuilder2, chirExpr: Expression)
             AddFnAttr(storeValue.GetRawValue(), CJ2C_ATTR)
         }
         return CreateTypedStoreForAddress(irBuilder, storeValue, storeAddr,
-            strength: GetMemberStoreStrength(irBuilder, lhs, path, chirExpr))
+            strength: GetMemberStoreStrength(irBuilder, lhs, path, chirExpr),
+            isVolatileReference: IsVolatileReferenceMember(irBuilder, lhs, path))
     }
     if (let Some(storeByName) <- (chirExpr as StoreElementByName)) {
         if (let Some(locationTy) <- storeByName.GetLocation().GetType()) {
@@ -742,7 +748,8 @@ public func GenerateStoreElementRef(irBuilder: IRBuilder2, chirExpr: Expression)
                     return LLVMNullValue()
                 }
                 return CreateTypedStoreForAddress(irBuilder, byNameValue, byNameAddr,
-                    strength: GetMemberStoreStrength(irBuilder, storeByName.GetLocation(), path, chirExpr))
+                    strength: GetMemberStoreStrength(irBuilder, storeByName.GetLocation(), path, chirExpr),
+                    isVolatileReference: IsVolatileReferenceMember(irBuilder, storeByName.GetLocation(), path))
             }
         }
     }

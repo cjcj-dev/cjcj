@@ -88,10 +88,15 @@ public enum IntrinsicKind {
     | LOG | LOG2 | LOG10 | SQRT | ROUND | POW | POWI | BIT_CAST | PREINITIALIZE | OBJECT_AS | IS_NULL
     | GET_TYPE_FOR_TYPE_PARAMETER | IS_SUBTYPE_TYPES | EXCLUSIVE_SCOPE
     | CANONICALIZE_STRING_BACKING
+    | REFERENCE_INVOKE_FINALIZE | REFERENCE_WAIT_PENDING | REFERENCE_RUNTIME_RUNNING | REFERENCE_NANO_TIME
 }
 
 public func IntrinsicKindName(kind: IntrinsicKind): String {
     return match (kind) {
+        case IntrinsicKind.REFERENCE_INVOKE_FINALIZE => "REFERENCE_INVOKE_FINALIZE"
+        case IntrinsicKind.REFERENCE_WAIT_PENDING => "REFERENCE_WAIT_PENDING"
+        case IntrinsicKind.REFERENCE_RUNTIME_RUNNING => "REFERENCE_RUNTIME_RUNNING"
+        case IntrinsicKind.REFERENCE_NANO_TIME => "REFERENCE_NANO_TIME"
         case IntrinsicKind.NOT_INTRINSIC => "NOT_INTRINSIC"
         case IntrinsicKind.NOT_IMPLEMENTED => "NOT_IMPLEMENTED"
         case IntrinsicKind.ARRAY_INIT => "ARRAY_INIT"
@@ -468,6 +473,19 @@ public func LookupHeadlessIntrinsicKind(name: String): Option<IntrinsicKind> {
 
 public func LookupCoreIntrinsicKind(name: String): Option<IntrinsicKind> {
     return match (name) {
+        case "referenceInvokeFinalize" => IntrinsicKind.REFERENCE_INVOKE_FINALIZE
+        case "referenceWaitPending" => IntrinsicKind.REFERENCE_WAIT_PENDING
+        case "referenceRuntimeRunning" => IntrinsicKind.REFERENCE_RUNTIME_RUNNING
+        case "referenceNanoTime" => IntrinsicKind.REFERENCE_NANO_TIME
+        case "mutexInit" => IntrinsicKind.MUTEX_INIT
+        case "mutexLock" => IntrinsicKind.CJ_MUTEX_LOCK
+        case "mutexTryLock" => IntrinsicKind.MUTEX_TRY_LOCK
+        case "mutexCheckStatus" => IntrinsicKind.MUTEX_CHECK_STATUS
+        case "mutexUnlock" => IntrinsicKind.MUTEX_UNLOCK
+        case "monitorInit" => IntrinsicKind.MONITOR_INIT
+        case "monitorWait" => IntrinsicKind.MOITIOR_WAIT
+        case "monitorNotify" => IntrinsicKind.MOITIOR_NOTIFY
+        case "monitorNotifyAll" => IntrinsicKind.MOITIOR_NOTIFY_ALL
         case "sizeOfType" => IntrinsicKind.SIZE_OF
         case "alignOfType" => IntrinsicKind.ALIGN_OF
         case "acquireRawData" => IntrinsicKind.ARRAY_ACQUIRE_RAW_DATA
@@ -700,16 +718,7 @@ public func LookupCjnativeSyncIntrinsicKind(name: String): Option<IntrinsicKind>
         case "fetchAnd" => IntrinsicKind.ATOMIC_FETCH_AND
         case "fetchOr" => IntrinsicKind.ATOMIC_FETCH_OR
         case "fetchXor" => IntrinsicKind.ATOMIC_FETCH_XOR
-        case "mutexInit" => IntrinsicKind.MUTEX_INIT
-        case "mutexLock" => IntrinsicKind.CJ_MUTEX_LOCK
-        case "mutexTryLock" => IntrinsicKind.MUTEX_TRY_LOCK
-        case "mutexCheckStatus" => IntrinsicKind.MUTEX_CHECK_STATUS
-        case "mutexUnlock" => IntrinsicKind.MUTEX_UNLOCK
         case "waitQueueInit" => IntrinsicKind.WAITQUEUE_INIT
-        case "monitorInit" => IntrinsicKind.MONITOR_INIT
-        case "monitorWait" => IntrinsicKind.MOITIOR_WAIT
-        case "monitorNotify" => IntrinsicKind.MOITIOR_NOTIFY
-        case "monitorNotifyAll" => IntrinsicKind.MOITIOR_NOTIFY_ALL
         case "multiConditionMonitorWait" => IntrinsicKind.MULTICONDITION_WAIT
         case "multiConditionMonitorNotify" => IntrinsicKind.MULTICONDITION_NOTIFY
         case "multiConditionMonitorNotifyAll" => IntrinsicKind.MULTICONDITION_NOTIFY_ALL

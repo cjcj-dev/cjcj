@@ -799,6 +799,13 @@ private func RegisterExceptionRaiser(cgMod: CGModule): Unit {
             args.add(param)
             let _ = irBuilder.CreateIntrinsicCallNoInvoke("llvm.cj.register.implicit.exception.raisers",
                 ArrayList<LLVMTypeRef>(), args)
+            let referenceMethods = ArrayList<LLVMValueRef>()
+            for (name in ["rt$RegisterReferenceFinalizer", "rt$RunReferenceHandler", "rt$RunReferenceFinalizers"]) {
+                let method = cgMod.GetCGContext().GetCGPkgContext().FindCHIRGlobalValue(name).getOrThrow()
+                let entry = cgMod.GetOrInsertCGFunction(method).GetRawFunction()
+                referenceMethods.add(irBuilder.CreateBitCast(entry, int8PtrType))
+            }
+            irBuilder.PublishReferenceMethods(referenceMethods)
         }
     }
 }

@@ -157,6 +157,10 @@ private func GenerateIntrinsic(irBuilder: IRBuilder2, kind: IntrinsicKind, args:
     if (IsMathIntrinsic(kind)) {
         return irBuilder.CallMathIntrinsics(kind, args)
     }
+    if (kind == IntrinsicKind.REFERENCE_INVOKE_FINALIZE || kind == IntrinsicKind.REFERENCE_WAIT_PENDING ||
+        kind == IntrinsicKind.REFERENCE_RUNTIME_RUNNING || kind == IntrinsicKind.REFERENCE_NANO_TIME) {
+        return irBuilder.CallReferenceRuntime(kind, args)
+    }
     if (IsRuntimeIntrinsic(kind)) {
         return irBuilder.CallRuntimeIntrinsics(kind, args, resultType)
     }
