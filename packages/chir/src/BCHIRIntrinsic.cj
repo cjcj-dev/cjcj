@@ -16,6 +16,7 @@ public class BCHIRIntrinsic {
             case IntrinsicKind.VARRAY_GET => 60
             case IntrinsicKind.BEGIN_CATCH => 347
             case IntrinsicKind.CJ_CORE_CAN_USE_SIMD => 106
+            case IntrinsicKind.REGISTER_FINALIZER => 363
             case _ => -1
         }
     }
@@ -35,6 +36,10 @@ public class BCHIRIntrinsic {
 
     public static func IsCanUseSIMD(kind: Int64): Bool {
         return kind == 106
+    }
+
+    public static func IsRegisterFinalizer(kind: Int64): Bool {
+        return kind == 363
     }
 
     public static func ReferenceEquals(left: InterpreterValue, right: InterpreterValue): Bool {

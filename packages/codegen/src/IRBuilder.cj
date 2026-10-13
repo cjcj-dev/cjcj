@@ -5777,14 +5777,35 @@ public class IRBuilder2 <: Resource {
         return objectValue
     }
 
+    public func CallRegisterFinalizer(receiver: LLVMValueRef): Unit {
+        let typeInfo = GetTypeInfoFromObject(receiver)
+        let typeInfoType = CGType.GetOrCreateTypeInfoType(GetLLVMContext())
+        let flagAddress = CreateStructGEP(typeInfoType, typeInfo,
+            UInt32(TypeInfoLayout.flagIndex), name: "finalizer.flags.addr")
+        let flagType = unsafe { LLVMInt8TypeInContext(GetLLVMContext().raw) }
+        let flags = CreateLoad(flagType, flagAddress, name: "finalizer.flags")
+        let mask = unsafe { LLVMConstInt(flagType, 2u64, 0) }
+        let needsRegistration = CreateICmp(LLVMIntPredicate.NE, CreateAnd(flags, mask),
+            unsafe { LLVMConstNull(flagType) }, name: "finalizer.required")
+        let registerBlock = CreateAndInsertBasicBlock("finalizer.register")
+        let returnBlock = CreateAndInsertBasicBlock("finalizer.return")
+        CreateCondBr(needsRegistration, registerBlock, returnBlock)
+        SetInsertPoint(registerBlock)
+        let refType = CGType.GetRefType(GetLLVMContext())
+        let functionType = MakeFunctionType(refType, ArrayList<LLVMTypeRef>([refType]))
+        let callee = GetOrCreateIntrinsicFunction("CJ_MCC_OnFinalizerCreated", functionType,
+            refType, false, ArrayList<String>(["cj-runtime"]))
+        let _ = CreateCallOrInvoke(callee,
+            ArrayList<LLVMValueRef>([CreateBitCast(receiver, refType)]))
+        CreateBr(returnBlock)
+        SetInsertPoint(returnBlock)
+    }
+
     private func AddClassMallocMetadata(objectValue: LLVMValueRef, classTy: Type): Unit {
         let classType = (classTy as ClassType).getOrThrow()
         CJC_ASSERT(!classTy.IsAutoEnvBase())
         let classDef = classType.GetClassDef()
         let mallocType = ArrayList<LLVMMetadataRef>()
-        if (classDef.GetFinalizer().isSome()) {
-            mallocType.add(LLVMCreateMDString(GetLLVMContext(), GC_FINALIZER_ATTR))
-        }
         if (IsCoreFutureClass(classDef) || IsSyncRelatedClass(classDef) || IsWeakRefClass(classDef)) {
             mallocType.add(LLVMCreateMDString(GetLLVMContext(), classDef.GetSrcCodeIdentifier()))
         }
