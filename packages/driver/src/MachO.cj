@@ -95,8 +95,7 @@ public open class MachO <: ToolChain {
 
     public open override func ProcessGeneration(input: ArrayList<TempFileInfo>): Bool {
         if (driverOptions.outputMode == OutputMode.STATIC_LIB) {
-            GenerateArchiveTool(input)
-            return true
+            return GenerateArchiveTool(input)
         }
         if (driverOptions.outputMode == OutputMode.OBJ) {
             GenerateObjTool(input)
@@ -112,11 +111,13 @@ public open class MachO <: ToolChain {
         return true
     }
 
-    protected open func GenerateArchiveTool(objFiles: ArrayList<TempFileInfo>): Unit {
+    protected open func GenerateArchiveTool(objFiles: ArrayList<TempFileInfo>): Bool {
         let tool = Tool(arPath, ToolType.BACKEND, driverOptions.environment.allVariables)
         tool.AppendArg("cr")
         let outputFile = CreateNewFileInfoWrapper(objFiles, TempFileKind.O_STATICLIB).filePath
-        let _ = RemovePath(outputFile)
+        if (!PrepareArchiveOutput(outputFile)) {
+            return false
+        }
         tool.AppendArg(outputFile)
         if (objFiles.isEmpty()) {
             for (inputObj in driverOptions.inputObjs) {
@@ -128,6 +129,7 @@ public open class MachO <: ToolChain {
             }
         }
         backendCmds.add(MakeSingleToolBatch(tool))
+        return true
     }
 
     protected open func GenerateLinking(objFiles: ArrayList<TempFileInfo>): TempFileInfo {

@@ -108,6 +108,18 @@ public func CopyFile(src: String, dest: String): Bool {
     }
 }
 
+func PrepareArchiveOutput(path: String): Bool {
+    if (FileUtil.IsDir(path)) {
+        eprintln("error: archive output '${path}' is a directory.")
+        return false
+    }
+    if (FileUtil.FileExist(path) && !FileUtil.Remove(path)) {
+        eprintln("error: cannot remove existing archive output '${path}'.")
+        return false
+    }
+    return true
+}
+
 public func RemovePath(path: String): Bool {
     if (FileUtil.IsDir(path)) {
         return FileUtil.RemoveDirectoryRecursively(path)

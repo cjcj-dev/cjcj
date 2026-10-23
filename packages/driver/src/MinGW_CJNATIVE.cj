@@ -71,14 +71,16 @@ public class MinGW_CJNATIVE <: Gnu {
         return mingwLibPath
     }
 
-    protected override func GenerateArchiveTool(objFiles: ArrayList<TempFileInfo>): Unit {
+    protected override func GenerateArchiveTool(objFiles: ArrayList<TempFileInfo>): Bool {
         let tool = Tool(arPath, ToolType.BACKEND, driverOptions.environment.allVariables)
         if (driverOptions.IsCrossCompiling() && FileUtil.GetFileName(arPath).contains("llvm-ar")) {
             tool.SetLdLibraryPath(FileUtil.JoinPath(FileUtil.GetDirPath(arPath), "../lib"))
         }
         tool.AppendArg("crD")
         let outputFile = CreateNewFileInfoWrapper(objFiles, TempFileKind.O_STATICLIB).filePath
-        let _ = RemovePath(outputFile)
+        if (!PrepareArchiveOutput(outputFile)) {
+            return false
+        }
         tool.AppendArg(outputFile)
         if (objFiles.isEmpty()) {
             for (inputObj in driverOptions.inputObjs) {
@@ -90,6 +92,7 @@ public class MinGW_CJNATIVE <: Gnu {
             }
         }
         backendCmds.add(MakeSingleToolBatch(tool))
+        return true
     }
 
     private func GetMinGWCjldScript(tool: Tool): String {

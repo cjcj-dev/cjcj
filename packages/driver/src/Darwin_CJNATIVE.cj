@@ -59,10 +59,9 @@ public open class Darwin_CJNATIVE <: MachO {
         SetOptions(setCompositeOption, driverOptions, setCompositeOptionsPass)
     }
 
-    protected open override func GenerateArchiveTool(objFiles: ArrayList<TempFileInfo>): Unit {
+    protected open override func GenerateArchiveTool(objFiles: ArrayList<TempFileInfo>): Bool {
         if (!driverOptions.ShouldEmitStaticLibInLTO()) {
-            super.GenerateArchiveTool(objFiles)
-            return
+            return super.GenerateArchiveTool(objFiles)
         }
         let ltoObject = GenerateStaticLibObjects(objFiles)
         let archiveTool = Tool(arPath, ToolType.BACKEND, driverOptions.environment.allVariables)
@@ -75,6 +74,7 @@ public open class Darwin_CJNATIVE <: MachO {
         archiveTool.AppendArg(archiveOutput.filePath)
         archiveTool.AppendArgsFromDirAtExecution(ltoObject.rawPath, "lto.o")
         backendCmds.add(MakeSingleToolBatch(archiveTool))
+        return true
     }
 
     protected open func GenerateStaticLibObjects(objFiles: ArrayList<TempFileInfo>): TempFileInfo {
