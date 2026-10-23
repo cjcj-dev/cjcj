@@ -1674,7 +1674,9 @@ public class InitializationChecker {
         if (let Some(assign) <- (expr as AssignExpr)) { operand = assign.leftValue }
         if (let Some(inc) <- (expr as IncOrDecExpr)) { operand = inc.expr }
         var integer = false
-        if (let Some(value) <- operand) {
+        if (expr.astKind == ASTKind.BINARY_EXPR || expr.astKind == ASTKind.UNARY_EXPR) {
+            if (let Some(ty) <- expr.GetTy()) { integer = ty.IsInteger() }
+        } else if (let Some(value) <- operand) {
             if (let Some(ty) <- value.GetTy()) { integer = ty.IsInteger() }
         }
         return (integer && expr.overflowStrategy == OverflowStrategy.THROWING) ||

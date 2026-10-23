@@ -913,13 +913,16 @@ public class InitializationControlFlowTest {
     }
 
     @TestCase
-    public func ExhaustiveCatchConsumesImplicitExceptionForFinally(): Unit {
+    public func NestedExhaustiveCatchesConsumeRemainingExceptionDomain(): Unit {
         ExpectInitializationAccepted("""
             func mayThrow(): Unit { throw Exception() }
             func read(): Int64 {
                 var x: Int64
-                try { mayThrow(); x = 1 }
-                catch (e: Exception | Error) { x = 2 }
+                try {
+                    try { mayThrow(); x = 1 }
+                    catch (e: Exception) { x = 2 }
+                    finally {}
+                } catch (e: Error) { x = 3 }
                 finally { let observed = x }
                 return x
             }
@@ -973,6 +976,17 @@ public class InitializationControlFlowTest {
                 var x: Int64
                 try { let v = Int8(a); x = 7 } catch (e: Exception) {}
                 return x // expected-init-error
+            }
+            """)
+    }
+
+    @TestCase
+    public func IntegerComparisonDoesNotInventOverflowException(): Unit {
+        ExpectInitializationAccepted("""
+            func read(a: Int64): Int64 {
+                var x: Int64
+                try { let v = a < 1; x = 7 } finally { let observed = x }
+                return x
             }
             """)
     }
