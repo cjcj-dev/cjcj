@@ -1,6 +1,7 @@
 package cjcj::driver
 
 import cjcj::frontend.DiagnosticEngine
+import cjcj::utils.Semaphore
 import cjcj::option.*
 import cjcj::option.TempFileInfo as ArchiveTempFileInfo
 import std.collection.ArrayList
@@ -101,10 +102,16 @@ class ArchiveOutputTest {
                 @Assert(commands.size, 3)
                 @Expect(String.fromUtf8(File.readFrom(output)), "old LTO archive")
                 @Expect(commands[1][0].GetName(), "RemoveFile")
+                let slots = Semaphore.Get().GetCount()
                 let removal = commands[1][0].Execute(false)
-                @Expect(removal.GetState(), ToolFutureState.SUCCESS)
-                @Expect(removal.exitCode, 0)
-                @Expect(FileUtil.FileExist(output), false)
+                try {
+                    @Expect(removal.GetState(), ToolFutureState.SUCCESS)
+                    @Expect(removal.exitCode, 0)
+                    @Expect(FileUtil.FileExist(output), false)
+                } finally {
+                    Semaphore.Get().Release()
+                }
+                @Expect(Semaphore.Get().GetCount(), slots)
             }
         } finally {
             manager.DeleteTempFiles()

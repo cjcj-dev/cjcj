@@ -6,8 +6,8 @@ import { resolve, join } from 'node:path';
 
 // Run on Linux with the candidate's installed compiler and matching SDK.
 // Keep every isolated fixture and case result, including failed preservation checks.
-const [compilerArg, parentArg, ar = 'ar'] = process.argv.slice(2);
-assert(compilerArg && parentArg, 'usage: zx archive_output_regression.mjs <cjc> <fixture-parent> [ar]');
+const [compilerArg, parentArg, ar = 'ar', selectedCase] = process.argv.slice(2);
+assert(compilerArg && parentArg, 'usage: zx archive_output_regression.mjs <cjc> <fixture-parent> [ar] [case]');
 assert.equal(process.platform, 'linux');
 const compiler = resolve(compilerArg);
 const root = await mkdtemp(join(resolve(parentArg), 'archive-output-'));
@@ -19,13 +19,18 @@ await writeFile(join(pkg, 'foo.cj'), 'package foo\npublic func archiveValue(): I
 const results = [], cases = [];
 async function run(label, exe, args) {
   const result = await $({ nothrow: true, timeout: 300_000 })`${exe} ${args}`;
-  results.push({ label, exe, args, rc: result.exitCode });
+  results.push({ label, exe, args, rc: result.exitCode, signal: result.signal ?? null });
   await writeFile(join(root, `${label}.stdout`), result.stdout);
   await writeFile(join(root, `${label}.stderr`), result.stderr);
   await writeFile(join(root, 'results.json'), JSON.stringify(results, null, 2) + '\n');
   return result;
 }
 async function checkCase(name, body) {
+  if (selectedCase && name !== selectedCase) {
+    cases.push({ name, status: 'NOT_RUN', reason: 'case filter' });
+    await writeFile(join(root, 'cases.json'), JSON.stringify(cases, null, 2) + '\n');
+    return;
+  }
   try {
     await body();
     cases.push({ name, status: 'PASS' });
@@ -94,15 +99,26 @@ for (const kind of ['populated', 'empty', 'fifo', 'directory-link', 'file-link',
       await chmod(output, 0o644);
       // Writable sticky directory passes output initialization. A different UID
       // can create new files but cannot unlink this root-owned regular file.
+      const identity = await run('permission-identity', 'setpriv', ['--reuid=65534', '--regid=0', '--clear-groups', '--', process.execPath, '-e',
+        'const fs=require("node:fs");console.log(JSON.stringify({uid:process.getuid(),gid:process.getgid(),groups:process.getgroups(),status:fs.readFileSync("/proc/self/status","utf8"),owner:fs.statSync(process.argv[1]).uid}));', output]);
+      assert.equal(identity.exitCode, 0);
+      const credentials = JSON.parse(identity.stdout);
+      assert.equal(credentials.uid, 65534);
+      assert.equal(credentials.owner, 0);
+      assert.match(credentials.status, /^CapEff:\s+0+$/m);
       assert.equal((await run('permission-write-control', 'setpriv', ['--reuid=65534', '--regid=0', '--clear-groups', '--', 'touch', join(out, 'write-control')])).exitCode, 0);
     }
     const result = await compile(`compile-${kind}`, out, kind === 'permission');
     if (kind === 'file-link' || kind === 'dangling-link') {
       assert.equal(result.exitCode, 0, `${kind}: ordinary archive creation must succeed`);
       await members(`${kind}-members`, output);
+      const outputInfo = await info(output, false);
+      assert.equal(outputInfo?.isFile(), true, `${kind}: output must be a regular archive`);
+      assert.equal(outputInfo?.isSymbolicLink(), false, `${kind}: output link should be replaced`);
       if (kind === 'file-link') {
         assert.equal(await text(target), 'linked file must not change\n', `${kind}: referent was modified`);
-        assert.equal((await info(output, false))?.isSymbolicLink(), false, `${kind}: output link should be replaced`);
+      } else {
+        assert.equal(await info(target, false), undefined, `${kind}: missing referent must remain absent`);
       }
     } else {
       const preserved = kind === 'fifo' ? (await info(output))?.isFIFO()
