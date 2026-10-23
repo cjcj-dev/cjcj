@@ -160,31 +160,76 @@ if (argv['skip-preflight'] === undefined) {
 
 // Observe completion directly: GNU timeout's rc=124 also represents a
 // program that deliberately returns 124, and 128+signal can be a normal exit.
+// The supervisor remains the private process-group leader until cleanup. It
+// kills its own group, never a potentially reused PID after a child has exited.
+const productSupervisor = `
+  const {spawn} = require('node:child_process');
+  const killGroup = () => process.kill(-process.pid, 'SIGKILL');
+  let finished = false;
+  let status = {exitCode: null};
+  let bytes = 0;
+  const finish = extra => {
+    if (finished) return;
+    finished = true;
+    let sent = false;
+    const report = value => {
+      if (sent) return;
+      sent = true;
+      process.send({...status, ...value}, killGroup);
+      setTimeout(killGroup, 1000);
+    };
+    let flushed = 0;
+    const drained = () => { if (++flushed === 2) report(extra); };
+    process.stdout.end(drained);
+    process.stderr.end(drained);
+    setTimeout(() => report({...extra, pipeIncomplete: true}), 1000);
+  };
+  process.on('disconnect', killGroup);
+  process.stdout.on('error', killGroup);
+  process.stderr.on('error', killGroup);
+  const child = spawn(process.argv[1], [], {stdio: ['ignore', 'pipe', 'pipe']});
+  for (const [input, output] of [[child.stdout, process.stdout], [child.stderr, process.stderr]]) {
+    input.on('data', data => {
+      if (finished) return;
+      bytes += data.length;
+      if (bytes > 1024 * 1024) finish({outputExceeded: true});
+      else output.write(data);
+    });
+  }
+  child.on('error', error => finish({spawnError: {code: error.code}}));
+  child.on('exit', (exitCode, signal) => {
+    status = {exitCode, signal};
+    // EOF is independent of the immediate child's exit. A descendant may
+    // retain a pipe, including after leaving our group: never wait forever.
+    setTimeout(() => finish({pipeIncomplete: true}), 1000);
+  });
+  child.on('close', () => finish({}));
+  setTimeout(() => finish({timedOut: true}), 30_000);
+`;
+
 function runProduct(file, cwd, env) {
   return new Promise(resolve => {
-    const child = spawn(file, [], {cwd, env, detached: true, stdio: ['ignore', 'pipe', 'pipe']});
+    const child = spawn(process.execPath, ['-e', productSupervisor, file],
+      {cwd, env, detached: true, stdio: ['ignore', 'pipe', 'pipe', 'ipc']});
     let stdout = '';
     let stderr = '';
-    let timedOut = false;
+    let result;
     let spawnError;
     child.stdout.setEncoding('utf8').on('data', text => { stdout += text; });
     child.stderr.setEncoding('utf8').on('data', text => { stderr += text; });
+    child.on('message', message => { result = message; });
     child.on('error', error => { spawnError = error; });
-    const timer = setTimeout(() => {
-      timedOut = true;
-      // The private process group includes descendants holding output pipes.
-      // SIGKILL bounds programs that ignore SIGTERM as well as simple loops.
-      try { process.kill(-child.pid, 'SIGKILL'); }
-      catch (error) { if (error.code !== 'ESRCH') spawnError = error; }
-    }, 30_000);
     child.on('close', (exitCode, signal) => {
-      clearTimeout(timer);
-      resolve({stdout, stderr, exitCode, signal, timedOut, spawnError});
+      resolve({stdout, stderr, ...(result || {exitCode: null, signal}),
+        supervisorExitCode: exitCode, supervisorSignal: signal,
+        ...(spawnError ? {spawnError} : {})});
     });
   });
 }
 
 function incompleteProduct(run, arm) {
+  if (run.outputExceeded) return `${arm}:<RUN-OUTPUT-LIMIT-1MiB>`;
+  if (run.pipeIncomplete) return `${arm}:<RUN-PIPE-INCOMPLETE>`;
   if (run.timedOut) return `${arm}:<RUN-TIMEOUT-30s>`;
   if (run.spawnError) return `${arm}:<RUN-ERROR ${run.spawnError.code}>`;
   if (run.signal) return `${arm}:<RUN-SIGNAL ${run.signal}>`;
@@ -215,6 +260,10 @@ async function classify(file) {
       if (incomplete.length) return `FAIL\t${name}\t${incomplete.join(' ')}`;
       const sout = commandSubstitution(selfRun.stdout);
       const selfCombined = `${selfRun.stdout}${selfRun.stderr}`;
+      const referenceCombined = referenceRun ? `${referenceRun.stdout}${referenceRun.stderr}` : '';
+      if (isAbiLoadError(referenceCombined)) {
+        return `FAIL\t${name}\t${HARNESS_TAG}: reference product ABI/runtime mismatch: ${bashQ(referenceCombined.split(/\r?\n/).find(Boolean) || '', 120)}`;
+      }
       if (isAbiLoadError(selfCombined)) {
         return `FAIL\t${name}\t${HARNESS_TAG}: product ABI/runtime mismatch: ${bashQ(selfCombined.split(/\r?\n/).find(Boolean) || '', 120)}`;
       }

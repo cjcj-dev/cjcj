@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import {spawnSync} from 'node:child_process';
+import {spawn, spawnSync} from 'node:child_process';
 import {parseSummary} from '../ci/release/g8.mjs';
 import {buildFullGateFloor} from '../build/lib/full-gate-floor-schema.mjs';
 
@@ -14,6 +14,141 @@ const script = path.resolve(argv.script || path.join(import.meta.dirname, 'difft
 const evidence = argv.evidence ? path.resolve(argv.evidence) : root;
 await fs.mkdir(evidence, {recursive: true});
 try {
+  if (argv.matrix) {
+    const corpus = path.join(root, 'corpus');
+    const sdk = path.join(root, 'sdk');
+    await fs.mkdir(corpus);
+    await fs.mkdir(path.join(sdk, 'runtime/lib/linux_x86_64_cjnative'), {recursive: true});
+    await fs.writeFile(path.join(sdk, 'runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so'), 'fixture only');
+    const cases = ['exit42', 'exit124', 'exit143', 'exit127', 'ref-timeout', 'self-timeout',
+      'ref-signal', 'self-signal', 'ref-loader', 'compile-fail', 'unequal', 'spawn-error', 'output-limit', 'pipe'];
+    for (const name of cases) await fs.writeFile(path.join(corpus, name + '.cj'), '// controlled product\n');
+    const compiler = path.join(root, 'compiler.mjs');
+    await fs.writeFile(compiler, `#!${process.execPath}
+      import fs from 'node:fs';
+      import path from 'node:path';
+      if (process.argv.includes('--version')) process.exit(0);
+      const name = path.basename(process.argv[2], '.cj');
+      const out = process.argv[process.argv.indexOf('-o') + 1];
+      const arm = out.endsWith('.ref') ? 'ref' : 'self';
+      if (name === 'compile-fail') process.exit(1);
+      if (name === 'spawn-error') process.exit(0);
+      let body = 'process.exit(0)';
+      if (name.startsWith('exit')) body = 'process.exit(' + Number(name.slice(4)) + ')';
+      if (name === arm + '-timeout') body = 'setInterval(() => {}, 1000)';
+      if (name === arm + '-signal') body = 'process.kill(process.pid, "SIGTERM")';
+      if (name === 'ref-loader') body = arm === 'ref' ? 'console.error("error while loading shared libraries: fixture.so");process.exit(127)' : 'process.exit(127)';
+      if (name === 'unequal') body = 'console.log(' + JSON.stringify(arm) + ')';
+      if (name === 'output-limit') body = 'process.stdout.write("x".repeat(1024 * 1024 + 1))';
+      if (name === 'pipe') body = 'require("node:child_process").spawn(process.execPath,["-e","setTimeout(() => {}, 4000)"],{stdio:["ignore",1,2]});process.exit(42)';
+      fs.writeFileSync(out, ${JSON.stringify(`#!${process.execPath}\n`)} + body + '\\n', {mode: 0o755});
+    `, {mode: 0o755});
+    const env = {...process.env, DIFFTEST_SELF: compiler, DIFFTEST_REF: compiler, DIFFTEST_SELF_TC: sdk, DIFFTEST_TC: sdk};
+    delete env.CJ_HOST_RTLIB;
+    const unrelated = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {stdio: 'ignore'});
+    try {
+      const result = spawnSync(process.execPath, [process.argv[1], script, '--jobs', '2', corpus],
+        {env, encoding: 'utf8', timeout: 100_000, maxBuffer: 4 * 1024 * 1024});
+      await fs.writeFile(path.join(evidence, 'matrix.stdout.log'), result.stdout || '');
+      await fs.writeFile(path.join(evidence, 'matrix.stderr.log'), result.stderr || '');
+      await fs.writeFile(path.join(evidence, 'matrix.execution.json'), JSON.stringify({rc: result.status, signal: result.signal, error: result.error?.message}) + '\n');
+      assert.equal(result.error, undefined);
+      assert.equal(result.status, 0, result.stderr);
+      for (const code of [42, 124, 143, 127]) assert.match(result.stdout, new RegExp('^PASS +exit' + code + ' +exit=' + code + '$', 'm'));
+      for (const name of cases.filter(name => !name.startsWith('exit') && name !== 'unequal')) assert.match(result.stdout, new RegExp('^FAIL +' + name + ' +', 'm'));
+      assert.match(result.stdout, /^MISMATCH +unequal +/m);
+      assert.match(result.stdout, /^FAIL +ref-loader +HARNESS: reference product/m);
+      assert.match(result.stdout, /^FAIL +spawn-error +.*RUN-ERROR ENOENT/m);
+      assert.match(result.stdout, /^FAIL +output-limit +.*RUN-OUTPUT-LIMIT/m);
+      assert.match(result.stdout, /^FAIL +pipe +.*RUN-PIPE-INCOMPLETE/m);
+      assert.equal(unrelated.exitCode, null);
+      assert.doesNotThrow(() => process.kill(unrelated.pid, 0));
+      console.log('PASS matrix controls, single-arm failures, loader, output/pipe bounds, unrelated process');
+    } finally {
+      unrelated.kill('SIGTERM');
+      await new Promise(resolve => unrelated.once('close', resolve));
+    }
+  } else if (argv.lifecycle) {
+    const corpus = path.join(root, 'corpus');
+    const sdk = path.join(root, 'sdk');
+    await fs.mkdir(corpus);
+    await fs.mkdir(path.join(sdk, 'runtime/lib/linux_x86_64_cjnative'), {recursive: true});
+    await fs.writeFile(path.join(sdk, 'runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so'), 'fixture only');
+    await fs.writeFile(path.join(corpus, 'descendant.cj'), '// controlled descendant fixture\n');
+    const leaf = `
+      const fs = require('node:fs');
+      const stat = fs.readFileSync('/proc/self/stat', 'utf8');
+      fs.writeFileSync(process.argv[1], JSON.stringify({pid: process.pid, start: stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19]}));
+      process.send('ready');
+      setInterval(() => {}, 1000);
+      setTimeout(() => process.exit(0), 12000);
+    `;
+    const product = `#!${process.execPath}
+      const {spawn} = require('node:child_process');
+      const path = require('node:path');
+      const child = spawn(process.execPath, ['-e', ${JSON.stringify(leaf)}, path.join(process.env.DIFFTEST_DESCENDANTS, path.basename(process.argv[1]) + '.json')], {detached: ${Boolean(argv.escape)}, stdio: ${JSON.stringify(argv.escape ? ['ignore', 1, 2, 'ipc'] : ['ignore', 'ignore', 'ignore', 'ipc'])}});
+      child.once('message', () => ${argv.cancel ? 'setInterval(() => {}, 1000)' : 'process.exit(42)'});
+    `;
+    const compiler = path.join(root, 'compiler.mjs');
+    await fs.writeFile(compiler, `#!${process.execPath}
+      import fs from 'node:fs';
+      if (process.argv.includes('--version')) process.exit(0);
+      fs.writeFileSync(process.argv[process.argv.indexOf('-o') + 1], ${JSON.stringify(product)}, {mode: 0o755});
+    `, {mode: 0o755});
+    const records = path.join(evidence, 'descendants');
+    await fs.mkdir(records);
+    const env = {...process.env, DIFFTEST_SELF: compiler, DIFFTEST_REF: compiler,
+      DIFFTEST_SELF_TC: sdk, DIFFTEST_TC: sdk, DIFFTEST_DESCENDANTS: records};
+    delete env.CJ_HOST_RTLIB;
+    let execution;
+    if (argv.cancel) {
+      const cli = spawn(process.execPath, [process.argv[1], script, '--jobs', '1', corpus], {env, stdio: ['ignore', 'pipe', 'pipe']});
+      let stdout = '', stderr = '';
+      cli.stdout.on('data', data => { stdout += data; });
+      cli.stderr.on('data', data => { stderr += data; });
+      const closed = new Promise(resolve => cli.once('close', (status, signal) => resolve({status, signal, stdout, stderr})));
+      const start = Date.now();
+      while (!(await fs.readdir(records)).length && Date.now() - start < 10_000) await new Promise(resolve => setTimeout(resolve, 20));
+      cli.kill(String(argv.cancel));
+      execution = await closed;
+      await new Promise(resolve => setTimeout(resolve, 200));
+    } else {
+      execution = spawnSync(process.execPath, [process.argv[1], script, '--jobs', '1', corpus],
+        {env, encoding: 'utf8', timeout: 45_000, maxBuffer: 4 * 1024 * 1024});
+    }
+    await fs.writeFile(path.join(evidence, 'lifecycle.stdout.log'), execution.stdout || '');
+    await fs.writeFile(path.join(evidence, 'lifecycle.stderr.log'), execution.stderr || '');
+    const descendants = await Promise.all((await fs.readdir(records)).map(async name => JSON.parse(await fs.readFile(path.join(records, name), 'utf8'))));
+    async function states() {
+      return Promise.all(descendants.map(async identity => {
+        const stat = await fs.readFile(`/proc/${identity.pid}/stat`, 'utf8').catch(() => '');
+        const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+        return {...identity, state: fields[19] === identity.start ? fields[0] : 'gone'};
+      }));
+    }
+    const atReturn = await states();
+    // A broken baseline's fixture exits itself. Observe before that deadline;
+    // do not rely on the outer systemd unit to clean up a leaked descendant.
+    if (atReturn.some(item => !['gone', 'Z', 'X'].includes(item.state))) {
+      await new Promise(resolve => setTimeout(resolve, 13_000));
+    }
+    const terminal = await states();
+    await fs.writeFile(path.join(evidence, 'lifecycle.json'), JSON.stringify({
+      rc: execution.status, signal: execution.signal, error: execution.error?.message, atReturn, terminal,
+    }, null, 2) + '\n');
+    assert.equal(execution.error, undefined);
+    if (argv.cancel) {
+      assert.ok(execution.signal || execution.status !== 0);
+      assert.ok(descendants.length > 0);
+    } else {
+      assert.equal(execution.status, 0, execution.stderr);
+      assert.match(execution.stdout, argv.escape ? /^FAIL +descendant +.*RUN-PIPE-INCOMPLETE/m : /^PASS +descendant +exit=42$/m);
+      assert.equal(descendants.length, 2);
+    }
+    if (!argv.escape) assert.ok(atReturn.every(item => ['gone', 'Z', 'X'].includes(item.state)), JSON.stringify(atReturn));
+    assert.ok(terminal.every(item => ['gone', 'Z', 'X'].includes(item.state)), JSON.stringify(terminal));
+    console.log('PASS descendant lifecycle, cancellation or bounded escaped-pipe failure');
+  } else {
   const corpus = path.join(root, 'corpus');
   await fs.mkdir(corpus);
   for (const [name, body] of [
@@ -22,7 +157,7 @@ try {
     ['exit124', 'return 124'],
   ]) await fs.writeFile(path.join(corpus, `${name}.cj`), `main(): Int64 {\n${body}\n}\n`);
 
-  let sdk = process.env.DIFFTEST_TIMEOUT_SDK;
+  let sdk = process.env.DIFFTEST_TIMEOUT_SDK ? path.resolve(process.env.DIFFTEST_TIMEOUT_SDK) : '';
   let compiler;
   if (sdk) {
     compiler = path.join(sdk, 'bin/cjc');
@@ -106,6 +241,7 @@ fs.writeFileSync(args[args.indexOf('-o') + 1], ${JSON.stringify(`#!${process.exe
   await fs.writeFile(path.join(evidence, 'checks.json'), JSON.stringify(checks, null, 2) + '\n');
   for (const item of checks) console.log(`${item.pass ? 'PASS' : 'FAIL'} ${item.name}${item.error ? ': ' + item.error : ''}`);
   process.exitCode = checks.every(item => item.pass) ? 0 : 1;
+  }
 } finally {
   if (argv.evidence) await fs.rm(root, {recursive: true, force: true});
   else console.log(`Evidence: ${evidence}`);
