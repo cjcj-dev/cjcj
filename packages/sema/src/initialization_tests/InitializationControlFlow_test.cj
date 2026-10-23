@@ -425,6 +425,411 @@ public class InitializationControlFlowTest {
     }
 
     @TestCase
+    public func FinallyReadsNonThrowingTryAssignment(): Unit {
+        ExpectInitializationAccepted("""
+            func read(): Int64 {
+                var x: Int64
+                try { x = 7 } finally { let observed = x }
+                return x
+            }
+            """)
+    }
+
+    @TestCase
+    public func FinallyReadsAssignmentBeforeReturn(): Unit {
+        ExpectInitializationAccepted("""
+            func read(): Int64 {
+                var x: Int64
+                try { x = 7; return x } finally { let observed = x }
+            }
+            """)
+    }
+
+    @TestCase
+    public func FinallyIncludesReturnBeforeAssignment(): Unit {
+        ExpectInitializationDiagnostic("""
+            func read(flag: Bool): Int64 {
+                var x: Int64
+                try {
+                    if (flag) { return 1 }
+                    x = 7
+                } finally { let observed = x } // expected-init-error
+                return x
+            }
+            """)
+    }
+
+    @TestCase
+    public func ReturnBranchDoesNotPreventOnlyReachableLetWrite(): Unit {
+        ExpectInitializationAccepted("""
+            func read(flag: Bool): Int64 {
+                let x: Int64
+                if (flag) {
+                    try { x = 1 } finally {}
+                    return 1
+                }
+                x = 2
+                return x
+            }
+            """)
+    }
+
+    @TestCase
+    public func MatchReturnBranchDoesNotPreventOnlyReachableLetWrite(): Unit {
+        ExpectInitializationAccepted("""
+            func read(flag: Bool): Int64 {
+                let x: Int64
+                match (flag) {
+                    case true => x = 1; return 1
+                    case _ => 0
+                }
+                x = 2
+                return x
+            }
+            """)
+    }
+
+    @TestCase
+    public func DirectConditionalLetWriteRemainsPossible(): Unit {
+        ExpectInitializationDiagnostic("""
+            func read(flag: Bool): Int64 {
+                let x: Int64
+                if (flag) { x = 1 }
+                x = 2 // expected-let-error
+                return x
+            }
+            """, immutable: true)
+    }
+
+    @TestCase
+    public func MutuallyExclusiveLetWritesRemainAccepted(): Unit {
+        ExpectInitializationAccepted("""
+            func read(flag: Bool): Int64 {
+                let x: Int64
+                if (flag) { x = 1 } else { x = 2 }
+                return x
+            }
+            """)
+    }
+
+    @TestCase
+    public func ElseIfConditionWriteReachesBothSuccessors(): Unit {
+        ExpectInitializationAccepted("""
+            func read(flag: Bool, gate: Bool): Int64 {
+                var x: Int64
+                if (flag) { x = 1 }
+                else if (if (gate) { x = 2; true } else { x = 3; false }) {
+                    let observed = x
+                } else { let observed = x }
+                return x
+            }
+            """)
+    }
+
+    @TestCase
+    public func ForGuardDoesNotRunOnEmptyInput(): Unit {
+        ExpectInitializationDiagnostic("""
+            func read(n: Int64, gate: Bool): Int64 {
+                var x: Int64
+                for (i in 0..n where (if (gate) { x = 1; true } else { x = 2; true })) {}
+                return x // expected-init-error
+            }
+            """)
+    }
+
+    @TestCase
+    public func ForInputAlwaysRunsBeforeZeroTrips(): Unit {
+        ExpectInitializationAccepted("""
+            func read(gate: Bool): Int64 {
+                var x: Int64
+                for (i in (if (gate) { x = 1; 0..0 } else { x = 2; 0..0 })) {}
+                return x
+            }
+            """)
+    }
+
+    @TestCase
+    public func ForGuardWriteIsAvailableToBody(): Unit {
+        ExpectInitializationAccepted("""
+            func read(n: Int64, gate: Bool): Unit {
+                var x: Int64
+                for (i in 0..n where (if (gate) { x = 1; true } else { x = 2; true })) {
+                    let observed = x
+                }
+            }
+            """)
+    }
+
+    @TestCase
+    public func BreakSkipsDoWhileConditionAssignment(): Unit {
+        ExpectInitializationDiagnostic("""
+            func read(stop: Bool, gate: Bool): Int64 {
+                var x: Int64
+                do { if (stop) { break } }
+                while (if (gate) { x = 1; false } else { x = 2; false })
+                return x // expected-init-error
+            }
+            """)
+    }
+
+    @TestCase
+    public func ContinueReachesDoWhileConditionAssignment(): Unit {
+        ExpectInitializationAccepted("""
+            func read(gate: Bool): Int64 {
+                var x: Int64
+                do { continue }
+                while (if (gate) { x = 1; false } else { x = 2; false })
+                return x
+            }
+            """)
+    }
+
+    @TestCase
+    public func DoWhileBodyWriteReachesBreak(): Unit {
+        ExpectInitializationAccepted("""
+            func read(): Int64 {
+                var x: Int64
+                do { x = 7; break } while (false)
+                return x
+            }
+            """)
+    }
+
+    @TestCase
+    public func MatchLocalBreakDoesNotTerminateArm(): Unit {
+        ExpectInitializationDiagnostic("""
+            func read(flag: Bool): Int64 {
+                var x: Int64
+                match (flag) {
+                    case true => do { break } while (false)
+                    case _ => x = 7
+                }
+                return x // expected-init-error
+            }
+            """)
+    }
+
+    @TestCase
+    public func SubscriptStoreChecksBase(): Unit {
+        ExpectInitializationDiagnostic("""
+            func write(): Unit {
+                var values: Array<Int64>
+                values[0] = 7 // expected-init-error
+            }
+            """)
+    }
+
+    @TestCase
+    public func SubscriptStoreChecksIndex(): Unit {
+        ExpectInitializationDiagnostic("""
+            func write(values: Array<Int64>): Unit {
+                var index: Int64
+                values[index] = 7 // expected-init-error
+            }
+            """)
+    }
+
+    @TestCase
+    public func InitializedSubscriptStoreAccepted(): Unit {
+        ExpectInitializationAccepted("""
+            func write(values: Array<Int64>): Unit {
+                var index = 0
+                values[index] = 7
+            }
+            """)
+    }
+
+    @TestCase
+    public func LetPatternAndDoesNotInitializeFalseExit(): Unit {
+        ExpectInitializationDiagnostic("""
+            func read(value: ?Int64, gate: Bool): Int64 {
+                var x: Int64
+                if (let Some(n) <- value && (if (gate) { x = n; true } else { x = 2; true })) {}
+                return x // expected-init-error
+            }
+            """)
+    }
+
+    @TestCase
+    public func LetPatternAndInitializesTrueExit(): Unit {
+        ExpectInitializationAccepted("""
+            func read(value: ?Int64, gate: Bool): Int64 {
+                var x: Int64
+                if (let Some(n) <- value && (if (gate) { x = n; true } else { x = 2; true })) {
+                    return x
+                }
+                return 0
+            }
+            """)
+    }
+
+    @TestCase
+    public func CatchReturnDoesNotContributePossibleWriteToNormalExit(): Unit {
+        ExpectInitializationAccepted("""
+            func read(flag: Bool): Int64 {
+                let x: Int64
+                try { if (flag) { throw Exception() } }
+                catch (e: Exception) { x = 1; return x }
+                x = 2
+                return x
+            }
+            """)
+    }
+
+    @TestCase
+    public func FinallyDoesNotMergeReturningWriteIntoNormalExit(): Unit {
+        ExpectInitializationAccepted("""
+            func read(flag: Bool): Int64 {
+                let x: Int64
+                try { if (flag) { x = 1; return x } } finally {}
+                x = 2
+                return x
+            }
+            """)
+    }
+
+    @TestCase
+    public func FinallyWritesRemainPossibleAfterConditionalEarlyWrite(): Unit {
+        ExpectInitializationDiagnostic("""
+            func read(flag: Bool): Int64 {
+                let x: Int64
+                try { if (flag) { x = 1; return x } }
+                finally { x = 2 } // expected-let-error
+                return 0
+            }
+            """, immutable: true)
+    }
+
+    @TestCase
+    public func FinallyWriteSurvivesExceptionalOnlyPriorAssignment(): Unit {
+        ExpectInitializationAccepted("""
+            func read(flag: Bool): Int64 {
+                var x: Int64
+                try {
+                    if (flag) { x = 1; throw Exception() }
+                } finally { x = 2 }
+                return x
+            }
+            """)
+    }
+
+    @TestCase
+    public func FinallyCallAfterWriteReadsInitializedValue(): Unit {
+        ExpectInitializationAccepted("""
+            func mayThrow(): Unit { throw Exception() }
+            func read(): Int64 {
+                var x: Int64
+                try { x = 7; mayThrow() }
+                finally { let observed = x }
+                return x
+            }
+            """)
+    }
+
+    @TestCase
+    public func FinallyCallBeforeWriteRetainsExceptionEntry(): Unit {
+        ExpectInitializationDiagnostic("""
+            func mayThrow(): Unit { throw Exception() }
+            func read(): Int64 {
+                var x: Int64
+                try { mayThrow(); x = 7 }
+                finally { let observed = x } // expected-init-error
+                return x
+            }
+            """)
+    }
+
+    @TestCase
+    public func ResourceCloseCanReachCatchBeforeReturn(): Unit {
+        ExpectInitializationDiagnostic("""
+            class Handle <: Resource {
+                public func close(): Unit { throw Exception() }
+                public func isClosed(): Bool { false }
+            }
+            func read(resource: Handle): Int64 {
+                var x: Int64
+                try (r = resource) { return 1 }
+                catch (e: Exception) { let observed = x } // expected-init-error
+                return 0
+            }
+            """)
+    }
+
+    @TestCase
+    public func ResourceCloseCarriesAssignmentBeforeReturn(): Unit {
+        ExpectInitializationAccepted("""
+            class Handle <: Resource {
+                public func close(): Unit { throw Exception() }
+                public func isClosed(): Bool { false }
+            }
+            func read(resource: Handle): Int64 {
+                var x: Int64
+                try (r = resource) { x = 7; return x }
+                catch (e: Exception) { return x }
+            }
+            """)
+    }
+
+    @TestCase
+    public func ConstructorBranchWritesInitializeField(): Unit {
+        ExpectInitializationAccepted("""
+            class Value {
+                let x: Int64
+                init(flag: Bool) {
+                    if (flag) { this.x = 1 } else { this.x = 2 }
+                }
+                func read(): Int64 { x }
+            }
+            """)
+    }
+
+    @TestCase
+    public func ConstructorFinallyInitializesBeforeReturn(): Unit {
+        ExpectInitializationAccepted("""
+            class Value {
+                let x: Int64
+                init() { try { return } finally { x = 7 } }
+                func read(): Int64 { x }
+            }
+            """)
+    }
+
+    @TestCase
+    public func ConstructorOnlyThrowingPathsNeedNoFieldValue(): Unit {
+        ExpectInitializationAccepted("""
+            class Value {
+                let x: Int64
+                init() { throw Exception() }
+            }
+            """)
+    }
+
+    @TestCase
+    public func NestedFunctionDoesNotEndEnclosingFlow(): Unit {
+        ExpectInitializationAccepted("""
+            func read(): Int64 {
+                func inner(): Int64 { return 1 }
+                let x: Int64
+                x = inner()
+                return x
+            }
+            """)
+    }
+
+    @TestCase
+    public func ConditionalMatchPreservesOrderedConditionWrites(): Unit {
+        ExpectInitializationAccepted("""
+            func read(gate: Bool): Int64 {
+                var x: Int64
+                match {
+                    case (if (gate) { x = 1; false } else { x = 2; false }) => 0
+                    case _ => x
+                }
+            }
+            """)
+    }
+
+    @TestCase
     public func CatchBindingsAreInitializedForEachCatch(): Unit {
         ExpectInitializationAccepted("""
             func read(): Int64 {
