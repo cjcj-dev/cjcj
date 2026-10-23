@@ -2,6 +2,8 @@ package cjcj::compiler_unittest
 
 import std.collection.*
 import std.env.getVariable
+import std.fs.Directory as FSDirectory
+import std.fs.removeIfExists
 import std.unittest.*
 import std.unittest.testmacro.*
 import cjcj::ast.*
@@ -65,8 +67,22 @@ private func isCoreArray(ty: Ty): Bool {
 public class ArrayCloneMetadataTest {
     @TestCase
     public func preservesArrayCloneMetadata(): Unit {
-        let dir = getVariable("ARRAY_CLONE_TEST_ROOT").getOrThrow()
-        let _ = FileUtil.CreateDirs(dir + "/")
+        let explicitRoot = getVariable("ARRAY_CLONE_TEST_ROOT")
+        let dir = if (let Some(root) <- explicitRoot) {
+            let _ = FileUtil.CreateDirs(root + "/")
+            root
+        } else {
+            FSDirectory.createTemp(getVariable("TMPDIR") ?? ".").toString()
+        }
+        try {
+            checkArrayCloneMetadata(dir)
+        } finally {
+            // Only the default path is owned by this test; retain manual-driver evidence.
+            if (explicitRoot.isNone()) { let _ = removeIfExists(dir, recursive: true) }
+        }
+    }
+
+    private func checkArrayCloneMetadata(dir: String): Unit {
         let path = dir + "/clone_metadata.cj"
         @Assert(FileUtil.WriteToFile(path, cloneSource))
         let invocation = CompilerInvocation()
