@@ -596,5 +596,10 @@
     "file": "scripts/test_array_clone_metadata_unit.py",
     "executor": "manual",
     "reason": "Manual bounded Linux ArrayCloneMetadata test links this registered compiler_unittest source against existing release archives; invoke python3 scripts/test_array_clone_metadata_unit.py --build-tree /path/to/product --sdk /path/to/paired-sdk --out /path/to/private-evidence. No workflow provisions these archives."
+  },
+  {
+    "file": "packages/sema/src/initialization_tests/InitializationControlFlow_test.cj",
+    "executor": "cjpm",
+    "member": "packages/sema"
   }
 ]

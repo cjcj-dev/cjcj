@@ -1704,6 +1704,17 @@ public class InitializationChecker {
                 mayThrow = !(ty.IsInteger() && conv.overflowStrategy != OverflowStrategy.THROWING)
             }
         }
+        if (let Some(interpolation) <- (expr as InterpolationExpr)) {
+            if (let Some(block) <- interpolation.block) {
+                if (let Some(ty) <- block.GetTy()) {
+                    // AfterTypeCheck creates the implicit conversion call only
+                    // after initialization checking. Record it after this part's
+                    // evaluation, before a later part can initialize a variable.
+                    // Primitive and String appends do not call user ToString.
+                    mayThrow = !ty.IsPrimitive() && !ty.IsString()
+                }
+            }
+        }
         if (mayThrow) { RecordFlowExit(expr, exceptional: true, terminates: false) }
         if (let Some(overloadable) <- (expr as OverloadableExpr)) {
             if (expr.astKind != ASTKind.ASSIGN_EXPR && OverloadableMayThrow(overloadable)) {
@@ -1850,11 +1861,7 @@ public class InitializationChecker {
                     if (let Some(strInterp) <- lit.siExpr) {
                         var result = true
                         for (partExpr in strInterp.strPartExprs) {
-                            if (let Some(interpolation) <- (partExpr as InterpolationExpr)) {
-                                result = CheckBlockOption(interpolation.block) && result
-                            } else {
-                                result = CheckInitInExpr(partExpr) && result
-                            }
+                            result = CheckInitInExpr(partExpr) && result
                         }
                         result
                     } else { true }
