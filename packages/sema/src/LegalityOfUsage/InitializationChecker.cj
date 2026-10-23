@@ -546,6 +546,43 @@ private func CollectConditionalInitializedDecls(node: Node, uninitsDecls: ArrayL
     return conditionalInitialized
 }
 
+// Capture the whole branch state, including assignments in a guard whose
+// variables need not be referenced again by the branch body.
+private func TakeInitializedDecls(uninitsDecls: ArrayList<Decl>): ArrayList<Decl> {
+    let initialized = ArrayList<Decl>()
+    for (decl in uninitsDecls) {
+        if (decl.TestAttr(Attribute.INITIALIZED)) {
+            initialized.add(decl)
+            decl.DisableAttr(Attribute.INITIALIZED)
+        }
+    }
+    return initialized
+}
+
+private func HasLocalLoopJump(loop: DoWhileExpr): Bool {
+    let found = InitBoolBox(false)
+    if (let Some(body) <- loop.body) {
+        let _ = Walker(body, visitPre: { node: Node =>
+            if (node.TestAttr(Attribute.UNREACHABLE)) {
+                return VisitAction.SKIP_CHILDREN
+            }
+            if (let Some(_) <- (node as FuncBody)) {
+                return VisitAction.SKIP_CHILDREN
+            }
+            if (let Some(jump) <- (node as JumpExpr)) {
+                if (let Some(target) <- jump.refLoop) {
+                    if (refEq(target, loop)) {
+                        found.value = true
+                        return VisitAction.STOP_NOW
+                    }
+                }
+            }
+            return VisitAction.WALK_CHILDREN
+        }).Walk()
+    }
+    return found.value
+}
+
 private func MetControlTransferExpr(node: Node): Bool {
     if (node.astKind == ASTKind.RETURN_EXPR || node.astKind == ASTKind.JUMP_EXPR ||
         node.astKind == ASTKind.THROW_EXPR) {
@@ -566,6 +603,12 @@ private func MetControlTransferExpr(node: Node): Bool {
         return false
     }
     if (let Some(doWhile) <- (node as DoWhileExpr)) {
+        // A break reaches the loop exit and a continue can reach it via the
+        // condition. Neither proves that the surrounding branch terminates.
+        // Check all local jumps first: a conditional break may precede a return.
+        if (HasLocalLoopJump(doWhile)) {
+            return false
+        }
         if (let Some(body) <- doWhile.body) {
             return MetControlTransferExpr(body)
         }
@@ -599,6 +642,25 @@ public class InitializationChecker {
     private let ctorUninitVars: ArrayList<CtorUninitVars> = ArrayList<CtorUninitVars>()
     private var optionalCtxDepth: Int64 = 0
     private var tryDepth: Int64 = 0
+    // Definite initialization is reset between exception branches. Keep
+    // possible assignments separately so that resetting it cannot permit a
+    // second assignment to a let in a catch or finally block.
+    private let exceptionAssignments: ArrayList<ArrayList<Decl>> = ArrayList<ArrayList<Decl>>()
+    private let possibleReassignments: ArrayList<Decl> = ArrayList<Decl>()
+
+    private func RestorePossibleReassignments(size: Int64, outgoing: ArrayList<Decl>): Unit {
+        while (possibleReassignments.size > size) {
+            let decl = possibleReassignments[possibleReassignments.size - 1]
+            possibleReassignments.remove(at: possibleReassignments.size - 1)
+            AddUniqueDecl(outgoing, decl)
+        }
+    }
+
+    private func AddPossibleReassignments(decls: ArrayList<Decl>): Unit {
+        for (decl in decls) {
+            AddUniqueDecl(possibleReassignments, decl)
+        }
+    }
 
     public init(ctx: ASTContext, diag: BasicDiagnosticEngine, opts!: OptionGlobalOptions = OptionGlobalOptions()) {
         this.ctx = ctx
@@ -879,6 +941,7 @@ public class InitializationChecker {
     }
 
     private func CheckInitInFuncBody(body: FuncBody): Unit {
+        let oldPossibleSize = possibleReassignments.size
         currentFuncBodies.add(body)
         if (let Some(generic) <- body.generic) {
             for (typeParam in generic.typeParameters) {
@@ -915,6 +978,7 @@ public class InitializationChecker {
             CheckBlockOption(body.body)
         }
         currentFuncBodies.remove(at: currentFuncBodies.size - 1)
+        RestorePossibleReassignments(oldPossibleSize, ArrayList<Decl>())
     }
 
     private func CheckInitInVarWithPatternDecl(vpd: VarWithPatternDecl): Unit {
@@ -979,6 +1043,7 @@ public class InitializationChecker {
             if (let Some(target) <- refExpr.GetTarget()) {
                 if (let Some(varDecl) <- (target as VarDecl)) {
                     if (NotAssignableVariable(varDecl, inInitFunction) ||
+                        (!varDecl.isVar && ContainsInitDecl(possibleReassignments, varDecl)) ||
                         IsAssignLetDefinedOuterLoop(ctx, varDecl, assignOrInc)) {
                         if (varDecl.TestAttr(Attribute.COMMON) && inInitFunction) {
                             DiagCJMPCannotAssignToImmutableCommonInCtor(diag, assignOrInc, refExpr)
@@ -1026,7 +1091,8 @@ public class InitializationChecker {
         let memberBase = member.baseExpr.getOrThrow()
         if (let Some(target) <- member.target) {
             if (let Some(varDecl) <- (target as VarDecl)) {
-                if (NotAssignableVariable(varDecl, inInitFunction)) {
+                if (NotAssignableVariable(varDecl, inInitFunction) ||
+                    (!varDecl.isVar && ContainsInitDecl(possibleReassignments, varDecl))) {
                     DiagCannotAssignToImmutable(diag, assignExpr, member)
                 }
                 let realBase = GetRealExpr(memberBase)
@@ -1328,6 +1394,9 @@ public class InitializationChecker {
             }
         }
         decl.EnableAttr(Attribute.INITIALIZED)
+        for (assignments in exceptionAssignments) {
+            AddUniqueDecl(assignments, decl)
+        }
     }
 
     private func HasInitVarsAfterTerminator(scopeName: String): Bool {
@@ -1843,18 +1912,41 @@ public class InitializationChecker {
         for (resource in tryExpr.resourceSpec) {
             CheckInitialization(resource)
         }
+        let uninitsDecls = ArrayList<Decl>()
+        GetUnInitsInExpr(tryExpr, uninitsDecls)
+        let commonInitedDecls = ArrayList<Decl>()
+        let firstBranchInited = InitBoolBox(false)
+        let assignments = ArrayList<Decl>()
+        exceptionAssignments.add(assignments)
+        let oldPossibleSize = possibleReassignments.size
         tryDepth++
         if (let Some(lambda) <- tryExpr.tryLambda) {
             CheckInitialization(lambda)
+            // The effect-handler lambda has its own initialization scope.
+            let _ = TakeInitializedDecls(uninitsDecls)
+            firstBranchInited.value = true
         } else {
-            CheckBlockOption(tryExpr.tryBlock)
+            if (let Some(block) <- tryExpr.tryBlock) {
+                CheckInitialization(block)
+                MergeBranchInitialization(block, TakeInitializedDecls(uninitsDecls),
+                    commonInitedDecls, firstBranchInited)
+            }
         }
         tryDepth--
-        for (pattern in tryExpr.catchPatterns) {
-            result = CheckInitInPattern(pattern) && result
+        for (decl in assignments) {
+            AddUniqueDecl(possibleReassignments, decl)
         }
-        for (block in tryExpr.catchBlocks) {
+        let catchEntrySize = possibleReassignments.size
+        let catchPossible = ArrayList<Decl>()
+        for (idx in 0..tryExpr.catchBlocks.size) {
+            if (idx < tryExpr.catchPatterns.size) {
+                result = CheckInitInPattern(tryExpr.catchPatterns[idx]) && result
+            }
+            let block = tryExpr.catchBlocks[idx]
             CheckInitialization(block)
+            MergeBranchInitialization(block, TakeInitializedDecls(uninitsDecls),
+                commonInitedDecls, firstBranchInited)
+            RestorePossibleReassignments(catchEntrySize, catchPossible)
         }
         for (handler in tryExpr.handlers) {
             result = CheckPatternOption(handler.commandPattern) && result
@@ -1863,8 +1955,28 @@ public class InitializationChecker {
             } else {
                 CheckBlockOption(handler.block)
             }
+            // Handler bodies may run conditionally; their local initialization
+            // must not escape into another handler or the surrounding function.
+            let _ = TakeInitializedDecls(uninitsDecls)
         }
+        for (decl in assignments) {
+            AddUniqueDecl(possibleReassignments, decl)
+        }
+        // finally also runs when the try/catch exits exceptionally, possibly
+        // before any of the branch assignments. Check its reads from the entry
+        // state; its own assignments are unconditional on a normal exit.
         CheckBlockOption(tryExpr.finallyBlock)
+        exceptionAssignments.remove(at: exceptionAssignments.size - 1)
+        let outgoing = ArrayList<Decl>()
+        RestorePossibleReassignments(oldPossibleSize, outgoing)
+        // Possible writes still matter after the try, even when no write is
+        // definite on every normal exit. Do not permit a later let assignment.
+        for (decl in assignments) {
+            if (ContainsInitDecl(uninitsDecls, decl)) {
+                AddUniqueDecl(possibleReassignments, decl)
+            }
+        }
+        UpdateInitCondition(commonInitedDecls, uninitsDecls)
         return result
     }
 
@@ -1919,7 +2031,12 @@ public class InitializationChecker {
     private func CheckInitInCondBlock(block: Block, uninitsDecls: ArrayList<Decl>,
         commonInitedDeclsOfBranches: ArrayList<Decl>, firstInitBranchInited: InitBoolBox): Unit {
         let initedInBlock = CheckAndGetConditionalInitDecls(block, uninitsDecls)
-        if (MetControlTransferExpr(block)) {
+        MergeBranchInitialization(block, initedInBlock, commonInitedDeclsOfBranches, firstInitBranchInited)
+    }
+
+    private func MergeBranchInitialization(node: Node, initedInBlock: ArrayList<Decl>,
+        commonInitedDeclsOfBranches: ArrayList<Decl>, firstInitBranchInited: InitBoolBox): Unit {
+        if (MetControlTransferExpr(node)) {
             return
         }
         if (!firstInitBranchInited.value) {
@@ -1971,31 +2088,51 @@ public class InitializationChecker {
         GetUnInitsInExpr(matchExpr, uninitsDecls)
         let commonInitedDeclsOfBranches = ArrayList<Decl>()
         let firstInitBranchInited = InitBoolBox(false)
+        let oldPossibleSize = possibleReassignments.size
+        let branchPossible = ArrayList<Decl>()
+        let guardAssignments = ArrayList<Decl>()
         for (matchCase in matchExpr.matchCases) {
             if (matchCase.TestAttr(Attribute.UNREACHABLE)) {
                 continue
             }
+            var caseResult = true
             for (pattern in matchCase.patterns) {
-                result = CheckInitInPattern(pattern) && result
+                caseResult = CheckInitInPattern(pattern) && caseResult
             }
-            result = CheckExprOption(matchCase.patternGuard) && result
-            if (result) {
+            exceptionAssignments.add(guardAssignments)
+            caseResult = CheckExprOption(matchCase.patternGuard) && caseResult
+            exceptionAssignments.remove(at: exceptionAssignments.size - 1)
+            let guardPossibleSize = possibleReassignments.size
+            if (caseResult) {
                 if (let Some(block) <- matchCase.exprOrDecls) {
-                    CheckInitInCondBlock(block, uninitsDecls, commonInitedDeclsOfBranches, firstInitBranchInited)
+                    CheckInitialization(block)
+                    MergeBranchInitialization(block, TakeInitializedDecls(uninitsDecls),
+                        commonInitedDeclsOfBranches, firstInitBranchInited)
                 }
             }
+            // The next case may be reached without evaluating this guard at
+            // all (its pattern may not match). Clear even after a failed check.
+            let _ = TakeInitializedDecls(uninitsDecls)
+            RestorePossibleReassignments(guardPossibleSize, branchPossible)
+            // A failed guard can have written a let before falling through.
+            AddPossibleReassignments(guardAssignments)
+            result = caseResult && result
         }
         for (other in matchExpr.matchCaseOthers) {
             if (other.TestAttr(Attribute.UNREACHABLE)) {
                 continue
             }
             result = CheckExprOption(other.matchExpr) && result
+            let conditionPossibleSize = possibleReassignments.size
             if (result) {
                 if (let Some(block) <- other.exprOrDecls) {
                     CheckInitInCondBlock(block, uninitsDecls, commonInitedDeclsOfBranches, firstInitBranchInited)
                 }
             }
+            RestorePossibleReassignments(conditionPossibleSize, branchPossible)
         }
+        RestorePossibleReassignments(oldPossibleSize, branchPossible)
+        AddPossibleReassignments(branchPossible)
         UpdateInitCondition(commonInitedDeclsOfBranches, uninitsDecls)
         return result
     }
@@ -2007,6 +2144,7 @@ public class InitializationChecker {
         let commonInitedDeclsOfBranches = ArrayList<Decl>()
         let firstInitBranchInited = InitBoolBox(false)
         let curUninits = ArrayList<Decl>()
+        let branchPossible = ArrayList<Decl>()
         CopyDeclList(curUninits, uninitsDecls)
         var visitingIf = ifExpr
         var isFirstIf = true
@@ -2021,7 +2159,9 @@ public class InitializationChecker {
                 }
             }
             if (let Some(thenBlock) <- visitingIf.thenBody) {
+                let possibleSize = possibleReassignments.size
                 CheckInitInCondBlock(thenBlock, curUninits, commonInitedDeclsOfBranches, firstInitBranchInited)
+                RestorePossibleReassignments(possibleSize, branchPossible)
             }
             if (!visitingIf.hasElse) {
                 commonInitedDeclsOfBranches.clear()
@@ -2044,6 +2184,7 @@ public class InitializationChecker {
                 break
             }
         }
+        AddPossibleReassignments(branchPossible)
         UpdateInitCondition(commonInitedDeclsOfBranches, uninitsDecls)
         return result
     }
