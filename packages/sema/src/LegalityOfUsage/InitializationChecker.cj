@@ -9,7 +9,7 @@ import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cjcj::option.GlobalOptions as OptionGlobalOptions
 import cjcj::sema.*
 import cjcj::sema.DiagCJMPCannotAssignToImmutableCommonInCtor
-import cjcj::utils.JAVA_REF_FIELD_NAME
+import cjcj::utils.{JAVA_REF_FIELD_NAME, OverflowStrategy}
 
 private class CollectDeclsInfo {
     public let nonFuncDecls: ArrayList<Decl> = ArrayList<Decl>()
@@ -26,6 +26,43 @@ private class InitBoolBox {
 
     public init(value: Bool) {
         this.value = value
+    }
+}
+
+private class InitFlowState {
+    public var reachable: Bool
+    public let definite: ArrayList<Decl> = ArrayList<Decl>()
+    public let possible: ArrayList<Decl> = ArrayList<Decl>()
+    public let writes: ArrayList<Decl> = ArrayList<Decl>()
+
+    public init(reachable: Bool) {
+        this.reachable = reachable
+    }
+}
+
+private class InitFlowExit {
+    public let node: Expr
+    public let state: InitFlowState
+    public let exceptional: Bool
+    public var exceptions: Bool = true
+    public var errors: Bool = true
+
+    public init(node: Expr, state: InitFlowState, exceptional: Bool) {
+        this.node = node
+        this.state = state
+        this.exceptional = exceptional
+    }
+}
+
+private class InitConditionFlow {
+    public let onTrue: InitFlowState
+    public let onFalse: InitFlowState
+    public let valid: Bool
+
+    public init(onTrue: InitFlowState, onFalse: InitFlowState, valid: Bool) {
+        this.onTrue = onTrue
+        this.onFalse = onFalse
+        this.valid = valid
     }
 }
 
@@ -139,17 +176,6 @@ private func CopyDeclList(dst: ArrayList<Decl>, src: ArrayList<Decl>): Unit {
     }
 }
 
-private func RemoveDecls(values: ArrayList<Decl>, toRemove: ArrayList<Decl>): Unit {
-    var idx: Int64 = 0
-    while (idx < values.size) {
-        if (ContainsInitDecl(toRemove, values[idx])) {
-            values.remove(at: idx)
-        } else {
-            idx++
-        }
-    }
-}
-
 private func RetainDeclIntersection(values: ArrayList<Decl>, other: ArrayList<Decl>): Unit {
     var idx: Int64 = 0
     while (idx < values.size) {
@@ -159,15 +185,6 @@ private func RetainDeclIntersection(values: ArrayList<Decl>, other: ArrayList<De
             values.remove(at: idx)
         }
     }
-}
-
-private func ContainsPatternVar(values: ArrayList<VarDecl>, decl: Decl): Bool {
-    for (value in values) {
-        if (SameDecl(value, decl)) {
-            return true
-        }
-    }
-    return false
 }
 
 private func IsInitializedButUnreachable(vd: VarDecl): Bool {
@@ -428,62 +445,6 @@ private func GetUnInitsInExpr(node: Node, unInitedNodes: ArrayList<Decl>): Unit 
     walker.Walk()
 }
 
-private func GetReferencedDeclsBeforeJumpExpr(block: Block): ArrayList<Decl> {
-    let result = ArrayList<Decl>()
-    let walker = Walker(block, visitPre: { node: Node =>
-        if (let Some(_) <- (node as FuncBody)) {
-            return VisitAction.SKIP_CHILDREN
-        }
-        if (let Some(_) <- (node as WhileExpr)) {
-            return VisitAction.SKIP_CHILDREN
-        }
-        if (let Some(_) <- (node as DoWhileExpr)) {
-            return VisitAction.SKIP_CHILDREN
-        }
-        if (let Some(_) <- (node as ForInExpr)) {
-            return VisitAction.SKIP_CHILDREN
-        }
-        if (let Some(_) <- (node as JumpExpr)) {
-            return VisitAction.STOP_NOW
-        }
-        if (let Some(expr) <- (node as Expr)) {
-            if (expr.IsReferenceExpr()) {
-                if (let Some(target) <- expr.GetTarget()) {
-                    AddUniqueDecl(result, target)
-                }
-            }
-        }
-        VisitAction.WALK_CHILDREN
-    })
-    walker.Walk()
-    return result
-}
-
-private func CollectPatternVarsInCondition(expr: Expr, out: ArrayList<VarDecl>): Unit {
-    if (let Some(letPattern) <- (expr as LetPatternDestructor)) {
-        for (pattern in letPattern.patterns) {
-            CollectPatternVars(pattern, out)
-        }
-        return
-    }
-    if (let Some(binary) <- (expr as BinaryExpr)) {
-        if (IsCondition(expr) && binary.op == TokenKind.AND) {
-            if (let Some(left) <- binary.leftExpr) {
-                CollectPatternVarsInCondition(left, out)
-            }
-            if (let Some(right) <- binary.rightExpr) {
-                CollectPatternVarsInCondition(right, out)
-            }
-        }
-        return
-    }
-    if (let Some(paren) <- (expr as ParenExpr)) {
-        if (let Some(child) <- paren.expr) {
-            CollectPatternVarsInCondition(child, out)
-        }
-    }
-}
-
 private func CollectPatternVars(pattern: Pattern, out: ArrayList<VarDecl>): Unit {
     if (let Some(varPattern) <- (pattern as VarPattern)) {
         if (let Some(varDecl) <- varPattern.varDecl) {
@@ -521,58 +482,6 @@ private func CollectPatternVars(pattern: Pattern, out: ArrayList<VarDecl>): Unit
     }
 }
 
-private func CollectConditionalInitializedDecls(node: Node, uninitsDecls: ArrayList<Decl>,
-    patternVars: ArrayList<VarDecl>): ArrayList<Decl> {
-    let conditionalInitialized = ArrayList<Decl>()
-    if (uninitsDecls.isEmpty()) {
-        return conditionalInitialized
-    }
-    let walker = Walker(node, visitPre: { current: Node =>
-        if (let Some(expr) <- (current as Expr)) {
-            if (expr.IsReferenceExpr()) {
-                if (let Some(target) <- expr.GetTarget()) {
-                    if (target.TestAttr(Attribute.INITIALIZED) && ContainsInitDecl(uninitsDecls, target)) {
-                        AddUniqueDecl(conditionalInitialized, target)
-                        if (!ContainsPatternVar(patternVars, target)) {
-                            target.DisableAttr(Attribute.INITIALIZED)
-                        }
-                    }
-                }
-            }
-        }
-        VisitAction.WALK_CHILDREN
-    })
-    walker.Walk()
-    return conditionalInitialized
-}
-
-private func MetControlTransferExpr(node: Node): Bool {
-    if (node.astKind == ASTKind.RETURN_EXPR || node.astKind == ASTKind.JUMP_EXPR ||
-        node.astKind == ASTKind.THROW_EXPR) {
-        return true
-    }
-    if (let Some(block) <- (node as Block)) {
-        for (child in block.body) {
-            if (MetControlTransferExpr(child)) {
-                return true
-            }
-        }
-        return false
-    }
-    if (let Some(assign) <- (node as AssignExpr)) {
-        if (let Some(right) <- assign.rightExpr) {
-            return MetControlTransferExpr(right)
-        }
-        return false
-    }
-    if (let Some(doWhile) <- (node as DoWhileExpr)) {
-        if (let Some(body) <- doWhile.body) {
-            return MetControlTransferExpr(body)
-        }
-    }
-    return false
-}
-
 private func IsInitialized(member: MemberAccess): Bool {
     let initialized = InitBoolBox(false)
     let walker = Walker(member, visitPre: { node: Node =>
@@ -597,8 +506,74 @@ public class InitializationChecker {
     private let contextVariables: ArrayList<ScopedDecls> = ArrayList<ScopedDecls>()
     private let terminatedScopes: ArrayList<TerminatedScopeInfo> = ArrayList<TerminatedScopeInfo>()
     private let ctorUninitVars: ArrayList<CtorUninitVars> = ArrayList<CtorUninitVars>()
-    private var optionalCtxDepth: Int64 = 0
     private var tryDepth: Int64 = 0
+    private var flowTryDepth: Int64 = 0
+    // Both sets describe paths reaching the current point, not all writes
+    // encountered while visiting the function. Abrupt edges are kept separately.
+    private var flowReachable: Bool = true
+    private var flowDecls: ArrayList<Decl> = ArrayList<Decl>()
+    private var flowExits: ArrayList<InitFlowExit> = ArrayList<InitFlowExit>()
+    private let possibleReassignments: ArrayList<Decl> = ArrayList<Decl>()
+    private let flowWrites: ArrayList<Decl> = ArrayList<Decl>()
+
+    private func TrackFlowDecls(node: Node): Unit {
+        GetUnInitsInExpr(node, flowDecls)
+    }
+
+    private func SaveFlow(): InitFlowState {
+        let state = InitFlowState(flowReachable)
+        for (decl in flowDecls) {
+            if (decl.TestAttr(Attribute.INITIALIZED)) {
+                state.definite.add(decl)
+            }
+        }
+        CopyDeclList(state.possible, possibleReassignments)
+        CopyDeclList(state.writes, flowWrites)
+        return state
+    }
+
+    private func RestoreFlow(state: InitFlowState): Unit {
+        flowReachable = state.reachable
+        for (decl in flowDecls) {
+            if (ContainsInitDecl(state.definite, decl)) {
+                decl.EnableAttr(Attribute.INITIALIZED)
+            } else {
+                decl.DisableAttr(Attribute.INITIALIZED)
+            }
+        }
+        CopyDeclList(possibleReassignments, state.possible)
+        CopyDeclList(flowWrites, state.writes)
+    }
+
+    private func MergeFlow(left: InitFlowState, right: InitFlowState): InitFlowState {
+        let result = InitFlowState(left.reachable || right.reachable)
+        let first = if (left.reachable) { left } else { right }
+        CopyDeclList(result.definite, first.definite)
+        CopyDeclList(result.possible, first.possible)
+        CopyDeclList(result.writes, first.writes)
+        if (left.reachable && right.reachable) {
+            RetainDeclIntersection(result.definite, right.definite)
+            for (decl in right.possible) { AddUniqueDecl(result.possible, decl) }
+            for (decl in right.writes) { AddUniqueDecl(result.writes, decl) }
+        }
+        return result
+    }
+
+    private func RecordFlowExit(expr: Expr, exceptional!: Bool = false, terminates!: Bool = true): Unit {
+        if (flowReachable && (!exceptional || flowTryDepth > 0)) {
+            flowExits.add(InitFlowExit(expr, SaveFlow(), exceptional))
+        }
+        if (terminates) { flowReachable = false }
+    }
+
+    private func TakeFlowExits(start: Int64): ArrayList<InitFlowExit> {
+        let result = ArrayList<InitFlowExit>()
+        while (flowExits.size > start) {
+            result.add(flowExits[start])
+            flowExits.remove(at: start)
+        }
+        return result
+    }
 
     public init(ctx: ASTContext, diag: BasicDiagnosticEngine, opts!: OptionGlobalOptions = OptionGlobalOptions()) {
         this.ctx = ctx
@@ -607,6 +582,9 @@ public class InitializationChecker {
     }
 
     public func Check(root: Node): Unit {
+        // The later overflow pass marks operations, but the same annotation and
+        // option resolver is needed now to construct their exceptional exits.
+        SetOverflowStrategyForNode(root, OverflowStrategy.NA, opts.overflowStrategy)
         CheckInitialization(root)
     }
 
@@ -680,6 +658,8 @@ public class InitializationChecker {
             case ASTKind.BLOCK =>
                 if (let Some(block) <- (node as Block)) {
                     for (child in block.body) {
+                        if (child.TestAttr(Attribute.UNREACHABLE)) { continue }
+                        if (!flowReachable && child.astKind != ASTKind.FUNC_DECL) { continue }
                         CheckInitialization(child)
                     }
                 }
@@ -879,6 +859,31 @@ public class InitializationChecker {
     }
 
     private func CheckInitInFuncBody(body: FuncBody): Unit {
+        let outerState = SaveFlow()
+        let outerDecls = flowDecls
+        let outerExits = flowExits
+        let outerTryDepth = flowTryDepth
+        let outerScopeTryDepth = tryDepth
+        flowTryDepth = 0
+        tryDepth = 0
+        flowDecls = ArrayList<Decl>()
+        flowExits = ArrayList<InitFlowExit>()
+        flowReachable = true
+        // Captured lets retain the enclosing point's possible assignments;
+        // assignments made while checking this function never escape back out.
+        flowWrites.clear()
+        TrackFlowDecls(body)
+        if (let Some(funcDecl) <- body.funcDecl) {
+            if (IsInstanceConstructor(funcDecl)) {
+                if (let Some(owner) <- funcDecl.outerDecl) {
+                    for (member in owner.GetMemberDeclPtrs()) {
+                        if (member.astKind == ASTKind.VAR_DECL && !member.TestAttr(Attribute.INITIALIZED)) {
+                            AddUniqueDecl(flowDecls, member)
+                        }
+                    }
+                }
+            }
+        }
         currentFuncBodies.add(body)
         if (let Some(generic) <- body.generic) {
             for (typeParam in generic.typeParameters) {
@@ -914,7 +919,36 @@ public class InitializationChecker {
         } else {
             CheckBlockOption(body.body)
         }
+        if (let Some(funcDecl) <- body.funcDecl) {
+            if (IsInstanceConstructor(funcDecl)) {
+                var completion = SaveFlow()
+                for (exit in flowExits) {
+                    if (!exit.exceptional && exit.node.astKind == ASTKind.RETURN_EXPR) {
+                        completion = MergeFlow(completion, exit.state)
+                    }
+                }
+                RemoveCtorUninitVars(ctorUninitVars, funcDecl)
+                let uninitialized = CtorUninitVars(funcDecl)
+                if (let Some(owner) <- funcDecl.outerDecl) {
+                    for (member in owner.GetMemberDeclPtrs()) {
+                        if (member.astKind != ASTKind.VAR_DECL || member.TestAttr(Attribute.STATIC)) { continue }
+                        if (!completion.reachable || ContainsInitDecl(completion.definite, member)) {
+                            member.EnableAttr(Attribute.INITIALIZED)
+                        } else if (ContainsInitDecl(flowDecls, member)) {
+                            member.DisableAttr(Attribute.INITIALIZED)
+                            uninitialized.decls.add(member)
+                        }
+                    }
+                }
+                ctorUninitVars.add(uninitialized)
+            }
+        }
         currentFuncBodies.remove(at: currentFuncBodies.size - 1)
+        flowDecls = outerDecls
+        flowExits = outerExits
+        flowTryDepth = outerTryDepth
+        tryDepth = outerScopeTryDepth
+        RestoreFlow(outerState)
     }
 
     private func CheckInitInVarWithPatternDecl(vpd: VarWithPatternDecl): Unit {
@@ -979,6 +1013,7 @@ public class InitializationChecker {
             if (let Some(target) <- refExpr.GetTarget()) {
                 if (let Some(varDecl) <- (target as VarDecl)) {
                     if (NotAssignableVariable(varDecl, inInitFunction) ||
+                        (!varDecl.isVar && ContainsInitDecl(possibleReassignments, varDecl)) ||
                         IsAssignLetDefinedOuterLoop(ctx, varDecl, assignOrInc)) {
                         if (varDecl.TestAttr(Attribute.COMMON) && inInitFunction) {
                             DiagCJMPCannotAssignToImmutableCommonInCtor(diag, assignOrInc, refExpr)
@@ -1026,7 +1061,8 @@ public class InitializationChecker {
         let memberBase = member.baseExpr.getOrThrow()
         if (let Some(target) <- member.target) {
             if (let Some(varDecl) <- (target as VarDecl)) {
-                if (NotAssignableVariable(varDecl, inInitFunction)) {
+                if (NotAssignableVariable(varDecl, inInitFunction) ||
+                    (!varDecl.isVar && ContainsInitDecl(possibleReassignments, varDecl))) {
                     DiagCannotAssignToImmutable(diag, assignExpr, member)
                 }
                 let realBase = GetRealExpr(memberBase)
@@ -1276,8 +1312,7 @@ public class InitializationChecker {
             return
         }
         let scopeGateName = CurrentScopeGate(node.scopeName)
-        let mayNotGoOn = optionalCtxDepth != 0 && (node.astKind != ASTKind.THROW_EXPR || tryDepth == 0)
-        if (scopeGateName.isEmpty() || mayNotGoOn) {
+        if (scopeGateName.isEmpty() || !flowReachable) {
             return
         }
         if (let None <- FindTerminatedScope(terminatedScopes, scopeGateName)) {
@@ -1327,7 +1362,10 @@ public class InitializationChecker {
                 }
             }
         }
+        if (!flowReachable) { return }
         decl.EnableAttr(Attribute.INITIALIZED)
+        AddUniqueDecl(possibleReassignments, decl)
+        AddUniqueDecl(flowWrites, decl)
     }
 
     private func HasInitVarsAfterTerminator(scopeName: String): Bool {
@@ -1561,6 +1599,15 @@ public class InitializationChecker {
         return result
     }
 
+    private func CheckAssignmentAddress(left: Expr): Unit {
+        if (let Some(member) <- (left as MemberAccess)) {
+            CheckExprOption(member.baseExpr)
+        } else if (let Some(subscript) <- (left as SubscriptExpr)) {
+            CheckExprOption(subscript.baseExpr)
+            for (index in subscript.indexExprs) { CheckInitInExpr(index) }
+        }
+    }
+
     private func CheckInitInAssignExpr(assign: AssignExpr): Bool {
         if (let None <- assign.leftValue) {
             return false
@@ -1575,11 +1622,34 @@ public class InitializationChecker {
             CheckInitInExpr(left)
             left.EnableAttr(Attribute.LEFT_VALUE)
         }
-        CheckExprOption(assign.rightExpr)
-        if (let Some(member) <- (left as MemberAccess)) {
-            CheckExprOption(member.baseExpr)
+        var addressFirst = left.mapExpr.isSome()
+        if (let Some(target) <- left.GetTarget()) {
+            addressFirst = addressFirst || target.astKind == ASTKind.PROP_DECL
+        }
+        if (let Some(subscript) <- (left as SubscriptExpr)) {
+            addressFirst = addressFirst || (!subscript.isTupleAccess && !subscript.IsVArrayAccess())
+        }
+        // AST2CHIR evaluates a setter's receiver and indices before its RHS;
+        // trivial and VArray stores without a mapped address evaluate RHS first.
+        if (!assign.isCompound && addressFirst) { CheckAssignmentAddress(left) }
+        if (assign.isCompound && (assign.op == TokenKind.AND_ASSIGN || assign.op == TokenKind.OR_ASSIGN)) {
+            let skipped = SaveFlow()
+            CheckExprOption(assign.rightExpr)
+            RestoreFlow(MergeFlow(skipped, SaveFlow()))
+        } else {
+            CheckExprOption(assign.rightExpr)
+        }
+        if (!assign.isCompound && !addressFirst) { CheckAssignmentAddress(left) }
+        if (let Some(subscript) <- (left as SubscriptExpr)) {
+            if (!subscript.isTupleAccess) { RecordFlowExit(assign, exceptional: true, terminates: false) }
+        }
+        if (assign.isCompound && OverloadableMayThrow(assign)) {
+            RecordFlowExit(assign, exceptional: true, terminates: false)
         }
         if (let Some(target) <- left.GetTarget()) {
+            if (target.astKind == ASTKind.PROP_DECL) {
+                RecordFlowExit(assign, exceptional: true, terminates: false)
+            }
             let hasNominalOuter = if (let Some(outer) <- target.outerDecl) { outer.IsNominalDecl() } else { false }
             let needCheck = target.scopeLevel == 0u32 || (target.astKind != ASTKind.VAR_DECL && hasNominalOuter) ||
                 (left.astKind == ASTKind.REF_EXPR && !target.TestAttr(Attribute.INITIALIZED))
@@ -1593,10 +1663,75 @@ public class InitializationChecker {
         return true
     }
 
+    private func OverloadableMayThrow(expr: OverloadableExpr): Bool {
+        let noException = expr.op == TokenKind.BITAND || expr.op == TokenKind.BITAND_ASSIGN ||
+            expr.op == TokenKind.BITOR || expr.op == TokenKind.BITOR_ASSIGN ||
+            expr.op == TokenKind.BITXOR || expr.op == TokenKind.BITXOR_ASSIGN || expr.op == TokenKind.NOT
+        if (noException) { return false }
+        var operand: Option<Expr> = None
+        if (let Some(binary) <- (expr as BinaryExpr)) { operand = binary.leftExpr }
+        if (let Some(unary) <- (expr as UnaryExpr)) { operand = unary.expr }
+        if (let Some(assign) <- (expr as AssignExpr)) { operand = assign.leftValue }
+        if (let Some(inc) <- (expr as IncOrDecExpr)) { operand = inc.expr }
+        var integer = false
+        if (expr.astKind == ASTKind.BINARY_EXPR || expr.astKind == ASTKind.UNARY_EXPR) {
+            if (let Some(ty) <- expr.GetTy()) { integer = ty.IsInteger() }
+        } else if (let Some(value) <- operand) {
+            if (let Some(ty) <- value.GetTy()) { integer = ty.IsInteger() }
+        }
+        return (integer && expr.overflowStrategy == OverflowStrategy.THROWING) ||
+            (integer && (expr.op == TokenKind.DIV || expr.op == TokenKind.DIV_ASSIGN ||
+                expr.op == TokenKind.MOD || expr.op == TokenKind.MOD_ASSIGN)) ||
+            expr.op == TokenKind.LSHIFT || expr.op == TokenKind.LSHIFT_ASSIGN ||
+            expr.op == TokenKind.RSHIFT || expr.op == TokenKind.RSHIFT_ASSIGN
+    }
+
     private func CheckInitInExpr(expr: Expr): Bool {
+        if (!flowReachable || expr.TestAttr(Attribute.UNREACHABLE)) { return true }
         if (let Some(desugar) <- expr.desugarExpr) {
             return CheckInitInExpr(desugar)
         }
+        let result = CheckInitInExprImpl(expr)
+        // These operations can leave through an exception edge after their
+        // operands have been evaluated. A plain local store is not such an edge.
+        var mayThrow = expr.astKind == ASTKind.CALL_EXPR ||
+            expr.astKind == ASTKind.ARRAY_EXPR || expr.astKind == ASTKind.ARRAY_LIT ||
+            expr.astKind == ASTKind.SPAWN_EXPR || expr.astKind == ASTKind.PERFORM_EXPR ||
+            expr.astKind == ASTKind.RESUME_EXPR || expr.astKind == ASTKind.SYNCHRONIZED_EXPR
+        if (let Some(subscript) <- (expr as SubscriptExpr)) { mayThrow = !subscript.isTupleAccess }
+        if (let Some(conv) <- (expr as TypeConvExpr)) {
+            if (let Some(ty) <- conv.GetTy()) {
+                mayThrow = !(ty.IsInteger() && conv.overflowStrategy != OverflowStrategy.THROWING)
+            }
+        }
+        if (let Some(interpolation) <- (expr as InterpolationExpr)) {
+            if (let Some(block) <- interpolation.block) {
+                if (let Some(ty) <- block.GetTy()) {
+                    // AfterTypeCheck creates the implicit conversion call only
+                    // after initialization checking. Record it after this part's
+                    // evaluation, before a later part can initialize a variable.
+                    // Primitive and String appends do not call user ToString.
+                    mayThrow = !ty.IsPrimitive() && !ty.IsString()
+                }
+            }
+        }
+        if (mayThrow) { RecordFlowExit(expr, exceptional: true, terminates: false) }
+        if (let Some(overloadable) <- (expr as OverloadableExpr)) {
+            if (expr.astKind != ASTKind.ASSIGN_EXPR && OverloadableMayThrow(overloadable)) {
+                RecordFlowExit(expr, exceptional: true, terminates: false)
+            }
+        }
+        if (expr.IsReferenceExpr() && !expr.TestAttr(Attribute.LEFT_VALUE)) {
+            if (let Some(target) <- expr.GetTarget()) {
+                if (target.astKind == ASTKind.PROP_DECL) {
+                    RecordFlowExit(expr, exceptional: true, terminates: false)
+                }
+            }
+        }
+        return result
+    }
+
+    private func CheckInitInExprImpl(expr: Expr): Bool {
         return match (expr.astKind) {
             case ASTKind.REF_EXPR =>
                 if (let Some(refExpr) <- (expr as RefExpr)) { CheckInitInRefExpr(refExpr) } else { true }
@@ -1608,6 +1743,7 @@ public class InitializationChecker {
                 if (let Some(ret) <- (expr as ReturnExpr)) {
                     let returnResult = CheckExprOption(ret.expr)
                     UpdateScopeStatus(ret)
+                    RecordFlowExit(ret)
                     returnResult
                 } else { true }
             case ASTKind.TRY_EXPR =>
@@ -1622,8 +1758,7 @@ public class InitializationChecker {
                 if (let Some(whileExpr) <- (expr as WhileExpr)) { CheckInitInWhileExpr(whileExpr) } else { true }
             case ASTKind.DO_WHILE_EXPR =>
                 if (let Some(doWhile) <- (expr as DoWhileExpr)) {
-                    CheckInitInLoop(doWhile.body, shouldUnset: false)
-                    CheckExprOption(doWhile.condExpr)
+                    CheckInitInDoWhileExpr(doWhile)
                 } else { true }
             case ASTKind.INC_OR_DEC_EXPR =>
                 if (let Some(incOrDec) <- (expr as IncOrDecExpr)) {
@@ -1657,11 +1792,11 @@ public class InitializationChecker {
                     var result = CheckExprOption(call.baseFunc)
                     if (let Some(desugarArgs) <- call.desugarArgs) {
                         for (arg in desugarArgs) {
-                            result = result && CheckExprOption(arg.getOrThrow().expr)
+                            result = CheckExprOption(arg.getOrThrow().expr) && result
                         }
                     } else {
                         for (arg in call.args) {
-                            result = result && CheckExprOption(arg.expr)
+                            result = CheckExprOption(arg.expr) && result
                         }
                     }
                     result
@@ -1726,11 +1861,7 @@ public class InitializationChecker {
                     if (let Some(strInterp) <- lit.siExpr) {
                         var result = true
                         for (partExpr in strInterp.strPartExprs) {
-                            if (let Some(interpolation) <- (partExpr as InterpolationExpr)) {
-                                result = CheckBlockOption(interpolation.block) && result
-                            } else {
-                                result = CheckInitInExpr(partExpr) && result
-                            }
+                            result = CheckInitInExpr(partExpr) && result
                         }
                         result
                     } else { true }
@@ -1739,10 +1870,12 @@ public class InitializationChecker {
                 if (let Some(throwExpr) <- (expr as ThrowExpr)) {
                     let throwResult = CheckExprOption(throwExpr.expr)
                     UpdateScopeStatus(throwExpr)
+                    RecordFlowExit(throwExpr, exceptional: true)
                     throwResult
                 } else { true }
             case ASTKind.JUMP_EXPR =>
                 UpdateScopeStatus(expr)
+                RecordFlowExit(expr)
                 true
             case ASTKind.PERFORM_EXPR =>
                 if (let Some(perform) <- (expr as PerformExpr)) { CheckExprOption(perform.expr) } else { true }
@@ -1824,249 +1957,387 @@ public class InitializationChecker {
         }
     }
 
+    private func MergeLoopExits(loop: Expr, start: Int64, normal: InitFlowState,
+        continues: InitFlowState): (InitFlowState, InitFlowState) {
+        var outgoing = normal
+        var condition = continues
+        for (exit in TakeFlowExits(start)) {
+            if (let Some(jump) <- (exit.node as JumpExpr)) {
+                if (let Some(target) <- jump.refLoop) {
+                    if (refEq(target, loop)) {
+                        if (jump.isBreak) {
+                            outgoing = MergeFlow(outgoing, exit.state)
+                        } else {
+                            condition = MergeFlow(condition, exit.state)
+                        }
+                        continue
+                    }
+                }
+            }
+            flowExits.add(exit)
+        }
+        return (outgoing, condition)
+    }
+
     private func CheckInitInWhileExpr(whileExpr: WhileExpr): Bool {
-        let result = CheckInitInConditionOption(whileExpr.condExpr)
-        CheckInitInLoop(whileExpr.body)
-        return result
+        TrackFlowDecls(whileExpr)
+        let start = flowExits.size
+        let condition = CheckConditionFlow(whileExpr.condExpr)
+        RestoreFlow(condition.onTrue)
+        CheckBlockOption(whileExpr.body)
+        let (outgoing, backedge) = MergeLoopExits(whileExpr, start, condition.onFalse, SaveFlow())
+        // A later false condition can follow a completed iteration. Its writes
+        // are possible, but the first false condition still permits zero trips.
+        RestoreFlow(if (condition.onFalse.reachable) { MergeFlow(outgoing, backedge) } else { outgoing })
+        return condition.valid
+    }
+
+    private func CheckInitInDoWhileExpr(loop: DoWhileExpr): Bool {
+        TrackFlowDecls(loop)
+        let start = flowExits.size
+        CheckBlockOption(loop.body)
+        let (breaks, conditionEntry) = MergeLoopExits(loop, start, InitFlowState(false), SaveFlow())
+        RestoreFlow(conditionEntry)
+        let condition = CheckConditionFlow(loop.condExpr)
+        RestoreFlow(MergeFlow(breaks, condition.onFalse))
+        return condition.valid
+    }
+
+    private func ForInInvokesIterator(forIn: ForInExpr): Bool {
+        let input = forIn.inExpression ?? return true
+        let ty = input.GetTy() ?? return true
+        if (ty.IsString()) { return false }
+        if (ty.IsRange() && !ty.typeArgs.isEmpty() && ty.typeArgs[0].IsInteger()) {
+            if (let Some(range) <- (input as RangeExpr)) {
+                if (let Some(step) <- range.stepExpr) {
+                    if (step.isConst) {
+                        let value = step.constNumValue.asInt.`Int64`()
+                        return value != 1 && value != -1
+                    }
+                } else { return false }
+            }
+        }
+        return true
     }
 
     private func CheckInitInForInExpr(forIn: ForInExpr): Bool {
-        var result = CheckPatternOption(forIn.pattern)
-        result = CheckExprOption(forIn.inExpression) && result
-        result = CheckExprOption(forIn.patternGuard) && result
-        CheckInitInLoop(forIn.body)
+        var result = CheckExprOption(forIn.inExpression)
+        TrackFlowDecls(forIn)
+        let entry = SaveFlow()
+        let start = flowExits.size
+        // Iterator lowering creates iterator() and next() only after SEMA.
+        // Both can throw before the first body, and next() also runs on backedges.
+        let invokesIterator = ForInInvokesIterator(forIn)
+        if (invokesIterator) { RecordFlowExit(forIn, exceptional: true, terminates: false) }
+        result = CheckPatternOption(forIn.pattern) && result
+        let guard = CheckConditionFlow(forIn.patternGuard)
+        RestoreFlow(guard.onTrue)
+        CheckBlockOption(forIn.body)
+        let (breaks, backedge) = MergeLoopExits(forIn, start, entry, SaveFlow())
+        if (invokesIterator) {
+            RestoreFlow(MergeFlow(backedge, guard.onFalse))
+            RecordFlowExit(forIn, exceptional: true, terminates: false)
+        }
+        RestoreFlow(MergeFlow(MergeFlow(breaks, backedge), guard.onFalse))
+        return guard.valid && result
+    }
+
+    private func ApplyFinallyState(input: InitFlowState, entry: InitFlowState,
+        output: InitFlowState): InitFlowState {
+        let result = InitFlowState(input.reachable && output.reachable)
+        CopyDeclList(result.definite, input.definite)
+        CopyDeclList(result.possible, input.possible)
+        for (decl in output.definite) {
+            if (!ContainsInitDecl(entry.definite, decl)) { AddUniqueDecl(result.definite, decl) }
+        }
+        CopyDeclList(result.writes, input.writes)
+        for (decl in output.writes) {
+            AddUniqueDecl(result.possible, decl)
+            AddUniqueDecl(result.writes, decl)
+        }
         return result
     }
 
-    private func CheckInitInTryExpr(tryExpr: TryExpr): Bool {
-        var result = true
-        for (resource in tryExpr.resourceSpec) {
-            CheckInitialization(resource)
+    private func ClassDerivesFrom(ty: Ty, target: Decl): Bool {
+        var current = ty as ClassTy
+        while (let Some(classTy) <- current) {
+            if (let Some(decl) <- classTy.decl) {
+                if (SameDecl(decl, target)) { return true }
+            }
+            current = classTy.GetSuperClassTy()
         }
+        return false
+    }
+
+    private func CatchTypes(pattern: Pattern): ArrayList<Ty> {
+        let result = ArrayList<Ty>()
+        if (let Some(exceptPattern) <- (pattern as ExceptTypePattern)) {
+            for (typeNode in exceptPattern.types) {
+                if (let Some(ty) <- typeNode.GetTy()) { result.add(ty) }
+            }
+        } else if (let Some(ty) <- pattern.GetTy()) {
+            result.add(ty)
+        }
+        return result
+    }
+
+    private func IsCoreExceptionRoot(ty: Ty, name: String): Bool {
+        let decl = Ty.GetDeclPtrOfTy(ty) ?? return false
+        return decl.fullPackageName == "std.core" && decl.identifier.Val() == name
+    }
+
+    private func ExceptionRoot(ty: Ty): String {
+        var current = ty as ClassTy
+        while (let Some(classTy) <- current) {
+            if (IsCoreExceptionRoot(classTy, "Exception")) { return "Exception" }
+            if (IsCoreExceptionRoot(classTy, "Error")) { return "Error" }
+            current = classTy.GetSuperClassTy()
+        }
+        return ""
+    }
+
+    private func CatchMayReceive(pattern: Pattern, exit: InitFlowExit): Bool {
+        if ((exit.node as ThrowExpr).isNone()) {
+            for (ty in CatchTypes(pattern)) {
+                let root = ExceptionRoot(ty)
+                if ((root == "Exception" && exit.exceptions) || (root == "Error" && exit.errors) ||
+                    root.isEmpty()) { return true }
+            }
+            return false
+        }
+        let throwExpr = (exit.node as ThrowExpr) ?? return true
+        let thrown = throwExpr.expr ?? return true
+        let thrownTy = thrown.GetTy() ?? return true
+        let thrownDecl = Ty.GetDeclPtrOfTy(thrownTy) ?? return true
+        for (caughtTy in CatchTypes(pattern)) {
+            let caughtDecl = Ty.GetDeclPtrOfTy(caughtTy) ?? return true
+            if (ClassDerivesFrom(thrownTy, caughtDecl) || ClassDerivesFrom(caughtTy, thrownDecl)) { return true }
+        }
+        return false
+    }
+
+    private func CatchCoversExit(pattern: Pattern, exit: InitFlowExit): Bool {
+        if ((exit.node as ThrowExpr).isNone()) {
+            for (ty in CatchTypes(pattern)) {
+                if (IsCoreExceptionRoot(ty, "Exception")) { exit.exceptions = false }
+                if (IsCoreExceptionRoot(ty, "Error")) { exit.errors = false }
+            }
+            return !exit.exceptions && !exit.errors
+        }
+        let throwExpr = (exit.node as ThrowExpr) ?? return false
+        let thrown = throwExpr.expr ?? return false
+        let thrownTy = thrown.GetTy() ?? return false
+        for (caughtTy in CatchTypes(pattern)) {
+            let caughtDecl = Ty.GetDeclPtrOfTy(caughtTy) ?? continue
+            if (ClassDerivesFrom(thrownTy, caughtDecl)) { return true }
+        }
+        return false
+    }
+
+    private func CheckInitInTryExpr(tryExpr: TryExpr): Bool {
+        TrackFlowDecls(tryExpr)
+        var result = true
+        let start = flowExits.size
+        flowTryDepth++
+        // Resource acquisition and the generated close calls are part of the
+        // protected region. Keep acquisition failures separate from normal flow.
+        for (resource in tryExpr.resourceSpec) { CheckInitialization(resource) }
+        let entry = SaveFlow()
         tryDepth++
         if (let Some(lambda) <- tryExpr.tryLambda) {
             CheckInitialization(lambda)
+            RecordFlowExit(tryExpr, exceptional: true, terminates: false)
         } else {
             CheckBlockOption(tryExpr.tryBlock)
         }
         tryDepth--
-        for (pattern in tryExpr.catchPatterns) {
-            result = CheckInitInPattern(pattern) && result
+        if (!tryExpr.resourceSpec.isEmpty()) {
+            RecordFlowExit(tryExpr, exceptional: true, terminates: false)
         }
-        for (block in tryExpr.catchBlocks) {
-            CheckInitialization(block)
+        var normal = SaveFlow()
+        let pending = ArrayList<InitFlowExit>()
+        let exceptions = ArrayList<InitFlowExit>()
+        for (exit in TakeFlowExits(start)) {
+            if (exit.exceptional) { exceptions.add(exit) } else { pending.add(exit) }
+            if (!tryExpr.resourceSpec.isEmpty() && !exit.exceptional) {
+                // close() also runs on return/break/continue and can replace
+                // that transfer with an exception consumed by this try's catch.
+                exceptions.add(InitFlowExit(tryExpr, exit.state, true))
+            }
         }
+        for (idx in 0..tryExpr.catchBlocks.size) {
+            var exceptional = InitFlowState(false)
+            for (exit in exceptions) {
+                if (idx >= tryExpr.catchPatterns.size || CatchMayReceive(tryExpr.catchPatterns[idx], exit)) {
+                    exceptional = MergeFlow(exceptional, exit.state)
+                }
+            }
+            RestoreFlow(exceptional)
+            if (idx < tryExpr.catchPatterns.size) {
+                let pattern = tryExpr.catchPatterns[idx]
+                result = CheckInitInPattern(pattern) && result
+                var i: Int64 = 0
+                while (i < exceptions.size) {
+                    if (CatchCoversExit(pattern, exceptions[i])) { exceptions.remove(at: i) } else { i++ }
+                }
+            }
+            CheckInitialization(tryExpr.catchBlocks[idx])
+            normal = MergeFlow(normal, SaveFlow())
+            for (exit in TakeFlowExits(start)) { pending.add(exit) }
+        }
+        for (exit in exceptions) { pending.add(exit) }
         for (handler in tryExpr.handlers) {
+            RestoreFlow(entry)
             result = CheckPatternOption(handler.commandPattern) && result
             if (let Some(lambda) <- handler.desugaredLambda) {
                 CheckInitInExpr(lambda)
             } else {
                 CheckBlockOption(handler.block)
             }
+            // A handler is invoked through its own lambda, not by falling
+            // through the surrounding try/catch. Its transfers remain local.
+            let _ = TakeFlowExits(start)
+            RestoreFlow(entry)
         }
-        CheckBlockOption(tryExpr.finallyBlock)
+        if (let Some(finallyBlock) <- tryExpr.finallyBlock) {
+            var finallyEntry = normal
+            for (exit in pending) { finallyEntry = MergeFlow(finallyEntry, exit.state) }
+            RestoreFlow(finallyEntry)
+            flowWrites.clear()
+            CheckInitialization(finallyBlock)
+            let finallyOutput = SaveFlow()
+            for (exit in pending) {
+                let state = ApplyFinallyState(exit.state, finallyEntry, finallyOutput)
+                if (state.reachable) {
+                    let outgoing = InitFlowExit(exit.node, state, exit.exceptional)
+                    outgoing.exceptions = exit.exceptions
+                    outgoing.errors = exit.errors
+                    flowExits.add(outgoing)
+                }
+            }
+            RestoreFlow(ApplyFinallyState(normal, finallyEntry, finallyOutput))
+        } else {
+            for (exit in pending) { flowExits.add(exit) }
+            RestoreFlow(normal)
+        }
+        flowTryDepth--
         return result
     }
 
-    private func CheckInitInConditionOption(expr: Option<Expr>): Bool {
-        if (let Some(value) <- expr) {
-            return CheckInitInCondition(value)
+    private func CheckConditionFlow(expr: Option<Expr>): InitConditionFlow {
+        if (let None <- expr) {
+            return InitConditionFlow(SaveFlow(), InitFlowState(false), true)
         }
-        return true
-    }
-
-    private func CheckInitInCondition(expr: Expr): Bool {
-        if (!IsCondition(expr)) {
-            return CheckInitInExpr(expr)
+        let value = expr.getOrThrow()
+        TrackFlowDecls(value)
+        if (let Some(paren) <- (value as ParenExpr)) {
+            return CheckConditionFlow(paren.expr)
         }
-        if (let Some(letPattern) <- (expr as LetPatternDestructor)) {
-            let result = CheckExprOption(letPattern.initializer)
-            let vars = ArrayList<VarDecl>()
-            for (pattern in letPattern.patterns) {
-                CollectPatternVars(pattern, vars)
-            }
-            for (varDecl in vars) {
-                varDecl.EnableAttr(Attribute.INITIALIZED)
-            }
-            return result
-        }
-        if (let Some(binary) <- (expr as BinaryExpr)) {
-            if (binary.op == TokenKind.AND) {
-                var binaryResult = CheckInitInConditionOption(binary.leftExpr)
-                binaryResult = CheckInitInConditionOption(binary.rightExpr) && binaryResult
-                return binaryResult
+        if (let Some(binary) <- (value as BinaryExpr)) {
+            if (binary.op == TokenKind.AND || binary.op == TokenKind.OR) {
+                let left = CheckConditionFlow(binary.leftExpr)
+                RestoreFlow(if (binary.op == TokenKind.AND) { left.onTrue } else { left.onFalse })
+                let right = CheckConditionFlow(binary.rightExpr)
+                if (binary.op == TokenKind.AND) {
+                    return InitConditionFlow(right.onTrue, MergeFlow(left.onFalse, right.onFalse),
+                        left.valid && right.valid)
+                }
+                return InitConditionFlow(MergeFlow(left.onTrue, right.onTrue), right.onFalse,
+                    left.valid && right.valid)
             }
         }
-        if (let Some(paren) <- (expr as ParenExpr)) {
-            if (let Some(child) <- paren.expr) {
-                return CheckInitInCondition(child)
-            }
-            return true
+        if (let Some(letPattern) <- (value as LetPatternDestructor)) {
+            let valid = CheckExprOption(letPattern.initializer)
+            let onFalse = SaveFlow()
+            for (pattern in letPattern.patterns) { CheckInitInPattern(pattern) }
+            return InitConditionFlow(SaveFlow(), onFalse, valid)
         }
-        return CheckInitInExpr(expr)
-    }
-
-    private func CheckAndGetConditionalInitDecls(expr: Expr, uninitsDecls: ArrayList<Decl>): ArrayList<Decl> {
-        CheckInitInCondition(expr)
-        if (uninitsDecls.isEmpty()) {
-            return ArrayList<Decl>()
-        }
-        let patternVars = ArrayList<VarDecl>()
-        CollectPatternVarsInCondition(expr, patternVars)
-        return CollectConditionalInitializedDecls(expr, uninitsDecls, patternVars)
-    }
-
-    private func CheckInitInCondBlock(block: Block, uninitsDecls: ArrayList<Decl>,
-        commonInitedDeclsOfBranches: ArrayList<Decl>, firstInitBranchInited: InitBoolBox): Unit {
-        let initedInBlock = CheckAndGetConditionalInitDecls(block, uninitsDecls)
-        if (MetControlTransferExpr(block)) {
-            return
-        }
-        if (!firstInitBranchInited.value) {
-            CopyDeclList(commonInitedDeclsOfBranches, initedInBlock)
-            firstInitBranchInited.value = true
-        } else {
-            RetainDeclIntersection(commonInitedDeclsOfBranches, initedInBlock)
-        }
-    }
-
-    private func UpdateInitCondition(commonInitedDecls: ArrayList<Decl>, uninitsDecls: ArrayList<Decl>): Unit {
-        for (decl in commonInitedDecls) {
-            if (ContainsInitDecl(uninitsDecls, decl)) {
-                decl.EnableAttr(Attribute.INITIALIZED)
+        let valid = CheckInitInExpr(value)
+        if (let Some(literal) <- (value as LitConstExpr)) {
+            if (literal.kind == LitConstKind.BOOL) {
+                if (literal.stringValue == "true") {
+                    return InitConditionFlow(SaveFlow(), InitFlowState(false), valid)
+                }
+                if (literal.stringValue == "false") {
+                    return InitConditionFlow(InitFlowState(false), SaveFlow(), valid)
+                }
             }
         }
+        return InitConditionFlow(SaveFlow(), SaveFlow(), valid)
     }
 
     private func CheckInitInBinaryExpr(binary: BinaryExpr): Bool {
-        if (let Some(desugar) <- binary.desugarExpr) {
-            return CheckInitInExpr(desugar)
+        if (binary.op == TokenKind.AND || binary.op == TokenKind.OR) {
+            let condition = CheckConditionFlow(Some(binary))
+            RestoreFlow(MergeFlow(condition.onTrue, condition.onFalse))
+            return condition.valid
         }
-        if (binary.op != TokenKind.AND && binary.op != TokenKind.OR && binary.op != TokenKind.COALESCING) {
-            return CheckExprOption(binary.leftExpr) && CheckExprOption(binary.rightExpr)
-        }
-        var leftUninits = ArrayList<Decl>()
-        if (let Some(left) <- binary.leftExpr) {
-            GetUnInitsInExpr(left, leftUninits)
-        }
-        var rightUninits = ArrayList<Decl>()
-        if (let Some(right) <- binary.rightExpr) {
-            GetUnInitsInExpr(right, rightUninits)
-        }
+        TrackFlowDecls(binary)
         var result = CheckExprOption(binary.leftExpr)
-        optionalCtxDepth++
-        result = result && CheckExprOption(binary.rightExpr)
-        optionalCtxDepth--
-        for (decl in rightUninits) {
-            if (!ContainsInitDecl(leftUninits, decl)) {
-                decl.DisableAttr(Attribute.INITIALIZED)
-            }
-        }
+        let left = SaveFlow()
+        result = CheckExprOption(binary.rightExpr) && result
+        if (binary.op == TokenKind.COALESCING) { RestoreFlow(MergeFlow(left, SaveFlow())) }
         return result
     }
 
     private func CheckInitInMatchExpr(matchExpr: MatchExpr): Bool {
         var result = CheckExprOption(matchExpr.selector)
-        let uninitsDecls = ArrayList<Decl>()
-        GetUnInitsInExpr(matchExpr, uninitsDecls)
-        let commonInitedDeclsOfBranches = ArrayList<Decl>()
-        let firstInitBranchInited = InitBoolBox(false)
+        TrackFlowDecls(matchExpr)
+        var nextCase = SaveFlow()
+        var outgoing = InitFlowState(false)
         for (matchCase in matchExpr.matchCases) {
-            if (matchCase.TestAttr(Attribute.UNREACHABLE)) {
-                continue
-            }
+            if (matchCase.TestAttr(Attribute.UNREACHABLE)) { continue }
+            RestoreFlow(nextCase)
             for (pattern in matchCase.patterns) {
                 result = CheckInitInPattern(pattern) && result
             }
-            result = CheckExprOption(matchCase.patternGuard) && result
-            if (result) {
-                if (let Some(block) <- matchCase.exprOrDecls) {
-                    CheckInitInCondBlock(block, uninitsDecls, commonInitedDeclsOfBranches, firstInitBranchInited)
+            let guard = CheckConditionFlow(matchCase.patternGuard)
+            RestoreFlow(guard.onTrue)
+            CheckBlockOption(matchCase.exprOrDecls)
+            outgoing = MergeFlow(outgoing, SaveFlow())
+            // A pattern mismatch skips the guard entirely; a failed guard does
+            // not. Irrefutable patterns have no mismatch edge.
+            var irrefutable = false
+            for (pattern in matchCase.patterns) {
+                if (pattern.astKind == ASTKind.WILDCARD_PATTERN || pattern.astKind == ASTKind.VAR_PATTERN) {
+                    irrefutable = true
                 }
             }
+            nextCase = if (irrefutable) { guard.onFalse } else { MergeFlow(nextCase, guard.onFalse) }
+            result = guard.valid && result
         }
         for (other in matchExpr.matchCaseOthers) {
-            if (other.TestAttr(Attribute.UNREACHABLE)) {
-                continue
-            }
-            result = CheckExprOption(other.matchExpr) && result
-            if (result) {
-                if (let Some(block) <- other.exprOrDecls) {
-                    CheckInitInCondBlock(block, uninitsDecls, commonInitedDeclsOfBranches, firstInitBranchInited)
-                }
-            }
+            if (other.TestAttr(Attribute.UNREACHABLE)) { continue }
+            RestoreFlow(nextCase)
+            let condition = CheckConditionFlow(other.matchExpr)
+            RestoreFlow(condition.onTrue)
+            CheckBlockOption(other.exprOrDecls)
+            outgoing = MergeFlow(outgoing, SaveFlow())
+            nextCase = condition.onFalse
+            result = condition.valid && result
         }
-        UpdateInitCondition(commonInitedDeclsOfBranches, uninitsDecls)
+        RestoreFlow(outgoing)
         return result
     }
 
     private func CheckInitInIfExpr(ifExpr: IfExpr): Bool {
-        let result = CheckInitInConditionOption(ifExpr.condExpr)
-        let uninitsDecls = ArrayList<Decl>()
-        GetUnInitsInExpr(ifExpr, uninitsDecls)
-        let commonInitedDeclsOfBranches = ArrayList<Decl>()
-        let firstInitBranchInited = InitBoolBox(false)
-        let curUninits = ArrayList<Decl>()
-        CopyDeclList(curUninits, uninitsDecls)
-        var visitingIf = ifExpr
-        var isFirstIf = true
-        while (true) {
-            if (let None <- visitingIf.thenBody) {
-                break
-            }
-            if (!isFirstIf) {
-                if (let Some(cond) <- visitingIf.condExpr) {
-                    let initedInCondition = CheckAndGetConditionalInitDecls(cond, curUninits)
-                    RemoveDecls(curUninits, initedInCondition)
-                }
-            }
-            if (let Some(thenBlock) <- visitingIf.thenBody) {
-                CheckInitInCondBlock(thenBlock, curUninits, commonInitedDeclsOfBranches, firstInitBranchInited)
-            }
-            if (!visitingIf.hasElse) {
-                commonInitedDeclsOfBranches.clear()
-                break
-            }
-            if (let Some(elseExpr) <- visitingIf.elseBody) {
-                if (let Some(elseIf) <- (elseExpr as IfExpr)) {
-                    visitingIf = elseIf
-                    isFirstIf = false
-                } else {
-                    if (let Some(elseBlock) <- (elseExpr as Block)) {
-                        CheckInitInCondBlock(elseBlock, curUninits, commonInitedDeclsOfBranches,
-                            firstInitBranchInited)
-                    } else {
-                        CheckInitInExpr(elseExpr)
-                    }
-                    break
-                }
-            } else {
-                break
-            }
-        }
-        UpdateInitCondition(commonInitedDeclsOfBranches, uninitsDecls)
-        return result
+        TrackFlowDecls(ifExpr)
+        let condition = CheckConditionFlow(ifExpr.condExpr)
+        RestoreFlow(condition.onTrue)
+        CheckBlockOption(ifExpr.thenBody)
+        let thenExit = SaveFlow()
+        RestoreFlow(condition.onFalse)
+        if (ifExpr.hasElse) { CheckExprOption(ifExpr.elseBody) }
+        RestoreFlow(MergeFlow(thenExit, SaveFlow()))
+        return condition.valid
     }
 
-    private func CheckInitInLoop(block: Option<Block>, shouldUnset!: Bool = true): Unit {
+    private func CheckInitInLoop(block: Option<Block>): Unit {
         if (let Some(loopBlock) <- block) {
             let uninitedDecls = ArrayList<Decl>()
             GetUnInitsInExpr(loopBlock, uninitedDecls)
             CheckInitialization(loopBlock)
-            if (shouldUnset) {
-                for (decl in uninitedDecls) {
-                    if (decl.TestAttr(Attribute.INITIALIZED)) {
-                        decl.DisableAttr(Attribute.INITIALIZED)
-                    }
-                }
-            } else {
-                let referencedBeforeJump = GetReferencedDeclsBeforeJumpExpr(loopBlock)
-                for (decl in uninitedDecls) {
-                    if (!ContainsInitDecl(referencedBeforeJump, decl) && decl.TestAttr(Attribute.INITIALIZED)) {
-                        decl.DisableAttr(Attribute.INITIALIZED)
-                    }
-                }
-            }
+            for (decl in uninitedDecls) { decl.DisableAttr(Attribute.INITIALIZED) }
         }
     }
 
@@ -2174,11 +2445,6 @@ public class InitializationChecker {
                         continue
                     }
                     decl.EnableAttr(Attribute.INITIALIZED)
-                }
-            }
-            if (let Some(terminated) <- FindTerminatedScope(terminatedScopes, body.scopeName)) {
-                if (terminated.terminationKind == ASTKind.THROW_EXPR) {
-                    return
                 }
             }
         }
