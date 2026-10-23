@@ -12,6 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {access, constants as fsConstants} from 'node:fs';
 import {promisify} from 'node:util';
+import {spawn} from 'node:child_process';
 
 const accessAsync = promisify(access);
 
@@ -157,6 +158,40 @@ if (argv['skip-preflight'] === undefined) {
   await preflightSelf(self, selfHome, tc, selfCompileLd, selfCangjieHome);
 }
 
+// Observe completion directly: GNU timeout's rc=124 also represents a
+// program that deliberately returns 124, and 128+signal can be a normal exit.
+function runProduct(file, cwd, env) {
+  return new Promise(resolve => {
+    const child = spawn(file, [], {cwd, env, detached: true, stdio: ['ignore', 'pipe', 'pipe']});
+    let stdout = '';
+    let stderr = '';
+    let timedOut = false;
+    let spawnError;
+    child.stdout.setEncoding('utf8').on('data', text => { stdout += text; });
+    child.stderr.setEncoding('utf8').on('data', text => { stderr += text; });
+    child.on('error', error => { spawnError = error; });
+    const timer = setTimeout(() => {
+      timedOut = true;
+      // The private process group includes descendants holding output pipes.
+      // SIGKILL bounds programs that ignore SIGTERM as well as simple loops.
+      try { process.kill(-child.pid, 'SIGKILL'); }
+      catch (error) { if (error.code !== 'ESRCH') spawnError = error; }
+    }, 30_000);
+    child.on('close', (exitCode, signal) => {
+      clearTimeout(timer);
+      resolve({stdout, stderr, exitCode, signal, timedOut, spawnError});
+    });
+  });
+}
+
+function incompleteProduct(run, arm) {
+  if (run.timedOut) return `${arm}:<RUN-TIMEOUT-30s>`;
+  if (run.spawnError) return `${arm}:<RUN-ERROR ${run.spawnError.code}>`;
+  if (run.signal) return `${arm}:<RUN-SIGNAL ${run.signal}>`;
+  if (run.exitCode === null) return `${arm}:<RUN-INCOMPLETE>`;
+  return '';
+}
+
 async function classify(file) {
   const name = path.basename(file, '.cj');
   const work = await fs.mkdtemp(path.join(os.tmpdir(), 'cjcj-difftest-'));
@@ -165,8 +200,9 @@ async function classify(file) {
     await fs.writeFile(path.join(work, `${name}.rlog`), referenceBuild.stdout + referenceBuild.stderr);
     let rout = '<REF-COMPILE-FAIL>';
     let rexit = -1;
+    let referenceRun;
     if (referenceBuild.exitCode === 0) {
-      const referenceRun = await $({cwd: work, nothrow: true, quiet: true, env: refEnv})`timeout 30 ${path.join(work, `${name}.ref`)}`;
+      referenceRun = await runProduct(path.join(work, `${name}.ref`), work, refEnv);
       rout = commandSubstitution(referenceRun.stdout);
       rexit = referenceRun.exitCode;
     }
@@ -174,7 +210,9 @@ async function classify(file) {
     const selfBuild = await $({cwd: work, nothrow: true, quiet: true, env: selfCompileEnv})`timeout 180 ${self} ${file} -o ${path.join(work, `${name}.self`)} --set-runtime-rpath`;
     await fs.writeFile(path.join(work, `${name}.slog`), selfBuild.stdout + selfBuild.stderr);
     if (selfBuild.exitCode === 0) {
-      const selfRun = await $({cwd: work, nothrow: true, quiet: true, env: selfProductEnv})`timeout 30 ${path.join(work, `${name}.self`)}`;
+      const selfRun = await runProduct(path.join(work, `${name}.self`), work, selfProductEnv);
+      const incomplete = [referenceRun && incompleteProduct(referenceRun, 'ref'), incompleteProduct(selfRun, 'self')].filter(Boolean);
+      if (incomplete.length) return `FAIL\t${name}\t${incomplete.join(' ')}`;
       const sout = commandSubstitution(selfRun.stdout);
       const selfCombined = `${selfRun.stdout}${selfRun.stderr}`;
       if (isAbiLoadError(selfCombined)) {
