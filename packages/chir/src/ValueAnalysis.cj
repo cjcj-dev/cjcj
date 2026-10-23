@@ -43,11 +43,11 @@ public open class ValueAnalysis<VD, Pool> <: Analysis<State<VD, Pool>> where VD 
         this.globals = globals
         this.handleNonNullLiteralValue = handleNonNullLiteralValue
         if (let Some(body) <- functionValue.GetBody()) {
-            CollectEscapedLocations(body)
+            CollectEscapedLocations(body, escapedLocations)
         }
     }
 
-    private func CollectEscapedLocations(body: BlockGroup): Unit {
+    private static func CollectEscapedLocations(body: BlockGroup, locations: ArrayList<Value>): Unit {
         for (block in body.GetBlocksRef()) {
             for (expr in block.GetExpressionsRef()) {
                 let isInout = if (let Some(intrinsic) <- (expr as Intrinsic)) {
@@ -58,10 +58,10 @@ public open class ValueAnalysis<VD, Pool> <: Analysis<State<VD, Pool>> where VD 
                     false
                 }
                 if (isInout && expr.GetNumOfNonSuccessorOperands() == 1) {
-                    escapedLocations.add(expr.GetOperand(0))
+                    locations.add(expr.GetOperand(0))
                 }
                 for (group in expr.GetBlockGroups()) {
-                    CollectEscapedLocations(group)
+                    CollectEscapedLocations(group, locations)
                 }
             }
         }
