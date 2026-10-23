@@ -1594,6 +1594,15 @@ public class InitializationChecker {
         return result
     }
 
+    private func CheckAssignmentAddress(left: Expr): Unit {
+        if (let Some(member) <- (left as MemberAccess)) {
+            CheckExprOption(member.baseExpr)
+        } else if (let Some(subscript) <- (left as SubscriptExpr)) {
+            CheckExprOption(subscript.baseExpr)
+            for (index in subscript.indexExprs) { CheckInitInExpr(index) }
+        }
+    }
+
     private func CheckInitInAssignExpr(assign: AssignExpr): Bool {
         if (let None <- assign.leftValue) {
             return false
@@ -1608,16 +1617,26 @@ public class InitializationChecker {
             CheckInitInExpr(left)
             left.EnableAttr(Attribute.LEFT_VALUE)
         }
-        CheckExprOption(assign.rightExpr)
-        if (!assign.isCompound) {
-            if (let Some(member) <- (left as MemberAccess)) { CheckExprOption(member.baseExpr) }
+        var addressFirst = left.mapExpr.isSome()
+        if (let Some(target) <- left.GetTarget()) {
+            addressFirst = addressFirst || target.astKind == ASTKind.PROP_DECL
         }
-        if (!assign.isCompound) {
-            if (let Some(subscript) <- (left as SubscriptExpr)) {
-                CheckExprOption(subscript.baseExpr)
-                for (index in subscript.indexExprs) { CheckInitInExpr(index) }
-                RecordFlowExit(assign, exceptional: true, terminates: false)
-            }
+        if (let Some(subscript) <- (left as SubscriptExpr)) {
+            addressFirst = addressFirst || (!subscript.isTupleAccess && !subscript.IsVArrayAccess())
+        }
+        // AST2CHIR evaluates a setter's receiver and indices before its RHS;
+        // trivial and VArray stores without a mapped address evaluate RHS first.
+        if (!assign.isCompound && addressFirst) { CheckAssignmentAddress(left) }
+        if (assign.isCompound && (assign.op == TokenKind.AND_ASSIGN || assign.op == TokenKind.OR_ASSIGN)) {
+            let skipped = SaveFlow()
+            CheckExprOption(assign.rightExpr)
+            RestoreFlow(MergeFlow(skipped, SaveFlow()))
+        } else {
+            CheckExprOption(assign.rightExpr)
+        }
+        if (!assign.isCompound && !addressFirst) { CheckAssignmentAddress(left) }
+        if (let Some(subscript) <- (left as SubscriptExpr)) {
+            if (!subscript.isTupleAccess) { RecordFlowExit(assign, exceptional: true, terminates: false) }
         }
         if (assign.isCompound && OverloadableMayThrow(assign)) {
             RecordFlowExit(assign, exceptional: true, terminates: false)

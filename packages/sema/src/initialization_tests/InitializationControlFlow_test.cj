@@ -630,6 +630,38 @@ public class InitializationControlFlowTest {
     }
 
     @TestCase
+    public func SubscriptIndexPrecedesRightHandInitialization(): Unit {
+        ExpectInitializationDiagnostic("""
+            func write(values: Array<Int64>, gate: Bool): Unit {
+                var index: Int64
+                values[index] = if (gate) { index = 0; 7 } else { index = 0; 8 } // expected-init-error
+            }
+            """)
+    }
+
+    @TestCase
+    public func SubscriptIndexWriteReachesRightHandRead(): Unit {
+        ExpectInitializationAccepted("""
+            func write(values: Array<Int64>, gate: Bool): Unit {
+                var x: Int64
+                values[if (gate) { x = 7; 0 } else { x = 8; 0 }] = x
+            }
+            """)
+    }
+
+    @TestCase
+    public func CompoundAndDoesNotGuaranteeRightHandAssignment(): Unit {
+        ExpectInitializationDiagnostic("""
+            func read(flag: Bool, gate: Bool): Int64 {
+                var condition = flag
+                var x: Int64
+                condition &&= if (gate) { x = 1; true } else { x = 2; false }
+                return x // expected-init-error
+            }
+            """)
+    }
+
+    @TestCase
     public func InitializedSubscriptStoreAccepted(): Unit {
         ExpectInitializationAccepted("""
             func write(values: Array<Int64>): Unit {
@@ -766,6 +798,7 @@ public class InitializationControlFlowTest {
                 var x: Int64
                 try (r = resource) { x = 7; return x }
                 catch (e: Exception) { return x }
+                return 0
             }
             """)
     }
