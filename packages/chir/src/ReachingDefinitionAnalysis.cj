@@ -214,6 +214,7 @@ public class ReachingDefinitionAnalysis <: Analysis<ReachingDefinitionDomain> {
     private let functionValue: Function
     private let allocateIdxMap: HashMap<Int64, Int64> = HashMap<Int64, Int64>()
     private let trackedAllocations: ArrayList<Value> = ArrayList<Value>()
+    private let aliasedAllocations: ArrayList<Value> = ArrayList<Value>()
 
     public init(functionValue: Function) {
         super(functionValue)
@@ -250,6 +251,8 @@ public class ReachingDefinitionAnalysis <: Analysis<ReachingDefinitionDomain> {
             HandleStoreElemRefExpr(state, expression)
         } else if (kind == ExprKind.APPLY) {
             HandleApplyExpr(state, expression)
+        } else if (kind == ExprKind.INVOKE || kind == ExprKind.INVOKESTATIC || kind == ExprKind.SPAWN) {
+            InvalidateAliasedAllocations(state)
         } else if (kind == ExprKind.INTRINSIC) {
             HandleIntrinsicExpr(state, expression)
         }
@@ -261,6 +264,9 @@ public class ReachingDefinitionAnalysis <: Analysis<ReachingDefinitionDomain> {
             HandleApplyExpr(state, terminator)
         } else if (kind == ExprKind.TRY_INTRINSIC) {
             HandleIntrinsicExpr(state, terminator)
+        } else if (kind == ExprKind.TRY_INVOKE || kind == ExprKind.TRY_INVOKESTATIC ||
+            kind == ExprKind.TRY_SPAWN) {
+            InvalidateAliasedAllocations(state)
         }
         return None
     }
@@ -289,6 +295,27 @@ public class ReachingDefinitionAnalysis <: Analysis<ReachingDefinitionDomain> {
                     }
                 }
             }
+            for (allocation in trackedAllocations) {
+                for (user in allocation.GetUsers()) {
+                    let kind = user.GetExprKind()
+                    if (kind == ExprKind.LOAD || kind == ExprKind.DEBUGEXPR) {
+                        continue
+                    }
+                    if (kind == ExprKind.STORE && user.GetOperand(0).nodeId != allocation.nodeId) {
+                        continue
+                    }
+                    aliasedAllocations.add(allocation)
+                    break
+                }
+            }
+        }
+    }
+
+    private func InvalidateAliasedAllocations(state: ReachingDefinitionDomain): Unit {
+        // A later direct store does not revoke an escaped address.
+        // Keep forwarding local stores, but kill them whenever an alias may write.
+        for (allocation in aliasedAllocations) {
+            state.Invalidate(allocation)
         }
     }
 
@@ -338,6 +365,9 @@ public class ReachingDefinitionAnalysis <: Analysis<ReachingDefinitionDomain> {
 
     private func HandleStoreExpr(state: ReachingDefinitionDomain, store: Expression): Unit {
         if (store.GetNumOfNonSuccessorOperands() >= 2) {
+            if (!allocateIdxMap.contains(store.GetOperand(1).nodeId)) {
+                InvalidateAliasedAllocations(state)
+            }
             state.UpdateStore(store.GetOperand(1), store)
         }
     }
@@ -364,6 +394,7 @@ public class ReachingDefinitionAnalysis <: Analysis<ReachingDefinitionDomain> {
     }
 
     private func HandleStoreElemRefExpr(state: ReachingDefinitionDomain, storeElemRef: Expression): Unit {
+        InvalidateAliasedAllocations(state)
         if (storeElemRef.GetNumOfNonSuccessorOperands() >= 2) {
             let location = storeElemRef.GetOperand(1)
             if (IsTrackedStructRef(location)) {
@@ -373,6 +404,7 @@ public class ReachingDefinitionAnalysis <: Analysis<ReachingDefinitionDomain> {
     }
 
     private func HandleApplyExpr(state: ReachingDefinitionDomain, apply: Expression): Unit {
+        InvalidateAliasedAllocations(state)
         if (apply.GetNumOfNonSuccessorOperands() > 1) {
             if (let Some(callee) <- apply.GetOperand(0).AsFunction()) {
                 if (callee.TestAttr(Attribute.MUT)) {
@@ -386,6 +418,7 @@ public class ReachingDefinitionAnalysis <: Analysis<ReachingDefinitionDomain> {
     }
 
     private func HandleIntrinsicExpr(state: ReachingDefinitionDomain, intrinsic: Expression): Unit {
+        InvalidateAliasedAllocations(state)
         if (GetIntrinsicKind(intrinsic) != IntrinsicKind.INOUT_PARAM) {
             return
         }

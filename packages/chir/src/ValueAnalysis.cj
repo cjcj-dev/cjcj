@@ -28,6 +28,7 @@ public open class ValueAnalysis<VD, Pool> <: Analysis<State<VD, Pool>> where VD 
     private let allocatedObjMap: AllocatedObjMap = AllocatedObjMap()
     private let refPool: ArrayList<Ref> = ArrayList<Ref>()
     private let absObjPool: ArrayList<AbstractObject> = ArrayList<AbstractObject>()
+    private let escapedLocations: ArrayList<Value> = ArrayList<Value>()
     protected let builder: CHIRBuilder
     protected let globals: ValueAnalysisGlobals<VD, Pool>
     // C++ ValueAnalysis.h:701-714 free-function template specializations are
@@ -41,6 +42,42 @@ public open class ValueAnalysis<VD, Pool> <: Analysis<State<VD, Pool>> where VD 
         this.builder = builder
         this.globals = globals
         this.handleNonNullLiteralValue = handleNonNullLiteralValue
+        if (let Some(body) <- functionValue.GetBody()) {
+            CollectEscapedLocations(body)
+        }
+    }
+
+    private func CollectEscapedLocations(body: BlockGroup): Unit {
+        for (block in body.GetBlocksRef()) {
+            for (expr in block.GetExpressionsRef()) {
+                let isInout = if (let Some(intrinsic) <- (expr as Intrinsic)) {
+                    intrinsic.GetIntrinsicKind() == IntrinsicKind.INOUT_PARAM
+                } else if (let Some(intrinsic) <- (expr as TryIntrinsic)) {
+                    intrinsic.GetIntrinsicKind() == IntrinsicKind.INOUT_PARAM
+                } else {
+                    false
+                }
+                if (isInout && expr.GetNumOfNonSuccessorOperands() == 1) {
+                    escapedLocations.add(expr.GetOperand(0))
+                }
+                for (group in expr.GetBlockGroups()) {
+                    CollectEscapedLocations(group)
+                }
+            }
+        }
+    }
+
+    private func InvalidateEscapedLocations(state: State<VD, Pool>, expr: Expression): Unit {
+        let kind = expr.GetExprKind()
+        if (kind == ExprKind.APPLY || kind == ExprKind.TRY_APPLY ||
+            kind == ExprKind.INVOKE || kind == ExprKind.TRY_INVOKE ||
+            kind == ExprKind.INVOKESTATIC || kind == ExprKind.TRY_INVOKESTATIC ||
+            kind == ExprKind.INTRINSIC || kind == ExprKind.TRY_INTRINSIC ||
+            kind == ExprKind.SPAWN || kind == ExprKind.TRY_SPAWN) {
+            for (location in escapedLocations) {
+                state.SetSelfAndChildrenStateToTop(location)
+            }
+        }
     }
 
     public static func InitialiseLetGVState(pkg: Package, builder: CHIRBuilder,
@@ -109,6 +146,7 @@ public open class ValueAnalysis<VD, Pool> <: Analysis<State<VD, Pool>> where VD 
     }
 
     public override func PropagateExpressionEffect(state: State<VD, Pool>, expression: Expression): Unit {
+        InvalidateEscapedLocations(state, expression)
         match (expression.GetExprMajorKind()) {
             case ExprMajorKind.MEMORY_EXPR => PreHandleMemoryExpr(state, expression)
             case ExprMajorKind.UNARY_EXPR => ()
@@ -121,6 +159,7 @@ public open class ValueAnalysis<VD, Pool> <: Analysis<State<VD, Pool>> where VD 
     }
 
     public override func PropagateTerminatorEffect(state: State<VD, Pool>, terminator: Expression): Option<Block> {
+        InvalidateEscapedLocations(state, terminator)
         match (terminator.GetExprKind()) {
             case ExprKind.TRY_APPLY =>
                 return PreHandleTryApplyExpr(state, (terminator as TryApply).getOrThrow())
