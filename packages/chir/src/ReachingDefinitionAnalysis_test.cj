@@ -34,18 +34,18 @@ public class ReachingDefinitionAliasingTest {
         block.AppendExpressions(ArrayList<Expression>([x, address, pointer, one, store, two, zero, write, load,
             builder.CreateExit(Some<Value>(load.GetResult().getOrThrow()), block)]))
         let analysis = ConstAnalysisWrapper(builder).RunOnFunc(fn, BasicDiagnosticEngine()).getOrThrow()
-        var observed = false
+        let observed = ArrayList<Bool>()
         analysis.VisitWith(
             { _: ConstDomain, _: Expression, _: Int64 => () },
             { state: ConstDomain, expr: Expression, _: Int64 =>
                 if (expr.nodeId == load.nodeId) {
-                    observed = true
+                    observed.add(true)
                     @Expect(state.CheckAbstractValue(load.GetResult().getOrThrow()).isNone(), true)
                 }
             },
             { _: ConstDomain, _: Expression, _: Option<Block> => () }
         )
-        @Expect(observed, true)
+        @Expect(observed.size, 1)
         RedundantLoadElimination().RunOnFunction(fn)
         @Expect(load.GetParentBlock().isSome(), true)
     }
