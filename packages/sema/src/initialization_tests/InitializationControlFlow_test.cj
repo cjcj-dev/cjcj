@@ -863,6 +863,148 @@ public class InitializationControlFlowTest {
     }
 
     @TestCase
+    public func IteratorCallsCanThrowBeforeBodyAssignment(): Unit {
+        ExpectInitializationDiagnostic("""
+            func read(xs: Iterable<Int64>): Int64 {
+                var x: Int64
+                try { for (i in xs) {}; x = 7 } catch (e: Exception) {}
+                return x // expected-init-error
+            }
+            """)
+    }
+
+    @TestCase
+    public func IteratorExceptionCatchInitializesNormalExit(): Unit {
+        ExpectInitializationAccepted("""
+            func read(xs: Iterable<Int64>): Int64 {
+                var x: Int64
+                try { for (i in xs) {}; x = 7 } catch (e: Exception) { x = 9 }
+                return x
+            }
+            """)
+    }
+
+    @TestCase
+    public func BarePropertyGetterCanThrowBeforeAssignment(): Unit {
+        ExpectInitializationDiagnostic("""
+            class Value {
+                prop p: Int64 { get() { throw Exception() } }
+                func read(): Int64 {
+                    var x: Int64
+                    try { let v = p; x = 7 } catch (e: Exception) {}
+                    return x // expected-init-error
+                }
+            }
+            """)
+    }
+
+    @TestCase
+    public func QualifiedPropertyGetterHasSameExceptionEdge(): Unit {
+        ExpectInitializationDiagnostic("""
+            class Value {
+                prop p: Int64 { get() { throw Exception() } }
+                func read(): Int64 {
+                    var x: Int64
+                    try { let v = this.p; x = 7 } catch (e: Exception) {}
+                    return x // expected-init-error
+                }
+            }
+            """)
+    }
+
+    @TestCase
+    public func ExhaustiveCatchConsumesImplicitExceptionForFinally(): Unit {
+        ExpectInitializationAccepted("""
+            func mayThrow(): Unit { throw Exception() }
+            func read(): Int64 {
+                var x: Int64
+                try { mayThrow(); x = 1 }
+                catch (e: Exception | Error) { x = 2 }
+                finally { let observed = x }
+                return x
+            }
+            """)
+    }
+
+    @TestCase
+    public func SeparateExhaustiveCatchesConsumeImplicitException(): Unit {
+        ExpectInitializationAccepted("""
+            func mayThrow(): Unit { throw Exception() }
+            func read(): Int64 {
+                var x: Int64
+                try { mayThrow(); x = 1 }
+                catch (e: Exception) { x = 2 }
+                catch (e: Error) { x = 3 }
+                finally { let observed = x }
+                return x
+            }
+            """)
+    }
+
+    @TestCase
+    public func PartialCatchRetainsUncaughtErrorForFinally(): Unit {
+        ExpectInitializationDiagnostic("""
+            func mayThrow(): Unit { throw Exception() }
+            func read(): Int64 {
+                var x: Int64
+                try { mayThrow(); x = 1 }
+                catch (e: Exception) { x = 2 }
+                finally { let observed = x } // expected-init-error
+                return x
+            }
+            """)
+    }
+
+    @TestCase
+    public func DefaultIntegerOverflowCanReachCatch(): Unit {
+        ExpectInitializationDiagnostic("""
+            func read(a: Int64): Int64 {
+                var x: Int64
+                try { let v = a + 1; x = 7 } catch (e: Exception) {}
+                return x // expected-init-error
+            }
+            """)
+    }
+
+    @TestCase
+    public func DefaultNarrowingCanReachCatch(): Unit {
+        ExpectInitializationDiagnostic("""
+            func read(a: Int64): Int64 {
+                var x: Int64
+                try { let v = Int8(a); x = 7 } catch (e: Exception) {}
+                return x // expected-init-error
+            }
+            """)
+    }
+
+    @TestCase
+    public func WrappingAnnotationHasNoOverflowException(): Unit {
+        ExpectInitializationAccepted("""
+            @OverflowWrapping
+            func read(a: Int64): Int64 {
+                var x: Int64
+                try { let v = a + 1; x = 7 } finally { let observed = x }
+                return x
+            }
+            """)
+    }
+
+    @TestCase
+    public func NestedThrowingAnnotationOverridesWrapping(): Unit {
+        ExpectInitializationDiagnostic("""
+            @OverflowWrapping
+            func outer(): Unit {
+                @OverflowThrowing
+                func read(a: Int64): Int64 {
+                    var x: Int64
+                    try { let v = a + 1; x = 7 } catch (e: Exception) {}
+                    return x // expected-init-error
+                }
+            }
+            """)
+    }
+
+    @TestCase
     public func CatchBindingsAreInitializedForEachCatch(): Unit {
         ExpectInitializationAccepted("""
             func read(): Int64 {

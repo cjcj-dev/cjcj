@@ -44,6 +44,8 @@ private class InitFlowExit {
     public let node: Expr
     public let state: InitFlowState
     public let exceptional: Bool
+    public var exceptions: Bool = true
+    public var errors: Bool = true
 
     public init(node: Expr, state: InitFlowState, exceptional: Bool) {
         this.node = node
@@ -580,6 +582,9 @@ public class InitializationChecker {
     }
 
     public func Check(root: Node): Unit {
+        // The later overflow pass marks operations, but the same annotation and
+        // option resolver is needed now to construct their exceptional exits.
+        SetOverflowStrategyForNode(root, OverflowStrategy.NA, opts.overflowStrategy)
         CheckInitialization(root)
     }
 
@@ -1703,8 +1708,8 @@ public class InitializationChecker {
                 RecordFlowExit(expr, exceptional: true, terminates: false)
             }
         }
-        if (let Some(member) <- (expr as MemberAccess)) {
-            if (let Some(target) <- member.GetTarget()) {
+        if (expr.IsReferenceExpr() && !expr.TestAttr(Attribute.LEFT_VALUE)) {
+            if (let Some(target) <- expr.GetTarget()) {
                 if (target.astKind == ASTKind.PROP_DECL) {
                     RecordFlowExit(expr, exceptional: true, terminates: false)
                 }
@@ -1989,16 +1994,41 @@ public class InitializationChecker {
         return condition.valid
     }
 
+    private func ForInInvokesIterator(forIn: ForInExpr): Bool {
+        let input = forIn.inExpression ?? return true
+        let ty = input.GetTy() ?? return true
+        if (ty.IsString()) { return false }
+        if (ty.IsRange() && !ty.typeArgs.isEmpty() && ty.typeArgs[0].IsInteger()) {
+            if (let Some(range) <- (input as RangeExpr)) {
+                if (let Some(step) <- range.stepExpr) {
+                    if (step.isConst) {
+                        let value = step.constNumValue.asInt.`Int64`()
+                        return value != 1 && value != -1
+                    }
+                } else { return false }
+            }
+        }
+        return true
+    }
+
     private func CheckInitInForInExpr(forIn: ForInExpr): Bool {
         var result = CheckExprOption(forIn.inExpression)
         TrackFlowDecls(forIn)
         let entry = SaveFlow()
         let start = flowExits.size
+        // Iterator lowering creates iterator() and next() only after SEMA.
+        // Both can throw before the first body, and next() also runs on backedges.
+        let invokesIterator = ForInInvokesIterator(forIn)
+        if (invokesIterator) { RecordFlowExit(forIn, exceptional: true, terminates: false) }
         result = CheckPatternOption(forIn.pattern) && result
         let guard = CheckConditionFlow(forIn.patternGuard)
         RestoreFlow(guard.onTrue)
         CheckBlockOption(forIn.body)
         let (breaks, backedge) = MergeLoopExits(forIn, start, entry, SaveFlow())
+        if (invokesIterator) {
+            RestoreFlow(MergeFlow(backedge, guard.onFalse))
+            RecordFlowExit(forIn, exceptional: true, terminates: false)
+        }
         RestoreFlow(MergeFlow(MergeFlow(breaks, backedge), guard.onFalse))
         return guard.valid && result
     }
@@ -2042,7 +2072,30 @@ public class InitializationChecker {
         return result
     }
 
+    private func IsCoreExceptionRoot(ty: Ty, name: String): Bool {
+        let decl = Ty.GetDeclPtrOfTy(ty) ?? return false
+        return decl.fullPackageName == "std.core" && decl.identifier.Val() == name
+    }
+
+    private func ExceptionRoot(ty: Ty): String {
+        var current = ty as ClassTy
+        while (let Some(classTy) <- current) {
+            if (IsCoreExceptionRoot(classTy, "Exception")) { return "Exception" }
+            if (IsCoreExceptionRoot(classTy, "Error")) { return "Error" }
+            current = classTy.GetSuperClassTy()
+        }
+        return ""
+    }
+
     private func CatchMayReceive(pattern: Pattern, exit: InitFlowExit): Bool {
+        if ((exit.node as ThrowExpr).isNone()) {
+            for (ty in CatchTypes(pattern)) {
+                let root = ExceptionRoot(ty)
+                if ((root == "Exception" && exit.exceptions) || (root == "Error" && exit.errors) ||
+                    root.isEmpty()) { return true }
+            }
+            return false
+        }
         let throwExpr = (exit.node as ThrowExpr) ?? return true
         let thrown = throwExpr.expr ?? return true
         let thrownTy = thrown.GetTy() ?? return true
@@ -2055,6 +2108,13 @@ public class InitializationChecker {
     }
 
     private func CatchCoversExit(pattern: Pattern, exit: InitFlowExit): Bool {
+        if ((exit.node as ThrowExpr).isNone()) {
+            for (ty in CatchTypes(pattern)) {
+                if (IsCoreExceptionRoot(ty, "Exception")) { exit.exceptions = false }
+                if (IsCoreExceptionRoot(ty, "Error")) { exit.errors = false }
+            }
+            return !exit.exceptions && !exit.errors
+        }
         let throwExpr = (exit.node as ThrowExpr) ?? return false
         let thrown = throwExpr.expr ?? return false
         let thrownTy = thrown.GetTy() ?? return false
@@ -2139,7 +2199,12 @@ public class InitializationChecker {
             let finallyOutput = SaveFlow()
             for (exit in pending) {
                 let state = ApplyFinallyState(exit.state, finallyEntry, finallyOutput)
-                if (state.reachable) { flowExits.add(InitFlowExit(exit.node, state, exit.exceptional)) }
+                if (state.reachable) {
+                    let outgoing = InitFlowExit(exit.node, state, exit.exceptional)
+                    outgoing.exceptions = exit.exceptions
+                    outgoing.errors = exit.errors
+                    flowExits.add(outgoing)
+                }
             }
             RestoreFlow(ApplyFinallyState(normal, finallyEntry, finallyOutput))
         } else {
