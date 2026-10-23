@@ -261,7 +261,9 @@ async function classify(file) {
       const sout = commandSubstitution(selfRun.stdout);
       const selfCombined = `${selfRun.stdout}${selfRun.stderr}`;
       const referenceCombined = referenceRun ? `${referenceRun.stdout}${referenceRun.stderr}` : '';
-      if (isAbiLoadError(referenceCombined)) {
+      // Diagnostics alone are not a load failure: successful programs may
+      // legitimately print these words while producing matching output.
+      if (referenceRun?.exitCode !== 0 && isAbiLoadError(referenceCombined)) {
         return `FAIL\t${name}\t${HARNESS_TAG}: reference product ABI/runtime mismatch: ${bashQ(referenceCombined.split(/\r?\n/).find(Boolean) || '', 120)}`;
       }
       if (isAbiLoadError(selfCombined)) {

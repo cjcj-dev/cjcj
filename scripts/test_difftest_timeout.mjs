@@ -14,7 +14,67 @@ const script = path.resolve(argv.script || path.join(import.meta.dirname, 'difft
 const evidence = argv.evidence ? path.resolve(argv.evidence) : root;
 await fs.mkdir(evidence, {recursive: true});
 try {
-  if (argv.matrix) {
+  if (argv.loader) {
+    const corpus = path.join(root, 'corpus');
+    const sdk = path.join(root, 'sdk');
+    await fs.mkdir(corpus);
+    await fs.mkdir(path.join(sdk, 'runtime/lib/linux_x86_64_cjnative'), {recursive: true});
+    await fs.writeFile(path.join(sdk, 'runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so'), 'fixture only');
+    // A real ELF/DT_NEEDED failure, not a program printing a loader message.
+    await fs.writeFile(path.join(root, 'dependency.c'), 'int difftest_dependency(void) { return 0; }\n');
+    await fs.writeFile(path.join(root, 'consumer.c'), 'extern int difftest_dependency(void); int main(void) { return difftest_dependency(); }\n');
+    const builds = [
+      ['cc', '-shared', '-fPIC', path.join(root, 'dependency.c'), '-o', path.join(root, 'libdifftest_missing.so')],
+      ['cc', path.join(root, 'consumer.c'), '-L' + root, '-ldifftest_missing', '-Wl,-rpath,' + root, '-o', path.join(root, 'missing-loader')],
+    ];
+    for (const [index, command] of builds.entries()) {
+      const result = spawnSync(command[0], command.slice(1), {encoding: 'utf8', timeout: 30000});
+      await fs.writeFile(path.join(evidence, `loader-build-${index}.json`), JSON.stringify({command, rc: result.status, signal: result.signal, stdout: result.stdout, stderr: result.stderr, error: result.error?.message}) + '\n');
+      assert.equal(result.error, undefined);
+      assert.equal(result.status, 0, result.stderr);
+    }
+    await fs.rename(path.join(root, 'libdifftest_missing.so'), path.join(root, 'libdifftest_missing.hidden'));
+    const missingLoader = spawnSync(path.join(root, 'missing-loader'), [], {encoding: 'utf8', timeout: 10000});
+    await fs.writeFile(path.join(evidence, 'loader-native.execution.json'), JSON.stringify({rc: missingLoader.status, signal: missingLoader.signal, stderr: missingLoader.stderr, error: missingLoader.error?.message}) + '\n');
+    assert.equal(missingLoader.error, undefined);
+    assert.equal(missingLoader.status, 127);
+    assert.match(missingLoader.stderr, /error while loading shared libraries: libdifftest_missing\.so/);
+    const cases = ['plain', 'exit127', 'ref-loader-real', 'ref-diagnostic'];
+    for (const name of cases) await fs.writeFile(path.join(corpus, name + '.cj'), '// controlled compiler boundary\n');
+    const compiler = path.join(root, 'compiler.mjs');
+    await fs.writeFile(compiler, `#!${process.execPath}
+      import fs from 'node:fs';
+      import path from 'node:path';
+      if (process.argv.includes('--version')) process.exit(0);
+      const name = path.basename(process.argv[2], '.cj');
+      const out = process.argv[process.argv.indexOf('-o') + 1];
+      const reference = out.endsWith('.ref');
+      if (name === 'ref-loader-real' && reference) fs.copyFileSync(${JSON.stringify(path.join(root, 'missing-loader'))}, out);
+      else {
+        let body = 'process.exit(0)';
+        if (name === 'exit127' || name === 'ref-loader-real') body = 'process.exit(127)';
+        if (name === 'ref-diagnostic') body = 'console.log("same output");' + (reference ? 'console.error("undefined symbol: ordinary diagnostic");' : '') + 'process.exit(0)';
+        fs.writeFileSync(out, ${JSON.stringify(`#!${process.execPath}\n`)} + body + '\\n', {mode: 0o755});
+      }
+    `, {mode: 0o755});
+    const env = {...process.env, DIFFTEST_SELF: compiler, DIFFTEST_REF: compiler, DIFFTEST_SELF_TC: sdk, DIFFTEST_TC: sdk};
+    delete env.CJ_HOST_RTLIB;
+    const result = spawnSync(process.execPath, [process.argv[1], script, '--jobs', '2', corpus],
+      {env, encoding: 'utf8', timeout: 30000, maxBuffer: 4 * 1024 * 1024});
+    await fs.writeFile(path.join(evidence, 'loader.stdout.log'), result.stdout || '');
+    await fs.writeFile(path.join(evidence, 'loader.stderr.log'), result.stderr || '');
+    await fs.writeFile(path.join(evidence, 'loader.execution.json'), JSON.stringify({rc: result.status, signal: result.signal, error: result.error?.message}) + '\n');
+    assert.equal(result.error, undefined);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /^PASS +plain +exit=0$/m);
+    assert.match(result.stdout, /^PASS +exit127 +exit=127$/m);
+    // The CLI intentionally bounds its diagnostic preview; the raw loader
+    // error above proves the fixture independently of the path's length.
+    assert.match(result.stdout, /^FAIL +ref-loader-real +HARNESS: reference product ABI\/runtime mismatch:/m);
+    console.log('PASS loader controls: exit0, exit127, real missing DT_NEEDED library');
+    assert.match(result.stdout, /^PASS +ref-diagnostic +exit=0$/m, 'successful reference stderr must not be classified as loader failure');
+    console.log('PASS reference ordinary stderr diagnostic');
+  } else if (argv.matrix) {
     const corpus = path.join(root, 'corpus');
     const sdk = path.join(root, 'sdk');
     await fs.mkdir(corpus);
@@ -78,8 +138,23 @@ try {
     const leaf = `
       const fs = require('node:fs');
       const stat = fs.readFileSync('/proc/self/stat', 'utf8');
-      fs.writeFileSync(process.argv[1], JSON.stringify({pid: process.pid, start: stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19]}));
-      process.send('ready');
+      const record = process.argv[1];
+      const identity = JSON.stringify({pid: process.pid, start: stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19]});
+      const pending = record + '.pending';
+      const publish = () => {
+        fs.writeFileSync(pending, ${argv['identity-invalid'] ? "'invalid identity JSON'" : 'identity'});
+        fs.renameSync(pending, record);
+        process.send('ready');
+      };
+      if (${Boolean(argv['identity-delay'] || argv['identity-never'])}) {
+        fs.writeFileSync(pending, identity.slice(0, 8));
+        const timer = setInterval(() => {
+          if (!${Boolean(argv['identity-never'])} && fs.existsSync(process.env.DIFFTEST_IDENTITY_RELEASE)) {
+            clearInterval(timer);
+            publish();
+          }
+        }, 10);
+      } else publish();
       setInterval(() => {}, 1000);
       setTimeout(() => process.exit(0), 12000);
     `;
@@ -97,8 +172,9 @@ try {
     `, {mode: 0o755});
     const records = path.join(evidence, 'descendants');
     await fs.mkdir(records);
+    const release = path.join(evidence, 'identity.release');
     const env = {...process.env, DIFFTEST_SELF: compiler, DIFFTEST_REF: compiler,
-      DIFFTEST_SELF_TC: sdk, DIFFTEST_TC: sdk, DIFFTEST_DESCENDANTS: records};
+      DIFFTEST_SELF_TC: sdk, DIFFTEST_TC: sdk, DIFFTEST_DESCENDANTS: records, DIFFTEST_IDENTITY_RELEASE: release};
     delete env.CJ_HOST_RTLIB;
     let execution;
     if (argv.cancel) {
@@ -107,18 +183,58 @@ try {
       cli.stdout.on('data', data => { stdout += data; });
       cli.stderr.on('data', data => { stderr += data; });
       const closed = new Promise(resolve => cli.once('close', (status, signal) => resolve({status, signal, stdout, stderr})));
-      const start = Date.now();
-      while (!(await fs.readdir(records)).length && Date.now() - start < 10_000) await new Promise(resolve => setTimeout(resolve, 20));
+      let partialObserved = false;
+      async function waitForIdentity() {
+        const start = Date.now();
+        while (Date.now() - start < 10_000) {
+          const names = await fs.readdir(records);
+          const published = names.filter(name => name.endsWith('.json'));
+          if (published.length) {
+            for (const name of published) {
+              const text = await fs.readFile(path.join(records, name), 'utf8');
+              let identity;
+              assert.doesNotThrow(() => { identity = JSON.parse(text); }, 'INVALID_DESCENDANT_IDENTITY');
+              assert.ok(Number.isSafeInteger(identity.pid) && identity.pid > 0 && /^\d+$/.test(identity.start), 'INVALID_DESCENDANT_IDENTITY');
+              const stat = await fs.readFile(`/proc/${identity.pid}/stat`, 'utf8');
+              const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+              assert.equal(fields[19], identity.start, 'descendant identity must still be live before cancellation');
+              assert.ok(!['Z', 'X'].includes(fields[0]), 'descendant must have started before cancellation');
+            }
+            return;
+          }
+          if (argv['identity-delay'] && names.some(name => name.endsWith('.pending')) && !partialObserved) {
+            const partial = await fs.readFile(path.join(records, names.find(name => name.endsWith('.pending'))), 'utf8');
+            assert.throws(() => JSON.parse(partial), 'controlled write must still be incomplete');
+            partialObserved = true;
+            await fs.writeFile(release, 'complete the controlled identity write\n');
+          }
+          await new Promise(resolve => setTimeout(resolve, 20));
+        }
+        throw Error('DESCENDANT_READY_TIMEOUT: no complete identity published');
+      }
+      try {
+        await waitForIdentity();
+      } catch (error) {
+        // This is preparation failure, not an effective cancellation sample.
+        cli.kill('SIGTERM');
+        execution = await closed;
+        await fs.writeFile(path.join(evidence, 'readiness.json'), JSON.stringify({validSample: false, error: error.message, cleanup: {rc: execution.status, signal: execution.signal}}) + '\n');
+        throw error;
+      }
       cli.kill(String(argv.cancel));
       execution = await closed;
       await new Promise(resolve => setTimeout(resolve, 200));
+      const published = (await fs.readdir(records)).filter(name => name.endsWith('.json'));
+      await fs.writeFile(path.join(evidence, 'readiness.json'), JSON.stringify({validSample: published.length > 0, partialObserved, published, rc: execution.status, signal: execution.signal}) + '\n');
+      assert.ok(published.length > 0, 'cancellation must wait for a completely published identity');
+      if (argv['identity-delay']) assert.ok(partialObserved, 'controlled partial write must be observed before cancellation');
     } else {
       execution = spawnSync(process.execPath, [process.argv[1], script, '--jobs', '1', corpus],
         {env, encoding: 'utf8', timeout: 45_000, maxBuffer: 4 * 1024 * 1024});
     }
     await fs.writeFile(path.join(evidence, 'lifecycle.stdout.log'), execution.stdout || '');
     await fs.writeFile(path.join(evidence, 'lifecycle.stderr.log'), execution.stderr || '');
-    const descendants = await Promise.all((await fs.readdir(records)).map(async name => JSON.parse(await fs.readFile(path.join(records, name), 'utf8'))));
+    const descendants = await Promise.all((await fs.readdir(records)).filter(name => name.endsWith('.json')).map(async name => JSON.parse(await fs.readFile(path.join(records, name), 'utf8'))));
     async function states() {
       return Promise.all(descendants.map(async identity => {
         const stat = await fs.readFile(`/proc/${identity.pid}/stat`, 'utf8').catch(() => '');
