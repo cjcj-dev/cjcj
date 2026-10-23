@@ -52,6 +52,73 @@ private func ExpectInitializationAccepted(code: String): Unit {
 @Test
 public class InitializationControlFlowTest {
     @TestCase
+    public func InterpolatedToStringMayThrowBeforeAssignment(): Unit {
+        ExpectInitializationDiagnostic("""
+            struct ThrowingText <: ToString {
+                public func toString(): String { throw Exception() }
+            }
+            func read(value: ThrowingText): Int64 {
+                var x: Int64
+                try {
+                    let text = "INTERPOLATE"
+                    x = 1
+                } catch (e: Exception) {}
+                return x // expected-init-error
+            }
+            """.replace("INTERPOLATE", "$" + "{value}"))
+    }
+
+    @TestCase
+    public func InterpolatedToStringMayThrowBeforeLaterPart(): Unit {
+        ExpectInitializationDiagnostic("""
+            struct ThrowingText <: ToString {
+                public func toString(): String { throw Exception() }
+            }
+            func read(value: ThrowingText): Int64 {
+                var x: Int64
+                try {
+                    let text = "INTERPOLATE"
+                } catch (e: Exception) {}
+                return x // expected-init-error
+            }
+            """.replace("INTERPOLATE", "$" + "{value}" + "$" + "{x = 1; 0}"))
+    }
+
+    @TestCase
+    public func InterpolatedToStringWithInitializedValueIsLegal(): Unit {
+        let result = CompileSource("""
+            struct ThrowingText <: ToString {
+                public func toString(): String { throw Exception() }
+            }
+            func read(value: ThrowingText): Int64 {
+                var x: Int64 = 0
+                try {
+                    let text = "INTERPOLATE"
+                    x = 1
+                } catch (e: Exception) {}
+                return x
+            }
+            """.replace("INTERPOLATE", "$" + "{value}"), stage: CompileStage.DESUGAR_AFTER_SEMA)
+        @Assert(result.instance.faithfulSemaInstance.isSome())
+        @Expect(result.ok)
+        @Expect(result.diag.GetErrorCount(), 0u64)
+    }
+
+    @TestCase
+    public func PrimitiveInterpolationDoesNotThrowException(): Unit {
+        ExpectInitializationAccepted("""
+            func read(value: Int64): Int64 {
+                var x: Int64
+                try {
+                    let text = "INTERPOLATE"
+                    x = 1
+                } catch (e: Exception) {}
+                return x
+            }
+            """.replace("INTERPOLATE", "$" + "{value}"))
+    }
+
+    @TestCase
     public func CatchOnlyAssignmentDoesNotInitialize(): Unit {
         ExpectInitializationDiagnostic("""
             func read(flag: Bool): Int64 {
