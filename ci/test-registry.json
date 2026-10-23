@@ -423,6 +423,11 @@
     "member": "packages/compiler_unittest"
   },
   {
+    "file": "packages/driver/src/Archive_output_test.cj",
+    "executor": "cjpm",
+    "member": "packages/driver"
+  },
+  {
     "file": "packages/driver/src/DriverOptions_normalization_test.cj",
     "executor": "cjpm",
     "member": "packages/driver"

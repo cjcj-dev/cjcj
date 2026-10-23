@@ -96,8 +96,7 @@ public open class Gnu <: ToolChain {
 
     protected func FinishGeneration(objFiles: ArrayList<TempFileInfo>): Bool {
         if (driverOptions.outputMode == OutputMode.STATIC_LIB) {
-            GenerateArchiveTool(objFiles)
-            return true
+            return GenerateArchiveTool(objFiles)
         }
         if (driverOptions.outputMode == OutputMode.OBJ) {
             GenerateObjTool(objFiles)
@@ -206,11 +205,13 @@ public open class Gnu <: ToolChain {
         return true
     }
 
-    protected open func GenerateArchiveTool(objFiles: ArrayList<TempFileInfo>): Unit {
+    protected open func GenerateArchiveTool(objFiles: ArrayList<TempFileInfo>): Bool {
         let tool = Tool(arPath, ToolType.BACKEND, driverOptions.environment.allVariables)
         tool.AppendArg("crD")
         let outputFile = CreateNewFileInfoWrapper(objFiles, TempFileKind.O_STATICLIB).filePath
-        let _ = RemovePath(outputFile)
+        if (!PrepareArchiveOutput(outputFile)) {
+            return false
+        }
         tool.AppendArg(outputFile)
         if (objFiles.isEmpty()) {
             for (inputObj in driverOptions.inputObjs) {
@@ -222,6 +223,7 @@ public open class Gnu <: ToolChain {
             }
         }
         backendCmds.add(MakeSingleToolBatch(tool))
+        return true
     }
 
     protected open func GenerateLinking(objFiles: ArrayList<TempFileInfo>): Bool {
