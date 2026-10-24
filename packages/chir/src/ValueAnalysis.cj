@@ -28,6 +28,8 @@ public open class ValueAnalysis<VD, Pool> <: Analysis<State<VD, Pool>> where VD 
     private let allocatedObjMap: AllocatedObjMap = AllocatedObjMap()
     private let refPool: ArrayList<Ref> = ArrayList<Ref>()
     private let absObjPool: ArrayList<AbstractObject> = ArrayList<AbstractObject>()
+    private let escapedLocations: ArrayList<Value> = ArrayList<Value>()
+    private let escapedElementRefs: ArrayList<Value> = ArrayList<Value>()
     protected let builder: CHIRBuilder
     protected let globals: ValueAnalysisGlobals<VD, Pool>
     // C++ ValueAnalysis.h:701-714 free-function template specializations are
@@ -41,6 +43,82 @@ public open class ValueAnalysis<VD, Pool> <: Analysis<State<VD, Pool>> where VD 
         this.builder = builder
         this.globals = globals
         this.handleNonNullLiteralValue = handleNonNullLiteralValue
+        if (let Some(body) <- functionValue.GetBody()) {
+            CollectEscapedLocations(body, escapedLocations)
+            for (location in escapedLocations) {
+                CollectEscapedElementRefs(location, escapedElementRefs)
+            }
+        }
+    }
+
+    private static func CollectEscapedLocations(body: BlockGroup, locations: ArrayList<Value>): Unit {
+        for (block in body.GetBlocksRef()) {
+            for (expr in block.GetExpressionsRef()) {
+                let isInout = if (let Some(intrinsic) <- (expr as Intrinsic)) {
+                    intrinsic.GetIntrinsicKind() == IntrinsicKind.INOUT_PARAM
+                } else if (let Some(intrinsic) <- (expr as TryIntrinsic)) {
+                    intrinsic.GetIntrinsicKind() == IntrinsicKind.INOUT_PARAM
+                } else {
+                    false
+                }
+                if (isInout && expr.GetNumOfNonSuccessorOperands() == 1) {
+                    locations.add(expr.GetOperand(0))
+                }
+                for (group in expr.GetBlockGroups()) {
+                    CollectEscapedLocations(group, locations)
+                }
+            }
+        }
+    }
+
+    // Field addresses may have independent abstract references in consumers such
+    // as TypeAnalysis. Track containment addresses without following loaded refs.
+    private static func CollectEscapedElementRefs(location: Value, refs: ArrayList<Value>): Unit {
+        for (user in location.GetUsers()) {
+            if (let Some(field) <- (user as GetElementRef)) {
+                let result = field.GetResult().getOrThrow()
+                if (field.GetLocation().nodeId == location.nodeId && !refs.contains(result)) {
+                    refs.add(result)
+                    CollectEscapedElementRefs(result, refs)
+                }
+            }
+        }
+    }
+
+    private func InvalidateEscapedLocations(state: State<VD, Pool>, expr: Expression): Unit {
+        let kind = expr.GetExprKind()
+        if (kind == ExprKind.APPLY || kind == ExprKind.TRY_APPLY ||
+            kind == ExprKind.INVOKE || kind == ExprKind.TRY_INVOKE ||
+            kind == ExprKind.INVOKESTATIC || kind == ExprKind.TRY_INVOKESTATIC ||
+            kind == ExprKind.INTRINSIC || kind == ExprKind.TRY_INTRINSIC ||
+            kind == ExprKind.SPAWN || kind == ExprKind.TRY_SPAWN) {
+            for (location in escapedLocations) {
+                let object = state.CheckAbstractObjectRefBy(location)
+                state.SetSelfAndChildrenStateToTop(location)
+                if (let Some(root) <- object) {
+                    InvalidateEscapedChildren(state, root)
+                }
+            }
+            for (location in escapedElementRefs) {
+                if (state.programState.Contains(location)) {
+                    state.SetToTopOrTopRef(location, true)
+                }
+            }
+        }
+    }
+
+    // Aggregate storage can contain reference-valued fields. Forget those
+    // bindings too, while preserving the value/reference shape of each child.
+    // Do not follow referenced objects: already loaded reference snapshots
+    // retain the facts about their original objects.
+    private static func InvalidateEscapedChildren(state: State<VD, Pool>, root: Value): Unit {
+        if (let Some(children) <- state.childrenMap.Get(root)) {
+            for (child in children) {
+                if (let Some(domain) <- state.CheckAbstractValueWithTopBottom(child)) {
+                    state.SetToTopOrTopRef(child, domain.IsRef())
+                }
+            }
+        }
     }
 
     public static func InitialiseLetGVState(pkg: Package, builder: CHIRBuilder,
@@ -109,6 +187,7 @@ public open class ValueAnalysis<VD, Pool> <: Analysis<State<VD, Pool>> where VD 
     }
 
     public override func PropagateExpressionEffect(state: State<VD, Pool>, expression: Expression): Unit {
+        InvalidateEscapedLocations(state, expression)
         match (expression.GetExprMajorKind()) {
             case ExprMajorKind.MEMORY_EXPR => PreHandleMemoryExpr(state, expression)
             case ExprMajorKind.UNARY_EXPR => ()
@@ -121,6 +200,7 @@ public open class ValueAnalysis<VD, Pool> <: Analysis<State<VD, Pool>> where VD 
     }
 
     public override func PropagateTerminatorEffect(state: State<VD, Pool>, terminator: Expression): Option<Block> {
+        InvalidateEscapedLocations(state, terminator)
         match (terminator.GetExprKind()) {
             case ExprKind.TRY_APPLY =>
                 return PreHandleTryApplyExpr(state, (terminator as TryApply).getOrThrow())
