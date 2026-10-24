@@ -611,9 +611,10 @@ process.on('exit', () => fs.writeFileSync(${JSON.stringify(scheduleFile)}, JSON.
   });
 }
 
-for (const fault of [true, false]) {
-  test(`smoke collector I/O ${fault ? 'failure aborts remaining samples' : 'control retains six outcomes'}`, async () => {
-    const f = await setup(`smoke-io-${fault ? 'fault' : 'control'}`);
+for (const mode of ['once', 'persistent', 'control']) {
+  const fault = mode !== 'control';
+  test(`smoke collector I/O ${mode === 'persistent' ? 'persistent failure preserves stderr fallback' : fault ? 'failure aborts remaining samples' : 'control retains six outcomes'}`, async () => {
+    const f = await setup(`smoke-io-${mode}`);
     const hook = path.join(f.root, 'smoke-io.mjs');
     const scheduled = path.join(f.root, 'smoke-io-schedule.json');
     await fs.writeFile(hook, `
@@ -636,12 +637,17 @@ cp.spawn = function(command, ...args) {
 syncBuiltinESMExports();
 const write = promises.writeFile;
 promises.writeFile = async function(file, ...args) {
+  if (schedule.fired && ${JSON.stringify(mode === 'persistent')}) {
+    schedule.secondary = (schedule.secondary || 0) + 1;
+    throw Object.assign(Error('secondary evidence write refused'), {code: 'ENOSPC'});
+  }
   if (firstClosed && !schedule.fired && String(file).endsWith('/call.json.tmp')) {
     // This case isolates the library caller after a real successful child;
     // the live-child termination cases above independently cover reaping.
     await firstClosed;
     schedule.fired = true;
-    if (${JSON.stringify(fault)}) throw Object.assign(Error('injected smoke collector ENOSPC'), {code: 'ENOSPC'});
+    if (${JSON.stringify(fault)}) throw Object.assign(Error('injected smoke collector ENOSPC'),
+      {code: 'ENOSPC', errno: -28, syscall: 'write', path: String(file)});
   }
   return write.call(this, file, ...args);
 };
@@ -650,20 +656,40 @@ process.on('exit', () => fs.writeFileSync(${JSON.stringify(scheduled)}, JSON.str
     const r = await smokeRun(f, {NODE_OPTIONS: `${process.env.NODE_OPTIONS || ''} --import=${hook}`.trim()});
     const schedule = JSON.parse(await fs.readFile(scheduled));
     const parent = JSON.parse(await fs.readFile(path.join(r.work, 'smoke-result.json')));
-    target('smoke_collector_io_stops_samples', {fault, parent_rc: r.result.status, signal: r.result.signal,
+    target('smoke_collector_io_stops_samples', {mode, fault, parent_rc: r.result.status, signal: r.result.signal,
       calls: r.calls.length, first: r.calls[0], schedule, parent});
     assert.equal(schedule.fired, true); assert.deepEqual(schedule.child, {rc: 0, signal: null});
     assert.equal(r.result.signal, null); assert.equal(r.result.error, undefined);
     assert.equal(r.result.status, fault ? 1 : 0, 'target preserve the smoke exception exit contract');
-    assert.equal(r.calls[0].child_rc, 0); assert.equal(r.calls[0].child_signal, null);
     if (fault) {
       assert.equal(r.calls.length, 1, 'target collector I/O exception stops further producer invocations');
-      assert.equal(r.calls[0].collector_rc, 74); assert.equal(r.calls[0].state, 'COLLECTOR_FAILED');
-      assert.equal(r.calls[0].collector_error.code, 'ENOSPC');
+      const fallbackLine = r.result.stderr.split('\n').find(line => line.startsWith('COLLECTOR_FAILED '));
+      assert.ok(fallbackLine, 'target collector diagnostics survive failed evidence persistence');
+      const fallback = JSON.parse(fallbackLine.slice('COLLECTOR_FAILED '.length));
+      assert.equal(fallback.error.message, 'injected smoke collector ENOSPC');
+      assert.equal(fallback.error.code, 'ENOSPC'); assert.equal(fallback.error.errno, -28);
+      assert.equal(fallback.error.syscall, 'write'); assert.match(fallback.error.path, /\/call\.json\.tmp$/);
+      assert.equal(fallback.child_pid, schedule.pid); assert.equal(fallback.child_rc, 0);
+      assert.equal(fallback.child_signal, null); assert.equal(fallback.collector_rc, 74);
+      assert.equal(fallback.logs_closed, true);
+      if (mode === 'persistent') {
+        assert.ok(schedule.secondary >= 2);
+        assert.ok(fallback.persistence_errors.length >= 2);
+        assert.ok(fallback.persistence_errors.every(message => message === 'secondary evidence write refused'));
+        // Failed writes leave the earlier RUNNING record intact; stderr owns
+        // the final raw state when that record cannot be updated.
+        assert.equal(r.calls[0].state, 'RUNNING'); assert.equal(r.calls[0].child_rc, null);
+      } else {
+        assert.equal(r.calls[0].child_rc, 0); assert.equal(r.calls[0].child_signal, null);
+        assert.equal(r.calls[0].collector_rc, 74); assert.equal(r.calls[0].state, 'COLLECTOR_FAILED');
+        assert.equal(r.calls[0].collector_error.code, 'ENOSPC');
+        assert.deepEqual(fallback.persistence_errors, []);
+      }
       assert.match(r.result.stderr + r.result.stdout, /injected smoke collector ENOSPC/);
       assert.ok(Object.values(parent.samples).every(sample => sample.compile === 'NOT_RUN' && sample.run === 'NOT_RUN'));
       assert.equal(parent.parent_rc, null, 'a thrown exception does not invent a completed smoke summary');
     } else {
+      assert.equal(r.calls[0].child_rc, 0); assert.equal(r.calls[0].child_signal, null);
       assert.equal(r.calls.length, 7); assert.equal(parent.parent_rc, 0);
       assert.equal(parent.pass, 6); assert.equal(parent.fail, 0);
     }

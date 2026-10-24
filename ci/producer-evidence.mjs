@@ -383,7 +383,7 @@ export async function runDirect(call, {passthrough = false, finalize} = {}) {
     await attempt(() => call.update());
     await attempt(() => fs.writeFile(path.join(directory, 'execution.json'), JSON.stringify(result, null, 2)));
     await attempt(() => finalize?.(result));
-    if (passthrough) process.stderr.write(`${failure.message}\nCOLLECTOR_FAILED ${JSON.stringify({
+    process.stderr.write(`${failure.message}\nCOLLECTOR_FAILED ${JSON.stringify({
       error: record.collector_error, child_pid: record.child_pid ?? null,
       child_rc: record.child_rc, child_signal: record.child_signal, collector_rc: 74,
       logs_closed: record.logs_closed, persistence_errors: secondary})}\n`);
