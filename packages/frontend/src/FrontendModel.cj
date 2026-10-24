@@ -6602,6 +6602,18 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
             searchPath.add(path)
         }
         searchPath.add(cangjieModules)
+        // CjoManagerImpl.h: options/env home also serves callers whose modules
+        // directory is a test/build tree; otherwise derive home from modules/<tuple>.
+        var home = globalOptions.cangjieHome
+        if (home.isEmpty() && globalOptions.environment.cangjieHome.hasValue) {
+            home = globalOptions.environment.cangjieHome.value
+        }
+        if (home.isEmpty()) {
+            home = FileUtil.GetDirPath(FileUtil.GetDirPath(cangjieModules))
+        }
+        if (!home.isEmpty()) {
+            searchPath.add(FileUtil.JoinPath(home, "third_party/flatbuffers/modules"))
+        }
     }
 
     public func GetSearchPath(): ArrayList<String> {
