@@ -434,6 +434,7 @@ for (const boundary of ['spawn-return', 'finish-write', 'execution-write', 'summ
     const f = await setup(`cancel-boundary-${boundary}`);
     const root = path.join(f.root, 'evidence');
     const hook = path.join(f.root, 'schedule-boundary.mjs');
+    const ownedChild = path.join(f.root, 'spawn-child.json');
     // A finite scheduler forces the two source windows without retrying a race.
     // It changes neither collector status nor the production cancellation bound.
     await fs.writeFile(hook, `
@@ -450,6 +451,7 @@ if (boundary === 'spawn-return') {
   cp.spawn = function(command, ...args) {
     const child = original.call(this, command, ...args);
     if (command === producer) {
+      fs.writeFileSync(${JSON.stringify(ownedChild)}, JSON.stringify({pid: child.pid, parent: process.pid}));
       const deadline = Date.now() + 3000;
       while (!fs.existsSync(trace) && Date.now() < deadline) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1);
       if (!fs.existsSync(trace)) throw Error('controlled producer never became ready');
@@ -476,20 +478,36 @@ process.on('exit', () => fs.writeFileSync(${JSON.stringify(path.join(f.root, 'sc
 `);
     const env = {...f.env, EVIDENCE_TEST_MODE: boundary === 'spawn-return' ? 'cancel-ignore' : ''};
     const args = ['--import', hook, path.join(repo, 'ci/producer-evidence.mjs'), '--role', 'package',
-      '--name', 'internal', '--source-tree', f.tree, '--root', root, '--', f.producer];
-    const result = spawnSync(process.execPath, args, {cwd: f.tree, env, encoding: 'utf8', timeout: 6000});
+      '--name', 'internal', '--source-tree', f.tree, '--root', root,
+      '--summary-file', path.join(root, 'package-internal.result.json'), '--invocation-id', `boundary-${boundary}`, '--', f.producer];
+    const collector = spawn(process.execPath, args, {cwd: f.tree, env, stdio: ['ignore', 'pipe', 'pipe']});
+    let stdout = ''; let stderr = ''; let watchdog = false;
+    collector.stdout.on('data', chunk => { stdout += chunk; }); collector.stderr.on('data', chunk => { stderr += chunk; });
+    const timer = setTimeout(async () => {
+      watchdog = true;
+      // The spawn-return cut can kill the collector before call.json gets its
+      // child_pid. Retain launch ownership outside that failed persistence.
+      const owned = JSON.parse(await fs.readFile(ownedChild).catch(() => 'null'));
+      if (owned?.parent === collector.pid && await fs.realpath(`/proc/${owned.pid}/exe`).catch(() => null) === f.producer)
+        process.kill(owned.pid, 'SIGKILL');
+      collector.kill('SIGKILL');
+    }, 5000);
+    const result = await new Promise(resolve => collector.on('close', (status, signal) => resolve({status, signal, stdout, stderr})));
+    clearTimeout(timer);
     const [call] = await calls(root);
     const actual = {boundary, rc: result.status, signal: result.signal, error: result.error?.message,
       child: call?.child_rc, child_signal: call?.child_signal, collector: call?.collector_rc, state: call?.state};
     await fs.writeFile(path.join(f.root, 'boundary-result.json'), JSON.stringify({...actual, args, stdout: result.stdout, stderr: result.stderr}, null, 2));
     target('cancel_boundary_owned', actual);
     assert.equal(result.status, 143, `target collector owns cancellation at ${boundary}`);
+    assert.equal(watchdog, false, 'target collector finishes without test cleanup');
     assert.equal(result.signal, null); assert.equal(result.error, undefined);
     assert.deepEqual(JSON.parse(await fs.readFile(path.join(f.root, 'schedule.json'))), {boundary, fired: true});
     assert.equal(call.state, 'CANCELLED'); assert.equal(call.collector_rc, 143);
     assert.equal(call.child_rc, boundary === 'spawn-return' ? -9 : 0);
     assert.equal(call.child_signal, boundary === 'spawn-return' ? 'SIGKILL' : null);
     const summary = JSON.parse(await fs.readFile(path.join(root, 'package-internal.result.json')));
+    assert.equal(summary.invocation_id, `boundary-${boundary}`);
     assert.equal(summary.execution_rc, call.child_rc); assert.equal(summary.collector_rc, 143);
     const execution = JSON.parse(await fs.readFile(path.join(call.file, '..', 'execution.json')));
     assert.equal(execution.exitCode, boundary === 'spawn-return' ? null : 0);
