@@ -187,10 +187,14 @@ const r=spawnSync(cjpm,['wire-public-consumer'],{encoding:'utf8'});assert.equal(
 const row={event:'regression',cjpm,out,arm,cases:process.env.CJPM_REGRESSION_CASES,rc:process.env.CJPM_WIRE_FAIL==='1'?23:0};fs.writeFileSync(path.join(out,'result.json'),JSON.stringify(row));fs.appendFileSync(${JSON.stringify(trace)},JSON.stringify(row)+'\\n');console.log('CJPM_PUBLIC_BODY_REACHED '+JSON.stringify(row));process.exitCode=row.rc;
 `);
    // Same module-load boundary technique as runtime-component-source. Keep the
-   // stage under test, real installer, hello, command and supervisor untouched.
-   // Source pin/network and unrelated producer qualification are NOT_RUN here.
+   // tools stage, tools installer, hello, command and supervisor untouched.
+   // Outer compiler/runtime/SDK production and qualification are controlled;
+   // source pin/network are exercised separately by the actual source gate.
    const boundaries={
     'build/lib/git.mjs':{fetchSource:'return;',assertSourceIdentity:'return;'},
+    'ci/bootstrap/sdk-inputs.mjs':{prepareSourceBuildInputs:'return {...arguments[0],installInputs:{install:arguments[0].consumerSdk}};'},
+    'ci/bootstrap/sdk-flow.mjs':{installProducts:'return arguments[1].consume(arguments[0].install);'},
+    'ci/bootstrap/sdk-verify-install.mjs':{verifyInstall:'return;'},
     'build/srcbuild/native-tool-dependencies.mjs':{prepareNativeToolDependencies:'return;'},
     'build/srcbuild/hle-dependencies.mjs':{installHleDependencies:'return;'},
     'build/srcbuild/tool-build-inputs.mjs':Object.fromEntries(['beginToolBuild','finishToolBuild','toolBuildInputs','finishToolInstall','installedToolBuildInputs'].map(name=>[name,"return {source:{status:'unresolved'},fixture:'production qualification NOT_RUN'};"])),
