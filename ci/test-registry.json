@@ -302,6 +302,11 @@
     "member": "packages/compiler_unittest"
   },
   {
+    "file": "packages/compiler_unittest/src/ImportSearchPath_test.cj",
+    "executor": "cjpm",
+    "member": "packages/compiler_unittest"
+  },
+  {
     "file": "packages/compiler_unittest/src/Macro_MsgFormatBindings_test.cj",
     "executor": "cjpm",
     "member": "packages/compiler_unittest"
