@@ -9,7 +9,8 @@ import std.unittest.testmacro.*
 func CheckMechanismIR(fn: Function, b: CHIRBuilder): Unit {
     let pkg = b.CreatePackage("fixture")
     pkg.AddGlobalFunc(fn)
-    @Expect(CHIRChecker(pkg, GlobalOptions(), b).CheckPackage(ArrayList<CHIRCheckerRule>()), true)
+    @Expect(CHIRChecker(pkg, GlobalOptions(), b).CheckPackage(
+        ArrayList<CHIRCheckerRule>([CHIRCheckerRule.CHECK_FUNC_BODY])), true)
 }
 
 // All observations below run the production Engine and Results replay.  The
@@ -261,9 +262,15 @@ public class SharedValueInvalidationMechanismTest {
             storage.GetResult().getOrThrow()
         }
         let field = b.CreateGetElementRef(c.GetRefTy(valueTy), fieldBase, ArrayList<UInt64>([0u64]), entry)
-        let store = b.CreateStore(object.GetResult().getOrThrow(), field.GetResult().getOrThrow(), entry)
+        // Store may not directly target GetElementRef. Materialize the field
+        // address in a typed local slot and write through the loaded reference.
+        let fieldAddressTy = c.GetRefTy(valueTy)
+        let addressSlot = b.CreateAllocate(c.GetRefTy(fieldAddressTy), fieldAddressTy, entry)
+        let saveAddress = b.CreateStore(field.GetResult().getOrThrow(), addressSlot.GetResult().getOrThrow(), entry)
+        let indirectAddress = b.CreateLoad(fieldAddressTy, addressSlot.GetResult().getOrThrow(), entry)
+        let store = b.CreateStore(object.GetResult().getOrThrow(), indirectAddress.GetResult().getOrThrow(), entry)
         let before = b.CreateLoad(valueTy, field.GetResult().getOrThrow(), entry)
-        entry.AppendExpressions(ArrayList<Expression>([field, store, before]))
+        entry.AppendExpressions(ArrayList<Expression>([field, addressSlot, saveAddress, indirectAddress, store, before]))
         let trigger = if (write) {
             InvalidationTrigger(b, kind, entry, normal, error, ArrayList<Value>([pointer.GetResult().getOrThrow()]), storageTy)
         } else {
