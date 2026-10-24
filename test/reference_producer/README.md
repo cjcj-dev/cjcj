@@ -31,7 +31,13 @@ The product cut removes the root-return registration call in
 `Translator.Visit(AstFuncDecl)`; rebuild the candidate CHIR/compiler normally,
 then rerun the same fixtures and reader. Root/derived/constant-finalizer targets
 must reject, while the scalar-fold and plain-constant-materialization assertions
-remain valid. The const_plain case also checks the root constructor, so its
+remain valid. Shared identity in finalizable constant batches is also a cut
+target: root registration makes the interpreter retain the entire runtime
+initialization batch. Removing it permits replacement initializers to allocate
+separate objects instead of loading the original shared instance. The
+`shared_global_keeps_identity` assertion therefore expects true/false/true
+across candidate/cut/restored; it is not an independent control.
+The const_plain case also checks the root constructor, so its
 overall cut status is FAIL; only its separate materialization check is an
 independent control. Restore the
 fixed source and rebuild before recovery. A crash or early compilation error

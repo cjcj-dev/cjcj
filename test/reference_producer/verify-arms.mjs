@@ -11,7 +11,8 @@ const key = row => `${row.name}/${row.phase}/${row.optimization}`;
 const expected = names.flatMap(name => ['raw', 'opt'].flatMap(phase =>
   ['O0', 'O2'].map(optimization => `${name}/${phase}/${optimization}`)));
 const targeted = new Set(['root_event_before_normal_exit',
-  'derived_constructor_reaches_root_event', 'const_batch_retains_runtime_event']);
+  'derived_constructor_reaches_root_event', 'const_batch_retains_runtime_event',
+  'shared_global_keeps_identity']);
 const observations = [];
 
 for (const [arm, file] of [['candidate', candidatePath], ['cut', cutPath], ['restored', restoredPath]]) {
