@@ -417,12 +417,27 @@ private func ReplaceFunction(cgMod: CGModule): Unit {
                     [basePtr, thisParamWithoutTI, load, size64]))
             } else {
                 // The original receiver is a headerless payload, not the boxed
-                // destination expected by gcwrite/gcread.generic. Read the
-                // wrapper's object into native storage, then copy its known
-                // no-reference layout back to the original receiver address.
-                let load = irBuilder.CreateEntryAlloca(thisLLVMType)
-                irBuilder.CallGCReadGenericPayload(load, thisParamWithTI, size32)
-                irBuilder.CopyNoRefOrMemCpy(thisLLVMType, thisParamWithoutTI, load, size64)
+                // destination expected by gcwrite/gcread.generic. For a native
+                // AS0->AS1 view use its original storage, without introducing
+                // typed-copy uses of the restricted addrspacecast result.
+                var nativeReceiver = LLVMNullValue()
+                if (unsafe { LLVMGetPointerAddressSpace(LLVMTypeOf(thisParamWithoutTI)) } == 0u32) {
+                    nativeReceiver = thisParamWithoutTI
+                } else if (unsafe { LLVMSelfhostIsAddrSpaceCastOperator(thisParamWithoutTI) } != 0) {
+                    let origin = unsafe { LLVMSelfhostAddrSpaceCastOperatorGetOperand(thisParamWithoutTI) }
+                    if (unsafe { LLVMGetPointerAddressSpace(LLVMTypeOf(origin)) } == 0u32) {
+                        nativeReceiver = IRBuilder2.GetNativePayloadSource(thisParamWithoutTI)
+                    }
+                }
+                if (!nativeReceiver.isNull()) {
+                    irBuilder.CallGCReadGenericPayload(nativeReceiver, thisParamWithTI, size32)
+                } else {
+                    // A true managed field retains its address space and its
+                    // known no-reference layout; never cast that field to AS0.
+                    let load = irBuilder.CreateEntryAlloca(thisLLVMType)
+                    irBuilder.CallGCReadGenericPayload(load, thisParamWithTI, size32)
+                    irBuilder.CopyNoRefOrMemCpy(thisLLVMType, thisParamWithoutTI, load, size64)
+                }
             }
         }
     }
