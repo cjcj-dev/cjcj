@@ -1,10 +1,10 @@
-name: Native stage1 host identity contract
+name: Independent official H input identity contract
 on:
   workflow_dispatch:
   pull_request:
     paths:
       - 'ci/bootstrap/stage1_host*'
-      - 'ci/bootstrap/test_host_identit*'
+      - 'ci/bootstrap/sdk-host-inputs.integration.test.mjs'
       - 'ci/host_sdk_pin.env'
       - 'ci/release/host_llvm.mjs'
       - '.github/workflows/test-host-identities.yml'
@@ -26,6 +26,7 @@ jobs:
           test "$(uname -m)" = aarch64
           node ci/release/host_llvm.mjs env >> "$GITHUB_ENV"
           source ci/host_sdk_pin.env
+          CJCJ_TOOLCHAIN="$(node ci/host-toolchain-pin.mjs)"
           export CJCJ_TOOLCHAIN
           python3 - <<'PY'
           import json, os
@@ -54,31 +55,20 @@ jobs:
           printf '%s  %s\n' "$SDK_SHA256" "$RUNNER_TEMP/$SDK_ARCHIVE" | sha256sum --check
           mkdir "$RUNNER_TEMP/fixed-sdk"
           tar -xzf "$RUNNER_TEMP/$SDK_ARCHIVE" -C "$RUNNER_TEMP/fixed-sdk"
-      - name: Native candidate, producer cut, consumer cut and restored arms
+      - name: Verify original official H archive and separate repaired H producer
         shell: bash
         env:
           HOST_IDENTITY_SDK: ${{ runner.temp }}/fixed-sdk/cangjie
+          HOST_IDENTITY_ARCHIVE: ${{ runner.temp }}/${{ env.SDK_ARCHIVE }}
           HOST_IDENTITY_LLVM: ${{ runner.temp }}/host-llvm/libLLVM-15.so
+          HOST_IDENTITY_LLVM_ARTIFACT: ${{ runner.temp }}/host-llvm
         run: |
           set -euo pipefail
           ulimit -c 0
           mkdir -p "$RUNNER_TEMP/identity-evidence"
           uname -a > "$RUNNER_TEMP/identity-evidence/machine.txt"
           uptime >> "$RUNNER_TEMP/identity-evidence/machine.txt"
-          python3 ci/bootstrap/test_host_identity_wiring.py "$RUNNER_TEMP/identity-evidence"
-          git fetch --no-tags --depth=1 origin 96a9458e8de025d1c5fcf5e7c150e51a77e2af37
-          git show 96a9458e8de025d1c5fcf5e7c150e51a77e2af37:ci/bootstrap/stage1_host_runner.sh > "$RUNNER_TEMP/identity-evidence/baseline-runner.sh"
-          git show 96a9458e8de025d1c5fcf5e7c150e51a77e2af37:ci/bootstrap/stage1_host_identities.txt > "$RUNNER_TEMP/identity-evidence/baseline-pins.txt"
-          set +e
-          STAGE1_RUNNER_PRODUCT="$RUNNER_TEMP/identity-evidence/baseline-runner.sh" \
-            STAGE1_PIN_PRODUCT="$RUNNER_TEMP/identity-evidence/baseline-pins.txt" \
-            python3 ci/bootstrap/test_host_identities.py HostIdentity.test_fixed_release_triple \
-            > "$RUNNER_TEMP/identity-evidence/baseline.log" 2>&1
-          rc=$?
-          set -e
-          echo "$rc" > "$RUNNER_TEMP/identity-evidence/baseline.rc"
-          test "$rc" = 1
-          grep -F 'llvm sha is not the declared host triple:' "$RUNNER_TEMP/identity-evidence/baseline.log"
+          node ci/bootstrap/sdk-host-inputs.integration.test.mjs > "$RUNNER_TEMP/identity-evidence/inputs.log" 2>&1
           uptime >> "$RUNNER_TEMP/identity-evidence/machine.txt"
       - uses: actions/upload-artifact@v7
         if: always()

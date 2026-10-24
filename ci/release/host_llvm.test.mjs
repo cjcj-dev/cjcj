@@ -183,13 +183,13 @@ for (const target of ['linux-aarch64', 'darwin-arm64', 'darwin-x64']) {
   }, target));
 }
 
-test('workflow supplies the target and downloads pinned host LLVM for every cell', () => {
+test('workflow keeps pinned host LLVM on the default branch and explicit native inputs on their branch', () => {
   const workflow = fs.readFileSync(new URL('../../.github/workflows/srcbuild-target.yml', import.meta.url), 'utf8');
   assert.ok(workflow.includes('CJCJ_SRCBUILD_TARGET: ${{ matrix.target }}'));
   for (const name of ['Load immutable bootstrap host LLVM provenance', 'Download pinned bootstrap host LLVM']) {
     const step = workflow.split(`- name: ${name}\n`)[1]?.split('\n      - name:')[0];
     assert.ok(step, name);
-    assert.doesNotMatch(step, /if:/);
+    assert.match(step, /if: inputs.native_runtime_artifact == ''/);
   }
   assert.ok(workflow.includes('node ci/release/prepare_bootstrap_inputs.mjs'));
 });

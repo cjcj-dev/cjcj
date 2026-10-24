@@ -49,7 +49,9 @@ The axes come from **every** `allReleasePlatforms()` row in `build/lib/targets.m
 G3 uses each host runtime tuple plus cross tuples; G6 deduplicates LLVM platforms.
 Blocked and excluded rows remain required by the full-platform release policy;
 readiness is diagnostic and cannot exempt evidence. Existing workflow job checks
-still validate exactly the buildable jobs. With no result file, ordinary missing
+validate exactly the declared package recipes (`packageDeclared`), including recipes
+whose native source is blocked. Declaration is not runnable admission. Complete
+bound evidence validates the submitted execution records without changing readiness. With no result file, ordinary missing
 evidence is UNKNOWN; if any platform is blocked it is NOT_MET. In a result file,
 a missing/duplicate/unexpected platform or tuple is NOT_MET. Missing check,
 artifact metadata or log is UNKNOWN with `missing=` naming it. A nonzero verifier

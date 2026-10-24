@@ -144,13 +144,15 @@ python3 ci/cangjie-test/classify.py O1 official-classification.json
 
 For B use `--arm bootstrap` in both commands and pass
 `--bootstrap-compiler-sha256 HASH` to `run.py` (see the trust input below).
-That run requires `compiler-lineage.json` from `compose-install` or
-`sdk_build --cjc`; it checks both driver names and the recorded producer
-against the independent build hash before executing any tests.
-Both `bin/cjc` and `bin/cjc-frontend` point to the same physical
-`bin/cjcj-stage1`. The name is the SDK layout convention even for a stage3
-producer; the record retains the source and installed hashes. Darwin's
-`install_name_tool` transformation is recorded at final packaging.
+That runner requires the original pre-seal `compiler-lineage.json` emitted by
+the compiler producer. `sdk-stage-producer.mjs` creates it with the compiler
+artifact before the output receipt is sealed. `compiler_identity.mjs` authenticates
+the complete SDK plan/manifest/payload and resolves the native entry's original
+member through `originalToolEntry`; the independent producer hash remains
+required. Read-only composition keeps this original record unchanged.
+Darwin loader transformations must be in the frozen producer recipe.
+
+
 
 The environment preparation copies `modules` into the private SDK's
 `tools/bin` as prescribed by the framework README:83–95. `run.py` sets the
@@ -186,12 +188,11 @@ With only O, `comparison_available=false`: no B/O comparison or repeated-run
 stability is asserted. Raw failures, sources, and statuses are preserved in
 every classified record. Repetition evidence availability is explicit.
 
-Device regression entries are `verify_classify.py`,
-`../bootstrap/test_compiler_identity.py`, and
-`build/test/compose-install.test.mjs`. The shell test exercises the full SDK
-assembly entry with distinct fixture ELFs; it does not certify compiler
-semantics. Its optional real compiler/frontend inputs rehearse the identity
-guard without executing a compiler against fixture runtime libraries.
+Device regression entries are `verify_classify.py` and
+`../bootstrap/test_compiler_identity.py`. The retired compose installation
+fixture is replaced by `ci/bootstrap/sdk-compose-stage3.integration.test.mjs`, which
+requires genuine C3/S1 inputs and checks the original producer and immutable
+SDK. Its registration alone does not certify compiler semantics.
 
 ### Bootstrap compiler trust input
 
@@ -217,3 +218,35 @@ our compiler passes identity admission; installing the official compiler with
 its genuine installer-generated record is rejected. Input admission deliberately
 stops these tests before any compiler executes; this proves SDK identity
 admission only, not compiler correctness or suite completion.
+
+Target tool readiness consumes the ordinary `TOOLS-INPUTS.json` emitted by
+`build/cli.mjs ... build tools`. Every one of cjpm, cjfmt, HLE, LSPServer,
+cjcov, cjtrace-recover, cjlint, cjprof and cjcompat keeps its own source,
+configuration, build/install status, retained executable, public entry, and
+payload facts. Native cjlint/cjprof additionally install their shared libraries,
+JSON/static configuration and JNI library. A missing, inherited-host, unresolved
+or mismatched member stays `ready=false`; a successful help probe alone cannot
+clear it. Readiness is a prerequisite observation, not tool semantics or full
+SDK qualification. The independent cjdb prerequisite remains unchanged.
+
+`available` is the prerequisite for executing the current SDK's business tests.
+It retains native configuration/AST/payload checks and CJ compiler/std/runtime
+pairing. The normal installer records its destination once in
+`TOOLS-INPUTS.json.installationInputs`; original `producer.build.inputs` stays
+unchanged. Lint/LSP runtime inputs may be selected at installation, but changed
+inputs return `ready=false`, `applicability.status=NOT_CONSUMED` until a real
+consumer is run. Installing, reading these facts, or a successful help command
+does not run that consumer. Execute the existing `testInstall` commands after
+availability admission and keep their actual results by scope; do not write
+back a global ready receipt or import an earlier PASS. Compiler macro tests and
+LSP source/CJO protocol tests do not imply lint/LSP macro coverage. Release
+keeps that missing coverage explicit after its independent installed tests.
+
+`environment.py` calls the adjacent `tool-readiness.mjs` reader for bootstrap
+inputs and `apply_environment` checks previously ready entries again before
+using the manifest. Keep these repository modules together when transferring
+the runner. `verify-target-tools.integration.mjs REAL_TARGET_SDK NEW_WORK` is the
+registered actual environment CLI check, requiring a real complete target SDK
+and separate capacity for its private SDK copy. It does not start or relax the
+96-CPU/8GiB language-suite entry. No target-tool or suite result is implied by
+source preparation.

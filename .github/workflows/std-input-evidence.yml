@@ -94,7 +94,7 @@ jobs:
           set -o pipefail
           mkdir -p "$RUNNER_TEMP/std-evidence"
           grep -Fx "compiler=$COMPILER_REF" "$RUNNER_TEMP/ast-support/PROVENANCE"
-          python3 ci/test_build_resources.py
+          node ci/run-registered-tests.mjs scripts "$RUNNER_TEMP/std-resource-checks" ci/build-resources.test.mjs
           bash ci/release/build_colour_std.sh runtime-source "$RUNNER_TEMP/std-active" \
             "$RUNNER_TEMP/ast-support" "$RUNNER_TEMP/std-evidence" 2>&1 | tee "$RUNNER_TEMP/std-evidence.log"
       - name: Upload evidence only

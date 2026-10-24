@@ -25,6 +25,7 @@ function fixture(root) {
   for (const argv of [['git', '-C', git, 'init', '-q'], ['git', '-C', git, '-c', 'user.name=Zxilly', '-c', 'user.email=zxilly@outlook.com', 'commit', '--allow-empty', '-qm', 'tuple fixture']]) {
     const result = command(argv); assert.equal(result.status, 0, result.stderr);
   }
+  fs.writeFileSync(path.join(fixed, 'llvm-tools.manifest'), 'PLATFORM=linux_x86_64\n');
   return {LLVM_SHA: 'llvm-fixture', CANGJIE_COMPILER_SHA: 'compiler-fixture', REPO_ROOT: git, CJCJ_FIXED_LLVM_DIR: fixed};
 }
 

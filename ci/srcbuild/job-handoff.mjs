@@ -2,6 +2,8 @@
 // Source jobs retain absolute SDK bindings and verify the producer before use.
 // Like bootstrap_store.acquire, nothing is consumable until its manifest checks.
 import fs from 'node:fs/promises';
+import {verifyNativeToolHandoff} from '../bootstrap/native-tool-input.mjs';
+import {readHleDependencies} from '../bootstrap/hle-input.mjs';
 import {resolveRuntimeSource} from '../runtime-pin.mjs';
 import {createReadStream} from 'node:fs';
 import crypto from 'node:crypto';
@@ -36,12 +38,21 @@ const tar = args => {
 };
 // Deliberately exclude PATH, cache launchers, tokens and runner command files.
 // Every consuming job installs its own dependencies and starts its own cache.
-const allowed = name => /^(CJCJ_BOOTSTRAP_[A-Z0-9_]+|CJCJ_SRCBUILD_(HOST_SDK|BOOTSTRAP_SDK)|CJCJ_TOOLCHAIN|CJCJ_ACTUAL_HOST_TOOLCHAIN|CANGJIE_HOME|CANGJIE_STDX_PATH|LD_LIBRARY_PATH|DYLD_LIBRARY_PATH|G2_IDENTITY|G2_CAMPAIGN_DIR|SOURCE_SDK_VERSION|CJCJ_RUNTIME_REF_OVERRIDE|CJCJ_ALLOW_RUNTIME_OVERRIDE|COLOUR_RT_(RUN_ID|RUN_ATTEMPT|ARTIFACT_ID|MANIFEST_SHA256)|RUNTIME_REF|RUNTIME_SRC_URL|TOOLS_REF|TOOLS_SRC_URL|STDX_REF|STDX_SRC_URL|CANGJIE_COMPILER_SHA|CANGJIE_COMPILER_URL|LLVM_SHA|LLVM_TUPLE_SUMS_SHA)$/.test(name);
+const allowed = name => /^(CJCJ_NATIVE_(SOURCE_SELECTION|CJDB_INSTALL|TOOL_DEPENDENCIES|RUNTIME_INSTALL|RUNTIME_SOURCE|RUNTIME_REF|LLVM_REF|HOST_VERSION)|CJCJ_SDK_TARGETS|CJCJ_SDK_INPUTS|CJCJ_HLE_DEPENDENCIES|CJCJ_BOOTSTRAP_[A-Z0-9_]+|CJCJ_SRCBUILD_(HOST_SDK|BOOTSTRAP_SDK)|CJCJ_TOOLCHAIN|CJCJ_ACTUAL_HOST_TOOLCHAIN|CANGJIE_HOME|CANGJIE_STDX_PATH|LD_LIBRARY_PATH|DYLD_LIBRARY_PATH|G2_IDENTITY|G2_CAMPAIGN_DIR|SOURCE_SDK_VERSION|CJCJ_RUNTIME_REF_OVERRIDE|CJCJ_ALLOW_RUNTIME_OVERRIDE|COLOUR_RT_(RUN_ID|RUN_ATTEMPT|ARTIFACT_ID|MANIFEST_SHA256)|RUNTIME_REF|RUNTIME_SRC_URL|TOOLS_REF|TOOLS_SRC_URL|STDX_REF|STDX_SRC_URL|CANGJIE_COMPILER_SHA|CANGJIE_COMPILER_URL|LLVM_SHA|LLVM_TUPLE_SUMS_SHA)$/.test(name);
 // MinGW is an independent producer. Its overlay must not replace the native
 // SDK, injected source version or environment when Windows std joins both arms.
 const roots = phase === 'mingw' ? ['.srcbuild/buildtools/llvm-mingw-w64']
   : ['.srcbuild', 'packages', 'runtime_shim', 'cjpm.toml'];
 const optional = phase === 'mingw' ? [] : ['cjpm.lock', 'target'];
+async function verifyHleHandoff(environment) {
+  const file=environment.CJCJ_HLE_DEPENDENCIES;
+  if(!file)return; // Phases before the native input selection have no tools input.
+  const archived=path.join(root,'.srcbuild')+path.sep;
+  for(const item of [file,...Object.values(await readHleDependencies(file)).filter(row=>row?.path).map(row=>row.path)]) {
+    if(!path.resolve(item).startsWith(archived)||!(await fs.realpath(item)).startsWith(archived))
+      throw new Error('handoff HLE dependency outside archived inputs');
+  }
+}
 async function verifyRuntimeHandoff(environment) {
   const selected = await resolveRuntimeSource(environment);
   const pin = environment.CJCJ_BOOTSTRAP_RUNTIME_PIN;
@@ -60,7 +71,7 @@ if (mode === 'pack') {
   }
   const environment = phase === 'mingw' ? {}
     : Object.fromEntries(Object.entries(process.env).filter(([key]) => allowed(key)));
-  if (phase !== 'mingw') await verifyRuntimeHandoff(environment);
+  if (phase !== 'mingw') { await verifyRuntimeHandoff(environment); await verifyHleHandoff(environment); await verifyNativeToolHandoff({root,environment}); }
   for (const [key, value] of Object.entries(environment)) {
     if (/[\r\n]/.test(value)) throw new Error(`multiline handoff environment: ${key}`);
   }
@@ -94,7 +105,7 @@ if (mode === 'pack') {
   // also rejects accidental cross-target or stale-run selection before unpack.
   if (phase !== 'mingw') await resolveRuntimeSource(record.environment, null);
   tar(['-xf', archive, '-C', root]);
-  if (phase !== 'mingw') await verifyRuntimeHandoff(record.environment);
+  if (phase !== 'mingw') { await verifyRuntimeHandoff(record.environment); await verifyHleHandoff(record.environment); await verifyNativeToolHandoff({root,environment:record.environment}); }
   await fs.appendFile(required('GITHUB_ENV'), Object.entries(record.environment)
     .map(([key, value]) => `${key}=${value}\n`).join(''));
   const sdk = record.environment.CANGJIE_HOME;

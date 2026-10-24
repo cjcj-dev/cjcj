@@ -13,7 +13,7 @@ import subprocess
 import sys
 import unittest
 
-PIN = '9733dfc09d29eca27d19cc3937a149838b4e3322'
+PIN = next(line.split('=', 1)[1] for line in (Path(__file__).resolve().parents[1] / 'ci/runtime_pin.env').read_text().splitlines() if line.startswith('RUNTIME_REF='))
 PRIVATE = '4909b2dec1af7f522133c6401e2ce960b0ef511d'
 URL = 'https://github.com/cjcj-dev/cangjie-runtime.git'
 INPUTS = ('CJCJ_LLVM_RUNTIME_MODE', 'CJCJ_LLVM_RUNTIME_URL',
@@ -92,7 +92,7 @@ class RuntimeInput(unittest.TestCase):
         print(f'ASSERT_PASS name={name}', flush=True)
 
     def tuple(self, label, inputs):
-        return self.run_script(label, 'ci/platform_tuples/fetch_sources.sh', inputs)
+        return self.run_script(label, 'ci/platform_tuples/fetch_sources.mjs', inputs)
 
     def test_default_pin(self):
         # Legacy environment values remain overwritten by the formal pin.
@@ -191,7 +191,7 @@ class RuntimeInput(unittest.TestCase):
                          f'open({str(capture)!r}, "w").write(json.dumps(sys.argv[1:]))\n'
                          'sys.exit(86)\n')
         cmake.chmod(0o755)
-        result = self.run_script(label, 'ci/platform_tuples/build_tuple.sh',
+        result = self.run_script(label, 'ci/platform_tuples/build_tuple.mjs',
                                  {**private_env, **(extra or {}),
                                   'PATH': f'{bindir}:{base_env["PATH"]}'}, root=root)
         return result, capture

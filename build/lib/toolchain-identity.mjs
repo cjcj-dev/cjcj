@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import {runtimeInputsForArtifact,RUNTIME_INPUTS} from './runtime-source-inputs.mjs';
 
 export const TOOLCHAIN_IDENTITY = 'TOOLCHAIN_ID.tsv';
 export const TOOLCHAIN_IDENTITY_FORMAT = 'toolchain-lineage-v1';
@@ -110,7 +111,9 @@ async function inspectArtifact(stage, rows, specification) {
   if (stampCommit.endsWith('-dirty')) {
     throw new Error(`${specification.name} ${specification.prefix} must not be dirty; actual=${rendered}`);
   }
-  if (stampCommit !== commit) {
+  if(specification.component==='runtime'&&/^src-[0-9a-f]{64}$/.test(stampCommit)){
+    await runtimeInputsForArtifact(stage,row.artifact,{repository,commit,stamp:`${specification.prefix}:${stampCommit}`});
+  }else if (stampCommit !== commit) {
     throw new Error(`${specification.name} ${specification.prefix} must equal source commit; ` +
       `actual=${stampCommit || '<empty>'}; source=${commit}`);
   }

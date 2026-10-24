@@ -3,6 +3,22 @@ name: Build release package
 on:
   workflow_call:
     inputs:
+      native_source_selection:
+        required: false
+        type: string
+        default: '{}'
+      native_llvm_ref:
+        required: false
+        type: string
+        default: ''
+      native_runtime_ref:
+        required: false
+        type: string
+        default: ''
+      native_host_version:
+        required: false
+        type: string
+        default: ''
       runner:
         required: true
         type: string
@@ -13,14 +29,9 @@ on:
         required: true
         type: string
       sdk_runtime_dir:
-        required: false
+        description: Expected runtime tuple, checked against the selected native target
+        required: true
         type: string
-        default: ''
-      compiler_artifact:
-        description: Same-run final compiler (Windows produces W2 in this job)
-        required: false
-        type: string
-        default: ''
       std_artifact:
         description: Same-platform source-built final std artifact
         required: true
@@ -48,10 +59,6 @@ on:
       version:
         required: true
         type: string
-      verify:
-        required: false
-        type: boolean
-        default: true
       dry_run:
         required: false
         type: boolean
@@ -68,47 +75,64 @@ permissions:
   contents: read
   actions: read
 
-env:
-  CJ_HEAP_SIZE: ${{ inputs.platform == 'darwin-arm64' && '6GB' || '12GB' }}
-
+# Whole native SDKs are produced by srcbuild-target's package-install step.
+# Component artifacts below are comparison inputs only, never install overlays.
 jobs:
   package:
     name: ${{ inputs.platform }} / Build release package
     runs-on: ${{ inputs.runner }}
     timeout-minutes: 180
     env:
-      MATRIX_RUNNER: ${{ inputs.runner }}
-      SDK_RUNTIME_DIR: ${{ inputs.sdk_runtime_dir }}
-      FINAL_COMPILER_DIR: ${{ github.workspace }}/.release-final-compiler/${{ inputs.platform }}
+      CJCJ_NATIVE_LLVM_REF: ${{ inputs.native_llvm_ref }}
+      CJCJ_NATIVE_RUNTIME_REF: ${{ inputs.native_runtime_ref }}
+      CJCJ_NATIVE_HOST_VERSION: ${{ inputs.native_host_version }}
+      CJCJ_NATIVE_SOURCE_SELECTION: ${{ inputs.native_source_selection }}
+      RELEASE_LLVM_PLATFORM: ${{ inputs.llvm_platform }}
+      RELEASE_RUNTIME_TUPLE: ${{ inputs.sdk_runtime_dir }}
+      RELEASE_PLATFORM: ${{ inputs.platform }}
+      RELEASE_KEY: ${{ inputs.release_key }}
+      CJCJ_NATIVE_SDK_VERSION: ${{ inputs.version }}
+      CJCJ_RELEASE_SOURCE_SHA: ${{ github.sha }}
+      NATIVE_SDK_ARTIFACT_DIR: ${{ github.workspace }}/.release-native/input
+      NATIVE_SDK_INSTALL_DIR: ${{ github.workspace }}/.release-native/install-${{ github.run_attempt }}
       FINAL_STD_DIR: ${{ github.workspace }}/.release-final-std/${{ inputs.platform }}
       CROSS_STD_DIR: ${{ github.workspace }}/.release-cross-std/${{ inputs.platform }}
       CROSS_STD_ARTIFACTS: ${{ inputs.cross_std_artifacts }}
       CROSS_STD_ARTIFACT: ${{ inputs.cross_std_artifact }}
       CROSS_STD_TUPLE: ${{ inputs.cross_std_tuple }}
-      RELEASE_KEY: ${{ inputs.release_key }}
-      PYTHON_BUNDLE_DIR: ${{ github.workspace }}/.release-python/${{ inputs.platform }}/bundle
-      RELEASE_PLATFORM: ${{ inputs.platform }}
-      SOURCE_CJPM_DIR: ${{ github.workspace }}/.release-cjpm/${{ inputs.platform }}
-      SOURCE_HLE_DIR: ${{ github.workspace }}/.release-hle/${{ inputs.platform }}
+      RELEASE_DIST: ${{ github.workspace }}/dist
+      CJ_HEAP_SIZE: ${{ inputs.platform == 'darwin-arm64' && '6GB' || '12GB' }}
     steps:
       - name: Checkout cjcj
         uses: actions/checkout@v7
 
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
       - name: Resolve archive identity independently of host toolchain
         run: node ci/release/package-key.mjs
 
-      - name: Load release host pin
-        shell: bash
-        run: |
-          set -euo pipefail
-          cat ci/host_sdk_pin.env >> "$GITHUB_ENV"
-          source ci/host_sdk_pin.env
-          echo "RELEASE_HOST_TOOLCHAIN=$CJCJ_TOOLCHAIN" >> "$GITHUB_ENV"
+      - name: Load and validate runtime pin
+        env:
+          CJCJ_RUNTIME_REF_OVERRIDE: ${{ inputs.runtime_ref }}
+          CJCJ_NATIVE_LLVM_REF: ${{ inputs.native_llvm_ref }}
+          CJCJ_NATIVE_RUNTIME_REF: ${{ inputs.native_runtime_ref }}
+          CJCJ_NATIVE_HOST_VERSION: ${{ inputs.native_host_version }}
+          CJCJ_ALLOW_RUNTIME_OVERRIDE: ${{ inputs.dry_run && inputs.runtime_ref != '' }}
+        run: npx --yes zx@8 ci/load_runtime_pin.mjs
+
+      - name: Download complete native SDK
+        uses: actions/download-artifact@v8
+        with:
+          name: cjcj-srcbuild-${{ inputs.platform }}-${{ inputs.version }}
+          path: ${{ env.NATIVE_SDK_ARTIFACT_DIR }}
 
       - name: Validate same-platform final std contract
         shell: bash
         env:
-          EXPECTED_STD_ARTIFACT: final-std-${{ inputs.platform }}
+          EXPECTED_STD_ARTIFACT: ${{ inputs.platform == 'windows-x64' && inputs.native_llvm_ref != '' && 'final-std-native-windows-x64' || format('final-std-{0}', inputs.platform) }}
           SELECTED_STD_ARTIFACT: ${{ inputs.std_artifact }}
         run: |
           set -euo pipefail
@@ -120,470 +144,20 @@ jobs:
           name: ${{ inputs.std_artifact }}
           path: ${{ env.FINAL_STD_DIR }}
 
-      - name: Validate native compiler artifact contract
-        if: runner.os != 'Windows'
-        shell: bash
-        env:
-          SELECTED_COMPILER_ARTIFACT: ${{ inputs.compiler_artifact }}
-        run: test "$SELECTED_COMPILER_ARTIFACT" = "final-compiler-$RELEASE_PLATFORM"
-
-      - name: Download final compiler
-        if: runner.os != 'Windows'
-        uses: actions/download-artifact@v8
-        with:
-          name: ${{ inputs.compiler_artifact }}
-          path: ${{ env.FINAL_COMPILER_DIR }}
-
-      - name: Extract final compiler
-        if: runner.os != 'Windows'
-        shell: bash
-        run: tar -C "$FINAL_COMPILER_DIR" -xzf "$FINAL_COMPILER_DIR/final-compiler.tar.gz"
-
-      - name: Download cross-tuple source-built final std
+      - name: Download cross-tuple comparison inputs
         if: inputs.cross_std_artifacts != '[]' || inputs.cross_std_artifact != ''
         uses: actions/download-artifact@v8
         with:
           pattern: final-std-*
           path: ${{ env.CROSS_STD_DIR }}
 
-      - name: Download same-platform source-built cjpm
-        if: runner.os != 'Windows'
-        uses: actions/download-artifact@v8
-        with:
-          name: source-cjpm-${{ inputs.platform }}
-          path: ${{ env.SOURCE_CJPM_DIR }}
+      # Mandatory for normal and dry-run candidates, on every native runner:
+      # archive SHA -> source/target/tool bytes -> std/cross/stdx -> ABI ->
+      # installed language/ordinary/macros -> cjdb/Python -> smoke -> same
+      # directory archive -> original path hidden -> all consumers again.
+      - name: Consume and rearchive complete native SDK
+        run: node ci/release/compose-package.mjs
 
-      - name: Download same-platform source-built hle
-        if: runner.os != 'Windows'
-        uses: actions/download-artifact@v8
-        with:
-          name: source-hle-${{ inputs.platform }}
-          path: ${{ env.SOURCE_HLE_DIR }}
-
-      - name: Test release build helpers
-        if: inputs.platform == 'linux-x64'
-        run: node --test build/test/runtime-pin.test.mjs
-
-      - name: Load and validate runtime pin
-        shell: bash
-        env:
-          CJCJ_RUNTIME_REF_OVERRIDE: ${{ inputs.runtime_ref }}
-          CJCJ_ALLOW_RUNTIME_OVERRIDE: ${{ inputs.dry_run && inputs.runtime_ref != '' }}
-        run: npx --yes zx@8 ci/load_runtime_pin.mjs
-
-      - name: Load LLVM provenance pin
-        shell: bash
-        run: cat ci/llvm_pin.env >> "$GITHUB_ENV"
-
-      - name: Load tools provenance pin
-        shell: bash
-        run: cat ci/source_pin.env >> "$GITHUB_ENV"
-
-      - name: Retain exact official base SDK archive
-        shell: bash
-        run: |
-          node ci/release/prepare_base_sdk.mjs \
-            --platform "$RELEASE_PLATFORM" \
-            --toolchain "$RELEASE_HOST_TOOLCHAIN" \
-            --outdir "$RUNNER_TEMP/release-base-sdk"
-
-      - name: Prepare MSYS2/MINGW64 cjcj toolchain
-        if: runner.os == 'Windows'
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: MINGW64
-          release: false
-          update: true
-          path-type: inherit
-          install: >-
-            git make python gzip unzip file binutils
-            mingw-w64-x86_64-clang
-            mingw-w64-x86_64-cmake
-            mingw-w64-x86_64-compiler-rt
-            mingw-w64-x86_64-gcc
-            mingw-w64-x86_64-libc++
-            mingw-w64-x86_64-libunwind
-            mingw-w64-x86_64-ninja
-
-      - name: Download cross-built Windows runtime
-        if: runner.os == 'Windows'
-        uses: actions/download-artifact@v8
-        with:
-          name: runtime-install-windows_x86_64
-          path: .platform-ci/runtime-install/windows_release_x86_64
-
-      - name: Verify cross-built Windows runtime
-        if: runner.os == 'Windows'
-        run: npx --yes zx@8 ci/platform_matrix/verify_windows_runtime_exports.mjs
-
-      - name: Download current-run fixed LLVM tuple (Windows)
-        if: runner.os == 'Windows'
-        continue-on-error: true
-        uses: actions/download-artifact@v8
-        with:
-          name: fixed-llvm-tools-${{ inputs.llvm_platform }}
-          path: ${{ runner.temp }}/current-run-fixed-llvm
-
-      - name: Download native fixed LLVM tuple (Windows)
-        if: runner.os == 'Windows'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TUPLE_ARTIFACT_DIR: ${{ runner.temp }}/current-run-fixed-llvm
-        run: npx --yes zx@8 ci/platform_matrix/fetch_llvm_tuple.mjs
-
-      - name: Official SDK provision (Windows)
-        if: runner.os == 'Windows'
-        env:
-          CJCJ_SDK_PROVISION_ONLY: '1'
-          GITCODE_API_KEY: ${{ secrets.GITCODE_API_KEY }}
-        run: npx --yes zx@8 ci/platform_matrix/build_cjcj.mjs
-
-      - name: Download current-run patched cjpm
-        if: runner.os == 'Windows'
-        continue-on-error: true
-        uses: actions/download-artifact@v8
-        with:
-          name: patched-cjpm-windows_x86_64
-          path: ${{ runner.temp }}/current-run-patched-cjpm
-
-      - name: Install patched cjpm (Windows)
-        id: fetch-cjpm
-        if: runner.os == 'Windows'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          CJPM_ARTIFACT_DIR: ${{ runner.temp }}/current-run-patched-cjpm
-        run: npx --yes zx@8 ci/platform_matrix/fetch_cjpm.mjs
-
-      - name: Build cjcj (Windows)
-        if: runner.os == 'Windows' && steps.fetch-cjpm.outcome == 'success'
-        env:
-          CJCJ_SDK_ALREADY_PROVISIONED: '1'
-        run: npx --yes zx@8 ci/platform_matrix/build_cjcj.mjs
-
-      - name: Download LLVM tools (Linux)
-        if: runner.os == 'Linux'
-        uses: actions/download-artifact@v8
-        with:
-          name: fixed-llvm-tools-${{ inputs.llvm_platform }}
-          path: fixed-toolchain/${{ inputs.llvm_platform }}
-
-      - name: Restore SDK cache
-        if: runner.os != 'Windows'
-        id: sdkcache
-        uses: actions/cache/restore@v6
-        with:
-          path: ~/.cjv
-          key: cjv-${{ runner.os }}-${{ runner.arch }}-${{ env.CJCJ_TOOLCHAIN }}
-
-      - name: Install SDK (Linux)
-        id: setup
-        if: runner.os == 'Linux'
-        env:
-          GITCODE_API_KEY: ${{ secrets.GITCODE_API_KEY }}
-          FIXED_LLC_GZ: ${{ github.workspace }}/fixed-toolchain/${{ inputs.llvm_platform }}/llc.gz
-          FIXED_OPT_GZ: ${{ github.workspace }}/fixed-toolchain/${{ inputs.llvm_platform }}/opt.gz
-        run: npx --yes zx@8 ci/setup_sdk.mjs
-
-      - name: Save SDK cache (Linux)
-        if: runner.os == 'Linux' && steps.setup.outcome == 'success' && steps.sdkcache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v6
-        with:
-          path: ~/.cjv
-          key: cjv-${{ runner.os }}-${{ runner.arch }}-${{ env.CJCJ_TOOLCHAIN }}
-
-      - name: Restore runtime cache
-        if: runner.os != 'Windows'
-        id: rtcache
-        uses: actions/cache/restore@v6
-        with:
-          path: dist-runtime
-          key: rt-${{ runner.os }}-${{ runner.arch }}-${{ inputs.runner }}-${{ env.RUNTIME_REF }}-${{ inputs.version }}-${{ hashFiles('ci/build_patched_runtime.mjs') }}
-
-      - name: Install packaging dependency (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq \
-            binutils build-essential libssl-dev zlib1g-dev libffi-dev libbz2-dev \
-            liblzma-dev libreadline-dev libsqlite3-dev libncurses-dev uuid-dev tk-dev
-
-      - name: Install runtime build dependencies (Linux)
-        if: runner.os == 'Linux' && steps.rtcache.outputs.cache-hit != 'true'
-        run: sudo apt-get install -y -qq clang cmake make
-
-      # runtime/CMakeLists.txt picks up a compiler cache from PATH; the report
-      # step below fails this job if the coloured runtime compiled without it.
-      - name: Start sccache
-        if: runner.os != 'Windows' && steps.rtcache.outputs.cache-hit != 'true'
-        uses: ./.github/actions/sccache
-        with:
-          component: runtime
-          platform: ${{ inputs.platform }}
-          pin: ${{ env.RUNTIME_REF }}
-          cache-size: 1G
-
-      - name: Build pinned runtime
-        if: runner.os != 'Windows' && steps.rtcache.outputs.cache-hit != 'true'
-        env:
-          RUNTIME_VERSION: ${{ inputs.version }}
-        run: npx --yes zx@8 ci/build_patched_runtime.mjs "$PWD/dist-runtime"
-
-      - name: Save runtime cache
-        if: runner.os != 'Windows' && steps.rtcache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v6
-        with:
-          path: dist-runtime
-          key: rt-${{ runner.os }}-${{ runner.arch }}-${{ inputs.runner }}-${{ env.RUNTIME_REF }}-${{ inputs.version }}-${{ hashFiles('ci/build_patched_runtime.mjs') }}
-
-      - name: Download native fixed LLVM tuple (macOS)
-        if: runner.os == 'macOS'
-        continue-on-error: true
-        uses: actions/download-artifact@v8
-        with:
-          name: fixed-llvm-tools-${{ inputs.llvm_platform }}
-          path: ${{ runner.temp }}/current-run-fixed-llvm
-
-      - name: Install native fixed LLVM tuple (macOS)
-        if: runner.os == 'macOS'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TUPLE_ARTIFACT_DIR: ${{ runner.temp }}/current-run-fixed-llvm
-        run: npx --yes zx@8 ci/platform_matrix/fetch_llvm_tuple.mjs
-
-      - name: Prepare official SDK and tuple (macOS)
-        id: darwinbuild
-        if: runner.os == 'macOS'
-        env:
-          CJCJ_PACKAGE_PREPARE_ONLY: '1'
-          GITCODE_API_KEY: ${{ secrets.GITCODE_API_KEY }}
-        run: npx --yes zx@8 ci/platform_matrix/build_cjcj.mjs
-
-      - name: Save SDK cache (macOS)
-        if: runner.os == 'macOS' && steps.darwinbuild.outcome == 'success' && steps.sdkcache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v6
-        with:
-          path: ~/.cjv
-          key: cjv-${{ runner.os }}-${{ runner.arch }}-${{ env.CJCJ_TOOLCHAIN }}
-
-      - name: Capture acceptance gate apparatus (Unix)
-        if: runner.os != 'Windows'
-        shell: bash
-        run: |
-          node ci/release/prepare_gate_apparatus.mjs \
-            --sdk "$CANGJIE_HOME" \
-            --platform "$RELEASE_PLATFORM" \
-            --actual-host-toolchain "$CJCJ_ACTUAL_HOST_TOOLCHAIN" \
-            --base-sdk-sidecar "$BASE_SDK_PROVENANCE" \
-            --outdir "$RUNNER_TEMP/release-gate-apparatus"
-
-      - name: Capture acceptance gate apparatus (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          node ci/release/prepare_gate_apparatus.mjs `
-            --sdk "$env:CANGJIE_HOME" `
-            --platform "$env:RELEASE_PLATFORM" `
-            --actual-host-toolchain "$env:CJCJ_ACTUAL_HOST_TOOLCHAIN" `
-            --base-sdk-sidecar "$env:BASE_SDK_PROVENANCE" `
-            --outdir "$env:RUNNER_TEMP\release-gate-apparatus"
-
-      - name: Activate pinned runtime
-        if: runner.os != 'Windows'
-        run: npx --yes zx@8 ci/install_patched_runtime.mjs "$PWD/dist-runtime"
-
-      - name: Build runtime shim (Linux)
-        if: runner.os == 'Linux'
-        env:
-          CJCJ_LLVM_SHIM_O: ${{ github.workspace }}/fixed-toolchain/${{ inputs.llvm_platform }}/cjselfhost_llvmshim.o
-        run: npx --yes zx@8 runtime_shim/build_shim.mjs
-
-      - name: Report sccache
-        if: always() && runner.os != 'Windows' && steps.rtcache.outputs.cache-hit != 'true'
-        uses: ./.github/actions/sccache-report
-        with:
-          component: runtime
-          platform: ${{ inputs.platform }}
-          require-compiles: ${{ job.status == 'success' }}
-
-      - name: Install source-built cjpm (Unix)
-        if: runner.os != 'Windows'
-        shell: bash
-        run: |
-          node ci/release/install_cjpm_artifact.mjs \
-            --platform "$RELEASE_PLATFORM" \
-            --artifact "$SOURCE_CJPM_DIR" \
-            --sdk "$CANGJIE_HOME"
-
-      - name: Install source-built hle (Unix)
-        if: runner.os != 'Windows'
-        shell: bash
-        run: |
-          node ci/release/install_hle_artifact.mjs \
-            --platform "$RELEASE_PLATFORM" \
-            --artifact "$SOURCE_HLE_DIR" \
-            --sdk "$CANGJIE_HOME"
-
-      - name: Prepare Python 3.11 bundle (Unix)
-        if: runner.os != 'Windows'
-        shell: bash
-        run: node ci/release/prepare_python_bundle.mjs "${{ inputs.platform }}" "$PYTHON_BUNDLE_DIR"
-
-      - name: Prepare Python 3.11 bundle (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: node ci/release/prepare_python_bundle.mjs "${{ inputs.platform }}" "$env:PYTHON_BUNDLE_DIR"
-
-      - name: Select final compiler identity
-        run: node ci/release/select_final_compiler.mjs
-
-      - name: Compose SDK package
-        if: runner.os != 'Windows'
-        shell: bash
-        run: |
-          runtime_lib="$PWD/dist-runtime/libcangjie-runtime.so"
-          if [ "$RUNNER_OS" = "macOS" ]; then runtime_lib="$PWD/dist-runtime/libcangjie-runtime.dylib"; fi
-          llvm_manifest="${FIXED_LLVM_MANIFEST:-$PWD/fixed-toolchain/${{ inputs.llvm_platform }}/llvm-tools.manifest}"
-          npx --yes zx@8 ci/release/compose-package.mjs \
-            --cross-root "$CROSS_STD_DIR" -- \
-            --release-key "${{ inputs.release_key }}" \
-            --sdk "$CANGJIE_HOME" \
-            --binary "$FINAL_COMPILER_BINARY" \
-            --compiler-artifact "$FINAL_COMPILER_DIR" \
-            --runtime-lib "$runtime_lib" \
-            --std-dir "$FINAL_STD_DIR" \
-            --llvm-manifest "$llvm_manifest" \
-            --isolated-llvm-bin "$CJCJ_PATCHED_LLVM_BIN" \
-            --base-sdk-id "$RELEASE_HOST_TOOLCHAIN" \
-            --base-sdk-archive "$BASE_SDK_ARCHIVE" \
-            --base-sdk-provenance "$BASE_SDK_PROVENANCE" \
-            --gate-host-runtime "$GATE_HOST_RUNTIME" \
-            --gate-apparatus-provenance "$GATE_APPARATUS_PROVENANCE" \
-            --cjcj-source-repo "${{ github.server_url }}/${{ github.repository }}.git" \
-            --cjcj-source-sha "${{ github.sha }}" \
-            --runtime-source-repo "$RUNTIME_SRC_URL" \
-            --runtime-source-sha "$RUNTIME_REF" \
-            --llvm-source-repo "$LLVM_URL" \
-            --std-source-repo "$RUNTIME_SRC_URL" \
-            --cjpm-provenance "$CJPM_PROVENANCE" \
-            --cjpm-source-repo "$CJPM_SOURCE_REPOSITORY" \
-            --cjpm-source-sha "$CJPM_SOURCE_COMMIT" \
-            --tools-source-repo "$TOOLS_SRC_URL" \
-            --tools-source-sha "$TOOLS_REF" \
-            --python-bundle "$PYTHON_BUNDLE_DIR" \
-            --version "${{ inputs.version }}" \
-            --platform "${{ inputs.platform }}" \
-            --outdir "$PWD/dist"
-
-      - name: Compose SDK package (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $binary = "$env:FINAL_COMPILER_BINARY"
-          npx --yes zx@8 ci/release/compose-package.mjs `
-            --cross-root "$env:CROSS_STD_DIR" -- `
-            --release-key "${{ inputs.release_key }}" `
-            --sdk "$env:CANGJIE_HOME" `
-            --binary "$binary" `
-            --compiler-artifact "$env:FINAL_COMPILER_DIR" `
-            --runtime-root "$PWD\.platform-ci\runtime-install\windows_release_x86_64" `
-            --std-dir "$env:FINAL_STD_DIR" `
-            --llvm-manifest "$env:FIXED_LLVM_MANIFEST" `
-            --isolated-llvm-bin "$env:CJCJ_PATCHED_LLVM_BIN" `
-            --base-sdk-id "$env:RELEASE_HOST_TOOLCHAIN" `
-            --base-sdk-archive "$env:BASE_SDK_ARCHIVE" `
-            --base-sdk-provenance "$env:BASE_SDK_PROVENANCE" `
-            --gate-host-runtime "$env:GATE_HOST_RUNTIME" `
-            --gate-apparatus-provenance "$env:GATE_APPARATUS_PROVENANCE" `
-            --cjcj-source-repo "${{ github.server_url }}/${{ github.repository }}.git" `
-            --cjcj-source-sha "${{ github.sha }}" `
-            --runtime-source-repo "$env:RUNTIME_SRC_URL" `
-            --runtime-source-sha "$env:RUNTIME_REF" `
-            --llvm-source-repo "$env:LLVM_URL" `
-            --std-source-repo "$env:RUNTIME_SRC_URL" `
-            --cjpm-provenance "$env:CJPM_PROVENANCE" `
-            --cjpm-source-repo "$env:CJPM_SOURCE_REPOSITORY" `
-            --cjpm-source-sha "$env:CJPM_SOURCE_COMMIT" `
-            --tools-source-repo "$env:TOOLS_SRC_URL" `
-            --tools-source-sha "$env:TOOLS_REF" `
-            --python-bundle "$env:PYTHON_BUNDLE_DIR" `
-            --version "${{ inputs.version }}" `
-            --platform "${{ inputs.platform }}" `
-            --outdir "$PWD\dist"
-
-      # cjcj-<version>-<platform>.SHA256SUMS: archive plus manifest, in
-      # `sha256sum -c` form, cross-checked against the .sha256 sidecar the
-      # packager wrote. release-matrix.yml aggregates one per platform and
-      # refuses to publish a list with a platform missing.
-      - name: Write package checksums
-        shell: bash
-        run: node ci/release/package_checksums.mjs write --dist dist --platform "$PACKAGE_KEY" --version "${{ inputs.version }}"
-
-      - name: Verify packaged standard library
-        if: inputs.verify
-        timeout-minutes: 2
-        shell: bash
-        run: |
-          # The checker discovers the target's complete std inventory; do not
-          # duplicate artifact or tuple file lists in this workflow.
-          node scripts/check_packaged_std.mjs \
-            --sdk "$PWD/dist/cjcj-${{ inputs.version }}-${{ env.PACKAGE_KEY }}" \
-            --std "$FINAL_STD_DIR" \
-            --platform "$RELEASE_PLATFORM"
-
-      - name: Verify packaged SDK
-        if: inputs.verify && runner.os != 'Windows'
-        shell: bash
-        run: |
-          set -e
-          pkg="cjcj-${{ inputs.version }}-${{ env.PACKAGE_KEY }}"
-          mkdir -p pkgtest
-          tar -C pkgtest -xzf "dist/${pkg}.tar.gz"
-          # shellcheck disable=SC1090
-          source "$PWD/pkgtest/${pkg}/envsetup.sh"
-          export cjHeapSize=12GB
-          work="$RUNNER_TEMP/release-smoke"
-          # An EXIT trap deleted both of these whatever happened, so a smoke
-          # failure took its own evidence with it and the diagnosis upload below
-          # would find an empty tree. Clean up only on success, which is what the
-          # Windows branch already does.
-          trap 'echo "preserving failed Unix smoke: work=$work package=$PWD/pkgtest"' EXIT
-          node scripts/verify_packaged_cjdb.mjs "$PWD/pkgtest/${pkg}"
-          npx --yes zx@8 ci/smoke/run_smoke.mjs "$PWD/pkgtest/${pkg}/bin/cjc" "$work"
-          trap - EXIT
-          rm -rf "$work" pkgtest
-
-      - name: Verify packaged SDK (Windows)
-        if: inputs.verify && runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $pkg = "cjcj-${{ inputs.version }}-${{ env.PACKAGE_KEY }}"
-          $extract = Join-Path $PWD 'pkgtest'
-          $work = Join-Path $env:RUNNER_TEMP 'release-smoke'
-          $smokeExit = 1
-          try {
-            Expand-Archive -LiteralPath "dist\$pkg.zip" -DestinationPath $extract -Force
-            $root = Join-Path $extract $pkg
-            $env:CJCJ_OFFICIAL_SDK_HOME = $env:CANGJIE_HOME
-            $env:CANGJIE_HOME = $root
-            $env:cjHeapSize = '12GB'
-            $env:PATH = "$root\bin;$root\runtime\lib\windows_x86_64_cjnative;$root\tools\lib;$env:PATH"
-            node scripts/verify_packaged_cjdb.mjs $root
-            if ($LASTEXITCODE -ne 0) { throw "packaged cjdb verification failed: $LASTEXITCODE" }
-            npx --yes zx@8 ci/smoke/run_smoke.mjs "$root\bin\cjc.exe" $work
-            $smokeExit = $LASTEXITCODE
-          } finally {
-            if ($smokeExit -eq 0) {
-              Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $work, $extract
-            } else {
-              Write-Host "preserving failed Windows smoke: work=$work package=$extract"
-            }
-          }
-          if ($smokeExit -ne 0) { exit $smokeExit }
-
-      # The pkg-* upload below only runs once everything before it succeeded, so a
-      # cell that dies leaves nothing behind to look at. srcbuild has carried a
-      # failure-only upload since srcbuild.yml's stage diagnostics; this is the
-      # package side of the same idea, named per platform so no two cells collide.
       - name: Upload failure diagnostics
         if: failure()
         uses: actions/upload-artifact@v7
@@ -591,12 +165,13 @@ jobs:
           name: pkg-diagnosis-${{ env.PACKAGE_KEY }}-${{ github.run_attempt }}
           retention-days: 7
           if-no-files-found: warn
+          include-hidden-files: true
           path: |
-            dist/*.sha256
-            dist/RELEASE-MANIFEST.jsonl
-            pkgtest/**/PROVENANCE.txt
-            pkgtest/**/*.log
-            ${{ runner.temp }}/release-smoke/**
+            dist/**/*.json
+            dist/**/*.jsonl
+            dist/**/*.log
+            .platform-ci/installed-sdk-check/**
+            .release-native/install-${{ github.run_attempt }}/cangjie/BUILD-MANIFEST.json
 
       - name: Upload SDK artifact
         uses: actions/upload-artifact@v7

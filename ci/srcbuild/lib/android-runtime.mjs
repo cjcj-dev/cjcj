@@ -1,9 +1,11 @@
+import {crossBuildJobs} from './cross-build-jobs.mjs';
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import {writeCrossRuntimeManifest} from '../../release/cross-runtime.mjs';
 
 // The source cell and the standalone runner build use the same runtime entry.
 export async function buildAndroidRuntime({workspace, ndk, version, runtimeRef, env = process.env}) {
+  env = {...env, CANGJIE_BUILD_JOBS: String(crossBuildJobs(env))};
   const repository = path.join(workspace, 'cangjie_runtime');
   const runtime = path.join(repository, 'runtime');
   const actualRef = (await $({stdio: 'pipe'})`git -C ${repository} rev-parse HEAD`).stdout.trim();

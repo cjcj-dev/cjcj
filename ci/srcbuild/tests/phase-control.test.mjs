@@ -4,7 +4,8 @@ import path from 'node:path';
 import test from 'node:test';
 import os from 'node:os';
 import {spawnSync} from 'node:child_process';
-import {allReleasePlatforms, getReleasePlatform} from '../../../build/lib/targets.mjs';
+import {load as loadYaml} from '../../vendor/js-yaml/js-yaml.mjs';
+import {allReleasePlatforms, getReleasePlatform, getTarget, releasePlatformReadiness, CROSS_STD_BUILDS} from '../../../build/lib/targets.mjs';
 
 const root = path.resolve(import.meta.dirname, '..', '..', '..');
 const readWorkflow = name => fs.readFile(path.join(root, '.github/workflows', name), 'utf8');
@@ -58,15 +59,20 @@ function phaseOf(job) {
 }
 
 async function artifactUploads(name) {
-  const text = uncommented(await readWorkflow(name));
+  const workflow = loadYaml(await readWorkflow(name));
   const found = [];
-  const lines = text.split('\n');
-  for (const [index, line] of lines.entries()) {
-    if (!/uses:\s*actions\/upload-artifact@/.test(line)) continue;
-    for (const next of lines.slice(index + 1, index + 8)) {
-      const artifact = next.match(/^\s*name:\s*(.+?)\s*$/);
-      if (artifact) { found.push([artifact[1], name]); break; }
-      if (/^\s*- /.test(next)) break;
+  for (const [id, job] of Object.entries(workflow.jobs)) {
+    for (const step of job.steps || []) {
+      if (!step.uses?.startsWith('actions/upload-artifact@')) continue;
+      const artifact = step.with?.name;
+      if (!artifact) continue;
+      if (artifact.includes('matrix.artifact')) {
+        const family = job.strategy.matrix.match(/outputs\.(ohos|ios)_matrix/)?.[1];
+        assert.ok(family, `${name}/${id}: dynamic cross artifacts require the source matrix`);
+        for (const row of CROSS_STD_BUILDS.filter(row => row.family === family)) {
+          found.push([artifact.replace(/\$\{\{ matrix\.artifact \}\}/g, row.artifact), `${name}/${id}`]);
+        }
+      } else found.push([artifact, `${name}/${id}`]);
     }
   }
   return found;
@@ -190,8 +196,7 @@ test('policy failure capture: a package cell that dies leaves evidence behind', 
   assert.match(upload, /if:\s*failure\(\)\s*\n\s*uses:\s*actions\/upload-artifact@/);
   assert.equal(scalar(upload, 'name'), 'pkg-diagnosis-${{ env.PACKAGE_KEY }}-${{ github.run_attempt }}',
     'failure diagnostics must be named per package and run attempt');
-  for (const evidence of ['dist/*.sha256', 'dist/RELEASE-MANIFEST.jsonl',
-    'pkgtest/**/PROVENANCE.txt', 'pkgtest/**/*.log', '${{ runner.temp }}/release-smoke/**']) {
+  for (const evidence of ['dist/**/*.json', 'dist/**/*.jsonl', 'dist/**/*.log', '.platform-ci/installed-sdk-check/**']) {
     assert.ok(upload.includes(evidence), `failure diagnostics must retain ${evidence}`);
   }
 });
@@ -209,7 +214,7 @@ test('policy failure capture: smoke workspaces survive the failure that needs th
 
 // Execute the same CLI that the workflow uses, and read its GITHUB_ENV output;
 // stdout alone would miss a broken producer-to-Actions environment handoff.
-test('policy failure capture: package identity reaches GITHUB_ENV for native and Android cells', async t => {
+for (const hasProducer of [true, false]) test(`policy failure capture: package identity ${hasProducer ? 'reaches GITHUB_ENV for declared SDK producers' : 'rejects cells without a complete SDK producer'}`, async t => {
   const workflow = uncommented(await readWorkflow('build-release-package.yml'));
   assert.match(workflow, /RELEASE_PLATFORM:\s*\$\{\{ inputs\.platform \}\}/);
   assert.match(workflow, /RELEASE_KEY:\s*\$\{\{ inputs\.release_key \}\}/);
@@ -217,16 +222,32 @@ test('policy failure capture: package identity reaches GITHUB_ENV for native and
   assert.ok(workflow.indexOf('run: node ci/release/package-key.mjs') < workflow.indexOf('Upload failure diagnostics'));
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'package-key-contract-'));
   t.after(() => fs.rm(dir, {recursive: true, force: true}));
-  const cells = [
+  const declared = [
     ...PHASES.map(host => ({host, key: '', archiveKey: host})),
     ...allReleasePlatforms().map(getReleasePlatform),
   ];
+  // A package/tuple declaration is not a whole SDK source producer. Keep every
+  // cell in the contract, including Windows and excluded cells, and derive the
+  // expected branch from the same public source declarations as the workflow.
+  const cells = declared.filter(cell => Boolean(releasePlatformReadiness(
+    cell.key || getTarget(cell.host).spec.packageHost.join('-')).sdkSourceTarget) === hasProducer);
+  if (!cells.length) return t.skip('no declared cells in this producer branch');
   for (const [index, cell] of cells.entries()) {
     const envFile = path.join(dir, `${index}.env`);
     const run = spawnSync(process.execPath, [path.join(root, 'ci/release/package-key.mjs')], {
       encoding: 'utf8', env: {...process.env, RELEASE_PLATFORM: cell.host,
         RELEASE_KEY: cell.key, GITHUB_ENV: envFile},
     });
+    assert.equal(run.signal, null);
+    assert.ifError(run.error);
+    if (!hasProducer) {
+      assert.equal(run.status, 1, `SDK_PRODUCER_REJECTION ${cell.key || cell.host}: ${run.stderr}`);
+      assert.ok(run.stderr.includes(`NATIVE_SDK_PRODUCER_MISSING ${cell.host}:`), run.stderr);
+      await assert.rejects(fs.readFile(envFile), {code: 'ENOENT'},
+        'a rejected SDK producer must not publish package identity');
+      console.log(`ASSERT_SDK_PRODUCER_REJECTION ${cell.key || cell.host}: rc=${run.status}`);
+      continue;
+    }
     assert.equal(run.status, 0, run.stderr);
     const output = await fs.readFile(envFile, 'utf8');
     assert.equal(output, `PACKAGE_KEY=${cell.archiveKey}\n`,

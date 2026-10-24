@@ -3,6 +3,18 @@ name: Build Windows runtime
 on:
   workflow_call:
     inputs:
+      native_llvm_ref:
+        required: false
+        type: string
+        default: ''
+      native_runtime_ref:
+        required: false
+        type: string
+        default: ''
+      native_host_version:
+        required: false
+        type: string
+        default: ''
       version:
         required: false
         type: string
@@ -36,11 +48,16 @@ jobs:
 
       - name: Load host toolchain pin
         shell: bash
-        run: cat ci/cjpm_pin.env >> "$GITHUB_ENV"
+        run: |
+          cat ci/cjpm_pin.env >> "$GITHUB_ENV"
+          node ci/host-toolchain-pin.mjs --github-env >> "$GITHUB_ENV"
 
       - name: Load runtime pin
         env:
           CJCJ_RUNTIME_REF_OVERRIDE: ${{ inputs.runtime_ref }}
+          CJCJ_NATIVE_LLVM_REF: ${{ inputs.native_llvm_ref }}
+          CJCJ_NATIVE_RUNTIME_REF: ${{ inputs.native_runtime_ref }}
+          CJCJ_NATIVE_HOST_VERSION: ${{ inputs.native_host_version }}
           CJCJ_ALLOW_RUNTIME_OVERRIDE: ${{ inputs.dry_run && inputs.runtime_ref != '' }}
         run: npx --yes zx@8 ci/load_runtime_pin.mjs
 
@@ -157,7 +174,9 @@ jobs:
           key: ${{ steps.cjv-cache.outputs.cache-primary-key }}
 
       - name: Load compiler pins
-        run: cat ci/source_pin.env ci/llvm_pin.env ci/host_sdk_pin.env >> "$GITHUB_ENV"
+        run: |
+          cat ci/source_pin.env ci/llvm_pin.env ci/host_sdk_pin.env >> "$GITHUB_ENV"
+          node ci/host-toolchain-pin.mjs --github-env >> "$GITHUB_ENV"
 
       - name: Install AST support build dependencies
         run: |

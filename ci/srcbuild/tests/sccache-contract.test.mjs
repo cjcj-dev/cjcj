@@ -36,13 +36,13 @@ function jobs(text) {
 // build-ast-support: libcangjie-ast-support.a via ci/build_ast_support.sh.
 // objc-darwin-e2e: the pinned runtime on macOS before the ObjC fixture.
 const CXX_JOBS = new Map([
+  ['ios-runtime.yml/runtime', {component: 'runtime', pin: /env\.RUNTIME_REF/}],
   ['android-runtime.yml/runtime', {component: 'runtime', pin: /env\.RUNTIME_REF/}],
   ['objc-darwin-e2e.yml/objc-darwin-e2e', {component: 'runtime', pin: /env\.RUNTIME_REF/}],
   ['build-ast-support.yml/build', {component: 'ast-support', pin: /\$\{\{ env\.COMPILER_REF \}\}-\$\{\{ env\.FLATBUFFERS_SHA \}\}/}],
   ['build-host-llvm.yml/host', {component: 'host-llvm', pin: /steps\.pin\.outputs\.sha/}],
   ['build-llvm-dylib.yml/dylib', {component: '${{ inputs.cache-component }}', pin: /steps\.pin\.outputs\.sha/}],
   ['build-llvm-tools.yml/build-tools', {component: 'llvm', pin: /steps\.llvm-pin\.outputs\.sha/}],
-  ['build-release-package.yml/package', {component: 'runtime', pin: /env\.RUNTIME_REF/}],
   ['build-windows-runtime.yml/build-runtime', {component: 'windows-runtime', pin: /env\.RUNTIME_REF/}],
   ['windows-runtime-export-contract.yml/native-contract', {component: 'windows-runtime', pin: /env\.RUNTIME_REF/}],
   ['windows-runtime-link.yml/link', {component: 'windows-runtime', pin: /env\.RUNTIME_REF/}],
@@ -52,11 +52,14 @@ const CXX_JOBS = new Map([
   ['srcbuild-target.yml/source-stage1-compiler', {component: 'srcbuild-stage1-compiler', pin: /env\.RUNTIME_REF/}],
   ['srcbuild-target.yml/source-stage3', {component: 'srcbuild-stage3', pin: /env\.RUNTIME_REF/}],
   ['srcbuild-target.yml/srcbuild', {component: 'srcbuild-package', pin: /env\.RUNTIME_REF/}],
+  ['srcbuild-target.yml/source-ohos', {component: 'srcbuild-ohos', pin: /env\.RUNTIME_REF/}],
+  ['srcbuild-target.yml/source-ios', {component: 'srcbuild-ios', pin: /env\.RUNTIME_REF/}],
   ['srcbuild-target.yml/source-android', {component: 'srcbuild-android', pin: /env\.RUNTIME_REF/}],
   ['srcbuild-target.yml/source-mingw', {component: 'srcbuild-mingw', pin: /env\.RUNTIME_REF/}],
   ['srcbuild-target.yml/source-windows', {component: 'srcbuild-windows', pin: /env\.RUNTIME_REF/}],
   ['ci.yml/build', {component: 'runtime', pin: /env\.RUNTIME_REF/}],
-  ['ci.yml/package-tests', {component: 'runtime-shim', pin: /env\.CJCJ_TOOLCHAIN/}],
+  ['ci.yml/package-tests', {component: 'runtime-shim', pin: /env\.RUNTIME_REF/}],
+  ['build-native-runtime.yml/runtime', {component: 'native-runtime', pin: /steps\.pin\.outputs\.runtime_sha/}],
   ['platform-matrix.yml/darwin-runtime', {component: 'runtime', pin: /env\.RUNTIME_REF/}],
   ['platform-matrix.yml/colour-runtime', {component: 'runtime', pin: /env\.RUNTIME_REF/}],
   ['platform-matrix.yml/platform', {component: 'runtime', pin: /env\.RUNTIME_REF/}],
@@ -72,7 +75,7 @@ const CXX_JOBS = new Map([
 // or configures one is excluded below rather than left out here.
 // `cc` needs the extra guard: a bare word boundary also matches the end of a
 // filename like src/foo.cc, and a file being copied is not a compile.
-const COMPILES = /(\bcmake\b|\bninja\b|\bmake\b|build\.py build|(?<![.\w-])cc\b|\bgcc\b|\bg\+\+|clang\+\+|\bclang\b|build_patched_runtime\.mjs|build_runtime\.mjs|test_windows_runtime_link\.mjs|build_tuple\.sh|install-static-libs|gha_run\.sh|build-stage3\.mjs|build-windows-final-std\.mjs|build-android-final-std\.mjs|build-android-runtime\.mjs|build_shim\.mjs|build_windows_std_ast\.mjs|build_ast_support\.sh|build-shim\.mjs|install-mingw)/;
+const COMPILES = /(\bcmake\b|\bninja\b|\bmake\b|build\.py build|(?<![.\w-])cc\b|\bgcc\b|\bg\+\+|clang\+\+|\bclang\b|build_patched_runtime\.mjs|build_runtime\.mjs|test_windows_runtime_link\.mjs|build_tuple\.mjs|install-static-libs|gha_run\.sh|build-stage3\.mjs|build-windows-final-std\.mjs|build-android-final-std\.mjs|build-ohos-final-std\.mjs|build-ios-final-std\.mjs|build-ios-runtime\.mjs|build-android-runtime\.mjs|run-native-package-tests\.mjs|build_shim\.mjs|build_windows_std_ast\.mjs|build_ast_support\.sh|build-shim\.mjs|install-mingw)/;
 // Only the package managers. Every other exclusion tried here -- the MSYS2
 // package list, --gcc-toolchain, CMAKE_C*_COMPILER=, shellcheck/actionlint --
 // was measured and carried nothing: dropping all six leaves the suite at the
@@ -184,6 +187,6 @@ test('build/cli.mjs keeps a launcher the workflow already exported', async () =>
   assert.match(shim, /CMAKE_CXX_COMPILER_LAUNCHER/, 'the shim compile honours the launcher');
   const staticLibs = await fs.readFile(path.join(root, 'build/toolchain/static-libs.mjs'), 'utf8');
   assert.match(staticLibs, /CMAKE_C_COMPILER_LAUNCHER/, 'autotools support libraries carry the launcher in CC');
-  const tuple = await fs.readFile(path.join(root, 'ci/platform_tuples/build_tuple.sh'), 'utf8');
-  assert.match(tuple, /\$\{SCCACHE_PATH:\+"\$SCCACHE_PATH"\} clang\+\+/, 'the tuple shim compile goes through sccache');
+  const tuple = await fs.readFile(path.join(root, 'ci/platform_tuples/build_tuple.mjs'), 'utf8');
+  assert.match(tuple, /\.\.\.\(process\.env\.SCCACHE_PATH \? \[process\.env\.SCCACHE_PATH\] : \[\]\), 'clang\+\+'/, 'the tuple shim compile goes through sccache');
 });

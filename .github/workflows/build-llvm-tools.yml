@@ -3,10 +3,20 @@ name: Reusable LLVM tools
 on:
   workflow_call:
     outputs:
-      tuple_artifact_id:
-        description: Fixed static tuple artifact from this run.
-        value: ${{ jobs.static-tuple.outputs.artifact_id }}
+      tuple_platforms:
+        description: Selected native static tuple platforms from this run.
+        value: ${{ jobs.plan.outputs.tuple_platforms }}
     inputs:
+      llvm_ref:
+        description: Optional complete LLVM candidate SHA; requires runtime_ref.
+        required: false
+        type: string
+        default: ''
+      runtime_ref:
+        description: Optional complete paired runtime SHA; requires llvm_ref.
+        required: false
+        type: string
+        default: ''
       cache-component:
         description: Isolated dylib cache namespace; reuse for a cold/warm pair.
         required: false
@@ -55,9 +65,14 @@ defaults:
 jobs:
   in-process-dylib:
     if: inputs.publish_dylib
+    needs: plan
     uses: ./.github/workflows/build-llvm-dylib.yml
     with:
       cache-component: ${{ inputs.cache-component }}
+      llvm_ref: ${{ inputs.llvm_ref }}
+      runtime_ref: ${{ inputs.runtime_ref }}
+      platforms: ${{ inputs.platforms }}
+      platform_set: ${{ inputs.platform_set }}
 
   # A release phase pays for its own tuple and no one else's, so the matrix has to
   # be selectable. Actions cannot filter a literal matrix, so build the list here
@@ -67,8 +82,14 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       matrix: ${{ steps.select.outputs.matrix }}
+      tuple_platforms: ${{ steps.select.outputs.tuple_platforms }}
     steps:
       - uses: actions/checkout@v7
+      - name: Validate native source pair before starting producers
+        env:
+          NATIVE_LLVM_REF: ${{ inputs.llvm_ref }}
+          NATIVE_RUNTIME_REF: ${{ inputs.runtime_ref }}
+        run: node ci/native-llvm-inputs.mjs
       - name: Select the requested tuples
         id: select
         env:
@@ -89,12 +110,12 @@ jobs:
       - name: Checkout cjcj
         uses: actions/checkout@v7
 
-      - name: Load LLVM pin
+      - name: Load native LLVM source pair
         id: llvm-pin
-        run: |
-          cat ci/llvm_pin.env >> "$GITHUB_ENV"
-          source ci/llvm_pin.env
-          echo "sha=$LLVM_SHA" >> "$GITHUB_OUTPUT"
+        env:
+          NATIVE_LLVM_REF: ${{ inputs.llvm_ref }}
+          NATIVE_RUNTIME_REF: ${{ inputs.runtime_ref }}
+        run: node ci/native-llvm-inputs.mjs
 
       # `rebuild` salts the key with the run id so the restore misses and the
       # post-step still saves the fresh tools under a key nothing else will read.
@@ -106,7 +127,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: fixed-toolchain/${{ matrix.platform }}
-          key: ${{ (inputs.rebuild || inputs.cold_cache) && format('rebuild-{0}-', github.run_id) || '' }}fixed-llvm-tools-${{ matrix.platform }}-${{ matrix.portability-tag }}-${{ steps.llvm-pin.outputs.sha }}-${{ env.CANGJIE_COMPILER_SHA }}-${{ hashFiles('ci/llvm_pin.env', 'ci/runtime_pin.env', 'ci/fetch-llvm-runtime.mjs', '.github/workflows/build-fixed-llc.yml', '.github/workflows/build-llvm-tools.yml', 'ci/llvm-tools-manifest.mjs', 'build/lib/targets.mjs', 'ci/llvm-tools-matrix.mjs', 'ci/platform_tuples/**', 'build/lib/srcbuild_git.sh', 'runtime_shim/cjselfhost_llvmshim.cpp') }}
+          key: ${{ (inputs.rebuild || inputs.cold_cache) && format('rebuild-{0}-', github.run_id) || '' }}fixed-llvm-tools-${{ matrix.platform }}-${{ matrix.portability-tag }}-${{ steps.llvm-pin.outputs.sha }}-${{ steps.llvm-pin.outputs.runtime_sha }}-${{ env.CANGJIE_COMPILER_SHA }}-${{ hashFiles('ci/llvm_pin.env', 'ci/runtime_pin.env', 'ci/fetch-llvm-runtime.mjs', '.github/workflows/build-fixed-llc.yml', '.github/workflows/build-llvm-tools.yml', 'ci/llvm-tools-manifest.mjs', 'build/lib/targets.mjs', 'ci/llvm-tools-matrix.mjs', 'ci/native-llvm-inputs.mjs', 'ci/platform_tuples/**', 'build/lib/srcbuild_git.sh', 'runtime_shim/cjselfhost_llvmshim.cpp') }}
 
       # Every C++ compile below (llc, opt, flatc, the shim object) goes through
       # sccache; the report step at the end fails the job if none did.
@@ -273,8 +294,8 @@ jobs:
           LLVM_TARGETS: ${{ matrix.llvm-targets }}
           TUPLE_ROOT: .tuple-build
         run: |
-          bash ci/platform_tuples/fetch_sources.sh
-          bash ci/platform_tuples/build_tuple.sh
+          npx --yes zx@8 ci/platform_tuples/fetch_sources.mjs
+          npx --yes zx@8 ci/platform_tuples/build_tuple.mjs
 
       - name: Report sccache
         if: always() && steps.cache.outputs.cache-hit != 'true'
@@ -391,35 +412,40 @@ jobs:
           retention-days: 14
 
   static-tuple:
-    outputs:
-      artifact_id: ${{ steps.static-artifact.outputs.artifact-id }}
-    if: inputs.publish_tuple
+    if: inputs.publish_tuple && needs.plan.outputs.tuple_platforms != '[]'
     name: Publish static colour LLVM tuple
-    needs: build-tools
-    runs-on: ubuntu-22.04
+    needs: [plan, build-tools]
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: ${{ fromJson(needs.plan.outputs.tuple_platforms) }}
+    runs-on: ${{ matrix.platform == 'linux_aarch64' && 'ubuntu-22.04-arm' || matrix.platform == 'darwin_aarch64' && 'macos-15' || matrix.platform == 'darwin_x86_64' && 'macos-15-intel' || 'ubuntu-22.04' }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
-          name: fixed-llvm-tools-linux_x86_64
-          path: fixed-toolchain/linux_x86_64
+          name: fixed-llvm-tools-${{ matrix.platform }}
+          path: fixed-toolchain/${{ matrix.platform }}
+      - name: Load native LLVM source pair
+        env:
+          NATIVE_LLVM_REF: ${{ inputs.llvm_ref }}
+          NATIVE_RUNTIME_REF: ${{ inputs.runtime_ref }}
+        run: node ci/native-llvm-inputs.mjs
       - name: Publish the shared ten-payload layout
         shell: bash
         run: |
           set -euo pipefail
-          source ci/llvm_pin.env
           REPO_ROOT="$GITHUB_WORKSPACE"
-          CJCJ_FIXED_LLVM_DIR="$GITHUB_WORKSPACE/fixed-toolchain/linux_x86_64"
+          CJCJ_FIXED_LLVM_DIR="$GITHUB_WORKSPACE/fixed-toolchain/${{ matrix.platform }}"
           REPO_ROOT="$REPO_ROOT" CJCJ_FIXED_LLVM_DIR="$CJCJ_FIXED_LLVM_DIR" LLVM_SHA="$LLVM_SHA" CANGJIE_COMPILER_SHA="$CANGJIE_COMPILER_SHA" \
             npx --yes zx@8 ci/llvm-tuple-layout.mjs "$RUNNER_TEMP/llvm-tuple"
           tuple="$RUNNER_TEMP/llvm-tuple/$LLVM_SHA/$CANGJIE_COMPILER_SHA"
-          (cd "$tuple" && sha256sum --strict -c SHA256SUMS)
-          echo "LLVM_TUPLE_SUMS_SHA=$(sha256sum "$tuple/SHA256SUMS" | awk '{print $1}')" | tee -a "$GITHUB_STEP_SUMMARY"
+          node ci/release/verify-tuple-payloads.mjs "$tuple" | tee -a "$GITHUB_STEP_SUMMARY"
           echo "STATIC_TUPLE=$tuple" >> "$GITHUB_ENV"
       - uses: actions/upload-artifact@v7
         id: static-artifact
         with:
-          name: static-llvm-tuple-linux_x86_64
+          name: static-llvm-tuple-${{ matrix.platform }}
           path: ${{ env.STATIC_TUPLE }}
           if-no-files-found: error
           retention-days: 90

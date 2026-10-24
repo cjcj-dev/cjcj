@@ -2,14 +2,14 @@
 
 Both runners resolve bootstrap inputs with
 `ci/release/prepare_bootstrap_inputs.mjs` before entering
-`ci/bootstrap/bootstrap.sh`. Actions consumes the exported environment through
+`ci/bootstrap/bootstrap.mjs`. Actions consumes the exported environment through
 `ci/bootstrap/gha_run.sh`; kkk2's `load_bootstrap_pins` consumes the same
 resolver's quoted shell output. Preparation failures publish no bootstrap
 command. The full 2..36 entry prepares native fixed tools before numbered steps
 with the same `prepareColourTuple` function used by bootstrap preparation.
 
-The resolver reads the common host SDK, LLVM, runtime, AST, runtime-artifact and
-dylib pin files for the selected target. Workflow-provided pin environment values
+The resolver selects official H and repaired host LLVM for the execution host.
+LLVM target, runtime, AST, runtime-artifact and dylib pins remain target inputs. Workflow-provided pin environment values
 use the same validation as those loaded from the files. No runner-specific
 expected digest is calculated from downloaded bytes.
 
@@ -39,7 +39,8 @@ upstream symlinks. An installed `CJCJ_SRCBUILD_HOST_SDK`, cjv installation, or
 dereferenced sharedbuild SDK is not a bootstrap base. Its archive SHA identifies
 the whole distribution and its original layout. No shared installation is
 modified. Missing platform archive pins fail with `HOST_SDK_PIN_MISSING`;
-Darwin archive pins remain pending registration by #766.
+All five native platform archive declarations are recorded; each platform keeps
+its own version, size, URL and SHA256.
 
 A depot is an explicit transport path (`CJCJ_BOOTSTRAP_COLOUR_TUPLE` with
 `CJCJ_BOOTSTRAP_SOURCE=depot`), not an identity inferred from 12/40-character
@@ -68,19 +69,38 @@ SHA256 identities. Paths may differ between runners; this table must match
 for the same inputs. The runtime manifest transitively authenticates its members.
 The table is emitted only after all checks and C++ header preparation succeed.
 
-For the default fetched compiler source, the common resolver invokes
-`ci/bootstrap/prepare_cpp_headers.mjs` before stage0. Explicit
-`CJCJ_BOOTSTRAP_CPP_SRC` / `CANGJIE_CPP_SRC` trees are caller-owned and must
-already satisfy bootstrap's header checks. Header preparation uses pinned LLVM
-and FlatBuffers sources, builds LLVM headers and flatc concurrently, and records
-the commands and file inventory in `build/build/shim-headers.json`.
+Cjo headers use the existing `prepare_cpp_headers.mjs` producer and a private
+`bootstrap-inputs/cjo-shim-headers` output. Defaults are the fixed compiler/LLVM/
+runtime/FlatBuffers commits in `shim-source-commits.json`; historical binary tuple
+pins are unchanged. `shim_source_selection` on every public workflow forwards
+`CJCJ_BOOTSTRAP_SHIM_SOURCE_SELECTION`: an object keyed by compiler, llvm, runtime,
+flatbuffers, with actual repository and full commit. Private commits require an
+explicit reachable repository; no official URL is invented. Local callers may
+instead pass `CJCJ_BOOTSTRAP_SHIM_SOURCES`, a JSON file with the same rows and
+existing root, plus archive.file/archive.sha256 for a fixed Git archive.
 
-The dylib is separate from the static tuple. Bootstrap installs it in the cjcj
-runner SDK while preserving the official compiler's host LLVM binding.
-`bootstrap_entries.test.mjs` executes the actual kkk2 driver and Actions resolver,
-compares identities and consumer argument bytes, and independently changes each
-input to verify rejection before command publication. These are preparation
-device tests, not stage1 compilation acceptance.
+The producer validates actual sources, configures against the selected runtime,
+generates LLVM headers, builds the matching host flatc and generates CjoFormat.
+It records selected sources and actual commands once in `BUILD-INPUTS.json`.
+Normal CMake targets handle regeneration and re-entry; no header inventory or
+second configuration certificate is produced. The selected LLVM/runtime pair
+is checked when preparing its real sources.
+
+The final `ci/srcbuild/steps/build-shim.mjs` validates an explicit copy or the installed object
+against the same original producer source/byte facts. If that object is
+unavailable, it genuinely compiles the complete TU with the selected headers,
+preparing them normally when no external header output was supplied. Source
+compilation uses the normal compiler launcher/cache and never reuses a local
+object merely because it exists or has a newer mtime.
+The manual cold-entry driver is `cpp-headers.integration.mjs`; the old shell pathname
+only forwards to that implementation. Full host/tuple/N/SDK qualification is
+separate from the finite real shim object and header-production tests.
+
+The dylib is separate from the static tuple. Native CMake installs it directly;
+validation reads those bytes, checks the fixed LLVM commit stamp and digest, and
+executes the three target lookups through its C API. Official H bytes remain
+unchanged. `prepare-bootstrap-plans.mjs` generates ordinary build targets from
+fixed Git inputs and actual N/R/AST installation locations.
 
 Run the preparation tests on the build host:
 
@@ -89,3 +109,36 @@ ulimit -c 0
 node --test ci/release/bootstrap_entries.test.mjs \
   ci/release/prepare_bootstrap_inputs.test.mjs ci/release/host_llvm.test.mjs
 ```
+
+## Native target configuration
+
+The source workflow requires `native_inputs_artifact` and its original
+`native_inputs_run_id`. The artifact contains complete N/R/AST native install
+roots and the two paired tools modules exported with
+`node ci/bootstrap/deploy-native-tools.mjs TOOLS_REPO COMMIT EMPTY_DESTINATION`.
+Its `locations.json` records `platform`, `installations` (each has relative
+`install`, original `buildResult`, and `configuration`) and
+`tools.privateRoot`. No removed receipt or SDK lock is a prerequisite.
+`configure-gha-inputs.mjs` checks out the fixed LLVM, runtime, AST compiler and
+H1 repositories, reads the actual candidate checkout, selects execution-host H,
+and writes `CJCJ_SDK_INPUTS` into GITHUB_ENV. The artifact must contain genuine
+native outputs; a source workflow cannot create this input by naming empty paths.
+The eight bootstrap phases then use `sdk-targets.mjs`; native production and full
+SDK qualification remain distinct from configuration-only checks.
+
+The same native artifact also carries the independently produced HLE dependency
+package. Extract it under an artifact-owned directory and record
+`hleDependencies` in `locations.json`, relative to that artifact root, pointing
+to its `hle-dependencies.relative.json`. Keep the Node, modules and cjbind paths
+relative to that descriptor. `configure-gha-inputs.mjs` uses `hle-input.mjs` to
+validate and export this selection; `job-handoff.mjs` preserves its archived
+closure and `tools.run` resolves the three paths at consumption. The component
+can be checked separately with `node ci/bootstrap/hle-input.mjs ROOT PLATFORM`;
+this does not create or qualify missing LLVM/runtime/AST native inputs.
+
+For a tools-only target dependency build, `build/cli.mjs --stdx-profile sdk-tools
+build stdx` selects the fixed stdx producer's existing `--skip-chir`,
+`--skip-syntax`, and `--without-effect-handlers` options. This does not qualify
+complete stdx. The default remains `full`. Set `CANGJIE_BUILD_JOBS` explicitly
+when bounding the native build; stdx, cjfmt and LSP forward the value (capped to
+the admitted CPU affinity) to their existing `--jobs` options.

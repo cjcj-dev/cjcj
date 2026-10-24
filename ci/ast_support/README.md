@@ -39,12 +39,13 @@ matching Cangjie module and generator. `SHA256SUMS` covers all these files.
 The compiler source authority is `https://gitcode.com/Cangjie/cangjie_compiler.git`;
 the former Zxilly mirror does not contain the alpha.06 compiler commit.
 
-Std compilation uses `ci/build_resources.sh`: requested heap defaults to 96GB,
-clamped to 75% of measured physical memory so the official host runtime does
-not reject the setting and fall back to its small default heap (#131).
-Hosts with less than a 96GB budget compile one std package at a time;
-large build hosts use every core. The selected heap, memory and parallelism
-are printed. Windows qualification is `build-windows-runtime.yml`: it calls
+Std compilation uses `ci/build-resources.mjs`. Default heap is at most 96GB
+and 75% of the process's effective physical/cgroup memory. Default jobs follow
+affinity and cgroup CPU quota. Explicit legal heap/jobs are preserved; a heap
+above observed memory reports that fact and its configuration source; the
+selected runtime validates its own virtual heap limits.
+Heap capacity is not an RSS estimate or a jobs-times-heap memory model.
+The selected heap, limits and jobs are printed. Windows qualification is `build-windows-runtime.yml`: it calls
 `ci/build_ast_support.sh` with `cmake/mingw_x86_64_toolchain.cmake`, installs
 that artifact, cross-builds `std/ast.o`, then `build_windows_std_ast.mjs`
 rejects a swapped schema, header or archive before the DLL export guard.

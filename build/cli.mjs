@@ -2,11 +2,13 @@
 // Port of cangjie-build/src/cangjie_build/cli.py.
 
 import path from 'node:path';
+import fs from 'node:fs';
 import {fileURLToPath} from 'node:url';
 import {buildConfig, DEFAULT_BUILD_TYPE, REPO_NAMES, VALID_BUILD_TYPES} from './lib/config.mjs';
 import {BuildError, ConfigError} from './lib/errors.mjs';
 import {configureLogging, getLogger} from './lib/logging.mjs';
-import {allTargets, assertHostContract} from './lib/targets.mjs';
+import {allTargets} from './lib/targets.mjs';
+import {assertBuildHostContract} from './lib/build-target.mjs';
 import * as sccache from './toolchain/sccache.mjs';
 import * as mingw from './toolchain/mingw.mjs';
 import * as staticLibs from './toolchain/static-libs.mjs';
@@ -20,12 +22,15 @@ import * as stdlib from './srcbuild/stages/stdlib.mjs';
 import * as stdx from './srcbuild/stages/stdx.mjs';
 import * as tools from './srcbuild/stages/tools.mjs';
 import * as verify from './srcbuild/stages/verify.mjs';
+import {prepareSourceBuildInputs} from '../ci/bootstrap/sdk-inputs.mjs';
+import {installProducts} from '../ci/bootstrap/sdk-flow.mjs';
+import {verifyInstall} from '../ci/bootstrap/sdk-verify-install.mjs';
 
 const VERSION = '0.1.0';
 const logger = getLogger('cangjie_build.cli');
 const COMMANDS = new Set([
   'install-system-deps', 'print-version', 'install-static-libs', 'install-mingw',
-  'install-target-python', 'fetch', 'build', 'package', 'verify', 'run-all',
+  'install-target-python', 'fetch', 'build', 'package', 'verify', 'run-all', 'sdk', 'install',
 ]);
 const BUILD_STAGES = Object.freeze({compiler, runtime, stdlib, stdx, tools});
 const LOG_LEVELS = new Set(['DEBUG', 'INFO', 'WARNING', 'ERROR']);
@@ -36,11 +41,20 @@ function usage() {
     + 'Global options:\n'
     + '  --workspace PATH\n'
     + '  --build-root PATH\n'
+    + '  --official-sdk-root PATH (default: CJCJ_OFFICIAL_SDK_ROOT, CJCJ_SRCBUILD_HOST_SDK, pinned cjv SDK)\n'
     + '  --target TARGET (default: linux-x64)\n'
     + '  --host-profile generic|kkk2 (default: generic)\n'
     + `  --build-type TYPE (default: ${DEFAULT_BUILD_TYPE})\n`
     + '  --cangjie-version VERSION\n'
     + '  --stdx-version INTEGER (default: 1)\n'
+    + '  --stdx-profile full|sdk-tools (default: full)\n'
+    + '  --stdx-build-mode clean|incremental (default: clean)\n'
+    + '  --tools-build-mode clean|incremental (default: clean)\n'
+    + '  --tools-dependencies PATH (fixed native JSON/runtime/bounds/httplib sources)\n'
+    + '  --tools-build-set all|NAME,... (default: all; omitted tools reuse existing outputs)\n'
+    + '  --tools-phase all|build|install (default: all; build does not publish the shared SDK)\n'
+    + '  --jobs INTEGER (tools total CPU budget; default: CANGJIE_BUILD_JOBS or available CPUs)\n'
+    + '  --tools-package-jobs INTEGER (heavy producer limit, default/max: 4)\n'
     + '  --log-level LEVEL (default: INFO)\n'
     + '  --version\n'
     + '  --help\n'
@@ -82,12 +96,18 @@ function parseGlobal(args) {
     let parsed;
     for (const [flag, key] of [
       ['--workspace', 'workspace'], ['--build-root', 'buildRoot'], ['--target', 'targetKey'],
+      ['--official-sdk-root', 'officialSdkRoot'],
       ['--host-profile', 'hostProfile'],
       ['--build-type', 'buildType'], ['--cangjie-version', 'cangjieVersion'],
-      ['--stdx-version', 'stdxVersion'], ['--log-level', 'logLevel'],
+      ['--stdx-version', 'stdxVersion'], ['--stdx-profile', 'stdxProfile'], ['--log-level', 'logLevel'],
+      ['--stdx-build-mode', 'stdxBuildMode'], ['--tools-build-mode','toolsBuildMode'], ['--tools-build-set','toolsBuildSet'],
+      ['--tools-phase','toolsPhase'], ['--tools-dependencies','toolsDependencies'], ['--jobs','jobs'], ['--tools-package-jobs','toolsPackageJobs'],
     ]) {
       parsed = optionValue(args, index, flag);
       if (parsed) {
+        if (key === 'officialSdkRoot' && (!parsed.value.trim() || parsed.value.startsWith('--') || COMMANDS.has(parsed.value))) {
+          throw new ConfigError('--official-sdk-root: expected a nonempty path');
+        }
         options[key] = parsed.value;
         index = parsed.next;
         break;
@@ -160,6 +180,13 @@ function parseFetch(args) {
 }
 
 async function dispatch(config, command, args) {
+  if(command==='install'){
+    const {main}=await import('../ci/bootstrap/sdk-flow.mjs');
+    const index=args.indexOf('--inputs');
+    if(index<0||!args[index+1])throw new ConfigError('install --inputs FILE [--no-package] [--dry-run|--build-only]');
+    const forwarded=[...args];forwarded[index]='--install-inputs';return main(forwarded);
+  }
+  if(command==='sdk'){const {main}=await import('../ci/bootstrap/sdk-flow.mjs');return main(args);}
   if (!COMMANDS.has(command)) throw new ConfigError(`unknown command: ${command}`);
   if (wantsHelp(args)) {
     process.stdout.write(`${commandUsage(command)}\n`);
@@ -209,6 +236,15 @@ async function dispatch(config, command, args) {
       buildType: config.buildType,
       cangjieVersion: config.cangjieVersion,
       stdxVersion: config.stdxVersion,
+      stdxProfile: config.stdxProfile,
+      stdxBuildMode: config.stdxBuildMode,
+      toolsBuildMode: config.toolsBuildMode,
+      toolsBuildSet: config.toolsBuildSet,
+      toolsDependencies: config.toolsDependencies,
+      toolsPhase: config.toolsPhase, jobs: config.jobs, toolsPackageJobs: config.toolsPackageJobs,
+      officialSdkRoot: config.officialSdkRoot,
+      consumerSdk: config.consumerSdk,
+      useSavedSources: false,
       globalTag: tag,
       repoOverrides,
     });
@@ -222,6 +258,13 @@ async function dispatch(config, command, args) {
     }
     if (args.length !== 1) throw new ConfigError(`build ${args[0]}: unexpected argument '${args[1]}'`);
     if (!(args[0] in BUILD_STAGES)) throw new ConfigError(`build: unknown stage '${args[0]}'`);
+    if(['compiler','runtime','stdlib'].includes(args[0])) {
+      if(process.env.CANGJIE_BUILD_DRY_RUN==='1'){console.log(JSON.stringify({status:'NOT_INSTALLED',reason:'DRY_RUN',sources:config.sources,stage:args[0]}));return;}
+      const production=await prepareSourceBuildInputs(config,process.env,args[0]);
+      await BUILD_STAGES[args[0]].run(production);
+      if(args[0]==='stdlib'&&process.env.CANGJIE_BUILD_DRY_RUN!=='1')await installProducts(production.installInputs,{packageOutput:false});
+      return;
+    }
     return BUILD_STAGES[args[0]].run(config);
   }
   if (command === 'package') {
@@ -233,8 +276,11 @@ async function dispatch(config, command, args) {
     return verify.run(config);
   }
   if (command === 'run-all') {
-    const valid = new Set(['--skip-system-deps', '--skip-install-libs']);
+    const valid = new Set(['--skip-system-deps', '--skip-install-libs','--build-only','--dry-run']);
     for (const argument of args) if (!valid.has(argument)) throw new ConfigError(`run-all: unknown option '${argument}'`);
+    if(args.includes('--dry-run')||process.env.CANGJIE_BUILD_DRY_RUN==='1') {
+      console.log(JSON.stringify({status:'NOT_INSTALLED',reason:'DRY_RUN',sources:config.sources,stages:['compiler','runtime','stdlib','stdx','tools','package']}));return;
+    }
     if (!args.includes('--skip-system-deps')) await systemDeps.install(config);
     if (!args.includes('--skip-install-libs')) {
       if (config.target.spec.needsMingw) {
@@ -245,13 +291,27 @@ async function dispatch(config, command, args) {
       }
     }
     await fetchStage.run(config);
-    await compiler.run(config);
-    await runtime.run(config);
-    await stdlib.run(config);
-    await stdx.run(config);
-    await tools.run(config);
-    await packageStage.run(config);
-    return verify.run(config);
+    const production=await prepareSourceBuildInputs(config);
+    await compiler.run(production);
+    await runtime.run(production);
+    await stdlib.run(production);
+    if(args.includes('--build-only')) {
+      // Native intermediate output supplies the later producers. No public SDK
+      // or archive is published, including when these consumers fail.
+      await stdx.run(production);
+      await tools.run(production);
+      console.log(JSON.stringify({status:'NOT_INSTALLED',reason:'BUILD_ONLY',sources:production.sources}));return;
+    }
+    await installProducts(production.installInputs,{packageOutput:false,consume:async pending=>{
+      const installed=Object.freeze({...production,producerSdk:null,consumerSdk:pending});
+      await stdx.run(installed);
+      await tools.run(installed);
+      if(!config.target.spec.crossCompile)await verifyInstall({sdk:pending,
+        work:path.join(config.workspace,'verify-installed'),platform:config.target.spec.llvmPlatform});
+    }});
+    const installed=Object.freeze({...production,producerSdk:null,consumerSdk:production.installInputs.install});
+    await packageStage.run(installed);
+    return verify.run(installed);
   }
 }
 
@@ -271,8 +331,12 @@ async function main() {
   validateGlobalOptions(parsed.options);
   configureLogging(parsed.options.logLevel);
   sccache.maybeEnable();
-  const config = buildConfig(parsed.options);
-  assertHostContract(parsed.options.targetKey, {profile: parsed.options.hostProfile});
+  if(['install','sdk'].includes(parsed.command))return dispatch(null,parsed.command,parsed.rest);
+  const config = buildConfig({...parsed.options, useSavedSources: parsed.command !== 'fetch'});
+  if (config.officialSdkRoot && !fs.statSync(config.officialSdkRoot, {throwIfNoEntry: false})?.isDirectory()) {
+    throw new ConfigError(`officialSdkRoot: directory does not exist: ${config.officialSdkRoot}`);
+  }
+  assertBuildHostContract(parsed.options.targetKey, {profile: parsed.options.hostProfile});
   await dispatch(config, parsed.command, parsed.rest);
 }
 

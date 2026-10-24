@@ -1,11 +1,13 @@
 #!/usr/bin/env zx
 
 import fs from 'node:fs/promises';
+import {resolveOfficialSdkRoot} from '../../../build/lib/config.mjs';
 import os from 'node:os';
 import path from 'node:path';
 import {assertPackagedLineage} from '../../../build/lib/package-lineage.mjs';
 import {getTarget} from '../../../build/lib/targets.mjs';
 import {verifyRepeatedCjo} from '../verify-repeated-cjo.mjs';
+import {verifyInstall} from '../../bootstrap/sdk-verify-install.mjs';
 
 $.stdio = 'inherit';
 
@@ -73,9 +75,10 @@ process.env[target.spec.loaderEnv] = libraryPath;
 if (target.spec.os === 'darwin') process.env.DYLD_FALLBACK_LIBRARY_PATH = libraryPath;
 process.env.cjHeapSize ||= '12GB';
 
-const work = `${process.env.RUNNER_TEMP || '/tmp'}/cjcj-srcbuild-verify`;
-await fs.rm(work, {recursive: true, force: true});
-await fs.mkdir(work, {recursive: true});
+const tempRoot = process.env.RUNNER_TEMP || os.tmpdir();
+await fs.mkdir(tempRoot, {recursive: true});
+const work = await fs.mkdtemp(path.join(tempRoot, 'cjcj-srcbuild-verify-'));
+console.log('[verify] work=' + work);
 
 async function probeTempExec(rootDir, label) {
   if (!rootDir) return `${label}=unset`;
@@ -139,9 +142,11 @@ console.log(`  cgroup-memory: ${cgroupMemory}`);
 
 await phase('lineage', async () => {
   await assertPackagedLineage(sdk, {
-    allowNightlyStd: process.env.CJCJ_ALLOW_NIGHTLY_STD === '1',
+    allowNightlyStd: process.env.CJCJ_ALLOW_NIGHTLY_STD === '1',officialRoot:resolveOfficialSdkRoot(),
   });
 });
+
+await phase('installed-compiler', () => verifyInstall({sdk,work:path.join(work,'installed'),platform:target.spec.llvmPlatform}));
 
 await phase('smoke', async () => {
   console.log('[smoke] verify deployed SDK');
@@ -157,7 +162,7 @@ await phase('selfcheck', async () => {
   const failedPackages = [];
   for (const pkg of packages) {
     console.log(`[selfcheck] package ${pkg}`);
-    const compiled = await $({nothrow: noFailFast})`${timeoutCommand} 900 ${self} --package ${root}/packages/${pkg}/src --module-name cjcj --import-path ${root}/target/release --output-type=staticlib -o ${work}/${pkg}.a`;
+    const compiled = await $({nothrow: noFailFast})`${timeoutCommand} 900 ${self} --package ${root}/packages/${pkg}/src --module-name cjcj --import-path ${sdk}/share/cjcj/cjo --output-type=staticlib -o ${work}/${pkg}.a`;
     if (!noFailFast) continue;
     if (compiled.exitCode === 0) {
       console.log(`[selfcheck] package ${pkg} PASS`);
@@ -175,7 +180,7 @@ await phase('selfcheck', async () => {
 await phase('selfdet', () => verifyRepeatedCjo({
   compiler: self,
   sourceDir: path.join(root, 'packages', 'conditional_compilation', 'src'),
-  importPath: path.join(root, 'target', 'release'),
+  importPath: path.join(sdk, 'share', 'cjcj', 'cjo'),
   outputDir: path.join(work, 'selfdet'),
   timeoutCommand,
 }));

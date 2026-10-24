@@ -33,7 +33,6 @@ export async function run(config, {resolveCjdbPythonHome = cjdbPythonHome} = {})
   const cjdbEnv = await nativeCjdbEnv(config, resolveCjdbPythonHome);
   await stage('compiler', async () => {
     applyCompilerPathNeutralFlags(repoDir);
-    await runBuildPy(config, repoDir, ['clean'], {stageName: 'compiler.clean'});
 
     if (config.target.spec.crossCompile) {
       await runBuildPy(config, repoDir, [

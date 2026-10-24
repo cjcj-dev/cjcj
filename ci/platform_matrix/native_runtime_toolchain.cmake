@@ -1,0 +1,7 @@
+# Select the actual cache before R79b's find_program(ccache sccache).
+if(NOT IS_ABSOLUTE "$ENV{SCCACHE_PATH}" OR NOT EXISTS "$ENV{SCCACHE_PATH}")
+  message(FATAL_ERROR "NATIVE_RUNTIME_SCCACHE_MISSING")
+endif()
+set(CANGJIE_COMPILER_CACHE "$ENV{SCCACHE_PATH}" CACHE FILEPATH "Native runtime compiler cache" FORCE)
+set(CMAKE_C_COMPILER_LAUNCHER "$ENV{SCCACHE_PATH}" CACHE STRING "C compiler launcher" FORCE)
+set(CMAKE_CXX_COMPILER_LAUNCHER "$ENV{SCCACHE_PATH}" CACHE STRING "C++ compiler launcher" FORCE)

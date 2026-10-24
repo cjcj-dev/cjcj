@@ -3,15 +3,18 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {sdkPlatform} from '../bootstrap/sdk-platform.mjs';
 
 // The runner and the acquisition step read the same reviewed declaration.
 // Artifact metadata identifies the producer; downloaded bytes never set a pin.
 export function hostIdentity() {
   const target = process.env.CJCJ_SRCBUILD_TARGET
-    || `${process.platform}-${process.platform === 'linux' && process.arch === 'arm64' ? 'aarch64' : process.arch}`;
+    || `${process.platform === 'win32' ? 'windows' : process.platform}-${process.platform === 'linux' && process.arch === 'arm64' ? 'aarch64' : process.arch}`;
   const {spec} = getTarget(target);
-  if (!spec.hostLlvmLibrary) throw new Error(`HOST_LLVM_TARGET_UNSUPPORTED target=${target}`);
-  const cell = {platform: spec.llvmPlatform, library: spec.hostLlvmLibrary};
+  const library = process.platform === 'win32' && target === 'windows-x64'
+    ? sdkPlatform('windows_x86_64').llvmLibrary : spec.hostLlvmLibrary;
+  if (!library) throw new Error(`HOST_LLVM_TARGET_UNSUPPORTED target=${target}`);
+  const cell = {platform: spec.llvmPlatform, library};
   const identities = process.env.STAGE1_HOST_IDENTITIES
     || new URL('../bootstrap/stage1_host_identities.txt', import.meta.url);
   const lines = fs.readFileSync(identities, 'utf8').split('\n');

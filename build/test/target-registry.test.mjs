@@ -74,8 +74,11 @@ test('ARM caller requests only ARM and package fields consume the same plan', t 
   assert.doesNotMatch(result.stdout, /issues\/473/);
   const {spec, sourceBuild} = getTarget('linux-aarch64');
   const expected = {runner: sourceBuild.runner, platform: spec.key, llvm_platform: spec.llvmPlatform,
-    sdk_runtime_dir: spec.runtimeTuple, compiler_artifact: `final-compiler-${spec.key}`};
+    sdk_runtime_dir: spec.runtimeTuple};
   const packageJob = job(text, 'package');
+  assert.doesNotMatch(packageJob, /compiler_artifact:/, 'complete native SDK input replaces the separate compiler artifact');
+  const consumer = fs.readFileSync(path.join(root, '.github/workflows/build-release-package.yml'), 'utf8');
+  assert.match(consumer, /name: cjcj-srcbuild-\$\{\{ inputs.platform \}\}-\$\{\{ inputs.version \}\}/);
   for (const [key, value] of Object.entries(expected)) {
     assert.equal(resolve(packageJob.match(new RegExp(`^      ${key}: (.+)$`, 'm'))[1]), value, key);
   }
@@ -88,9 +91,9 @@ test('every target mapping reaches archive naming, runtime lookup and native hos
   t.after(() => fs.rmSync(temp, {recursive: true, force: true}));
   for (const key of allTargets()) {
     const {spec} = getTarget(key);
-    const download = baseSdkDownload(key, readHostToolchainPin());
+    const download = baseSdkDownload(key, readHostToolchainPin(key));
     const identity = baseSdkIdentities.platforms[key];
-    assert.equal(download.archive, `cangjie-sdk-${identity.os}-${identity.arch}-${baseSdkIdentities.version}${identity.extension}`, key);
+    assert.equal(download.archive, `cangjie-sdk-${identity.os}-${identity.arch}-${identity.version || baseSdkIdentities.version}${identity.extension}`, key);
     assert.equal(download.size, identity.size, `${key} pinned size`);
     assert.equal(download.sha256, identity.sha256, `${key} pinned SHA-256`);
     assert.equal(targetForHost(...spec.packageHost).spec.key, key, `${key} package host`);

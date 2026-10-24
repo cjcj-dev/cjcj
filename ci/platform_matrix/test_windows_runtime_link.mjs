@@ -16,7 +16,7 @@ const selection = 'ci/platform_matrix/windows_runtime_toolchain.cmake';
 const originalEntry = await fs.readFile(entry, 'utf8');
 const originalSelection = await fs.readFile(selection, 'utf8');
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
-const entryCall = 'python3 build.py build --target ${runtimeTarget} --build-type ${buildType} --target-toolchain /mingw64';
+const entryCall = 'python3 build.py build --target ${runtimeTarget} --build-type ${buildType} --target-toolchain "$runtime_toolchain"';
 assert.equal(originalEntry.split(entryCall).length, 2, 'one native product build call');
 assert.equal(originalSelection.split('set(CMAKE_LINKER_TYPE LLD)').length, 2);
 const cutEntry = originalEntry.replace(entryCall, `CMAKE_TOOLCHAIN_FILE= ${entryCall}`);

@@ -84,7 +84,12 @@ function check(t, r, status, needle) {
 for (const gate of gates) {
   test(`${gate} complete bound evidence through explicit and registry CLI`, async t => {
     const s = await fixture(t, gate);
-    check(t, run(s, gate), 'MET'); check(t, run(s, gate, false), 'MET');
+    const explicit = run(s, gate);
+    check(t, explicit, 'MET'); check(t, run(s, gate, false), 'MET');
+    if (gate !== 'G10') for (const row of explicit.scope.platforms) {
+      assert.equal(row.status, releasePlatformReadiness(row.key).status, 'bound fixture evidence must not promote readiness');
+      assert.deepEqual(row.reasons, [...releasePlatformReadiness(row.key).reasons]);
+    }
   });
   test(`${gate} stale binding and changed payload never pass`, async t => {
     const s = await fixture(t, gate);

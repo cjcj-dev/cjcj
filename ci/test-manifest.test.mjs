@@ -4,6 +4,8 @@ import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
+import {load as loadYaml, dump as dumpYaml} from './vendor/js-yaml/js-yaml.mjs';
+import {makePlan, validatePlan, GROUPS} from './contract-shards.mjs';
 import {
   DEFERRED,
   DISCOVERY_FLOOR,
@@ -11,6 +13,7 @@ import {
   GATING,
   GATING_FLOOR,
   REGISTERED,
+  WORKFLOW_TEST_SOURCES,
   validateDrivers,
   validateManifest,
   discoverDriverFiles,
@@ -58,6 +61,20 @@ function literalTestArguments(text) {
   return named;
 }
 
+function sourceGating(name, text) {
+  const registration = WORKFLOW_TEST_SOURCES.find(entry => entry.workflow === name);
+  if (!registration) return [];
+  const workflow = loadYaml(text);
+  const jobs = Object.values(workflow.jobs);
+  assert.match(registration.source_sha, /^[0-9a-f]{40}$/, 'WORKFLOW_TEST_SOURCE_SHA');
+  for (const job of jobs) {
+    assert.deepEqual(job.steps[0], {
+      uses: 'actions/checkout@v7', with: {ref: registration.source_sha},
+    }, 'WORKFLOW_TEST_SOURCE_CHECKOUT');
+  }
+  return registration.gating;
+}
+
 test('the manifest covers every test file in the repository', () => {
   const discovered = discoverTestFiles();
   // A scan that found nothing would make "every discovered file is registered"
@@ -87,7 +104,7 @@ test('discovery includes untracked Python, shell and Cangjie tests', async () =>
   const root = await fs.mkdtemp(path.join(process.env.TMPDIR || '/tmp', 'manifest-discovery-'));
   try {
     execFileSync('git', ['init', '-q', root]);
-    const names = ['test_added.py', 'test_added.sh', 'added_test.cj', 'added.test.mjs'];
+    const names = ['test_added.py', 'test_added.sh', 'added_test.cj', 'added.test.mjs', 'added.integration.mjs'];
     for (const name of names) await fs.writeFile(path.join(root, name), '');
     assert.deepEqual(discoverTestFiles(root), [...names].sort());
     assert.throws(() => validateManifest(root, [], [], [], []), /unregistered.*test_added/);
@@ -98,17 +115,18 @@ test('discovery includes untracked Python, shell and Cangjie tests', async () =>
   }
 });
 
-test('CI invokes both registered script and pinned official cjpm consumers', async () => {
+test('CI invokes registered script and native SDK Cangjie consumers', async () => {
   const ci = (await workflows()).get('ci.yml');
   assert.match(ci, /node ci\/run-registered-tests\.mjs scripts/);
   const job = ci.slice(ci.indexOf('  package-tests:'), ci.indexOf('  fixed-llvm-tools:'));
-  // The pinned loader idiom is the one ci/host-toolchain-pin.test.mjs audits,
-  // so requiring it here keeps the two contracts agreeing on one spelling.
-  assert.match(job, /cat ci\/host_sdk_pin\.env >> "\$GITHUB_ENV"/);
-  assert.match(job, /"\$cjv_bin" install "\$CJCJ_TOOLCHAIN"/);
-  assert.match(job, /source "\$sdk\/envsetup\.sh"/);
-  assert.match(job, /node ci\/run-registered-tests\.mjs cj/);
-  assert.doesNotMatch(job, /continue-on-error|build_patched_runtime|setup_sdk\.mjs/);
+  assert.match(job, /node ci\/release\/receive_native_sdk\.mjs/);
+  assert.match(job, /cat ci\/runtime_pin\.env >> "\$GITHUB_ENV"/);
+  assert.match(job, /node ci\/run-native-package-tests\.mjs/);
+  const entry = await fs.readFile(path.join(repoRoot, 'ci/run-native-package-tests.mjs'), 'utf8');
+  assert.match(entry, /colourEnvironment\('build'\)/);
+  assert.match(entry, /'ci\/run-registered-tests\.mjs', 'cj'/);
+  assert.match(entry, /OBJC_PREAMBLE_PRODUCER/);
+  assert.doesNotMatch(job, /continue-on-error|Install official test SDK/);
 });
 
 test('workflow registration requires an invocation, not a comment or echoed command', async () => {
@@ -149,20 +167,20 @@ test('ci.yml runs the manifest rather than a literal file list', async () => {
   // GATING and still not be handed to node if ci.yml has its own list.
   const ci = (await workflows()).get('ci.yml');
   assert.ok(ci, 'ci.yml is missing');
-  assert.match(ci, /ci\/test-manifest\.mjs list/,
+  assert.match(ci, /ci\/contract-shards\.mjs plan/,
     'ci.yml no longer drives its test step from the manifest');
   assert.deepEqual(literalTestArguments(ci), [],
     'ci.yml names test files literally again; drive the list from ci/test-manifest.mjs instead');
   // Without it a hanging test spends the job's whole timeout-minutes and the
   // failure names no test. package-std-integrity.test.mjs hangs in about 8% of
   // batch runs on the shared box, cause unknown, and it is in this list.
-  assert.match(step(ci, 'Test build and release contracts'), /--test-timeout=\d+/,
-    'the test step lost its timeout; a hang would go unattributed for the whole job');
+  assert.match(step(ci, 'Test build and release contracts'), /ci\/contract-shards\.mjs run/);
+  assert.match(await fs.readFile(path.join(repoRoot, 'ci/contract-shards.mjs'), 'utf8'), /--test-timeout=300000/);
 });
 
 test('Verify sources provisions the lineage consumer pin before running contracts', async () => {
   const ci = (await workflows()).get('ci.yml');
-  const lint = ci.slice(ci.indexOf('  lint:'), ci.indexOf('  fixed-llvm-tools:'));
+  const lint = ci.slice(ci.indexOf('  contracts:'), ci.indexOf('  source-audits:'));
   const install = step(lint, 'Install official lineage input');
   assert.match(install, /source ci\/host_sdk_pin\.env/,
     'lineage fixtures must use the same pin as pinnedOfficialSdkRoot');
@@ -196,8 +214,11 @@ test('ci.yml discovers the shell scripts it lints instead of listing them', asyn
 test('no workflow runs a test file the manifest does not gate', async () => {
   const offenders = [];
   for (const [name, text] of await workflows()) {
+    const sourceFiles = sourceGating(name, text);
     for (const file of literalTestArguments(text)) {
-      if (!GATING.includes(file)) offenders.push(`${name} runs ${file}, which is not in GATING`);
+      if (!GATING.includes(file) && !sourceFiles.includes(file)) {
+        offenders.push(`${name} runs ${file}, which is not in its source's GATING`);
+      }
     }
     for (const [, file] of text.matchAll(/(?:python3|bash)\s+([\w./-]+\.(?:py|sh))/g)) {
       if (!/(?:^|\/)test[_.-]|[._-]test\.sh$|\/tests\//.test(file)) continue;
@@ -208,6 +229,19 @@ test('no workflow runs a test file the manifest does not gate', async () => {
   assert.deepEqual(offenders, [], `\n  ${offenders.join('\n  ')}`);
 });
 
+test('fixed-source workflow registration rejects missing or drifting checkout and stays scoped', async () => {
+  const name = 'darwin-input-consumers.yml';
+  const text = (await workflows()).get(name);
+  assert.deepEqual(sourceGating(name, text), ['ci/release/darwin_consumer_boundary.test.mjs']);
+  assert.deepEqual(sourceGating('other.yml', text), []);
+  for (const withValue of [undefined, {ref: 'master'},
+    {ref: '0'.repeat(40)}, {ref: WORKFLOW_TEST_SOURCES[0].source_sha, path: 'other-source'}]) {
+    const parsed = loadYaml(text);
+    parsed.jobs['native-input'].steps[0].with = withValue;
+    assert.throws(() => sourceGating(name, dumpYaml(parsed)), /WORKFLOW_TEST_SOURCE_CHECKOUT/);
+  }
+});
+
 
 test('manifest CLI hands every gating file to the workflow consumer', () => {
   const output = execFileSync(process.execPath, ['ci/test-manifest.mjs', 'list'],
@@ -215,29 +249,67 @@ test('manifest CLI hands every gating file to the workflow consumer', () => {
   assert.deepEqual(output.trim().split('\n'), [...GATING]);
 });
 
-test('workflow list collection preserves every gating file and enforces its floor', async () => {
-  const body = step((await workflows()).get('ci.yml'), 'Test build and release contracts');
-  const run = body.split('run: |\n')[1];
-  const prefix = run.slice(0, run.indexOf('node --test '));
-  const floor = prefix.match(/test "\$\{#FILES\[@\]\}" -ge (\d+)/);
-  assert.equal(Number(floor?.[1]), GATING_FLOOR, 'workflow floor must match the manifest floor');
-  const result = spawnSync('bash', ['-e', '-o', 'pipefail', '-c',
-    `${prefix}\nprintf '%s\\n' "\${FILES[@]}"`], {cwd: repoRoot, encoding: 'utf8'});
-  assert.equal(result.status, 0, `workflow list collection failed: ${result.stderr}`);
-  assert.deepEqual(result.stdout.trim().split('\n').slice(1), [...GATING],
-    'workflow must hand every gating file to node --test');
+test('workflow DAG preserves every manifest file and independently prepares all four groups', async () => {
+  const ci = loadYaml(await fs.readFile(path.join(workflowDir, 'ci.yml'), 'utf8'));
+  const jobs = ci.jobs;
+  assert.deepEqual(jobs.contracts.strategy.matrix.group, Array.from({length: GROUPS}, (_, i) => i));
+  assert.equal(jobs.contracts.strategy['fail-fast'], false);
+  assert.equal(jobs.contracts['runs-on'], 'ubuntu-slim');
+  assert.equal(jobs.contracts['timeout-minutes'], 10);
+  assert.equal(jobs.contracts.needs, 'contract-plan');
+  assert.equal(jobs.lint.name, 'Verify sources');
+  assert.equal(jobs.lint.if, 'always()');
+  assert.deepEqual(jobs.lint.needs, ['static-checks', 'contract-plan', 'contracts', 'source-audits']);
+  assert.ok(jobs.lint.steps.some(s => /job.result!=="success"/.test(s.run || '')));
+  assert.ok(jobs.lint.steps.some(s => /contract-shards.mjs summary/.test(s.run || '')));
+  assert.ok(jobs.contracts.steps.some(s => s.uses?.startsWith('actions/checkout@')));
+  assert.ok(jobs.contracts.steps.some(s => /prepare-runtime-test-input/.test(s.run || '')));
+  assert.ok(jobs.contracts.steps.some(s => /test-zx.mjs prepare/.test(s.run || '')));
+  assert.ok(jobs.contracts.steps.some(s => s.if === 'always()' && s.with?.name === 'contract-group-${{ matrix.group }}'));
+  assert.equal(jobs.contracts['continue-on-error'], undefined);
+  const plan = makePlan([...GATING], {head:'a'.repeat(40),tree:'b'.repeat(40)});
+  assert.deepEqual(validatePlan(plan, [...GATING]).files, [...GATING]);
+  assert.equal(new Set(plan.groups.flatMap(group => group.files)).size, GATING.length);
 });
 
 test('promoted contracts have their CI prerequisites', async () => {
   const ci = (await workflows()).get('ci.yml');
   assert.match(step(ci, 'Install release contract dependencies'), /apt-get install[^\n]*\bpython3\b/);
   assert.match(step(ci, 'Install release contract dependencies'), /apt-get install[^\n]*\bjq\b/);
+  assert.match(step(ci, 'Install release contract dependencies'), /apt-get install[^\n]*\bcmake\b/);
+  assert.match(step(ci, 'Install release contract dependencies'), /apt-get install[^\n]*\bninja-build\b/);
   assert.match(step(ci, 'Test build and release contracts'),
     /RELEASE_EVIDENCE_TEST_ROOT: \$\{\{ runner\.temp \}\}\/release-evidence-tests/);
   for (const file of ['build/test/bootstrap-handoff.test.mjs',
     'build/test/windows-final-compiler.test.mjs', 'build/test/release-evidence.test.mjs',
     'scripts/cjcjcg_aggregate_ctype_gate.test.mjs']) {
     assert.ok(GATING.includes(file), `${file} has its prerequisites and must be gating`);
+  }
+});
+
+test('producer evidence qualification and full smoke artifacts are wired without enabling diagnostics', async () => {
+  const ci = loadYaml(await fs.readFile(path.join(workflowDir, 'ci.yml'), 'utf8'));
+  const contracts = ci.jobs.contracts;
+  const install = contracts.steps.find(s => s.name === 'Install release contract dependencies');
+  for (const dependency of ['build-essential', 'gdb', 'python3', 'git'])
+    assert.ok(install.run.split(/\s+/).includes(dependency), dependency);
+  assert.ok(GATING.includes('ci/producer-evidence.test.mjs'));
+  const run = contracts.steps.find(s => s.name === 'Test build and release contracts');
+  assert.equal(run.env.PRODUCER_EVIDENCE_TEST_ROOT, '${{ runner.temp }}/producer-evidence-tests');
+  const qualification = contracts.steps.find(s => s.name === 'Preserve producer qualification evidence');
+  assert.equal(qualification.if, 'always()');
+  assert.equal(qualification.with.path, run.env.PRODUCER_EVIDENCE_TEST_ROOT);
+  assert.equal(qualification.with['include-hidden-files'], true);
+  const smoke = ci.jobs.build.steps.find(s => s.name === 'Run smoke tests');
+  assert.match(smoke.run, /"\$RUNNER_TEMP\/smoke-tests"/);
+  const upload = ci.jobs.build.steps.find(s => s.name === 'Preserve smoke producer evidence');
+  assert.equal(upload.if, 'always()');
+  assert.equal(upload.with.path, '${{ runner.temp }}/smoke-tests');
+  assert.equal(upload.with['include-hidden-files'], true);
+  assert.equal(upload.with['if-no-files-found'], 'warn');
+  for (const [name, job] of Object.entries(ci.jobs)) {
+    assert.doesNotMatch(JSON.stringify(job.env || {}), /runner\.temp/, `job-level context: ${name}`);
+    assert.doesNotMatch(JSON.stringify(job), /CJCJ_DIAGNOSTIC_CALL/, `normal execution: ${name}`);
   }
 });
 
@@ -255,7 +327,7 @@ test('ci.yml provides the publisher archive tools before running contracts', asy
   // Android package fixtures compile AArch64 objects and link shared libraries.
   assert.match(install, /apt-get install[^\n]*\bclang\b/);
   assert.match(install, /apt-get install[^\n]*\blld\b/);
-  assert.match(install, /npx --yes zx@8 --version/);
+  assert.match(install, /npm exec --yes --package=zx@8 -- node ci\/test-zx\.mjs prepare "\$RUNNER_TEMP\/test-zx\.json"/);
   assert.ok(ci.indexOf('- name: Install release contract dependencies')
     < ci.indexOf('- name: Test build and release contracts'));
 });
@@ -349,12 +421,12 @@ test('the manifest CLI rejects a real unregistered driver and recovers', () => {
     fsSync.writeFileSync(path.join(root, probe), 'import sys\nsys.exit(1)\n');
     const output = path.join(work, 'runner-results');
     const runner = spawnSync(process.execPath,
-      ['ci/run-registered-tests.mjs', 'scripts', output, 'ci/test_build_resources.py'],
+      ['ci/run-registered-tests.mjs', 'scripts', output, 'ci/build-resources.test.mjs'],
       {cwd: repoRoot, encoding: 'utf8'});
     assert.equal(runner.status, 0, `isolated probe polluted the shared runner: ${runner.stdout}${runner.stderr}`);
     const report = JSON.parse(fsSync.readFileSync(path.join(output, 'results.json'), 'utf8'));
-    assert.deepEqual(report.results.map(result => [result.file, result.rc]), [['ci/test_build_resources.py', 0]]);
-    assert.match(fsSync.readFileSync(report.results[0].log, 'utf8'), /ASSERT oversized request capped to measured physical-memory budget/);
+    assert.deepEqual(report.results.map(result => [result.file, result.rc]), [['ci/build-resources.test.mjs', 0]]);
+    assert.match(fsSync.readFileSync(report.results[0].log, 'utf8'), /EFFECTIVE_RESOURCES_OBSERVED/);
     const red = cli();
     assert.notEqual(red.rc, 0, 'the CLI accepted an unregistered test driver');
     assert.match(red.out, /zz-manifest-probe-\d+\/run\.py/);

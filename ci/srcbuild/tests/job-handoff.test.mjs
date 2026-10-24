@@ -139,3 +139,59 @@ test('same-run handoff retains and revalidates explicit runtime authorization an
   assert.equal(await fs.readFile(f.env.GITHUB_ENV, 'utf8'), before);
   console.log('HANDOFF_RUNTIME_TARGET_ASSERT retained-pin-and-authorization=1 missing-permission=rejected');
 });
+
+test('native HLE locations and relative component paths survive the public job handoff', async t => {
+  const f=await fixture(t), native=path.join(f.root,'.srcbuild/native-inputs');
+  const component=path.join(native,'hle');
+  await fs.mkdir(path.join(component,'modules'),{recursive:true});
+  await fs.writeFile(path.join(component,'node'),'controlled node bytes');
+  await fs.writeFile(path.join(component,'cjbind'),'controlled cjbind bytes');
+  const descriptor=path.join(component,'dependencies.json');
+  const input={platform:'linux_x86_64'};
+  for(const key of ['node','modules','cjbind'])input[key]={path:key,version:'fixture',source:'controlled input'};
+  await fs.writeFile(descriptor,JSON.stringify(input));
+  await fs.writeFile(path.join(native,'locations.json'),JSON.stringify({platform:input.platform,hleDependencies:'hle/dependencies.json'}));
+  const configure=path.resolve(import.meta.dirname,'../../bootstrap/hle-input.mjs');
+  const p=spawnSync(process.execPath,[configure,native,input.platform],{env:f.env,encoding:'utf8'});
+  assert.equal(p.status,0,p.stderr);
+  const selected=(await fs.readFile(f.env.GITHUB_ENV,'utf8')).trim().split('=')[1];
+  assert.equal(selected,descriptor);
+  f.env.CJCJ_HLE_DEPENDENCIES=selected;
+  assert.equal(f.run('pack').rc,0);
+  await fs.rename(f.root,f.root+'.producer');await fs.mkdir(f.root);
+  assert.equal(f.run('restore').rc,0);
+  const {readHleDependencies}=await import('../../bootstrap/hle-input.mjs');
+  const resolved=await readHleDependencies(descriptor,input.platform);
+  assert.equal(await fs.readFile(resolved.cjbind.path,'utf8'),'controlled cjbind bytes');
+  assert.equal(resolved.node.path,path.join(component,'node'));
+  assert.equal(resolved.modules.path,path.join(component,'modules'));
+  assert.match(await fs.readFile(f.env.GITHUB_ENV,'utf8'),/CJCJ_HLE_DEPENDENCIES=/);
+  // A descriptor outside the archived closure must not become an apparently
+  // successful handoff merely because its files still exist on this runner.
+  assert.match(f.run('pack',{CJCJ_HLE_DEPENDENCIES:descriptor.replace(f.root,f.root+'.producer')}).output,
+    /outside archived inputs/);
+  const wrong=spawnSync(process.execPath,[configure,native,'darwin_aarch64'],{env:f.env,encoding:'utf8'});
+  assert.equal(wrong.status,1);assert.match(wrong.stderr,/GHA_NATIVE_ARTIFACT_PLATFORM/);
+  console.log('HLE_HANDOFF_REACHED restored-three-paths=1 outside-rejected=1 wrong-platform-rejected=1');
+});
+
+test('public handoff carries native tool dependency locations and rejects an unarchived source',async t=>{
+ const f=await fixture(t),selection={};
+ for(const name of ['json','httplib','runtime','bounds']) {
+  const source=path.join(f.root,'.srcbuild','native-tools',name);await fs.mkdir(source,{recursive:true});
+  await fs.writeFile(path.join(source,'transport.txt'),'finite dependency transport '+name);
+  selection[name]={repo:'fixture://'+name,commit:'a'.repeat(40),path:source};
+ }
+ const descriptor=path.join(f.root,'.srcbuild','native-tool-dependencies.json');
+ await fs.writeFile(descriptor,JSON.stringify(selection));f.env.CJCJ_NATIVE_TOOL_DEPENDENCIES=descriptor;
+ assert.equal(f.run('pack').rc,0);
+ await fs.rm(f.root,{recursive:true});await fs.mkdir(f.root);
+ const restored=f.run('restore');assert.equal(restored.rc,0,restored.output);
+ assert((await fs.readFile(f.env.GITHUB_ENV,'utf8')).includes('CJCJ_NATIVE_TOOL_DEPENDENCIES='+descriptor));
+ assert.deepEqual(JSON.parse(await fs.readFile(descriptor)),selection);
+ for(const [name,row]of Object.entries(selection))assert.equal(await fs.readFile(path.join(row.path,'transport.txt'),'utf8'),'finite dependency transport '+name);
+ const outside=path.join(f.dir,'outside');await fs.mkdir(outside);selection.json.path=outside;
+ await fs.writeFile(descriptor,JSON.stringify(selection));const rejected=f.run('pack');
+ assert.equal(rejected.rc,1);assert.match(rejected.output,/handoff native tool dependency outside archived inputs/);
+ // These are location/byte transport fixtures, not qualified Git producers.
+});

@@ -5,6 +5,18 @@ on:
     branches: [ci/platform-matrix]
   workflow_dispatch:
     inputs:
+      native_sdk_version:
+        description: Fixed package version emitted by srcbuild-target source-package
+        type: string
+      native_sdk_run_id:
+        description: Run producing the native SDK package
+        type: string
+      native_inputs_artifact:
+        description: Complete native N/R/AST installations and paired build adapter artifact
+        type: string
+      native_inputs_run_id:
+        description: Run producing the fixed native input artifact
+        type: string
       darwin_verify_only:
         description: Verify the published Darwin input and source classification
         type: boolean
@@ -49,6 +61,8 @@ env:
   # "Load runtime pin" step — the pin lives in exactly one file.
   RUNTIME_VERSION: 1.2.0-alpha.20260721165458
   CJ_HEAP_SIZE: 12GB
+  CANGJIE_WORKSPACE: ${{ github.workspace }}/.srcbuild
+  CJCJ_NATIVE_INPUT_ROOT: ${{ github.workspace }}/.srcbuild/native-inputs
 
 jobs:
   matrix-plan:
@@ -172,8 +186,23 @@ jobs:
           require-compiles: ${{ job.status == 'success' }}
   colour-runtime:
     if: ${{ !inputs.std_evidence_only && !inputs.darwin_runtime_only && !inputs.darwin_host_only && !inputs.darwin_verify_only }}
-    name: Pinned Linux colour runtime
-    runs-on: ubuntu-22.04
+    name: Pinned Linux colour runtime (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            platform: linux_x86_64
+            target: linux-x64
+            diagnostics: colour-runtime-gate-diagnostics
+          - runner: ubuntu-22.04-arm
+            platform: linux_aarch64
+            target: linux-aarch64
+            diagnostics: colour-runtime-gate-diagnostics-linux_aarch64
+    env:
+      COLOUR_RT_PLATFORM: ${{ matrix.platform }}
+      PLATFORM_TUPLE: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v7
       - name: Load runtime pin
@@ -186,15 +215,20 @@ jobs:
       - uses: ./.github/actions/sccache
         with:
           component: runtime
-          platform: ubuntu-22.04
+          platform: ${{ matrix.runner }}
           pin: ${{ env.RUNTIME_REF }}
           cache-size: 1G
-      - name: Fetch pinned H48 language tuple
+      - name: Receive packaged native SDK
+        uses: actions/download-artifact@v8
+        with:
+          name: cjcj-srcbuild-${{ matrix.target }}-${{ inputs.native_sdk_version || vars.CJCJ_NATIVE_SDK_VERSION }}
+          run-id: ${{ inputs.native_sdk_run_id || vars.CJCJ_NATIVE_SDK_RUN_ID }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/native-sdk-artifact
+      - name: Verify and select installed native SDK
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          python3 ci/release/publish_language_tuple.py fetch \
-            --pin ci/h48_language_tuple_pin.json --output "$RUNNER_TEMP/h48-download"
+          CJCJ_NATIVE_SDK_VERSION: ${{ inputs.native_sdk_version || vars.CJCJ_NATIVE_SDK_VERSION }}
+        run: node ci/release/receive_native_sdk.mjs "$RUNNER_TEMP/native-sdk-artifact" "$RUNNER_TEMP/native-sdk" "${{ matrix.target }}"
       - name: Provision native gate debugger
         run: |
           sudo apt-get update -qq
@@ -209,37 +243,29 @@ jobs:
         run: |
           source ci/platform_matrix/runtime_core_setup.sh || echo "::warning::Core setup incomplete; see setup.log"
           npx --yes zx@8 ci/platform_matrix/build_runtime.mjs
-      - name: Complete gate with pinned language tuple and same-build target
+      - name: Complete gate with native installed SDK and same-build target
         run: |
           npx --yes zx@8 ci/release/gate_colour_runtime.mjs runtime-source \
-            "$RUNNER_TEMP/h48-download/installed/tuple" "$RUNNER_TEMP/h48-active" \
-            .platform-ci/runtime-install
-      - name: Load same-generation AST SDK inputs
-        run: cat ci/ast_support/linux_x86_64.env >> "$GITHUB_ENV"
-      - name: Download verified prerelease input
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: node ci/release/download_pinned.mjs cjcj-dev/cjcj "${{ env.AST_SUPPORT_ARTIFACT_ID }}" "${{ runner.temp }}/ast-support"
-      - name: Rebuild and install alpha.06 std with coloured cjc
-        run: |
-          bash ci/release/build_colour_std.sh runtime-source "$RUNNER_TEMP/h48-active" \
-            "$RUNNER_TEMP/ast-support" .platform-ci/runtime-install
+            "$CJCJ_TARGET_SDK" "$RUNNER_TEMP/native-active" .platform-ci/runtime-install
       - name: Package same-build runtime pair
         id: package
         run: |
           # Use the exact published pair selected and verified by the gate.
           # The output layout also retains staging and earlier configurations.
-          source "$RUNNER_TEMP/h48-active.env"
-          cp "$GCV2_RUNTIME_LIB_DIR/libboundscheck.so" .platform-ci/runtime-install/runtime/lib/linux_x86_64_cjnative/libboundscheck.so
-          node ci/release/colour_runtime.mjs .platform-ci/runtime-install colour-runtime
-          nm --defined-only colour-runtime/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so > colour-runtime/symbols.txt
+          source "$RUNNER_TEMP/native-active.env"
+          cp "$GCV2_RUNTIME_LIB_DIR/libboundscheck.so" ".platform-ci/runtime-install/runtime/lib/${COLOUR_RT_PLATFORM}_cjnative/libboundscheck.so"
+          node ci/release/colour_runtime.mjs "$CJCJ_TARGET_SDK" colour-runtime
+          so="colour-runtime/runtime/lib/${COLOUR_RT_PLATFORM}_cjnative/libcangjie-runtime.so"
+          sha256sum "$so" "colour-runtime/runtime/lib/${COLOUR_RT_PLATFORM}_cjnative/libboundscheck.so"
+          nm --defined-only "$so" > colour-runtime/symbols.txt
           test "$(grep -Ec ' g_cjLoadBadMask(@@?[^[:space:]]+)?$' colour-runtime/symbols.txt)" = 1
-          nm -D --defined-only colour-runtime/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so > colour-runtime/exports.txt
+          test "$(grep -Ec ' CJ_MCC_HandleReturnSafepoint(@@?[^[:space:]]+)?$' colour-runtime/symbols.txt)" = 1
+          nm -D --defined-only "$so" > colour-runtime/exports.txt
           test "$(grep -Ec ' g_cjLoadBadMask(@@?[^[:space:]]+)?$' colour-runtime/exports.txt)" = 1
       - uses: actions/upload-artifact@v7
         id: artifact
         with:
-          name: colour-runtime-linux_x86_64
+          name: colour-runtime-${{ matrix.platform }}
           path: colour-runtime/
           if-no-files-found: error
           retention-days: 7
@@ -259,7 +285,7 @@ jobs:
         uses: ./.github/actions/sccache-report
         with:
           component: runtime
-          platform: ubuntu-22.04
+          platform: ${{ matrix.runner }}
           require-compiles: ${{ job.status == 'success' }}
 
       - name: Report runtime gate log availability
@@ -280,11 +306,10 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: colour-runtime-gate-diagnostics
+          name: ${{ matrix.diagnostics }}
           path: |
             ci/runtime_pin.env
-            ci/h48_language_tuple_pin.json
-            ${{ runner.temp }}/h48-active.env
+            ${{ runner.temp }}/native-active.env
             ${{ steps.runtime-build.outcome == 'failure' && '.platform-ci/runtime-gate-diagnostics/' || '' }}
             runtime-source/runtime/**/gate_run.log
             runtime-source/runtime/**/gc_unit_gate.status
@@ -336,7 +361,9 @@ jobs:
 
       - name: Load host toolchain pin
         shell: bash
-        run: cat ci/cjpm_pin.env >> "$GITHUB_ENV"
+        run: |
+          cat ci/cjpm_pin.env >> "$GITHUB_ENV"
+          node ci/host-toolchain-pin.mjs --github-env >> "$GITHUB_ENV"
 
       - name: Load runtime pin
         shell: bash
@@ -432,6 +459,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TUPLE_ARTIFACT_DIR: ${{ runner.temp }}/current-run-fixed-llvm
         run: npx --yes zx@8 ci/platform_matrix/fetch_llvm_tuple.mjs
+
+      - name: Receive native SDK producer inputs
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ inputs.native_inputs_artifact || vars.CJCJ_NATIVE_INPUTS_ARTIFACT }}-${{ matrix.target }}
+          run-id: ${{ inputs.native_inputs_run_id || vars.CJCJ_NATIVE_INPUTS_RUN_ID }}
+          github-token: ${{ github.token }}
+          path: ${{ github.workspace }}/.srcbuild/native-inputs
 
       - name: Official SDK provision (Windows)
         if: always() && runner.os == 'Windows'

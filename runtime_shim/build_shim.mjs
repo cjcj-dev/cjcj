@@ -11,11 +11,12 @@ $.stdio = 'inherit';
 // $'...', so a raw Windows path like D:\a\... reaches cc with \a as BEL.
 const norm = (p) => p.replaceAll('\\', '/');
 const here = norm(import.meta.dirname);
-const cpp = norm(process.env.CANGJIE_CPP_SRC || '/root/cj_build/cangjie_compiler');
+const cpp = norm(process.env.CANGJIE_CPP_SRC || '');
 const llvmSrcInc = `${cpp}/third_party/llvm-project/llvm/include`;
 const llvmGenInc = `${cpp}/build/build/third_party/llvm/include`;
 const flatbuffersInc = `${cpp}/build/build/include`;
 const schemaGenInc = `${cpp}/build/build/schema`;
+const schemaHeader = `${schemaGenInc}/flatbuffers/CjoFormat_generated.h`;
 let cxx = process.env.CXX || 'clang++';
 const cc = process.env.CC || 'cc';
 // The same launcher cmake-driven builds use (sccache on GitHub Actions), so the
@@ -54,67 +55,51 @@ async function isFile(target) {
   try { return (await fs.stat(target)).isFile(); } catch { return false; }
 }
 
-async function mtimeMs(target) {
-  try { return (await fs.stat(target)).mtimeMs; } catch { return null; }
-}
-
-// An object older than the source it was compiled from links silently: the
-// symbols still resolve, so nothing fails and the build looks clean. Treat a
-// stale object as absent so it falls through to the rebuild paths below, and
-// let the final else report it if none of them can produce one.
-async function isUsableObject(object, source) {
-  if (!(await isFile(object))) return false;
-  const objectAge = await mtimeMs(object);
-  const sourceAge = await mtimeMs(source);
-  if (objectAge === null || sourceAge === null) return true;
-  if (objectAge >= sourceAge) return true;
-  console.error(`STALE_SHIM_OBJECT object=${object} is older than source=${source}`);
-  console.error(`  object mtime ${new Date(objectAge).toISOString()}`);
-  console.error(`  source mtime ${new Date(sourceAge).toISOString()}`);
-  return false;
-}
-
-if (!(await commandExists(cxx)) && await commandExists('clang++-15')) cxx = 'clang++-15';
-
 await $`${ccLauncher} ${cc} -std=c11 -O2 -fPIC -D_POSIX_C_SOURCE=200809L ${commitDefine} -c ${here}/cjc_runtime_config.c -o ${here}/cjc_runtime_config.o`;
 console.log(`CJCJ_COMMIT=${cjcjCommit}`);
 
-// Resolve in the original priority order: existing object, CI source-built
-// artifact, then a local source build against a complete patched C++ tree.
-let reused = false;
-if (await isUsableObject(shimObject, `${here}/cjselfhost_llvmshim.cpp`)) {
-  console.log('reusing existing cjselfhost_llvmshim.o');
-  reused = true;
-} else if (sourceBuiltObject) {
+// The caller validates an explicitly selected installed object. Without one,
+// always compile the current translation unit against the selected header tree.
+// A local .o can belong to a previous tuple even when it has a newer mtime;
+// content caching belongs to the compiler launcher, not to this selection.
+if (sourceBuiltObject) {
   if (!(await isFile(sourceBuiltObject))) {
     console.error(`ERR: source-built shim artifact missing: ${sourceBuiltObject}`);
     process.exit(1);
   }
-  await $`cp ${sourceBuiltObject} ${shimObject}`;
-  console.log(`used source-built shim artifact: ${sourceBuiltObject}`);
-} else if (await isDirectory(flatbuffersInc) && await isDirectory(`${schemaGenInc}/flatbuffers`)) {
-  let llvmIncludeArgs;
-  if (await isDirectory(llvmSrcInc) && await isDirectory(llvmGenInc)) {
-    llvmIncludeArgs = [`-I${llvmSrcInc}`, `-I${llvmGenInc}`];
-  } else if (await commandExists('llvm-config-15')) {
-    const includedir = (await $({stdio: 'pipe'})`llvm-config-15 --includedir`).stdout.trim();
-    llvmIncludeArgs = [`-I${includedir}`];
-  } else {
-    console.error('ERR: LLVM 15 headers not found (needed only to compile the shim from source)');
-    process.exit(1);
+  if (path.resolve(sourceBuiltObject) !== path.resolve(shimObject)) {
+    await fs.copyFile(sourceBuiltObject, shimObject);
   }
-  await $`${cxxLauncher} ${cxx} -std=c++17 -O2 -fPIC -fno-rtti -fno-exceptions -c ${here}/cjselfhost_llvmshim.cpp -o ${shimObject} ${llvmIncludeArgs} ${`-I${flatbuffersInc}`} ${`-I${schemaGenInc}`}`;
+  console.log(`used source-built shim artifact: ${sourceBuiltObject}`);
+  console.log(`selected: ${shimObject}`);
 } else {
-  console.error('ERR: cannot obtain cjselfhost_llvmshim.o — none of: (1) a pre-existing local .o,');
-  console.error('     (2) CJCJ_LLVM_SHIM_O from the source-build artifact, (3) a complete patched');
-  console.error('     LLVM/Cangjie C++ build tree for a local source compile is available.');
-  process.exit(1);
+  if (!cpp) {
+    throw new Error('ERR: CANGJIE_CPP_SRC is required to compile the shim from selected headers');
+  }
+  for (const includeRoot of [llvmSrcInc, llvmGenInc, flatbuffersInc]) {
+    if (!(await isDirectory(includeRoot))) {
+      throw new Error(`ERR: selected shim header directory missing: ${includeRoot}`);
+    }
+  }
+  for (const header of [schemaHeader, `${llvmSrcInc}/llvm/IR/Module.h`,
+    `${llvmGenInc}/llvm/Config/llvm-config.h`]) {
+    if (!(await isFile(header))) {
+      throw new Error(`ERR: selected shim header missing: ${header}`);
+    }
+  }
+  // Respect an explicitly selected compiler. A default compiler may use its
+  // versioned executable name; LLVM headers never fall back to llvm-config.
+  if (!process.env.CXX && !(await commandExists(cxx)) && await commandExists('clang++-15')) {
+    cxx = 'clang++-15';
+  }
+  const compileEnv = {...process.env};
+  for (const key of ['CPATH', 'CPLUS_INCLUDE_PATH', 'C_INCLUDE_PATH', 'OBJC_INCLUDE_PATH']) {
+    compileEnv[key] = '';
+  }
+  await $({env: compileEnv})`${cxxLauncher} ${cxx} -std=c++17 -O2 -fPIC -fno-rtti -fno-exceptions -c ${here}/cjselfhost_llvmshim.cpp -o ${shimObject} ${`-I${llvmSrcInc}`} ${`-I${llvmGenInc}`} ${`-I${flatbuffersInc}`} ${`-I${schemaGenInc}`}`;
+  console.log(`built: ${shimObject}`);
 }
 
-// Say which of the two happened. The previous message said "built:" on the
-// reuse path too, so a log showing a fresh build and a log showing a month-old
-// object read the same.
-console.log(`${reused ? 'reused' : 'built'}: ${shimObject}`);
 console.log(`built: ${here}/cjc_runtime_config.o`);
 await $({nothrow: true})`set -o pipefail; nm -C ${shimObject} | grep -cE ' T (LLVMGlobalObjectAddStringAttribute|LLVMSelfhost)' | sed 's/^/exported LLVMSelfhost* symbols: /'`;
 

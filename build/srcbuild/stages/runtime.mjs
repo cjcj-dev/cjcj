@@ -1,6 +1,12 @@
 // Port of cangjie-build/src/cangjie_build/stages/runtime.py.
 
 import path from 'node:path';
+import fs from 'node:fs/promises';
+import {runtimeSourceRepository,RUNTIME_INPUTS} from '../../lib/runtime-source-inputs.mjs';
+import {receiveNativeRuntime} from '../../../ci/bootstrap/native-runtime-input.mjs';
+import {prepareRuntimeInputs} from '../../../ci/bootstrap/sdk-native-stage.mjs';
+import {sdkPlatform} from '../../../ci/bootstrap/sdk-platform.mjs';
+import {hostPlatform} from '../../../ci/host-toolchain-pin.mjs';
 import {stage} from '../../lib/logging.mjs';
 import {assertRuntimeSplit} from '../../lib/runtime-split.mjs';
 import {
@@ -8,7 +14,7 @@ import {
   finishGcUnitLanguageDeferral,
   gcUnitRuntimeBuildEnv,
 } from '../gc-unit-gate.mjs';
-import {copyContents, ensureDir, runBuildPy, windowsCrossArgs} from './common.mjs';
+import {bootstrapHostSdk, copyContents, ensureDir, runBuildPy, windowsCrossArgs} from './common.mjs';
 
 export async function run(config) {
   const runtimeRoot = path.join(config.repoPath('runtime'), 'runtime');
@@ -16,9 +22,26 @@ export async function run(config) {
   const compilerOutput = path.join(config.repoPath('compiler'), 'output');
 
   await stage('runtime', async () => {
-    beginGcUnitLanguageDeferral(config, runtimeRoot, compilerOutput);
+    if (config.nativeRuntime) {
+      const selected=config.nativeRuntime;
+      if (!selected.hostVersion || config.target.spec.crossCompile) throw new Error('RUNTIME_COMPONENT_NATIVE_PAIR_REQUIRED');
+      const input = await receiveNativeRuntime({root:selected.install,
+        sourceRoot:selected.sourceRoot,
+        sourceRepository:config.sources.runtime.repository, platform:hostPlatform(),
+        llvmCommit:selected.llvmCommit,runtimeCommit:selected.runtimeCommit,hostVersion:selected.hostVersion,
+        work:path.join(config.workspace,'native-runtime-consumer')});
+      for (const subdirectory of ['lib','runtime',...(config.target.spec.os==='linux'?['share/runtime-build']:[])])
+        copyContents(path.join(input.install,subdirectory),path.join(compilerOutput,subdirectory),{stage:'runtime.adopt.native'});
+      await fs.copyFile(path.join(input.install,RUNTIME_INPUTS),path.join(compilerOutput,RUNTIME_INPUTS));
+      // The legacy stdlib stage consumes this build input snapshot. Reuse the
+      // native SDK adapter without rebuilding or mutating the R installation.
+      await prepareRuntimeInputs({runtime:input.install,link:targetDir,
+        native:sdkPlatform(hostPlatform()),buildType:config.buildType});
+      assertRuntimeSplit({hostSdk:bootstrapHostSdk(config),targetSdk:compilerOutput,target:config.target});
+      return;
+    }
+    if (process.env.CANGJIE_BUILD_DRY_RUN !== '1') beginGcUnitLanguageDeferral(config, runtimeRoot, compilerOutput);
     ensureDir(targetDir);
-    await runBuildPy(config, runtimeRoot, ['clean'], {stageName: 'runtime.clean.host'});
     await runBuildPy(config, runtimeRoot, [
       'build', '--target', 'native', '-t', config.buildType, '-v', config.cangjieVersion,
     ], {
@@ -36,11 +59,11 @@ export async function run(config) {
         stage: 'runtime.copy.host',
       });
     }
-    finishGcUnitLanguageDeferral(config, runtimeRoot, compilerOutput);
+    if (process.env.CANGJIE_BUILD_DRY_RUN !== '1') finishGcUnitLanguageDeferral(config, runtimeRoot, compilerOutput);
     if (!config.target.spec.crossCompile) {
       if (process.env.CANGJIE_BUILD_DRY_RUN !== '1') {
         assertRuntimeSplit({
-          hostSdk: process.env.CJCJ_SRCBUILD_HOST_SDK,
+          hostSdk: bootstrapHostSdk(config),
           targetSdk: compilerOutput,
           target: config.target,
         });
@@ -48,7 +71,6 @@ export async function run(config) {
       return;
     }
 
-    await runBuildPy(config, runtimeRoot, ['clean'], {stageName: 'runtime.clean.windows'});
     await runBuildPy(config, runtimeRoot, [
       'build', '-t', config.crossBuildType,
       ...windowsCrossArgs(config, {sysroot: false}),
@@ -71,7 +93,7 @@ export async function run(config) {
     }
     if (process.env.CANGJIE_BUILD_DRY_RUN !== '1') {
       assertRuntimeSplit({
-        hostSdk: process.env.CJCJ_SRCBUILD_HOST_SDK,
+        hostSdk: bootstrapHostSdk(config),
         targetSdk: compilerOutput,
         target: config.target,
       });

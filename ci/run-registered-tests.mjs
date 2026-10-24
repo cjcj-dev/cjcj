@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env zx
 import {spawn, spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import fs from 'node:fs';
@@ -35,7 +35,8 @@ export async function runScripts(root, entries, output) {
       const temporary = path.join(directory, 'tmp');
       fs.mkdirSync(temporary, {recursive: true});
       const args = entry.args.map(arg => arg.replaceAll('{output}', path.join(directory, 'output')));
-      const result = await execute([entry.executor, entry.file, ...args], root, directory,
+      const command = entry.executor === 'zx' ? ['npx', '--yes', 'zx@8', entry.file, ...args] : [entry.executor, entry.file, ...args];
+      const result = await execute(command, root, directory,
         {...process.env, TMPDIR: temporary, PYTHONDONTWRITEBYTECODE: '1'});
       results[index] = {file: entry.file, sha256: digest(path.join(root, entry.file)), ...result};
       console.log(`TEST_RESULT file=${entry.file} rc=${result.rc} log=${result.log}`);
@@ -114,6 +115,23 @@ export function cangjieCommand(sdk, output, selection) {
   return command;
 }
 
+export function cangjieEnvironment(sdk, inherited = process.env) {
+  return {...inherited,
+    PATH: [path.join(sdk, 'bin'), path.join(sdk, 'tools/bin'), inherited.PATH].filter(Boolean).join(path.delimiter),
+    LD_LIBRARY_PATH: [path.join(sdk, 'third_party/llvm/lib'),
+      path.join(sdk, 'runtime/lib/linux_x86_64_cjnative'), path.join(sdk, 'tools/lib'),
+      inherited.LD_LIBRARY_PATH].filter(Boolean).join(path.delimiter)};
+}
+
+// All workspace cjpm children use the same SDK loading domain. Export this
+// execution boundary so bounded integrations can exercise real member targets
+// without broadening the registered CLI's directed-selection contract.
+export async function executeCangjie(command, root, output, sdk, inherited = process.env) {
+  const env = cangjieEnvironment(sdk, inherited);
+  const result = await execute(command, root, output, env);
+  return {...result, loadingDomain: env.LD_LIBRARY_PATH};
+}
+
 export function inspectTargetReports(files, cases) {
   // The producer already requires Python; use its standard XML parser rather
   // than accepting a nonempty directory as evidence that selected cases ran.
@@ -140,7 +158,7 @@ export async function runCangjie(root, entries, output, selection) {
   if (!sdk) throw new Error('CANGJIE_HOME must identify the pinned official host SDK');
   const inputs = ['bin/cjc', 'tools/bin/cjpm',
     'runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so',
-    'runtime/lib/linux_x86_64_cjnative/libboundscheck.so'];
+    'runtime/lib/linux_x86_64_cjnative/libboundscheck.so', 'third_party/llvm/lib/libLLVM-15.so'];
   const identities = Object.fromEntries(inputs.map(file => [file, digest(path.join(sdk, file))]));
   const command = cangjieCommand(sdk, output, selection);
   let qualified;
@@ -173,9 +191,9 @@ export async function runCangjie(root, entries, output, selection) {
   }
   const temporary = path.join(output, 'tmp');
   fs.mkdirSync(temporary, {recursive: true});
-  const env = {...process.env, PATH: [path.join(sdk, 'bin'), path.join(sdk, 'tools/bin'), process.env.PATH].filter(Boolean).join(path.delimiter),
+  const env = {...process.env,
     TMPDIR: temporary, OBJC_PREAMBLE_IMPORTS: path.join(fixture, 'imports')};
-  const result = await execute(command, root, output, env);
+  const result = await executeCangjie(command, root, output, sdk, env);
   const reports = path.join(output, 'reports');
   const reportFiles = fs.existsSync(reports) ? fs.readdirSync(reports, {recursive: true}).filter(file => file.endsWith('.xml')) : [];
   let selectedCases;
@@ -197,7 +215,7 @@ export async function main(argv) {
   const selection = group === 'cj' ? parseCangjieSelection(parameters) : undefined;
   if (!['scripts', 'cj'].includes(group) || !destination) throw new Error('usage: run-registered-tests.mjs scripts|cj NEW_OUTPUT_DIR [test-file]');
   validateManifest();
-  const entries = REGISTERED.filter(entry => group === 'cj' ? entry.executor === 'cjpm' : ['python3', 'bash'].includes(entry.executor))
+  const entries = REGISTERED.filter(entry => group === 'cj' ? entry.executor === 'cjpm' : ['python3', 'bash', 'zx'].includes(entry.executor))
     .filter(entry => !only || entry.file === only);
   if (!entries.length || (group === 'cj' && only)) throw new Error('empty or unsupported test selection');
   const output = path.resolve(destination);

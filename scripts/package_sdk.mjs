@@ -578,7 +578,8 @@ if (stdDir) {
       process.exit(3);
     }
     // Suffix follows the TUPLE, not this package's own platform.
-    const crossShared = tuple.includes('windows') ? '.dll' : tuple.includes('darwin') ? '.dylib' : '.so';
+    const crossShared = tuple.includes('windows') ? '.dll'
+      : tuple.includes('darwin') || tuple.startsWith('ios_') ? '.dylib' : '.so';
     const src = {
       modulesStd: path.join(root, 'modules', tuple, 'std'),
       modulesTop: path.join(root, 'modules', tuple),

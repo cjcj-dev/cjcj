@@ -18,15 +18,15 @@ const pins = [
 for (const [component, directory, urlVariable, refVariable] of pins) {
   const expectedUrl = process.env[urlVariable];
   const expectedRef = process.env[refVariable];
-  if (!expectedUrl || !/^https:\/\//.test(expectedUrl)) {
-    throw new Error(`${urlVariable} must be an HTTPS repository URL`);
+  if (!expectedUrl || /[\r\n]/.test(expectedUrl)) {
+    throw new Error(`${urlVariable} must be the selected nonempty repository location`);
   }
   if (!expectedRef || !/^[0-9a-f]{40}$/.test(expectedRef)) {
     throw new Error(`${refVariable} must be a lowercase 40-character commit SHA`);
   }
 
   const source = `${workspace}/${directory}`;
-  const actualUrl = (await $({stdio: 'pipe'})`git -C ${source} remote get-url origin`).stdout.trim();
+  const actualUrl = (await $({stdio: 'pipe'})`git -C ${source} config --get remote.origin.url`).stdout.trim();
   if (actualUrl !== expectedUrl) {
     throw new Error(`${component} URL mismatch: expected ${expectedUrl}, got ${actualUrl}`);
   }

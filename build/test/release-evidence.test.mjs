@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
+import {readFileSync} from 'node:fs';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import test from 'node:test';
@@ -15,20 +16,18 @@ import {
   REVIEWED_GATE_HOST_TOOLCHAIN,
 } from '../lib/release-gate-apparatus.mjs';
 
+import {getReleasePlatform} from '../lib/targets.mjs';
+import {load as loadYaml} from '../../ci/vendor/js-yaml/js-yaml.mjs';
+
 const VERSION = '0.0.2';
 const RUN_ID = 42420002;
-const PLATFORMS = [
-  'linux-x64',
-  'linux-aarch64',
-  'darwin-x64',
-  'darwin-arm64',
-  'windows-x64',
-  'linux-x64-android',
-  'darwin-arm64-android',
-  'win32-x64-android',
-];
-const HOSTS = {'linux-x64-android': 'linux-x64', 'darwin-arm64-android': 'darwin-arm64', 'win32-x64-android': 'windows-x64'};
-const hostFor = platform => HOSTS[platform] || platform;
+// Keep all declared platform obligations, including blocked source recipes.
+const RELEASE_WORKFLOW = loadYaml(readFileSync('.github/workflows/release.yml', 'utf8'));
+const CONTRACTS = Object.values(RELEASE_WORKFLOW.jobs)
+  .filter(job => job.uses === './.github/workflows/build-release-package.yml')
+  .map(job => getReleasePlatform(job.with.release_key));
+const PLATFORMS = CONTRACTS.map(p => p.archiveKey);
+const hostFor = platform => CONTRACTS.find(p => p.archiveKey === platform).host;
 const COMPONENTS = [
   'base-sdk', GATE_APPARATUS_COMPONENT, 'cjcj', 'runtime', 'llvm-llc', 'llvm-opt', 'std', 'cjpm', 'python',
 ];
@@ -117,14 +116,20 @@ async function fixture() {
     head_sha: '0123456789abcdef0123456789abcdef01234567',
   };
   const recorded = JSON.parse(await fs.readFile(new URL('./fixtures/release-evidence/run-36311262568.jobs.json', import.meta.url)));
-  const jobs = recorded.jobs.filter(job => !job.name.includes('-ohos / Build release package')).map(job => ({...job}));
+  const jobs = recorded.jobs.filter(job => !job.name.endsWith(' / Build release package')).map(job => ({...job}));
   for (const job of jobs) {
-    if (job.name.endsWith(' / Build release package')) {
-      const platform = job.name.split(' / ')[0].replace(/^phase \d+ · /, '');
-      job.name += ` / ${hostFor(platform)} / Build release package`;
-    }
     if (job.name !== 'Publish release' && !job.name.endsWith(' / in-process-dylib') &&
         !job.name.endsWith(' / Publish static colour LLVM tuple')) job.conclusion = 'success';
+  }
+  // Package job names come from the actual caller and callee, independently
+  // of the archive consumer's naming/uniqueness logic.
+  const workflow = loadYaml(await fs.readFile('.github/workflows/release.yml', 'utf8'));
+  const callee = loadYaml(await fs.readFile('.github/workflows/build-release-package.yml', 'utf8'));
+  const calleeJob = Object.values(callee.jobs).find(job => job.name?.includes('Build release package'));
+  let id = 100000;
+  for (const job of Object.values(workflow.jobs).filter(job => job.uses === './.github/workflows/build-release-package.yml')) {
+    const name = `${job.name} / ${calleeJob.name.replace('${{ inputs.platform }}', job.with.platform)}`;
+    jobs.push({id: ++id, name, conclusion: 'success', html_url: `https://github.com/cjcj-dev/cjcj/actions/runs/${RUN_ID}/job/${id}`});
   }
   await fs.writeFile(path.join(source, 'run.json'), `${JSON.stringify(runMetadata, null, 2)}\n`);
   await fs.writeFile(path.join(source, 'jobs.json'), `${JSON.stringify({total_count: jobs.length, jobs}, null, 2)}\n`);
@@ -176,15 +181,16 @@ async function resealJobs(archive, jobs) {
   await fs.writeFile(ledger, text);
 }
 
-test('archives and verifies all eight release cells with optional skips', async () => {
+test('archives and verifies all declared release cells with optional skips', async () => {
   const {source, archive, missingLogs} = await fixture();
   const collected = collect(source, archive);
   assert.equal(collected.status, 0, collected.stderr);
   const verified = run(['verify', '--archive', archive, '--version', VERSION]);
-  console.log(`TARGET_EIGHT_VERIFY rc=${verified.status} ${verified.stdout.trim()}`);
+  console.log(`TARGET_DECLARED_VERIFY rc=${verified.status} ${verified.stdout.trim()}`);
   assert.equal(verified.status, 0, verified.stderr);
-  assert.match(verified.stdout, /manifests=8 checksums=8/);
+  assert.ok(verified.stdout.includes(`manifests=${PLATFORMS.length} checksums=${PLATFORMS.length}`), verified.stdout);
   const index = JSON.parse(await fs.readFile(path.join(archive, 'ARCHIVE_INDEX.json')));
+  console.log(`ARCHIVE_PLATFORM_ASSERT expected=${JSON.stringify(PLATFORMS)} actual=${JSON.stringify(index.platforms.map(p => p.name))}`);
   assert.deepEqual(index.platforms.map(p => p.name).sort(), [...PLATFORMS].sort());
   await fs.cp(archive, missingLogs, {recursive: true});
   await fs.rm(path.join(missingLogs, 'logs'), {recursive: true});
@@ -247,7 +253,7 @@ test('accepts optional LLVM success as well as skipped', async () => {
   assert.equal(result.status, 0, result.stderr);
 });
 
-for (const platform of ['linux-x64-android', 'darwin-arm64-android', 'win32-x64-android']) {
+for (const platform of CONTRACTS.filter(p => p.archiveKey !== p.host).map(p => p.archiveKey)) {
   test(`requires ${platform} manifest and checksum`, async () => {
     const {source, archive} = await fixture();
     const directory = path.join(source, 'artifacts', `pkg-${platform}`);
@@ -262,11 +268,11 @@ for (const platform of ['linux-x64-android', 'darwin-arm64-android', 'win32-x64-
   });
 }
 
-test('runbook jq accepts exactly the buildable artifact set', async () => {
+test('runbook jq accepts exactly the declared artifact set', async () => {
   const {work} = await fixture();
   const runbook = await fs.readFile('ops/coord/RELEASE_0_0_2_RUNBOOK.md', 'utf8');
   const start = runbook.indexOf('EXPECTED_PACKAGES=$(');
-  const endMarker = `' "$RELEASE_DIR/artifacts.review.json"`;
+  const endMarker = 'test "$(cut -f4 "$RELEASE_DIR/artifact-ids.review.tsv" | sort -u)" = false';
   const end = runbook.indexOf(endMarker, start) + endMarker.length;
   assert.ok(start >= 0 && end > start, 'runbook artifact audit snippet exists');
   const script = runbook.slice(start, end);
@@ -283,7 +289,7 @@ test('runbook jq accepts exactly the buildable artifact set', async () => {
   assert.notEqual((await audit([...artifacts, artifacts[0]])).status, 0, 'duplicate');
   assert.notEqual((await audit(artifacts.map((a, i) => i === 0 ? {...a, expired: true} : a))).status, 0, 'expired');
   assert.notEqual((await audit(artifacts.map((a, i) => i === 0 ? {...a, digest: ''} : a))).status, 0, 'digest');
-  console.log('TARGET_RUNBOOK eight accepted; eight missing, duplicate, expired, empty digest rejected');
+  console.log(`TARGET_RUNBOOK ${PLATFORMS.length} accepted; every missing, duplicate, expired, empty digest rejected`);
 });
 
 for (const [host, phase] of [['linux-x64', 1], ['linux-aarch64', 2], ['darwin-arm64', 4], ['darwin-x64', 5]]) {

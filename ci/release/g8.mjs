@@ -6,7 +6,10 @@ import path from 'node:path';
 import os from 'node:os';
 import {spawn, execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
-import {fileSha256, pinnedOfficialSdkRoot} from '../../build/lib/package-lineage.mjs';
+import {fileSha256, pinnedOfficialSdkRoot, readHostSdkPinToolchain} from '../../build/lib/package-lineage.mjs';
+import {resolveOfficialSdkRoot} from '../../build/lib/config.mjs';
+import {hostPlatform, hostToolchainFromCjcVersion} from '../host-toolchain-pin.mjs';
+import {cleanSdkEnvironment} from '../bootstrap/sdk-platform.mjs';
 import {buildFullGateFloor} from '../../build/lib/full-gate-floor-schema.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -90,9 +93,14 @@ export async function main(argv) {
   if (process.platform !== 'linux' || process.arch !== 'x64') throw new Error('G8 corpus tools require linux-x64');
   const sdk = path.resolve(options['--sdk']);
   const out = path.resolve(options['--out']);
-  const official = await pinnedOfficialSdkRoot();
+  const official = resolveOfficialSdkRoot() ?? await pinnedOfficialSdkRoot();
   const compiler = path.join(sdk, 'bin/cjc');
   const reference = path.join(official, 'bin/cjc');
+  const expectedHost = await readHostSdkPinToolchain();
+  const actualHost = hostToolchainFromCjcVersion(execFileSync(reference, ['--version'], {
+    encoding: 'utf8', env: cleanSdkEnvironment(official, hostPlatform()), timeout: 30000,
+  }));
+  if (actualHost !== expectedHost) throw new Error(`host SDK version mismatch: root=${official} expected=${expectedHost} actual=${actualHost}`);
   const sha = execFileSync('git', ['rev-parse', 'HEAD'], {cwd: repo, encoding: 'utf8'}).trim();
   const captured = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
   const campaign = options['--campaign-id'] || `${sha}-${captured.replace(/[-:]/g, '')}-${process.pid}`;

@@ -25,6 +25,7 @@ import {
   BASE_SDK_SOURCE_REASON,
   SOURCE_PROVENANCE_NOT_APPLICABLE,
   baseSdkDownload,
+  readToolsPin,
 } from '../lib/release-component-provenance.mjs';
 import {
   GATE_APPARATUS_COMPONENT,
@@ -39,6 +40,7 @@ const LLVM_SHA = '3'.repeat(40);
 const STD_SHA = '4'.repeat(40);
 const TUPLE = 'linux_x86_64_cjnative';
 const CJ = '\0CJ_MCC_WriteRefField\0';
+const TOOL_PIN=await readToolsPin(new URL('../../ci/source_pin.env',import.meta.url));
 
 const digest = contents => crypto.createHash('sha256').update(contents).digest('hex');
 
@@ -50,7 +52,7 @@ async function write(root, relative, contents) {
 }
 
 // A stage that passes every rule, so each test can break exactly one thing.
-async function fixture({stdOnDisk, stdInProvenance, tools} = {}) {
+async function fixture({stdOnDisk, stdInProvenance, tools, sidecars} = {}) {
   const work = await fs.mkdtemp(path.join(os.tmpdir(), 'rebuilt-identity-'));
   const stage = path.join(work, 'stage');
   await write(stage, 'bin/cjc', `compiler\0CJCJ-COMMIT:${CJCJ_SHA}\0`);
@@ -60,6 +62,23 @@ async function fixture({stdOnDisk, stdInProvenance, tools} = {}) {
   await write(stage, 'third_party/llvm/bin/opt', `opt\0CJLLVM-COMMIT:${LLVM_SHA}\0`);
   for (const [name, contents] of Object.entries(tools ?? {cjpm: `cjpm fixture${CJ}`})) {
     await write(stage, `tools/bin/${name}`, contents);
+  }
+  // A producer's sidecar for a tool the byte marker cannot see. The producer
+  // records the installed binary's real digest, so the fixture has to as well:
+  // a stub naming a hash the bytes do not have is a stale record, and the
+  // discovery walk checks the record against the package instead of trusting a
+  // filename. A null value writes the sidecar without the binary it names, which
+  // is the failure the walk has to refuse.
+  for (const [name, value] of Object.entries(sidecars ?? {})) {
+    const staged = path.join(stage, `tools/bin/${name}`);
+    const recorded = await fs.readFile(staged).then(digest, () => null);
+    const payloads=[];
+    if(name==='cjfmt')payloads.push({path:'tools/config/cangjie-format.toml',type:'file'});
+    if(['cjfmt','LSPServer'].includes(name))payloads.push({path:'tools/lib/libcangjie-lsp.so',type:'file'});
+    for(const payload of payloads)await write(stage,payload.path,'controlled source payload');
+    const contents={schema:1,component:name,platform:'linux-x64',source:{status:'resolved',repository:TOOL_PIN.repository,commit:TOOL_PIN.commit},
+      artifact:{path:name,sha256:recorded},payloads:payloads.map(p=>({...p,sha256:digest('controlled source payload')}))};
+    await write(stage,`tools/${name}.SOURCE.json`,JSON.stringify(value?{...contents,...value,payloads:value.payloads?.length?value.payloads:contents.payloads}:contents));
   }
   const onDisk = stdOnDisk ?? {[`lib/${TUPLE}/libcangjie-std-core.a`]: 'std core archive'};
   for (const [relative, contents] of Object.entries(onDisk)) await write(stage, relative, contents);
@@ -206,6 +225,47 @@ test('every Cangjie-written tool in the stage gets its own row', async () => {
   assert.ok(!components.includes('tool-cjfmt'), 'a C++ tool must not be claimed as Cangjie-written');
 });
 
+// A tool whose backend is C++ carries no CJ_MCC_ marker, so the byte marker
+// cannot see it. Its producer writes a sidecar naming the installed binary and
+// the checkout it came from; that is the structural evidence, and without this
+// arm a C++-backed source-built tool would leave the official bytes in the
+// package while the manifest row called them inherited.
+test('a C++-backed tool is discovered by its installed sidecar, not by a name list', async () => {
+  const cjfmtBytes = `cjfmt\0CJTOOL-COMMIT:${TOOL_PIN.commit}\0`;
+  const {options} = await fixture({
+    tools: {
+      cjpm: `cjpm\0CJTOOL-COMMIT:${'6'.repeat(40)}\0${CJ}`,
+      cjfmt: cjfmtBytes,
+    },
+    // The sidecar is the producer's real record shape, naming the installed bytes
+    // it was written for rather than a placeholder digest.
+    sidecars: {
+      cjfmt: {
+        schema: 1, component: 'cjfmt', platform: 'linux-x64',
+        source: {status:'resolved',repository:TOOL_PIN.repository,commit:TOOL_PIN.commit},
+        artifact: {path: 'cjfmt', sha256: digest(cjfmtBytes)},
+        payloads: [],
+      },
+    },
+  });
+  const {rows} = await writeReleaseManifest({
+    ...options,
+    toolSources: {
+      'tool-cjpm': {repository: 'https://example.invalid/tools', commit: '6'.repeat(40)},
+      'tool-cjfmt': TOOL_PIN,
+    },
+  });
+  const cjfmt = rows.find(row => row.component === 'tool-cjfmt');
+  assert.ok(cjfmt, 'the sidecar-discovered tool must have a row');
+  assert.equal(cjfmt.build.identity_rule, 'enforced');
+  assert.equal(cjfmt.source.commit, TOOL_PIN.commit);
+});
+
+test('a declared source-owned C++ tool whose sidecar names a missing binary is refused', async () => {
+  const {options} = await fixture({tools: {cjpm: `cjpm${CJ}`}, sidecars: {cjfmt: null}});
+  await assert.rejects(writeReleaseManifest(options), /names cjfmt, but .* is absent/);
+});
+
 // The exemption expires by itself: the first stamped tool makes the stamp
 // mandatory for all of them, so nobody has to remember to switch it on.
 test('once any tool carries CJTOOL-COMMIT the unstamped ones fail closed', async () => {
@@ -299,4 +359,19 @@ test('an absent stamp and a stamped-unknown one are different states', () => {
   assert.equal(classifyStamp('unknown'), 'stamped-unknown');
   assert.equal(classifyStamp('1.2.0-alpha'), 'stamped-unknown');
   assert.equal(classifyStamp('a'.repeat(40)), 'stamped');
+});
+
+for(const defect of ['platform','source','payload-empty','marker-stale'])test('A8 manifest refuses '+defect+' even with a runtime marker',async()=>{
+ const {options}=await fixture({tools:{cjpm:`cjpm${CJ}`,cjfmt:`cjfmt${CJ}`},sidecars:{cjfmt:null}});
+ const stage=options.stage;
+ const target=path.join(stage,'tools/cjfmt.SOURCE.json');
+ const record=JSON.parse(await fs.readFile(target,'utf8'));
+ if(defect==='platform')record.platform='darwin-arm64';
+ if(defect==='source')record.source.commit='0'.repeat(40);
+ if(defect==='payload-empty')record.payloads=[];
+ if(defect==='marker-stale')record.artifact.sha256='0'.repeat(64);
+ await fs.writeFile(target,JSON.stringify(record));
+ const rejected=await writeReleaseManifest(options).then(()=>false,()=>true);
+ console.log('A8_MANIFEST_TARGET_ASSERTION_REACHED',defect,rejected);
+ assert.equal(rejected,true);
 });

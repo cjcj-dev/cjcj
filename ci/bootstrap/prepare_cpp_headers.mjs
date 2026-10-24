@@ -1,151 +1,67 @@
-#!/usr/bin/env node
-// Prepare the default fetched C++ source for the stage0 source-built shim.
-// This builds LLVM headers and flatc, never the old C++ compiler.
-import crypto from 'node:crypto';
+#!/usr/bin/env zx
+// One producer for source-built Cjo shim headers. Original sources stay immutable.
 import fs from 'node:fs';
 import path from 'node:path';
+import {selectBuildJobs} from '../build-resources.mjs';
 import {fileURLToPath} from 'node:url';
-import {checkoutExactSource} from '../../build/lib/git.mjs';
 import {run} from '../../build/lib/runner.mjs';
 import {resolveRuntimeSource} from '../runtime-pin.mjs';
+import {selectShimSources,resolveShimSources} from './shim-header-sources.mjs';
 
-const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-function readPin(name) {
-  return Object.fromEntries(fs.readFileSync(path.join(repo, 'ci', name), 'utf8')
-    .split(/\r?\n/).filter(line => /^[A-Z_]+=/.test(line))
-    .map(line => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)]));
+const roots=['third_party/llvm-project/llvm/include','build/build/third_party/llvm/include','build/build/include','build/build/schema'];
+const sourceIdentity=sources=>Object.fromEntries(Object.entries(sources).map(([name,row])=>[name,{
+ commit:row.commit,root:row.root,...(row.repository?{repository:row.repository}:{}),...(row.archive?{archive:row.archive}:{})}]));
+async function selection(cpp,runtimePinFile,env) {
+ const runtime=await resolveRuntimeSource(env,runtimePinFile),sources=selectShimSources(cpp,env);
+ if(sources.runtime.commit!==runtime.runtimeRef)throw Error('SHIM_HEADERS_RUNTIME_PAIR');
+ // This is the target LLVM pair, never the independent bootstrap host LLVM.
+ const targetLlvm=runtime.nativePair?.llvm||env.LLVM_SHA;
+ if(targetLlvm&&sources.llvm.commit!==targetLlvm)throw Error('SHIM_HEADERS_LLVM_PAIR');
+ return sources;
 }
-function digest(file) {
-  return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+export async function prepareCppHeaders(cppSrc,runtimePinFile=process.env.CJCJ_BOOTSTRAP_RUNTIME_PIN,env=process.env) {
+ const cpp=path.resolve(cppSrc);await selection(cpp,runtimePinFile,env);
+ fs.mkdirSync(cpp,{recursive:true});
+ const sources=await resolveShimSources(cpp,env,{fetch:true});
+ const compiler=sources.compiler.root,llvm=sources.llvm.root,runtime=sources.runtime.root,flatbuffers=sources.flatbuffers.root;
+ const schemaSource=path.join(compiler,'schema/CjoFormat.fbs');
+ if(!fs.existsSync(schemaSource))throw Error('SHIM_HEADERS_CJO_SOURCE '+sources.compiler.commit);
+ const build=path.join(cpp,'build/build'),llvmBuild=path.join(build,'third_party/llvm');
+ const flatBuild=path.join(cpp,'build/shim-flatbuffers'),schema=path.join(build,'schema/flatbuffers');
+ const flatc=path.join(flatBuild,'flatc'+(process.platform==='win32'?'.exe':''));
+ const jobs=String(await selectBuildJobs(undefined,env)),commands=[];
+ const cleanEnv={...env};
+ for(const key of ['CPATH','CPLUS_INCLUDE_PATH','C_INCLUDE_PATH','OBJC_INCLUDE_PATH'])cleanEnv[key]='';
+ async function execute(argv) {
+  const started=new Date().toISOString();
+  try { const result=await run(argv,{stage:'bootstrap.cpp-headers',env:cleanEnv});
+   commands.push({argv,rc:result.exitCode??0,started,ended:new Date().toISOString()});}
+  catch(error){commands.push({argv,rc:error.exitCode??error.rc??null,error:String(error),started,ended:new Date().toISOString()});throw error;}
+  finally{fs.writeFileSync(path.join(cpp,'shim-header-commands.json'),JSON.stringify(commands,null,2));}
+ }
+ await execute(['cmake','-G','Ninja','-S',path.join(llvm,'llvm'),'-B',llvmBuild,
+  '-DCANGJIE_RUNTIME_SOURCE_DIR='+runtime,'-DCMAKE_BUILD_TYPE=Release','-DLLVM_ENABLE_PROJECTS=','-DLLVM_TARGETS_TO_BUILD=X86',
+  '-DLLVM_ENABLE_RTTI=OFF','-DLLVM_INCLUDE_TESTS=OFF','-DLLVM_INCLUDE_BENCHMARKS=OFF','-DLLVM_INCLUDE_EXAMPLES=OFF',
+  '-DLLVM_BUILD_TOOLS=OFF','-DLLVM_ENABLE_BINDINGS=OFF','-DLLVM_ENABLE_TERMINFO=OFF','-DLLVM_ENABLE_ZLIB=OFF','-DLLVM_ENABLE_ZSTD=OFF','-DLLVM_ENABLE_LIBXML2=OFF',
+  '-DCMAKE_C_COMPILER='+(env.CC||'clang'),'-DCMAKE_CXX_COMPILER='+(env.CXX||'clang++')]);
+ await execute(['cmake','--build',llvmBuild,'--target','intrinsics_gen','-j',jobs]);
+ await execute(['cmake','-G','Ninja','-S',flatbuffers,'-B',flatBuild,
+  '-DFLATBUFFERS_BUILD_TESTS=OFF','-DFLATBUFFERS_BUILD_FLATLIB=OFF','-DFLATBUFFERS_BUILD_SHAREDLIB=OFF',
+  '-DCMAKE_C_COMPILER='+(env.CC||'clang'),'-DCMAKE_CXX_COMPILER='+(env.CXX||'clang++')]);
+ await execute(['cmake','--build',flatBuild,'--target','flatc','-j',jobs]);
+ fs.mkdirSync(schema,{recursive:true});
+ await execute([flatc,'--no-warnings','-c','-o',schema,schemaSource]);
+ for(const [from,to] of [[path.join(llvm,'llvm/include'),roots[0]],[path.join(flatbuffers,'include'),roots[2]],
+  [schemaSource,'schema/CjoFormat.fbs']]) {
+  fs.mkdirSync(path.dirname(path.join(cpp,to)),{recursive:true});fs.cpSync(from,path.join(cpp,to),{recursive:true});
+ }
+ const manifest={sources:sourceIdentity(sources),commands};
+ const record=path.join(cpp,'BUILD-INPUTS.json');
+ fs.writeFileSync(record,JSON.stringify(manifest,null,2)+'\n');
+ console.log('SHIM_HEADERS_READY inputs='+record);
+ return manifest;
 }
-function headers(root, relative = '') {
-  return fs.readdirSync(path.join(root, relative), {withFileTypes: true})
-    .sort((a, b) => a.name.localeCompare(b.name)).flatMap(entry => {
-      const file = path.join(relative, entry.name);
-      return entry.isDirectory() ? headers(root, file)
-        : [{path: file, sha256: digest(path.join(root, file))}];
-    });
-}
-
-export async function verifyCppHeaders(cppSrc, runtimePinFile) {
-  const selected = await resolveRuntimeSource(process.env, runtimePinFile);
-  const cpp = path.resolve(cppSrc);
-  const manifest = JSON.parse(fs.readFileSync(path.join(cpp, 'build/build/shim-headers.json'), 'utf8'));
-  const pin = readPin('llvm_pin.env');
-  for (const [name, url, sha] of [
-    ['runtime', selected.sourceUrl, selected.runtimeRef],
-    ['compiler', pin.CANGJIE_COMPILER_URL, pin.CANGJIE_COMPILER_SHA],
-    ['llvm', pin.LLVM_URL, pin.LLVM_SHA],
-    ['flatbuffers', pin.FLATBUFFERS_URL, pin.FLATBUFFERS_SHA],
-  ]) {
-    if (manifest[name]?.url !== url || manifest[name]?.sha !== sha) {
-      throw new Error(`SHIM_HEADERS_SOURCE_MISMATCH: ${name}`);
-    }
-  }
-  const runtimeHead = await run(['git', '-C', path.join(cpp, 'third_party/paired-runtime'),
-    'rev-parse', 'HEAD'], {capture: true});
-  if (runtimeHead.stdout.trim() !== selected.runtimeRef) {
-    throw new Error('SHIM_HEADERS_SOURCE_HEAD_MISMATCH: runtime');
-  }
-  for (const root of ['third_party/llvm-project/llvm/include',
-    'build/build/third_party/llvm/include', 'build/build/include', 'build/build/schema']) {
-    const actual = headers(path.join(cpp, root));
-    if (!actual.length || JSON.stringify(actual) !== JSON.stringify(manifest.headers?.[root])) {
-      throw new Error(`SHIM_HEADERS_DIGEST_MISMATCH: ${root}`);
-    }
-  }
-  for (const name of ['schema', 'flatc']) {
-    const file = manifest[name];
-    if (!file?.path || digest(path.resolve(cpp, file.path)) !== file.sha256) {
-      throw new Error(`SHIM_HEADERS_DIGEST_MISMATCH: ${name}`);
-    }
-  }
-  console.log(`SHIM_HEADERS_VERIFIED runtime=${selected.runtimeRef}`);
-}
-
-export async function prepareCppHeaders(cppSrc, runtimePinFile = process.env.CJCJ_BOOTSTRAP_RUNTIME_PIN) {
-  const runtimePin = await resolveRuntimeSource(process.env, runtimePinFile);
-  const cpp = path.resolve(cppSrc);
-  const pin = readPin('llvm_pin.env');
-  // One compiler source identity for the whole stage chain, defined once in
-  // ci/llvm_pin.env: the same commit the colour LLVM tuple, the in-process dylib
-  // and every other LLVM product in this file are built from. The headers made
-  // below are compiled and linked against those products, so a source tree at any
-  // other commit -- ci/source_pin.env COMPILER_REF, whose tree has no
-  // schema/ModuleFormat.fbs -- is a different compiler, not an interchangeable
-  // checkout of this one.
-  const identity = await run(['git', '-C', cpp, 'rev-parse', 'HEAD'], {capture: true});
-  if (identity.stdout.trim() !== pin.CANGJIE_COMPILER_SHA) {
-    throw new Error(`default shim compiler source differs from CANGJIE_COMPILER_SHA: ${identity.stdout.trim()}`);
-  }
-  const schemaSource = path.join(cpp, 'schema/ModuleFormat.fbs');
-  if (!fs.existsSync(schemaSource)) {
-    throw new Error(`schema/ModuleFormat.fbs absent at CANGJIE_COMPILER_SHA ${pin.CANGJIE_COMPILER_SHA}: ${cpp}`);
-  }
-  const llvm = path.join(cpp, 'third_party/llvm-project');
-  const runtime = path.join(cpp, 'third_party/paired-runtime');
-  const flatbuffers = path.join(cpp, 'third_party/flatbuffers');
-  await checkoutExactSource(pin.LLVM_URL, llvm, pin.LLVM_SHA);
-  await checkoutExactSource(runtimePin.sourceUrl, runtime, runtimePin.runtimeRef);
-  await checkoutExactSource(pin.FLATBUFFERS_URL, flatbuffers, pin.FLATBUFFERS_SHA);
-
-  const build = path.join(cpp, 'build/build');
-  const llvmBuild = path.join(build, 'third_party/llvm');
-  const flatBuild = path.join(cpp, 'build/shim-flatbuffers');
-  const schema = path.join(build, 'schema/flatbuffers');
-  const jobs = process.env.CANGJIE_BUILD_JOBS || '64';
-  const commands = [];
-  async function execute(command) {
-    commands.push(command);
-    const started = Date.now();
-    await run(command, {stage: 'bootstrap.cpp-headers'});
-    console.log(`SHIM_HEADERS_STEP wall=${(Date.now() - started) / 1000} command=${JSON.stringify(command)}`);
-  }
-  // Independent generated-header producers use separate build directories.
-  const results = await Promise.allSettled([
-    (async () => {
-      await execute(['cmake', '-G', 'Ninja', '-S', `${llvm}/llvm`, '-B', llvmBuild,
-        `-DCANGJIE_RUNTIME_SOURCE_DIR=${runtime}`,
-        '-DCMAKE_BUILD_TYPE=Release', '-DLLVM_ENABLE_PROJECTS=', '-DLLVM_TARGETS_TO_BUILD=X86',
-        '-DLLVM_ENABLE_RTTI=OFF', '-DLLVM_INCLUDE_TESTS=OFF',
-        '-DCMAKE_C_COMPILER=clang', '-DCMAKE_CXX_COMPILER=clang++',
-        '-DCMAKE_CXX_FLAGS=-include cstdint -include unordered_map -include map -include vector -include string']);
-      await execute(['cmake', '--build', llvmBuild, '--target', 'llvm-headers', '-j', jobs]);
-    })(),
-    (async () => {
-      await execute(['cmake', '-G', 'Ninja', '-S', flatbuffers, '-B', flatBuild,
-        '-DFLATBUFFERS_BUILD_TESTS=OFF', '-DFLATBUFFERS_BUILD_FLATLIB=OFF',
-        '-DFLATBUFFERS_BUILD_SHAREDLIB=OFF']);
-      await execute(['cmake', '--build', flatBuild, '--target', 'flatc', '-j', jobs]);
-      fs.mkdirSync(path.join(build, 'include'), {recursive: true});
-      fs.cpSync(path.join(flatbuffers, 'include/flatbuffers'), path.join(build, 'include/flatbuffers'), {recursive: true});
-      fs.mkdirSync(schema, {recursive: true});
-      await execute([path.join(flatBuild, 'flatc'), '--no-warnings', '-c', '-o', schema,
-        schemaSource]);
-    })(),
-  ]);
-  for (const result of results) {
-    if (result.status === 'rejected') throw result.reason;
-  }
-  const roots = ['third_party/llvm-project/llvm/include',
-    'build/build/third_party/llvm/include', 'build/build/include', 'build/build/schema'];
-  const manifest = {
-    compiler: {url: pin.CANGJIE_COMPILER_URL, sha: pin.CANGJIE_COMPILER_SHA},
-    llvm: {url: pin.LLVM_URL, sha: pin.LLVM_SHA},
-    runtime: {url: runtimePin.sourceUrl, sha: runtimePin.runtimeRef},
-    flatbuffers: {url: pin.FLATBUFFERS_URL, sha: pin.FLATBUFFERS_SHA},
-    schema: {path: 'schema/ModuleFormat.fbs', sha256: digest(schemaSource)},
-    flatc: {path: path.join(flatBuild, 'flatc'), sha256: digest(path.join(flatBuild, 'flatc'))},
-    commands,
-    headers: Object.fromEntries(roots.map(root => [root, headers(path.join(cpp, root))])),
-  };
-  const manifestPath = path.join(build, 'shim-headers.json');
-  fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
-  console.log(`SHIM_HEADERS_READY manifest=${manifestPath} sha256=${digest(manifestPath)}`);
-  return manifestPath;
-}
-
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  if (!process.argv[2]) throw new Error('usage: prepare_cpp_headers.mjs <fetched compiler source>');
-  await prepareCppHeaders(process.argv[2], process.argv[3]);
+if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
+ if(!process.argv[2])throw Error('usage: prepare_cpp_headers.mjs <private header output> [runtime selection]');
+ await prepareCppHeaders(process.argv[2],process.argv[3]);
 }

@@ -1,0 +1,112 @@
+#!/usr/bin/env zx
+// Public source-build CLI with a controlled native tool producer. The small
+// executable is real; this does not claim an LSP/C2/full SDK functional test.
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import assert from 'node:assert/strict';
+import {spawnSync} from 'node:child_process';
+import {fileDigest,archiveInstall} from '../../ci/bootstrap/sdk-flow.mjs';
+import {buildConfig} from '../lib/config.mjs';
+import {toolBuildInputs} from '../srcbuild/tool-build-inputs.mjs';
+import {installSourceTools} from '../srcbuild/install-tools.mjs';
+import {installHleDependencies} from '../srcbuild/hle-dependencies.mjs';
+import {hlePayloadFixture} from './hle-payload-fixture.mjs';
+import {installedInputs} from '../../ci/srcbuild/lib/installed-inputs.mjs';
+import {writeInstalledReleaseManifest,verifyInstalledReleaseManifest} from '../lib/release-manifest.mjs';
+const base=process.env.RELEASE_EVIDENCE_TEST_ROOT,mirror=process.env.SDK_INPUT_TOOLS_MIRROR;
+if(!base||!mirror)throw new Error('tool facts integration needs evidence root and fixed cjpm object mirror');
+const root=await fs.mkdtemp(path.join(base,'tool-facts-')),workspace=path.join(root,'workspace'),tools=path.join(workspace,'cangjie_tools'),sdk=path.join(root,'sdk');
+const write=async(file,data)=>{await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,data);};
+const records=[];
+async function command(argv,options={}){
+ const r=spawnSync(argv[0],argv.slice(1),{encoding:'utf8',maxBuffer:8*1024*1024,...options});
+ records.push({argv,rc:r.status,signal:r.signal,stdout:r.stdout,stderr:r.stderr});await write(path.join(root,'commands.json'),JSON.stringify(records,null,2));
+ return r;
+}
+async function git(...args){const r=await command(['git','-C',tools,...args]);assert.equal(r.status,0,r.stderr);return r.stdout.trim();}
+await write(path.join(tools,'cangjie-language-server/main.c'),'#include <stdio.h>\nint main(void){puts("42");return 0;}\n');
+await write(path.join(tools,'cangjie-language-server/build/build.py'),`import pathlib,subprocess,sys
+root=pathlib.Path(__file__).resolve().parents[1]
+if sys.argv[1]=='build':
+ out=root/'output/bin/LSPServer'; out.parent.mkdir(parents=True,exist_ok=True)
+ subprocess.run(['cc',str(root/'main.c'),'-o',str(out)],check=True)
+elif sys.argv[1]!='clean': raise RuntimeError('unexpected native verb')
+`);
+await git('init');await git('add','.');await git('-c','user.name=Zxilly','-c','user.email=zxilly@outlook.com','commit','-m','finite native tool source');
+const commit=await git('rev-parse','HEAD'),repository='file://'+tools;
+await git('remote','add','origin',repository);
+await write(path.join(workspace,'.source-selection.json'),JSON.stringify({tools:{url:repository,tag:commit}}));
+// Real native bytes stand in for unrelated SDK inputs. No Cangjie invocation
+// or ABI assertion is performed by this bounded producer-record test.
+for(const rel of ['bin/cjcj-stage1','lib/linux_x86_64_cjnative/libcangjie-std-core.a','runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so']){
+ await fs.mkdir(path.dirname(path.join(sdk,rel)),{recursive:true});await fs.copyFile('/usr/bin/true',path.join(sdk,rel));
+}
+await write(path.join(sdk,'STAGE-INPUTS.json'),JSON.stringify({compilerFile:'bin/cjcj-stage1',compilerSha256:await fileDigest(path.join(sdk,'bin/cjcj-stage1')),fixture:'not a Cangjie SDK'}));
+const env={...process.env,CJCJ_SRCBUILD_CONSUMER_SDK:sdk,CJCJ_SRCBUILD_SOURCE_MIRRORS:'https://github.com/cjcj-dev/cangjie-tools.git=file://'+mirror,CJCJ_SRCBUILD_REQUIRE_MIRRORS:'1'};
+delete env.CANGJIE_BUILD_DRY_RUN;
+if(!env.CJCJ_SRCBUILD_HOST_SDK)throw new Error('tool facts integration requires the real plain host SDK loader input');
+const cli=process.env.CJCJ_TOOL_FACTS_CLI||new URL('../cli.mjs',import.meta.url).pathname;
+const args=[process.execPath,cli,'--workspace',workspace,'--build-root',path.join(root,'buildtools'),'--target','linux-x64','--host-profile','kkk2','--build-type','release','--tools-phase','build','--tools-build-set','lsp','--jobs','2','build','tools'];
+const built=await command(args,{env});assert.equal(built.status,0,built.stderr);
+console.log('PUBLIC_PRODUCER_OUTPUT_REACHED');
+const record=path.join(workspace,'build/tools/lsp/build-inputs.json'),facts=JSON.parse(await fs.readFile(record,'utf8'));
+assert.equal(facts.source.commit,commit);assert.equal(facts.source.repository,repository);assert.equal(facts.build.rc,0);
+assert.deepEqual(facts.build.argv.slice(-2),['--jobs','2']);
+const product=path.join(tools,'cangjie-language-server/output/bin/LSPServer');
+assert.equal(facts.artifact.sha256,await fileDigest(product));
+const value=await command([product]);assert.equal(value.status,0);assert.equal(value.stdout.trim(),'42');
+const config=buildConfig({workspace,targetKey:'linux-x64',buildType:'release'});
+await toolBuildInputs(config,'lsp',product);
+// An install-only invocation with a newer selected pin still describes the old
+// producer. Neither its source nor its build configuration is overwritten.
+await write(path.join(tools,'later-source'),'next object');await git('add','later-source');await git('-c','user.name=Zxilly','-c','user.email=zxilly@outlook.com','commit','-m','next source selection');
+const later=await git('rev-parse','HEAD');assert.notEqual(later,commit);
+const reused=await toolBuildInputs(config,'lsp',product);assert.equal(reused.source.commit,commit);
+const bytes=await fs.readFile(product);await fs.appendFile(product,'changed');
+await assert.rejects(toolBuildInputs(config,'lsp',product),/TOOL_BUILD_INPUT_MISMATCH/);
+await fs.writeFile(product,bytes);assert.equal((await toolBuildInputs(config,'lsp',product)).source.commit,commit);
+await fs.rename(record,record+'.original');
+assert.equal((await toolBuildInputs(config,'lsp',product)).source.status,'unresolved');
+await fs.rename(record+'.original',record);
+if(process.env.CJCJ_TOOL_FACTS_INSTALL==='1'){
+ // Carry the actual CLI-produced record and binary through the real installer.
+ // Other tools/HLE payloads are explicitly controlled inputs, not six-tool PASS.
+ for(const rel of ['cjpm/dist/cjpm','cjfmt/build/build/bin/cjfmt','hyperlangExtension/target/bin/main',
+   'cjcov/dist/cjcov','cjtrace-recover/dist/bin/cjtrace-recover','cjlint/dist/bin/cjlint','cjprof/dist/bin/cjprof','cjcompat/dist/bin/cjcompat']){
+   await fs.mkdir(path.dirname(path.join(tools,rel)),{recursive:true});await fs.copyFile('/usr/bin/true',path.join(tools,rel));
+ }
+ for(const rel of ['cjlint/dist/lib/libcjlint.so','cjlint/dist/config/cjlint_rule_list.json','cjprof/dist/lib/libcjprof.so','cjprof/dist/lib/libcjprof-jni.so','cjprof/dist/config/static/index.html'])await write(path.join(tools,rel),'explicit unrelated payload fixture');
+ await write(path.join(tools,'cjfmt/config/cangjie-format.toml'),'fixture formatter configuration');
+ await write(path.join(tools,'cjpm/dist/cangjie-repo.toml'),'fixture repository configuration');
+ const parser=path.join(tools,'hyperlangExtension/src/dtsparser');
+ await write(path.join(parser,'analysis.js'),'// controlled parser boundary');
+ await write(path.join(parser,'package.json'),JSON.stringify({dependencies:{typescript:'npm:typescript@4.9.5','https-proxy-agent':'7.0.6'}}));
+ const deps=path.join(root,'dependencies');hlePayloadFixture(deps);
+ await installHleDependencies({toolsRoot:tools,sdk,platform:'linux_x86_64',input:{platform:'linux_x86_64',
+  node:{path:process.execPath,source:'controlled native Node',version:process.version},
+  modules:{path:path.join(deps,'tools/dtsparser/node_modules'),source:'controlled npm boundary',version:'fixture'},
+  cjbind:{path:process.execPath,source:'controlled executable, not actual cjbind',version:'v1.1.0-alpha.53.1'}}});
+ await installSourceTools(config,sdk);
+ // Unrelated SDK-shaped inputs above do not claim compiler provenance. Retain
+ // that explicit unresolved boundary in the package facts test.
+ await fs.rename(path.join(sdk,'STAGE-INPUTS.json'),path.join(root,'controlled-sdk-input.json'));
+ const gathered=await installedInputs(sdk,'linux_x86_64'),lsp=gathered.components.find(row=>row.component==='LSPServer');
+ assert.equal(lsp.source.commit,commit);assert.equal(lsp.artifact.sha256,facts.artifact.sha256);
+ assert.equal(gathered.components.find(row=>row.component==='hle').source.status,'unresolved');
+ const manifest=await writeInstalledReleaseManifest({stage:sdk,platform:'linux_x86_64',...gathered});
+ const manifestLsp=manifest.rows.find(row=>row.component==='tool-LSPServer');
+ assert.equal(manifestLsp.source.commit,commit);assert.deepEqual(manifestLsp.artifact,lsp.artifact);
+ await assert.rejects(verifyInstalledReleaseManifest({stage:sdk,platform:'linux_x86_64',...gathered}),/source.status is unresolved/);
+ const retained=path.join(sdk,lsp.artifact.path),retainedBytes=await fs.readFile(retained);
+ await fs.appendFile(retained,'cut');await assert.rejects(installedInputs(sdk,'linux_x86_64'),/INSTALLED_INPUT_BYTES/);
+ await fs.writeFile(retained,retainedBytes);await installedInputs(sdk,'linux_x86_64');
+ const checker=path.join(root,'unpacked.mjs');
+ await write(checker,`import {installedInputs} from ${JSON.stringify(new URL('../../ci/srcbuild/lib/installed-inputs.mjs',import.meta.url).href)};\nimport assert from 'node:assert/strict';\nimport fs from 'node:fs/promises';\nimport {spawnSync} from 'node:child_process';\nconst root=process.argv[2],row=(await installedInputs(root,'linux_x86_64')).components.find(x=>x.component==='LSPServer');\nassert.equal(row.source.commit,${JSON.stringify(commit)});const release=(await fs.readFile(root+'/RELEASE-MANIFEST.jsonl','utf8')).trim().split('\\n').map(x=>JSON.parse(x)).find(x=>x.component==='tool-LSPServer');assert.equal(release.source.commit,row.source.commit);assert.deepEqual(release.artifact,row.artifact);const r=spawnSync(root+'/tools/bin/LSPServer',[],{encoding:'utf8'});assert.equal(r.status,0,r.stderr);assert.equal(r.stdout.trim(),'42');console.log('UNPACKED_TOOL_FACTS_REACHED');\n`);
+ await fs.rename(tools,tools+'.parked');
+ try{
+   await archiveInstall({install:sdk,archive:path.join(root,'tools-interface.tar.gz'),format:'tar.gz',
+    test:{commands:[{argv:[process.execPath,checker,'${install}']}]},vars:{work:root},records:[]});
+ }finally{await fs.rename(tools+'.parked',tools);}
+ console.log('INSTALLED_ARCHIVED_TOOL_FACTS_TARGET_REACHED');
+}
+console.log('PUBLIC_TOOL_BUILD_FACTS_TARGET_REACHED '+JSON.stringify({root,commit,later,artifact:facts.artifact}));

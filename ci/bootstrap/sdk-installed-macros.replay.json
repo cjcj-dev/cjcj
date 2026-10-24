@@ -1,0 +1,230 @@
+{
+  "source": "2026-10-16 installed C2 macro gate first failure; retained macro-result.json",
+  "sourceWork": "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1",
+  "sourceCompilerSha256": "a02adafbdcc4dd68fa4601d7e5e81aac18e8008ccec85c3d5da89859f54b4376",
+  "scope": "Recorded command output through explicit-testmacro-run; later commands were NOT_RUN. Replay files are placeholders, never compiler execution.",
+  "commands": [
+    {
+      "rc": 0,
+      "signal": null,
+      "stdout": "",
+      "stderr": "Bare memcpy/memmove payload provenance is unknown; use cj_array_copy_ref, a typed helper, or supply typed provenance. [unknown-payload:report]\n  call void @llvm.memcpy.p1i8.p0i8.i64(i8 addrspace(1)* align 1 %arr.idx.get.gep, i8* align 1 getelementptr inbounds ([43 x i8], [43 x i8]* @\"$const_cjstring_data.2Jy1zPkSpN0\", i32 0, i32 0), i64 43, i1 false)\nin function default.cjstring.materialize.0\nBare memcpy/memmove payload provenance is unknown; use cj_array_copy_ref, a typed helper, or supply typed provenance. [unknown-payload:report]\n  call void @llvm.memcpy.p1i8.p0i8.i64(i8 addrspace(1)* align 1 %arr.idx.get.gep, i8* align 1 getelementptr inbounds ([25 x i8], [25 x i8]* @\"$const_cjstring_data.oji8eTTktI\", i32 0, i32 0), i64 25, i1 false)\nin function default.cjstring.materialize.1\nBare memcpy/memmove payload provenance is unknown; use cj_array_copy_ref, a typed helper, or supply typed provenance. [unknown-payload:report]\n  call void @llvm.memcpy.p1i8.p0i8.i64(i8 addrspace(1)* align 1 %arr.idx.get.gep, i8* align 1 getelementptr inbounds ([3 x i8], [3 x i8]* @\"$const_cjstring_data.ciQh56PO1Hn\", i32 0, i32 0), i64 3, i1 false)\nin function default.cjstring.materialize.2\n",
+      "name": "ordinary-compile",
+      "argv": [
+        "cjc",
+        "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/ordinary control.cj",
+        "-o",
+        "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/ordinary control"
+      ],
+      "cwd": "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1",
+      "wall": 14.440943323000003
+    },
+    {
+      "rc": 0,
+      "signal": null,
+      "stdout": "ORDINARY_CONTROL value=42\n",
+      "stderr": "",
+      "name": "ordinary-run",
+      "argv": [
+        "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/ordinary control"
+      ],
+      "cwd": "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1",
+      "wall": 0.03386078099999577
+    },
+    {
+      "rc": 0,
+      "signal": null,
+      "stdout": "",
+      "stderr": "Bare memcpy/memmove payload provenance is unknown; use cj_array_copy_ref, a typed helper, or supply typed provenance. [unknown-payload:report]\n  call void @llvm.memcpy.p1i8.p0i8.i64(i8 addrspace(1)* align 1 %arr.idx.get.gep, i8* align 1 getelementptr inbounds ([3 x i8], [3 x i8]* @\"$const_cjstring_data.ciQh56PO1Hn\", i32 0, i32 0), i64 3Bare memcpy/memmove payload provenance is unknown; use cj_array_copy_ref, a typed helper, or supply typed provenance. [unknown-payload:report], i\n1 false)  \nin function callf1def.cjstring.materialize.1\n void @llvm.memcpy.p1i8.p0i8.i64(i8 addrspace(1)* align 1 %arr.idx.get.gep, i8* align 1 getelementptr inbounds ([16 x i8], [16 x i8]* @\"$const_cjstring_data.c-J6RJj+YQj\", i32 0, i32 0), i64 16, i1 false)\nin function f1def.cjstring.materialize.2\nBare memcpy/memmove payload provenance is unknown; use cj_array_copy_ref, a typed helper, or supply typed provenance. [unknown-payload:report]\n  call void @llvm.memcpy.p1i8.p0i8.i64(i8 addrspace(1)* align 1 %arr.idx.get.gep, i8* align 1 getelementptr inbounds ([61 x i8], [61 x i8]* @\"$const_cjstring_data.58U2zzTTTlm\", i32 0, i32 0), i64 61, i1 false)\nin function f1def.cjstring.materialize.3\n",
+      "name": "macro-definition",
+      "argv": [
+        "cjc",
+        "--compile-macro",
+        "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/def.cj"
+      ],
+      "cwd": "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1",
+      "wall": 33.356870476999994
+    },
+    {
+      "rc": 0,
+      "signal": null,
+      "stdout": "MACRO_BODY_EXECUTED\n",
+      "stderr": "Bare memcpy/memmove payload provenance is unknown; use cj_array_copy_ref, a typed helper, or supply typed provenance. [unknown-payload:report]\n  call void @llvm.memcpy.p1i8.p0i8.i64(i8 addrspace(1)* align 1 %arr.idx.get.gep, i8* align 1 getelementptr inbounds ([43 x i8], [43 x i8]* @\"$const_cjstring_data.2Jy1zPkSpN0\", i32 0, i32 0), i64 43, i1 false)\nin function default.cjstring.materialize.0\nBare memcpy/memmove payload provenance is unknown; use cj_array_copy_ref, a typed helper, or supply typed provenance. [unknown-payload:report]\n  call void @llvm.memcpy.p1i8.p0i8.i64(i8 addrspace(1)* align 1 %arr.idx.get.gep, i8* align 1 getelementptr inbounds ([27 x i8], [27 x i8]* @\"$const_cjstring_data.97JfAqPKKgf\", i32 0, i32 0), i64 27, i1 false)\nin function default.cjstring.materialize.1\n",
+      "name": "macro-expansion",
+      "argv": [
+        "cjc",
+        "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/use.cj",
+        "--import-path",
+        "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1",
+        "-o",
+        "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/macro use"
+      ],
+      "cwd": "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1",
+      "wall": 14.124067449000009
+    },
+    {
+      "rc": 0,
+      "signal": null,
+      "stdout": "MACRO_VALUE_ASSERT value=42\n",
+      "stderr": "",
+      "name": "macro-run",
+      "argv": [
+        "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/macro use"
+      ],
+      "cwd": "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1",
+      "wall": 0.03619310200000473
+    },
+    {
+      "rc": 0,
+      "signal": null,
+      "stdout": "",
+      "stderr": "",
+      "name": "leaf-compile",
+      "argv": [
+        "cjc",
+        "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/leaf.cj",
+        "--output-type=staticlib",
+        "-o",
+        "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/libsdkleaf.a"
+      ],
+      "cwd": "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1",
+      "wall": 8.808177115999992
+    },
+    {
+      "rc": 0,
+      "signal": null,
+      "stdout": "",
+      "stderr": "Bare memcpy/memmove payload provenance is unknown; use cj_array_copy_ref, a typed helper, or supply typed provenance. [unknown-payload:report]\n  call void @llvm.memcpy.p1i8.p0i8.i64(i8 addrspace(1)* align 1 %arr.idx.get.gep, i8* align 1 getelementptr inbounds ([3 x i8], [3 x i8]* @\"$const_cjstring_data.ciQh56PO1Hn\", i32 0, i32 0), i64 3, i1 false)\nin function sdkhelper.cjstring.materialize.1\n",
+      "name": "helper-compile",
+      "argv": [
+        "cjc",
+        "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/helper.cj",
+        "--output-type=staticlib",
+        "--import-path",
+        "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1",
+        "-L",
+        "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1",
+        "-lsdkleaf",
+        "-o",
+        "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/libsdkhelper.a"
+      ],
+      "cwd": "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1",
+      "wall": 12.87621063799999
+    },
+    {
+      "rc": 0,
+      "signal": null,
+      "stdout": "",
+      "stderr": "Bare memcpy/memmove payload provenance is unknown; use cj_array_copy_ref, a typed helper, or supply typed provenance. [unknown-payload:report]\n  call void @llvm.memcpy.p1i8.p0i8.i64(i8 addrspace(1)* align 1 %arr.idx.get.gep, i8* align 1 getelementptr inbounds ([48 x i8], [48 x i8]* @\"$const_cjstring_data.3lvCkxvcmzr\", i32 0, i32 0), i64 48, i1 false)\nin function sdkchain.cjstring.materialize.0\nBare memcpy/memmove payload provenance is unknown; use cj_array_copy_ref, a typed helper, or supply typed provenance. [unknown-payload:report]\n  call void @llvm.memcpy.p1i8.p0i8.i64(i8 addrspace(1)* align 1 %arr.idx.get.gep, i8* align 1 getelementptr inbounds ([3 x i8], [3 x i8]* @\"$const_cjstring_data.ciQh56PO1Hn\", i32 0, i32 0), i64 3, i1 false)\nin function sdkchain.cjstring.materialize.1\nBare memcpy/memmove payload provenance is unknown; use cj_array_copy_ref, a typed helper, or supply typed provenance. [unknown-payload:report]\n  call void @llvm.memcpy.p1i8.p0i8.i64(i8 addrspace(1)* align 1 %arr.idx.get.gep, i8* align 1 getelementptr inbounds ([16 x iBare memcpy/memmove payload provenance is unknown; use cj_array_copy_ref, a typed helper, or supply typed provenance. [unknown-payload:report]8]\n, [16 x   i8call]*  void@ \"@$cllvm.memcpy.p1i8.p0i8.i64o(nis8t addrspace(_1cj)s*t ralign 1i n%garr.idx.get.gep_dat, ai.8c*- Jalign 16 RJgetelementptrj inbounds+ (YQ[j42\" x , ii832] , 0[, 42i32 x  i08)], *i 64@ \"16$, ci1o nfalses)t_\nin function csdkchain.cjstring.materialize.2j\nstring_data.6L74QkhzLlH\", i32 0, i32 0), i64 42, i1 false)\nin function sdkchain.cjstring.materialize.3\n",
+      "name": "chain-definition",
+      "argv": [
+        "cjc",
+        "--compile-macro",
+        "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/chain.cj",
+        "--import-path",
+        "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1",
+        "-L",
+        "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1",
+        "-lsdkhelper",
+        "-lsdkleaf"
+      ],
+      "cwd": "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1",
+      "wall": 36.618482814000004
+    },
+    {
+      "rc": 0,
+      "signal": null,
+      "stdout": "MACRO_HELPER_EXECUTED value=42\n",
+      "stderr": "Bare memcpy/memmove payload provenance is unknown; use cj_array_copy_ref, a typed helper, or supply typed provenance. [unknown-payload:report]\n  call void @llvm.memcpy.p1i8.p0i8.i64(i8 addrspace(1)* align 1 %arr.idx.get.gep, i8* align 1 getelementptr inbounds ([43 x i8], [43 x i8]* @\"$const_cjstring_data.2Jy1zPkSpN0\", i32 0, i32 0), i64 43, i1 false)\nin function default.cjstring.materialize.0\nBare memcpy/memmove payload provenance is unknown; use cj_array_copy_ref, a typed helper, or supply typed provenance. [unknown-payload:report]\n  call void @llvm.memcpy.p1i8.p0i8.i64(i8 addrspace(1)* align 1 %arr.idx.get.gep, i8* align 1 getelementptr inbounds ([26 x i8], [26 x i8]* @\"$const_cjstring_data.eF2MMSDX8n2\", i32 0, i32 0), i64 26, i1 false)\nin function default.cjstring.materialize.1\n",
+      "name": "chain-expansion",
+      "argv": [
+        "cjc",
+        "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/chain use.cj",
+        "--import-path",
+        "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1",
+        "-o",
+        "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/chain use"
+      ],
+      "cwd": "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1",
+      "wall": 13.678852618000004
+    },
+    {
+      "rc": 0,
+      "signal": null,
+      "stdout": "MACRO_CHAIN_VALUE value=42\n",
+      "stderr": "",
+      "name": "chain-run",
+      "argv": [
+        "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/chain use"
+      ],
+      "cwd": "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1",
+      "wall": 0.02691766199999256
+    },
+    {
+      "rc": 0,
+      "signal": null,
+      "stdout": "",
+      "stderr": "Bare memcpy/memmove payload provenance is unknown; use cj_array_copy_ref, a typed helper, or supply typed provenance. [unknown-payload:report]\n  call void @llvm.memcpy.p1i8.p0i8.i64(i8 addrspace(1)* align 1 %arr.idx.get.gep, i8* align 1 getelementptr inbounds ([43 x i8], [43 x i8]* @\"$const_cjstring_data.2Jy1zPkSpN0\", i32 0, i32 0), i64 43, i1 false)\nin function default.cjstring.materialize.0\nBare memcpy/memmove payload provenance is unknown; use cj_array_copy_ref, a typed helper, or supply typed provenance. [unknown-payload:report]\n  call void @llvm.memcpy.p1i8.p0i8.i64(i8 addrspace(1)* align 1 %arr.idx.get.gep, i8* align 1 getelementptr inbounds ([59 x i8], [59 x i8]* @\"$const_cjstring_data.fE9GbiPrzpM\", i32 0, i32 0), i64 59, i1 false)\nin function default.cjstring.materialize.1\nBare memcpy/memmove payload provenance is unknown; use cj_array_copy_ref, a typed helper, or supply typed provenance. [unknown-payload:report]\n  call void @llvm.memcpy.p1i8.p0i8.i64(i8 addrspace(1)* align 1 %arr.idx.get.gep, i8* align 1 getelementptr inbounds ([7 x i8], [7 x i8]* @\"$const_cjstring_data.4Jm0S-OPT2T\", i32 0, i32 0), i64 7, i1 false)\nin function default.cjstring.materialize.3\n",
+      "name": "deriving-compile",
+      "argv": [
+        "cjc",
+        "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/deriving.cj",
+        "-o",
+        "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/deriving"
+      ],
+      "cwd": "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1",
+      "wall": 16.21302661
+    },
+    {
+      "rc": 0,
+      "signal": null,
+      "stdout": "DERIVING_ASSERTION_REACHED value=Empty()\nDERIVING_VALUE_PASS\n",
+      "stderr": "",
+      "name": "deriving-run",
+      "argv": [
+        "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/deriving"
+      ],
+      "cwd": "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1",
+      "wall": 0.028708534000004875
+    },
+    {
+      "rc": 0,
+      "signal": null,
+      "stdout": "",
+      "stderr": "Bare memcpy/memmove payload provenance is unknown; use cj_array_copy_ref, a typed helper, or supply typed provenance. [unknown-payload:report]\n  call void @llvm.memcpy.p1i8.p0i8.i64(i8 addrspace(1)* align 1 %arr.idx.get.gep, i8* align 1 getelementptr inbounds ([43 x i8], [43 x i8]* @\"$const_cjstring_data.2Jy1zPkSpN0\", i32 0, i32 0), i64 43, i1 false)\nin function default.cjstring.materialize.0\nBare memcpy/memmove payload provenance is unknown; use cj_array_copy_ref, a typed helper, or supply typed provenance. [unknown-payload:report]\n  call void @llvm.memcpy.p1i8.p0i8.i64(i8 addrspace(1)* align 1 %arr.idx.get.gep, i8* align 1 getelementptr inbounds ([28 x i8], [28 x i8]* @\"$const_cjstring_data.32FRutTL2IE\", i32 0, i32 0), i64 28, i1 false)\nin function default.cjstring.materialize.1\nBare memcpy/memmove payload provenance is unknown; use cj_array_copy_ref, a typed helper, or supply typed provenance. [unknown-payload:report]\n  call void @llvm.memcpy.p1i8.p0i8.i64(i8 addrspace(1)* align 1 %arr.idx.get.gep, i8* align 1 getelementptr inbounds ([51 x i8], [51 x i8]* @\"$const_cjstring_data.41Paz2QTNzH\", i32 0, i32 0), i64 51, i1 false)\nin function default.cjstring.materialize.2\nBare memcpy/memmove payload provenance is unknown; use cj_array_copy_ref, a typed helper, or supply typed provenance. [unknown-payload:report]\n  call void @llvm.memcpy.p1i8.p0i8.i64(i8 addrspace(1)* align 1 %arr.idx.get.gep, i8* align 1 getelementptr inbounds ([23 x i8], [23 x i8]* @\"$const_cjstring_data.b7fAgvo-G8U\", i32 0, i32 0), i64 23, i1 false)\nin function default.cjstring.materialize.3\n",
+      "name": "explicit-testmacro-compile",
+      "argv": [
+        "cjc",
+        "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/explicit-testmacro_test.cj",
+        "--test",
+        "-o",
+        "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/explicit-testmacro"
+      ],
+      "cwd": "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1",
+      "wall": 31.448344174
+    },
+    {
+      "rc": 0,
+      "signal": null,
+      "stdout": "\u001b[?25l\u001b[0J\u001b7\u001b[;r\u001b8\n\u001b[1F\u001b7\u001b[9999E\u001b8explicit-testmacro_BODY_EXECUTED\n\u001b[0J\u001b7\u001b[;r\u001b8\u001b[?25h--------------------------------------------------------------------------------------------------\nTP: \u001b[33mdefault\u001b[0m, time elapsed: 400346 ns, RESULT:\n    TCS: \u001b[33mInstalledTest\u001b[0m, time elapsed: 391916 ns, RESULT:\n    [\u001b[32m PASSED \u001b[0m] CASE: valueCase (184388 ns)\nSummary: TOTAL: 1\n    \u001b[32mPASSED\u001b[0m: 1, \u001b[32mSKIPPED\u001b[0m: 0, ERROR: 0\n    \u001b[31mFAILED\u001b[0m: 0\n--------------------------------------------------------------------------------------------------\n",
+      "stderr": "",
+      "name": "explicit-testmacro-run",
+      "argv": [
+        "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/explicit-testmacro"
+      ],
+      "cwd": "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1",
+      "wall": 0.4016916950000159
+    }
+  ],
+  "artifactPaths": [
+    "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/ordinary control",
+    "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/lib-macro_f1def.so",
+    "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/macro use",
+    "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/libsdkleaf.a",
+    "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/libsdkhelper.a",
+    "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/lib-macro_sdkchain.so",
+    "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/chain use",
+    "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/deriving",
+    "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/explicit-testmacro"
+  ]
+}

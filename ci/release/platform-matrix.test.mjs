@@ -5,7 +5,7 @@ import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import test from 'node:test';
 import {checkPlatform, planMatrix, probeRequirement, runnerHost, selectPlatforms} from './platform-matrix.mjs';
-import {allReleasePlatforms, getReleasePlatform, RELEASE_REQUIREMENTS} from '../../build/lib/targets.mjs';
+import {allReleasePlatforms, getReleasePlatform, RELEASE_REQUIREMENTS, sourceBuildCells, releasePlatformReadiness} from '../../build/lib/targets.mjs';
 
 const script = path.resolve(import.meta.dirname, 'platform-matrix.mjs');
 const run = args => spawnSync(process.execPath, [script, ...args], {encoding: 'utf8'});
@@ -72,6 +72,8 @@ test('runtime diagnostics entry preserves teardown rc and raw gate output byte f
   const source = path.join(temporary, 'source');
   const output = path.join(temporary, 'output');
   const logs = new Map([
+    ['CMakebuild/gc-unit-runs/run-current/finalizer.rc', '7\n'],
+    ['CMakebuild/gc-unit.status', 'GATE=FAIL\nGATE_RC=1\n'],
     ['build/gate_run.log', 'GC_UNIT_GATE_FAIL: suite exited unsuccessfully (rc=127)\n'],
     ['build/gc_unit_gate.status', 'FAIL rc=127\n'],
     ['tests/gc_unit/build/teardown.log', 'timeout: failed to run command gdb: No such file or directory\nTEARDOWN_RC=127\n'],
@@ -142,9 +144,9 @@ test('probe CLI reports SDK capability independently of blocked cross-build read
   const present = probe();
   assert.equal(present.status, 0, present.stderr);
   assert.match(present.stdout, /^PRESENT ohos-sdk:/);
-  const check = spawnSync(process.execPath, [script, 'check', '--platform', 'linux-x64-ohos'], {env, encoding: 'utf8'});
+  const check = spawnSync(process.execPath, [script, 'check', '--platform', 'ohos-arm64'], {env, encoding: 'utf8'});
   assert.equal(check.status, 1, 'SDK presence must not invent cross-build producers');
-  assert.match(check.stderr, /BLOCKED tuple linux_ohos_aarch64_cjnative:/);
+  assert.match(check.stderr, /BLOCKED device-side SDK:/);
 });
 
 test('probe CLI refuses absent and unknown requirement names', () => {
@@ -166,22 +168,25 @@ test('SDK input jobs cover the selected runner/requirement pairs and exclude aba
     [{runner: 'ubuntu-24.04', requirement: 'android-ndk'}]);
 });
 
-test('phased release source and package sets equal the buildable matrix', () => {
+test('phased release declares every host package behind its complete source admission gate', () => {
   const workflow = fs.readFileSync(path.resolve(import.meta.dirname, '../../.github/workflows/release.yml'), 'utf8');
   const source = [...workflow.matchAll(/^      targets: (\S+)$/gm)].map(match => match[1]);
   const packages = [...workflow.matchAll(/^      release_key: (\S+)$/gm)].map(match => match[1]);
   const plan = planMatrix('all');
-  assert.deepEqual(source.sort(), plan.source.map(row => row.target).sort(), 'source symmetric difference');
-  assert.deepEqual(packages.sort(), plan.package.map(row => row.release_key).sort(), 'package symmetric difference');
+  assert.deepEqual(source.sort(), sourceBuildCells({nativeInputs:true}).map(row => row.target).sort(), 'declared source symmetric difference');
+  assert.deepEqual(packages.sort(), allReleasePlatforms().filter(key => !getReleasePlatform(key).excluded && !getReleasePlatform(key).crossCompiledHost).sort(), 'declared package symmetric difference');
+  assert.match(workflow, /run: node ci\/srcbuild\/target-matrix.mjs --targets all --require-ready/);
+  assert.match(workflow, /source-p1-linux-x64:\n    needs: plan/);
+  for (const row of plan.package) assert.equal(releasePlatformReadiness(row.release_key).status, 'buildable');
 });
 
-test('plan for all fourteen platforms: four source cells, eight packages, five blocked, one excluded', () => {
+test('plan excludes incomplete native producers from runnable source and package matrices', () => {
   const plan = planMatrix('all');
-  assert.deepEqual(plan.source.map(row => row.target).sort(), ['darwin-arm64', 'darwin-x64', 'linux-aarch64', 'linux-x64']);
-  assert.deepEqual(plan.package.map(row => row.release_key), ['linux-x64', 'linux-arm64', 'linux-x64-android', 'darwin-arm64', 'darwin-x64', 'darwin-arm64-android', 'win32-x64', 'win32-x64-android']);
-  assert.equal(plan.blocked.length, 5);
+  assert.deepEqual(plan.source.map(row => row.target).sort(), ['linux-x64']);
+  assert.deepEqual(plan.package.map(row => row.release_key), ['linux-x64', 'linux-x64-android', 'linux-x64-ohos']);
+  assert.deepEqual(plan.blocked.map(row => row.release_key), ['linux-arm64', 'darwin-arm64', 'darwin-x64', 'darwin-arm64-android', 'darwin-arm64-ios', 'darwin-arm64-ohos', 'ohos-arm64', 'win32-x64', 'win32-x64-android', 'win32-x64-ohos']);
   assert.deepEqual(plan.excluded.map(row => row.release_key), ['win32-x64-ohos-arm32']);
-  assert.equal(plan.windowsSide, true);
+  assert.equal(plan.windowsSide, false);
   for (const row of plan.blocked) {
     assert.match(row.runner, /^(ubuntu|macos|windows)-/);
     assert.ok(row.reasons.length > 0, `${row.release_key}: empty reasons`);
@@ -192,35 +197,40 @@ test('package rows carry exactly the inputs build-release-package.yml takes, spe
   const rows = new Map(planMatrix('all').package.map(row => [row.release_key, row]));
   assert.deepEqual(rows.get('linux-x64'), {
     release_key: 'linux-x64', platform: 'linux-x64', runner: 'ubuntu-24.04', llvm_platform: 'linux_x86_64',
-    sdk_runtime_dir: 'linux_x86_64_cjnative', compiler_artifact: 'final-compiler-linux-x64',
     std_artifact: 'final-std-linux-x64',
     cross_std_artifacts: JSON.stringify([{tuple: 'windows_x86_64_cjnative', artifact: 'final-std-windows-x64'}]), host_std_cross_built: 'false',
   });
-  assert.deepEqual(rows.get('win32-x64'), {
-    release_key: 'win32-x64', platform: 'windows-x64', runner: 'windows-2025', llvm_platform: 'windows_x86_64',
-    sdk_runtime_dir: 'windows_x86_64_cjnative', compiler_artifact: '', std_artifact: 'final-std-windows-x64',
-    cross_std_artifacts: '[]', host_std_cross_built: 'true',
-  });
-  assert.equal(rows.get('darwin-arm64').runner, 'macos-15');
-  assert.equal(rows.get('darwin-x64').runner, 'macos-15-intel');
-  assert.equal(rows.get('linux-arm64').runner, 'ubuntu-24.04-arm');
+  assert.equal(rows.has('win32-x64'), false);
+  assert.match(planMatrix('win32-x64').blocked[0].reasons, /native SDK windows-x64: no source cell runs package-install/);
+  for (const key of ['darwin-arm64', 'darwin-x64']) {
+    assert.equal(rows.has(key), false, 'blocked native source cannot become a package job');
+    assert.match(planMatrix(key).blocked[0].reasons, /source darwin-.*issues\/473/);
+  }
+  assert.equal(rows.has('linux-arm64'), false);
+  assert.match(planMatrix('linux-arm64').blocked[0].reasons, /source linux-aarch64:.*issues\/763/);
 });
 
 test('selecting a consumer selects the source cells it needs and nothing else', () => {
   const windows = planMatrix('win32-x64');
-  assert.deepEqual(windows.source.map(row => row.target), ['linux-x64'], 'the Windows std comes from the linux-x64 cell');
-  assert.equal(windows.windowsSide, true);
+  assert.deepEqual(windows.source, [], 'a std/component producer cannot supply the whole Windows SDK');
+  assert.deepEqual(windows.package, []);
+  assert.match(windows.blocked[0].reasons, /native SDK windows-x64/);
+  assert.equal(windows.windowsSide, false);
   const arm = planMatrix('linux-arm64');
-  assert.deepEqual(arm.source.map(row => row.target).sort(), ['linux-aarch64', 'linux-x64'], 'linux-arm64 embeds the Windows cross std built on linux-x64');
+  assert.deepEqual(arm.source, [], 'an incomplete native input cannot schedule its cross dependencies');
+  assert.match(arm.blocked[0].reasons, /source linux-aarch64:/);
+  assert.deepEqual(JSON.parse(arm.blocked[0].cross_std_artifacts), [{tuple: 'windows_x86_64_cjnative', artifact: 'final-std-windows-x64'}]);
   assert.equal(arm.windowsSide, false);
-  assert.deepEqual(arm.package.map(row => row.release_key), ['linux-arm64']);
+  assert.deepEqual(arm.package, []);
   const darwin = planMatrix('darwin-arm64');
-  assert.deepEqual(darwin.source.map(row => row.target), ['darwin-arm64']);
+  assert.deepEqual(darwin.source, []);
+  assert.deepEqual(darwin.package, []);
+  assert.match(darwin.blocked[0].reasons, /source darwin-arm64:/);
   assert.equal(darwin.windowsSide, false);
 });
 
 test('a blocked-only selection still produces a plan with a red cell, and an unknown key is refused', () => {
-  const blocked = planMatrix('linux-x64-ohos');
+  const blocked = planMatrix('ohos-arm64');
   assert.deepEqual(blocked.source, []);
   assert.deepEqual(blocked.package, []);
   assert.equal(blocked.blocked.length, 1);

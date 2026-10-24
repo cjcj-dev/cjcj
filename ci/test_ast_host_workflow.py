@@ -30,7 +30,8 @@ shutil.copytree(repo / 'ci', work / 'ci')
 workflow = repo / '.github/workflows/build-ast-support.yml'
 shutil.copyfile(workflow, work / 'workflow.yml')
 steps = yaml.safe_load(workflow.read_text())['jobs']['build']['steps']
-expected = dict(line.split('=', 1) for line in (repo / 'ci/host_sdk_pin.env').read_text().splitlines() if '=' in line)['CJCJ_TOOLCHAIN']
+# Independent Linux x86_64 workflow contract; never derive expected from the selector.
+expected = 'nightly-' + '1.3.0-alpha.20261009001050'
 env = {k: v for k, v in os.environ.items() if k not in ('CJCJ_TOOLCHAIN', 'AST_FLATBUFFERS_SDK')}
 env.update(GITHUB_ENV=str(work / 'github.env'), RUNNER_TEMP=str(work / 'temp'), PS4='+ ')
 Path(env['GITHUB_ENV']).touch()
@@ -47,7 +48,7 @@ def digest(path):
 
 result['inputs'] = {name: digest(repo / name) for name in (
     '.github/workflows/build-ast-support.yml', 'ci/build_ast_support.sh',
-    'ci/host_sdk_pin.env', 'ci/test_ast_host_workflow.py')}
+    'ci/host_sdk_pin.env', 'ci/host-toolchain-pin.mjs', 'ci/test_ast_host_workflow.py')}
 
 def save(rc):
     result['rc'] = rc

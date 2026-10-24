@@ -16,6 +16,8 @@
 //         runtime/final-std producers or package consumers are implemented.
 
 import fs from 'node:fs';
+import {nativePair} from '../runtime-pin.mjs';
+import {nativeSourceRoute} from '../srcbuild/native-selection.mjs';
 import os from 'node:os';
 import path from 'node:path';
 import {execFileSync} from 'node:child_process';
@@ -23,6 +25,7 @@ import {pathToFileURL} from 'node:url';
 import {parseArgs} from 'node:util';
 import {
   RELEASE_REQUIREMENTS,
+  CROSS_STD_BUILDS,
   allReleasePlatforms,
   allTargets,
   getReleasePlatform,
@@ -61,7 +64,7 @@ export function planMatrix(requested) {
   const excluded = [];
   const prerequisites = new Map();
   for (const key of selected) {
-    const readiness = releasePlatformReadiness(key);
+    const readiness = releasePlatformReadiness(key,{nativeInputs:nativeSourceRoute()});
     if (readiness.status === 'excluded') {
       excluded.push({release_key: key, reason: readiness.reasons[0]});
       continue;
@@ -71,20 +74,20 @@ export function planMatrix(requested) {
       if (!prerequisites.has(id)) prerequisites.set(id, {runner: readiness.runner, requirement});
     }
     if (readiness.status === 'blocked') {
-      blocked.push({release_key: key, runner: readiness.runner, reasons: readiness.reasons.join(' | ')});
+      blocked.push({release_key: key, runner: readiness.runner, reasons: readiness.reasons.join(' | '),
+        cross_std_artifacts: JSON.stringify(crossStdArtifacts(readiness))});
       continue;
     }
     const host = getTarget(readiness.host);
-    const crossTuples = Object.keys(readiness.crossStd);
     if (!source.has(readiness.sourceTarget)) source.set(readiness.sourceTarget, {target: readiness.sourceTarget});
-    const cross = crossTuples.map(tuple => {
+    const cross = crossStdArtifacts(readiness);
+    for (const {tuple} of cross) {
       const producer = readiness.crossStd[tuple];
       if (!source.has(producer)) source.set(producer, {target: producer});
       if (tuple === 'linux_android_aarch64_cjnative') source.get(producer).build_android = true;
-      const artifact = tuple === 'linux_android_aarch64_cjnative'
-        ? 'final-std-android-aarch64' : stdArtifact(allTargetKeysForTuple(tuple)[0]);
-      return {tuple, artifact};
-    });
+      const crossBuild = CROSS_STD_BUILDS.find(row => row.tuple === tuple);
+      if (crossBuild) source.get(producer)[`build_${crossBuild.family}`] = true;
+    }
     packages.push(packageRow(key, readiness, host, cross));
   }
   if (source.size + packages.length + blocked.length + excluded.length === 0) {
@@ -102,6 +105,16 @@ export function planMatrix(requested) {
   });
 }
 
+// Blocked plans expose the declared inputs for preparation, but never enter
+// the runnable source/package matrices. Both views share artifact expansion.
+export function crossStdArtifacts(readiness) {
+  return Object.keys(readiness.crossStd).map(tuple => ({tuple,
+    artifact: CROSS_STD_BUILDS.find(row => row.tuple === tuple)?.artifact
+      ?? (tuple === 'linux_android_aarch64_cjnative' ? 'final-std-android-aarch64'
+        : stdArtifact(allTargetKeysForTuple(tuple)[0])),
+  }));
+}
+
 // The build targets whose own runtime tuple is this one; a cross std artifact is
 // named after that target (final-std-windows-x64 carries windows_x86_64_cjnative).
 function allTargetKeysForTuple(tuple) {
@@ -111,17 +124,13 @@ function allTargetKeysForTuple(tuple) {
 }
 
 function packageRow(key, readiness, host, cross) {
-  const windows = host.spec.crossCompile;
+  const windows = readiness.hostStdCrossBuilt;
   return {
     release_key: key,
     platform: readiness.host,
     runner: readiness.runner,
     llvm_platform: host.spec.llvmPlatform,
-    sdk_runtime_dir: host.spec.runtimeTuple,
-    // Windows produces its final compiler inside the package job (W2); every
-    // native host hands its own final-compiler-<target> over.
-    compiler_artifact: windows ? '' : `final-compiler-${readiness.host}`,
-    std_artifact: stdArtifact(readiness.host),
+    std_artifact: readiness.host==='windows-x64'&&!windows?'final-std-native-windows-x64':stdArtifact(readiness.host),
     cross_std_artifacts: JSON.stringify(cross),
     host_std_cross_built: windows ? 'true' : 'false',
   };
@@ -154,7 +163,7 @@ export function probeRequirement(name, env = process.env, exec = execFileSync) {
 }
 
 export function checkPlatform(key, {platform = process.platform, arch = process.arch, env = process.env, exec = execFileSync} = {}) {
-  const readiness = releasePlatformReadiness(key);
+  const readiness = releasePlatformReadiness(key,{nativeInputs:Boolean(nativePair(env))});
   const definition = getReleasePlatform(key);
   const lines = [];
   const problems = [];
@@ -181,7 +190,7 @@ export function checkPlatform(key, {platform = process.platform, arch = process.
 
 export function renderTable() {
   const rows = allReleasePlatforms().map(key => {
-    const readiness = releasePlatformReadiness(key);
+    const readiness = releasePlatformReadiness(key,{nativeInputs:nativeSourceRoute()});
     const definition = getReleasePlatform(key);
     const tuples = [getTarget(definition.host).spec.runtimeTuple, ...definition.crossTuples].join(', ');
     const dropped = definition.droppedTuples.length ? definition.droppedTuples.join(', ') : '-';

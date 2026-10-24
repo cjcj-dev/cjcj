@@ -3,12 +3,13 @@ import {prepareTrimpath, withSeedOptimization} from '../release/trimpath.mjs';
 // Provision the official host nightly SDK, activate the native fixed LLVM
 // tuple, then attempt the O1 workspace build.
 
+import {prepareColourSdk, colourEnvironment} from '../prepare-colour-sdk.mjs';
 import {checkCodegenRuntimeLayout} from '../check-codegen-runtime-layout.mjs';
 import {targetForHost} from '../../build/lib/targets.mjs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import {activateLlvmTuple} from './llvm-tuple.mjs';
+import {verifyInstalledLlvmTuple} from './llvm-tuple.mjs';
 import {parseLlvmToolsManifest} from '../llvm-tools-manifest.mjs';
 import {
   hostToolchainFromCjcVersion,
@@ -122,7 +123,7 @@ if (process.platform === 'win32') {
   setupRc = setup.exitCode;
 }
 
-const cangjieHome = path.join(home, '.cjv', 'toolchains', toolchain);
+let cangjieHome = path.join(home, '.cjv', 'toolchains', toolchain);
 const stdxPath = path.join(home, '.cjv', 'stdx', toolchain, 'static', 'stdx');
 if (setupRc === 0 && !(await isDirectory(cangjieHome))) throw new Error(`toolchain directory missing: ${cangjieHome}`);
 if (setupRc === 0 && baseSdkRetention) {
@@ -220,8 +221,7 @@ const fixedTools = [
   {name: 'opt', archive: fixedOptGz, manifestKey: 'OPT_SHA256', versionKey: 'OPT_VERSION'},
   {name: expectedLldTool, archive: fixedLldGz, manifestKey: 'LLD_SHA256', versionKey: 'LLD_VERSION'},
 ];
-await activateLlvmTuple(fixedTools, {sdkToolPath, manifest});
-console.log(`activated fixed LLVM tuple ${process.env.PLATFORM_TUPLE || 'unknown'} at ${llvmSourceSha}: llc + opt + ${expectedLldTool}`);
+// The paired native install is checked after preparation below; never patch H.
 
 async function findNamedFile(directory, names) {
   const wanted = new Set(names.map((n) => n.toLowerCase()));
@@ -237,22 +237,10 @@ async function findNamedFile(directory, names) {
   }
   return '';
 }
-async function installFile(source, destination) {
-  await fs.copyFile(source, `${destination}.new`);
-  if (process.platform !== 'win32') await fs.chmod(`${destination}.new`, 0o755);
-  await fs.rename(`${destination}.new`, destination);
-}
 const sdkRuntimeDirName = process.env.SDK_RUNTIME_DIR || targetForHost()?.spec.runtimeTuple || '';
 if (!sdkRuntimeDirName) throw new Error(`unsupported host for bootstrap runtime install: ${process.platform}/${process.arch}`);
 const finalCompilerOutput = process.env.FINAL_COMPILER_DIR || '';
 const finalWindows = process.platform === 'win32' && Boolean(finalCompilerOutput);
-const hostSdk = path.join(root, 'final-compiler-host-sdk');
-if (finalWindows) {
-  await fs.rm(hostSdk, {recursive: true, force: true});
-  await fs.cp(cangjieHome, hostSdk, {recursive: true});
-}
-const sdkRuntimeDir = path.join(cangjieHome, 'runtime', 'lib', sdkRuntimeDirName);
-if (!(await isDirectory(sdkRuntimeDir))) throw new Error(`SDK runtime dir missing: ${sdkRuntimeDir}`);
 const runtimeLibNames = process.platform === 'darwin'
   ? ['libcangjie-runtime.dylib']
   : process.platform === 'win32'
@@ -282,36 +270,17 @@ if (!builtRuntimeLib) {
   );
 }
 console.log(`bootstrap runtime source=${builtRuntimeLib} search=${runtimeSearchUsed}`);
-const installedRuntimeLib = path.join(sdkRuntimeDir, path.basename(builtRuntimeLib));
-await installFile(builtRuntimeLib, installedRuntimeLib);
-// Windows PE link consumes -l:libcangjie-runtime.dll from this directory; the
-// cross-build also stages import/static side-cars and libboundscheck next to
-// the DLL. Mirror the whole host runtime lib dir so the bootstrap link matches
-// the product install (see run_smoke.mjs combined Windows path).
-if (process.platform === 'win32') {
-  const builtRuntimeDir = path.dirname(builtRuntimeLib);
-  for (const entry of await fs.readdir(builtRuntimeDir)) {
-    const source = path.join(builtRuntimeDir, entry);
-    if (!(await isFile(source))) continue;
-    const destination = path.join(sdkRuntimeDir, entry);
-    if (path.resolve(source) === path.resolve(installedRuntimeLib)) continue;
-    await installFile(source, destination);
-    console.log(`bootstrap runtime staged ${entry} -> ${destination}`);
-  }
-  const installRoot = path.resolve(builtRuntimeDir, '..', '..', '..');
-  const libSide = path.join(installRoot, 'lib', sdkRuntimeDirName);
-  const sdkLibDir = path.join(cangjieHome, 'lib', sdkRuntimeDirName);
-  if (await isDirectory(libSide) && await isDirectory(sdkLibDir)) {
-    for (const entry of await fs.readdir(libSide)) {
-      const source = path.join(libSide, entry);
-      if (!(await isFile(source))) continue;
-      const destination = path.join(sdkLibDir, entry);
-      await installFile(source, destination);
-      console.log(`bootstrap lib staged ${entry} -> ${destination}`);
-    }
-  }
-}
-console.log(`bootstrap runtime installed: ${installedRuntimeLib}`);
+// Build and consume the independent native SDK. Its installed compiler entry
+// selects the execution runtime; target std and libraries come from that install.
+const colourState = await prepareColourSdk(process.env.CJCJ_NATIVE_INPUT_ROOT);
+cangjieHome = colourState.sdk;
+Object.assign(process.env, await colourEnvironment('build'));
+await verifyInstalledLlvmTuple(fixedTools, {sdk: cangjieHome, sdkToolPath, manifest});
+const sdkLlc = await sdkToolPath('llc');
+const installedRuntimeLib = path.join(colourState.runtime, path.basename(builtRuntimeLib));
+if (!(await fs.readFile(installedRuntimeLib)).equals(await fs.readFile(builtRuntimeLib)))
+  throw new Error('COLOUR_RUNTIME_PRODUCER_MISMATCH');
+const hostSdk = colourState.sdk;
 
 await printCommonVersions();
 console.log(`sdk_toolchain=${toolchain}\nsdk_home=${cangjieHome}\noptimization=O1\nsetup_rc=${setupRc}`);
@@ -486,7 +455,10 @@ if (process.platform === 'win32') {
   shim = await $({nothrow: true})`npx --yes zx@8 runtime_shim/build_shim.mjs`;
   console.log(`shim_rc=${shim.exitCode}; continuing to cjpm build so the platform frontier is recorded`);
   await checkCodegenRuntimeLayout();
-  build = await $({nothrow: true})`cjpm build`;
+  build = await $({nothrow: true, env: await colourEnvironment('build')})`cjpm build`;
+}
+if (build.exitCode === 0) {
+  await $`node ci/check-colour-tlab.mjs ${path.join('target', 'release', 'bin', 'cjcj::cjc')}`;
 }
 console.log(`setup_rc=${setupRc} shim_rc=${shim.exitCode} build_rc=${build.exitCode}`);
 if (shim.exitCode !== 0) process.exit(shim.exitCode);

@@ -2,12 +2,44 @@ name: Pinned in-process LLVM dylib
 on:
   workflow_dispatch:
     inputs:
+      llvm_ref:
+        description: Optional complete LLVM candidate SHA; requires runtime_ref.
+        type: string
+        default: ''
+      runtime_ref:
+        description: Optional complete paired runtime SHA; requires llvm_ref.
+        type: string
+        default: ''
+      platforms:
+        description: Selected native platforms; all selects Linux and Darwin.
+        type: string
+        default: all
+      platform_set:
+        description: Optional shared platform subset; Windows has its own producer.
+        type: string
+        default: ''
       cache-component:
         description: 'Isolated cache namespace for a cold/warm pair; reuse exactly for the warm run'
         type: string
         default: llvm-dylib
   workflow_call:
     inputs:
+      llvm_ref:
+        description: Optional complete LLVM candidate SHA; requires runtime_ref.
+        type: string
+        default: ''
+      runtime_ref:
+        description: Optional complete paired runtime SHA; requires llvm_ref.
+        type: string
+        default: ''
+      platforms:
+        description: Selected native platforms; all selects Linux and Darwin.
+        type: string
+        default: all
+      platform_set:
+        description: Optional shared platform subset; Windows has its own producer.
+        type: string
+        default: ''
       cache-component:
         description: 'Component cache namespace (independent of the dylib artifact and pin)'
         type: string
@@ -15,23 +47,30 @@ on:
 permissions:
   contents: read
 jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.select.outputs.dylib_matrix }}
+      platforms: ${{ steps.select.outputs.tuple_platforms }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate the selected source pair
+        env:
+          NATIVE_LLVM_REF: ${{ inputs.llvm_ref }}
+          NATIVE_RUNTIME_REF: ${{ inputs.runtime_ref }}
+        run: node ci/native-llvm-inputs.mjs
+      - name: Select native dylib producers
+        id: select
+        env:
+          REQUESTED: ${{ inputs.platforms || 'all' }}
+          PLATFORM_SET: ${{ inputs.platform_set }}
+        run: node ci/llvm-tools-matrix.mjs
   dylib:
+    needs: plan
+    if: needs.plan.outputs.platforms != '[]'
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - runner: ubuntu-22.04
-            platform: linux_x86_64
-            library: libLLVM-15.so
-          - runner: ubuntu-24.04-arm
-            platform: linux_aarch64
-            library: libLLVM-15.so
-          - runner: macos-15
-            platform: darwin_aarch64
-            library: libLLVM.dylib
-          - runner: macos-15-intel
-            platform: darwin_x86_64
-            library: libLLVM.dylib
+      matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 180
     env:
@@ -39,17 +78,17 @@ jobs:
       LLVM_DYLIB_PLATFORM: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v7
-      - name: Load reviewed source pin
+      - name: Load native LLVM source pair
         id: pin
-        run: |
-          source ci/llvm_pin.env
-          cat ci/llvm_pin.env >> "$GITHUB_ENV"
-          echo "sha=$LLVM_SHA" >> "$GITHUB_OUTPUT"
+        env:
+          NATIVE_LLVM_REF: ${{ inputs.llvm_ref }}
+          NATIVE_RUNTIME_REF: ${{ inputs.runtime_ref }}
+        run: node ci/native-llvm-inputs.mjs
       - uses: ./.github/actions/sccache
         with:
           component: ${{ inputs.cache-component }}
           platform: ${{ matrix.platform }}
-          pin: ${{ steps.pin.outputs.sha }}
+          pin: ${{ steps.pin.outputs.sha }}-${{ steps.pin.outputs.runtime_sha }}
           cache-size: 3G
       - name: Build three-target shared LLVM
         run: |
@@ -86,19 +125,7 @@ jobs:
           cp -L "dylib-build/lib/$LLVM_DYLIB_LIBRARY" "depot/dylib/$LLVM_DYLIB_LIBRARY"
           file "depot/dylib/$LLVM_DYLIB_LIBRARY" | tee depot/dylib/architecture.txt
           cp dylib-build/defined-symbols.txt depot/dylib/defined-symbols.txt
-          python3 - <<'PY'
-          import hashlib, json, os
-          from pathlib import Path
-          root = Path('depot/dylib')
-          sha = hashlib.sha256((root / os.environ['LLVM_DYLIB_LIBRARY']).read_bytes()).hexdigest()
-          (root / 'manifest.json').write_text(json.dumps({
-              'llvm_sha': os.environ['LLVM_SHA'], 'sha256': sha,
-              'platform': os.environ['LLVM_DYLIB_PLATFORM'], 'library': os.environ['LLVM_DYLIB_LIBRARY'],
-              'targets': ['X86', 'ARM', 'AArch64'],
-              'run_id': os.environ['GITHUB_RUN_ID'], 'run_attempt': os.environ['GITHUB_RUN_ATTEMPT']}) + '\n')
-          with open(os.environ['GITHUB_ENV'], 'a') as out:
-              out.write(f'BUILT_DYLIB_SHA256={sha}\n')
-          PY
+          node ci/llvm-dylib/record-manifest.mjs depot/dylib llvm-fork paired-runtime
       - name: Verify exact loaded library and C API
         run: |
           set -euo pipefail

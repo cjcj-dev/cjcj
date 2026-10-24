@@ -251,7 +251,7 @@ def main():
     if args.arm == 'bootstrap':
         if not args.bootstrap_compiler_sha256:
             parser.error('COMPILER_IDENTITY bootstrap requires --bootstrap-compiler-sha256 from independent build output')
-        subprocess.run([sys.executable, str(HERE.parent / 'bootstrap/compiler_identity.py'), str(sdk),
+        subprocess.run(['node', str(HERE.parent / 'bootstrap/compiler_identity.mjs'), str(sdk),
                         '--expected-producer-sha256', args.bootstrap_compiler_sha256], check=True)
     elif args.bootstrap_compiler_sha256:
         parser.error('--bootstrap-compiler-sha256 requires --arm bootstrap')

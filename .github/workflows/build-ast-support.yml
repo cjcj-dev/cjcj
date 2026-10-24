@@ -3,7 +3,7 @@ name: Bootstrap AST support
 on:
   push:
     branches: [master]
-    paths: [.github/workflows/build-ast-support.yml, ci/build_ast_support.sh, ci/source_pin.env, ci/host_sdk_pin.env]
+    paths: [.github/workflows/build-ast-support.yml, ci/build_ast_support.sh, ci/source_pin.env, ci/host_sdk_pin.env, ci/host-toolchain-pin.mjs, ci/test_ast_host_workflow.py]
   workflow_dispatch:
     inputs:
       cold_cache:
@@ -32,7 +32,9 @@ jobs:
         run: |
           cat ci/source_pin.env ci/llvm_pin.env >> "$GITHUB_ENV"
       - name: Load host toolchain pin
-        run: cat ci/host_sdk_pin.env >> "$GITHUB_ENV"
+        run: |
+          cat ci/host_sdk_pin.env >> "$GITHUB_ENV"
+          node ci/host-toolchain-pin.mjs --github-env >> "$GITHUB_ENV"
       - uses: ./.github/actions/sccache
         with:
           component: ast-support

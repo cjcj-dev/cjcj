@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import fsSync from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
@@ -41,14 +42,32 @@ function commit(root, message) {
   return sha;
 }
 
-function gate(root, name, extra = []) {
-  const result = run(process.execPath, [command, name, '--repo', root, '--json', ...extra]);
-  let value;
+const gateEvidence = process.env.CJCJ_TEST_EVIDENCE
+  ? path.join(process.env.CJCJ_TEST_EVIDENCE, 'release-gates')
+  : fsSync.mkdtempSync(path.join(os.tmpdir(), 'release-gates-evidence-'));
+fsSync.mkdirSync(gateEvidence, {recursive: true});
+let gateSequence = 0;
+
+function gate(root, name, extra = [], {expectScope = platformGates.includes(name), env = process.env} = {}) {
+  const childEnv = {...env};
+  // Structural cases own their runbook/evidence root, not the caller's campaign.
+  delete childEnv.CJCJ_GATE_EVIDENCE;
+  const args = [command, name, '--repo', root, '--json', ...extra];
+  const result = run(process.execPath, args, {env: childEnv});
+  let value, parseError;
   try {
     value = JSON.parse(result.stdout);
   } catch (error) {
-    assert.fail(`gate output is not JSON: ${error.message}\nstdout=${result.stdout}\nstderr=${result.stderr}`);
+    parseError = error.message;
   }
+  const record = {command: [process.execPath, ...args], status: result.status,
+    signal: result.signal, error: result.error?.message, stdout: result.stdout,
+    stderr: result.stderr, value, parseError};
+  const evidence = path.join(gateEvidence, `${process.pid}-${++gateSequence}-${name}.json`);
+  fsSync.writeFileSync(evidence, JSON.stringify(record, null, 2) + '\n');
+  assert.equal(parseError, undefined, `gate output is not JSON: ${JSON.stringify(record)}; evidence=${evidence}`);
+  if (expectScope) assert.ok(value.scope && Array.isArray(value.scope.platforms) && Array.isArray(value.scope.jobs),
+    `gate scope missing: ${JSON.stringify(record)}; evidence=${evidence}`);
   return {result, value};
 }
 
@@ -156,8 +175,21 @@ async function platformFixture(t) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'release-platform-gates-'));
   t.after(() => fs.rm(root, {recursive: true, force: true}));
   for (const entry of ['build', 'ci', '.github', 'scripts', 'ops']) {
-    await fs.cp(path.join(repo, entry), path.join(root, entry), {recursive: true});
+    await fs.cp(path.join(repo, entry), path.join(root, entry), {recursive: true,
+      mode: fsSync.constants.COPYFILE_FICLONE,
+      // These gates execute bundle/wire tests, not the separate G1 parser or
+      // pinned Git acquisition fixtures. Do not clone their large inputs per case.
+      filter: source => !['ci/fixtures/git', 'ci/g1-parser/node_modules'].some(relative =>
+        source === path.join(repo, relative) || source.startsWith(path.join(repo, relative) + path.sep)),
+    });
   }
+  const evidence = path.join(root, 'private-evidence');
+  await fs.mkdir(evidence);
+  const runbook = path.join(root, 'ops/coord/RELEASE_0_0_2_RUNBOOK.md');
+  const original = await fs.readFile(runbook, 'utf8');
+  assert.match(original, /^export RELEASE_EVIDENCE_ROOT=.+$/m);
+  await fs.writeFile(runbook, original.replace(/^export RELEASE_EVIDENCE_ROOT=.+$/m,
+    `export RELEASE_EVIDENCE_ROOT=${evidence}`));
   return root;
 }
 
@@ -172,9 +204,10 @@ async function mutateFile(root, relative, transform) {
 }
 
 test('platform gates consume every registry row and retain explicit run requirements', async t => {
+  const root = await platformFixture(t);
   const {allReleasePlatforms, getReleasePlatform, releasePlatformReadiness} = await import('../build/lib/targets.mjs');
   for (const name of platformGates) {
-    const {result, value} = gate(repo, name);
+    const {result, value} = gate(root, name);
     t.diagnostic(`${name}: real CLI rc=${result.status}, status=${value.status}`);
     assert.equal(result.status, name === 'G15' ? 0 : value.scope.platforms.some(p => p.status === 'blocked') ? 1 : 2, JSON.stringify(value));
     assert.deepEqual(value.scope.platforms.map(row => row.key), allReleasePlatforms());
@@ -184,9 +217,23 @@ test('platform gates consume every registry row and retain explicit run requirem
       assert.deepEqual(row.reasons, [...releasePlatformReadiness(row.key).reasons]);
     }
     assert.deepEqual(value.scope.jobs.map(job => job.key).sort(), allReleasePlatforms()
-      .filter(key => releasePlatformReadiness(key).status === 'buildable').sort());
+      .filter(key => releasePlatformReadiness(key).packageDeclared).sort());
     if (name !== 'G15') assert.match(value.value, /NEEDS_RUN:/);
   }
+});
+
+test('G15 runs real child assertions and preserves their failure under a parent test runner', async t => {
+  const root = await platformFixture(t);
+  const normal = gate(root, 'G15');
+  assert.equal(normal.result.status, 0, JSON.stringify(normal.value));
+  assert.match(normal.value.value, /tests pass=[1-9]\d* fail=0/);
+  const control = gate(root, 'G3');
+  await fs.appendFile(path.join(root, 'ci/srcbuild/tests/release-wire.test.mjs'),
+    "\ntest('G15 child failure control', () => assert.fail('G15_REAL_CHILD_FAILURE'));\n");
+  const failed = gate(root, 'G15');
+  assert.equal(failed.result.status, 1, JSON.stringify(failed.value));
+  assert.equal(failed.value.status, 'NOT_MET');
+  assert.deepEqual(gate(root, 'G3').value, control.value);
 });
 
 test('new registry platform makes each dependent gate red until its package job exists', async t => {
@@ -201,20 +248,17 @@ test('new registry platform makes each dependent gate red until its package job 
     assert.match(value.value, /fixture-new-platform: expected one package job, found 0/);
   });
   // A newly supported platform can be wired without editing the gate itself.
-  await mutateFile(root, '.github/workflows/release.yml', source => source.replace('jobs:\n', [
-    'jobs:',
-    '  fixture-new-package:',
-    '    uses: ./.github/workflows/build-release-package.yml',
-    '    needs: [package-p1-linux-x64]',
-    '    with:',
-    '      release_key: fixture-new-platform',
-    '      platform: linux-x64',
-    '      llvm_platform: linux_x86_64',
-    '      std_artifact: final-std-linux-x64',
-    "      cross_std_artifacts: '[]'",
-    '',
-  ].join('\n')).replace('    needs: [source-p1-linux-x64,', '    needs: [fixture-new-package, source-p1-linux-x64,')
-    .replace("        needs.package-p5-darwin-x64.result == 'success' &&", "        needs.fixture-new-package.result == 'success' &&\n        needs.package-p5-darwin-x64.result == 'success' &&"));
+  await mutateFile(root, '.github/workflows/release.yml', source => {
+    const release = loadYaml(source);
+    const native = Object.values(release.jobs).find(job => job.with?.release_key === 'linux-x64');
+    assert.ok(native, 'real native package is the reusable caller template');
+    release.jobs['fixture-new-package'] = {...native, needs: ['package-p1-linux-x64'],
+      with: {...native.with, release_key: 'fixture-new-platform', cross_std_artifacts: '[]'}};
+    release.jobs.publish.needs.push('fixture-new-package');
+    release.jobs.publish.if = release.jobs.publish.if.replace(/\s*}}\s*$/,
+      " && needs.fixture-new-package.result == 'success' }}");
+    return dumpYaml(release, {lineWidth: -1});
+  });
   for (const name of platformGates) {
     const {result, value} = gate(root, name);
     assert.equal(result.status, name === 'G15' ? 0 : value.scope.platforms.some(p => p.status === 'blocked') ? 1 : 2, JSON.stringify(value));
@@ -280,7 +324,7 @@ test('comments do not create jobs and excluded or blocked rows keep their reason
     assert.ok(after.value.value.includes(row.key));
     assert.ok(after.value.value.includes(row.reasons[0]));
   }
-  const historical = gate(root, 'G7', ['--ref', 'HEAD']);
+  const historical = gate(root, 'G7', ['--ref', 'HEAD'], {expectScope: false});
   assert.equal(historical.result.status, 2);
   assert.match(historical.value.value, /require a checkout, not --ref/);
 });
@@ -338,13 +382,59 @@ test('release YAML formatting preserves real CLI gate results', async t => {
   });
 });
 
+test('platform fixtures isolate caller evidence, private registries and runbooks', async t => {
+  const first = await platformFixture(t);
+  const second = await platformFixture(t);
+  const baseline = gate(first, 'G3');
+  const control = gate(second, 'G3');
+  const poisoned = {...process.env, CJCJ_GATE_EVIDENCE: path.join(first, 'absent-external-campaign')};
+  const isolated = gate(first, 'G3', [], {env: poisoned, expectScope: false});
+  assert.deepEqual(isolated.value, baseline.value, 'caller evidence must not replace case-owned input');
+  const registry = path.join(first, 'private-evidence/GATE_EVIDENCE.json');
+  await fs.writeFile(registry, '{invalid registry');
+  const rejected = gate(first, 'G3', [], {expectScope: false});
+  assert.equal(rejected.result.status, 2);
+  assert.match(rejected.value.value, /unreadable JSON/);
+  assert.deepEqual(gate(second, 'G3').value, control.value, 'registry mutation is case-local');
+  await fs.rm(registry);
+  assert.deepEqual(gate(first, 'G3').value, baseline.value, 'registry removal restores original missing-evidence semantics');
+  const runbook = path.join(first, 'ops/coord/RELEASE_0_0_2_RUNBOOK.md');
+  const original = await fs.readFile(runbook, 'utf8');
+  await fs.writeFile(runbook, original.replace(/^export RELEASE_EVIDENCE_ROOT=.+$/m, '# deliberately missing root'));
+  const invalidRoot = gate(first, 'G3', [], {expectScope: false});
+  assert.equal(invalidRoot.result.status, 2);
+  assert.match(invalidRoot.value.value, /runbook does not expose one concrete RELEASE_EVIDENCE_ROOT/);
+  assert.deepEqual(gate(second, 'G3').value, control.value, 'runbook mutation is case-local');
+  await fs.writeFile(runbook, original);
+  assert.deepEqual(gate(first, 'G3').value, baseline.value, 'runbook restoration recovers scope');
+  t.diagnostic('PRIVATE_EVIDENCE_ISOLATION caller/registry/runbook rejection and recovery reached');
+});
+
 test('invalid release YAML and duplicate mapping keys fail closed', async t => {
   const root = await platformFixture(t);
   for (const source of ['jobs: [', 'jobs: {}\njobs: {}\n', 'jobs: []\n']) {
     await write(root, '.github/workflows/release.yml', source);
-    const {result, value} = gate(root, 'G15');
+    const {result, value} = gate(root, 'G15', [], {expectScope: false});
     assert.equal(result.status, 1, JSON.stringify(value));
     assert.equal(value.status, 'NOT_MET');
     assert.match(value.value, /invalid release workflow YAML|jobs must be a mapping/);
+  }
+});
+
+// A blocked native source must not make its declared package obligation vanish.
+test('every source-blocked declared package remains mandatory without gaining readiness', async t => {
+  const root = await platformFixture(t);
+  const original = await fs.readFile(path.join(root, '.github/workflows/release.yml'), 'utf8');
+  const scope = gate(root, 'G7').value.scope;
+  for (const row of scope.platforms.filter(p => p.packageDeclared && p.status === 'blocked')) {
+    const job = scope.jobs.find(j => j.key === row.key);
+    assert.ok(job, row.key);
+    await write(root, '.github/workflows/release.yml', original.replace(
+      new RegExp(`^  ${job.id}:[\\s\\S]*?(?=^  [\\w-]+:|$(?![\\s\\S]))`, 'm'), ''));
+    const {result, value} = gate(root, 'G7');
+    console.log(`DECLARED_BLOCKED_ASSERT key=${row.key} rc=${result.status} failures=${JSON.stringify(value.scope.failures)}`);
+    assert.equal(result.status, 1);
+    assert.ok(value.scope.failures.includes(`${row.key}: expected one package job, found 0`));
+    assert.deepEqual(value.scope.platforms.find(p => p.key === row.key), row);
   }
 });

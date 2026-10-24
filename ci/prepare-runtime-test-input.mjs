@@ -5,11 +5,13 @@ import path from 'node:path';
 import {resolveRuntimeSource} from './runtime-pin.mjs';
 import {sourceFetchArguments} from '../build/lib/git.mjs';
 import {GATING, GATING_FLOOR, repoRoot, validateManifest} from './test-manifest.mjs';
+import {prepareOriginalSource} from './llvm-runtime-fixture.mjs';
 
 const [destination, ...extra] = argv._;
 const mode = argv.run === true ? '--run' : undefined;
 if (!destination || extra.length || (argv.run !== undefined && argv.run !== true))
   throw new Error('usage: prepare-runtime-test-input.mjs CHECKOUT_DIR [--run]');
+prepareOriginalSource();
 const checkout = path.resolve(destination);
 if (/[\r\n]/.test(checkout)) throw new Error('checkout path must be a single environment line');
 // Test input is always the formal pin; caller overrides cannot select it.

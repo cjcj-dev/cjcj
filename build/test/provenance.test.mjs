@@ -7,6 +7,41 @@ import {spawnSync} from 'node:child_process';
 import test from 'node:test';
 import {compilerCommit, sourceCommit, writeStdProvenance} from '../lib/provenance.mjs';
 
+test('archive source provenance consumes the verified producer revision without Git metadata',async()=>{
+  const f=fixture();const commit=git(f.source,'rev-parse','HEAD');
+  fs.renameSync(path.join(f.source,'.git'),path.join(f.root,'git-evidence'));
+  await writeStdProvenance({sourceDir:f.source,sourceRevision:commit,installPrefix:f.prefix,compiler:f.compiler,
+    buildSdk:'fixed-fixture-sdk',coloured:'true',preflightC2:'stage2',barrier:'generational-post',failClosed:false});
+  const text=fs.readFileSync(path.join(f.prefix,'PROVENANCE.txt'),'utf8');
+  assert.match(text,new RegExp('STD_SOURCE_COMMIT = '+commit));
+  assert.match(text,new RegExp('CJSTD-COMMIT:'+commit));
+});
+
+test('explicit source revision cannot override Git; omitted revision keeps trusted legacy injection',async()=>{
+  const f=fixture(), actual=git(f.source,'rev-parse','HEAD'), other='a'.repeat(40);
+  await assert.rejects(writeStdProvenance({sourceDir:f.source,sourceRevision:other,
+    installPrefix:f.prefix,compiler:f.compiler}),/STD_SOURCE_REVISION/);
+  const previous=process.env.CJSTD_COMMIT;
+  try {
+    process.env.CJSTD_COMMIT=other;
+    await writeStdProvenance({sourceDir:f.source,installPrefix:f.prefix,compiler:f.compiler});
+    assert.match(fs.readFileSync(path.join(f.prefix,'PROVENANCE.txt'),'utf8'),new RegExp('STD_SOURCE_COMMIT = '+other));
+    await writeStdProvenance({sourceDir:f.source,sourceRevision:actual,installPrefix:f.prefix,compiler:f.compiler});
+    assert.match(fs.readFileSync(path.join(f.prefix,'PROVENANCE.txt'),'utf8'),new RegExp('STD_SOURCE_COMMIT = '+actual));
+  } finally {if(previous===undefined)delete process.env.CJSTD_COMMIT;else process.env.CJSTD_COMMIT=previous;}
+});
+
+test('explicit archive source is not relabelled by a surrounding unrelated Git checkout',async()=>{
+  const f=fixture(), source=path.join(f.source,'archive-child');fs.mkdirSync(source);
+  fs.writeFileSync(path.join(source,'std.cj'),'package std\n');
+  const archiveRevision='b'.repeat(40);
+  await writeStdProvenance({sourceDir:source,sourceRoot:source,sourceRevision:archiveRevision,
+    installPrefix:f.prefix,compiler:f.compiler});
+  const text=fs.readFileSync(path.join(f.prefix,'PROVENANCE.txt'),'utf8');
+  assert.match(text,new RegExp('STD_SOURCE_COMMIT = '+archiveRevision+'\\s'));
+  assert.doesNotMatch(text,/STD_SOURCE_COMMIT = .*dirty/);
+});
+
 // Builds the same fixture the first test uses. `stamped: false` leaves the
 // CJCJ-COMMIT marker out so compilerCommit probes and comes back empty.
 function fixture({stamped = true} = {}) {

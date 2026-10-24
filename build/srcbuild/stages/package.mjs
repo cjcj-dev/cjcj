@@ -6,8 +6,9 @@ import {BuildError} from '../../lib/errors.mjs';
 import {getLogger, stage} from '../../lib/logging.mjs';
 import {run as runCommand} from '../../lib/runner.mjs';
 import {assertNoVerifierReportArtifacts} from '../../../scripts/verifier_artifact_gate.mjs';
-import {assertSdkPathParity} from '../../lib/sdk-path-parity.mjs';
-import {consumerSdk, copyInto, copytree, ensureDir, requireDir, requireFile} from './common.mjs';
+import {packageInstall} from '../../../ci/srcbuild/lib/package-install.mjs';
+import {archiveInstall} from '../../../ci/bootstrap/sdk-flow.mjs';
+import {consumerSdk, ensureDir, requireDir, requireFile} from './common.mjs';
 
 const logger = getLogger('cangjie_build.stages.package');
 
@@ -17,29 +18,6 @@ function platformLibDirName(config) {
 
 function archivePath(config, baseName) {
   return path.join(config.softwareDir, `${baseName}.${config.target.spec.archiveFormat}`);
-}
-
-async function makeArchive(config, sourceDir, baseName) {
-  const format = config.target.spec.archiveFormat;
-  fs.mkdirSync(config.softwareDir, {recursive: true});
-  const archive = archivePath(config, baseName);
-  fs.rmSync(archive, {force: true});
-  logger.info('Creating %s archive %s', format, archive);
-  if (format === 'tar.gz') {
-    await runCommand([
-      config.target.spec.tarCommand, '--format=gnu', '-czf', archive,
-      '-C', path.dirname(sourceDir), path.basename(sourceDir),
-    ], {
-      stage: 'package.archive',
-    });
-  } else if (format === 'zip') {
-    await runCommand(['zip', '-r', archive, path.basename(sourceDir)], {
-      cwd: path.dirname(sourceDir), stage: 'package.archive',
-    });
-  } else {
-    throw new BuildError('package.archive', `unsupported archive format: ${format}`);
-  }
-  return archive;
 }
 
 function globOrFail(directory, suffix, stageName) {
@@ -54,117 +32,52 @@ function globOrFail(directory, suffix, stageName) {
 function organizeSdkTree(config, destination) {
   const suffix = config.target.spec.exeSuffix;
   const toolsRoot = config.repoPath('tools');
-  const usabilityChecker = requireFile(
-    path.resolve(import.meta.dirname, '..', '..', '..', 'scripts', 'check_sdk_usable.mjs'),
-    {stage: 'package.usability_checker'},
-  );
-  const verifierArtifactGate = requireFile(
-    path.resolve(import.meta.dirname, '..', '..', '..', 'scripts', 'verifier_artifact_gate.mjs'),
-    {stage: 'package.verifier_artifact_gate'},
-  );
-  const astSupport = path.join(destination, 'lib', platformLibDirName(config), 'libcangjie-ast-support.a');
-  if (fs.statSync(astSupport, {throwIfNoEntry: false})?.isFile()) {
-    fs.unlinkSync(astSupport);
-    logger.info('Removed %s', astSupport);
+  // CMake's installed AST library is consumed by the compiler and by the
+  // original AST installation facts. Preserve it in both copied and in-place
+  // SDKs; organizing public tools must not prune native installation members.
+
+  // Native target/install owns this tree. Packaging must preserve the public
+  // launchers and retained products rather than overwrite them from build dirs.
+  for(const name of ['cjpm','cjfmt','hle','LSPServer','cjcov','cjtrace-recover','cjlint','cjprof','cjcompat']) {
+    for(const relative of ['tools/bin/'+name+suffix,'tools/bin/'+name+suffix+'.entry',
+      '.target-tools/tools/bin/'+name+suffix])requireFile(path.join(destination,relative),{stage:'package.'+name});
+  }
+  for(const relative of ['tools/config/cangjie-format.toml','tools/config/cangjie-repo.toml',
+    'tools/dtsparser/analysis.js','tools/dtsparser/DEPENDENCIES.json','tools/bin/node'+suffix]) {
+    requireFile(path.join(destination,relative),{stage:'package.tool-payload'});
   }
 
-  const toolsBin = ensureDir(path.join(destination, 'tools', 'bin'));
-  const toolsConfig = ensureDir(path.join(destination, 'tools', 'config'));
-  copyInto(usabilityChecker, path.join(destination, 'tools'), {stage: 'package.usability_checker'});
-  copyInto(verifierArtifactGate, path.join(destination, 'tools'), {stage: 'package.verifier_artifact_gate'});
-  const cjpm = requireFile(path.join(toolsRoot, 'cjpm', 'dist', `cjpm${suffix}`), {stage: 'package.cjpm'});
-  copyInto(cjpm, toolsBin, {stage: 'package.cjpm'});
 
-  const cjfmt = requireFile(path.join(toolsRoot, 'cjfmt', 'build', 'build', 'bin', `cjfmt${suffix}`), {
-    stage: 'package.cjfmt',
-  });
-  copyInto(cjfmt, toolsBin, {stage: 'package.cjfmt'});
-  for (const toml of globOrFail(path.join(toolsRoot, 'cjfmt', 'config'), '.toml', 'package.cjfmt.config')) {
-    copyInto(toml, toolsConfig, {stage: 'package.cjfmt.config'});
-  }
+}
 
-  const hleSource = requireFile(path.join(toolsRoot, 'hyperlangExtension', 'target', 'bin', `main${suffix}`), {
-    stage: 'package.hle',
-  });
-  fs.cpSync(hleSource, path.join(toolsBin, `hle${suffix}`), {preserveTimestamps: true});
-
-  const dtsparserSource = requireDir(path.join(toolsRoot, 'hyperlangExtension', 'src', 'dtsparser'), {
-    stage: 'package.dtsparser',
-  });
-  const dtsparserDestination = path.join(destination, 'tools', 'dtsparser');
-  copytree(dtsparserSource, dtsparserDestination, {stage: 'package.dtsparser'});
-  for (const name of fs.readdirSync(dtsparserDestination)) {
-    const candidate = path.join(dtsparserDestination, name);
-    if (name.endsWith('.cj') && fs.statSync(candidate).isFile()) fs.unlinkSync(candidate);
-  }
-
-  const lsp = requireFile(path.join(toolsRoot, 'cangjie-language-server', 'output', 'bin', `LSPServer${suffix}`), {
-    stage: 'package.lsp',
-  });
-  copyInto(lsp, toolsBin, {stage: 'package.lsp'});
-
-  // Both are built native-only, so on the Windows cross build the SDK keeps the
-  // base toolchain's copies rather than failing on a product we never produced.
-  if (!config.target.spec.crossCompile) {
-    const cjcov = requireFile(path.join(toolsRoot, 'cjcov', 'dist', `cjcov${suffix}`), {stage: 'package.cjcov'});
-    copyInto(cjcov, toolsBin, {stage: 'package.cjcov'});
-
-    // cjtrace-recover installs through CMake, which places programs under bin/.
-    const cjtrace = requireFile(
-      path.join(toolsRoot, 'cjtrace-recover', 'dist', 'bin', `cjtrace-recover${suffix}`),
-      {stage: 'package.cjtrace-recover'},
-    );
-    copyInto(cjtrace, toolsBin, {stage: 'package.cjtrace-recover'});
-  }
+function installedStdx(config) {
+  if (config.stdxProfile === 'sdk-tools') throw new BuildError('package.stdx', 'complete SDK packaging requires full stdx');
+  return requireDir(path.join(consumerSdk(config, config.target.primaryCompilerOutput()), 'stdx',
+    config.target.stdxTargetSubdir()), {stage: 'package.stdx'});
 }
 
 async function packageMainSdk(config) {
   const compilerOutput = consumerSdk(config, config.target.primaryCompilerOutput());
   requireDir(compilerOutput, {stage: 'package.compiler_output'});
+
   try {
     assertNoVerifierReportArtifacts([compilerOutput]);
   } catch (error) {
     throw new BuildError('package.verifier_artifact_gate', error.message);
   }
-  const cangjieDir = path.join(ensureDir(config.softwareDir), 'cangjie');
-  const sameDirectory = fs.existsSync(cangjieDir)
-    && fs.realpathSync(compilerOutput) === fs.realpathSync(cangjieDir);
-  if (!sameDirectory) {
-    fs.rmSync(cangjieDir, {recursive: true, force: true});
-    fs.cpSync(compilerOutput, cangjieDir, {recursive: true, dereference: false, preserveTimestamps: true});
-  }
-  organizeSdkTree(config, cangjieDir);
-  if (config.target.spec.os !== 'windows') {
-    // Match the release re-packager: installed SDK data must be readable and
-    // directories/programs traversable by users other than the build account.
-    await runCommand(['chmod', '-R', 'u+rwX,go+rX', cangjieDir], {stage: 'package.permissions'});
-  }
+  installedStdx(config); // Still required before copying or archiving an SDK.
+  const cangjieDir=compilerOutput;
+  organizeSdkTree(config,cangjieDir);
   const archiveBase = `cangjie-sdk-${config.target.spec.sdkName}-${config.cangjieVersion}`;
-  // A failed parity check must not leave a stale archive from an earlier run
-  // looking publishable in software/.
-  fs.rmSync(archivePath(config, archiveBase), {force: true});
-  const parity = await assertSdkPathParity(cangjieDir, {officialRoot: config.officialSdkRoot});
-  logger.info(
-    'SDK_PATH_PARITY_PASS official=%s candidate=%s required=%d extra=%d',
-    parity.officialRoot,
-    parity.candidateRoot,
-    parity.officialPaths.length,
-    parity.extraInCandidate.length,
-  );
-  return makeArchive(config, cangjieDir, archiveBase);
+  return (await packageInstall({sdk:cangjieDir,target:config.target,version:config.cangjieVersion,
+    officialSdkRoot:config.officialSdkRoot,archive:archivePath(config,archiveBase)})).archive;
 }
 
-async function packageStdx(config) {
-  const stdxDir = path.join(config.repoPath('stdx'), 'target', config.target.stdxTargetSubdir());
-  requireDir(stdxDir, {stage: 'package.stdx'});
-  const staged = path.join(ensureDir(config.softwareDir), path.basename(stdxDir));
-  fs.rmSync(staged, {recursive: true, force: true});
-  fs.cpSync(stdxDir, staged, {recursive: true, dereference: false, preserveTimestamps: true});
-  return makeArchive(
-    config,
-    staged,
-    `cangjie-stdx-${config.target.spec.sdkName}-${config.cangjieVersion}.${config.stdxVersion}`,
-  );
+export async function packageStdx(config) {
+  const stdxDir = installedStdx(config);
+  return (await archiveInstall({install:stdxDir,
+    archive:archivePath(config,`cangjie-stdx-${config.target.spec.sdkName}-${config.cangjieVersion}.${config.stdxVersion}`),
+    format:config.target.spec.archiveFormat,records:[]})).archive;
 }
 
 export async function run(config) {

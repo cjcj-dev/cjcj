@@ -28,8 +28,8 @@ All platforms emit the same strict fifteen-field `tuple` manifest, binding the
 platform, three source pins, three tools' source/version/hash, linker name and
 shim hash. Partial legacy manifests are rejected. Windows can compute every
 field from the same pinned sources and its built shim; no field is exempt.
-Native dependency and shim checks remain. Windows uses `fetch_sources.sh` and
-`build_tuple.sh` under MSYS2, including its LLVM static archives. The unified
+Native dependency and shim checks remain. Windows uses `fetch_sources.mjs` and
+`build_tuple.mjs` under MSYS2, including its LLVM static archives. The unified
 cache identity includes both recipes and the target registry, preventing reuse
 of the former split recipes.
 
@@ -40,7 +40,7 @@ rebuild LLVM on every target.
 
 Private tool producers can explicitly pair a candidate LLVM with a runtime
 without changing the formal `ci/runtime_pin.env` default. Pass all three values
-to both `fetch_sources.sh` and `build_tuple.sh`:
+to both `fetch_sources.mjs` and `build_tuple.mjs`:
 
 ```sh
 export CJCJ_LLVM_RUNTIME_MODE=private
@@ -48,8 +48,8 @@ export CJCJ_LLVM_RUNTIME_URL=https://github.com/cjcj-dev/cangjie-runtime.git
 export CJCJ_LLVM_RUNTIME_SHA=4909b2dec1af7f522133c6401e2ce960b0ef511d
 # The approved private pairing for this runtime is LLVM
 # 20a76c752153ca2f56b3f65b205653f7f60e8869; set LLVM_SHA explicitly as usual.
-bash ci/platform_tuples/fetch_sources.sh
-bash ci/platform_tuples/build_tuple.sh
+npx --yes zx@8 ci/platform_tuples/fetch_sources.mjs
+npx --yes zx@8 ci/platform_tuples/build_tuple.mjs
 ```
 
 Do not combine these with `RUNTIME_REF`/`RUNTIME_SRC_URL`. Missing, malformed,
@@ -68,6 +68,6 @@ The mirror must contain the formal pin and the explicit private commit above.
 The build-entry test records the real first CMake arguments and stops there;
 it does not claim to configure/build LLVM or run a native GitHub job.
 
-`bash ci/test-llvm-runtime-chain.sh <new-lane-directory> <runtime-mirror>
+`npx --yes zx@8 ci/test-llvm-runtime-chain.mjs <new-lane-directory> <runtime-mirror>
 <other-source-mirror>` passes the same tuple directly from source fetch
 to the build entry and checks the runtime HEAD at the emitted CMake path.

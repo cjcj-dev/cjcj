@@ -15,12 +15,12 @@ const target = {
 test('bootstrap SDK verification retains exactly the SDK-owned phases', async () => {
   const source = await fs.readFile(entry, 'utf8');
   assert.deepEqual([...source.matchAll(/await phase\('([^']+)'/g)].map(match => match[1]),
-    ['lineage', 'smoke', 'selfcheck', 'selfdet']);
+    ['lineage', 'installed-compiler', 'smoke', 'selfcheck', 'selfdet']);
 });
 
-async function runEntry(t, {compiler = true} = {}) {
-  const work = await fs.mkdtemp(path.join(os.tmpdir(), 'verify-sdk-contract-'));
-  t.after(() => fs.rm(work, {recursive: true, force: true}));
+async function runEntry(t, {compiler = true, sharedRoot} = {}) {
+  const work = sharedRoot || await fs.mkdtemp(path.join(os.tmpdir(), 'verify-sdk-contract-'));
+  if (!sharedRoot) t.after(() => fs.rm(work, {recursive: true, force: true}));
   const sdk = path.join(work, 'sdk');
   await fs.mkdir(path.join(sdk, 'bin'), {recursive: true});
   // An intentionally rejected SDK lets the real lineage phase expose its
@@ -57,4 +57,27 @@ test('verify still rejects a missing deployed compiler before SDK phases', {skip
   assert.match(result.output, /exit code: 1/);
   assert.doesNotMatch(result.output, /\[preflight\] runner-specific probes/);
   assert.doesNotMatch(result.output, /bootstrap-intermediate: std provenance/);
+});
+
+
+test('verify preserves another invocation work and allocates separate directories', {skip: !target}, async t => {
+  const sharedRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'verify-sdk-shared-'));
+  t.after(() => fs.rm(sharedRoot, {recursive: true, force: true}));
+  const occupied = path.join(sharedRoot, 'cjcj-srcbuild-verify');
+  await fs.mkdir(occupied);
+  await fs.writeFile(path.join(occupied, 'active-output'), 'other invocation');
+  const first = await runEntry(t, {sharedRoot});
+  const second = await runEntry(t, {sharedRoot});
+  for (const result of [first, second]) {
+    assert.equal(result.status, 1, result.output);
+    assert.match(result.output, /bootstrap-intermediate: std provenance names stdlib-stage1/);
+  }
+  assert.equal(await fs.readFile(path.join(occupied, 'active-output'), 'utf8'), 'other invocation');
+  const one = first.output.match(/\[verify\] work=(.+)/)?.[1];
+  const two = second.output.match(/\[verify\] work=(.+)/)?.[1];
+  assert.ok(one); assert.ok(two); assert.notEqual(one, two);
+  assert.equal(path.dirname(one), sharedRoot);
+  assert.equal(path.dirname(two), sharedRoot);
+  assert.ok((await fs.stat(one)).isDirectory());
+  assert.ok((await fs.stat(two)).isDirectory());
 });

@@ -1,0 +1,106 @@
+name: Native runtime and bounds installation
+on:
+  workflow_call:
+    inputs:
+      llvm_ref:
+        type: string
+        required: true
+      runtime_ref:
+        type: string
+        required: true
+      runtime_version:
+        type: string
+        required: true
+      platforms:
+        type: string
+        default: all
+permissions:
+  contents: read
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.select.outputs.dylib_matrix }}
+      platforms: ${{ steps.select.outputs.tuple_platforms }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate the explicit native source pair
+        env:
+          NATIVE_LLVM_REF: ${{ inputs.llvm_ref }}
+          NATIVE_RUNTIME_REF: ${{ inputs.runtime_ref }}
+        run: |
+          set -euo pipefail
+          test -n "$NATIVE_LLVM_REF"
+          test -n "$NATIVE_RUNTIME_REF"
+          node ci/native-llvm-inputs.mjs
+      - name: Select the existing native runner matrix
+        id: select
+        env:
+          REQUESTED: ${{ inputs.platforms }}
+        run: node ci/llvm-tools-matrix.mjs
+  runtime:
+    needs: plan
+    if: needs.plan.outputs.platforms != '[]'
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+      - name: Load native source pair
+        id: pin
+        env:
+          NATIVE_LLVM_REF: ${{ inputs.llvm_ref }}
+          NATIVE_RUNTIME_REF: ${{ inputs.runtime_ref }}
+        run: node ci/native-llvm-inputs.mjs
+      - uses: actions/checkout@v7
+        with:
+          repository: cjcj-dev/cangjie-runtime
+          ref: ${{ steps.pin.outputs.runtime_sha }}
+          path: runtime-source
+      - uses: ./.github/actions/sccache
+        with:
+          component: native-runtime
+          platform: ${{ matrix.platform }}
+          pin: ${{ steps.pin.outputs.runtime_sha }}
+      - name: Build and install the exact native runtime and bounds
+        env:
+          RUNTIME_NATIVE_PAIR: '1'
+          GC_UNIT_GATE_LANGUAGE_TESTS: ${{ runner.os == 'Linux' && 'defer' || 'all' }}
+          RUNTIME_REF: ${{ steps.pin.outputs.runtime_sha }}
+          RUNTIME_VERSION: ${{ inputs.runtime_version }}
+          RUNTIME_TARGET: native
+          RUNTIME_BUILD_TYPE: release
+          NATIVE_RUNTIME_PLATFORM: ${{ matrix.platform }}
+          MATRIX_RUNNER: ${{ matrix.runner }}
+        run: |
+          set -euo pipefail
+          ulimit -S -c 0
+          ulimit -H -c 0
+          if [ "$RUNNER_OS" = macOS ]; then
+            export CANGJIE_BUILD_JOBS=$(sysctl -n hw.logicalcpu)
+          else
+            export CANGJIE_BUILD_JOBS=$(nproc)
+          fi
+          npx --yes zx@8 ci/platform_matrix/build_runtime.mjs
+      - uses: actions/upload-artifact@v7
+        with:
+          name: native-runtime-install-${{ matrix.platform }}
+          path: .platform-ci/runtime-install
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: native-runtime-diagnostics-${{ matrix.platform }}
+          path: |
+            .platform-ci/logs
+            runtime-source/runtime/CMakebuild/CMakeCache.txt
+            runtime-source/runtime/tests/gc_unit/build_standalone/gate-runs
+          if-no-files-found: warn
+      - uses: ./.github/actions/sccache-report
+        if: always()
+        with:
+          component: native-runtime
+          platform: ${{ matrix.platform }}
+          require-compiles: ${{ job.status == 'success' }}

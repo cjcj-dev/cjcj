@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import test from 'node:test';
+import {recordRuntimeInputs} from '../build/lib/runtime-source-inputs.mjs';
 
 const repo = path.resolve(import.meta.dirname, '..');
 const command = path.join(repo, 'ci', 'release-gates.mjs');
@@ -370,7 +371,7 @@ test('capture records a dirty build truthfully instead of laundering it', async 
 
 // Like the packaged-std P05 contract, count production workflow invocations,
 // not mentions in tests, comments, or the capture command's usage text.
-test('G2 identity capture has exactly one workflow consumer', async t => {
+for (const runtimeMode of ['git','archive']) test('G2 workflow capture and gate consume ordinary runtime facts: '+runtimeMode, async t => {
   const workflows = path.join(repo, '.github', 'workflows');
   const consumers = [];
   for (const name of (await fs.readdir(workflows)).sort()) {
@@ -395,8 +396,8 @@ test('G2 identity capture has exactly one workflow consumer', async t => {
   assert.ok(freezeStep.includes('tar -cf "$base_archive" -C "$CJCJ_SRCBUILD_HOST_SDK" .'));
   assert.ok(freezeStep.includes('--base-sdk "$base_archive"'));
   assert.ok(!freezeStep.includes('prepare_base_sdk'), 'G2_WORKFLOW_FREEZE: no network download feeds the freeze');
-  assert.ok(source.indexOf('- name: Freeze G2 identity inputs') < source.indexOf('- name: Compose self-hosted SDK'));
-  assert.ok(source.indexOf('- name: Compose self-hosted SDK') < source.indexOf('- name: Capture G2 SDK identity'));
+  assert.ok(source.indexOf('- name: Freeze G2 identity inputs') < source.indexOf('- name: Test and archive installed SDK'));
+  assert.ok(source.indexOf('- name: Test and archive installed SDK') < source.indexOf('- name: Capture G2 SDK identity'));
   assert.ok(source.indexOf('- name: Capture G2 SDK identity') < source.indexOf('- name: Retain G2 campaign identity'));
   const step = source.split(/^      - name:/m)
     .find(value => /^[ \t]*node ci\/capture-g2-identity\.mjs[ \t]/m.test(value));
@@ -410,15 +411,16 @@ test('G2 identity capture has exactly one workflow consumer', async t => {
   }
   const state = await fixture(t);
   await writeIdentity(state, skeleton());
-  const files = await artifactSet(state);
+  const runtimeStamp=runtimeMode==='archive'?'src-'+'e'.repeat(64):state.runtimePin;
+  const files = await artifactSet(state,{overrides:{runtime_dynamic:runtimeStamp,runtime_static:runtimeStamp}});
   const workspace = path.join(state.campaign, 'workspace');
   const sdk = path.join(workspace, 'software', 'cangjie');
   const locations = {
     runtime_dynamic: 'runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so',
     runtime_static: 'lib/linux_x86_64_cjnative/libcangjie-runtime.a',
-    llvm_llc: 'third_party/llvm/bin/llc',
-    llvm_opt: 'third_party/llvm/bin/opt',
-    cjcj: 'bin/cjc',
+    llvm_llc: '.native-tools/third_party/llvm/bin/llc',
+    llvm_opt: '.native-tools/third_party/llvm/bin/opt',
+    cjcj: 'libexec/compiler/cjcj-stage1',
     std: 'lib/linux_x86_64_cjnative/libcangjie-std-core.a',
   };
   const expected = {};
@@ -432,11 +434,32 @@ test('G2 identity capture has exactly one workflow consumer', async t => {
     expected[name] = {
       artifact_path: destination,
       sha256: crypto.createHash('sha256').update(bytes).digest('hex'),
-      provenance_stamp: `${STAMP_PREFIXES[name]}:${commit}`,
+      provenance_stamp: `${STAMP_PREFIXES[name]}:${name.startsWith('runtime_')?runtimeStamp:commit}`,
       source_commit: commit,
       source_dirty: false,
     };
   }
+  // The workflow now consumes the retained products through installed entry
+  // recipes. The finite text fixtures remain identity-only inputs, not an SDK.
+  const launcher='finite public entry without a product lineage stamp';
+  const digest=bytes=>crypto.createHash('sha256').update(bytes).digest('hex');
+  const recipe=relative=>['cjcj-sdk-entry-v1','1',relative,'linux','native-target:x64','runtime/lib/linux_x86_64_cjnative',''].join('\n');
+  await write(sdk,'bin/cjcj-stage1',launcher);
+  await write(sdk,'bin/cjcj-stage1.entry',recipe(locations.cjcj));
+  for(const alias of ['cjc','cjc-frontend'])await fs.symlink('cjcj-stage1',path.join(sdk,'bin',alias));
+  for(const name of ['llc','opt']){
+    await write(sdk,'third_party/llvm/bin/'+name,launcher);
+    await write(sdk,'third_party/llvm/bin/'+name+'.entry',recipe(locations['llvm_'+name]));
+  }
+  await write(sdk,'STAGE-INPUTS.json',JSON.stringify({platform:'linux_x86_64',compilerFile:locations.cjcj,
+    compilerSha256:expected.cjcj.sha256,compilerEntrySha256:digest(launcher)}));
+  // Ordinary recorder observes the fixture's pair; no historical source tree
+  // or materialization certificate is supplied. Text artifacts remain a G2
+  // reader/workflow contract fixture, not real runtime/SDK production.
+  const facts=await recordRuntimeInputs({repository:state.runtime,commit:state.runtimePin,install:sdk,
+    artifacts:['runtime_dynamic','runtime_static'].map(name=>locations[name]),
+    configuration:{platform:'linux_x86_64',buildType:'Release'},work:sdk});
+  assert.equal('source_materialization' in facts.build,false);
   const result = run('bash', ['-e', '-o', 'pipefail', '-c', body.join('\n')], {
     cwd: repo,
     env: {...process.env, CANGJIE_WORKSPACE: workspace,
@@ -447,4 +470,19 @@ test('G2 identity capture has exactly one workflow consumer', async t => {
   assert.deepEqual(captured.artifacts, expected, 'G2_WORKFLOW_CAPTURE: persist all six measured SDK identities');
   assert.equal(captured.status, 'READY');
   assert.match(captured.captured_utc, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+  const accepted=gate(state);
+  assert.equal(accepted.result.status,0,accepted.value.value);
+  assert.equal(accepted.value.status,'MET');
+  // Retain the normal transport locator while testing each actual consumer
+  // requirement. This fixture edit is not a production identity rewrite.
+  async function replaceRecordedFacts(value) {
+    const bytes=JSON.stringify(value);await write(state.campaign,'RUNTIME-INPUTS.json',bytes);
+    await writeIdentity(state,{...captured,inputs:{runtime:{path:'RUNTIME-INPUTS.json',sha256:digest(bytes)}}});
+  }
+  await replaceRecordedFacts({...facts,build:{}});
+  const missing=gate(state);console.log('G2_RUNTIME_CONFIGURATION_ASSERTION_REACHED',runtimeMode);
+  assert.equal(missing.result.status,1);assert.match(missing.value.value,/original runtime configuration missing/);
+  await replaceRecordedFacts({...facts,artifacts:facts.artifacts.map((row,index)=>index?{...row,sha256:'f'.repeat(64)}:row)});
+  const wrongPair=gate(state);assert.equal(wrongPair.result.status,1);assert.match(wrongPair.value.value,/captured runtime differs.*runtime_static/);
+  await replaceRecordedFacts(facts);assert.equal(gate(state).result.status,0);
 });

@@ -177,6 +177,43 @@ function render(dist, output) {
   ], {encoding: 'utf8'});
 }
 
+test('clean Git runtime manifest preserves its actual stamp',async()=>{
+  const {work,stage,pythonArgs}=await fixture();
+  try{
+    const options={stage,platform:platforms[0],...pythonArgs};
+    const {rows}=await writeReleaseManifest(options),runtime=rows.find(row=>row.component==='runtime');
+    assert.equal(runtime.source.commit,RUNTIME_SHA);assert.equal(runtime.embedded_stamp,'CJRT-COMMIT:'+RUNTIME_SHA);
+    await assert.rejects(writeReleaseManifest({...options,runtimeCommit:'f'.repeat(40)}),/must equal frozen SHA/);
+    console.log('RELEASE_GIT_SOURCE_CONTROL_REACHED');
+  }finally{await fs.rm(work,{recursive:true,force:true});}
+});
+
+test('archive runtime source object is distinct from its materialized product stamp',
+  {skip:!process.env.CJCJ_TEST_ARCHIVE_RUNTIME}, async () => {
+  // Supplied by runtime-archive-source.integration.mjs: actual generated native
+  // SO/ar, not a second expected stamp constructed by the manifest fixture.
+  const input=JSON.parse(await fs.readFile(process.env.CJCJ_TEST_ARCHIVE_RUNTIME,'utf8'));
+  const {work,stage,pythonArgs}=await fixture();
+  try{
+    const facts=JSON.parse(await fs.readFile(path.join(input.install,'RUNTIME-INPUTS.json'),'utf8'));
+    for(const row of facts.artifacts){
+      const dest=path.join(stage,row.path);await fs.mkdir(path.dirname(dest),{recursive:true});
+      await fs.copyFile(path.join(input.install,row.path),dest);
+    }
+    await fs.copyFile(path.join(input.install,'RUNTIME-INPUTS.json'),path.join(stage,'RUNTIME-INPUTS.json'));
+    const options={stage,platform:platforms[0],...pythonArgs,runtimeCommit:input.commit,runtimeRepository:input.repository};
+    const {rows}=await writeReleaseManifest(options),row=rows.find(value=>value.component==='runtime');
+    assert.equal(row.source.commit,input.commit);
+    assert.equal(row.embedded_stamp,facts.embedded_stamp);
+    assert.match(row.embedded_stamp,/^CJRT-COMMIT:src-[0-9a-f]{64}$/);
+    assert.deepEqual(row.build.configuration,facts.build.configuration);
+    assert.equal('source_materialization' in row.build,false);
+    await assert.rejects(writeReleaseManifest({...options,runtimeCommit:'f'.repeat(40)}),/RUNTIME_SOURCE_INPUT_BINDING/);
+    await writeReleaseManifest(options);
+    console.log('RELEASE_ARCHIVE_SOURCE_TARGET_REACHED',row.source.commit,row.embedded_stamp);
+  }finally{await fs.rm(work,{recursive:true,force:true});}
+});
+
 test('five release manifests carry one nonempty SHA_ONLY policy and notes render it', async () => {
   const {work, stage, dist, pythonArgs} = await fixture();
   try {

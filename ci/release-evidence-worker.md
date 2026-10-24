@@ -14,7 +14,7 @@ mkdir -p "$worker/keep"
 curl -fL https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64 \
   -o "$worker/keep/jq-linux-amd64"
 # From the candidate checkout:
-bash ci/release-evidence-worker.sh "$worker/candidate" "$worker/keep/jq-linux-amd64" \
+npx --yes zx@8 ci/release-evidence-worker.mjs "$worker/candidate" "$worker/keep/jq-linux-amd64" \
   build/test/release-evidence.test.mjs
 ```
 
@@ -22,11 +22,25 @@ The entry verifies SHA256
 `5942c9b0934e510ee61eb3e30273f1b3fe2590df93933a93d7c58b81d19c8ff5`
 before and after copying the executable, checks `jq-1.7.1`, and exports a private
 PATH and persistent `RELEASE_EVIDENCE_TEST_ROOT` to the actual Node/shell consumer.
-It prints the selected executable, version and hash. Existing bash, Node and
-sha256sum are required. There is no fallback jq implementation.
+It prints the selected executable, version and hash. Node, zx 8, sha256sum and Linux prlimit (util-linux) are required. There is no fallback jq implementation.
 
 Omit the trailing test arguments to use the complete source-derived list from
 `node ci/test-manifest.mjs list`. Pass Node test options before filenames for a
 focused run. Use separate private roots for parallel arms. Preserve each actual
 exit code and log; existing failures remain failures. On kkk2 invoke this entry
 through `box.sh` and keep all files below `/root/<full-lane-name>/`.
+
+The finite migration contract can be run with real, pinned jq and a separate
+private evidence directory:
+
+```bash
+CJCJ_BASH_AST_PARSER=/private/tools/shfmt-v3.12.0 \
+WORKER_JQ_ENTITY=/private/tools/jq \
+WORKER_MIGRATION_EVIDENCE=/private/worker-contract \
+node --test ci/release-evidence-worker.integration.mjs
+```
+
+`ci/g3-parser-input.json` pins the mature Bash AST parser used by that test.
+It reads the original Bash fixture unchanged; it does not affect the G1 parser.
+The focused default-list test uses a small caller manifest and real Node tests;
+it does not represent a run of the full repository test list.

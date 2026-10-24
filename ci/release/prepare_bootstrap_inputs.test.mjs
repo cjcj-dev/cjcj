@@ -229,3 +229,8 @@ test('reviewed tuple manifest pin rejects valid stored bytes from a different tu
   assert.doesNotMatch(result.stdout, /^CJCJ_BOOTSTRAP_COLOUR_TUPLE=/m);
   console.log('ASSERT independent reviewed tuple manifest pin executed');
 }));
+
+test('explicit missing Cjo header output is refused rather than selecting default',()=>fixture(({env,run,dir})=>{
+ env.CJCJ_BOOTSTRAP_CPP_SRC=path.join(dir,'missing-selected-headers');
+ const result=run();assert.notEqual(result.status,0);assert.match(result.stderr,/SHIM_HEADERS_EXPLICIT_MISSING/);
+}));

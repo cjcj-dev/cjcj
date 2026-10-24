@@ -30,10 +30,10 @@ class BootstrapIdentityTest(unittest.TestCase):
         self.sdk.mkdir()
         (self.sdk / 'envsetup.sh').write_text('# unused: stop at input admission\n')
         self.expected = sha(COMPILER)
-        self.cli = HERE.parent / 'bootstrap/compiler_identity.py'
+        self.cli = HERE.parent / 'bootstrap/compiler_identity.mjs'
 
     def command(self, args):
-        return subprocess.run([sys.executable, *map(str, args)], capture_output=True, text=True)
+        return subprocess.run(['node' if str(args[0]).endswith('.mjs') else sys.executable, *map(str, args)], capture_output=True, text=True)
 
     def install(self, producer):
         result = self.command([self.cli, self.sdk, '--install', producer])
