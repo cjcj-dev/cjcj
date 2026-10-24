@@ -390,6 +390,7 @@ test('G2 consumes declared archive admission before its independent identity gat
   for (const relative of ['ci/llvm_pin.env', 'ci/source_pin.env', 'ci/cjpm_pin.env', 'ci/release-evidence', 'scripts/archive_release_evidence.mjs']) {
     await fs.symlink(path.resolve(relative), path.join(checkout, relative));
   }
+  await fs.writeFile(path.join(work, 'G2_IDENTITY.json'), JSON.stringify({schema_version: 1, status: 'PENDING'}));
   const gate = () => {
     const result = spawnSync(process.execPath, [path.resolve('ci/release-gates.mjs'), 'G2',
       '--repo', checkout, '--runtime-repo', runtime, '--evidence', archive, '--json'], {encoding: 'utf8'});
