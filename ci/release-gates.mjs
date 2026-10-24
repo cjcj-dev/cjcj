@@ -816,6 +816,8 @@ async function evaluateG5(context) {
 const G8_METRIC_PATHS = [
   'difftest.total',
   'difftest.pass',
+  'difftest.match',
+  'difftest.unknown',
   'difftest.mismatch',
   'difftest.fail',
   'smoke.pass',
@@ -845,6 +847,8 @@ function validateG8Metrics(value, label, {pending = false} = {}) {
   if (pending) return {status: 'UNKNOWN', detail: `missing=status=READY,${missing.join(',')}`};
   if (missing.length) return {status: 'UNKNOWN', detail: `missing=${missing.join(',')}`};
   if (invalid.length) return {status: 'NOT_MET', detail: `invalid=${invalid.join(',')}`};
+  if (value.difftest.unknown !== 0) return {status: 'UNKNOWN',
+    detail: `${label}.difftest.unknown=${value.difftest.unknown} (execution qualification UNKNOWN)`};
   return {status: 'MET', detail: 'complete'};
 }
 
@@ -967,9 +971,10 @@ async function evaluateG8(context) {
     failures.push(`difftest.total=${current.difftest.total}<${baseline.difftest.total}`);
   }
   if (current.difftest.pass !== current.difftest.total || current.difftest.mismatch !== 0 ||
-      current.difftest.fail !== 0) {
+      current.difftest.fail !== 0 || current.difftest.match !== 0 || current.difftest.unknown !== 0) {
     failures.push(`difftest=${current.difftest.pass}/${current.difftest.total}` +
-      ` mismatch=${current.difftest.mismatch} fail=${current.difftest.fail}`);
+      ` mismatch=${current.difftest.mismatch} fail=${current.difftest.fail}` +
+      ` match=${current.difftest.match} unknown=${current.difftest.unknown}`);
   }
   if (current.smoke.pass < baseline.smoke.pass || current.smoke.fail !== 0) {
     failures.push(`smoke=pass${current.smoke.pass}/fail${current.smoke.fail}; baseline_pass=${baseline.smoke.pass}`);

@@ -27,10 +27,12 @@ export const FULL_GATE_FLOOR_IDENTITY_FIELDS = Object.freeze([
   Object.freeze({field: 'measured_utc', pattern: UTC_SECOND, description: 'UTC second the run finished'}),
 ]);
 
-// The eleven measured integers, in the order ci/release-gates.mjs names them.
+// The measured integers, in the order ci/release-gates.mjs names them.
 export const FULL_GATE_FLOOR_METRICS = Object.freeze([
   'difftest.total',
   'difftest.pass',
+  'difftest.match',
+  'difftest.unknown',
   'difftest.mismatch',
   'difftest.fail',
   'smoke.pass',
@@ -43,7 +45,7 @@ export const FULL_GATE_FLOOR_METRICS = Object.freeze([
 ]);
 
 // Every field the floor must carry before it can leave PENDING: the three
-// identity fields plus the eleven measured integers.
+// identity fields plus the measured integers.
 export const FULL_GATE_FLOOR_FIELDS = Object.freeze([
   ...FULL_GATE_FLOOR_IDENTITY_FIELDS.map(entry => entry.field),
   ...FULL_GATE_FLOOR_METRICS.map(metric => `baseline.${metric}`),
@@ -83,6 +85,8 @@ function inadmissibleFields(baseline) {
   const failures = [];
   const difftest = baseline.difftest;
   const bcgate = baseline.bcgate;
+  if (difftest.unknown !== 0) failures.push(`baseline.difftest.unknown=${difftest.unknown} (execution qualification UNKNOWN)`);
+  if (difftest.match !== 0) failures.push(`baseline.difftest.match=${difftest.match} (MATCH is not PASS)`);
   // release-gates.mjs:900-901
   if (difftest.pass !== difftest.total) {
     failures.push(`baseline.difftest.pass=${difftest.pass} is not baseline.difftest.total=${difftest.total}`);
@@ -168,6 +172,8 @@ export function buildFullGateFloor(candidate) {
       difftest: {
         total: baseline.difftest.total,
         pass: baseline.difftest.pass,
+        match: baseline.difftest.match,
+        unknown: baseline.difftest.unknown,
         mismatch: baseline.difftest.mismatch,
         fail: baseline.difftest.fail,
       },

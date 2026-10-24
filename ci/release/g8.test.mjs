@@ -12,11 +12,11 @@ const good = {
   schema: 1, campaign_id: `${sha}-20260930T010000Z-1`, cjcj_head_sha: sha,
   captured_utc: '2026-09-30T01:00:00Z',
   results: {
-    difftest: {total: 2, pass: 2, mismatch: 0, fail: 0}, smoke: {pass: 3, fail: 0},
+    difftest: {total: 2, pass: 2, match: 0, unknown: 0, mismatch: 0, fail: 0}, smoke: {pass: 3, fail: 0},
     bcgate: {shared: 4, byte_identical: 3, differing: 1, compile_errors: 0}, verify_exit: 0,
   },
 };
-const diff = 'TOTAL=2  PASS=2  MISMATCH=0  FAIL=0\n';
+const diff = 'TOTAL=2  PASS=2  MATCH=0  MISMATCH=0  FAIL=0 UNKNOWN=0\n';
 const smoke = '[smoke] summary: pass=3 fail=0 workdir=/work\n';
 const bc = 'shared functions: 4  |  byte-identical: 3 (75.0%)  |  differing: 1\n' +
   'fully-identical samples: 1/2  |  compile-errors: 0\n';
@@ -30,7 +30,7 @@ test('G8 parses each real summary format without substituting zeros', () => {
     assert.throws(() => parseSummary(name, output + output), /expected one summary/);
   }
   assert.throws(() => parseSummary('difftest', diff.replace('TOTAL=2', 'TOTAL=3')), /inconsistent/);
-  assert.throws(() => parseSummary('difftest', 'TOTAL=0 PASS=0 MISMATCH=0 FAIL=0\n'), /empty/);
+  assert.throws(() => parseSummary('difftest', 'TOTAL=0 PASS=0 MATCH=0 MISMATCH=0 FAIL=0 UNKNOWN=0\n'), /empty/);
   assert.throws(() => parseSummary('smoke', smoke.replace('pass=3', 'pass=0')), /empty/);
   assert.throws(() => parseSummary('bcgate', bc.replace('functions: 4', 'functions: 5')), /inconsistent/);
 });
@@ -59,7 +59,7 @@ test('G8 preserves one wrong answer through the floor writer and release consume
   assert.equal((await f.writer(good)).status, 0);
   assert.equal(f.gate().value.status, 'MET');
   const broken = structuredClone(good);
-  broken.results.difftest = parseSummary('difftest', 'TOTAL=2 PASS=1 MISMATCH=1 FAIL=0\n');
+  broken.results.difftest = parseSummary('difftest', 'TOTAL=2 PASS=1 MATCH=0 MISMATCH=1 FAIL=0 UNKNOWN=0\n');
   const rejected = await f.writer(broken);
   assert.equal(rejected.status, 1);
   assert.match(rejected.stderr, /baseline.difftest.mismatch=1/);
@@ -89,4 +89,29 @@ test('G8 floor writer names every omitted result field and preserves the floor',
     assert.equal(await fs.readFile(f.floor, 'utf8'), before);
     console.log(`TARGET missing ${field} rejected`);
   }
+});
+
+test('G8 refuses legacy summaries and unknown qualification through writer and gate', async t => {
+  assert.throws(() => parseSummary('difftest', 'TOTAL=2 PASS=2 MISMATCH=0 FAIL=0\n'), /expected one summary/);
+  const f = await fixture(t);
+  // These records are schema controls only. No product execution in this
+  // test supplies the independent evidence needed to grant qualification.
+  assert.equal((await f.writer(good)).status, 0);
+  const before = await fs.readFile(f.floor, 'utf8');
+  for (const difftest of [
+    parseSummary('difftest', 'TOTAL=2 PASS=0 MATCH=2 MISMATCH=0 FAIL=0 UNKNOWN=2\n'),
+    {...good.results.difftest, unknown: 2},
+    {total: 2, pass: 2, mismatch: 0, fail: 0},
+  ]) {
+    const value = structuredClone(good);
+    value.results.difftest = difftest;
+    const written = await f.writer(value);
+    assert.equal(written.status, 1, written.stderr);
+    assert.match(written.stderr, /difftest\.(unknown|match)/);
+    assert.equal(await fs.readFile(f.floor, 'utf8'), before);
+    const gated = f.gate();
+    assert.notEqual(gated.value.status, 'MET');
+    assert.match(gated.value.value, /unknown|difftest\.match/);
+  }
+  assert.throws(() => parseSummary('difftest', 'TOTAL=2 PASS=2 MATCH=0 MISMATCH=0 FAIL=0 UNKNOWN=2\n'), /inconsistent/);
 });

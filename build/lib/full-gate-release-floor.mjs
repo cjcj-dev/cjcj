@@ -11,7 +11,7 @@ export const FULL_GATE_RELEASE_FLOOR = Object.freeze({
     results: 'G8_FULL_GATE.json',
   }),
   baseline: Object.freeze({
-    difftest: Object.freeze({total: null, pass: null, mismatch: null, fail: null}),
+    difftest: Object.freeze({total: null, pass: null, match: null, unknown: null, mismatch: null, fail: null}),
     smoke: Object.freeze({pass: null, fail: null}),
     bcgate: Object.freeze({
       shared: null,

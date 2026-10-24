@@ -28,7 +28,7 @@ async function write(root, relative, contents) {
 
 function baseline() {
   return {
-    difftest: {total: 20, pass: 20, mismatch: 0, fail: 0},
+    difftest: {total: 20, pass: 20, match: 0, unknown: 0, mismatch: 0, fail: 0},
     smoke: {pass: 6, fail: 0},
     bcgate: {shared: 100, byte_identical: 90, differing: 10, compile_errors: 0},
     verify_exit: 0,
@@ -246,7 +246,7 @@ test('the writer refuses a run the gate would not have passed, so it cannot beco
   // that fails G8 on every absolute condition, whose bcgate.differing=50 would
   // have become the ceiling later runs are measured against.
   const failing = results();
-  failing.results.difftest = {total: 20, pass: 15, mismatch: 3, fail: 2};
+  failing.results.difftest = {total: 20, pass: 15, match: 0, unknown: 0, mismatch: 3, fail: 2};
   failing.results.smoke = {pass: 6, fail: 1};
   failing.results.bcgate = {shared: 100, byte_identical: 90, differing: 50, compile_errors: 4};
   failing.results.verify_exit = 1;

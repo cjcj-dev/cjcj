@@ -15,65 +15,8 @@ const evidence = argv.evidence ? path.resolve(argv.evidence) : root;
 await fs.mkdir(evidence, {recursive: true});
 try {
   if (argv.loader) {
-    const corpus = path.join(root, 'corpus');
-    const sdk = path.join(root, 'sdk');
-    await fs.mkdir(corpus);
-    await fs.mkdir(path.join(sdk, 'runtime/lib/linux_x86_64_cjnative'), {recursive: true});
-    await fs.writeFile(path.join(sdk, 'runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so'), 'fixture only');
-    // A real ELF/DT_NEEDED failure, not a program printing a loader message.
-    await fs.writeFile(path.join(root, 'dependency.c'), 'int difftest_dependency(void) { return 0; }\n');
-    await fs.writeFile(path.join(root, 'consumer.c'), 'extern int difftest_dependency(void); int main(void) { return difftest_dependency(); }\n');
-    const builds = [
-      ['cc', '-shared', '-fPIC', path.join(root, 'dependency.c'), '-o', path.join(root, 'libdifftest_missing.so')],
-      ['cc', path.join(root, 'consumer.c'), '-L' + root, '-ldifftest_missing', '-Wl,-rpath,' + root, '-o', path.join(root, 'missing-loader')],
-    ];
-    for (const [index, command] of builds.entries()) {
-      const result = spawnSync(command[0], command.slice(1), {encoding: 'utf8', timeout: 30000});
-      await fs.writeFile(path.join(evidence, `loader-build-${index}.json`), JSON.stringify({command, rc: result.status, signal: result.signal, stdout: result.stdout, stderr: result.stderr, error: result.error?.message}) + '\n');
-      assert.equal(result.error, undefined);
-      assert.equal(result.status, 0, result.stderr);
-    }
-    await fs.rename(path.join(root, 'libdifftest_missing.so'), path.join(root, 'libdifftest_missing.hidden'));
-    const missingLoader = spawnSync(path.join(root, 'missing-loader'), [], {encoding: 'utf8', timeout: 10000});
-    await fs.writeFile(path.join(evidence, 'loader-native.execution.json'), JSON.stringify({rc: missingLoader.status, signal: missingLoader.signal, stderr: missingLoader.stderr, error: missingLoader.error?.message}) + '\n');
-    assert.equal(missingLoader.error, undefined);
-    assert.equal(missingLoader.status, 127);
-    assert.match(missingLoader.stderr, /error while loading shared libraries: libdifftest_missing\.so/);
-    const cases = ['plain', 'exit127', 'ref-loader-real', 'ref-diagnostic'];
-    for (const name of cases) await fs.writeFile(path.join(corpus, name + '.cj'), '// controlled compiler boundary\n');
-    const compiler = path.join(root, 'compiler.mjs');
-    await fs.writeFile(compiler, `#!${process.execPath}
-      import fs from 'node:fs';
-      import path from 'node:path';
-      if (process.argv.includes('--version')) process.exit(0);
-      const name = path.basename(process.argv[2], '.cj');
-      const out = process.argv[process.argv.indexOf('-o') + 1];
-      const reference = out.endsWith('.ref');
-      if (name === 'ref-loader-real' && reference) fs.copyFileSync(${JSON.stringify(path.join(root, 'missing-loader'))}, out);
-      else {
-        let body = 'process.exit(0)';
-        if (name === 'exit127' || name === 'ref-loader-real') body = 'process.exit(127)';
-        if (name === 'ref-diagnostic') body = 'console.log("same output");' + (reference ? 'console.error("undefined symbol: ordinary diagnostic");' : '') + 'process.exit(0)';
-        fs.writeFileSync(out, ${JSON.stringify(`#!${process.execPath}\n`)} + body + '\\n', {mode: 0o755});
-      }
-    `, {mode: 0o755});
-    const env = {...process.env, DIFFTEST_SELF: compiler, DIFFTEST_REF: compiler, DIFFTEST_SELF_TC: sdk, DIFFTEST_TC: sdk};
-    delete env.CJ_HOST_RTLIB;
-    const result = spawnSync(process.execPath, [process.argv[1], script, '--jobs', '2', corpus],
-      {env, encoding: 'utf8', timeout: 30000, maxBuffer: 4 * 1024 * 1024});
-    await fs.writeFile(path.join(evidence, 'loader.stdout.log'), result.stdout || '');
-    await fs.writeFile(path.join(evidence, 'loader.stderr.log'), result.stderr || '');
-    await fs.writeFile(path.join(evidence, 'loader.execution.json'), JSON.stringify({rc: result.status, signal: result.signal, error: result.error?.message}) + '\n');
-    assert.equal(result.error, undefined);
-    assert.equal(result.status, 0, result.stderr);
-    assert.match(result.stdout, /^PASS +plain +exit=0$/m);
-    assert.match(result.stdout, /^PASS +exit127 +exit=127$/m);
-    // The CLI intentionally bounds its diagnostic preview; the raw loader
-    // error above proves the fixture independently of the path's length.
-    assert.match(result.stdout, /^FAIL +ref-loader-real +HARNESS: reference product ABI\/runtime mismatch:/m);
-    console.log('PASS loader controls: exit0, exit127, real missing DT_NEEDED library');
-    assert.match(result.stdout, /^PASS +ref-diagnostic +exit=0$/m, 'successful reference stderr must not be classified as loader failure');
-    console.log('PASS reference ordinary stderr diagnostic');
+    const {testLoaderContract} = await import('./difftest-loader-fixtures.mjs');
+    await testLoaderContract({root, script, evidence, zx: process.argv[1]});
   } else if (argv.matrix) {
     const corpus = path.join(root, 'corpus');
     const sdk = path.join(root, 'sdk');
@@ -114,10 +57,10 @@ try {
       await fs.writeFile(path.join(evidence, 'matrix.execution.json'), JSON.stringify({rc: result.status, signal: result.signal, error: result.error?.message}) + '\n');
       assert.equal(result.error, undefined);
       assert.equal(result.status, 0, result.stderr);
-      for (const code of [42, 124, 143, 127]) assert.match(result.stdout, new RegExp('^PASS +exit' + code + ' +exit=' + code + '$', 'm'));
-      for (const name of cases.filter(name => !name.startsWith('exit') && name !== 'unequal')) assert.match(result.stdout, new RegExp('^FAIL +' + name + ' +', 'm'));
+      for (const code of [42, 124, 143, 127]) assert.match(result.stdout, new RegExp('^MATCH +exit' + code + ' +exit=' + code + ' qualification=UNKNOWN$', 'm'));
+      for (const name of cases.filter(name => !name.startsWith('exit') && name !== 'unequal' && name !== 'ref-loader')) assert.match(result.stdout, new RegExp('^FAIL +' + name + ' +', 'm'));
       assert.match(result.stdout, /^MISMATCH +unequal +/m);
-      assert.match(result.stdout, /^FAIL +ref-loader +HARNESS: reference product/m);
+      assert.match(result.stdout, /^MATCH +ref-loader +exit=127 qualification=UNKNOWN$/m);
       assert.match(result.stdout, /^FAIL +spawn-error +.*RUN-ERROR ENOENT/m);
       assert.match(result.stdout, /^FAIL +output-limit +.*RUN-OUTPUT-LIMIT/m);
       assert.match(result.stdout, /^FAIL +pipe +.*RUN-PIPE-INCOMPLETE/m);
@@ -258,7 +201,7 @@ try {
       assert.ok(descendants.length > 0);
     } else {
       assert.equal(execution.status, 0, execution.stderr);
-      assert.match(execution.stdout, argv.escape ? /^FAIL +descendant +.*RUN-PIPE-INCOMPLETE/m : /^PASS +descendant +exit=42$/m);
+      assert.match(execution.stdout, argv.escape ? /^FAIL +descendant +.*RUN-PIPE-INCOMPLETE/m : /^MATCH +descendant +exit=42 qualification=UNKNOWN$/m);
       assert.equal(descendants.length, 2);
     }
     if (!argv.escape) assert.ok(atReturn.every(item => ['gone', 'Z', 'X'].includes(item.state)), JSON.stringify(atReturn));
@@ -318,7 +261,7 @@ fs.writeFileSync(args[args.indexOf('-o') + 1], ${JSON.stringify(`#!${process.exe
     catch (error) { checks.push({name, pass: false, error: error.message}); }
   }
   for (const code of process.env.DIFFTEST_TIMEOUT_SDK ? [42, 124] : [42, 124, 143]) {
-    check(`normal-exit-${code}`, () => assert.match(execution.stdout, new RegExp(`^PASS +exit${code} +exit=${code}$`, 'm')));
+    check(`normal-exit-${code}`, () => assert.match(execution.stdout, new RegExp(`^MATCH +exit${code} +exit=${code} qualification=UNKNOWN$`, 'm')));
   }
   check('timeout-is-not-pass', () => assert.match(execution.stdout, /^FAIL +timeout +.*RUN-TIMEOUT/m));
   if (!process.env.DIFFTEST_TIMEOUT_SDK) {
@@ -326,7 +269,7 @@ fs.writeFileSync(args[args.indexOf('-o') + 1], ${JSON.stringify(`#!${process.exe
   }
   const counts = parseSummary('difftest', execution.stdout);
   const failures = process.env.DIFFTEST_TIMEOUT_SDK ? 1 : 2;
-  check('g8-counts', () => assert.deepEqual(counts, {total: failures + (failures === 1 ? 2 : 3), pass: failures === 1 ? 2 : 3, mismatch: 0, fail: failures}));
+  check('g8-counts', () => assert.deepEqual(counts, {total: failures + (failures === 1 ? 2 : 3), pass: 0, match: failures === 1 ? 2 : 3, unknown: failures + (failures === 1 ? 2 : 3), mismatch: 0, fail: failures}));
   const sha = '08148651dc2aeee42eae161eca98d83a5cdb4935';
   const floor = difftest => buildFullGateFloor({campaign_id: `${sha}-20261023T000000Z-1`,
     cjcj_head_sha: sha, measured_utc: '2026-10-23T00:00:00Z', baseline: {
@@ -347,12 +290,12 @@ fs.writeFileSync(args[args.indexOf('-o') + 1], ${JSON.stringify(`#!${process.exe
     command: [process.execPath, process.argv[1], script, '--jobs', '2', controls],
     compiler, sdk, rc: controlExecution.status, signal: controlExecution.signal, error: controlExecution.error?.message,
   }, null, 2) + '\n');
-  check('g8-accepts-normal-controls', () => {
+  check('g8-refuses-unqualified-normal-controls', () => {
     assert.equal(controlExecution.error, undefined);
     assert.equal(controlExecution.status, 0, controlExecution.stderr);
     const controlCounts = parseSummary('difftest', controlExecution.stdout);
-    assert.deepEqual(controlCounts, {total: 2, pass: 2, mismatch: 0, fail: 0});
-    assert.doesNotThrow(() => floor(controlCounts));
+    assert.deepEqual(controlCounts, {total: 2, pass: 0, match: 2, unknown: 2, mismatch: 0, fail: 0});
+    assert.throws(() => floor(controlCounts), /unknown=2/);
   });
   await fs.writeFile(path.join(evidence, 'checks.json'), JSON.stringify(checks, null, 2) + '\n');
   for (const item of checks) console.log(`${item.pass ? 'PASS' : 'FAIL'} ${item.name}${item.error ? ': ' + item.error : ''}`);

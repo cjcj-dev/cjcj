@@ -26,9 +26,10 @@ function summary(text, pattern, fields, label) {
 
 export function parseSummary(name, text) {
   if (name === 'difftest') {
-    const counts = summary(text, /^TOTAL=(\d+)\s+PASS=(\d+)\s+MISMATCH=(\d+)\s+FAIL=(\d+)\s*$/gm,
-      ['total', 'pass', 'mismatch', 'fail'], name);
-    if (!counts.total || counts.total !== counts.pass + counts.mismatch + counts.fail) {
+    const counts = summary(text, /^TOTAL=(\d+)\s+PASS=(\d+)\s+MATCH=(\d+)\s+MISMATCH=(\d+)\s+FAIL=(\d+)\s+UNKNOWN=(\d+)\s*$/gm,
+      ['total', 'pass', 'match', 'mismatch', 'fail', 'unknown'], name);
+    if (!counts.total || counts.total !== counts.pass + counts.match + counts.mismatch + counts.fail ||
+        counts.unknown > counts.total || counts.pass + counts.unknown > counts.total) {
       throw new Error('difftest: empty or inconsistent total');
     }
     return counts;

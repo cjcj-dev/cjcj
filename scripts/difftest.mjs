@@ -259,17 +259,12 @@ async function classify(file) {
       const incomplete = [referenceRun && incompleteProduct(referenceRun, 'ref'), incompleteProduct(selfRun, 'self')].filter(Boolean);
       if (incomplete.length) return `FAIL\t${name}\t${incomplete.join(' ')}`;
       const sout = commandSubstitution(selfRun.stdout);
-      const selfCombined = `${selfRun.stdout}${selfRun.stderr}`;
-      const referenceCombined = referenceRun ? `${referenceRun.stdout}${referenceRun.stderr}` : '';
-      // Diagnostics alone are not a load failure: successful programs may
-      // legitimately print these words while producing matching output.
-      if (referenceRun?.exitCode !== 0 && isAbiLoadError(referenceCombined)) {
-        return `FAIL\t${name}\t${HARNESS_TAG}: reference product ABI/runtime mismatch: ${bashQ(referenceCombined.split(/\r?\n/).find(Boolean) || '', 120)}`;
-      }
-      if (isAbiLoadError(selfCombined)) {
-        return `FAIL\t${name}\t${HARNESS_TAG}: product ABI/runtime mismatch: ${bashQ(selfCombined.split(/\r?\n/).find(Boolean) || '', 120)}`;
-      }
-      if (sout === rout && selfRun.exitCode === rexit) return `PASS\t${name}\texit=${selfRun.exitCode}`;
+      // stdout and the observed normal exit are differential evidence only.
+      // Neither stderr nor rc=127 identifies who emitted a diagnostic. This
+      // runner has no independent evidence of loader/execution qualification,
+      // including later lazy binding or dynamic loading. Never promote MATCH
+      // to PASS on these observations.
+      if (sout === rout && selfRun.exitCode === rexit) return `MATCH\t${name}\texit=${selfRun.exitCode}`;
       const refCompileDetail = referenceBuild.exitCode === 0
         ? ''
         : ` stderr=${bashQ(referenceBuild.stderr.split(/\r?\n/, 1)[0], 200)}`;
@@ -302,7 +297,7 @@ async function classify(file) {
 if (argv.one !== undefined) {
   const file = typeof argv.one === 'string' ? argv.one : argv._[0];
   if (!file) process.exit(1);
-  console.log(await classify(path.resolve(file)));
+  console.log(`${await classify(path.resolve(file))}\tqualification=UNKNOWN`);
   process.exit(0);
 }
 
@@ -325,23 +320,24 @@ async function worker() {
 await Promise.all(Array.from({length: Math.min(jobs, samples.length)}, worker));
 results.sort();
 
-let pass = 0;
+const pass = 0; // No independent qualification evidence is supplied by this runner.
+let match = 0;
 let mismatch = 0;
 let fail = 0;
 const gaps = new Map();
 for (const line of results) {
   const [status, name, ...detailParts] = line.split('\t');
   const detail = detailParts.join('\t');
-  if (status === 'PASS') pass++;
+  if (status === 'MATCH') match++;
   else if (status === 'MISMATCH') mismatch++;
   else {
     fail++;
     gaps.set(detail, (gaps.get(detail) || 0) + 1);
   }
-  console.log(`${status.padEnd(8)} ${name.padEnd(22)} ${detail}`);
+  console.log(`${status.padEnd(8)} ${name.padEnd(22)} ${detail} qualification=UNKNOWN`);
 }
 console.log('================================================================');
-console.log(`TOTAL=${pass + mismatch + fail}  PASS=${pass}  MISMATCH=${mismatch}  FAIL=${fail}`);
+console.log(`TOTAL=${results.length}  PASS=${pass}  MATCH=${match}  MISMATCH=${mismatch}  FAIL=${fail}  UNKNOWN=${results.length}`);
 console.log('---- gap tally (selfhost faithful-pipeline failures, ranked) ----');
 for (const [detail, count] of [...gaps].sort((a, b) => b[1] - a[1] || b[0].localeCompare(a[0]))) {
   console.log(`${String(count).padStart(7)} ${detail}`);
