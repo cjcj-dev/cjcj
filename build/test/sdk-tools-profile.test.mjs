@@ -182,7 +182,7 @@ if verb in ('build','install'):
    }
    await write(tools+'/cjfmt/config/cangjie-format.toml','fixture format');
    await write(tools+'/cjpm/tests/public/test-cache-errors.mjs',`import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {spawnSync} from 'node:child_process';
-const [cjpm,out,arm]=process.argv.slice(2);assert.equal(cjpm,${JSON.stringify(sdk+'/tools/bin/cjpm')});assert(path.isAbsolute(cjpm));assert.equal(arm,'candidate');assert.deepEqual(fs.readdirSync(out),[]);assert.equal(process.env.CJPM_REGRESSION_CASES,undefined);assert.equal(process.env.CANGJIE_HOME,${JSON.stringify(sdk)});assert(process.env.PATH.startsWith(${JSON.stringify(sdk+'/bin:'+sdk+'/tools/bin:')}));assert(!process.env.LD_LIBRARY_PATH.includes('foreign-sdk'));assert.equal(process.env.CPATH,undefined);
+const [cjpm,out,arm]=process.argv.slice(2);const pending=path.dirname(path.dirname(path.dirname(cjpm)));assert.equal(path.dirname(pending),${JSON.stringify(root)});assert(path.basename(pending).startsWith('sdk.tools-pending-'));assert.equal(cjpm,path.join(pending,'tools/bin/cjpm'));assert(path.isAbsolute(cjpm));assert.equal(arm,'candidate');assert.deepEqual(fs.readdirSync(out),[]);assert.equal(process.env.CJPM_REGRESSION_CASES,undefined);assert.equal(process.env.CANGJIE_HOME,pending);assert(process.env.PATH.startsWith(pending+'/bin:'+pending+'/tools/bin:'));assert(!process.env.LD_LIBRARY_PATH.includes('foreign-sdk'));assert.equal(process.env.CPATH,undefined);
 const r=spawnSync(cjpm,['wire-public-consumer'],{encoding:'utf8'});assert.equal(r.status,0,r.stderr);
 const row={event:'regression',cjpm,out,arm,cases:process.env.CJPM_REGRESSION_CASES,rc:process.env.CJPM_WIRE_FAIL==='1'?23:0};fs.writeFileSync(path.join(out,'result.json'),JSON.stringify(row));fs.appendFileSync(${JSON.stringify(trace)},JSON.stringify(row)+'\\n');console.log('CJPM_PUBLIC_BODY_REACHED '+JSON.stringify(row));process.exitCode=row.rc;
 `);
@@ -238,7 +238,7 @@ test('installed cjpm public regression follows tools installation and blocks pac
   const rows=r.events.filter(e=>e.event==='regression');
   console.log('CJPM_POST_INSTALL_CALL_ASSERT_REACHED '+label);
   assert.equal(rows.length,1,'installed public regression must be called once after installation');
-  assert.equal(rows[0].cjpm,f.sdk+'/tools/bin/cjpm');outs.push(rows[0].out);
+  const pending=path.dirname(path.dirname(path.dirname(rows[0].cjpm)));assert.equal(path.dirname(pending),f.root);assert(path.basename(pending).startsWith('sdk.tools-pending-'));assert.equal(rows[0].cjpm,path.join(pending,'tools/bin/cjpm'));outs.push(rows[0].out);
   assert(r.events.findIndex(e=>e.event==='regression')>r.events.findLastIndex(e=>e.event==='producer'));
   if(label==='install')assert(!r.events.some(e=>e.event==='producer'&&e.verb==='build'));
  }
