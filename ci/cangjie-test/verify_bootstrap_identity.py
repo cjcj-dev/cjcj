@@ -36,7 +36,7 @@ class BootstrapIdentityTest(unittest.TestCase):
         return subprocess.run(['node' if str(args[0]).endswith('.mjs') else sys.executable, *map(str, args)], capture_output=True, text=True)
 
     def install(self, producer):
-        result = self.command([self.cli, self.sdk, '--install', producer])
+        result = self.command([HERE / 'install_identity_fixture.mjs', self.sdk, producer])
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def entry(self, arm='bootstrap', expected=True):
