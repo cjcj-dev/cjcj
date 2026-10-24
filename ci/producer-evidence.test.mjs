@@ -695,3 +695,119 @@ process.on('exit', () => fs.writeFileSync(${JSON.stringify(scheduled)}, JSON.str
     }
   });
 }
+
+
+for (const consumer of ['cli', 'smoke']) for (const mode of ['fault', 'close-fault', 'control']) {
+  test(`direct collector ordered errors ${consumer} ${mode} retain the first log error`, async () => {
+    const f = await setup(`ordered-${consumer}-${mode}`);
+    const hook = path.join(f.root, 'ordered-errors.mjs');
+    const scheduleFile = path.join(f.root, 'ordered-schedule.json');
+    await fs.writeFile(hook, `
+import fs from 'node:fs';
+import promises from 'node:fs/promises';
+import cp from 'node:child_process';
+import {syncBuiltinESMExports} from 'node:module';
+const fault = ${JSON.stringify(mode !== 'control')};
+const closeFault = ${JSON.stringify(mode === 'close-fault')};
+const producer = ${JSON.stringify(f.producer)};
+const schedule = {events: [], logs: [], watchdog: false};
+let ready; const firstLog = new Promise(resolve => { ready = resolve; });
+let stdoutFd; let rejected = false; let closeRejected = false;
+const open = promises.open;
+promises.open = async function(file, ...args) {
+  const handle = await open.call(this, file, ...args);
+  if (/\\/(stdout|stderr)\\.log$/.test(String(file))) {
+    const log = {file: String(file), closed: false}; schedule.logs.push(log);
+    if (String(file).endsWith('/stdout.log')) stdoutFd = handle.fd;
+    const close = handle.close.bind(handle);
+    handle.close = async () => {
+      await close(); log.closed = true;
+      if (closeFault && !closeRejected) { closeRejected = true; throw Object.assign(Error('SECONDARY_CLOSE_ERROR'), {code: 'EIO', syscall: 'close', path: log.file}); }
+    };
+  }
+  return handle;
+};
+const writeSync = fs.writeSync;
+fs.writeSync = function(fd, ...args) {
+  if (fault && fd === stdoutFd && !schedule.events.length) {
+    schedule.events.push('FIRST_LOG_ERROR'); ready();
+    throw Object.assign(Error('FIRST_LOG_ERROR'), {code: 'ENOSPC', errno: -28, syscall: 'write', path: schedule.logs.find(log => log.file.endsWith('/stdout.log')).file});
+  }
+  return writeSync.call(this, fd, ...args);
+};
+const spawn = cp.spawn;
+cp.spawn = function(command, ...args) {
+  const child = spawn.call(this, command, ...args);
+  if (command === producer) {
+    schedule.pid = child.pid;
+    child.on('close', (rc, signal) => { schedule.child = {rc, signal}; });
+    const timer = setTimeout(() => { if (!schedule.child) { schedule.watchdog = true; child.kill('SIGKILL'); } }, 3000);
+    timer.unref();
+  }
+  return child;
+};
+syncBuiltinESMExports();
+const write = promises.writeFile;
+promises.writeFile = async function(file, ...args) {
+  if (fault && schedule.pid) {
+    if (!rejected && String(file).endsWith('/call.json.tmp')) {
+      await firstLog;
+      rejected = true; schedule.events.push('SECOND_MANIFEST_ERROR');
+      throw Object.assign(Error('SECOND_MANIFEST_ERROR'), {code: 'EROFS', syscall: 'write', path: String(file)});
+    }
+    if (rejected) {
+      schedule.events.push('LATER_PERSISTENCE_ERROR');
+      throw Object.assign(Error('LATER_PERSISTENCE_ERROR'), {code: 'EIO', syscall: 'write', path: String(file)});
+    }
+  }
+  return write.call(this, file, ...args);
+};
+process.on('exit', () => fs.writeFileSync(${JSON.stringify(scheduleFile)}, JSON.stringify(schedule)));
+`);
+    const extra = {NODE_OPTIONS: `${process.env.NODE_OPTIONS || ''} --import=${hook}`.trim(),
+      EVIDENCE_TEST_MODE: mode === 'control' ? '' : 'log-wait'};
+    let result, observed;
+    if (consumer === 'smoke') {
+      const r = await smokeRun(f, extra); result = r.result; observed = r.calls;
+    } else {
+      const root = path.join(f.root, 'evidence');
+      const args = [path.join(repo, 'ci/producer-evidence.mjs'), '--role', 'package', '--name', 'internal',
+        '--source-tree', f.tree, '--root', root, '--', f.producer];
+      result = spawnSync(process.execPath, args, {cwd: f.tree, env: {...f.env, ...extra}, encoding: 'utf8', timeout: 6000});
+      observed = await calls(root);
+    }
+    const schedule = JSON.parse(await fs.readFile(scheduleFile));
+    const fallbackLine = result.stderr.split('\n').find(line => line.startsWith('COLLECTOR_FAILED '));
+    const fallback = fallbackLine ? JSON.parse(fallbackLine.slice('COLLECTOR_FAILED '.length)) : null;
+    const actual = {consumer, mode, rc: result.status, signal: result.signal, schedule, observed, fallback,
+      stdout: result.stdout, stderr: result.stderr};
+    await fs.writeFile(path.join(f.root, 'ordered-result.json'), JSON.stringify(actual, null, 2));
+    target('collector_first_error_order', actual);
+    assert.equal(result.signal, null); assert.equal(result.error, undefined);
+    assert.equal(schedule.watchdog, false); assert.equal(schedule.logs.length, consumer === 'smoke' && mode === 'control' ? 14 : 2);
+    assert.ok(schedule.logs.every(log => log.closed), 'target both actual log handles close');
+    assert.equal(await fs.stat(`/proc/${schedule.pid}`).then(() => true, () => false), false);
+    if (mode === 'control') {
+      assert.equal(result.status, 0); assert.equal(fallback, null);
+      assert.equal(observed.length, consumer === 'smoke' ? 7 : 1);
+    } else {
+      assert.equal(result.status, consumer === 'smoke' ? 1 : 74);
+      assert.equal(observed.length, 1, 'target failed collector stops the real consumer');
+      assert.deepEqual(schedule.events.slice(0, 2), ['FIRST_LOG_ERROR', 'SECOND_MANIFEST_ERROR']);
+      assert.deepEqual(schedule.child, {rc: null, signal: 'SIGKILL'});
+      assert.equal(fallback.error.message, 'FIRST_LOG_ERROR'); assert.equal(fallback.error.code, 'ENOSPC');
+      assert.equal(fallback.error.errno, -28); assert.equal(fallback.error.syscall, 'write');
+      assert.match(fallback.error.path, /\/stdout\.log$/);
+      assert.equal(fallback.child_pid, schedule.pid); assert.equal(fallback.child_rc, -9);
+      assert.equal(fallback.child_signal, 'SIGKILL'); assert.equal(fallback.collector_rc, 74);
+      assert.equal(fallback.logs_closed, mode !== 'close-fault');
+      assert.ok(fallback.secondary_errors.some(error => error.message === 'SECOND_MANIFEST_ERROR' && error.code === 'EROFS'));
+      assert.ok(fallback.secondary_errors.some(error => error.message === 'LATER_PERSISTENCE_ERROR' && error.code === 'EIO'));
+      assert.equal(fallback.secondary_errors.some(error => error.message === 'SECONDARY_CLOSE_ERROR'), mode === 'close-fault');
+      if (consumer === 'smoke') {
+        const parent = JSON.parse(await fs.readFile(path.join(f.root, 'smoke/smoke-result.json')));
+        assert.ok(Object.values(parent.samples).every(sample => sample.compile === 'NOT_RUN' && sample.run === 'NOT_RUN'));
+      }
+    }
+  });
+}

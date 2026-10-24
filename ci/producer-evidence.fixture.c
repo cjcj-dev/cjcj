@@ -33,6 +33,10 @@ int main(int argc, char **argv) {
     if (mode && (!strcmp(mode, "cancel-zero") || !strcmp(mode, "cancel-ignore"))) {
         for (;;) pause();
     }
+    if (mode && !strcmp(mode, "log-wait")) {
+        puts("CONTROLLED_LOG_READY"); fflush(stdout);
+        for (;;) pause();
+    }
     if (mode && !strcmp(mode, "unlink")) { unlink(argv[0]); if (argc > 1) unlink(argv[1]); return 0; }
     if (mode && !strcmp(mode, "fail")) { fputs("CONTROLLED_CHILD_FAILURE\n", stderr); return 7; }
     if (mode && !strcmp(mode, "signal")) { raise(SIGSEGV); return 93; }
