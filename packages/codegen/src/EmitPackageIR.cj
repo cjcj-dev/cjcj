@@ -408,8 +408,13 @@ private func ReplaceFunction(cgMod: CGModule): Unit {
                 irBuilder.CallGCWriteAgg(thisLLVMType, ArrayList<LLVMValueRef>(
                     [basePtr, thisParamWithoutTI, load, size64]))
             } else {
-                irBuilder.CallGCWriteGenericPayloadFromSrc(
-                    thisParamWithoutTI, payloadPtr, size32, thisParamTypeInfo)
+                // The original receiver is a headerless payload, not the boxed
+                // destination expected by gcwrite/gcread.generic. Read the
+                // wrapper's object into native storage, then copy its known
+                // no-reference layout back to the original receiver address.
+                let load = irBuilder.CreateEntryAlloca(thisLLVMType)
+                irBuilder.CallGCReadGenericPayload(load, thisParamWithTI, size32)
+                irBuilder.CopyNoRefOrMemCpy(thisLLVMType, thisParamWithoutTI, load, size64)
             }
         }
     }
