@@ -288,10 +288,25 @@ export async function diagnose(call) {
     stderr: `${stderr}\nevidence=${directory} state=${record.state}\n`};
 }
 
-export async function runDirect(call, {passthrough = false} = {}) {
+export async function runDirect(call, {passthrough = false, finalize} = {}) {
   const {command, env, record, directory} = call;
   let stdout = ''; let stderr = ''; let error; let cancelled; let killTimer;
-  let child; let childClosed = false;
+  let child; let childClosed = false; let closed; let result;
+  let stdoutFile; let stderrFile; let logError;
+  const terminateFailedChild = () => {
+    if (!child || childClosed) return;
+    // A failed collector can no longer safely supervise a producer. Terminate
+    // only the child it launched; await close before releasing its resources.
+    record.termination = {reason: 'collector-failure', signal: 'SIGKILL', sent: child.kill('SIGKILL')};
+  };
+  const closeLogs = async () => {
+    const files = [stdoutFile, stderrFile].filter(Boolean);
+    stdoutFile = undefined; stderrFile = undefined;
+    const outcomes = await Promise.allSettled(files.map(file => file.close()));
+    const failed = outcomes.find(outcome => outcome.status === 'rejected');
+    if (failed) throw failed.reason;
+    record.logs_closed = true;
+  };
   const forward = signal => {
     if (!child || childClosed) return;
     child.kill(signal);
@@ -313,38 +328,65 @@ export async function runDirect(call, {passthrough = false} = {}) {
   process.on('SIGTERM', term); process.on('SIGINT', interrupt);
   try {
   record.state = 'RUNNING'; await call.update();
-  const stdoutFile = await fs.open(path.join(directory, 'stdout.log'), 'w');
-  const stderrFile = await fs.open(path.join(directory, 'stderr.log'), 'w');
+  stdoutFile = await fs.open(path.join(directory, 'stdout.log'), 'w');
+  stderrFile = await fs.open(path.join(directory, 'stderr.log'), 'w');
   child = spawn(command[0], command.slice(1), {cwd: record.cwd, env, stdio: ['inherit', 'pipe', 'pipe']});
-  child.stdout.on('data', chunk => { stdout += chunk; writeSync(stdoutFile.fd, chunk); if (passthrough) process.stdout.write(chunk); });
-  child.stderr.on('data', chunk => { stderr += chunk; writeSync(stderrFile.fd, chunk); if (passthrough) process.stderr.write(chunk); });
+  const writeLog = (file, chunk) => {
+    if (logError) return;
+    try { writeSync(file.fd, chunk); }
+    catch (error) { logError = error; terminateFailedChild(); }
+  };
+  child.stdout.on('data', chunk => { stdout += chunk; writeLog(stdoutFile, chunk); if (passthrough) process.stdout.write(chunk); });
+  child.stderr.on('data', chunk => { stderr += chunk; writeLog(stderrFile, chunk); if (passthrough) process.stderr.write(chunk); });
   child.on('error', value => { error = value; });
-  const closed = new Promise(resolve => child.on('close', (exitCode, signal) => {
+  closed = new Promise(resolve => child.on('close', (exitCode, signal) => {
     childClosed = true; clearTimeout(killTimer);
     resolve({exitCode, signal, stdout, stderr, error});
   }));
   if (cancelled) forward(cancelled);
   record.child_pid = child.pid ?? null;
   await call.update();
-  const result = await closed;
-  await stdoutFile.close(); await stderrFile.close();
+  result = await closed;
+  if (logError) throw logError;
+  await closeLogs();
   await call.finish(result);
   const saveCancellation = async () => {
     if (!cancelled) return;
     record.state = 'CANCELLED'; record.collector_rc = 128 + os.constants.signals[cancelled];
     await call.update();
   };
-  await saveCancellation();
-  result.collector_rc = record.collector_rc;
-  await fs.writeFile(path.join(directory, 'execution.json'), JSON.stringify(result, null, 2));
-  // A signal during the final write still belongs to this invocation.
-  if (cancelled && result.collector_rc !== 128 + os.constants.signals[cancelled]) {
+  // The CLI's atomic summary is also part of this invocation. A signal during
+  // its write or rename must update all three records before handlers leave.
+  do {
     await saveCancellation();
     result.collector_rc = record.collector_rc;
     await fs.writeFile(path.join(directory, 'execution.json'), JSON.stringify(result, null, 2));
-  }
+    await finalize?.(result);
+  } while (cancelled && result.collector_rc !== 128 + os.constants.signals[cancelled]);
   return result;
+  } catch (failure) {
+    terminateFailedChild();
+    if (closed) result = await closed;
+    result ||= {exitCode: null, signal: null, stdout, stderr, error};
+    // Cleanup and subsequent evidence failures must not replace the first I/O
+    // error, or turn the raw child status into the collector's exit status.
+    const secondary = [];
+    try { await closeLogs(); } catch (error) { secondary.push(error.message); }
+    record.child_rc = result.signal ? -os.constants.signals[result.signal] : result.exitCode;
+    record.child_signal = result.signal ?? null;
+    record.state = 'COLLECTOR_FAILED'; record.collector_rc = 74;
+    record.error = failure.message;
+    record.collector_error = {message: failure.message, code: failure.code ?? null};
+    result.collector_rc = 74; result.collector_error = record.collector_error;
+    const attempt = async operation => { try { await operation(); } catch (error) { secondary.push(error.message); } };
+    await attempt(() => call.update());
+    await attempt(() => fs.writeFile(path.join(directory, 'execution.json'), JSON.stringify(result, null, 2)));
+    await attempt(() => finalize?.(result));
+    if (passthrough) process.stderr.write(`${failure.message}\n${secondary.map(message => `evidence persistence: ${message}\n`).join('')}`);
+    return result;
   } finally {
+    // Both success and failure have reaped the child and closed logs before
+    // withdrawing the cancellation escalation and signal ownership.
     clearTimeout(killTimer);
     process.off('SIGTERM', term); process.off('SIGINT', interrupt);
   }
@@ -355,10 +397,25 @@ async function main() {
   if (separator < 0) throw new Error('expected options -- original-argv');
   const options = Object.fromEntries(Array.from({length: separator / 2}, (_, i) => [args[i * 2].replace(/^--/, ''), args[i * 2 + 1]]));
   const command = args.slice(separator + 1); let call; let result;
+  const saveSummary = async result => {
+    const collectorRc = call?.record.collector_rc ?? code(result);
+    if (call || options['summary-file']) {
+      await fs.mkdir(options.root, {recursive: true});
+      await json(options['summary-file'] || path.join(options.root, `package-${options.name}.result.json`), {
+        invocation_id: options['invocation-id'] ?? null,
+        execution_rc: call?.record.child_rc ?? null, child_signal: call?.record.child_signal ?? null,
+        collector_rc: collectorRc, directory: call?.directory ?? null, state: call?.record.state ?? 'COLLECTOR_FAILED'});
+    }
+  };
   try {
     call = await preserveCall({command, role: options.role, name: options.name, root: options.root,
       sourceTree: options['source-tree'], inputs: JSON.parse(options.inputs || '[]')});
-    result = call.record.diagnostic ? await diagnose(call) : await runDirect(call, {passthrough: true});
+    if (!call.record.diagnostic) {
+      result = await runDirect(call, {passthrough: true, finalize: saveSummary});
+      process.exitCode = result.collector_rc;
+      return;
+    }
+    result = await diagnose(call);
     if (call.record.diagnostic) { process.stdout.write(result.stdout); process.stderr.write(result.stderr); }
   } catch (error) {
     call ||= error.evidence;
@@ -371,13 +428,7 @@ async function main() {
     process.stderr.write(`${error.message}\n`);
   }
   const collectorRc = call?.record.collector_rc ?? code(result);
-  if (call || options['summary-file']) {
-    await fs.mkdir(options.root, {recursive: true});
-    await json(options['summary-file'] || path.join(options.root, `package-${options.name}.result.json`), {
-    invocation_id: options['invocation-id'] ?? null,
-    execution_rc: call?.record.child_rc ?? null, child_signal: call?.record.child_signal ?? null,
-    collector_rc: collectorRc, directory: call?.directory ?? null, state: call?.record.state ?? 'COLLECTOR_FAILED'});
-  }
+  await saveSummary(result);
   process.exitCode = collectorRc;
 }
 

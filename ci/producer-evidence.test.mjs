@@ -429,7 +429,7 @@ for (const mode of ['cancel-zero', 'cancel-ignore']) {
   });
 }
 
-for (const boundary of ['spawn-return', 'finish-write', 'execution-write']) {
+for (const boundary of ['spawn-return', 'finish-write', 'execution-write', 'summary-write', 'summary-rename']) {
   test(`direct cancellation owns the ${boundary} boundary and preserves raw child status`, async () => {
     const f = await setup(`cancel-boundary-${boundary}`);
     const root = path.join(f.root, 'evidence');
@@ -459,9 +459,10 @@ if (boundary === 'spawn-return') {
   };
   syncBuiltinESMExports();
 } else {
-  const original = promises.writeFile;
-  promises.writeFile = async function(file, ...args) {
-    const target = boundary === 'finish-write' ? 'stdout.log' : 'execution.json';
+  const method = boundary === 'summary-rename' ? 'rename' : 'writeFile';
+  const original = promises[method];
+  promises[method] = async function(file, ...args) {
+    const target = boundary.startsWith('summary-') ? 'package-internal.result.json.tmp' : boundary === 'finish-write' ? 'stdout.log' : 'execution.json';
     if (!fired && String(file).endsWith('/' + target)) {
       fired = true; process.kill(process.pid, 'SIGTERM');
       // Hold the real persistence window open for signal delivery, not a retry.
@@ -470,6 +471,7 @@ if (boundary === 'spawn-return') {
     return original.call(this, file, ...args);
   };
 }
+
 process.on('exit', () => fs.writeFileSync(${JSON.stringify(path.join(f.root, 'schedule.json'))}, JSON.stringify({boundary, fired})));
 `);
     const env = {...f.env, EVIDENCE_TEST_MODE: boundary === 'spawn-return' ? 'cancel-ignore' : ''};
@@ -492,5 +494,101 @@ process.on('exit', () => fs.writeFileSync(${JSON.stringify(path.join(f.root, 'sc
     const execution = JSON.parse(await fs.readFile(path.join(call.file, '..', 'execution.json')));
     assert.equal(execution.exitCode, boundary === 'spawn-return' ? null : 0);
     assert.equal(execution.signal, call.child_signal); assert.equal(execution.collector_rc, 143);
+  });
+}
+
+for (const boundary of ['update-write', 'update-rename', 'update-cancel', 'summary-write', 'summary-rename', 'control']) {
+  test(`direct collector ${boundary} closes logs and reaps its exact child after a persistence failure`, async () => {
+    const f = await setup(`io-failure-${boundary}`);
+    const root = path.join(f.root, 'evidence');
+    const hook = path.join(f.root, 'fail-persistence.mjs');
+    const scheduleFile = path.join(f.root, 'failure-schedule.json');
+    await fs.writeFile(hook, `
+import fs from 'node:fs';
+import promises from 'node:fs/promises';
+import cp from 'node:child_process';
+import {syncBuiltinESMExports} from 'node:module';
+const boundary = ${JSON.stringify(boundary)};
+const producer = ${JSON.stringify(f.producer)};
+const trace = ${JSON.stringify(f.trace)};
+const schedule = {boundary, fired: false, watchdog: false, logs: []};
+const open = promises.open;
+promises.open = async function(file, ...args) {
+  const handle = await open.call(this, file, ...args);
+  if (String(file).endsWith('/stdout.log') || String(file).endsWith('/stderr.log')) {
+    const entry = {file: String(file), closed: false}; schedule.logs.push(entry);
+    const close = handle.close.bind(handle);
+    handle.close = async () => { await close(); entry.closed = true; };
+  }
+  return handle;
+};
+const spawn = cp.spawn;
+cp.spawn = function(command, ...args) {
+  const child = spawn.call(this, command, ...args);
+  if (command === producer) {
+    schedule.pid = child.pid;
+    child.on('close', (rc, signal) => { schedule.child = {rc, signal}; });
+    // A broken cut must leave evidence, rather than orphan a producer or hang
+    // the workflow. This watchdog is an explicit failing control, never green.
+    const watchdog = setTimeout(() => {
+      if (!schedule.child) { schedule.watchdog = true; child.kill('SIGKILL'); }
+    }, 3000);
+    watchdog.unref();
+  }
+  return child;
+};
+syncBuiltinESMExports();
+const method = boundary.endsWith('rename') ? 'rename' : 'writeFile';
+const original = promises[method];
+promises[method] = async function(file, ...args) {
+  const summary = boundary.startsWith('summary-');
+  const target = summary ? 'package-internal.result.json.tmp' : 'call.json.tmp';
+  if (!schedule.fired && schedule.pid && String(file).endsWith('/' + target)) {
+    const deadline = Date.now() + 2500;
+    while (!fs.existsSync(trace) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 1));
+    if (!fs.existsSync(trace)) throw Error('producer readiness missing before fault');
+    schedule.fired = true;
+    if (boundary === 'update-cancel') {
+      process.kill(process.pid, 'SIGTERM');
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+    if (boundary !== 'control') throw Object.assign(Error('injected ENOSPC at ' + boundary), {code: 'ENOSPC'});
+  }
+  return original.call(this, file, ...args);
+};
+process.on('exit', () => fs.writeFileSync(${JSON.stringify(scheduleFile)}, JSON.stringify(schedule)));
+`);
+    const waiting = boundary.startsWith('update-');
+    const args = ['--import', hook, path.join(repo, 'ci/producer-evidence.mjs'), '--role', 'package',
+      '--name', 'internal', '--source-tree', f.tree, '--root', root, '--', f.producer];
+    const result = spawnSync(process.execPath, args, {cwd: f.tree,
+      env: {...f.env, EVIDENCE_TEST_MODE: waiting ? 'cancel-ignore' : ''}, encoding: 'utf8', timeout: 6000});
+    const schedule = JSON.parse(await fs.readFile(scheduleFile));
+    const [call] = await calls(root);
+    const summary = JSON.parse(await fs.readFile(path.join(root, 'package-internal.result.json')));
+    const execution = JSON.parse(await fs.readFile(path.join(call.file, '..', 'execution.json')));
+    const actual = {boundary, rc: result.status, signal: result.signal, schedule, call, summary, execution};
+    await fs.writeFile(path.join(f.root, 'failure-result.json'), JSON.stringify({...actual, args, stdout: result.stdout, stderr: result.stderr}, null, 2));
+    target('collector_io_failure_reaps_child', actual);
+    assert.equal(schedule.fired, true, 'target fault occurs after real child readiness');
+    assert.equal(schedule.watchdog, false, 'target production collector reaps child without the test watchdog');
+    assert.equal(schedule.logs.length, 2);
+    assert.ok(schedule.logs.every(log => log.closed), 'target collector closes both actual log handles');
+    assert.equal(await fs.stat(`/proc/${schedule.pid}`).then(() => true, () => false), false, 'target exact child is reaped');
+    assert.equal(result.error, undefined); assert.equal(result.signal, null);
+    assert.equal(result.status, boundary === 'control' ? 0 : 74);
+    assert.equal(call.child_rc, waiting ? -9 : 0);
+    assert.equal(call.child_signal, waiting ? 'SIGKILL' : null);
+    assert.deepEqual(schedule.child, {rc: waiting ? null : 0, signal: waiting ? 'SIGKILL' : null});
+    assert.equal(execution.exitCode, schedule.child.rc); assert.equal(execution.signal, schedule.child.signal);
+    assert.equal(summary.execution_rc, call.child_rc); assert.equal(summary.child_signal, call.child_signal);
+    assert.equal(summary.collector_rc, result.status); assert.equal(execution.collector_rc, result.status);
+    if (boundary !== 'control') {
+      assert.equal(call.state, 'COLLECTOR_FAILED'); assert.equal(summary.state, 'COLLECTOR_FAILED');
+      assert.equal(call.collector_error.code, 'ENOSPC');
+      assert.match(call.error, new RegExp('injected ENOSPC at ' + boundary));
+      assert.match(result.stderr, new RegExp('injected ENOSPC at ' + boundary));
+      assert.equal(execution.collector_error.code, 'ENOSPC');
+    }
   });
 }
