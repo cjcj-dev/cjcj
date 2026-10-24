@@ -7,6 +7,7 @@ import {spawnSync} from 'node:child_process';
 import {buildCapacity} from '../../ci/build-resources.mjs';
 import {toolsFor} from '../srcbuild/stages/tools.mjs';
 import {makeRepos} from '../lib/config.mjs';
+import {installEntries} from '../../ci/bootstrap/sdk-install-entries.mjs';
 const producers=toolsFor();
 function assertCommands(lines,verb,selected=producers) {
  const commands=lines.filter(line=>line.includes('python3 build.py '+verb));
@@ -52,7 +53,7 @@ test('public nine-tool stage separates the total CPU and heavy package budgets',
  assert.equal(p.status,0,p.stderr);
  const lines=p.stderr.split('\n').filter(s=>s.includes('python3 build.py build'));
  assertCommands(lines,'build');
- assert(lines.some(s=>s.includes('/cjcompat/build')&&s.includes('--sdk '+root+'/cangjie_compiler/output')));
+ assert(lines.some(s=>s.includes('/cjcompat/build')&&s.includes('--sdk '+root+'/software/cangjie')));
  for(const name of ['cjpm','cjfmt','cangjie-language-server','cjlint','cjprof','cjcompat'])assert(lines.some(s=>s.includes('/'+name+'/build')&&s.includes('--jobs 1')));
  for(const name of ['hyperlangExtension','cjcov','cjtrace-recover'])assert(lines.some(s=>s.includes('/'+name+'/build')&&!s.includes('--jobs')));
  const selectedSdk=root+'/selected-sdk';await fs.mkdir(selectedSdk);
@@ -145,8 +146,14 @@ async function installedRegressionFixture() {
   if(!await fs.stat(root+'/fixture-ready').catch(()=>null)) {
    await fs.mkdir(sdk,{recursive:true});await fs.mkdir(root+'/official',{recursive:true});
    const hello='#!/bin/sh\nprintf "Hello, Cangjie\\n"\n';
-   await write(sdk+'/bin/cjc','#!'+process.execPath+'\n'+
+   await write(sdk+'/bin/cjcj-stage1','#!'+process.execPath+'\n'+
     `const fs=require('node:fs');const out=process.argv[process.argv.indexOf('-o')+1];fs.writeFileSync(out,${JSON.stringify(hello)},{mode:0o755});\n`,0o755);
+   // The real pending-tools consumer copies the installed compiler entry and
+   // execution closure. Produce that entry through the existing installer;
+   // this compiler body remains an explicitly controlled hello fixture.
+   await installEntries({root:sdk,build:root+'/compiler-entry',platform:'linux_x86_64',
+    groups:[{directory:'bin',retain:'libexec/compiler',names:['cjcj-stage1'],libraries:[]}]});
+   await fs.symlink('cjcj-stage1',sdk+'/bin/cjc');
    // Do not copy Node or any SDK; these unrelated HLE inputs are unused markers.
    for(const file of ['tools/bin/node','tools/dtsparser/node_modules/.bin/cjbind','tools/dtsparser/DEPENDENCIES.json'])await write(sdk+'/'+file,'controlled unused HLE boundary');
    const outputs={cjpm:'cjpm/dist/cjpm',cjfmt:'cjfmt/build/build/bin/cjfmt',hle:'hyperlangExtension/target/bin/main',lsp:'cangjie-language-server/output/bin/LSPServer',cjcov:'cjcov/dist/cjcov','cjtrace-recover':'cjtrace-recover/dist/bin/cjtrace-recover',cjlint:'cjlint/dist/bin/cjlint',cjprof:'cjprof/dist/bin/cjprof',cjcompat:'cjcompat/dist/bin/cjcompat'};
