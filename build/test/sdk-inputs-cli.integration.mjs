@@ -77,6 +77,7 @@ function identities(ws, expectedUrls = urls) {
 }
 const otherFetch = ['--repo-url', `compiler=${fixtureUrl}`, '--repo-tag', `compiler=${fixtureSha}`,
   '--repo-url', `runtime=${fixtureUrl}`, '--repo-tag', `runtime=${fixtureSha}`,
+  '--repo-url', `llvm=${fixtureUrl}`, '--repo-tag', `llvm=${fixtureSha}`,
   ...(process.env.SDK_INPUT_TOOLS_REF ? ['--repo-tag', `tools=${fixed.tools}`] : []),
   ...(process.env.SDK_INPUT_STDX_REF ? ['--repo-tag', `stdx=${fixed.stdx}`] : [])];
 const ws = path.join(work, 'workspace');
