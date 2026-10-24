@@ -44,3 +44,11 @@ the assertions, the expected target rejections, all four scalar/plain control
 checks, and six binary-CHIR reader executions per arm. Reader exit 1 counts only
 with its reached target marker; signals and earlier failures reject the arm.
 This is a prepared check, not a record of an executed test.
+
+`default_functions.cj` links against the actual product CHIR archive. The
+target supplies all eleven interpreter helpers plus the three native Reference
+callbacks and checks every enum-selected pointer, MAIN and Clone. The separate
+`control` argument checks missing helpers and MAIN. This catches insertion of
+native callbacks into the positional interpreter table, including silent
+misbinding before an out-of-bounds write. Native Reference method publication
+remains covered by full std code generation; this test does not replace it.

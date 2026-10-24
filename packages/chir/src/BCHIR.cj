@@ -534,9 +534,8 @@ public class BCHIR {
 
 public func BCHIRDefaultFunctionMangledNames(): ArrayList<String> {
     let names = ArrayList<String>()
-    names.add("rt$RegisterReferenceFinalizer")
-    names.add("rt$RunReferenceHandler")
-    names.add("rt$RunReferenceFinalizers")
+    // Positions are BCHIRDefaultFunctionKind indices, not runtime callbacks.
+    // Reference methods are published by native core package initialization.
     names.add("rt$ThrowArithmeticException")
     names.add("rt$ThrowOverflowException")
     names.add("rt$ThrowIndexOutOfBoundsException")
