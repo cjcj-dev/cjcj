@@ -70,7 +70,7 @@
   {
     "file": "ci/test-srcbuild-acquire-wiring.mjs",
     "executor": "manual",
-    "reason": "Requires real kkk2 host and an exclusive private checkout with absent .srcbuild state; cuts the actual srcbuild acquisition call, redirects state into NEW_WORK and runs only formal step 2. Fixture payloads do not qualify LLVM or SDK."
+    "reason": "Requires an exclusive private checkout and NEW_WORK on the controlled worker; public SDK CLI acquires a digest-selected source archive and installs its five transport payloads. Cuts the actual installation copy with independent source acquisition control; restores product source. Fixture payloads do not qualify LLVM or SDK."
   },
   {
     "file": "ci/test-llvm-tuple-layout.mjs",
