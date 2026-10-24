@@ -7,15 +7,19 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {printCommonVersions, stageBegin, toCommandPath} from './common.mjs';
 import {pickWindowsCC} from './pick_cc.mjs';
+import {configureNativeRuntime, installNativeRuntimeDependencies, installNativeRuntimeInputs, recordNativeRuntime} from './native_runtime.mjs';
 
 const {root} = stageBegin('runtime');
 const source = process.env.RUNTIME_SOURCE || path.join(process.cwd(), 'runtime-source');
 const version = process.env.RUNTIME_VERSION || '1.2.0-alpha.20260721165458';
 const buildType = process.env.RUNTIME_BUILD_TYPE || 'release';
-const runtimeTarget = process.env.RUNTIME_TARGET || 'native';
+const runtimeTarget = process.env.RUNTIME_TARGET || (process.platform === 'win32' ? 'windows-x86_64' : 'native');
 const runtimeToolchain = process.env.RUNTIME_TOOLCHAIN || '';
 const installRoot = path.join(root, 'runtime-install');
 let artifactRoot = installRoot;
+const nativePair = process.env.RUNTIME_NATIVE_PAIR === '1';
+let nativeCommands;
+if (nativePair) configureNativeRuntime({runtimeTarget});
 
 if (runtimeToolchain) {
   process.env.PATH = `${path.join(runtimeToolchain, 'bin')}${path.delimiter}${process.env.PATH || ''}`;
@@ -28,7 +32,8 @@ try { await fs.access(buildPy); } catch {
   console.error(`FATAL: pinned runtime checkout missing: ${buildPy}`);
   process.exit(2);
 }
-const actualRef = (await $({stdio: 'pipe', verbose: false})`git -C ${toCommandPath(source)} rev-parse HEAD`).stdout.trim();
+const objectRepository=process.env.RUNTIME_GIT_REPOSITORY || source;
+const actualRef = (await $({stdio: 'pipe', verbose: false})`git -C ${toCommandPath(objectRepository)} rev-parse ${process.env.RUNTIME_GIT_REPOSITORY ? process.env.RUNTIME_REF+'^{commit}' : 'HEAD'}`).stdout.trim();
 if (!/^[0-9a-f]{40}$/.test(actualRef)) {
   console.error(`FATAL: runtime checkout did not resolve to a full commit SHA: ${actualRef}`);
   process.exit(3);
@@ -41,6 +46,10 @@ if (process.env.RUNTIME_REF) {
 }
 await fs.mkdir(installRoot, {recursive: true});
 const runtimeDirectory = path.join(source, 'runtime');
+if(nativePair&&process.platform==='linux') {
+  process.env.GC_UNIT_GATE_STATUS=path.join(runtimeDirectory,'CMakebuild/gc-unit.status');
+  await fs.rm(process.env.GC_UNIT_GATE_STATUS,{force:true});
+}
 const preinstall = path.join(process.env.RUNNER_TEMP || path.join(root, 'runtime-preinstall'));
 
 if (process.platform === 'linux') {
@@ -51,7 +60,7 @@ if (process.platform === 'linux') {
       console.error('FATAL: RUNTIME_TOOLCHAIN is required for the Windows cross target');
       process.exit(4);
     }
-    const configuredInstallRoot = path.join(installRoot, 'windows_release_x86_64');
+    const configuredInstallRoot = path.join(installRoot, `windows_${buildType}_x86_64`);
     artifactRoot = configuredInstallRoot;
     await $({cwd: runtimeDirectory})`python3 build.py build --target ${runtimeTarget} --build-type ${buildType} --target-toolchain ${runtimeToolchain} --prefix ${preinstall} -v ${version}`;
     await $({cwd: runtimeDirectory})`python3 build.py install --prefix ${configuredInstallRoot}`;
@@ -73,40 +82,51 @@ if (process.platform === 'linux') {
   await $({cwd: runtimeDirectory})`python3 build.py build --target native --build-type ${buildType} --prefix ${preinstall} -v ${version}`;
   await $({cwd: runtimeDirectory})`python3 build.py install --prefix ${installRoot}`;
 } else if (process.platform === 'win32') {
-  const windowsCC = await pickWindowsCC();
+  const windowsCC = await pickWindowsCC(runtimeToolchain
+    ? [path.join(runtimeToolchain, 'bin', 'clang.exe')] : undefined);
   if (!/[\\/]mingw64[\\/]bin[\\/]clang\.exe$/i.test(windowsCC)) {
     console.error(`FATAL: runtime requires working MINGW64/MSVCRT clang, probe selected ${windowsCC}`);
     process.exit(4);
   }
   const msysBash = process.env.MSYS2_BASH || 'C:\\msys64\\usr\\bin\\bash.exe';
+  const selectedToolchain = path.dirname(path.dirname(windowsCC));
   const shellQuote = (value) => "'" + value.replace(/'/g, "'\\''") + "'";
   const targetSeparator = runtimeTarget.lastIndexOf('-');
   const targetPlatform = runtimeTarget.slice(0, targetSeparator);
   const targetArch = runtimeTarget.slice(targetSeparator + 1);
-  const configuredInstallRoot = path.join(installRoot, `${targetPlatform}_${buildType}_${targetArch}`);
+  const configuredInstallRoot = nativePair ? installRoot : path.join(installRoot, `${targetPlatform}_${buildType}_${targetArch}`);
   artifactRoot = configuredInstallRoot;
   const linkerToolchain = fileURLToPath(new URL('./windows_runtime_toolchain.cmake', import.meta.url));
   const script = [
     'set -euo pipefail',
-    'export PATH=/mingw64/bin:/usr/bin:$PATH',
+    `runtime_toolchain="$(cygpath -u ${shellQuote(selectedToolchain)})"`,
+    'export PATH="$runtime_toolchain/bin:/usr/bin:$PATH"',
     // build.py drives the main tree with `make cangjie-runtime`; Ninja files have no
     // such rule (round-9 root), so force the Makefiles generator (make is installed).
     "export CMAKE_GENERATOR='Unix Makefiles'",
     // Select the official llvm-mingw linker before build.py configures CMake.
     `export CMAKE_TOOLCHAIN_FILE="$(cygpath -m ${shellQuote(linkerToolchain)})"`,
+    ...(nativePair ? [`export SCCACHE_PATH="$(cygpath -m ${shellQuote(process.env.SCCACHE_PATH)})"`] : []),
     'command -v cmake ninja clang; cmake --version | head -1',
     `runtime_source="$(cygpath -u ${shellQuote(runtimeDirectory)})"`,
-    `runtime_preinstall="$(cygpath -u ${shellQuote(installRoot)})"`,
+    `runtime_preinstall="$(cygpath -u ${shellQuote(preinstall)})"`,
     `runtime_install="$(cygpath -u ${shellQuote(configuredInstallRoot)})"`,
     'cd "$runtime_source"',
-    `python3 build.py build --target ${runtimeTarget} --build-type ${buildType} --target-toolchain /mingw64 --prefix "$runtime_preinstall" -v ${shellQuote(version)}`,
+    `python3 build.py build --target ${runtimeTarget} --build-type ${buildType} --target-toolchain "$runtime_toolchain" --prefix "$runtime_preinstall" -v ${shellQuote(version)}`,
     'python3 build.py install --prefix "$runtime_install"',
   ].join('\n');
-  const scriptPath = path.join(process.cwd(), 'rtbuild-msys2.sh');
-  await fs.writeFile(scriptPath, `${script}\n`);
-  const scriptMixedPath = scriptPath.replaceAll('\\', '/');
-  const command = 'export MSYSTEM=MINGW64 MSYS2_PATH_TYPE=inherit CHERE_INVOKING=1; exec /usr/bin/bash -l ' + scriptMixedPath;
-  await $`${toCommandPath(msysBash)} -c ${command}`;
+  const command = 'export MSYSTEM=MINGW64 MSYS2_PATH_TYPE=inherit CHERE_INVOKING=1; exec /usr/bin/bash -lc ' + shellQuote(script);
+  nativeCommands = [[msysBash, '-c', command]];
+  let result;
+  try { result = await $`${toCommandPath(msysBash)} -c ${command}`; }
+  catch (error) { result = error; throw error; }
+  finally {
+    if (nativePair) await fs.writeFile(path.join(installRoot, 'runtime-native-command.json'), JSON.stringify({
+      argv:nativeCommands[0], runtimeRef:actualRef, llvmRef:process.env.LLVM_SHA,
+      rc:result?.exitCode ?? null, signal:result?.signal ?? null,
+      source:runtimeDirectory, install:installRoot, buildType, version,
+    }, null, 2) + '\n');
+  }
 } else {
   console.error(`FATAL: unsupported runtime build host: ${process.platform}/${process.arch}`);
   process.exit(5);
@@ -114,10 +134,11 @@ if (process.platform === 'linux') {
 
 if (runtimeTarget === 'windows-x86_64') {
   const runtimeExportDefinition = path.join(runtimeDirectory, 'src', 'windows_x86_64_exports.def');
-  const configuredInstallRoot = path.join(installRoot, 'windows_release_x86_64');
-  await fs.copyFile(runtimeExportDefinition, path.join(configuredInstallRoot, 'windows_x86_64_exports.def'));
+  await fs.copyFile(runtimeExportDefinition, path.join(artifactRoot, 'windows_x86_64_exports.def'));
   console.log(`WINDOWS_RUNTIME_EXPORT_DEF staged_from=${runtimeExportDefinition}`);
 }
+
+if (nativePair) installNativeRuntimeDependencies({source, installRoot, buildType});
 
 async function collectFiles(directory) {
   const files = [];
@@ -137,6 +158,11 @@ if (!runtimeLib) {
   console.error(`FATAL: libcangjie-runtime was not installed under ${installRoot}`);
   process.exit(6);
 }
-await fs.writeFile(path.join(artifactRoot, 'SOURCE_SHA'), `${actualRef}\n`);
+if (!nativePair) await fs.writeFile(path.join(artifactRoot, 'SOURCE_SHA'), `${actualRef}\n`);
 console.log(`runtime_provenance=${path.join(artifactRoot, 'SOURCE_SHA')} source_ref=${actualRef}`);
 await $({nothrow: true})`file ${toCommandPath(runtimeLib)}`;
+
+if (nativePair) {
+  installNativeRuntimeInputs({source, installRoot});
+  await recordNativeRuntime({source, installRoot, actualRef, version, buildType, commands:nativeCommands});
+}

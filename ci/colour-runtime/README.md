@@ -79,3 +79,11 @@ identities, source lane and retained qualification runs are recorded in
 The tested target runtime is measured independently of this fixed language
 SDK. Updating the production runtime pin and all platform release assets is
 tracked separately in #863; it does not change the language SDK identities.
+
+The resumed native producer selects runtime/std paths and manifests separately
+for linux_x86_64 and linux_aarch64. ARM requires its own language tuple pin,
+AST input and `COLOUR_RT_QUALIFIED_LANGUAGE_ARTIFACT`; the x64 qualification
+artifact 1504 is never an ARM fallback. These inputs must come from the native
+SDK producer with fixed source identities. The workflow can emit a candidate
+runtime pin after successful build/std/gate, but no official pin is changed by
+this integration. Native ARM execution remains pending those actual inputs.

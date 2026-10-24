@@ -4,3 +4,6 @@
 # MINGW64 clang otherwise selects GNU ld, which fails libc++ delete REL32s.
 cmake_minimum_required(VERSION 3.29)
 set(CMAKE_LINKER_TYPE LLD)
+if("$ENV{RUNTIME_NATIVE_PAIR}" STREQUAL "1")
+  include("${CMAKE_CURRENT_LIST_DIR}/native_runtime_toolchain.cmake")
+endif()

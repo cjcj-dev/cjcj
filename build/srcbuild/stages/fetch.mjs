@@ -2,8 +2,9 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import {saveSourceSelection} from '../../lib/config.mjs';
 import {BuildError} from '../../lib/errors.mjs';
-import {shallowClone} from '../../lib/git.mjs';
+import {shallowClone, assertSourceIdentity} from '../../lib/git.mjs';
 import {getLogger, stage} from '../../lib/logging.mjs';
 import {applyTextPatch, ensureDir} from './common.mjs';
 
@@ -60,11 +61,13 @@ export async function run(config) {
     for (const repo of Object.values(config.repos)) {
       const target = path.join(config.workspace, repo.dirName);
       if (fs.existsSync(target)) {
-        logger.info('Repo %s already at %s, skipping clone', repo.name, target);
-        continue;
+        logger.info('Checking existing repo %s at %s', repo.name, target);
+      } else {
+        await shallowClone(repo.url, target, {tag: repo.tag});
       }
-      await shallowClone(repo.url, target, {tag: repo.tag});
+      await assertSourceIdentity(repo, target);
     }
     applyCompilerCjdbPatches(config.repoPath('compiler'));
+    saveSourceSelection(config);
   });
 }

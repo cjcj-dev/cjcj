@@ -5,7 +5,9 @@ import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import test from 'node:test';
+import {archiveInstall} from '../../ci/bootstrap/sdk-flow.mjs';
 import {writeCrossRuntimeManifest} from '../../ci/release/cross-runtime.mjs';
+import {CROSS_STD_BUILDS} from '../lib/targets.mjs';
 import {
   BASE_SDK_PROVENANCE,
   BASE_SDK_SOURCE_REASON,
@@ -418,7 +420,7 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
     /PROVENANCE|RELEASE-MANIFEST/.test(line)).join('\n')}\nARCHIVE-PROVENANCE-END`);
   console.log(`RELEASE-MANIFEST-BEGIN\n${manifestText.trim()}\nRELEASE-MANIFEST-END`);
 
-  for (const mode of ['list', 'single']) await t.test(`Android archive consumes runtime and std through the release compose entry (${mode})`, async () => {
+  for (const mode of ['list', 'single']) await t.test(`Android component transport retains bytes; compose requires complete SDK (${mode})`, async () => {
     // These are package-device fixture inputs, not acceptance of a real runtime/std build.
     const tuple = 'linux_android_aarch64_cjnative';
     const crossRoot = path.join(root, `cross artifacts ${mode}`);
@@ -439,29 +441,95 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
     run('clang', ['--target=aarch64-linux-android23', '-c', runtimeSource, '-o', path.join(staticLib, 'cjstart.o')]);
     await writeCrossRuntimeManifest({root: crossRuntime, tuple, runtimeRef: RUNTIME_SHA});
     const androidOut = path.join(root, `android-dist-${mode}`);
-    const forwarded = finalArgs.slice(1);
-    forwarded[forwarded.indexOf('--outdir') + 1] = androidOut;
-    const result = runRaw('zx', [path.resolve('ci/release/compose-package.mjs'), '--cross-root', crossRoot,
-      '--', ...forwarded, '--release-key', 'linux-x64-android'],
-    {env: {...process.env, GITHUB_RUN_ID: 'fixture-run', GITHUB_RUN_ATTEMPT: '1',
-      CROSS_STD_ARTIFACTS: mode === 'list' ? JSON.stringify([{tuple, artifact: 'final-std-android-aarch64'}]) : '[]',
-      CROSS_STD_ARTIFACT: mode === 'single' ? 'final-std-android-aarch64' : '',
-      CROSS_STD_TUPLE: mode === 'single' ? tuple : ''}});
+    const input=path.join(root,'missing-native-android-'+mode);await fs.mkdir(input);
+    const result=runRaw('zx',[path.resolve('ci/release/compose-package.mjs')],{env:{...process.env,
+      NATIVE_SDK_ARTIFACT_DIR:input,NATIVE_SDK_INSTALL_DIR:path.join(root,'received-android-'+mode),
+      RELEASE_PLATFORM:'linux-x64',RELEASE_KEY:'linux-x64-android',CJCJ_NATIVE_SDK_VERSION:'fixture',
+      CJCJ_RELEASE_SOURCE_SHA:CJCJ_SHA,RUNTIME_REF:RUNTIME_SHA,FINAL_STD_DIR:std,RELEASE_DIST:androidOut,
+      CROSS_STD_DIR:crossRoot,CROSS_STD_ARTIFACTS:mode==='list'?JSON.stringify([{tuple,artifact:'final-std-android-aarch64'}]):'[]',
+      CROSS_STD_ARTIFACT:mode==='single'?'final-std-android-aarch64':'',CROSS_STD_TUPLE:mode==='single'?tuple:''}});
+    assert.equal(result.status,1,result.stderr);assert.match(result.stderr,/NATIVE_SDK_ARCHIVE_COUNT 0/);
+    assert.doesNotMatch(result.stdout,/NATIVE_RELEASE_(INPUTS|CONSUMED|ARCHIVE)/);
     const output = path.join(androidOut, 'cjcj-fixture-linux-x64-android');
     const names = [`runtime/lib/${tuple}/libcangjie-runtime.so`, `runtime/lib/${tuple}/libboundscheck.so`,
       `lib/${tuple}/cjstart.o`, `lib/${tuple}/libcangjie-std-core.a`, `runtime/lib/${tuple}/libcangjie-std-core.so`];
-    const observed = await Promise.all(names.map(async name => {
-      const bytes = await fs.readFile(path.join(output, name)).catch(() => null);
-      return bytes ? crypto.createHash('sha256').update(bytes).digest('hex') : 'MISSING';
-    }));
-    const expected = await Promise.all(names.map((name, index) => sha256(path.join(index < 3 ? crossRuntime : crossStd, name))));
-    console.log(`ASSERT_ANDROID_PACKAGE_BYTES mode=${mode} rc=${result.status} observed=${JSON.stringify(observed)} expected=${JSON.stringify(expected)}`);
-    assert.deepEqual(observed, expected, `real compose/package entry must carry Android inputs: ${result.stderr}`);
-    assert.equal(result.status, 0, result.stdout + result.stderr);
-    const archive = path.join(androidOut, 'cjcj-fixture-linux-x64-android.tar.gz');
-    const entries = run('tar', ['-tzf', archive]).stdout;
-    for (const name of names) assert.ok(entries.includes(`cjcj-fixture-linux-x64-android/${name}`));
+    // The component transport remains independently executable. No SDK
+    // BUILD record or compiler is fabricated to get past the actual consumer.
+    const relative=names.map((name,index)=>'final-std-android-aarch64/'+(index<3?'cross-runtime/':'')+name);
+    const archive=path.join(root,'finite-android-'+mode+'.tar.gz');
+    await archiveInstall({install:crossRoot,archive,test:{required:relative},vars:{},records:[]});
+    const unpacked=path.join(archive+'.unpacked',path.basename(crossRoot));
+    const observed=await Promise.all(relative.map(name=>sha256(path.join(unpacked,name))));
+    const expected=await Promise.all(names.map((name,index)=>sha256(path.join(index<3?crossRuntime:crossStd,name))));
+    assert.deepEqual(observed,expected);console.log('FINITE_ANDROID_TRANSPORT_ASSERT '+mode);
+
   });
+
+  const crossCases = [
+    ...[...new Set(CROSS_STD_BUILDS.map(row => row.family))].map(family => ({family, mode: 'list',
+      label: family, builds: CROSS_STD_BUILDS.filter(row => row.family === family)})),
+    ...CROSS_STD_BUILDS.map(row => ({family: row.family, mode: 'single', label: row.tuple, builds: [row]})),
+  ];
+  for (const {family, mode, label, builds} of crossCases) {
+    await t.test(`${label} component transport retains bytes; compose requires complete SDK (${mode})`, async () => {
+      // Bounded package transport fixtures. Linux hosts this archive test; these
+      // bytes do not qualify a Darwin/OHOS compiler, runtime or final std build.
+      const crossRoot = path.join(root, `cross ${label} ${mode}`);
+      const expectedFiles = [];
+      for (const build of builds) {
+        const {tuple, artifact} = build;
+        const crossStd = path.join(crossRoot, artifact);
+        const suffix = family === 'ios' ? '.dylib' : '.so';
+        for (const directory of ['modules', 'lib', 'runtime/lib']) {
+          await fs.cp(path.join(std, directory, TUPLE), path.join(crossStd, directory, tuple), {recursive: true});
+        }
+        if (family === 'ios') await fs.rename(path.join(crossStd, 'runtime/lib', tuple, 'libcangjie-std-core.so'),
+          path.join(crossStd, 'runtime/lib', tuple, 'libcangjie-std-core.dylib'));
+        const crossRuntime = path.join(crossStd, 'cross-runtime');
+        const shared = path.join(crossRuntime, 'runtime/lib', tuple);
+        const staticLib = path.join(crossRuntime, 'lib', tuple);
+        await fs.mkdir(shared, {recursive: true}); await fs.mkdir(staticLib, {recursive: true});
+        if (family === 'ios') {
+          const bytes = Buffer.alloc(128);
+          bytes.writeUInt32LE(0xfeedfacf, 0); bytes.writeUInt32LE(build.arch === 'arm64' ? 0x0100000c : 0x01000007, 4);
+          bytes.writeUInt32LE(6, 12); bytes.write(`CJRT-COMMIT:${RUNTIME_SHA}`, 32);
+          await fs.writeFile(path.join(shared, `libcangjie-runtime${suffix}`), bytes);
+          await fs.writeFile(path.join(staticLib, 'cjstart.o'), 'fixture Mach-O startup bytes');
+        } else {
+          const runtimeSource = await write(root, `${tuple}.c`,
+            `const char lineage[] = "CJRT-COMMIT:${RUNTIME_SHA}"; int fixture(void) { return 478; }\n`);
+          const triple = `${build.arch}-linux-ohos`;
+          run('clang', [`--target=${triple}`, '-fuse-ld=lld', '-nostdlib', '-shared', runtimeSource,
+            '-o', path.join(shared, `libcangjie-runtime${suffix}`)]);
+          run('clang', [`--target=${triple}`, '-c', runtimeSource, '-o', path.join(staticLib, 'cjstart.o')]);
+        }
+        await fs.copyFile(path.join(shared, `libcangjie-runtime${suffix}`), path.join(shared, `libboundscheck${suffix}`));
+        await writeCrossRuntimeManifest({root: crossRuntime, tuple, runtimeRef: RUNTIME_SHA});
+        const names = [`runtime/lib/${tuple}/libcangjie-runtime${suffix}`, `runtime/lib/${tuple}/libboundscheck${suffix}`,
+          `lib/${tuple}/cjstart.o`, `lib/${tuple}/libcangjie-std-core.a`, `runtime/lib/${tuple}/libcangjie-std-core${suffix}`,
+          `modules/${tuple}/std/std.core.a`];
+        for (const [index, name] of names.entries()) expectedFiles.push({name, relative:artifact+'/'+(index<3?'cross-runtime/':'')+name, sha256: await sha256(path.join(index < 3 ? crossRuntime : crossStd, name))});
+      }
+      const outputRoot = path.join(root, `dist-${label}-${mode}`);
+      const input=path.join(root,'missing-native-'+label+'-'+mode);await fs.mkdir(input);
+      const platform=family==='ios'?'darwin-arm64':'linux-x64',key=family==='ios'?'darwin-arm64-ios':'linux-x64-ohos';
+      const result=runRaw('zx',[path.resolve('ci/release/compose-package.mjs')],{env:{...process.env,
+        NATIVE_SDK_ARTIFACT_DIR:input,NATIVE_SDK_INSTALL_DIR:path.join(root,'received-'+label+'-'+mode),
+        RELEASE_PLATFORM:platform,RELEASE_KEY:key,CJCJ_NATIVE_SDK_VERSION:'fixture',
+        CJCJ_RELEASE_SOURCE_SHA:CJCJ_SHA,RUNTIME_REF:RUNTIME_SHA,FINAL_STD_DIR:std,RELEASE_DIST:outputRoot,
+        CROSS_STD_DIR:crossRoot,CROSS_STD_ARTIFACTS:mode==='list'?JSON.stringify(builds.map(({tuple,artifact})=>({tuple,artifact}))):'[]',
+        CROSS_STD_ARTIFACT:mode==='single'?builds[0].artifact:'',CROSS_STD_TUPLE:mode==='single'?builds[0].tuple:''}});
+      assert.equal(result.status,1,result.stderr);assert.match(result.stderr,/NATIVE_SDK_ARCHIVE_COUNT 0/);
+      assert.doesNotMatch(result.stdout,/NATIVE_RELEASE_(INPUTS|CONSUMED|ARCHIVE)/);
+      const archive=path.join(root,'finite-cross-'+label+'-'+mode+'.tar.gz');
+      await archiveInstall({install:crossRoot,archive,test:{required:expectedFiles.map(f=>f.relative)},vars:{},records:[]});
+      const unpacked=path.join(archive+'.unpacked',path.basename(crossRoot));
+      const observed=await Promise.all(expectedFiles.map(f=>sha256(path.join(unpacked,f.relative))));
+      assert.deepEqual(observed,expectedFiles.map(f=>f.sha256));
+      console.log('FINITE_CROSS_TRANSPORT_ASSERT '+JSON.stringify({label,mode,platform,key,rc:result.status}));
+
+    });
+  }
 
   async function expectInspectionFailure(name, expected) {
     const stubBin = path.join(root, `${name}-stub-bin`);

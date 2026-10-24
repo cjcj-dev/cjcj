@@ -3,6 +3,62 @@ name: Linux ARM packaged smoke soak
 on:
   workflow_dispatch:
     inputs:
+      native_runtime_artifact:
+        description: Existing native-runtime-install artifact prefix
+        type: string
+        required: false
+        default: ''
+      native_runtime_run_id:
+        description: Frozen producer run for native runtime installation
+        type: string
+        required: false
+        default: ''
+      native_llvm_ref:
+        description: Explicit paired LLVM full commit
+        type: string
+        required: false
+        default: ''
+      native_runtime_ref:
+        description: Explicit paired runtime full commit
+        type: string
+        required: false
+        default: ''
+      native_host_version:
+        description: Exact official bootstrap host version for this pair
+        type: string
+        required: false
+        default: ''
+      shim_source_selection:
+        description: Cjo header source repository and full commit JSON; private fixed sources require reachable repositories
+        type: string
+        required: false
+        default: "{}"
+      native_source_selection:
+        description: Explicit native source repository and full commit JSON; empty preserves fixed defaults
+        type: string
+        required: false
+        default: '{}'
+      native_build_inputs_artifact:
+        required: false
+        type: string
+        default: ''
+      native_build_inputs_run_id:
+        required: false
+        type: string
+        default: ''
+      source_selection:
+        required: false
+        type: string
+        default: '{}'
+      native_inputs_artifact:
+        description: Reviewed complete native installation artifact prefix, suffixed by source target
+        required: true
+        type: string
+      native_inputs_run_id:
+        description: Original native installation producer run
+        required: true
+        type: string
+
       rounds:
         description: Full packaged-smoke rounds
         required: false
@@ -31,7 +87,6 @@ jobs:
       platform: ${{ steps.matrix.outputs.platform }}
       llvm_platform: ${{ steps.matrix.outputs.llvm_platform }}
       sdk_runtime_dir: ${{ steps.matrix.outputs.sdk_runtime_dir }}
-      compiler_artifact: ${{ steps.matrix.outputs.compiler_artifact }}
       std_artifact: ${{ steps.matrix.outputs.std_artifact }}
     steps:
       - uses: actions/checkout@v7
@@ -47,6 +102,19 @@ jobs:
     name: Build source SDK and final std artifacts
     uses: ./.github/workflows/srcbuild.yml
     with:
+      native_build_inputs_artifact: ${{ inputs.native_build_inputs_artifact }}
+      native_build_inputs_run_id: ${{ inputs.native_build_inputs_run_id }}
+      source_selection: ${{ inputs.source_selection }}
+      native_inputs_artifact: ${{ inputs.native_inputs_artifact }}
+      shim_source_selection: ${{ inputs.shim_source_selection }}
+      native_source_selection: ${{ inputs.native_source_selection }}
+      native_inputs_run_id: ${{ inputs.native_inputs_run_id }}
+      native_runtime_artifact: ${{ inputs.native_runtime_artifact }}
+      native_runtime_run_id: ${{ inputs.native_runtime_run_id }}
+      native_llvm_ref: ${{ inputs.native_llvm_ref }}
+      native_runtime_ref: ${{ inputs.native_runtime_ref }}
+      native_host_version: ${{ inputs.native_host_version }}
+      cangjie_ref: 0.0.0-arm-soak
       build_type: relwithdebinfo
       targets: ${{ needs.matrix-plan.outputs.targets }}
 
@@ -55,14 +123,16 @@ jobs:
     needs: [matrix-plan, source-final-std]
     uses: ./.github/workflows/build-release-package.yml
     with:
+      native_source_selection: ${{ inputs.native_source_selection }}
+      native_llvm_ref: ${{ inputs.native_llvm_ref }}
+      native_runtime_ref: ${{ inputs.native_runtime_ref }}
+      native_host_version: ${{ inputs.native_host_version }}
       runner: ${{ needs.matrix-plan.outputs.runner }}
       platform: ${{ needs.matrix-plan.outputs.platform }}
       llvm_platform: ${{ needs.matrix-plan.outputs.llvm_platform }}
       sdk_runtime_dir: ${{ needs.matrix-plan.outputs.sdk_runtime_dir }}
-      compiler_artifact: ${{ needs.matrix-plan.outputs.compiler_artifact }}
       std_artifact: ${{ inputs.std_artifact || needs.matrix-plan.outputs.std_artifact }}
-      version: arm-soak
-      verify: false
+      version: 0.0.0-arm-soak
     secrets: inherit
 
   soak:
@@ -86,7 +156,7 @@ jobs:
           set -euo pipefail
           rounds="${{ inputs.rounds }}"
           [[ "$rounds" =~ ^[1-9][0-9]*$ ]] || { echo "invalid rounds: $rounds"; exit 2; }
-          pkg=cjcj-arm-soak-linux-aarch64
+          pkg=cjcj-0.0.0-arm-soak-linux-aarch64
           extract="$RUNNER_TEMP/arm-soak-package"
           work_root="$RUNNER_TEMP/arm-soak-rounds"
           rm -rf "$extract" "$work_root"
@@ -94,9 +164,9 @@ jobs:
           trap 'rm -rf "$extract" "$work_root"' EXIT
           tar -C "$extract" -xzf "dist/${pkg}.tar.gz"
           # shellcheck disable=SC1090
-          source "$extract/${pkg}/envsetup.sh"
+          source "$extract/cangjie/envsetup.sh"
           export cjHeapSize=12GB
-          compiler="$extract/${pkg}/bin/cjc"
+          compiler="$extract/cangjie/bin/cjc"
           {
             echo '### Linux ARM packaged smoke soak'
             echo

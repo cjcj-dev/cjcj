@@ -102,17 +102,22 @@ test('base SDK digest mismatch cannot turn into provenance success', async () =>
   );
 });
 
-test('packaged SDK ABI mismatch cannot turn into compose success', async () => {
-  const label = coverProbeSite('packaged SDK compiler/runtime colour ABI');
-  await assert.rejects(
-    runRequiredCheck({
-      label,
-      run: async () => {
-        throw new Error('g_cjLoadBadMask ABI mismatch: compiler=0 runtime=1');
-      },
-    }),
-    /packaged SDK compiler\/runtime colour ABI failed: g_cjLoadBadMask ABI mismatch: compiler=0 runtime=1/,
-  );
+test('packaged SDK ABI mismatch is rejected by the current package consumer', async t => {
+  const {packageInstall}=await import('../../ci/srcbuild/lib/package-install.mjs');
+  const {getTarget}=await import('../lib/targets.mjs');
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'package-abi-negative-'));
+  t.after(()=>fs.rm(root,{recursive:true,force:true}));
+  const sdk=path.join(root,'sdk'),runtime=path.join(sdk,'runtime/lib/linux_x86_64_cjnative');
+  await fs.mkdir(runtime,{recursive:true});await fs.mkdir(path.join(sdk,'bin'));
+  await fs.writeFile(root+'/compiler.c','int main(void){return 0;}\n');
+  await fs.writeFile(root+'/runtime.c','int g_cjLoadBadMask=0;\n');
+  for(const args of [[root+'/compiler.c','-o',sdk+'/bin/cjc'],
+    ['-shared','-fPIC',root+'/runtime.c','-o',runtime+'/libcangjie-runtime.so']]) {
+    const r=spawnSync('cc',args,{encoding:'utf8'});assert.equal(r.status,0,r.stderr);
+  }
+  await assert.rejects(packageInstall({sdk,target:getTarget('linux-x64'),version:'finite',
+    archive:root+'/rejected.tar.gz'}),/g_cjLoadBadMask ABI mismatch: compiler=0.*runtime=1/);
+  await assert.rejects(fs.stat(root+'/rejected.tar.gz'),{code:'ENOENT'});
 });
 
 test('tuple fetch script rejects an unsupported non-dry-run host', async t => {

@@ -3,6 +3,8 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {assertBootstrapCompiler} from '../lib/bootstrap-handoff.mjs';
+import {installedStageOutput} from '../lib/installed-stage-output.mjs';
+import {verifyStdBuildInputs} from '../../bootstrap/stdlib-build.mjs';
 import {writeStdProvenance} from '../../../build/lib/provenance.mjs';
 import {getTarget} from '../../../build/lib/targets.mjs';
 import {installPath, isInstalled, TARGET_TRIPLE} from '../../../build/toolchain/mingw.mjs';
@@ -31,8 +33,9 @@ if (process.platform !== target.spec.nodePlatform || process.arch !== target.spe
 if (!target.spec.crossCompile) throw new Error('windows-x64 must remain a cross target');
 if (!isInstalled(buildRoot)) throw new Error(`official MinGW toolchain is incomplete under ${installPath(buildRoot)}`);
 
-const sdk = path.join(workspace, 'software', 'cangjie');
-const compiler = path.join(sdk, 'bin', 'cjcj-stage2');
+const sdk = path.join(path.resolve(requiredEnv('CJCJ_BOOTSTRAP_WORK')), 'sdk-stage2');
+const originalCompiler = await installedStageOutput(sdk, 'stage2');
+const compiler = originalCompiler.product;
 const runtimeRepository = path.join(workspace, 'cangjie_runtime');
 const runtimeRoot = path.join(runtimeRepository, 'runtime');
 const runtimeOutput = path.join(runtimeRoot, 'output');
@@ -44,7 +47,7 @@ const mingwBin = path.join(mingwRoot, 'bin');
 const mingwLib = path.join(mingwRoot, TARGET_TRIPLE, 'lib');
 
 const runtimeRef = (await $({stdio: 'pipe'})`git -C ${runtimeRepository} rev-parse HEAD`).stdout.trim();
-if (runtimeRef !== expectedRuntimeRef) {
+if (runtimeRef !== expectedRuntimeRef || runtimeRef !== originalCompiler.lineage.runtimeCommit) {
   throw new Error(`runtime source mismatch: expected ${expectedRuntimeRef}, got ${runtimeRef}`);
 }
 const resolvedCompiler = await fs.realpath(compiler);
@@ -66,7 +69,7 @@ const stageEnv = {
 };
 const assertCompiler = async () => {
   const command = await $({env: stageEnv, stdio: 'pipe'})`command -v cjc`;
-  await assertBootstrapCompiler({sdk, command: command.stdout.trim()});
+  await assertBootstrapCompiler({sdk, command: command.stdout.trim(), producer: compiler, producerSha256: originalCompiler.lineage.compilerSha256});
 };
 await assertCompiler();
 await $({env: stageEnv})`set -o pipefail; cjc --version | head -2`;
@@ -86,6 +89,7 @@ for (const entry of await fs.readdir(runtimeOutput)) {
 
 await assertCompiler();
 console.log('[windows-stage3] cross-build final std with stage2 host cjc');
+await verifyStdBuildInputs(sdk);
 await fs.rm(finalStd, {recursive: true, force: true});
 await $({cwd: stdlibRoot, env: stageEnv})`python3 build.py clean`;
 await $({cwd: stdlibRoot, env: stageEnv})`python3 build.py build -t release --target windows-x86_64 --target-lib=${runtimeTarget} --target-lib=${mingwLib} --target-sysroot ${mingwRoot}/ --target-toolchain ${mingwBin}`;
@@ -105,3 +109,13 @@ if (!symbols.includes('g_cjLoadBadMask') || !/CJ_MCC_Read(?:StaticRef|RefField)/
   throw new Error('Windows final std lacks coloured-runtime barrier symbols');
 }
 console.log(`WINDOWS_STAGE3_BUILD_PASS target=${target.spec.key} final_std=${finalStd}`);
+
+// Tool production has one caller in the workflow. It requires a target SDK
+// containing this final std plus Windows native libraries, not the host SDK.
+const targetSdk=path.join(workspace,'software/cangjie-windows');
+for(const relative of ['tools/bin/libcangjie-lsp.dll','tools/lib/libcangjie-lsp.dll.a',
+  'runtime/lib/windows_x86_64_cjnative/libcangjie-runtime.dll']) {
+  await fs.access(path.join(targetSdk,relative)).catch(()=>{throw new Error('WINDOWS_TARGET_SDK_INPUT_REQUIRED '+path.join(targetSdk,relative));});
+}
+await fs.cp(path.join(finalStd,'lib'),path.join(targetSdk,'lib'),{recursive:true,force:true});
+console.log(`WINDOWS_TARGET_SDK_READY root=${targetSdk}`);

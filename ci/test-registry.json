@@ -1,104 +1,23 @@
 [
   {
-    "file": "build/test/srcbuild_git_shell_contract.sh",
-    "executor": "bash",
+    "file": "build/test/srcbuild-git-shell-contract.test.mjs",
+    "executor": "zx",
     "args": []
   },
   {
-    "file": "ci/bootstrap/test_bootstrap.sh",
-    "executor": "bash",
-    "args": []
-  },
-  {
-    "file": "ci/bootstrap/test_colour_llvm.py",
-    "executor": "manual",
-    "reason": "Requires real COLOUR_LLVM_SO and HOST_LLVM_SO libraries to exercise bootstrap binding; neither is supplied by the independent script-contract job."
-  },
-  {
-    "file": "ci/bootstrap/test_compiler_identity.py",
-    "executor": "python3",
-    "args": []
-  },
-  {
-    "file": "ci/bootstrap/test_cpp_headers.sh",
+    "file": "ci/bootstrap/cpp-headers.integration.mjs",
     "executor": "manual",
     "reason": "Cold bootstrap integration needs pinned C++ source, host LLVM, AST archive and colour tuple; allocates a private full build worker."
   },
   {
-    "file": "ci/bootstrap/test_host_identities.py",
-    "executor": "python3",
-    "args": []
-  },
-  {
-    "file": "ci/bootstrap/test_host_identity_wiring.py",
-    "executor": "workflow",
-    "workflow": ".github/workflows/test-host-identities.yml",
-    "interpreter": "python3"
-  },
-  {
-    "file": "ci/bootstrap/test_sdk_cjc_swap.py",
-    "executor": "python3",
-    "args": [
-      "--output",
-      "{output}"
-    ]
-  },
-  {
-    "file": "ci/bootstrap/test_sdk_exe_symlink.py",
-    "executor": "python3",
-    "args": [
-      "--output",
-      "{output}"
-    ]
-  },
-  {
-    "file": "ci/bootstrap/test_sdk_runtime.py",
-    "executor": "python3",
-    "args": [
-      "--output",
-      "{output}"
-    ]
-  },
-  {
-    "file": "ci/bootstrap/test_sdk_shared_pair.py",
-    "executor": "python3",
-    "args": [
-      "--output",
-      "{output}"
-    ]
-  },
-  {
-    "file": "ci/bootstrap/test_sdk_std.py",
-    "executor": "python3",
-    "args": [
-      "--output",
-      "{output}"
-    ]
-  },
-  {
-    "file": "ci/bootstrap/test_sdk_symlinks.py",
-    "executor": "python3",
-    "args": []
-  },
-  {
-    "file": "ci/bootstrap/test_sdk_verify.py",
-    "executor": "python3",
-    "args": []
-  },
-  {
-    "file": "ci/bootstrap/test_stage0_cache.sh",
-    "executor": "bash",
-    "args": []
+    "file": "ci/bootstrap/test_cpp_headers.sh",
+    "executor": "manual",
+    "reason": "Compatibility wrapper for cpp-headers.integration.mjs; same actual bootstrap inputs required."
   },
   {
     "file": "ci/bootstrap/test_target_runtime_link.py",
     "executor": "manual",
     "reason": "Requires an assembled stage1 target SDK with separately bound host libraries and pinned coloured target runtime, not the official host SDK."
-  },
-  {
-    "file": "ci/bootstrap/test_tuple_permissions.py",
-    "executor": "manual",
-    "reason": "Requires a real LLVM_TUPLE, assembled HOST_SDK and COLOUR_RUNTIME; permission fault arms copy and install this full paired toolchain."
   },
   {
     "file": "ci/release/test_darwin_runtime_controls.sh",
@@ -113,18 +32,28 @@
     "args": []
   },
   {
-    "file": "ci/test-ast-support-wiring.sh",
+    "file": "ci/test-ast-support-wiring.mjs",
     "executor": "manual",
     "reason": "Fault-arm tool rewrites ci/release/prepare_bootstrap_inputs.mjs in place; run only in an isolated checkout, not alongside its Node contract suite."
   },
   {
-    "file": "ci/test-codegen-layout-sync.sh",
-    "executor": "workflow",
-    "workflow": ".github/workflows/test-llvm-tuple.yml",
-    "interpreter": "bash"
+    "file": "ci/test-g1-signal-cleanup.mjs",
+    "executor": "manual",
+    "reason": "Linux real-entry INT/TERM parity uses the locked Bash parser and cuts the actual bootstrap consumer; requires an exclusive isolated checkout, not concurrent Node tests."
   },
   {
-    "file": "ci/test-codegen-runtime-layout.sh",
+    "file": "ci/test-g1-failure-propagation.mjs",
+    "executor": "manual",
+    "reason": "Actual migrated-entry error propagation uses the locked Bash parser plus fixed runtime/LLVM/tuple inputs; caller supplies a private evidence directory and input JSON."
+  },
+  {
+    "file": "ci/test-codegen-layout-sync.mjs",
+    "executor": "workflow",
+    "workflow": ".github/workflows/test-llvm-tuple.yml",
+    "interpreter": "npx --yes zx@8"
+  },
+  {
+    "file": "ci/test-codegen-runtime-layout.mjs",
     "executor": "manual",
     "reason": "Requires candidate compiler, paired host SDK/libLLVM and both runtime/LLVM source repositories for ABI integration."
   },
@@ -134,13 +63,18 @@
     "reason": "Requires a real candidate compiler, paired host SDK/libLLVM, fixed core input tree and private evidence directory; invocation and output contract are documented in tests/frontend_apc/README.md."
   },
   {
-    "file": "ci/test-colour-libxml2.sh",
+    "file": "ci/test-colour-libxml2.mjs",
     "executor": "manual",
-    "reason": "Fault-arm tool rewrites workflow, srcbuild and checker files in place; optional real bad/good ld.lld controls need retained linker artifacts."
+    "reason": "Fault-arm tool rewrites workflow, tuple producer and checker files in place; optional real bad/good ld.lld controls need retained linker artifacts."
   },
   {
-    "file": "ci/test-llvm-tuple-layout.sh",
-    "executor": "bash",
+    "file": "ci/test-srcbuild-acquire-wiring.mjs",
+    "executor": "manual",
+    "reason": "Requires an exclusive private checkout and NEW_WORK on the controlled worker; public SDK CLI acquires a digest-selected source archive and installs its five transport payloads. Cuts the actual installation copy with independent source acquisition control; restores product source. Fixture payloads do not qualify LLVM or SDK."
+  },
+  {
+    "file": "ci/test-llvm-tuple-layout.mjs",
+    "executor": "zx",
     "args": [
       "{output}"
     ]
@@ -152,20 +86,15 @@
     "interpreter": "npx --yes zx@8"
   },
   {
-    "file": "ci/test-runtime-layout.sh",
+    "file": "ci/test-runtime-layout.mjs",
     "executor": "workflow",
     "workflow": ".github/workflows/test-llvm-tuple.yml",
-    "interpreter": "bash"
+    "interpreter": "npx --yes zx@8"
   },
   {
     "file": "ci/test_ast_host_workflow.py",
     "executor": "manual",
     "reason": "Runs actual AST workflow install/build steps in a private SDK home with source downloads; needs a dedicated full-build worker and PyYAML."
-  },
-  {
-    "file": "ci/test_build_resources.py",
-    "executor": "python3",
-    "args": []
   },
   {
     "file": "ci/test_phase_gc.py",
@@ -423,11 +352,6 @@
     "member": "packages/compiler_unittest"
   },
   {
-    "file": "packages/driver/src/Archive_output_test.cj",
-    "executor": "cjpm",
-    "member": "packages/driver"
-  },
-  {
     "file": "packages/driver/src/DriverOptions_normalization_test.cj",
     "executor": "cjpm",
     "member": "packages/driver"
@@ -603,14 +527,9 @@
     "reason": "Real fixed runtime commits and an explicitly supplied local Git transport mirror/work directory are required; stops at the first tuple CMake boundary without an LLVM build."
   },
   {
-    "file": "ci/test-llvm-runtime-chain.sh",
+    "file": "ci/test-llvm-runtime-chain.mjs",
     "executor": "manual",
     "reason": "Requires explicit lane work directory, real fixed runtime Git mirror, and local other-source Git fixture; observes the real tuple CMake boundary without an LLVM build."
-  },
-  {
-    "file": "ci/bootstrap/test_supplied_stage1.sh",
-    "executor": "manual",
-    "reason": "Linux x86_64/aarch64 real-input bootstrap contract; requires BOOTSTRAP_CHECK_LOG_DIR and the complete pinned supplied-stage1 arguments from ci/bootstrap/bootstrap.sh, including a stage1 ELF and host SDK. No workflow provisions this tuple."
   },
   {
     "file": "packages/compiler_unittest/src/ArrayCloneMetadata_test.cj",
@@ -621,6 +540,285 @@
     "file": "scripts/test_array_clone_metadata_unit.py",
     "executor": "manual",
     "reason": "Manual bounded Linux ArrayCloneMetadata test links this registered compiler_unittest source against existing release archives; invoke python3 scripts/test_array_clone_metadata_unit.py --build-tree /path/to/product --sdk /path/to/paired-sdk --out /path/to/private-evidence. No workflow provisions these archives."
+  },
+  {
+    "file": "ci/bootstrap/sdk-host-inputs.integration.test.mjs",
+    "executor": "workflow",
+    "workflow": ".github/workflows/test-host-identities.yml",
+    "interpreter": "node",
+    "args": []
+  },
+  {
+    "file": "ci/bootstrap/sdk-native-capi.integration.test.mjs",
+    "executor": "manual",
+    "reason": "Requires SDK_CAPI_REQUEST naming actual fixed N library and its independent source digest, native CMake/clang++/Ninja tools, plus SDK_CAPI_EVIDENCE in an owned native domain. Checks real X86/ARM/AArch64 C API results and a precise registration cut; no SDK producer receipt or installation authentication remains. NOT_RUN until these explicit inputs are supplied."
+  },
+  {
+    "file": "ci/host-toolchain-official.integration.test.mjs",
+    "executor": "manual",
+    "reason": "Requires SDK_OFFICIAL_INPUT JSON naming the independently received official H install root and original compiler SHA256. Executes the actual official compiler and workflow selector, preserving the independently measured Linux identity and the unchanged explicitly unverified aarch64 control. It does not read a removed producer plan or SDK lock; NOT_RUN until the genuine H input is supplied."
+  },
+  {
+    "file": "ci/bootstrap/std-runtime-colour.integration.mjs",
+    "executor": "manual",
+    "reason": "Requires real independently supplied STD_COLOUR_INPUTS naming the fixed host/verification plan and STD_COLOUR_OUTPUT in an owned domain; missing inputs fail. No production SDK is available in the generic Node gate."
+  },
+  {
+    "file": "ci/bootstrap/sdk-native-cjo-install.integration.test.mjs",
+    "executor": "manual",
+    "reason": "Requires npx-reachable zx@8 plus an owned temporary directory; it runs the real nativeStage compiler path and the real build_shim.mjs producer so the assertion reads the installed share/cjcj/cjo instead of a copy-list reimplementation. The source tree is an explicit fixture, not a compiler build."
+  },
+  {
+    "file": "ci/bootstrap/sdk-native-wiring.integration.test.mjs",
+    "executor": "manual",
+    "reason": "Requires SDK_WIRING_TEST_ROOT in an owned kkk2 domain and native C compiler/archive tools, actual resource settings, and exclusive product mutation for causal arms. Exercises adapters with explicit C fixtures, not a full Cangjie SDK."
+  },
+  {
+    "file": "ci/bootstrap/sdk-native-libraries.integration.test.mjs",
+    "executor": "manual",
+    "reason": "Requires SDK_NATIVE_LIBRARIES_INPUTS with actual completed N/R/H/AST source/install facts, SDK_NATIVE_LIBRARIES_COMPLETED with genuine stage0/std-bootstrap installations, and an owned SDK_NATIVE_LIBRARIES_ROOT. Optional SDK_NATIVE_LIBRARIES_COPIED reuses the same read-only entity copies across independent arms. Runs formal prepare-bootstrap-plans and sdk-build --from/--through stage1-initial, then a real native archive link/execution and origin assertions. Needs native CMake/clang/Ninja; no dependency rebuild, debugger or full SDK qualification."
+  },
+  {
+    "file": "ci/bootstrap/sdk-native-migration.integration.test.mjs",
+    "executor": "manual",
+    "reason": "Requires SDK_MIGRATION_INPUTS naming actual independently received H and AST roots plus an owned work directory. Executes native install/launcher, real cangjie-test bootstrap identity admission, real H compiler/default cjpm hello and relocated archive. H is a reference interface input, not proof of H1/std/C2/C3 or full SDK production; missing inputs fail."
+  },
+  {
+    "file": "build/test/native-tool-install.integration.test.mjs",
+    "executor": "manual",
+    "reason": "Requires SDK_MIGRATION_INPUTS with actual H and an owned work directory. Builds six explicitly small Cangjie source fixtures using actual H, then installs and runs their outputs through native public SDK tool entries. Checks retained producer bytes and that missing dye still rejects all six fixtures; does not qualify full cangjie_tools source rebuilding or any non-Linux platform."
+  },
+  {
+    "file": "build/test/sdk-inputs-cli.integration.mjs",
+    "executor": "manual",
+    "reason": "Documented in build/SOURCE-INPUTS.md as approved private kkk2 integration: requires SDK_INPUT_WORK, writable fixed tools/cjpm/stdx Git mirrors in SDK_INPUT_MIRRORS, and read-only real host SDK_INPUT_H, plus zx for the CI verify child. No workflow provisions these private inputs. Run the real CLI and observer suite with those inputs; registration does not qualify native builds, SDK packaging or the separate product cuts."
+  },
+  {
+    "file": "build/test/source-tool-install-contract.integration.test.mjs",
+    "executor": "workflow",
+    "workflow": ".github/workflows/srcbuild-target.yml",
+    "interpreter": "node",
+    "args": []
+  },
+  {
+    "file": "ci/bootstrap/sdk-stdlib-source.integration.test.mjs",
+    "executor": "manual",
+    "reason": "Requires SDK_STDLIB_DESCRIPTOR, SDK_STDLIB_REPOSITORY/COMMIT and an owned SDK_STDLIB_TEST_ROOT; an archived driver may select its real compiler repository separately. Real prepare/checkout/resume, no native stage."
+  },
+  {
+    "file": "ci/bootstrap/sdk-jobserver.integration.test.mjs",
+    "executor": "manual",
+    "reason": "Requires an owned SDK_JOBSERVER_TEST_ROOT, actual paired JOBSERVER_TEST_SDK and SDK_JOBSERVER_TEMPLATE; runs public SDK jobserver/token/cancellation finite gates."
+  },
+  {
+    "file": "ci/bootstrap/sdk-supervisor.integration.mjs",
+    "executor": "manual",
+    "reason": "Finite native supervisor/FD integration requires explicit fixed source and runtime adapter paths plus an owned persistent work root; no current CI invocation supplies those inputs."
+  },
+  {
+    "file": "ci/bootstrap/sdk-cancel-ownership.integration.mjs",
+    "executor": "manual",
+    "reason": "Finite native supervisor/FD integration requires explicit fixed source and runtime adapter paths plus an owned persistent work root; no current CI invocation supplies those inputs."
+  },
+  {
+    "file": "ci/bootstrap/sdk-supervisor-protocol.integration.mjs",
+    "executor": "manual",
+    "reason": "Finite native supervisor/FD integration requires explicit fixed source and runtime adapter paths plus an owned persistent work root; no current CI invocation supplies those inputs."
+  },
+  {
+    "file": "ci/bootstrap/sdk-supervisor-final.integration.mjs",
+    "executor": "manual",
+    "reason": "Finite native supervisor/FD integration requires explicit fixed source and runtime adapter paths plus an owned persistent work root; no current CI invocation supplies those inputs."
+  },
+  {
+    "file": "ci/bootstrap/sdk-cancel-budget.integration.mjs",
+    "executor": "manual",
+    "reason": "Finite native supervisor/FD integration requires explicit fixed source and runtime adapter paths plus an owned persistent work root; no current CI invocation supplies those inputs."
+  },
+  {
+    "file": "ci/bootstrap/sdk-supervisor-signal.integration.mjs",
+    "executor": "manual",
+    "reason": "Finite native supervisor/FD integration requires explicit fixed source and runtime adapter paths plus an owned persistent work root; no current CI invocation supplies those inputs."
+  },
+  {
+    "file": "ci/bootstrap/sdk-supervisor-native.integration.mjs",
+    "executor": "manual",
+    "reason": "Finite native supervisor/FD integration requires explicit fixed source and runtime adapter paths plus an owned persistent work root; no current CI invocation supplies those inputs."
+  },
+  {
+    "file": "ci/bootstrap/sdk-supervisor-lifecycle.integration.mjs",
+    "executor": "manual",
+    "reason": "Finite native supervisor/FD integration requires explicit fixed source and runtime adapter paths plus an owned persistent work root; no current CI invocation supplies those inputs."
+  },
+  {
+    "file": "build/test/source-build-installed.integration.mjs",
+    "executor": "manual",
+    "reason": "Real native SDK successor to source-build-parity command ordering. Requires SOURCE_PARITY_INSTALLED_CONFIG with workspace/buildRoot/targetKey/buildType/cangjieVersion/stdxVersion/hostProfile/officialSdkRoot/consumerSdk options for an owned complete installation at workspace/software/cangjie. Invokes public package and verify with real ABI, hello/cjpm, macros and parked-original unpacked consumption; no opaque SDK fixture. NOT_RUN until the full installed nine-tool input exists. Retains original positive package/source/run/ABI/relocation obligations; finite fixture refusal is not this gate. See build/test/PACKAGE-GATE-OBLIGATIONS.md; Windows/Darwin/cross release gates remain independently required."
+  },
+  {
+    "file": "build/test/runtime-archive-source.integration.mjs",
+    "executor": "manual",
+    "reason": "Finite real CMake provenance generator, native SO/ar and SDK input/identity consumers require a fixed runtime generator and a controlled native worker; not a full runtime or ABI build."
+  },
+  {
+    "file": "build/test/tool-build-facts.integration.mjs",
+    "executor": "manual",
+    "reason": "Public SDK source-build CLI with a real Git selector, fixed cjpm overlay mirror and bounded native C producer; requires RELEASE_EVIDENCE_TEST_ROOT/SDK_INPUT_TOOLS_MIRROR. Tests producer/source/build facts, not actual LSP or complete Cangjie SDK."
+  },
+  {
+    "file": "build/test/cjprof-static-reinstall.integration.mjs",
+    "executor": "manual",
+    "reason": "Requires CJPROF_BUILT_INPUT pointing to recorded real Linux cjprof build facts and immutable native/source/install-rule files, plus RELEASE_EVIDENCE_TEST_ROOT. Runs normal Python/CMake/JNI install in a private relocated copy, SDK installer, real public HTTP consumer and release artifact/archive. Other eight tool/HLE inputs are unresolved interface controls; not full native production or SDK qualification."
+  },
+  {
+    "file": "build/test/tool-environment-availability.integration.mjs",
+    "executor": "manual",
+    "reason": "Requires private RELEASE_EVIDENCE_TEST_ROOT and TOOL_AVAILABILITY_FIXTURE from native-tool-selection.integration.mjs. Copies only that small controlled LSP interface/dependency input; real environment.py CLI and run.py's environment reentry distinguish installation availability from unconsumed macro semantics. Not a real SDK, upstream suite or LSP qualification."
+  },
+  {
+    "file": "build/test/native-tool-selection.integration.mjs",
+    "executor": "manual",
+    "reason": "Requires private RELEASE_EVIDENCE_TEST_ROOT, native C/C++ compiler and Git. Small C producer through build/install facts, actual SDK installer/launcher, public readiness and sdk-build testInstall; current selection stays distinct from old build, wrong AST/runtime/CJ inputs and unconsumed paths reject. Controlled native/interface inputs, not real lint/LSP semantics or SDK qualification."
+  },
+  {
+    "file": "build/test/native-tool-readiness.integration.mjs",
+    "executor": "manual",
+    "reason": "Requires an actual previously installed Linux cjprof in NATIVE_READINESS_INSTALLED_SDK, original NATIVE_READINESS_HEAP_INPUT, real NATIVE_READINESS_JDK and private RELEASE_EVIDENCE_TEST_ROOT. Copies only the recorded native payload; public readiness under a controlled changed stage selection, real HTTP and JNI library loads, changed-JNI refusal. Original producer/install facts stay unchanged. No complete SDK, macro or nine-tool semantic qualification."
+  },
+  {
+    "file": "ci/g2-native-inputs.integration.mjs",
+    "executor": "manual",
+    "reason": "Requires complete original NATIVE_HOST_TEST_INPUT_ROOT and fixed CJCJ_TEST_RUNTIME_GENERATOR plus private RELEASE_EVIDENCE_TEST_ROOT. Actual native ELF/SO/ar source capture through formal host/freeze/capture/G1/G2; archive verifier is explicitly controlled, not complete SDK or official release evidence."
+  },
+  {
+    "file": "ci/release/installed-manifest-entry.integration.mjs",
+    "executor": "manual",
+    "reason": "Formal package/compose finite native fixture; explicitly controlled unavailable SDK functional prerequisites, requires private evidence root."
+  },
+  {
+    "file": "build/test/runtime-component-source.integration.mjs",
+    "executor": "manual",
+    "reason": "Requires a private complete host SDK (version read from its actual compiler), fixed original runtime provenance generator, Linux native C toolchain and isolated evidence root. Formal producer/archive/configure/receive finite pair; unavailable CPP and unrelated H1/AST/LLVM boundaries are explicit, never SDK qualification."
+  },
+  {
+    "file": "ci/bootstrap/sdk-std-install-shape.integration.mjs",
+    "executor": "manual",
+    "reason": "Requires a fixed R AddCangjieSource.cmake and owned SDK_STD_SHAPE_WORK on a controlled native worker. Configures real CMake install graphs for five SDK platforms without building or fabricating target payloads; Windows/Darwin native production remains a separate obligation."
+  },
+  {
+    "file": "ci/bootstrap/sdk-std-install-native.integration.mjs",
+    "executor": "manual",
+    "reason": "Requires SDK_NATIVE_INSTALLED_SDK/TEST_ROOT/INPUTS, real paired Linux installed SDK; jobs follow actual resources. Public CLI installs existing std bytes without rebuilding std; missing artifacts, exact native-stage product cut, independent control, restored actual String compile/run. Windows/Darwin native production remains NOT_RUN."
+  },
+  {
+    "file": "ci/bootstrap/native-cjdb-jobs.test.mjs",
+    "executor": "manual",
+    "reason": "Platform fixed 74e6 finite public CLI gate requires its recorded four-CPU domain, real sccache/Python3.11 development installation and retained NATIVE_JOBS_EVIDENCE; existing producer evidence reused, not a CPU admission rule."
+  },
+  {
+    "file": "ci/build-resources.test.mjs",
+    "executor": "zx",
+    "args": []
+  },
+  {
+    "file": "ci/bootstrap/resource-consumers.integration.test.mjs",
+    "executor": "manual",
+    "reason": "Requires actual private reference H in RESOURCE_CONSUMER_HOST, retained RESOURCE_CONSUMER_EVIDENCE, and assigned Linux CPU domain with an explicit smaller RESOURCE_CONSUMER_CORES subset. Exercises real hello/cjpm and override CHIR target plus a separately labelled BCHIR argument transport fixture; not SDK or CHIR linker qualification."
+  },
+  {
+    "file": "ci/bootstrap/capi-resources.integration.test.mjs",
+    "executor": "manual",
+    "reason": "Requires fixed actual N and original CAPI_RESOURCE_REQUEST, private CAPI_RESOURCE_EVIDENCE, real CMake/clang/Ninja; public native checker compiles its real C API consumer and reads N without changing the installation."
+  },
+  {
+    "file": "ci/bootstrap/native-cjdb-tools.test.mjs",
+    "executor": "manual",
+    "reason": "Platform fixed producer tool spelling gate requires NATIVE_TOOLS_EVIDENCE, NATIVE_JOBS_PYTHON and actual NATIVE_UPPERCASE_SCCACHE; finite real CMake/C compile, not full native N."
+  },
+  {
+    "file": "ci/platform_matrix/cross-runtime-build-type.test.mjs",
+    "executor": "manual",
+    "reason": "Requires private CROSS_TYPE_EVIDENCE and ZX; public Windows cross runtime build/install uses explicitly labelled command fixture, not Windows runtime qualification."
+  },
+  {
+    "file": "ci/platform_matrix/pick_cc.test.mjs",
+    "executor": "manual",
+    "reason": "Requires actual /usr/lib/llvm-15/bin/clang; explicit compiler selection runs real small C compile probe on Linux, not Windows execution."
+  },
+  {
+    "file": "ci/srcbuild/tests/cross-jobs-entry.test.mjs",
+    "executor": "manual",
+    "reason": "Requires private CROSS_JOBS_EVIDENCE and ZX; formal cross runtime CLI exercises controlled dependency commands and actual resource propagation, full cross SDK remains separate."
+  },
+  {
+    "file": "ci/bootstrap/native-python-jobs-explicit.test.mjs",
+    "executor": "zx",
+    "args": []
+  },
+  {
+    "file": "ci/cangjie-test/verify-target-tools.integration.mjs",
+    "executor": "manual",
+    "reason": "Requires a real complete nine-tool target SDK and admitted isolated work capacity. Invokes public environment.py and actual per-tool probes; does not start the 96-CPU suite or grant semantic SDK qualification."
+  },
+  {
+    "file": "ci/bootstrap/native-workflow.test.mjs",
+    "executor": "zx",
+    "args": []
+  },
+  {
+    "file": "ci/bootstrap/native-cjdb-job.test.mjs",
+    "executor": "manual",
+    "reason": "Requires private NATIVE_JOB_EVIDENCE and actual NATIVE_JOB_PYTHON/NATIVE_JOB_SCCACHE. Public workflow adapter runs existing native CMake producer and a small C compile then deliberately stops before install; not full N or Windows qualification."
+  },
+  {
+    "file": "ci/release-evidence-worker.integration.mjs",
+    "executor": "manual",
+    "reason": "Finite real Linux x64 worker CLI parity requires pinned real jq 1.7.1, shfmt v3.12.0 (ci/g3-parser-input.json), and a private WORKER_MIGRATION_EVIDENCE directory outside /tmp; command is documented in ci/release-evidence-worker.md. Full default repository suite and SDK qualification are separate."
+  },
+  {
+    "file": "ci/bootstrap/native-windows-llvm-decode.test.mjs",
+    "executor": "manual",
+    "reason": "Platform fixed 180645 public Python XML decoder synthetic-event gate; requires PYTHON and isolated TRACE_TEST_EVIDENCE. Original producer finite results are reused; not Windows capture qualification."
+  },
+  {
+    "file": "ci/bootstrap/windows-host-entry.integration.mjs",
+    "executor": "manual",
+    "reason": "Public prepare-native-host through original ETW collector, real Python XML decoder and configure missing-input boundary, with explicitly controlled Windows commands/filesystem and download in a Linux subprocess. Requires Node22 experimental module mocks, actual /usr/bin/python3 and WINDOWS_HOST_ENTRY_EVIDENCE. Synthetic integration is not native Windows or full SDK qualification."
+  },
+  {
+    "file": "ci/bootstrap/native-windows-toolchain.test.mjs",
+    "executor": "manual",
+    "reason": "Fixed platform 991835 helper/PE gates require actual LLVM_READOBJ, TOOLCHAIN_DLL_DIRECTORY and private TOOLCHAIN_TEST_EVIDENCE. Reuse original platform finite evidence; not Windows execution."
+  },
+  {
+    "file": "ci/bootstrap/windows-toolchain-entry.integration.mjs",
+    "executor": "manual",
+    "reason": "Finite public artifact materialization, adapter source/tool selection and SDK copy/archive/installed-input consumption. Requires WINDOWS_TOOLCHAIN_ENTRY_EVIDENCE, actual tar and Node22; explicit synthetic transport bytes do not qualify Windows/N/SDK."
+  },
+  {
+    "file": "ci/platform_tuples/migration.integration.mjs",
+    "executor": "manual",
+    "reason": "Fixed G2 leaf parity and AST tests require G2_MIGRATION_EVIDENCE, pinned shfmt 3.12.0 via CJCJ_BASH_AST_PARSER, real git/cmake/zx@8. Reuse original script owner results; finite configure is not full native production."
+  },
+  {
+    "file": "ci/platform_tuples/workflow-entry.integration.mjs",
+    "executor": "manual",
+    "reason": "Public build-llvm-tools workflow run body with real local Git transport and first CMake observation boundary. Requires private G2_WORKFLOW_EVIDENCE and zx@8. Linux caller test does not execute Windows/MSYS2 or full LLVM."
+  },
+  {
+    "file": "build/test/stdx-runtime-entry.integration.mjs",
+    "executor": "manual",
+    "reason": "Requires owned RELEASE_EVIDENCE_TEST_ROOT/TMPDIR, cc/c++/CMake/Ninja/LLVM15 on controlled Linux worker. Real public build stdx, native launcher/loading/link/install with tiny interface programs, not full stdx or SDK qualification; retains small fixtures and raw process results."
+  },
+  {
+    "file": "build/test/stdx-cross-filesystem.integration.mjs",
+    "executor": "manual",
+    "reason": "Requires private RELEASE_EVIDENCE_TEST_ROOT and STDX_CROSS_DATA_ROOT on two real devices, fixed STDX_RECOVERY_CONFIG_GENERATOR handoff, cc/CMake/Ninja/LLVM15 and controlled resources. Public stdx/sdk-build tiny native fixture covers old facts, failure/reentry and existing same-install reuse without full SDK copies; not actual SDK qualification."
+  },
+  {
+    "file": "packages/driver/src/Archive_output_test.cj",
+    "executor": "cjpm",
+    "member": "packages/driver"
   },
   {
     "file": "packages/sema/src/initialization_tests/InitializationControlFlow_test.cj",

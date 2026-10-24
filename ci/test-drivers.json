@@ -156,11 +156,6 @@
     "reason": "manual driver: no workflow provisions an SDK environment (CANGJIE_HOME) and an SDK directory on the command line and a private LLVM tool build; documented invocation `python3 test/macho_lto_staticlib/run.py \\`"
   },
   {
-    "file": "test/macro_instance_stack/run_arms.sh",
-    "kind": "driver",
-    "reason": "manual driver: no workflow provisions an SDK environment (CANGJIE_HOME) and cjpm from a paired SDK; a shell script, and no other file in test names it"
-  },
-  {
     "file": "test/named_struct_factory/build.sh",
     "kind": "driver",
     "reason": "manual driver: no workflow provisions an SDK environment (CANGJIE_HOME) and cjpm from a paired SDK; documented invocation `bash test/named_struct_factory/build.sh /absolute/product/tree /absolute/test-elf /absolute/assertions/libLLVM-15.so /absolute/assertions/cjselfhost_l`"
@@ -169,27 +164,6 @@
     "file": "test/reduce_multi_type_subst/run.py",
     "kind": "driver",
     "reason": "manual driver: no workflow provisions an SDK environment (CANGJIE_HOME) and an SDK directory on the command line; a process entry point, and no other file in test names it"
-  },
-  {
-    "file": "test/runtime_param_layout/compare.py",
-    "kind": "fixture",
-    "consumers": [
-      "test/runtime_param_layout/run.sh"
-    ],
-    "reason": "loaded or run as a child process by test/runtime_param_layout/run.sh; not an entry point on its own (a python module)"
-  },
-  {
-    "file": "test/runtime_param_layout/generate.py",
-    "kind": "fixture",
-    "consumers": [
-      "test/runtime_param_layout/run.sh"
-    ],
-    "reason": "loaded or run as a child process by test/runtime_param_layout/run.sh; not an entry point on its own (a process entry point)"
-  },
-  {
-    "file": "test/runtime_param_layout/run.sh",
-    "kind": "driver",
-    "reason": "manual driver: nothing under .github/workflows names it and it needs a shell script inputs only; documented invocation `bash test/runtime_param_layout/run.sh \"$candidate_repo\" \"$runtime_header\" \\`"
   },
   {
     "file": "test/soft_heap_config/check_transport.py",
@@ -602,5 +576,31 @@
     "file": "tests/jobserver_protocol/run.py",
     "kind": "driver",
     "reason": "Manual Linux FIFO protocol driver; no workflow provisions a product compiler with jobserver tracing. Invoke python3 tests/jobserver_protocol/run.py --compiler /path/to/cjcj-stage1 --source /path/to/package --out /path/to/private-evidence."
+  },
+  {
+    "file": "test/macro_instance_stack/run_arms.sh",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions an SDK environment (CANGJIE_HOME) and cjpm from a paired SDK; a shell script, and no other file in test names it"
+  },
+  {
+    "file": "test/runtime_param_layout/compare.py",
+    "kind": "fixture",
+    "consumers": [
+      "test/runtime_param_layout/run.sh"
+    ],
+    "reason": "loaded or run as a child process by test/runtime_param_layout/run.sh; not an entry point on its own (a python module)"
+  },
+  {
+    "file": "test/runtime_param_layout/generate.py",
+    "kind": "fixture",
+    "consumers": [
+      "test/runtime_param_layout/run.sh"
+    ],
+    "reason": "loaded or run as a child process by test/runtime_param_layout/run.sh; not an entry point on its own (a process entry point)"
+  },
+  {
+    "file": "test/runtime_param_layout/run.sh",
+    "kind": "driver",
+    "reason": "manual driver: nothing under .github/workflows names it and it needs a shell script inputs only; documented invocation `bash test/runtime_param_layout/run.sh \"$candidate_repo\" \"$runtime_header\" \\`"
   }
 ]

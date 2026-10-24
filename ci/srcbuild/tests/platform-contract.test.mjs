@@ -7,8 +7,9 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import {execFileSync} from 'node:child_process';
-import {buildConfig} from '../../../build/lib/config.mjs';
-import {baseEnv} from '../../../build/srcbuild/stages/common.mjs';
+import {buildConfig, normalizeCangjieVersion} from '../../../build/lib/config.mjs';
+import {baseEnv, envFrom} from '../../../build/srcbuild/stages/common.mjs';
+import {run} from '../../../build/lib/runner.mjs';
 import {assembleCjcLinkOption} from '../../platform_matrix/link_option.mjs';
 import {assertFinalStd} from '../lib/final-std.mjs';
 import {llvmToolMatrix, sourceBuildCells} from '../../../build/lib/targets.mjs';
@@ -17,10 +18,30 @@ const root = path.resolve(import.meta.dirname, '../../..');
 const readWorkflow = name => fs.readFile(path.join(root, '.github/workflows', name), 'utf8');
 const llvmWorkflow = name => loadYaml(fsSync.readFileSync(path.join(root, '.github/workflows', name), 'utf8'));
 
+test('native SDK downloads bind the actual packaged producer and read-only run authentication', () => {
+  for (const name of ['ci.yml', 'platform-matrix.yml']) {
+    const workflow = llvmWorkflow(name);
+    assert.deepEqual(workflow.permissions, {contents: 'read', actions: 'read'});
+    const job = workflow.jobs[name === 'ci.yml' ? 'package-tests' : 'colour-runtime'];
+    const download = job.steps.find(step => step.name === 'Receive packaged native SDK');
+    assert.match(download.uses, /^actions\/download-artifact@/);
+    assert.match(download.with.name, /^cjcj-srcbuild-/);
+    assert.equal(download.with['run-id'], '${{ inputs.native_sdk_run_id || vars.CJCJ_NATIVE_SDK_RUN_ID }}');
+    assert.equal(download.with['github-token'], '${{ github.token }}');
+    const receive = job.steps.find(step => step.name === 'Verify and select installed native SDK');
+    assert.match(receive.run, /node ci\/release\/receive_native_sdk.mjs/);
+    assert(job.steps.indexOf(download) < job.steps.indexOf(receive));
+  }
+  const source = llvmWorkflow('srcbuild-target.yml');
+  const producer = Object.values(source.jobs).flatMap(job => job.steps || []).find(step => step.name === 'Upload self-hosted SDK and gate logs');
+  assert.equal(producer.with.name, 'cjcj-srcbuild-${{ matrix.target }}-${{ steps.version.outputs.value }}');
+  assert.match(producer.with.path, /cangjie-sdk-.*-cjcj/);
+});
+
 const producer = llvmWorkflow('build-llvm-tools.yml');
 const wrapper = llvmWorkflow('platform-tuples.yml');
 
-function llvmPlan(requested = 'all', platformSet = '', publishTuple = false) {
+function llvmPlanOutputs(requested = 'all', platformSet = '', publishTuple = false) {
   const directory = fsSync.mkdtempSync(path.join(os.tmpdir(), 'llvm-matrix-'));
   const output = path.join(directory, 'output');
   try {
@@ -31,15 +52,23 @@ function llvmPlan(requested = 'all', platformSet = '', publishTuple = false) {
         PUBLISH_TUPLE: String(publishTuple), GITHUB_OUTPUT: output},
     });
     assert.equal(result.status, 0, result.stderr);
-    const record = fsSync.readFileSync(output, 'utf8').trim();
-    assert.ok(record.startsWith('matrix='), record);
-    const matrix = JSON.parse(record.slice('matrix='.length));
-    console.log(`LLVM_MATRIX_RESULT ${JSON.stringify(matrix)}`);
-    return matrix.include;
+    const records = fsSync.readFileSync(output, 'utf8').trim().split('\n');
+    const outputs = Object.fromEntries(records.map(record => {
+      const separator = record.indexOf('=');
+      assert.ok(separator > 0, record);
+      return [record.slice(0, separator), JSON.parse(record.slice(separator + 1))];
+    }));
+    assert.equal(records.length, Object.keys(outputs).length, 'duplicate producer output');
+    assert.ok(outputs.matrix?.include);
+    assert.deepEqual(outputs.tuple_platforms, outputs.matrix.include
+      .filter(row => /^(linux|darwin)_/.test(row.platform)).map(row => row.platform));
+    console.log(`LLVM_MATRIX_RESULT ${JSON.stringify(outputs)}`);
+    return outputs;
   } finally {
     fsSync.rmSync(directory, {recursive: true, force: true});
   }
 }
+const llvmPlan = (...args) => llvmPlanOutputs(...args).matrix.include;
 
 test('producer emits the real runner and glibc baseline for all five tuples', () => {
   const rows = llvmPlan('all', 'all');
@@ -81,8 +110,9 @@ test('native callers retain four tuples and explicit selections deduplicate', ()
   assert.equal(llvmPlan('all', 'darwin-windows').length, 3);
 });
 
-test('static publication adds x64 once without dropping the requested tuple', () => {
-  assert.deepEqual(llvmPlan('darwin_aarch64', '', true).map(row => row.platform), ['darwin_aarch64', 'linux_x86_64']);
+test('static publication retains exactly the selected native tuples', () => {
+  assert.deepEqual(llvmPlan('darwin_aarch64', '', true).map(row => row.platform), ['darwin_aarch64']);
+  assert.deepEqual(llvmPlan('linux_aarch64,darwin_x86_64', '', true).map(row => row.platform), ['linux_aarch64', 'darwin_x86_64']);
   assert.equal(llvmPlan('linux_x86_64', '', true).length, 1);
 });
 
@@ -117,7 +147,7 @@ test('the repository has one fixed LLVM artifact uploader and preserves native a
   }
   assert.ok(steps.some(step => step.run?.includes('validate tuple')));
   assert.ok(steps.some(step => step.run?.includes('assert_no_libxml2_needed.sh')));
-  assert.ok(steps.some(step => step.run?.includes('bash ci/platform_tuples/build_tuple.sh')));
+  assert.ok(steps.some(step => step.run?.includes('npx --yes zx@8 ci/platform_tuples/build_tuple.mjs')));
   assert.ok(steps.some(step => step.run?.includes('llvm-static-libs.txt')));
 });
 
@@ -141,28 +171,60 @@ async function invokedWorkflows(entry, stack = []) {
 // this file blind to every row. Two selectors are live and both are covered:
 // the fixed-LLVM producer (llvm-tools-matrix.mjs) and the source-build matrix
 // (srcbuild/target-matrix.mjs).
-const planTable = text => {
+let sourcePlanTables;
+function sourcePlans() {
+  if (sourcePlanTables) return sourcePlanTables;
+  const dir = fsSync.mkdtempSync(path.join(os.tmpdir(), 'source-contract-plan-'));
+  const output = path.join(dir, 'outputs');
+  try {
+    const result = spawnSync(process.execPath, ['ci/srcbuild/target-matrix.mjs', '--targets', 'all'], {
+      cwd: root, encoding: 'utf8', env: {...process.env, GITHUB_OUTPUT: output},
+    });
+    assert.equal(result.status, 0, result.stderr);
+    sourcePlanTables = Object.fromEntries(fsSync.readFileSync(output, 'utf8').trim().split('\n').map(line => {
+      const i = line.indexOf('='); return [line.slice(0, i), line.slice(i + 1)];
+    }));
+    return sourcePlanTables;
+  } finally { fsSync.rmSync(dir, {recursive: true, force: true}); }
+}
+const planTable = (text, job = text) => {
   if (text.includes('run: node ci/llvm-tools-matrix.mjs')) {
     return llvmToolMatrix('all', {platformSet: 'all'}).include;
   }
-  if (text.includes('run: node ci/srcbuild/target-matrix.mjs')) return sourceBuildCells();
+  if (text.includes('run: node ci/srcbuild/target-matrix.mjs')) {
+    const output = job.match(/fromJson\(needs\.plan\.outputs\.(\w+)\)/)?.[1] || 'cells';
+    // This is a declaration audit, including currently blocked native cells.
+    // Cross matrices retain their own rows; never mix iOS and OHOS artifacts.
+    const table = sourcePlans()[output === 'matrix' ? 'cells' : output];
+    assert.ok(table, `unknown source matrix output ${output}`);
+    return JSON.parse(table).include;
+  }
   return [...text.matchAll(/^\s*all='(\[[\s\S]*?\])'\s*$/gm)].flatMap(([, json]) => JSON.parse(json));
 };
 
-// The values a ${{ matrix.KEY }} placeholder can take inside one workflow file.
-const matrixValues = (text, key) => [
-  ...[...text.matchAll(new RegExp(String.raw`^\s*(?:- )?${key}: (\S+)$`, 'gm'))].map(([, value]) => value),
-  ...planTable(text).map(entry => entry[key]).filter(value => value !== undefined).map(String),
-];
-
 function expandMatrix(name, text, workflow = text) {
-  const placeholder = name.match(/\$\{\{\s*matrix\.(\w+)\s*\}\}/);
-  if (!placeholder) return [name];
-  const local = matrixValues(text, placeholder[1]);
-  const values = local.length ? local : planTable(workflow)
-    .map(entry => entry[placeholder[1]]).filter(value => value !== undefined).map(String);
-  assert.ok(values.length > 0, `no matrix values for ${placeholder[1]} in ${name}`);
-  return values.flatMap(value => expandMatrix(name.replace(placeholder[0], value), text, workflow));
+  const keys = [...name.matchAll(/\$\{\{\s*matrix\.(\w+)\s*\}\}/g)].map(match => match[1]);
+  if (!keys.length) return [name];
+  const dynamic = /matrix:\s*\$\{\{\s*fromJson\(/.test(text);
+  if (dynamic) {
+    const rows = planTable(workflow, text);
+    assert.ok(rows.length > 0, `no matrix rows for ${name}`);
+    return rows.map(row => name.replace(/\$\{\{\s*matrix\.(\w+)\s*\}\}/g, (_, key) => {
+      assert.ok(row[key] !== undefined, `no matrix value for ${key} in ${name}`);
+      return String(row[key]);
+    }));
+  }
+  const key = keys[0];
+  const outputArray = text.match(new RegExp(String.raw`^\s+${key}:\s*\$\{\{\s*fromJson\(needs\.plan\.outputs\.(\w+)\)\s*\}\}`, 'm'));
+  if (outputArray) {
+    assert.ok(workflow.includes('run: node ci/llvm-tools-matrix.mjs'), 'array matrix must name its actual producer');
+    const values = llvmPlanOutputs('all', 'all', true)[outputArray[1]];
+    assert.ok(Array.isArray(values) && values.length > 0, `no producer values for ${key}`);
+    return values.flatMap(value => expandMatrix(name.replace(new RegExp(String.raw`\$\{\{\s*matrix\.${key}\s*\}\}`, 'g'), value), text, workflow));
+  }
+  const values = [...text.matchAll(new RegExp(String.raw`^\s*(?:- )?${key}: (\S+)$`, 'gm'))].map(([, value]) => value);
+  assert.ok(values.length > 0, `no matrix values for ${key} in ${name}`);
+  return values.flatMap(value => expandMatrix(name.replace(new RegExp(String.raw`\$\{\{\s*matrix\.${key}\s*\}\}`, 'g'), value), text, workflow));
 }
 
 // Artifact names one workflow file uploads, with its own matrix fanout expanded.
@@ -381,13 +443,15 @@ test('source-build workflow connects every native runner to its LLVM and std art
   ]) assert.ok(workflow.includes(edge), edge);
 
   const order = [
+    'Configure native bootstrap from actual repositories and target installations',
     'Bootstrap stage0 compiler', 'Bootstrap stage1 compiler', 'Build stage 3 compiler and final std',
     'Upload final source-built std install root', 'Build stdx from source',
-    'Compose self-hosted SDK', 'Verify self-hosted SDK',
+    'Verify installed SDK', 'Verify self-hosted SDK',
   ].map(name => workflow.indexOf(`name: ${name}`));
   assert.ok(order.every(index => index >= 0));
   assert.deepEqual([...order].sort((a, b) => a - b), order);
 
+  assert.match(workflow, /CJCJ_SRCBUILD_CONSUMER_SDK:.*software\/cangjie/, 'verify consumes the same native final install');
   for (const payload of ['llc.gz', 'opt.gz', 'ld.lld', 'ld64.lld', 'llvm-tools.manifest', 'cjselfhost_llvmshim.o']) {
     assert.ok(fixed.includes(payload), payload);
   }
@@ -435,7 +499,14 @@ test('arm soak produces every artifact its package job downloads, each exactly o
   const required = failClosedDownloads(consumer, callerInputs);
   assert.ok(required.includes(demanded), `std artifact ${demanded} is not among ${required}`);
 
-  const produced = await runArtifacts('arm-soak.yml');
+  const sourceCall = soakJobs.get('source-final-std');
+  const producerVersion = unquote(mapping(block(sourceCall, /^\s*with:\s*$/)).get('cangjie_ref'));
+  assert.equal(normalizeCangjieVersion(producerVersion), callerInputs.get('version'), 'source and consumer SDK versions must match');
+  const sourceWorkflow = await readWorkflow('srcbuild-target.yml');
+  assert.ok(sourceWorkflow.includes('REQUESTED_REF: ${{ inputs.cangjie_ref }}'));
+  assert.ok(sourceWorkflow.includes('--cangjie-version \"$REQUESTED_REF\" print-version'));
+  const produced = (await runArtifacts('arm-soak.yml')).map(([name, owner]) =>
+    [name.replaceAll('${{ steps.version.outputs.value }}', producerVersion), owner]);
   const producersOf = artifact => produced.filter(([name]) => name === artifact).map(([, source]) => source);
 
   // The point of the whole test: demanded and produced have to be the same set.
@@ -502,7 +573,7 @@ test('native build environments use configured architecture, OpenSSL, and loader
   try {
     for (const targetKey of ['linux-aarch64', 'darwin-arm64', 'darwin-x64', 'linux-x64']) {
       const config = buildConfig({targetKey});
-      const env = baseEnv(config);
+      const env = baseEnv(config, {...process.env, CJCJ_SRCBUILD_HOST_SDK: undefined});
       assert.equal(env.ARCH, config.target.spec.arch);
       assert.equal(env.OPENSSL_PATH, config.target.spec.opensslLibDir);
       assert.ok(env.PATH.startsWith(config.target.spec.llvmBinDir));
@@ -514,6 +585,61 @@ test('native build environments use configured architecture, OpenSSL, and loader
     else process.env.CANGJIE_BUILD_DRY_RUN = oldDryRun;
   }
 });
+
+// Each branch has its own test and real child. A failure in a fresh build cannot
+// prevent the tools-only branch from executing. Expectations describe the public
+// ordering contract: SDK tools and configured dependencies precede the caller's
+// unchanged tail. They do not repeat the product's derivation algorithm.
+for (const shape of ['fresh', 'tools']) {
+  for (const inherited of ['', '/caller/one:/caller/two']) {
+    test(`A1 ${shape} child preserves prefix priority and ${inherited ? 'nonempty' : 'empty'} caller tail`, async () => {
+      const previousDryRun = process.env.CANGJIE_BUILD_DRY_RUN;
+      delete process.env.CANGJIE_BUILD_DRY_RUN;
+      const workspace = fsSync.mkdtempSync(path.join(os.tmpdir(), 'loader-derive-ws-'));
+      try {
+        const targetKey = ['linux-x64', 'linux-aarch64', 'darwin-arm64', 'darwin-x64'].find(key => {
+          const spec = buildConfig({targetKey: key}).target.spec;
+          return spec.nodePlatform === process.platform && spec.nodeArch === process.arch;
+        });
+        assert.ok(targetKey, 'a native target must match the executing host');
+        const consumerSdk = shape === 'tools' ? sdkWithToolsLibOnly(workspace) : null;
+        const config = buildConfig({targetKey, workspace, consumerSdk});
+        const spec = config.target.spec;
+        const observed = path.join(workspace, 'child.env');
+        const result = await run([process.execPath, '-e',
+          'require("node:fs").writeFileSync(process.argv[1], process.env[process.argv[2]] ?? "absent")',
+          observed, spec.loaderEnv,
+        ], {
+          envOverlay: envFrom(config, {...process.env, CJCJ_SRCBUILD_HOST_SDK: null,
+            [spec.loaderEnv]: inherited}),
+          capture: true, logOutput: false, check: false,
+        });
+        console.log(`A1_CHILD_RC shape=${shape} tail=${JSON.stringify(inherited)} rc=${result.exitCode}`);
+        assert.equal(result.exitCode, 0, 'the real observation child must run');
+        const value = fsSync.readFileSync(observed, 'utf8');
+        const expected = [
+          ...(consumerSdk ? [path.join(consumerSdk, 'tools', 'lib')] : []),
+          spec.opensslLibDir,
+          ...(inherited ? ['/caller/one', '/caller/two'] : []),
+        ];
+        console.log(`A1_ORDER_TARGET_ASSERTION_EXECUTED shape=${shape} tail=${JSON.stringify(inherited)} actual=${JSON.stringify(value.split(path.delimiter))} expected=${JSON.stringify(expected)}`);
+        assert.deepEqual(value.split(path.delimiter), expected,
+          `${shape}: tools/configured prefixes must have priority over the unchanged caller tail`);
+      } finally {
+        fsSync.rmSync(workspace, {recursive: true, force: true});
+        if (previousDryRun === undefined) delete process.env.CANGJIE_BUILD_DRY_RUN;
+        else process.env.CANGJIE_BUILD_DRY_RUN = previousDryRun;
+      }
+    });
+  }
+}
+
+function sdkWithToolsLibOnly(workspace) {
+  const sdk = fsSync.mkdtempSync(path.join(workspace, 'consumer-'));
+  fsSync.mkdirSync(path.join(sdk, 'tools', 'lib'), {recursive: true});
+  fsSync.mkdirSync(path.join(sdk, 'bin'), {recursive: true});
+  return sdk;
+}
 
 test('source build keeps the pinned plain host runtime across both bootstrap halves', async () => {
   const workflow = await fs.readFile(path.join(root, '.github/workflows/srcbuild-target.yml'), 'utf8');
@@ -559,11 +685,12 @@ test('source build keeps the pinned plain host runtime across both bootstrap hal
 
   const common = await fs.readFile(path.join(root, 'build/srcbuild/stages/common.mjs'), 'utf8');
   assert.ok(common.includes("extraPathDirs.unshift(path.join(hostSdk, 'bin'))"));
-  const stage1 = await fs.readFile(path.join(root, 'ci/srcbuild/steps/build-stage1.mjs'), 'utf8');
-  assert.ok(stage1.includes('hostLoaderPath({'));
-  assert.ok(stage1.includes("path.join(oracleCompilerDir, 'cjc')"));
-  assert.ok(stage1.includes('PATH: `${oracleCompilerDir}${path.delimiter}'));
-  assert.ok(stage1.includes('await $({env: oracleEnv})`cjpm build`'));
+  const domains=await fs.readFile(path.join(root,'ci/bootstrap/sdk-targets.mjs'),'utf8');
+  assert.ok(domains.includes("'.host/runtime/lib/'+tuple"));
+  // Windows installs libLLVM-15.dll under bin/, so the loader directory is
+  // derived from the frozen platform instead of the literal 'lib'.
+  assert.ok(domains.includes("third_party/llvm/'+native.llvmDirectory"));
+  assert.ok(domains.includes("'stage1-initial','stage1-std'"));
 
   const stdx = await fs.readFile(path.join(root, 'build/srcbuild/stages/stdx.mjs'), 'utf8');
   assert.ok(stdx.includes('STDX_HOST_CANGJIE_HOME'));
@@ -590,7 +717,8 @@ test('Windows final std is cross-built by the stage2 Linux host compiler', async
   ]) assert.ok(workflow.includes(edge), edge);
   for (const contract of [
     "getTarget('windows-x64')",
-    "path.join(sdk, 'bin', 'cjcj-stage2')",
+    "installedStageOutput(sdk, 'stage2')",
+    "producer: compiler, producerSha256: originalCompiler.lineage.compilerSha256",
     '--target windows-x86_64',
     '--target-sysroot ${mingwRoot}/',
     '--target-toolchain ${mingwBin}',
@@ -641,7 +769,7 @@ test('an omitted optional input reads the way Actions reads it, not as undefined
     ['platform', 'linux-aarch64'],
     ['llvm_platform', 'linux_aarch64'],
     ['std_artifact', 'final-std-linux-aarch64'],
-    ['compiler_artifact', 'final-compiler-linux-aarch64'],
+    ['version', 'fixture-version'],
   ];
 
   const withCross = failClosedDownloads(consumer,
@@ -670,4 +798,20 @@ test('an input the caller omits and the workflow does not default is a failure, 
     '        required: true', '        type: boolean'].join('\n');
   assert.throws(() => effectiveInputs(declared, new Map()),
     /input needed is omitted by the caller and declares no default/);
+});
+
+test('dynamic cross matrices produce exactly the artifacts declared by release consumers', async () => {
+  const workflow = await readWorkflow('srcbuild-target.yml');
+  const actual = uploadedArtifacts(workflow);
+  const release = loadYaml(await readWorkflow('release.yml'));
+  const requested = new Set(Object.values(release.jobs)
+    .filter(job => job.uses === './.github/workflows/build-release-package.yml')
+    .flatMap(job => JSON.parse(job.with.cross_std_artifacts || '[]'))
+    .filter(row => /^(linux_ohos_|ios_)/.test(row.tuple)).map(row => row.artifact));
+  for (const artifact of requested) {
+    const count = actual.filter(name => name === artifact).length;
+    console.log(`DYNAMIC_ARTIFACT_ASSERT artifact=${artifact} producers=${count}`);
+    assert.equal(count, 1, `producers of ${artifact}`);
+  }
+  assert.deepEqual(actual.filter(name => /^final-std-(ohos|ios)-/.test(name)).sort(), [...requested].sort());
 });

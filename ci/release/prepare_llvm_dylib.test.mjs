@@ -78,3 +78,15 @@ for (const target of ['darwin-arm64', 'darwin-x64']) {
     console.log(`ASSERT ${target} native dylib selection and digest rejection executed`);
   }, target));
 }
+
+for (const [field,value,reason] of [['runtime_sha','f'.repeat(40),'LLVM_DYLIB_RUNTIME_MISMATCH'],
+  ['runtime_sha',undefined,'LLVM_DYLIB_RUNTIME_MISMATCH'],
+  ['platform','darwin_aarch64','LLVM_DYLIB_PLATFORM_MISMATCH'],
+  ['library','libLLVM.dylib','LLVM_DYLIB_PLATFORM_MISMATCH']]) {
+  test(`explicit pair refuses dylib ${field}=${value}`,()=>fixture(({dylib,run})=>{
+    const file=path.join(dylib,'manifest.json'), manifest=JSON.parse(fs.readFileSync(file));
+    manifest[field]=value;fs.writeFileSync(file,JSON.stringify(manifest));
+    const result=run();assert.notEqual(result.status,0);assert.ok(result.stderr.includes(reason),result.stderr);
+    assert.doesNotMatch(result.stdout,/^CJCJ_BOOTSTRAP_COLOUR_LLVM_SO=/m);
+  }));
+}

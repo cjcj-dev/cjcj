@@ -3,6 +3,64 @@ name: Self-hosted source SDK and final std
 on:
   workflow_call:
     inputs:
+      native_runtime_artifact:
+        description: Existing native-runtime-install artifact prefix
+        type: string
+        required: false
+        default: ''
+      native_runtime_run_id:
+        description: Frozen producer run for native runtime installation
+        type: string
+        required: false
+        default: ''
+      native_llvm_ref:
+        description: Explicit paired LLVM full commit
+        type: string
+        required: false
+        default: ''
+      native_runtime_ref:
+        description: Explicit paired runtime full commit
+        type: string
+        required: false
+        default: ''
+      native_host_version:
+        description: Exact official bootstrap host version for this pair
+        type: string
+        required: false
+        default: ''
+      shim_source_selection:
+        description: Cjo header source repository and full commit JSON; private fixed sources require reachable repositories
+        type: string
+        required: false
+        default: "{}"
+      native_source_selection:
+        description: Explicit native source repository and full commit JSON; empty preserves fixed defaults
+        type: string
+        required: false
+        default: '{}'
+      native_build_inputs_artifact:
+        description: Optional native-cjdb source/dependency artifact prefix; runs the existing producer before SDK configuration
+        type: string
+        required: false
+        default: ''
+      native_build_inputs_run_id:
+        description: Original run containing native-cjdb.json and its real dependencies
+        type: string
+        required: false
+        default: ''
+      source_selection:
+        description: Ordinary build repository options JSON, including explicit full stdx url/tag; empty keeps defaults
+        type: string
+        required: false
+        default: '{}'
+      native_inputs_artifact:
+        description: Reviewed complete native installations and exported paired tools artifact
+        required: true
+        type: string
+      native_inputs_run_id:
+        description: Original native installation producer run
+        required: true
+        type: string
       cangjie_ref:
         description: Optional SDK version label; source repository revisions remain pinned
         required: false
@@ -31,6 +89,16 @@ on:
         required: false
         type: string
         default: all
+      build_ohos:
+        description: Build both OHOS runtime and final std tuples on the Linux source cell
+        required: false
+        type: boolean
+        default: false
+      build_ios:
+        description: Build the three iOS runtime and final std tuples on Darwin ARM64
+        required: false
+        type: boolean
+        default: false
       build_android:
         description: Build the Android runtime and final std needed by Android release packages
         required: false
@@ -43,6 +111,64 @@ on:
         default: false
   workflow_dispatch:
     inputs:
+      native_runtime_artifact:
+        description: Existing native-runtime-install artifact prefix
+        type: string
+        required: false
+        default: ''
+      native_runtime_run_id:
+        description: Frozen producer run for native runtime installation
+        type: string
+        required: false
+        default: ''
+      native_llvm_ref:
+        description: Explicit paired LLVM full commit
+        type: string
+        required: false
+        default: ''
+      native_runtime_ref:
+        description: Explicit paired runtime full commit
+        type: string
+        required: false
+        default: ''
+      native_host_version:
+        description: Exact official bootstrap host version for this pair
+        type: string
+        required: false
+        default: ''
+      shim_source_selection:
+        description: Cjo header source repository and full commit JSON; private fixed sources require reachable repositories
+        type: string
+        required: false
+        default: "{}"
+      native_source_selection:
+        description: Explicit native source repository and full commit JSON; empty preserves fixed defaults
+        type: string
+        required: false
+        default: '{}'
+      native_build_inputs_artifact:
+        description: Optional native-cjdb source/dependency artifact prefix; runs the existing producer before SDK configuration
+        type: string
+        required: false
+        default: ''
+      native_build_inputs_run_id:
+        description: Original run containing native-cjdb.json and its real dependencies
+        type: string
+        required: false
+        default: ''
+      source_selection:
+        description: Ordinary build repository options JSON, including explicit full stdx url/tag; empty keeps defaults
+        type: string
+        required: false
+        default: '{}'
+      native_inputs_artifact:
+        description: Reviewed complete native installations and exported paired tools artifact
+        required: true
+        type: string
+      native_inputs_run_id:
+        description: Original native installation producer run
+        required: true
+        type: string
       cangjie_ref:
         description: Optional SDK version label; source repository revisions remain pinned
         required: false
@@ -71,6 +197,16 @@ on:
         required: false
         type: string
         default: all
+      build_ohos:
+        description: Build both OHOS runtime and final std tuples on the Linux source cell
+        required: false
+        type: boolean
+        default: false
+      build_ios:
+        description: Build the three iOS runtime and final std tuples on Darwin ARM64
+        required: false
+        type: boolean
+        default: false
       build_android:
         description: Build the Android runtime and final std needed by Android release packages
         required: false
@@ -92,6 +228,19 @@ permissions:
 concurrency:
   group: srcbuild-native-${{ github.ref }}-${{ inputs.targets || 'all' }}
   cancel-in-progress: false
+
+env:
+  CJCJ_NATIVE_RUNTIME_ARTIFACT: ${{ inputs.native_runtime_artifact }}
+  CJCJ_NATIVE_RUNTIME_RUN_ID: ${{ inputs.native_runtime_run_id }}
+  CJCJ_NATIVE_LLVM_REF: ${{ inputs.native_llvm_ref }}
+  CJCJ_NATIVE_RUNTIME_REF: ${{ inputs.native_runtime_ref }}
+  CJCJ_NATIVE_HOST_VERSION: ${{ inputs.native_host_version }}
+  CJCJ_NATIVE_INPUTS_ARTIFACT: ${{ inputs.native_inputs_artifact }}
+  CJCJ_NATIVE_INPUTS_RUN_ID: ${{ inputs.native_inputs_run_id }}
+  CJCJ_NATIVE_BUILD_INPUTS_ARTIFACT: ${{ inputs.native_build_inputs_artifact }}
+  CJCJ_NATIVE_BUILD_INPUTS_RUN_ID: ${{ inputs.native_build_inputs_run_id }}
+  CJCJ_NATIVE_SOURCE_SELECTION: ${{ inputs.native_source_selection }}
+  CJCJ_SOURCE_SELECTION: ${{ inputs.source_selection }}
 
 jobs:
   # Four source SDK builds are the expensive part of a release, and starting all
@@ -128,12 +277,26 @@ jobs:
       matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
     uses: ./.github/workflows/srcbuild-target.yml
     with:
+      native_build_inputs_artifact: ${{ inputs.native_build_inputs_artifact }}
+      native_build_inputs_run_id: ${{ inputs.native_build_inputs_run_id }}
+      source_selection: ${{ inputs.source_selection }}
+      native_inputs_artifact: ${{ inputs.native_inputs_artifact }}
+      shim_source_selection: ${{ inputs.shim_source_selection }}
+      native_source_selection: ${{ inputs.native_source_selection }}
+      native_inputs_run_id: ${{ inputs.native_inputs_run_id }}
+      native_runtime_artifact: ${{ inputs.native_runtime_artifact }}
+      native_runtime_run_id: ${{ inputs.native_runtime_run_id }}
+      native_llvm_ref: ${{ inputs.native_llvm_ref }}
+      native_runtime_ref: ${{ inputs.native_runtime_ref }}
+      native_host_version: ${{ inputs.native_host_version }}
       targets: ${{ matrix.target }}
       cangjie_ref: ${{ inputs.cangjie_ref }}
       build_type: ${{ inputs.build_type }}
       dry_run: ${{ inputs.dry_run || false }}
       runtime_ref: ${{ inputs.runtime_ref }}
       build_android: ${{ inputs.build_android || false }}
+      build_ohos: ${{ inputs.build_ohos || false }}
+      build_ios: ${{ inputs.build_ios || false }}
       rebuild_llvm: ${{ inputs.rebuild_llvm || false }}
 
   blocked:

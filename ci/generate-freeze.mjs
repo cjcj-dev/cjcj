@@ -1,5 +1,7 @@
-#!/usr/bin/env node
+#!/usr/bin/env zx
 
+import {hostToolchainFromCjcVersion} from './host-toolchain-pin.mjs';
+import {getTarget} from '../build/lib/targets.mjs';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -180,6 +182,27 @@ export async function generateFreeze(options, now = new Date()) {
   const workflowRef = resolveWorkflowRef(repo, options.workflowRef || '', head);
   const repository = runGit(repo, ['remote', 'get-url', 'origin']);
   const pins = await loadPins(repo);
+  const declaredPins={...pins};
+  const selected=options.selectedInputs;
+  if(selected) {
+    if(!SHA40.test(selected.pair?.runtime||'')||!SHA40.test(selected.pair?.llvm||'')
+      ||selected.host?.archive!==baseSdk||selected.hostSdk?.archive?.path!==baseSdk
+      ||selected.hostSdk?.version!==selected.pair?.hostVersion||selected.hostSdk?.root!==selected.host?.install
+      ||getTarget(selected.hostSdk?.platform).spec.llvmPlatform!==selected.platform
+      ||selected.hostSdk?.compiler?.rc!==0||selected.hostSdk.compiler.version!==selected.pair?.hostVersion
+      ||!selected.hostSdk.compiler.path?.startsWith(path.join(selected.host.install,'bin')+path.sep)
+      ||hostToolchainFromCjcVersion(selected.hostSdk?.compiler?.stdout || '')!=='nightly-'+selected.pair?.hostVersion
+      ||selected.hostLlvm?.execution?.rc!==0)
+      throw new Error('FREEZE_NATIVE_INPUTS_INVALID');
+    pins.RUNTIME_REF=selected.pair.runtime;pins.LLVM_SHA=selected.pair.llvm;
+    if(selected.ast){
+      if(!SHA40.test(selected.ast.commit||'')||selected.ast.llvm_commit!==selected.pair.llvm
+        ||!selected.ast.repository||!/^[a-f0-9]{64}$/.test(selected.ast.build_inputs?.sha256||'')
+        ||!/^[a-f0-9]{64}$/.test(selected.ast.ast_inputs?.sha256||'')
+        ||!/^[a-f0-9]{64}$/.test(selected.ast.library?.sha256||''))throw Error('FREEZE_NATIVE_AST_INPUTS_INVALID');
+      pins.CANGJIE_COMPILER_SHA=selected.ast.commit;
+    }
+  }
 
   const baseStat = await fs.stat(baseSdk);
   if (!baseStat.isFile() || baseStat.size === 0) throw new Error(`base SDK must be a non-empty file: ${baseSdk}`);
@@ -196,7 +219,11 @@ export async function generateFreeze(options, now = new Date()) {
     cjcj_head_sha: head,
     workflow_ref: workflowRef,
     pins,
-    BASE_SDK_SHA256: await sha256(baseSdk),
+    ...(selected?{pin_files:Object.entries(declaredPins).map(([name,value])=>({name,value})),
+      selected_inputs:{runtime:selected.pair.runtime,llvm:selected.pair.llvm,host_version:selected.pair.hostVersion,...(selected.ast?{ast:selected.ast}:{})},
+      host_sdk:selected.hostSdk,host_llvm:selected.hostLlvm,
+      selected_host:selected.host.install}:{}),
+    BASE_SDK_SHA256: selected ? selected.hostSdk.archive.sha256 : await sha256(baseSdk),
     policy_sha256: await sha256(path.join(repo, 'ops/design/DRYRUN_EXECUTION_POLICY.md')),
     orchestrator_sha256: await sha256(path.join(repo, '.github/workflows/release.yml')),
     approval: {

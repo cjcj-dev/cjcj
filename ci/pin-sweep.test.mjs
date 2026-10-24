@@ -51,20 +51,15 @@ test('every commit-valued pin is inventoried and paired with its clone URL', () 
     [],
     'every commit pin must declare both its authority ref and comparison mainline',
   );
-  assert.deepEqual(
-    pins.map(pin => [pin.key, pin.authorityRef, pin.mainlineRef]).sort((a, b) => a[0].localeCompare(b[0])),
-    [
-      ['CANGJIE_COMPILER_SHA', 'refs/heads/main', 'refs/heads/main'],
-      ['CJPM_FORK_REF', 'refs/heads/fix/cjpm-fixed', 'refs/heads/main'],
-      ['COMPILER_REF', 'refs/heads/main', 'refs/heads/main'],
-      ['FLATBUFFERS_SHA', 'refs/heads/master', 'refs/heads/master'],
-      ['LLVM_SHA', 'refs/heads/main', 'refs/heads/main'],
-      ['LOADERLIFE_MIN_REF', 'refs/heads/main', 'refs/heads/main'],
-      ['RUNTIME_REF', 'refs/heads/main', 'refs/heads/main'],
-      ['STDX_REF', 'refs/heads/main', 'refs/heads/main'],
-      ['TOOLS_REF', 'refs/heads/fix/demangler-cstdint', 'refs/heads/main'],
-    ],
-  );
+  // Source branches change with fixed producer deliveries; compare the actual
+  // declaration rather than silently requiring an older producer's branch.
+  for (const pin of pins) {
+    const lines = fs.readFileSync(path.join(repoRoot, pin.file), 'utf8').split(/\r?\n/);
+    for (const [key, value] of [[pin.authorityKey, pin.authorityRef], [pin.mainlineKey, pin.mainlineRef]]) {
+      assert.deepEqual(lines.filter(line => line.startsWith(key+'=')), [key+'='+value]);
+      assert.match(value, /^refs\/heads\/[A-Za-z0-9][A-Za-z0-9._/-]*$/);
+    }
+  }
   assert.equal(
     pins.find(pin => pin.key === 'LOADERLIFE_MIN_REF').urlKey,
     'RUNTIME_SRC_URL',

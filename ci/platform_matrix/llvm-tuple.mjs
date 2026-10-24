@@ -96,3 +96,30 @@ export async function activateLlvmTuple(fixedTools, {sdkToolPath, manifest}) {
   for (const tool of fixedTools) await fs.rm(tool.rollback, {force: true});
   for (const tool of fixedTools) await fs.rm(path.dirname(tool.tuple), {recursive: true, force: true});
 }
+
+// A native SDK already owns its tool installation and entry recipes. Compare
+// its actual producer bytes with the selected tuple without overwriting either.
+export async function verifyInstalledLlvmTuple(fixedTools, {sdk, sdkToolPath, manifest, env = process.env}) {
+  for (const tool of fixedTools) {
+    const expected = manifest.get(tool.manifestKey) || '';
+    const payload = zlib.gunzipSync(await fs.readFile(tool.archive));
+    if (!/^[a-f0-9]{64}$/.test(expected) || sha256(payload) !== expected)
+      throw new Error(`fixed ${tool.name} artifact sha mismatch`);
+    const entry = await sdkToolPath(tool.name);
+    let producer = entry;
+    if (await isFile(entry+'.entry')) {
+      const recipe = (await fs.readFile(entry+'.entry', 'utf8')).trimEnd().split('\n');
+      if (recipe[0] !== 'cjcj-sdk-entry-v1' || recipe[1] !== '1' || !recipe[2]
+          || path.isAbsolute(recipe[2]) || recipe[2].includes('\\') || recipe[2].split('/').includes('..'))
+        throw new Error(`installed ${tool.name} entry recipe mismatch`);
+      producer = path.join(sdk, recipe[2]);
+    }
+    if (sha256(await fs.readFile(producer)) !== expected)
+      throw new Error(`installed ${tool.name} producer sha mismatch`);
+    const probe = spawnSync(entry, ['--version'], {env, encoding: 'utf8'});
+    if (probe.status !== 0) throw new Error(`installed ${tool.name} probe rc=${probe.status} signal=${probe.signal}`);
+    const version = probe.stdout.split(/\r?\n/).map(line => line.trim()).find(line => /LLVM version |^LLD /.test(line)) || '';
+    if (version !== manifest.get(tool.versionKey)) throw new Error(`installed ${tool.name} version mismatch`);
+    console.log(`NATIVE_TUPLE_CONSUMED tool=${tool.name} producer=${producer} sha256=${expected}`);
+  }
+}

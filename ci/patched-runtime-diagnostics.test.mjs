@@ -53,6 +53,7 @@ if mode.startswith('collection'):
 output = root / 'output/Release/lib'
 output.mkdir(parents=True)
 (output / 'libcangjie-runtime.so').write_text('fixture only, not a runtime SO')
+(output / 'libboundscheck.so').write_text('fixture only, not a boundscheck SO')
 `;
 async function run(command, args, options) {
   return new Promise((resolve, reject) => {

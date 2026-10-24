@@ -1,6 +1,11 @@
+#!/usr/bin/env zx
+import {verifyComponentProvenance, readToolsPin, readCjpmPin, sourceOwnedTools} from './release-component-provenance.mjs';
 import crypto from 'node:crypto';
+import {isDeepStrictEqual} from 'node:util';
+import {sdkPlatform} from '../../ci/bootstrap/sdk-platform.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import {runtimeInputsForArtifact,RUNTIME_INPUTS} from './runtime-source-inputs.mjs';
 import {
   SOURCE_PROVENANCE_NOT_APPLICABLE,
   SOURCE_PROVENANCE_RESOLVED,
@@ -66,6 +71,11 @@ export function validateReleaseManifestSource(sourceValue, component) {
   }
   if (status !== SOURCE_PROVENANCE_RESOLVED) {
     throw new Error(`${component}.source.status must be ${SOURCE_PROVENANCE_RESOLVED}; got ${status}`);
+  }
+  if (component === 'python' && sourceValue.kind === 'archive') {
+    if (!/^https?:\/\//.test(sourceValue.url || '') || !/^3\.11\.\d+$/.test(sourceValue.version || '')
+        || !/^[0-9a-f]{64}$/.test(sourceValue.sha256 || '')) throw new Error('python.source archive facts invalid');
+    return sourceValue;
   }
   const repository = requireText(sourceValue.repository, `${component}.source.repository`);
   const commit = requireText(sourceValue.commit, `${component}.source.commit`);
@@ -179,7 +189,7 @@ function isCangjieBinary(bytes) {
 // appears in the stage. A name list would have to be edited each time, and the
 // edit is exactly what gets forgotten (arm-soak's hard-coded artifact name, and
 // the four hard-coded counts in kkk2_gate.sh:195, are the same failure).
-async function discoverCangjieTools(stage, exeSuffix) {
+async function discoverCangjieTools(stage, exeSuffix, platform) {
   const found = [];
   for (const dir of [path.join(stage, 'tools', 'bin'), path.join(stage, 'bin')]) {
     let entries;
@@ -198,6 +208,39 @@ async function discoverCangjieTools(stage, exeSuffix) {
       found.push({component: `tool-${base}`, file});
     }
   }
+  // A tool whose backend is C++ carries no Cangjie runtime entry point, so the
+  // byte marker above cannot see it. Its producer writes a sidecar beside the
+  // installed binary naming the checkout it was built from; that sidecar is the
+  // same record the installer verified before copying the bytes, and it is the
+  // only structural evidence that such a tool is ours. Discover it here rather
+  // than from a name list, so a C++-backed tool added to the source build is
+  // covered the moment its producer stages it.
+  const toolsRoot = path.join(stage, 'tools');
+  const sidecars = await fs.readdir(toolsRoot, {withFileTypes: true}).catch(() => []);
+  for (const entry of sidecars.sort((a, b) => a.name.localeCompare(b.name))) {
+    const match = /^(.+)\.SOURCE\.json$/.exec(entry.name);
+    if (!entry.isFile() || !match) continue;
+    const base = match[1];
+    const installed = path.join(toolsRoot, 'bin', base + exeSuffix);
+    const alreadyFound = found.some(row => row.component === `tool-${base}`);
+    if (!await fileExists(installed)) {
+      throw new Error(`${entry.name} names ${base}, but ${installed} is absent`);
+    }
+    // The sidecar is a record of a specific installed payload, not a marker that
+    // a name exists. Check it against what is actually in the package: a stale
+    // sidecar left beside a rebuilt or differently-sourced binary would otherwise
+    // describe bytes that are not there.
+    const sidecar = JSON.parse(await fs.readFile(path.join(toolsRoot, entry.name), 'utf8'));
+    const pin = base === 'cjpm' ? await readCjpmPin(new URL('../../ci/cjpm_pin.env', import.meta.url))
+      : await readToolsPin(new URL('../../ci/source_pin.env', import.meta.url));
+    // Verify payloads relative to the SDK root, while the artifact binary lives
+    // under tools/bin. The normal artifact verifier receives an explicit root.
+    await verifyComponentProvenance({component:base,artifactName:base+exeSuffix,binary:installed,
+      sidecar:path.join(toolsRoot,entry.name),platform,expectedRepository:pin.repository,expectedCommit:pin.commit,
+      payloadRoot:stage});
+    if (alreadyFound) continue;
+    found.push({component: `tool-${base}`, file: installed});
+  }
   if (found.length === 0) {
     // Zero discovered is not a pass. Every release package ships at least cjpm,
     // so an empty result means the walk looked in the wrong place or the stage
@@ -207,6 +250,8 @@ async function discoverCangjieTools(stage, exeSuffix) {
   }
   return found;
 }
+
+
 
 // Each source-owned tool is declared by component. Inherited base-SDK tools
 // remain explicit not-applicable rows; they are never assigned our commit just
@@ -284,7 +329,7 @@ async function stagedStdFiles(stage) {
   return files.sort();
 }
 
-async function reconcileStdArtifacts(stage, stdText) {
+export async function reconcileStdArtifacts(stage, stdText) {
   const hashes = provenanceArtifactHashes(stdText);
   if (hashes === null) {
     throw new Error('std PROVENANCE.txt has no ARTIFACT-SHA256 block; ' +
@@ -435,13 +480,18 @@ export async function writeReleaseManifest({
   const python = await artifact(stage, pythonArtifact, `packaged Python ${pythonVersion} is missing`);
   const pythonProvenance = await artifact(stage, pythonMetadataArtifact, 'packaged Python provenance is missing');
   assertFrozenStamp(cjcjArtifact, 'cjc', 'CJCJ-COMMIT', frozen.cjcj);
-  assertFrozenStamp(runtime, 'runtime', 'CJRT-COMMIT', frozen.runtime);
+  let runtimeBuild;
+  if(/^CJRT-COMMIT:src-[0-9a-f]{64}$/.test(runtime.embedded_stamp)){
+    if(runtime.stamp_occurrences['CJRT-COMMIT'].length!==1)throw new Error('runtime CJRT-COMMIT occurrence must be exactly 1');
+    const inputs=await runtimeInputsForArtifact(stage,runtime,{repository:runtimeRepository,commit:frozen.runtime,stamp:runtime.embedded_stamp});
+    runtimeBuild=inputs.build;
+  }else assertFrozenStamp(runtime, 'runtime', 'CJRT-COMMIT', frozen.runtime);
   assertFrozenStamp(llc, 'llvm-llc', 'CJLLVM-COMMIT', frozen.llvm);
   assertFrozenStamp(opt, 'llvm-opt', 'CJLLVM-COMMIT', frozen.llvm);
   // Every Cangjie-written tool the stage actually contains, found by structure
   // rather than by name. cjpm resolves through the same path, so it is covered
   // by the same rule instead of by a special case.
-  const discovered = await discoverCangjieTools(stage, exeSuffix);
+  const discovered = await discoverCangjieTools(stage, exeSuffix, platform);
   const tools = [];
   for (const {component, file} of discovered) {
     tools.push({
@@ -549,6 +599,7 @@ export async function writeReleaseManifest({
       source: source(runtimeRepository, frozen.runtime, 'runtime'),
       artifact: {path: runtime.path, sha256: runtime.sha256},
       embedded_stamp: runtime.embedded_stamp,
+      ...(runtimeBuild?{build:runtimeBuild}:{}),
     },
     ...[
       ['llvm-llc', llc],
@@ -661,4 +712,76 @@ export async function writeReleaseManifest({
   const destination = path.join(stage, RELEASE_MANIFEST);
   await fs.writeFile(destination, `${rows.map(row => JSON.stringify(row)).join('\n')}\n`);
   return {destination, rows};
+}
+
+
+// Native packages retain the original build inputs. Project those facts into
+// the existing release rows; unresolved facts stay unresolved. Writing this
+// inventory does not grant release qualification.
+export async function installedReleaseRows({stage, platform, components, inputs}) {
+  if (!Array.isArray(components) || !components.length || !inputs) throw new Error('INSTALLED_RELEASE_INPUTS');
+  const rows = [], names = new Set(), native = sdkPlatform(platform);
+  const relative = value => {
+    if (typeof value !== 'string' || !value || path.isAbsolute(value) || value.includes('\\') || value.split('/').includes('..'))
+      throw new Error('INSTALLED_RELEASE_PATH');
+    return value;
+  };
+  async function measured(value) {
+    relative(value.path);
+    if (await sha256(path.join(stage, value.path)) !== value.sha256) throw new Error('INSTALLED_RELEASE_BYTES ' + value.path);
+    return value;
+  }
+  async function append(component, facts, product, prefix) {
+    if (names.has(component)) throw new Error('INSTALLED_RELEASE_DUPLICATE ' + component);
+    names.add(component);
+    const row = {...facts, schema:1, platform, component, signature_policy:RELEASE_SIGNATURE_POLICY};
+    if (product) {
+      // stdx carries ordinary native install paths, not per-file build hashes.
+      // Record the release row's existing representative artifact identity here.
+      row.artifact = component === 'stdx'
+        ? {...product, sha256: await sha256(path.join(stage, relative(product.path)))}
+        : await measured(product);
+      const bytes = await fs.readFile(path.join(stage, product.path));
+      row.embedded_stamp = embeddedStamp(bytes, prefix ? [prefix] : []).value;
+      if (facts.embedded_stamp && facts.embedded_stamp !== row.embedded_stamp) throw new Error('INSTALLED_RELEASE_STAMP ' + component);
+    } else row.embedded_stamp = 'no-stamp';
+    if (component !== 'stdx') for (const product of facts.artifacts ?? []) await measured(product);
+    if (facts.entry) { await measured(facts.entry); if (facts.entry.recipe) await measured(facts.entry.recipe); }
+    rows.push(row);
+  }
+  for (const facts of components) {
+    const name = facts.component;
+    const component = name === 'compiler' ? 'cjcj' : sourceOwnedTools(native.os === 'windows').includes(name) ? 'tool-' + name : name;
+    const prefix = name === 'compiler' ? 'CJCJ-COMMIT' : name === 'runtime' ? 'CJRT-COMMIT'
+      : ['cjpm', ...sourceOwnedTools(native.os === 'windows')].includes(name) ? 'CJTOOL-COMMIT' : '';
+    const product = facts.artifact ?? (name === 'runtime' ? facts.artifacts?.find(row => row.path.endsWith('libcangjie-runtime' + native.shared)) : facts.artifacts?.[0]);
+    await append(component, facts, product, prefix);
+    if (name === 'llvm-cjdb') for (const tool of ['llc', 'opt']) {
+      const publicPath = 'third_party/llvm/bin/' + tool + native.exe;
+      const recipe = (await fs.readFile(path.join(stage, publicPath + '.entry'), 'utf8')).trimEnd().split('\n');
+      if (recipe[0] !== 'cjcj-sdk-entry-v1') throw new Error('INSTALLED_RELEASE_ENTRY ' + tool);
+      const retained = relative(recipe[2]), actual = await fs.realpath(path.join(stage, retained));
+      if (!actual.startsWith(await fs.realpath(stage) + path.sep)) throw new Error('INSTALLED_RELEASE_ENTRY_ESCAPE ' + tool);
+      await append('llvm-' + tool, {source:facts.source, build:facts.build},
+        {path:retained, sha256:await sha256(actual)}, 'CJLLVM-COMMIT');
+    }
+  }
+  // Hash the original records themselves as well as their installed products.
+  for (const record of Object.values(inputs)) await measured(record);
+  return rows;
+}
+export async function writeInstalledReleaseManifest(options) {
+  const rows = await installedReleaseRows(options), destination = path.join(options.stage, RELEASE_MANIFEST);
+  await fs.writeFile(destination, rows.map(row => JSON.stringify(row)).join('\n') + '\n');
+  return {destination, rows};
+}
+export async function verifyInstalledReleaseManifest(options) {
+  const expected = JSON.parse(JSON.stringify(await installedReleaseRows(options)));
+  const rows = (await fs.readFile(path.join(options.stage, RELEASE_MANIFEST), 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+  if (!isDeepStrictEqual(rows, expected)) throw new Error('INSTALLED_RELEASE_FACTS_MISMATCH');
+  for (const row of rows) {
+    validateReleaseManifestSource(row.source, row.component);
+    validateReleaseManifestArtifact(row.artifact, row.component);
+  }
+  return rows;
 }

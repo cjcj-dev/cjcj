@@ -150,6 +150,13 @@ async function main() {
     await fs.mkdir(out, {recursive: true});
     const packagedRuntime = path.join(out, runtimeLibrary);
     await fs.copyFile(runtime, packagedRuntime);
+    // Target SDK assembly consumes the pair produced by this same build.
+    const boundsName = process.platform === 'darwin' ? 'libboundscheck.dylib' : 'libboundscheck.so';
+    const boundsSource = path.join(path.dirname(runtime), boundsName);
+    const packagedBounds = path.join(out, boundsName);
+    await fs.copyFile(boundsSource, packagedBounds);
+    const boundsDigest = crypto.createHash('sha256').update(await fs.readFile(packagedBounds)).digest('hex');
+    await fs.writeFile(`${packagedBounds}.sha256`, `${boundsDigest}  ${boundsName}\n`);
     await fs.writeFile(`${out}/SOURCE_SHA`, `${runtimeRef}\n`);
     const digest = crypto.createHash('sha256').update(await fs.readFile(packagedRuntime)).digest('hex');
     await fs.writeFile(`${packagedRuntime}.sha256`, `${digest}  ${runtimeLibrary}\n`);

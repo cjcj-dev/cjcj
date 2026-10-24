@@ -1,278 +1,44 @@
-import assert from 'node:assert/strict';
-import fs from 'node:fs/promises';
-import os from 'node:os';
-import path from 'node:path';
-import {spawnSync} from 'node:child_process';
-import test from 'node:test';
-import crypto from 'node:crypto';
-import {publishBootstrapStdOutput} from '../../ci/bootstrap/std-output.mjs';
-import {prepareBootstrapHandoff, assertBootstrapCompiler} from '../../ci/srcbuild/lib/bootstrap-handoff.mjs';
-
-async function fixture(t) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'bootstrap-handoff-'));
-  t.after(() => fs.rm(root, {recursive: true, force: true}));
-  const work = path.join(root, 'bootstrap-work');
-  const sdk = path.join(root, 'software', 'cangjie');
-  const source = path.join(root, 'source');
-  const tuple = 'linux_x86_64_cjnative';
-  const write = async (name, contents) => {
-    await fs.mkdir(path.dirname(name), {recursive: true});
-    await fs.writeFile(name, contents, {mode: 0o755});
-  };
-  const inputSdk = path.join(work, 'sdk-stage1');
-  await write(path.join(work, 'cjcj-stage2'), '#!/bin/bash\nprintf "compiler home=%s ld=%s\\n" "$CANGJIE_HOME" "$LD_LIBRARY_PATH"\n');
-  await write(path.join(work, 'stdlib-stage2', 'lib', tuple, 'libcangjie-std-core.a'), 'coloured std');
-  await write(path.join(inputSdk, 'lib', tuple, 'libcangjie-std-core.a'), 'bootstrap std');
-  await write(path.join(inputSdk, '.stage1-host', 'binding.txt'), 'host_ld=/host/runtime:/host/llvm\n');
-  await write(path.join(inputSdk, 'tools', 'bin', 'cjpm-stage1'), '#!/bin/bash\nprintf "cjpm home=%s ld=%s\\n" "$CANGJIE_HOME" "$LD_LIBRARY_PATH"\n"$CANGJIE_HOME/bin/cjc"\n');
-  for (const name of ['opt', 'llc', 'ld.lld']) await write(path.join(inputSdk, 'third_party', 'llvm', 'bin', `${name}-stage1`), '#!/bin/bash\nprintf "backend home=%s ld=%s\\n" "$CANGJIE_HOME" "$LD_LIBRARY_PATH"\n');
-  for (const name of ['cjselfhost_llvmshim.o', 'cjc_runtime_config.o']) await write(path.join(work, 'cjcj-src-stage1', 'runtime_shim', name), name);
-  await fs.symlink('libcangjie-std-core.a', path.join(inputSdk, 'lib', tuple, 'core-relative.a'));
-  await write(path.join(inputSdk, 'bin', 'cjc'), '#!/bin/bash\nprintf "old-stage1 compiler\\n"\n');
-  await write(path.join(sdk, 'stale-sdk'), 'old pipeline');
-  await write(path.join(work, 'cjcj-stage1'), 'stage1 compiler');
-  await write(path.join(work, 'stdlib-stage2', 'std-producer.json'), JSON.stringify({compiler_sha256: crypto.createHash('sha256').update('stage1 compiler').digest('hex')}));
-  const f = {root, work, sdk, source, tuple};
-  f.publish = () => publishBootstrapStdOutput({...f, prefix: path.join(work, 'stdlib-stage2'), compiler: path.join(work, 'cjcj-stage1')});
-  await f.publish();
-  return f;
+import test from'node:test';import assert from'node:assert/strict';import fs from'node:fs/promises';import path from'node:path';import {spawnSync}from'node:child_process';
+import {prepareBootstrapHandoff,assertBootstrapCompiler}from'../../ci/srcbuild/lib/bootstrap-handoff.mjs';
+import {verifyCompiler,compilerProducer}from'../../ci/bootstrap/compiler_identity.mjs';
+import {installCompiler}from'../../ci/fixtures/compiler-install.mjs';
+import {fileDigest,atomicJson}from'../../ci/bootstrap/sdk-flow.mjs';
+const parent=process.env.RELEASE_EVIDENCE_TEST_ROOT;if(!parent)throw new Error('RELEASE_EVIDENCE_TEST_ROOT required');await fs.mkdir(parent,{recursive:true});
+async function fixture(){
+ const root=await fs.mkdtemp(path.join(parent,'handoff-')),work=path.join(root,'work'),sdk=path.join(root,'consumer'),source=path.join(root,'source'),tuple='linux_x86_64_cjnative';
+ const original=path.join(root,'compiler.c'),producer=path.join(root,'native-compiler');await fs.writeFile(original,'#include <stdio.h>\nint main(void){puts("native compiler input identity");return 0;}\n');
+ const compile=spawnSync('cc',[original,'-o',producer],{encoding:'utf8'});assert.equal(compile.status,0,compile.stderr);
+ const stage2=path.join(work,'sdk-stage2');await installCompiler(stage2,producer);
+ await atomicJson(path.join(stage2,'STAGE-INPUTS.json'),{phase:'stage2',compilerFile:'bin/cjcj-stage1',compilerSha256:await fileDigest(producer)});
+ for(const [rel,data]of Object.entries({['lib/'+tuple+'/libcangjie-std-core.a']:'std input bytes',['modules/'+tuple+'/std/std.core.cjo']:'module input bytes','share/cjcj/runtime_shim/cjselfhost_llvmshim.o':'LLVM shim input','share/cjcj/runtime_shim/cjc_runtime_config.o':'runtime config input'})){
+  await fs.mkdir(path.dirname(path.join(stage2,rel)),{recursive:true});await fs.writeFile(path.join(stage2,rel),data);}
+ return {root,work,sdk,source,tuple,stage2,producer,producerSha256:await fileDigest(producer)};
 }
-
-test('bootstrap handoff consumes stage2 std and compiler and rebinds host and target processes', async t => {
-  const f = await fixture(t);
-  const result = await prepareBootstrapHandoff(f);
-  assert.equal(result.compiler, path.join(f.work, 'cjcj-stage2'));
-  assert.equal((await fs.lstat(path.join(f.sdk, 'lib', f.tuple, 'core-relative.a'))).isFile(), true);
-  assert.equal(await fs.readFile(path.join(f.sdk, 'lib', f.tuple, 'core-relative.a'), 'utf8'), 'bootstrap std');
-  assert.equal(await fs.readFile(path.join(f.sdk, 'lib', f.tuple, 'libcangjie-std-core.a'), 'utf8'), 'coloured std');
-  await assert.rejects(fs.stat(path.join(f.sdk, 'stale-sdk')), {code: 'ENOENT'});
-  const run = spawnSync(path.join(f.sdk, 'tools', 'bin', 'cjpm'), {encoding: 'utf8'});
-  assert.equal(run.status, 0, run.stderr);
-  assert.equal(run.stdout, `cjpm home=${f.sdk} ld=/host/runtime:/host/llvm\ncompiler home=${f.sdk} ld=${result.targetLd}\n`);
-  for (const name of ['opt', 'llc']) {
-    const backend = spawnSync(path.join(f.sdk, 'third_party', 'llvm', 'bin', name), {encoding: 'utf8'});
-    assert.equal(backend.status, 0, backend.stderr);
-    assert.equal(backend.stdout, `backend home=${f.sdk} ld=${result.targetLd}\n`);
-  }
-  assert.equal(await fs.readFile(path.join(f.source, 'runtime_shim', 'cjselfhost_llvmshim.o'), 'utf8'), 'cjselfhost_llvmshim.o');
-  assert.match(await fs.readFile(path.join(f.work, 'sdk-stage1', 'bin', 'cjc'), 'utf8'), /old-stage1 compiler/);
+test('stage2 target handoff preserves compiler, full std and actual shim inputs',async()=>{
+ const f=await fixture(),r=await prepareBootstrapHandoff(f);
+ assert.equal(await fileDigest(await compilerProducer(f.sdk)),f.producerSha256);
+ assert.equal(await fs.readFile(path.join(f.sdk,'modules',f.tuple,'std/std.core.cjo'),'utf8'),'module input bytes');
+ assert.equal(await fs.readFile(path.join(f.source,'runtime_shim/cjselfhost_llvmshim.o'),'utf8'),'LLVM shim input');
+ assert.equal(r.stdOutput.coreSha256,await fileDigest(path.join(f.stage2,'lib',f.tuple,'libcangjie-std-core.a')));
+ const command=path.join(f.sdk,'bin/cjc');await assertBootstrapCompiler({...f,command});
+ const child=spawnSync(command,[],{encoding:'utf8'});console.log('HANDOFF_NATIVE_RESULT',child.status,child.stdout.trim());assert.equal(child.status,0);assert.equal(child.stdout.trim(),'native compiler input identity');
 });
-
-test('missing bootstrap stage2 compiler cannot consume an unrelated old product', async t => {
-  const f = await fixture(t);
-  await fs.rm(path.join(f.work, 'cjcj-stage2'));
-  await assert.rejects(prepareBootstrapHandoff(f), {code: 'ENOENT'});
-  assert.equal(await fs.readFile(path.join(f.sdk, 'stale-sdk'), 'utf8'), 'old pipeline');
+for(const mutation of ['source','installed','alias','missing'])test('handoff rejects changed compiler input: '+mutation,async()=>{
+ const f=await fixture();await prepareBootstrapHandoff(f);const command=path.join(f.sdk,'bin/cjc');
+ if(mutation==='source')await fs.appendFile(f.producer,'changed');
+ if(mutation==='installed')await fs.appendFile(path.join(f.sdk,'bin/cjcj-stage1'),'changed');
+ if(mutation==='missing')await fs.rm(path.join(f.sdk,'bin/cjcj-stage1'));
+ if(mutation==='alias'){await fs.rm(command);await fs.symlink('../compiler.c',command);}
+ await assert.rejects(assertBootstrapCompiler({...f,command}));
 });
-
-for (const mutation of ['none', 'entry', 'installed', 'producer', 'command']) {
-  test(`bootstrap compiler identity validates real handoff: ${mutation}`, async t => {
-    const f = await fixture(t);
-    await prepareBootstrapHandoff(f);
-    let command = path.join(f.sdk, 'bin', 'cjc');
-    const files = {
-      entry: command,
-      installed: path.join(f.sdk, 'bin', 'cjcj-stage2'),
-      producer: path.join(f.work, 'cjcj-stage2'),
-    };
-    if (files[mutation]) await fs.appendFile(files[mutation], '\n# replaced input\n');
-    if (mutation === 'command') command = path.join(f.work, 'sdk-stage1', 'bin', 'cjc');
-    if (mutation === 'none') {
-      const identity = await assertBootstrapCompiler({sdk: f.sdk, command});
-      assert.equal(identity.producer, path.join(f.work, 'cjcj-stage2'));
-      const result = spawnSync(command, {encoding: 'utf8'});
-      assert.equal(result.status, 0, result.stderr);
-      assert.match(result.stdout, /compiler home=/);
-    } else {
-      await assert.rejects(assertBootstrapCompiler({sdk: f.sdk, command}), /bootstrap compiler identity mismatch/);
-    }
-  });
-}
-
-test('bootstrap producer reaches actual stdx and tools subprocess entries', async t => {
-  const {buildConfig} = await import('../lib/config.mjs');
-  const tools = await import('../srcbuild/stages/tools.mjs');
-  const stdx = await import('../srcbuild/stages/stdx.mjs');
-  const packageStage = await import('../srcbuild/stages/package.mjs');
-  const f = await fixture(t);
-  const host = path.join(f.root, 'host-sdk');
-  const fakeBin = path.join(f.root, 'external-fixtures');
-  const trace = path.join(f.root, 'compiler-invocations.jsonl');
-  const write = async (file, data, mode = 0o755) => {
-    await fs.mkdir(path.dirname(file), {recursive: true});
-    await fs.writeFile(file, data, {mode});
-  };
-  // Actual ELF symbol tables exercise the existing runtime-split precondition.
-  for (const [sdkRoot, source] of [[host, 'int host_runtime;'],
-    [path.join(f.work, 'sdk-stage1'), 'long g_cjLoadBadMask;']]) {
-    const output = path.join(sdkRoot, 'runtime', 'lib', f.tuple, 'libcangjie-runtime.so');
-    await fs.mkdir(path.dirname(output), {recursive: true});
-    const built = spawnSync('cc', ['-shared', '-fPIC', '-x', 'c', '-', '-o', output], {input: source, encoding: 'utf8'});
-    assert.equal(built.status, 0, built.stderr);
-  }
-  await fs.appendFile(path.join(f.work, 'cjcj-stage2'), `cat "$CANGJIE_HOME/lib/${f.tuple}/libcangjie-std-core.a"\n`);
-  await f.publish();
-  await prepareBootstrapHandoff(f);
-  const pin = (await fs.readFile(new URL('../../ci/cjpm_pin.env', import.meta.url), 'utf8')).match(/^CJPM_FORK_REF=(.+)$/m)[1];
-  await write(path.join(fakeBin, 'git'), `#!/bin/sh\ncase "$1" in rev-parse) printf '%s\\n' '${pin}' ;; esac\n`);
-  const previous = Object.fromEntries(['PATH', 'CJCJ_SRCBUILD_HOST_SDK', 'CANGJIE_BUILD_DRY_RUN'].map(key => [key, process.env[key]]));
-  t.after(() => {
-    for (const [key, value] of Object.entries(previous)) {
-      if (value === undefined) delete process.env[key]; else process.env[key] = value;
-    }
-  });
-  process.env.PATH = `${fakeBin}:${process.env.PATH}`;
-  process.env.CJCJ_SRCBUILD_HOST_SDK = host;
-  delete process.env.CANGJIE_BUILD_DRY_RUN;
-  const officialSdkRoot = path.join(f.root, 'official-sdk');
-  await write(path.join(officialSdkRoot, 'tools', 'bin', 'cjpm'), 'official skeleton');
-  const original = buildConfig({workspace: f.root, buildRoot: f.root, consumerSdk: f.sdk, officialSdkRoot});
-  const dependencies = path.join(f.root, 'dependencies');
-  await fs.mkdir(dependencies);
-  const config = {...original, target: {...original.target, spec: {...original.target.spec,
-    llvmBinDir: dependencies, opensslLibDir: dependencies}}};
-  // Keep an executable old output available: a disconnected consumer must reach
-  // the origin assertion, rather than fail merely because a file is absent.
-  await write(path.join(config.repoPath('compiler'), 'output', 'bin', 'cjc'), '#!/bin/sh\nprintf "old output compiler\\n"\n');
-  await write(path.join(config.repoPath('compiler'), 'output', 'lib', f.tuple, 'libcangjie-std-core.a'), 'old std');
-  const oldRuntime = path.join(config.repoPath('compiler'), 'output', 'runtime', 'lib', f.tuple, 'libcangjie-runtime.so');
-  await fs.mkdir(path.dirname(oldRuntime), {recursive: true});
-  await fs.copyFile(path.join(f.sdk, 'runtime', 'lib', f.tuple, 'libcangjie-runtime.so'), oldRuntime);
-  const python = `import json, os, pathlib, subprocess, sys\nif sys.argv[1] == 'build':\n r = subprocess.run(['cjc'], text=True, capture_output=True)\n r.check_returncode()\n with open(${JSON.stringify(trace)}, 'a') as out: out.write(json.dumps({'cwd': os.getcwd(), 'compiler': r.stdout}) + '\\n')\n p = pathlib.Path('build_temp/build/build.ninja')\n p.parent.mkdir(parents=True, exist_ok=True)\n p.write_text('LD_LIBRARY_PATH=' + os.environ['LD_LIBRARY_PATH'] + ' cjc file.cj\\n')\n`;
-  await write(path.join(config.repoPath('stdx'), 'build.py'), python);
-  const products = {
-    cjpm: ['cjpm/dist/cjpm'], cjfmt: ['cjfmt/build/build/bin/cjfmt', 'cjfmt/config/default.toml'],
-    hle: ['hyperlangExtension/target/bin/main', 'hyperlangExtension/src/dtsparser/keep.txt'],
-    lsp: ['cangjie-language-server/output/bin/LSPServer'], cjcov: ['cjcov/dist/cjcov'],
-    'cjtrace-recover': ['cjtrace-recover/dist/bin/cjtrace-recover'],
-  };
-  for (const [name, directory] of tools.toolsFor(config)) {
-    const destinations = products[name].map(relative => path.join(config.repoPath('tools'), relative));
-    const install = `if sys.argv[1] == 'install':\n for name in ${JSON.stringify(destinations)}:\n  p = pathlib.Path(name)\n  p.parent.mkdir(parents=True, exist_ok=True)\n  p.write_text('fixture tool from ' + pathlib.Path('compiler-result.txt').read_text())\n`;
-    await write(path.join(config.repoPath('tools'), directory, 'build.py'), python + "if sys.argv[1] == 'build': pathlib.Path('compiler-result.txt').write_text(r.stdout)\n" + install);
-  }
-  await stdx.run(config);
-  await tools.run(config);
-  await fs.mkdir(path.join(config.repoPath('stdx'), 'target', f.tuple), {recursive: true});
-  await packageStage.run(config);
-  console.log('SDK_PACKAGE_ORIGIN_ASSERT_REACHED');
-  assert.equal(await fs.readFile(path.join(f.sdk, 'lib', f.tuple, 'libcangjie-std-core.a'), 'utf8'), 'coloured std');
-  assert.ok((await fs.readFile(path.join(f.sdk, 'tools', 'bin', 'cjpm'), 'utf8')).includes(`compiler home=${f.sdk}`));
-  const invocations = (await fs.readFile(trace, 'utf8')).trim().split('\n').map(JSON.parse);
-  assert.equal(invocations.length, 1 + tools.toolsFor(config).length);
-  for (const row of invocations) {
-    console.log(`CONSUMER_ORIGIN_ASSERT_REACHED ${row.cwd}`);
-    assert.ok(row.compiler.includes(`compiler home=${f.sdk}`), JSON.stringify(row));
-    assert.ok(row.compiler.endsWith('coloured std'), JSON.stringify(row));
-  }
+test('canonical compiler aliases reject frontend substitution and obsolete binaries',async()=>{
+ const f=await fixture();await verifyCompiler(f.stage2,f.producerSha256);
+ const frontend=path.join(f.stage2,'bin/cjc-frontend');await fs.rm(frontend);await fs.copyFile(f.producer,frontend);
+ await assert.rejects(verifyCompiler(f.stage2,f.producerSha256),/same-directory/);
+ await fs.rm(frontend);await fs.symlink('cjcj-stage1',frontend);await fs.writeFile(path.join(f.stage2,'bin/cjc-upstream-oracle'),'obsolete');
+ await assert.rejects(verifyCompiler(f.stage2,f.producerSha256),/stale compiler/);
 });
-
-for (const hostHeap of ['12288MB', '10752MB', '5376MB']) {
-  test(`handoff passes recipe heap ${hostHeap} to host and compiler`, async t => {
-    const f = await fixture(t);
-    await fs.writeFile(path.join(f.work, 'cjcj-stage2'),
-      '#!/bin/bash\nprintf "compiler heap=%s\\n" "$cjHeapSize"\n');
-    await fs.writeFile(path.join(f.work, 'sdk-stage1', 'tools', 'bin', 'cjpm-stage1'),
-      '#!/bin/bash\nprintf "host heap=%s\\n" "$cjHeapSize"\n"$CANGJIE_HOME/bin/cjc"\n');
-    await f.publish();
-    await prepareBootstrapHandoff(f);
-    const run = spawnSync(path.join(f.sdk, 'tools', 'bin', 'cjpm'), {
-      encoding: 'utf8', env: {...process.env, cjHeapSize: hostHeap},
-    });
-    assert.equal(run.status, 0, run.stderr);
-    console.log(`HEAP_BOUNDARY_ASSERT_REACHED ${JSON.stringify(run.stdout)}`);
-    assert.equal(run.stdout, `host heap=${hostHeap}\ncompiler heap=${hostHeap}\n`);
-  });
-}
-
-for (const heap of ['20GB', '', undefined]) {
-  test(`handoff preserves explicit heap ${JSON.stringify(heap)}`, async t => {
-    const f = await fixture(t);
-    await fs.writeFile(path.join(f.work, 'cjcj-stage2'),
-      '#!/bin/bash\nprintf "set=%s heap=%s\\n" "${cjHeapSize+x}" "$cjHeapSize"\n');
-    await f.publish();
-    await prepareBootstrapHandoff(f);
-    await assertBootstrapCompiler({sdk: f.sdk, command: path.join(f.sdk, 'bin', 'cjc')});
-    const env = {...process.env};
-    if (heap === undefined) delete env.cjHeapSize; else env.cjHeapSize = heap;
-    const run = spawnSync(path.join(f.sdk, 'bin', 'cjc'), {encoding: 'utf8', env});
-    assert.equal(run.status, 0, run.stderr);
-    console.log(`HEAP_PRESENCE_ASSERT_REACHED ${JSON.stringify(run.stdout)}`);
-    assert.equal(run.stdout, `set=${heap === undefined ? '' : 'x'} heap=${heap ?? ''}\n`);
-  });
-}
-
-test('same handoff SDK inherits each invocation heap without capturing generation environment', async t => {
-  const f = await fixture(t);
-  await fs.writeFile(path.join(f.work, 'cjcj-stage2'),
-    '#!/bin/bash\nprintf "%s\\n" "$cjHeapSize"\n');
-  await f.publish();
-  await prepareBootstrapHandoff(f);
-  for (const heap of ['5376MB', '10752MB']) {
-    const run = spawnSync(path.join(f.sdk, 'bin', 'cjc'), {
-      encoding: 'utf8', env: {...process.env, cjHeapSize: heap},
-    });
-    assert.equal(run.status, 0, run.stderr);
-    console.log(`HEAP_PER_INVOCATION_ASSERT_REACHED expected=${heap} actual=${run.stdout.trim()}`);
-    assert.equal(run.stdout, `${heap}\n`);
-  }
+test('missing producer cannot consume an unrelated existing install',async()=>{
+ const f=await fixture();await fs.rm(f.stage2,{recursive:true});await fs.mkdir(f.sdk,{recursive:true});await fs.writeFile(path.join(f.sdk,'unrelated'),'keep');
+ await assert.rejects(prepareBootstrapHandoff(f),{code:'ENOENT'});assert.equal(await fs.readFile(path.join(f.sdk,'unrelated'),'utf8'),'keep');
 });
-
-test('stage3 final cjpm build consumes the resource-limited host environment', async () => {
-  const stage = await fs.readFile(new URL('../../ci/srcbuild/steps/build-stage3.mjs', import.meta.url), 'utf8');
-  const call = stage.split('\n').find(line => line.includes('`cjpm build -j 1`'));
-  assert.ok(call, 'final build call exists');
-  console.log(`STAGE3_HEAP_CONTRACT_ASSERT_REACHED ${call.trim()}`);
-  assert.match(call, /env: stageEnv\}/);
-  assert.match(stage, /cjHeapSize: resources\.STD_BUILD_HEAP/);
-});
-
-test('legacy stage2 inherits the caller heap', async () => {
-  const stage = await fs.readFile(new URL('../../ci/srcbuild/steps/build-stage2.mjs', import.meta.url), 'utf8');
-  assert.match(stage, /await \$`cjpm build -j 1`/);
-  assert.doesNotMatch(stage, /cjHeapSize:/);
-});
-
-
-for (const topology of ['overlapping-links', 'stage33-regular-sdk']) {
-test(`handoff materializes ${topology} on two consecutive promotions`, async t => {
-  const f = await fixture(t);
-  const relative = path.join('lib', f.tuple);
-  for (const [tree, content] of [['sdk-stage1', 'old pcre'], ['stdlib-stage2', 'stage2 pcre']]) {
-    const directory = path.join(f.work, tree, relative);
-    await fs.writeFile(path.join(directory, 'libpcre2-8.so.0.14.0'), content);
-    for (const [name, target] of [['libpcre2-8.so', 'libpcre2-8.so.0'], ['libpcre2-8.so.0', 'libpcre2-8.so.0.14.0']]) {
-      const isLink = topology === 'overlapping-links' || tree === 'stdlib-stage2';
-      if (isLink) await fs.symlink(target, path.join(directory, name));
-      else await fs.writeFile(path.join(directory, name), content);
-      assert.equal((await fs.lstat(path.join(directory, name))).isSymbolicLink(), isLink);
-    }
-  }
-  const links = async directory => {
-    const result = [];
-    for (const entry of await fs.readdir(directory, {withFileTypes: true})) {
-      const file = path.join(directory, entry.name);
-      if (entry.isSymbolicLink()) result.push(file);
-      else if (entry.isDirectory()) result.push(...await links(file));
-    }
-    return result;
-  };
-  await f.publish();
-  for (let pass = 1; pass <= 2; pass++) {
-    let failure;
-    try { await prepareBootstrapHandoff(f); } catch (error) { failure = error; }
-    console.log(`HANDOFF_COMPLETION_ASSERT_REACHED pass=${pass} code=${failure?.code ?? 'OK'}`);
-    assert.equal(failure, undefined, `handoff must complete: ${failure?.stack}`);
-    for (const name of ['libpcre2-8.so', 'libpcre2-8.so.0']) {
-      const file = path.join(f.sdk, relative, name);
-      assert.equal((await fs.lstat(file)).isFile(), true, name);
-      assert.equal(await fs.readFile(file, 'utf8'), 'stage2 pcre', name);
-    }
-    assert.deepEqual(await links(f.sdk), []);
-    await assertBootstrapCompiler({sdk: f.sdk, command: path.join(f.sdk, 'bin', 'cjc')});
-    console.log(`HANDOFF_REGULAR_CONTENT_ASSERT_PASS pass=${pass}`);
-    await fs.writeFile(path.join(f.sdk, relative, 'libpcre2-8.so.0'), 'stale consumer');
-    assert.equal(await fs.readFile(path.join(f.work, 'stdlib-stage2', relative, 'libpcre2-8.so'), 'utf8'), 'stage2 pcre');
-  }
-});
-}

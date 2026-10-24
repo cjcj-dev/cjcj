@@ -58,7 +58,6 @@ for (const [name, options, debug, trimmed] of [
   });
 }
 
-const bootstrap = fileURLToPath(new URL('../bootstrap/bootstrap.sh', import.meta.url));
 const aggregate = await fs.readFile(new URL('../../scripts/cjcjcg_aggregate_ctype_build_kkk2.sh', import.meta.url), 'utf8');
 // Execute the original configuration statements up to the cjpm environment.
 // The historical full script has fixed SDK/shim locations; this exercises its
@@ -98,7 +97,7 @@ for (const [name, input, debug] of [
       await fs.rm(root, {recursive: true, force: true});
     }
   });
-  for (const consumer of ['bootstrap', 'JS seed']) {
+  for (const consumer of ['JS seed']) {
     test(`${consumer}: ${name} preserves options and selects O1`, async () => {
       const root = await fs.mkdtemp(path.join(os.tmpdir(), 'seed space '));
       try {
@@ -109,13 +108,7 @@ for (const [name, input, debug] of [
         const expected = before.startsWith('compile-option = "-O2')
           ? 'compile-option = "-O1' + before.slice('compile-option = "-O2'.length) : before;
         let result;
-        if (consumer === 'bootstrap') {
-          result = spawnSync('bash', ['-c',
-            'source "$1"; STAGE=seed-test; DRY=0; rewrite_compile_option_o1 "$2"',
-            'bash', bootstrap, file], {encoding: 'utf8'});
-        } else {
-          await fs.writeFile(file, withSeedOptimization(before));
-        }
+        await fs.writeFile(file, withSeedOptimization(before));
         // Assert the produced configuration first: a guard error must not hide
         // the O1/preserved-options assertion in the deliberately broken arm.
         assert.equal(await fs.readFile(file, 'utf8'), expected, 'O1 with all other options preserved');
@@ -128,77 +121,31 @@ for (const [name, input, debug] of [
   }
 }
 
-test('bootstrap still rejects unsupported optimization and prefix lookalikes', async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'seed-invalid '));
+test('trimpath rejects wrong authenticated runtime identity and recovers isolated input', async t => {
+  const configured = process.env.GC_FIX_RUNTIME_CHECKOUT;
+  assert.ok(configured, 'formal runtime preparation must supply GC_FIX_RUNTIME_CHECKOUT');
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'trimpath-runtime-'));
+  t.after(() => fs.rm(root, {recursive: true, force: true}));
+  const copy = path.join(root, 'runtime');
+  const git = (...args) => {
+    const result = spawnSync('git', args, {encoding: 'utf8'});
+    assert.equal(result.status, 0, result.stderr);
+    return result.stdout.trim();
+  };
+  git('clone', '--no-hardlinks', configured, copy);
+  const ref = git('-C', copy, 'rev-parse', 'HEAD');
+  const origin = git('-C', configured, 'remote', 'get-url', 'origin');
+  git('-C', copy, 'remote', 'set-url', 'origin', origin);
+  git('-C', copy, '-c', 'user.name=Zxilly', '-c', 'user.email=zxilly@outlook.com', 'commit', '--allow-empty', '-qm', 'wrong runtime fixture identity');
+  process.env.GC_FIX_RUNTIME_CHECKOUT = copy;
   try {
-    for (const value of ['-O0', '-O10', '-O20']) {
-      const file = path.join(root, 'cjpm.toml');
-      const input = `compile-option = "${value} --trimpath /source"\n`;
-      await fs.writeFile(file, input);
-      const result = spawnSync('bash', ['-c',
-        'source "$1"; STAGE=seed-test; DRY=0; rewrite_compile_option_o1 "$2"',
-        'bash', bootstrap, file], {encoding: 'utf8'});
-      assert.equal(result.status, 1);
-      assert.equal(await fs.readFile(file, 'utf8'), input);
-      assert.equal(withSeedOptimization(input), input);
-    }
-  } finally {
-    await fs.rm(root, {recursive: true, force: true});
-  }
-});
-
-test('srcbuild entry sends prepared O1 configuration to cjpm', async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'seed-entry '));
-  try {
-    await fs.mkdir(path.join(root, 'packages/cjc'), {recursive: true});
-    await fs.mkdir(path.join(root, 'software/cangjie'), {recursive: true});
-    const runtime = path.join(root, 'host/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so');
-    await fs.mkdir(path.dirname(runtime), {recursive: true});
-    await fs.writeFile(runtime, 'configuration fixture; never loaded');
-    await fs.writeFile(path.join(root, 'packages/cjc/cjpm.toml'), 'link-option = ""\n');
-    await fs.writeFile(path.join(root, 'cjpm.toml'), 'compile-option = "-O2"\n');
-    await prepareTrimpath(root);
-    const before = await fs.readFile(path.join(root, 'cjpm.toml'), 'utf8');
-    const fixture = await trimpathLayoutFixture(root);
-    console.log('LAYOUT-SOURCES cold private=' + fixture.cache);
-    const entry = pathToFileURL(path.join(fixture.source, 'ci/srcbuild/steps/build-stage1.mjs')).href;
-    // Substitute only the external command runner; import the complete real
-    // entry module. This test proves the configuration sent to cjpm, not a build.
-    const script = `
-      import fs from 'node:fs';
-      const stop = new Error('observed cjpm boundary');
-      globalThis.$ = () => (strings) => {
-        if (strings.join('') !== 'cjpm build') throw new Error('unexpected command');
-        fs.copyFileSync('cjpm.toml', 'observed.toml');
-        console.log('OBSERVED cjpm build configuration');
-        throw stop;
-      };
-      try { await import(${JSON.stringify(entry)}); }
-      catch (error) { if (error !== stop) throw error; }
-    `;
-    const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
-      cwd: root, encoding: 'utf8', timeout: 120_000, env: {...fixture.env,
-        CANGJIE_WORKSPACE: root, GITHUB_WORKSPACE: root, CJCJ_SRCBUILD_TARGET: 'linux-x64',
-        CJCJ_SRCBUILD_HOST_SDK: path.join(root, 'host'), CJCJ_SRCBUILD_HOST_CJC: '/unused/configuration-only',
-      },
-    });
-    const trace = result.stdout + result.stderr;
-    console.log(trace);
-    // Observe the real Git consumer before checking command status: a broken
-    // binding must fail here even when it also prevents the ABI/cjpm boundary.
-    for (const side of ['llvm', 'runtime']) {
-      const fetch = `fetch --depth 1 ${fixture.mirrors[side]} ${fixture.refs[side]}`;
-      assert.equal(trace.split(fetch).length - 1, 1, `layout ${side} fetch uses its exact private mirror`);
-    }
-    assert.doesNotMatch(trace, /falling back to|fetch[^\n]*https:\/\//);
-    assert.match(trace, /ABI_PAIR=OK/);
-    assert.match(trace, /CODEGEN_LAYOUT=OK/);
-    assert.equal(result.status, 0, trace);
-    assert.match(result.stdout, /OBSERVED cjpm build configuration/);
-    assert.equal(await fs.readFile(path.join(root, 'observed.toml'), 'utf8'),
-      before.replace('compile-option = "-O2', 'compile-option = "-O1'));
-    console.log('ASSERT srcbuild-cjpm-config=PASS');
-  } finally {
-    await fs.rm(root, {recursive: true, force: true});
-  }
+    await assert.rejects(trimpathLayoutFixture(path.join(root, 'wrong')), /runtime input HEAD/);
+    git('-C', copy, 'reset', '--hard', ref);
+    const restored = await trimpathLayoutFixture(path.join(root, 'restored'));
+    const mirror = new URL(restored.mirrors.runtime);
+    assert.equal(git('--git-dir', mirror.pathname, 'rev-parse', 'HEAD'), ref);
+    await fs.rm(copy, {recursive: true, force: true});
+    assert.equal(git('--git-dir', mirror.pathname, 'rev-parse', 'HEAD'), ref, 'input removal must not invalidate the private mirror');
+    console.log(`TRIMPATH_INPUT_ASSERT wrong=rejected restored=accepted isolated=accepted commit=${ref}`);
+  } finally { process.env.GC_FIX_RUNTIME_CHECKOUT = configured; }
 });

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
+import {load as loadYaml} from './vendor/js-yaml/js-yaml.mjs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -7,6 +8,8 @@ import test from 'node:test';
 import {baseSdkDownload, RELEASE_HOST_TOOLCHAIN} from '../build/lib/release-component-provenance.mjs';
 import {
   hostToolchainFromCjcVersion,
+  parseHostToolchainPin,
+  readHostToolchainPin,
   requireHostToolchain,
   requireMatchingBaseSdkToolchain,
 } from './host-toolchain-pin.mjs';
@@ -32,10 +35,7 @@ async function filesBelow(directory) {
 }
 
 async function hostPin() {
-  const text = await fs.readFile(pinPath, 'utf8');
-  const match = text.match(/^CJCJ_TOOLCHAIN=(\S+)$/m);
-  assert.ok(match, 'ci/host_sdk_pin.env must define CJCJ_TOOLCHAIN');
-  return match[1];
+  return parseHostToolchainPin(await fs.readFile(pinPath, 'utf8'));
 }
 
 async function runSrcbuildHostResolver({
@@ -47,22 +47,14 @@ async function runSrcbuildHostResolver({
 }) {
   const fixture = await fs.mkdtemp(path.join(os.tmpdir(), 'srcbuild-host-pin-'));
   try {
-    const fixtureScript = path.join(fixture, 'tools', 'srcbuild_kkk2.sh');
-    await fs.mkdir(path.dirname(fixtureScript), {recursive: true});
-    await fs.mkdir(path.join(fixture, 'ci'), {recursive: true});
-    await fs.copyFile(path.join(root, 'tools', 'srcbuild_kkk2.sh'), fixtureScript);
-    await fs.writeFile(path.join(fixture, 'ci', 'host_sdk_pin.env'), pin);
-    await fs.writeFile(path.join(fixture, 'ci', 'cjpm_pin.env'), pin);
-    await fs.writeFile(
-      path.join(fixture, 'ci', 'runtime_pin.env'),
-      `RUNTIME_VERSION=${runtimePinVersion}\n`,
-    );
-    const command = readerOnly
-      ? 'source "$1" --lib-only; read_host_toolchain_pin'
-      : 'source "$1" --lib-only; export RUNTIME_VERSION="$2" CJCJ_TOOLCHAIN="$3"; resolve_host_toolchain_pin; printf "%s\\n" "$CJCJ_TOOLCHAIN"';
-    return spawnSync('bash', ['-c', command, 'bash', fixtureScript, runtimeVersion, staleToolchain], {
-      encoding: 'utf8',
-    });
+    const fixtureScript=path.join(fixture,'ci/host-toolchain-pin.mjs');
+    await fs.mkdir(path.dirname(fixtureScript),{recursive:true});
+    await fs.copyFile(path.join(root,'ci/host-toolchain-pin.mjs'),fixtureScript);
+    const file=path.join(fixture,'ci/host_sdk_pin.env');await fs.writeFile(file,pin);
+    await fs.writeFile(path.join(fixture,'ci/runtime_pin.env'),`RUNTIME_VERSION=${runtimePinVersion}\n`);
+    return spawnSync(process.execPath,[fixtureScript,'--file',file],{encoding:'utf8',
+      env:{...process.env,RUNTIME_VERSION:runtimeVersion,CJCJ_TOOLCHAIN:staleToolchain}});
+
   } finally {
     await fs.rm(fixture, {recursive: true, force: true});
   }
@@ -118,7 +110,8 @@ test('ordinary and release host nightly literals use the host pins', async () =>
   assert.deepEqual(offenders, []);
   console.log(`ORDINARY-HOST-SCAN offenders=${offenders.length}`);
   const release = await fs.readFile(path.join(root, '.github', 'workflows', 'build-release-package.yml'), 'utf8');
-  assert.ok(release.includes(srcbuildLoadCommand));
+  assert.ok(release.includes('name: cjcj-srcbuild-${{ inputs.platform }}-${{ inputs.version }}'));
+  assert.doesNotMatch(release, /setup_sdk|prepare_base_sdk/);
 });
 
 // Run the real scan entry in an isolated tree, not a duplicate classifier.
@@ -149,9 +142,12 @@ for (const [name, changedFile, mutate] of scanControls) {
         await fs.mkdir(path.join(fixture, directory), {recursive: true});
       }
       for (const relative of [
-        'ci/host-toolchain-pin.test.mjs', 'ci/host-toolchain-pin.mjs',
+        'ci/host-toolchain-pin.test.mjs', 'ci/host-toolchain-pin.mjs', 'ci/vendor/js-yaml/js-yaml.mjs',
         'ci/host_sdk_pin.env', 'ci/release/base-sdk-identities.json',
-        'build/lib/release-component-provenance.mjs',
+        'build/lib/release-component-provenance.mjs', 'ci/release/source-tool-payloads.mjs',
+        'ci/bootstrap/sdk-platform.mjs', 'ci/bootstrap/sdk-io.mjs', 'ci/bootstrap/sdk-flow.mjs',
+        'ci/bootstrap/sdk-command-lifetime.mjs', 'ci/bootstrap/sdk-std-resume.mjs',
+        'ci/bootstrap/sdk-source.mjs', 'ci/bootstrap/sdk-install-entries.mjs', 'ci/build-resources.mjs',
         'build/lib/targets.mjs', 'build/lib/errors.mjs',
         '.github/workflows/build-release-package.yml',
         'ci/cangjie-test/README.md', 'ci/host-runtime/release.json',
@@ -290,7 +286,7 @@ test('srcbuild rejects a missing pin key instead of retaining stale host state',
     runtimeVersion: '9.9.9',
   });
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /CJCJ_TOOLCHAIN is missing/);
+  assert.match(result.stderr, /unsupported host toolchain pin record|must define exactly one CJCJ_TOOLCHAIN/);
   assert.equal(result.stdout, '');
 });
 
@@ -350,31 +346,15 @@ test('measured cjc version is converted to the exact nightly identity', () => {
   assert.throws(() => hostToolchainFromCjcVersion('not a compiler version'), /did not report/);
 });
 
-test('release workflow selects the same host pin for setup and base SDK consumers', async t => {
-  const release = await fs.readFile(path.join(root, '.github', 'workflows', 'build-release-package.yml'), 'utf8');
-  const script = release.match(/- name: Load release host pin\n        shell: bash\n        run: \|\n((?:          .*\n)+)/)?.[1];
-  assert.ok(script, 'release pin loader must exist');
-  const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'release-host-pin-'));
-  t.after(() => fs.rm(temporary, {recursive: true, force: true}));
-  const githubEnv = path.join(temporary, 'github.env');
-  const result = spawnSync('bash', ['-c', script], {
-    cwd: root, encoding: 'utf8',
-    env: {...process.env, GITHUB_ENV: githubEnv, CJCJ_TOOLCHAIN: 'stale-host', RELEASE_HOST_TOOLCHAIN: 'stale-release'},
-  });
-  assert.equal(result.status, 0, result.stderr);
-  const loaded = Object.fromEntries((await fs.readFile(githubEnv, 'utf8')).trim().split('\n').map(line => line.split('=')));
-  const releaseHost = loaded.RELEASE_HOST_TOOLCHAIN;
-  const ordinaryHost = await hostPin();
-  assert.equal(releaseHost, ordinaryHost, 'release host must equal the host pin');
-  assert.equal(loaded.CJCJ_TOOLCHAIN, ordinaryHost, 'setup host must equal the host pin');
-  assert.equal(RELEASE_HOST_TOOLCHAIN, ordinaryHost, 'archive selector must equal the host pin');
-  for (const platform of ['linux-x64', 'linux-aarch64', 'darwin-x64', 'darwin-arm64', 'windows-x64']) {
-    assert.match(baseSdkDownload(platform, releaseHost).sha256, /^[0-9a-f]{64}$/);
-  }
+test('release consumes native installs while official archive selectors retain the declared host pin', async () => {
+  const release = await fs.readFile(path.join(root, '.github/workflows/build-release-package.yml'), 'utf8');
+  assert.doesNotMatch(release, /Load release host pin|prepare_base_sdk|setup_sdk/);
+  assert.ok(release.includes('run: node ci/release/compose-package.mjs'));
+  assert.equal(RELEASE_HOST_TOOLCHAIN, await hostPin());
+  for (const platform of ['linux-x64', 'linux-aarch64', 'darwin-x64', 'darwin-arm64', 'windows-x64'])
+    assert.match(baseSdkDownload(platform, readHostToolchainPin(platform)).sha256, /^[0-9a-f]{64}$/);
   assert.throws(() => baseSdkDownload('linux-x64', 'nightly-unregistered'), /no pinned archive identity/);
-  assert.throws(() => baseSdkDownload('unsupported', releaseHost), /unsupported base SDK platform/);
-  assert.match(release, /--toolchain "\$RELEASE_HOST_TOOLCHAIN"/);
-  assert.match(release, /--base-sdk-id "\$RELEASE_HOST_TOOLCHAIN"/);
+  assert.throws(() => baseSdkDownload('unsupported', RELEASE_HOST_TOOLCHAIN), /unsupported base SDK platform/);
 });
 
 test('both JavaScript entry points require the loaded environment value', async () => {
@@ -395,10 +375,9 @@ const HOST_TOOLCHAIN_PINS = Object.freeze({
   }),
   'ci/host_sdk_pin.env': Object.freeze({
     host: 'source-build host',
-    // ci.yml/package-tests installs the official test SDK and keys its shim
-    // sccache on the same pin, so ci.yml loads this file and not cjpm_pin.env.
+    // Native package consumers use their installed SDK; official pins remain host inputs.
     loaders: Object.freeze(['build-ast-support.yml', 'build-host-runtime.yml',
-      'build-release-package.yml', 'ci.yml', 'srcbuild-target.yml']),
+      'srcbuild-target.yml']),
   }),
 });
 
@@ -406,7 +385,7 @@ test('ordinary CI and source-build hosts use the same nightly', async () => {
   const ordinary = await fs.readFile(cjpmPinPath, 'utf8');
   const definitions = ordinary.match(/^CJCJ_TOOLCHAIN=\S+$/gm) ?? [];
   assert.equal(definitions.length, 1, 'ordinary host must define exactly one toolchain');
-  assert.equal(definitions[0].slice('CJCJ_TOOLCHAIN='.length), await hostPin(),
+  assert.equal(parseHostToolchainPin(ordinary.split(/\r?\n/).filter(line => line.startsWith('CJCJ_TOOLCHAIN')).join('\n')), await hostPin(),
     'CJCJ_TOOLCHAIN must be equal in ci/cjpm_pin.env and ci/host_sdk_pin.env');
 });
 
@@ -446,4 +425,196 @@ test('every CJCJ_TOOLCHAIN definition names a host and has measured consumers', 
     assert.ok(observed.length > 0, `${file} has no consumer; delete it or wire it, do not leave it readable`);
     console.log(`HOST-TOOLCHAIN-PIN ${file} host="${host}" loaders=${observed.join(',')}`);
   }
+});
+
+async function workflowStep(workflow, job, name) {
+  const text = await fs.readFile(path.join(root, '.github/workflows', workflow), 'utf8');
+  const step = loadYaml(text).jobs[job].steps.find(step => step.name === name);
+  assert.ok(step?.run, `${workflow}: ${name} must remain executable`);
+  return step.run;
+}
+
+const independentHostVersions = Object.freeze({
+  linux_x86_64: '1.3.0-alpha.20261009001050',
+  linux_aarch64: '1.3.0-alpha.20260925001050',
+  darwin_x86_64: '1.3.0-alpha.20260925001050',
+  darwin_aarch64: '1.3.0-alpha.20260925001050',
+  windows_x86_64: '1.3.0-alpha.20260925001050',
+});
+
+for (const [platform, version] of Object.entries(independentHostVersions)) {
+  test(`AST independent expected and real CLI producer agree for execution host ${platform}`, async () => {
+    // The expectation comes from fixed declarations, independently of the CLI.
+    const declared = Object.fromEntries((await fs.readFile(pinPath, 'utf8')).split('\n')
+      .filter(line => line.includes('=')).map(line => line.split('=')));
+    const expected = declared['CJCJ_TOOLCHAIN_' + platform.toUpperCase()] || declared.CJCJ_TOOLCHAIN;
+    assert.equal(expected, 'nightly-' + version);
+    if (platform === 'linux_x86_64') {
+      const harness = await fs.readFile(path.join(root, 'ci/test_ast_host_workflow.py'), 'utf8');
+      assert.ok(harness.includes("expected = 'nightly-' + '" + version + "'"), 'AST must use its independent expectation');
+      assert.ok(harness.includes("'ci/host-toolchain-pin.mjs', 'ci/test_ast_host_workflow.py'"), 'AST input evidence must include its real producer');
+    }
+    const actual = spawnSync(process.execPath, ['ci/host-toolchain-pin.mjs', '--platform', platform],
+      {cwd: root, encoding: 'utf8'});
+    assert.equal(actual.status, 0, actual.stderr);
+    console.log(`ASSERT_AST_INDEPENDENT_HOST ${platform} actual=${actual.stdout.trim()} expected=${expected}`);
+    assert.equal(actual.stdout.trim(), expected);
+  });
+}
+
+test('Windows cross workflow retains the Linux execution host after its second pin load', async t => {
+  if (process.platform !== 'linux' || process.arch !== 'x64') return t.skip('Linux x64 execution-host workflow');
+  const work = await fs.mkdtemp(path.join(os.tmpdir(), 'windows-host-load-'));
+  t.after(() => fs.rm(work, {recursive: true, force: true}));
+  const githubEnv = path.join(work, 'github.env');
+  for (const name of ['Load host toolchain pin', 'Load compiler pins']) {
+    const script = await workflowStep('build-windows-runtime.yml', 'build-runtime', name);
+    const run = spawnSync('bash', ['--noprofile', '--norc', '-euo', 'pipefail', '-c', script], {
+      cwd: root, encoding: 'utf8', env: {...process.env, GITHUB_ENV: githubEnv},
+    });
+    assert.equal(run.status, 0, run.stderr);
+    const env = Object.fromEntries((await fs.readFile(githubEnv, 'utf8')).trim().split('\n')
+      .filter(line => line && !line.startsWith('#')).map(line => line.split(/=(.*)/s).slice(0, 2)));
+    console.log(`ASSERT_WINDOWS_EXECUTION_HOST step=${name} actual=${env.CJCJ_TOOLCHAIN}`);
+    assert.equal(env.CJCJ_TOOLCHAIN, 'nightly-' + independentHostVersions.linux_x86_64);
+  }
+});
+
+test('Android candidate installs the execution host before the lineage consumer', async () => {
+  const script = await workflowStep('android-runtime.yml', 'runtime', 'Install official lineage test input');
+  assert.match(script, /source ci\/host_sdk_pin\.env/);
+  assert.match(script, /CJCJ_TOOLCHAIN="\$\(node ci\/host-toolchain-pin\.mjs\)"\nexport CJCJ_TOOLCHAIN/);
+  assert.ok(script.indexOf('node ci/host-toolchain-pin.mjs') < script.indexOf('"$cjv_bin" install "$CJCJ_TOOLCHAIN"'));
+  const workflow = loadYaml(await fs.readFile(path.join(root, '.github/workflows/android-runtime.yml'), 'utf8'));
+  assert.deepEqual(workflow.jobs.runtime.strategy.matrix.arm, ['candidate', 'cut', 'restored']);
+  const verify = workflow.jobs.runtime.steps.find(step => step.name === 'Verify Android release and pin contracts');
+  assert.match(verify.run, /build\/test\/package-provenance\.test\.mjs/);
+  assert.equal(verify.if, "matrix.arm == 'candidate'");
+});
+
+// Execute the actual workflow handoff under GitHub's Bash options. Stop at the
+// first installer/environment consumer: these contracts qualify the handoff,
+// without downloading or installing an SDK during the Node gate.
+test('workflow host pin assignment preserves parser failure and exported success', async t => {
+  const sites = [];
+  for (const file of await fs.readdir(path.join(root, '.github/workflows'))) {
+    if (!file.endsWith('.yml')) continue;
+    const workflow = loadYaml(await fs.readFile(path.join(root, '.github/workflows', file), 'utf8'));
+    for (const [job, definition] of Object.entries(workflow.jobs)) {
+      for (const step of definition.steps ?? []) {
+        if (!step.run?.includes('$(node ci/host-toolchain-pin.mjs)')) continue;
+        const lines = step.run.trimEnd().split('\n');
+        const assignment = lines.findIndex(line => line.includes('$(node ci/host-toolchain-pin.mjs)'));
+        const start = lines.findLastIndex((line, i) => i < assignment && line === 'source ci/host_sdk_pin.env');
+        assert.ok(start >= 0, `${file}:${job} must load its actual pin`);
+        let end = assignment + 1;
+        if (lines[end] === 'export CJCJ_TOOLCHAIN') end++;
+        sites.push({file, job, name: step.name, handoff: lines.slice(start, end).join('\n'), consumer: lines[end]});
+      }
+    }
+  }
+  assert.deepEqual(sites.map(({file, job}) => `${file}:${job}`).sort(), [
+    'android-runtime.yml:runtime', 'ci.yml:contracts', 'test-host-identities.yml:aarch64',
+  ].sort(), 'all workflow command-substitution host loaders must be exercised');
+  for (const site of sites) {
+    for (const invalid of [false, true]) {
+      await t.test(`${site.file}:${site.job} ${invalid ? 'parser failure' : 'exported success'}`, async () => {
+        const work = await fs.mkdtemp(path.join(os.tmpdir(), 'workflow-host-handoff-'));
+        try {
+          await fs.mkdir(path.join(work, 'ci'));
+          await fs.copyFile(path.join(root, 'ci/host-toolchain-pin.mjs'), path.join(work, 'ci/host-toolchain-pin.mjs'));
+          const pin = await fs.readFile(pinPath, 'utf8');
+          await fs.writeFile(path.join(work, 'ci/host_sdk_pin.env'), pin + (invalid ? '\nCJCJ_TOOLCHAIN_UNKNOWN=invalid\n' : ''));
+          const env = {...process.env};
+          delete env.CJCJ_TOOLCHAIN;
+          const parser = spawnSync(process.execPath, ['ci/host-toolchain-pin.mjs'], {cwd: work, env, encoding: 'utf8'});
+          const observer = 'node -e \'console.log("HOST_HANDOFF_CONSUMED=" + JSON.stringify(process.env.CJCJ_TOOLCHAIN))\'';
+          const result = spawnSync('bash', ['--noprofile', '--norc', '-euo', 'pipefail', '-x', '-c', `${site.handoff}\n${observer}`], {
+            cwd: work, env, encoding: 'utf8',
+          });
+          console.log(`TARGET_HOST_HANDOFF ${JSON.stringify({...site, invalid, parserRc: parser.status, shellRc: result.status, stdout: result.stdout, stderr: result.stderr})}`);
+          assert.ifError(parser.error);
+          assert.ifError(result.error);
+          if (invalid) {
+            assert.equal(parser.status, 1, parser.stderr);
+            assert.equal(result.status, parser.status, 'workflow must preserve the real parser exit status');
+            assert.equal(result.stdout, '', 'failed pin must stop before the environment consumer');
+          } else {
+            assert.equal(parser.status, 0, parser.stderr);
+            assert.equal(result.status, 0, result.stderr);
+            assert.equal(result.stdout.trim(), `HOST_HANDOFF_CONSUMED=${JSON.stringify(parser.stdout.trim())}`,
+              'the real parser result must reach the child environment unchanged');
+          }
+        } finally {
+          await fs.rm(work, {recursive: true, force: true});
+        }
+      });
+    }
+  }
+});
+
+// These steps run on Linux (including the Windows cross-build) or on a native
+// matrix host. Execute their actual shell text; a successful parser must win
+// over the generic record before a later installer or cache consumer runs.
+test('workflow GitHub environment loaders resolve the execution host and stop on reader failure', async t => {
+  const sites = [
+    ['build-ast-support.yml', 'build', 'Load host toolchain pin'],
+    ['build-windows-runtime.yml', 'build-runtime', 'Load host toolchain pin'],
+    ['build-windows-runtime.yml', 'build-runtime', 'Load compiler pins'],
+    ['ci.yml', 'build', 'Load host toolchain pin'],
+    ['ci.yml', 'provision', 'Load host toolchain pin'],
+    ['platform-matrix.yml', 'platform', 'Load host toolchain pin'],
+    ['srcbuild-target.yml', 'source-stage0', 'Load host toolchain pin'],
+  ];
+  for (const [file, job, name] of sites) {
+    const script = await workflowStep(file, job, name);
+    for (const arm of ['normal', 'bad-pin', 'missing-reader']) {
+      await t.test(`${file}:${job}:${name} ${arm}`, async () => {
+        const work = await fs.mkdtemp(path.join(os.tmpdir(), 'github-host-loader-'));
+        try {
+          await fs.mkdir(path.join(work, 'ci'));
+          for (const input of ['host_sdk_pin.env', 'cjpm_pin.env', 'source_pin.env', 'llvm_pin.env', 'host-toolchain-pin.mjs']) {
+            await fs.copyFile(path.join(root, 'ci', input), path.join(work, 'ci', input));
+          }
+          if (arm === 'bad-pin') {
+            const pin = path.join(work, 'ci/host_sdk_pin.env');
+            await fs.writeFile(pin, (await fs.readFile(pin, 'utf8')).trimEnd() + '\nCJCJ_TOOLCHAIN_UNKNOWN=invalid\n');
+          }
+          if (arm === 'missing-reader') await fs.rename(path.join(work, 'ci/host-toolchain-pin.mjs'), path.join(work, 'ci/host-toolchain-pin.disabled'));
+          const env = {...process.env, GITHUB_ENV: path.join(work, 'github.env')};
+          const result = spawnSync('bash', ['--noprofile', '--norc', '-euo', 'pipefail', '-c', `${script}\nprintf 'HOST_LOADER_COMPLETED\\n'`], {cwd: work, env, encoding: 'utf8'});
+          assert.ifError(result.error);
+          console.log(`TARGET_GITHUB_HOST_LOADER ${JSON.stringify({file, job, name, arm, rc: result.status, stdout: result.stdout, stderr: result.stderr})}`);
+          if (arm === 'normal') {
+            assert.equal(result.status, 0, result.stderr);
+            assert.match(result.stdout, /HOST_LOADER_COMPLETED/);
+            const records = (await fs.readFile(env.GITHUB_ENV, 'utf8')).split('\n').filter(line => line && !line.startsWith('#'));
+            const loaded = Object.fromEntries(records.map(line => line.split(/=(.*)/s).slice(0, 2)));
+            const platform = `${process.platform === 'win32' ? 'windows' : process.platform}_${process.arch === 'x64' ? 'x86_64' : 'aarch64'}`;
+            assert.ok(independentHostVersions[platform]);
+            console.log(`ASSERT_GITHUB_EXECUTION_HOST ${file}:${job}:${name} actual=${loaded.CJCJ_TOOLCHAIN}`);
+            assert.equal(loaded.CJCJ_TOOLCHAIN, 'nightly-' + independentHostVersions[platform]);
+          } else {
+            assert.equal(result.status, 1, result.stderr);
+            assert.doesNotMatch(result.stdout, /HOST_LOADER_COMPLETED/);
+            assert.match(result.stderr, arm === 'bad-pin' ? /unsupported host platform pin/ : /Cannot find module/);
+          }
+        } finally {
+          await fs.rm(work, {recursive: true, force: true});
+        }
+      });
+    }
+  }
+});
+
+// Explicit native H selection has a registered original archive; default pins
+// and an arbitrary matching version string cannot select it.
+test('explicit native host archive selection retains the default pin and rejects unregistered hosts',()=>{
+ const old='nightly-'+'1.3.0-alpha.20260925001050';
+ assert.throws(()=>baseSdkDownload('linux-x64',old),/no pinned archive identity/);
+ assert.equal(baseSdkDownload('linux-x64',old,{selectedHost:true}).sha256,
+  'fde68a5713968f5f875e013355d73aab8bd95bb1fbfd1f1b6a29b1adcf48943b');
+ assert.equal(baseSdkDownload('linux-x64',readHostToolchainPin('linux-x64')).sha256,
+  '1e23b2b64263dfc2267a3f459e9b13840278e84db1797a6733db68f49885df5c');
+ assert.throws(()=>baseSdkDownload('linux-x64','nightly-'+'1.3.0-alpha.20260101000000',{selectedHost:true}),/no pinned archive identity/);
 });

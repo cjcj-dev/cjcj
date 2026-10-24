@@ -43,17 +43,24 @@ test('every release platform names a buildable host target and a runner of that 
   }
 });
 
-test('readiness is derived from DAG producers: native and Android packages have DAG producers; other gaps remain named', () => {
+test('readiness is derived from DAG producers: complete native SDK producers are distinct from cross std/component producers', () => {
   const byStatus = {buildable: [], blocked: [], excluded: []};
   for (const key of allReleasePlatforms()) byStatus[releasePlatformReadiness(key).status].push(key);
-  assert.deepEqual(byStatus.buildable, ['linux-x64', 'linux-arm64', 'linux-x64-android', 'darwin-arm64', 'darwin-x64', 'darwin-arm64-android', 'win32-x64', 'win32-x64-android']);
+  assert.deepEqual(byStatus.buildable, ['linux-x64', 'linux-x64-android', 'linux-x64-ohos']);
+  for (const key of ['win32-x64', 'win32-x64-android', 'win32-x64-ohos']) {
+    const readiness = releasePlatformReadiness(key);
+    assert.equal(readiness.sdkSourceTarget, null, key + ': cross std does not supply a native SDK');
+    assert.equal(readiness.status, 'blocked');
+    assert.ok(readiness.reasons.some(reason => reason.startsWith('native SDK windows-x64:')));
+    assert.equal(readiness.packageDeclared, true, 'the Windows package obligation remains');
+  }
   assert.deepEqual(byStatus.excluded, ['win32-x64-ohos-arm32']);
-  assert.equal(byStatus.blocked.length, 5);
+  assert.deepEqual(byStatus.blocked, ['linux-arm64', 'darwin-arm64', 'darwin-x64', 'darwin-arm64-android', 'darwin-arm64-ios', 'darwin-arm64-ohos', 'ohos-arm64', 'win32-x64', 'win32-x64-android', 'win32-x64-ohos']);
   for (const key of byStatus.blocked) {
     const readiness = releasePlatformReadiness(key);
     assert.ok(readiness.reasons.length > 0, `${key} blocked without a reason`);
     for (const reason of readiness.reasons) {
-      assert.match(reason, /^(tuple \S+_cjnative: |requires [a-z-]+: |device-side SDK: )/, `${key}: reason does not name a tuple, capability or device-side gap: ${reason}`);
+      assert.match(reason, /^(tuple \S+_cjnative: |requires [a-z-]+: |device-side SDK: |source [a-z0-9-]+: |native SDK [a-z0-9-]+: )/, `${key}: reason does not name a tuple, capability or device-side gap: ${reason}`);
     }
   }
   for (const key of byStatus.buildable) assert.deepEqual(releasePlatformReadiness(key).reasons, []);
@@ -88,10 +95,10 @@ test('ARM32 tuples are dropped, never carried, and the arm32-only package is exc
 });
 
 test('asking the build for a blocked release platform fails closed with the missing tuple, not "unknown target"', () => {
-  assert.throws(() => getTarget('linux-x64-ohos'), error => {
-    assert.match(error.message, /release platform 'linux-x64-ohos' is blocked/);
+  assert.throws(() => getTarget('ohos-arm64'), error => {
+    assert.match(error.message, /release platform 'ohos-arm64' is blocked/);
     // The OHOS SDK is installed and probed by the prerequisites job, so the gap this
-    // platform still has is the cross-built tuple. Naming the SDK here would be
+    // platform still has is the device-side host compiler. Naming the SDK here would be
     // a stale claim, so assert its absence too.
     assert.match(error.message, /linux_ohos_aarch64_cjnative/);
     assert.doesNotMatch(error.message, /ohos-sdk/);
@@ -105,8 +112,10 @@ test('asking the build for a blocked release platform fails closed with the miss
 // the table so there is one truth about which runner packages which platform.
 test('release.yml package jobs agree with the release platform table', () => {
   const release = fs.readFileSync(path.join(root, '.github/workflows/release.yml'), 'utf8');
+  assert.match(release, /run: node ci\/srcbuild\/target-matrix.mjs --targets all --require-ready/);
+  assert.match(release, /source-p1-linux-x64:\n    needs: plan/);
   const jobs = release.split(/\n  (?=[a-z0-9-]+:\n)/).filter(job => job.includes('uses: ./.github/workflows/build-release-package.yml'));
-  assert.equal(jobs.length, allReleasePlatforms().filter(key => releasePlatformReadiness(key).status === 'buildable').length);
+  assert.equal(jobs.length, allReleasePlatforms().filter(key => !getReleasePlatform(key).excluded && !getReleasePlatform(key).crossCompiledHost).length);
   const scalar = (job, key) => job.match(new RegExp(String.raw`^\s*${key}: '?([^'\n]*)'?\s*$`, 'm'))?.[1];
   const seen = [];
   for (const job of jobs) {
@@ -119,11 +128,11 @@ test('release.yml package jobs agree with the release platform table', () => {
     assert.equal(scalar(job, 'runner'), readiness.runner, `${key}: runner`);
     assert.equal(scalar(job, 'llvm_platform'), readiness.llvmPlatform, `${key}: llvm_platform`);
     assert.equal(scalar(job, 'sdk_runtime_dir'), readiness.runtimeTuple, `${key}: sdk_runtime_dir`);
-    assert.equal(scalar(job, 'std_artifact'), `final-std-${readiness.host}`, `${key}: std_artifact`);
+    assert.equal(scalar(job, 'std_artifact'), readiness.host==='windows-x64'?'final-std-native-windows-x64':`final-std-${readiness.host}`, `${key}: std_artifact`);
     const cross = JSON.parse(scalar(job, 'cross_std_artifacts'));
     assert.deepEqual(Object.keys(readiness.crossStd), cross.map(entry => entry.tuple), `${key}: cross tuples`);
   }
-  assert.deepEqual(seen.sort(), allReleasePlatforms().filter(key => releasePlatformReadiness(key).status === 'buildable').sort());
+  assert.deepEqual(seen.sort(), allReleasePlatforms().filter(key => !getReleasePlatform(key).excluded && !getReleasePlatform(key).crossCompiledHost).sort());
 });
 
 // DAG_REQUIREMENT_PRODUCERS is the only thing that lets a `requires <sdk>` line
@@ -200,8 +209,8 @@ test('a platform whose SDK is installed and probed no longer reports a missing c
       continue;
     }
     for (const reason of readiness.reasons) {
-      assert.ok(tupleReason.test(reason) || reason.startsWith('device-side SDK: '),
-        `${key}: leftover reason is neither a tuple nor a device-side gap: ${reason}`);
+      assert.ok(tupleReason.test(reason) || reason.startsWith('device-side SDK: ') || reason.startsWith('source ') || reason.startsWith('native SDK '),
+        `${key}: leftover reason is neither a tuple, device-side nor native-source gap: ${reason}`);
     }
   }
   // Nine uses over nine platforms (the excluded arm32 package also names ohos-sdk,

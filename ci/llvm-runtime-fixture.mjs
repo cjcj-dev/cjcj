@@ -3,6 +3,7 @@ import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {createHash} from 'node:crypto';
+import {sourceFetchArguments} from '../build/lib/git.mjs';
 export const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const base = '3b1fe439310269257a43685407df523f55a47cf6';
 export function command(argv, options = {}) {
@@ -10,10 +11,24 @@ export function command(argv, options = {}) {
   if (result.error || result.signal) throw result.error ?? new Error(result.signal);
   return {rc: result.status, stdout: result.stdout, stderr: result.stderr};
 }
-export function originalSource() {
-  const file = 'ci/fetch-llvm-runtime.mjs'.replace(/mjs$/, 'sh');
-  const result = command(['git', '-C', repo, 'show', `${base}:${file}`]);
-  if (result.rc !== 0) throw new Error(result.stderr);
+const sourcePath = 'ci/fetch-llvm-runtime.sh';
+const sourceBlob = '52e9de86a83eeeabe5545041b653f80eb11b9f69';
+export function prepareOriginalSource(checkout = repo) {
+  const identity = () => command(['git', '-C', checkout, 'rev-parse', '--verify', `${base}:${sourcePath}`]);
+  if (identity().rc !== 0) {
+    const fetched = command(['git', '-C', checkout, ...sourceFetchArguments('https://github.com/cjcj-dev/cjcj.git', base, {noTags: true})]);
+    if (fetched.rc !== 0) throw new Error(`LLVM_RUNTIME_HISTORY_FETCH_FAILED: ${fetched.stderr}`);
+  }
+  const result = identity();
+  if (result.rc !== 0 || result.stdout.trim() !== sourceBlob)
+    throw new Error(`LLVM_RUNTIME_HISTORY_IDENTITY: ${result.stderr || result.stdout}`);
+  const content = command(['git', '-C', checkout, 'cat-file', '-e', `${sourceBlob}^{blob}`]);
+  if (content.rc !== 0) throw new Error(`LLVM_RUNTIME_HISTORY_BLOB: ${content.stderr}`);
+  console.log(`LLVM_RUNTIME_HISTORY_VERIFIED commit=${base} blob=${sourceBlob}`);
+}
+export function originalSource(checkout = repo) {
+  const result = command(['git', '-C', checkout, 'show', `${base}:${sourcePath}`]);
+  if (result.rc !== 0) throw new Error(`LLVM_RUNTIME_HISTORY_MISSING: ${result.stderr}`);
   return result.stdout;
 }
 export const digest = file => createHash('sha256').update(fs.readFileSync(file)).digest('hex');

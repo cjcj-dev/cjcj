@@ -61,7 +61,7 @@ const linuxAArch64 = Object.freeze({
 
 const darwinArm64 = Object.freeze({
   sourceBuild: Object.freeze({runner: 'macos-15', reasons: Object.freeze([
-    'ci/bootstrap/bootstrap.sh rejects Darwin; implement Darwin bootstrap: https://github.com/cjcj-dev/cjcj/issues/473',
+    'Fixed paired H1 producer still lacks the Darwin recipe; complete producer closure: https://github.com/cjcj-dev/cjcj/issues/473',
   ])}),
   spec: Object.freeze({
     key: 'darwin-arm64', sdkName: 'mac-aarch64', archiveFormat: 'tar.gz',
@@ -89,7 +89,7 @@ const darwinArm64 = Object.freeze({
 
 const darwinX64 = Object.freeze({
   sourceBuild: Object.freeze({runner: 'macos-15-intel', reasons: Object.freeze([
-    'ci/bootstrap/bootstrap.sh rejects Darwin; implement Darwin bootstrap: https://github.com/cjcj-dev/cjcj/issues/473',
+    'Fixed paired H1 producer still lacks the Darwin recipe; complete producer closure: https://github.com/cjcj-dev/cjcj/issues/473',
   ])}),
   spec: Object.freeze({
     key: 'darwin-x64', sdkName: 'mac-x64', archiveFormat: 'tar.gz',
@@ -116,6 +116,7 @@ const darwinX64 = Object.freeze({
 });
 
 const windowsX64 = Object.freeze({
+  nativeSourceBuild: Object.freeze({runner: 'windows-2022'}),
   spec: Object.freeze({
     key: 'windows-x64', sdkName: 'windows-x64', archiveFormat: 'zip',
     packageHost: Object.freeze(['win32', 'x64']),
@@ -189,9 +190,6 @@ export function llvmToolMatrix(requested = 'all', {platformSet = '', publishTupl
     selected = targets.filter(spec => wanted.includes(spec.llvmPlatform));
   }
   if (!selected.length) throw new ConfigError(`no LLVM platforms selected from '${requested}'`);
-  if (publishTuple && !selected.some(spec => spec.key === 'linux-x64')) {
-    selected.push(getTarget('linux-x64').spec);
-  }
   return {include: selected.map(spec => ({
     runner: spec.llvmRunner,
     platform: spec.llvmPlatform,
@@ -201,14 +199,15 @@ export function llvmToolMatrix(requested = 'all', {platformSet = '', publishTupl
   }))};
 }
 
-export function sourceBuildCells() {
-  return [...registry.values()].filter(target => target.sourceBuild).map(({spec, sourceBuild}) => ({
+export function sourceBuildCells({nativeInputs=false}={}) {
+  return [...registry.values()].filter(target => target.sourceBuild || nativeInputs && target.nativeSourceBuild).map(({spec, sourceBuild, nativeSourceBuild}) => ({
     target: spec.key,
-    runner: sourceBuild.runner,
+    runner: (nativeSourceBuild || sourceBuild).runner,
     llvm_platform: spec.llvmPlatform,
     static_libs: spec.needsStaticLibs,
-    status: sourceBuild.reasons.length ? 'blocked' : 'runnable',
-    reasons: [...sourceBuild.reasons],
+    status: !nativeInputs && sourceBuild.reasons.length ? 'blocked' : 'runnable',
+    reasons: nativeInputs ? [] : [...sourceBuild.reasons],
+    ...(nativeInputs ? {input_route:'native-installations'} : {}),
   }));
 }
 
@@ -232,7 +231,7 @@ const PLATFORM_RUNNERS = Object.freeze([
 
 export function ciBuildCells() {
   return CI_BUILD_RUNNERS.map(([runner, target, experimental]) => ({
-    runner, llvm_platform: getTarget(target).spec.llvmPlatform, experimental,
+    runner, target, llvm_platform: getTarget(target).spec.llvmPlatform, experimental,
   }));
 }
 
@@ -242,7 +241,7 @@ export function ciProvisionCells() {
 
 export function platformTestCells() {
   return PLATFORM_RUNNERS.map(([runner, target]) => ({
-    runner, llvm_platform: getTarget(target).spec.llvmPlatform,
+    runner, target, llvm_platform: getTarget(target).spec.llvmPlatform,
     sdk_runtime_dir: getTarget(target).spec.runtimeTuple,
   }));
 }
@@ -305,9 +304,19 @@ export function assertHostContract(key, {
 // source cell only (srcbuild-target.yml source-mingw/source-android), so the
 // Windows and Android tuples are produced by the Linux source cell; Android
 // runtime and final std use ci/srcbuild/steps/build-android-final-std.mjs.
+// Shared by release artifact selection and segmented cross jobs. Each row names
+// a real producer consuming the matching native stage3 handoff.
+export const CROSS_STD_BUILDS = Object.freeze([
+  {family: 'ohos', target: 'linux-x64', tuple: 'linux_ohos_aarch64_cjnative', arch: 'aarch64', runtime_target: 'ohos-aarch64', artifact: 'final-std-ohos-aarch64'},
+  {family: 'ohos', target: 'linux-x64', tuple: 'linux_ohos_x86_64_cjnative', arch: 'x86_64', runtime_target: 'ohos-x86_64', artifact: 'final-std-ohos-x86-64'},
+  {family: 'ios', target: 'darwin-arm64', tuple: 'ios_aarch64_cjnative', arch: 'arm64', runtimeArch: 'aarch64', sdk: 'iphoneos', runtime_target: 'ios-aarch64', artifact: 'final-std-ios-aarch64-cjnative'},
+  {family: 'ios', target: 'darwin-arm64', tuple: 'ios_simulator_aarch64_cjnative', arch: 'arm64', runtimeArch: 'aarch64', sdk: 'iphonesimulator', runtime_target: 'ios-simulator-aarch64', artifact: 'final-std-ios-simulator-aarch64-cjnative'},
+  {family: 'ios', target: 'darwin-arm64', tuple: 'ios_simulator_x86_64_cjnative', arch: 'x86_64', runtimeArch: 'x86_64', sdk: 'iphonesimulator', runtime_target: 'ios-simulator-x86_64', artifact: 'final-std-ios-simulator-x86-64-cjnative'},
+].map(Object.freeze));
 const DAG_CROSS_STD_PRODUCERS = Object.freeze({
   windows_x86_64_cjnative: 'linux-x64',
   linux_android_aarch64_cjnative: 'linux-x64',
+  ...Object.fromEntries(CROSS_STD_BUILDS.map(row => [row.tuple, row.target])),
 });
 
 // tuple -> target key whose source cell uploads final-std-<target> for it.
@@ -462,12 +471,12 @@ export function isDroppedArm32Tuple(tuple) {
 // {status: 'buildable' | 'blocked' | 'excluded', reasons: string[], ...}. `reasons`
 // is empty exactly when status is 'buildable'; every blocked reason names the
 // tuple or capability and what would have to exist for it to clear.
-export function releasePlatformReadiness(key) {
+export function releasePlatformReadiness(key, {nativeInputs=false}={}) {
   const platform = getReleasePlatform(key);
   const hostTarget = getTarget(platform.host);
   const reasons = [];
   if (platform.excluded) {
-    return Object.freeze({key, status: 'excluded', host: platform.host, runner: platform.runner, reasons: Object.freeze([platform.excluded])});
+    return Object.freeze({key, packageDeclared: false, status: 'excluded', host: platform.host, runner: platform.runner, reasons: Object.freeze([platform.excluded])});
   }
   if (platform.crossCompiledHost) {
     reasons.push(`device-side SDK: bin/cjc, runtime and std must all be cross-compiled for ${platform.crossTuples.join(', ')}; the P01-P23 DAG only builds a host SDK for ${platform.host}`);
@@ -495,16 +504,34 @@ export function releasePlatformReadiness(key) {
     if (DAG_REQUIREMENT_PRODUCERS[requirement]) continue;
     reasons.push(`requires ${requirement}: ${contract.summary}; no DAG stage installs or consumes it`);
   }
+  // A complete package recipe can be declared while its native source is blocked.
+  // Snapshot structural gaps before adding source readiness; declaration never
+  // grants runnable admission and does not remove any production reason.
+  const packageDeclared = reasons.length === 0;
+  // package-install uploads one whole SDK per source cell. A cross-std or
+  // component producer cannot supply the archive consumed by release.
+  const sdkSourceTarget = hostTarget.sourceBuild || nativeInputs && hostTarget.nativeSourceBuild ? platform.host : null;
+  if (!sdkSourceTarget) reasons.push(`native SDK ${platform.host}: no source cell runs package-install and uploads cjcj-srcbuild-${platform.host}-VERSION; cross std/components are not a whole SDK`);
   // The host SDK's own std comes from its source cell, except for a host whose
   // std is itself cross-built (windows-x64: linux-x64 builds final-std-windows-x64
   // and the package job runs on Windows).
-  const sourceTarget = hostTarget.spec.crossCompile ? stdProducerFor(hostTarget.spec.runtimeTuple) : platform.host;
+  if(hostTarget.nativeSourceBuild&&!nativeInputs)reasons.push(`native SDK ${platform.host}: explicit native pair and provider inputs required`);
+  const sourceTarget = nativeInputs && hostTarget.nativeSourceBuild ? platform.host : hostTarget.spec.crossCompile ? stdProducerFor(hostTarget.spec.runtimeTuple) : platform.host;
+  // Declaring a cross tuple does not make its native compiler producer ready.
+  // Use the same source facts as the formal source workflow's admission step.
+  for (const target of new Set([sourceTarget, ...Object.values(crossStd)])) {
+    const source = getTarget(target).sourceBuild;
+    if (!source && !(nativeInputs && getTarget(target).nativeSourceBuild)) reasons.push(`source ${target}: explicit native SDK inputs required`);
+    else if(!nativeInputs)for (const reason of source.reasons) reasons.push(`source ${target}: ${reason}`);
+  }
   return Object.freeze({
     key,
+    packageDeclared,
     status: reasons.length ? 'blocked' : 'buildable',
     host: platform.host,
     sourceTarget,
-    hostStdCrossBuilt: Boolean(hostTarget.spec.crossCompile),
+    sdkSourceTarget,
+    hostStdCrossBuilt: Boolean(hostTarget.spec.crossCompile && !nativeInputs),
     runner: platform.runner,
     officialArchive: platform.officialArchive,
     archiveKey: platform.archiveKey,

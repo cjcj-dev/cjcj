@@ -1,0 +1,13 @@
+cmake_minimum_required(VERSION 3.16)
+project(cjcj_sdk_entry LANGUAGES CXX)
+add_executable(cjcj-sdk-entry entry.cpp)
+target_compile_features(cjcj-sdk-entry PRIVATE cxx_std_17)
+if(WIN32)
+  target_link_libraries(cjcj-sdk-entry PRIVATE shell32)
+endif()
+if(MSVC)
+  set_property(TARGET cjcj-sdk-entry PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  # The entry must itself start under either inherited SDK library domain.
+  target_link_options(cjcj-sdk-entry PRIVATE -static)
+endif()

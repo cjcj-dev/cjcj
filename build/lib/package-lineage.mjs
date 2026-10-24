@@ -1,8 +1,10 @@
+import {resolveOfficialSdkRoot} from './config.mjs';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {parseHostToolchainPin} from '../../ci/host-toolchain-pin.mjs';
 
 export const PACKAGED_TOOL_NAMES = Object.freeze([
   'cjpm', 'cjfmt', 'hle', 'LSPServer', 'cjcov', 'cjtrace-recover',
@@ -71,9 +73,7 @@ export function hostSdkPinPath() {
 
 export async function readHostSdkPinToolchain(pinFile = hostSdkPinPath()) {
   const text = await fs.readFile(pinFile, 'utf8');
-  const match = text.match(/^CJCJ_TOOLCHAIN=(\S+)$/m);
-  if (!match) throw new Error(`CJCJ_TOOLCHAIN missing from ${pinFile}`);
-  return match[1];
+  return parseHostToolchainPin(text);
 }
 
 export async function pinnedOfficialSdkRoot(pinFile = hostSdkPinPath()) {
@@ -100,8 +100,18 @@ export async function listPackagedArtifacts(root) {
   }
   for (const rel of SCAN_ROOTS) await walk(path.join(root, rel));
   for (const name of PACKAGED_TOOL_NAMES) {
-    const file = path.join(root, 'tools', 'bin', name);
-    if (await exists(file)) files.push(file);
+    for(const suffix of ['', '.exe']){
+      let file = path.join(root, 'tools', 'bin', name+suffix);
+      if(!await exists(file))continue;
+      try{
+        const lines=(await fs.readFile(file+'.entry','utf8')).trimEnd().split('\n');
+        const rel=lines[2];
+        if(lines[0]!=='cjcj-sdk-entry-v1'||!rel||path.isAbsolute(rel)||rel.includes('\\')||rel.split('/').includes('..'))throw new Error('packaged tool entry path '+name);
+        file=path.join(root,rel);
+        if(!await exists(file))throw new Error('packaged tool product missing '+name);
+      }catch(e){if(e.code!=='ENOENT')throw e;}
+      files.push(file);
+    }
   }
   files.sort();
   return files;
@@ -121,21 +131,22 @@ export function contentSignals(buffer) {
   if (/CJCJ-COMMIT:[0-9a-f]{40}/.test(text)) found.push('CJCJ-COMMIT');
   if (/CJTOOL-COMMIT:[0-9a-f]{40}/.test(text)) found.push('CJTOOL-COMMIT');
   if (/CJLLVM-COMMIT:[0-9a-f]{40}/.test(text)) found.push('CJLLVM-COMMIT');
-  if (/CJRT-COMMIT:[0-9a-f]{40}/.test(text)) found.push('CJRT-COMMIT');
+  if (/CJRT-COMMIT:(?:[0-9a-f]{40}|src-[0-9a-f]{64})(?![0-9A-Za-z._-])/.test(text)) found.push('CJRT-COMMIT');
   if (text.includes('g_cjStoreBadMask')) found.push('g_cjStoreBadMask');
   return found;
 }
 
-let cachedOfficialShas;
+const cachedOfficialShas = new Map();
 
-export async function bindOfficialNightlyShas() {
-  if (cachedOfficialShas) return cachedOfficialShas;
-  const root = await pinnedOfficialSdkRoot();
+export async function bindOfficialNightlyShas(officialRoot) {
+  const root = path.resolve(resolveOfficialSdkRoot(officialRoot) ?? await pinnedOfficialSdkRoot());
+  if(cachedOfficialShas.has(root))return cachedOfficialShas.get(root);
   if (!await exists(root, 'dir')) {
     throw new Error(`official nightly pin dir missing: ${root}`);
   }
-  cachedOfficialShas = await collectStdArtifactShas(root);
-  return cachedOfficialShas;
+  const hashes=await collectStdArtifactShas(root);
+  cachedOfficialShas.set(root,hashes);
+  return hashes;
 }
 
 export async function collectContentFindings(sdkRoot, officialShas) {
@@ -161,7 +172,7 @@ function formatFindings(findings) {
 }
 
 export async function inspectPackagedLineage(sdkRoot, {
-  allowNightlyStd = false,
+  allowNightlyStd = false, officialRoot,
 } = {}) {
   const provenancePath = path.join(sdkRoot, 'PROVENANCE.txt');
   let provenanceKind = 'unknown';
@@ -179,7 +190,7 @@ export async function inspectPackagedLineage(sdkRoot, {
     };
   }
 
-  const officialShas = await bindOfficialNightlyShas();
+  const officialShas = await bindOfficialNightlyShas(officialRoot);
   const findings = await collectContentFindings(sdkRoot, officialShas);
   if (allowNightlyStd && (findings.length > 0 || provenanceKind === 'official-std')) {
     return {

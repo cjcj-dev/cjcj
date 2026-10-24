@@ -1,4 +1,6 @@
+import {sourceToolPayloads} from '../../ci/release/source-tool-payloads.mjs';
 import {getTarget} from './targets.mjs';
+import {sdkPlatform,entryPlatformName} from '../../ci/bootstrap/sdk-platform.mjs';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -7,6 +9,14 @@ import {readHostToolchainPin} from '../../ci/host-toolchain-pin.mjs';
 export const BASE_SDK_PROVENANCE = 'BASE-SDK-PROVENANCE.json';
 export const CJPM_PROVENANCE = 'CJPM-PROVENANCE.json';
 export const HLE_PROVENANCE = 'HLE-PROVENANCE.json';
+// Required shared-tool products include their target native support payloads.
+export const SOURCE_TOOLS_NATIVE = Object.freeze(['cjfmt', 'LSPServer', 'cjcov', 'cjtrace-recover', 'cjlint', 'cjprof', 'cjcompat']);
+export const SOURCE_TOOLS_WINDOWS = SOURCE_TOOLS_NATIVE;
+
+// hle and cjpm retain their dedicated producer/install paths.
+export function sourceOwnedTools(isWindows) {
+  return [...(isWindows ? SOURCE_TOOLS_WINDOWS : SOURCE_TOOLS_NATIVE), 'hle'];
+}
 export const SOURCE_PROVENANCE_RESOLVED = 'resolved';
 export const SOURCE_PROVENANCE_NOT_APPLICABLE = 'not-applicable';
 export const SOURCE_PROVENANCE_UNRESOLVED = 'unresolved';
@@ -111,11 +121,13 @@ function requireIdentity(value, {component, platform}, label) {
   }
 }
 
-export function baseSdkDownload(platform, toolchain) {
+export function baseSdkDownload(platform, toolchain, {selectedHost = false} = {}) {
   const tuple = baseSdkPlatforms.get(platform);
   if (!tuple) throw new Error(`unsupported base SDK platform: ${platform}`);
   const version = requireString(toolchain, 'base SDK toolchain').replace(/^nightly-/, '');
-  if (version !== RELEASE_HOST_TOOLCHAIN.replace(/^nightly-/, '') || version !== baseSdkIdentities.version) {
+  const current = version === readHostToolchainPin(platform).replace(/^nightly-/, '') && version === (tuple.version || baseSdkIdentities.version);
+  const identity = current ? tuple : selectedHost && tuple.registeredHosts?.[version];
+  if (!identity) {
     throw new Error(`base SDK release has no pinned archive identity: ${version}`);
   }
   const {spec} = getTarget(platform);
@@ -125,8 +137,8 @@ export function baseSdkDownload(platform, toolchain) {
     url: `${NIGHTLY_RELEASE_BASE}/${version}/${archive}`,
     releaseRepository: NIGHTLY_RELEASE_REPOSITORY,
     version,
-    size: tuple.size,
-    sha256: tuple.sha256,
+    size: identity.size,
+    sha256: identity.sha256,
   };
 }
 
@@ -286,10 +298,69 @@ export async function readCjpmPin(pinFile) {
   return parseCjpmPin(await fs.readFile(pinFile, 'utf8'));
 }
 
+export async function safePayloadPath(root, relative) {
+  if (typeof relative !== 'string' || !relative || path.isAbsolute(relative) || path.win32.isAbsolute(relative)
+      || relative.includes('\\') || relative.includes('\0') || relative.split('/').some(p => !p || p === '.' || p === '..')) {
+    throw new Error(`unsafe payload path: ${relative}`);
+  }
+  root = await fs.realpath(root);
+  let current=root;
+  for (const part of relative.split('/')) {
+    current=path.join(current,part);
+    const stat=await fs.lstat(current).catch(e=>{if(e.code==='ENOENT')return null;throw e;});
+    if(stat?.isSymbolicLink())throw new Error(`payload path contains a link: ${current}`);
+  }
+  return current;
+}
+export async function artifactSourceBinary(binary,sdk,platform) {
+  const recipe=await fs.readFile(binary+'.entry','utf8').catch(e=>{if(e.code==='ENOENT')return null;throw e;});
+  if(recipe===null)return binary;
+  const lines=recipe.trimEnd().split('\n');
+  const target=getTarget(platform).spec.llvmPlatform;
+  if(lines[0]!=='cjcj-sdk-entry-v1'||lines[3]!==entryPlatformName(target)||lines[4]!=='native-target:'+sdkPlatform(target).arch)throw new Error('artifact target recipe mismatch');
+  let root=path.dirname(await fs.realpath(binary));
+  const ascent=Number(lines[1]);
+  if(!Number.isInteger(ascent)||ascent<0||ascent>32)throw new Error('artifact recipe ascent');
+  for(let i=0;i<ascent;i++)root=path.dirname(root);
+  if(root!==await fs.realpath(sdk))throw new Error('artifact recipe SDK root mismatch');
+  return safePayloadPath(root,lines[2]);
+}
+
+export function requireToolPayloads(component, platform, payloads) {
+  if (!Array.isArray(payloads)) throw new Error(`${component} payloads must be an array`);
+  const paths=payloads.map(p=>p.path);
+  if(new Set(paths).size!==paths.length)throw new Error(`${component} duplicate payload path`);
+  if(component==='cjpm'||component==='compiler')return; // Dedicated producers check their config and final std contracts.
+  for(const required of sourceToolPayloads(component,platform)) {
+    if(!paths.includes(required))throw new Error(`${component} missing required payload: ${required}`);
+  }
+}
+
+async function requireHleClosure(root,platform) {
+  const suffix=sourceToolPayloads('hle',platform)[1].endsWith('.exe')?'.exe':'';
+  for(const relative of ['tools/dtsparser/analysis.js','tools/dtsparser/node_modules/.bin/cjbind'+suffix]) {
+    if(!(await fs.lstat(await safePayloadPath(root,relative))).isFile())throw new Error('HLE_DEPENDENCY_FILE '+relative);
+  }
+  for(const [name,version]of [['typescript','4.9.5'],['https-proxy-agent','7.0.6']]) {
+    const prefix='tools/dtsparser/node_modules/'+name+'/';
+    const pkg=JSON.parse(await fs.readFile(await safePayloadPath(root,prefix+'package.json'),'utf8'));
+    if(pkg.name!==name||pkg.version!==version)throw new Error('HLE_DEPENDENCY_VERSION '+name);
+    const main=String(pkg.main||'index.js').replace(/^\.\//,'');
+    if(!(await fs.lstat(await safePayloadPath(root,prefix+main))).isFile())throw new Error('HLE_DEPENDENCY_MAIN '+name);
+  }
+}
+
 // The sidecar shape is the same for every source-built tool we ship; only the
 // component name and the binary's name change. cjpm keeps its own entry points
 // so its thirty-odd call sites stay untouched.
-export async function writeComponentProvenance({component, binary, destination, platform, repository, commit}) {
+export async function writeComponentProvenance({component, binary, destination, platform, repository, commit, payloads = []}) {
+  requireToolPayloads(component,platform,payloads);
+  if(component==='hle')await requireHleClosure(path.dirname(binary),platform);
+  for(const entry of payloads) {
+    const target=await safePayloadPath(path.dirname(binary),entry.path);
+    const stat=await fs.lstat(target);
+    if(entry.type==='directory'?!stat.isDirectory():entry.type!=='file'||!stat.isFile()) throw new Error(`invalid payload type: ${entry.path}`);
+  }
   const value = {
     schema: 1,
     component: requireString(component, 'component'),
@@ -303,9 +374,51 @@ export async function writeComponentProvenance({component, binary, destination, 
       path: path.basename(binary),
       sha256: await fileSha256(binary),
     },
+    // The files beside the binary that the tool reads at run time. Recorded by
+    // path and content so the consumer can check it received the same ones,
+    // rather than only that a file of that name exists.
+    payloads: await Promise.all(payloads.map(async entry => ({
+      path: requireString(entry.path, `${component} payload path`),
+      type: entry.type === 'directory' ? 'directory' : 'file',
+      sha256: await payloadDigest(await safePayloadPath(path.dirname(binary), entry.path)),
+    }))),
   };
   await fs.writeFile(destination, `${JSON.stringify(value, null, 2)}\n`);
   return value;
+}
+
+// A directory payload is digested over its contents in sorted relative-path
+// order, so a differing file or a missing one changes the digest. Returns null
+// for an absent path, which the verifier treats as a mismatch rather than as
+// "nothing to check".
+async function payloadDigest(target) {
+  let stat;
+  try {
+    stat = await fs.lstat(target);
+  } catch (error) {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  }
+  if (stat.isFile()) return fileSha256(target);
+  if (!stat.isDirectory()) throw new Error(`payload is neither file nor directory: ${target}`);
+  const hash = crypto.createHash('sha256');
+  const walk = async (directory, prefix) => {
+    for (const name of (await fs.readdir(directory)).sort()) {
+      const child = path.join(directory, name);
+      const childStat = await fs.lstat(child);
+      const relative = prefix ? `${prefix}/${name}` : name;
+      if (childStat.isDirectory()) {
+        hash.update(`d ${relative}\n`);
+        await walk(child, relative);
+      } else if (childStat.isFile()) {
+        hash.update(`f ${relative} ${await fileSha256(child)}\n`);
+      } else {
+        throw new Error(`payload contains a non-regular file: ${child}`);
+      }
+    }
+  };
+  await walk(target, '');
+  return hash.digest('hex');
 }
 
 export async function verifyComponentProvenance({
@@ -316,6 +429,7 @@ export async function verifyComponentProvenance({
   platform,
   expectedRepository,
   expectedCommit,
+  payloadRoot,
 }) {
   const label = `${component} provenance`;
   const value = await readJson(sidecar, label);
@@ -335,6 +449,31 @@ export async function verifyComponentProvenance({
   const recorded = requireMatch(value.artifact?.sha256, SHA256, `${label}.artifact.sha256`);
   const actual = await fileSha256(binary);
   if (recorded !== actual) throw new Error(`${label} binary SHA-256 mismatch: ${recorded} != ${actual}`);
+  // The binary is not the whole tool. Check the recorded payload digests against
+  // what actually arrived, so a package cannot keep the official configuration or
+  // implementation library while installing our front end: an absent payload is a
+  // mismatch, not an unconstrained one.
+  const payloads = value.payloads;
+  if (!Array.isArray(payloads)) {
+    throw new Error(`${label}.payloads must be an array of {path,type,sha256}`);
+  }
+  requireToolPayloads(component,platform,payloads);
+  if(component==='hle')await requireHleClosure(payloadRoot||path.dirname(binary),platform);
+  for (const entry of payloads) {
+    const relative = requireString(entry?.path, `${label} payload path`);
+    if (entry?.type !== 'file' && entry?.type !== 'directory') {
+      throw new Error(`${label} payload ${relative} has invalid type: ${entry?.type}`);
+    }
+    const expected = requireMatch(entry.sha256, SHA256, `${label} payload ${relative} sha256`);
+    const target = await safePayloadPath(payloadRoot || path.dirname(binary), relative);
+    const stat = await fs.lstat(target).catch(e=>{if(e.code==='ENOENT')return null;throw e;});
+    if(stat && (entry.type==='directory' ? !stat.isDirectory() : !stat.isFile())) throw new Error(`${label} payload type mismatch: ${relative}`);
+    const landed = await payloadDigest(target);
+    if (landed === null) throw new Error(`${label} payload is missing beside the artifact: ${relative}`);
+    if (landed !== expected) {
+      throw new Error(`${label} payload ${relative} differs from the recorded content: ${landed} != ${expected}`);
+    }
+  }
   return value;
 }
 

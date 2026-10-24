@@ -6,7 +6,7 @@ import {writeStdProvenance} from '../../lib/provenance.mjs';
 import {assertRuntimeCommonCache, assertRuntimeSplit} from '../../lib/runtime-split.mjs';
 import {runGcUnitLanguageTests} from '../gc-unit-gate.mjs';
 import {installPath, TARGET_TRIPLE} from '../../toolchain/mingw.mjs';
-import {copyContents, opensslLibPath, runBuildPy, windowsCrossArgs} from './common.mjs';
+import {bootstrapHostSdk, copyContents, opensslLibPath, runBuildPy, windowsCrossArgs} from './common.mjs';
 
 export function shouldRunGcUnitLanguageTests(env = process.env) {
   return !env.CJCJ_SRCBUILD_VERIFIER_REPORT_ACTIVE;
@@ -24,12 +24,11 @@ export async function run(config) {
   await stage('stdlib', async () => {
     if (process.env.CANGJIE_BUILD_DRY_RUN !== '1') {
       assertRuntimeSplit({
-        hostSdk: process.env.CJCJ_SRCBUILD_HOST_SDK,
+        hostSdk: bootstrapHostSdk(config),
         targetSdk: compilerOutput,
         target: config.target,
       });
     }
-    await runBuildPy(config, stdlibRoot, ['clean'], {stageName: 'stdlib.clean.host'});
     await runBuildPy(config, stdlibRoot, [
       'build', '-t', config.buildType, '--target', 'native',
       ...nativeTargetLibs.map(directory => `--target-lib=${directory}`),
@@ -48,10 +47,11 @@ export async function run(config) {
     // Report-mode output is quarantined and must never be executed as a
     // product.  The formal build path still runs this gate; diagnostic step 19
     // stops after compiling/installing every stdlib module and inventorying it.
-    if (shouldRunGcUnitLanguageTests()) await runGcUnitLanguageTests(config, compilerOutput);
+    if (process.env.CANGJIE_BUILD_DRY_RUN !== '1' && shouldRunGcUnitLanguageTests()) await runGcUnitLanguageTests(config, compilerOutput,
+      process.env.CJCJ_NATIVE_RUNTIME_INSTALL ? {source:process.env.CJCJ_NATIVE_RUNTIME_SOURCE
+        || path.join(process.env.CJCJ_NATIVE_RUNTIME_INSTALL,'share/runtime-build')} : {});
     if (!config.target.spec.crossCompile) return;
 
-    await runBuildPy(config, stdlibRoot, ['clean'], {stageName: 'stdlib.clean.windows'});
     const mingwLib = path.join(installPath(config.buildRoot), TARGET_TRIPLE, 'lib');
     await runBuildPy(config, stdlibRoot, [
       'build', '-t', config.crossBuildType,

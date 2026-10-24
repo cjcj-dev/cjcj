@@ -1,6 +1,7 @@
 import fs from 'node:fs';
+import {nativeSourceRoute} from './native-selection.mjs';
 import {parseArgs} from 'node:util';
-import {sourceBuildCells} from '../../build/lib/targets.mjs';
+import {sourceBuildCells, CROSS_STD_BUILDS} from '../../build/lib/targets.mjs';
 
 try {
   const {values} = parseArgs({options: {
@@ -8,7 +9,7 @@ try {
     single: {type: 'boolean', default: false},
     'require-ready': {type: 'boolean', default: false},
   }});
-  const cells = sourceBuildCells();
+  const cells = sourceBuildCells({nativeInputs:nativeSourceRoute()});
   const requested = values.targets.trim();
   const wanted = !requested || requested === 'all'
     ? cells.map(cell => cell.target) : requested.split(',').map(key => key.trim());
@@ -24,6 +25,11 @@ try {
   if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary);
   const outputs = {
     cells: JSON.stringify({include: selected}),
+    ios_targets: JSON.stringify(CROSS_STD_BUILDS.filter(row => row.family === 'ios' && selected.some(cell => cell.target === row.target)).map(row => row.runtime_target)),
+    ...Object.fromEntries(['ohos', 'ios'].map(family => [`${family}_matrix`, JSON.stringify({include:
+      CROSS_STD_BUILDS.filter(row => row.family === family && selected.some(cell => cell.target === row.target))
+        .map(row => ({...row, runner: selected.find(cell => cell.target === row.target).runner})),
+    })])),
     matrix: JSON.stringify({include: runnable}),
     blocked: JSON.stringify({include: blocked}),
     has_runnable: String(runnable.length > 0),

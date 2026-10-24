@@ -4,12 +4,14 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import {resolveOfficialSdkRoot} from '../lib/config.mjs';
 import {
   classifyProvenanceText,
   collectContentFindings,
   inspectPackagedLineage,
   listPackagedArtifacts,
   pinnedOfficialSdkRoot,
+  readHostSdkPinToolchain,
 } from '../lib/package-lineage.mjs';
 
 const TUPLE = 'linux_x86_64_cjnative';
@@ -18,6 +20,31 @@ const STD = 'b'.repeat(40);
 const DYE = `rebuilt-final\0CJCJ-COMMIT:${STAGE2}\0g_cjStoreBadMask\0CJRT-COMMIT:${STD}\0`;
 
 const digest = contents => crypto.createHash('sha256').update(contents).digest('hex');
+
+test('default lineage reference selects the independently declared execution host SDK', async () => {
+  const versions = {
+    'linux-x64': 'nightly-' + '1.3.0-alpha.20261009001050',
+    'linux-arm64': 'nightly-' + '1.3.0-alpha.20260925001050',
+    'darwin-x64': 'nightly-' + '1.3.0-alpha.20260925001050',
+    'darwin-arm64': 'nightly-' + '1.3.0-alpha.20260925001050',
+    'win32-x64': 'nightly-' + '1.3.0-alpha.20260925001050',
+  };
+  const expected = versions[`${process.platform}-${process.arch}`];
+  assert.ok(expected, 'execution host must have an independent SDK declaration');
+  const actual = await pinnedOfficialSdkRoot();
+  console.log(`ASSERT_LINEAGE_HOST_REFERENCE actual=${actual} expected=${expected}`);
+  assert.equal(actual, path.join(os.homedir(), '.cjv', 'toolchains', expected));
+});
+
+test('lineage reference retains the custom pinFile API and platform override', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'lineage-pin-'));
+  t.after(() => fs.rm(root, {recursive: true, force: true}));
+  const pinFile = path.join(root, 'pin.env');
+  await fs.writeFile(pinFile, 'CJCJ_TOOLCHAIN=nightly-custom\nCJCJ_TOOLCHAIN_LINUX_X86_64=nightly-linux-custom\n');
+  const expected = process.platform === 'linux' && process.arch === 'x64' ? 'nightly-linux-custom' : 'nightly-custom';
+  assert.equal(await readHostSdkPinToolchain(pinFile), expected);
+  assert.equal(await pinnedOfficialSdkRoot(pinFile), path.join(os.homedir(), '.cjv', 'toolchains', expected));
+});
 
 async function write(root, relative, contents, mode) {
   const file = path.join(root, relative);
@@ -64,13 +91,13 @@ async function miniTree(kind) {
 }
 
 async function copyOfficialStdModules(dest) {
-  const official = await pinnedOfficialSdkRoot();
+  const official = resolveOfficialSdkRoot() ?? await pinnedOfficialSdkRoot();
   const srcModules = path.join(official, 'modules');
   await fs.cp(srcModules, path.join(dest, 'modules'), {recursive: true});
 }
 
 test('pinned official SDK supplies the lineage comparison input', async () => {
-  const official = await pinnedOfficialSdkRoot();
+  const official = resolveOfficialSdkRoot() ?? await pinnedOfficialSdkRoot();
   const installed = await fs.stat(official).catch(error => {
     if (error.code === 'ENOENT') return null;
     throw error;

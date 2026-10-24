@@ -19,6 +19,65 @@ name: Release matrix
 on:
   workflow_dispatch:
     inputs:
+      native_runtime_artifact:
+        description: Existing native-runtime-install artifact prefix
+        type: string
+        required: false
+        default: ''
+      native_runtime_run_id:
+        description: Frozen producer run for native runtime installation
+        type: string
+        required: false
+        default: ''
+      native_llvm_ref:
+        description: Explicit paired LLVM full commit
+        type: string
+        required: false
+        default: ''
+      native_runtime_ref:
+        description: Explicit paired runtime full commit
+        type: string
+        required: false
+        default: ''
+      native_host_version:
+        description: Exact official bootstrap host version for this pair
+        type: string
+        required: false
+        default: ''
+      shim_source_selection:
+        description: Cjo header source repository and full commit JSON; private fixed sources require reachable repositories
+        type: string
+        required: false
+        default: "{}"
+      native_source_selection:
+        description: Explicit native source repository and full commit JSON; empty preserves fixed defaults
+        type: string
+        required: false
+        default: '{}'
+      native_build_inputs_artifact:
+        description: Optional native-cjdb source/dependency artifact prefix; runs the existing producer before SDK configuration
+        type: string
+        required: false
+        default: ''
+      native_build_inputs_run_id:
+        description: Original run containing native-cjdb.json and its real dependencies
+        type: string
+        required: false
+        default: ''
+      source_selection:
+        description: Ordinary build repository options JSON, including explicit full stdx url/tag; empty keeps defaults
+        type: string
+        required: false
+        default: '{}'
+      native_inputs_artifact:
+        description: Reviewed complete native installation artifact prefix, suffixed by source target
+        required: true
+        type: string
+      native_inputs_run_id:
+        description: Original native installation producer run
+        required: true
+        type: string
+
       version:
         description: "Package version, e.g. 0.0.2"
         required: true
@@ -60,6 +119,19 @@ permissions:
 concurrency:
   group: release-matrix-${{ github.ref }}-${{ inputs.platforms }}
   cancel-in-progress: false
+
+env:
+  CJCJ_NATIVE_RUNTIME_ARTIFACT: ${{ inputs.native_runtime_artifact }}
+  CJCJ_NATIVE_RUNTIME_RUN_ID: ${{ inputs.native_runtime_run_id }}
+  CJCJ_NATIVE_LLVM_REF: ${{ inputs.native_llvm_ref }}
+  CJCJ_NATIVE_RUNTIME_REF: ${{ inputs.native_runtime_ref }}
+  CJCJ_NATIVE_HOST_VERSION: ${{ inputs.native_host_version }}
+  CJCJ_NATIVE_INPUTS_ARTIFACT: ${{ inputs.native_inputs_artifact }}
+  CJCJ_NATIVE_INPUTS_RUN_ID: ${{ inputs.native_inputs_run_id }}
+  CJCJ_NATIVE_BUILD_INPUTS_ARTIFACT: ${{ inputs.native_build_inputs_artifact }}
+  CJCJ_NATIVE_BUILD_INPUTS_RUN_ID: ${{ inputs.native_build_inputs_run_id }}
+  CJCJ_NATIVE_SOURCE_SELECTION: ${{ inputs.native_source_selection }}
+  CJCJ_SOURCE_SELECTION: ${{ inputs.source_selection }}
 
 jobs:
   plan:
@@ -147,7 +219,22 @@ jobs:
       matrix: ${{ fromJson(needs.plan.outputs.source_matrix) }}
     uses: ./.github/workflows/srcbuild.yml
     with:
+      cangjie_ref: ${{ inputs.version }}
+      native_build_inputs_artifact: ${{ inputs.native_build_inputs_artifact }}
+      native_build_inputs_run_id: ${{ inputs.native_build_inputs_run_id }}
+      source_selection: ${{ inputs.source_selection }}
+      native_inputs_artifact: ${{ inputs.native_inputs_artifact }}
+      shim_source_selection: ${{ inputs.shim_source_selection }}
+      native_source_selection: ${{ inputs.native_source_selection }}
+      native_inputs_run_id: ${{ inputs.native_inputs_run_id }}
+      native_runtime_artifact: ${{ inputs.native_runtime_artifact }}
+      native_runtime_run_id: ${{ inputs.native_runtime_run_id }}
+      native_llvm_ref: ${{ inputs.native_llvm_ref }}
+      native_runtime_ref: ${{ inputs.native_runtime_ref }}
+      native_host_version: ${{ inputs.native_host_version }}
       build_android: ${{ matrix.build_android || false }}
+      build_ohos: ${{ matrix.build_ohos || false }}
+      build_ios: ${{ matrix.build_ios || false }}
       build_type: ${{ inputs.build_type }}
       dry_run: ${{ inputs.dry_run }}
       runtime_ref: ${{ inputs.runtime_ref }}
@@ -175,6 +262,9 @@ jobs:
     if: needs.plan.outputs.windows_side == 'true'
     uses: ./.github/workflows/build-windows-runtime.yml
     with:
+      native_llvm_ref: ${{ inputs.native_llvm_ref }}
+      native_runtime_ref: ${{ inputs.native_runtime_ref }}
+      native_host_version: ${{ inputs.native_host_version }}
       version: ${{ inputs.version }}
       dry_run: ${{ inputs.dry_run }}
       runtime_ref: ${{ inputs.runtime_ref }}
@@ -192,11 +282,14 @@ jobs:
       matrix: ${{ fromJson(needs.plan.outputs.package_matrix) }}
     uses: ./.github/workflows/build-release-package.yml
     with:
+      native_source_selection: ${{ inputs.native_source_selection }}
+      native_llvm_ref: ${{ inputs.native_llvm_ref }}
+      native_runtime_ref: ${{ inputs.native_runtime_ref }}
+      native_host_version: ${{ inputs.native_host_version }}
       runner: ${{ matrix.runner }}
       platform: ${{ matrix.platform }}
       llvm_platform: ${{ matrix.llvm_platform }}
       sdk_runtime_dir: ${{ matrix.sdk_runtime_dir }}
-      compiler_artifact: ${{ matrix.compiler_artifact }}
       std_artifact: ${{ matrix.std_artifact }}
       cross_std_artifacts: ${{ matrix.cross_std_artifacts }}
       release_key: ${{ matrix.release_key }}

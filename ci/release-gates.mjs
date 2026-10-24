@@ -1,5 +1,6 @@
-#!/usr/bin/env node
+#!/usr/bin/env zx
 
+import {selectedFreezePins} from './native-freeze-inputs.mjs';
 import crypto from 'node:crypto';
 import {platformRequirements, platformEvidence, g10Evidence} from './release-run-evidence.mjs';
 import {load as loadYaml} from './vendor/js-yaml/js-yaml.mjs';
@@ -420,6 +421,18 @@ async function discoverEvidenceContext(gate, context) {
   return {...context, evidence};
 }
 
+function declaredPinValues(pins) {
+  return {
+    RUNTIME_REF: pins.runtime.RUNTIME_REF,
+    LLVM_SHA: pins.llvm.LLVM_SHA,
+    CANGJIE_COMPILER_SHA: pins.llvm.CANGJIE_COMPILER_SHA,
+    COMPILER_REF: pins.source.COMPILER_REF,
+    TOOLS_REF: pins.source.TOOLS_REF,
+    STDX_REF: pins.source.STDX_REF,
+    CJPM_FORK_REF: pins.cjpm.CJPM_FORK_REF,
+  };
+}
+
 async function evaluateG1(context) {
   const freezeFile = context.freeze || await defaultFreezePath(context);
   let text;
@@ -437,15 +450,7 @@ async function evaluateG1(context) {
   }
   const pins = await loadPins(context);
   const head = git(context, ['rev-parse', 'HEAD']);
-  const requiredPins = {
-    RUNTIME_REF: pins.runtime.RUNTIME_REF,
-    LLVM_SHA: pins.llvm.LLVM_SHA,
-    CANGJIE_COMPILER_SHA: pins.llvm.CANGJIE_COMPILER_SHA,
-    COMPILER_REF: pins.source.COMPILER_REF,
-    TOOLS_REF: pins.source.TOOLS_REF,
-    STDX_REF: pins.source.STDX_REF,
-    CJPM_FORK_REF: pins.cjpm.CJPM_FORK_REF,
-  };
+  const requiredPins = declaredPinValues(pins);
   const failures = [];
   if (!/^[0-9a-f]{40}-\d{8}T\d{6}Z-\d+$/.test(String(freeze.campaign_id || ''))) {
     failures.push('campaign_id');
@@ -454,7 +459,9 @@ async function evaluateG1(context) {
     failures.push(`cjcj_head_sha=${freeze.cjcj_head_sha || '<missing>'}`);
   }
   if (!String(freeze.workflow_ref || '').trim() || String(freeze.workflow_ref).includes('<')) failures.push('workflow_ref');
-  for (const [name, expected] of Object.entries(requiredPins)) {
+  let expectedPins=requiredPins;
+  try { expectedPins=selectedFreezePins(freeze,requiredPins); } catch(error) { failures.push(error.message); }
+  for (const [name, expected] of Object.entries(expectedPins)) {
     if (!SHA40.test(String(expected || ''))) failures.push(`${name}:pin-file-invalid`);
     const values = nestedValues(freeze, name);
     if (values.length !== 1 || values[0] !== expected) failures.push(`${name}:freeze-mismatch`);
@@ -615,7 +622,47 @@ function parseG2Json(text, label) {
   }
 }
 
+async function capturedRuntimeInputFailures(identity,identityFile) {
+  if(!identity.inputs)return [];
+  const input=identity.inputs.runtime;
+  if(Object.keys(identity.inputs).join(',')!=='runtime'||!input||Object.keys(input).sort().join(',')!=='path,sha256'
+    ||input.path!=='RUNTIME-INPUTS.json'||!SHA256.test(input.sha256||''))return ['invalid original runtime input locator'];
+  try {
+    const file=path.join(path.dirname(identityFile),input.path),bytes=await fs.readFile(file);
+    if(crypto.createHash('sha256').update(bytes).digest('hex')!==input.sha256)return ['original runtime input bytes changed'];
+    const facts=JSON.parse(bytes);
+    if(facts.source?.status!=='resolved'||!SHA40.test(facts.source.commit||'')||!facts.source.repository
+      ||!Array.isArray(facts.artifacts)||facts.artifacts.length<2)return ['original runtime source/pair missing'];
+    if(!facts.build?.configuration)return ['original runtime configuration missing'];
+    for(const name of ['runtime_dynamic','runtime_static']) {
+      const artifact=identity.artifacts[name];
+      const found=facts.artifacts.filter(row=>typeof row.path==='string'&&!path.isAbsolute(row.path)&&!row.path.includes('\\')
+        &&!row.path.split('/').includes('..')&&artifact.artifact_path.endsWith('/'+row.path)
+        &&row.sha256===artifact.sha256);
+      if(found.length!==1||facts.source.commit!==artifact.source_commit||facts.embedded_stamp!==artifact.provenance_stamp)
+        return ['captured runtime differs from original source/materialization/pair: '+name];
+    }
+    return [];
+  }catch(error){return ['original runtime input unreadable: '+error.message];}
+}
+
 async function evaluateG2(context) {
+  let freeze, selectedPins;
+  const freezeFile=context.freeze||(context.evidence?path.join(path.dirname(path.resolve(context.evidence)),'FREEZE.json'):'');
+  if(freezeFile) {
+    try { freeze=JSON.parse(await fs.readFile(freezeFile,'utf8')); }
+    catch(error) { if(error.code!=='ENOENT'||context.freeze)return gateResult('G2','NOT_MET','freeze unreadable: '+error.message); }
+    if(freeze?.selected_inputs) {
+      try {selectedPins=selectedFreezePins(freeze,declaredPinValues(await loadPins(context)));}
+      catch(error){return gateResult('G2','NOT_MET',error.message);}
+      if(context.runtimeRef&&context.runtimeRef!==selectedPins.RUNTIME_REF)return gateResult('G2','NOT_MET','explicit runtime differs from freeze');
+      for(const [name,value]of Object.entries(selectedPins)) {
+        const values=nestedValues(freeze,name);
+        if(values.length!==1||values[0]!==value)return gateResult('G2','NOT_MET',name+':freeze-mismatch');
+      }
+      context={...context,runtimeRef:selectedPins.RUNTIME_REF};
+    }
+  }
   const ancestry = await loaderlifeResult(context, 'G2');
   if (ancestry.status !== 'MET') return ancestry;
   if (!context.evidence) {
@@ -644,18 +691,21 @@ async function evaluateG2(context) {
     return gateResult('G2', schemaState.status, `${ancestry.value}; archive=valid; ${schemaState.detail}`);
   }
 
-  const failures = [];
+  const runtimeFailures=await capturedRuntimeInputFailures(identity,identityFile);
+  const failures = [...runtimeFailures];
   if (!identity.campaign_id.startsWith(`${identity.cjcj_head_sha}-`)) {
     failures.push('campaign_id does not bind cjcj_head_sha');
   }
   if (run.head_sha !== identity.cjcj_head_sha) {
     failures.push(`archive head=${run.head_sha || '<missing>'} identity head=${identity.cjcj_head_sha}`);
   }
+  if(selectedPins&&(freeze.cjcj_head_sha!==identity.cjcj_head_sha||freeze.campaign_id!==identity.campaign_id))
+    failures.push('selected freeze differs from captured campaign/head');
   const expectedCommits = {
-    runtime_dynamic: pins.runtime.RUNTIME_REF,
-    runtime_static: pins.runtime.RUNTIME_REF,
-    llvm_llc: pins.llvm.LLVM_SHA,
-    llvm_opt: pins.llvm.LLVM_SHA,
+    runtime_dynamic: selectedPins?.RUNTIME_REF||pins.runtime.RUNTIME_REF,
+    runtime_static: selectedPins?.RUNTIME_REF||pins.runtime.RUNTIME_REF,
+    llvm_llc: selectedPins?.LLVM_SHA||pins.llvm.LLVM_SHA,
+    llvm_opt: selectedPins?.LLVM_SHA||pins.llvm.LLVM_SHA,
     cjcj: identity.cjcj_head_sha,
   };
   const stampPrefixes = {
@@ -674,7 +724,9 @@ async function evaluateG2(context) {
     }
     if (artifact.source_dirty !== false) failures.push(`${name}.source_dirty=${artifact.source_dirty}`);
     const marker = `${stampPrefixes[name]}:${artifact.source_commit}`;
-    if (!artifact.provenance_stamp.includes(marker)) failures.push(`${name}.provenance_stamp lacks ${marker}`);
+    const materialized=name.startsWith('runtime_')&&/^CJRT-COMMIT:src-[0-9a-f]{64}$/.test(artifact.provenance_stamp)
+      &&identity.inputs?.runtime&&runtimeFailures.length===0;
+    if (!materialized&&!artifact.provenance_stamp.includes(marker)) failures.push(`${name}.provenance_stamp lacks ${marker}`);
     if (artifact.provenance_stamp.includes('-dirty')) failures.push(`${name}.provenance_stamp is dirty`);
   }
   if (failures.length) {
@@ -686,11 +738,18 @@ async function evaluateG2(context) {
 
 function runTests(context, files) {
   if (context.ref) throw new GateInputError('UNKNOWN', 'targeted node tests cannot run against --ref without a checkout');
-  const result = spawn(process.execPath, ['--test', '--test-timeout=300000', ...files], {cwd: context.repo});
+  // A gate invoked by a test must start a fresh test runner. Inheriting Node's
+  // worker context can return its binary reporter protocol and rc0 even when
+  // the nested tests failed, so it cannot establish gate success.
+  const env = {...process.env};
+  delete env.NODE_TEST_CONTEXT;
+  const result = spawn(process.execPath, ['--test', '--test-reporter=tap', '--test-timeout=300000', ...files], {cwd: context.repo, env});
   if (result.error) throw new GateInputError('UNKNOWN', `node test runner unavailable: ${result.error.message}`);
   if (result.status !== 0) return {status: 'NOT_MET', detail: commandFailure(result)};
   const pass = result.stdout.match(/^(?:#|ℹ)\s*pass\s+(\d+)$/m)?.[1] || '?';
   const fail = result.stdout.match(/^(?:#|ℹ)\s*fail\s+(\d+)$/m)?.[1] || '?';
+  if (!/^\d+$/.test(pass) || Number(pass) < 1 || fail !== '0')
+    return {status:'NOT_MET', detail:`test execution not established: pass=${pass} fail=${fail}`};
   return {status: 'MET', detail: `tests pass=${pass} fail=${fail}`};
 }
 
@@ -723,14 +782,22 @@ async function evaluateG5(context) {
     readFile(context, 'scripts/check_packaged_std.mjs'),
     readFile(context, '.github/workflows/build-release-package.yml'),
   ]);
+  const [nativeConsumer, composer] = workflow.includes('run: node ci/release/compose-package.mjs')
+    ? await Promise.all([readFile(context, 'ci/release/verify_native_release.mjs'), readFile(context, 'ci/release/compose-package.mjs')]) : ['', ''];
   const classes = checker.match(/const CLASS_NAMES\s*=\s*\[([^\]]+)\]/)?.[1]
     ?.match(/['"][^'"]+['"]/g)?.map(value => value.slice(1, -1)) || [];
   const expectedClasses = ['cjo', 'bc', 'static-ffi', 'shared', 'provenance'];
   const invocationCount = workflow.match(/node scripts\/check_packaged_std\.mjs/g)?.length || 0;
   const block = stepBlock(workflow, 'Verify packaged standard library');
-  const staticPass = JSON.stringify(classes) === JSON.stringify(expectedClasses) &&
+  const native = workflow.includes('run: node ci/release/compose-package.mjs')
+    && composer.includes('await verifyNativeRelease(options, env)') && composer.includes('await archiveInstall(')
+    && composer.includes("new URL('./verify_native_release.mjs'")
+    && nativeConsumer.includes('scripts/check_packaged_std.mjs')
+    && nativeConsumer.includes('signal: AbortSignal.timeout(120000)')
+    && ['--sdk', '--std', '--platform'].every(value => nativeConsumer.includes(value));
+  const staticPass = JSON.stringify(classes) === JSON.stringify(expectedClasses) && (native ||
     invocationCount === 1 && /if:\s*inputs\.verify/.test(block) && /timeout-minutes:\s*2/.test(block) &&
-    !/continue-on-error/.test(block) && ['--sdk', '--std', '--platform'].every(value => block.includes(value));
+    !/continue-on-error/.test(block) && ['--sdk', '--std', '--platform'].every(value => block.includes(value)));
   if (!staticPass) {
     return gateResult('G5', 'NOT_MET',
       `classes=${classes.join(',') || '<none>'} workflow_consumers=${invocationCount} bounded=${/timeout-minutes:\s*2/.test(block)}`);
@@ -1430,7 +1497,7 @@ async function releaseScope(context) {
     const readiness = releasePlatformReadiness(key);
     const {spec} = getTarget(platform.host);
     return {
-      key, host: platform.host, status: readiness.status, reasons: readiness.reasons,
+      key, host: platform.host, packageDeclared: readiness.packageDeclared, status: readiness.status, reasons: readiness.reasons,
       llvm_platform: spec.llvmPlatform,
       std_tuples: [...new Set([spec.runtimeTuple, ...platform.crossTuples])],
     };
@@ -1449,9 +1516,11 @@ async function releaseScope(context) {
     .filter(([, job]) => job?.uses === './.github/workflows/build-release-package.yml')
     .map(([id, job]) => ({id, key: job.with?.release_key, host: job.with?.platform,
       llvm_platform: job.with?.llvm_platform}));
-  const expected = platforms.filter(platform => platform.status === 'buildable');
+  // Static workflow declarations include source-blocked recipes. Admission is
+  // still controlled by source readiness; evidence covers every registry row.
+  const expected = platforms.filter(platform => platform.packageDeclared);
   const failures = [];
-  if (!platforms.length || !expected.length) failures.push('empty release platform/buildable set');
+  if (!platforms.length || !expected.length) failures.push('empty release platform/declared package set');
   for (const platform of expected) {
     const matches = jobs.filter(job => job.key === platform.key);
     if (matches.length !== 1) failures.push(`${platform.key}: expected one package job, found ${matches.length}`);
@@ -1526,11 +1595,16 @@ async function evaluateG15(context) {
     readFile(context, '.github/workflows/build-release-package.yml'),
     releaseScope(context),
   ]);
+  const [nativeConsumer, composer] = packageWorkflow.includes('run: node ci/release/compose-package.mjs')
+    ? await Promise.all([readFile(context, 'ci/release/verify_native_release.mjs'), readFile(context, 'ci/release/compose-package.mjs')]) : ['', ''];
   const version = python.match(/RELEASE_PYTHON_VERSION\s*=\s*['"](3\.11\.\d+)['"]/)?.[1] || '';
   const bundleArgs = packageWorkflow.match(/--python-bundle/g)?.length || 0;
   const verifiers = packageWorkflow.match(/verify_packaged_cjdb\.mjs/g)?.length || 0;
   const packageJobs = scope.jobs.length;
-  const structural = Boolean(version) && bundleArgs === 2 && verifiers === 2 && scope.failures.length === 0;
+  const native = packageWorkflow.includes('run: node ci/release/compose-package.mjs')
+    && composer.includes('await verifyNativeRelease(options, env)') && composer.includes('await archiveInstall(')
+    && nativeConsumer.includes('scripts/verify_packaged_cjdb.mjs');
+  const structural = Boolean(version) && (native || bundleArgs === 2 && verifiers === 2) && scope.failures.length === 0;
   if (!structural) {
     return gateResult('G15', 'NOT_MET',
       `python=${version || '<missing>'} python_bundle_args=${bundleArgs} cjdb_verifiers=${verifiers} package_jobs=${packageJobs}; ${scope.failures.join('; ')}`, {scope});

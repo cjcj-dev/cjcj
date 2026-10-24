@@ -13,9 +13,9 @@ TOOLS = {'cjpm': 'tools/bin/cjpm', 'cjfmt': 'tools/bin/cjfmt',
          'cjlint': 'tools/bin/cjlint', 'cjcov': 'tools/bin/cjcov',
          'cjdb': 'tools/bin/cjdb', 'LSPServer': 'tools/bin/LSPServer',
          'cjcompat': 'tools/bin/cjcompat', 'hle': 'tools/bin/hle',
-         'cjtrace-recover': 'tools/bin/cjtrace-recover'}
-# #521 owns replacement of these managed tools. Readiness is not compiler identity.
-COLOURED_TOOL_DEBT = set(TOOLS) - {'cjdb'}
+         'cjtrace-recover': 'tools/bin/cjtrace-recover', 'cjprof': 'tools/bin/cjprof'}
+# Target tools require their actual producer/install facts as well as a probe.
+TARGET_TOOLS = set(TOOLS) - {'cjdb'}
 
 
 def sha(path):
@@ -44,6 +44,12 @@ def apply_environment(sdk, env, manifest):
         for rel, expected in files.items():
             if sha(Path(root) / rel) != expected:
                 raise ValueError('environment artifact changed: ' + str(Path(root) / rel))
+    if manifest.get('arm') == 'bootstrap' and manifest.get('tools'):
+        current = json.loads(subprocess.check_output([
+            'node', str(Path(__file__).with_name('tool-readiness.mjs')), str(sdk)], text=True))
+        for name in TARGET_TOOLS:
+            if manifest['tools'].get(name, {}).get('ready') and not current.get(name, {}).get('available'):
+                raise ValueError('tool input changed: ' + name + ': ' + current.get(name, {}).get('reason', 'missing'))
     env['LD_LIBRARY_PATH'] = str(sdk / 'third_party/llvm/lib') + ':' + env.get('LD_LIBRARY_PATH', '')
     for key in ('JAVA_HOME', 'CANGJIE_STDX_PATH'):
         env.pop(key, None)
@@ -54,7 +60,7 @@ def apply_environment(sdk, env, manifest):
     return env
 
 
-def probe(name, sdk, env, output, arm):
+def probe(name, sdk, env, output, arm, qualifications):
     path = sdk / TOOLS[name]
     record = {'path': str(path), 'sha256': sha(path) if path.is_file() else None}
     if not path.is_file():
@@ -74,9 +80,11 @@ def probe(name, sdk, env, output, arm):
     dynamic = subprocess.run(['readelf', '-d', str(path)], capture_output=True, text=True, check=False)
     (output / (name + '.dynamic.txt')).write_text(dynamic.stdout + dynamic.stderr)
     reason = 'probe completed' if rc == 0 else 'probe failed (see log); not semantic acceptance'
-    if arm == 'bootstrap' and name in COLOURED_TOOL_DEBT:
-        reason = 'cjcj#521: managed tool producer not qualified for coloured runtime'
-    return name, dict(record, ready=rc == 0 and not (arm == 'bootstrap' and name in COLOURED_TOOL_DEBT),
+    qualification = qualifications.get(name, {'ready': False, 'reason': 'target producer facts missing'})
+    target_ready = arm != 'bootstrap' or name not in TARGET_TOOLS or qualification.get('available') is True
+    if not target_ready:
+        reason = qualification['reason']
+    return name, dict(record, ready=rc == 0 and target_ready, qualification=qualification,
                       reason=reason, rc=rc, log=str(output / (name + '.log')))
 
 
@@ -125,8 +133,10 @@ def main():
                 'recipe_sha256': sha(Path(__file__)), 'variables': variables,
                 'artifacts': artifacts, 'readiness': readiness}
     env = apply_environment(sdk, load_environment(sdk), manifest)
+    qualifications = json.loads(subprocess.check_output([
+        'node', str(Path(__file__).with_name('tool-readiness.mjs')), str(sdk)], text=True)) if args.arm == 'bootstrap' else {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(TOOLS)) as pool:
-        futures = [pool.submit(probe, name, sdk, env, output, args.arm) for name in TOOLS]
+        futures = [pool.submit(probe, name, sdk, env, output, args.arm, qualifications) for name in TOOLS]
         manifest['tools'] = dict(f.result() for f in futures)
     (output / 'environment.json').write_text(json.dumps(manifest, indent=2) + '\n')
     print(json.dumps({'environment': str(output / 'environment.json'), 'readiness': readiness,

@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env zx
 
 // Fills the G2_IDENTITY.json skeleton that ci/generate-freeze.mjs writes.
 //
@@ -22,6 +22,9 @@ import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 
+import {compilerProducer, verifyCompiler} from './bootstrap/compiler_identity.mjs';
+import {sdkPlatform} from './bootstrap/sdk-platform.mjs';
+import {runtimeInputsForArtifact, RUNTIME_INPUTS} from '../build/lib/runtime-source-inputs.mjs';
 import {embeddedStamp} from '../build/lib/toolchain-identity.mjs';
 
 const SHA40 = /^[0-9a-f]{40}$/;
@@ -71,6 +74,9 @@ function usage() {
     'usage: node ci/capture-g2-identity.mjs --identity FILE --runtime-dynamic FILE --runtime-static FILE \\',
     '         --llvm-llc FILE --llvm-opt FILE --cjcj FILE --std FILE [source options]',
     '',
+    '--sdk DIR selects the actual retained compiler/LLVM and runtime/std from one installed SDK.',
+    'Use --identity plus --sdk, or the legacy explicit artifact arguments below.',
+    '',
     'required:',
     '  --identity FILE         the G2_IDENTITY.json written by ci/generate-freeze.mjs',
     ...G2_SLOTS.map(slot => `  ${slotFlag(slot.name).padEnd(22)}  artifact carrying the ${slot.prefix} stamp`),
@@ -86,7 +92,7 @@ function usage() {
 export function parseArguments(argv) {
   const artifacts = {};
   const sources = {};
-  const fields = new Map([['--identity', 'identity']]);
+  const fields = new Map([['--identity', 'identity'],['--sdk','sdk']]);
   for (const slot of G2_SLOTS) fields.set(slotFlag(slot.name), `artifact:${slot.name}`);
   for (const source of G2_SOURCES) fields.set(sourceFlag(source), `source:${source}`);
   const values = {identity: '', artifacts, sources};
@@ -97,7 +103,7 @@ export function parseArguments(argv) {
     const value = argv[index + 1];
     if (!value || value.startsWith('--')) throw new Error(`${argument} requires a value\n${usage()}`);
     const target = fields.get(argument);
-    if (target === 'identity') values.identity = value;
+    if (target === 'identity'||target==='sdk') values[target] = value;
     else if (target.startsWith('artifact:')) artifacts[target.slice('artifact:'.length)] = value;
     else sources[target.slice('source:'.length)] = value;
     index += 1;
@@ -126,7 +132,7 @@ function git(repo, args) {
 // and -- when the caller supplied the checkout -- cross-check the stamp against
 // that checkout's HEAD. Returns either the five recorded fields or the reasons
 // it refuses to record them; it never returns a partially guessed slot.
-async function measureSlot(slot, file, sourceDir) {
+async function measureSlot(slot, file, sourceDir, sdk = '', runtimeInputs = null) {
   const reasons = [];
   const resolved = path.resolve(file);
   let bytes;
@@ -150,11 +156,19 @@ async function measureSlot(slot, file, sourceDir) {
   const raw = stamps[0];
   const stampDirty = raw.endsWith(DIRTY_SUFFIX);
   const stampCommit = stampDirty ? raw.slice(0, -DIRTY_SUFFIX.length) : raw;
-  if (!SHA40.test(stampCommit)) {
+  const materialized=slot.source==='runtime'&&/^src-[0-9a-f]{64}$/.test(stampCommit);
+  if(materialized) {
+    if(!sdk||!runtimeInputs||!SHA40.test(runtimeInputs.source?.commit||''))return {reasons:[`${slot.name}: original installed RUNTIME-INPUTS required for materialized source`]};
+    try {
+      await runtimeInputsForArtifact(sdk,{path:path.relative(sdk,resolved).split(path.sep).join('/'),sha256:sha256(bytes)},
+        {repository:runtimeInputs.source?.repository,commit:runtimeInputs.source?.commit,stamp:slot.prefix+':'+raw});
+    }catch(error){return {reasons:[`${slot.name}: ${error.message}`]};}
+  }
+  if (!materialized&&!SHA40.test(stampCommit)) {
     return {reasons: [`${slot.name}: ${slot.prefix}:${raw || '<empty>'} in ${resolved} is not a 40-character commit SHA`]};
   }
 
-  let sourceCommit = stampCommit;
+  let sourceCommit = materialized?runtimeInputs.source.commit:stampCommit;
   let sourceDirty = stampDirty;
   if (sourceDir) {
     const repo = path.resolve(sourceDir);
@@ -162,7 +176,7 @@ async function measureSlot(slot, file, sourceDir) {
     const status = git(repo, ['status', '--porcelain=v1', '--untracked-files=normal']);
     if (!head.ok) reasons.push(`${slot.name}: cannot read ${sourceFlag(slot.source)} ${repo} HEAD: ${head.detail}`);
     else if (!SHA40.test(head.value)) reasons.push(`${slot.name}: ${repo} HEAD is not a full commit SHA: ${head.value}`);
-    else if (head.value !== stampCommit) {
+    else if (head.value !== sourceCommit) {
       reasons.push(`${slot.name}: ${slot.prefix}:${stampCommit} does not match ${repo} HEAD ${head.value}`);
     } else sourceCommit = head.value;
     if (!status.ok) reasons.push(`${slot.name}: cannot read ${repo} worktree state: ${status.detail}`);
@@ -221,8 +235,28 @@ async function writeAtomic(destination, contents) {
   }
 }
 
-export async function captureG2Identity({identity: identityFile, artifacts = {}, sources = {}}, now = new Date()) {
+export async function captureG2Identity({identity: identityFile, artifacts = {}, sources = {}, sdk = ''}, now = new Date()) {
   const reasons = [];
+  let runtimeInputs, runtimeBytes;
+  if(sdk) {
+    if(Object.keys(artifacts).length)throw new CaptureRefused(['--sdk cannot be combined with per-artifact paths']);
+    sdk=await fs.realpath(sdk);
+    const stage=await verifyCompiler(sdk),native=sdkPlatform(stage.platform);
+    const retained=async relative=>{
+      const entry=path.join(sdk,relative),recipe=(await fs.readFile(entry+'.entry','utf8')).trimEnd().split('\n');
+      if(recipe[0]!=='cjcj-sdk-entry-v1'||!recipe[2]||path.isAbsolute(recipe[2])||recipe[2].includes('\\')||recipe[2].split('/').includes('..'))
+        throw new CaptureRefused(['invalid installed LLVM entry '+relative]);
+      const product=await fs.realpath(path.join(sdk,recipe[2]));
+      if(!product.startsWith(sdk+path.sep))throw new CaptureRefused(['installed LLVM product escapes SDK']);
+      return product;
+    };
+    artifacts={runtime_dynamic:path.join(sdk,'runtime/lib',native.tuple,'libcangjie-runtime'+native.shared),
+      runtime_static:path.join(sdk,'lib',native.tuple,'libcangjie-runtime.a'),
+      llvm_llc:await retained('third_party/llvm/bin/llc'+native.exe),
+      llvm_opt:await retained('third_party/llvm/bin/opt'+native.exe),
+      cjcj:await compilerProducer(sdk),std:path.join(sdk,'lib',native.tuple,'libcangjie-std-core.a')};
+    runtimeBytes=await fs.readFile(path.join(sdk,RUNTIME_INPUTS));runtimeInputs=JSON.parse(runtimeBytes);
+  }
   if (!identityFile) reasons.push('--identity is required; it names the G2_IDENTITY.json to fill');
   for (const slot of G2_SLOTS) {
     if (!artifacts[slot.name]) reasons.push(`${slot.name}: ${slotFlag(slot.name)} was not supplied`);
@@ -247,7 +281,7 @@ export async function captureG2Identity({identity: identityFile, artifacts = {},
   // artifact leaves the record exactly as it was found.
   const measured = {};
   for (const slot of G2_SLOTS) {
-    const result = await measureSlot(slot, artifacts[slot.name], sources[slot.source] || '');
+    const result = await measureSlot(slot, artifacts[slot.name], sources[slot.source] || '',sdk,runtimeInputs);
     if (result.reasons) reasons.push(...result.reasons);
     else measured[slot.name] = Object.fromEntries(SLOT_FIELDS.map(field => [field, result.slot[field]]));
   }
@@ -258,7 +292,9 @@ export async function captureG2Identity({identity: identityFile, artifacts = {},
     captured_utc: utcStamp(now),
     status: 'READY',
     artifacts: Object.fromEntries(G2_SLOTS.map(slot => [slot.name, measured[slot.name]])),
+    ...(runtimeBytes?{inputs:{runtime:{path:RUNTIME_INPUTS,sha256:sha256(runtimeBytes)}}}:{}),
   };
+  if(runtimeBytes)await writeAtomic(path.join(path.dirname(file),RUNTIME_INPUTS),runtimeBytes);
   await writeAtomic(file, `${JSON.stringify(updated, null, 2)}\n`);
   return {identityFile: file, identity: updated};
 }

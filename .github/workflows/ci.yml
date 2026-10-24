@@ -5,6 +5,23 @@ on:
     branches: [master]
   pull_request:
   workflow_dispatch:
+    inputs:
+      native_sdk_version:
+        description: Fixed package version emitted by srcbuild-target source-package
+        type: string
+      native_sdk_run_id:
+        description: Run producing the native SDK package
+        type: string
+      native_inputs_artifact:
+        description: Complete native N/R/AST installations and paired build adapter artifact
+        type: string
+      native_inputs_run_id:
+        description: Run producing the fixed native input artifact
+        type: string
+
+permissions:
+  contents: read
+  actions: read
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -25,13 +42,12 @@ jobs:
         id: matrix
         run: node ci/target-matrix.mjs ci
 
-  lint:
-    name: Verify sources
+  static-checks:
+    name: Static source checks
     runs-on: ubuntu-slim
     timeout-minutes: 10
     steps:
-      - name: Checkout cjcj
-        uses: actions/checkout@v7
+      - uses: actions/checkout@v7
       - name: Run actionlint
         run: |
           bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
@@ -55,53 +71,95 @@ jobs:
         run: |
           find ci runtime_shim scripts -type f -name '*.mjs' -print0 \
             | xargs -0 -n1 node --check
-      # Driven by ci/test-manifest.mjs, never by a literal list here: the four
-      # steps this replaced named eight of the repository's twenty-eight test
-      # files, and the other twenty ran nowhere. ci/test-manifest.test.mjs holds
-      # both ends of that -- every test file must be in a manifest bucket, and
-      # this step must keep asking the manifest.
+
+  contract-plan:
+    runs-on: ubuntu-slim
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Export complete validated manifest plan
+        run: |
+          node ci/test-manifest.mjs list > "$RUNNER_TEMP/contract-files.txt"
+          node ci/contract-shards.mjs plan "$RUNNER_TEMP/contract-plan.json" "$RUNNER_TEMP/contract-files.txt"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: contract-plan
+          path: ${{ runner.temp }}/contract-plan.json
+          if-no-files-found: error
+
+  contracts:
+    name: Contracts group ${{ matrix.group }}
+    needs: contract-plan
+    runs-on: ubuntu-slim
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [0, 1, 2, 3]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: contract-plan
+          path: ${{ runner.temp }}/contract-plan
       - name: Install release contract dependencies
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq zip unzip clang lld libssl-dev python3 build-essential jq
-          npx --yes zx@8 --version
+          sudo apt-get update -qq && sudo apt-get install -y -qq zip unzip clang lld libssl-dev python3 build-essential git gdb jq cmake ninja-build
+          npm exec --yes --package=zx@8 -- node ci/test-zx.mjs prepare "$RUNNER_TEMP/test-zx.json"
+          npm ci --prefix ci/g1-parser --ignore-scripts --no-audit --no-fund
       # package-lineage compares package bytes with the official host SDK. Load
       # the consumer's pin, not the build job's independently loaded environment.
       - name: Install official lineage input
         shell: bash
         run: |
           source ci/host_sdk_pin.env
+          CJCJ_TOOLCHAIN="$(node ci/host-toolchain-pin.mjs)"
+          export CJCJ_TOOLCHAIN
           mkdir -p "$RUNNER_TEMP/lineage-cjv"
           curl -fsSL https://github.com/Zxilly/cjv/releases/download/v0.2.20/cjv_linux_amd64.tar.gz | tar -xz -C "$RUNNER_TEMP/lineage-cjv"
           cjv_bin=$(find "$RUNNER_TEMP/lineage-cjv" -type f -name cjv | head -1)
           "$cjv_bin" install "$CJCJ_TOOLCHAIN"
       - name: Prepare pinned runtime contract input
-        run: npx --yes zx@8 ci/prepare-runtime-test-input.mjs "$RUNNER_TEMP/runtime-contract-input"
+        run: node ci/test-zx.mjs run "$RUNNER_TEMP/test-zx-bin" npx --yes zx@8 ci/prepare-runtime-test-input.mjs "$RUNNER_TEMP/runtime-contract-input"
       - name: Test build and release contracts
         shell: bash
         env:
+          CONTRACT_GROUP: ${{ matrix.group }}
           RELEASE_EVIDENCE_TEST_ROOT: ${{ runner.temp }}/release-evidence-tests
+          STD_BARRIER_TEST_ROOT: ${{ runner.temp }}/std-barrier-tests
           CJCJ_TEST_EVIDENCE: ${{ runner.temp }}/srcbuild-driver-evidence
+          PRODUCER_EVIDENCE_TEST_ROOT: ${{ runner.temp }}/producer-evidence-tests
         run: |
-          mapfile -t FILES < <(node ci/test-manifest.mjs list)
-          echo "manifest gates ${#FILES[@]} test files"
-          # mapfile succeeds with zero lines if the manifest fails, and `node
-          # --test` with no file arguments falls back to its own discovery, which
-          # would pass while testing nothing.
-          test "${#FILES[@]}" -ge 85
-          # A hanging test would otherwise consume this job's whole
-          # timeout-minutes and end in "exceeded maximum execution time", which
-          # names no test. The bound makes the runner fail the specific test by
-          # name instead. It is not a way to pass over a hang -- a timeout here is
-          # a failure. 300s is ~150x the whole suite's normal 2s; a test that
-          # genuinely needs longer says so with its own {timeout}, which wins.
-          node --test --test-timeout=300000 "${FILES[@]}"
+          node ci/contract-shards.mjs run "$RUNNER_TEMP/contract-plan/contract-plan.json" "$CONTRACT_GROUP" "$RUNNER_TEMP/contract-result"
+      - name: Preserve contract group evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: contract-group-${{ matrix.group }}
+          path: ${{ runner.temp }}/contract-result
+          if-no-files-found: error
       - name: Preserve srcbuild driver evidence
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: srcbuild-driver-evidence
+          name: srcbuild-driver-evidence-${{ matrix.group }}
           path: ${{ runner.temp }}/srcbuild-driver-evidence
           if-no-files-found: warn
+      - name: Preserve producer qualification evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: producer-qualification-${{ matrix.group }}
+          path: ${{ runner.temp }}/producer-evidence-tests
+          if-no-files-found: warn
+          include-hidden-files: true
+
+  source-audits:
+    name: Pin reachability and source policy
+    runs-on: ubuntu-slim
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
       - name: Audit pin reachability
         run: node ci/pin-sweep.mjs --remote
       - name: Verify smoke assets
@@ -111,6 +169,31 @@ jobs:
           test -f ci/smoke/macro_demo/app/main.cj
       - name: Verify LLVM policy
         run: test -z "$(git ls-files 'ci/prebuilt/**' 'runtime_shim/prebuilt/**')"
+
+
+  lint:
+    name: Verify sources
+    if: always()
+    needs: [static-checks, contract-plan, contracts, source-audits]
+    runs-on: ubuntu-slim
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Require every source job to succeed
+        env:
+          REQUIRED_JOBS: ${{ toJSON(needs) }}
+        run: |
+          node -e 'const jobs=JSON.parse(process.env.REQUIRED_JOBS); if(Object.values(jobs).some(job=>job.result!=="success")) { console.error(jobs); process.exit(1); }'
+      - uses: actions/download-artifact@v8
+        with:
+          name: contract-plan
+          path: ${{ runner.temp }}/contract-plan
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: contract-group-*
+          path: ${{ runner.temp }}/contract-results
+      - name: Verify exact coverage and real Node outcomes
+        run: node ci/contract-shards.mjs summary "$RUNNER_TEMP/contract-plan/contract-plan.json" "$RUNNER_TEMP/contract-results"
 
   script-tests:
     name: Python and shell contracts
@@ -134,7 +217,7 @@ jobs:
           path: ${{ runner.temp }}/script-tests
 
   package-tests:
-    name: Cangjie package tests (official host)
+    name: Cangjie package tests (native target SDK)
     needs: fixed-llvm-tools
     runs-on: ubuntu-24.04
     timeout-minutes: 90
@@ -149,44 +232,32 @@ jobs:
         with:
           name: fixed-llvm-tools-linux_x86_64
           path: fixed-toolchain/linux_x86_64
-      - name: Export host toolchain pin
-        run: cat ci/host_sdk_pin.env >> "$GITHUB_ENV"
-      - name: Install official test SDK
-        shell: bash
-        run: |
-          mkdir -p "$RUNNER_TEMP/test-cjv"
-          curl -fsSL https://github.com/Zxilly/cjv/releases/download/v0.2.20/cjv_linux_amd64.tar.gz | tar -xz -C "$RUNNER_TEMP/test-cjv"
-          cjv_bin=$(find "$RUNNER_TEMP/test-cjv" -type f -name cjv | head -1)
-          "$cjv_bin" install "$CJCJ_TOOLCHAIN"
-      # The shim object compiles C++ against the LLVM that produced
-      # fixed-llvm-tools, so the cache key carries the same host toolchain pin
-      # the SDK above is installed from; a pin change must not reuse its objects.
+      - name: Load runtime pin
+        run: cat ci/runtime_pin.env >> "$GITHUB_ENV"
+      - name: Receive packaged native SDK
+        uses: actions/download-artifact@v8
+        with:
+          name: cjcj-srcbuild-linux-x64-${{ inputs.native_sdk_version || vars.CJCJ_NATIVE_SDK_VERSION }}
+          run-id: ${{ inputs.native_sdk_run_id || vars.CJCJ_NATIVE_SDK_RUN_ID }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/native-sdk-artifact
+      - name: Verify and select installed native SDK
+        env:
+          CJCJ_NATIVE_SDK_VERSION: ${{ inputs.native_sdk_version || vars.CJCJ_NATIVE_SDK_VERSION }}
+        run: node ci/release/receive_native_sdk.mjs "$RUNNER_TEMP/native-sdk-artifact" "$RUNNER_TEMP/native-sdk" linux-x64
       - name: Start sccache
         uses: ./.github/actions/sccache
         with:
           component: runtime-shim
           platform: ubuntu-24.04
-          pin: ${{ env.CJCJ_TOOLCHAIN }}
+          pin: ${{ env.RUNTIME_REF }}
           cache-size: 1G
       - name: Run registered Cangjie package tests
-        shell: bash
         env:
           CJCJ_LLVM_SHIM_O: ${{ github.workspace }}/fixed-toolchain/linux_x86_64/cjselfhost_llvmshim.o
         run: |
           ulimit -c 0
-          sdk="$HOME/.cjv/toolchains/$CJCJ_TOOLCHAIN"
-          source "$sdk/envsetup.sh"
-          npx --yes zx@8 runtime_shim/build_shim.mjs
-          cjpm build -j"$(nproc)" --target-dir "$RUNNER_TEMP/objc-producer"
-          products=()
-          for name in 'cjcj::cjc' 'cjc@cjcj'; do
-            file="$RUNNER_TEMP/objc-producer/release/bin/$name"
-            [[ ! -f "$file" ]] || products+=("$file")
-          done
-          [[ "${#products[@]}" = 1 ]]
-          cp "${products[0]}" "$RUNNER_TEMP/cjcj-stage1"
-          export OBJC_PREAMBLE_PRODUCER="$RUNNER_TEMP/cjcj-stage1"
-          node ci/run-registered-tests.mjs cj "$RUNNER_TEMP/package-tests"
+          node ci/run-native-package-tests.mjs
       - name: Report sccache
         if: always()
         uses: ./.github/actions/sccache-report
@@ -198,14 +269,15 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: package-tests-official-host
+          name: package-tests-native-sdk
+          if-no-files-found: warn
+          include-hidden-files: true
           path: |
             ${{ runner.temp }}/package-tests/results.json
             ${{ runner.temp }}/package-tests/run.log
             ${{ runner.temp }}/package-tests/reports
             ${{ runner.temp }}/package-tests/prepare
-            ${{ runner.temp }}/package-tests/objc-fixture/fixture.json
-            ${{ runner.temp }}/package-tests/objc-fixture/*.log
+            ${{ runner.temp }}/package-tests/objc-fixture
             ${{ runner.temp }}/package-tests/prerequisite.json
 
   fixed-llvm-tools:
@@ -226,7 +298,9 @@ jobs:
         uses: actions/checkout@v7
       - name: Load host toolchain pin
         shell: bash
-        run: cat ci/cjpm_pin.env >> "$GITHUB_ENV"
+        run: |
+          cat ci/cjpm_pin.env >> "$GITHUB_ENV"
+          node ci/host-toolchain-pin.mjs --github-env >> "$GITHUB_ENV"
       - name: Load runtime pin
         shell: bash
         run: cat ci/runtime_pin.env >> "$GITHUB_ENV"
@@ -327,10 +401,23 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y -qq libssl-dev
       - name: Install patched runtime
         run: npx --yes zx@8 ci/install_patched_runtime.mjs "$PWD/dist-runtime" "$PWD/patched-runtime"
+      - name: Receive native SDK producer inputs
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ inputs.native_inputs_artifact || vars.CJCJ_NATIVE_INPUTS_ARTIFACT }}-${{ matrix.target }}
+          run-id: ${{ inputs.native_inputs_run_id || vars.CJCJ_NATIVE_INPUTS_RUN_ID }}
+          github-token: ${{ github.token }}
+          path: ${{ github.workspace }}/.srcbuild/native-inputs
+
+      - name: Prepare paired coloured target SDK
+        env:
+          CANGJIE_WORKSPACE: ${{ github.workspace }}/.srcbuild
+          CJCJ_NATIVE_INPUT_ROOT: ${{ github.workspace }}/.srcbuild/native-inputs
+        run: node ci/prepare-colour-sdk.mjs
       - name: Build runtime shim
         env:
           CJCJ_LLVM_SHIM_O: ${{ github.workspace }}/fixed-toolchain/${{ matrix.llvm_platform }}/cjselfhost_llvmshim.o
-        run: npx --yes zx@8 runtime_shim/build_shim.mjs
+        run: node ci/with-colour-sdk.mjs build -- npx --yes zx@8 runtime_shim/build_shim.mjs
       - name: Report sccache
         if: always()
         uses: ./.github/actions/sccache-report
@@ -342,14 +429,23 @@ jobs:
         run: |
           node ci/check-codegen-runtime-layout.mjs
           node ci/release/trimpath.mjs .
-          node ci/with-runtime-audit.mjs -- cjpm build
+          node ci/with-runtime-audit.mjs -- node ci/with-colour-sdk.mjs build -- cjpm build
       # Deploy name must be cjcj, not cjc (process-name GC stack-root exclusion -> SEGV).
       - name: Compose compiler
         run: |
           test -f "target/release/bin/cjcj::cjc"
+          node ci/check-colour-tlab.mjs "target/release/bin/cjcj::cjc"
           cp "target/release/bin/cjcj::cjc" "target/release/bin/cjcj"
       - name: Run smoke tests
-        run: npx --yes zx@8 ci/smoke/run_smoke.mjs "$PWD/target/release/bin/cjcj"
+        run: node ci/with-colour-sdk.mjs run -- npx --yes zx@8 ci/smoke/run_smoke.mjs "$PWD/target/release/bin/cjcj" "$RUNNER_TEMP/smoke-tests"
+      - name: Preserve smoke producer evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: smoke-producer-evidence-${{ matrix.runner }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/smoke-tests
+          if-no-files-found: warn
+          include-hidden-files: true
 
   # Non-gating: verifies SDK provisioning on macOS; does not build cjcj.
   provision:
@@ -366,7 +462,9 @@ jobs:
         uses: actions/checkout@v7
       - name: Load host toolchain pin
         shell: bash
-        run: cat ci/cjpm_pin.env >> "$GITHUB_ENV"
+        run: |
+          cat ci/cjpm_pin.env >> "$GITHUB_ENV"
+          node ci/host-toolchain-pin.mjs --github-env >> "$GITHUB_ENV"
       - name: Restore SDK cache
         id: sdkcache
         uses: actions/cache/restore@v6

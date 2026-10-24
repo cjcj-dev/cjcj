@@ -25,6 +25,16 @@ import fs from 'node:fs';
 export const repoRoot = path.resolve(import.meta.dirname, '..');
 export const REGISTERED = Object.freeze(JSON.parse(fs.readFileSync(new URL('./test-registry.json', import.meta.url), 'utf8')));
 
+// These tests execute in a separately checked-out, fixed product tree. They
+// cannot be in this branch's GATING file list: that would execute a different
+// source identity (or a file that is absent here). The manifest test checks the
+// actual first checkout before recognizing this workflow-specific registration.
+export const WORKFLOW_TEST_SOURCES = Object.freeze([
+  {workflow: 'darwin-input-consumers.yml',
+    source_sha: '255d8c7e1f5e70be69b4cf3e9091514cfb1a4d09',
+    gating: ['ci/release/darwin_consumer_boundary.test.mjs']},
+]);
+
 // The second axis, and the reason it exists. The name patterns above cannot see
 // tests/macro_runtime_path/run.py: a directory of fixtures with one independent
 // driver whose name says nothing about testing. So the driver axis is selected
@@ -36,49 +46,63 @@ export const DRIVERS = Object.freeze(JSON.parse(fs.readFileSync(new URL('./test-
 
 // Run by `node --test` in .github/workflows/ci.yml, via `test-manifest.mjs list`.
 export const GATING = Object.freeze([
+  'ci/bootstrap/sdk-python-source.test.mjs',
+  'ci/colour-sdk.test.mjs',
+  'ci/release/receive_native_sdk.test.mjs',
+  'ci/release/native-release.test.mjs',
+  'build/test/installed-release-manifest.test.mjs',
+  'ci/bootstrap/native-runtime-input.test.mjs',
+  'ci/bootstrap/native-host.test.mjs',
+  'build/test/runtime-command-entry.test.mjs',
+  'build/test/sdk-tools-profile.test.mjs',
+  'build/test/native-tool-layout.test.mjs',
+  'build/test/tool-readiness.test.mjs',
+  'ci/bootstrap/sdk-installed-string-descendants.test.mjs',
+  'ci/bootstrap/sdk-installed-string.test.mjs',
+  'ci/bootstrap/sdk-std-barrier-resume.test.mjs',
+  'ci/check-colour-tlab.test.mjs',
+  'ci/release/darwin_workflow_entry.test.mjs',
+  'ci/bootstrap/compiler-identity.integration.test.mjs',
+  'ci/g1-entry-branches.test.mjs',
+  'ci/g1-entry-differential.test.mjs',
+  'ci/g1-tuple-entry.test.mjs',
+  'ci/g1-layout-entry.test.mjs',
+  'ci/g1-cwd-entry.test.mjs',
   'ci/llvm-tuple-layout.test.mjs',
+  'ci/llvm-tuple-platform.test.mjs',
+  'ci/native-llvm-inputs.test.mjs',
+  'ci/platform_matrix/native_runtime.test.mjs',
+  'ci/srcbuild/tests/cross-runtime-cache.test.mjs',
+  'ci/llvm-dylib/record-manifest.test.mjs',
+  'ci/colour-runtime/platform.test.mjs',
+  'ci/release/acquire_fixed_tuple.test.mjs',
   'ci/abi-migration.test.mjs',
   'ci/llvm-runtime-input.test.mjs',
-  'ci/release/download_pinned.test.mjs',
   'build/test/source-matrix.test.mjs',
-  'build/test/target-registry.test.mjs',
   'ci/platform_matrix/summarize_scope.test.mjs',
   'ci/platform_matrix/llvm-tuple.test.mjs',
   'ci/release/g8.test.mjs',
   'build/test/archive.test.mjs',
-  'build/test/bootstrap-handoff.test.mjs',
-  'build/test/bootstrap-std-output.test.mjs',
-  'build/test/cangjie-written-tools.test.mjs',
   'build/test/cangjie-test-preparation.test.mjs',
-  'build/test/compose-install.test.mjs',
   'build/test/compose-sdk-entry.test.mjs',
   'build/test/darwin-cjdb-python.test.mjs',
   'build/test/fail-closed-probes.test.mjs',
   'build/test/fetch-patches.test.mjs',
   'build/test/final-compiler.test.mjs',
   'build/test/gate-apparatus.test.mjs',
-  'build/test/gc-unit-gate.test.mjs',
   'build/test/git.test.mjs',
-  'build/test/hle-artifact.test.mjs',
-  'build/test/package-lineage.test.mjs',
   'build/test/package-provenance.test.mjs',
   'build/test/package-safety.test.mjs',
   'build/test/package-std-integrity.test.mjs',
   'build/test/provenance.test.mjs',
   'build/test/python-bundle.test.mjs',
-  'build/test/rebuilt-identity.test.mjs',
   'build/test/release-evidence.test.mjs',
-  'build/test/release-host-pin.test.mjs',
   'build/test/release-platforms.test.mjs',
   'build/test/release-manifest-components.test.mjs',
   'build/test/release-manifest.test.mjs',
   'build/test/runtime-pin.test.mjs',
-  'build/test/runtime-selection.test.mjs',
   'build/test/sdk-usability.test.mjs',
-  'build/test/sdk-path-parity.test.mjs',
-  'build/test/source-build-parity.test.mjs',
   'build/test/srcbuild-fixed-release.test.mjs',
-  'build/test/srcbuild-kkk2.test.mjs',
   'build/test/stock-backup.test.mjs',
   'build/test/system-deps.test.mjs',
   'build/test/toolchain-identity.test.mjs',
@@ -91,7 +115,6 @@ export const GATING = Object.freeze([
   'ci/g10/run.test.mjs',
   'ci/generate-freeze.test.mjs',
   'ci/gc-release-floor.test.mjs',
-  'ci/host-toolchain-pin.test.mjs',
   'ci/ast-support-toolchain.test.mjs',
   'ci/idle-writer-policy.test.mjs',
   'ci/llvm-tools-manifest.test.mjs',
@@ -99,19 +122,16 @@ export const GATING = Object.freeze([
   'ci/patched-runtime-diagnostics.test.mjs',
   'ci/patched-runtime-language-defer.test.mjs',
   'ci/official-runtime-isolation.test.mjs',
-  'ci/bootstrap/prepare_cpp_headers.test.mjs',
-  'ci/bootstrap/stage1_host_runner.test.mjs',
   'ci/pin-sweep.test.mjs',
   'ci/release-pair-pin.test.mjs',
   'ci/release-gates.test.mjs',
   'ci/smoke/smoke-runtime-isolation.test.mjs',
   'ci/release-run-evidence.test.mjs',
-  // Node fixtures use mocked transport, no SDK or credentials. The publisher
-  // exercises real zip/unzip; ci.yml installs both before running this list.
   'ci/release/android-platform.test.mjs',
+  'ci/release/ohos-platform.test.mjs',
+  'ci/release/ios-platform.test.mjs',
   'ci/release/bootstrap_store.test.mjs',
   'ci/release/colour_runtime.test.mjs',
-  'ci/release/bootstrap_entries.test.mjs',
   'ci/release/cross-runtime.test.mjs',
   'ci/release/darwin_runtime.test.mjs',
   'ci/release/host_llvm.test.mjs',
@@ -119,31 +139,133 @@ export const GATING = Object.freeze([
   'ci/release/publish_bootstrap_inputs.test.mjs',
   'ci/release/package_checksums.test.mjs',
   'ci/release/platform-matrix.test.mjs',
+  'ci/release/native-sdk-producer.test.mjs',
   'ci/release/prepare_bootstrap_inputs.test.mjs',
-  'ci/release/trimpath.test.mjs',
   'ci/sccache/report.test.mjs',
   'ci/srcbuild/tests/inject-version.test.mjs',
   'ci/srcbuild/tests/job-handoff.test.mjs',
   'ci/srcbuild/tests/phase-control.test.mjs',
+  'ci/srcbuild/tests/ohos-ios-segmented.test.mjs',
   'ci/srcbuild/tests/pin-compiler-llvm.test.mjs',
-  'ci/srcbuild/tests/platform-contract.test.mjs',
   'ci/srcbuild/tests/product-binary.test.mjs',
-  'ci/srcbuild/tests/release-wire.test.mjs',
   'ci/srcbuild/tests/sccache-contract.test.mjs',
-  'ci/srcbuild/tests/segmented-workflow.test.mjs',
-  // Invokes npx --yes zx@8 on a rejected fixture SDK; CI primes zx below.
   'ci/srcbuild/tests/verify-sdk.test.mjs',
+  'ci/srcbuild/tests/build-shim-output.test.mjs',
   'ci/srcbuild/tests/workflow-inputs.test.mjs',
   'ci/test-manifest.test.mjs',
+  'ci/contract-shards.test.mjs',
   'ci/run-registered-tests.test.mjs',
   'scripts/erased_dynpayload_gate.test.mjs',
   'scripts/cjcjcg_aggregate_ctype_gate.test.mjs',
+  'ci/producer-evidence.test.mjs',
+  'ci/bootstrap/sdk-flow.test.mjs',
+  'ci/bootstrap/sdk-targets.test.mjs',
+  'ci/bootstrap/sdk-resume.test.mjs',
+  'ci/bootstrap/sdk-install-entries.test.mjs',
+  'ci/bootstrap/sdk-installed-macros.test.mjs',
+  'ci/bootstrap/sdk-pair-inputs.test.mjs',
+  'ci/bootstrap/sdk-resume-inputs.integration.mjs',
+  'ci/srcbuild/lib/package-install.test.mjs',
+  'build/test/source-tool-install-interface.test.mjs',
+  'ci/bootstrap/sdk-stage2-input.test.mjs',
+  'ci/bootstrap/sdk-stage2-cli.integration.test.mjs',
+  'build/test/source-tool-production-entry.test.mjs',
+  'ci/release/download_pinned.test.mjs',
+  'build/test/target-registry.test.mjs',
+  'build/test/bootstrap-handoff.test.mjs',
+  'build/test/cangjie-written-tools.test.mjs',
+  'build/test/gc-unit-gate.test.mjs',
+  'build/test/hle-artifact.test.mjs',
+  'build/test/installed-language-runtime.test.mjs',
+  'build/test/package-lineage.test.mjs',
+  'build/test/rebuilt-identity.test.mjs',
+  'build/test/release-host-pin.test.mjs',
+  'build/test/runtime-selection.test.mjs',
+  'build/test/sdk-path-parity.test.mjs',
+  'build/test/source-build-parity.test.mjs',
+  'build/test/source-tool-payload.test.mjs',
+  'build/test/srcbuild-kkk2.test.mjs',
+  'ci/host-toolchain-pin.test.mjs',
+  'ci/bootstrap/prepare_cpp_headers.test.mjs',
+  'ci/release/bootstrap_entries.test.mjs',
+  'ci/release/bootstrap_host_sdk.test.mjs',
+  'ci/release/trimpath.test.mjs',
+  'ci/srcbuild/tests/platform-contract.test.mjs',
+  'ci/srcbuild/tests/release-wire.test.mjs',
+  'ci/srcbuild/tests/segmented-workflow.test.mjs',
 ]);
 
 // Registered, not executed. `needs` is what CI would have to provide; `verified`
 // records what the invocation in `needs` actually produced when run by hand, so
 // wiring one of these in is a decision about CI shape, not a re-investigation.
 export const DEFERRED = Object.freeze([
+  Object.freeze({file: "ci/bootstrap/sdk-command-lifetime.test.mjs",
+    needs: "Dedicated Linux worker with Python3 pidfd/subreaper support and Node; owned absolute RELEASE_EVIDENCE_TEST_ROOT and TMPDIR; node --test ci/bootstrap/sdk-command-lifetime.test.mjs. Retains small CLI logs and symlinks only; no SDK or repository copy",
+    verified: "TASK02:10 public supervisor CLI regression for absolute/relative/symlink paths, body and exit propagation, import isolation and cancellation; actual results belong to the fixed candidate report, not SDK production qualification"}),
+  Object.freeze({file: 'build/test/hle-version-install.test.mjs',
+    needs: 'Dedicated Linux x64 worker with Node (verified 22.20.0), cc, C++ compiler, CMake and Ninja; '
+      + 'pre-create an owned absolute RELEASE_EVIDENCE_TEST_ROOT and TMPDIR, then node --test build/test/hle-version-install.test.mjs. '
+      + 'Budget for two retained nine-launcher installation fixtures (r55 observed 52.7 MB); keep shared SDKs and active producer domains outside this root. '
+      + 'Uses controlled native Node/cjbind relays and npm metadata, not real HLE/cjbind production inputs; generic CI has not provisioned this isolated retained-fixture contract',
+    verified: 'r55 fixed 7a049c8831e2302c8dbd7d962fde90774fed5155: 3 tests passed, child rc0 on kkk2 under 2 CPUs/2GiB/core0; '
+      + 'old label and 0.3.6 install/default-explicit entry/reentry/relocation, bad source/version/payload rejection; '
+      + 'actual version cut new rc1, old control rc0, restored both rc0. HLE/cjbind business and full SDK remain NOT_RUN; registration is not production qualification'}),
+  Object.freeze({file: 'ci/bootstrap/archive-reentry.test.mjs',
+    needs: 'CMake/tar and an isolated worker; public shim CMake boundary and native-stage controlled producer entry; CPU count is not admission',
+    verified: '1019 CPU correction: 47 affected tests passed; public stage reached configured producer with explicit/default jobs, 2-core product cut rejected old CPU minimum and restoration passed; full stage/SDK separate'}),
+  Object.freeze({file: 'ci/srcbuild/shim-reentry.integration.test.mjs',
+    needs: 'SHIM_REENTRY_INPUT: fixed complete Reference TU, two real prepared Cjo/LLVM header outputs and actual previously compiled installed shim component; isolated 8-core worker',
+    verified: '1019 subtraction: public real-TU regression passed, including explicit/installed bad-object source fallback and actual inc/config failure/control/recovery; full N/SDK NOT_RUN'}),
+  Object.freeze({file: 'ci/bootstrap/native-cjdb-shim.integration.test.mjs',
+    needs: 'NATIVE_SHIM_TEST_INPUT with fixed real C++ schema, Reference shim, host flatc, paired LLVM15 source/generated configuration; finite native object gate only',
+    verified: '1019 subtraction: complete-TU/installed-object/schema regression passed with archive digest/source controls; full N/link/SDK NOT_RUN'}),
+  Object.freeze({file: 'ci/bootstrap/native-source-reentry.integration.test.mjs',
+    needs: 'NATIVE_SOURCE_REENTRY_INPUT: real fixed compiler, bounds, FlatBuffers and paired LLVM/runtime; private official FlatBuffers target and normal failure recovery',
+    verified: '1019 subtraction: complete official configure and FlatBuffers target/install passed after configure_file/PATCH_COMMAND failures and on reentry; Git and archive inputs; no full native N/stage qualification'}),
+  Object.freeze({file: 'ci/bootstrap/native-windows-llvm-trace.test.mjs',
+    needs: 'Linux Node for real command/PID/rc and foreign-host rejection controls; native ETW requires admitted Windows runner',
+    verified: '5 pass rc0; own-rc cut 4 pass/1 fail rc1 then restored 5 pass rc0; Linux real process records only, native Windows ETW NOT_RUN'}),
+  Object.freeze({file: 'ci/bootstrap/native-python-windows.test.mjs',
+    needs: 'Linux Python and exact CPython3.11.17 PC/layout source in WINDOWS_PYTHON_LAYOUT; explicit non-executable fixtures',
+    verified: '5 pass rc0; actual official PC/layout over non-executable fixtures; include-dev cut 4 pass/1 fail rc1 then restored 5 pass rc0; Windows PCbuild/CJDB NOT_RUN'}),
+  Object.freeze({file: 'ci/bootstrap/native-ast-inputs.test.mjs',
+    needs: 'Git/CMake/Ninja/Clang15; actual small Linux and Windows-cross C archive/install facts',
+    verified: '5 pass rc0 on kkk2; native LLVM/AST and full native-cjdb pipeline NOT_RUN'}),
+  Object.freeze({file: 'build/test/windows-pe-symbols.test.mjs',
+    needs: 'Linux Clang15 C producer and LLVM14 lld-link/llvm-readobj; small actual PE images, no Windows execution',
+    verified: '3 pass rc0 on kkk2; imported/exported positive and zero control, non-PE rejection; native Windows NOT_RUN'}),
+  Object.freeze({file: 'build/test/windows-sdk-interface.test.mjs',
+    needs: 'Linux Node configuration/host rejection apparatus using the fixed SDK source closure',
+    verified: '3 pass rc0 on kkk2; Ndb51/R79b target graph and public foreign-host rejection, no native production'}),
+  Object.freeze({file: 'ci/platform_matrix/windows-native-runtime.test.mjs',
+    needs: 'Linux Node installer fixture with Windows selector; no Windows program execution',
+    verified: '3 pass rc0 on kkk2; staging DLL bytes, command input requirement, stale dependency refusal'}),
+  Object.freeze({
+    file: 'build/test/windows-native-cli.test.mjs',
+    needs: 'Linux x64 Node script apparatus with public CLI dry-run and host selector fixture; does not run Windows programs',
+    verified: '6 pass rc0 on kkk2 under 8 cores/8GiB; native/cross command plans, dependency rejection and DLL PATH retention; Windows production NOT_RUN',
+  }),
+  Object.freeze({
+    file: 'build/test/stdx-source-selection-cli.test.mjs',
+    needs: 'Linux x64 public stdx CLI, LLVM 15 Clang, libssl, git, CMake, Ninja, cc, nm, python3 and tar; '
+      + 'same native fixture prerequisites as stdx-build-inputs-cli, absent from generic official CI',
+    verified: 'node --test build/test/stdx-source-selection-cli.test.mjs: 8 pass, rc0 on kkk2 under 8 cores/8GiB; '
+      + 'explicit originless source selection, unknown/mismatched/unmaterialized source rejection, actual installation and relocated fixed CI reader; not native Cangjie stdx qualification',
+  }),
+  Object.freeze({
+    file: 'build/test/stdx-build-inputs-cli.test.mjs',
+    needs: 'Linux x64 public build CLI host profile kkk2, LLVM 15 Clang, libssl, git, CMake, '
+      + 'Ninja, cc, nm, python3 and tar; executor cases also require STDX_HOST_CONTRACT_FILE naming fixed stdx b10784b27a5b3f815c9542d28f3ba02f48db48d5 build/libs/MakeHostCJNATIVESharedLib.cmake; not yet provided by the generic official CI contract',
+    verified: 'node --test build/test/stdx-build-inputs-cli.test.mjs: 6 pass, rc0 on kkk2 under 8 cores/8GiB; '
+      + 'historical CMake fixture source/config/install facts (graph/hash layer retired by TASK19:27), full/subset separation, failed-producer invalidation and relocated native C consumption; not native Cangjie stdx qualification',
+  }),
+  Object.freeze({
+    file: 'build/test/installed-stdx-cli.test.mjs',
+    needs: 'Linux x64 public build CLI host profile kkk2 with /usr/lib/llvm-15/bin, libssl, cc, nm and python3; '
+      + 'the generic official CI contract does not currently install that pinned LLVM 15 prerequisite',
+    verified: 'node --test build/test/installed-stdx-cli.test.mjs: 3 pass, rc0 on kkk2 under 8 cores/8GiB; '
+      + 'public build/install and installed-path consumption with external producer fixture plus Windows cross dry-run; no native stdx qualification',
+  }),
   Object.freeze({
     file: 'build/test/runtime-colour.test.mjs',
     needs: 'Node and git, plus cc with shared/PIC support, an ELF linker with version-script '
@@ -197,7 +319,9 @@ export function discoverTestFiles(root = repoRoot) {
     {encoding: 'utf8'});
   const found = listed.split('\0').filter(Boolean)
     .filter(file => !file.split('/').includes('node_modules'))
-    .filter(file => /\.test\.mjs$|(?:^|\/)test[_.-][^/]*\.(?:py|sh)$|[._-]test\.sh$|_test\.cj$|^build\/test\/.*\.sh$|\/tests\/[^/]+\.(?:py|sh)$/.test(file));
+    .filter(file => /\.(?:test|integration)\.mjs$|(?:^|\/)test[_.-][^/]*\.(?:py|sh)$|[._-]test\.sh$|_test\.cj$|^build\/test\/.*\.sh$|\/tests\/[^/]+\.(?:py|sh)$/.test(file)
+      || (/^ci\/test-[^/]*\.mjs$/.test(file)
+        && /^#!\/usr\/bin\/env zx(?:\r?\n|$)/.test(fs.readFileSync(path.join(root, file), 'utf8'))));
   return [...new Set(found)].sort();
 }
 
@@ -298,7 +422,7 @@ export function validateManifest(root = repoRoot, registered = REGISTERED, gatin
       const members = workspace.match(/\btest-members\s*=\s*\[([^\]]*)\]/)?.[1] || '';
       if (!members.includes(`"${entry.member}"`)) throw new Error(`member not tested: ${entry.member}`);
       if (!fs.existsSync(path.join(root, entry.member, 'cjpm.toml'))) throw new Error(`missing member: ${entry.member}`);
-    } else if (!['python3', 'bash'].includes(entry.executor) || !Array.isArray(entry.args)) {
+    } else if (!['python3', 'bash', 'zx'].includes(entry.executor) || !Array.isArray(entry.args)) {
       throw new Error(`invalid executor: ${entry.file}`);
     }
   }

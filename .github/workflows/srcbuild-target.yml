@@ -3,6 +3,64 @@ name: One source target / verified SDK phases
 on:
   workflow_call:
     inputs:
+      native_runtime_artifact:
+        description: Existing native-runtime-install artifact prefix
+        type: string
+        required: false
+        default: ''
+      native_runtime_run_id:
+        description: Frozen producer run for native runtime installation
+        type: string
+        required: false
+        default: ''
+      native_llvm_ref:
+        description: Explicit paired LLVM full commit
+        type: string
+        required: false
+        default: ''
+      native_runtime_ref:
+        description: Explicit paired runtime full commit
+        type: string
+        required: false
+        default: ''
+      native_host_version:
+        description: Exact official bootstrap host version for this pair
+        type: string
+        required: false
+        default: ''
+      shim_source_selection:
+        description: Cjo header source repository and full commit JSON; private fixed sources require reachable repositories
+        type: string
+        required: false
+        default: "{}"
+      native_source_selection:
+        description: Explicit native source repository and full commit JSON; empty preserves fixed defaults
+        type: string
+        required: false
+        default: '{}'
+      native_build_inputs_artifact:
+        description: Optional native-cjdb source/dependency artifact prefix; runs the existing producer before SDK configuration
+        type: string
+        required: false
+        default: ''
+      native_build_inputs_run_id:
+        description: Original run containing native-cjdb.json and its real dependencies
+        type: string
+        required: false
+        default: ''
+      source_selection:
+        description: Ordinary build repository options JSON, including explicit full stdx url/tag; empty keeps defaults
+        type: string
+        required: false
+        default: '{}'
+      native_inputs_artifact:
+        description: Explicit complete native N/R/AST installations and exported paired tools with locations.json
+        required: true
+        type: string
+      native_inputs_run_id:
+        description: Original run producing the selected native installations
+        required: true
+        type: string
       cangjie_ref:
         description: Optional SDK version label; source repository revisions remain pinned
         required: false
@@ -31,6 +89,16 @@ on:
         required: false
         type: string
         default: all
+      build_ohos:
+        description: Build OHOS runtime and final std from the native stage3 handoff
+        required: false
+        type: boolean
+        default: false
+      build_ios:
+        description: Build iOS runtime and final std from the native stage3 handoff
+        required: false
+        type: boolean
+        default: false
       build_android:
         description: Build the Android runtime and final std needed by Android release packages
         required: false
@@ -50,6 +118,23 @@ permissions:
 # per platform in the same run, and one group for all of them would leave every
 # call but one pending -- and cancel all but the newest pending one.
 
+env:
+  CJCJ_NATIVE_RUNTIME_ARTIFACT: ${{ inputs.native_runtime_artifact }}
+  CJCJ_NATIVE_RUNTIME_RUN_ID: ${{ inputs.native_runtime_run_id }}
+  CJCJ_NATIVE_LLVM_REF: ${{ inputs.native_llvm_ref }}
+  CJCJ_NATIVE_RUNTIME_REF: ${{ inputs.native_runtime_ref }}
+  CJCJ_NATIVE_HOST_VERSION: ${{ inputs.native_host_version }}
+  CJCJ_NATIVE_INPUTS_ARTIFACT: ${{ inputs.native_inputs_artifact }}
+  CJCJ_NATIVE_INPUTS_RUN_ID: ${{ inputs.native_inputs_run_id }}
+  CJCJ_NATIVE_BUILD_INPUTS_ARTIFACT: ${{ inputs.native_build_inputs_artifact }}
+  CJCJ_NATIVE_BUILD_INPUTS_RUN_ID: ${{ inputs.native_build_inputs_run_id }}
+  CJCJ_NATIVE_SOURCE_SELECTION: ${{ inputs.native_source_selection }}
+  CJCJ_SOURCE_SELECTION: ${{ inputs.source_selection }}
+
+defaults:
+  run:
+    shell: bash
+
 jobs:
   plan:
     name: Select targets
@@ -57,6 +142,8 @@ jobs:
     outputs:
       matrix: ${{ steps.select.outputs.matrix }}
       llvm_platforms: ${{ steps.select.outputs.llvm_platforms }}
+      ohos_matrix: ${{ steps.select.outputs.ohos_matrix }}
+      ios_matrix: ${{ steps.select.outputs.ios_matrix }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -73,14 +160,90 @@ jobs:
   fixed-llvm:
     name: Build native LLVM tools
     needs: plan
+    if: inputs.native_runtime_artifact == ''
     uses: ./.github/workflows/build-llvm-tools.yml
     with:
       platforms: ${{ needs.plan.outputs.llvm_platforms }}
       rebuild: ${{ inputs.rebuild_llvm || false }}
+      llvm_ref: ${{ inputs.native_llvm_ref }}
+      runtime_ref: ${{ inputs.native_runtime_ref }}
+
+  native-cjdb:
+    name: ${{ matrix.target }} / native CMake install
+    needs: plan
+    if: inputs.native_build_inputs_artifact != ''
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Receive fixed native source and development dependencies
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ inputs.native_build_inputs_artifact }}-${{ matrix.target }}
+          run-id: ${{ inputs.native_build_inputs_run_id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/native-input-artifact
+      - name: Materialize native producer inputs
+        run: node ci/bootstrap/native-cjdb-job.mjs materialize "$RUNNER_TEMP/native-input-artifact" "$RUNNER_TEMP/native-inputs"
+      - name: Set up Windows Python build tools
+        if: runner.os == 'Windows'
+        uses: microsoft/setup-msbuild@v2
+      - uses: ./.github/actions/native-windows-tools
+        if: runner.os == 'Windows'
+        with:
+          native-compiler: 'true'
+      - name: Prepare Unix CMake tools
+        if: runner.os != 'Windows'
+        run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" install-system-deps
+      - uses: ./.github/actions/sccache
+        with:
+          component: native-cjdb
+          platform: ${{ matrix.target }}
+          pin: ${{ inputs.native_llvm_ref }}
+          cache-size: 2G
+      - name: Build and install N and AST with the existing native producer
+        if: runner.os != 'Windows'
+        run: node ci/bootstrap/native-cjdb-job.mjs build "$RUNNER_TEMP/native-inputs" "$RUNNER_TEMP/native-cjdb"
+      - name: Build Windows Python and native N and AST
+        if: runner.os == 'Windows'
+        run: node ci/bootstrap/native-cjdb-job.mjs build "$RUNNER_TEMP/native-inputs" "$RUNNER_TEMP/native-cjdb"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: native-cjdb-${{ matrix.target }}
+          path: ${{ runner.temp }}/native-cjdb/native-install.tar
+          if-no-files-found: error
+      - name: Retain original native build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-cjdb-diagnostics-${{ matrix.target }}
+          path: |
+            ${{ runner.temp }}/native-cjdb/commands.json
+            ${{ runner.temp }}/native-cjdb/native-cjdb.json
+            ${{ runner.temp }}/native-cjdb/build/CMakeCache.txt
+            ${{ runner.temp }}/native-cjdb/build/install_manifest.txt
+            ${{ runner.temp }}/native-cjdb/install/BUILD-INPUTS.json
+            ${{ runner.temp }}/native-cjdb/python/producer-commands.json
+          if-no-files-found: warn
+      - uses: ./.github/actions/sccache-report
+        if: always()
+        with:
+          component: native-cjdb
+          platform: ${{ matrix.target }}
+          require-compiles: ${{ job.status == 'success' }}
 
   source-stage0:
     name: ${{ matrix.target }} / source-stage0
-    needs: [plan, fixed-llvm]
+    needs: [plan, fixed-llvm, native-cjdb]
+    if: always() && needs.plan.result == 'success' && (needs.fixed-llvm.result == 'success' || needs.fixed-llvm.result == 'skipped') && (needs.native-cjdb.result == 'success' || needs.native-cjdb.result == 'skipped')
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 360
     strategy:
@@ -90,6 +253,7 @@ jobs:
       CANGJIE_WORKSPACE: ${{ github.workspace }}/.srcbuild/workspace
       CANGJIE_BUILD_ROOT: ${{ github.workspace }}/.srcbuild/buildtools
       CJCJ_SRCBUILD_TARGET: ${{ matrix.target }}
+      CJCJ_NATIVE_CJDB_INSTALL: ${{ inputs.native_build_inputs_artifact != '' && format('{0}/.srcbuild/native-cjdb-install', github.workspace) || '' }}
       CJCJ_FIXED_LLVM_DIR: ${{ github.workspace }}/.srcbuild/fixed-llc
       # sccache: .github/actions/sccache below. The disk cache is persisted as one
       # actions/cache entry per (component, target, pin); the sccache GitHub
@@ -106,8 +270,36 @@ jobs:
         with:
           persist-credentials: false
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: ./.github/actions/native-windows-tools
+        if: runner.os == 'Windows'
+
+      - name: Receive selected native inputs before choosing the host
+        if: inputs.native_runtime_artifact != ''
+        uses: actions/download-artifact@v6
+        with:
+          name: ${{ inputs.native_inputs_artifact }}-${{ matrix.target }}
+          run-id: ${{ inputs.native_inputs_run_id }}
+          github-token: ${{ github.token }}
+          path: ${{ github.workspace }}/.srcbuild/native-inputs
+
+      - name: Receive native CMake installation produced in this run
+        if: inputs.native_build_inputs_artifact != ''
+        uses: actions/download-artifact@v8
+        with:
+          name: native-cjdb-${{ matrix.target }}
+          path: ${{ github.workspace }}/.srcbuild/native-cjdb-artifact
+      - name: Unpack native CMake installation before host and AST selection
+        if: inputs.native_build_inputs_artifact != ''
+        run: node ci/bootstrap/native-cjdb-job.mjs unpack "$GITHUB_WORKSPACE/.srcbuild/native-cjdb-artifact/native-install.tar" "$CJCJ_NATIVE_CJDB_INSTALL"
+
       - name: Load host toolchain pin
-        run: cat ci/host_sdk_pin.env >> "$GITHUB_ENV"
+        if: inputs.native_runtime_artifact == ''
+        run: |
+          cat ci/host_sdk_pin.env >> "$GITHUB_ENV"
+          node ci/host-toolchain-pin.mjs --github-env >> "$GITHUB_ENV"
 
       - name: Load source pins
         run: |
@@ -117,10 +309,25 @@ jobs:
       - name: Load and validate runtime pin
         env:
           CJCJ_RUNTIME_REF_OVERRIDE: ${{ inputs.runtime_ref }}
+          CJCJ_NATIVE_RUNTIME_ARTIFACT: ${{ inputs.native_runtime_artifact }}
+          CJCJ_NATIVE_LLVM_REF: ${{ inputs.native_llvm_ref }}
+          CJCJ_NATIVE_RUNTIME_REF: ${{ inputs.native_runtime_ref }}
+          CJCJ_NATIVE_HOST_VERSION: ${{ inputs.native_host_version }}
           CJCJ_ALLOW_RUNTIME_OVERRIDE: ${{ inputs.dry_run && inputs.runtime_ref != '' }}
         run: npx --yes zx@8 ci/load_runtime_pin.mjs
 
+      - name: Resolve actual source selection
+        run: node ci/srcbuild/source-selection.mjs
+
+      - name: Select actual native host and freeze the same inputs
+        if: inputs.native_runtime_artifact != ''
+        env:
+          CJCJ_NATIVE_INPUT_ROOT: ${{ github.workspace }}/.srcbuild/native-inputs
+          CJCJ_NATIVE_SOURCE_SELECTION: ${{ inputs.native_source_selection }}
+        run: node ci/bootstrap/prepare-native-host.mjs
+
       - name: Provision uncoloured host SDK
+        if: inputs.native_runtime_artifact == ''
         shell: bash
         run: |
           set -euo pipefail
@@ -137,7 +344,7 @@ jobs:
       # the toolchain this build actually bootstraps from. Later build steps
       # create files and inject the product version.
       - name: Freeze G2 identity inputs
-        if: matrix.target == 'linux-x64'
+        if: inputs.native_runtime_artifact == '' && (matrix.target == 'linux-x64')
         shell: bash
         run: |
           set -euo pipefail
@@ -156,6 +363,7 @@ jobs:
           echo "G2_CAMPAIGN_DIR=$(dirname "$identity")" >> "$GITHUB_ENV"
 
       - name: Copy host inputs for source handoffs
+        if: inputs.native_runtime_artifact == ''
         shell: bash
         run: |
           set -euo pipefail
@@ -173,7 +381,7 @@ jobs:
           echo "CJCJ_SRCBUILD_HOST_SDK=$host_sdk" >> "$GITHUB_ENV"
 
       - name: Copy frozen G2 identity for source handoffs
-        if: matrix.target == 'linux-x64'
+        if: inputs.native_runtime_artifact == '' && (matrix.target == 'linux-x64')
         shell: bash
         run: |
           set -euo pipefail
@@ -252,12 +460,14 @@ jobs:
         run: npx --yes zx@8 ci/srcbuild/steps/verify-source-pins.mjs
 
       - name: Download native LLVM tuple
+        if: inputs.native_runtime_artifact == ''
         uses: actions/download-artifact@v8
         with:
           name: fixed-llvm-tools-${{ matrix.llvm_platform }}
           path: ${{ env.CJCJ_FIXED_LLVM_DIR }}
 
       - name: Load immutable bootstrap host LLVM provenance
+        if: inputs.native_runtime_artifact == ''
         shell: bash
         run: |
           set -euo pipefail
@@ -265,13 +475,14 @@ jobs:
           echo "CJCJ_BOOTSTRAP_HOST_LLVM_ARTIFACT=$GITHUB_WORKSPACE/.srcbuild/inputs/bootstrap-host-llvm" >> "$GITHUB_ENV"
 
       - name: Download pinned bootstrap host LLVM
+        if: inputs.native_runtime_artifact == ''
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: node ci/release/download_pinned.mjs cjcj-dev/cjcj "${{ env.HOST_LLVM_ARTIFACT_ID }}" "${{ env.CJCJ_BOOTSTRAP_HOST_LLVM_ARTIFACT }}"
 
       - name: Load immutable in-process LLVM dylib provenance
-        if: runner.os == 'Linux' || runner.os == 'macOS'
+        if: inputs.native_runtime_artifact == '' && (runner.os == 'Linux' || runner.os == 'macOS')
         shell: bash
         run: |
           set -euo pipefail
@@ -285,13 +496,14 @@ jobs:
           echo "CJCJ_BOOTSTRAP_DYLIB_ARTIFACT=$GITHUB_WORKSPACE/.srcbuild/inputs/llvm-depot/$LLVM_SHA/$CANGJIE_COMPILER_SHA/dylib" >> "$GITHUB_ENV"
 
       - name: Download pinned in-process LLVM dylib
-        if: runner.os == 'Linux' || runner.os == 'macOS'
+        if: inputs.native_runtime_artifact == '' && (runner.os == 'Linux' || runner.os == 'macOS')
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: node ci/release/download_pinned.mjs cjcj-dev/cjcj "${{ env.LLVM_DYLIB_ARTIFACT_ID }}" "${{ env.CJCJ_BOOTSTRAP_DYLIB_ARTIFACT }}"
 
       - name: Load pinned colour runtime provenance
+        if: inputs.native_runtime_artifact == ''
         shell: bash
         env:
           RUNTIME_PLATFORM: ${{ matrix.llvm_platform }}
@@ -303,19 +515,20 @@ jobs:
           echo "CJCJ_BOOTSTRAP_COLOUR_RT=$GITHUB_WORKSPACE/.srcbuild/inputs/colour-runtime" >> "$GITHUB_ENV"
 
       - name: Download pinned colour runtime pair
+        if: inputs.native_runtime_artifact == ''
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: node ci/release/download_pinned.mjs cjcj-dev/cjcj "${{ env.COLOUR_RT_ARTIFACT_ID }}" "${{ env.CJCJ_BOOTSTRAP_COLOUR_RT }}"
 
       - name: Verify independent Darwin libraries and classify std input
-        if: runner.os == 'macOS'
+        if: inputs.native_runtime_artifact == '' && (runner.os == 'macOS')
         env:
           RUNTIME_PLATFORM: ${{ matrix.llvm_platform }}
         run: node ci/release/darwin_runtime.mjs source "$CJCJ_BOOTSTRAP_COLOUR_RT" "$RUNTIME_PLATFORM"
 
       - name: Inspect downloaded colour runtime symbols
-        if: runner.os != 'macOS'
+        if: inputs.native_runtime_artifact == '' && (runner.os != 'macOS')
         shell: bash
         run: |
           set -euo pipefail
@@ -326,6 +539,7 @@ jobs:
           awk '$NF ~ /^g_cjLoadBadMask(@@?[^[:space:]]+)?$/ {print; n++} END {print "COLOUR_RT_DEFINED_MASK_COUNT=" n+0; exit n != 1}' "$GITHUB_WORKSPACE/.srcbuild/inputs/colour-runtime-symbols.txt"
 
       - name: Load immutable AST support provenance
+        if: inputs.native_runtime_artifact == ''
         shell: bash
         env:
           AST_PLATFORM: ${{ matrix.llvm_platform }}
@@ -339,6 +553,7 @@ jobs:
           cat "ci/ast_support/${AST_PLATFORM}.env" >> "$GITHUB_ENV"
 
       - name: Download AST support archive
+        if: inputs.native_runtime_artifact == ''
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -348,7 +563,9 @@ jobs:
       # reads LLVM_SHA from its environment -- without the export every host
       # failed here with "LLVM_SHA pin missing" (release-matrix run 35718484244).
       - name: Resolve bootstrap inputs on this runner
+        if: inputs.native_runtime_artifact == ''
         env:
+          CJCJ_BOOTSTRAP_SHIM_SOURCE_SELECTION: ${{ inputs.shim_source_selection }}
           GITHUB_TOKEN: ${{ github.token }}
         shell: bash
         run: |
@@ -362,17 +579,19 @@ jobs:
           CJCJ_BOOTSTRAP_AST_ARTIFACT="$GITHUB_WORKSPACE/.srcbuild/inputs/ast-support/libcangjie-ast-support.a" \
             node ci/release/prepare_bootstrap_inputs.mjs
 
-      - name: Verify native Linux stage1 host identities
-        if: startsWith(matrix.target, 'linux-')
+      - name: Verify complete official H and repaired host LLVM identities
+        if: inputs.native_runtime_artifact == ''
         shell: bash
         env:
           HOST_IDENTITY_SDK: ${{ env.CJCJ_BOOTSTRAP_BASE }}
+          HOST_IDENTITY_ARCHIVE: ${{ env.CJCJ_BOOTSTRAP_BASE_ARCHIVE }}
           HOST_IDENTITY_LLVM: ${{ env.CJCJ_BOOTSTRAP_HOST_LLVM_SO }}
         run: |
           : "${HOST_IDENTITY_SDK:?}" "${HOST_IDENTITY_LLVM:?}"
-          python3 ci/bootstrap/test_host_identities.py
+          node ci/bootstrap/sdk-host-inputs.integration.test.mjs
 
       - name: Prove colour runtime identity rejection
+        if: inputs.native_runtime_artifact == ''
         shell: bash
         run: |
           set -euo pipefail
@@ -394,7 +613,7 @@ jobs:
           echo "ASSERT colour-runtime wrong-pin rejected rc=$rc; valid input resolved in prior step"
 
       - name: Reject a one-digit host pin change with the real artifact
-        if: startsWith(matrix.target, 'linux-')
+        if: inputs.native_runtime_artifact == '' && (startsWith(matrix.target, 'linux-'))
         shell: bash
         run: |
           set -euo pipefail
@@ -423,7 +642,7 @@ jobs:
         env:
           TARGET_LLVM_PLATFORM: ${{ matrix.llvm_platform }}
         # Linux cells use the scoped digest rows checked above.
-        if: startsWith(matrix.target, 'darwin-')
+        if: inputs.native_runtime_artifact == '' && startsWith(matrix.target, 'darwin-')
         shell: bash
         run: |
           set -euo pipefail
@@ -457,7 +676,7 @@ jobs:
           echo "ASSERT real-artifact $CJCJ_SRCBUILD_TARGET provenance one-digit rejection executed"
 
       - name: Record host repair and nightly control symbols
-        if: matrix.target == 'linux-x64'
+        if: inputs.native_runtime_artifact == '' && (matrix.target == 'linux-x64')
         shell: bash
         run: |
           set -euo pipefail
@@ -477,6 +696,37 @@ jobs:
           nm --defined-only "$CJCJ_BOOTSTRAP_COLOUR_LLVM_SO" > "$RUNNER_TEMP/colour-control.nm"
           c++filt < "$RUNNER_TEMP/colour-control.nm" > "$RUNNER_TEMP/colour-control.symbols"
           awk 'index($0, "llvm::isCJTypedReadHelperCandidate(") {print; n++} END {print "HOST_COLOUR_POSITIVE_CONTROL count=" n+0}' "$RUNNER_TEMP/colour-control.symbols"
+
+      - name: Receive complete native target installations and paired build adapter
+        if: inputs.native_runtime_artifact == ''
+        uses: actions/download-artifact@v6
+        with:
+          name: ${{ inputs.native_inputs_artifact }}-${{ matrix.target }}
+          run-id: ${{ inputs.native_inputs_run_id }}
+          github-token: ${{ github.token }}
+          path: ${{ github.workspace }}/.srcbuild/native-inputs
+
+      - name: Receive fixed native runtime installation
+        if: inputs.native_runtime_artifact != ''
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ inputs.native_runtime_artifact }}-${{ matrix.llvm_platform }}
+          run-id: ${{ inputs.native_runtime_run_id }}
+          github-token: ${{ github.token }}
+          path: ${{ github.workspace }}/.srcbuild/native-runtime-install
+
+      - name: Configure native bootstrap from actual repositories and target installations
+        shell: bash
+        env:
+          CJCJ_NATIVE_SOURCE_SELECTION: ${{ inputs.native_source_selection }}
+          CJCJ_NATIVE_INPUT_ROOT: ${{ github.workspace }}/.srcbuild/native-inputs
+          CJCJ_NATIVE_RUNTIME_INSTALL: ${{ inputs.native_runtime_artifact != '' && format('{0}/.srcbuild/native-runtime-install', github.workspace) || '' }}
+          CJCJ_NATIVE_LLVM_REF: ${{ inputs.native_llvm_ref }}
+          CJCJ_NATIVE_RUNTIME_REF: ${{ inputs.native_runtime_ref }}
+          CJCJ_NATIVE_HOST_VERSION: ${{ inputs.native_host_version }}
+        run: |
+          ulimit -c 0
+          node ci/bootstrap/configure-gha-inputs.mjs
 
       - name: Bootstrap stage0 compiler
         shell: bash
@@ -523,6 +773,12 @@ jobs:
         uses: actions/checkout@v7
         with:
           persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: ./.github/actions/native-windows-tools
+        if: runner.os == 'Windows'
 
       - name: Download preceding source phase
         uses: actions/download-artifact@v8
@@ -603,6 +859,12 @@ jobs:
         with:
           persist-credentials: false
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: ./.github/actions/native-windows-tools
+        if: runner.os == 'Windows'
+
       - name: Download preceding source phase
         uses: actions/download-artifact@v8
         with:
@@ -681,6 +943,12 @@ jobs:
         uses: actions/checkout@v7
         with:
           persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: ./.github/actions/native-windows-tools
+        if: runner.os == 'Windows'
 
       - name: Download preceding source phase
         uses: actions/download-artifact@v8
@@ -761,6 +1029,12 @@ jobs:
         with:
           persist-credentials: false
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: ./.github/actions/native-windows-tools
+        if: runner.os == 'Windows'
+
       - name: Download preceding source phase
         uses: actions/download-artifact@v8
         with:
@@ -803,13 +1077,23 @@ jobs:
 
       - name: Build stage 3 compiler and final std
         env:
-          CJCJ_BOOTSTRAP_WORK: ${{ env.CANGJIE_WORKSPACE }}/bootstrap-work
+          CJCJ_BOOTSTRAP_WORK: ${{ env.CANGJIE_WORKSPACE }}/native-bootstrap
         run: npx --yes zx@8 ci/srcbuild/steps/build-stage3.mjs
 
       - name: Upload final source-built std install root
+        if: matrix.target != 'windows-x64'
         uses: actions/upload-artifact@v7
         with:
           name: final-std-${{ matrix.target }}
+          path: ${{ env.CANGJIE_WORKSPACE }}/software/final-std-stage2
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload native Windows final std install root
+        if: matrix.target == 'windows-x64'
+        uses: actions/upload-artifact@v7
+        with:
+          name: final-std-native-windows-x64
           path: ${{ env.CANGJIE_WORKSPACE }}/software/final-std-stage2
           if-no-files-found: error
           retention-days: 7
@@ -836,7 +1120,12 @@ jobs:
 
   srcbuild:
     name: ${{ matrix.target }} / srcbuild
-    needs: [plan, source-stage3]
+    # The Linux archive ships the two public Windows FFI files. Their producer is
+    # the Windows final-std job, so the package job consumes that artifact
+    # instead of retaining H leftovers. Splitting the std producer out of this
+    # job is why it is a predecessor again rather than an optional copy.
+    needs: [plan, source-stage3, source-windows]
+    if: always() && needs.plan.result == 'success' && needs.source-stage3.result == 'success' && (needs.source-windows.result == 'success' || needs.source-windows.result == 'skipped')
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 360
     strategy:
@@ -855,6 +1144,12 @@ jobs:
         uses: actions/checkout@v7
         with:
           persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: ./.github/actions/native-windows-tools
+        if: runner.os == 'Windows'
 
       - name: Download preceding source phase
         uses: actions/download-artifact@v8
@@ -919,6 +1214,7 @@ jobs:
           node ci/release/prepare_hle_artifact.mjs \
             --platform "${{ matrix.target }}" \
             --binary "$CANGJIE_WORKSPACE/cangjie_tools/hyperlangExtension/target/bin/main" \
+            --sdk "$CANGJIE_WORKSPACE/software/cangjie" \
             --outdir "$GITHUB_WORKSPACE/.release-hle/${{ matrix.target }}"
 
       - name: Upload source-built hle artifact
@@ -929,16 +1225,146 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      - name: Package and verify SDK
+      # cjfmt and LSPServer are built from the same pinned checkout. They carry
+      # no CJ_MCC_ entry points, because the backend is C++, so the release
+      # manifest cannot discover them by structure the way it discovers the
+      # Cangjie-written tools. Stage their artifacts here so the release package
+      # installs the source-built bytes rather than leaving the official ones in
+      # place under a manifest row that calls them inherited.
+      - name: Prepare source-built cjlint artifact
+        run: |
+          node ci/release/prepare_tools_artifact.mjs \
+            --tool cjlint --platform "${{ matrix.target }}" \
+            --binary "$CANGJIE_WORKSPACE/cangjie_tools/cjlint/dist/bin/cjlint" \
+            --sdk "$CANGJIE_WORKSPACE/software/cangjie" \
+            --outdir "$GITHUB_WORKSPACE/.release-tools/${{ matrix.target }}/cjlint"
+
+      - name: Upload source-built cjlint artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: source-cjlint-${{ matrix.target }}
+          path: ${{ github.workspace }}/.release-tools/${{ matrix.target }}/cjlint
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Prepare source-built cjprof artifact
+        run: |
+          node ci/release/prepare_tools_artifact.mjs \
+            --tool cjprof --platform "${{ matrix.target }}" \
+            --binary "$CANGJIE_WORKSPACE/cangjie_tools/cjprof/dist/bin/cjprof" \
+            --sdk "$CANGJIE_WORKSPACE/software/cangjie" \
+            --outdir "$GITHUB_WORKSPACE/.release-tools/${{ matrix.target }}/cjprof"
+
+      - name: Upload source-built cjprof artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: source-cjprof-${{ matrix.target }}
+          path: ${{ github.workspace }}/.release-tools/${{ matrix.target }}/cjprof
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Prepare source-built cjcompat artifact
+        run: |
+          node ci/release/prepare_tools_artifact.mjs \
+            --tool cjcompat --platform "${{ matrix.target }}" \
+            --binary "$CANGJIE_WORKSPACE/cangjie_tools/cjcompat/dist/bin/cjcompat" \
+            --sdk "$CANGJIE_WORKSPACE/software/cangjie" \
+            --outdir "$GITHUB_WORKSPACE/.release-tools/${{ matrix.target }}/cjcompat"
+
+      - name: Upload source-built cjcompat artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: source-cjcompat-${{ matrix.target }}
+          path: ${{ github.workspace }}/.release-tools/${{ matrix.target }}/cjcompat
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Prepare source-built cjfmt artifact
+        run: |
+          node ci/release/prepare_tools_artifact.mjs \
+            --tool cjfmt --platform "${{ matrix.target }}" \
+            --sdk "$CANGJIE_WORKSPACE/software/cangjie" \
+            --binary "$CANGJIE_WORKSPACE/cangjie_tools/cjfmt/build/build/bin/cjfmt" \
+            --outdir "$GITHUB_WORKSPACE/.release-tools/${{ matrix.target }}/cjfmt"
+
+      - name: Upload source-built cjfmt artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: source-cjfmt-${{ matrix.target }}
+          path: ${{ github.workspace }}/.release-tools/${{ matrix.target }}/cjfmt
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Prepare source-built LSPServer artifact
+        run: |
+          node ci/release/prepare_tools_artifact.mjs \
+            --tool LSPServer --platform "${{ matrix.target }}" \
+            --sdk "$CANGJIE_WORKSPACE/software/cangjie" \
+            --binary "$CANGJIE_WORKSPACE/cangjie_tools/cangjie-language-server/output/bin/LSPServer" \
+            --outdir "$GITHUB_WORKSPACE/.release-tools/${{ matrix.target }}/LSPServer"
+
+      - name: Upload source-built LSPServer artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: source-LSPServer-${{ matrix.target }}
+          path: ${{ github.workspace }}/.release-tools/${{ matrix.target }}/LSPServer
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Prepare source-built cjcov artifact
+        run: |
+          node ci/release/prepare_tools_artifact.mjs \
+            --tool cjcov --platform "${{ matrix.target }}" \
+            --sdk "$CANGJIE_WORKSPACE/software/cangjie" \
+            --binary "$CANGJIE_WORKSPACE/cangjie_tools/cjcov/dist/cjcov" \
+            --outdir "$GITHUB_WORKSPACE/.release-tools/${{ matrix.target }}/cjcov"
+
+      - name: Upload source-built cjcov artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: source-cjcov-${{ matrix.target }}
+          path: ${{ github.workspace }}/.release-tools/${{ matrix.target }}/cjcov
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Prepare source-built cjtrace-recover artifact
+        run: |
+          node ci/release/prepare_tools_artifact.mjs \
+            --tool cjtrace-recover --platform "${{ matrix.target }}" \
+            --sdk "$CANGJIE_WORKSPACE/software/cangjie" \
+            --binary "$CANGJIE_WORKSPACE/cangjie_tools/cjtrace-recover/dist/bin/cjtrace-recover" \
+            --outdir "$GITHUB_WORKSPACE/.release-tools/${{ matrix.target }}/cjtrace-recover"
+
+      - name: Upload source-built cjtrace-recover artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: source-cjtrace-recover-${{ matrix.target }}
+          path: ${{ github.workspace }}/.release-tools/${{ matrix.target }}/cjtrace-recover
+          if-no-files-found: error
+          retention-days: 7
+
+      # The Linux archive also ships the two public Windows FFI files. Their
+      # source producer is the existing Windows final-std job, not H leftovers.
+      - name: Download source-built Windows FFI outputs
+        if: matrix.target == 'linux-x64'
+        uses: actions/download-artifact@v8
+        with:
+          name: final-std-windows-x64
+          path: ${{ env.CANGJIE_WORKSPACE }}/software/final-std-windows-stage2
+
+      - name: Install source-built Windows FFI outputs
+        if: matrix.target == 'linux-x64'
+        run: node ci/srcbuild/steps/install-windows-ffi.mjs
+
+      - name: Verify installed SDK
         env:
           CJCJ_SRCBUILD_CONSUMER_SDK: ${{ env.CANGJIE_WORKSPACE }}/software/cangjie
         run: |
-          npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" package
           npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" verify
 
       - name: Build compiler shim
         env:
-          CANGJIE_CPP_SRC: ${{ env.CANGJIE_WORKSPACE }}/cangjie_compiler
+          CJCJ_SRCBUILD_CONSUMER_SDK: ${{ env.CANGJIE_WORKSPACE }}/software/cangjie
         run: npx --yes zx@8 ci/srcbuild/steps/build-shim.mjs
 
       - name: Upload stage diagnostics
@@ -950,28 +1376,27 @@ jobs:
           if-no-files-found: warn
           path: |
             ${{ env.CANGJIE_WORKSPACE }}/software/cangjie/bin/cjcj-stage1
-            target/release/**/*.cjo
+            ${{ env.CANGJIE_WORKSPACE }}/software/cangjie/share/cjcj/cjo/**/*.cjo
 
-      - name: Compose self-hosted SDK
+      - name: Test and archive installed SDK
         env:
           SOURCE_SDK_VERSION: ${{ steps.version.outputs.value }}
-        run: npx --yes zx@8 ci/srcbuild/steps/compose-sdk.mjs
+        run: npx --yes zx@8 ci/srcbuild/steps/package-install.mjs
+
+      - name: Test real SDK source-tool installation and packaging
+        if: matrix.target == 'linux-x64'
+        env:
+          SOURCE_SDK_VERSION: ${{ steps.version.outputs.value }}
+          CJCJ_SRCBUILD_TARGET: linux-x64
+          CJCJ_SRCBUILD_CONSUMER_SDK: ${{ env.CANGJIE_WORKSPACE }}/software/cangjie
+          RELEASE_EVIDENCE_TEST_ROOT: ${{ runner.temp }}/source-tool-sdk-integration
+        run: node build/test/source-tool-install-contract.integration.test.mjs
 
       - name: Capture G2 SDK identity
         if: matrix.target == 'linux-x64'
         timeout-minutes: 2
-        shell: bash
         run: |
-          set -euo pipefail
-          sdk="$CANGJIE_WORKSPACE/software/cangjie"
-          node ci/capture-g2-identity.mjs \
-            --identity "$G2_IDENTITY" \
-            --runtime-dynamic "$sdk/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so" \
-            --runtime-static "$sdk/lib/linux_x86_64_cjnative/libcangjie-runtime.a" \
-            --llvm-llc "$sdk/third_party/llvm/bin/llc" \
-            --llvm-opt "$sdk/third_party/llvm/bin/opt" \
-            --cjcj "$sdk/bin/cjc" \
-            --std "$sdk/lib/linux_x86_64_cjnative/libcangjie-std-core.a"
+          node ci/capture-g2-identity.mjs --identity "$G2_IDENTITY" --sdk "$CANGJIE_WORKSPACE/software/cangjie"
 
       - name: Retain G2 campaign identity
         if: always() && matrix.target == 'linux-x64' && env.G2_IDENTITY != ''
@@ -1002,8 +1427,8 @@ jobs:
         with:
           name: cjcj-srcbuild-${{ matrix.target }}-${{ steps.version.outputs.value }}
           path: |
-            ${{ env.CANGJIE_WORKSPACE }}/software/cangjie-sdk-*-${{ steps.version.outputs.value }}-cjcj.tar.gz
-            ${{ env.CANGJIE_WORKSPACE }}/software/cangjie-sdk-*-${{ steps.version.outputs.value }}-cjcj.tar.gz.sha256
+            ${{ env.CANGJIE_WORKSPACE }}/software/cangjie-sdk-*-${{ steps.version.outputs.value }}-cjcj.*
+            ${{ env.CANGJIE_WORKSPACE }}/software/cangjie-sdk-*-${{ steps.version.outputs.value }}-cjcj.*.sha256
             ${{ runner.temp }}/cjcj-srcbuild-verify/*.log
             .srcbuild/shim-build.log
           if-no-files-found: warn
@@ -1045,6 +1470,12 @@ jobs:
         uses: actions/checkout@v7
         with:
           persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: ./.github/actions/native-windows-tools
+        if: runner.os == 'Windows'
 
       - name: Download preceding source phase
         uses: actions/download-artifact@v8
@@ -1088,7 +1519,9 @@ jobs:
       - name: Build Android runtime and final std with stage2 cjc
         if: matrix.target == 'linux-x64' && inputs.build_android
         env:
+          CMAKE_TOOLCHAIN_FILE: ${{ github.workspace }}/ci/platform_matrix/native_runtime_toolchain.cmake
           CJCJ_STAGE3_CANGJIE_VERSION: ${{ steps.version.outputs.value }}
+          CJCJ_BOOTSTRAP_WORK: ${{ env.CANGJIE_WORKSPACE }}/native-bootstrap
         run: npx --yes zx@8 ci/srcbuild/steps/build-android-final-std.mjs
 
       - name: Upload Android runtime and final std
@@ -1106,6 +1539,194 @@ jobs:
         with:
           component: srcbuild-android
           platform: ${{ matrix.target }}
+          require-compiles: ${{ job.status == 'success' }}
+
+  source-ohos:
+    name: ${{ matrix.runtime_target }} / source-ohos
+    needs: [plan, source-stage3]
+    if: contains(needs.plan.outputs.llvm_platforms, 'linux_x86_64') && inputs.build_ohos
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.plan.outputs.ohos_matrix) }}
+    env:
+      CANGJIE_WORKSPACE: ${{ github.workspace }}/.srcbuild/workspace
+      CANGJIE_BUILD_ROOT: ${{ github.workspace }}/.srcbuild/buildtools
+      CJCJ_SRCBUILD_TARGET: ${{ matrix.target }}
+      CJCJ_FIXED_LLVM_DIR: ${{ github.workspace }}/.srcbuild/fixed-llc
+      cjHeapSize: 12GB
+      cjHeapSwap: "on"
+      CJCJ_STAGE3_STDLIB_BUILD_TYPE: ${{ inputs.build_type || 'relwithdebinfo' }}
+    steps:
+      - name: Checkout cjcj
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: ./.github/actions/native-windows-tools
+        if: runner.os == 'Windows'
+
+      - name: Download preceding source phase
+        uses: actions/download-artifact@v8
+        with:
+          name: source-handoff-${{ matrix.target }}-stage3
+          path: ${{ runner.temp }}/source-handoff
+
+      - name: Verify preceding source phase
+        run: node ci/srcbuild/job-handoff.mjs restore stage3 "$RUNNER_TEMP/source-handoff"
+
+      - name: Install build dependencies
+        run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" install-system-deps
+
+      - name: Start sccache
+        uses: ./.github/actions/sccache
+        with:
+          component: srcbuild-ohos
+          platform: ${{ matrix.runtime_target }}
+          pin: ${{ env.RUNTIME_REF }}
+          cache-size: 2G
+
+      - name: Restore source SDK version output
+        id: version
+        run: echo "value=$SOURCE_SDK_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Add Linux swap for stage2 chir heap
+        if: runner.os == 'Linux'
+        run: |
+          sudo fallocate -l 12G /mnt/swapfile
+          sudo chmod 600 /mnt/swapfile
+          sudo mkswap /mnt/swapfile
+          sudo swapon /mnt/swapfile
+          free -h
+
+      - name: Install OHOS SDK and probe
+        if: matrix.target == 'linux-x64' && inputs.build_ohos
+        uses: ./.github/actions/setup-release-sdk
+        with:
+          requirement: ohos-sdk
+
+      - name: Build OHOS runtime and final std with stage2 cjc
+        if: matrix.target == 'linux-x64' && inputs.build_ohos
+        env:
+          CMAKE_TOOLCHAIN_FILE: ${{ github.workspace }}/ci/platform_matrix/native_runtime_toolchain.cmake
+          CJCJ_STAGE3_CANGJIE_VERSION: ${{ steps.version.outputs.value }}
+          CROSS_STD_TUPLE: ${{ matrix.tuple }}
+          CJCJ_BOOTSTRAP_WORK: ${{ env.CANGJIE_WORKSPACE }}/native-bootstrap
+        run: npx --yes zx@8 ci/srcbuild/steps/build-ohos-final-std.mjs
+
+      - name: Upload OHOS runtime and final std
+        if: matrix.target == 'linux-x64' && inputs.build_ohos
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ env.CANGJIE_WORKSPACE }}/software/${{ matrix.artifact }}
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Report sccache
+        if: always()
+        uses: ./.github/actions/sccache-report
+        with:
+          component: srcbuild-ohos
+          platform: ${{ matrix.runtime_target }}
+          require-compiles: ${{ job.status == 'success' }}
+
+  source-ios:
+    name: ${{ matrix.runtime_target }} / source-ios
+    needs: [plan, source-stage3]
+    if: contains(needs.plan.outputs.llvm_platforms, 'darwin_aarch64') && inputs.build_ios
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.plan.outputs.ios_matrix) }}
+    env:
+      CANGJIE_WORKSPACE: ${{ github.workspace }}/.srcbuild/workspace
+      CANGJIE_BUILD_ROOT: ${{ github.workspace }}/.srcbuild/buildtools
+      CJCJ_SRCBUILD_TARGET: ${{ matrix.target }}
+      CJCJ_FIXED_LLVM_DIR: ${{ github.workspace }}/.srcbuild/fixed-llc
+      cjHeapSize: 12GB
+      cjHeapSwap: "on"
+      CJCJ_STAGE3_STDLIB_BUILD_TYPE: ${{ inputs.build_type || 'relwithdebinfo' }}
+    steps:
+      - name: Checkout cjcj
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: ./.github/actions/native-windows-tools
+        if: runner.os == 'Windows'
+
+      - name: Download preceding source phase
+        uses: actions/download-artifact@v8
+        with:
+          name: source-handoff-${{ matrix.target }}-stage3
+          path: ${{ runner.temp }}/source-handoff
+
+      - name: Verify preceding source phase
+        run: node ci/srcbuild/job-handoff.mjs restore stage3 "$RUNNER_TEMP/source-handoff"
+
+      - name: Install build dependencies
+        run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" install-system-deps
+
+      - name: Start sccache
+        uses: ./.github/actions/sccache
+        with:
+          component: srcbuild-ios
+          platform: ${{ matrix.runtime_target }}
+          pin: ${{ env.RUNTIME_REF }}
+          cache-size: 2G
+
+      - name: Restore source SDK version output
+        id: version
+        run: echo "value=$SOURCE_SDK_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Add Linux swap for stage2 chir heap
+        if: runner.os == 'Linux'
+        run: |
+          sudo fallocate -l 12G /mnt/swapfile
+          sudo chmod 600 /mnt/swapfile
+          sudo mkswap /mnt/swapfile
+          sudo swapon /mnt/swapfile
+          free -h
+
+      - name: Install iOS SDK and probe
+        if: matrix.target == 'darwin-arm64' && inputs.build_ios
+        uses: ./.github/actions/setup-release-sdk
+        with:
+          requirement: xcode-ios
+
+      - name: Build iOS runtime and final std with stage2 cjc
+        if: matrix.target == 'darwin-arm64' && inputs.build_ios
+        env:
+          CMAKE_TOOLCHAIN_FILE: ${{ github.workspace }}/ci/platform_matrix/native_runtime_toolchain.cmake
+          CJCJ_STAGE3_CANGJIE_VERSION: ${{ steps.version.outputs.value }}
+          CROSS_STD_TUPLE: ${{ matrix.tuple }}
+          CJCJ_BOOTSTRAP_WORK: ${{ env.CANGJIE_WORKSPACE }}/native-bootstrap
+        run: npx --yes zx@8 ci/srcbuild/steps/build-ios-final-std.mjs
+
+      - name: Upload iOS runtime and final std
+        if: matrix.target == 'darwin-arm64' && inputs.build_ios
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ env.CANGJIE_WORKSPACE }}/software/${{ matrix.artifact }}
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Report sccache
+        if: always()
+        uses: ./.github/actions/sccache-report
+        with:
+          component: srcbuild-ios
+          platform: ${{ matrix.runtime_target }}
           require-compiles: ${{ job.status == 'success' }}
 
   source-mingw:
@@ -1136,9 +1757,19 @@ jobs:
         with:
           persist-credentials: false
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: ./.github/actions/native-windows-tools
+        if: runner.os == 'Windows'
+
       - name: Load and validate runtime pin
         env:
           CJCJ_RUNTIME_REF_OVERRIDE: ${{ inputs.runtime_ref }}
+          CJCJ_NATIVE_RUNTIME_ARTIFACT: ${{ inputs.native_runtime_artifact }}
+          CJCJ_NATIVE_LLVM_REF: ${{ inputs.native_llvm_ref }}
+          CJCJ_NATIVE_RUNTIME_REF: ${{ inputs.native_runtime_ref }}
+          CJCJ_NATIVE_HOST_VERSION: ${{ inputs.native_host_version }}
           CJCJ_ALLOW_RUNTIME_OVERRIDE: ${{ inputs.dry_run && inputs.runtime_ref != '' }}
         run: npx --yes zx@8 ci/load_runtime_pin.mjs
 
@@ -1224,6 +1855,12 @@ jobs:
         with:
           persist-credentials: false
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: ./.github/actions/native-windows-tools
+        if: runner.os == 'Windows'
+
       - name: Download native stage3 handoff
         uses: actions/download-artifact@v8
         with:
@@ -1270,7 +1907,159 @@ jobs:
         if: matrix.target == 'linux-x64'
         env:
           CJCJ_STAGE3_CANGJIE_VERSION: ${{ steps.version.outputs.value }}
+          CJCJ_BOOTSTRAP_WORK: ${{ env.CANGJIE_WORKSPACE }}/native-bootstrap
         run: npx --yes zx@8 ci/srcbuild/steps/build-windows-final-std.mjs
+
+      # Nine fixed-source target outputs use the Windows SDK dependency closure.
+      - name: Cross-build Windows SDK tools from source
+        if: matrix.target == 'linux-x64'
+        env:
+          CJCJ_SRCBUILD_CONSUMER_SDK: ${{ env.CANGJIE_WORKSPACE }}/software/cangjie-windows
+        run: npx --yes zx@8 build/cli.mjs --target windows-x64 --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" build tools
+
+      - name: Prepare cross-built Windows cjlint artifact
+        if: matrix.target == 'linux-x64'
+        run: |
+          node ci/release/prepare_tools_artifact.mjs \
+            --tool cjlint --platform "windows-x64" \
+            --binary "$CANGJIE_WORKSPACE/cangjie_tools/cjlint/dist/bin/cjlint.exe" \
+            --sdk "$CANGJIE_WORKSPACE/software/cangjie-windows" \
+            --outdir "$GITHUB_WORKSPACE/.release-tools-windows/cjlint"
+
+      - name: Upload cross-built Windows cjlint artifact
+        if: matrix.target == 'linux-x64'
+        uses: actions/upload-artifact@v7
+        with:
+          name: source-cjlint-windows-x64
+          path: ${{ github.workspace }}/.release-tools-windows/cjlint
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Prepare cross-built Windows cjprof artifact
+        if: matrix.target == 'linux-x64'
+        run: |
+          node ci/release/prepare_tools_artifact.mjs \
+            --tool cjprof --platform "windows-x64" \
+            --binary "$CANGJIE_WORKSPACE/cangjie_tools/cjprof/dist/bin/cjprof.exe" \
+            --sdk "$CANGJIE_WORKSPACE/software/cangjie-windows" \
+            --outdir "$GITHUB_WORKSPACE/.release-tools-windows/cjprof"
+
+      - name: Upload cross-built Windows cjprof artifact
+        if: matrix.target == 'linux-x64'
+        uses: actions/upload-artifact@v7
+        with:
+          name: source-cjprof-windows-x64
+          path: ${{ github.workspace }}/.release-tools-windows/cjprof
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Prepare cross-built Windows cjcompat artifact
+        if: matrix.target == 'linux-x64'
+        run: |
+          node ci/release/prepare_tools_artifact.mjs \
+            --tool cjcompat --platform "windows-x64" \
+            --binary "$CANGJIE_WORKSPACE/cangjie_tools/cjcompat/dist/bin/cjcompat.exe" \
+            --sdk "$CANGJIE_WORKSPACE/software/cangjie-windows" \
+            --outdir "$GITHUB_WORKSPACE/.release-tools-windows/cjcompat"
+
+      - name: Upload cross-built Windows cjcompat artifact
+        if: matrix.target == 'linux-x64'
+        uses: actions/upload-artifact@v7
+        with:
+          name: source-cjcompat-windows-x64
+          path: ${{ github.workspace }}/.release-tools-windows/cjcompat
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Prepare cross-built Windows cjfmt artifact
+        if: matrix.target == 'linux-x64'
+        run: |
+          node ci/release/prepare_tools_artifact.mjs \
+            --tool cjfmt --platform windows-x64 \
+            --binary "$CANGJIE_WORKSPACE/cangjie_tools/cjfmt/build/build/bin/cjfmt.exe" \
+            --sdk "$CANGJIE_WORKSPACE/software/cangjie-windows" \
+            --outdir "$GITHUB_WORKSPACE/.release-tools-windows/cjfmt"
+
+      - name: Upload cross-built Windows cjfmt artifact
+        if: matrix.target == 'linux-x64'
+        uses: actions/upload-artifact@v7
+        with:
+          name: source-cjfmt-windows-x64
+          path: ${{ github.workspace }}/.release-tools-windows/cjfmt
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Prepare cross-built Windows LSPServer artifact
+        if: matrix.target == 'linux-x64'
+        run: |
+          node ci/release/prepare_tools_artifact.mjs \
+            --tool LSPServer --platform windows-x64 \
+            --binary "$CANGJIE_WORKSPACE/cangjie_tools/cangjie-language-server/output/bin/LSPServer.exe" \
+            --sdk "$CANGJIE_WORKSPACE/software/cangjie-windows" \
+            --outdir "$GITHUB_WORKSPACE/.release-tools-windows/LSPServer"
+
+      - name: Upload cross-built Windows LSPServer artifact
+        if: matrix.target == 'linux-x64'
+        uses: actions/upload-artifact@v7
+        with:
+          name: source-LSPServer-windows-x64
+          path: ${{ github.workspace }}/.release-tools-windows/LSPServer
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Prepare cross-built Windows cjcov artifact
+        if: matrix.target == 'linux-x64'
+        run: |
+          node ci/release/prepare_tools_artifact.mjs \
+            --tool cjcov --platform windows-x64 \
+            --binary "$CANGJIE_WORKSPACE/cangjie_tools/cjcov/dist/cjcov.exe" \
+            --sdk "$CANGJIE_WORKSPACE/software/cangjie-windows" \
+            --outdir "$GITHUB_WORKSPACE/.release-tools-windows/cjcov"
+
+      - name: Upload cross-built Windows cjcov artifact
+        if: matrix.target == 'linux-x64'
+        uses: actions/upload-artifact@v7
+        with:
+          name: source-cjcov-windows-x64
+          path: ${{ github.workspace }}/.release-tools-windows/cjcov
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Prepare cross-built Windows cjtrace-recover artifact
+        if: matrix.target == 'linux-x64'
+        run: |
+          node ci/release/prepare_tools_artifact.mjs \
+            --tool cjtrace-recover --platform windows-x64 \
+            --binary "$CANGJIE_WORKSPACE/cangjie_tools/cjtrace-recover/dist/bin/cjtrace-recover.exe" \
+            --sdk "$CANGJIE_WORKSPACE/software/cangjie-windows" \
+            --outdir "$GITHUB_WORKSPACE/.release-tools-windows/cjtrace-recover"
+
+      - name: Upload cross-built Windows cjtrace-recover artifact
+        if: matrix.target == 'linux-x64'
+        uses: actions/upload-artifact@v7
+        with:
+          name: source-cjtrace-recover-windows-x64
+          path: ${{ github.workspace }}/.release-tools-windows/cjtrace-recover
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Prepare cross-built Windows hle artifact
+        if: matrix.target == 'linux-x64'
+        run: |
+          node ci/release/prepare_hle_artifact.mjs \
+            --platform windows-x64 \
+            --binary "$CANGJIE_WORKSPACE/cangjie_tools/hyperlangExtension/target/bin/main.exe" \
+            --sdk "$CANGJIE_WORKSPACE/software/cangjie-windows" \
+            --outdir "$GITHUB_WORKSPACE/.release-hle-windows"
+
+      - name: Upload cross-built Windows hle artifact
+        if: matrix.target == 'linux-x64'
+        uses: actions/upload-artifact@v7
+        with:
+          name: source-hle-windows-x64
+          path: ${{ github.workspace }}/.release-hle-windows
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Upload Windows source-built std install root
         if: matrix.target == 'linux-x64'

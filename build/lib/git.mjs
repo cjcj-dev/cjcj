@@ -91,6 +91,42 @@ export async function checkoutExactSource(url, dest, ref) {
   await run(['git', '-C', dest, 'checkout', '--detach', 'FETCH_HEAD'], {stage: 'git.checkout'});
 }
 
+// Resume only a repository whose real identity matches this invocation. Do not
+// reset/clean an existing checkout: it may contain native outputs or the cjpm
+// subtree overlay. A changed pin needs a separate checkout prepared by fetch.
+export async function assertSourceIdentity(repo, dest) {
+  if (process.env.CANGJIE_BUILD_DRY_RUN === '1') return;
+  const query = async (...args) => (await run(['git', '-C', dest, ...args], {
+    stage: 'source.identity', capture: true, logOutput: false, echo: false,
+  })).stdout.trim();
+  const root = await query('rev-parse', '--show-toplevel');
+  if (fs.realpathSync(root) !== fs.realpathSync(dest)) {
+    throw new BuildError('source.identity', `${repo.name}: not a repository root: ${dest}`);
+  }
+  // job-handoff removes .git/config to avoid shipping credentials. Missing
+  // origin is therefore legal; the fixed object and tracked content below are
+  // still required. If origin exists, it must agree with selected source options.
+  const remotes = (await query('remote')).split('\n');
+  const origin = remotes.includes('origin') ? await query('remote', 'get-url', 'origin') : null;
+  if (origin !== null && origin !== repo.url) {
+    throw new BuildError('source.identity', `${repo.name}: origin ${origin}, expected ${repo.url}; use a separate workspace`);
+  }
+  const head = await query('rev-parse', 'HEAD');
+  if (repo.tag) {
+    const expected = /^[0-9a-f]{40}$/i.test(repo.tag) ? repo.tag.toLowerCase()
+      : await query('rev-parse', '--verify', '--end-of-options', `${repo.tag}^{commit}`);
+    if (head !== expected) {
+      throw new BuildError('source.identity', `${repo.name}: HEAD ${head}, expected ${expected}; use a separate workspace`);
+    }
+  }
+  if (repo.name === 'tools' || repo.name === 'stdx') {
+    const paths = repo.name === 'tools' ? ['.', ':!cjpm'] : ['.'];
+    const changed = await query('diff', '--name-only', 'HEAD', '--', ...paths);
+    if (changed) throw new BuildError('source.identity', `${repo.name}: tracked source differs from HEAD: ${changed}; preserve it and use a separate workspace`);
+  }
+  logger.info('Source identity %s %s %s', repo.name, head, origin);
+}
+
 export async function shallowClone(url, dest, {tag} = {}) {
   if (fs.existsSync(dest)) throw new BuildError('git', `destination already exists: ${dest}`);
   fs.mkdirSync(path.dirname(dest), {recursive: true});

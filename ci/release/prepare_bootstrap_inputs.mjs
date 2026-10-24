@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env zx
 
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -6,10 +6,12 @@ import path from 'node:path';
 import {prepareColourTuple} from './bootstrap_tuple.mjs';
 import {verifyRuntime} from './colour_runtime.mjs';
 import {resolveRuntimeSource, writeRuntimeSelection} from '../runtime-pin.mjs';
-import {prepareCppHeaders, verifyCppHeaders} from '../bootstrap/prepare_cpp_headers.mjs';
+import {prepareCppHeaders} from '../bootstrap/prepare_cpp_headers.mjs';
 import {hostIdentity, prepareHostLlvm} from './host_llvm.mjs';
 import {bootstrapArtifact} from './bootstrap_artifact.mjs';
 import {prepareHostSdk} from './bootstrap_host_sdk.mjs';
+import {hostPlatform, readHostToolchainPin, requireHostToolchain} from '../host-toolchain-pin.mjs';
+import {sdkPlatform} from '../bootstrap/sdk-platform.mjs';
 
 function sha256File(file) {
   return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
@@ -46,14 +48,20 @@ function findFile(root, predicate) {
 }
 
 const target = process.env.CJCJ_SRCBUILD_TARGET
-  || `${process.platform}-${process.platform === 'linux' && process.arch === 'arm64' ? 'aarch64' : process.arch}`;
+  || `${process.platform === 'win32' ? 'windows' : process.platform}-${process.platform === 'linux' && process.arch === 'arm64' ? 'aarch64' : process.arch}`;
 const platform = {'linux-x64': 'linux_x86_64', 'linux-aarch64': 'linux_aarch64',
-  'darwin-arm64': 'darwin_aarch64', 'darwin-x64': 'darwin_x86_64'}[target];
+  'darwin-arm64': 'darwin_aarch64', 'darwin-x64': 'darwin_x86_64', 'windows-x64': 'windows_x86_64'}[target];
 if (!platform) throw new Error(`BOOTSTRAP_TARGET_UNSUPPORTED: ${target}`);
 const runtimeSelection = await resolveRuntimeSource();
 process.env.RUNTIME_REF = runtimeSelection.runtimeRef;
 process.env.RUNTIME_SRC_URL = runtimeSelection.sourceUrl;
-for (const pin of ['host_sdk_pin.env', 'llvm_pin.env',
+// Resolve caller-owned host selections before importing target dependency pins.
+const executionHost = hostPlatform();
+const explicitHost = process.env.CJCJ_TOOLCHAIN !== undefined
+  || process.env[`CJCJ_TOOLCHAIN_${executionHost.toUpperCase()}`] !== undefined;
+const hostToolchain = explicitHost ? requireHostToolchain(process.env, executionHost)
+  : readHostToolchainPin(executionHost);
+for (const pin of ['llvm_pin.env',
   `ast_support/${platform}.env`, `colour-runtime/${platform}.env`, `llvm-dylib/${platform}.env`]) {
   const pinFile = new URL(`../${pin}`, import.meta.url);
   if (!fs.existsSync(pinFile)) continue;
@@ -65,7 +73,8 @@ for (const pin of ['host_sdk_pin.env', 'llvm_pin.env',
 const inputsWork = process.env.CJCJ_BOOTSTRAP_INPUTS_WORK
   || path.join(process.env.RUNNER_TEMP || process.env.CANGJIE_BUILD_ROOT || '.', 'bootstrap-inputs');
 const buildRoot = process.env.CANGJIE_BUILD_ROOT || '';
-const hostSdk = await prepareHostSdk(platform, inputsWork);
+process.env.CJCJ_TOOLCHAIN = hostToolchain;
+const hostSdk = await prepareHostSdk(executionHost, inputsWork);
 const base = hostSdk.path;
 
 // Every source cell consumes its independently pinned repaired host artifact.
@@ -77,7 +86,7 @@ const hostLlvm = prepareHostLlvm();
 function completeAstInput(archive) {
   return archive && ['SHA256SUMS', 'include/cangjie',
     'include/flatbuffers/StdAstFormat_generated.h', 'schema/StdAstFormat.fbs',
-    'third_party/flatbuffers/bin/flatc', 'third_party/flatbuffers/include',
+    `third_party/flatbuffers/bin/flatc${sdkPlatform(platform).exe}`, 'third_party/flatbuffers/include',
     'third_party/flatbuffers/cangjie', 'third_party/flatbuffers/modules']
     .every(name => fs.existsSync(path.join(path.dirname(archive), name)));
 }
@@ -95,7 +104,7 @@ const astSupport = pinnedInput(process.env.CJCJ_BOOTSTRAP_AST_ARTIFACT || proces
   astFallbacks, '', process.env.AST_SUPPORT_SHA256, 'ast-support archive SHA256');
 if (!completeAstInput(astSupport)) throw new Error(`AST_SUPPORT_INPUTS_INCOMPLETE: ${astSupport}`);
 
-const tuple = await prepareColourTuple({work: inputsWork});
+const tuple = await prepareColourTuple({work: inputsWork, platform});
 const colourTuple = tuple.directory;
 
 process.env.CJCJ_BOOTSTRAP_COLOUR_RT = bootstrapArtifact(process.env.CJCJ_BOOTSTRAP_COLOUR_RT,
@@ -107,14 +116,13 @@ await writeRuntimeSelection(runtimePinFile);
 const llvmSha = process.env.LLVM_SHA || '';
 if (!/^[0-9a-f]{40}$/.test(llvmSha)) throw new Error('LLVM_SHA pin missing');
 
-const cppSrc = firstExisting([
+const requestedCpp = process.env.CJCJ_BOOTSTRAP_CPP_SRC || process.env.CANGJIE_CPP_SRC;
+if (requestedCpp && !fs.existsSync(requestedCpp)) throw Error('SHIM_HEADERS_EXPLICIT_MISSING '+requestedCpp);
+const explicitCpp = firstExisting([
   process.env.CJCJ_BOOTSTRAP_CPP_SRC,
   process.env.CANGJIE_CPP_SRC,
-  process.env.CANGJIE_WORKSPACE
-    ? path.join(process.env.CANGJIE_WORKSPACE, 'cangjie_compiler')
-    : '',
 ]);
-if (!cppSrc) throw new Error('cpp-src dir missing (CANGJIE_WORKSPACE/cangjie_compiler after fetch)');
+const cppSrc = explicitCpp || path.join(inputsWork, 'cjo-shim-headers');
 
 const cjcjSha = process.env.CJCJ_BOOTSTRAP_CJCJ_SHA
   || process.env.GITHUB_SHA
@@ -142,6 +150,14 @@ if (process.platform === 'linux' || darwin || process.env.CJCJ_BOOTSTRAP_DYLIB_A
     throw new Error(`LLVM_DYLIB_SHA256_MISMATCH expected=${dylibPin} actual=${colourDigest} file=${colourLlvm}`);
   }
   const dylibManifest = JSON.parse(fs.readFileSync(path.join(dylibRoot, 'manifest.json'), 'utf8'));
+  if ((runtimeSelection.overrideRef || dylibManifest.runtime_sha !== undefined)
+      && dylibManifest.runtime_sha !== runtimeSelection.runtimeRef) {
+    throw new Error('LLVM_DYLIB_RUNTIME_MISMATCH');
+  }
+  if (dylibManifest.runtime_sha !== undefined && (dylibManifest.platform !== platform
+      || dylibManifest.library !== path.basename(colourLlvm))) {
+    throw new Error('LLVM_DYLIB_PLATFORM_MISMATCH');
+  }
   if (dylibManifest.llvm_sha !== llvmSha || dylibManifest.sha256 !== dylibPin
       || JSON.stringify(dylibManifest.targets) !== JSON.stringify(['X86', 'ARM', 'AArch64'])) {
     throw new Error(`LLVM_DYLIB_MANIFEST_MISMATCH: ${dylibRoot}`);
@@ -152,12 +168,11 @@ if (process.platform === 'linux' || darwin || process.env.CJCJ_BOOTSTRAP_DYLIB_A
 
 // Explicit external trees remain caller-owned; default fetched sources are
 // prepared here before gha_run.sh can enter stage0.
-if (!process.env.CJCJ_BOOTSTRAP_CPP_SRC && !process.env.CANGJIE_CPP_SRC) {
+if (!explicitCpp) {
   await prepareCppHeaders(cppSrc, runtimePinFile);
-} else {
-  // Caller ownership does not authorize headers from a different source.
-  await verifyCppHeaders(cppSrc, runtimePinFile);
 }
+// A caller-supplied prepared header tree is consumed by the same real compiler;
+// do not reconstruct a second header-inventory certification here.
 
 const exported = {
   ...colourInputs,
@@ -169,7 +184,10 @@ const exported = {
   RUNTIME_REF: runtimeSelection.runtimeRef,
   RUNTIME_SRC_URL: runtimeSelection.sourceUrl,
   CJCJ_BOOTSTRAP_BASE: path.resolve(base),
+  CJCJ_BOOTSTRAP_BASE_ARCHIVE: hostSdk.archive,
   CJCJ_BOOTSTRAP_CPP_SRC: path.resolve(cppSrc),
+  ...(process.env.CJCJ_BOOTSTRAP_SHIM_SOURCES ? {CJCJ_BOOTSTRAP_SHIM_SOURCES: path.resolve(process.env.CJCJ_BOOTSTRAP_SHIM_SOURCES)} : {}),
+  ...(process.env.CJCJ_BOOTSTRAP_SHIM_SOURCE_SELECTION ? {CJCJ_BOOTSTRAP_SHIM_SOURCE_SELECTION: process.env.CJCJ_BOOTSTRAP_SHIM_SOURCE_SELECTION} : {}),
   CJCJ_BOOTSTRAP_CJCJ_SHA: cjcjSha,
   CJCJ_BOOTSTRAP_HOST_LLVM_SO: hostLlvm.file,
   CJCJ_BOOTSTRAP_HOST_LLVM_SHA256: hostLlvm.sha256,

@@ -8,10 +8,11 @@ const execute = promisify(execFile);
 for (const [name, script, marker] of [
   ['bootstrap independent compiler identity', '../../ci/cangjie-test/verify_bootstrap_identity.py', 'BOOTSTRAP_OFFICIAL_TARGET rejected= True'],
   ['seven-way upstream result triage', '../../ci/cangjie-test/verify_classify.py', 'CLASSIFY_EXACT_DELTA'],
-  ['compiler producer and frontend SDK entry', '../../ci/bootstrap/test_compiler_identity.py', 'SDK_VERIFY_FRONTEND_RESTORED'],
+  ['compiler producer and frontend SDK entry', '../../ci/bootstrap/compiler-identity.integration.test.mjs', 'SDK_VERIFY_FRONTEND_RESTORED'],
 ]) {
   test(name, {concurrency: true}, async () => {
-    const result = await execute('python3', [fileURLToPath(new URL(script, import.meta.url))]);
+    const result = await execute(script.endsWith('.mjs') ? process.execPath : 'python3',
+      [fileURLToPath(new URL(script, import.meta.url))]);
     assert.match(result.stdout, new RegExp(marker));
     process.stdout.write(result.stdout);
   });

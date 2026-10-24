@@ -10,9 +10,16 @@ const repo = path.resolve(import.meta.dirname, '../..');
 const driver = path.join(repo, 'ci', 'smoke', 'run_smoke.mjs');
 
 function smoke(t, {runtimeLibDir, transcript = ''}) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'smoke-isolation-'));
-  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
+  const evidence = process.env.PRODUCER_EVIDENCE_TEST_ROOT;
+  if (evidence) fs.mkdirSync(evidence, {recursive: true});
+  const root = fs.mkdtempSync(path.join(evidence || os.tmpdir(), 'smoke-isolation-'));
+  if (!evidence) t.after(() => fs.rmSync(root, {recursive: true, force: true}));
   const argv = path.join(root, 'argv.log');
+  const sdk = path.join(root, 'official-sdk');
+  for (const directory of ['modules', 'lib', 'runtime/lib', 'third_party/llvm/lib', 'tools/lib']) {
+    fs.mkdirSync(path.join(sdk, directory), {recursive: true});
+  }
+  transcript = transcript.replaceAll('/official/sdk', sdk);
   // A compiler stub that records argv and then "builds" by copying the expected
   // sample output, so the driver proceeds to the run phase as it would for real.
   const stub = path.join(root, 'cjcj');
@@ -47,9 +54,11 @@ function smoke(t, {runtimeLibDir, transcript = ''}) {
     `console.error(${JSON.stringify(transcript)});`,
     'process.exit(0);',
   ].join('\n'), {mode: 0o755});
-  const env = {...process.env, CJCJ_PATCHED_RUNTIME_LIB_DIR: runtimeLibDir, CANGJIE_HOME: '/official/sdk'};
+  const env = {...process.env, CJCJ_PATCHED_RUNTIME_LIB_DIR: runtimeLibDir, CANGJIE_HOME: sdk};
   const result = spawnSync('npx', ['--yes', 'zx@8', driver, stub, path.join(root, 'work')],
-    {env, encoding: 'utf8', timeout: 600_000});
+    {cwd: root, env, encoding: 'utf8', timeout: 600_000});
+  fs.writeFileSync(path.join(root, 'invocation-result.json'), JSON.stringify({status: result.status,
+    signal: result.signal, stdout: result.stdout, stderr: result.stderr, error: result.error?.message}, null, 2));
   const invocations = fs.existsSync(argv)
     ? fs.readFileSync(argv, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line))
     : [];

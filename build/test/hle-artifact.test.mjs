@@ -1,3 +1,4 @@
+import {hlePayloadFixture} from './hle-payload-fixture.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import fs from 'node:fs';
@@ -18,7 +19,11 @@ function stage(contents = 'hle-binary') {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hle-artifact-'));
   const binary = path.join(root, 'hle');
   fs.writeFileSync(binary, contents);
-  return {root, binary, sidecar: path.join(root, HLE_PROVENANCE)};
+  fs.mkdirSync(path.join(root,'tools/dtsparser'),{recursive:true});
+  fs.writeFileSync(path.join(root,'tools/dtsparser/analysis.js'),'parser fixture');
+  fs.mkdirSync(path.join(root,'tools/bin'),{recursive:true});
+  hlePayloadFixture(root);
+  return {root, binary, payloads:[{path:'tools/dtsparser',type:'directory'},{path:'tools/bin/node',type:'file'}], sidecar: path.join(root, HLE_PROVENANCE)};
 }
 
 const verify = ({binary, sidecar}) => verifyComponentProvenance({
@@ -37,7 +42,7 @@ test('an hle sidecar round-trips and pins the binary it was written for', async 
   const fixture = stage();
   try {
     const written = await writeComponentProvenance({
-      component: 'hle', binary: fixture.binary, destination: fixture.sidecar,
+      component: 'hle', binary: fixture.binary, destination: fixture.sidecar, payloads:fixture.payloads,
       platform: 'linux-x64', repository: REPOSITORY, commit: COMMIT,
     });
     assert.equal(written.component, 'hle');
@@ -55,7 +60,7 @@ test('a swapped hle binary is rejected rather than installed', async () => {
   const fixture = stage();
   try {
     await writeComponentProvenance({
-      component: 'hle', binary: fixture.binary, destination: fixture.sidecar,
+      component: 'hle', binary: fixture.binary, destination: fixture.sidecar, payloads:fixture.payloads,
       platform: 'linux-x64', repository: REPOSITORY, commit: COMMIT,
     });
     fs.writeFileSync(fixture.binary, 'someone-elses-hle');

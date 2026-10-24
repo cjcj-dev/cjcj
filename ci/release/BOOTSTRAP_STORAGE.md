@@ -80,3 +80,28 @@ manifest identifies runtime `4c4cbf53b44497103e76e2a47a8fa35f5d7a7287`, while
 Persistent storage does not resolve that separate source identity mismatch (#859);
 the 9733 input remains pending #855. These temporary prereleases must be removed
 before the formal 0.0.2 release; no formal release or latest is created here.
+
+## Native platform continuation
+
+The current single-platform official pin is retained byte for byte. Its legacy
+untagged payload belongs only to `linux_x86_64`. Explicit version-2 registries
+select a platform entry before acquisition; a version-1 candidate carrying its
+own `platform` is also accepted. Missing ARM/Darwin pins never fall back to x64.
+The manifest platform, selected pin digest, and independent sums override remain
+checked by the shared `bootstrap_tuple.mjs` consumer, including the existing
+`acquire_fixed_tuple.mjs DESTINATION FIXED_TOOLS` entry. No retired shell
+consumer is restored.
+
+`build-fixed-llc.yml` -> `build-llvm-tools.yml` selects exactly the requested
+native platforms, builds tools with the existing sccache action, and creates
+one `static-llvm-tuple-<platform>` artifact per selected Linux/Darwin host.
+Darwin preserves `ld64.lld` through compressed tools, executable tuple and
+checksums; Linux preserves `ld.lld`. The persist job identifies each immutable
+artifact separately. The output is a candidate pin; this source change does
+not update official pins or establish native execution qualification.
+
+Full Darwin bootstrap still requires its native host LLVM, AST/std/runtime and
+SDK inputs plus the separately reviewed #904 integration. Source readiness
+continues to report those missing producers. #906 Apple capture, #907 installed
+alternate-stack behavior, device execution and full SDK packaging are separate
+uncompleted acceptance obligations.

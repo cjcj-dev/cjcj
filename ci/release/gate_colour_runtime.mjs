@@ -2,8 +2,8 @@
 // Complete the original runtime gate with independent build/language SDKs.
 import fs from 'node:fs';
 import path from 'node:path';
-import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
+import {assertLanguageState,GC_UNIT_LANGUAGE_DONE} from '../../build/srcbuild/gc-unit-gate.mjs';
 
 const entry = fileURLToPath(import.meta.url);
 const entryIndex = process.argv.findIndex(value => path.resolve(value) === entry);
@@ -22,9 +22,11 @@ const source = fs.realpathSync(args[0]);
 const sdkInput = fs.realpathSync(args[1]);
 const active = path.resolve(args[2]);
 const installed = fs.realpathSync(args[3]);
-const repo = fileURLToPath(new URL('../..', import.meta.url));
-const digest = file => createHash('sha256').update(fs.readFileSync(file)).digest('hex');
-const field = (text, key) => text.split('\n').find(line => line.startsWith(`${key}=`))?.slice(key.length + 1) || '';
+const {hostPlatform} = await import('../host-toolchain-pin.mjs');
+const {sdkPlatform} = await import('../bootstrap/sdk-platform.mjs');
+const platform = process.env.PLATFORM_TUPLE || hostPlatform();
+const native = sdkPlatform(platform);
+if (native.os !== 'linux') throw new Error('COLOUR_RT_GATE_PLATFORM requires Linux');
 // Every subprocess inherits a zero soft/hard core limit. Preserve its raw rc.
 async function run(command, commandArgs, env = process.env, capture = false) {
   const result = await $({env, stdio: capture ? 'pipe' : 'inherit', verbose: false, nothrow: true})
@@ -33,59 +35,35 @@ async function run(command, commandArgs, env = process.env, capture = false) {
   return result.stdout;
 }
 
-// Select the build that produced the installed SO; its resolver validates the
-// published target pair. No other configuration may satisfy the gate.
-const installedSha = digest(path.join(installed, 'runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so'));
-const temp = path.join(source, 'runtime/output/temp');
-const manifests = fs.readdirSync(temp).flatMap(name => {
-  const file = path.join(temp, name, 'runtime-build-config.txt');
-  if (!fs.existsSync(file)) return [];
-  const text = fs.readFileSync(file, 'utf8');
-  return field(text, 'RUNTIME_SHA256') === installedSha ? [text] : [];
-});
-if (manifests.length !== 1) {
-  console.error(`COLOUR_RT_GATE_BUILD_IDENTITY count=${manifests.length}`);
-  process.exit(2);
-}
-const config = field(manifests[0], 'CONFIG_ID');
-const env = {...process.env, GCV2_RUNTIME_CONFIG: config};
-const target = (await run('bash', [path.join(source, 'runtime/build/resolve_runtime_output.sh'),
-  path.join(source, 'runtime'), config], env, true)).trim();
-let buildSdk = sdkInput;
-if (!buildSdkMode) {
-  const pin = JSON.parse(fs.readFileSync(path.join(repo, 'ci/h48_language_tuple_pin.json'), 'utf8'));
-  const activated = await run('python3', [path.join(repo, 'ci/release/language_tuple.py'), 'activate',
-    '--root', sdkInput, '--manifest-sha256', pin.manifest_sha256,
-    '--compiler-sha256', pin.compiler_sha256, '--target', target,
-    '--target-runtime-sha256', installedSha,
-    '--target-boundscheck-sha256', field(manifests[0], 'BOUNDSCHECK_SHA256'),
-    '--output', active], env, true);
-  fs.writeFileSync(`${active}.env`, activated);
-  buildSdk = path.join(active, 'sdk');
-}
-// LANGUAGE_TOOLCHAIN.md:37-43: only the build SDK must contain this target.
-// The qualified language SDK retains its original runtime and SDK.lock.json.
-for (const name of ['libcangjie-runtime.so', 'libboundscheck.so']) {
-  await run('cmp', [path.join(target, name), path.join(buildSdk, 'runtime/lib/linux_x86_64_cjnative', name)], env);
-}
-const languageInputs = `${active}-language`;
-if (fs.existsSync(languageInputs)) {
-  console.error(`COLOUR_RT_LANGUAGE_DEST_EXISTS ${languageInputs}`);
-  process.exit(2);
-}
-await run(process.execPath, [path.join(repo, 'ci/release/download_pinned.mjs'),
-  'cjcj-dev/cjcj', '1504', languageInputs], env);
-const languageSdk = path.join(languageInputs, 'sdk');
-const host = path.join(languageSdk, 'host/compiler');
-Object.assign(env, {
-  GC_UNIT_BUILD_SDK: buildSdk,
-  GC_UNIT_LANGUAGE_SDK: languageSdk,
-  GC_UNIT_CJC_RUNTIME_LIB_DIR: host,
-  GC_UNIT_LANGUAGE_QUALIFICATION: path.join(source, 'runtime/tests/gc_unit/language_toolchain_qualification.json'),
-  GC_UNIT_COLOUR_CHECKER: path.join(repo, 'ci/bootstrap/std_runtime_colour.py'),
-  GC_UNIT_COLOUR_HOST_RUNTIME: path.join(host, 'libcangjie-runtime.so'),
-  CANGJIE_HOME: buildSdk, CJC: path.join(languageSdk, 'bin/cjc'),
-  GCV2_RUNTIME_LIB_DIR: target, GC_UNIT_GATE_LANGUAGE_TESTS: 'all',
-});
-// Original complete gate: cache qualification and actual language assertions.
+// Consume the normal installation and its selected CMake build directly.
+// Strip/install transformations do not require an unstripped publication copy.
+const target=path.join(installed,'runtime/lib',native.tuple);
+let env={...process.env};delete env.GCV2_RUNTIME_CONFIG;
+fs.mkdirSync(active,{recursive:true});
+const status=path.join(active,'gate.status');fs.rmSync(status,{force:true});fs.rmSync(active+'.env',{force:true});
+const languageSdk = sdkInput;
+const {compilerRuntimeDirectory}=await import('../../build/lib/runtime-split.mjs');
+const {buildConfig}=await import('../../build/lib/config.mjs');
+const {cleanSdkEnvironment}=await import('../bootstrap/sdk-platform.mjs');
+const configObject=buildConfig({workspace:active,consumerSdk:languageSdk,targetKey:platform === 'linux_aarch64' ? 'linux-aarch64' : 'linux-x64'});
+const hostSdk=path.join(languageSdk,'.host');
+const host=compilerRuntimeDirectory({sdk:languageSdk,hostSdk,target:configObject.target});
+for(const name of ['libcangjie-runtime.so','libboundscheck.so'])
+  await run('cmp',[path.join(target,name),path.join(languageSdk,'runtime/lib',native.tuple,name)],env);
+env={...cleanSdkEnvironment(languageSdk,platform,env),
+  GC_UNIT_LANGUAGE_SDK:languageSdk,GC_UNIT_CJC_RUNTIME_LIB_DIR:host,
+   GC_UNIT_RUNTIME_TUPLE:native.tuple,
+   GC_UNIT_CJC_RUNTIME_TUPLE:configObject.target.spec.hostRuntimeTuple||configObject.target.spec.runtimeTuple,
+  GC_UNIT_COLOUR_HOST_RUNTIME:path.join(hostSdk,`runtime/lib/${native.tuple}/libcangjie-runtime.so`),
+  CANGJIE_HOME:languageSdk,CJC:path.join(languageSdk,'bin/cjc'),
+  GCV2_RUNTIME_LIB_DIR:target,GCV2_RUNTIME_OUTPUT_ROOT:path.join(source,'runtime/CMakebuild/runtime-staging'),
+  GCV2_RUNTIME_BUILD_DIR:path.join(source,'runtime/CMakebuild'),GC_UNIT_GATE_STATUS:status,
+  GC_UNIT_GATE_LANGUAGE_TESTS:'all',GC_UNIT_OUT:active,
+};
+// Original complete gate executes both consumers and writes this run result.
 await run('bash', [path.join(source, 'runtime/tests/gc_unit/gate_gc_unit.sh')], env);
+
+assertLanguageState(status,GC_UNIT_LANGUAGE_DONE,'release.gc_unit_language');
+// The packaging step consumes exactly the installed pair exercised here.
+const quote = value => "'" + value.replaceAll("'", "'\\''") + "'";
+fs.writeFileSync(active+'.env', `GCV2_RUNTIME_LIB_DIR=${quote(target)}\nGC_UNIT_LANGUAGE_SDK=${quote(languageSdk)}\n`);

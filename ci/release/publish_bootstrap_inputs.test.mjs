@@ -16,8 +16,12 @@ function fixture(check) {
     const bytes = Buffer.from('#!/bin/sh\necho bootstrap-fixture\n');
     fs.writeFileSync(path.join(root, 'bin/llc'), bytes);
     const list = [{path: 'bin/llc', mode: 0o755, sha256: digest(bytes)}];
+    for (const [name, content] of [['MANIFEST', 'PLATFORM=linux_aarch64\n'], ['SHA256SUMS', 'fixture sums\n']]) {
+      fs.writeFileSync(path.join(root, name), content);
+      list.push({path: name, mode: 0o644, sha256: digest(content)});
+    }
     fs.writeFileSync(path.join(dir, 'files.json'), JSON.stringify(list));
-    const zip = spawnSync('zip', ['-q', path.join(dir, 'artifact.zip'), 'bin/llc'], {cwd: root});
+    const zip = spawnSync('zip', ['-q', path.join(dir, 'artifact.zip'), 'bin/llc', 'MANIFEST', 'SHA256SUMS'], {cwd: root});
     assert.equal(zip.status, 0, zip.stderr?.toString());
     const preload = path.join(dir, 'transport.mjs');
     fs.writeFileSync(preload, `
@@ -51,17 +55,19 @@ globalThis.fetch = async (url, options = {}) => {
       root, path.join(dir, 'files.json'), path.join(dir, 'pin.json')], {
       encoding: 'utf8', env: {...process.env, GITHUB_REPOSITORY: 'cjcj-dev/cjcj',
         GITHUB_RUN_ID: '123', GITHUB_RUN_ATTEMPT: '1', GITHUB_SHA: 'a'.repeat(40),
-        BOOTSTRAP_ARTIFACT_ID: '456', GITHUB_TOKEN: '', FIXTURE_DIR: dir, ...extra}});
-    check({dir, root, bytes, run});
+        BOOTSTRAP_ARTIFACT_ID: '456', BOOTSTRAP_PLATFORM: 'linux_aarch64', GITHUB_TOKEN: '', FIXTURE_DIR: dir, ...extra}});
+    check({dir, root, bytes, list, run});
   } finally { fs.rmSync(dir, {recursive: true, force: true}); }
 }
 
-test('publisher reads back both stores before emitting equal pinned digests', () => fixture(({dir, bytes, run}) => {
+test('publisher reads back both stores before emitting equal pinned digests', () => fixture(({dir, bytes, list, run}) => {
   const result = run();
   assert.equal(result.status, 0, result.stderr);
   const pin = JSON.parse(fs.readFileSync(path.join(dir, 'pin.json')));
-  assert.deepEqual(pin.files, [{path: 'bin/llc', mode: 0o755, asset: 101,
-    artifact_sha256: digest(bytes), release_sha256: digest(bytes)}]);
+  assert.deepEqual(pin.files, list.map(file => ({path: file.path, mode: file.mode, asset: 101,
+    artifact_sha256: file.sha256, release_sha256: file.sha256})));
+  assert.equal(pin.platform, 'linux_aarch64');
+  assert.equal(pin.tuple_sums_sha256, digest('fixture sums\n'));
   const requests = fs.readFileSync(path.join(dir, 'requests.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
   const urls = requests.filter(r => r.url).map(r => r.url);
   assert.ok(urls.findIndex(u => u.endsWith('/456/zip')) < urls.findIndex(u => u.endsWith('/releases')));
@@ -84,13 +90,21 @@ test('publisher replaced release bytes reject at named digest before pin or publ
   console.log('ASSERT publisher replaced-release digest rejection executed');
 }));
 
-test('publisher fixed-artifact readback rejects changed input before creating a release', () => fixture(({dir, root, run}) => {
+test('publisher fixed-artifact readback rejects changed input before creating a release', () => fixture(({dir, root, list, run}) => {
   fs.writeFileSync(path.join(root, 'bin/llc'), 'changed after artifact upload');
-  fs.writeFileSync(path.join(dir, 'files.json'), JSON.stringify([{path: 'bin/llc', mode: 0o755,
-    sha256: digest(Buffer.from('changed after artifact upload'))}]));
+  list[0].sha256 = digest(Buffer.from('changed after artifact upload'));
+  fs.writeFileSync(path.join(dir, 'files.json'), JSON.stringify(list));
   const result = run();
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /bootstrap digest mismatch: bin\/llc/);
   assert.doesNotMatch(fs.readFileSync(path.join(dir, 'requests.jsonl'), 'utf8'), /"method":"POST"/);
   console.log('ASSERT publisher fixed-artifact identity rejection executed');
+}));
+
+test('publisher refuses wrong platform before creating a prerelease', () => fixture(({dir, run}) => {
+  const result = run({BOOTSTRAP_PLATFORM: 'linux_x86_64'});
+  assert.equal(result.status, 65, result.stderr);
+  assert.match(result.stderr, /BOOTSTRAP_TUPLE_PLATFORM_MISMATCH expected=linux_x86_64 actual=linux_aarch64/);
+  assert.equal(fs.existsSync(path.join(dir, 'requests.jsonl')), false);
+  console.log('ASSERT publisher-platform-rejection rc=65 before remote writes');
 }));

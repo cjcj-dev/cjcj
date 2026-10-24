@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -92,11 +93,20 @@ test('pinned 174db8f compiler files pass verify only after fetch run restores th
     for (const dirName of ['cangjie_runtime', 'cangjie_tools', 'cangjie_stdx']) {
       fs.mkdirSync(path.join(workspace, dirName));
     }
-    const config = buildConfig({
-      workspace,
-      buildRoot: path.join(workspace, 'buildtools'),
-      cangjieVersion: '0.0.1',
-    });
+    // The fetch entry now checks real repositories before patching. Preserve
+    // the fixed 174db file bytes, but identify these small fixture Git objects
+    // honestly rather than claiming they are the complete pinned compiler.
+    const repoOverrides={};
+    for(const name of ['compiler','runtime','tools','stdx','llvm','cjpm']) {
+      const root=path.join(workspace,name==='llvm'?'cangjie_compiler/third_party/llvm-project':name==='cjpm'?'cjpm-source':'cangjie_'+name);
+      fs.mkdirSync(root,{recursive:true});
+      const git=(...args)=>{const r=spawnSync('git',['-C',root,...args],{encoding:'utf8'});assert.equal(r.status,0,r.stderr);return r.stdout.trim();};
+      git('init','-q');git('add','.');
+      git('-c','user.name=Zxilly','-c','user.email=zxilly@outlook.com','commit','--allow-empty','-qm','finite fetch fixture');
+      repoOverrides[name]={url:root,tag:git('rev-parse','HEAD')};
+    }
+    const config = buildConfig({workspace,buildRoot:path.join(workspace,'buildtools'),
+      cangjieVersion:'0.0.1',repoOverrides});
     const cjdb = path.join(config.repoPath('compiler'), 'third_party', 'cmake', 'BuildCJDB.cmake');
     const src = path.join(config.repoPath('compiler'), 'src', 'CMakeLists.txt');
     assert.throws(

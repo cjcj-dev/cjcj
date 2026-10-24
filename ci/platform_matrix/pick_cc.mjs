@@ -8,8 +8,7 @@ import path from 'node:path';
 // works on windows-2025 (kernel 26100) — R27 probe evidence. The wrapper is
 // plain C, so probe the installed compilers with a trivial source and use the
 // first one that actually produces an executable.
-export async function pickWindowsCC() {
-  const candidates = [
+export async function pickWindowsCC(candidates = [
     process.env.CC,
     'C:\\msys64\\mingw64\\bin\\clang.exe',
     'C:\\mingw64\\bin\\clang.exe',
@@ -17,7 +16,7 @@ export async function pickWindowsCC() {
     'C:\\mingw64\\bin\\gcc.exe',
     'C:\\msys64\\clang64\\bin\\clang.exe',
     'clang',
-  ].filter(Boolean);
+  ].filter(Boolean)) {
   const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'cc-probe-'));
   const src = path.join(temp, 'probe.c');
   await fs.writeFile(src, 'int main(void) { return 0; }\n');

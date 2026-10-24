@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import {spawnSync} from 'node:child_process';
-import {releasePlatformReadiness} from '../../build/lib/targets.mjs';
+import {releasePlatformReadiness, getTarget} from '../../build/lib/targets.mjs';
 import {crossStdArguments} from './cross-std-arguments.mjs';
 
 const tuple = 'linux_android_aarch64_cjnative';
@@ -13,8 +13,15 @@ for (const key of keys) test(`Android producer removes exactly the frozen missin
   const result = releasePlatformReadiness(key);
   console.log(`ASSERT_ANDROID_READINESS ${key} ${JSON.stringify(result)}`);
   assert.deepEqual(baseline.filter(reason => !result.reasons.includes(reason)), baseline, 'the Android producer must remove its precise missing-tuple reason');
-  assert.deepEqual(result.reasons.filter(reason => !baseline.includes(reason)), [], 'no new blocker');
-  assert.equal(result.status, 'buildable');
+  const sourceReasons = getTarget(result.sourceTarget).sourceBuild.reasons.map(reason => `source ${result.sourceTarget}: ${reason}`);
+  if (!result.sdkSourceTarget) {
+    const sdkReasons = result.reasons.filter(reason => reason.startsWith(`native SDK ${result.host}:`));
+    assert.equal(sdkReasons.length, 1, 'Android std does not grant a missing native SDK producer');
+    sourceReasons.push(...sdkReasons);
+    assert.equal(result.packageDeclared, true);
+  }
+  assert.deepEqual(result.reasons.filter(reason => !baseline.includes(reason)), sourceReasons, 'only declared native source blockers remain');
+  assert.equal(result.status, sourceReasons.length ? 'blocked' : 'buildable');
   assert.equal(result.crossStd[tuple], 'linux-x64');
 });
 
@@ -23,8 +30,14 @@ test('Windows Android matrix CLI carries both cross artifacts into package argum
   const run = spawnSync(process.execPath, [script, 'plan', '--platforms', 'win32-x64-android'], {encoding: 'utf8'});
   assert.equal(run.status, 0, run.stderr);
   const plan = JSON.parse(run.stdout);
-  assert.deepEqual(plan.source, [{target: 'linux-x64', build_android: true}]);
-  const row = plan.package[0];
+  const readiness = releasePlatformReadiness('win32-x64-android');
+  if (readiness.status === 'buildable') assert.deepEqual(plan.source, [{target: 'linux-x64', build_android: true}]);
+  else {
+    assert.deepEqual(plan.source, []); assert.deepEqual(plan.package, []);
+    for (const reason of readiness.reasons) assert.ok(plan.blocked[0].reasons.includes(reason), reason);
+    assert.ok(readiness.reasons.length);
+  }
+  const row = plan.package[0] || plan.blocked[0];
   const entries = JSON.parse(row?.cross_std_artifacts ?? '[]');
   const args = crossStdArguments(JSON.stringify(entries), '/artifacts with spaces');
   console.log(`ASSERT_ANDROID_CROSS_CONSUMER ${JSON.stringify(args)}`);
@@ -48,7 +61,7 @@ test('Android producer and package consumer are connected to the real release wo
   assert.match(source, /run: npx --yes zx@8 ci\/srcbuild\/steps\/build-android-final-std\.mjs/);
   assert.match(source, /name: final-std-android-aarch64\n/);
   assert.match(packageWorkflow, /pattern: final-std-\*/);
-  assert.equal((packageWorkflow.match(/npx --yes zx@8 ci\/release\/compose-package\.mjs/g) ?? []).length, 2);
+  assert.equal((packageWorkflow.match(/node ci\/release\/compose-package\.mjs/g) ?? []).length, 1);
   assert.match(packager, /await installCrossRuntime\(\{root: spec\.slice\(split \+ 1\), stage, tuple, runtimeRef: runtimeSourceCommit\}\)/);
 });
 

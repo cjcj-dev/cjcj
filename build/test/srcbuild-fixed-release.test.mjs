@@ -41,7 +41,7 @@ for (const mode of ['release', 'depot']) {
 for (const defect of ['asset', 'sums', 'unavailable']) {
   test(`native shared acquisition rejects ${defect} before fixed-tool publication`, () => fixture(inputs => {
     inputs.env.CJCJ_BOOTSTRAP_SOURCE = 'release';
-    if (defect === 'asset') fs.writeFileSync(inputs.env.FIXTURE_RELEASE_FILE, 'changed release bytes');
+    if (defect === 'asset') fs.writeFileSync(path.join(inputs.artifact, 'SHA256SUMS'), 'changed release bytes');
     if (defect === 'sums') inputs.env.LLVM_TUPLE_SUMS_SHA = '0'.repeat(64);
     if (defect === 'unavailable') inputs.env.FIXTURE_RELEASE_UNAVAILABLE = '1';
     const result = acquire(inputs);

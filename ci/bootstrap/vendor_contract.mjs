@@ -4,9 +4,12 @@ import {fileURLToPath} from 'node:url';
 import {spawnSync} from 'node:child_process';
 
 export const vendorFiles = Object.freeze([
-  'bootstrap.sh', 'sdk_build.sh', 'test_bootstrap.sh',
-  'stage1_host_runner.sh', 'stage1_host_identities.txt',
+  'bootstrap.mjs', 'sdk_build.sh',
+  'stage1_host_identities.txt',
 ]);
+// Import records identify the historical tools bytes. The replacement ESM
+// entry is this repository's product, authenticated against its fixed commit.
+const importedFiles = new Set(['sdk_build.sh', 'stage1_host_identities.txt']);
 
 function git(repo, args) {
   const result = spawnSync('git', ['-C', repo, ...args], {maxBuffer: 16 * 1024 * 1024});
@@ -34,7 +37,7 @@ export function checkVendor({sourceRepo = process.cwd(), commit = 'HEAD', consum
   for (const name of vendorFiles) {
     const item = {name, errors: []};
     const values = records.split('\n').filter(line => line.startsWith(`TOOLS_${name}=`));
-    if (values.length !== 1 || !/^[0-9a-f]{64}$/.test(values[0].slice(values[0].indexOf('=') + 1))) {
+    if (importedFiles.has(name) && (values.length !== 1 || !/^[0-9a-f]{64}$/.test(values[0].slice(values[0].indexOf('=') + 1)))) {
       item.errors.push({kind: 'import-record'});
     }
     const relative = `ci/bootstrap/${name}`;

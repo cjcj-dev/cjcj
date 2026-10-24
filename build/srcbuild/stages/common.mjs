@@ -1,11 +1,13 @@
 // Port of cangjie-build/src/cangjie_build/stages/_common.py.
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import {BuildError} from '../../lib/errors.mjs';
 import {getLogger} from '../../lib/logging.mjs';
 import {run} from '../../lib/runner.mjs';
 import {hostLoaderPath} from '../../lib/runtime-split.mjs';
+import {atomicJson} from '../../../ci/bootstrap/sdk-flow.mjs';
 import * as mingw from '../../toolchain/mingw.mjs';
 import * as staticLibs from '../../toolchain/static-libs.mjs';
 
@@ -17,19 +19,31 @@ function joinPathsep(...parts) {
 }
 
 export function consumerSdk(config, output = 'output') {
-  const sdk = config.consumerSdk || path.join(config.repoPath('compiler'), output);
-  if (config.consumerSdk) requireDir(sdk, {stage: 'consumer.sdk'});
+  const sdk = config.producerSdk || config.consumerSdk || path.join(config.softwareDir,'cangjie');
+  if (config.consumerSdk && !config.producerSdk) requireDir(sdk, {stage: 'consumer.sdk'});
   return sdk;
 }
 
-export function baseEnv(config) {
+// Old standalone adapters may only carry an environment; a resolved source
+// build always supplies the selected plan and takes precedence over that input.
+export function bootstrapHostSdk(config, env = process.env) {
+  return config.selection?.bootstrapHost.install ?? config.officialSdkRoot ?? env.CJCJ_SRCBUILD_HOST_SDK;
+}
+
+export function baseEnv(config, base = process.env) {
   const spec = config.target.spec;
-  const dryRun = process.env.CANGJIE_BUILD_DRY_RUN === '1';
+  const hostSdk = bootstrapHostSdk(config, base);
+  const dryRun = base.CANGJIE_BUILD_DRY_RUN === '1';
   if (!dryRun && (process.platform !== spec.nodePlatform || process.arch !== spec.nodeArch)) {
     throw new BuildError(
       'environment',
       `target ${spec.key} requires host ${spec.nodePlatform}/${spec.nodeArch}, current ${process.platform}/${process.arch}`,
     );
+  }
+  if (spec.nodePlatform === 'win32') {
+    for (const [name, value] of [['CJCJ_NATIVE_LLVM_BIN', spec.llvmBinDir], ['CJCJ_NATIVE_OPENSSL_LIB', spec.opensslLibDir]]) {
+      if (!value || !path.isAbsolute(value)) throw new BuildError('environment', `${name} must name an absolute native dependency directory`);
+    }
   }
   for (const directory of [spec.llvmBinDir, spec.opensslLibDir].filter(Boolean)) {
     if (!dryRun && !fs.statSync(directory, {throwIfNoEntry: false})?.isDirectory()) {
@@ -37,6 +51,8 @@ export function baseEnv(config) {
     }
   }
   const env = {
+    ...base,
+    ...(hostSdk ? {CJCJ_SRCBUILD_HOST_SDK: hostSdk} : {}),
     ARCH: spec.arch,
     SDK_NAME: spec.sdkName,
     CANGJIE_VERSION: config.cangjieVersion,
@@ -49,7 +65,7 @@ export function baseEnv(config) {
     CJ_IR_VERIFIER_MODE: 'strict',
     CJ_IR_VERIFIER_REPORT: null,
   };
-  const verifierReport = process.env.CJCJ_SRCBUILD_VERIFIER_REPORT_ACTIVE || '';
+  const verifierReport = base.CJCJ_SRCBUILD_VERIFIER_REPORT_ACTIVE || '';
   if (verifierReport) {
     if (!path.isAbsolute(verifierReport)) {
       throw new BuildError('environment', 'CJCJ_SRCBUILD_VERIFIER_REPORT_ACTIVE must be an absolute path');
@@ -75,7 +91,7 @@ export function baseEnv(config) {
     '-fdebug-compilation-dir=.',
   ].join(' ');
   for (const flag of ['CFLAGS', 'CXXFLAGS']) {
-    env[flag] = [process.env[flag], sourcePrefixMap].filter(Boolean).join(' ');
+    env[flag] = [base[flag], sourcePrefixMap].filter(Boolean).join(' ');
   }
   // Official Linux builds select lld; the macOS guide relies on Apple's linker.
   if (spec.os === 'linux' || spec.crossCompile) env.LDFLAGS = '-fuse-ld=lld';
@@ -92,6 +108,12 @@ export function baseEnv(config) {
   }
 
   const cangjieHome = consumerSdk(config);
+  // The caller's whole environment is handed through (see `...base` above), so a
+  // loader variable that is already present may be an inherited value rather than
+  // this function's own platform derivation.  Track the derivation explicitly:
+  // asking whether the key is merely non-empty would let an inherited value
+  // suppress the dependency/tools prefixes below.
+  let derivedLoaderPath = false;
   if (fs.statSync(cangjieHome, {throwIfNoEntry: false})?.isDirectory()) {
     env.CANGJIE_HOME = cangjieHome;
     extraPathDirs.unshift(path.join(cangjieHome, 'tools', 'bin'));
@@ -99,34 +121,34 @@ export function baseEnv(config) {
     const runtimeLib = path.join(cangjieHome, 'runtime', 'lib', config.target.runtimeLibSubdir(config.buildType));
     if (fs.statSync(runtimeLib, {throwIfNoEntry: false})?.isDirectory()) {
       env[spec.loaderEnv] = hostLoaderPath({
-        hostSdk: process.env.CJCJ_SRCBUILD_HOST_SDK,
+        hostSdk,
         targetSdk: cangjieHome,
         target: config.target,
-        inherited: joinPathsep(...ldPaths, process.env[spec.loaderEnv] || ''),
+        inherited: joinPathsep(...ldPaths, base[spec.loaderEnv] || ''),
         includeTargetLlvm: false,
       });
+      derivedLoaderPath = true;
     }
     const toolsLib = path.join(cangjieHome, 'tools', 'lib');
-    if (!env[spec.loaderEnv] && fs.statSync(toolsLib, {throwIfNoEntry: false})?.isDirectory()) {
+    if (!derivedLoaderPath && fs.statSync(toolsLib, {throwIfNoEntry: false})?.isDirectory()) {
       ldPaths.unshift(toolsLib);
     }
   }
-  const hostSdk = process.env.CJCJ_SRCBUILD_HOST_SDK;
   if (hostSdk && fs.statSync(hostSdk, {throwIfNoEntry: false})?.isDirectory()) {
     extraPathDirs.unshift(path.join(hostSdk, 'tools', 'bin'));
     extraPathDirs.unshift(path.join(hostSdk, 'bin'));
   }
 
-  if (config.consumerSdk) extraPathDirs.unshift(path.join(cangjieHome, 'bin'));
+  if (!config.target.spec.crossCompile && (config.consumerSdk || config.producerSdk)) extraPathDirs.unshift(path.join(cangjieHome, 'bin'));
 
-  const stdxPath = path.join(
-    config.workspace, 'cangjie_stdx', 'target', config.target.stdxTargetSubdir(), 'static', 'stdx',
-  );
-  if (fs.statSync(stdxPath, {throwIfNoEntry: false})?.isDirectory()) env.CANGJIE_STDX_PATH = stdxPath;
-  if (!env[spec.loaderEnv] && ldPaths.length && spec.loaderEnv) {
-    env[spec.loaderEnv] = joinPathsep(...ldPaths, process.env[spec.loaderEnv] || '');
+  const stdxPath = config.stdxProfile === 'sdk-tools'
+    ? path.join(config.repoPath('stdx'), 'target', config.target.stdxTargetSubdir(), 'static', 'stdx')
+    : path.join(consumerSdk(config, config.target.primaryCompilerOutput()), 'stdx', config.target.stdxTargetSubdir(), 'static', 'stdx');
+  env.CANGJIE_STDX_PATH = fs.statSync(stdxPath, {throwIfNoEntry: false})?.isDirectory() ? stdxPath : null;
+  if (!derivedLoaderPath && ldPaths.length && spec.loaderEnv) {
+    env[spec.loaderEnv] = joinPathsep(...ldPaths, base[spec.loaderEnv] || '');
   }
-  env.PATH = joinPathsep(...extraPathDirs, process.env.PATH || '');
+  env.PATH = joinPathsep(...extraPathDirs, spec.loaderEnv === 'PATH' ? env.PATH || base.PATH || '' : base.PATH || '');
   return env;
 }
 
@@ -177,22 +199,52 @@ export function cmakePrefixPathFor(config) {
   return parts.length ? parts.join(path.delimiter) : null;
 }
 
-export function mergedEnv(config, ...extra) {
-  const env = baseEnv(config);
+// A caller-supplied environment is a base, not a pair of loose key/value
+// overrides.  Deriving the child environment from process.env while the caller
+// decided what to do from its own environment silently strips that caller's
+// selection -- the child then runs without the host SDK the gate was enabled
+// for.  Take the base explicitly so a caller can hand over the environment it
+// actually ran under.
+export function envFrom(config, base, ...extra) {
+  const env = baseEnv(config, base);
   const cmakePrefix = cmakePrefixPathFor(config);
   if (cmakePrefix) env.CMAKE_PREFIX_PATH = cmakePrefix;
   for (const layer of extra) Object.assign(env, layer);
   return env;
 }
 
+export function mergedEnv(config, ...extra) {
+  return envFrom(config, process.env, ...extra);
+}
+
+export function explicitBuildJobs(maximum=Infinity, fallback) {
+  const value=process.env.CANGJIE_BUILD_JOBS??(fallback===undefined?undefined:String(fallback));
+  if(value===undefined)return [];
+  if(!/^[1-9][0-9]*$/.test(value)||!Number.isSafeInteger(Number(value)))
+    throw new BuildError('build.jobs','CANGJIE_BUILD_JOBS must be a positive integer');
+  return ['--jobs',String(Math.min(Number(value),os.availableParallelism(),maximum))];
+}
+
 export function pythonExe() {
   return 'python3';
 }
 
-export async function runBuildPy(config, cwd, args, {stageName, extraEnv} = {}) {
+export async function runBuildPy(config, cwd, args, {stageName, extraEnv, cpuSet} = {}) {
   requireDir(cwd, {stage: stageName});
   const envOverlay = extraEnv ? mergedEnv(config, extraEnv) : mergedEnv(config);
-  await run([pythonExe(), 'build.py', ...args], {cwd, envOverlay, stage: stageName});
+  const argv=[...(cpuSet?['taskset','-c',cpuSet]:[]), pythonExe(), 'build.py', ...args];
+  const observation={stage:stageName,argv,cwd};
+  try {
+    const result=await run(argv,{cwd,envOverlay,stage:stageName});
+    observation.exitCode=process.env.CANGJIE_BUILD_DRY_RUN==='1'?null:result.exitCode;
+  } catch(error) {
+    observation.exitCode=error.exitCode??null;observation.error=error.message;throw error;
+  } finally {
+    if(config.production&&process.env.CANGJIE_BUILD_DRY_RUN!=='1') {
+      config.production.commands.push(observation);
+      await atomicJson(path.join(config.workspace,'build/native-build.json'),config.production);
+    }
+  }
 }
 
 export function ensureDir(directory) {

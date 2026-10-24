@@ -1,4 +1,5 @@
 import path from 'node:path';
+import {CROSS_STD_BUILDS} from '../../build/lib/targets.mjs';
 
 export function crossStdArguments(text, root, {artifact = '', tuple = ''} = {}) {
   const entries = JSON.parse(text);
@@ -17,7 +18,7 @@ export function crossStdArguments(text, root, {artifact = '', tuple = ''} = {}) 
     tuples.add(tuple);
     const directory = path.join(root, artifact);
     const args = ['--cross-std-dir', `${tuple}=${directory}`];
-    if (tuple === 'linux_android_aarch64_cjnative') {
+    if (tuple === 'linux_android_aarch64_cjnative' || CROSS_STD_BUILDS.some(row => row.tuple === tuple)) {
       args.push('--cross-runtime-dir', `${tuple}=${path.join(directory, 'cross-runtime')}`);
     }
     return args;

@@ -153,6 +153,8 @@ function barrierMode(builtBy, supplied) {
 
 export async function writeStdProvenance({
   sourceDir,
+  sourceRevision,
+  sourceRoot,
   installPrefix,
   compiler,
   buildSdk = process.env.CANGJIE_HOME || '',
@@ -163,7 +165,21 @@ export async function writeStdProvenance({
   failClosed = process.env.CJSTD_PROVENANCE_FAIL_CLOSED === '1' || STD_PROVENANCE_FAIL_CLOSED_DEFAULT,
   now = new Date(),
 }) {
-  const stdCommit = sourceCommit(sourceDir);
+  // Native passes its checked revision and the consumed repository root. A
+  // Git repository surrounding an extracted archive is not that archive's Git.
+  // Callers omitting sourceRevision keep the historical CJSTD_COMMIT contract.
+  let stdCommit;
+  if (sourceRevision === undefined) stdCommit = sourceCommit(sourceDir);
+  else {
+    const repository = commandOutput('git', ['rev-parse', '--show-toplevel'], sourceDir);
+    const ownsGit = repository && (sourceRoot === undefined
+      || await fs.realpath(repository) === await fs.realpath(sourceRoot));
+    if (ownsGit) {
+      const actual = commandOutput('git', ['rev-parse', 'HEAD'], sourceDir);
+      if (actual !== sourceRevision) throw new Error('STD_SOURCE_REVISION actual '+actual+' expected '+sourceRevision);
+      stdCommit = sourceCommit(sourceDir, sourceRevision);
+    } else stdCommit = validateCommit(sourceRevision, 'STD_SOURCE_REVISION');
+  }
   const probedCommit = await compilerCommit(compiler);
   const probedState = classifyStamp(probedCommit);
   // Three states, three sentences. Collapsing the middle one into the first is

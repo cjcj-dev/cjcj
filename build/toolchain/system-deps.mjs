@@ -308,8 +308,18 @@ export async function installDarwin(config, {
   await runCommand(['xcrun', '--sdk', 'macosx', '--show-sdk-path'], {stage: 'system_deps.xcode'});
 }
 
+// The workflow provisions the native Windows toolchain; the same public CLI
+// verifies it for manual callers. No Linux cross dependency installer is used.
+export async function verifyWindows({runCommand=run}={}) {
+  const cmake=await runCommand(['cmake','--version'],{stage:'system_deps.cmake',capture:true,logOutput:false});
+  assertCmakeVersion(cmake.stdout);
+  for(const tool of ['clang','ninja','git','tar','patch'])
+    await runCommand([tool,'--version'],{stage:'system_deps.windows',capture:true,logOutput:false});
+}
+
 export async function install(config) {
   assertNativeHost(config);
+  if (config.target.spec.nodePlatform === 'win32') return verifyWindows();
   if (config.target.spec.os === 'darwin') return installDarwin(config);
   if (config.target.spec.nodePlatform === 'linux') return installLinux(config);
   throw new BuildError('system_deps', `unsupported source-build host: ${process.platform}`);

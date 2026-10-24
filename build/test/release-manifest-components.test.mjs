@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import test from 'node:test';
+import {readHostToolchainPin} from '../../ci/host-toolchain-pin.mjs';
 import {pathToFileURL} from 'node:url';
 import {
   BASE_SDK_PROVENANCE,
@@ -45,12 +46,11 @@ const writerRunner = [
   'await writeReleaseManifest(options);',
 ].join('\n');
 
-test('base SDK provenance maps every release platform to its nightly archive', () => {
-  const version = REVIEWED_GATE_HOST_TOOLCHAIN;
+test('base SDK provenance maps every release platform to its nightly archive', async t => {
   const expected = new Map([
     ['linux-x64', [
-      'cangjie-sdk-linux-x64-1.3.0-alpha.20260925001050.tar.gz', 204818301,
-      'fde68a5713968f5f875e013355d73aab8bd95bb1fbfd1f1b6a29b1adcf48943b',
+      'cangjie-sdk-linux-x64-1.3.0-alpha.20261009001050.tar.gz', 208435636,
+      '1e23b2b64263dfc2267a3f459e9b13840278e84db1797a6733db68f49885df5c',
     ]],
     ['linux-aarch64', [
       'cangjie-sdk-linux-aarch64-1.3.0-alpha.20260925001050.tar.gz', 206550010,
@@ -70,18 +70,36 @@ test('base SDK provenance maps every release platform to its nightly archive', (
     ]],
   ]);
   for (const [platform, [archive, size, sha256]] of expected) {
-    const value = baseSdkDownload(platform, version);
-    assert.equal(value.archive, archive);
-    assert.ok(value.url.endsWith(`/${version.replace(/^nightly-/, '')}/${archive}`));
-    assert.equal(value.size, size);
-    assert.equal(value.sha256, sha256);
+    await t.test(platform, () => {
+      const version = readHostToolchainPin(platform);
+      const value = baseSdkDownload(platform, version);
+      assert.equal(value.archive, archive);
+      assert.equal(value.version, platform === 'linux-x64'
+        ? '1.3.0-alpha.20261009001050' : '1.3.0-alpha.20260925001050');
+      assert.equal(value.url, `https://gitcode.com/Cangjie/nightly_build/releases/download/${value.version}/${archive}`);
+      assert.equal(value.size, size);
+      assert.equal(value.sha256, sha256);
+    });
+  }
+});
+
+test('base SDK provenance rejects unregistered and other-platform releases', async t => {
+  for (const platform of ['linux-x64', 'linux-aarch64', 'darwin-x64', 'darwin-arm64', 'windows-x64']) {
+    await t.test(platform, () => {
+      for (const version of [
+        'nightly-1.3.0-alpha.20990101001050',
+        platform === 'linux-x64' ? 'nightly-1.3.0-alpha.20260925001050' : 'nightly-1.3.0-alpha.20261009001050',
+      ]) {
+        assert.throws(() => baseSdkDownload(platform, version), /base SDK release has no pinned archive identity/);
+      }
+    });
   }
 });
 
 test('base SDK provenance refuses an archive outside the pinned digest', async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'base-sdk-pin-negative-'));
   t.after(() => fs.rm(root, {recursive: true, force: true}));
-  const expected = baseSdkDownload('linux-x64', REVIEWED_GATE_HOST_TOOLCHAIN);
+  const expected = baseSdkDownload('linux-x64', readHostToolchainPin('linux-x64'));
   const archive = path.join(root, expected.archive);
   const destination = path.join(root, BASE_SDK_PROVENANCE);
   await fs.writeFile(archive, 'tampered base SDK archive\n');
@@ -91,7 +109,7 @@ test('base SDK provenance refuses an archive outside the pinned digest', async t
       archive,
       destination,
       platform: 'linux-x64',
-      toolchain: REVIEWED_GATE_HOST_TOOLCHAIN,
+      toolchain: readHostToolchainPin('linux-x64'),
     }),
     new RegExp(`base SDK archive SHA-256 mismatch for linux-x64: expected ${expected.sha256}, got [0-9a-f]{64}`),
   );
@@ -102,7 +120,7 @@ test('base SDK provenance is atomically retained with a content-addressed archiv
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'base-sdk-durable-'));
   t.after(() => fs.rm(root, {recursive: true, force: true}));
   const toolchain = path.join(root, 'private-toolchain');
-  const expected = baseSdkDownload('linux-x64', REVIEWED_GATE_HOST_TOOLCHAIN);
+  const expected = baseSdkDownload('linux-x64', readHostToolchainPin('linux-x64'));
   const archive = path.join(root, expected.archive);
   const inputSidecar = path.join(root, BASE_SDK_PROVENANCE);
   const contents = Buffer.from('fixture base SDK archive\n');
@@ -130,7 +148,7 @@ test('base SDK provenance is atomically retained with a content-addressed archiv
     sidecar: inputSidecar,
     toolchainDir: toolchain,
     platform: 'linux-x64',
-    toolchain: REVIEWED_GATE_HOST_TOOLCHAIN,
+    toolchain: readHostToolchainPin('linux-x64'),
   });
   assert.equal(await fs.readFile(retained.cachedArchive, 'utf8'), contents.toString());
   assert.equal(retained.provenance.artifact.size, contents.length);
@@ -147,7 +165,7 @@ test('base SDK provenance is atomically retained with a content-addressed archiv
       sidecar: inputSidecar,
       toolchainDir: toolchain,
       platform: 'linux-x64',
-      toolchain: REVIEWED_GATE_HOST_TOOLCHAIN,
+      toolchain: readHostToolchainPin('linux-x64'),
     }),
     /base SDK provenance archive size mismatch|base SDK provenance archive SHA-256 mismatch/,
   );
@@ -168,7 +186,7 @@ function digest(contents) {
 }
 
 function baseSdkProvenance(platform) {
-  const download = baseSdkDownload(platform, REVIEWED_GATE_HOST_TOOLCHAIN);
+  const download = baseSdkDownload(platform, readHostToolchainPin(platform));
   return {
     schema: 1,
     component: 'base-sdk',
@@ -195,7 +213,7 @@ async function writeGateApparatus(stage, platform) {
     schema: 1,
     component: GATE_APPARATUS_COMPONENT,
     platform,
-    gate_host_toolchain: REVIEWED_GATE_HOST_TOOLCHAIN,
+    gate_host_toolchain: readHostToolchainPin('linux-x64'),
     base_sdk: {
       source: baseSdk.source,
       release_repository: baseSdk.release.repository,
@@ -271,7 +289,7 @@ test('release manifest keeps every component and requires frozen clean stamps', 
     platform: 'linux-x64',
     runtimeArtifact: runtime,
     stdProvenance: provenance,
-    baseSdkId: REVIEWED_GATE_HOST_TOOLCHAIN,
+    baseSdkId: readHostToolchainPin('linux-x64'),
     baseSdkProvenance: baseSdkProvenance('linux-x64'),
     gateApparatusArtifact,
     cjcjCommit: CJCJ_SHA,
