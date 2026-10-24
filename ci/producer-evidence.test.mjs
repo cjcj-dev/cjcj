@@ -428,3 +428,69 @@ for (const mode of ['cancel-zero', 'cancel-ignore']) {
     assert.equal((await calls(work)).length, 1); assert.equal((await fs.readFile(f.trace, 'utf8')).match(/argv0=/g).length, 1);
   });
 }
+
+for (const boundary of ['spawn-return', 'finish-write', 'execution-write']) {
+  test(`direct cancellation owns the ${boundary} boundary and preserves raw child status`, async () => {
+    const f = await setup(`cancel-boundary-${boundary}`);
+    const root = path.join(f.root, 'evidence');
+    const hook = path.join(f.root, 'schedule-boundary.mjs');
+    // A finite scheduler forces the two source windows without retrying a race.
+    // It changes neither collector status nor the production cancellation bound.
+    await fs.writeFile(hook, `
+import cp from 'node:child_process';
+import fs from 'node:fs';
+import promises from 'node:fs/promises';
+import {syncBuiltinESMExports} from 'node:module';
+const boundary = ${JSON.stringify(boundary)};
+const producer = ${JSON.stringify(f.producer)};
+const trace = ${JSON.stringify(f.trace)};
+let fired = false;
+if (boundary === 'spawn-return') {
+  const original = cp.spawn;
+  cp.spawn = function(command, ...args) {
+    const child = original.call(this, command, ...args);
+    if (command === producer) {
+      const deadline = Date.now() + 3000;
+      while (!fs.existsSync(trace) && Date.now() < deadline) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1);
+      if (!fs.existsSync(trace)) throw Error('controlled producer never became ready');
+      fired = true; process.kill(process.pid, 'SIGTERM');
+    }
+    return child;
+  };
+  syncBuiltinESMExports();
+} else {
+  const original = promises.writeFile;
+  promises.writeFile = async function(file, ...args) {
+    const target = boundary === 'finish-write' ? 'stdout.log' : 'execution.json';
+    if (!fired && String(file).endsWith('/' + target)) {
+      fired = true; process.kill(process.pid, 'SIGTERM');
+      // Hold the real persistence window open for signal delivery, not a retry.
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+    return original.call(this, file, ...args);
+  };
+}
+process.on('exit', () => fs.writeFileSync(${JSON.stringify(path.join(f.root, 'schedule.json'))}, JSON.stringify({boundary, fired})));
+`);
+    const env = {...f.env, EVIDENCE_TEST_MODE: boundary === 'spawn-return' ? 'cancel-ignore' : ''};
+    const args = ['--import', hook, path.join(repo, 'ci/producer-evidence.mjs'), '--role', 'package',
+      '--name', 'internal', '--source-tree', f.tree, '--root', root, '--', f.producer];
+    const result = spawnSync(process.execPath, args, {cwd: f.tree, env, encoding: 'utf8', timeout: 6000});
+    const [call] = await calls(root);
+    const actual = {boundary, rc: result.status, signal: result.signal, error: result.error?.message,
+      child: call?.child_rc, child_signal: call?.child_signal, collector: call?.collector_rc, state: call?.state};
+    await fs.writeFile(path.join(f.root, 'boundary-result.json'), JSON.stringify({...actual, args, stdout: result.stdout, stderr: result.stderr}, null, 2));
+    target('cancel_boundary_owned', actual);
+    assert.equal(result.status, 143, `target collector owns cancellation at ${boundary}`);
+    assert.equal(result.signal, null); assert.equal(result.error, undefined);
+    assert.deepEqual(JSON.parse(await fs.readFile(path.join(f.root, 'schedule.json'))), {boundary, fired: true});
+    assert.equal(call.state, 'CANCELLED'); assert.equal(call.collector_rc, 143);
+    assert.equal(call.child_rc, boundary === 'spawn-return' ? -9 : 0);
+    assert.equal(call.child_signal, boundary === 'spawn-return' ? 'SIGKILL' : null);
+    const summary = JSON.parse(await fs.readFile(path.join(root, 'package-internal.result.json')));
+    assert.equal(summary.execution_rc, call.child_rc); assert.equal(summary.collector_rc, 143);
+    const execution = JSON.parse(await fs.readFile(path.join(call.file, '..', 'execution.json')));
+    assert.equal(execution.exitCode, boundary === 'spawn-return' ? null : 0);
+    assert.equal(execution.signal, call.child_signal); assert.equal(execution.collector_rc, 143);
+  });
+}

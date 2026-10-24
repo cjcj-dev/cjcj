@@ -148,7 +148,7 @@ for (const [name, changedFile, mutate] of scanControls) {
         'ci/bootstrap/sdk-platform.mjs', 'ci/bootstrap/sdk-io.mjs', 'ci/bootstrap/sdk-flow.mjs',
         'ci/bootstrap/sdk-command-lifetime.mjs', 'ci/bootstrap/sdk-std-resume.mjs',
         'ci/bootstrap/sdk-source.mjs', 'ci/bootstrap/sdk-install-entries.mjs', 'ci/build-resources.mjs',
-        'build/lib/targets.mjs', 'build/lib/errors.mjs',
+        'build/lib/targets.mjs', 'build/lib/errors.mjs', 'build/srcbuild/tool-layout.mjs',
         '.github/workflows/build-release-package.yml',
         'ci/cangjie-test/README.md', 'ci/host-runtime/release.json',
       ]) {

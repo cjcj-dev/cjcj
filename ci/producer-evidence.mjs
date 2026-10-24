@@ -290,42 +290,64 @@ export async function diagnose(call) {
 
 export async function runDirect(call, {passthrough = false} = {}) {
   const {command, env, record, directory} = call;
-  record.state = 'RUNNING'; await call.update();
   let stdout = ''; let stderr = ''; let error; let cancelled; let killTimer;
-  const stdoutFile = await fs.open(path.join(directory, 'stdout.log'), 'w');
-  const stderrFile = await fs.open(path.join(directory, 'stderr.log'), 'w');
-  const child = spawn(command[0], command.slice(1), {cwd: record.cwd, env, stdio: ['inherit', 'pipe', 'pipe']});
-  child.stdout.on('data', chunk => { stdout += chunk; writeSync(stdoutFile.fd, chunk); if (passthrough) process.stdout.write(chunk); });
-  child.stderr.on('data', chunk => { stderr += chunk; writeSync(stderrFile.fd, chunk); if (passthrough) process.stderr.write(chunk); });
-  const cancel = signal => {
-    if (cancelled) return;
-    cancelled = signal;
-    record.cancellation_signal = signal;
-    record.cancellation = {requested_signal: signal, grace_ms: 1000, escalation_signal: null};
+  let child; let childClosed = false;
+  const forward = signal => {
+    if (!child || childClosed) return;
     child.kill(signal);
     killTimer = setTimeout(() => {
       record.cancellation.escalation_signal = 'SIGKILL';
       record.cancellation.escalation_sent = child.kill('SIGKILL');
     }, record.cancellation.grace_ms);
   };
+  const cancel = signal => {
+    if (cancelled) return;
+    cancelled = signal;
+    record.cancellation_signal = signal;
+    record.cancellation = {requested_signal: signal, grace_ms: 1000, escalation_signal: null};
+    forward(signal);
+  };
   const term = () => cancel('SIGTERM'); const interrupt = () => cancel('SIGINT');
+  // The child may publish readiness before spawn returns to this process.
+  // Own cancellation before launch, and until all direct-run evidence is saved.
   process.on('SIGTERM', term); process.on('SIGINT', interrupt);
+  try {
+  record.state = 'RUNNING'; await call.update();
+  const stdoutFile = await fs.open(path.join(directory, 'stdout.log'), 'w');
+  const stderrFile = await fs.open(path.join(directory, 'stderr.log'), 'w');
+  child = spawn(command[0], command.slice(1), {cwd: record.cwd, env, stdio: ['inherit', 'pipe', 'pipe']});
+  child.stdout.on('data', chunk => { stdout += chunk; writeSync(stdoutFile.fd, chunk); if (passthrough) process.stdout.write(chunk); });
+  child.stderr.on('data', chunk => { stderr += chunk; writeSync(stderrFile.fd, chunk); if (passthrough) process.stderr.write(chunk); });
   child.on('error', value => { error = value; });
-  const closed = new Promise(resolve => child.on('close', (exitCode, signal) => resolve({exitCode, signal, stdout, stderr, error})));
+  const closed = new Promise(resolve => child.on('close', (exitCode, signal) => {
+    childClosed = true; clearTimeout(killTimer);
+    resolve({exitCode, signal, stdout, stderr, error});
+  }));
+  if (cancelled) forward(cancelled);
   record.child_pid = child.pid ?? null;
   await call.update();
   const result = await closed;
-  clearTimeout(killTimer);
   await stdoutFile.close(); await stderrFile.close();
-  process.off('SIGTERM', term); process.off('SIGINT', interrupt);
   await call.finish(result);
-  if (cancelled) {
+  const saveCancellation = async () => {
+    if (!cancelled) return;
     record.state = 'CANCELLED'; record.collector_rc = 128 + os.constants.signals[cancelled];
     await call.update();
-  }
+  };
+  await saveCancellation();
   result.collector_rc = record.collector_rc;
   await fs.writeFile(path.join(directory, 'execution.json'), JSON.stringify(result, null, 2));
+  // A signal during the final write still belongs to this invocation.
+  if (cancelled && result.collector_rc !== 128 + os.constants.signals[cancelled]) {
+    await saveCancellation();
+    result.collector_rc = record.collector_rc;
+    await fs.writeFile(path.join(directory, 'execution.json'), JSON.stringify(result, null, 2));
+  }
   return result;
+  } finally {
+    clearTimeout(killTimer);
+    process.off('SIGTERM', term); process.off('SIGINT', interrupt);
+  }
 }
 
 async function main() {
