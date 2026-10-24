@@ -202,7 +202,8 @@ const result=await receiveNativeRuntime(i);console.log('DIRECT_RECEIVE_REACHED '
    const r=spawnSync(process.execPath,[driver,file],{encoding:'utf8',env:{...env,FIXTURE_ELF:'1'}});
    fs.writeFileSync(path.join(root,'receive-'+name+'-result.json'),JSON.stringify({argv:[process.execPath,driver,file],rc:r.status,signal:r.signal,stdout:r.stdout,stderr:r.stderr}));
    if(expected===0){assert.equal(r.status,0,r.stdout+r.stderr);assert.match(r.stdout,/DIRECT_RECEIVE_REACHED/);}
-   else {assert.notEqual(r.status,0,'DIRECT_CURRENT_INPUT_REJECTION_TARGET '+r.stdout+r.stderr);assert.match(r.stdout+r.stderr,reason);}
+   else {assert.equal(r.status,expected,'DIRECT_CURRENT_INPUT_REJECTION_TARGET '+r.stdout+r.stderr);assert.equal(r.signal,null);assert.match(r.stdout+r.stderr,reason);}
+   return r;
  };
  if(scenario==='reentry') {
    invoke();invoke();invoke({root:path.join(root,'other-prefix')});
@@ -222,7 +223,12 @@ const result=await receiveNativeRuntime(i);console.log('DIRECT_RECEIVE_REACHED '
    invoke({},1,/language_toolchain.mjs/);fs.renameSync(mjs+'.absent',mjs);invoke();
    invoke({receiveOnly:true,runtimeCommit:'e'.repeat(40)},1,/NATIVE_RUNTIME_COMPONENT_IDENTITY/);
    const lib=path.join(install,'runtime/lib',platform+'_cjnative/libcangjie-runtime.so');const bytes=fs.readFileSync(lib);
-   fs.appendFileSync(lib,'changed');invoke({receiveOnly:true},1,/NATIVE_RUNTIME_COMPONENT_BYTES/);fs.writeFileSync(lib,bytes);invoke({receiveOnly:true});
+   const recorded=fs.readFileSync(path.join(install,'RUNTIME-INPUTS.json'));
+   fs.appendFileSync(lib,'changed');
+   const rejected=invoke({receiveOnly:true},1,/RUNTIME_SOURCE_ARTIFACT_BINDING/);
+   assert.match(rejected.stdout,/RUNTIME_PAIR_ASSERTION_REACHED/);
+   assert.deepEqual(fs.readFileSync(path.join(install,'RUNTIME-INPUTS.json')),recorded,'receiving changed bytes must not rewrite producer facts');
+   fs.writeFileSync(lib,bytes);invoke({receiveOnly:true});
    console.log('DIRECT_RECEIVE_BAD_INPUT_CONTROLS_TARGET');
  }
 }));
