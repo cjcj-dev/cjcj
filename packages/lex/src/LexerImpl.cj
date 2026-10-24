@@ -207,10 +207,20 @@ public class LexerImpl {
     private var resetLineOffsetsFromBase: ArrayList<Int64> = ArrayList<Int64>()
     private let lookAheadCache: ArrayList<Token> = ArrayList<Token>()
     private var resetLookAheadCache: ArrayList<Token> = ArrayList<Token>()
+    // Each cached fragment retains its original input-token index. Lookahead may
+    // contain several fragments of one token, or skip comments between tokens.
+    private let lookAheadTokenStarts: ArrayList<Int64> = ArrayList<Int64>()
+    private var resetLookAheadTokenStarts: ArrayList<Int64> = ArrayList<Int64>()
     private var enableScan: Bool = true
     private let tokens: ArrayList<Token> = ArrayList<Token>()
+    private let tokenOrigins: ArrayList<Int64> = ArrayList<Int64>()
+    private var inputTokenCount: Int64 = 0
     private var curToken: Int64 = 0
     private var resetToken: Int64 = 0
+    private var splitTokenOffset: Int64 = 0
+    private var resetSplitTokenOffset: Int64 = 0
+    private var lastTokenStart: Int64 = 0
+    private var resetLastTokenStart: Int64 = 0
     private var enableCollect: Bool = false
     private var enableCollectTokenStream: Bool = false
     private let collectTokensFindCache: HashSet<Position> = HashSet<Position>()
@@ -218,6 +228,7 @@ public class LexerImpl {
     private let tokenStream: TreeSet<Token> = TreeSet<Token>()
     private let stringPartsMap: HashMap<Token, ArrayList<StringPart>> = HashMap<Token, ArrayList<StringPart>>()
     private let comments: ArrayList<Token> = ArrayList<Token>()
+    private var resetCommentsSize: Int64 = 0
     private var success: Bool = true
     private let stringStarts: ArrayList<(Int64, Bool)> = ArrayList<(Int64, Bool)>()
     private let interpolations: ArrayList<Int64> = ArrayList<Int64>()
@@ -261,20 +272,23 @@ public class LexerImpl {
         this.enableScan = false
         lineOffsetsFromBase.add(0)
         EnterNormalMod()
-        for (token in inputTokens) {
+        inputTokenCount = inputTokens.size
+        for (index in 0..inputTokens.size) {
+            let token = inputTokens[index]
             if (token.kind == TokenKind.IDENTIFIER && LookupKeyword(token.Value()) != TokenKind.IDENTIFIER) {
                 let tempLexer = LexerImpl(token.Value(), diag, sm, LexerConfig(posBase: token.Begin()))
                 let expanded = tempLexer.GetTokens()
                 for (expandedToken in expanded) {
                     tokens.add(expandedToken)
+                    tokenOrigins.add(index)
                 }
             } else {
                 tokens.add(token)
+                tokenOrigins.add(index)
             }
         }
-        if (!tokens.isEmpty()) {
-            let lastToken = tokens[tokens.size - 1]
-            pos = Position(lastToken.Begin().fileID, lastToken.Begin().line, lastToken.Begin().column + 1)
+        if (!inputTokens.isEmpty()) {
+            pos = inputTokens[inputTokens.size - 1].End()
         } else {
             pos = Position(0u64, 0, 0)
         }
@@ -283,10 +297,13 @@ public class LexerImpl {
     public func Next(): Token {
         var token = Token(TokenKind.SENTINEL, "", BEGIN_POSITION, BEGIN_POSITION)
         if (lookAheadCache.isEmpty()) {
+            lastTokenStart = CurrentInputToken()
             token = Scan()
         } else {
+            lastTokenStart = lookAheadTokenStarts[0]
             token = lookAheadCache[0]
             lookAheadCache.remove(at: 0)
+            lookAheadTokenStarts.remove(at: 0)
         }
         CollectToken(token)
         return token
@@ -297,9 +314,11 @@ public class LexerImpl {
             return lookAheadCache
         }
         while (lookAheadCache.size < num) {
+            let tokenStart = CurrentInputToken()
             let token = Scan()
             if (token.kind != TokenKind.COMMENT) {
                 lookAheadCache.add(token)
+                lookAheadTokenStarts.add(tokenStart)
             }
             if (token.kind == TokenKind.END) {
                 break
@@ -337,11 +356,13 @@ public class LexerImpl {
             }
         }
         while (ret.size < num) {
+            let tokenStart = CurrentInputToken()
             let token = Scan()
             if (token.kind == TokenKind.COMMENT) {
                 continue
             }
             lookAheadCache.add(token)
+            lookAheadTokenStarts.add(tokenStart)
             if (token.kind != TokenKind.NL) {
                 ret.add(token)
             }
@@ -384,9 +405,13 @@ public class LexerImpl {
         pResetCurrent = pCurrent
         pResetNext = pNext
         resetLookAheadCache = copyTokenList(lookAheadCache)
+        resetLookAheadTokenStarts = copyOffsets(lookAheadTokenStarts)
         resetLineOffsetsFromBase = copyOffsets(lineOffsetsFromBase)
         lineResetOffsetsFromBase = lineOffsetsFromBase.size
         resetToken = curToken
+        resetSplitTokenOffset = splitTokenOffset
+        resetLastTokenStart = lastTokenStart
+        resetCommentsSize = comments.size
     }
 
     public func Reset(): Unit {
@@ -396,11 +421,20 @@ public class LexerImpl {
         for (token in resetLookAheadCache) {
             lookAheadCache.add(token)
         }
+        lookAheadTokenStarts.clear()
+        for (tokenStart in resetLookAheadTokenStarts) {
+            lookAheadTokenStarts.add(tokenStart)
+        }
         lineOffsetsFromBase.clear()
         for (offset in resetLineOffsetsFromBase) {
             lineOffsetsFromBase.add(offset)
         }
         curToken = resetToken
+        splitTokenOffset = resetSplitTokenOffset
+        lastTokenStart = resetLastTokenStart
+        while (comments.size > resetCommentsSize) {
+            comments.remove(at: comments.size - 1)
+        }
     }
 
     public func GetPosBase(): Position {
@@ -421,54 +455,48 @@ public class LexerImpl {
         ehEnabled = enabled
     }
 
-    @When[os == "Windows"]
     public func GetStrParts(t: Token): ArrayList<StringPart> {
         CJC_ASSERT(t.kind == TokenKind.STRING_LITERAL || t.kind == TokenKind.MULTILINE_STRING)
         if (let Some(parts) <- stringPartsMap.get(t)) {
             return parts
         }
         if (!enableScan) {
-            let syntheticInput = if (t.kind == TokenKind.MULTILINE_STRING) {
-                "\"\"\"\r\n" + ProcessQuotaMarks(t.Value()) + "\"\"\""
+            let multiLine = t.kind == TokenKind.MULTILINE_STRING
+            let contentBegin = if (multiLine) {
+                Position(t.Begin().fileID, t.Begin().line + 1, 1)
             } else {
-                "\"" + ProcessQuotaMarks(t.Value(), processSingle: true) + "\""
+                t.Begin() + 1
             }
-            let tempLexer = LexerImpl(syntheticInput, diag, source, LexerConfig(posBase: t.Begin()))
-            tempLexer.Scan()
-            for ((token, parts) in tempLexer.stringPartsMap) {
-                stringPartsMap.add(token, parts)
-            }
-        }
-        if (let Some(parts) <- stringPartsMap.get(t)) {
+            let tempLexer = LexerImpl(t.Value(), diag, source, LexerConfig(posBase: contentBegin))
+            let parts = tempLexer.ScanTokenStringParts(multiLine)
+            stringPartsMap.add(t, parts)
             return parts
         }
         CJC_ASSERT(false)
         return ArrayList<StringPart>()
     }
 
-    @When[os != "Windows"]
-    public func GetStrParts(t: Token): ArrayList<StringPart> {
-        CJC_ASSERT(t.kind == TokenKind.STRING_LITERAL || t.kind == TokenKind.MULTILINE_STRING)
-        if (let Some(parts) <- stringPartsMap.get(t)) {
-            return parts
-        }
-        if (!enableScan) {
-            let syntheticInput = if (t.kind == TokenKind.MULTILINE_STRING) {
-                "\"\"\"\n" + ProcessQuotaMarks(t.Value()) + "\"\"\""
-            } else {
-                "\"" + ProcessQuotaMarks(t.Value(), processSingle: true) + "\""
+    private func ScanTokenStringParts(multiLine: Bool): ArrayList<StringPart> {
+        let parts = ArrayList<StringPart>()
+        var begin: Int64 = 0
+        var beginPos = GetPos(begin)
+        stringStarts.add((0, multiLine))
+        while (pNext < bytes.size) {
+            ReadUTF8Char()
+            if (currentChar == Int64(b'\\')) {
+                ProcessEscape(0, true, false)
+            } else if (currentChar == Int64(b'$') && getNextChar(0) == b'{') {
+                let processed = ProcessStringInterpolation(begin, beginPos, parts, multiLine)
+                begin = processed[0]
+                beginPos = GetPos(begin)
+                if (processed[1] == 0) {
+                    break
+                }
             }
-            let tempLexer = LexerImpl(syntheticInput, diag, source, LexerConfig(posBase: t.Begin()))
-            tempLexer.Scan()
-            for ((token, parts) in tempLexer.stringPartsMap) {
-                stringPartsMap.add(token, parts)
-            }
         }
-        if (let Some(parts) <- stringPartsMap.get(t)) {
-            return parts
-        }
-        CJC_ASSERT(false)
-        return ArrayList<StringPart>()
+        parts.add(StringPart(StringPartKind.STR, input[begin..bytes.size], beginPos, GetPos(bytes.size)))
+        stringStarts.remove(at: stringStarts.size - 1)
+        return parts
     }
 
     public func GetTokens(): Array<Token> {
@@ -501,14 +529,18 @@ public class LexerImpl {
         }
     }
 
+    private func CurrentInputToken(): Int64 {
+        return if (curToken < tokenOrigins.size) { tokenOrigins[curToken] } else { inputTokenCount }
+    }
+
     public func GetCurrentToken(): Int64 {
-        var tokenNumber = curToken
-        for (token in lookAheadCache) {
-            if (token.kind != TokenKind.SENTINEL && token.kind != TokenKind.ILLEGAL && token.kind != TokenKind.END) {
-                tokenNumber--
-            }
-        }
-        return tokenNumber
+        return if (lookAheadTokenStarts.isEmpty()) { CurrentInputToken() } else { lookAheadTokenStarts[0] }
+    }
+
+    // The parser may have obtained a lookahead fragment without consuming it.
+    // Its original index cannot be recovered by subtracting one from curToken.
+    public func GetLastTokenStart(): Int64 {
+        return lastTokenStart
     }
 
     private func IsQuoteContext(): Bool {
@@ -530,11 +562,13 @@ public class LexerImpl {
             index = lookAheadCache.size
         }
         while (index < num) {
+            let tokenStart = CurrentInputToken()
             let token = Scan()
             if (token.kind == TokenKind.COMMENT && skipComments) {
                 continue
             }
             lookAheadCache.add(token)
+            lookAheadTokenStarts.add(tokenStart)
             if (!skipNewline || token.kind != TokenKind.NL) {
                 index++
             }
@@ -1754,9 +1788,11 @@ public class LexerImpl {
             while (currentChar == Int64(b'.') || currentChar == Int64(b'-') || currentChar == Int64(b' ')) {
                 isPackageIdent = true
                 let pLast = pCurrent
+                let prefix = res.Value() + byteString(UInt8(currentChar))
                 scanned = ScanBackquotedIdentifierPart(res)
                 res = scanned[0]
                 if (scanned[1]) {
+                    res.SetValue(prefix + res.Value())
                     continue
                 }
                 if (IsAdjacent(pLast, pCurrent) && success) {
@@ -1886,7 +1922,7 @@ public class LexerImpl {
         let stringParts = ArrayList<StringPart>()
         var begin = pStart + 1
         stringStarts.add((pStart, false))
-        tokenKind = if (isJString) { TokenKind.JSTRING_LITERAL } else { TokenKind.STRING_LITERAL }
+        let stringTokenKind = if (isJString) { TokenKind.JSTRING_LITERAL } else { TokenKind.STRING_LITERAL }
         var offset: Int64 = 1
         var beginPos = GetPos(begin)
         if (isJString) {
@@ -1916,7 +1952,7 @@ public class LexerImpl {
                 }
             }
         }
-        var ret = Token(tokenKind, input[pStart + offset..pCurrent], pos, GetPos(pNext))
+        var ret = Token(stringTokenKind, input[pStart + offset..pCurrent], pos, GetPos(pNext))
         ret.isSingleQuote = quoteChar == Int64(b'\'')
         if (needStringParts) {
             stringPartsMap.add(ret, stringParts)
@@ -1986,11 +2022,16 @@ public class LexerImpl {
     private func ScanInterpolationStringLiteralHoleBalancedText(endingChar: UInt8, allowNewline: Bool): Bool {
         while (true) {
             ReadUTF8Char()
-            if (isQuote(currentChar)) {
+            if (currentChar == Int64(b'J') && isQuote(Int64(getNextChar(0)))) {
+                if (!ScanStringOrJString(pCurrent, needStringParts: false, isJString: true)[1]) {
+                    return false
+                }
+            } else if (isQuote(currentChar)) {
                 if (!ScanInterpolationStringLiteralHoleBalancedTextString()) {
                     return false
                 }
-            } else if (currentChar == Int64(b'#') && getNextChar(0) == b'#') {
+            } else if (currentChar == Int64(b'#') &&
+                (getNextChar(0) == b'#' || getNextChar(0) == b'"' || getNextChar(0) == b'\'')) {
                 if (!ScanMultiLineRawString(pCurrent)[1]) {
                     return false
                 }
@@ -2148,7 +2189,7 @@ public class LexerImpl {
         )
         tok.delimiterNum = delimiterNum
         tok.isSingleQuote = quoteChar == Int64(b'\'')
-        return (tok, false)
+        return (tok, true)
     }
 
     private func ScanMultiLineComment(pStart: Int64, allowNewLine: Bool): (Token, Bool) {
@@ -2617,42 +2658,29 @@ public class LexerImpl {
         if (curToken >= tokens.size) {
             return Token(TokenKind.END, "", pos, pos)
         }
-        if (splitAmbiguousToken) {
-            var currentToken = tokens[curToken]
-            if (currentToken.kind == TokenKind.COALESCING) {
-                let curPos = currentToken.Begin()
-                let endPos = currentToken.End()
-                currentToken.kind = TokenKind.QUEST
-                currentToken.SetValuePos("?", curPos + 1, endPos + 1)
-                tokens[curToken] = currentToken
-                return Token(TokenKind.QUEST, "?", curPos, endPos)
-            }
-            if (currentToken.kind == TokenKind.RSHIFT_ASSIGN) {
-                let curPos = currentToken.Begin()
-                let endPos = currentToken.End()
-                currentToken.kind = TokenKind.GE
-                currentToken.SetValuePos(">=", curPos + 1, endPos + 1)
-                tokens[curToken] = currentToken
-                return Token(TokenKind.GT, ">", curPos, endPos)
-            }
-            if (currentToken.kind == TokenKind.RSHIFT) {
-                let curPos = currentToken.Begin()
-                let endPos = currentToken.End()
-                currentToken.kind = TokenKind.GT
-                currentToken.SetValuePos(">", curPos + 1, endPos + 1)
-                tokens[curToken] = currentToken
-                return Token(TokenKind.GT, ">", curPos, endPos)
-            }
-            if (currentToken.kind == TokenKind.GE) {
-                let curPos = currentToken.Begin()
-                let endPos = currentToken.End()
-                currentToken.kind = TokenKind.ASSIGN
-                currentToken.SetValuePos("=", curPos + 1, endPos + 1)
-                tokens[curToken] = currentToken
-                return Token(TokenKind.GT, ">", curPos, endPos)
-            }
-        }
         let token = tokens[curToken]
+        if (token.kind == TokenKind.END) {
+            return token
+        }
+        if (splitAmbiguousToken && (token.kind == TokenKind.COALESCING ||
+            token.kind == TokenKind.RSHIFT_ASSIGN || token.kind == TokenKind.RSHIFT || token.kind == TokenKind.GE)) {
+            let fragmentCount: Int64 = if (token.kind == TokenKind.RSHIFT_ASSIGN) { 3 } else { 2 }
+            let isAssign = (token.kind == TokenKind.GE || token.kind == TokenKind.RSHIFT_ASSIGN) &&
+                splitTokenOffset == fragmentCount - 1
+            let kind = if (token.kind == TokenKind.COALESCING) { TokenKind.QUEST } else if (isAssign) {
+                TokenKind.ASSIGN
+            } else {
+                TokenKind.GT
+            }
+            let begin = token.Begin() + splitTokenOffset
+            let fragment = Token(kind, TokenKindLiteral(kind), begin, begin + 1)
+            splitTokenOffset++
+            if (splitTokenOffset == fragmentCount) {
+                splitTokenOffset = 0
+                curToken++
+            }
+            return fragment
+        }
         curToken++
         return token
     }

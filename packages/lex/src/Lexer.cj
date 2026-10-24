@@ -117,6 +117,10 @@ public class Lexer {
     public func GetCurrentToken(): Int64 {
         return impl.GetCurrentToken()
     }
+
+    public func GetLastTokenStart(): Int64 {
+        return impl.GetLastTokenStart()
+    }
 }
 
 public func ProcessQuotaMarks(value: String, processSingle!: Bool = false): String {

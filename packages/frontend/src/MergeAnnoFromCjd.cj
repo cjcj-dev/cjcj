@@ -2,7 +2,9 @@ package cjcj::frontend
 
 import cjcj::ast.*
 import cjcj::ast.AnnotationKind as AstAnnotationKind
-import cjcj::utils.CJC_ASSERT
+import cjcj::utils.{CJC_ASSERT, STD_LIB_OPTION}
+import cjcj::sema.TypeManager as CjdTypeManager
+import cjcj::sema.{SameTy, GetTyFromASTDecl}
 import std.collection.*
 
 // Faithful port of C++ ExpandToAPILevel (Frontend/MergeAnnoFromCjd.cpp:27-60).
@@ -37,85 +39,315 @@ public func ExpandToAPILevel(invocation: MacroInvocation): Unit {
     expandedDecl.annotations.add(apilevelAnno)
 }
 
-// Faithful port of C++ IsSameType(Type, Type) (Frontend/MergeAnnoFromCjd.cpp:65-126).
-public func IsSameType(left: Type, right: Type): Bool {
-    CJC_ASSERT(Ty.IsTyCorrect(right.GetTy()))
-    let rightTy = right.GetTy().getOrThrow()
-    match (left.astKind) {
-        case ASTKind.REF_TYPE =>
-            let leftRefType = (left as RefType).getOrThrow()
-            if (right.astKind != ASTKind.REF_TYPE) {
-                return false
-            }
-            let rightRefTypeName = if (rightTy.IsPrimitive()) { rightTy.String() } else { rightTy.name }
-            if (leftRefType.ref.identifier.Val() != rightRefTypeName) {
-                return false
-            }
-            if (leftRefType.typeArguments.size != rightTy.typeArgs.size) {
-                return false
-            }
-            var idx: Int64 = 0
-            while (idx < leftRefType.typeArguments.size) {
-                if (!IsSameType(leftRefType.typeArguments[idx], rightTy.typeArgs[idx])) {
-                    return false
+// Resolve CJD spellings through the loaded package member tables. Those tables
+// retain the original Decl for re-exports; neither a package alias nor an import
+// alias changes that identity. Do not register the sidecar as a source package
+// (that would replace the real import manager's per-file/source state).
+func BindCjdTypeIdentities(source: Package, imports: ImportManager): Unit {
+    let types = CjdTypeManager()
+    let coreOption = imports.GetCoreDecl<EnumDecl>(STD_LIB_OPTION)
+    for (file in source.files) {
+        let scopes = ArrayList<Node>()
+        let walker = Walker(file, visitPre: { node: Node =>
+            scopes.add(node)
+            VisitAction.WALK_CHILDREN
+        }, visitPost: { node: Node =>
+            if (let Some(typeNode) <- (node as Type)) {
+                if (let Some(target) <- ResolveCjdTypeTarget(typeNode, file, source, imports, scopes)) {
+                    typeNode.SetTarget(target)
                 }
-                idx++
+                if (let Some(thisType) <- (typeNode as ThisType)) {
+                    var idx = scopes.size
+                    while (idx > 0) {
+                        idx--
+                        if (let Some(owner) <- (scopes[idx] as ClassDecl)) {
+                            if (let Some(target) <- ResolveCjdName(owner.identifier.Val(), file, source, imports)) {
+                                if (let Some(actual) <- (target as ClassDecl)) {
+                                    thisType.SetTy(types.GetClassThisTy(actual, []))
+                                }
+                            }
+                            break
+                        }
+                    }
+                } else if (let Some(semantic) <- CjdSemanticType(typeNode, types, coreOption: coreOption)) {
+                    typeNode.SetTy(semantic)
+                }
             }
-        case ASTKind.QUALIFIED_TYPE =>
-            let leftQualifiedType = (left as QualifiedType).getOrThrow()
-            if (right.astKind != ASTKind.QUALIFIED_TYPE) {
-                return false
+            scopes.remove(at: scopes.size - 1)
+            VisitAction.WALK_CHILDREN
+        })
+        walker.Walk()
+    }
+}
+
+private func UniqueCjdTarget(decls: ArrayList<Decl>): Option<Decl> {
+    var result: Option<Decl> = None
+    for (decl in decls) {
+        if (let Some(previous) <- result) {
+            if (!refEq(previous, decl)) {
+                return None
             }
-            let rightQualifiedType = (right as QualifiedType).getOrThrow()
-            if (leftQualifiedType.field.Val() != rightQualifiedType.field.Val()) {
-                return false
+        } else {
+            result = decl
+        }
+    }
+    return result
+}
+
+private func CjdPackageMember(packageName: String, name: String, imports: ImportManager): ArrayList<Decl> {
+    if (let Some(pkg) <- imports.GetPackage(packageName)) {
+        return imports.GetPackageMembersByName(pkg, name)
+    }
+    return ArrayList<Decl>()
+}
+
+private func ResolveCjdName(name: String, file: File, source: Package,
+    imports: ImportManager): Option<Decl> {
+    // A declaration in this package shadows imports.
+    let local = CjdPackageMember(source.fullPackageName, name, imports)
+    if (!local.isEmpty()) {
+        return UniqueCjdTarget(local)
+    }
+    let candidates = ArrayList<Decl>()
+    for (spec in file.imports) {
+        if (spec.IsImportMulti()) {
+            continue
+        }
+        let content = spec.content
+        if (spec.IsImportAll()) {
+            candidates.add(all: CjdPackageMember(content.GetPrefixPath(), name, imports))
+            continue
+        }
+        let visibleName = if (spec.IsImportAlias()) { content.aliasName.Val() } else { content.identifier.Val() }
+        if (visibleName != name) {
+            continue
+        }
+        // Package imports and declaration imports have different producers.
+        if (let Some(pkgDecl) <- imports.GetPackageDecl(content.GetImportedPackageName())) {
+            candidates.add(pkgDecl)
+        } else {
+            candidates.add(all: CjdPackageMember(content.GetPrefixPath(), content.identifier.Val(), imports))
+        }
+    }
+    if (candidates.isEmpty()) {
+        candidates.add(all: CjdPackageMember("std.core", name, imports))
+    }
+    return UniqueCjdTarget(candidates)
+}
+
+private func CjdScopeGeneric(node: Node): Option<Generic> {
+    if (let Some(body) <- (node as FuncBody)) {
+        return body.generic
+    }
+    if (let Some(decl) <- (node as Decl)) {
+        return decl.generic
+    }
+    return None
+}
+
+private func ResolveCjdTypeTarget(typeNode: Type, file: File, source: Package,
+    imports: ImportManager, scopes: ArrayList<Node>): Option<Decl> {
+    if (let Some(refType) <- (typeNode as RefType)) {
+        let name = refType.ref.identifier.Val()
+        var idx = scopes.size
+        while (idx > 0) {
+            idx--
+            if (let Some(generic) <- CjdScopeGeneric(scopes[idx])) {
+                for (param in generic.typeParameters) {
+                    if (param.identifier.Val() == name) {
+                        return param
+                    }
+                }
             }
-            if (!IsSameType(leftQualifiedType.baseType.getOrThrow(), rightQualifiedType.baseType.getOrThrow())) {
-                return false
+        }
+        return ResolveCjdName(name, file, source, imports)
+    }
+    if (let Some(qualified) <- (typeNode as QualifiedType)) {
+        let base = qualified.baseType ?? return None
+        let target = ResolveCjdTypeTarget(base, file, source, imports, scopes) ?? return None
+        if (let Some(pkgDecl) <- (target as PackageDecl)) {
+            return UniqueCjdTarget(imports.GetPackageMembersByName(pkgDecl.srcPackage, qualified.field.Val()))
+        }
+        let members = ArrayList<Decl>()
+        for (member in target.GetMemberDeclPtrs()) {
+            if (member.identifier.Val() == qualified.field.Val()) {
+                members.add(member)
             }
-        case ASTKind.OPTION_TYPE =>
-            if (!IsSameType(left, rightTy)) {
-                return false
-            }
-        case ASTKind.PRIMITIVE_TYPE =>
-            let leftPrimitiveType = (left as PrimitiveType).getOrThrow()
-            var leftPrimitiveTypeName = leftPrimitiveType.str
-            var rightTyName = if (rightTy.IsPrimitive()) { rightTy.String() } else { rightTy.name }
-            leftPrimitiveTypeName = if (leftPrimitiveTypeName == "Rune") { "UInt8" } else { leftPrimitiveTypeName }
-            rightTyName = if (rightTyName == "Rune") { "UInt8" } else { rightTyName }
-            if (leftPrimitiveTypeName != rightTyName) {
-                return false
-            }
-            if (leftPrimitiveType.kind != right.TyKind()) {
-                return false
-            }
-        case _ => ()
+        }
+        return UniqueCjdTarget(members)
+    }
+    return None
+}
+
+private func CjdSemanticType(node: Type, types: CjdTypeManager,
+    coreOption!: Option<EnumDecl> = None): Option<Ty> {
+    if (let Some(primitive) <- (node as PrimitiveType)) {
+        return PrimitiveTy(primitive.kind)
+    }
+    if (let Some(paren) <- (node as ParenType)) {
+        return CjdSemanticType(paren.innerType ?? return None, types, coreOption: coreOption)
+    }
+    if (let Some(tuple) <- (node as TupleType)) {
+        let fields = ArrayList<Ty>()
+        for (field in tuple.fieldTypes) {
+            fields.add(CjdSemanticType(field, types, coreOption: coreOption) ?? return None)
+        }
+        return types.GetTupleTy(fields.toArray())
+    }
+    if (let Some(function) <- (node as FuncType)) {
+        let params = ArrayList<Ty>()
+        for (param in function.paramTypes) {
+            params.add(CjdSemanticType(param, types, coreOption: coreOption) ?? return None)
+        }
+        let result = CjdSemanticType(function.retType ?? return None, types, coreOption: coreOption) ?? return None
+        return types.GetFunctionTy(params.toArray(), result)
+    }
+    if (let Some(option) <- (node as OptionType)) {
+        // Binding uses the loaded std.core declaration, independent of lexical
+        // imports/shadowing. Later comparisons reuse only that declaration and
+        // reconvert components, whose generic parameters may have been paired.
+        let decl = if (let Some(core) <- coreOption) { core } else {
+            let bound = node.GetTy() ?? return None
+            if (!bound.IsCoreOptionType()) { return None }
+            (bound as EnumTy).getOrThrow().declPtr ?? return None
+        }
+        var result = CjdSemanticType(option.componentType ?? return None, types, coreOption: coreOption) ?? return None
+        if (option.questNum == 0u64) { return None }
+        var depth = 0u64
+        while (depth < option.questNum) {
+            result = types.GetEnumTy(decl, typeArgs: [result])
+            depth++
+        }
+        return result
+    }
+    if (let Some(varray) <- (node as VArrayType)) {
+        let element = CjdSemanticType(varray.typeArgument ?? return None, types, coreOption: coreOption) ?? return None
+        let constant = (varray.constantType ?? return None) as ConstantType ?? return None
+        let literal = (constant.constantExpr ?? return None) as LitConstExpr ?? return None
+        if (literal.kind != LitConstKind.INTEGER) { return None }
+        // Use the same integer-literal representation/range check as
+        // GetTyFromASTVArrayType; no spelling-based nominal matching.
+        literal.constNumValue.asInt.InitIntLiteral(literal.stringValue, TypeKind.TYPE_INT64)
+        literal.constNumValue.asInt.SetOutOfRange(CjdTypeManager.GetPrimitiveTy(TypeKind.TYPE_INT64))
+        if (literal.constNumValue.asInt.IsOutOfRange()) { return None }
+        return types.GetVArrayTy(element, literal.constNumValue.asInt.`Int64`())
+    }
+    let target = node.GetTarget() ?? return None
+    if (let Some(param) <- (target as GenericParamDecl)) {
+        if (Ty.IsTyCorrect(param.GetTy())) {
+            return param.GetTy()
+        }
+        let ty = types.GetGenericsTy(param)
+        param.SetTy(ty)
+        return ty
+    }
+    let args = ArrayList<Ty>()
+    let arguments = if (let Some(refType) <- (node as RefType)) {
+        refType.typeArguments
+    } else if (let Some(qualified) <- (node as QualifiedType)) {
+        qualified.typeArguments
+    } else {
+        return None
+    }
+    for (arg in arguments) {
+        args.add(CjdSemanticType(arg, types, coreOption: coreOption) ?? return None)
+    }
+    if (let Some(alias) <- (target as TypeAliasDecl)) {
+        let count = if (let Some(generic) <- alias.generic) { generic.typeParameters.size } else { 0 }
+        if (count != args.size || alias.TestAttr(Attribute.IN_REFERENCE_CYCLE)) {
+            return None
+        }
+        return types.SubstituteTypeAliasInTy(types.GetTypeAliasTy(alias, args.toArray()))
+    }
+    if (let Some(builtin) <- (target as BuiltInDecl)) {
+        // Builtins are identified by the loaded declaration's kind. VArray's
+        // size is carried by VArrayType and is handled above, never guessed.
+        if (builtin.IsType(BuiltInType.VARRAY)) { return None }
+        let count = if (builtin.IsType(BuiltInType.CSTRING)) { 0 } else { 1 }
+        if (args.size != count) { return None }
+        let result = GetTyFromASTDecl(types, builtin, args)
+        return if (Ty.IsTyCorrect(result)) { Some(result) } else { None }
+    }
+    if (let Some(decl) <- (target as ClassDecl)) {
+        return types.GetClassTy(decl, args.toArray())
+    }
+    if (let Some(decl) <- (target as StructDecl)) {
+        return types.GetStructTy(decl, args.toArray())
+    }
+    if (let Some(decl) <- (target as InterfaceDecl)) {
+        return types.GetInterfaceTy(decl, args.toArray())
+    }
+    if (let Some(decl) <- (target as EnumDecl)) {
+        return types.GetEnumTy(decl, typeArgs: args.toArray())
+    }
+    return None
+}
+
+private func IsSameCjdNominal(left: Type, right: Ty): Bool {
+    let leftDecl = left.GetTarget()
+    let rightDecl = Ty.GetDeclPtrOfTy(Some(right))
+    if (let Some(target) <- leftDecl) {
+        if (let Some(param) <- (target as GenericParamDecl)) {
+            return Ty.IsTyCorrect(param.GetTy()) && SameTy(param.GetTy().getOrThrow(), right)
+        }
+        if (let Some(other) <- rightDecl) {
+            return refEq(target, other)
+        }
+    }
+    return false
+}
+
+private func IsSameTypeArguments(left: ArrayList<Type>, right: ArrayList<Ty>): Bool {
+    if (left.size != right.size) {
+        return false
+    }
+    var idx: Int64 = 0
+    while (idx < left.size) {
+        if (!IsSameType(left[idx], right[idx])) {
+            return false
+        }
+        idx++
     }
     return true
 }
 
+// CJO loading can reconstruct a QualifiedType as RefType; the semantic type,
+// not the reconstructed syntax kind, is the declaration's identity.
+public func IsSameType(left: Type, right: Type): Bool {
+    CJC_ASSERT(Ty.IsTyCorrect(right.GetTy()))
+    return IsSameType(left, right.GetTy().getOrThrow())
+}
+
 // Faithful port of C++ IsSameType(Type, Ty) (Frontend/MergeAnnoFromCjd.cpp:128-234).
 public func IsSameType(left: Type, rightTy: Ty): Bool {
+    if (let Some(target) <- left.GetTarget()) {
+        if (target is TypeAliasDecl) {
+            let expanded = CjdSemanticType(left, CjdTypeManager()) ?? return false
+            return Ty.IsTyCorrect(expanded) && SameTy(expanded, rightTy)
+        }
+    }
     match (left.astKind) {
+        case ASTKind.THIS_TYPE =>
+            if (let Some(other) <- (rightTy as ClassThisTy)) {
+                let owner = Ty.GetDeclPtrOfTy(left.GetTy()) ?? return false
+                let target = Ty.GetDeclPtrOfTy(Some(other)) ?? return false
+                return refEq(owner, target)
+            }
+            return false
         case ASTKind.REF_TYPE =>
             let leftRefType = (left as RefType).getOrThrow()
-            let rightTyName = if (rightTy.IsPrimitive()) { rightTy.String() } else { rightTy.name }
-            if (leftRefType.ref.identifier.Val() != rightTyName) {
+            if (!IsSameCjdNominal(leftRefType, rightTy)) {
                 return false
             }
-            if (leftRefType.typeArguments.size != rightTy.typeArgs.size) {
+            if (!IsSameTypeArguments(leftRefType.typeArguments, rightTy.typeArgs)) {
                 return false
-            }
-            var idx: Int64 = 0
-            while (idx < leftRefType.typeArguments.size) {
-                if (!IsSameType(leftRefType.typeArguments[idx], rightTy.typeArgs[idx])) {
-                    return false
-                }
-                idx++
             }
         case ASTKind.QUALIFIED_TYPE =>
             let leftQualifiedType = (left as QualifiedType).getOrThrow()
-            if (leftQualifiedType.field.Val() != rightTy.name) {
+            if (!IsSameCjdNominal(leftQualifiedType, rightTy)) {
+                return false
+            }
+            if (!IsSameTypeArguments(leftQualifiedType.typeArguments, rightTy.typeArgs)) {
                 return false
             }
         case ASTKind.FUNC_TYPE =>
@@ -185,7 +417,10 @@ public func IsSameType(left: Type, rightTy: Ty): Bool {
             if (leftPrimitiveType.str != rightPrimitiveTy.String()) {
                 return false
             }
-        case _ => ()
+        case ASTKind.PAREN_TYPE =>
+            let inner = (left as ParenType).getOrThrow().innerType ?? return false
+            return IsSameType(inner, rightTy)
+        case _ => return false
     }
     return true
 }
@@ -200,6 +435,13 @@ public func IsSameGeneric(left: Generic, right: Generic): Bool {
         if (left.typeParameters[idx].identifier.Val() != right.typeParameters[idx].identifier.Val()) {
             return false
         }
+        // Pair declaration-local parameters before comparing their uses or
+        // constraints. A failed candidate is overwritten by the next pairing.
+        let target = right.typeParameters[idx]
+        let targetTy = if (Ty.IsTyCorrect(target.GetTy())) { target.GetTy().getOrThrow() } else {
+            GenericsTy(target.identifier.Val(), target)
+        }
+        left.typeParameters[idx].SetTy(targetTy)
         idx++
     }
     if (left.genericConstraints.isEmpty() != right.genericConstraints.isEmpty()) {
@@ -264,14 +506,14 @@ public func IsSameFuncByIdentifier(leftBody: FuncBody, rightBody: FuncBody): Boo
             rightBody.paramLists[0].params[idx].GetTy().getOrThrow())) {
             return false
         }
-        CJC_ASSERT(rightBody.GetTy().getOrThrow().IsFunc())
-        let leftFuncTy = (rightBody.GetTy().getOrThrow() as FuncTy).getOrThrow()
-        if (let Some(leftRetType) <- leftBody.retType) {
-            if (!IsSameType(leftRetType, leftFuncTy.retTy)) {
-                return false
-            }
-        }
         idx++
+    }
+    CJC_ASSERT(rightBody.GetTy().getOrThrow().IsFunc())
+    let rightFuncTy = (rightBody.GetTy().getOrThrow() as FuncTy).getOrThrow()
+    if (let Some(leftRetType) <- leftBody.retType) {
+        if (!IsSameType(leftRetType, rightFuncTy.retTy)) {
+            return false
+        }
     }
     return true
 }
@@ -441,7 +683,10 @@ public func MergeMemberDecl(declPair: (Decl, Decl)): Unit {
     }
     for (member in declPair[1].GetMemberDeclPtrs()) {
         var found: Option<Decl> = None
-        for ((sourceMember, _) in memberMapping) {
+        for ((sourceMember, targetMember) in memberMapping) {
+            if (targetMember.isSome()) {
+                continue
+            }
             if (IsSameDeclByIdentifier(sourceMember, member)) {
                 found = Some(sourceMember)
                 break

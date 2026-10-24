@@ -107,6 +107,18 @@ private func LookupNativeSymbol(handle: CPointer<Unit>, name: String): CPointer<
     return result
 }
 
+// Validate the metadata before passing any of its pointers to native code.
+func IsValidNativePluginInfo(info: MetaTransformPluginInfo): Bool {
+    if (info.cjcVersion.isNull() || CPointer<Unit>(info.registerTo).isNull()) {
+        return false
+    }
+    var matches = false
+    try (expectedVersion = unsafe { LibC.mallocCString(CANGJIE_VERSION) }.asResource()) {
+        matches = unsafe { strcmp(info.cjcVersion, expectedVersion.value) } == 0
+    }
+    return matches
+}
+
 public class NativeMetaTransformPlugin {
     private let pluginPath: String
     private let metaTransformPluginInfo: MetaTransformPluginInfo
@@ -140,14 +152,7 @@ public class NativeMetaTransformPlugin {
     }
 
     public func IsValid(): Bool {
-        if (pluginPath.isEmpty()) {
-            return false
-        }
-        var versionMatches = false
-        try (expectedVersion = unsafe { LibC.mallocCString(CANGJIE_VERSION) }.asResource()) {
-            versionMatches = unsafe { strcmp(metaTransformPluginInfo.cjcVersion, expectedVersion.value) } == 0
-        }
-        return versionMatches && !CPointer<Unit>(metaTransformPluginInfo.registerTo).isNull()
+        return !pluginPath.isEmpty() && IsValidNativePluginInfo(metaTransformPluginInfo)
     }
 
     public func GetHandle(): CPointer<Unit> {

@@ -367,7 +367,17 @@
     "member": "packages/incremental_compilation"
   },
   {
+    "file": "packages/frontend/src/MergeAnnoFromCjd_test.cj",
+    "executor": "cjpm",
+    "member": "packages/frontend"
+  },
+  {
     "file": "packages/lex/src/Lex_test.cj",
+    "executor": "cjpm",
+    "member": "packages/lex"
+  },
+  {
+    "file": "packages/lex/src/TokenCursor_test.cj",
     "executor": "cjpm",
     "member": "packages/lex"
   },
@@ -398,6 +408,16 @@
   },
   {
     "file": "packages/parse/src/ParserTest_test.cj",
+    "executor": "cjpm",
+    "member": "packages/parse"
+  },
+  {
+    "file": "packages/meta_transformation/src/NativeMetaTransformPlugin_test.cj",
+    "executor": "cjpm",
+    "member": "packages/meta_transformation"
+  },
+  {
+    "file": "packages/parse/src/TokenInputContract_test.cj",
     "executor": "cjpm",
     "member": "packages/parse"
   },

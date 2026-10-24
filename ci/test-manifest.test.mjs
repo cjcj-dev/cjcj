@@ -459,11 +459,15 @@ test('a driver cannot claim no executor while a workflow names it', async () => 
   }
 });
 
-test('mainline archive, initialization and ArrayClone keep their executable registrations', () => {
+test('mainline archive, initialization and ArrayClone plus parser/frontend keep their executable registrations', () => {
   for (const [file, member] of [
     ['packages/driver/src/Archive_output_test.cj', 'packages/driver'],
     ['packages/sema/src/initialization_tests/InitializationControlFlow_test.cj', 'packages/sema'],
     ['packages/compiler_unittest/src/ArrayCloneMetadata_test.cj', 'packages/compiler_unittest'],
+    ['packages/frontend/src/MergeAnnoFromCjd_test.cj', 'packages/frontend'],
+    ['packages/lex/src/TokenCursor_test.cj', 'packages/lex'],
+    ['packages/meta_transformation/src/NativeMetaTransformPlugin_test.cj', 'packages/meta_transformation'],
+    ['packages/parse/src/TokenInputContract_test.cj', 'packages/parse'],
   ]) {
     const entries = REGISTERED.filter(entry => entry.file === file);
     console.log(`MAINLINE_REGISTRY_ASSERTION_REACHED ${file}`);

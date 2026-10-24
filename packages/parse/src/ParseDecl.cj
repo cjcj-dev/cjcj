@@ -2394,9 +2394,9 @@ extend ParserImpl {
                 let firstMod = SortModifierByPos(modifiers)[0]
                 DiagExpectNoModifier(firstMod)
             }
-            for (anno in annos) {
+            for (anno in decl.annotations) {
                 if (anno.kind != AnnotationKind.WHEN && anno.kind != AnnotationKind.DEPRECATED) {
-                    DiagUnexpectedAnnoOn(annos[0], identifier.Begin(), annos[0].identifier.Val(), identifier.Val())
+                    DiagUnexpectedAnnoOn(anno, identifier.Begin(), anno.identifier.Val(), identifier.Val())
                 }
             }
         }

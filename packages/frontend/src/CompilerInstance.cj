@@ -460,18 +460,27 @@ public class CompilerInstance {
             try {
                 let metaTransformPlugin = NativeMetaTransformPlugin.Get(pluginPath)
                 if (!metaTransformPlugin.IsValid()) {
+                    let _ = metaTransformPlugin.Close()
+                    CloseLoadedNativeMetaTransformPlugins()
                     DiagnoseInvalidPlugin(pluginPath)
                     return false
                 }
                 loadedPluginPaths.add(pluginPath)
                 loadedNativeMetaTransformPlugins.add(metaTransformPlugin)
             } catch (e: Exception) {
+                CloseLoadedNativeMetaTransformPlugins()
                 DiagnoseInvalidPlugin(pluginPath)
                 return false
             }
         }
-        metaTransformPluginBuilder.SetIsCppPlugin(true)
-        return true
+        // The managed builder cannot be passed as the opaque C++ builder expected
+        // by registerTo. Until that bridge exists, accepting these libraries
+        // would report success while executing none of their transformations.
+        CloseLoadedNativeMetaTransformPlugins()
+        loadedPluginPaths.clear()
+        diag.Diagnose(DiagCategory.CHIR, DEFAULT_POSITION,
+            "native C++ MetaTransform plugins are not supported by this frontend")
+        return false
     }
 
     private func RegisterCjPlugin(): Bool {

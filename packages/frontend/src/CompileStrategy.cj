@@ -20,9 +20,8 @@ import std.collection.*
 import std.sort.*
 import std.sync.*
 
-// Faithful ports of the C++ .cj.d process-wide caches (Frontend/CompileStrategy.cpp:464-467).
-private let g_cjdAstCache = HashMap<String, Option<Package>>()
-private let g_cjdAstCacheLock = Mutex()
+// CJD ASTs belong to this import operation: merging consumes annotations, and
+// another invocation may use a different file (or replace the same path).
 private let g_sourceManageLock = Mutex()
 
 private type ParseResult = (File, TokenVecMap, Int64)
@@ -56,13 +55,13 @@ func ParseAndMergeCjd(ci: CompilerInstance, cjdInfo: (String, String)): Unit {
     let pkg = Package(cjdInfo[0])
     fileAst.curPackage = Some(pkg)
     pkg.files.add(fileAst)
-    if (let Some(originPkg) <- ci.importManager.getOrThrow().GetPackage(cjdInfo[0])) {
+    AddCurFile(pkg)
+    let imports = ci.importManager.getOrThrow()
+    if (let Some(originPkg) <- imports.GetPackage(cjdInfo[0])) {
+        BindCjdTypeIdentities(pkg, imports)
         MergeCusAnno(originPkg, pkg)
     } else {
         InternalError(cjdInfo[0] + " cannot find origin ast")
-    }
-    synchronized(g_cjdAstCacheLock) {
-        g_cjdAstCache[cjdInfo[0]] = Some(pkg)
     }
 }
 
@@ -120,22 +119,7 @@ public open class CompileStrategy {
             if (option.jobs.hasValue && option.jobs.value == 1u64) {
                 ParseAndMergeCjd(ci, cjdInfo)
             } else {
-                synchronized(g_cjdAstCacheLock) {
-                    if (let Some(cachedPackage) <- g_cjdAstCache.get(packageName)) {
-                        if (let Some(cachedPackageValue) <- cachedPackage) {
-                            if (let Some(originPkg) <- ci.importManager.getOrThrow().GetPackage(packageName)) {
-                                MergeCusAnno(originPkg, cachedPackageValue)
-                            } else {
-                                InternalError(packageName + " cannot find origin ast")
-                            }
-                        } else {
-                            let _ = taskQueue.AddTask<Unit>({ => ParseAndMergeCjd(ci, cjdInfo) })
-                        }
-                    } else {
-                        g_cjdAstCache[packageName] = None
-                        let _ = taskQueue.AddTask<Unit>({ => ParseAndMergeCjd(ci, cjdInfo) })
-                    }
-                }
+                let _ = taskQueue.AddTask<Unit>({ => ParseAndMergeCjd(ci, cjdInfo) })
             }
         }
         taskQueue.RunAndWaitForAllTasksCompleted()

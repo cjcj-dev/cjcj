@@ -1,6 +1,6 @@
 package cjcj::lex
 
-import cjcj::basic.*
+import cjcj::basic.{Position, DiagnosticEngine, SourceManager, StringConvertor, DiagKindRefactor}
 import std.collection.*
 import std.unittest.*
 import std.unittest.testmacro.*
