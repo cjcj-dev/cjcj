@@ -446,7 +446,10 @@ for (const runtimeMode of ['git','archive']) test('G2 workflow capture and gate 
   const recipe=relative=>['cjcj-sdk-entry-v1','1',relative,'linux','native-target:x64','runtime/lib/linux_x86_64_cjnative',''].join('\n');
   await write(sdk,'bin/cjcj-stage1',launcher);
   await write(sdk,'bin/cjcj-stage1.entry',recipe(locations.cjcj));
-  for(const alias of ['cjc','cjc-frontend'])await fs.symlink('cjcj-stage1',path.join(sdk,'bin',alias));
+  for(const alias of ['cjc','cjc-frontend']) {
+    await fs.symlink('cjcj-stage1',path.join(sdk,'bin',alias));
+    await fs.symlink('cjcj-stage1',path.join(sdk,'libexec/compiler',alias));
+  }
   for(const name of ['llc','opt']){
     await write(sdk,'third_party/llvm/bin/'+name,launcher);
     await write(sdk,'third_party/llvm/bin/'+name+'.entry',recipe(locations['llvm_'+name]));

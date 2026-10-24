@@ -84,7 +84,7 @@ if(name==='python3' && args[0]==='build.py') {
     const log=path.join(root,'commands.jsonl'), install=path.join(root,'work/runtime-install');
     const env={...process.env,PATH:bin+path.delimiter+process.env.PATH,
       PLATFORM_CI_ROOT:path.join(root,'work'),RUNTIME_SOURCE:source,RUNTIME_TARGET:'native',RUNTIME_TOOLCHAIN:'',
-      RUNTIME_NATIVE_PAIR:'1',RUNTIME_REF:runtime,CJCJ_NATIVE_RUNTIME_REF:runtime,LLVM_SHA:llvm,
+      RUNTIME_NATIVE_PAIR:'1',RUNTIME_REF:runtime,CJCJ_NATIVE_RUNTIME_REF:runtime,CJCJ_NATIVE_LLVM_REF:llvm,LLVM_SHA:llvm,
       NATIVE_RUNTIME_PLATFORM:platform,RUNTIME_VERSION:'1.3.0-fixture',RUNTIME_BUILD_TYPE:'release',
       CMAKE_TOOLCHAIN_FILE:'',SCCACHE_PATH:path.join(bin,'sccache'),FIXTURE_LOG:log,FIXTURE_CMAKE:cmake,
       FIXTURE_BAD_CACHE:'',FIXTURE_NO_BOUNDS:'',FIXTURE_FAIL_BUILD:'',FIXTURE_NO_STATUS:'',FIXTURE_CPP_FAIL:'',
@@ -126,6 +126,7 @@ for(const [name,extra,reason] of [
   assert.equal(fs.existsSync(path.join(install,'NATIVE-INPUTS.json')),false);
 }));
 for(const [name,extra,reason] of [
+  ['missing explicit LLVM pair',{CJCJ_NATIVE_LLVM_REF:''},'NATIVE_RUNTIME_EXPLICIT_PAIR_REQUIRED'],
   ['mismatched source pair',{CJCJ_NATIVE_RUNTIME_REF:'f'.repeat(40)},'NATIVE_RUNTIME_PAIR_MISMATCH'],
   ['wrong checkout',{RUNTIME_REF:'e'.repeat(40),CJCJ_NATIVE_RUNTIME_REF:'e'.repeat(40)},'expected eeeee'],
   ['wrong native platform',{NATIVE_RUNTIME_PLATFORM:'darwin_invalid'},'NATIVE_RUNTIME_PLATFORM_MISMATCH'],

@@ -66,12 +66,13 @@ test('Windows readiness consumes installed lib-prefixed cjlint DLL and refuses t
   payloadFiles[relative]={sha256:row.sha256,producers:['cjlint']};
  }
  const producer={source:{status:'resolved',repository:'fixture://tools',commit:'a'.repeat(40)},artifact,
-  build:{rc:0,platform:stage.platform,inputs:{stage,artifacts},payloads:built,
-   dependencies:{json:{repo:'fixture://json',commit:'b'.repeat(40),changes_sha256:'c'.repeat(64)}},nativeConfiguration:{native:{values:{CMAKE_BUILD_TYPE:'Release'}}}},
+  build:{rc:0,directory:'cjlint',platform:stage.platform,inputs:{stage,artifacts},payloads:built,
+   dependencies:{json:{repo:'fixture://json',commit:'b'.repeat(40),changes_sha256:'c'.repeat(64)}},nativeConfiguration:{native:{values:{CMAKE_BUILD_TYPE:'Release',CMAKE_CXX_COMPILER:'fixture-clang++'}}}},
   install:{rc:0,artifact,payloads}};
  const inputs={files:{[rel]:{sha256:artifact.sha256,artifact,entry,producer}},payloadFiles};
  const save=()=>write('TOOLS-INPUTS.json',JSON.stringify(inputs));await save();
- assert.equal((await toolReadiness(root)).cjlint.ready,true);
+ const accepted= (await toolReadiness(root)).cjlint;
+ assert.equal(accepted.ready,true,accepted.reason);
  const correct='tools/lib/libcjlint.dll',wrong='tools/lib/cjlint.dll';
  await fs.rename(root+'/'+correct,root+'/'+wrong);
  for(const rows of [built,payloads,payloadFiles]){rows[wrong]=rows[correct];delete rows[correct];}

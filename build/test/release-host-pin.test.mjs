@@ -23,7 +23,7 @@ test('a changed pin reaches both release selectors and requires matching archive
   const root = path.resolve(import.meta.dirname, '../..');
   for (const relative of [
     'ci/host-toolchain-pin.mjs', 'ci/release/base-sdk-identities.json',
-    'ci/release/source-tool-payloads.mjs',
+    'ci/release/source-tool-payloads.mjs', 'build/srcbuild/tool-layout.mjs',
     'build/lib/release-component-provenance.mjs', 'build/lib/release-gate-apparatus.mjs',
     'build/lib/targets.mjs', 'build/lib/errors.mjs',
   ]) {

@@ -13,13 +13,13 @@ for (const key of keys) test(`Android producer removes exactly the frozen missin
   const result = releasePlatformReadiness(key);
   console.log(`ASSERT_ANDROID_READINESS ${key} ${JSON.stringify(result)}`);
   assert.deepEqual(baseline.filter(reason => !result.reasons.includes(reason)), baseline, 'the Android producer must remove its precise missing-tuple reason');
-  const sourceReasons = getTarget(result.sourceTarget).sourceBuild.reasons.map(reason => `source ${result.sourceTarget}: ${reason}`);
-  if (!result.sdkSourceTarget) {
-    const sdkReasons = result.reasons.filter(reason => reason.startsWith(`native SDK ${result.host}:`));
-    assert.equal(sdkReasons.length, 1, 'Android std does not grant a missing native SDK producer');
-    sourceReasons.push(...sdkReasons);
-    assert.equal(result.packageDeclared, true);
-  }
+  const sourceReasons = [];
+  if (!result.sdkSourceTarget) sourceReasons.push(
+    `native SDK ${result.host}: no source cell runs package-install and uploads cjcj-srcbuild-${result.host}-VERSION; cross std/components are not a whole SDK`);
+  if (getTarget(result.host).nativeSourceBuild) sourceReasons.push(
+    `native SDK ${result.host}: explicit native pair and provider inputs required`);
+  sourceReasons.push(...getTarget(result.sourceTarget).sourceBuild.reasons.map(reason => `source ${result.sourceTarget}: ${reason}`));
+  assert.equal(result.packageDeclared, true);
   assert.deepEqual(result.reasons.filter(reason => !baseline.includes(reason)), sourceReasons, 'only declared native source blockers remain');
   assert.equal(result.status, sourceReasons.length ? 'blocked' : 'buildable');
   assert.equal(result.crossStd[tuple], 'linux-x64');
