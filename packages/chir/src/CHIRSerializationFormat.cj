@@ -1225,6 +1225,11 @@ func CHIRIntrinsicKindFromName(name: String): IntrinsicKind {
         case "IS_SUBTYPE_TYPES" => IntrinsicKind.IS_SUBTYPE_TYPES
         case "EXCLUSIVE_SCOPE" => IntrinsicKind.EXCLUSIVE_SCOPE
         case "CANONICALIZE_STRING_BACKING" => IntrinsicKind.CANONICALIZE_STRING_BACKING
+        case "REFERENCE_INVOKE_FINALIZE" => IntrinsicKind.REFERENCE_INVOKE_FINALIZE
+        case "REFERENCE_WAIT_PENDING" => IntrinsicKind.REFERENCE_WAIT_PENDING
+        case "REFERENCE_RUNTIME_RUNNING" => IntrinsicKind.REFERENCE_RUNTIME_RUNNING
+        case "REFERENCE_NANO_TIME" => IntrinsicKind.REFERENCE_NANO_TIME
+        case "REGISTER_FINALIZER" => IntrinsicKind.REGISTER_FINALIZER
         case _ => IntrinsicKind.NOT_INTRINSIC
     }
 }

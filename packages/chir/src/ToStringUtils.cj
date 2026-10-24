@@ -107,6 +107,10 @@ public func TypeVecToString<T>(prefix: String, types: ArrayList<T>, suffix: Stri
 
 public func IntrinsicKindToString(kind: IntrinsicKind): String {
     return match (kind) {
+        case IntrinsicKind.REFERENCE_INVOKE_FINALIZE => "referenceInvokeFinalize"
+        case IntrinsicKind.REFERENCE_WAIT_PENDING => "referenceWaitPending"
+        case IntrinsicKind.REFERENCE_RUNTIME_RUNNING => "referenceRuntimeRunning"
+        case IntrinsicKind.REFERENCE_NANO_TIME => "referenceNanoTime"
         case IntrinsicKind.NOT_INTRINSIC => "notIntrinsic"
         case IntrinsicKind.NOT_IMPLEMENTED => "notImplemented"
         case IntrinsicKind.ARRAY_INIT => "arrayInit"
@@ -135,6 +139,7 @@ public func IntrinsicKindToString(kind: IntrinsicKind): String {
         case IntrinsicKind.ARRAY_SLICE_SET_ELEMENT_UNCHECKED => "arraySliceSetUnchecked"
         case IntrinsicKind.FILL_IN_STACK_TRACE => "fillInStackTrace"
         case IntrinsicKind.CANONICALIZE_STRING_BACKING => "canonicalizeStringBacking"
+        case IntrinsicKind.REGISTER_FINALIZER => "registerFinalizer"
         case IntrinsicKind.DECODE_STACK_TRACE => "decodeStackTrace"
         case IntrinsicKind.DUMP_CURRENT_THREAD_INFO => "dumpCurrentThreadInfo"
         case IntrinsicKind.DUMP_ALL_THREADS_INFO => "dumpAllThreadsInfo"

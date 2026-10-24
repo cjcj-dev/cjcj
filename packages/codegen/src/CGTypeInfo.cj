@@ -32,6 +32,7 @@ private let UG_INTERFACE_KIND: UInt64 = 129u64
 private let UG_RAW_ARRAY_KIND: UInt64 = 130u64
 private let UG_COMMON_ENUM_KIND: UInt64 = 132u64
 private let UG_WEAKREF_KIND: UInt64 = 133u64
+private let UG_FINALREF_KIND: UInt64 = 136u64
 private let UG_FUNC_KIND: UInt64 = 131u64
 private let UG_GENERIC_CUSTOM_KIND: UInt64 = 254u64
 private let UG_GENERIC_KIND: UInt64 = 255u64
@@ -1494,6 +1495,9 @@ private func TypeInfoKind(cgMod: CGModule, chirTy: Type): UInt64 {
     if (chirTy.IsCString()) { return UG_CSTRING }
     if (chirTy.IsBox()) { return UG_CLASS_KIND }
     if (let Some(classTy) <- (chirTy as ClassType)) {
+        if (IsFinalReferenceClass(classTy)) {
+            return UG_FINALREF_KIND
+        }
         if (IsWeakRefClass(classTy)) {
             return UG_WEAKREF_KIND
         }

@@ -11,7 +11,6 @@ import cjcj::utils.{CJC_ASSERT, CJC_ASSERT_WITH_MSG}
 private let BITS_PER_BYTE: UInt64 = 8u64
 private let BYTES_PER_WORD: UInt64 = 8u64
 private let MAX_SPLIT_NUM: Int64 = 2
-private let MAX_FIELD_NUM: Int64 = 8
 
 private let LLVM_VOID_TYPE_KIND: Int32 = 0
 private let LLVM_HALF_TYPE_KIND: Int32 = 1
@@ -24,6 +23,7 @@ private let LLVM_INTEGER_TYPE_KIND: Int32 = 8
 private let LLVM_STRUCT_TYPE_KIND: Int32 = 10
 private let LLVM_ARRAY_TYPE_KIND: Int32 = 11
 private let LLVM_POINTER_TYPE_KIND: Int32 = 12
+private let LLVM_VECTOR_TYPE_KIND: Int32 = 13
 
 public enum ProcessKind {
     | NO_PROCESS
@@ -170,6 +170,11 @@ public open class CGCFFI {
         return false
     }
 
+    public open func GetLoweredParamCount(_: FuncType, _: Int64): Int64 {
+        CJC_ASSERT(false)
+        return 0
+    }
+
     public open func ProcessParam(_: Type, _: LLVMFuncArgIt, _: LLVMValueRef, _: IRBuilder2): Unit {
         CJC_ASSERT(false)
     }
@@ -187,7 +192,7 @@ public open class CGCFFI {
         let cgMod = builder.GetCGModule()
         let actualSize = GetTypeSize(cgMod, chirRetTy)
         builder.CreateMemCpy(sret, UInt32(GetTypeAlignment(cgMod, chirRetTy)), place,
-            UInt32(GetTypeAlignment(cgMod, retType)), SizeValue(builder, actualSize))
+            UInt32(GetTypeAlignment(cgMod, retType)), SizeValue(builder, MinUInt64(actualSize, GetTypeSize(cgMod, retType))))
         return sret
     }
 
@@ -254,6 +259,15 @@ public open class LinuxCJNativeCGCFFI <: CGCFFI {
         }
         let kinds = found.kinds
         return idx < kinds.size && (kinds[idx] == ProcessKind.DIRECT || kinds[idx] == ProcessKind.EXPAND)
+    }
+
+    public override func GetLoweredParamCount(chirFuncTy: FuncType, idx: Int64): Int64 {
+        let info = FindCFuncInfo(chirFuncTy).getOrThrow()
+        return match (info.kinds[idx]) {
+            case ProcessKind.SKIP => 0
+            case ProcessKind.EXPAND => 2
+            case _ => 1
+        }
     }
 
     protected func GetReturnType(chirTy: Type, params: ArrayList<LLVMTypeRef>): LLVMTypeRef {
@@ -329,6 +343,9 @@ public class LinuxAmd64CJNativeCGCFFI <: LinuxCJNativeCGCFFI {
         let retTy = GetReturnType(chirFuncTy.GetReturnType(), paramTys)
         if (retTy.isNull()) {
             return LLVMNullType()
+        }
+        if (!paramTys.isEmpty()) {
+            intNum.value--
         }
         for (paramTy in chirFuncTy.GetParamTypes()) {
             CJC_ASSERT(IsMetCType(paramTy))
@@ -413,7 +430,7 @@ public class LinuxAmd64CJNativeCGCFFI <: LinuxCJNativeCGCFFI {
             let part1 = builder.CreateStructGEP(destTy, alloca, 1u32)
             builder.CreateStore(arg2, part1)
             builder.CreateMemCpy(place, UInt32(GetTypeAlignment(cgMod, chirParamTy)), alloca,
-                UInt32(GetTypeAlignment(cgMod, destTy)), SizeValue(builder, GetTypeSize(cgMod, chirParamTy)))
+                UInt32(GetTypeAlignment(cgMod, destTy)), SizeValue(builder, MinUInt64(GetTypeSize(cgMod, chirParamTy), GetTypeSize(cgMod, destTy))))
         }
     }
 
@@ -458,7 +475,8 @@ public class LinuxAmd64CJNativeCGCFFI <: LinuxCJNativeCGCFFI {
         let tmpTy = CreateStructType(ctx, MakeTypeList(info[0], info[1]))
         let alloca = builder.CreateEntryAlloca(tmpTy, name: "arg.copy")
         builder.CreateMemCpy(alloca, UInt32(GetTypeAlignment(cgMod, tmpTy)), args[argIdx.value].GetRawValue(),
-            UInt32(GetTypeAlignment(cgMod, chirParamTy)), SizeValue(builder, GetTypeSize(cgMod, chirParamTy)))
+            UInt32(GetTypeAlignment(cgMod, chirParamTy)),
+            SizeValue(builder, MinUInt64(GetTypeSize(cgMod, chirParamTy), GetTypeSize(cgMod, tmpTy))))
         let argPtr1 = builder.CreateStructGEP(tmpTy, alloca, 0u32)
         let argPtr2 = builder.CreateStructGEP(tmpTy, alloca, 1u32)
         InsertCGValue(args, argIdx.value, cgMod.CreateGhostCFuncArgValue(builder.CreateLoad(info[0], argPtr1),
@@ -533,9 +551,11 @@ public class LinuxAmd64CJNativeCGCFFI <: LinuxCJNativeCGCFFI {
         sseNum: Int64Box): LLVMTypeRef {
         CJC_ASSERT(!info.IsIndirect())
         if (info.IsDirect()) {
-            if (isIntOrPtrTy(info[0]) && intNum.value > 0) {
+            if (isIntOrPtrTy(info[0])) {
+                if (intNum.value == 0) { return ty }
                 intNum.value--
-            } else if (isFloatingPointTy(info[0]) && sseNum.value > 0) {
+            } else if (isFloatingPointTy(info[0]) || isVectorTy(info[0])) {
+                if (sseNum.value == 0) { return ty }
                 sseNum.value--
             }
             return info[0]
@@ -548,7 +568,7 @@ public class LinuxAmd64CJNativeCGCFFI <: LinuxCJNativeCGCFFI {
             intNum.value -= 2
             return LLVMNullType()
         }
-        if (isFloatingPointTy(info[0]) && isFloatingPointTy(info[1])) {
+        if ((isFloatingPointTy(info[0]) || isVectorTy(info[0])) && (isFloatingPointTy(info[1]) || isVectorTy(info[1]))) {
             if (sseNum.value < 2) {
                 return ty
             }
@@ -568,12 +588,13 @@ public class LinuxAmd64CJNativeCGCFFI <: LinuxCJNativeCGCFFI {
             return found
         }
         let llvmType = GetLLVMType(chirTy)
-        let classes = ClassifyType(llvmType)
-        var lowPartTy = GetLowPartType(llvmType, classes, isArg)
+        let sourceType = CGType.GetOrCreate(cgMod, chirTy)
+        let classes = ClassifyType(sourceType)
+        var lowPartTy = GetLowPartType(sourceType, classes, isArg)
         if (lowPartTy.isNull()) {
             return SetABIArgInfo(typeMap, chirTy, ABIArgInfo.GetIndirect())
         }
-        if (classes.size <= 1 || (isVoidTy(lowPartTy) && classes[1] == WordClass.NO_CLASS)) {
+        if (classes.size <= 1 || classes[1] == WordClass.NO_CLASS) {
             return SetABIArgInfo(typeMap, chirTy, ABIArgInfo.GetDirect(lowPartTy))
         }
         var highPartTy = LLVMNullType()
@@ -581,12 +602,12 @@ public class LinuxAmd64CJNativeCGCFFI <: LinuxCJNativeCGCFFI {
             if (classes[0] == WordClass.NO_CLASS) {
                 return SetABIArgInfo(typeMap, chirTy, ABIArgInfo.GetIndirect())
             }
-            highPartTy = GetIntegerTypeWithOffset(llvmType, BYTES_PER_WORD, llvmType, BYTES_PER_WORD)
+            highPartTy = GetIntegerTypeWithOffset(sourceType, BYTES_PER_WORD)
         } else if (classes[1] == WordClass.SSE) {
             if (classes[0] == WordClass.NO_CLASS) {
                 return SetABIArgInfo(typeMap, chirTy, ABIArgInfo.GetIndirect())
             }
-            highPartTy = GetSseTypeWithOffset(llvmType, BYTES_PER_WORD, llvmType, BYTES_PER_WORD)
+            highPartTy = GetSseTypeWithOffset(sourceType, BYTES_PER_WORD)
         } else if (classes[1] == WordClass.SSEUP) {
             lowPartTy = unsafe { LLVMFP128TypeInContext(ctx.GetLLVMContext().raw) }
         } else if (classes[1] == WordClass.X87UP) {
@@ -600,16 +621,16 @@ public class LinuxAmd64CJNativeCGCFFI <: LinuxCJNativeCGCFFI {
         return SetABIArgInfo(typeMap, chirTy, ABIArgInfo.GetExpand(lowPartTy, highPartTy))
     }
 
-    private func GetLowPartType(llvmType: LLVMTypeRef, classes: ArrayList<WordClass>, isArg: Bool): LLVMTypeRef {
+    private func GetLowPartType(sourceType: CGType, classes: ArrayList<WordClass>, isArg: Bool): LLVMTypeRef {
         var lowPartTy = unsafe { LLVMVoidTypeInContext(ctx.GetLLVMContext().raw) }
         if (classes[0] == WordClass.NO_CLASS) {
             return lowPartTy
         } else if (classes[0] == WordClass.MEMORY) {
             return LLVMNullType()
         } else if (classes[0] == WordClass.INTEGER) {
-            lowPartTy = GetIntegerTypeWithOffset(llvmType, 0u64, llvmType, 0u64)
+            lowPartTy = GetIntegerTypeWithOffset(sourceType, 0u64)
         } else if (classes[0] == WordClass.SSE) {
-            lowPartTy = GetSseTypeWithOffset(llvmType, 0u64, llvmType, 0u64)
+            lowPartTy = GetSseTypeWithOffset(sourceType, 0u64)
         } else if (classes[0] == WordClass.X87) {
             if (isArg) {
                 return LLVMNullType()
@@ -626,7 +647,8 @@ public class LinuxAmd64CJNativeCGCFFI <: LinuxCJNativeCGCFFI {
         return lowPartTy
     }
 
-    private func ClassifyType(llvmType: LLVMTypeRef): ArrayList<WordClass> {
+    private func ClassifyType(sourceType: CGType): ArrayList<WordClass> {
+        let llvmType = sourceType.GetLLVMType()
         let wordSize = (GetTypeSize(cgMod, llvmType) + BYTES_PER_WORD - 1u64) / BYTES_PER_WORD
         let wordClasses = ArrayList<WordClass>()
         var idx: UInt64 = 0u64
@@ -638,13 +660,15 @@ public class LinuxAmd64CJNativeCGCFFI <: LinuxCJNativeCGCFFI {
             FillWithMemory(wordClasses)
             return wordClasses
         }
-        ClassifyType(llvmType, wordClasses, 0u64)
+        ClassifyType(sourceType, wordClasses, 0u64)
         FixupClassification(llvmType, wordClasses)
         return wordClasses
     }
 
-    private func ClassifyType(llvmType: LLVMTypeRef, wordClasses: ArrayList<WordClass>, offset: UInt64): Unit {
-        let alignment = GetTypeAlignment(cgMod, llvmType)
+    private func ClassifyType(sourceType: CGType, wordClasses: ArrayList<WordClass>, offset: UInt64): Unit {
+        let llvmType = sourceType.GetLLVMType()
+        if (GetTypeSize(cgMod, llvmType) == 0u64) { return }
+        let alignment = UInt64(sourceType.GetAlign().getOrThrow())
         let misAlign = offset % alignment
         if (misAlign != 0u64) {
             var wordIdx = offset / BYTES_PER_WORD
@@ -669,15 +693,15 @@ public class LinuxAmd64CJNativeCGCFFI <: LinuxCJNativeCGCFFI {
                 CJC_ASSERT_WITH_MSG(false, "Bits in FloatingPointTy are wrong.")
             }
         } else if (isStructTy(llvmType)) {
-            ClassifyStructType(GetStructElements(llvmType), wordClasses, offset)
+            ClassifyStructType(sourceType, wordClasses, offset)
         } else if (isArrayTy(llvmType)) {
             let elemNum = unsafe { LLVMGetArrayLength(llvmType) }
-            let elemType = GetPointerElementType(llvmType)
+            let elemType = sourceType.GetContainedTypeAt(0u64)
             var elemIdx: UInt32 = 0u32
             var elemOffset = offset
             while (elemIdx < elemNum) {
                 ClassifyType(elemType, wordClasses, elemOffset)
-                elemOffset += GetTypeSize(cgMod, elemType)
+                elemOffset += UInt64(elemType.GetSize().getOrThrow())
                 elemIdx++
             }
         } else {
@@ -685,16 +709,14 @@ public class LinuxAmd64CJNativeCGCFFI <: LinuxCJNativeCGCFFI {
         }
     }
 
-    private func ClassifyStructType(fields: ArrayList<LLVMTypeRef>, wordClasses: ArrayList<WordClass>,
+    private func ClassifyStructType(sourceType: CGType, wordClasses: ArrayList<WordClass>,
         offset: UInt64): Unit {
-        if (fields.isEmpty()) {
-            return
-        }
-        var fieldOffset = offset
-        for (field in fields) {
-            fieldOffset = AlignedUpTo(cgMod, fieldOffset, field)
-            ClassifyType(field, wordClasses, fieldOffset)
-            fieldOffset += GetTypeSize(cgMod, field)
+        // Layout-only tail bytes and alignment wrappers are not source values.
+        // One source field still occupies one LLVM field, at its actual offset.
+        let fields = sourceType.GetContainedTypes()
+        for (idx in 0..fields.size) {
+            ClassifyType(fields[idx], wordClasses,
+                offset + cgMod.GetOffsetOfElement(sourceType.GetLLVMType(), UInt32(idx)))
         }
     }
 
@@ -734,106 +756,76 @@ public class LinuxAmd64CJNativeCGCFFI <: LinuxCJNativeCGCFFI {
         }
     }
 
-    private func GetIntegerTypeWithOffset(curType: LLVMTypeRef, offset: UInt64, srcType: LLVMTypeRef,
-        srcOffset: UInt64): LLVMTypeRef {
-        CJC_ASSERT(srcOffset == 0u64 || srcOffset == BYTES_PER_WORD)
-        if (offset == 0u64) {
-            let typeSize = GetTypeSize(cgMod, curType)
-            if (isIntOrPtrTy(curType) && typeSize == BYTES_PER_WORD) {
-                return curType
+    // Collect only value leaves, retaining offsets from the storage layout.
+    // Classification and register coercion must agree about padding (including
+    // nested explicit alignment and arrays), or an SSE leaf can become double.
+    private func CollectValueLeaves(sourceType: CGType, offset: UInt64,
+        leaves: ArrayList<(LLVMTypeRef, UInt64)>): Unit {
+        let llvmType = sourceType.GetLLVMType()
+        if (isStructTy(llvmType)) {
+            let fields = sourceType.GetContainedTypes()
+            for (idx in 0..fields.size) {
+                CollectValueLeaves(fields[idx],
+                    offset + cgMod.GetOffsetOfElement(llvmType, UInt32(idx)), leaves)
             }
-            if (isIntOrPtrTy(curType) && (typeSize == 1u64 || typeSize == 2u64 || typeSize == 4u64) &&
-                ContainsUselessBits(srcType, AsBits(srcOffset + typeSize), AsBits(srcOffset + BYTES_PER_WORD))) {
-                return curType
+        } else if (isArrayTy(llvmType)) {
+            let element = sourceType.GetContainedTypeAt(0u64)
+            let stride = UInt64(element.GetSize().getOrThrow())
+            let count = unsafe { LLVMGetArrayLength(llvmType) }
+            var index = 0u32
+            while (index < count) {
+                CollectValueLeaves(element, offset + UInt64(index) * stride, leaves)
+                index++
+            }
+        } else if (GetTypeSize(cgMod, llvmType) != 0u64) {
+            leaves.add((llvmType, offset))
+        }
+    }
+
+    private func ContainsUselessBits(leaves: ArrayList<(LLVMTypeRef, UInt64)>,
+        start: UInt64, end: UInt64): Bool {
+        for ((ty, offset) in leaves) {
+            if (offset < end && offset + GetTypeSize(cgMod, ty) > start) { return false }
+        }
+        return true
+    }
+
+    private func GetIntegerTypeWithOffset(sourceType: CGType, offset: UInt64): LLVMTypeRef {
+        let leaves = ArrayList<(LLVMTypeRef, UInt64)>()
+        CollectValueLeaves(sourceType, 0u64, leaves)
+        for ((ty, leafOffset) in leaves) {
+            let size = GetTypeSize(cgMod, ty)
+            if (leafOffset == offset && isIntOrPtrTy(ty) &&
+                (size == 1u64 || size == 2u64 || size == 4u64 || size == 8u64) &&
+                ContainsUselessBits(leaves, offset + size, offset + BYTES_PER_WORD)) {
+                return ty
             }
         }
-        if (isStructTy(curType) && offset < GetTypeSize(cgMod, curType)) {
-            let fieldOffsets = CalcFieldOffsets(curType)
-            let fieldIdx = GetFieldContainsOffset(fieldOffsets, offset)
-            let relOffset = offset - fieldOffsets[fieldIdx]
-            return GetIntegerTypeWithOffset(GetStructElementType(curType, fieldIdx), relOffset, srcType, srcOffset)
-        }
-        let typeSize = GetTypeSize(cgMod, srcType)
-        CJC_ASSERT(typeSize != srcOffset)
-        let intSize = MinUInt64(typeSize - srcOffset, BYTES_PER_WORD)
+        let size = UInt64(sourceType.GetSize().getOrThrow())
+        let intSize = MinUInt64(size - offset, BYTES_PER_WORD)
         return unsafe { LLVMIntTypeInContext(ctx.GetLLVMContext().raw, UInt32(AsBits(intSize))) }
     }
 
-    private func GetSseTypeWithOffset(curType: LLVMTypeRef, offset: UInt64, srcType: LLVMTypeRef,
-        srcOffset: UInt64): LLVMTypeRef {
-        CJC_ASSERT(srcOffset == 0u64 || srcOffset == BYTES_PER_WORD)
-        let bytesOfHalfWord = 4u64
-        if (ContainsUselessBits(srcType, AsBits(srcOffset + bytesOfHalfWord), AsBits(srcOffset + BYTES_PER_WORD))) {
+    private func GetSseTypeWithOffset(sourceType: CGType, offset: UInt64): LLVMTypeRef {
+        let leaves = ArrayList<(LLVMTypeRef, UInt64)>()
+        CollectValueLeaves(sourceType, 0u64, leaves)
+        if (ContainsUselessBits(leaves, offset + 4u64, offset + BYTES_PER_WORD)) {
             return unsafe { LLVMFloatTypeInContext(ctx.GetLLVMContext().raw) }
         }
-        if (ContainsFloatAtOffset(curType, offset) && ContainsFloatAtOffset(curType, offset + bytesOfHalfWord)) {
+        var lowFloat = false
+        var highFloat = false
+        for ((ty, leafOffset) in leaves) {
+            if (isFloatTy(ty)) {
+                if (leafOffset == offset) { lowFloat = true }
+                if (leafOffset == offset + 4u64) { highFloat = true }
+            }
+        }
+        if (lowFloat && highFloat) {
             return unsafe { LLVMVectorType(LLVMFloatTypeInContext(ctx.GetLLVMContext().raw), 2u32) }
         }
         return unsafe { LLVMDoubleTypeInContext(ctx.GetLLVMContext().raw) }
     }
 
-    private func ContainsUselessBits(llvmType: LLVMTypeRef, start: UInt64, end: UInt64): Bool {
-        CJC_ASSERT(start <= end)
-        if (AsBits(GetTypeSize(cgMod, llvmType)) <= start) {
-            return true
-        }
-        if (isStructTy(llvmType)) {
-            let fieldOffsets = CalcFieldOffsets(llvmType)
-            let fields = GetStructElements(llvmType)
-            var idx: Int64 = 0
-            while (idx < fields.size) {
-                let fieldOffset = fieldOffsets[idx]
-                let fieldOffsetBits = AsBits(fieldOffset)
-                if (fieldOffsetBits >= end) {
-                    break
-                }
-                let fieldStart = if (fieldOffsetBits < start) { start - fieldOffsetBits } else { 0u64 }
-                if (!ContainsUselessBits(fields[idx], fieldStart, end - fieldOffsetBits)) {
-                    return false
-                }
-                idx++
-            }
-            return true
-        }
-        return false
-    }
-
-    private func CalcFieldOffsets(llvmType: LLVMTypeRef): ArrayList<UInt64> {
-        let offsets = ArrayList<UInt64>()
-        let fields = GetStructElements(llvmType)
-        CJC_ASSERT(fields.size <= MAX_FIELD_NUM)
-        var offset: UInt64 = 0u64
-        for (field in fields) {
-            offset = AlignedUpTo(cgMod, offset, field)
-            offsets.add(offset)
-            offset += GetTypeSize(cgMod, field)
-        }
-        return offsets
-    }
-
-    private func GetFieldContainsOffset(fieldOffsets: ArrayList<UInt64>, offset: UInt64): Int64 {
-        var idx: Int64 = 0
-        while (idx + 1 < fieldOffsets.size) {
-            if (fieldOffsets[idx] <= offset && fieldOffsets[idx + 1] > offset) {
-                break
-            }
-            idx++
-        }
-        return idx
-    }
-
-    private func ContainsFloatAtOffset(llvmType: LLVMTypeRef, offset: UInt64): Bool {
-        if (offset == 0u64 && isFloatTy(llvmType)) {
-            return true
-        }
-        if (isStructTy(llvmType)) {
-            let fieldOffsets = CalcFieldOffsets(llvmType)
-            let fieldIdx = GetFieldContainsOffset(fieldOffsets, offset)
-            let relOffset = offset - fieldOffsets[fieldIdx]
-            return ContainsFloatAtOffset(GetStructElementType(llvmType, fieldIdx), relOffset)
-        }
-        return false
-    }
 }
 
 public open class LinuxAarch64CJNativeCGCFFI <: LinuxCJNativeCGCFFI {
@@ -906,7 +898,11 @@ public open class LinuxAarch64CJNativeCGCFFI <: LinuxCJNativeCGCFFI {
         if (!isStructTy(retType) && IsStructPtrTy(unsafe { LLVMTypeOf(value) })) {
             castRes = builder.CreateBitCast(value, unsafe { LLVMPointerType(retType, 0u32) })
         }
-        return builder.CreateLoad(retType, castRes)
+        var result = LLVMNullValue()
+        try (nameCString = unsafe { LibC.mallocCString("") }.asResource()) {
+            result = builder.CreateLoad(retType, castRes, nameCString.value)
+        }
+        return result
     }
 
     protected open override func ProcessInvocationArg(chirParamTy: StructType, kind: ProcessKind, argIdx: Int64Box,
@@ -1039,7 +1035,10 @@ public open class LinuxAarch64CJNativeCGCFFI <: LinuxCJNativeCGCFFI {
             let tmpVal = builder.CreateEntryAlloca(info[0], name: "arg.copy")
             builder.CreateMemCpy(tmpVal, UInt32(GetTypeAlignment(cgMod, info[0])), arg.GetRawValue(),
                 UInt32(GetTypeAlignment(cgMod, chirParamTy)), SizeValue(builder, actualSize))
-            args[argIdx] = cgMod.CreateGhostCFuncArgValue(builder.CreateLoad(info[0], tmpVal), GetCGType(cgMod, info[0]))
+            try (nameCString = unsafe { LibC.mallocCString("") }.asResource()) {
+                args[argIdx] = cgMod.CreateGhostCFuncArgValue(builder.CreateLoad(info[0], tmpVal, nameCString.value),
+                    GetCGType(cgMod, info[0]))
+            }
         }
     }
 }
@@ -1733,6 +1732,10 @@ private func isArrayTy(llvmType: LLVMTypeRef): Bool {
     return !llvmType.isNull() && unsafe { LLVMGetTypeKind(llvmType) } == LLVM_ARRAY_TYPE_KIND
 }
 
+private func isVectorTy(llvmType: LLVMTypeRef): Bool {
+    return unsafe { LLVMGetTypeKind(llvmType) } == LLVM_VECTOR_TYPE_KIND
+}
+
 private func isFloatTy(llvmType: LLVMTypeRef): Bool {
     return !llvmType.isNull() && unsafe { LLVMGetTypeKind(llvmType) } == LLVM_FLOAT_TYPE_KIND
 }
@@ -1830,7 +1833,7 @@ private func CreateIntCastUnsigned(builder: IRBuilder2, value: LLVMValueRef, des
     return builder.CreateTrunc(value, destType)
 }
 
-private func AddAlignAttributeAtIndex(value: LLVMValueRef, idx: UInt32, align: UInt64): Unit {
+public func AddAlignAttributeAtIndex(value: LLVMValueRef, idx: UInt32, align: UInt64): Unit {
     if (value.isNull()) {
         return
     }
@@ -1846,5 +1849,9 @@ private func AddAlignAttributeAtIndex(value: LLVMValueRef, idx: UInt32, align: U
         return
     }
     let attr = unsafe { LLVMCreateEnumAttribute(attrContext, alignKind, align) }
-    unsafe { LLVMAddAttributeAtIndex(value, idx, attr) }
+    if (!unsafe { LLVMIsAFunction(value) }.isNull()) {
+        unsafe { LLVMAddAttributeAtIndex(value, idx, attr) }
+    } else {
+        unsafe { LLVMAddCallSiteAttribute(value, idx, attr) }
+    }
 }

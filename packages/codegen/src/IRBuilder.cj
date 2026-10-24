@@ -741,6 +741,7 @@ public class IRBuilder2 <: Resource {
                 try (nameCString = unsafe { LibC.mallocCString("") }.asResource()) {
                     loadInst = unsafe { LLVMBuildLoad2(builder.raw, elementType, valueToLoad, nameCString.value) }
                 }
+                SetMemoryAlignment(loadInst, valueToLoad)
                 if (let Some(basePtr) <-
                     GetCGContext().GetBasePtrOf(cgMod.GetMappedCGValue(operand).GetRawValue())) {
                     GetCGContext().SetBasePtr(loadInst, basePtr)
@@ -1014,12 +1015,72 @@ public class IRBuilder2 <: Resource {
         return result
     }
 
+    // Alignment belongs to the address, not its pointee type. In particular a
+    // packed field keeps its parent's guarantee across GEPs and pointer casts.
+    // Reconstruct from the IR so facts survive different expression builders.
+    private func AlignmentAtOffset(alignment: UInt32, offset: UInt64): UInt32 {
+        var result = alignment
+        while (result > 1u32 && offset % UInt64(result) != 0u64) {
+            result /= 2u32
+        }
+        return result
+    }
+
+    public func GetAddressAlignment(address: LLVMValueRef): UInt32 {
+        if (!unsafe { LLVMIsAAllocaInst(address) }.isNull() ||
+            !unsafe { LLVMIsAGlobalVariable(address) }.isNull()) {
+            let explicitAlign = unsafe { LLVMGetAlignment(address) }
+            if (explicitAlign != 0u32) { return explicitAlign }
+            return cgMod.GetABITypeAlignment(unsafe { LLVMGetElementType(LLVMTypeOf(address)) })
+        }
+        if (!unsafe { LLVMIsABitCastInst(address) }.isNull() ||
+            !unsafe { LLVMIsAAddrSpaceCastInst(address) }.isNull()) {
+            return GetAddressAlignment(unsafe { LLVMGetOperand(address, 0u32) })
+        }
+        if (!unsafe { LLVMIsAGetElementPtrInst(address) }.isNull()) {
+            let base = unsafe { LLVMGetOperand(address, 0u32) }
+            var alignment = GetAddressAlignment(base)
+            var element = unsafe { LLVMGetElementType(LLVMTypeOf(base)) }
+            let count = UInt32(unsafe { LLVMGetNumOperands(address) })
+            var index = 1u32
+            while (index < count) {
+                let operand = unsafe { LLVMGetOperand(address, index) }
+                let constant = unsafe { LLVMSelfhostIsConstantInt(operand) } != 0
+                if (index > 1u32 && unsafe { LLVMGetTypeKind(element) } == LLVM_STRUCT_TYPE_KIND) {
+                    CJC_ASSERT(constant)
+                    let field = UInt32(unsafe { LLVMConstIntGetZExtValue(operand) })
+                    alignment = AlignmentAtOffset(alignment, cgMod.GetOffsetOfElement(element, field))
+                    element = unsafe { LLVMStructGetTypeAtIndex(element, field) }
+                } else {
+                    if (index > 1u32) { element = unsafe { LLVMGetElementType(element) } }
+                    let stride = cgMod.GetTypeSize(element)
+                    // Only the low alignment bits matter; avoid overflow for
+                    // negative indices represented as unsigned LLVM constants.
+                    let factor = if (constant) {
+                        unsafe { LLVMConstIntGetZExtValue(operand) } % UInt64(alignment)
+                    } else { 1u64 }
+                    alignment = AlignmentAtOffset(alignment, (stride % UInt64(alignment)) * factor)
+                }
+                index++
+            }
+            return alignment
+        }
+        // A raw pointer, join, or constant expression has no proven alignment.
+        // Do not promote its guarantee from a cast's destination type.
+        return 1u32
+    }
+
+    private func SetMemoryAlignment(instruction: LLVMValueRef, address: LLVMValueRef): Unit {
+        unsafe { LLVMSetAlignment(instruction, GetAddressAlignment(address)) }
+    }
+
     public func CreateLoad(elementType: LLVMTypeRef, addr: LLVMValueRef, name!: String = ""): LLVMValueRef {
         let buildLoad = { rawElementType: LLVMTypeRef, rawAddr: LLVMValueRef, rawName: String =>
             var loadResult = LLVMNullValue()
             try (nameCString = unsafe { LibC.mallocCString(rawName) }.asResource()) {
                 loadResult = unsafe { LLVMBuildLoad2(builder.raw, rawElementType, rawAddr, nameCString.value) }
             }
+            SetMemoryAlignment(loadResult, rawAddr)
             loadResult
         }
         let elementKind = unsafe { LLVMGetTypeKind(elementType) }
@@ -1227,7 +1288,9 @@ public class IRBuilder2 <: Resource {
     }
 
     public func CreateLoad(elementType: LLVMTypeRef, addr: LLVMValueRef, name: CString): LLVMValueRef {
-        return unsafe { LLVMBuildLoad2(builder.raw, elementType, addr, name) }
+        let result = unsafe { LLVMBuildLoad2(builder.raw, elementType, addr, name) }
+        SetMemoryAlignment(result, addr)
+        return result
     }
 
     public func CreateLoad(cgVal: CGValue, name!: String = ""): LLVMValueRef {
@@ -1269,6 +1332,7 @@ public class IRBuilder2 <: Resource {
     // same as CJBarrierLowering::uncolorIfGCPtr).
     public func CreateStore(value: LLVMValueRef, addr: LLVMValueRef, isVolatile!: Bool = false): LLVMValueRef {
         let store = unsafe { LLVMBuildStore(builder.raw, value, addr) }
+        SetMemoryAlignment(store, addr)
         if (isVolatile) {
             unsafe { LLVMSetVolatile(store, 1) }
         }
@@ -1687,17 +1751,19 @@ public class IRBuilder2 <: Resource {
 
     public func CreateMemSet(pointer: LLVMValueRef, value: LLVMValueRef, len: LLVMValueRef,
         align!: UInt32 = 0u32): LLVMValueRef {
-        return unsafe { LLVMBuildMemSet(builder.raw, pointer, value, len, align) }
+        return unsafe { LLVMBuildMemSet(builder.raw, pointer, value, len, GetAddressAlignment(pointer)) }
     }
 
-    public func CreateMemCpy(dest: LLVMValueRef, destAlign: UInt32, src: LLVMValueRef, srcAlign: UInt32,
+    public func CreateMemCpy(dest: LLVMValueRef, _: UInt32, src: LLVMValueRef, _: UInt32,
         size: LLVMValueRef): LLVMValueRef {
-        return unsafe { LLVMBuildMemCpy(builder.raw, dest, destAlign, src, srcAlign, size) }
+        return unsafe { LLVMBuildMemCpy(builder.raw, dest, GetAddressAlignment(dest),
+            src, GetAddressAlignment(src), size) }
     }
 
     public func CreateMemMove(dest: LLVMValueRef, destAlign: UInt32, src: LLVMValueRef, srcAlign: UInt32,
         size: LLVMValueRef): LLVMValueRef {
-        return unsafe { LLVMBuildMemMove(builder.raw, dest, destAlign, src, srcAlign, size) }
+        return unsafe { LLVMBuildMemMove(builder.raw, dest, GetAddressAlignment(dest),
+            src, GetAddressAlignment(src), size) }
     }
 
     // Copy an aggregate through its LLVM field types. This is a code-generation helper
@@ -1740,7 +1806,8 @@ public class IRBuilder2 <: Resource {
         try (nameCString = unsafe { LibC.mallocCString("typed.copy.leaf") }.asResource()) {
             leaf = unsafe { LLVMBuildLoad2(builder.raw, aggregateType, source, nameCString.value) }
         }
-        let _ = unsafe { LLVMBuildStore(builder.raw, leaf, destination) }
+        SetMemoryAlignment(leaf, source)
+        let _ = CreateStore(leaf, destination)
     }
 
     public func CopyNativeAggregate(aggregateType: LLVMTypeRef, source: LLVMValueRef,
@@ -3166,6 +3233,47 @@ public class IRBuilder2 <: Resource {
             return callArgs[0]
         }
         return callInst
+    }
+
+    public func CallReferenceRuntime(kind: IntrinsicKind, args: ArrayList<Value>): LLVMValueRef {
+        let name = match (kind) {
+            case IntrinsicKind.REFERENCE_INVOKE_FINALIZE => "CJ_MCC_ReferenceInvokeFinalize"
+            case IntrinsicKind.REFERENCE_WAIT_PENDING => "CJ_MCC_ReferenceWaitPending"
+            case IntrinsicKind.REFERENCE_RUNTIME_RUNNING => "CJ_MCC_ReferenceRuntimeRunning"
+            case IntrinsicKind.REFERENCE_NANO_TIME => "CJ_MCC_ReferenceNanoTime"
+            case _ => throw IllegalArgumentException("invalid Reference runtime operation")
+        }
+        let returnType = match (kind) {
+            case IntrinsicKind.REFERENCE_WAIT_PENDING => CGType.GetRefType(GetLLVMContext())
+            case IntrinsicKind.REFERENCE_RUNTIME_RUNNING => unsafe { LLVMInt1TypeInContext(GetLLVMContext().raw) }
+            case IntrinsicKind.REFERENCE_NANO_TIME => unsafe { LLVMInt64TypeInContext(GetLLVMContext().raw) }
+            case _ => unsafe { LLVMVoidTypeInContext(GetLLVMContext().raw) }
+        }
+        let parameters = RawValuesOfCGValues(MapIntrinsicArguments(args))
+        let functionTy = MakeFunctionTypeFromArgs(returnType, parameters)
+        return CreateCallOrInvoke(GetOrInsertRuntimeFunction(name, functionTy), parameters)
+    }
+
+    public func PublishReferenceMethods(methods: ArrayList<LLVMValueRef>): Unit {
+        let functionTy = MakeFunctionTypeFromArgs(unsafe { LLVMVoidTypeInContext(GetLLVMContext().raw) }, methods)
+        let _ = CreateCallOrInvoke(GetOrInsertRuntimeFunction("CJ_MCC_SetReferenceMethods", functionTy), methods)
+    }
+
+    public func CallReferenceVolatileLoad(address: LLVMValueRef): LLVMValueRef {
+        let base = GetTrackedManagedBase(address).getOrThrow()
+        let refPlaceTy = unsafe { LLVMPointerType(CGType.GetRefType(GetLLVMContext()), 1u32) }
+        let args = ArrayList<LLVMValueRef>([base, CreatePointerCast(address, refPlaceTy),
+            GetInt32(SEQ_CST_AS_INT32)])
+        return CallMappedLLVMIntrinsic(IntrinsicKind.ATOMIC_LOAD, args, ArrayList<LLVMTypeRef>())
+    }
+
+    public func CallReferenceVolatileStore(value: LLVMValueRef, address: LLVMValueRef): LLVMValueRef {
+        let base = GetTrackedManagedBase(address).getOrThrow()
+        let refTy = CGType.GetRefType(GetLLVMContext())
+        let refPlaceTy = unsafe { LLVMPointerType(refTy, 1u32) }
+        let args = ArrayList<LLVMValueRef>([CreatePointerCast(value, refTy), base,
+            CreatePointerCast(address, refPlaceTy), GetInt32(SEQ_CST_AS_INT32)])
+        return CallMappedLLVMIntrinsic(IntrinsicKind.ATOMIC_STORE, args, ArrayList<LLVMTypeRef>())
     }
 
     public func CallGCReadWeakRef(args: ArrayList<LLVMValueRef>): LLVMValueRef {
@@ -5777,16 +5885,42 @@ public class IRBuilder2 <: Resource {
         return objectValue
     }
 
+    public func CallRegisterFinalizer(receiver: LLVMValueRef): Unit {
+        let typeInfo = GetTypeInfoFromObject(receiver)
+        let typeInfoType = CGType.GetOrCreateTypeInfoType(GetLLVMContext())
+        let flagAddress = CreateStructGEP(typeInfoType, typeInfo,
+            UInt32(TypeInfoLayout.flagIndex), name: "finalizer.flags.addr")
+        let flagType = unsafe { LLVMInt8TypeInContext(GetLLVMContext().raw) }
+        let flags = CreateLoad(flagType, flagAddress, name: "finalizer.flags")
+        let mask = unsafe { LLVMConstInt(flagType, 2u64, 0) }
+        let needsRegistration = CreateICmp(LLVMIntPredicate.NE, CreateAnd(flags, mask),
+            unsafe { LLVMConstNull(flagType) }, name: "finalizer.required")
+        let registerBlock = CreateAndInsertBasicBlock("finalizer.register")
+        let returnBlock = CreateAndInsertBasicBlock("finalizer.return")
+        CreateCondBr(needsRegistration, registerBlock, returnBlock)
+        SetInsertPoint(registerBlock)
+        let refType = CGType.GetRefType(GetLLVMContext())
+        let functionType = MakeFunctionType(refType, ArrayList<LLVMTypeRef>([refType]))
+        let callee = GetOrCreateIntrinsicFunction("CJ_MCC_OnFinalizerCreated", functionType,
+            refType, false, ArrayList<String>(["cj-runtime"]))
+        let _ = CreateCallOrInvoke(callee,
+            ArrayList<LLVMValueRef>([CreateBitCast(receiver, refType)]))
+        CreateBr(returnBlock)
+        SetInsertPoint(returnBlock)
+    }
+
     private func AddClassMallocMetadata(objectValue: LLVMValueRef, classTy: Type): Unit {
         let classType = (classTy as ClassType).getOrThrow()
         CJC_ASSERT(!classTy.IsAutoEnvBase())
         let classDef = classType.GetClassDef()
         let mallocType = ArrayList<LLVMMetadataRef>()
-        if (classDef.GetFinalizer().isSome()) {
-            mallocType.add(LLVMCreateMDString(GetLLVMContext(), GC_FINALIZER_ATTR))
-        }
         if (IsCoreFutureClass(classDef) || IsSyncRelatedClass(classDef) || IsWeakRefClass(classDef)) {
-            mallocType.add(LLVMCreateMDString(GetLLVMContext(), classDef.GetSrcCodeIdentifier()))
+            let name = match (classDef.GetSrcCodeIdentifier()) {
+                case "ReferenceMutex" => "Mutex"
+                case "ReferenceMonitor" => "Monitor"
+                case other => other
+            }
+            mallocType.add(LLVMCreateMDString(GetLLVMContext(), name))
         }
         if (!mallocType.isEmpty()) {
             LLVMSetInstructionMetadata(GetLLVMContext(), objectValue, "MallocType",
