@@ -90,6 +90,7 @@ private class TerminatedScopeInfo {
 private class CtorUninitVars {
     public var ctor: FuncDecl
     public let decls: ArrayList<Decl> = ArrayList<Decl>()
+    public let initializedDecls: ArrayList<Decl> = ArrayList<Decl>()
 
     public init(ctor: FuncDecl) {
         this.ctor = ctor
@@ -934,6 +935,7 @@ public class InitializationChecker {
                         if (member.astKind != ASTKind.VAR_DECL || member.TestAttr(Attribute.STATIC)) { continue }
                         if (!completion.reachable || ContainsInitDecl(completion.definite, member)) {
                             member.EnableAttr(Attribute.INITIALIZED)
+                            uninitialized.initializedDecls.add(member)
                         } else if (ContainsInitDecl(flowDecls, member)) {
                             member.DisableAttr(Attribute.INITIALIZED)
                             uninitialized.decls.add(member)
@@ -1350,33 +1352,14 @@ public class InitializationChecker {
         ctorUninitVars.add(ctorVars)
     }
 
-    private func UpdateInitializationStatus(assign: AssignExpr, decl: Decl): Unit {
-        let scopeGateName = CurrentScopeGate(assign.scopeName)
-        if (!scopeGateName.isEmpty()) {
-            if (let Some(terminated) <- FindTerminatedScope(terminatedScopes, scopeGateName)) {
-                if (ContainsInitDecl(terminated.variablesBeforeTerminator, decl)) {
-                    if (terminated.terminationKind != ASTKind.THROW_EXPR || tryDepth != 0) {
-                        AddUniqueDecl(terminated.initVarsAfterTerminator, decl)
-                        return
-                    }
-                }
-            }
-        }
+    private func UpdateInitializationStatus(decl: Decl): Unit {
+        // A transfer in a conditional operand (for example `value ?? return`)
+        // does not terminate the other path. The current flow, rather than a
+        // scope-wide record of an earlier transfer, owns this assignment.
         if (!flowReachable) { return }
         decl.EnableAttr(Attribute.INITIALIZED)
         AddUniqueDecl(possibleReassignments, decl)
         AddUniqueDecl(flowWrites, decl)
-    }
-
-    private func HasInitVarsAfterTerminator(scopeName: String): Bool {
-        let scopeGateName = CurrentScopeGate(scopeName)
-        if (scopeGateName.isEmpty()) {
-            return false
-        }
-        if (let Some(terminated) <- FindTerminatedScope(terminatedScopes, scopeGateName)) {
-            return !terminated.initVarsAfterTerminator.isEmpty()
-        }
-        return false
     }
 
     private func IsOrderRelated(checkNode: Node, targetNode: Node, isClassLikeOrStruct: Bool): Bool {
@@ -1522,9 +1505,6 @@ public class InitializationChecker {
                 return false
             }
             if (!target.TestAttr(Attribute.INITIALIZED)) {
-                if (HasInitVarsAfterTerminator(refExpr.scopeName)) {
-                    return true
-                }
                 if (refExpr.ShouldDiagnose(allowCompilerAdd: true)) {
                     if (IsInDifferentFunction(refExpr, target)) {
                         DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_capture_before_initialization,
@@ -1657,7 +1637,7 @@ public class InitializationChecker {
                 CheckInitInExpr(left)
             }
             if (target.TestAttr(Attribute.INITIALIZATION_CHECKED) && !IsInDifferentFunction(assign, target)) {
-                UpdateInitializationStatus(assign, target)
+                UpdateInitializationStatus(target)
             }
         }
         return true
@@ -2448,14 +2428,20 @@ public class InitializationChecker {
                 }
             }
         }
-        let definitelyUninitVars = if (let Some(entry) <- FindCtorUninitVars(ctorUninitVars, fd)) {
-            entry.decls
-        } else {
-            ArrayList<Decl>()
-        }
+        let completion = FindCtorUninitVars(ctorUninitVars, fd)
         for (decl in uninitNonFuncDecls) {
-            if (decl.TestAnyAttr(Attribute.INITIALIZED, Attribute.COMMON) &&
-                !ContainsInitDecl(definitelyUninitVars, decl)) {
+            // The constructor records its normal completions before restoring
+            // the enclosing flow. That restoration can include these fields
+            // when an earlier global initializer references them; its flags
+            // describe that enclosing point, not this constructor's result.
+            let initialized = if (let Some(state) <- completion) {
+                ContainsInitDecl(state.initializedDecls, decl)
+            } else { false }
+            let uninitialized = if (let Some(state) <- completion) {
+                ContainsInitDecl(state.decls, decl)
+            } else { false }
+            if ((initialized || decl.TestAnyAttr(Attribute.INITIALIZED, Attribute.COMMON)) && !uninitialized) {
+                decl.EnableAttr(Attribute.INITIALIZED)
                 continue
             }
             if (fd.TestAttr(Attribute.COMPILER_ADD) && fd.TestAttr(Attribute.PRIMARY_CONSTRUCTOR)) {
