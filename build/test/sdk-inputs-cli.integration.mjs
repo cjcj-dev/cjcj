@@ -18,8 +18,11 @@ const mirrors = process.env.SDK_INPUT_MIRRORS;
 const host = process.env.SDK_INPUT_H;
 assert.ok(work && mirrors && host, 'SDK_INPUT_WORK/MIRRORS/H required');
 fs.mkdirSync(work, {recursive: true});
-const fixed = {tools: '759c8a58980ce89606c4406027ecf1a3bf281854',
-  cjpm: makeRepos().cjpm.tag, stdx: '56e9954235a872ca54d1f729bdf0a75e282f3601'};
+// A cut runner freezes this expectation before mutating the product pin.
+const fixed = {tools: process.env.SDK_INPUT_TOOLS_REF ?? '759c8a58980ce89606c4406027ecf1a3bf281854',
+  cjpm: process.env.SDK_INPUT_EXPECT_CJPM ?? makeRepos().cjpm.tag,
+  stdx: process.env.SDK_INPUT_STDX_REF ?? '56e9954235a872ca54d1f729bdf0a75e282f3601'};
+for (const name of ['tools', 'cjpm', 'stdx']) assert.match(fixed[name], /^[0-9a-f]{40}$/, `${name} fixed object required`);
 // Stale input stays distinct when tools and its cjpm overlay share one commit.
 const staleTools = '24c2a08630ed3a1467a0f99aa5fa914df73916f8';
 const urls = {tools: 'https://github.com/cjcj-dev/cangjie-tools.git', stdx: 'https://github.com/cjcj-dev/cangjie-stdx.git'};
@@ -73,7 +76,9 @@ function identities(ws, expectedUrls = urls) {
   }
 }
 const otherFetch = ['--repo-url', `compiler=${fixtureUrl}`, '--repo-tag', `compiler=${fixtureSha}`,
-  '--repo-url', `runtime=${fixtureUrl}`, '--repo-tag', `runtime=${fixtureSha}`];
+  '--repo-url', `runtime=${fixtureUrl}`, '--repo-tag', `runtime=${fixtureSha}`,
+  ...(process.env.SDK_INPUT_TOOLS_REF ? ['--repo-tag', `tools=${fixed.tools}`] : []),
+  ...(process.env.SDK_INPUT_STDX_REF ? ['--repo-tag', `stdx=${fixed.stdx}`] : [])];
 const ws = path.join(work, 'workspace');
 const cases = {};
 cases['fetch-default'] = () => {
@@ -99,8 +104,9 @@ cases['tools-overlay'] = () => {
   observed(p, 'TOOLS_INPUT_OBSERVED');
   const tools = path.join(ws, 'cangjie_tools');
   const tree = git(tools, 'write-tree');
-  console.log('CJPM_SUBTREE_ASSERTION_REACHED');
-  assert.equal(git(tools, 'rev-parse', `${tree}:cjpm`), git(tools, 'rev-parse', `${fixed.cjpm}:cjpm`), 'complete fork cjpm tree');
+  const actualTree = git(tools, 'rev-parse', `${tree}:cjpm`), expectedTree = git(tools, 'rev-parse', `${fixed.cjpm}:cjpm`);
+  console.log('CJPM_SUBTREE_ASSERTION_REACHED', JSON.stringify({expectedRef:fixed.cjpm, actualTree, expectedTree}));
+  assert.equal(actualTree, expectedTree, 'complete fork cjpm tree');
   assert.equal(git(tools, 'diff', '--cached', '--name-only', 'HEAD', '--', '.', ':!cjpm'), '', 'other tools stay combined');
   identities(ws);
 };

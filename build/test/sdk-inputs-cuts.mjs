@@ -13,6 +13,13 @@ const test = fileURLToPath(new URL('./sdk-inputs-cli.integration.mjs', import.me
 const evidence = process.env.SDK_INPUT_CUTS;
 assert.ok(evidence && process.env.SDK_INPUT_WORK, 'SDK_INPUT_CUTS and SDK_INPUT_WORK required');
 fs.mkdirSync(evidence, {recursive: true});
+// Read once before any product mutation; children must not derive expectations
+// from the pin that this runner is about to cut.
+const expectedCjpm = makeRepos().cjpm.tag;
+assert.match(expectedCjpm, /^[0-9a-f]{40}$/, 'fixed cjpm expectation required');
+const cutCjpm = process.env.SDK_INPUT_CUT_CJPM_REF ?? 'c03e8d9cbde2fb11e5d5361bfa7ede2900b986ad';
+assert.match(cutCjpm, /^[0-9a-f]{40}$/, 'fixed cjpm cut object required');
+assert.notEqual(cutCjpm, expectedCjpm, 'cjpm cut must select a different object');
 const cuts = [
   {name: 'cli-h', file: 'build/cli.mjs',
     from: "['--official-sdk-root', 'officialSdkRoot']", to: "['--official-sdk-root', 'unusedOfficialSdkRoot']",
@@ -31,8 +38,8 @@ const cuts = [
     from: 'await assertSourceIdentity(repo, target);', to: '// Controlled cut: do not validate resumed source identity.',
     cases: 'stale-source', target: /STALE_SOURCE_ASSERTION_REACHED/, failure: /AssertionError/, control: 'h-default'},
   {name: 'cjpm-overlay', file: 'ci/cjpm_pin.env',
-    from: `CJPM_FORK_REF=${makeRepos().cjpm.tag}`,
-    to: 'CJPM_FORK_REF=c03e8d9cbde2fb11e5d5361bfa7ede2900b986ad',
+    from: `CJPM_FORK_REF=${expectedCjpm}`,
+    to: `CJPM_FORK_REF=${cutCjpm}`,
     cases: 'tools-overlay', target: /CJPM_SUBTREE_ASSERTION_REACHED/, failure: /complete fork cjpm tree/, control: 'h-default'},
   {name: 'handoff-origin', file: 'build/lib/git.mjs',
     from: "const origin = remotes.includes('origin') ? await query('remote', 'get-url', 'origin') : null;",
@@ -52,18 +59,24 @@ const cuts = [
 ];
 function run(label, cases, work = process.env.SDK_INPUT_WORK, script = test) {
   const p = spawnSync(process.execPath, [script], {cwd: root, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024,
-    env: {...process.env, SDK_INPUT_CASES: cases, SDK_INPUT_WORK: work, SDK_RESUME_TEST_ROOT:work}});
+    env: {...process.env, SDK_INPUT_EXPECT_CJPM: expectedCjpm, SDK_INPUT_CASES: cases, SDK_INPUT_WORK: work, SDK_RESUME_TEST_ROOT:work}});
   const text = `${p.stdout}\n${p.stderr}`;
   fs.writeFileSync(path.join(evidence, `${label}.log`), text);
   fs.writeFileSync(path.join(evidence, `${label}.json`), JSON.stringify({argv: [process.execPath, script], cases, work,
-    status: p.status, signal: p.signal, error: p.error?.message}, null, 2));
+    expectedCjpm, status: p.status, signal: p.signal, error: p.error?.message}, null, 2));
   console.log('ARM_RESULT', label, p.status, p.signal); return {...p, text};
 }
-for (const cut of cuts) {
+const selected = process.env.SDK_INPUT_CUT_CASES?.split(',');
+for (const name of selected ?? []) assert.ok(cuts.some(cut => cut.name === name), `unknown cut ${name}`);
+for (const cut of cuts.filter(cut => !selected || selected.includes(cut.name))) {
   const file = path.join(root, cut.file), original = fs.readFileSync(file, 'utf8');
   assert.equal(original.split(cut.from).length, 2, `${cut.name}: unique product anchor`);
   let work = process.env.SDK_INPUT_WORK;
   if (cut.name === 'source-pin' || cut.isolated) work = path.join(evidence, cut.name+'-work');
+  if (cut.name === 'cjpm-overlay') {
+    const green = run(`${cut.name}-green`, cut.cases, work, cut.script);
+    assert.equal(green.status, 0, green.text);
+  }
   try {
     fs.writeFileSync(file, original.replace(cut.from, cut.to));
     const before=path.join(evidence,`${cut.name}.before`);fs.writeFileSync(before,original);
