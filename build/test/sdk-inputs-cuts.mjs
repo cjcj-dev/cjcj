@@ -1,4 +1,5 @@
 #!/usr/bin/env zx
+import {makeRepos} from '../lib/config.mjs';
 // Execute only after the candidate's complete finite CLI suite succeeds.
 // Cut the actual private product files, preserve diff/rc/target assertion and
 // independent controls, restore in finally, then verify the affected cases.
@@ -30,7 +31,7 @@ const cuts = [
     from: 'await assertSourceIdentity(repo, target);', to: '// Controlled cut: do not validate resumed source identity.',
     cases: 'stale-source', target: /STALE_SOURCE_ASSERTION_REACHED/, failure: /AssertionError/, control: 'h-default'},
   {name: 'cjpm-overlay', file: 'ci/cjpm_pin.env',
-    from: 'CJPM_FORK_REF=3b67c4cc714222cd7f5bea254802e4b37f470087',
+    from: `CJPM_FORK_REF=${makeRepos().cjpm.tag}`,
     to: 'CJPM_FORK_REF=c03e8d9cbde2fb11e5d5361bfa7ede2900b986ad',
     cases: 'tools-overlay', target: /CJPM_SUBTREE_ASSERTION_REACHED/, failure: /complete fork cjpm tree/, control: 'h-default'},
   {name: 'handoff-origin', file: 'build/lib/git.mjs',

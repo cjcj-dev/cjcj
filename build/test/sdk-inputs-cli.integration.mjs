@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {readHostToolchainPin} from '../../ci/host-toolchain-pin.mjs';
+import {makeRepos} from '../lib/config.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const cli = path.join(root, 'build/cli.mjs');
@@ -18,7 +19,7 @@ const host = process.env.SDK_INPUT_H;
 assert.ok(work && mirrors && host, 'SDK_INPUT_WORK/MIRRORS/H required');
 fs.mkdirSync(work, {recursive: true});
 const fixed = {tools: '759c8a58980ce89606c4406027ecf1a3bf281854',
-  cjpm: '3b67c4cc714222cd7f5bea254802e4b37f470087', stdx: '56e9954235a872ca54d1f729bdf0a75e282f3601'};
+  cjpm: makeRepos().cjpm.tag, stdx: '56e9954235a872ca54d1f729bdf0a75e282f3601'};
 // Stale input stays distinct when tools and its cjpm overlay share one commit.
 const staleTools = '24c2a08630ed3a1467a0f99aa5fa914df73916f8';
 const urls = {tools: 'https://github.com/cjcj-dev/cangjie-tools.git', stdx: 'https://github.com/cjcj-dev/cangjie-stdx.git'};

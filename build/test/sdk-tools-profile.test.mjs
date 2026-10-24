@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {buildCapacity} from '../../ci/build-resources.mjs';
 import {toolsFor} from '../srcbuild/stages/tools.mjs';
+import {makeRepos} from '../lib/config.mjs';
 const producers=toolsFor();
 function assertCommands(lines,verb,selected=producers) {
  const commands=lines.filter(line=>line.includes('python3 build.py '+verb));
@@ -196,7 +197,7 @@ const row={event:'regression',cjpm,out,arm,cases:process.env.CJPM_REGRESSION_CAS
 const boundaries=${JSON.stringify(Object.fromEntries(Object.entries(boundaries).map(([p,v])=>[new URL(p,repo).href,v])))};
 export async function load(url,context,next){const r=await next(url,context);if(!boundaries[url]&&url!==${JSON.stringify(new URL('build/lib/runner.mjs',repo).href)})return r;let source=String(r.source);if(boundaries[url])source+="\\nimport {appendFileSync as recordBoundary} from 'node:fs';\\n";
 if(boundaries[url]){for(const [name,body]of Object.entries(boundaries[url])){const re=new RegExp('export (async )?function '+name+'\\\\(');if(!re.test(source))throw Error('BOUNDARY_ANCHOR '+name);source=source.replace(re,(_,a='')=>a+'function CONTROLLED_ORIGINAL_'+name+'(');source+='\\nexport function '+name+'(){'+body+'}\\n';}}
-if(url===${JSON.stringify(new URL('build/lib/runner.mjs',repo).href)}){source=source.replace('export async function run(', 'async function originalRun(');source+='\\nexport async function run(argv,options){if(argv[0]==="git"&&argv[1]==="rev-parse")return {exitCode:0,stdout:"3b67c4cc714222cd7f5bea254802e4b37f470087\\\\n"};if(argv[0]==="git"&&argv[1]==="restore")return {exitCode:0,stdout:""};return originalRun(argv,options);}\\n';}
+if(url===${JSON.stringify(new URL('build/lib/runner.mjs',repo).href)}){source=source.replace('export async function run(', 'async function originalRun(');source+='\\nexport async function run(argv,options){if(argv[0]==="git"&&argv[1]==="rev-parse")return {exitCode:0,stdout:"${makeRepos().cjpm.tag}\\\\n"};if(argv[0]==="git"&&argv[1]==="restore")return {exitCode:0,stdout:""};return originalRun(argv,options);}\\n';}
 return {...r,source};}
 `);
    await write(root+'/fixture-ready','finite interface, not a qualified SDK\n');
