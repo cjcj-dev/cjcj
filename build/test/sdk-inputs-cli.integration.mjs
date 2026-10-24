@@ -19,9 +19,9 @@ const host = process.env.SDK_INPUT_H;
 assert.ok(work && mirrors && host, 'SDK_INPUT_WORK/MIRRORS/H required');
 fs.mkdirSync(work, {recursive: true});
 // A cut runner freezes this expectation before mutating the product pin.
-const fixed = {tools: process.env.SDK_INPUT_TOOLS_REF ?? '759c8a58980ce89606c4406027ecf1a3bf281854',
+const fixed = {tools: process.env.SDK_INPUT_EXPECT_TOOLS ?? process.env.SDK_INPUT_TOOLS_REF ?? makeRepos().tools.tag,
   cjpm: process.env.SDK_INPUT_EXPECT_CJPM ?? makeRepos().cjpm.tag,
-  stdx: process.env.SDK_INPUT_STDX_REF ?? '56e9954235a872ca54d1f729bdf0a75e282f3601'};
+  stdx: process.env.SDK_INPUT_EXPECT_STDX ?? process.env.SDK_INPUT_STDX_REF ?? makeRepos().stdx.tag};
 for (const name of ['tools', 'cjpm', 'stdx']) assert.match(fixed[name], /^[0-9a-f]{40}$/, `${name} fixed object required`);
 // Stale input stays distinct when tools and its cjpm overlay share one commit.
 const staleTools = '24c2a08630ed3a1467a0f99aa5fa914df73916f8';
@@ -46,10 +46,9 @@ const privateUrls = {tools: `file://${mirrors}/tools.git`, stdx: `file://${mirro
 const mappings = `${urls.tools}=${privateUrls.tools};${urls.stdx}=${privateUrls.stdx};${fixtureUrl}=${fixtureUrl};${privateUrls.tools}=${privateUrls.tools};${privateUrls.stdx}=${privateUrls.stdx}`;
 let sequence = 0;
 function invoke(label, workspace, args, env = {}) {
-  // This existing source-selection fixture deliberately uses fixed 759c,
-  // which has six producers. Select its real subset at the public boundary;
-  // the complete nine-tool production remains a separate registered gate.
-  if(env.SDK_INPUT_OBSERVE==='tools')args=['--tools-build-set','cjpm,cjfmt,hle,lsp,cjcov,cjtrace-recover','--tools-phase','build',...args];
+  // Reach every real producer capability check, including cjcompat. Native
+  // dependency preparation/builds stop at the observer after source checkout.
+  if(env.SDK_INPUT_OBSERVE==='tools')args=['--tools-phase','build',...args];
   const argv = ['--experimental-loader', observer, cli, '--workspace', workspace,
     '--build-root', path.join(work, 'buildtools'), '--host-profile', 'kkk2',
     '--cangjie-version', '0.0.0-input-integration', ...args];
@@ -110,6 +109,19 @@ cases['tools-overlay'] = () => {
   assert.equal(actualTree, expectedTree, 'complete fork cjpm tree');
   assert.equal(git(tools, 'diff', '--cached', '--name-only', 'HEAD', '--', '.', ':!cjpm'), '', 'other tools stay combined');
   identities(ws);
+};
+cases['missing-cjcompat'] = () => {
+  const producer = path.join(ws, 'cangjie_tools/cjcompat/build/build.py');
+  const held = producer + '.input-test-held';
+  fs.renameSync(producer, held);
+  try {
+    const p = invoke('missing-cjcompat', ws, ['build', 'tools'], {SDK_INPUT_OBSERVE:'tools'});
+    console.log('CJCOMPAT_CAPABILITY_ASSERTION_REACHED');
+    assert.equal(p.status, 1, p.text);
+    assert.match(p.text, /TOOLS_PRODUCER_CHECK_REACHED cjcompat/);
+    assert.match(p.text, /tools.cjcompat.source/);
+    assert.doesNotMatch(p.text, /TOOLS_NATIVE_BOUNDARY_REACHED/);
+  } finally { fs.renameSync(held, producer); }
 };
 cases['resume'] = () => {
   const retained = path.join(ws, 'cangjie_tools', 'retained-native-output');

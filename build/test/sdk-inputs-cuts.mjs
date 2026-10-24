@@ -16,6 +16,11 @@ fs.mkdirSync(evidence, {recursive: true});
 // Read once before any product mutation; children must not derive expectations
 // from the pin that this runner is about to cut.
 const expectedCjpm = makeRepos().cjpm.tag;
+const expectedTools = process.env.SDK_INPUT_TOOLS_REF ?? makeRepos().tools.tag;
+const expectedStdx = process.env.SDK_INPUT_STDX_REF ?? makeRepos().stdx.tag;
+for (const ref of [expectedTools, expectedStdx]) assert.match(ref, /^[0-9a-f]{40}$/);
+const cutTools = process.env.SDK_INPUT_CUT_TOOLS_REF ?? '759c8a58980ce89606c4406027ecf1a3bf281854';
+const cutStdx = process.env.SDK_INPUT_CUT_STDX_REF ?? '56e9954235a872ca54d1f729bdf0a75e282f3601';
 assert.match(expectedCjpm, /^[0-9a-f]{40}$/, 'fixed cjpm expectation required');
 const cutCjpm = process.env.SDK_INPUT_CUT_CJPM_REF ?? 'c03e8d9cbde2fb11e5d5361bfa7ede2900b986ad';
 assert.match(cutCjpm, /^[0-9a-f]{40}$/, 'fixed cjpm cut object required');
@@ -32,8 +37,11 @@ const cuts = [
     cases: 'verify-h', target: /LINEAGE_INPUT_REACHED/, failure: /LINEAGE_INPUT_MISMATCH/, control: 'h-env'},
   {name: 'source-pin', file: 'build/lib/config.mjs',
     from: 'tag: override.tag ?? globalTag ?? pinnedRef ?? null,',
-    to: "tag: override.tag ?? globalTag ?? (name === 'tools' ? 'c03e8d9cbde2fb11e5d5361bfa7ede2900b986ad' : pinnedRef) ?? null,",
+    to: `tag: override.tag ?? globalTag ?? (name === 'tools' ? '${cutTools}' : pinnedRef) ?? null,`,
     cases: 'fetch-default', target: /FIXED_SOURCE_ASSERTIONS_REACHED/, failure: /tools fixed HEAD/, control: 'h-default'},
+  {name: 'stdx-pin', file: 'ci/source_pin.env',
+    from: `STDX_REF=${expectedStdx}`, to: `STDX_REF=${cutStdx}`,
+    cases: 'fetch-default', target: /FIXED_SOURCE_ASSERTIONS_REACHED/, failure: /stdx fixed HEAD/, control: 'h-default', isolated: true},
   {name: 'resume-identity', file: 'build/srcbuild/stages/fetch.mjs',
     from: 'await assertSourceIdentity(repo, target);', to: '// Controlled cut: do not validate resumed source identity.',
     cases: 'stale-source', target: /STALE_SOURCE_ASSERTION_REACHED/, failure: /AssertionError/, control: 'h-default'},
@@ -59,16 +67,19 @@ const cuts = [
 ];
 function run(label, cases, work = process.env.SDK_INPUT_WORK, script = test) {
   const p = spawnSync(process.execPath, [script], {cwd: root, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024,
-    env: {...process.env, SDK_INPUT_EXPECT_CJPM: expectedCjpm, SDK_INPUT_CASES: cases, SDK_INPUT_WORK: work, SDK_RESUME_TEST_ROOT:work}});
+    env: {...process.env, SDK_INPUT_EXPECT_CJPM: expectedCjpm, SDK_INPUT_EXPECT_TOOLS: expectedTools,
+      SDK_INPUT_EXPECT_STDX: expectedStdx, SDK_INPUT_CASES: cases, SDK_INPUT_WORK: work, SDK_RESUME_TEST_ROOT:work}});
   const text = `${p.stdout}\n${p.stderr}`;
   fs.writeFileSync(path.join(evidence, `${label}.log`), text);
   fs.writeFileSync(path.join(evidence, `${label}.json`), JSON.stringify({argv: [process.execPath, script], cases, work,
-    expectedCjpm, status: p.status, signal: p.signal, error: p.error?.message}, null, 2));
+    expectedCjpm, expectedTools, expectedStdx, status: p.status, signal: p.signal, error: p.error?.message}, null, 2));
   console.log('ARM_RESULT', label, p.status, p.signal); return {...p, text};
 }
 const selected = process.env.SDK_INPUT_CUT_CASES?.split(',');
 for (const name of selected ?? []) assert.ok(cuts.some(cut => cut.name === name), `unknown cut ${name}`);
 for (const cut of cuts.filter(cut => !selected || selected.includes(cut.name))) {
+  if (cut.name === 'source-pin') { assert.match(cutTools, /^[0-9a-f]{40}$/); assert.notEqual(cutTools, expectedTools); }
+  if (cut.name === 'stdx-pin') { assert.match(cutStdx, /^[0-9a-f]{40}$/); assert.notEqual(cutStdx, expectedStdx); }
   const file = path.join(root, cut.file), original = fs.readFileSync(file, 'utf8');
   assert.equal(original.split(cut.from).length, 2, `${cut.name}: unique product anchor`);
   let work = process.env.SDK_INPUT_WORK;
@@ -95,7 +106,7 @@ for (const cut of cuts.filter(cut => !selected || selected.includes(cut.name))) 
   // The stale-source assertion stops before fixture restoration in the red
   // arm. Reset only this deliberately mutated fixture to the fixed tools base.
   if (cut.name === 'resume-identity') {
-    const p = spawnSync('git', ['reset', '--hard', '759c8a58980ce89606c4406027ecf1a3bf281854'],
+    const p = spawnSync('git', ['reset', '--hard', expectedTools],
       {cwd: path.join(work, 'workspace/cangjie_tools'), encoding: 'utf8'});
     fs.writeFileSync(path.join(evidence, 'fixture-restore.json'), JSON.stringify({status:p.status,signal:p.signal,stdout:p.stdout,stderr:p.stderr}));
     assert.equal(p.status, 0, p.stderr);

@@ -49,7 +49,10 @@ export async function load(url, context, nextLoad) {
     `);
   }
   if (url.endsWith('/srcbuild/stages/tools.mjs') && process.env.SDK_INPUT_OBSERVE === 'tools') {
-    const anchor = 'const toolEnv = targetToolsEnv(config);';
+    const check = 'const directory=requireToolProducer(name);';
+    if (!source.includes(check)) throw new Error('producer observation anchor missing');
+    source = source.replace(check, check + "\nconsole.log('TOOLS_PRODUCER_CHECK_REACHED',name);");
+    const anchor = 'await prepareNativeToolDependencies(config,pending.map(([name])=>name));';
     if (!source.includes(anchor)) throw new Error('tools observation anchor missing');
     source = source.replace(anchor, `console.log('TOOLS_NATIVE_BOUNDARY_REACHED');
       throw new BuildError('input-observer', 'TOOLS_INPUT_OBSERVED');\n${anchor}`);
