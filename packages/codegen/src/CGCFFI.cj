@@ -894,13 +894,29 @@ public open class LinuxAarch64CJNativeCGCFFI <: LinuxCJNativeCGCFFI {
 
     public override func ProcessRetValue(retType: LLVMTypeRef, value: LLVMValueRef, builder: IRBuilder2): LLVMValueRef {
         CJC_ASSERT(!isVoidTy(retType))
-        var castRes = value
-        if (!isStructTy(retType) && IsStructPtrTy(unsafe { LLVMTypeOf(value) })) {
-            castRes = builder.CreateBitCast(value, unsafe { LLVMPointerType(retType, 0u32) })
+        let sourceType = GetPointerElementType(unsafe { LLVMTypeOf(value) })
+        return LoadAarch64Coercion(retType, value, GetTypeSize(cgMod, sourceType), builder)
+    }
+
+    private func LoadAarch64Coercion(coercionType: LLVMTypeRef, source: LLVMValueRef,
+        sourceSize: UInt64, builder: IRBuilder2): LLVMValueRef {
+        // AAPCS64 rounds the register container, not the source allocation.
+        // Preserve the in-memory byte order (including on big-endian targets)
+        // and never load the extra register bytes from the source object.
+        let coercionSize = GetTypeSize(cgMod, coercionType)
+        var address = source
+        if (sourceSize < coercionSize) {
+            address = builder.CreateEntryAlloca(coercionType, name: "cffi.coerce")
+            builder.CreateStore(unsafe { LLVMConstNull(coercionType) }, address)
+            builder.CreateMemCpy(address, UInt32(GetTypeAlignment(cgMod, coercionType)), source,
+                builder.GetAddressAlignment(source), SizeValue(builder, sourceSize))
+        } else {
+            let addressSpace = unsafe { LLVMGetPointerAddressSpace(LLVMTypeOf(source)) }
+            address = builder.CreateBitCast(source, unsafe { LLVMPointerType(coercionType, addressSpace) })
         }
         var result = LLVMNullValue()
         try (nameCString = unsafe { LibC.mallocCString("") }.asResource()) {
-            result = builder.CreateLoad(retType, castRes, nameCString.value)
+            result = builder.CreateLoad(coercionType, address, nameCString.value)
         }
         return result
     }
@@ -926,9 +942,12 @@ public open class LinuxAarch64CJNativeCGCFFI <: LinuxCJNativeCGCFFI {
     }
 
     protected func IsHomogeneousAggregate(llvmType: LLVMTypeRef, baseBox: TypeBox, membersBox: UInt64Box): Bool {
+        membersBox.value = 0u64
         if (isStructTy(llvmType)) {
-            membersBox.value = 0u64
-            for (fieldTy in GetStructElements(llvmType)) {
+            let fields = GetStructElements(llvmType)
+            var valueSize = 0u64
+            for (idx in 0..fields.size) {
+                let fieldTy = fields[idx]
                 if (GetTypeSize(cgMod, fieldTy) == 0u64) {
                     continue
                 }
@@ -936,11 +955,31 @@ public open class LinuxAarch64CJNativeCGCFFI <: LinuxCJNativeCGCFFI {
                 if (!IsHomogeneousAggregate(fieldTy, baseBox, fdMembers)) {
                     return false
                 }
+                // Homogeneity is a property of the completed layout. LLVM
+                // fields also include alignment wrappers and explicit padding;
+                // neither may create gaps between the fundamental members.
+                if (cgMod.GetOffsetOfElement(llvmType, UInt32(idx)) != valueSize) {
+                    return false
+                }
+                valueSize += GetTypeSize(cgMod, fieldTy)
                 membersBox.value += fdMembers.value
+                if (membersBox.value > 4u64) { return false }
             }
             if (baseBox.value.isNull()) {
                 return false
             }
+            if (GetTypeSize(cgMod, baseBox.value) * membersBox.value != GetTypeSize(cgMod, llvmType)) {
+                return false
+            }
+        } else if (isArrayTy(llvmType)) {
+            let count = UInt64(unsafe { LLVMGetArrayLength(llvmType) })
+            if (count == 0u64 || count > 4u64) { return false }
+            let element = GetPointerElementType(llvmType)
+            let elementMembers = UInt64Box(0u64)
+            if (!IsHomogeneousAggregate(element, baseBox, elementMembers)) { return false }
+            // Bound before multiplication, including nested arrays of structs.
+            if (elementMembers.value > 4u64 / count) { return false }
+            membersBox.value = elementMembers.value * count
             if (GetTypeSize(cgMod, baseBox.value) * membersBox.value != GetTypeSize(cgMod, llvmType)) {
                 return false
             }
@@ -951,6 +990,8 @@ public open class LinuxAarch64CJNativeCGCFFI <: LinuxCJNativeCGCFFI {
             }
             if (baseBox.value.isNull()) {
                 baseBox.value = llvmType
+            } else if (!SameLLVMType(baseBox.value, llvmType)) {
+                return false
             }
         }
         return membersBox.value > 0u64 && membersBox.value <= 4u64
@@ -1021,25 +1062,9 @@ public open class LinuxAarch64CJNativeCGCFFI <: LinuxCJNativeCGCFFI {
         CJC_ASSERT(argIdx < args.size)
         let arg = args[argIdx]
         let actualSize = GetTypeSize(cgMod, chirParamTy)
-        if (isIntegerTy(info[0])) {
-            let actualIntTy = unsafe { LLVMIntTypeInContext(ctx.GetLLVMContext().raw, UInt32(AsBits(actualSize))) }
-            let addrSpace = unsafe { LLVMGetPointerAddressSpace(unsafe { LLVMTypeOf(arg.GetRawValue()) }) }
-            var tmpVal = builder.CreateBitCast(arg.GetRawValue(), unsafe { LLVMPointerType(actualIntTy, addrSpace) })
-            tmpVal = builder.CreateLoad(actualIntTy, tmpVal)
-            if (GetTypeSize(cgMod, info[0]) != actualSize) {
-                tmpVal = CreateIntCastUnsigned(builder, tmpVal, info[0])
-            }
-            args[argIdx] = cgMod.CreateGhostCFuncArgValue(tmpVal, GetCGType(cgMod, info[0]))
-        } else {
-            CJC_ASSERT(isArrayTy(info[0]))
-            let tmpVal = builder.CreateEntryAlloca(info[0], name: "arg.copy")
-            builder.CreateMemCpy(tmpVal, UInt32(GetTypeAlignment(cgMod, info[0])), arg.GetRawValue(),
-                UInt32(GetTypeAlignment(cgMod, chirParamTy)), SizeValue(builder, actualSize))
-            try (nameCString = unsafe { LibC.mallocCString("") }.asResource()) {
-                args[argIdx] = cgMod.CreateGhostCFuncArgValue(builder.CreateLoad(info[0], tmpVal, nameCString.value),
-                    GetCGType(cgMod, info[0]))
-            }
-        }
+        CJC_ASSERT(isIntegerTy(info[0]) || isArrayTy(info[0]))
+        let coerced = LoadAarch64Coercion(info[0], arg.GetRawValue(), actualSize, builder)
+        args[argIdx] = cgMod.CreateGhostCFuncArgValue(coerced, GetCGType(cgMod, info[0]))
     }
 }
 
