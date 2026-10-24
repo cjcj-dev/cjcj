@@ -151,8 +151,9 @@ async function installedRegressionFixture() {
    // The real pending-tools consumer copies the installed compiler entry and
    // execution closure. Produce that entry through the existing installer;
    // this compiler body remains an explicitly controlled hello fixture.
+   await fs.mkdir(sdk+'/tools/lib',{recursive:true});
    await installEntries({root:sdk,build:root+'/compiler-entry',platform:'linux_x86_64',
-    groups:[{directory:'bin',retain:'libexec/compiler',names:['cjcj-stage1'],libraries:[]}]});
+    groups:[{directory:'bin',retain:'libexec/compiler',names:['cjcj-stage1'],libraries:['tools/lib']}]});
    await fs.symlink('cjcj-stage1',sdk+'/bin/cjc');
    // Do not copy Node or any SDK; these unrelated HLE inputs are unused markers.
    for(const file of ['tools/bin/node','tools/dtsparser/node_modules/.bin/cjbind','tools/dtsparser/DEPENDENCIES.json'])await write(sdk+'/'+file,'controlled unused HLE boundary');
