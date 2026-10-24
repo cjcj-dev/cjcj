@@ -387,7 +387,9 @@ export async function runDirect(call, {passthrough = false, finalize} = {}) {
       error: record.collector_error, child_pid: record.child_pid ?? null,
       child_rc: record.child_rc, child_signal: record.child_signal, collector_rc: 74,
       logs_closed: record.logs_closed, persistence_errors: secondary})}\n`);
-    return result;
+    // Direct library callers already abort on collector I/O exceptions. Keep
+    // that contract; only this CLI consumes the already-finalized failure.
+    throw Object.assign(failure, {directExecution: result});
   } finally {
     // Both success and failure have reaped the child and closed logs before
     // withdrawing the cancellation escalation and signal ownership.
@@ -422,6 +424,10 @@ async function main() {
     result = await diagnose(call);
     if (call.record.diagnostic) { process.stdout.write(result.stdout); process.stderr.write(result.stderr); }
   } catch (error) {
+    if (error.directExecution) {
+      process.exitCode = error.directExecution.collector_rc;
+      return;
+    }
     call ||= error.evidence;
     result = {exitCode: error.exitCode || 74, stderr: error.message};
     if (call && !error.evidence) {
