@@ -7,7 +7,7 @@ import {getLogger, stage} from '../../lib/logging.mjs';
 import {run as runCommand} from '../../lib/runner.mjs';
 import {assertNoVerifierReportArtifacts} from '../../../scripts/verifier_artifact_gate.mjs';
 import {packageInstall} from '../../../ci/srcbuild/lib/package-install.mjs';
-import {archiveInstall} from '../../../ci/bootstrap/sdk-flow.mjs';
+import {archiveInstall, privateRoot} from '../../../ci/bootstrap/sdk-flow.mjs';
 import {consumerSdk, ensureDir, requireDir, requireFile} from './common.mjs';
 
 const logger = getLogger('cangjie_build.stages.package');
@@ -18,6 +18,25 @@ function platformLibDirName(config) {
 
 function archivePath(config, baseName) {
   return path.join(config.softwareDir, `${baseName}.${config.target.spec.archiveFormat}`);
+}
+
+function sdkArchive(config) {
+  return archivePath(config, `cangjie-sdk-${config.target.spec.sdkName}-${config.cangjieVersion}`);
+}
+
+function stdxArchive(config) {
+  return archivePath(config, `cangjie-stdx-${config.target.spec.sdkName}-${config.cangjieVersion}.${config.stdxVersion}`);
+}
+
+async function invalidatePackageOutputs(config) {
+  // A failed current attempt must not expose an earlier package as its output.
+  // Validate the parent before touching only these two owned publication sets.
+  await privateRoot(config.softwareDir);
+  for (const archive of [sdkArchive(config), stdxArchive(config)]) {
+    for (const suffix of ['', '.sha256', '.unpacked']) {
+      fs.rmSync(archive + suffix, {recursive: true, force: true});
+    }
+  }
 }
 
 function globOrFail(directory, suffix, stageName) {
@@ -68,20 +87,20 @@ async function packageMainSdk(config) {
   installedStdx(config); // Still required before copying or archiving an SDK.
   const cangjieDir=compilerOutput;
   organizeSdkTree(config,cangjieDir);
-  const archiveBase = `cangjie-sdk-${config.target.spec.sdkName}-${config.cangjieVersion}`;
   return (await packageInstall({sdk:cangjieDir,target:config.target,version:config.cangjieVersion,
-    officialSdkRoot:config.officialSdkRoot,archive:archivePath(config,archiveBase)})).archive;
+    officialSdkRoot:config.officialSdkRoot,archive:sdkArchive(config)})).archive;
 }
 
 export async function packageStdx(config) {
   const stdxDir = installedStdx(config);
   return (await archiveInstall({install:stdxDir,
-    archive:archivePath(config,`cangjie-stdx-${config.target.spec.sdkName}-${config.cangjieVersion}.${config.stdxVersion}`),
+    archive:stdxArchive(config),
     format:config.target.spec.archiveFormat,records:[]})).archive;
 }
 
 export async function run(config) {
   return stage('package', async () => {
+    await invalidatePackageOutputs(config);
     ensureDir(config.softwareDir);
     const sdk = await packageMainSdk(config);
     const stdx = await packageStdx(config);

@@ -62,6 +62,13 @@ test('package entry refuses to archive an SDK missing one official relative path
       ['cangjie-sdk-linux-x64-1.2.3.tar.gz'],
       'stale archive from an earlier run',
     );
+    const stdxArchive = file(config.softwareDir,
+      ['cangjie-stdx-linux-x64-1.2.3.1.tar.gz'], 'stale stdx archive');
+    for (const output of [archive, stdxArchive]) {
+      file(config.softwareDir, [path.basename(output) + '.sha256'], 'stale digest');
+      file(config.softwareDir, [path.basename(output) + '.unpacked', 'old-member'], 'stale unpack');
+    }
+    const independent = file(config.softwareDir, ['unrelated-archive.tar.gz'], 'independent output');
     await runPackage(() => assert.rejects(
       publicPackage(config),
       error => {
@@ -73,10 +80,12 @@ test('package entry refuses to archive an SDK missing one official relative path
         return true;
       },
     ));
-    assert.equal(
-      fs.existsSync(archive),
-      false,
-    );
+    for (const output of [archive, stdxArchive]) {
+      for (const suffix of ['', '.sha256', '.unpacked']) {
+        assert.equal(fs.existsSync(output + suffix), false, `failed package left stale output ${output + suffix}`);
+      }
+    }
+    assert.equal(fs.readFileSync(independent, 'utf8'), 'independent output');
   } finally {
     fs.rmSync(root, {recursive: true, force: true});
   }
