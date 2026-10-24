@@ -4,10 +4,12 @@ integration tests. They are shallow, complete-tree packs, not invented commits.
 - runtime.pack: cjcj-dev/cangjie-runtime at
   0d6e0888216481c55d1e8b2a0fc2685672289b6a
 - tools.pack: cjcj-dev/cangjie-tools at
-  3b67c4cc714222cd7f5bea254802e4b37f470087
+  2c8a704d7d51e65af2b777e11836aeef66bd8f50
 
-Captured from the existing local repository objects with `git init --bare` and
-`git fetch --depth 1 <local-repository> <sha>:refs/heads/main`. The pack contains
+Captured with `git init --bare` and
+`git fetch --depth 1 <repository> <sha>:refs/heads/main`. Runtime used existing
+local objects; tools used its canonical source repository at the exact pin.
+The pack contains
 that commit and its entire tree, with no parent history. `pinnedRemote` installs
 it into a fresh bare repository and records its shallow boundary. The tests
 then exercise their existing Git fetch/proof paths against this local remote.

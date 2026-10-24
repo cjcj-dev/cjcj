@@ -19,7 +19,7 @@ test('normal source build carries only this invocation defer and normal inputs',
 test('defer remains limited to selected native Linux and leaves unsupported targets untouched',()=>{
  const env={CJCJ_SRCBUILD_HOST_SDK:'/host'};
  for(const key of ['windows-x64','darwin-x64'])assert.equal(gcUnitRuntimeBuildEnv(buildConfig({targetKey:key}),env),undefined);
- assert.equal(gcUnitRuntimeBuildEnv(buildConfig({targetKey:'linux-x64'}),{}),undefined);
+ assert.equal(gcUnitRuntimeBuildEnv(buildConfig({targetKey:'linux-x64',officialSdkRoot:null}),{}),undefined);
 });
 
 test('cross target keeps the actual Linux compiler host and does not enable native language execution',()=>{

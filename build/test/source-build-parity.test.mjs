@@ -556,7 +556,7 @@ test('runtime producer uses the host loader before the target runtime exists', (
     process.env.CANGJIE_BUILD_DRY_RUN = '1';
     process.env.CJCJ_SRCBUILD_HOST_SDK = hostSdk;
     process.env.LD_LIBRARY_PATH = '/inherited';
-    const env = baseEnv(config);
+    const env = baseEnv({...config, selection: {bootstrapHost: {install: hostSdk}}});
     const loader = env.LD_LIBRARY_PATH.split(path.delimiter);
     const prefixMap = `-ffile-prefix-map=${path.resolve(workspace)}=.`;
     assert.match(env.CFLAGS, new RegExp(prefixMap.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
