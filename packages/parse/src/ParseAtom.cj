@@ -159,11 +159,14 @@ extend ParserImpl {
             LitConstKind.STRING
         }
         Next()
-        if (token.kind == TokenKind.STRING_LITERAL || token.kind == TokenKind.JSTRING_LITERAL ||
-            token.kind == TokenKind.MULTILINE_STRING) {
+        if (token.kind == TokenKind.STRING_LITERAL || token.kind == TokenKind.MULTILINE_STRING) {
             return ProcessStringInterpolation(token, kind)
         }
         let lit = LitConstExpr(kind, token)
+        if (token.kind == TokenKind.JSTRING_LITERAL) {
+            lit.stringKind = StringKind.JSTRING
+            return NormalizeLitConst(lit, token)
+        }
         if (token.kind == TokenKind.MULTILINE_RAW_STRING) {
             lit.stringKind = StringKind.MULTILINE_RAW
             lit.delimiterNum = UInt64(token.delimiterNum)
@@ -201,8 +204,6 @@ extend ParserImpl {
         let lit = NormalizeLitConst(LitConstExpr(kind, token), token)
         if (token.kind == TokenKind.MULTILINE_STRING) {
             lit.stringKind = StringKind.MULTILINE
-        } else if (token.kind == TokenKind.JSTRING_LITERAL) {
-            lit.stringKind = StringKind.JSTRING
         }
         var hasInterpolation = false
         for (part in parts) {
@@ -225,8 +226,6 @@ extend ParserImpl {
                 let partLit = NormalizeLitConst(LitConstExpr(kind, partToken), partToken)
                 if (token.kind == TokenKind.MULTILINE_STRING) {
                     partLit.stringKind = StringKind.MULTILINE
-                } else if (token.kind == TokenKind.JSTRING_LITERAL) {
-                    partLit.stringKind = StringKind.JSTRING
                 }
                 strExpr.strPartExprs.add(partLit)
             } else {
