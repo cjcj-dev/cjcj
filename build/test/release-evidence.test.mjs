@@ -167,15 +167,18 @@ async function resealJobs(archive, jobs) {
   await writeJobs(archive, jobs);
   const urlsFile = path.join(archive, 'urls.tsv');
   const lines = (await fs.readFile(urlsFile, 'utf8')).trimEnd().split('\n');
-  const conclusions = new Map(jobs.map(job => [String(job.id), job.conclusion]));
-  await fs.writeFile(urlsFile, lines.map(line => {
-    const fields = line.split('\t');
-    if (fields[0] === 'job') fields[3] = conclusions.get(fields[1]);
-    return fields.join('\t');
-  }).join('\n') + '\n');
+  const clean = value => String(value).replaceAll('\t', ' ').replaceAll('\r', ' ').replaceAll('\n', ' ');
+  await fs.writeFile(urlsFile, [
+    ...lines.filter(line => !line.startsWith('job\t')),
+    ...jobs.map(job => ['job', job.id, clean(job.name), job.conclusion, job.html_url].join('\t')),
+  ].join('\n') + '\n');
+  const indexFile = path.join(archive, 'ARCHIVE_INDEX.json');
+  const index = JSON.parse(await fs.readFile(indexFile));
+  index.jobs = jobs.length;
+  await fs.writeFile(indexFile, JSON.stringify(index, null, 2) + '\n');
   const ledger = path.join(archive, 'EVIDENCE_SHA256SUMS');
   let text = await fs.readFile(ledger, 'utf8');
-  for (const file of ['jobs.json', 'urls.tsv']) {
+  for (const file of ['jobs.json', 'urls.tsv', 'ARCHIVE_INDEX.json']) {
     const hash = crypto.createHash('sha256').update(await fs.readFile(path.join(archive, file))).digest('hex');
     text = text.split('\n').map(line => line.endsWith(`  ${file}`) ? `${hash}  ${file}` : line).join('\n');
   }
@@ -230,7 +233,7 @@ for (const platform of PLATFORMS) {
     const missing = jobs.filter(row => row !== job);
     await writeJobs(source, missing);
     rejected(collect(source, `${archive}-missing`), expected);
-    await writeJobs(archive, missing);
+    await resealJobs(archive, missing);
     rejected(run(['verify', '--archive', archive]), expected);
   });
 }
