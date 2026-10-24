@@ -20,6 +20,10 @@ class CopybackHolder<T> {
     public var box: CopybackBox<T>
     public init(value: T) { box = CopybackBox<T>(value, false) }
     public func change(value: T): Unit { box.change(value, false) }
+    public func changeInvoke(value: T, fail: Bool): Bool {
+        try { box.change(value, fail); return true }
+        catch (e: Exception) { println("UNEXPECTED FIELD ${e.message}"); return false }
+    }
 }
 func report(name: String, ok: Bool): Int64 {
     if (ok) { println("PASS ${name}"); return 0 }
@@ -49,21 +53,41 @@ func referenceControl(): Int64 {
     errors += report("ref-mut", value.first == 41 && value.value == "after" && value.last == 67)
     return errors
 }
-func managedFieldControl(): Int64 {
+func managedFieldControl(fail: Bool): Int64 {
     let holder = CopybackHolder<Int64>(31)
     var errors = report("field-ctor", holder.box.first == 11 && holder.box.value == 31 && holder.box.last == 37)
     holder.change(61)
     errors += report("field-mut", holder.box.first == 41 && holder.box.value == 61 && holder.box.last == 67)
+    let returned = holder.changeInvoke(83, fail)
+    errors += report("field-invoke", returned && holder.box.first == 41 && holder.box.value == 83 && holder.box.last == 67)
     return errors
 }
-main(args: Array<String>): Int64 {
-    var errors = rawCall()
-    errors += rawInvoke(args.size == 123)
-    errors += referenceControl()
-    errors += managedFieldControl()
+func managedReferenceControl(fail: Bool): Int64 {
+    let holder = CopybackHolder<String>("before")
+    var errors = report("field-ref-ctor", holder.box.first == 11 && holder.box.value == "before" && holder.box.last == 37)
+    holder.change("after")
+    errors += report("field-ref-mut", holder.box.first == 41 && holder.box.value == "after" && holder.box.last == 67)
+    let returned = holder.changeInvoke("invoke", fail)
+    errors += report("field-ref-invoke", returned && holder.box.first == 41 && holder.box.value == "invoke" && holder.box.last == 67)
+    return errors
+}
+func unwindControl(): Int64 {
     var caught = false
     try { let value = CopybackBox<Int64>(71, true); println(value.first) }
     catch (e: Exception) { caught = e.message == "copyback constructor control" }
-    errors += report("unwind-control", caught)
-    return errors
+    return report("unwind-control", caught)
+}
+main(args: Array<String>): Int64 {
+    // Each control runs in a separate process so a corrupted raw receiver
+    // cannot hide the reference or exception-control results.
+    for (arg in args) {
+        if (arg == "raw-call") { return rawCall() }
+        if (arg == "raw-invoke") { return rawInvoke(args.size == 123) }
+        if (arg == "reference") { return referenceControl() }
+        if (arg == "field") { return managedFieldControl(args.size == 123) }
+        if (arg == "field-reference") { return managedReferenceControl(args.size == 123) }
+        if (arg == "unwind") { return unwindControl() }
+    }
+    println("MISSING COPYBACK CASE")
+    return 2
 }

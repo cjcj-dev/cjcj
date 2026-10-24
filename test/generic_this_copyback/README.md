@@ -3,14 +3,19 @@
 Run `node test/generic_this_copyback/run.mjs /absolute/public/cjc /new/output candidate`
 under the normal compiler and target runtime environment. `PAYLOAD_RUN_LD` may
 select the target runtime independently of the compiler host. No test macros or
-runtime changes are needed. Four normal compile/run arms cover O0/O2, debug and
-non-debug; each records nine independent field/body/exception assertions.
+runtime changes are needed. Four normal compile arms cover O0/O2, debug and non-debug. Each compiled
+program runs six separate cases, with thirteen field/body/exception assertions.
+A failure in a raw receiver cannot mask the reference or unwind controls.
 
 `ReplaceFunction` only runs with compile debug enabled. Its no-reference
 constructor and mutable-method receiver is a headerless original payload; the
 callee wrapper operates on a boxed temporary. The readback must begin at byte
-zero of native storage. Reference-bearing receivers retain their aggregate
-barriers. Stack and managed-field destinations, call and protected invocation,
+zero of native storage. Known-size reference-bearing receivers retain their
+aggregate barriers. Unsized generic receivers use the existing generic field
+write barrier with the tracked owner, exact field pointer, boxed source and
+dynamic payload size; their placeholder i8 is never used as an allocation or
+typed no-reference layout. Generic holder fields instantiate both Int64 and
+String and call mut methods through ordinary and protected calls. Stack and managed-field destinations, call and protected invocation,
 and a real constructor unwind are included. Inspect the saved actual IR to
 confirm call/invoke reachability; source-level try alone is not branch evidence.
 

@@ -349,7 +349,8 @@ private func ReplaceFunction(cgMod: CGModule): Unit {
             argsVal[thisParamOffset] = thisParamWithTI
 
             let payloadPtr = irBuilder.GetPayloadFromObject(thisParamWithTI)
-            let thisLLVMType = CGType.GetOrCreate(cgMod, thisCHIRType).GetLLVMType()
+            let thisCGType = CGType.GetOrCreate(cgMod, thisCHIRType)
+            let thisLLVMType = thisCGType.GetLLVMType()
             if (irBuilder.IsTypeContainsRef(thisLLVMType)) {
                 if (item.isCalleeMutOrCtor) {
                     let load = irBuilder.CreateEntryAlloca(thisLLVMType)
@@ -400,7 +401,14 @@ private func ReplaceFunction(cgMod: CGModule): Unit {
             if (!item.isCalleeMutOrCtor) {
                 continue
             }
-            if (irBuilder.IsTypeContainsRef(thisLLVMType)) {
+            if (thisCGType.GetSize().isNone()) {
+                // The i8 representation of an unsized generic is not a
+                // one-byte/no-reference layout. Keep the actual field owner
+                // and let the generic barrier copy the boxed payload using
+                // its dynamic size and reference layout.
+                let owner = irBuilder.GetTrackedManagedBase(thisParamWithoutTI) ?? basePtr
+                irBuilder.CallGCWriteGeneric(owner, thisParamWithoutTI, thisParamWithTI, size32)
+            } else if (irBuilder.IsTypeContainsRef(thisLLVMType)) {
                 let load = irBuilder.CreateEntryAlloca(thisLLVMType)
                 let _ = irBuilder.CreateCJMemSetStructWith0(load)
                 irBuilder.CallGCReadAgg(thisLLVMType, ArrayList<LLVMValueRef>(
