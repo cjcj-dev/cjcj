@@ -834,5 +834,15 @@
     "file": "packages/sema/src/initialization_tests/InitializationControlFlow_test.cj",
     "executor": "cjpm",
     "member": "packages/sema"
+  },
+  {
+    "file": "packages/chir/src/GetRefToArrayElem_test.cj",
+    "executor": "cjpm",
+    "member": "packages/chir"
+  },
+  {
+    "file": "packages/chir/src/ReachingDefinitionAnalysis_test.cj",
+    "executor": "cjpm",
+    "member": "packages/chir"
   }
 ]
