@@ -29,6 +29,7 @@ public open class ValueAnalysis<VD, Pool> <: Analysis<State<VD, Pool>> where VD 
     private let refPool: ArrayList<Ref> = ArrayList<Ref>()
     private let absObjPool: ArrayList<AbstractObject> = ArrayList<AbstractObject>()
     private let escapedLocations: ArrayList<Value> = ArrayList<Value>()
+    private let escapedElementRefs: ArrayList<Value> = ArrayList<Value>()
     protected let builder: CHIRBuilder
     protected let globals: ValueAnalysisGlobals<VD, Pool>
     // C++ ValueAnalysis.h:701-714 free-function template specializations are
@@ -44,6 +45,9 @@ public open class ValueAnalysis<VD, Pool> <: Analysis<State<VD, Pool>> where VD 
         this.handleNonNullLiteralValue = handleNonNullLiteralValue
         if (let Some(body) <- functionValue.GetBody()) {
             CollectEscapedLocations(body, escapedLocations)
+            for (location in escapedLocations) {
+                CollectEscapedElementRefs(location, escapedElementRefs)
+            }
         }
     }
 
@@ -67,6 +71,20 @@ public open class ValueAnalysis<VD, Pool> <: Analysis<State<VD, Pool>> where VD 
         }
     }
 
+    // Field addresses may have independent abstract references in consumers such
+    // as TypeAnalysis. Track containment addresses without following loaded refs.
+    private static func CollectEscapedElementRefs(location: Value, refs: ArrayList<Value>): Unit {
+        for (user in location.GetUsers()) {
+            if (let Some(field) <- (user as GetElementRef)) {
+                let result = field.GetResult().getOrThrow()
+                if (field.GetLocation().nodeId == location.nodeId && !refs.contains(result)) {
+                    refs.add(result)
+                    CollectEscapedElementRefs(result, refs)
+                }
+            }
+        }
+    }
+
     private func InvalidateEscapedLocations(state: State<VD, Pool>, expr: Expression): Unit {
         let kind = expr.GetExprKind()
         if (kind == ExprKind.APPLY || kind == ExprKind.TRY_APPLY ||
@@ -75,7 +93,30 @@ public open class ValueAnalysis<VD, Pool> <: Analysis<State<VD, Pool>> where VD 
             kind == ExprKind.INTRINSIC || kind == ExprKind.TRY_INTRINSIC ||
             kind == ExprKind.SPAWN || kind == ExprKind.TRY_SPAWN) {
             for (location in escapedLocations) {
+                let object = state.CheckAbstractObjectRefBy(location)
                 state.SetSelfAndChildrenStateToTop(location)
+                if (let Some(root) <- object) {
+                    InvalidateEscapedChildren(state, root)
+                }
+            }
+            for (location in escapedElementRefs) {
+                if (state.programState.Contains(location)) {
+                    state.SetToTopOrTopRef(location, true)
+                }
+            }
+        }
+    }
+
+    // Aggregate storage can contain reference-valued fields. Forget those
+    // bindings too, while preserving the value/reference shape of each child.
+    // Do not follow referenced objects: already loaded reference snapshots
+    // retain the facts about their original objects.
+    private static func InvalidateEscapedChildren(state: State<VD, Pool>, root: Value): Unit {
+        if (let Some(children) <- state.childrenMap.Get(root)) {
+            for (child in children) {
+                if (let Some(domain) <- state.CheckAbstractValueWithTopBottom(child)) {
+                    state.SetToTopOrTopRef(child, domain.IsRef())
+                }
             }
         }
     }

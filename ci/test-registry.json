@@ -308,6 +308,16 @@
     "member": "packages/chir"
   },
   {
+    "file": "packages/chir/src/ArraySnapshotMechanism_test.cj",
+    "executor": "cjpm",
+    "member": "packages/chir"
+  },
+  {
+    "file": "packages/chir/src/MechanismInvalidation_test.cj",
+    "executor": "cjpm",
+    "member": "packages/chir"
+  },
+  {
     "file": "packages/codegen/src/GenericPayloadProvenance_test.cj",
     "executor": "cjpm",
     "member": "packages/codegen"
