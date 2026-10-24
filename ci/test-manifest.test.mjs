@@ -458,3 +458,17 @@ test('a driver cannot claim no executor while a workflow names it', async () => 
     await fs.rm(root, {recursive: true, force: true});
   }
 });
+
+test('mainline archive, initialization and ArrayClone keep their executable registrations', () => {
+  for (const [file, member] of [
+    ['packages/driver/src/Archive_output_test.cj', 'packages/driver'],
+    ['packages/sema/src/initialization_tests/InitializationControlFlow_test.cj', 'packages/sema'],
+    ['packages/compiler_unittest/src/ArrayCloneMetadata_test.cj', 'packages/compiler_unittest'],
+  ]) {
+    const entries = REGISTERED.filter(entry => entry.file === file);
+    console.log(`MAINLINE_REGISTRY_ASSERTION_REACHED ${file}`);
+    assert.equal(entries.length, 1, `MAINLINE_REGISTRATION ${file}`);
+    assert.equal(entries[0].executor, 'cjpm', `MAINLINE_EXECUTOR ${file}`);
+    assert.equal(entries[0].member, member, `MAINLINE_MEMBER ${file}`);
+  }
+});
