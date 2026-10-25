@@ -1,4 +1,5 @@
 #!/usr/bin/env zx
+import {readSourcePins} from './native-llvm-inputs.mjs';
 // Install the Cangjie bootstrap SDK and export the build environment.
 
 import {targetForHost} from '../build/lib/targets.mjs';
@@ -207,12 +208,12 @@ if (llcPlatform && fixedLlcGz) {
     const parsedSchema = manifest.schema;
     manifest = manifest.values;
     llvmSourceSha = manifest.get('LLVM_SHA') || '';
-    const pinText = await fs.readFile(path.join(repoRoot, 'ci', 'llvm_pin.env'), 'utf8');
-    const expectedFields = [['LLVM_SHA', pinText.match(/^LLVM_SHA=([0-9a-f]{40})$/m)?.[1] || '']];
+    const selectedPins = readSourcePins(repoRoot).llvm;
+    const expectedFields = [['LLVM_SHA', selectedPins.LLVM_SHA || '']];
     expectedFields.push(
       ['PLATFORM', llcPlatform],
-      ['CANGJIE_COMPILER_SHA', pinText.match(/^CANGJIE_COMPILER_SHA=([0-9a-f]{40})$/m)?.[1] || ''],
-      ['FLATBUFFERS_SHA', pinText.match(/^FLATBUFFERS_SHA=([0-9a-f]{40})$/m)?.[1] || ''],
+      ['CANGJIE_COMPILER_SHA', selectedPins.CANGJIE_COMPILER_SHA || ''],
+      ['FLATBUFFERS_SHA', selectedPins.FLATBUFFERS_SHA || ''],
     );
     for (const [field, expected] of expectedFields) {
       if (!expected || manifest.get(field) !== expected) {

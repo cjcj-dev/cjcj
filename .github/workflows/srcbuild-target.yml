@@ -304,7 +304,7 @@ jobs:
       - name: Load source pins
         run: |
           cat ci/source_pin.env >> "$GITHUB_ENV"
-          cat ci/llvm_pin.env >> "$GITHUB_ENV"
+          node ci/native-llvm-inputs.mjs
 
       - name: Load and validate runtime pin
         env:

@@ -69,3 +69,18 @@ test('dylib matrix selects only requested native producers and uses native libra
  const windows=run('windows_x86_64');assert.equal(windows.status,0,windows.stderr);
  assert.match(fs.readFileSync(output,'utf8'),/^dylib_matrix=\{"include":\[\]\}$/m);
 }));
+
+test('canonical compiler pin reaches the native producer and SDK header defaults',async()=>fixture(({run,output})=>{
+ const source=Object.fromEntries(fs.readFileSync('ci/source_pin.env','utf8').split(/\r?\n/).filter(Boolean).map(line=>line.split('=')));
+ const result=run({});assert.equal(result.status,0,result.stderr);
+ const selected=fs.readFileSync(output,'utf8');
+ assert.ok(selected.includes(`CANGJIE_COMPILER_SHA=${source.COMPILER_REF}\n`));
+ assert.ok(selected.includes(`CANGJIE_COMPILER_URL=${source.COMPILER_SRC_URL}\n`));
+ assert.doesNotMatch(fs.readFileSync('ci/llvm_pin.env','utf8'),/^CANGJIE_COMPILER_(?:SHA|URL)=/m);
+ const probe=spawnSync(process.execPath,['--input-type=module','-e',
+  "import {FIXED_INPUTS} from './ci/bootstrap/sdk-targets.mjs'; import {SHIM_SOURCE_COMMITS,selectShimSources} from './ci/bootstrap/shim-header-sources.mjs'; console.log(JSON.stringify({sdk:FIXED_INPUTS,shim:SHIM_SOURCE_COMMITS,selected:selectShimSources('/private-fixture',{})}));"],{encoding:'utf8'});
+ assert.equal(probe.status,0,probe.stderr);const observed=JSON.parse(probe.stdout);
+ assert.equal(observed.sdk.compiler,source.COMPILER_REF);assert.equal(observed.shim.compiler,source.COMPILER_REF);
+ assert.equal(observed.selected.compiler.repository,source.COMPILER_SRC_URL);
+ for(const name of ['llvm','runtime','compiler','flatbuffers'])assert.equal(observed.shim[name],observed.sdk[name]);
+}));

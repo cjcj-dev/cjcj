@@ -31,7 +31,7 @@ function declaration(key, authority = 'refs/heads/main', mainline = 'refs/heads/
 test('every commit-valued pin is inventoried and paired with its clone URL', () => {
   const pins = discoverPins(repoRoot);
   assert.deepEqual(pins.map(pin => pin.key).sort(), [
-    'CANGJIE_COMPILER_SHA',
+    'BOUNDS_REF',
     'CJPM_FORK_REF',
     'COMPILER_REF',
     'FLATBUFFERS_SHA',

@@ -30,6 +30,7 @@ jobs:
         run: |
           set -euo pipefail
           cat ci/cjpm_pin.env >> "$GITHUB_ENV"
+          node ci/host-toolchain-pin.mjs --github-env >> "$GITHUB_ENV"
           cat ci/runtime_pin.env >> "$GITHUB_ENV"
           home="$RUNNER_TEMP/objc-nightly-home"
           mkdir -p "$home"

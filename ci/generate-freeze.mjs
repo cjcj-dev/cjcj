@@ -16,7 +16,6 @@ const SHA40 = /^[0-9a-f]{40}$/;
 const PIN_SOURCES = Object.freeze({
   RUNTIME_REF: 'ci/runtime_pin.env',
   LLVM_SHA: 'ci/llvm_pin.env',
-  CANGJIE_COMPILER_SHA: 'ci/llvm_pin.env',
   COMPILER_REF: 'ci/source_pin.env',
   TOOLS_REF: 'ci/source_pin.env',
   STDX_REF: 'ci/source_pin.env',
@@ -114,6 +113,7 @@ async function loadPins(repo) {
     if (!SHA40.test(value)) throw new Error(`${relative} has invalid ${name}: ${value || '<empty>'}`);
     pins[name] = value;
   }
+  pins.CANGJIE_COMPILER_SHA = pins.COMPILER_REF;
   return pins;
 }
 

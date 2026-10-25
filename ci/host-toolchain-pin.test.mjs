@@ -369,24 +369,24 @@ test('both JavaScript entry points require the loaded environment value', async 
 // sets explicit so updating a pin cannot silently disconnect a workflow.
 // Enumerate definitions from git to discover undeclared additional pins.
 const HOST_TOOLCHAIN_PINS = Object.freeze({
-  'ci/cjpm_pin.env': Object.freeze({
-    host: 'ordinary CI build host',
-    loaders: Object.freeze(['build-cjpm.yml', 'build-windows-runtime.yml', 'ci.yml', 'objc-darwin-e2e.yml', 'platform-matrix.yml']),
-  }),
   'ci/host_sdk_pin.env': Object.freeze({
-    host: 'source-build host',
-    // Native package consumers use their installed SDK; official pins remain host inputs.
-    loaders: Object.freeze(['build-ast-support.yml', 'build-host-runtime.yml',
-      'srcbuild-target.yml']),
+    host: 'ordinary CI and source-build host',
+    loaders: Object.freeze(['build-ast-support.yml', 'build-host-runtime.yml', 'srcbuild-target.yml']),
   }),
 });
 
-test('ordinary CI and source-build hosts use the same nightly', async () => {
+test('ordinary CI and source-build hosts use the sole nightly pin', async () => {
   const ordinary = await fs.readFile(cjpmPinPath, 'utf8');
-  const definitions = ordinary.match(/^CJCJ_TOOLCHAIN=\S+$/gm) ?? [];
-  assert.equal(definitions.length, 1, 'ordinary host must define exactly one toolchain');
-  assert.equal(parseHostToolchainPin(ordinary.split(/\r?\n/).filter(line => line.startsWith('CJCJ_TOOLCHAIN')).join('\n')), await hostPin(),
-    'CJCJ_TOOLCHAIN must be equal in ci/cjpm_pin.env and ci/host_sdk_pin.env');
+  assert.doesNotMatch(ordinary, /^CJCJ_TOOLCHAIN(?:_[A-Z0-9_]+)?=/m,
+    'cjpm source selection must not duplicate the host nightly');
+  for (const name of ['build-cjpm.yml', 'build-windows-runtime.yml', 'ci.yml', 'objc-darwin-e2e.yml', 'platform-matrix.yml']) {
+    const workflow = loadYaml(await fs.readFile(path.join(root, '.github/workflows', name), 'utf8'));
+    for (const job of Object.values(workflow.jobs)) for (const step of job.steps || []) {
+      if (!step.run?.includes(loadCommand)) continue;
+      assert.match(step.run, /node ci\/host-toolchain-pin\.mjs/, name+' must resolve its host in the cjpm load step');
+      assert.match(step.run, /(?:--github-env|echo "CJCJ_TOOLCHAIN=\$CJCJ_TOOLCHAIN")/, name+' must export the resolved host');
+    }
+  }
 });
 
 test('every CJCJ_TOOLCHAIN definition names a host and has measured consumers', async () => {
@@ -435,11 +435,11 @@ async function workflowStep(workflow, job, name) {
 }
 
 const independentHostVersions = Object.freeze({
-  linux_x86_64: '1.3.0-alpha.20261009001050',
-  linux_aarch64: '1.3.0-alpha.20260925001050',
-  darwin_x86_64: '1.3.0-alpha.20260925001050',
-  darwin_aarch64: '1.3.0-alpha.20260925001050',
-  windows_x86_64: '1.3.0-alpha.20260925001050',
+  linux_x86_64: '1.3.0-alpha.20261025001053',
+  linux_aarch64: '1.3.0-alpha.20261025001053',
+  darwin_x86_64: '1.3.0-alpha.20261025001053',
+  darwin_aarch64: '1.3.0-alpha.20261025001053',
+  windows_x86_64: '1.3.0-alpha.20261025001053',
 });
 
 for (const [platform, version] of Object.entries(independentHostVersions)) {
@@ -610,7 +610,7 @@ test('workflow GitHub environment loaders resolve the execution host and stop on
 // Explicit native H selection has a registered original archive; default pins
 // and an arbitrary matching version string cannot select it.
 test('explicit native host archive selection retains the default pin and rejects unregistered hosts',()=>{
- const old='nightly-'+'1.3.0-alpha.20260925001050';
+ const old='nightly-'+'1.3.0-alpha.20261025001053';
  assert.throws(()=>baseSdkDownload('linux-x64',old),/no pinned archive identity/);
  assert.equal(baseSdkDownload('linux-x64',old,{selectedHost:true}).sha256,
   'fde68a5713968f5f875e013355d73aab8bd95bb1fbfd1f1b6a29b1adcf48943b');

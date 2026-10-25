@@ -1,6 +1,7 @@
 #!/usr/bin/env zx
 
 import crypto from 'node:crypto';
+import {readSourcePins} from '../../native-llvm-inputs.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import zlib from 'node:zlib';
@@ -33,25 +34,13 @@ const fixedRoot = path.resolve(process.env.CJCJ_FIXED_LLVM_DIR || '.srcbuild/fix
 const llvmBin = path.join(sdk, 'third_party', 'llvm', 'bin');
 const llvmLib = path.join(sdk, 'third_party', 'llvm', 'lib');
 
-function parsePinFile(text, label) {
-  const result = {};
-  for (const line of text.split(/\r?\n/).filter(Boolean)) {
-    const separator = line.indexOf('=');
-    if (separator < 1) throw new Error(`${label}: malformed line: ${line}`);
-    const key = line.slice(0, separator);
-    if (key in result) throw new Error(`${label}: duplicate key: ${key}`);
-    result[key] = line.slice(separator + 1);
-  }
-  return result;
-}
-
 const sha256 = data => crypto.createHash('sha256').update(data).digest('hex');
 const manifestFile = path.join(fixedRoot, 'llvm-tools.manifest');
 const manifest = Object.fromEntries(parseLlvmToolsManifest(
   await fs.readFile(manifestFile, 'utf8'),
   {label: manifestFile, schema: 'tuple'},
 ).values);
-const pins = parsePinFile(await fs.readFile(path.join(root, 'ci', 'llvm_pin.env'), 'utf8'), 'ci/llvm_pin.env');
+const pins = readSourcePins(root).llvm;
 for (const [key, expected] of [
   ['PLATFORM', spec.llvmPlatform],
   ['LLVM_SHA', pins.LLVM_SHA],

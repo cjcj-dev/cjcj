@@ -6,6 +6,7 @@ import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {spawnSync} from 'node:child_process';
 
+import {readSourcePins} from './native-llvm-inputs.mjs';
 const root = path.resolve(import.meta.dirname, '..');
 const parent = process.env.G1_EVIDENCE || os.tmpdir();
 const names = ['test-llvm-tuple-layout', 'test-runtime-layout', 'test-codegen-layout-sync'];
@@ -68,7 +69,7 @@ before(async () => {
   checked(['git', 'init', '--bare', '--quiet', path.join(inputs, 'empty.git')]);
   const fixture = path.join(evidence, 'tuple producer');
   checked(['npx', '--yes', 'zx@8', path.join(root, 'ci/test-llvm-tuple-layout.mjs'), fixture]);
-  const llvmPin = pin('llvm_pin.env');
+  const llvmPin = readSourcePins(root).llvm;
   const origin = path.join(fixture, 'depot', llvmPin.LLVM_SHA, llvmPin.CANGJIE_COMPILER_SHA);
   tuples = ['caller-one', 'caller-two', 'repo-decoy'].map(identity => {
     const directory = path.join(evidence, identity);

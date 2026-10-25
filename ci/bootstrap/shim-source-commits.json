@@ -1,6 +1,0 @@
-{
-  "compiler": "f07c55738c12c154160c313c630a42a73a51025d",
-  "llvm": "c3e2e4c3baff0b22a3e0ebacc7cc6bfd5c8f0c20",
-  "runtime": "88a16f11af6bf010f20ad475e2cd7a28c0eac1ad",
-  "flatbuffers": "c3e4d69cbd5950e43f775ba76eadb30750d6e0b7"
-}

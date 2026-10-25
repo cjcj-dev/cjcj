@@ -225,10 +225,11 @@ async function loadPins(context) {
     readFile(context, 'ci/source_pin.env', {absence: 'UNKNOWN'}),
     readFile(context, 'ci/cjpm_pin.env', {absence: 'UNKNOWN'}),
   ]);
+  const sourcePins = parseEnv(source, 'ci/source_pin.env');
   return {
     runtime: parseEnv(runtime, 'ci/runtime_pin.env'),
-    llvm: parseEnv(llvm, 'ci/llvm_pin.env'),
-    source: parseEnv(source, 'ci/source_pin.env'),
+    llvm: {...parseEnv(llvm, 'ci/llvm_pin.env'), CANGJIE_COMPILER_SHA: sourcePins.COMPILER_REF, CANGJIE_COMPILER_URL: sourcePins.COMPILER_SRC_URL},
+    source: sourcePins,
     cjpm: parseEnv(cjpm, 'ci/cjpm_pin.env'),
   };
 }

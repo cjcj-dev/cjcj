@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import {resolveShimSources,selectShimSources} from './shim-header-sources.mjs';
+import {readSourcePins} from '../native-llvm-inputs.mjs';
 import {prepareCppHeaders} from './prepare_cpp_headers.mjs';
 
 function git(args) {const r=spawnSync('git',args,{encoding:'utf8'});assert.equal(r.status,0,r.stderr);return r.stdout.trim();}
@@ -30,11 +31,12 @@ test('selected compiler repository identity is checked rather than relabeled',as
  env.CJCJ_BOOTSTRAP_SHIM_SOURCE_SELECTION=JSON.stringify(rows);
  await assert.rejects(resolveShimSources(root,env),/SHIM_SOURCE_REPOSITORY compiler/);
 });
-test('default private source selection requires a reachable location and never falls back to official old pins',async()=>{
+test('default header source selection uses the production compiler pin and requires fetch for an absent checkout',async()=>{
  const {root,env}=fixture();delete env.CJCJ_BOOTSTRAP_SHIM_SOURCE_SELECTION;
  const selected=selectShimSources(root,env);
- assert.equal(selected.compiler.repository,undefined);
- await assert.rejects(resolveShimSources(root,env,{fetch:true}),/SHIM_SOURCE_LOCATION_REQUIRED compiler/);
+ assert.equal(selected.compiler.repository,readSourcePins().source.COMPILER_SRC_URL);
+ assert.equal(selected.compiler.commit,readSourcePins().source.COMPILER_REF);
+ await assert.rejects(resolveShimSources(root,env,{fetch:false}),/SHIM_SOURCE_LOCATION_REQUIRED compiler/);
 });
 test('header source runtime and target LLVM must match the actual selected pair',async()=>{
  const {root,commit,env}=fixture();

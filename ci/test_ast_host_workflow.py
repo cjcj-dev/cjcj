@@ -31,7 +31,7 @@ workflow = repo / '.github/workflows/build-ast-support.yml'
 shutil.copyfile(workflow, work / 'workflow.yml')
 steps = yaml.safe_load(workflow.read_text())['jobs']['build']['steps']
 # Independent Linux x86_64 workflow contract; never derive expected from the selector.
-expected = 'nightly-' + '1.3.0-alpha.20261009001050'
+expected = 'nightly-' + '1.3.0-alpha.20261025001053'
 env = {k: v for k, v in os.environ.items() if k not in ('CJCJ_TOOLCHAIN', 'AST_FLATBUFFERS_SDK')}
 env.update(GITHUB_ENV=str(work / 'github.env'), RUNNER_TEMP=str(work / 'temp'), PS4='+ ')
 Path(env['GITHUB_ENV']).touch()

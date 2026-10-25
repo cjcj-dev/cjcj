@@ -7,10 +7,13 @@ import {fileURLToPath} from 'node:url';
 import {sdkPlatform} from './sdk-platform.mjs';
 import {readHostToolchainPin} from '../host-toolchain-pin.mjs';
 export const BOOTSTRAP_PHASES=Object.freeze(['stage0','stage0-run','std-bootstrap','stage1-initial','stage1-std','stage2','stage3-std','stage3']);
-// Private paired source inputs; release artifact pins are deliberately separate.
-export const FIXED_INPUTS=Object.freeze({llvm:'872b162de7a8806760fb1194764b4b8f0c605e1a',
-  compiler:'174db8f40d5efddee63c47a3162bbf676bc227a0',bounds:'2ae82839ecaaa7d031e66ccbd2076d671acfd615',
-  runtime:'58dae8764fb7bcc16296abb617f0cebd01712973',h1:'1553645ac50f72ba58712843255313250869cbbc',host:'1.3.0-alpha.20261009001050'});
+import {readSourcePins} from '../native-llvm-inputs.mjs';
+// SDK defaults consume the same source pins as the workflow producers.
+const pins=readSourcePins();
+export const FIXED_INPUTS=Object.freeze({llvm:pins.llvm.LLVM_SHA,
+  compiler:pins.source.COMPILER_REF,bounds:pins.source.BOUNDS_REF,
+  runtime:pins.runtime.RUNTIME_REF,flatbuffers:pins.llvm.FLATBUFFERS_SHA,
+  h1:'1553645ac50f72ba58712843255313250869cbbc',host:readHostToolchainPin().replace(/^nightly-/, '')});
 const stageEntry=fileURLToPath(new URL('./sdk-native-stage.mjs',import.meta.url));
 const verifyEntry=fileURLToPath(new URL('./sdk-verify-install.mjs',import.meta.url));
 // A tool update's pending consumer needs the compiler and its actual execution

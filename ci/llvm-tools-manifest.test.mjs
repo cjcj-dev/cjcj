@@ -12,12 +12,8 @@ import {
   parsePackagedLlvmToolsManifest,
 } from './llvm-tools-manifest.mjs';
 
-const pins = Object.fromEntries(
-  fs.readFileSync(new URL('./llvm_pin.env', import.meta.url), 'utf8')
-    .split(/\r?\n/)
-    .filter((line) => /^[A-Z0-9_]+=[0-9a-f]+$/.test(line))
-    .map((line) => line.split('=')),
-);
+import {readSourcePins} from './native-llvm-inputs.mjs';
+const pins = readSourcePins().llvm;
 const tupleManifest = [
   'PLATFORM=linux_x86_64',
   `LLVM_SHA=${pins.LLVM_SHA}`,
