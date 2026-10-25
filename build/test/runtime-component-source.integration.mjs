@@ -80,7 +80,7 @@ if sys.argv[1]=='install':
  const source=mode.startsWith('archive')?materialized:objects;
  // Explicit unavailable functionality, never a fabricated CPP PASS file.
  const boundaries={
-  'ci/platform_matrix/native_runtime.mjs':{installNativeRuntimeInputs:'const root=arguments[0].installRoot;for(const f of ["share/runtime-build/runtime/tests/gc_unit/gate_gc_unit.sh","share/runtime-build/runtime/tests/gc_unit/language_toolchain.mjs","share/runtime-build/runtime/CMakebuild/compile_commands.json","share/runtime-build/runtime/CMakebuild/gc-unit.status","runtime/include/schedule.h"]){fs.mkdirSync(path.dirname(path.join(root,f)),{recursive:true});fs.writeFileSync(path.join(root,f),"CONTROLLED_CPP_NOT_RUN");}console.log("CONTROLLED_CPP_DIRECT_INPUT_NOT_RUN");'},
+  'ci/platform_matrix/native_runtime.mjs':{installNativeRuntimeInputs:'const root=arguments[0].installRoot;controlledDirectSource(path.join(root,"share/runtime-build/runtime"));for(const f of ["share/runtime-build/runtime/CMakebuild/compile_commands.json","share/runtime-build/runtime/CMakebuild/gc-unit.status","runtime/include/schedule.h"]){fs.mkdirSync(path.dirname(path.join(root,f)),{recursive:true});fs.writeFileSync(path.join(root,f),"CONTROLLED_CPP_NOT_RUN");}console.log("CONTROLLED_CPP_DIRECT_INPUT_NOT_RUN");'},
   'build/srcbuild/gc-unit-gate.mjs':{
    assertLanguageState:'console.log("CONTROLLED_CPP_GATE_NOT_RUN");return new Map([["CPP_SUITE","PASS"]]);',
   },
@@ -88,6 +88,7 @@ if sys.argv[1]=='install':
  await write(root+'/boundaries.json',JSON.stringify({functions:boundaries,otherSourcePins:'H1/AST/LLVM use actual finite Git object; no native qualification',commands:['sudo apt-get preparation','npx qualify_teardown_tools'],host:'actual complete private H925'},null,2));
  await write(root+'/loader.mjs',String.raw`const boundaries=${JSON.stringify(Object.fromEntries(Object.entries(boundaries).map(([p,v])=>[new URL(p,'file://'+repo).href,v])))};
 export async function load(url,context,next){const r=await next(url,context);if(!boundaries[url]&&!url.endsWith('/ci/bootstrap/sdk-targets.mjs'))return r;let source=String(r.source);
+if(url.endsWith('/ci/platform_matrix/native_runtime.mjs'))source+='\nimport {directSource as controlledDirectSource} from '+JSON.stringify(${JSON.stringify(new URL('ci/fixtures/runtime-direct-inputs.mjs','file://'+repo).href)})+';\n';
 if(boundaries[url])for(const [name,body]of Object.entries(boundaries[url])){const re=new RegExp('export (async )?function '+name+'\\(');if(!re.test(source))throw Error('BOUNDARY_ANCHOR '+name);source=source.replace(re,(_,a='')=>a+'function CONTROLLED_ORIGINAL_'+name+'(');source+='\nexport function '+name+'(){'+body+'}\n';}
 if(url.endsWith('/ci/bootstrap/sdk-targets.mjs'))source=source.replace(/compiler:'[0-9a-f]{40}'/,"compiler:'${commit}'").replace(/h1:'[0-9a-f]{40}'/,"h1:'${commit}'");
 return {...r,source};}
