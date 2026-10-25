@@ -53,9 +53,9 @@ export function collect() {
  const sources={};for(const [label,repository]of [['entry',process.cwd()],['runtime',source]])sources[label]=inspect(dir,label+'-commit',['git','-C',repository,'rev-parse','HEAD']).stdout?.trim();
  const manifest={sources,requestedRuntime:process.env.RUNTIME_REF,buildOutcome:process.env.WINDOWS_RUNTIME_BUILD_OUTCOME||'unknown',
   callerAudit:{compiler:process.env.COMPILER_CALLER_REF,llvm:process.env.LLVM_CALLER_REF,role:'source-only audit by runtime owner; not fetched or executed by this producer'},files:[]};
- manifest.files.push(...copyFiles(build,path.join(dir,'build-products'),f=>/\.(?:dll|a|lib|def|rsp)$/i.test(f)||/\b(?:link\.txt|CMakeCache\.txt|install_manifest\.txt|compile_commands\.json)$/.test(f)));
+ manifest.files.push(...copyFiles(build,path.join(dir,'build-products'),f=>/\.(?:dll|a|lib|def|rsp)$/i.test(f)||/\b(?:link\.txt|build\.make|CMakeCache\.txt|install_manifest\.txt|compile_commands\.json)$/.test(f)));
  manifest.files.push(...copyFiles(install,path.join(dir,'installed'),()=>true));
- for(const member of ['windows_x86_64_exports.def','windows_export_references.json']) {
+ for(const member of ['windows_x86_64_exports.def','windows_export_references.json','windows_retired_exports.def']) {
   const file=path.join(source,'runtime/src',member);if(fs.existsSync(file)){const to=path.join(dir,member);fs.copyFileSync(file,to);manifest.files.push({...fact(to),source:file});}
  }
  const toolchain=process.env.WINDOWS_RUNTIME_TOOLCHAIN||'C:/msys64/mingw64';
@@ -80,7 +80,21 @@ export function collect() {
   }
   manifest.dlls.push(row);
  }
+ // The runtime owner consumes actual selected Windows translation units, not
+ // source-only Unix definitions or a second compilation. Capture even when a
+ // later registration check rejected the successfully linked runtime.
+ const linked=manifest.files.some(f=>f.file.endsWith('windows_x86_64_exports.raw.def'))&&dlls.length>0;
+ manifest.runtimeDefinitions={status:'NOT_RUN',reason:'normal runtime link not reached'};
+ if(linked) {
+  const output=path.join(dir,'runtime-definitions.json');
+  const result=inspect(dir,'runtime-definitions-command',[process.execPath,
+   path.join(source,'runtime/build/capture_windows_runtime_definitions.mjs'),build,
+   path.join(source,'runtime/src'),sources.runtime||'',output,path.join(toolchain,'bin/llvm-readobj.exe')]);
+  manifest.runtimeDefinitions={rc:result.status,signal:result.signal,error:result.error?.message,
+   runtime:sources.runtime,output,produced:fs.existsSync(output)};
+ }
  fs.writeFileSync(path.join(dir,'products.json'),JSON.stringify(manifest,null,2));
+ if(linked&&(manifest.runtimeDefinitions.rc!==0||!manifest.runtimeDefinitions.produced))throw Error('native Windows runtime definition capture failed; original command evidence retained');
  if(manifest.buildOutcome==='success'&&(!manifest.files.some(f=>f.file.endsWith('windows_x86_64_exports.raw.def'))||!dlls.length))throw Error('successful native build missing raw/DLL evidence');
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)) {

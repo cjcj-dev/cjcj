@@ -38,6 +38,16 @@ complete PE tables, actual dependency images and system dependency identities.
 No collector output grants qualification to an input or changes the runtime's
 registered JSON/definition.
 
+Once a normal link produced raw/DLL, the always collector runs the runtime
+owner's `capture_windows_runtime_definitions.mjs` over the existing CMake
+objects and compile database. It retains that reader's own rc/logs and complete
+COFF definitions even after a post-link registration rejection. No second build
+is performed. Missing capture input or reader failure remains an error; an
+earlier failure that never reached link is recorded as NOT_RUN. The runtime
+owner receives these inputs for normal collect/write/check. The frozen 4ff248
+interface supplies this capture; it is not adopted as a qualified final runtime
+while its C03f2 reflection pairing remains open.
+
 After successful normal installation, the public installed verifier keeps the
 historical contract and additionally requires all five Reference services.
 Packaging archives this installation, extracts into a new directory and invokes
