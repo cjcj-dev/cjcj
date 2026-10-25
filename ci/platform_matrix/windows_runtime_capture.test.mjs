@@ -54,7 +54,6 @@ console.log('FINITE_CAPTURE_REACHED');process.exitCode=${captureRc};
  const r=spawnSync(process.execPath,[entry,'collect'],{encoding:'utf8',env:{...process.env,
   WINDOWS_RUNTIME_EVIDENCE:out,RUNTIME_SOURCE:source,PLATFORM_CI_ROOT:root,WINDOWS_RUNTIME_TOOLCHAIN:path.join(root,'unused-toolchain'),WINDOWS_RUNTIME_BUILD_OUTCOME:'failure'}});
  write(path.join(root,'collector.stdout'),r.stdout);write(path.join(root,'collector.stderr'),r.stderr);
- assert.equal(r.status,captureRc===0?0:1,r.stderr);
  const products=JSON.parse(fs.readFileSync(path.join(out,'products.json')));
  const command=JSON.parse(fs.readFileSync(path.join(out,'runtime-definitions-command.json')));
  assert.equal(command.rc,captureRc);assert.equal(command.argv.at(-1),process.execPath);
@@ -64,6 +63,9 @@ console.log('FINITE_CAPTURE_REACHED');process.exitCode=${captureRc};
  const retained=path.join(out,'selected-objects',path.relative(build,selected));
  assert(fs.existsSync(retained),'runtime-selected Heap object must survive in always evidence');
  assert.equal(fs.readFileSync(retained,'utf8'),'finite selected bytes, not COFF');
+ // Check the retained product before the aggregate collector status so a
+ // missing object is diagnosed at its own invariant in both reader branches.
+ assert.equal(r.status,captureRc===0?0:1,r.stderr);
  assert.equal(products.runtimeDefinitions.selectedObjects.length,1);
  assert(!fs.existsSync(path.join(out,'selected-objects/unselected.obj')));
  assert.equal(fs.readFileSync(path.join(out,'cmake-file-api/reply/index-fixture.json'),'utf8'),'finite graph input');
