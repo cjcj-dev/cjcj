@@ -559,6 +559,7 @@ test('workflow host pin assignment preserves parser failure and exported success
 test('workflow GitHub environment loaders resolve the execution host and stop on reader failure', async t => {
   const sites = [
     ['build-ast-support.yml', 'build', 'Load host toolchain pin'],
+    ['objc-darwin-e2e.yml', 'objc-darwin-e2e', 'Load pins'],
     ['build-windows-runtime.yml', 'build-runtime', 'Load host toolchain pin'],
     ['build-windows-runtime.yml', 'build-runtime', 'Load compiler pins'],
     ['ci.yml', 'build', 'Load host toolchain pin'],
@@ -573,7 +574,7 @@ test('workflow GitHub environment loaders resolve the execution host and stop on
         const work = await fs.mkdtemp(path.join(os.tmpdir(), 'github-host-loader-'));
         try {
           await fs.mkdir(path.join(work, 'ci'));
-          for (const input of ['host_sdk_pin.env', 'cjpm_pin.env', 'source_pin.env', 'llvm_pin.env', 'host-toolchain-pin.mjs']) {
+          for (const input of ['host_sdk_pin.env', 'cjpm_pin.env', 'source_pin.env', 'llvm_pin.env', 'runtime_pin.env', 'host-toolchain-pin.mjs']) {
             await fs.copyFile(path.join(root, 'ci', input), path.join(work, 'ci', input));
           }
           if (arm === 'bad-pin') {
@@ -581,7 +582,7 @@ test('workflow GitHub environment loaders resolve the execution host and stop on
             await fs.writeFile(pin, (await fs.readFile(pin, 'utf8')).trimEnd() + '\nCJCJ_TOOLCHAIN_UNKNOWN=invalid\n');
           }
           if (arm === 'missing-reader') await fs.rename(path.join(work, 'ci/host-toolchain-pin.mjs'), path.join(work, 'ci/host-toolchain-pin.disabled'));
-          const env = {...process.env, GITHUB_ENV: path.join(work, 'github.env')};
+          const env = {...process.env, RUNNER_TEMP:work, GITHUB_ENV: path.join(work, 'github.env')};
           const result = spawnSync('bash', ['--noprofile', '--norc', '-euo', 'pipefail', '-c', `${script}\nprintf 'HOST_LOADER_COMPLETED\\n'`], {cwd: work, env, encoding: 'utf8'});
           assert.ifError(result.error);
           console.log(`TARGET_GITHUB_HOST_LOADER ${JSON.stringify({file, job, name, arm, rc: result.status, stdout: result.stdout, stderr: result.stderr})}`);
