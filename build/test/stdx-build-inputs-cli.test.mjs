@@ -273,3 +273,30 @@ test('unset stdx macro executor retains official host default when PATH selects 
   assert.equal(read(f.sdk).build.environment.STDX_HOST_CANGJIE_HOME, f.host);
   console.log('UNSET_EXECUTOR_DEFAULT_CONTROL_ASSERT_REACHED');
 });
+
+
+test('public native stdx forwards GCC input and rejects incompatible incremental reuse', t => {
+  const f=fixture(t), gcc=path.join(f.root,'gcc-prefix'); fs.mkdirSync(gcc);
+  successful(f.build());
+  console.log('STDX_GCC_DEFAULT_CONTROL_REACHED');
+  assert.equal(read(f.sdk).build.configuration.values.BUILD_GCC_TOOLCHAIN,'');
+  successful(f.build(['--stdx-gcc-toolchain',gcc]));
+  console.log('STDX_GCC_FORWARD_TARGET_REACHED');
+  const facts=read(f.sdk);
+  assert(facts.build.argv.includes('--gcc-toolchain='+gcc));
+  assert.equal(facts.build.configuration.values.BUILD_GCC_TOOLCHAIN,gcc);
+  successful(f.build(['--stdx-gcc-toolchain',gcc,'--stdx-build-mode','incremental']));
+  const before=fs.readFileSync(path.join(f.root,'consumer.jsonl'),'utf8');
+  const missing=f.build(['--stdx-build-mode','incremental']);
+  assert.equal(missing.status,1); assert.match(missing.stderr,/native configuration changed: BUILD_GCC_TOOLCHAIN=/);
+  assert.equal(fs.readFileSync(path.join(f.root,'consumer.jsonl'),'utf8'),before);
+  const other=path.join(f.root,'other-gcc'); fs.mkdirSync(other);
+  const changed=f.build(['--stdx-gcc-toolchain',other,'--stdx-build-mode','incremental']);
+  assert.equal(changed.status,1); assert.match(changed.stderr,/native configuration changed: BUILD_GCC_TOOLCHAIN=/);
+  successful(f.build(['--stdx-build-mode','incremental'],{CJCJ_STDX_GCC_TOOLCHAIN:gcc}));
+  successful(f.build());
+  const relative=f.build(['--stdx-gcc-toolchain','relative']);
+  assert.equal(relative.status,1); assert.match(relative.stderr,/expected an absolute GCC/);
+  const cross=f.build(['--target','windows-x64','--stdx-gcc-toolchain',gcc]);
+  assert.equal(cross.status,1); assert.match(cross.stderr,/only supported for native stdx builds/);
+});

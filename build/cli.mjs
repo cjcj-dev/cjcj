@@ -49,6 +49,7 @@ function usage() {
     + '  --stdx-version INTEGER (default: 1)\n'
     + '  --stdx-profile full|sdk-tools (default: full)\n'
     + '  --stdx-build-mode clean|incremental (default: clean)\n'
+    + '  --stdx-gcc-toolchain PATH (native Clang GCC headers/libraries prefix)\n'
     + '  --tools-build-mode clean|incremental (default: clean)\n'
     + '  --tools-dependencies PATH (fixed native JSON/runtime/bounds/httplib sources)\n'
     + '  --tools-build-set all|NAME,... (default: all; omitted tools reuse existing outputs)\n'
@@ -100,7 +101,7 @@ function parseGlobal(args) {
       ['--host-profile', 'hostProfile'],
       ['--build-type', 'buildType'], ['--cangjie-version', 'cangjieVersion'],
       ['--stdx-version', 'stdxVersion'], ['--stdx-profile', 'stdxProfile'], ['--log-level', 'logLevel'],
-      ['--stdx-build-mode', 'stdxBuildMode'], ['--tools-build-mode','toolsBuildMode'], ['--tools-build-set','toolsBuildSet'],
+      ['--stdx-build-mode', 'stdxBuildMode'], ['--stdx-gcc-toolchain', 'stdxGccToolchain'], ['--tools-build-mode','toolsBuildMode'], ['--tools-build-set','toolsBuildSet'],
       ['--tools-phase','toolsPhase'], ['--tools-dependencies','toolsDependencies'], ['--jobs','jobs'], ['--tools-package-jobs','toolsPackageJobs'],
     ]) {
       parsed = optionValue(args, index, flag);
@@ -238,6 +239,7 @@ async function dispatch(config, command, args) {
       stdxVersion: config.stdxVersion,
       stdxProfile: config.stdxProfile,
       stdxBuildMode: config.stdxBuildMode,
+      stdxGccToolchain: config.stdxGccToolchain,
       toolsBuildMode: config.toolsBuildMode,
       toolsBuildSet: config.toolsBuildSet,
       toolsDependencies: config.toolsDependencies,

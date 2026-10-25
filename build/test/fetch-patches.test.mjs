@@ -7,6 +7,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import {buildConfig} from '../lib/config.mjs';
+import {getBuildTarget} from '../lib/build-target.mjs';
 import {applyCompilerCjdbPatches, run as fetchRun, verifyCompilerCjdbPatches} from '../srcbuild/stages/fetch.mjs';
 
 const BUILD_CJDB = [
@@ -83,10 +84,11 @@ test('Windows fetch preserves selected native compilers and normal runtime insta
       git('-c', 'user.name=Zxilly', '-c', 'user.email=zxilly@outlook.com', 'commit', '--allow-empty', '-qm', 'finite canonical CMake fixture');
       repoOverrides[name] = {url: root, tag: git('rev-parse', 'HEAD')};
     }
-    const config = buildConfig({workspace, buildRoot: workspace + '/tools', targetKey: 'win32-x64', repoOverrides});
+    const config = {...buildConfig({workspace, buildRoot: workspace + '/tools', targetKey: 'windows-x64', repoOverrides}),
+      target: getBuildTarget('windows-x64', {platform: 'win32', arch: 'x64'})};
     await fetchRun(config);
     const cmake = (args) => {
-      const r = spawnSync('cmake', args, {encoding: 'utf8'});
+      const r = spawnSync('cmake', args, {cwd: workspace, encoding: 'utf8'});
       assert.equal(r.status, 0, r.stdout + r.stderr); return r;
     };
     const script = (name, setup) => {

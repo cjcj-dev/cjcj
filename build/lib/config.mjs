@@ -127,6 +127,7 @@ export function buildConfig({
   stdxVersion = 1,
   stdxProfile = 'full',
   stdxBuildMode = 'clean',
+  stdxGccToolchain = process.env.CJCJ_STDX_GCC_TOOLCHAIN,
   toolsBuildMode = 'clean',
   toolsBuildSet = 'all',
   toolsDependencies = process.env.CJCJ_NATIVE_TOOL_DEPENDENCIES,
@@ -156,6 +157,11 @@ export function buildConfig({
     throw new ConfigError('officialSdkRoot: expected a nonempty path');
   }
   const target = getBuildTarget(targetKey);
+  if (stdxGccToolchain != null) {
+    if (typeof stdxGccToolchain !== 'string' || !stdxGccToolchain.trim() || !path.isAbsolute(stdxGccToolchain))
+      throw new ConfigError('stdx-gcc-toolchain: expected an absolute GCC headers/libraries prefix');
+    if (target.spec.crossCompile) throw new ConfigError('stdx-gcc-toolchain is only supported for native stdx builds');
+  }
   const workspacePath = absolute(workspace || process.env.CANGJIE_WORKSPACE || path.join(process.cwd(), 'workspace'));
   const buildRootPath = absolute(buildRoot || process.env.CANGJIE_BUILD_ROOT || path.join(process.cwd(), 'buildtools'));
   const rawVersion = cangjieVersion || process.env.CANGJIE_VERSION || globalTag || '';
@@ -180,6 +186,7 @@ export function buildConfig({
     stdxVersion: Number(stdxVersion),
     stdxProfile,
     stdxBuildMode,
+    stdxGccToolchain: stdxGccToolchain == null ? null : absolute(stdxGccToolchain),
     toolsBuildMode,
     toolsBuildSet,
     toolsDependencies: toolsDependencies ? absolute(toolsDependencies) : null,
@@ -217,6 +224,7 @@ export function withBuildType(config, buildType) {
     stdxVersion: config.stdxVersion,
     stdxProfile: config.stdxProfile,
     stdxBuildMode: config.stdxBuildMode,
+    stdxGccToolchain: config.stdxGccToolchain,
     toolsBuildMode: config.toolsBuildMode,
     toolsBuildSet: config.toolsBuildSet,
     toolsDependencies: config.toolsDependencies,

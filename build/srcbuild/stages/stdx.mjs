@@ -28,9 +28,9 @@ function checkIncrementalConfiguration(config, directory, compilerInclude) {
     CANGJIE_BUILD_WITHOUT_PLUGIN:'OFF',CANGJIE_BUILD_WITHOUT_ASPECT_CJ:'OFF',
     CANGJIE_BUILD_STDLIB_WITH_COVERAGE:'OFF',CANGJIE_BUILD_ARGS:''};
   if(!config.target.spec.crossCompile)Object.assign(expected,{CANGJIE_TARGET_LIB:opensslLibPath(config)||'',
-    CANGJIE_TARGET_TOOLCHAIN:'',CANGJIE_TARGET_SYSROOT:''});
+    CANGJIE_TARGET_TOOLCHAIN:'',CANGJIE_TARGET_SYSROOT:'',BUILD_GCC_TOOLCHAIN:config.stdxGccToolchain||''});
   for(const [key,value]of Object.entries(expected)) {
-    const actual=values[key];
+    const actual=key==='BUILD_GCC_TOOLCHAIN' ? values[key]??'' : values[key];
     if((key==='CMAKE_BUILD_TYPE'?actual?.toLowerCase():actual)!==value)
       throw new BuildError('stdx.incremental',`native configuration changed: ${key}=${actual} expected=${value}; select a separate build or clean explicitly`);
   }
@@ -86,6 +86,7 @@ export async function run(config) {
       ];
     } else {
       args = ['build', '-t', config.buildType, `--include=${compilerInclude}`];
+      if (config.stdxGccToolchain) args.push(`--gcc-toolchain=${config.stdxGccToolchain}`);
       const openssl = opensslLibPath(config);
       if (openssl) args.push(`--target-lib=${openssl}`);
     }
