@@ -2207,7 +2207,6 @@ class CHIRDeserializerImpl {
                 CJC_ASSERT(operands.size == 1)
                 return builder.CreateUnBoxToRef(resultTy.getOrThrow(), operands[0], owner)
             case ExprKind.VARRAY =>
-                CJC_ASSERT(!operands.isEmpty())
                 return builder.CreateVArray(resultTy.getOrThrow(), operands, owner)
             case ExprKind.VARRAY_BUILDER =>
                 CJC_ASSERT(operands.size == 3)

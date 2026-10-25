@@ -67,7 +67,8 @@ class JavaInteropTypeChecker {
                     builder.AddMainHintArguments(Ty.ToString(param.GetTy()))
                     builder.Emit()
                     fd.EnableAttr(Attribute.IS_BROKEN)
-                    outer.EnableAttr(Attribute.HAS_BROKEN, Attribute.IS_BROKEN)
+                    outer.EnableAttr(Attribute.HAS_BROKEN)
+                    outer.EnableAttr(Attribute.IS_BROKEN)
                 }
             }
         }

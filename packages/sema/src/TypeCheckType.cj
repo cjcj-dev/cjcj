@@ -285,18 +285,7 @@ private func TypeCheckTypeIsLegalJavaTypeArgument(typeNode: Type): Bool {
 
 // C++ src/Sema/TypeCheckType.cpp:271-299 TypeCheckerImpl::CheckRefExprCheckTyArgs.
 private func CheckRefExprCheckTyArgs(refType: RefType, target: Decl): Bool {
-    if (refType.typeArguments.isEmpty()) {
-        return true
-    }
-    if (!TypeCheckTypeHasJavaAttr(target)) {
-        return false
-    }
-    for (typeArg in refType.typeArguments) {
-        if (!TypeCheckTypeIsLegalJavaTypeArgument(typeArg)) {
-            return true
-        }
-    }
-    return false
+    return refType.typeArguments.isEmpty()
 }
 
 // C++ src/Sema/TypeCheckerImpl.h:1702-1723 SubstituteTypeArguments<Type>.
