@@ -51,6 +51,7 @@ function usage() {
     + '  --stdx-build-mode clean|incremental (default: clean)\n'
     + '  --stdx-gcc-toolchain PATH (native Clang GCC headers/libraries prefix)\n'
     + '  --tools-build-mode clean|incremental (default: clean)\n'
+    + '  --tools-gcc-toolchain PATH (native Linux cjlint Clang GCC headers/libraries prefix)\n'
     + '  --tools-dependencies PATH (fixed native JSON/runtime/bounds/httplib sources)\n'
     + '  --tools-build-set all|NAME,... (default: all; omitted tools reuse existing outputs)\n'
     + '  --tools-phase all|build|install (default: all; build does not publish the shared SDK)\n'
@@ -102,7 +103,7 @@ function parseGlobal(args) {
       ['--build-type', 'buildType'], ['--cangjie-version', 'cangjieVersion'],
       ['--stdx-version', 'stdxVersion'], ['--stdx-profile', 'stdxProfile'], ['--log-level', 'logLevel'],
       ['--stdx-build-mode', 'stdxBuildMode'], ['--stdx-gcc-toolchain', 'stdxGccToolchain'], ['--tools-build-mode','toolsBuildMode'], ['--tools-build-set','toolsBuildSet'],
-      ['--tools-phase','toolsPhase'], ['--tools-dependencies','toolsDependencies'], ['--jobs','jobs'], ['--tools-package-jobs','toolsPackageJobs'],
+      ['--tools-phase','toolsPhase'], ['--tools-dependencies','toolsDependencies'], ['--tools-gcc-toolchain','toolsGccToolchain'], ['--jobs','jobs'], ['--tools-package-jobs','toolsPackageJobs'],
     ]) {
       parsed = optionValue(args, index, flag);
       if (parsed) {
@@ -243,6 +244,7 @@ async function dispatch(config, command, args) {
       toolsBuildMode: config.toolsBuildMode,
       toolsBuildSet: config.toolsBuildSet,
       toolsDependencies: config.toolsDependencies,
+      toolsGccToolchain: config.toolsGccToolchain,
       toolsPhase: config.toolsPhase, jobs: config.jobs, toolsPackageJobs: config.toolsPackageJobs,
       officialSdkRoot: config.officialSdkRoot,
       consumerSdk: config.consumerSdk,

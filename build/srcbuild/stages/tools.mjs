@@ -65,6 +65,7 @@ function buildArgsFor(name, config, jobs) {
   }
   const toolsBuildType = config.buildType === 'relwithdebinfo' ? 'release' : config.buildType;
   const args = ['build', '-t', toolsBuildType];
+  if(name==='cjlint' && config.toolsGccToolchain)args.push('--gcc-toolchain',config.toolsGccToolchain);
   if (name === 'cjpm' && config.target.spec.rpathOrigin) {
     args.push(
       '--set-rpath',

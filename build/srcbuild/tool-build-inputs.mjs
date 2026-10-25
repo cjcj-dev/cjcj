@@ -24,16 +24,20 @@ async function sourceState(root, directory, revision) {
   return {commit, changes_sha256:sha256(diff)};
 }
 export async function sdkInputs(config, sdk) {
-  const stage = await readJson(path.join(sdk,'STAGE-INPUTS.json'));
+  // Official SDK archives expose bin/cjc and libraries, not our bootstrap
+  // stage record. Preserve stage facts when present; never manufacture them.
+  let stage;
+  try { stage = await readJson(path.join(sdk,'STAGE-INPUTS.json')); }
+  catch(error) { if(error.code!=='ENOENT')throw error; }
   const tuple = config.target.runtimeLibSubdir(config.buildType);
-  const files = {compiler:await compilerProducer(sdk),
+  const files = {compiler:stage===undefined?path.join(sdk,'bin','cjc'+config.target.spec.exeSuffix):await compilerProducer(sdk),
     stdCore:path.join(sdk,'lib',tuple,'libcangjie-std-core.a'),
     runtime:path.join(sdk,'runtime/lib',tuple,'libcangjie-runtime'+(config.target.spec.os==='windows'?'.dll':config.target.spec.os==='darwin'?'.dylib':'.so'))};
   for(const [name,rel]of Object.entries({stdProvenance:'PROVENANCE.txt',compilerEntry:'bin/cjcj-stage1'+config.target.spec.exeSuffix+'.entry',
     hleDependencies:'tools/dtsparser/DEPENDENCIES.json',nativeAst:(config.target.spec.os==='windows'?'tools/bin/libcangjie-lsp':'tools/lib/libcangjie-lsp')+(config.target.spec.os==='windows'?'.dll':config.target.spec.os==='darwin'?'.dylib':'.so'),executionRuntime:'.compiler-exec/'+path.relative(sdk,files.runtime)})){
     try{await fs.access(path.join(sdk,rel));files[name]=path.join(sdk,rel);}catch(e){if(e.code!=='ENOENT')throw e;}
   }
-  return {stage, artifacts:Object.fromEntries(await Promise.all(Object.entries(files).map(async ([name,file])=>[name,{path:file,sdkRelative:path.relative(sdk,file).split(path.sep).join('/'),sha256:await fileDigest(file)}])))};
+  return {...(stage===undefined?{}:{stage}), artifacts:Object.fromEntries(await Promise.all(Object.entries(files).map(async ([name,file])=>[name,{path:file,sdkRelative:path.relative(sdk,file).split(path.sep).join('/'),sha256:await fileDigest(file)}])))};
 }
 export async function beginToolBuild(config, name, {cjpmPin, argv, env, sdk}) {
   if(dry()) return null;
@@ -66,7 +70,7 @@ async function nativeConfigurationInputs(config,name) {
   if(['cjlint','cjprof','cjcompat'].includes(name))for(const [part,relative]of [['native',name+'/build/build/CMakeCache.txt'],...(name==='cjprof'?[['jni','cjprof/bridge/jni/build/CMakeCache.txt']]:[])]) {
     const file=path.join(config.repoPath('tools'),relative);
     const cache=Object.fromEntries((await fs.readFile(file,'utf8')).split('\n').filter(line=>/^[A-Za-z_][^:]*:[^=]*=/.test(line)).map(line=>[line.slice(0,line.indexOf(':')),line.slice(line.indexOf('=')+1)]));
-    nativeConfiguration[part]={path:file,values:Object.fromEntries(Object.entries(cache).filter(([key])=>/^(CMAKE_(BUILD_TYPE|SYSTEM_NAME|CXX_COMPILER|C_COMPILER|HOME_DIRECTORY)|CANGJIE_HOME$|CJPROF_|JAVA_|JNI_|JSON_ROOT$)/.test(key)))};
+    nativeConfiguration[part]={path:file,values:Object.fromEntries(Object.entries(cache).filter(([key])=>/^(CMAKE_(BUILD_TYPE|SYSTEM_NAME|CXX_COMPILER|C_COMPILER|HOME_DIRECTORY)|CANGJIE_HOME$|CJPROF_|JAVA_|JNI_|JSON_ROOT$|GCC_TOOLCHAIN_FLAG$)/.test(key)))};
   }
   return nativeConfiguration;
 }
@@ -86,6 +90,12 @@ export async function finishToolBuild(config, name, facts, product) {
   const landed=await sdkInputs(config,facts.build.environment.CANGJIE_HOME);
   if(!isDeepStrictEqual(landed,facts.build.inputs))throw new Error('TOOL_SDK_CHANGED_DURING_BUILD '+name);
   const nativeConfiguration=await nativeConfigurationInputs(config,name);
+  if(name==='cjlint' && (config.toolsGccToolchain || 'GCC_TOOLCHAIN_FLAG' in nativeConfiguration.native.values)) {
+    const actual=nativeConfiguration.native.values.GCC_TOOLCHAIN_FLAG;
+    console.log('TOOLS_GCC_CONFIGURATION_ASSERTION_REACHED '+JSON.stringify({actual,expected:config.toolsGccToolchain??''}));
+    if(actual!==(config.toolsGccToolchain??''))
+      throw Error('TOOL_GCC_TOOLCHAIN_MISMATCH cjlint: '+actual);
+  }
   const payloads={};
   for(const row of await nativeToolBuildPayloads(config,name))payloads[row.to]={source:row.from,sha256:await fileDigest(row.from)};
   await atomicJson(recordPath(config,name),{...facts,artifact:{path:product,sha256:await fileDigest(product)},build:{...facts.build,nativeConfiguration,payloads,rc:0}});

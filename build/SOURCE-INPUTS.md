@@ -306,3 +306,19 @@ Native build and install artifacts are recorded separately: normal CMake RPATH
 or install-name changes are not falsely rejected as a source change. Source
 configuration and the copied JNI output must stay byte-identical; each native
 installed payload retains its actual successful build input.
+
+For native Linux cjlint, `--tools-gcc-toolchain /absolute/prefix` (or
+`CJCJ_TOOLS_GCC_TOOLCHAIN`) selects Clang's GCC headers/libraries through the
+producer's ordinary `build.py --gcc-toolchain`. Choose it to match the selected
+SDK's native AST ABI; it is independent of stdx's option and is rejected for
+cross/non-Linux targets. Clean and incremental invocations pass the same option;
+withdrawing it lets the producer clear its cached selection. Build facts capture
+and check `GCC_TOOLCHAIN_FLAG`; install-only reuse retains the original build
+configuration. This requires a tools source with the normal cjlint option and
+cache reconfiguration support. A passed configuration test is not AST ABI proof.
+
+Official host archives do not have a bootstrap `STAGE-INPUTS.json`. Tool builds
+record their actual `bin/cjc`, std-core/runtime and available native AST library
+inputs without creating a stage record or modifying that SDK. If bootstrap
+stage facts exist, they still select and describe that stage's compiler. Invalid
+existing records and missing actual compiler/library files remain failures.

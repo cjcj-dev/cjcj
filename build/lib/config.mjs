@@ -131,6 +131,7 @@ export function buildConfig({
   toolsBuildMode = 'clean',
   toolsBuildSet = 'all',
   toolsDependencies = process.env.CJCJ_NATIVE_TOOL_DEPENDENCIES,
+  toolsGccToolchain = process.env.CJCJ_TOOLS_GCC_TOOLCHAIN,
   toolsPhase = 'all',
   jobs,
   toolsPackageJobs = 4,
@@ -162,6 +163,12 @@ export function buildConfig({
       throw new ConfigError('stdx-gcc-toolchain: expected an absolute GCC headers/libraries prefix');
     if (target.spec.crossCompile) throw new ConfigError('stdx-gcc-toolchain is only supported for native stdx builds');
   }
+  if (toolsGccToolchain != null) {
+    if (typeof toolsGccToolchain !== 'string' || !toolsGccToolchain.trim() || !path.isAbsolute(toolsGccToolchain))
+      throw new ConfigError('tools-gcc-toolchain: expected an absolute GCC headers/libraries prefix');
+    if (target.spec.crossCompile || target.spec.nodePlatform !== 'linux')
+      throw new ConfigError('tools-gcc-toolchain is only supported for native Linux cjlint builds');
+  }
   const workspacePath = absolute(workspace || process.env.CANGJIE_WORKSPACE || path.join(process.cwd(), 'workspace'));
   const buildRootPath = absolute(buildRoot || process.env.CANGJIE_BUILD_ROOT || path.join(process.cwd(), 'buildtools'));
   const rawVersion = cangjieVersion || process.env.CANGJIE_VERSION || globalTag || '';
@@ -190,6 +197,7 @@ export function buildConfig({
     toolsBuildMode,
     toolsBuildSet,
     toolsDependencies: toolsDependencies ? absolute(toolsDependencies) : null,
+    toolsGccToolchain: toolsGccToolchain == null ? null : absolute(toolsGccToolchain),
     toolsPhase,
     jobs: jobs===undefined?undefined:Number(jobs),
     toolsPackageJobs:Number(toolsPackageJobs),
@@ -228,6 +236,7 @@ export function withBuildType(config, buildType) {
     toolsBuildMode: config.toolsBuildMode,
     toolsBuildSet: config.toolsBuildSet,
     toolsDependencies: config.toolsDependencies,
+    toolsGccToolchain: config.toolsGccToolchain,
     toolsPhase: config.toolsPhase,
     jobs: config.jobs,
     toolsPackageJobs: config.toolsPackageJobs,
