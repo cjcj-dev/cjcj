@@ -261,10 +261,11 @@ test('cross-run tuple lookup is granted actions: read', async () => {
   console.log('OBJC_E2E_ASSERT actions_read=true tuple_fallback=cross-run');
 });
 
-test('workflow is a bash 3.2 macOS arm pinned to cjpm_pin.env', async () => {
+test('workflow is a bash 3.2 macOS arm using the source and host pins', async () => {
   const text = await fs.readFile(workflow, 'utf8');
-  const pin = await fs.readFile(path.join(repoRoot, 'ci', 'cjpm_pin.env'), 'utf8');
+  const pin = await fs.readFile(path.join(repoRoot, 'ci', 'host_sdk_pin.env'), 'utf8');
   assert.match(pin, /^CJCJ_TOOLCHAIN=nightly-\S+$/m);
+  assert.match(text, /node ci\/host-toolchain-pin\.mjs --github-env >> "\$GITHUB_ENV"/);
   assert.match(text, /workflow_dispatch:/);
   assert.match(text, /runs-on: macos-15\n/);
   assert.match(text, /cat ci\/cjpm_pin\.env >> "\$GITHUB_ENV"/);
