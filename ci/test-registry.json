@@ -849,5 +849,17 @@
     "file": "packages/chir/src/ReachingDefinitionAnalysis_test.cj",
     "executor": "cjpm",
     "member": "packages/chir"
+  },
+  {
+    "file": "ci/release/test_darwin_loader_controls.mjs",
+    "executor": "workflow",
+    "workflow": ".github/workflows/darwin-input-consumers.yml",
+    "interpreter": "node"
+  },
+  {
+    "file": "ci/release/test_darwin_llvm_controls.mjs",
+    "executor": "workflow",
+    "workflow": ".github/workflows/darwin-input-consumers.yml",
+    "interpreter": "node"
   }
 ]

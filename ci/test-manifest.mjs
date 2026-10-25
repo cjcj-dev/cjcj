@@ -25,14 +25,11 @@ import fs from 'node:fs';
 export const repoRoot = path.resolve(import.meta.dirname, '..');
 export const REGISTERED = Object.freeze(JSON.parse(fs.readFileSync(new URL('./test-registry.json', import.meta.url), 'utf8')));
 
-// These tests execute in a separately checked-out, fixed product tree. They
-// cannot be in this branch's GATING file list: that would execute a different
-// source identity (or a file that is absent here). The manifest test checks the
-// actual first checkout before recognizing this workflow-specific registration.
+// This workflow must execute this candidate, including its registered native
+// boundary test. The checker rejects missing, branch or foreign checkouts.
 export const WORKFLOW_TEST_SOURCES = Object.freeze([
-  {workflow: 'darwin-input-consumers.yml',
-    source_sha: '255d8c7e1f5e70be69b4cf3e9091514cfb1a4d09',
-    gating: ['ci/release/darwin_consumer_boundary.test.mjs']},
+  {workflow:'darwin-input-consumers.yml', source_ref:'${{ github.sha }}',
+    gating:['ci/release/darwin_consumer_boundary.test.mjs']},
 ]);
 
 // The second axis, and the reason it exists. The name patterns above cannot see
@@ -62,6 +59,8 @@ export const GATING = Object.freeze([
   'ci/bootstrap/sdk-std-barrier-resume.test.mjs',
   'ci/check-colour-tlab.test.mjs',
   'ci/release/darwin_workflow_entry.test.mjs',
+  'ci/release/darwin_consumer_boundary.test.mjs',
+  'ci/release/darwin_llvm.test.mjs',
   'ci/bootstrap/compiler-identity.integration.test.mjs',
   'ci/g1-entry-branches.test.mjs',
   'ci/g1-entry-differential.test.mjs',
