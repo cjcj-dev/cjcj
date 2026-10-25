@@ -1,0 +1,7 @@
+# Condition binding lifetime
+
+Run `node test/condition_binding_lifetime/run.mjs /absolute/installed/bin/cjc /absolute/new-output candidate` under the normal wf/scope. The runner crosses the public compiler entry, links and executes positive programs, and requires exact undeclared-name rejection for illegal visibility. CONDITION_RUN_LD can select the paired target runtime for execution; it does not change compiler inputs.
+
+The compiler retains condition declarations in their Collector-assigned lexical scopes for the ASTContext lifetime. Removing them after initial body checking makes the after-typecheck Token-to-refreshPos rewrite fail when it checks the same argument again. No change to Token desugaring, stdx source, runtime, LLVM, or assertions is needed. The else/after/self-initializer cases prove this does not widen lexical visibility; the ordinary Token control also checks that position injection remains active.
+
+Phases: baseline expects both condition targets to reject tk, candidate/restored require every positive compile/run and every negative rejection. A cut restores declaration removal only after the if then-body (in both inferred and target-typed paths); it must reject if-target while while-target and ordinary-control still compile/run. The cut is built in an isolated normal producer output; frozen installs are not modified. These phases are definitions, not claims of completed execution. Fullstdx must subsequently resume its original normal graph/cache with the qualified new compiler.

@@ -6021,15 +6021,6 @@ extend TypeChecker {
         return nothingTy
     }
 
-    private func AddUniqueBoundDecl(decls: ArrayList<Decl>, decl: Decl): Unit {
-        for (existing in decls) {
-            if (SameDecl(existing, decl)) {
-                return
-            }
-        }
-        decls.add(decl)
-    }
-
     private func PropagateCtxExpr(pattern: Pattern, initializer: Expr): Unit {
         let walker = Walker(pattern, visitPre: { node: Node =>
             if (let Some(varPattern) <- (node as VarPattern)) {
@@ -6043,18 +6034,20 @@ extend TypeChecker {
         let _ = walker.Walk()
     }
 
-    private func BindCollectedConditionDecls(ctx: ASTContext, patterns: ArrayList<Pattern>,
-        boundDecls: ArrayList<Decl>): Unit {
+    // Collector assigns condition/then and loop-body declarations their own lexical scope.
+    // Keep them for ASTContext's lifetime: after-typecheck desugaring (std.ast.Token
+    // -> refreshPos) typechecks generated calls in that same scope. Lookup walks
+    // ancestors only, so else branches and following code cannot see these child scopes.
+    private func BindCollectedConditionDecls(ctx: ASTContext, patterns: ArrayList<Pattern>): Unit {
         let collected = ArrayList<Decl>()
         CollectPatternBindings(patterns, collected)
         for (decl in collected) {
             BindLocalDeclIfAbsent(ctx, decl)
-            AddUniqueBoundDecl(boundDecls, decl)
         }
     }
 
     private func CheckLetPatternCondition(ctx: ASTContext, letPattern: LetPatternDestructor,
-        boundDecls: ArrayList<Decl>, suppressIntroducingVariableError: Bool): Bool {
+        suppressIntroducingVariableError: Bool): Bool {
         if (let None <- letPattern.initializer) {
             let _ = TcInvalid(letPattern)
             return false
@@ -6085,21 +6078,21 @@ extend TypeChecker {
         }
         if (Ty.IsTyCorrect(selectorTy) && subpatternsGood) {
             letPattern.SetTy(TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN))
-            BindCollectedConditionDecls(ctx, letPattern.patterns, boundDecls)
+            BindCollectedConditionDecls(ctx, letPattern.patterns)
             return good
         }
         let _ = TcInvalid(letPattern)
         return false
     }
 
-    private func CheckConditionWithBindings(ctx: ASTContext, expr: Expr, boundDecls: ArrayList<Decl>,
+    private func CheckConditionWithBindings(ctx: ASTContext, expr: Expr,
         suppressIntroducingVariableError: Bool): Bool {
         if (let Some(letPattern) <- (expr as LetPatternDestructor)) {
-            return CheckLetPatternCondition(ctx, letPattern, boundDecls, suppressIntroducingVariableError)
+            return CheckLetPatternCondition(ctx, letPattern, suppressIntroducingVariableError)
         }
         if (let Some(parenExpr) <- (expr as ParenExpr)) {
             if (let Some(inner) <- parenExpr.expr) {
-                let ok = CheckConditionWithBindings(ctx, inner, boundDecls, suppressIntroducingVariableError)
+                let ok = CheckConditionWithBindings(ctx, inner, suppressIntroducingVariableError)
         parenExpr.SetTy(inner.GetTy().getOrThrow())
                 return ok
             }
@@ -6126,12 +6119,12 @@ extend TypeChecker {
                 }
                 var ok = true
                 if (let Some(left) <- binaryExpr.leftExpr) {
-                    ok = CheckConditionWithBindings(ctx, left, boundDecls, suppressChildren) && ok
+                    ok = CheckConditionWithBindings(ctx, left, suppressChildren) && ok
                 } else {
                     ok = false
                 }
                 if (let Some(right) <- binaryExpr.rightExpr) {
-                    ok = CheckConditionWithBindings(ctx, right, boundDecls, suppressChildren) && ok
+                    ok = CheckConditionWithBindings(ctx, right, suppressChildren) && ok
                 } else {
                     ok = false
                 }
@@ -6175,10 +6168,9 @@ extend TypeChecker {
     }
 
     private func SynthesizeIfExpr(ctx: ASTContext, pos: SynPos, ifExpr: IfExpr): Ty {
-        let conditionBindings = ArrayList<Decl>()
         var isWellTyped = true
         if (let Some(condExpr) <- ifExpr.condExpr) {
-            isWellTyped = CheckConditionWithBindings(ctx, condExpr, conditionBindings, false) && isWellTyped
+            isWellTyped = CheckConditionWithBindings(ctx, condExpr, false) && isWellTyped
         } else {
             isWellTyped = false
         }
@@ -6187,7 +6179,6 @@ extend TypeChecker {
         } else {
             isWellTyped = false
         }
-        RemovePatternBindings(ctx, conditionBindings)
         if (SynthesizedIfHasMissingElse(ifExpr)) {
             if (let Some(elseBody) <- ifExpr.elseBody) {
                 isWellTyped = Ty.IsTyCorrect(Synthesize(ctx, SynPos.EXPR_ARG, elseBody)) && isWellTyped
@@ -6275,16 +6266,14 @@ extend TypeChecker {
     }
 
     private func CheckIfExprWithTarget(ctx: ASTContext, target: Ty, ifExpr: IfExpr): Bool {
-        let conditionBindings = ArrayList<Decl>()
         var isWellTyped = true
         if (let Some(condExpr) <- ifExpr.condExpr) {
-            isWellTyped = CheckConditionWithBindings(ctx, condExpr, conditionBindings, false)
+            isWellTyped = CheckConditionWithBindings(ctx, condExpr, false)
         } else {
             isWellTyped = false
         }
         if (SynthesizedIfHasMissingElse(ifExpr)) {
             let branchOk = CheckIfExprNoElseWithTarget(ctx, target, ifExpr)
-            RemovePatternBindings(ctx, conditionBindings)
             isWellTyped = branchOk && isWellTyped
         } else {
             var thenTyCorrect = false
@@ -6300,7 +6289,6 @@ extend TypeChecker {
                 }
                 thenTyCorrect = Ty.IsTyCorrect(thenBody.GetTy())
             }
-            RemovePatternBindings(ctx, conditionBindings)
             var elseTyCorrect = false
             if (let Some(elseBody) <- ifExpr.elseBody) {
                 if (!Check(ctx, target, elseBody) && ifExpr.ShouldDiagnose() && !CanSkipDiag(elseBody)) {
@@ -6367,15 +6355,6 @@ extend TypeChecker {
     private func CollectPatternBindings(patterns: ArrayList<Pattern>, out: ArrayList<Decl>): Unit {
         for (pattern in patterns) {
             CollectPatternBinding(pattern, out)
-        }
-    }
-
-    private func RemovePatternBindings(ctx: ASTContext, decls: ArrayList<Decl>): Unit {
-        for (decl in decls) {
-            let name = decl.identifier.Val()
-            if (!name.isEmpty() && name != INVALID_IDENTIFIER) {
-                ctx.RemoveDeclByName(Names(name, decl.scopeName), decl)
-            }
         }
     }
 
@@ -9124,10 +9103,8 @@ extend TypeChecker {
         if ((let None <- we.condExpr) || (let None <- we.body)) {
             return TcInvalid(we)
         }
-        let bindings = ArrayList<Decl>()
-        var isWellTyped = CheckConditionWithBindings(ctx, we.condExpr.getOrThrow(), bindings, false)
+        var isWellTyped = CheckConditionWithBindings(ctx, we.condExpr.getOrThrow(), false)
         isWellTyped = Ty.IsTyCorrect(Synthesize(ctx, SynPos.UNUSED, we.body.getOrThrow())) && isWellTyped
-        RemovePatternBindings(ctx, bindings)
         let ty = if (isWellTyped) { TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT) }
             else { TypeManager.GetInvalidTy() }
         we.SetTy(ty)
@@ -9149,9 +9126,7 @@ extend TypeChecker {
             return TcInvalid(dwe)
         }
         var isWellTyped = Ty.IsTyCorrect(Synthesize(ctx, SynPos.UNUSED, dwe.body.getOrThrow()))
-        let bindings = ArrayList<Decl>()
-        isWellTyped = CheckConditionWithBindings(ctx, dwe.condExpr.getOrThrow(), bindings, false) && isWellTyped
-        RemovePatternBindings(ctx, bindings)
+        isWellTyped = CheckConditionWithBindings(ctx, dwe.condExpr.getOrThrow(), false) && isWellTyped
         let ty = if (isWellTyped) { TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT) }
             else { TypeManager.GetInvalidTy() }
         dwe.SetTy(ty)
