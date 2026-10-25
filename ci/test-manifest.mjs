@@ -43,6 +43,7 @@ export const DRIVERS = Object.freeze(JSON.parse(fs.readFileSync(new URL('./test-
 
 // Run by `node --test` in .github/workflows/ci.yml, via `test-manifest.mjs list`.
 export const GATING = Object.freeze([
+  'ci/platform_matrix/windows_runtime_capture.test.mjs',
   'ci/bootstrap/sdk-python-source.test.mjs',
   'ci/colour-sdk.test.mjs',
   'ci/release/receive_native_sdk.test.mjs',

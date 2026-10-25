@@ -4,14 +4,16 @@ One `windows-2025` job, 45 minute timeout, four build jobs, MINGW64/MSVCRT
 clang and LLD, Unix Makefiles, the existing sccache action (2G cache). This is
 runtime-only production: compiler/std/LLVM SDK targets are not built.
 
-The coordinator publishes the independently reviewed CI candidate to
-`cjcj-dev/cjcj:fix/ci-official-chain-1025` and runtime source
-`65ab0659d0e657c92a9ddabe8a10f8bc22dd2eef` to a normal reviewed source ref,
-proposed `cjcj-dev/cangjie-runtime:publish/windows-runtime-65ab0659-1026`.
-Publication and dispatch need their existing authorization; neither has happened
-merely because this workflow specifies a SHA. Verify both remote commits before
-explicitly dispatching this workflow at the candidate branch with `runtime_ref`.
-The old successful run and its old runtime default are not inputs to this run.
+Publication is currently held. The first source-only phase used runtime
+`65ab0659d0e657c92a9ddabe8a10f8bc22dd2eef`; its proposed publication ref is
+superseded by the runtime owner's pending generator/registration successor.
+Do not publish or dispatch that old input. Obtain the owner's frozen successor
+and review boundary, then update the explicit runtime input after any active
+experiment ends. The independently reviewed CI candidate and runtime source
+must be published by an authorized role through normal Git refs in
+`cjcj-dev/cjcj` and `cjcj-dev/cangjie-runtime`. Verify both remote commits before
+explicit dispatch at the candidate ref. Neither publication nor dispatch is
+authorized by this document. The old successful run is not this run's evidence.
 
 `actions/checkout` obtains the runtime's tracked sources, including boundscheck
 and CJThread. MSYS2 installs the declared MINGW64 packages. Actual package/tool
@@ -40,7 +42,7 @@ produce a fake successful install/package. A job-level timeout can prevent final
 artifact upload; absence of artifacts is not a successful link observation.
 
 The runtime owner consumes actual returned raw/DLL with fixed C/N source callers
-through its normal collect/write/check. It owns registration, history (including
-NewFinalizer) and source corrections. Known source errors stop affected production;
+through its normal collect/write/check. It owns registration, history (including the explicitly retired, non-reusable NewFinalizer ordinal
+277 in the pending successor) and source corrections. Known source errors stop affected production;
 this workflow does not split the runtime into alternate libraries or bypass a
 post-link gate to create a qualified SDK. No additional matrix is scheduled here.
