@@ -59,7 +59,6 @@ concurrency:
 env:
   # RUNTIME_REF/RUNTIME_SRC_URL come from ci/runtime_pin.env via the
   # "Load runtime pin" step — the pin lives in exactly one file.
-  RUNTIME_VERSION: 1.2.0-alpha.20260721165458
   CJ_HEAP_SIZE: 12GB
   CANGJIE_WORKSPACE: ${{ github.workspace }}/.srcbuild
   CJCJ_NATIVE_INPUT_ROOT: ${{ github.workspace }}/.srcbuild/native-inputs

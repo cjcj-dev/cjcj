@@ -93,8 +93,8 @@ async function main() {
 
   const out = argv._[0];
   if (!out) throw new Error('usage: build_patched_runtime.mjs <out-dir>');
-  const {runtimeRef, sourceUrl: srcUrl, pinRef, overrideRef} = await resolveRuntimeSource();
-  const version = process.env.RUNTIME_VERSION || '1.2.0-alpha.20260619020029';
+  const {runtimeRef, sourceUrl: srcUrl, pinRef, overrideRef, RUNTIME_VERSION} = await resolveRuntimeSource();
+  const version = process.env.RUNTIME_VERSION || RUNTIME_VERSION;
   const diagnostics = await startDiagnostics(runtimeRef, version);
   const {dir, record} = diagnostics;
   let work;

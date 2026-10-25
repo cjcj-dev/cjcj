@@ -3,6 +3,7 @@
 // MINGW64 only for build.py, whose Windows recipe requires POSIX make/PATH.
 
 import fs from 'node:fs/promises';
+import {readSourcePins} from '../native-llvm-inputs.mjs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {printCommonVersions, stageBegin, toCommandPath} from './common.mjs';
@@ -11,7 +12,8 @@ import {configureNativeRuntime, installNativeRuntimeDependencies, installNativeR
 
 const {root} = stageBegin('runtime');
 const source = process.env.RUNTIME_SOURCE || path.join(process.cwd(), 'runtime-source');
-const version = process.env.RUNTIME_VERSION || '1.2.0-alpha.20260721165458';
+const version = process.env.RUNTIME_VERSION || readSourcePins().runtime.RUNTIME_VERSION;
+process.env.RUNTIME_VERSION = version;
 const buildType = process.env.RUNTIME_BUILD_TYPE || 'release';
 const runtimeTarget = process.env.RUNTIME_TARGET || (process.platform === 'win32' ? 'windows-x86_64' : 'native');
 const runtimeToolchain = process.env.RUNTIME_TOOLCHAIN || '';

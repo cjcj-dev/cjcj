@@ -18,7 +18,7 @@ on:
       version:
         required: false
         type: string
-        default: 1.2.0-alpha.20260721165458
+        default: ''
       dry_run:
         required: false
         type: boolean
@@ -150,7 +150,7 @@ jobs:
         env:
           RUNTIME_TARGET: windows-x86_64
           RUNTIME_TOOLCHAIN: ${{ github.workspace }}/.windows-runtime-buildtools/llvm-mingw-w64
-          RUNTIME_VERSION: ${{ inputs.version }}
+          RUNTIME_VERSION: ${{ inputs.version || env.RUNTIME_VERSION }}
         run: npx --yes zx@8 ci/platform_matrix/build_runtime.mjs
 
       - name: Restore Cangjie toolchain
