@@ -54,7 +54,8 @@ registerHooks({load(url,context,next){
  assert.equal(build.args[build.args.indexOf('--target-toolchain')+1],toolchain);
  assert.equal(build.args[build.args.indexOf('--prefix')+1],env.RUNNER_TEMP);
  assert.equal(build.args[build.args.indexOf('-v')+1],env.RUNTIME_VERSION);
- assert.equal(build.args[build.args.indexOf('--jobs')+1],'4');
+ console.log('WINDOWS_SHELL_JOBS_ASSERT_REACHED');
+ assert.equal(build.args[build.args.indexOf('--jobs')+1],'4','public Windows script must preserve explicit build jobs');
  assert.deepEqual(JSON.parse(fs.readFileSync(env.SHELL_LAUNCH)),{argv:['--login','-s'],env:{MSYSTEM:'MINGW64',MSYS2_PATH_TYPE:'inherit',CHERE_INVOKING:'1'}});
  const command=JSON.parse(fs.readFileSync(out+'/windows-native/runtime-native-command.json'));
  assert.equal(command.rc,fail?37:0);assert.equal(command.signal,null);
