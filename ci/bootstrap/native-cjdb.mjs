@@ -10,6 +10,7 @@ import {materializeNativeSource} from './sdk-source.mjs';
 import {nativeHostFlatc} from './native-shim-inputs.mjs';
 import {prepareNativeCompilerSource} from './native-compiler-input.mjs';
 import {nativeAstInstallation} from './native-ast-inputs.mjs';
+import {installNativeClang} from './native-clang-install.mjs';
 import {pythonConfiguration,verifyCjdbPythonConfiguration,verifyCjdbPythonInstallation,pythonSourceInputs} from './sdk-cjdb-python.mjs';
 import {sdkPlatform} from './sdk-platform.mjs';
 import {execute} from './sdk-io.mjs';
@@ -112,6 +113,7 @@ export async function nativeCjdb(config) {
  const targets=[...new Set([...native.nativeTargets,'cangjie-ast-support'])];
  await run([tools.cmake||'cmake','--build',build,'--target',...targets.filter(t=>!['all','install'].includes(t)),'-j',jobs]);
  await run([tools.cmake||'cmake','--build',build,'-j',jobs]);await run([tools.cmake||'cmake','--install',build]);
+ const clangInstallation=await installNativeClang({build,install,platform,cmake:tools.cmake||'cmake',env},run);
  const astInstallation=await nativeAstInstallation({compiler,build,install,platform,source:compilerSource,commands:records,cmakeCommand:tools.cmake||'cmake'});
  // CMake is the only native library installer; Python and libedit are explicit
  // runtime dependencies copied once, with conflicts diagnosed at installation.
@@ -145,7 +147,7 @@ export async function nativeCjdb(config) {
   windowsToolchain={compiler:windowsToolchain.facts.compiler,installedFiles,original:{path:original,sha256:await fileDigest(path.join(install,original))}};
  }
  await atomicJson(install+'/BUILD-INPUTS.json',{commits,compilerSource,platform,llvmLibrary:{file:'third_party/llvm/'+native.llvmDirectory+'/'+native.llvmLibrary,sha256:await fileDigest(nativeRoot+'/'+native.llvmDirectory+'/'+native.llvmLibrary)},targets,
-  astInstallation,nativeShim,pythonInstallationInput,...(windowsToolchain?{windowsToolchain}:{}),configuration:config,python:{configured:observed,installed},pythonSource,commands:records});
+  astInstallation,clangInstallation,nativeShim,pythonInstallationInput,...(windowsToolchain?{windowsToolchain}:{}),configuration:config,python:{configured:observed,installed},pythonSource,commands:records});
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
  try{await nativeCjdb(await readJson(process.argv[2]));}catch(e){console.error(e.stack);process.exitCode=e.rc||1;}

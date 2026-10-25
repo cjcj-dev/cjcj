@@ -26,12 +26,24 @@ fs.copyFileSync(fixture+'/compiler-174db8f/third_party/CMakeLists.txt',compiler+
 fs.cpSync(fixture+'/compiler-41b223-schema/schema',compiler+'/schema',{recursive:true});
 // Limited compiler graph: use the actual prepared upstream POST_BUILD command,
 // then deliberately stop before native AST/install/Python debugger consumers.
-write(compiler+'/CMakeLists.txt',"cmake_minimum_required(VERSION 3.20)\nproject(NativeVersionEntry NONE)\nfile(STRINGS \"${CMAKE_SOURCE_DIR}/third_party/CMakeLists.txt\" versionCommand REGEX \"COMMAND .*VERSION.txt\")\nlist(LENGTH versionCommand count)\nif(NOT count EQUAL 1)\n message(FATAL_ERROR \"one official version producer required\")\nendif()\nstring(REPLACE \"\\${CMAKE_CURRENT_SOURCE_DIR}\" \"${CMAKE_SOURCE_DIR}/third_party\" versionCommand \"${versionCommand}\")\nset(SOURCE_DIR \"${CANGJIE_CJNATIVE_SOURCE_DIR}\")\nset(THIRD_PARTY_LLVM third_party/llvm)\nfile(MAKE_DIRECTORY \"${CMAKE_BINARY_DIR}/${THIRD_PARTY_LLVM}\")\ncmake_language(EVAL CODE \"add_custom_target(lldb ${versionCommand} COMMAND ${CMAKE_COMMAND} -E echo NATIVE_VERSION_POST_BUILD_REACHED COMMAND ${CMAKE_COMMAND} -E false WORKING_DIRECTORY ${SOURCE_DIR})\")\nforeach(name cjdb lldb-boundscheck lldb-cangjie-lsp lldb-cangjie-frontend cangjie-ast-support)\n add_custom_target(${name})\nendforeach()\n");
+write(compiler+'/CMakeLists.txt',"cmake_minimum_required(VERSION 3.20)\nproject(NativeVersionEntry NONE)\nfile(STRINGS \"${CMAKE_SOURCE_DIR}/third_party/CMakeLists.txt\" versionCommand REGEX \"COMMAND .*VERSION.txt\")\nlist(LENGTH versionCommand count)\nif(NOT count EQUAL 1)\n message(FATAL_ERROR \"one official version producer required\")\nendif()\nstring(REPLACE \"\\${CMAKE_CURRENT_SOURCE_DIR}\" \"${CMAKE_SOURCE_DIR}/third_party\" versionCommand \"${versionCommand}\")\nset(SOURCE_DIR \"${CANGJIE_CJNATIVE_SOURCE_DIR}\")\nset(THIRD_PARTY_LLVM third_party/llvm)\nfile(MAKE_DIRECTORY \"${CMAKE_BINARY_DIR}/${THIRD_PARTY_LLVM}\")\nset(stopAfterVersion \"COMMAND ${CMAKE_COMMAND} -E false\")\nif(\"$ENV{NATIVE_CLANG_FINITE_INSTALL}\" STREQUAL \"1\")\n set(stopAfterVersion \"\")\n execute_process(COMMAND \"${CMAKE_COMMAND}\" -G Ninja -S \"${CMAKE_SOURCE_DIR}/finite-clang\" -B \"${CMAKE_BINARY_DIR}/third_party/cjnative-prefix/src/cjnative-build\" RESULT_VARIABLE result)\n if(NOT result EQUAL 0)\n  message(FATAL_ERROR \"finite component configuration failed\")\n endif()\n install(FILES \"${CMAKE_SOURCE_DIR}/CMakeLists.txt\" DESTINATION share/finite-clang)\nendif()\ncmake_language(EVAL CODE \"add_custom_target(lldb ${versionCommand} COMMAND ${CMAKE_COMMAND} -E echo NATIVE_VERSION_POST_BUILD_REACHED ${stopAfterVersion} WORKING_DIRECTORY ${SOURCE_DIR})\")\nforeach(name cjdb lldb-boundscheck lldb-cangjie-lsp lldb-cangjie-frontend cangjie-ast-support)\n add_custom_target(${name})\nendforeach()\n");
 function gitFixture(name,dir) {
  good(name+'-init',['git','init',dir]);good(name+'-add',['git','-C',dir,'add','.']);
  good(name+'-commit',['git','-C',dir,'-c','user.name=Zxilly','-c','user.email=zxilly@outlook.com','commit','-m','Finite version source']);
  return good(name+'-head',['git','-C',dir,'rev-parse','HEAD']);
 }
+// Real host clang and its real core resource headers, installed through a
+// small CMake component graph. This is not a newly built N575 clang.
+write(compiler+'/finite-clang/CMakeLists.txt', `cmake_minimum_required(VERSION 3.20)
+project(FiniteClangInstall NONE)
+install(PROGRAMS /usr/lib/llvm-15/bin/clang DESTINATION bin COMPONENT clang)
+install(PROGRAMS /usr/lib/llvm-15/bin/clang DESTINATION bin RENAME clang++ COMPONENT clang)
+install(FILES /usr/lib/llvm-15/lib/clang/15.0.7/include/stddef.h /usr/lib/llvm-15/lib/clang/15.0.7/include/__stddef_max_align_t.h /usr/lib/llvm-15/lib/clang/15.0.7/include/stdint.h /usr/lib/llvm-15/lib/clang/15.0.7/include/stdarg.h DESTINATION lib/clang/15.0.7/include COMPONENT clang-resource-headers)
+install(FILES Core.h DESTINATION include/llvm-c COMPONENT llvm-headers)
+install(FILES llvm-config.h DESTINATION include/llvm/Config COMPONENT llvm-headers)
+`);
+write(compiler+'/finite-clang/Core.h','// finite LLVM header presence fixture, not API qualification\n');
+write(compiler+'/finite-clang/llvm-config.h','// finite generated header presence fixture\n');
 const compilerCommit=gitFixture('compiler',compiler),llvm=base+'/llvm-git';
 write(llvm+'/README','finite LLVM input, no LLVM product\n');const llvmCommit=gitFixture('llvm',llvm);
 const archive=base+'/llvm-archive';fs.cpSync(llvm,archive,{recursive:true,filter:p=>path.basename(p)!=='.git'});
@@ -68,4 +80,28 @@ test('archive missing commit and Git mismatch stop version production without fa
   const c=config(name,source,commit),r=invoke(name,c);assert.equal(r.status,1);assert.match(r.stdout+r.stderr,new RegExp(marker));
   assert(!fs.existsSync(c.build+'/third_party/llvm/VERSION.txt'));
  }
+});
+
+test('formal native entry installs clang components and compiles with installed resource headers on first and warm runs',()=>{
+ process.env.NATIVE_CLANG_FINITE_INSTALL='1';
+ try {
+  const c=config('clang-install',archive);
+  for(const phase of ['first','warm']) {
+   const r=invoke('clang-install-'+phase,c);
+   assert.equal(r.status,1,'finite AST boundary, no debugger or N install qualification');
+   assert.match(r.stderr,/NATIVE_AST_NOT_INSTALLED/,'finite graph stops after actual clang components and header compile');
+   const root=c.install+'/third_party/llvm';
+   console.log('NATIVE_INSTALLED_CLANG_ASSERT_REACHED '+phase);
+   assert(fs.existsSync(root+'/bin/clang'),'normal native entry must install clang into the final independent prefix');
+   assert(fs.existsSync(root+'/bin/clang++'));
+   const events=r.stdout.split('\n').filter(x=>x.startsWith('{')).map(x=>{try{return JSON.parse(x);}catch{return {};}});
+   const query=events.find(x=>x.event==='native-clang-resource');assert.equal(query?.rc,0);
+   assert.equal(query.stdout.trim(),root+'/lib/clang/15.0.7');
+   assert(fs.statSync(c.build+'/installed-clang-consumer.o').size>0);
+   const deps=fs.readFileSync(c.build+'/installed-clang-consumer.d','utf8');
+   for(const header of ['stddef.h','stdint.h','stdarg.h'])assert(deps.includes(root+'/lib/clang/15.0.7/include/'+header),deps);
+   const targets=events.filter(x=>x.event==='target-result'&&x.argv.includes('--component'));
+   assert.deepEqual(targets.map(x=>[x.argv.at(-1),x.rc]),[['clang',0],['clang-resource-headers',0],['llvm-headers',0]]);
+  }
+ } finally {delete process.env.NATIVE_CLANG_FINITE_INSTALL;}
 });
