@@ -52,10 +52,12 @@ target_link_libraries(consumer LibEdit::LibEdit \${CURSES_LIBRARIES} \${PANEL_LI
 `);
 const config=buildConfig({workspace:path.join(root,'workspace'),buildRoot,targetKey:'linux-x64'});
 const prefix=cmakePrefixPathFor(config);
-ok(run('consumer-configure',['cmake','-S',source,'-B',build,'-G','Ninja'],{env:{...env,CMAKE_PREFIX_PATH:prefix}}));
+// compiler/third_party/cmake/BuildCJDB.cmake supplies this option to nested LLDB.
+// Preserve the production selection instead of testing FindCurses defaults.
+ok(run('consumer-configure',['cmake','-S',source,'-B',build,'-G','Ninja','-DCURSES_NEED_NCURSES=1'],{env:{...env,CMAKE_PREFIX_PATH:prefix}}));
 const cache=fs.readFileSync(path.join(build,'CMakeCache.txt'),'utf8');
 console.log('STATIC_LIBS_PREFIX_CONSUMER_ASSERTION_REACHED');
-for(const [key,expected]of [['LibEdit_INCLUDE_DIRS',path.join(libedit,'include')],['LibEdit_LIBRARIES',path.join(libedit,'lib/libedit.a')],['CURSES_NCURSES_LIBRARY',ncArchive],['PANEL_LIBRARIES',path.join(ncurses,'lib/libpanel.a')]]) {
+for(const [key,expected]of [['LibEdit_INCLUDE_DIRS',path.join(libedit,'include')],['LibEdit_LIBRARIES',path.join(libedit,'lib/libedit.a')],['CURSES_NCURSES_LIBRARY',ncArchive],['CURSES_FORM_LIBRARY',path.join(ncurses,'lib/libform.a')],['CURSES_EXTRA_LIBRARY',path.join(ncurses,'lib/libtinfo.a')],['PANEL_LIBRARIES',path.join(ncurses,'lib/libpanel.a')]]) {
  const line=cache.split('\n').find(line=>line.startsWith(key+':'));
  assert.equal(line?.slice(line.indexOf('=')+1),expected,key);
 }
