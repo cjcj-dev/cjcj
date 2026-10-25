@@ -13,6 +13,7 @@ import {FIXED_INPUTS} from './sdk-targets.mjs';
 import {sdkPlatform} from './sdk-platform.mjs';
 import {stage2Input} from './sdk-stage2-input.mjs';
 import {receiveNativeRuntime} from './native-runtime-input.mjs';
+import {languageSourceInputs} from '../../build/srcbuild/installed-language-source.mjs';
 import {hostPlatform, readHostToolchainPin, hostToolchainFromCjcVersion} from '../host-toolchain-pin.mjs';
 import {runtimeSourceRepository} from '../../build/lib/runtime-source-inputs.mjs';
 import {readInstalledNativeAst} from './installed-native-ast.mjs';
@@ -153,8 +154,10 @@ export async function prepareNativeInputs(descriptor, env = process.env) {
       ...(supplied.sourceRoot ? {sourceRoot:await privateRoot(supplied.sourceRoot)} : {})};
     if(name==='runtime'&&native.os==='linux') {
       rows[name].sourceRoot=rows[name].sourceRoot||await privateRoot(path.join(rows[name].install,'share/runtime-build'));
-      for(const member of ['runtime/tests/gc_unit/gate_gc_unit.sh','runtime/tests/gc_unit/language_toolchain.mjs',
-        'runtime/CMakebuild/compile_commands.json','runtime/CMakebuild/gc-unit.status'])await fs.access(path.join(rows[name].sourceRoot,member));
+      languageSourceInputs(path.join(rows[name].sourceRoot,'runtime'),
+        {installed:rows[name].sourceRoot===path.join(rows[name].install,'share/runtime-build')});
+      for(const member of ['runtime/CMakebuild/compile_commands.json','runtime/CMakebuild/gc-unit.status'])
+        await fs.access(path.join(rows[name].sourceRoot,member));
       await fs.access(path.join(rows[name].install,'runtime/include/schedule.h'));
     }
   }

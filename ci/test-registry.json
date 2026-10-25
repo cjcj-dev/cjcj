@@ -871,5 +871,10 @@
     "file": "build/test/static-libs-native.integration.mjs",
     "executor": "manual",
     "reason": "Requires real fixed ncurses/libedit archives in STATIC_LIBS_ARCHIVES and private RELEASE_EVIDENCE_TEST_ROOT. Public install-static-libs CLI cold/warm/partial-header restore, stage prefix through actual CMake/static consumer; not full CJDB or platform qualification."
+  },
+  {
+    "file": "ci/bootstrap/sdk-language-prepare.integration.test.mjs",
+    "executor": "manual",
+    "reason": "Requires read-only CJCJ_LANGUAGE_PREPARE_HOST and private RELEASE_EVIDENCE_TEST_ROOT. Formal CJCJ_NATIVE_INPUTS descriptor through prepare-bootstrap-plans, real Git/C finite artifacts and installed legacy/modern language inputs, exact missing-member rejection. CPP/N/AST shapes are explicit fixtures; not complete SDK or ABI qualification."
   }
 ]
