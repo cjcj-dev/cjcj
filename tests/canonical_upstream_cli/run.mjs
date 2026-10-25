@@ -18,7 +18,7 @@ const env = {...process.env, CANGJIE_HOME: sdk, LD_LIBRARY_PATH:
 const result = {arm, compiler, compiler_sha256: hash(compiler), sdk, commands: [], assertions: [], rc: 1};
 const cases = [
   ['control', []], ['resource_bound', []], ['array_copy', ['4099']],
-  ['alias_store', ['41']], ['match_guard', []],
+  ['alias_store', ['41']], ['struct_store', ['41']], ['match_guard', []],
 ];
 function save() { fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify(result, null, 2) + '\n'); }
 function run(label, argv) {

@@ -9,7 +9,10 @@ generic intersection bound, checking one close on normal return and exception.
 `array_copy` exercises generic primitive/reference copies, nonzero offsets, overlap
 and zero length. Its small runtime length does **not** validate the >2GiB split
 boundary. `alias_store` reads through an immutable member pointing to a mutable
-object before and after aliased call/store. `match_guard` exercises both fragments
+object before and after aliased call/store. `struct_store` directly exercises the
+tracked struct allocation with nested field stores, nested/member mutating calls,
+whole-value reads, an unchanged copied value and an immutable field control.
+`match_guard` exercises both fragments
 of an alternative pattern with true/false guards and the exhaustive final case,
 checking compiler reachability diagnostics as well as runtime values.
 
