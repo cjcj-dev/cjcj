@@ -30,6 +30,8 @@ foreach(name cjdb lldb-boundscheck lldb-cangjie-lsp lldb-cangjie-frontend cangji
  add_custom_target(\${name})
 endforeach()
 `);
+ fs.cpSync(new URL('../../build/test/fixtures/compiler-174db8f/',import.meta.url),compiler,{recursive:true});
+ fs.cpSync(new URL('../../build/test/fixtures/compiler-41b223-schema/schema',import.meta.url),compiler+'/schema',{recursive:true});
  function git(dir,label){for(const [name,args]of [['init',['init']],['add',['add','.']],['commit',['-c','user.name=Zxilly','-c','user.email=zxilly@outlook.com','commit','--allow-empty','-m','Finite workflow input']]])assert.equal(run(label+'-'+name,['git','-C',dir,...args]).status,0);return run(label+'-head',['git','-C',dir,'rev-parse','HEAD']).stdout.trim();}
  const compilerSha=git(compiler,'compiler'),dependencySha=git(input+'/dep','dependency');
  fs.writeFileSync(input+'/xml-input/xml/README','finite dependency transfer only\n');

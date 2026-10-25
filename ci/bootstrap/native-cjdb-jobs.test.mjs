@@ -50,6 +50,8 @@ endforeach()
  await fs.mkdir(source+'/third_party/cmake',{recursive:true});await fs.mkdir(source+'/src',{recursive:true});
  await fs.writeFile(source+'/third_party/cmake/BuildCJDB.cmake','externalproject_get_property(cjnative BINARY_DIR)\nset(LLVM_GC_BINARY_DIR "${BINARY_DIR}")\n    USES_TERMINAL_BUILD ON\n    DEPENDS cjnative)\n');
  await fs.writeFile(source+'/src/CMakeLists.txt','if(CANGJIE_BUILD_CJDB)\n    add_dependencies(lldb cangjie-frontend)\nendif()\n');
+ await fs.copyFile(new URL('../../build/test/fixtures/compiler-174db8f/third_party/CMakeLists.txt',import.meta.url),source+'/third_party/CMakeLists.txt');
+ await fs.cp(new URL('../../build/test/fixtures/compiler-41b223-schema/schema',import.meta.url),source+'/schema',{recursive:true});
  good('git-init',['git','init',source]);good('git-add',['git','-C',source,'add','.']);
  good('git-commit',['git','-C',source,'-c','user.name=Zxilly','-c','user.email=zxilly@outlook.com','commit','-m','Finite native jobs entry']);
  const commit=good('git-head',['git','-C',source,'rev-parse','HEAD']);
@@ -75,6 +77,20 @@ endforeach()
   assert.ok(observed.startsWith(expected.join('|')+'|'),observed);
   assert.ok(observed.includes('-DLLVM_PARALLEL_LINK_JOBS='+expected[1]),observed);
   assert.doesNotMatch(r.stderr,/NATIVE_CPUS/);
+  const dependencyFile=config.build+'.compiler-source/third_party/CMakeLists.txt';
+  const before='DEPENDS cangjie-demangler boundscheck)',after='DEPENDS cangjie-demangler boundscheck boundscheck-static)';
+  const prepared=await fs.readFile(dependencyFile,'utf8');
+  console.log('BOUNDSCHECK_NATIVE_TARGET_REACHED '+label+' first');
+  assert.equal(prepared.split(after).length-1,2);
+  if(label==='default'){
+   await fs.writeFile(dependencyFile,prepared.replace(after,before));
+   const restored=run('default-cache-public',[process.execPath,producer,file],{env});
+   assert.equal(restored.status,1,'finite C target stops before installation');
+   assert.match(restored.stdout,/NATIVE_JOBS_BUILD_REACHED jobs=4/);
+   console.log('BOUNDSCHECK_NATIVE_TARGET_REACHED cache-restore');
+   assert.equal(await fs.readFile(dependencyFile,'utf8'),prepared);
+  }
+
  }
 });
 test('public native jobs rejects invalid capacity before creating a build directory',async()=>{

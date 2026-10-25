@@ -58,6 +58,9 @@ function compilerFixture(targetKey) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'darwinpy-compiler-'));
   const workspace = path.join(root, 'workspace');
   fs.mkdirSync(path.join(workspace, 'cangjie_compiler'), {recursive: true});
+  fs.mkdirSync(path.join(workspace, 'cangjie_compiler/third_party'), {recursive: true});
+  fs.copyFileSync(path.join(import.meta.dirname, 'fixtures/compiler-174db8f/third_party/CMakeLists.txt'),
+    path.join(workspace, 'cangjie_compiler/third_party/CMakeLists.txt'));
   return {
     root,
     config: buildConfig({

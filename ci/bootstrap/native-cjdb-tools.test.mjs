@@ -34,6 +34,8 @@ endforeach()
  await fs.mkdir(compiler+'/third_party/cmake',{recursive:true});await fs.mkdir(compiler+'/src',{recursive:true});
  await fs.writeFile(compiler+'/third_party/cmake/BuildCJDB.cmake','externalproject_get_property(cjnative BINARY_DIR)\nset(LLVM_GC_BINARY_DIR "${BINARY_DIR}")\n    USES_TERMINAL_BUILD ON\n    DEPENDS cjnative)\n');
  await fs.writeFile(compiler+'/src/CMakeLists.txt','if(CANGJIE_BUILD_CJDB)\n    add_dependencies(lldb cangjie-frontend)\nendif()\n');
+ await fs.copyFile(new URL('../../build/test/fixtures/compiler-174db8f/third_party/CMakeLists.txt',import.meta.url),compiler+'/third_party/CMakeLists.txt');
+ await fs.cp(new URL('../../build/test/fixtures/compiler-41b223-schema/schema',import.meta.url),compiler+'/schema',{recursive:true});
  for(const [name,args]of [['init',['init']],['add',['add','.']],['commit',['-c','user.name=Zxilly','-c','user.email=zxilly@outlook.com','commit','-m','Finite native tool path fixture']]])
   assert.equal(run(name,['git','-C',compiler,...args]).status,0);
  const commit=run('head',['git','-C',compiler,'rev-parse','HEAD']).stdout.trim();

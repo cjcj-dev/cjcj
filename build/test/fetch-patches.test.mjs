@@ -8,7 +8,7 @@ import test from 'node:test';
 
 import {buildConfig} from '../lib/config.mjs';
 import {getBuildTarget} from '../lib/build-target.mjs';
-import {applyCompilerCjdbPatches, run as fetchRun, verifyCompilerCjdbPatches} from '../srcbuild/stages/fetch.mjs';
+import {applyCompilerBoundscheckDependencies, applyCompilerCjdbPatches, run as fetchRun, verifyCompilerCjdbPatches} from '../srcbuild/stages/fetch.mjs';
 
 const BUILD_CJDB = [
   'cmake_policy(SET CMP0114 NEW)',
@@ -88,7 +88,10 @@ test('Windows fetch preserves selected native compilers and normal runtime insta
     }
     const config = {...buildConfig({workspace, buildRoot: workspace + '/tools', targetKey: 'windows-x64', repoOverrides}),
       target: getBuildTarget('windows-x64', {platform: 'win32', arch: 'x64'})};
+    const boundsFile = path.join(compiler, 'third_party/CMakeLists.txt');
+    const canonicalBounds = fs.readFileSync(boundsFile);
     await fetchRun(config);
+    assert.deepEqual(fs.readFileSync(boundsFile), canonicalBounds, 'canonical 41b already has both static bounds dependencies');
     const cmake = (args) => {
       const r = spawnSync('cmake', args, {cwd: workspace, encoding: 'utf8'});
       assert.equal(r.status, 0, r.stdout + r.stderr); return r;
@@ -216,4 +219,61 @@ test('apply throws patch shape drift when DEPENDS cjnative shape moves', () => {
   } finally {
     fs.rmSync(root, {recursive: true, force: true});
   }
+});
+
+// Exercise the public source selector and existing-source path, not just the
+// patch helper. build compiler deliberately bypasses fetch on reentry.
+for (const entry of ['fetch', 'build']) test(`public ${entry} restores both static boundscheck producer edges`, () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'boundscheck-cli-'));
+  try {
+    const compiler = path.join(workspace, 'cangjie_compiler');
+    fs.cpSync(PIN_FIXTURE, compiler, {recursive:true});
+    fs.cpSync(SCHEMA_PIN_FIXTURE, path.join(compiler, 'schema'), {recursive:true});
+    const options=[];
+    for (const name of ['compiler','runtime','tools','stdx','llvm','cjpm']) {
+      const root=path.join(workspace,name==='llvm'?'cangjie_compiler/third_party/llvm-project':name==='cjpm'?'cjpm-source':'cangjie_'+name);
+      fs.mkdirSync(root,{recursive:true});
+      const git=(...args)=>{const r=spawnSync('git',['-C',root,...args],{encoding:'utf8'});assert.equal(r.status,0,r.stderr);return r.stdout.trim();};
+      git('init','-q');git('add','.');
+      git('-c','user.name=Zxilly','-c','user.email=zxilly@outlook.com','commit','--allow-empty','-qm','fixed boundscheck fixture');
+      options.push('--repo-url',name+'='+root,'--repo-tag',name+'='+git('rev-parse','HEAD'));
+    }
+    const file=path.join(compiler,'third_party/CMakeLists.txt');
+    const original=fs.readFileSync(file,'utf8');
+    const before='DEPENDS cangjie-demangler boundscheck)';
+    const after='DEPENDS cangjie-demangler boundscheck boundscheck-static)';
+    assert.equal(original.split(before).length-1,2);
+    const expected=original.replaceAll(before,after);
+    const cli=new URL('../cli.mjs',import.meta.url).pathname;
+    const invoke=()=>{
+      // The build arm checks its real source preparation; native build.py is
+      // explicitly dry-run here. Native compilation is a separate gate.
+      const env={...process.env};delete env.CANGJIE_BUILD_DRY_RUN;
+      if(entry==='build')env.CANGJIE_BUILD_DRY_RUN='1';
+      const args=entry==='fetch'?['fetch',...options]:['build','compiler'];
+      const r=spawnSync(process.execPath,[cli,'--workspace',workspace,'--build-root',workspace+'/buildtools','--target','linux-x64',...args],{env,encoding:'utf8'});
+      assert.equal(r.status,0,r.stdout+r.stderr);
+    };
+    invoke();
+    console.log('BOUNDSCHECK_PUBLIC_TARGET_REACHED '+entry+' first');
+    assert.equal(fs.readFileSync(file,'utf8'),expected);
+    invoke();
+    assert.equal(fs.readFileSync(file,'utf8'),expected,'warm entry must preserve both edges');
+    fs.writeFileSync(file,expected.replace(after,before));
+    invoke();
+    console.log('BOUNDSCHECK_PUBLIC_TARGET_REACHED '+entry+' partial-restore');
+    assert.equal(fs.readFileSync(file,'utf8'),expected);
+    if(entry==='fetch')verifyCompilerCjdbPatches(compiler);
+  } finally {fs.rmSync(workspace,{recursive:true,force:true});}
+});
+
+test('boundscheck preparation refuses shape drift without rewriting canonical input', () => {
+  const root=copyPinFixture();
+  try {
+    const file=path.join(root,'third_party/CMakeLists.txt');
+    const source=fs.readFileSync(file,'utf8').replace('DEPENDS cangjie-demangler boundscheck)','DEPENDS changed-producer)');
+    fs.writeFileSync(file,source);
+    assert.throws(()=>applyCompilerBoundscheckDependencies(root),/patch shape drift/);
+    assert.equal(fs.readFileSync(file,'utf8'),source);
+  } finally {fs.rmSync(root,{recursive:true,force:true});}
 });

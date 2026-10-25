@@ -11,6 +11,23 @@ import {getLogger, stage} from '../../lib/logging.mjs';
 import {applyTextPatch, ensureDir} from './common.mjs';
 
 const logger = getLogger('cangjie_build.stages.fetch');
+const BOUNDSCHECK_DEPENDS = 'DEPENDS cangjie-demangler boundscheck';
+
+// Upstream da68cc5ae3028c724da470b703eff757402cba44. Both cjnative
+// source paths copy the static archive on Windows during their patch step.
+// The shared-library target alone cannot order that producer before the copy.
+export function applyCompilerBoundscheckDependencies(repoDir) {
+  const file = path.join(repoDir, 'third_party', 'CMakeLists.txt');
+  const source = fs.readFileSync(file, 'utf8');
+  const oldText = `${BOUNDSCHECK_DEPENDS})`;
+  const newText = `${BOUNDSCHECK_DEPENDS} boundscheck-static)`;
+  const count = text => source.split(text).length - 1;
+  if (count(oldText) + count(newText) !== 2) {
+    throw new BuildError('fetch.patch', `patch shape drift: expected both cjnative boundscheck dependencies in ${file}`);
+  }
+  if (source.includes(oldText)) fs.writeFileSync(file, source.replaceAll(oldText, newText));
+}
+
 const BUILDCJDB_EDITS = [
   [
     'externalproject_get_property(cjnative BINARY_DIR)\nset(LLVM_GC_BINARY_DIR "${BINARY_DIR}")\n',
@@ -101,6 +118,7 @@ export async function run(config) {
       await assertSourceIdentity(repo, target);
     }
     applyCompilerCjdbPatches(config.repoPath('compiler'));
+    applyCompilerBoundscheckDependencies(config.repoPath('compiler'));
     applyCompilerSchemaInstall(config.repoPath('compiler'));
     if (config.target.spec.nodePlatform === 'win32') applyCompilerWindowsPatches(config.repoPath('compiler'));
     saveSourceSelection(config);

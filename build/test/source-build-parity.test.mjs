@@ -107,6 +107,9 @@ function makeFixture({packageLayout=false}={}) {
   const buildRoot = directory(root, 'buildtools');
   const officialSdkRoot = directory(root, 'official-sdk');
   const compilerRoot = directory(workspace, 'cangjie_compiler');
+  fs.mkdirSync(path.join(compilerRoot, 'third_party'), {recursive: true});
+  fs.copyFileSync(path.join(import.meta.dirname, 'fixtures/compiler-174db8f/third_party/CMakeLists.txt'),
+    path.join(compilerRoot, 'third_party/CMakeLists.txt'));
   const runtimeRoot = directory(workspace, 'cangjie_runtime');
   const toolsRoot = directory(workspace, 'cangjie_tools');
   const stdxRoot = directory(workspace, 'cangjie_stdx');
