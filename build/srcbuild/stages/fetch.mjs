@@ -28,6 +28,18 @@ export function applyCompilerBoundscheckDependencies(repoDir) {
   if (source.includes(oldText)) fs.writeFileSync(file, source.replaceAll(oldText, newText));
 }
 
+// VERSION.txt is produced by the same normal cjnative POST_BUILD step for
+// Git checkouts and selected archives. Do not require a fabricated repository.
+export function applyCompilerLlvmVersion(repoDir) {
+  const old = 'COMMAND git log -1 --oneline --decorate > ${CMAKE_BINARY_DIR}/${THIRD_PARTY_LLVM}/VERSION.txt';
+  const replacement = 'COMMAND "${CJCJ_NATIVE_NODE}" "${CMAKE_CURRENT_SOURCE_DIR}/cmake/llvm-source-version.mjs" "${SOURCE_DIR}" "${CMAKE_BINARY_DIR}/${THIRD_PARTY_LLVM}/VERSION.txt" "${CJ_LLVM_COMMIT}"';
+  applyTextPatch(path.join(repoDir, 'third_party', 'CMakeLists.txt'), [[old, replacement]], {
+    stage: 'fetch.patch.llvm-version', marker: replacement,
+  });
+  fs.copyFileSync(fileURLToPath(new URL('../patches/llvm-source-version.mjs', import.meta.url)),
+    path.join(repoDir, 'third_party', 'cmake', 'llvm-source-version.mjs'));
+}
+
 const BUILDCJDB_EDITS = [
   [
     'externalproject_get_property(cjnative BINARY_DIR)\nset(LLVM_GC_BINARY_DIR "${BINARY_DIR}")\n',

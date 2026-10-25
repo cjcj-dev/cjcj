@@ -731,6 +731,11 @@
     "reason": "Requires SDK_NATIVE_INSTALLED_SDK/TEST_ROOT/INPUTS, real paired Linux installed SDK; jobs follow actual resources. Public CLI installs existing std bytes without rebuilding std; missing artifacts, exact native-stage product cut, independent control, restored actual String compile/run. Windows/Darwin native production remains NOT_RUN."
   },
   {
+    "file": "ci/bootstrap/native-llvm-version.integration.test.mjs",
+    "executor": "manual",
+    "reason": "Requires owned NATIVE_VERSION_EVIDENCE and native Python3.11/CMake/Ninja. Executes public native-cjdb entry with a finite compiler graph consuming the actual patched upstream VERSION command for archive/Git, cold/warm and rejection controls; stops before debugger/install, not full N qualification."
+  },
+  {
     "file": "ci/bootstrap/native-cjdb-jobs.test.mjs",
     "executor": "manual",
     "reason": "Platform fixed 74e6 finite public CLI gate requires its recorded four-CPU domain, real sccache/Python3.11 development installation and retained NATIVE_JOBS_EVIDENCE; existing producer evidence reused, not a CPU admission rule."

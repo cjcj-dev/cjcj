@@ -1,7 +1,7 @@
 #!/usr/bin/env zx
 // Fixed compiler CMake targets build the complete native LLVM/CJDB dependency closure.
 import fs from 'node:fs/promises';
-import {applyCompilerBoundscheckDependencies,applyCompilerCjdbPatches,applyCompilerWindowsPatches,applyCompilerSchemaInstall} from '../../build/srcbuild/stages/fetch.mjs';
+import {applyCompilerBoundscheckDependencies,applyCompilerLlvmVersion,applyCompilerCjdbPatches,applyCompilerWindowsPatches,applyCompilerSchemaInstall} from '../../build/srcbuild/stages/fetch.mjs';
 import path from 'node:path';
 import os from 'node:os';
 import {fileURLToPath} from 'node:url';
@@ -79,6 +79,7 @@ export async function nativeCjdb(config) {
  applyCompilerCjdbPatches(compiler);
  applyCompilerBoundscheckDependencies(compiler);
  applyCompilerSchemaInstall(compiler);
+ applyCompilerLlvmVersion(compiler);
  const compilerSource=prepared.source;
  let windowsToolchain;
  if(native.os==='win32') {
@@ -98,6 +99,7 @@ export async function nativeCjdb(config) {
  const llvmArgs=[`-DCANGJIE_RUNTIME_SOURCE_DIR=${runtime}`,`-DCMAKE_C_COMPILER_LAUNCHER=${launcher}`,
   `-DCMAKE_CXX_COMPILER_LAUNCHER=${launcher}`,`-DLLVM_PARALLEL_LINK_JOBS=${linkJobs}`,`-DCJ_LLVM_COMMIT=${commits.llvm}`];
  await run([tools.cmake||'cmake','-G','Ninja','-S',compiler,'-B',build,'-DCMAKE_BUILD_TYPE=Release',
+  `-DCJCJ_NATIVE_NODE=${process.execPath}`,`-DCJ_LLVM_COMMIT=${commits.llvm}`,
   `-DCMAKE_TOOLCHAIN_FILE=${toolchain}`,`-DCMAKE_C_COMPILER=${tools.cc}`,
   `-DCMAKE_CXX_COMPILER=${tools.cxx}`,`-DCMAKE_C_COMPILER_LAUNCHER=${launcher}`,`-DCMAKE_CXX_COMPILER_LAUNCHER=${launcher}`,
   '-DCANGJIE_BUILD_CJC=ON','-DCANGJIE_BUILD_STD_SUPPORT=ON','-DCANGJIE_BUILD_TESTS=OFF','-DCANGJIE_BUILD_CJDB=ON',
