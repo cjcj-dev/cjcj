@@ -39,18 +39,25 @@ if(name==='python3' && args[0]==='build.py') {
   const r=spawnSync('cmake',['-P',e.FIXTURE_CMAKE],{encoding:'utf8',env:e});
   process.stdout.write(r.stdout||'');process.stderr.write(r.stderr||'');if(r.status!==0)process.exit(r.status||1);
   fs.mkdirSync('CMakebuild',{recursive:true});
-  if(process.platform==='linux' && !e.FIXTURE_NO_BOUNDS){
-    const arch=e.NATIVE_RUNTIME_PLATFORM.slice('linux_'.length),directory='CMakebuild/runtime-staging/lib/'+arch+'_Release';
-    fs.mkdirSync(directory,{recursive:true});fs.writeFileSync(path.join(directory,'libboundscheck.so'),'this native build bounds');
-  }
+  const arch=e.NATIVE_RUNTIME_PLATFORM.split('_').slice(1).join('_'),suffix=process.platform==='darwin'?'dylib':'so';
+  const bounds=path.resolve('CMakebuild/runtime-staging/lib/'+arch+'_Release/libboundscheck.'+suffix);
+  if(!e.FIXTURE_NO_BOUNDS){fs.mkdirSync(path.dirname(bounds),{recursive:true});fs.writeFileSync(bounds,'this native build bounds');}
+  const links=['boundscheck','cangjie-runtime'].map(name=>path.resolve('CMakebuild/src/CMakeFiles/'+name+'.dir/link.txt'));
+  for(const file of links)fs.mkdirSync(path.dirname(file),{recursive:true});
+  fs.writeFileSync(links[0],'clang -shared -o '+bounds);
+  fs.writeFileSync(links[1],e.FIXTURE_BAD_LINK?'clang -shared unrelated.so':'clang -shared '+bounds);
+  fs.writeFileSync('CMakebuild/runtime-link-inputs.txt',links.join('\n'));
+
   const tuple=e.NATIVE_RUNTIME_PLATFORM+'_cjnative',preinstall=path.resolve('CMakebuild/cjthread-installed');
   fs.mkdirSync('CMakebuild/cjthread-build',{recursive:true});
   fs.writeFileSync('CMakebuild/cjthread-build/CMakeCache.txt',
-    'CMAKE_INSTALL_PREFIX:PATH='+preinstall+'\nTARGET_ARCH:STRING='+tuple+'\nCMAKE_BUILD_TYPE:STRING=Release\n');
+    'CMAKE_HOME_DIRECTORY:INTERNAL='+path.resolve('src/CJThread')+'\nCMAKE_INSTALL_PREFIX:PATH='+preinstall+'\nTARGET_ARCH:STRING='+tuple+'\nCMAKE_BUILD_TYPE:STRING='+(e.FIXTURE_BAD_MODE?'Debug':'Release')+'\n');
   fs.mkdirSync(path.join(preinstall,'lib',tuple),{recursive:true});
   for(const name of ['thread','aio'])if(!(e.FIXTURE_NO_AIO && name==='aio'))
     fs.writeFileSync(path.join(preinstall,'lib',tuple,'libcangjie-'+name+'.a'),'installed CJThread '+name);
-  const cache=['CANGJIE_COMPILER_CACHE:FILEPATH='+e.SCCACHE_PATH];
+  fs.writeFileSync('CMakebuild/cjthread-build/install_manifest.txt',['thread','aio'].filter(name=>!(e.FIXTURE_BAD_MANIFEST&&name==='aio')).map(name=>path.join(preinstall,'lib',tuple,'libcangjie-'+name+'.a')).join('\n'));
+  const cache=['CANGJIE_COMPILER_CACHE:FILEPATH='+e.SCCACHE_PATH,
+    'CMAKE_HOME_DIRECTORY:INTERNAL='+process.cwd(),'CMAKE_INSTALL_PREFIX:PATH='+preinstall,'CMAKE_BUILD_TYPE:STRING=Release'];
   if(e.FIXTURE_WRAPPER) {
     const wrappers=path.resolve('CMakebuild/wrappers');fs.mkdirSync(wrappers,{recursive:true});
     for(const [language,name] of [['C','clang'],['CXX','clang++']]) {
@@ -94,7 +101,7 @@ if(name==='python3' && args[0]==='build.py') {
       RUNTIME_NATIVE_PAIR:'1',RUNTIME_REF:runtime,CJCJ_NATIVE_RUNTIME_REF:runtime,CJCJ_NATIVE_LLVM_REF:llvm,LLVM_SHA:llvm,
       NATIVE_RUNTIME_PLATFORM:platform,RUNTIME_VERSION:'1.3.0-fixture',RUNTIME_BUILD_TYPE:'release',
       CMAKE_TOOLCHAIN_FILE:'',SCCACHE_PATH:path.join(bin,'sccache'),FIXTURE_LOG:log,FIXTURE_CMAKE:cmake,
-      FIXTURE_NO_AIO:'',FIXTURE_BAD_CACHE:'',FIXTURE_NO_BOUNDS:'',FIXTURE_FAIL_BUILD:'',FIXTURE_NO_STATUS:'',FIXTURE_CPP_FAIL:'',
+      FIXTURE_BAD_LINK:'',FIXTURE_BAD_MODE:'',FIXTURE_BAD_MANIFEST:'',FIXTURE_NO_AIO:'',FIXTURE_BAD_CACHE:'',FIXTURE_NO_BOUNDS:'',FIXTURE_FAIL_BUILD:'',FIXTURE_NO_STATUS:'',FIXTURE_CPP_FAIL:'',
       GC_UNIT_GATE_LANGUAGE_TESTS:'defer',GITHUB_STEP_SUMMARY:'',RUNNER_TEMP:path.join(root,'preinstall')};
     const run = extra => spawnSync(process.env.ZX || 'zx',[entry],{encoding:'utf8',env:{...env,...extra},timeout:20000});
     const manifest=()=>JSON.parse(fs.readFileSync(path.join(install,'NATIVE-INPUTS.json'),'utf8'));
@@ -139,7 +146,10 @@ for(const [name,extra,reason] of [
   ['mismatched source pair',{CJCJ_NATIVE_RUNTIME_REF:'f'.repeat(40)},'NATIVE_RUNTIME_PAIR_MISMATCH'],
   ['wrong checkout',{RUNTIME_REF:'e'.repeat(40),CJCJ_NATIVE_RUNTIME_REF:'e'.repeat(40)},'expected eeeee'],
   ['wrong native platform',{NATIVE_RUNTIME_PLATFORM:'darwin_invalid'},'NATIVE_RUNTIME_PLATFORM_MISMATCH'],
-  ['missing bounds',{FIXTURE_NO_BOUNDS:'1'},process.platform==='linux'?'NATIVE_RUNTIME_BUILD_MISSING':'NATIVE_RUNTIME_INSTALL_MISSING'],
+  ['missing bounds',{FIXTURE_NO_BOUNDS:'1'},'NATIVE_RUNTIME_BUILD_MISSING'],
+  ['missing aio manifest member',{FIXTURE_BAD_MANIFEST:'1'},'NATIVE_CJTHREAD_INSTALL_MANIFEST'],
+  ['wrong CJThread configuration',{FIXTURE_BAD_MODE:'1'},'NATIVE_CJTHREAD_INSTALL_CONFIGURATION'],
+  ['unlinked bounds target',{FIXTURE_BAD_LINK:'1'},'NATIVE_BOUNDS_RUNTIME_LINK'],
   ['missing installed aio',{FIXTURE_NO_AIO:'1'},'NATIVE_CJTHREAD_INSTALL_MISSING'],
   ['wrong C++ cache',{FIXTURE_BAD_CACHE:'1'},'NATIVE_RUNTIME_CACHE_MISMATCH: CMAKE_CXX_COMPILER_LAUNCHER'],
 ]) test(`native runtime public entry rejects ${name}`,()=>fixture(({run,install})=>{

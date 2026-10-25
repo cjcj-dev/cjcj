@@ -24,6 +24,16 @@ async function fixture(t, body) {
   git(['-c','user.name=Zxilly','-c','user.email=zxilly@outlook.com','commit','-qm','Controlled runtime installer fixture']);
   env.RUNTIME_REF = env.CJCJ_NATIVE_RUNTIME_REF = git(['rev-parse','HEAD']);
   env.RUNTIME_SOURCE_REPOSITORY = source;
+  const tuple='windows_x86_64_cjnative',preinstall=path.join(root,'cjthread-install'),runtime=path.join(source,'runtime'),build=path.join(runtime,'CMakebuild');
+  put(path.join(build,'CMakeCache.txt'),`CMAKE_HOME_DIRECTORY:INTERNAL=${runtime}\nCMAKE_INSTALL_PREFIX:PATH=${preinstall}\nCMAKE_BUILD_TYPE:STRING=Release\nCANGJIE_COMPILER_CACHE:FILEPATH=${cache}\nCMAKE_C_COMPILER_LAUNCHER:STRING=${cache}\nCMAKE_CXX_COMPILER_LAUNCHER:STRING=${cache}\n`);
+  put(path.join(build,'cjthread-build/CMakeCache.txt'),`CMAKE_HOME_DIRECTORY:INTERNAL=${runtime}/src/CJThread\nCMAKE_INSTALL_PREFIX:PATH=${preinstall}\nTARGET_ARCH:STRING=${tuple}\nCMAKE_BUILD_TYPE:STRING=Release\n`);
+  const archives=['thread','aio'].map(name=>path.join(preinstall,'lib',tuple,`libcangjie-${name}.a`));
+  archives.forEach((file,i)=>put(file,'installed '+['thread','aio'][i]));
+  put(path.join(build,'cjthread-build/install_manifest.txt'),archives.join('\n'));
+  const bounds=path.join(build,'runtime-staging/bin/x86_64_Release/libboundscheck.dll');
+  const links=['boundscheck','cangjie-runtime'].map(name=>path.join(build,`src/CMakeFiles/${name}.dir/link.txt`));
+  put(links[0],'clang -shared -o '+bounds);put(links[1],'clang '+bounds+'.a');
+  put(path.join(build,'runtime-link-inputs.txt'),links.join('\n'));
   const platform = Object.getOwnPropertyDescriptor(process, 'platform');
   Object.defineProperty(process, 'platform', {value: 'win32'});
   try { await body({root, source, installRoot, env, put}); }
@@ -38,15 +48,8 @@ test('native Windows uses the explicit Windows build.py route and original cache
 test('native Windows copies this invocation bounds DLL and records Windows layout plus actual command input', t => fixture(t, async f => {
   const tuple = 'windows_x86_64_cjnative';
   f.put(path.join(f.source, 'runtime/CMakebuild/runtime-staging/bin/x86_64_Release/libboundscheck.dll'), 'produced bounds fixture');
-  f.put(path.join(f.source, 'runtime/CMakebuild/CMakeCache.txt'),
-    ['CANGJIE_COMPILER_CACHE:FILEPATH=', 'CMAKE_C_COMPILER_LAUNCHER:STRING=', 'CMAKE_CXX_COMPILER_LAUNCHER:STRING=']
-      .map(prefix => prefix + f.env.SCCACHE_PATH).join('\n'));
   f.put(path.join(f.installRoot, 'runtime/lib', tuple, 'libcangjie-runtime.dll'), 'runtime fixture\nCJRT-COMMIT:' + f.env.RUNTIME_REF + '\n');
   f.put(path.join(f.installRoot, 'lib', tuple, 'libcangjie-runtime.a'), 'archive fixture\nCJRT-COMMIT:' + f.env.RUNTIME_REF + '\n');
-  const preinstall=path.join(f.root,'cjthread-install');
-  f.put(path.join(f.source,'runtime/CMakebuild/cjthread-build/CMakeCache.txt'),
-    `CMAKE_INSTALL_PREFIX:PATH=${preinstall}\nTARGET_ARCH:STRING=${tuple}\nCMAKE_BUILD_TYPE:STRING=Release\n`);
-  for(const name of ['thread','aio'])f.put(path.join(preinstall,'lib',tuple,`libcangjie-${name}.a`),'installed '+name);
   installNativeRuntimeDependencies({...f, buildType: 'release'});
   for(const name of ['thread','aio'])assert.equal(fs.readFileSync(path.join(f.installRoot,'lib',tuple,`libcangjie-${name}.a`),'utf8'),'installed '+name);
   console.log('WINDOWS_BOUNDS_INSTALL_ASSERT_REACHED');
