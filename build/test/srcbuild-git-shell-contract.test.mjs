@@ -16,7 +16,7 @@ await entry(async () => {
   const inputs = {};
   for (const [name, file, body] of [
     ['llvm', 'llvm/include/llvm/Transforms/Scalar/ReflectionInfo.h', 'enum EnumReflectionType {\n  ERT_NONE,\n};\n'],
-    ['compiler', 'schema/ModuleFormat.fbs', 'table Fixture {}\n'],
+    ['compiler', 'schema/CjoFormat.fbs', 'table Fixture {}\n'],
     ['flatbuffers', 'CMakeLists.txt', 'cmake_minimum_required(VERSION 3.16)\n'],
     ['runtime', 'runtime/tools/generate-runtime-layout.py', '# source fetch fixture\n'],
   ]) {
@@ -68,7 +68,7 @@ await entry(async () => {
     }
     check('fetch_sources_head', r.exitCode === 0 && Object.entries(inputs).every(([name, input]) => heads[name] === input.sha) &&
       r.stdall.includes('SOURCE-MIRROR none, falling back to') && noShellError(r.stdall) &&
-      fs.existsSync(path.join(tuple, 'cangjie-compiler/schema/ModuleFormat.fbs')) && fs.existsSync(path.join(tuple, 'flatbuffers/CMakeLists.txt')), {rc: r.exitCode, heads});
+      fs.existsSync(path.join(tuple, 'cangjie-compiler/schema/CjoFormat.fbs')) && fs.existsSync(path.join(tuple, 'flatbuffers/CMakeLists.txt')), {rc: r.exitCode, heads});
   }
   const canonical = 'https://example.invalid/a?[b]*.git';
   const hit = await fetchHelper('checkout-hit', canonical, inputs.llvm.sha, `${canonical}=file://${inputs.llvm.bare}`);

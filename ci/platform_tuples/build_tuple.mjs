@@ -38,7 +38,7 @@ await entry(async () => {
       '-DCMAKE_C_COMPILER=clang', '-DCMAKE_CXX_COMPILER=clang++']);
     await run(['cmake', '--build', flatBuild, '--target', 'flatc', '--parallel', '3']);
     await run(['mkdir', '-p', `${generated}/flatbuffers`]);
-    await run([`${flatBuild}/flatc${exe}`, '--no-warnings', '-c', '-o', `${generated}/flatbuffers`, `${root}/cangjie-compiler/schema/ModuleFormat.fbs`]);
+    await run([`${flatBuild}/flatc${exe}`, '--no-warnings', '-c', '-o', `${generated}/flatbuffers`, `${root}/cangjie-compiler/schema/CjoFormat.fbs`]);
     await run([...(process.env.SCCACHE_PATH ? [process.env.SCCACHE_PATH] : []), 'clang++', '-std=c++17', '-O2',
       ...(windows ? [] : ['-fPIC']), '-fno-rtti', '-fno-exceptions', `-I${llvmSrc}/llvm/include`, `-I${llvmBuild}/include`,
       `-I${flatSrc}/include`, `-I${generated}`, '-c', 'runtime_shim/cjselfhost_llvmshim.cpp', '-o', `${output}/cjselfhost_llvmshim.o`]);

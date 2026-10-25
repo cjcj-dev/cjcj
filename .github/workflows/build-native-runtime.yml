@@ -79,10 +79,11 @@ jobs:
           ulimit -S -c 0
           ulimit -H -c 0
           if [ "$RUNNER_OS" = macOS ]; then
-            export CANGJIE_BUILD_JOBS=$(sysctl -n hw.logicalcpu)
+            CANGJIE_BUILD_JOBS=$(sysctl -n hw.logicalcpu)
           else
-            export CANGJIE_BUILD_JOBS=$(nproc)
+            CANGJIE_BUILD_JOBS=$(nproc)
           fi
+          export CANGJIE_BUILD_JOBS
           npx --yes zx@8 ci/platform_matrix/build_runtime.mjs
       - uses: actions/upload-artifact@v7
         with:

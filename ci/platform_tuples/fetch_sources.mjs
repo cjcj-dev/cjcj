@@ -29,7 +29,7 @@ await entry(async () => {
     await run(['bash', '-c', 'set -o pipefail; sed -n \'/enum EnumReflectionType/,/};/p\' "$1" | grep -c \'^  ERT_\' || true',
       'reflection-count', `${root}/llvm-project/llvm/include/llvm/Transforms/Scalar/ReflectionInfo.h`]);
     await fetchExact(required('CANGJIE_COMPILER_URL', 41), required('CANGJIE_COMPILER_SHA', 41), `${root}/cangjie-compiler`, 'schema');
-    await run(['test', '-f', `${root}/cangjie-compiler/schema/ModuleFormat.fbs`]);
+    await run(['test', '-f', `${root}/cangjie-compiler/schema/CjoFormat.fbs`]);
     await fetchExact(required('FLATBUFFERS_URL', 44), required('FLATBUFFERS_SHA', 44), `${root}/flatbuffers`);
     await run(['test', '-f', `${root}/flatbuffers/CMakeLists.txt`]);
   });

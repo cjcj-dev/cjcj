@@ -11,7 +11,9 @@ import {fileURLToPath} from 'node:url';
 // Migration of the retired Python installer's frontend-alias obligation.
 // These are native control executables, not a qualified Cangjie compiler.
 test('formal SDK flow compiler fixture rejects a replaced frontend and restores its producer', async () => {
-  const root = await fs.mkdtemp(path.join(process.env.RELEASE_EVIDENCE_TEST_ROOT || os.tmpdir(), 'compiler-entry-'));
+  const parent = process.env.RELEASE_EVIDENCE_TEST_ROOT || os.tmpdir();
+  await fs.mkdir(parent, {recursive: true});
+  const root = await fs.mkdtemp(path.join(parent, 'compiler-entry-'));
   const sdk = path.join(root, 'install');
   const cli = fileURLToPath(new URL('./compiler_identity.mjs', import.meta.url));
   const producer = '/bin/true';

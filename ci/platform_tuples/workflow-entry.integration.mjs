@@ -33,7 +33,7 @@ function git(cwd, ...args) {
 }
 const input = path.join(evidence, 'source input'); fs.mkdirSync(input);
 for (const [file, body] of Object.entries({
-  'schema/ModuleFormat.fbs': 'table Fixture {}\n',
+  'schema/CjoFormat.fbs': 'table Fixture {}\n',
   'llvm/include/llvm/Transforms/Scalar/ReflectionInfo.h': 'enum EnumReflectionType {\n  ERT_NONE,\n};\n',
   'CMakeLists.txt': 'cmake_minimum_required(VERSION 3.16)\n',
   'runtime/tools/generate-runtime-layout.py': '# finite source transport\n',

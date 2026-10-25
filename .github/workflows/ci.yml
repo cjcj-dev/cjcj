@@ -104,7 +104,7 @@ jobs:
           path: ${{ runner.temp }}/contract-plan
       - name: Install release contract dependencies
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq zip unzip clang lld libssl-dev python3 build-essential git gdb jq cmake ninja-build
+          sudo apt-get update -qq && sudo apt-get install -y -qq zip unzip clang lld clang-15 lld-15 libssl-dev python3 build-essential git gdb jq cmake ninja-build
           npm exec --yes --package=zx@8 -- node ci/test-zx.mjs prepare "$RUNNER_TEMP/test-zx.json"
           npm ci --prefix ci/g1-parser --ignore-scripts --no-audit --no-fund
       # package-lineage compares package bytes with the official host SDK. Load

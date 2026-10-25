@@ -33,7 +33,9 @@ function repository(name, files) {
 }
 const runtime=repository('runtime remote',{'runtime-marker.txt':'paired real Git consumer\n'});
 const other=repository('other remote',{
+  // Keep the retired shell fixture's schema alongside the current producer input.
   'schema/ModuleFormat.fbs':'table Sample { value:int; }\nroot_type Sample;\n',
+  'schema/CjoFormat.fbs':'table Sample { value:int; }\nroot_type Sample;\n',
   'CMakeLists.txt':'cmake_minimum_required(VERSION 3.16)\nproject(flat_fixture NONE)\n',
   'llvm/include/llvm/Transforms/Scalar/ReflectionInfo.h':'enum EnumReflectionType {\n  ERT_FIXTURE\n};\n',
   'llvm/CMakeLists.txt':`cmake_minimum_required(VERSION 3.16)
@@ -96,7 +98,7 @@ test('fetch real first checkout and cached checkout preserve pinned identities',
    const r=invoke('fetch_sources',arm,phase,env);assert.equal(r.status,0,r.stdout+r.stderr);
    for(const [dir,sha] of [['llvm-project',other.sha],['paired-runtime',runtime.sha],['cangjie-compiler',other.sha],['flatbuffers',other.sha]])
     assert.equal(setup(['git','-C',path.resolve(cwd,env.TUPLE_ROOT,dir),'rev-parse','HEAD']),sha);
-   assert.ok(fs.existsSync(path.resolve(cwd,env.TUPLE_ROOT,'cangjie-compiler/schema/ModuleFormat.fbs')));
+   assert.ok(fs.existsSync(path.resolve(cwd,env.TUPLE_ROOT,`cangjie-compiler/schema/${arm==='old'?'ModuleFormat':'CjoFormat'}.fbs`)));
    assert.ok(fs.readFileSync(path.resolve(cwd,env.TUPLE_ROOT,'logs/source-fetch.log'),'utf8').includes('LLVM_RUNTIME_IDENTITY'));
   }
   fs.writeFileSync(path.resolve(cwd,env.TUPLE_ROOT,'paired-runtime/dirty'),'dirty');

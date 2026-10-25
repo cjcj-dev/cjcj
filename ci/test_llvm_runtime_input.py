@@ -41,7 +41,7 @@ source.mkdir()
 for name, body in {
     'llvm/include/llvm/Transforms/Scalar/ReflectionInfo.h':
         'enum EnumReflectionType {\n  ERT_NONE,\n};\n',
-    'schema/ModuleFormat.fbs': 'table Fixture {}\n',
+    'schema/CjoFormat.fbs': 'table Fixture {}\n',
     'CMakeLists.txt': 'cmake_minimum_required(VERSION 3.16)\n',
 }.items():
     path = source / name
