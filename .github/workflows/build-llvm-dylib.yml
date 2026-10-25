@@ -109,6 +109,7 @@ jobs:
           npx --yes zx@8 ci/fetch-llvm-runtime.mjs paired-runtime
           cmake -G Ninja -S llvm-fork/llvm -B dylib-build \
             -DCANGJIE_RUNTIME_SOURCE_DIR="$PWD/paired-runtime" \
+            -DCJ_LLVM_COMMIT="$LLVM_SHA" \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
             -DCMAKE_C_FLAGS_RELWITHDEBINFO='-O2 -g1 -DNDEBUG' \
             -DCMAKE_CXX_FLAGS_RELWITHDEBINFO='-O2 -g1 -DNDEBUG' \
