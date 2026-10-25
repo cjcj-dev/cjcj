@@ -1,6 +1,7 @@
 package cjcj::chir
 
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cjcj::basic.SourceManager as BasicSourceManager
 import cjcj::utils.OverflowStrategy
 import std.collection.*
 import std.unittest.*
@@ -62,9 +63,16 @@ class SignedMinRemainderTest {
                 let rhs = builder.CreateConstant(ty, IntLiteral(-1), block)
                 let remainder = builder.CreateBinaryExpression(ExprKind.MOD, ty,
                     lhs.GetResult().getOrThrow(), rhs.GetResult().getOrThrow(), block, overflowStrategy: strategy)
+                let sourceManager = BasicSourceManager()
+                let sourceText = "${minimum} % -1"
+                let sourcePath = "minimum_remainder.cj"
+                let fileId = sourceManager.AddSource(sourcePath, sourceText)
+                remainder.SetDebugLocation(DebugLocation(sourcePath, UInt32(fileId),
+                    Position(1u32, 1u32), Position(1u32, UInt32(sourceText.size + 1))))
                 block.AppendExpressions(ArrayList<Expression>([lhs, rhs, remainder,
                     builder.CreateExit(Some<Value>(remainder.GetResult().getOrThrow()), block)]))
                 let diagnostics = BasicDiagnosticEngine()
+                diagnostics.SetSourceManager(sourceManager)
                 let analysis = ConstAnalysisWrapper(builder).RunOnFunc(fn, diagnostics).getOrThrow()
                 let observed = ArrayList<Bool>()
                 analysis.VisitWith({ _: ConstDomain, _: Expression, _: Int64 => () },
