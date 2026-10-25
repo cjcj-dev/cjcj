@@ -15,6 +15,9 @@ function fixture(label,{payloads=true,testable=false,reentry=false}={}) {
   for(const member of ['tests/gc_unit/gate_gc_unit.mjs','tests/gc_unit/language_toolchain.mjs',
     'tests/gc_unit/product_test_configuration.mjs','build/resolve_runtime_headers.mjs'])fs.unlinkSync(runtime+'/'+member);
   for(const [member,text] of Object.entries(fixed.files))write(runtime+'/'+member,text);
+  // The symbol fixture has its own five hooks; it does not claim the real GC
+  // source/ELF pairing represented by the separate modern-source fixture.
+  fs.rmSync(runtime+'/src',{recursive:true});
   const hooks=`typedef decltype(sizeof(0)) size_t;\nnamespace MapleRuntime { struct Probe {static void One();static void Two();static void Three();static void Four();};\n#ifdef MRT_TESTABLE_INTERNALS\nvoid Probe::One() {}\nvoid Probe::Two() {}\nvoid Probe::Three() {}\nvoid Probe::Four() {}\nsize_t ZFailLargerCommits=0;\n#endif\n}\n`;
   write(runtime+'/src/hooks.cpp',hooks);
   const source=hooks+(reentry?'extern "C" {void CJ_CJThreadStackGuardExpand(){} void CJ_CJThreadStackGuardRecover(){} void CJ_CJThreadStackGuardGet(){}}':'');
