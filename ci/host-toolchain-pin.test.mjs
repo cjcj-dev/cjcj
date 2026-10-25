@@ -514,7 +514,7 @@ test('workflow host pin assignment preserves parser failure and exported success
     }
   }
   assert.deepEqual(sites.map(({file, job}) => `${file}:${job}`).sort(), [
-    'android-runtime.yml:runtime', 'ci.yml:contracts', 'test-host-identities.yml:aarch64',
+    'android-runtime.yml:runtime', 'build-cjpm.yml:build-cjpm', 'ci.yml:contracts', 'test-host-identities.yml:aarch64',
   ].sort(), 'all workflow command-substitution host loaders must be exercised');
   for (const site of sites) {
     for (const invalid of [false, true]) {
@@ -610,11 +610,11 @@ test('workflow GitHub environment loaders resolve the execution host and stop on
 // Explicit native H selection has a registered original archive; default pins
 // and an arbitrary matching version string cannot select it.
 test('explicit native host archive selection retains the default pin and rejects unregistered hosts',()=>{
- const old='nightly-'+'1.3.0-alpha.20261025001053';
+ const old='nightly-'+'1.3.0-alpha.20260925001050';
  assert.throws(()=>baseSdkDownload('linux-x64',old),/no pinned archive identity/);
  assert.equal(baseSdkDownload('linux-x64',old,{selectedHost:true}).sha256,
   'fde68a5713968f5f875e013355d73aab8bd95bb1fbfd1f1b6a29b1adcf48943b');
  assert.equal(baseSdkDownload('linux-x64',readHostToolchainPin('linux-x64')).sha256,
-  '1e23b2b64263dfc2267a3f459e9b13840278e84db1797a6733db68f49885df5c');
+  '772cfec6e7e371b78ad487c7938dad296e2fb6fe9e2462fe4a5ff68b3d02984f');
  assert.throws(()=>baseSdkDownload('linux-x64','nightly-'+'1.3.0-alpha.20260101000000',{selectedHost:true}),/no pinned archive identity/);
 });

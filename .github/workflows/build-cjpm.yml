@@ -29,7 +29,9 @@ jobs:
         run: |
           cat ci/cjpm_pin.env >> "$GITHUB_ENV"
           source ci/cjpm_pin.env
+          source ci/host_sdk_pin.env
           CJCJ_TOOLCHAIN=$(node ci/host-toolchain-pin.mjs)
+          export CJCJ_TOOLCHAIN
           echo "CJCJ_TOOLCHAIN=$CJCJ_TOOLCHAIN" >> "$GITHUB_ENV"
           echo "ref=$CJPM_FORK_REF" >> "$GITHUB_OUTPUT"
           echo "toolchain=$CJCJ_TOOLCHAIN" >> "$GITHUB_OUTPUT"

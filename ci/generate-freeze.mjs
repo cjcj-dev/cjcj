@@ -114,7 +114,8 @@ async function loadPins(repo) {
     pins[name] = value;
   }
   pins.CANGJIE_COMPILER_SHA = pins.COMPILER_REF;
-  return pins;
+  return {RUNTIME_REF:pins.RUNTIME_REF, LLVM_SHA:pins.LLVM_SHA,
+    CANGJIE_COMPILER_SHA:pins.COMPILER_REF, ...pins};
 }
 
 function resolveWorkflowRef(repo, requested, head) {
