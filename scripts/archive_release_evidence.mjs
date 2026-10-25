@@ -17,7 +17,8 @@ import {
 import {allReleasePlatforms, releasePlatformReadiness} from '../build/lib/targets.mjs';
 
 const RELEASE_PLATFORMS = allReleasePlatforms().map(releasePlatformReadiness)
-  .filter(platform => platform.status === 'buildable');
+  // Source readiness blocks production; it cannot waive declared evidence.
+  .filter(platform => platform.packageDeclared);
 const PLATFORMS = RELEASE_PLATFORMS.map(platform => platform.archiveKey);
 const PLATFORM_CONTRACTS = new Map(RELEASE_PLATFORMS.map(platform => [platform.archiveKey, platform]));
 
@@ -77,7 +78,7 @@ function usage() {
     '  run.json       GitHub REST workflow-run response',
     '  jobs.json      GitHub REST workflow-jobs response (or --paginate --slurp pages)',
     '  run.log        unmodified combined workflow log',
-    '  artifacts/**   downloaded pkg-* artifacts containing manifests and checksums for every buildable release platform',
+    '  artifacts/**   downloaded pkg-* artifacts containing manifests and checksums for every declared release platform',
   ].join('\n');
 }
 

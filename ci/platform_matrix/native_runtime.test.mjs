@@ -84,7 +84,7 @@ if(name==='python3' && args[0]==='build.py') {
     const log=path.join(root,'commands.jsonl'), install=path.join(root,'work/runtime-install');
     const env={...process.env,PATH:bin+path.delimiter+process.env.PATH,
       PLATFORM_CI_ROOT:path.join(root,'work'),RUNTIME_SOURCE:source,RUNTIME_TARGET:'native',RUNTIME_TOOLCHAIN:'',
-      RUNTIME_NATIVE_PAIR:'1',RUNTIME_REF:runtime,CJCJ_NATIVE_RUNTIME_REF:runtime,LLVM_SHA:llvm,
+      RUNTIME_NATIVE_PAIR:'1',RUNTIME_REF:runtime,CJCJ_NATIVE_RUNTIME_REF:runtime,CJCJ_NATIVE_LLVM_REF:llvm,LLVM_SHA:llvm,
       NATIVE_RUNTIME_PLATFORM:platform,RUNTIME_VERSION:'1.3.0-fixture',RUNTIME_BUILD_TYPE:'release',
       CMAKE_TOOLCHAIN_FILE:'',SCCACHE_PATH:path.join(bin,'sccache'),FIXTURE_LOG:log,FIXTURE_CMAKE:cmake,
       FIXTURE_BAD_CACHE:'',FIXTURE_NO_BOUNDS:'',FIXTURE_FAIL_BUILD:'',FIXTURE_NO_STATUS:'',FIXTURE_CPP_FAIL:'',
@@ -126,6 +126,7 @@ for(const [name,extra,reason] of [
   assert.equal(fs.existsSync(path.join(install,'NATIVE-INPUTS.json')),false);
 }));
 for(const [name,extra,reason] of [
+  ['missing explicit LLVM pair',{CJCJ_NATIVE_LLVM_REF:''},'NATIVE_RUNTIME_EXPLICIT_PAIR_REQUIRED'],
   ['mismatched source pair',{CJCJ_NATIVE_RUNTIME_REF:'f'.repeat(40)},'NATIVE_RUNTIME_PAIR_MISMATCH'],
   ['wrong checkout',{RUNTIME_REF:'e'.repeat(40),CJCJ_NATIVE_RUNTIME_REF:'e'.repeat(40)},'expected eeeee'],
   ['wrong native platform',{NATIVE_RUNTIME_PLATFORM:'darwin_invalid'},'NATIVE_RUNTIME_PLATFORM_MISMATCH'],
@@ -201,7 +202,8 @@ const result=await receiveNativeRuntime(i);console.log('DIRECT_RECEIVE_REACHED '
    const r=spawnSync(process.execPath,[driver,file],{encoding:'utf8',env:{...env,FIXTURE_ELF:'1'}});
    fs.writeFileSync(path.join(root,'receive-'+name+'-result.json'),JSON.stringify({argv:[process.execPath,driver,file],rc:r.status,signal:r.signal,stdout:r.stdout,stderr:r.stderr}));
    if(expected===0){assert.equal(r.status,0,r.stdout+r.stderr);assert.match(r.stdout,/DIRECT_RECEIVE_REACHED/);}
-   else {assert.notEqual(r.status,0,'DIRECT_CURRENT_INPUT_REJECTION_TARGET '+r.stdout+r.stderr);assert.match(r.stdout+r.stderr,reason);}
+   else {assert.equal(r.status,expected,'DIRECT_CURRENT_INPUT_REJECTION_TARGET '+r.stdout+r.stderr);assert.equal(r.signal,null);assert.match(r.stdout+r.stderr,reason);}
+   return r;
  };
  if(scenario==='reentry') {
    invoke();invoke();invoke({root:path.join(root,'other-prefix')});
@@ -221,7 +223,12 @@ const result=await receiveNativeRuntime(i);console.log('DIRECT_RECEIVE_REACHED '
    invoke({},1,/language_toolchain.mjs/);fs.renameSync(mjs+'.absent',mjs);invoke();
    invoke({receiveOnly:true,runtimeCommit:'e'.repeat(40)},1,/NATIVE_RUNTIME_COMPONENT_IDENTITY/);
    const lib=path.join(install,'runtime/lib',platform+'_cjnative/libcangjie-runtime.so');const bytes=fs.readFileSync(lib);
-   fs.appendFileSync(lib,'changed');invoke({receiveOnly:true},1,/NATIVE_RUNTIME_COMPONENT_BYTES/);fs.writeFileSync(lib,bytes);invoke({receiveOnly:true});
+   const recorded=fs.readFileSync(path.join(install,'RUNTIME-INPUTS.json'));
+   fs.appendFileSync(lib,'changed');
+   const rejected=invoke({receiveOnly:true},1,/RUNTIME_SOURCE_ARTIFACT_BINDING/);
+   assert.match(rejected.stdout,/RUNTIME_PAIR_ASSERTION_REACHED/);
+   assert.deepEqual(fs.readFileSync(path.join(install,'RUNTIME-INPUTS.json')),recorded,'receiving changed bytes must not rewrite producer facts');
+   fs.writeFileSync(lib,bytes);invoke({receiveOnly:true});
    console.log('DIRECT_RECEIVE_BAD_INPUT_CONTROLS_TARGET');
  }
 }));

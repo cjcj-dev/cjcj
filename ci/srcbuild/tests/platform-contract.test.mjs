@@ -13,6 +13,7 @@ import {run} from '../../../build/lib/runner.mjs';
 import {assembleCjcLinkOption} from '../../platform_matrix/link_option.mjs';
 import {assertFinalStd} from '../lib/final-std.mjs';
 import {llvmToolMatrix, sourceBuildCells} from '../../../build/lib/targets.mjs';
+import * as stdlibStage from '../../../build/srcbuild/stages/stdlib.mjs';
 
 const root = path.resolve(import.meta.dirname, '../../..');
 const readWorkflow = name => fs.readFile(path.join(root, '.github/workflows', name), 'utf8');
@@ -85,9 +86,12 @@ test('both caller subsets reach the same producer matrix and upload identity', (
   const call = wrapper.jobs['build-tuple'];
   assert.equal(call.uses, './.github/workflows/build-llvm-tools.yml');
   const allCaller = llvmWorkflow('platform-matrix.yml').jobs;
-  const releaseCaller = llvmWorkflow('release.yml').jobs;
-  const subset = jobs => Object.values(jobs).find(job => job.uses === './.github/workflows/platform-tuples.yml')
-    .with?.platform_set || 'all';
+  const releaseCaller = llvmWorkflow('release-matrix.yml').jobs;
+  const subset = jobs => {
+    const calls = Object.values(jobs).filter(job => job.uses === './.github/workflows/platform-tuples.yml');
+    assert.equal(calls.length, 1, 'caller has exactly one tuple producer');
+    return calls[0].with?.platform_set || 'all';
+  };
   const binding = call.with.platform_set;
   const resolve = value => binding === "${{ inputs.platform_set || 'all' }}" ? value : binding;
   const allRows = llvmPlan('all', resolve(subset(allCaller)));
@@ -409,10 +413,19 @@ function failClosedDownloads(text, inputs) {
 }
 
 function substitute(value, inputs) {
-  return value.replace(/\$\{\{\s*inputs\.(\w+)\s*\}\}/g, (_, name) => {
+  // The package contract's one conditional name: the paired Windows std has
+  // a separate producer. Resolve its actual inputs, then execute the real gate.
+  const selected = value.replace(/\$\{\{\s*inputs\.(\w+) == '([^']*)' && inputs\.(\w+) != '' && '([^']*)' \|\| format\('([^']*)', inputs\.(\w+)\)\s*\}\}/g,
+    (_, platform, match, ref, paired, format, argument) => {
+      for (const name of [platform, ref, argument]) assert.ok(inputs.has(name), `no value for inputs.${name}`);
+      return inputs.get(platform) === match && inputs.get(ref) !== '' ? paired : format.replace('{0}', inputs.get(argument));
+    });
+  const result = selected.replace(/\$\{\{\s*inputs\.(\w+)\s*\}\}/g, (_, name) => {
     assert.ok(inputs.has(name), `no value for inputs.${name}`);
     return inputs.get(name);
   });
+  assert.ok(!result.includes('${{'), `unresolved package input: ${result}`);
+  return result;
 }
 
 test('source-build workflow connects every native runner to its LLVM and std artifact', async () => {
@@ -489,10 +502,24 @@ test('arm soak produces every artifact its package job downloads, each exactly o
   const platform = callerInputs.get('platform');
   const demanded = callerInputs.get('std_artifact');
 
-  // build-release-package.yml:66-73 fails the run on any other value, so the caller
-  // has to demand exactly this name. Whole-value equality: `-BROKEN` must not pass.
+  // Execute the consumer's actual same-platform gate. Whole-value equality:
+  // a correctly produced name passes and the same name plus -BROKEN fails.
   const consumer = await readWorkflow('build-release-package.yml');
-  assert.ok(consumer.includes('EXPECTED_STD_ARTIFACT: final-std-${{ inputs.platform }}'));
+  const gate = loadYaml(consumer).jobs.package.steps.find(step => step.name === 'Validate same-platform final std contract');
+  assert.ok(gate, 'package consumer declares its final std gate');
+  const resolved = effectiveInputs(consumer, callerInputs);
+  const gateEnv = Object.fromEntries(Object.entries(gate.env).map(([name, value]) => [name, substitute(value, resolved)]));
+  assert.equal(gateEnv.EXPECTED_STD_ARTIFACT, `final-std-${platform}`);
+  assert.equal(gateEnv.SELECTED_STD_ARTIFACT, demanded);
+  for (const [selected, expected] of [[demanded, 0], [`${demanded}-BROKEN`, 1]]) {
+    const checked = spawnSync('bash', ['-eu', '-o', 'pipefail', '-c', gate.run], {
+      cwd: root, encoding: 'utf8', env: {...process.env, ...gateEnv, SELECTED_STD_ARTIFACT: selected},
+    });
+    assert.equal(checked.status, expected, checked.stderr);
+    assert.equal(checked.signal, null);
+    assert.ifError(checked.error);
+    console.log(`FINAL_STD_CONSUMER_GATE selected=${selected} rc=${checked.status}`);
+  }
   assert.equal(demanded, `final-std-${platform}`);
 
   // Every download the package job will reach on this platform and die on if absent.
@@ -572,7 +599,7 @@ test('native build environments use configured architecture, OpenSSL, and loader
   process.env.CANGJIE_BUILD_DRY_RUN = '1';
   try {
     for (const targetKey of ['linux-aarch64', 'darwin-arm64', 'darwin-x64', 'linux-x64']) {
-      const config = buildConfig({targetKey});
+      const config = buildConfig({targetKey, officialSdkRoot: null});
       const env = baseEnv(config, {...process.env, CJCJ_SRCBUILD_HOST_SDK: undefined});
       assert.equal(env.ARCH, config.target.spec.arch);
       assert.equal(env.OPENSSL_PATH, config.target.spec.opensslLibDir);
@@ -671,9 +698,33 @@ test('source build keeps the pinned plain host runtime across both bootstrap hal
 
   const stdlib = await fs.readFile(path.join(root, 'build/srcbuild/stages/stdlib.mjs'), 'utf8');
   const nativeBuild = stdlib.indexOf("'build', '-t', config.buildType");
-  assert.ok(stdlib.indexOf('assertRuntimeSplit({') < stdlib.indexOf("['clean']"));
-  assert.ok(stdlib.indexOf("['clean']") < nativeBuild);
-  assert.ok(nativeBuild < stdlib.indexOf('assertRuntimeCommonCache({'));
+  const split = stdlib.indexOf('assertRuntimeSplit({');
+  const cache = stdlib.indexOf('assertRuntimeCommonCache({');
+  const install = stdlib.indexOf("['install']");
+  assert.ok(split >= 0 && split < nativeBuild);
+  assert.ok(nativeBuild < cache);
+  assert.ok(cache < install);
+
+  // Unified native builds run build/install without an implicit clean. The
+  // split invariant still has to reject before any build command can execute.
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'stdlib-host-guard-'));
+  const previousDryRun = process.env.CANGJIE_BUILD_DRY_RUN;
+  try {
+    const host = path.join(workspace, 'host');
+    await fs.mkdir(host);
+    await fs.mkdir(path.join(workspace, 'cangjie_compiler', 'output'), {recursive: true});
+    delete process.env.CANGJIE_BUILD_DRY_RUN;
+    await assert.rejects(() => stdlibStage.run(buildConfig({workspace, officialSdkRoot: host})), error => {
+      assert.equal(error.stage, 'runtime.split');
+      assert.match(error.message, /host runtime is missing/);
+      console.log('STDLIB_HOST_SPLIT_REJECTED_BEFORE_BUILD');
+      return true;
+    });
+  } finally {
+    if (previousDryRun === undefined) delete process.env.CANGJIE_BUILD_DRY_RUN;
+    else process.env.CANGJIE_BUILD_DRY_RUN = previousDryRun;
+    await fs.rm(workspace, {recursive: true, force: true});
+  }
 
   const activation = await fs.readFile(path.join(root, 'ci/srcbuild/steps/activate-source-sdk.mjs'), 'utf8');
   assert.ok(activation.includes('assertRuntimeSplit({'));

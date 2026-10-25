@@ -4,7 +4,6 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import {buildConfig} from '../lib/config.mjs';
-import * as packageStage from '../srcbuild/stages/package.mjs';
 import {finiteNativeLayout,publicPackage,rejectsMissingStage} from './package-fixture.mjs';
 import {toolsFor} from '../srcbuild/stages/tools.mjs';
 
@@ -17,15 +16,15 @@ function file(root, parts, contents = '') {
   return result;
 }
 
-// The subset of the source tree package.run() reads, with every tool product in
-// place; individual tests delete one product to check the stage fails closed.
+// The unified native install consumed by the public package command.
+// Individual tests remove an installed product to check the stage fails closed.
 function packageFixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cjtoolsrc-package-'));
   const workspace = path.join(root, 'workspace');
   const tools = path.join(workspace, 'cangjie_tools');
   const officialSdkRoot = path.join(root, 'official-sdk');
-  fs.mkdirSync(path.join(workspace, 'cangjie_compiler', 'output'), {recursive: true});
-  file(workspace, ['cangjie_compiler', 'output', 'stdx', 'linux_x86_64_cjnative', 'static', 'stdx', 'fixture.cjo'], 'installed stdx fixture');
+  const installed = path.join(workspace, 'software', 'cangjie');
+  file(installed, ['stdx', 'linux_x86_64_cjnative', 'static', 'stdx', 'fixture.cjo'], 'installed stdx fixture');
   file(tools, ['cjpm', 'dist', 'cjpm']);
   file(officialSdkRoot, ['tools', 'bin', 'cjpm']);
   file(tools, ['cjfmt', 'build', 'build', 'bin', 'cjfmt']);
@@ -35,7 +34,6 @@ function packageFixture() {
   file(tools, ['cangjie-language-server', 'output', 'bin', 'LSPServer']);
   file(tools, ['cjcov', 'dist', 'cjcov'], 'source-built cjcov');
   file(tools, ['cjtrace-recover', 'dist', 'bin', 'cjtrace-recover'], 'source-built cjtrace-recover');
-  const installed=path.join(workspace,'cangjie_compiler/output');
   for(const name of ['cjpm','cjfmt','hle','LSPServer','cjcov','cjtrace-recover','cjlint','cjprof','cjcompat']) {
     const value=name==='cjcov'||name==='cjtrace-recover'?'source-built '+name:'source '+name;
     file(installed,['tools/bin',name],'installed launcher '+name);
@@ -64,6 +62,13 @@ test('package entry refuses to archive an SDK missing one official relative path
       ['cangjie-sdk-linux-x64-1.2.3.tar.gz'],
       'stale archive from an earlier run',
     );
+    const stdxArchive = file(config.softwareDir,
+      ['cangjie-stdx-linux-x64-1.2.3.1.tar.gz'], 'stale stdx archive');
+    for (const output of [archive, stdxArchive]) {
+      file(config.softwareDir, [path.basename(output) + '.sha256'], 'stale digest');
+      file(config.softwareDir, [path.basename(output) + '.unpacked', 'old-member'], 'stale unpack');
+    }
+    const independent = file(config.softwareDir, ['unrelated-archive.tar.gz'], 'independent output');
     await runPackage(() => assert.rejects(
       publicPackage(config),
       error => {
@@ -75,10 +80,12 @@ test('package entry refuses to archive an SDK missing one official relative path
         return true;
       },
     ));
-    assert.equal(
-      fs.existsSync(archive),
-      false,
-    );
+    for (const output of [archive, stdxArchive]) {
+      for (const suffix of ['', '.sha256', '.unpacked']) {
+        assert.equal(fs.existsSync(output + suffix), false, `failed package left stale output ${output + suffix}`);
+      }
+    }
+    assert.equal(fs.readFileSync(independent, 'utf8'), 'independent output');
   } finally {
     fs.rmSync(root, {recursive: true, force: true});
   }
@@ -137,7 +144,7 @@ for (const [tool, product] of [
   test(`packaging fails closed when ${tool} was not built from source`, async () => {
     const {root, tools, config} = packageFixture();
     try {
-      fs.rmSync(path.join(config.repoPath('compiler'),'output/tools/bin',tool));
+      fs.rmSync(path.join(config.softwareDir,'cangjie/tools/bin',tool));
       await runPackage(() => assert.rejects(
         publicPackage(config),
         new RegExp(`required file missing: .*${tool}`),
@@ -158,14 +165,12 @@ for (const layout of ['same', 'alias', 'separate']) {
       const destination = path.join(config.softwareDir, 'cangjie');
       const producer = layout === 'separate' ? path.join(root, 'producer') : destination;
       fs.mkdirSync(producer,{recursive:true});
-      fs.cpSync(path.join(config.repoPath('compiler'),'output/tools'),path.join(producer,'tools'),{recursive:true});
-      fs.cpSync(path.join(config.repoPath('compiler'),'output/.target-tools'),path.join(producer,'.target-tools'),{recursive:true});
-      const selectedCompiler=fs.readFileSync(path.join(config.repoPath('compiler'),'output/bin/cjc'));
-      file(producer,['bin','cjc'],selectedCompiler);
-      fs.cpSync(path.join(config.repoPath('compiler'),'output/runtime'),path.join(producer,'runtime'),{recursive:true});
+      const selectedCompiler=fs.readFileSync(path.join(destination,'bin/cjc'));
+      if (layout === 'separate') fs.cpSync(destination,producer,{recursive:true});
       file(producer, ['lib', config.target.spec.runtimeTuple, 'libcangjie-std-core.a'], 'selected final std');
       file(producer, ['stdx', config.target.stdxTargetSubdir(), 'static', 'stdx', 'fixture.cjo'], 'selected installed stdx');
       file(config.repoPath('compiler'), ['output', 'bin', 'cjc'], 'old compiler');
+      if (layout === 'separate') fs.rmSync(destination,{recursive:true});
       file(config.repoPath('compiler'), ['output', 'lib', config.target.spec.runtimeTuple, 'libcangjie-std-core.a'], 'old std');
       let selected = producer;
       if (layout === 'alias') {
@@ -173,9 +178,10 @@ for (const layout of ['same', 'alias', 'separate']) {
         fs.symlinkSync(producer, selected);
       }
       await rejectsMissingStage({...config,consumerSdk:selected});
-      assert.deepEqual(fs.readFileSync(path.join(destination,'bin','cjc')),selectedCompiler);
-      assert.equal(fs.readFileSync(path.join(destination, 'lib', config.target.spec.runtimeTuple, 'libcangjie-std-core.a'), 'utf8'), 'selected final std');
-      assert.equal(fs.readFileSync(path.join(destination, 'stdx', config.target.stdxTargetSubdir(), 'static/stdx/fixture.cjo'), 'utf8'), 'selected installed stdx');
+      if (layout === 'separate') assert.equal(fs.existsSync(destination),false,'package consumes the selected install in place');
+      assert.deepEqual(fs.readFileSync(path.join(producer,'bin','cjc')),selectedCompiler);
+      assert.equal(fs.readFileSync(path.join(producer, 'lib', config.target.spec.runtimeTuple, 'libcangjie-std-core.a'), 'utf8'), 'selected final std');
+      assert.equal(fs.readFileSync(path.join(producer, 'stdx', config.target.stdxTargetSubdir(), 'static/stdx/fixture.cjo'), 'utf8'), 'selected installed stdx');
     } finally {
       fs.rmSync(root, {recursive: true, force: true});
     }

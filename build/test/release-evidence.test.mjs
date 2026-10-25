@@ -1,3 +1,4 @@
+#!/usr/bin/env zx
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
@@ -166,15 +167,18 @@ async function resealJobs(archive, jobs) {
   await writeJobs(archive, jobs);
   const urlsFile = path.join(archive, 'urls.tsv');
   const lines = (await fs.readFile(urlsFile, 'utf8')).trimEnd().split('\n');
-  const conclusions = new Map(jobs.map(job => [String(job.id), job.conclusion]));
-  await fs.writeFile(urlsFile, lines.map(line => {
-    const fields = line.split('\t');
-    if (fields[0] === 'job') fields[3] = conclusions.get(fields[1]);
-    return fields.join('\t');
-  }).join('\n') + '\n');
+  const clean = value => String(value).replaceAll('\t', ' ').replaceAll('\r', ' ').replaceAll('\n', ' ');
+  await fs.writeFile(urlsFile, [
+    ...lines.filter(line => !line.startsWith('job\t')),
+    ...jobs.map(job => ['job', job.id, clean(job.name), job.conclusion, job.html_url].join('\t')),
+  ].join('\n') + '\n');
+  const indexFile = path.join(archive, 'ARCHIVE_INDEX.json');
+  const index = JSON.parse(await fs.readFile(indexFile));
+  index.jobs = jobs.length;
+  await fs.writeFile(indexFile, JSON.stringify(index, null, 2) + '\n');
   const ledger = path.join(archive, 'EVIDENCE_SHA256SUMS');
   let text = await fs.readFile(ledger, 'utf8');
-  for (const file of ['jobs.json', 'urls.tsv']) {
+  for (const file of ['jobs.json', 'urls.tsv', 'ARCHIVE_INDEX.json']) {
     const hash = crypto.createHash('sha256').update(await fs.readFile(path.join(archive, file))).digest('hex');
     text = text.split('\n').map(line => line.endsWith(`  ${file}`) ? `${hash}  ${file}` : line).join('\n');
   }
@@ -219,9 +223,18 @@ for (const platform of PLATFORMS) {
     const {source, archive, jobs} = await fixture();
     const job = jobs.find(j => j.name.startsWith(`${platform} / Build release package /`) ||
       j.name.includes(`· ${platform} / Build release package /`));
+    assert.equal(collect(source, archive).status, 0);
+    const expected = `${platform} package grid is not exactly one success (found 0)`;
     job.name += ' extra';
     await writeJobs(source, jobs);
-    rejected(collect(source, archive), `${platform} package grid is not exactly one success (found 0)`);
+    rejected(collect(source, `${archive}-renamed`), expected);
+    await resealJobs(archive, jobs);
+    rejected(run(['verify', '--archive', archive]), expected);
+    const missing = jobs.filter(row => row !== job);
+    await writeJobs(source, missing);
+    rejected(collect(source, `${archive}-missing`), expected);
+    await resealJobs(archive, missing);
+    rejected(run(['verify', '--archive', archive]), expected);
   });
 }
 
@@ -256,15 +269,23 @@ test('accepts optional LLVM success as well as skipped', async () => {
 for (const platform of CONTRACTS.filter(p => p.archiveKey !== p.host).map(p => p.archiveKey)) {
   test(`requires ${platform} manifest and checksum`, async () => {
     const {source, archive} = await fixture();
+    const good = collect(source, archive);
+    assert.equal(good.status, 0, good.stderr);
     const directory = path.join(source, 'artifacts', `pkg-${platform}`);
     const manifestFile = path.join(directory, `cjcj-${VERSION}-${platform}.RELEASE-MANIFEST.jsonl`);
     const saved = await fs.readFile(manifestFile);
     await fs.rm(manifestFile);
-    rejected(collect(source, archive), `${platform} manifest: expected exactly one`);
+    rejected(collect(source, `${archive}-missing-manifest`), `${platform} manifest: expected exactly one`);
+    const archivedManifest = path.join(archive, 'manifests', path.basename(manifestFile));
+    await fs.rm(archivedManifest);
+    rejected(run(['verify', '--archive', archive]), path.basename(manifestFile));
+    await fs.writeFile(archivedManifest, saved);
     await fs.writeFile(manifestFile, saved);
     const checksum = (await fs.readdir(directory)).find(name => name.endsWith('.sha256'));
     await fs.rm(path.join(directory, checksum));
-    rejected(collect(source, archive), `${platform} checksum: expected exactly one`);
+    rejected(collect(source, `${archive}-missing-checksum`), `${platform} checksum: expected exactly one`);
+    await fs.rm(path.join(archive, 'checksums', checksum));
+    rejected(run(['verify', '--archive', archive]), checksum);
   });
 }
 
@@ -351,3 +372,73 @@ for (const [host, phase] of [['linux-x64', 1], ['linux-aarch64', 2], ['darwin-ar
     rejected(collect(source, `${archive}-alien`), `job has the wrong dry-run conclusion: ${alien.name}`);
   });
 }
+
+// Exercise G2's real verifier subprocess. Only the unrelated ancestry/identity
+// inputs are finite fixtures; no synthetic verifier stands in for this chain.
+test('G2 consumes declared archive admission before its independent identity gate', async () => {
+  const {source, archive, work, jobs} = await fixture();
+  const checkout = path.join(work, 'checkout'), runtime = path.join(work, 'runtime');
+  await fs.mkdir(path.join(checkout, 'ci'), {recursive: true});
+  await fs.mkdir(path.join(checkout, 'scripts'));
+  await fs.mkdir(runtime);
+  function git(...args) {
+    const result = spawnSync('git', ['-C', runtime, ...args], {encoding: 'utf8'});
+    assert.equal(result.status, 0, result.stderr);
+    return result.stdout.trim();
+  }
+  git('init', '-q');
+  git('-c', 'user.name=Zxilly', '-c', 'user.email=zxilly@outlook.com', 'commit', '--allow-empty', '-qm', 'ancestry fixture');
+  const ref = git('rev-parse', 'HEAD');
+  await fs.writeFile(path.join(checkout, 'ci/runtime_pin.env'), `RUNTIME_REF=${ref}\nLOADERLIFE_MIN_REF=${ref}\n`);
+  for (const relative of ['ci/llvm_pin.env', 'ci/source_pin.env', 'ci/cjpm_pin.env', 'ci/release-evidence', 'scripts/archive_release_evidence.mjs']) {
+    await fs.symlink(path.resolve(relative), path.join(checkout, relative));
+  }
+  await fs.writeFile(path.join(work, 'G2_IDENTITY.json'), JSON.stringify({schema_version: 1, status: 'PENDING'}));
+  const gate = () => {
+    const result = spawnSync(process.execPath, [path.resolve('ci/release-gates.mjs'), 'G2',
+      '--repo', checkout, '--runtime-repo', runtime, '--evidence', archive, '--json'], {encoding: 'utf8'});
+    const value = JSON.parse(result.stdout);
+    console.log(`TARGET_G2_ARCHIVE rc=${result.status} ${JSON.stringify(value)}`);
+    return {result, value};
+  };
+  const good = collect(source, archive);
+  assert.equal(good.status, 0, good.stderr);
+  const valid = gate();
+  assert.equal(valid.result.status, 2);
+  assert.equal(valid.value.status, 'UNKNOWN');
+  assert.match(valid.value.value, /archive=valid/);
+  const blocked = CONTRACTS.find(row => row.archiveKey !== row.host && row.host !== 'linux-x64');
+  const job = jobs.find(row => row.name.startsWith(`${blocked.archiveKey} / Build release package /`));
+  const canonical = job.name;
+  job.name += ' renamed';
+  await resealJobs(archive, jobs);
+  const missing = gate();
+  assert.equal(missing.result.status, 1);
+  assert.equal(missing.value.status, 'NOT_MET');
+  assert.ok(missing.value.value.includes(`${blocked.archiveKey} package grid is not exactly one success`));
+  job.name = canonical;
+  job.conclusion = 'failure';
+  await resealJobs(archive, jobs);
+  const failed = gate();
+  assert.equal(failed.result.status, 1);
+  assert.equal(failed.value.status, 'NOT_MET');
+  assert.ok(failed.value.value.includes(`${canonical} expected=success actual=failure`));
+  job.conclusion = 'success';
+  await resealJobs(archive, jobs);
+  const index = JSON.parse(await fs.readFile(path.join(archive, 'ARCHIVE_INDEX.json')));
+  const cell = index.platforms.find(row => row.name === blocked.archiveKey);
+  for (const kind of ['manifest', 'checksum']) {
+    const file = path.join(archive, cell[kind]), bytes = await fs.readFile(file);
+    await fs.rm(file);
+    const absent = gate();
+    assert.equal(absent.result.status, 1);
+    assert.equal(absent.value.status, 'NOT_MET');
+    assert.match(absent.value.value, /evidence rejected/);
+    assert.ok(absent.value.value.includes(path.basename(file)));
+    await fs.writeFile(file, bytes);
+  }
+  const restored = gate();
+  assert.equal(restored.result.status, 2);
+  assert.equal(restored.value.status, 'UNKNOWN');
+  assert.match(restored.value.value, /archive=valid/);
+});

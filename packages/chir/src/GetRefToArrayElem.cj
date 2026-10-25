@@ -64,12 +64,13 @@ public class GetRefToArrayElem {
             return false
         }
 
+        arrayGetRef.MoveBefore(intrinsic)
         if (let Some(fields) <- fieldUsers) {
             for (field in fields) {
-                RewriteFieldUser(field, arrayGetRefResult, builder)
+                RewriteFieldUser(field, arrayGetRefResult, intrinsic, builder)
             }
         }
-        intrinsic.ReplaceWith(arrayGetRef)
+        intrinsic.RemoveSelfFromBlock()
         return true
     }
 
@@ -88,13 +89,14 @@ public class GetRefToArrayElem {
         return fields
     }
 
-    private static func RewriteFieldUser(field: Field, arrayGetRefResult: LocalVar, builder: CHIRBuilder): Unit {
+    private static func RewriteFieldUser(field: Field, arrayGetRefResult: LocalVar, snapshot: Intrinsic,
+        builder: CHIRBuilder): Unit {
         let fieldTy = if (let Some(ty) <- field.GetResultType()) {
             ty
         } else {
             throw IllegalArgumentException("field rewrite requires a result type")
         }
-        let parentBlock = if (let Some(block) <- field.GetParentBlock()) {
+        let parentBlock = if (let Some(block) <- snapshot.GetParentBlock()) {
             block
         } else {
             throw IllegalArgumentException("field rewrite requires a parent block")
@@ -106,8 +108,12 @@ public class GetRefToArrayElem {
             getElemRefResult.EnableAttr(Attribute.READONLY)
             let load = builder.CreateLoad(fieldTy, getElemRefResult, parentBlock)
             load.CopyBaseInfoFrom(field)
-            getElemRef.MoveBefore(field)
-            field.ReplaceWith(load)
+            // Read the fields at the original value snapshot, not at a later use
+            // which may follow an array write (including a write through an alias).
+            getElemRef.MoveBefore(snapshot)
+            load.MoveBefore(snapshot)
+            field.GetResult().getOrThrow().ReplaceWith(load.GetResult().getOrThrow())
+            field.RemoveSelfFromBlock()
         } else {
             throw IllegalArgumentException("GetElementRef rewrite requires a result")
         }

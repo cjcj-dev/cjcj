@@ -12,6 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {access, constants as fsConstants} from 'node:fs';
 import {promisify} from 'node:util';
+import {spawn} from 'node:child_process';
 
 const accessAsync = promisify(access);
 
@@ -157,6 +158,85 @@ if (argv['skip-preflight'] === undefined) {
   await preflightSelf(self, selfHome, tc, selfCompileLd, selfCangjieHome);
 }
 
+// Observe completion directly: GNU timeout's rc=124 also represents a
+// program that deliberately returns 124, and 128+signal can be a normal exit.
+// The supervisor remains the private process-group leader until cleanup. It
+// kills its own group, never a potentially reused PID after a child has exited.
+const productSupervisor = `
+  const {spawn} = require('node:child_process');
+  const killGroup = () => process.kill(-process.pid, 'SIGKILL');
+  let finished = false;
+  let status = {exitCode: null};
+  let bytes = 0;
+  const finish = extra => {
+    if (finished) return;
+    finished = true;
+    let sent = false;
+    const report = value => {
+      if (sent) return;
+      sent = true;
+      process.send({...status, ...value}, killGroup);
+      setTimeout(killGroup, 1000);
+    };
+    let flushed = 0;
+    const drained = () => { if (++flushed === 2) report(extra); };
+    process.stdout.end(drained);
+    process.stderr.end(drained);
+    setTimeout(() => report({...extra, pipeIncomplete: true}), 1000);
+  };
+  process.on('disconnect', killGroup);
+  process.stdout.on('error', killGroup);
+  process.stderr.on('error', killGroup);
+  const child = spawn(process.argv[1], [], {stdio: ['ignore', 'pipe', 'pipe']});
+  for (const [input, output] of [[child.stdout, process.stdout], [child.stderr, process.stderr]]) {
+    input.on('data', data => {
+      if (finished) return;
+      bytes += data.length;
+      if (bytes > 1024 * 1024) finish({outputExceeded: true});
+      else output.write(data);
+    });
+  }
+  child.on('error', error => finish({spawnError: {code: error.code}}));
+  child.on('exit', (exitCode, signal) => {
+    status = {exitCode, signal};
+    // EOF is independent of the immediate child's exit. A descendant may
+    // retain a pipe, including after leaving our group: never wait forever.
+    setTimeout(() => finish({pipeIncomplete: true}), 1000);
+  });
+  child.on('close', () => finish({}));
+  setTimeout(() => finish({timedOut: true}), 30_000);
+`;
+
+function runProduct(file, cwd, env) {
+  return new Promise(resolve => {
+    const child = spawn(process.execPath, ['-e', productSupervisor, file],
+      {cwd, env, detached: true, stdio: ['ignore', 'pipe', 'pipe', 'ipc']});
+    let stdout = '';
+    let stderr = '';
+    let result;
+    let spawnError;
+    child.stdout.setEncoding('utf8').on('data', text => { stdout += text; });
+    child.stderr.setEncoding('utf8').on('data', text => { stderr += text; });
+    child.on('message', message => { result = message; });
+    child.on('error', error => { spawnError = error; });
+    child.on('close', (exitCode, signal) => {
+      resolve({stdout, stderr, ...(result || {exitCode: null, signal}),
+        supervisorExitCode: exitCode, supervisorSignal: signal,
+        ...(spawnError ? {spawnError} : {})});
+    });
+  });
+}
+
+function incompleteProduct(run, arm) {
+  if (run.outputExceeded) return `${arm}:<RUN-OUTPUT-LIMIT-1MiB>`;
+  if (run.pipeIncomplete) return `${arm}:<RUN-PIPE-INCOMPLETE>`;
+  if (run.timedOut) return `${arm}:<RUN-TIMEOUT-30s>`;
+  if (run.spawnError) return `${arm}:<RUN-ERROR ${run.spawnError.code}>`;
+  if (run.signal) return `${arm}:<RUN-SIGNAL ${run.signal}>`;
+  if (run.exitCode === null) return `${arm}:<RUN-INCOMPLETE>`;
+  return '';
+}
+
 async function classify(file) {
   const name = path.basename(file, '.cj');
   const work = await fs.mkdtemp(path.join(os.tmpdir(), 'cjcj-difftest-'));
@@ -165,8 +245,9 @@ async function classify(file) {
     await fs.writeFile(path.join(work, `${name}.rlog`), referenceBuild.stdout + referenceBuild.stderr);
     let rout = '<REF-COMPILE-FAIL>';
     let rexit = -1;
+    let referenceRun;
     if (referenceBuild.exitCode === 0) {
-      const referenceRun = await $({cwd: work, nothrow: true, quiet: true, env: refEnv})`timeout 30 ${path.join(work, `${name}.ref`)}`;
+      referenceRun = await runProduct(path.join(work, `${name}.ref`), work, refEnv);
       rout = commandSubstitution(referenceRun.stdout);
       rexit = referenceRun.exitCode;
     }
@@ -174,13 +255,16 @@ async function classify(file) {
     const selfBuild = await $({cwd: work, nothrow: true, quiet: true, env: selfCompileEnv})`timeout 180 ${self} ${file} -o ${path.join(work, `${name}.self`)} --set-runtime-rpath`;
     await fs.writeFile(path.join(work, `${name}.slog`), selfBuild.stdout + selfBuild.stderr);
     if (selfBuild.exitCode === 0) {
-      const selfRun = await $({cwd: work, nothrow: true, quiet: true, env: selfProductEnv})`timeout 30 ${path.join(work, `${name}.self`)}`;
+      const selfRun = await runProduct(path.join(work, `${name}.self`), work, selfProductEnv);
+      const incomplete = [referenceRun && incompleteProduct(referenceRun, 'ref'), incompleteProduct(selfRun, 'self')].filter(Boolean);
+      if (incomplete.length) return `FAIL\t${name}\t${incomplete.join(' ')}`;
       const sout = commandSubstitution(selfRun.stdout);
-      const selfCombined = `${selfRun.stdout}${selfRun.stderr}`;
-      if (isAbiLoadError(selfCombined)) {
-        return `FAIL\t${name}\t${HARNESS_TAG}: product ABI/runtime mismatch: ${bashQ(selfCombined.split(/\r?\n/).find(Boolean) || '', 120)}`;
-      }
-      if (sout === rout && selfRun.exitCode === rexit) return `PASS\t${name}\texit=${selfRun.exitCode}`;
+      // stdout and the observed normal exit are differential evidence only.
+      // Neither stderr nor rc=127 identifies who emitted a diagnostic. This
+      // runner has no independent evidence of loader/execution qualification,
+      // including later lazy binding or dynamic loading. Never promote MATCH
+      // to PASS on these observations.
+      if (sout === rout && selfRun.exitCode === rexit) return `MATCH\t${name}\texit=${selfRun.exitCode}`;
       const refCompileDetail = referenceBuild.exitCode === 0
         ? ''
         : ` stderr=${bashQ(referenceBuild.stderr.split(/\r?\n/, 1)[0], 200)}`;
@@ -213,7 +297,7 @@ async function classify(file) {
 if (argv.one !== undefined) {
   const file = typeof argv.one === 'string' ? argv.one : argv._[0];
   if (!file) process.exit(1);
-  console.log(await classify(path.resolve(file)));
+  console.log(`${await classify(path.resolve(file))}\tqualification=UNKNOWN`);
   process.exit(0);
 }
 
@@ -236,23 +320,24 @@ async function worker() {
 await Promise.all(Array.from({length: Math.min(jobs, samples.length)}, worker));
 results.sort();
 
-let pass = 0;
+const pass = 0; // No independent qualification evidence is supplied by this runner.
+let match = 0;
 let mismatch = 0;
 let fail = 0;
 const gaps = new Map();
 for (const line of results) {
   const [status, name, ...detailParts] = line.split('\t');
   const detail = detailParts.join('\t');
-  if (status === 'PASS') pass++;
+  if (status === 'MATCH') match++;
   else if (status === 'MISMATCH') mismatch++;
   else {
     fail++;
     gaps.set(detail, (gaps.get(detail) || 0) + 1);
   }
-  console.log(`${status.padEnd(8)} ${name.padEnd(22)} ${detail}`);
+  console.log(`${status.padEnd(8)} ${name.padEnd(22)} ${detail} qualification=UNKNOWN`);
 }
 console.log('================================================================');
-console.log(`TOTAL=${pass + mismatch + fail}  PASS=${pass}  MISMATCH=${mismatch}  FAIL=${fail}`);
+console.log(`TOTAL=${results.length}  PASS=${pass}  MATCH=${match}  MISMATCH=${mismatch}  FAIL=${fail}  UNKNOWN=${results.length}`);
 console.log('---- gap tally (selfhost faithful-pipeline failures, ranked) ----');
 for (const [detail, count] of [...gaps].sort((a, b) => b[1] - a[1] || b[0].localeCompare(a[0]))) {
   console.log(`${String(count).padStart(7)} ${detail}`);

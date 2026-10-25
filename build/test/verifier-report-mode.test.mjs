@@ -95,7 +95,7 @@ test('removed diagnostic step options reject at the public launcher and diagnost
   assert.equal(rejected.status,1);assert.match(rejected.stderr,/Unknown option '--verifier-report'/);
   assert.equal(shouldRunGcUnitLanguageTests({}),true);
   assert.equal(shouldRunGcUnitLanguageTests({CJCJ_SRCBUILD_VERIFIER_REPORT_ACTIVE:report}),false);
-  const output=path.join(root,'cangjie_compiler/output');fs.mkdirSync(output,{recursive:true});
+  const output=path.join(root,'software/cangjie');fs.mkdirSync(output,{recursive:true});
   fs.writeFileSync(path.join(output,VERIFIER_DIAGNOSTIC_MARKER),'{}\n');
   const packaged=spawnSync(process.execPath,[path.join(repoRoot,'build/cli.mjs'),
     '--workspace',root,'--build-root',root+'/build','--cangjie-version','finite','package'],{encoding:'utf8'});
@@ -408,12 +408,12 @@ test('verifier tool selection qualifies real bitcode through environment and CLI
 test('verifier tool selection reaches package, SDK usability and performance consumers', async t => {
   const root = fixture(t);
   const workspace = path.join(root, 'workspace');
-  const output = path.join(workspace, 'cangjie_compiler', 'output');
+  const output = path.join(workspace, 'installed-sdk');
   fs.mkdirSync(output, {recursive: true});
   fs.writeFileSync(path.join(output, 'report.bc'), Buffer.from([0x42, 0x43, 0xc0, 0xde, 1]));
   const llvmDis = selectionTool(root, 'report.mjs', {ir: '!cj.verifier.mode = !{!7}\n!7 = !{!"report"}\n'});
   await withEnvironment({CJCJ_VERIFIER_LLVM_DIS: llvmDis}, async () => {
-    const config = buildConfig({workspace, buildRoot: path.join(root, 'build')});
+    const config = buildConfig({workspace, consumerSdk: output, buildRoot: path.join(root, 'build')});
     await selectionObservation(t, 'consumer/package', async observation => {
       let message = '';
       try { await packageStage.run(config); } catch (error) { message = error.message; }
@@ -478,7 +478,7 @@ test('verifier tool selection reaches package, SDK usability and performance con
 test('source-build package entry rejects a diagnostic workspace before archiving', async t => {
   const root = fixture(t);
   const workspace = path.join(root, 'workspace');
-  fs.mkdirSync(path.join(workspace, 'cangjie_compiler', 'output'), {recursive: true});
+  fs.mkdirSync(path.join(workspace, 'software', 'cangjie'), {recursive: true});
   const report = path.join(root, 'report.tsv');
   markDiagnosticWorkspace({workspace, report, inventory: `${report}.artifacts.tsv`});
   const config = buildConfig({workspace, buildRoot: path.join(root, 'build')});

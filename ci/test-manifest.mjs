@@ -193,6 +193,7 @@ export const GATING = Object.freeze([
   'ci/srcbuild/tests/platform-contract.test.mjs',
   'ci/srcbuild/tests/release-wire.test.mjs',
   'ci/srcbuild/tests/segmented-workflow.test.mjs',
+  'scripts/difftest-timeout.test.mjs',
 ]);
 
 // Registered, not executed. `needs` is what CI would have to provide; `verified`
