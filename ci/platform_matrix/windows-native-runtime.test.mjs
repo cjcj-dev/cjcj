@@ -43,7 +43,12 @@ test('native Windows copies this invocation bounds DLL and records Windows layou
       .map(prefix => prefix + f.env.SCCACHE_PATH).join('\n'));
   f.put(path.join(f.installRoot, 'runtime/lib', tuple, 'libcangjie-runtime.dll'), 'runtime fixture\nCJRT-COMMIT:' + f.env.RUNTIME_REF + '\n');
   f.put(path.join(f.installRoot, 'lib', tuple, 'libcangjie-runtime.a'), 'archive fixture\nCJRT-COMMIT:' + f.env.RUNTIME_REF + '\n');
+  const preinstall=path.join(f.root,'cjthread-install');
+  f.put(path.join(f.source,'runtime/CMakebuild/cjthread-build/CMakeCache.txt'),
+    `CMAKE_INSTALL_PREFIX:PATH=${preinstall}\nTARGET_ARCH:STRING=${tuple}\nCMAKE_BUILD_TYPE:STRING=Release\n`);
+  for(const name of ['thread','aio'])f.put(path.join(preinstall,'lib',tuple,`libcangjie-${name}.a`),'installed '+name);
   installNativeRuntimeDependencies({...f, buildType: 'release'});
+  for(const name of ['thread','aio'])assert.equal(fs.readFileSync(path.join(f.installRoot,'lib',tuple,`libcangjie-${name}.a`),'utf8'),'installed '+name);
   console.log('WINDOWS_BOUNDS_INSTALL_ASSERT_REACHED');
   assert.equal(fs.readFileSync(path.join(f.installRoot, 'runtime/lib', tuple, 'libboundscheck.dll'), 'utf8'), 'produced bounds fixture');
   const options = {...f, actualRef: f.env.RUNTIME_REF, version: f.env.RUNTIME_VERSION, buildType: 'release'};
@@ -53,7 +58,7 @@ test('native Windows copies this invocation bounds DLL and records Windows layou
   const facts = JSON.parse(fs.readFileSync(path.join(f.installRoot, 'NATIVE-INPUTS.json')));
   assert.equal(facts.platform, 'windows_x86_64'); assert.deepEqual(facts.commands, commands);
   assert.ok(facts.files['runtime/lib/' + tuple + '/libboundscheck.dll']);
-  assert.equal(Object.keys(facts.files).length, 4);
+  assert.equal(Object.keys(facts.files).length, 6);
   assert.ok(facts.files[RUNTIME_INPUTS]);
   const original = JSON.parse(fs.readFileSync(path.join(f.installRoot, RUNTIME_INPUTS)));
   assert.equal(original.source.repository, f.source);

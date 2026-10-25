@@ -34,19 +34,36 @@ export function configureNativeRuntime({runtimeTarget}, env = process.env) {
   env.CMAKE_TOOLCHAIN_FILE = selectedToolchain;
 }
 
-// R79b installs bounds with CMake only on macOS. Linux uses the dependency
-// just built by this native invocation, as the existing cross producers do.
+// CJThread is configured and installed by build_cjthread.sh in its own CMake
+// graph. The later top-level build.py install --prefix does not relocate that
+// graph. Consume its normal installed archives, including installation transforms.
 export function installNativeRuntimeDependencies({source, installRoot, buildType}) {
-  if (!['linux', 'win32'].includes(process.platform)) return;
-  const arch = {x64:'x86_64',arm64:'aarch64'}[process.arch];
-  const mode = buildType[0].toUpperCase() + buildType.slice(1).toLowerCase();
-  const windows = process.platform === 'win32', library = windows ? 'libboundscheck.dll' : 'libboundscheck.so';
-  const input = path.join(source, 'runtime/CMakebuild/runtime-staging', windows ? 'bin' : 'lib', `${arch}_${mode}`, library);
-  assert.ok(fs.existsSync(input) && fs.lstatSync(input).isFile(), `NATIVE_RUNTIME_BUILD_MISSING: ${input}`);
-  const output = path.join(installRoot, 'runtime/lib', `${hostPlatform()}_cjnative`, library);
-  fs.mkdirSync(path.dirname(output), {recursive:true});
-  fs.copyFileSync(input, output);
-  console.log(`native_runtime_dependency=${input} installed=${output}`);
+  const tuple = `${hostPlatform()}_cjnative`;
+  const copies = [];
+  if (['linux', 'win32'].includes(process.platform)) {
+    const arch = {x64:'x86_64',arm64:'aarch64'}[process.arch];
+    const mode = buildType[0].toUpperCase() + buildType.slice(1).toLowerCase();
+    const windows = process.platform === 'win32', library = windows ? 'libboundscheck.dll' : 'libboundscheck.so';
+    const input = path.join(source, 'runtime/CMakebuild/runtime-staging', windows ? 'bin' : 'lib', `${arch}_${mode}`, library);
+    assert.ok(fs.existsSync(input) && fs.lstatSync(input).isFile(), `NATIVE_RUNTIME_BUILD_MISSING: ${input}`);
+    copies.push([input, path.join(installRoot, 'runtime/lib', tuple, library)]);
+  }
+  const cache = fs.readFileSync(path.join(source, 'runtime/CMakebuild/cjthread-build/CMakeCache.txt'), 'utf8');
+  const value = key => new RegExp(`^${key}:[^=]+=(.*)$`, 'm').exec(cache)?.[1]?.trim();
+  const prefix = value('CMAKE_INSTALL_PREFIX');
+  assert.ok(path.isAbsolute(prefix || ''), 'NATIVE_CJTHREAD_INSTALL_PREFIX');
+  assert.equal(value('TARGET_ARCH'), tuple, 'NATIVE_CJTHREAD_INSTALL_TARGET');
+  assert.equal(value('CMAKE_BUILD_TYPE')?.toLowerCase(), buildType.toLowerCase(), 'NATIVE_CJTHREAD_INSTALL_CONFIGURATION');
+  for (const library of ['libcangjie-thread.a', 'libcangjie-aio.a']) {
+    const input = path.join(prefix, 'lib', tuple, library);
+    assert.ok(fs.existsSync(input) && fs.lstatSync(input).isFile(), `NATIVE_CJTHREAD_INSTALL_MISSING: ${input}`);
+    copies.push([input, path.join(installRoot, 'lib', tuple, library)]);
+  }
+  for (const [input, output] of copies) {
+    fs.mkdirSync(path.dirname(output), {recursive:true});
+    if (path.resolve(input) !== path.resolve(output)) fs.copyFileSync(input, output);
+    console.log(`native_runtime_dependency=${input} installed=${output}`);
+  }
 }
 
 // Normal native build/install carries the actual test sources, generated
@@ -64,7 +81,8 @@ export async function recordNativeRuntime({source, installRoot, actualRef, versi
   const suffix = process.platform === 'darwin' ? 'dylib' : process.platform === 'win32' ? 'dll' : 'so';
   const tuple = `${platform}_cjnative`;
   const required = [`runtime/lib/${tuple}/libcangjie-runtime.${suffix}`,
-    `runtime/lib/${tuple}/libboundscheck.${suffix}`, `lib/${tuple}/libcangjie-runtime.a`];
+    `runtime/lib/${tuple}/libboundscheck.${suffix}`, `lib/${tuple}/libcangjie-runtime.a`,
+    `lib/${tuple}/libcangjie-thread.a`, `lib/${tuple}/libcangjie-aio.a`];
   for (const relative of required) {
     assert.ok(fs.existsSync(path.join(installRoot, relative)), `NATIVE_RUNTIME_INSTALL_MISSING: ${relative}`);
   }
