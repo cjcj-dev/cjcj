@@ -58,7 +58,9 @@ test('native Windows copies this invocation bounds DLL and records Windows layou
   const facts = JSON.parse(fs.readFileSync(path.join(f.installRoot, 'NATIVE-INPUTS.json')));
   assert.equal(facts.platform, 'windows_x86_64'); assert.deepEqual(facts.commands, commands);
   assert.ok(facts.files['runtime/lib/' + tuple + '/libboundscheck.dll']);
-  assert.equal(Object.keys(facts.files).length, 6);
+  assert.deepEqual(Object.keys(facts.files).sort(), [RUNTIME_INPUTS, 'SOURCE_SHA',
+    `runtime/lib/${tuple}/libcangjie-runtime.dll`, `runtime/lib/${tuple}/libboundscheck.dll`,
+    ...['runtime','thread','aio'].map(name=>`lib/${tuple}/libcangjie-${name}.a`)].sort());
   assert.ok(facts.files[RUNTIME_INPUTS]);
   const original = JSON.parse(fs.readFileSync(path.join(f.installRoot, RUNTIME_INPUTS)));
   assert.equal(original.source.repository, f.source);
