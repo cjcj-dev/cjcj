@@ -88,7 +88,7 @@ export async function install(buildRoot, {jobs} = {}) {
       cwd: source,
       envOverlay: {
         ...(launcher?{CC:`${launcher} ${process.env.CC || 'cc'}`} : {}),
-        CPPFLAGS:[`-I${path.join(ncurses,'include/ncurses')}`,process.env.CPPFLAGS].filter(Boolean).join(' '),
+        CPPFLAGS:[`-I${path.join(ncurses,'include')}`,`-I${path.join(ncurses,'include/ncurses')}`,process.env.CPPFLAGS].filter(Boolean).join(' '),
         LDFLAGS:[`-L${path.join(ncurses,'lib')}`,process.env.LDFLAGS].filter(Boolean).join(' '),
       },
       stage: 'static_libs.libedit.configure',

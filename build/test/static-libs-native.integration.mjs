@@ -10,7 +10,10 @@ import {cmakePrefixPathFor} from '../srcbuild/stages/common.mjs';
 import {NCURSES_VERSION,NCURSES_URL,LIBEDIT_TARBALL,LIBEDIT_URL,installationPaths,isInstalled} from '../toolchain/static-libs.mjs';
 const base=process.env.RELEASE_EVIDENCE_TEST_ROOT,archives=process.env.STATIC_LIBS_ARCHIVES,modules=process.env.STATIC_LIBS_LLVM_MODULES;
 assert(base&&archives&&modules,'RELEASE_EVIDENCE_TEST_ROOT, STATIC_LIBS_ARCHIVES and fixed STATIC_LIBS_LLVM_MODULES required');
-const root=fs.mkdtempSync(path.join(base,'static-libs-')),buildRoot=path.join(root,'buildtools');
+const root=fs.mkdtempSync(path.join(base,'static-libs-'));
+// A failed normal component build can resume its existing installation without
+// replacing the successful peer or overwriting the first command's evidence.
+const buildRoot=process.env.STATIC_LIBS_REUSE_BUILD_ROOT || path.join(root,'buildtools');
 const records=[];
 function run(name,argv,options={}) {
  const r=spawnSync(argv[0],argv.slice(1),{encoding:'utf8',maxBuffer:32*1024*1024,...options});
@@ -39,7 +42,7 @@ ok(run('partial-restore',cli,{env}));assert.equal(isInstalled(buildRoot),true);
 assert.equal(fs.statSync(ncArchive).mtimeMs,before);
 assert.equal(fs.readFileSync(path.join(buildRoot,'libedit-3.1/lib/libedit.a'),'utf8'),'old-cache sentinel, never linked');
 const source=path.join(root,'consumer'),build=path.join(root,'consumer-build');fs.mkdirSync(source);
-fs.writeFileSync(path.join(source,'main.c'),`#include <histedit.h>\n#include <curses.h>\n#include <term.h>\n#include <stdio.h>\nint main(void){HistEvent ev;History *h=history_init();if(!h)return 41;if(history(h,&ev,H_ENTER,"new dependency")<0)return 42;history_end(h);EditLine *e=el_init("probe",stdin,stdout,stderr);if(!e)return 43;el_end(e);printf("STATIC_LIBS_NATIVE_CONSUMER %s\\n",curses_version());return 0;}\n`);
+fs.writeFileSync(path.join(source,'main.c'),`#include <histedit.h>\n#include <ncurses/curses.h>\n#include <ncurses/term.h>\n#include <stdio.h>\nint main(void){HistEvent ev;History *h=history_init();if(!h)return 41;if(history(h,&ev,H_ENTER,"new dependency")<0)return 42;history_end(h);EditLine *e=el_init("probe",stdin,stdout,stderr);if(!e)return 43;el_end(e);printf("STATIC_LIBS_NATIVE_CONSUMER %s\\n",curses_version());return 0;}\n`);
 fs.writeFileSync(path.join(source,'CMakeLists.txt'),`cmake_minimum_required(VERSION 3.20)
 project(static_libraries_consumer C)
 include(CMakePushCheckState)
