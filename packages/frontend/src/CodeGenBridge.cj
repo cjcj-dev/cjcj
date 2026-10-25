@@ -371,8 +371,7 @@ private class ToCHIR {
         let lowered = chirPkg.getOrThrow()
         // C++: CHIR/CHIR.cpp:1133-1140 ToCHIR::Run.
         if (instance.invocation.globalOptions.outputMode == OutputMode.CHIR) {
-            let fileName = FileUtil.JoinPath(outputPath, lowered.GetName()) + CHIR_SERIALIZATION_FILE_EXTENSION
-            CHIRSerializer.Serialize(lowered, fileName, ToCHIRPhase.RAW)
+            EmitCHIR(outputPath, lowered, ToCHIRPhase.RAW, instance.invocation.globalOptions.NeedDumpCHIR())
             return Some(lowered)
         }
         var pluginPackage = lowered

@@ -53,6 +53,11 @@ public open class Decl <: Node & Hashable & Equatable<Decl> {
         return objectId != right.objectId
     }
 
+    public func IsJavaForeign(): Bool { return TestAttr(Attribute.JAVA_FOREIGN) }
+    public func IsJavaExport(): Bool { return TestAttr(Attribute.JAVA_EXPORT) }
+    public func IsObjCForeign(): Bool { return TestAttr(Attribute.OBJ_C_FOREIGN) }
+    public func IsObjCExport(): Bool { return TestAttr(Attribute.OBJ_C_EXPORT) }
+
     public func IsMemberDecl(): Bool {
         if (let Some(parent) <- outerDecl) {
             return parent.IsNominalDecl()

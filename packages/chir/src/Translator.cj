@@ -4080,7 +4080,7 @@ public class Translator {
         } else {
             decl.linkage
         })
-        let needInitialSuperClassSetup = !decl.TestAttr(AstAttribute.SPECIFIC) ||
+        let needInitialSuperClassSetup = !mergingSpecific || !decl.TestAttr(AstAttribute.SPECIFIC) ||
             decl.TestAttr(AstAttribute.IMPORTED) || decl.TestAttr(AstAttribute.GENERIC_INSTANTIATED)
         if (needInitialSuperClassSetup) {
             SetClassSuperClass(def, decl)

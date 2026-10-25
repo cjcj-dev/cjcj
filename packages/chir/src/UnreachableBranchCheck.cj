@@ -153,7 +153,7 @@ public class UnreachableBranchCheck {
     }
 
     private func VisitFunc<T>(result: Results<T>): Unit where T <: AbstractDomain<T> {
-        let matchSuccesses = HashSet<(Block, Block)>()
+        let matchSuccesses = HashMap<Block, HashSet<Block>>()
         let selectedTerminators = ArrayList<(Expression, Block)>()
         let hasProcessed = HashSet<Block>()
         let actionBeforeVisitExpr = { _: T, _: Expression, _: Int64 => }
@@ -164,7 +164,8 @@ public class UnreachableBranchCheck {
                 if (canSucceed) {
                     let nextCase = GetNextMatchCase(branch.GetParentBlock().getOrThrow())[1]
                     if (let Some(next) <- nextCase && !result.GetEntryState(branch.GetTrueBlock()).IsBottom()) {
-                        matchSuccesses.add((next, branch.GetTrueBlock()))
+                        if (!matchSuccesses.contains(next)) { matchSuccesses[next] = HashSet<Block>() }
+                        matchSuccesses[next].add(branch.GetTrueBlock())
                     }
                 }
             }
@@ -178,7 +179,8 @@ public class UnreachableBranchCheck {
         for ((terminator, target) in selectedTerminators) {
             if (let Some(branch) <- (terminator as Branch) && target == branch.GetFalseBlock()) {
                 let nextCase = GetNextMatchCase(branch.GetParentBlock().getOrThrow())[1]
-                if (let Some(next) <- nextCase && matchSuccesses.contains((next, branch.GetTrueBlock()))) { continue }
+                if (let Some(next) <- nextCase && matchSuccesses.contains(next) &&
+                    matchSuccesses[next].contains(branch.GetTrueBlock())) { continue }
             }
             VisitTerminator(result, terminator, target, hasProcessed)
         }

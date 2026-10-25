@@ -58,7 +58,11 @@ private func IsObjCBlockImpl(decl: ClassDecl): Bool {
 
 public enum TypePosition { | IN | OUT | BOTH }
 
-public func IsObjCCompatible(ty: Ty, pos: TypePosition = TypePosition.BOTH): Bool {
+public func IsObjCCompatible(ty: Ty): Bool {
+    return IsObjCCompatible(ty, TypePosition.BOTH)
+}
+
+public func IsObjCCompatible(ty: Ty, pos: TypePosition): Bool {
     match (ty.kind) {
         case TypeKind.TYPE_UNIT => return match (pos) { case TypePosition.OUT => true; case _ => false }
         case TypeKind.TYPE_INT8 | TypeKind.TYPE_INT16 | TypeKind.TYPE_INT32 | TypeKind.TYPE_INT64 |

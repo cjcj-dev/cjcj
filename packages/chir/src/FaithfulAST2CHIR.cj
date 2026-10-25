@@ -1657,7 +1657,7 @@ public class FaithfulAST2CHIR {
         if (decl.TestAttr(AstAttribute.COMMON) && !decl.TestAttr(AstAttribute.FROM_COMMON_PART)) {
             // CJO encodes platform specifics as COMMON + COMMON_WITH_DEFAULT.
             // Only imported extends recover SPECIFIC; class dispatch must retain COMMON.
-            if (isImported && decl.astKind == AstASTKind.EXTEND_DECL &&
+            if (isImported && decl.astKind == ASTKind.EXTEND_DECL &&
                 decl.TestAttr(AstAttribute.COMMON_WITH_DEFAULT)) {
                 def.EnableAttr(Attribute.SPECIFIC)
                 def.DisableAttr(Attribute.COMMON)

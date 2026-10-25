@@ -42,7 +42,11 @@ class JavaInteropTypeChecker {
         }
     }
 
-    private func IsJavaCompatible(ty: Ty, pos: JavaTypePosition = JavaTypePosition.BOTH): Bool {
+    private func IsJavaCompatible(ty: Ty): Bool {
+        return IsJavaCompatible(ty, JavaTypePosition.BOTH)
+    }
+
+    private func IsJavaCompatible(ty: Ty, pos: JavaTypePosition): Bool {
         if (IsSupported(ty, pos)) {
             if ((ty as ClassLikeTy).isSome() && IsJArray(ty)) {
                 return IsJavaCompatible(ty.typeArgs[0])
@@ -92,14 +96,14 @@ class JavaInteropTypeChecker {
         CheckParamTypes(fd, DiagKindRefactor.sema_java_mirror_method_arg_must_be_java_mirror)
     }
 
-    private func CheckPropType(prop: PropDecl): Unit {
-        if (!IsJavaCompatible(prop.GetTy().getOrThrow())) {
+    private func CheckPropType(property: PropDecl): Unit {
+        if (!IsJavaCompatible(property.GetTy().getOrThrow())) {
             let kind = if (isImpl) { DiagKindRefactor.sema_java_impl_prop_must_be_java_compatible }
                 else { DiagKindRefactor.sema_java_mirror_prop_must_be_java_mirror }
-            let builder = DiagnoseRefactor(diag, kind, prop.typeNode.getOrThrow())
-            builder.AddMainHintArguments(Ty.ToString(prop.GetTy()))
+            let builder = DiagnoseRefactor(diag, kind, property.typeNode.getOrThrow())
+            builder.AddMainHintArguments(Ty.ToString(property.GetTy()))
             builder.Emit()
-            prop.EnableAttr(Attribute.IS_BROKEN)
+            property.EnableAttr(Attribute.IS_BROKEN)
         }
     }
 
@@ -110,7 +114,7 @@ class JavaInteropTypeChecker {
                 if (fd.TestAttr(Attribute.CONSTRUCTOR)) {
                     CheckParamTypes(fd, DiagKindRefactor.sema_java_mirror_ctor_arg_must_be_java_mirror)
                 } else { CheckMethodTypes(fd) }
-            } else if (let Some(prop) <- (member as PropDecl)) { CheckPropType(prop) }
+            } else if (let Some(property) <- (member as PropDecl)) { CheckPropType(property) }
         }
     }
 }
