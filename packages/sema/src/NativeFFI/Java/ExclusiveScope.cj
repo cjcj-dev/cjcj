@@ -4,7 +4,7 @@ import std.collection.*
 import cjcj::ast.*
 import cjcj::basic.{DEFAULT_POSITION, DiagKindRefactor}
 import cjcj::sema.{GenerateTypeMapping, GetUsedMemberDecl, TypeManager}
-import cjcj::sema.NativeFFI.{FFICreateOptionNoneRef, FFICreateOptionSomeRef, WithinFile}
+import cjcj::sema.NativeFFI.{CreateType, FFICreateOptionNoneRef, FFICreateOptionSomeRef, WithinFile}
 
 // canonical 41b22350: Java/AfterTypeCheck/ExclusiveScope.cpp. JNI local references
 // must stay inside the managed exclusive scope, including result conversion.
