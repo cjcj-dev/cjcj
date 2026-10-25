@@ -47,6 +47,9 @@ foreach(name cjdb lldb-boundscheck lldb-cangjie-lsp lldb-cangjie-frontend cangji
  add_custom_target(\${name})
 endforeach()
 `);
+ await fs.mkdir(source+'/third_party/cmake',{recursive:true});await fs.mkdir(source+'/src',{recursive:true});
+ await fs.writeFile(source+'/third_party/cmake/BuildCJDB.cmake','externalproject_get_property(cjnative BINARY_DIR)\nset(LLVM_GC_BINARY_DIR "${BINARY_DIR}")\n    USES_TERMINAL_BUILD ON\n    DEPENDS cjnative)\n');
+ await fs.writeFile(source+'/src/CMakeLists.txt','if(CANGJIE_BUILD_CJDB)\n    add_dependencies(lldb cangjie-frontend)\nendif()\n');
  good('git-init',['git','init',source]);good('git-add',['git','-C',source,'add','.']);
  good('git-commit',['git','-C',source,'-c','user.name=Zxilly','-c','user.email=zxilly@outlook.com','commit','-m','Finite native jobs entry']);
  const commit=good('git-head',['git','-C',source,'rev-parse','HEAD']);
