@@ -2,7 +2,6 @@
 
 import {createHash} from 'node:crypto';
 import {createReadStream} from 'node:fs';
-import {finished} from 'node:stream/promises';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
@@ -171,13 +170,13 @@ function canonicalCounts(files, target) {
 }
 
 async function sha256(file) {
-  const hash = createHash('sha256');
-  const input = createReadStream(file);
-  input.on('data', chunk => hash.update(chunk));
-  // A readable's end precedes its asynchronous file close. Settle both before
-  // the CLI exits, including the final batch of concurrent hash readers.
-  await finished(input, {cleanup: true});
-  return hash.digest('hex');
+  return await new Promise((resolve, reject) => {
+    const hash = createHash('sha256');
+    const input = createReadStream(file);
+    input.on('error', reject);
+    input.on('data', chunk => hash.update(chunk));
+    input.on('end', () => resolve(hash.digest('hex')));
+  });
 }
 
 async function hashFiles(root, files, concurrency = 16) {
