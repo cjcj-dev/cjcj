@@ -281,8 +281,6 @@ public class ASTChecker {
             EMPTY_STRING_CHECK(node, anno.identifier.Val(), "anno->identifier")
             VEC_AST_NULLPTR_CHECK(node, anno.args, "anno->args")
             match (anno.kind) {
-                case AnnotationKind.JAVA =>
-                    EMPTY_STRING_CHECK(node, anno.definedPackage, "anno->definedPackage")
                 case AnnotationKind.WHEN =>
                     AST_NULLPTR_CHECK(this, node, anno.condExpr, "anno->condExpr")
                 case AnnotationKind.ATTRIBUTE =>
