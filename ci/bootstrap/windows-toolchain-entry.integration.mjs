@@ -83,7 +83,7 @@ test('actual SDK copy recipes and archive retain native runtime bytes and origin
  const stage=createBootstrapTargets(input).stages.find(s=>s.id==='stage0-run');
  for(const group of stage.entries.filter(g=>['bin','third_party/llvm/bin'].includes(g.directory)&&!g.names))for(const name of dlls)assert.ok(group.exclude.includes(name),'DLL must not become an executable wrapper');
  const hostCopy=stage.copies.find(c=>c.to===''&&c.owner==='H');assert.ok(dlls.every(n=>hostCopy.exclude.includes('bin/'+n)));
- const copies=stage.copies.filter(c=>c.owner==='N runtime'||c.owner==='N toolchain input'||c.to==='third_party/llvm'||c.to==='third_party/flatbuffers');
+ const copies=stage.copies.filter(c=>c.owner==='native toolchain runtime'||c.owner==='native toolchain input'||c.to==='third_party/llvm'||c.to==='third_party/flatbuffers');
  // N and AST use one native install in production. This bounded transport uses
  // the same physical directory, without pretending to build AST or an SDK.
  for(const c of copies)if(c.to==='third_party/flatbuffers')c.from=input.llvm.install+'/third_party/flatbuffers';

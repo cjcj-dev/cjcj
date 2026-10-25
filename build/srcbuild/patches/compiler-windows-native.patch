@@ -1,0 +1,71 @@
+diff --git a/cmake/mingw_x86_64_toolchain.cmake b/cmake/mingw_x86_64_toolchain.cmake
+index 460252e1..4b7d2ac0 100644
+--- a/cmake/mingw_x86_64_toolchain.cmake
++++ b/cmake/mingw_x86_64_toolchain.cmake
+@@ -78,12 +78,18 @@ endif()
+ # Besides gcc and g++, there are also copies of them with the triple prefix
+ # in a native MinGW toolchain, like x86_64-w64-mingw32-gcc.
+ # Use those with the prefix here in order to be compatible with cross-compilation.
+-set(CMAKE_C_COMPILER x86_64-w64-mingw32-gcc)
+-set(CMAKE_CXX_COMPILER x86_64-w64-mingw32-g++)
++# Preserve an explicitly selected compiler (including its absolute path).
++# The historical names are llvm-mingw aliases, not a requirement to use GCC.
++if(NOT CMAKE_C_COMPILER)
++    set(CMAKE_C_COMPILER x86_64-w64-mingw32-gcc)
++endif()
++if(NOT CMAKE_CXX_COMPILER)
++    set(CMAKE_CXX_COMPILER x86_64-w64-mingw32-g++)
++endif()
+ find_program(CMAKE_AR llvm-ar)
+ find_program(CMAKE_RANLIB llvm-ranlib)
+-set(LLVM_BUILD_C_COMPILER x86_64-w64-mingw32-gcc)
+-set(LLVM_BUILD_CXX_COMPILER x86_64-w64-mingw32-g++)
++set(LLVM_BUILD_C_COMPILER "${CMAKE_C_COMPILER}")
++set(LLVM_BUILD_CXX_COMPILER "${CMAKE_CXX_COMPILER}")
+ 
+ set(LINKER_OPTION_PREFIX "-Wl,")
+ set(MAKE_SO_STACK_PROTECTOR_OPTION -fstack-protector)
+diff --git a/cmake/modules/InstallWindowsToolchain.cmake b/cmake/modules/InstallWindowsToolchain.cmake
+new file mode 100644
+index 00000000..12ace0c4
+--- /dev/null
++++ b/cmake/modules/InstallWindowsToolchain.cmake
+@@ -0,0 +1,13 @@
++# Native producer supplies the DLLs from its selected MSVCRT toolchain.
++# Use normal CMake installation so the manifest and the transported install
++# include the runtime needed by cjc, LLVM/CJDB and the installed host flatc.
++if(WIN32 AND CANGJIE_TOOLCHAIN_RUNTIME_FILES)
++    foreach(runtime_file IN LISTS CANGJIE_TOOLCHAIN_RUNTIME_FILES)
++        if(NOT EXISTS "${runtime_file}")
++            message(FATAL_ERROR "Selected Windows toolchain runtime is missing: ${runtime_file}")
++        endif()
++    endforeach()
++    foreach(destination bin third_party/llvm/bin third_party/flatbuffers/bin)
++        install(FILES ${CANGJIE_TOOLCHAIN_RUNTIME_FILES} DESTINATION "${destination}")
++    endforeach()
++endif()
+diff --git a/third_party/CMakeLists.txt b/third_party/CMakeLists.txt
+index 1f02e730..523479b4 100644
+--- a/third_party/CMakeLists.txt
++++ b/third_party/CMakeLists.txt
+@@ -32,6 +32,7 @@ endif()
+ # Handle third-party dependencies
+ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/")
+ include(Flatbuffer)
++include("${CMAKE_SOURCE_DIR}/cmake/modules/InstallWindowsToolchain.cmake")
+ 
+ if(CANGJIE_BUILD_CJDB)
+     include(Xml2)
+diff --git a/third_party/cmake/Xml2.cmake b/third_party/cmake/Xml2.cmake
+index d83c2139..13c75f40 100644
+--- a/third_party/cmake/Xml2.cmake
++++ b/third_party/cmake/Xml2.cmake
+@@ -31,6 +31,8 @@ execute_process(
+         -DCUSTOM_WARNING_SETTINGS=-Wno-error
+         -DCANGJIE_TARGET_TOOLCHAIN=${CANGJIE_TARGET_TOOLCHAIN}
+         -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
++        -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
++        -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+         -DCMAKE_SYSROOT=${CANGJIE_TARGET_SYSROOT}
+         -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON
+         -DCMAKE_INSTALL_LIBDIR=lib

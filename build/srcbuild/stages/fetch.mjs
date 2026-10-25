@@ -2,6 +2,8 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import {spawnSync} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
 import {saveSourceSelection} from '../../lib/config.mjs';
 import {BuildError} from '../../lib/errors.mjs';
 import {shallowClone, assertSourceIdentity} from '../../lib/git.mjs';
@@ -55,6 +57,26 @@ export function applyCompilerCjdbPatches(repoDir) {
   verifyCompilerCjdbPatches(repoDir);
 }
 
+// Keep the reviewed 53da076 native Windows compiler/install changes when
+// consuming canonical sources. Canonical Flatbuffer.cmake already forwards
+// selected compilers and separates host flatc; preserve its newer recipe.
+export function applyCompilerWindowsPatches(repoDir) {
+  const patch = fileURLToPath(new URL('../patches/compiler-windows-native.patch', import.meta.url));
+  const apply = (...args) => spawnSync('git', ['apply', ...args, patch], {
+    cwd: repoDir, encoding: 'utf8',
+  });
+  const check = apply('--check');
+  if (check.status !== 0) {
+    const restored = apply('--reverse', '--check');
+    if (restored.status === 0) return;
+    throw new BuildError('fetch.patch.windows', `compiler Windows patch shape drift: ${check.stderr || check.error?.message}`);
+  }
+  const result = apply();
+  if (result.status !== 0) {
+    throw new BuildError('fetch.patch.windows', result.stderr || result.error?.message || `git apply exited ${result.status}`);
+  }
+}
+
 export async function run(config) {
   ensureDir(config.workspace);
   await stage('fetch', async () => {
@@ -68,6 +90,7 @@ export async function run(config) {
       await assertSourceIdentity(repo, target);
     }
     applyCompilerCjdbPatches(config.repoPath('compiler'));
+    if (config.target.spec.nodePlatform === 'win32') applyCompilerWindowsPatches(config.repoPath('compiler'));
     saveSourceSelection(config);
   });
 }

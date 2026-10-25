@@ -123,7 +123,8 @@ test('entry adds no steps or side effects and preserves reviewed execution order
     return list.map(step => step.name || (step.uses === 'actions/checkout@v7'
       ? `${step.uses}:${checkout++}` : step.uses));
   };
-  const expected = identities(originalSteps);
+  const expected = identities(originalSteps.map(step => step.uses === 'actions/setup-node@v4'
+    ? {...step, uses: 'actions/setup-node@v7.1.0'} : step));
   const actual = identities(steps);
   const positions = actual.map(identity => expected.indexOf(identity));
   observed('DARWIN_STEP_SCOPE_AND_ORDER', {actual, positions});
