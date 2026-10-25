@@ -111,6 +111,6 @@ test('public cjlint GCC selection survives cold, warm, withdrawal and restoratio
   f.write(cache,original.replace('GCC_TOOLCHAIN_FLAG:PATH=/usr','GCC_TOOLCHAIN_FLAG:PATH=/other'));
   await assert.rejects(toolBuildInputs(config,'cjlint',facts.artifact.path),/TOOL_BUILD_CONFIGURATION_CHANGED/);
   f.write(cache,original);await toolBuildInputs(config,'cjlint',facts.artifact.path);
-  const relative=f.build('cjlint',['--tools-gcc-toolchain','relative']);assert.equal(relative.status,1);assert.match(relative.stderr,/absolute GCC/);
-  const cross=f.build('cjlint',['--target','windows-x64','--tools-gcc-toolchain',prefix]);assert.equal(cross.status,1);assert.match(cross.stderr,/native Linux cjlint/);
+  const relative=f.build('cjlint',['--tools-gcc-toolchain','relative']);assert.equal(relative.status,2);assert.match(relative.stderr,/absolute GCC/);
+  const cross=f.build('cjlint',['--target','windows-x64','--tools-gcc-toolchain',prefix]);assert.equal(cross.status,2);assert.match(cross.stderr,/native Linux cjlint/);
 });
