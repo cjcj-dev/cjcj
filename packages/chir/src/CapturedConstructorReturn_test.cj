@@ -48,7 +48,8 @@ private class CapturedReturnFixture {
         }
         // A stored closure escapes: LambdaInline cannot erase the capture.
         let closureTy = ctx.GetFuncTy(ArrayList<Type>(), refTy)
-        let closure = builder.CreateLambda(closureTy, closureTy, entry, identifier: "captureReceiver")
+        let closure = builder.CreateLambda(closureTy, closureTy, entry,
+            identifier: "_CN17captured_receiver15captureReceiverEL_E")
         let closureBody = builder.CreateBlockGroup(fn)
         closure.InitBody(closureBody)
         let closureEntry = builder.CreateBlock(closureBody)
