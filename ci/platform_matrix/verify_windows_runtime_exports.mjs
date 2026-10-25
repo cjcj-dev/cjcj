@@ -112,6 +112,12 @@ const inspected = spawnSync(objdump, ['-p', runtimeDll], {
   encoding: 'utf8',
   maxBuffer: 64 * 1024 * 1024,
 });
+// Preserve the complete PE tables and objdump's own rc on failure as well.
+const dumpRoot=path.resolve(process.env.WINDOWS_EXPORT_DUMP_ROOT||'.platform-ci/windows-native', 'verify-'+process.pid);
+await fs.mkdir(dumpRoot,{recursive:true});
+await fs.writeFile(path.join(dumpRoot,'objdump.stdout'),inspected.stdout||'');
+await fs.writeFile(path.join(dumpRoot,'objdump.stderr'),inspected.stderr||'');
+await fs.writeFile(path.join(dumpRoot,'command.json'),JSON.stringify({argv:[objdump,'-p',runtimeDll],rc:inspected.status,signal:inspected.signal}));
 if (inspected.status !== 0) {
   process.stderr.write(inspected.stderr || String(inspected.error || 'objdump failed'));
   process.exit(inspected.status || 3);
@@ -133,6 +139,10 @@ const imports = new Set(
 );
 // The generated runtime definition is the caller contract. Implementation exports
 // outside that contract may vary with the toolchain and are not checked.
+// This workflow's Reference-generation caller obligations supplement the
+// unchanged historical registered contract; they do not regenerate its def.
+if(argv['reference-services'])for(const symbol of ['CJ_MCC_SetReferenceMethods','CJ_MCC_ReferenceInvokeFinalize',
+ 'CJ_MCC_ReferenceWaitPending','CJ_MCC_ReferenceRuntimeRunning','CJ_MCC_ReferenceNanoTime'])expectedExports.add(symbol);
 const missingExpected = sortedDifference(expectedExports, exports);
 const unexpectedImports = [...imports].filter((dll) => !officialImports.has(dll));
 const missingImports = [...officialImports].filter((dll) => !imports.has(dll));

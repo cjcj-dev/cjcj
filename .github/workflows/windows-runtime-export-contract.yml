@@ -4,13 +4,16 @@ on:
   pull_request:
     paths:
       - 'ci/platform_matrix/verify_windows_runtime_exports*.mjs'
+      - 'ci/platform_matrix/windows_runtime_*.mjs'
+      - 'ci/platform_matrix/windows_runtime_toolchain.cmake'
+      - 'ci/platform_matrix/build_runtime.mjs'
       - '.github/workflows/windows-runtime-export-contract.yml'
   workflow_dispatch:
     inputs:
       runtime_ref:
-        description: Runtime commit providing the generated caller contract
+        description: Published full runtime commit for normal Windows link (source approval is not DLL qualification)
         required: true
-        default: 1a14f0a8ccb685038729d8ca221768884beb5654
+        default: 65ab0659d0e657c92a9ddabe8a10f8bc22dd2eef
         type: string
 
 permissions:
@@ -21,9 +24,12 @@ jobs:
     runs-on: windows-2025
     timeout-minutes: 45
     env:
-      # Fixed integration fixture: runtime's reviewed caller-contract producer.
-      RUNTIME_REF: ${{ inputs.runtime_ref || '1a14f0a8ccb685038729d8ca221768884beb5654' }}
+      # Requires source publication/exact-fetch before dispatch; never an old binary.
+      RUNTIME_REF: ${{ inputs.runtime_ref || '65ab0659d0e657c92a9ddabe8a10f8bc22dd2eef' }}
       RUNTIME_TARGET: windows-x86_64
+      RUNTIME_BUILD_JOBS: '4'
+      COMPILER_CALLER_REF: 8ba3eb11c18527d5641794225b901202071d726f
+      LLVM_CALLER_REF: de7f37458b456c4a7ef1ebe2726d81fcfd9904c2
     steps:
       - uses: actions/checkout@v7
       - uses: actions/checkout@v7
@@ -42,6 +48,7 @@ jobs:
           path-type: inherit
           install: >-
             git make python gzip unzip file binutils
+            mingw-w64-x86_64-binutils
             mingw-w64-x86_64-clang
             mingw-w64-x86_64-cmake
             mingw-w64-x86_64-compiler-rt
@@ -69,11 +76,21 @@ jobs:
           platform: windows-x86_64
           pin: ${{ env.RUNTIME_REF }}
       - name: Build through the production MINGW64 entry
+        id: native
         shell: bash
         run: npx --yes zx@8 ci/platform_matrix/build_runtime.mjs
       - name: Verify the installed runtime contract
         shell: bash
-        run: npx --yes zx@8 ci/platform_matrix/verify_windows_runtime_exports.mjs
+        run: npx --yes zx@8 ci/platform_matrix/verify_windows_runtime_exports.mjs --reference-services
+      - name: Package and consume the same installed runtime
+        shell: bash
+        run: npx --yes zx@8 ci/platform_matrix/windows_runtime_package.mjs
+      - name: Preserve link and install outputs even after a failed post-build contract
+        if: always()
+        shell: bash
+        env:
+          WINDOWS_RUNTIME_BUILD_OUTCOME: ${{ steps.native.outcome }}
+        run: node ci/platform_matrix/windows_runtime_capture.mjs collect
       - name: Report sccache
         if: always()
         uses: ./.github/actions/sccache-report

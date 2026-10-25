@@ -98,6 +98,13 @@ if (process.platform === 'linux') {
   const targetArch = runtimeTarget.slice(targetSeparator + 1);
   const configuredInstallRoot = nativePair ? installRoot : path.join(installRoot, `${targetPlatform}_${buildType}_${targetArch}`);
   artifactRoot = configuredInstallRoot;
+  const jobs=Number(process.env.RUNTIME_BUILD_JOBS||0);
+  if(!Number.isSafeInteger(jobs)||jobs<0)throw Error('invalid RUNTIME_BUILD_JOBS');
+  const evidence = path.resolve(root, 'windows-native');
+  const captureScript = fileURLToPath(new URL('./windows_runtime_capture.mjs', import.meta.url));
+  Object.assign(process.env, {WINDOWS_RUNTIME_EVIDENCE:evidence, WINDOWS_RUNTIME_BUILD_ROOT:path.join(runtimeDirectory,'CMakebuild'),
+    WINDOWS_RUNTIME_CAPTURE_SCRIPT:captureScript, WINDOWS_RUNTIME_NODE:process.execPath, WINDOWS_RUNTIME_TOOLCHAIN:selectedToolchain});
+  await fs.mkdir(evidence,{recursive:true});
   const linkerToolchain = fileURLToPath(new URL('./windows_runtime_toolchain.cmake', import.meta.url));
   const script = [
     'set -euo pipefail',
@@ -113,9 +120,11 @@ if (process.platform === 'linux') {
     `runtime_source="$(cygpath -u ${shellQuote(runtimeDirectory)})"`,
     `runtime_preinstall="$(cygpath -u ${shellQuote(preinstall)})"`,
     `runtime_install="$(cygpath -u ${shellQuote(configuredInstallRoot)})"`,
+    `capture_node="$(cygpath -u ${shellQuote(process.execPath)})"`,
+    `capture_script="$(cygpath -u ${shellQuote(captureScript)})"`,
     'cd "$runtime_source"',
-    `python3 build.py build --target ${runtimeTarget} --build-type ${buildType} --target-toolchain "$runtime_toolchain" --prefix "$runtime_preinstall" -v ${shellQuote(version)}`,
-    'python3 build.py install --prefix "$runtime_install"',
+    `"$capture_node" "$capture_script" run build -- python3 build.py build${jobs?' --jobs '+jobs:''} --target ${runtimeTarget} --build-type ${buildType} --target-toolchain "$runtime_toolchain" --prefix "$runtime_preinstall" -v ${shellQuote(version)}`,
+    '"$capture_node" "$capture_script" run install -- python3 build.py install --prefix "$runtime_install"',
   ].join('\n');
   const command = 'export MSYSTEM=MINGW64 MSYS2_PATH_TYPE=inherit CHERE_INVOKING=1; exec /usr/bin/bash -lc ' + shellQuote(script);
   nativeCommands = [[msysBash, '-c', command]];
@@ -123,11 +132,12 @@ if (process.platform === 'linux') {
   try { result = await $`${toCommandPath(msysBash)} -c ${command}`; }
   catch (error) { result = error; throw error; }
   finally {
-    if (nativePair) await fs.writeFile(path.join(installRoot, 'runtime-native-command.json'), JSON.stringify({
+    await fs.writeFile(path.join(evidence, 'runtime-native-command.json'), JSON.stringify({
       argv:nativeCommands[0], runtimeRef:actualRef, llvmRef:process.env.LLVM_SHA,
       rc:result?.exitCode ?? null, signal:result?.signal ?? null,
-      source:runtimeDirectory, install:installRoot, buildType, version,
+      source:runtimeDirectory, install:configuredInstallRoot, buildType, version,
     }, null, 2) + '\n');
+    if(nativePair)await fs.copyFile(path.join(evidence,'runtime-native-command.json'),path.join(installRoot,'runtime-native-command.json'));
   }
 } else {
   console.error(`FATAL: unsupported runtime build host: ${process.platform}/${process.arch}`);
