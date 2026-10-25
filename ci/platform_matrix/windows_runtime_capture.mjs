@@ -59,15 +59,16 @@ export function collect() {
   const file=path.join(source,'runtime/src',member);if(fs.existsSync(file)){const to=path.join(dir,member);fs.copyFileSync(file,to);manifest.files.push({...fact(to),source:file});}
  }
  const toolchain=process.env.WINDOWS_RUNTIME_TOOLCHAIN||'C:/msys64/mingw64';
- for(const [name,args]of [['clang',['--version']],['ld.lld',['--version']],['cmake',['--version']],['python3',['--version']],['objdump',['--version']]])
+ for(const [name,args]of [['clang',['--version']],['ld.lld',['--version']],['llvm-readobj',['--version']],['cmake',['--version']],['python3',['--version']],['objdump',['--version']]])
   inspect(dir,'tool-'+name,[path.join(toolchain,'bin',name+'.exe'),...args]);
  inspect(dir,'pacman-packages',['C:/msys64/usr/bin/pacman.exe','-Q']);
  const dlls=walk(dir).filter(f=>/\.dll$/i.test(f)),objdump=process.env.OBJDUMP||path.join(toolchain,'bin/objdump.exe');
  manifest.dlls=[];
  for(const [i,dll]of dlls.entries()) {
   const result=inspect(dir,'pe-'+i,[objdump,'-p',dll]);
+  const coff=inspect(dir,'coff-'+i,[path.join(toolchain,'bin/llvm-readobj.exe'),'--coff-exports',dll]);
   const imports=[...(result.stdout||'').matchAll(/^\s*DLL Name:\s*(\S+)/gim)].map(m=>m[1]);
-  const row={...fact(dll),objdumpRc:result.status,imports,dependencies:[]};
+  const row={...fact(dll),objdumpRc:result.status,readobjRc:coff.status,imports,dependencies:[]};
   for(const name of imports) {
    const found=[path.join(path.dirname(dll),name),...walk(build).filter(f=>path.basename(f).toLowerCase()===name.toLowerCase()),path.join(toolchain,'bin',name)]
     .find(f=>fs.existsSync(f));

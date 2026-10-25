@@ -116,7 +116,7 @@ if (process.platform === 'linux') {
     // Select the official llvm-mingw linker before build.py configures CMake.
     `export CMAKE_TOOLCHAIN_FILE="$(cygpath -m ${shellQuote(linkerToolchain)})"`,
     ...(nativePair ? [`export SCCACHE_PATH="$(cygpath -m ${shellQuote(process.env.SCCACHE_PATH)})"`] : []),
-    'command -v cmake ninja clang; cmake --version | head -1',
+    'command -v cmake ninja clang llvm-readobj; cmake --version | head -1; llvm-readobj --version',
     `runtime_source="$(cygpath -u ${shellQuote(runtimeDirectory)})"`,
     `runtime_preinstall="$(cygpath -u ${shellQuote(preinstall)})"`,
     `runtime_install="$(cygpath -u ${shellQuote(configuredInstallRoot)})"`,

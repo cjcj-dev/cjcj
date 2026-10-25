@@ -17,7 +17,11 @@ authorized by this document. The old successful run is not this run's evidence.
 
 `actions/checkout` obtains the runtime's tracked sources, including boundscheck
 and CJThread. MSYS2 installs the declared MINGW64 packages. Actual package/tool
-versions are recorded, rather than treating the rolling package indexes as a
+versions are recorded. The declared `mingw-w64-x86_64-llvm-tools` package
+provides the `llvm-readobj` used by the runtime successor's normal CMake
+`WINDOWS_EXPORT_READOBJ` lookup and complete COFF export check; this is a host
+package tool, not our stopped N candidate. Both objdump and readobj output/rc
+are retained. Actual versions are recorded rather than treating the rolling package indexes as a
 fixed compiler version. C8ba3/Nde7f are source-only caller-audit coordinates for
 the runtime owner, not fetched or executed by this native producer. Their
 source qualification does not authorize any compiler/std/SDK production.
