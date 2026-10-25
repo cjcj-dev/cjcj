@@ -183,6 +183,10 @@ return {...r,source};}
  }
  await write(legacy+'/.source-selection.json',JSON.stringify(choices));
  const legacyBoundary={...boundaries,
+  // This test's C-only std producer cannot create a complete nine-tool SDK.
+  // The public stages and actual runtime split/snapshot remain under test;
+  // full installation stays explicitly outside this finite component gate.
+  'ci/bootstrap/sdk-flow.mjs':{installProducts:'if(arguments[0]?.selection?.platform!=="linux_x86_64")throw Error("CONTROLLED_INSTALL_SELECTION_REQUIRED");console.log("CONTROLLED_COMPLETE_SDK_INSTALL_NOT_RUN");'},
   'build/lib/provenance.mjs':{writeStdProvenance:'console.log("CONTROLLED_CANGJIE_STD_PROVENANCE_NOT_RUN");'},
   'build/srcbuild/gc-unit-gate.mjs':{...boundaries['build/srcbuild/gc-unit-gate.mjs'],
    runGcUnitLanguageTests:'console.log("LEGACY_LANGUAGE_PRODUCER_ASSERT_REACHED");if(arguments[2]?.source!==process.env.CJCJ_NATIVE_RUNTIME_SOURCE)throw Error("LEGACY_LANGUAGE_PRODUCER_REQUIRED");console.log("CONTROLLED_LEGACY_LANGUAGE_SOURCE_SELECTED "+arguments[2].source);'}};
@@ -207,6 +211,7 @@ return {...r,source};}
   const std=await run('legacy-stdlib-'+buildType,[...cli,'build','stdlib'],legacyEnv);
   assert.match(std.stdout+std.stderr,/LEGACY_NATIVE_VALUE=42/);
   assert.match(std.stdout+std.stderr,/CONTROLLED_LEGACY_LANGUAGE_SOURCE_SELECTED/);
+  assert.match(std.stdout+std.stderr,/CONTROLLED_COMPLETE_SDK_INSTALL_NOT_RUN/);
   await run('legacy-runtime-repeat-'+buildType,[...cli,'build','runtime'],legacyEnv);
  }
  console.log('RUNTIME_FORMAL_FINITE_PASS '+JSON.stringify({mode,root,commit,stamp:facts.embedded_stamp,commands:records.length,CPP:'NOT_RUN'}));
