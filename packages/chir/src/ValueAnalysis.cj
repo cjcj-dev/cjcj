@@ -92,17 +92,22 @@ public open class ValueAnalysis<VD, Pool> <: Analysis<State<VD, Pool>> where VD 
             kind == ExprKind.INVOKESTATIC || kind == ExprKind.TRY_INVOKESTATIC ||
             kind == ExprKind.INTRINSIC || kind == ExprKind.TRY_INTRINSIC ||
             kind == ExprKind.SPAWN || kind == ExprKind.TRY_SPAWN) {
-            for (location in escapedLocations) {
-                let object = state.CheckAbstractObjectRefBy(location)
-                state.SetSelfAndChildrenStateToTop(location)
-                if (let Some(root) <- object) {
-                    InvalidateEscapedChildren(state, root)
-                }
+            InvalidateEscapedStorage(state)
+        }
+    }
+
+    private func InvalidateEscapedStorage(state: State<VD, Pool>): Unit {
+        for (location in escapedLocations) {
+            let object = state.CheckAbstractObjectRefBy(location)
+            state.SetSelfAndChildrenStateToTop(location)
+            if (let Some(root) <- object) {
+                InvalidateEscapedChildren(state, root)
             }
-            for (location in escapedElementRefs) {
-                if (state.programState.Contains(location)) {
-                    state.SetToTopOrTopRef(location, true)
-                }
+        }
+        for (location in escapedElementRefs) {
+            if (state.programState.Contains(location)) {
+                state.InvalidateReferenceTarget(location)
+                state.SetToTopOrTopRef(location, true)
             }
         }
     }
@@ -225,7 +230,11 @@ public open class ValueAnalysis<VD, Pool> <: Analysis<State<VD, Pool>> where VD 
 
     protected open func PreHandleGetElementRefExpr(state: State<VD, Pool>, getElemRef: GetElementRef): Unit {
         let dest = getElemRef.GetResult().getOrThrow()
-        if (!state.programState.Contains(dest)) {
+        // A loop back edge can carry this definition's invalidated TopRef.
+        // Rebind it to its stable expression reference before recording the
+        // newly evaluated address; TopRef itself has no refMap entry.
+        if (!state.programState.Contains(dest) ||
+            state.programState.At(dest).GetRef().getOrThrow().IsTopRefInstance()) {
             let destRef = state.CreateNewRef(expr: Some(getElemRef))
             state.programState.SetRef(dest, destRef)
             state.refMap.Set(destRef, RefMapValue.ObjectTarget(FindTargetElement(state, getElemRef)))
@@ -389,12 +398,15 @@ public open class ValueAnalysis<VD, Pool> <: Analysis<State<VD, Pool>> where VD 
         CJC_ASSERT(locDomain.GetKind() == ValueDomainKind.REF)
         let locRef = locDomain.GetRef().getOrThrow()
         if (locRef.IsTopRefInstance()) {
+            InvalidateEscapedStorage(state)
             return
         }
         if (let Some(locRefVal) <- state.refMap.Get(locRef)) {
             match (locRefVal) {
                 case RefMapValue.ObjectTarget(dest) =>
-                    if (!dest.IsTopObjInstance()) {
+                    if (dest.IsTopObjInstance()) {
+                        InvalidateEscapedStorage(state)
+                    } else {
                         let local = (location as LocalVar).getOrThrow()
                         if (local.GetExpr().getOrThrow().GetExprKind() == ExprKind.GET_ELEMENT_REF) {
                             state.PropagateWithoutChildren(value, dest)

@@ -756,6 +756,25 @@ public class State<VD, Pool> <: AbstractDomain<State<VD, Pool>> where VD <: Abst
         }
     }
 
+    // Forget the storage binding shared by address aliases, not the object
+    // previously loaded from that storage. Loaded object snapshots keep their
+    // own reference and must retain their facts after a field is overwritten.
+    public func InvalidateReferenceTarget(address: Value): Unit {
+        if (let Some(domain) <- CheckAbstractValueWithTopBottom(address)) {
+            if (let Some(refValue) <- domain.GetRef()) {
+                if (refValue.IsTopRefInstance()) { return }
+                if (let Some(target) <- refMap.Get(refValue)) {
+                    match (target) {
+                        case RefMapValue.RefTarget(_) =>
+                            refMap.Set(refValue, RefMapValue.RefTarget(Ref.GetTopRefInstance()))
+                        case RefMapValue.ObjectTarget(_) =>
+                            refMap.Set(refValue, RefMapValue.ObjectTarget(AbstractObject.GetTopObjInstance()))
+                    }
+                }
+            }
+        }
+    }
+
     public func GetAbstractDomain(obj: Value): Option<VD> {
         var absObj: Option<Value> = obj
         if (let Some(ty) <- obj.GetType()) {

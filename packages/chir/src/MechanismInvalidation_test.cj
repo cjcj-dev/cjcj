@@ -1,7 +1,7 @@
 package cjcj::chir
 
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
-import cjcj::option.GlobalOptions
+import cjcj::option.{GlobalOptions, OptimizationFlag}
 import std.collection.*
 import std.unittest.*
 import std.unittest.testmacro.*
@@ -639,4 +639,230 @@ public class ReachingDefinitionDispatchMechanismTest {
     @TestCase public func TryInvokeStaticNoEscapeControl(): Unit { Check("tryInvokeStatic", escaped: false) }
     @TestCase public func TrySpawnNoEscapeControl(): Unit { Check("trySpawn", escaped: false) }
 
+}
+
+// Addresses kept in typed slots remain mutable storage, unlike loaded values.
+private class AliasFollowthroughFixture {
+    let c = CHIRContext()
+    let b: CHIRBuilder
+    let fn: Function
+    let body: BlockGroup
+    let entry: Block
+    let storageTy: StructType
+    let storage: Value
+    let pointer: Value
+    let ret: Allocate
+
+    init(name: String, cStruct!: Bool = false) {
+        b = CHIRBuilder(c)
+        fn = b.CreateFunction(c.GetFuncTy(ArrayList<Type>(), c.GetUnitTy()), name, packageName: "aliasFixture")
+        body = b.CreateBlockGroup(fn)
+        fn.InitBody(body)
+        entry = b.CreateBlock(body)
+        body.SetEntryBlock(entry)
+        ret = b.CreateAllocate(c.GetRefTy(c.GetUnitTy()), c.GetUnitTy(), entry)
+        fn.SetReturnValue(ret.GetResult().getOrThrow())
+        let def = b.CreateStructDef("aliasFixture", "Storage")
+        storageTy = c.GetStructTy(def, ArrayList<Type>())
+        def.SetType(storageTy)
+        def.SetCStruct(cStruct)
+        def.AddInstanceVar(MemberVarInfo("item", c.GetInt64Ty()))
+        let root = b.CreateAllocate(c.GetRefTy(storageTy), storageTy, entry)
+        storage = root.GetResult().getOrThrow()
+        let io = b.CreateIntrinsic(c.GetCPointerTy(storageTy),
+            IntrisicCallContext(kind: IntrinsicKind.INOUT_PARAM, args: ArrayList<Value>([storage])), entry)
+        let ptr = b.CreateIntrinsic(c.GetCPointerTy(storageTy),
+            IntrisicCallContext(kind: IntrinsicKind.CPOINTER_INIT1, args: ArrayList<Value>([io.GetResult().getOrThrow()])), entry)
+        pointer = ptr.GetResult().getOrThrow()
+        entry.AppendExpressions(ArrayList<Expression>([ret, root, io, ptr]))
+    }
+
+    func Finish(): Unit {
+        let params = ArrayList<Type>()
+        for (p in fn.GetParams()) { params.add(p.GetType().getOrThrow()) }
+        fn.SetType(c.GetFuncTy(params, c.GetUnitTy()))
+        CheckMechanismIR(fn, b)
+    }
+
+    func Writer(block: Block): Apply {
+        let callee = b.CreateFunction(c.GetFuncTy(ArrayList<Type>([c.GetCPointerTy(storageTy)]), c.GetUnitTy()), "opaqueAliasWriter")
+        return b.CreateApply(c.GetUnitTy(), callee, FuncCallContext(args: ArrayList<Value>([pointer])), block)
+    }
+}
+
+@Test
+public class AliasFollowthroughTest {
+    private func Loop(write: Bool): Unit {
+        // The actual compiler also produces this CType shape from source.
+        let f = AliasFollowthroughFixture("loopAddress", cStruct: true)
+        let b = f.b
+        let c = f.c
+        let loop = b.CreateBlock(f.body)
+        let exit = b.CreateBlock(f.body)
+        let keep = b.CreateParameter(c.GetBoolTy(), DebugLocation(), f.fn)
+        f.entry.AppendExpression(b.CreateGoTo(loop, f.entry))
+        let field = b.CreateGetElementRef(c.GetRefTy(c.GetInt64Ty()), f.storage, ArrayList<UInt64>([0u64]), loop)
+        let load = b.CreateLoad(c.GetInt64Ty(), field.GetResult().getOrThrow(), loop)
+        loop.AppendExpressions(ArrayList<Expression>([field, load]))
+        if (write) { loop.AppendExpression(f.Writer(loop)) }
+        loop.AppendExpression(b.CreateBranch(keep, loop, exit, loop))
+        exit.AppendExpression(b.CreateExit(None, exit))
+        f.Finish()
+        println("ALIAS F1 checker passed write=${write}; starting loop fixpoint")
+        let result = ConstAnalysisWrapper(b).RunOnFunc(f.fn, BasicDiagnosticEngine())
+        @Expect(result.isSome(), true)
+        println("ALIAS F1 loop completed write=${write}")
+    }
+
+    private func UnknownStore(write: Bool, unrelated!: Bool = false): Unit {
+        let f = AliasFollowthroughFixture("unknownFieldStore")
+        let c = f.c
+        let b = f.b
+        let block = f.entry
+        let zero = b.CreateConstant(c.GetInt64Ty(), IntLiteral(0), block)
+        block.AppendExpressions(ArrayList<Expression>([zero,
+            b.CreateStoreElementRef(zero.GetResult().getOrThrow(), f.storage, ArrayList<UInt64>([0u64]), block)]))
+        let old = b.CreateGetElementRef(c.GetRefTy(c.GetInt64Ty()), f.storage, ArrayList<UInt64>([0u64]), block)
+        block.AppendExpressions(ArrayList<Expression>([old, f.Writer(block)]))
+        let slot = b.CreateAllocate(c.GetRefTy(c.GetRefTy(c.GetInt64Ty())), c.GetRefTy(c.GetInt64Ty()), block)
+        let save = b.CreateStore(old.GetResult().getOrThrow(), slot.GetResult().getOrThrow(), block)
+        let one = b.CreateConstant(c.GetInt64Ty(), IntLiteral(1), block)
+        let two = b.CreateConstant(c.GetInt64Ty(), IntLiteral(2), block)
+        let rebuild = b.CreateStoreElementRef(one.GetResult().getOrThrow(), f.storage, ArrayList<UInt64>([0u64]), block)
+        let alias = b.CreateLoad(c.GetRefTy(c.GetInt64Ty()), slot.GetResult().getOrThrow(), block)
+        block.AppendExpressions(ArrayList<Expression>([slot, save, one, two, rebuild, alias]))
+        if (write) {
+            let dest: Value = if (unrelated) {
+                let separate = b.CreateAllocate(c.GetRefTy(c.GetInt64Ty()), c.GetInt64Ty(), block)
+                block.AppendExpression(separate)
+                separate.GetResult().getOrThrow()
+            } else { alias.GetResult().getOrThrow() }
+            block.AppendExpression(b.CreateStore(two.GetResult().getOrThrow(), dest, block))
+        }
+        let fresh = b.CreateGetElementRef(c.GetRefTy(c.GetInt64Ty()), f.storage, ArrayList<UInt64>([0u64]), block)
+        let out = b.CreateLoad(c.GetInt64Ty(), fresh.GetResult().getOrThrow(), block)
+        // A real store consumer keeps the returned scalar live for CP rewriting.
+        let sink = b.CreateAllocate(c.GetRefTy(c.GetInt64Ty()), c.GetInt64Ty(), block)
+        let consume = b.CreateStore(out.GetResult().getOrThrow(), sink.GetResult().getOrThrow(), block)
+        block.AppendExpressions(ArrayList<Expression>([fresh, out, sink, consume, b.CreateExit(None, block)]))
+        f.Finish()
+        let pkg = b.CreatePackage("aliasCP")
+        pkg.AddGlobalFunc(f.fn)
+        let wrapper = ConstAnalysisWrapper(b)
+        wrapper.RunOnPackage(pkg, BasicDiagnosticEngine(), 1)
+        let opts = GlobalOptions()
+        opts.SelectCHIROpt(OptimizationFlag.CONST_PROPAGATION)
+        ConstPropagation(builder: Some(b), wrapper: wrapper, opts: opts).RunOnFunc(f.fn)
+        let producer = (consume.GetValue() as LocalVar).getOrThrow().GetExpr().getOrThrow()
+        let shouldFold = !write || unrelated
+        @Expect(producer.GetExprKind() == ExprKind.CONSTANT, shouldFold)
+        if (shouldFold) {
+            let literal = ((producer as Constant).getOrThrow().GetValue() as IntLiteral).getOrThrow()
+            @Expect(literal.GetSignedVal(), 1)
+        }
+        println("ALIAS F3 CP consumer kind=${producer.GetExprKindName()} write=${write} unrelated=${unrelated}")
+    }
+
+    private func SavedFieldAddress(write: Bool, reload!: Bool = false): Unit {
+        let c = CHIRContext()
+        let b = CHIRBuilder(c)
+        let pkg = b.CreatePackage("aliasDevirt")
+        let def = b.CreateClassDef("aliasDevirt", "Base", "Base")
+        let ty = c.GetClassTy(def, ArrayList<Type>())
+        def.SetType(ty)
+        def.EnableAttr(Attribute.VIRTUAL)
+        def.EnableAttr(Attribute.PUBLIC)
+        pkg.AddClass(def)
+        let sub = b.CreateClassDef("aliasDevirt", "Derived", "Derived")
+        let subTy = c.GetClassTy(sub, ArrayList<Type>())
+        sub.SetType(subTy)
+        sub.SetSuperClassTy(ty)
+        pkg.AddClass(sub)
+        let method = b.CreateFunction(c.GetFuncTy(ArrayList<Type>([c.GetRefTy(ty)]), c.GetUnitTy()),
+            "Base.f", srcCodeIdentifier: "f", packageName: "aliasDevirt")
+        method.EnableAttr(Attribute.VIRTUAL)
+        method.EnableAttr(Attribute.PUBLIC)
+        method.SetOuterDeclaredOrExtendedDef(def)
+        def.AddMethod(method)
+        let overrideMethod = b.CreateFunction(c.GetFuncTy(ArrayList<Type>([c.GetRefTy(subTy)]), c.GetUnitTy()),
+            "Derived.f", srcCodeIdentifier: "f", packageName: "aliasDevirt")
+        overrideMethod.EnableAttr(Attribute.PUBLIC)
+        overrideMethod.EnableAttr(Attribute.VIRTUAL)
+        overrideMethod.SetOuterDeclaredOrExtendedDef(sub)
+        sub.AddMethod(overrideMethod)
+        VTableGenerator(b).GenerateVTable(def)
+        VTableGenerator(b).GenerateVTable(sub)
+        let fn = b.CreateFunction(c.GetFuncTy(ArrayList<Type>(), c.GetUnitTy()), "savedFieldAddress", packageName: "aliasDevirt")
+        let body = b.CreateBlockGroup(fn)
+        fn.InitBody(body)
+        let block = b.CreateBlock(body)
+        body.SetEntryBlock(block)
+        let ret = b.CreateAllocate(c.GetRefTy(c.GetUnitTy()), c.GetUnitTy(), block)
+        fn.SetReturnValue(ret.GetResult().getOrThrow())
+        let holder = b.CreateStructDef("aliasDevirt", "Holder")
+        let holderTy = c.GetStructTy(holder, ArrayList<Type>())
+        holder.SetType(holderTy)
+        holder.AddInstanceVar(MemberVarInfo("item", c.GetRefTy(ty)))
+        let replacement = b.CreateParameter(holderTy, DebugLocation(), fn)
+        let object = b.CreateAllocate(c.GetRefTy(ty), ty, block)
+        let storage = b.CreateAllocate(c.GetRefTy(holderTy), holderTy, block)
+        let io = b.CreateIntrinsic(c.GetCPointerTy(holderTy), IntrisicCallContext(kind: IntrinsicKind.INOUT_PARAM,
+            args: ArrayList<Value>([storage.GetResult().getOrThrow()])), block)
+        let pointer = b.CreateIntrinsic(c.GetCPointerTy(holderTy), IntrisicCallContext(kind: IntrinsicKind.CPOINTER_INIT1,
+            args: ArrayList<Value>([io.GetResult().getOrThrow()])), block)
+        let fieldTy = c.GetRefTy(c.GetRefTy(ty))
+        let field = b.CreateGetElementRef(fieldTy, storage.GetResult().getOrThrow(), ArrayList<UInt64>([0u64]), block)
+        let slot = b.CreateAllocate(c.GetRefTy(fieldTy), fieldTy, block)
+        let save = b.CreateStore(field.GetResult().getOrThrow(), slot.GetResult().getOrThrow(), block)
+        let alias = b.CreateLoad(fieldTy, slot.GetResult().getOrThrow(), block)
+        let store = b.CreateStore(object.GetResult().getOrThrow(), alias.GetResult().getOrThrow(), block)
+        let snapshot = b.CreateLoad(c.GetRefTy(ty), alias.GetResult().getOrThrow(), block)
+        block.AppendExpressions(ArrayList<Expression>([ret, object, storage, io, pointer, field, slot, save, alias, store, snapshot]))
+        if (write) {
+            let zero = b.CreateConstant(c.GetInt64Ty(), IntLiteral(0), block)
+            let call = b.CreateIntrinsic(c.GetUnitTy(), IntrisicCallContext(kind: IntrinsicKind.CPOINTER_WRITE,
+                args: ArrayList<Value>([pointer.GetResult().getOrThrow(), zero.GetResult().getOrThrow(), replacement]),
+                instTypeArgs: ArrayList<Type>([holderTy])), block)
+            block.AppendExpressions(ArrayList<Expression>([zero, call]))
+        }
+        let observed: Value = if (reload) {
+            let again = b.CreateLoad(fieldTy, slot.GetResult().getOrThrow(), block)
+            block.AppendExpression(again)
+            again.GetResult().getOrThrow()
+        } else { alias.GetResult().getOrThrow() }
+        let post = b.CreateLoad(c.GetRefTy(ty), observed, block)
+        let invoke = b.CreateInvoke(c.GetUnitTy(), InvokeCallContext(method, post.GetResult().getOrThrow(),
+            FuncCallContext(thisType: Some(ty))), block)
+        let snapshotInvoke = b.CreateInvoke(c.GetUnitTy(), InvokeCallContext(method, snapshot.GetResult().getOrThrow(),
+            FuncCallContext(thisType: Some(ty))), block)
+        block.AppendExpressions(ArrayList<Expression>([post, invoke, snapshotInvoke, b.CreateExit(None, block)]))
+        fn.SetType(c.GetFuncTy(ArrayList<Type>([holderTy]), c.GetUnitTy()))
+        CheckMechanismIR(fn, b)
+        pkg.AddGlobalFunc(fn)
+        let info = DevirtualizationInfo(pkg)
+        let wrapper = AnalysisWrapper<TypeAnalysis, TypeDomain>(b)
+        wrapper.RunOnPackage(pkg, false, 1, { f, builder, debug => TypeAnalysis(f, builder, debug, info) })
+        let opts = GlobalOptions()
+        opts.SelectCHIROpt(OptimizationFlag.DEVIRTUALIZATION)
+        Devirtualization(wrapper, info, b, pkg, opts).RunOnFuncs(ArrayList<Function>([fn]))
+        var calls: Int64 = 0
+        var dynamicCalls: Int64 = 0
+        for (expr in block.GetExpressions()) {
+            if (expr.GetExprKind() == ExprKind.APPLY) { calls++ }
+            if (expr.GetExprKind() == ExprKind.INVOKE) { dynamicCalls++ }
+        }
+        @Expect(calls, if (write) { 1 } else { 2 })
+        @Expect(dynamicCalls, if (write) { 1 } else { 0 })
+        println("ALIAS F2 devirt direct=${calls} dynamic=${dynamicCalls} write=${write} reload=${reload}; snapshot must stay exact")
+    }
+
+    @TestCase public func F2SavedAddress(): Unit { SavedFieldAddress(true) }
+    @TestCase public func F2ReloadSavedAddress(): Unit { SavedFieldAddress(true, reload: true) }
+    @TestCase public func F2NoWriteControl(): Unit { SavedFieldAddress(false) }
+
+    @TestCase public func F1LoopAddress(): Unit { Loop(true) }
+    @TestCase public func F1LoopNoWriteControl(): Unit { Loop(false) }
+    @TestCase public func F3UnknownAddressStore(): Unit { UnknownStore(true) }
+    @TestCase public func F3NoWriteControl(): Unit { UnknownStore(false) }
+    @TestCase public func F3UnrelatedStoreControl(): Unit { UnknownStore(true, unrelated: true) }
 }
