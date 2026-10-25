@@ -8,6 +8,7 @@ import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {hostToolchainFromCjcVersion} from '../../ci/host-toolchain-pin.mjs';
+import {buildConfig} from '../lib/config.mjs';
 const repo=new URL('../../',import.meta.url).pathname;
 const base=process.env.RELEASE_EVIDENCE_TEST_ROOT,generator=process.env.CJCJ_TEST_RUNTIME_GENERATOR,host=process.env.CJCJ_SRCBUILD_HOST_SDK;
 if(!base||!generator||!host)throw Error('runtime component test requires evidence root, original generator and complete private host');
@@ -172,6 +173,14 @@ return {...r,source};}
  await fs.mkdir(carried+'/share/runtime-build',{recursive:true});
  const legacy=root+'/legacy';await fs.mkdir(legacy);
  await run('legacy-source-clone',['git','clone',origin,legacy+'/cangjie_runtime'],consumer);
+ // The public CLI resolves every selected source before entering runtime/std.
+ // Materialize finite Git inputs for those unchanged boundaries as well.
+ const legacyConfig=buildConfig({workspace:legacy,targetKey:'linux-x64'}),choices={};
+ for(const name of ['compiler','runtime','tools','stdx','llvm','cjpm']) {
+  if(name!=='runtime')await run('legacy-'+name+'-clone',['git','clone',origin,legacyConfig.repoPath(name)],consumer);
+  choices[name]={url:origin,tag:commit};
+ }
+ await write(legacy+'/.source-selection.json',JSON.stringify(choices));
  const legacyBoundary={...boundaries,
   'build/lib/provenance.mjs':{writeStdProvenance:'console.log("CONTROLLED_CANGJIE_STD_PROVENANCE_NOT_RUN");'},
   'build/srcbuild/gc-unit-gate.mjs':{...boundaries['build/srcbuild/gc-unit-gate.mjs'],
