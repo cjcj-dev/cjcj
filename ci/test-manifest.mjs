@@ -51,6 +51,7 @@ export const GATING = Object.freeze([
   'ci/bootstrap/native-runtime-input.test.mjs',
   'ci/bootstrap/native-host.test.mjs',
   'build/test/runtime-command-entry.test.mjs',
+  'build/test/installed-language-259.test.mjs',
   'build/test/sdk-tools-profile.test.mjs',
   'build/test/native-tool-layout.test.mjs',
   'build/test/tool-readiness.test.mjs',

@@ -10,6 +10,7 @@ import {hostPlatform} from '../host-toolchain-pin.mjs';
 import {sdkPlatform} from './sdk-platform.mjs';
 import {checkNativeInput} from './sdk-native-input-check.mjs';
 import {assertLanguageState, GC_UNIT_LANGUAGE_DEFERRED, GC_UNIT_LANGUAGE_DONE} from '../../build/srcbuild/gc-unit-gate.mjs';
+import {languageSourceInputs} from '../../build/srcbuild/installed-language-source.mjs';
 export {nativePair} from '../runtime-pin.mjs';
 export async function receiveNativeRuntime({root, sourceRoot, sourceRepository, configuration, platform, llvmCommit, runtimeCommit, hostVersion, work, gateStatus}) {
   root = await privateRoot(root);
@@ -35,9 +36,10 @@ export async function receiveNativeRuntime({root, sourceRoot, sourceRepository, 
     if(!['defer','all','only'].includes(mode))throw new Error('NATIVE_RUNTIME_LANGUAGE_MODE');
     const fields=assertLanguageState(status,mode==='defer'?GC_UNIT_LANGUAGE_DEFERRED:GC_UNIT_LANGUAGE_DONE,'native.receive');
     if(fields.get('CPP_SUITE')!=='PASS')throw new Error('NATIVE_RUNTIME_CPP_RESULT');
-    for(const directory of new Set([runtime,path.join(carried,'runtime')]))
-      for(const member of ['tests/gc_unit/gate_gc_unit.sh','tests/gc_unit/language_toolchain.mjs',
-        'CMakebuild/compile_commands.json'])await fs.access(path.join(directory,member));
+    for(const directory of new Set([runtime,path.join(carried,'runtime')])) {
+      languageSourceInputs(directory,{installed:directory===path.join(carried,'runtime')});
+      await fs.access(path.join(directory,'CMakebuild/compile_commands.json'));
+    }
     // Return the installed source root used by transport/SDK graph consumers.
     sourceRoot=carried;
     await fs.access(path.join(root,'runtime/include/schedule.h'));
