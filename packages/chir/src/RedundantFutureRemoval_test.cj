@@ -14,7 +14,7 @@ private class ReceiverFutureFixture {
     public let constructor: Function
     public let allocation: Allocate
     public let initCall: Apply
-    public let spawn: Spawn
+    public let spawnExpr: Spawn
     public let execute: Function
 
     public init() {
@@ -41,8 +41,8 @@ private class ReceiverFutureFixture {
         allocation = builder.CreateAllocate(refTy, ty, block)
         initCall = builder.CreateApply(refTy, constructor,
             FuncCallContext(args: ArrayList<Value>([allocation.GetResult().getOrThrow(), closure])), block)
-        spawn = builder.CreateSpawn(refTy, initCall.GetResult().getOrThrow(), block)
-        block.AppendExpressions(ArrayList<Expression>([allocation, initCall, spawn]))
+        spawnExpr = builder.CreateSpawn(refTy, initCall.GetResult().getOrThrow(), block)
+        block.AppendExpressions(ArrayList<Expression>([allocation, initCall, spawnExpr]))
     }
 
     public func AddGet(withTimeout: Bool): Apply {
@@ -83,8 +83,8 @@ class RedundantFutureRemovalTest {
             let get = f.AddGet(withTimeout)
             f.Finish()
             @Expect(RedundantFutureRemoval(f.pkg).RunOnFunc(f.fn), 0)
-            @Expect(f.spawn.IsExecuteClosure(), false)
-            @Expect(f.spawn.GetFuture().nodeId, receiver.nodeId)
+            @Expect(f.spawnExpr.IsExecuteClosure(), false)
+            @Expect(f.spawnExpr.GetFuture().nodeId, receiver.nodeId)
             @Expect(get.GetOperand(1).nodeId, receiver.nodeId)
             @Expect(f.initCall.GetParentBlock().isSome(), true)
             @Expect(f.allocation.GetParentBlock().isSome(), true)
@@ -105,9 +105,9 @@ class RedundantFutureRemovalTest {
             }
             f.Finish()
             @Expect(RedundantFutureRemoval(f.pkg).RunOnFunc(f.fn), 1)
-            @Expect(f.spawn.IsExecuteClosure(), true)
-            @Expect(f.spawn.GetClosure().nodeId, f.closure.nodeId)
-            @Expect(f.spawn.GetExecuteClosure().getOrThrow().nodeId, f.execute.nodeId)
+            @Expect(f.spawnExpr.IsExecuteClosure(), true)
+            @Expect(f.spawnExpr.GetClosure().nodeId, f.closure.nodeId)
+            @Expect(f.spawnExpr.GetExecuteClosure().getOrThrow().nodeId, f.execute.nodeId)
             @Expect(f.initCall.GetParentBlock().isNone(), true)
             @Expect(f.allocation.GetParentBlock().isNone(), true)
             for (debug in debugs) {
@@ -129,7 +129,7 @@ class RedundantFutureRemovalTest {
         f.Finish()
         @Expect(RedundantFutureRemoval(f.pkg).RunOnFunc(f.fn), 0)
         @Expect(call.GetOperand(1).nodeId, raw.nodeId)
-        @Expect(f.spawn.GetFuture().nodeId, f.initCall.GetResult().getOrThrow().nodeId)
+        @Expect(f.spawnExpr.GetFuture().nodeId, f.initCall.GetResult().getOrThrow().nodeId)
     }
 
     @TestCase
@@ -157,7 +157,7 @@ class RedundantFutureRemovalTest {
         f.constructor.SetOuterDeclaredOrExtendedDef(other)
         f.Finish()
         @Expect(RedundantFutureRemoval(f.pkg).RunOnFunc(f.fn), 0)
-        @Expect(f.spawn.IsExecuteClosure(), false)
+        @Expect(f.spawnExpr.IsExecuteClosure(), false)
     }
 
     @TestCase
@@ -168,7 +168,7 @@ class RedundantFutureRemovalTest {
         f.block.AppendExpression(second)
         f.Finish()
         @Expect(RedundantFutureRemoval(f.pkg).RunOnFunc(f.fn), 0)
-        @Expect(f.spawn.IsExecuteClosure(), false)
+        @Expect(f.spawnExpr.IsExecuteClosure(), false)
         @Expect(second.IsExecuteClosure(), false)
     }
 }
