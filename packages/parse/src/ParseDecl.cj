@@ -1329,7 +1329,7 @@ extend ParserImpl {
         }
         let funcBody = decl.funcBody.getOrThrow()
         if (funcBody.retType.isNone() && !funcBody.TestAttr(Attribute.HAS_BROKEN)) {
-            ParseDiagnoseRefactor(functionMustHaveReturnType, decl).Emit()
+            ParseDiagnoseRefactor(functionMustHaveReturnType, decl, decl.identifier.Val()).Emit()
             decl.EnableAttr(Attribute.IS_BROKEN)
         }
         if (funcBody.body.isSome()) {
