@@ -1,6 +1,5 @@
 """Synchronous, inherited CPU envelope; never rewrite compiler arguments."""
 import ctypes
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -42,20 +41,18 @@ def enter():
             raise OSError(ctypes.get_errno(), 'PR_SET_PDEATHSIG')
         if os.getppid() != parent:
             terminate_children(signal.SIGTERM, None)
-        quota, period = (group() / 'cpu.max').read_text().split()
-        affinity = sorted(os.sched_getaffinity(0))
-        if quota == 'max' or int(quota) > 96 * int(period) or len(affinity) != 96:
-            raise RuntimeError('CPU_ENVELOPE: expected 96 CPUs and quota <=96 CPUs')
-        return dict(cgroup=str(group()), cpu_max=f'{quota} {period}', affinity=affinity)
-    available = sorted(os.sched_getaffinity(0))
-    if len(available) < 96:
-        raise RuntimeError('CPU_ENVELOPE: requires 96 available CPUs')
-    cpus = ','.join(map(str, available[-96:]))
-    unit = 'cangjie-test-' + str(os.getpid()) + '-' + hashlib.sha256(os.getcwd().encode()).hexdigest()[:8]
-    env = dict(os.environ, CANGJIE_TEST_SCOPE=unit)
-    command = ['systemd-run', '--scope', '--quiet', '--unit=' + unit,
-               '-p', 'AllowedCPUs=' + cpus, '-p', 'CPUQuota=9600%',
-               sys.executable, *sys.argv]
+        return json.loads(subprocess.check_output(
+            ['node', str(Path(__file__).with_suffix('.mjs')), 'verify'], text=True))
+    policy = str(Path(__file__).with_suffix('.mjs'))
+    plan = json.loads(subprocess.check_output(['node', policy, 'plan'], text=True))
+    properties = json.loads(subprocess.check_output(
+        ['node', policy, 'options', json.dumps(plan)], text=True))
+    unit = plan['unit']
+    env = dict(os.environ, CANGJIE_TEST_SCOPE=unit, CANGJIE_TEST_ENVELOPE=json.dumps(plan))
+    command = ['systemd-run', '--scope', '--quiet', '--unit=' + unit]
+    for value in properties:
+        command += ['-p', value]
+    command += [sys.executable, *sys.argv]
     def stop(signum, frame):
         subprocess.run(['systemctl', 'stop', unit + '.scope'], check=False)
         raise SystemExit(128 + signum)
