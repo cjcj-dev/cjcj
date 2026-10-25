@@ -6800,10 +6800,10 @@ private func GetTypeDefFromImplicitUsedFuncParam(cgModule: CGModule, funcName: S
 }
 
 private func CreateImplicitUsedFuncCall(irBuilder: IRBuilder2, funcMangledName: String,
-    args: ArrayList<LLVMValueRef>): Unit {
+    args: ArrayList<LLVMValueRef>): LLVMValueRef {
     let implicitImportedFunc = irBuilder.GetCGModule().GetOrInsertCGFunction(
         irBuilder.GetCGContext().GetCGPkgContext().FindCHIRGlobalValue(funcMangledName).getOrThrow())
-    let _ = irBuilder.CreateCallOrInvoke(implicitImportedFunc.GetRawFunction(), args)
+    return irBuilder.CreateCallOrInvoke(implicitImportedFunc.GetRawFunction(), args)
 }
 
 private func CreateExceptionAndThrow(irBuilder: IRBuilder2, exceptionClassName: String,
@@ -6811,7 +6811,7 @@ private func CreateExceptionAndThrow(irBuilder: IRBuilder2, exceptionClassName: 
     let exceptionClassType = GetTypeDefFromImplicitUsedFuncParam(
         irBuilder.GetCGModule(), exceptionInitFuncName, 0)
     let exceptionValue = irBuilder.CallClassIntrinsicAlloc(exceptionClassType)
-    CreateImplicitUsedFuncCall(irBuilder, exceptionInitFuncName,
+    let initializedException = CreateImplicitUsedFuncCall(irBuilder, exceptionInitFuncName,
         ArrayList<LLVMValueRef>([exceptionValue, irBuilder.CreateTypeInfo(exceptionClassType)]))
-    irBuilder.CallExceptionIntrinsicThrow(exceptionValue)
+    irBuilder.CallExceptionIntrinsicThrow(initializedException)
 }

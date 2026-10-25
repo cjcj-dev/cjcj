@@ -33,6 +33,14 @@ main(): Int64 {
         caught = e.message == "constructor-abort"
     }
     if (!caught) { return 2 }
+    var boundsCaught = false
+    try {
+        let data = [1, 2]
+        let _ = data[ordinary.read()]
+    } catch (_: IndexOutOfBoundsException) {
+        boundsCaught = true
+    }
+    if (!boundsCaught) { return 4 }
     if (!refEq(root, root) || !refEq(finalizable, finalizable)) { return 3 }
     println("CONSTRUCTOR_RECEIVER normal=41 ordinary=42 struct=43 exception=caught root=valid")
     return 0
