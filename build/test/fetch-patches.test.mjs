@@ -257,7 +257,7 @@ for (const entry of ['fetch', 'build']) test(`public ${entry} restores both stat
     const invoke=()=>{
       const env={...process.env};delete env.CANGJIE_BUILD_DRY_RUN;
       const args=entry==='fetch'?['fetch',...options]:['build','compiler'];
-      const argv=[cli,'--workspace',workspace,'--build-root',workspace+'/buildtools','--target','linux-x64','--official-sdk-root',workspace+'/host-not-consumed',...args];
+      const argv=[cli,'--workspace',workspace,'--build-root',workspace+'/buildtools','--target','linux-x64','--official-sdk-root',workspace,...args];
       const r=spawnSync(process.execPath,argv,{env,encoding:'utf8'});
       commands.push({argv:[process.execPath,...argv],rc:r.status,signal:r.signal,stdout:r.stdout,stderr:r.stderr});
       fs.writeFileSync(path.join(workspace,'commands.json'),JSON.stringify(commands,null,2));
