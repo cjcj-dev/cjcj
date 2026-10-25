@@ -10,7 +10,7 @@ on:
         required: true
       runtime_version:
         type: string
-        required: true
+        default: ''
       platforms:
         type: string
         default: all

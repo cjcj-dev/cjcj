@@ -20,9 +20,9 @@ on:
         type: boolean
         default: false
       runtime_version:
-        description: Runtime version used by the native producer.
+        description: Optional runtime version; empty uses the runtime source pin.
         type: string
-        default: 1.3.0-alpha.20260925001050
+        default: ''
       publish_host:
         description: Build the separately pinned, uncoloured bootstrap host LLVM SO.
         required: false
@@ -80,7 +80,7 @@ jobs:
       llvm_ref: ${{ inputs.llvm_ref }}
       runtime_ref: ${{ inputs.runtime_ref }}
       platforms: ${{ inputs.platforms || 'all' }}
-      runtime_version: ${{ inputs.runtime_version || '1.3.0-alpha.20260925001050' }}
+      runtime_version: ${{ inputs.runtime_version || '' }}
 
   host:
     if: inputs.publish_host

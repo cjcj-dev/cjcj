@@ -338,8 +338,6 @@ jobs:
     if: ${{ !inputs.runtime_only && !inputs.std_evidence_only && !inputs.darwin_runtime_only && !inputs.darwin_host_only && !inputs.darwin_verify_only }}
     name: Build Windows runtime
     uses: ./.github/workflows/build-windows-runtime.yml
-    with:
-      version: 1.2.0-alpha.20260721165458
 
   platform:
     name: ${{ matrix.runner }} / runtime + cjcj + smoke
