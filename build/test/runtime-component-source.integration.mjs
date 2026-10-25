@@ -177,8 +177,9 @@ return {...r,source};}
  // Materialize finite Git inputs for those unchanged boundaries as well.
  const legacyConfig=buildConfig({workspace:legacy,targetKey:'linux-x64'}),choices={};
  for(const name of ['compiler','runtime','tools','stdx','llvm','cjpm']) {
-  if(name!=='runtime')await run('legacy-'+name+'-clone',['git','clone',origin,legacyConfig.repoPath(name)],consumer);
-  choices[name]={url:origin,tag:commit};
+  const url=name==='llvm'?'https://github.com/cjcj-dev/cjcj-llvm.git':origin;
+  if(name!=='runtime')await run('legacy-'+name+'-clone',['git','clone',url,legacyConfig.repoPath(name)],consumer);
+  choices[name]={url,tag:commit};
  }
  await write(legacy+'/.source-selection.json',JSON.stringify(choices));
  const legacyBoundary={...boundaries,
