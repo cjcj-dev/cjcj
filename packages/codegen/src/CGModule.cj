@@ -1273,6 +1273,7 @@ public class CGModule {
                         LLVMLinkage.WeakODR
                     }
                     AddLinkageTypeMetadata(unitValue, linkage, false)
+                    unsafe { LLVMSetVisibility(unitValue, 1) } // LLVMHiddenVisibility
                 }
             }
             return unitValue

@@ -562,13 +562,9 @@ public class Translator {
         blockGroupStack.add(body)
         let initExpr = RequireExpr(decl.initializer, "global variable initializer")
         let initValue = TranslateExprArg(initExpr, RequireRefBaseType(globalVar))
-        if (decl.IsConst()) {
-            for (expr in CurrentBlock().GetExpressions()) {
-                expr.SetDebugLocation(INVALID_LOCATION)
-            }
-        }
-        let loc = if (decl.IsConst()) { INVALID_LOCATION } else { TranslateLocation(decl) }
-        CreateAndAppendWrappedStore(initValue, globalVar, loc)
+        // Const evaluation may preserve runtime events (including Reference registration).
+        // Retain source locations for diagnostics and any initializer that survives folding.
+        CreateAndAppendWrappedStore(initValue, globalVar, TranslateLocation(decl))
         if (CurrentBlock().GetTerminator().isNone()) {
             let createdExit568 = builder.CreateExit(None, CurrentBlock())
             CurrentBlock().AppendExpression(createdExit568)
@@ -4481,11 +4477,12 @@ public class Translator {
         currentBlock = thenBlock
         let createdConstant4323 = builder.CreateConstant(boolTy, BoolLiteral(true), CurrentBlock())
         CurrentBlock().AppendExpression(createdConstant4323)
+        createdConstant4323.SetDebugLocation(loc)
         let constantTrue = RequireResult(createdConstant4323)
-        CreateAndAppendWrappedStore(constantTrue, resultLoc, CurrentBlock(), rightLoc)
+        CreateAndAppendWrappedStore(constantTrue, resultLoc, CurrentBlock(), loc)
         let createdGoTo4325 = builder.CreateGoTo(endBlock, CurrentBlock())
         CurrentBlock().AppendExpression(createdGoTo4325)
-        createdGoTo4325.SetDebugLocation(rightLoc)
+        createdGoTo4325.SetDebugLocation(loc)
 
         currentBlock = elseBlock
         if (!isImplicitAdd) {
@@ -6290,10 +6287,6 @@ public class Translator {
         }
         currentBlock = trueBlock
         let guardBlock = CurrentBlock()
-        let patternFailurePredecessors = ArrayList<Block>()
-        for (predecessor in falseBlock.GetPredecessors()) {
-            patternFailurePredecessors.add(predecessor)
-        }
         let newTrueBlock = CreateBlock()
         let guardLoc = TranslateLocation(RequireExpr(matchCase.patternGuard, "match pattern guard"))
         if (sourceExpr != SourceExpr.QUEST && !originLoc.IsInvalidPos()) {
@@ -6307,17 +6300,6 @@ public class Translator {
         }
         TranslateMatchGuardCondition(RequireExpr(matchCase.patternGuard, "match pattern guard"), newTrueBlock,
             falseBlock, sourceExpr)
-        if (!patternFailurePredecessors.isEmpty()) {
-            for (predecessor in falseBlock.GetPredecessors()) {
-                var existed = false
-                for (old in patternFailurePredecessors) {
-                    if (refEq(old, predecessor)) { existed = true }
-                }
-                if (!existed) {
-                    predecessor.GetTerminator().getOrThrow().EnableAttr(Attribute.MATCH_PATTERN)
-                }
-            }
-        }
         return newTrueBlock
     }
 
@@ -6935,7 +6917,7 @@ public class Translator {
             blocks.add(indexToBodies.get(key).getOrThrow())
         }
         if (refEq(defaultBlock, endBlock)) {
-            defaultBlock = blocks[0]
+            defaultBlock = CreateUnreachableMatchDefaultBlock()
         }
         currentBlock = baseBlock
         let targetType = if (let Some(enumTy) <- (RequireAstTy(RequireExpr(matchExpr.selector, "match selector")) as
@@ -6953,11 +6935,19 @@ public class Translator {
         currentBlock = endBlock
     }
 
+    private func CreateUnreachableMatchDefaultBlock(): Block {
+        let block = CreateBlock()
+        block.AppendExpression(builder.CreateExit(None, block))
+        block.EnableAttr(Attribute.UNREACHABLE)
+        return block
+    }
+
     private func TranslateEnumPatternMatchAsTable(matchExpr: AstMatchExpr, enumVal: Value,
         retVal: Option<Value>): Unit {
         var isStillReachable = true
         let baseBlock = CurrentBlock()
         let endBlock = CreateBlock()
+        endBlock.SetDebugLocation(TranslateLocation(matchExpr))
         var firstDefaultBlock = endBlock
         let firstSelectorVal = GetEnumIDValue(RequireAstTy(RequireExpr(matchExpr.selector, "match selector")), enumVal)
         let matchInfo = EnumMatchInfo()
@@ -6996,7 +6986,7 @@ public class Translator {
             blocks.add(matchInfo.firstSwitchBlocks.get(key).getOrThrow())
         }
         if (refEq(firstDefaultBlock, endBlock)) {
-            firstDefaultBlock = blocks[0]
+            firstDefaultBlock = CreateUnreachableMatchDefaultBlock()
         }
         currentBlock = baseBlock
         let createdMultiBranch6510 = builder.CreateMultiBranch(firstSelectorVal, firstDefaultBlock, indexes, blocks, baseBlock)
@@ -7143,6 +7133,7 @@ public class Translator {
                 firstLevelBlock)
             firstLevelBlock.AppendExpression(createdMultiBranch6624)
             createdMultiBranch6624.SetSourceExpr(tableSourceExpr)
+            createdMultiBranch6624.EnableAttr(Attribute.MATCH_PATTERN)
         }
         return blockBranchInfos
     }

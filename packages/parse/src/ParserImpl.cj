@@ -583,6 +583,7 @@ public func AnnotationKindToString(kind: AnnotationKind): String {
         case AnnotationKind.NON_PRODUCT => "NonProduct"
         case AnnotationKind.CUSTOM => "Custom"
         case AnnotationKind.JAVA => "Java"
+        case AnnotationKind.OBJ_C => "ObjC"
         case AnnotationKind.UNKNOWN => "Unknown"
         case AnnotationKind.NO_HEAP_ALLOC => "NoHeapAlloc"
         case AnnotationKind.NO_WRITE_BARRIER => "NoWriteBarrier"
@@ -593,6 +594,8 @@ public func AnnotationKindToString(kind: AnnotationKind): String {
 }
 
 public func NameToAnnotationKind(name: String): AnnotationKind {
+    if (name == "Java") { return AnnotationKind.JAVA }
+    if (name == "ObjC") { return AnnotationKind.OBJ_C }
     if (name == "JavaMirror") { return AnnotationKind.JAVA_MIRROR }
     if (name == "JavaImpl") { return AnnotationKind.JAVA_IMPL }
     if (name == "JavaHasDefault") { return AnnotationKind.JAVA_HAS_DEFAULT }

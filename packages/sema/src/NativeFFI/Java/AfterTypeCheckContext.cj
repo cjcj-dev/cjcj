@@ -43,6 +43,7 @@ private class SuperCtorNativeList {
 public class AfterTypeCheckContext {
     public let importManager: SemaImportManager
     public let typeManager: TypeManager
+    public let targetTriple: String
     public let pkg: Package
     public let hasMirrorOrImpl: Bool
     private let javaMirrors: ArrayList<ClassLikeDecl>
@@ -55,9 +56,10 @@ public class AfterTypeCheckContext {
     private let javaImplUserCtorToNativeFuncs = HashMap<FuncDecl, SuperCtorNativeList>()
     private let javaImplUserCtorToOriginalSuperCall = HashMap<FuncDecl, CallExpr>()
 
-    public init(importManager: SemaImportManager, typeManager: TypeManager, pkg: Package, hasMirrorOrImpl: Bool) {
+    public init(importManager: SemaImportManager, typeManager: TypeManager, pkg: Package, hasMirrorOrImpl: Bool, targetTriple: String) {
         this.importManager = importManager
         this.typeManager = typeManager
+        this.targetTriple = targetTriple
         this.pkg = pkg
         this.hasMirrorOrImpl = hasMirrorOrImpl
         javaMirrors = GetJavaMirrors(pkg)

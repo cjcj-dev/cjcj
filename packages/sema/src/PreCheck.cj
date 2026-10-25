@@ -706,7 +706,7 @@ extend TypeCheckerImpl {
     public func AddSuperInterfaceForClassLikeDecl(ctx: ASTContext): Unit {
         for (sym in GetAllDecls(ctx)) {
             let node = sym.node.getOrThrow()
-            if (!node.TestAnyAttr(Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_IMPL)) {
+            if (!node.TestAnyAttr(Attribute.OBJ_C_FOREIGN, Attribute.OBJ_C_EXPORT)) {
                 continue
             }
             if (let Some(classLikeDecl) <- (node as ClassLikeDecl)) {
@@ -792,7 +792,7 @@ public func AddSuperClassObjectForClassDecl(
         if (TypeCheckClassLikeHasSuperClass(diag, classDecl)) {
             continue
         }
-        if (classDecl.TestAnyAttr(Attribute.JAVA_MIRROR, Attribute.JAVA_MIRROR_SUBTYPE)) {
+        if (classDecl.TestAnyAttr(Attribute.JAVA_FOREIGN, Attribute.JAVA_EXPORT)) {
             if (!AddJObjectSuperClassJavaInterop(importManager.getOrThrow(), diag, ctx, classDecl)) {
                 AddObjectSuperClass(ctx, pkg, classDecl, importManager)
             }

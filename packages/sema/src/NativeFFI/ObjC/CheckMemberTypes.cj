@@ -65,7 +65,7 @@ public class CheckMemberTypes <: Handler<TypeCheckContext> {
     private func CheckFuncRetType(fd: FuncDecl, ctx: TypeCheckContext): Unit {
         let funcBody = fd.funcBody.getOrThrow()
         if (let Some(retType) <- funcBody.retType) {
-            if (!IsObjCCompatible(retType.GetTy().getOrThrow())) {
+            if (!IsObjCCompatible(retType.GetTy().getOrThrow(), TypePosition.OUT)) {
                 DiagnoseRefactor(ctx.diag,
                     DiagKindRefactor.sema_objc_interop_method_ret_must_be_objc_compatible,
                     retType, GetDeclInteropName()).Emit()
@@ -88,7 +88,7 @@ public class CheckMemberTypes <: Handler<TypeCheckContext> {
 
         for (paramList in fd.funcBody.getOrThrow().paramLists) {
             for (param in paramList.params) {
-                if (IsObjCCompatible(param.GetTy().getOrThrow())) {
+                if (IsObjCCompatible(param.GetTy().getOrThrow(), TypePosition.IN)) {
                     continue
                 }
 

@@ -79,10 +79,10 @@ private func NeedCheck(parent: MemberSignature, child: MemberSignature): Bool {
     }
     CJC_ASSERT(childDecl.IsFuncOrProp())
 
-    if (!parentOuter.TestAnyAttr(Attribute.JAVA_MIRROR, Attribute.JAVA_MIRROR_SUBTYPE)) {
+    if (!parentOuter.TestAnyAttr(Attribute.JAVA_FOREIGN, Attribute.JAVA_EXPORT)) {
         return false
     }
-    if (!childOuter.TestAnyAttr(Attribute.JAVA_MIRROR, Attribute.JAVA_MIRROR_SUBTYPE)) {
+    if (!childOuter.TestAnyAttr(Attribute.JAVA_FOREIGN, Attribute.JAVA_EXPORT)) {
         return false
     }
     if (SameDecl(parentOuter, childOuter)) {
@@ -210,10 +210,10 @@ private func NeedCheckForeignName(parent: MemberSignature, child: MemberSignatur
     }
     CJC_ASSERT(childDecl.IsFuncOrProp())
 
-    if (!parentOuter.TestAnyAttr(Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_IMPL)) {
+    if (!parentOuter.TestAnyAttr(Attribute.OBJ_C_FOREIGN, Attribute.OBJ_C_EXPORT)) {
         return false
     }
-    if (!childOuter.TestAnyAttr(Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_IMPL)) {
+    if (!childOuter.TestAnyAttr(Attribute.OBJ_C_FOREIGN, Attribute.OBJ_C_EXPORT)) {
         return false
     }
     if (SameDecl(parentOuter, childOuter)) {

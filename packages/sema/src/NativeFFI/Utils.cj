@@ -355,11 +355,14 @@ public func IsJArray(decl: Decl): Bool {
     if ((decl as ClassLikeDecl).isNone()) {
         return false
     }
-    if (!decl.TestAttr(Attribute.JAVA_MIRROR)) {
+    if (!decl.TestAttr(Attribute.JAVA_FOREIGN)) {
         return false
     }
     if (decl.identifier.Val() != INTEROP_JARRAY_NAME || decl.fullPackageName != INTEROP_JAVA_LANG_PACKAGE) {
         return false
+    }
+    if (let Some(attr) <- GetSingleArgumentAnnotationValue(decl, AstAnnotationKind.JAVA)) {
+        return attr == ARRAY_SUBSCRIPT_IDENT
     }
     if (let Some(attr) <- GetSingleArgumentAnnotationValue(decl, AstAnnotationKind.JAVA_MIRROR)) {
         return attr == ARRAY_SUBSCRIPT_IDENT

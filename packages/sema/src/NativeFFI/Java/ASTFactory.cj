@@ -61,6 +61,7 @@ public class ASTFactory {
         }
         let res = builder(envRef)
         if (let Some(block) <- res) {
+            block.curFile = Some(curFile)
             block.body.add(envVar, at: 0)
             return Some(block)
         }

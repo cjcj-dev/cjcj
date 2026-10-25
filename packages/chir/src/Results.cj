@@ -34,6 +34,13 @@ public class Results<Domain> where Domain <: AbstractDomain<Domain> {
         }
     }
 
+    public func GetEntryState(block: Block): Domain {
+        if (let Some(state) <- entrySets.get(block.nodeId)) { return state }
+        let owner = block.GetParentBlockGroup().getOrThrow().GetOwnerExpression().getOrThrow()
+        let parentLambda = (owner as Lambda).getOrThrow()
+        return lambdaResultsMap.get(parentLambda.nodeId).getOrThrow().get(block.nodeId).getOrThrow()
+    }
+
     public func VisitWith(
         actionBeforeVisitExpr: (Domain, Expression, Int64) -> Unit,
         actionAfterVisitExpr: (Domain, Expression, Int64) -> Unit,

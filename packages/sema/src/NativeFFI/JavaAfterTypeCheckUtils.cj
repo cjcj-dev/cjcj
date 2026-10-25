@@ -251,20 +251,12 @@ public class Utils {
 }
 
 public func GetJavaRefField(mirrorLike: ClassDecl): VarDecl {
-    if (mirrorLike.TestAttr(Attribute.JAVA_MIRROR_SUBTYPE)) {
-        if (let Some(superClass) <- mirrorLike.GetSuperClassDecl()) {
-            if (!superClass.GetTy().getOrThrow().IsObject() &&
-                superClass.TestAnyAttr(Attribute.JAVA_MIRROR, Attribute.JAVA_MIRROR_SUBTYPE)) {
-                return GetJavaRefField(superClass)
-            }
-        }
+    if (mirrorLike.TestAnyAttr(Attribute.JAVA_FOREIGN, Attribute.JAVA_EXPORT) && !IsJObject(mirrorLike)) {
         let superClass = mirrorLike.GetSuperClassDecl().getOrThrow()
-        if (!superClass.TestAnyAttr(Attribute.JAVA_MIRROR, Attribute.JAVA_MIRROR_SUBTYPE)) {
-            CJC_ABORT()
-        }
+        CJC_ASSERT(superClass.TestAnyAttr(Attribute.JAVA_FOREIGN, Attribute.JAVA_EXPORT))
         return GetJavaRefField(superClass)
     }
-    CJC_ASSERT(mirrorLike.TestAttr(Attribute.JAVA_MIRROR))
+    CJC_ASSERT(mirrorLike.TestAttr(Attribute.JAVA_FOREIGN))
     CJC_ASSERT(IsJObject(mirrorLike))
     let body = mirrorLike.body.getOrThrow()
     for (member in body.decls) {
@@ -292,7 +284,7 @@ public func IsJavaRefGetter(fd: Decl): Bool {
 }
 
 public func GetJavaRefGetter(mirror: ClassLikeDecl): FuncDecl {
-    CJC_ASSERT(mirror.TestAnyAttr(Attribute.JAVA_MIRROR_SUBTYPE, Attribute.JAVA_MIRROR))
+    CJC_ASSERT(mirror.TestAnyAttr(Attribute.JAVA_EXPORT, Attribute.JAVA_FOREIGN))
     if (let Some(classDecl) <- (mirror as ClassDecl)) {
         if (!IsJObject(mirror)) {
             return GetJavaRefGetter(classDecl.GetSuperClassDecl().getOrThrow())
@@ -309,14 +301,14 @@ public func GetJavaRefGetter(mirror: ClassLikeDecl): FuncDecl {
 
 public func CreateJavaRefCall(mirrorLike: ClassLikeDecl, javaRefGetter: FuncDecl,
     curFile: Option<File>): Expr {
-    CJC_ASSERT(mirrorLike.TestAnyAttr(Attribute.JAVA_MIRROR, Attribute.JAVA_MIRROR_SUBTYPE))
+    CJC_ASSERT(mirrorLike.TestAnyAttr(Attribute.JAVA_FOREIGN, Attribute.JAVA_EXPORT))
     return CreateJavaRefCall(CreateThisRef(Some(mirrorLike), mirrorLike.GetTy(), curFile), javaRefGetter)
 }
 
 public func CreateJavaRefCall(mirrorLike: ClassLikeDecl, javaref: VarDecl,
     curFile: Option<File>): Expr {
     CJC_ASSERT((mirrorLike as ClassDecl).isSome())
-    CJC_ASSERT(mirrorLike.TestAnyAttr(Attribute.JAVA_MIRROR, Attribute.JAVA_MIRROR_SUBTYPE))
+    CJC_ASSERT(mirrorLike.TestAnyAttr(Attribute.JAVA_FOREIGN, Attribute.JAVA_EXPORT))
     return CreateJavaRefCall(CreateThisRef(Some(mirrorLike), mirrorLike.GetTy(), curFile), javaref)
 }
 
@@ -324,7 +316,7 @@ public func CreateJavaRefCall(expr: Expr, javaRefGetter: FuncDecl): Expr {
     let exprTy = expr.GetTy().getOrThrow()
     CJC_ASSERT(exprTy.IsClassLike())
     let commonDecl = (exprTy as ClassLikeTy).getOrThrow().commonDecl.getOrThrow()
-    CJC_ASSERT(commonDecl.TestAnyAttr(Attribute.JAVA_MIRROR, Attribute.JAVA_MIRROR_SUBTYPE))
+    CJC_ASSERT(commonDecl.TestAnyAttr(Attribute.JAVA_FOREIGN, Attribute.JAVA_EXPORT))
     let curFile = expr.curFile.getOrThrow()
     let args = ArrayList<FuncArg>()
     let retTy = (javaRefGetter.GetTy().getOrThrow() as FuncTy).getOrThrow().retTy
@@ -336,12 +328,12 @@ public func CreateJavaRefCall(expr: Expr, javaref: VarDecl): Expr {
     let exprTy = expr.GetTy().getOrThrow()
     CJC_ASSERT(exprTy.IsClassLike())
     let commonDecl = (exprTy as ClassLikeTy).getOrThrow().commonDecl.getOrThrow()
-    CJC_ASSERT(commonDecl.TestAnyAttr(Attribute.JAVA_MIRROR, Attribute.JAVA_MIRROR_SUBTYPE))
+    CJC_ASSERT(commonDecl.TestAnyAttr(Attribute.JAVA_FOREIGN, Attribute.JAVA_EXPORT))
     return WithinFile<MemberAccess>(CreateMemberAccess(expr, javaref), expr.curFile.getOrThrow())
 }
 
 public func CreateJavaRefCall(expr: Expr, mirrorLike: ClassLikeDecl): Expr {
-    CJC_ASSERT(mirrorLike.TestAnyAttr(Attribute.JAVA_MIRROR, Attribute.JAVA_MIRROR_SUBTYPE))
+    CJC_ASSERT(mirrorLike.TestAnyAttr(Attribute.JAVA_FOREIGN, Attribute.JAVA_EXPORT))
     if (let Some(mirrorClass) <- (mirrorLike as ClassDecl)) {
         return CreateJavaRefCall(expr, GetJavaRefField(mirrorClass))
     }
@@ -361,7 +353,7 @@ public func IsGeneratedJavaMirrorConstructor(ctor: FuncDecl): Bool {
     if (let None <- ctor.outerDecl) {
         return false
     }
-    return ctor.outerDecl.getOrThrow().TestAttr(Attribute.JAVA_MIRROR) &&
+    return ctor.outerDecl.getOrThrow().TestAttr(Attribute.JAVA_FOREIGN) &&
         ctor.TestAttr(Attribute.CONSTRUCTOR) && ctor.TestAttr(Attribute.COMPILER_ADD)
 }
 
@@ -397,7 +389,7 @@ public func GetJavaImplRegistryCompanionConstructor(companion: ClassDecl): FuncD
 }
 
 public func GetJavaMirrorWrappingConstructor(mirror: ClassDecl): Option<FuncDecl> {
-    CJC_ASSERT(mirror.TestAttr(Attribute.JAVA_MIRROR))
+    CJC_ASSERT(mirror.TestAttr(Attribute.JAVA_FOREIGN))
     for (member in mirror.GetMemberDecls()) {
         if (let Some(fd) <- (member as FuncDecl)) {
             if (IsWrappingConstructorOfJavaMirror(fd)) {
@@ -436,20 +428,20 @@ public func GetGeneratedConstructorInMirror(mirror: ClassDecl): Option<FuncDecl>
 
 public func GetGeneratedJavaMirrorConstructor(mirror: ClassLikeDecl): FuncDecl {
     CJC_ASSERT((mirror as ClassDecl).isSome())
-    if (mirror.TestAttr(Attribute.JAVA_MIRROR_SUBTYPE) && !mirror.TestAttr(Attribute.JAVA_MIRROR)) {
+    if (mirror.TestAttr(Attribute.JAVA_EXPORT) && !mirror.TestAttr(Attribute.JAVA_FOREIGN)) {
         for (superType in mirror.inheritedTypes) {
             if (superType.TyKind() != TypeKind.TYPE_CLASS) {
                 continue
             }
             let superTy = (superType.GetTy().getOrThrow() as ClassLikeTy).getOrThrow()
             let superDecl = superTy.commonDecl.getOrThrow()
-            if (superDecl.TestAnyAttr(Attribute.JAVA_MIRROR, Attribute.JAVA_MIRROR_SUBTYPE)) {
+            if (superDecl.TestAnyAttr(Attribute.JAVA_FOREIGN, Attribute.JAVA_EXPORT)) {
                 return GetGeneratedJavaMirrorConstructor(superDecl)
             }
         }
         CJC_ABORT()
     }
-    CJC_ASSERT(mirror.TestAttr(Attribute.JAVA_MIRROR))
+    CJC_ASSERT(mirror.TestAttr(Attribute.JAVA_FOREIGN))
     return GetGeneratedConstructorInMirror((mirror as ClassDecl).getOrThrow()).getOrThrow()
 }
 
@@ -477,7 +469,7 @@ public func GetJavaMemberName(decl: Decl): String {
 
 public func HasPredefinedJavaName(decl: ClassLikeDecl): Bool {
     for (anno in decl.annotations) {
-        if (anno.kind == AstAnnotationKind.JAVA_MIRROR || anno.kind == AstAnnotationKind.JAVA_IMPL) {
+        if (anno.kind == AstAnnotationKind.JAVA || anno.kind == AstAnnotationKind.JAVA_MIRROR || anno.kind == AstAnnotationKind.JAVA_IMPL) {
             return !anno.args.isEmpty()
         }
     }
@@ -486,7 +478,7 @@ public func HasPredefinedJavaName(decl: ClassLikeDecl): Bool {
 
 public func GetJavaMirrorAnnoAttr(decl: ClassLikeDecl): Option<String> {
     for (anno in decl.annotations) {
-        if (anno.kind != AstAnnotationKind.JAVA_MIRROR && anno.kind != AstAnnotationKind.JAVA_IMPL) {
+        if (anno.kind != AstAnnotationKind.JAVA && anno.kind != AstAnnotationKind.JAVA_MIRROR && anno.kind != AstAnnotationKind.JAVA_IMPL) {
             continue
         }
         CJC_ASSERT(anno.args.size < 2)
@@ -586,7 +578,7 @@ public func GetJavaTopLevelClassName(decl: ClassLikeDecl): String {
 
 public func GetJavaPackage(decl: Decl): String {
     for (anno in decl.annotations) {
-        if (anno.kind != AstAnnotationKind.JAVA_MIRROR && anno.kind != AstAnnotationKind.JAVA_IMPL) {
+        if (anno.kind != AstAnnotationKind.JAVA && anno.kind != AstAnnotationKind.JAVA_MIRROR && anno.kind != AstAnnotationKind.JAVA_IMPL) {
             continue
         }
         CJC_ASSERT_WITH_MSG(anno.args.size < 2,
@@ -676,7 +668,7 @@ public func CreateMirrorConstructorCall(importManager: SemaImportManager, entity
     let curFile = entity.curFile
     if (let Some(classLikeTy) <- (mirrorTy as ClassLikeTy)) {
         if (let Some(decl) <- classLikeTy.commonDecl) {
-            if (decl.TestAttr(Attribute.JAVA_MIRROR)) {
+            if (decl.TestAttr(Attribute.JAVA_FOREIGN)) {
                 var mirrorCtor: Option<FuncDecl> = None
                 if ((decl as InterfaceDecl).isSome() ||
                     ((decl as ClassDecl).isSome() && decl.TestAttr(Attribute.ABSTRACT))) {
@@ -702,7 +694,7 @@ public func CreateMirrorConstructorCall(importManager: SemaImportManager, entity
 }
 
 public func IsSynthetic(node: Node): Bool {
-    return (node as ClassDecl).isSome() && node.TestAttr(Attribute.JAVA_MIRROR_SYNTHETIC_WRAPPER)
+    return (node as ClassDecl).isSome() && node.TestAttr(Attribute.JAVA_FOREIGN_SYNTHETIC_WRAPPER)
 }
 
 public func IsOptionOfString(ty: Ty): Bool {

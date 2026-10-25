@@ -2192,6 +2192,10 @@ public class ASTWriter <: Resource {
                     }
                 case AstAnnotationKind.FROZEN =>
                     annotations.add(SaveAnno(annotation, 2u16, false))
+                case AstAnnotationKind.JAVA =>
+                    annotations.add(SaveAnno(annotation, 11u16, true))
+                case AstAnnotationKind.OBJ_C =>
+                    annotations.add(SaveAnno(annotation, 12u16, true))
                 case AstAnnotationKind.JAVA_MIRROR =>
                     annotations.add(SaveAnno(annotation, 4u16, true))
                 case AstAnnotationKind.JAVA_IMPL =>

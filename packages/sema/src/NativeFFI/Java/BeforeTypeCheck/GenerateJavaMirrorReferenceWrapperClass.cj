@@ -29,9 +29,8 @@ public class GenerateJavaMirrorReferenceWrapperClass <: PreTypeCheckStage {
     private func GenerateWrapperClass(mirror: ClassLikeDecl): ClassDecl {
         CJC_ASSERT(ShouldHaveMirrorReferenceWrapper(mirror))
         let wrapper = CloneClassSkeleton(mirror, GetMirrorReferenceWrapperNameFromClassLike(mirror))
-        wrapper.EnableAttr(Attribute.JAVA_MIRROR)
-        wrapper.EnableAttr(Attribute.JAVA_MIRROR_SUBTYPE)
-        wrapper.EnableAttr(Attribute.JAVA_MIRROR_SYNTHETIC_WRAPPER)
+        wrapper.EnableAttr(Attribute.JAVA_FOREIGN)
+        wrapper.EnableAttr(Attribute.JAVA_FOREIGN_SYNTHETIC_WRAPPER)
 
         InsertSuperTypes(wrapper, mirror)
         return wrapper

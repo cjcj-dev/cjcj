@@ -3,26 +3,6 @@ package cjcj::chir
 import std.collection.*
 import cjcj::utils.{HAS_INITED_IDENT, ProfileRecorder}
 
-private func IsObjCMirror(classDef: ClassDef): Bool {
-    return classDef.TestAttr(Attribute.OBJ_C_MIRROR)
-}
-
-private func IsJavaMirror(classDef: ClassDef): Bool {
-    return classDef.TestAttr(Attribute.JAVA_MIRROR)
-}
-
-private func IsMirror(classDef: ClassDef): Bool {
-    return IsObjCMirror(classDef) || IsJavaMirror(classDef)
-}
-
-private func IsObjCImpl(classDef: ClassDef): Bool {
-    return classDef.TestAttr(Attribute.OBJ_C_IMPL)
-}
-
-private func HasInitedGeneratedFromAST(classDef: ClassDef): Bool {
-    return IsMirror(classDef) || IsObjCImpl(classDef)
-}
-
 public class MarkClassHasInited {
     private let builder: CHIRBuilder
 
@@ -31,15 +11,18 @@ public class MarkClassHasInited {
     }
 
     private func AddHasInitedFlagToClassDef(classDef: ClassDef): Unit {
-        if (HasInitedGeneratedFromAST(classDef)) {
-            return
+        // Older CJO files carry this as an AST member. Recognize the actual
+        // field so imported classes never receive a duplicate layout entry.
+        for (member in classDef.GetDirectInstanceVars()) {
+            if (member.name == HAS_INITED_IDENT) {
+                return
+            }
         }
 
         let attributeInfo = AttributeInfo()
         attributeInfo.Enable(Attribute.NO_REFLECT_INFO)
         attributeInfo.Enable(Attribute.COMPILER_ADD)
         attributeInfo.Enable(Attribute.PRIVATE)
-        attributeInfo.Enable(Attribute.HAS_INITED_FIELD)
         let memberInfo = MemberVarInfo(HAS_INITED_IDENT, builder.context.GetBoolTy())
         memberInfo.attributeInfo.CopyFrom(attributeInfo)
         classDef.AddInstanceVar(memberInfo)

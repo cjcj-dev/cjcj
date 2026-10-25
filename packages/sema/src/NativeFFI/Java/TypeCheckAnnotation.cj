@@ -29,7 +29,7 @@ public func CheckJavaHasDefaultAnnotation(diag: DiagnosticEngine, annotation: An
     var isOuterDeclJavaMirror = false
     var isOuterDeclInterface = false
     if (let Some(outerDecl) <- decl.outerDecl) {
-        isOuterDeclJavaMirror = outerDecl.TestAttr(Attribute.JAVA_MIRROR)
+        isOuterDeclJavaMirror = outerDecl.TestAttr(Attribute.JAVA_FOREIGN)
         isOuterDeclInterface = isOuterDeclJavaMirror && outerDecl.astKind == ASTKind.INTERFACE_DECL
     }
     let isCurrentDeclFunc = decl.astKind == ASTKind.FUNC_DECL

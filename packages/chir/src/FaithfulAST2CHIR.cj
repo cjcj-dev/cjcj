@@ -869,12 +869,11 @@ private func BuildAttr(attrs: AstAttributePack): AttributeInfo {
     if (attrs.TestAttr(AstAttribute.NO_REFLECT_INFO)) { attrInfo.Enable(Attribute.NO_REFLECT_INFO) }
     if (attrs.TestAttr(AstAttribute.COMMON)) { attrInfo.Enable(Attribute.COMMON) }
     if (attrs.TestAttr(AstAttribute.SPECIFIC)) { attrInfo.Enable(Attribute.SPECIFIC) }
-    if (attrs.TestAttr(AstAttribute.JAVA_MIRROR)) { attrInfo.Enable(Attribute.JAVA_MIRROR) }
-    if (attrs.TestAttr(AstAttribute.OBJ_C_MIRROR)) { attrInfo.Enable(Attribute.OBJ_C_MIRROR) }
-    if (attrs.TestAttr(AstAttribute.HAS_INITED_FIELD)) { attrInfo.Enable(Attribute.HAS_INITED_FIELD) }
+    if (attrs.TestAttr(AstAttribute.JAVA_FOREIGN)) { attrInfo.Enable(Attribute.JAVA_FOREIGN) }
+    if (attrs.TestAttr(AstAttribute.OBJ_C_FOREIGN)) { attrInfo.Enable(Attribute.OBJ_C_FOREIGN) }
     if (attrs.TestAttr(AstAttribute.UNSAFE)) { attrInfo.Enable(Attribute.UNSAFE) }
     if (attrs.TestAttr(AstAttribute.DOES_NOT_THROW)) { attrInfo.Enable(Attribute.DOES_NOT_THROW) }
-    if (attrs.TestAttr(AstAttribute.OBJ_C_IMPL)) { attrInfo.Enable(Attribute.OBJ_C_IMPL) }
+    if (attrs.TestAttr(AstAttribute.OBJ_C_EXPORT)) { attrInfo.Enable(Attribute.OBJ_C_EXPORT) }
     return attrInfo
 }
 
@@ -1656,7 +1655,15 @@ public class FaithfulAST2CHIR {
             }
         }
         if (decl.TestAttr(AstAttribute.COMMON) && !decl.TestAttr(AstAttribute.FROM_COMMON_PART)) {
-            def.EnableAttr(Attribute.COMMON)
+            // CJO encodes platform specifics as COMMON + COMMON_WITH_DEFAULT.
+            // Only imported extends recover SPECIFIC; class dispatch must retain COMMON.
+            if (isImported && decl.astKind == AstASTKind.EXTEND_DECL &&
+                decl.TestAttr(AstAttribute.COMMON_WITH_DEFAULT)) {
+                def.EnableAttr(Attribute.SPECIFIC)
+                def.DisableAttr(Attribute.COMMON)
+            } else {
+                def.EnableAttr(Attribute.COMMON)
+            }
         }
         if (decl.TestAttr(AstAttribute.SPECIFIC)) {
             def.EnableAttr(Attribute.SPECIFIC)
@@ -3880,7 +3887,7 @@ public class FaithfulAST2CHIR {
 
     private func TranslateInitializerToFunction(varDecl: AstVarDecl, suffix!: String): Function {
         let trans = CreateTranslator()
-        let loc = if (varDecl.IsConst()) { INVALID_LOCATION } else { trans.TranslateLocation(varDecl) }
+        let loc = trans.TranslateLocation(varDecl)
         let initFn = trans.CreateEmptyGVInitFunc(GlobalVarInitFuncName(varDecl),
             "gv$_" + varDecl.identifier.Val() + suffix, EffectiveRawMangledName(varDecl),
             EffectivePackageName(varDecl), BasicLinkage.INTERNAL, loc, varDecl.IsConst())
@@ -4786,9 +4793,9 @@ public class FaithfulAST2CHIR {
         }
         if (let Some(customTypeDef) <- (target as CustomTypeDef)) {
             if (AstIsImpl(decl)) {
-                customTypeDef.EnableAttr(Attribute.JAVA_IMPL)
+                customTypeDef.EnableAttr(Attribute.JAVA_EXPORT)
             } else if (AstIsMirror(decl)) {
-                customTypeDef.EnableAttr(Attribute.JAVA_MIRROR)
+                customTypeDef.EnableAttr(Attribute.JAVA_FOREIGN)
             }
         }
     }

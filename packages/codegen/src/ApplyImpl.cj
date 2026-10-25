@@ -164,6 +164,26 @@ private func GenerateApply(irBuilder: IRBuilder2, callee: Value, args: ArrayList
     return LLVMNullValue()
 }
 
+private func AddSubWordIntParamAttrsForWrapper(cgMod: CGModule, funcTy: FuncType,
+    call: LLVMValueRef, llvmArgs: ArrayList<LLVMValueRef>, sret: Bool): Unit {
+    var index: Int64 = if (sret) { 1 } else { 0 }
+    let params = funcTy.GetParamTypes()
+    for (paramIndex in 0..params.size) {
+        let ty = params[paramIndex]
+        let count = cgMod.GetCGCFFI().GetLoweredParamCount(funcTy, paramIndex)
+        if (count == 0) { continue }
+        if (index >= llvmArgs.size) { break }
+        let loweredTy = unsafe { LLVMTypeOf(llvmArgs[index]) }
+        if ((ty.IsBoolean() || ty.IsInteger()) && unsafe { LLVMGetTypeKind(loweredTy) } == 8 &&
+            unsafe { LLVMGetIntTypeWidth(loweredTy) } < 32u32) {
+            AddParamAttr(call, UInt32(index), "noundef")
+            AddParamAttr(call, UInt32(index), if (ty.IsSignedInteger()) { "signext" } else { "zeroext" })
+        }
+        // Aggregate coercion can occupy multiple slots in our full FFI implementation.
+        index += count
+    }
+}
+
 private func AddAttributeForWrapper(cgMod: CGModule, function: LLVMValueRef, callInst: LLVMValueRef, varFuncTy: LLVMTypeRef,
     chirFuncTy: FuncType, sret: Bool): Unit {
     AddLinkageTypeMetadata(function, LLVMLinkage.Internal, false)
@@ -254,6 +274,7 @@ private func GenerateWrapperFuncBody(cgMod: CGModule, irBuilder: IRBuilder2, fun
         } else {
             let _ = irBuilder.CreateRet(callInst)
         }
+        AddSubWordIntParamAttrsForWrapper(cgMod, chirFuncTy, callInst, llvmArgs, sret)
         AddAttributeForWrapper(cgMod, function, callInst, varFuncTy, chirFuncTy, sret)
     }
     irBuilder.SetInsertPoint(oldBlock)
@@ -350,135 +371,83 @@ private func HasAddrSpace(value: LLVMValueRef, addrSpace: UInt32): Bool {
         unsafe { LLVMGetPointerAddressSpace(llvmType) } == addrSpace
 }
 
-@When[os == "macOS" || os == "iOS"]
-private func CreateCFuncCallOrInvoke(cgMod: CGModule, irBuilder: IRBuilder2, callee: LLVMValueRef,
-    args: ArrayList<CGValue>, retTy: Type, isSRet: Bool): LLVMValueRef {
+private func CreateCFuncCallArgs(cgMod: CGModule, irBuilder: IRBuilder2,
+    args: ArrayList<CGValue>, retTy: Type, isSRet: Bool): ArrayList<LLVMValueRef> {
     let llvmArgs = ArrayList<LLVMValueRef>()
-    var ret = LLVMNullValue()
     if (isSRet) {
-        ret = irBuilder.CreateEntryAlloca(CGType.GetOrCreate(cgMod, retTy))
-        llvmArgs.add(ret)
+        llvmArgs.add(irBuilder.CreateEntryAlloca(CGType.GetOrCreate(cgMod, retTy)))
     }
-    for (cgArg in args) {
-        let cgArgTy = cgArg.GetCGType().getOrThrow().GetOriginal()
-        if (IsZeroSizedTypeInC(cgMod, cgArgTy)) {
-            continue
-        }
-        if (HasAddrSpace(cgArg.GetRawValue(), 1u32)) {
-            llvmArgs.add(irBuilder.CreateAddrSpaceCast(cgArg.GetRawValue(),
-                CGType.GetOrCreate(cgMod, cgArgTy).GetLLVMType()))
+    for (arg in args) {
+        let ty = arg.GetCGType().getOrThrow().GetOriginal()
+        if (IsZeroSizedTypeInC(cgMod, ty)) { continue }
+        if (HasAddrSpace(arg.GetRawValue(), 1u32)) {
+            llvmArgs.add(irBuilder.CreateAddrSpaceCast(arg.GetRawValue(),
+                CGType.GetOrCreate(cgMod, ty).GetLLVMType()))
         } else {
-            llvmArgs.add(cgArg.GetRawValue())
+            llvmArgs.add(arg.GetRawValue())
         }
     }
-    let calleeType = unsafe { LLVMGlobalGetValueType(callee) }
-    let callRet = irBuilder.CreateCallOrInvoke(callee, calleeType, llvmArgs)
-    if (cgMod.GetCGContext().GetCompileOptions().target.arch != ArchType.AARCH64) {
-        var paramIdx: UInt32 = 0u32
-        let paramCount = unsafe { LLVMCountParams(callee) }
-        while (paramIdx < paramCount) {
-            if (HasAttributeAtIndex(callee, paramIdx + 1u32, "byval")) {
-                AddTypeAttributeAtIndex(callRet, paramIdx + 1u32, "byval",
-                    GetPointerElementType(unsafe { LLVMTypeOf(LLVMGetParam(callee, paramIdx)) }))
-                let alignment = GetAttributeAtIndex(callee, paramIdx + 1u32, "align")
-                if (!alignment.isNull()) {
-                    unsafe { LLVMAddCallSiteAttribute(callRet, paramIdx + 1u32, alignment) }
-                }
-            }
-            paramIdx++
-        }
-    }
-    let targetTriple = cgMod.GetCGContext().GetCompileOptions().target
-    if (targetTriple.arch == ArchType.AARCH64 &&
-        (targetTriple.os == OSType.DARWIN || targetTriple.os == OSType.IOS)) {
-        if (HasAttributeAtIndex(callee, 0u32, "signext")) {
-            AddRetAttr(callRet, "signext")
-        } else if (HasAttributeAtIndex(callee, 0u32, "zeroext")) {
-            AddRetAttr(callRet, "zeroext")
-        }
-        var paramIdx: UInt32 = 0u32
-        let paramCount = unsafe { LLVMCountParams(callee) }
-        while (paramIdx < paramCount) {
-            if (HasAttributeAtIndex(callee, paramIdx + 1u32, "noundef")) {
-                AddParamAttr(callRet, paramIdx, "noundef")
-            }
-            if (HasAttributeAtIndex(callee, paramIdx + 1u32, "signext")) {
-                AddParamAttr(callRet, paramIdx, "signext")
-            } else if (HasAttributeAtIndex(callee, paramIdx + 1u32, "zeroext")) {
-                AddParamAttr(callRet, paramIdx, "zeroext")
-            }
-            paramIdx++
-        }
-    }
-    // Fixed byval attributes come from the declaration above. Variadic
-    // memory-class aggregates have no declaration parameter to copy from.
-    if (cgMod.GetCGContext().GetCompileOptions().target.arch == ArchType.X86_64 &&
-        cgMod.GetCGContext().GetCompileOptions().target.os != OSType.WINDOWS) {
-        let fixedCount = unsafe { LLVMCountParams(callee) }
-        var index = if (isSRet) { 1u32 } else { 0u32 }
-        for (arg in args) {
-            let ty = CGType.GetOrCreate(cgMod, arg.GetCGType().getOrThrow().GetOriginal().StripAllRefs())
-            if (index >= fixedCount && ty.GetOriginal().IsStruct() &&
-                unsafe { LLVMGetTypeKind(LLVMTypeOf(arg.GetRawValue())) } == LLVM_POINTER_TYPE_KIND) {
-                AddByValAttribute(callRet, index, ty.GetLLVMType(), align: UInt64(ty.GetAlign().getOrThrow()))
-            }
-            index++
-        }
-    }
-    if (isSRet) {
-        AddParamAttr(callRet, 0u32, "noalias")
-        AddSRetAttribute(callRet, GetPointerElementType(unsafe { LLVMTypeOf(ret) }))
-        return ret
-    }
-    return callRet
+    return llvmArgs
 }
 
-@When[os != "macOS" && os != "iOS"]
-private func CreateCFuncCallOrInvoke(cgMod: CGModule, irBuilder: IRBuilder2, callee: LLVMValueRef,
-    args: ArrayList<CGValue>, retTy: Type, isSRet: Bool): LLVMValueRef {
-    let llvmArgs = ArrayList<LLVMValueRef>()
-    var ret = LLVMNullValue()
-    if (isSRet) {
-        ret = irBuilder.CreateEntryAlloca(CGType.GetOrCreate(cgMod, retTy))
-        llvmArgs.add(ret)
-    }
-    for (cgArg in args) {
-        let cgArgTy = cgArg.GetCGType().getOrThrow().GetOriginal()
-        if (IsZeroSizedTypeInC(cgMod, cgArgTy)) {
-            continue
-        }
-        if (HasAddrSpace(cgArg.GetRawValue(), 1u32)) {
-            llvmArgs.add(irBuilder.CreateAddrSpaceCast(cgArg.GetRawValue(),
-                CGType.GetOrCreate(cgMod, cgArgTy).GetLLVMType()))
-        } else {
-            llvmArgs.add(cgArg.GetRawValue())
-        }
-    }
-    let calleeType = unsafe { LLVMGlobalGetValueType(callee) }
-    let callRet = irBuilder.CreateCallOrInvoke(callee, calleeType, llvmArgs)
+private func CopyCalleeDeclAttrsToCallSite(cgMod: CGModule, callee: LLVMValueRef,
+    call: LLVMValueRef): Unit {
     if (cgMod.GetCGContext().GetCompileOptions().target.arch != ArchType.AARCH64) {
-        var paramIdx: UInt32 = 0u32
-        let paramCount = unsafe { LLVMCountParams(callee) }
-        while (paramIdx < paramCount) {
-            if (HasAttributeAtIndex(callee, paramIdx + 1u32, "byval")) {
-                AddTypeAttributeAtIndex(callRet, paramIdx + 1u32, "byval",
-                    GetPointerElementType(unsafe { LLVMTypeOf(LLVMGetParam(callee, paramIdx)) }))
-                let alignment = GetAttributeAtIndex(callee, paramIdx + 1u32, "align")
+        var index = 0u32
+        while (index < unsafe { LLVMCountParams(callee) }) {
+            if (HasAttributeAtIndex(callee, index + 1u32, "byval")) {
+                AddTypeAttributeAtIndex(call, index + 1u32, "byval",
+                    GetPointerElementType(unsafe { LLVMTypeOf(LLVMGetParam(callee, index)) }))
+                let alignment = GetAttributeAtIndex(callee, index + 1u32, "align")
                 if (!alignment.isNull()) {
-                    unsafe { LLVMAddCallSiteAttribute(callRet, paramIdx + 1u32, alignment) }
+                    unsafe { LLVMAddCallSiteAttribute(call, index + 1u32, alignment) }
                 }
             }
-            paramIdx++
+            index++
         }
     }
-    // Fixed byval attributes come from the declaration above. Variadic
-    // memory-class aggregates have no declaration parameter to copy from.
+    for (ext in ["signext", "zeroext"]) {
+        if (HasAttributeAtIndex(callee, 0u32, ext)) { AddRetAttr(call, ext) }
+    }
+}
+
+private func AddSubWordIntParamAttrsForDirectCall(cgMod: CGModule, callee: LLVMValueRef,
+    call: LLVMValueRef, args: ArrayList<CGValue>, llvmArgs: ArrayList<LLVMValueRef>, sret: Bool): Unit {
+    let fixedCount = Int64(unsafe { LLVMCountParams(callee) })
+    CJC_ASSERT(fixedCount <= llvmArgs.size)
+    var index: Int64 = if (sret) { 1 } else { 0 }
+    for (arg in args) {
+        if (index >= fixedCount || index >= llvmArgs.size) { break }
+        let ty = arg.GetCGType().getOrThrow().GetOriginal()
+        if (IsZeroSizedTypeInC(cgMod, ty)) { continue }
+        if (ty.IsBoolean() || ty.IsInteger()) {
+            AddParamAttr(call, UInt32(index), "noundef")
+            let loweredTy = unsafe { LLVMTypeOf(llvmArgs[index]) }
+            if (unsafe { LLVMGetTypeKind(loweredTy) } == 8 &&
+                unsafe { LLVMGetIntTypeWidth(loweredTy) } < 32u32) {
+                AddParamAttr(call, UInt32(index), if (ty.IsSignedInteger()) { "signext" } else { "zeroext" })
+            }
+        }
+        index++
+    }
+}
+
+private func CreateCFuncCallOrInvoke(cgMod: CGModule, irBuilder: IRBuilder2, callee: LLVMValueRef,
+    args: ArrayList<CGValue>, retTy: Type, isSRet: Bool): LLVMValueRef {
+    let llvmArgs = CreateCFuncCallArgs(cgMod, irBuilder, args, retTy, isSRet)
+    let calleeType = unsafe { LLVMGlobalGetValueType(callee) }
+    let callRet = irBuilder.CreateCallOrInvoke(callee, calleeType, llvmArgs)
+    CopyCalleeDeclAttrsToCallSite(cgMod, callee, callRet)
+    AddSubWordIntParamAttrsForDirectCall(cgMod, callee, callRet, args, llvmArgs, isSRet)
+    // Retain our complete SysV FFI lowering: variadic memory aggregates have no
+    // declaration parameter from which to copy byval and alignment.
     if (cgMod.GetCGContext().GetCompileOptions().target.arch == ArchType.X86_64 &&
         cgMod.GetCGContext().GetCompileOptions().target.os != OSType.WINDOWS) {
         let fixedCount = unsafe { LLVMCountParams(callee) }
         var index = if (isSRet) { 1u32 } else { 0u32 }
         for (arg in args) {
             let ty = CGType.GetOrCreate(cgMod, arg.GetCGType().getOrThrow().GetOriginal().StripAllRefs())
+            if (IsZeroSizedTypeInC(cgMod, ty.GetOriginal())) { continue }
             if (index >= fixedCount && ty.GetOriginal().IsStruct() &&
                 unsafe { LLVMGetTypeKind(LLVMTypeOf(arg.GetRawValue())) } == LLVM_POINTER_TYPE_KIND) {
                 AddByValAttribute(callRet, index, ty.GetLLVMType(), align: UInt64(ty.GetAlign().getOrThrow()))
@@ -487,6 +456,7 @@ private func CreateCFuncCallOrInvoke(cgMod: CGModule, irBuilder: IRBuilder2, cal
         }
     }
     if (isSRet) {
+        let ret = llvmArgs[0]
         AddParamAttr(callRet, 0u32, "noalias")
         AddSRetAttribute(callRet, GetPointerElementType(unsafe { LLVMTypeOf(ret) }))
         return ret

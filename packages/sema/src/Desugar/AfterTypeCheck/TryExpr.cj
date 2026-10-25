@@ -181,8 +181,20 @@ private func CreateExceptionPattern(exceptionDecl: ClassDecl, pattern: VarPatter
 
 private func SelectZeroArgFunction(typeManager: TypeManager, resource: VarDecl, fieldName: String): Option<FuncDecl> {
     let resourceTy = resource.GetTy()
-    let decls = FieldLookup(typeManager, Ty.GetDeclPtrOfTy(resourceTy), fieldName,
-        info: LookupInfo(baseTy: resourceTy, file: resource.curFile))
+    let decls = ArrayList<Decl>()
+    if (let Some(genericTy) <- ((resourceTy ?? TypeManager.GetInvalidTy()) as GenericsTy)) {
+        // A type parameter has no member declaration of its own. Resolve Resource
+        // methods through each valid upper bound, just as ordinary member lookup does.
+        for (upperBound in genericTy.upperBounds) {
+            if (Ty.IsTyCorrect(upperBound)) {
+                decls.add(all: FieldLookup(typeManager, Ty.GetDeclPtrOfTy(Some(upperBound)), fieldName,
+                    info: LookupInfo(baseTy: Some(upperBound), file: resource.curFile)))
+            }
+        }
+    } else {
+        decls.add(all: FieldLookup(typeManager, Ty.GetDeclPtrOfTy(resourceTy), fieldName,
+            info: LookupInfo(baseTy: resourceTy, file: resource.curFile)))
+    }
     for (decl in decls) {
         if (let Some(funcDecl) <- (decl as FuncDecl)) {
             if (let Some(declTy) <- decl.GetTy()) {

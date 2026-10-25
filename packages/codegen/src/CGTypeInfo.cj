@@ -505,6 +505,9 @@ private func SetConcreteTypeInfoLinkage(cgMod: CGModule, typeInfo: LLVMValueRef,
         }
         unsafe {
             LLVMSetLinkage(typeInfo, LLVMLinkageValue(staticGILinkage))
+            if (cgMod.GetCGContext().GetCompileOptions().target.os != OSType.WINDOWS) {
+                LLVMSetVisibility(typeInfo, 1) // LLVMHiddenVisibility
+            }
             LLVMSetGlobalConstant(typeInfo, 0)
         }
         return

@@ -15,19 +15,3 @@ public class CheckMirrorInheritMirror <: Handler<TypeCheckContext> {
         ctx.target.EnableAttr(Attribute.IS_BROKEN)
     }
 }
-
-private func IsValidObjCMirror(ty: Ty): Bool {
-    let classLikeTy = ty as ClassLikeTy
-    if (let None <- classLikeTy) { return false }
-    let value = classLikeTy.getOrThrow()
-    if (let None <- value.commonDecl) { return false }
-    if (!IsObjCMirror(value.commonDecl.getOrThrow())) { return false }
-    for (parent in value.GetSuperInterfaceTys()) { if (!IsValidObjCMirror(parent)) { return false } }
-    if (let Some(classTy) <- (ty as ClassTy)) {
-        if (let None <- classTy.GetSuperClassTy()) { return true }
-        let superTy = classTy.GetSuperClassTy().getOrThrow()
-        if (superTy.IsObject()) { return true }
-        return IsValidObjCMirror(superTy)
-    }
-    return true
-}

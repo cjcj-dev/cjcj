@@ -1096,8 +1096,8 @@ extend TypeCheckerImpl {
         }
         if (fd.IsFinalizer() && typeManager.IsSubtype(
             fdOuterDecl.GetTy().getOrThrow(), declOuterDecl.GetTy().getOrThrow())) {
-            let memberType = if (decl.TestAttr(Attribute.OBJ_C_MIRROR) &&
-                decl.TestAttr(Attribute.DESUGARED_MIRROR_FIELD)) { "field of an Objective-C mirror"
+            let memberType = if (decl.TestAttr(Attribute.OBJ_C_FOREIGN) &&
+                decl.TestAttr(Attribute.DESUGARED_FOREIGN_FIELD)) { "field of an Objective-C mirror"
             } else if (decl.astKind == ASTKind.PROP_DECL) { "property" } else { "function" }
             diag.getOrThrow().DiagnoseRefactor(
                 BasicDiagKindRefactor.sema_instance_func_cannot_be_used_in_finalizer, pos, memberType).Emit()
@@ -2587,5 +2587,5 @@ public func TypeCheckReferenceCheckUsageOfDeprecated(
 
 // Upstream a51ced71, src/Sema/TypeCheckExpr.cpp:43-46.
 public func IsDeclaredFuncOrProp(decl: Decl): Bool {
-    return decl.IsFuncOrProp() && !decl.TestAttr(Attribute.OBJ_C_IMPL_MOVED_MEMBER_PROXY)
+    return decl.IsFuncOrProp() && !decl.TestAttr(Attribute.OBJ_C_EXPORT_MOVED_MEMBER_PROXY)
 }

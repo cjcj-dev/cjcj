@@ -238,7 +238,7 @@ private class DeclAttributeCheckerImpl {
         let invalidAbstract = member.TestAttr(Attribute.ABSTRACT) &&
             ((member.TestAttr(Attribute.STATIC) && !member.TestAttr(Attribute.FOREIGN)) ||
                 (!classDecl.TestAttr(Attribute.ABSTRACT) && !classDecl.TestAttr(Attribute.FOREIGN))) &&
-            !classDecl.TestAttr(Attribute.OBJ_C_MIRROR)
+            !classDecl.TestAttr(Attribute.OBJ_C_FOREIGN)
         if (invalidAbstract && !member.TestAttr(Attribute.COMMON_WITH_DEFAULT)) {
             Diagnose(diag, member, BasicDiagKind.sema_missing_func_body,
                 args: [BasicDiagArgument(memberKind), BasicDiagArgument(member.identifier.Val())]).Emit()
@@ -317,11 +317,11 @@ private class DeclAttributeCheckerImpl {
 
     private func CheckPropDeclAttributes(propDecl: PropDecl): Unit {
         if (let Some(outer) <- propDecl.outerDecl) {
-            if (outer.TestAttr(Attribute.OBJ_C_MIRROR)) {
+            if (outer.TestAttr(Attribute.OBJ_C_FOREIGN)) {
                 return
             }
         }
-        if (propDecl.TestAnyAttr(Attribute.ABSTRACT, Attribute.JAVA_MIRROR) || opts.compileCjd) {
+        if (propDecl.TestAnyAttr(Attribute.ABSTRACT, Attribute.JAVA_FOREIGN) || opts.compileCjd) {
             return
         }
         if (IsCommonWithoutDefault(propDecl)) {

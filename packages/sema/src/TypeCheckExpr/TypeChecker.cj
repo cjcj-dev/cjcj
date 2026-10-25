@@ -129,10 +129,6 @@ extend TypeCheckerImpl {
             opts: ci.getOrThrow().globalOptions)
         checker.Check()
 
-        let movedMembers = checker.MoveStructInheritedMembers()
-        CJC_ASSERT_WITH_MSG(structMemberMap.isEmpty(),
-            "structMemberMap should be empty when moving inherited members")
-        structMemberMap = movedMembers
     }
 
     internal func GenerateMainInvoke(): Unit {
@@ -1266,7 +1262,7 @@ extend TypeChecker {
             for (pkg in pkgs) {
                 let ctx = instance.GetASTContextByPackage(Some(pkg)).getOrThrow()
                 PerformDesugarAfterTypeCheck(impl.typeManager, manager, instance.mangler,
-                    impl.structMemberMap, pkg, context: Some(ctx), options: options,
+                    pkg, context: Some(ctx), options: options,
                     synthesizer: Some({ synCtx: ASTContext, pos: SynPos, node: Node =>
                         SynthesizeWithoutRecover(synCtx, pos, node)
                     }), callChecker: Some({ checkCtx: ASTContext, target: Ty, call: CallExpr =>
@@ -1525,7 +1521,7 @@ extend TypeChecker {
             case Some(value) => value
             case None => return
         }
-        var hasBrokenBody = funcBody.generic.isSome() && !fd.TestAttr(Attribute.STATIC) && HasJavaAttr(decl).isNone()
+        var hasBrokenBody = funcBody.generic.isSome() && !fd.TestAttr(Attribute.STATIC)
         if (hasBrokenBody) {
             Diagnose(impl.diag.getOrThrow(), fd, BasicDiagKind.sema_forbid_generic_constructor,
                 args: [BasicDiagArgument(fd.identifier.Val())]).Emit()
@@ -1665,10 +1661,7 @@ extend TypeChecker {
             case Some(value) => value
             case None => return
         }
-        let invalidGeneric = funcBody.generic.isSome() && !fd.TestAttr(Attribute.STATIC) && match (fd.outerDecl) {
-            case Some(outerDecl) => HasJavaAttr(outerDecl).isNone()
-            case None => false
-        }
+        let invalidGeneric = funcBody.generic.isSome() && !fd.TestAttr(Attribute.STATIC) && fd.outerDecl.isSome()
         if (invalidGeneric) {
             Diagnose(impl.diag.getOrThrow(), fd, BasicDiagKind.sema_forbid_generic_finalizer,
                 args: [BasicDiagArgument(fd.identifier.Val())]).Emit()
@@ -2275,11 +2268,11 @@ extend TypeChecker {
         if (decl.astKind != ASTKind.STRUCT_DECL && decl.astKind != ASTKind.CLASS_DECL) {
             return
         }
-        if (decl.TestAnyAttr(Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_MIRROR_INTERFACE_HANDLE_WRAPPER)) {
+        if (decl.TestAnyAttr(Attribute.OBJ_C_FOREIGN, Attribute.OBJ_C_FOREIGN_INTERFACE_HANDLE_WRAPPER)) {
             return
         }
-        if (decl.TestAnyAttr(Attribute.JAVA_MIRROR, Attribute.JAVA_MIRROR_SYNTHETIC_WRAPPER,
-            Attribute.JAVA_IMPL_REGISTRY_COMPANION)) {
+        if (decl.TestAnyAttr(Attribute.JAVA_FOREIGN, Attribute.JAVA_FOREIGN_SYNTHETIC_WRAPPER,
+            Attribute.JAVA_EXPORT_REGISTRY_COMPANION)) {
             return
         }
         if (decl.astKind == ASTKind.STRUCT_DECL && decl.TestAttr(Attribute.COMMON)) {
@@ -3597,7 +3590,7 @@ extend TypeChecker {
             var isWellTyped = true
             if (retTy.IsUnit()) {
                 isWellTyped = Ty.IsTyCorrect(Synthesize(ctx, SynPos.UNUSED, body))
-            } else if (NeedCheckBodyReturn(fb)) {
+            } else {
                 isWellTyped = Check(ctx, retTy, body)
                 if (!isWellTyped && body.body.isEmpty()) {
                     if (let Some(diagValue2) <- impl.diag) {
@@ -3844,11 +3837,6 @@ extend TypeChecker {
 
     private func CheckCtorFuncBody(ctx: ASTContext, fb: FuncBody): Unit {
         let funcDecl = fb.funcDecl.getOrThrow()
-        if (let Some(parentClassLike) <- fb.parentClassLike) {
-            if (let Some(attr) <- HasJavaAttr(parentClassLike)) {
-                funcDecl.EnableAttr(attr)
-            }
-        }
         var ctorTy: Ty = TypeManager.GetInvalidTy()
         if (funcDecl.TestAttr(Attribute.STATIC)) {
             ctorTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
@@ -4145,12 +4133,12 @@ extend TypeChecker {
                 impl.CheckRecursiveConstructorCall(body.decls)
             }
             if (classDecl.TestAnyAttr(
-                Attribute.JAVA_MIRROR, Attribute.JAVA_MIRROR_SUBTYPE)) {
+                Attribute.JAVA_FOREIGN, Attribute.JAVA_EXPORT)) {
                 CheckJavaInteropLibImport(classDecl)
             }
             // C++ src/Sema/TypeCheckClassLike.cpp:136-138.
             if (classDecl.TestAnyAttr(
-                Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_IMPL)) {
+                Attribute.OBJ_C_FOREIGN, Attribute.OBJ_C_EXPORT)) {
                 CheckObjCInteropLibImport(classDecl)
             }
             return tyOrInvalid(classDecl)
@@ -4171,11 +4159,11 @@ extend TypeChecker {
             if (let Some(body3) <- interfaceDecl.body) {
                 TypeCheckCompositeBody(ctx, interfaceDecl, body3.decls)
             }
-            if (interfaceDecl.TestAnyAttr(Attribute.JAVA_MIRROR, Attribute.JAVA_MIRROR_SUBTYPE)) {
+            if (interfaceDecl.TestAnyAttr(Attribute.JAVA_FOREIGN, Attribute.JAVA_EXPORT)) {
                 CheckJavaInteropLibImport(interfaceDecl)
             }
             // C++ src/Sema/TypeCheckClassLike.cpp:268-270.
-            if (interfaceDecl.TestAnyAttr(Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_IMPL)) {
+            if (interfaceDecl.TestAnyAttr(Attribute.OBJ_C_FOREIGN, Attribute.OBJ_C_EXPORT)) {
                 CheckObjCInteropLibImport(interfaceDecl)
             }
             return tyOrInvalid(interfaceDecl)
@@ -4331,10 +4319,8 @@ extend TypeChecker {
                 let _ = SynthesizeBlock(ctx, body)
             } else if (IsConstructorBody(fb)) {
                 let _ = SynthesizeBlock(ctx, body)
-            } else if (NeedCheckBodyReturn(fb)) {
-                let _ = CheckBlock(ctx, retTy, body)
             } else {
-                let _ = SynthesizeBlock(ctx, body)
+                let _ = CheckBlock(ctx, retTy, body)
             }
             currentFuncBody = previousFuncBody
         }
@@ -6013,7 +5999,7 @@ extend TypeChecker {
                 ReplaceIdealTy(impl.typeManager, innerExpr, diag: impl.diag) && isWellTyped
         }
         replaceReturnClassThisOutsideClass(re, innerExpr)
-        if (!isWellTyped && NeedCheckBodyReturn(fb)) {
+        if (!isWellTyped) {
             return TcInvalid(re)
         }
         let nothingTy = TypeManager.GetNothingTy()

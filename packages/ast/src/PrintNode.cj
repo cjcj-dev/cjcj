@@ -633,10 +633,7 @@ private class PrintState {
     }
 
     private func printClassDecl(classDecl: ClassDecl, indent: UInt64): Unit {
-        if (let Some(attr) <- HasJavaAttr(classDecl)) {
-            let argStr = if (attr == Attribute.JAVA_APP) { "app" } else { "ext" }
-            printLine(indent, "@Java[\"" + argStr + "\"]")
-        }
+
         open(indent, "ClassDecl: " + classDecl.identifier.Val())
         printBasic(classDecl, indent + 1u64)
         printAnnotations(classDecl, indent + 1u64)
@@ -652,10 +649,7 @@ private class PrintState {
     }
 
     private func printInterfaceDecl(interfaceDecl: InterfaceDecl, indent: UInt64): Unit {
-        if (let Some(attr) <- HasJavaAttr(interfaceDecl)) {
-            let argStr = if (attr == Attribute.JAVA_APP) { "app" } else { "ext" }
-            printLine(indent, "@Java[\" " + argStr + " \"]")
-        }
+
         open(indent, "InterfaceDecl: " + interfaceDecl.identifier.Val())
         printBasic(interfaceDecl, indent + 1u64)
         printModifiers(interfaceDecl, indent)

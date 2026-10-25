@@ -107,7 +107,7 @@ public class FunctionInline {
         // @ObjCMirror functions are generated and always have the same body
         // that calls relevant native code.
         // According to benchmarks, they can always be inlined.
-        if (fn.TestAttr(Attribute.OBJ_C_MIRROR)) {
+        if (fn.TestAttr(Attribute.OBJ_C_FOREIGN)) {
             return true
         }
         let currentGlobalFunc = globalFunc.getOrThrow()

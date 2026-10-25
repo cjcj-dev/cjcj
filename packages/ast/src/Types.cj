@@ -451,13 +451,6 @@ public open class Ty <: Identifiable & Hashable & Equatable<Ty> {
         return kind == TypeKind.TYPE_CSTRING
     }
 
-    public func IsEraseGeneric(): Bool {
-        if (let Some(gen) <- (this as GenericsTy)) {
-            return gen.isEraseMode
-        }
-        return false
-    }
-
     public func IsClassLike(): Bool {
         return kind == TypeKind.TYPE_CLASS || kind == TypeKind.TYPE_INTERFACE
     }
@@ -1520,7 +1513,6 @@ public class TypeAliasTy <: Ty {
 
 public class GenericsTy <: Ty {
     public var decl: Option<GenericParamDecl> = None
-    public var isEraseMode: Bool = false
     public let upperBounds: ArrayList<Ty> = ArrayList<Ty>()
     public var isUpperBoundLegal: Bool = true
     public var lowerBound: Option<Ty> = None
@@ -1531,7 +1523,6 @@ public class GenericsTy <: Ty {
         super(TypeKind.TYPE_GENERICS)
         this.name = name
         this.decl = decl
-        isEraseMode = IsJavaGeneric(decl)
         generic = true
     }
 

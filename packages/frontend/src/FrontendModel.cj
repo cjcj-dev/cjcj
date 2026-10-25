@@ -2132,7 +2132,7 @@ public class CjoSignatureMaterializer {
 
     // ReferenceLoader.cpp:524-580 LoadDeclRefs.
     private func LoadDeclRefs(declObj: PackageFormat_Decl, astDecl: Decl): Unit {
-        astDecl.SetTy(LoadType(declObj.GetType()))
+        astDecl.SetTy(LoadType(declObj.GetType()) ?? TypeManager.GetInvalidTy())
         if (!Ty.IsTyCorrect(astDecl.GetTy()) && isLoadCache) { return }
         LoadGenericConstraintsRef(declObj.GetGeneric(), astDecl.GetGeneric())
         let rawAnnotations = declObj.GetAnnotations().getOrThrow()
@@ -3552,6 +3552,8 @@ public class CjoSignatureMaterializer {
             case 8u16 => annotation.kind = AstAnnotationKind.FOREIGN_NAME
             case 9u16 => annotation.kind = AstAnnotationKind.JAVA_HAS_DEFAULT
             case 10u16 => annotation.kind = AstAnnotationKind.ANNOTATION
+            case 11u16 => annotation.kind = AstAnnotationKind.JAVA
+            case 12u16 => annotation.kind = AstAnnotationKind.OBJ_C
             case _ => return None
         }
         annotation.identifier = Identifier(reader.StringField(annoTable, 6))
@@ -3712,27 +3714,27 @@ public class CjoSignatureMaterializer {
             case 73 => Some(Attribute.COMMON_NON_EXHAUSTIVE)
             case 74 => Some(Attribute.SPECIFIC)
             case 75 => Some(Attribute.COMMON_WITH_DEFAULT)
-            case 76 => Some(Attribute.JAVA_MIRROR)
-            case 77 => Some(Attribute.JAVA_MIRROR_SUBTYPE)
+            case 76 => Some(Attribute.JAVA_FOREIGN)
+            case 77 => Some(Attribute.JAVA_EXPORT)
             case 78 => Some(Attribute.JAVA_HAS_DEFAULT)
-            case 79 => Some(Attribute.JAVA_MIRROR_SYNTHETIC_WRAPPER)
-            case 80 => Some(Attribute.OBJ_C_MIRROR)
-            case 81 => Some(Attribute.OBJ_C_IMPL)
+            case 79 => Some(Attribute.JAVA_FOREIGN_SYNTHETIC_WRAPPER)
+            case 80 => Some(Attribute.OBJ_C_FOREIGN)
+            case 81 => Some(Attribute.OBJ_C_EXPORT)
             case 82 => Some(Attribute.OBJ_C_INIT)
             case 83 => Some(Attribute.OBJ_C_OPTIONAL)
             case 84 => Some(Attribute.JAVA_CJ_MAPPING)
             case 85 => Some(Attribute.OBJ_C_CJ_MAPPING)
             case 86 => Some(Attribute.CJ_MIRROR_JAVA_INTERFACE_FWD)
-            case 87 => Some(Attribute.DESUGARED_MIRROR_FIELD)
+            case 87 => Some(Attribute.DESUGARED_FOREIGN_FIELD)
             case 88 => Some(Attribute.HAS_INITED_FIELD)
-            case 89 => Some(Attribute.OBJ_C_MIRROR_INTERFACE_HANDLE_WRAPPER)
+            case 89 => Some(Attribute.OBJ_C_FOREIGN_INTERFACE_HANDLE_WRAPPER)
             case 90 => Some(Attribute.CJ_MIRROR_JAVA_INTERFACE_DEFAULT)
             case 91 => Some(Attribute.CJ_MIRROR_OBJC_INTERFACE_FWD)
             case 92 => Some(Attribute.ALREADY_LOADED)
-            case 93 => Some(Attribute.JAVA_IMPL_REGISTRY_COMPANION)
+            case 93 => Some(Attribute.JAVA_EXPORT_REGISTRY_COMPANION)
             case 94 => Some(Attribute.DOES_NOT_THROW)
-            case 95 => Some(Attribute.OBJ_C_IMPL_REGISTRY_COMPANION)
-            case 96 => Some(Attribute.OBJ_C_IMPL_MOVED_MEMBER_PROXY)
+            case 95 => Some(Attribute.OBJ_C_EXPORT_REGISTRY_COMPANION)
+            case 96 => Some(Attribute.OBJ_C_EXPORT_MOVED_MEMBER_PROXY)
             case _ => None
         }
     }

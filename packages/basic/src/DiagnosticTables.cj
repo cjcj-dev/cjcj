@@ -1072,6 +1072,9 @@ public enum DiagKindRefactor {
     | sema_unused_import
     | sema_diag_end
     | conditional_compilation_unexpected_cfg_name
+    | parse_deprecated_interop_annotation
+    | parse_objc_func_must_be_foreign
+    | sema_objc_mirror_interface_subtype_must_be_annotated
 }
 
 public class ErrorData {
@@ -2990,6 +2993,9 @@ public let errorData: Array<ErrorData> = [
     ErrorData(message: "unused import '%s'", mainHint: "unused import", otherHints: []),
     ErrorData(message: "", mainHint: "", otherHints: []),
     ErrorData(message: "unexpected conditional compilation condition name '%s'; declare it in cfg.names in cfg.toml", mainHint: "unexpected cfg name", otherHints: []),
+    ErrorData(message: "annotation %s is deprecated, use %s instead", mainHint: "", otherHints: []),
+    ErrorData(message: "@ObjC top-level function '%s' must be foreign", mainHint: "", otherHints: []),
+    ErrorData(message: "only '@ObjC' foreign interface can inherit super '@ObjC' foreign interface", mainHint: "'%s' must be annotated with '@ObjC foreign'", otherHints: []),
 ]
 
 public let rDiagSeveritys: Array<DiagSeverity> = [
@@ -3729,6 +3735,9 @@ public let rDiagSeveritys: Array<DiagSeverity> = [
     DiagSeverity.DS_WARNING,
     DiagSeverity.DS_ERROR,
     DiagSeverity.DS_WARNING,
+    DiagSeverity.DS_WARNING,
+    DiagSeverity.DS_ERROR,
+    DiagSeverity.DS_ERROR,
 ]
 
 public let rWarnGroups: Array<WarnGroup> = [
@@ -4468,6 +4477,9 @@ public let rWarnGroups: Array<WarnGroup> = [
     WarnGroup.UNUSED,
     WarnGroup.NONE,
     WarnGroup.UNEXPECTED_CFG,
+    WarnGroup.DEPRECATED,
+    WarnGroup.NONE,
+    WarnGroup.NONE,
 ]
 
 public let warnGroupDescrs: Array<String> = [
@@ -5222,8 +5234,11 @@ public let RE_DIAG_KIND_STR: Array<String> = [
     "sema_unused_import",
     "sema_diag_end",
     "conditional_compilation_unexpected_cfg_name",
+    "parse_deprecated_interop_annotation",
+    "parse_objc_func_must_be_foreign",
+    "sema_objc_mirror_interface_subtype_must_be_annotated",
 ]
-public let RE_DIAG_KIND_STR_SIZE: Int64 = 736
+public let RE_DIAG_KIND_STR_SIZE: Int64 = 739
 
 public func DiagKindIndex(kind: DiagKind): Int64 {
     return match (kind) {
@@ -6256,6 +6271,9 @@ public func DiagKindRefactorIndex(kind: DiagKindRefactor): Int64 {
         case DiagKindRefactor.sema_unused_import => 733
         case DiagKindRefactor.sema_diag_end => 734
         case DiagKindRefactor.conditional_compilation_unexpected_cfg_name => 735
+        case DiagKindRefactor.parse_deprecated_interop_annotation => 736
+        case DiagKindRefactor.parse_objc_func_must_be_foreign => 737
+        case DiagKindRefactor.sema_objc_mirror_interface_subtype_must_be_annotated => 738
     }
 }
 
@@ -6292,6 +6310,9 @@ public func GetDiagnoseCategory(diagKind: DiagKind): DiagCategory {
 }
 
 public func GetDiagnoseCategory(diagKind: DiagKindRefactor): DiagCategory {
+    if (diagKind == DiagKindRefactor.sema_objc_mirror_interface_subtype_must_be_annotated) { return DiagCategory.SEMA }
+    if (diagKind == DiagKindRefactor.parse_deprecated_interop_annotation ||
+        diagKind == DiagKindRefactor.parse_objc_func_must_be_foreign) { return DiagCategory.PARSE }
     if (diagKind == DiagKindRefactor.conditional_compilation_unexpected_cfg_name) {
         return DiagCategory.CONDITIONAL_COMPILATION
     }

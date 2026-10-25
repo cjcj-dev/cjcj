@@ -67,6 +67,8 @@ public class Ohos_CJNATIVE <: Linux_CJNATIVE {
         }
         tool.AppendArg("-z")
         tool.AppendArg("max-page-size=4096")
+        tool.AppendArg("-z")
+        tool.AppendArg("pack-relative-relocs")
         tool.AppendArgIf(driverOptions.stripSymbolTable, "-s")
         tool.AppendArg("--hash-style=gnu")
         tool.AppendArg("-m")

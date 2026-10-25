@@ -2416,7 +2416,7 @@ public class InitializationChecker {
             if ((let Some(parentClassLike) <- body.parentClassLike) &&
                 (let Some(classDecl) <- (parentClassLike as ClassDecl)) &&
                 (let Some(superClass) <- classDecl.GetSuperClassDecl()) &&
-                superClass.TestAnyAttr(Attribute.JAVA_MIRROR, Attribute.JAVA_MIRROR_SUBTYPE)) {
+                superClass.TestAnyAttr(Attribute.JAVA_FOREIGN, Attribute.JAVA_EXPORT)) {
                 for (decl in uninitNonFuncDecls) {
                     if (decl.astKind != ASTKind.VAR_DECL || !decl.TestAttr(Attribute.COMPILER_ADD)) {
                         continue

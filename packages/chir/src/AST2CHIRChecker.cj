@@ -120,6 +120,24 @@ private func CheckMethodType(astTy: AstTy, chirTy: Type): Bool {
     return true
 }
 
+// The merged CHIR keeps the common return type after sema accepts a specific refinement.
+// Parameter types still have to match, including the implicit receiver offset for methods.
+private func CheckFuncTypeSameParams(astTy: AstTy, chirTy: Type, receiverOffset: Int64): Bool {
+    let astTyArgs = astTy.typeArgs
+    let chirTyArgs = chirTy.GetTypeArgs()
+    if (astTyArgs.isEmpty() || astTyArgs.size + receiverOffset != chirTyArgs.size) {
+        return false
+    }
+    var loop: Int64 = 0
+    while (loop + 1 < astTyArgs.size) {
+        if (!CheckType(astTyArgs[loop], chirTyArgs[loop + receiverOffset])) {
+            return false
+        }
+        loop++
+    }
+    return true
+}
+
 private func CheckStructType(astTy: AstTy, chirTy: Type): Bool {
     if (!astTy.IsStruct()) {
         return false
@@ -304,12 +322,16 @@ private func CheckInheritDeclGlobalMember(decl: AstDecl, chirNode: CustomTypeDef
             return true
         }
         let chirType = cacheValue.GetType().getOrThrow()
-        if (!decl.TestAttr(AstAttribute.STATIC) && !CheckMethodType(decl.GetTy().getOrThrow(), chirType)) {
+        let specificOverCommon = decl.TestAttr(AstAttribute.SPECIFIC) &&
+            cacheValue.TestAttr(Attribute.DESERIALIZED)
+        if (!decl.TestAttr(AstAttribute.STATIC) && !CheckMethodType(decl.GetTy().getOrThrow(), chirType) &&
+            !(specificOverCommon && CheckFuncTypeSameParams(decl.GetTy().getOrThrow(), chirType, 1))) {
             Errorln(cacheValue.GetIdentifier() + " is expected to be promoted " + decl.GetTy().getOrThrow().String() +
                 ".")
             return false
         }
-        if (decl.TestAttr(AstAttribute.STATIC) && !CheckFuncType(decl.GetTy().getOrThrow(), chirType)) {
+        if (decl.TestAttr(AstAttribute.STATIC) && !CheckFuncType(decl.GetTy().getOrThrow(), chirType) &&
+            !(specificOverCommon && CheckFuncTypeSameParams(decl.GetTy().getOrThrow(), chirType, 0))) {
             Errorln(cacheValue.GetIdentifier() + " is expected to be promoted " + decl.GetTy().getOrThrow().String() +
                 ".")
             return false

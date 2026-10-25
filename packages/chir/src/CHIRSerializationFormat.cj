@@ -305,14 +305,14 @@ func CHIRKnownAttributes(): ArrayList<Attribute> {
     attrs.add(Attribute.DESERIALIZED)
     attrs.add(Attribute.INITIALIZER)
     attrs.add(Attribute.UNSAFE)
-    attrs.add(Attribute.JAVA_MIRROR)
-    attrs.add(Attribute.JAVA_IMPL)
-    attrs.add(Attribute.OBJ_C_MIRROR)
+    attrs.add(Attribute.JAVA_FOREIGN)
+    attrs.add(Attribute.JAVA_EXPORT)
+    attrs.add(Attribute.OBJ_C_FOREIGN)
     attrs.add(Attribute.HAS_INITED_FIELD)
     attrs.add(Attribute.JAVA_HAS_DEFAULT)
     attrs.add(Attribute.PREVIOUSLY_DESERIALIZED)
     attrs.add(Attribute.DOES_NOT_THROW)
-    attrs.add(Attribute.OBJ_C_IMPL)
+    attrs.add(Attribute.OBJ_C_EXPORT)
     attrs.add(Attribute.MATCH_PATTERN)
     attrs.add(Attribute.PLUGIN_ADDED)
     attrs.add(Attribute.FAST_NATIVE)
@@ -358,14 +358,14 @@ func CHIRAttributeFromIndex(index: Int64): Attribute {
         case 29 => Attribute.DESERIALIZED
         case 30 => Attribute.INITIALIZER
         case 31 => Attribute.UNSAFE
-        case 32 => Attribute.JAVA_MIRROR
-        case 33 => Attribute.JAVA_IMPL
-        case 34 => Attribute.OBJ_C_MIRROR
+        case 32 => Attribute.JAVA_FOREIGN
+        case 33 => Attribute.JAVA_EXPORT
+        case 34 => Attribute.OBJ_C_FOREIGN
         case 35 => Attribute.HAS_INITED_FIELD
         case 36 => Attribute.JAVA_HAS_DEFAULT
         case 37 => Attribute.PREVIOUSLY_DESERIALIZED
         case 38 => Attribute.DOES_NOT_THROW
-        case 39 => Attribute.OBJ_C_IMPL
+        case 39 => Attribute.OBJ_C_EXPORT
         case 40 => Attribute.MATCH_PATTERN
         case 41 => Attribute.PLUGIN_ADDED
         case 71 => Attribute.FAST_NATIVE

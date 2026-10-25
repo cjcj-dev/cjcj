@@ -296,7 +296,6 @@ public func AddJObjectSuperClassJavaInterop(
         let typeNode = CreateRefType(classObject)
         typeNode.curFile = classDecl.curFile
         classDecl.inheritedTypes.add(typeNode, at: 0)
-        classDecl.EnableAttr(Attribute.JAVA_MIRROR_SUBTYPE)
     } else {
         let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_member_not_imported,
             classDecl.identifier.Begin(), arguments: [INTEROP_JAVA_LANG_PACKAGE + "." + INTEROP_JOBJECT_NAME])

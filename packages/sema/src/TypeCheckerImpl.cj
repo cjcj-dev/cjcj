@@ -104,7 +104,6 @@ public class TypeCheckerImpl {
     public var importManager: Option<SemaImportManager> = None
     public let scopeManager: ScopeManager = ScopeManager()
     public let mainFunctionMap: HashMap<Node, ArrayList<Decl>> = HashMap<Node, ArrayList<Decl>>()
-    public var structMemberMap: HashMap<InheritableDecl, MemberMap> = HashMap<InheritableDecl, MemberMap>()
 
     public init(ci!: Option<CompilerInstance> = None, typeManager!: TypeManager = TypeManager(),
         diag!: Option<BasicDiagnosticEngine> = None,

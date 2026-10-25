@@ -1733,36 +1733,6 @@ public class TypeManager {
         return ty
     }
 
-    public func RestoreJavaGenericsTy(decl: Decl): Unit {
-        if (!decl.TestAttr(Attribute.GENERIC_INSTANTIATED)) {
-            return
-        }
-        if (let None <- HasJavaAttr(decl)) {
-            return
-        }
-        if (let Some(genericDecl) <- decl.genericDecl) {
-            if (let Some(classDecl) <- (decl as ClassDecl)) {
-                for (ty in allocatedClassLikeTys) {
-                    if (SameDeclOption(Ty.GetDeclPtrOfTy(ty), Some(genericDecl))) {
-                        if (let Some(classTy) <- (ty as ClassTy)) {
-                            classTy.declPtr = classDecl
-                            classTy.decl = classDecl
-                        }
-                    }
-                }
-            } else if (let Some(interfaceDecl) <- (decl as InterfaceDecl)) {
-                for (ty in allocatedClassLikeTys) {
-                    if (SameDeclOption(Ty.GetDeclPtrOfTy(ty), Some(genericDecl))) {
-                        if (let Some(interfaceTy) <- (ty as InterfaceTy)) {
-                            interfaceTy.declPtr = interfaceDecl
-                            interfaceTy.decl = interfaceDecl
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     public func GetAllExtendInterfaceTy(ty: Ty): TySet {
         if (!Ty.IsTyCorrect(ty)) {
             return TySet()

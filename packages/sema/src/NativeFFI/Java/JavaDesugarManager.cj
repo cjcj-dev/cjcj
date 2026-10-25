@@ -9,7 +9,7 @@ import cjcj::option.MaybeString
 import cjcj::sema.{GenerateGetTypeForTypeParamIntrinsic, MemberMap, TypeManager}
 import cjcj::sema.NativeFFI.{CreateSuperCall, GetCangjieLibName, GetJavaMirrorWrappingConstructor, GetJavaRefField,
     InteropLibBridge, IsJArray, Utils, WithinFile, WrapReturningLambdaCall}
-import cjcj::utils.{HAS_INITED_IDENT, JAVA_REF_GETTER_FUNC_NAME}
+import cjcj::utils.JAVA_REF_GETTER_FUNC_NAME
 
 public class JavaDesugarManager {
     private let importManager: SemaImportManager
@@ -18,22 +18,19 @@ public class JavaDesugarManager {
     private let mangler: BaseMangler
     private let javagenOutputPath: MaybeString
     private let outputPath: String
-    private let memberMap: HashMap<InheritableDecl, MemberMap>
     private var utilsStore: Option<Utils> = None
     private var ilibStore: Option<InteropLibBridge> = None
     private var jniStore: Option<JniBridge> = None
     private var factoryStore: Option<ASTFactory> = None
 
     public init(importManager: SemaImportManager, typeManager: TypeManager, diag: DiagnosticEngine,
-        mangler: BaseMangler, javagenOutputPath: MaybeString, outputPath: String,
-        memberMap: HashMap<InheritableDecl, MemberMap>) {
+        mangler: BaseMangler, javagenOutputPath: MaybeString, outputPath: String) {
         this.importManager = importManager
         this.typeManager = typeManager
         this.diag = diag
         this.mangler = mangler
         this.javagenOutputPath = javagenOutputPath
         this.outputPath = outputPath
-        this.memberMap = memberMap
     }
 
     private func Ensure(ctx: AfterTypeCheckContext): Unit {
@@ -111,20 +108,6 @@ public class JavaDesugarManager {
         let superCall = CreateSuperCall(decl, superCtor.getOrThrow(), superCtor.getOrThrow().GetTy().getOrThrow())
         superCall.args.add(arg)
         wrapping.funcBody.getOrThrow().body.getOrThrow().body.add(superCall)
-    }
-
-    private func InsertJavaMirrorHasInited(mirror: ClassDecl): Unit {
-        let boolTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN)
-        let initializer = CreateLitConstExpr(LitConstKind.BOOL, "false", boolTy)
-        let field = WithinFile<VarDecl>(CreateVarDecl(HAS_INITED_IDENT, Some(initializer), None), mirror.curFile)
-        field.isVar = true
-        field.fullPackageName = mirror.fullPackageName
-        field.outerDecl = Some(mirror)
-        field.EnableAttr(Attribute.PRIVATE)
-        field.EnableAttr(Attribute.NO_REFLECT_INFO)
-        field.EnableAttr(Attribute.IN_CLASSLIKE)
-        field.EnableAttr(Attribute.HAS_INITED_FIELD)
-        mirror.body.getOrThrow().decls.add(field)
     }
 
     private func InsertJavaMirrorFinalizer(mirror: ClassDecl): Unit {
@@ -244,7 +227,7 @@ public class JavaDesugarManager {
         }
     }
 
-    private func InsertJStringOfStringCtorBody(decl: ClassDecl): Unit {
+    private func InsertJStringOfStringCtorBody(ctx: AfterTypeCheckContext, decl: ClassDecl): Unit {
         var generated: Option<FuncDecl> = None
         for (member in decl.GetMemberDecls()) {
             if (let Some(fd) <- (member as FuncDecl)) {
@@ -308,17 +291,20 @@ public class JavaDesugarManager {
         nodes.add(envVar)
         nodes.add(entity.getOrThrow())
         let superCall = CreateSuperCall(decl, wrapping.getOrThrow(), wrapping.getOrThrow().GetTy().getOrThrow())
-        superCall.args.add(CreateFuncArg(WrapReturningLambdaCall(typeManager, nodes)))
+        let scopeBody = CreateBlock(nodes, BridgeLib().GetJavaEntityTy())
+        scopeBody.curFile = Some(file)
+        let exclusive = WrapWithExclusiveScope(ctx, scopeBody, BridgeLib().GetJavaEntityTy().getOrThrow())
+        if (exclusive.isNone()) { ctor.EnableAttr(Attribute.IS_BROKEN); return }
+        superCall.args.add(CreateFuncArg(exclusive.getOrThrow()))
         ctor.funcBody.getOrThrow().body.getOrThrow().body.add(superCall)
     }
 
-    public func GenerateInMirror(classDecl: ClassDecl): Unit {
+    public func GenerateInMirror(ctx: AfterTypeCheckContext, classDecl: ClassDecl): Unit {
         InsertJavaMirrorWrappingConstructorBody(classDecl)
-        InsertJavaMirrorHasInited(classDecl)
         InsertJavaMirrorFinalizer(classDecl)
         if (let Some(jstring) <- BridgeUtils().GetJStringDecl()) {
             if (classDecl == jstring) {
-                InsertJStringOfStringCtorBody(classDecl)
+                InsertJStringOfStringCtorBody(ctx, classDecl)
             }
         }
         if (IsJArray(classDecl)) {
@@ -330,7 +316,7 @@ public class JavaDesugarManager {
         }
     }
 
-    public func GenerateInMirrors(file: File): Unit {
+    public func GenerateInMirrors(ctx: AfterTypeCheckContext, file: File): Unit {
         if (let Some(pkg) <- file.curPackage) {
             GenerateGetTypeForTypeParamIntrinsic(pkg, typeManager)
         }
@@ -343,7 +329,7 @@ public class JavaDesugarManager {
                     return
                 }
                 if (let Some(classDecl) <- (classLike as ClassDecl)) {
-                    GenerateInMirror(classDecl)
+                    GenerateInMirror(ctx, classDecl)
                 }
             }
         }
@@ -363,12 +349,12 @@ public class JavaDesugarManager {
         Ensure(ctx)
         GenerateJavaReferenceFieldInJObject(BridgeLib()).Process(ctx)
         ctx.FlushGeneratedDecls()
-        GenerateJavaMirrorApiStub(typeManager, BridgeLib(), BridgeUtils(), memberMap).Process(ctx)
+        GenerateJavaMirrorApiStub(typeManager, BridgeLib(), BridgeUtils()).Process(ctx)
         ctx.FlushGeneratedDecls()
         GenerateJavaImplApiStub(typeManager, BridgeLib(), BridgeJni()).Process(ctx)
         ctx.FlushGeneratedDecls()
         for (file in ctx.pkg.files) {
-            GenerateInMirrors(file)
+            GenerateInMirrors(ctx, file)
         }
         GenerateInJavaImplRegistryCompanion(typeManager, BridgeLib()).Process(ctx)
         ctx.FlushGeneratedDecls()

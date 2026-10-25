@@ -221,6 +221,7 @@ private class ASTHasherImpl {
             case AnnotationKind.NO_STACK_GROW => 28
             case AnnotationKind.NO_WRITE_BARRIER => 29
             case AnnotationKind.SYSTEM_STACK => 30
+            case AnnotationKind.OBJ_C => 31
         }
         CombineHash(Int64(value))
     }
@@ -439,8 +440,8 @@ private class ASTHasherImpl {
         let nonSemaAttr: Array<Attribute> = [
             Attribute.ABSTRACT, Attribute.CONSTRUCTOR, Attribute.DEFAULT, Attribute.ENUM_CONSTRUCTOR,
             Attribute.INTERNAL, Attribute.FOREIGN, Attribute.COMMON, Attribute.SPECIFIC, Attribute.GENERIC,
-            Attribute.GLOBAL, Attribute.INTRINSIC, Attribute.JAVA_APP, Attribute.JAVA_MIRROR,
-            Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_IMPL, Attribute.MACRO_FUNC, Attribute.MUT,
+            Attribute.GLOBAL, Attribute.INTRINSIC, Attribute.JAVA_FOREIGN,
+            Attribute.OBJ_C_FOREIGN, Attribute.OBJ_C_EXPORT, Attribute.MACRO_FUNC, Attribute.MUT,
             Attribute.NUMERIC_OVERFLOW, Attribute.OPERATOR, Attribute.PRIVATE, Attribute.PUBLIC, Attribute.PROTECTED,
             Attribute.STATIC, Attribute.TOOL_ADD, Attribute.UNSAFE
         ]
@@ -1157,7 +1158,7 @@ private class ASTHasherImpl {
     public static func IsConsideredInSignatureHash(anno: Annotation): Bool {
         match (anno.kind) {
             case AnnotationKind.C | AnnotationKind.CALLING_CONV | AnnotationKind.INTRINSIC |
-                AnnotationKind.JAVA | AnnotationKind.JAVA_MIRROR | AnnotationKind.JAVA_IMPL |
+                AnnotationKind.JAVA | AnnotationKind.OBJ_C | AnnotationKind.JAVA_MIRROR | AnnotationKind.JAVA_IMPL |
                 AnnotationKind.OBJ_C_MIRROR | AnnotationKind.OBJ_C_IMPL | AnnotationKind.FOREIGN_NAME |
                 AnnotationKind.WHEN | AnnotationKind.DEPRECATED => return true
             case AnnotationKind.ATTRIBUTE | AnnotationKind.NUMERIC_OVERFLOW | AnnotationKind.FASTNATIVE |
@@ -1180,7 +1181,7 @@ private class ASTHasherImpl {
                 AnnotationKind.NO_WRITE_BARRIER_REC | AnnotationKind.NO_STACK_GROW |
                 AnnotationKind.SYSTEM_STACK => return true
             case AnnotationKind.C | AnnotationKind.CALLING_CONV | AnnotationKind.INTRINSIC |
-                AnnotationKind.JAVA | AnnotationKind.JAVA_MIRROR | AnnotationKind.JAVA_IMPL |
+                AnnotationKind.JAVA | AnnotationKind.OBJ_C | AnnotationKind.JAVA_MIRROR | AnnotationKind.JAVA_IMPL |
                 AnnotationKind.OBJ_C_MIRROR | AnnotationKind.OBJ_C_IMPL | AnnotationKind.FOREIGN_NAME |
                 AnnotationKind.WHEN => return !anno.args.isEmpty()
             case _ =>

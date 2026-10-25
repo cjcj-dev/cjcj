@@ -542,6 +542,7 @@ public enum AnnotationKind {
     | NO_WRITE_BARRIER_REC
     | NO_STACK_GROW
     | SYSTEM_STACK
+    | OBJ_C
 }
 
 public func AnnotationKindIndex(kind: AnnotationKind): Int64 {
@@ -577,6 +578,7 @@ public func AnnotationKindIndex(kind: AnnotationKind): Int64 {
         case AnnotationKind.NO_STACK_GROW => 28
         case AnnotationKind.NO_WRITE_BARRIER => 29
         case AnnotationKind.SYSTEM_STACK => 30
+        case AnnotationKind.OBJ_C => 31
     }
 }
 

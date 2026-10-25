@@ -1,6 +1,7 @@
 package cjcj::chir
 
 import std.collection.*
+import cjcj::utils.CJC_ASSERT
 
 public class ReachingDefinitionDomain <: AbstractDomain<ReachingDefinitionDomain> {
     private let reachingDefs: ArrayList<ExpressionFlatSet> = ArrayList<ExpressionFlatSet>()
@@ -378,52 +379,87 @@ public class ReachingDefinitionAnalysis <: Analysis<ReachingDefinitionDomain> {
         }
     }
 
-    private func HandleGetElemRefExpr(state: ReachingDefinitionDomain, getElemRef: Expression): Unit {
-        if (getElemRef.GetNumOfNonSuccessorOperands() >= 1) {
-            let location = getElemRef.GetOperand(0)
-            if (IsTrackedStructRef(location)) {
-                if (let Some(result) <- getElemRef.GetResult()) {
-                    if (!result.TestAttr(Attribute.READONLY)) {
-                        state.Invalidate(location)
-                    }
-                } else {
-                    state.Invalidate(location)
+    private func GetRootRefLocation(value: Value): Value {
+        var location = value
+        while (let Some(local) <- (location as LocalVar)) {
+            if (let Some(expr) <- local.GetExpr()) {
+                if (let Some(field) <- (expr as GetElementRef)) {
+                    location = field.GetLocation()
+                    continue
+                }
+                if (let Some(field) <- (expr as GetElementByName)) {
+                    location = field.GetLocation()
+                    continue
                 }
             }
+            break
+        }
+        return location
+    }
+
+    private func IsPathToReadOnlyMember(baseTy: Type, path: ArrayList<UInt64>): Bool {
+        let pureTy = baseTy.StripAllRefs()
+        if (!pureTy.IsNominal() || path.isEmpty()) {
+            return false
+        }
+        var def = (pureTy as CustomType).getOrThrow().GetCustomTypeDef()
+        var i: Int64 = 0
+        while (i < path.size) {
+            let members = def.GetAllInstanceVars()
+            CJC_ASSERT(path[i] < UInt64(members.size))
+            let member = members[Int64(path[i])]
+            if (member.IsImmutable()) {
+                return true
+            }
+            if (i + 1 == path.size) {
+                break
+            }
+            let memberTy = member.ty.StripAllRefs()
+            if (!memberTy.IsNominal()) {
+                return false
+            }
+            def = (memberTy as CustomType).getOrThrow().GetCustomTypeDef()
+            i++
+        }
+        return false
+    }
+
+    private func KillTrackedStructReachingDefs(state: ReachingDefinitionDomain, location: Value): Unit {
+        if (IsTrackedStructRef(location)) {
+            state.Invalidate(location)
         }
     }
 
-    private func HandleStoreElemRefExpr(state: ReachingDefinitionDomain, storeElemRef: Expression): Unit {
-        InvalidateAliasedAllocations(state)
-        if (storeElemRef.GetNumOfNonSuccessorOperands() >= 2) {
-            let location = storeElemRef.GetOperand(1)
-            if (IsTrackedStructRef(location)) {
-                state.Invalidate(location)
-            }
+    private func HandleGetElemRefExpr(state: ReachingDefinitionDomain, expression: Expression): Unit {
+        let field = (expression as GetElementRef).getOrThrow()
+        // A readonly receiver does not make a mutable field immutable.
+        if (IsPathToReadOnlyMember(field.GetLocation().GetType().getOrThrow(), field.GetPath())) {
+            return
         }
+        KillTrackedStructReachingDefs(state, GetRootRefLocation(field.GetLocation()))
+    }
+
+    private func HandleStoreElemRefExpr(state: ReachingDefinitionDomain, storeElemRef: Expression): Unit {
+        // Preserve the existing escaped-address invalidation in addition to canonical root tracking.
+        InvalidateAliasedAllocations(state)
+        KillTrackedStructReachingDefs(state, GetRootRefLocation(storeElemRef.GetOperand(1)))
     }
 
     private func HandleApplyExpr(state: ReachingDefinitionDomain, apply: Expression): Unit {
         InvalidateAliasedAllocations(state)
-        if (apply.GetNumOfNonSuccessorOperands() > 1) {
-            if (let Some(callee) <- apply.GetOperand(0).AsFunction()) {
-                if (callee.TestAttr(Attribute.MUT)) {
-                    let receiver = apply.GetOperand(1)
-                    if (IsTrackedStructRef(receiver)) {
-                        state.Invalidate(receiver)
-                    }
-                }
+        if (let Some(callee) <- (apply.GetOperand(0) as Function)) {
+            if (callee.IsMemberFunc() && !callee.TestAttr(Attribute.STATIC)) {
+                CJC_ASSERT(apply.GetNumOfNonSuccessorOperands() > 1)
+                KillTrackedStructReachingDefs(state, GetRootRefLocation(apply.GetOperand(1)))
             }
         }
     }
 
     private func HandleIntrinsicExpr(state: ReachingDefinitionDomain, intrinsic: Expression): Unit {
         InvalidateAliasedAllocations(state)
-        if (GetIntrinsicKind(intrinsic) != IntrinsicKind.INOUT_PARAM) {
-            return
-        }
-        if (intrinsic.GetNumOfNonSuccessorOperands() == 1) {
-            state.Invalidate(intrinsic.GetOperand(0))
+        if (GetIntrinsicKind(intrinsic) == IntrinsicKind.INOUT_PARAM) {
+            CJC_ASSERT(intrinsic.GetNumOfNonSuccessorOperands() == 1)
+            state.Invalidate(GetRootRefLocation(intrinsic.GetOperand(0)))
         }
     }
 

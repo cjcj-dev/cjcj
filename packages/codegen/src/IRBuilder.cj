@@ -6597,7 +6597,7 @@ public class IRBuilder2 <: Resource {
         }
     }
 
-    // Mirrors CodeGen/Base/IntrinsicsDispatcher.cpp:218-267 ArrayMemCpyOrCopyTo.
+    // Canonical 3bda7b24: one bounded copy per iteration, including the final segment.
     private func ArrayMemCpyOrCopyTo(arrayCopyToInfo: ArrayCopyToInfo): Unit {
         let copyLen = arrayCopyToInfo.dataSize
         if (unsafe { LLVMSelfhostIsConstantInt(copyLen) } != 0 &&
@@ -6606,8 +6606,8 @@ public class IRBuilder2 <: Resource {
             return
         }
 
-        let blocks = CreateAndInsertBasicBlocks(ArrayList<String>([GenNameForBB("arr.copy.start"),
-            GenNameForBB("arr.copy.body"), GenNameForBB("arr.copy.end")]))
+        let blocks = CreateAndInsertBasicBlocks(ArrayList<String>([GenNameForBB("arr.copy.cond"),
+            GenNameForBB("arr.copy.body"), GenNameForBB("arr.copy.exit")]))
         CJC_ASSERT(blocks.size >= 3)
         let whileLoopHeader = blocks[0]
         let whileLoopBody = blocks[1]
@@ -6617,32 +6617,30 @@ public class IRBuilder2 <: Resource {
         // incorrectly ICE'd std.unittest* while upstream still emits the copy loop.
         let sizeOfSingleCopy = GetInt64(2147483640)
         let i64Ty = unsafe { LLVMInt64TypeInContext(GetLLVMContext().raw) }
-        let iterator = CreateEntryAlloca(i64Ty, name: "iterator")
-        CreateStore(GetInt64(0), iterator)
+        let preBlock = GetInsertBlock()
         CreateBr(whileLoopHeader)
 
         SetInsertPoint(whileLoopHeader)
-        let iteratorPlus2G = CreateBinary(ExprKind.ADD, CreateLoad(i64Ty, iterator), sizeOfSingleCopy)
-        let cmpResult = CreateICmp(LLVMIntPredicate.SLT, iteratorPlus2G, copyLen, name: "max.size")
+        let offset = CreatePHI(i64Ty, name: "offset")
+        AddIncoming(offset, ArrayList<LLVMValueRef>([GetInt64(0)]), ArrayList<LLVMBasicBlockRef>([preBlock]))
+        let remaining = CreateBinary(ExprKind.SUB, copyLen, offset)
+        let cmpResult = CreateICmp(LLVMIntPredicate.UGT, remaining, GetInt64(0), name: "should_continue")
         CreateCondBr(cmpResult, whileLoopBody, afterWhileLoop)
 
         SetInsertPoint(whileLoopBody)
-        let iteratorIndex = CreateLoad(i64Ty, iterator)
+        let isLarge = CreateICmp(LLVMIntPredicate.UGT, remaining, sizeOfSingleCopy, name: "is_large")
+        let segmentSize = CreateSelect(isLarge, sizeOfSingleCopy, remaining, name: "segment_size")
         CreateCopyTo(ArrayCopyToInfo(arrayCopyToInfo.srcBP, arrayCopyToInfo.dstBP, arrayCopyToInfo.srcArrPtr,
-            arrayCopyToInfo.dstArrPtr, sizeOfSingleCopy,
-            CreateBinary(ExprKind.ADD, iteratorIndex, arrayCopyToInfo.srcIndex),
-            CreateBinary(ExprKind.ADD, iteratorIndex, arrayCopyToInfo.dstIndex), arrayCopyToInfo.elemType,
-            sizeOfSingleCopy))
-        let newIterator = CreateBinary(ExprKind.ADD, iteratorIndex, sizeOfSingleCopy)
-        CreateStore(newIterator, iterator)
+            arrayCopyToInfo.dstArrPtr, segmentSize,
+            CreateBinary(ExprKind.ADD, offset, arrayCopyToInfo.srcIndex),
+            CreateBinary(ExprKind.ADD, offset, arrayCopyToInfo.dstIndex), arrayCopyToInfo.elemType,
+            segmentSize))
+        let nextOffset = CreateBinary(ExprKind.ADD, offset, segmentSize)
+        let backEdge = GetInsertBlock()
         CreateBr(whileLoopHeader)
+        AddIncoming(offset, ArrayList<LLVMValueRef>([nextOffset]), ArrayList<LLVMBasicBlockRef>([backEdge]))
 
         SetInsertPoint(afterWhileLoop)
-        let index = CreateLoad(i64Ty, iterator)
-        let residualSize = CreateBinary(ExprKind.SUB, copyLen, index)
-        CreateCopyTo(ArrayCopyToInfo(arrayCopyToInfo.srcBP, arrayCopyToInfo.dstBP, arrayCopyToInfo.srcArrPtr,
-            arrayCopyToInfo.dstArrPtr, residualSize, CreateBinary(ExprKind.ADD, index, arrayCopyToInfo.srcIndex),
-            CreateBinary(ExprKind.ADD, index, arrayCopyToInfo.dstIndex), arrayCopyToInfo.elemType, residualSize))
     }
 
     private func CreateArrayCopyIntrinsic(intrinsicName: String, dstBase: LLVMValueRef, dstData: LLVMValueRef,
