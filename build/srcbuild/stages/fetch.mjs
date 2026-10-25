@@ -57,6 +57,17 @@ export function applyCompilerCjdbPatches(repoDir) {
   verifyCompilerCjdbPatches(repoDir);
 }
 
+// The installed public compiler headers include several generated schemas.
+// Install the complete output set owned by the existing flatc target, including
+// libs-only builds; never synthesize headers or copy them after CMake install.
+export function applyCompilerSchemaInstall(repoDir) {
+  const target = 'add_custom_target(CangjieFlatbuffersHeaders DEPENDS ${FLATC_OUTPUTS} ${FLATC_LIBAST_OUTPUTS})';
+  const install = 'install(FILES ${FLATC_OUTPUTS} DESTINATION include/flatbuffers)';
+  applyTextPatch(path.join(repoDir, 'schema', 'CMakeLists.txt'), [[target, target + '\n' + install]], {
+    stage: 'fetch.patch.schema-install', marker: install,
+  });
+}
+
 // Keep the reviewed 53da076 native Windows compiler/install changes when
 // consuming canonical sources. Canonical Flatbuffer.cmake already forwards
 // selected compilers and separates host flatc; preserve its newer recipe.
@@ -90,6 +101,7 @@ export async function run(config) {
       await assertSourceIdentity(repo, target);
     }
     applyCompilerCjdbPatches(config.repoPath('compiler'));
+    applyCompilerSchemaInstall(config.repoPath('compiler'));
     if (config.target.spec.nodePlatform === 'win32') applyCompilerWindowsPatches(config.repoPath('compiler'));
     saveSourceSelection(config);
   });

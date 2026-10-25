@@ -37,6 +37,7 @@ const REQUIREMENTS = [
 ];
 
 const PIN_FIXTURE = path.join(import.meta.dirname, 'fixtures', 'compiler-174db8f');
+const SCHEMA_PIN_FIXTURE = path.join(import.meta.dirname, 'fixtures', 'compiler-41b223-schema', 'schema');
 const WINDOWS_PIN_FIXTURE = path.join(import.meta.dirname, 'fixtures', 'compiler-41b223-windows');
 const PATCHED_SHA = {
   buildCjdb: 'd2cb7d2cb6f236ed1ac072c817743e3164adf7a71bc481aa604b88e094a8cabc',
@@ -71,6 +72,7 @@ test('Windows fetch preserves selected native compilers and normal runtime insta
   const compiler = path.join(workspace, 'cangjie_compiler');
   try {
     fs.cpSync(WINDOWS_PIN_FIXTURE, compiler, {recursive: true});
+    fs.cpSync(SCHEMA_PIN_FIXTURE, path.join(compiler, 'schema'), {recursive: true});
     const repoOverrides = {};
     for (const name of ['compiler', 'runtime', 'tools', 'stdx', 'llvm', 'cjpm']) {
       const root = path.join(workspace, name === 'llvm' ? 'cangjie_compiler/third_party/llvm-project'
@@ -143,6 +145,7 @@ test('pinned 174db8f compiler files pass verify only after fetch run restores th
   try {
     const compilerDir = path.join(workspace, 'cangjie_compiler');
     fs.cpSync(PIN_FIXTURE, compilerDir, {recursive: true});
+    fs.cpSync(SCHEMA_PIN_FIXTURE, path.join(compilerDir, 'schema'), {recursive: true});
     for (const dirName of ['cangjie_runtime', 'cangjie_tools', 'cangjie_stdx']) {
       fs.mkdirSync(path.join(workspace, dirName));
     }
