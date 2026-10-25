@@ -35,6 +35,31 @@ test('formal prepare CLI keeps default phases and explicit C2 expansion, rejecti
  assert.equal(r.status,1,r.text);assert.match(r.text,/BOOTSTRAP_TARGET_INPUT_MISMATCH/);
  inputs.runtimeCommit='HEAD';await fs.writeFile(file,JSON.stringify(inputs));r=run();assert.equal(r.status,1,r.text);assert.match(r.text,/TARGET_SOURCE runtime commit/);
 });
+test('formal prepare selects an explicit own H1 producer without replacing host or native AST',async()=>{
+ const work=await temp(),inputs=input(work),file=path.join(work,'inputs.json'),workspace=path.join(work,'workspace');
+ const run=()=>invoke('ci/bootstrap/prepare-bootstrap-plans.mjs',[],{CJCJ_SDK_INPUTS:file,CANGJIE_WORKSPACE:workspace,CJCJ_SDK_TARGETS:''});
+ const selected='e'.repeat(40);
+ inputs.h1Commit=selected;inputs.h1.commit=selected;
+ await fs.writeFile(file,JSON.stringify(inputs));let r=run();assert.equal(r.status,0,r.text);
+ const plan=JSON.parse(await fs.readFile(path.join(workspace,'build-targets.json'),'utf8'));
+ const producer=plan.stages.find(s=>s.id==='stage0').commands[0].argv;
+ console.log('H1_SOURCE_CONSUMER_ASSERTION_REACHED');
+ assert.equal(plan.repos.h1.commit,selected);
+ assert.equal(producer[producer.indexOf('--commit')+1],selected);
+ assert.equal(producer[producer.indexOf('--host')+1],inputs.host.install);
+ assert.equal(producer[producer.indexOf('--sdk')+1],inputs.llvm.install);
+ assert.equal(plan.stages.find(s=>s.id==='stage0-run').metadata.compilerCommit,selected);
+ assert.equal(plan.stages.find(s=>s.id==='nativeAST').reuse.commit,FIXED_INPUTS.compiler);
+ const std=plan.stages.find(s=>s.id==='std-bootstrap').commands[0].argv;
+ assert.equal(std[std.indexOf('--sdk')+1],'${output.stage0-run}');
+ assert.equal(std[std.indexOf('--commit')+1],inputs.runtime.commit);
+ inputs.h1.commit=FIXED_INPUTS.h1;await fs.writeFile(file,JSON.stringify(inputs));r=run();
+ assert.equal(r.status,1,r.text);assert.match(r.text,/TARGET_SOURCE h1/);
+ inputs.h1Commit='HEAD';await fs.writeFile(file,JSON.stringify(inputs));r=run();
+ assert.equal(r.status,1,r.text);assert.match(r.text,/TARGET_SOURCE h1/);
+ delete inputs.h1Commit;await fs.writeFile(file,JSON.stringify(inputs));r=run();
+ assert.equal(r.status,0,r.text);
+});
 test('real sdk-build CLI copies imported inputs and still calls gates on first install and resume',async()=>{
  const work=await temp(),source=path.join(work,'input'),flow=path.join(work,'flow'),install=path.join(work,'install');
  await fs.mkdir(source);await fs.writeFile(path.join(source,'value'),'original C2 input');

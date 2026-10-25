@@ -142,7 +142,7 @@ export function createBootstrapTargets(input) {
   if(typeof runtimeCommit!=='string'||!/^[a-f0-9]{40}$/.test(runtimeCommit))throw new Error('TARGET_SOURCE runtime commit');
   for(const [name,row]of Object.entries({llvm,runtime,ast,h1})) {
     const expected=name==='runtime'?runtimeCommit:name==='llvm'?(input.llvmCommit??FIXED_INPUTS.llvm)
-      :name==='ast'?(input.astCommit??FIXED_INPUTS.compiler):FIXED_INPUTS[name];
+      :name==='ast'?(input.astCommit??FIXED_INPUTS.compiler):name==='h1'?(input.h1Commit??FIXED_INPUTS.h1):FIXED_INPUTS[name];
     if (!/^[a-f0-9]{40}$/.test(expected || '')) throw new Error('TARGET_SOURCE '+name);
     if(row.commit!==expected)throw new Error('TARGET_SOURCE '+name);
   }
