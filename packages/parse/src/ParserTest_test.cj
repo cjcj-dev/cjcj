@@ -443,10 +443,10 @@ class ParserPortTest {
         let members = ArrayList<String>()
         let refs = ArrayList<String>()
         let nestedParents = ArrayList<String>()
-        var nestedInterfaces = 0
+        let nestedInterfaces = ArrayList<InterfaceDecl>()
         Walker(file, visitPre: { node: Node =>
             if (let Some(decl) <- (node as InterfaceDecl) && decl.identifier.Val() == "F") {
-                nestedInterfaces++
+                nestedInterfaces.add(decl)
                 for (parent in decl.inheritedTypes) {
                     if (let Some(refType) <- (parent as RefType)) {
                         nestedParents.add(refType.ref.identifier.Val())
@@ -466,7 +466,7 @@ class ParserPortTest {
         // ParseInheritedTypes rejects F <: F and omits that invalid edge from
         // the AST. Keep the complete-list assertion and require its diagnostic.
         @Expect(expectStrings(refs, ["C", "D", "E"]), true)
-        @Expect(nestedInterfaces, 1)
+        @Expect(nestedInterfaces.size, 1)
         @Expect(expectStrings(nestedParents, ["E"]), true)
         var selfInheritanceErrors = 0
         for (diagnostic in parsed[1].GetCategoryDiagnostic(DiagCategory.PARSE)) {
@@ -506,10 +506,10 @@ class ParserPortTest {
         let members = ArrayList<String>()
         let refs = ArrayList<String>()
         let nestedParents = ArrayList<String>()
-        var nestedInterfaces = 0
+        let nestedInterfaces = ArrayList<InterfaceDecl>()
         Walker(parsed[0], visitPre: { node: Node =>
             if (let Some(decl) <- (node as InterfaceDecl) && decl.identifier.Val() == "F") {
-                nestedInterfaces++
+                nestedInterfaces.add(decl)
                 for (parent in decl.inheritedTypes) {
                     if (let Some(refType) <- (parent as RefType)) {
                         nestedParents.add(refType.ref.identifier.Val())
@@ -527,7 +527,7 @@ class ParserPortTest {
         }).Walk()
         @Expect(expectStrings(members, ["I", "E", "H", "A", "F"]), true)
         @Expect(expectStrings(refs, ["C", "D", "E", "G"]), true)
-        @Expect(nestedInterfaces, 1)
+        @Expect(nestedInterfaces.size, 1)
         @Expect(expectStrings(nestedParents, ["E", "G"]), true)
         for (diagnostic in parsed[1].GetCategoryDiagnostic(DiagCategory.PARSE)) {
             @Expect(diagnostic.rKind == DiagKindRefactor.parse_decl_cannot_inherit_their_self, false)
