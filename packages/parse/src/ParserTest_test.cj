@@ -451,7 +451,30 @@ class ParserPortTest {
             return VisitAction.WALK_CHILDREN
         }).Walk()
         @Expect(expectStrings(members, ["I", "E", "H", "A", "F"]), true)
-        @Expect(expectStrings(refs, ["C", "D", "E", "F"]), true)
+        // ParseInheritedTypes rejects F <: F and omits that invalid edge from
+        // the AST. Keep the complete-list assertion and require its diagnostic.
+        @Expect(expectStrings(refs, ["C", "D", "E"]), true)
+        var selfInheritanceErrors = 0
+        for (diagnostic in parsed[1].GetCategoryDiagnostic(DiagCategory.PARSE)) {
+            if (diagnostic.rKind == DiagKindRefactor.parse_decl_cannot_inherit_their_self) {
+                selfInheritanceErrors++
+            }
+        }
+        @Expect(selfInheritanceErrors, 1)
+    }
+
+    @TestCase
+    func interfaceDeclDistinctParents(): Unit {
+        let parsed = parseDecl("interface F <: E & G {}")
+        @Expect(countErrors(parsed[1]), 0)
+        let refs = ArrayList<String>()
+        Walker(parsed[0], visitPre: { node: Node =>
+            if (let Some(refType) <- (node as RefType)) {
+                refs.add(refType.ref.identifier.Val())
+            }
+            return VisitAction.WALK_CHILDREN
+        }).Walk()
+        @Expect(expectStrings(refs, ["E", "G"]), true)
     }
 
     @TestCase
