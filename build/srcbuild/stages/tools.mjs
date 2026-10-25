@@ -266,6 +266,9 @@ export async function run(config) {
         // environment's removals absent instead of inheriting an earlier SDK.
         for(const key of Object.keys(process.env))if(!(key in env))env[key]=undefined;
         env.CJPM_REGRESSION_CASES=undefined;
+        // The test owns only this unpublished private SDK while it replaces
+        // and restores the selected compiler entry. Keep the public cjpm path.
+        env.CJPM_REGRESSION_PRIVATE_SDK=installed;
         const out=fs.mkdtempSync(path.join(config.workspace,'verify-cjpm-'));
         await command([process.execPath,path.join(toolsRoot,'cjpm/tests/public/test-cache-errors.mjs'),
           path.join(installed,'tools/bin/cjpm'),out,'candidate'],{cwd:toolsRoot,env});
