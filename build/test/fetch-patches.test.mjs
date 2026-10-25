@@ -226,7 +226,9 @@ test('apply throws patch shape drift when DEPENDS cjnative shape moves', () => {
 // Exercise the public source selector and existing-source path, not just the
 // patch helper. build compiler deliberately bypasses fetch on reentry.
 for (const entry of ['fetch', 'build']) test(`public ${entry} restores both static boundscheck producer edges`, () => {
-  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'boundscheck-cli-'));
+  const evidence=process.env.RELEASE_EVIDENCE_TEST_ROOT;
+  const workspace = fs.mkdtempSync(path.join(evidence||os.tmpdir(), 'boundscheck-cli-'));
+  const commands=[];
   try {
     const compiler = path.join(workspace, 'cangjie_compiler');
     fs.cpSync(PIN_FIXTURE, compiler, {recursive:true});
@@ -255,7 +257,10 @@ for (const entry of ['fetch', 'build']) test(`public ${entry} restores both stat
     const invoke=()=>{
       const env={...process.env};delete env.CANGJIE_BUILD_DRY_RUN;
       const args=entry==='fetch'?['fetch',...options]:['build','compiler'];
-      const r=spawnSync(process.execPath,[cli,'--workspace',workspace,'--build-root',workspace+'/buildtools','--target','linux-x64','--official-sdk-root',workspace+'/host-not-consumed',...args],{env,encoding:'utf8'});
+      const argv=[cli,'--workspace',workspace,'--build-root',workspace+'/buildtools','--target','linux-x64','--official-sdk-root',workspace+'/host-not-consumed',...args];
+      const r=spawnSync(process.execPath,argv,{env,encoding:'utf8'});
+      commands.push({argv:[process.execPath,...argv],rc:r.status,signal:r.signal,stdout:r.stdout,stderr:r.stderr});
+      fs.writeFileSync(path.join(workspace,'commands.json'),JSON.stringify(commands,null,2));
       assert.equal(r.status,entry==='build'?1:0,r.stdout+r.stderr);
       if(entry==='build')assert.match(r.stderr,/BOUNDSCHECK_FINITE_BUILD_BOUNDARY/);
     };
@@ -269,7 +274,7 @@ for (const entry of ['fetch', 'build']) test(`public ${entry} restores both stat
     console.log('BOUNDSCHECK_PUBLIC_TARGET_REACHED '+entry+' partial-restore');
     assert.equal(fs.readFileSync(file,'utf8'),expected);
     if(entry==='fetch')verifyCompilerCjdbPatches(compiler);
-  } finally {fs.rmSync(workspace,{recursive:true,force:true});}
+  } finally {if(!evidence)fs.rmSync(workspace,{recursive:true,force:true});}
 });
 
 test('boundscheck preparation refuses shape drift without rewriting canonical input', () => {
