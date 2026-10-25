@@ -2132,7 +2132,8 @@ public class CjoSignatureMaterializer {
 
     // ReferenceLoader.cpp:524-580 LoadDeclRefs.
     private func LoadDeclRefs(declObj: PackageFormat_Decl, astDecl: Decl): Unit {
-        astDecl.SetTy(LoadType(declObj.GetType()) ?? TypeManager.GetInvalidTy())
+        // LoadType already maps missing incremental-cache entries to InvalidTy.
+        astDecl.SetTy(LoadType(declObj.GetType()))
         if (!Ty.IsTyCorrect(astDecl.GetTy()) && isLoadCache) { return }
         LoadGenericConstraintsRef(declObj.GetGeneric(), astDecl.GetGeneric())
         let rawAnnotations = declObj.GetAnnotations().getOrThrow()
