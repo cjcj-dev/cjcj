@@ -55,18 +55,25 @@ export function collect() {
   callerAudit:{compiler:process.env.COMPILER_CALLER_REF,llvm:process.env.LLVM_CALLER_REF,role:'source-only audit by runtime owner; not fetched or executed by this producer'},files:[]};
  manifest.files.push(...copyFiles(build,path.join(dir,'build-products'),f=>/\.(?:dll|a|lib|def|rsp)$/i.test(f)||/\b(?:link\.txt|build\.make|CMakeCache\.txt|install_manifest\.txt|compile_commands\.json)$/.test(f)));
  manifest.files.push(...copyFiles(install,path.join(dir,'installed'),()=>true));
+ // Preserve the actual configure graph even if planning/COFF reading fails.
+ manifest.files.push(...copyFiles(path.join(build,'.cmake/api/v1'),path.join(dir,'cmake-file-api'),()=>true));
  for(const member of ['windows_x86_64_exports.def','windows_export_references.json','windows_retired_exports.def']) {
   const file=path.join(source,'runtime/src',member);if(fs.existsSync(file)){const to=path.join(dir,member);fs.copyFileSync(file,to);manifest.files.push({...fact(to),source:file});}
  }
  const toolchain=process.env.WINDOWS_RUNTIME_TOOLCHAIN||'C:/msys64/mingw64';
+ const cacheFile=path.join(build,'CMakeCache.txt');
+ const cache=fs.existsSync(cacheFile)?fs.readFileSync(cacheFile,'utf8'):'';
+ const cachedReadobj=cache.match(/^WINDOWS_EXPORT_READOBJ:FILEPATH=(.+)$/m)?.[1].trim();
+ const readobj=cachedReadobj||path.join(toolchain,'bin/llvm-readobj.exe');
+ manifest.readobj={configured:cachedReadobj??null,selected:readobj};
  for(const [name,args]of [['clang',['--version']],['ld.lld',['--version']],['llvm-readobj',['--version']],['cmake',['--version']],['python3',['--version']],['objdump',['--version']]])
-  inspect(dir,'tool-'+name,[path.join(toolchain,'bin',name+'.exe'),...args]);
+  inspect(dir,'tool-'+name,[name==='llvm-readobj'?readobj:path.join(toolchain,'bin',name+'.exe'),...args]);
  inspect(dir,'pacman-packages',['C:/msys64/usr/bin/pacman.exe','-Q']);
  const dlls=walk(dir).filter(f=>/\.dll$/i.test(f)),objdump=process.env.OBJDUMP||path.join(toolchain,'bin/objdump.exe');
  manifest.dlls=[];
  for(const [i,dll]of dlls.entries()) {
   const result=inspect(dir,'pe-'+i,[objdump,'-p',dll]);
-  const coff=inspect(dir,'coff-'+i,[path.join(toolchain,'bin/llvm-readobj.exe'),'--coff-exports',dll]);
+  const coff=inspect(dir,'coff-'+i,[readobj,'--coff-exports',dll]);
   const imports=[...(result.stdout||'').matchAll(/^\s*DLL Name:\s*(\S+)/gim)].map(m=>m[1]);
   const row={...fact(dll),objdumpRc:result.status,readobjRc:coff.status,imports,dependencies:[]};
   for(const name of imports) {
@@ -85,16 +92,31 @@ export function collect() {
  // later registration check rejected the successfully linked runtime.
  const linked=manifest.files.some(f=>f.file.endsWith('windows_x86_64_exports.raw.def'))&&dlls.length>0;
  manifest.runtimeDefinitions={status:'NOT_RUN',reason:'normal runtime link not reached'};
- if(linked) {
+ if(linked&&cachedReadobj&&path.isAbsolute(cachedReadobj)&&!cachedReadobj.endsWith('-NOTFOUND')) {
   const output=path.join(dir,'runtime-definitions.json');
   const result=inspect(dir,'runtime-definitions-command',[process.execPath,
    path.join(source,'runtime/build/capture_windows_runtime_definitions.mjs'),build,
-   path.join(source,'runtime/src'),sources.runtime||'',output,path.join(toolchain,'bin/llvm-readobj.exe')]);
+   path.join(source,'runtime/src'),sources.runtime||'',output,readobj]);
   manifest.runtimeDefinitions={rc:result.status,signal:result.signal,error:result.error?.message,
    runtime:sources.runtime,output,produced:fs.existsSync(output)};
- }
+  // The runtime producer owns selection. Retain exactly its selected objects,
+  // including Heap/archive inputs, without an independent symbol allow-list.
+  const planFile=output+'.commands/link-object-plan.json';
+  try {
+   const plan=JSON.parse(fs.readFileSync(planFile,'utf8'));
+   if(!Array.isArray(plan.objects)||!plan.objects.length)throw Error('runtime link-object plan has no selected objects');
+   const failures=[];manifest.runtimeDefinitions.selectedObjects=[];
+   for(const row of plan.objects)try {
+    const relative=path.relative(build,row.object);
+    if(!relative||relative==='..'||relative.startsWith('..'+path.sep)||path.isAbsolute(relative))throw Error('selected object outside normal build: '+row.object);
+    const target=path.join(dir,'selected-objects',relative);fs.mkdirSync(path.dirname(target),{recursive:true});fs.copyFileSync(row.object,target);
+    manifest.runtimeDefinitions.selectedObjects.push({...fact(target),source:row.object,target:row.target});
+   }catch(error){failures.push(String(error));}
+   if(failures.length)throw Error(failures.join('\n'));
+  }catch(error){manifest.runtimeDefinitions.retentionError=String(error);}
+ } else if(linked)manifest.runtimeDefinitions={status:'NOT_RUN',error:'normal CMake WINDOWS_EXPORT_READOBJ absolute path is missing'};
  fs.writeFileSync(path.join(dir,'products.json'),JSON.stringify(manifest,null,2));
- if(linked&&(manifest.runtimeDefinitions.rc!==0||!manifest.runtimeDefinitions.produced))throw Error('native Windows runtime definition capture failed; original command evidence retained');
+ if(linked&&(manifest.runtimeDefinitions.rc!==0||!manifest.runtimeDefinitions.produced||manifest.runtimeDefinitions.retentionError))throw Error('native Windows runtime definition capture failed; original command evidence retained');
  if(manifest.buildOutcome==='success'&&(!manifest.files.some(f=>f.file.endsWith('windows_x86_64_exports.raw.def'))||!dlls.length))throw Error('successful native build missing raw/DLL evidence');
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)) {

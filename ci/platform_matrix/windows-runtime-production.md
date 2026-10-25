@@ -40,13 +40,28 @@ registered JSON/definition.
 
 Once a normal link produced raw/DLL, the always collector runs the runtime
 owner's `capture_windows_runtime_definitions.mjs` over the existing CMake
-objects and compile database. It retains that reader's own rc/logs and complete
-COFF definitions even after a post-link registration rejection. No second build
+objects and compile database. It retains that reader's own rc/logs and emitted
+COFF definitions even after a post-link registration rejection. Completeness
+requires the runtime owner's selected link-object closure; a zero reader rc
+alone does not establish it. No second build
 is performed. Missing capture input or reader failure remains an error; an
 earlier failure that never reached link is recorded as NOT_RUN. The runtime
-owner receives these inputs for normal collect/write/check. The frozen 4ff248
-interface supplies this capture; it is not adopted as a qualified final runtime
-while its C03f2 reflection pairing remains open.
+owner receives these inputs for normal collect/write/check. The historical 4ff248
+interface is SOURCE REJECT under review_gc_anchor_sts_1025's 2026-10-25
+16:59:59Z finding: its cangjie-runtime.dir filter excludes linked Heap.dir
+objects containing the five Reference services. Its old negative test also
+stopped at diagnostics.json ENOENT before the missing_from_raw assertion.
+Preserve both failures. Registration and ABI acceptance depending on this
+capture remain invalid; do not publish or dispatch 4ff248. The runtime owner
+subsequently repaired the selected closure and negative controls in f1f1; the
+original reviewer granted SOURCE/finite graph PASS, not Windows production
+qualification. CI retains the normal always evidence and child rc chain without
+substituting a symbol filter or weakening the runtime gate.
+
+Pure native link preparation does not require the new reflection SDK to run.
+The final fixed E/R and their applicable source reviews must nevertheless be
+ready before requesting the coordinator's separate publication/official-job
+authorization. Neither 4ff248 nor the old 65ab default is that final input.
 
 After successful normal installation, the public installed verifier keeps the
 historical contract and additionally requires all five Reference services.
@@ -60,3 +75,19 @@ through its normal collect/write/check. It owns registration, history (including
 277 in the pending successor) and source corrections. Known source errors stop affected production;
 this workflow does not split the runtime into alternate libraries or bypass a
 post-link gate to create a qualified SDK. No additional matrix is scheduled here.
+
+The next proposed runtime source is
+`ee7cd9f5a532957a2f45a45ca111e4cf07a8851b`. Its parent f1f1 passed
+source and finite graph review but then failed the normal configure probe
+manifest gate. The one-line manifest successor requires the original review's
+incremental conclusion. Do not run the known failing f1f1 configuration.
+Neither source publication nor official dispatch has been authorized here.
+
+The collector now takes the actual `WINDOWS_EXPORT_READOBJ:FILEPATH` from the
+normal CMake cache, records its version and uses that path for both PE inspection
+and the runtime capture CLI. After capture, it retains every object selected by
+`runtime-definitions.json.commands/link-object-plan.json` under
+`selected-objects/`, preserving its build-relative path, including Heap inputs.
+It saves the configure file-api query/reply even if capture planning fails.
+Capture failure keeps its own rc and retained inputs; it cannot turn the failed
+build/install into a pass. Runtime owns graph selection and registration.

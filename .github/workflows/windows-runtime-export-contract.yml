@@ -13,7 +13,7 @@ on:
       runtime_ref:
         description: Published full runtime commit for normal Windows link (source approval is not DLL qualification)
         required: true
-        default: 65ab0659d0e657c92a9ddabe8a10f8bc22dd2eef
+        default: ee7cd9f5a532957a2f45a45ca111e4cf07a8851b
         type: string
 
 permissions:
@@ -25,7 +25,7 @@ jobs:
     timeout-minutes: 45
     env:
       # Requires source publication/exact-fetch before dispatch; never an old binary.
-      RUNTIME_REF: ${{ inputs.runtime_ref || '65ab0659d0e657c92a9ddabe8a10f8bc22dd2eef' }}
+      RUNTIME_REF: ${{ inputs.runtime_ref || 'ee7cd9f5a532957a2f45a45ca111e4cf07a8851b' }}
       RUNTIME_TARGET: windows-x86_64
       RUNTIME_BUILD_JOBS: '4'
       COMPILER_CALLER_REF: 8ba3eb11c18527d5641794225b901202071d726f
