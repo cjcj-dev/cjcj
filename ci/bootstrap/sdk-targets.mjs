@@ -19,8 +19,20 @@ const verifyEntry=fileURLToPath(new URL('./sdk-verify-install.mjs',import.meta.u
 // A tool update's pending consumer needs the compiler and its actual execution
 // closure. Copy those dependencies for use, never a backup of the whole SDK.
 export async function toolConsumerCopies(sdk,platform) {
-  const native=sdkPlatform(platform),recipe=(await fs.readFile(path.join(sdk,'bin/cjcj-stage1'+native.exe+'.entry'),'utf8')).trimEnd().split('\n');
-  if(recipe[0]!=='cjcj-sdk-entry-v1')throw Error('TOOL_CONSUMER_COMPILER_ENTRY');
+  const native=sdkPlatform(platform);
+  // Official SDKs expose bin/cjc directly. A staged SDK still requires its
+  // normal launcher recipe; losing that recipe must not select the host path.
+  const stage=await fs.stat(path.join(sdk,'STAGE-INPUTS.json')).catch(error=>{
+    if(error.code==='ENOENT')return null;throw error;
+  });
+  const entry=await fs.readFile(path.join(sdk,'bin/cjcj-stage1'+native.exe+'.entry'),'utf8').catch(error=>{
+    if(error.code!=='ENOENT')throw error;
+    if(stage)throw Error('TOOL_CONSUMER_COMPILER_ENTRY missing staged launcher recipe');
+    return null;
+  });
+  const recipe=entry===null?[]:entry.trimEnd().split('\n');
+  if(entry!==null&&recipe[0]!=='cjcj-sdk-entry-v1')throw Error('TOOL_CONSUMER_COMPILER_ENTRY');
+  if(entry===null)await fs.access(path.join(sdk,'bin/cjc'+native.exe));
   const paths=new Set(['bin','libexec','runtime','lib','modules','third_party','.native-tools','include','schema','share/cjcj',
     'STAGE-INPUTS.json','compiler-inputs.json','PROVENANCE.txt','RUNTIME-INPUTS.json',
     ...recipe.slice(5).filter(rel=>rel.startsWith('.host/')||rel.startsWith('.compiler-exec/'))]);

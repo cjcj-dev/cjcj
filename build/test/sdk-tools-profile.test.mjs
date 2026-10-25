@@ -265,3 +265,37 @@ test('installed cjpm hello remains independent of the full regression call',asyn
  await helloInstall({sdk:f.sdk,work:f.root+'/independent-hello-'+Date.now(),platform:'linux_x86_64'});
  console.log('CJPM_INDEPENDENT_INSTALLED_HELLO_PASS');
 });
+
+// Keep the public tools/installation/hello path real. Only the compiler and
+// nine producer bodies are the existing controlled fixture, not official H.
+test('public tools install accepts direct compiler SDKs and retains the staged recipe requirement',async()=>{
+ const f=await installedRegressionFixture(),entry=f.sdk+'/bin/cjcj-stage1.entry';
+ const saved=await fs.readFile(entry),raw=await fs.readFile(f.sdk+'/libexec/compiler/cjcj-stage1');
+ await fs.rename(f.sdk+'/bin',f.sdk+'/bin-staged-control');
+ await fs.mkdir(f.sdk+'/bin');await fs.writeFile(f.sdk+'/bin/cjc',raw,{mode:0o755});
+ try {
+  const normal=await f.invoke('direct-compiler');assert.equal(normal.status,0,normal.stderr);
+  console.log('TOOLS_DIRECT_COMPILER_CONSUMER_REACHED');
+  assert.equal(normal.events.filter(e=>e.event==='regression').length,1);
+  assert.equal(JSON.parse(await fs.readFile(f.workspace+'/verify-tools/hello-result.json')).packaged.rc,0);
+  assert.equal(await fs.stat(f.sdk+'/STAGE-INPUTS.json').catch(()=>null),null);
+  assert.equal(await fs.stat(entry).catch(()=>null),null);
+  // A staged SDK with a lost recipe must reject before its compiler consumer.
+  await fs.writeFile(f.sdk+'/STAGE-INPUTS.json','{"fixture":"staged SDK marker"}');
+  const missing=await f.invoke('missing-staged-recipe',['--tools-phase','install']);
+  assert.equal(missing.status,1,missing.stderr);
+  assert.match(missing.stderr,/TOOL_CONSUMER_COMPILER_ENTRY missing staged launcher recipe/);
+  assert(!missing.events.some(e=>e.event==='regression'));
+  console.log('TOOLS_STAGED_MISSING_RECIPE_REJECTED');
+  await fs.unlink(f.sdk+'/STAGE-INPUTS.json');
+ }finally {
+  await fs.rm(f.sdk+'/STAGE-INPUTS.json',{force:true});
+  await fs.rename(f.sdk+'/bin',f.sdk+'/bin-direct-evidence');
+  await fs.rename(f.sdk+'/bin-staged-control',f.sdk+'/bin');
+ }
+ assert.deepEqual(await fs.readFile(entry),saved);
+ const restored=await f.invoke('staged-recipe-restored',['--tools-phase','install']);
+ assert.equal(restored.status,0,restored.stderr);
+ assert.equal(restored.events.filter(e=>e.event==='regression').length,1);
+ console.log('TOOLS_STAGED_RECIPE_CONTROL_RESTORED');
+});
