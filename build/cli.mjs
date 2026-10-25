@@ -205,7 +205,7 @@ async function dispatch(config, command, args) {
   }
   if (command === 'install-static-libs') {
     requireNoArgs(command, args);
-    return staticLibs.install(config.buildRoot);
+    return staticLibs.install(config.buildRoot, {jobs:config.jobs});
   }
   if (command === 'install-mingw') {
     requireNoArgs(command, args);
@@ -291,7 +291,7 @@ async function dispatch(config, command, args) {
         await mingw.install(config.buildRoot);
         if (config.target.spec.crossCompile) await targetPython.install(config.buildRoot);
       } else if (config.target.spec.needsStaticLibs) {
-        await staticLibs.install(config.buildRoot);
+        await staticLibs.install(config.buildRoot, {jobs:config.jobs});
       }
     }
     await fetchStage.run(config);

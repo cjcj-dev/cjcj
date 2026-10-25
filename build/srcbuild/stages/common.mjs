@@ -192,8 +192,7 @@ export function cmakePrefixPathFor(config) {
   if (config.target.spec.needsMingw) {
     parts.push(path.join(mingw.installPath(config.buildRoot), mingw.TARGET_TRIPLE));
   } else if (config.target.spec.needsStaticLibs) {
-    const ncursesRoot = path.join(config.buildRoot, `ncurses-${staticLibs.NCURSES_VERSION}`, 'usr');
-    const libeditRoot = path.join(config.buildRoot, 'libedit-3.1');
+    const {ncurses:ncursesRoot,libedit:libeditRoot}=staticLibs.installationPaths(config.buildRoot);
     if (fs.existsSync(ncursesRoot) || fs.existsSync(libeditRoot)) parts.push(staticLibs.cmakePrefixPath(config.buildRoot));
   }
   return parts.length ? parts.join(path.delimiter) : null;

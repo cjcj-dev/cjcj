@@ -322,3 +322,15 @@ record their actual `bin/cjc`, std-core/runtime and available native AST library
 inputs without creating a stage record or modifying that SDK. If bootstrap
 stage facts exist, they still select and describe that stage's compiler. Invalid
 existing records and missing actual compiler/library files remain failures.
+
+Support libraries use the complete upstream ncurses 6.6 and libedit
+20260512-3.1 archives. `install-static-libs` and `run-all` pass their admitted
+`--jobs` to each native make. Source extraction and versioned installations are
+separate: `sources/<archive-root>`, `ncurses-6.6/usr`, and
+`libedit-20260512-3.1`. The old undated `libedit-3.1` prefix is not selected.
+Restored caches go through the normal entry again: complete headers/libraries
+skip that component, while an incomplete component is configured and installed
+normally without rebuilding its complete peer. Libedit's configure consumes
+that ncurses prefix. Compiler environment construction uses these same prefixes;
+standalone native-CJDB descriptors must select the actual new installation and
+run their own affected native link/install gates before claiming that input.

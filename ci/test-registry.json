@@ -866,5 +866,10 @@
     "executor": "workflow",
     "workflow": ".github/workflows/darwin-input-consumers.yml",
     "interpreter": "node"
+  },
+  {
+    "file": "build/test/static-libs-native.integration.mjs",
+    "executor": "manual",
+    "reason": "Requires real fixed ncurses/libedit archives in STATIC_LIBS_ARCHIVES and private RELEASE_EVIDENCE_TEST_ROOT. Public install-static-libs CLI cold/warm/partial-header restore, stage prefix through actual CMake/static consumer; not full CJDB or platform qualification."
   }
 ]
