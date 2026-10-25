@@ -84,7 +84,8 @@ class RedundantFutureRemovalTest {
             f.Finish()
             @Expect(RedundantFutureRemoval(f.pkg).RunOnFunc(f.fn), 0)
             @Expect(f.spawnExpr.IsExecuteClosure(), false)
-            @Expect(f.spawnExpr.GetFuture().nodeId, receiver.nodeId)
+            // Inspect the operand even if a product cut incorrectly changes the spawn mode.
+            @Expect(f.spawnExpr.GetObject().nodeId, receiver.nodeId)
             @Expect(get.GetOperand(1).nodeId, receiver.nodeId)
             @Expect(f.initCall.GetParentBlock().isSome(), true)
             @Expect(f.allocation.GetParentBlock().isSome(), true)
