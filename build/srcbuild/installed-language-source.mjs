@@ -6,7 +6,10 @@ const here=path.dirname(fileURLToPath(import.meta.url));
 const managed=['run_finalizer_trigger.sh','run_phase_entry_trigger.sh','run_segmented_array_managed.sh'];
 function required(root,member){const file=path.join(root,member);if(!fs.statSync(file).isFile())throw Error('missing runtime language input '+file);return file;}
 export function languageSourceInputs(runtime,{installed=false}={}) {
-  const unit=path.join(runtime,'tests/gc_unit'),modern=fs.existsSync(path.join(unit,'gate_gc_unit.mjs'));
+  const unit=path.join(runtime,'tests/gc_unit');
+  const entry=fs.readFileSync(required(unit,'gate_gc_unit.sh'),'utf8');
+  const modern=entry.includes('gate_gc_unit.mjs');
+  if(!modern&&!entry.includes('run_language_tests()'))throw Error('unsupported runtime language entry '+unit);
   const common=['gate_gc_unit.sh','run_finalizer_trigger.sh','finalizer_trigger.cj','run_phase_entry_trigger.sh',
     'phase_entry_trigger.cj','phase_entry_major.cj','run_so_reentry_bounded.sh','so_reentry_probe.cpp',
     'run_segmented_array_managed.sh','segmented_array_managed.cj'];

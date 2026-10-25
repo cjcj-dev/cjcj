@@ -90,7 +90,7 @@ if sys.argv[1]=='install':
 export async function load(url,context,next){const r=await next(url,context);if(!boundaries[url]&&!url.endsWith('/ci/bootstrap/sdk-targets.mjs'))return r;let source=String(r.source);
 if(url.endsWith('/ci/platform_matrix/native_runtime.mjs'))source+='\nimport {directSource as controlledDirectSource} from '+JSON.stringify(${JSON.stringify(new URL('ci/fixtures/runtime-direct-inputs.mjs','file://'+repo).href)})+';\n';
 if(boundaries[url])for(const [name,body]of Object.entries(boundaries[url])){const re=new RegExp('export (async )?function '+name+'\\(');if(!re.test(source))throw Error('BOUNDARY_ANCHOR '+name);source=source.replace(re,(_,a='')=>a+'function CONTROLLED_ORIGINAL_'+name+'(');source+='\nexport function '+name+'(){'+body+'}\n';}
-if(url.endsWith('/ci/bootstrap/sdk-targets.mjs'))source=source.replace(/compiler:'[0-9a-f]{40}'/,"compiler:'${commit}'").replace(/h1:'[0-9a-f]{40}'/,"h1:'${commit}'");
+if(url.endsWith('/ci/bootstrap/sdk-targets.mjs')){const anchor='compiler:pins.source.COMPILER_REF';if(!source.includes(anchor))throw Error('BOUNDARY_COMPILER_PIN_ANCHOR');source=source.replace(anchor,"compiler:'${commit}'").replace(/h1:'[0-9a-f]{40}'/,"h1:'${commit}'");}
 return {...r,source};}
 `);
  const bin=root+'/bin';await fs.mkdir(bin);

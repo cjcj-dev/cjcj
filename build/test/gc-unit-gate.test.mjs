@@ -22,6 +22,15 @@ test('defer remains limited to selected native Linux and leaves unsupported targ
  assert.equal(gcUnitRuntimeBuildEnv(buildConfig({targetKey:'linux-x64',officialSdkRoot:null}),{}),undefined);
 });
 
+test('a delegating source entry cannot select shell compatibility when its mjs dependency is missing',()=>{
+ const root=fs.mkdtempSync(path.join(process.env.RELEASE_EVIDENCE_TEST_ROOT||os.tmpdir(),'direct-missing-gate-'));
+ const config=buildConfig({workspace:root,targetKey:'linux-x64'}),runtime=path.join(config.repoPath('runtime'),'runtime'),sdk=root+'/sdk',env={CJCJ_SRCBUILD_HOST_SDK:root+'/host'};
+ directSource(runtime);directBuild(runtime);fs.renameSync(runtime+'/tests/gc_unit/gate_gc_unit.mjs',runtime+'/tests/gc_unit/gate_gc_unit.mjs.saved');
+ assert.throws(()=>finishGcUnitLanguageDeferral(config,runtime,sdk,{env}),/gate_gc_unit.mjs/);
+ fs.renameSync(runtime+'/tests/gc_unit/gate_gc_unit.mjs.saved',runtime+'/tests/gc_unit/gate_gc_unit.mjs');
+ finishGcUnitLanguageDeferral(config,runtime,sdk,{env});assertGcUnitLanguageDeferred(config,sdk,{env});
+});
+
 test('cross target keeps the actual Linux compiler host and does not enable native language execution',()=>{
  const root=fs.mkdtempSync(path.join(process.env.RELEASE_EVIDENCE_TEST_ROOT||os.tmpdir(),'direct-cross-'));
  const config=buildConfig({workspace:root,targetKey:'windows-x64'}),sdk=root+'/sdk',host=root+'/host',runtime=root+'/source/runtime';
