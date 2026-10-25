@@ -21,12 +21,10 @@ jobs:
       DARWIN_BUILD_RUNTIME: ${{ matrix.build_runtime }}
       RUNTIME_BUILD_TYPE: relwithdebinfo
     steps:
-      # Dispatch identifies the registered workflow branch; this checkout
-      # identifies the separately reviewed product. Publishing this commit is
-      # a prerequisite for deployment/running, not part of this workflow change.
+      # Consume the exact candidate commit selected by the workflow dispatch.
       - uses: actions/checkout@v7
         with:
-          ref: 255d8c7e1f5e70be69b4cf3e9091514cfb1a4d09
+          ref: ${{ github.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: '22'

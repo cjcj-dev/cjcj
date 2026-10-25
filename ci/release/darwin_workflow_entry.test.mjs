@@ -34,8 +34,8 @@ test('reviewed workflow fixture retains its fixed Git content', () => {
   observed('DARWIN_REVIEWED_FIXTURE', {sourceSha, hash});
 });
 
-test('first checkout executes only the full reviewed product SHA', () => {
-  const expected = {...originalSteps[0], with: {ref: sourceSha}};
+test('first checkout executes the immutable dispatch commit', () => {
+  const expected = {...originalSteps[0], with: {ref: '${{ github.sha }}'}};
   observed('DARWIN_FIXED_CHECKOUT', steps[0]);
   assert.deepEqual(steps[0], expected, 'DARWIN_FIXED_CHECKOUT');
 });

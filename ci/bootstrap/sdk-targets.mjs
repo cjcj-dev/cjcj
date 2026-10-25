@@ -13,7 +13,7 @@ const pins=readSourcePins();
 export const FIXED_INPUTS=Object.freeze({llvm:pins.llvm.LLVM_SHA,
   compiler:pins.source.COMPILER_REF,bounds:pins.source.BOUNDS_REF,
   runtime:pins.runtime.RUNTIME_REF,flatbuffers:pins.llvm.FLATBUFFERS_SHA,
-  h1:'1553645ac50f72ba58712843255313250869cbbc',host:readHostToolchainPin().replace(/^nightly-/, '')});
+  h1:'83901791548856f0458f3e3e38c4c1ab7ac496c5',host:readHostToolchainPin().replace(/^nightly-/, '')});
 const stageEntry=fileURLToPath(new URL('./sdk-native-stage.mjs',import.meta.url));
 const verifyEntry=fileURLToPath(new URL('./sdk-verify-install.mjs',import.meta.url));
 // A tool update's pending consumer needs the compiler and its actual execution
