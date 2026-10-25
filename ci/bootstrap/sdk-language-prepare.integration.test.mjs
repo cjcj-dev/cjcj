@@ -96,8 +96,15 @@ for(const kind of ['legacy','modern']) {
    if(paired)assert.match(r.stdout,/NATIVE_RUNTIME_COMPONENT_ACCEPTED/);
    const plan=JSON.parse(fs.readFileSync(r.workspace+'/build-targets.json'));
    assert.equal(plan.bootstrapInputs.runtime.sourceRoot,path.dirname(f.carried));
-   const command=plan.stages.find(stage=>stage.id==='stage3').test.commands[0].argv;
-   assert.equal(command[command.indexOf('--runtime-source')+1],path.dirname(f.carried));
+   for(const id of ['stage2-target-sdk','stage3']) {
+    const stage=plan.stages.find(stage=>stage.id===id);
+    assert.ok(stage.copies.some(row=>row.owner==='R'&&row.from===f.sdk&&row.to===''),
+      'installed runtime and carried language inputs must reach '+id);
+    const command=stage.test.commands[0].argv;
+    assert.ok(command[1].endsWith('/sdk-installed-language.mjs'));
+    assert.equal(command[command.indexOf('--sdk')+1],'${output}');
+    assert.equal(command.includes('--runtime-source'),false,'language consumes the copied SDK installation');
+   }
    assert.equal(fs.existsSync(r.descriptor.install),false,'prepare must not install a complete SDK');
   }
  });
