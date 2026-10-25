@@ -296,7 +296,7 @@ test('public native stdx forwards GCC input and rejects incompatible incremental
   successful(f.build(['--stdx-build-mode','incremental'],{CJCJ_STDX_GCC_TOOLCHAIN:gcc}));
   successful(f.build());
   const relative=f.build(['--stdx-gcc-toolchain','relative']);
-  assert.equal(relative.status,1); assert.match(relative.stderr,/expected an absolute GCC/);
+  assert.equal(relative.status,2,relative.stderr); assert.match(relative.stderr,/expected an absolute GCC/);
   const cross=f.build(['--target','windows-x64','--stdx-gcc-toolchain',gcc]);
-  assert.equal(cross.status,1); assert.match(cross.stderr,/only supported for native stdx builds/);
+  assert.equal(cross.status,2,cross.stderr); assert.match(cross.stderr,/only supported for native stdx builds/);
 });
