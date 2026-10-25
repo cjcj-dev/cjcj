@@ -876,5 +876,10 @@
     "file": "ci/bootstrap/sdk-language-prepare.integration.test.mjs",
     "executor": "manual",
     "reason": "Requires read-only CJCJ_LANGUAGE_PREPARE_HOST and private RELEASE_EVIDENCE_TEST_ROOT. Formal CJCJ_NATIVE_INPUTS descriptor through prepare-bootstrap-plans, real Git/C finite artifacts and installed legacy/modern language inputs, exact missing-member rejection. CPP/N/AST shapes are explicit fixtures; not complete SDK or ABI qualification."
+  },
+  {
+    "file": "build/test/static-libs-headers.integration.mjs",
+    "executor": "manual",
+    "reason": "Requires a read-only normal static install, fixed archives/LLVM modules and private RELEASE_EVIDENCE_TEST_ROOT. Copies the installation, exercises public CLI warm and missing-header recovery, actual LLVM CMake/C consumer and independent libedit control. Not full CJDB/platform qualification."
   }
 ]

@@ -21,8 +21,12 @@ export function installationPaths(buildRoot) {
 
 function componentInstalled(buildRoot, component) {
   const prefix=installationPaths(buildRoot)[component];
+  // Public C headers for ncurses/tinfo/panel/form and their installed header
+  // dependencies: curses -> ncurses_dll/unctrl, term -> ncurses_dll,
+  // panel -> curses, form -> curses/eti. System headers belong to the compiler.
   const required=component==='ncurses'
-    ? ['lib/libncurses.a','lib/libtinfo.a','lib/libpanel.a','lib/libform.a','include/ncurses/curses.h','include/ncurses/term.h','include/ncurses/panel.h']
+    ? ['lib/libncurses.a','lib/libtinfo.a','lib/libpanel.a','lib/libform.a','include/ncurses/curses.h','include/ncurses/term.h','include/ncurses/panel.h',
+      'include/ncurses/form.h','include/ncurses/eti.h','include/ncurses/ncurses_dll.h','include/ncurses/unctrl.h']
     : ['lib/libedit.a','include/histedit.h','lib/pkgconfig/libedit.pc'];
   if(!required.every(file=>fs.statSync(path.join(prefix,file),{throwIfNoEntry:false})?.isFile()))return false;
   if(component==='ncurses')return fs.readFileSync(path.join(prefix,'include/ncurses/curses.h'),'utf8')
