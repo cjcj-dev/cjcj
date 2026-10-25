@@ -1,7 +1,7 @@
 package cjcj::codegen
 
 import std.collection.ArrayList
-import cjcj::chir.{CheckCustomTypeDefIsExpected, ClassType, CustomType, Expression, GetElementByName, GetElementRef, LocalVar, Value}
+import cjcj::chir.{IsCurrentReceiver, CheckCustomTypeDefIsExpected, ClassType, CustomType, Expression, GetElementByName, GetElementRef, LocalVar, Value}
 import cjcj::utils.CORE_PACKAGE_NAME
 
 // LLVM GCWriteRef::StrengthKind. Like ZGC access decorators, this belongs to
@@ -85,7 +85,7 @@ private func GetMemberAccessStrength(irBuilder: IRBuilder2, base: Value, path: A
             if (!isLoad && isReferent && path.size == 1) {
                 if (let Some(function) <- access.GetTopLevelFunc()) {
                     if (function.IsConstructor() && function.GetNumOfParams() > 0 &&
-                        function.GetParam(0).nodeId == base.nodeId) {
+                        IsCurrentReceiver(base, function.GetParam(0))) {
                         strength = GCWriteStrength.STRONG
                     }
                 }

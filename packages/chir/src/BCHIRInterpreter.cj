@@ -360,7 +360,9 @@ public class BCHIRInterpreter {
                 if (BCHIRIntrinsic.IsRegisterFinalizer(intrinsicKind)) {
                     let receiver = interpStack.ArgsPopIVal()
                     RecordObjectInitReturn(receiver)
-                    interpStack.ArgsPush(InterpreterValue.MakeUnit())
+                    // ConstEval's heap does not move objects, but the intrinsic
+                    // has the same receiver-result shape and retains its event.
+                    interpStack.ArgsPush(receiver)
                     pc += 1 + GetOpCodeArgSize(opCode)
                 } else if (BCHIRIntrinsic.IsReferenceEquality(intrinsicKind)) {
                     let right = interpStack.ArgsPopIVal()

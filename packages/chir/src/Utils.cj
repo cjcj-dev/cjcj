@@ -2,6 +2,7 @@ package cjcj::chir
 
 import std.collection.*
 import cjcj::ast.ASTKind
+import cjcj::ast.Attribute as AstAttribute
 import cjcj::ast.Decl as AstDecl
 import cjcj::ast.FuncDecl as AstFuncDecl
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
@@ -942,8 +943,60 @@ public func CheckCustomTypeDefIsExpected(def: CustomTypeDef, packageName: String
     return pkgName == packageName && def.GetSrcCodeIdentifier() == defSrcCodeName
 }
 
+// Managed class constructors forward the receiver returned by Object.init.
+// Foreign entry points and value-type constructors retain their own ABI.
+public func ConstructorReturnsReceiver(decl: AstFuncDecl): Bool {
+    if (!decl.TestAttr(AstAttribute.CONSTRUCTOR) ||
+        decl.TestAnyAttr(AstAttribute.STATIC, AstAttribute.FOREIGN)) {
+        return false
+    }
+    let owner = decl.outerDecl ?? return false
+    return owner.astKind == ASTKind.CLASS_DECL
+}
+
+public func ConstructorReturnsReceiver(fn: Function): Bool {
+    return !fn.IsStaticInit() && !fn.TestAttr(Attribute.STATIC) && !fn.TestAttr(Attribute.FOREIGN) &&
+        (fn.GetFuncKind() == FuncKind.CLASS_CONSTRUCTOR ||
+            fn.GetFuncKind() == FuncKind.PRIMAL_CLASS_CONSTRUCTOR)
+}
+
+// Identity of the logical constructor receiver for definite-initialization and
+// Reference access-strength checks. This is not a general alias analysis: only
+// the compiler-owned return slot, casts and receiver-forwarding calls are admitted.
+public func IsCurrentReceiver(value: Value, firstParam: Value): Bool {
+    if (refEq(value, firstParam)) {
+        return true
+    }
+    let param = (firstParam as Parameter) ?? return false
+    let fn = param.GetOwnerFunc() ?? return false
+    if (!ConstructorReturnsReceiver(fn) || fn.GetParam(0).nodeId != param.nodeId) {
+        return false
+    }
+    let local = value.AsLocalVar() ?? return false
+    let expr = local.GetExpr() ?? return false
+    if (expr.GetExprKind() == ExprKind.CLASS_STATIC_CAST) {
+        return IsCurrentReceiver(expr.GetOperand(0), firstParam)
+    }
+    if (let Some(load) <- (expr as Load)) {
+        let receiverSlot = fn.GetReturnValue() ?? return false
+        return refEq(load.GetLocation(), receiverSlot)
+    }
+    if (let Some(apply) <- (expr as ApplyBase)) {
+        let callee = apply.GetCallee().AsFunction() ?? return false
+        let args = apply.GetArgs()
+        return ConstructorReturnsReceiver(callee) && !args.isEmpty() &&
+            IsCurrentReceiver(args[0], firstParam)
+    }
+    if (let Some(intrinsic) <- (expr as Intrinsic)) {
+        return intrinsic.GetIntrinsicKind() == IntrinsicKind.REGISTER_FINALIZER &&
+            IsCurrentReceiver(intrinsic.GetOperand(0), firstParam)
+    }
+    return false
+}
+
 public func ReturnTypeShouldBeVoid(fn: Function): Bool {
-    return fn.IsGVInit() || fn.IsFinalizer() || (fn.IsConstructor() && !fn.TestAttr(Attribute.STATIC))
+    return fn.IsGVInit() || fn.IsFinalizer() ||
+        (fn.IsConstructor() && !fn.TestAttr(Attribute.STATIC) && !ConstructorReturnsReceiver(fn))
 }
 
 public func GetMethodIdxInAutoEnvObject(methodName: String): UInt64 {
@@ -1021,10 +1074,9 @@ public func IsStructOrExtendMethod(value: Value): Bool {
 
 public func IsInitialisingMemberVar(functionValue: Function, store: StoreElementRef): Option<Int64> {
     let location = store.GetLocation()
-    if ((functionValue.IsConstructor() || functionValue.GetFuncKind() == FuncKind.INSTANCEVAR_INIT) &&
-        location.IsParameter()) {
+    if (functionValue.IsConstructor() || functionValue.GetFuncKind() == FuncKind.INSTANCEVAR_INIT) {
         let paths = store.GetPath()
-        if (refEq(location, functionValue.GetParam(0)) && paths.size == 1) {
+        if (IsCurrentReceiver(location, functionValue.GetParam(0)) && paths.size == 1) {
             return Int64(paths[0])
         }
     }

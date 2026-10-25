@@ -236,7 +236,7 @@ public class MaybeUninitAnalysis <: Analysis<MaybeUninitDomain> {
                     case _ => false
                 }
                 if (calleeFunc.IsConstructor() && sameOuterDef &&
-                    applyExpr.GetArgs()[0].nodeId == functionValue.GetParam(0).nodeId) {
+                    IsCurrentReceiver(applyExpr.GetArgs()[0], functionValue.GetParam(0))) {
                     state.SetAllLocalMemberInited()
                     if (ctorInitInfo.superClassDef.isSome()) {
                         state.Kill(domainSize - 1)

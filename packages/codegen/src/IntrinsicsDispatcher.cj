@@ -67,11 +67,11 @@ private func GenerateIntrinsic(irBuilder: IRBuilder2, kind: IntrinsicKind, args:
         return GeneratePreInitializeIntrinsics(irBuilder)
     }
     if (kind == IntrinsicKind.REGISTER_FINALIZER) {
-        if (!IsExactNonFinalizableReceiver(args[0])) {
-            let receiver = irBuilder.GetCGModule().GetMappedCGValue(args[0]).GetRawValue()
-            irBuilder.CallRegisterFinalizer(receiver)
+        let receiver = irBuilder.GetCGModule().GetMappedCGValue(args[0]).GetRawValue()
+        if (IsExactNonFinalizableReceiver(args[0])) {
+            return receiver
         }
-        return UnitOrNull(irBuilder, resultType)
+        return irBuilder.CallRegisterFinalizer(receiver)
     }
     if (kind == IntrinsicKind.CG_UNSAFE_BEGIN || kind == IntrinsicKind.CG_UNSAFE_END) {
         return UnitOrNull(irBuilder, resultType)

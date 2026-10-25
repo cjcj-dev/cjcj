@@ -4,7 +4,7 @@ import cjcj::basic.Linkage as BasicLinkage
 import std.collection.*
 import std.convert.*
 
-let CHIR_TEXT_HEADER_V2: String = "CHIR-TEXT\t3"
+let CHIR_TEXT_HEADER_V2: String = "CHIR-TEXT\t4-CR01"
 let CHIR_FIELD_SEPARATOR: String = "|"
 let CHIR_LIST_SEPARATOR: String = ","
 

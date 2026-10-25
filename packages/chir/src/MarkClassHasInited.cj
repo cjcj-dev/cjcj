@@ -67,12 +67,19 @@ public class MarkClassHasInited {
 
     private func AssignHasInitedFlagToTrueInConstructorExit(constructor: Function): Unit {
         let boolTy = builder.context.GetBoolTy()
-        let thisArg = constructor.GetParam(0)
         let constructorBody = constructor.GetBody().getOrThrow()
         for (block in constructorBody.GetBlocks()) {
             let terminator = block.GetTerminator()
             if (terminator.isNone() || terminator.getOrThrow().GetExprKind() != ExprKind.EXIT) {
                 continue
+            }
+            let thisArg: Value = if (ConstructorReturnsReceiver(constructor)) {
+                let receiver = builder.CreateLoad(constructor.GetReturnType().getOrThrow(),
+                    constructor.GetReturnValue().getOrThrow(), block)
+                receiver.MoveBefore(terminator.getOrThrow())
+                receiver.GetResult().getOrThrow()
+            } else {
+                constructor.GetParam(0)
             }
             let trueVal = builder.CreateConstant(boolTy, BoolLiteral(true), block)
             trueVal.MoveBefore(terminator.getOrThrow())

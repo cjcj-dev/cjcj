@@ -1538,7 +1538,7 @@ class CHIRSerializerImpl {
             Some(valueKind), Some(allValue), Some(exprKind), Some(allExpression), Some(defKind),
             Some(allCustomTypeDef), packageInitFunc, ToCHIRPhaseIndex(phase), packageLiteralInitFunc)
         try {
-            builder.Finish(serializedPackage)
+            builder.Finish(serializedPackage, CONSTRUCTOR_ABI_CHIR_IDENTIFIER)
             WriteFlatBufferToFile(filename, builder.GetBufferPointer(), builder.GetSize())
         } catch (_: Exception) {
             CJC_ASSERT(false)
@@ -1551,7 +1551,7 @@ class CHIRSerializerImpl {
             UInt8(AccessLevelIndex(chirPackage.GetPackageAccessLevel())), Some(typeKind), Some(allType),
             Some(valueKind), Some(allValue), Some(exprKind), Some(allExpression), Some(defKind),
             Some(allCustomTypeDef), packageInitFunc, ToCHIRPhaseIndex(ToCHIRPhase.RAW), packageLiteralInitFunc)
-        builder.Finish(serializedPackage)
+        builder.Finish(serializedPackage, CONSTRUCTOR_ABI_CHIR_IDENTIFIER)
         return builder.Release()
     }
 

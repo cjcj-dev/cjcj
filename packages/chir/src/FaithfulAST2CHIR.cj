@@ -4713,7 +4713,9 @@ public class FaithfulAST2CHIR {
             params.add(baseParams[paramIndex])
             paramIndex++
         }
-        let retTy = if (funcDecl.TestAttr(AstAttribute.CONSTRUCTOR)) {
+        let retTy = if (ConstructorReturnsReceiver(funcDecl)) {
+            params[0]
+        } else if (funcDecl.TestAttr(AstAttribute.CONSTRUCTOR)) {
             builder.context.GetUnitTy()
         } else {
             funcTy.GetReturnType()

@@ -233,12 +233,8 @@ class CHIRDeserializerImpl {
 
     public func DeserializePackage(text: String): Package {
         let lines = text.split("\n")
-        if (lines.isEmpty()) {
-            return builder.CreatePackage("<deserialized>")
-        }
-        if (lines[0] != CHIR_TEXT_HEADER_V2) {
-            let name = if (text.startsWith("package ")) { text[8..].split("\n")[0] } else { "<deserialized>" }
-            return builder.CreatePackage(name)
+        if (lines.isEmpty() || lines[0] != CHIR_TEXT_HEADER_V2) {
+            throw IllegalArgumentException("CHIR text constructor ABI mismatch: rebuild for CR01")
         }
         parseRecords(lines)
         let pkg = createPackage()

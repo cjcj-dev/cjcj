@@ -5885,7 +5885,7 @@ public class IRBuilder2 <: Resource {
         return objectValue
     }
 
-    public func CallRegisterFinalizer(receiver: LLVMValueRef): Unit {
+    public func CallRegisterFinalizer(receiver: LLVMValueRef): LLVMValueRef {
         let typeInfo = GetTypeInfoFromObject(receiver)
         let typeInfoType = CGType.GetOrCreateTypeInfoType(GetLLVMContext())
         let flagAddress = CreateStructGEP(typeInfoType, typeInfo,
@@ -5895,6 +5895,7 @@ public class IRBuilder2 <: Resource {
         let mask = unsafe { LLVMConstInt(flagType, 2u64, 0) }
         let needsRegistration = CreateICmp(LLVMIntPredicate.NE, CreateAnd(flags, mask),
             unsafe { LLVMConstNull(flagType) }, name: "finalizer.required")
+        let originalBlock = GetInsertBlock()
         let registerBlock = CreateAndInsertBasicBlock("finalizer.register")
         let returnBlock = CreateAndInsertBasicBlock("finalizer.return")
         CreateCondBr(needsRegistration, registerBlock, returnBlock)
@@ -5903,10 +5904,17 @@ public class IRBuilder2 <: Resource {
         let functionType = MakeFunctionType(refType, ArrayList<LLVMTypeRef>([refType]))
         let callee = GetOrCreateIntrinsicFunction("CJ_MCC_OnFinalizerCreated", functionType,
             refType, false, ArrayList<String>(["cj-runtime"]))
-        let _ = CreateCallOrInvoke(callee,
+        let registered = CreateCallOrInvoke(callee,
             ArrayList<LLVMValueRef>([CreateBitCast(receiver, refType)]))
+        // An invoke creates a new normal continuation. The exceptional edge has
+        // no returned receiver and must not be an incoming edge of this PHI.
+        let registeredBlock = GetInsertBlock()
         CreateBr(returnBlock)
         SetInsertPoint(returnBlock)
+        let updated = CreatePHI(refType, name: "finalizer.receiver")
+        AddIncoming(updated, ArrayList<LLVMValueRef>([receiver, registered]),
+            ArrayList<LLVMBasicBlockRef>([originalBlock, registeredBlock]))
+        return updated
     }
 
     private func AddClassMallocMetadata(objectValue: LLVMValueRef, classTy: Type): Unit {

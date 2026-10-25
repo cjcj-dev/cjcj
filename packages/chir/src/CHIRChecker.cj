@@ -423,6 +423,14 @@ public class CHIRChecker {
     }
 
     private func CheckRetureTypeIfIsVoid(topLevelFunc: Function, funcTy: FuncType): Unit {
+        if (ConstructorReturnsReceiver(topLevelFunc)) {
+            let params = funcTy.GetParamTypes()
+            if (params.isEmpty() || !refEq(funcTy.GetReturnType(), params[0])) {
+                Errorln("managed class constructor must return its receiver type: " +
+                    topLevelFunc.GetIdentifier())
+            }
+            return
+        }
         if (optionalRules.contains(CHIRCheckerRule.RETURN_TYPE_NEED_BE_VOID)) {
             if (!ReturnTypeShouldBeVoid(topLevelFunc)) {
                 return

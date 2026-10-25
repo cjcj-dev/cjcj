@@ -1,5 +1,6 @@
 package cjcj::codegen
 
+import cjcj::chir.ConstructorReturnsReceiver
 import cjcj::chir.FuncKind
 import cjcj::chir.FuncType
 import cjcj::chir.Function
@@ -331,6 +332,9 @@ public func SetZExtAttrForCFunc(callBase: LLVMValueRef, functionType: LLVMTypeRe
 }
 
 public func ShouldReturnVoid(fn: Function): Bool {
+    if (ConstructorReturnsReceiver(fn)) {
+        return false
+    }
     let kind = fn.GetFuncKind()
     return kind == FuncKind.CLASS_CONSTRUCTOR || kind == FuncKind.PRIMAL_CLASS_CONSTRUCTOR ||
         kind == FuncKind.STRUCT_CONSTRUCTOR || kind == FuncKind.PRIMAL_STRUCT_CONSTRUCTOR ||

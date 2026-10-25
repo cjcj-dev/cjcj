@@ -342,7 +342,7 @@ public class VarInitCheck {
             }
             let thisArg = initFunc.GetParam(0)
             let receiver = args[0]
-            if (refEq(receiver, thisArg)) {
+            if (IsCurrentReceiver(receiver, thisArg)) {
                 RaiseIllegalMemberFunCallError(apply, calleeFunc, checkResult)
             } else if (let Some(localVal) <- receiver.AsLocalVar()) {
                 if (let Some(argExpr) <- localVal.GetExpr()) {
@@ -417,7 +417,7 @@ public class VarInitCheck {
             return
         }
         let paths = store.GetPath()
-        if (refEq(store.GetLocation(), fn.GetParam(0)) && paths.size == 1) {
+        if (IsCurrentReceiver(store.GetLocation(), fn.GetParam(0)) && paths.size == 1) {
             let index = Int64(paths[0])
             if (members[index].TestAttr(Attribute.READONLY)) {
                 match (state.IsMaybeInitedMember(index)) {
@@ -499,7 +499,7 @@ private func IsGetElemRefViaDefMember(
     }
     let getElemRef = (expr as GetElementRef).getOrThrow()
     let location = getElemRef.GetLocation()
-    if (refEq(location, thisArg)) {
+    if (IsCurrentReceiver(location, thisArg)) {
         return Int64(getElemRef.GetPath()[0])
     }
     if (let Some(localVal) <- location.AsLocalVar()) {
@@ -516,7 +516,7 @@ private func IsStoreViaDefMember(
     shouldBeNested!: Bool = false
 ): Option<Int64> {
     let location = store.GetLocation()
-    if (refEq(location, thisArg) && (!shouldBeNested || store.GetPath().size > 1)) {
+    if (IsCurrentReceiver(location, thisArg) && (!shouldBeNested || store.GetPath().size > 1)) {
         return Int64(store.GetPath()[0])
     } else if (let Some(localVal) <- location.AsLocalVar()) {
         if (let Some(expr) <- localVal.GetExpr()) {
