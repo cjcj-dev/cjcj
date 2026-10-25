@@ -442,7 +442,19 @@ class ParserPortTest {
         let file = parsed[0]
         let members = ArrayList<String>()
         let refs = ArrayList<String>()
+        let nestedParents = ArrayList<String>()
+        var nestedInterfaces = 0
         Walker(file, visitPre: { node: Node =>
+            if (let Some(decl) <- (node as InterfaceDecl) && decl.identifier.Val() == "F") {
+                nestedInterfaces++
+                for (parent in decl.inheritedTypes) {
+                    if (let Some(refType) <- (parent as RefType)) {
+                        nestedParents.add(refType.ref.identifier.Val())
+                    } else {
+                        @Expect(false, true)
+                    }
+                }
+            }
             if (let Some(decl) <- (node as Decl)) {
                 members.add(decl.identifier.Val())
             } else if (let Some(refType) <- (node as RefType)) {
@@ -454,10 +466,24 @@ class ParserPortTest {
         // ParseInheritedTypes rejects F <: F and omits that invalid edge from
         // the AST. Keep the complete-list assertion and require its diagnostic.
         @Expect(expectStrings(refs, ["C", "D", "E"]), true)
+        @Expect(nestedInterfaces, 1)
+        @Expect(expectStrings(nestedParents, ["E"]), true)
         var selfInheritanceErrors = 0
         for (diagnostic in parsed[1].GetCategoryDiagnostic(DiagCategory.PARSE)) {
             if (diagnostic.rKind == DiagKindRefactor.parse_decl_cannot_inherit_their_self) {
                 selfInheritanceErrors++
+                @Expect(diagnostic.errorMessage, "declaration 'F' cannot inherit itself")
+                @Expect(diagnostic.mainHint.range.begin.line, 7)
+                @Expect(diagnostic.mainHint.range.begin.column, 28)
+                @Expect(diagnostic.mainHint.range.end.line, 7)
+                @Expect(diagnostic.mainHint.range.end.column, 29)
+                @Expect(diagnostic.otherHints.size, 1)
+                if (!diagnostic.otherHints.isEmpty()) {
+                    @Expect(diagnostic.otherHints[0].range.begin.line, 7)
+                    @Expect(diagnostic.otherHints[0].range.begin.column, 19)
+                    @Expect(diagnostic.otherHints[0].range.end.line, 7)
+                    @Expect(diagnostic.otherHints[0].range.end.column, 20)
+                }
             }
         }
         @Expect(selfInheritanceErrors, 1)
@@ -465,16 +491,47 @@ class ParserPortTest {
 
     @TestCase
     func interfaceDeclDistinctParents(): Unit {
-        let parsed = parseDecl("interface F <: E & G {}")
+        let code = #"
+    interface I <: C & D{
+        func E() {}
+        let H = 40
+        class A {
+        }
+        interface F <: E & G{
+        }
+    }
+"#
+        let parsed = parseFile(code)
         @Expect(countErrors(parsed[1]), 0)
+        let members = ArrayList<String>()
         let refs = ArrayList<String>()
+        let nestedParents = ArrayList<String>()
+        var nestedInterfaces = 0
         Walker(parsed[0], visitPre: { node: Node =>
-            if (let Some(refType) <- (node as RefType)) {
+            if (let Some(decl) <- (node as InterfaceDecl) && decl.identifier.Val() == "F") {
+                nestedInterfaces++
+                for (parent in decl.inheritedTypes) {
+                    if (let Some(refType) <- (parent as RefType)) {
+                        nestedParents.add(refType.ref.identifier.Val())
+                    } else {
+                        @Expect(false, true)
+                    }
+                }
+            }
+            if (let Some(decl) <- (node as Decl)) {
+                members.add(decl.identifier.Val())
+            } else if (let Some(refType) <- (node as RefType)) {
                 refs.add(refType.ref.identifier.Val())
             }
             return VisitAction.WALK_CHILDREN
         }).Walk()
-        @Expect(expectStrings(refs, ["E", "G"]), true)
+        @Expect(expectStrings(members, ["I", "E", "H", "A", "F"]), true)
+        @Expect(expectStrings(refs, ["C", "D", "E", "G"]), true)
+        @Expect(nestedInterfaces, 1)
+        @Expect(expectStrings(nestedParents, ["E", "G"]), true)
+        for (diagnostic in parsed[1].GetCategoryDiagnostic(DiagCategory.PARSE)) {
+            @Expect(diagnostic.rKind == DiagKindRefactor.parse_decl_cannot_inherit_their_self, false)
+        }
     }
 
     @TestCase
