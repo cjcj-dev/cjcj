@@ -43,10 +43,24 @@ function quotas(directory) {
   }
   return result;
 }
+function inheritedMemory(directory,key) {
+  let bound='max';
+  for(let dir=directory;;dir=path.dirname(dir)) {
+    const file=path.join(dir,key);
+    if(fs.existsSync(file)) {
+      const value=fs.readFileSync(file,'utf8').trim();
+      if(value!=='max'&&(bound==='max'||BigInt(value)<BigInt(bound)))bound=value;
+    }
+    if(dir===root)break;
+    if(!dir.startsWith(root+'/'))fail('cgroup escaped mount');
+  }
+  return bound;
+}
 export function current() {
   const directory=cgroup(),text=fs.readFileSync('/proc/self/status','utf8').match(/^Cpus_allowed_list:\s*(.+)$/m)?.[1];
   if(!text)fail('process affinity unavailable');
-  return {cgroup:directory,...limit(parseCpus(text),quotas(directory))};
+  return {cgroup:directory,...limit(parseCpus(text),quotas(directory)),
+    memoryMax:inheritedMemory(directory,'memory.max'),swapMax:inheritedMemory(directory,'memory.swap.max')};
 }
 export function validate(request, parent) {
   if(!Array.isArray(request.affinity)||!request.affinity.length||new Set(request.affinity).size!==request.affinity.length||
@@ -63,11 +77,15 @@ export function plan() {
 }
 export function options(request) {
   if(!/^cangjie-test-\d+-[a-f0-9]{8}$/.test(request.unit||''))fail('invalid unit');
-  validate(request,current());
+  const parent=current();
+  validate(request,parent);
   // systemd's CPUQuota is a percentage; never round a fractional allowance up.
   const percentage=Number(BigInt(request.quota)*100000000n/BigInt(request.period))/1000000;
-  return ['AllowedCPUs='+request.affinity.join(','),'CPUQuota='+percentage+'%',
+  const properties=['AllowedCPUs='+request.affinity.join(','),'CPUQuota='+percentage+'%',
     'CPUQuotaPeriodSec='+request.period/1000000+'s'];
+  if(parent.memoryMax!=='max')properties.push('MemoryMax='+parent.memoryMax);
+  if(parent.swapMax!=='max')properties.push('MemorySwapMax='+parent.swapMax);
+  return properties;
 }
 export function verify(request) {
   const actual=current();
@@ -75,6 +93,8 @@ export function verify(request) {
   validate(request,request.parent);
   const parentNow=limit(request.parent.affinity,quotas(request.parent.cgroup));
   validate(actual,request);validate(actual,parentNow);
+  for(const key of ['memoryMax','swapMax'])if(request.parent[key]!=='max'&&
+    (actual[key]==='max'||BigInt(actual[key])>BigInt(request.parent[key])))fail('scope exceeds parent memory/swap limit');
   const own=fs.readFileSync(path.join(actual.cgroup,'cpu.max'),'utf8').trim();
   if(own.startsWith('max '))fail('scope quota must be finite');
   return {cgroup:actual.cgroup,cpu_max:own,affinity:actual.affinity,parent:request.parent};

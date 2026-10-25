@@ -30,7 +30,8 @@ to `load-monitor.log` once a minute while running.
 The runner enters a synchronous systemd scope using the caller's actual process
 CPU affinity and the tightest CPU quota across its cgroup ancestors, capped by
 that affinity. It checks the requested bounds again before creating the scope
-and checks the actual child bounds before any suite starts. A four-CPU caller
+and checks the actual child bounds before any suite starts. Finite parent memory
+and swap limits also carry into the new scope. A four-CPU caller
 therefore stays within four CPUs; there is no 96-CPU minimum. The scope is stopped
 when the caller exits or receives a termination signal. No SDK executable or
 explicit test jobs argument is rewritten. CPU selection/validation lives in
