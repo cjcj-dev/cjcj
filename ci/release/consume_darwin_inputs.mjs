@@ -64,7 +64,10 @@ export function consumeDarwinInputs(work, target = process.env.CJCJ_SRCBUILD_TAR
   // Defined export, not a dependency's symbol. Never invoke a safepoint without
   // a managed caller; the runtime arm proves load/binding, with ABI hold intact.
   const exported = execute('runtime-exports', tools.nm, ['-g', '-U', runtimeBinaries[0].file]).stdout;
-  assert.match(exported, /\b_CJ_MCC_HandleReturnSafepoint\s*$/m, 'DARWIN_RUNTIME_EXPORT_MISSING');
+  const defined = new Set(exported.split('\n').map(line => line.trim().split(/\s+/).at(-1)));
+  for (const symbol of ['CJ_MCC_HandleReturnSafepoint', 'CJ_MCC_PackageInitBegin',
+    'CJ_MCC_PackageInitComplete', 'CJ_MCC_PackageInitFail', 'CJ_MCC_PackageInitAbort'])
+    assert.ok(defined.has('_'+symbol), `DARWIN_RUNTIME_EXPORT_MISSING ${symbol}`);
   const bounds = execute('bounds-exports', tools.nm, ['-g', '-U', runtimeBinaries[1].file]).stdout;
   assert.match(bounds, /\b_memcpy_s\s*$/m, 'DARWIN_BOUNDSCHECK_EXPORT_MISSING');
   const loader = path.join(work, 'darwin-loader');

@@ -226,6 +226,8 @@ test('no workflow runs a test file the manifest does not gate', async () => {
     }
     for (const [, file] of text.matchAll(/(?:python3|bash|node)\s+([\w./-]+\.(?:py|sh|mjs))/g)) {
       if (!/(?:^|\/)test[_.-]|[._-]test\.sh$|\/tests\//.test(file)) continue;
+      // Node manifest/tool launchers are infrastructure, not discovered tests.
+      if (file.endsWith('.mjs') && !discoverTestFiles().includes(file)) continue;
       const entry = REGISTERED.find(item => item.file === file);
       if (!entry || entry.executor === 'manual') offenders.push(`${name} executes unregistered/manual ${file}`);
     }
