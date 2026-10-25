@@ -380,12 +380,9 @@ private func RemoveCtorUninitVars(entries: ArrayList<CtorUninitVars>, ctor: Func
     }
 }
 
-private func HasForeignOrJavaParent(body: FuncBody): Bool {
+private func HasForeignParent(body: FuncBody): Bool {
     if (let Some(parentClassLike) <- body.parentClassLike) {
         if (parentClassLike.TestAttr(Attribute.FOREIGN)) {
-            return true
-        }
-        if (let Some(_) <- HasJavaAttr(parentClassLike)) {
             return true
         }
     }
@@ -2407,7 +2404,7 @@ public class InitializationChecker {
             return
         }
         if (let Some(body) <- fd.funcBody) {
-            if (HasForeignOrJavaParent(body)) {
+            if (HasForeignParent(body)) {
                 for (decl in uninitNonFuncDecls) {
                     decl.EnableAttr(Attribute.INITIALIZED)
                 }

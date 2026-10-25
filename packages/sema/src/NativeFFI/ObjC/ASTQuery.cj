@@ -60,7 +60,7 @@ public enum TypePosition { | IN | OUT | BOTH }
 
 public func IsObjCCompatible(ty: Ty, pos: TypePosition = TypePosition.BOTH): Bool {
     match (ty.kind) {
-        case TypeKind.TYPE_UNIT => return pos == TypePosition.OUT
+        case TypeKind.TYPE_UNIT => return match (pos) { case TypePosition.OUT => true; case _ => false }
         case TypeKind.TYPE_INT8 | TypeKind.TYPE_INT16 | TypeKind.TYPE_INT32 | TypeKind.TYPE_INT64 |
             TypeKind.TYPE_INT_NATIVE | TypeKind.TYPE_IDEAL_INT | TypeKind.TYPE_UINT8 | TypeKind.TYPE_UINT16 | TypeKind.TYPE_UINT32 |
             TypeKind.TYPE_UINT64 | TypeKind.TYPE_UINT_NATIVE | TypeKind.TYPE_FLOAT32 | TypeKind.TYPE_FLOAT64 | TypeKind.TYPE_IDEAL_FLOAT |

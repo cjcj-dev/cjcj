@@ -27,24 +27,6 @@ private func anyGeneric(values: ArrayList<Ty>): Bool {
     return false
 }
 
-private func IsJavaGeneric(gpd: GenericParamDecl): Bool {
-    if (let Some(outerDeclValue) <- gpd.outerDecl) {
-        if (let Some(_) <- HasJavaAttr(outerDeclValue)) {
-            return true
-        }
-        if (let Some(funcDeclValue) <- (outerDeclValue as FuncDecl)) {
-            if (let Some(funcBodyValue) <- funcDeclValue.funcBody) {
-                if (let Some(parentClassLikeValue) <- funcBodyValue.parentClassLike) {
-                    if (let Some(_) <- HasJavaAttr(parentClassLikeValue)) {
-                        return true
-                    }
-                }
-            }
-        }
-    }
-    return false
-}
-
 private func typeArgsString(values: ArrayList<Ty>, delimiter: String): String {
     let parts = ArrayList<String>()
     for (value in values) {

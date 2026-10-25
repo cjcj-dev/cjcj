@@ -26,8 +26,14 @@ public class CheckMemberTypes <: Handler<TypeCheckContext> {
             return
         }
 
-        DiagnoseRefactor(ctx.diag, DiagKindRefactor.sema_objc_interop_prop_must_be_objc_compatible,
-            pd.typeNode.getOrThrow(), GetDeclInteropName()).Emit()
+        let kind = if (!IsObjCImpl(pd.outerDecl.getOrThrow().GetTy().getOrThrow()) &&
+            pd.TestAttr(Attribute.DESUGARED_FOREIGN_FIELD)) {
+            DiagKindRefactor.sema_objc_interop_field_must_be_objc_compatible
+        } else { DiagKindRefactor.sema_objc_interop_prop_must_be_objc_compatible }
+        let builder = DiagnoseRefactor(ctx.diag, kind,
+            pd.typeNode.getOrThrow(), GetDeclInteropName(ctx))
+        builder.AddMainHintArguments(Ty.ToString(pd.GetTy()))
+        builder.Emit()
         pd.EnableAttr(Attribute.IS_BROKEN)
         let outerDecl = pd.outerDecl.getOrThrow()
         outerDecl.EnableAttr(Attribute.HAS_BROKEN)
@@ -40,8 +46,10 @@ public class CheckMemberTypes <: Handler<TypeCheckContext> {
             return
         }
 
-        DiagnoseRefactor(ctx.diag, DiagKindRefactor.sema_objc_interop_field_must_be_objc_compatible,
-            vd.typeNode.getOrThrow(), GetDeclInteropName()).Emit()
+        let builder = DiagnoseRefactor(ctx.diag, DiagKindRefactor.sema_objc_interop_field_must_be_objc_compatible,
+            vd.typeNode.getOrThrow(), GetDeclInteropName(ctx))
+        builder.AddMainHintArguments(Ty.ToString(vd.GetTy()))
+        builder.Emit()
         vd.EnableAttr(Attribute.IS_BROKEN)
         let outerDecl = vd.outerDecl.getOrThrow()
         outerDecl.EnableAttr(Attribute.HAS_BROKEN)
@@ -66,9 +74,11 @@ public class CheckMemberTypes <: Handler<TypeCheckContext> {
         let funcBody = fd.funcBody.getOrThrow()
         if (let Some(retType) <- funcBody.retType) {
             if (!IsObjCCompatible(retType.GetTy().getOrThrow(), TypePosition.OUT)) {
-                DiagnoseRefactor(ctx.diag,
+                let builder = DiagnoseRefactor(ctx.diag,
                     DiagKindRefactor.sema_objc_interop_method_ret_must_be_objc_compatible,
-                    retType, GetDeclInteropName()).Emit()
+                    retType, GetDeclInteropName(ctx))
+                builder.AddMainHintArguments(retType.ToString())
+                builder.Emit()
 
                 fd.EnableAttr(Attribute.IS_BROKEN)
                 let outerDecl = fd.outerDecl.getOrThrow()
@@ -97,13 +107,15 @@ public class CheckMemberTypes <: Handler<TypeCheckContext> {
                 outerDecl.EnableAttr(Attribute.HAS_BROKEN)
                 outerDecl.EnableAttr(Attribute.IS_BROKEN)
 
-                DiagnoseRefactor(ctx.diag, errKind, param, GetDeclInteropName()).Emit()
+                let builder = DiagnoseRefactor(ctx.diag, errKind, param, GetDeclInteropName(ctx))
+                builder.AddMainHintArguments(Ty.ToString(param.GetTy()))
+                builder.Emit()
             }
         }
     }
 
     // C++ src/Sema/NativeFFI/ObjC/TypeCheck/CheckMemberTypes.cpp:115-126.
-    private func GetDeclInteropName(): String {
-        return "Objective-C mirror"
+    private func GetDeclInteropName(ctx: TypeCheckContext): String {
+        return if (IsObjCImpl(ctx.target.GetTy().getOrThrow())) { "exported '@ObjC'" } else { "'@ObjC' foreign" }
     }
 }

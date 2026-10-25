@@ -87,10 +87,12 @@ private func DiagJavaMirrorChildMustBeAnnotated(
         }
     }
     let parent = parentDecl.getOrThrow()
-    DiagnoseRefactor(diag,
+    let builder = DiagnoseRefactor(diag,
         DiagKindRefactor.sema_java_mirror_subtype_must_be_annotated,
         decl,
-        arguments: [parent.identifier.Val()]).Emit()
+        arguments: [parent.identifier.Val()])
+    builder.AddMainHintArguments(decl.identifier.Val())
+    builder.Emit()
 }
 
 // C++ src/Sema/NativeFFI/Java/AfterTypeCheck/TypeCheckJavaInterop.cpp:36-60.
@@ -143,8 +145,14 @@ private func DiagJavaTypesAsGenericParam(diag: DiagnosticEngine, expr: Node,
     if (javaDecls.isEmpty()) {
         return
     }
-    // FEATURE_DEBT(JAVA_AFTERTYPECHECK_BODY): C++
-    // src/Sema/NativeFFI/Java/AfterTypeCheck/DiagsInterop.cpp:142-153.
+    let primary = javaDecls[javaDecls.size - 1]
+    let genericDecl = expr.GetTarget().getOrThrow()
+    let builder = DiagnoseRefactor(diag, DiagKindRefactor.sema_generic_parameter_of_java_type,
+        expr, arguments: [primary.identifier.Val(), genericDecl.identifier.Val()])
+    for (index in 0..javaDecls.size - 1) {
+        builder.AddNote("It also uses '@Java' type '" + javaDecls[index].identifier.Val() + "'")
+    }
+    builder.Emit()
 }
 
 // C++ src/Sema/NativeFFI/Java/AfterTypeCheck/EscapeChecks.cpp:44-60.

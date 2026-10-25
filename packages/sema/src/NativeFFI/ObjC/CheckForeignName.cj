@@ -30,7 +30,7 @@ private func HasForeignName(member: Decl): Bool {
 public class CheckForeignName <: Handler<TypeCheckContext> {
     // C++ src/Sema/NativeFFI/ObjC/TypeCheck/CheckForeignName.cpp:46-72.
     public func HandleImpl(ctx: TypeCheckContext): Unit {
-        let targetKind = if (IsObjCMirror(ctx.target)) { "@ObjCMirror" } else { "@ObjCImpl" }
+        let targetKind = if (IsObjCMirror(ctx.target)) { "'@ObjC' foreign" } else { "exported '@ObjC'" }
         for (memberDecl in ctx.target.GetMemberDeclPtrs()) {
             if (memberDecl.TestAttr(Attribute.IS_BROKEN)) {
                 continue
@@ -52,7 +52,7 @@ public class CheckForeignName <: Handler<TypeCheckContext> {
                     memberDecl, targetKind).Emit()
             } else {
                 DiagnoseRefactor(ctx.diag, DiagKindRefactor.sema_objc_method_must_have_foreign_name,
-                    memberDecl, targetKind, memberDecl.identifier.Val()).Emit()
+                    memberDecl, memberDecl.identifier.Val(), targetKind).Emit()
             }
         }
     }

@@ -42,6 +42,9 @@ public func PreCheckAnnoForFFI(root: Node, diag: BasicDiagnosticEngine): Unit {
     let walker = Walker(root, visitPre: { curNode: Node =>
         if (curNode.IsDecl()) {
             if (let Some(decl) <- (curNode as Decl)) {
+                if (decl.IsJavaForeign() || decl.IsObjCForeign()) {
+                    return VisitAction.WALK_CHILDREN
+                }
                 SetForeignABIAttr(decl)
                 PreCheckAnnoForCFFI(decl, diag)
             }

@@ -63,7 +63,7 @@ private func IsNonSerializedAnnotation(kind: AstAnnotationKind): Bool {
 }
 
 private func IsUnsupportedAnnotation(kind: AstAnnotationKind): Bool {
-    return kind == AstAnnotationKind.JAVA || kind == AstAnnotationKind.CALLING_CONV ||
+    return kind == AstAnnotationKind.CALLING_CONV ||
         kind == AstAnnotationKind.FOREIGN_GETTER_NAME || kind == AstAnnotationKind.FOREIGN_SETTER_NAME ||
         kind == AstAnnotationKind.CONSTSAFE || kind == AstAnnotationKind.ENSURE_PREPARED_TO_MOCK ||
         kind == AstAnnotationKind.NON_PRODUCT || kind == AstAnnotationKind.UNKNOWN

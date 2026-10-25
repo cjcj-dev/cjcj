@@ -23,7 +23,7 @@ class JavaInteropTypeChecker {
 
     private func IsSupported(ty: Ty, pos: JavaTypePosition): Bool {
         match (ty.kind) {
-            case TypeKind.TYPE_UNIT => return pos == JavaTypePosition.OUT
+            case TypeKind.TYPE_UNIT => return match (pos) { case JavaTypePosition.OUT => true; case _ => false }
             case TypeKind.TYPE_BOOLEAN | TypeKind.TYPE_INT8 | TypeKind.TYPE_UINT16 |
                 TypeKind.TYPE_INT16 | TypeKind.TYPE_INT32 | TypeKind.TYPE_INT64 |
                 TypeKind.TYPE_FLOAT32 | TypeKind.TYPE_FLOAT64 => return true

@@ -263,27 +263,6 @@ public func CheckTypeParametersForAliasRef(
     return true
 }
 
-private func TypeCheckTypeHasJavaAttr(target: Decl): Bool {
-    return if (let Some(_) <- HasJavaAttr(target)) { true } else { false }
-}
-
-private func TypeCheckTypeIsLegalJavaTypeArgument(typeNode: Type): Bool {
-    if (let Some(refType) <- (typeNode as RefType)) {
-        if (let Some(target) <- refType.ref.target) {
-            let realTarget = GetRealTarget(target)
-            return TypeCheckTypeHasJavaAttr(realTarget) || realTarget.astKind == ASTKind.GENERIC_PARAM_DECL
-        }
-        return false
-    }
-    if (let Some(qualifiedType) <- (typeNode as QualifiedType)) {
-        if (let Some(target) <- qualifiedType.target) {
-            return TypeCheckTypeHasJavaAttr(GetRealTarget(target))
-        }
-    }
-    return false
-}
-
-// C++ src/Sema/TypeCheckType.cpp:271-299 TypeCheckerImpl::CheckRefExprCheckTyArgs.
 private func CheckRefExprCheckTyArgs(refType: RefType, target: Decl): Bool {
     return refType.typeArguments.isEmpty()
 }

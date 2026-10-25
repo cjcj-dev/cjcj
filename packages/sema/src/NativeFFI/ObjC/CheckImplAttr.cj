@@ -21,7 +21,7 @@ public class CheckImplAttr <: Handler<TypeCheckContext> {
             DiagKindRefactor.sema_objc_mirror_subtype_must_be_annotated
         }
         let builder = DiagnoseRefactor(ctx.diag, kind, ctx.target)
-        if (ty.IsInterface()) { builder.AddMainHintArguments(ctx.target.identifier.Val()) }
+        builder.AddMainHintArguments(ctx.target.identifier.Val())
         builder.Emit()
         ctx.target.EnableAttr(Attribute.IS_BROKEN)
     }

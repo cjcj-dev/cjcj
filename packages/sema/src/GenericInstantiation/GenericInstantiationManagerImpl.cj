@@ -390,13 +390,6 @@ private func ignoredInstantiationKind(decl: Decl): Bool {
         decl.astKind == ASTKind.GENERIC_PARAM_DECL || decl.astKind == ASTKind.PACKAGE_DECL
 }
 
-private func HasJavaTargetAttr(target: Decl): Bool {
-    if (let Some(_) <- HasJavaAttr(target)) {
-        return true
-    }
-    return false
-}
-
 class GenericInstantiationManagerImpl {
     private var ci: CompilerInstance
     private let instantiations: ArrayList<GenericInstantiationRecord> = ArrayList<GenericInstantiationRecord>()

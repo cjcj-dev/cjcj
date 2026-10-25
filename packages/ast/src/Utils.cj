@@ -618,22 +618,6 @@ public func IsDefaultImplementation(decl: Decl): Bool {
     return false
 }
 
-public func InsideAtJavaDecl(decl: Decl): Bool {
-    if ((decl.astKind == ASTKind.FUNC_DECL || decl.astKind == ASTKind.VAR_DECL) &&
-        decl.TestAttr(Attribute.IN_CLASSLIKE)) {
-        if (let Some(_) <- HasJavaAttr(decl)) {
-            return true
-        }
-        return false
-    }
-    if (decl.astKind == ASTKind.FUNC_PARAM) {
-        if (let Some(outer) <- decl.outerDecl) {
-            return InsideAtJavaDecl(outer)
-        }
-    }
-    return false
-}
-
 public func CanBeSrcExported(fd: FuncDecl): Bool {
     if (fd.isInline) {
         return true
