@@ -37,8 +37,8 @@ test('formal Windows native action selects the fixed MSVCRT package without repl
  assert.equal(attempted.rc,1);assert.match(attempted.stderr,/WINDOWS_TOOLCHAIN_ARCHIVE/);
  assert.equal(await fs.stat(root+'/tool-env').then(()=>true,()=>false),false);
  const {WINDOWS_TOOLCHAIN:p}=await import('./install-windows-toolchain.mjs');
- assert.equal(p.url,'https://github.com/mstorsjo/llvm-mingw/releases/download/20220906/llvm-mingw-20220906-msvcrt-x86_64.zip');
- assert.equal(p.sha256,'1b63120c346ff78a4e3dba77101a535434a62122d3b44021438a77bdf1b4679a');
+ assert.equal(p.url,'https://github.com/mstorsjo/llvm-mingw/releases/download/20261020/llvm-mingw-20261020-msvcrt-x86_64.zip');
+ assert.equal(p.sha256,'52a3e3f584a74c3cde8ceb0c6960549683178e03b36818cb02b7ed109a68ff67');
 });
 test('public raw materialization overlays the actual new source config and preserves original dependency bytes',async()=>{
  const base=root+'/raw',art=root+'/artifact',input=root+'/input';await fs.mkdir(base);await fs.mkdir(art);

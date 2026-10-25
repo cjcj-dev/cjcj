@@ -69,8 +69,9 @@ test('runtime checkout retains its pinned repository and separate source directo
 });
 
 test('Node boundary pin loading and actual input consumption retain reviewed commands', () => {
-  const node = 'actions/setup-node@v4';
-  assert.deepEqual(byUses(steps, node), byUses(originalSteps, node), 'DARWIN_NODE22');
+  const expectedNode = {...byUses(originalSteps, 'actions/setup-node@v4'), uses: 'actions/setup-node@v7.1.0'};
+  expectedNode.with = {...expectedNode.with, 'node-version': '24.22.1'};
+  assert.deepEqual(byUses(steps, expectedNode.uses), expectedNode, 'DARWIN_NODE24');
   for (const name of [
     'Check host and target guard before tools and input preparation',
     'Load pinned runtime source',

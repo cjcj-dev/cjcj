@@ -42,7 +42,7 @@ runs:
   using: composite
   steps:
     - name: Install sccache
-      uses: mozilla-actions/sccache-action@v0.0.10
+      uses: mozilla-actions/sccache-action@v0.0.11
       with:
         version: ${{ inputs.sccache-version }}
         disable_annotations: 'true'

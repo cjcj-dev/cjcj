@@ -259,9 +259,9 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7.1.0
         with:
-          node-version: '22'
+          node-version: '24.22.1'
       - name: Select the requested targets
         id: select
         env:
@@ -308,9 +308,9 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7.1.0
         with:
-          node-version: '22'
+          node-version: '24.22.1'
       - name: Report missing source inputs
         env:
           REQUESTED: ${{ inputs.targets }}

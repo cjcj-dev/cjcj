@@ -31,9 +31,9 @@ jobs:
           repository: cjcj-dev/cangjie-runtime
           ref: ${{ env.RUNTIME_REF }}
           path: runtime-source
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7.1.0
         with:
-          node-version: 22
+          node-version: '24.22.1'
       - uses: msys2/setup-msys2@v2
         with:
           msystem: MINGW64

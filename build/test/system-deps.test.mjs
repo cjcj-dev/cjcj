@@ -56,7 +56,7 @@ test('CMake installer verifies the official archive and exposes its exact binary
     process.env.GITHUB_PATH = githubPath;
     const cmake = await installCmake3(root, {
       downloadArchive: async (url, archive) => {
-        assert.match(url, /Kitware\/CMake\/releases\/download\/v3\.31\.10/);
+        assert.match(url, /Kitware\/CMake\/releases\/download\/v3\.31\.12/);
         write(archive, 'archive fixture');
       },
       hashFile: async file => {
