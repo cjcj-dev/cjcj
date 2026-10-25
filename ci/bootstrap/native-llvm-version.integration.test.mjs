@@ -20,13 +20,32 @@ const write=(file,text)=>{fs.mkdirSync(path.dirname(file),{recursive:true});fs.w
 const fixture=path.resolve('build/test/fixtures');
 const compiler=path.join(base,'compiler');
 write(compiler+'/cmake/linux_x86_64_toolchain.cmake','set(CMAKE_SYSTEM_NAME Linux)\n');
-write(compiler+'/third_party/cmake/BuildCJDB.cmake','externalproject_get_property(cjnative BINARY_DIR)\nset(LLVM_GC_BINARY_DIR "${BINARY_DIR}")\n    USES_TERMINAL_BUILD ON\n    DEPENDS cjnative)\n');
+for(const name of ['BuildCJDB.cmake','Xml2.cmake']) {fs.mkdirSync(compiler+'/third_party/cmake',{recursive:true});fs.copyFileSync(fixture+'/compiler-41b223-cjdb/'+name,compiler+'/third_party/cmake/'+name);}
 write(compiler+'/src/CMakeLists.txt','if(CANGJIE_BUILD_CJDB)\n    add_dependencies(lldb cangjie-frontend)\nendif()\n');
 fs.copyFileSync(fixture+'/compiler-174db8f/third_party/CMakeLists.txt',compiler+'/third_party/CMakeLists.txt');
 fs.cpSync(fixture+'/compiler-41b223-schema/schema',compiler+'/schema',{recursive:true});
 // Limited compiler graph: use the actual prepared upstream POST_BUILD command,
 // then deliberately stop before native AST/install/Python debugger consumers.
 write(compiler+'/CMakeLists.txt',"cmake_minimum_required(VERSION 3.20)\nproject(NativeVersionEntry NONE)\nfile(STRINGS \"${CMAKE_SOURCE_DIR}/third_party/CMakeLists.txt\" versionCommand REGEX \"COMMAND .*VERSION.txt\")\nlist(LENGTH versionCommand count)\nif(NOT count EQUAL 1)\n message(FATAL_ERROR \"one official version producer required\")\nendif()\nstring(REPLACE \"\\${CMAKE_CURRENT_SOURCE_DIR}\" \"${CMAKE_SOURCE_DIR}/third_party\" versionCommand \"${versionCommand}\")\nset(SOURCE_DIR \"${CANGJIE_CJNATIVE_SOURCE_DIR}\")\nset(THIRD_PARTY_LLVM third_party/llvm)\nfile(MAKE_DIRECTORY \"${CMAKE_BINARY_DIR}/${THIRD_PARTY_LLVM}\")\nset(stopAfterVersion \"COMMAND ${CMAKE_COMMAND} -E false\")\nif(\"$ENV{NATIVE_CLANG_FINITE_INSTALL}\" STREQUAL \"1\")\n set(stopAfterVersion \"\")\n execute_process(COMMAND \"${CMAKE_COMMAND}\" -G Ninja -S \"${CMAKE_SOURCE_DIR}/finite-clang\" -B \"${CMAKE_BINARY_DIR}/third_party/cjnative-prefix/src/cjnative-build\" RESULT_VARIABLE result)\n if(NOT result EQUAL 0)\n  message(FATAL_ERROR \"finite component configuration failed\")\n endif()\n install(FILES \"${CMAKE_SOURCE_DIR}/CMakeLists.txt\" DESTINATION share/finite-clang)\nendif()\ncmake_language(EVAL CODE \"add_custom_target(lldb ${versionCommand} COMMAND ${CMAKE_COMMAND} -E echo NATIVE_VERSION_POST_BUILD_REACHED ${stopAfterVersion} WORKING_DIRECTORY ${SOURCE_DIR})\")\nforeach(name cjdb lldb-boundscheck lldb-cangjie-lsp lldb-cangjie-frontend cangjie-ast-support)\n add_custom_target(${name})\nendforeach()\n");
+
+const xmlGraph=`if("$ENV{NATIVE_XML2_FINITE_INSTALL}" STREQUAL "1")
+ enable_language(C)
+ include("\${CMAKE_SOURCE_DIR}/third_party/cmake/Xml2.cmake")
+ file(READ "\${CMAKE_SOURCE_DIR}/third_party/cmake/BuildCJDB.cmake" cjdb)
+ string(FIND "\${cjdb}" "# For Windows, dlls" begin)
+ string(FIND "\${cjdb}" "# Generate binary cjdb" end)
+ math(EXPR length "\${end}-\${begin}")
+ string(SUBSTRING "\${cjdb}" \${begin} \${length} xmlInstall)
+ set(LLVM_GC_LLDB_INSTALL_PREFIX "\${CMAKE_BINARY_DIR}/finite-lldb")
+ file(MAKE_DIRECTORY "\${LLVM_GC_LLDB_INSTALL_PREFIX}/lib")
+ cmake_language(EVAL CODE "\${xmlInstall}")
+ install(CODE "message(STATUS NATIVE_XML2_INSTALL_REACHED)")
+ set(stopAfterVersion "")
+endif()
+`;
+const graph=fs.readFileSync(compiler+'/CMakeLists.txt','utf8');
+fs.writeFileSync(compiler+'/CMakeLists.txt',graph.replace('cmake_language(EVAL CODE',xmlGraph+'cmake_language(EVAL CODE'));
+
 function gitFixture(name,dir) {
  good(name+'-init',['git','init',dir]);good(name+'-add',['git','-C',dir,'add','.']);
  good(name+'-commit',['git','-C',dir,'-c','user.name=Zxilly','-c','user.email=zxilly@outlook.com','commit','-m','Finite version source']);
@@ -104,4 +123,57 @@ test('formal native entry installs clang components and compiles with installed 
    assert.deepEqual(targets.map(x=>[x.argv.at(-1),x.rc]),[['clang',0],['clang-resource-headers',0],['llvm-headers',0]]);
   }
  } finally {delete process.env.NATIVE_CLANG_FINITE_INSTALL;}
+});
+
+test('formal native entry installs selected XML2 SONAME chain for real API use and cache recovery',()=>{
+ const input=process.env.NATIVE_XML2_ARCHIVE;assert(input,'NATIVE_XML2_ARCHIVE required for this explicit test');
+ const c=config('xml2-install',archive);c.jobs=4;c.xml2Archive={file:input,sha256:createHash('sha256').update(fs.readFileSync(input)).digest('hex')};
+ process.env.NATIVE_XML2_FINITE_INSTALL='1';
+ process.env.NATIVE_CLANG_FINITE_INSTALL='1';
+ try {
+  const lib=c.install+'/third_party/llvm/lib',source=base+'/xml-consumer.c',exe=base+'/xml-consumer';
+  write(source,'#define _GNU_SOURCE\n#include <libxml/parser.h>\n#include <dlfcn.h>\n#include <stdio.h>\nint main(void){Dl_info i;xmlDocPtr d=xmlReadMemory("<root/>",7,"memory.xml",0,0);if(!d)return 2;if(!dladdr((void*)xmlReadMemory,&i))return 3;puts(i.dli_fname);xmlFreeDoc(d);return 0;}\n');
+  for(const phase of ['first','warm','recovered']) {
+   if(phase==='recovered'){
+    const entity=fs.realpathSync(lib+'/libxml2.so');fs.renameSync(entity,base+'/retained-installed-xml2-entity');
+   }
+   const r=invoke('xml2-'+phase,c);
+   assert.equal(r.status,1,'finite AST boundary after normal XML2 and clang component installation');assert.match(r.stderr,/NATIVE_AST_NOT_INSTALLED/);
+   const events=r.stdout.split('\n').filter(x=>x.startsWith('{')).map(x=>{try{return JSON.parse(x);}catch{return {};}});
+   assert.equal(events.find(x=>x.event==='target-result'&&x.argv?.[1]==='--install'&&x.argv[2]===c.build)?.rc,0,'normal outer install must complete');
+   console.log('NATIVE_XML2_CHAIN_CONSUMER_ASSERT_REACHED '+phase);
+   const link=run('xml-consumer-link-'+phase,['cc',source,'-I'+c.build+'/third_party/xml2/include/libxml2',lib+'/libxml2.so','-Wl,-rpath,'+lib,'-ldl','-o',exe]);
+   assert.equal(link.status,0,'installed XML2 chain must link the real API consumer: '+link.stderr);
+   const consumed=run('xml-consumer-run-'+phase,[exe]);assert.equal(consumed.status,0,consumed.stderr);
+   assert.equal(path.dirname(consumed.stdout.trim()),lib,'consumer must load the independently installed XML2');
+   assert.equal(fs.realpathSync(lib+'/libxml2.so'),lib+'/'+path.basename(fs.realpathSync(c.build+'/third_party/xml2/lib/libxml2.so')));
+   const soname=good('xml-needed-'+phase,['readelf','-d',exe]);assert.match(soname,/\(NEEDED\)[^\n]*\[libxml2\.so\.16\]/);
+   assert(fs.readFileSync(c.build+'/install_manifest.txt','utf8').includes(lib+'/'+path.basename(fs.realpathSync(lib+'/libxml2.so'))));
+  }
+  good('xml-package',['tar','-cf',base+'/xml-install.tar','-C',c.install,'.']);fs.mkdirSync(base+'/xml-unpacked');
+  good('xml-unpack',['tar','-xf',base+'/xml-install.tar','-C',base+'/xml-unpacked']);
+  const unpacked=base+'/xml-unpacked/third_party/llvm/lib';
+  const result=spawnSync(exe,[],{encoding:'utf8',env:{...process.env,LD_LIBRARY_PATH:unpacked}});
+  write(base+'/xml-unpacked-consumer.json',JSON.stringify({argv:[exe],env:{LD_LIBRARY_PATH:unpacked},rc:result.status,signal:result.signal,stdout:result.stdout,stderr:result.stderr}));
+  assert.equal(result.status,0,result.stderr);assert.equal(path.dirname(result.stdout.trim()),unpacked);
+ } finally {delete process.env.NATIVE_XML2_FINITE_INSTALL;delete process.env.NATIVE_CLANG_FINITE_INSTALL;}
+});
+
+test('XML2 install rules preserve Darwin symlink chain and Windows DLL branch',()=>{
+ const prepared=base+'/xml2-install-build.compiler-source/third_party/cmake/BuildCJDB.cmake';
+ const text=fs.readFileSync(prepared,'utf8'),begin=text.indexOf('# For Windows, dlls'),end=text.indexOf('# Generate binary cjdb');
+ const windows=text.match(/if\(WIN32\)\n    (install\(FILES\n        \$\{CMAKE_BINARY_DIR\}\/third_party\/xml2\/bin\/libxml2\.dll\n        DESTINATION tools\/bin\/\))/)?.[1];assert(windows,'existing Windows DLL rule retained');
+ for(const platform of ['Darwin','Windows']){
+  const src=base+'/'+platform+'-install-source',build=base+'/'+platform+'-install-build',install=base+'/'+platform+'-install';
+  fs.mkdirSync(build+'/third_party/xml2/lib',{recursive:true});fs.mkdirSync(build+'/third_party/xml2/bin',{recursive:true});fs.mkdirSync(build+'/lldb/lib',{recursive:true});
+  if(platform==='Darwin'){
+   write(build+'/third_party/xml2/lib/libxml2.16.1.4.dylib','explicit non-Mach-O installation fixture');
+   fs.symlinkSync('libxml2.16.1.4.dylib',build+'/third_party/xml2/lib/libxml2.16.dylib');fs.symlinkSync('libxml2.16.dylib',build+'/third_party/xml2/lib/libxml2.dylib');
+  }else write(build+'/third_party/xml2/bin/libxml2.dll','explicit non-PE installation fixture');
+  write(src+'/CMakeLists.txt','cmake_minimum_required(VERSION 3.20)\nproject(XmlInstallShape NONE)\nset(DARWIN TRUE)\nset(LLVM_GC_LLDB_INSTALL_PREFIX "${CMAKE_BINARY_DIR}/lldb")\n'+(platform==='Darwin'?text.slice(begin,end):windows));
+  good(platform+'-configure',['cmake','-S',src,'-B',build,'-DCMAKE_INSTALL_PREFIX='+base+'/unused-prefix']);
+  good(platform+'-install',['cmake','--install',build,'--prefix',install]);
+  if(platform==='Darwin')assert.equal(fs.realpathSync(install+'/third_party/llvm/lib/libxml2.dylib'),install+'/third_party/llvm/lib/libxml2.16.1.4.dylib');
+  else assert.equal(fs.readFileSync(install+'/tools/bin/libxml2.dll','utf8'),'explicit non-PE installation fixture');
+ }
 });

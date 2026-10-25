@@ -738,7 +738,7 @@
   {
     "file": "ci/bootstrap/native-llvm-version.integration.test.mjs",
     "executor": "manual",
-    "reason": "Requires owned NATIVE_VERSION_EVIDENCE and native Python3.11/CMake/Ninja. Executes public native-cjdb entry with a finite compiler graph consuming the actual patched upstream VERSION command for archive/Git, cold/warm and rejection controls; also exercises normal clang/LLVM-header components with a real installed host clang resource consumer; stops before debugger/full native install, not full N qualification."
+    "reason": "Requires owned NATIVE_VERSION_EVIDENCE and native Python3.11/CMake/Ninja. Executes public native-cjdb entry with a finite compiler graph consuming the actual patched upstream VERSION command for archive/Git, cold/warm and rejection controls; also exercises normal clang/LLVM-header components with a real installed host clang resource consumer; selected XML2 test additionally requires NATIVE_XML2_ARCHIVE and runs its real native CMake producer/install/API/relocation plus finite Darwin/Windows installation rules. Stops before debugger/full native install, not full N qualification."
   },
   {
     "file": "ci/bootstrap/native-cjdb-jobs.test.mjs",

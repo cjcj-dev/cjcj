@@ -1,7 +1,7 @@
 #!/usr/bin/env zx
 // Fixed compiler CMake targets build the complete native LLVM/CJDB dependency closure.
 import fs from 'node:fs/promises';
-import {applyCompilerBoundscheckDependencies,applyCompilerLlvmVersion,applyCompilerCjdbPatches,applyCompilerWindowsPatches,applyCompilerSchemaInstall} from '../../build/srcbuild/stages/fetch.mjs';
+import {applyCompilerBoundscheckDependencies,applyCompilerLlvmVersion,applyCompilerXml2Install,applyCompilerCjdbPatches,applyCompilerWindowsPatches,applyCompilerSchemaInstall} from '../../build/srcbuild/stages/fetch.mjs';
 import path from 'node:path';
 import os from 'node:os';
 import {fileURLToPath} from 'node:url';
@@ -81,6 +81,7 @@ export async function nativeCjdb(config) {
  applyCompilerBoundscheckDependencies(compiler);
  applyCompilerSchemaInstall(compiler);
  applyCompilerLlvmVersion(compiler);
+ applyCompilerXml2Install(compiler);
  const compilerSource=prepared.source;
  let windowsToolchain;
  if(native.os==='win32') {

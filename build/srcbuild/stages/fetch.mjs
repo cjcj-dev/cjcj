@@ -40,6 +40,21 @@ export function applyCompilerLlvmVersion(repoDir) {
     path.join(repoDir, 'third_party', 'cmake', 'llvm-source-version.mjs'));
 }
 
+// Xml2.cmake normally builds and installs the selected source before CJDB.
+// Follow that producer's shared-library chain at install time; its entity
+// version need not equal the source release, and the SONAME may change.
+export function applyCompilerXml2Install(repoDir) {
+  const file = path.join(repoDir, 'third_party', 'cmake', 'BuildCJDB.cmake');
+  for (const [entry, soname, entity] of [
+    ['libxml2.dylib', 'libxml2.16.dylib', 'libxml2.2.14.0.dylib'],
+    ['libxml2.so', 'libxml2.so.16', 'libxml2.so.2.14.0'],
+  ]) {
+    const old = `    install(FILES\n        \${CMAKE_BINARY_DIR}/third_party/xml2/lib/${entry}\n        \${CMAKE_BINARY_DIR}/third_party/xml2/lib/${soname}\n        \${CMAKE_BINARY_DIR}/third_party/xml2/lib/${entity}\n        DESTINATION third_party/llvm/lib)`;
+    const replacement = `    install(CODE "file(INSTALL DESTINATION \\\"\\\${CMAKE_INSTALL_PREFIX}/third_party/llvm/lib\\\"\n        TYPE SHARED_LIBRARY FOLLOW_SYMLINK_CHAIN\n        FILES \\\"\${CMAKE_BINARY_DIR}/third_party/xml2/lib/${entry}\\\")")`;
+    applyTextPatch(file, [[old, replacement]], {stage:'fetch.patch.xml2-install', marker:replacement});
+  }
+}
+
 const BUILDCJDB_EDITS = [
   [
     'externalproject_get_property(cjnative BINARY_DIR)\nset(LLVM_GC_BINARY_DIR "${BINARY_DIR}")\n',
