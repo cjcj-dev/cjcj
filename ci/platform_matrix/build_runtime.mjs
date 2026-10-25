@@ -8,6 +8,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {printCommonVersions, stageBegin, toCommandPath} from './common.mjs';
 import {pickWindowsCC} from './pick_cc.mjs';
+import {runMsysScript} from './windows_runtime_shell.mjs';
 import {configureNativeRuntime, installNativeRuntimeDependencies, installNativeRuntimeInputs, recordNativeRuntime} from './native_runtime.mjs';
 
 const {root} = stageBegin('runtime');
@@ -126,15 +127,19 @@ if (process.platform === 'linux') {
     `"$capture_node" "$capture_script" run build -- python3 build.py build${jobs?' --jobs '+jobs:''} --target ${runtimeTarget} --build-type ${buildType} --target-toolchain "$runtime_toolchain" --prefix "$runtime_preinstall" -v ${shellQuote(version)}`,
     '"$capture_node" "$capture_script" run install -- python3 build.py install --prefix "$runtime_install"',
   ].join('\n');
-  const command = 'export MSYSTEM=MINGW64 MSYS2_PATH_TYPE=inherit CHERE_INVOKING=1; exec /usr/bin/bash -lc ' + shellQuote(script);
-  nativeCommands = [[msysBash, '-c', command]];
+  const scriptFile = path.join(evidence, 'runtime-native-script.txt');
+  await fs.writeFile(scriptFile, script + '\n');
+  nativeCommands = [[msysBash, '--login', '-s']];
   let result;
-  try { result = await $`${toCommandPath(msysBash)} -c ${command}`; }
-  catch (error) { result = error; throw error; }
+  try {
+    result = await runMsysScript(msysBash, script);
+    if (result.exitCode !== 0 || result.error) throw new Error(`MSYS runtime entry failed: rc=${result.exitCode} signal=${result.signal} error=${result.error || 'none'}`);
+  }
   finally {
     await fs.writeFile(path.join(evidence, 'runtime-native-command.json'), JSON.stringify({
       argv:nativeCommands[0], runtimeRef:actualRef, llvmRef:process.env.LLVM_SHA,
-      rc:result?.exitCode ?? null, signal:result?.signal ?? null,
+      rc:result?.exitCode ?? null, signal:result?.signal ?? null, error:result?.error,
+      stdinFile:scriptFile, environment:{MSYSTEM:'MINGW64',MSYS2_PATH_TYPE:'inherit',CHERE_INVOKING:'1'},
       source:runtimeDirectory, install:configuredInstallRoot, buildType, version,
     }, null, 2) + '\n');
     if(nativePair)await fs.copyFile(path.join(evidence,'runtime-native-command.json'),path.join(installRoot,'runtime-native-command.json'));
