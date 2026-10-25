@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import {buildConfig} from '../lib/config.mjs';
+import {buildConfig, saveSourceSelection} from '../lib/config.mjs';
 import {getBuildTarget} from '../lib/build-target.mjs';
 import {applyCompilerBoundscheckDependencies, applyCompilerCjdbPatches, run as fetchRun, verifyCompilerCjdbPatches} from '../srcbuild/stages/fetch.mjs';
 
@@ -90,8 +90,10 @@ test('Windows fetch preserves selected native compilers and normal runtime insta
       target: getBuildTarget('windows-x64', {platform: 'win32', arch: 'x64'})};
     const boundsFile = path.join(compiler, 'third_party/CMakeLists.txt');
     const canonicalBounds = fs.readFileSync(boundsFile);
-    await fetchRun(config);
+    applyCompilerBoundscheckDependencies(compiler);
     assert.deepEqual(fs.readFileSync(boundsFile), canonicalBounds, 'canonical 41b already has both static bounds dependencies');
+    await fetchRun(config);
+    assert.equal(fs.readFileSync(boundsFile,'utf8').split('DEPENDS cangjie-demangler boundscheck boundscheck-static)').length-1,2);
     const cmake = (args) => {
       const r = spawnSync('cmake', args, {cwd: workspace, encoding: 'utf8'});
       assert.equal(r.status, 0, r.stdout + r.stderr); return r;
@@ -229,15 +231,20 @@ for (const entry of ['fetch', 'build']) test(`public ${entry} restores both stat
     const compiler = path.join(workspace, 'cangjie_compiler');
     fs.cpSync(PIN_FIXTURE, compiler, {recursive:true});
     fs.cpSync(SCHEMA_PIN_FIXTURE, path.join(compiler, 'schema'), {recursive:true});
-    const options=[];
+    // Deliberately stop at the first actual build.py call: this gate grants
+    // source preparation only, never a compiler build or installation.
+    fs.writeFileSync(path.join(compiler,'build.py'),"raise SystemExit('BOUNDSCHECK_FINITE_BUILD_BOUNDARY')\n");
+    const options=[],repoOverrides={};
     for (const name of ['compiler','runtime','tools','stdx','llvm','cjpm']) {
       const root=path.join(workspace,name==='llvm'?'cangjie_compiler/third_party/llvm-project':name==='cjpm'?'cjpm-source':'cangjie_'+name);
       fs.mkdirSync(root,{recursive:true});
       const git=(...args)=>{const r=spawnSync('git',['-C',root,...args],{encoding:'utf8'});assert.equal(r.status,0,r.stderr);return r.stdout.trim();};
       git('init','-q');git('add','.');
       git('-c','user.name=Zxilly','-c','user.email=zxilly@outlook.com','commit','--allow-empty','-qm','fixed boundscheck fixture');
-      options.push('--repo-url',name+'='+root,'--repo-tag',name+'='+git('rev-parse','HEAD'));
+      const tag=git('rev-parse','HEAD');repoOverrides[name]={url:root,tag};
+      options.push('--repo-url',name+'='+root,'--repo-tag',name+'='+tag);
     }
+    saveSourceSelection(buildConfig({workspace,buildRoot:workspace+'/buildtools',targetKey:'linux-x64',repoOverrides}));
     const file=path.join(compiler,'third_party/CMakeLists.txt');
     const original=fs.readFileSync(file,'utf8');
     const before='DEPENDS cangjie-demangler boundscheck)';
@@ -246,13 +253,11 @@ for (const entry of ['fetch', 'build']) test(`public ${entry} restores both stat
     const expected=original.replaceAll(before,after);
     const cli=new URL('../cli.mjs',import.meta.url).pathname;
     const invoke=()=>{
-      // The build arm checks its real source preparation; native build.py is
-      // explicitly dry-run here. Native compilation is a separate gate.
       const env={...process.env};delete env.CANGJIE_BUILD_DRY_RUN;
-      if(entry==='build')env.CANGJIE_BUILD_DRY_RUN='1';
       const args=entry==='fetch'?['fetch',...options]:['build','compiler'];
-      const r=spawnSync(process.execPath,[cli,'--workspace',workspace,'--build-root',workspace+'/buildtools','--target','linux-x64',...args],{env,encoding:'utf8'});
-      assert.equal(r.status,0,r.stdout+r.stderr);
+      const r=spawnSync(process.execPath,[cli,'--workspace',workspace,'--build-root',workspace+'/buildtools','--target','linux-x64','--official-sdk-root',workspace+'/host-not-consumed',...args],{env,encoding:'utf8'});
+      assert.equal(r.status,entry==='build'?1:0,r.stdout+r.stderr);
+      if(entry==='build')assert.match(r.stderr,/BOUNDSCHECK_FINITE_BUILD_BOUNDARY/);
     };
     invoke();
     console.log('BOUNDSCHECK_PUBLIC_TARGET_REACHED '+entry+' first');
