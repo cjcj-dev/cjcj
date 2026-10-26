@@ -41,6 +41,7 @@ const launch=state==='launch'?await zx$({shell:${JSON.stringify(path.join(root,'
 Object.defineProperty(process,'platform',{value:'win32'});
 globalThis.$=()=>async(strings,...values)=>{
  const states={nonzero:new ProcessOutput(19),signal:new ProcessOutput(null,'SIGTERM'),launch,
+  'from-error':ProcessOutput.fromError(Error('explicit public fromError cause')),
   'zero-signal':new ProcessOutput(0,'SIGTERM'),
   'zero-error':new ProcessOutput({code:0,signal:null,error:Error('explicit ProcessOutput cause'),duration:0,from:'public constructor fixture',store:{stdout:[],stderr:[],stdall:[]}})};
  const output=states[state]||new ProcessOutput(0);
@@ -104,7 +105,7 @@ test('package summary preserves native failure after successful verifier',()=>{
  assert.equal(summary.rc,33,'package summary must include native consumer failure');
  assert.equal(f.events().filter(e=>e.kind==='run').length,1);
 });
-for(const state of ['nonzero','signal','launch','zero-signal','zero-error'])test('verifier failure stops native consumers: '+state,()=>{
+for(const state of ['nonzero','signal','launch','from-error','zero-signal','zero-error'])test('verifier failure stops native consumers: '+state,()=>{
  const f=fixture(),r=f.run('windows_runtime_package.mjs',[],{FIXTURE_VERIFIER_STATE:state});
  const events=f.events();
  assert.equal(events.filter(e=>e.kind==='verifier').length,1,'verifier must actually be invoked');
@@ -114,10 +115,13 @@ for(const state of ['nonzero','signal','launch','zero-signal','zero-error'])test
  assert.equal(r.status,state==='nonzero'?19:1,'abnormal verifier must terminate package nonzero');
  const summary=JSON.parse(fs.readFileSync(path.join(f.output,'unpacked-consumer.json')));
  assert.equal(summary.rc,r.status);assert.equal(summary.native.status,'NOT_RUN');
- assert.equal(summary.verifier.rc,state==='nonzero'?19:state.startsWith('zero-')?0:null);
+ const actual=events.find(e=>e.kind==='verifier');
+ assert.equal(summary.verifier.rc,actual.rc,'preserve the actual zx exitCode, including spawn errno');
+ if(state==='launch')assert.ok(Number.isInteger(actual.rc)&&actual.rc<0,'real Linux ENOENT spawn reports a negative errno');
+ else assert.equal(actual.rc,state==='nonzero'?19:state.startsWith('zero-')?0:null);
  assert.equal(summary.verifier.signal,state.includes('signal')?'SIGTERM':null);
  assert.equal(summary.verifier.ok,events.find(e=>e.kind==='verifier').ok);
- if(state==='launch'||state==='zero-error'){
+ if(['launch','from-error','zero-error'].includes(state)){
   console.log('VERIFIER_CAUSE_TARGET_REACHED '+state);
   const actual=events.find(e=>e.kind==='verifier');
   assert.equal(actual.ok,false);assert.ok(actual.cause?.message);
