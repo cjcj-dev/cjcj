@@ -251,11 +251,13 @@ test('explicit stdx macro executor reaches first incremental recovery and instal
   }
   assert(fs.readFileSync(f.executorEnv.FIXTURE_EXECUTOR_TRACE,'utf8').includes(path.join(f.sdk,'bin/cjc')));
   console.log('EXPLICIT_EXECUTOR_ATTEMPT_BUILD_INSTALL_ASSERT_REACHED');
+  const published = fs.readFileSync(path.join(f.sdk, STDX_BUILD_INPUTS));
   const wrong = f.build(inc, {...env, STDX_HOST_CANGJIE_HOME:f.host});
   assert.equal(wrong.status, 1); assert.match(wrong.stderr, /must provide the public cjc selected on PATH/);
-  assert(!fs.existsSync(path.join(f.sdk, STDX_BUILD_INPUTS)));
+  assert.deepEqual(fs.readFileSync(path.join(f.sdk, STDX_BUILD_INPUTS)), published);
   const missing = f.build(inc, {...env, STDX_HOST_CANGJIE_HOME:path.join(f.root,'missing-home')});
   assert.equal(missing.status, 1); assert.match(missing.stderr, /host cjc not found/);
+  assert.deepEqual(fs.readFileSync(path.join(f.sdk, STDX_BUILD_INPUTS)), published);
   // b107's native contract uses explicit empty HOME to disable host closure.
   successful(f.build(inc, {...env, STDX_HOST_CANGJIE_HOME:''}));
   assert.equal(read(f.sdk).build.environment.STDX_HOST_CANGJIE_HOME, '');
@@ -266,9 +268,9 @@ test('explicit stdx macro executor reaches first incremental recovery and instal
 
 test('unset stdx macro executor retains official host default when PATH selects that host', t => {
   const f = executorFixture(t);
-  // Existing non-explicit consumer layout: H precedes the default compiler output.
-  fs.mkdirSync(path.join(f.root,'cangjie_compiler'), {recursive:true});
-  fs.symlinkSync(f.sdk, path.join(f.root,'cangjie_compiler/output'));
+  // Existing non-explicit consumer layout: H precedes the normal SDK install.
+  fs.mkdirSync(path.join(f.root,'software'), {recursive:true});
+  fs.symlinkSync(f.sdk, path.join(f.root,'software/cangjie'));
   const env = {...f.executorEnv, STDX_HOST_CANGJIE_HOME:undefined, CJCJ_SRCBUILD_CONSUMER_SDK:''};
   successful(f.build([], env));
   successful(f.build(['--stdx-build-mode','incremental'], env));

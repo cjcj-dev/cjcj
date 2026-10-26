@@ -22,8 +22,13 @@ export async function load(url, context, nextLoad) {
     source += '\nexport function assertRuntimeSplit() {}\n';
   }
   if (url.endsWith('/srcbuild/gc-unit-gate.mjs') && process.env.SDK_INPUT_OBSERVE === 'verify') {
-    source = source.replace('export function assertGcUnitLanguageDone(', 'function unusedGcUnitLanguageDone(');
-    source += '\nexport function assertGcUnitLanguageDone() {}\n';
+    // The public verify stage now runs the installed language entry. Keep the
+    // same finite language boundary while observing host selection downstream;
+    // actual language production/qualification is outside this apparatus.
+    const anchor = 'export async function runGcUnitLanguageTests(';
+    if (!source.includes(anchor)) throw new Error('language observation anchor missing');
+    source = source.replace(anchor, 'async function unusedGcUnitLanguageTests(');
+    source += '\nexport async function runGcUnitLanguageTests() { console.log("FINITE_LANGUAGE_BOUNDARY_NOT_RUN"); }\n';
   }
   if (url.endsWith('/lib/package-lineage.mjs') && ['verify','ci-verify'].includes(process.env.SDK_INPUT_OBSERVE)) {
     const anchor = "const root = path.resolve(resolveOfficialSdkRoot(officialRoot) ?? await pinnedOfficialSdkRoot());";

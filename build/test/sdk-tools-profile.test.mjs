@@ -215,7 +215,7 @@ return {...r,source};}
    await write(root+'/fixture-ready','finite interface, not a qualified SDK\n');
   }
   const env={...process.env,NODE_OPTIONS:'--experimental-loader='+root+'/loader.mjs',CJCJ_SRCBUILD_CONSUMER_SDK:sdk,CJCJ_OFFICIAL_SDK_ROOT:root+'/official',CANGJIE_HOME:root+'/foreign-sdk',LD_LIBRARY_PATH:root+'/foreign-sdk/lib',CPATH:root+'/foreign-sdk/include',CJPM_REGRESSION_CASES:'one-case-only',CANGJIE_BUILD_JOBS:'2',CJCJ_SUPERVISOR_WORK:root+'/supervision'};
-  delete env.CANGJIE_BUILD_DRY_RUN;delete env.CJCJ_HLE_DEPENDENCIES;delete env.CJCJ_OFFICIAL_SDK_ROOT;
+  delete env.CANGJIE_BUILD_DRY_RUN;delete env.CJCJ_HLE_DEPENDENCIES;
   const readEvents=async()=>{const text=await fs.readFile(trace,'utf8').catch(()=> '');return text.trim()?text.trim().split('\n').map(line=>JSON.parse(line)):[];};
   const invoke=async(label,extra=[],command=['build','tools'],overlay={})=>{
    const before=(await readEvents()).length;

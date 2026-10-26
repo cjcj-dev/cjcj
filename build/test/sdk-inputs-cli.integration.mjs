@@ -269,6 +269,7 @@ cases['verify-h'] = () => {
   ]) {
     const p=invoke(label,packageFixture(),[...args,'verify'],{SDK_INPUT_OBSERVE:'verify',SDK_INPUT_EXPECT_H:expected,...env});
     console.log('VERIFY_WIRING_ASSERTION_REACHED',label);
+    assert.match(p.text,/FINITE_LANGUAGE_BOUNDARY_NOT_RUN/);
     observed(p,'LINEAGE_INPUT_OBSERVED');assert.doesNotMatch(p.text,/LINEAGE_INPUT_MISMATCH/);
   }
 };
