@@ -21,3 +21,11 @@ perform a product cut or grant a pass: a cut must be made in an isolated compile
 source, rebuilt through the normal target, and associated with its actual diff and
 producer. A failed compile is not a reached runtime assertion. Matching runtime
 SO and SDK producer identities are supplied by the enclosing build/install run.
+
+The resource-bound consumer keeps its resource try in statement position and
+retains the return from inside that scope. Its trailing throw makes unexpected
+fallthrough fail; it does not replace the close-count or exception assertions.
+The original 700a fixture ended with the Unit-typed resource try in an Int64
+return-expression position and was correctly rejected before execution. Its
+first failure remains in the v104 evidence; correcting that input does not
+change the compiler's Unit rule or establish that the generic-bound path passes.

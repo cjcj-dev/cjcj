@@ -16,6 +16,9 @@ func consume<T>(value: T, fail: Bool): Int64 where T <: Tagged & Resource {
         if (fail) { throw Exception("resource body") }
         return r.tag()
     }
+    // Resource try has type Unit. Keep it in statement position while checking
+    // that the normal return above exits the resource scope and closes once.
+    throw Exception("resource guard unexpectedly fell through")
 }
 
 main(): Int64 {
