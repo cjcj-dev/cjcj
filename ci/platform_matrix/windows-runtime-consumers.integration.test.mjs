@@ -131,7 +131,9 @@ test('package verifier uses the real zx child with literal path arguments',()=>{
  fs.writeFileSync(dump,'#!'+process.execPath+'\nconsole.log('+JSON.stringify(table)+');\n',{mode:0o755});
  const nativeNode=path.join(f.root,String.raw`C:\hostedtoolcache\windows\node\24.22.1\x64\node.exe`);
  fs.symlinkSync(process.execPath,nativeNode);
- const scriptRoot=path.join(f.root,String.raw`D:\a\script's (literal)`);fs.mkdirSync(scriptRoot);
+ // Node ESM rejects encoded backslashes even on Linux. Exercise literal
+ // backslashes in the native executable/root, and legal quotes/spaces in ESM.
+ const scriptRoot=path.join(f.root,"D: script's (literal)");fs.mkdirSync(scriptRoot);
  for(const name of ['windows_runtime_package.mjs','windows_runtime_capture.mjs','windows_runtime_consumers.mjs','verify_windows_runtime_exports.mjs'])
   fs.copyFileSync(path.resolve('ci/platform_matrix',name),path.join(scriptRoot,name));
  const r=f.run('windows_runtime_package.mjs',[],{FIXTURE_VERIFIER_REAL:'1',FIXTURE_NODE_PATH:nativeNode,FIXTURE_ENTRY:path.join(scriptRoot,'windows_runtime_package.mjs'),OBJDUMP:dump});
