@@ -82,7 +82,9 @@ export async function runConsumers(install,phase) {
    }
   }
   const exe=path.join(output,name+'.exe');
-  rc=await command('link',[compiler,...args,'-fuse-ld=lld','-static',...objects,
+  // compiler-rt supplies builtins, not the C++ exception unwinder. Keep the
+  // installed/unpacked executables self-contained with the matching libunwind.
+  rc=await command('link',[compiler,...args,'-fuse-ld=lld','-static','--unwindlib=libunwind',...objects,
    ...(name==='frames'?[runtimeImport,boundsImport]:[]),'-lntdll','-o',exe]);if(rc)return rc;
   rc=await command('run',[exe,dll],{env});if(rc)return rc;
  }

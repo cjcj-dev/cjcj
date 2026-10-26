@@ -27,7 +27,7 @@ function fixture() {
  put(path.join(build,'CMakeCache.txt'),'CMAKE_CXX_COMPILER:FILEPATH='+compiler+'\n');
  json(path.join(reply,'index-fixture.json'),{reply:{'client-runtime-exports':{'codemodel-v2':{jsonFile:'model.json'}}}});
  json(path.join(reply,'model.json'),{paths:{build,source:runtime},configurations:[{targets:[{jsonFile:'exception.json'}]}]});
- json(path.join(reply,'exception.json'),{name:'Exception',sources:[{path:'src/Exception/WindowsExceptionTransfer.cpp',compileGroupIndex:0}],compileGroups:[{language:'CXX',defines:[{define:'ACTUAL_PRODUCT_CONFIGURATION=1'}],includes:[{path:path.join(runtime,'include')}],compileCommandFragments:[{fragment:'-target x86_64-w64-mingw32 -stdlib=libc++ -fno-exceptions'}]}]});
+ json(path.join(reply,'exception.json'),{name:'Exception',sources:[{path:'src/Exception/WindowsExceptionTransfer.cpp',compileGroupIndex:0}],compileGroups:[{language:'CXX',defines:[{define:'ACTUAL_PRODUCT_CONFIGURATION=1'}],includes:[{path:path.join(runtime,'include')}],compileCommandFragments:[{fragment:'-target x86_64-w64-mingw32 -stdlib=libc++ --rtlib=compiler-rt -fno-exceptions'}]}]});
  for(const name of ['windows_n2c_os_unwind.cpp','windows_exception_return_os.cpp','windows_exception_frames.cpp','gc_unit/test_unwind_regressions.cpp'])put(path.join(runtime,'tests',name),'explicit consumer source command fixture');
  put(path.join(runtime,'tests/windows_exception_imports.mjs'),`import fs from 'node:fs';fs.appendFileSync(process.env.CONSUMER_CALLS,JSON.stringify({kind:'imports',args:process.argv.slice(2)})+'\\n');process.exitCode=Number(process.env.FIXTURE_IMPORTS_RC||0);`);
  const hooks=path.join(root,'host.mjs');
@@ -87,6 +87,11 @@ for(const packaged of [false,true])test(packaged?'same-install package selects u
  }
  const links=events.filter(e=>e.kind==='compiler'&&e.args.includes('-lntdll'));
  assert.equal(links.length,3);
+ console.log('CONSUMER_UNWINDER_TARGET_REACHED');
+ for(const link of links) {
+  assert.ok(link.args.includes('-static'),'consumer must not borrow toolchain runtime DLLs');
+  assert.ok(link.args.includes('--unwindlib=libunwind'),'C++ exception consumers must link their unwinder');
+ }
  for(const name of ['libcangjie-runtime.dll.a','libboundscheck.dll.a'])assert.ok(links[2].args.includes(path.join(selected,path.relative(f.install,f.lib),name)));
  const captures=fs.readdirSync(f.env.WINDOWS_RUNTIME_EVIDENCE).filter(x=>x.startsWith('consumer-')).map(x=>JSON.parse(fs.readFileSync(path.join(f.env.WINDOWS_RUNTIME_EVIDENCE,x,'command.json'))));
  assert.equal(captures.length,13);assert.ok(captures.every(c=>c.rc===0&&c.signal===null));
