@@ -12,7 +12,8 @@ test('source host producer exports one canonical root through first and repeated
  const {buildConfig}=await import('../../build/lib/config.mjs');
  const {baseEnv}=await import('../../build/srcbuild/stages/common.mjs');
  await fs.mkdir(root,{recursive:true});const work=await fs.mkdtemp(path.join(root,'canonical-host-'));
- const bootstrap=work+'/bootstrap',workspace=work+'/workspace',selected=workspace+'/source-host-sdk';
+ const bootstrap=work+'/bootstrap',workspace=work+'/workspace',selected=workspace+'/source-host-sdk',consumer=work+'/consumer';
+ await fs.mkdir(consumer+'/runtime/lib/linux_x86_64_cjnative',{recursive:true});
  await fs.mkdir(bootstrap+'/runtime/lib/linux_x86_64_cjnative',{recursive:true});
  await fs.mkdir(bootstrap+'/bin',{recursive:true});await fs.writeFile(bootstrap+'/bin/cjc','old fixture compiler');
  await fs.mkdir(workspace+'/cangjie_compiler/output/bin',{recursive:true});
@@ -36,7 +37,7 @@ test('source host producer exports one canonical root through first and repeated
     const at=line.indexOf('=');return[line.slice(0,at),line.slice(at+1)];}));
    assert.equal(exported.CJCJ_OFFICIAL_SDK_ROOT,selected,'HOST_CANONICAL_EXPORT');
    assert.equal(exported.CJCJ_SRCBUILD_HOST_SDK,undefined);
-   const config=buildConfig({workspace,officialSdkRoot:exported.CJCJ_OFFICIAL_SDK_ROOT});
+   const config=buildConfig({workspace,consumerSdk:consumer,officialSdkRoot:exported.CJCJ_OFFICIAL_SDK_ROOT});
    const child=baseEnv(config,{...env,...exported});
    assert.equal(child.CJCJ_OFFICIAL_SDK_ROOT,selected);
    assert.equal(child.LD_LIBRARY_PATH.split(path.delimiter)[0],selected+'/runtime/lib/linux_x86_64_cjnative');

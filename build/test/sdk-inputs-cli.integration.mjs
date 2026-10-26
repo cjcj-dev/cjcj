@@ -230,6 +230,7 @@ for (const explicit of [false, true]) cases[`handoff-${explicit?'explicit':'defa
 };
 function packageFixture() {
   const sdk = path.join(work, 'package-workspace/software/cangjie');
+  fs.mkdirSync(path.join(sdk,'stdx/linux_x86_64_cjnative'),{recursive:true});
   for (const name of ['cjpm', 'cjfmt', 'hle', 'LSPServer', 'cjcov', 'cjtrace-recover', 'cjlint', 'cjprof', 'cjcompat']) {
     for (const rel of [`tools/bin/${name}`, `tools/bin/${name}.entry`, `.target-tools/tools/bin/${name}`]) file(path.join(sdk, rel), 'controlled installed interface\n');
   }
