@@ -904,10 +904,5 @@
     "file": "packages/parse/src/InteropAnnotation_test.cj",
     "executor": "cjpm",
     "member": "packages/parse"
-  },
-  {
-    "file": "runtime_shim/tests/macro_loader.test.mjs",
-    "executor": "manual",
-    "reason": "Linux native component red/control/restored gate consumes the normally built compiler macro loader and needs CC plus an isolated output. Run only in the approved remote resource slot; public CJ macro acceptance remains sdk-verify-install."
   }
 ]

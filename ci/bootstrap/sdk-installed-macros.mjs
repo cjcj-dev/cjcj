@@ -123,7 +123,16 @@ public macro Chain(input: Tokens): Tokens {
 `);
   requireLine(await invoke('chain-definition',[cjc,'--compile-macro',chainDef,'--import-path',work,'-L',work,'-lsdkhelper','-lsdkleaf']),
     'MACRO_BODY_EXECUTED');
-  await artifact(path.join(work,'lib-macro_sdkchain'+native.shared));
+  const chainLibrary=path.join(work,'lib-macro_sdkchain'+native.shared);
+  await artifact(chainLibrary);
+  if(native.os==='linux') {
+    // Inspect the actual public producer output, without adding test-only link flags.
+    const dynamic=await invoke('chain-dynamic-table',['readelf','-d',chainLibrary]);
+    const rpath=dynamic.stdout.match(/\(RPATH\).*\[([^\]]+)\]/)?.[1];
+    if(!rpath||dynamic.stdout.includes('(RUNPATH)')||!rpath.split(':').some(item=>
+      path.resolve(item)===path.join(sdk,'runtime','lib',platform+'_cjnative')))
+      throw Error('MACRO_PRODUCER_TARGET_RPATH_MISSING');
+  }
   const chainUse=await source('chain use.cj',`import sdkchain.*
 @Chain
 func value(): Int64 { 42 }
