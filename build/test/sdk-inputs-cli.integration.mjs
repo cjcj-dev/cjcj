@@ -9,6 +9,7 @@ import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {readHostToolchainPin} from '../../ci/host-toolchain-pin.mjs';
 import {makeRepos} from '../lib/config.mjs';
+import {zxCommand} from '../../ci/test-zx.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const cli = path.join(root, 'build/cli.mjs');
@@ -283,8 +284,8 @@ cases['ci-verify-h'] = () => {
       SDK_INPUT_OBSERVE:'ci-verify',SDK_INPUT_EXPECT_H:expected};
     for (const key of ['CJCJ_OFFICIAL_SDK_ROOT','CJCJ_SRCBUILD_HOST_SDK','CJCJ_VERIFY_NO_FAIL_FAST']) delete env[key];
     Object.assign(env,selected);
-    const p = command(`ci-verify-${label}`,['--import','zx/globals','--experimental-loader',observer,
-      path.join(root,'ci/srcbuild/steps/verify.mjs'),sdk],env);
+    const p = command(`ci-verify-${label}`,['--experimental-loader',observer,
+      ...zxCommand([path.join(root,'ci/srcbuild/steps/verify.mjs'),sdk],env).slice(1)],env);
     console.log('CI_VERIFY_WIRING_ASSERTION_REACHED',label);
     observed(p,'LINEAGE_INPUT_OBSERVED'); assert.doesNotMatch(p.text,/LINEAGE_INPUT_MISMATCH/);
   }

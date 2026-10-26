@@ -270,7 +270,8 @@ test('unset stdx macro executor retains official host default when PATH selects 
   const f = executorFixture(t);
   // Existing non-explicit consumer layout: H precedes the normal SDK install.
   fs.mkdirSync(path.join(f.root,'software'), {recursive:true});
-  fs.symlinkSync(f.sdk, path.join(f.root,'software/cangjie'));
+  const destination=path.join(f.root,'software/cangjie');
+  fs.cpSync(f.sdk, destination, {recursive:true});
   const env = {...f.executorEnv, STDX_HOST_CANGJIE_HOME:undefined, CJCJ_SRCBUILD_CONSUMER_SDK:''};
   successful(f.build([], env));
   successful(f.build(['--stdx-build-mode','incremental'], env));
@@ -278,7 +279,7 @@ test('unset stdx macro executor retains official host default when PATH selects 
     assert.equal(row.macro, f.host); assert.equal(row.baseline, f.host);
     assert.equal(row.cjc, path.join(f.host,'bin/cjc'));
   }
-  assert.equal(read(f.sdk).build.environment.STDX_HOST_CANGJIE_HOME, f.host);
+  assert.equal(read(destination).build.environment.STDX_HOST_CANGJIE_HOME, f.host);
   console.log('UNSET_EXECUTOR_DEFAULT_CONTROL_ASSERT_REACHED');
 });
 
