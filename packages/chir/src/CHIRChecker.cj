@@ -130,6 +130,15 @@ public class CHIRChecker {
             results.add(taskQueue.AddTask<Unit>({ => check(item) }))
         }
         taskQueue.RunAndWaitForAllTasksCompleted()
+        var firstFailure: Option<Exception> = None
+        for (result in results) {
+            try {
+                result.get()
+            } catch (e: Exception) {
+                if (firstFailure.isNone()) { firstFailure = Some(e) }
+            }
+        }
+        if (let Some(e) <- firstFailure) { throw e }
     }
 
     private func CheckFunc(fn: Function): Unit {

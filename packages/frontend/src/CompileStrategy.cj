@@ -110,22 +110,36 @@ public open class CompileStrategy {
         if (!hasLevelFlag && !hasSyscapFlag) {
             return
         }
-        ProfileRecorder.Start("ImportPackages", "ParseAndMergeCjds")
-        let cjdInfos = ci.importManager.getOrThrow().GetDepPkgCjdPaths()
-        let taskQueue = TaskQueue(Int64(cjdInfos.size))
-        option.compileCjd = true
-        for ((packageName, cjdPath) in cjdInfos) {
-            let cjdInfo = (packageName, cjdPath)
-            if (option.jobs.hasValue && option.jobs.value == 1u64) {
-                ParseAndMergeCjd(ci, cjdInfo)
-            } else {
-                let _ = taskQueue.AddTask<Unit>({ => ParseAndMergeCjd(ci, cjdInfo) })
+        let recorder = ProfileRecorder("ImportPackages", "ParseAndMergeCjds")
+        let wasCompileCjd = option.compileCjd
+        try {
+            let cjdInfos = ci.importManager.getOrThrow().GetDepPkgCjdPaths()
+            let taskQueue = TaskQueue(Int64(cjdInfos.size))
+            let results = ArrayList<TaskResult<Unit>>()
+            option.compileCjd = true
+            for ((packageName, cjdPath) in cjdInfos) {
+                let cjdInfo = (packageName, cjdPath)
+                if (option.jobs.hasValue && option.jobs.value == 1u64) {
+                    ParseAndMergeCjd(ci, cjdInfo)
+                } else {
+                    results.add(taskQueue.AddTask<Unit>({ => ParseAndMergeCjd(ci, cjdInfo) }))
+                }
             }
+            taskQueue.RunAndWaitForAllTasksCompleted()
+            var firstFailure: Option<Exception> = None
+            for (result in results) {
+                try {
+                    result.get()
+                } catch (e: Exception) {
+                    if (firstFailure.isNone()) { firstFailure = Some(e) }
+                }
+            }
+            if (let Some(e) <- firstFailure) { throw e }
+            ci.diag.EmitCategoryGroup()
+        } finally {
+            option.compileCjd = wasCompileCjd
+            recorder.close()
         }
-        taskQueue.RunAndWaitForAllTasksCompleted()
-        ci.diag.EmitCategoryGroup()
-        option.compileCjd = false
-        ProfileRecorder.Stop("ImportPackages", "ParseAndMergeCjds")
     }
 
     public func MacroExpand(): Bool {
@@ -330,8 +344,17 @@ private class FullCompileStrategyImpl {
 
     public func AddFilesToPackage(pkg: Package, taskResults: ParseTaskResults): Int64 {
         var lineCountOfAddedFiles: Int64 = 0
+        let completed = ArrayList<ParseResult>()
+        var firstFailure: Option<Exception> = None
         for (taskResult in taskResults) {
-            let curResult = taskResult.get()
+            try {
+                completed.add(taskResult.get())
+            } catch (e: Exception) {
+                if (firstFailure.isNone()) { firstFailure = Some(e) }
+            }
+        }
+        if (let Some(e) <- firstFailure) { throw e }
+        for (curResult in completed) {
             let file = curResult[0]
             file.curPackage = Some(pkg)
             file.indexOfPackage = UInt64(pkg.files.size)

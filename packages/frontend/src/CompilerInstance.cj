@@ -1509,9 +1509,17 @@ public class CompilerInstance {
         }
         taskQueue.RunInBackground()
         taskQueue.WaitForAllTasksCompleted()
+        let completed = ArrayList<ArrayList<PendingMangledDecl>>()
+        var firstFailure: Option<Exception> = None
         for (result in taskResults) {
-            mergeMangledDecls(result.get())
+            try {
+                completed.add(result.get())
+            } catch (e: Exception) {
+                if (firstFailure.isNone()) { firstFailure = Some(e) }
+            }
         }
+        if (let Some(e) <- firstFailure) { throw e }
+        for (pending in completed) { mergeMangledDecls(pending) }
         mergeMangledDecls(DoNewMangling(baseMangler, topDecls, start, topDecls.size))
     }
 
