@@ -67,7 +67,8 @@ test('ordinary stdx source selection preserves distinct full sources and actual 
  const env=selectedEnv(workflow('srcbuild-target.yml'));
  const base=workflowSourceSelection(env);assert.equal(base.STDX_REF,'b10784b27a5b3f815c9542d28f3ba02f48db48d5');
  assert.equal(base.TOOLS_REF,'7acd240e273f9e5773611deca29bba3267afd0fd');
- assert.equal(base.CJPM_REF,'2c8a704d7d51e65af2b777e11836aeef66bd8f50');
+ const cjpm=/^CJPM_FORK_REF=([a-f0-9]{40})$/m.exec(fs.readFileSync(path.join(repo,'ci/cjpm_pin.env'),'utf8'))[1];
+ assert.equal(base.CJPM_REF,cjpm);
  console.log('WORKFLOW_PIN_SELECTION_ASSERTION_REACHED',JSON.stringify({tools:base.TOOLS_REF,stdx:base.STDX_REF,cjpm:base.CJPM_REF}));
  const alternative=workflowSourceSelection({...env,CJCJ_SOURCE_SELECTION:JSON.stringify({compiler:JSON.parse(inputs.source_selection).compiler,stdx:{url:'https://example.invalid/stdx.git',tag:'c3066ac097166145765b274d7a4a79e43d70ffc8'}})});
  assert.equal(alternative.STDX_REF,'c3066ac097166145765b274d7a4a79e43d70ffc8');assert.notEqual(alternative.STDX_REF,base.STDX_REF);

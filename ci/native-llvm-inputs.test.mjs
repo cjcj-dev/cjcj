@@ -95,3 +95,16 @@ test('retired environment aliases cannot override the canonical source pair',()=
  assert.equal(rows.CJCJ_NATIVE_LLVM_REF,llvm);assert.equal(rows.CJCJ_NATIVE_RUNTIME_REF,runtime);
  for(const key of Object.keys(retired))assert.equal(Object.hasOwn(rows,key),false,key);
 }));
+
+test('retired aliases alone preserve the default pair through public environment export',()=>fixture(({run,output})=>{
+ const poisoned={NATIVE_LLVM_REF:'f'.repeat(40),NATIVE_RUNTIME_REF:'e'.repeat(40),LLVM_SHA:'d'.repeat(40),
+  RUNTIME_REF:'c'.repeat(40),RUNTIME_GIT_REPOSITORY:'/not-selected',CJCJ_LLVM_RUNTIME_MODE:'private',
+  CJCJ_LLVM_RUNTIME_URL:'file:///not-selected',CJCJ_LLVM_RUNTIME_SHA:'b'.repeat(40),CJCJ_NATIVE_SOURCE_SELECTION:'invalid json'};
+ assert.equal(run(poisoned).status,0);
+ const rows=Object.fromEntries(fs.readFileSync(output,'utf8').trim().split('\n').map(line=>line.split('=')));
+ for(const [file,key,out] of [['llvm_pin.env','LLVM_SHA','CJCJ_NATIVE_LLVM_REF'],['runtime_pin.env','RUNTIME_REF','CJCJ_NATIVE_RUNTIME_REF']]) {
+  const pin=new RegExp('^'+key+'=([a-f0-9]{40})$','m').exec(fs.readFileSync('ci/'+file,'utf8'))[1];
+  assert.equal(rows[out],pin);
+ }
+ for(const key of Object.keys(poisoned))assert.equal(Object.hasOwn(rows,key),false,key);
+}));

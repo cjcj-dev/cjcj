@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {digest} from './bootstrap_store.mjs';
+import {nativeLlvmInputs} from '../native-llvm-inputs.mjs';
 
 function fixture(check, platform = 'linux_x86_64') {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fixed-acquire-'));
@@ -39,7 +40,7 @@ function fixture(check, platform = 'linux_x86_64') {
         [`https://api.github.com/repos/${pin.repository}/releases/assets/${file.asset}`, payloads[file.path]]))));
       return spawnSync(process.execPath, ['--import', transport,
         new URL('./acquire_fixed_tuple.mjs', import.meta.url).pathname, destination, path.join(dir, 'fixed-tools')],
-      {env: {...process.env, FIXED_TRANSPORT: sourceFile, CJCJ_BOOTSTRAP_INPUTS_PIN: pinFile, CJCJ_SRCBUILD_TARGET: {linux_x86_64:'linux-x64',linux_aarch64:'linux-aarch64',darwin_aarch64:'darwin-arm64',darwin_x86_64:'darwin-x64'}[platform], [`LLVM_TUPLE_SUMS_SHA_${platform}`]: sums, ...extra}, encoding: 'utf8'});
+      {env: {...process.env, CJCJ_NATIVE_LLVM_REF:'',CJCJ_NATIVE_RUNTIME_REF:'',CJCJ_RUNTIME_REF_OVERRIDE:'', FIXED_TRANSPORT: sourceFile, CJCJ_BOOTSTRAP_INPUTS_PIN: pinFile, CJCJ_SRCBUILD_TARGET: {linux_x86_64:'linux-x64',linux_aarch64:'linux-aarch64',darwin_aarch64:'darwin-arm64',darwin_x86_64:'darwin-x64'}[platform], [`LLVM_TUPLE_SUMS_SHA_${platform}`]: sums, ...extra}, encoding: 'utf8'});
     };
     check({pins, pin, payloads, reseal, run, destination});
   } finally { fs.rmSync(dir, {recursive: true, force: true}); }
@@ -55,6 +56,12 @@ for (const platform of ['linux_x86_64', 'linux_aarch64', 'darwin_aarch64', 'darw
     console.log(`ASSERT fixed-release-platform ${platform} rc=0 verified bytes`);
   }, platform));
 }
+
+test('fixed release CLI accepts the exported default pair for the historical tuple',()=>fixture(({run,destination,payloads})=>{
+  const result=run(undefined,nativeLlvmInputs({}));
+  assert.equal(result.status,0,result.stderr);
+  assert.equal(fs.readFileSync(path.join(destination,'MANIFEST'),'utf8'),payloads.MANIFEST);
+}));
 
 test('fixed release CLI rejects wrong-platform pin before download', () => fixture(({pin, run, destination}) => {
   pin.platform = 'linux_aarch64';

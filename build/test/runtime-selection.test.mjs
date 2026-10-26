@@ -29,7 +29,9 @@ test('formal loader carries the explicit component pair through handoff and reje
  const run=async label=>{const r=spawnSync(process.execPath,[new URL('../../ci/load_runtime_pin.mjs',import.meta.url).pathname],{env,encoding:'utf8'});
   await fs.writeFile(work+'/'+label+'.json',JSON.stringify({rc:r.status,signal:r.signal,stdout:r.stdout,stderr:r.stderr}));return r;};
  const normal=await run('normal');assert.equal(normal.status,0,normal.stderr);
- await assert.rejects(resolveRuntimeSource({...env,CJCJ_NATIVE_RUNTIME_ARTIFACT:''}),/COMPONENT_SELECTION_REQUIRED/);
+ // A source pair also drives the runtime-only producer, without an SDK artifact.
+ assert.equal((await resolveRuntimeSource({...env,CJCJ_NATIVE_RUNTIME_ARTIFACT:''})).runtimeRef,env.CJCJ_NATIVE_RUNTIME_REF);
+ await assert.rejects(resolveRuntimeSource({CJCJ_NATIVE_RUNTIME_ARTIFACT:'frozen-runtime'}),/COMPONENT_SELECTION_REQUIRED/);
  assert.equal((await resolveRuntimeSource({...env,CJCJ_NATIVE_RUNTIME_ARTIFACT:'frozen-runtime'})).runtimeRef,env.CJCJ_NATIVE_RUNTIME_REF);
  const handed=Object.fromEntries((await fs.readFile(env.GITHUB_ENV,'utf8')).trim().split('\n').map(s=>s.split('=')));
  assert.equal(handed.CJCJ_NATIVE_RUNTIME_REF,env.CJCJ_NATIVE_RUNTIME_REF);

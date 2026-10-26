@@ -191,4 +191,6 @@ if (nativePair) {
 }
 
 }
-if(process.argv[1] && path.resolve(process.argv[1])===fileURLToPath(import.meta.url)) await buildRuntime();
+// zx retains its CLI in argv[1]; the selected script follows it. Imports do
+// not carry this module's path and must not start a second production entry.
+if(process.argv.slice(1).some(arg=>path.resolve(arg)===fileURLToPath(import.meta.url))) await buildRuntime();

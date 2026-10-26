@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import {nativeLlvmInputs} from '../native-llvm-inputs.mjs';
 
 export const tuplePlatforms = ['linux_x86_64', 'linux_aarch64', 'darwin_x86_64', 'darwin_aarch64'];
 export function nativeTuplePlatform(env = process.env) {
@@ -38,13 +39,15 @@ export function verifyTupleSources(tuple, env = process.env) {
   const text = fs.readFileSync(path.join(tuple, 'MANIFEST'), 'utf8');
   const values = key => text.split('\n').filter(line => line.startsWith(key+'=')).map(line => line.slice(key.length+1));
   const llvm = values('LLVM_SHA'), runtime = values('RUNTIME_REF');
-  // Historical pinned tuples have no paired-runtime record. Keep that path for
-  // the historical default only; an explicit new pair must never inherit it.
-  if (!env.CJCJ_NATIVE_RUNTIME_REF && !env.CJCJ_RUNTIME_REF_OVERRIDE && !runtime.some(Boolean)) return;
-  const pin = (file,key) => fs.readFileSync(new URL('../'+file, import.meta.url),'utf8')
-    .match(new RegExp('^'+key+'=([a-f0-9]{40})$','m'))?.[1];
-  const wantedLlvm = env.CJCJ_NATIVE_LLVM_REF || pin('llvm_pin.env','LLVM_SHA');
-  const wantedRuntime = env.CJCJ_NATIVE_RUNTIME_REF || pin('runtime_pin.env','RUNTIME_REF');
+  const selected = nativeLlvmInputs(env), defaults = nativeLlvmInputs({});
+  const wantedLlvm = selected.CJCJ_NATIVE_LLVM_REF;
+  const wantedRuntime = env.CJCJ_RUNTIME_REF_OVERRIDE || selected.CJCJ_NATIVE_RUNTIME_REF;
+  // The normal environment handoff now exports the default pair too. That
+  // transport does not turn the historical default tuple into a new producer.
+  // A different selected pair still requires both identities in its manifest.
+  if (!env.CJCJ_RUNTIME_REF_OVERRIDE && !runtime.some(Boolean)
+      && wantedLlvm === defaults.CJCJ_NATIVE_LLVM_REF
+      && wantedRuntime === defaults.CJCJ_NATIVE_RUNTIME_REF) return;
   if (![wantedLlvm,wantedRuntime].every(value => /^[a-f0-9]{40}$/.test(value || ''))
       || llvm.length !== 1 || runtime.length !== 1
       || llvm[0] !== wantedLlvm || runtime[0] !== wantedRuntime) {
