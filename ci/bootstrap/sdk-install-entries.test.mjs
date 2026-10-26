@@ -77,7 +77,7 @@ set_target_properties(compiler PROPERTIES RUNTIME_OUTPUT_DIRECTORY "\${SDK}/bin"
  const argumentsToKeep=['space value','quote"value','back\\slash'];
  const results=[];
  const env=()=>({...process.env,CANGJIE_HOME:path.join(work,'wrong SDK'),[loader]:path.join(sdk,'runtime'),
-  PATH:path.join(sdk,'bin')+path.delimiter+(process.env.PATH||'')});
+  PATH:[path.join(sdk,'bin'),...(windows?[path.join(sdk,'runtime')]:[]),process.env.PATH||''].join(path.delimiter)});
  async function check(name,form,retained=name){
   const basename=name+exe,publicFile=path.join(sdk,'bin',basename);
   const invocation=form==='PATH'?basename:form==='relative'?'.'+path.sep+path.join('bin',basename):publicFile;
@@ -96,6 +96,12 @@ set_target_properties(compiler PROPERTIES RUNTIME_OUTPUT_DIRECTORY "\${SDK}/bin"
  }
  for(const name of ['cjc','cjc-frontend'])for(const form of ['absolute','relative','PATH'])await check(name,form);
  if(!windows){await fs.symlink('cjc',path.join(sdk,'bin','cjc-alias'));await check('cjc-alias','PATH','cjc');}
+ const raw=run([path.join(sdk,'libexec/compiler','cjc'+exe)],{cwd:work,
+  env:{...env(),CANGJIE_HOME:sdk,[loader]:path.join(sdk,'.compiler-exec/runtime')+(windows?path.delimiter+(process.env.PATH||''):'')}});
+ results.push({name:'raw-missing-relative-runtime',rc:raw.status,signal:raw.signal,stdout:raw.stdout,stderr:raw.stderr});
+ await fs.writeFile(path.join(work,'consumer-results.json'),JSON.stringify(results,null,2));
+ console.log('RAW_COMPILER_RELATIVE_MISSING_TARGET_REACHED',raw.status,raw.stderr.trim());
+ assert.equal(raw.status,49,raw.stderr);assert.match(raw.stderr,/COMPILER_RELATIVE_RESOURCE_MISSING/);
  // Missing compiler-relative resources must still reject even with valid HOME.
  const runtime=path.join(sdk,'runtime');await fs.rename(runtime,runtime+'.retained');
  try{
