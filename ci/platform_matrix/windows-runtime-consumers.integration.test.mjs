@@ -53,7 +53,9 @@ globalThis.$=()=>async(strings,...values)=>{
 };`);
  const env={...process.env,PLATFORM_CI_ROOT:output,RUNTIME_SOURCE:source,WINDOWS_RUNTIME_EVIDENCE:path.join(output,'windows-native'),CONSUMER_CALLS:calls};
  function run(entry,extra=[],overrides={}) {
-  const argv=[process.execPath,zxTool.cli,'--eval',`await import(${JSON.stringify(pathToFileURL(hooks).href)});await import(${JSON.stringify(pathToFileURL(path.resolve('ci/platform_matrix/'+entry)).href)});`,...extra];
+  const argv=entry==='windows_runtime_package.mjs'
+   ? [process.execPath,zxTool.cli,'--eval',`await import(${JSON.stringify(pathToFileURL(hooks).href)});await import(${JSON.stringify(pathToFileURL(path.resolve('ci/platform_matrix/'+entry)).href)});`,...extra]
+   : [process.execPath,'--import',hooks,path.resolve('ci/platform_matrix/'+entry),...extra];
   const r=spawnSync(argv[0],argv.slice(1),{env:{...env,...overrides},encoding:'utf8',timeout:30000});
   put(path.join(root,'entry.stdout'),r.stdout||'');put(path.join(root,'entry.stderr'),r.stderr||'');
   json(path.join(root,'entry-command.json'),{argv,rc:r.status,signal:r.signal,error:r.error?.message});return r;
