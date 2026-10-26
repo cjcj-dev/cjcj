@@ -148,6 +148,79 @@ main(): Int64 {
   requireLine(expandedChain,'MACRO_HELPER_EXECUTED value=42');
   requireLine(await invoke('chain-run',[chainBin]),'MACRO_CHAIN_VALUE value=42');
 
+  if(native.os==='linux') {
+   // Keep the static chain above. This separate public producer chain must
+   // contain real DT_NEEDED edges; it cannot pass by folding dependencies into
+   // the macro. Explicit $ORIGIN locates only these private CJ libraries. The
+   // target SDK runtime path must still come from the compiler's macro link.
+   const privateRpath=['--link-option','--disable-new-dtags','--link-option','-rpath','--link-option','$ORIGIN'];
+   const dynLeaf=await source('dynamic leaf.cj',`package sdkdynleaf
+public func dynamicLeafValue(): Int64 { 40 }
+`);
+   const dynHelper=await source('dynamic helper.cj',`package sdkdynhelper
+import sdkdynleaf.*
+public func dynamicHelperValue(): Int64 { dynamicLeafValue() + 2 }
+`);
+   const dynLeafLib=path.join(work,'libsdkdynleaf.so');
+   const dynHelperLib=path.join(work,'libsdkdynhelper.so');
+   await compile('dynamic-leaf-compile',dynLeaf,dynLeafLib,
+     ['--output-type=dylib','--link-option','-soname','--link-option','libsdkdynleaf.so',...privateRpath]);
+   await compile('dynamic-helper-compile',dynHelper,dynHelperLib,
+     ['--output-type=dylib','--import-path',work,'-L',work,'-lsdkdynleaf',
+      '--link-option','-soname','--link-option','libsdkdynhelper.so',...privateRpath]);
+   async function requireNeeded(name,file,dependency) {
+    const row=await invoke(name,['readelf','-d',file]);
+    const needed=[...row.stdout.matchAll(/\(NEEDED\).*\[([^\]]+)\]/g)].map(match=>match[1]);
+    if(!needed.includes(dependency))throw Error('MACRO_DYNAMIC_DEPENDENCY_MISSING '+dependency);
+    return row;
+   }
+   await requireNeeded('dynamic-helper-needed',dynHelperLib,'libsdkdynleaf.so');
+   const dynControl=await source('dynamic control.cj',`import sdkdynhelper.*
+main(): Int64 {
+    if (dynamicHelperValue() != 42) { return 1 }
+    println("DYNAMIC_ORDINARY_CONTROL value=42")
+    return 0
+}
+`);
+   const dynControlBin=path.join(work,'dynamic control');
+   await compile('dynamic-control-compile',dynControl,dynControlBin,
+     ['--import-path',work,'-L',work,'-lsdkdynhelper','-lsdkdynleaf',...privateRpath]);
+   requireLine(await invoke('dynamic-control-run',[dynControlBin]),'DYNAMIC_ORDINARY_CONTROL value=42');
+   const dynDef=await source('dynamic macro.cj',`macro package sdkdynamic
+import std.ast.*
+import std.time.*
+import sdkdynhelper.*
+public macro Dynamic(input: Tokens): Tokens {
+    if (DateTime.nowUTC().year < 1970) { throw Exception("DYNAMIC_STD_TIME_VALUE") }
+    if (dynamicHelperValue() != 42) { throw Exception("DYNAMIC_CJ_DEPENDENCY_VALUE") }
+    println("MACRO_DYNAMIC_DEPENDENCIES_EXECUTED value=42")
+    input
+}
+`);
+   await invoke('dynamic-macro-definition',[cjc,'--compile-macro',dynDef,'--import-path',work,
+     '-L',work,'-lsdkdynhelper',...privateRpath]);
+   const dynMacroLib=path.join(work,'lib-macro_sdkdynamic.so');
+   await artifact(dynMacroLib);
+   const dynamic=await requireNeeded('dynamic-macro-needed',dynMacroLib,'libsdkdynhelper.so');
+   const paths=dynamic.stdout.match(/\(RPATH\).*\[([^\]]+)\]/)?.[1]?.split(':')??[];
+   if(dynamic.stdout.includes('(RUNPATH)')||!paths.includes('$ORIGIN')||
+      !paths.some(item=>path.resolve(item)===path.join(sdk,'runtime','lib',native.tuple)))
+     throw Error('MACRO_DYNAMIC_RUNTIME_AND_PRIVATE_RPATH_MISSING');
+   const dynUse=await source('dynamic use.cj',`import sdkdynamic.*
+@Dynamic
+func value(): Int64 { 42 }
+main(): Int64 {
+    if (value() != 42) { return 1 }
+    println("MACRO_DYNAMIC_TARGET value=42")
+    return 0
+}
+`);
+   const dynBin=path.join(work,'dynamic use');
+   requireLine(await compile('dynamic-macro-expansion',dynUse,dynBin,['--import-path',work]),
+     'MACRO_DYNAMIC_DEPENDENCIES_EXECUTED value=42');
+   requireLine(await invoke('dynamic-macro-run',[dynBin]),'MACRO_DYNAMIC_TARGET value=42');
+  }
+
   // R stdlib/doc/libs/std_en/deriving/deriving_samples/deriving_user_guide.md.
   // The empty-class case consumes deriving.builtins/tostring.cj's real literal.
   // Its pre-assertion output and dedicated rc 42 distinguish the planned semantic
