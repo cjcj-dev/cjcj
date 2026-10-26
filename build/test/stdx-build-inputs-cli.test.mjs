@@ -223,8 +223,8 @@ add_custom_target(cj_entry ALL COMMAND`).replace(
   assert.notEqual(fs.readFileSync(consumer, 'utf8'), beforeConsumer, 'native reconfigure actually ran');
   assert.deepEqual(fs.readFileSync(path.join(f.sdk, STDX_BUILD_INPUTS)),beforeInstall,
     'wrong generated graph cannot replace the previously published install facts');
-  const latestBuild=JSON.parse(fs.readFileSync(path.join(f.root,'build/stdx/build-inputs.json')));
-  assert.equal(latestBuild.install,undefined,'wrong graph cannot complete the current installation');
+  assert.equal(fs.existsSync(path.join(f.root,'build/stdx/build-inputs.json')),false,
+    'wrong graph cannot complete the current build or installation');
   console.log('STDX_GENERATED_RUNTIME_REJECTION_ASSERT_REACHED');
   // Restore this controlled graph fault; the normal producer regenerates it.
   fs.writeFileSync(graph, originalGraph);
