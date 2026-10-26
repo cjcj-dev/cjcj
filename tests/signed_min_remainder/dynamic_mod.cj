@@ -1,5 +1,7 @@
 package signed_min_dynamic_mod
 
+import std.convert.*
+
 main(args: Array<String>): Int64 {
     if (args.size != 3) { return 2 }
     let width = args[0]

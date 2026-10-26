@@ -29,3 +29,7 @@ The original 700a fixture ended with the Unit-typed resource try in an Int64
 return-expression position and was correctly rejected before execution. Its
 first failure remains in the v104 evidence; correcting that input does not
 change the compiler's Unit rule or establish that the generic-bound path passes.
+
+The argv-driven integer consumers explicitly import `std.convert.*`: the fixed
+stdlib defines `Int64.parse` as an extension in that package, not in core. This
+keeps runtime input parsing and every original mechanism assertion unchanged.

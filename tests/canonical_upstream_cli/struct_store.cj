@@ -1,5 +1,7 @@
 package canonical_struct_store
 
+import std.convert.*
+
 struct Inner {
     public var value: Int64
     public init(value: Int64) { this.value = value }

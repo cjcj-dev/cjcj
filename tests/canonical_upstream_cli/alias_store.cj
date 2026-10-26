@@ -1,5 +1,7 @@
 package canonical_alias_store
 
+import std.convert.*
+
 class Leaf {
     public var value: Int64 = 3
     public func replace(value: Int64): Unit { this.value = value }

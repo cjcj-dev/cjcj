@@ -1,5 +1,7 @@
 package canonical_array_copy
 
+import std.convert.*
+
 class Cell {
     public let value: Int64
     public init(value: Int64) { this.value = value }
