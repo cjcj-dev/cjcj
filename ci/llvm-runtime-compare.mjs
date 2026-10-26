@@ -31,7 +31,7 @@ for (const row of table.rows) {
     console.log(`ASSERT_REACHED streams branch=${row.kind}:${row.line} input=${index}`);
     const explicit=input.env[table.mode]==='private';
     const sha=input.env[table.shaVariable];
-    const removedSelection=input.env[table.mode] && !explicit
+    const removedSelection=!explicit && (input.env[table.mode] || Object.hasOwn(input.env,table.urlVariable) || Object.hasOwn(input.env,table.shaVariable))
       || explicit && (input.env[table.urlVariable]!==table.privateEnv[table.urlVariable]
         || Object.hasOwn(input.env,'RUNTIME_REF') || Object.hasOwn(input.env,'RUNTIME_SRC_URL'));
     if(explicit&&!/^[a-f0-9]{40}$/.test(sha||'')) {

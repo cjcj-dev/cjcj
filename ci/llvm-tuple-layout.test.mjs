@@ -82,7 +82,8 @@ if (process.env.TUPLE_DIFFERENTIAL === '1') test('tuple source-derived full tabl
     delete env.BASH_ENV;
     const expand = value => replacements[value] || value;
     for (const [key, value] of Object.entries(input.env || {})) {
-      if (value === null) delete env[key]; else env[key] = expand(value);
+      const selectedKey=key==='LLVM_SHA'?'CJCJ_NATIVE_LLVM_REF':key;
+      if (value === null) delete env[selectedKey]; else env[selectedKey] = expand(value);
     }
     const args = (input.args || ['$DEPOT']).map(expand);
     const depotRoot = args[0] || env.CJCJ_LLVM_DEPOT_ROOT || '/root/llvmdepot';
@@ -124,7 +125,12 @@ if (process.env.TUPLE_DIFFERENTIAL === '1') test('tuple source-derived full tabl
     const arms = {};
     for (const [name, argv] of [['old', ['bash', old, ...args]], ['new', ['npx', '--yes', 'zx@8', product, ...args]]]) {
       prepare();
-      const result = command(argv, {env, cwd: identity.REPO_ROOT});
+      // The unchanged Bash witness consumes its original name; the current
+      // public publisher consumes the same selected value under canonical N.
+      const executionEnv={...env};
+      delete executionEnv.LLVM_SHA;
+      if(name==='old'&&Object.hasOwn(env,'CJCJ_NATIVE_LLVM_REF'))executionEnv.LLVM_SHA=env.CJCJ_NATIVE_LLVM_REF;
+      const result = command(argv, {env:executionEnv, cwd: identity.REPO_ROOT});
       fs.writeFileSync(path.join(work, `${name}.stdout`), result.stdout);
       fs.writeFileSync(path.join(work, `${name}.stderr`), result.stderr);
       const trace = fs.existsSync(path.join(work, 'argv.json')) ? JSON.parse(fs.readFileSync(path.join(work, 'argv.json'), 'utf8')) : null;

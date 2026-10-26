@@ -1,13 +1,15 @@
-#!/usr/bin/env node
+#!/usr/bin/env zx
 // Public tuple/Git consumer regression. Requires the real fixed runtime mirror;
 // the first CMake invocation returns 86, so this never builds LLVM.
 import fs from 'node:fs';
 import path from 'node:path';
+import {fileURLToPath} from 'node:url';
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {readSourcePins} from './native-llvm-inputs.mjs';
 const repo=path.resolve(import.meta.dirname,'..'), options={};
-for(let i=2;i<process.argv.length;i+=2){const key=process.argv[i];if(!['--work','--runtime-mirror','--only','--skip'].includes(key)||!process.argv[i+1])throw Error('expected --work DIR --runtime-mirror GIT [--only CASE|--skip CASE]');options[key.slice(2)]=process.argv[i+1];}
+const entryIndex=process.argv.findIndex((arg,i)=>i>0&&path.resolve(arg)===fileURLToPath(import.meta.url));
+for(let i=entryIndex+1;i<process.argv.length;i+=2){const key=process.argv[i];if(!['--work','--runtime-mirror','--only','--skip'].includes(key)||!process.argv[i+1])throw Error('expected --work DIR --runtime-mirror GIT [--only CASE|--skip CASE]');options[key.slice(2)]=process.argv[i+1];}
 assert.ok(options.work&&options['runtime-mirror'],'explicit work and runtime mirror required');
 const work=path.resolve(options.work),mirror=fs.realpathSync(options['runtime-mirror']);
 fs.mkdirSync(work);const records=[];
