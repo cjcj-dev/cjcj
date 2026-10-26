@@ -87,8 +87,8 @@ jobs:
       - uses: actions/checkout@v7
       - name: Validate native source pair before starting producers
         env:
-          NATIVE_LLVM_REF: ${{ inputs.llvm_ref }}
-          NATIVE_RUNTIME_REF: ${{ inputs.runtime_ref }}
+          CJCJ_NATIVE_LLVM_REF: ${{ inputs.llvm_ref }}
+          CJCJ_NATIVE_RUNTIME_REF: ${{ inputs.runtime_ref }}
         run: node ci/native-llvm-inputs.mjs
       - name: Select the requested tuples
         id: select
@@ -113,8 +113,8 @@ jobs:
       - name: Load native LLVM source pair
         id: llvm-pin
         env:
-          NATIVE_LLVM_REF: ${{ inputs.llvm_ref }}
-          NATIVE_RUNTIME_REF: ${{ inputs.runtime_ref }}
+          CJCJ_NATIVE_LLVM_REF: ${{ inputs.llvm_ref }}
+          CJCJ_NATIVE_RUNTIME_REF: ${{ inputs.runtime_ref }}
         run: node ci/native-llvm-inputs.mjs
 
       # `rebuild` salts the key with the run id so the restore misses and the
@@ -169,9 +169,9 @@ jobs:
         run: |
           git init llvm-fork
           git -C llvm-fork remote add origin "$LLVM_URL"
-          git -C llvm-fork fetch --depth=1 origin "$LLVM_SHA"
+          git -C llvm-fork fetch --depth=1 origin "$CJCJ_NATIVE_LLVM_REF"
           git -C llvm-fork checkout --detach FETCH_HEAD
-          test "$(git -C llvm-fork rev-parse HEAD)" = "$LLVM_SHA"
+          test "$(git -C llvm-fork rev-parse HEAD)" = "$CJCJ_NATIVE_LLVM_REF"
 
           git clone --filter=blob:none --no-checkout "$CANGJIE_COMPILER_URL" cangjie-compiler
           git -C cangjie-compiler sparse-checkout set schema
@@ -231,13 +231,13 @@ jobs:
           fi
           {
             printf 'PLATFORM=%s\n' '${{ matrix.platform }}'
-            printf 'LLVM_SHA=%s\n' "$LLVM_SHA"
+            printf 'LLVM_SHA=%s\n' "$CJCJ_NATIVE_LLVM_REF"
             printf 'CANGJIE_COMPILER_SHA=%s\n' "$CANGJIE_COMPILER_SHA"
             printf 'FLATBUFFERS_SHA=%s\n' "$FLATBUFFERS_SHA"
             printf 'LLC_SHA256=%s\n' "$llc_sha"
             printf 'OPT_SHA256=%s\n' "$opt_sha"
             printf 'LLD_TOOL=%s\n' "$lld_tool"
-            printf 'LLD_SOURCE=%s\n' "tuple:$LLVM_SHA"
+            printf 'LLD_SOURCE=%s\n' "tuple:$CJCJ_NATIVE_LLVM_REF"
             printf 'LLD_VERSION=%s\n' "$lld_version"
             printf 'LLD_SHA256=%s\n' "$lld_sha"
           } > "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
@@ -268,7 +268,7 @@ jobs:
           for tool in llc opt; do
             version="$(llc-build/bin/$tool --version | awk '/LLVM version / {sub(/^[[:space:]]+/, ""); print; found=1; exit} END {if (!found) exit 1}')"
             prefix=$(printf '%s' "$tool" | tr '[:lower:]' '[:upper:]')
-            printf '%s_SOURCE=tuple:%s\n%s_VERSION=%s\n' "$prefix" "$LLVM_SHA" "$prefix" "$version" >> \
+            printf '%s_SOURCE=tuple:%s\n%s_VERSION=%s\n' "$prefix" "$CJCJ_NATIVE_LLVM_REF" "$prefix" "$version" >> \
               "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
           done
 
@@ -348,7 +348,7 @@ jobs:
           fi
           grep -Fx "PLATFORM=${{ matrix.platform }}" \
             "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
-          grep -Fx "LLVM_SHA=$LLVM_SHA" \
+          grep -Fx "LLVM_SHA=$CJCJ_NATIVE_LLVM_REF" \
             "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
           grep -Fx "CANGJIE_COMPILER_SHA=$CANGJIE_COMPILER_SHA" \
             "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
@@ -360,7 +360,7 @@ jobs:
             "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
           grep -Fx "LLD_TOOL=$lld_tool" \
             "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
-          grep -Fx "LLD_SOURCE=tuple:$LLVM_SHA" \
+          grep -Fx "LLD_SOURCE=tuple:$CJCJ_NATIVE_LLVM_REF" \
             "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
           grep -Fx "LLD_VERSION=$lld_version" \
             "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
@@ -428,8 +428,8 @@ jobs:
           path: fixed-toolchain/${{ matrix.platform }}
       - name: Load native LLVM source pair
         env:
-          NATIVE_LLVM_REF: ${{ inputs.llvm_ref }}
-          NATIVE_RUNTIME_REF: ${{ inputs.runtime_ref }}
+          CJCJ_NATIVE_LLVM_REF: ${{ inputs.llvm_ref }}
+          CJCJ_NATIVE_RUNTIME_REF: ${{ inputs.runtime_ref }}
         run: node ci/native-llvm-inputs.mjs
       - name: Publish the shared ten-payload layout
         shell: bash
@@ -437,9 +437,9 @@ jobs:
           set -euo pipefail
           REPO_ROOT="$GITHUB_WORKSPACE"
           CJCJ_FIXED_LLVM_DIR="$GITHUB_WORKSPACE/fixed-toolchain/${{ matrix.platform }}"
-          REPO_ROOT="$REPO_ROOT" CJCJ_FIXED_LLVM_DIR="$CJCJ_FIXED_LLVM_DIR" LLVM_SHA="$LLVM_SHA" CANGJIE_COMPILER_SHA="$CANGJIE_COMPILER_SHA" \
+          REPO_ROOT="$REPO_ROOT" CJCJ_FIXED_LLVM_DIR="$CJCJ_FIXED_LLVM_DIR" CJCJ_NATIVE_LLVM_REF="$CJCJ_NATIVE_LLVM_REF" CANGJIE_COMPILER_SHA="$CANGJIE_COMPILER_SHA" \
             npx --yes zx@8 ci/llvm-tuple-layout.mjs "$RUNNER_TEMP/llvm-tuple"
-          tuple="$RUNNER_TEMP/llvm-tuple/$LLVM_SHA/$CANGJIE_COMPILER_SHA"
+          tuple="$RUNNER_TEMP/llvm-tuple/$CJCJ_NATIVE_LLVM_REF/$CANGJIE_COMPILER_SHA"
           node ci/release/verify-tuple-payloads.mjs "$tuple" | tee -a "$GITHUB_STEP_SUMMARY"
           echo "STATIC_TUPLE=$tuple" >> "$GITHUB_ENV"
       - uses: actions/upload-artifact@v7

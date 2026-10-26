@@ -21,24 +21,24 @@ test('explicit native host is selected before freeze and old host steps retain t
    assert.match(steps[at(name)].if,/inputs.native_runtime_artifact == ''/);
  assert.equal(workflow.jobs['fixed-llvm'].with.llvm_ref,'${{ inputs.native_llvm_ref }}');
  assert.equal(workflow.jobs['fixed-llvm'].with.runtime_ref,'${{ inputs.native_runtime_ref }}');
- assert.equal(steps[select].env.CJCJ_NATIVE_SOURCE_SELECTION,'${{ inputs.native_source_selection }}');
+ assert.equal(steps[select].env?.CJCJ_NATIVE_SOURCE_SELECTION,undefined);
  const configure=steps.find(step=>step.name==='Configure native bootstrap from actual repositories and target installations');
- assert.equal(configure.env.CJCJ_NATIVE_SOURCE_SELECTION,steps[select].env.CJCJ_NATIVE_SOURCE_SELECTION);
+ assert.equal(configure.env?.CJCJ_NATIVE_SOURCE_SELECTION,undefined);
  for(const name of ['srcbuild.yml','release.yml','release-matrix.yml','arm-soak.yml']){
   const outer=load(await fs.readFile(new URL('../../.github/workflows/'+name,import.meta.url),'utf8'));
   for(const job of Object.values(outer.jobs))if(job.with?.native_inputs_artifact)
-   assert.equal(job.with.native_source_selection,'${{ inputs.native_source_selection }}',name);
+   assert.equal(job.with.native_source_selection,undefined,name);
  }
 });
 test('explicit native source selection retains default pins and does not relabel the N/R/H pair',()=>{
  const defaults=nativeSourceSelection({},null);
  assert.equal(defaults.explicitAst,false);assert.deepEqual(defaults.selection.ast,{repository:NATIVE_REPOSITORIES.ast,commit:FIXED_INPUTS.compiler});
  const pair={llvm:'a'.repeat(40),runtime:'b'.repeat(40)},ast={repository:'file:///actual/transferred/source.git',commit:'f07c55738c12c154160c313c630a42a73a51025d'};
- const selected=nativeSourceSelection({CJCJ_NATIVE_SOURCE_SELECTION:JSON.stringify({ast})},pair);
+ const selected=nativeSourceSelection({},pair,{ast});
  assert.deepEqual(selected.selection.ast,ast);assert.equal(selected.explicitAst,true);
  assert.equal(selected.selection.llvm.commit,pair.llvm);assert.equal(selected.selection.runtime.commit,pair.runtime);
  for(const invalid of [{ast:null},{ast:{commit:ast.commit}},{llvm:ast},{unrecognized:ast}])
-  assert.throws(()=>nativeSourceSelection({CJCJ_NATIVE_SOURCE_SELECTION:JSON.stringify(invalid)},pair),/GHA_NATIVE_SOURCE_SELECTION/);
+  assert.throws(()=>nativeSourceSelection({},pair,invalid),/GHA_NATIVE_SOURCE_SELECTION/);
 });
 test('formal native configure rejects invalid source choices before source transport or SDK preparation',async()=>{
  await fs.mkdir(root,{recursive:true});const work=await fs.mkdtemp(path.join(root,'native-source-rejection-'));
@@ -47,12 +47,13 @@ test('formal native configure rejects invalid source choices before source trans
   CJCJ_NATIVE_INPUT_ROOT:work+'/inputs',CJCJ_BOOTSTRAP_BASE:work+'/unavailable-host'};
  for(const key of ['CJCJ_NATIVE_LLVM_REF','CJCJ_NATIVE_RUNTIME_REF','CJCJ_NATIVE_RUNTIME_INSTALL'])delete env[key];
  const records=[];
- for(const choice of [{ast:null},{ast:{repository:'file:///absent',commit:'short'}},{unknown:{}}]){
+ for(const choice of [{compiler:null},{compiler:{url:'file:///absent',tag:''}},{unknown:{}}]){
+  await fs.mkdir(env.CANGJIE_WORKSPACE,{recursive:true});await fs.writeFile(env.CANGJIE_WORKSPACE+'/.source-selection.json',JSON.stringify(choice));
   const argv=[new URL('./configure-gha-inputs.mjs',import.meta.url).pathname];
-  const r=spawnSync(process.execPath,argv,{env:{...env,CJCJ_NATIVE_SOURCE_SELECTION:JSON.stringify(choice)},encoding:'utf8'});
+  const r=spawnSync(process.execPath,argv,{env,encoding:'utf8'});
   records.push({argv,choice,rc:r.status,signal:r.signal,stdout:r.stdout,stderr:r.stderr});
   await fs.writeFile(work+'/commands.json',JSON.stringify(records,null,2));
-  assert.equal(r.status,1);assert.match(r.stderr,/GHA_NATIVE_SOURCE_SELECTION/);
+  assert.equal(r.status,1);assert.match(r.stderr,/invalid .*source-selection/);
   assert.equal(await fs.stat(work+'/workspace/native-sources').then(()=>true,()=>false),false);
  }
 });
@@ -112,7 +113,7 @@ test('formal host entry freezes the actual complete H and selected target pair, 
  const downstream=run(process.execPath,[new URL('../load_runtime_pin.mjs',import.meta.url).pathname],{...env,...exported});
  await fs.writeFile(work+'/loader-command.json',JSON.stringify({rc:downstream.status,signal:downstream.signal,stdout:downstream.stdout,stderr:downstream.stderr}));
  assert.equal(downstream.status,0,downstream.stderr);
- assert.match(await fs.readFile(env.GITHUB_ENV,'utf8'),new RegExp('^RUNTIME_REF='+selectedR+'$','m'));
+ assert.match(await fs.readFile(env.GITHUB_ENV,'utf8'),new RegExp('^CJCJ_NATIVE_RUNTIME_REF='+selectedR+'$','m'));
  assert.doesNotMatch(await fs.readFile(env.GITHUB_ENV,'utf8'),/CJCJ_ALLOW_RUNTIME_OVERRIDE=true/);
 });
 

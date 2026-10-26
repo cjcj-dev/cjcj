@@ -7,7 +7,7 @@ import {execute} from './sdk-io.mjs';
 import {sdkPlatform} from './sdk-platform.mjs';
 import {nativeSymbolRows} from './std-runtime-colour.mjs';
 export async function verifyBootstrapRuntimeSdk(sdk,tuple,env=process.env,sourceRoot){
- const selection=await resolveRuntimeSource(env),original=verifyRuntime({...env,RUNTIME_REF:selection.runtimeRef});
+ const selection=await resolveRuntimeSource(env),original=verifyRuntime({...env,CJCJ_NATIVE_RUNTIME_REF:selection.runtimeRef});
  const native=sdkPlatform(tuple.replace(/_cjnative$/,''));
  if(sourceRoot){const r=await execute('git',['-C',sourceRoot,'rev-parse','HEAD']);
   if(r.stdout.trim()!==selection.runtimeRef)throw new Error('BOOTSTRAP_RUNTIME_SOURCE_MISMATCH');}

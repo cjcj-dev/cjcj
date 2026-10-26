@@ -83,7 +83,7 @@ async function fixture() {
     const result = spawnSync(process.execPath, [entry], {encoding:'utf8',env:{...process.env,
       NATIVE_SDK_ARTIFACT_DIR:root+'/artifact',NATIVE_SDK_INSTALL_DIR:root+'/install-'+label,
       RELEASE_PLATFORM:'linux-x64',RELEASE_KEY:'linux-x64',CJCJ_NATIVE_SDK_VERSION:'fixture',
-      CJCJ_RELEASE_SOURCE_SHA:sourceSha,RUNTIME_REF:runtimeRef,FINAL_STD_DIR:root+'/std',RELEASE_DIST:root+'/dist-'+label}});
+      CJCJ_RELEASE_SOURCE_SHA:sourceSha,CJCJ_NATIVE_RUNTIME_REF:runtimeRef,FINAL_STD_DIR:root+'/std',RELEASE_DIST:root+'/dist-'+label}});
     await fs.writeFile(root+'/'+label+'.stdout',result.stdout);await fs.writeFile(root+'/'+label+'.stderr',result.stderr);
     await fs.writeFile(root+'/'+label+'.rc.json',JSON.stringify({rc:result.status,signal:result.signal}));
     console.log(`NATIVE_RELEASE_CLI label=${label} rc=${result.status} evidence=${root}`);return result;

@@ -36,13 +36,13 @@ jobs:
         if: matrix.build_runtime
         with:
           repository: cjcj-dev/cangjie-runtime
-          ref: ${{ env.RUNTIME_REF }}
+          ref: ${{ env.CJCJ_NATIVE_RUNTIME_REF }}
           path: runtime-source
       - uses: ./.github/actions/sccache
         with:
           component: darwin-consumer
           platform: ${{ matrix.platform }}
-          pin: ${{ env.RUNTIME_REF }}
+          pin: ${{ env.CJCJ_NATIVE_RUNTIME_REF }}
           cache-size: 1G
       - name: Build or acquire native inputs and consume their actual loaded libraries
         env:

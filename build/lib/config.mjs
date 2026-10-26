@@ -73,7 +73,7 @@ export function resolveOfficialSdkRoot(value = process.env.CJCJ_OFFICIAL_SDK_ROO
   return absolute(value);
 }
 
-export function makeRepos({globalTag, overrides = {}} = {}) {
+export function makeRepos({globalTag, overrides = {}, env=process.env, nativeSelection} = {}) {
   if (globalTag !== undefined && !String(globalTag).trim()) throw new ConfigError('empty global tag');
   const pins = Object.fromEntries((fs.readFileSync(new URL('../../ci/runtime_pin.env', import.meta.url), 'utf8')+'\n'+fs.readFileSync(new URL('../../ci/source_pin.env', import.meta.url), 'utf8')+'\n'+fs.readFileSync(new URL('../../ci/cjpm_pin.env', import.meta.url),'utf8'))
     .split(/\r?\n/).filter(line => line && !line.startsWith('#')).map(line => {
@@ -82,11 +82,14 @@ export function makeRepos({globalTag, overrides = {}} = {}) {
       return [line.slice(0, separator), line.slice(separator + 1)];
     }));
   pins.CJPM_REF=pins.CJPM_FORK_REF;pins.CJPM_SRC_URL=pins.CJPM_FORK_URL;
-  const pair=process.env.CJCJ_NATIVE_LLVM_REF||process.env.CJCJ_NATIVE_RUNTIME_REF
-    ? {llvm:process.env.CJCJ_NATIVE_LLVM_REF,runtime:process.env.CJCJ_NATIVE_RUNTIME_REF}:null;
+  const pair=env.CJCJ_NATIVE_LLVM_REF||env.CJCJ_NATIVE_RUNTIME_REF
+    ? {llvm:env.CJCJ_NATIVE_LLVM_REF,runtime:env.CJCJ_NATIVE_RUNTIME_REF}:null;
   if(pair&&![pair.llvm,pair.runtime].every(value=>/^[a-f0-9]{40}$/.test(value??'')))throw new ConfigError('NATIVE_RUNTIME_EXPLICIT_PAIR_REQUIRED');
-  if(process.env.CJCJ_NATIVE_RUNTIME_INSTALL&&!pair)throw new ConfigError('NATIVE_RUNTIME_EXPLICIT_PAIR_REQUIRED');
-  const native=nativeSourceSelection(process.env,pair).selection;
+  if(env.CJCJ_NATIVE_RUNTIME_INSTALL&&!pair)throw new ConfigError('NATIVE_RUNTIME_EXPLICIT_PAIR_REQUIRED');
+  const selected=Object.fromEntries(['llvm','runtime'].filter(name=>overrides[name]?.url)
+    .map(name=>[name,{repository:overrides[name].url,commit:pair?.[name]}]));
+  const native=nativeSelection || nativeSourceSelection(env,pair,pair?selected:{}).selection;
+  if(pair&&['llvm','runtime'].some(name=>native[name]?.commit!==pair[name]))throw new ConfigError('NATIVE_COMPONENT_SOURCE_CONFLICT');
   pins.LLVM_REF=native.llvm.commit;pins.LLVM_SRC_URL=native.llvm.repository;
   if(pair){pins.RUNTIME_REF=native.runtime.commit;pins.RUNTIME_SRC_URL=native.runtime.repository;}
   const repos = {};
@@ -137,6 +140,8 @@ export function buildConfig({
   toolsPackageJobs = 4,
   globalTag,
   repoOverrides,
+  nativeSelection,
+  env=process.env,
   useSavedSources = true,
 } = {}) {
   if (!['full','sdk-tools'].includes(stdxProfile)) throw new ConfigError('invalid stdx profile: '+stdxProfile);
@@ -182,7 +187,7 @@ export function buildConfig({
     if (Object.keys(selected).length) sourceSelection[name] = selected;
   }
   validateSourceSelection(sourceSelection);
-  const repos = makeRepos({globalTag, overrides: sourceSelection});
+  const repos = makeRepos({globalTag, overrides: sourceSelection,env,nativeSelection});
 
   const config = {
     workspace: workspacePath,

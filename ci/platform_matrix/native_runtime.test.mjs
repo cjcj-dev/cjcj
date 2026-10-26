@@ -14,14 +14,14 @@ import {directSource} from '../fixtures/runtime-direct-inputs.mjs';
 const directHelper=new URL('../fixtures/runtime-direct-inputs.mjs',import.meta.url).href;
 // External native compilation is a command fixture here. The real product CLI,
 // checkout check, CMake toolchain script, installation and manifest path execute.
-function fixture(check) {
+function fixture(check,{legacy=false}={}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'native-runtime-'));
   try {
     const source = path.join(root, 'runtime-source'), bin = path.join(root, 'bin');
     fs.mkdirSync(path.join(source, 'runtime'), {recursive:true});
     fs.mkdirSync(bin);
     fs.writeFileSync(path.join(source, 'runtime/build.py'), '# producer fixture, see command log\n');
-    directSource(path.join(source,'runtime'));
+    directSource(path.join(source,'runtime'),{legacy});
     const git = args => {
       const r = spawnSync('git', ['-C',source,...args], {encoding:'utf8'});
       assert.equal(r.status,0,r.stderr); return r.stdout.trim();
@@ -77,10 +77,10 @@ if(name==='python3' && args[0]==='build.py') {
   const suffix=process.platform==='darwin'?'dylib':'so';
   const files=['runtime/lib/'+tuple+'/libcangjie-runtime.'+suffix,'lib/'+tuple+'/libcangjie-runtime.a'];
   if(process.platform==='darwin' && !e.FIXTURE_NO_BOUNDS)files.push('runtime/lib/'+tuple+'/libboundscheck.'+suffix);
-  for(const file of files){const dst=path.join(prefix,file);fs.mkdirSync(path.dirname(dst),{recursive:true});fs.writeFileSync(dst,'fixture bytes '+file+'\0CJRT-COMMIT:'+e.RUNTIME_REF+'\0');}
+  for(const file of files){const dst=path.join(prefix,file);fs.mkdirSync(path.dirname(dst),{recursive:true});fs.writeFileSync(dst,'fixture bytes '+file+'\0CJRT-COMMIT:'+e.CJCJ_NATIVE_RUNTIME_REF+'\0');}
   if(e.FIXTURE_ELF) {
     const cpp=path.resolve('CMakebuild/finite.c'),obj=path.resolve('CMakebuild/finite.o');
-    fs.writeFileSync(cpp,'unsigned long g_cjLoadBadMask=42; const char stamp[]="CJRT-COMMIT:'+e.RUNTIME_REF+'";\n');
+    fs.writeFileSync(cpp,'unsigned long g_cjLoadBadMask=42; const char stamp[]="CJRT-COMMIT:'+e.CJCJ_NATIVE_RUNTIME_REF+'";\n');
     for(const argv of [['cc','-fPIC','-c',cpp,'-o',obj],['cc','-shared',obj,'-o',path.join(prefix,files[0])],['ar','rcs',path.join(prefix,files[1]),obj]]) {
       if(argv[0]==='ar')fs.rmSync(path.join(prefix,files[1]));
       const r=spawnSync(argv[0],argv.slice(1),{stdio:'inherit'});if(r.status!==0)process.exit(r.status||1);
@@ -98,7 +98,7 @@ if(name==='python3' && args[0]==='build.py') {
     const log=path.join(root,'commands.jsonl'), install=path.join(root,'work/runtime-install');
     const env={...process.env,PATH:bin+path.delimiter+process.env.PATH,
       PLATFORM_CI_ROOT:path.join(root,'work'),RUNTIME_SOURCE:source,RUNTIME_TARGET:'native',RUNTIME_TOOLCHAIN:'',
-      RUNTIME_NATIVE_PAIR:'1',RUNTIME_REF:runtime,
+      RUNTIME_NATIVE_PAIR:'1',
       NATIVE_RUNTIME_PLATFORM:platform,RUNTIME_VERSION:'1.3.0-fixture',RUNTIME_BUILD_TYPE:'release',
       CMAKE_TOOLCHAIN_FILE:'',SCCACHE_PATH:path.join(bin,'sccache'),FIXTURE_LOG:log,FIXTURE_CMAKE:cmake,
       FIXTURE_BAD_LINK:'',FIXTURE_BAD_MODE:'',FIXTURE_BAD_MANIFEST:'',FIXTURE_NO_AIO:'',FIXTURE_BAD_CACHE:'',FIXTURE_NO_BOUNDS:'',FIXTURE_FAIL_BUILD:'',FIXTURE_NO_STATUS:'',FIXTURE_CPP_FAIL:'',
@@ -111,7 +111,7 @@ if(name==='python3' && args[0]==='build.py') {
     assert.equal(load.run,'node ci/native-llvm-inputs.mjs');
     const selection=path.join(root,'github-env');
     const selected=spawnSync(process.execPath,[load.run.slice('node '.length)],{encoding:'utf8',env:{...env,
-      NATIVE_LLVM_REF:llvm,NATIVE_RUNTIME_REF:runtime,GITHUB_ENV:selection,GITHUB_OUTPUT:path.join(root,'github-output')}});
+      CJCJ_NATIVE_LLVM_REF:llvm,CJCJ_NATIVE_RUNTIME_REF:runtime,GITHUB_ENV:selection,GITHUB_OUTPUT:path.join(root,'github-output')}});
     assert.equal(selected.status,0,selected.stderr);
     Object.assign(env,Object.fromEntries(fs.readFileSync(selection,'utf8').trim().split('\n').map(line=>{
       const at=line.indexOf('=');return [line.slice(0,at),line.slice(at+1)];
@@ -161,8 +161,8 @@ for(const [name,extra,reason] of [
 }));
 for(const [name,extra,reason] of [
   ['missing explicit LLVM pair',{CJCJ_NATIVE_LLVM_REF:''},'NATIVE_RUNTIME_EXPLICIT_PAIR_REQUIRED'],
-  ['mismatched source pair',{CJCJ_NATIVE_RUNTIME_REF:'f'.repeat(40)},'NATIVE_RUNTIME_PAIR_MISMATCH'],
-  ['wrong checkout',{RUNTIME_REF:'e'.repeat(40),CJCJ_NATIVE_RUNTIME_REF:'e'.repeat(40)},'expected eeeee'],
+  ['mismatched source pair',{CJCJ_NATIVE_RUNTIME_REF:'f'.repeat(40)},'expected fffff'],
+  ['wrong checkout',{CJCJ_NATIVE_RUNTIME_REF:'e'.repeat(40)},'expected eeeee'],
   ['wrong native platform',{NATIVE_RUNTIME_PLATFORM:'darwin_invalid'},'NATIVE_RUNTIME_PLATFORM_MISMATCH'],
   ['missing bounds',{FIXTURE_NO_BOUNDS:'1'},'NATIVE_RUNTIME_BUILD_MISSING'],
   ['missing aio manifest member',{FIXTURE_BAD_MANIFEST:'1'},'NATIVE_CJTHREAD_INSTALL_MANIFEST'],
@@ -183,7 +183,7 @@ test('native producer failure stops before install and preserves its command exi
 test('formal workflow carries selected sources through checkout, original producer and whole install upload',()=>{
   const entry=yaml.load(fs.readFileSync('.github/workflows/build-fixed-llc.yml','utf8'));
   const native=yaml.load(fs.readFileSync('.github/workflows/build-native-runtime.yml','utf8'));
-  for(const key of ['llvm_ref','runtime_ref'])assert.equal(native.on.workflow_dispatch.inputs[key].required,true);
+  for(const key of ['llvm_ref','runtime_ref'])assert.equal(native.on.workflow_dispatch.inputs[key].required,false);
   assert.equal(native.on.workflow_dispatch.inputs.platforms.default,'darwin_aarch64,darwin_x86_64');
   assert.equal(entry.on.workflow_dispatch.inputs.build_runtime.default,false);
   assert.equal(entry.jobs['native-runtime'].uses,'./.github/workflows/build-native-runtime.yml');
@@ -191,7 +191,7 @@ test('formal workflow carries selected sources through checkout, original produc
   const steps=native.jobs.runtime.steps;
   assert.equal(steps.find(x=>x.with?.repository==='cjcj-dev/cangjie-runtime').with.ref,'${{ steps.pin.outputs.runtime_sha }}');
   const build=steps.find(x=>x.env?.RUNTIME_NATIVE_PAIR==='1');
-  assert.equal(build.env.RUNTIME_REF,'${{ steps.pin.outputs.runtime_sha }}');
+  assert.equal(build.env.CJCJ_NATIVE_RUNTIME_REF,'${{ steps.pin.outputs.runtime_sha }}');
   assert.equal(build.env.GC_UNIT_GATE_LANGUAGE_TESTS,"${{ runner.os == 'Linux' && 'defer' || 'all' }}");
   assert.doesNotMatch(JSON.stringify(native),/GC_UNIT_GATE_SKIP/);
   assert.match(build.run,/zx@8 ci\/platform_matrix\/build_runtime.mjs/);
@@ -276,3 +276,15 @@ const result=await receiveNativeRuntime(i);console.log('DIRECT_RECEIVE_REACHED '
    console.log('DIRECT_RECEIVE_BAD_INPUT_CONTROLS_TARGET');
  }
 }));
+
+// This is the actual status protocol produced by the selected shell gate, not
+// a synthesized GATE_RC. Both native entry and installed/archive consumers run.
+test('legacy native public entry retains schema-1 CPP status through installation and package', {skip:process.platform!=='linux'},()=>fixture(({run,install,source,root})=>{
+ const r=run();console.log('LEGACY_NATIVE_STATUS_INSTALL_TARGET_REACHED');assert.equal(r.status,0,r.stdout+r.stderr);
+ const status=fs.readFileSync(source+'/runtime/CMakebuild/gc-unit.status','utf8');
+ assert.match(status,/SCHEMA_VERSION=1/);assert.match(status,/CPP_RUNNER_RC=0/);assert.doesNotMatch(status,/GATE_RC/);
+ const archive=root+'/legacy.tar',unpack=root+'/unpack';fs.mkdirSync(unpack);
+ for(const args of [['-cf',archive,'-C',install,'.'],['-xf',archive,'-C',unpack]])assert.equal(spawnSync('tar',args).status,0);
+ for(const base of [install,unpack])assert.equal(fs.readFileSync(base+'/share/runtime-build/runtime/CMakebuild/gc-unit.status','utf8'),status);
+ assert.ok(fs.existsSync(unpack+'/share/runtime-build/runtime/tests/gc_unit/installed-language-entry.mjs'));
+},{legacy:true}));

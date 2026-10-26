@@ -65,7 +65,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: cjcj-dev/cangjie-runtime
-          ref: ${{ env.RUNTIME_REF }}
+          ref: ${{ env.CJCJ_NATIVE_RUNTIME_REF }}
           fetch-depth: 1
           path: runtime-source
 
@@ -76,7 +76,7 @@ jobs:
         with:
           component: windows-runtime
           platform: windows_x86_64
-          pin: ${{ env.RUNTIME_REF }}
+          pin: ${{ env.CJCJ_NATIVE_RUNTIME_REF }}
           cache-size: 1G
 
       - name: Restore official MinGW toolchain

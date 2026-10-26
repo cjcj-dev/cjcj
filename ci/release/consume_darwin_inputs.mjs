@@ -44,7 +44,7 @@ export function consumeDarwinInputs(work, target = process.env.CJCJ_SRCBUILD_TAR
   const hostBinary = verifyDarwinMachO(prepareHostLlvm().file, host.platform);
   const colourRoot = bootstrapArtifact(process.env.CJCJ_BOOTSTRAP_DYLIB_ARTIFACT,
     'cjcj-dev/cjcj', process.env.LLVM_DYLIB_ARTIFACT_ID, work, 'LLVM_DYLIB');
-  const colour = verifyDarwinLlvm(colourRoot, host.platform, process.env.LLVM_SHA);
+  const colour = verifyDarwinLlvm(colourRoot, host.platform, process.env.CJCJ_NATIVE_LLVM_REF);
   const runtimeRoot = bootstrapArtifact(process.env.CJCJ_BOOTSTRAP_COLOUR_RT,
     'cjcj-dev/cjcj', process.env.COLOUR_RT_ARTIFACT_ID, work, 'COLOUR_RT');
   // A freshly installed runtime records SOURCE_SHA; published native artifacts
@@ -53,8 +53,8 @@ export function consumeDarwinInputs(work, target = process.env.CJCJ_SRCBUILD_TAR
   const runtimeManifest = fs.existsSync(sourceFile) ? null
     : JSON.parse(fs.readFileSync(path.join(runtimeRoot, 'manifest.json'), 'utf8'));
   const runtimeSha = runtimeManifest?.runtime_sha || fs.readFileSync(sourceFile, 'utf8').trim();
-  assert.match(process.env.RUNTIME_REF || '', /^[a-f0-9]{40}$/, 'DARWIN_RUNTIME_SOURCE_PIN');
-  assert.equal(runtimeSha, process.env.RUNTIME_REF, 'DARWIN_RUNTIME_SOURCE_MISMATCH');
+  assert.match(process.env.CJCJ_NATIVE_RUNTIME_REF || '', /^[a-f0-9]{40}$/, 'DARWIN_RUNTIME_SOURCE_PIN');
+  assert.equal(runtimeSha, process.env.CJCJ_NATIVE_RUNTIME_REF, 'DARWIN_RUNTIME_SOURCE_MISMATCH');
   if (runtimeManifest) assert.equal(runtimeManifest.platform, host.platform, 'DARWIN_RUNTIME_PLATFORM_MISMATCH');
   const runtimeBinaries = ['libcangjie-runtime.dylib', 'libboundscheck.dylib']
     .map(name => verifyDarwinMachO(path.join(runtimeRoot, 'runtime/lib', host.tuple, name), host.platform));
@@ -86,7 +86,7 @@ export function consumeDarwinInputs(work, target = process.env.CJCJ_SRCBUILD_TAR
   }
   const result = {target, platform:host.platform, tuple:host.tuple, tools, apple_sdk:appleSdk,
     inputs:{host_llvm:hostRoot, colour_llvm:colourRoot, runtime:runtimeRoot},
-    sources:{llvm:process.env.LLVM_SHA, runtime:runtimeSha}, loader, loaded,
+    sources:{llvm:process.env.CJCJ_NATIVE_LLVM_REF, runtime:runtimeSha}, loader, loaded,
     runtime_archive_architecture:architecture, full_sdk:'NOT_RUN', runtime_abi:'NOT_RUN'};
   fs.writeFileSync(path.join(work, 'darwin-consumer.json'), JSON.stringify(result, null, 2)+'\n');
   console.log(`DARWIN_NATIVE_INPUT_CONSUMED host_tuple=${host.tuple} target=${target}`);

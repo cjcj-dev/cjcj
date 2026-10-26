@@ -43,8 +43,8 @@ export function verifyTupleSources(tuple, env = process.env) {
   if (!env.CJCJ_NATIVE_RUNTIME_REF && !env.CJCJ_RUNTIME_REF_OVERRIDE && !runtime.some(Boolean)) return;
   const pin = (file,key) => fs.readFileSync(new URL('../'+file, import.meta.url),'utf8')
     .match(new RegExp('^'+key+'=([a-f0-9]{40})$','m'))?.[1];
-  const wantedLlvm = env.LLVM_SHA || pin('llvm_pin.env','LLVM_SHA');
-  const wantedRuntime = env.CJCJ_NATIVE_RUNTIME_REF || env.RUNTIME_REF || pin('runtime_pin.env','RUNTIME_REF');
+  const wantedLlvm = env.CJCJ_NATIVE_LLVM_REF || pin('llvm_pin.env','LLVM_SHA');
+  const wantedRuntime = env.CJCJ_NATIVE_RUNTIME_REF || pin('runtime_pin.env','RUNTIME_REF');
   if (![wantedLlvm,wantedRuntime].every(value => /^[a-f0-9]{40}$/.test(value || ''))
       || llvm.length !== 1 || runtime.length !== 1
       || llvm[0] !== wantedLlvm || runtime[0] !== wantedRuntime) {

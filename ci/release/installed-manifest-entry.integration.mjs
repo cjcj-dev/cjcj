@@ -154,7 +154,7 @@ if(publicMode){
 const artifactDir=workspace+'/software',archiveName=(await fs.readdir(artifactDir)).find(name=>name.startsWith('cangjie-sdk-')&&name.endsWith('.tar.gz'));
 assert.ok(archiveName);const archive=artifactDir+'/'+archiveName;
 const releaseEnv={...env,NATIVE_SDK_ARTIFACT_DIR:artifactDir,NATIVE_SDK_INSTALL_DIR:root+'/received',RELEASE_PLATFORM:'linux-x64',RELEASE_KEY:'linux-x64',
- CJCJ_NATIVE_SDK_VERSION:env.SOURCE_SDK_VERSION,CJCJ_RELEASE_SOURCE_SHA:commit,RUNTIME_REF:commit,FINAL_STD_DIR:root+'/std',RELEASE_DIST:root+'/dist'};
+ CJCJ_NATIVE_SDK_VERSION:env.SOURCE_SDK_VERSION,CJCJ_RELEASE_SOURCE_SHA:commit,CJCJ_NATIVE_RUNTIME_REF:commit,FINAL_STD_DIR:root+'/std',RELEASE_DIST:root+'/dist'};
 const composed=await run('formal-compose-unresolved',[process.execPath,repo+'ci/release/compose-package.mjs'],releaseEnv);
 // A checksum failure is an independent earlier transport control.
 const archiveBytes=await fs.readFile(archive);await fs.appendFile(archive,'changed');

@@ -12,12 +12,12 @@ const otherMirror = fs.realpathSync(otherArgument);
 const otherSha = (await capture(['git', '-C', otherMirror, 'rev-parse', 'HEAD'])).stdout.trim();
 const runtimeSha = '4909b2dec1af7f522133c6401e2ce960b0ef511d';
 const runtimeUrl = 'https://github.com/cjcj-dev/cangjie-runtime.git';
-delete process.env.RUNTIME_REF; delete process.env.RUNTIME_SRC_URL;
+delete process.env.CJCJ_NATIVE_RUNTIME_REF; delete process.env.RUNTIME_SRC_URL;
 Object.assign(process.env, {
-  CJCJ_LLVM_RUNTIME_MODE: 'private', CJCJ_LLVM_RUNTIME_URL: runtimeUrl, CJCJ_LLVM_RUNTIME_SHA: runtimeSha,
+  CJCJ_NATIVE_RUNTIME_REF: runtimeSha,
   CJCJ_SRCBUILD_SOURCE_MIRRORS: `${runtimeUrl}=file://${runtimeMirror};file://${otherMirror}=file://${otherMirror}`,
   CJCJ_SRCBUILD_REQUIRE_MIRRORS: '1', TUPLE_ROOT: path.join(work, 'tuple'), TUPLE_PLATFORM: 'linux_x86_64', LLVM_TARGETS: 'X86',
-  LLVM_URL: `file://${otherMirror}`, LLVM_SHA: otherSha,
+  LLVM_URL: `file://${otherMirror}`, CJCJ_NATIVE_LLVM_REF: otherSha,
   CANGJIE_COMPILER_URL: `file://${otherMirror}`, CANGJIE_COMPILER_SHA: otherSha,
   FLATBUFFERS_URL: `file://${otherMirror}`, FLATBUFFERS_SHA: otherSha, GIT_TRACE: path.join(work, 'fetch.trace'),
 });

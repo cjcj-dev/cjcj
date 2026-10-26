@@ -5,6 +5,7 @@ import {compilerRuntimeDirectory} from '../lib/runtime-split.mjs';
 import {run as runCommand} from '../lib/runner.mjs';
 import {bootstrapHostSdk, envFrom, requireDir, requireFile} from './stages/common.mjs';
 import {languageSourceInputs,prepareInstalledLanguage,installedLanguageCommand} from './installed-language-source.mjs';
+import {completedGcUnitGate} from './installed-language-inputs.mjs';
 
 export const GC_UNIT_LANGUAGE_DONE = 'LANGUAGE_TESTS=LANGUAGE_DONE';
 export const GC_UNIT_LANGUAGE_DEFERRED = 'LANGUAGE_TESTS=LANGUAGE_DEFERRED';
@@ -30,7 +31,7 @@ function statusFields(file,stage) {
 }
 export function assertLanguageState(file,expected,stage) {
   const fields=statusFields(file,stage);
-  if(fields.get('GATE')!=='PASS'||fields.get('GATE_RC')!=='0')throw new BuildError(stage,`gc_unit gate is not one exact PASS/rc0 in ${file}`);
+  if(!completedGcUnitGate(fields))throw new BuildError(stage,`gc_unit gate is not one exact PASS/rc0 in ${file}`);
   if(fields.get('LANGUAGE_TESTS')!==expected.slice('LANGUAGE_TESTS='.length))
     throw new BuildError(stage,`${expected} missing in ${file}`);
   return fields;
@@ -51,7 +52,7 @@ export function beginGcUnitLanguageDeferral(config,runtime,sdk,{env=process.env}
 export function installGcUnitInputs(config,runtime,sdk,{gateStatus=gcUnitBuildStatus(runtime)}={}) {
   const stage='runtime.gc_unit_language',status=gateStatus;
   const fields=statusFields(status,stage);
-  if(fields.get('GATE')!=='PASS'||fields.get('GATE_RC')!=='0'||fields.get('CPP_SUITE')!=='PASS'
+  if(!completedGcUnitGate(fields)||fields.get('CPP_SUITE')!=='PASS'
     ||!['LANGUAGE_DEFERRED','LANGUAGE_DONE'].includes(fields.get('LANGUAGE_TESTS')))
     throw new BuildError(stage,`current native gate did not complete: ${status}`);
   const {modern}=languageSourceInputs(runtime);
@@ -101,7 +102,7 @@ export async function runGcUnitLanguageTests(config,sdk,{env=process.env,source=
   // inputs. The std checkout is not the producer of these runtime tests.
   const root=source||path.join(sdk,'share/runtime-build'),runtime=path.join(root,'runtime');
   const native=statusFields(gcUnitBuildStatus(runtime),stage);
-  if(native.get('GATE')!=='PASS'||native.get('GATE_RC')!=='0'||native.get('CPP_SUITE')!=='PASS')
+  if(!completedGcUnitGate(native)||native.get('CPP_SUITE')!=='PASS')
     throw new BuildError(stage,'native CPP result required before only-language');
   const command=installedLanguageCommand(runtime);
   requireFile(path.join(runtime,'CMakebuild/compile_commands.json'),{stage});

@@ -117,7 +117,7 @@ for (const [name, pair, accepted] of [['matching',`LLVM_SHA=${'a'.repeat(40)}\nR
   ['missing historical pair','',false]]) {
   test(`fixed release CLI checks ${name} source pair before installation`,()=>fixture(({payloads,reseal,run,destination})=>{
     payloads.MANIFEST='PLATFORM=linux_x86_64\n'+pair;reseal();
-    const result=run(undefined,{LLVM_SHA:'a'.repeat(40),CJCJ_NATIVE_RUNTIME_REF:'b'.repeat(40)});
+    const result=run(undefined,{CJCJ_NATIVE_LLVM_REF:'a'.repeat(40),CJCJ_NATIVE_RUNTIME_REF:'b'.repeat(40)});
     assert.equal(result.status===0,accepted,result.stderr);
     if(accepted)assert.equal(fs.readFileSync(path.join(destination,'MANIFEST'),'utf8'),payloads.MANIFEST);
     else {assert.match(result.stderr,/BOOTSTRAP_TUPLE_SOURCE_PAIR_MISMATCH/);assert.equal(fs.existsSync(destination),false);}

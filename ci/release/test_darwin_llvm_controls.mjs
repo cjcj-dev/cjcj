@@ -28,7 +28,7 @@ for (const [arm,bearing,rule] of [['candidate'],...cuts,['restored']]) {
   }
   const source=path.join(root,relative); fs.writeFileSync(source,changed);
   const child=spawnSync(process.execPath,['--test',path.join(repository,'ci/release/darwin_llvm.test.mjs')],{
-    encoding:'utf8',env:{...process.env, PLATFORM:normal.platform, LLVM_SHA:normal.sources.llvm,
+    encoding:'utf8',env:{...process.env, PLATFORM:normal.platform, CJCJ_NATIVE_LLVM_REF:normal.sources.llvm,
       DARWIN_LLVM_NATIVE_SOURCE:normal.inputs.colour_llvm, DARWIN_LLVM_PRODUCT:source}});
   fs.writeFileSync(path.join(out,`${arm}.stdout`),child.stdout||'');
   fs.writeFileSync(path.join(out,`${arm}.stderr`),child.stderr||'');

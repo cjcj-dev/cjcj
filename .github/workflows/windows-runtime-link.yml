@@ -8,6 +8,15 @@ on:
       - 'ci/platform_matrix/test_windows_runtime_link.mjs'
       - '.github/workflows/windows-runtime-link.yml'
   workflow_dispatch:
+    inputs:
+      llvm_ref:
+        description: Paired LLVM identity only; empty pair uses current pins
+        type: string
+        default: ''
+      runtime_ref:
+        description: Published runtime commit; supply both source identities
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -21,16 +30,20 @@ jobs:
       matrix:
         arm: [candidate, cut-entry, cut-selection, restored]
     env:
-      # Runtime includes the publication and Windows export-source fixes (#1234/#1236).
-      RUNTIME_REF: 1a14f0a8ccb685038729d8ca221768884beb5654
       RUNTIME_TARGET: windows-x86_64
       LINK_CONTROL_ARM: ${{ matrix.arm }}
     steps:
       - uses: actions/checkout@v7
+      - name: Resolve native source pair
+        id: pin
+        env:
+          CJCJ_NATIVE_LLVM_REF: ${{ inputs.llvm_ref }}
+          CJCJ_NATIVE_RUNTIME_REF: ${{ inputs.runtime_ref }}
+        run: node ci/native-llvm-inputs.mjs
       - uses: actions/checkout@v7
         with:
           repository: cjcj-dev/cangjie-runtime
-          ref: ${{ env.RUNTIME_REF }}
+          ref: ${{ env.CJCJ_NATIVE_RUNTIME_REF }}
           path: runtime-source
       - uses: actions/setup-node@v7.1.0
         with:
@@ -63,7 +76,7 @@ jobs:
         with:
           component: windows-runtime
           platform: windows-x86_64-${{ matrix.arm }}
-          pin: ${{ env.RUNTIME_REF }}
+          pin: ${{ env.CJCJ_NATIVE_RUNTIME_REF }}
       - name: Exercise production entry and linker controls
         shell: bash
         run: npx --yes zx@8 ci/platform_matrix/test_windows_runtime_link.mjs

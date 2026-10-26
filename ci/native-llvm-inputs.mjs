@@ -14,21 +14,21 @@ export function readSourcePins(repo=root) {
 }
 export function nativeLlvmInputs(env=process.env) {
   const {llvm,runtime}=readSourcePins();
-  const requestedLlvm=env.NATIVE_LLVM_REF || '', requestedRuntime=env.NATIVE_RUNTIME_REF || '';
-  if (Boolean(requestedLlvm)!==Boolean(requestedRuntime)) throw new Error('NATIVE_LLVM_PAIR_REQUIRED');
+  const requestedLlvm=env.CJCJ_NATIVE_LLVM_REF || '', requestedRuntime=env.CJCJ_NATIVE_RUNTIME_REF || '';
+  if (Boolean(requestedLlvm)!==Boolean(requestedRuntime)) throw new Error('NATIVE_RUNTIME_EXPLICIT_PAIR_REQUIRED');
   for (const ref of [requestedLlvm || llvm.LLVM_SHA, requestedRuntime || runtime.RUNTIME_REF]) {
     if (!/^[a-f0-9]{40}$/.test(ref || '')) throw new Error('NATIVE_LLVM_REF_INVALID');
   }
-  const selected={...llvm, LLVM_SHA:requestedLlvm || llvm.LLVM_SHA,
+  // Pin-file keys describe source facts; the process boundary has one pair.
+  return {LLVM_URL:llvm.LLVM_URL, CANGJIE_COMPILER_URL:llvm.CANGJIE_COMPILER_URL,
+    CANGJIE_COMPILER_SHA:llvm.CANGJIE_COMPILER_SHA, FLATBUFFERS_URL:llvm.FLATBUFFERS_URL,
+    FLATBUFFERS_SHA:llvm.FLATBUFFERS_SHA,
     CJCJ_NATIVE_LLVM_REF:requestedLlvm || llvm.LLVM_SHA,
     CJCJ_NATIVE_RUNTIME_REF:requestedRuntime || runtime.RUNTIME_REF};
-  if (requestedRuntime) Object.assign(selected, {CJCJ_LLVM_RUNTIME_MODE:'private',
-    CJCJ_LLVM_RUNTIME_URL:runtime.RUNTIME_SRC_URL,CJCJ_LLVM_RUNTIME_SHA:requestedRuntime});
-  return selected;
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
   const selected=nativeLlvmInputs(),output=Object.entries(selected).map(([key,value])=>`${key}=${value}\n`).join('');
   if (process.env.GITHUB_ENV) fs.appendFileSync(process.env.GITHUB_ENV,output);
-  if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT,`sha=${selected.LLVM_SHA}\nruntime_sha=${selected.CJCJ_NATIVE_RUNTIME_REF}\n`);
+  if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT,`sha=${selected.CJCJ_NATIVE_LLVM_REF}\nruntime_sha=${selected.CJCJ_NATIVE_RUNTIME_REF}\n`);
   process.stdout.write(output);
 }

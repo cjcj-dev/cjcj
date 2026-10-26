@@ -98,11 +98,12 @@ return {...r,source};}
  for(const name of ['sudo','npx','sccache']){const file=bin+'/'+name;await write(file,`#!${process.execPath}\nconsole.log('CONTROLLED_EXTERNAL_PREPARATION',${JSON.stringify(name)},process.argv.slice(2));\n`);await fs.chmod(file,0o755);}
  const loader='--experimental-loader='+root+'/loader.mjs';
  const env={NODE_OPTIONS:loader,PATH:bin+path.delimiter+process.env.PATH,PLATFORM_CI_ROOT:root+'/producer',
-  RUNTIME_SOURCE:source,RUNTIME_GIT_REPOSITORY:objects,RUNTIME_TARGET:'native',RUNTIME_TOOLCHAIN:'',RUNTIME_NATIVE_PAIR:'1',
-  RUNTIME_REF:commit,CJCJ_NATIVE_RUNTIME_REF:commit,LLVM_SHA:commit,NATIVE_RUNTIME_PLATFORM:platform,
+  RUNTIME_SOURCE:source,RUNTIME_TARGET:'native',RUNTIME_TOOLCHAIN:'',RUNTIME_NATIVE_PAIR:'1',
+  CJCJ_NATIVE_RUNTIME_REF:commit,CJCJ_NATIVE_LLVM_REF:commit,NATIVE_RUNTIME_PLATFORM:platform,
   RUNTIME_VERSION:version,RUNTIME_BUILD_TYPE:'release',CJCJ_NATIVE_HOST_VERSION:version,
   FINITE_CACHE_WRAPPER:mode==='archive-wrapper'?'1':'',SCCACHE_PATH:bin+'/sccache',CMAKE_TOOLCHAIN_FILE:'',CJ_RUNTIME_COMMIT:'',GC_UNIT_GATE_LANGUAGE_TESTS:'defer',GITHUB_STEP_SUMMARY:'',RUNNER_TEMP:root+'/preinstall'};
- await run('formal-producer',[process.env.ZX||'zx',repo+'ci/platform_matrix/build_runtime.mjs'],env);
+ await write(root+'/producer-entry.mjs',`import {buildRuntime} from '${repo}ci/platform_matrix/build_runtime.mjs'; await buildRuntime({objectRepository:${JSON.stringify(objects)}});`);
+ await run('formal-producer',[process.env.ZX||'zx',root+'/producer-entry.mjs'],env);
  const installed=root+'/producer/runtime-install',carried=root+'/received';await fs.mkdir(carried);
  if(mode==='archive-wrapper'){const m=JSON.parse(await fs.readFile(installed+'/NATIVE-INPUTS.json'));for(const k of ['C','CXX'])assert.equal(m.compiler_cache_configuration[k].mode,'compiler-wrapper');console.log('NATIVE_WRAPPER_RECORD_TO_RECEIVE_REACHED');}
  console.log('RUNTIME_PRODUCER_INSTALLED_RECORD_ASSERT_REACHED '+mode);

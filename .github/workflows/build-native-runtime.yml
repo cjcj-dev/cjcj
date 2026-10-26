@@ -5,11 +5,11 @@ on:
       llvm_ref:
         description: Full paired LLVM source identity (not built by this runtime job)
         type: string
-        required: true
+        required: false
       runtime_ref:
         description: Published full runtime source commit
         type: string
-        required: true
+        required: false
       runtime_version:
         description: Native runtime version (empty uses the existing runtime pin)
         type: string
@@ -17,16 +17,16 @@ on:
       platforms:
         description: Comma-separated native platforms; select only authorized jobs
         type: string
-        required: true
+        required: false
         default: darwin_aarch64,darwin_x86_64
   workflow_call:
     inputs:
       llvm_ref:
         type: string
-        required: true
+        required: false
       runtime_ref:
         type: string
-        required: true
+        required: false
       runtime_version:
         type: string
         default: ''
@@ -43,14 +43,12 @@ jobs:
       platforms: ${{ steps.select.outputs.tuple_platforms }}
     steps:
       - uses: actions/checkout@v7
-      - name: Validate the explicit native source pair
+      - name: Resolve the default or explicit native source pair
         env:
-          NATIVE_LLVM_REF: ${{ inputs.llvm_ref }}
-          NATIVE_RUNTIME_REF: ${{ inputs.runtime_ref }}
+          CJCJ_NATIVE_LLVM_REF: ${{ inputs.llvm_ref }}
+          CJCJ_NATIVE_RUNTIME_REF: ${{ inputs.runtime_ref }}
         run: |
           set -euo pipefail
-          test -n "$NATIVE_LLVM_REF"
-          test -n "$NATIVE_RUNTIME_REF"
           node ci/native-llvm-inputs.mjs
       - name: Select the existing native runner matrix
         id: select
@@ -73,8 +71,8 @@ jobs:
       - name: Load native source pair
         id: pin
         env:
-          NATIVE_LLVM_REF: ${{ inputs.llvm_ref }}
-          NATIVE_RUNTIME_REF: ${{ inputs.runtime_ref }}
+          CJCJ_NATIVE_LLVM_REF: ${{ inputs.llvm_ref }}
+          CJCJ_NATIVE_RUNTIME_REF: ${{ inputs.runtime_ref }}
         run: node ci/native-llvm-inputs.mjs
       - uses: actions/checkout@v7
         with:
@@ -120,7 +118,7 @@ jobs:
         env:
           RUNTIME_NATIVE_PAIR: '1'
           GC_UNIT_GATE_LANGUAGE_TESTS: ${{ runner.os == 'Linux' && 'defer' || 'all' }}
-          RUNTIME_REF: ${{ steps.pin.outputs.runtime_sha }}
+          CJCJ_NATIVE_RUNTIME_REF: ${{ steps.pin.outputs.runtime_sha }}
           RUNTIME_VERSION: ${{ inputs.runtime_version }}
           RUNTIME_TARGET: native
           RUNTIME_BUILD_TYPE: release

@@ -15,7 +15,7 @@ async function selection(cpp,runtimePinFile,env) {
  const runtime=await resolveRuntimeSource(env,runtimePinFile),sources=selectShimSources(cpp,env);
  if(sources.runtime.commit!==runtime.runtimeRef)throw Error('SHIM_HEADERS_RUNTIME_PAIR');
  // This is the target LLVM pair, never the independent bootstrap host LLVM.
- const targetLlvm=runtime.nativePair?.llvm||env.LLVM_SHA;
+ const targetLlvm=runtime.nativePair?.llvm||env.CJCJ_NATIVE_LLVM_REF;
  if(targetLlvm&&sources.llvm.commit!==targetLlvm)throw Error('SHIM_HEADERS_LLVM_PAIR');
  return sources;
 }

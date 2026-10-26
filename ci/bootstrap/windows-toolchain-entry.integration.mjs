@@ -65,11 +65,11 @@ test('public native adapter passes absolute selected compiler and fixed source t
  const digest=hash(await fs.readFile(input+'/dep.tar')),commit='a'.repeat(40),compiler='53da07662223e1dbaa7711f4ef149d6ae7b3afea';
  const config={platform:'windows_x86_64',commits:{compiler,llvm:commit,runtime:commit,bounds:commit,flatbuffers:commit},compiler:'compiler',tools:{cc:'clang',cxx:'clang++',launcher:'sccache'}};
  for(const name of ['llvm','runtime','bounds','flatbuffers'])config[name+'Archive']={file:'dep.tar',sha256:digest};await json(input+'/native-cjdb.json',config);
- const env={...process.env,CJCJ_WINDOWS_TOOLCHAIN:root+'/selected-toolchain',CJCJ_NATIVE_LLVM_REF:commit,CJCJ_NATIVE_RUNTIME_REF:commit,CJCJ_NATIVE_HOST_VERSION:'1.3.0-alpha.20260925001050',CJCJ_NATIVE_SOURCE_SELECTION:JSON.stringify({ast:{repository:'file:///controlled-cpp',commit:compiler}})};
+ const env={...process.env,CJCJ_WINDOWS_TOOLCHAIN:root+'/selected-toolchain',CJCJ_NATIVE_LLVM_REF:commit,CJCJ_NATIVE_RUNTIME_REF:commit,CJCJ_NATIVE_HOST_VERSION:'1.3.0-alpha.20260925001050'};
  const r=await run('selected',[process.execPath,child,'job','build',input,root+'/job-work'],env);
  assert.equal(r.rc,1);assert.match(r.stderr,/NATIVE_CJDB_RUNNER_REQUIRED/);
  const actual=JSON.parse(await fs.readFile(root+'/job-work/native-cjdb.json'));assert.equal(actual.tools.cc,bin+'/clang.exe');assert.equal(actual.tools.cxx,bin+'/clang++.exe');assert.equal(actual.tools.launcher,'sccache');assert.equal(actual.commits.compiler,compiler);
- const bad=await run('wrong-pair',[process.execPath,child,'job','build',input,root+'/bad-job'],{...env,CJCJ_NATIVE_SOURCE_SELECTION:JSON.stringify({ast:{repository:'file:///bad',commit:'b'.repeat(40)}})});
+ const bad=await run('wrong-pair',[process.execPath,child,'job','build',input,root+'/bad-job'],{...env,CJCJ_NATIVE_LLVM_REF:'b'.repeat(40)});
  assert.equal(bad.rc,1);assert.match(bad.stderr,/NATIVE_JOB_SOURCE_PAIR/);
 });
 function sdkInputs(){const row=(commit,name)=>({commit,tree:'a'.repeat(40),repository:'/fixture/'+name+'.git',install:root+'/'+name,configuration:{fixture:true},buildResult:root+'/'+name+'/result.json',sourceRoot:root+'/'+name+'-producer'});const runtime=row(FIXED_INPUTS.runtime,'R');return{platform:'windows_x86_64',work:root+'/sdk-work',install:root+'/sdk',host:{version:readHostToolchainPin('windows_x86_64').replace(/^nightly-/,''),install:root+'/H'},llvm:row(FIXED_INPUTS.llvm,'N'),runtime,ast:row(FIXED_INPUTS.compiler,'AST'),h1:{...row(FIXED_INPUTS.h1,'H1'),product:root+'/H1/compiler'},compiler:row('b'.repeat(40),'C'),stdlib:{...runtime,install:root+'/std'},tools:{privateRoot:root+'/tools'}};}

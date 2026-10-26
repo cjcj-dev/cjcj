@@ -25,7 +25,7 @@ for (const platform of ['linux_x86_64', 'linux_aarch64', 'darwin_aarch64', 'darw
       fs.writeFileSync(path.join(fixed, 'llvm-tools.manifest'), `PLATFORM=${platform}\n`);
       const result = spawnSync('npx', ['--yes', 'zx@8', 'ci/llvm-tuple-layout.mjs', path.join(root, 'depot')], {
         encoding: 'utf8', env: {...process.env, REPO_ROOT: recipe, CJCJ_FIXED_LLVM_DIR: fixed,
-          LLVM_SHA: 'a'.repeat(40), CANGJIE_COMPILER_SHA: 'b'.repeat(40), TEST_DEPOT: path.join(root, 'depot')},
+          CJCJ_NATIVE_LLVM_REF: 'a'.repeat(40), CANGJIE_COMPILER_SHA: 'b'.repeat(40), TEST_DEPOT: path.join(root, 'depot')},
       });
       assert.equal(result.status, 0, result.stderr);
       const tuple = path.join(root, 'depot', 'a'.repeat(40), 'b'.repeat(40));

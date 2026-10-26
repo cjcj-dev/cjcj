@@ -55,7 +55,7 @@ test('explicit dylib depot path uses the same reviewed digest', () => fixture(({
   delete env.CJCJ_BOOTSTRAP_COLOUR_DYLIB;
   env.CJCJ_LLVM_DEPOT_ROOT = path.join(path.dirname(dylib), 'depot');
   env.CANGJIE_COMPILER_SHA = 'c'.repeat(40);
-  const nested = path.join(env.CJCJ_LLVM_DEPOT_ROOT, env.LLVM_SHA, env.CANGJIE_COMPILER_SHA, 'dylib');
+  const nested = path.join(env.CJCJ_LLVM_DEPOT_ROOT, env.CJCJ_NATIVE_LLVM_REF, env.CANGJIE_COMPILER_SHA, 'dylib');
   env.CJCJ_BOOTSTRAP_COLOUR_DYLIB = nested;
   fs.mkdirSync(nested, {recursive: true});
   fs.cpSync(dylib, nested, {recursive: true});

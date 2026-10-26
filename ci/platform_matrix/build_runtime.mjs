@@ -3,6 +3,7 @@
 // MINGW64 only for build.py, whose Windows recipe requires POSIX make/PATH.
 
 import fs from 'node:fs/promises';
+import {nativeSourceSelection} from '../bootstrap/native-source-selection.mjs';
 import {readSourcePins} from '../native-llvm-inputs.mjs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -12,6 +13,8 @@ import {runMsysScript} from './windows_runtime_shell.mjs';
 import {configureNativeRuntime, installNativeRuntimeDependencies, installNativeRuntimeInputs, recordNativeRuntime} from './native_runtime.mjs';
 import {darwinCommand} from '../release/darwin_commands.mjs';
 
+export async function buildRuntime({sourceSelection,objectRepository}={}) {
+const {selection}=nativeSourceSelection(process.env,undefined,sourceSelection);
 const {root} = stageBegin('runtime');
 const source = process.env.RUNTIME_SOURCE || path.join(process.cwd(), 'runtime-source');
 const version = process.env.RUNTIME_VERSION || readSourcePins().runtime.RUNTIME_VERSION;
@@ -23,28 +26,28 @@ const installRoot = path.join(root, 'runtime-install');
 let artifactRoot = installRoot;
 const nativePair = process.env.RUNTIME_NATIVE_PAIR === '1';
 let nativeCommands;
-if (nativePair) configureNativeRuntime({runtimeTarget});
+if (nativePair) configureNativeRuntime({runtimeTarget,selection});
 
 if (runtimeToolchain) {
   process.env.PATH = `${path.join(runtimeToolchain, 'bin')}${path.delimiter}${process.env.PATH || ''}`;
 }
 
 await printCommonVersions();
-console.log(`runtime_source=${source}\nruntime_ref=${process.env.RUNTIME_REF || 'unknown'}\nruntime_target=${runtimeTarget}`);
+console.log(`runtime_source=${source}\nruntime_ref=${selection.runtime.commit || 'unknown'}\nruntime_target=${runtimeTarget}`);
 const buildPy = path.join(source, 'runtime', 'build.py');
 try { await fs.access(buildPy); } catch {
   console.error(`FATAL: pinned runtime checkout missing: ${buildPy}`);
   process.exit(2);
 }
-const objectRepository=process.env.RUNTIME_GIT_REPOSITORY || source;
-const actualRef = (await $({stdio: 'pipe', verbose: false})`git -C ${toCommandPath(objectRepository)} rev-parse ${process.env.RUNTIME_GIT_REPOSITORY ? process.env.RUNTIME_REF+'^{commit}' : 'HEAD'}`).stdout.trim();
+const repository=objectRepository || source;
+const actualRef = (await $({stdio: 'pipe', verbose: false})`git -C ${toCommandPath(repository)} rev-parse ${objectRepository ? selection.runtime.commit+'^{commit}' : 'HEAD'}`).stdout.trim();
 if (!/^[0-9a-f]{40}$/.test(actualRef)) {
   console.error(`FATAL: runtime checkout did not resolve to a full commit SHA: ${actualRef}`);
   process.exit(3);
 }
-if (process.env.RUNTIME_REF) {
-  if (actualRef !== process.env.RUNTIME_REF) {
-    console.error(`FATAL: runtime checkout is ${actualRef}, expected ${process.env.RUNTIME_REF}`);
+if (selection.runtime.commit) {
+  if (actualRef !== selection.runtime.commit) {
+    console.error(`FATAL: runtime checkout is ${actualRef}, expected ${selection.runtime.commit}`);
     process.exit(3);
   }
 }
@@ -140,7 +143,7 @@ if (process.platform === 'linux') {
   }
   finally {
     await fs.writeFile(path.join(evidence, 'runtime-native-command.json'), JSON.stringify({
-      argv:nativeCommands[0], runtimeRef:actualRef, llvmRef:process.env.LLVM_SHA,
+      argv:nativeCommands[0], runtimeRef:actualRef, llvmRef:selection.llvm.commit,
       rc:result?.exitCode ?? null, signal:result?.signal ?? null, error:result?.error,
       stdinFile:scriptFile, environment:{MSYSTEM:'MINGW64',MSYS2_PATH_TYPE:'inherit',CHERE_INVOKING:'1'},
       source:runtimeDirectory, install:configuredInstallRoot, buildType, version,
@@ -183,6 +186,9 @@ console.log(`runtime_provenance=${path.join(artifactRoot, 'SOURCE_SHA')} source_
 await $({nothrow: true})`file ${toCommandPath(runtimeLib)}`;
 
 if (nativePair) {
-  installNativeRuntimeInputs({source, installRoot});
-  await recordNativeRuntime({source, installRoot, actualRef, version, buildType, commands:nativeCommands});
+  installNativeRuntimeInputs({source, installRoot,selection});
+  await recordNativeRuntime({source, installRoot, actualRef, version, buildType, commands:nativeCommands,selection,repository});
 }
+
+}
+if(process.argv[1] && path.resolve(process.argv[1])===fileURLToPath(import.meta.url)) await buildRuntime();

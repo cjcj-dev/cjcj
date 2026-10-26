@@ -48,13 +48,13 @@ jobs:
           echo "CANGJIE_WORKSPACE=$RUNNER_TEMP/ios-source" >> "$GITHUB_ENV"
           mkdir -p "$RUNNER_TEMP/ios-source/cangjie_runtime"
           git -C "$RUNNER_TEMP/ios-source/cangjie_runtime" init
-          git -C "$RUNNER_TEMP/ios-source/cangjie_runtime" fetch --depth=1 "$RUNTIME_SRC_URL" "$RUNTIME_REF"
+          git -C "$RUNNER_TEMP/ios-source/cangjie_runtime" fetch --depth=1 "$RUNTIME_SRC_URL" "$CJCJ_NATIVE_RUNTIME_REF"
           git -C "$RUNNER_TEMP/ios-source/cangjie_runtime" checkout --detach FETCH_HEAD
       - uses: ./.github/actions/sccache
         with:
           component: runtime
           platform: ${{ matrix.target }}
-          pin: ${{ env.RUNTIME_REF }}
+          pin: ${{ env.CJCJ_NATIVE_RUNTIME_REF }}
       - name: Prepare controlled arm
         env:
           ARM: ${{ matrix.arm }}

@@ -12,7 +12,7 @@ fs.mkdirSync(evidence, {recursive:true});
 const cwd = path.join(evidence, 'caller with spaces'); fs.mkdirSync(cwd);
 const envBase = {...process.env, LC_ALL:'C', GIT_CONFIG_NOSYSTEM:'1', GIT_AUTHOR_DATE:'2026-10-20T00:00:00+0000', GIT_COMMITTER_DATE:'2026-10-20T00:00:00+0000'};
 for (const key of Object.keys(envBase)) if (/^(CJCJ_LLVM_RUNTIME_|CJCJ_SRCBUILD_|TUPLE_|LLVM_|CANGJIE_COMPILER_|FLATBUFFERS_)/.test(key)) delete envBase[key];
-delete envBase.NODE_TEST_CONTEXT; delete envBase.RUNTIME_REF; delete envBase.RUNTIME_SRC_URL;
+delete envBase.NODE_TEST_CONTEXT; delete envBase.CJCJ_NATIVE_RUNTIME_REF; delete envBase.RUNTIME_SRC_URL;
 let sequence=0; const results=[];
 function run(label, command, env={}, directory=cwd) {
   const dir=path.join(evidence, `${String(sequence++).padStart(3,'0')}-${label}`);fs.mkdirSync(dir);
@@ -59,7 +59,7 @@ const url='https://github.com/cjcj-dev/cangjie-runtime.git';
 fs.writeFileSync(path.join(evidence,'input-identities.json'),JSON.stringify({runtime:runtime.sha,other:other.sha,parser:'shfmt v3.12.0'},null,2)+'\n');
 const baseline={TUPLE_ROOT:'tuple relative',TUPLE_PLATFORM:'linux_x86_64',LLVM_TARGETS:'X86',
  CJCJ_LLVM_RUNTIME_MODE:'private',CJCJ_LLVM_RUNTIME_URL:url,CJCJ_LLVM_RUNTIME_SHA:runtime.sha,
- LLVM_URL:'https://fixture.invalid/llvm',LLVM_SHA:other.sha,CANGJIE_COMPILER_URL:'https://fixture.invalid/compiler',CANGJIE_COMPILER_SHA:other.sha,
+ LLVM_URL:'https://fixture.invalid/llvm',CJCJ_NATIVE_LLVM_REF:other.sha,CANGJIE_COMPILER_URL:'https://fixture.invalid/compiler',CANGJIE_COMPILER_SHA:other.sha,
  FLATBUFFERS_URL:'https://fixture.invalid/flatbuffers',FLATBUFFERS_SHA:other.sha,
  CJCJ_SRCBUILD_REQUIRE_MIRRORS:'1',CJCJ_SRCBUILD_SOURCE_MIRRORS:[`${url}=file://${runtime.dir}`,...['llvm','compiler','flatbuffers'].map(x=>`https://fixture.invalid/${x}=file://${other.dir}`)].join(';')};
 const old=path.join(evidence,'old repo');

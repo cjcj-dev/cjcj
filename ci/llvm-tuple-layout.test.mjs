@@ -26,7 +26,7 @@ function fixture(root) {
     const result = command(argv); assert.equal(result.status, 0, result.stderr);
   }
   fs.writeFileSync(path.join(fixed, 'llvm-tools.manifest'), 'PLATFORM=linux_x86_64\n');
-  return {LLVM_SHA: 'llvm-fixture', CANGJIE_COMPILER_SHA: 'compiler-fixture', REPO_ROOT: git, CJCJ_FIXED_LLVM_DIR: fixed};
+  return {CJCJ_NATIVE_LLVM_REF: 'llvm-fixture', CANGJIE_COMPILER_SHA: 'compiler-fixture', REPO_ROOT: git, CJCJ_FIXED_LLVM_DIR: fixed};
 }
 
 test('tuple source exporter loses only the deleted real identity guard', () => {
@@ -49,8 +49,8 @@ test('real tuple publisher emits all ten checksummed consumer payloads', t => {
   const depot = path.join(root, "depot with spaces ' $ é");
   const result = command(['npx', '--yes', 'zx@8', product, depot], {env});
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(result.stdout, `published fixed LLVM tuple to depot ${depot}/${env.LLVM_SHA}/${env.CANGJIE_COMPILER_SHA}\n`);
-  const tuple = path.join(depot, env.LLVM_SHA, env.CANGJIE_COMPILER_SHA);
+  assert.equal(result.stdout, `published fixed LLVM tuple to depot ${depot}/${env.CJCJ_NATIVE_LLVM_REF}/${env.CANGJIE_COMPILER_SHA}\n`);
+  const tuple = path.join(depot, env.CJCJ_NATIVE_LLVM_REF, env.CANGJIE_COMPILER_SHA);
   const checked = command(['sha256sum', '--strict', '-c', 'SHA256SUMS'], {cwd: tuple});
   assert.equal(checked.status, 0, checked.stderr);
   assert.equal(checked.stdout.trim().split('\n').length, 10);
@@ -86,7 +86,7 @@ if (process.env.TUPLE_DIFFERENTIAL === '1') test('tuple source-derived full tabl
     }
     const args = (input.args || ['$DEPOT']).map(expand);
     const depotRoot = args[0] || env.CJCJ_LLVM_DEPOT_ROOT || '/root/llvmdepot';
-    const tuple = `${depotRoot}/${env.LLVM_SHA || ''}/${env.CANGJIE_COMPILER_SHA || ''}`;
+    const tuple = `${depotRoot}/${env.CJCJ_NATIVE_LLVM_REF || ''}/${env.CANGJIE_COMPILER_SHA || ''}`;
     const old = path.join(work, 'retired-entry.bash');
     fs.writeFileSync(old, 'set -e\n' + source + '\npublish_fixed_tuple_to_depot "$@"\n');
     const tools = ['git', 'mkdir', 'cp', 'gzip', 'chmod', 'sha256sum'];

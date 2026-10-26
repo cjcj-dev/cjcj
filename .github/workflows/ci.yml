@@ -250,7 +250,7 @@ jobs:
         with:
           component: runtime-shim
           platform: ubuntu-24.04
-          pin: ${{ env.RUNTIME_REF }}
+          pin: ${{ env.CJCJ_NATIVE_RUNTIME_REF }}
           cache-size: 1G
       - name: Run registered Cangjie package tests
         env:
@@ -343,7 +343,7 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: dist-runtime
-          key: rt-${{ runner.os }}-${{ runner.arch }}-${{ matrix.runner }}-${{ env.RUNTIME_REF }}-${{ env.RUNTIME_VERSION }}-${{ hashFiles('ci/build_patched_runtime.mjs', 'ci/runtime-diagnostics.mjs') }}
+          key: rt-${{ runner.os }}-${{ runner.arch }}-${{ matrix.runner }}-${{ env.CJCJ_NATIVE_RUNTIME_REF }}-${{ env.RUNTIME_VERSION }}-${{ hashFiles('ci/build_patched_runtime.mjs', 'ci/runtime-diagnostics.mjs') }}
       - name: Initialize runtime diagnostics
         run: |
           dir="$GITHUB_WORKSPACE/runtime-diagnostics/${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.runner }}"
@@ -362,7 +362,7 @@ jobs:
         with:
           component: runtime
           platform: ${{ matrix.runner }}
-          pin: ${{ env.RUNTIME_REF }}
+          pin: ${{ env.CJCJ_NATIVE_RUNTIME_REF }}
           cache-size: 1G
       - name: Build patched runtime
         id: rtbuild
@@ -396,7 +396,7 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: dist-runtime
-          key: rt-${{ runner.os }}-${{ runner.arch }}-${{ matrix.runner }}-${{ env.RUNTIME_REF }}-${{ env.RUNTIME_VERSION }}-${{ hashFiles('ci/build_patched_runtime.mjs', 'ci/runtime-diagnostics.mjs') }}
+          key: rt-${{ runner.os }}-${{ runner.arch }}-${{ matrix.runner }}-${{ env.CJCJ_NATIVE_RUNTIME_REF }}-${{ env.RUNTIME_VERSION }}-${{ hashFiles('ci/build_patched_runtime.mjs', 'ci/runtime-diagnostics.mjs') }}
       - name: Install runtime audit dependencies
         run: sudo apt-get update -qq && sudo apt-get install -y -qq libssl-dev
       - name: Install patched runtime

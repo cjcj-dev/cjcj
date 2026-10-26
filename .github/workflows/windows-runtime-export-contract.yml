@@ -10,11 +10,14 @@ on:
       - '.github/workflows/windows-runtime-export-contract.yml'
   workflow_dispatch:
     inputs:
-      runtime_ref:
-        description: Published full runtime commit for normal Windows link (source approval is not DLL qualification)
-        required: true
-        default: 2b020d26a4e11a2464c11d1b0928690a7650b6d7
+      llvm_ref:
+        description: Paired LLVM identity only; empty pair uses current pins
         type: string
+        default: ''
+      runtime_ref:
+        description: Published runtime commit; supply both source identities
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -24,18 +27,22 @@ jobs:
     runs-on: windows-2025
     timeout-minutes: 45
     env:
-      # Requires source publication/exact-fetch before dispatch; never an old binary.
-      RUNTIME_REF: ${{ inputs.runtime_ref || '2b020d26a4e11a2464c11d1b0928690a7650b6d7' }}
       RUNTIME_TARGET: windows-x86_64
       RUNTIME_BUILD_JOBS: '4'
       COMPILER_CALLER_REF: 8ba3eb11c18527d5641794225b901202071d726f
       LLVM_CALLER_REF: de7f37458b456c4a7ef1ebe2726d81fcfd9904c2
     steps:
       - uses: actions/checkout@v7
+      - name: Resolve native source pair
+        id: pin
+        env:
+          CJCJ_NATIVE_LLVM_REF: ${{ inputs.llvm_ref }}
+          CJCJ_NATIVE_RUNTIME_REF: ${{ inputs.runtime_ref }}
+        run: node ci/native-llvm-inputs.mjs
       - uses: actions/checkout@v7
         with:
           repository: cjcj-dev/cangjie-runtime
-          ref: ${{ env.RUNTIME_REF }}
+          ref: ${{ env.CJCJ_NATIVE_RUNTIME_REF }}
           path: runtime-source
       - uses: actions/setup-node@v7.1.0
         with:
@@ -75,7 +82,7 @@ jobs:
         with:
           component: windows-runtime
           platform: windows-x86_64
-          pin: ${{ env.RUNTIME_REF }}
+          pin: ${{ env.CJCJ_NATIVE_RUNTIME_REF }}
       - name: Build through the production MINGW64 entry
         id: native
         shell: bash

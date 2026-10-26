@@ -33,11 +33,6 @@ on:
         type: string
         required: false
         default: "{}"
-      native_source_selection:
-        description: Explicit native source repository and full commit JSON; empty preserves fixed defaults
-        type: string
-        required: false
-        default: '{}'
       native_build_inputs_artifact:
         required: false
         type: string
@@ -107,7 +102,6 @@ jobs:
       source_selection: ${{ inputs.source_selection }}
       native_inputs_artifact: ${{ inputs.native_inputs_artifact }}
       shim_source_selection: ${{ inputs.shim_source_selection }}
-      native_source_selection: ${{ inputs.native_source_selection }}
       native_inputs_run_id: ${{ inputs.native_inputs_run_id }}
       native_runtime_artifact: ${{ inputs.native_runtime_artifact }}
       native_runtime_run_id: ${{ inputs.native_runtime_run_id }}
@@ -123,7 +117,6 @@ jobs:
     needs: [matrix-plan, source-final-std]
     uses: ./.github/workflows/build-release-package.yml
     with:
-      native_source_selection: ${{ inputs.native_source_selection }}
       native_llvm_ref: ${{ inputs.native_llvm_ref }}
       native_runtime_ref: ${{ inputs.native_runtime_ref }}
       native_host_version: ${{ inputs.native_host_version }}

@@ -33,11 +33,6 @@ on:
         type: string
         required: false
         default: "{}"
-      native_source_selection:
-        description: Explicit native source repository and full commit JSON; empty preserves fixed defaults
-        type: string
-        required: false
-        default: '{}'
       native_build_inputs_artifact:
         description: Optional native-cjdb source/dependency artifact prefix; runs the existing producer before SDK configuration
         type: string
@@ -128,7 +123,6 @@ env:
   CJCJ_NATIVE_INPUTS_RUN_ID: ${{ inputs.native_inputs_run_id }}
   CJCJ_NATIVE_BUILD_INPUTS_ARTIFACT: ${{ inputs.native_build_inputs_artifact }}
   CJCJ_NATIVE_BUILD_INPUTS_RUN_ID: ${{ inputs.native_build_inputs_run_id }}
-  CJCJ_NATIVE_SOURCE_SELECTION: ${{ inputs.native_source_selection }}
   CJCJ_SOURCE_SELECTION: ${{ inputs.source_selection }}
 
 defaults:
@@ -323,7 +317,6 @@ jobs:
         if: inputs.native_runtime_artifact != ''
         env:
           CJCJ_NATIVE_INPUT_ROOT: ${{ github.workspace }}/.srcbuild/native-inputs
-          CJCJ_NATIVE_SOURCE_SELECTION: ${{ inputs.native_source_selection }}
         run: node ci/bootstrap/prepare-native-host.mjs
 
       - name: Provision uncoloured host SDK
@@ -405,7 +398,7 @@ jobs:
         with:
           component: srcbuild-stage0
           platform: ${{ matrix.target }}
-          pin: ${{ env.RUNTIME_REF }}
+          pin: ${{ env.CJCJ_NATIVE_RUNTIME_REF }}
           cache-size: 2G
 
       - name: Restore support library cache
@@ -452,7 +445,7 @@ jobs:
             --repo-url "compiler=$CANGJIE_COMPILER_URL" \
             --repo-tag "compiler=$CANGJIE_COMPILER_SHA" \
             --repo-url "runtime=$RUNTIME_SRC_URL" \
-            --repo-tag "runtime=$RUNTIME_REF" \
+            --repo-tag "runtime=$CJCJ_NATIVE_RUNTIME_REF" \
             --repo-url "tools=$TOOLS_SRC_URL" \
             --repo-tag "tools=$TOOLS_REF" \
             --repo-url "stdx=$STDX_SRC_URL" \
@@ -490,12 +483,12 @@ jobs:
           set -euo pipefail
           source ci/llvm_pin.env
           source "ci/llvm-dylib/${{ matrix.llvm_platform }}.env"
-          test "$LLVM_DYLIB_SOURCE_SHA" = "$LLVM_SHA"
+          test "$LLVM_DYLIB_SOURCE_SHA" = "$CJCJ_NATIVE_LLVM_REF"
           test -n "$LLVM_DYLIB_RUN_ID"
           test -n "$LLVM_DYLIB_RUN_ATTEMPT"
           test -n "$LLVM_DYLIB_ARTIFACT_ID"
           cat "ci/llvm-dylib/${{ matrix.llvm_platform }}.env" >> "$GITHUB_ENV"
-          echo "CJCJ_BOOTSTRAP_DYLIB_ARTIFACT=$GITHUB_WORKSPACE/.srcbuild/inputs/llvm-depot/$LLVM_SHA/$CANGJIE_COMPILER_SHA/dylib" >> "$GITHUB_ENV"
+          echo "CJCJ_BOOTSTRAP_DYLIB_ARTIFACT=$GITHUB_WORKSPACE/.srcbuild/inputs/llvm-depot/$CJCJ_NATIVE_LLVM_REF/$CANGJIE_COMPILER_SHA/dylib" >> "$GITHUB_ENV"
 
       - name: Download pinned in-process LLVM dylib
         if: inputs.native_runtime_artifact == '' && (runner.os == 'Linux' || runner.os == 'macOS')
@@ -720,7 +713,6 @@ jobs:
       - name: Configure native bootstrap from actual repositories and target installations
         shell: bash
         env:
-          CJCJ_NATIVE_SOURCE_SELECTION: ${{ inputs.native_source_selection }}
           CJCJ_NATIVE_INPUT_ROOT: ${{ github.workspace }}/.srcbuild/native-inputs
           CJCJ_NATIVE_RUNTIME_INSTALL: ${{ inputs.native_runtime_artifact != '' && format('{0}/.srcbuild/native-runtime-install', github.workspace) || '' }}
           CJCJ_NATIVE_LLVM_REF: ${{ inputs.native_llvm_ref }}
@@ -799,7 +791,7 @@ jobs:
         with:
           component: srcbuild-stage1-initial-std
           platform: ${{ matrix.target }}
-          pin: ${{ env.RUNTIME_REF }}
+          pin: ${{ env.CJCJ_NATIVE_RUNTIME_REF }}
           cache-size: 2G
 
       - name: Restore source SDK version output
@@ -884,7 +876,7 @@ jobs:
         with:
           component: srcbuild-stage1-std
           platform: ${{ matrix.target }}
-          pin: ${{ env.RUNTIME_REF }}
+          pin: ${{ env.CJCJ_NATIVE_RUNTIME_REF }}
           cache-size: 2G
 
       - name: Restore source SDK version output
@@ -969,7 +961,7 @@ jobs:
         with:
           component: srcbuild-stage1-compiler
           platform: ${{ matrix.target }}
-          pin: ${{ env.RUNTIME_REF }}
+          pin: ${{ env.CJCJ_NATIVE_RUNTIME_REF }}
           cache-size: 2G
 
       - name: Restore source SDK version output
@@ -1054,7 +1046,7 @@ jobs:
         with:
           component: srcbuild-stage3
           platform: ${{ matrix.target }}
-          pin: ${{ env.RUNTIME_REF }}
+          pin: ${{ env.CJCJ_NATIVE_RUNTIME_REF }}
           cache-size: 2G
 
       - name: Restore source SDK version output
@@ -1170,7 +1162,7 @@ jobs:
         with:
           component: srcbuild-package
           platform: ${{ matrix.target }}
-          pin: ${{ env.RUNTIME_REF }}
+          pin: ${{ env.CJCJ_NATIVE_RUNTIME_REF }}
           cache-size: 2G
 
       - name: Restore source SDK version output
@@ -1496,7 +1488,7 @@ jobs:
         with:
           component: srcbuild-android
           platform: ${{ matrix.target }}
-          pin: ${{ env.RUNTIME_REF }}
+          pin: ${{ env.CJCJ_NATIVE_RUNTIME_REF }}
           cache-size: 2G
 
       - name: Restore source SDK version output
@@ -1589,7 +1581,7 @@ jobs:
         with:
           component: srcbuild-ohos
           platform: ${{ matrix.runtime_target }}
-          pin: ${{ env.RUNTIME_REF }}
+          pin: ${{ env.CJCJ_NATIVE_RUNTIME_REF }}
           cache-size: 2G
 
       - name: Restore source SDK version output
@@ -1683,7 +1675,7 @@ jobs:
         with:
           component: srcbuild-ios
           platform: ${{ matrix.runtime_target }}
-          pin: ${{ env.RUNTIME_REF }}
+          pin: ${{ env.CJCJ_NATIVE_RUNTIME_REF }}
           cache-size: 2G
 
       - name: Restore source SDK version output
@@ -1783,7 +1775,7 @@ jobs:
         with:
           component: srcbuild-mingw
           platform: ${{ matrix.target }}
-          pin: ${{ env.RUNTIME_REF }}
+          pin: ${{ env.CJCJ_NATIVE_RUNTIME_REF }}
           cache-size: 2G
 
       - name: Restore official MinGW toolchain
@@ -1889,7 +1881,7 @@ jobs:
         with:
           component: srcbuild-windows
           platform: ${{ matrix.target }}
-          pin: ${{ env.RUNTIME_REF }}
+          pin: ${{ env.CJCJ_NATIVE_RUNTIME_REF }}
           cache-size: 2G
 
       - name: Restore source SDK version output

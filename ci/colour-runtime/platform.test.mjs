@@ -15,7 +15,7 @@ for (const [target, platform] of [['linux-x64', 'linux_x86_64'], ['linux-aarch64
     assert.equal(result.status, 0, result.stderr);
     const manifest = JSON.parse(fs.readFileSync(path.join(output, 'manifest.json')));
     assert.equal(manifest.platform, platform);
-    assert.equal(manifest.runtime_sha, env.RUNTIME_REF);
+    assert.equal(manifest.runtime_sha, env.CJCJ_NATIVE_RUNTIME_REF);
     for (const file of [`runtime/lib/${platform}_cjnative/libcangjie-runtime.so`,
       `runtime/lib/${platform}_cjnative/libboundscheck.so`, `lib/${platform}_cjnative/libcangjie-runtime.a`,
       `lib/${platform}_cjnative/libcangjie-std-core.a`, `modules/${platform}_cjnative/std.core.cjo`]) {

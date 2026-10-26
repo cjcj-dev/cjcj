@@ -5,6 +5,17 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {spawnSync} from 'node:child_process';
 
+// The original shell gate declares schema 1 and publishes its CPP exit code.
+// The modern/installed language gate publishes GATE_RC. Do not synthesize a
+// missing exit code or accept an unknown schema as a successful producer.
+export function completedGcUnitGate(fields) {
+  if(fields.get('GATE')!=='PASS')return false;
+  if(fields.has('SCHEMA_VERSION'))return fields.get('SCHEMA_VERSION')==='1'
+    && fields.get('CPP_SUITE')==='PASS' && fields.get('CPP_RUNNER_RC')==='0'
+    && (!fields.has('GATE_RC')||fields.get('GATE_RC')==='0');
+  return fields.get('GATE_RC')==='0';
+}
+
 function file(name, executable=false) {
   fs.accessSync(name, executable ? fs.constants.X_OK : fs.constants.R_OK);
   if (!fs.statSync(name).isFile()) throw Error('LANGUAGE_INPUT_NOT_FILE '+name);

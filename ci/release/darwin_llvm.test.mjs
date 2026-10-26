@@ -23,7 +23,7 @@ function fixture(body) {
   }
   const save = () => fs.writeFileSync(json, JSON.stringify(manifest));
   save();
-  const check = () => verifyDarwinLlvm(root, platform, native ? process.env.LLVM_SHA : 'a'.repeat(40));
+  const check = () => verifyDarwinLlvm(root, platform, native ? process.env.CJCJ_NATIVE_LLVM_REF : 'a'.repeat(40));
   try { body({root, file, manifest, save, check}); }
   finally { fs.rmSync(root, {recursive:true, force:true}); }
 }

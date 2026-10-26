@@ -13,9 +13,10 @@ import {materializeNativeSource} from './sdk-source.mjs';
 export async function buildNativeCjdbJob({input,work,env=process.env}) {
   input=await privateRoot(input);work=await privateRoot(work);
   const selected=await readJson(path.join(input,'native-cjdb.json'));
-  const pair=nativePair(env),platform=hostPlatform();
+  const pair=nativePair(env,{requireHost:false}),platform=hostPlatform();
   if(!pair)throw Error('NATIVE_JOB_PAIR_REQUIRED');
-  const {selection}=nativeSourceSelection(env,pair);
+  const {selection}=nativeSourceSelection(env,pair,{ast:{
+    repository:path.resolve(input,selected.compiler || '.'),commit:selected.commits?.compiler}});
   if(selected.platform!==platform||selected.commits?.llvm!==pair.llvm
     ||selected.commits?.runtime!==pair.runtime||selected.commits?.compiler!==selection.ast.commit)
     throw Error('NATIVE_JOB_SOURCE_PAIR');

@@ -1,6 +1,7 @@
 #!/usr/bin/env zx
 // Native build.py/install integration; records actual installed files, not SDK qualification.
 import fs from 'node:fs';
+import {nativeSourceSelection} from '../bootstrap/native-source-selection.mjs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import assert from 'node:assert/strict';
@@ -15,14 +16,14 @@ const windowsToolchain = fileURLToPath(new URL('./windows_runtime_toolchain.cmak
 const sha = value => /^[a-f0-9]{40}$/.test(value || '');
 const hostPlatform = () => `${process.platform === 'win32' ? 'windows' : process.platform}_${{x64:'x86_64',arm64:'aarch64'}[process.arch] || process.arch}`;
 
-export function configureNativeRuntime({runtimeTarget}, env = process.env) {
+export function configureNativeRuntime({runtimeTarget,selection}, env = process.env) {
+  selection??=nativeSourceSelection(env).selection;
   const windows = hostPlatform() === 'windows_x86_64';
   assert.ok(windows ? runtimeTarget === 'windows-x86_64'
     : runtimeTarget === 'native' && /^(linux|darwin)_(x86_64|aarch64)$/.test(hostPlatform()),
     'NATIVE_RUNTIME_HOST_UNSUPPORTED');
   assert.equal(env.NATIVE_RUNTIME_PLATFORM, hostPlatform(), 'NATIVE_RUNTIME_PLATFORM_MISMATCH');
-  assert.ok(sha(env.LLVM_SHA) && sha(env.RUNTIME_REF), 'NATIVE_RUNTIME_PAIR_REQUIRED');
-  assert.equal(env.RUNTIME_REF, env.CJCJ_NATIVE_RUNTIME_REF, 'NATIVE_RUNTIME_PAIR_MISMATCH');
+  assert.ok(sha(selection.llvm.commit) && sha(selection.runtime.commit), 'NATIVE_RUNTIME_PAIR_REQUIRED');
   assert.ok(env.RUNTIME_VERSION, 'NATIVE_RUNTIME_VERSION_REQUIRED');
   if (windows) assert.ok(/^\d+\.\d+\.\d+-alpha\.\d+$/.test(env.CJCJ_NATIVE_HOST_VERSION || ''), 'NATIVE_RUNTIME_HOST_VERSION_REQUIRED');
   assert.ok(path.isAbsolute(env.SCCACHE_PATH || '') && fs.existsSync(env.SCCACHE_PATH),
@@ -92,14 +93,15 @@ export function installNativeRuntimeDependencies({source, installRoot, buildType
 
 // Normal native build/install carries the actual test sources, generated
 // headers and compile command used by the later installed language gate.
-export function installNativeRuntimeInputs({source,installRoot,gateStatus}) {
+export function installNativeRuntimeInputs({source,installRoot,gateStatus,selection}) {
   if(process.platform!=='linux')return;
-  const config=buildConfig({targetKey:process.arch==='arm64'?'linux-aarch64':'linux-x64'});
+  const config=buildConfig({targetKey:process.arch==='arm64'?'linux-aarch64':'linux-x64',nativeSelection:selection});
   installGcUnitInputs(config,path.join(source,'runtime'),installRoot,{gateStatus});
 }
 
-export async function recordNativeRuntime({source, installRoot, actualRef, version, buildType, commands}, env = process.env) {
-  assert.equal(actualRef, env.RUNTIME_REF, 'NATIVE_RUNTIME_SOURCE_MISMATCH');
+export async function recordNativeRuntime({source, installRoot, actualRef, version, buildType, commands,selection,repository=source}, env = process.env) {
+  selection??=nativeSourceSelection(env).selection;
+  assert.equal(actualRef, selection.runtime.commit, 'NATIVE_RUNTIME_SOURCE_MISMATCH');
   if (process.platform === 'win32') assert.ok(Array.isArray(commands) && commands.length > 0, 'NATIVE_RUNTIME_COMMANDS_REQUIRED');
   const platform = hostPlatform();
   const suffix = process.platform === 'darwin' ? 'dylib' : process.platform === 'win32' ? 'dll' : 'so';
@@ -142,9 +144,8 @@ export async function recordNativeRuntime({source, installRoot, actualRef, versi
       compilerCache[language] = {mode:'compiler-wrapper', compiler, cache:env.SCCACHE_PATH};
     }
   }
-  const repository=env.RUNTIME_GIT_REPOSITORY || source;
-  const sourceRepository=env.RUNTIME_SOURCE_REPOSITORY || await runtimeSourceRepository(repository);
-  const configuration={buildType,version,hostVersion:env.CJCJ_NATIVE_HOST_VERSION||version,pairedLlvmCommit:env.LLVM_SHA};
+  const sourceRepository=await runtimeSourceRepository(repository);
+  const configuration={buildType,version,hostVersion:env.CJCJ_NATIVE_HOST_VERSION||version,pairedLlvmCommit:selection.llvm.commit};
   const artifacts=[required[0],required[2]];
   const stamps=embeddedStamp(fs.readFileSync(path.join(installRoot,artifacts[0])),'CJRT-COMMIT');
   let runtimeInputs;
@@ -175,7 +176,7 @@ export async function recordNativeRuntime({source, installRoot, actualRef, versi
   }
   walk(installRoot);
   fs.writeFileSync(path.join(installRoot, 'NATIVE-INPUTS.json'), JSON.stringify({
-    runtime_sha:actualRef, paired_llvm_sha:env.LLVM_SHA, platform, version, build_type:buildType,
+    runtime_sha:actualRef, paired_llvm_sha:selection.llvm.commit, platform, version, build_type:buildType,
     source:runtimeInputs.source, configuration,
     producer_sha:env.GITHUB_SHA || null, run_id:env.GITHUB_RUN_ID || null,
     run_attempt:env.GITHUB_RUN_ATTEMPT || null, compiler_cache:env.SCCACHE_PATH,

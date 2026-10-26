@@ -54,14 +54,25 @@ export function fixture(root, table, {baseline = false} = {}) {
   fs.mkdirSync(path.join(copy, 'build/lib'), {recursive: true});
   const entry = path.join(copy, 'ci', baseline ? 'original.bash' : 'fetch-llvm-runtime.mjs');
   if (baseline) fs.writeFileSync(entry, originalSource());
-  else fs.copyFileSync(path.join(repo, 'ci/fetch-llvm-runtime.mjs'), entry);
+  else {
+    fs.copyFileSync(path.join(repo, 'ci/fetch-llvm-runtime.mjs'), entry);
+    // Copy the real module import closure, including its pin data. Only the
+    // ordinary runtime pin below points at this isolated Git transport input.
+    const pending=['ci/native-llvm-inputs.mjs','ci/bootstrap/native-source-selection.mjs'],seen=new Set();
+    while(pending.length){const member=pending.pop();if(seen.has(member))continue;seen.add(member);
+      const text=fs.readFileSync(path.join(repo,member),'utf8'),target=path.join(copy,member);
+      fs.mkdirSync(path.dirname(target),{recursive:true});fs.writeFileSync(target,text);
+      for(const match of text.matchAll(/(?:from\s*|import\s*)['"](\.[^'"]+\.mjs)['"]/g))pending.push(path.normalize(path.join(path.dirname(member),match[1])));
+    }
+    for(const member of ['llvm_pin.env','source_pin.env','host_sdk_pin.env'])fs.copyFileSync(path.join(repo,'ci',member),path.join(copy,'ci',member));
+  }
   fs.copyFileSync(path.join(repo, 'build/lib/srcbuild_git.sh'), path.join(copy, 'build/lib/srcbuild_git.sh'));
   // Only the adjacent data pin changes: both unchanged product entries use the
   // same real Git fixture. No network runtime revision or native claim is made.
   fs.writeFileSync(path.join(copy, 'ci/runtime_pin.env'), `RUNTIME_REF=${sha}\nRUNTIME_SRC_URL=${table.privateEnv[table.urlVariable]}\n`);
   const cleanEnv = {...process.env, LC_ALL: 'C', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null'};
   for (const key of new Set([...Object.keys(table.privateEnv), 'RUNTIME_REF', 'RUNTIME_SRC_URL', 'GIT_TRACE',
-    'GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'CJCJ_SRCBUILD_SOURCE_MIRRORS', 'CJCJ_SRCBUILD_REQUIRE_MIRRORS'])) delete cleanEnv[key];
+    'CJCJ_NATIVE_LLVM_REF', 'CJCJ_NATIVE_RUNTIME_REF', 'GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'CJCJ_SRCBUILD_SOURCE_MIRRORS', 'CJCJ_SRCBUILD_REQUIRE_MIRRORS'])) delete cleanEnv[key];
   cleanEnv.CJCJ_SRCBUILD_SOURCE_MIRRORS = `${table.privateEnv[table.urlVariable]}=file://${origin}`;
   cleanEnv.CJCJ_SRCBUILD_REQUIRE_MIRRORS = '1';
   const execute = (input, index) => {
@@ -97,6 +108,15 @@ export function fixture(root, table, {baseline = false} = {}) {
     for (const [key, value] of Object.entries(input.env)) {
       if (value === undefined) delete env[key];
       else env[key] = value === table.privateEnv[table.shaVariable] ? sha : value;
+    }
+    if(!baseline) {
+      // Historical witnesses retain their original environment in the saved
+      // baseline. The current public caller supplies the sole canonical pair.
+      const explicit=input.canonical ?? (input.env[table.modeVariable || Object.keys(table.privateEnv)[0]]==='private');
+      if(explicit){env.CJCJ_NATIVE_LLVM_REF=sha;env.CJCJ_NATIVE_RUNTIME_REF=env[table.shaVariable]??'';}
+      for(const [key,value] of Object.entries(input.canonicalEnv||{})){
+        if(value===undefined)delete env[key];else env[key]=value==='$SHA'?sha:value;
+      }
     }
     const args = input.args.map(arg => arg === '$DEST' ? dest : arg);
     const result = command([...(baseline ? ['bash'] : ['npx', '--yes', 'zx@8']), entry, ...args], {env, cwd: root});

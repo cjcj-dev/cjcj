@@ -22,7 +22,7 @@ if (process.platform !== 'linux' || process.arch !== 'x64') {
 const workspace = path.resolve(required('CANGJIE_WORKSPACE'));
 if (workspace === path.parse(workspace).root) throw new Error('workspace must not be a filesystem root');
 const version = required('CJCJ_STAGE3_CANGJIE_VERSION');
-const expectedRef = required('RUNTIME_REF');
+const expectedRef = required('CJCJ_NATIVE_RUNTIME_REF');
 const probe = probeRequirement('android-ndk');
 if (!probe.present) throw new Error(probe.detail);
 const ndk = path.resolve(probe.detail.slice(probe.detail.indexOf('=') + 1));

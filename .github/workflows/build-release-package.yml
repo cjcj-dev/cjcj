@@ -3,10 +3,6 @@ name: Build release package
 on:
   workflow_call:
     inputs:
-      native_source_selection:
-        required: false
-        type: string
-        default: '{}'
       native_llvm_ref:
         required: false
         type: string
@@ -86,7 +82,6 @@ jobs:
       CJCJ_NATIVE_LLVM_REF: ${{ inputs.native_llvm_ref }}
       CJCJ_NATIVE_RUNTIME_REF: ${{ inputs.native_runtime_ref }}
       CJCJ_NATIVE_HOST_VERSION: ${{ inputs.native_host_version }}
-      CJCJ_NATIVE_SOURCE_SELECTION: ${{ inputs.native_source_selection }}
       RELEASE_LLVM_PLATFORM: ${{ inputs.llvm_platform }}
       RELEASE_RUNTIME_TUPLE: ${{ inputs.sdk_runtime_dir }}
       RELEASE_PLATFORM: ${{ inputs.platform }}

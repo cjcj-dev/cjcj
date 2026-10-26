@@ -116,7 +116,7 @@ if sys.argv[1]=='install':
  for(const key of ['CJCJ_SRCBUILD_HOST_SDK','CJCJ_OFFICIAL_SDK_ROOT','CJCJ_SRCBUILD_CONSUMER_SDK','CJCJ_SRCBUILD_VERIFIER_REPORT_ACTIVE','CANGJIE_BUILD_DRY_RUN','CJCJ_NATIVE_RUNTIME_INSTALL','CJCJ_NATIVE_RUNTIME_SOURCE','CJCJ_NATIVE_SOURCE_SELECTION','CJCJ_NATIVE_RUNTIME_REF','CJCJ_NATIVE_LLVM_REF'])delete base[key];
  function invoke(stage,{mode='missing',explicit=true,selected=host,native=false,extra={}}={}) {
   const env={...base,...(mode==='conflict'?{CJCJ_SRCBUILD_HOST_SDK:root+'/stale-host'}:mode==='same'?{CJCJ_SRCBUILD_HOST_SDK:host}:{}),...extra};
-  if(native)Object.assign(env,{CJCJ_NATIVE_RUNTIME_INSTALL:seed,CJCJ_NATIVE_RUNTIME_REF:choices.runtime.tag,CJCJ_NATIVE_LLVM_REF:choices.llvm.tag,CJCJ_NATIVE_HOST_VERSION:'1.0.0',CJCJ_NATIVE_SOURCE_SELECTION:JSON.stringify(Object.fromEntries(['runtime','llvm'].map(n=>[n,{repository:choices[n].url,commit:choices[n].tag}])))});
+  if(native)Object.assign(env,{CJCJ_NATIVE_RUNTIME_INSTALL:seed,CJCJ_NATIVE_RUNTIME_REF:choices.runtime.tag,CJCJ_NATIVE_LLVM_REF:choices.llvm.tag,CJCJ_NATIVE_HOST_VERSION:'1.0.0'});
   const args=[new URL('../cli.mjs',import.meta.url).pathname,'--workspace',workspace,'--build-root',root+'/buildtools',...(explicit?['--official-sdk-root',selected]:[]),...(stage==='verify'?['verify']:['build',stage])];
   return command(stage+'-'+mode+(native?'-native':''),process.execPath,args,env);
  }

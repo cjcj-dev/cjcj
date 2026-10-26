@@ -25,7 +25,7 @@ fi
 
 {
     printf '### fixed LLVM tuple `%s`\n\n' "${TUPLE_PLATFORM:-unknown}"
-    printf -- '- LLVM pin: `%s`\n' "${LLVM_SHA:-unknown}"
+    printf -- '- LLVM pin: `%s`\n' "${CJCJ_NATIVE_LLVM_REF:-unknown}"
     printf -- '- runner: `%s` (`%s` / `%s`)\n' "${RUNNER_NAME:-unknown}" "${RUNNER_OS:-unknown}" "${RUNNER_ARCH:-unknown}"
     printf -- '- dependency setup: msys2=`%s`, linux=`%s`, macOS=`%s`\n' \
         "${MSYS2_OUTCOME:-skipped}" "${LINUX_DEPS_OUTCOME:-skipped}" "${MACOS_DEPS_OUTCOME:-skipped}"

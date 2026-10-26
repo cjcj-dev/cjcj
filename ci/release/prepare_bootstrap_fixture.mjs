@@ -53,7 +53,7 @@ export function fixture(check, target = 'linux-x64') {
     const env = {...process.env, CJCJ_SRCBUILD_TARGET: target, CJCJ_BOOTSTRAP_COLOUR_DYLIB: dylibFallback, CJCJ_BOOTSTRAP_DYLIB_ARTIFACT: dylib, LLVM_DYLIB_SHA256: dylibSha, GITHUB_ENV: '', CJCJ_SRCBUILD_HOST_SDK: sdk,
       CJCJ_BOOTSTRAP_HOST_LLVM_SO: so, CJCJ_BOOTSTRAP_AST_SUPPORT: ast,
       CJCJ_BOOTSTRAP_SOURCE: 'depot', CJCJ_BOOTSTRAP_SOURCE_REASON: 'fixture explicit depot', CJCJ_BOOTSTRAP_INPUTS_WORK: path.join(dir, 'work'), CJCJ_BOOTSTRAP_COLOUR_TUPLE: fallback,
-      CJCJ_BOOTSTRAP_CPP_SRC: sdk, LLVM_SHA: 'a'.repeat(40), LLVM_DYLIB_SOURCE_SHA: 'a'.repeat(40),
+      CJCJ_BOOTSTRAP_CPP_SRC: sdk, CJCJ_NATIVE_LLVM_REF: 'a'.repeat(40), LLVM_DYLIB_SOURCE_SHA: 'a'.repeat(40),
       CJCJ_BOOTSTRAP_CJCJ_SHA: 'b'.repeat(40), LLVM_TUPLE_SUMS_SHA: digest,
       AST_SUPPORT_SHA256: crypto.createHash('sha256').update('ast fixture').digest('hex')};
     const hostArtifact = path.join(dir, 'host-artifact');
@@ -103,21 +103,21 @@ export function fixture(check, target = 'linux-x64') {
         GIT_AUTHOR_DATE: '2000-01-01T00:00:00Z', GIT_COMMITTER_DATE: '2000-01-01T00:00:00Z'}});
       if (result.status !== 0) throw new Error(result.stderr);
     }
-    env.RUNTIME_REF = spawnSync('git', ['-C', runtimeSource, 'rev-parse', 'HEAD'], {encoding: 'utf8'}).stdout.trim();
-    env.LLVM_SHA = env.RUNTIME_REF;
-    env.LLVM_DYLIB_SOURCE_SHA = env.RUNTIME_REF;
-    env.CJCJ_RUNTIME_REF_OVERRIDE = env.RUNTIME_REF;
+    env.CJCJ_NATIVE_RUNTIME_REF = spawnSync('git', ['-C', runtimeSource, 'rev-parse', 'HEAD'], {encoding: 'utf8'}).stdout.trim();
+    env.CJCJ_NATIVE_LLVM_REF = env.CJCJ_NATIVE_RUNTIME_REF;
+    env.LLVM_DYLIB_SOURCE_SHA = env.CJCJ_NATIVE_RUNTIME_REF;
+    env.CJCJ_RUNTIME_REF_OVERRIDE = env.CJCJ_NATIVE_RUNTIME_REF;
     env.CJCJ_ALLOW_RUNTIME_OVERRIDE = 'true';
     for (const root of [artifact, fallback]) fs.writeFileSync(path.join(root,'MANIFEST'),
-      `PLATFORM=${tuplePlatform}\nLLVM_SHA=${env.LLVM_SHA}\nRUNTIME_REF=${env.RUNTIME_REF}\n`);
+      `PLATFORM=${tuplePlatform}\nLLVM_SHA=${env.CJCJ_NATIVE_LLVM_REF}\nRUNTIME_REF=${env.CJCJ_NATIVE_RUNTIME_REF}\n`);
     for (const root of [dylib, dylibFallback]) {
       const manifest = path.join(root, 'manifest.json');
       fs.writeFileSync(manifest, JSON.stringify({...JSON.parse(fs.readFileSync(manifest)),
-        llvm_sha: env.LLVM_SHA, runtime_sha: env.RUNTIME_REF, platform: tuplePlatform,
+        llvm_sha: env.CJCJ_NATIVE_LLVM_REF, runtime_sha: env.CJCJ_NATIVE_RUNTIME_REF, platform: tuplePlatform,
         library: target.startsWith('darwin-') ? 'libLLVM.dylib' : 'libLLVM-15.so'}));
     }
-    fs.writeFileSync(path.join(runtimeSource, 'SOURCE_SHA'), env.RUNTIME_REF);
-    prepareRuntime(runtimeSource, runtime, {RUNTIME_REF: env.RUNTIME_REF, COLOUR_RT_PLATFORM: platform,
+    fs.writeFileSync(path.join(runtimeSource, 'SOURCE_SHA'), env.CJCJ_NATIVE_RUNTIME_REF);
+    prepareRuntime(runtimeSource, runtime, {CJCJ_NATIVE_RUNTIME_REF: env.CJCJ_NATIVE_RUNTIME_REF, COLOUR_RT_PLATFORM: platform,
       GITHUB_RUN_ID: '123', GITHUB_RUN_ATTEMPT: '1'});
     Object.assign(env, {CJCJ_BOOTSTRAP_COLOUR_RT: runtime, COLOUR_RT_RUN_ID: '123',
       COLOUR_RT_RUN_ATTEMPT: '1', COLOUR_RT_ARTIFACT_ID: '456',

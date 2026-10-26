@@ -2,10 +2,10 @@
 // artifact, native installation or SDK has passed its consuming gates.
 import {nativePair} from '../runtime-pin.mjs';
 export function nativeSourceRoute(env=process.env) {
-  const pair=nativePair(env);
+  const pair=nativePair(env,{requireHost:Boolean(env.CJCJ_NATIVE_RUNTIME_ARTIFACT||env.CJCJ_NATIVE_BUILD_INPUTS_ARTIFACT)});
   const runtime=env.CJCJ_NATIVE_RUNTIME_ARTIFACT||'';
   const build=env.CJCJ_NATIVE_BUILD_INPUTS_ARTIFACT||'';
-  if(!pair&&!runtime&&!build)return false;
+  if(!runtime&&!build&&!env.CJCJ_NATIVE_INPUTS_ARTIFACT)return false;
   if(!pair||!runtime)throw Error('SOURCE_NATIVE_PAIR_AND_RUNTIME_REQUIRED');
   for(const [artifact,run] of [
     [runtime,env.CJCJ_NATIVE_RUNTIME_RUN_ID],

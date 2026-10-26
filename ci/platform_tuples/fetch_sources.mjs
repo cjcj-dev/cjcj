@@ -23,7 +23,7 @@ await entry(async () => {
     }
     const runtime = path.join(repo, 'ci/fetch-llvm-runtime.mjs');
     await run(['npx', '--yes', 'zx@8', runtime, '--check-input', `${root}/paired-runtime`]);
-    await fetchExact(required('LLVM_URL', 32), required('LLVM_SHA', 32), `${root}/llvm-project`);
+    await fetchExact(required('LLVM_URL', 32), required('CJCJ_NATIVE_LLVM_REF', 32), `${root}/llvm-project`);
     await run(['npx', '--yes', 'zx@8', runtime, `${root}/paired-runtime`]);
     // Original diagnostic pipeline is explicitly best effort (including missing header).
     await run(['bash', '-c', 'set -o pipefail; sed -n \'/enum EnumReflectionType/,/};/p\' "$1" | grep -c \'^  ERT_\' || true',

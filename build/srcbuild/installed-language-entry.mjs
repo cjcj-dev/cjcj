@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {spawnSync} from 'node:child_process';
-import {languageInputs} from './installed-language-inputs.mjs';
+import {languageInputs,completedGcUnitGate} from './installed-language-inputs.mjs';
 
 const unit=path.dirname(fileURLToPath(import.meta.url)),runtime=path.resolve(unit,'../..');
 const env={...process.env},root=env.GC_UNIT_OUT;
@@ -36,7 +36,7 @@ function payload(name,member,args=[]) {
 try {
   if(env.GC_UNIT_GATE_LANGUAGE_TESTS!=='only'||env.GC_UNIT_GATE_SKIP==='1')fail('installed language requires fresh only mode');
   const previous=fields(path.join(runtime,'CMakebuild/gc-unit.status'));
-  if(previous.get('GATE')!=='PASS'||previous.get('GATE_RC')!=='0'||previous.get('CPP_SUITE')!=='PASS')fail('native CPP result required');
+  if(!completedGcUnitGate(previous)||previous.get('CPP_SUITE')!=='PASS')fail('native CPP result required');
   result.CPP_SUITE='PASS';result.CPP_SUITE_SOURCE='NATIVE_PRODUCER';
   const inputs=languageInputs(env);env.CANGJIE_HOME=inputs.sdk;env.CJC=inputs.cjc;
   const headers=env.GCV2_RUNTIME_OUTPUT_ROOT;file(path.join(headers,'include/schedule.h'));

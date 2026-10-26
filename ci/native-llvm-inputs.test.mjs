@@ -7,26 +7,26 @@ function fixture(check) {
  try {
   const output=path.join(root,'environment');
   const run=extra=>spawnSync(process.execPath,['ci/native-llvm-inputs.mjs'],{encoding:'utf8',env:{...process.env,
-   NATIVE_LLVM_REF:'',NATIVE_RUNTIME_REF:'',GITHUB_ENV:output,GITHUB_OUTPUT:path.join(root,'outputs'),...extra}});
+   CJCJ_NATIVE_LLVM_REF:'',CJCJ_NATIVE_RUNTIME_REF:'',GITHUB_ENV:output,GITHUB_OUTPUT:path.join(root,'outputs'),...extra}});
   check({run,output});
  } finally {fs.rmSync(root,{recursive:true,force:true});}
 }
 test('native LLVM default preserves the repository source pair',()=>fixture(({run,output})=>{
  const result=run();assert.equal(result.status,0,result.stderr);
- for(const [file,key,outKey] of [['ci/llvm_pin.env','LLVM_SHA','LLVM_SHA'],['ci/llvm_pin.env','LLVM_SHA','CJCJ_NATIVE_LLVM_REF'],['ci/runtime_pin.env','RUNTIME_REF','CJCJ_NATIVE_RUNTIME_REF']]) {
+ for(const [file,key,outKey] of [['ci/llvm_pin.env','LLVM_SHA','CJCJ_NATIVE_LLVM_REF'],['ci/runtime_pin.env','RUNTIME_REF','CJCJ_NATIVE_RUNTIME_REF']]) {
   const ref=new RegExp(`^${key}=([a-f0-9]{40})$`,'m').exec(fs.readFileSync(file,'utf8'))[1];
   assert.ok(fs.readFileSync(output,'utf8').includes(`${outKey}=${ref}\n`));
  }
  assert.doesNotMatch(result.stdout,/CJCJ_LLVM_RUNTIME_MODE/);
 }));
 test('native LLVM explicit complete pair reaches producer environment',()=>fixture(({run,output})=>{
- const result=run({NATIVE_LLVM_REF:llvm,NATIVE_RUNTIME_REF:runtime});assert.equal(result.status,0,result.stderr);
- const env=fs.readFileSync(output,'utf8');assert.ok(env.includes(`LLVM_SHA=${llvm}\n`));
+ const result=run({CJCJ_NATIVE_LLVM_REF:llvm,CJCJ_NATIVE_RUNTIME_REF:runtime});assert.equal(result.status,0,result.stderr);
+ const env=fs.readFileSync(output,'utf8');assert.doesNotMatch(env,/^LLVM_SHA=/m);
  assert.ok(env.includes(`CJCJ_NATIVE_LLVM_REF=${llvm}\n`));
- assert.ok(env.includes(`CJCJ_LLVM_RUNTIME_SHA=${runtime}\n`));assert.match(env,/CJCJ_LLVM_RUNTIME_MODE=private/);
+ assert.ok(env.includes(`CJCJ_NATIVE_RUNTIME_REF=${runtime}\n`));assert.doesNotMatch(env,/CJCJ_LLVM_RUNTIME_/);
 }));
-for(const [name,extra,reason] of [['partial',{NATIVE_LLVM_REF:llvm},'NATIVE_LLVM_PAIR_REQUIRED'],
- ['abbreviated',{NATIVE_LLVM_REF:'db51',NATIVE_RUNTIME_REF:runtime},'NATIVE_LLVM_REF_INVALID']]) {
+for(const [name,extra,reason] of [['partial',{CJCJ_NATIVE_LLVM_REF:llvm},'NATIVE_RUNTIME_EXPLICIT_PAIR_REQUIRED'],
+ ['abbreviated',{CJCJ_NATIVE_LLVM_REF:'db51',CJCJ_NATIVE_RUNTIME_REF:runtime},'NATIVE_LLVM_REF_INVALID']]) {
  test(`native LLVM rejects ${name} pair before export`,()=>fixture(({run,output})=>{
   const result=run(extra);assert.equal(result.status,1);assert.ok(result.stderr.includes(reason));assert.equal(fs.existsSync(output),false);
  }));
@@ -37,7 +37,7 @@ test('formal native workflow passes source pair through cache and layout produce
  for(const key of ['llvm_ref','runtime_ref']) assert.equal(entry.jobs.tuple.with[key],`\${{ inputs.${key} }}`);
  for(const job of ['build-tools','static-tuple']) {
   const load=producer.jobs[job].steps.find(step=>step.run==='node ci/native-llvm-inputs.mjs');assert.ok(load,job);
-  assert.equal(load.env.NATIVE_LLVM_REF,'${{ inputs.llvm_ref }}');assert.equal(load.env.NATIVE_RUNTIME_REF,'${{ inputs.runtime_ref }}');
+  assert.equal(load.env.CJCJ_NATIVE_LLVM_REF,'${{ inputs.llvm_ref }}');assert.equal(load.env.CJCJ_NATIVE_RUNTIME_REF,'${{ inputs.runtime_ref }}');
  }
  const cache=producer.jobs['build-tools'].steps.find(step=>step.id==='cache');assert.match(cache.with.key,/steps\.llvm-pin\.outputs\.runtime_sha/);
  const layout=producer.jobs['static-tuple'].steps.find(step=>step.name==='Publish the shared ten-payload layout');
@@ -52,8 +52,8 @@ test('formal native entry passes the complete pair and platform subset to the dy
  }
  const load=dylib.jobs.dylib.steps.find(step=>step.id==='pin');
  assert.equal(load.run,'node ci/native-llvm-inputs.mjs');
- assert.equal(load.env.NATIVE_LLVM_REF,'${{ inputs.llvm_ref }}');
- assert.equal(load.env.NATIVE_RUNTIME_REF,'${{ inputs.runtime_ref }}');
+ assert.equal(load.env.CJCJ_NATIVE_LLVM_REF,'${{ inputs.llvm_ref }}');
+ assert.equal(load.env.CJCJ_NATIVE_RUNTIME_REF,'${{ inputs.runtime_ref }}');
  const build=dylib.jobs.dylib.steps.find(step=>step.name==='Build three-target shared LLVM');
  assert.match(build.run,/ci\/fetch-llvm-runtime.mjs paired-runtime/);
  assert.match(build.run,/ci\/llvm-dylib\/record-manifest.mjs depot\/dylib llvm-fork paired-runtime/);
@@ -84,4 +84,14 @@ test('canonical compiler pin reaches the native producer and SDK header defaults
  assert.equal(observed.sdk.compiler,source.COMPILER_REF);assert.equal(observed.shim.compiler,source.COMPILER_REF);
  assert.equal(observed.selected.compiler.repository,source.COMPILER_SRC_URL);
  for(const name of ['llvm','runtime','compiler','flatbuffers'])assert.equal(observed.shim[name],observed.sdk[name]);
+}));
+
+test('retired environment aliases cannot override the canonical source pair',()=>fixture(({run,output})=>{
+ const retired={NATIVE_LLVM_REF:'f'.repeat(40),NATIVE_RUNTIME_REF:'f'.repeat(40),LLVM_SHA:'f'.repeat(40),
+  RUNTIME_REF:'f'.repeat(40),RUNTIME_GIT_REPOSITORY:'/not-selected',CJCJ_LLVM_RUNTIME_MODE:'private',
+  CJCJ_LLVM_RUNTIME_URL:'file:///not-selected',CJCJ_LLVM_RUNTIME_SHA:'f'.repeat(40),CJCJ_NATIVE_SOURCE_SELECTION:'invalid json'};
+ const result=run({...retired,CJCJ_NATIVE_LLVM_REF:llvm,CJCJ_NATIVE_RUNTIME_REF:runtime});
+ assert.equal(result.status,0,result.stderr);const rows=Object.fromEntries(fs.readFileSync(output,'utf8').trim().split('\n').map(line=>line.split('=')));
+ assert.equal(rows.CJCJ_NATIVE_LLVM_REF,llvm);assert.equal(rows.CJCJ_NATIVE_RUNTIME_REF,runtime);
+ for(const key of Object.keys(retired))assert.equal(Object.hasOwn(rows,key),false,key);
 }));

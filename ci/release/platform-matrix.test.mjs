@@ -123,7 +123,7 @@ test('runtime build entry refuses an unusable gdb and records the root cause', {
   const result = spawnSync('npx', ['--yes', 'zx@8', 'ci/platform_matrix/build_runtime.mjs'], {
     cwd: root, encoding: 'utf8', timeout: 110000,
     env: {...process.env, PATH: `${tools}${path.delimiter}${process.env.PATH}`, RUNTIME_SOURCE: source,
-      RUNTIME_REF: '', RUNTIME_TARGET: 'native', RUNTIME_TOOLCHAIN: '', PLATFORM_CI_ROOT: output,
+      CJCJ_NATIVE_RUNTIME_REF: '', RUNTIME_TARGET: 'native', RUNTIME_TOOLCHAIN: '', PLATFORM_CI_ROOT: output,
       BUILD_CALLS: calls, GITHUB_STEP_SUMMARY: path.join(temporary, 'summary.md')},
   });
   assert.equal(result.status, 1, result.stdout + result.stderr);

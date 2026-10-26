@@ -430,7 +430,7 @@ for (const runtimeMode of ['git','archive']) test('G2 workflow capture and gate 
     await fs.mkdir(path.dirname(destination), {recursive: true});
     await fs.copyFile(files[name], destination);
     const commit = name.startsWith('runtime_') ? state.runtimePin
-      : name.startsWith('llvm_') ? LLVM_SHA : name === 'cjcj' ? CJCJ_SHA : STD_SHA;
+      : name.startsWith('llvm_') ? CJCJ_NATIVE_LLVM_REF: name === 'cjcj' ? CJCJ_SHA : STD_SHA;
     expected[name] = {
       artifact_path: destination,
       sha256: crypto.createHash('sha256').update(bytes).digest('hex'),

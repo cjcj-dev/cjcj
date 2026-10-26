@@ -17,7 +17,7 @@ const env = {...process.env, CJCJ_SRCBUILD_TARGET:normal.target,
   CJCJ_BOOTSTRAP_HOST_LLVM_ARTIFACT:normal.inputs.host_llvm,
   CJCJ_BOOTSTRAP_DYLIB_ARTIFACT:normal.inputs.colour_llvm,
   CJCJ_BOOTSTRAP_COLOUR_RT:normal.inputs.runtime,
-  LLVM_SHA:normal.sources.llvm, RUNTIME_REF:normal.sources.runtime};
+  CJCJ_NATIVE_LLVM_REF:normal.sources.llvm, CJCJ_NATIVE_RUNTIME_REF:normal.sources.runtime};
 const results = {};
 for (const arm of ['candidate', 'cut', 'restored']) {
   const root = path.join(out, arm); copyDarwinControlSource(root);

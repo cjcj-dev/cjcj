@@ -17,7 +17,7 @@ function fixture(body) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'darwin-runtime-'));
   const source = path.join(root, 'source');
   const output = path.join(root, 'output');
-  const env = {...process.env, RUNTIME_REF: process.env.RUNTIME_REF || 'a'.repeat(40),
+  const env = {...process.env, CJCJ_NATIVE_RUNTIME_REF: process.env.CJCJ_NATIVE_RUNTIME_REF || 'a'.repeat(40),
     GITHUB_RUN_ID: '123', GITHUB_RUN_ATTEMPT: '1', COLOUR_RT_RUN_ID: '123', COLOUR_RT_RUN_ATTEMPT: '1'};
   for (const relative of files) {
     const dest = path.join(source, relative);
@@ -25,7 +25,7 @@ function fixture(body) {
     if (process.env.DARWIN_RT_NATIVE_SOURCE) fs.copyFileSync(path.join(process.env.DARWIN_RT_NATIVE_SOURCE, relative), dest);
     else fs.writeFileSync(dest, `fixture for device test: ${relative}`);
   }
-  fs.writeFileSync(path.join(source, 'SOURCE_SHA'), env.RUNTIME_REF);
+  fs.writeFileSync(path.join(source, 'SOURCE_SHA'), env.CJCJ_NATIVE_RUNTIME_REF);
   const run = (mode, dir = output, reference) => spawnSync(process.execPath,
     [product, mode, dir, platform, ...(reference ? [reference] : [])], {env, encoding: 'utf8'});
   try {

@@ -50,7 +50,7 @@ function invoke(label, changes = {}) {
   const env = {...base, ...step.env, TUPLE_PLATFORM: 'windows_x86_64', LLVM_TARGETS: 'X86',
     CJCJ_LLVM_RUNTIME_MODE: 'private', CJCJ_LLVM_RUNTIME_URL: url, CJCJ_LLVM_RUNTIME_SHA: sha,
     CJCJ_SRCBUILD_REQUIRE_MIRRORS: '1', CJCJ_SRCBUILD_SOURCE_MIRRORS: `${url}=file://${input};file://${input}=file://${input}`,
-    LLVM_URL: `file://${input}`, LLVM_SHA: sha, CANGJIE_COMPILER_URL: `file://${input}`, CANGJIE_COMPILER_SHA: sha,
+    LLVM_URL: `file://${input}`, CJCJ_NATIVE_LLVM_REF: sha, CANGJIE_COMPILER_URL: `file://${input}`, CANGJIE_COMPILER_SHA: sha,
     FLATBUFFERS_URL: `file://${input}`, FLATBUFFERS_SHA: sha, G2_CMAKE_CAPTURE: capture,
     GIT_TRACE: path.join(cwd, 'fetch.trace'), PATH: `${path.join(cwd, 'bin')}:${base.PATH}`, ...changes};
   fs.writeFileSync(path.join(cwd, 'workflow-command.json'), JSON.stringify({run: step.run, env: Object.fromEntries(Object.entries(env).filter(([key]) => !(key in base)))}, null, 2));

@@ -44,7 +44,7 @@ registerHooks({load(url,context,next){
 }});`);
  const env={...process.env,PATH:bin+':'+process.env.PATH,WINDOWS_SHELL_EVIDENCE:evidence,
   MSYS2_BASH:bash,SHELL_CC:bin+'/clang.exe',SHELL_CALLS:root+'/calls.jsonl',SHELL_LAUNCH:root+'/launch.json',FIXTURE_BUILD_RC:fail?'37':'0',
-  PLATFORM_CI_ROOT:out,RUNTIME_SOURCE:source,RUNTIME_REF:ref,RUNTIME_TARGET:'windows-x86_64',RUNTIME_BUILD_TYPE:'release',RUNTIME_VERSION:"1.3.0-fixture's",RUNTIME_BUILD_JOBS:'4',RUNTIME_NATIVE_PAIR:'0',RUNNER_TEMP:root+'/temporary'+special};
+  PLATFORM_CI_ROOT:out,RUNTIME_SOURCE:source,CJCJ_NATIVE_RUNTIME_REF:ref,RUNTIME_TARGET:'windows-x86_64',RUNTIME_BUILD_TYPE:'release',RUNTIME_VERSION:"1.3.0-fixture's",RUNTIME_BUILD_JOBS:'4',RUNTIME_NATIVE_PAIR:'0',RUNNER_TEMP:root+'/temporary'+special};
  const argv=[process.execPath,'--import',hooks,path.resolve('ci/platform_matrix/build_runtime.mjs')];
  const result=run(argv,env);put(root+'/entry.stdout',result.stdout||'');put(root+'/entry.stderr',result.stderr||'');put(root+'/entry-command.json',JSON.stringify({argv,rc:result.status,signal:result.signal,error:result.error?.message}));
  const records=fs.existsSync(env.SHELL_CALLS)?fs.readFileSync(env.SHELL_CALLS,'utf8').trim().split('\n').map(JSON.parse):[];

@@ -52,7 +52,7 @@ export function collect() {
  const source=path.resolve(process.env.RUNTIME_SOURCE||'runtime-source'),build=path.join(source,'runtime/CMakebuild');
  const install=path.resolve(process.env.PLATFORM_CI_ROOT||'.platform-ci','runtime-install');
  const sources={};for(const [label,repository]of [['entry',process.cwd()],['runtime',source]])sources[label]=inspect(dir,label+'-commit',['git','-C',repository,'rev-parse','HEAD']).stdout?.trim();
- const manifest={sources,requestedRuntime:process.env.RUNTIME_REF,buildOutcome:process.env.WINDOWS_RUNTIME_BUILD_OUTCOME||'unknown',
+ const manifest={sources,requestedRuntime:process.env.CJCJ_NATIVE_RUNTIME_REF,buildOutcome:process.env.WINDOWS_RUNTIME_BUILD_OUTCOME||'unknown',
   callerAudit:{compiler:process.env.COMPILER_CALLER_REF,llvm:process.env.LLVM_CALLER_REF,role:'source-only audit by runtime owner; not fetched or executed by this producer'},files:[]};
  manifest.files.push(...copyFiles(build,path.join(dir,'build-products'),f=>/\.(?:dll|a|lib|def|rsp)$/i.test(f)||/\b(?:link\.txt|build\.make|CMakeCache\.txt|install_manifest\.txt|compile_commands\.json)$/.test(f)));
  manifest.files.push(...copyFiles(install,path.join(dir,'installed'),()=>true));

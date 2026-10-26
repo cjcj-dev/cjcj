@@ -33,11 +33,6 @@ on:
         type: string
         required: false
         default: "{}"
-      native_source_selection:
-        description: Explicit native source repository and full commit JSON; empty preserves fixed defaults
-        type: string
-        required: false
-        default: '{}'
       native_build_inputs_artifact:
         description: Optional native-cjdb source/dependency artifact prefix; runs the existing producer before SDK configuration
         type: string
@@ -141,11 +136,6 @@ on:
         type: string
         required: false
         default: "{}"
-      native_source_selection:
-        description: Explicit native source repository and full commit JSON; empty preserves fixed defaults
-        type: string
-        required: false
-        default: '{}'
       native_build_inputs_artifact:
         description: Optional native-cjdb source/dependency artifact prefix; runs the existing producer before SDK configuration
         type: string
@@ -239,7 +229,6 @@ env:
   CJCJ_NATIVE_INPUTS_RUN_ID: ${{ inputs.native_inputs_run_id }}
   CJCJ_NATIVE_BUILD_INPUTS_ARTIFACT: ${{ inputs.native_build_inputs_artifact }}
   CJCJ_NATIVE_BUILD_INPUTS_RUN_ID: ${{ inputs.native_build_inputs_run_id }}
-  CJCJ_NATIVE_SOURCE_SELECTION: ${{ inputs.native_source_selection }}
   CJCJ_SOURCE_SELECTION: ${{ inputs.source_selection }}
 
 jobs:
@@ -282,7 +271,6 @@ jobs:
       source_selection: ${{ inputs.source_selection }}
       native_inputs_artifact: ${{ inputs.native_inputs_artifact }}
       shim_source_selection: ${{ inputs.shim_source_selection }}
-      native_source_selection: ${{ inputs.native_source_selection }}
       native_inputs_run_id: ${{ inputs.native_inputs_run_id }}
       native_runtime_artifact: ${{ inputs.native_runtime_artifact }}
       native_runtime_run_id: ${{ inputs.native_runtime_run_id }}

@@ -15,7 +15,7 @@ const repo=path.resolve(import.meta.dirname,'../..');
 const inputs={native_runtime_artifact:'finite-declaration-R',native_runtime_run_id:'11',native_llvm_ref:'1'.repeat(40),
  native_runtime_ref:'2'.repeat(40),native_host_version:'1.3.0-alpha.20261009001050',native_inputs_artifact:'finite-declaration-H-tools',
  native_inputs_run_id:'12',native_build_inputs_artifact:'finite-declaration-native-sources',native_build_inputs_run_id:'13',
- native_source_selection:JSON.stringify({ast:{repository:'https://example.invalid/private-compiler.git',commit:'3'.repeat(40)}}),source_selection:'{}'};
+ source_selection:JSON.stringify({compiler:{url:'https://example.invalid/private-compiler.git',tag:'3'.repeat(40)}})};
 const workflow=name=>load(fs.readFileSync(path.join(repo,'.github/workflows',name),'utf8'));
 const selectedEnv=wf=>Object.fromEntries(Object.entries(wf.env).map(([k,v])=>[k,v.replace(/\$\{\{ inputs\.(\w+) \}\}/g,(_,name)=>inputs[name]??'')]));
 function fixture(t){const root=fs.mkdtempSync(path.join(os.tmpdir(),'native-workflow-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));return root;}
@@ -69,10 +69,10 @@ test('ordinary stdx source selection preserves distinct full sources and actual 
  assert.equal(base.TOOLS_REF,'7acd240e273f9e5773611deca29bba3267afd0fd');
  assert.equal(base.CJPM_REF,'2c8a704d7d51e65af2b777e11836aeef66bd8f50');
  console.log('WORKFLOW_PIN_SELECTION_ASSERTION_REACHED',JSON.stringify({tools:base.TOOLS_REF,stdx:base.STDX_REF,cjpm:base.CJPM_REF}));
- const alternative=workflowSourceSelection({...env,CJCJ_SOURCE_SELECTION:JSON.stringify({stdx:{url:'https://example.invalid/stdx.git',tag:'c3066ac097166145765b274d7a4a79e43d70ffc8'}})});
+ const alternative=workflowSourceSelection({...env,CJCJ_SOURCE_SELECTION:JSON.stringify({compiler:JSON.parse(inputs.source_selection).compiler,stdx:{url:'https://example.invalid/stdx.git',tag:'c3066ac097166145765b274d7a4a79e43d70ffc8'}})});
  assert.equal(alternative.STDX_REF,'c3066ac097166145765b274d7a4a79e43d70ffc8');assert.notEqual(alternative.STDX_REF,base.STDX_REF);
- assert.equal(alternative.CANGJIE_COMPILER_SHA,'3'.repeat(40));assert.equal(alternative.RUNTIME_REF,'2'.repeat(40));
- assert.throws(()=>workflowSourceSelection({...env,CJCJ_SOURCE_SELECTION:JSON.stringify({compiler:{tag:'4'.repeat(40)}})}),/SOURCE_CONFLICT/);
+ assert.equal(alternative.CANGJIE_COMPILER_SHA,'3'.repeat(40));assert.equal(alternative.CJCJ_NATIVE_RUNTIME_REF,'2'.repeat(40));
+ assert.throws(()=>workflowSourceSelection({...env,CJCJ_SOURCE_SELECTION:JSON.stringify({runtime:{tag:'4'.repeat(40)}})}),/SOURCE_CONFLICT/);
 });
 test('transport locations select same N/AST installation without overwriting original facts',async t=>{
  const root=fixture(t),install=path.join(root,'install');fs.mkdirSync(install);

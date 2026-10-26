@@ -12,6 +12,6 @@ if (workspace === path.parse(workspace).root) throw new Error('workspace must no
 const probe = probeRequirement('android-ndk');
 if (!probe.present) throw new Error(probe.detail);
 const ndk = probe.detail.slice(probe.detail.indexOf('=') + 1);
-const root = await buildAndroidRuntime({workspace, ndk, version: required('RUNTIME_VERSION'), runtimeRef: required('RUNTIME_REF')});
+const root = await buildAndroidRuntime({workspace, ndk, version: required('RUNTIME_VERSION'), runtimeRef: required('CJCJ_NATIVE_RUNTIME_REF')});
 await $`file ${root}/runtime/lib/linux_android_aarch64_cjnative/libcangjie-runtime.so`;
 await $`sha256sum ${root}/runtime/lib/linux_android_aarch64_cjnative/libcangjie-runtime.so ${root}/runtime/lib/linux_android_aarch64_cjnative/libboundscheck.so`;

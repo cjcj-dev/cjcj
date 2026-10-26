@@ -40,8 +40,8 @@ test('default header source selection uses the production compiler pin and requi
 });
 test('header source runtime and target LLVM must match the actual selected pair',async()=>{
  const {root,commit,env}=fixture();
- Object.assign(env,{CJCJ_RUNTIME_REF_OVERRIDE:commit,CJCJ_ALLOW_RUNTIME_OVERRIDE:'true',LLVM_SHA:'0'.repeat(40)});
- delete env.RUNTIME_REF;delete env.CJCJ_NATIVE_LLVM_REF;delete env.CJCJ_NATIVE_RUNTIME_REF;
+ Object.assign(env,{CJCJ_RUNTIME_REF_OVERRIDE:commit,CJCJ_ALLOW_RUNTIME_OVERRIDE:'true',CJCJ_NATIVE_LLVM_REF:'0'.repeat(40)});
+ delete env.CJCJ_NATIVE_RUNTIME_REF;delete env.CJCJ_NATIVE_LLVM_REF;delete env.CJCJ_NATIVE_RUNTIME_REF;
  delete env.CJCJ_NATIVE_RUNTIME_ARTIFACT;delete env.CJCJ_BOOTSTRAP_RUNTIME_PIN;
  await assert.rejects(prepareCppHeaders(root,undefined,env),/SHIM_HEADERS_LLVM_PAIR/);
  const rows=JSON.parse(env.CJCJ_BOOTSTRAP_SHIM_SOURCE_SELECTION);rows.runtime.commit='0'.repeat(40);

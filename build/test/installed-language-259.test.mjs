@@ -28,7 +28,7 @@ function fixture(label,{payloads=true,testable=false,reentry=false}={}) {
   const compiler='#!'+process.execPath+'\nif(process.env.DIRECT_COMPILER_FAIL)process.exit(Number(process.env.DIRECT_COMPILER_FAIL));\n';
   write(sdk+'/bin/cjc',compiler,0o755);write(host+'/bin/cjc',compiler,0o755);
   write(runtime+'/CMakebuild/compile_commands.json',JSON.stringify([{file:'/selected/runtime/src/Heap/z/zGeneration.cpp',arguments:['clang++',...(testable?['-DMRT_TESTABLE_INTERNALS']:[])]}]));
-  write(runtime+'/CMakebuild/gc-unit.status','GATE=PASS\nGATE_RC=0\nCPP_SUITE=PASS\nLANGUAGE_TESTS=LANGUAGE_DEFERRED\nSEGMENTED_ARRAY_MANAGED_CAN_RUN='+(testable?'1':'0')+'\nEVIDENCE_DIR='+root+'/native-cpp\n');
+  write(runtime+'/CMakebuild/gc-unit.status','SCHEMA_VERSION=1\nPHASE=cpp\nGATE=PASS\nCPP_RUNNER_RC=0\nCPP_SUITE=PASS\nLANGUAGE_TESTS=LANGUAGE_DEFERRED\nSEGMENTED_ARRAY_MANAGED_CAN_RUN='+(testable?'1':'0')+'\nEVIDENCE_DIR='+root+'/native-cpp\n');
   if(testable)write(root+'/native-cpp/cj_gc_unit','#!'+process.execPath+'\nconsole.log("finite original CPP ELF boundary");\n',0o755);
   if(payloads) {
     write(unit+'/payload.mjs',`import fs from 'node:fs';fs.appendFileSync(process.env.DIRECT_TRACE,JSON.stringify({kind:process.argv[2],args:process.argv.slice(3)})+'\\n');if(process.argv[2]==='PHASE'&&process.env.DIRECT_PHASE_FAIL)process.exit(Number(process.env.DIRECT_PHASE_FAIL));\n`);
@@ -87,4 +87,17 @@ test('259 symbol-selected consumers retain SO and both segmented windows and the
   const r=f.run();assert.equal(r.status,0,r.stderr);assert.deepEqual(f.rows().map(row=>[row.kind,...row.args]),[['FINALIZER'],['PHASE'],['SO'],['SEGMENTED','both']]);
   fs.renameSync(elf,elf+'.saved');const missing=f.run();assert.notEqual(missing.status,0);assert.match(missing.stderr,/cj_gc_unit/);
   fs.renameSync(elf+'.saved',elf);assert.equal(f.run().status,0);
+});
+
+test('legacy installed entry refuses missing or failed CPP exit and unknown status schema',()=>{
+ const f=fixture('status');const file=f.runtime+'/CMakebuild/gc-unit.status',original=fs.readFileSync(file,'utf8');
+ for(const [label,text] of [['missing',original.replace('CPP_RUNNER_RC=0\n','')],['failed',original.replace('CPP_RUNNER_RC=0','CPP_RUNNER_RC=1')],['schema',original.replace('SCHEMA_VERSION=1','SCHEMA_VERSION=9')],['contradiction',original+'GATE_RC=1\n']]){
+  write(file,text);assert.throws(()=>f.install(),/current native gate did not complete/,label);
+ }
+ write(file,original);f.install();
+ const carried=f.sdk+'/share/runtime-build/runtime/CMakebuild/gc-unit.status';
+ write(carried,original.replace('CPP_RUNNER_RC=0','CPP_RUNNER_RC=1'));
+ const bad=f.run();assert.equal(bad.status,1);assert.match(bad.stderr,/native CPP result required/);assert.equal(f.rows().length,0);
+ write(carried,original);const restored=f.run();assert.equal(restored.status,0,restored.stderr);
+ console.log('LEGACY_INSTALLED_STATUS_RECOVERY_TARGET_REACHED');
 });
