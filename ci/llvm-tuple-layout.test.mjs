@@ -5,6 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import {spawnSync} from 'node:child_process';
 import {gzipSync} from 'node:zlib';
+import {createHash} from 'node:crypto';
 import {exportBranches} from './llvm-tuple-branches.mjs';
 
 const repo = path.resolve(import.meta.dirname, '..');
@@ -134,7 +135,25 @@ if (process.env.TUPLE_DIFFERENTIAL === '1') test('tuple source-derived full tabl
       fs.writeFileSync(path.join(work, `${name}.stdout`), result.stdout);
       fs.writeFileSync(path.join(work, `${name}.stderr`), result.stderr);
       const trace = fs.existsSync(path.join(work, 'argv.json')) ? JSON.parse(fs.readFileSync(path.join(work, 'argv.json'), 'utf8')) : null;
-      const sums = result.status === 0 ? fs.readFileSync(path.join(tuple, 'SHA256SUMS'), 'utf8') : null;
+      let sums = result.status === 0 ? fs.readFileSync(path.join(tuple, 'SHA256SUMS'), 'utf8') : null;
+      if (sums !== null) {
+        const manifest = fs.readFileSync(path.join(tuple, 'MANIFEST'), 'utf8');
+        fs.writeFileSync(path.join(work, `${name}.manifest`), manifest);
+        fs.writeFileSync(path.join(work, `${name}.sums`), sums);
+        assert.equal(command(['sha256sum', '--strict', '-c', 'SHA256SUMS'], {cwd: tuple}).status, 0);
+        if (name === 'new') {
+          // The historical publisher predates paired-runtime provenance. Keep
+          // its original bytes and assert the one intentional fact extension;
+          // compare every other byte, including all ten payload checksums.
+          const runtimeLine = `RUNTIME_REF=${env.CJCJ_NATIVE_RUNTIME_REF || ''}\n`;
+          assert.equal(manifest.split(runtimeLine).length, 2);
+          const historical = fs.readFileSync(path.join(work, 'old.manifest'), 'utf8');
+          assert.equal(manifest.replace(runtimeLine, ''), historical);
+          assert.equal(fs.readFileSync(path.join(tuple, 'lib/STATIC_LLVM.txt'), 'utf8'), manifest);
+          const oldHash = createHash('sha256').update(historical).digest('hex');
+          sums = sums.replace(/^[a-f0-9]{64}(  \.\/(?:MANIFEST|lib\/STATIC_LLVM\.txt))$/gm, `${oldHash}$1`);
+        }
+      }
       arms[name] = {rc: result.status, stdout: normalize(result.stdout), stderr: normalize(result.stderr), trace, sums};
       fs.writeFileSync(path.join(work, `${name}.json`), JSON.stringify(arms[name], null, 2));
       // A green comparison without an observed fault is not a positive control.

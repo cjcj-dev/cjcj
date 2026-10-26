@@ -15,7 +15,7 @@ const step = workflow.jobs['build-tools'].steps.find(item => item.name === 'Buil
 assert.equal(step.shell, 'msys2 {0}');
 assert.equal(step.if, "runner.os == 'Windows' && steps.cache.outputs.cache-hit != 'true'");
 const base = {...process.env};
-for (const key of Object.keys(base)) if (/^(CJCJ_LLVM_RUNTIME_|CJCJ_SRCBUILD_|TUPLE_|LLVM_|CANGJIE_COMPILER_|FLATBUFFERS_)/.test(key)) delete base[key];
+for (const key of Object.keys(base)) if (/^(CJCJ_NATIVE_(LLVM|RUNTIME)_REF|CJCJ_LLVM_RUNTIME_|CJCJ_SRCBUILD_|TUPLE_|LLVM_|CANGJIE_COMPILER_|FLATBUFFERS_)/.test(key)) delete base[key];
 delete base.RUNTIME_REF; delete base.RUNTIME_SRC_URL; delete base.NODE_TEST_CONTEXT;
 function execute(label, command, cwd, env = base) {
   const out = fs.openSync(path.join(evidence, `${label}.stdout`), 'wx');
@@ -48,7 +48,7 @@ function invoke(label, changes = {}) {
   const capture = path.join(cwd, 'cmake.json');
   fs.writeFileSync(path.join(cwd, 'bin/cmake'), `#!${process.execPath}\nrequire('node:fs').writeFileSync(process.env.G2_CMAKE_CAPTURE, JSON.stringify(process.argv.slice(2))); process.exit(86);\n`, {mode: 0o755});
   const env = {...base, ...step.env, TUPLE_PLATFORM: 'windows_x86_64', LLVM_TARGETS: 'X86',
-    CJCJ_LLVM_RUNTIME_MODE: 'private', CJCJ_LLVM_RUNTIME_URL: url, CJCJ_LLVM_RUNTIME_SHA: sha,
+    CJCJ_NATIVE_RUNTIME_REF: sha,
     CJCJ_SRCBUILD_REQUIRE_MIRRORS: '1', CJCJ_SRCBUILD_SOURCE_MIRRORS: `${url}=file://${input};file://${input}=file://${input}`,
     LLVM_URL: `file://${input}`, CJCJ_NATIVE_LLVM_REF: sha, CANGJIE_COMPILER_URL: `file://${input}`, CANGJIE_COMPILER_SHA: sha,
     FLATBUFFERS_URL: `file://${input}`, FLATBUFFERS_SHA: sha, G2_CMAKE_CAPTURE: capture,
@@ -69,10 +69,10 @@ test('workflow fetches selected runtime and passes it to the actual build entry'
   console.log('WORKFLOW_TARGET_ASSERT_PASS selected_runtime_cmake');
 });
 test('workflow rejects malformed runtime input before any fetch independently', () => {
-  const result = invoke('invalid', {CJCJ_LLVM_RUNTIME_SHA: 'short'});
+  const result = invoke('invalid', {CJCJ_NATIVE_RUNTIME_REF: 'short'});
   console.log(`WORKFLOW_CONTROL_ASSERT_REACHED rc=${result.rc}`);
   assert.equal(result.rc, 1);
-  assert.match(result.stdout + result.stderr, /40-digit SHA/);
+  assert.match(result.stdout + result.stderr, /NATIVE_LLVM_REF_INVALID/);
   assert.equal(fs.existsSync(result.capture), false);
   assert.equal(fs.existsSync(path.join(result.cwd, step.env.TUPLE_ROOT, 'llvm-project')), false);
   const trace = path.join(result.cwd, 'fetch.trace');

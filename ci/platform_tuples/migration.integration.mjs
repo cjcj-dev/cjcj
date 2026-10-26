@@ -11,7 +11,7 @@ assert.ok(evidence && path.isAbsolute(evidence), 'explicit private evidence dire
 fs.mkdirSync(evidence, {recursive:true});
 const cwd = path.join(evidence, 'caller with spaces'); fs.mkdirSync(cwd);
 const envBase = {...process.env, LC_ALL:'C', GIT_CONFIG_NOSYSTEM:'1', GIT_AUTHOR_DATE:'2026-10-20T00:00:00+0000', GIT_COMMITTER_DATE:'2026-10-20T00:00:00+0000'};
-for (const key of Object.keys(envBase)) if (/^(CJCJ_LLVM_RUNTIME_|CJCJ_SRCBUILD_|TUPLE_|LLVM_|CANGJIE_COMPILER_|FLATBUFFERS_)/.test(key)) delete envBase[key];
+for (const key of Object.keys(envBase)) if (/^(CJCJ_NATIVE_(LLVM|RUNTIME)_REF|CJCJ_LLVM_RUNTIME_|CJCJ_SRCBUILD_|TUPLE_|LLVM_|CANGJIE_COMPILER_|FLATBUFFERS_)/.test(key)) delete envBase[key];
 delete envBase.NODE_TEST_CONTEXT; delete envBase.CJCJ_NATIVE_RUNTIME_REF; delete envBase.RUNTIME_SRC_URL;
 let sequence=0; const results=[];
 function run(label, command, env={}, directory=cwd) {
@@ -58,8 +58,8 @@ message(FATAL_ERROR "G2_FINITE_CONFIGURE_STOP")
 const url='https://github.com/cjcj-dev/cangjie-runtime.git';
 fs.writeFileSync(path.join(evidence,'input-identities.json'),JSON.stringify({runtime:runtime.sha,other:other.sha,parser:'shfmt v3.12.0'},null,2)+'\n');
 const baseline={TUPLE_ROOT:'tuple relative',TUPLE_PLATFORM:'linux_x86_64',LLVM_TARGETS:'X86',
- CJCJ_LLVM_RUNTIME_MODE:'private',CJCJ_LLVM_RUNTIME_URL:url,CJCJ_LLVM_RUNTIME_SHA:runtime.sha,
- LLVM_URL:'https://fixture.invalid/llvm',CJCJ_NATIVE_LLVM_REF:other.sha,CANGJIE_COMPILER_URL:'https://fixture.invalid/compiler',CANGJIE_COMPILER_SHA:other.sha,
+ CJCJ_NATIVE_RUNTIME_REF:runtime.sha,
+ LLVM_URL:'https://fixture.invalid/llvm',LLVM_SHA:other.sha,CANGJIE_COMPILER_URL:'https://fixture.invalid/compiler',CANGJIE_COMPILER_SHA:other.sha,
  FLATBUFFERS_URL:'https://fixture.invalid/flatbuffers',FLATBUFFERS_SHA:other.sha,
  CJCJ_SRCBUILD_REQUIRE_MIRRORS:'1',CJCJ_SRCBUILD_SOURCE_MIRRORS:[`${url}=file://${runtime.dir}`,...['llvm','compiler','flatbuffers'].map(x=>`https://fixture.invalid/${x}=file://${other.dir}`)].join(';')};
 const old=path.join(evidence,'old repo');
@@ -68,6 +68,15 @@ for(const [source,target] of [
  ['build/lib/srcbuild_git.sh','build/lib/srcbuild_git.sh'],['ci/fetch-llvm-runtime.mjs','ci/fetch-llvm-runtime.mjs'],['ci/runtime_pin.env','ci/runtime_pin.env']]){
  const dest=path.join(old,target);fs.mkdirSync(path.dirname(dest),{recursive:true});fs.copyFileSync(path.join(repo,source),dest);
 }
+// Both tuple wrappers consume the same current runtime fetcher. Preserve the
+// retired outer Bash witness, and copy that fetcher's actual module closure.
+const pending=['ci/fetch-llvm-runtime.mjs'], copied=new Set();
+while(pending.length){const member=pending.pop();if(copied.has(member))continue;copied.add(member);
+ const body=fs.readFileSync(path.join(repo,member),'utf8'),dest=path.join(old,member);
+ fs.mkdirSync(path.dirname(dest),{recursive:true});fs.writeFileSync(dest,body);
+ for(const match of body.matchAll(/(?:from\s*|import\s*)['"](\.[^'"]+\.mjs)['"]/g))pending.push(path.normalize(path.join(path.dirname(member),match[1])));
+}
+for(const pin of ['llvm_pin.env','source_pin.env','host_sdk_pin.env'])fs.copyFileSync(path.join(repo,'ci',pin),path.join(old,'ci',pin));
 const commands=(entry,arm)=>arm==='old'?['bash',path.join(old,`ci/platform_tuples/${entry}.sh`)]:['npx','--yes','zx@8',path.join(repo,`ci/platform_tuples/${entry}.mjs`)];
 const allRows=[];
 for(const entry of ['fetch_sources','build_tuple']){
@@ -77,7 +86,12 @@ for(const entry of ['fetch_sources','build_tuple']){
 const expanded=expandEnvironment(allRows,{fetch_sources:baseline,build_tuple:baseline});
 fs.writeFileSync(path.join(evidence,'ast-branches.json'),JSON.stringify(allRows,null,2)+'\n');
 fs.writeFileSync(path.join(evidence,'ast-expanded.json'),JSON.stringify(expanded,null,2)+'\n');
-function invoke(entry,arm,label,env){return run(`${label}-${arm}`,commands(entry,arm),env);}
+function invoke(entry,arm,label,env){
+ const selected={...env};
+ if(arm==='old')selected.CJCJ_NATIVE_LLVM_REF=other.sha;
+ else {delete selected.LLVM_SHA;if(Object.hasOwn(env,'LLVM_SHA'))selected.CJCJ_NATIVE_LLVM_REF=env.LLVM_SHA;}
+ return run(`${label}-${arm}`,commands(entry,arm),selected);
+}
 function pair(entry,label,env,check){for(const arm of ['old','new']){const r=invoke(entry,arm,label,env);check(r,arm);}}
 let count=0;
 test('AST required environment expands into actual CLI rejections',()=>{
@@ -88,7 +102,11 @@ test('AST required environment expands into actual CLI rejections',()=>{
   const env={...item.env,TUPLE_ROOT:`required-${count++}`};
   if(item.variable==='TUPLE_ROOT'){if(item.outcome==='unset')delete env.TUPLE_ROOT;else env.TUPLE_ROOT='';}
   // Omitted values must not be reintroduced by the ambient environment.
-  pair(item.entry,`${item.entry}-${item.variable}-${item.outcome}`,env,r=>{assert.equal(r.status,1,r.stdout+r.stderr);assert.ok((r.stdout+r.stderr).includes(`: line ${item.line}: ${item.variable}:`),r.stdout+r.stderr);});
+  pair(item.entry,`${item.entry}-${item.variable}-${item.outcome}`,env,(r,arm)=>{
+   assert.equal(r.status,1,r.stdout+r.stderr);
+   if(arm==='new'&&item.variable==='LLVM_SHA')assert.match(r.stdout+r.stderr,/NATIVE_RUNTIME_EXPLICIT_PAIR_REQUIRED/);
+   else assert.ok((r.stdout+r.stderr).includes(`: line ${item.line}: ${item.variable}:`),r.stdout+r.stderr);
+  });
  }
 });
 test('fetch real first checkout and cached checkout preserve pinned identities',()=>{
@@ -111,8 +129,8 @@ test('absolute root reaches the selected checkout from another caller directory'
 });
 test('invalid private input stops before any LLVM checkout',()=>{
  for(const arm of ['old','new']){
-  const env={...baseline,TUPLE_ROOT:`bad-private-${arm}`,CJCJ_LLVM_RUNTIME_SHA:'bad'};
-  const r=invoke('fetch_sources',arm,'bad-private',env);assert.equal(r.status,1);assert.match(r.stdout,/complete lowercase 40-digit SHA/);
+  const env={...baseline,TUPLE_ROOT:`bad-private-${arm}`,CJCJ_NATIVE_RUNTIME_REF:'bad'};
+  const r=invoke('fetch_sources',arm,'bad-private',env);assert.equal(r.status,1);assert.match(r.stdout+r.stderr,/NATIVE_LLVM_REF_INVALID/);
   assert.equal(fs.existsSync(path.join(cwd,env.TUPLE_ROOT,'llvm-project')),false);
  }
 });
