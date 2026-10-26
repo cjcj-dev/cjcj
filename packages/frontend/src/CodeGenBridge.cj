@@ -1207,42 +1207,24 @@ public func EmitLLVMSimilarBytecode(instance: CompilerInstance, enableIncrement:
 
     let recorder = ProfileRecorder("CodeGen", "Save bc file")
     instance.invocation.globalOptions.UpdateCachedDirName(fullPackageName)
-    if (llvmModules.size == 1) {
+    let allBCFilePath = ArrayList<String>()
+    for (index in 0..llvmModules.size) {
+        let suffix = if (llvmModules.size == 1) { "" } else { index.toString() }
         let filePath = GenerateBCFilePathAndUpdateToInvocation(
-            instance.invocation.globalOptions, TempFileKind.T_BC, fullPackageName, "")
+            instance.invocation.globalOptions, TempFileKind.T_BC, fullPackageName, suffix)
         if (filePath.isEmpty()) {
             ClearPackageModules(llvmModules)
             recorder.close()
             return false
         }
-        let _ = SavePackageModule(llvmModules[0], filePath)
-    } else {
-        let taskQueueSaveBitcode = TaskQueue(llvmModules.size)
-        let allBCFilePath = ArrayList<String>()
-        var index: Int64 = 0
-        while (index < llvmModules.size) {
-            let filePath = GenerateBCFilePathAndUpdateToInvocation(instance.invocation.globalOptions,
-                TempFileKind.T_BC, fullPackageName, index.toString())
-            if (filePath.isEmpty()) {
-                ClearPackageModules(llvmModules)
-                recorder.close()
-                return false
-            }
-            allBCFilePath.add(filePath)
-            index++
-        }
-        index = 0
-        while (index < llvmModules.size) {
-            let module = llvmModules[index]
-            let bcFilePath = allBCFilePath[index]
-            let _ = taskQueueSaveBitcode.AddTask<Unit>({ =>
-                let _ = SavePackageModule(module, bcFilePath)
-            })
-            index++
-        }
-        taskQueueSaveBitcode.RunAndWaitForAllTasksCompleted()
+        allBCFilePath.add(filePath)
     }
+    let saved = SaveGeneratedBitcode(llvmModules, allBCFilePath)
     ClearPackageModules(llvmModules)
+    if (!saved) {
+        recorder.close()
+        return false
+    }
 
     if (instance.invocation.globalOptions.enIncrementalCompilation) {
         let fileName = GenerateFileName(instance.invocation.globalOptions, fullPackageName, "")
@@ -1255,6 +1237,36 @@ public func EmitLLVMSimilarBytecode(instance: CompilerInstance, enableIncrement:
     }
     recorder.close()
     return true
+}
+
+// Consume every native writer result before publishing successful codegen/cache state.
+// The worker queue joins execution; its join alone does not consume TaskResult failures.
+func SaveGeneratedBitcode(modules: ArrayList<LLVMModuleHandle>, paths: ArrayList<String>): Bool {
+    CJC_ASSERT(modules.size == paths.size)
+    let writeModule = { module: LLVMModuleHandle, path: String =>
+        let saved = SavePackageModule(module, path)
+        if (!saved) {
+            eprintln("error: failed to write LLVM bitcode file: " + path)
+        }
+        saved
+    }
+    if (modules.size == 1) {
+        return writeModule(modules[0], paths[0])
+    }
+    let queue = TaskQueue(modules.size)
+    let results = ArrayList<TaskResult<Bool>>()
+    for (index in 0..modules.size) {
+        let module = modules[index]
+        let path = paths[index]
+        results.add(queue.AddTask<Bool>({ => writeModule(module, path) }))
+    }
+    queue.RunAndWaitForAllTasksCompleted()
+    var saved = true
+    for (result in results) {
+        let moduleSaved = result.get()
+        saved = moduleSaved && saved
+    }
+    return saved
 }
 
 public func ConvertFrontendOptionsToCodegenOptions(options: GlobalOptions): GlobalOptions {
