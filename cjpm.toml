@@ -79,5 +79,6 @@
   compile-option = "-O2"
   override-compile-option = ""
   # Signal setup is used by utils and parser consumers as well as bin/cjc.
+  # Sole owner of this object: platform package options must not add it again.
   link-option = "runtime_shim/cjc_runtime_config.o"
   target-dir = ""

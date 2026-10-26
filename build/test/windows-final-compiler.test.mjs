@@ -9,6 +9,7 @@ import {fileSha256, FINAL_COMPILER_PROVENANCE} from '../../ci/srcbuild/lib/final
 import {getTarget} from '../lib/targets.mjs';
 
 const workspaceToml = await fs.readFile(new URL('../../cjpm.toml', import.meta.url), 'utf8');
+const cjcToml = await fs.readFile(new URL('../../packages/cjc/cjpm.toml', import.meta.url), 'utf8');
 
 for (const fail of ['', 'final-clean', 'final-build']) {
   test(`Windows continuation subprocess fixture: ${fail || 'handoff'}`, async t => {
@@ -54,16 +55,29 @@ for (const fail of ['', 'final-clean', 'final-build']) {
       await write(path.join(mingw, dll), `MinGW ${dll}`);
     }
     await write(path.join(root, 'cjpm.toml'), workspaceToml.replace('compile-option = "-O2"', 'compile-option = "-O1"'));
-    const cjcTomlPath = await write(path.join(root, 'cjc.toml'), 'link-option = "original"\n');
+    const cjcTomlPath = await write(path.join(root, 'cjc.toml'), cjcToml);
     Object.assign(process.env, {GITHUB_SERVER_URL: 'https://github.com', GITHUB_REPOSITORY: 'cjcj-dev/cjcj',
       GITHUB_SHA: 'a'.repeat(40), GITHUB_RUN_ID: 'fixture', GITHUB_RUN_ATTEMPT: '1', CJCJ_LLVM_LINK_RSP: 'llvm.rsp'});
     const external = await write(path.join(root, 'external-build.py'), `import pathlib, sys, shutil\ncommand, tag, sdk, host, fail = sys.argv[1:]\nsdk = pathlib.Path(sdk)\nassert (sdk/'bin/cjc.exe').read_text() == 'W1 compiler fixture'\nassert (sdk/'lib/${tuple}/libcangjie-std-p0.a').read_text() == 'final static std'\nwith open('commands.log', 'a') as out: out.write(tag + ':' + command + '\\n')\nif tag == fail: sys.exit(71)\nif tag == 'final-clean': shutil.rmtree('target')\nelse:\n p = pathlib.Path('target/release/bin/cjc@cjcj.exe')\n p.parent.mkdir(parents=True)\n p.write_text('W2 from ' + (sdk/'bin/cjc.exe').read_text())\n p.with_name('decoy').write_text('old compiler fixture')\n`);
     process.chdir(root);
     const result = await buildWindowsFinalCompiler({root, cangjieHome: sdk, hostSdk: host, sdkRuntimeDirName: tuple,
-      cjcTomlPath, cjcToml: 'link-option = "original"\n', workspaceToml, mingwCxxLinkRsp: 'crt.rsp',
+      cjcTomlPath, cjcToml, workspaceToml, mingwCxxLinkRsp: 'crt.rsp',
       installedRuntimeLib: path.join(sdk, 'runtime', 'lib', tuple, 'libcangjie-runtime.dll'),
       fixedLlvmManifest: llvmManifest, finalCompilerOutput: path.join(root, 'artifact'), finalStd, mingwBin: mingw,
       runInMsys: async (command, tag, sdkRoot, hostRoot) => {
+        // Observe both real continuation boundaries, after platformize and
+        // workspace restoration; this fixture does not run a Windows linker.
+        const effectiveManifests = await Promise.all([
+          fs.readFile('cjpm.toml', 'utf8'), fs.readFile(cjcTomlPath, 'utf8'),
+        ]);
+        const linkOptions = effectiveManifests.map(text => {
+          const match = text.match(/^\s*link-option\s*=\s*"([^"]*)"/m);
+          assert.ok(match, 'real workspace/package link options must exist');
+          return match[1];
+        }).join(' ');
+        console.log(`WINDOWS_FINAL_CONFIG_ASSERT_REACHED tag=${tag} fixture_only=true`);
+        assert.equal(linkOptions.split(/\s+/).filter(x => x === 'runtime_shim/cjc_runtime_config.o').length,
+          1, 'Windows final workspace + platform package must link config exactly once');
         if (tag === 'final-build') {
           const effectiveWorkspace = await fs.readFile('cjpm.toml', 'utf8');
           console.log('WINDOWS_W2_OPTIMIZATION_ASSERT_REACHED fixture_only=true');
