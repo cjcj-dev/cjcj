@@ -41,7 +41,7 @@ function usage() {
     + 'Global options:\n'
     + '  --workspace PATH\n'
     + '  --build-root PATH\n'
-    + '  --official-sdk-root PATH (default: CJCJ_OFFICIAL_SDK_ROOT, CJCJ_SRCBUILD_HOST_SDK, pinned cjv SDK)\n'
+    + '  --official-sdk-root PATH (default: CJCJ_OFFICIAL_SDK_ROOT, pinned cjv SDK)\n'
     + '  --target TARGET (default: linux-x64)\n'
     + '  --host-profile generic|kkk2 (default: generic)\n'
     + `  --build-type TYPE (default: ${DEFAULT_BUILD_TYPE})\n`

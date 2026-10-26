@@ -13,7 +13,7 @@ import {sdkEnvironment} from '../../ci/bootstrap/sdk-platform.mjs';
 const parent=process.env.RELEASE_EVIDENCE_TEST_ROOT;
 const source=process.env.CJCJ_SRCBUILD_CONSUMER_SDK;
 const workspaceInput=process.env.CANGJIE_WORKSPACE;
-const official=process.env.CJCJ_OFFICIAL_SDK_ROOT||process.env.CJCJ_SRCBUILD_HOST_SDK;
+const official=process.env.CJCJ_OFFICIAL_SDK_ROOT;
 if(!parent||!source||!workspaceInput||!official)throw new Error('SOURCE_TOOL_SDK_INPUT_REQUIRED: RELEASE_EVIDENCE_TEST_ROOT, CJCJ_SRCBUILD_CONSUMER_SDK, CANGJIE_WORKSPACE, official SDK');
 const targetKey=process.env.CJCJ_SRCBUILD_TARGET||'linux-x64';
 if(targetKey!=='linux-x64')throw new Error('SOURCE_TOOL_SDK_NATIVE_LINUX_REQUIRED');

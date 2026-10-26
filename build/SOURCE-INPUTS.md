@@ -77,8 +77,7 @@ build.py, installation and tool consumers follow this step unchanged.
 
 1. `--official-sdk-root PATH` (relative paths resolve against the invocation cwd).
 2. `CJCJ_OFFICIAL_SDK_ROOT` (the existing release package reference setting).
-3. `CJCJ_SRCBUILD_HOST_SDK` (the existing private host SDK setting).
-4. The platform host pin under the real home directory's `.cjv/toolchains/`.
+3. The platform host pin under the real home directory's `.cjv/toolchains/`.
 
 An explicit empty value, absent directory or regular file is a configuration
 error. An omitted option preserves the existing pinned fallback. No HOME
@@ -86,7 +85,7 @@ override or shared SDK write is needed. The CLI passes `officialSdkRoot`
 through config, `packageMainSdk`, `packageInstall` and `assertSdkPathParity`;
 the parity boundary still rejects a materialized depot reference. The CI
 `ci/srcbuild/steps/package-install.mjs` already supplies the official env value
-to buildConfig and now inherits the private host fallback when it is absent.
+to buildConfig; an omitted value uses the same pinned fallback.
 CI `steps/verify.mjs`, config and both parity/lineage consumers use the same
 `resolveOfficialSdkRoot` function; CI has env precedence and the same pinned
 fallback, without a new descriptor scheduler.

@@ -25,7 +25,7 @@ function fixture(t) {
   fs.writeFileSync(path.join(tools, 'cjpm/build/build.py'), '# controlled source fixture\n');
   const env = {...process.env, CANGJIE_BUILD_DRY_RUN: '1', CJCJ_NATIVE_TOOL_DEPENDENCIES: path.join(root,'native-dependencies.json'), CJCJ_NATIVE_LLVM_BIN: path.join(root, 'llvm/bin'),
     CJCJ_NATIVE_OPENSSL_LIB: path.join(root, 'openssl/lib')};
-  for (const key of ['CJCJ_OFFICIAL_SDK_ROOT', 'CJCJ_SRCBUILD_HOST_SDK', 'CJCJ_SRCBUILD_CONSUMER_SDK']) delete env[key];
+  for (const key of ['CJCJ_OFFICIAL_SDK_ROOT', 'CJCJ_SRCBUILD_CONSUMER_SDK']) delete env[key];
   return {root, env, run({native = true, args = ['build', 'tools'], extra = {}, profile = 'generic'} = {}) {
     const argv = [...(native ? ['--import', preload] : []), 'build/cli.mjs', '--workspace', root,
       '--build-root', path.join(root, 'buildtools'), '--target', 'windows-x64', '--host-profile', profile, ...args];
@@ -83,8 +83,8 @@ test('base environment retains the host DLL directory when adding SDK executable
   fs.mkdirSync(path.join(host, 'runtime/lib', tuple), {recursive: true});
   fs.writeFileSync(path.join(host, 'runtime/lib', tuple, 'libcangjie-runtime.dll'), 'fixture DLL marker');
   fs.mkdirSync(path.join(sdk, 'runtime/lib', tuple), {recursive: true});
-  const previous = Object.fromEntries(['CANGJIE_BUILD_DRY_RUN', 'CJCJ_SRCBUILD_HOST_SDK'].map(k => [k, process.env[k]]));
-  process.env.CANGJIE_BUILD_DRY_RUN = '1'; process.env.CJCJ_SRCBUILD_HOST_SDK = host;
+  const previous = Object.fromEntries(['CANGJIE_BUILD_DRY_RUN', 'CJCJ_OFFICIAL_SDK_ROOT'].map(k => [k, process.env[k]]));
+  process.env.CANGJIE_BUILD_DRY_RUN = '1'; process.env.CJCJ_OFFICIAL_SDK_ROOT = host;
   t.after(() => { for (const [k, v] of Object.entries(previous)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; } });
   const config = {...buildConfig({workspace: f.root, consumerSdk: sdk}),
     target: getBuildTarget('windows-x64', {platform: 'win32', arch: 'x64', env: f.env})};

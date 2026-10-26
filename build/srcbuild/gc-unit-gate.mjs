@@ -86,7 +86,7 @@ export function finishGcUnitLanguageDeferral(config,runtime,sdk,{env=process.env
 }
 export function languageInputEnvironment(config,sdk,env=process.env) {
   const compiler=path.join(sdk,'bin/cjc'),hostSdk=bootstrapHostSdk(config,env);
-  return {...env,CJCJ_SRCBUILD_HOST_SDK:hostSdk,CANGJIE_HOME:sdk,CJC:compiler,GC_UNIT_LANGUAGE_SDK:sdk,
+  return {...env,CJCJ_OFFICIAL_SDK_ROOT:hostSdk,CANGJIE_HOME:sdk,CJC:compiler,GC_UNIT_LANGUAGE_SDK:sdk,
     GC_UNIT_RUNTIME_TUPLE:config.target.runtimeLibSubdir(config.buildType),
     GC_UNIT_CJC_RUNTIME_TUPLE:config.target.spec.hostRuntimeTuple||config.target.spec.runtimeTuple,
     GCV2_RUNTIME_LIB_DIR:path.join(sdk,'runtime/lib',config.target.runtimeLibSubdir(config.buildType)),

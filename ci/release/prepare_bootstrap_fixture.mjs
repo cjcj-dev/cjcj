@@ -50,7 +50,7 @@ export function fixture(check, target = 'linux-x64') {
       llvm_sha: 'a'.repeat(40), sha256: dylibSha, targets: ['X86', 'ARM', 'AArch64']}));
     const dylibFallback = path.join(dir, 'dylib-fallback');
     fs.cpSync(dylib, dylibFallback, {recursive: true});
-    const env = {...process.env, CJCJ_SRCBUILD_TARGET: target, CJCJ_BOOTSTRAP_COLOUR_DYLIB: dylibFallback, CJCJ_BOOTSTRAP_DYLIB_ARTIFACT: dylib, LLVM_DYLIB_SHA256: dylibSha, GITHUB_ENV: '', CJCJ_SRCBUILD_HOST_SDK: sdk,
+    const env = {...process.env, CJCJ_SRCBUILD_TARGET: target, CJCJ_BOOTSTRAP_COLOUR_DYLIB: dylibFallback, CJCJ_BOOTSTRAP_DYLIB_ARTIFACT: dylib, LLVM_DYLIB_SHA256: dylibSha, GITHUB_ENV: '', CJCJ_OFFICIAL_SDK_ROOT: sdk,
       CJCJ_BOOTSTRAP_HOST_LLVM_SO: so, CJCJ_BOOTSTRAP_AST_SUPPORT: ast,
       CJCJ_BOOTSTRAP_SOURCE: 'depot', CJCJ_BOOTSTRAP_SOURCE_REASON: 'fixture explicit depot', CJCJ_BOOTSTRAP_INPUTS_WORK: path.join(dir, 'work'), CJCJ_BOOTSTRAP_COLOUR_TUPLE: fallback,
       CJCJ_BOOTSTRAP_CPP_SRC: sdk, CJCJ_NATIVE_LLVM_REF: 'a'.repeat(40), LLVM_DYLIB_SOURCE_SHA: 'a'.repeat(40),

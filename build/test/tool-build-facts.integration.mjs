@@ -44,7 +44,7 @@ for(const rel of ['bin/cjcj-stage1','lib/linux_x86_64_cjnative/libcangjie-std-co
 await write(path.join(sdk,'STAGE-INPUTS.json'),JSON.stringify({compilerFile:'bin/cjcj-stage1',compilerSha256:await fileDigest(path.join(sdk,'bin/cjcj-stage1')),fixture:'not a Cangjie SDK'}));
 const env={...process.env,CJCJ_SRCBUILD_CONSUMER_SDK:sdk,CJCJ_SRCBUILD_SOURCE_MIRRORS:'https://github.com/cjcj-dev/cangjie-tools.git=file://'+mirror,CJCJ_SRCBUILD_REQUIRE_MIRRORS:'1'};
 delete env.CANGJIE_BUILD_DRY_RUN;
-if(!env.CJCJ_SRCBUILD_HOST_SDK)throw new Error('tool facts integration requires the real plain host SDK loader input');
+if(!env.CJCJ_OFFICIAL_SDK_ROOT)throw new Error('tool facts integration requires the real plain host SDK loader input');
 const cli=process.env.CJCJ_TOOL_FACTS_CLI||new URL('../cli.mjs',import.meta.url).pathname;
 const args=[process.execPath,cli,'--workspace',workspace,'--build-root',path.join(root,'buildtools'),'--target','linux-x64','--host-profile','kkk2','--build-type','release','--tools-phase','build','--tools-build-set','lsp','--jobs','2','build','tools'];
 const built=await command(args,{env});assert.equal(built.status,0,built.stderr);

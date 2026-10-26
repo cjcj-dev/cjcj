@@ -112,7 +112,7 @@ if sys.argv[1]=='install':
   saveSourceSelection(buildConfig({workspace:root,repoOverrides:{stdx:{url:'https://gitcode.com/Cangjie/cangjie_stdx.git',tag:commit}}}));
   const env = {...process.env, CC: process.env.CC || '/usr/lib/llvm-15/bin/clang',
     CXX: process.env.CXX || '/usr/lib/llvm-15/bin/clang++',
-    FIXTURE_ROOT: root, CJCJ_SRCBUILD_HOST_SDK: host, CJCJ_SRCBUILD_CONSUMER_SDK: sdk};
+    FIXTURE_ROOT: root, CJCJ_OFFICIAL_SDK_ROOT: host, CJCJ_SRCBUILD_CONSUMER_SDK: sdk};
   delete env.CANGJIE_BUILD_DRY_RUN; delete env.CJCJ_SRCBUILD_VERIFIER_REPORT_ACTIVE;
   env.CANGJIE_STDX_PATH = path.join(root, 'unrelated-host-stdx');
   const args = [cli, '--workspace', root, '--build-root', path.join(root, 'buildtools'), '--host-profile', 'kkk2'];

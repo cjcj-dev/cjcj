@@ -119,7 +119,7 @@ source+='\\nexport async function '+name+'(){console.log("CONTROLLED_UNAVAILABLE
 `);
 const env={...process.env,NODE_OPTIONS:'--experimental-loader='+root+'/loader.mjs',CANGJIE_WORKSPACE:workspace,
  CJCJ_SRCBUILD_TARGET:'linux-x64',SOURCE_SDK_VERSION:'0.0.0-manifest-fixture',CJCJ_SDK_TARGETS:root+'/targets.json',
- CJCJ_OFFICIAL_SDK_ROOT:process.env.CJCJ_SRCBUILD_HOST_SDK||root+'/unavailable-host'};
+ CJCJ_OFFICIAL_SDK_ROOT:process.env.CJCJ_OFFICIAL_SDK_ROOT||root+'/unavailable-host'};
 if(process.env.INSTALLED_PYTHON_RECORD && !publicMode){
  const wrong=await run('formal-package-wrong-source',[process.execPath,repo+'ci/srcbuild/steps/package-install.mjs'],
   {...env,CJCJ_PACKAGE_SOURCE_REPOSITORY:env.CJCJ_PACKAGE_SOURCE_REPOSITORY||'file://'+repo,CJCJ_PACKAGE_SOURCE_COMMIT:'0'.repeat(40)});

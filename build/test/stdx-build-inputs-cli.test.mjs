@@ -24,7 +24,7 @@ function executorFixture(t) {
   fs.writeFileSync(py, fs.readFileSync(py, 'utf8')
     .replace("build=pathlib.Path('build_temp/build')", `build=pathlib.Path('build_temp/build')
 with (root/'executor-env.jsonl').open('a') as stream:
- stream.write(json.dumps(dict(phase=sys.argv[1],macro=os.environ.get('STDX_HOST_CANGJIE_HOME'),baseline=os.environ.get('CJCJ_SRCBUILD_HOST_SDK'),home=os.environ.get('CANGJIE_HOME'),cjc=shutil.which('cjc')))+'\\n')`)
+ stream.write(json.dumps(dict(phase=sys.argv[1],macro=os.environ.get('STDX_HOST_CANGJIE_HOME'),baseline=os.environ.get('CJCJ_OFFICIAL_SDK_ROOT'),home=os.environ.get('CANGJIE_HOME'),cjc=shutil.which('cjc')))+'\\n')`)
     .replace('if not build.exists():', "if not build.exists() or os.environ.get('CANGJIE_SCHEMA_DIR'):"));
   fs.appendFileSync(path.join(f.stdx, 'CMakeLists.txt'), `
 include(\${CMAKE_CURRENT_SOURCE_DIR}/MakeHostCJNATIVESharedLib.cmake)

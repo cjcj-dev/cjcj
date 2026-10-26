@@ -216,7 +216,7 @@ export async function prepareSourceBuildInputs(config, env=process.env, startSta
   }
   const selected=resolveSources(sources);
   const install=path.join(config.repoPath('compiler'),config.target.primaryCompilerOutput());
-  const hostInstall=config.officialSdkRoot??env.CJCJ_SRCBUILD_HOST_SDK;
+  const hostInstall=config.officialSdkRoot??env.CJCJ_OFFICIAL_SDK_ROOT;
   if(!hostInstall)throw Error('SOURCE_BUILD_BOOTSTRAP_HOST_REQUIRED');
   const bootstrapHost={install:path.resolve(hostInstall),platform:host};
   const component=name=>({...selected[name],install,platform});

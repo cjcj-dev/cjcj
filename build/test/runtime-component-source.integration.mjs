@@ -10,7 +10,7 @@ import {createHash} from 'node:crypto';
 import {hostToolchainFromCjcVersion} from '../../ci/host-toolchain-pin.mjs';
 import {buildConfig} from '../lib/config.mjs';
 const repo=new URL('../../',import.meta.url).pathname;
-const base=process.env.RELEASE_EVIDENCE_TEST_ROOT,generator=process.env.CJCJ_TEST_RUNTIME_GENERATOR,host=process.env.CJCJ_SRCBUILD_HOST_SDK;
+const base=process.env.RELEASE_EVIDENCE_TEST_ROOT,generator=process.env.CJCJ_TEST_RUNTIME_GENERATOR,host=process.env.CJCJ_OFFICIAL_SDK_ROOT;
 if(!base||!generator||!host)throw Error('runtime component test requires evidence root, original generator and complete private host');
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
 const write=async(file,data)=>{await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,data);};
@@ -199,7 +199,7 @@ return {...r,source};}
  legacyLoader=legacyLoader.replace("+'(){'+body", "+'(...args){'+body");
  await write(root+'/legacy-loader.mjs',legacyLoader);
  await write(root+'/legacy-boundaries.json',JSON.stringify({functions:legacyBoundary,CPP:'NOT_RUN',CANGJIE_STD:'NOT_RUN',LANGUAGE:'NOT_RUN'}));
- const legacyEnv={...consumer,NODE_OPTIONS:'--experimental-loader='+root+'/legacy-loader.mjs',CJCJ_SRCBUILD_HOST_SDK:host};
+ const legacyEnv={...consumer,NODE_OPTIONS:'--experimental-loader='+root+'/legacy-loader.mjs',CJCJ_OFFICIAL_SDK_ROOT:host};
  for(const buildType of ['release','relwithdebinfo']){
   const cli=[process.execPath,repo+'build/cli.mjs','--workspace',legacy,'--build-root',root+'/legacy-build','--build-type',buildType];
   await run('legacy-runtime-'+buildType,[...cli,'build','runtime'],legacyEnv);

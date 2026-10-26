@@ -139,7 +139,7 @@ for(const [label,mode,capabilities] of [['default-all',undefined,false],['explic
  const original=legacyProducer(f,mode,{testable:capabilities,reentry:capabilities});
  const parse=text=>new Map(text.trim().split('\n').map(line=>{const i=line.indexOf('=');return [line.slice(0,i),line.slice(i+1)];}));
  const selected=parse(original),format=fields=>[...fields].map(([key,value])=>key+'='+value).join('\n')+'\n';
- const status=gcUnitStatusPath(f.config,f.sdk),native=f.runtime+'/CMakebuild/gc-unit.status',env={CJCJ_SRCBUILD_HOST_SDK:f.host};
+ const status=gcUnitStatusPath(f.config,f.sdk),native=f.runtime+'/CMakebuild/gc-unit.status',env={CJCJ_OFFICIAL_SDK_ROOT:f.host};
  const assertState=mode==='defer'?assertGcUnitLanguageDeferred:assertGcUnitLanguageDone;
  const consume=text=>{write(status,text);return assertState(f.config,f.sdk,{env});};
  assert.equal(completedGcUnitGate(selected),true,'SCHEMA1_VALID_'+label);consume(original);

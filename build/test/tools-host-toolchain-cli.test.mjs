@@ -69,7 +69,7 @@ else: raise RuntimeError('unexpected phase')
   }
   const commit=freeze(tools);
   write(path.join(workspace,'.source-selection.json'),JSON.stringify({tools:{url:'file://'+tools,tag:commit},cjpm:{url:'file://'+tools,tag:commit}}));
-  const env={...process.env,CJCJ_SRCBUILD_CONSUMER_SDK:host,CJCJ_SRCBUILD_HOST_SDK:host};
+  const env={...process.env,CJCJ_SRCBUILD_CONSUMER_SDK:host,CJCJ_OFFICIAL_SDK_ROOT:host};
   for(const key of ['CANGJIE_BUILD_DRY_RUN','CJCJ_TOOLS_GCC_TOOLCHAIN','CJCJ_SRCBUILD_SOURCE_MIRRORS','CJCJ_SRCBUILD_REQUIRE_MIRRORS'])delete env[key];
   function build(tool,extra=[]) {
     return run([process.execPath,new URL('../cli.mjs',import.meta.url).pathname,'--workspace',workspace,

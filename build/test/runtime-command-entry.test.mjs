@@ -78,7 +78,7 @@ function r3Fixture(label) {
  // overlay, split/cache checks, provenance and language gate remain active.
  const record=String.raw`import os,sys,pathlib,json,shutil
 r=pathlib.Path.cwd(); seed=pathlib.Path(os.environ['R3_SEED'])
-with open(os.environ['R3_TRACE'],'a') as f: f.write(json.dumps(dict(cwd=str(r),argv=sys.argv,host=os.environ.get('CJCJ_SRCBUILD_HOST_SDK'),ld=os.environ.get('LD_LIBRARY_PATH')))+'\n')
+with open(os.environ['R3_TRACE'],'a') as f: f.write(json.dumps(dict(cwd=str(r),argv=sys.argv,host=os.environ.get('CJCJ_OFFICIAL_SDK_ROOT'),ld=os.environ.get('LD_LIBRARY_PATH')))+'\n')
 if os.environ.get('R3_CHILD_FAIL') and sys.argv[1]=='build': sys.exit(19)
 `;
  write(runtime+'/build.py',record+String.raw`
@@ -113,9 +113,9 @@ if sys.argv[1]=='install':
  const loader=root+'/boundaries.mjs';
  write(loader,`export async function load(url,context,next){const r=await next(url,context);const boundary=url.endsWith('/ci/bootstrap/sdk-flow.mjs')?'installProducts':url.endsWith('/build/lib/package-lineage.mjs')?'assertPackagedLineage':url.endsWith('/ci/bootstrap/sdk-verify-install.mjs')?'verifyInstall':url.endsWith('/ci/bootstrap/native-runtime-input.mjs')?'receiveNativeRuntime':null;if(!boundary)return r;let s=String(r.source);const re=new RegExp('export (async )?function '+boundary+'\\\\(');if(!re.test(s))throw Error('R3_BOUNDARY_SHAPE '+boundary);s=s.replace(re,(_,a='')=>a+'function ORIGINAL_'+boundary+'(');s+='\\nexport async function '+boundary+'(input){console.log("R3_CONTROLLED_BOUNDARY '+boundary+'");if('+JSON.stringify(boundary)+'==="receiveNativeRuntime")return {install:input.root};}';return {...r,source:s};}\n`);
  const base={...process.env,NODE_OPTIONS:'--experimental-loader='+loader,R3_SEED:seed,R3_TRACE:root+'/producer.jsonl',DIRECT_TRACE:root+'/language.jsonl',GC_UNIT_GATE_CONTRACT_SELFTEST:'1',GC_UNIT_GATE_SKIP:'0',MRT_TESTABLE_INTERNALS:'0'};
- for(const key of ['CJCJ_SRCBUILD_HOST_SDK','CJCJ_OFFICIAL_SDK_ROOT','CJCJ_SRCBUILD_CONSUMER_SDK','CJCJ_SRCBUILD_VERIFIER_REPORT_ACTIVE','CANGJIE_BUILD_DRY_RUN','CJCJ_NATIVE_RUNTIME_INSTALL','CJCJ_NATIVE_RUNTIME_SOURCE','CJCJ_NATIVE_SOURCE_SELECTION','CJCJ_NATIVE_RUNTIME_REF','CJCJ_NATIVE_LLVM_REF'])delete base[key];
+ for(const key of ['CJCJ_OFFICIAL_SDK_ROOT','CJCJ_SRCBUILD_CONSUMER_SDK','CJCJ_SRCBUILD_VERIFIER_REPORT_ACTIVE','CANGJIE_BUILD_DRY_RUN','CJCJ_NATIVE_RUNTIME_INSTALL','CJCJ_NATIVE_RUNTIME_SOURCE','CJCJ_NATIVE_SOURCE_SELECTION','CJCJ_NATIVE_RUNTIME_REF','CJCJ_NATIVE_LLVM_REF'])delete base[key];
  function invoke(stage,{mode='missing',explicit=true,selected=host,native=false,extra={}}={}) {
-  const env={...base,...(mode==='conflict'?{CJCJ_SRCBUILD_HOST_SDK:root+'/stale-host'}:mode==='same'?{CJCJ_SRCBUILD_HOST_SDK:host}:{}),...extra};
+  const env={...base,...(mode==='conflict'?{CJCJ_OFFICIAL_SDK_ROOT:root+'/stale-host'}:mode==='same'?{CJCJ_OFFICIAL_SDK_ROOT:host}:{}),...extra};
   if(native)Object.assign(env,{CJCJ_NATIVE_RUNTIME_INSTALL:seed,CJCJ_NATIVE_RUNTIME_REF:choices.runtime.tag,CJCJ_NATIVE_LLVM_REF:choices.llvm.tag,CJCJ_NATIVE_HOST_VERSION:'1.0.0'});
   const args=[new URL('../cli.mjs',import.meta.url).pathname,'--workspace',workspace,'--build-root',root+'/buildtools',...(explicit?['--official-sdk-root',selected]:[]),...(stage==='verify'?['verify']:['build',stage])];
   return command(stage+'-'+mode+(native?'-native':''),process.execPath,args,env);

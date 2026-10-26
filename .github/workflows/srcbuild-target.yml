@@ -329,7 +329,7 @@ jobs:
           host_sdk="$HOME/.cjv/toolchains/$CJCJ_TOOLCHAIN"
           test -d "$host_sdk"
           echo "CJCJ_SRCBUILD_BOOTSTRAP_SDK=$host_sdk" >> "$GITHUB_ENV"
-          echo "CJCJ_SRCBUILD_HOST_SDK=$host_sdk" >> "$GITHUB_ENV"
+          echo "CJCJ_OFFICIAL_SDK_ROOT=$host_sdk" >> "$GITHUB_ENV"
 
       # G2 describes the canonical Linux x64 SDK. Freeze right after the host
       # SDK is provisioned: the checkout itself is still clean (provisioning
@@ -341,10 +341,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -d "$CJCJ_SRCBUILD_HOST_SDK"
+          test -d "$CJCJ_OFFICIAL_SDK_ROOT"
           base_archive="$RUNNER_TEMP/g2-base-sdk/host-sdk.tar"
           mkdir -p "$(dirname "$base_archive")"
-          tar -cf "$base_archive" -C "$CJCJ_SRCBUILD_HOST_SDK" .
+          tar -cf "$base_archive" -C "$CJCJ_OFFICIAL_SDK_ROOT" .
           node ci/generate-freeze.mjs \
             --base-sdk "$base_archive" \
             --workflow-ref "${GITHUB_SHA:-$(git rev-parse HEAD)}" \
@@ -371,7 +371,7 @@ jobs:
           test -d "$host_sdk"
           node ci/srcbuild/host-env.mjs "$host_sdk"
           echo "CJCJ_SRCBUILD_BOOTSTRAP_SDK=$host_sdk" >> "$GITHUB_ENV"
-          echo "CJCJ_SRCBUILD_HOST_SDK=$host_sdk" >> "$GITHUB_ENV"
+          echo "CJCJ_OFFICIAL_SDK_ROOT=$host_sdk" >> "$GITHUB_ENV"
 
       - name: Copy frozen G2 identity for source handoffs
         if: inputs.native_runtime_artifact == '' && (matrix.target == 'linux-x64')

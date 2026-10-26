@@ -27,7 +27,7 @@ export function consumerSdk(config, output = 'output') {
 // Old standalone adapters may only carry an environment; a resolved source
 // build always supplies the selected plan and takes precedence over that input.
 export function bootstrapHostSdk(config, env = process.env) {
-  return config.selection?.bootstrapHost.install ?? config.officialSdkRoot ?? env.CJCJ_SRCBUILD_HOST_SDK;
+  return config.selection?.bootstrapHost.install ?? config.officialSdkRoot ?? env.CJCJ_OFFICIAL_SDK_ROOT;
 }
 
 export function baseEnv(config, base = process.env) {
@@ -52,7 +52,7 @@ export function baseEnv(config, base = process.env) {
   }
   const env = {
     ...base,
-    ...(hostSdk ? {CJCJ_SRCBUILD_HOST_SDK: hostSdk} : {}),
+    ...(hostSdk ? {CJCJ_OFFICIAL_SDK_ROOT: hostSdk} : {}),
     ARCH: spec.arch,
     SDK_NAME: spec.sdkName,
     CANGJIE_VERSION: config.cangjieVersion,

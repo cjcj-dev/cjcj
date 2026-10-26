@@ -486,7 +486,7 @@ test('tools select the target compiler home while keeping the plain host loader'
       }),
     }),
   });
-  const previousHostSdk = process.env.CJCJ_SRCBUILD_HOST_SDK;
+  const previousHostSdk = process.env.CJCJ_OFFICIAL_SDK_ROOT;
   try {
     const hostSdk = directory(root, 'host-sdk');
     const targetSdk = path.join(config.repoPath('compiler'), 'output');
@@ -495,7 +495,7 @@ test('tools select the target compiler home while keeping the plain host loader'
     ];
     const hostRuntime = file(hostSdk, runtimeRelative, 'plain-host-runtime');
     file(targetSdk, runtimeRelative, 'coloured-target-runtime');
-    process.env.CJCJ_SRCBUILD_HOST_SDK = hostSdk;
+    process.env.CJCJ_OFFICIAL_SDK_ROOT = hostSdk;
 
     let env;
     try {
@@ -528,8 +528,8 @@ test('tools select the target compiler home while keeping the plain host loader'
       /required platform dependency directory missing:/,
     );
   } finally {
-    if (previousHostSdk === undefined) delete process.env.CJCJ_SRCBUILD_HOST_SDK;
-    else process.env.CJCJ_SRCBUILD_HOST_SDK = previousHostSdk;
+    if (previousHostSdk === undefined) delete process.env.CJCJ_OFFICIAL_SDK_ROOT;
+    else process.env.CJCJ_OFFICIAL_SDK_ROOT = previousHostSdk;
     fs.rmSync(root, {recursive: true, force: true});
   }
 });
@@ -539,7 +539,7 @@ test('runtime producer uses the host loader before the target runtime exists', (
   const previousDryRun = process.env.CANGJIE_BUILD_DRY_RUN;
   const previousJobs = process.env.CANGJIE_BUILD_JOBS;
   delete process.env.CANGJIE_BUILD_JOBS; // This gate specifies the default recipe.
-  const previousHostSdk = process.env.CJCJ_SRCBUILD_HOST_SDK;
+  const previousHostSdk = process.env.CJCJ_OFFICIAL_SDK_ROOT;
   const previousLoader = process.env.LD_LIBRARY_PATH;
   try {
     const workspace = directory(root, 'workspace');
@@ -557,7 +557,7 @@ test('runtime producer uses the host loader before the target runtime exists', (
     ]);
 
     process.env.CANGJIE_BUILD_DRY_RUN = '1';
-    process.env.CJCJ_SRCBUILD_HOST_SDK = hostSdk;
+    process.env.CJCJ_OFFICIAL_SDK_ROOT = hostSdk;
     process.env.LD_LIBRARY_PATH = '/inherited';
     const env = baseEnv({...config, selection: {bootstrapHost: {install: hostSdk}}});
     const loader = env.LD_LIBRARY_PATH.split(path.delimiter);
@@ -571,8 +571,8 @@ test('runtime producer uses the host loader before the target runtime exists', (
   } finally {
     if (previousDryRun === undefined) delete process.env.CANGJIE_BUILD_DRY_RUN;
     else process.env.CANGJIE_BUILD_DRY_RUN = previousDryRun;
-    if (previousHostSdk === undefined) delete process.env.CJCJ_SRCBUILD_HOST_SDK;
-    else process.env.CJCJ_SRCBUILD_HOST_SDK = previousHostSdk;
+    if (previousHostSdk === undefined) delete process.env.CJCJ_OFFICIAL_SDK_ROOT;
+    else process.env.CJCJ_OFFICIAL_SDK_ROOT = previousHostSdk;
     if (previousLoader === undefined) delete process.env.LD_LIBRARY_PATH;
     else process.env.LD_LIBRARY_PATH = previousLoader;
     fs.rmSync(root, {recursive: true, force: true});

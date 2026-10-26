@@ -393,7 +393,7 @@ for (const runtimeMode of ['git','archive']) test('G2 workflow capture and gate 
   const freezeStep = source.split(/^      - name:/m)
     .find(value => /^[ \t]*node ci\/generate-freeze\.mjs[ \t]/m.test(value));
   assert.ok(freezeStep, 'G2_WORKFLOW_FREEZE: workflow must generate the campaign skeleton');
-  assert.ok(freezeStep.includes('tar -cf "$base_archive" -C "$CJCJ_SRCBUILD_HOST_SDK" .'));
+  assert.ok(freezeStep.includes('tar -cf "$base_archive" -C "$CJCJ_OFFICIAL_SDK_ROOT" .'));
   assert.ok(freezeStep.includes('--base-sdk "$base_archive"'));
   assert.ok(!freezeStep.includes('prepare_base_sdk'), 'G2_WORKFLOW_FREEZE: no network download feeds the freeze');
   assert.ok(source.indexOf('- name: Freeze G2 identity inputs') < source.indexOf('- name: Test and archive installed SDK'));

@@ -16,7 +16,7 @@ test('SDK integration has an automatic production consumer while ordinary CI own
  assert.doesNotMatch(code,/hlePayloadFixture|cjcov:42|skip:/);
 });
 test('missing production SDK input exits nonzero before any target starts',()=>{
- const env={...process.env};for(const key of ['RELEASE_EVIDENCE_TEST_ROOT','CJCJ_SRCBUILD_CONSUMER_SDK','CANGJIE_WORKSPACE','CJCJ_OFFICIAL_SDK_ROOT','CJCJ_SRCBUILD_HOST_SDK'])delete env[key];
+ const env={...process.env};for(const key of ['RELEASE_EVIDENCE_TEST_ROOT','CJCJ_SRCBUILD_CONSUMER_SDK','CANGJIE_WORKSPACE','CJCJ_OFFICIAL_SDK_ROOT'])delete env[key];
  const r=spawnSync(process.execPath,[path.join(root,integration)],{env,encoding:'utf8'});
  assert.equal(r.status,1,r.stderr);assert.match(r.stderr,/SOURCE_TOOL_SDK_INPUT_REQUIRED/);assert.doesNotMatch(r.stdout,/A8_PACKAGE_TARGET_ASSERTION_REACHED/);
  console.log('PRODUCTION_INPUT_REQUIRED_ASSERTION_REACHED');

@@ -21,7 +21,7 @@ const write = async (file, contents, mode = 0o755) => {
 const pin = (await fs.readFile(new URL('../../ci/cjpm_pin.env', import.meta.url), 'utf8')).match(/^CJPM_FORK_REF=(.+)$/m)[1];
 await write(path.join(fakeBin, 'git'), `#!/bin/sh\ncase "$1" in rev-parse) printf '%s\\n' '${pin}' ;; esac\n`);
 process.env.PATH = `${fakeBin}:${process.env.PATH}`;
-process.env.CJCJ_SRCBUILD_HOST_SDK = host;
+process.env.CJCJ_OFFICIAL_SDK_ROOT = host;
 process.env.GC_UNIT_CJC_RUNTIME_LIB_DIR = path.join(host, 'runtime/lib', tuple);
 delete process.env.CANGJIE_BUILD_DRY_RUN;
 const original = buildConfig({workspace: path.join(root, 'workspace'), buildRoot: root, consumerSdk: sdk});

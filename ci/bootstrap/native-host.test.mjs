@@ -8,6 +8,43 @@ import {load} from '../vendor/js-yaml/js-yaml.mjs';
 import {nativeSourceSelection,NATIVE_REPOSITORIES} from './native-source-selection.mjs';
 import {FIXED_INPUTS} from './sdk-targets.mjs';
 const root=process.env.RELEASE_EVIDENCE_TEST_ROOT;if(!root)throw new Error('RELEASE_EVIDENCE_TEST_ROOT required');
+test('source host producer exports one canonical root through first and repeated preparation',async()=>{
+ const {buildConfig}=await import('../../build/lib/config.mjs');
+ const {baseEnv}=await import('../../build/srcbuild/stages/common.mjs');
+ await fs.mkdir(root,{recursive:true});const work=await fs.mkdtemp(path.join(root,'canonical-host-'));
+ const bootstrap=work+'/bootstrap',workspace=work+'/workspace',selected=workspace+'/source-host-sdk';
+ await fs.mkdir(bootstrap+'/runtime/lib/linux_x86_64_cjnative',{recursive:true});
+ await fs.mkdir(bootstrap+'/bin',{recursive:true});await fs.writeFile(bootstrap+'/bin/cjc','old fixture compiler');
+ await fs.mkdir(workspace+'/cangjie_compiler/output/bin',{recursive:true});
+ await fs.writeFile(workspace+'/cangjie_compiler/output/bin/cjc','new fixture compiler');
+ await fs.writeFile(work+'/plain.c','int plain_host_fixture(void) { return 0; }\n');
+ const records=[];const run=(label,argv,env)=>{
+  const r=spawnSync(argv[0],argv.slice(1),{env,encoding:'utf8'});
+  records.push({label,argv,rc:r.status,signal:r.signal,stdout:r.stdout,stderr:r.stderr,error:r.error?.message});
+  return r;
+ };
+ try {
+  const cc=run('plain-host-library',[process.env.CC||'cc','-shared','-fPIC',work+'/plain.c','-o',bootstrap+'/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so'],process.env);
+  assert.equal(cc.status,0,cc.stderr);
+  for(const phase of ['first','repeat']){
+   const output=work+'/'+phase+'.env',env={...process.env,CANGJIE_WORKSPACE:workspace,GITHUB_ENV:output,
+    CJCJ_SRCBUILD_TARGET:'linux-x64',CJCJ_SRCBUILD_BOOTSTRAP_SDK:bootstrap,
+    CJCJ_OFFICIAL_SDK_ROOT:work+'/stale-canonical',CJCJ_SRCBUILD_HOST_SDK:work+'/removed-alias'};
+   const r=run(phase,[process.env.ZX||'zx',new URL('../srcbuild/steps/prepare-source-host-sdk.mjs',import.meta.url).pathname],env);
+   assert.equal(r.status,0,r.stderr);
+   const exported=Object.fromEntries((await fs.readFile(output,'utf8')).trim().split('\n').map(line=>{
+    const at=line.indexOf('=');return[line.slice(0,at),line.slice(at+1)];}));
+   assert.equal(exported.CJCJ_OFFICIAL_SDK_ROOT,selected,'HOST_CANONICAL_EXPORT');
+   assert.equal(exported.CJCJ_SRCBUILD_HOST_SDK,undefined);
+   const config=buildConfig({workspace,officialSdkRoot:exported.CJCJ_OFFICIAL_SDK_ROOT});
+   const child=baseEnv(config,{...env,...exported});
+   assert.equal(child.CJCJ_OFFICIAL_SDK_ROOT,selected);
+   assert.equal(child.LD_LIBRARY_PATH.split(path.delimiter)[0],selected+'/runtime/lib/linux_x86_64_cjnative');
+   assert.equal(await fs.readFile(selected+'/bin/cjc','utf8'),'new fixture compiler');
+   assert.equal(await fs.readFile(bootstrap+'/bin/cjc','utf8'),'old fixture compiler');
+  }
+ } finally {await fs.writeFile(work+'/commands.json',JSON.stringify(records,null,2));}
+});
 test('explicit native host is selected before freeze and old host steps retain their default branch',async()=>{
  const workflow=load(await fs.readFile(new URL('../../.github/workflows/srcbuild-target.yml',import.meta.url),'utf8'));
  const steps=workflow.jobs['source-stage0'].steps;

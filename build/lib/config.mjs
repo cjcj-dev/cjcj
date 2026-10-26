@@ -67,7 +67,7 @@ export function saveSourceSelection(config) {
   fs.writeFileSync(`${file}.tmp`, `${JSON.stringify(config.sourceSelection, null, 2)}\n`);
   fs.renameSync(`${file}.tmp`, file);
 }
-export function resolveOfficialSdkRoot(value = process.env.CJCJ_OFFICIAL_SDK_ROOT ?? process.env.CJCJ_SRCBUILD_HOST_SDK) {
+export function resolveOfficialSdkRoot(value = process.env.CJCJ_OFFICIAL_SDK_ROOT) {
   if (value === undefined || value === null) return null;
   if (!String(value).trim()) throw new ConfigError('officialSdkRoot: expected a nonempty path');
   return absolute(value);
@@ -122,7 +122,7 @@ export function makeRepos({globalTag, overrides = {}, env=process.env, nativeSel
 export function buildConfig({
   workspace,
   buildRoot,
-  officialSdkRoot = process.env.CJCJ_OFFICIAL_SDK_ROOT ?? process.env.CJCJ_SRCBUILD_HOST_SDK,
+  officialSdkRoot = process.env.CJCJ_OFFICIAL_SDK_ROOT,
   consumerSdk = process.env.CJCJ_SRCBUILD_CONSUMER_SDK,
   targetKey = 'linux-x64',
   buildType = DEFAULT_BUILD_TYPE,

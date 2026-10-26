@@ -245,9 +245,9 @@ function packageArm(label, args, env, expected, read = true) {
   observed(p, 'PARITY_INPUT_OBSERVED'); assert.doesNotMatch(p.text, /PARITY_INPUT_MISMATCH/);
   if (read) assert.match(p.text, /PRIVATE_H_ENTRY_READ/);
 }
-cases['h-env'] = () => packageArm('h-env', [], {CJCJ_SRCBUILD_HOST_SDK: host}, host);
-cases['h-official-env'] = () => packageArm('h-official-env', [], {
-  CJCJ_OFFICIAL_SDK_ROOT: host, CJCJ_SRCBUILD_HOST_SDK: '/invalid/ambient-host'}, host);
+cases['h-env'] = () => packageArm('h-env', [], {CJCJ_OFFICIAL_SDK_ROOT: host}, host);
+cases['h-legacy-ignored'] = () => packageArm('h-legacy-ignored', [], {
+  CJCJ_SRCBUILD_HOST_SDK: '/invalid/ambient-host'}, path.join(os.homedir(), '.cjv/toolchains', readHostToolchainPin()), false);
 cases['h-explicit'] = () => {
   const ambient = path.join(work, 'ambient-host-control'); file(path.join(ambient, 'envsetup.sh'), 'controlled ambient SDK');
   packageArm('h-explicit', ['--official-sdk-root', host], {CJCJ_OFFICIAL_SDK_ROOT: ambient, CJCJ_SRCBUILD_HOST_SDK: ambient}, host);
@@ -262,7 +262,6 @@ cases['h-invalid'] = () => {
 };
 cases['verify-h'] = () => {
   for(const [label,args,env,expected] of [
-    ['verify-host',[],{CJCJ_SRCBUILD_HOST_SDK:host},host],
     ['verify-official',[],{CJCJ_OFFICIAL_SDK_ROOT:host},host],
     ['verify-explicit',['--official-sdk-root',host],{},host],
     ['verify-default',[],{},path.join(os.homedir(),'.cjv/toolchains',readHostToolchainPin())],
@@ -275,7 +274,6 @@ cases['verify-h'] = () => {
 cases['ci-verify-h'] = () => {
   const sdk = path.join(packageFixture(),'software/cangjie');
   for (const [label,selected,expected] of [
-    ['host',{CJCJ_SRCBUILD_HOST_SDK:host},host],
     ['official',{CJCJ_OFFICIAL_SDK_ROOT:host,CJCJ_SRCBUILD_HOST_SDK:'/wrong-host'},host],
     ['default',{},path.join(os.homedir(),'.cjv/toolchains',readHostToolchainPin())],
   ]) {

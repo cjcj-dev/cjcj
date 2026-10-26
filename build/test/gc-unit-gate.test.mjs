@@ -6,7 +6,7 @@ import {directSource,directBuild,write} from '../../ci/fixtures/runtime-direct-i
 import {languageInputEnvironment,gcUnitLanguageGateEnabled,gcUnitRuntimeBuildEnv,gcUnitBuildStatus,gcUnitStatusPath,beginGcUnitLanguageDeferral,finishGcUnitLanguageDeferral,assertGcUnitLanguageDeferred,assertGcUnitLanguageDone} from '../srcbuild/gc-unit-gate.mjs';
 test('normal source build carries only this invocation defer and normal inputs',()=>{
  const root=fs.mkdtempSync(path.join(process.env.RELEASE_EVIDENCE_TEST_ROOT||os.tmpdir(),'direct-deferral-'));
- const config=buildConfig({workspace:root,targetKey:'linux-x64'}),runtime=path.join(config.repoPath('runtime'),'runtime'),sdk=root+'/sdk',env={CJCJ_SRCBUILD_HOST_SDK:root+'/host'};
+ const config=buildConfig({workspace:root,targetKey:'linux-x64'}),runtime=path.join(config.repoPath('runtime'),'runtime'),sdk=root+'/sdk',env={CJCJ_OFFICIAL_SDK_ROOT:root+'/host'};
  directSource(runtime);directBuild(runtime);
  assert.deepEqual(gcUnitRuntimeBuildEnv(config,env),{GC_UNIT_GATE_LANGUAGE_TESTS:'defer',GC_UNIT_GATE_STATUS:gcUnitBuildStatus(runtime)});
  beginGcUnitLanguageDeferral(config,runtime,sdk,{env});assert.equal(fs.existsSync(gcUnitBuildStatus(runtime)),false);
@@ -17,14 +17,14 @@ test('normal source build carries only this invocation defer and normal inputs',
  const status=gcUnitStatusPath(config,sdk);write(status,'GATE=PASS\nGATE_RC=0\nLANGUAGE_TESTS=LANGUAGE_DONE\nLANGUAGE_TESTS=LANGUAGE_DEFERRED\n');assert.throws(()=>assertGcUnitLanguageDone(config,sdk,{env}),/duplicate status field/);
 });
 test('defer remains limited to selected native Linux and leaves unsupported targets untouched',()=>{
- const env={CJCJ_SRCBUILD_HOST_SDK:'/host'};
+ const env={CJCJ_OFFICIAL_SDK_ROOT:'/host'};
  for(const key of ['windows-x64','darwin-x64'])assert.equal(gcUnitRuntimeBuildEnv(buildConfig({targetKey:key}),env),undefined);
  assert.equal(gcUnitRuntimeBuildEnv(buildConfig({targetKey:'linux-x64',officialSdkRoot:null}),{}),undefined);
 });
 
 test('a delegating source entry cannot select shell compatibility when its mjs dependency is missing',()=>{
  const root=fs.mkdtempSync(path.join(process.env.RELEASE_EVIDENCE_TEST_ROOT||os.tmpdir(),'direct-missing-gate-'));
- const config=buildConfig({workspace:root,targetKey:'linux-x64'}),runtime=path.join(config.repoPath('runtime'),'runtime'),sdk=root+'/sdk',env={CJCJ_SRCBUILD_HOST_SDK:root+'/host'};
+ const config=buildConfig({workspace:root,targetKey:'linux-x64'}),runtime=path.join(config.repoPath('runtime'),'runtime'),sdk=root+'/sdk',env={CJCJ_OFFICIAL_SDK_ROOT:root+'/host'};
  directSource(runtime);directBuild(runtime);fs.renameSync(runtime+'/tests/gc_unit/gate_gc_unit.mjs',runtime+'/tests/gc_unit/gate_gc_unit.mjs.saved');
  assert.throws(()=>finishGcUnitLanguageDeferral(config,runtime,sdk,{env}),/gate_gc_unit.mjs/);
  fs.renameSync(runtime+'/tests/gc_unit/gate_gc_unit.mjs.saved',runtime+'/tests/gc_unit/gate_gc_unit.mjs');
@@ -40,7 +40,7 @@ test('cross target keeps the actual Linux compiler host and does not enable nati
  write(sdk+'/runtime/lib/windows_x86_64_cjnative/libcangjie-runtime.dll','target');
  write(sdk+'/runtime/lib/windows_x86_64_cjnative/libboundscheck.dll','target bounds');
  write(sdk+'/lib/windows_x86_64_cjnative/libcangjie-std-core.a','target std');
- const env=languageInputEnvironment(config,sdk,{...process.env,CJCJ_SRCBUILD_HOST_SDK:host});
+ const env=languageInputEnvironment(config,sdk,{...process.env,CJCJ_OFFICIAL_SDK_ROOT:host});
  assert.equal(env.GC_UNIT_CJC_RUNTIME_TUPLE,'linux_x86_64_cjnative');assert.equal(env.GC_UNIT_RUNTIME_TUPLE,'windows_x86_64_cjnative');
  assert.equal(gcUnitLanguageGateEnabled(config,env),false);
  const argv=[runtime+'/tests/gc_unit/language_toolchain.mjs'],r=spawnSync(process.execPath,argv,{env,encoding:'utf8'});
@@ -56,9 +56,9 @@ test('explicit source plan controls language gating and child host without chang
  const root=fs.mkdtempSync(path.join(process.env.RELEASE_EVIDENCE_TEST_ROOT||os.tmpdir(),'selected-host-'));
  const chosen=root+'/chosen',stale=root+'/stale',macro=root+'/macro';fs.mkdirSync(chosen);
  const config={...buildConfig({workspace:root,officialSdkRoot:stale}),selection:{bootstrapHost:{install:chosen}}};
- for(const env of [{PATH:process.env.PATH},{PATH:process.env.PATH,CJCJ_SRCBUILD_HOST_SDK:stale,STDX_HOST_CANGJIE_HOME:macro}]){
+ for(const env of [{PATH:process.env.PATH},{PATH:process.env.PATH,CJCJ_OFFICIAL_SDK_ROOT:stale,STDX_HOST_CANGJIE_HOME:macro}]){
   const before={...env};assert.equal(gcUnitLanguageGateEnabled(config,env),true);
-  const child=baseEnv(config,env);assert.equal(child.CJCJ_SRCBUILD_HOST_SDK,chosen);assert.equal(child.STDX_HOST_CANGJIE_HOME,env.STDX_HOST_CANGJIE_HOME);assert.deepEqual(env,before);
+  const child=baseEnv(config,env);assert.equal(child.CJCJ_OFFICIAL_SDK_ROOT,chosen);assert.equal(child.STDX_HOST_CANGJIE_HOME,env.STDX_HOST_CANGJIE_HOME);assert.deepEqual(env,before);
  }
  for(const targetKey of ['windows-x64','darwin-x64'])assert.equal(gcUnitLanguageGateEnabled({...buildConfig({targetKey}),selection:config.selection},{}),false);
 });

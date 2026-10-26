@@ -16,10 +16,10 @@ const workspace = process.env.CANGJIE_WORKSPACE;
 const githubEnv = process.env.GITHUB_ENV;
 const githubPath = process.env.GITHUB_PATH;
 const targetKey = process.env.CJCJ_SRCBUILD_TARGET;
-const hostSdk = process.env.CJCJ_SRCBUILD_HOST_SDK;
+const hostSdk = process.env.CJCJ_OFFICIAL_SDK_ROOT;
 if (!workspace || !githubEnv || !githubPath || !targetKey || !hostSdk) {
   throw new Error(
-    'CANGJIE_WORKSPACE, GITHUB_ENV, GITHUB_PATH, CJCJ_SRCBUILD_TARGET and CJCJ_SRCBUILD_HOST_SDK are required',
+    'CANGJIE_WORKSPACE, GITHUB_ENV, GITHUB_PATH, CJCJ_SRCBUILD_TARGET and CJCJ_OFFICIAL_SDK_ROOT are required',
   );
 }
 const target = getTarget(targetKey);
@@ -119,7 +119,7 @@ const runtimeBinary = path.join(runtimeLib, spec.runtimeLibrary);
 await assertColouredRuntime(runtimeBinary, path.join(hostSdk, 'runtime', 'lib',
   spec.hostRuntimeTuple || spec.runtimeTuple, spec.hostRuntimeLibrary || spec.runtimeLibrary));
 assertRuntimeSplit({
-  hostSdk: process.env.CJCJ_SRCBUILD_HOST_SDK,
+  hostSdk: process.env.CJCJ_OFFICIAL_SDK_ROOT,
   targetSdk: sdk,
   target,
 });
