@@ -1,7 +1,5 @@
 package cjcj::driver
 
-@When[os == "Windows"]
-import cjcj::utils.GetApplicationPath
 @When[!debug && os != "Windows"]
 import cjcj::utils.{CreateAltSignalStack, RegisterCrashSignalHandler}
 @When[!debug && os == "Windows"]
@@ -40,9 +38,8 @@ public func RunDriverMain(args: Array<String>): Int64 {
         var failed = false
         try {
         diag.SetSourceManager(sourceManager)
-        @When[os == "Windows"]
-        let maybeExePath = GetApplicationPath()
-        @When[os != "Windows"]
+        // Resolve the invocation entry, not the retained process image. Both
+        // Driver and the frontend shim use this same compiler-relative root.
         let maybeExePath = GetApplicationPath(args[0], environmentVars)
         if (let None <- maybeExePath) {
             return 1

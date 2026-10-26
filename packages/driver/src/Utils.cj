@@ -127,6 +127,7 @@ public func RemovePath(path: String): Bool {
     return FileUtil.Remove(path)
 }
 
+@When[os != "Windows"]
 public func GetApplicationPath(argv0: String, environmentVars: HashMap<String, String>): Option<String> {
     if (argv0.contains("/")) {
         return FileUtil.GetAbsPath(argv0)
