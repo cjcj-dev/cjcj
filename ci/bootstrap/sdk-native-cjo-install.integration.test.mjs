@@ -185,7 +185,7 @@ test('normal compiler stage requires its component before publishing the install
     assert.equal(row.installedLoader,null);assert.equal(row.inputs,null,'failed pending component must not publish compiler inputs');
    } else {
     assert.equal(row.result.status,0,row.result.stdout+row.result.stderr);
-    assert.equal(row.installedLoader,'fixture compiler-owned macro loader\n');
+    assert.equal(row.installedLoader,'fixture compiler-owned macro loader\n','NATIVE_STAGE_MACRO_COMPONENT_INSTALLED');
     assert.equal(row.inputs.commit,row.commit);
     for(const relative of ['.compiler-exec','libexec/runtime','share/cjcj/cjo/runtime'])
      assert.equal(await fs.lstat(path.join(row.output,relative)).catch(()=>null),null);
