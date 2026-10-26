@@ -78,5 +78,6 @@
   # Keep the checked-in option path-free; -g builds retain source locations.
   compile-option = "-O2"
   override-compile-option = ""
-  link-option = ""
+  # Signal setup is used by utils and parser consumers as well as bin/cjc.
+  link-option = "runtime_shim/cjc_runtime_config.o"
   target-dir = ""
