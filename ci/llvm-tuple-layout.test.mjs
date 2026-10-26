@@ -105,8 +105,11 @@ if (process.env.TUPLE_DIFFERENTIAL === '1') test('tuple source-derived full tabl
       const bashEnv = path.join(work, 'bash-env');
       if (input.fail.command === 'cd') fs.writeFileSync(bashEnv, "cd() { printf '%s\\n' 'fixture command error: cd' >&2; return 19; }\n");
       else if (input.fail.command === 'printf') {
-        const state = path.join(work, 'printf-counter');
-        fs.writeFileSync(bashEnv, `printf() { local count=0; if [[ -f '${state}' ]]; then read -r count < '${state}' || :; fi; count=$((count + 1)); builtin printf '%s\\n' "$count" > '${state}'; if [[ $count == ${input.fail.occurrence} ]]; then builtin printf '%s\\n' 'fixture command error: printf' >&2; return 19; fi; builtin printf "$@"; }\n`);
+        const field = /^\s*printf '([A-Z_]+)=/.exec(rows.find(row => row.kind === entry.branch && row.line === entry.line).source)?.[1];
+        assert.ok(field, 'source-derived manifest field required');
+        // Select the actual field write, not a process-wide invocation ordinal:
+        // zx may issue its own printf and paired provenance adds another field.
+        fs.writeFileSync(bashEnv, `printf() { case "$1" in ${field}=*) builtin printf '%s\\n' 'fixture command error: printf' >&2; return 19;; esac; builtin printf "$@"; }\n`);
       } else fs.writeFileSync(bashEnv, "echo() { builtin printf '%s\\n' 'fixture command error: echo' >&2; return 19; }\n");
       env.BASH_ENV = bashEnv;
     }
@@ -126,15 +129,6 @@ if (process.env.TUPLE_DIFFERENTIAL === '1') test('tuple source-derived full tabl
     const arms = {};
     for (const [name, argv] of [['old', ['bash', old, ...args]], ['new', ['npx', '--yes', 'zx@8', product, ...args]]]) {
       prepare();
-      if (name === 'new' && entry.branch === 'status:manifest-printf' && input.expected === 1) {
-        // The final DEPOT_ROLE printf still determines group status; the
-        // paired-runtime fact inserted before it shifts its ordinal by one.
-        const bashEnv = path.join(work, 'bash-env');
-        const body = fs.readFileSync(bashEnv, 'utf8');
-        const oldPredicate = `$count == ${input.fail.occurrence}`;
-        assert.ok(body.includes(oldPredicate));
-        fs.writeFileSync(bashEnv, body.replace(oldPredicate, `$count == ${input.fail.occurrence + 1}`));
-      }
       // The unchanged Bash witness consumes its original name; the current
       // public publisher consumes the same selected value under canonical N.
       const executionEnv={...env};
