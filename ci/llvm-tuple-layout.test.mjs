@@ -134,6 +134,12 @@ if (process.env.TUPLE_DIFFERENTIAL === '1') test('tuple source-derived full tabl
       const executionEnv={...env};
       delete executionEnv.LLVM_SHA;
       if(name==='old'&&Object.hasOwn(env,'CJCJ_NATIVE_LLVM_REF'))executionEnv.LLVM_SHA=env.CJCJ_NATIVE_LLVM_REF;
+      if (name === 'new' && env.BASH_ENV) {
+        // Load the controlled builtin at zx's documented shell-prefix boundary.
+        // Passing BASH_ENV through Node alone did not install the function in
+        // the observed child shell; that unexecuted cut is not evidence.
+        executionEnv.ZX_PREFIX = `source '${env.BASH_ENV.replaceAll("'", "'\\''")}'; set -euo pipefail;`;
+      }
       const result = command(argv, {env:executionEnv, cwd: identity.REPO_ROOT});
       fs.writeFileSync(path.join(work, `${name}.stdout`), result.stdout);
       fs.writeFileSync(path.join(work, `${name}.stderr`), result.stderr);
