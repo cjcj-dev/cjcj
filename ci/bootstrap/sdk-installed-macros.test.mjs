@@ -8,7 +8,7 @@ import childProcess from 'node:child_process';
 import {syncBuiltinESMExports} from 'node:module';
 import {EventEmitter} from 'node:events';
 import {PassThrough} from 'node:stream';
-import {macroInstall} from './sdk-installed-macros.mjs';
+import {macroInstall,precompiledStdxMacros} from './sdk-installed-macros.mjs';
 
 const originalRecording=JSON.parse(await fs.readFile(new URL('./sdk-installed-macros.replay.json',import.meta.url),'utf8'));
 const originalFullRecording=JSON.parse(await fs.readFile(new URL('./sdk-installed-macros.mock.replay.json',import.meta.url),'utf8'));
@@ -24,6 +24,24 @@ function withSyntheticChain(data) {
  const at=copy.commands.findIndex(row=>row.name==='chain-definition');
  copy.commands.splice(at+1,0,{name:'chain-dynamic-table',argv:['readelf','-d',path.join(copy.sourceWork,'lib-macro_sdkchain.so')],
   rc:0,signal:null,stdout:'0x000000000000000f (RPATH) Library rpath: [SYNTHETIC_TARGET_SDK/runtime/lib/linux_x86_64_cjnative]\n',stderr:''});
+ // d40a has no execution recording yet. These NEW rows are a separate,
+ // explicit process substitute, solely to test the acceptance predicates and
+ // keep the historical downstream tests reachable. They are not observations.
+ const w=copy.sourceWork,p=name=>path.join(w,name),r=['--link-option','--disable-new-dtags','--link-option','-rpath','--link-option','$ORIGIN'];
+ const rows=[];
+ const add=(name,argv,stdout='')=>rows.push({name,argv,rc:0,signal:null,stdout,stderr:''});
+ add('dynamic-leaf-compile',['cjc',p('dynamic leaf.cj'),'--output-type=dylib','--link-option','-soname','--link-option','libsdkdynleaf.so',...r,'-o',p('libsdkdynleaf.so')]);
+ add('dynamic-helper-compile',['cjc',p('dynamic helper.cj'),'--output-type=dylib','--import-path',w,'-L',w,'-lsdkdynleaf','--link-option','-soname','--link-option','libsdkdynhelper.so',...r,'-o',p('libsdkdynhelper.so')]);
+ add('dynamic-helper-needed',['readelf','-d',p('libsdkdynhelper.so')],'(NEEDED) Shared library: [libsdkdynleaf.so]\n');
+ add('dynamic-control-compile',['cjc',p('dynamic control.cj'),'--import-path',w,'-L',w,'-lsdkdynhelper','-lsdkdynleaf',...r,'-o',p('dynamic control')]);
+ add('dynamic-control-run',[p('dynamic control')],'DYNAMIC_ORDINARY_CONTROL value=42\n');
+ add('dynamic-macro-definition',['cjc','--compile-macro',p('dynamic macro.cj'),'--import-path',w,'-L',w,'-lsdkdynhelper',...r]);
+ add('dynamic-macro-needed',['readelf','-d',p('lib-macro_sdkdynamic.so')],
+  '(NEEDED) Shared library: [libsdkdynhelper.so]\n(RPATH) Library rpath: [$ORIGIN:SYNTHETIC_TARGET_SDK/runtime/lib/linux_x86_64_cjnative]\n');
+ add('dynamic-macro-expansion',['cjc',p('dynamic use.cj'),'--import-path',w,'-o',p('dynamic use')],'MACRO_DYNAMIC_DEPENDENCIES_EXECUTED value=42\n');
+ add('dynamic-macro-run',[p('dynamic use')],'MACRO_DYNAMIC_TARGET value=42\n');
+ copy.commands.splice(copy.commands.findIndex(row=>row.name==='chain-run')+1,0,...rows);
+ copy.artifactPaths.push(...['libsdkdynleaf.so','libsdkdynhelper.so','lib-macro_sdkdynamic.so','dynamic control','dynamic use'].map(p));
  return copy;
 }
 const recording=withSyntheticChain(originalRecording),fullRecording=withSyntheticChain(originalFullRecording);
@@ -40,7 +58,7 @@ async function replay(t, change, expected, {data=recording,target='explicit-test
  t.after(()=>fs.rm(root,{recursive:true,force:true}));
  const sdk=path.join(root,'sdk'),work=path.join(root,'work');
  data=structuredClone(data);
- for(const row of data.commands)if(row.name==='chain-dynamic-table')row.stdout=row.stdout.replaceAll('SYNTHETIC_TARGET_SDK',sdk);
+ for(const row of data.commands)row.stdout=row.stdout.replaceAll('SYNTHETIC_TARGET_SDK',sdk);
  await fs.mkdir(path.join(sdk,'bin'),{recursive:true});
  await fs.mkdir(path.join(sdk,'libexec/compiler'),{recursive:true});
  await fs.mkdir(path.join(sdk,'runtime/lib/linux_x86_64_cjnative'),{recursive:true});
@@ -104,6 +122,61 @@ async function replay(t, change, expected, {data=recording,target='explicit-test
  assert.equal(saved.rc,supplied.rc,'the actual child rc must be retained');
 }
 const unchanged=row=>row;
+async function publishedReplay(t,{missing,corrupt,relocated=false}={}) {
+ const root=await fs.mkdtemp(path.join(os.tmpdir(),'published-macro-predicate-'));
+ t.after(()=>fs.rm(root,{recursive:true,force:true}));
+ const original=path.join(root,'sdk'),sdk=relocated?path.join(root,'unpacked-sdk'):original;
+ const relative='stdx/linux_x86_64_cjnative/static/stdx';
+ await fs.mkdir(path.join(original,relative),{recursive:true});
+ for(const name of ['chir.to_string_macro','plugin'])for(const file of ['stdx.'+name+'.cjo','lib-macro_stdx.'+name+'.so'])
+  if(file!==missing)await fs.writeFile(path.join(original,relative,file),'synthetic published bytes '+file);
+ if(relocated)await fs.rename(original,sdk);
+ const calls=[];
+ const stub=t.mock.method(childProcess,'spawn',(file,args,options)=>{
+  calls.push({file,args,env:options.env});assert(!args.includes('--compile-macro'),'published consumer must not re-produce macros');
+  assert(![file,...args].some(v=>relocated&&v.includes(original+path.sep)),'old SDK is unavailable');
+  const compile=file===path.join(sdk,'bin/cjc');
+  const kind=compile?path.basename(args[0],'.cj'):path.basename(file);
+  if(compile) {
+   assert(args.includes(path.join(sdk,relative)));
+   assert(!args.some(v=>v.includes('rpath')),'consumer cannot inject producer RPATH');
+   const text=fsSync.readFileSync(args[0],'utf8');
+   if(kind==='to-string')assert.match(text,/@CHIREnumToString/);
+   if(kind==='plugin')assert.match(text,/@CHIRPlugin/);
+  }
+  const stdout=compile?'':({ordinary:'PRECOMPILED_ORDINARY value=42\n',
+   'to-string':'PRECOMPILED_TOSTRING_BODY_EXECUTED\nPRECOMPILED_TOSTRING value=42\n',
+   plugin:'PRECOMPILED_PLUGIN_BODY_EXECUTED\nPRECOMPILED_PLUGIN value=42\n'})[kind];
+  const child=new EventEmitter();child.stdout=new PassThrough();child.stderr=new PassThrough();
+  queueMicrotask(()=>{child.stdout.end(corrupt&&!compile&&kind===corrupt?'REMOVED\n':stdout);child.stderr.end('');child.emit('close',0,null);});return child;
+ });
+ syncBuiltinESMExports();t.after(()=>{stub.mock.restore();syncBuiltinESMExports();});
+ const action=()=>precompiledStdxMacros({sdk,work:path.join(root,'work'),platform:'linux_x86_64'});
+ if(missing){await assert.rejects(action(),{code:'ENOENT'});assert.equal(calls.length,0);}
+ else if(corrupt)await assert.rejects(action(),/PRECOMPILED_MACRO_ASSERT/);
+ else {assert.equal((await action()).status,'PASS');assert.equal(calls.length,6);}
+ for(const name of ['chir.to_string_macro','plugin'])for(const file of ['stdx.'+name+'.cjo','lib-macro_stdx.'+name+'.so'])
+  if(file!==missing)assert.equal(await fs.readFile(path.join(sdk,relative,file),'utf8'),'synthetic published bytes '+file);
+}
+test('published consumer keeps images unchanged and does not produce macros',t=>publishedReplay(t));
+test('published consumer binds moved installation with old path absent',t=>publishedReplay(t,{relocated:true}));
+for(const name of ['chir.to_string_macro','plugin'])test('published consumer refuses missing '+name,t=>publishedReplay(t,{missing:'lib-macro_stdx.'+name+'.so'}));
+for(const name of ['ordinary','to-string','plugin'])test('published consumer requires actual '+name+' output',t=>publishedReplay(t,{corrupt:name}));
+for(const [target,missing]of [['dynamic-helper-needed','libsdkdynleaf.so'],['dynamic-macro-needed','libsdkdynhelper.so']]) {
+ test('synthetic shared chain rejects missing actual edge '+missing,t=>replay(t,row=>({...row,stdout:row.stdout.replace('(NEEDED)','(REMOVED)')}),
+  'MACRO_DYNAMIC_DEPENDENCY_MISSING '+missing,{data:fullRecording,target,complete:true}));
+}
+for(const [target,marker]of [['dynamic-control-run','DYNAMIC_ORDINARY_CONTROL value=42'],
+ ['dynamic-macro-expansion','MACRO_DYNAMIC_DEPENDENCIES_EXECUTED value=42'],['dynamic-macro-run','MACRO_DYNAMIC_TARGET value=42']]) {
+ test('synthetic shared chain rejects missing '+marker,t=>replay(t,row=>({...row,stdout:''}),
+  `INSTALLED_MACRO_ASSERT ${target} missing ${marker}`,{data:fullRecording,target,complete:true}));
+}
+for(const [name,mutate]of [
+ ['SDK path',text=>text.replace('/runtime/lib/','/.compiler-exec/runtime/lib/')],
+ ['origin',text=>text.replace('$ORIGIN','/unrelated')],
+ ['RUNPATH',text=>text.replace('(RPATH)','(RUNPATH)')],
+])test('synthetic shared chain rejects '+name,t=>replay(t,row=>({...row,stdout:mutate(row.stdout)}),
+ 'MACRO_DYNAMIC_RUNTIME_AND_PRIVATE_RPATH_MISSING',{data:fullRecording,target:'dynamic-macro-needed',complete:true}));
 test('old chain-definition recording cannot satisfy new Keep body obligation',t=>replay(t,unchanged,
  'INSTALLED_MACRO_ASSERT chain-definition missing MACRO_BODY_EXECUTED',
  {data:originalRecording,target:'chain-definition'}));

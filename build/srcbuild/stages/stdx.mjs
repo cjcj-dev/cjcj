@@ -7,6 +7,7 @@ import {command,publishPaths,atomicJson} from '../../../ci/bootstrap/sdk-flow.mj
 import {cleanSdkEnvironment,sdkPlatform} from '../../../ci/bootstrap/sdk-platform.mjs';
 import {STDX_BUILD_INPUTS} from '../stdx-build-inputs.mjs';
 import {selectBuildJobs} from '../../../ci/build-resources.mjs';
+import {precompiledStdxMacros} from '../../../ci/bootstrap/sdk-installed-macros.mjs';
 import {BuildError} from '../../lib/errors.mjs';
 import {stage} from '../../lib/logging.mjs';
 import {assertSourceIdentity} from '../../lib/git.mjs';
@@ -126,6 +127,8 @@ export async function run(config) {
     if(!dry&&!limited) {
       await consumeStdx(config,prefix);
       await publishPaths(['stdx',STDX_BUILD_INPUTS].map(relative=>({pending:path.join(installRoot,relative),destination:path.join(destination,relative)})));
+      if(!config.target.spec.crossCompile)await precompiledStdxMacros({sdk:destination,
+        work:path.join(config.workspace,'build/stdx/installed-macros'),platform:config.target.spec.llvmPlatform});
     }
   });
 }
