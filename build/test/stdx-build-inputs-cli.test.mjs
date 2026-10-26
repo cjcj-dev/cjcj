@@ -94,19 +94,21 @@ test('public sdk-tools producer records its actual subset configuration in its o
 });
 
 for (const [phase, rc] of [['CONFIGURE', 25], ['BUILD', 23], ['INSTALL', 24]]) {
-  test(`public failed ${phase.toLowerCase()} invalidates prior installed success and preserves it`, t => {
+  test(`public failed ${phase.toLowerCase()} preserves the published install without publishing the failed attempt`, t => {
     const f = fixture(t); successful(f.build());
     const before = fs.readFileSync(path.join(f.sdk, STDX_BUILD_INPUTS));
+    const pendingBefore = new Set(fs.readdirSync(f.root).filter(name=>name.startsWith('sdk.stdx-pending-')));
     const result = f.build([], {['FIXTURE_FAIL_' + phase]: '1'});
     console.log('STDX_FAILED_' + phase + '_ASSERT_REACHED');
     // The public CLI maps a BuildError to 1; retain the child producer's own
     // 23/24 from the runner diagnostic instead of conflating parent/child rc.
     assert.equal(result.status, 1, result.stderr);
     assert.match(result.stderr, new RegExp('\\(exit=' + rc + '\\)'));
-    assert.equal(fs.existsSync(path.join(f.sdk, STDX_BUILD_INPUTS)), false);
-    const directory = path.dirname(path.join(f.sdk, STDX_BUILD_INPUTS));
-    const previous = fs.readdirSync(directory).find(name => name.startsWith('stdx.json.previous-'));
-    assert.ok(previous); assert.deepEqual(fs.readFileSync(path.join(directory, previous)), before);
+    assert.deepEqual(fs.readFileSync(path.join(f.sdk, STDX_BUILD_INPUTS)), before);
+    const failedPending = fs.readdirSync(f.root).filter(name=>name.startsWith('sdk.stdx-pending-')&&!pendingBefore.has(name));
+    assert.equal(failedPending.length,1,'one isolated failed producer attempt');
+    assert.equal(fs.existsSync(path.join(f.root,failedPending[0],STDX_BUILD_INPUTS)),false,
+      'failed attempt cannot publish successful install facts');
     if (phase === 'INSTALL') {
       const built = JSON.parse(fs.readFileSync(path.join(f.root, 'build/stdx/build-inputs.json')));
       assert.equal(built.build.rc, 0); assert.equal(built.install, undefined);
@@ -207,6 +209,7 @@ add_custom_target(cj_entry ALL COMMAND`).replace(
   assert(originalGraph.includes(hostRuntime));
   const consumer = path.join(f.root, 'consumer.jsonl');
   const beforeConsumer = fs.readFileSync(consumer, 'utf8');
+  const beforeInstall = fs.readFileSync(path.join(f.sdk,STDX_BUILD_INPUTS));
   fs.writeFileSync(graph, originalGraph.replaceAll(hostRuntime, wrongRuntime));
   try {
     const wrong = f.build(inc, env);
@@ -218,7 +221,10 @@ add_custom_target(cj_entry ALL COMMAND`).replace(
   assert.equal(generatedWrong.status, 1);
   assert.match(generatedWrong.stderr, /generated cjc command selects wrong runtime/);
   assert.notEqual(fs.readFileSync(consumer, 'utf8'), beforeConsumer, 'native reconfigure actually ran');
-  assert(!fs.existsSync(path.join(f.sdk, STDX_BUILD_INPUTS)), 'wrong generated graph cannot publish install success');
+  assert.deepEqual(fs.readFileSync(path.join(f.sdk, STDX_BUILD_INPUTS)),beforeInstall,
+    'wrong generated graph cannot replace the previously published install facts');
+  const latestBuild=JSON.parse(fs.readFileSync(path.join(f.root,'build/stdx/build-inputs.json')));
+  assert.equal(latestBuild.install,undefined,'wrong graph cannot complete the current installation');
   console.log('STDX_GENERATED_RUNTIME_REJECTION_ASSERT_REACHED');
   // Restore this controlled graph fault; the normal producer regenerates it.
   fs.writeFileSync(graph, originalGraph);
