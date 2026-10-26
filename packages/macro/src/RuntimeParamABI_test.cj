@@ -1,6 +1,7 @@
 package cjcj::macro_pkg
 
 import std.unittest.*
+import std.unittest.TestPackage
 import std.unittest.testmacro.*
 
 // The native side is fixed R ee7cd9f5/runtime/src/Cangjie.h, not another
@@ -20,13 +21,14 @@ public class RuntimeParamABITest {
 
     @TestCase
     public func NativeWorkerAndOriginOffsets(): Unit {
+        @Assert(sizeOf<RuntimeGCParamC>() == 72)
         try (storage = LibC.malloc<RuntimeGCParamC>().asResource()) {
             @Assert(!storage.value.isNull())
             unsafe {
                 storage.value.write(RuntimeGCParamC(101, 0.5, 103, 104,
                     105, 106, 107, 108, true, false, true, false,
                     true, 109, -110, false, true))
-                let base = storage.value.toUIntNative()
+                let base = CPointer<UInt8>(storage.value)
                 @Expect(CPointer<UIntNative>(base).read(), 101)
                 @Expect(CPointer<Float64>(base + 8).read(), 0.5)
                 @Expect(CPointer<UInt64>(base + 16).read(), 103)
@@ -50,6 +52,7 @@ public class RuntimeParamABITest {
 
     @TestCase
     public func NativeTrailingRecordsRemainAligned(): Unit {
+        @Assert(sizeOf<RuntimeConfigParamC>() == 168)
         try (storage = LibC.malloc<RuntimeConfigParamC>().asResource()) {
             @Assert(!storage.value.isNull())
             unsafe {
@@ -58,7 +61,7 @@ public class RuntimeParamABITest {
                     RuntimeGCParamC(201, 0.5, 203, 204, 205, 206, 207, 208,
                         false, true, false, true, false, 209, -210, true, false),
                     RuntimeLogParamC(5), RuntimeConcurrencyParamC(1024, 128, 3)))
-                let base = storage.value.toUIntNative()
+                let base = CPointer<UInt8>(storage.value)
                 @Expect(CPointer<UIntNative>(base + 8).read(), 131072)
                 @Expect(CPointer<Bool>(base + 40).read(), true)
                 @Expect(CPointer<UIntNative>(base + 48).read(), 65536)
