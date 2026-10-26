@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
+import {pathToFileURL} from 'node:url';
 import {verifiedTool} from '../test-zx.mjs';
 const zxTool=verifiedTool();
 
@@ -52,7 +53,7 @@ globalThis.$=()=>async(strings,...values)=>{
 };`);
  const env={...process.env,PLATFORM_CI_ROOT:output,RUNTIME_SOURCE:source,WINDOWS_RUNTIME_EVIDENCE:path.join(output,'windows-native'),CONSUMER_CALLS:calls};
  function run(entry,extra=[],overrides={}) {
-  const argv=[process.execPath,'--import',hooks,path.resolve('ci/platform_matrix/'+entry),...extra];
+  const argv=[process.execPath,zxTool.cli,'--eval',`await import(${JSON.stringify(pathToFileURL(hooks).href)});await import(${JSON.stringify(pathToFileURL(path.resolve('ci/platform_matrix/'+entry)).href)});`,...extra];
   const r=spawnSync(argv[0],argv.slice(1),{env:{...env,...overrides},encoding:'utf8',timeout:30000});
   put(path.join(root,'entry.stdout'),r.stdout||'');put(path.join(root,'entry.stderr'),r.stderr||'');
   json(path.join(root,'entry-command.json'),{argv,rc:r.status,signal:r.signal,error:r.error?.message});return r;
@@ -103,6 +104,9 @@ for(const [packaged,outputName] of [[false,'output'],[true,'output'],[true,'D: a
  const captures=fs.readdirSync(f.env.WINDOWS_RUNTIME_EVIDENCE).filter(x=>x.startsWith('consumer-')).map(x=>JSON.parse(fs.readFileSync(path.join(f.env.WINDOWS_RUNTIME_EVIDENCE,x,'command.json'))));
  assert.equal(captures.length,13);assert.ok(captures.every(c=>c.rc===0&&c.signal===null));
  if(packaged){
+  const verifier=events.find(e=>e.kind==='verifier'),command=verifier.values[0];
+  console.log('PACKAGE_VERIFIER_ARGV_TARGET_REACHED');
+  assert.deepEqual(command,[process.execPath,zxTool.cli,path.resolve('ci/platform_matrix/verify_windows_runtime_exports.mjs'),selected,'--expected-def',path.join(selected,path.relative(f.install,f.lib),'windows_x86_64_exports.def'),'--reference-services'],'verifier must receive the unpacked input through the actual Node/zx CLI');
   const archiveCommands=fs.readdirSync(f.env.WINDOWS_RUNTIME_EVIDENCE).filter(x=>/^(package|unpack)-/.test(x)).map(x=>JSON.parse(fs.readFileSync(path.join(f.env.WINDOWS_RUNTIME_EVIDENCE,x,'command.json'))));
   console.log('PACKAGE_LOCAL_ARCHIVE_TARGET_REACHED');
   assert.equal(archiveCommands.length,2);assert.ok(archiveCommands.every(c=>c.rc===0&&c.cwd===f.output));
@@ -112,6 +116,26 @@ for(const [packaged,outputName] of [[false,'output'],[true,'output'],[true,'D: a
   const summary=JSON.parse(fs.readFileSync(path.join(f.output,'unpacked-consumer.json')));
   assert.equal(summary.verifier.rc,0);assert.equal(summary.native.rc,0);assert.equal(summary.rc,0);
  }
+});
+test('package verifier uses the real zx child with literal path arguments',()=>{
+ const f=fixture(String.raw`D:\a\native package's (literal)`);
+ const symbols=['CJ_MCC_SetReferenceMethods','CJ_MCC_ReferenceInvokeFinalize','CJ_MCC_ReferenceWaitPending','CJ_MCC_ReferenceRuntimeRunning','CJ_MCC_ReferenceNanoTime'];
+ fs.writeFileSync(path.join(f.lib,'windows_x86_64_exports.def'),'EXPORTS\n'+symbols.map((s,i)=>` ${s} @${i+1}`).join('\n')+'\n');
+ const packaged=f.run('windows_runtime_package.mjs');assert.equal(packaged.status,0,packaged.stderr);
+ const command=f.events().find(e=>e.kind==='verifier').values[0];
+ const dump=path.join(f.root,'objdump-fixture.mjs');
+ const table=['dbghelp.dll','kernel32.dll','libboundscheck.dll','msvcrt.dll','ws2_32.dll'].map(s=>'DLL Name: '+s).join('\n')+'\n\n[Ordinal/Name Pointer] Table\n'+symbols.map((s,i)=>` [${i}] ${s}`).join('\n')+'\n\n';
+ fs.writeFileSync(dump,'#!'+process.execPath+'\nconsole.log('+JSON.stringify(table)+');\n',{mode:0o755});
+ const driver=path.join(f.root,'verifier-child.mjs');
+ fs.writeFileSync(driver,'const command='+JSON.stringify(command)+';const result=await $({nothrow:true})`${command}`;console.log(JSON.stringify({rc:result.exitCode,signal:result.signal,ok:result.ok,cause:result.cause?.message,stdout:result.stdout,stderr:result.stderr}));');
+ const argv=[process.execPath,zxTool.cli,driver],r=spawnSync(argv[0],argv.slice(1),{encoding:'utf8',env:{...f.env,OBJDUMP:dump},timeout:30000});
+ fs.writeFileSync(path.join(f.root,'verifier-child.stdout'),r.stdout||'');fs.writeFileSync(path.join(f.root,'verifier-child.stderr'),r.stderr||'');
+ fs.writeFileSync(path.join(f.root,'verifier-child-command.json'),JSON.stringify({argv,rc:r.status,signal:r.signal,verifierArgv:command}));
+ assert.equal(r.status,0,r.stderr);const actual=JSON.parse(r.stdout.trim());
+ console.log('PACKAGE_REAL_VERIFIER_TARGET_REACHED');
+ assert.equal(actual.rc,0,actual.stderr);assert.equal(actual.ok,true);assert.equal(actual.signal,null);
+ assert.ok(actual.stdout.includes('dll='+path.join(f.output,'runtime-unpacked',path.relative(f.install,f.lib),'libcangjie-runtime.dll')),'real verifier must consume the exact unpacked literal path');
+ assert.ok(actual.stdout.includes('missing=0'));
 });
 test('package summary preserves native failure after successful verifier',()=>{
  const f=fixture(),r=f.run('windows_runtime_package.mjs',[],{FIXTURE_RUN_RC:'33'});

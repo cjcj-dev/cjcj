@@ -20,11 +20,17 @@ async function definition(dir) {
 }
 const expected=await definition(restored);if(!expected)throw Error('unpacked registered runtime definition missing');
 const entry=path.join(import.meta.dirname,'verify_windows_runtime_exports.mjs');
-const result=await $({nothrow:true})`npx --yes zx@8 ${entry} ${restored} --expected-def ${expected} --reference-services`;
+// Reuse the running zx CLI through its native Node executable. npx.cmd adds
+// another Windows command parser after zx's shell quoting of native paths.
+const verifierArgv=[process.execPath,process.argv[1],entry,restored,'--expected-def',expected,'--reference-services'];
+const started=new Date().toISOString();
+const result=await $({nothrow:true})`${verifierArgv}`;
+await fs.writeFile(path.join(root,'unpacked-verifier.stdout'),result.stdout);
+await fs.writeFile(path.join(root,'unpacked-verifier.stderr'),result.stderr);
 const verifierOk=result.ok===true&&!result.signal;
 const failedRc=Number.isInteger(result.exitCode)&&result.exitCode>0?result.exitCode:1;
 const summary={archive,restored,expected,
- verifier:{rc:result.exitCode,signal:result.signal,ok:result.ok,
+ verifier:{argv:verifierArgv,cwd:process.cwd(),started,ended:new Date().toISOString(),rc:result.exitCode,signal:result.signal,ok:result.ok,
   cause:result.cause?{name:result.cause.name,message:result.cause.message,code:result.cause.code,stack:result.cause.stack}:null},
  native:{status:'NOT_RUN'},rc:verifierOk?0:failedRc};
 const summaryFile=path.join(root,'unpacked-consumer.json');
