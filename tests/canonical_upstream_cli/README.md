@@ -33,3 +33,9 @@ change the compiler's Unit rule or establish that the generic-bound path passes.
 The argv-driven integer consumers explicitly import `std.convert.*`: the fixed
 stdlib defines `Int64.parse` as an extension in that package, not in core. This
 keeps runtime input parsing and every original mechanism assertion unchanged.
+
+Alternative patterns cannot bind variables. The guarded alternative therefore
+uses wildcards and extracts the payload in its branch body, retaining both outer
+fragments, true/false guards, all original expected values, and the reachability
+check. An unexpected Empty value in that body throws instead of returning a
+plausible payload. The original illegal pattern diagnostic is retained as v106.

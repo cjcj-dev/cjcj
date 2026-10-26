@@ -6,7 +6,12 @@ enum Choice {
 
 func select(value: Choice, accept: Bool): Int64 {
     match (value) {
-        case Left(n) | Right(n) where accept => n
+        case Left(_) | Right(_) where accept =>
+            match (value) {
+                case Left(n) => n
+                case Right(n) => n
+                case Empty => throw Exception("guarded payload branch received Empty")
+            }
         case Left(n) => n + 10
         case Right(n) => n + 20
         case Empty => -1
