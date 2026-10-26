@@ -98,11 +98,24 @@ if(name==='python3' && args[0]==='build.py') {
     const log=path.join(root,'commands.jsonl'), install=path.join(root,'work/runtime-install');
     const env={...process.env,PATH:bin+path.delimiter+process.env.PATH,
       PLATFORM_CI_ROOT:path.join(root,'work'),RUNTIME_SOURCE:source,RUNTIME_TARGET:'native',RUNTIME_TOOLCHAIN:'',
-      RUNTIME_NATIVE_PAIR:'1',RUNTIME_REF:runtime,CJCJ_NATIVE_RUNTIME_REF:runtime,CJCJ_NATIVE_LLVM_REF:llvm,LLVM_SHA:llvm,
+      RUNTIME_NATIVE_PAIR:'1',RUNTIME_REF:runtime,
       NATIVE_RUNTIME_PLATFORM:platform,RUNTIME_VERSION:'1.3.0-fixture',RUNTIME_BUILD_TYPE:'release',
       CMAKE_TOOLCHAIN_FILE:'',SCCACHE_PATH:path.join(bin,'sccache'),FIXTURE_LOG:log,FIXTURE_CMAKE:cmake,
       FIXTURE_BAD_LINK:'',FIXTURE_BAD_MODE:'',FIXTURE_BAD_MANIFEST:'',FIXTURE_NO_AIO:'',FIXTURE_BAD_CACHE:'',FIXTURE_NO_BOUNDS:'',FIXTURE_FAIL_BUILD:'',FIXTURE_NO_STATUS:'',FIXTURE_CPP_FAIL:'',
       GC_UNIT_GATE_LANGUAGE_TESTS:'defer',GITHUB_STEP_SUMMARY:'',RUNNER_TEMP:path.join(root,'preinstall')};
+    // Consume the workflow's real GITHUB_ENV producer instead of hand-filling
+    // the pair that the installed-language input consumer needs on Linux.
+    for (const key of ['CJCJ_NATIVE_RUNTIME_REF','CJCJ_NATIVE_LLVM_REF','LLVM_SHA']) delete env[key];
+    const workflow=yaml.load(fs.readFileSync('.github/workflows/build-native-runtime.yml','utf8'));
+    const load=workflow.jobs.runtime.steps.find(step=>step.id==='pin');
+    assert.equal(load.run,'node ci/native-llvm-inputs.mjs');
+    const selection=path.join(root,'github-env');
+    const selected=spawnSync(process.execPath,[load.run.slice('node '.length)],{encoding:'utf8',env:{...env,
+      NATIVE_LLVM_REF:llvm,NATIVE_RUNTIME_REF:runtime,GITHUB_ENV:selection,GITHUB_OUTPUT:path.join(root,'github-output')}});
+    assert.equal(selected.status,0,selected.stderr);
+    Object.assign(env,Object.fromEntries(fs.readFileSync(selection,'utf8').trim().split('\n').map(line=>{
+      const at=line.indexOf('=');return [line.slice(0,at),line.slice(at+1)];
+    })));
     const run = extra => spawnSync(process.env.ZX || 'zx',[entry],{encoding:'utf8',env:{...env,...extra},timeout:20000});
     const manifest=()=>JSON.parse(fs.readFileSync(path.join(install,'NATIVE-INPUTS.json'),'utf8'));
     check({run,manifest,runtime,install,log,env,source,root});
@@ -110,7 +123,12 @@ if(name==='python3' && args[0]==='build.py') {
 }
 
 test('native runtime public entry builds then installs and records the actual pair and payload',()=>fixture(({run,manifest,runtime,install,log})=>{
-  const r=run();assert.equal(r.status,0,r.stdout+r.stderr);
+  const r=run();
+  const phases=fs.readFileSync(log,'utf8').trim().split('\n').map(JSON.parse)
+    .filter(x=>x.name==='python3'&&x.args[0]==='build.py').map(x=>x.args[1]);
+  assert.deepEqual(phases,['build','install']);
+  console.log('NATIVE_PAIR_INSTALL_TARGET_REACHED');
+  assert.equal(r.status,0,r.stdout+r.stderr);
   if(process.platform==='linux') assert.equal(fs.readFileSync(path.join(install,'runtime/lib',platform+'_cjnative/libboundscheck.so'),'utf8'),'this native build bounds');
   console.log('CJTHREAD_INSTALLED_ARCHIVE_TARGET_REACHED');
   for(const name of ['thread','aio'])assert.equal(fs.readFileSync(path.join(install,'lib',platform+'_cjnative','libcangjie-'+name+'.a'),'utf8'),'installed CJThread '+name);

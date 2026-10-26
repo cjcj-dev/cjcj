@@ -20,6 +20,7 @@ export function nativeLlvmInputs(env=process.env) {
     if (!/^[a-f0-9]{40}$/.test(ref || '')) throw new Error('NATIVE_LLVM_REF_INVALID');
   }
   const selected={...llvm, LLVM_SHA:requestedLlvm || llvm.LLVM_SHA,
+    CJCJ_NATIVE_LLVM_REF:requestedLlvm || llvm.LLVM_SHA,
     CJCJ_NATIVE_RUNTIME_REF:requestedRuntime || runtime.RUNTIME_REF};
   if (requestedRuntime) Object.assign(selected, {CJCJ_LLVM_RUNTIME_MODE:'private',
     CJCJ_LLVM_RUNTIME_URL:runtime.RUNTIME_SRC_URL,CJCJ_LLVM_RUNTIME_SHA:requestedRuntime});

@@ -13,7 +13,7 @@ function fixture(check) {
 }
 test('native LLVM default preserves the repository source pair',()=>fixture(({run,output})=>{
  const result=run();assert.equal(result.status,0,result.stderr);
- for(const [file,key,outKey] of [['ci/llvm_pin.env','LLVM_SHA','LLVM_SHA'],['ci/runtime_pin.env','RUNTIME_REF','CJCJ_NATIVE_RUNTIME_REF']]) {
+ for(const [file,key,outKey] of [['ci/llvm_pin.env','LLVM_SHA','LLVM_SHA'],['ci/llvm_pin.env','LLVM_SHA','CJCJ_NATIVE_LLVM_REF'],['ci/runtime_pin.env','RUNTIME_REF','CJCJ_NATIVE_RUNTIME_REF']]) {
   const ref=new RegExp(`^${key}=([a-f0-9]{40})$`,'m').exec(fs.readFileSync(file,'utf8'))[1];
   assert.ok(fs.readFileSync(output,'utf8').includes(`${outKey}=${ref}\n`));
  }
@@ -22,6 +22,7 @@ test('native LLVM default preserves the repository source pair',()=>fixture(({ru
 test('native LLVM explicit complete pair reaches producer environment',()=>fixture(({run,output})=>{
  const result=run({NATIVE_LLVM_REF:llvm,NATIVE_RUNTIME_REF:runtime});assert.equal(result.status,0,result.stderr);
  const env=fs.readFileSync(output,'utf8');assert.ok(env.includes(`LLVM_SHA=${llvm}\n`));
+ assert.ok(env.includes(`CJCJ_NATIVE_LLVM_REF=${llvm}\n`));
  assert.ok(env.includes(`CJCJ_LLVM_RUNTIME_SHA=${runtime}\n`));assert.match(env,/CJCJ_LLVM_RUNTIME_MODE=private/);
 }));
 for(const [name,extra,reason] of [['partial',{NATIVE_LLVM_REF:llvm},'NATIVE_LLVM_PAIR_REQUIRED'],
