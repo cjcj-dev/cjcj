@@ -47,7 +47,7 @@ export async function toolConsumerCopies(sdk,platform) {
 }
 // The sole SDK layout recipe. Callers select actual producer artifacts and an
 // execution role; they never enumerate loader paths, retained ELF names or aliases.
-export function installationRecipe(selection,{compiler:product,std,bootstrap=false,hostObjects=false,final=false,nativeChecks,tools,layout,macroLoader}={}) {
+export function installationRecipe(selection,{compiler:product,std,bootstrap=false,hostObjects=false,final=false,nativeChecks,tools,layout}={}) {
   const {platform,bootstrapHost:host,compilerExecution:execution,targetComponents:target}=selection;
   const native=sdkPlatform(platform),tuple=native.tuple,exe=native.exe;
   const nLib=['third_party/llvm/'+native.llvmDirectory,'runtime/lib/'+tuple,'lib/'+tuple,'tools/lib'];
@@ -55,9 +55,6 @@ export function installationRecipe(selection,{compiler:product,std,bootstrap=fal
     entries:[{directory:'tools/bin',retain:'.target-tools/tools/bin',names:tools.rows.map(row=>row.name),libraries:nLib}],links:{}};
   const {llvm,runtime,ast}=target;
   product??=target.compiler.product;std??=target.std.install;
-  // An imported compiler selects its actual private component as another
-  // producer artifact. H and native C++ compiler inputs need no such artifact.
-  if(macroLoader===undefined)macroLoader=target.compiler.macroLoader;
   const compilerName='bin/cjcj-stage1'+exe;
   const prefix=execution.role==='bootstrap-host'?'.host':execution.role==='separate'?'.compiler-exec':'';
   const executionNative=sdkPlatform(execution.platform??platform),execTuple=executionNative.tuple;
@@ -67,7 +64,7 @@ export function installationRecipe(selection,{compiler:product,std,bootstrap=fal
   const hostToolLib=['.host/runtime/lib/'+tuple,'.host/lib/'+tuple,'.host/third_party/llvm/'+native.llvmDirectory,'.host/tools/lib'];
   const copies=[
     ...(bootstrap?[
-      {from:host.install,to:'.host',owner:'H',exclude:['SDK.lock.json','runtime/lib/'+execTuple+'/libcjcj-macro-loader.so']},
+      {from:host.install,to:'.host',owner:'H',exclude:['SDK.lock.json']},
       {from:host.install,to:'',owner:'H',exclude:['SDK.lock.json','schema','STAGE-INPUTS.json','BUILD-MANIFEST.json','compiler-lineage.json',
         'bin/cjc'+exe,'bin/cjc-frontend'+exe,'third_party/llvm','tools/bin/cjdb'+exe,'tools/bin/chir-dis'+exe,'tools/bin/LSPMacroServer'+exe,'tools/lib',
         ...(hostObjects?['include/cangjie','include/flatbuffers']:['include']),'third_party/flatbuffers',
@@ -89,12 +86,12 @@ export function installationRecipe(selection,{compiler:product,std,bootstrap=fal
       {from:std+'/third_party/flatbuffers/modules',to:'third_party/flatbuffers/modules',owner:'std'},
     ]:[]),
     ...(!bootstrap&&prefix?[
-      {from:execution.runtime.install+'/runtime/lib/'+execTuple,to:prefix+'/runtime/lib/'+execTuple,owner:'compiler execution runtime',exclude:['libcjcj-macro-loader.so']},
+      {from:execution.runtime.install+'/runtime/lib/'+execTuple,to:prefix+'/runtime/lib/'+execTuple,owner:'compiler execution runtime'},
       {from:execution.std.install+'/lib/'+execTuple,to:prefix+'/lib/'+execTuple,owner:'compiler execution std'},
       {from:execution.llvm.install+'/third_party/llvm/'+executionNative.llvmDirectory,to:prefix+'/third_party/llvm/'+executionNative.llvmDirectory,owner:'compiler execution LLVM'},
     ]:[]),
     ...(bootstrap&&execution.role==='separate'?[
-      {from:execution.runtime.install+'/runtime',to:prefix+'/runtime',owner:'compiler execution runtime',exclude:['lib/'+execTuple+'/libcjcj-macro-loader.so']},
+      {from:execution.runtime.install+'/runtime',to:prefix+'/runtime',owner:'compiler execution runtime'},
       {from:execution.std.install+'/lib',to:prefix+'/lib',owner:'compiler execution std'},
       {from:execution.llvm.install+'/third_party/llvm/'+native.llvmDirectory,to:prefix+'/third_party/llvm/'+native.llvmDirectory,owner:'compiler execution LLVM'},
     ]:[]),
@@ -108,14 +105,12 @@ export function installationRecipe(selection,{compiler:product,std,bootstrap=fal
       {from:target.compiler.install,to:'',owner:'native compiler/runtime/std producers',
         exclude:['bin/cjc'+exe,'bin/cjc-frontend'+exe,'STAGE-INPUTS.json']},
       ...(!prefix?[]:[
-        {from:execution.runtime.install+'/runtime/lib/'+execTuple,to:prefix+'/runtime/lib/'+execTuple,owner:'compiler execution runtime',exclude:['libcjcj-macro-loader.so']},
+        {from:execution.runtime.install+'/runtime/lib/'+execTuple,to:prefix+'/runtime/lib/'+execTuple,owner:'compiler execution runtime'},
         {from:execution.std.install+'/lib/'+execTuple,to:prefix+'/lib/'+execTuple,owner:'compiler execution std'},
         {from:execution.llvm.install+'/third_party/llvm/'+executionNative.llvmDirectory,to:prefix+'/third_party/llvm/'+executionNative.llvmDirectory,owner:'compiler execution LLVM'}]),
       {from:host.install+'/runtime/lib/'+sdkPlatform(host.platform??platform).tuple,to:'.host/runtime/lib/'+sdkPlatform(host.platform??platform).tuple,owner:'bootstrap host comparison runtime'},
       {from:product,to:compilerName,owner:'compiler'});
   }
-  if(native.os==='linux'&&macroLoader)copies.push({from:macroLoader,
-    to:'runtime/lib/'+tuple+'/libcjcj-macro-loader.so',owner:'compiler macro loader'});
   // These repository tools belong to the installation, before pending
   // consumers run. Packaging only archives this same installed directory.
   const scripts=['check_sdk_usable.mjs','verifier_artifact_gate.mjs'];
@@ -185,8 +180,7 @@ export function createBootstrapTargets(input) {
     const execution={role:id==='stage2-target-sdk'?'separate':transitional?'bootstrap-host':'target',stage:id,
       ...Object.fromEntries(['compiler','runtime','std','llvm'].map(name=>[name,{install:executionSource||(name==='runtime'?runtime.install:name==='llvm'?llvm.install:std),platform}]))};
     const selection={platform,bootstrapHost:host,compilerExecution:execution,targetComponents:{compiler,std:stdlib,runtime,llvm,ast}};
-    const macroLoader=transitional?null:(id==='stage2-target-sdk'?out('stage2'):'${build}/compiler')+'/runtime/lib/'+tuple+'/libcjcj-macro-loader.so';
-    const recipe=installationRecipe(selection,{compiler:product,std,hostObjects,macroLoader,final:['stage3','stage2-target-sdk'].includes(id),bootstrap:true,nativeChecks:path.join(work,'native-check')});
+    const recipe=installationRecipe(selection,{compiler:product,std,hostObjects,final:['stage3','stage2-target-sdk'].includes(id),bootstrap:true,nativeChecks:path.join(work,'native-check')});
     return {id,depends,commands,output:id===finalStage?'${install}':path.join(work,'sdk-'+id),...recipe,
       copies:[...recipe.copies,...(['stage2','stage3'].includes(id)?[
         {from:'${build}/compiler/share/cjcj',to:'share/cjcj',owner:'compiler',exclude:['build-inputs']},
@@ -240,7 +234,7 @@ export function createBootstrapTargets(input) {
     stage.reuse={...reused};
     delete stage.commands;
     const recipe=installationRecipe({platform,bootstrapHost:host,compilerExecution:{role:'target'},targetComponents:{compiler,std:stdlib,runtime,llvm,ast}},
-      {compiler:path.join(reused.install,'libexec/compiler/cjcj-stage1'+exe),macroLoader:path.join(reused.install,'runtime/lib',tuple,'libcjcj-macro-loader.so'),std:reused.bootstrapStd,bootstrap:true,nativeChecks:path.join(work,'native-check')});
+      {compiler:path.join(reused.install,'libexec/compiler/cjcj-stage1'+exe),std:reused.bootstrapStd,bootstrap:true,nativeChecks:path.join(work,'native-check')});
     stage.copies=[...recipe.copies,
       {from:path.join(reused.install,'share/cjcj'),to:'share/cjcj',owner:'compiler',exclude:['build-inputs']},
       {from:reused.compilerInputs,to:'compiler-inputs.json',owner:'compiler'}];

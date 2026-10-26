@@ -126,11 +126,6 @@ export async function nativeStage(options, {signal} = {}) {
       // absolute path out of the tree, which the install guard rejects as escape.
       {from:path.join(target,'release'),to:'share/cjcj/cjo',exclude:['bin','runtime']},
       ...['cjselfhost_llvmshim.o','cjc_runtime_config.o'].map(name=>({from:path.join(source,'runtime_shim',name),to:'share/cjcj/runtime_shim/'+name}))]);
-    // This compiler-owned component belongs beside the target runtime, never
-    // beside the host libraries used to execute cjc/cjpm. Its producer owns the
-    // install interface; a missing Linux component is an installation failure.
-    if(native.os==='linux')await command([process.execPath,path.join(source,'runtime_shim/install_macro_loader.mjs'),
-      '--prefix',destination,'--platform',platform],{cwd:source,env,records});
     await atomicJson(path.join(destination,'compiler-inputs.json'),{commit,version:process.env.SOURCE_SDK_VERSION,parentSha256:await fileDigest(await compilerProducer(sdk)),
       stdSha256:await stdIdentity(options['std-input']||sdk),
       stdCoreSha256:await fileDigest(path.join(sdk,'lib',native.tuple,'libcangjie-std-core.a')),

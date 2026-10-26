@@ -23,7 +23,7 @@ async function writeExecutable(file, body) {
 
 // `produceLink: false` removes the only input the real shim needs to emit the
 // link, which makes the same invocation serve as the control arm.
-async function runCompilerStage({produceLink = true, explicitHost = false, decoy = false, macroLoader = true} = {}) {
+async function runCompilerStage({produceLink = true, explicitHost = false, decoy = false} = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'native-stage-cjo-'));
   const source = path.join(root, 'source'), sdk = path.join(root, 'sdk');
   const runtime = path.join(root, 'runtime'), output = path.join(root, 'output');
@@ -39,17 +39,6 @@ async function runCompilerStage({produceLink = true, explicitHost = false, decoy
   // The real producer of the build-tree runtime link.
   await fs.copyFile(new URL('../../runtime_shim/build_shim.mjs', import.meta.url),
     path.join(source, 'runtime_shim/build_shim.mjs'));
-  // Controlled C producer implementing the fixed installMacroLoader CLI. It
-  // tests nativeStage's public interface and publication, not native dlopen.
-  await fs.writeFile(path.join(source,'runtime_shim/install_macro_loader.mjs'),`
-import fs from 'node:fs/promises';import path from 'node:path';import {parseArgs} from 'node:util';
-const {values}=parseArgs({options:{prefix:{type:'string'},platform:{type:'string'}}});
-if(!values.prefix||values.platform!=='linux_x86_64')throw Error('MACRO_LOADER_INSTALL_ARGUMENTS');
-const destination=path.join(values.prefix,'runtime/lib',values.platform+'_cjnative');
-console.log('MACRO_LOADER_INSTALL_REACHED '+JSON.stringify(values));
-await fs.mkdir(destination,{recursive:true});
-await fs.copyFile('runtime_shim/libcjcj-macro-loader.so',path.join(destination,'libcjcj-macro-loader.so'));
-`);
   // The shim consumes the explicitly installed N object; it still compiles
   // the runtime configuration C source through the normal compiler command.
   await fs.writeFile(path.join(source, 'runtime_shim/cjc_runtime_config.c'),
@@ -75,7 +64,6 @@ await fs.writeFile(path.join(target,'release/bin/cjcj::cjc'), 'fixture compiler 
 // prefix is supposed to carry.
 await fs.mkdir(path.join(target,'release/cjcj'), {recursive: true});
 await fs.writeFile(path.join(target,'release/cjcj/parse@cjcj.cjo'), 'fixture cjo payload\\n');
-${macroLoader?"await fs.writeFile('runtime_shim/libcjcj-macro-loader.so','fixture compiler-owned macro loader\\n');":''}
 `;
   await writeExecutable(path.join(packageManagerSdk, 'tools/bin/cjpm'),packageManager('selected'));
   if(decoy)await writeExecutable(path.join(sdk, '.host/tools/bin/cjpm'),packageManager('unselected'));
@@ -112,8 +100,7 @@ ${macroLoader?"await fs.writeFile('runtime_shim/libcjcj-macro-loader.so','fixtur
   const inputs = await fs.readFile(path.join(output, 'compiler-inputs.json'), 'utf8')
     .then(JSON.parse).catch(error => { if(error.code === 'ENOENT') return null; throw error; });
   const observed=await fs.readFile(path.join(source,'package-manager-observed.json'),'utf8').then(JSON.parse).catch(()=>null);
-  const installedLoader=await fs.readFile(path.join(output,'runtime/lib',tuple,'libcjcj-macro-loader.so'),'utf8').catch(error=>{if(error.code==='ENOENT')return null;throw error;});
-  return {root, result, listing, packageCjo, sourceLink, cjoRuntime, commit, inputs, observed, sdk, packageManagerSdk, target, installedLoader,output};
+  return {root, result, listing, packageCjo, sourceLink, cjoRuntime, commit, inputs, observed, sdk, packageManagerSdk, target};
 }
 
 async function retainOrRemove(root) {
@@ -171,26 +158,4 @@ for(const decoy of [false,true])test('explicit package-manager SDK '+(decoy?'ove
     assert.ok(listing.includes('cjcj'));
     assert.deepEqual(packageCjo,['parse@cjcj.cjo']);
   } finally {await retainOrRemove(root);}
-});
-
-test('normal compiler stage requires its component before publishing the installation',async()=>{
- for(const macroLoader of [true,false,true]) {
-  const row=await runCompilerStage({macroLoader,explicitHost:true});
-  try {
-   assert.match(row.result.stdout,/MACRO_LOADER_INSTALL_REACHED/);
-   console.log('NATIVE_STAGE_MACRO_COMPONENT_TARGET_REACHED '+JSON.stringify({macroLoader,rc:row.result.status}));
-   if(!macroLoader) {
-    assert.equal(row.result.status,1,row.result.stdout+row.result.stderr);
-    assert.match(row.result.stderr,/ENOENT.*libcjcj-macro-loader\.so/s);
-    assert.equal(row.installedLoader,null);assert.equal(row.inputs,null,'failed pending component must not publish compiler inputs');
-   } else {
-    assert.equal(row.result.status,0,row.result.stdout+row.result.stderr);
-    assert.equal(row.installedLoader,'fixture compiler-owned macro loader\n','NATIVE_STAGE_MACRO_COMPONENT_INSTALLED');
-    assert.equal(row.inputs.commit,row.commit);
-    for(const relative of ['.compiler-exec','libexec/runtime','share/cjcj/cjo/runtime'])
-     assert.equal(await fs.lstat(path.join(row.output,relative)).catch(()=>null),null);
-   }
-   assert.equal(row.observed.selected,'selected','host package-manager control');
-  } finally {await retainOrRemove(row.root);}
- }
 });

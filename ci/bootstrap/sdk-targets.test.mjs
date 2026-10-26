@@ -1,4 +1,4 @@
-import test from'node:test';import assert from'node:assert/strict';import {createBootstrapTargets,validateBootstrapTargets,FIXED_INPUTS,BOOTSTRAP_PHASES,installationRecipe}from'./sdk-targets.mjs';import {targetOrder}from'./sdk-flow.mjs';import {PLATFORMS}from'./sdk-io.mjs';import{readHostToolchainPin}from'../host-toolchain-pin.mjs';
+import test from'node:test';import assert from'node:assert/strict';import {createBootstrapTargets,validateBootstrapTargets,FIXED_INPUTS,BOOTSTRAP_PHASES}from'./sdk-targets.mjs';import {targetOrder}from'./sdk-flow.mjs';import {PLATFORMS}from'./sdk-io.mjs';import{readHostToolchainPin}from'../host-toolchain-pin.mjs';
 import {bootstrap} from './bootstrap.mjs';
 function inputs(platform){const row=(commit,name)=>({commit,tree:'a'.repeat(40),repository:'/fixture/'+name+'.git',install:'/fixture/'+name,configuration:{fixture:true},buildResult:'/fixture/'+name+'/result.json',sourceRoot:'/fixture/'+name+'-producer'});const runtime=row(FIXED_INPUTS.runtime,'R');return{platform,work:'/fixture/work',install:'/fixture/install',host:{version:readHostToolchainPin(platform).replace(/^nightly-/, ''),install:'/fixture/H'},llvm:row(FIXED_INPUTS.llvm,'N'),runtime,ast:row(FIXED_INPUTS.compiler,'AST'),h1:{...row(FIXED_INPUTS.h1,'H1'),product:'/fixture/H1/compiler'},compiler:row('b'.repeat(40),'C'),stdlib:{...runtime,install:'/fixture/std',buildResult:'/fixture/std/result.json',sourceRoot:'/fixture/std-producer'},tools:{privateRoot:'/fixture/tools'}};}
 test('public native fact copy and C2 reuse retain one input writer',async()=>{
@@ -313,63 +313,4 @@ test('the shared recipe preserves explicit host and independent stage2 execution
   ['missing dependency',s=>{delete s.compilerExecution.llvm;}],
  ]){const broken=structuredClone(selection);mutate(broken);assert.throws(()=>installationSelection(broken),/INSTALL_/);console.log('INSTALL_SELECTION_REJECTION_REACHED '+name);}
  console.log('INSTALL_EXPLICIT_ROLE_FIXTURE_REACHED dynamic-R-role=NOT_RUN');
-});
-
-test('compiler macro component follows generated Stage2 and reuse into target runtime only',()=>{
- for(const platform of Object.keys(PLATFORMS)) {
-  const input=inputs(platform),graph=createBootstrapTargets(input),tuple=PLATFORMS[platform][2];
-  for(const id of ['stage0-run','stage1-initial','stage1-std','stage2','stage2-target-sdk','stage3']) {
-   const stage=graph.stages.find(s=>s.id===id),components=stage.copies.filter(c=>c.owner==='compiler macro loader');
-   const required=platform.startsWith('linux_')&&['stage2','stage2-target-sdk','stage3'].includes(id);
-   assert.equal(components.length,required?1:0,platform+' '+id);
-   if(required) {
-    assert.equal(components[0].to,'runtime/lib/'+tuple+'/libcjcj-macro-loader.so');
-    assert.match(components[0].from,/\/runtime\/lib\/linux_(x86_64|aarch64)_cjnative\/libcjcj-macro-loader.so$/);
-   }
-   for(const copy of stage.copies.filter(c=>c.owner==='compiler execution runtime'))
-    assert.ok(copy.exclude.some(p=>p.endsWith('libcjcj-macro-loader.so')),'execution copy must exclude target component');
-  }
- }
-});
-
-test('selected compiler component crosses normal prepare and copy; missing rejects, H stays legal',async()=>{
- const fs=await import('node:fs/promises'),path=await import('node:path'),os=await import('node:os');
- const {prepareInstallInputs}=await import('./sdk-inputs.mjs'),{copyOutputs}=await import('./sdk-flow.mjs');
- const root=await fs.mkdtemp(path.join(process.env.SDK_FLOW_TEST_ROOT||os.tmpdir(),'macro-component-copy-'));
- const tuple='linux_x86_64_cjnative',platform='linux_x86_64';
- const put=async(file,text)=>{await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,text);};
- const artifact=name=>({repository:'/fixture/'+name,commit:'a'.repeat(40),platform,install:path.join(root,name)});
- const target=Object.fromEntries(['compiler','std','runtime','llvm'].map(n=>[n,artifact(n)]));
- target.compiler.product=target.compiler.install+'/bin/cjc';
- target.compiler.macroLoader=target.compiler.install+'/runtime/lib/'+tuple+'/libcjcj-macro-loader.so';
- const host=artifact('H');
- const selection={platform,hostPlatform:platform,bootstrapHost:host,
-  compilerExecution:{role:'separate',stage:'native',platform,...Object.fromEntries(['compiler','std','runtime','llvm'].map(n=>[n,host]))},targetComponents:target};
- for(const file of [target.compiler.product,target.std.install+'/modules/'+tuple+'/std/std.core.cjo',target.std.install+'/lib/'+tuple+'/libcangjie-std-core.a',
-  target.runtime.install+'/runtime/lib/'+tuple+'/libcangjie-runtime.so',target.llvm.install+'/third_party/llvm/bin/llc',host.install+'/runtime/lib/'+tuple+'/libcangjie-runtime.so',
-  host.install+'/lib/'+tuple+'/libcangjie-std-core.a',host.install+'/third_party/llvm/lib/libLLVM-15.so'])await put(file,'fixture '+file);
- await put(target.compiler.macroLoader,'target component');
- // A distinct host decoy must never become the target helper or be copied into
- // the compiler execution runtime. H without this file remains legal below.
- const decoy=host.install+'/runtime/lib/'+tuple+'/libcjcj-macro-loader.so';await put(decoy,'host decoy');
- const descriptor={selection,work:root+'/work',install:root+'/sdk'};
- async function install(label) {
-  const prepared=await prepareInstallInputs({...descriptor,install:root+'/'+label});
-  const recipe=installationRecipe(prepared.selection),copies=recipe.copies.filter(c=>['compiler macro loader','compiler execution runtime'].includes(c.owner));
-  await copyOutputs(root+'/'+label,copies);
-  assert.equal(await fs.readFile(root+'/'+label+'/runtime/lib/'+tuple+'/libcjcj-macro-loader.so','utf8'),'target component');
-  assert.equal(await fs.readFile(root+'/'+label+'/.compiler-exec/runtime/lib/'+tuple+'/libcangjie-runtime.so','utf8'),'fixture '+host.install+'/runtime/lib/'+tuple+'/libcangjie-runtime.so');
-  await assert.rejects(fs.stat(root+'/'+label+'/.compiler-exec/runtime/lib/'+tuple+'/libcjcj-macro-loader.so'),{code:'ENOENT'});
- }
- await install('normal');
- await fs.rename(target.compiler.macroLoader,target.compiler.macroLoader+'.retained');
- try {
-  await assert.rejects(prepareInstallInputs(descriptor),error=>error.code==='ENOENT'&&error.path===target.compiler.macroLoader);
-  const official=structuredClone(descriptor);delete official.selection.targetComponents.compiler.macroLoader;
-  await prepareInstallInputs(official);
-  assert.equal(installationRecipe(official.selection).copies.some(c=>c.owner==='compiler macro loader'),false);
-  console.log('SELECTED_MACRO_COMPONENT_MISSING_TARGET_REACHED H_CONTROL_PASS');
- } finally {await fs.rename(target.compiler.macroLoader+'.retained',target.compiler.macroLoader);}
- await install('restored');
- console.log('MACRO_COMPONENT_TARGET_ONLY_RESTORED '+root);
 });
