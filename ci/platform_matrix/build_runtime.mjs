@@ -10,6 +10,7 @@ import {printCommonVersions, stageBegin, toCommandPath} from './common.mjs';
 import {pickWindowsCC} from './pick_cc.mjs';
 import {runMsysScript} from './windows_runtime_shell.mjs';
 import {configureNativeRuntime, installNativeRuntimeDependencies, installNativeRuntimeInputs, recordNativeRuntime} from './native_runtime.mjs';
+import {darwinCommand} from '../release/darwin_commands.mjs';
 
 const {root} = stageBegin('runtime');
 const source = process.env.RUNTIME_SOURCE || path.join(process.cwd(), 'runtime-source');
@@ -49,6 +50,8 @@ if (process.env.RUNTIME_REF) {
 }
 await fs.mkdir(installRoot, {recursive: true});
 const runtimeDirectory = path.join(source, 'runtime');
+const nativePython = (label, args) => darwinCommand(path.join(root, 'logs', 'native-runtime'),
+  label, 'python3', args, {cwd:runtimeDirectory, env:process.env});
 if(nativePair&&process.platform==='linux') {
   process.env.GC_UNIT_GATE_STATUS=path.join(runtimeDirectory,'CMakebuild/gc-unit.status');
   await fs.rm(process.env.GC_UNIT_GATE_STATUS,{force:true});
@@ -69,8 +72,8 @@ if (process.platform === 'linux') {
     await $({cwd: runtimeDirectory})`python3 build.py install --prefix ${configuredInstallRoot}`;
   } else if (runtimeTarget === 'native') {
     await $`npx --yes zx@8 ${toCommandPath(path.join(import.meta.dirname, 'qualify_teardown_tools.mjs'))} ${toCommandPath(path.join(root, 'logs', 'teardown-tools.log'))}`;
-    await $({cwd: runtimeDirectory})`python3 build.py build --target native --build-type ${buildType} --prefix ${preinstall} -v ${version}`;
-    await $({cwd: runtimeDirectory})`python3 build.py install --prefix ${installRoot}`;
+    nativePython('build', ['build.py', 'build', '--target', 'native', '--build-type', buildType, '--prefix', preinstall, '-v', version]);
+    nativePython('install', ['build.py', 'install', '--prefix', installRoot]);
   } else {
     console.error(`FATAL: unsupported Linux runtime target: ${runtimeTarget}`);
     process.exit(5);
@@ -82,8 +85,8 @@ if (process.platform === 'linux') {
   }
   await $({nothrow: true})`xcodebuild -version`;
   await $({nothrow: true})`xcrun --sdk macosx --show-sdk-version`;
-  await $({cwd: runtimeDirectory})`python3 build.py build --target native --build-type ${buildType} --prefix ${preinstall} -v ${version}`;
-  await $({cwd: runtimeDirectory})`python3 build.py install --prefix ${installRoot}`;
+  nativePython('build', ['build.py', 'build', '--target', 'native', '--build-type', buildType, '--prefix', preinstall, '-v', version]);
+  nativePython('install', ['build.py', 'install', '--prefix', installRoot]);
 } else if (process.platform === 'win32') {
   const windowsCC = await pickWindowsCC(runtimeToolchain
     ? [path.join(runtimeToolchain, 'bin', 'clang.exe')] : undefined);

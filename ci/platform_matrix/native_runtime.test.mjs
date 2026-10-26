@@ -165,6 +165,8 @@ test('native producer failure stops before install and preserves its command exi
 test('formal workflow carries selected sources through checkout, original producer and whole install upload',()=>{
   const entry=yaml.load(fs.readFileSync('.github/workflows/build-fixed-llc.yml','utf8'));
   const native=yaml.load(fs.readFileSync('.github/workflows/build-native-runtime.yml','utf8'));
+  for(const key of ['llvm_ref','runtime_ref'])assert.equal(native.on.workflow_dispatch.inputs[key].required,true);
+  assert.equal(native.on.workflow_dispatch.inputs.platforms.default,'darwin_aarch64,darwin_x86_64');
   assert.equal(entry.on.workflow_dispatch.inputs.build_runtime.default,false);
   assert.equal(entry.jobs['native-runtime'].uses,'./.github/workflows/build-native-runtime.yml');
   for(const key of ['llvm_ref','runtime_ref'])assert.equal(entry.jobs['native-runtime'].with[key],`\${{ inputs.${key} }}`);
@@ -175,6 +177,10 @@ test('formal workflow carries selected sources through checkout, original produc
   assert.equal(build.env.GC_UNIT_GATE_LANGUAGE_TESTS,"${{ runner.os == 'Linux' && 'defer' || 'all' }}");
   assert.doesNotMatch(JSON.stringify(native),/GC_UNIT_GATE_SKIP/);
   assert.match(build.run,/zx@8 ci\/platform_matrix\/build_runtime.mjs/);
+  assert.match(build.run,/ci\/build-resources.mjs --jobs-only/);
+  const consumer=steps.find(x=>x.run==='node ci/platform_matrix/native_runtime_package.mjs');
+  assert.ok(steps.indexOf(consumer)>steps.indexOf(build));
+  assert.equal(consumer.env.NATIVE_RUNTIME_PLATFORM,'${{ matrix.platform }}');
   assert.equal(steps.find(x=>x.with?.name==='native-runtime-install-${{ matrix.platform }}').with.path,'.platform-ci/runtime-install');
   assert.equal(native.jobs.runtime['runs-on'],'${{ matrix.runner }}');
   assert.equal(native.permissions.contents,'read');

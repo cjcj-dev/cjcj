@@ -10,7 +10,7 @@ export function darwinCommand(work, label, command, args, options = {}) {
   const start = new Date().toISOString();
   try { result = spawnSync(command, args, {...options, stdio:['ignore', out, err]}); }
   finally { fs.closeSync(out); fs.closeSync(err); }
-  const record = {command, args, start, end:new Date().toISOString(), rc:result.status,
+  const record = {command, args, cwd:options.cwd || process.cwd(), start, end:new Date().toISOString(), rc:result.status,
     signal:result.signal, error:result.error?.message || null, stdout, stderr};
   fs.writeFileSync(path.join(work, `${label}.json`), JSON.stringify(record, null, 2)+'\n');
   const output = fs.readFileSync(stdout, 'utf8'), errors = fs.readFileSync(stderr, 'utf8');

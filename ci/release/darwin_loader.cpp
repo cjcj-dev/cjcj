@@ -43,6 +43,14 @@ int main(int argc, char** argv)
         dispose(context);
         std::cout << "DARWIN_LLVM_CONTEXT_OK\n";
     }
+    if (std::strcmp(argv[3], "boundscheck") == 0) {
+        auto copy = reinterpret_cast<int (*)(void*, size_t, const void*, size_t)>(symbol);
+        const char input[] = "native installed bounds";
+        char output[sizeof(input)]{};
+        if (copy(output, sizeof(output), input, sizeof(input)) != 0 ||
+            std::memcmp(input, output, sizeof(input)) != 0) return 71;
+        std::cout << "NATIVE_BOUNDS_CALL_OK\n";
+    }
     // Runtime teardown is process-owned. Loading/looking up the ABI symbol does
     // not execute a safepoint without a managed caller or waive the ABI hold.
     return 0;
