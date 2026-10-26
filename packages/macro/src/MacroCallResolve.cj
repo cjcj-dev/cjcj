@@ -207,8 +207,7 @@ private func BindDefinition(macCall: MacroCall, macroName: String): Bool {
 }
 
 private func findStdMacroLibPath(packageName: String, instance: MacroHost): String {
-    let basePath = FileUtil.JoinPath(FileUtil.GetDirPath(instance.GetGlobalOptions().executablePath),
-        "../runtime/lib")
+    let basePath = FileUtil.GetCompilerRuntimeBasePath(instance.GetGlobalOptions().executablePath)
     let libName = "lib" + FileUtil.ConvertPackageNameToLibCangjieBaseFormat(packageName) + LIB_SUFFIX
     return FileUtil.JoinPath(
         FileUtil.JoinPath(basePath, instance.GetGlobalOptions().GetCangjieLibHostPathName()), libName)

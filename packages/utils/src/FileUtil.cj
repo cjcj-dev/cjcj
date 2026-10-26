@@ -709,12 +709,18 @@ public class FileUtil {
         let result = ArrayList<UInt8>()
         var previousIsSlash = false
         let slash = preferredDirSeparator(toUnix).toArray()[0]
+        // Windows UNC and device roots start with two separators. They remain
+        // roots through GetDirPath/JoinPath as well as direct normalization.
+        @When[os == "Windows"]
+        let preserveNetworkRoot = input.size >= 2 && isPathSlashByte(input[0]) && isPathSlashByte(input[1])
+        @When[os != "Windows"]
+        let preserveNetworkRoot = false
         for (byte in input.toArray()) {
             if (byte == 0u8) {
                 break
             }
             let isSlashByte = isPathSlashByte(byte)
-            if (previousIsSlash && isSlashByte) {
+            if (previousIsSlash && isSlashByte && !(preserveNetworkRoot && result.size == 1)) {
                 continue
             }
             if (isSlashByte) {
@@ -1160,6 +1166,21 @@ public class FileUtil {
         }
         joinedPath += append
         return Normalize(joinedPath)
+    }
+
+    // The public compiler lives in bin. Build the sibling runtime path without
+    // leaving a literal '..' for Windows extended-length/device path consumers.
+    // Unix retains its existing path spelling and filesystem resolution.
+    public static func GetCompilerRuntimeBasePath(executablePath: String): String {
+        @When[os == "Windows"]
+        let base = GetDirPath(GetDirPath(executablePath))
+        @When[os == "Windows"]
+        let relative = "runtime/lib"
+        @When[os != "Windows"]
+        let base = GetDirPath(executablePath)
+        @When[os != "Windows"]
+        let relative = "../runtime/lib"
+        return JoinPath(base, relative)
     }
 
     public static func GetShortHash(fullHash: UInt64): String {

@@ -726,8 +726,7 @@ public class MacroEvaluation {
     public func GetMacroDefDynamicFiles(): ArrayList<String> {
         let macroDynFiles = ArrayList<String>()
         for (packageName in ci.importManager.GetImportedStdMacroPackages()) {
-            let basePath = FileUtil.JoinPath(FileUtil.GetDirPath(ci.GetGlobalOptions().executablePath),
-                "../runtime/lib")
+            let basePath = FileUtil.GetCompilerRuntimeBasePath(ci.GetGlobalOptions().executablePath)
             let libName = "lib" + FileUtil.ConvertPackageNameToLibCangjieBaseFormat(packageName) + LIB_SUFFIX
             let macroPath = FileUtil.JoinPath(
                 FileUtil.JoinPath(basePath, ci.GetGlobalOptions().GetCangjieLibHostPathName()), libName)

@@ -3,12 +3,36 @@ package cjcj::driver
 import std.collection.*
 import std.fs.File
 import std.fs.Directory as FSDirectory
+import cjcj::frontend.CompilerInvocation
 import std.unittest.*
 import std.unittest.testmacro.*
 
 @When[os == "Windows"]
 @Test
 class WindowsEntryTest {
+    @TestCase
+    func NetworkRootsReachRelativeRuntimeConsumers(): Unit {
+        // Literal expected roots, not output from the entry resolver itself.
+        // No mounted network share is needed for these string consumers.
+        for (root in ["\\\\server\\share\\SDK 空格", "\\\\?\\UNC\\server\\share\\SDK 空格",
+            "\\\\?\\C:\\SDK 空格", "\\\\.\\C:\\SDK 空格"]) {
+            let entry = root + "\\bin\\cjc.exe"
+            @Expect(FileUtil.Normalize(entry), entry)
+            @Expect(FileUtil.Normalize(entry, toUnix: true), entry.replace("\\", "/"))
+            @Expect(FileUtil.GetDirPath(entry), root + "\\bin")
+            @Expect(FileUtil.JoinPath(root + "\\bin", "../runtime/lib"), root + "\\bin\\..\\runtime\\lib")
+            @Expect(FileUtil.GetCompilerRuntimeBasePath(entry), root + "\\runtime\\lib")
+            let invocation = CompilerInvocation()
+            invocation.globalOptions.executablePath = entry
+            let tuple = invocation.globalOptions.GetCangjieLibHostPathName()
+            @Expect(invocation.GetRuntimeLibPath(), root + "\\runtime\\lib\\" + tuple +
+                "\\libcangjie-runtime.dll")
+        }
+        // Preserve ordinary drive/root behavior and collapse interior repeats.
+        @Expect(FileUtil.Normalize("C:\\SDK\\\\bin\\cjc.exe"), "C:\\SDK\\bin\\cjc.exe")
+        @Expect(FileUtil.Normalize("\\SDK\\bin\\cjc.exe"), "\\SDK\\bin\\cjc.exe")
+    }
+
     @TestCase
     func PublicEntryPreservesUnicodeSpacesAndBasename(): Unit {
         let created = FSDirectory.createTemp(".")
