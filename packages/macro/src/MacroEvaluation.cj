@@ -570,6 +570,7 @@ private func installNativeMacroResult(macCall: MacroCall, resultPtr: CPointer<UI
 }
 
 private func invokeCommonNativeMacro(macCall: MacroCall, inputBytes: ArrayList<UInt8>): Bool {
+    var result = false
     try (inputPtr = LibC.malloc<UInt8>(count: nativeBufferSize(inputBytes)).asResource()) {
         if (inputPtr.value.isNull()) { return false }
         writeNativeBytes(inputPtr.value, inputBytes)
@@ -578,7 +579,7 @@ private func invokeCommonNativeMacro(macCall: MacroCall, inputBytes: ArrayList<U
         var failed = false
         try {
             let resultPtr = unsafe { invokeFunc(inputPtr.value, inputBytes.size, CPointer<Unit>(ctxHandle)) }
-            return installNativeMacroResult(macCall, resultPtr)
+            result = installNativeMacroResult(macCall, resultPtr)
         } catch (e: Exception) {
             failed = true
             throw e
@@ -590,9 +591,11 @@ private func invokeCommonNativeMacro(macCall: MacroCall, inputBytes: ArrayList<U
             }
         }
     }
+    return result
 }
 
 private func invokeAttrNativeMacro(macCall: MacroCall, attrBytes: ArrayList<UInt8>, inputBytes: ArrayList<UInt8>): Bool {
+    var result = false
     try (attrPtr = LibC.malloc<UInt8>(count: nativeBufferSize(attrBytes)).asResource()) {
         if (attrPtr.value.isNull()) { return false }
         writeNativeBytes(attrPtr.value, attrBytes)
@@ -607,7 +610,7 @@ private func invokeAttrNativeMacro(macCall: MacroCall, attrBytes: ArrayList<UInt
                     invokeFunc(attrPtr.value, attrBytes.size, inputPtr.value, inputBytes.size,
                         CPointer<Unit>(ctxHandle))
                 }
-                return installNativeMacroResult(macCall, resultPtr)
+                result = installNativeMacroResult(macCall, resultPtr)
             } catch (e: Exception) {
                 failed = true
                 throw e
@@ -620,6 +623,7 @@ private func invokeAttrNativeMacro(macCall: MacroCall, attrBytes: ArrayList<UInt
             }
         }
     }
+    return result
 }
 
 private func markNativeMacroFailed(macCall: MacroCall): Bool {
