@@ -37,58 +37,55 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
     }
 
     public override func PerformIncrementalScopeAnalysis(): Bool {
-        let recorder = ProfileRecorder("Main Stage", "AST Diff")
-        let sourcePackages = core.GetSourcePackages()
-        CJC_ASSERT(sourcePackages.size == 1)
-        let packageValue = sourcePackages[0]
-        if (!core.CalculateASTCache()) {
-            recorder.close()
+        try (recorder = ProfileRecorder("Main Stage", "AST Diff")) {
+            let sourcePackages = core.GetSourcePackages()
+            CJC_ASSERT(sourcePackages.size == 1)
+            let packageValue = sourcePackages[0]
+            if (!core.CalculateASTCache()) {
+                return true
+            }
+            let options = invocation.globalOptions
+            if (!options.pluginPaths.isEmpty()) {
+                kind = IncreKind.ROLLBACK
+                diag.Warn(DiagCategory.OTHER, DEFAULT_POSITION,
+                    "`--incremental-compile` is incompatible with `--plugin` and will be ignored.")
+                return true
+            }
+            if (!core.declsWithDuplicatedRawMangleName.isEmpty()) {
+                kind = IncreKind.ROLLBACK
+                IncrementalCompilationLogger.GetInstance().LogLn(
+                    "illegal source code leads to duplicated raw mangle name, roll back to full compilation")
+                return true
+            }
+            let increRes = IncrementalScopeAnalysis(IncrementalScopeAnalysisArgs(core.rawMangleName2DeclMap,
+                core.astCacheInfo, packageValue, options, core.importManager.getOrThrow(), core.cachedInfo, core.fileMap,
+                core.directExtends))
+            if (increRes.kind == IncreKind.INCR) {
+                if (!CheckCachedBitcodeInfo(packageValue.fullPackageName, options)) {
+                    increRes.kind = IncreKind.ROLLBACK
+                } else {
+                    for (mangle in increRes.deletedMangleNames) { cacheMangles.incrRemovedDecls.add(mangle) }
+                }
+            }
+            if (increRes.kind == IncreKind.NO_CHANGE) {
+                for (srcPkg in sourcePackages) { options.UpdateCachedDirName(srcPkg.fullPackageName) }
+                if (options.aggressiveParallelCompileSplitNum.hasValue &&
+                    !CheckCachedBitcodeInfo(packageValue.fullPackageName, options)) {
+                    increRes.kind = IncreKind.ROLLBACK
+                }
+                if (increRes.kind == IncreKind.NO_CHANGE && !options.IsLTOEnabled() &&
+                    !CheckCachedObjFile(options, increRes.cacheInfo)) {
+                    increRes.kind = IncreKind.ROLLBACK
+                }
+                if (increRes.kind == IncreKind.NO_CHANGE && options.IsLTOEnabled() &&
+                    !CheckCachedBitcodeInfoForLTO(options, increRes.cacheInfo)) {
+                    increRes.kind = IncreKind.ROLLBACK
+                }
+            }
+            increRes.Dump()
+            SaveCompilationResult(increRes)
             return true
         }
-        let options = invocation.globalOptions
-        if (!options.pluginPaths.isEmpty()) {
-            kind = IncreKind.ROLLBACK
-            diag.Warn(DiagCategory.OTHER, DEFAULT_POSITION,
-                "`--incremental-compile` is incompatible with `--plugin` and will be ignored.")
-            recorder.close()
-            return true
-        }
-        if (!core.declsWithDuplicatedRawMangleName.isEmpty()) {
-            kind = IncreKind.ROLLBACK
-            IncrementalCompilationLogger.GetInstance().LogLn(
-                "illegal source code leads to duplicated raw mangle name, roll back to full compilation")
-            recorder.close()
-            return true
-        }
-        let increRes = IncrementalScopeAnalysis(IncrementalScopeAnalysisArgs(core.rawMangleName2DeclMap,
-            core.astCacheInfo, packageValue, options, core.importManager.getOrThrow(), core.cachedInfo, core.fileMap,
-            core.directExtends))
-        if (increRes.kind == IncreKind.INCR) {
-            if (!CheckCachedBitcodeInfo(packageValue.fullPackageName, options)) {
-                increRes.kind = IncreKind.ROLLBACK
-            } else {
-                for (mangle in increRes.deletedMangleNames) { cacheMangles.incrRemovedDecls.add(mangle) }
-            }
-        }
-        if (increRes.kind == IncreKind.NO_CHANGE) {
-            for (srcPkg in sourcePackages) { options.UpdateCachedDirName(srcPkg.fullPackageName) }
-            if (options.aggressiveParallelCompileSplitNum.hasValue &&
-                !CheckCachedBitcodeInfo(packageValue.fullPackageName, options)) {
-                increRes.kind = IncreKind.ROLLBACK
-            }
-            if (increRes.kind == IncreKind.NO_CHANGE && !options.IsLTOEnabled() &&
-                !CheckCachedObjFile(options, increRes.cacheInfo)) {
-                increRes.kind = IncreKind.ROLLBACK
-            }
-            if (increRes.kind == IncreKind.NO_CHANGE && options.IsLTOEnabled() &&
-                !CheckCachedBitcodeInfoForLTO(options, increRes.cacheInfo)) {
-                increRes.kind = IncreKind.ROLLBACK
-            }
-        }
-        increRes.Dump()
-        SaveCompilationResult(increRes)
-        recorder.close()
-        return true
     }
 
     private func SaveCompilationResult(result: IncreResult): Unit {
@@ -132,81 +129,77 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
     }
 
     public override func PerformSema(): Bool {
-        let recorder = ProfileRecorder("Main Stage", "Semantic")
-        let logger = IncrementalCompilationLogger.GetInstance()
-        if (logger.IsEnable()) {
-            let message = if (kind == IncreKind.NO_CHANGE) { "no change, skip sema" } else if (
-                kind == IncreKind.ROLLBACK) { "full sema" } else { "incremental sema" }
-            logger.LogLn(message)
-        }
-        if (kind == IncreKind.NO_CHANGE || kind == IncreKind.EMPTY_PKG) {
-            recorder.close()
-            return true
-        }
-        if (kind == IncreKind.ROLLBACK) {
-            let ret = super.PerformSema()
-            recorder.close()
-            return ret
-        }
-        for (srcPkg in core.GetSourcePackages()) {
-            srcPkg.EnableAttr(Attribute.INCRE_COMPILE)
-            HandleCtorForIncr(srcPkg, core.mangledName2DeclMap, core.cachedInfo.semaInfo)
-            for (mangle in core.importManager.getOrThrow().LoadCachedTypeForPackage(srcPkg, core.mangledName2DeclMap)) {
-                cacheMangles.incrRemovedDecls.add(mangle)
+        try (recorder = ProfileRecorder("Main Stage", "Semantic")) {
+            let logger = IncrementalCompilationLogger.GetInstance()
+            if (logger.IsEnable()) {
+                let message = if (kind == IncreKind.NO_CHANGE) { "no change, skip sema" } else if (
+                    kind == IncreKind.ROLLBACK) { "full sema" } else { "incremental sema" }
+                logger.LogLn(message)
             }
-        }
-        MarkIncrementalCheckForCtor(declsToBeReCompiled)
-        let visit = { decl: Decl =>
-            if (!decl.IsNominalDecl() && decl.astKind != ASTKind.PROP_DECL) {
-                decl.EnableAttr(Attribute.IS_CHECK_VISITED)
-                decl.EnableAttr(Attribute.INITIALIZED)
-                decl.EnableAttr(Attribute.INITIALIZATION_CHECKED)
-                decl.EnableAttr(Attribute.INCRE_COMPILE)
+            if (kind == IncreKind.NO_CHANGE || kind == IncreKind.EMPTY_PKG) {
+                return true
             }
-            if (let Some(funcDecl) <- (decl as FuncDecl)) {
-                if (let Some(funcBody) <- funcDecl.funcBody) {
-                    funcBody.body = None
-                    return
+            if (kind == IncreKind.ROLLBACK) {
+                let ret = super.PerformSema()
+                return ret
+            }
+            for (srcPkg in core.GetSourcePackages()) {
+                srcPkg.EnableAttr(Attribute.INCRE_COMPILE)
+                HandleCtorForIncr(srcPkg, core.mangledName2DeclMap, core.cachedInfo.semaInfo)
+                for (mangle in core.importManager.getOrThrow().LoadCachedTypeForPackage(srcPkg, core.mangledName2DeclMap)) {
+                    cacheMangles.incrRemovedDecls.add(mangle)
                 }
             }
-            if (let Some(varDecl) <- (decl as VarDecl)) {
-                if (varDecl.initializer.isNone()) { return }
-                varDecl.EnableAttr(Attribute.DEFAULT)
-                if (HasSimpleInitialiser(varDecl)) { varDecl.DisableAttr(Attribute.IS_CHECK_VISITED) }
+            MarkIncrementalCheckForCtor(declsToBeReCompiled)
+            let visit = { decl: Decl =>
+                if (!decl.IsNominalDecl() && decl.astKind != ASTKind.PROP_DECL) {
+                    decl.EnableAttr(Attribute.IS_CHECK_VISITED)
+                    decl.EnableAttr(Attribute.INITIALIZED)
+                    decl.EnableAttr(Attribute.INITIALIZATION_CHECKED)
+                    decl.EnableAttr(Attribute.INCRE_COMPILE)
+                }
+                if (let Some(funcDecl) <- (decl as FuncDecl)) {
+                    if (let Some(funcBody) <- funcDecl.funcBody) {
+                        funcBody.body = None
+                        return
+                    }
+                }
+                if (let Some(varDecl) <- (decl as VarDecl)) {
+                    if (varDecl.initializer.isNone()) { return }
+                    varDecl.EnableAttr(Attribute.DEFAULT)
+                    if (HasSimpleInitialiser(varDecl)) { varDecl.DisableAttr(Attribute.IS_CHECK_VISITED) }
+                }
             }
-        }
-        for ((_, decl) in core.mangledName2DeclMap) {
-            if (!decl.toBeCompiled && !IsInDeclWithAttribute(decl, Attribute.GENERIC) &&
-                Ty.IsTyCorrect(decl.GetTy()) &&
-                (decl.astKind != ASTKind.FUNC_DECL || !decl.TestAttr(Attribute.DEFAULT))) {
-                visit(decl)
+            for ((_, decl) in core.mangledName2DeclMap) {
+                if (!decl.toBeCompiled && !IsInDeclWithAttribute(decl, Attribute.GENERIC) &&
+                    Ty.IsTyCorrect(decl.GetTy()) &&
+                    (decl.astKind != ASTKind.FUNC_DECL || !decl.TestAttr(Attribute.DEFAULT))) {
+                    visit(decl)
+                }
             }
+            let ret = super.PerformSema()
+            return ret
         }
-        let ret = super.PerformSema()
-        recorder.close()
-        return ret
     }
 
     public override func PerformOverflowStrategy(): Bool {
-        let recorder = ProfileRecorder("Main Stage", "Overflow Strategy")
-        if (kind == IncreKind.NO_CHANGE || kind == IncreKind.EMPTY_PKG) {
-            recorder.close()
-            return true
+        try (recorder = ProfileRecorder("Main Stage", "Overflow Strategy")) {
+            if (kind == IncreKind.NO_CHANGE || kind == IncreKind.EMPTY_PKG) {
+                return true
+            }
+            let ret = super.PerformOverflowStrategy()
+            return ret
         }
-        let ret = super.PerformOverflowStrategy()
-        recorder.close()
-        return ret
     }
 
     public override func PerformDesugarAfterSema(): Bool {
-        let recorder = ProfileRecorder("Main Stage", "Desugar after Sema")
-        if (kind == IncreKind.NO_CHANGE || kind == IncreKind.EMPTY_PKG) {
-            recorder.close()
-            return true
+        try (recorder = ProfileRecorder("Main Stage", "Desugar after Sema")) {
+            if (kind == IncreKind.NO_CHANGE || kind == IncreKind.EMPTY_PKG) {
+                return true
+            }
+            let ret = super.PerformDesugarAfterSema()
+            return ret
         }
-        let ret = super.PerformDesugarAfterSema()
-        recorder.close()
-        return ret
     }
 
     public override func PerformGenericInstantiation(): Bool {
@@ -264,41 +257,39 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
     }
 
     public override func PerformCHIRCompilation(): Bool {
-        let recorder = ProfileRecorder("Main Stage", "CHIR")
-        if (kind == IncreKind.NO_CHANGE || kind == IncreKind.EMPTY_PKG) {
-            recorder.close()
-            return true
+        try (recorder = ProfileRecorder("Main Stage", "CHIR")) {
+            if (kind == IncreKind.NO_CHANGE || kind == IncreKind.EMPTY_PKG) {
+                return true
+            }
+            let ret = super.PerformCHIRCompilation()
+            for (ty in core.chirInfo.ccTys) { changedTypes.add(ty) }
+            if (kind == IncreKind.INCR) {
+                UpdateIncrRemovedDeclsForVirtualFuncDep(cacheMangles, rawIncrRemovedDecls,
+                    core.cachedInfo.virtualFuncDep, core.chirInfo.delVirtFuncWrapForIncr)
+                UpdateIncrRemovedDeclsForVarInitDep(cacheMangles, rawIncrRemovedDecls,
+                    core.cachedInfo.varInitDepMap)
+            }
+            return ret
         }
-        let ret = super.PerformCHIRCompilation()
-        for (ty in core.chirInfo.ccTys) { changedTypes.add(ty) }
-        if (kind == IncreKind.INCR) {
-            UpdateIncrRemovedDeclsForVirtualFuncDep(cacheMangles, rawIncrRemovedDecls,
-                core.cachedInfo.virtualFuncDep, core.chirInfo.delVirtFuncWrapForIncr)
-            UpdateIncrRemovedDeclsForVarInitDep(cacheMangles, rawIncrRemovedDecls,
-                core.cachedInfo.varInitDepMap)
-        }
-        recorder.close()
-        return ret
     }
 
     public override func PerformCodeGen(): Bool {
-        let recorder = ProfileRecorder("Main Stage", "CodeGen")
-        if (kind == IncreKind.NO_CHANGE) {
-            // C++ src/FrontendTool/IncrementalCompilerInstance.cpp:481-488 (7a1666e7).
-            LoadCachedCodegenResult()
-            for (srcPkg in core.GetSourcePackages()) {
-                invocation.globalOptions.UpdateCachedDirName(srcPkg.fullPackageName)
+        try (recorder = ProfileRecorder("Main Stage", "CodeGen")) {
+            if (kind == IncreKind.NO_CHANGE) {
+                // C++ src/FrontendTool/IncrementalCompilerInstance.cpp:481-488 (7a1666e7).
+                LoadCachedCodegenResult()
+                for (srcPkg in core.GetSourcePackages()) {
+                    invocation.globalOptions.UpdateCachedDirName(srcPkg.fullPackageName)
+                }
+                return true
             }
-            recorder.close()
-            return true
+            // C++ src/FrontendTool/IncrementalCompilerInstance.cpp:490-495 (7a1666e7).
+            let ret = CodegenAllPackages(kind == IncreKind.INCR, cachedMangleMap: cacheMangles)
+            if (ret && ShouldSaveCjoForOutputMode()) {
+                RegisterCjoOutputs(core.GetSourcePackages())
+            }
+            return ret
         }
-        // C++ src/FrontendTool/IncrementalCompilerInstance.cpp:490-495 (7a1666e7).
-        let ret = CodegenAllPackages(kind == IncreKind.INCR, cachedMangleMap: cacheMangles)
-        if (ret && ShouldSaveCjoForOutputMode()) {
-            RegisterCjoOutputs(core.GetSourcePackages())
-        }
-        recorder.close()
-        return ret
     }
 
     public override func PerformCjoSaving(): Bool {
@@ -322,23 +313,22 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
     }
 
     public override func PerformResultsSaving(): Bool {
-        let recorder = ProfileRecorder("Main Stage", "Save results")
-        if (kind == IncreKind.NO_CHANGE || kind == IncreKind.EMPTY_PKG) {
-            recorder.close()
-            return true
-        }
-        var ret = true
-        for (pkg in core.GetSourcePackages()) {
-            if (invocation.globalOptions.outputMode == OutputMode.CHIR) { ret = ret && SaveCjo(pkg) }
-            if (ret && !pkg.IsEmpty()) {
-                let cachedCjo = invocation.globalOptions.GenerateCachedPathName(
-                    pkg.fullPackageName, SERIALIZED_FILE_EXTENSION)
-                ret = ret && FileUtil.WriteBufferToASTFile(cachedCjo,
-                    core.importManager.getOrThrow().ExportASTSignature(pkg))
+        try (recorder = ProfileRecorder("Main Stage", "Save results")) {
+            if (kind == IncreKind.NO_CHANGE || kind == IncreKind.EMPTY_PKG) {
+                return true
             }
+            var ret = true
+            for (pkg in core.GetSourcePackages()) {
+                if (invocation.globalOptions.outputMode == OutputMode.CHIR) { ret = ret && SaveCjo(pkg) }
+                if (ret && !pkg.IsEmpty()) {
+                    let cachedCjo = invocation.globalOptions.GenerateCachedPathName(
+                        pkg.fullPackageName, SERIALIZED_FILE_EXTENSION)
+                    ret = ret && FileUtil.WriteBufferToASTFile(cachedCjo,
+                        core.importManager.getOrThrow().ExportASTSignature(pkg))
+                }
+            }
+            return ret
         }
-        recorder.close()
-        return ret
     }
 
     private func LoadCachedCodegenResult(): Unit {

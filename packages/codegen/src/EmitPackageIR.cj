@@ -191,6 +191,8 @@ public func GenPackageModules(chirData: CHIRData, options: GlobalOptions, enable
     cachedMangleMap!: CachedMangleMap = CachedMangleMap()): ArrayList<LLVMModuleHandle> {
     let cgPkgContext = CGPkgContext(chirData, options, enableIncrement, noHeapAllocChecker,
         noWriteBarrierRecChecker, cachedMangleMap)
+    var failed = false
+    try {
     let splitter = CHIRSplitter(cgPkgContext)
     let subPackages = splitter.SplitCHIRPackage()
     for (subPackage in subPackages) {
@@ -217,6 +219,16 @@ public func GenPackageModules(chirData: CHIRData, options: GlobalOptions, enable
     }
     options.symbolsNeedLocalizedPerPkg[cgPkgContext.GetCHIRPackage().GetName()] = localizedSymbolsForPkg
     return cgPkgContext.ReleaseLLVMModules()
+    } catch (e: Exception) {
+        failed = true
+        throw e
+    } finally {
+        try {
+            cgPkgContext.Clear()
+        } catch (e: Exception) {
+            if (!failed) { throw e }
+        }
+    }
 }
 
 private func SetSymbolLinkageType(cgMod: CGModule): Unit {
@@ -1650,8 +1662,16 @@ public func SavePackageModule(module: LLVMModuleHandle, bcFilePath: String): Boo
 }
 
 public func ClearPackageModules(packageModules: ArrayList<LLVMModuleHandle>): Unit {
+    var failure: Option<Exception> = None
     for (moduleHandle in packageModules) {
-        unsafe { LLVMDisposeModule(moduleHandle.raw) }
+        try {
+            // ReleaseLLVMModule transfers its context with the module. Calling
+            // the owning handle closes both and records disposal exactly once.
+            moduleHandle.close()
+        } catch (e: Exception) {
+            if (failure.isNone()) { failure = Some(e) }
+        }
     }
     packageModules.clear()
+    if (let Some(e) <- failure) { throw e }
 }

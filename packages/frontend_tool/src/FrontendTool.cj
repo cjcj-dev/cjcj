@@ -103,7 +103,9 @@ public func ExecuteFrontendWithResult(
     tempFolderPath!: Option<String> = None
 ): FrontendExecutionResult {
     // C++: src/FrontendTool/FrontendTool.cpp:160-213, stack DiagnosticEngine lifetime.
-    try (diag = DiagnosticEngine()) {
+    let diag = DiagnosticEngine()
+    var diagnosticScopeFailed = false
+    try {
     let invocation = CompilerInvocation()
     ConfigureInvocationPaths(invocation, exePath, environmentVars)
     if (!InitializeCompilerInvocation(invocation, args)) {
@@ -134,7 +136,11 @@ public func ExecuteFrontendWithResult(
     ConfigureFrontendDiagnostics(diag, globalOptions)
 
     let instance = CreateCompilerInstance(invocation, diag)
+    var failed = false
+    try {
     if (ExecuteCompile(instance)) {
+        // Join before publishing success/cache; an AST task failure is a compile failure.
+        instance.close()
         let incrementalNoChange = if (let Some(incr) <- (instance as IncrementalCompilerInstance)) {
             incr.kind == IncreKind.NO_CHANGE
         } else {
@@ -143,11 +149,27 @@ public func ExecuteFrontendWithResult(
         let driverOptions = DriverOptions()
         driverOptions.CopyFromOptions(instance.invocation.globalOptions, incrementalNoChange)
         let _ = instance.UpdateAndWriteCachedInfoToDisk()
-        // C++ ~CompilerInstance joins destroyFut before process continues (cpp:87-91).
-        instance.JoinDestroyASTResources()
         return FrontendExecutionResult(0, driverOptions: driverOptions)
     }
-    instance.JoinDestroyASTResources()
+    } catch (e: Exception) {
+        failed = true
+        throw e
+    } finally {
+        try {
+            instance.close()
+        } catch (e: Exception) {
+            if (!failed) { throw e }
+        }
+    }
+    } catch (e: Exception) {
+        diagnosticScopeFailed = true
+        throw e
+    } finally {
+        try {
+            diag.close()
+        } catch (e: Exception) {
+            if (!diagnosticScopeFailed) { throw e }
+        }
     }
     return FrontendExecutionResult(1)
 }
@@ -170,6 +192,7 @@ public func ExecuteFrontend(
 
 public func ExecuteFrontendByDriver(instance: DefaultCompilerInstance, driver: Driver): Bool {
     if (ExecuteCompile(instance)) {
+        instance.close()
         let incrementalNoChange = if (let Some(incr) <- (instance as IncrementalCompilerInstance)) {
             incr.kind == IncreKind.NO_CHANGE
         } else {

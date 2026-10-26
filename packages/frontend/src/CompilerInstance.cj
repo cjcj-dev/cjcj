@@ -1161,6 +1161,10 @@ public class CompilerInstance {
         // TypeAnalysis.h:66 / TypeAnalysis.cpp:62-79 keeps a nullable borrowed
         // builder pointer. Retire its managed owner with the CHIR data.
         TypeValue.SetCHIRBuilder(None)
+        if (let Some(data) <- chirData) {
+            data.SetCurrentCHIRPackage(None)
+            data.SetCurrentRealCHIRPackage(None)
+        }
         chirData = None
     }
 

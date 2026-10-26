@@ -6,7 +6,7 @@ import std.fs.removeIfExists
 import cjcj::utils.{TaskQueue, TaskResult}
 import std.unittest.*
 import std.unittest.testmacro.*
-import cjcj::codegen.{LLVMContextHandle, LLVMModuleHandle, LLVMParseBitcodeFile, SavePackageModule}
+import cjcj::codegen.{ClearPackageModules, LLVMContextHandle, LLVMModuleHandle, LLVMParseBitcodeFile, SavePackageModule}
 
 // Every normal CJPM/registered invocation prepares and owns its own fixture.
 // No runner-only environment variable or pre-existing directory is required.
@@ -36,6 +36,23 @@ private class BitcodeWriteTestDirectory <: Resource {
 
 @Test
 public class BitcodeWriteFailureTest {
+    @TestCase
+    public func TransferredModulesReleaseTheirContexts(): Unit {
+        try (leftContext = LLVMContextHandle.Create(), rightContext = LLVMContextHandle.Create(),
+            left = LLVMModuleHandle.Create("owned-left", leftContext),
+            right = LLVMModuleHandle.Create("owned-right", rightContext)) {
+            left.EnableContextDisposalOnClose()
+            right.EnableContextDisposalOnClose()
+            let modules = ArrayList<LLVMModuleHandle>([left, right])
+            ClearPackageModules(modules)
+            @Expect(modules.isEmpty(), true)
+            @Expect(left.isClosed(), true)
+            @Expect(right.isClosed(), true)
+            @Expect(leftContext.isClosed(), true)
+            @Expect(rightContext.isClosed(), true)
+        }
+    }
+
     @TestCase
     public func SingleNativeFailureIsReturned(): Unit {
         try (directory = BitcodeWriteTestDirectory(), context = LLVMContextHandle.Create(),

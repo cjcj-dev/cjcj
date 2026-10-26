@@ -1200,6 +1200,7 @@ public func EmitLLVMSimilarBytecode(instance: CompilerInstance, enableIncrement:
     }
     let fullPackageName = curPackage.getOrThrow().GetName()
     let llvmModules = GenPackageModules(instance, enableIncrement, cachedMangleMap)
+    var failed = false
     // This scope owns every generated module, including diagnostic, path and
     // native-writer exception exits. The recorder is closed during unwinding
     // before module disposal, so either cleanup is independent of the other.
@@ -1235,8 +1236,15 @@ public func EmitLLVMSimilarBytecode(instance: CompilerInstance, enableIncrement:
             }
             return true
         }
+    } catch (e: Exception) {
+        failed = true
+        throw e
     } finally {
-        ClearPackageModules(llvmModules)
+        try {
+            ClearPackageModules(llvmModules)
+        } catch (e: Exception) {
+            if (!failed) { throw e }
+        }
     }
 }
 
