@@ -161,7 +161,13 @@ if (process.env.TUPLE_DIFFERENTIAL === '1') test('tuple source-derived full tabl
     }
     results.push({...entry, arms});
     fs.writeFileSync(path.join(evidence, 'results.json'), JSON.stringify(results, null, 2));
-    assert.deepEqual(arms.new, arms.old, `branch ${entry.branch}:${entry.line} trigger ${entry.trigger}`);
+    if (input.fixture === 'missing-payload' && input.payload === 'llvm-tools.manifest') {
+      // The current platform selector reads this required input before copying
+      // payloads. The retired Linux-only publisher rejected it at cp instead.
+      assert.match(arms.old.stderr, /cp: cannot stat .*llvm-tools\.manifest/);
+      assert.match(arms.new.stderr, /ENOENT:.*open .*llvm-tools\.manifest/);
+      assert.deepEqual({...arms.new, stderr: ''}, {...arms.old, stderr: ''});
+    } else assert.deepEqual(arms.new, arms.old, `branch ${entry.branch}:${entry.line} trigger ${entry.trigger}`);
     assert.equal(arms.new.rc, input.expected, `expected branch ${entry.branch}:${entry.line}`);
     console.log(`ASSERT TABLE_ROW executed index=${index} branch=${entry.branch}:${entry.line} trigger=${entry.trigger} rc=${arms.new.rc}`);
   }
