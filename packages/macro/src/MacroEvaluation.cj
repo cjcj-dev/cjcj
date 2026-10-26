@@ -769,7 +769,6 @@ public class MacroEvaluation {
 
     public func InitGlobalVariable(): Unit {
         let runtimeInit = RuntimeInit.GetInstance()
-        let invokeReleaseHandle = ReleaseHandleFromC(runtimeInit.runtimeReleaseFunc)
         var idx: Int64 = 0
         while (idx < usedMacroPkgs.size) {
             let packageName = usedMacroPkgs[idx][0]
@@ -794,26 +793,39 @@ public class MacroEvaluation {
                     macroInvokeTable[currentId] = mInvoke
                     currentId
                 }
-                try (idCell = LibC.malloc<Int64>().asResource(),
-                    resetNotify = LibC.malloc<ResetNotify>().asResource()) {
-                    CJC_ASSERT(!idCell.value.isNull() && !resetNotify.value.isNull())
+                var task = CPointer<Unit>()
+                var completed = false
+                try {
+                    mInvoke.argument = unsafe { LibC.malloc<Int64>() }
+                    mInvoke.resetArgument = unsafe { LibC.malloc<ResetNotify>() }
+                    if (mInvoke.argument.isNull() || mInvoke.resetArgument.isNull()) {
+                        throw IllegalStateException("cannot allocate macro reset arguments")
+                    }
                     unsafe {
-                        idCell.value.write(id)
-                        resetNotify.value.write(ResetNotify(CPointer<Unit>(ResetVariableFinishNotify),
-                            CPointer<Unit>(idCell.value)))
+                        mInvoke.argument.write(id)
+                        mInvoke.resetArgument.write(ResetNotify(CPointer<Unit>(ResetVariableFinishNotify),
+                            CPointer<Unit>(mInvoke.argument)))
                     }
+                    task = runtimeInit.SubmitTask(CPointer<Unit>(initGlobalFunc),
+                        CPointer<Unit>(mInvoke.resetArgument))
+                    runtimeInit.CompleteTask(task)
+                    completed = true
                     synchronized(mInvoke.mtx) {
-                        let coroutineHandle = unsafe { InvokeNewTaskFromC(runtimeInit.runtimeMethodFunc)(
-                            CPointer<Unit>(initGlobalFunc), CPointer<Unit>(resetNotify.value)) }
-                        CJC_ASSERT(!coroutineHandle.isNull())
-                        while (!mInvoke.isDataReady) {
-                            mInvoke.cv.wait()
+                        if (let Some(e) <- mInvoke.failure) { throw e }
+                        if (!mInvoke.isDataReady) {
+                            throw IllegalStateException("macro reset task completed without its notification")
                         }
-                        unsafe { invokeReleaseHandle(coroutineHandle) }
                     }
-                }
-                synchronized(macroInvokeTableLock) {
-                    macroInvokeTable.remove(id)
+                } finally {
+                    if (task.isNull() || completed) {
+                        synchronized(macroInvokeTableLock) { macroInvokeTable.remove(id) }
+                        unsafe {
+                            LibC.free(mInvoke.resetArgument)
+                            LibC.free(mInvoke.argument)
+                        }
+                    }
+                    // A failed wait leaves the table entry and its native
+                    // arguments alive. CloseRuntime preserves that failure.
                 }
                 findGlobalFunc = true
                 usedMacroPkgs[idx] = (packageName, true)
@@ -860,31 +872,32 @@ public class MacroEvaluation {
             macroInvokeTable[currentId] = mInvoke
             currentId
         }
-        let handle = unsafe { LibC.malloc<Int64>() }
-        CJC_ASSERT(!handle.isNull())
-        unsafe { handle.write(id) }
-
-        synchronized(mInvoke.mtx) {
-            macCall.coroutineHandle = unsafe {
-                InvokeNewTaskFromC(runtimeInit.runtimeMethodFunc)(
-                    CPointer<Unit>(InvokeMacro), CPointer<Unit>(handle))
+        var completed = false
+        try {
+            mInvoke.argument = unsafe { LibC.malloc<Int64>() }
+            if (mInvoke.argument.isNull()) {
+                throw IllegalStateException("cannot allocate macro callback argument")
             }
-            CJC_ASSERT(!macCall.coroutineHandle.isNull())
-            while (!macCall.isDataReady) {
-                mInvoke.cv.wait()
+            unsafe { mInvoke.argument.write(id) }
+            macCall.coroutineHandle = runtimeInit.SubmitTask(CPointer<Unit>(InvokeMacro),
+                CPointer<Unit>(mInvoke.argument))
+            // The R future, not the H notification, is the completion barrier.
+            // In particular this wait must be outside the callback's H mutex.
+            runtimeInit.CompleteTask(macCall.coroutineHandle)
+            completed = true
+            macCall.coroutineHandle = CPointer<Unit>()
+            synchronized(mInvoke.mtx) {
+                if (let Some(e) <- mInvoke.failure) { throw e }
+                if (!macCall.isDataReady) {
+                    throw IllegalStateException("macro task completed without its result")
+                }
+            }
+        } finally {
+            if (macCall.coroutineHandle.isNull() || completed) {
+                synchronized(macroInvokeTableLock) { macroInvokeTable.remove(id) }
+                unsafe { LibC.free(mInvoke.argument) }
             }
         }
-        ReleaseThreadHandle(macCall)
-        synchronized(macroInvokeTableLock) {
-            macroInvokeTable.remove(id)
-        }
-        unsafe { LibC.free(handle) }
-    }
-
-    // Mirrors src/Macro/MacroEvaluationCJNative.cpp:180-185 ReleaseThreadHandle.
-    public func ReleaseThreadHandle(macCall: MacroCall): Unit {
-        let invokeReleaseHandle = ReleaseHandleFromC(RuntimeInit.GetInstance().runtimeReleaseFunc)
-        unsafe { invokeReleaseHandle(macCall.coroutineHandle) }
     }
 
     public func CheckAttrTokens(attrTokens: ArrayList<Token>, macCall: MacroCall): Bool {

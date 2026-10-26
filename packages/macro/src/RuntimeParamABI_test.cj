@@ -1,5 +1,6 @@
 package cjcj::macro_pkg
 
+import std.env.getVariable
 import std.unittest.*
 import std.unittest.testmacro.*
 
@@ -71,6 +72,67 @@ public class RuntimeParamABITest {
                 @Expect(CPointer<UIntNative>(base + 152).read(), 128)
                 @Expect(CPointer<UInt32>(base + 160).read(), 3)
             }
+        }
+    }
+}
+
+// This is the host control, not an independent-R lifecycle qualification.
+// Public SDK macro cases must separately exercise the paired target runtime.
+@C
+func RuntimeLifecycleHostCallback(arg: CPointer<Unit>): CPointer<Unit> {
+    unsafe { CPointer<Int64>(arg).write(42) }
+    return CPointer<Unit>()
+}
+
+@Test
+public class RuntimeTaskLifecycleTest {
+    @TestCase
+    public func UninitializedCloseRejectsNewTasks(): Unit {
+        let runtime = RuntimeInit()
+        runtime.CloseRuntime()
+        runtime.CloseRuntime()
+        var rejected = false
+        try {
+            let _ = runtime.SubmitTask(CPointer<Unit>(RuntimeLifecycleHostCallback), CPointer<Unit>())
+        } catch (e: IllegalStateException) {
+            rejected = true
+            @Expect(e.message, "macro task submitted to an unavailable runtime")
+        }
+        @Expect(rejected, true)
+    }
+
+    @TestCase
+    public func MissingFiniPropagatesFailure(): Unit {
+        var rejected = false
+        try {
+            FinishRuntime(RuntimeHandle())
+        } catch (e: IllegalStateException) {
+            rejected = true
+            @Expect(e.message, "macro runtime missing FiniCJRuntime")
+        }
+        @Expect(rejected, true)
+    }
+
+    @When[os == "Linux" && arch == "x86_64"]
+    @TestCase
+    public func BorrowedHostSurvivesCloseAndCompletesNullResult(): Unit {
+        let library = getVariable("CANGJIE_HOME").getOrThrow() +
+            "/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so"
+        // Closing the first borrower must not finalize H: a second borrower
+        // must still submit and complete an actual task in the same host.
+        for (_ in 0..2) {
+            let runtime = RuntimeInit()
+            @Assert(runtime.InitRuntime(library))
+            @Assert(!runtime.taskOnOpenedRuntime)
+            try (argument = LibC.malloc<Int64>().asResource()) {
+                @Assert(!argument.value.isNull())
+                unsafe { argument.value.write(0) }
+                let task = runtime.SubmitTask(CPointer<Unit>(RuntimeLifecycleHostCallback),
+                    CPointer<Unit>(argument.value))
+                runtime.CompleteTask(task)
+                @Expect(unsafe { argument.value.read() }, 42)
+            }
+            runtime.CloseRuntime()
         }
     }
 }

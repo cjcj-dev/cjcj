@@ -25,6 +25,10 @@ class MacroInvoke {
     let mtx: Mutex = Mutex()
     let cv: Condition
     var isDataReady: Bool = false
+    var failure: Option<Exception> = None
+    // Kept by macroInvokeTable until the corresponding R future is DONE.
+    var argument = CPointer<Int64>()
+    var resetArgument = CPointer<ResetNotify>()
 
     init(mc: MacroCall) {
         macCall = Some(mc)
@@ -77,13 +81,28 @@ func InvokeMacro(mi: CPointer<Unit>): CPointer<Unit> {
         macroInvokeTable.get(id).getOrThrow()
     }
     synchronized(mInvoke.mtx) {
-        let (ctxId, ctxHandle) = registerMacroCtx(mInvoke.macCall.getOrThrow())
         try {
-            let _ = unsafe { InvokeMacroFunc(CPointer<Unit>(ctxHandle)) }
+            let (ctxId, ctxHandle) = registerMacroCtx(mInvoke.macCall.getOrThrow())
+            var failed = false
+            try {
+                let _ = unsafe { InvokeMacroFunc(CPointer<Unit>(ctxHandle)) }
+            } catch (e: Exception) {
+                failed = true
+                throw e
+            } finally {
+                try {
+                    unregisterMacroCtx(ctxId, ctxHandle)
+                } catch (e: Exception) {
+                    if (!failed) { throw e }
+                }
+            }
+        } catch (e: Exception) {
+            // Do not unwind a host Cangjie exception across the R callback ABI.
+            // The submitting host rethrows this same object after R reports DONE.
+            mInvoke.failure = Some(e)
         } finally {
-            unregisterMacroCtx(ctxId, ctxHandle)
+            mInvoke.cv.notify()
         }
-        mInvoke.cv.notify()
     }
     return CPointer<Unit>()
 }
