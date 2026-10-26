@@ -467,8 +467,51 @@ private func hasDirSplit(str: String): Bool {
     return false
 }
 
+@When[os == "Windows"]
+private func isDrivePrefix(path: String, start!: Int64 = 0): Bool {
+    if (path.size < start + 2) { return false }
+    let letter = path[start]
+    return ((letter >= b'a' && letter <= b'z') || (letter >= b'A' && letter <= b'Z')) &&
+        path[start + 1] == b':'
+}
+
+@When[os == "Windows"]
+private func windowsVolumeEnd(path: String): Int64 {
+    if (isDrivePrefix(path)) { return 2 }
+    if (path.size < 2 || !isPathSlashByte(path[0]) || !isPathSlashByte(path[1])) { return 0 }
+    var start: Int64 = 2
+    if (path.size >= 4 && (path[2] == b'?' || path[2] == b'.') && isPathSlashByte(path[3])) {
+        if (isDrivePrefix(path, start: 4)) { return 6 }
+        if (path.size >= 8 && path[4..7].toAsciiUpper() == "UNC" && isPathSlashByte(path[7])) {
+            start = 8
+        } else {
+            // A device/volume name is one component after the namespace prefix.
+            var end: Int64 = 4
+            while (end < path.size && !isPathSlashByte(path[end])) { end++ }
+            return end
+        }
+    }
+    // A UNC volume consists of both server and share, not just the server.
+    var end = start
+    while (end < path.size && !isPathSlashByte(path[end])) { end++ }
+    if (end < path.size) { end++ }
+    while (end < path.size && !isPathSlashByte(path[end])) { end++ }
+    return end
+}
+
+@When[os == "Windows"]
+private func windowsRootLength(path: String): Int64 {
+    let volume = windowsVolumeEnd(path)
+    if (volume < path.size && isPathSlashByte(path[volume])) { return volume + 1 }
+    return volume
+}
+
 private func appendPath(p1: String, p2: String): String {
-    if (isLastCharDirSplit(p1)) {
+    @When[os == "Windows"]
+    let driveRelative = p1.size == 2 && isDrivePrefix(p1)
+    @When[os != "Windows"]
+    let driveRelative = false
+    if (isLastCharDirSplit(p1) || driveRelative) {
         return p1 + p2
     }
     return p1 + preferredDirSeparator(false) + p2
@@ -630,9 +673,14 @@ public class FileUtil {
 
     public static func GetFileName(filePath: String): String {
         let path = Normalize(filePath)
+        @When[os == "Windows"]
+        if (path.size <= windowsRootLength(path)) { return "" }
         if (let Some(pos) <- lastDirSplit(path)) {
             return path[pos + 1..]
         }
+        @When[os == "Windows"]
+        return path[windowsVolumeEnd(path)..]
+        @When[os != "Windows"]
         return path
     }
 
@@ -651,6 +699,19 @@ public class FileUtil {
         return GetFileName(path)
     }
 
+    @When[os == "Windows"]
+    public static func GetDirPath(filePath: String): String {
+        let path = Normalize(filePath)
+        let rootLength = windowsRootLength(path)
+        if (let Some(pos) <- lastDirSplit(path)) {
+            if (pos < rootLength) { return path[0..rootLength] }
+            return path[0..pos]
+        }
+        let volume = windowsVolumeEnd(path)
+        return if (volume > 0) { path[0..volume] } else { "." }
+    }
+
+    @When[os != "Windows"]
     public static func GetDirPath(filePath: String): String {
         if (let Some(pos) <- lastDirSplit(filePath)) {
             return Normalize(filePath[0..pos])
@@ -1161,7 +1222,11 @@ public class FileUtil {
 
     public static func JoinPath(base: String, append: String): String {
         var joinedPath = base
-        if (!base.isEmpty() && !isPathSlashByte(base[base.size - 1])) {
+        @When[os == "Windows"]
+        let driveRelative = base.size == 2 && isDrivePrefix(base)
+        @When[os != "Windows"]
+        let driveRelative = false
+        if (!base.isEmpty() && !isPathSlashByte(base[base.size - 1]) && !driveRelative) {
             joinedPath += preferredDirSeparator(false)
         }
         joinedPath += append
