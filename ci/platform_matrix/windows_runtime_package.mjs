@@ -7,8 +7,10 @@ import {runConsumers} from './windows_runtime_consumers.mjs';
 const root=path.resolve(process.env.PLATFORM_CI_ROOT||'.platform-ci');
 const install=path.join(root,'runtime-install'),restored=path.join(root,'runtime-unpacked'),archive=path.join(root,'runtime-install.tar');
 await fs.mkdir(restored); // never adopt an old unpacked installation
-for(const [label,args]of [['package',['tar','-cf',archive,'-C',install,'.']],['unpack',['tar','-xf',archive,'-C',restored]]]) {
- const rc=await capture(label,args);if(rc)process.exit(rc);
+// A drive-qualified archive is interpreted as host:file by GNU tar. Keep
+// archive and -C operands relative to the same explicit working directory.
+for(const [label,args]of [['package',['tar','-cf','./runtime-install.tar','-C','./runtime-install','.']],['unpack',['tar','-xf','./runtime-install.tar','-C','./runtime-unpacked']]]) {
+ const rc=await capture(label,args,{cwd:root});if(rc)process.exit(rc);
 }
 async function definition(dir) {
  for(const e of await fs.readdir(dir,{withFileTypes:true})) {

@@ -11,9 +11,9 @@ const zxTool=verifiedTool();
 const evidence=process.env.WINDOWS_CONSUMERS_EVIDENCE;
 if(!evidence)throw Error('WINDOWS_CONSUMERS_EVIDENCE required');
 fs.mkdirSync(evidence,{recursive:true});
-function fixture() {
+function fixture(outputName='output') {
  const root=fs.mkdtempSync(path.join(evidence,"consumer's (literal) "));
- const output=path.join(root,'output'),source=path.join(root,'runtime-source'),runtime=path.join(source,'runtime');
+ const output=path.join(root,outputName),source=path.join(root,'runtime-source'),runtime=path.join(source,'runtime');
  const install=path.join(output,'runtime-install'),lib=path.join(install,'windows_release_x86_64/runtime/lib/windows_x86_64_cjnative');
  const build=path.join(runtime,'CMakebuild'),reply=path.join(build,'.cmake/api/v1/reply');
  const put=(f,s)=>{fs.mkdirSync(path.dirname(f),{recursive:true});fs.writeFileSync(f,s);};
@@ -60,8 +60,15 @@ globalThis.$=()=>async(strings,...values)=>{
  return {root,output,runtime,build,install,lib,compiler,env,run,events:()=>fs.existsSync(calls)?fs.readFileSync(calls,'utf8').trim().split('\n').map(JSON.parse):[]};
 }
 
-for(const packaged of [false,true])test(packaged?'same-install package selects unpacked DLL and imports':'installed consumers preserve compiler inputs and IAT checks',()=>{
- const f=fixture();const r=f.run(packaged?'windows_runtime_package.mjs':'windows_runtime_consumers.mjs');
+for(const [packaged,outputName] of [[false,'output'],[true,'output'],[true,'D: archive root']])test(packaged?'same-install package selects unpacked DLL and imports: '+outputName:'installed consumers preserve compiler inputs and IAT checks',()=>{
+ const f=fixture(outputName);const r=f.run(packaged?'windows_runtime_package.mjs':'windows_runtime_consumers.mjs');
+ if(outputName.includes(':')) {
+  const archiveDir=fs.readdirSync(f.env.WINDOWS_RUNTIME_EVIDENCE).find(x=>x.startsWith('package-'));
+  assert.ok(archiveDir,'the real tar command must have been started');
+  const command=JSON.parse(fs.readFileSync(path.join(f.env.WINDOWS_RUNTIME_EVIDENCE,archiveDir,'command.json')));
+  console.log('PACKAGE_TAR_LOCAL_TARGET_REACHED');
+  assert.equal(command.rc,0,'real tar must create the local archive in a colon-containing root');
+ }
  assert.equal(r.status,0,r.stderr);
  const selected=packaged?path.join(f.output,'runtime-unpacked'):f.install;
  const events=f.events(),runs=events.filter(e=>e.kind==='run'),checks=events.filter(e=>e.kind==='imports');
@@ -96,6 +103,11 @@ for(const packaged of [false,true])test(packaged?'same-install package selects u
  const captures=fs.readdirSync(f.env.WINDOWS_RUNTIME_EVIDENCE).filter(x=>x.startsWith('consumer-')).map(x=>JSON.parse(fs.readFileSync(path.join(f.env.WINDOWS_RUNTIME_EVIDENCE,x,'command.json'))));
  assert.equal(captures.length,13);assert.ok(captures.every(c=>c.rc===0&&c.signal===null));
  if(packaged){
+  const archiveCommands=fs.readdirSync(f.env.WINDOWS_RUNTIME_EVIDENCE).filter(x=>/^(package|unpack)-/.test(x)).map(x=>JSON.parse(fs.readFileSync(path.join(f.env.WINDOWS_RUNTIME_EVIDENCE,x,'command.json'))));
+  console.log('PACKAGE_LOCAL_ARCHIVE_TARGET_REACHED');
+  assert.equal(archiveCommands.length,2);assert.ok(archiveCommands.every(c=>c.rc===0&&c.cwd===f.output));
+  assert.ok(archiveCommands.every(c=>c.argv[2]==='./runtime-install.tar'),'tar must receive a local archive operand');
+  for(const name of fs.readdirSync(f.lib))assert.deepEqual(fs.readFileSync(path.join(selected,path.relative(f.install,f.lib),name)),fs.readFileSync(path.join(f.lib,name)),'same-install member bytes must survive tar/unpack');
   assert.equal(events.filter(e=>e.kind==='verifier').length,1);assert.ok(fs.existsSync(path.join(f.output,'runtime-install.tar')));
   const summary=JSON.parse(fs.readFileSync(path.join(f.output,'unpacked-consumer.json')));
   assert.equal(summary.verifier.rc,0);assert.equal(summary.native.rc,0);assert.equal(summary.rc,0);
