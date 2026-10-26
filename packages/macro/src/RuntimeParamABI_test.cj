@@ -1,7 +1,6 @@
 package cjcj::macro_pkg
 
 import std.unittest.*
-import std.unittest.TestPackage
 import std.unittest.testmacro.*
 
 // The native side is fixed R ee7cd9f5/runtime/src/Cangjie.h, not another
