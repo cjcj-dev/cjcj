@@ -160,7 +160,7 @@ func LifecycleMalformedCommon(_: CPointer<UInt8>, _: Int64, _: CPointer<Unit>): 
 @C
 func LifecycleMalformedAttr(_: CPointer<UInt8>, _: Int64, _: CPointer<UInt8>, _: Int64,
     context: CPointer<Unit>): CPointer<UInt8> {
-    return LifecycleMalformedCommon(CPointer<UInt8>(), 0, context)
+    return unsafe { LifecycleMalformedCommon(CPointer<UInt8>(), 0, context) }
 }
 
 @C
