@@ -1,7 +1,7 @@
 #!/usr/bin/env zx
 
 import crypto from 'node:crypto';
-import {readSourcePins} from '../../native-llvm-inputs.mjs';
+import {nativeLlvmInputs} from '../../native-llvm-inputs.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import zlib from 'node:zlib';
@@ -40,10 +40,10 @@ const manifest = Object.fromEntries(parseLlvmToolsManifest(
   await fs.readFile(manifestFile, 'utf8'),
   {label: manifestFile, schema: 'tuple'},
 ).values);
-const pins = readSourcePins(root).llvm;
+const pins = nativeLlvmInputs();
 for (const [key, expected] of [
   ['PLATFORM', spec.llvmPlatform],
-  ['LLVM_SHA', pins.LLVM_SHA],
+  ['LLVM_SHA', pins.CJCJ_NATIVE_LLVM_REF],
   ['CANGJIE_COMPILER_SHA', pins.CANGJIE_COMPILER_SHA],
   ['FLATBUFFERS_SHA', pins.FLATBUFFERS_SHA],
 ]) {

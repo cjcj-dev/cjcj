@@ -1,5 +1,5 @@
 #!/usr/bin/env zx
-import {readSourcePins} from './native-llvm-inputs.mjs';
+import {nativeLlvmInputs} from './native-llvm-inputs.mjs';
 // Install the Cangjie bootstrap SDK and export the build environment.
 
 import {targetForHost} from '../build/lib/targets.mjs';
@@ -208,8 +208,8 @@ if (llcPlatform && fixedLlcGz) {
     const parsedSchema = manifest.schema;
     manifest = manifest.values;
     llvmSourceSha = manifest.get('LLVM_SHA') || '';
-    const selectedPins = readSourcePins(repoRoot).llvm;
-    const expectedFields = [['LLVM_SHA', selectedPins.LLVM_SHA || '']];
+    const selectedPins = nativeLlvmInputs();
+    const expectedFields = [['LLVM_SHA', selectedPins.CJCJ_NATIVE_LLVM_REF || '']];
     expectedFields.push(
       ['PLATFORM', llcPlatform],
       ['CANGJIE_COMPILER_SHA', selectedPins.CANGJIE_COMPILER_SHA || ''],
