@@ -68,7 +68,10 @@ func ResetVariableFinishNotify(mi: CPointer<Unit>): Unit {
 @C
 func InvokeMacroFunc(mc: CPointer<Unit>): CPointer<Unit> {
     let macCall = lookupMacroCtx(mc)
-    let _ = evaluateNativeMacro(macCall)
+    // false has already marked FAIL/ILLEGAL; it must never become SUCCESS
+    // merely because the task completed and published its readiness.
+    let succeeded = evaluateNativeMacro(macCall)
+    if (!succeeded) { macCall.status = MacroEvalStatus.FAIL }
     macCall.isDataReady = true
     return CPointer<Unit>()
 }
@@ -100,6 +103,7 @@ func InvokeMacro(mi: CPointer<Unit>): CPointer<Unit> {
             // Do not unwind a host Cangjie exception across the R callback ABI.
             // The submitting host rethrows this same object after R reports DONE.
             mInvoke.failure = Some(e)
+            mInvoke.macCall.getOrThrow().status = MacroEvalStatus.FAIL
         } finally {
             mInvoke.cv.notify()
         }

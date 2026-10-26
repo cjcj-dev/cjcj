@@ -113,7 +113,11 @@ public class RuntimeTaskLifecycleTest {
         @Expect(rejected, true)
     }
 
-    @When[os == "Linux" && arch == "x86_64"]
+}
+
+@When[os == "Linux" && arch == "x86_64"]
+@Test
+public class RuntimeTaskLifecycleHostTest {
     @TestCase
     public func BorrowedHostSurvivesCloseAndCompletesNullResult(): Unit {
         let library = getVariable("CANGJIE_HOME").getOrThrow() +
@@ -134,5 +138,83 @@ public class RuntimeTaskLifecycleTest {
             }
             runtime.CloseRuntime()
         }
+    }
+}
+
+// Invalid UTF-8 in one otherwise well-framed native token makes the actual
+// decoder throw in H, without throwing from a foreign/@C test function.
+@C
+func LifecycleMalformedCommon(_: CPointer<UInt8>, _: Int64, _: CPointer<Unit>): CPointer<UInt8> {
+    let buffer = LibC.malloc<UInt8>(count: 11)
+    if (!buffer.isNull()) {
+        unsafe {
+            for (i in 0..11) { buffer.write(i, 0u8) }
+            buffer.write(0, 1u8)  // token count
+            buffer.write(6, 1u8)  // UTF-8 byte length
+            buffer.write(10, 0xffu8)
+        }
+    }
+    return buffer
+}
+
+@C
+func LifecycleMalformedAttr(_: CPointer<UInt8>, _: Int64, _: CPointer<UInt8>, _: Int64,
+    context: CPointer<Unit>): CPointer<UInt8> {
+    return LifecycleMalformedCommon(CPointer<UInt8>(), 0, context)
+}
+
+@C
+func LifecycleEmptyCommon(_: CPointer<UInt8>, _: Int64, _: CPointer<Unit>): CPointer<UInt8> {
+    return CPointer<UInt8>()
+}
+
+@Test
+public class RuntimeTaskLifecycleBodyTest {
+    @TestCase
+    public func CommonAndAttrPreserveDecoderException(): Unit {
+        var expectedMessage = ""
+        try {
+            let _ = String.fromUtf8([0xffu8])
+        } catch (e: IllegalArgumentException) {
+            expectedMessage = e.message
+        }
+        @Assert(!expectedMessage.isEmpty())
+        for (attribute in [false, true]) {
+            let expression = MacroExpandExpr()
+            expression.invocation.hasAttr = attribute
+            let call = MacroCall(expression)
+            call.invokeFunc = if (attribute) { CPointer<Unit>(LifecycleMalformedAttr) }
+                else { CPointer<Unit>(LifecycleMalformedCommon) }
+            var rejected = false
+            try {
+                let _ = evaluateNativeMacro(call)
+            } catch (e: IllegalArgumentException) {
+                rejected = true
+                @Expect(e.message, expectedMessage)
+            }
+            @Expect(rejected, true)
+        }
+    }
+
+    @TestCase
+    public func MissingDefinitionCannotBecomeSuccessfulReadyResult(): Unit {
+        let expression = MacroExpandExpr()
+        let call = MacroCall(expression)
+        @Expect(evaluateNativeMacro(call), false)
+        @Expect(call.status, MacroEvalStatus.FAIL)
+        @Expect(call.isDataReady, true)
+        @Assert(expression.invocation.newTokens.size == 1)
+        @Expect(expression.invocation.newTokens[0].kind, TokenKind.ILLEGAL)
+    }
+
+    @TestCase
+    public func EmptyNativeTokenResultRemainsValid(): Unit {
+        let expression = MacroExpandExpr()
+        let call = MacroCall(expression)
+        call.invokeFunc = CPointer<Unit>(LifecycleEmptyCommon)
+        @Expect(evaluateNativeMacro(call), true)
+        @Expect(call.isDataReady, true)
+        @Expect(expression.invocation.newTokens.isEmpty(), true)
+        @Expect(call.status == MacroEvalStatus.FAIL, false)
     }
 }

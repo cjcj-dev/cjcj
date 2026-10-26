@@ -556,86 +556,95 @@ private func writeNativeBytes(ptr: CPointer<UInt8>, bytes: ArrayList<UInt8>): Un
 
 private func installNativeMacroResult(macCall: MacroCall, resultPtr: CPointer<UInt8>): Bool {
     let invocation = macCall.RequireInvocation()
-    let tokens = TokenSerialization.GetTokensFromNativeBuffer(resultPtr)
-    FreeNativeBuffer(resultPtr)
-    invocation.newTokens.clear()
-    for (token in tokens) {
-        invocation.newTokens.add(token)
+    // A null pointer is the native ABI's valid empty-token result. Always
+    // release a nonnull result even if decoding/installation throws.
+    try {
+        let tokens = TokenSerialization.GetTokensFromNativeBuffer(resultPtr)
+        invocation.newTokens.clear()
+        for (token in tokens) { invocation.newTokens.add(token) }
+        macCall.isDataReady = true
+        return true
+    } finally {
+        FreeNativeBuffer(resultPtr)
     }
-    macCall.isDataReady = true
-    return true
 }
 
 private func invokeCommonNativeMacro(macCall: MacroCall, inputBytes: ArrayList<UInt8>): Bool {
-    var result = false
     try (inputPtr = LibC.malloc<UInt8>(count: nativeBufferSize(inputBytes)).asResource()) {
-        if (inputPtr.value.isNull()) {
-            result = false
-        } else {
-            writeNativeBytes(inputPtr.value, inputBytes)
-            let invokeFunc = CommonMacroFunc(macCall.invokeFunc)
-            let (ctxId, ctxHandle) = registerMacroCtx(macCall)
+        if (inputPtr.value.isNull()) { return false }
+        writeNativeBytes(inputPtr.value, inputBytes)
+        let invokeFunc = CommonMacroFunc(macCall.invokeFunc)
+        let (ctxId, ctxHandle) = registerMacroCtx(macCall)
+        var failed = false
+        try {
+            let resultPtr = unsafe { invokeFunc(inputPtr.value, inputBytes.size, CPointer<Unit>(ctxHandle)) }
+            return installNativeMacroResult(macCall, resultPtr)
+        } catch (e: Exception) {
+            failed = true
+            throw e
+        } finally {
             try {
-                let resultPtr = unsafe {
-                    invokeFunc(inputPtr.value, inputBytes.size, CPointer<Unit>(ctxHandle))
-                }
-                result = installNativeMacroResult(macCall, resultPtr)
-            } finally {
                 unregisterMacroCtx(ctxId, ctxHandle)
+            } catch (e: Exception) {
+                if (!failed) { throw e }
             }
         }
-    } catch (e: Exception) {
-        result = false
     }
-    return result
 }
 
 private func invokeAttrNativeMacro(macCall: MacroCall, attrBytes: ArrayList<UInt8>, inputBytes: ArrayList<UInt8>): Bool {
-    var result = false
     try (attrPtr = LibC.malloc<UInt8>(count: nativeBufferSize(attrBytes)).asResource()) {
-        if (attrPtr.value.isNull()) {
-            result = false
-        } else {
-            writeNativeBytes(attrPtr.value, attrBytes)
-            try (inputPtr = LibC.malloc<UInt8>(count: nativeBufferSize(inputBytes)).asResource()) {
-                if (inputPtr.value.isNull()) {
-                    result = false
-                } else {
-                    writeNativeBytes(inputPtr.value, inputBytes)
-                    let invokeFunc = AttrMacroFunc(macCall.invokeFunc)
-                    let (ctxId, ctxHandle) = registerMacroCtx(macCall)
-                    try {
-                        let resultPtr = unsafe {
-                            invokeFunc(attrPtr.value, attrBytes.size, inputPtr.value, inputBytes.size,
-                                CPointer<Unit>(ctxHandle))
-                        }
-                        result = installNativeMacroResult(macCall, resultPtr)
-                    } finally {
-                        unregisterMacroCtx(ctxId, ctxHandle)
-                    }
+        if (attrPtr.value.isNull()) { return false }
+        writeNativeBytes(attrPtr.value, attrBytes)
+        try (inputPtr = LibC.malloc<UInt8>(count: nativeBufferSize(inputBytes)).asResource()) {
+            if (inputPtr.value.isNull()) { return false }
+            writeNativeBytes(inputPtr.value, inputBytes)
+            let invokeFunc = AttrMacroFunc(macCall.invokeFunc)
+            let (ctxId, ctxHandle) = registerMacroCtx(macCall)
+            var failed = false
+            try {
+                let resultPtr = unsafe {
+                    invokeFunc(attrPtr.value, attrBytes.size, inputPtr.value, inputBytes.size,
+                        CPointer<Unit>(ctxHandle))
+                }
+                return installNativeMacroResult(macCall, resultPtr)
+            } catch (e: Exception) {
+                failed = true
+                throw e
+            } finally {
+                try {
+                    unregisterMacroCtx(ctxId, ctxHandle)
+                } catch (e: Exception) {
+                    if (!failed) { throw e }
                 }
             }
         }
-    } catch (e: Exception) {
-        result = false
     }
-    return result
+}
+
+private func markNativeMacroFailed(macCall: MacroCall): Bool {
+    macCall.status = MacroEvalStatus.FAIL
+    let invocation = macCall.RequireInvocation()
+    invocation.newTokens.clear()
+    invocation.newTokens.add(Token(TokenKind.ILLEGAL, ""))
+    macCall.isDataReady = true
+    return false
 }
 
 func evaluateNativeMacro(macCall: MacroCall): Bool {
     if (macCall.invokeFunc.isNull() && !macCall.FindMacroDefMethod()) {
-        return false
+        return markNativeMacroFailed(macCall)
     }
-    if (macCall.invokeFunc.isNull()) {
-        return false
-    }
+    if (macCall.invokeFunc.isNull()) { return markNativeMacroFailed(macCall) }
     let invocation = macCall.RequireInvocation()
     let inputBytes = TokenSerialization.GetTokensBytes(invocation.args)
-    if (invocation.hasAttr) {
+    let succeeded = if (invocation.hasAttr) {
         let attrBytes = TokenSerialization.GetTokensBytes(invocation.attrs)
-        return invokeAttrNativeMacro(macCall, attrBytes, inputBytes)
+        invokeAttrNativeMacro(macCall, attrBytes, inputBytes)
+    } else {
+        invokeCommonNativeMacro(macCall, inputBytes)
     }
-    return invokeCommonNativeMacro(macCall, inputBytes)
+    return if (succeeded) { true } else { markNativeMacroFailed(macCall) }
 }
 
 private func refreshNewTokensPosition(originPos: ArrayList<Position>, tokensToParse: ArrayList<Token>): Unit {
