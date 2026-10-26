@@ -1,5 +1,114 @@
 import test from'node:test';import assert from'node:assert/strict';import fs from'node:fs/promises';import path from'node:path';import {spawnSync}from'node:child_process';import {installEntries,assertLauncherFormat}from'./sdk-install-entries.mjs';import {fileDigest}from'./sdk-flow.mjs';
 const parent=process.env.RELEASE_EVIDENCE_TEST_ROOT;if(!parent)throw new Error('RELEASE_EVIDENCE_TEST_ROOT required');await fs.mkdir(parent,{recursive:true});
+test('public compiler argv0 selects target resources while retained execution loads the host',async()=>{
+ const work=await fs.realpath(await fs.mkdtemp(path.join(parent,'compiler argv0-')));
+ let sdk=path.join(work,'SDK with spaces');
+ const windows=process.platform==='win32',darwin=process.platform==='darwin',exe=windows?'.exe':'';
+ const platform=(windows?'windows':darwin?'darwin':'linux')+'_'+(process.arch==='arm64'?'aarch64':'x86_64');
+ const loader=windows?'PATH':darwin?'DYLD_LIBRARY_PATH':'LD_LIBRARY_PATH';
+ const run=(argv,opts={})=>spawnSync(argv[0],argv.slice(1),{encoding:'utf8',timeout:60000,...opts});
+ const ok=(argv,opts)=>{const p=run(argv,opts);assert.equal(p.status,0,p.stdout+p.stderr);return p;};
+ const source=path.join(work,'source');await fs.mkdir(source);
+ await fs.mkdir(path.join(sdk,'runtime'),{recursive:true});
+ await fs.writeFile(path.join(sdk,'runtime','selected-runtime'),'target-runtime');
+ await fs.writeFile(path.join(source,'value.cpp'),'extern "C"\n#ifdef _WIN32\n__declspec(dllexport)\n#endif\nint host_value(){return VALUE;}\n');
+ await fs.writeFile(path.join(source,'main.cpp'),String.raw`
+#include <filesystem>
+#include <fstream>
+#include <iostream>
+#include <cstdlib>
+#include <vector>
+#ifdef _WIN32
+#include <windows.h>
+extern "C" __declspec(dllimport) int host_value();
+#else
+extern "C" int host_value();
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#endif
+#endif
+namespace fs=std::filesystem;
+int main(int argc,char** argv){
+ fs::path actual;
+#ifdef _WIN32
+ std::vector<wchar_t> b(32768);auto n=GetModuleFileNameW(nullptr,b.data(),static_cast<DWORD>(b.size()));
+ if(!n||n==b.size())return 48;actual=fs::canonical(fs::path(std::wstring(b.data(),n)));
+#elif defined(__APPLE__)
+ uint32_t size=0;_NSGetExecutablePath(nullptr,&size);std::vector<char>b(size);
+ if(_NSGetExecutablePath(b.data(),&size))return 48;actual=fs::canonical(b.data());
+#else
+ actual=fs::canonical("/proc/self/exe");
+#endif
+ auto resources=fs::path(argv[0]).parent_path().parent_path()/"runtime"/"selected-runtime";
+ std::ifstream file(resources);std::string selected;std::getline(file,selected);
+ std::cout<<argv[0]<<'\n'<<host_value()<<'\n'<<actual.string()<<'\n'<<selected<<'\n';
+ for(int i=1;i<argc;++i)std::cout<<argv[i]<<'\n';
+ if(selected!="target-runtime"){std::cerr<<"COMPILER_RELATIVE_RESOURCE_MISSING\n";return 49;}
+ return 0;
+}
+`);
+ await fs.writeFile(path.join(source,'CMakeLists.txt'),`cmake_minimum_required(VERSION 3.16)
+project(public_compiler_entry LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 17)
+foreach(role host target)
+ add_library(\${role}_probe SHARED value.cpp)
+ set_target_properties(\${role}_probe PROPERTIES OUTPUT_NAME native_probe)
+ if(role STREQUAL "host")
+  set(dir "\${SDK}/.compiler-exec/runtime")
+  target_compile_definitions(host_probe PRIVATE VALUE=42)
+ else()
+  set(dir "\${SDK}/runtime")
+  target_compile_definitions(target_probe PRIVATE VALUE=41)
+ endif()
+ set_target_properties(\${role}_probe PROPERTIES LIBRARY_OUTPUT_DIRECTORY "\${dir}" RUNTIME_OUTPUT_DIRECTORY "\${dir}" ARCHIVE_OUTPUT_DIRECTORY "\${dir}")
+endforeach()
+add_executable(compiler main.cpp)
+target_link_libraries(compiler PRIVATE host_probe)
+set_target_properties(compiler PROPERTIES RUNTIME_OUTPUT_DIRECTORY "\${SDK}/bin")
+`);
+ ok(['cmake','-G','Ninja','-S',source,'-B',path.join(work,'payload-build'),'-DCMAKE_BUILD_TYPE=Release','-DSDK='+sdk]);
+ ok(['cmake','--build',path.join(work,'payload-build'),'--parallel','2']);
+ const payload=path.join(sdk,'bin','compiler'+exe),original=await fileDigest(payload);
+ for(const name of ['cjc','cjc-frontend'])await fs.copyFile(payload,path.join(sdk,'bin',name+exe));
+ const records=[];
+ await installEntries({root:sdk,build:path.join(work,'entry-build'),platform,records,
+  groups:[{directory:'bin',retain:'libexec/compiler',names:['cjc'+exe,'cjc-frontend'+exe],libraries:['.compiler-exec/runtime']}]});
+ await fs.writeFile(path.join(work,'install-commands.json'),JSON.stringify(records,null,2));
+ const argumentsToKeep=['space value','quote"value','back\\slash'];
+ const results=[];
+ const env=()=>({...process.env,CANGJIE_HOME:path.join(work,'wrong SDK'),[loader]:path.join(sdk,'runtime'),
+  PATH:path.join(sdk,'bin')+path.delimiter+(process.env.PATH||'')});
+ async function check(name,form,retained=name){
+  const basename=name+exe,publicFile=path.join(sdk,'bin',basename);
+  const invocation=form==='PATH'?basename:form==='relative'?'.'+path.sep+path.join('bin',basename):publicFile;
+  const r=run([invocation,...argumentsToKeep],{cwd:sdk,env:env()});
+  console.log('COMPILER_PUBLIC_ARGV0_TARGET_REACHED',name,form,r.status,r.stdout.trim());
+  results.push({name,form,argv:[invocation,...argumentsToKeep],cwd:sdk,rc:r.status,signal:r.signal,stdout:r.stdout,stderr:r.stderr});
+  await fs.writeFile(path.join(work,'consumer-results.json'),JSON.stringify(results,null,2));
+  const lines=r.stdout.trimEnd().split(/\r?\n/);
+  assert.equal(lines[0],publicFile,'PUBLIC_COMPILER_ARGV0');
+  assert.equal(r.status,0,r.stderr);
+  assert.equal(lines[1],'42','HOST_EXECUTION_LIBRARY');
+  assert.equal(lines[2],await fs.realpath(path.join(sdk,'libexec/compiler',retained+exe)),'RETAINED_EXECUTABLE');
+  assert.equal(lines[3],'target-runtime','COMPILER_RELATIVE_TARGET_RUNTIME');
+  assert.deepEqual(lines.slice(4),argumentsToKeep,'FORWARDED_ARGUMENTS');
+  assert.equal(await fileDigest(path.join(sdk,'libexec/compiler',retained+exe)),original);
+ }
+ for(const name of ['cjc','cjc-frontend'])for(const form of ['absolute','relative','PATH'])await check(name,form);
+ if(!windows){await fs.symlink('cjc',path.join(sdk,'bin','cjc-alias'));await check('cjc-alias','PATH','cjc');}
+ // Missing compiler-relative resources must still reject even with valid HOME.
+ const runtime=path.join(sdk,'runtime');await fs.rename(runtime,runtime+'.retained');
+ try{
+  const r=run([path.join(sdk,'bin','cjc'+exe)],{cwd:work,env:{...env(),CANGJIE_HOME:sdk}});
+  results.push({name:'missing-relative-runtime',rc:r.status,signal:r.signal,stdout:r.stdout,stderr:r.stderr});
+  await fs.writeFile(path.join(work,'consumer-results.json'),JSON.stringify(results,null,2));
+  console.log('COMPILER_RELATIVE_MISSING_TARGET_REACHED',r.status,r.stderr.trim());
+  assert.equal(r.status,49,r.stderr);assert.match(r.stderr,/COMPILER_RELATIVE_RESOURCE_MISSING/);
+ }finally{await fs.rename(runtime+'.retained',runtime);}
+ await check('cjc','PATH');
+ const moved=path.join(work,'relocated SDK');await fs.rename(sdk,moved);sdk=await fs.realpath(moved);
+ await check('cjc-frontend','PATH');
+});
 test('native public entries retain actual bytes and separate host and target library loads',async()=>{
  const root=await fs.mkdtemp(path.join(parent,'native-entries-')),sdk=path.join(root,'install');
  const run=(file,args,opts={})=>spawnSync(file,args,{encoding:'utf8',...opts});
