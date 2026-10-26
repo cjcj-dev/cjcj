@@ -270,7 +270,7 @@ public class MTableInterfaceInfo {
 
 public class CGModule {
     private let cgCtx: CGContext
-    private var module: Option<LLVMModuleHandle>
+    private var module: Option<LLVMModuleHandle> = None
     private let functions: HashMap<UIntNative, CGFunction> = HashMap<UIntNative, CGFunction>()
     private let globalVariables: HashMap<String, CGValue> = HashMap<String, CGValue>()
     private let localValueMapping: HashMap<Value, CGValue> = HashMap<Value, CGValue>()
