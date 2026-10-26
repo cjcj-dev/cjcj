@@ -586,7 +586,7 @@
   {
     "file": "ci/bootstrap/sdk-native-cjo-install.integration.test.mjs",
     "executor": "manual",
-    "reason": "Requires npx-reachable zx@8 plus an owned temporary directory; it runs the real nativeStage compiler path and the real build_shim.mjs producer so the assertion reads the installed share/cjcj/cjo instead of a copy-list reimplementation. The source tree is an explicit fixture, not a compiler build."
+    "reason": "Requires prepared zx through ci/test-zx.mjs, a native C compiler and an owned temporary directory. Runs the real nativeStage compiler path/build_shim producer and installed CJO consumption, including explicit package-manager SDK versus embedded bootstrap host. SDK_FLOW_TEST_ROOT retains evidence. Controlled source/package-manager fixtures do not qualify a complete compiler build."
   },
   {
     "file": "ci/bootstrap/sdk-native-wiring.integration.test.mjs",
