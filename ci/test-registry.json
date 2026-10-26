@@ -402,6 +402,11 @@
     "member": "packages/lex"
   },
   {
+    "file": "packages/macro/src/RuntimeParamABI_test.cj",
+    "executor": "cjpm",
+    "member": "packages/macro"
+  },
+  {
     "file": "packages/mangle/src/Demangle_test.cj",
     "executor": "cjpm",
     "member": "packages/mangle"
