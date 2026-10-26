@@ -70,7 +70,20 @@ for(const packaged of [false,true])test(packaged?'same-install package selects u
  for(const name of ['libcangjie-runtime.dll.a','libboundscheck.dll.a'])assert.ok(links[2].args.includes(path.join(selected,path.relative(f.install,f.lib),name)));
  const captures=fs.readdirSync(f.env.WINDOWS_RUNTIME_EVIDENCE).filter(x=>x.startsWith('consumer-')).map(x=>JSON.parse(fs.readFileSync(path.join(f.env.WINDOWS_RUNTIME_EVIDENCE,x,'command.json'))));
  assert.equal(captures.length,13);assert.ok(captures.every(c=>c.rc===0&&c.signal===null));
- if(packaged){assert.equal(events.filter(e=>e.kind==='verifier').length,1);assert.ok(fs.existsSync(path.join(f.output,'runtime-install.tar')));}
+ if(packaged){
+  assert.equal(events.filter(e=>e.kind==='verifier').length,1);assert.ok(fs.existsSync(path.join(f.output,'runtime-install.tar')));
+  const summary=JSON.parse(fs.readFileSync(path.join(f.output,'unpacked-consumer.json')));
+  assert.equal(summary.verifier.rc,0);assert.equal(summary.native.rc,0);assert.equal(summary.rc,0);
+ }
+});
+test('package summary preserves native failure after successful verifier',()=>{
+ const f=fixture(),r=f.run('windows_runtime_package.mjs',[],{FIXTURE_RUN_RC:'33'});
+ assert.equal(r.status,33,r.stderr);
+ const summary=JSON.parse(fs.readFileSync(path.join(f.output,'unpacked-consumer.json')));
+ console.log('PACKAGE_NATIVE_RC_TARGET_REACHED');
+ assert.equal(summary.verifier.rc,0);assert.equal(summary.native.rc,33);
+ assert.equal(summary.rc,33,'package summary must include native consumer failure');
+ assert.equal(f.events().filter(e=>e.kind==='run').length,1);
 });
 for(const [key,code,stoppedKind]of [['FIXTURE_COMPILE_RC',31,'run'],['FIXTURE_IMPORTS_RC',32,'frames-link'],['FIXTURE_RUN_RC',33,'second-compile']])test('consumer failure preserves '+key,()=>{
  const f=fixture(),r=f.run('windows_runtime_consumers.mjs',[],{[key]:String(code)});
