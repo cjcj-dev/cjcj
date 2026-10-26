@@ -19,10 +19,14 @@ async function definition(dir) {
 const expected=await definition(restored);if(!expected)throw Error('unpacked registered runtime definition missing');
 const entry=path.join(import.meta.dirname,'verify_windows_runtime_exports.mjs');
 const result=await $({nothrow:true})`npx --yes zx@8 ${entry} ${restored} --expected-def ${expected} --reference-services`;
-const summary={archive,restored,expected,verifier:{rc:result.exitCode,signal:result.signal},native:{status:'NOT_RUN'},rc:result.exitCode};
+const verifierOk=result.exitCode===0&&!result.signal&&!result.error;
+const failedRc=Number.isInteger(result.exitCode)&&result.exitCode>0?result.exitCode:1;
+const summary={archive,restored,expected,
+ verifier:{rc:result.exitCode,signal:result.signal,error:result.error?String(result.error):null},
+ native:{status:'NOT_RUN'},rc:verifierOk?0:failedRc};
 const summaryFile=path.join(root,'unpacked-consumer.json');
 await fs.writeFile(summaryFile,JSON.stringify(summary));
-if(result.exitCode===0) {
+if(verifierOk) {
  try {
   summary.rc=await runConsumers(restored,'unpacked');
   summary.native={rc:summary.rc};

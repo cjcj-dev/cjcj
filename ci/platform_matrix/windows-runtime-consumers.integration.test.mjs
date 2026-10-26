@@ -29,7 +29,7 @@ function fixture() {
  for(const name of ['windows_n2c_os_unwind.cpp','windows_exception_return_os.cpp','windows_exception_frames.cpp','gc_unit/test_unwind_regressions.cpp'])put(path.join(runtime,'tests',name),'explicit consumer source command fixture');
  put(path.join(runtime,'tests/windows_exception_imports.mjs'),`import fs from 'node:fs';fs.appendFileSync(process.env.CONSUMER_CALLS,JSON.stringify({kind:'imports',args:process.argv.slice(2)})+'\\n');process.exitCode=Number(process.env.FIXTURE_IMPORTS_RC||0);`);
  const hooks=path.join(root,'host.mjs');
- put(hooks,`import fs from 'node:fs';Object.defineProperty(process,'platform',{value:'win32'});globalThis.$=()=>async(strings,...values)=>{fs.appendFileSync(process.env.CONSUMER_CALLS,JSON.stringify({kind:'verifier',values})+'\\n');return {exitCode:0,signal:null};};`);
+ put(hooks,`import fs from 'node:fs';Object.defineProperty(process,'platform',{value:'win32'});globalThis.$=()=>async(strings,...values)=>{fs.appendFileSync(process.env.CONSUMER_CALLS,JSON.stringify({kind:'verifier',values})+'\\n');const states={nonzero:{exitCode:19,signal:null},signal:{exitCode:null,signal:'SIGTERM'},launch:{exitCode:null,signal:null,error:Error('ENOENT explicit launch fixture')},'zero-signal':{exitCode:0,signal:'SIGTERM'},'zero-error':{exitCode:0,signal:null,error:Error('explicit process error')}};return states[process.env.FIXTURE_VERIFIER_STATE]||{exitCode:0,signal:null};};`);
  const env={...process.env,PLATFORM_CI_ROOT:output,RUNTIME_SOURCE:source,WINDOWS_RUNTIME_EVIDENCE:path.join(output,'windows-native'),CONSUMER_CALLS:calls};
  function run(entry,extra=[],overrides={}) {
   const argv=[process.execPath,'--import',hooks,path.resolve('ci/platform_matrix/'+entry),...extra];
@@ -84,6 +84,20 @@ test('package summary preserves native failure after successful verifier',()=>{
  assert.equal(summary.verifier.rc,0);assert.equal(summary.native.rc,33);
  assert.equal(summary.rc,33,'package summary must include native consumer failure');
  assert.equal(f.events().filter(e=>e.kind==='run').length,1);
+});
+for(const state of ['nonzero','signal','launch','zero-signal','zero-error'])test('verifier failure stops native consumers: '+state,()=>{
+ const f=fixture(),r=f.run('windows_runtime_package.mjs',[],{FIXTURE_VERIFIER_STATE:state});
+ const events=f.events();
+ assert.equal(events.filter(e=>e.kind==='verifier').length,1,'verifier must actually be invoked');
+ console.log('VERIFIER_STOP_TARGET_REACHED '+state);
+ assert.equal(events.filter(e=>['compiler','imports','run'].includes(e.kind)).length,0,
+  'failed or abnormal verifier must not start native consumers');
+ assert.equal(r.status,state==='nonzero'?19:1,'abnormal verifier must terminate package nonzero');
+ const summary=JSON.parse(fs.readFileSync(path.join(f.output,'unpacked-consumer.json')));
+ assert.equal(summary.rc,r.status);assert.equal(summary.native.status,'NOT_RUN');
+ assert.equal(summary.verifier.rc,state==='nonzero'?19:state.startsWith('zero-')?0:null);
+ assert.equal(summary.verifier.signal,state.includes('signal')?'SIGTERM':null);
+ if(state==='launch'||state==='zero-error')assert.ok(summary.verifier.error);
 });
 for(const [key,code,stoppedKind]of [['FIXTURE_COMPILE_RC',31,'run'],['FIXTURE_IMPORTS_RC',32,'frames-link'],['FIXTURE_RUN_RC',33,'second-compile']])test('consumer failure preserves '+key,()=>{
  const f=fixture(),r=f.run('windows_runtime_consumers.mjs',[],{[key]:String(code)});
