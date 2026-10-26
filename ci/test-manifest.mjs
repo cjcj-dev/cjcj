@@ -202,6 +202,14 @@ export const GATING = Object.freeze([
 // records what the invocation in `needs` actually produced when run by hand, so
 // wiring one of these in is a decision about CI shape, not a re-investigation.
 export const DEFERRED = Object.freeze([
+  Object.freeze({
+    file: 'ci/platform_matrix/native-runtime-package.integration.test.mjs',
+    needs: 'Native Linux or Darwin x64/arm64, Node, CXX (default clang++) with shared-library support, which and tar; '
+      + 'NATIVE_PACKAGE_EVIDENCE must name an absolute private directory retaining real compiled libraries, loader and package evidence. '
+      + 'Run node --test ci/platform_matrix/native-runtime-package.integration.test.mjs after preparing these inputs; generic GATING does not provision that evidence directory.',
+    verified: 'Fixed c7f447 finite-v2 on kkk2: 4 tests pass, rc0; real Linux ELF load/origin/memcpy and same-package unpack, '
+      + 'missing library and wrong-origin rejection/recovery. Fixtures do not qualify a native runtime, Darwin execution or SDK.',
+  }),
   Object.freeze({file: "ci/bootstrap/sdk-command-lifetime.test.mjs",
     needs: "Dedicated Linux worker with Python3 pidfd/subreaper support and Node; owned absolute RELEASE_EVIDENCE_TEST_ROOT and TMPDIR; node --test ci/bootstrap/sdk-command-lifetime.test.mjs. Retains small CLI logs and symlinks only; no SDK or repository copy",
     verified: "TASK02:10 public supervisor CLI regression for absolute/relative/symlink paths, body and exit propagation, import isolation and cancellation; actual results belong to the fixed candidate report, not SDK production qualification"}),
