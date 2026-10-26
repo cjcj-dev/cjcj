@@ -1200,43 +1200,44 @@ public func EmitLLVMSimilarBytecode(instance: CompilerInstance, enableIncrement:
     }
     let fullPackageName = curPackage.getOrThrow().GetName()
     let llvmModules = GenPackageModules(instance, enableIncrement, cachedMangleMap)
-    if (instance.diag.GetErrorCount() != 0) {
-        ClearPackageModules(llvmModules)
-        return false
-    }
-
-    let recorder = ProfileRecorder("CodeGen", "Save bc file")
-    instance.invocation.globalOptions.UpdateCachedDirName(fullPackageName)
-    let allBCFilePath = ArrayList<String>()
-    for (index in 0..llvmModules.size) {
-        let suffix = if (llvmModules.size == 1) { "" } else { index.toString() }
-        let filePath = GenerateBCFilePathAndUpdateToInvocation(
-            instance.invocation.globalOptions, TempFileKind.T_BC, fullPackageName, suffix)
-        if (filePath.isEmpty()) {
-            ClearPackageModules(llvmModules)
-            recorder.close()
+    // This scope owns every generated module, including diagnostic, path and
+    // native-writer exception exits. The recorder is closed during unwinding
+    // before module disposal, so either cleanup is independent of the other.
+    try {
+        if (instance.diag.GetErrorCount() != 0) {
             return false
         }
-        allBCFilePath.add(filePath)
-    }
-    let saved = SaveGeneratedBitcode(llvmModules, allBCFilePath)
-    ClearPackageModules(llvmModules)
-    if (!saved) {
-        recorder.close()
-        return false
-    }
+        try (recorder = ProfileRecorder("CodeGen", "Save bc file")) {
+            instance.invocation.globalOptions.UpdateCachedDirName(fullPackageName)
+            let allBCFilePath = ArrayList<String>()
+            for (index in 0..llvmModules.size) {
+                let suffix = if (llvmModules.size == 1) { "" } else { index.toString() }
+                let filePath = GenerateBCFilePathAndUpdateToInvocation(
+                    instance.invocation.globalOptions, TempFileKind.T_BC, fullPackageName, suffix)
+                if (filePath.isEmpty()) {
+                    return false
+                }
+                allBCFilePath.add(filePath)
+            }
+            let saved = SaveGeneratedBitcode(llvmModules, allBCFilePath)
+            if (!saved) {
+                return false
+            }
 
-    if (instance.invocation.globalOptions.enIncrementalCompilation) {
-        let fileName = GenerateFileName(instance.invocation.globalOptions, fullPackageName, "")
-        if (instance.GetAllCHIRPackages().size > 1) {
-            instance.cachedInfo.bitcodeFilesName.add(fileName)
-        } else {
-            instance.cachedInfo.bitcodeFilesName.clear()
-            instance.cachedInfo.bitcodeFilesName.add(fileName)
+            if (instance.invocation.globalOptions.enIncrementalCompilation) {
+                let fileName = GenerateFileName(instance.invocation.globalOptions, fullPackageName, "")
+                if (instance.GetAllCHIRPackages().size > 1) {
+                    instance.cachedInfo.bitcodeFilesName.add(fileName)
+                } else {
+                    instance.cachedInfo.bitcodeFilesName.clear()
+                    instance.cachedInfo.bitcodeFilesName.add(fileName)
+                }
+            }
+            return true
         }
+    } finally {
+        ClearPackageModules(llvmModules)
     }
-    recorder.close()
-    return true
 }
 
 // Consume every native writer result before publishing successful codegen/cache state.
@@ -1261,10 +1262,26 @@ func SaveGeneratedBitcode(modules: ArrayList<LLVMModuleHandle>, paths: ArrayList
         results.add(queue.AddTask<Bool>({ => writeModule(module, path) }))
     }
     queue.RunAndWaitForAllTasksCompleted()
+    return CollectBitcodeWriteResults(results)
+}
+
+// All workers have joined before result consumption. Retain the first exception
+// while draining every result, then propagate it with its original type/message.
+func CollectBitcodeWriteResults(results: ArrayList<TaskResult<Bool>>): Bool {
     var saved = true
+    var firstFailure: Option<Exception> = None
     for (result in results) {
-        let moduleSaved = result.get()
-        saved = moduleSaved && saved
+        try {
+            let moduleSaved = result.get()
+            saved = moduleSaved && saved
+        } catch (e: Exception) {
+            if (let None <- firstFailure) {
+                firstFailure = Some(e)
+            }
+        }
+    }
+    if (let Some(failure) <- firstFailure) {
+        throw failure
     }
     return saved
 }

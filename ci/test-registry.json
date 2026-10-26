@@ -382,6 +382,11 @@
     "member": "packages/incremental_compilation"
   },
   {
+    "file": "packages/frontend/src/BitcodeWriteFailure_test.cj",
+    "executor": "cjpm",
+    "member": "packages/frontend"
+  },
+  {
     "file": "packages/frontend/src/MergeAnnoFromCjd_test.cj",
     "executor": "cjpm",
     "member": "packages/frontend"
