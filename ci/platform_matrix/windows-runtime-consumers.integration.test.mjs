@@ -37,15 +37,18 @@ import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
 const {ProcessOutput,$:zx$}=createRequire(${JSON.stringify(zxTool.packageFile)})('zx');
 const state=process.env.FIXTURE_VERIFIER_STATE;
+const real$=globalThis.$;
 // Obtain a real nothrow ProcessOutput from a failed spawn before simulating Windows.
 const launch=state==='launch'?await zx$({shell:${JSON.stringify(path.join(root,'missing-shell'))},nothrow:true,quiet:true})\`exit 0\`:null;
 Object.defineProperty(process,'platform',{value:'win32'});
-globalThis.$=()=>async(strings,...values)=>{
+if(process.env.FIXTURE_NODE_PATH)Object.defineProperty(process,'execPath',{value:process.env.FIXTURE_NODE_PATH});
+globalThis.$=options=>async(strings,...values)=>{
  const states={nonzero:new ProcessOutput(19),signal:new ProcessOutput(null,'SIGTERM'),launch,
   'from-error':ProcessOutput.fromError(Error('explicit public fromError cause')),
   'zero-signal':new ProcessOutput(0,'SIGTERM'),
   'zero-error':new ProcessOutput({code:0,signal:null,error:Error('explicit ProcessOutput cause'),duration:0,from:'public constructor fixture',store:{stdout:[],stderr:[],stdall:[]}})};
- const output=states[state]||new ProcessOutput(0);
+ const output=process.env.FIXTURE_VERIFIER_REAL==='1'||state==='native-launch'
+  ? await real$(options)(strings,...values) : states[state]||new ProcessOutput(0);
  assert(output instanceof ProcessOutput);assert.equal(output.error,undefined);
  if(state==='launch'){assert.equal(output.cause.code,'ENOENT');assert.equal(output.ok,false);}
  fs.appendFileSync(process.env.CONSUMER_CALLS,JSON.stringify({kind:'verifier',values,type:output.constructor.name,ok:output.ok,rc:output.exitCode,signal:output.signal,cause:output.cause?{name:output.cause.name,message:output.cause.message,code:output.cause.code,stack:output.cause.stack}:null})+'\\n');
@@ -54,7 +57,7 @@ globalThis.$=()=>async(strings,...values)=>{
  const env={...process.env,PLATFORM_CI_ROOT:output,RUNTIME_SOURCE:source,WINDOWS_RUNTIME_EVIDENCE:path.join(output,'windows-native'),CONSUMER_CALLS:calls};
  function run(entry,extra=[],overrides={}) {
   const argv=entry==='windows_runtime_package.mjs'
-   ? [process.execPath,zxTool.cli,'--eval',`await import(${JSON.stringify(pathToFileURL(hooks).href)});await import(${JSON.stringify(pathToFileURL(path.resolve('ci/platform_matrix/'+entry)).href)});`,...extra]
+   ? [process.execPath,zxTool.cli,'--eval',`await import(${JSON.stringify(pathToFileURL(hooks).href)});await import(${JSON.stringify(pathToFileURL(overrides.FIXTURE_ENTRY||path.resolve('ci/platform_matrix/'+entry)).href)});`,...extra]
    : [process.execPath,'--import',hooks,path.resolve('ci/platform_matrix/'+entry),...extra];
   const r=spawnSync(argv[0],argv.slice(1),{env:{...env,...overrides},encoding:'utf8',timeout:30000});
   put(path.join(root,'entry.stdout'),r.stdout||'');put(path.join(root,'entry.stderr'),r.stderr||'');
@@ -123,21 +126,24 @@ test('package verifier uses the real zx child with literal path arguments',()=>{
  const f=fixture(String.raw`D:\a\native package's (literal)`);
  const symbols=['CJ_MCC_SetReferenceMethods','CJ_MCC_ReferenceInvokeFinalize','CJ_MCC_ReferenceWaitPending','CJ_MCC_ReferenceRuntimeRunning','CJ_MCC_ReferenceNanoTime'];
  fs.writeFileSync(path.join(f.lib,'windows_x86_64_exports.def'),'EXPORTS\n'+symbols.map((s,i)=>` ${s} @${i+1}`).join('\n')+'\n');
- const packaged=f.run('windows_runtime_package.mjs');assert.equal(packaged.status,0,packaged.stderr);
- const command=f.events().find(e=>e.kind==='verifier').values[0];
  const dump=path.join(f.root,'objdump-fixture.mjs');
  const table=['dbghelp.dll','kernel32.dll','libboundscheck.dll','msvcrt.dll','ws2_32.dll'].map(s=>'DLL Name: '+s).join('\n')+'\n\n[Ordinal/Name Pointer] Table\n'+symbols.map((s,i)=>` [${i}] ${s}`).join('\n')+'\n\n';
  fs.writeFileSync(dump,'#!'+process.execPath+'\nconsole.log('+JSON.stringify(table)+');\n',{mode:0o755});
- const driver=path.join(f.root,'verifier-child.mjs');
- fs.writeFileSync(driver,'const command='+JSON.stringify(command)+';const result=await $({nothrow:true})`${command}`;console.log(JSON.stringify({rc:result.exitCode,signal:result.signal,ok:result.ok,cause:result.cause?.message,stdout:result.stdout,stderr:result.stderr}));');
- const argv=[process.execPath,zxTool.cli,driver],r=spawnSync(argv[0],argv.slice(1),{encoding:'utf8',env:{...f.env,OBJDUMP:dump},timeout:30000});
- fs.writeFileSync(path.join(f.root,'verifier-child.stdout'),r.stdout||'');fs.writeFileSync(path.join(f.root,'verifier-child.stderr'),r.stderr||'');
- fs.writeFileSync(path.join(f.root,'verifier-child-command.json'),JSON.stringify({argv,rc:r.status,signal:r.signal,verifierArgv:command}));
- assert.equal(r.status,0,r.stderr);const actual=JSON.parse(r.stdout.trim());
+ const nativeNode=path.join(f.root,String.raw`C:\hostedtoolcache\windows\node\24.22.1\x64\node.exe`);
+ fs.symlinkSync(process.execPath,nativeNode);
+ const scriptRoot=path.join(f.root,String.raw`D:\a\script's (literal)`);fs.mkdirSync(scriptRoot);
+ for(const name of ['windows_runtime_package.mjs','windows_runtime_capture.mjs','windows_runtime_consumers.mjs','verify_windows_runtime_exports.mjs'])
+  fs.copyFileSync(path.resolve('ci/platform_matrix',name),path.join(scriptRoot,name));
+ const r=f.run('windows_runtime_package.mjs',[],{FIXTURE_VERIFIER_REAL:'1',FIXTURE_NODE_PATH:nativeNode,FIXTURE_ENTRY:path.join(scriptRoot,'windows_runtime_package.mjs'),OBJDUMP:dump});
+ const actual=JSON.parse(fs.readFileSync(path.join(f.output,'unpacked-consumer.json'))).verifier;
  console.log('PACKAGE_REAL_VERIFIER_TARGET_REACHED');
+ assert.equal(r.status,0,'native argv must execute the literal Node/script paths: '+r.stderr);
  assert.equal(actual.rc,0,actual.stderr);assert.equal(actual.ok,true);assert.equal(actual.signal,null);
- assert.ok(actual.stdout.includes('dll='+path.join(f.output,'runtime-unpacked',path.relative(f.install,f.lib),'libcangjie-runtime.dll')),'real verifier must consume the exact unpacked literal path');
- assert.ok(actual.stdout.includes('missing=0'));
+ assert.equal(actual.argv[0],nativeNode);assert.equal(actual.argv[2],path.join(scriptRoot,'verify_windows_runtime_exports.mjs'));
+ const stdout=fs.readFileSync(path.join(f.output,'unpacked-verifier.stdout'),'utf8');
+ assert.ok(stdout.includes('dll='+path.join(f.output,'runtime-unpacked',path.relative(f.install,f.lib),'libcangjie-runtime.dll')),'real verifier must consume the exact unpacked literal path');
+ assert.ok(stdout.includes('missing=0'));
+ assert.equal(f.events().filter(e=>e.kind==='run').length,3,'real verifier success must reach all three unpacked consumers');
 });
 test('package summary preserves native failure after successful verifier',()=>{
  const f=fixture(),r=f.run('windows_runtime_package.mjs',[],{FIXTURE_RUN_RC:'33'});
@@ -148,8 +154,8 @@ test('package summary preserves native failure after successful verifier',()=>{
  assert.equal(summary.rc,33,'package summary must include native consumer failure');
  assert.equal(f.events().filter(e=>e.kind==='run').length,1);
 });
-for(const state of ['nonzero','signal','launch','from-error','zero-signal','zero-error'])test('verifier failure stops native consumers: '+state,()=>{
- const f=fixture(),r=f.run('windows_runtime_package.mjs',[],{FIXTURE_VERIFIER_STATE:state});
+for(const state of ['nonzero','signal','launch','from-error','zero-signal','zero-error','native-launch'])test('verifier failure stops native consumers: '+state,()=>{
+ const f=fixture(),r=f.run('windows_runtime_package.mjs',[],{FIXTURE_VERIFIER_STATE:state,...(state==='native-launch'?{FIXTURE_NODE_PATH:path.join(f.root,'missing-native-node')}:{})});
  const events=f.events();
  assert.equal(events.filter(e=>e.kind==='verifier').length,1,'verifier must actually be invoked');
  console.log('VERIFIER_STOP_TARGET_REACHED '+state);
@@ -160,16 +166,16 @@ for(const state of ['nonzero','signal','launch','from-error','zero-signal','zero
  assert.equal(summary.rc,r.status);assert.equal(summary.native.status,'NOT_RUN');
  const actual=events.find(e=>e.kind==='verifier');
  assert.equal(summary.verifier.rc,actual.rc,'preserve the actual zx exitCode, including spawn errno');
- if(state==='launch')assert.ok(Number.isInteger(actual.rc)&&actual.rc<0,'real Linux ENOENT spawn reports a negative errno');
+ if(state==='launch'||state==='native-launch')assert.ok(Number.isInteger(actual.rc)&&actual.rc<0,'real Linux ENOENT spawn reports a negative errno');
  else assert.equal(actual.rc,state==='nonzero'?19:state.startsWith('zero-')?0:null);
  assert.equal(summary.verifier.signal,state.includes('signal')?'SIGTERM':null);
  assert.equal(summary.verifier.ok,events.find(e=>e.kind==='verifier').ok);
- if(['launch','from-error','zero-error'].includes(state)){
+ if(['launch','from-error','zero-error','native-launch'].includes(state)){
   console.log('VERIFIER_CAUSE_TARGET_REACHED '+state);
   const actual=events.find(e=>e.kind==='verifier');
   assert.equal(actual.ok,false);assert.ok(actual.cause?.message);
   assert.deepEqual(summary.verifier.cause,actual.cause,'preserve the real ProcessOutput cause');
-  if(state==='launch')assert.equal(summary.verifier.cause.code,'ENOENT');
+  if(state==='launch'||state==='native-launch')assert.equal(summary.verifier.cause.code,'ENOENT');
  }else assert.equal(summary.verifier.cause,null);
 });
 for(const [key,code,stoppedKind]of [['FIXTURE_COMPILE_RC',31,'run'],['FIXTURE_IMPORTS_RC',32,'frames-link'],['FIXTURE_RUN_RC',33,'second-compile']])test('consumer failure preserves '+key,()=>{
