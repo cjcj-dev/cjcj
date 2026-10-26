@@ -671,16 +671,22 @@ public class FileUtil {
         }
     }
 
+    @When[os == "Windows"]
     public static func GetFileName(filePath: String): String {
         let path = Normalize(filePath)
-        @When[os == "Windows"]
         if (path.size <= windowsRootLength(path)) { return "" }
         if (let Some(pos) <- lastDirSplit(path)) {
             return path[pos + 1..]
         }
-        @When[os == "Windows"]
         return path[windowsVolumeEnd(path)..]
-        @When[os != "Windows"]
+    }
+
+    @When[os != "Windows"]
+    public static func GetFileName(filePath: String): String {
+        let path = Normalize(filePath)
+        if (let Some(pos) <- lastDirSplit(path)) {
+            return path[pos + 1..]
+        }
         return path
     }
 
