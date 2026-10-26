@@ -59,7 +59,6 @@ jobs:
         run: |
           set -euo pipefail
           {
-            echo "RUNTIME_REF=$CJCJ_NATIVE_RUNTIME_REF"
             echo "RUNTIME_VERSION=$RUNTIME_VERSION"
             echo "CANGJIE_WORKSPACE=$RUNNER_TEMP/android-source"
           } >> "$GITHUB_ENV"

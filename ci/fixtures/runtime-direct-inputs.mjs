@@ -22,5 +22,10 @@ export function directSource(runtime,{legacy=false}={}) {
 export function directBuild(runtime,{noStatus=false,cppFail=false}={}) {
  write(path.join(runtime,'CMakebuild/compile_commands.json'),JSON.stringify([{file:'/selected/runtime/src/Heap/z/zGeneration.cpp',arguments:['clang++','-DNDEBUG']}])+'\n');
  write(path.join(runtime,'CMakebuild/runtime-staging/include/schedule.h'),'// actual normal header location in limited producer\n');
- if(!noStatus)write(path.join(runtime,'CMakebuild/gc-unit.status'),(fs.existsSync(path.join(runtime,'tests/gc_unit/gate_gc_unit.mjs'))?'GATE=PASS\nGATE_RC=0\n':'SCHEMA_VERSION=1\nPHASE=cpp\nGATE=PASS\nCPP_RUNNER_RC=0\n')+'CPP_SUITE='+(cppFail?'FAIL':'PASS')+'\nLANGUAGE_TESTS=LANGUAGE_DEFERRED\n');
+ const legacy='SCHEMA_VERSION=1\nPHASE=cpp\nGATE=PASS\nCPP_RUNNER_RC=0\nCPP_SUITE_SOURCE=FRESH\nLANGUAGE_TEST_MODE=defer\n'
+   +'OHOS_HOST=NOT_RUN\nOHOS_HOST_SOURCE=NOT_RUN\nOHOS_RUNNER_RC=NOT_RUN\nOHOS_HOST_FILTERS=0\n'
+   +[['FINALIZER_TRIGGER','FINALIZER'],['PHASE_ENTRY_TRIGGER','PHASE_ENTRY'],['SO_REENTRY_BOUNDED','SO_REENTRY'],['SEGMENTED_ARRAY_MANAGED','SEGMENTED']]
+     .map(([state,runner])=>state+'=NOT_RUN\n'+state+'_SOURCE=NOT_RUN\n'+runner+'_RUNNER_RC=NOT_RUN\n').join('')
+   +'SO_REENTRY_BOUNDED_CAN_RUN=0\nSEGMENTED_ARRAY_MANAGED_CAN_RUN=0\n';
+ if(!noStatus)write(path.join(runtime,'CMakebuild/gc-unit.status'),(fs.existsSync(path.join(runtime,'tests/gc_unit/gate_gc_unit.mjs'))?'GATE=PASS\nGATE_RC=0\n':legacy)+'CPP_SUITE='+(cppFail?'FAIL':'PASS')+'\nLANGUAGE_TESTS=LANGUAGE_DEFERRED\n');
 }
