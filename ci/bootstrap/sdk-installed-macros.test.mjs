@@ -10,8 +10,20 @@ import {EventEmitter} from 'node:events';
 import {PassThrough} from 'node:stream';
 import {macroInstall} from './sdk-installed-macros.mjs';
 
-const recording=JSON.parse(await fs.readFile(new URL('./sdk-installed-macros.replay.json',import.meta.url),'utf8'));
-const fullRecording=JSON.parse(await fs.readFile(new URL('./sdk-installed-macros.mock.replay.json',import.meta.url),'utf8'));
+const originalRecording=JSON.parse(await fs.readFile(new URL('./sdk-installed-macros.replay.json',import.meta.url),'utf8'));
+const originalFullRecording=JSON.parse(await fs.readFile(new URL('./sdk-installed-macros.mock.replay.json',import.meta.url),'utf8'));
+// Historical recordings are immutable. Only the two new assertions receive
+// explicitly synthetic output, so downstream old builtin tests stay reachable.
+// This verifies gate behavior, never CJ compilation, loading or std.time use.
+function withSyntheticChain(data) {
+ const copy=structuredClone(data);
+ for(const row of copy.commands) {
+  if(row.name==='chain-definition')row.stdout+='\nMACRO_BODY_EXECUTED\n';
+  if(row.name==='chain-expansion')row.stdout+='\nMACRO_STD_TIME_EXECUTED\n';
+ }
+ return copy;
+}
+const recording=withSyntheticChain(originalRecording),fullRecording=withSyntheticChain(originalFullRecording);
 const marker='explicit-testmacro_BODY_EXECUTED';
 const explicit=recording.commands.find(row=>row.name==='explicit-testmacro-run');
 const markerLine=explicit.stdout.split('\n').find(line=>line.includes(marker));
@@ -50,6 +62,12 @@ async function replay(t, change, expected, {data=recording,target='explicit-test
   }
   const original=data.commands[calls++];
   assert.deepEqual([file,...args].map(s=>s.replaceAll(options.cwd,data.sourceWork)),original.argv);
+  if(original.name==='chain-definition') {
+   const source=fsSync.readFileSync(path.join(options.cwd,'chain.cj'),'utf8');
+   assert.match(source,/import std\.time\.\*/);assert.match(source,/import f1def\.\*/);
+   assert.match(source,/@Keep\s+func dependencyValue/);assert.match(source,/DateTime\.nowUTC\(\)\.year/);
+   assert.match(source,/let value = dependencyValue\(\)/);
+  }
   for(const artifact of data.artifactPaths) {
    const target=path.join(options.cwd,path.basename(artifact));
    if(!fsSync.existsSync(target))fsSync.writeFileSync(target,'replay output, not executable');
@@ -81,6 +99,15 @@ async function replay(t, change, expected, {data=recording,target='explicit-test
  assert.equal(saved.rc,supplied.rc,'the actual child rc must be retained');
 }
 const unchanged=row=>row;
+test('old chain-definition recording cannot satisfy new Keep body obligation',t=>replay(t,unchanged,
+ 'INSTALLED_MACRO_ASSERT chain-definition missing MACRO_BODY_EXECUTED',
+ {data:originalRecording,target:'chain-definition'}));
+for(const [target,marker]of [['chain-definition','MACRO_BODY_EXECUTED'],['chain-expansion','MACRO_STD_TIME_EXECUTED']]) {
+ test('synthetic chain refuses missing '+marker,t=>replay(t,row=>({...row,stdout:row.stdout.replaceAll(marker,'REMOVED')}),
+  `INSTALLED_MACRO_ASSERT ${target} missing ${marker}`,{data:fullRecording,target,complete:true}));
+ test('synthetic chain restores '+marker+' and keeps existing downstream controls',t=>replay(t,unchanged,'PASS',
+  {data:fullRecording,target,complete:true}));
+}
 const replaceLine=line=>row=>({...row,stdout:row.stdout.replace(markerLine,line)});
 const missing=`INSTALLED_MACRO_ASSERT explicit-testmacro-run missing ${marker}`;
 

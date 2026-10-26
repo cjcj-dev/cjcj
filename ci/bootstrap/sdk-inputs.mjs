@@ -266,6 +266,7 @@ export async function prepareInstallInputs(descriptor) {
   const work=await privateRoot(descriptor.work),install=await privateRoot(descriptor.install);
   const required=[
     target.compiler.product,
+    ...(native.os==='linux'&&target.compiler.macroLoader?[target.compiler.macroLoader]:[]),
     target.std.install+'/modules/'+native.tuple+'/std/std.core.cjo',
     target.std.install+'/lib/'+native.tuple+'/libcangjie-std-core.a',
     target.runtime.install+'/runtime/lib/'+native.tuple+'/libcangjie-runtime'+native.shared,

@@ -105,15 +105,24 @@ public func helperValue(): Int64 { leafValue() + 2 }
   await compile('helper-compile',helper,helperLib,['--output-type=staticlib','--import-path',work,'-L',work,'-lsdkleaf']);
   const chainDef=await source('chain.cj',`macro package sdkchain
 import std.ast.*
+import std.time.*
 import sdkhelper.*
+import f1def.*
+@Keep
+func dependencyValue(): Int64 { helperValue() }
 public macro Chain(input: Tokens): Tokens {
-    let value = helperValue()
+    // A real std.time call adds a std dependency outside the old five-library
+    // preload list. Keep it in the macro body, not in the generated program.
+    if (DateTime.nowUTC().year < 1970) { throw Exception("MACRO_STD_TIME_VALUE") }
+    println("MACRO_STD_TIME_EXECUTED")
+    let value = dependencyValue()
     if (value != 42) { throw Exception("MACRO_HELPER_VALUE") }
     println("MACRO_HELPER_EXECUTED value=42")
     input
 }
 `);
-  await invoke('chain-definition',[cjc,'--compile-macro',chainDef,'--import-path',work,'-L',work,'-lsdkhelper','-lsdkleaf']);
+  requireLine(await invoke('chain-definition',[cjc,'--compile-macro',chainDef,'--import-path',work,'-L',work,'-lsdkhelper','-lsdkleaf']),
+    'MACRO_BODY_EXECUTED');
   await artifact(path.join(work,'lib-macro_sdkchain'+native.shared));
   const chainUse=await source('chain use.cj',`import sdkchain.*
 @Chain
@@ -125,7 +134,9 @@ main(): Int64 {
 }
 `);
   const chainBin=path.join(work,'chain use'+native.exe);
-  requireLine(await compile('chain-expansion',chainUse,chainBin,['--import-path',work]),'MACRO_HELPER_EXECUTED value=42');
+  const expandedChain=await compile('chain-expansion',chainUse,chainBin,['--import-path',work]);
+  requireLine(expandedChain,'MACRO_STD_TIME_EXECUTED');
+  requireLine(expandedChain,'MACRO_HELPER_EXECUTED value=42');
   requireLine(await invoke('chain-run',[chainBin]),'MACRO_CHAIN_VALUE value=42');
 
   // R stdlib/doc/libs/std_en/deriving/deriving_samples/deriving_user_guide.md.
