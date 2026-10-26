@@ -12,7 +12,7 @@ import {macroInstall} from './sdk-installed-macros.mjs';
 
 const originalRecording=JSON.parse(await fs.readFile(new URL('./sdk-installed-macros.replay.json',import.meta.url),'utf8'));
 const originalFullRecording=JSON.parse(await fs.readFile(new URL('./sdk-installed-macros.mock.replay.json',import.meta.url),'utf8'));
-// Historical recordings are immutable. Only the two new assertions receive
+// Historical recordings are immutable. Only the new chain assertions receive
 // explicitly synthetic output, so downstream old builtin tests stay reachable.
 // This verifies gate behavior, never CJ compilation, loading or std.time use.
 function withSyntheticChain(data) {
@@ -21,6 +21,9 @@ function withSyntheticChain(data) {
   if(row.name==='chain-definition')row.stdout+='\nMACRO_BODY_EXECUTED\n';
   if(row.name==='chain-expansion')row.stdout+='\nMACRO_STD_TIME_EXECUTED\n';
  }
+ const at=copy.commands.findIndex(row=>row.name==='chain-definition');
+ copy.commands.splice(at+1,0,{name:'chain-dynamic-table',argv:['readelf','-d',path.join(copy.sourceWork,'lib-macro_sdkchain.so')],
+  rc:0,signal:null,stdout:'0x000000000000000f (RPATH) Library rpath: [SYNTHETIC_TARGET_SDK/runtime/lib/linux_x86_64_cjnative]\n',stderr:''});
  return copy;
 }
 const recording=withSyntheticChain(originalRecording),fullRecording=withSyntheticChain(originalFullRecording);
@@ -36,6 +39,8 @@ async function replay(t, change, expected, {data=recording,target='explicit-test
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'installed-macro-replay-'));
  t.after(()=>fs.rm(root,{recursive:true,force:true}));
  const sdk=path.join(root,'sdk'),work=path.join(root,'work');
+ data=structuredClone(data);
+ for(const row of data.commands)if(row.name==='chain-dynamic-table')row.stdout=row.stdout.replaceAll('SYNTHETIC_TARGET_SDK',sdk);
  await fs.mkdir(path.join(sdk,'bin'),{recursive:true});
  await fs.mkdir(path.join(sdk,'libexec/compiler'),{recursive:true});
  await fs.mkdir(path.join(sdk,'runtime/lib/linux_x86_64_cjnative'),{recursive:true});
@@ -108,6 +113,12 @@ for(const [target,marker]of [['chain-definition','MACRO_BODY_EXECUTED'],['chain-
  test('synthetic chain restores '+marker+' and keeps existing downstream controls',t=>replay(t,unchanged,'PASS',
   {data:fullRecording,target,complete:true}));
 }
+for(const [name,mutate]of [
+ ['missing',row=>({...row,stdout:''})],
+ ['runpath',row=>({...row,stdout:row.stdout.replace('(RPATH)','(RUNPATH)')})],
+ ['host path',row=>({...row,stdout:row.stdout.replace('/runtime/lib/','/.compiler-exec/runtime/lib/')})],
+])test('synthetic dynamic table rejects '+name,t=>replay(t,mutate,'MACRO_PRODUCER_TARGET_RPATH_MISSING',
+ {data:fullRecording,target:'chain-dynamic-table',complete:true}));
 const replaceLine=line=>row=>({...row,stdout:row.stdout.replace(markerLine,line)});
 const missing=`INSTALLED_MACRO_ASSERT explicit-testmacro-run missing ${marker}`;
 
