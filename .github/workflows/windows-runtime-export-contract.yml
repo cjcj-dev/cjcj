@@ -83,6 +83,9 @@ jobs:
       - name: Verify the installed runtime contract
         shell: bash
         run: npx --yes zx@8 ci/platform_matrix/verify_windows_runtime_exports.mjs --reference-services
+      - name: Compile and run installed native OS consumers
+        shell: bash
+        run: node ci/platform_matrix/windows_runtime_consumers.mjs
       - name: Package and consume the same installed runtime
         shell: bash
         run: npx --yes zx@8 ci/platform_matrix/windows_runtime_package.mjs

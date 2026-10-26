@@ -731,6 +731,11 @@
     "reason": "Requires SDK_NATIVE_INSTALLED_SDK/TEST_ROOT/INPUTS, real paired Linux installed SDK; jobs follow actual resources. Public CLI installs existing std bytes without rebuilding std; missing artifacts, exact native-stage product cut, independent control, restored actual String compile/run. Windows/Darwin native production remains NOT_RUN."
   },
   {
+    "file": "ci/platform_matrix/windows-runtime-consumers.integration.test.mjs",
+    "executor": "manual",
+    "reason": "Requires owned WINDOWS_CONSUMERS_EVIDENCE on controlled Linux worker. Executes installed/package public entries with explicit Windows/compiler/consumer command fixtures and real capture/tar; checks product CMake inputs, IAT invocation, isolated install/unpack origin and child failure propagation. Actual COFF/PE/import-library/Windows OS qualification requires the official Windows runner."
+  },
+  {
     "file": "ci/platform_matrix/windows-runtime-shell.integration.test.mjs",
     "executor": "manual",
     "reason": "Requires owned WINDOWS_SHELL_EVIDENCE, Node registerHooks and Bash on controlled Linux worker. Public Windows entry with explicit host/tool command fixtures exercises real Bash stdin, literal special paths, build/install capture and failure sequencing. Native MSYS/COFF/DLL qualification requires official Windows runner."

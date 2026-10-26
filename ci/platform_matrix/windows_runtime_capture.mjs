@@ -19,14 +19,15 @@ function copyFiles(base,destination,select) {
  }
  return files;
 }
-export async function capture(label,argv) {
+export async function capture(label,argv,options={}) {
  if(!/^[a-z-]+$/.test(label)||!argv.length)throw Error('native command label/argv required');
  const dir=fs.mkdtempSync((fs.mkdirSync(root(),{recursive:true}),path.join(root(),label+'-')));
- const record={label,argv,cwd:process.cwd(),started:new Date().toISOString()};
+ const record={label,argv,cwd:options.cwd||process.cwd(),started:new Date().toISOString()};
+ if(options.env)record.path=Object.entries(options.env).find(([key])=>key.toLowerCase()==='path')?.[1];
  fs.writeFileSync(path.join(dir,'command.json'),JSON.stringify(record,null,2));
  for(const [i,arg]of argv.entries())if(arg.startsWith('@')&&fs.existsSync(arg.slice(1)))fs.copyFileSync(arg.slice(1),path.join(dir,'response-'+i+'.txt'));
  const stdout=fs.openSync(path.join(dir,'stdout.log'),'w'),stderr=fs.openSync(path.join(dir,'stderr.log'),'w');
- const child=spawn(argv[0],argv.slice(1),{stdio:['inherit','pipe','pipe'],windowsHide:true});
+ const child=spawn(argv[0],argv.slice(1),{cwd:record.cwd,env:options.env||process.env,stdio:['inherit','pipe','pipe'],windowsHide:true});
  child.stdout.on('data',b=>{fs.writeSync(stdout,b);process.stdout.write(b);});child.stderr.on('data',b=>{fs.writeSync(stderr,b);process.stderr.write(b);});
  const interrupt=()=>child.kill('SIGINT'),terminate=()=>child.kill('SIGTERM');process.on('SIGINT',interrupt);process.on('SIGTERM',terminate);
  const result=await new Promise(resolve=>{let error;child.once('error',e=>{error=String(e);});child.once('close',(rc,signal)=>resolve({rc:error?null:rc,signal,error}));});

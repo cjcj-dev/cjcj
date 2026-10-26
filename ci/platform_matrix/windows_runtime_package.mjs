@@ -3,6 +3,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {capture} from './windows_runtime_capture.mjs';
+import {runConsumers} from './windows_runtime_consumers.mjs';
 const root=path.resolve(process.env.PLATFORM_CI_ROOT||'.platform-ci');
 const install=path.join(root,'runtime-install'),restored=path.join(root,'runtime-unpacked'),archive=path.join(root,'runtime-install.tar');
 await fs.mkdir(restored); // never adopt an old unpacked installation
@@ -19,4 +20,4 @@ const expected=await definition(restored);if(!expected)throw Error('unpacked reg
 const entry=path.join(import.meta.dirname,'verify_windows_runtime_exports.mjs');
 const result=await $({nothrow:true})`npx --yes zx@8 ${entry} ${restored} --expected-def ${expected} --reference-services`;
 await fs.writeFile(path.join(root,'unpacked-consumer.json'),JSON.stringify({archive,restored,expected,rc:result.exitCode,signal:result.signal}));
-process.exitCode=result.exitCode;
+process.exitCode=result.exitCode||await runConsumers(restored,'unpacked');
