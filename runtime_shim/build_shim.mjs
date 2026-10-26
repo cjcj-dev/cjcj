@@ -58,6 +58,16 @@ async function isFile(target) {
 await $`${ccLauncher} ${cc} -std=c11 -O2 -fPIC -D_POSIX_C_SOURCE=200809L ${commitDefine} -c ${here}/cjc_runtime_config.c -o ${here}/cjc_runtime_config.o`;
 console.log(`CJCJ_COMMIT=${cjcjCommit}`);
 
+// This is a compiler component, not a runtime ABI change. Install it beside
+// the selected target runtime; $ORIGIN must survive linking literally. Query
+// the compiler target instead of the build machine (Windows cross builds).
+const ccTarget = (await $({quiet: true, stdio: 'pipe'})`${cc} -dumpmachine`).stdout.trim();
+if (ccTarget.includes('linux') && !ccTarget.includes('android')) {
+  const loader = `${here}/libcjcj-macro-loader.so`;
+  await $`${ccLauncher} ${cc} -std=c11 -O2 -fPIC -fno-optimize-sibling-calls -fvisibility=hidden -shared ${here}/cjc_macro_loader.c -Wl,--disable-new-dtags ${'-Wl,-rpath,$ORIGIN'} -Wl,-soname,libcjcj-macro-loader.so -o ${loader} -ldl`;
+  console.log(`built: ${loader}`);
+}
+
 // The caller validates an explicitly selected installed object. Without one,
 // always compile the current translation unit against the selected header tree.
 // A local .o can belong to a previous tuple even when it has a newer mtime;

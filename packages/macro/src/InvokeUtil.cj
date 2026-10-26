@@ -561,21 +561,6 @@ private func OpenInLinkMap(libPath: String, lmid: Int64): RuntimeHandle {
 }
 
 @When[os == "Linux"]
-private func NativePathExists(libPath: String): Bool {
-    var found = false
-    try (path = unsafe { LibC.mallocCString(libPath) }.asResource()) {
-        let realpathRes = unsafe { realpath(path.value, CString(CPointer<UInt8>())) }
-        if (!realpathRes.isNull()) {
-            unsafe { free(realpathRes) }
-            found = true
-        }
-    } catch (e: Exception) {
-        found = false
-    }
-    return found
-}
-
-@When[os == "Linux"]
 private func ReadLinkMapId(raw: CPointer<Unit>): Option<Int64> {
     if (raw.isNull()) {
         return None
@@ -596,34 +581,12 @@ private func ReadLinkMapId(raw: CPointer<Unit>): Option<Int64> {
     return result
 }
 
-// Sibling cangjie libs share the admission image's directory. Load them into
-// that link map before the macro so their SONAME is already satisfied there,
-// instead of by the process LD_LIBRARY_PATH.
-@When[os == "Linux"]
-private func PreloadAdmissionSiblings(runtimeLibPath: String, lmid: Int64): Bool {
-    let dir = FileUtil.GetDirPath(runtimeLibPath)
-    let names = ["libboundscheck.so", "libcangjie-std-core.so", "libcangjie-std-math.so",
-        "libcangjie-std-collection.so", "libcangjie-std-sort.so", "libcangjie-std-ast.so"]
-    for (name in names) {
-        let full = FileUtil.JoinPath(dir, name)
-        if (!NativePathExists(full)) {
-            continue
-        }
-        let opened = OpenInLinkMap(full, lmid)
-        if (!opened.opened) {
-            return false
-        }
-        opened.retain = true
-    }
-    return true
-}
-
 @When[os == "Linux"]
 private func OpenMacroInNamespace(path: String): Option<RuntimeHandle> {
     if (!RuntimeInit.GetInstance().HasLinkMap()) {
         return None<RuntimeHandle>
     }
-    let handle = OpenInLinkMap(path, RuntimeInit.GetInstance().LinkMapId())
+    let handle = RuntimeInit.GetInstance().OpenAdmissionLibrary(path)
     if (handle.opened) {
         handle.retain = true
     }
@@ -849,6 +812,9 @@ public class RuntimeInit {
     public var taskOnOpenedRuntime: Bool = false
     private var hasLinkMap: Bool = false
     private var linkMapId: Int64 = 0
+    private var namespaceLoader: Option<RuntimeHandle> = None
+    private var namespaceOpen: CPointer<Unit> = CPointer<Unit>()
+    private var namespaceError: CPointer<Unit> = CPointer<Unit>()
 
     public init() {}
 
@@ -866,10 +832,38 @@ public class RuntimeInit {
         return linkMapId
     }
 
-    // Process image has no CJ_MCC_PackageInitBegin. Open that image in a new
-    // link map so the macro's MRT_LibraryOnLoad and N2C bind there
-    // (Cjstart.S .init_array, PackageInit.cpp:241-252). LoadCJLibrary cannot
-    // do this: Loader.cpp:18 dlopens into the base namespace.
+    @When[os == "Linux"]
+    public func OpenAdmissionLibrary(libPath: String): RuntimeHandle {
+        var result = RuntimeHandle()
+        if (namespaceOpen.isNull()) { return result }
+        try (path = unsafe { LibC.mallocCString(libPath) }.asResource()) {
+            let absolute = unsafe { realpath(path.value, CString(CPointer<UInt8>())) }
+            if (absolute.isNull()) {
+                Errorln("could not get realpath of library: " + libPath)
+                return result
+            }
+            var raw = CPointer<Unit>()
+            try {
+                raw = unsafe { CFunc<(CString) -> CPointer<Unit>>(namespaceOpen)(absolute) }
+            } finally {
+                unsafe { free(absolute) }
+            }
+            result = RuntimeHandle(libPath, raw: raw)
+            if (!result.opened) {
+                Errorln("could not load the dynamic library: " + libPath)
+                let error = unsafe { CFunc<() -> CString>(namespaceError)() }
+                if (!error.isNull()) { Errorln(error.toString()) }
+            }
+        } catch (e: Exception) {
+            return RuntimeHandle()
+        }
+        return result
+    }
+
+    // The private native caller contributes the target SDK's inherited RPATH
+    // to dlopen. Direct dlmopen of an absolute macro path from this host cannot
+    // do that. No fixed list of std DSOs or process LD_LIBRARY_PATH mutation is
+    // involved. RTLD_LOCAL also avoids RTLD_GLOBAL in a non-base namespace.
     @When[os == "Linux"]
     private func BindAdmissionNamespace(runtimeLibPath: String, initArgs: ArrayList<(String, String)>): Option<Bool> {
         let opened = OpenInLinkMap(runtimeLibPath, LM_ID_NEWLM)
@@ -882,15 +876,31 @@ public class RuntimeInit {
             handle = None
             return None<Bool>
         }
-        if (!PrepareRuntime(opened, initArgs)) {
-            return Some(false)
-        }
         let mapId = ReadLinkMapId(opened.raw)
         if (let None <- mapId) {
             return Some(false)
         }
         let lmid = mapId.getOrThrow()
-        if (!PreloadAdmissionSiblings(runtimeLibPath, lmid)) {
+        let loaderPath = FileUtil.JoinPath(FileUtil.GetDirPath(runtimeLibPath), "libcjcj-macro-loader.so")
+        let loader = OpenInLinkMap(loaderPath, lmid)
+        if (!loader.opened) {
+            return Some(false)
+        }
+        let openFunction = GetMethodPointer(loader, "CjcjMacroOpen")
+        let errorFunction = GetMethodPointer(loader, "CjcjMacroError")
+        if (openFunction.isNull() || errorFunction.isNull()) {
+            let _ = CloseSymbolTable(loader)
+            Errorln("missing compiler macro loader exports: " + loaderPath)
+            return Some(false)
+        }
+        loader.retain = true
+        namespaceLoader = Some(loader)
+        namespaceOpen = openFunction
+        namespaceError = errorFunction
+        // Once runtime initialization starts it can own live native threads.
+        // Keep both namespace images mapped even if initialization later fails.
+        opened.retain = true
+        if (!PrepareRuntime(opened, initArgs)) {
             return Some(false)
         }
         runtimeMethodFunc = GetMethodPointer(opened, CJ_NEW_TASK_FROM_C)
@@ -1000,6 +1010,9 @@ public class RuntimeInit {
         taskOnOpenedRuntime = false
         hasLinkMap = false
         linkMapId = 0
+        namespaceLoader = None
+        namespaceOpen = CPointer<Unit>()
+        namespaceError = CPointer<Unit>()
         // C++ InvokeUtil.cpp:113-129 finishes its runtime before unloading images.
         // This Cangjie host still needs its runtime and registered image metadata.
         // Keep macro images alive until the host process shuts down naturally.

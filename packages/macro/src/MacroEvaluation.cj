@@ -696,6 +696,9 @@ public class MacroEvaluation {
         let runtimeReady = RuntimeInit.GetInstance().InitRuntime(ci.GetRuntimeLibPath(), initArgs: initArgs)
         if (runtimeReady) {
             EvalMacros()
+        } else {
+            ci.GetDiag().Diagnose(DEFAULT_POSITION,
+                "Cannot initialize macro runtime: " + ci.GetRuntimeLibPath())
         }
     }
 

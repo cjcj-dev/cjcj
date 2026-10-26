@@ -119,18 +119,22 @@ extend MacroEvaluation {
         for ((key, value) in ci.GetGlobalOptions().environment.allVariables) {
             initArgs.add((key, value))
         }
-        let _ = RuntimeInit.GetInstance().InitRuntime(ci.GetRuntimeLibPath(), initArgs: initArgs)
+        let runtimeReady = RuntimeInit.GetInstance().InitRuntime(ci.GetRuntimeLibPath(), initArgs: initArgs)
         let msger = MacroProcMsger.GetInstance()
         unsafe {
             let _ = close((msger.pipefdP2C + 1).read())
             let _ = close(msger.pipefdC2P.read())
         }
-        ExecuteEvalSrvTask()
+        if (runtimeReady) {
+            ExecuteEvalSrvTask()
+        } else {
+            Errorln("Cannot initialize macro runtime: " + ci.GetRuntimeLibPath())
+        }
         RuntimeInit.GetInstance().CloseRuntime()
         unsafe {
             let _ = close(msger.pipefdP2C.read())
             let _ = close((msger.pipefdC2P + 1).read())
-            exit(0)
+            exit(if (runtimeReady) { 0 } else { 1 })
         }
     }
 
