@@ -854,5 +854,45 @@
     "file": "packages/chir/src/ReachingDefinitionAnalysis_test.cj",
     "executor": "cjpm",
     "member": "packages/chir"
+  },
+  {
+    "file": "build/test/platform-link-options.test.mjs",
+    "executor": "zx",
+    "args": []
+  },
+  {
+    "file": "packages/basic/src/MacroCallDiagInfo_test.cj",
+    "executor": "cjpm",
+    "member": "packages/basic"
+  },
+  {
+    "file": "packages/chir/src/CapturedConstructorReturn_test.cj",
+    "executor": "cjpm",
+    "member": "packages/chir"
+  },
+  {
+    "file": "packages/chir/src/ConstructorReceiver_test.cj",
+    "executor": "cjpm",
+    "member": "packages/chir"
+  },
+  {
+    "file": "packages/chir/src/RedundantFutureRemoval_test.cj",
+    "executor": "cjpm",
+    "member": "packages/chir"
+  },
+  {
+    "file": "packages/chir/src/SignedMinRemainder_test.cj",
+    "executor": "cjpm",
+    "member": "packages/chir"
+  },
+  {
+    "file": "packages/compiler_unittest/src/ConstructorReceiver_test.cj",
+    "executor": "cjpm",
+    "member": "packages/compiler_unittest"
+  },
+  {
+    "file": "packages/parse/src/InteropAnnotation_test.cj",
+    "executor": "cjpm",
+    "member": "packages/parse"
   }
 ]
