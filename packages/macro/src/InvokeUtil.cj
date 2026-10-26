@@ -206,9 +206,14 @@ struct RuntimeGCParamC {
     let garbageThreshold: Float64
     let gcInterval: UInt64
     let backupGCInterval: UInt64
+    let parallelGCThreads: UInt32
     let concGCThreads: UInt32
     let youngGCThreads: UInt32
     let oldGCThreads: UInt32
+    let parallelGCThreadsSet: Bool
+    let concGCThreadsSet: Bool
+    let youngGCThreadsSet: Bool
+    let oldGCThreadsSet: Bool
     let staticGCThreads: Bool
     let maxTenuringThreshold: UInt32
     let zTenuringThreshold: Int32
@@ -216,16 +221,23 @@ struct RuntimeGCParamC {
     let zTenuringThresholdSet: Bool
 
     init(gcThreshold: UIntNative, garbageThreshold: Float64, gcInterval: UInt64,
-        backupGCInterval: UInt64, concGCThreads: UInt32, youngGCThreads: UInt32, oldGCThreads: UInt32,
+        backupGCInterval: UInt64, parallelGCThreads: UInt32, concGCThreads: UInt32,
+        youngGCThreads: UInt32, oldGCThreads: UInt32, parallelGCThreadsSet: Bool,
+        concGCThreadsSet: Bool, youngGCThreadsSet: Bool, oldGCThreadsSet: Bool,
         staticGCThreads: Bool, maxTenuringThreshold: UInt32, zTenuringThreshold: Int32,
         maxTenuringThresholdSet: Bool, zTenuringThresholdSet: Bool) {
         this.gcThreshold = gcThreshold
         this.garbageThreshold = garbageThreshold
         this.gcInterval = gcInterval
         this.backupGCInterval = backupGCInterval
+        this.parallelGCThreads = parallelGCThreads
         this.concGCThreads = concGCThreads
         this.youngGCThreads = youngGCThreads
         this.oldGCThreads = oldGCThreads
+        this.parallelGCThreadsSet = parallelGCThreadsSet
+        this.concGCThreadsSet = concGCThreadsSet
+        this.youngGCThreadsSet = youngGCThreadsSet
+        this.oldGCThreadsSet = oldGCThreadsSet
         this.staticGCThreads = staticGCThreads
         this.maxTenuringThreshold = maxTenuringThreshold
         this.zTenuringThreshold = zTenuringThreshold
@@ -311,10 +323,19 @@ public let GC_THRESHOLD: UIntNative = 0
 public let GARBAGE_THRESHOLD: Float64 = 0.5
 public let GC_INTERVAL: UInt64 = 150
 public let BACKUP_GC_INTERVAL: UInt64 = 0
+// R ee7cd Cangjie.h GCParam: keep worker counts and their origin bits in
+// declaration order. ZGC zArguments.cpp:56-83 distinguishes a default zero
+// budget from an explicitly supplied one; macro configuration leaves both
+// the counts and origin bits unset so the runtime performs its normal selection.
 // Zero worker budgets and unset thresholds select runtime ergonomics.
+public let PARALLEL_GC_THREADS: UInt32 = 0
 public let CONC_GC_THREADS: UInt32 = 0
 public let YOUNG_GC_THREADS: UInt32 = 0
 public let OLD_GC_THREADS: UInt32 = 0
+public let PARALLEL_GC_THREADS_SET: Bool = false
+public let CONC_GC_THREADS_SET: Bool = false
+public let YOUNG_GC_THREADS_SET: Bool = false
+public let OLD_GC_THREADS_SET: Bool = false
 public let STATIC_GC_THREADS: Bool = false
 public let MAX_TENURING_THRESHOLD: UInt32 = 15
 public let Z_TENURING_THRESHOLD: Int32 = -1
@@ -450,7 +471,8 @@ private func makeRuntimeConfig(envs: ArrayList<(String, String)>): RuntimeConfig
         RuntimeHeapParamC(REGION_SIZE, heapSize, EXEMPTION_THRESHOLD, HEAP_UTILIZATION, HEAP_GROWTH,
             getRuntimeEnv(envs, CJ_HEAP_SIZE).isSome() || HEAP_SIZE_SET, SOFT_HEAP_SIZE, SOFT_HEAP_SIZE_SET),
         RuntimeGCParamC(GC_THRESHOLD, GARBAGE_THRESHOLD, GC_INTERVAL, BACKUP_GC_INTERVAL,
-            CONC_GC_THREADS, YOUNG_GC_THREADS, OLD_GC_THREADS, STATIC_GC_THREADS,
+            PARALLEL_GC_THREADS, CONC_GC_THREADS, YOUNG_GC_THREADS, OLD_GC_THREADS,
+            PARALLEL_GC_THREADS_SET, CONC_GC_THREADS_SET, YOUNG_GC_THREADS_SET, OLD_GC_THREADS_SET, STATIC_GC_THREADS,
             MAX_TENURING_THRESHOLD, Z_TENURING_THRESHOLD, MAX_TENURING_THRESHOLD_SET, Z_TENURING_THRESHOLD_SET),
         RuntimeLogParamC(5),
         RuntimeConcurrencyParamC(STACK_SIZE, GetStackSizeFromEnv(envs), PROCESSOR_NUM))
