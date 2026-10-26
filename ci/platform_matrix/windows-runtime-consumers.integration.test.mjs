@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
+import {verifiedTool} from '../test-zx.mjs';
+const zxTool=verifiedTool();
 
 // Executes the public entries and real child capture/tar. Tool commands and
 // Windows platform are explicit fixtures: these results do not qualify PE/OS.
@@ -29,7 +31,24 @@ function fixture() {
  for(const name of ['windows_n2c_os_unwind.cpp','windows_exception_return_os.cpp','windows_exception_frames.cpp','gc_unit/test_unwind_regressions.cpp'])put(path.join(runtime,'tests',name),'explicit consumer source command fixture');
  put(path.join(runtime,'tests/windows_exception_imports.mjs'),`import fs from 'node:fs';fs.appendFileSync(process.env.CONSUMER_CALLS,JSON.stringify({kind:'imports',args:process.argv.slice(2)})+'\\n');process.exitCode=Number(process.env.FIXTURE_IMPORTS_RC||0);`);
  const hooks=path.join(root,'host.mjs');
- put(hooks,`import fs from 'node:fs';Object.defineProperty(process,'platform',{value:'win32'});globalThis.$=()=>async(strings,...values)=>{fs.appendFileSync(process.env.CONSUMER_CALLS,JSON.stringify({kind:'verifier',values})+'\\n');const states={nonzero:{exitCode:19,signal:null},signal:{exitCode:null,signal:'SIGTERM'},launch:{exitCode:null,signal:null,error:Error('ENOENT explicit launch fixture')},'zero-signal':{exitCode:0,signal:'SIGTERM'},'zero-error':{exitCode:0,signal:null,error:Error('explicit process error')}};return states[process.env.FIXTURE_VERIFIER_STATE]||{exitCode:0,signal:null};};`);
+ put(hooks,`import fs from 'node:fs';
+import assert from 'node:assert/strict';
+import {createRequire} from 'node:module';
+const {ProcessOutput,$:zx$}=createRequire(${JSON.stringify(zxTool.packageFile)})('zx');
+const state=process.env.FIXTURE_VERIFIER_STATE;
+// Obtain a real nothrow ProcessOutput from a failed spawn before simulating Windows.
+const launch=state==='launch'?await zx$({shell:${JSON.stringify(path.join(root,'missing-shell'))},nothrow:true,quiet:true})\`exit 0\`:null;
+Object.defineProperty(process,'platform',{value:'win32'});
+globalThis.$=()=>async(strings,...values)=>{
+ const states={nonzero:new ProcessOutput(19),signal:new ProcessOutput(null,'SIGTERM'),launch,
+  'zero-signal':new ProcessOutput(0,'SIGTERM'),
+  'zero-error':new ProcessOutput({code:0,signal:null,error:Error('explicit ProcessOutput cause'),duration:0,from:'public constructor fixture',store:{stdout:[],stderr:[],stdall:[]}})};
+ const output=states[state]||new ProcessOutput(0);
+ assert(output instanceof ProcessOutput);assert.equal(output.error,undefined);
+ if(state==='launch'){assert.equal(output.cause.code,'ENOENT');assert.equal(output.ok,false);}
+ fs.appendFileSync(process.env.CONSUMER_CALLS,JSON.stringify({kind:'verifier',values,type:output.constructor.name,ok:output.ok,rc:output.exitCode,signal:output.signal,cause:output.cause?{name:output.cause.name,message:output.cause.message,code:output.cause.code,stack:output.cause.stack}:null})+'\\n');
+ return output;
+};`);
  const env={...process.env,PLATFORM_CI_ROOT:output,RUNTIME_SOURCE:source,WINDOWS_RUNTIME_EVIDENCE:path.join(output,'windows-native'),CONSUMER_CALLS:calls};
  function run(entry,extra=[],overrides={}) {
   const argv=[process.execPath,'--import',hooks,path.resolve('ci/platform_matrix/'+entry),...extra];
@@ -97,7 +116,14 @@ for(const state of ['nonzero','signal','launch','zero-signal','zero-error'])test
  assert.equal(summary.rc,r.status);assert.equal(summary.native.status,'NOT_RUN');
  assert.equal(summary.verifier.rc,state==='nonzero'?19:state.startsWith('zero-')?0:null);
  assert.equal(summary.verifier.signal,state.includes('signal')?'SIGTERM':null);
- if(state==='launch'||state==='zero-error')assert.ok(summary.verifier.error);
+ assert.equal(summary.verifier.ok,events.find(e=>e.kind==='verifier').ok);
+ if(state==='launch'||state==='zero-error'){
+  console.log('VERIFIER_CAUSE_TARGET_REACHED '+state);
+  const actual=events.find(e=>e.kind==='verifier');
+  assert.equal(actual.ok,false);assert.ok(actual.cause?.message);
+  assert.deepEqual(summary.verifier.cause,actual.cause,'preserve the real ProcessOutput cause');
+  if(state==='launch')assert.equal(summary.verifier.cause.code,'ENOENT');
+ }else assert.equal(summary.verifier.cause,null);
 });
 for(const [key,code,stoppedKind]of [['FIXTURE_COMPILE_RC',31,'run'],['FIXTURE_IMPORTS_RC',32,'frames-link'],['FIXTURE_RUN_RC',33,'second-compile']])test('consumer failure preserves '+key,()=>{
  const f=fixture(),r=f.run('windows_runtime_consumers.mjs',[],{[key]:String(code)});

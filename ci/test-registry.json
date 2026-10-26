@@ -733,7 +733,7 @@
   {
     "file": "ci/platform_matrix/windows-runtime-consumers.integration.test.mjs",
     "executor": "manual",
-    "reason": "Requires owned WINDOWS_CONSUMERS_EVIDENCE on controlled Linux worker. Executes installed/package public entries with explicit Windows/compiler/consumer command fixtures and real capture/tar; checks product CMake inputs, IAT invocation, isolated install/unpack origin and child failure propagation. Actual COFF/PE/import-library/Windows OS qualification requires the official Windows runner."
+    "reason": "Requires formal CJCJ_TEST_ZX_RECEIPT (real ProcessOutput), owned WINDOWS_CONSUMERS_EVIDENCE on controlled Linux worker. Executes installed/package public entries with explicit Windows/compiler/consumer command fixtures and real capture/tar; checks product CMake inputs, IAT invocation, isolated install/unpack origin and child failure propagation. Actual COFF/PE/import-library/Windows OS qualification requires the official Windows runner."
   },
   {
     "file": "ci/platform_matrix/windows-runtime-shell.integration.test.mjs",
