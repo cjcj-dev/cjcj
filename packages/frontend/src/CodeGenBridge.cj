@@ -767,9 +767,15 @@ private class ToCHIR {
         }
         builderTaskQueue.RunAndWaitForAllTasksCompleted()
         let builderList = ArrayList<ChirBuilder>()
+        var firstFailure: Option<Exception> = None
         for (result in results) {
-            builderList.add(result.get())
+            try {
+                builderList.add(result.get())
+            } catch (e: Exception) {
+                if (firstFailure.isNone()) { firstFailure = Some(e) }
+            }
         }
+        if (let Some(e) <- firstFailure) { throw e }
         return builderList
     }
 
@@ -805,18 +811,20 @@ private class ToCHIR {
                 let builderList = ConstructSubBuilders(threadNum, funcNum)
                 let taskQueue = TaskQueue(threadNum)
                 let propagationList = ArrayList<RangePropagation>()
+                let results = ArrayList<TaskResult<Unit>>()
                 var index: Int64 = 0
                 while (index < funcNum) {
                     let funcValue = globalFuncs[index]
                     let rangePropagation = RangePropagation(builderList[index], rangeAnalysisWrapper,
                         instance.diag.AsBasicDiagnosticEngine(), options.enIncrementalCompilation)
-                    let _ = taskQueue.AddTask<Unit>({ =>
+                    results.add(taskQueue.AddTask<Unit>({ =>
                         rangePropagation.RunOnFunc(funcValue, options.chirDebugOptimizer)
-                    })
+                    }))
                     propagationList.add(rangePropagation)
                     index++
                 }
                 taskQueue.RunAndWaitForAllTasksCompleted()
+                ConsumeCHIRPassResults(results)
                 for (rangePropagation in propagationList) {
                     MergeEffectMap(rangePropagation.GetEffectMap(), effectMap)
                     dce.UnreachableBlockElimination(rangePropagation.GetFuncsNeedRemoveBlocks(),
@@ -1101,9 +1109,15 @@ private func ConstructSubBuilders(builder: ChirBuilder, threadNum: Int64,
     }
     builderTaskQueue.RunAndWaitForAllTasksCompleted()
     let builderList = ArrayList<ChirBuilder>()
+    var firstFailure: Option<Exception> = None
     for (result in results) {
-        builderList.add(result.get())
+        try {
+            builderList.add(result.get())
+        } catch (e: Exception) {
+            if (firstFailure.isNone()) { firstFailure = Some(e) }
+        }
     }
+    if (let Some(e) <- firstFailure) { throw e }
     return builderList
 }
 
@@ -1124,17 +1138,19 @@ private func RunConstantPropagation(pkg: RealCHIRPackage, builder: ChirBuilder, 
         let builderList = ConstructSubBuilders(builder, threadNum, funcNum)
         let taskQueue = TaskQueue(threadNum)
         let cpList = ArrayList<ConstPropagation>()
+        let results = ArrayList<TaskResult<Unit>>()
         var index: Int64 = 0
         while (index < funcNum) {
             let funcValue = globalFuncs[index]
             let cp = ConstPropagation(builder: Some(builderList[index]), wrapper: wrapper, opts: options)
-            let _ = taskQueue.AddTask<Unit>({ =>
+            results.add(taskQueue.AddTask<Unit>({ =>
                 cp.RunOnFunc(funcValue, isDebug: options.chirDebugOptimizer, isCJLint: false)
-            })
+            }))
             cpList.add(cp)
             index++
         }
         taskQueue.RunAndWaitForAllTasksCompleted()
+        ConsumeCHIRPassResults(results)
         for (cp in cpList) {
             MergeEffectMap(cp.GetEffectMap(), effectMap)
             dce.UnreachableBlockElimination(cp.GetFuncsNeedRemoveBlocks(),
@@ -1145,6 +1161,20 @@ private func RunConstantPropagation(pkg: RealCHIRPackage, builder: ChirBuilder, 
         }
         builder.context.MergeTypes()
     }
+}
+
+// Workers are joined by each caller. On failure, do not merge partial pass
+// effects or start the next phase; the compiler owner releases its CHIR graph.
+private func ConsumeCHIRPassResults(results: ArrayList<TaskResult<Unit>>): Unit {
+    var firstFailure: Option<Exception> = None
+    for (result in results) {
+        try {
+            result.get()
+        } catch (e: Exception) {
+            if (firstFailure.isNone()) { firstFailure = Some(e) }
+        }
+    }
+    if (let Some(e) <- firstFailure) { throw e }
 }
 
 private func RunVarInitChecking(pkg: RealCHIRPackage, diag: BasicDiagnosticEngine, jobs: UInt64): Bool {
@@ -1183,12 +1213,29 @@ public func GenPackageModules(instance: CompilerInstance, enableIncrement: Bool,
     noWriteBarrierRecChecker.RunOnPackage(realPackage)
     let packageModules = CodegenGenPackageModules(codegenData, codegenOptions, enableIncrement,
         noHeapAllocChecker, noWriteBarrierRecChecker, cachedMangleMap: cachedMangleMap)
-    if (instance.diag.GetErrorCount() != 0) {
-        instance.diag.EmitCategoryDiagnostics(DiagCategory.CHIR)
-        ClearPackageModules(packageModules)
-        return llvmModules
+    var transferred = false
+    var failed = false
+    try {
+        if (instance.diag.GetErrorCount() != 0) {
+            instance.diag.EmitCategoryDiagnostics(DiagCategory.CHIR)
+            return llvmModules
+        }
+        transferred = true
+        return packageModules
+    } catch (e: Exception) {
+        failed = true
+        throw e
+    } finally {
+        // Until return transfers the array to Emit, this scope owns it even
+        // when diagnostic emission throws. Never mask that first exception.
+        if (!transferred) {
+            try {
+                ClearPackageModules(packageModules)
+            } catch (e: Exception) {
+                if (!failed) { throw e }
+            }
+        }
     }
-    return packageModules
 }
 
 // C++: FrontendTool/DefaultCompilerInstance.cpp:252-299.
@@ -1208,7 +1255,8 @@ public func EmitLLVMSimilarBytecode(instance: CompilerInstance, enableIncrement:
         if (instance.diag.GetErrorCount() != 0) {
             return false
         }
-        try (recorder = ProfileRecorder("CodeGen", "Save bc file")) {
+        let recorder = ProfileRecorder("CodeGen", "Save bc file")
+        try {
             instance.invocation.globalOptions.UpdateCachedDirName(fullPackageName)
             let allBCFilePath = ArrayList<String>()
             for (index in 0..llvmModules.size) {
@@ -1235,6 +1283,8 @@ public func EmitLLVMSimilarBytecode(instance: CompilerInstance, enableIncrement:
                 }
             }
             return true
+        } finally {
+            recorder.close()
         }
     } catch (e: Exception) {
         failed = true

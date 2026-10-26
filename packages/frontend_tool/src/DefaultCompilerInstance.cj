@@ -456,8 +456,11 @@ private func FrontendToolStageFromIndex(idx: Int64): CompileStage {
 }
 
 private func ProfiledBool(title: String, subtitle: String, action: () -> Bool): Bool {
-    try (recorder = ProfileRecorder(title, subtitle)) {
+    let recorder = ProfileRecorder(title, subtitle)
+    try {
         return action()
+    } finally {
+        recorder.close()
     }
 }
 

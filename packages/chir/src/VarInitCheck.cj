@@ -46,8 +46,17 @@ public class VarInitCheck {
             }))
         }
         taskQueue.RunAndWaitForAllTasksCompleted()
+        let completed = ArrayList<CHIRCheckResult>()
+        var firstFailure: Option<Exception> = None
         for (taskResult in taskResults) {
-            let fnResult = taskResult.get()
+            try {
+                completed.add(taskResult.get())
+            } catch (e: Exception) {
+                if (firstFailure.isNone()) { firstFailure = Some(e) }
+            }
+        }
+        if (let Some(e) <- firstFailure) { throw e }
+        for (fnResult in completed) {
             var idx: Int64 = 0
             while (idx < fnResult.errors.size) {
                 checkResult.AddError(fnResult.errors[idx])

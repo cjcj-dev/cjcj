@@ -37,7 +37,8 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
     }
 
     public override func PerformIncrementalScopeAnalysis(): Bool {
-        try (recorder = ProfileRecorder("Main Stage", "AST Diff")) {
+        let recorder = ProfileRecorder("Main Stage", "AST Diff")
+        try {
             let sourcePackages = core.GetSourcePackages()
             CJC_ASSERT(sourcePackages.size == 1)
             let packageValue = sourcePackages[0]
@@ -85,6 +86,8 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
             increRes.Dump()
             SaveCompilationResult(increRes)
             return true
+        } finally {
+            recorder.close()
         }
     }
 
@@ -129,7 +132,8 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
     }
 
     public override func PerformSema(): Bool {
-        try (recorder = ProfileRecorder("Main Stage", "Semantic")) {
+        let recorder = ProfileRecorder("Main Stage", "Semantic")
+        try {
             let logger = IncrementalCompilationLogger.GetInstance()
             if (logger.IsEnable()) {
                 let message = if (kind == IncreKind.NO_CHANGE) { "no change, skip sema" } else if (
@@ -179,26 +183,34 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
             }
             let ret = super.PerformSema()
             return ret
+        } finally {
+            recorder.close()
         }
     }
 
     public override func PerformOverflowStrategy(): Bool {
-        try (recorder = ProfileRecorder("Main Stage", "Overflow Strategy")) {
+        let recorder = ProfileRecorder("Main Stage", "Overflow Strategy")
+        try {
             if (kind == IncreKind.NO_CHANGE || kind == IncreKind.EMPTY_PKG) {
                 return true
             }
             let ret = super.PerformOverflowStrategy()
             return ret
+        } finally {
+            recorder.close()
         }
     }
 
     public override func PerformDesugarAfterSema(): Bool {
-        try (recorder = ProfileRecorder("Main Stage", "Desugar after Sema")) {
+        let recorder = ProfileRecorder("Main Stage", "Desugar after Sema")
+        try {
             if (kind == IncreKind.NO_CHANGE || kind == IncreKind.EMPTY_PKG) {
                 return true
             }
             let ret = super.PerformDesugarAfterSema()
             return ret
+        } finally {
+            recorder.close()
         }
     }
 
@@ -257,7 +269,8 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
     }
 
     public override func PerformCHIRCompilation(): Bool {
-        try (recorder = ProfileRecorder("Main Stage", "CHIR")) {
+        let recorder = ProfileRecorder("Main Stage", "CHIR")
+        try {
             if (kind == IncreKind.NO_CHANGE || kind == IncreKind.EMPTY_PKG) {
                 return true
             }
@@ -270,11 +283,14 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
                     core.cachedInfo.varInitDepMap)
             }
             return ret
+        } finally {
+            recorder.close()
         }
     }
 
     public override func PerformCodeGen(): Bool {
-        try (recorder = ProfileRecorder("Main Stage", "CodeGen")) {
+        let recorder = ProfileRecorder("Main Stage", "CodeGen")
+        try {
             if (kind == IncreKind.NO_CHANGE) {
                 // C++ src/FrontendTool/IncrementalCompilerInstance.cpp:481-488 (7a1666e7).
                 LoadCachedCodegenResult()
@@ -289,6 +305,8 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
                 RegisterCjoOutputs(core.GetSourcePackages())
             }
             return ret
+        } finally {
+            recorder.close()
         }
     }
 
@@ -313,7 +331,8 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
     }
 
     public override func PerformResultsSaving(): Bool {
-        try (recorder = ProfileRecorder("Main Stage", "Save results")) {
+        let recorder = ProfileRecorder("Main Stage", "Save results")
+        try {
             if (kind == IncreKind.NO_CHANGE || kind == IncreKind.EMPTY_PKG) {
                 return true
             }
@@ -328,6 +347,8 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
                 }
             }
             return ret
+        } finally {
+            recorder.close()
         }
     }
 

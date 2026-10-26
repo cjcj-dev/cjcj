@@ -66,7 +66,8 @@ private func InitIncrementalGen(cgPkgContext: CGPkgContext): Bool {
         cgPkgContext.GetGlobalOptions().codegenDebugMode) { 1 } else { cgModules.size }
     if (threadNum == 1) {
         for (cgModule in cgModules) {
-            result = result && cgModule.InitIncrementalGen()
+            let initialized = cgModule.InitIncrementalGen()
+            result = initialized && result
         }
     } else {
         let taskQueueInitIncrementalGen = TaskQueue(threadNum)
@@ -75,9 +76,16 @@ private func InitIncrementalGen(cgPkgContext: CGPkgContext): Bool {
             results.add(taskQueueInitIncrementalGen.AddTask<Bool>({ => cgModule.InitIncrementalGen() }))
         }
         taskQueueInitIncrementalGen.RunAndWaitForAllTasksCompleted()
+        var firstFailure: Option<Exception> = None
         for (taskResult in results) {
-            result = result && taskResult.get()
+            try {
+                let initialized = taskResult.get()
+                result = initialized && result
+            } catch (e: Exception) {
+                if (firstFailure.isNone()) { firstFailure = Some(e) }
+            }
         }
+        if (let Some(e) <- firstFailure) { throw e }
     }
     return result
 }
@@ -141,49 +149,67 @@ private func GenSubCHIRPackagePart2(cgMod: CGModule): Unit {
 
 // Mirrors EmitPackageIR.cpp:467-492.
 private func GenSubCHIRPackages(cgPkgContext: CGPkgContext): Unit {
-    ProfileRecorder.Start("EmitIR", "GenSubCHIRPackages")
-    let cgModules = cgPkgContext.GetCGModules()
-    let options = cgPkgContext.GetGlobalOptions()
-    if (options.NeedDumpIRToFile()) {
-        ClearOldIRDumpFiles(options.output, cgPkgContext.GetCurrentPkgName())
-    }
-    let threadNum = if (!TEMPORARILY_ENABLE_BACKEND_CONCURRENCY || options.codegenDebugMode) {
-        1
-    } else {
-        cgModules.size
-    }
-    if ((Process.current.getEnv("CJCJ_BACKEND_CONCURRENCY_TRACE") ?? "") == "1") {
-        eprintln("CJCJ_BACKEND_CONCURRENCY threadNum=${threadNum} cgModules.size=${cgModules.size}")
-    }
-    if (threadNum == 1) {
-        for (cgModule in cgModules) {
-            GenSubCHIRPackage(cgModule)
+    try (recorder = ProfileRecorder("EmitIR", "GenSubCHIRPackages")) {
+        let cgModules = cgPkgContext.GetCGModules()
+        let options = cgPkgContext.GetGlobalOptions()
+        if (options.NeedDumpIRToFile()) {
+            ClearOldIRDumpFiles(options.output, cgPkgContext.GetCurrentPkgName())
         }
-    } else {
-        let taskQueueDefinitions = TaskQueue(threadNum)
-        for (cgModule in cgModules) {
-            let _ = taskQueueDefinitions.AddTask<Unit>({ => GenSubCHIRPackage(cgModule) })
+        let threadNum = if (!TEMPORARILY_ENABLE_BACKEND_CONCURRENCY || options.codegenDebugMode) {
+            1
+        } else {
+            cgModules.size
         }
-        taskQueueDefinitions.RunAndWaitForAllTasksCompleted()
+        if ((Process.current.getEnv("CJCJ_BACKEND_CONCURRENCY_TRACE") ?? "") == "1") {
+            eprintln("CJCJ_BACKEND_CONCURRENCY threadNum=${threadNum} cgModules.size=${cgModules.size}")
+        }
+        if (threadNum == 1) {
+            for (cgModule in cgModules) {
+                GenSubCHIRPackage(cgModule)
+            }
+        } else {
+            let taskQueueDefinitions = TaskQueue(threadNum)
+            let results = ArrayList<TaskResult<Unit>>()
+            for (cgModule in cgModules) {
+                results.add(taskQueueDefinitions.AddTask<Unit>({ => GenSubCHIRPackage(cgModule) }))
+            }
+            taskQueueDefinitions.RunAndWaitForAllTasksCompleted()
+            ConsumeModuleGenerationResults(results)
+        }
+        if (threadNum == 1) {
+            for (cgModule in cgModules) {
+                GenSubCHIRPackagePart2(cgModule)
+            }
+        } else {
+            let taskQueueFinalize = TaskQueue(threadNum)
+            let results = ArrayList<TaskResult<Unit>>()
+            for (cgModule in cgModules) {
+                results.add(taskQueueFinalize.AddTask<Unit>({ => GenSubCHIRPackagePart2(cgModule) }))
+            }
+            taskQueueFinalize.RunAndWaitForAllTasksCompleted()
+            ConsumeModuleGenerationResults(results)
+        }
+        if (options.NeedDumpIRToScreen()) {
+            for (cgModule in cgModules) {
+                DumpIR(cgModule.GetLLVMModule().getOrThrow(), "")
+            }
+        }
+        CGValueRepresentationCensus.Dump()
     }
-    if (threadNum == 1) {
-        for (cgModule in cgModules) {
-            GenSubCHIRPackagePart2(cgModule)
-        }
-    } else {
-        let taskQueueFinalize = TaskQueue(threadNum)
-        for (cgModule in cgModules) {
-            let _ = taskQueueFinalize.AddTask<Unit>({ => GenSubCHIRPackagePart2(cgModule) })
-        }
-        taskQueueFinalize.RunAndWaitForAllTasksCompleted()
-    }
-    if (options.NeedDumpIRToScreen()) {
-        for (cgModule in cgModules) {
-            DumpIR(cgModule.GetLLVMModule().getOrThrow(), "")
+}
+
+// Definitions must finish successfully before finalization; both phases must
+// consume every completed result before throwing the first stored exception.
+private func ConsumeModuleGenerationResults(results: ArrayList<TaskResult<Unit>>): Unit {
+    var firstFailure: Option<Exception> = None
+    for (result in results) {
+        try {
+            result.get()
+        } catch (e: Exception) {
+            if (firstFailure.isNone()) { firstFailure = Some(e) }
         }
     }
-    CGValueRepresentationCensus.Dump()
-    ProfileRecorder.Stop("EmitIR", "GenSubCHIRPackages")
+    if (let Some(e) <- firstFailure) { throw e }
 }
 
 public func GenPackageModules(chirData: CHIRData, options: GlobalOptions, enableIncrement: Bool,

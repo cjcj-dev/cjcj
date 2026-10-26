@@ -2,7 +2,7 @@ package cjcj::chir
 
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::basic.DiagKindRefactor
-import cjcj::utils.TaskQueue
+import cjcj::utils.{TaskQueue, TaskResult}
 import std.collection.*
 
 private func GetKeyWordBySourceExpr(sourceExpr: SourceExpr): String {
@@ -38,15 +38,25 @@ public class UnreachableBranchCheck {
             }
         } else {
             let taskQueue = TaskQueue(threadNum)
+            let results = ArrayList<TaskResult<Unit>>()
             for (funcValue in pkg.GetGlobalFuncsWithBody()) {
                 if (funcValue.GetSkipCheck() == SkipKind.SKIP_DCE_WARNING) {
                     continue
                 }
-                let _ = taskQueue.AddTask<Unit>({ =>
+                results.add(taskQueue.AddTask<Unit>({ =>
                     RunOnFunc(funcValue)
-                })
+                }))
             }
             taskQueue.RunAndWaitForAllTasksCompleted()
+            var firstFailure: Option<Exception> = None
+            for (result in results) {
+                try {
+                    result.get()
+                } catch (e: Exception) {
+                    if (firstFailure.isNone()) { firstFailure = Some(e) }
+                }
+            }
+            if (let Some(e) <- firstFailure) { throw e }
         }
     }
 
