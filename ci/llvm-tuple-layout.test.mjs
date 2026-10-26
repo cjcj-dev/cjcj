@@ -126,6 +126,15 @@ if (process.env.TUPLE_DIFFERENTIAL === '1') test('tuple source-derived full tabl
     const arms = {};
     for (const [name, argv] of [['old', ['bash', old, ...args]], ['new', ['npx', '--yes', 'zx@8', product, ...args]]]) {
       prepare();
+      if (name === 'new' && entry.branch === 'status:manifest-printf' && input.expected === 1) {
+        // The final DEPOT_ROLE printf still determines group status; the
+        // paired-runtime fact inserted before it shifts its ordinal by one.
+        const bashEnv = path.join(work, 'bash-env');
+        const body = fs.readFileSync(bashEnv, 'utf8');
+        const oldPredicate = `$count == ${input.fail.occurrence}`;
+        assert.ok(body.includes(oldPredicate));
+        fs.writeFileSync(bashEnv, body.replace(oldPredicate, `$count == ${input.fail.occurrence + 1}`));
+      }
       // The unchanged Bash witness consumes its original name; the current
       // public publisher consumes the same selected value under canonical N.
       const executionEnv={...env};
@@ -161,10 +170,12 @@ if (process.env.TUPLE_DIFFERENTIAL === '1') test('tuple source-derived full tabl
     }
     results.push({...entry, arms});
     fs.writeFileSync(path.join(evidence, 'results.json'), JSON.stringify(results, null, 2));
-    if (input.fixture === 'missing-payload' && input.payload === 'llvm-tools.manifest') {
+    if ((input.fixture === 'missing-payload' && input.payload === 'llvm-tools.manifest')
+      || Object.hasOwn(input.env || {}, 'CJCJ_FIXED_LLVM_DIR')) {
       // The current platform selector reads this required input before copying
       // payloads. The retired Linux-only publisher rejected it at cp instead.
-      assert.match(arms.old.stderr, /cp: cannot stat .*llvm-tools\.manifest/);
+      assert.match(arms.old.stderr, input.fixture === 'missing-payload'
+        ? /cp: cannot stat .*llvm-tools\.manifest/ : /cp: cannot stat '\/llc\.gz'/);
       assert.match(arms.new.stderr, /ENOENT:.*open .*llvm-tools\.manifest/);
       assert.deepEqual({...arms.new, stderr: ''}, {...arms.old, stderr: ''});
     } else assert.deepEqual(arms.new, arms.old, `branch ${entry.branch}:${entry.line} trigger ${entry.trigger}`);
