@@ -21,7 +21,7 @@ test('native LLVM default preserves the repository source pair',()=>fixture(({ru
 }));
 test('native LLVM explicit complete pair reaches producer environment',()=>fixture(({run,output})=>{
  const result=run({CJCJ_NATIVE_LLVM_REF:llvm,CJCJ_NATIVE_RUNTIME_REF:runtime});assert.equal(result.status,0,result.stderr);
- const env=fs.readFileSync(output,'utf8');assert.doesNotMatch(env,/^LLVM_SHA=/m);
+ const env=fs.readFileSync(output,'utf8');console.log('CANONICAL_PAIR_EXPORT_TARGET_REACHED');assert.doesNotMatch(env,/^LLVM_SHA=/m);
  assert.ok(env.includes(`CJCJ_NATIVE_LLVM_REF=${llvm}\n`));
  assert.ok(env.includes(`CJCJ_NATIVE_RUNTIME_REF=${runtime}\n`));assert.doesNotMatch(env,/CJCJ_LLVM_RUNTIME_/);
 }));

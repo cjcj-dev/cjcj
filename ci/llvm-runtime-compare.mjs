@@ -29,8 +29,25 @@ for (const row of table.rows) {
     seen.set(key, record);
     fs.writeFileSync(path.join(output, 'results.json'), JSON.stringify(records, null, 2));
     console.log(`ASSERT_REACHED streams branch=${row.kind}:${row.line} input=${index}`);
-    assert.deepEqual(right.normalized, left.normalized, `streams branch=${row.kind}:${row.line} input=${index}`);
+    const explicit=input.env[table.mode]==='private';
+    const sha=input.env[table.shaVariable];
+    const removedSelection=input.env[table.mode] && !explicit
+      || explicit && (input.env[table.urlVariable]!==table.privateEnv[table.urlVariable]
+        || Object.hasOwn(input.env,'RUNTIME_REF') || Object.hasOwn(input.env,'RUNTIME_SRC_URL'));
+    if(explicit&&!/^[a-f0-9]{40}$/.test(sha||'')) {
+      record.contract='canonical pair rejects incomplete/invalid identity';
+      assert.equal(right.rc,1);
+      assert.match(right.stderr,sha?/NATIVE_LLVM_REF_INVALID/:/NATIVE_RUNTIME_EXPLICIT_PAIR_REQUIRED/);
+    } else if(removedSelection) {
+      record.contract='retired environment selection is ignored; canonical pair/default remains';
+      assert.equal(right.rc,0,right.stderr);
+      assert.doesNotMatch(right.stdout,/sha=(?:present|inherited)/);
+    } else {
+      record.contract='unchanged Git/argv/exit/stream behavior';
+      assert.deepEqual(right.normalized, left.normalized, `streams branch=${row.kind}:${row.line} input=${index}`);
+    }
+    fs.writeFileSync(path.join(output, 'results.json'), JSON.stringify(records, null, 2));
     console.log(`ASSERT_PASS streams input=${index} rc=${right.rc}`);
   }
 }
-console.log(`TABLE_PASS rows=${table.rows.length} inputs=${records.length}`);
+console.log(`TABLE_CONTRACT_PASS rows=${table.rows.length} inputs=${records.length}`);

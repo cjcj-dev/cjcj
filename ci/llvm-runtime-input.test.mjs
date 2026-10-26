@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {exportBranches} from './llvm-runtime-branches.mjs';
-import {fixture, originalSource, prepareOriginalSource, command, repo, base} from './llvm-runtime-fixture.mjs';
+import {fixture, originalSource, prepareOriginalSource, command, historyRepo, base} from './llvm-runtime-fixture.mjs';
 
 const source = originalSource();
 const table = exportBranches(source);
@@ -16,7 +16,7 @@ test('fixed historical input is rejected when missing and recovered through prep
   const previous = process.env.CJCJ_SRCBUILD_SOURCE_MIRRORS;
   const required = process.env.CJCJ_SRCBUILD_REQUIRE_MIRRORS;
   try {
-    process.env.CJCJ_SRCBUILD_SOURCE_MIRRORS = `https://github.com/cjcj-dev/cjcj.git=file://${repo}`;
+    process.env.CJCJ_SRCBUILD_SOURCE_MIRRORS = `https://github.com/cjcj-dev/cjcj.git=file://${historyRepo}`;
     process.env.CJCJ_SRCBUILD_REQUIRE_MIRRORS = '1';
     prepareOriginalSource(root);
     assert.equal(originalSource(root), source);

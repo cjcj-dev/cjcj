@@ -5,6 +5,9 @@ import {fileURLToPath} from 'node:url';
 import {createHash} from 'node:crypto';
 import {sourceFetchArguments} from '../build/lib/git.mjs';
 export const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+// A source archive may consume the original Git witness from an existing
+// read-only checkout; this is test input, never product source selection.
+export const historyRepo=process.env.LLVM_RUNTIME_TEST_HISTORY_REPOSITORY || repo;
 export const base = '3b1fe439310269257a43685407df523f55a47cf6';
 export function command(argv, options = {}) {
   const result = spawnSync(argv[0], argv.slice(1), {encoding: 'utf8', ...options});
@@ -26,7 +29,7 @@ export function prepareOriginalSource(checkout = repo) {
   if (content.rc !== 0) throw new Error(`LLVM_RUNTIME_HISTORY_BLOB: ${content.stderr}`);
   console.log(`LLVM_RUNTIME_HISTORY_VERIFIED commit=${base} blob=${sourceBlob}`);
 }
-export function originalSource(checkout = repo) {
+export function originalSource(checkout = historyRepo) {
   const result = command(['git', '-C', checkout, 'show', `${base}:${sourcePath}`]);
   if (result.rc !== 0) throw new Error(`LLVM_RUNTIME_HISTORY_MISSING: ${result.stderr}`);
   return result.stdout;
@@ -112,7 +115,7 @@ export function fixture(root, table, {baseline = false} = {}) {
     if(!baseline) {
       // Historical witnesses retain their original environment in the saved
       // baseline. The current public caller supplies the sole canonical pair.
-      const explicit=input.canonical ?? (input.env[table.modeVariable || Object.keys(table.privateEnv)[0]]==='private');
+      const explicit=input.canonical ?? (input.env[table.mode]==='private');
       if(explicit){env.CJCJ_NATIVE_LLVM_REF=sha;env.CJCJ_NATIVE_RUNTIME_REF=env[table.shaVariable]??'';}
       for(const [key,value] of Object.entries(input.canonicalEnv||{})){
         if(value===undefined)delete env[key];else env[key]=value==='$SHA'?sha:value;

@@ -62,7 +62,7 @@ local Git fixtures. No release workflow or release pin opts into private mode.
 Consumers must bind the approved LLVM/runtime pair and the reviewed cjcj producer
 commit themselves; this interface does not authorize publication or runtime use.
 
-`python3 ci/test_llvm_runtime_input.py --work <new-lane-directory>
+`node ci/test-llvm-runtime-input.mjs --work <new-lane-directory>
 --runtime-mirror <local-git-tree>` runs real fetch entries against local transports.
 The mirror must contain the formal pin and the explicit private commit above.
 The build-entry test records the real first CMake arguments and stops there;
