@@ -116,7 +116,7 @@ await group('cjlint',()=>{
   fs.writeFileSync(root+'/config/cjlint_rule_list.json',JSON.stringify({RuleList:rules}));
   fs.writeFileSync(dir+'/main.cj',source);
   const output=root+'/report.'+format;
-  const r=run('lint-'+name,[binary('cjlint'),'-f',dir,'-c',root,'-o',output,'-r',format,...(explicitAnalysis?['--analysis-sdk',app]:[])],{environment,expected});
+  const r=run('lint-'+name,[binary('cjlint'),'-f',dir,'-c',root,'-o',output,'-r',format,...(explicitAnalysis?['-m',app]:[])],{environment,expected});
   const text=fs.readFileSync(output,'utf8');
   let rows;
   if(format==='json')rows=JSON.parse(text);
