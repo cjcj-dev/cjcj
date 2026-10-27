@@ -12,6 +12,7 @@ export const TOOL_PUBLIC_NAMES = {lsp:'LSPServer'};
 export const toolName = name => { const plain=name.replace(/\.exe$/,''); return plain==='LSPServer'?'lsp':plain; };
 export const cjlintBuildDirectory = config => path.join(config.buildRoot,'cjlint');
 export const retainedToolPath = row => row.producer==='cjlint'?'.target-tools/tools/cjlint/bin/'+row.name:'.target-tools/'+row.to;
+export const hleBuildDirectory = config => path.join(config.buildRoot,'hle');
 export const cjprofBuildDirectory = config => path.join(config.buildRoot,'cjprof');
 export function requireToolProducer(name) {
   const directory=TOOL_DIRECTORIES[name];
@@ -26,7 +27,7 @@ export function toolOutputs(config) {
     ['cjcov','cjcov/dist/cjcov'],['cjtrace-recover','cjtrace-recover/dist/bin/cjtrace-recover'],
     ['cjlint','cjlint/dist/bin/cjlint'],['cjprof','cjprof/dist/bin/cjprof'],['cjcompat','cjcompat/dist/bin/cjcompat'],
   ].map(([producer,rel])=>({producer,name:(TOOL_PUBLIC_NAMES[producer]??producer)+exe,
-    from:path.join(root,rel+exe),to:'tools/bin/'+(TOOL_PUBLIC_NAMES[producer]??producer)+exe}));
+    from:producer==='hle'?path.join(hleBuildDirectory(config),'bin','main'+exe):path.join(root,rel+exe),to:'tools/bin/'+(TOOL_PUBLIC_NAMES[producer]??producer)+exe}));
 }
 export function toolBuildProduct(config,name) {
   const root=config.repoPath('tools'),exe=config.target.spec.exeSuffix;
