@@ -30,6 +30,7 @@ import cjcj::chir.StringLiteral
 import cjcj::chir.StructType
 import cjcj::chir.TupleType
 import cjcj::chir.Type
+import cjcj::chir.RefType
 import cjcj::chir.TypeCast
 import cjcj::chir.TypeKind
 import cjcj::chir.Value
