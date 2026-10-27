@@ -306,6 +306,7 @@ test('public tools install accepts direct compiler SDKs and retains the staged r
 test('public independent install selects native upstream prefixes without HLE or SDK publication',async t=>{
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'native-tool-prefix-'));
  t.after(()=>fs.rm(root,{recursive:true,force:true}));
+ for(const name of ['cjfmt','cangjie-language-server','cjlint','cjprof','cjcompat'])await fs.mkdir(root+'/cangjie_tools/'+name+'/build',{recursive:true});
  const env={...process.env,CANGJIE_BUILD_DRY_RUN:'1',CANGJIE_BUILD_JOBS:'1'};
  const invoke=(extra=[])=>spawnSync(process.execPath,[cli,'--workspace',root,
   '--tools-phase','install','--tools-build-set','cjfmt,lsp,cjlint,cjprof,cjcompat',
