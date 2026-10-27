@@ -191,7 +191,7 @@ if(process.argv[2]==='build'){const out=path.resolve('target/release/bin/main');
     if(['cjtrace-recover','cjcompat','cjprof'].includes(name)) {
      await write(tools+'/'+dir+'/build.mjs',`import fs from 'node:fs';import path from 'node:path';
 const verb=process.argv[2];fs.appendFileSync(${JSON.stringify(trace)},JSON.stringify({event:'producer',name:${JSON.stringify(name)},verb})+'\\n');
-if(verb==='build'||verb==='install') {const out=path.join(${JSON.stringify(tools)},verb==='build'?${JSON.stringify(buildProducts[name])}:${JSON.stringify(outputs[name])});fs.mkdirSync(path.dirname(out),{recursive:true});fs.writeFileSync(out,${JSON.stringify(body)},{mode:0o755});if(verb==='install')for(const [rel,value]of Object.entries(${JSON.stringify(payloads)})){const file=path.join(${JSON.stringify(tools)},rel);fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,value);}}
+if(verb==='build'||verb==='install') {const out=${name==='cjprof'?"verb==='build'?path.join(process.argv[process.argv.indexOf('--build-dir')+1],'cjprof'):path.join("+JSON.stringify(tools)+","+JSON.stringify(outputs[name])+")":"path.join("+JSON.stringify(tools)+",verb==='build'?"+JSON.stringify(buildProducts[name])+":"+JSON.stringify(outputs[name])+")"};fs.mkdirSync(path.dirname(out),{recursive:true});fs.writeFileSync(out,${JSON.stringify(body)},{mode:0o755});if(verb==='install')for(const [rel,value]of Object.entries(${JSON.stringify(payloads)})){const file=path.join(${JSON.stringify(tools)},rel);fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,value);}}
 `);
      continue;
     }
@@ -363,13 +363,14 @@ test('public Cangjie cjcompat receives the selected shared frontend inputs',asyn
 test('public Cangjie cjprof forwards the selected host JNI inputs without a C++ fallback',async t=>{
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'prof-source-entry-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
  await fs.mkdir(root+'/cangjie_tools/cjprof/build',{recursive:true});
- const argv=[cli,'--workspace',root,'--tools-phase','build','--tools-build-set','cjprof','--jobs','1'];
+ const argv=[cli,'--workspace',root,'--build-root',root+'/selected-output','--tools-phase','build','--tools-build-set','cjprof','--jobs','1'];
  const env={...process.env,CANGJIE_BUILD_DRY_RUN:'1'};delete env.JAVA_HOME;delete env.CJPROF_LOMBOK_JAR;
  const invoke=options=>spawnSync(process.execPath,[...argv,...options,'build','tools'],{env,encoding:'utf8'});
  const missing=invoke([]);assert.equal(missing.status,1);assert.match(missing.stderr,/toolsJniHome is required/);
  const normal=invoke(profOptions);assert.equal(normal.status,0,normal.stderr);
  assert.match(normal.stderr,/build\.mjs build --sdk .* --jni-home \/selected\/jdk --runtime-header \/selected\/Cangjie.h --lombok-jar \/selected\/lombok.jar/);
  assert.doesNotMatch(normal.stderr,/build\.py|build\.mjs clean|--dependencies/);
+ assert(normal.stderr.includes('--build-dir '+root+'/selected-output/cjprof'));
  const windows=invoke([...profOptions,'--target','windows-x64']);assert.notEqual(windows.status,0);
  assert.match(windows.stderr,/selected Cangjie producer supports Linux x86-64/);
  console.log('CJPROF_PUBLIC_HOST_INPUTS_REACHED');

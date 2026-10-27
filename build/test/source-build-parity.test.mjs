@@ -735,12 +735,13 @@ test('Linux source stages emit the Python command order', async () => {
           '--llvm',path.join(sdk,'third_party/llvm/lib/libLLVM-15.so'),
           '--jobs',String(toolBudget[name].jobs),'--tools-revision',config.repo('tools').tag);
       }
-      if(name==='cjprof')buildArgs.splice(0,buildArgs.length,...producer,'build','--sdk',config.consumerSdk??path.join(config.repoPath('compiler'),'output'),'--jni-home',config.toolsJniHome,'--runtime-header',config.toolsRuntimeHeader,'--lombok-jar',config.toolsLombokJar);
+      if(name==='cjprof')buildArgs.splice(0,buildArgs.length,...producer,'build','--sdk',config.consumerSdk??path.join(config.repoPath('compiler'),'output'),'--jni-home',config.toolsJniHome,'--runtime-header',config.toolsRuntimeHeader,'--lombok-jar',config.toolsLombokJar,'--build-dir',path.join(config.buildRoot,'cjprof'));
       expectedCommands.push(expected(root, cwd, [...prefix,...buildArgs]));
       const installArgs = [...producer,'install'];
       if (['cjfmt','cjtrace-recover','cjlint','cjprof','cjcompat'].includes(name)) {
         installArgs.push('--prefix', path.join(toolsRoot, name, 'dist'));
       }
+      if(name==='cjprof')installArgs.push('--build-dir',path.join(config.buildRoot,'cjprof'));
       expectedCommands.push(expected(root, cwd, installArgs));
     }
     // This gate observes producer command ordering. Installed SDK packaging,

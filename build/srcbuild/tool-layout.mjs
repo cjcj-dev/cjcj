@@ -6,6 +6,7 @@ export const TOOL_NAMES = ['cjpm','cjfmt','hle','lsp','cjcov','cjtrace-recover',
 export const TOOL_DIRECTORIES = {cjpm:'cjpm',cjfmt:'cjfmt',hle:'hyperlangExtension',lsp:'cangjie-language-server',cjcov:'cjcov','cjtrace-recover':'cjtrace-recover',cjlint:'cjlint',cjprof:'cjprof',cjcompat:'cjcompat'};
 export const TOOL_PUBLIC_NAMES = {lsp:'LSPServer'};
 export const toolName = name => { const plain=name.replace(/\.exe$/,''); return plain==='LSPServer'?'lsp':plain; };
+export const cjprofBuildDirectory = config => path.join(config.buildRoot,'cjprof');
 export function requireToolProducer(name) {
   const directory=TOOL_DIRECTORIES[name];
   if(!directory)throw new Error('TOOL_SOURCE_MISSING '+name+': fixed source producer required; host output cannot substitute');
@@ -26,7 +27,7 @@ export function toolBuildProduct(config,name) {
   if(name==='cjtrace-recover')return path.join(root,'cjtrace-recover/cmake-build/cjtrace-recover'+exe);
   if(name==='cjcompat')return path.join(root,'cjcompat/build/cangjie-build/cjcompat'+exe);
   if(['cjfmt','cjlint'].includes(name))return path.join(root,name,'build/build/bin',name+exe);
-  if(name==='cjprof')return path.join(root,name,'build/cangjie-output',name+exe);
+  if(name==='cjprof')return path.join(cjprofBuildDirectory(config),name+exe);
   const row=toolOutputs(config).find(row=>row.producer===name);
   if(!row)requireToolProducer(name);
   return row.from;
@@ -84,8 +85,8 @@ export async function toolPayloads(config,name,installPrefix) {
 export async function nativeToolBuildPayloads(config,name) {
   if(!['cjlint','cjprof'].includes(name))return [];
   const root=config.repoPath('tools'),os=config.target.spec.os;
-  const rows=nativeToolLibraries(name,os).map(row=>({from:path.join(root,row.build),to:row.to}));
-  if(name==='cjprof')rows.push({from:path.join(root,'cjprof/build/cangjie-output/cjprof.jar'),to:'tools/share/java/cjprof.jar'});
+  const rows=nativeToolLibraries(name,os).map(row=>({from:name==='cjprof'?path.join(cjprofBuildDirectory(config),path.basename(row.build)):path.join(root,row.build),to:row.to}));
+  if(name==='cjprof')rows.push({from:path.join(cjprofBuildDirectory(config),'cjprof.jar'),to:'tools/share/java/cjprof.jar'});
   const source=path.join(root,name,name==='cjlint'?'config':'static');
   async function walk(dir,tail='') {
     for(const entry of (await fs.readdir(dir,{withFileTypes:true})).sort((a,b)=>a.name.localeCompare(b.name))) {

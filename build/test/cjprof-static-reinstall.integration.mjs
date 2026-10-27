@@ -22,13 +22,14 @@ const parent=process.env.RELEASE_EVIDENCE_TEST_ROOT,input=process.env.CJPROF_BUI
 if(!parent||!input)throw Error('RELEASE_EVIDENCE_TEST_ROOT and CJPROF_BUILT_INPUT required');
 const original=JSON.parse(await fs.readFile(input,'utf8'));
 assert.equal(original.build.rc,0);assert.equal(original.build.platform,'linux_x86_64');
-const originalRoot=path.resolve(path.dirname(original.artifact.path),'../..');
+const originalRoot=path.dirname(path.dirname(original.build.nativeConfiguration.cangjie.values.sources[0])),originalBuild=path.dirname(original.artifact.path);
 const work=await fs.mkdtemp(path.join(parent,'cjprof-reinstall-'));
 const config=buildConfig({workspace:path.join(work,'workspace'),buildRoot:path.join(work,'buildtools'),cangjieVersion:original.build.version,consumerSdk:path.join(work,'sdk'),officialSdkRoot:path.join(work,'unused-host'),toolsPhase:'install'});
 const tools=config.repoPath('tools'),prof=path.join(tools,'cjprof'),sdk=config.consumerSdk;
 const write=async(file,value)=>{await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,value);};
 const copy=async(from,to)=>{await fs.mkdir(path.dirname(to),{recursive:true});await fs.copyFile(from,to);};
-const relocate=text=>text.split(originalRoot).join(prof);
+const relocatedBuild=path.join(config.buildRoot,'cjprof');
+const relocate=text=>text.split(originalBuild).join(relocatedBuild).split(originalRoot).join(prof);
 const commands=[];
 async function succeeds(label,argv,cwd=work){
  const out=openSync(path.join(work,label+'.stdout'),'wx'),err=openSync(path.join(work,label+'.stderr'),'wx');
@@ -44,9 +45,9 @@ for(const row of [original.artifact,...Object.values(original.build.payloads)]){
 for(const rel of ['build/build.mjs','tests/heap.data'])await copy(path.join(originalRoot,rel),path.join(prof,rel));
 const producerFacts=original.build.nativeConfiguration.cangjie;
 assert.equal(producerFacts.values.language,'Cangjie');
-await write(path.join(prof,'build/cangjie-output/build-facts.json'),relocate(JSON.stringify(producerFacts.values)));
+await write(path.join(relocatedBuild,'build-facts.json'),relocate(JSON.stringify(producerFacts.values)));
 const facts=JSON.parse(relocate(JSON.stringify(original))),record=path.join(config.workspace,'build/tools/cjprof/build-inputs.json'),dist=path.join(prof,'dist');
-const installArgv=[process.execPath,'build.mjs','install','--prefix',dist];
+const installArgv=[process.execPath,'build.mjs','install','--prefix',dist,'--build-dir',relocatedBuild];
 async function producerInstall(label){await succeeds(label,installArgv,path.join(prof,'build'));}
 // The real public launcher deliberately replaces LD_LIBRARY_PATH. Supply only
 // the selected host's runtime/bounds, not a copied SDK or a target qualifier.
@@ -70,11 +71,11 @@ await write(path.join(parser,'analysis.js'),'controlled parser input');await wri
 const hle=path.join(work,'hle');hlePayloadFixture(hle);
 await installHleDependencies({toolsRoot:tools,sdk,platform:'linux_x86_64',input:{platform:'linux_x86_64',node:{path:'/usr/bin/true',source:'unexecuted ELF fixture, not Node',version:'fixture'},modules:{path:path.join(hle,'tools/dtsparser/node_modules'),source:'controlled modules',version:'fixture'},cjbind:{path:'/usr/bin/true',source:'unexecuted ELF fixture, not cjbind',version:'v1.1.0-alpha.53.1'}}});
 await fs.cp(path.join(originalRoot,'static'),path.join(prof,'static'),{recursive:true});
-await fs.cp(path.join(originalRoot,'build/cangjie-output/config'),path.join(prof,'build/cangjie-output/config'),{recursive:true});
-const staticFile=path.join(prof,'build/cangjie-output/config/static/html/index.html'),current=await fs.readFile(staticFile);
+await fs.cp(path.join(originalBuild,'config'),path.join(relocatedBuild,'config'),{recursive:true});
+const staticFile=path.join(relocatedBuild,'config/static/html/index.html'),current=await fs.readFile(staticFile);
 // The old built-page overlay is deliberately unresolved. It passes through
 // the actual Cangjie producer install and normal SDK installer.
-await write(path.join(prof,'build/cangjie-output/config/static/legacy.html'),'legacy source page');await fs.rename(staticFile,path.join(prof,'build/cangjie-output/config/static/html/previous.html'));
+await write(path.join(relocatedBuild,'config/static/legacy.html'),'legacy source page');await fs.rename(staticFile,path.join(relocatedBuild,'config/static/html/previous.html'));
 await producerInstall('old-native-install');await installSourceTools(config,sdk,{consume});
 async function serving(label,root,paths){
  const listener=net.createServer();listener.listen(0,'127.0.0.1');await once(listener,'listening');const port=listener.address().port;await new Promise(resolve=>listener.close(resolve));
@@ -96,7 +97,7 @@ assert.equal(old['/static/legacy.html'].status,200);assert.equal(old['/static/le
 // Delete/rename source, park old dist as the public tools stage does, then run
 // the actual producer install. Restore the recorded source's original static
 // bytes; finishToolInstall records this execution, not an invented install rc.
-await fs.rm(path.join(prof,'build/cangjie-output/config/static/legacy.html'));await fs.rename(path.join(prof,'build/cangjie-output/config/static/html/previous.html'),staticFile);
+await fs.rm(path.join(relocatedBuild,'config/static/legacy.html'));await fs.rename(path.join(relocatedBuild,'config/static/html/previous.html'),staticFile);
 await fs.rename(dist,dist+'.old');await producerInstall('new-native-install');await write(record,JSON.stringify(facts,null,2));
 await finishToolInstall(config,'cjprof',path.join(dist,'bin/cjprof'),installArgv);await installSourceTools(config,sdk,{consume});
 const selected=JSON.parse(await fs.readFile(path.join(sdk,'TOOLS-INPUTS.json'),'utf8'));

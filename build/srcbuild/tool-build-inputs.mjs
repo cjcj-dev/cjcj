@@ -7,7 +7,7 @@ import {promisify, isDeepStrictEqual} from 'node:util';
 import {atomicJson, fileDigest, readJson} from '../../ci/bootstrap/sdk-flow.mjs';
 import {compilerProducer} from '../../ci/bootstrap/compiler_identity.mjs';
 import {readNativeToolDependencies} from './native-tool-dependencies.mjs';
-import {TOOL_DIRECTORIES,toolPayloads,nativeToolBuildPayloads,toolBuildProduct} from './tool-layout.mjs';
+import {TOOL_DIRECTORIES,toolPayloads,nativeToolBuildPayloads,toolBuildProduct,cjprofBuildDirectory} from './tool-layout.mjs';
 import {sha256} from '../../ci/bootstrap/sdk-io.mjs';
 
 const execute = promisify(execFile);
@@ -69,7 +69,7 @@ export async function beginToolBuild(config, name, {cjpmPin, argv, env, sdk}) {
 async function nativeConfigurationInputs(config,name) {
   const nativeConfiguration={};
   if(name==='cjprof') {
-    const file=path.join(config.repoPath('tools'),'cjprof/build/cangjie-output/build-facts.json');
+    const file=path.join(cjprofBuildDirectory(config),'build-facts.json');
     return {cangjie:{path:file,values:await readJson(file)}};
   }
   if(name==='cjcompat') {

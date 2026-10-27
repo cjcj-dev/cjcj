@@ -11,7 +11,7 @@ import {cleanSdkEnvironment} from '../../../ci/bootstrap/sdk-platform.mjs';
 import {installSourceTools,sourceToolOutputs} from '../install-tools.mjs';
 import {beginToolBuild,finishToolBuild,toolBuildInputs,finishToolInstall} from '../tool-build-inputs.mjs';
 import {prepareNativeToolDependencies} from '../native-tool-dependencies.mjs';
-import {TOOL_NAMES,TOOL_DIRECTORIES,requireToolProducer,toolBuildProduct} from '../tool-layout.mjs';
+import {TOOL_NAMES,TOOL_DIRECTORIES,requireToolProducer,toolBuildProduct,cjprofBuildDirectory} from '../tool-layout.mjs';
 import {installHleDependencies} from '../hle-dependencies.mjs';
 import {installPath as mingwInstallPath} from '../../toolchain/mingw.mjs';
 import path from 'node:path';
@@ -61,7 +61,7 @@ function buildArgsFor(name, config, jobs) {
   if(name==='cjprof') {
     if(config.target.spec.os!=='linux'||config.target.spec.crossCompile||config.target.spec.llvmPlatform!=='linux_x86_64')throw new BuildError('tools.cjprof','selected Cangjie producer supports Linux x86-64');
     for(const key of ['toolsJniHome','toolsRuntimeHeader','toolsLombokJar'])if(!config[key])throw new BuildError('tools.cjprof',key+' is required');
-    return ['build','--sdk',consumerSdk(config),'--jni-home',config.toolsJniHome,'--runtime-header',config.toolsRuntimeHeader,'--lombok-jar',config.toolsLombokJar];
+    return ['build','--sdk',consumerSdk(config),'--jni-home',config.toolsJniHome,'--runtime-header',config.toolsRuntimeHeader,'--lombok-jar',config.toolsLombokJar,'--build-dir',cjprofBuildDirectory(config)];
   }
   if(name==='cjcompat') {
     const source=config.repoPath('compiler'),sdk=consumerSdk(config);
@@ -105,7 +105,8 @@ function buildArgsFor(name, config, jobs) {
   return [...args,...dependencies];
 }
 
-function installArgsFor(name, toolsRoot) {
+function installArgsFor(name, toolsRoot, config) {
+  if(name==='cjprof')return ['install','--prefix',path.join(toolsRoot,name,'dist'),'--build-dir',cjprofBuildDirectory(config)];
   if (['cjfmt','cjlint','cjprof','cjcompat'].includes(name))return ['install','--prefix',path.join(toolsRoot,name,'dist')];
   if (name !== 'cjtrace-recover') return ['install'];
   return ['install', '--prefix', path.join(toolsRoot, CJTRACE_DIST)];
@@ -211,7 +212,7 @@ export async function run(config) {
           fs.mkdirSync(prefix,{recursive:false});
           if(name==='lsp')fs.mkdirSync(destination);
         }
-        const argv=['install','--prefix',destination];
+        const argv=['install','--prefix',destination,...(name==='cjprof'?['--build-dir',cjprofBuildDirectory(config)]:[])];
         await runTool(config,name,path.join(toolsRoot,subpath),argv,{stageName:'tools.'+name+'.install',extraEnv:env});
         await finishToolInstall(config,name,path.join(prefix,'bin',(name==='lsp'?'LSPServer':name)+suffix),
           toolArgv(name,argv),{prefix});
@@ -302,7 +303,7 @@ export async function run(config) {
       await toolBuildInputs(config,name,product);
     }
     for (const [name, subpath] of allTools) {
-      const argv=installArgsFor(name,toolsRoot);
+      const argv=installArgsFor(name,toolsRoot,config);
       // Native install reads the build tree; preserve old dist separately so
       // removed configuration/JNI members cannot survive as new output.
       if(['cjfmt','cjlint','cjprof','cjcompat'].includes(name)&&process.env.CANGJIE_BUILD_DRY_RUN!=='1') {
