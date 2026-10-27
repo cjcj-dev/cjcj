@@ -16,7 +16,7 @@ export async function configureNativeToolInput({root,workspace,platform,envFile}
   const file=await fs.realpath(path.join(root,locations.nativeToolDependencies));
   if(!file.startsWith(root+path.sep))throw Error('GHA_NATIVE_TOOL_INPUT_PATH');
   const selection=await readJson(file),resolved={};
-  for(const name of ['json','httplib','runtime','bounds']) {
+  for(const name of ['json']) {
     const row=selection[name];
     if(!row)throw Error('GHA_NATIVE_TOOL_SOURCE '+name);
     relative(row.path);
@@ -26,7 +26,7 @@ export async function configureNativeToolInput({root,workspace,platform,envFile}
   }
   const output=path.join(workspace,'native-tool-dependencies.json');
   await atomicJson(output,resolved);
-  await readNativeToolDependencies(output,['cjprof']);
+  await readNativeToolDependencies(output,['cjlint']);
   if(envFile)await fs.appendFile(envFile,'CJCJ_NATIVE_TOOL_DEPENDENCIES='+output+'\n');
   return output;
 }
@@ -34,7 +34,7 @@ export async function verifyNativeToolHandoff({root,environment}) {
   const file=environment.CJCJ_NATIVE_TOOL_DEPENDENCIES;
   if(!file)return;
   const archived=path.join(await fs.realpath(root),'.srcbuild')+path.sep;
-  const selection=await readNativeToolDependencies(file,['cjprof']);
+  const selection=await readNativeToolDependencies(file,['cjlint']);
   for(const item of [file,...Object.values(selection).map(row=>row.path)]) {
     if(!path.resolve(item).startsWith(archived)||!(await fs.realpath(item)).startsWith(archived))throw Error('handoff native tool dependency outside archived inputs');
   }

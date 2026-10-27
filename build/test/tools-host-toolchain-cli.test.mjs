@@ -114,3 +114,41 @@ test('public cjlint GCC selection survives cold, warm, withdrawal and restoratio
   const relative=f.build('cjlint',['--tools-gcc-toolchain','relative']);assert.equal(relative.status,2);assert.match(relative.stderr,/absolute GCC/);
   const cross=f.build('cjlint',['--target','windows-x64','--tools-gcc-toolchain',prefix]);assert.equal(cross.status,2);assert.match(cross.stderr,/native Linux cjlint/);
 });
+
+// Stop only after the real public stage has prepared its fixed Git inputs.
+// All/default and mixed selectors must use the same JSON-only dependency set;
+// this boundary deliberately precedes tool builds, not the dependency reader.
+for(const [label,selection]of [['default',null],['combined','cjlint,cjprof'],['prof-only','cjprof']])
+test('public dependency closure '+label+' reaches the post-prepare boundary',()=>{
+ const f=fixture('dependency-'+label);
+ const directories=['cjpm','cjfmt','hyperlangExtension','cangjie-language-server','cjcov','cjtrace-recover','cjlint','cjprof','cjcompat'];
+ for(const directory of directories) {
+  const script=['cjtrace-recover','cjprof','cjcompat'].includes(directory)?'build.mjs':'build.py';
+  const file=path.join(f.tools,directory,'build',script);
+  if(!fs.existsSync(file))f.write(file,'// producer must not execute in this boundary test\n');
+ }
+ f.ok(f.run(['git','-C',f.tools,'add','.']));
+ f.ok(f.run(['git','-C',f.tools,'-c','user.name=Zxilly','-c','user.email=zxilly@outlook.com','commit','-m','test: complete public selector input']));
+ const commit=f.ok(f.run(['git','-C',f.tools,'rev-parse','HEAD'])).stdout.trim();
+ f.write(path.join(f.workspace,'.source-selection.json'),JSON.stringify({tools:{url:'file://'+f.tools,tag:commit},cjpm:{url:'file://'+f.tools,tag:commit}}));
+ const stage=new URL('../srcbuild/stages/tools.mjs',import.meta.url).href;
+ const anchor='await prepareNativeToolDependencies(config,pending.map(([name])=>name));';
+ f.write(path.join(f.root,'after-prepare.mjs'),`export async function load(url,context,next){const r=await next(url,context);if(url!==${JSON.stringify(stage)})return r;const source=String(r.source),anchor=${JSON.stringify(anchor)};if(source.split(anchor).length!==2)throw Error('POST_PREPARE_ANCHOR');return {...r,source:source.replace(anchor,anchor+"\\nconsole.log('PUBLIC_DEPENDENCY_TARGET_REACHED');throw Error('FINITE_AFTER_PREPARE');")};}`);
+ const env={...process.env,CJCJ_SRCBUILD_CONSUMER_SDK:host,CJCJ_OFFICIAL_SDK_ROOT:host,NODE_OPTIONS:'--experimental-loader='+path.join(f.root,'after-prepare.mjs')};
+ for(const key of ['CANGJIE_BUILD_DRY_RUN','CJCJ_SRCBUILD_SOURCE_MIRRORS','CJCJ_SRCBUILD_REQUIRE_MIRRORS'])delete env[key];
+ const argv=[process.execPath,new URL('../cli.mjs',import.meta.url).pathname,'--workspace',f.workspace,'--build-root',path.join(f.root,'buildtools'),
+  '--official-sdk-root',host,'--host-profile','kkk2','--target','linux-x64','--tools-phase','build','--jobs','1',
+  ...(selection?['--tools-build-set',selection]:[]),'--tools-dependencies',path.join(f.root,'dependencies.json'),
+  '--tools-mangle-source',path.join(f.root,'mangle'),'--tools-jni-home',path.join(f.root,'jdk'),
+  '--tools-runtime-header',path.join(f.root,'Cangjie.h'),'--tools-lombok-jar',path.join(f.root,'lombok.jar'),'build','tools'];
+ const invoke=()=>f.run(argv,{env});
+ const reached=r=>{assert.equal(r.status,1,r.stdout+'\n'+r.stderr);assert.match(r.stdout,/PUBLIC_DEPENDENCY_TARGET_REACHED/,'real dependency preparation must complete');assert.match(r.stderr,/FINITE_AFTER_PREPARE/);};
+ const original=fs.readFileSync(path.join(f.root,'dependencies.json'),'utf8');
+ reached(invoke());
+ f.write(path.join(f.root,'dependencies.json'),'{}');
+ const missing=invoke();
+ if(selection==='cjprof')reached(missing);
+ else {assert.equal(missing.status,1);assert.match(missing.stderr,/TOOLS_DEPENDENCY_SOURCE json/);assert.doesNotMatch(missing.stdout,/PUBLIC_DEPENDENCY_TARGET_REACHED/);}
+ f.write(path.join(f.root,'dependencies.json'),original);reached(invoke());
+ console.log('PUBLIC_DEPENDENCY_SELECTOR_PASS '+label);
+});
