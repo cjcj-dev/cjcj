@@ -12,6 +12,10 @@ for(const value of [prefix,sdk,source,work])assert(value&&path.isAbsolute(value)
 assert.equal(process.platform,'linux');
 fs.mkdirSync(work);
 const env=cleanSdkEnvironment(sdk,'linux_x86_64');
+// An independently installed frontend component belongs to this tool prefix,
+// not to the read-only compiler SDK. The loader evidence below records which
+// library each executable actually selects, installed and unpacked alike.
+env.LD_LIBRARY_PATH=prefix+'/tools/lib:'+env.LD_LIBRARY_PATH;
 const commands=[],groups=[],checks=[];
 function run(name,argv,{cwd=work,library,expected=0}={}) {
  const started=new Date().toISOString(),selected={...env,...(library?{LD_LIBRARY_PATH:library+':'+env.LD_LIBRARY_PATH}:{})};
@@ -24,6 +28,28 @@ function run(name,argv,{cwd=work,library,expected=0}={}) {
 function check(name,fn){try{fn();checks.push({name,pass:true});}catch(e){checks.push({name,pass:false,error:String(e)});throw e;}finally{fs.writeFileSync(work+'/checks.json',JSON.stringify(checks,null,2));}}
 async function group(name,fn){if(!selected.has(name)){groups.push({name,status:'NOT_RUN',reason:'not selected'});return;}try{await fn();groups.push({name,rc:0});}catch(e){groups.push({name,rc:1,error:e.stack});}fs.writeFileSync(work+'/groups.json',JSON.stringify(groups,null,2));}
 const binary=name=>prefix+'/'+name+'/bin/'+(name==='lsp'?'LSPServer':name);
+// Exercise source-language receiver results, inheritance and generic results.
+// These declarations also enter actual major-1 CJO files in cjcompat below.
+const receiverDeclarations=`
+public open class ReceiverBase {
+ public let value: Int64
+ public init(value: Int64) { this.value = value }
+ public func read(): Int64 { value }
+}
+public class ReceiverDerived <: ReceiverBase {
+ public init(value: Int64) { super(value + 2) }
+}
+public class ReceiverBox<T> {
+ public let payload: T
+ public init(payload: T) { this.payload = payload }
+ public func read(): T { payload }
+}
+public func receiverResult(): Int64 {
+ let receiver = ReceiverDerived(40)
+ let box = ReceiverBox<Int64>(receiver.read())
+ return box.read()
+}
+`;
 for(const name of selected)run(name+'-loader',['ldd',binary(name)],{library:prefix+'/'+name+'/lib'});
 await group('cjfmt',()=>{
  const input=work+'/format.cj',output=work+'/formatted.cj',again=work+'/again.cj';
@@ -36,16 +62,48 @@ await group('cjfmt',()=>{
  check('format idempotence',()=>assert.equal(fs.readFileSync(again,'utf8'),fs.readFileSync(output,'utf8')));
 });
 await group('lsp',()=>{
- // Reuse the established public protocol consumer without changing its
- // assertions, selected module SDK, or input. Only select the installed tool.
- const original=fs.readFileSync(source+'/cangjie-language-server/test/public/source-control.mjs','utf8');
- const expression="join(sdk, 'tools/bin/LSPServer')";
- assert.equal(original.split(expression).length-1,2);
- const script=work+'/lsp-source-control.mjs';fs.writeFileSync(script,original.replaceAll(expression,JSON.stringify(binary('lsp'))));
- fs.writeFileSync(work+'/lsp-consumer-selection.json',JSON.stringify({source:source+'/cangjie-language-server/test/public/source-control.mjs',replacement:{from:expression,to:binary('lsp')},assertions:'unchanged'}));
  const project=work+'/lsp-project';fs.cpSync(source+'/cangjie-language-server/test/public/fixtures/ordinary',project,{recursive:true});
- run('lsp-protocol',[process.execPath,script,sdk,project,work+'/lsp-evidence','explicit','memory']);
- check('LSP source symbol and clean exit',()=>{const r=JSON.parse(fs.readFileSync(work+'/lsp-evidence/result.json'));assert.equal(r.controlPass,true);assert.equal(r.assertionExecuted,true);assert.equal(r.process.code,0);});
+ const receiverFile=project+'/src/receiver.cj';
+ fs.writeFileSync(receiverFile,'package probe\n'+receiverDeclarations);
+ fs.writeFileSync(work+'/receiver-reference.cj',receiverDeclarations+'\nmain() { println(receiverResult()) }\n');
+ run('receiver-reference-compile',[sdk+'/bin/cjc',work+'/receiver-reference.cj','-o',work+'/receiver-reference']);
+ check('actual producer constructor result',()=>assert.equal(run('receiver-reference-run',[work+'/receiver-reference']).stdout.trim(),'42'));
+ // Preserve the ordinary source control, then exercise imported declarations
+ // through the existing public CJO protocol consumer. A source symbol alone
+ // does not establish that the selected SDK's CJO files were accepted.
+ const selections=[];
+ for(const [consumer,mode]of [['source-control','explicit'],['cjo-searchpath','default'],['cjo-searchpath','explicit']]) {
+  const file=source+'/cangjie-language-server/test/public/'+consumer+'.mjs';
+  const original=fs.readFileSync(file,'utf8'),expression="join(sdk, 'tools/bin/LSPServer')";
+  assert.equal(original.split(expression).length-1,2);
+  const tag='lsp-'+consumer+'-'+mode,script=work+'/'+tag+'.mjs',evidence=work+'/'+tag;
+  const libraryExpression="join(sdk, 'tools/lib')";
+  assert.equal(original.split(libraryExpression).length-1,1);
+  const semanticAnchor='  result.assertionExecuted = true;';
+  assert.equal(original.split(semanticAnchor).length-1,1);
+  const semanticRequests=`  result.receiverClass = await request('workspace/symbol', { query: 'ReceiverDerived' });
+  result.genericClass = await request('workspace/symbol', { query: 'ReceiverBox' });
+  result.receiverFunction = await request('workspace/symbol', { query: 'receiverResult' });
+`;
+  fs.writeFileSync(script,original.replaceAll(expression,JSON.stringify(binary('lsp')))
+   .replace(libraryExpression,JSON.stringify(prefix+'/tools/lib'))
+   .replace(semanticAnchor,semanticRequests+semanticAnchor));
+  selections.push({source:file,mode,replacement:{from:expression,to:binary('lsp')},
+   frontendLibrary:prefix+'/tools/lib',assertions:'unchanged'});
+  fs.writeFileSync(work+'/lsp-consumer-selection.json',JSON.stringify(selections,null,2));
+  const result=run(tag,[process.execPath,script,sdk,project,evidence,mode,'memory'],{expected:null});
+  check('LSP '+consumer+' '+mode,()=>{
+   const r=JSON.parse(fs.readFileSync(evidence+'/result.json'));
+   assert.equal(r.assertionExecuted,true);assert.equal(r.controlPass,true);
+   if(consumer==='cjo-searchpath')assert.equal(r.targetPass,true,'imported std.ast.FuncDecl required');
+   for(const [field,name,kind]of [['receiverClass','ReceiverDerived',5],['genericClass','ReceiverBox',5],['receiverFunction','receiverResult',12]])
+    assert(r[field]?.some(item=>item.name.startsWith(name)&&item.kind===kind),'semantic receiver/generic symbol '+name);
+   const protocol=JSON.parse(fs.readFileSync(evidence+'/protocol.json'));
+   const incompatible=protocol.filter(x=>x.method==='textDocument/checkHealthy'&&/\bis incompatible\b/.test(x.params?.message??''));
+   assert.equal(incompatible.length,0,'selected SDK CJO incompatibility diagnostics');
+   assert.equal(r.process.code,0);assert.equal(result.status,0);
+  });
+ }
 });
 await group('cjlint',()=>{
  for(const [arm,decl]of [['mutable','var'],['immutable','let']]) {
@@ -53,6 +111,18 @@ await group('cjlint',()=>{
   run('lint-'+arm+'-compile',[sdk+'/bin/cjc',dir+'/main.cj','-o',dir+'/program']);
   const output=work+'/lint-'+arm+'-report';run('lint-'+arm,[binary('cjlint'),'-f',dir,'-c',prefix+'/cjlint','-m',sdk,'-o',output,'-r','json'],{library:prefix+'/cjlint/lib'});
   check('lint G.VAR.01 '+arm,()=>{const report=JSON.parse(fs.readFileSync(output+'.json'));assert(Array.isArray(report));assert.equal(report.some(x=>x.description?.includes('G.VAR.01')&&x.description.includes("'value'")),arm==='mutable');});
+ }
+ for(const [arm,decl]of [['mutable','var'],['immutable','let']]) {
+  const dir=work+'/lint-receiver-'+arm;fs.mkdirSync(dir);
+  fs.writeFileSync(dir+'/main.cj',receiverDeclarations+'\nmain(): Int64 {\n '+decl+' value = receiverResult()\n println(value)\n return 0\n}\n');
+  run('lint-receiver-'+arm+'-compile',[sdk+'/bin/cjc',dir+'/main.cj','-o',dir+'/program']);
+  check('receiver program '+arm,()=>assert.equal(run('lint-receiver-'+arm+'-run',[dir+'/program']).stdout.trim(),'42'));
+  const output=work+'/lint-receiver-'+arm+'-report';
+  run('lint-receiver-'+arm,[binary('cjlint'),'-f',dir,'-c',prefix+'/cjlint','-m',sdk,'-o',output,'-r','json'],{library:prefix+'/cjlint/lib'});
+  check('lint receiver result G.VAR.01 '+arm,()=>{
+   const report=JSON.parse(fs.readFileSync(output+'.json'));assert(Array.isArray(report));
+   assert.equal(report.some(x=>x.description?.includes('G.VAR.01')&&x.description.includes("'value'")),arm==='mutable');
+  });
  }
 });
 await group('cjprof',()=>{
@@ -63,7 +133,7 @@ await group('cjprof',()=>{
 });
 await group('cjcompat',()=>{
  for(const [name,body]of Object.entries({old:'public func retained(): Int64 { 1 }\npublic func removed(): Int64 { 2 }\n',same:'public func retained(): Int64 { 1 }\npublic func removed(): Int64 { 2 }\n',deleted:'public func retained(): Int64 { 1 }\n'})) {
-  const dir=work+'/compat-'+name;fs.mkdirSync(dir);fs.writeFileSync(dir+'/lib.cj','package compat_fixture\n'+body);
+  const dir=work+'/compat-'+name;fs.mkdirSync(dir);fs.writeFileSync(dir+'/lib.cj','package compat_fixture\n'+receiverDeclarations+body);
   run('compat-cjo-'+name,[sdk+'/bin/cjc','lib.cj','--output-type=staticlib','-o','libcompat_fixture.a'],{cwd:dir});
  }
  for(const mode of [[],['--api'],['--abi']])for(const name of ['same','deleted']) {
