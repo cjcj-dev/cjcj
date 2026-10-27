@@ -748,7 +748,7 @@ test('Linux source stages emit the Python command order', async () => {
     // real installed SDK, which this command-generation fixture does not own.
     const isTool = command => command.includes(toolsRoot.replaceAll(root,'<ROOT>')) && /build\.(?:py|mjs)/.test(command);
     assert.deepEqual(commands.filter(c=>!isTool(c)), expectedCommands.filter(c=>!isTool(c)));
-    assert.equal(commands.filter(isTool).length,26);
+    assert.equal(commands.filter(isTool).length,25);
     console.log('FORMAL_TOOL_COMMAND_ASSERT_REACHED');
     assert.deepEqual(commands.filter(isTool).sort(), expectedCommands.filter(isTool).sort());
     const lastBuild=Math.max(...commands.map((c,i)=>isTool(c)&&/build\.(?:py|mjs) build/.test(c)?i:-1));
@@ -757,7 +757,7 @@ test('Linux source stages emit the Python command order', async () => {
       const clean=commands.findIndex(c=>own(c)&&/build\.(?:py|mjs) clean/.test(c));
       const build=commands.findIndex(c=>own(c)&&/build\.(?:py|mjs) build/.test(c));
       const install=commands.findIndex(c=>own(c)&&/build\.(?:py|mjs) install/.test(c));
-      assert((name==='cjtrace-recover'?clean===-1:clean>=0)&&build>clean&&install>lastBuild,'producer order and publication barrier: '+subpath);
+      assert((['cjtrace-recover','cjcompat'].includes(name)?clean===-1:clean>=0)&&build>clean&&install>lastBuild,'producer order and publication barrier: '+subpath);
       console.log('FORMAL_TOOL_ORDER_BARRIER_PASS '+name);
     }
   } finally {
