@@ -135,6 +135,7 @@ export function buildConfig({
   toolsBuildSet = 'all',
   toolsDependencies = process.env.CJCJ_NATIVE_TOOL_DEPENDENCIES,
   toolsGccToolchain = process.env.CJCJ_TOOLS_GCC_TOOLCHAIN,
+  toolsMangleSource = process.env.CANGJIE_MANGLE_SOURCE_DIR,
   toolsPhase = 'all',
   toolsInstallPrefix,
   jobs,
@@ -177,6 +178,8 @@ export function buildConfig({
     if (target.spec.crossCompile || target.spec.nodePlatform !== 'linux')
       throw new ConfigError('tools-gcc-toolchain is only supported for native Linux cjlint builds');
   }
+  if (toolsMangleSource != null && (typeof toolsMangleSource !== 'string' || !path.isAbsolute(toolsMangleSource)))
+    throw new ConfigError('tools-mangle-source: expected an absolute compiler packages/mangle/src path');
   const workspacePath = absolute(workspace || process.env.CANGJIE_WORKSPACE || path.join(process.cwd(), 'workspace'));
   const buildRootPath = absolute(buildRoot || process.env.CANGJIE_BUILD_ROOT || path.join(process.cwd(), 'buildtools'));
   const rawVersion = cangjieVersion || process.env.CANGJIE_VERSION || globalTag || '';
@@ -206,6 +209,7 @@ export function buildConfig({
     toolsBuildSet,
     toolsDependencies: toolsDependencies ? absolute(toolsDependencies) : null,
     toolsGccToolchain: toolsGccToolchain == null ? null : absolute(toolsGccToolchain),
+    toolsMangleSource: toolsMangleSource == null ? null : absolute(toolsMangleSource),
     toolsPhase,
     toolsInstallPrefix,
     jobs: jobs===undefined?undefined:Number(jobs),
@@ -246,6 +250,7 @@ export function withBuildType(config, buildType) {
     toolsBuildSet: config.toolsBuildSet,
     toolsDependencies: config.toolsDependencies,
     toolsGccToolchain: config.toolsGccToolchain,
+    toolsMangleSource: config.toolsMangleSource,
     toolsPhase: config.toolsPhase,
     toolsInstallPrefix: config.toolsInstallPrefix,
     jobs: config.jobs,

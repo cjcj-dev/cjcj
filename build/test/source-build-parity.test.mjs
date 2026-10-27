@@ -153,7 +153,7 @@ function makeFixture({packageLayout=false}={}) {
   }
   return {
     root,
-    config: buildConfig({workspace, buildRoot, officialSdkRoot, consumerSdk:selectedSdk, toolsDependencies:path.join(root,'native-dependencies.json'), cangjieVersion: '1.2.3'}),
+    config: buildConfig({workspace, buildRoot, officialSdkRoot, consumerSdk:selectedSdk, toolsDependencies:path.join(root,'native-dependencies.json'), toolsMangleSource:path.join(root,'mangle'), cangjieVersion: '1.2.3'}),
   };
 }
 
@@ -719,14 +719,16 @@ test('Linux source stages emit the Python command order', async () => {
     ]) {
       const cwd = path.join(toolsRoot, subpath);
       const prefix=toolBudget[name].cpuSet?['taskset','-c',toolBudget[name].cpuSet]:[];
-      expectedCommands.push(expected(root, cwd, [...prefix,'python3', 'build.py', 'clean']));
-      const buildArgs = ['python3', 'build.py', 'build', '-t', 'release'];
+      const producer=name==='cjtrace-recover'?[process.execPath,'build.mjs']:['python3','build.py'];
+      if(name!=='cjtrace-recover')expectedCommands.push(expected(root,cwd,[...prefix,...producer,'clean']));
+      const buildArgs = [...producer,'build','-t','release'];
+      if(name==='cjtrace-recover')buildArgs.push('--cangjie-sdk',config.consumerSdk,'--mangle-source',config.toolsMangleSource,'--set-rpath','$ORIGIN/../lib:$ORIGIN/../../../runtime/lib/linux_x86_64_cjnative');
       if (name === 'cjpm') buildArgs.push('--set-rpath', '$ORIGIN/../../runtime/lib/linux_x86_64_cjnative');
       if (['cjpm','cjfmt','lsp','cjlint','cjprof','cjcompat'].includes(name)) buildArgs.push('--jobs',String(toolBudget[name].jobs));
       if(['cjlint','cjprof'].includes(name))buildArgs.push('--dependencies',config.toolsDependencies);
       if(name==='cjcompat')buildArgs.push('--sdk',config.consumerSdk??path.join(config.repoPath('compiler'),'output'));
       expectedCommands.push(expected(root, cwd, [...prefix,...buildArgs]));
-      const installArgs = ['python3', 'build.py', 'install'];
+      const installArgs = [...producer,'install'];
       if (['cjtrace-recover','cjlint','cjprof','cjcompat'].includes(name)) {
         installArgs.push('--prefix', path.join(toolsRoot, name, 'dist'));
       }
@@ -736,18 +738,18 @@ test('Linux source stages emit the Python command order', async () => {
     // ABI, hello/macro and relocation checks are retained in the registered
     // package/installed-consumer gates (see SOURCE-INPUTS.md). They require a
     // real installed SDK, which this command-generation fixture does not own.
-    const isTool = command => command.includes(toolsRoot.replaceAll(root,'<ROOT>')) && command.includes('python3 build.py');
+    const isTool = command => command.includes(toolsRoot.replaceAll(root,'<ROOT>')) && /build\.(?:py|mjs)/.test(command);
     assert.deepEqual(commands.filter(c=>!isTool(c)), expectedCommands.filter(c=>!isTool(c)));
-    assert.equal(commands.filter(isTool).length,27);
+    assert.equal(commands.filter(isTool).length,26);
     console.log('FORMAL_TOOL_COMMAND_ASSERT_REACHED');
     assert.deepEqual(commands.filter(isTool).sort(), expectedCommands.filter(isTool).sort());
-    const lastBuild=Math.max(...commands.map((c,i)=>isTool(c)&&c.includes('build.py build')?i:-1));
+    const lastBuild=Math.max(...commands.map((c,i)=>isTool(c)&&/build\.(?:py|mjs) build/.test(c)?i:-1));
     for(const [name,subpath] of tools.toolsFor(config)) {
       const own=command=>command.includes(path.join(toolsRoot,subpath).replaceAll(root,'<ROOT>'));
-      const clean=commands.findIndex(c=>own(c)&&c.includes('build.py clean'));
-      const build=commands.findIndex(c=>own(c)&&c.includes('build.py build'));
-      const install=commands.findIndex(c=>own(c)&&c.includes('build.py install'));
-      assert(clean>=0&&build>clean&&install>lastBuild,'producer order and publication barrier: '+subpath);
+      const clean=commands.findIndex(c=>own(c)&&/build\.(?:py|mjs) clean/.test(c));
+      const build=commands.findIndex(c=>own(c)&&/build\.(?:py|mjs) build/.test(c));
+      const install=commands.findIndex(c=>own(c)&&/build\.(?:py|mjs) install/.test(c));
+      assert((name==='cjtrace-recover'?clean===-1:clean>=0)&&build>clean&&install>lastBuild,'producer order and publication barrier: '+subpath);
       console.log('FORMAL_TOOL_ORDER_BARRIER_PASS '+name);
     }
   } finally {

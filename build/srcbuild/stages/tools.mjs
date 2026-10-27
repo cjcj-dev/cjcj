@@ -19,7 +19,7 @@ import {BuildError} from '../../lib/errors.mjs';
 import {fetchSource, assertSourceIdentity} from '../../lib/git.mjs';
 import {stage} from '../../lib/logging.mjs';
 import {run as runCommand} from '../../lib/runner.mjs';
-import {applyTextPatch, baseEnv, consumerSdk, requireFile, runBuildPy, explicitBuildJobs} from './common.mjs';
+import {applyTextPatch, baseEnv, consumerSdk, requireFile, runBuildScript, explicitBuildJobs} from './common.mjs';
 
 // cjcov and cjtrace-recover are Cangjie-written SDK tools that upstream
 // cangjie-build does not drive, so shipping the base SDK's copies would leave
@@ -30,6 +30,9 @@ const TOOL_PATHS = TOOL_NAMES.map(name=>[name,TOOL_DIRECTORIES[name]?path.join(T
 // CMAKE_INSTALL_PREFIX (/usr/local by default), so it must be pointed at a
 // directory inside the repo, mirroring the dist/ the other tools produce.
 const CJTRACE_DIST = path.join('cjtrace-recover', 'dist');
+const toolScript = name => name === 'cjtrace-recover' ? 'build.mjs' : 'build.py';
+const toolArgv = (name,args) => [name === 'cjtrace-recover' ? process.execPath : 'python3',toolScript(name),...args];
+const runTool = (config,name,cwd,args,options) => runBuildScript(config,cwd,args,{...options,script:toolScript(name)});
 const CJPM_NEEDLE = '/opt/buildtools/llvm-mingw-w64';
 const CJPM_EDITS = [[
   '-L /opt/buildtools/llvm-mingw-w64/x86_64-w64-mingw32/lib',
@@ -55,11 +58,23 @@ async function checkoutPinnedCjpm(config,toolsRoot) {
 }
 
 function buildArgsFor(name, config, jobs) {
+  if (name === 'cjtrace-recover') {
+    // The sole producer is now the Cangjie module/CLI graph. The compiler
+    // source input is explicit; no native demangler or Python fallback.
+    const origin=config.target.spec.rpathOrigin;
+    // Standalone install keeps the producer's CJTRACE_BUNDLE_RUNTIME=ON lib/.
+    // The SDK recipe already supplies its selected target runtime; the retained
+    // tool body can also resolve that runtime without copying an official H.
+    const rpath=origin ? `${origin}/../lib`+(config.target.spec.os==='linux'?`:${origin}/../../../runtime/lib/${config.target.runtimeLibSubdir(config.buildType)}`:'') : '';
+    return ['build','-t',config.buildType==='relwithdebinfo'?'release':config.buildType,
+      '--cangjie-sdk',consumerSdk(config),'--mangle-source',config.toolsMangleSource,
+      ...(rpath?['--set-rpath',rpath]:[]),
+      ...(config.target.spec.crossCompile?['--target','windows-x86_64','--target-sysroot',mingwInstallPath(config.buildRoot)]:[])];
+  }
   const dependencies=['cjlint','cjprof'].includes(name)?['--dependencies',config.toolsDependencies]
     :name==='cjcompat'?['--sdk',consumerSdk(config)]:[];
   if (config.target.spec.crossCompile) {
     const args=['build', '-t', config.crossBuildType, '--target', 'windows-x86_64'];
-    if(name==='cjtrace-recover')args.push('--target-sysroot',mingwInstallPath(config.buildRoot),'--cangjie-sdk',consumerSdk(config));
     if(['cjpm','cjfmt','lsp','cjlint','cjprof','cjcompat'].includes(name))args.push('--jobs',String(jobs));
     return [...args,...dependencies];
   }
@@ -157,6 +172,8 @@ export async function run(config) {
     const allTools=toolsFor(config);
     const selected=config.toolsBuildSet&&config.toolsBuildSet!=='all'?new Set(config.toolsBuildSet.split(',')):null;
     const pending=config.toolsPhase==='install'?[]:selected?allTools.filter(([name])=>selected.has(name)):allTools;
+    if (pending.some(([name])=>name==='cjtrace-recover') && !config.toolsMangleSource)
+      throw new BuildError('tools.cjtrace-recover.source','TOOLS_MANGLE_SOURCE_REQUIRED: --tools-mangle-source');
     // Independent native tools retain their original build facts and install
     // through upstream build.py into separate prefixes, without publishing an SDK.
     if(config.toolsInstallPrefix) {
@@ -166,7 +183,7 @@ export async function run(config) {
       await assertSourceIdentity(config.repo('tools'),toolsRoot);
       for(const [name,subpath]of independent) {
         if(process.env.CANGJIE_BUILD_DRY_RUN!=='1') {
-          requireFile(path.join(toolsRoot,subpath,'build.py'),{stage:'tools.'+name+'.source'});
+          requireFile(path.join(toolsRoot,subpath,toolScript(name)),{stage:'tools.'+name+'.source'});
           const facts=await toolBuildInputs(config,name,toolBuildProduct(config,name));
           if(facts.source.status!=='resolved')throw new BuildError('tools.install','original build inputs required: '+name);
         }
@@ -181,9 +198,9 @@ export async function run(config) {
           if(name==='lsp')fs.mkdirSync(destination);
         }
         const argv=['install','--prefix',destination];
-        await runBuildPy(config,path.join(toolsRoot,subpath),argv,{stageName:'tools.'+name+'.install',extraEnv:env});
+        await runTool(config,name,path.join(toolsRoot,subpath),argv,{stageName:'tools.'+name+'.install',extraEnv:env});
         await finishToolInstall(config,name,path.join(prefix,'bin',(name==='lsp'?'LSPServer':name)+suffix),
-          ['python3','build.py',...argv],{prefix});
+          toolArgv(name,argv),{prefix});
       }
       return;
     }
@@ -191,12 +208,12 @@ export async function run(config) {
     // Missing ninth producer must fail before fetching or shared installation.
     for(const [name]of config.toolsPhase==='build'?pending:allTools) {
       const directory=requireToolProducer(name);
-      if(process.env.CANGJIE_BUILD_DRY_RUN!=='1')requireFile(path.join(toolsRoot,directory,'build/build.py'),{stage:'tools.'+name+'.source'});
+      if(process.env.CANGJIE_BUILD_DRY_RUN!=='1')requireFile(path.join(toolsRoot,directory,'build',toolScript(name)),{stage:'tools.'+name+'.source'});
     }
     await assertSourceIdentity(config.repo('tools'), toolsRoot);
-    await checkoutPinnedCjpm(config,toolsRoot);
+    if(pending.some(([name])=>name==='cjpm'))await checkoutPinnedCjpm(config,toolsRoot);
     const cjpmBuildPy = path.join(toolsRoot, 'cjpm', 'build', 'build.py');
-    if (fs.readFileSync(cjpmBuildPy, 'utf8').includes(CJPM_NEEDLE)) {
+    if (pending.some(([name])=>name==='cjpm') && fs.readFileSync(cjpmBuildPy, 'utf8').includes(CJPM_NEEDLE)) {
       applyTextPatch(cjpmBuildPy, CJPM_EDITS, {stage: 'tools.cjpm.patch'});
     }
     await prepareNativeToolDependencies(config,pending.map(([name])=>name));
@@ -237,7 +254,8 @@ export async function run(config) {
         const {jobs,cpuSet}=plan[name];
         const producerEnv={...toolEnv,CANGJIE_BUILD_JOBS:String(jobs),CMAKE_BUILD_PARALLEL_LEVEL:String(jobs),MAKEFLAGS:'-j'+jobs};
         try {
-          if(config.toolsBuildMode!=='incremental')await runBuildPy(config, cwd, ['clean'], {stageName:`tools.${name}.clean`, extraEnv:producerEnv,cpuSet});
+          if(config.toolsBuildMode!=='incremental' && (name!=='cjtrace-recover' || fs.existsSync(path.join(toolsRoot,'cjtrace-recover/cmake-build/CMakeCache.txt'))))
+            await runTool(config,name,cwd,['clean'],{stageName:`tools.${name}.clean`,extraEnv:producerEnv,cpuSet});
           const output=outputs.find(row=>row.name===({lsp:'LSPServer'}[name]??name)+suffix);
           // These upstream Python mains discard a returned error. Preserve a
           // prior final executable so a failed rebuild cannot masquerade as it.
@@ -249,8 +267,8 @@ export async function run(config) {
           // The pinned native LSP entry owns first and incomplete dependency
           // preparation, consuming the same --jobs as its final CMake build.
           const argv=buildArgsFor(name,config,jobs);
-          const facts=await beginToolBuild(config,name,{cjpmPin:readCjpmPin(config),argv:['python3','build.py',...argv],env:producerEnv,sdk:consumerSdk(config)});
-          await runBuildPy(config, cwd, argv, {stageName:`tools.${name}.build`, extraEnv:producerEnv,cpuSet});
+          const facts=await beginToolBuild(config,name,{cjpmPin:readCjpmPin(config),argv:toolArgv(name,argv),env:producerEnv,sdk:consumerSdk(config)});
+          await runTool(config,name,cwd,argv,{stageName:`tools.${name}.build`,extraEnv:producerEnv,cpuSet});
           const product=toolBuildProduct(config,name);
           if(process.env.CANGJIE_BUILD_DRY_RUN!=='1')requireFile(product,{stage:`tools.${name}.built-output`});
           await finishToolBuild(config,name,facts,product);
@@ -277,10 +295,10 @@ export async function run(config) {
         const dist=path.join(toolsRoot,name,'dist');
         if(fs.existsSync(dist))fs.renameSync(dist,dist+'.previous-'+Date.now());
       }
-      await runBuildPy(config, path.join(toolsRoot,subpath), argv, {
+      await runTool(config,name,path.join(toolsRoot,subpath),argv, {
         stageName:`tools.${name}.install`, extraEnv:installEnv,
       });
-      await finishToolInstall(config,name,outputs.find(row=>row.producer===name).from,['python3','build.py',...argv]);
+      await finishToolInstall(config,name,outputs.find(row=>row.producer===name).from,toolArgv(name,argv));
     }
     requireFile(path.join(toolsRoot, 'cjpm', 'dist', `cjpm${suffix}`), {stage: 'tools.cjpm.verify'});
     if(process.env.CANGJIE_BUILD_DRY_RUN!=='1') {

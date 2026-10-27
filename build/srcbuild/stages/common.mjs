@@ -228,10 +228,10 @@ export function pythonExe() {
   return 'python3';
 }
 
-export async function runBuildPy(config, cwd, args, {stageName, extraEnv, cpuSet} = {}) {
+export async function runBuildScript(config, cwd, args, {stageName, extraEnv, cpuSet, script = 'build.py'} = {}) {
   requireDir(cwd, {stage: stageName});
   const envOverlay = extraEnv ? mergedEnv(config, extraEnv) : mergedEnv(config);
-  const argv=[...(cpuSet?['taskset','-c',cpuSet]:[]), pythonExe(), 'build.py', ...args];
+  const argv=[...(cpuSet?['taskset','-c',cpuSet]:[]), script.endsWith('.mjs') ? process.execPath : pythonExe(), script, ...args];
   const observation={stage:stageName,argv,cwd};
   try {
     const result=await run(argv,{cwd,envOverlay,stage:stageName});
@@ -244,6 +244,10 @@ export async function runBuildPy(config, cwd, args, {stageName, extraEnv, cpuSet
       await atomicJson(path.join(config.workspace,'build/native-build.json'),config.production);
     }
   }
+}
+
+export function runBuildPy(config, cwd, args, options = {}) {
+  return runBuildScript(config, cwd, args, {...options, script:'build.py'});
 }
 
 export function ensureDir(directory) {

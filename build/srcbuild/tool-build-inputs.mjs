@@ -67,10 +67,10 @@ export async function beginToolBuild(config, name, {cjpmPin, argv, env, sdk}) {
 }
 async function nativeConfigurationInputs(config,name) {
   const nativeConfiguration={};
-  if(['cjlint','cjprof','cjcompat'].includes(name))for(const [part,relative]of [['native',name+'/build/build/CMakeCache.txt'],...(name==='cjprof'?[['jni','cjprof/bridge/jni/build/CMakeCache.txt']]:[])]) {
+  if(['cjlint','cjprof','cjcompat','cjtrace-recover'].includes(name))for(const [part,relative]of [['native',name+(name==='cjtrace-recover'?'/cmake-build/CMakeCache.txt':'/build/build/CMakeCache.txt')],...(name==='cjprof'?[['jni','cjprof/bridge/jni/build/CMakeCache.txt']]:[])]) {
     const file=path.join(config.repoPath('tools'),relative);
     const cache=Object.fromEntries((await fs.readFile(file,'utf8')).split('\n').filter(line=>/^[A-Za-z_][^:]*:[^=]*=/.test(line)).map(line=>[line.slice(0,line.indexOf(':')),line.slice(line.indexOf('=')+1)]));
-    nativeConfiguration[part]={path:file,values:Object.fromEntries(Object.entries(cache).filter(([key])=>/^(CMAKE_(BUILD_TYPE|SYSTEM_NAME|CXX_COMPILER|C_COMPILER|HOME_DIRECTORY)|CANGJIE_HOME$|CJPROF_|JAVA_|JNI_|JSON_ROOT$|GCC_TOOLCHAIN_FLAG$)/.test(key)))};
+    nativeConfiguration[part]={path:file,values:Object.fromEntries(Object.entries(cache).filter(([key])=>/^(CMAKE_(BUILD_TYPE|SYSTEM_NAME|CXX_COMPILER|C_COMPILER|HOME_DIRECTORY)|CANGJIE_HOME$|CANGJIE_MANGLE_SOURCE_DIR$|CJTRACE_BUNDLE_RUNTIME$|RUNTIME_RPATH$|ZX_EXECUTABLE$|CJPROF_|JAVA_|JNI_|JSON_ROOT$|GCC_TOOLCHAIN_FLAG$)/.test(key)))};
   }
   return nativeConfiguration;
 }
@@ -109,7 +109,7 @@ export async function toolBuildInputs(config, name, product, {installed=false}={
   if(facts.build?.rc!==0 || (installed&&facts.install!==undefined?facts.install?.artifact:facts.artifact)?.sha256!==digest || facts.build.platform!==config.target.spec.llvmPlatform
     || !/^[0-9a-f]{40}$/.test(facts.source?.commit||'') || !facts.source?.repository)
     throw new Error('TOOL_BUILD_INPUT_MISMATCH '+name);
-  if(['cjlint','cjprof','cjcompat'].includes(name)&&!isDeepStrictEqual(await nativeConfigurationInputs(config,name),facts.build.nativeConfiguration))throw Error('TOOL_BUILD_CONFIGURATION_CHANGED '+name);
+  if(['cjlint','cjprof','cjcompat','cjtrace-recover'].includes(name)&&!isDeepStrictEqual(await nativeConfigurationInputs(config,name),facts.build.nativeConfiguration))throw Error('TOOL_BUILD_CONFIGURATION_CHANGED '+name);
   if(['cjlint','cjprof'].includes(name)) {
     const current={};
     for(const row of await nativeToolBuildPayloads(config,name))current[row.to]={source:row.from,sha256:await fileDigest(row.from)};
