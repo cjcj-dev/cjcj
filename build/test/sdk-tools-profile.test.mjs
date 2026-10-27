@@ -347,3 +347,14 @@ test('public independent install selects native upstream prefixes without HLE or
  }
  const hle=invoke(['--tools-build-set','hle']);assert.equal(hle.status,1,hle.stderr);assert.match(hle.stderr,/independent install requires native tools/);
 });
+
+test('public Cangjie cjcompat receives the selected shared frontend inputs',async t=>{
+ const root=await fs.mkdtemp(path.join(os.tmpdir(),'compat-source-entry-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
+ await fs.mkdir(root+'/cangjie_tools/cjcompat/build',{recursive:true});
+ const options=['--tools-compiler-libs',root+'/selected-libs','--tools-runtime-config',root+'/config.o','--tools-llvm-shim',root+'/shim.o','--tools-llvm-library',root+'/libLLVM.so'];
+ const r=spawnSync(process.execPath,[cli,'--workspace',root,'--tools-phase','build','--tools-build-set','cjcompat','--jobs','1',...options,'build','tools'],{encoding:'utf8',env:{...process.env,CANGJIE_BUILD_DRY_RUN:'1'}});
+ assert.equal(r.status,0,r.stderr);
+ for(const [flag,file]of [['--compiler-libs','selected-libs'],['--runtime-config','config.o'],['--shim','shim.o'],['--llvm','libLLVM.so']])assert(r.stderr.includes(flag+' '+root+'/'+file));
+ assert.match(r.stderr,/build\.mjs build --type release/);
+ assert.doesNotMatch(r.stderr,/build\.py|build\.mjs clean/);
+});
