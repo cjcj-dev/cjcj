@@ -49,15 +49,17 @@ await write(path.join(relocatedBuild,'build-facts.json'),relocate(JSON.stringify
 const facts=JSON.parse(relocate(JSON.stringify(original))),record=path.join(config.workspace,'build/tools/cjprof/build-inputs.json'),dist=path.join(prof,'dist');
 const installArgv=[process.execPath,'build.mjs','install','--prefix',dist,'--build-dir',relocatedBuild];
 async function producerInstall(label){await succeeds(label,installArgv,path.join(prof,'build'));}
-// The real public launcher deliberately replaces LD_LIBRARY_PATH. Supply only
-// the selected host's runtime/bounds, not a copied SDK or a target qualifier.
+// The real public launcher deliberately replaces LD_LIBRARY_PATH. Reference
+// the fixed read-only host runtime/bounds in this host-only install fixture;
+// these links are not a standalone runtime package or a target qualifier.
 const hostRuntime=path.join(producerFacts.values.sdk,'runtime/lib/linux_x86_64_cjnative');
-async function copyRuntime(root) {
- for(const file of ['libcangjie-runtime.so','libboundscheck.so'])await copy(path.join(hostRuntime,file),path.join(root,'runtime/lib/linux_x86_64_cjnative',file));
+async function referenceRuntime(root) {
+ const target=path.join(root,'runtime/lib/linux_x86_64_cjnative');await fs.mkdir(target,{recursive:true});
+ for(const file of ['libcangjie-runtime.so','libboundscheck.so'])await fs.symlink(path.join(hostRuntime,file),path.join(target,file));
 }
-await copyRuntime(sdk);
+await referenceRuntime(sdk);
 async function consume(pending) {
- await copyRuntime(pending);
+ await referenceRuntime(pending);
  await succeeds('pending-heap-'+commands.length,[path.join(pending,'tools/bin/cjprof'),'heap','-i',path.join(prof,'tests/heap.data')]);
  const output=await fs.readFile(path.join(work,commands.at(-1).label+'.stdout'),'utf8');
  assert.match(output,/default::Dirived\s+1\s+72\s+168/);
