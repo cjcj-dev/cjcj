@@ -5683,6 +5683,15 @@ public class IRBuilder2 <: Resource {
 
     // Internal std.core declaration imported through IMPLICIT_USED. In
     // particular do not synthesize an external declaration for an old CJO.
+    // CHIRType translates an Any interface parameter as exactly Ref<Any>.
+    // A raw class value or a reference-to-reference is a different ABI.
+    public static func IsResetFailureValueType(ty: Type): Bool {
+        if (let Some(reference) <- (ty as RefType)) {
+            return reference.GetBaseType().IsAny()
+        }
+        return false
+    }
+
     public func CreateResetFailureReportCall(exceptionRoot: LLVMValueRef, context: LLVMValueRef,
         notify: LLVMValueRef): LLVMValueRef {
         var helper: Option<Function> = None
@@ -5699,7 +5708,7 @@ public class IRBuilder2 <: Resource {
         let cgFunc = cgMod.GetOrInsertCGFunction(fn)
         let cgFuncTy = cgFunc.GetCGFunctionType().getOrThrow()
         let retTy = CGType.GetOrCreate(cgMod, funcTy.GetReturnType()).GetLLVMType()
-        if (funcTy.GetParamTypes().size != 4 || !funcTy.GetParamType(0).IsAny() || cgFuncTy.HasSRet() ||
+        if (funcTy.GetParamTypes().size != 4 || !IsResetFailureValueType(funcTy.GetParamType(0)) || cgFuncTy.HasSRet() ||
             funcTy.GetReturnType().GetTypeKind() != TypeKind.TYPE_INT32 ||
             unsafe { LLVMGetTypeKind(retTy) } != LLVM_INTEGER_TYPE_KIND ||
             unsafe { LLVMGetIntTypeWidth(retTy) } != 32u32 ||

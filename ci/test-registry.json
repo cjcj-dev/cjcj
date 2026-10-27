@@ -252,6 +252,11 @@
     "member": "packages/codegen"
   },
   {
+    "file": "packages/codegen/src/ResetFailureSignature_test.cj",
+    "executor": "cjpm",
+    "member": "packages/codegen"
+  },
+  {
     "file": "packages/compiler_unittest/src/APILevelVersion_test.cj",
     "executor": "cjpm",
     "member": "packages/compiler_unittest"
