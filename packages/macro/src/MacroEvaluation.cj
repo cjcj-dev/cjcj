@@ -821,10 +821,13 @@ public class MacroEvaluation {
                     }
                     task = runtimeInit.SubmitTask(CPointer<Unit>(initGlobalFunc),
                         CPointer<Unit>(mInvoke.resetArgument))
-                    runtimeInit.CompleteTask(task)
+                    let taskResult = runtimeInit.CompleteTask(task)
                     completed = true
                     synchronized(mInvoke.mtx) {
                         if (let Some(e) <- mInvoke.failure) { throw e }
+                        if (!taskResult.isNull()) {
+                            throw mInvoke.notificationFailure
+                        }
                         if (!mInvoke.isDataReady) {
                             throw IllegalStateException("macro reset task completed without its notification")
                         }
@@ -845,7 +848,8 @@ public class MacroEvaluation {
                 break
             }
             if (!findGlobalFunc) {
-                Warningln("could not find global reset method in macro dylib: " + method)
+                throw IllegalStateException("macro library lacks reset notification ABI v2; rebuild macro package " +
+                    packageName + ": " + method)
             }
             idx++
         }

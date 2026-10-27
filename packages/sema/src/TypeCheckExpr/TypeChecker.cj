@@ -49,7 +49,7 @@ private let INOUT_IMMUTABLE: String = "is a immutable variable"
 
 private let SPECIAL_EXPORTED_FUNCS = HashMap<String, HashSet<String>>([
     (UTILS_CORE_PACKAGE_NAME, HashSet<String>([
-        "arrayInitByCollection", "arrayInitByFunction", "composition", "handleException",
+        "arrayInitByCollection", "arrayInitByFunction", "composition", "handleException", "reportResetFailureV1",
         "createOverflowExceptionMsg", "createArithmeticExceptionMsg", "getCommandLineArgs"
     ])),
     (UTILS_AST_PACKAGE_NAME, HashSet<String>([
@@ -2974,7 +2974,7 @@ extend TypeChecker {
     private func GetImplicitUsedCoreDecls(): ArrayList<Decl> {
         let out = ArrayList<Decl>()
         if (let Some(instance) <- impl.ci) {
-            for (name in ["CJ_CORE_ExecAtexitCallbacks", "getCommandLineArgs", "eprintln", "handleException",
+            for (name in ["CJ_CORE_ExecAtexitCallbacks", "getCommandLineArgs", "eprintln", "handleException", "reportResetFailureV1",
                 "NegativeArraySizeException", "createOverflowExceptionMsg", "createArithmeticExceptionMsg",
                 "SpawnException"]) {
                 let decl = match (findCoreImplicitDeclInMap(instance, name)) {

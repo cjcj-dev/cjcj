@@ -5681,6 +5681,58 @@ public class IRBuilder2 <: Resource {
         return CreateImplicitUsedFunctionCall(helperName, args)
     }
 
+    // Internal std.core declaration imported through IMPLICIT_USED. In
+    // particular do not synthesize an external declaration for an old CJO.
+    public func CreateResetFailureReportCall(exceptionRoot: LLVMValueRef, context: LLVMValueRef,
+        notify: LLVMValueRef): LLVMValueRef {
+        var helper: Option<Function> = None
+        for (fn in GetCGContext().GetCGPkgContext().GetCHIRPackage().GetGlobalFunctions()) {
+            if (fn.GetPackageName() == "std.core" && fn.GetSrcCodeIdentifier() == "reportResetFailureV1") {
+                if (helper.isSome()) {
+                    throw IllegalStateException("ambiguous std.core reportResetFailureV1 declaration")
+                }
+                helper = Some(fn)
+            }
+        }
+        let fn = helper ?? throw IllegalStateException("std.core lacks reportResetFailureV1; rebuild the paired standard library")
+        let funcTy = fn.GetFuncType().getOrThrow()
+        let cgFunc = cgMod.GetOrInsertCGFunction(fn)
+        let cgFuncTy = cgFunc.GetCGFunctionType().getOrThrow()
+        let retTy = CGType.GetOrCreate(cgMod, funcTy.GetReturnType()).GetLLVMType()
+        if (funcTy.GetParamTypes().size != 4 || !funcTy.GetParamType(0).IsAny() || cgFuncTy.HasSRet() ||
+            funcTy.GetReturnType().GetTypeKind() != TypeKind.TYPE_INT32 ||
+            unsafe { LLVMGetTypeKind(retTy) } != LLVM_INTEGER_TYPE_KIND ||
+            unsafe { LLVMGetIntTypeWidth(retTy) } != 32u32 ||
+            unsafe { LLVMCountParams(cgFunc.GetRawFunction()) } != 4u32) {
+            throw IllegalStateException("incompatible std.core reportResetFailureV1 declaration")
+        }
+        for (i in 1..4) {
+            let nativePointer = (funcTy.GetParamType(i) as CPointerType) ??
+                throw IllegalStateException("reportResetFailureV1 requires native pointer parameters")
+            let element = nativePointer.GetElementType()
+            if ((i == 1 && element.GetTypeKind() != TypeKind.TYPE_UINT8) || (i > 1 && !element.IsUnit())) {
+                throw IllegalStateException("incompatible reportResetFailureV1 pointer parameter")
+            }
+        }
+        let ptrTy = unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 0u32) }
+        let refTy = CGType.GetRefType(GetLLVMContext())
+        // These are the existing target-runtime services. Only metadata and
+        // native UTF-8 storage cross the later notification, never this ref.
+        let typeForAnyTy = MakeFunctionType(ptrTy, ArrayList<LLVMTypeRef>([refTy]))
+        let typeInfo = CreateCallOrInvoke(GetOrInsertRuntimeFunction("CJ_MCC_GetTypeForAny", typeForAnyTy),
+            ArrayList<LLVMValueRef>([CreateLoad(refTy, exceptionRoot)]))
+        let typeNameTy = MakeFunctionType(ptrTy, ArrayList<LLVMTypeRef>([ptrTy]))
+        let typeName = CreateCallOrInvoke(GetOrInsertRuntimeFunction("CJ_MCC_GetTypeName", typeNameTy),
+            ArrayList<LLVMValueRef>([typeInfo]))
+        let values = ArrayList<LLVMValueRef>([CreateLoad(refTy, exceptionRoot), typeName, context, notify])
+        let args = ArrayList<LLVMValueRef>()
+        for (i in 0..4) {
+            args.add(FixFuncArg(CGValue(values[i], CGType.GetOrCreate(cgMod, funcTy.GetParamType(i))),
+                cgFuncTy.GetParamType(i)))
+        }
+        return CreateCallOrInvoke(cgFunc.GetRawFunction(), args)
+    }
+
     public func CreateEPrintlnCall(message: String): LLVMValueRef {
         let helperName = "_CNat8eprintlnHRNat6StringE"
         if (let Some(helperValue) <- GetCGContext().GetCGPkgContext().FindCHIRGlobalValue(helperName)) {

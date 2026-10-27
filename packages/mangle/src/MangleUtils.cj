@@ -12,7 +12,9 @@ public let MANGLE_GLOBAL_PACKAGE_INIT_PREFIX: String = "GP"
 public let MANGLE_GLOBAL_FILE_INIT_PREFIX: String = "GF"
 public let MANGLE_FUNC_PARA_INIT_PREFIX: String = "PI"
 public let SPECIAL_NAME_FOR_INIT_FUNCTION: String = "ii"
-public let SPECIAL_NAME_FOR_INIT_RESET_FUNCTION: String = "ir"
+// v2 reset notifications carry an explicit result and copied UTF-8 error data.
+// Old ir callbacks have a different C signature and must be regenerated.
+public let SPECIAL_NAME_FOR_INIT_RESET_FUNCTION: String = "ir2"
 public let SPECIAL_NAME_FOR_INIT_LITERAL_FUNCTION: String = "il"
 public let SPECIAL_NAME_FOR_IMPORTS_INIT_FUNCTION: String = "fi"
 public let SPECIAL_NAME_FOR_LITERAL_IMPORTS_INIT_FUNCTION: String = "fl"

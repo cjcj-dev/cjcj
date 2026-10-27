@@ -218,3 +218,112 @@ public class RuntimeTaskLifecycleBodyTest {
         @Expect(call.status == MacroEvalStatus.FAIL, false)
     }
 }
+
+// Finite host tests of the versioned C boundary. The public paired reset gate
+// separately supplies actual target Exception/Error values and owns R shutdown.
+private func WithResetNotification(action: (CPointer<Unit>, MacroInvoke) -> Unit): Unit {
+    let invocation = MacroInvoke()
+    let id = synchronized(macroInvokeTableLock) {
+        let current = macroInvokeNextId
+        macroInvokeNextId++
+        macroInvokeTable[current] = invocation
+        current
+    }
+    try {
+        try (cell = LibC.malloc<Int64>().asResource()) {
+            @Assert(!cell.value.isNull())
+            unsafe { cell.value.write(id) }
+            action(CPointer<Unit>(cell.value), invocation)
+        }
+    } finally {
+        synchronized(macroInvokeTableLock) { macroInvokeTable.remove(id) }
+    }
+}
+
+@Test
+public class RuntimeTaskLifecycleResetTest {
+    @TestCase
+    public func ExceptionAndErrorCopyLengthDelimitedBytes(): Unit {
+        let originalType = "test:OriginalFailure"
+        let originalMessage = String.fromUtf8([65u8, 0u8, 66u8, 0xe4u8, 0xb8u8, 0xadu8])
+        for (kind in [1u32, 2u32]) {
+            WithResetNotification({ context, invocation =>
+                try (typeBytes = unsafe { LibC.mallocCString(originalType) }.asResource(),
+                    messageBytes = unsafe { LibC.mallocCString(originalMessage) }.asResource()) {
+                    @Assert(!typeBytes.value.isNull() && !messageBytes.value.isNull())
+                    let status = unsafe { ResetVariableFinishNotify(context, kind, typeBytes.value.getChars(),
+                        UIntNative(originalType.size), messageBytes.value.getChars(), UIntNative(originalMessage.size)) }
+                    @Expect(status, 0)
+                    // The callback has copied both views before returning.
+                    unsafe {
+                        typeBytes.value.getChars().write(0, 88u8)
+                        messageBytes.value.getChars().write(0, 89u8)
+                    }
+                }
+                @Expect(invocation.isDataReady, true)
+                let failure = (invocation.failure.getOrThrow() as MacroResetFailure).getOrThrow()
+                @Expect(failure.remoteKind, kind)
+                @Expect(failure.remoteType, originalType)
+                @Expect(failure.remoteMessage, originalMessage)
+            })
+        }
+    }
+
+    @TestCase
+    public func EmptyMessageAndUnknownExportAreDistinctFailures(): Unit {
+        WithResetNotification({ context, invocation =>
+            let name = "test:EmptyMessage"
+            try (bytes = unsafe { LibC.mallocCString(name) }.asResource()) {
+                @Expect(unsafe { ResetVariableFinishNotify(context, 1u32, bytes.value.getChars(), UIntNative(name.size),
+                    CPointer<UInt8>(), 0) }, 0)
+            }
+            let failure = (invocation.failure.getOrThrow() as MacroResetFailure).getOrThrow()
+            @Expect(failure.remoteMessage, "")
+            @Expect(failure.remoteKind, 1u32)
+        })
+        for (kind in [3u32, 4u32]) {
+            WithResetNotification({ context, invocation =>
+                @Expect(unsafe { ResetVariableFinishNotify(context, kind, CPointer<UInt8>(), 0,
+                    CPointer<UInt8>(), 0) }, 0)
+                let failure = (invocation.failure.getOrThrow() as MacroResetFailure).getOrThrow()
+                @Expect(failure.remoteKind, kind)
+                @Expect(failure.remoteType, "")
+                @Expect(failure.remoteMessage, "")
+                @Expect(invocation.isDataReady, true)
+            })
+        }
+    }
+
+    @TestCase
+    public func InvalidPayloadReturnsFailureWithoutThrowingAcrossC(): Unit {
+        WithResetNotification({ context, invocation =>
+            @Expect(unsafe { ResetVariableFinishNotify(context, 1u32, CPointer<UInt8>(), 1,
+                CPointer<UInt8>(), 0) }, -1)
+            @Expect(invocation.failure.isSome(), true)
+            @Expect(invocation.isDataReady, true)
+        })
+        @Expect(unsafe { ResetVariableFinishNotify(CPointer<Unit>(), 0u32, CPointer<UInt8>(), 0,
+            CPointer<UInt8>(), 0) }, -1)
+    }
+
+    @TestCase
+    public func NormalNotificationAndDuplicateCannotHideFirstFailure(): Unit {
+        WithResetNotification({ context, invocation =>
+            @Expect(unsafe { ResetVariableFinishNotify(context, 0u32, CPointer<UInt8>(), 0,
+                CPointer<UInt8>(), 0) }, 0)
+            @Expect(invocation.failure.isNone(), true)
+            @Expect(invocation.isDataReady, true)
+        })
+        WithResetNotification({ context, invocation =>
+            @Expect(unsafe { ResetVariableFinishNotify(context, 4u32, CPointer<UInt8>(), 0,
+                CPointer<UInt8>(), 0) }, 0)
+            let first = (invocation.failure.getOrThrow() as MacroResetFailure).getOrThrow()
+            @Expect(unsafe { ResetVariableFinishNotify(context, 0u32, CPointer<UInt8>(), 0,
+                CPointer<UInt8>(), 0) }, -1)
+            let retained = (invocation.failure.getOrThrow() as MacroResetFailure).getOrThrow()
+            @Expect(retained.remoteKind, first.remoteKind)
+            @Expect(retained.remoteType, first.remoteType)
+            @Expect(retained.remoteMessage, first.remoteMessage)
+        })
+    }
+}

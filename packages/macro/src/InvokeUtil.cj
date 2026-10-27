@@ -999,9 +999,10 @@ public class RuntimeInit {
         }
     }
 
-    public func CompleteTask(task: CPointer<Unit>): Unit {
+    public func CompleteTask(task: CPointer<Unit>): CPointer<Unit> {
         // No MacroInvoke/table/lifecycle lock is held while R waits for the
         // callback and UserFuncExecutor to finish. A null task result is valid.
+        var taskResult = CPointer<Unit>()
         try {
             try (result = LibC.malloc<CPointer<Unit>>().asResource()) {
                 if (result.value.isNull()) {
@@ -1011,6 +1012,7 @@ public class RuntimeInit {
                 if (status != 0) {
                     throw IllegalStateException("macro runtime GetTaskRet failed: " + status.toString())
                 }
+                taskResult = unsafe { result.value.read() }
                 unsafe { ReleaseHandleFromC(runtimeReleaseFunc)(task) }
             }
         } catch (e: Exception) {
@@ -1026,6 +1028,7 @@ public class RuntimeInit {
             outstandingTasks--
             tasksFinished.notifyAll()
         }
+        return taskResult
     }
 
     public func CloseRuntime(): Unit {
