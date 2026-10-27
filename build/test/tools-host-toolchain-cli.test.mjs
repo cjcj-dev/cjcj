@@ -90,40 +90,20 @@ test('official H reaches the public tools producer without a synthetic stage rec
   assert.equal(f.ok(f.run([facts.artifact.path])).stdout.trim(),'42');
   assert(!fs.existsSync(path.join(host,'STAGE-INPUTS.json')));
 });
-test('public cjlint GCC selection survives cold, warm, withdrawal and restoration',async()=>{
-  const f=fixture('gcc'),prefix='/usr';
-  f.ok(f.build('cjlint',['--tools-gcc-toolchain',prefix]));
-  function selected(expected) {
-    const facts=f.facts('cjlint');
-    console.log('TOOLS_GCC_CONSUMER_ASSERTION_REACHED '+JSON.stringify({expected}));
-    assert.equal(facts.build.nativeConfiguration.native.values.GCC_TOOLCHAIN_FLAG,expected);
-    assert.equal(f.ok(f.run([facts.artifact.path])).stdout.trim(),'42');
-    const commands=JSON.parse(fs.readFileSync(path.join(f.tools,'cjlint/build/build/compile_commands.json')));
-    for(const row of commands)assert.equal(row.command.includes('--gcc-toolchain='+prefix),expected===prefix);
-    return facts;
-  }
-  selected(prefix);
-  f.ok(f.build('cjlint',['--tools-build-mode','incremental','--tools-gcc-toolchain',prefix]));selected(prefix);
-  f.ok(f.build('cjlint',['--tools-build-mode','incremental']));selected('');
-  f.ok(f.build('cjlint',['--tools-build-mode','incremental','--tools-gcc-toolchain',prefix]));
-  const facts=selected(prefix),config=buildConfig({workspace:f.workspace,targetKey:'linux-x64',buildType:'release'});
-  const cache=path.join(f.tools,'cjlint/build/build/CMakeCache.txt'),original=fs.readFileSync(cache,'utf8');
-  f.write(cache,original.replace('GCC_TOOLCHAIN_FLAG:PATH=/usr','GCC_TOOLCHAIN_FLAG:PATH=/other'));
-  await assert.rejects(toolBuildInputs(config,'cjlint',facts.artifact.path),/TOOL_BUILD_CONFIGURATION_CHANGED/);
-  f.write(cache,original);await toolBuildInputs(config,'cjlint',facts.artifact.path);
-  const relative=f.build('cjlint',['--tools-gcc-toolchain','relative']);assert.equal(relative.status,2);assert.match(relative.stderr,/absolute GCC/);
-  const cross=f.build('cjlint',['--target','windows-x64','--tools-gcc-toolchain',prefix]);assert.equal(cross.status,2);assert.match(cross.stderr,/native Linux cjlint/);
+test('retired C++ cjlint GCC selection is rejected rather than silently changing the new frontend',()=>{
+ const f=fixture('retired-gcc'),r=f.build('cjlint',['--tools-gcc-toolchain','/usr']);
+ assert.equal(r.status,2);assert.match(r.stderr,/retired C\+\+ cjlint/);
 });
 
 // Stop only after the real public stage has prepared its fixed Git inputs.
-// All/default and mixed selectors must use the same JSON-only dependency set;
-// this boundary deliberately precedes tool builds, not the dependency reader.
+// All/default and mixed selectors must no longer demand retired C++ sources.
+// This boundary follows fixed source selection and precedes actual tool builds.
 for(const [label,selection]of [['default',null],['combined','cjlint,cjprof'],['prof-only','cjprof']])
 test('public dependency closure '+label+' reaches the post-prepare boundary',()=>{
  const f=fixture('dependency-'+label);
  const directories=['cjpm','cjfmt','hyperlangExtension','cangjie-language-server','cjcov','cjtrace-recover','cjlint','cjprof','cjcompat'];
  for(const directory of directories) {
-  const script=['cjtrace-recover','cjprof','cjcompat'].includes(directory)?'build.mjs':'build.py';
+  const script=['cjtrace-recover','cjprof','cjcompat','cjlint'].includes(directory)?'build.mjs':'build.py';
   const file=path.join(f.tools,directory,'build',script);
   if(!fs.existsSync(file))f.write(file,'// producer must not execute in this boundary test\n');
  }
@@ -132,7 +112,7 @@ test('public dependency closure '+label+' reaches the post-prepare boundary',()=
  const commit=f.ok(f.run(['git','-C',f.tools,'rev-parse','HEAD'])).stdout.trim();
  f.write(path.join(f.workspace,'.source-selection.json'),JSON.stringify({tools:{url:'file://'+f.tools,tag:commit},cjpm:{url:'file://'+f.tools,tag:commit}}));
  const stage=new URL('../srcbuild/stages/tools.mjs',import.meta.url).href;
- const anchor='await prepareNativeToolDependencies(config,pending.map(([name])=>name));';
+ const anchor='const toolEnv = targetToolsEnv(config);';
  f.write(path.join(f.root,'after-prepare.mjs'),`export async function load(url,context,next){const r=await next(url,context);if(url!==${JSON.stringify(stage)})return r;const source=String(r.source),anchor=${JSON.stringify(anchor)};if(source.split(anchor).length!==2)throw Error('POST_PREPARE_ANCHOR');return {...r,source:source.replace(anchor,anchor+"\\nconsole.log('PUBLIC_DEPENDENCY_TARGET_REACHED');throw Error('FINITE_AFTER_PREPARE');")};}`);
  const env={...process.env,CJCJ_SRCBUILD_CONSUMER_SDK:host,CJCJ_OFFICIAL_SDK_ROOT:host,NODE_OPTIONS:'--experimental-loader='+path.join(f.root,'after-prepare.mjs')};
  for(const key of ['CANGJIE_BUILD_DRY_RUN','CJCJ_SRCBUILD_SOURCE_MIRRORS','CJCJ_SRCBUILD_REQUIRE_MIRRORS'])delete env[key];
@@ -147,8 +127,7 @@ test('public dependency closure '+label+' reaches the post-prepare boundary',()=
  reached(invoke());
  f.write(path.join(f.root,'dependencies.json'),'{}');
  const missing=invoke();
- if(selection==='cjprof')reached(missing);
- else {assert.equal(missing.status,1);assert.match(missing.stderr,/TOOLS_DEPENDENCY_SOURCE json/);assert.doesNotMatch(missing.stdout,/PUBLIC_DEPENDENCY_TARGET_REACHED/);}
+ reached(missing); // neither the mixed nor default path reads retired JSON/httplib sources
  f.write(path.join(f.root,'dependencies.json'),original);reached(invoke());
  console.log('PUBLIC_DEPENDENCY_SELECTOR_PASS '+label);
 });

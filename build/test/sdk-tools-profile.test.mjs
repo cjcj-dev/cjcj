@@ -16,7 +16,7 @@ function assertCommands(lines,verb,selected=producers) {
  for(const [name,dir]of selected)assert.equal(commands.filter(line=>line.includes('/'+dir)).length,1,verb+' exactly once: '+name);
 }
 const cli=new URL('../cli.mjs',import.meta.url).pathname;
-const profOptions=['--tools-jni-home','/selected/jdk','--tools-runtime-header','/selected/Cangjie.h','--tools-lombok-jar','/selected/lombok.jar'];
+const profOptions=['--tools-analysis-sdk','/selected/analysis','--tools-frontend-source','/selected/frontend','--tools-frontend-ref','bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb','--tools-compiler-libs','/selected/frontend-libs','--tools-runtime-config','/selected/config.o','--tools-llvm-shim','/selected/shim.o','--tools-llvm-library','/selected/libLLVM-15.so','--tools-jni-home','/selected/jdk','--tools-runtime-header','/selected/Cangjie.h','--tools-lombok-jar','/selected/lombok.jar'];
 test('public trace entry selects Cangjie build.mjs and requires its compiler mangle source',async t=>{
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'trace-source-entry-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
  await fs.mkdir(root+'/cangjie_tools/cjtrace-recover/build',{recursive:true});
@@ -177,7 +177,7 @@ async function installedRegressionFixture() {
    // Do not copy Node or any SDK; these unrelated HLE inputs are unused markers.
    for(const file of ['tools/bin/node','tools/dtsparser/node_modules/.bin/cjbind','tools/dtsparser/DEPENDENCIES.json'])await write(sdk+'/'+file,'controlled unused HLE boundary');
    const outputs={cjpm:'cjpm/dist/cjpm',cjfmt:'cjfmt/dist/bin/cjfmt',hle:'hyperlangExtension/target/bin/main',lsp:'cangjie-language-server/output/bin/LSPServer',cjcov:'cjcov/dist/cjcov','cjtrace-recover':'cjtrace-recover/dist/bin/cjtrace-recover',cjlint:'cjlint/dist/bin/cjlint',cjprof:'cjprof/dist/bin/cjprof',cjcompat:'cjcompat/dist/bin/cjcompat'};
-   const buildProducts={...outputs,cjfmt:'cjfmt/build/build/bin/cjfmt','cjtrace-recover':'cjtrace-recover/cmake-build/cjtrace-recover',cjlint:'cjlint/build/build/bin/cjlint',cjprof:'cjprof/build/cangjie-output/cjprof',cjcompat:'cjcompat/build/cangjie-build/cjcompat'};
+   const buildProducts={...outputs,cjfmt:'cjfmt/build/build/bin/cjfmt','cjtrace-recover':'cjtrace-recover/cmake-build/cjtrace-recover',cjlint:'unused-cjlint-build-path',cjprof:'cjprof/build/cangjie-output/cjprof',cjcompat:'cjcompat/build/cangjie-build/cjcompat'};
    const cjpm='#!'+process.execPath+'\n'+`const fs=require('node:fs');const path=require('node:path');
 fs.appendFileSync(${JSON.stringify(trace)},JSON.stringify({event:'installed-cjpm',args:process.argv.slice(2),cwd:process.cwd()})+'\\n');
 if(process.argv[2]==='build'){const out=path.resolve('target/release/bin/main');fs.mkdirSync(path.dirname(out),{recursive:true});fs.writeFileSync(out,${JSON.stringify(hello)},{mode:0o755});}
@@ -186,12 +186,12 @@ if(process.argv[2]==='build'){const out=path.resolve('target/release/bin/main');
     const body=name==='cjpm'?cjpm:'#!'+process.execPath+'\nconsole.log("controlled tool");\n';
     const payloads=name==='cjpm'?{'cjpm/dist/cangjie-repo.toml':'fixture repo'}:
      name==='cjfmt'?{'cjfmt/dist/config/cangjie-format.toml':'fixture format'}:
-     name==='cjlint'?{'cjlint/dist/lib/libcjlint.so':'unloaded fixture','cjlint/dist/config/rules.json':'{}'}:
+     name==='cjlint'?{'cjlint/dist/lib/libcangjie-runtime.so':'unloaded fixture','cjlint/dist/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so':'unloaded fixture','cjlint/dist/modules/std.core.cjo':'analysis fixture','cjlint/dist/config/cjlint_rule_list.json':'{}'}:
      name==='cjprof'?{'cjprof/dist/lib/libcjprof-cangjie.so':'unloaded fixture','cjprof/dist/lib/libcjprof-jni.so':'unloaded fixture','cjprof/dist/share/java/cjprof.jar':'unloaded fixture','cjprof/dist/config/static/index.html':'fixture page'}:{};
-    if(['cjtrace-recover','cjcompat','cjprof'].includes(name)) {
+    if(['cjtrace-recover','cjcompat','cjprof','cjlint'].includes(name)) {
      await write(tools+'/'+dir+'/build.mjs',`import fs from 'node:fs';import path from 'node:path';
 const verb=process.argv[2];fs.appendFileSync(${JSON.stringify(trace)},JSON.stringify({event:'producer',name:${JSON.stringify(name)},verb})+'\\n');
-if(verb==='build'||verb==='install') {const out=${name==='cjprof'?"verb==='build'?path.join(process.argv[process.argv.indexOf('--build-dir')+1],'cjprof'):path.join("+JSON.stringify(tools)+","+JSON.stringify(outputs[name])+")":"path.join("+JSON.stringify(tools)+",verb==='build'?"+JSON.stringify(buildProducts[name])+":"+JSON.stringify(outputs[name])+")"};fs.mkdirSync(path.dirname(out),{recursive:true});fs.writeFileSync(out,${JSON.stringify(body)},{mode:0o755});if(verb==='install')for(const [rel,value]of Object.entries(${JSON.stringify(payloads)})){const file=path.join(${JSON.stringify(tools)},rel);fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,value);}}
+if(verb==='build'||verb==='install') {const out=${['cjprof','cjlint'].includes(name)?"verb==='build'?path.join(process.argv[process.argv.indexOf('--build-dir')+1],"+JSON.stringify(name==='cjlint'?'target/release/bin/cjlint':'cjprof')+"):path.join("+JSON.stringify(tools)+","+JSON.stringify(outputs[name])+")":"path.join("+JSON.stringify(tools)+",verb==='build'?"+JSON.stringify(buildProducts[name])+":"+JSON.stringify(outputs[name])+")"};fs.mkdirSync(path.dirname(out),{recursive:true});fs.writeFileSync(out,${JSON.stringify(body)},{mode:0o755});if(verb==='install')for(const [rel,value]of Object.entries(${JSON.stringify(payloads)})){const file=path.join(${JSON.stringify(tools)},rel);fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,value);}}
 `);
      continue;
     }
@@ -374,4 +374,24 @@ test('public Cangjie cjprof forwards the selected host JNI inputs without a C++ 
  const windows=invoke([...profOptions,'--target','windows-x64']);assert.notEqual(windows.status,0);
  assert.match(windows.stderr,/selected Cangjie producer supports Linux x86-64/);
  console.log('CJPROF_PUBLIC_HOST_INPUTS_REACHED');
+});
+
+// This is the public CLI/configuration boundary, not a tool compilation.
+test('public Cangjie lint separates host execution and explicit/default analysis inputs',async t=>{
+ const root=await fs.mkdtemp(path.join(os.tmpdir(),'lint-source-entry-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
+ await fs.mkdir(root+'/cangjie_tools/cjlint/build',{recursive:true});
+ const args=[cli,'--workspace',root,'--build-root',root+'/output','--tools-build-set','cjlint','--tools-phase','build','--jobs','1'];
+ const env={...process.env,CANGJIE_BUILD_DRY_RUN:'1',CJCJ_SRCBUILD_CONSUMER_SDK:'/execution-H'};
+ for(const key of ['CJLINT_ANALYSIS_SDK','CJLINT_FRONTEND_SOURCE','CJLINT_FRONTEND_REF','CJCJ_TOOLS_GCC_TOOLCHAIN'])delete env[key];
+ const invoke=(extra=[],overlay={})=>spawnSync(process.execPath,[...args,...extra,'build','tools'],{env:{...env,...overlay},encoding:'utf8'});
+ const missing=invoke();assert.equal(missing.status,1);assert.match(missing.stderr,/toolsAnalysisSdk is required/);
+ const explicit=invoke(profOptions);assert.equal(explicit.status,0,explicit.stderr);
+ assert.match(explicit.stderr,/build\.mjs build --sdk \/execution-H --analysis-sdk \/selected\/analysis/);
+ assert.match(explicit.stderr,/--frontend-artifacts \/selected\/frontend-libs --frontend-runtime-object \/selected\/config\.o/);
+ assert.doesNotMatch(explicit.stderr,/build\.py|--dependencies|build\.mjs clean/);
+ const options=profOptions.filter((value,i)=>!['--tools-analysis-sdk','--tools-frontend-source','--tools-frontend-ref'].includes(value)&&!['--tools-analysis-sdk','--tools-frontend-source','--tools-frontend-ref'].includes(profOptions[i-1]));
+ const defaults=invoke(options,{CJLINT_ANALYSIS_SDK:'/selected/analysis',CJLINT_FRONTEND_SOURCE:'/selected/frontend',CJLINT_FRONTEND_REF:'b'.repeat(40)});
+ assert.equal(defaults.status,0,defaults.stderr);assert(defaults.stderr.includes('--analysis-sdk /selected/analysis'));
+ const override=invoke(profOptions,{CJLINT_ANALYSIS_SDK:'/wrong-ambient'});assert.equal(override.status,0,override.stderr);assert.doesNotMatch(override.stderr,/wrong-ambient/);
+ const cross=invoke([...profOptions,'--target','windows-x64']);assert.equal(cross.status,1);assert.match(cross.stderr,/supports Linux x86-64/);
 });

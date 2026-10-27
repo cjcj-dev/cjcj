@@ -35,9 +35,10 @@ await fs.writeFile(path.join(source,'hyperlangExtension/src/dtsparser/source.cj'
 // Payload-copy boundaries only: these markers are never loaded as libraries
 // and cannot qualify native/JNI products. The nine actual fixture executables
 // above still exercise the public installed launcher and lineage rejection.
-for(const rel of ['cjpm/dist/cangjie-repo.toml','cjlint/dist/lib/libcjlint.so','cjlint/dist/config/cjlint_rule_list.json','cjprof/dist/lib/libcjprof-cangjie.so','cjprof/dist/lib/libcjprof-jni.so','cjprof/dist/share/java/cjprof.jar','cjprof/dist/config/static/index.html']) {
+for(const rel of ['cjpm/dist/cangjie-repo.toml','cjlint/dist/lib/libcangjie-runtime.so','cjlint/dist/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so','cjlint/dist/modules/std.core.cjo','cjlint/dist/config/cjlint_rule_list.json','cjprof/dist/lib/libcjprof-cangjie.so','cjprof/dist/lib/libcjprof-jni.so','cjprof/dist/share/java/cjprof.jar','cjprof/dist/config/static/index.html']) {
  const file=path.join(source,rel);await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,'controlled transport boundary '+rel);
 }
+await fs.copyFile(path.join(inputs.host,'runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so'),path.join(source,'cjlint/dist/lib/libcangjie-runtime.so'));
 hlePayloadFixture(sdk);
 await fs.writeFile(path.join(sdk,'tools/dtsparser/DEPENDENCIES.json'),JSON.stringify({fixture:'unqualified transport inputs'}));
 const config={workspace:root,softwareDir:path.join(root,'software'),repoPath:()=>source,target:getTarget('linux-x64')};
@@ -46,7 +47,7 @@ for(const [name]of products)test('source-built '+name+' is the installed public 
  const binary=path.join(sdk,'tools/bin',name),result=spawnSync(binary,[],{encoding:'utf8'});
  console.log('SOURCE_TOOL_RESULT_TARGET_ASSERTION_REACHED '+JSON.stringify({name,rc:result.status,stdout:result.stdout}));
  assert.equal(result.status,0,result.stderr);assert.equal(result.stdout.trim(),name+':42');
- const raw=path.join(sdk,'.target-tools/tools/bin',name);
+ const raw=path.join(sdk,name==='cjlint'?'.target-tools/tools/cjlint/bin':'.target-tools/tools/bin',name);
  assert.equal(await fileDigest(raw),expected[name],'installed product retains actual independently captured build bytes');
 });
 test('lineage reads actual source-built tool bytes and still rejects unstamped interface fixtures',async()=>{

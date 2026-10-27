@@ -2,10 +2,15 @@
 // its SDK-adapted source must exist in the selected complete tools candidate.
 import path from 'node:path';
 import fs from 'node:fs/promises';
+import {execFile} from 'node:child_process';
+import {promisify} from 'node:util';
+const execute=promisify(execFile);
 export const TOOL_NAMES = ['cjpm','cjfmt','hle','lsp','cjcov','cjtrace-recover','cjlint','cjprof','cjcompat'];
 export const TOOL_DIRECTORIES = {cjpm:'cjpm',cjfmt:'cjfmt',hle:'hyperlangExtension',lsp:'cangjie-language-server',cjcov:'cjcov','cjtrace-recover':'cjtrace-recover',cjlint:'cjlint',cjprof:'cjprof',cjcompat:'cjcompat'};
 export const TOOL_PUBLIC_NAMES = {lsp:'LSPServer'};
 export const toolName = name => { const plain=name.replace(/\.exe$/,''); return plain==='LSPServer'?'lsp':plain; };
+export const cjlintBuildDirectory = config => path.join(config.buildRoot,'cjlint');
+export const retainedToolPath = row => row.producer==='cjlint'?'.target-tools/tools/cjlint/bin/'+row.name:'.target-tools/'+row.to;
 export const cjprofBuildDirectory = config => path.join(config.buildRoot,'cjprof');
 export function requireToolProducer(name) {
   const directory=TOOL_DIRECTORIES[name];
@@ -26,20 +31,16 @@ export function toolBuildProduct(config,name) {
   const root=config.repoPath('tools'),exe=config.target.spec.exeSuffix;
   if(name==='cjtrace-recover')return path.join(root,'cjtrace-recover/cmake-build/cjtrace-recover'+exe);
   if(name==='cjcompat')return path.join(root,'cjcompat/build/cangjie-build/cjcompat'+exe);
-  if(['cjfmt','cjlint'].includes(name))return path.join(root,name,'build/build/bin',name+exe);
+  if(name==='cjlint')return path.join(cjlintBuildDirectory(config),'target/release/bin/cjlint');
+  if(name==='cjfmt')return path.join(root,name,'build/build/bin',name+exe);
   if(name==='cjprof')return path.join(cjprofBuildDirectory(config),name+exe);
   const row=toolOutputs(config).find(row=>row.producer===name);
   if(!row)requireToolProducer(name);
   return row.from;
 }
-// Fixed native producers choose their own Windows prefixes/output classes.
-// cjlint uses MinGW's lib prefix and RUNTIME_OUTPUT_DIRECTORY=bin;
 // Cangjie cjprof currently produces Linux ELF/JNI in cangjie-output.
 export function nativeToolLibraries(name,os) {
-  const windows=os==='windows'||os==='win32';
-  const ext=windows?'.dll':os==='darwin'?'.dylib':'.so';
-  if(name==='cjlint')return [{build:'cjlint/build/build/'+(windows?'bin/':'lib/')+'libcjlint'+ext,
-    install:'cjlint/dist/lib/libcjlint'+ext,to:'tools/lib/libcjlint'+ext}];
+  if(name==='cjlint')return []; // no retired C++ tool library
   if(name==='cjprof')return ['cjprof-cangjie','cjprof-jni'].map(lib=>{
     const file='lib'+lib+'.so';
     return {build:'cjprof/build/cangjie-output/'+file,
@@ -53,10 +54,14 @@ export async function toolPayloads(config,name,installPrefix) {
   const root=config.repoPath('tools'),rows=[];
   const add=(rel,to)=>rows.push({producer:name,from:installPrefix
     ?path.join(installPrefix,to.replace(/^\.target-tools\//,'').replace(/^tools\//,'')):path.join(root,rel),to});
+  if(name==='cjlint') {
+    const prefix=installPrefix??path.join(root,'cjlint/dist');
+    return lintInstalledPayloads(prefix);
+  }
   if(name==='cjfmt')add('cjfmt/dist/config/cangjie-format.toml','tools/config/cangjie-format.toml');
   if(name==='cjpm')add('cjpm/dist/cangjie-repo.toml','tools/config/cangjie-repo.toml');
   if(name==='cjprof')add('cjprof/dist/share/java/cjprof.jar','tools/share/java/cjprof.jar');
-  if(['cjlint','cjprof'].includes(name)) {
+  if(name==='cjprof') {
     for(const row of nativeToolLibraries(name,config.target.spec.os))add(row.install,row.to);
     async function walk(relative) {
       const entries=await fs.readdir(installPrefix?path.join(installPrefix,relative.slice((name+'/dist/').length)):path.join(root,relative),{withFileTypes:true});
@@ -84,10 +89,11 @@ export async function toolPayloads(config,name,installPrefix) {
 // Keep shared/JNI libraries and source configuration bound to that build, too.
 export async function nativeToolBuildPayloads(config,name) {
   if(!['cjlint','cjprof'].includes(name))return [];
+  if(name==='cjlint')return lintBuildPayloads(config);
   const root=config.repoPath('tools'),os=config.target.spec.os;
   const rows=nativeToolLibraries(name,os).map(row=>({from:name==='cjprof'?path.join(cjprofBuildDirectory(config),path.basename(row.build)):path.join(root,row.build),to:row.to}));
   if(name==='cjprof')rows.push({from:path.join(cjprofBuildDirectory(config),'cjprof.jar'),to:'tools/share/java/cjprof.jar'});
-  const source=path.join(root,name,name==='cjlint'?'config':'static');
+  const source=path.join(root,name,'static');
   async function walk(dir,tail='') {
     for(const entry of (await fs.readdir(dir,{withFileTypes:true})).sort((a,b)=>a.name.localeCompare(b.name))) {
       const rel=tail+entry.name,from=path.join(dir,entry.name);
@@ -101,5 +107,47 @@ export async function nativeToolBuildPayloads(config,name) {
   }
   await walk(source);
   if(!rows.some(row=>row.to.startsWith('tools/config/')))throw Error('SOURCE_TOOL_CONFIG_MISSING '+name);
+  return rows;
+}
+
+// Cangjie lint is an independently installed analysis application. Keep its
+// host libraries and selected analysis modules beside its retained body; they
+// must not replace the containing SDK's target runtime or modules.
+const lintRetain='.target-tools/tools/cjlint/';
+async function lintTree(directory,relative,rows) {
+  for(const entry of (await fs.readdir(directory,{withFileTypes:true})).sort((a,b)=>a.name.localeCompare(b.name))) {
+    const file=path.join(directory,entry.name),rel=relative+'/'+entry.name;
+    if(entry.isDirectory())await lintTree(file,rel,rows);
+    else if(entry.isFile()||entry.isSymbolicLink()) {
+      if(!(await fs.stat(file)).isFile())throw Error('CJLINT_PAYLOAD_TYPE '+file);
+      rows.push({producer:'cjlint',from:file,to:lintRetain+rel});
+    }else throw Error('CJLINT_PAYLOAD_TYPE '+file);
+  }
+}
+async function lintInstalledPayloads(prefix) {
+  const rows=[];
+  for(const name of ['config','modules','lib','runtime'])await lintTree(path.join(prefix,name),name,rows);
+  if(rows.some(r=>/lib(?:cjlint|cangjie-lsp)\./.test(r.to)))throw Error('CJLINT_RETIRED_LIBRARY');
+  return rows;
+}
+async function lintBuildPayloads(config) {
+  const file=path.join(cjlintBuildDirectory(config),'product.json'),facts=JSON.parse(await fs.readFile(file,'utf8'));
+  if(facts.language!=='Cangjie'||!facts.analysis?.sdk)throw Error('CJLINT_ANALYSIS_INPUT_REQUIRED');
+  const rows=[];
+  await lintTree(path.join(config.repoPath('tools'),'cjlint/config'),'config',rows);
+  await lintTree(path.join(facts.analysis.sdk,'modules'),'modules',rows);
+  const env={...process.env,LD_LIBRARY_PATH:[path.join(facts.host.sdk,'runtime/lib/linux_x86_64_cjnative'),path.join(facts.host.sdk,'lib/linux_x86_64_cjnative'),path.dirname(facts.frontend.llvmLibrary)].join(path.delimiter)};
+  delete env.LD_PRELOAD;delete env.LD_AUDIT;
+  const {stdout}=await execute('ldd',[facts.executable],{env});
+  if(stdout.includes('not found'))throw Error('CJLINT_HOST_DEPENDENCY_MISSING');
+  for(const line of stdout.split('\n')) {
+    const match=line.match(/^\s*(\S+)\s+=>\s+(\/\S+)/);if(!match)continue;
+    const [,name,source]=match;
+    if(name.includes('cjlint')||name.includes('cangjie-lsp'))throw Error('CJLINT_RETIRED_LIBRARY');
+    if(source.startsWith(facts.host.sdk+'/')||await fs.realpath(source)===await fs.realpath(facts.frontend.llvmLibrary)) {
+      rows.push({producer:'cjlint',from:source,to:lintRetain+'lib/'+name});
+      if(name==='libcangjie-runtime.so')rows.push({producer:'cjlint',from:source,to:lintRetain+'runtime/lib/linux_x86_64_cjnative/'+name});
+    }
+  }
   return rows;
 }

@@ -106,23 +106,47 @@ await group('lsp',()=>{
  }
 });
 await group('cjlint',()=>{
+ const app=prefix+'/cjlint';
+ // Execution H and analysis modules are separate inputs. Installed/unpacked
+ // calls resolve their bundled modules; neither ambient H nor SDK -m overrides it.
+ const environment={CANGJIE_HOME:undefined,CANGJIE_PATH:undefined,LD_LIBRARY_PATH:undefined,LD_PRELOAD:undefined,LD_AUDIT:undefined};
+ const invoke=(name,source,rules,{format='json',expected=0,explicitAnalysis=false}={})=>{
+  const root=work+'/lint-'+name,dir=root+'/src';fs.mkdirSync(dir,{recursive:true});
+  fs.cpSync(app+'/config',root+'/config',{recursive:true});
+  fs.writeFileSync(root+'/config/cjlint_rule_list.json',JSON.stringify({RuleList:rules}));
+  fs.writeFileSync(dir+'/main.cj',source);
+  const output=root+'/report.'+format;
+  const r=run('lint-'+name,[binary('cjlint'),'-f',dir,'-c',root,'-o',output,'-r',format,...(explicitAnalysis?['--analysis-sdk',app]:[])],{environment,expected});
+  const text=fs.readFileSync(output,'utf8');
+  let rows;
+  if(format==='json')rows=JSON.parse(text);
+  else {
+   const all=[],row=[];let field='',quoted=false;
+   for(let i=0;i<text.length;i++){const c=text[i];if(c==='"'){if(quoted&&text[i+1]==='"'){field+='"';i++;}else quoted=!quoted;}else if(!quoted&&(c===','||c==='\n')){row.push(field);field='';if(c==='\n')all.push(row.splice(0));}else field+=c;}
+   assert.equal(quoted,false);rows=all.slice(1).map(r=>({file:r[0],line:Number(r[1]),column:Number(r[2]),description:r[5]}));
+  }
+  assert(Array.isArray(rows));return {rows,result:r};
+ };
  for(const [arm,decl]of [['mutable','var'],['immutable','let']]) {
-  const dir=work+'/lint-'+arm;fs.mkdirSync(dir);fs.writeFileSync(dir+'/main.cj','main(): Int64 {\n    '+decl+' value: Int64 = 42\n    return value\n}\n');
-  run('lint-'+arm+'-compile',[sdk+'/bin/cjc',dir+'/main.cj','-o',dir+'/program']);
-  const output=work+'/lint-'+arm+'-report';run('lint-'+arm,[binary('cjlint'),'-f',dir,'-c',prefix+'/cjlint','-m',sdk,'-o',output,'-r','json'],{library:prefix+'/cjlint/lib'});
-  check('lint G.VAR.01 '+arm,()=>{const report=JSON.parse(fs.readFileSync(output+'.json'));assert(Array.isArray(report));assert.equal(report.some(x=>x.description?.includes('G.VAR.01')&&x.description.includes("'value'")),arm==='mutable');});
+  const ordinary=invoke(arm,'func api(): Int64 { '+decl+' value: Int64 = 42\n value }\n',['G.VAR.01'],{explicitAnalysis:arm==='immutable'});
+  check('lint immutable rule '+arm,()=>{assert.equal(ordinary.rows.length,arm==='mutable'?1:0);if(arm==='mutable')assert.equal(ordinary.rows[0].description,"G.VAR.01: Prefer immutable variables when the value of the variable 'value' does not change.");});
+  const receiver=invoke('receiver-'+arm,receiverDeclarations+'\nfunc api(): Int64 { '+decl+' value = receiverResult()\n value }\n',['G.VAR.01'],{explicitAnalysis:arm==='immutable'});
+  check('lint receiver result '+arm,()=>assert.equal(receiver.rows.some(x=>x.description?.includes('G.VAR.01')&&x.description.includes("'value'")),arm==='mutable'));
  }
- for(const [arm,decl]of [['mutable','var'],['immutable','let']]) {
-  const dir=work+'/lint-receiver-'+arm;fs.mkdirSync(dir);
-  fs.writeFileSync(dir+'/main.cj',receiverDeclarations+'\nmain(): Int64 {\n '+decl+' value = receiverResult()\n println(value)\n return 0\n}\n');
-  run('lint-receiver-'+arm+'-compile',[sdk+'/bin/cjc',dir+'/main.cj','-o',dir+'/program']);
-  check('receiver program '+arm,()=>assert.equal(run('lint-receiver-'+arm+'-run',[dir+'/program']).stdout.trim(),'42'));
-  const output=work+'/lint-receiver-'+arm+'-report';
-  run('lint-receiver-'+arm,[binary('cjlint'),'-f',dir,'-c',prefix+'/cjlint','-m',sdk,'-o',output,'-r','json'],{library:prefix+'/cjlint/lib'});
-  check('lint receiver result G.VAR.01 '+arm,()=>{
-   const report=JSON.parse(fs.readFileSync(output+'.json'));assert(Array.isArray(report));
-   assert.equal(report.some(x=>x.description?.includes('G.VAR.01')&&x.description.includes("'value'")),arm==='mutable');
-  });
+ const error=invoke('sema-error','interface Counter { func increase(): Unit }\nstruct CounterValue <: Counter { var value: Int64 = 0\n public func increase(): Unit { value += 1 } }\n',['G.ITF.01'],{expected:1});
+ check('lint SEMA failure retains actual diagnostic and report',()=>{assert.match(error.result.stderr,/immutable/);assert(error.rows.some(x=>x.defectType==='G_ITF_01_should_use_mut_modifier'));});
+ for(const [name,body]of [['parse-error','func broken( {'],['import-error','import missing_package.not_here\nfunc api(): Int64 { 1 }\n']]) {
+  const root=work+'/lint-'+name;fs.mkdirSync(root+'/src',{recursive:true});fs.writeFileSync(root+'/src/main.cj',body);
+  run('lint-'+name,[binary('cjlint'),'-f',root+'/src','-c',app,'-o',root+'/report.json','-r','json'],{environment,expected:1});
+  check('lint '+name+' refuses report publication',()=>assert.equal(fs.existsSync(root+'/report.json'),false));
+ }
+ const rules=['G.SYN.01','G.VAR.03','G.FMT.13','G.VAR.02','G.VAR.01'];
+ const ordered=["G.FMT.13: The file header comments should contain the copyright information.","G.VAR.01: Prefer immutable variables when the value of the variable 'value' does not change.","G.VAR.02: Prefer variable 'value' to follow the principle of minimizing scope.","G.VAR.03: Avoid declaring global variable 'value'.","G.SYN.01: The syntax 'global variable' is disabled in this project."];
+ for(const format of ['json','csv']) {
+  const order=invoke('order-'+format,'package example\nvar value = 1\nfunc api(): Int64 { value }\n',rules,{format});
+  check('lint raw '+format+' position and body order',()=>{assert.deepEqual(order.rows.map(x=>x.line),[1,2,2,2,2]);assert.deepEqual(order.rows.map(x=>x.description),ordered);});
+  const duplicate=invoke('dedup-'+format,'extend String { public func serialize(): Unit {} }\nfunc api(): Unit { "password passwd".serialize() }\n',['G.SER.01'],{format});
+  check('lint raw '+format+' body deduplication',()=>{assert.equal(duplicate.rows.length,1);assert.equal(duplicate.rows[0].description,"G.SER.01: Serialize unencrypted sensitive data 'password passwd' may cause information leak");});
  }
 });
 await group('cjprof',()=>{

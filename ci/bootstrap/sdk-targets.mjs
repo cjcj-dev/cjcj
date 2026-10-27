@@ -52,7 +52,8 @@ export function installationRecipe(selection,{compiler:product,std,bootstrap=fal
   const native=sdkPlatform(platform),tuple=native.tuple,exe=native.exe;
   const nLib=['third_party/llvm/'+native.llvmDirectory,'runtime/lib/'+tuple,'lib/'+tuple,'tools/lib'];
   if(tools)return {copies:[...tools.rows,...tools.payloads].map(row=>({...row,owner:'source-built tools'})),
-    entries:[{directory:'tools/bin',retain:'.target-tools/tools/bin',names:tools.rows.map(row=>row.name),libraries:nLib}],links:{}};
+    entries:[{directory:'tools/bin',retain:'.target-tools/tools/bin',names:tools.rows.filter(row=>row.producer!=='cjlint').map(row=>row.name),libraries:nLib},
+      ...tools.rows.filter(row=>row.producer==='cjlint').map(row=>({directory:'tools/bin',retain:'.target-tools/tools/cjlint/bin',names:[row.name],libraries:['.target-tools/tools/cjlint/lib']}))],links:{}};
   const {llvm,runtime,ast}=target;
   product??=target.compiler.product;std??=target.std.install;
   const compilerName='bin/cjcj-stage1'+exe;

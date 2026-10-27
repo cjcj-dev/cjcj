@@ -42,8 +42,8 @@ function producerFacts(sdk,tool,binary,platform='linux-x64',source=null) {
   const file=path.join(sdk,'TOOLS-INPUTS.json'),suffix=platform==='windows-x64'?'.exe':'';
   const inputs=fs.existsSync(file)?JSON.parse(fs.readFileSync(file,'utf8')):{files:{}};
   const sha256=digest(fs.readFileSync(binary)),payloads={};
-  if(tool==='cjlint')for(const name of fs.readdirSync(path.join(sdk,'tools/config')).filter(name=>name.endsWith('.json'))) {
-    const rel='tools/config/'+name;payloads[rel]={sha256:digest(fs.readFileSync(path.join(sdk,rel)))};
+  if(tool==='cjlint')for(const name of fs.readdirSync(path.join(sdk,'.target-tools/tools/cjlint'),{recursive:true})) {
+    const rel='.target-tools/tools/cjlint/'+name;if(fs.statSync(path.join(sdk,rel)).isFile())payloads[rel]={sha256:digest(fs.readFileSync(path.join(sdk,rel)))};
   }
   if(tool==='cjprof')for(const prefix of ['tools/config/static','.target-tools/tools/config/static']) {
     for(const tail of fs.readdirSync(path.join(sdk,prefix),{recursive:true})) {
@@ -253,7 +253,7 @@ for(const [platform,suffix,libraries]of [
  writeFile(path.join(release,'tools/config/other.toml'),'keep other configuration\n');
  writeFile(path.join(release,'tools/config/cangjie-format.toml'),'base format\n');
  for(const rel of sourceToolPayloads(tool,platform)) {
-  if(rel==='tools/config')writeFile(path.join(sdk,rel,'cjlint_rule_list.json'),'target lint config');
+  if(rel==='.target-tools/tools/cjlint')writeFile(path.join(sdk,rel,'config/cjlint_rule_list.json'),'target lint config');
   else if(rel.endsWith('/config/static'))writeFile(path.join(sdk,rel,'index.html'),'target prof config');
   else if(!fs.existsSync(path.join(sdk,rel)))writeFile(path.join(sdk,rel),'target native payload');
  }
@@ -264,11 +264,14 @@ for(const [platform,suffix,libraries]of [
  const consumer=dedicated?path.join(root,'ci/release/install_hle_artifact.mjs'):install;
  const toolArgs=dedicated?[]:['--tool',tool];
  try {
+  if(tool==='cjlint'&&platform!=='linux-x64') {
+   assert.throws(()=>run(producer,[...toolArgs,'--platform',platform,'--binary',binary,'--sdk',sdk,'--outdir',artifact]),/CJLINT_PLATFORM_NOT_SUPPORTED/);return;
+  }
   run(producer,[...toolArgs,'--platform',platform,'--binary',binary,'--sdk',sdk,'--outdir',artifact]);
   // Move the actual artifact root before consumption.
   const moved=artifact+'-moved';fs.renameSync(artifact,moved);
   run(consumer,[...toolArgs,'--platform',platform,'--artifact',moved,'--sdk',release]);
-  const results={binary:fs.readFileSync(path.join(release,'tools/bin/'+tool+suffix),'utf8'),
+  const results={binary:fs.readFileSync(path.join(release,tool==='cjlint'?'.target-tools/tools/cjlint/bin/cjlint':'tools/bin/'+tool+suffix),'utf8'),
    format:tool==='cjfmt'?fs.readFileSync(path.join(release,'tools/config/cangjie-format.toml'),'utf8'):null,
    repo:fs.readFileSync(path.join(release,'tools/config/cangjie-repo.toml'),'utf8'),other:fs.readFileSync(path.join(release,'tools/config/other.toml'),'utf8')};
   console.log('A8_PLATFORM_TARGET_ASSERTION_REACHED',platform,tool,JSON.stringify(results));
@@ -302,7 +305,7 @@ test('A8 workflow native callers provide their actual SDK input',()=>{
    writeExecutable(binary,'controlled caller binary\n');
    const tool=argv[argv.indexOf('--tool')+1];
    for(const rel of sourceToolPayloads(tool,'linux-x64')) {
-    if(rel==='tools/config')writeFile(path.join(targetSdk,rel,'cjlint_rule_list.json'),'lint config');
+    if(rel==='.target-tools/tools/cjlint')writeFile(path.join(targetSdk,rel,'config/cjlint_rule_list.json'),'lint config');
     else if(rel.endsWith('/config/static'))writeFile(path.join(targetSdk,rel,'index.html'),'prof config');
     else if(!fs.existsSync(path.join(targetSdk,rel)))writeFile(path.join(targetSdk,rel),'native payload');
    }

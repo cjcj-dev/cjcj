@@ -75,7 +75,7 @@ if(process.env.CJCJ_TOOL_FACTS_INSTALL==='1'){
    'cjcov/dist/cjcov','cjtrace-recover/dist/bin/cjtrace-recover','cjlint/dist/bin/cjlint','cjprof/dist/bin/cjprof','cjcompat/dist/bin/cjcompat']){
    await fs.mkdir(path.dirname(path.join(tools,rel)),{recursive:true});await fs.copyFile('/usr/bin/true',path.join(tools,rel));
  }
- for(const rel of ['cjlint/dist/lib/libcjlint.so','cjlint/dist/config/cjlint_rule_list.json','cjprof/dist/lib/libcjprof-cangjie.so','cjprof/dist/lib/libcjprof-jni.so','cjprof/dist/share/java/cjprof.jar','cjprof/dist/config/static/index.html'])await write(path.join(tools,rel),'explicit unrelated payload fixture');
+ for(const rel of ['cjlint/dist/lib/libcangjie-runtime.so','cjlint/dist/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so','cjlint/dist/modules/std.core.cjo','cjlint/dist/config/cjlint_rule_list.json','cjprof/dist/lib/libcjprof-cangjie.so','cjprof/dist/lib/libcjprof-jni.so','cjprof/dist/share/java/cjprof.jar','cjprof/dist/config/static/index.html'])await write(path.join(tools,rel),'explicit unrelated payload fixture');
  await write(path.join(tools,'cjfmt/dist/config/cangjie-format.toml'),'fixture formatter configuration');
  await write(path.join(tools,'cjpm/dist/cangjie-repo.toml'),'fixture repository configuration');
  const parser=path.join(tools,'hyperlangExtension/src/dtsparser');

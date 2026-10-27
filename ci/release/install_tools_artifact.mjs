@@ -9,6 +9,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {parseArgs} from 'node:util';
 import {privateRoot} from '../bootstrap/sdk-flow.mjs';
+import {installEntries} from '../bootstrap/sdk-install-entries.mjs';
+import {getTarget} from '../../build/lib/targets.mjs';
 import {preserveStock} from '../../build/lib/stock-backup.mjs';
 import {
   readToolsPin,
@@ -29,6 +31,7 @@ for (const name of ['tool', 'platform', 'artifact', 'sdk']) {
 }
 if (!/^[A-Za-z0-9][A-Za-z0-9_.+-]*$/.test(values.tool)) throw new Error(`invalid tool name: ${values.tool}`);
 
+if(values.tool==='cjlint'&&values.platform!=='linux-x64')throw Error('CJLINT_PLATFORM_NOT_SUPPORTED');
 const windows = values.platform === 'windows-x64';
 const name = values.tool + (windows ? '.exe' : '');
 const artifactRoot = path.resolve(values.artifact);
@@ -67,11 +70,14 @@ for (const entry of provenance.payloads) {
   await fs.mkdir(path.dirname(to), {recursive: true});
   // cjprof owns its static subtrees; removed source pages must disappear on
   // artifact reinstallation too. Keep other tools' shared config intact.
-  if(values.tool==='cjprof'&&['tools/config/static','.target-tools/tools/config/static'].includes(entry.path))
+  if((values.tool==='cjprof'&&['tools/config/static','.target-tools/tools/config/static'].includes(entry.path))||(values.tool==='cjlint'&&entry.path==='.target-tools/tools/cjlint'))
     await fs.rm(to,{recursive:true,force:true});
   // Merge genuinely shared directories.
   await fs.cp(from, to, {recursive: entry.type === 'directory', force:true});
 }
+if(values.tool==='cjlint')await installEntries({root:sdkRoot,build:path.join(sdkRoot,'.native-tools/cjlint-entry'),
+  platform:getTarget(values.platform).spec.llvmPlatform,records:[],
+  groups:[{directory:'tools/bin',retain:'.target-tools/tools/cjlint/bin',names:['cjlint'],libraries:['.target-tools/tools/cjlint/lib']}]});
 if (provenance.payloads.length) {
   console.log(`${values.tool.toUpperCase()}-PAYLOADS installed=${provenance.payloads.map(entry => entry.path).join(',')}`);
 }

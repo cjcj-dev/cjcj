@@ -7,7 +7,7 @@ export const SOURCE_TOOL_PAYLOADS = Object.freeze({
   cjfmt: Object.freeze(['tools/config/cangjie-format.toml']),
   LSPServer: Object.freeze(['tools/lib/libcangjie-lsp.so']),
   hle: Object.freeze(['tools/dtsparser', 'tools/bin/node']),
-  cjlint: Object.freeze(['tools/config']),
+  cjlint: Object.freeze(['.target-tools/tools/cjlint']),
   cjprof: Object.freeze(['tools/config/static','.target-tools/tools/config/static','tools/share/java/cjprof.jar']),
   cjcompat: Object.freeze([]),
   cjcov: Object.freeze([]), 'cjtrace-recover': Object.freeze([]),
@@ -22,7 +22,7 @@ export function sourceToolPayloads(tool, platform = 'linux-x64') {
     : ['tools/lib/libcangjie-lsp'+(spec.os==='darwin'?'.dylib':'.so')];
   if(tool==='cjfmt')return SOURCE_TOOL_PAYLOADS.cjfmt;
   if(tool==='LSPServer')return lsp;
-  if(tool==='cjlint')return ['tools/config',...nativeToolLibraries('cjlint',spec.os).map(row=>row.to),...lsp];
+  if(tool==='cjlint')return SOURCE_TOOL_PAYLOADS.cjlint;
   if(tool==='cjprof')return [...SOURCE_TOOL_PAYLOADS.cjprof,...nativeToolLibraries('cjprof',spec.os).map(row=>row.to)];
   if(tool==='hle')return ['tools/dtsparser','tools/bin/node'+spec.exeSuffix];
   return SOURCE_TOOL_PAYLOADS[tool];

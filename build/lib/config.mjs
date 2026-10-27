@@ -139,6 +139,9 @@ export function buildConfig({
   toolsJniHome = process.env.JAVA_HOME,
   toolsRuntimeHeader,
   toolsLombokJar = process.env.CJPROF_LOMBOK_JAR,
+  toolsAnalysisSdk = process.env.CJLINT_ANALYSIS_SDK,
+  toolsFrontendSource = process.env.CJLINT_FRONTEND_SOURCE,
+  toolsFrontendRef = process.env.CJLINT_FRONTEND_REF,
   toolsCompilerLibs,
   toolsRuntimeConfig,
   toolsLlvmShim,
@@ -179,15 +182,11 @@ export function buildConfig({
       throw new ConfigError('stdx-gcc-toolchain: expected an absolute GCC headers/libraries prefix');
     if (target.spec.crossCompile) throw new ConfigError('stdx-gcc-toolchain is only supported for native stdx builds');
   }
-  if (toolsGccToolchain != null) {
-    if (typeof toolsGccToolchain !== 'string' || !toolsGccToolchain.trim() || !path.isAbsolute(toolsGccToolchain))
-      throw new ConfigError('tools-gcc-toolchain: expected an absolute GCC headers/libraries prefix');
-    if (target.spec.crossCompile || target.spec.nodePlatform !== 'linux')
-      throw new ConfigError('tools-gcc-toolchain is only supported for native Linux cjlint builds');
-  }
+  if(toolsGccToolchain!=null)throw new ConfigError('tools-gcc-toolchain: retired C++ cjlint producer option');
   if (toolsMangleSource != null && (typeof toolsMangleSource !== 'string' || !path.isAbsolute(toolsMangleSource)))
     throw new ConfigError('tools-mangle-source: expected an absolute compiler packages/mangle/src path');
-  for(const [name,value]of Object.entries({toolsJniHome,toolsRuntimeHeader,toolsLombokJar,toolsCompilerLibs,toolsRuntimeConfig,toolsLlvmShim,toolsLlvmLibrary}))if(value!=null&&(typeof value!=='string'||!path.isAbsolute(value)))throw new ConfigError(name+': expected an absolute frontend input path');
+  for(const [name,value]of Object.entries({toolsAnalysisSdk,toolsFrontendSource,toolsJniHome,toolsRuntimeHeader,toolsLombokJar,toolsCompilerLibs,toolsRuntimeConfig,toolsLlvmShim,toolsLlvmLibrary}))if(value!=null&&(typeof value!=='string'||!path.isAbsolute(value)))throw new ConfigError(name+': expected an absolute frontend input path');
+  if(toolsFrontendRef!=null&&!/^[0-9a-f]{40}$/.test(toolsFrontendRef))throw new ConfigError('tools-frontend-ref: full fixed commit required');
   const workspacePath = absolute(workspace || process.env.CANGJIE_WORKSPACE || path.join(process.cwd(), 'workspace'));
   const buildRootPath = absolute(buildRoot || process.env.CANGJIE_BUILD_ROOT || path.join(process.cwd(), 'buildtools'));
   const rawVersion = cangjieVersion || process.env.CANGJIE_VERSION || globalTag || '';
@@ -221,6 +220,9 @@ export function buildConfig({
     toolsJniHome: toolsJniHome == null ? null : absolute(toolsJniHome),
     toolsRuntimeHeader: toolsRuntimeHeader == null ? null : absolute(toolsRuntimeHeader),
     toolsLombokJar: toolsLombokJar == null ? null : absolute(toolsLombokJar),
+    toolsAnalysisSdk: toolsAnalysisSdk == null ? null : absolute(toolsAnalysisSdk),
+    toolsFrontendSource: toolsFrontendSource == null ? null : absolute(toolsFrontendSource),
+    toolsFrontendRef,
     toolsCompilerLibs: toolsCompilerLibs == null ? null : absolute(toolsCompilerLibs),
     toolsRuntimeConfig: toolsRuntimeConfig == null ? null : absolute(toolsRuntimeConfig),
     toolsLlvmShim: toolsLlvmShim == null ? null : absolute(toolsLlvmShim),
@@ -269,6 +271,9 @@ export function withBuildType(config, buildType) {
     toolsJniHome: config.toolsJniHome,
     toolsRuntimeHeader: config.toolsRuntimeHeader,
     toolsLombokJar: config.toolsLombokJar,
+    toolsAnalysisSdk: config.toolsAnalysisSdk,
+    toolsFrontendSource: config.toolsFrontendSource,
+    toolsFrontendRef: config.toolsFrontendRef,
     toolsCompilerLibs: config.toolsCompilerLibs,
     toolsRuntimeConfig: config.toolsRuntimeConfig,
     toolsLlvmShim: config.toolsLlvmShim,

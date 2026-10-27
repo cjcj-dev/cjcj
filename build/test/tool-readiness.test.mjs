@@ -118,17 +118,10 @@ async function astTool(f,name) {
     const config=await f.write('tools/config/cangjie-format.toml','format config');
     p.install.payloads[config.path]={sha256:config.sha256};f.input.payloadFiles[config.path]={sha256:config.sha256,producers:[name]};
   }
-  if(name==='cjlint') {
-    p.build.payloads={};
-    for(const file of ['tools/lib/libcjlint.so','tools/config/rules.json']) {
-      const row=await f.write(file,'lint fixture'),built={source:'/fixture/'+file,sha256:row.sha256};
-      p.build.payloads[file]=built;p.install.payloads[file]={...built,build:{...built}};f.input.payloadFiles[file]={sha256:row.sha256,producers:[name]};
-    }
-  }
   const ast=await f.write('tools/lib/libcangjie-lsp.so','AST fixture');p.build.inputs.artifacts.nativeAst={sdkRelative:ast.path,sha256:ast.sha256};
   f.input.files[rel]=template;await f.save();return {rel,p};
 }
-for(const name of ['cjlint','lsp'])readTest('public '+name+' retains AST linkage and its actual compiler/macro edges',async t=>{
+for(const name of ['lsp'])readTest('public '+name+' retains AST linkage and its actual compiler/macro edges',async t=>{
   const f=await fixture(t),{rel,p}=await astTool(f,name),publicName=path.basename(rel);
   assert.equal(publicRead(f.root)[publicName].ready,true);
   await f.write('STAGE-INPUTS.json',JSON.stringify({...p.build.inputs.stage,fixture:'new label only'}));
@@ -147,12 +140,12 @@ for(const name of ['cjlint','lsp'])readTest('public '+name+' retains AST linkage
   }
 });
 readTest('public readiness keeps separately installed compiler execution runtime for native macros',async t=>{
-  const f=await fixture(t),{p}=await astTool(f,'cjlint');
+  const f=await fixture(t),{p}=await astTool(f,'lsp');
   const exec=await f.write('.compiler-exec/runtime/lib/runtime.so','execution runtime');
   p.build.inputs.artifacts.executionRuntime={sdkRelative:exec.path,sha256:exec.sha256};await f.save();
-  assert.equal(publicRead(f.root).cjlint.ready,true);
+  assert.equal(publicRead(f.root).LSPServer.ready,true);
   await f.write(exec.path,'changed execution runtime');const r=publicRead(f.root);
-  assert.equal(r.cjlint.ready,false);assert.match(r.cjlint.reason,/installed bytes differ: .compiler-exec/);assert.equal(r.cjprof.ready,true);
+  assert.equal(r.LSPServer.ready,false);assert.match(r.LSPServer.reason,/installed bytes differ: .compiler-exec/);assert.equal(r.cjprof.ready,true);
 });
 
 for(const tool of ['cjfmt','cjcompat'])readTest('Cangjie '+tool+' binds its SDK inputs without the retired C++ AST library',async t=>{
@@ -163,4 +156,29 @@ for(const tool of ['cjfmt','cjcompat'])readTest('Cangjie '+tool+' binds its SDK 
  await f.write(runtime,'different selected runtime');
  assert.equal(publicRead(f.root)[tool].ready,false);
  assert.match(publicRead(f.root)[tool].reason,/installed bytes differ/);
+});
+
+readTest('Cangjie lint requires explicit analysis facts, bundled modules and host libraries',async t=>{
+ const f=await fixture(t),template=structuredClone(f.input.files['tools/bin/cjprof']),p=template.producer;
+ const rel='tools/bin/cjlint',retain='.target-tools/tools/cjlint/',body=retain+'bin/cjlint';
+ template.artifact=await f.write(body,await fs.readFile('/usr/bin/true'));
+ template.entry=await f.write(rel,await fs.readFile('/usr/bin/true'));
+ template.entry.recipe=await f.write(rel+'.entry',['cjcj-sdk-entry-v1','2',body,'linux','native-target:x64',retain+'lib'].join('\n')+'\n');
+ p.artifact=structuredClone(template.artifact);p.install.artifact=structuredClone(template.artifact);
+ p.build.directory='cjlint';p.build.dependencies={};p.build.payloads={};p.install.payloads={};
+ const values={language:'Cangjie',host:{sdk:'/execution-H'},analysis:{sdk:'/analysis-R'},frontend:{ref:'b'.repeat(40),artifacts:'/frontend',runtimeObject:'/config.o',llvmShim:'/shim.o',llvmLibrary:'/libLLVM.so'}};
+ p.build.nativeConfiguration={cangjie:{values}};
+ for(const tail of ['lib/libcangjie-runtime.so','runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so','config/cjlint_rule_list.json','modules/linux_x86_64_cjnative/std.core.cjo']) {
+  const row=await f.write(retain+tail,'selected '+tail),built={source:'/raw/'+tail,sha256:row.sha256};
+  p.build.payloads[row.path]=built;p.install.payloads[row.path]={...built,build:structuredClone(built)};f.input.payloadFiles[row.path]={sha256:row.sha256,producers:['cjlint']};
+ }
+ f.input.files[rel]=template;await f.save();assert.equal(publicRead(f.root).cjlint.ready,true);
+ const original=structuredClone(values.analysis);delete values.analysis;await f.save();
+ assert.match(publicRead(f.root).cjlint.reason,/analysis configuration missing/);assert.equal(publicRead(f.root).cjprof.ready,true);
+ values.analysis=original;await f.save();assert.equal(publicRead(f.root).cjlint.ready,true);
+ const module=retain+'modules/linux_x86_64_cjnative/std.core.cjo';await f.write(module,'changed');
+ assert.match(publicRead(f.root).cjlint.reason,/installed bytes differ/);
+ await f.write(module,'selected modules/linux_x86_64_cjnative/std.core.cjo');assert.equal(publicRead(f.root).cjlint.ready,true);
+ await f.write('STAGE-INPUTS.json',JSON.stringify({...p.build.inputs.stage,fixture:'different target SDK'}));
+ assert.match(publicRead(f.root).cjlint.reason,/producer SDK selection differs/,'host analysis evidence does not grant target SDK readiness');
 });

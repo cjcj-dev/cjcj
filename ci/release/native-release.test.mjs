@@ -8,6 +8,7 @@ import {fileDigest} from '../bootstrap/sdk-flow.mjs';
 import {readToolsPin, readCjpmPin} from '../../build/lib/release-component-provenance.mjs';
 import {sourceToolPayloads} from './source-tool-payloads.mjs';
 import {releaseSelection} from './native-release-inputs.mjs';
+import {retainedToolPath} from '../../build/srcbuild/tool-layout.mjs';
 import {toolSdkInputs} from '../cangjie-test/tool-readiness.mjs';
 import {allTargets, getTarget, getReleasePlatform, allReleasePlatforms} from '../../build/lib/targets.mjs';
 const parent = process.env.RELEASE_EVIDENCE_TEST_ROOT;
@@ -49,7 +50,7 @@ async function fixture() {
   const toolInputs = {files: {}, payloadFiles: {}};
   const components = [];
   for (const tool of tools) {
-    const relative = 'tools/bin/' + tool, retained = '.target-tools/tools/bin/' + tool;
+    const relative = 'tools/bin/' + tool, retained = retainedToolPath({producer:tool,name:tool,to:relative});
     await write(relative, 'finite launcher fixture');
     await write(relative + '.entry', `cjcj-sdk-entry-v1\n../..\n${retained}\nlinux\n1\nruntime/lib/linux_x86_64_cjnative\n`);
     await write(retained, 'finite source tool ' + tool);
@@ -64,7 +65,7 @@ async function fixture() {
     components.push(structuredClone({component:tool,source,build,artifact,entry}));
     for (const payload of tool === 'cjpm' ? ['tools/config/cangjie-repo.toml'] : sourceToolPayloads(tool)) {
       if (payload === 'tools/dtsparser') await write(payload + '/analysis.js', 'finite parser');
-      else if(payload==='tools/config')await write(payload+'/cjlint_rule_list.json','finite lint config');
+      else if(payload==='.target-tools/tools/cjlint')await write(payload+'/config/cjlint_rule_list.json','finite lint config');
       else if(payload.endsWith('/config/static'))await write(payload+'/index.html','finite prof config');
       else await write(payload, 'finite payload');
     }
@@ -100,7 +101,7 @@ function reachedNativeDependencies(result) {
 test('release uses current native installation selection without relabelling its old build; CJ pairing stays bound',async()=>{
   const f=await fixture();
   const originals={};
-  for(const tool of ['cjlint','LSPServer']) {
+  for(const tool of ['LSPServer']) {
     const build=f.toolInputs.files['tools/bin/'+tool].producer.build;
     build.inputs.stage.runtimeCommit='f'.repeat(40);
     f.components.find(row=>row.component===tool).build=structuredClone(build);
@@ -110,7 +111,7 @@ test('release uses current native installation selection without relabelling its
   await f.write('TOOLS-INPUTS.json',JSON.stringify(f.toolInputs));await f.pack();
   console.log('RELEASE_INSTALLED_NATIVE_SELECTION_TARGET_BEGIN');
   reachedNativeDependencies(await f.run('current-native-install'));
-  for(const tool of ['cjlint','LSPServer'])assert.deepEqual(f.toolInputs.files['tools/bin/'+tool].producer.build,originals[tool]);
+  for(const tool of ['LSPServer'])assert.deepEqual(f.toolInputs.files['tools/bin/'+tool].producer.build,originals[tool]);
   const cj=f.toolInputs.files['tools/bin/cjpm'].producer.build;
   cj.inputs.stage.runtimeCommit='f'.repeat(40);f.components.find(row=>row.component==='cjpm').build=structuredClone(cj);
   await f.write('TOOLS-INPUTS.json',JSON.stringify(f.toolInputs));await f.pack();
@@ -125,7 +126,7 @@ test('whole SDK CLI reaches real dependency guard, rejects source change, restor
   await fs.appendFile(f.archive,'changed transport');const digest=await f.run('wrong-digest');assert.match(digest.stderr,/NATIVE_SDK_ARCHIVE_DIGEST/);
 });
 for(const tool of tools)test(`whole SDK CLI requires produced ${tool} bytes and source, with restoration`,async()=>{
-  const f=await fixture();const retained='.target-tools/tools/bin/'+tool;
+  const f=await fixture();const retained=retainedToolPath({producer:tool,name:tool,to:'tools/bin/'+tool});
   await fs.rm(path.join(f.sdk,retained));await f.pack();
   const missing=await f.run('missing');assert.equal(missing.status,1);assert.match(missing.stderr,new RegExp('NATIVE_RELEASE_TOOL_MISSING '+tool));
   await f.write(retained,'wrong tool bytes');await f.pack();const wrong=await f.run('wrong-bytes');

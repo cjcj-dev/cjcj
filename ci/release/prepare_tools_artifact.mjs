@@ -33,6 +33,7 @@ for (const name of ['tool', 'platform', 'binary', 'outdir', 'sdk']) {
 }
 if (!/^[A-Za-z0-9][A-Za-z0-9_.+-]*$/.test(values.tool)) throw new Error(`invalid tool name: ${values.tool}`);
 
+if(values.tool==='cjlint'&&values.platform!=='linux-x64')throw Error('CJLINT_PLATFORM_NOT_SUPPORTED');
 const windows = values.platform === 'windows-x64';
 const name = values.tool + (windows ? '.exe' : '');
 const destination = await privateRoot(values.outdir);
@@ -72,12 +73,11 @@ for (const relative of sourceToolPayloads(values.tool, values.platform)) {
   if (!stat) throw new Error(`${values.tool}: source SDK has no ${relative} (looked in ${sourceSdk})`);
   const to = await safePayloadPath(destination, relative);
   await fs.mkdir(path.dirname(to), {recursive: true});
-  if((values.tool==='cjlint'&&relative==='tools/config')
+  if((values.tool==='cjlint'&&relative==='.target-tools/tools/cjlint')
     ||(values.tool==='cjprof'&&relative.endsWith('/config/static'))) {
     // Transport the existing successful install set, not extra files left in
     // a shared SDK directory. Both cjprof body-relative layouts are required.
-    const members=Object.keys(producer.install.payloads??{}).filter(rel=>rel.startsWith(relative+'/')
-      &&(values.tool!=='cjlint'||rel.endsWith('.json')));
+    const members=Object.keys(producer.install.payloads??{}).filter(rel=>rel.startsWith(relative+'/'));
     if(!members.length)throw Error('SOURCE_TOOL_ARTIFACT_CONFIG '+values.tool);
     for(const member of members) {
       const input=await safePayloadPath(sourceSdk,member),output=await safePayloadPath(destination,member);

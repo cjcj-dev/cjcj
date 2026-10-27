@@ -6,8 +6,7 @@ import {execFile} from 'node:child_process';
 import {promisify, isDeepStrictEqual} from 'node:util';
 import {atomicJson, fileDigest, readJson} from '../../ci/bootstrap/sdk-flow.mjs';
 import {compilerProducer} from '../../ci/bootstrap/compiler_identity.mjs';
-import {readNativeToolDependencies} from './native-tool-dependencies.mjs';
-import {TOOL_DIRECTORIES,toolPayloads,nativeToolBuildPayloads,toolBuildProduct,cjprofBuildDirectory} from './tool-layout.mjs';
+import {TOOL_DIRECTORIES,toolPayloads,nativeToolBuildPayloads,toolBuildProduct,cjprofBuildDirectory,cjlintBuildDirectory} from './tool-layout.mjs';
 import {sha256} from '../../ci/bootstrap/sdk-io.mjs';
 
 const execute = promisify(execFile);
@@ -55,19 +54,20 @@ export async function beginToolBuild(config, name, {cjpmPin, argv, env, sdk}) {
     'CJFMT_FRONTEND_CJO','CJFMT_FRONTEND_LIB','CJFMT_FRONTEND_NATIVE','CJFMT_FRONTEND_REF','CJFMT_SOURCE_REF',
     'cjHeapSize','JAVA_HOME','CJC_HEAP_SIZE','CJ_HEAP_SIZE','CANGJIE_HEAP_SIZE','CJ_IR_VERIFIER_MODE']
     .filter(key=>env[key]!==undefined&&env[key]!==null).map(key=>[key,String(env[key])]));
-  const dependencies=name==='cjlint'?await readNativeToolDependencies(config.toolsDependencies,[name]):{};
-  for(const row of Object.values(dependencies)) {
-    const actual=await sourceState(row.path,'.','HEAD');
-    if(actual.commit!==row.commit||actual.changes_sha256!==sha256(''))throw Error('TOOL_DEPENDENCY_SOURCE_CHANGED '+row.path);
-    Object.assign(row,actual);
-  }
+  const dependencies={};
   return {source:{status:'resolved',repository,commit:state.commit},
     build:{directory,dependencies,source_changes_sha256:state.changes_sha256,argv,
-      platform:config.target.spec.llvmPlatform,buildType:name==='cjprof'?'producer-default':argv[argv.indexOf(name==='cjcompat'?'--type':'-t')+1],requestedBuildType:config.buildType,
+      platform:config.target.spec.llvmPlatform,buildType:['cjprof','cjlint'].includes(name)?'producer-default':argv[argv.indexOf(name==='cjcompat'?'--type':'-t')+1],requestedBuildType:config.buildType,
       mode:config.toolsBuildMode??'clean',version:config.cangjieVersion,environment,inputs:await sdkInputs(config,sdk)}};
 }
 async function nativeConfigurationInputs(config,name) {
   const nativeConfiguration={};
+  if(name==='cjlint') {
+    const file=path.join(cjlintBuildDirectory(config),'product.json');
+    const values=await readJson(file);
+    if(path.resolve(config.toolsAnalysisSdk??'')!==values.analysis?.sdk)throw Error('CJLINT_ANALYSIS_INPUT_CHANGED');
+    return {cangjie:{path:file,values}};
+  }
   if(name==='cjprof') {
     const file=path.join(cjprofBuildDirectory(config),'build-facts.json');
     return {cangjie:{path:file,values:await readJson(file)}};
@@ -91,20 +91,9 @@ export async function finishToolBuild(config, name, facts, product) {
     const current=await sourceState(row.path,'.','HEAD');
     if(!isDeepStrictEqual(current,{commit:row.commit,changes_sha256:row.changes_sha256}))throw Error('TOOL_DEPENDENCY_CHANGED_DURING_BUILD '+name);
   }
-  if(name==='cjlint') {
-    const selection=await readNativeToolDependencies(config.toolsDependencies,[name]);
-    const before=Object.fromEntries(Object.entries(facts.build.dependencies).map(([key,{repo,commit,path}])=>[key,{repo,commit,path}]));
-    if(!isDeepStrictEqual(before,selection))throw Error('TOOL_DEPENDENCY_SELECTION_CHANGED '+name);
-  }
   const landed=await sdkInputs(config,facts.build.environment.CANGJIE_HOME);
   if(!isDeepStrictEqual(landed,facts.build.inputs))throw new Error('TOOL_SDK_CHANGED_DURING_BUILD '+name);
   const nativeConfiguration=await nativeConfigurationInputs(config,name);
-  if(name==='cjlint' && (config.toolsGccToolchain || 'GCC_TOOLCHAIN_FLAG' in nativeConfiguration.native.values)) {
-    const actual=nativeConfiguration.native.values.GCC_TOOLCHAIN_FLAG;
-    console.log('TOOLS_GCC_CONFIGURATION_ASSERTION_REACHED '+JSON.stringify({actual,expected:config.toolsGccToolchain??''}));
-    if(actual!==(config.toolsGccToolchain??''))
-      throw Error('TOOL_GCC_TOOLCHAIN_MISMATCH cjlint: '+actual);
-  }
   const payloads={};
   for(const row of await nativeToolBuildPayloads(config,name))payloads[row.to]={source:row.from,sha256:await fileDigest(row.from)};
   await atomicJson(recordPath(config,name),{...facts,artifact:{path:product,sha256:await fileDigest(product)},build:{...facts.build,nativeConfiguration,payloads,rc:0}});
@@ -141,12 +130,12 @@ export async function finishToolInstall(config,name,product,argv,{prefix}={}) {
       const built=facts.build.payloads[rel];
       // Native CMake may rewrite install names. The Cangjie cjprof producer
       // copies every payload unchanged, including the Java jar and business SO.
-      if((name==='cjprof'||rel.includes('/config/'))&&row.sha256!==built.sha256)throw Error('TOOL_INSTALL_BUILD_PAYLOAD_MISMATCH '+rel);
+      if((['cjprof','cjlint'].includes(name)||rel.includes('/config/'))&&row.sha256!==built.sha256)throw Error('TOOL_INSTALL_BUILD_PAYLOAD_MISMATCH '+rel);
       row.build={...built};
     }
   }
   const artifact={path:product,sha256:await fileDigest(product)};
-  if(name==='cjprof'&&artifact.sha256!==facts.artifact.sha256)throw Error('TOOL_INSTALL_BUILD_ARTIFACT_MISMATCH '+name);
+  if(['cjprof','cjlint'].includes(name)&&artifact.sha256!==facts.artifact.sha256)throw Error('TOOL_INSTALL_BUILD_ARTIFACT_MISMATCH '+name);
   await atomicJson(prefix?path.join(prefix,'build-inputs.json'):recordPath(config,name),{...facts,install:{argv,rc:0,artifact,payloads}});
 }
 export async function installedToolBuildInputs(config,name,product) {
