@@ -175,8 +175,8 @@ async function installedRegressionFixture() {
    await fs.symlink('cjcj-stage1',sdk+'/bin/cjc');
    // Do not copy Node or any SDK; these unrelated HLE inputs are unused markers.
    for(const file of ['tools/bin/node','tools/dtsparser/node_modules/.bin/cjbind','tools/dtsparser/DEPENDENCIES.json'])await write(sdk+'/'+file,'controlled unused HLE boundary');
-   const outputs={cjpm:'cjpm/dist/cjpm',cjfmt:'cjfmt/build/build/bin/cjfmt',hle:'hyperlangExtension/target/bin/main',lsp:'cangjie-language-server/output/bin/LSPServer',cjcov:'cjcov/dist/cjcov','cjtrace-recover':'cjtrace-recover/dist/bin/cjtrace-recover',cjlint:'cjlint/dist/bin/cjlint',cjprof:'cjprof/dist/bin/cjprof',cjcompat:'cjcompat/dist/bin/cjcompat'};
-   const buildProducts={...outputs,'cjtrace-recover':'cjtrace-recover/cmake-build/cjtrace-recover',cjlint:'cjlint/build/build/bin/cjlint',cjprof:'cjprof/build/build/src/cjprof',cjcompat:'cjcompat/build/build/bin/cjcompat'};
+   const outputs={cjpm:'cjpm/dist/cjpm',cjfmt:'cjfmt/dist/bin/cjfmt',hle:'hyperlangExtension/target/bin/main',lsp:'cangjie-language-server/output/bin/LSPServer',cjcov:'cjcov/dist/cjcov','cjtrace-recover':'cjtrace-recover/dist/bin/cjtrace-recover',cjlint:'cjlint/dist/bin/cjlint',cjprof:'cjprof/dist/bin/cjprof',cjcompat:'cjcompat/dist/bin/cjcompat'};
+   const buildProducts={...outputs,cjfmt:'cjfmt/build/build/bin/cjfmt','cjtrace-recover':'cjtrace-recover/cmake-build/cjtrace-recover',cjlint:'cjlint/build/build/bin/cjlint',cjprof:'cjprof/build/build/src/cjprof',cjcompat:'cjcompat/build/build/bin/cjcompat'};
    const cjpm='#!'+process.execPath+'\n'+`const fs=require('node:fs');const path=require('node:path');
 fs.appendFileSync(${JSON.stringify(trace)},JSON.stringify({event:'installed-cjpm',args:process.argv.slice(2),cwd:process.cwd()})+'\\n');
 if(process.argv[2]==='build'){const out=path.resolve('target/release/bin/main');fs.mkdirSync(path.dirname(out),{recursive:true});fs.writeFileSync(out,${JSON.stringify(hello)},{mode:0o755});}
@@ -184,6 +184,7 @@ if(process.argv[2]==='build'){const out=path.resolve('target/release/bin/main');
    for(const [name,dir]of producers) {
     const body=name==='cjpm'?cjpm:'#!'+process.execPath+'\nconsole.log("controlled tool");\n';
     const payloads=name==='cjpm'?{'cjpm/dist/cangjie-repo.toml':'fixture repo'}:
+     name==='cjfmt'?{'cjfmt/dist/config/cangjie-format.toml':'fixture format'}:
      name==='cjlint'?{'cjlint/dist/lib/libcjlint.so':'unloaded fixture','cjlint/dist/config/rules.json':'{}'}:
      name==='cjprof'?{'cjprof/dist/lib/libcjprof.so':'unloaded fixture','cjprof/dist/lib/libcjprof-jni.so':'unloaded fixture','cjprof/dist/config/static/index.html':'fixture page'}:{};
     if(name==='cjtrace-recover') {
@@ -205,7 +206,7 @@ if verb in ('build','install'):
    p=root/rel;p.parent.mkdir(parents=True,exist_ok=True);p.write_text(value)
 `);
    }
-   await write(tools+'/cjfmt/config/cangjie-format.toml','fixture format');
+   await write(tools+'/cjfmt/dist/config/cangjie-format.toml','fixture format');
    await write(tools+'/cjpm/tests/public/test-cache-errors.mjs',`import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {spawnSync} from 'node:child_process';
 const [cjpm,out,arm]=process.argv.slice(2);const pending=path.dirname(path.dirname(path.dirname(cjpm)));assert.equal(path.dirname(pending),${JSON.stringify(root)});assert(path.basename(pending).startsWith('sdk.tools-pending-'));assert.equal(cjpm,path.join(pending,'tools/bin/cjpm'));assert(path.isAbsolute(cjpm));assert.equal(arm,'candidate');assert.deepEqual(fs.readdirSync(out),[]);assert.equal(process.env.CJPM_REGRESSION_CASES,undefined);assert.equal(process.env.CJPM_REGRESSION_PRIVATE_SDK,pending);assert.equal(process.env.CANGJIE_HOME,pending);assert(process.env.PATH.startsWith(pending+'/bin:'+pending+'/tools/bin:'));assert(!process.env.LD_LIBRARY_PATH.includes('foreign-sdk'));assert.equal(process.env.CPATH,undefined);
 const r=spawnSync(cjpm,['wire-public-consumer'],{encoding:'utf8'});assert.equal(r.status,0,r.stderr);

@@ -227,7 +227,7 @@ test('the payload table covers every tool the release installs', async () => {
   }
   // The tools whose behaviour actually depends on files beside the binary.
   assert.deepEqual([...sourceToolPayloads('cjfmt')].sort(),
-    ['tools/config/cangjie-format.toml', 'tools/lib/libcangjie-lsp.so']);
+    ['tools/config/cangjie-format.toml']);
   assert.deepEqual([...sourceToolPayloads('LSPServer')], ['tools/lib/libcangjie-lsp.so']);
   assert.deepEqual([...sourceToolPayloads('hle')], ['tools/dtsparser', 'tools/bin/node']);
   assert.deepEqual([...sourceToolPayloads('cjcov')], []);
@@ -275,7 +275,7 @@ for(const [platform,suffix,libraries]of [
   assert.ok(results.binary.startsWith('controlled '+platform+' '+tool+' bytes\n'));
   assert.deepEqual({repo:results.repo,other:results.other},{repo:'keep cjpm repository\n',other:'keep other configuration\n'});
   if(tool==='cjfmt')assert.equal(results.format,'target format\n');
-  if(tool==='cjfmt'||tool==='LSPServer')for(const lib of libraries)assert.equal(fs.readFileSync(path.join(release,lib),'utf8'),'target '+platform+' library\n');
+  if(tool==='LSPServer')for(const lib of libraries)assert.equal(fs.readFileSync(path.join(release,lib),'utf8'),'target '+platform+' library\n');
   if(tool==='hle')assert.equal(fs.readFileSync(path.join(release,'tools/dtsparser/analysis.js'),'utf8'),'target parser\n');
   if(tool==='cjprof')for(const prefix of ['tools/config/static','.target-tools/tools/config/static']) {
    assert.equal(fs.existsSync(path.join(release,prefix,'legacy.html')),false,'artifact reinstall removes previous static member');

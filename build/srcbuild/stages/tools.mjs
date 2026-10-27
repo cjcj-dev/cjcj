@@ -92,7 +92,7 @@ function buildArgsFor(name, config, jobs) {
 }
 
 function installArgsFor(name, toolsRoot) {
-  if (['cjlint','cjprof','cjcompat'].includes(name))return ['install','--prefix',path.join(toolsRoot,name,'dist')];
+  if (['cjfmt','cjlint','cjprof','cjcompat'].includes(name))return ['install','--prefix',path.join(toolsRoot,name,'dist')];
   if (name !== 'cjtrace-recover') return ['install'];
   return ['install', '--prefix', path.join(toolsRoot, CJTRACE_DIST)];
 }
@@ -252,7 +252,7 @@ export async function run(config) {
         const [name, subpath] = pending[next++];
         const cwd = path.join(toolsRoot, subpath);
         const {jobs,cpuSet}=plan[name];
-        const producerEnv={...toolEnv,CANGJIE_BUILD_JOBS:String(jobs),CMAKE_BUILD_PARALLEL_LEVEL:String(jobs),MAKEFLAGS:'-j'+jobs};
+        const producerEnv={...toolEnv,...(name==='cjfmt'?{CJFMT_SOURCE_REF:config.repo('tools').tag}:{}),CANGJIE_BUILD_JOBS:String(jobs),CMAKE_BUILD_PARALLEL_LEVEL:String(jobs),MAKEFLAGS:'-j'+jobs};
         try {
           if(config.toolsBuildMode!=='incremental' && (name!=='cjtrace-recover' || fs.existsSync(path.join(toolsRoot,'cjtrace-recover/cmake-build/CMakeCache.txt'))))
             await runTool(config,name,cwd,['clean'],{stageName:`tools.${name}.clean`,extraEnv:producerEnv,cpuSet});
@@ -291,7 +291,7 @@ export async function run(config) {
       const argv=installArgsFor(name,toolsRoot);
       // Native install reads the build tree; preserve old dist separately so
       // removed configuration/JNI members cannot survive as new output.
-      if(['cjlint','cjprof','cjcompat'].includes(name)&&process.env.CANGJIE_BUILD_DRY_RUN!=='1') {
+      if(['cjfmt','cjlint','cjprof','cjcompat'].includes(name)&&process.env.CANGJIE_BUILD_DRY_RUN!=='1') {
         const dist=path.join(toolsRoot,name,'dist');
         if(fs.existsSync(dist))fs.renameSync(dist,dist+'.previous-'+Date.now());
       }

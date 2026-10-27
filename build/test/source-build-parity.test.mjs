@@ -128,8 +128,8 @@ function makeFixture({packageLayout=false}={}) {
   for (const parts of [
     ['cjfmt', 'build'], ['hyperlangExtension', 'build'], ['cangjie-language-server', 'build'],
   ]) directory(toolsRoot, ...parts);
-  file(toolsRoot, ['cjfmt', 'build', 'build', 'bin', 'cjfmt']);
-  file(toolsRoot, ['cjfmt', 'config', 'default.toml']);
+  file(toolsRoot, ['cjfmt', 'dist', 'bin', 'cjfmt']);
+  file(toolsRoot, ['cjfmt', 'dist', 'config', 'default.toml']);
   file(toolsRoot, ['hyperlangExtension', 'target', 'bin', 'main']);
   file(toolsRoot, ['hyperlangExtension', 'src', 'dtsparser', 'keep.txt']);
   file(toolsRoot, ['hyperlangExtension', 'src', 'dtsparser', 'drop.cj']);

@@ -52,6 +52,7 @@ export async function beginToolBuild(config, name, {cjpmPin, argv, env, sdk}) {
   const state=await sourceState(root,directory,name==='cjpm'?cjpmPin.ref:'HEAD');
   const environment=Object.fromEntries(['CC','CXX','CFLAGS','CXXFLAGS','LDFLAGS','CANGJIE_HOME','CANGJIE_STDX_PATH',
     'PATH','LD_LIBRARY_PATH','DYLD_LIBRARY_PATH','CANGJIE_BUILD_JOBS','CMAKE_BUILD_PARALLEL_LEVEL','MAKEFLAGS',
+    'CJFMT_FRONTEND_CJO','CJFMT_FRONTEND_LIB','CJFMT_FRONTEND_NATIVE','CJFMT_FRONTEND_REF','CJFMT_SOURCE_REF',
     'cjHeapSize','JAVA_HOME','CJC_HEAP_SIZE','CJ_HEAP_SIZE','CANGJIE_HEAP_SIZE','CJ_IR_VERIFIER_MODE']
     .filter(key=>env[key]!==undefined&&env[key]!==null).map(key=>[key,String(env[key])]));
   const dependencies=['cjlint','cjprof'].includes(name)?await readNativeToolDependencies(config.toolsDependencies,[name]):{};
@@ -67,10 +68,10 @@ export async function beginToolBuild(config, name, {cjpmPin, argv, env, sdk}) {
 }
 async function nativeConfigurationInputs(config,name) {
   const nativeConfiguration={};
-  if(['cjlint','cjprof','cjcompat','cjtrace-recover'].includes(name))for(const [part,relative]of [['native',name+(name==='cjtrace-recover'?'/cmake-build/CMakeCache.txt':'/build/build/CMakeCache.txt')],...(name==='cjprof'?[['jni','cjprof/bridge/jni/build/CMakeCache.txt']]:[])]) {
+  if(['cjfmt','cjlint','cjprof','cjcompat','cjtrace-recover'].includes(name))for(const [part,relative]of [['native',name+(name==='cjtrace-recover'?'/cmake-build/CMakeCache.txt':'/build/build/CMakeCache.txt')],...(name==='cjprof'?[['jni','cjprof/bridge/jni/build/CMakeCache.txt']]:[])]) {
     const file=path.join(config.repoPath('tools'),relative);
     const cache=Object.fromEntries((await fs.readFile(file,'utf8')).split('\n').filter(line=>/^[A-Za-z_][^:]*:[^=]*=/.test(line)).map(line=>[line.slice(0,line.indexOf(':')),line.slice(line.indexOf('=')+1)]));
-    nativeConfiguration[part]={path:file,values:Object.fromEntries(Object.entries(cache).filter(([key])=>/^(CMAKE_(BUILD_TYPE|SYSTEM_NAME|CXX_COMPILER|C_COMPILER|HOME_DIRECTORY)|CANGJIE_HOME$|CANGJIE_MANGLE_SOURCE_DIR$|CJTRACE_BUNDLE_RUNTIME$|RUNTIME_RPATH$|ZX_EXECUTABLE$|CJPROF_|JAVA_|JNI_|JSON_ROOT$|GCC_TOOLCHAIN_FLAG$)/.test(key)))};
+    nativeConfiguration[part]={path:file,values:Object.fromEntries(Object.entries(cache).filter(([key])=>/^(CMAKE_(BUILD_TYPE|SYSTEM_NAME|CXX_COMPILER|C_COMPILER|HOME_DIRECTORY)|CANGJIE_HOME$|CANGJIE_MANGLE_SOURCE_DIR$|CJTRACE_BUNDLE_RUNTIME$|RUNTIME_RPATH$|ZX_EXECUTABLE$|CJFMT_|CJPROF_|JAVA_|JNI_|JSON_ROOT$|GCC_TOOLCHAIN_FLAG$)/.test(key)))};
   }
   return nativeConfiguration;
 }
@@ -109,7 +110,7 @@ export async function toolBuildInputs(config, name, product, {installed=false}={
   if(facts.build?.rc!==0 || (installed&&facts.install!==undefined?facts.install?.artifact:facts.artifact)?.sha256!==digest || facts.build.platform!==config.target.spec.llvmPlatform
     || !/^[0-9a-f]{40}$/.test(facts.source?.commit||'') || !facts.source?.repository)
     throw new Error('TOOL_BUILD_INPUT_MISMATCH '+name);
-  if(['cjlint','cjprof','cjcompat','cjtrace-recover'].includes(name)&&!isDeepStrictEqual(await nativeConfigurationInputs(config,name),facts.build.nativeConfiguration))throw Error('TOOL_BUILD_CONFIGURATION_CHANGED '+name);
+  if(['cjfmt','cjlint','cjprof','cjcompat','cjtrace-recover'].includes(name)&&!isDeepStrictEqual(await nativeConfigurationInputs(config,name),facts.build.nativeConfiguration))throw Error('TOOL_BUILD_CONFIGURATION_CHANGED '+name);
   if(['cjlint','cjprof'].includes(name)) {
     const current={};
     for(const row of await nativeToolBuildPayloads(config,name))current[row.to]={source:row.from,sha256:await fileDigest(row.from)};

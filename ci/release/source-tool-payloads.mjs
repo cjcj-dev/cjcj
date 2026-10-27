@@ -1,10 +1,10 @@
 // SDK-relative runtime inputs, taken from the native install rules and callers:
-// cjfmt/src/main.cpp reads the format file; LSP links the platform shared library;
+// Cangjie cjfmt reads its format file; the existing LSP links its shared library;
 // HLE main.cj invokes node and its parser invokes TypeScript/cjbind dependencies.
 import {nativeToolLibraries} from '../../build/srcbuild/tool-layout.mjs';
 import {getTarget,getReleasePlatform} from '../../build/lib/targets.mjs';
 export const SOURCE_TOOL_PAYLOADS = Object.freeze({
-  cjfmt: Object.freeze(['tools/config/cangjie-format.toml', 'tools/lib/libcangjie-lsp.so']),
+  cjfmt: Object.freeze(['tools/config/cangjie-format.toml']),
   LSPServer: Object.freeze(['tools/lib/libcangjie-lsp.so']),
   hle: Object.freeze(['tools/dtsparser', 'tools/bin/node']),
   cjlint: Object.freeze(['tools/config']),
@@ -20,7 +20,7 @@ export function sourceToolPayloads(tool, platform = 'linux-x64') {
   const lsp=spec.os==='windows'
     ? ['tools/bin/libcangjie-lsp.dll', 'tools/lib/libcangjie-lsp.dll.a']
     : ['tools/lib/libcangjie-lsp'+(spec.os==='darwin'?'.dylib':'.so')];
-  if(tool==='cjfmt')return ['tools/config/cangjie-format.toml',...lsp];
+  if(tool==='cjfmt')return SOURCE_TOOL_PAYLOADS.cjfmt;
   if(tool==='LSPServer'||tool==='cjcompat')return lsp;
   if(tool==='cjlint')return ['tools/config',...nativeToolLibraries('cjlint',spec.os).map(row=>row.to),...lsp];
   if(tool==='cjprof')return [...SOURCE_TOOL_PAYLOADS.cjprof,...nativeToolLibraries('cjprof',spec.os).map(row=>row.to)];

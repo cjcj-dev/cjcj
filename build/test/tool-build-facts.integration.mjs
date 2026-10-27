@@ -71,12 +71,12 @@ await fs.rename(record+'.original',record);
 if(process.env.CJCJ_TOOL_FACTS_INSTALL==='1'){
  // Carry the actual CLI-produced record and binary through the real installer.
  // Other tools/HLE payloads are explicitly controlled inputs, not six-tool PASS.
- for(const rel of ['cjpm/dist/cjpm','cjfmt/build/build/bin/cjfmt','hyperlangExtension/target/bin/main',
+ for(const rel of ['cjpm/dist/cjpm','cjfmt/dist/bin/cjfmt','hyperlangExtension/target/bin/main',
    'cjcov/dist/cjcov','cjtrace-recover/dist/bin/cjtrace-recover','cjlint/dist/bin/cjlint','cjprof/dist/bin/cjprof','cjcompat/dist/bin/cjcompat']){
    await fs.mkdir(path.dirname(path.join(tools,rel)),{recursive:true});await fs.copyFile('/usr/bin/true',path.join(tools,rel));
  }
  for(const rel of ['cjlint/dist/lib/libcjlint.so','cjlint/dist/config/cjlint_rule_list.json','cjprof/dist/lib/libcjprof.so','cjprof/dist/lib/libcjprof-jni.so','cjprof/dist/config/static/index.html'])await write(path.join(tools,rel),'explicit unrelated payload fixture');
- await write(path.join(tools,'cjfmt/config/cangjie-format.toml'),'fixture formatter configuration');
+ await write(path.join(tools,'cjfmt/dist/config/cangjie-format.toml'),'fixture formatter configuration');
  await write(path.join(tools,'cjpm/dist/cangjie-repo.toml'),'fixture repository configuration');
  const parser=path.join(tools,'hyperlangExtension/src/dtsparser');
  await write(path.join(parser,'analysis.js'),'// controlled parser boundary');

@@ -27,8 +27,8 @@ function packageFixture() {
   file(installed, ['stdx', 'linux_x86_64_cjnative', 'static', 'stdx', 'fixture.cjo'], 'installed stdx fixture');
   file(tools, ['cjpm', 'dist', 'cjpm']);
   file(officialSdkRoot, ['tools', 'bin', 'cjpm']);
-  file(tools, ['cjfmt', 'build', 'build', 'bin', 'cjfmt']);
-  file(tools, ['cjfmt', 'config', 'default.toml']);
+  file(tools, ['cjfmt', 'dist', 'bin', 'cjfmt']);
+  file(tools, ['cjfmt', 'dist', 'config', 'default.toml']);
   file(tools, ['hyperlangExtension', 'target', 'bin', 'main']);
   file(tools, ['hyperlangExtension', 'src', 'dtsparser', 'keep.txt']);
   file(tools, ['cangjie-language-server', 'output', 'bin', 'LSPServer']);

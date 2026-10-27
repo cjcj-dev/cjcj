@@ -14,7 +14,7 @@ export function requireToolProducer(name) {
 export function toolOutputs(config) {
   const root=config.repoPath('tools'),exe=config.target.spec.exeSuffix;
   return [
-    ['cjpm','cjpm/dist/cjpm'],['cjfmt','cjfmt/build/build/bin/cjfmt'],
+    ['cjpm','cjpm/dist/cjpm'],['cjfmt','cjfmt/dist/bin/cjfmt'],
     ['hle','hyperlangExtension/target/bin/main'],['lsp','cangjie-language-server/output/bin/LSPServer'],
     ['cjcov','cjcov/dist/cjcov'],['cjtrace-recover','cjtrace-recover/dist/bin/cjtrace-recover'],
     ['cjlint','cjlint/dist/bin/cjlint'],['cjprof','cjprof/dist/bin/cjprof'],['cjcompat','cjcompat/dist/bin/cjcompat'],
@@ -24,7 +24,7 @@ export function toolOutputs(config) {
 export function toolBuildProduct(config,name) {
   const root=config.repoPath('tools'),exe=config.target.spec.exeSuffix;
   if(name==='cjtrace-recover')return path.join(root,'cjtrace-recover/cmake-build/cjtrace-recover'+exe);
-  if(['cjlint','cjcompat'].includes(name))return path.join(root,name,'build/build/bin',name+exe);
+  if(['cjfmt','cjlint','cjcompat'].includes(name))return path.join(root,name,'build/build/bin',name+exe);
   if(name==='cjprof')return path.join(root,name,'build/build/src',name+exe);
   const row=toolOutputs(config).find(row=>row.producer===name);
   if(!row)requireToolProducer(name);
@@ -51,7 +51,7 @@ export async function toolPayloads(config,name,installPrefix) {
   const root=config.repoPath('tools'),rows=[];
   const add=(rel,to)=>rows.push({producer:name,from:installPrefix
     ?path.join(installPrefix,to.replace(/^\.target-tools\//,'').replace(/^tools\//,'')):path.join(root,rel),to});
-  if(name==='cjfmt')add('cjfmt/config/cangjie-format.toml','tools/config/cangjie-format.toml');
+  if(name==='cjfmt')add('cjfmt/dist/config/cangjie-format.toml','tools/config/cangjie-format.toml');
   if(name==='cjpm')add('cjpm/dist/cangjie-repo.toml','tools/config/cangjie-repo.toml');
   if(['cjlint','cjprof'].includes(name)) {
     for(const row of nativeToolLibraries(name,config.target.spec.os))add(row.install,row.to);

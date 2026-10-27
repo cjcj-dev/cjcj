@@ -49,9 +49,9 @@ for(const rel of await fs.readdir(path.join(originalRoot,'build/build'),{recursi
 const facts=JSON.parse(relocate(JSON.stringify(original))),record=path.join(config.workspace,'build/tools/cjprof/build-inputs.json'),dist=path.join(prof,'dist');
 const installArgv=['python3','build.py','install','--prefix',dist];
 async function producerInstall(label){await succeeds(label,installArgv,path.join(prof,'build'));}
-const others=[['cjpm','cjpm/dist/cjpm'],['cjfmt','cjfmt/build/build/bin/cjfmt'],['hle','hyperlangExtension/target/bin/main'],['LSPServer','cangjie-language-server/output/bin/LSPServer'],['cjcov','cjcov/dist/cjcov'],['cjtrace-recover','cjtrace-recover/dist/bin/cjtrace-recover'],['cjlint','cjlint/dist/bin/cjlint'],['cjcompat','cjcompat/dist/bin/cjcompat']];
+const others=[['cjpm','cjpm/dist/cjpm'],['cjfmt','cjfmt/dist/bin/cjfmt'],['hle','hyperlangExtension/target/bin/main'],['LSPServer','cangjie-language-server/output/bin/LSPServer'],['cjcov','cjcov/dist/cjcov'],['cjtrace-recover','cjtrace-recover/dist/bin/cjtrace-recover'],['cjlint','cjlint/dist/bin/cjlint'],['cjcompat','cjcompat/dist/bin/cjcompat']];
 for(const [name,relative]of others){const file=path.join(tools,relative);await write(file,'#!'+process.execPath+'\nconsole.log('+JSON.stringify(name+':control')+');\n');await fs.chmod(file,0o755);}
-for(const rel of ['cjlint/dist/lib/libcjlint.so','cjlint/dist/config/cjlint_rule_list.json','cjfmt/config/cangjie-format.toml','cjpm/dist/cangjie-repo.toml'])await write(path.join(tools,rel),'independent control '+rel);
+for(const rel of ['cjlint/dist/lib/libcjlint.so','cjlint/dist/config/cjlint_rule_list.json','cjfmt/dist/config/cangjie-format.toml','cjpm/dist/cangjie-repo.toml'])await write(path.join(tools,rel),'independent control '+rel);
 await write(path.join(sdk,'tools/config/other.toml'),'shared config control');
 const parser=path.join(tools,'hyperlangExtension/src/dtsparser');
 await write(path.join(parser,'analysis.js'),'controlled parser input');await write(path.join(parser,'package.json'),JSON.stringify({dependencies:{typescript:'npm:typescript@4.9.5','https-proxy-agent':'7.0.6'}}));

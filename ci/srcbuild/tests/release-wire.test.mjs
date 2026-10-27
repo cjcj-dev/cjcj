@@ -267,7 +267,7 @@ test('the cross-tool step and the source installation name the same tool paths',
   const crossEnd = source.indexOf('- name: Upload Windows source-built std install root');
   assert.ok(crossStart >= 0 && crossEnd > crossStart, 'the cross tool-build region must be locatable');
   const crossRegion = source.slice(crossStart, crossEnd);
-  for (const [tool, relative] of [['cjfmt', 'cjfmt/build/build/bin/cjfmt'],
+  for (const [tool, relative] of [['cjfmt', 'cjfmt/dist/bin/cjfmt'],
     ['hle', 'hyperlangExtension/target/bin/main'],
     ['LSPServer', 'cangjie-language-server/output/bin/LSPServer'],
     ...['cjlint','cjprof','cjcompat'].map(name=>[name,name+'/dist/bin/'+name])]) {

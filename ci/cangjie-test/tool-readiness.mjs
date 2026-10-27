@@ -10,12 +10,12 @@ import {sdkPlatform,entryPlatformName} from '../bootstrap/sdk-platform.mjs';
 import {TOOL_NAMES,TOOL_PUBLIC_NAMES,TOOL_DIRECTORIES,nativeToolLibraries,toolName} from '../../build/srcbuild/tool-layout.mjs';
 // These are the SDK edges of the actual source producers, not the entire SDK
 // snapshot recorded for diagnostics. cjprof links its own prof/JNI payload and
-// a source-built demangler. cjcompat imports CJO through cangjie-lsp; cjfmt uses
-// its formatter. Neither executes the selected Cangjie compiler. cjlint DOES
+// a source-built demangler. cjcompat imports CJO through cangjie-lsp.
+// Cangjie cjfmt follows the selected compiler/std/runtime producer inputs. cjlint DOES
 // execute cjc --compile-macro and initialize RuntimeInit; LSP enables macro
 // expansion. Those two therefore retain compiler/std/runtime pairing, including
 // the compiler's separately installed execution runtime when recorded.
-const nativeSdkInputs={cjprof:[],cjcompat:['nativeAst'],cjfmt:['nativeAst'],
+const nativeSdkInputs={cjprof:[],cjcompat:['nativeAst'],
   cjlint:['nativeAst','compiler','stdCore','runtime'],lsp:['nativeAst','compiler','stdCore','runtime']};
 // These tools load/execute the selected SDK at use time. Their linked native
 // AST remains a build dependency. Installing into another SDK does not by
