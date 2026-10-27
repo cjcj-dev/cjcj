@@ -68,7 +68,7 @@ await write(path.join(sdk,'tools/config/other.toml'),'shared config control');
 const parser=path.join(tools,'hyperlangExtension/src/dtsparser');
 await write(path.join(parser,'analysis.js'),'controlled parser input');await write(path.join(parser,'package.json'),JSON.stringify({dependencies:{typescript:'npm:typescript@4.9.5','https-proxy-agent':'7.0.6'}}));
 const hle=path.join(work,'hle');hlePayloadFixture(hle);
-await installHleDependencies({toolsRoot:tools,sdk,platform:'linux_x86_64',input:{platform:'linux_x86_64',node:{path:process.execPath,source:'controlled Node interface',version:process.version},modules:{path:path.join(hle,'tools/dtsparser/node_modules'),source:'controlled modules',version:'fixture'},cjbind:{path:process.execPath,source:'controlled cjbind interface',version:'v1.1.0-alpha.53.1'}}});
+await installHleDependencies({toolsRoot:tools,sdk,platform:'linux_x86_64',input:{platform:'linux_x86_64',node:{path:'/usr/bin/true',source:'unexecuted ELF fixture, not Node',version:'fixture'},modules:{path:path.join(hle,'tools/dtsparser/node_modules'),source:'controlled modules',version:'fixture'},cjbind:{path:'/usr/bin/true',source:'unexecuted ELF fixture, not cjbind',version:'v1.1.0-alpha.53.1'}}});
 await fs.cp(path.join(originalRoot,'static'),path.join(prof,'static'),{recursive:true});
 await fs.cp(path.join(originalRoot,'build/cangjie-output/config'),path.join(prof,'build/cangjie-output/config'),{recursive:true});
 const staticFile=path.join(prof,'build/cangjie-output/config/static/html/index.html'),current=await fs.readFile(staticFile);
