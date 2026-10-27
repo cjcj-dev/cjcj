@@ -380,13 +380,14 @@ test('public Cangjie cjprof forwards the selected host JNI inputs without a C++ 
 test('public Cangjie lint separates host execution and explicit/default analysis inputs',async t=>{
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'lint-source-entry-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
  await fs.mkdir(root+'/cangjie_tools/cjlint/build',{recursive:true});
+ const executionSdk=root+'/execution-H';await fs.mkdir(executionSdk);
  const args=[cli,'--workspace',root,'--build-root',root+'/output','--tools-build-set','cjlint','--tools-phase','build','--jobs','1'];
- const env={...process.env,CANGJIE_BUILD_DRY_RUN:'1',CJCJ_SRCBUILD_CONSUMER_SDK:'/execution-H'};
+ const env={...process.env,CANGJIE_BUILD_DRY_RUN:'1',CJCJ_SRCBUILD_CONSUMER_SDK:executionSdk};
  for(const key of ['CJLINT_ANALYSIS_SDK','CJLINT_FRONTEND_SOURCE','CJLINT_FRONTEND_REF','CJCJ_TOOLS_GCC_TOOLCHAIN'])delete env[key];
  const invoke=(extra=[],overlay={})=>spawnSync(process.execPath,[...args,...extra,'build','tools'],{env:{...env,...overlay},encoding:'utf8'});
  const missing=invoke();assert.equal(missing.status,1);assert.match(missing.stderr,/toolsAnalysisSdk is required/);
  const explicit=invoke(profOptions);assert.equal(explicit.status,0,explicit.stderr);
- assert.match(explicit.stderr,/build\.mjs build --sdk \/execution-H --analysis-sdk \/selected\/analysis/);
+ assert(explicit.stderr.includes('build.mjs build --sdk '+executionSdk+' --analysis-sdk /selected/analysis'),explicit.stderr);
  assert.match(explicit.stderr,/--frontend-artifacts \/selected\/frontend-libs --frontend-runtime-object \/selected\/config\.o/);
  assert.doesNotMatch(explicit.stderr,/build\.py|--dependencies|build\.mjs clean/);
  const options=profOptions.filter((value,i)=>!['--tools-analysis-sdk','--tools-frontend-source','--tools-frontend-ref'].includes(value)&&!['--tools-analysis-sdk','--tools-frontend-source','--tools-frontend-ref'].includes(profOptions[i-1]));
