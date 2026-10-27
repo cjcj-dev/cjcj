@@ -5,7 +5,9 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {cleanSdkEnvironment} from '../../ci/bootstrap/sdk-platform.mjs';
-const [prefix,sdk,source,work]=process.argv.slice(2);
+const [prefix,sdk,source,work,names='cjfmt,lsp,cjlint,cjprof,cjcompat']=process.argv.slice(2);
+const selected=new Set(names.split(','));
+assert(selected.size && [...selected].every(name=>['cjfmt','lsp','cjlint','cjprof','cjcompat','cjtrace-recover'].includes(name)),'known tool selection required');
 for(const value of [prefix,sdk,source,work])assert(value&&path.isAbsolute(value),'absolute prefix/sdk/source/work required');
 assert.equal(process.platform,'linux');
 fs.mkdirSync(work);
@@ -20,9 +22,9 @@ function run(name,argv,{cwd=work,library,expected=0}={}) {
  if(expected!==null)assert.equal(r.status,expected,name);return r;
 }
 function check(name,fn){try{fn();checks.push({name,pass:true});}catch(e){checks.push({name,pass:false,error:String(e)});throw e;}finally{fs.writeFileSync(work+'/checks.json',JSON.stringify(checks,null,2));}}
-async function group(name,fn){try{await fn();groups.push({name,rc:0});}catch(e){groups.push({name,rc:1,error:e.stack});}fs.writeFileSync(work+'/groups.json',JSON.stringify(groups,null,2));}
+async function group(name,fn){if(!selected.has(name)){groups.push({name,status:'NOT_RUN',reason:'not selected'});return;}try{await fn();groups.push({name,rc:0});}catch(e){groups.push({name,rc:1,error:e.stack});}fs.writeFileSync(work+'/groups.json',JSON.stringify(groups,null,2));}
 const binary=name=>prefix+'/'+name+'/bin/'+(name==='lsp'?'LSPServer':name);
-for(const name of ['cjfmt','lsp','cjlint','cjprof','cjcompat'])run(name+'-loader',['ldd',binary(name)],{library:prefix+'/'+name+'/lib'});
+for(const name of selected)run(name+'-loader',['ldd',binary(name)],{library:prefix+'/'+name+'/lib'});
 await group('cjfmt',()=>{
  const input=work+'/format.cj',output=work+'/formatted.cj',again=work+'/again.cj';
  fs.writeFileSync(input,'// header\nmain(){\nlet value=7 // inline\nprintln(value)\n}\n');
@@ -69,5 +71,16 @@ await group('cjcompat',()=>{
   check('compat '+name+' '+tag,()=>{assert.match(r.stdout,name==='same'?/^Compatible!\s*$/m:/^Incompatible!$/m);if(name==='deleted')assert(r.stdout.includes('Function declaration visible outside the module deleted or made private.'));});
  }
 });
-fs.writeFileSync(work+'/result.json',JSON.stringify({prefix,sdk,source,groups,scope:'five independent native tools; external selected SDK AST/CJO dependencies; no full SDK/Stage2'},null,2));
-process.exitCode=groups.some(g=>g.rc!==0)?1:0;
+await group('cjtrace-recover',()=>{
+ const file=work+'/trace-source.cj';fs.writeFileSync(file,'func ordinaryControl(): Int64 { 7 }\nmain() { println(ordinaryControl()) }\n');
+ run('trace-source-compile',[sdk+'/bin/cjc',file,'-o',work+'/trace-program']);
+ check('trace source program',()=>assert.equal(run('trace-source-run',[work+'/trace-program']).stdout.trim(),'7'));
+ const symbols=run('trace-symbols',['nm','--defined-only',work+'/trace-program']).stdout;
+ const symbol=symbols.split('\n').map(s=>s.trim().split(/\s+/).at(-1)).find(s=>s?.startsWith('_CN')&&s.includes('ordinaryControl')&&!s.includes('$'));
+ assert(symbol,'actual compiler symbol required');
+ fs.writeFileSync(work+'/trace.map',symbol+' target original.cj\n');fs.writeFileSync(work+'/trace.txt','Exception: probe\n    at target(SOURCE:17)\n');
+ const output=run('trace-recovery',[binary('cjtrace-recover'),'-m',work+'/trace.map','-f',work+'/trace.txt']).stdout;
+ check('trace actual recovered symbol and source',()=>assert(output.split('\n').includes('    at default.ordinaryControl()(original.cj:17)')));
+});
+fs.writeFileSync(work+'/result.json' ,JSON.stringify({prefix,sdk,source,selected:[...selected],groups,scope:'selected independent tools; external selected SDK AST/CJO dependencies; no full SDK/Stage2'},null,2));
+process.exitCode=groups.some(g=>g.rc!==undefined&&g.rc!==0)?1:0;
