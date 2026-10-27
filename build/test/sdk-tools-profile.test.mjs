@@ -301,3 +301,22 @@ test('public tools install accepts direct compiler SDKs and retains the staged r
  assert.equal(restored.events.filter(e=>e.event==='regression').length,1);
  console.log('TOOLS_STAGED_RECIPE_CONTROL_RESTORED');
 });
+
+
+test('public independent install selects native upstream prefixes without HLE or SDK publication',async t=>{
+ const root=await fs.mkdtemp(path.join(os.tmpdir(),'native-tool-prefix-'));
+ t.after(()=>fs.rm(root,{recursive:true,force:true}));
+ const env={...process.env,CANGJIE_BUILD_DRY_RUN:'1',CANGJIE_BUILD_JOBS:'1'};
+ const invoke=(extra=[])=>spawnSync(process.execPath,[cli,'--workspace',root,
+  '--tools-phase','install','--tools-build-set','cjfmt,lsp,cjlint,cjprof,cjcompat',
+  '--tools-install-prefix',root+'/installed',...extra,'build','tools'],{env,encoding:'utf8'});
+ const r=invoke();assert.equal(r.status,0,r.stderr);
+ assertCommands(r.stderr.split('\n'),'install',producers.filter(([name])=>['cjfmt','lsp','cjlint','cjprof','cjcompat'].includes(name)));
+ assert.doesNotMatch(r.stderr,/build.py (?:build|clean)|cjpm.checkout|hle.dependencies/);
+ for(const name of ['cjfmt','cjlint','cjprof','cjcompat'])assert(r.stderr.includes('--prefix '+root+'/installed/'+name));
+ assert(r.stderr.includes('--prefix '+root+'/installed/lsp/bin'));
+ for(const args of [['--tools-phase','build'],['--tools-build-set','all'],['--tools-install-prefix','relative']]) {
+  const invalid=invoke(args);assert.equal(invalid.status,2,invalid.stderr);assert.match(invalid.stderr,/tools-install-prefix requires/);
+ }
+ const hle=invoke(['--tools-build-set','hle']);assert.equal(hle.status,1,hle.stderr);assert.match(hle.stderr,/independent install requires native tools/);
+});

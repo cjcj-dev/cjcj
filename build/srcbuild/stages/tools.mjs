@@ -157,6 +157,37 @@ export async function run(config) {
     const allTools=toolsFor(config);
     const selected=config.toolsBuildSet&&config.toolsBuildSet!=='all'?new Set(config.toolsBuildSet.split(',')):null;
     const pending=config.toolsPhase==='install'?[]:selected?allTools.filter(([name])=>selected.has(name)):allTools;
+    // Independent native tools retain their original build facts and install
+    // through upstream build.py into separate prefixes, without publishing an SDK.
+    if(config.toolsInstallPrefix) {
+      const independent=allTools.filter(([name])=>selected.has(name));
+      if(config.target.spec.crossCompile || independent.some(([name])=>!['cjfmt','lsp','cjlint','cjprof','cjcompat','cjtrace-recover'].includes(name)))
+        throw new BuildError('tools.install','independent install requires native tools');
+      await assertSourceIdentity(config.repo('tools'),toolsRoot);
+      for(const [name,subpath]of independent) {
+        if(process.env.CANGJIE_BUILD_DRY_RUN!=='1') {
+          requireFile(path.join(toolsRoot,subpath,'build.py'),{stage:'tools.'+name+'.source'});
+          const facts=await toolBuildInputs(config,name,toolBuildProduct(config,name));
+          if(facts.source.status!=='resolved')throw new BuildError('tools.install','original build inputs required: '+name);
+        }
+      }
+      const env=targetToolsEnv(config);
+      if(process.env.CANGJIE_BUILD_DRY_RUN!=='1')fs.mkdirSync(config.toolsInstallPrefix);
+      for(const [name,subpath]of independent) {
+        const prefix=path.join(config.toolsInstallPrefix,name);
+        const destination=name==='lsp'?path.join(prefix,'bin'):prefix;
+        if(process.env.CANGJIE_BUILD_DRY_RUN!=='1') {
+          fs.mkdirSync(prefix,{recursive:false});
+          if(name==='lsp')fs.mkdirSync(destination);
+        }
+        const argv=['install','--prefix',destination];
+        await runBuildPy(config,path.join(toolsRoot,subpath),argv,{stageName:'tools.'+name+'.install',extraEnv:env});
+        await finishToolInstall(config,name,path.join(prefix,'bin',(name==='lsp'?'LSPServer':name)+suffix),
+          ['python3','build.py',...argv],{prefix});
+      }
+      return;
+    }
+
     // Missing ninth producer must fail before fetching or shared installation.
     for(const [name]of config.toolsPhase==='build'?pending:allTools) {
       const directory=requireToolProducer(name);

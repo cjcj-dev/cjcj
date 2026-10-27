@@ -47,15 +47,16 @@ export function nativeToolLibraries(name,os) {
 }
 // Enumerate the normal producer's install tree, not a hand-picked substitute
 // library. A missing mandatory payload fails before shared SDK publication.
-export async function toolPayloads(config,name) {
+export async function toolPayloads(config,name,installPrefix) {
   const root=config.repoPath('tools'),rows=[];
-  const add=(rel,to)=>rows.push({producer:name,from:path.join(root,rel),to});
+  const add=(rel,to)=>rows.push({producer:name,from:installPrefix
+    ?path.join(installPrefix,to.replace(/^\.target-tools\//,'').replace(/^tools\//,'')):path.join(root,rel),to});
   if(name==='cjfmt')add('cjfmt/config/cangjie-format.toml','tools/config/cangjie-format.toml');
   if(name==='cjpm')add('cjpm/dist/cangjie-repo.toml','tools/config/cangjie-repo.toml');
   if(['cjlint','cjprof'].includes(name)) {
     for(const row of nativeToolLibraries(name,config.target.spec.os))add(row.install,row.to);
     async function walk(relative) {
-      const entries=await fs.readdir(path.join(root,relative),{withFileTypes:true});
+      const entries=await fs.readdir(installPrefix?path.join(installPrefix,relative.slice((name+'/dist/').length)):path.join(root,relative),{withFileTypes:true});
       for(const entry of entries.sort((a,b)=>a.name.localeCompare(b.name))) {
         const rel=relative+'/'+entry.name;
         if(entry.isDirectory())await walk(rel);

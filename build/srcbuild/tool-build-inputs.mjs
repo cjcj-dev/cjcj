@@ -120,12 +120,12 @@ export async function toolBuildInputs(config, name, product, {installed=false}={
 
 // Record the normal install's complete payload only after its command succeeds.
 // Existing build facts stay attached to reused bytes, never to today's selector.
-export async function finishToolInstall(config,name,product,argv) {
+export async function finishToolInstall(config,name,product,argv,{prefix}={}) {
   if(dry())return;
   const facts=await toolBuildInputs(config,name,toolBuildProduct(config,name));
   if(facts.source.status!=='resolved')throw new Error('TOOL_INSTALL_SOURCE_MISSING '+name);
   const payloads={};
-  for(const row of await toolPayloads(config,name))payloads[row.to]={source:row.from,sha256:await fileDigest(row.from)};
+  for(const row of await toolPayloads(config,name,prefix))payloads[row.to]={source:row.from,sha256:await fileDigest(row.from)};
   if(['cjlint','cjprof'].includes(name)) {
     if(!isDeepStrictEqual(Object.keys(payloads).sort(),Object.keys(facts.build.payloads).sort()))throw Error('TOOL_INSTALL_BUILD_PAYLOAD_SET '+name);
     for(const [rel,row]of Object.entries(payloads)) {
@@ -137,7 +137,7 @@ export async function finishToolInstall(config,name,product,argv) {
     }
   }
   const artifact={path:product,sha256:await fileDigest(product)};
-  await atomicJson(recordPath(config,name),{...facts,install:{argv,rc:0,artifact,payloads}});
+  await atomicJson(prefix?path.join(prefix,'build-inputs.json'):recordPath(config,name),{...facts,install:{argv,rc:0,artifact,payloads}});
 }
 export async function installedToolBuildInputs(config,name,product) {
   const facts=await toolBuildInputs(config,name,product,{installed:true});

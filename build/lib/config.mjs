@@ -136,6 +136,7 @@ export function buildConfig({
   toolsDependencies = process.env.CJCJ_NATIVE_TOOL_DEPENDENCIES,
   toolsGccToolchain = process.env.CJCJ_TOOLS_GCC_TOOLCHAIN,
   toolsPhase = 'all',
+  toolsInstallPrefix,
   jobs,
   toolsPackageJobs = 4,
   globalTag,
@@ -151,6 +152,8 @@ export function buildConfig({
   }
   if(Number(toolsPackageJobs)>4)throw new ConfigError('tools-package-jobs exceeds the four heavy C2 package limit');
   const toolNames=['cjpm','cjfmt','hle','lsp','cjcov','cjtrace-recover','cjlint','cjprof','cjcompat'];
+  if(toolsInstallPrefix!==undefined && (toolsPhase!=='install' || toolsBuildSet==='all' || !path.isAbsolute(toolsInstallPrefix)))
+    throw new ConfigError('tools-install-prefix requires install phase, explicit tool set and absolute prefix');
   const selectedTools=String(toolsBuildSet).split(',');
   if(toolsBuildSet!=='all'&&(!selectedTools.every(name=>toolNames.includes(name))||new Set(selectedTools).size!==selectedTools.length))
     throw new ConfigError('invalid tools build set: '+toolsBuildSet);
@@ -204,6 +207,7 @@ export function buildConfig({
     toolsDependencies: toolsDependencies ? absolute(toolsDependencies) : null,
     toolsGccToolchain: toolsGccToolchain == null ? null : absolute(toolsGccToolchain),
     toolsPhase,
+    toolsInstallPrefix,
     jobs: jobs===undefined?undefined:Number(jobs),
     toolsPackageJobs:Number(toolsPackageJobs),
     repos,
@@ -243,6 +247,7 @@ export function withBuildType(config, buildType) {
     toolsDependencies: config.toolsDependencies,
     toolsGccToolchain: config.toolsGccToolchain,
     toolsPhase: config.toolsPhase,
+    toolsInstallPrefix: config.toolsInstallPrefix,
     jobs: config.jobs,
     toolsPackageJobs: config.toolsPackageJobs,
     officialSdkRoot: config.officialSdkRoot,
