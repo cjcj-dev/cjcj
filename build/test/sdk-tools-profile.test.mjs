@@ -5,8 +5,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {buildCapacity} from '../../ci/build-resources.mjs';
-import {toolsFor} from '../srcbuild/stages/tools.mjs';
-import {makeRepos} from '../lib/config.mjs';
+import {toolsFor,targetToolsEnv} from '../srcbuild/stages/tools.mjs';
+import {makeRepos,buildConfig} from '../lib/config.mjs';
 import {installEntries} from '../../ci/bootstrap/sdk-install-entries.mjs';
 const producers=toolsFor();
 const isProducer = (line,verb='') => new RegExp('build\\.(?:py|mjs)'+(verb?' '+verb:'')).test(line);
@@ -188,6 +188,14 @@ if(process.argv[2]==='build'){const out=path.resolve('target/release/bin/main');
      name==='cjfmt'?{'cjfmt/dist/config/cangjie-format.toml':'fixture format'}:
      name==='cjlint'?{'cjlint/dist/lib/libcangjie-runtime.so':'unloaded fixture','cjlint/dist/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so':'unloaded fixture','cjlint/dist/modules/std.core.cjo':'analysis fixture','cjlint/dist/config/cjlint_rule_list.json':'{}'}:
      name==='cjprof'?{'cjprof/dist/lib/libcjprof-cangjie.so':'unloaded fixture','cjprof/dist/lib/libcjprof-jni.so':'unloaded fixture','cjprof/dist/share/java/cjprof.jar':'unloaded fixture','cjprof/dist/config/static/index.html':'fixture page'}:{};
+    if(name==='hle') {
+     await write(tools+'/'+dir+'/build.mjs',`import fs from 'node:fs';import path from 'node:path';
+const verb=process.argv[2],build=process.argv[process.argv.indexOf('--build-dir')+1];
+fs.appendFileSync(${JSON.stringify(trace)},JSON.stringify({event:'producer',name:'hle',verb})+'\\n');
+if(verb==='build'||verb==='install'){const out=path.join(build,'bin/main');fs.mkdirSync(path.dirname(out),{recursive:true});fs.writeFileSync(out,${JSON.stringify(body)},{mode:0o755});}
+`);
+     continue;
+    }
     if(['cjtrace-recover','cjcompat','cjprof','cjlint'].includes(name)) {
      await write(tools+'/'+dir+'/build.mjs',`import fs from 'node:fs';import path from 'node:path';
 const verb=process.argv[2];fs.appendFileSync(${JSON.stringify(trace)},JSON.stringify({event:'producer',name:${JSON.stringify(name)},verb})+'\\n');
@@ -330,7 +338,7 @@ test('public tools install accepts direct compiler SDKs and retains the staged r
 });
 
 
-test('public independent install selects native upstream prefixes without HLE or SDK publication',async t=>{
+test('public independent install selects native tool prefixes without SDK publication',async t=>{
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'native-tool-prefix-'));
  t.after(()=>fs.rm(root,{recursive:true,force:true}));
  for(const name of ['cjfmt','cangjie-language-server','cjlint','cjprof','cjcompat'])await fs.mkdir(root+'/cangjie_tools/'+name+'/build',{recursive:true});
@@ -346,7 +354,7 @@ test('public independent install selects native upstream prefixes without HLE or
  for(const args of [['--tools-phase','build'],['--tools-build-set','all'],['--tools-install-prefix','relative']]) {
   const invalid=invoke(args);assert.equal(invalid.status,2,invalid.stderr);assert.match(invalid.stderr,/tools-install-prefix requires/);
  }
- const hle=invoke(['--tools-build-set','hle']);assert.equal(hle.status,1,hle.stderr);assert.match(hle.stderr,/independent install requires native tools/);
+ const hle=invoke(['--tools-build-set','hle']);assert.equal(hle.status,0,hle.stderr);assert.match(hle.stderr,/build\.mjs install --prefix .*installed\/hle\/tools\/bin --build-dir/);
 });
 
 test('public Cangjie cjcompat receives the selected shared frontend inputs',async t=>{
@@ -395,4 +403,16 @@ test('public Cangjie lint separates host execution and explicit/default analysis
  assert.equal(defaults.status,0,defaults.stderr);assert(defaults.stderr.includes('--analysis-sdk /selected/analysis'));
  const override=invoke(profOptions,{CJLINT_ANALYSIS_SDK:'/wrong-ambient'});assert.equal(override.status,0,override.stderr);assert.doesNotMatch(override.stderr,/wrong-ambient/);
  const cross=invoke([...profOptions,'--target','windows-x64']);assert.equal(cross.status,1);assert.match(cross.stderr,/supports Linux x86-64/);
+});
+
+
+test('native tool environment preserves explicit installed stdx and rejects missing input',async t=>{
+ const root=await fs.mkdtemp(path.join(os.tmpdir(),'tool-stdx-selection-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
+ const saved=process.env.CANGJIE_STDX_PATH;t.after(()=>{if(saved===undefined)delete process.env.CANGJIE_STDX_PATH;else process.env.CANGJIE_STDX_PATH=saved;});
+ const config=buildConfig({workspace:root,targetKey:'linux-x64'});
+ delete process.env.CANGJIE_STDX_PATH;const fallback=targetToolsEnv(config).CANGJIE_STDX_PATH;
+ await fs.mkdir(root+'/installed-stdx');process.env.CANGJIE_STDX_PATH=root+'/installed-stdx';
+ assert.equal(targetToolsEnv(config).CANGJIE_STDX_PATH,root+'/installed-stdx');
+ process.env.CANGJIE_STDX_PATH=root+'/missing';assert.throws(()=>targetToolsEnv(config),/existing absolute directory/);
+ delete process.env.CANGJIE_STDX_PATH;assert.equal(targetToolsEnv(config).CANGJIE_STDX_PATH,fallback);
 });

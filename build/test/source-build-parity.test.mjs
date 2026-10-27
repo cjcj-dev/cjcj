@@ -719,9 +719,10 @@ test('Linux source stages emit the Python command order', async () => {
     ]) {
       const cwd = path.join(toolsRoot, subpath);
       const prefix=toolBudget[name].cpuSet?['taskset','-c',toolBudget[name].cpuSet]:[];
-      const producer=['cjtrace-recover','cjcompat','cjprof','cjlint'].includes(name)?[process.execPath,'build.mjs']:['python3','build.py'];
-      if(!['cjtrace-recover','cjcompat','cjprof','cjlint'].includes(name))expectedCommands.push(expected(root,cwd,[...prefix,...producer,'clean']));
+      const producer=['hle','cjtrace-recover','cjcompat','cjprof','cjlint'].includes(name)?[process.execPath,'build.mjs']:['python3','build.py'];
+      if(!['cjtrace-recover','cjcompat','cjprof','cjlint'].includes(name))expectedCommands.push(expected(root,cwd,[...prefix,...producer,'clean',...(name==='hle'?['--build-dir',path.join(config.buildRoot,'hle')]:[])]));
       const buildArgs = [...producer,'build','-t','release'];
+      if(name==='hle')buildArgs.push('--build-dir',path.join(config.buildRoot,'hle'));
       if(name==='cjtrace-recover')buildArgs.push('--cangjie-sdk',config.consumerSdk,'--mangle-source',config.toolsMangleSource,'--set-rpath','$ORIGIN/../lib:$ORIGIN/../../../runtime/lib/linux_x86_64_cjnative');
       if (name === 'cjpm') buildArgs.push('--set-rpath', '$ORIGIN/../../runtime/lib/linux_x86_64_cjnative');
       if (['cjpm','cjfmt','lsp','cjlint','cjprof','cjcompat'].includes(name)) buildArgs.push('--jobs',String(toolBudget[name].jobs));
@@ -738,6 +739,7 @@ test('Linux source stages emit the Python command order', async () => {
       if(name==='cjprof')buildArgs.splice(0,buildArgs.length,...producer,'build','--sdk',config.consumerSdk??path.join(config.repoPath('compiler'),'output'),'--jni-home',config.toolsJniHome,'--runtime-header',config.toolsRuntimeHeader,'--lombok-jar',config.toolsLombokJar,'--build-dir',path.join(config.buildRoot,'cjprof'));
       expectedCommands.push(expected(root, cwd, [...prefix,...buildArgs]));
       const installArgs = [...producer,'install'];
+      if(name==='hle')installArgs.push('--build-dir',path.join(config.buildRoot,'hle'));
       if (['cjfmt','cjtrace-recover','cjlint','cjprof','cjcompat'].includes(name)) {
         installArgs.push('--prefix', path.join(toolsRoot, name, 'dist'));
       }

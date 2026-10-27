@@ -126,6 +126,14 @@ export function toolsFor(config) { return TOOL_PATHS; }
 export function targetToolsEnv(config) {
   const env = baseEnv(config);
   const targetHome = consumerSdk(config);
+  // Native tool development may consume an already installed matching stdx
+  // prefix without modifying the selected read-only host SDK.
+  if(!config.target.spec.crossCompile && process.env.CANGJIE_STDX_PATH) {
+    const selected=process.env.CANGJIE_STDX_PATH;
+    if(!path.isAbsolute(selected)||!fs.statSync(selected,{throwIfNoEntry:false})?.isDirectory())
+      throw new BuildError('tools.stdx','CANGJIE_STDX_PATH must be an existing absolute directory: '+selected);
+    env.CANGJIE_STDX_PATH=selected;
+  }
   // Common flags use Clang's debug compilation directory option. Native
   // subprojects must not silently choose the host's default GCC instead.
   if(config.target.spec.nodePlatform==='linux') {
