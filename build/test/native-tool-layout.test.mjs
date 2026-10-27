@@ -14,13 +14,14 @@ const layouts=[
  ['linux-x64','cjlint','cjlint/build/build/lib/libcjlint.so','cjlint/dist/lib/libcjlint.so','tools/lib/libcjlint.so'],
  ['darwin-x64','cjlint','cjlint/build/build/lib/libcjlint.dylib','cjlint/dist/lib/libcjlint.dylib','tools/lib/libcjlint.dylib'],
  ['windows-x64','cjlint','cjlint/build/build/bin/libcjlint.dll','cjlint/dist/lib/libcjlint.dll','tools/lib/libcjlint.dll'],
- ['linux-x64','cjprof','cjprof/build/cangjie-output/libcjprof-cangjie.so','cjprof/dist/lib/libcjprof-cangjie.so','tools/lib/libcjprof-cangjie.so'],
- ['linux-x64','cjprof','cjprof/build/cangjie-output/libcjprof-jni.so','cjprof/dist/lib/libcjprof-jni.so','tools/lib/libcjprof-jni.so'],
+ ['linux-x64','cjprof','selected-build/cjprof/libcjprof-cangjie.so','cjprof/dist/lib/libcjprof-cangjie.so','tools/lib/libcjprof-cangjie.so'],
+ ['linux-x64','cjprof','selected-build/cjprof/libcjprof-jni.so','cjprof/dist/lib/libcjprof-jni.so','tools/lib/libcjprof-jni.so'],
+ ['linux-x64','cjprof','selected-build/cjprof/cjprof.jar','cjprof/dist/share/java/cjprof.jar','tools/share/java/cjprof.jar'],
 ];
 for(const [platform,name] of [...new Map(layouts.map(row=>[row[0]+'/'+row[1],[row[0],row[1]]])).values()])test('native raw/install/release paths: '+platform+' '+name,async t=>{
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'native-layout-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
  const write=async(rel,body='transport marker')=>{await fs.mkdir(path.dirname(root+'/'+rel),{recursive:true});await fs.writeFile(root+'/'+rel,body);};
- const config={repoPath:()=>root,target:getTarget(platform)};
+ const config={repoPath:()=>root,buildRoot:root+'/selected-build',target:getTarget(platform)};
  {
   const rows=layouts.filter(row=>row[0]===platform&&row[1]===name);
   for(const [,,raw,installed]of rows){await write(raw);await write(installed);}

@@ -133,6 +133,8 @@ for(const name of ['cjlint','lsp'])readTest('public '+name+' retains AST linkage
   assert.equal(publicRead(f.root)[publicName].ready,true);
   await f.write('STAGE-INPUTS.json',JSON.stringify({...p.build.inputs.stage,fixture:'new label only'}));
   assert.equal(publicRead(f.root)[publicName].ready,true,'unrelated stage label is not a native dependency');
+  assert.equal(publicRead(f.root).cjprof.ready,false,'Cangjie producer retains its selected SDK identity');
+  await f.write('STAGE-INPUTS.json',JSON.stringify(p.build.inputs.stage));
   await f.write('tools/lib/libcangjie-lsp.so','changed AST');
   let r=publicRead(f.root);assert.equal(r[publicName].ready,false);assert.match(r[publicName].reason,/installed bytes differ: tools\/lib\/libcangjie-lsp/);assert.equal(r.cjprof.ready,true);
   await f.write('tools/lib/libcangjie-lsp.so','AST fixture');
