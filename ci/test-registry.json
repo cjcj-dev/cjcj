@@ -901,5 +901,10 @@
     "file": "build/test/static-libs-headers.integration.mjs",
     "executor": "manual",
     "reason": "Requires a read-only normal static install, fixed archives/LLVM modules and private RELEASE_EVIDENCE_TEST_ROOT. Copies the installation, exercises public CLI warm and missing-header recovery, actual LLVM CMake/C consumer and independent libedit control. Not full CJDB/platform qualification."
+  },
+  {
+    "file": "build/test/native-tool-functions.integration.mjs",
+    "executor": "manual",
+    "reason": "Requires actual independently installed cjfmt/LSPServer/cjlint/cjprof/cjcompat prefixes, a read-only qualified SDK for AST/CJO dependencies, fixed tools source and fresh work directory. Exercises formatting/compilation/runtime, existing LSP protocol, lint diagnostics, heap parsing and real compiler-produced CJO compatibility. No fixture tools or complete SDK qualification."
   }
 ]
