@@ -81,7 +81,7 @@ function run(script, args, options = {}) {
   });
 }
 
-test('a source-built tool reaches the package with the configuration and library it needs', () => {
+test('Cangjie cjfmt reaches the package with its configuration and leaves unrelated AST alone', () => {
   const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'source-tool-payload-'));
   const sdk = sourceSdk(fixture);
   const artifact = path.join(fixture, 'artifact');
@@ -93,14 +93,14 @@ test('a source-built tool reaches the package with the configuration and library
     // The producer records the payload it actually staged, not just the binary.
     const sidecar = JSON.parse(fs.readFileSync(path.join(artifact, 'SOURCE-PROVENANCE.json'), 'utf8'));
     assert.deepEqual(sidecar.payloads.map(entry => entry.path).sort(),
-      ['tools/config/cangjie-format.toml', 'tools/lib/libcangjie-lsp.so'], 'the sidecar must record both payloads');
+      ['tools/config/cangjie-format.toml'], 'the sidecar records the Cangjie formatter payload');
     assert.equal(fs.readFileSync(path.join(artifact, 'tools', 'config', 'cangjie-format.toml'), 'utf8'),
       'indentWidth = 4\n', 'the producer must carry the source configuration');
 
     run(install, ['--tool', 'cjfmt', '--platform', 'linux-x64',
       '--artifact', artifact, '--sdk', release]);
     // The point of the whole path: the package ends up with our tool *and* our
-    // configuration and library, not our binary beside the official ones. The
+    // configuration. The unrelated C++ AST library is not its payload. The
     // producer stamps the binary with the source lineage, so the installed bytes
     // are the staged ones plus that record rather than the raw source bytes.
     const installedBinary = fs.readFileSync(path.join(release, 'tools', 'bin', 'cjfmt'), 'utf8');
@@ -109,7 +109,7 @@ test('a source-built tool reaches the package with the configuration and library
     assert.equal(fs.readFileSync(path.join(release, 'tools', 'config', 'cangjie-format.toml'), 'utf8'),
       'indentWidth = 4\n', 'the source configuration must replace the official one');
     assert.equal(fs.readFileSync(path.join(release, 'tools', 'lib', 'libcangjie-lsp.so'), 'utf8'),
-      'source-built lsp library\n', 'the source implementation library must replace the official one');
+      'official lsp library\n', 'cjfmt does not own the unrelated AST library');
     // The stock bytes are preserved rather than destroyed.
     assert.equal(fs.readFileSync(path.join(release, 'tools', 'stock', 'cjfmt'), 'utf8'),
       'official cjfmt bytes\n');

@@ -58,7 +58,11 @@ for(const version of ['v1.1.0-alpha.53.1','0.3.6'])test('HLE descriptor/install/
   const rows=[['cjpm','cjpm/dist/cjpm'],['cjfmt','cjfmt/dist/bin/cjfmt'],['hle','hyperlangExtension/target/bin/main'],['LSPServer','cangjie-language-server/output/bin/LSPServer'],['cjcov','cjcov/dist/cjcov'],['cjtrace-recover','cjtrace-recover/dist/bin/cjtrace-recover'],['cjlint','cjlint/dist/bin/cjlint'],['cjprof','cjprof/dist/bin/cjprof'],['cjcompat','cjcompat/dist/bin/cjcompat']];
   for(const [name,rel]of rows)await write(path.join(f.tools,rel),'#!'+process.execPath+'\n'+(name==='hle'?`const {spawnSync}=require('node:child_process');const a=process.argv.slice(2),b=a[a.indexOf('-b')+1];const p=spawnSync(b,a.slice(a.indexOf('--')+1),{stdio:'inherit'});process.exit(p.status??1);`:`console.log(${JSON.stringify(name+':control')});`),0o755);
   for(const rel of ['cjlint/dist/lib/libcjlint.so','cjlint/dist/config/cjlint_rule_list.json','cjprof/dist/lib/libcjprof.so','cjprof/dist/lib/libcjprof-jni.so','cjprof/dist/config/static/index.html','cjfmt/dist/config/cangjie-format.toml','cjpm/dist/cangjie-repo.toml'])await write(path.join(f.tools,rel),'controlled payload '+rel);
-  await installSourceTools(f.config,f.sdk);
+  await installSourceTools(f.config,f.sdk,{consume:async pending=>{
+   const actual=JSON.parse(f.run([path.join(pending,'tools/bin/hle'),'--','--version']).stdout);
+   assert.equal(actual.version,version);
+   assert.equal(f.run([path.join(pending,'tools/bin/cjpm')]).stdout.trim(),'cjpm:control');
+  }});
   const inputs=JSON.parse(await fs.readFile(path.join(f.sdk,'TOOLS-INPUTS.json'),'utf8'));
   assert.equal(inputs.files['tools/bin/hle'].producer.source.status,'unresolved','interface doubles must not acquire qualification');
   const argv=['--auto-cstring','--array-pointers-in-args','--no-layout-test','--no-detect-include-path','-p','hle_probe','-o','bindings.cj','header.h','--','-DPROBE=1'];
@@ -68,7 +72,11 @@ for(const version of ['v1.1.0-alpha.53.1','0.3.6'])test('HLE descriptor/install/
   }
   f.run([path.join(f.sdk,'tools/bin/cjpm')]);
   // Real installation reentry keeps source/version and default dependency selection.
-  await f.install();await installSourceTools(f.config,f.sdk);
+  await f.install();await installSourceTools(f.config,f.sdk,{consume:async pending=>{
+   const actual=JSON.parse(f.run([path.join(pending,'tools/bin/hle'),'--','--version']).stdout);
+   assert.equal(actual.version,version);
+   assert.equal(f.run([path.join(pending,'tools/bin/cjpm')]).stdout.trim(),'cjpm:control');
+  }});
   assert.equal(JSON.parse(f.run([path.join(f.sdk,'tools/bin/hle'),'--','--version']).stdout).version,version);
   const moved=f.sdk+'-moved';await fs.rename(f.sdk,moved);
   assert.equal(JSON.parse(f.run([path.join(moved,'tools/bin/hle'),'--','--version']).stdout).version,version);

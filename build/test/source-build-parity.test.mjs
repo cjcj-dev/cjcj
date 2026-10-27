@@ -729,7 +729,7 @@ test('Linux source stages emit the Python command order', async () => {
       if(name==='cjcompat')buildArgs.push('--sdk',config.consumerSdk??path.join(config.repoPath('compiler'),'output'));
       expectedCommands.push(expected(root, cwd, [...prefix,...buildArgs]));
       const installArgs = [...producer,'install'];
-      if (['cjtrace-recover','cjlint','cjprof','cjcompat'].includes(name)) {
+      if (['cjfmt','cjtrace-recover','cjlint','cjprof','cjcompat'].includes(name)) {
         installArgs.push('--prefix', path.join(toolsRoot, name, 'dist'));
       }
       expectedCommands.push(expected(root, cwd, installArgs));
