@@ -27,7 +27,7 @@ async function fixture(t) {
     const artifact=await write(retained,native),entry=await write(rel,native);
     entry.recipe=await write(rel+'.entry',['cjcj-sdk-entry-v1','2',retained,'linux','native-target:x64','third_party/llvm/lib','runtime/lib/linux_x86_64_cjnative','lib/linux_x86_64_cjnative','tools/lib'].join('\n')+'\n');
     const payloads={};
-    for(const relative of name==='cjpm'?['tools/config/cangjie-repo.toml']:['tools/lib/libcjprof.so','tools/lib/libcjprof-jni.so','tools/config/static/index.html','.target-tools/tools/config/static/index.html']) {
+    for(const relative of name==='cjpm'?['tools/config/cangjie-repo.toml']:['tools/share/java/cjprof.jar','tools/lib/libcjprof-cangjie.so','tools/lib/libcjprof-jni.so','tools/config/static/index.html','.target-tools/tools/config/static/index.html']) {
       const row=await write(relative,relative.endsWith('.so')?native:'reader config');
       payloads[relative]={source:'/unavailable-original/'+relative,sha256:row.sha256};
       input.payloadFiles[relative]={sha256:row.sha256,producers:[name]};
@@ -35,7 +35,7 @@ async function fixture(t) {
     input.files[rel]={sha256:artifact.sha256,artifact,entry,producer:{source:{status:'resolved',repository:'fixture://source',commit:'a'.repeat(40)},artifact:structuredClone(artifact),
       build:{directory:name,rc:0,platform:'linux_x86_64',inputs:{stage,artifacts},payloads:structuredClone(payloads),
         dependencies:Object.fromEntries(['json','httplib','runtime','bounds'].map(key=>[key,{repo:'fixture://'+key,commit:'b'.repeat(40),changes_sha256:'c'.repeat(64)}])),
-        nativeConfiguration:{native:{values:{CMAKE_BUILD_TYPE:'Release',CMAKE_CXX_COMPILER:'/fixed/clang++',CJPROF_TARGET:'native'}},jni:{values:{CMAKE_BUILD_TYPE:'Release',CMAKE_CXX_COMPILER:'/fixed/clang++',CJPROF_TARGET:'native',CJPROF_LIBRARY:payloads['tools/lib/libcjprof.so']?.source}}}},install:{rc:0,artifact:structuredClone(artifact),payloads}}};
+        nativeConfiguration:{cangjie:{values:{language:'Cangjie',sdk:'/selected/sdk',jdk:'/selected/jdk',runtimeHeader:'/selected/Cangjie.h',lombok:'/selected/lombok.jar'}},native:{values:{CMAKE_BUILD_TYPE:'Release',CMAKE_CXX_COMPILER:'/fixed/clang++',CJPROF_TARGET:'native'}},jni:{values:{CMAKE_BUILD_TYPE:'Release',CMAKE_CXX_COMPILER:'/fixed/clang++',CJPROF_TARGET:'native',CJPROF_LIBRARY:payloads['tools/lib/libcjprof-cangjie.so']?.source}}}},install:{rc:0,artifact:structuredClone(artifact),payloads}}};
   }
   const prof=input.files['tools/bin/cjprof'].producer;
   for(const [rel,row]of Object.entries(prof.install.payloads))row.build=structuredClone(prof.build.payloads[rel]);
@@ -52,9 +52,9 @@ readTest('reader accepts matching target facts after relocation without original
 const changes={
   'missing producer':f=>delete f.input.files['tools/bin/cjprof'].producer,
   'missing native build payload':f=>{delete f.input.files['tools/bin/cjprof'].producer.build.payloads;},
-  'missing fixed dependency':f=>{delete f.input.files['tools/bin/cjprof'].producer.build.dependencies.json;},
-  'JNI configuration mismatch':f=>{f.input.files['tools/bin/cjprof'].producer.build.nativeConfiguration.jni.values.CMAKE_BUILD_TYPE='Debug';},
-  'JNI parent mismatch':f=>{f.input.files['tools/bin/cjprof'].producer.build.nativeConfiguration.jni.values.CJPROF_LIBRARY='/unrelated/libcjprof.so';},
+  'missing fixed dependency':f=>{delete f.input.files['tools/bin/cjprof'].producer.build.nativeConfiguration.cangjie.values.runtimeHeader;},
+  'JNI configuration mismatch':f=>{f.input.files['tools/bin/cjprof'].producer.build.nativeConfiguration.cangjie.values.jdk='' ;},
+  'JNI parent mismatch':f=>{f.input.files['tools/bin/cjprof'].producer.build.nativeConfiguration.cangjie.values.language='C++';},
   'unresolved source':f=>{f.input.files['tools/bin/cjprof'].producer.source.status='unresolved';},
   'missing install artifact':f=>{delete f.input.files['tools/bin/cjprof'].producer.install.artifact;},
   'failed install':f=>{f.input.files['tools/bin/cjprof'].producer.install.rc=1;},
@@ -63,7 +63,7 @@ const changes={
   'old JNI bytes':f=>f.write('tools/lib/libcjprof-jni.so','changed'),
   'missing JNI payload fact':f=>{delete f.input.files['tools/bin/cjprof'].producer.install.payloads['tools/lib/libcjprof-jni.so'];},
   'missing body-relative static config':f=>fs.unlink(path.join(f.root,'.target-tools/tools/config/static/index.html')),
-  'wrong library producer':f=>{f.input.payloadFiles['tools/lib/libcjprof.so'].producers=['cjpm'];},
+  'wrong library producer':f=>{f.input.payloadFiles['tools/lib/libcjprof-cangjie.so'].producers=['cjpm'];},
 };
 for(const [name,change]of Object.entries(changes))readTest('per-tool refusal and independent control: '+name,async t=>{
   const f=await fixture(t);await change(f);await f.save();const result=await toolReadiness(f.root);
@@ -74,15 +74,15 @@ for(const key of ['compiler','stdCore','runtime'])readTest('reject changed produ
   const result=await toolReadiness(f.root);assert.equal(result.cjpm.ready,false);assert.match(result.cjpm.reason,/installed bytes differ/);
 });
 
-readTest('normal native install bytes remain distinct from build bytes',async t=>{
+readTest('Cangjie cjprof copied payload cannot be relabelled as an install transformation',async t=>{
   const f=await fixture(t),prof=f.input.files['tools/bin/cjprof'].producer;
   // Reader-only normal install transformation record; no native install is
   // claimed by this fixture. JNI and copied config remain byte-identical.
   prof.artifact.sha256='d'.repeat(64);
-  prof.build.payloads['tools/lib/libcjprof.so'].sha256='e'.repeat(64);
-  prof.install.payloads['tools/lib/libcjprof.so'].build.sha256='e'.repeat(64);
+  prof.build.payloads['tools/lib/libcjprof-cangjie.so'].sha256='e'.repeat(64);
+  prof.install.payloads['tools/lib/libcjprof-cangjie.so'].build.sha256='e'.repeat(64);
   await f.save();const result=await toolReadiness(f.root);
-  assert.equal(result.cjprof.ready,true,result.cjprof.reason);assert.equal(result.cjpm.ready,true,result.cjpm.reason);
+  assert.equal(result.cjprof.ready,false);assert.match(result.cjprof.reason,/installed copied payload differs from build/);assert.equal(result.cjpm.ready,true,result.cjpm.reason);
 });
 
 // The externally executed reader is the same entry used by environment.py.
@@ -90,20 +90,20 @@ function publicRead(root) {
   const r=spawnSync(process.execPath,[fileURLToPath(new URL('../../ci/cangjie-test/tool-readiness.mjs',import.meta.url)),root],{encoding:'utf8'});
   assert.equal(r.status,0,r.stderr);return JSON.parse(r.stdout);
 }
-readTest('public readiness reuses native payload across unrelated stage and SDK changes but keeps CJ pairing',async t=>{
+readTest('public readiness rejects changed SDK pairing for Cangjie cjprof and cjpm',async t=>{
   const f=await fixture(t),before=JSON.stringify(f.input.files['tools/bin/cjprof'].producer);
   await f.write('STAGE-INPUTS.json',JSON.stringify({platform:'linux_x86_64',compilerFile:'libexec/compiler',fixture:'another stage'}));
   for(const key of ['compiler','stdCore','runtime'])await f.write(f.input.files['tools/bin/cjpm'].producer.build.inputs.artifacts[key].sdkRelative,'different SDK input');
   const result=publicRead(f.root);
-  assert.equal(result.cjprof.ready,true,result.cjprof.reason);
+  assert.equal(result.cjprof.ready,false);assert.match(result.cjprof.reason,/producer SDK selection differs/);
   assert.equal(result.cjpm.ready,false);assert.match(result.cjpm.reason,/producer SDK selection differs/);
   assert.equal(JSON.stringify(f.input.files['tools/bin/cjprof'].producer),before,'old producer facts are retained');
 });
 readTest('native filename cannot bypass recorded native producer and actual configuration',async t=>{
   const f=await fixture(t),p=f.input.files['tools/bin/cjprof'].producer;
-  for(const change of [()=>{p.build.directory='cjpm';},()=>{p.build.directory='cjprof';delete p.build.nativeConfiguration.native.values.CMAKE_CXX_COMPILER;}]) {
+  for(const change of [()=>{p.build.directory='cjpm';},()=>{p.build.directory='cjprof';delete p.build.nativeConfiguration.cangjie.values.language;}]) {
     change();await f.save();const result=publicRead(f.root);
-    assert.equal(result.cjprof.ready,false);assert.match(result.cjprof.reason,/native (producer directory differs|configuration missing)/);
+    assert.equal(result.cjprof.ready,false);assert.match(result.cjprof.reason,/producer directory differs|Cangjie JNI configuration missing/);
     assert.equal(result.cjpm.ready,true);
   }
 });

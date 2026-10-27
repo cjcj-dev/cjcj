@@ -35,7 +35,7 @@ await fs.writeFile(path.join(source,'hyperlangExtension/src/dtsparser/source.cj'
 // Payload-copy boundaries only: these markers are never loaded as libraries
 // and cannot qualify native/JNI products. The nine actual fixture executables
 // above still exercise the public installed launcher and lineage rejection.
-for(const rel of ['cjpm/dist/cangjie-repo.toml','cjlint/dist/lib/libcjlint.so','cjlint/dist/config/cjlint_rule_list.json','cjprof/dist/lib/libcjprof.so','cjprof/dist/lib/libcjprof-jni.so','cjprof/dist/config/static/index.html']) {
+for(const rel of ['cjpm/dist/cangjie-repo.toml','cjlint/dist/lib/libcjlint.so','cjlint/dist/config/cjlint_rule_list.json','cjprof/dist/lib/libcjprof-cangjie.so','cjprof/dist/lib/libcjprof-jni.so','cjprof/dist/share/java/cjprof.jar','cjprof/dist/config/static/index.html']) {
  const file=path.join(source,rel);await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,'controlled transport boundary '+rel);
 }
 hlePayloadFixture(sdk);

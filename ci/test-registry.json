@@ -693,7 +693,7 @@
   {
     "file": "build/test/cjprof-static-reinstall.integration.mjs",
     "executor": "manual",
-    "reason": "Requires CJPROF_BUILT_INPUT pointing to recorded real Linux cjprof build facts and immutable native/source/install-rule files, plus RELEASE_EVIDENCE_TEST_ROOT. Runs normal Python/CMake/JNI install in a private relocated copy, SDK installer, real public HTTP consumer and release artifact/archive. Other eight tool/HLE inputs are unresolved interface controls; not full native production or SDK qualification."
+    "reason": "Requires CJPROF_BUILT_INPUT pointing to recorded real Linux cjprof build facts and immutable native/source/install-rule files, plus RELEASE_EVIDENCE_TEST_ROOT. Runs the normal Cangjie build.mjs install in a private relocated copy, SDK installer, real public HTTP consumer and release artifact/archive. Copies only the selected host runtime/bounds required by the real launcher; no full SDK. Other eight tool/HLE inputs are unresolved interface controls; not full native production or SDK qualification."
   },
   {
     "file": "build/test/tool-environment-availability.integration.mjs",
@@ -708,7 +708,7 @@
   {
     "file": "build/test/native-tool-readiness.integration.mjs",
     "executor": "manual",
-    "reason": "Requires an actual previously installed Linux cjprof in NATIVE_READINESS_INSTALLED_SDK, original NATIVE_READINESS_HEAP_INPUT, real NATIVE_READINESS_JDK and private RELEASE_EVIDENCE_TEST_ROOT. Copies only the recorded native payload; public readiness under a controlled changed stage selection, real HTTP and JNI library loads, changed-JNI refusal. Original producer/install facts stay unchanged. No complete SDK, macro or nine-tool semantic qualification."
+    "reason": "Requires an actual previously installed Linux cjprof in NATIVE_READINESS_INSTALLED_SDK, original NATIVE_READINESS_HEAP_INPUT, real NATIVE_READINESS_JDK and private RELEASE_EVIDENCE_TEST_ROOT. Requires an actual STAGE-INPUTS selection; official host-only installs are not applicable. Copies the recorded SDK compiler/stdCore/runtime edges and runtime bounds plus tool payload; positive readiness, changed-stage refusal/restoration, real HTTP and selected-JDK libjsig JNI loading, changed-JNI refusal. Original producer/install facts stay unchanged. No complete SDK, macro or nine-tool semantic qualification."
   },
   {
     "file": "ci/g2-native-inputs.integration.mjs",
@@ -905,6 +905,6 @@
   {
     "file": "build/test/native-tool-functions.integration.mjs",
     "executor": "manual",
-    "reason": "Requires actual independently installed cjfmt/LSPServer/cjlint/cjprof/cjcompat prefixes, a read-only qualified SDK for AST/CJO dependencies, fixed tools source and fresh work directory. Exercises formatting/compilation/runtime, existing LSP protocol, lint diagnostics, heap parsing and real compiler-produced CJO compatibility. No fixture tools or complete SDK qualification."
+    "reason": "Requires actual independently installed cjfmt/LSPServer/cjlint/cjprof/cjcompat prefixes, a read-only qualified SDK for AST/CJO dependencies, fixed tools source and fresh work directory. Exercises formatting/compilation/runtime, existing LSP protocol, lint diagnostics, heap parsing/selected-JDK Java JNI heap API and real compiler-produced CJO compatibility. No fixture tools or complete SDK qualification."
   }
 ]

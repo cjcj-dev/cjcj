@@ -26,22 +26,22 @@ export function toolBuildProduct(config,name) {
   if(name==='cjtrace-recover')return path.join(root,'cjtrace-recover/cmake-build/cjtrace-recover'+exe);
   if(name==='cjcompat')return path.join(root,'cjcompat/build/cangjie-build/cjcompat'+exe);
   if(['cjfmt','cjlint'].includes(name))return path.join(root,name,'build/build/bin',name+exe);
-  if(name==='cjprof')return path.join(root,name,'build/build/src',name+exe);
+  if(name==='cjprof')return path.join(root,name,'build/cangjie-output',name+exe);
   const row=toolOutputs(config).find(row=>row.producer===name);
   if(!row)requireToolProducer(name);
   return row.from;
 }
 // Fixed native producers choose their own Windows prefixes/output classes.
 // cjlint uses MinGW's lib prefix and RUNTIME_OUTPUT_DIRECTORY=bin;
-// cjprof/JNI explicitly set STRIP_LIB_PREFIX=ON and retain their src/build dirs.
+// Cangjie cjprof currently produces Linux ELF/JNI in cangjie-output.
 export function nativeToolLibraries(name,os) {
   const windows=os==='windows'||os==='win32';
   const ext=windows?'.dll':os==='darwin'?'.dylib':'.so';
   if(name==='cjlint')return [{build:'cjlint/build/build/'+(windows?'bin/':'lib/')+'libcjlint'+ext,
     install:'cjlint/dist/lib/libcjlint'+ext,to:'tools/lib/libcjlint'+ext}];
-  if(name==='cjprof')return ['cjprof','cjprof-jni'].map(lib=>{
-    const file=(windows?'':'lib')+lib+ext;
-    return {build:lib==='cjprof'?'cjprof/build/build/src/'+file:'cjprof/bridge/jni/build/'+file,
+  if(name==='cjprof')return ['cjprof-cangjie','cjprof-jni'].map(lib=>{
+    const file='lib'+lib+'.so';
+    return {build:'cjprof/build/cangjie-output/'+file,
       install:'cjprof/dist/lib/'+file,to:'tools/lib/'+file};
   });
   return [];
@@ -54,6 +54,7 @@ export async function toolPayloads(config,name,installPrefix) {
     ?path.join(installPrefix,to.replace(/^\.target-tools\//,'').replace(/^tools\//,'')):path.join(root,rel),to});
   if(name==='cjfmt')add('cjfmt/dist/config/cangjie-format.toml','tools/config/cangjie-format.toml');
   if(name==='cjpm')add('cjpm/dist/cangjie-repo.toml','tools/config/cangjie-repo.toml');
+  if(name==='cjprof')add('cjprof/dist/share/java/cjprof.jar','tools/share/java/cjprof.jar');
   if(['cjlint','cjprof'].includes(name)) {
     for(const row of nativeToolLibraries(name,config.target.spec.os))add(row.install,row.to);
     async function walk(relative) {
@@ -64,8 +65,8 @@ export async function toolPayloads(config,name,installPrefix) {
         else if(entry.isFile()) {
           const installed='tools/'+rel.slice((name+'/dist/').length);
           add(rel,installed);
-          // cjprof HttpServer resolves /proc/self/exe (GetModuleFileName on
-          // Windows); retain its config next to the actual target body too.
+          // cjprof resolves its executable directory; retain config next
+          // to the actual target body as well as the public tool directory.
           if(name==='cjprof')add(rel,'.target-tools/'+installed);
         }
         else throw new Error('SOURCE_TOOL_PAYLOAD_TYPE '+rel);
@@ -84,6 +85,7 @@ export async function nativeToolBuildPayloads(config,name) {
   if(!['cjlint','cjprof'].includes(name))return [];
   const root=config.repoPath('tools'),os=config.target.spec.os;
   const rows=nativeToolLibraries(name,os).map(row=>({from:path.join(root,row.build),to:row.to}));
+  if(name==='cjprof')rows.push({from:path.join(root,'cjprof/build/cangjie-output/cjprof.jar'),to:'tools/share/java/cjprof.jar'});
   const source=path.join(root,name,name==='cjlint'?'config':'static');
   async function walk(dir,tail='') {
     for(const entry of (await fs.readdir(dir,{withFileTypes:true})).sort((a,b)=>a.name.localeCompare(b.name))) {

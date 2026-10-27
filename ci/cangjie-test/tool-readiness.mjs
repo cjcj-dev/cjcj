@@ -9,12 +9,12 @@ import {fileDigest,readJson,relative} from '../bootstrap/sdk-flow.mjs';
 import {sdkPlatform,entryPlatformName} from '../bootstrap/sdk-platform.mjs';
 import {TOOL_NAMES,TOOL_PUBLIC_NAMES,TOOL_DIRECTORIES,nativeToolLibraries,toolName} from '../../build/srcbuild/tool-layout.mjs';
 // These are the SDK edges of the actual source producers, not the entire SDK
-// snapshot recorded for diagnostics. cjprof links its own prof/JNI payload and
-// a source-built demangler. Cangjie cjcompat and cjfmt follow the selected compiler/std/runtime producer inputs. cjlint DOES
+// snapshot recorded for diagnostics. Cangjie cjprof, cjcompat and cjfmt retain
+// the selected compiler/std/runtime producer inputs. cjlint DOES
 // execute cjc --compile-macro and initialize RuntimeInit; LSP enables macro
 // expansion. Those two therefore retain compiler/std/runtime pairing, including
 // the compiler's separately installed execution runtime when recorded.
-const nativeSdkInputs={cjprof:[],
+const nativeSdkInputs={
   cjlint:['nativeAst','compiler','stdCore','runtime'],lsp:['nativeAst','compiler','stdCore','runtime']};
 // These tools load/execute the selected SDK at use time. Their linked native
 // AST remains a build dependency. Installing into another SDK does not by
@@ -52,6 +52,7 @@ export async function toolReadiness(root) {
       if(facts?.source?.status!=='resolved'||!facts.source.repository||!/^[0-9a-f]{40}$/.test(facts.source.commit??''))throw Error('target producer source missing');
       if(facts.build?.rc!==0||facts.build.platform!==stage.platform||facts.install?.rc!==0)throw Error('target build/install not recorded');
       const nativeInputs=nativeSdkInputs[name];
+      if(name==='cjprof'&&facts.build.directory!=='cjprof')throw Error('producer directory differs');
       if(nativeInputs) {
         // A public filename alone cannot establish a native producer. Preserve
         // its recorded source/build directory and actual native configuration.
@@ -96,18 +97,17 @@ export async function toolReadiness(root) {
         if(!built||!isDeepStrictEqual(Object.keys(built).sort(),Object.keys(payloads).sort()))throw Error('installed native payload set differs from successful build');
         for(const [rel,row]of Object.entries(payloads)) {
           if(!isDeepStrictEqual(row.build,built[rel]))throw Error('installed native payload lacks build input: '+rel);
-          if((rel.includes('/config/')||rel.includes('cjprof-jni'))&&row.sha256!==built[rel].sha256)throw Error('installed copied payload differs from build: '+rel);
+          if((name==='cjprof'||rel.includes('/config/'))&&row.sha256!==built[rel].sha256)throw Error('installed copied payload differs from build: '+rel);
         }
-        for(const key of name==='cjprof'?['json','httplib','runtime','bounds']:['json']) {
+        for(const key of name==='cjprof'?[]:['json']) {
           const dep=facts.build.dependencies?.[key];
           if(!dep?.repo||!/^[0-9a-f]{40}$/.test(dep.commit??'')||!sha(dep.changes_sha256))throw Error('native dependency source missing: '+key);
         }
-        if(!facts.build.nativeConfiguration?.native?.values?.CMAKE_BUILD_TYPE)throw Error('native configuration missing');
+        if(name==='cjlint'&&!facts.build.nativeConfiguration?.native?.values?.CMAKE_BUILD_TYPE)throw Error('native configuration missing');
         if(name==='cjprof') {
-          const parent=facts.build.nativeConfiguration.native.values,jni=facts.build.nativeConfiguration.jni?.values;
-          if(!jni||jni.CMAKE_BUILD_TYPE!==parent.CMAKE_BUILD_TYPE||!parent.CJPROF_TARGET||jni.CJPROF_TARGET!==parent.CJPROF_TARGET)throw Error('JNI configuration differs');
-          const lib=Object.entries(built).find(([rel])=>/\/libcjprof\.(so|dylib)$/.test(rel)||rel==='tools/lib/cjprof.dll')?.[1];
-          if(!lib||jni.CJPROF_LIBRARY!==lib.source)throw Error('JNI parent library differs');
+          const selected=facts.build.nativeConfiguration?.cangjie?.values;
+          if(selected?.language!=='Cangjie'||!selected.sdk||!selected.jdk||!selected.runtimeHeader||!selected.lombok)throw Error('Cangjie JNI configuration missing');
+          required.push('tools/share/java/cjprof.jar');
         }
         required.push(...nativeToolLibraries(name,native.os).map(row=>row.to));
         if(!Object.keys(payloads).some(rel=>rel.startsWith(name==='cjprof'?'tools/config/static/':'tools/config/')&&(name!=='cjlint'||rel.endsWith('.json'))))throw Error('installed configuration absent');

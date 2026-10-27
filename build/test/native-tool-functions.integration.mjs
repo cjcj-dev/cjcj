@@ -17,8 +17,8 @@ const env=cleanSdkEnvironment(sdk,'linux_x86_64');
 // library each executable actually selects, installed and unpacked alike.
 env.LD_LIBRARY_PATH=prefix+'/tools/lib:'+env.LD_LIBRARY_PATH;
 const commands=[],groups=[],checks=[];
-function run(name,argv,{cwd=work,library,expected=0}={}) {
- const started=new Date().toISOString(),selected={...env,...(library?{LD_LIBRARY_PATH:library+':'+env.LD_LIBRARY_PATH}:{})};
+function run(name,argv,{cwd=work,library,expected=0,environment={}}={}) {
+ const started=new Date().toISOString(),selected={...env,...(library?{LD_LIBRARY_PATH:library+':'+env.LD_LIBRARY_PATH}:{}),...environment};
  const r=spawnSync(argv[0],argv.slice(1),{cwd,env:selected,encoding:'utf8',maxBuffer:16*1024*1024,timeout:120000});
  fs.writeFileSync(work+'/'+name+'.stdout',r.stdout??'');fs.writeFileSync(work+'/'+name+'.stderr',r.stderr??'');
  commands.push({name,argv,cwd,env:selected,started,ended:new Date().toISOString(),rc:r.status,signal:r.signal,error:r.error?.message??null});
@@ -127,9 +127,34 @@ await group('cjlint',()=>{
 });
 await group('cjprof',()=>{
  for(const [name,expected]of [['heap',/default::Dirived\s+1\s+72\s+168/],['heap_multi_ref',/std.core::Future<Unit>\s+1\s+168\s+728/]]) {
-  const result=run('prof-'+name,[binary('cjprof'),'heap','-i',source+'/cjprof/tests/'+name+'.data'],{library:prefix+'/cjprof/lib'});
+  const input=work+'/'+name+'.data';fs.copyFileSync(source+'/cjprof/tests/'+name+'.data',input);
+  const result=run('prof-'+name,[binary('cjprof'),'heap','-i',input],{library:prefix+'/cjprof/lib'});
   check('prof actual retained heap '+name,()=>assert.match(result.stdout,expected));
  }
+ const facts=JSON.parse(fs.readFileSync(prefix+'/cjprof/build-facts.json'));
+ assert.equal(facts.language,'Cangjie');assert.equal(facts.sdk,sdk,'selected compiler/runtime host');
+ const jdk=facts.jdk,jar=prefix+'/cjprof/share/java/cjprof.jar';assert(path.isAbsolute(jdk));
+ fs.writeFileSync(work+'/PublicProf.java',`import com.cjprof.jni.Cjprof;
+public class PublicProf {
+ public static void main(String[] a) throws Exception {
+  Cjprof.initialize();
+  if (!Cjprof.parseHeapSnapshotFiles(java.util.Arrays.asList(a[0]))) throw new AssertionError("parse");
+  if (Cjprof.queryAllHeapSnapshot().size()!=1) throw new AssertionError("snapshot count");
+  long id=Cjprof.getSnapshotIDByFilePath(a[0]);
+  if (Cjprof.getConstructorNodesBySnapshotID(id).isEmpty()) throw new AssertionError("constructors");
+  System.out.println("CJPROF_PUBLIC_JAVA_HEAP_PASS");
+  System.out.print(java.nio.file.Files.readString(java.nio.file.Path.of("/proc/self/maps")));
+ }
+}\n`);
+ run('prof-java-compile',[jdk+'/bin/javac','-cp',jar,work+'/PublicProf.java']);
+ const result=run('prof-java-run',[jdk+'/bin/java','-Xcheck:jni','-Djava.library.path='+prefix+'/cjprof/lib','-cp',work+':'+jar,'PublicProf',work+'/heap.data'],
+  {library:prefix+'/cjprof/lib',environment:{LD_PRELOAD:jdk+'/lib/libjsig.so'}});
+ check('prof Java parsed installed CJ implementation',()=>{
+  assert.match(result.stdout,/CJPROF_PUBLIC_JAVA_HEAP_PASS/);
+  for(const lib of ['libcjprof-cangjie.so','libcjprof-jni.so'])assert(result.stdout.includes(prefix+'/cjprof/lib/'+lib));
+  assert(result.stdout.includes(sdk+'/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so'));
+  assert(result.stdout.includes(jdk+'/lib/libjsig.so'));
+ });
 });
 await group('cjcompat',()=>{
  for(const [name,body]of Object.entries({old:'public func retained(): Int64 { 1 }\npublic func removed(): Int64 { 2 }\n',same:'public func retained(): Int64 { 1 }\npublic func removed(): Int64 { 2 }\n',deleted:'public func retained(): Int64 { 1 }\n'})) {

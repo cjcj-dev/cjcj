@@ -8,7 +8,7 @@ export const SOURCE_TOOL_PAYLOADS = Object.freeze({
   LSPServer: Object.freeze(['tools/lib/libcangjie-lsp.so']),
   hle: Object.freeze(['tools/dtsparser', 'tools/bin/node']),
   cjlint: Object.freeze(['tools/config']),
-  cjprof: Object.freeze(['tools/config/static','.target-tools/tools/config/static']),
+  cjprof: Object.freeze(['tools/config/static','.target-tools/tools/config/static','tools/share/java/cjprof.jar']),
   cjcompat: Object.freeze([]),
   cjcov: Object.freeze([]), 'cjtrace-recover': Object.freeze([]),
 });

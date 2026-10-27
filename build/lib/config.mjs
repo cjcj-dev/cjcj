@@ -136,6 +136,9 @@ export function buildConfig({
   toolsDependencies = process.env.CJCJ_NATIVE_TOOL_DEPENDENCIES,
   toolsGccToolchain = process.env.CJCJ_TOOLS_GCC_TOOLCHAIN,
   toolsMangleSource = process.env.CANGJIE_MANGLE_SOURCE_DIR,
+  toolsJniHome = process.env.JAVA_HOME,
+  toolsRuntimeHeader,
+  toolsLombokJar = process.env.CJPROF_LOMBOK_JAR,
   toolsCompilerLibs,
   toolsRuntimeConfig,
   toolsLlvmShim,
@@ -184,7 +187,7 @@ export function buildConfig({
   }
   if (toolsMangleSource != null && (typeof toolsMangleSource !== 'string' || !path.isAbsolute(toolsMangleSource)))
     throw new ConfigError('tools-mangle-source: expected an absolute compiler packages/mangle/src path');
-  for(const [name,value]of Object.entries({toolsCompilerLibs,toolsRuntimeConfig,toolsLlvmShim,toolsLlvmLibrary}))if(value!=null&&(typeof value!=='string'||!path.isAbsolute(value)))throw new ConfigError(name+': expected an absolute frontend input path');
+  for(const [name,value]of Object.entries({toolsJniHome,toolsRuntimeHeader,toolsLombokJar,toolsCompilerLibs,toolsRuntimeConfig,toolsLlvmShim,toolsLlvmLibrary}))if(value!=null&&(typeof value!=='string'||!path.isAbsolute(value)))throw new ConfigError(name+': expected an absolute frontend input path');
   const workspacePath = absolute(workspace || process.env.CANGJIE_WORKSPACE || path.join(process.cwd(), 'workspace'));
   const buildRootPath = absolute(buildRoot || process.env.CANGJIE_BUILD_ROOT || path.join(process.cwd(), 'buildtools'));
   const rawVersion = cangjieVersion || process.env.CANGJIE_VERSION || globalTag || '';
@@ -215,6 +218,9 @@ export function buildConfig({
     toolsDependencies: toolsDependencies ? absolute(toolsDependencies) : null,
     toolsGccToolchain: toolsGccToolchain == null ? null : absolute(toolsGccToolchain),
     toolsMangleSource: toolsMangleSource == null ? null : absolute(toolsMangleSource),
+    toolsJniHome: toolsJniHome == null ? null : absolute(toolsJniHome),
+    toolsRuntimeHeader: toolsRuntimeHeader == null ? null : absolute(toolsRuntimeHeader),
+    toolsLombokJar: toolsLombokJar == null ? null : absolute(toolsLombokJar),
     toolsCompilerLibs: toolsCompilerLibs == null ? null : absolute(toolsCompilerLibs),
     toolsRuntimeConfig: toolsRuntimeConfig == null ? null : absolute(toolsRuntimeConfig),
     toolsLlvmShim: toolsLlvmShim == null ? null : absolute(toolsLlvmShim),
@@ -260,6 +266,9 @@ export function withBuildType(config, buildType) {
     toolsDependencies: config.toolsDependencies,
     toolsGccToolchain: config.toolsGccToolchain,
     toolsMangleSource: config.toolsMangleSource,
+    toolsJniHome: config.toolsJniHome,
+    toolsRuntimeHeader: config.toolsRuntimeHeader,
+    toolsLombokJar: config.toolsLombokJar,
     toolsCompilerLibs: config.toolsCompilerLibs,
     toolsRuntimeConfig: config.toolsRuntimeConfig,
     toolsLlvmShim: config.toolsLlvmShim,

@@ -19,7 +19,7 @@ export async function readNativeToolDependencies(file,names) {
   return result;
 }
 export async function prepareNativeToolDependencies(config,names) {
-  if(!names.some(name=>['cjlint','cjprof'].includes(name)))return;
+  if(!names.includes('cjlint'))return;
   if(process.env.CANGJIE_BUILD_DRY_RUN==='1') {
     if(!config.toolsDependencies)throw Error('TOOLS_DEPENDENCIES_REQUIRED');
     return;

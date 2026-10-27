@@ -41,6 +41,7 @@ function usage() {
     + 'Global options:\n'
     + '  --workspace PATH\n'
     + '  --build-root PATH\n'
+    + '  --tools-jni-home PATH --tools-runtime-header FILE --tools-lombok-jar FILE\n'
     + '  --tools-compiler-libs PATH --tools-runtime-config FILE --tools-llvm-shim FILE --tools-llvm-library FILE\n'
     + '  --official-sdk-root PATH (default: CJCJ_OFFICIAL_SDK_ROOT, pinned cjv SDK)\n'
     + '  --target TARGET (default: linux-x64)\n'
@@ -105,7 +106,7 @@ function parseGlobal(args) {
       ['--build-type', 'buildType'], ['--cangjie-version', 'cangjieVersion'],
       ['--stdx-version', 'stdxVersion'], ['--stdx-profile', 'stdxProfile'], ['--log-level', 'logLevel'],
       ['--stdx-build-mode', 'stdxBuildMode'], ['--stdx-gcc-toolchain', 'stdxGccToolchain'], ['--tools-build-mode','toolsBuildMode'], ['--tools-build-set','toolsBuildSet'],
-      ['--tools-phase','toolsPhase'], ['--tools-install-prefix','toolsInstallPrefix'], ['--tools-dependencies','toolsDependencies'], ['--tools-gcc-toolchain','toolsGccToolchain'], ['--tools-mangle-source','toolsMangleSource'], ['--tools-compiler-libs','toolsCompilerLibs'], ['--tools-runtime-config','toolsRuntimeConfig'], ['--tools-llvm-shim','toolsLlvmShim'], ['--tools-llvm-library','toolsLlvmLibrary'], ['--jobs','jobs'], ['--tools-package-jobs','toolsPackageJobs'],
+      ['--tools-phase','toolsPhase'], ['--tools-install-prefix','toolsInstallPrefix'], ['--tools-dependencies','toolsDependencies'], ['--tools-gcc-toolchain','toolsGccToolchain'], ['--tools-mangle-source','toolsMangleSource'], ['--tools-jni-home','toolsJniHome'], ['--tools-runtime-header','toolsRuntimeHeader'], ['--tools-lombok-jar','toolsLombokJar'], ['--tools-compiler-libs','toolsCompilerLibs'], ['--tools-runtime-config','toolsRuntimeConfig'], ['--tools-llvm-shim','toolsLlvmShim'], ['--tools-llvm-library','toolsLlvmLibrary'], ['--jobs','jobs'], ['--tools-package-jobs','toolsPackageJobs'],
     ]) {
       parsed = optionValue(args, index, flag);
       if (parsed) {
@@ -248,6 +249,9 @@ async function dispatch(config, command, args) {
       toolsDependencies: config.toolsDependencies,
       toolsGccToolchain: config.toolsGccToolchain,
       toolsMangleSource: config.toolsMangleSource,
+      toolsJniHome: config.toolsJniHome,
+      toolsRuntimeHeader: config.toolsRuntimeHeader,
+      toolsLombokJar: config.toolsLombokJar,
       toolsCompilerLibs: config.toolsCompilerLibs,
       toolsRuntimeConfig: config.toolsRuntimeConfig,
       toolsLlvmShim: config.toolsLlvmShim,

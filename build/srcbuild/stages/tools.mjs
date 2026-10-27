@@ -30,7 +30,7 @@ const TOOL_PATHS = TOOL_NAMES.map(name=>[name,TOOL_DIRECTORIES[name]?path.join(T
 // CMAKE_INSTALL_PREFIX (/usr/local by default), so it must be pointed at a
 // directory inside the repo, mirroring the dist/ the other tools produce.
 const CJTRACE_DIST = path.join('cjtrace-recover', 'dist');
-const toolScript = name => ['cjtrace-recover','cjcompat'].includes(name) ? 'build.mjs' : 'build.py';
+const toolScript = name => ['cjtrace-recover','cjcompat','cjprof'].includes(name) ? 'build.mjs' : 'build.py';
 const toolArgv = (name,args) => [toolScript(name)==='build.mjs' ? process.execPath : 'python3',toolScript(name),...args];
 const runTool = (config,name,cwd,args,options) => runBuildScript(config,cwd,args,{...options,script:toolScript(name)});
 const CJPM_NEEDLE = '/opt/buildtools/llvm-mingw-w64';
@@ -58,6 +58,11 @@ async function checkoutPinnedCjpm(config,toolsRoot) {
 }
 
 function buildArgsFor(name, config, jobs) {
+  if(name==='cjprof') {
+    if(config.target.spec.os!=='linux'||config.target.spec.crossCompile||config.target.spec.llvmPlatform!=='linux_x86_64')throw new BuildError('tools.cjprof','selected Cangjie producer supports Linux x86-64');
+    for(const key of ['toolsJniHome','toolsRuntimeHeader','toolsLombokJar'])if(!config[key])throw new BuildError('tools.cjprof',key+' is required');
+    return ['build','--sdk',consumerSdk(config),'--jni-home',config.toolsJniHome,'--runtime-header',config.toolsRuntimeHeader,'--lombok-jar',config.toolsLombokJar];
+  }
   if(name==='cjcompat') {
     const source=config.repoPath('compiler'),sdk=consumerSdk(config);
     return ['build','--type',config.buildType==='relwithdebinfo'?'release':config.buildType,
@@ -80,7 +85,7 @@ function buildArgsFor(name, config, jobs) {
       ...(rpath?['--set-rpath',rpath]:[]),
       ...(config.target.spec.crossCompile?['--target','windows-x86_64','--target-sysroot',mingwInstallPath(config.buildRoot)]:[])];
   }
-  const dependencies=['cjlint','cjprof'].includes(name)?['--dependencies',config.toolsDependencies]
+  const dependencies=name==='cjlint'?['--dependencies',config.toolsDependencies]
     :name==='cjcompat'?['--sdk',consumerSdk(config)]:[];
   if (config.target.spec.crossCompile) {
     const args=['build', '-t', config.crossBuildType, '--target', 'windows-x86_64'];
@@ -263,7 +268,7 @@ export async function run(config) {
         const {jobs,cpuSet}=plan[name];
         const producerEnv={...toolEnv,...(name==='cjfmt'?{CJFMT_SOURCE_REF:config.repo('tools').tag}:{}),CANGJIE_BUILD_JOBS:String(jobs),CMAKE_BUILD_PARALLEL_LEVEL:String(jobs),MAKEFLAGS:'-j'+jobs};
         try {
-          if(name!=='cjcompat' && config.toolsBuildMode!=='incremental' && (name!=='cjtrace-recover' || fs.existsSync(path.join(toolsRoot,'cjtrace-recover/cmake-build/CMakeCache.txt'))))
+          if(!['cjcompat','cjprof'].includes(name) && config.toolsBuildMode!=='incremental' && (name!=='cjtrace-recover' || fs.existsSync(path.join(toolsRoot,'cjtrace-recover/cmake-build/CMakeCache.txt'))))
             await runTool(config,name,cwd,['clean'],{stageName:`tools.${name}.clean`,extraEnv:producerEnv,cpuSet});
           const output=outputs.find(row=>row.name===({lsp:'LSPServer'}[name]??name)+suffix);
           // These upstream Python mains discard a returned error. Preserve a

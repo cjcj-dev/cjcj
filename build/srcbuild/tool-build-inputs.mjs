@@ -55,7 +55,7 @@ export async function beginToolBuild(config, name, {cjpmPin, argv, env, sdk}) {
     'CJFMT_FRONTEND_CJO','CJFMT_FRONTEND_LIB','CJFMT_FRONTEND_NATIVE','CJFMT_FRONTEND_REF','CJFMT_SOURCE_REF',
     'cjHeapSize','JAVA_HOME','CJC_HEAP_SIZE','CJ_HEAP_SIZE','CANGJIE_HEAP_SIZE','CJ_IR_VERIFIER_MODE']
     .filter(key=>env[key]!==undefined&&env[key]!==null).map(key=>[key,String(env[key])]));
-  const dependencies=['cjlint','cjprof'].includes(name)?await readNativeToolDependencies(config.toolsDependencies,[name]):{};
+  const dependencies=name==='cjlint'?await readNativeToolDependencies(config.toolsDependencies,[name]):{};
   for(const row of Object.values(dependencies)) {
     const actual=await sourceState(row.path,'.','HEAD');
     if(actual.commit!==row.commit||actual.changes_sha256!==sha256(''))throw Error('TOOL_DEPENDENCY_SOURCE_CHANGED '+row.path);
@@ -63,11 +63,15 @@ export async function beginToolBuild(config, name, {cjpmPin, argv, env, sdk}) {
   }
   return {source:{status:'resolved',repository,commit:state.commit},
     build:{directory,dependencies,source_changes_sha256:state.changes_sha256,argv,
-      platform:config.target.spec.llvmPlatform,buildType:argv[argv.indexOf(name==='cjcompat'?'--type':'-t')+1],requestedBuildType:config.buildType,
+      platform:config.target.spec.llvmPlatform,buildType:name==='cjprof'?'producer-default':argv[argv.indexOf(name==='cjcompat'?'--type':'-t')+1],requestedBuildType:config.buildType,
       mode:config.toolsBuildMode??'clean',version:config.cangjieVersion,environment,inputs:await sdkInputs(config,sdk)}};
 }
 async function nativeConfigurationInputs(config,name) {
   const nativeConfiguration={};
+  if(name==='cjprof') {
+    const file=path.join(config.repoPath('tools'),'cjprof/build/cangjie-output/build-facts.json');
+    return {cangjie:{path:file,values:await readJson(file)}};
+  }
   if(name==='cjcompat') {
     const file=path.join(config.repoPath('tools'),'cjcompat/build/cangjie-build/inputs.json');
     return {cangjie:{path:file,values:await readJson(file)}};
@@ -87,7 +91,7 @@ export async function finishToolBuild(config, name, facts, product) {
     const current=await sourceState(row.path,'.','HEAD');
     if(!isDeepStrictEqual(current,{commit:row.commit,changes_sha256:row.changes_sha256}))throw Error('TOOL_DEPENDENCY_CHANGED_DURING_BUILD '+name);
   }
-  if(['cjlint','cjprof'].includes(name)) {
+  if(name==='cjlint') {
     const selection=await readNativeToolDependencies(config.toolsDependencies,[name]);
     const before=Object.fromEntries(Object.entries(facts.build.dependencies).map(([key,{repo,commit,path}])=>[key,{repo,commit,path}]));
     if(!isDeepStrictEqual(before,selection))throw Error('TOOL_DEPENDENCY_SELECTION_CHANGED '+name);
@@ -135,13 +139,14 @@ export async function finishToolInstall(config,name,product,argv,{prefix}={}) {
     if(!isDeepStrictEqual(Object.keys(payloads).sort(),Object.keys(facts.build.payloads).sort()))throw Error('TOOL_INSTALL_BUILD_PAYLOAD_SET '+name);
     for(const [rel,row]of Object.entries(payloads)) {
       const built=facts.build.payloads[rel];
-      // CMake may normally rewrite native RPATH/install names. Keep those
-      // installed bytes distinct; copied config/JNI must still be identical.
-      if((rel.includes('/config/')||rel.includes('cjprof-jni'))&&row.sha256!==built.sha256)throw Error('TOOL_INSTALL_BUILD_PAYLOAD_MISMATCH '+rel);
+      // Native CMake may rewrite install names. The Cangjie cjprof producer
+      // copies every payload unchanged, including the Java jar and business SO.
+      if((name==='cjprof'||rel.includes('/config/'))&&row.sha256!==built.sha256)throw Error('TOOL_INSTALL_BUILD_PAYLOAD_MISMATCH '+rel);
       row.build={...built};
     }
   }
   const artifact={path:product,sha256:await fileDigest(product)};
+  if(name==='cjprof'&&artifact.sha256!==facts.artifact.sha256)throw Error('TOOL_INSTALL_BUILD_ARTIFACT_MISMATCH '+name);
   await atomicJson(prefix?path.join(prefix,'build-inputs.json'):recordPath(config,name),{...facts,install:{argv,rc:0,artifact,payloads}});
 }
 export async function installedToolBuildInputs(config,name,product) {
