@@ -83,7 +83,7 @@ async function serving(label,root,paths){
  const out=openSync(path.join(work,label+'.stdout'),'wx'),err=openSync(path.join(work,label+'.stderr'),'wx');
  const child=spawn(argv[0],argv.slice(1),{cwd:work,env:process.env,stdio:['ignore',out,err]});closeSync(out);closeSync(err);const closed=once(child,'close');
  try{
-  let ready=false;for(let n=0;n<100;n++){if(child.exitCode!==null)throw Error('cjprof exited before HTTP '+child.exitCode);try{await fetch('http://127.0.0.1:'+port+'/static/html/index.html',{signal:AbortSignal.timeout(500)});ready=true;break;}catch{}await delay(50);}
+  let ready=false;for(let n=0;n<100;n++){if(child.exitCode!==null)throw Error('cjprof exited before HTTP '+child.exitCode);try{const response=await fetch('http://127.0.0.1:'+port+'/static/html/index.html',{signal:AbortSignal.timeout(500)});await response.arrayBuffer();ready=true;break;}catch{}await delay(50);}
   assert.ok(ready,'actual cjprof HTTP server started');await copy('/proc/'+child.pid+'/maps',path.join(work,label+'.maps'));
   const replies={};for(const route of paths){const r=await fetch('http://127.0.0.1:'+port+route,{signal:AbortSignal.timeout(3000)});replies[route]={status:r.status,body:await r.text()};}
   await write(path.join(work,label+'.http.json'),JSON.stringify(replies,null,2));return replies;
