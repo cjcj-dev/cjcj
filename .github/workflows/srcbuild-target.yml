@@ -1278,7 +1278,7 @@ jobs:
           node ci/release/prepare_tools_artifact.mjs \
             --tool cjfmt --platform "${{ matrix.target }}" \
             --sdk "$CANGJIE_WORKSPACE/software/cangjie" \
-            --binary "$CANGJIE_WORKSPACE/cangjie_tools/cjfmt/build/build/bin/cjfmt" \
+            --binary "$CANGJIE_WORKSPACE/cangjie_tools/cjfmt/dist/bin/cjfmt" \
             --outdir "$GITHUB_WORKSPACE/.release-tools/${{ matrix.target }}/cjfmt"
 
       - name: Upload source-built cjfmt artifact
@@ -1970,7 +1970,7 @@ jobs:
         run: |
           node ci/release/prepare_tools_artifact.mjs \
             --tool cjfmt --platform windows-x64 \
-            --binary "$CANGJIE_WORKSPACE/cangjie_tools/cjfmt/build/build/bin/cjfmt.exe" \
+            --binary "$CANGJIE_WORKSPACE/cangjie_tools/cjfmt/dist/bin/cjfmt.exe" \
             --sdk "$CANGJIE_WORKSPACE/software/cangjie-windows" \
             --outdir "$GITHUB_WORKSPACE/.release-tools-windows/cjfmt"
 
