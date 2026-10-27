@@ -719,14 +719,22 @@ test('Linux source stages emit the Python command order', async () => {
     ]) {
       const cwd = path.join(toolsRoot, subpath);
       const prefix=toolBudget[name].cpuSet?['taskset','-c',toolBudget[name].cpuSet]:[];
-      const producer=name==='cjtrace-recover'?[process.execPath,'build.mjs']:['python3','build.py'];
-      if(name!=='cjtrace-recover')expectedCommands.push(expected(root,cwd,[...prefix,...producer,'clean']));
+      const producer=['cjtrace-recover','cjcompat'].includes(name)?[process.execPath,'build.mjs']:['python3','build.py'];
+      if(!['cjtrace-recover','cjcompat'].includes(name))expectedCommands.push(expected(root,cwd,[...prefix,...producer,'clean']));
       const buildArgs = [...producer,'build','-t','release'];
       if(name==='cjtrace-recover')buildArgs.push('--cangjie-sdk',config.consumerSdk,'--mangle-source',config.toolsMangleSource,'--set-rpath','$ORIGIN/../lib:$ORIGIN/../../../runtime/lib/linux_x86_64_cjnative');
       if (name === 'cjpm') buildArgs.push('--set-rpath', '$ORIGIN/../../runtime/lib/linux_x86_64_cjnative');
       if (['cjpm','cjfmt','lsp','cjlint','cjprof','cjcompat'].includes(name)) buildArgs.push('--jobs',String(toolBudget[name].jobs));
       if(['cjlint','cjprof'].includes(name))buildArgs.push('--dependencies',config.toolsDependencies);
-      if(name==='cjcompat')buildArgs.push('--sdk',config.consumerSdk??path.join(config.repoPath('compiler'),'output'));
+      if(name==='cjcompat') {
+        const sdk=config.consumerSdk??path.join(config.repoPath('compiler'),'output'),source=config.repoPath('compiler');
+        buildArgs.splice(0,buildArgs.length,...producer,'build','--type','release','--sdk',sdk,
+          '--compiler-source',source,'--compiler-libs',path.join(source,'target/release'),
+          '--runtime-config',path.join(source,'runtime_shim/cjc_runtime_config.o'),
+          '--shim',path.join(sdk,'third_party/llvm/fixed-llc/cjselfhost_llvmshim.o'),
+          '--llvm',path.join(sdk,'third_party/llvm/lib/libLLVM-15.so'),
+          '--jobs',String(toolBudget[name].jobs),'--tools-revision',config.repo('tools').tag);
+      }
       expectedCommands.push(expected(root, cwd, [...prefix,...buildArgs]));
       const installArgs = [...producer,'install'];
       if (['cjfmt','cjtrace-recover','cjlint','cjprof','cjcompat'].includes(name)) {

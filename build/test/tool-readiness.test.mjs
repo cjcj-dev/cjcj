@@ -128,7 +128,7 @@ async function astTool(f,name) {
   const ast=await f.write('tools/lib/libcangjie-lsp.so','AST fixture');p.build.inputs.artifacts.nativeAst={sdkRelative:ast.path,sha256:ast.sha256};
   f.input.files[rel]=template;await f.save();return {rel,p};
 }
-for(const name of ['cjcompat','cjlint','lsp'])readTest('public '+name+' retains AST linkage and its actual compiler/macro edges',async t=>{
+for(const name of ['cjlint','lsp'])readTest('public '+name+' retains AST linkage and its actual compiler/macro edges',async t=>{
   const f=await fixture(t),{rel,p}=await astTool(f,name),publicName=path.basename(rel);
   assert.equal(publicRead(f.root)[publicName].ready,true);
   await f.write('STAGE-INPUTS.json',JSON.stringify({...p.build.inputs.stage,fixture:'new label only'}));
@@ -153,12 +153,12 @@ readTest('public readiness keeps separately installed compiler execution runtime
   assert.equal(r.cjlint.ready,false);assert.match(r.cjlint.reason,/installed bytes differ: .compiler-exec/);assert.equal(r.cjprof.ready,true);
 });
 
-readTest('Cangjie cjfmt binds its SDK inputs without the retired C++ AST library',async t=>{
- const f=await fixture(t),{p}=await astTool(f,'cjfmt');
+for(const tool of ['cjfmt','cjcompat'])readTest('Cangjie '+tool+' binds its SDK inputs without the retired C++ AST library',async t=>{
+ const f=await fixture(t),{p}=await astTool(f,tool);
  await fs.rm(path.join(f.root,'tools/lib/libcangjie-lsp.so'));
- assert.equal(publicRead(f.root).cjfmt.ready,true);
+ assert.equal(publicRead(f.root)[tool].ready,true);
  const runtime=p.build.inputs.artifacts.runtime.sdkRelative;
  await f.write(runtime,'different selected runtime');
- assert.equal(publicRead(f.root).cjfmt.ready,false);
- assert.match(publicRead(f.root).cjfmt.reason,/installed bytes differ/);
+ assert.equal(publicRead(f.root)[tool].ready,false);
+ assert.match(publicRead(f.root)[tool].reason,/installed bytes differ/);
 });

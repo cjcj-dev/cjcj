@@ -24,7 +24,8 @@ export function toolOutputs(config) {
 export function toolBuildProduct(config,name) {
   const root=config.repoPath('tools'),exe=config.target.spec.exeSuffix;
   if(name==='cjtrace-recover')return path.join(root,'cjtrace-recover/cmake-build/cjtrace-recover'+exe);
-  if(['cjfmt','cjlint','cjcompat'].includes(name))return path.join(root,name,'build/build/bin',name+exe);
+  if(name==='cjcompat')return path.join(root,'cjcompat/build/cangjie-build/cjcompat'+exe);
+  if(['cjfmt','cjlint'].includes(name))return path.join(root,name,'build/build/bin',name+exe);
   if(name==='cjprof')return path.join(root,name,'build/build/src',name+exe);
   const row=toolOutputs(config).find(row=>row.producer===name);
   if(!row)requireToolProducer(name);

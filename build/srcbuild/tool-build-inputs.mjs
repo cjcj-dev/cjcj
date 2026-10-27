@@ -63,11 +63,15 @@ export async function beginToolBuild(config, name, {cjpmPin, argv, env, sdk}) {
   }
   return {source:{status:'resolved',repository,commit:state.commit},
     build:{directory,dependencies,source_changes_sha256:state.changes_sha256,argv,
-      platform:config.target.spec.llvmPlatform,buildType:argv[argv.indexOf('-t')+1],requestedBuildType:config.buildType,
+      platform:config.target.spec.llvmPlatform,buildType:argv[argv.indexOf(name==='cjcompat'?'--type':'-t')+1],requestedBuildType:config.buildType,
       mode:config.toolsBuildMode??'clean',version:config.cangjieVersion,environment,inputs:await sdkInputs(config,sdk)}};
 }
 async function nativeConfigurationInputs(config,name) {
   const nativeConfiguration={};
+  if(name==='cjcompat') {
+    const file=path.join(config.repoPath('tools'),'cjcompat/build/cangjie-build/inputs.json');
+    return {cangjie:{path:file,values:await readJson(file)}};
+  }
   if(['cjfmt','cjlint','cjprof','cjcompat','cjtrace-recover'].includes(name))for(const [part,relative]of [['native',name+(name==='cjtrace-recover'?'/cmake-build/CMakeCache.txt':'/build/build/CMakeCache.txt')],...(name==='cjprof'?[['jni','cjprof/bridge/jni/build/CMakeCache.txt']]:[])]) {
     const file=path.join(config.repoPath('tools'),relative);
     const cache=Object.fromEntries((await fs.readFile(file,'utf8')).split('\n').filter(line=>/^[A-Za-z_][^:]*:[^=]*=/.test(line)).map(line=>[line.slice(0,line.indexOf(':')),line.slice(line.indexOf('=')+1)]));

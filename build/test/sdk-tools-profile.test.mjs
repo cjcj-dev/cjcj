@@ -176,7 +176,7 @@ async function installedRegressionFixture() {
    // Do not copy Node or any SDK; these unrelated HLE inputs are unused markers.
    for(const file of ['tools/bin/node','tools/dtsparser/node_modules/.bin/cjbind','tools/dtsparser/DEPENDENCIES.json'])await write(sdk+'/'+file,'controlled unused HLE boundary');
    const outputs={cjpm:'cjpm/dist/cjpm',cjfmt:'cjfmt/dist/bin/cjfmt',hle:'hyperlangExtension/target/bin/main',lsp:'cangjie-language-server/output/bin/LSPServer',cjcov:'cjcov/dist/cjcov','cjtrace-recover':'cjtrace-recover/dist/bin/cjtrace-recover',cjlint:'cjlint/dist/bin/cjlint',cjprof:'cjprof/dist/bin/cjprof',cjcompat:'cjcompat/dist/bin/cjcompat'};
-   const buildProducts={...outputs,cjfmt:'cjfmt/build/build/bin/cjfmt','cjtrace-recover':'cjtrace-recover/cmake-build/cjtrace-recover',cjlint:'cjlint/build/build/bin/cjlint',cjprof:'cjprof/build/build/src/cjprof',cjcompat:'cjcompat/build/build/bin/cjcompat'};
+   const buildProducts={...outputs,cjfmt:'cjfmt/build/build/bin/cjfmt','cjtrace-recover':'cjtrace-recover/cmake-build/cjtrace-recover',cjlint:'cjlint/build/build/bin/cjlint',cjprof:'cjprof/build/build/src/cjprof',cjcompat:'cjcompat/build/cangjie-build/cjcompat'};
    const cjpm='#!'+process.execPath+'\n'+`const fs=require('node:fs');const path=require('node:path');
 fs.appendFileSync(${JSON.stringify(trace)},JSON.stringify({event:'installed-cjpm',args:process.argv.slice(2),cwd:process.cwd()})+'\\n');
 if(process.argv[2]==='build'){const out=path.resolve('target/release/bin/main');fs.mkdirSync(path.dirname(out),{recursive:true});fs.writeFileSync(out,${JSON.stringify(hello)},{mode:0o755});}
@@ -187,9 +187,9 @@ if(process.argv[2]==='build'){const out=path.resolve('target/release/bin/main');
      name==='cjfmt'?{'cjfmt/dist/config/cangjie-format.toml':'fixture format'}:
      name==='cjlint'?{'cjlint/dist/lib/libcjlint.so':'unloaded fixture','cjlint/dist/config/rules.json':'{}'}:
      name==='cjprof'?{'cjprof/dist/lib/libcjprof.so':'unloaded fixture','cjprof/dist/lib/libcjprof-jni.so':'unloaded fixture','cjprof/dist/config/static/index.html':'fixture page'}:{};
-    if(name==='cjtrace-recover') {
+    if(['cjtrace-recover','cjcompat'].includes(name)) {
      await write(tools+'/'+dir+'/build.mjs',`import fs from 'node:fs';import path from 'node:path';
-const verb=process.argv[2];fs.appendFileSync(${JSON.stringify(trace)},JSON.stringify({event:'producer',name:'cjtrace-recover',verb})+'\\n');
+const verb=process.argv[2];fs.appendFileSync(${JSON.stringify(trace)},JSON.stringify({event:'producer',name:${JSON.stringify(name)},verb})+'\\n');
 if(verb==='build'||verb==='install') {const out=path.join(${JSON.stringify(tools)},verb==='build'?${JSON.stringify(buildProducts[name])}:${JSON.stringify(outputs[name])});fs.mkdirSync(path.dirname(out),{recursive:true});fs.writeFileSync(out,${JSON.stringify(body)},{mode:0o755});}
 `);
      continue;

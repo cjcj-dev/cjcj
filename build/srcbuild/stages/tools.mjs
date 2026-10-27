@@ -30,8 +30,8 @@ const TOOL_PATHS = TOOL_NAMES.map(name=>[name,TOOL_DIRECTORIES[name]?path.join(T
 // CMAKE_INSTALL_PREFIX (/usr/local by default), so it must be pointed at a
 // directory inside the repo, mirroring the dist/ the other tools produce.
 const CJTRACE_DIST = path.join('cjtrace-recover', 'dist');
-const toolScript = name => name === 'cjtrace-recover' ? 'build.mjs' : 'build.py';
-const toolArgv = (name,args) => [name === 'cjtrace-recover' ? process.execPath : 'python3',toolScript(name),...args];
+const toolScript = name => ['cjtrace-recover','cjcompat'].includes(name) ? 'build.mjs' : 'build.py';
+const toolArgv = (name,args) => [toolScript(name)==='build.mjs' ? process.execPath : 'python3',toolScript(name),...args];
 const runTool = (config,name,cwd,args,options) => runBuildScript(config,cwd,args,{...options,script:toolScript(name)});
 const CJPM_NEEDLE = '/opt/buildtools/llvm-mingw-w64';
 const CJPM_EDITS = [[
@@ -58,6 +58,15 @@ async function checkoutPinnedCjpm(config,toolsRoot) {
 }
 
 function buildArgsFor(name, config, jobs) {
+  if(name==='cjcompat') {
+    const source=config.repoPath('compiler'),sdk=consumerSdk(config);
+    return ['build','--type',config.buildType==='relwithdebinfo'?'release':config.buildType,
+      '--sdk',sdk,'--compiler-source',source,'--compiler-libs',config.toolsCompilerLibs??path.join(source,'target/release'),
+      '--runtime-config',config.toolsRuntimeConfig??path.join(source,'runtime_shim/cjc_runtime_config.o'),
+      '--shim',config.toolsLlvmShim??path.join(sdk,'third_party/llvm/fixed-llc/cjselfhost_llvmshim.o'),
+      '--llvm',config.toolsLlvmLibrary??path.join(sdk,'third_party/llvm/lib',config.target.spec.hostLlvmLibrary),
+      '--jobs',String(jobs),'--tools-revision',config.repo('tools').tag];
+  }
   if (name === 'cjtrace-recover') {
     // The sole producer is now the Cangjie module/CLI graph. The compiler
     // source input is explicit; no native demangler or Python fallback.
@@ -254,7 +263,7 @@ export async function run(config) {
         const {jobs,cpuSet}=plan[name];
         const producerEnv={...toolEnv,...(name==='cjfmt'?{CJFMT_SOURCE_REF:config.repo('tools').tag}:{}),CANGJIE_BUILD_JOBS:String(jobs),CMAKE_BUILD_PARALLEL_LEVEL:String(jobs),MAKEFLAGS:'-j'+jobs};
         try {
-          if(config.toolsBuildMode!=='incremental' && (name!=='cjtrace-recover' || fs.existsSync(path.join(toolsRoot,'cjtrace-recover/cmake-build/CMakeCache.txt'))))
+          if(name!=='cjcompat' && config.toolsBuildMode!=='incremental' && (name!=='cjtrace-recover' || fs.existsSync(path.join(toolsRoot,'cjtrace-recover/cmake-build/CMakeCache.txt'))))
             await runTool(config,name,cwd,['clean'],{stageName:`tools.${name}.clean`,extraEnv:producerEnv,cpuSet});
           const output=outputs.find(row=>row.name===({lsp:'LSPServer'}[name]??name)+suffix);
           // These upstream Python mains discard a returned error. Preserve a

@@ -21,7 +21,7 @@ export function sourceToolPayloads(tool, platform = 'linux-x64') {
     ? ['tools/bin/libcangjie-lsp.dll', 'tools/lib/libcangjie-lsp.dll.a']
     : ['tools/lib/libcangjie-lsp'+(spec.os==='darwin'?'.dylib':'.so')];
   if(tool==='cjfmt')return SOURCE_TOOL_PAYLOADS.cjfmt;
-  if(tool==='LSPServer'||tool==='cjcompat')return lsp;
+  if(tool==='LSPServer')return lsp;
   if(tool==='cjlint')return ['tools/config',...nativeToolLibraries('cjlint',spec.os).map(row=>row.to),...lsp];
   if(tool==='cjprof')return [...SOURCE_TOOL_PAYLOADS.cjprof,...nativeToolLibraries('cjprof',spec.os).map(row=>row.to)];
   if(tool==='hle')return ['tools/dtsparser','tools/bin/node'+spec.exeSuffix];

@@ -104,7 +104,7 @@ function parseGlobal(args) {
       ['--build-type', 'buildType'], ['--cangjie-version', 'cangjieVersion'],
       ['--stdx-version', 'stdxVersion'], ['--stdx-profile', 'stdxProfile'], ['--log-level', 'logLevel'],
       ['--stdx-build-mode', 'stdxBuildMode'], ['--stdx-gcc-toolchain', 'stdxGccToolchain'], ['--tools-build-mode','toolsBuildMode'], ['--tools-build-set','toolsBuildSet'],
-      ['--tools-phase','toolsPhase'], ['--tools-install-prefix','toolsInstallPrefix'], ['--tools-dependencies','toolsDependencies'], ['--tools-gcc-toolchain','toolsGccToolchain'], ['--tools-mangle-source','toolsMangleSource'], ['--jobs','jobs'], ['--tools-package-jobs','toolsPackageJobs'],
+      ['--tools-phase','toolsPhase'], ['--tools-install-prefix','toolsInstallPrefix'], ['--tools-dependencies','toolsDependencies'], ['--tools-gcc-toolchain','toolsGccToolchain'], ['--tools-mangle-source','toolsMangleSource'], ['--tools-compiler-libs','toolsCompilerLibs'], ['--tools-runtime-config','toolsRuntimeConfig'], ['--tools-llvm-shim','toolsLlvmShim'], ['--tools-llvm-library','toolsLlvmLibrary'], ['--jobs','jobs'], ['--tools-package-jobs','toolsPackageJobs'],
     ]) {
       parsed = optionValue(args, index, flag);
       if (parsed) {
@@ -247,6 +247,10 @@ async function dispatch(config, command, args) {
       toolsDependencies: config.toolsDependencies,
       toolsGccToolchain: config.toolsGccToolchain,
       toolsMangleSource: config.toolsMangleSource,
+      toolsCompilerLibs: config.toolsCompilerLibs,
+      toolsRuntimeConfig: config.toolsRuntimeConfig,
+      toolsLlvmShim: config.toolsLlvmShim,
+      toolsLlvmLibrary: config.toolsLlvmLibrary,
       toolsPhase: config.toolsPhase, toolsInstallPrefix: config.toolsInstallPrefix, jobs: config.jobs, toolsPackageJobs: config.toolsPackageJobs,
       officialSdkRoot: config.officialSdkRoot,
       consumerSdk: config.consumerSdk,
