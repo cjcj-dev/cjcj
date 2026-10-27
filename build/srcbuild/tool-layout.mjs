@@ -2,6 +2,7 @@
 // its SDK-adapted source must exist in the selected complete tools candidate.
 import path from 'node:path';
 import fs from 'node:fs/promises';
+import {readFileSync} from 'node:fs';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 const execute=promisify(execFile);
@@ -31,7 +32,12 @@ export function toolBuildProduct(config,name) {
   const root=config.repoPath('tools'),exe=config.target.spec.exeSuffix;
   if(name==='cjtrace-recover')return path.join(root,'cjtrace-recover/cmake-build/cjtrace-recover'+exe);
   if(name==='cjcompat')return path.join(root,'cjcompat/build/cangjie-build/cjcompat'+exe);
-  if(name==='cjlint')return path.join(cjlintBuildDirectory(config),'target/release/bin/cjlint');
+  if(name==='cjlint') {
+    // The normal CJPM producer records its actual executable (main or cjlint).
+    // Only command planning lacks a product; real build/install use that record.
+    if(process.env.CANGJIE_BUILD_DRY_RUN==='1')return path.join(cjlintBuildDirectory(config),'target/release/bin/cjlint');
+    return JSON.parse(readFileSync(path.join(cjlintBuildDirectory(config),'product.json'),'utf8')).executable;
+  }
   if(name==='cjfmt')return path.join(root,name,'build/build/bin',name+exe);
   if(name==='cjprof')return path.join(cjprofBuildDirectory(config),name+exe);
   const row=toolOutputs(config).find(row=>row.producer===name);

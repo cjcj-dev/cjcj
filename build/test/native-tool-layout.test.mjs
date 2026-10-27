@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {getTarget} from '../lib/targets.mjs';
-import {nativeToolBuildPayloads,toolPayloads} from '../srcbuild/tool-layout.mjs';
+import {nativeToolBuildPayloads,toolPayloads,toolBuildProduct} from '../srcbuild/tool-layout.mjs';
 import {sourceToolPayloads} from '../../ci/release/source-tool-payloads.mjs';
 // Independent literals from fixed ec1 native CMake producers/install rules.
 // Text transport fixtures only: no compiler, DLL, Windows execution or SDK pass.
@@ -13,6 +13,21 @@ const layouts=[
  ['linux-x64','cjprof','selected-build/cjprof/libcjprof-jni.so','cjprof/dist/lib/libcjprof-jni.so','tools/lib/libcjprof-jni.so'],
  ['linux-x64','cjprof','selected-build/cjprof/cjprof.jar','cjprof/dist/share/java/cjprof.jar','tools/share/java/cjprof.jar'],
 ];
+test('Cangjie lint consumes the executable recorded by its normal CJPM producer',async t=>{
+ const root=await fs.mkdtemp(path.join(os.tmpdir(),'lint-product-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
+ const config={repoPath:()=>root,buildRoot:root,target:getTarget('linux-x64')};
+ const build=root+'/cjlint';await fs.mkdir(build);
+ for(const name of ['main','cjlint']) {
+  const executable=build+'/target/release/bin/'+name;
+  await fs.mkdir(path.dirname(executable),{recursive:true});await fs.writeFile(executable,'normal producer output fixture');
+  await fs.writeFile(build+'/product.json',JSON.stringify({executable}));
+  assert.equal(toolBuildProduct(config,'cjlint'),executable);
+ }
+ await fs.rename(build+'/product.json',build+'/product-held.json');
+ assert.throws(()=>toolBuildProduct(config,'cjlint'),/ENOENT/,'no guessed filename without producer record');
+ await fs.rename(build+'/product-held.json',build+'/product.json');
+ assert.equal(toolBuildProduct(config,'cjlint'),build+'/target/release/bin/cjlint');
+});
 for(const [platform,name] of [...new Map(layouts.map(row=>[row[0]+'/'+row[1],[row[0],row[1]]])).values()])test('native raw/install/release paths: '+platform+' '+name,async t=>{
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'native-layout-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
  const write=async(rel,body='transport marker')=>{await fs.mkdir(path.dirname(root+'/'+rel),{recursive:true});await fs.writeFile(root+'/'+rel,body);};
