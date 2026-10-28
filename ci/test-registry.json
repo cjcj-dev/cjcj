@@ -357,6 +357,11 @@
     "member": "packages/compiler_unittest"
   },
   {
+    "file": "packages/compiler_unittest/src/ASTContextLookup_test.cj",
+    "executor": "cjpm",
+    "member": "packages/compiler_unittest"
+  },
+  {
     "file": "packages/compiler_unittest/src/SemaTypeCheckerPort_test.cj",
     "executor": "cjpm",
     "member": "packages/compiler_unittest"

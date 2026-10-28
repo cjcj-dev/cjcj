@@ -1021,6 +1021,12 @@ public class CompilerInstance {
     }
 
     public func GetASTContextByPackage(pkg: Package): Option<ASTContext> {
+        // PreTypeCheck owns the populated symbol/lookup context, including when
+        // SEMA reports errors in incomplete source. Do not substitute the empty
+        // parse context, or a same-named but different package, after that stage.
+        if (let Some(semaInstance) <- faithfulSemaInstance) {
+            return semaInstance.GetASTContextByPackage(Some(pkg))
+        }
         return pkgCtxMap.get(pkg.fullPackageName)
     }
 
