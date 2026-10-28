@@ -9,6 +9,7 @@ import {assertNoVerifierReportArtifacts} from '../../../scripts/verifier_artifac
 import {packageInstall} from '../../../ci/srcbuild/lib/package-install.mjs';
 import {archiveInstall, privateRoot} from '../../../ci/bootstrap/sdk-flow.mjs';
 import {consumerSdk, ensureDir, requireDir, requireFile} from './common.mjs';
+import {toolOutputs, retainedToolPath} from '../tool-layout.mjs';
 
 const logger = getLogger('cangjie_build.stages.package');
 
@@ -50,16 +51,15 @@ function globOrFail(directory, suffix, stageName) {
 
 function organizeSdkTree(config, destination) {
   const suffix = config.target.spec.exeSuffix;
-  const toolsRoot = config.repoPath('tools');
   // CMake's installed AST library is consumed by the compiler and by the
   // original AST installation facts. Preserve it in both copied and in-place
   // SDKs; organizing public tools must not prune native installation members.
 
   // Native target/install owns this tree. Packaging must preserve the public
   // launchers and retained products rather than overwrite them from build dirs.
-  for(const name of ['cjpm','cjfmt','hle','LSPServer','cjcov','cjtrace-recover','cjlint','cjprof','cjcompat','cjhead']) {
-    for(const relative of ['tools/bin/'+name+suffix,'tools/bin/'+name+suffix+'.entry',
-      '.target-tools/tools/bin/'+name+suffix])requireFile(path.join(destination,relative),{stage:'package.'+name});
+  for(const row of toolOutputs(config)) {
+    for(const relative of [row.to,row.to+'.entry',retainedToolPath(row)])
+      requireFile(path.join(destination,relative),{stage:'package.'+row.name});
   }
   for(const relative of ['tools/config/cangjie-format.toml','tools/config/cangjie-repo.toml',
     'tools/dtsparser/analysis.js','tools/dtsparser/DEPENDENCIES.json','tools/bin/node'+suffix]) {

@@ -363,7 +363,10 @@ fs.writeFileSync(out+'.c','#include <stdio.h>\\nint main(void){puts("hello from 
   'third_party/llvm/lib/libLLVM-15.so','schema/StdAstFormat.fbs','include/flatbuffers/StdAstFormat_generated.h',
   'third_party/flatbuffers/bin/flatc','stdx/'+tuple+'/fixture',
   ...['llc','llvm-as','llvm-dis','opt'].map(name=>'third_party/llvm/bin/'+name),
-  ...['cjpm','cjfmt','hle','LSPServer','cjcov','cjtrace-recover','cjlint','cjprof','cjcompat'].flatMap(name=>['tools/bin/'+name,'tools/bin/'+name+'.entry','.target-tools/tools/bin/'+name]),
+  ...['cjpm','cjfmt','hle','LSPServer','cjcov','cjtrace-recover','cjlint','cjprof','cjcompat','cjhead'].flatMap(name=>{
+    const privateDir={LSPServer:'lsp',cjlint:'cjlint',cjhead:'cjhead'}[name];
+    return ['tools/bin/'+name,'tools/bin/'+name+'.entry','.target-tools/tools/'+(privateDir?privateDir+'/':'')+'bin/'+name];
+  }),
   'tools/config/cangjie-format.toml','tools/config/cangjie-repo.toml','tools/dtsparser/analysis.js','tools/bin/node'])await put(output+'/'+rel,'finite native artifact');
  for(const name of ['llc','llvm-as','llvm-dis','opt'])await fs.chmod(output+'/third_party/llvm/bin/'+name,0o755);
  await put(output+'/tools/dtsparser/DEPENDENCIES.json','{}');

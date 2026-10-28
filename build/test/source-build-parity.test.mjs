@@ -887,6 +887,28 @@ test('package rejects the exact missing native target payload path', async () =>
   } finally { fs.rmSync(root, {recursive: true, force: true}); }
 });
 
+test('public package requires the installed private analysis bodies, not stale common bodies', async () => {
+  const {root,config}=makeFixture({packageLayout:true});
+  try {
+    const sdk=config.consumerSdk;
+    await rejectsMissingStage(config); // Correct layout reaches the unchanged native SDK gate.
+    for(const [producer,name] of [['lsp','LSPServer'],['cjhead','cjhead'],['cjlint','cjlint']]) {
+      const body=path.join(sdk,'.target-tools/tools',producer,'bin',name),saved=fs.readFileSync(body);
+      file(sdk,['.target-tools/tools/bin',name],'stale common body must not satisfy private install');
+      fs.rmSync(body);
+      console.log('PACKAGE_PRIVATE_BODY_TARGET '+name);
+      await assert.rejects(publicPackage(config),error=>error.message.includes('.target-tools/tools/'+producer+'/bin/'+name));
+      fs.writeFileSync(body,saved);
+      await rejectsMissingStage(config);
+    }
+    const stdx=path.join(sdk,'stdx',config.target.stdxTargetSubdir());
+    fs.renameSync(stdx,stdx+'.held');
+    await assert.rejects(publicPackage(config),/package.stdx/);
+    fs.renameSync(stdx+'.held',stdx);
+    await rejectsMissingStage(config);
+  } finally {fs.rmSync(root,{recursive:true,force:true});}
+});
+
 test('Linux package excludes only the optional Windows target roots', async () => {
   const {root, config} = makeFixture({packageLayout:true});
   try {
@@ -910,8 +932,11 @@ test('Windows complete target path obligations remain; public package rejects mi
       officialSdkRoot:f.config.officialSdkRoot,consumerSdk:path.join(f.config.workspace,'windows-sdk'),targetKey:'windows-x64',cangjieVersion:'1.2.3'});
     const input=directory(config.consumerSdk);
     file(input,['envsetup.sh']);directory(input,'stdx',config.target.stdxTargetSubdir());
-    for(const name of ['cjpm','cjfmt','hle','LSPServer','cjcov','cjtrace-recover','cjlint','cjprof','cjcompat','cjhead'])for(const relative of
-      ['tools/bin/'+name+'.exe','tools/bin/'+name+'.exe.entry','.target-tools/tools/bin/'+name+'.exe'])file(input,[relative],'finite Windows layout');
+    for(const name of ['cjpm','cjfmt','hle','LSPServer','cjcov','cjtrace-recover','cjlint','cjprof','cjcompat','cjhead']) {
+      const privateDir={LSPServer:'lsp',cjlint:'cjlint',cjhead:'cjhead'}[name];
+      for(const relative of ['tools/bin/'+name+'.exe','tools/bin/'+name+'.exe.entry',
+        '.target-tools/tools/'+(privateDir?privateDir+'/':'')+'bin/'+name+'.exe'])file(input,[relative],'finite Windows layout');
+    }
     for(const relative of ['tools/config/cangjie-format.toml','tools/config/cangjie-repo.toml',
       'tools/dtsparser/analysis.js','tools/dtsparser/DEPENDENCIES.json','tools/bin/node.exe'])file(input,[relative],'finite Windows payload');
     const paths=[['lib','windows_x86_64_cjnative','libcangjie-std-core.a'],['modules','windows_x86_64_cjnative','std','std.core.cjo']];

@@ -232,8 +232,9 @@ for (const explicit of [false, true]) cases[`handoff-${explicit?'explicit':'defa
 function packageFixture() {
   const sdk = path.join(work, 'package-workspace/software/cangjie');
   fs.mkdirSync(path.join(sdk,'stdx/linux_x86_64_cjnative'),{recursive:true});
-  for (const name of ['cjpm', 'cjfmt', 'hle', 'LSPServer', 'cjcov', 'cjtrace-recover', 'cjlint', 'cjprof', 'cjcompat']) {
-    for (const rel of [`tools/bin/${name}`, `tools/bin/${name}.entry`, `.target-tools/tools/bin/${name}`]) file(path.join(sdk, rel), 'controlled installed interface\n');
+  for (const name of ['cjpm', 'cjfmt', 'hle', 'LSPServer', 'cjcov', 'cjtrace-recover', 'cjlint', 'cjprof', 'cjcompat','cjhead']) {
+    const privateDir={LSPServer:'lsp',cjlint:'cjlint',cjhead:'cjhead'}[name];
+    for (const rel of [`tools/bin/${name}`, `tools/bin/${name}.entry`, `.target-tools/tools/${privateDir?privateDir+'/':''}bin/${name}`]) file(path.join(sdk, rel), 'controlled installed interface\n');
   }
   for (const rel of ['tools/config/cangjie-format.toml', 'tools/config/cangjie-repo.toml',
     'tools/dtsparser/analysis.js', 'tools/dtsparser/DEPENDENCIES.json', 'tools/bin/node']) file(path.join(sdk, rel), 'controlled installed payload\n');
