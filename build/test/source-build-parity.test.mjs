@@ -892,12 +892,14 @@ test('public package requires the installed private analysis bodies, not stale c
   try {
     const sdk=config.consumerSdk;
     await rejectsMissingStage(config); // Correct layout reaches the unchanged native SDK gate.
-    for(const [producer,name] of [['lsp','LSPServer'],['cjhead','cjhead'],['cjlint','cjlint']]) {
-      const body=path.join(sdk,'.target-tools/tools',producer,'bin',name),saved=fs.readFileSync(body);
-      file(sdk,['.target-tools/tools/bin',name],'stale common body must not satisfy private install');
+    for(const name of ['cjpm','cjfmt','hle','LSPServer','cjcov','cjtrace-recover','cjlint','cjprof','cjcompat','cjhead']) {
+      const producer={LSPServer:'lsp',cjhead:'cjhead',cjlint:'cjlint'}[name];
+      const relative='.target-tools/tools/'+(producer?producer+'/':'')+'bin/'+name;
+      const body=path.join(sdk,relative),saved=fs.readFileSync(body);
+      if(producer)file(sdk,['.target-tools/tools/bin',name],'stale common body must not satisfy private install');
       fs.rmSync(body);
       console.log('PACKAGE_PRIVATE_BODY_TARGET '+name);
-      await assert.rejects(publicPackage(config),error=>error.message.includes('.target-tools/tools/'+producer+'/bin/'+name));
+      await assert.rejects(publicPackage(config),error=>error.message.includes(relative));
       fs.writeFileSync(body,saved);
       await rejectsMissingStage(config);
     }
