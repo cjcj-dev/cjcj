@@ -6,7 +6,7 @@ import {execFile} from 'node:child_process';
 import {promisify, isDeepStrictEqual} from 'node:util';
 import {atomicJson, fileDigest, readJson} from '../../ci/bootstrap/sdk-flow.mjs';
 import {compilerProducer} from '../../ci/bootstrap/compiler_identity.mjs';
-import {TOOL_DIRECTORIES,toolPayloads,nativeToolBuildPayloads,toolBuildProduct,cjprofBuildDirectory,cjlintBuildDirectory} from './tool-layout.mjs';
+import {TOOL_DIRECTORIES,toolPayloads,nativeToolBuildPayloads,toolBuildProduct,cjprofBuildDirectory,cjlintBuildDirectory,toolProducerDirectory} from './tool-layout.mjs';
 import {sha256} from '../../ci/bootstrap/sdk-io.mjs';
 
 const execute = promisify(execFile);
@@ -57,11 +57,17 @@ export async function beginToolBuild(config, name, {cjpmPin, argv, env, sdk}) {
   const dependencies={};
   return {source:{status:'resolved',repository,commit:state.commit},
     build:{directory,dependencies,source_changes_sha256:state.changes_sha256,argv,
-      platform:config.target.spec.llvmPlatform,buildType:['cjprof','cjlint'].includes(name)?'producer-default':argv[argv.indexOf(name==='cjcompat'?'--type':'-t')+1],requestedBuildType:config.buildType,
+      platform:config.target.spec.llvmPlatform,buildType:['cjprof','cjlint','lsp','cjhead'].includes(name)?'producer-default':argv[argv.indexOf(name==='cjcompat'?'--type':'-t')+1],requestedBuildType:config.buildType,
       mode:config.toolsBuildMode??'clean',version:config.cangjieVersion,environment,inputs:await sdkInputs(config,sdk)}};
 }
 async function nativeConfigurationInputs(config,name) {
   const nativeConfiguration={};
+  if(['lsp','cjhead'].includes(name)) {
+    const file=path.join(toolProducerDirectory(config,name),name==='lsp'?'server-build-command.json':'build-facts.json');
+    const values=await readJson(file);
+    if(values.rc!==0)throw Error('TOOL_PRODUCER_NOT_SUCCESSFUL '+name);
+    return {cangjie:{path:file,values}};
+  }
   if(name==='cjlint') {
     const file=path.join(cjlintBuildDirectory(config),'product.json');
     const values=await readJson(file);
@@ -107,7 +113,7 @@ export async function toolBuildInputs(config, name, product, {installed=false}={
   if(facts.build?.rc!==0 || (installed&&facts.install!==undefined?facts.install?.artifact:facts.artifact)?.sha256!==digest || facts.build.platform!==config.target.spec.llvmPlatform
     || !/^[0-9a-f]{40}$/.test(facts.source?.commit||'') || !facts.source?.repository)
     throw new Error('TOOL_BUILD_INPUT_MISMATCH '+name);
-  if(['cjfmt','cjlint','cjprof','cjcompat','cjtrace-recover'].includes(name)&&!isDeepStrictEqual(await nativeConfigurationInputs(config,name),facts.build.nativeConfiguration))throw Error('TOOL_BUILD_CONFIGURATION_CHANGED '+name);
+  if(['cjfmt','cjlint','cjprof','cjcompat','cjtrace-recover','lsp','cjhead'].includes(name)&&!isDeepStrictEqual(await nativeConfigurationInputs(config,name),facts.build.nativeConfiguration))throw Error('TOOL_BUILD_CONFIGURATION_CHANGED '+name);
   if(['cjlint','cjprof'].includes(name)) {
     const current={};
     for(const row of await nativeToolBuildPayloads(config,name))current[row.to]={source:row.from,sha256:await fileDigest(row.from)};

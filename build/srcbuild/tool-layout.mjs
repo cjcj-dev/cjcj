@@ -6,12 +6,13 @@ import {readFileSync} from 'node:fs';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 const execute=promisify(execFile);
-export const TOOL_NAMES = ['cjpm','cjfmt','hle','lsp','cjcov','cjtrace-recover','cjlint','cjprof','cjcompat'];
-export const TOOL_DIRECTORIES = {cjpm:'cjpm',cjfmt:'cjfmt',hle:'hyperlangExtension',lsp:'cangjie-language-server',cjcov:'cjcov','cjtrace-recover':'cjtrace-recover',cjlint:'cjlint',cjprof:'cjprof',cjcompat:'cjcompat'};
+export const TOOL_NAMES = ['cjpm','cjfmt','hle','lsp','cjcov','cjtrace-recover','cjlint','cjprof','cjcompat','cjhead'];
+export const TOOL_DIRECTORIES = {cjpm:'cjpm',cjfmt:'cjfmt',hle:'hyperlangExtension',lsp:'cangjie-language-server',cjcov:'cjcov','cjtrace-recover':'cjtrace-recover',cjlint:'cjlint',cjprof:'cjprof',cjcompat:'cjcompat',cjhead:'cjhead'};
+export const toolProducerDirectory = (config,name) => config.toolsProducerBuildDir ?? path.join(config.buildRoot,name);
 export const TOOL_PUBLIC_NAMES = {lsp:'LSPServer'};
 export const toolName = name => { const plain=name.replace(/\.exe$/,''); return plain==='LSPServer'?'lsp':plain; };
 export const cjlintBuildDirectory = config => path.join(config.buildRoot,'cjlint');
-export const retainedToolPath = row => row.producer==='cjlint'?'.target-tools/tools/cjlint/bin/'+row.name:'.target-tools/'+row.to;
+export const retainedToolPath = row => ['cjlint','lsp','cjhead'].includes(row.producer)?'.target-tools/tools/'+row.producer+'/bin/'+row.name:'.target-tools/'+row.to;
 export const hleBuildDirectory = config => path.join(config.buildRoot,'hle');
 export const cjprofBuildDirectory = config => path.join(config.buildRoot,'cjprof');
 export function requireToolProducer(name) {
@@ -23,14 +24,16 @@ export function toolOutputs(config) {
   const root=config.repoPath('tools'),exe=config.target.spec.exeSuffix;
   return [
     ['cjpm','cjpm/dist/cjpm'],['cjfmt','cjfmt/dist/bin/cjfmt'],
-    ['hle','hyperlangExtension/target/bin/main'],['lsp','cangjie-language-server/output/bin/LSPServer'],
+    ['hle','hyperlangExtension/target/bin/main'],['lsp','cangjie-language-server/dist/bin/cangjie-lsp'],
     ['cjcov','cjcov/dist/cjcov'],['cjtrace-recover','cjtrace-recover/dist/bin/cjtrace-recover'],
-    ['cjlint','cjlint/dist/bin/cjlint'],['cjprof','cjprof/dist/bin/cjprof'],['cjcompat','cjcompat/dist/bin/cjcompat'],
+    ['cjlint','cjlint/dist/bin/cjlint'],['cjprof','cjprof/dist/bin/cjprof'],['cjcompat','cjcompat/dist/bin/cjcompat'],['cjhead','cjhead/dist/bin/cjhead'],
   ].map(([producer,rel])=>({producer,name:(TOOL_PUBLIC_NAMES[producer]??producer)+exe,
     from:producer==='hle'?path.join(hleBuildDirectory(config),'bin','main'+exe):path.join(root,rel+exe),to:'tools/bin/'+(TOOL_PUBLIC_NAMES[producer]??producer)+exe}));
 }
 export function toolBuildProduct(config,name) {
   const root=config.repoPath('tools'),exe=config.target.spec.exeSuffix;
+  if(name==='lsp')return path.join(toolProducerDirectory(config,name),'server/target/release/bin/main'+exe);
+  if(name==='cjhead')return path.join(toolProducerDirectory(config,name),'cjhead'+exe);
   if(name==='cjtrace-recover')return path.join(root,'cjtrace-recover/cmake-build/cjtrace-recover'+exe);
   if(name==='cjcompat')return path.join(root,'cjcompat/build/cangjie-build/cjcompat'+exe);
   if(name==='cjlint') {
@@ -64,6 +67,20 @@ export async function toolPayloads(config,name,installPrefix) {
   if(name==='cjlint') {
     const prefix=installPrefix??path.join(root,'cjlint/dist');
     return lintInstalledPayloads(prefix);
+  }
+  if(['lsp','cjhead'].includes(name)) {
+    const prefix=installPrefix??path.join(root,TOOL_DIRECTORIES[name],'dist');
+    async function walk(dir,relative) {
+      for(const entry of await fs.readdir(dir,{withFileTypes:true})) {
+        const from=path.join(dir,entry.name),rel=relative+'/'+entry.name;
+        if(entry.isDirectory())await walk(from,rel);
+        else if((await fs.stat(from)).isFile())rows.push({producer:name,from,to:'.target-tools/tools/'+name+'/'+rel});
+        else throw Error('SOURCE_TOOL_PAYLOAD_TYPE '+from);
+      }
+    }
+    await walk(path.join(prefix,'lib'),'lib');
+    if(name==='cjhead')await walk(path.join(prefix,'share'),'share');
+    return rows;
   }
   if(name==='cjfmt')add('cjfmt/dist/config/cangjie-format.toml','tools/config/cangjie-format.toml');
   if(name==='cjpm')add('cjpm/dist/cangjie-repo.toml','tools/config/cangjie-repo.toml');

@@ -3,6 +3,7 @@
 import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
+import {TOOL_NAMES} from '../srcbuild/tool-layout.mjs';
 import {ConfigError} from './errors.mjs';
 import {getBuildTarget} from './build-target.mjs';
 import {resolveSources,nativeSourceSelection} from '../../ci/bootstrap/native-source-selection.mjs';
@@ -146,6 +147,8 @@ export function buildConfig({
   toolsRuntimeConfig,
   toolsLlvmShim,
   toolsLlvmLibrary,
+  toolsProducerBuildDir,
+  toolsJsonBuild,
   toolsPhase = 'all',
   toolsInstallPrefix,
   jobs,
@@ -162,10 +165,11 @@ export function buildConfig({
     if(value!==undefined&&(!/^[1-9][0-9]*$/.test(String(value))||!Number.isSafeInteger(Number(value)))) throw new ConfigError('invalid '+key+': '+value);
   }
   if(Number(toolsPackageJobs)>4)throw new ConfigError('tools-package-jobs exceeds the four heavy C2 package limit');
-  const toolNames=['cjpm','cjfmt','hle','lsp','cjcov','cjtrace-recover','cjlint','cjprof','cjcompat'];
-  if(toolsInstallPrefix!==undefined && (toolsPhase!=='install' || toolsBuildSet==='all' || !path.isAbsolute(toolsInstallPrefix)))
-    throw new ConfigError('tools-install-prefix requires install phase, explicit tool set and absolute prefix');
+  const toolNames=TOOL_NAMES;
+  if(toolsInstallPrefix!==undefined && (toolsPhase!=='install' || !path.isAbsolute(toolsInstallPrefix)))
+    throw new ConfigError('tools-install-prefix requires install phase and absolute prefix');
   const selectedTools=String(toolsBuildSet).split(',');
+  if(toolsProducerBuildDir && (toolsBuildSet==='all'||selectedTools.length!==1))throw new ConfigError('tools-producer-build-dir requires one selected tool');
   if(toolsBuildSet!=='all'&&(!selectedTools.every(name=>toolNames.includes(name))||new Set(selectedTools).size!==selectedTools.length))
     throw new ConfigError('invalid tools build set: '+toolsBuildSet);
   if (!['clean','incremental'].includes(toolsBuildMode)) throw new ConfigError('invalid tools build mode: '+toolsBuildMode);
@@ -185,7 +189,7 @@ export function buildConfig({
   if(toolsGccToolchain!=null)throw new ConfigError('tools-gcc-toolchain: retired C++ cjlint producer option');
   if (toolsMangleSource != null && (typeof toolsMangleSource !== 'string' || !path.isAbsolute(toolsMangleSource)))
     throw new ConfigError('tools-mangle-source: expected an absolute compiler packages/mangle/src path');
-  for(const [name,value]of Object.entries({toolsAnalysisSdk,toolsFrontendSource,toolsJniHome,toolsRuntimeHeader,toolsLombokJar,toolsCompilerLibs,toolsRuntimeConfig,toolsLlvmShim,toolsLlvmLibrary}))if(value!=null&&(typeof value!=='string'||!path.isAbsolute(value)))throw new ConfigError(name+': expected an absolute frontend input path');
+  for(const [name,value]of Object.entries({toolsAnalysisSdk,toolsFrontendSource,toolsJniHome,toolsRuntimeHeader,toolsLombokJar,toolsCompilerLibs,toolsRuntimeConfig,toolsLlvmShim,toolsLlvmLibrary,toolsProducerBuildDir,toolsJsonBuild}))if(value!=null&&(typeof value!=='string'||!path.isAbsolute(value)))throw new ConfigError(name+': expected an absolute frontend input path');
   if(toolsFrontendRef!=null&&!/^[0-9a-f]{40}$/.test(toolsFrontendRef))throw new ConfigError('tools-frontend-ref: full fixed commit required');
   const workspacePath = absolute(workspace || process.env.CANGJIE_WORKSPACE || path.join(process.cwd(), 'workspace'));
   const buildRootPath = absolute(buildRoot || process.env.CANGJIE_BUILD_ROOT || path.join(process.cwd(), 'buildtools'));
@@ -227,6 +231,8 @@ export function buildConfig({
     toolsRuntimeConfig: toolsRuntimeConfig == null ? null : absolute(toolsRuntimeConfig),
     toolsLlvmShim: toolsLlvmShim == null ? null : absolute(toolsLlvmShim),
     toolsLlvmLibrary: toolsLlvmLibrary == null ? null : absolute(toolsLlvmLibrary),
+    toolsProducerBuildDir: toolsProducerBuildDir == null ? null : absolute(toolsProducerBuildDir),
+    toolsJsonBuild: toolsJsonBuild == null ? null : absolute(toolsJsonBuild),
     toolsPhase,
     toolsInstallPrefix,
     jobs: jobs===undefined?undefined:Number(jobs),
@@ -278,6 +284,8 @@ export function withBuildType(config, buildType) {
     toolsRuntimeConfig: config.toolsRuntimeConfig,
     toolsLlvmShim: config.toolsLlvmShim,
     toolsLlvmLibrary: config.toolsLlvmLibrary,
+    toolsProducerBuildDir: config.toolsProducerBuildDir,
+    toolsJsonBuild: config.toolsJsonBuild,
     toolsPhase: config.toolsPhase,
     toolsInstallPrefix: config.toolsInstallPrefix,
     jobs: config.jobs,

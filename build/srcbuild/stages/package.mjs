@@ -57,7 +57,7 @@ function organizeSdkTree(config, destination) {
 
   // Native target/install owns this tree. Packaging must preserve the public
   // launchers and retained products rather than overwrite them from build dirs.
-  for(const name of ['cjpm','cjfmt','hle','LSPServer','cjcov','cjtrace-recover','cjlint','cjprof','cjcompat']) {
+  for(const name of ['cjpm','cjfmt','hle','LSPServer','cjcov','cjtrace-recover','cjlint','cjprof','cjcompat','cjhead']) {
     for(const relative of ['tools/bin/'+name+suffix,'tools/bin/'+name+suffix+'.entry',
       '.target-tools/tools/bin/'+name+suffix])requireFile(path.join(destination,relative),{stage:'package.'+name});
   }

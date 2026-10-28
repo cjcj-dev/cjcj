@@ -73,7 +73,7 @@ for (const relative of sourceToolPayloads(values.tool, values.platform)) {
   if (!stat) throw new Error(`${values.tool}: source SDK has no ${relative} (looked in ${sourceSdk})`);
   const to = await safePayloadPath(destination, relative);
   await fs.mkdir(path.dirname(to), {recursive: true});
-  if((values.tool==='cjlint'&&relative==='.target-tools/tools/cjlint')
+  if((['cjlint','LSPServer','cjhead'].includes(values.tool)&&relative.startsWith('.target-tools/tools/'))
     ||(values.tool==='cjprof'&&relative.endsWith('/config/static'))) {
     // Transport the existing successful install set, not extra files left in
     // a shared SDK directory. Both cjprof body-relative layouts are required.

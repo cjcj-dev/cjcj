@@ -61,7 +61,7 @@ export async function installSourceTools(config, installRoot=path.join(config.so
   // cjprof owns these static subtrees. A normal source update may delete or
   // rename a page; copying only today's members leaves yesterday's pages live.
   // Other tools share tools/config, so replace only the two owned subtrees.
-  for(const relative of ['tools/config/static','.target-tools/tools/config/static','.target-tools/tools/cjlint']) {
+  for(const relative of ['tools/config/static','.target-tools/tools/config/static','.target-tools/tools/cjlint','.target-tools/tools/lsp','.target-tools/tools/cjhead']) {
     const directory=await privateRoot(path.join(sdk,relative));
     await fs.rm(directory,{recursive:true,force:true});
   }

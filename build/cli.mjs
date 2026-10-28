@@ -58,6 +58,8 @@ function usage() {
     + '  --tools-dependencies PATH (legacy native dependency description; not a Cangjie tool input)\n'
     + '  --tools-build-set all|NAME,... (default: all; omitted tools reuse existing outputs)\n'
     + '  --tools-mangle-source DIR (compiler Cangjie demangler source for cjtrace-recover)\n'
+    + '  --tools-producer-build-dir PATH (one selected tool; normal existing producer directory)\n'
+    + '  --tools-json-build PATH (LSP matching JSON producer)\n'
     + '  --tools-phase all|build|install (default: all; build does not publish the shared SDK)\n'
     + '  --jobs INTEGER (tools total CPU budget; default: CANGJIE_BUILD_JOBS or available CPUs)\n'
     + '  --tools-package-jobs INTEGER (heavy producer limit, default/max: 4)\n'
@@ -107,7 +109,7 @@ function parseGlobal(args) {
       ['--build-type', 'buildType'], ['--cangjie-version', 'cangjieVersion'],
       ['--stdx-version', 'stdxVersion'], ['--stdx-profile', 'stdxProfile'], ['--log-level', 'logLevel'],
       ['--stdx-build-mode', 'stdxBuildMode'], ['--stdx-gcc-toolchain', 'stdxGccToolchain'], ['--tools-build-mode','toolsBuildMode'], ['--tools-build-set','toolsBuildSet'],
-      ['--tools-phase','toolsPhase'], ['--tools-install-prefix','toolsInstallPrefix'], ['--tools-dependencies','toolsDependencies'], ['--tools-gcc-toolchain','toolsGccToolchain'], ['--tools-mangle-source','toolsMangleSource'], ['--tools-jni-home','toolsJniHome'], ['--tools-runtime-header','toolsRuntimeHeader'], ['--tools-lombok-jar','toolsLombokJar'], ['--tools-analysis-sdk','toolsAnalysisSdk'], ['--tools-frontend-source','toolsFrontendSource'], ['--tools-frontend-ref','toolsFrontendRef'], ['--tools-compiler-libs','toolsCompilerLibs'], ['--tools-runtime-config','toolsRuntimeConfig'], ['--tools-llvm-shim','toolsLlvmShim'], ['--tools-llvm-library','toolsLlvmLibrary'], ['--jobs','jobs'], ['--tools-package-jobs','toolsPackageJobs'],
+      ['--tools-producer-build-dir','toolsProducerBuildDir'], ['--tools-json-build','toolsJsonBuild'], ['--tools-phase','toolsPhase'], ['--tools-install-prefix','toolsInstallPrefix'], ['--tools-dependencies','toolsDependencies'], ['--tools-gcc-toolchain','toolsGccToolchain'], ['--tools-mangle-source','toolsMangleSource'], ['--tools-jni-home','toolsJniHome'], ['--tools-runtime-header','toolsRuntimeHeader'], ['--tools-lombok-jar','toolsLombokJar'], ['--tools-analysis-sdk','toolsAnalysisSdk'], ['--tools-frontend-source','toolsFrontendSource'], ['--tools-frontend-ref','toolsFrontendRef'], ['--tools-compiler-libs','toolsCompilerLibs'], ['--tools-runtime-config','toolsRuntimeConfig'], ['--tools-llvm-shim','toolsLlvmShim'], ['--tools-llvm-library','toolsLlvmLibrary'], ['--jobs','jobs'], ['--tools-package-jobs','toolsPackageJobs'],
     ]) {
       parsed = optionValue(args, index, flag);
       if (parsed) {
