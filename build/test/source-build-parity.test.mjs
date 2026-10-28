@@ -126,19 +126,19 @@ function makeFixture({packageLayout=false}={}) {
   file(toolsRoot, ['cjpm', 'build', 'build.py'], '# fixture\n');
   file(toolsRoot, ['cjpm', 'dist', 'cjpm']);
   for (const parts of [
-    ['cjfmt', 'build'], ['hyperlangExtension', 'build'], ['cangjie-language-server', 'build'],
+    ['cjfmt', 'build'], ['hyperlangExtension', 'build'], ['cangjie-language-server', 'cangjie'],
   ]) directory(toolsRoot, ...parts);
   file(toolsRoot, ['cjfmt', 'dist', 'bin', 'cjfmt']);
   file(toolsRoot, ['cjfmt', 'dist', 'config', 'default.toml']);
   file(toolsRoot, ['hyperlangExtension', 'target', 'bin', 'main']);
   file(toolsRoot, ['hyperlangExtension', 'src', 'dtsparser', 'keep.txt']);
   file(toolsRoot, ['hyperlangExtension', 'src', 'dtsparser', 'drop.cj']);
-  file(toolsRoot, ['cangjie-language-server', 'output', 'bin', 'LSPServer']);
+  file(toolsRoot, ['cangjie-language-server', 'dist', 'bin', 'cangjie-lsp']);
   directory(toolsRoot, 'cjcov', 'build');
   file(toolsRoot, ['cjcov', 'dist', 'cjcov']);
   directory(toolsRoot, 'cjtrace-recover', 'build');
   file(toolsRoot, ['cjtrace-recover', 'dist', 'bin', 'cjtrace-recover']);
-  for(const name of ['cjlint','cjprof','cjcompat'])directory(toolsRoot,name,'build');
+  for(const name of ['cjlint','cjprof','cjcompat','cjhead'])directory(toolsRoot,name,'build');
   file(compilerRoot, ['output', 'stdx', 'linux_x86_64_cjnative', '.keep']);
   file(compilerRoot, ['output', 'envsetup.sh']);
   file(officialSdkRoot, ['envsetup.sh']);
@@ -153,7 +153,7 @@ function makeFixture({packageLayout=false}={}) {
   }
   return {
     root,
-    config: buildConfig({workspace, buildRoot, officialSdkRoot, consumerSdk:selectedSdk, toolsJniHome:'/selected/jdk',toolsRuntimeHeader:'/selected/Cangjie.h',toolsLombokJar:'/selected/lombok.jar',toolsAnalysisSdk:'/selected/analysis',toolsFrontendSource:'/selected/frontend',toolsFrontendRef:'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',toolsCompilerLibs:'/selected/frontend-libs',toolsRuntimeConfig:'/selected/config.o',toolsLlvmShim:'/selected/shim.o',toolsLlvmLibrary:'/selected/libLLVM-15.so', toolsMangleSource:path.join(root,'mangle'), cangjieVersion: '1.2.3'}),
+    config: buildConfig({workspace, buildRoot, officialSdkRoot, consumerSdk:selectedSdk, toolsJsonBuild:'/selected/json-build',toolsJniHome:'/selected/jdk',toolsRuntimeHeader:'/selected/Cangjie.h',toolsLombokJar:'/selected/lombok.jar',toolsAnalysisSdk:'/selected/analysis',toolsFrontendSource:'/selected/frontend',toolsFrontendRef:'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',toolsCompilerLibs:'/selected/frontend-libs',toolsRuntimeConfig:'/selected/config.o',toolsLlvmShim:'/selected/shim.o',toolsLlvmLibrary:'/selected/libLLVM-15.so', toolsMangleSource:path.join(root,'mangle'), cangjieVersion: '1.2.3'}),
   };
 }
 
@@ -704,28 +704,30 @@ test('Linux source stages emit the Python command order', async () => {
         'git', 'restore', '--source', cjpmPin.CJPM_FORK_REF, '--staged', '--worktree', '--', 'cjpm',
       ]),
     ];
-    const toolNames=['cjpm','cjfmt','hle','lsp','cjcov','cjtrace-recover','cjlint','cjprof','cjcompat'];
-    const toolBudget=tools.toolCpuPlan(toolNames,os.availableParallelism(),Math.min(9,os.availableParallelism()));
+    const toolNames=['cjpm','cjfmt','hle','lsp','cjcov','cjtrace-recover','cjlint','cjprof','cjcompat','cjhead'];
+    const toolBudget=tools.toolCpuPlan(toolNames,os.availableParallelism(),Math.min(toolNames.length,os.availableParallelism()));
     // cjcov and cjtrace-recover extend the upstream tool set on purpose: they
     // are Cangjie-written and must come from source rather than the base SDK.
     for (const [name, subpath] of [
       ['cjpm', path.join('cjpm', 'build')],
       ['cjfmt', path.join('cjfmt', 'build')],
       ['hle', path.join('hyperlangExtension', 'build')],
-      ['lsp', path.join('cangjie-language-server', 'build')],
+      ['lsp', path.join('cangjie-language-server', 'cangjie')],
       ['cjcov', path.join('cjcov', 'build')],
       ['cjtrace-recover', path.join('cjtrace-recover', 'build')],
-      ...['cjlint','cjprof','cjcompat'].map(name=>[name,path.join(name,'build')]),
+      ...['cjlint','cjprof','cjcompat','cjhead'].map(name=>[name,path.join(name,'build')]),
     ]) {
       const cwd = path.join(toolsRoot, subpath);
       const prefix=toolBudget[name].cpuSet?['taskset','-c',toolBudget[name].cpuSet]:[];
-      const producer=['hle','cjtrace-recover','cjcompat','cjprof','cjlint'].includes(name)?[process.execPath,'build.mjs']:['python3','build.py'];
-      if(!['cjtrace-recover','cjcompat','cjprof','cjlint'].includes(name))expectedCommands.push(expected(root,cwd,[...prefix,...producer,'clean',...(name==='hle'?['--build-dir',path.join(config.buildRoot,'hle')]:[])]));
+      const producer=['cjpm','cjcov','lsp','cjhead','hle','cjtrace-recover','cjcompat','cjprof','cjlint'].includes(name)?[process.execPath,'build.mjs']:['python3','build.py'];
+      if(!['lsp','cjhead','cjtrace-recover','cjcompat','cjprof','cjlint'].includes(name))expectedCommands.push(expected(root,cwd,[...prefix,...producer,'clean',...(name==='hle'?['--build-dir',path.join(config.buildRoot,'hle')]:[])]));
       const buildArgs = [...producer,'build','-t','release'];
       if(name==='hle')buildArgs.push('--build-dir',path.join(config.buildRoot,'hle'));
       if(name==='cjtrace-recover')buildArgs.push('--cangjie-sdk',config.consumerSdk,'--mangle-source',config.toolsMangleSource,'--set-rpath','$ORIGIN/../lib:$ORIGIN/../../../runtime/lib/linux_x86_64_cjnative');
       if (name === 'cjpm') buildArgs.push('--set-rpath', '$ORIGIN/../../runtime/lib/linux_x86_64_cjnative');
       if (['cjpm','cjfmt','lsp','cjlint','cjprof','cjcompat'].includes(name)) buildArgs.push('--jobs',String(toolBudget[name].jobs));
+      if(name==='lsp')buildArgs.splice(0,buildArgs.length,...producer,'--phase','build','--sdk',config.consumerSdk,'--cjpm',path.join(config.consumerSdk,'tools/bin/cjpm'),'--build',path.join(config.buildRoot,'lsp'),'--server','stdio','--jobs',String(toolBudget[name].jobs),'--frontend-packages',config.toolsCompilerLibs,'--runtime-config',config.toolsRuntimeConfig,'--json-build',config.toolsJsonBuild,'--llvm-shim',config.toolsLlvmShim,'--llvm-library',config.toolsLlvmLibrary);
+      if(name==='cjhead')buildArgs.splice(0,buildArgs.length,...producer,'build','--cjc',path.join(config.consumerSdk,'bin/cjc'),'--frontend-dir',config.toolsCompilerLibs,'--shim',config.toolsLlvmShim,'--runtime-config',config.toolsRuntimeConfig,'--llvm-lib',config.toolsLlvmLibrary,'--frontend-commit',config.toolsFrontendRef,'--source-commit',config.repo('tools').tag,'--runtime-dir',path.join(config.consumerSdk,'runtime/lib/linux_x86_64_cjnative'),'--build-dir',path.join(config.buildRoot,'cjhead'),'--jobs',String(toolBudget[name].jobs));
       if(name==='cjlint')buildArgs.splice(0,buildArgs.length,...producer,'build','--sdk',config.consumerSdk,'--analysis-sdk',config.toolsAnalysisSdk,'--frontend-source',config.toolsFrontendSource,'--frontend-ref',config.toolsFrontendRef,'--frontend-artifacts',config.toolsCompilerLibs,'--frontend-runtime-object',config.toolsRuntimeConfig,'--llvm-shim',config.toolsLlvmShim,'--llvm-library',config.toolsLlvmLibrary,'--build-dir',path.join(config.buildRoot,'cjlint'),'--jobs',String(toolBudget[name].jobs));
       if(name==='cjcompat') {
         const sdk=config.consumerSdk??path.join(config.repoPath('compiler'),'output'),source=config.repoPath('compiler');
@@ -745,6 +747,8 @@ test('Linux source stages emit the Python command order', async () => {
       }
       if(name==='cjlint')installArgs.push('--build-dir',path.join(config.buildRoot,'cjlint'),'--analysis-sdk',config.toolsAnalysisSdk);
       if(name==='cjprof')installArgs.push('--build-dir',path.join(config.buildRoot,'cjprof'));
+      if(name==='lsp')installArgs.splice(0,installArgs.length,...producer,'--phase','install','--build',path.join(config.buildRoot,'lsp'),'--install',path.join(toolsRoot,'cangjie-language-server/dist'));
+      if(name==='cjhead')installArgs.splice(0,installArgs.length,...producer,'install','--build-dir',path.join(config.buildRoot,'cjhead'),'--prefix',path.join(toolsRoot,'cjhead/dist'));
       expectedCommands.push(expected(root, cwd, installArgs));
     }
     // This gate observes producer command ordering. Installed SDK packaging,
@@ -753,16 +757,16 @@ test('Linux source stages emit the Python command order', async () => {
     // real installed SDK, which this command-generation fixture does not own.
     const isTool = command => command.includes(toolsRoot.replaceAll(root,'<ROOT>')) && /build\.(?:py|mjs)/.test(command);
     assert.deepEqual(commands.filter(c=>!isTool(c)), expectedCommands.filter(c=>!isTool(c)));
-    assert.equal(commands.filter(isTool).length,23);
+    assert.equal(commands.filter(isTool).length,24);
     console.log('FORMAL_TOOL_COMMAND_ASSERT_REACHED');
     assert.deepEqual(commands.filter(isTool).sort(), expectedCommands.filter(isTool).sort());
-    const lastBuild=Math.max(...commands.map((c,i)=>isTool(c)&&/build\.(?:py|mjs) build/.test(c)?i:-1));
+    const lastBuild=Math.max(...commands.map((c,i)=>isTool(c)&&/build\.(?:py|mjs) (?:--phase )?build/.test(c)?i:-1));
     for(const [name,subpath] of tools.toolsFor(config)) {
       const own=command=>command.includes(path.join(toolsRoot,subpath).replaceAll(root,'<ROOT>'));
       const clean=commands.findIndex(c=>own(c)&&/build\.(?:py|mjs) clean/.test(c));
-      const build=commands.findIndex(c=>own(c)&&/build\.(?:py|mjs) build/.test(c));
-      const install=commands.findIndex(c=>own(c)&&/build\.(?:py|mjs) install/.test(c));
-      assert((['cjtrace-recover','cjcompat','cjprof','cjlint'].includes(name)?clean===-1:clean>=0)&&build>clean&&install>lastBuild,'producer order and publication barrier: '+subpath);
+      const build=commands.findIndex(c=>own(c)&&/build\.(?:py|mjs) (?:--phase )?build/.test(c));
+      const install=commands.findIndex(c=>own(c)&&/build\.(?:py|mjs) (?:--phase )?install/.test(c));
+      assert((['lsp','cjhead','cjtrace-recover','cjcompat','cjprof','cjlint'].includes(name)?clean===-1:clean>=0)&&build>clean&&install>lastBuild,'producer order and publication barrier: '+subpath);
       console.log('FORMAL_TOOL_ORDER_BARRIER_PASS '+name);
     }
   } finally {
@@ -906,7 +910,7 @@ test('Windows complete target path obligations remain; public package rejects mi
       officialSdkRoot:f.config.officialSdkRoot,consumerSdk:path.join(f.config.workspace,'windows-sdk'),targetKey:'windows-x64',cangjieVersion:'1.2.3'});
     const input=directory(config.consumerSdk);
     file(input,['envsetup.sh']);directory(input,'stdx',config.target.stdxTargetSubdir());
-    for(const name of ['cjpm','cjfmt','hle','LSPServer','cjcov','cjtrace-recover','cjlint','cjprof','cjcompat'])for(const relative of
+    for(const name of ['cjpm','cjfmt','hle','LSPServer','cjcov','cjtrace-recover','cjlint','cjprof','cjcompat','cjhead'])for(const relative of
       ['tools/bin/'+name+'.exe','tools/bin/'+name+'.exe.entry','.target-tools/tools/bin/'+name+'.exe'])file(input,[relative],'finite Windows layout');
     for(const relative of ['tools/config/cangjie-format.toml','tools/config/cangjie-repo.toml',
       'tools/dtsparser/analysis.js','tools/dtsparser/DEPENDENCIES.json','tools/bin/node.exe'])file(input,[relative],'finite Windows payload');
