@@ -1,6 +1,6 @@
 name: Consume existing native LLVM tuples
 on:
-  workflow_dispatch:
+  workflow_call:
 permissions:
   contents: read
   actions: read

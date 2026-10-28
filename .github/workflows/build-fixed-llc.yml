@@ -5,6 +5,10 @@ on:
     branches: [debug/llc-build]
   workflow_dispatch:
     inputs:
+      consume_native_only:
+        description: Consume the fixed existing three native tuples only; all production and publication inputs are ignored.
+        type: boolean
+        default: false
       llvm_ref:
         description: Optional complete LLVM candidate SHA; requires runtime_ref.
         required: false
@@ -73,8 +77,15 @@ permissions:
   contents: read
 
 jobs:
+  native-consume:
+    if: ${{ inputs.consume_native_only }}
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/consume-native-llvm-tuple.yml
+
   native-runtime:
-    if: inputs.build_runtime
+    if: ${{ !inputs.consume_native_only && inputs.build_runtime }}
     uses: ./.github/workflows/build-native-runtime.yml
     with:
       llvm_ref: ${{ inputs.llvm_ref }}
@@ -83,11 +94,11 @@ jobs:
       runtime_version: ${{ inputs.runtime_version || '' }}
 
   host:
-    if: inputs.publish_host
+    if: ${{ !inputs.consume_native_only && inputs.publish_host }}
     uses: ./.github/workflows/build-host-llvm.yml
 
   tuple:
-    if: ${{ !inputs.publish_host || inputs.publish_tuple || inputs.publish_dylib }}
+    if: ${{ !inputs.consume_native_only && (!inputs.publish_host || inputs.publish_tuple || inputs.publish_dylib) }}
     uses: ./.github/workflows/build-llvm-tools.yml
     with:
       llvm_ref: ${{ inputs.llvm_ref }}
@@ -100,7 +111,7 @@ jobs:
       rebuild: ${{ inputs.rebuild || false }}
 
   persist:
-    if: inputs.persist_tuple && inputs.publish_tuple && needs.tuple.outputs.tuple_platforms != '[]'
+    if: ${{ !inputs.consume_native_only && inputs.persist_tuple && inputs.publish_tuple && needs.tuple.outputs.tuple_platforms != '[]' }}
     needs: tuple
     strategy:
       fail-fast: false

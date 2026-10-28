@@ -80,3 +80,36 @@ test('official consumption is three bounded native jobs, exact artifact IDs, wit
   assert.match(workflow,/run-id: \$\{\{ steps.select.outputs.run_id \}\}/);
   assert.doesNotMatch(workflow,/build_cjcj|build-fixed-llc|build-llvm-tools|workflow_run:|schedule:/);
 });
+
+test('registered LLVM entry selects consumption exclusively and preserves normal production selection',()=>{
+  const entry=fs.readFileSync(new URL('../../.github/workflows/build-fixed-llc.yml',import.meta.url),'utf8');
+  const consumer=fs.readFileSync(new URL('../../.github/workflows/consume-native-llvm-tuple.yml',import.meta.url),'utf8');
+  assert.match(entry,/consume_native_only:\n[\s\S]*?type: boolean\n        default: false/);
+  assert.match(consumer,/on:\n  workflow_call:/);
+  assert.doesNotMatch(consumer,/workflow_dispatch:/);
+  const jobs=Object.fromEntries([...entry.slice(entry.indexOf('\njobs:')).matchAll(/^  ([\w-]+):\n([\s\S]*?)(?=^  [\w-]+:\n|$(?![\s\S]))/gm)].map(match=>[match[1],match[2]]));
+  assert.deepEqual(Object.keys(jobs),['native-consume','native-runtime','host','tuple','persist']);
+  assert.match(jobs['native-consume'],/uses: \.\/\.github\/workflows\/consume-native-llvm-tuple.yml/);
+  assert.match(jobs['native-consume'],/permissions:\n      contents: read\n      actions: read/);
+  assert.doesNotMatch(jobs['native-consume'],/needs:|secrets:|with:/);
+  // These workflow conditions are plain boolean expressions. Execute their actual
+  // input/needs expressions; actionlint separately checks GitHub expression syntax.
+  const selected=(inputs,platforms='["linux_aarch64"]')=>Object.entries(jobs).filter(([name,body])=>{
+    const expression=body.match(/^    if: \$\{\{ (.+) \}\}$/m)?.[1];
+    assert.ok(expression,'missing job condition: '+name);
+    return Function('inputs','needs',`return (${expression})`)(inputs,{tuple:{outputs:{tuple_platforms:platforms}}});
+  }).map(([name])=>name);
+  for(let bits=0;bits<32;bits++) {
+    const input=Object.fromEntries(['build_runtime','publish_host','publish_tuple','publish_dylib','persist_tuple'].map((key,i)=>[key,Boolean(bits&(1<<i))]));
+    for(const platforms of ['[]','["linux_aarch64"]']) {
+      assert.deepEqual(selected({...input,consume_native_only:true},platforms),['native-consume'],'consume mode must exclude every production/publication job');
+      const expected=[...(input.build_runtime?['native-runtime']:[]),...(input.publish_host?['host']:[]),
+        ...(!input.publish_host||input.publish_tuple||input.publish_dylib?['tuple']:[]),
+        ...(input.persist_tuple&&input.publish_tuple&&platforms!=='[]'?['persist']:[])];
+      assert.deepEqual(selected({...input,consume_native_only:false},platforms),expected);
+      assert.deepEqual(selected(input,platforms),expected);
+    }
+  }
+  assert.deepEqual(selected({}),['tuple']); // Existing push/default behavior.
+  assert.deepEqual(selected({consume_native_only:true}),['native-consume']);
+});
