@@ -205,6 +205,69 @@ test('formal workflow carries selected sources through checkout, original produc
   assert.doesNotMatch(JSON.stringify(native),/h48|language_tuple|build_colour_std|release create/);
 });
 
+// File retention only: these are distinguishable fixture bytes, not ELF or
+// runtime qualification. Execute the workflow's actual Node CLI without a
+// second native build or a copy of the repository/dependencies.
+function gateRetentionFixture(check) {
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'native-gate-retention-'));
+  try {
+    fs.symlinkSync(path.resolve('ci'),path.join(root,'ci'),'dir');
+    const runtime=path.join(root,'runtime-source/runtime');
+    const run=path.join(runtime,'tests/gc_unit/build_standalone/gate-runs/run.current');
+    const lib=path.join(runtime,'output/temp/selected/lib/x86_64_Release');
+    const other=path.join(runtime,'output/temp/unselected/lib/x86_64_Release');
+    for(const dir of [run,lib,other])fs.mkdirSync(dir,{recursive:true});
+    const files=['cj_gc_unit','cj_gc_forwarding_publication_unit','libcangjie-runtime.so','libboundscheck.so']
+      .map(name=>path.join(name.endsWith('.so')?lib:run,name));
+    for(const file of files)fs.writeFileSync(file,'selected bytes: '+path.basename(file));
+    for(const name of ['libcangjie-runtime.so','libboundscheck.so'])fs.writeFileSync(path.join(other,name),'unselected bytes');
+    const identity=files.map(file=>crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')+'  '+file).join('\n')+'\n';
+    fs.writeFileSync(path.join(run,'test-artifacts.sha256'),identity);
+    const workflow=yaml.load(fs.readFileSync('.github/workflows/build-native-runtime.yml','utf8'));
+    const steps=workflow.jobs.runtime.steps;
+    const step=steps.find(x=>x.run?.includes('native_runtime.mjs retain-gate'));
+    assert.equal(step.if,"always() && runner.os == 'Linux'");
+    const upload=steps.find(x=>x.with?.name==='native-runtime-diagnostics-${{ matrix.platform }}');
+    assert.equal(upload.if,'always()');
+    assert.ok(steps.indexOf(step)<steps.indexOf(upload));
+    assert.ok(upload.with.path.split('\n').includes('runtime-source/runtime/tests/gc_unit/build_standalone/gate-runs'));
+    const argv=step.run.split(' ');assert.equal(argv.shift(),'node');
+    const invoke=()=>spawnSync(process.execPath,argv,{cwd:root,encoding:'utf8'});
+    check({root,runtime,run,lib,files,identity,invoke});
+  } finally {if(!process.env.RELEASE_EVIDENCE_TEST_ROOT)fs.rmSync(root,{recursive:true,force:true});}
+}
+
+test('gate retention public workflow keeps exact selected libraries and original ELF bytes',()=>gateRetentionFixture(({run,lib,files,identity,invoke})=>{
+  const r=invoke();assert.equal(r.status,0,r.stdout+r.stderr);
+  for(const name of ['libcangjie-runtime.so','libboundscheck.so'])
+    assert.deepEqual(fs.readFileSync(path.join(run,'selected-libraries',name)),fs.readFileSync(path.join(lib,name)));
+  const record=JSON.parse(fs.readFileSync(path.join(run,'selected-libraries.json')));
+  assert.deepEqual(record.files.map(x=>x.source),files);assert.equal(record.error,null);
+  assert.equal(fs.readFileSync(path.join(run,'test-artifacts.sha256'),'utf8'),identity);
+  for(const name of ['cj_gc_unit','cj_gc_forwarding_publication_unit'])
+    assert.equal(fs.readFileSync(path.join(run,name),'utf8'),'selected bytes: '+name);
+  console.log('NATIVE_GATE_RETENTION_BYTES_REACHED');
+}));
+test('gate retention rejects missing selected SO despite another configuration, then restores',()=>gateRetentionFixture(({run,lib,invoke})=>{
+  const missing=path.join(lib,'libboundscheck.so'),saved=fs.readFileSync(missing);fs.unlinkSync(missing);
+  const red=invoke();assert.notEqual(red.status,0);
+  const rejected=JSON.parse(fs.readFileSync(path.join(run,'selected-libraries.json')));
+  assert.match(rejected.error,/ENOENT/);assert.ok(rejected.error.includes(missing),rejected.error);
+  assert.equal(fs.existsSync(path.join(run,'selected-libraries/libboundscheck.so')),false);
+  assert.equal(fs.readFileSync(path.join(run,'cj_gc_unit'),'utf8'),'selected bytes: cj_gc_unit');
+  fs.writeFileSync(missing,saved);
+  const restored=invoke();assert.equal(restored.status,0,restored.stdout+restored.stderr);
+  assert.deepEqual(fs.readFileSync(path.join(run,'selected-libraries/libboundscheck.so')),saved);
+  console.log('NATIVE_GATE_RETENTION_MISSING_AND_RESTORE_REACHED');
+}));
+test('gate retention reports no linked identity without inventing payloads',()=>gateRetentionFixture(({run,invoke})=>{
+  fs.unlinkSync(path.join(run,'test-artifacts.sha256'));
+  const r=invoke();assert.equal(r.status,0,r.stdout+r.stderr);
+  assert.match(r.stdout,/NATIVE_GATE_LIBRARIES_NOT_RECORDED/);
+  assert.equal(fs.existsSync(path.join(run,'selected-libraries')),false);
+  assert.equal(fs.existsSync(path.join(run,'selected-libraries.json')),false);
+}));
+
 test('public native producer records compiler-name cache wrappers', {skip:process.platform==='win32'},()=>fixture(({run,manifest})=>{
   const r=run({FIXTURE_WRAPPER:'1'});assert.equal(r.status,0,r.stdout+r.stderr);
   const m=manifest();for(const language of ['C','CXX'])assert.equal(m.compiler_cache_configuration[language].mode,'compiler-wrapper');

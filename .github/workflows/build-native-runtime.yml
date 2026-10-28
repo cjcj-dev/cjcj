@@ -142,6 +142,9 @@ jobs:
           name: native-runtime-install-${{ matrix.platform }}
           path: .platform-ci/runtime-install
           if-no-files-found: error
+      - name: Retain the exact Linux gate libraries beside its original ELF
+        if: always() && runner.os == 'Linux'
+        run: node ci/platform_matrix/native_runtime.mjs retain-gate runtime-source
       - uses: actions/upload-artifact@v7
         if: always()
         with:

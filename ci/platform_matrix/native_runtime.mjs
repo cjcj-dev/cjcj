@@ -16,6 +16,60 @@ const windowsToolchain = fileURLToPath(new URL('./windows_runtime_toolchain.cmak
 const sha = value => /^[a-f0-9]{40}$/.test(value || '');
 const hostPlatform = () => `${process.platform === 'win32' ? 'windows' : process.platform}_${{x64:'x86_64',arm64:'aarch64'}[process.arch] || process.arch}`;
 
+// The gate already records the exact linked ELF and library paths before
+// running cases. Keep those libraries beside that ELF for the existing always
+// upload, including when build.py exits before install. Do not select another
+// configuration, strip debug information, or recompute its recorded identity.
+export function retainNativeGateLibraries(source) {
+  const runtime = path.resolve(source, 'runtime');
+  const runs = path.join(runtime, 'tests/gc_unit/build_standalone/gate-runs');
+  if (!fs.existsSync(runs)) {
+    console.log('NATIVE_GATE_LIBRARIES_NOT_RECORDED: no gate run directory');
+    return;
+  }
+  let failed = false;
+  for (const entry of fs.readdirSync(runs, {withFileTypes:true})) {
+    if (!entry.isDirectory()) continue;
+    const run = path.join(runs, entry.name), identity = path.join(run, 'test-artifacts.sha256');
+    if (!fs.existsSync(identity)) {
+      console.log(`NATIVE_GATE_LIBRARIES_NOT_RECORDED: ${identity}`);
+      continue;
+    }
+    const record = {identity, files:[], error:null};
+    try {
+      const rows = fs.readFileSync(identity, 'utf8').trim().split(/\r?\n/).map(line => {
+        const match = /^([a-f0-9]{64}) [ *](.+)$/.exec(line);
+        assert.ok(match, 'NATIVE_GATE_IDENTITY_LINE');
+        return {recordedSha256:match[1], source:match[2]};
+      });
+      const names = ['cj_gc_unit', 'cj_gc_forwarding_publication_unit', 'libcangjie-runtime.so', 'libboundscheck.so'];
+      for (const name of names) {
+        const selected = rows.filter(row => path.basename(row.source) === name);
+        assert.equal(selected.length, 1, `NATIVE_GATE_IDENTITY_MISSING: ${name}`);
+        const row = selected[0], real = fs.realpathSync(row.source);
+        const relative = path.relative(fs.realpathSync(runtime), real);
+        assert.ok(relative && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative),
+          `NATIVE_GATE_SOURCE_OUTSIDE_RUNTIME: ${row.source}`);
+        assert.ok(fs.statSync(real).isFile(), `NATIVE_GATE_NOT_FILE: ${row.source}`);
+        const library = name.endsWith('.so');
+        if (!library) assert.equal(path.resolve(row.source), path.join(run, name), 'NATIVE_GATE_ELF_RUN_MISMATCH');
+        const retained = library ? path.join(run, 'selected-libraries', name) : row.source;
+        if (library) {
+          fs.mkdirSync(path.dirname(retained), {recursive:true});
+          fs.copyFileSync(real, retained);
+        }
+        record.files.push({...row, retained, bytes:fs.statSync(retained).size});
+      }
+    } catch (error) {
+      record.error = error.message;
+      failed = true;
+    }
+    fs.writeFileSync(path.join(run, 'selected-libraries.json'), JSON.stringify(record, null, 2) + '\n');
+    console.log('NATIVE_GATE_LIBRARIES ' + JSON.stringify(record));
+  }
+  assert.ok(!failed, 'NATIVE_GATE_LIBRARY_RETENTION_FAILED');
+}
+
 export function configureNativeRuntime({runtimeTarget,selection}, env = process.env) {
   selection??=nativeSourceSelection(env).selection;
   const windows = hostPlatform() === 'windows_x86_64';
@@ -186,4 +240,10 @@ export async function recordNativeRuntime({source, installRoot, actualRef, versi
       '--prefix', env.RUNNER_TEMP || path.join(path.dirname(installRoot),'runtime-preinstall'), '-v',version],
       ['python3','build.py','install','--prefix',installRoot]], files,
   }, null, 2) + '\n');
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  assert.equal(process.argv[2], 'retain-gate', 'expected retain-gate <runtime source>');
+  assert.ok(process.argv[3], 'runtime source required');
+  retainNativeGateLibraries(process.argv[3]);
 }
