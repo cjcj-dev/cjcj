@@ -21,6 +21,48 @@ function run(name,argv,{compiler=false,expect=0}={}) {
  if(expect==='nonzero')assert(r.status!==0,name+' HLE_CHILD_FAILURE_TARGET');else assert.equal(r.status,expect,name);
  return fs.readFileSync(path.join(out,name+'.stdout'),'utf8');
 }
+// Exercise directory traversal through the installed CLI and real cjbind. Each
+// header has a distinct basename: this tests recursion, not output collisions.
+if(['nested','nested-only','nested-failure','flat-directory'].includes(mode)) {
+ const cases=mode==='nested'?['only','mixed','bad']:
+  [mode==='nested-only'?'only':mode==='nested-failure'?'bad':'flat'];
+ for(const kind of cases) {
+  const base=path.join(out,kind),headers=path.join(base,'headers'),gen=path.join(base,'generated');
+  fs.mkdirSync(headers,{recursive:true});fs.mkdirSync(gen);
+  if(kind==='bad') {
+   fs.writeFileSync(headers+'/root.h','int hle_root(void);\n');
+   fs.mkdirSync(headers+'/sub/deep',{recursive:true});
+   fs.writeFileSync(headers+'/sub/deep/broken.h','struct Broken { syntax ???; };\n');
+   run('nested-child-failure',[hle,'-c','-d',headers,'-o',gen,'--module-name','hle_nested'],{expect:'nonzero'});
+   // A failure from the actual nested input, not an unrelated missing tool.
+   const diagnostic=fs.readFileSync(out+'/nested-child-failure.stdout','utf8')+
+    fs.readFileSync(out+'/nested-child-failure.stderr','utf8');
+   assert.match(diagnostic,/broken\.h/,'HLE_NESTED_BAD_HEADER_TARGET');
+   console.log('HLE_NESTED_BAD_HEADER_TARGET_PASS');continue;
+  }
+  const specs=kind==='only'?[['sub/deep/leaf.h','hle_leaf',42]]:
+   kind==='mixed'?[['root.h','hle_root',11],['sub/child.h','hle_child',13],['sub/deep/leaf.h','hle_leaf',18]]:
+   [['root.h','hle_root',42]];
+  for(const [name,fn]of specs) {
+   fs.mkdirSync(path.dirname(headers+'/'+name),{recursive:true});
+   fs.writeFileSync(headers+'/'+name,`int ${fn}(void);\n`);
+  }
+  // These are not C headers and must not be selected at any depth.
+  fs.mkdirSync(headers+'/ignored',{recursive:true});
+  fs.writeFileSync(headers+'/ignored/foreign.d.ts','not a C header ???\n');
+  fs.writeFileSync(headers+'/notes.txt','not a header\n');
+  run(kind+'-HLE_NESTED_DIRECTORY_TARGET',[hle,'-c','-d',headers,'-o',gen,'--module-name','hle_nested',
+   ...(kind==='mixed'?['-b',cjbind]:[])]);
+  assert.deepEqual(fs.readdirSync(gen).filter(x=>x.endsWith('.cj')).sort(),
+   specs.map(([name])=>path.basename(name,'.h')+'.cj').sort(),'HLE_NESTED_HEADER_SET');
+  fs.writeFileSync(base+'/api.c',specs.map(([,fn,value])=>`int ${fn}(void){return ${value};}`).join('\n'));
+  fs.writeFileSync(gen+'/consumer.cj',`package hle_nested\nmain() {\n let result = unsafe { ${specs.map(([,fn])=>fn+'()').join(' + ')} }\n if (result != 42) { return 41 }\n println("HLE_DIRECTORY_C_TARGET ${kind} value=42")\n return 0\n}\n`);
+  run(kind+'-c-compile',['cc','-c',base+'/api.c','-o',base+'/api.o']);
+  run(kind+'-cj-compile',[sdk+'/bin/cjc','-p',gen,base+'/api.o','-o',base+'/consumer'],{compiler:true});
+  assert.match(run(kind+'-run',[base+'/consumer'],{compiler:true}),new RegExp('HLE_DIRECTORY_C_TARGET '+kind+' value=42'));
+ }
+ console.log('HLE_DIRECTORY_RECURSION_PASS');process.exit(0);
+}
 const input=path.join(out,'headers');fs.mkdirSync(input);
 fs.writeFileSync(path.join(input,'api.h'),'struct HlePoint { long x; long y; };\nint hle_answer(int x);\nstruct HlePoint hle_point(long x, long y);\nint *hle_pointer(void);\n');
 fs.writeFileSync(path.join(input,'extra.h'),'int hle_extra(void);\n');
