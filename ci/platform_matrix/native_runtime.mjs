@@ -242,7 +242,7 @@ export async function recordNativeRuntime({source, installRoot, actualRef, versi
   }, null, 2) + '\n');
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && fs.realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   assert.equal(process.argv[2], 'retain-gate', 'expected retain-gate <runtime source>');
   assert.ok(process.argv[3], 'runtime source required');
   retainNativeGateLibraries(process.argv[3]);
