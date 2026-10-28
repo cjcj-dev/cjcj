@@ -437,6 +437,11 @@ test('fresh real tools source acquires independent CJPM before checking its prod
  async function workspace(label,selector){
   const work=root+'/'+label;await fs.mkdir(work);const source=work+'/cangjie_tools';
   await git(label+'-clone',['clone','--shared','--no-checkout',inputs.toolsRepository,source]);
+  // Normal sparse Git input: complete selected CJPM source and the real entry
+  // files required by default all before its intentionally absent HLE inputs.
+  // This arm proves source selection, not production of the other nine tools.
+  await git(label+'-sparse',['-C',source,'sparse-checkout','set','--no-cone','/cjpm/',
+    ...producers.filter(([name])=>name!=='cjpm').map(([name,dir])=>'/'+dir+'/'+(name==='cjfmt'?'build.py':'build.mjs'))]);
   await git(label+'-checkout',['-C',source,'checkout','--detach',inputs.toolsRef]);
   await assert.rejects(fs.access(source+'/cjpm/build/build.mjs'),{code:'ENOENT'});
   await fs.access(source+'/cjpm/build/build.py');
