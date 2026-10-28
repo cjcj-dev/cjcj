@@ -72,3 +72,68 @@ for (const [requested, platforms] of [
     } finally { fs.rmSync(root, {recursive: true, force: true}); }
   });
 }
+
+// Execute the actual workflow exporter; this proves resource transport, not an
+// LLVM build or the memory peak of a future official runner.
+for (const name of ['build-llvm-tools', 'build-llvm-dylib']) {
+  test(`${name} transports effective jobs to native compile and serialized link pools`, () => {
+    const workflow = yaml.load(fs.readFileSync(`.github/workflows/${name}.yml`, 'utf8'));
+    const job = workflow.jobs[name === 'build-llvm-tools' ? 'build-tools' : 'dylib'];
+    const script = job.steps.find(step => step.name === 'Select native build capacity').run;
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'native-capacity-'));
+    try {
+      const env = {...process.env, KKK2_JOBS: '1'};
+      delete env.CANGJIE_BUILD_JOBS;
+      delete env.CMAKE_BUILD_PARALLEL_LEVEL;
+      const execute = (label, body, extra = {}) => {
+        const output = path.join(root, label);
+        const result = spawnSync('bash', ['-e', '-o', 'pipefail', '-c', body], {
+          encoding: 'utf8', env: {...env, ...extra, GITHUB_ENV: output},
+        });
+        return {...result, exported: fs.existsSync(output) ? fs.readFileSync(output, 'utf8') : ''};
+      };
+      const normal = execute('normal', script);
+      assert.equal(normal.status, 0, normal.stderr);
+      assert.equal(normal.exported, 'CMAKE_BUILD_PARALLEL_LEVEL=1\n');
+      const capacity = JSON.parse(normal.stdout.match(/NATIVE_BUILD_CAPACITY (.+)/)[1]);
+      assert.equal(capacity.jobs, 1);
+      assert.equal(capacity.linkJobs, 1);
+      assert.ok(capacity.memory > 0 && capacity.diskAvailable > 0);
+      const explicit = execute('explicit', script, {KKK2_JOBS: '3', CANGJIE_BUILD_JOBS: '2'});
+      assert.equal(explicit.status, 0, explicit.stderr);
+      assert.equal(explicit.exported, 'CMAKE_BUILD_PARALLEL_LEVEL=2\n');
+      const rejected = execute('rejected', script, {CANGJIE_BUILD_JOBS: '2'});
+      assert.equal(rejected.status, 1);
+      assert.match(rejected.stderr, /exceeds declared KKK2_JOBS budget=1/);
+      assert.equal(rejected.exported, '');
+      const cut = execute('cut', script.replace(/^.*fs.appendFileSync\(process.env.GITHUB_ENV.*\n/m, ''));
+      assert.equal(cut.status, 0, cut.stderr);
+      assert.throws(() => assert.equal(cut.exported, 'CMAKE_BUILD_PARALLEL_LEVEL=1\n'), /ERR_ASSERTION/);
+      const restored = execute('restored', script);
+      assert.equal(restored.status, 0, restored.stderr);
+      assert.equal(restored.exported, normal.exported);
+      const build = job.steps.find(step => step.name === (name === 'build-llvm-tools' ? 'Build LLVM tools' : 'Build three-target shared LLVM')).run;
+      assert.match(build, /-DLLVM_PARALLEL_COMPILE_JOBS="\$CMAKE_BUILD_PARALLEL_LEVEL" -DLLVM_PARALLEL_LINK_JOBS=1/);
+      assert.match(build, /cmake --build .*--parallel "\$CMAKE_BUILD_PARALLEL_LEVEL"/);
+      assert.doesNotMatch(build, /jobs=\$\((nproc|sysctl)/);
+      if (name === 'build-llvm-tools') assert.match(job.steps.find(step => step.name === 'Generate LLVM shim').run,
+        /cmake --build flatbuffers-build --parallel "\$CMAKE_BUILD_PARALLEL_LEVEL" --target flatc/);
+      console.log(`RESOURCE_TRANSPORT ${name} normal=0 explicit=0 budget=1 exporter-cut=assertion restored=0`);
+    } finally { fs.rmSync(root, {recursive: true, force: true}); }
+  });
+}
+
+test('native preparation budgets include plans and static tuple packaging', () => {
+  const tools = yaml.load(fs.readFileSync('.github/workflows/build-llvm-tools.yml', 'utf8'));
+  const dylib = yaml.load(fs.readFileSync('.github/workflows/build-llvm-dylib.yml', 'utf8'));
+  const runtime = yaml.load(fs.readFileSync('.github/workflows/build-native-runtime.yml', 'utf8'));
+  for (const flow of [tools, dylib, runtime]) assert.equal(flow.jobs.plan['timeout-minutes'], 10);
+  for (const job of [tools.jobs['build-tools'], tools.jobs['static-tuple'], dylib.jobs.dylib, runtime.jobs.runtime]) {
+    assert.equal(job.strategy['max-parallel'], 4);
+    assert.equal(job.strategy['fail-fast'], false);
+  }
+  assert.equal(tools.jobs['static-tuple']['timeout-minutes'], 30);
+  assert.equal(dylib.jobs.dylib['timeout-minutes'], 180);
+  assert.equal(runtime.jobs.runtime['timeout-minutes'], 120);
+  assert.match(tools.jobs['build-tools']['timeout-minutes'], /350 \|\| 120/);
+});

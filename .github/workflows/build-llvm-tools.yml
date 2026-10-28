@@ -80,6 +80,7 @@ jobs:
   plan:
     name: Select tuples
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     outputs:
       matrix: ${{ steps.select.outputs.matrix }}
       tuple_platforms: ${{ steps.select.outputs.tuple_platforms }}
@@ -104,12 +105,30 @@ jobs:
     timeout-minutes: ${{ matrix.platform == 'windows_x86_64' && 350 || 120 }}
     strategy:
       fail-fast: false
+      max-parallel: 4
       matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout cjcj
         uses: actions/checkout@v7
 
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24.22.1'
+      - name: Select native build capacity
+        if: runner.os != 'Windows'
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import os from 'node:os';
+          import {buildCapacity, selectBuildJobs} from './ci/build-resources.mjs';
+          const capacity = await buildCapacity();
+          const jobs = await selectBuildJobs(undefined, process.env, capacity);
+          const disk = fs.statfsSync('.');
+          console.log('NATIVE_BUILD_CAPACITY ' + JSON.stringify({...capacity, jobs, linkJobs: 1,
+            freeMemory: os.freemem(), diskAvailable: disk.bavail * disk.bsize}));
+          fs.appendFileSync(process.env.GITHUB_ENV, 'CMAKE_BUILD_PARALLEL_LEVEL=' + jobs + '\n');
+          NODE
       - name: Load native LLVM source pair
         id: llvm-pin
         env:
@@ -192,6 +211,7 @@ jobs:
             -DCANGJIE_RUNTIME_SOURCE_DIR="$PWD/paired-runtime" \
             -DCMAKE_BUILD_TYPE=Release \
             -DLLVM_ENABLE_ASSERTIONS=OFF \
+            -DLLVM_PARALLEL_COMPILE_JOBS="$CMAKE_BUILD_PARALLEL_LEVEL" -DLLVM_PARALLEL_LINK_JOBS=1 \
             -DBUILD_SHARED_LIBS=OFF \
             -DLLVM_LINK_LLVM_DYLIB=OFF \
             -DLLVM_BUILD_LLVM_DYLIB=OFF \
@@ -202,7 +222,7 @@ jobs:
             -DCMAKE_C_COMPILER=clang \
             -DCMAKE_CXX_COMPILER=clang++ \
             -DCMAKE_CXX_FLAGS="-gline-tables-only -include cstdint -include unordered_map -include map -include vector -include string"
-          ninja -C llc-build llc opt lld
+          cmake --build llc-build --parallel "$CMAKE_BUILD_PARALLEL_LEVEL" --target llc opt lld
           mkdir -p "fixed-toolchain/${{ matrix.platform }}"
           case "${{ matrix.platform }}" in
             darwin_*) lld_tool=ld64.lld ;;
@@ -249,7 +269,7 @@ jobs:
             -DFLATBUFFERS_BUILD_TESTS=OFF \
             -DFLATBUFFERS_BUILD_FLATLIB=OFF \
             -DFLATBUFFERS_BUILD_SHAREDLIB=OFF
-          ninja -C flatbuffers-build flatc
+          cmake --build flatbuffers-build --parallel "$CMAKE_BUILD_PARALLEL_LEVEL" --target flatc
           mkdir -p shim-generated/flatbuffers
           flatbuffers-build/flatc --no-warnings -c -o shim-generated/flatbuffers \
             cangjie-compiler/schema/CjoFormat.fbs
@@ -414,9 +434,11 @@ jobs:
   static-tuple:
     if: inputs.publish_tuple && needs.plan.outputs.tuple_platforms != '[]'
     name: Publish static colour LLVM tuple
+    timeout-minutes: 30
     needs: [plan, build-tools]
     strategy:
       fail-fast: false
+      max-parallel: 4
       matrix:
         platform: ${{ fromJson(needs.plan.outputs.tuple_platforms) }}
     runs-on: ${{ matrix.platform == 'linux_aarch64' && 'ubuntu-22.04-arm' || matrix.platform == 'darwin_aarch64' && 'macos-15' || matrix.platform == 'darwin_x86_64' && 'macos-15-intel' || 'ubuntu-22.04' }}

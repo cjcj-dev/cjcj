@@ -49,6 +49,7 @@ permissions:
 jobs:
   plan:
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     outputs:
       matrix: ${{ steps.select.outputs.dylib_matrix }}
       platforms: ${{ steps.select.outputs.tuple_platforms }}
@@ -70,6 +71,7 @@ jobs:
     if: needs.plan.outputs.platforms != '[]'
     strategy:
       fail-fast: false
+      max-parallel: 4
       matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 180
@@ -78,6 +80,22 @@ jobs:
       LLVM_DYLIB_PLATFORM: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24.22.1'
+      - name: Select native build capacity
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import os from 'node:os';
+          import {buildCapacity, selectBuildJobs} from './ci/build-resources.mjs';
+          const capacity = await buildCapacity();
+          const jobs = await selectBuildJobs(undefined, process.env, capacity);
+          const disk = fs.statfsSync('.');
+          console.log('NATIVE_BUILD_CAPACITY ' + JSON.stringify({...capacity, jobs, linkJobs: 1,
+            freeMemory: os.freemem(), diskAvailable: disk.bavail * disk.bsize}));
+          fs.appendFileSync(process.env.GITHUB_ENV, 'CMAKE_BUILD_PARALLEL_LEVEL=' + jobs + '\n');
+          NODE
       - name: Load native LLVM source pair
         id: pin
         env:
@@ -97,9 +115,6 @@ jobs:
           if [ "$RUNNER_OS" = Linux ]; then
             sudo apt-get update -qq
             sudo apt-get install -y -qq clang cmake ninja-build
-            jobs=$(nproc)
-          else
-            jobs=$(sysctl -n hw.logicalcpu)
           fi
           git init llvm-fork
           git -C llvm-fork remote add origin "$LLVM_URL"
@@ -114,10 +129,11 @@ jobs:
             -DCMAKE_C_FLAGS_RELWITHDEBINFO='-O2 -g1 -DNDEBUG' \
             -DCMAKE_CXX_FLAGS_RELWITHDEBINFO='-O2 -g1 -DNDEBUG' \
             -DLLVM_ENABLE_ASSERTIONS=OFF -DLLVM_ENABLE_RTTI=OFF \
+            -DLLVM_PARALLEL_COMPILE_JOBS="$CMAKE_BUILD_PARALLEL_LEVEL" -DLLVM_PARALLEL_LINK_JOBS=1 \
             -DBUILD_SHARED_LIBS=OFF -DLLVM_BUILD_LLVM_DYLIB=ON -DLLVM_LINK_LLVM_DYLIB=OFF \
             -DLLVM_TARGETS_TO_BUILD='X86;ARM;AArch64' -DLLVM_ENABLE_PROJECTS='' \
             -DCMAKE_CXX_FLAGS='-include cstdint -include unordered_map -include map -include vector -include string'
-          cmake --build dylib-build --target LLVM llvm-nm -j"$jobs"
+          cmake --build dylib-build --target LLVM llvm-nm --parallel "$CMAKE_BUILD_PARALLEL_LEVEL"
           # nm --defined-only must see the real full symbol table, including
           # local symbols; a stripped binary cannot establish that invariant.
           dylib-build/bin/llvm-nm --defined-only "dylib-build/lib/$LLVM_DYLIB_LIBRARY" > dylib-build/defined-symbols.txt
