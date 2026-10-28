@@ -26,7 +26,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Load fixed source and AST input identities
-        run: cat ci/runtime_pin.env ci/source_pin.env ci/ast_support/linux_x86_64.env >> "$GITHUB_ENV"
+        run: |
+          node ci/load_runtime_pin.mjs
+          cat ci/source_pin.env ci/ast_support/linux_x86_64.env >> "$GITHUB_ENV"
       - uses: actions/checkout@v7
         with:
           repository: cjcj-dev/cangjie-runtime

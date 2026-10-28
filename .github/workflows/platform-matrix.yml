@@ -57,7 +57,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # RUNTIME_REF/RUNTIME_SRC_URL come from ci/runtime_pin.env via the
+  # The canonical pair and runtime metadata come from ci/runtime_pin.env via the
   # "Load runtime pin" step — the pin lives in exactly one file.
   CJ_HEAP_SIZE: 12GB
   CANGJIE_WORKSPACE: ${{ github.workspace }}/.srcbuild
@@ -118,7 +118,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Load runtime pin
-        run: cat ci/runtime_pin.env >> "$GITHUB_ENV"
+        run: node ci/load_runtime_pin.mjs
       - uses: actions/checkout@v7
         with:
           repository: cjcj-dev/cangjie-runtime
@@ -205,7 +205,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Load runtime pin
-        run: cat ci/runtime_pin.env >> "$GITHUB_ENV"
+        run: node ci/load_runtime_pin.mjs
       - uses: actions/checkout@v7
         with:
           repository: cjcj-dev/cangjie-runtime
@@ -364,7 +364,7 @@ jobs:
 
       - name: Load runtime pin
         shell: bash
-        run: cat ci/runtime_pin.env >> "$GITHUB_ENV"
+        run: node ci/load_runtime_pin.mjs
 
       # The consolidated cangjie-runtime main already carries the GC and Darwin
       # fixes; no per-runner patch overlay is needed.

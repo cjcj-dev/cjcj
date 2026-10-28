@@ -31,7 +31,7 @@ jobs:
       - name: Check host and target guard before tools and input preparation
         run: node --test ci/release/darwin_consumer_boundary.test.mjs
       - name: Load pinned runtime source
-        run: cat ci/runtime_pin.env >> "$GITHUB_ENV"
+        run: node ci/load_runtime_pin.mjs
       - uses: actions/checkout@v7
         if: matrix.build_runtime
         with:

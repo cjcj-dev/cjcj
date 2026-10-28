@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import {fileURLToPath} from 'node:url';
+import {load as loadYaml} from './vendor/js-yaml/js-yaml.mjs';
 
 const root = new URL('../', import.meta.url);
 const read = file => fs.readFileSync(new URL(file, root), 'utf8');
@@ -16,6 +17,56 @@ const pins = file => Object.fromEntries(read(file).trim().split('\n').map(line =
 const runtime = pins('ci/runtime_pin.env');
 const llvm = pins('ci/llvm_pin.env');
 const input = JSON.parse(read('ci/bootstrap_inputs_pin.json'));
+
+test('workflow pin producers export the canonical pair consumed by checkout and cache', t => {
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'workflow-runtime-pair-'));
+  t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
+  const base={...process.env,RUNNER_TEMP:dir,PLATFORM:'darwin_aarch64'};
+  for(const key of ['CJCJ_NATIVE_LLVM_REF','CJCJ_NATIVE_RUNTIME_REF','CJCJ_NATIVE_RUNTIME_ARTIFACT',
+    'CJCJ_NATIVE_HOST_VERSION','CJCJ_RUNTIME_REF_OVERRIDE','CJCJ_ALLOW_RUNTIME_OVERRIDE',
+    'CJCJ_BOOTSTRAP_RUNTIME_PIN','RUNTIME_SRC_URL'])delete base[key];
+  let invocation=0;
+  const execute=(command,extra={})=>{
+    const output=path.join(dir,'env-'+invocation++);
+    const result=spawnSync('bash',['-e','-c',command],{cwd:fileURLToPath(root),env:{...base,...extra,GITHUB_ENV:output},encoding:'utf8'});
+    const exported=fs.existsSync(output)?Object.fromEntries(fs.readFileSync(output,'utf8').trim().split('\n').map(line=>{
+      const i=line.indexOf('=');assert.ok(i>0,'valid GITHUB_ENV assignment');return [line.slice(0,i),line.slice(i+1)];
+    })):{};
+    return {result,exported};
+  };
+  const assertPair=(row,expected={llvm:llvm.LLVM_SHA,runtime:runtime.RUNTIME_REF})=>{
+    assert.equal(row.result.status,0,row.result.stderr);
+    assert.equal(row.exported.CJCJ_NATIVE_LLVM_REF,expected.llvm);
+    assert.equal(row.exported.CJCJ_NATIVE_RUNTIME_REF,expected.runtime);
+    assert.equal(row.exported.RUNTIME_REF,undefined,'retired environment alias is not exported');
+    assert.equal(row.exported.RUNTIME_VERSION,runtime.RUNTIME_VERSION);
+  };
+  const workflows=['platform-matrix','darwin-input-consumers','ci','objc-darwin-e2e','verify-darwin-runtime','std-input-evidence'];
+  let callers=0;
+  for(const name of workflows)for(const [jobName,job]of Object.entries(loadYaml(read('.github/workflows/'+name+'.yml')).jobs)) {
+    const steps=job.steps??[],index=steps.findIndex(step=>step.run?.includes('node ci/load_runtime_pin.mjs'));
+    if(index<0)continue;
+    const loaded=execute(steps[index].run);assertPair(loaded);callers++;
+    for(const step of steps)for(const [key,value]of Object.entries(step.with??{})) {
+      if(typeof value!=='string'||!value.includes('${{ env.CJCJ_NATIVE_RUNTIME_REF }}'))continue;
+      assert.ok(steps.indexOf(step)>index,'export must precede '+key);
+      const resolved=value.replace('${{ env.CJCJ_NATIVE_RUNTIME_REF }}',loaded.exported.CJCJ_NATIVE_RUNTIME_REF);
+      if(['ref','pin'].includes(key))assert.equal(resolved,runtime.RUNTIME_REF);
+      else assert.ok(resolved.includes(runtime.RUNTIME_REF),'cache key carries the selected runtime');
+    }
+    console.log('CANONICAL_WORKFLOW_TARGET',name,jobName,loaded.exported.CJCJ_NATIVE_RUNTIME_REF);
+  }
+  assert.equal(callers,9,'all migrated raw-pin callers are exercised');
+  const command=loadYaml(read('.github/workflows/platform-matrix.yml')).jobs['darwin-runtime'].steps.find(step=>step.name==='Load runtime pin').run;
+  const explicit={CJCJ_NATIVE_LLVM_REF:'a'.repeat(40),CJCJ_NATIVE_RUNTIME_REF:'b'.repeat(40)};
+  assertPair(execute(command,explicit),{llvm:explicit.CJCJ_NATIVE_LLVM_REF,runtime:explicit.CJCJ_NATIVE_RUNTIME_REF});
+  const half=execute(command,{CJCJ_NATIVE_RUNTIME_REF:explicit.CJCJ_NATIVE_RUNTIME_REF});
+  assert.equal(half.result.status,1);assert.match(half.result.stderr,/NATIVE_RUNTIME_EXPLICIT_PAIR_REQUIRED/);
+  const conflict=execute(command,{...explicit,CJCJ_RUNTIME_REF_OVERRIDE:'c'.repeat(40),CJCJ_ALLOW_RUNTIME_OVERRIDE:'true'});
+  assert.equal(conflict.result.status,1);assert.match(conflict.result.stderr,/NATIVE_RUNTIME_OVERRIDE_CONFLICT/);
+  assert.throws(()=>assertPair(execute('cat ci/runtime_pin.env >> "$GITHUB_ENV"')),/undefined/,'old producer does not establish canonical checkout input');
+  assertPair(execute(command));
+});
 
 test('release runtime loader selects the stack-slot-root runtime paired with LLVM', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'release-pair-'));

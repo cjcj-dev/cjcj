@@ -80,6 +80,7 @@ test('Node boundary pin loading and actual input consumption retain reviewed com
   ]) {
     observed('DARWIN_REVIEWED_CONSUMPTION', actualNamed(name));
     const expected = {...originalNamed(name)};
+    if (name === 'Load pinned runtime source') expected.run = 'node ci/load_runtime_pin.mjs';
     if (name === 'Build or acquire native inputs and consume their actual loaded libraries') {
       // This exact run is the sole authorized command change from the fixture.
       expected.run = 'ulimit -c 0\n'
