@@ -1,0 +1,62 @@
+name: Consume existing native LLVM tuples
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  consume:
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        include:
+          - platform: linux_aarch64
+            runner: ubuntu-22.04-arm
+          - platform: darwin_aarch64
+            runner: macos-15
+          - platform: darwin_x86_64
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    env:
+      PLATFORM_CI_ROOT: ${{ runner.temp }}/native-tuple-consumer
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24.22.1'
+      - name: Check native capacity and exact completed producer artifact
+        id: select
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ulimit -S -c 0
+          ulimit -H -c 0
+          node ci/platform_matrix/native_llvm_consumer.mjs prepare
+      - uses: actions/download-artifact@v8
+        with:
+          repository: cjcj-dev/cjcj
+          run-id: ${{ steps.select.outputs.run_id }}
+          artifact-ids: ${{ steps.select.outputs.artifact_id }}
+          github-token: ${{ github.token }}
+          merge-multiple: true
+          path: ${{ env.PLATFORM_CI_ROOT }}/artifact
+      - name: Fetch, install and consume this tuple on its native host
+        run: |
+          set -euo pipefail
+          ulimit -S -c 0
+          ulimit -H -c 0
+          node ci/platform_matrix/native_llvm_consumer.mjs consume
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: native-llvm-consumer-${{ matrix.platform }}
+          path: |
+            ${{ env.PLATFORM_CI_ROOT }}/evidence
+            ${{ env.PLATFORM_CI_ROOT }}/selected.env
+            ${{ env.PLATFORM_CI_ROOT }}/artifact/MANIFEST
+            ${{ env.PLATFORM_CI_ROOT }}/artifact/SHA256SUMS
+            ${{ env.PLATFORM_CI_ROOT }}/artifact/fixed-llc/llvm-tools.manifest
+          if-no-files-found: warn
