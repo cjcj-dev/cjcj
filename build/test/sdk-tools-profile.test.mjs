@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {buildCapacity} from '../../ci/build-resources.mjs';
 import {toolsFor,targetToolsEnv} from '../srcbuild/stages/tools.mjs';
-import {makeRepos,buildConfig} from '../lib/config.mjs';
+import {makeRepos,buildConfig,saveSourceSelection} from '../lib/config.mjs';
 import {installEntries} from '../../ci/bootstrap/sdk-install-entries.mjs';
 const producers=toolsFor();
 const isProducer = (line,verb='') => new RegExp('build\\.(?:py|mjs)'+(verb?' (?:--phase )?'+verb:'')).test(line);
@@ -466,15 +466,17 @@ test('fresh real tools source acquires independent CJPM before checking its prod
  console.log('CJPM_REAL_SELECTOR_MISSING_ENTRY_REJECTED');
  // The same failed workspace recovers through its normal explicit selector,
  // before any successful producer existed; this is not a preseeded build tree.
- r=await invoke('restored-explicit',missing,['--tools-build-set','cjpm','--repo-tag','cjpm='+inputs.cjpmRef]);assert.equal(r.status,0,r.stderr);await selected('restored',missing);
+  saveSourceSelection(buildConfig({workspace:missing.work,repoOverrides:{cjpm:{tag:inputs.cjpmRef}}}));
+ r=await invoke('restored-explicit',missing,['--tools-build-set','cjpm']);assert.equal(r.status,0,r.stderr);await selected('restored',missing);
  await fs.access(missing.source+'/cjpm/dist/cjpm');
  const facts=JSON.parse(await fs.readFile(missing.work+'/build/tools/cjpm/build-inputs.json','utf8'));
  assert.equal(facts.source.commit,inputs.cjpmRef);
  console.log('CJPM_FRESH_REAL_BUILD_AND_SOURCE_RESTORED');
  const prefix=root+'/independent-install';
+ saveSourceSelection(buildConfig({workspace:missing.work,repoOverrides:{cjpm:{tag:'ffffffffffffffffffffffffffffffffffffffff'}}}));
  r=await execute('existing-producer-install-control',[process.execPath,cli,'--workspace',missing.work,'--build-root',missing.work+'/build',
   '--official-sdk-root',inputs.host,'--host-profile','kkk2','--tools-phase','install','--tools-build-set','cjpm',
-  '--repo-tag','cjpm=ffffffffffffffffffffffffffffffffffffffff','--tools-install-prefix',prefix,'build','tools'],{env});
+  '--tools-install-prefix',prefix,'build','tools'],{env});
  assert.equal(r.status,0,r.stderr);
  const installed=JSON.parse(await fs.readFile(prefix+'/cjpm/build-inputs.json','utf8'));
  assert.equal(installed.source.commit,inputs.cjpmRef,'install preserves the actual producer, not a new unused selector');
