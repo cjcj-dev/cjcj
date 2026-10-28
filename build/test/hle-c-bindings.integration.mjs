@@ -5,16 +5,19 @@ import fs from 'node:fs';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
-const [prefix,sdk,out,mode='normal']=process.argv.slice(2);
+const [prefix,sdk,out,mode='normal',nativeBody]=process.argv.slice(2);
 if(!prefix||!sdk||!out)throw Error('usage: hle-c-bindings.integration.mjs prefix sdk fresh-evidence [normal|failure|control]');
 fs.mkdirSync(out,{recursive:true});
 const caller=path.join(out,'unrelated cwd');fs.mkdirSync(caller);
-const hle=path.join(prefix,'tools/bin/hle'),cjbind=path.join(prefix,'tools/dtsparser/node_modules/.bin/cjbind');
+// Isolated product-cut arms may select the normally built native CLI body;
+// normal installed/unpacked runs always use the public relative launcher.
+const hle=nativeBody??path.join(prefix,'tools/bin/hle'),cjbind=path.join(prefix,'tools/dtsparser/node_modules/.bin/cjbind');
 const env={...process.env,CANGJIE_HOME:sdk,PATH:'/usr/bin:/bin',LD_LIBRARY_PATH:'',LD_PRELOAD:'',LD_AUDIT:''};
 const rows=[];
 function run(name,argv,{compiler=false,expect=0}={}) {
+ if(nativeBody&&argv[0]===hle&&!argv.includes('-b'))argv=[...argv,'-b',cjbind];
  const started=new Date().toISOString(),stdout=fs.openSync(path.join(out,name+'.stdout'),'wx'),stderr=fs.openSync(path.join(out,name+'.stderr'),'wx');
- const e={...env,...(compiler?{PATH:sdk+'/bin:/usr/bin:/bin',LD_LIBRARY_PATH:sdk+'/runtime/lib/linux_x86_64_cjnative:'+sdk+'/tools/lib'}:{})};
+ const e={...env,...((compiler||(nativeBody&&argv[0]===hle))?{PATH:sdk+'/bin:/usr/bin:/bin',LD_LIBRARY_PATH:sdk+'/runtime/lib/linux_x86_64_cjnative:'+sdk+'/tools/lib'}:{})};
  const r=spawnSync(argv[0],argv.slice(1),{cwd:caller,env:e,stdio:['ignore',stdout,stderr]});fs.closeSync(stdout);fs.closeSync(stderr);
  rows.push({name,argv,cwd:caller,started,ended:new Date().toISOString(),rc:r.status,signal:r.signal,error:r.error?.message??null});fs.writeFileSync(path.join(out,'commands.json'),JSON.stringify(rows,null,2));
  assert.equal(r.signal,null,name);assert.equal(r.error,undefined,name);
