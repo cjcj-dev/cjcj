@@ -109,7 +109,7 @@ test('public ten-tool stage separates the total CPU and heavy package budgets',a
  assert(incrementalLines.slice(firstInstall).every(line=>isProducer(line,'install')),'no late build after shared install begins');
  const invalidMode=spawnSync(process.execPath,[cli,...profOptions,'--workspace',root,'--tools-build-mode','unknown','build','tools'],{env,encoding:'utf8'});
  assert.equal(invalidMode.status,2);assert.match(invalidMode.stderr,/invalid tools build mode/);
- console.log(`NINE_TOOL_JOB_ARGUMENTS_REACHED commands=${producers.length} explicit-interfaces=6; no compilation`);
+ console.log(`TEN_TOOL_JOB_ARGUMENTS_REACHED commands=${producers.length} explicit-interfaces=6; no compilation`);
 });
 
 
@@ -151,7 +151,7 @@ test('public tool build selection retains a complete install and rejects ambiguo
 
 
 // Finite public-entry propagation: real Python children, tool installer/native
-// launchers, installed hello and supervised regression. The nine bodies and
+// launchers, installed hello and supervised regression. The ten bodies and
 // regression are controlled interfaces, not cjpm/SDK functional qualification.
 let regressionFixture;
 async function installedRegressionFixture() {
@@ -177,7 +177,7 @@ async function installedRegressionFixture() {
    await fs.symlink('cjcj-stage1',sdk+'/bin/cjc');
    // Do not copy Node or any SDK; these unrelated HLE inputs are unused markers.
    for(const file of ['tools/bin/node','tools/dtsparser/node_modules/.bin/cjbind','tools/dtsparser/DEPENDENCIES.json'])await write(sdk+'/'+file,'controlled unused HLE boundary');
-   const outputs={cjpm:'cjpm/dist/cjpm',cjfmt:'cjfmt/dist/bin/cjfmt',hle:'hyperlangExtension/target/bin/main',lsp:'cangjie-language-server/output/bin/LSPServer',cjcov:'cjcov/dist/cjcov','cjtrace-recover':'cjtrace-recover/dist/bin/cjtrace-recover',cjlint:'cjlint/dist/bin/cjlint',cjprof:'cjprof/dist/bin/cjprof',cjcompat:'cjcompat/dist/bin/cjcompat'};
+   const outputs={cjpm:'cjpm/dist/cjpm',cjfmt:'cjfmt/dist/bin/cjfmt',hle:'hyperlangExtension/target/bin/main',lsp:'cangjie-language-server/dist/bin/cangjie-lsp',cjhead:'cjhead/dist/bin/cjhead',cjcov:'cjcov/dist/cjcov','cjtrace-recover':'cjtrace-recover/dist/bin/cjtrace-recover',cjlint:'cjlint/dist/bin/cjlint',cjprof:'cjprof/dist/bin/cjprof',cjcompat:'cjcompat/dist/bin/cjcompat'};
    const buildProducts={...outputs,cjfmt:'cjfmt/build/build/bin/cjfmt','cjtrace-recover':'cjtrace-recover/cmake-build/cjtrace-recover',cjlint:'unused-cjlint-build-path',cjprof:'cjprof/build/cangjie-output/cjprof',cjcompat:'cjcompat/build/cangjie-build/cjcompat'};
    const cjpm='#!'+process.execPath+'\n'+`const fs=require('node:fs');const path=require('node:path');
 fs.appendFileSync(${JSON.stringify(trace)},JSON.stringify({event:'installed-cjpm',args:process.argv.slice(2),cwd:process.cwd()})+'\\n');
@@ -188,6 +188,7 @@ if(process.argv[2]==='build'){const out=path.resolve('target/release/bin/main');
     const payloads=name==='cjpm'?{'cjpm/dist/cangjie-repo.toml':'fixture repo'}:
      name==='cjfmt'?{'cjfmt/dist/config/cangjie-format.toml':'fixture format'}:
      name==='cjlint'?{'cjlint/dist/lib/libcangjie-runtime.so':'unloaded fixture','cjlint/dist/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so':'unloaded fixture','cjlint/dist/modules/std.core.cjo':'analysis fixture','cjlint/dist/config/cjlint_rule_list.json':'{}'}:
+     ['lsp','cjhead'].includes(name)?{[outputs[name].replace(/bin\/[^/]+$/,'lib/libcangjie-runtime.so')]:'unloaded fixture',...(name==='cjhead'?{'cjhead/dist/share/cjhead/frontend.json':'fixture frontend'}:{})}:
      name==='cjprof'?{'cjprof/dist/lib/libcjprof-cangjie.so':'unloaded fixture','cjprof/dist/lib/libcjprof-jni.so':'unloaded fixture','cjprof/dist/share/java/cjprof.jar':'unloaded fixture','cjprof/dist/config/static/index.html':'fixture page'}:{};
     if(name==='hle') {
      await write(tools+'/'+dir+'/build.mjs',`import fs from 'node:fs';import path from 'node:path';
@@ -197,10 +198,10 @@ if(verb==='build'||verb==='install'){const out=path.join(build,'bin/main');fs.mk
 `);
      continue;
     }
-    if(['cjtrace-recover','cjcompat','cjprof','cjlint'].includes(name)) {
+    if(['cjpm','cjcov','cjtrace-recover','cjcompat','cjprof','cjlint','lsp','cjhead'].includes(name)) {
      await write(tools+'/'+dir+'/build.mjs',`import fs from 'node:fs';import path from 'node:path';
-const verb=process.argv[2];fs.appendFileSync(${JSON.stringify(trace)},JSON.stringify({event:'producer',name:${JSON.stringify(name)},verb})+'\\n');
-if(verb==='build'||verb==='install') {const out=${['cjprof','cjlint'].includes(name)?"verb==='build'?path.join(process.argv[process.argv.indexOf('--build-dir')+1],"+JSON.stringify(name==='cjlint'?'target/release/bin/cjlint':'cjprof')+"):path.join("+JSON.stringify(tools)+","+JSON.stringify(outputs[name])+")":"path.join("+JSON.stringify(tools)+",verb==='build'?"+JSON.stringify(buildProducts[name])+":"+JSON.stringify(outputs[name])+")"};fs.mkdirSync(path.dirname(out),{recursive:true});fs.writeFileSync(out,${JSON.stringify(body)},{mode:0o755});if(verb==='install')for(const [rel,value]of Object.entries(${JSON.stringify(payloads)})){const file=path.join(${JSON.stringify(tools)},rel);fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,value);}}
+const verb=process.argv[2]==='--phase'?process.argv[3]:process.argv[2];fs.appendFileSync(${JSON.stringify(trace)},JSON.stringify({event:'producer',name:${JSON.stringify(name)},verb})+'\\n');
+if(verb==='build'||verb==='install') {const out=${['cjprof','cjlint','lsp','cjhead'].includes(name)?"verb==='build'?path.join(process.argv[process.argv.indexOf("+JSON.stringify(name==='lsp'?'--build':'--build-dir')+")+1],"+JSON.stringify(name==='cjlint'?'target/release/bin/cjlint':name==='lsp'?'server/target/release/bin/main':name==='cjhead'?'cjhead':'cjprof')+"):path.join("+JSON.stringify(tools)+","+JSON.stringify(outputs[name])+")":"path.join("+JSON.stringify(tools)+",verb==='build'?"+JSON.stringify(buildProducts[name])+":"+JSON.stringify(outputs[name])+")"};fs.mkdirSync(path.dirname(out),{recursive:true});fs.writeFileSync(out,${JSON.stringify(body)},{mode:0o755});if(verb==='install')for(const [rel,value]of Object.entries(${JSON.stringify(payloads)})){const file=path.join(${JSON.stringify(tools)},rel);fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,value);}}
 `);
      continue;
     }
@@ -271,9 +272,9 @@ test('installed cjpm public regression follows tools installation and blocks pac
  const f=await installedRegressionFixture(),outs=[];
  for(const [label,args]of [['first',[]],['incremental',['--tools-build-mode','incremental']],['install',['--tools-phase','install']]]) {
   const r=await f.invoke(label,args);assert.equal(r.status,0,r.stderr);
-  const installed=JSON.parse(await fs.readFile(f.sdk+'/TOOLS-INPUTS.json','utf8'));assert.equal(Object.keys(installed.files).length,9);
+  const installed=JSON.parse(await fs.readFile(f.sdk+'/TOOLS-INPUTS.json','utf8'));assert.equal(Object.keys(installed.files).length,producers.length);
   assert.equal(JSON.parse(await fs.readFile(f.workspace+'/verify-tools/hello-result.json','utf8')).packaged.rc,0);
-  assert.equal(r.events.filter(e=>e.event==='producer'&&e.verb==='install').length,9);
+  assert.equal(r.events.filter(e=>e.event==='producer'&&e.verb==='install').length,producers.length);
   console.log('CJPM_INSTALL_AND_HELLO_CONTROL_REACHED '+label);
   const rows=r.events.filter(e=>e.event==='regression');
   console.log('CJPM_POST_INSTALL_CALL_ASSERT_REACHED '+label);
@@ -305,7 +306,7 @@ test('installed cjpm hello remains independent of the full regression call',asyn
 });
 
 // Keep the public tools/installation/hello path real. Only the compiler and
-// nine producer bodies are the existing controlled fixture, not official H.
+// ten producer bodies are the existing controlled fixture, not official H.
 test('public tools install accepts direct compiler SDKs and retains the staged recipe requirement',async()=>{
  const f=await installedRegressionFixture(),entry=f.sdk+'/bin/cjcj-stage1.entry';
  const saved=await fs.readFile(entry),raw=await fs.readFile(f.sdk+'/libexec/compiler/cjcj-stage1');
@@ -344,7 +345,7 @@ test('public independent install selects native tool prefixes without SDK public
  t.after(()=>fs.rm(root,{recursive:true,force:true}));
  for(const [,dir]of producers)await fs.mkdir(root+'/cangjie_tools/'+dir,{recursive:true});
  const env={...process.env,CANGJIE_MANGLE_SOURCE_DIR:root+'/mangle',CANGJIE_BUILD_DRY_RUN:'1',CANGJIE_BUILD_JOBS:'1'};
- const invoke=(extra=[])=>spawnSync(process.execPath,[cli,...profOptions,'--workspace',root,
+ const invoke=(extra=[])=>spawnSync(process.execPath,[cli,...profOptions,'--workspace',root,'--build-root',root+'/build',
   '--tools-phase','install','--tools-build-set','cjfmt,lsp,cjlint,cjprof,cjcompat',
   '--tools-install-prefix',root+'/installed',...extra,'build','tools'],{env,encoding:'utf8'});
  const r=invoke();assert.equal(r.status,0,r.stderr);

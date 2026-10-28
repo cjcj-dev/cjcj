@@ -227,7 +227,7 @@ export async function run(config) {
     // Independent native tools retain their original build facts and install
     // through upstream build.py into separate prefixes, without publishing an SDK.
     if(config.toolsInstallPrefix) {
-      const independent=allTools.filter(([name])=>selected.has(name));
+      const independent=allTools.filter(([name])=>!selected||selected.has(name));
       if(config.target.spec.crossCompile)
         throw new BuildError('tools.install','independent install requires native tools');
       await assertSourceIdentity(config.repo('tools'),toolsRoot);
