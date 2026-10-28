@@ -121,26 +121,38 @@ async function astTool(f,name) {
   const ast=await f.write('tools/lib/libcangjie-lsp.so','AST fixture');p.build.inputs.artifacts.nativeAst={sdkRelative:ast.path,sha256:ast.sha256};
   f.input.files[rel]=template;await f.save();return {rel,p};
 }
-for(const name of ['lsp'])readTest('public '+name+' retains AST linkage and its actual compiler/macro edges',async t=>{
-  const f=await fixture(t),{rel,p}=await astTool(f,name),publicName=path.basename(rel);
-  assert.equal(publicRead(f.root)[publicName].ready,true);
-  await f.write('STAGE-INPUTS.json',JSON.stringify({...p.build.inputs.stage,fixture:'new label only'}));
-  assert.equal(publicRead(f.root)[publicName].ready,true,'unrelated stage label is not a native dependency');
-  assert.equal(publicRead(f.root).cjprof.ready,false,'Cangjie producer retains its selected SDK identity');
-  await f.write('STAGE-INPUTS.json',JSON.stringify(p.build.inputs.stage));
-  await f.write('tools/lib/libcangjie-lsp.so','changed AST');
-  let r=publicRead(f.root);assert.equal(r[publicName].ready,false);assert.match(r[publicName].reason,/installed bytes differ: tools\/lib\/libcangjie-lsp/);assert.equal(r.cjprof.ready,true);
-  await f.write('tools/lib/libcangjie-lsp.so','AST fixture');
-  for(const key of ['compiler','stdCore','runtime']) {
-    const file=p.build.inputs.artifacts[key].sdkRelative,old=await fs.readFile(path.join(f.root,file));
-    await f.write(file,'changed macro dependency');r=publicRead(f.root);
-    assert.equal(r[publicName].ready,!['cjlint','lsp'].includes(name),key+': '+r[publicName].reason);
-    if(['cjlint','lsp'].includes(name))assert.match(r[publicName].reason,/installed bytes differ/);
-    await f.write(file,old);
+async function cangjieLsp(f) {
+  const template=structuredClone(f.input.files['tools/bin/cjprof']),p=template.producer;
+  const rel='tools/bin/LSPServer',retained='.target-tools/tools/lsp/bin/LSPServer';
+  template.artifact=await f.write(retained,await fs.readFile('/usr/bin/true'));
+  template.entry=await f.write(rel,await fs.readFile('/usr/bin/true'));
+  template.entry.recipe=await f.write(rel+'.entry',['cjcj-sdk-entry-v1','2',retained,'linux','native-target:x64','.target-tools/tools/lsp/lib'].join('\n')+'\n');
+  p.artifact=structuredClone(template.artifact);p.install.artifact=structuredClone(template.artifact);
+  p.build.directory='cangjie-language-server';p.build.payloads={};p.install.payloads={};
+  p.build.nativeConfiguration={cangjie:{values:{rc:0,signal:null,error:null,inputs:{sdk:'/host-H',frontendPackages:'/fixed-frontend',llvmLibrary:'/libLLVM.so',runtimeConfig:'/config.o',jsonBuild:'/json',llvmShim:'/shim.o'}}}};
+  for(const tail of ['libcangjie-runtime.so','libLLVM-15.so']) {
+    const row=await f.write('.target-tools/tools/lsp/lib/'+tail,'normal LSP install '+tail);
+    p.install.payloads[row.path]={source:'/producer/'+tail,sha256:row.sha256};
+    f.input.payloadFiles[row.path]={sha256:row.sha256,producers:['lsp']};
   }
+  delete p.build.inputs.artifacts.nativeAst;
+  f.input.files[rel]=template;await f.save();return p;
+}
+readTest('public Cangjie LSP binds its normal frontend payload and selected SDK without a C++ AST fallback',async t=>{
+  const f=await fixture(t),p=await cangjieLsp(f);
+  assert.equal(publicRead(f.root).LSPServer.ready,true,publicRead(f.root).LSPServer.reason);
+  const payload='.target-tools/tools/lsp/lib/libcangjie-runtime.so',old=await fs.readFile(path.join(f.root,payload));
+  await f.write(payload,'changed');assert.match(publicRead(f.root).LSPServer.reason,/installed bytes differ/);assert.equal(publicRead(f.root).cjprof.ready,true);
+  await f.write(payload,old);assert.equal(publicRead(f.root).LSPServer.ready,true);
+  const selected=p.build.nativeConfiguration.cangjie.values.inputs;
+  const frontend=selected.frontendPackages;delete selected.frontendPackages;await f.save();
+  assert.match(publicRead(f.root).LSPServer.reason,/Cangjie LSP input missing: frontendPackages/);
+  selected.frontendPackages=frontend;await f.save();assert.equal(publicRead(f.root).LSPServer.ready,true);
+  await f.write('STAGE-INPUTS.json',JSON.stringify({...p.build.inputs.stage,fixture:'different analysis SDK'}));
+  assert.match(publicRead(f.root).LSPServer.reason,/producer SDK selection differs/);
 });
-readTest('public readiness keeps separately installed compiler execution runtime for native macros',async t=>{
-  const f=await fixture(t),{p}=await astTool(f,'lsp');
+readTest('public LSP readiness retains separately installed compiler execution dependencies',async t=>{
+  const f=await fixture(t),p=await cangjieLsp(f);
   const exec=await f.write('.compiler-exec/runtime/lib/runtime.so','execution runtime');
   p.build.inputs.artifacts.executionRuntime={sdkRelative:exec.path,sha256:exec.sha256};await f.save();
   assert.equal(publicRead(f.root).LSPServer.ready,true);

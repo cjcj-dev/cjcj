@@ -114,7 +114,7 @@ test('same-run handoff retains and revalidates explicit runtime authorization an
   const formal = Object.fromEntries((await fs.readFile(new URL('../../runtime_pin.env', import.meta.url), 'utf8')).trim().split('\n').map(line => line.split('=')));
   await fs.writeFile(pin, `RUNTIME_REF=${selected}\nRUNTIME_SRC_URL=${formal.RUNTIME_SRC_URL}\n`);
   Object.assign(f.env, {CJCJ_RUNTIME_REF_OVERRIDE: selected, CJCJ_ALLOW_RUNTIME_OVERRIDE: 'true',
-    CJCJ_NATIVE_RUNTIME_REF: selected, RUNTIME_SRC_URL: formal.RUNTIME_SRC_URL, CJCJ_BOOTSTRAP_RUNTIME_PIN: pin,
+    RUNTIME_SRC_URL: formal.RUNTIME_SRC_URL, CJCJ_BOOTSTRAP_RUNTIME_PIN: pin,
     COLOUR_RT_RUN_ID: '123', COLOUR_RT_RUN_ATTEMPT: '1', COLOUR_RT_ARTIFACT_ID: '456',
     COLOUR_RT_MANIFEST_SHA256: 'e'.repeat(64)});
   const packed = f.run('pack');

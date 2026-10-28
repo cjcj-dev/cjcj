@@ -1,5 +1,5 @@
 // SDK-relative runtime inputs, taken from the native install rules and callers:
-// Cangjie cjfmt reads its format file; the existing LSP links its shared library;
+// Cangjie cjfmt reads its format file; LSP retains its installed Cangjie runtime closure;
 // HLE main.cj invokes node and its parser invokes TypeScript/cjbind dependencies.
 import {nativeToolLibraries} from '../../build/srcbuild/tool-layout.mjs';
 import {getTarget,getReleasePlatform} from '../../build/lib/targets.mjs';
@@ -19,8 +19,10 @@ export function sourceToolPayloads(tool, platform = 'linux-x64') {
   try{getTarget(key);}catch{key=getReleasePlatform(platform).host;}
   const spec=getTarget(key).spec;
   if(tool==='cjfmt')return SOURCE_TOOL_PAYLOADS.cjfmt;
-  if(tool==='LSPServer')return SOURCE_TOOL_PAYLOADS.LSPServer;
-  if(tool==='cjlint')return SOURCE_TOOL_PAYLOADS.cjlint;
+  if(['LSPServer','cjlint','cjhead'].includes(tool)) {
+    const entry='tools/bin/'+tool+spec.exeSuffix;
+    return [...SOURCE_TOOL_PAYLOADS[tool],entry,entry+'.entry'];
+  }
   if(tool==='cjprof')return [...SOURCE_TOOL_PAYLOADS.cjprof,...nativeToolLibraries('cjprof',spec.os).map(row=>row.to)];
   if(tool==='hle')return ['tools/dtsparser','tools/bin/node'+spec.exeSuffix];
   return SOURCE_TOOL_PAYLOADS[tool];

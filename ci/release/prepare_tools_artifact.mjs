@@ -45,6 +45,16 @@ const row=record.files?.['tools/bin/'+name],producer=row?.producer;
 if(producer?.source?.status!=='resolved'||!producer.source.repository||!/^[a-f0-9]{40}$/.test(producer.source.commit??'')
   ||producer.build?.rc!==0||producer.install?.rc!==0||producer.build.platform!==getTarget(values.platform).spec.llvmPlatform)throw Error('SOURCE_TOOL_ARTIFACT_PRODUCER '+values.tool);
 const pin=producer.source;
+// Transport the normal install's existing target launcher and relative recipe.
+// Artifact installation must not rebuild a host launcher for a cross target.
+if(['cjlint','LSPServer','cjhead'].includes(values.tool)) {
+  const publicPath='tools/bin/'+name;
+  if(row.entry?.path!==publicPath||row.entry.recipe?.path!==publicPath+'.entry')throw Error('SOURCE_TOOL_ARTIFACT_ENTRY '+values.tool);
+  for(const entry of [row.entry,row.entry.recipe])if(await fileDigest(await safePayloadPath(sourceSdk,entry.path))!==entry.sha256)
+    throw Error('SOURCE_TOOL_ARTIFACT_ENTRY_BYTES '+entry.path);
+  const retained=await artifactSourceBinary(path.join(sourceSdk,publicPath),sourceSdk,values.platform);
+  if(retained===path.join(sourceSdk,publicPath)||await fileDigest(retained)!==row.sha256)throw Error('SOURCE_TOOL_ARTIFACT_ENTRY_BODY '+values.tool);
+}
 
 const inputBinary=await fs.realpath(values.binary);
 const realSdk=await fs.realpath(sourceSdk);

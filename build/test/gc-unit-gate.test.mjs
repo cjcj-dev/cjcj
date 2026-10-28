@@ -4,6 +4,7 @@ import test from 'node:test';import assert from 'node:assert/strict';
 import {buildConfig} from '../lib/config.mjs';
 import {directSource,directBuild,write} from '../../ci/fixtures/runtime-direct-inputs.mjs';
 import {languageInputEnvironment,gcUnitLanguageGateEnabled,gcUnitRuntimeBuildEnv,gcUnitBuildStatus,gcUnitStatusPath,beginGcUnitLanguageDeferral,finishGcUnitLanguageDeferral,assertGcUnitLanguageDeferred,assertGcUnitLanguageDone} from '../srcbuild/gc-unit-gate.mjs';
+if(process.env.RELEASE_EVIDENCE_TEST_ROOT)fs.mkdirSync(process.env.RELEASE_EVIDENCE_TEST_ROOT,{recursive:true});
 test('normal source build carries only this invocation defer and normal inputs',()=>{
  const root=fs.mkdtempSync(path.join(process.env.RELEASE_EVIDENCE_TEST_ROOT||os.tmpdir(),'direct-deferral-'));
  const config=buildConfig({workspace:root,targetKey:'linux-x64'}),runtime=path.join(config.repoPath('runtime'),'runtime'),sdk=root+'/sdk',env={CJCJ_OFFICIAL_SDK_ROOT:root+'/host'};

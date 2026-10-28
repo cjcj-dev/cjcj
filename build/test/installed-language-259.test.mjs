@@ -10,6 +10,7 @@ import {languageSourceInputs} from '../srcbuild/installed-language-source.mjs';
 const fixed=JSON.parse(fs.readFileSync(new URL('../../ci/platform_matrix/fixtures/runtime-language-259.json',import.meta.url)));
 const tuple='linux_x86_64_cjnative',entry=new URL('../../ci/bootstrap/sdk-installed-language.mjs',import.meta.url).pathname;
 function fixture(label,{payloads=true,testable=false,reentry=false}={}) {
+  if(process.env.RELEASE_EVIDENCE_TEST_ROOT)fs.mkdirSync(process.env.RELEASE_EVIDENCE_TEST_ROOT,{recursive:true});
   const root=fs.mkdtempSync(path.join(process.env.RELEASE_EVIDENCE_TEST_ROOT||os.tmpdir(),'language259-'+label+'-'));
   const runtime=root+'/source/runtime',sdk=root+'/sdk',host=root+'/host',unit=runtime+'/tests/gc_unit';
   directSource(runtime);directBuild(runtime);

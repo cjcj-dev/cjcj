@@ -5,11 +5,11 @@ import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {inventory, expandInputs} from './g1-entry-branches.mjs';
-import {readSourcePins} from './native-llvm-inputs.mjs';
+import {readSourcePins,nativeLlvmInputs} from './native-llvm-inputs.mjs';
 const root = path.resolve(import.meta.dirname, '..');
 const entry = 'ci/test-llvm-tuple-layout.mjs';
 function run(argv, cwd = root) {
-  const result = spawnSync(argv[0], argv.slice(1), {cwd, encoding: 'utf8', timeout: 60000});
+  const result = spawnSync(argv[0], argv.slice(1), {cwd, env:{...process.env,...nativeLlvmInputs()}, encoding: 'utf8', timeout: 60000});
   assert.ifError(result.error);
   assert.equal(result.signal, null);
   return {rc: result.status, stdout: result.stdout, stderr: result.stderr};

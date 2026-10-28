@@ -227,6 +227,7 @@ test('apply throws patch shape drift when DEPENDS cjnative shape moves', () => {
 // patch helper. build compiler deliberately bypasses fetch on reentry.
 for (const entry of ['fetch', 'build']) test(`public ${entry} restores both static boundscheck producer edges`, () => {
   const evidence=process.env.RELEASE_EVIDENCE_TEST_ROOT;
+  if(evidence)fs.mkdirSync(evidence,{recursive:true});
   const workspace = fs.mkdtempSync(path.join(evidence||os.tmpdir(), 'boundscheck-cli-'));
   const commands=[];
   try {

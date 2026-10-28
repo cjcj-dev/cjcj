@@ -11,7 +11,7 @@ await entry(async () => {
   await run([shell, '-c', 'printf "BASH_VERSION=%s\\nBASH_PATH=%s\\n" "$BASH_VERSION" "$BASH"']);
   const base = {...process.env};
   for (const key of Object.keys(base)) if (/^(CJCJ_SRCBUILD_|CJCJ_LLVM_RUNTIME_)/.test(key)) delete base[key];
-  delete base.RUNTIME_REF; delete base.RUNTIME_SRC_URL;
+  delete base.CJCJ_NATIVE_LLVM_REF; delete base.CJCJ_NATIVE_RUNTIME_REF; delete base.RUNTIME_SRC_URL;
   const git = async (...argv) => (await capture(['git', ...argv])).stdout.trim();
   const inputs = {};
   for (const [name, file, body] of [
@@ -52,12 +52,19 @@ await entry(async () => {
     const fixture = path.join(work, 'fetch-repo');
     for (const [from, to] of [
       [fetch, 'ci/platform_tuples/fetch_sources.mjs'], [helper, 'build/lib/srcbuild_git.sh'],
-      ...['ci/platform_tuples/entry.mjs', 'ci/entry-common.mjs', 'ci/fetch-llvm-runtime.mjs'].map(file => [path.join(repo, file), file]),
+      ...['ci/platform_tuples/entry.mjs', 'ci/entry-common.mjs', 'ci/fetch-llvm-runtime.mjs',
+        'ci/native-llvm-inputs.mjs','ci/source_pin.env','ci/llvm_pin.env','ci/host_sdk_pin.env',
+        'ci/host-toolchain-pin.mjs','ci/build-resources.mjs',
+        ...['native-source-selection','sdk-targets','sdk-flow','sdk-io','sdk-platform',
+          'sdk-command-lifetime','sdk-std-resume','sdk-install-entries','sdk-source'].map(name=>'ci/bootstrap/'+name+'.mjs')]
+        .map(file => [path.join(repo, file), file]),
     ]) { const dest = path.join(fixture, to); fs.mkdirSync(path.dirname(dest), {recursive: true}); fs.copyFileSync(from, dest); }
     fs.writeFileSync(path.join(fixture, 'ci/runtime_pin.env'), `RUNTIME_REF=${inputs.runtime.sha}\nRUNTIME_SRC_URL=file://${inputs.runtime.bare}\n`);
     const tuple = path.join(work, 'tuple');
-    const env = {...base, TUPLE_ROOT: tuple, GIT_TRACE: path.join(work, 'sources.trace')};
-    for (const [prefix, name] of [['LLVM', 'llvm'], ['CANGJIE_COMPILER', 'compiler'], ['FLATBUFFERS', 'flatbuffers']]) {
+    fs.appendFileSync(path.join(fixture,'ci/llvm_pin.env'),`\nLLVM_URL=file://${inputs.llvm.bare}\n`);
+    const env = {...base, TUPLE_ROOT: tuple, GIT_TRACE: path.join(work, 'sources.trace'),
+      LLVM_URL:`file://${inputs.llvm.bare}`, CJCJ_NATIVE_LLVM_REF:inputs.llvm.sha,CJCJ_NATIVE_RUNTIME_REF:inputs.runtime.sha};
+    for (const [prefix, name] of [['CANGJIE_COMPILER', 'compiler'], ['FLATBUFFERS', 'flatbuffers']]) {
       env[`${prefix}_URL`] = `file://${inputs[name].bare}`; env[`${prefix}_SHA`] = inputs[name].sha;
     }
     const r = await run(['npx', '--yes', 'zx@8', path.join(fixture, 'ci/platform_tuples/fetch_sources.mjs')], {env, log: path.join(work, 'sources.log'), check: false});

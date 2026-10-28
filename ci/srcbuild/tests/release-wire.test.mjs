@@ -269,8 +269,8 @@ test('the cross-tool step and the source installation name the same tool paths',
   const crossRegion = source.slice(crossStart, crossEnd);
   for (const [tool, relative] of [['cjfmt', 'cjfmt/dist/bin/cjfmt'],
     ['hle', 'hyperlangExtension/target/bin/main'],
-    ['LSPServer', 'cangjie-language-server/output/bin/LSPServer'],
-    ...['cjlint','cjprof','cjcompat'].map(name=>[name,name+'/dist/bin/'+name])]) {
+    ['LSPServer', 'cangjie-language-server/dist/bin/cangjie-lsp'],
+    ...['cjlint','cjprof','cjcompat','cjhead'].map(name=>[name,name+'/dist/bin/'+name])]) {
     assert.ok(installTools.includes(relative), `${tool}: the source installation must name ${relative}`);
     const directory = path.posix.dirname(relative);
     const staged = crossRegion.match(new RegExp(`cangjie_tools/${directory}/[A-Za-z0-9_.-]+`));

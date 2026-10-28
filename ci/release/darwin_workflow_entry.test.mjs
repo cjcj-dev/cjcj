@@ -63,6 +63,7 @@ test('all four native cells retain targets runtime split timeout and environment
 test('runtime checkout retains its pinned repository and separate source directory', () => {
   const checkouts = steps.filter(step => step.uses === 'actions/checkout@v7');
   const expected = originalSteps.filter(step => step.uses === 'actions/checkout@v7');
+  expected[1] = {...expected[1], with: {...expected[1].with, ref: '${{ env.CJCJ_NATIVE_RUNTIME_REF }}'}};
   observed('DARWIN_RUNTIME_SOURCE_DOMAIN', checkouts[1]);
   assert.equal(checkouts.length, 2, 'DARWIN_CHECKOUT_DOMAINS');
   assert.deepEqual(checkouts[1], expected[1], 'DARWIN_RUNTIME_SOURCE_DOMAIN');
@@ -105,7 +106,9 @@ test('native producer bytes retain Darwin identity and Mach-O rejection controls
 test('local sccache start and always report retain their original workspace domain', () => {
   for (const uses of ['./.github/actions/sccache', './.github/actions/sccache-report']) {
     observed('DARWIN_SCCACHE_DOMAIN', byUses(steps, uses));
-    assert.deepEqual(byUses(steps, uses), byUses(originalSteps, uses), 'DARWIN_SCCACHE_DOMAIN');
+    const expected = structuredClone(byUses(originalSteps, uses));
+    if (uses === './.github/actions/sccache') expected.with.pin = '${{ env.CJCJ_NATIVE_RUNTIME_REF }}';
+    assert.deepEqual(byUses(steps, uses), expected, 'DARWIN_SCCACHE_DOMAIN');
   }
 });
 

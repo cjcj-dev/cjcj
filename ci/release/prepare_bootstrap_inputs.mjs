@@ -153,7 +153,7 @@ if (process.platform === 'linux' || darwin || process.env.CJCJ_BOOTSTRAP_DYLIB_A
     throw new Error(`LLVM_DYLIB_SHA256_MISMATCH expected=${dylibPin} actual=${colourDigest} file=${colourLlvm}`);
   }
   const dylibManifest = JSON.parse(fs.readFileSync(path.join(dylibRoot, 'manifest.json'), 'utf8'));
-  if ((runtimeSelection.overrideRef || dylibManifest.runtime_sha !== undefined)
+  if ((runtimeSelection.nativePair || runtimeSelection.overrideRef || dylibManifest.runtime_sha !== undefined)
       && dylibManifest.runtime_sha !== runtimeSelection.runtimeRef) {
     throw new Error('LLVM_DYLIB_RUNTIME_MISMATCH');
   }

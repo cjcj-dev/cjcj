@@ -1,3 +1,4 @@
+import {TOOL_NAMES,TOOL_PUBLIC_NAMES} from '../srcbuild/tool-layout.mjs';
 import {sourceToolPayloads} from '../../ci/release/source-tool-payloads.mjs';
 import {getTarget} from './targets.mjs';
 import {sdkPlatform,entryPlatformName} from '../../ci/bootstrap/sdk-platform.mjs';
@@ -10,7 +11,7 @@ export const BASE_SDK_PROVENANCE = 'BASE-SDK-PROVENANCE.json';
 export const CJPM_PROVENANCE = 'CJPM-PROVENANCE.json';
 export const HLE_PROVENANCE = 'HLE-PROVENANCE.json';
 // Required shared-tool products include their target native support payloads.
-export const SOURCE_TOOLS_NATIVE = Object.freeze(['cjfmt', 'LSPServer', 'cjcov', 'cjtrace-recover', 'cjlint', 'cjprof', 'cjcompat']);
+export const SOURCE_TOOLS_NATIVE = Object.freeze(TOOL_NAMES.filter(name=>!['cjpm','hle'].includes(name)).map(name=>TOOL_PUBLIC_NAMES[name]??name));
 export const SOURCE_TOOLS_WINDOWS = SOURCE_TOOLS_NATIVE;
 
 // hle and cjpm retain their dedicated producer/install paths.

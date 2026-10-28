@@ -1273,6 +1273,22 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      - name: Prepare source-built cjhead artifact
+        run: |
+          node ci/release/prepare_tools_artifact.mjs \
+            --tool cjhead --platform "${{ matrix.target }}" \
+            --binary "$CANGJIE_WORKSPACE/cangjie_tools/cjhead/dist/bin/cjhead" \
+            --sdk "$CANGJIE_WORKSPACE/software/cangjie" \
+            --outdir "$GITHUB_WORKSPACE/.release-tools/${{ matrix.target }}/cjhead"
+
+      - name: Upload source-built cjhead artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: source-cjhead-${{ matrix.target }}
+          path: ${{ github.workspace }}/.release-tools/${{ matrix.target }}/cjhead
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Prepare source-built cjfmt artifact
         run: |
           node ci/release/prepare_tools_artifact.mjs \
@@ -1294,7 +1310,7 @@ jobs:
           node ci/release/prepare_tools_artifact.mjs \
             --tool LSPServer --platform "${{ matrix.target }}" \
             --sdk "$CANGJIE_WORKSPACE/software/cangjie" \
-            --binary "$CANGJIE_WORKSPACE/cangjie_tools/cangjie-language-server/output/bin/LSPServer" \
+            --binary "$CANGJIE_WORKSPACE/cangjie_tools/cangjie-language-server/dist/bin/cangjie-lsp" \
             --outdir "$GITHUB_WORKSPACE/.release-tools/${{ matrix.target }}/LSPServer"
 
       - name: Upload source-built LSPServer artifact
@@ -1965,6 +1981,24 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      - name: Prepare cross-built Windows cjhead artifact
+        if: matrix.target == 'linux-x64'
+        run: |
+          node ci/release/prepare_tools_artifact.mjs \
+            --tool cjhead --platform "windows-x64" \
+            --binary "$CANGJIE_WORKSPACE/cangjie_tools/cjhead/dist/bin/cjhead.exe" \
+            --sdk "$CANGJIE_WORKSPACE/software/cangjie-windows" \
+            --outdir "$GITHUB_WORKSPACE/.release-tools-windows/cjhead"
+
+      - name: Upload cross-built Windows cjhead artifact
+        if: matrix.target == 'linux-x64'
+        uses: actions/upload-artifact@v7
+        with:
+          name: source-cjhead-windows-x64
+          path: ${{ github.workspace }}/.release-tools-windows/cjhead
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Prepare cross-built Windows cjfmt artifact
         if: matrix.target == 'linux-x64'
         run: |
@@ -1988,7 +2022,7 @@ jobs:
         run: |
           node ci/release/prepare_tools_artifact.mjs \
             --tool LSPServer --platform windows-x64 \
-            --binary "$CANGJIE_WORKSPACE/cangjie_tools/cangjie-language-server/output/bin/LSPServer.exe" \
+            --binary "$CANGJIE_WORKSPACE/cangjie_tools/cangjie-language-server/dist/bin/cangjie-lsp.exe" \
             --sdk "$CANGJIE_WORKSPACE/software/cangjie-windows" \
             --outdir "$GITHUB_WORKSPACE/.release-tools-windows/LSPServer"
 

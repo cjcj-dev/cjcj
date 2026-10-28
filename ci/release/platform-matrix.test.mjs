@@ -5,6 +5,7 @@ import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import test from 'node:test';
 import {checkPlatform, planMatrix, probeRequirement, runnerHost, selectPlatforms} from './platform-matrix.mjs';
+import {nativeLlvmInputs} from '../native-llvm-inputs.mjs';
 import {allReleasePlatforms, getReleasePlatform, RELEASE_REQUIREMENTS, sourceBuildCells, releasePlatformReadiness} from '../../build/lib/targets.mjs';
 
 const script = path.resolve(import.meta.dirname, 'platform-matrix.mjs');
@@ -16,7 +17,9 @@ test('Linux native runtime qualifies teardown tools before invoking the gate', t
   assert.match(build, /apt-get install -y -qq clang cmake make gdb coreutils/);
   const native = build.slice(build.indexOf("} else if (runtimeTarget === 'native')"), build.indexOf("} else if (process.platform === 'darwin')"));
   assert.ok(native.indexOf('qualify_teardown_tools.mjs') >= 0);
-  assert.ok(native.indexOf('qualify_teardown_tools.mjs') < native.indexOf('python3 build.py build'));
+  const buildCall = native.indexOf("nativePython('build', ['build.py', 'build'");
+  assert.ok(buildCall >= 0, 'normal nativePython build entry remains present');
+  assert.ok(native.indexOf('qualify_teardown_tools.mjs') < buildCall);
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'teardown-tools-'));
   t.after(() => fs.rmSync(temporary, {recursive: true, force: true}));
   const log = path.join(temporary, 'tools.log');
@@ -120,10 +123,12 @@ test('runtime build entry refuses an unusable gdb and records the root cause', {
   writeTool('python3', 'if [[ "$1" == "--version" ]]; then echo fixture-python; exit 0; fi\necho "$*" >> "$BUILD_CALLS"\nmkdir -p "$PLATFORM_CI_ROOT/runtime-install"\ntouch "$PLATFORM_CI_ROOT/runtime-install/libcangjie-runtime.so"');
   const output = path.join(temporary, 'output');
   const calls = path.join(temporary, 'build-calls');
+  const selectedRuntime = spawnSync('git', ['-C', source, 'rev-parse', 'HEAD'], {encoding: 'utf8'});
+  assert.equal(selectedRuntime.status, 0, selectedRuntime.stderr);
   const result = spawnSync('npx', ['--yes', 'zx@8', 'ci/platform_matrix/build_runtime.mjs'], {
     cwd: root, encoding: 'utf8', timeout: 110000,
     env: {...process.env, PATH: `${tools}${path.delimiter}${process.env.PATH}`, RUNTIME_SOURCE: source,
-      CJCJ_NATIVE_RUNTIME_REF: '', RUNTIME_TARGET: 'native', RUNTIME_TOOLCHAIN: '', PLATFORM_CI_ROOT: output,
+      ...nativeLlvmInputs(), CJCJ_NATIVE_RUNTIME_REF: selectedRuntime.stdout.trim(), RUNTIME_TARGET: 'native', RUNTIME_TOOLCHAIN: '', PLATFORM_CI_ROOT: output,
       BUILD_CALLS: calls, GITHUB_STEP_SUMMARY: path.join(temporary, 'summary.md')},
   });
   assert.equal(result.status, 1, result.stdout + result.stderr);

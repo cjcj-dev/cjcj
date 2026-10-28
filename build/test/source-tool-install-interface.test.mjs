@@ -14,14 +14,14 @@ const parent=process.env.RELEASE_EVIDENCE_TEST_ROOT;
 if(!parent)throw new Error('RELEASE_EVIDENCE_TEST_ROOT required');
 await fs.mkdir(parent,{recursive:true});
 const write=async(file,value,mode=0o644)=>{await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,value,{mode});};
-test('A8 controlled HLE inputs and nine installed tool interfaces retain configuration',async()=>{
+test('A8 controlled HLE inputs and ten installed tool interfaces retain configuration',async()=>{
  const work=await fs.mkdtemp(path.join(parent,'a8-install-')),workspace=path.join(work,'workspace');
  const config=buildConfig({workspace,buildRoot:path.join(work,'buildtools'),cangjieVersion:'1.2.3',consumerSdk:path.join(workspace,'software/cangjie'),officialSdkRoot:path.join(work,'official'),toolsPhase:'install'});
  const sdk=config.consumerSdk,tools=config.repoPath('tools');
- const rows=[['cjpm','cjpm/dist/cjpm'],['cjfmt','cjfmt/dist/bin/cjfmt'],['hle','hyperlangExtension/target/bin/main'],['LSPServer','cangjie-language-server/output/bin/LSPServer'],['cjcov','cjcov/dist/cjcov'],['cjtrace-recover','cjtrace-recover/dist/bin/cjtrace-recover'],['cjlint','cjlint/dist/bin/cjlint'],['cjprof','cjprof/dist/bin/cjprof'],['cjcompat','cjcompat/dist/bin/cjcompat']];
+ const rows=[['cjpm','cjpm/dist/cjpm'],['cjfmt','cjfmt/dist/bin/cjfmt'],['hle','hyperlangExtension/target/bin/main'],['LSPServer','cangjie-language-server/dist/bin/cangjie-lsp'],['cjcov','cjcov/dist/cjcov'],['cjtrace-recover','cjtrace-recover/dist/bin/cjtrace-recover'],['cjlint','cjlint/dist/bin/cjlint'],['cjprof','cjprof/dist/bin/cjprof'],['cjcompat','cjcompat/dist/bin/cjcompat'],['cjhead','cjhead/dist/bin/cjhead']];
  for(const [name,relative]of rows){await write((name==='hle'?path.join(config.buildRoot,'hle/bin/main'):path.join(tools,relative)),'#!'+process.execPath+'\nconsole.log(process.env.ENTRY_ARGV_PROBE ? JSON.stringify({args:process.argv.slice(2),cwd:process.cwd()}) : '+JSON.stringify(name+':42')+');\n',0o755);await write(path.join(sdk,'tools/bin',name),'old '+name);await write(path.join(config.officialSdkRoot,'tools/bin',name),'official interface');}
  await write(path.join(sdk,'tools/config/other.toml'),'preserved');
- for(const rel of ['cjlint/dist/lib/libcangjie-runtime.so','cjlint/dist/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so','cjlint/dist/modules/std.core.cjo','cjlint/dist/config/cjlint_rule_list.json','cjprof/dist/lib/libcjprof-cangjie.so','cjprof/dist/lib/libcjprof-jni.so','cjprof/dist/share/java/cjprof.jar','cjprof/dist/config/static/index.html'])await write(path.join(tools,rel),'explicit interface payload '+rel);
+ for(const rel of ['cangjie-language-server/dist/lib/libcangjie-runtime.so','cjhead/dist/lib/libcangjie-runtime.so','cjhead/dist/share/README','cjlint/dist/lib/libcangjie-runtime.so','cjlint/dist/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so','cjlint/dist/modules/std.core.cjo','cjlint/dist/config/cjlint_rule_list.json','cjprof/dist/lib/libcjprof-cangjie.so','cjprof/dist/lib/libcjprof-jni.so','cjprof/dist/share/java/cjprof.jar','cjprof/dist/config/static/index.html'])await write(path.join(tools,rel),'explicit interface payload '+rel);
  await write(path.join(tools,'cjfmt/dist/config/cangjie-format.toml'),'new format');
  await write(path.join(tools,'cjpm/dist/cangjie-repo.toml'),'new repository');
  const parser=path.join(tools,'hyperlangExtension/src/dtsparser');
@@ -38,7 +38,7 @@ test('A8 controlled HLE inputs and nine installed tool interfaces retain configu
  assert.equal(recorded.files['tools/bin/cjprof'].producer.source.status,'unresolved','fixture payloads do not acquire target qualification');
  assert.equal(recorded.buildSelection.phase,'install');
  assert.equal(recorded.buildSelection.builtThisInvocation,'none');
- assert.equal(recorded.buildSelection.reusedExistingOutputs.length,9);
+ assert.equal(recorded.buildSelection.reusedExistingOutputs.length,10);
  for(const [name]of rows){const result=spawnSync(path.join(sdk,'tools/bin',name),[],{encoding:'utf8'});console.log('A8_NATIVE_INSTALL_TARGET_ASSERTION_REACHED',name,result.status,result.stdout.trim());assert.deepEqual({rc:result.status,out:result.stdout.trim()},{rc:0,out:name+':42'});}
  assert.equal(await fs.readFile(path.join(sdk,'tools/config/other.toml'),'utf8'),'preserved');
  assert.equal(await fs.readFile(path.join(sdk,'tools/config/cangjie-repo.toml'),'utf8'),'new repository');

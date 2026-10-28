@@ -65,7 +65,7 @@ test('Cangjie lint transports an isolated analysis application without legacy li
  const read=()=>toolPayloads(config,'cjlint',prefix);
  const rows=await read();assert.equal(rows.length,5);
  assert(rows.every(row=>row.to.startsWith('.target-tools/tools/cjlint/')));
- assert.deepEqual(sourceToolPayloads('cjlint'),['.target-tools/tools/cjlint']);
+ assert.deepEqual(sourceToolPayloads('cjlint'),['.target-tools/tools/cjlint','tools/bin/cjlint','tools/bin/cjlint.entry']);
  await write('lib/libcjlint.so');await assert.rejects(read,/CJLINT_RETIRED_LIBRARY/);
  await fs.rm(prefix+'/lib/libcjlint.so');assert.deepEqual(await read(),rows);
  await fs.rename(prefix+'/modules',prefix+'/modules-held');await assert.rejects(read,/ENOENT/);

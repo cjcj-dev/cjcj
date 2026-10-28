@@ -22,10 +22,10 @@ test('release runtime loader selects the stack-slot-root runtime paired with LLV
   try {
     const output = path.join(dir, 'github-env');
     const env = {...process.env, GITHUB_ENV: output};
-    for (const key of ['RUNTIME_REF', 'RUNTIME_SRC_URL', 'CJCJ_RUNTIME_REF_OVERRIDE', 'CJCJ_ALLOW_RUNTIME_OVERRIDE']) delete env[key];
+    for (const key of ['CJCJ_NATIVE_LLVM_REF', 'CJCJ_NATIVE_RUNTIME_REF', 'RUNTIME_SRC_URL', 'CJCJ_RUNTIME_REF_OVERRIDE', 'CJCJ_ALLOW_RUNTIME_OVERRIDE']) delete env[key];
     const result = spawnSync(process.execPath, [fileURLToPath(new URL('ci/load_runtime_pin.mjs', root))], {env, encoding: 'utf8'});
     assert.equal(result.status, 0, result.stderr);
-    const selected = /^RUNTIME_REF=(.*)$/m.exec(fs.readFileSync(output, 'utf8'))?.[1];
+    const selected = /^CJCJ_NATIVE_RUNTIME_REF=(.*)$/m.exec(fs.readFileSync(output, 'utf8'))?.[1];
     assert.equal(selected, runtime.RUNTIME_REF, 'release runtime must provide the paired ordinary-statepoint register-root contract');
     console.log(`ASSERT release-runtime-selected=${selected}`);
   } finally { fs.rmSync(dir, {recursive: true, force: true}); }
