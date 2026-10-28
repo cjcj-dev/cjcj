@@ -8,14 +8,14 @@ import {fileDigest} from '../bootstrap/sdk-flow.mjs';
 import {readToolsPin, readCjpmPin} from '../../build/lib/release-component-provenance.mjs';
 import {sourceToolPayloads} from './source-tool-payloads.mjs';
 import {releaseSelection} from './native-release-inputs.mjs';
-import {retainedToolPath} from '../../build/srcbuild/tool-layout.mjs';
+import {retainedToolPath, toolName} from '../../build/srcbuild/tool-layout.mjs';
 import {toolSdkInputs} from '../cangjie-test/tool-readiness.mjs';
 import {allTargets, getTarget, getReleasePlatform, allReleasePlatforms} from '../../build/lib/targets.mjs';
 const parent = process.env.RELEASE_EVIDENCE_TEST_ROOT;
 if (!parent) throw new Error('RELEASE_EVIDENCE_TEST_ROOT required');
 const entry = new URL('./compose-package.mjs', import.meta.url).pathname;
 const sourceSha = 'a'.repeat(40), runtimeRef = 'b'.repeat(40);
-const tools = ['cjpm', 'cjfmt', 'hle', 'LSPServer', 'cjcov', 'cjtrace-recover', 'cjlint', 'cjprof', 'cjcompat'];
+const tools = ['cjpm', 'cjfmt', 'hle', 'LSPServer', 'cjcov', 'cjtrace-recover', 'cjlint', 'cjprof', 'cjcompat', 'cjhead'];
 test('default and explicit native release selection preserve every platform mapping', () => {
   for (const platform of allTargets()) {
     const {spec} = getTarget(platform);
@@ -50,7 +50,7 @@ async function fixture() {
   const toolInputs = {files: {}, payloadFiles: {}};
   const components = [];
   for (const tool of tools) {
-    const relative = 'tools/bin/' + tool, retained = retainedToolPath({producer:tool,name:tool,to:relative});
+    const relative = 'tools/bin/' + tool, retained = retainedToolPath({producer:toolName(tool),name:tool,to:relative});
     await write(relative, 'finite launcher fixture');
     await write(relative + '.entry', `cjcj-sdk-entry-v1\n../..\n${retained}\nlinux\n1\nruntime/lib/linux_x86_64_cjnative\n`);
     await write(retained, 'finite source tool ' + tool);
@@ -64,8 +64,9 @@ async function fixture() {
     toolInputs.files[relative] = {sha256, producer:{source,build,artifact:{path:'/original/build/'+tool,sha256}},artifact,entry};
     components.push(structuredClone({component:tool,source,build,artifact,entry}));
     for (const payload of tool === 'cjpm' ? ['tools/config/cangjie-repo.toml'] : sourceToolPayloads(tool)) {
+      if(payload===relative||payload===relative+'.entry')continue; // actual entries above are transported as payloads
       if (payload === 'tools/dtsparser') await write(payload + '/analysis.js', 'finite parser');
-      else if(payload==='.target-tools/tools/cjlint')await write(payload+'/config/cjlint_rule_list.json','finite lint config');
+      else if(['.target-tools/tools/cjlint','.target-tools/tools/lsp','.target-tools/tools/cjhead'].includes(payload))await write(payload+'/lib/libcangjie-runtime.so','finite private runtime');
       else if(payload.endsWith('/config/static'))await write(payload+'/index.html','finite prof config');
       else await write(payload, 'finite payload');
     }
@@ -126,8 +127,11 @@ test('whole SDK CLI reaches real dependency guard, rejects source change, restor
   await fs.appendFile(f.archive,'changed transport');const digest=await f.run('wrong-digest');assert.match(digest.stderr,/NATIVE_SDK_ARCHIVE_DIGEST/);
 });
 for(const tool of tools)test(`whole SDK CLI requires produced ${tool} bytes and source, with restoration`,async()=>{
-  const f=await fixture();const retained=retainedToolPath({producer:tool,name:tool,to:'tools/bin/'+tool});
-  await fs.rm(path.join(f.sdk,retained));await f.pack();
+  const f=await fixture();const retained=retainedToolPath({producer:toolName(tool),name:tool,to:'tools/bin/'+tool});
+  await fs.rm(path.join(f.sdk,retained));
+  if(['LSPServer','cjlint','cjhead'].includes(tool))
+    await f.write('.target-tools/tools/bin/'+tool,'finite source tool '+tool); // obsolete body cannot satisfy the current recipe
+  await f.pack();
   const missing=await f.run('missing');assert.equal(missing.status,1);assert.match(missing.stderr,new RegExp('NATIVE_RELEASE_TOOL_MISSING '+tool));
   await f.write(retained,'wrong tool bytes');await f.pack();const wrong=await f.run('wrong-bytes');
   assert.match(wrong.stderr,new RegExp('NATIVE_RELEASE_TOOL_BYTES '+tool));
