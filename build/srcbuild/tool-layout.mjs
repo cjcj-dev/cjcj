@@ -13,7 +13,7 @@ export const TOOL_PUBLIC_NAMES = {lsp:'LSPServer'};
 export const toolName = name => { const plain=name.replace(/\.exe$/,''); return plain==='LSPServer'?'lsp':plain; };
 export const cjlintBuildDirectory = config => path.join(config.buildRoot,'cjlint');
 export const retainedToolPath = row => ['cjlint','lsp','cjhead'].includes(row.producer)?'.target-tools/tools/'+row.producer+'/bin/'+row.name:'.target-tools/'+row.to;
-export const hleBuildDirectory = config => path.join(config.buildRoot,'hle');
+export const hleBuildDirectory = config => toolProducerDirectory(config,'hle');
 export const cjprofBuildDirectory = config => path.join(config.buildRoot,'cjprof');
 export function requireToolProducer(name) {
   const directory=TOOL_DIRECTORIES[name];
