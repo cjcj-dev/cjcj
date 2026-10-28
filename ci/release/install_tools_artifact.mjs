@@ -52,7 +52,13 @@ const toolsBin = await privateRoot(path.join(sdkRoot, 'tools', 'bin'));
 const installed = path.join(toolsBin, name);
 const staged = path.join(toolsBin, values.tool + '-source' + (windows ? '.exe' : ''));
 await fs.mkdir(toolsBin, {recursive: true});
-await preserveStock({sdk: values.sdk, installed, name});
+// A newly added source tool (for example cjhead) has no stock predecessor.
+// Preserve an existing entry, but do not require an obsolete tool in a fresh SDK.
+const prior = await fs.lstat(installed).catch(error => {
+  if (error.code === 'ENOENT') return null;
+  throw error;
+});
+if (prior) await preserveStock({sdk: values.sdk, installed, name});
 await fs.copyFile(sourceBinary, staged);
 if (!windows) await fs.chmod(staged, 0o755);
 await fs.rm(installed, {force: true});

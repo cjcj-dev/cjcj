@@ -355,6 +355,11 @@ for(const tool of ['LSPServer','cjhead','cjlint'])test('retained '+tool+' artifa
   run(install,['--tool',tool,'--platform','linux-x64','--artifact',artifact,'--sdk',release]);
   assert.match(fs.readFileSync(path.join(release,prefix,'bin',tool),'utf8'),/^controlled retained body/);
   assert.equal(fs.readFileSync(path.join(release,'tools/bin/'+tool+'.entry'),'utf8'),recipe.toString());
+  assert.equal(fs.existsSync(path.join(release,'tools/stock',tool)),false,'fresh install has no stock predecessor');
+  const launcher=fs.readFileSync(path.join(release,'tools/bin',tool));
+  run(install,['--tool',tool,'--platform','linux-x64','--artifact',artifact,'--sdk',release]);
+  assert.deepEqual(fs.readFileSync(path.join(release,'tools/stock',tool)),launcher,'existing entry is still preserved');
+  assert.match(fs.readFileSync(path.join(release,prefix,'bin',tool),'utf8'),/^controlled retained body/);
  } finally {fs.rmSync(work,{recursive:true,force:true});}
 });
 
