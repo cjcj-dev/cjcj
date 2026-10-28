@@ -19,8 +19,6 @@ jobs:
             runner: macos-15-intel
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
-    env:
-      PLATFORM_CI_ROOT: ${{ runner.temp }}/native-tuple-consumer
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7.1.0
@@ -34,6 +32,8 @@ jobs:
           set -euo pipefail
           ulimit -S -c 0
           ulimit -H -c 0
+          export PLATFORM_CI_ROOT="$RUNNER_TEMP/native-tuple-consumer"
+          echo "PLATFORM_CI_ROOT=$PLATFORM_CI_ROOT" >> "$GITHUB_ENV"
           node ci/platform_matrix/native_llvm_consumer.mjs prepare
       - uses: actions/download-artifact@v8
         with:
