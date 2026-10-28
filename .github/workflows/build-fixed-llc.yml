@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       consume_native_only:
-        description: Consume the fixed existing three native tuples only; all production and publication inputs are ignored.
+        description: Consume the selected existing native tuples only; all production and publication inputs are ignored.
         type: boolean
         default: false
       llvm_ref:
