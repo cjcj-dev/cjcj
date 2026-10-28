@@ -71,11 +71,13 @@ test('empty, extra, and symlink artifact members fail before fetch can select a 
   fs.symlinkSync('old-master',path.join(root,'bin'));
   assert.throws(()=>verifyArtifact(root,platform),/NATIVE_TUPLE_SYMLINK/);
 });
-test('official consumption is three bounded native jobs, exact artifact IDs, without SDK or LLVM build',()=>{
+test('official consumption selects only remaining Darwin ARM on standard macos-26',()=>{
   const workflow=fs.readFileSync(new URL('../../.github/workflows/consume-native-llvm-tuple.yml',import.meta.url),'utf8');
-  assert.equal((workflow.match(/- platform:/g)||[]).length,3);
-  for(const runner of ['ubuntu-22.04-arm','macos-15','macos-15-intel'])assert.ok(workflow.includes('runner: '+runner));
-  assert.match(workflow,/timeout-minutes: 20/);assert.match(workflow,/max-parallel: 3/);
+  const cells=[...workflow.matchAll(/- platform: ([^\s]+)\n\s+runner: ([^\s]+)/g)].map(match=>({platform:match[1],runner:match[2]}));
+  assert.deepEqual(cells,[{platform:'darwin_aarch64',runner:'macos-26'}],
+    'only the unconsumed ARM host on the selected standard runner may execute');
+  assert.equal((workflow.match(/- platform:/g)||[]).length,1);
+  assert.match(workflow,/timeout-minutes: 20/);assert.match(workflow,/max-parallel: 1/);
   assert.match(workflow,/artifact-ids: \$\{\{ steps.select.outputs.artifact_id \}\}/);
   assert.match(workflow,/run-id: \$\{\{ steps.select.outputs.run_id \}\}/);
   assert.doesNotMatch(workflow,/build_cjcj|build-fixed-llc|build-llvm-tools|workflow_run:|schedule:/);

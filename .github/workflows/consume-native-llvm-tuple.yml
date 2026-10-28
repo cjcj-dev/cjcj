@@ -8,15 +8,11 @@ jobs:
   consume:
     strategy:
       fail-fast: false
-      max-parallel: 3
+      max-parallel: 1
       matrix:
         include:
-          - platform: linux_aarch64
-            runner: ubuntu-22.04-arm
           - platform: darwin_aarch64
-            runner: macos-15
-          - platform: darwin_x86_64
-            runner: macos-15-intel
+            runner: macos-26
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
     steps:
