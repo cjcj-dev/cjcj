@@ -257,13 +257,15 @@ export async function run(config) {
       return;
     }
 
-    // Missing ninth producer must fail before fetching or shared installation.
+    // The tools pin and the independent CJPM selector are distinct sources.
+    // Materialize the selected CJPM subtree before checking its entry script;
+    // the unoverlaid tools tree may still contain only the retired build.py.
+    await assertSourceIdentity(config.repo('tools'), toolsRoot);
+    if(pending.some(([name])=>name==='cjpm'))await checkoutPinnedCjpm(config,toolsRoot);
     for(const [name]of config.toolsPhase==='build'?pending:allTools) {
       const directory=requireToolProducer(name);
       if(process.env.CANGJIE_BUILD_DRY_RUN!=='1')requireFile(path.join(toolsRoot,directory,name==='lsp'?'cangjie':'build',toolScript(name)),{stage:'tools.'+name+'.source'});
     }
-    await assertSourceIdentity(config.repo('tools'), toolsRoot);
-    if(pending.some(([name])=>name==='cjpm'))await checkoutPinnedCjpm(config,toolsRoot);
     const cjpmBuildPy = path.join(toolsRoot, 'cjpm', 'build', 'build.py');
     if (pending.some(([name])=>name==='cjpm') && fs.existsSync(cjpmBuildPy) && fs.readFileSync(cjpmBuildPy, 'utf8').includes(CJPM_NEEDLE)) {
       applyTextPatch(cjpmBuildPy, CJPM_EDITS, {stage: 'tools.cjpm.patch'});

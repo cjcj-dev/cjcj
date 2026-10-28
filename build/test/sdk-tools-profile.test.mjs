@@ -420,3 +420,59 @@ test('native tool environment preserves explicit installed stdx and rejects miss
  process.env.CANGJIE_STDX_PATH=root+'/missing';assert.throws(()=>targetToolsEnv(config),/existing absolute directory/);
  delete process.env.CANGJIE_STDX_PATH;assert.equal(targetToolsEnv(config).CANGJIE_STDX_PATH,fallback);
 });
+
+// Fixed real repositories and an already qualified host are supplied by the
+// native source-entry job. No substitute producer or old Python fallback.
+test('fresh real tools source acquires independent CJPM before checking its producer', {skip:!process.env.CJPM_FIRST_INPUTS,timeout:180000},async()=>{
+ const inputs=JSON.parse(await fs.readFile(process.env.CJPM_FIRST_INPUTS,'utf8'));
+ for(const key of ['toolsRef','cjpmRef'])assert.match(inputs[key],/^[0-9a-f]{40}$/);
+ const root=inputs.output;await fs.mkdir(root,{recursive:false});
+ const records=[];
+ const execute=async(label,argv,options={})=>{
+  const started=new Date().toISOString(),r=spawnSync(argv[0],argv.slice(1),{encoding:'utf8',maxBuffer:16*1024*1024,...options});
+  records.push({label,argv,cwd:options.cwd??process.cwd(),started,ended:new Date().toISOString(),rc:r.status,signal:r.signal,error:r.error?.message??null});
+  await fs.writeFile(root+'/commands.json',JSON.stringify(records,null,2));await fs.writeFile(root+'/'+label+'.stdout',r.stdout??'');await fs.writeFile(root+'/'+label+'.stderr',r.stderr??'');return r;
+ };
+ const git=async(label,args)=>{const r=await execute(label,['git',...args]);assert.equal(r.status,0,r.stderr);return r.stdout.trim();};
+ async function workspace(label,selector){
+  const work=root+'/'+label;await fs.mkdir(work);const source=work+'/cangjie_tools';
+  await git(label+'-clone',['clone','--shared','--no-checkout',inputs.toolsRepository,source]);
+  await git(label+'-checkout',['-C',source,'checkout','--detach',inputs.toolsRef]);
+  await assert.rejects(fs.access(source+'/cjpm/build/build.mjs'),{code:'ENOENT'});
+  await fs.access(source+'/cjpm/build/build.py');
+  await fs.writeFile(work+'/.source-selection.json',JSON.stringify({tools:{url:inputs.toolsRepository,tag:inputs.toolsRef},cjpm:{url:inputs.cjpmRepository,tag:selector}}));
+  return {work,source};
+ }
+ const env={...process.env,...inputs.environment};delete env.CANGJIE_BUILD_DRY_RUN;delete env.CJCJ_HLE_DEPENDENCIES;
+ const invoke=(label,w,args=[])=>execute(label,[process.execPath,cli,'--workspace',w.work,'--build-root',w.work+'/build','--official-sdk-root',inputs.host,'--host-profile','kkk2','--tools-phase','build','--jobs','4','--tools-mangle-source',inputs.mangle,...args,'build','tools'],{env});
+ const selected=async(label,w)=>{
+  assert.equal(await git(label+'-fetched',['-C',w.source,'rev-parse','FETCH_HEAD']),inputs.cjpmRef);
+  const expected=await git(label+'-object',['-C',inputs.cjpmRepository,'rev-parse',inputs.cjpmRef+':cjpm/build/build.mjs']);
+  assert.equal(await git(label+'-index',['-C',w.source,'rev-parse',':cjpm/build/build.mjs']),expected);
+  assert.equal((await git(label+'-source-diff',['-C',w.source,'diff',inputs.cjpmRef,'--','cjpm'])), '');
+ };
+ const all=await workspace('default-all',inputs.cjpmRef);
+ let r=await invoke('default-all',all);assert.equal(r.status,1,r.stderr);assert.match(r.stderr,/HLE_DEPENDENCIES_REQUIRED/);assert.doesNotMatch(r.stderr,/required file missing/);await selected('default',all);
+ console.log('CJPM_DEFAULT_ALL_REAL_SELECTOR_REACHED');
+ const bad=await workspace('missing-selector','ffffffffffffffffffffffffffffffffffffffff');
+ r=await invoke('missing-selector',bad,['--tools-build-set','cjpm']);assert.equal(r.status,1);assert.match(r.stderr,/fetch/);await assert.rejects(fs.access(bad.source+'/cjpm/build/build.mjs'),{code:'ENOENT'});
+ const missing=await workspace('missing-entry',inputs.toolsRef);
+ r=await invoke('missing-entry',missing,['--tools-build-set','cjpm']);assert.equal(r.status,1);assert.match(r.stderr,/tools.cjpm.source.*build.mjs/);
+ console.log('CJPM_REAL_SELECTOR_MISSING_ENTRY_REJECTED');
+ // The same failed workspace recovers through its normal explicit selector,
+ // before any successful producer existed; this is not a preseeded build tree.
+ r=await invoke('restored-explicit',missing,['--tools-build-set','cjpm','--repo-tag','cjpm='+inputs.cjpmRef]);assert.equal(r.status,0,r.stderr);await selected('restored',missing);
+ await fs.access(missing.source+'/cjpm/dist/cjpm');
+ const facts=JSON.parse(await fs.readFile(missing.work+'/build/tools/cjpm/build-inputs.json','utf8'));
+ assert.equal(facts.source.commit,inputs.cjpmRef);
+ console.log('CJPM_FRESH_REAL_BUILD_AND_SOURCE_RESTORED');
+ const prefix=root+'/independent-install';
+ r=await execute('existing-producer-install-control',[process.execPath,cli,'--workspace',missing.work,'--build-root',missing.work+'/build',
+  '--official-sdk-root',inputs.host,'--host-profile','kkk2','--tools-phase','install','--tools-build-set','cjpm',
+  '--repo-tag','cjpm=ffffffffffffffffffffffffffffffffffffffff','--tools-install-prefix',prefix,'build','tools'],{env});
+ assert.equal(r.status,0,r.stderr);
+ const installed=JSON.parse(await fs.readFile(prefix+'/cjpm/build-inputs.json','utf8'));
+ assert.equal(installed.source.commit,inputs.cjpmRef,'install preserves the actual producer, not a new unused selector');
+ assert.deepEqual(await fs.readFile(prefix+'/cjpm/bin/cjpm'),await fs.readFile(missing.source+'/cjpm/dist/cjpm'));
+ console.log('CJPM_EXISTING_PRODUCER_INSTALL_CONTROL');
+});
