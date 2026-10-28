@@ -50,9 +50,12 @@ if(['nested','nested-only','nested-failure','flat-directory'].includes(mode)) {
    fs.mkdirSync(path.dirname(headers+'/'+name),{recursive:true});
    fs.writeFileSync(headers+'/'+name,`int ${fn}(void);\n`);
   }
-  // These are not C headers and must not be selected at any depth.
-  fs.mkdirSync(headers+'/ignored',{recursive:true});
-  fs.writeFileSync(headers+'/ignored/foreign.d.ts','not a C header ???\n');
+  // Mixed traversal also rejects non-C inputs. Keep the omission target and
+  // the flat control independent of this separate extension-selection check.
+  if(kind==='mixed') {
+   fs.mkdirSync(headers+'/ignored',{recursive:true});
+   fs.writeFileSync(headers+'/ignored/foreign.d.ts','not a C header ???\n');
+  }
   fs.writeFileSync(headers+'/notes.txt','not a header\n');
   run(kind+'-HLE_NESTED_DIRECTORY_TARGET',[hle,'-c','-d',headers,'-o',gen,'--module-name','hle_nested',
    ...(kind==='mixed'?['-b',cjbind]:[])]);
