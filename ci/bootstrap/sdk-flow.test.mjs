@@ -297,7 +297,7 @@ source+='\\nexport async function '+name+'(config){const fs=await import("node:f
  const cliPath=new URL('../../build/cli.mjs',import.meta.url).pathname;
  const argv=[cliPath,'--workspace',workspace,'--build-root',work+'/buildtools','--official-sdk-root',work+'/host',
   'run-all','--skip-system-deps','--skip-install-libs'];
- const env={...process.env,NODE_OPTIONS:'--experimental-loader='+loader,RUN_ALL_TRACE:trace};
+ const env={...process.env,NODE_OPTIONS:[process.env.NODE_OPTIONS,'--experimental-loader='+loader].filter(Boolean).join(' '),RUN_ALL_TRACE:trace};
  const commands=[];
  async function invoke(label,extra={},flags=[]){
   const actualArgv=[...argv,...flags];const r=run(process.execPath,actualArgv,{env:{...env,...extra}});commands.push({label,argv:actualArgv,rc:r.status,signal:r.signal,stdout:r.stdout,stderr:r.stderr});
@@ -382,7 +382,7 @@ return {...result,source};}
 `);
  const cliPath=fileURLToPath(new URL('../../build/cli.mjs',import.meta.url));
  const base=[cliPath,'--workspace',workspace,'--build-root',work+'/buildtools','--official-sdk-root',work+'/host'];
- const env={...process.env,NODE_OPTIONS:'--experimental-loader='+loader};
+ const env={...process.env,NODE_OPTIONS:[process.env.NODE_OPTIONS,'--experimental-loader='+loader].filter(Boolean).join(' ')};
  const commands=[];
  async function invoke(label,args,extra={}) {
   const argv=[...base,...args],r=run(process.execPath,argv,{env:{...env,...extra}});
