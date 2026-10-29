@@ -54,11 +54,11 @@ for(const name of selected)run(name+'-loader',['ldd',binary(name)],{library:pref
 await group('cjfmt',()=>{
  const input=work+'/format.cj',output=work+'/formatted.cj',again=work+'/again.cj';
  fs.writeFileSync(input,'// header\nmain(){\nlet value=7 // inline\nprintln(value)\n}\n');
- run('fmt',[binary('cjfmt'),'-f',input,'-o',output,'-c',prefix+'/packages/cjfmt/config/cangjie-format.toml']);
+ run('fmt',[binary('cjfmt'),'-f',input,'-o',output,'-c',prefix+'/cjfmt/config/cangjie-format.toml']);
  check('format changes whitespace and preserves comments',()=>{const text=fs.readFileSync(output,'utf8');assert.notEqual(text,fs.readFileSync(input,'utf8'));assert.match(text,/\/\/ header/);assert.match(text,/\/\/ inline/);});
  run('fmt-compile',[sdk+'/bin/cjc',output,'-o',work+'/formatted-program']);
  check('formatted program semantics',()=>assert.equal(run('fmt-run',[work+'/formatted-program']).stdout.trim(),'7'));
- run('fmt-again',[binary('cjfmt'),'-f',output,'-o',again,'-c',prefix+'/packages/cjfmt/config/cangjie-format.toml']);
+ run('fmt-again',[binary('cjfmt'),'-f',output,'-o',again,'-c',prefix+'/cjfmt/config/cangjie-format.toml']);
  check('format idempotence',()=>assert.equal(fs.readFileSync(again,'utf8'),fs.readFileSync(output,'utf8')));
 });
 await group('lsp',()=>{
