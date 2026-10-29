@@ -4,7 +4,7 @@ integration tests. They are shallow, complete-tree packs, not invented commits.
 - runtime.pack: cjcj-dev/cangjie-runtime at
   259ad49f709222e75bdb832bcc28dc769ea4efbf
 - tools.pack: local cjcj-tools migration candidate at
-  94f04bef13f909e318bac657b2331df78839de73
+  8e27eead8dc93ddd20ed66eaac9fd4170072e1c6
 
 Captured with `git init --bare` and
 `git fetch --depth 1 <repository> <sha>:refs/heads/main`. Runtime used existing
