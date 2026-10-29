@@ -97,6 +97,23 @@ if(process.env.CJCJ_TOOL_FACTS_INSTALL==='1'){
  // that explicit unresolved boundary in the package facts test.
  await fs.rename(path.join(sdk,'STAGE-INPUTS.json'),path.join(root,'controlled-sdk-input.json'));
  const gathered=await installedInputs(sdk,'linux_x86_64'),lsp=gathered.components.find(row=>row.component==='LSPServer');
+ for(const name of ['cjpm','cjfmt','hle','LSPServer','cjcov','cjtrace-recover','cjlint','cjprof','cjcompat','cjhead'])
+   assert(gathered.components.some(row=>row.component===name),'installed component '+name);
+ for(const [name,directory]of [['LSPServer','lsp'],['cjlint','cjlint'],['cjhead','cjhead']]){
+   const actual=path.join(sdk,'.target-tools/tools',directory,'bin',name),held=actual+'.held';
+   assert.equal(gathered.components.find(row=>row.component===name).artifact.path,'.target-tools/tools/'+directory+'/bin/'+name);
+   const legacy=path.join(sdk,'.target-tools/tools/bin',name);
+   await fs.mkdir(path.dirname(legacy),{recursive:true});await fs.copyFile(actual,legacy);
+   await fs.rename(actual,held);
+   try{
+     await assert.rejects(installedInputs(sdk,'linux_x86_64'),error=>error.code==='ENOENT'&&error.path===actual);
+     if(name!=='LSPServer'){
+       const control=await command([path.join(sdk,'tools/bin/LSPServer')]);
+       assert.equal(control.status,0);assert.equal(control.stdout.trim(),'42');
+     }
+   }finally{await fs.rename(held,actual);}
+   assert.equal((await installedInputs(sdk,'linux_x86_64')).components.find(row=>row.component===name).artifact.path,'.target-tools/tools/'+directory+'/bin/'+name);
+ }
  assert.equal(lsp.source.commit,commit);assert.equal(lsp.artifact.sha256,facts.artifact.sha256);
  assert.equal(gathered.components.find(row=>row.component==='hle').source.status,'unresolved');
  const manifest=await writeInstalledReleaseManifest({stage:sdk,platform:'linux_x86_64',...gathered});
