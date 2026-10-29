@@ -72,6 +72,8 @@ if(process.env.CJCJ_TOOL_FACTS_INSTALL==='1'){
  await write(path.join(tools,'packages/lsp/dist/bin/cangjie-lsp'),await fs.readFile(product));
  await fs.chmod(path.join(tools,'packages/lsp/dist/bin/cangjie-lsp'),0o755);
  for(const rel of ['packages/lsp/dist/lib/libcangjie-runtime.so','packages/cjhead/dist/bin/cjhead','packages/cjhead/dist/lib/libcangjie-runtime.so','packages/cjhead/dist/share/README'])await write(path.join(tools,rel),'explicit unrelated fixture');
+ await fs.copyFile('/usr/bin/true',path.join(tools,'packages/cjhead/dist/bin/cjhead'));
+ await fs.chmod(path.join(tools,'packages/cjhead/dist/bin/cjhead'),0o755);
  await fs.mkdir(path.join(config.buildRoot,'hle/bin'),{recursive:true});await fs.copyFile('/usr/bin/true',path.join(config.buildRoot,'hle/bin/main'));
  // Carry the actual CLI-produced record and binary through the real installer.
  // Other tools/HLE payloads are explicitly controlled inputs, not six-tool PASS.
@@ -87,9 +89,9 @@ if(process.env.CJCJ_TOOL_FACTS_INSTALL==='1'){
  await write(path.join(parser,'package.json'),JSON.stringify({dependencies:{typescript:'npm:typescript@4.9.5','https-proxy-agent':'7.0.6'}}));
  const deps=path.join(root,'dependencies');hlePayloadFixture(deps);
  await installHleDependencies({toolsRoot:tools,sdk,platform:'linux_x86_64',input:{platform:'linux_x86_64',
-  node:{path:process.execPath,source:'controlled native Node',version:process.version},
+  node:{path:'/usr/bin/true',source:'native executable format fixture; not Node behavior',version:'fixture'},
   modules:{path:path.join(deps,'tools/dtsparser/node_modules'),source:'controlled npm boundary',version:'fixture'},
-  cjbind:{path:process.execPath,source:'controlled executable, not actual cjbind',version:'v1.1.0-alpha.53.1'}}});
+  cjbind:{path:'/usr/bin/true',source:'native executable format fixture; not cjbind behavior',version:'fixture'}}});
  await installSourceTools(config,sdk,{consume:async pending=>{const actual=await command([path.join(pending,'tools/bin/LSPServer')]);assert.equal(actual.status,0,actual.stderr);assert.equal(actual.stdout.trim(),'42');}});
  // Unrelated SDK-shaped inputs above do not claim compiler provenance. Retain
  // that explicit unresolved boundary in the package facts test.

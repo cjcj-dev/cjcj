@@ -50,14 +50,15 @@ for(const rel of ['packages/cjpm/dist/config/cangjie-repo.toml','packages/cjfmt/
 for(const rel of ['tools/dtsparser/DEPENDENCIES.json','tools/bin/node','tools/dtsparser/node_modules/.bin/cjbind'])await write(path.join(sdk,rel),'unqualified HLE fixture');
 const cli=fileURLToPath(new URL('../../ci/cangjie-test/tool-readiness.mjs',import.meta.url));
 const read=async label=>JSON.parse(await run(label,[process.execPath,cli,sdk]));
-await installSourceTools(config,sdk,{consume:async pending=>assert.equal((await run('pending-consumer-'+records.length,[path.join(pending,'tools/bin/LSPServer')])).trim(),'native fixture:42')});
+const consume=async pending=>assert.equal((await run('pending-consumer-'+records.length,[path.join(pending,'tools/bin/LSPServer')])).trim(),'native fixture:42');
+await installSourceTools(config,sdk,{consume});
 let observed=await read('same-build');assert.equal(observed.LSPServer.ready,true,observed.LSPServer.reason);
 assert.equal(observed.cjpm.ready,false,'unresolved CJ producer independent control');
 console.log('UNRESOLVED_CJ_INDEPENDENT_CONTROL_PASS');
 const current={...stage,compilerCommit:'3'.repeat(40),runtimeCommit:'4'.repeat(40)};
 await write(path.join(sdk,'STAGE-INPUTS.json'),JSON.stringify(current));
 for(const key of ['compiler','stdCore','runtime'])await write(path.join(sdk,sdkFiles[key]),'new '+key);
-await installSourceTools(config,sdk);
+await installSourceTools(config,sdk,{consume});
 let facts=await json(path.join(sdk,'TOOLS-INPUTS.json'));
 console.log('NORMAL_INSTALL_SELECTION_ASSERTION_REACHED');
 assert.deepEqual(facts.files['tools/bin/LSPServer'].producer,original,'original build/install facts unchanged');
@@ -108,7 +109,7 @@ try {
  const r=JSON.parse(await run('relocated',[process.execPath,cli,moved]));
  assert.equal(r.LSPServer.available,true);assert.equal(r.LSPServer.ready,false);
 }finally {await fs.rename(moved,sdk);}
-await installSourceTools(config,sdk);
+await installSourceTools(config,sdk,{consume});
 assert.equal((await read('reinstalled')).LSPServer.available,true);
 assert.deepEqual((await json(path.join(sdk,'TOOLS-INPUTS.json'))).files['tools/bin/LSPServer'].producer,original);
 console.log('NATIVE_SELECTION_FINITE_PASS '+work);
