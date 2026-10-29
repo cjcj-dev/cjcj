@@ -91,7 +91,7 @@ if(process.env.CJCJ_TOOL_FACTS_INSTALL==='1'){
  await installHleDependencies({toolsRoot:tools,sdk,platform:'linux_x86_64',input:{platform:'linux_x86_64',
   node:{path:'/usr/bin/true',source:'native executable format fixture; not Node behavior',version:'fixture'},
   modules:{path:path.join(deps,'tools/dtsparser/node_modules'),source:'controlled npm boundary',version:'fixture'},
-  cjbind:{path:'/usr/bin/true',source:'native executable format fixture; not cjbind behavior',version:'fixture'}}});
+  cjbind:{path:'/usr/bin/true',source:'native executable format fixture; not cjbind behavior',version:'v1.1.0-alpha.53.1'}}});
  await installSourceTools(config,sdk,{consume:async pending=>{const actual=await command([path.join(pending,'tools/bin/LSPServer')]);assert.equal(actual.status,0,actual.stderr);assert.equal(actual.stdout.trim(),'42');}});
  // Unrelated SDK-shaped inputs above do not claim compiler provenance. Retain
  // that explicit unresolved boundary in the package facts test.

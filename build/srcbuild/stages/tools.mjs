@@ -195,7 +195,7 @@ export async function run(config) {
     if (pending.some(([name])=>name==='cjtrace-recover') && !config.toolsMangleSource)
       throw new BuildError('tools.cjtrace-recover.source','TOOLS_MANGLE_SOURCE_REQUIRED: --tools-mangle-source');
     // Independent native tools retain their original build facts and install
-    // through upstream build.py into separate prefixes, without publishing an SDK.
+    // through the root tools entry into separate prefixes, without publishing an SDK.
     if(config.toolsInstallPrefix) {
       const independent=allTools.filter(([name])=>!selected||selected.has(name));
       if(config.target.spec.crossCompile)
@@ -268,10 +268,9 @@ export async function run(config) {
         const producerEnv={...toolEnv,...(name==='cjfmt'?{CJFMT_SOURCE_REF:config.repo('tools').tag}:{}),CANGJIE_BUILD_JOBS:String(jobs),CMAKE_BUILD_PARALLEL_LEVEL:String(jobs),MAKEFLAGS:'-j'+jobs};
         try {
           const output=outputs.find(row=>row.name===({lsp:'LSPServer'}[name]??name)+suffix);
-          // These upstream Python mains discard a returned error. Preserve a
-          // prior final executable so a failed rebuild cannot masquerade as it.
-          // The pinned native LSP entry owns first and incomplete dependency
-          // preparation, consuming the same --jobs as its final CMake build.
+          // Preserve the prior producer facts across failed rebuilds. Each
+          // package entry owns first and incomplete dependency preparation
+          // and consumes the budget selected above.
           const argv=buildArgsFor(name,config,jobs);
           const facts=await beginToolBuild(config,name,{argv:toolArgv(config,name,argv),env:producerEnv,sdk:consumerSdk(config)});
           await runTool(config,name,cwd,argv,{stageName:`tools.${name}.build`,extraEnv:producerEnv,cpuSet});
