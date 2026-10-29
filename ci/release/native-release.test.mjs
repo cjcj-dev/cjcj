@@ -46,7 +46,7 @@ async function fixture() {
   await write('STAGE-INPUTS.json', JSON.stringify(metadata));
   await write('compiler-inputs.json', JSON.stringify({commit: sourceSha, compilerSha256}));
   const pins = {tools: await readToolsPin(new URL('../source_pin.env', import.meta.url)),
-    cjpm: await readCjpmPin(new URL('../cjpm_pin.env', import.meta.url))};
+    cjpm: await readCjpmPin(new URL('../source_pin.env', import.meta.url))};
   const toolInputs = {files: {}, payloadFiles: {}};
   const components = [];
   for (const tool of tools) {

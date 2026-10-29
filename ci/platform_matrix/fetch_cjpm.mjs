@@ -142,7 +142,7 @@ const staged = path.join(toolsBin, 'cjpm-patched.exe');
 await fs.mkdir(toolsBin, {recursive: true});
 const stock = await preserveStock({sdk: cangjieHome, installed, name: 'cjpm.exe'});
 await fs.writeFile(staged, zlib.gunzipSync(await fs.readFile(compressed)));
-const pin = await readCjpmPin(path.resolve(import.meta.dirname, '..', 'cjpm_pin.env'));
+const pin = await readCjpmPin(path.resolve(import.meta.dirname, '..', 'source_pin.env'));
 const provenance = await verifyCjpmProvenance({
   binary: staged,
   sidecar: provenanceSidecar,

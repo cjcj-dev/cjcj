@@ -54,18 +54,18 @@ for(const name of selected)run(name+'-loader',['ldd',binary(name)],{library:pref
 await group('cjfmt',()=>{
  const input=work+'/format.cj',output=work+'/formatted.cj',again=work+'/again.cj';
  fs.writeFileSync(input,'// header\nmain(){\nlet value=7 // inline\nprintln(value)\n}\n');
- run('fmt',[binary('cjfmt'),'-f',input,'-o',output,'-c',prefix+'/cjfmt/config/cangjie-format.toml']);
+ run('fmt',[binary('cjfmt'),'-f',input,'-o',output,'-c',prefix+'/packages/cjfmt/config/cangjie-format.toml']);
  check('format changes whitespace and preserves comments',()=>{const text=fs.readFileSync(output,'utf8');assert.notEqual(text,fs.readFileSync(input,'utf8'));assert.match(text,/\/\/ header/);assert.match(text,/\/\/ inline/);});
  run('fmt-compile',[sdk+'/bin/cjc',output,'-o',work+'/formatted-program']);
  check('formatted program semantics',()=>assert.equal(run('fmt-run',[work+'/formatted-program']).stdout.trim(),'7'));
- run('fmt-again',[binary('cjfmt'),'-f',output,'-o',again,'-c',prefix+'/cjfmt/config/cangjie-format.toml']);
+ run('fmt-again',[binary('cjfmt'),'-f',output,'-o',again,'-c',prefix+'/packages/cjfmt/config/cangjie-format.toml']);
  check('format idempotence',()=>assert.equal(fs.readFileSync(again,'utf8'),fs.readFileSync(output,'utf8')));
 });
 await group('lsp',()=>{
  // sdk is the explicitly selected analysis prefix for this group. The server's
  // retained host libraries are resolved by its private installed runtime path.
  const evidence=work+'/lsp-stdio';
- run('lsp-stdio',[process.execPath,source+'/cangjie-language-server/cangjie/tests/server-client.mjs',
+ run('lsp-stdio',[process.execPath,source+'/packages/lsp/tests/server-client.mjs',
   binary('lsp'),sdk,evidence,'target'],{environment:{CANGJIE_HOME:undefined,CANGJIE_PATH:undefined,LD_LIBRARY_PATH:undefined}});
  check('Cangjie server lifecycle and real semantic queries',()=>{
   const rows=JSON.parse(fs.readFileSync(evidence+'/client-results.json','utf8'));
@@ -122,7 +122,7 @@ await group('cjlint',()=>{
 });
 await group('cjprof',()=>{
  for(const [name,expected]of [['heap',/default::Dirived\s+1\s+72\s+168/],['heap_multi_ref',/std.core::Future<Unit>\s+1\s+168\s+728/]]) {
-  const input=work+'/'+name+'.data';fs.copyFileSync(source+'/cjprof/tests/'+name+'.data',input);
+  const input=work+'/'+name+'.data';fs.copyFileSync(source+'/packages/cjprof/tests/'+name+'.data',input);
   const result=run('prof-'+name,[binary('cjprof'),'heap','-i',input],{library:prefix+'/cjprof/lib'});
   check('prof actual retained heap '+name,()=>assert.match(result.stdout,expected));
  }

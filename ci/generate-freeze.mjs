@@ -19,7 +19,7 @@ const PIN_SOURCES = Object.freeze({
   COMPILER_REF: 'ci/source_pin.env',
   TOOLS_REF: 'ci/source_pin.env',
   STDX_REF: 'ci/source_pin.env',
-  CJPM_FORK_REF: 'ci/cjpm_pin.env',
+  CJPM_FORK_REF: 'ci/source_pin.env',
 });
 
 const G2_ARTIFACTS = Object.freeze([
@@ -105,11 +105,13 @@ async function loadPins(repo) {
   const pins = {};
   for (const [name, relative] of Object.entries(PIN_SOURCES)) {
     if (!files.has(relative)) files.set(relative, await fs.readFile(path.join(repo, relative), 'utf8'));
-    const matches = files.get(relative).split(/\r?\n/).filter(line => line.startsWith(`${name}=`));
+    // Historical freeze field, derived from the tools source; no second selector.
+    const key = name === 'CJPM_FORK_REF' ? 'TOOLS_REF' : name;
+    const matches = files.get(relative).split(/\r?\n/).filter(line => line.startsWith(`${key}=`));
     if (matches.length !== 1) {
       throw new Error(`${relative} must contain exactly one literal ${name}= line; found ${matches.length}`);
     }
-    const value = matches[0].slice(name.length + 1);
+    const value = matches[0].slice(key.length + 1);
     if (!SHA40.test(value)) throw new Error(`${relative} has invalid ${name}: ${value || '<empty>'}`);
     pins[name] = value;
   }

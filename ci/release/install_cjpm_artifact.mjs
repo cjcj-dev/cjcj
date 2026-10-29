@@ -26,7 +26,7 @@ const windows = values.platform === 'windows-x64';
 const artifactRoot = path.resolve(values.artifact);
 const sourceBinary = path.join(artifactRoot, windows ? 'cjpm.exe' : 'cjpm');
 const sidecar = path.join(artifactRoot, CJPM_PROVENANCE);
-const pin = await readCjpmPin(path.resolve(import.meta.dirname, '..', 'cjpm_pin.env'));
+const pin = await readCjpmPin(path.resolve(import.meta.dirname, '..', 'source_pin.env'));
 const provenance = await verifyCjpmProvenance({
   binary: sourceBinary,
   sidecar,

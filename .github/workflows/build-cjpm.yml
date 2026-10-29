@@ -27,13 +27,13 @@ jobs:
       - name: Load cjpm pin
         id: cjpm-pin
         run: |
-          cat ci/cjpm_pin.env >> "$GITHUB_ENV"
-          source ci/cjpm_pin.env
+          cat ci/source_pin.env >> "$GITHUB_ENV"
+          source ci/source_pin.env
           source ci/host_sdk_pin.env
           CJCJ_TOOLCHAIN=$(node ci/host-toolchain-pin.mjs)
           export CJCJ_TOOLCHAIN
           echo "CJCJ_TOOLCHAIN=$CJCJ_TOOLCHAIN" >> "$GITHUB_ENV"
-          echo "ref=$CJPM_FORK_REF" >> "$GITHUB_OUTPUT"
+          echo "ref=$TOOLS_REF" >> "$GITHUB_OUTPUT"
           echo "toolchain=$CJCJ_TOOLCHAIN" >> "$GITHUB_OUTPUT"
 
       - name: Restore patched cjpm cache
@@ -79,53 +79,15 @@ jobs:
           cjv install $env:CJCJ_TOOLCHAIN -c stdx
           $cjvRoot | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
-      - name: Fetch pinned cjpm fork
+      - name: Fetch selected cjcj-tools source
         if: steps.cjpm-cache.outputs.cache-hit != 'true'
         shell: msys2 {0}
-        run: |
-          git clone --filter=blob:none --no-checkout "$CJPM_FORK_URL" cangjie-tools
-          git -C cangjie-tools checkout --detach "$CJPM_FORK_REF"
-          test "$(git -C cangjie-tools rev-parse HEAD)" = "$CJPM_FORK_REF"
+        run: node ci/release/build_cjpm.mjs fetch
 
-      - name: Build patched cjpm
+      - name: Build Cangjie cjpm
         if: steps.cjpm-cache.outputs.cache-hit != 'true'
         shell: msys2 {0}
-        run: |
-          set -euxo pipefail
-          cangjie_home="$(cygpath -u "$USERPROFILE/.cjv/toolchains/$CJCJ_TOOLCHAIN")"
-          stdx_path="$(cygpath -u "$USERPROFILE/.cjv/stdx/$CJCJ_TOOLCHAIN/static/stdx")"
-          export CANGJIE_HOME="$cangjie_home"
-          export CANGJIE_STDX_PATH="$stdx_path"
-          export MINGW_PATH=/mingw64
-          export cjHeapSize=12GB
-          # cjpm is itself a Cangjie binary: it loads libcangjie-runtime.dll (and
-          # tools/lib deps) at startup — r3 forensics: found on PATH, exec rc=127.
-          export PATH="$cangjie_home/bin:$cangjie_home/tools/bin:$cangjie_home/runtime/lib/windows_x86_64_cjnative:$cangjie_home/tools/lib:/mingw64/bin:$PATH"
-          # r2 died here with a bare 127 and no output — name the failing layer.
-          ls "$cangjie_home" "$cangjie_home/tools/bin" 2>&1 | head -40 || true
-          command -v cjpm || echo "cjpm NOT on PATH"
-          cjpm --version || echo "cjpm --version rc=$?"
-          # r5/r6: the msys2-built libuv/fswatcher and msys2 libc++ expect the
-          # msys2 CRT generation (__hash_memory, __imp_btowc, __sys_nerr…) but
-          # the SDK's older bundled mingw layer wins the -L order. Swap the
-          # whole C/C++ runtime layer to the single msys2 generation —
-          # build-local only, nothing here ships.
-          for lib in libc++.a libc++abi.a libc++experimental.a libunwind.a \
-                     libmsvcrt.a libmingwex.a libmingw32.a libmoldname.a libpthread.a libm.a \
-                     crt2.o crtbegin.o crtend.o CRT_glob.o; do
-            for sdkcopy in $(find "$cangjie_home/third_party" -name "$lib" 2>/dev/null); do
-              test -f "/mingw64/lib/$lib" || continue
-              cp -v "/mingw64/lib/$lib" "$sdkcopy"
-            done
-          done
-          cd cangjie-tools/cjpm
-          cjpm build
-          product=target/release/bin/main
-          test -f "$product" || product=target/release/bin/main.exe
-          test -f "$product"
-          mkdir -p ../../patched-cjpm/windows_x86_64
-          cp "$product" ../../patched-cjpm/windows_x86_64/cjpm.exe
-          ../../patched-cjpm/windows_x86_64/cjpm.exe --version
+        run: MINGW_PATH="$(cygpath -w /mingw64)" node ci/release/build_cjpm.mjs build
 
       - name: Verify patched cjpm payload
         run: |

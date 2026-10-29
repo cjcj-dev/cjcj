@@ -23,7 +23,7 @@ import {
 // when that exact sha is reachable on the remote, so the pin and the assertion
 // must be the same string by construction.
 const cjpmPin = Object.fromEntries(
-  fs.readFileSync(new URL('../../ci/cjpm_pin.env', import.meta.url), 'utf8')
+  fs.readFileSync(new URL('../../ci/source_pin.env', import.meta.url), 'utf8')
     .split('\n')
     .filter(line => /^[A-Z_]+=/.test(line))
     .map(line => {
@@ -111,7 +111,7 @@ function makeFixture({packageLayout=false}={}) {
   fs.copyFileSync(path.join(import.meta.dirname, 'fixtures/compiler-174db8f/third_party/CMakeLists.txt'),
     path.join(compilerRoot, 'third_party/CMakeLists.txt'));
   const runtimeRoot = directory(workspace, 'cangjie_runtime');
-  const toolsRoot = directory(workspace, 'cangjie_tools');
+  const toolsRoot = directory(workspace, 'cjcj-tools');
   const stdxRoot = directory(workspace, 'cangjie_stdx');
 
   directory(compilerRoot, 'output');
@@ -123,22 +123,22 @@ function makeFixture({packageLayout=false}={}) {
   file(runtimeRoot, ['stdlib', 'output', '.keep']);
   directory(stdxRoot);
   directory(compilerRoot, 'include');
-  file(toolsRoot, ['cjpm', 'build', 'build.py'], '# fixture\n');
-  file(toolsRoot, ['cjpm', 'dist', 'cjpm']);
+  file(toolsRoot, ['build.mjs'], '# fixture\n');
+  file(toolsRoot, ['packages', 'cjpm', 'dist', 'bin', 'cjpm']);
   for (const parts of [
-    ['cjfmt', 'build'], ['hyperlangExtension', 'build'], ['cangjie-language-server', 'cangjie'],
+    ['packages', 'cjfmt', 'build'], ['packages', 'hle', 'build'], ['packages', 'lsp', 'build'],
   ]) directory(toolsRoot, ...parts);
-  file(toolsRoot, ['cjfmt', 'dist', 'bin', 'cjfmt']);
-  file(toolsRoot, ['cjfmt', 'dist', 'config', 'default.toml']);
-  file(toolsRoot, ['hyperlangExtension', 'target', 'bin', 'main']);
-  file(toolsRoot, ['hyperlangExtension', 'src', 'dtsparser', 'keep.txt']);
-  file(toolsRoot, ['hyperlangExtension', 'src', 'dtsparser', 'drop.cj']);
-  file(toolsRoot, ['cangjie-language-server', 'dist', 'bin', 'cangjie-lsp']);
-  directory(toolsRoot, 'cjcov', 'build');
-  file(toolsRoot, ['cjcov', 'dist', 'cjcov']);
-  directory(toolsRoot, 'cjtrace-recover', 'build');
-  file(toolsRoot, ['cjtrace-recover', 'dist', 'bin', 'cjtrace-recover']);
-  for(const name of ['cjlint','cjprof','cjcompat','cjhead'])directory(toolsRoot,name,'build');
+  file(toolsRoot, ['packages', 'cjfmt', 'dist', 'bin', 'cjfmt']);
+  file(toolsRoot, ['packages', 'cjfmt', 'dist', 'config', 'default.toml']);
+  file(toolsRoot, ['packages', 'hle', 'target', 'bin', 'main']);
+  file(toolsRoot, ['packages', 'hle', 'src', 'dtsparser', 'keep.txt']);
+  file(toolsRoot, ['packages', 'hle', 'src', 'dtsparser', 'drop.cj']);
+  file(toolsRoot, ['packages', 'lsp', 'dist', 'bin', 'cangjie-lsp']);
+  directory(toolsRoot, 'packages', 'cjcov', 'build');
+  file(toolsRoot, ['packages', 'cjcov', 'dist', 'bin', 'cjcov']);
+  directory(toolsRoot, 'packages', 'cjtrace-recover', 'build');
+  file(toolsRoot, ['packages', 'cjtrace-recover', 'dist', 'bin', 'cjtrace-recover']);
+  for(const name of ['cjlint','cjprof','cjcompat','cjhead'])directory(toolsRoot,'packages',name,'build');
   file(compilerRoot, ['output', 'stdx', 'linux_x86_64_cjnative', '.keep']);
   file(compilerRoot, ['output', 'envsetup.sh']);
   file(officialSdkRoot, ['envsetup.sh']);
@@ -665,7 +665,7 @@ test('Linux source stages emit the Python command order', async () => {
     const runtimeRoot = path.join(workspace, 'cangjie_runtime', 'runtime');
     const stdlibRoot = path.join(workspace, 'cangjie_runtime', 'stdlib');
     const stdxRoot = path.join(workspace, 'cangjie_stdx');
-    const toolsRoot = path.join(workspace, 'cangjie_tools');
+    const toolsRoot = path.join(workspace, 'cjcj-tools');
     const commands = await captureCommands(root, async () => {
       await compiler.run(config);
       await runtime.run(config);
@@ -690,19 +690,6 @@ test('Linux source stages emit the Python command order', async () => {
         `--include=${path.join(compilerRoot, 'include')}`, '--target-lib=/usr/lib/x86_64-linux-gnu', '--jobs', String(await selectBuildJobs(config.jobs)),
       ]),
       expected(root, stdxRoot, ['python3', 'build.py', 'install', '--prefix', path.join(compilerRoot, 'output', 'stdx')]),
-      // Read the pin rather than repeating it. tools.mjs:48-51 takes the url and
-      // ref straight from ci/cjpm_pin.env, so a literal here is a second copy of
-      // the pin that no one updates with the first: when CJPM_FORK_REF moved to
-      // pick up the cjpm-side jobserver, this assertion still named the old sha
-      // and would have failed for a reason that has nothing to do with the
-      // command order it exists to check.
-      expected(root, toolsRoot, [
-        'git', ...sourceFetchArguments(cjpmPin.CJPM_FORK_URL, cjpmPin.CJPM_FORK_REF),
-      ]),
-      expected(root, toolsRoot, ['git', 'rev-parse', 'FETCH_HEAD']),
-      expected(root, toolsRoot, [
-        'git', 'restore', '--source', cjpmPin.CJPM_FORK_REF, '--staged', '--worktree', '--', 'cjpm',
-      ]),
     ];
     const toolNames=['cjpm','cjfmt','hle','lsp','cjcov','cjtrace-recover','cjlint','cjprof','cjcompat','cjhead'];
     const toolBudget=tools.toolCpuPlan(toolNames,os.availableParallelism(),Math.min(toolNames.length,os.availableParallelism()));
@@ -711,18 +698,17 @@ test('Linux source stages emit the Python command order', async () => {
     for (const [name, subpath] of [
       ['cjpm', path.join('cjpm', 'build')],
       ['cjfmt', path.join('cjfmt', 'build')],
-      ['hle', path.join('hyperlangExtension', 'build')],
-      ['lsp', path.join('cangjie-language-server', 'cangjie')],
+      ['hle', 'packages/hle'],
+      ['lsp', 'packages/lsp'],
       ['cjcov', path.join('cjcov', 'build')],
-      ['cjtrace-recover', path.join('cjtrace-recover', 'build')],
+      ['cjtrace-recover', 'packages/cjtrace-recover'],
       ...['cjlint','cjprof','cjcompat','cjhead'].map(name=>[name,path.join(name,'build')]),
     ]) {
-      const cwd = path.join(toolsRoot, subpath);
+      const cwd = toolsRoot;
       const prefix=toolBudget[name].cpuSet?['taskset','-c',toolBudget[name].cpuSet]:[];
-      const producer=['cjpm','cjcov','lsp','cjhead','hle','cjtrace-recover','cjcompat','cjprof','cjlint'].includes(name)?[process.execPath,'build.mjs']:['python3','build.py'];
-      if(!['lsp','cjhead','cjtrace-recover','cjcompat','cjprof','cjlint'].includes(name))expectedCommands.push(expected(root,cwd,[...prefix,...producer,'clean',...(name==='hle'?['--build-dir',path.join(config.buildRoot,'hle')]:[])]));
-      const buildArgs = [...producer,'build','-t','release'];
-      if(name==='hle')buildArgs.push('--build-dir',path.join(config.buildRoot,'hle'));
+      const producer=[process.execPath,'build.mjs'];
+      const buildArgs = [...producer,'build','--build-dir',path.join(config.buildRoot,name),'-t','release'];
+      if(name==='hle')buildArgs.splice(2,buildArgs.length-2,'build','-t','release','--build-dir',path.join(config.buildRoot,'hle'));
       if(name==='cjtrace-recover')buildArgs.push('--cangjie-sdk',config.consumerSdk,'--mangle-source',config.toolsMangleSource,'--set-rpath','$ORIGIN/../lib:$ORIGIN/../../../runtime/lib/linux_x86_64_cjnative');
       if (name === 'cjpm') buildArgs.push('--set-rpath', '$ORIGIN/../../runtime/lib/linux_x86_64_cjnative');
       if (['cjpm','cjfmt','lsp','cjlint','cjprof','cjcompat'].includes(name)) buildArgs.push('--jobs',String(toolBudget[name].jobs));
@@ -731,7 +717,7 @@ test('Linux source stages emit the Python command order', async () => {
       if(name==='cjlint')buildArgs.splice(0,buildArgs.length,...producer,'build','--sdk',config.consumerSdk,'--analysis-sdk',config.toolsAnalysisSdk,'--frontend-source',config.toolsFrontendSource,'--frontend-ref',config.toolsFrontendRef,'--frontend-artifacts',config.toolsCompilerLibs,'--frontend-runtime-object',config.toolsRuntimeConfig,'--llvm-shim',config.toolsLlvmShim,'--llvm-library',config.toolsLlvmLibrary,'--build-dir',path.join(config.buildRoot,'cjlint'),'--jobs',String(toolBudget[name].jobs));
       if(name==='cjcompat') {
         const sdk=config.consumerSdk??path.join(config.repoPath('compiler'),'output'),source=config.repoPath('compiler');
-        buildArgs.splice(0,buildArgs.length,...producer,'build','--type','release','--sdk',sdk,
+        buildArgs.splice(0,buildArgs.length,...producer,'build','--build-dir',path.join(config.buildRoot,name),'--type','release','--sdk',sdk,
           '--compiler-source',source,'--compiler-libs',config.toolsCompilerLibs,
           '--runtime-config',config.toolsRuntimeConfig,
           '--shim',config.toolsLlvmShim,
@@ -739,17 +725,12 @@ test('Linux source stages emit the Python command order', async () => {
           '--jobs',String(toolBudget[name].jobs),'--tools-revision',config.repo('tools').tag);
       }
       if(name==='cjprof')buildArgs.splice(0,buildArgs.length,...producer,'build','--sdk',config.consumerSdk??path.join(config.repoPath('compiler'),'output'),'--jni-home',config.toolsJniHome,'--runtime-header',config.toolsRuntimeHeader,'--lombok-jar',config.toolsLombokJar,'--build-dir',path.join(config.buildRoot,'cjprof'));
-      expectedCommands.push(expected(root, cwd, [...prefix,...buildArgs]));
-      const installArgs = [...producer,'install'];
-      if(name==='hle')installArgs.push('--build-dir',path.join(config.buildRoot,'hle'));
-      if (['cjfmt','cjtrace-recover','cjlint','cjprof','cjcompat'].includes(name)) {
-        installArgs.push('--prefix', path.join(toolsRoot, name, 'dist'));
-      }
-      if(name==='cjlint')installArgs.push('--build-dir',path.join(config.buildRoot,'cjlint'),'--analysis-sdk',config.toolsAnalysisSdk);
-      if(name==='cjprof')installArgs.push('--build-dir',path.join(config.buildRoot,'cjprof'));
-      if(name==='lsp')installArgs.splice(0,installArgs.length,...producer,'--phase','install','--build',path.join(config.buildRoot,'lsp'),'--install',path.join(toolsRoot,'cangjie-language-server/dist'));
-      if(name==='cjhead')installArgs.splice(0,installArgs.length,...producer,'install','--build-dir',path.join(config.buildRoot,'cjhead'),'--prefix',path.join(toolsRoot,'cjhead/dist'));
-      expectedCommands.push(expected(root, cwd, installArgs));
+      const phaseIndex=name==='lsp'?3:2;
+      const nativeBuild=buildArgs.slice(phaseIndex+1);
+      if(!nativeBuild.includes('--build-dir')&&name!=='lsp')nativeBuild.push('--build-dir',path.join(config.buildRoot,name));
+      expectedCommands.push(expected(root,cwd,[...prefix,process.execPath,'build.mjs','build','--tool',name,'--build-root',config.buildRoot,'--',...nativeBuild]));
+      const nativeInstall=name==='lsp'?['--build',path.join(config.buildRoot,name)]:['--build-dir',path.join(config.buildRoot,name),...(name==='cjlint'?['--analysis-sdk',config.toolsAnalysisSdk]:[])];
+      expectedCommands.push(expected(root,cwd,[process.execPath,'build.mjs','install','--tool',name,'--build-root',config.buildRoot,'--prefix',path.join(toolsRoot,'packages',name,'dist'),'--',...nativeInstall]));
     }
     // This gate observes producer command ordering. Installed SDK packaging,
     // ABI, hello/macro and relocation checks are retained in the registered
@@ -757,16 +738,16 @@ test('Linux source stages emit the Python command order', async () => {
     // real installed SDK, which this command-generation fixture does not own.
     const isTool = command => command.includes(toolsRoot.replaceAll(root,'<ROOT>')) && /build\.(?:py|mjs)/.test(command);
     assert.deepEqual(commands.filter(c=>!isTool(c)), expectedCommands.filter(c=>!isTool(c)));
-    assert.equal(commands.filter(isTool).length,24);
+    assert.equal(commands.filter(isTool).length,20);
     console.log('FORMAL_TOOL_COMMAND_ASSERT_REACHED');
     assert.deepEqual(commands.filter(isTool).sort(), expectedCommands.filter(isTool).sort());
     const lastBuild=Math.max(...commands.map((c,i)=>isTool(c)&&/build\.(?:py|mjs) (?:--phase )?build/.test(c)?i:-1));
     for(const [name,subpath] of tools.toolsFor(config)) {
-      const own=command=>command.includes(path.join(toolsRoot,subpath).replaceAll(root,'<ROOT>'));
+      const own=command=>isTool(command)&&command.includes('--tool '+name+' ');
       const clean=commands.findIndex(c=>own(c)&&/build\.(?:py|mjs) clean/.test(c));
       const build=commands.findIndex(c=>own(c)&&/build\.(?:py|mjs) (?:--phase )?build/.test(c));
       const install=commands.findIndex(c=>own(c)&&/build\.(?:py|mjs) (?:--phase )?install/.test(c));
-      assert((['lsp','cjhead','cjtrace-recover','cjcompat','cjprof','cjlint'].includes(name)?clean===-1:clean>=0)&&build>clean&&install>lastBuild,'producer order and publication barrier: '+subpath);
+      assert(clean===-1&&build>=0&&install>lastBuild,'producer order and publication barrier: '+subpath);
       console.log('FORMAL_TOOL_ORDER_BARRIER_PASS '+name);
     }
   } finally {
@@ -969,15 +950,15 @@ test('package rejects an extra link outside the published SDK', async () => {
 // them and fails for everyone else. tools.mjs fetches it with `git fetch
 // --depth 1 <url> <sha>`, which resolves nothing when the object is not
 // advertised by the remote, so the pin must name an object the remote actually
-// has. This is not hypothetical: CJPM_FORK_REF sat four commits behind the
+// has. This is not hypothetical: TOOLS_REF sat four commits behind the
 // cjpm-side jobserver for three days because those commits lived only on a
 // local branch, and nothing said so -- the build simply kept using the older
 // pin, and the jobserver on the compiler side had no token source.
 //
 // A failed or interrupted probe is not a successful reachability check.
 test('the cjpm pin names an object the remote actually has', {timeout: 60_000}, t => {
-  const {CJPM_FORK_URL: url, CJPM_FORK_REF: ref} = cjpmPin;
-  assert.match(ref, /^[0-9a-f]{40}$/, 'CJPM_FORK_REF must be a full sha');
+  const {TOOLS_SRC_URL: url, TOOLS_REF: ref} = cjpmPin;
+  assert.match(ref, /^[0-9a-f]{40}$/, 'TOOLS_REF must be a full sha');
 
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cjpm-pin-'));
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));

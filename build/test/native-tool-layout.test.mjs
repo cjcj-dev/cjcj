@@ -9,9 +9,9 @@ import {sourceToolPayloads} from '../../ci/release/source-tool-payloads.mjs';
 // Independent literals from fixed ec1 native CMake producers/install rules.
 // Text transport fixtures only: no compiler, DLL, Windows execution or SDK pass.
 const layouts=[
- ['linux-x64','cjprof','selected-build/cjprof/libcjprof-cangjie.so','cjprof/dist/lib/libcjprof-cangjie.so','tools/lib/libcjprof-cangjie.so'],
- ['linux-x64','cjprof','selected-build/cjprof/libcjprof-jni.so','cjprof/dist/lib/libcjprof-jni.so','tools/lib/libcjprof-jni.so'],
- ['linux-x64','cjprof','selected-build/cjprof/cjprof.jar','cjprof/dist/share/java/cjprof.jar','tools/share/java/cjprof.jar'],
+ ['linux-x64','cjprof','selected-build/cjprof/libcjprof-cangjie.so','packages/cjprof/dist/lib/libcjprof-cangjie.so','tools/lib/libcjprof-cangjie.so'],
+ ['linux-x64','cjprof','selected-build/cjprof/libcjprof-jni.so','packages/cjprof/dist/lib/libcjprof-jni.so','tools/lib/libcjprof-jni.so'],
+ ['linux-x64','cjprof','selected-build/cjprof/cjprof.jar','packages/cjprof/dist/share/java/cjprof.jar','tools/share/java/cjprof.jar'],
 ];
 test('Cangjie lint consumes the executable recorded by its normal CJPM producer',async t=>{
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'lint-product-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
@@ -37,7 +37,7 @@ for(const [platform,name] of [...new Map(layouts.map(row=>[row[0]+'/'+row[1],[ro
   for(const [,,raw,installed]of rows){await write(raw);await write(installed);}
   const sourceConfig=name==='cjlint'?'config/rules.json':'static/index.html';
   const installedConfig=name==='cjlint'?'config/rules.json':'config/static/index.html';
-  await write(name+'/'+sourceConfig);await write(name+'/dist/'+installedConfig);
+  await write('packages/'+name+'/'+sourceConfig);await write('packages/'+name+'/dist/'+installedConfig);
   const raw=await nativeToolBuildPayloads(config,name);
   console.log('NATIVE_RAW_LIBRARY_TARGET_BEGIN '+platform+' '+name);
   for(const [,,build,,to]of rows) {

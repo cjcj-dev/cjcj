@@ -15,7 +15,7 @@ assert.ok(evidence && process.env.SDK_INPUT_WORK, 'SDK_INPUT_CUTS and SDK_INPUT_
 fs.mkdirSync(evidence, {recursive: true});
 // Read once before any product mutation; children must not derive expectations
 // from the pin that this runner is about to cut.
-const expectedCjpm = makeRepos().cjpm.tag;
+const expectedCjpm = makeRepos().tools.tag;
 const expectedTools = process.env.SDK_INPUT_TOOLS_REF ?? makeRepos().tools.tag;
 const expectedStdx = process.env.SDK_INPUT_STDX_REF ?? makeRepos().stdx.tag;
 for (const ref of [expectedTools, expectedStdx]) assert.match(ref, /^[0-9a-f]{40}$/);
@@ -45,10 +45,10 @@ const cuts = [
   {name: 'resume-identity', file: 'build/srcbuild/stages/fetch.mjs',
     from: 'await assertSourceIdentity(repo, target);', to: '// Controlled cut: do not validate resumed source identity.',
     cases: 'stale-source', target: /STALE_SOURCE_ASSERTION_REACHED/, failure: /AssertionError/, control: 'h-default'},
-  {name: 'cjpm-overlay', file: 'ci/cjpm_pin.env',
-    from: `CJPM_FORK_REF=${expectedCjpm}`,
-    to: `CJPM_FORK_REF=${cutCjpm}`,
-    cases: 'tools-overlay', target: /CJPM_SUBTREE_ASSERTION_REACHED/, failure: /complete fork cjpm tree/, control: 'h-default'},
+  {name: 'cjpm-overlay', file: 'ci/source_pin.env',
+    from: `TOOLS_REF=${expectedCjpm}`,
+    to: `TOOLS_REF=${cutCjpm}`,
+    cases: 'tools-package', target: /CJPM_SUBTREE_ASSERTION_REACHED/, failure: /complete selected packages/cjpm tree/, control: 'h-default'},
   {name: 'handoff-origin', file: 'build/lib/git.mjs',
     from: "const origin = remotes.includes('origin') ? await query('remote', 'get-url', 'origin') : null;",
     to: "const origin = await query('remote', 'get-url', 'origin');",
@@ -107,7 +107,7 @@ for (const cut of cuts.filter(cut => !selected || selected.includes(cut.name))) 
   // arm. Reset only this deliberately mutated fixture to the fixed tools base.
   if (cut.name === 'resume-identity') {
     const p = spawnSync('git', ['reset', '--hard', expectedTools],
-      {cwd: path.join(work, 'workspace/cangjie_tools'), encoding: 'utf8'});
+      {cwd: path.join(work, 'workspace/cjcj-tools'), encoding: 'utf8'});
     fs.writeFileSync(path.join(evidence, 'fixture-restore.json'), JSON.stringify({status:p.status,signal:p.signal,stdout:p.stdout,stderr:p.stderr}));
     assert.equal(p.status, 0, p.stderr);
   }

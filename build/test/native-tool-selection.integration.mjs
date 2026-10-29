@@ -32,7 +32,7 @@ await write(path.join(tools,'cangjie-language-server/main.c'),'#include <stdio.h
 await run('git-init',['git','init','-q',tools]);
 await run('git-add',['git','add','.'],tools);
 await run('git-commit',['git','-c','user.name=Zxilly','-c','user.email=zxilly@outlook.com','commit','-qm','native interface fixture'],tools);
-const product=path.join(tools,'cangjie-language-server/output/bin/LSPServer');await fs.mkdir(path.dirname(product),{recursive:true});
+const product=path.join(tools,'packages/lsp/dist/bin/LSPServer');await fs.mkdir(path.dirname(product),{recursive:true});
 const argv=['cc',path.join(tools,'cangjie-language-server/main.c'),'-o',product];
 const before=await beginToolBuild(config,'lsp',{argv,env:{CANGJIE_HOME:sdk},sdk});
 await run('native-build',argv);await finishToolBuild(config,'lsp',before,product);
@@ -41,8 +41,8 @@ const original=await json(path.join(workspace,'build/tools/lsp/build-inputs.json
 for(const row of toolOutputs(config))if(row.producer!=='lsp') {
  await fs.mkdir(path.dirname(row.from),{recursive:true});await fs.copyFile(product,row.from);
 }
-for(const rel of ['cjpm/dist/cangjie-repo.toml','cjfmt/config/cangjie-format.toml','cjlint/dist/lib/libcjlint.so','cjlint/dist/config/rules.json',
- 'cjprof/dist/lib/libcjprof-cangjie.so','cjprof/dist/lib/libcjprof-jni.so','cjprof/dist/share/java/cjprof.jar','cjprof/dist/config/static/index.html'])await write(path.join(tools,rel),'unqualified other-tool fixture');
+for(const rel of ['packages/cjpm/dist/cangjie-repo.toml','packages/cjfmt/config/cangjie-format.toml','packages/cjlint/dist/lib/libcjlint.so','packages/cjlint/dist/config/rules.json',
+ 'packages/cjprof/dist/lib/libcjprof-cangjie.so','packages/cjprof/dist/lib/libcjprof-jni.so','packages/cjprof/dist/share/java/cjprof.jar','packages/cjprof/dist/config/static/index.html'])await write(path.join(tools,rel),'unqualified other-tool fixture');
 for(const rel of ['tools/dtsparser/DEPENDENCIES.json','tools/bin/node','tools/dtsparser/node_modules/.bin/cjbind'])await write(path.join(sdk,rel),'unqualified HLE fixture');
 const cli=fileURLToPath(new URL('../../ci/cangjie-test/tool-readiness.mjs',import.meta.url));
 const read=async label=>JSON.parse(await run(label,[process.execPath,cli,sdk]));

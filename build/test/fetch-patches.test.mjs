@@ -151,7 +151,7 @@ test('pinned 174db8f compiler files pass verify only after fetch run restores th
     const compilerDir = path.join(workspace, 'cangjie_compiler');
     fs.cpSync(PIN_FIXTURE, compilerDir, {recursive: true});
     fs.cpSync(SCHEMA_PIN_FIXTURE, path.join(compilerDir, 'schema'), {recursive: true});
-    for (const dirName of ['cangjie_runtime', 'cangjie_tools', 'cangjie_stdx']) {
+    for (const dirName of ['cangjie_runtime', 'cjcj-tools', 'cangjie_stdx']) {
       fs.mkdirSync(path.join(workspace, dirName));
     }
     // The fetch entry now checks real repositories before patching. Preserve

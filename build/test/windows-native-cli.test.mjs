@@ -16,13 +16,13 @@ function fixture(t) {
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));
   const preload = path.join(root, 'host.mjs');
   fs.writeFileSync(preload, "Object.defineProperty(process,'platform',{value:'win32'});\n");
-  const tools = path.join(root, 'cangjie_tools');
+  const tools = path.join(root, 'cjcj-tools');
   for (const name of ['cjpm', 'cjfmt', 'hyperlangExtension', 'cangjie-language-server', 'cjcov', 'cjtrace-recover', 'cjlint', 'cjprof', 'cjcompat']) {
     fs.mkdirSync(path.join(tools, name, 'build'), {recursive: true});
   }
   fs.mkdirSync(path.join(tools, 'cjpm/dist'), {recursive: true});
-  fs.writeFileSync(path.join(tools, 'cjpm/dist/cjpm.exe'), 'fixture marker, not PE');
-  fs.writeFileSync(path.join(tools, 'cjpm/build/build.py'), '# controlled source fixture\n');
+  fs.writeFileSync(path.join(tools, 'packages/cjpm/dist/cjpm.exe'), 'fixture marker, not PE');
+  fs.writeFileSync(path.join(tools, 'packages/cjpm/build/build.py'), '# controlled source fixture\n');
   const env = {...process.env, CANGJIE_BUILD_DRY_RUN: '1', CJCJ_NATIVE_TOOL_DEPENDENCIES: path.join(root,'native-dependencies.json'), CJCJ_NATIVE_LLVM_BIN: path.join(root, 'llvm/bin'),
     CJCJ_NATIVE_OPENSSL_LIB: path.join(root, 'openssl/lib')};
   for (const key of ['CJCJ_OFFICIAL_SDK_ROOT', 'CJCJ_SRCBUILD_CONSUMER_SDK']) delete env[key];

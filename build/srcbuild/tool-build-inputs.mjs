@@ -38,7 +38,7 @@ export async function sdkInputs(config, sdk) {
   }
   return {...(stage===undefined?{}:{stage}), artifacts:Object.fromEntries(await Promise.all(Object.entries(files).map(async ([name,file])=>[name,{path:file,sdkRelative:path.relative(sdk,file).split(path.sep).join('/'),sha256:await fileDigest(file)}])))};
 }
-export async function beginToolBuild(config, name, {cjpmPin, argv, env, sdk}) {
+export async function beginToolBuild(config, name, {argv, env, sdk}) {
   if(dry()) return null;
   const root=config.repoPath('tools'), directory=directories[name];
   if(!directory)throw new Error('TOOL_BUILD_NAME '+name);
@@ -47,8 +47,8 @@ export async function beginToolBuild(config, name, {cjpmPin, argv, env, sdk}) {
   const destination=recordPath(config,name);
   try { await fs.rename(destination,destination+'.previous-'+Date.now()); }
   catch(e){if(e.code!=='ENOENT')throw e;}
-  const repository=name==='cjpm'?cjpmPin.url:config.repo('tools').url;
-  const state=await sourceState(root,directory,name==='cjpm'?cjpmPin.ref:'HEAD');
+  const repository=config.repo('tools').url;
+  const state=await sourceState(root,directory,'HEAD');
   const environment=Object.fromEntries(['CC','CXX','CFLAGS','CXXFLAGS','LDFLAGS','CANGJIE_HOME','CANGJIE_STDX_PATH',
     'PATH','LD_LIBRARY_PATH','DYLD_LIBRARY_PATH','CANGJIE_BUILD_JOBS','CMAKE_BUILD_PARALLEL_LEVEL','MAKEFLAGS',
     'CJFMT_FRONTEND_CJO','CJFMT_FRONTEND_LIB','CJFMT_FRONTEND_NATIVE','CJFMT_FRONTEND_REF','CJFMT_SOURCE_REF',
@@ -79,13 +79,17 @@ async function nativeConfigurationInputs(config,name) {
     return {cangjie:{path:file,values:await readJson(file)}};
   }
   if(name==='cjcompat') {
-    const file=path.join(config.repoPath('tools'),'cjcompat/build/cangjie-build/inputs.json');
+    const file=path.join(toolProducerDirectory(config,'cjcompat'),'inputs.json');
     return {cangjie:{path:file,values:await readJson(file)}};
   }
-  if(['cjfmt','cjlint','cjprof','cjcompat','cjtrace-recover'].includes(name))for(const [part,relative]of [['native',name+(name==='cjtrace-recover'?'/cmake-build/CMakeCache.txt':'/build/build/CMakeCache.txt')],...(name==='cjprof'?[['jni','cjprof/bridge/jni/build/CMakeCache.txt']]:[])]) {
-    const file=path.join(config.repoPath('tools'),relative);
+  if(name==='cjfmt') {
+    const file=path.join(toolProducerDirectory(config,name),'inputs.json');
+    return {cangjie:{path:file,values:await readJson(file)}};
+  }
+  if(name==='cjtrace-recover') {
+    const file=path.join(toolProducerDirectory(config,name),'CMakeCache.txt');
     const cache=Object.fromEntries((await fs.readFile(file,'utf8')).split('\n').filter(line=>/^[A-Za-z_][^:]*:[^=]*=/.test(line)).map(line=>[line.slice(0,line.indexOf(':')),line.slice(line.indexOf('=')+1)]));
-    nativeConfiguration[part]={path:file,values:Object.fromEntries(Object.entries(cache).filter(([key])=>/^(CMAKE_(BUILD_TYPE|SYSTEM_NAME|CXX_COMPILER|C_COMPILER|HOME_DIRECTORY)|CANGJIE_HOME$|CANGJIE_MANGLE_SOURCE_DIR$|CJTRACE_BUNDLE_RUNTIME$|RUNTIME_RPATH$|ZX_EXECUTABLE$|CJFMT_|CJPROF_|JAVA_|JNI_|JSON_ROOT$|GCC_TOOLCHAIN_FLAG$)/.test(key)))};
+    nativeConfiguration.native={path:file,values:cache};
   }
   return nativeConfiguration;
 }

@@ -231,7 +231,7 @@ async function discoverCangjieTools(stage, exeSuffix, platform) {
     // sidecar left beside a rebuilt or differently-sourced binary would otherwise
     // describe bytes that are not there.
     const sidecar = JSON.parse(await fs.readFile(path.join(toolsRoot, entry.name), 'utf8'));
-    const pin = base === 'cjpm' ? await readCjpmPin(new URL('../../ci/cjpm_pin.env', import.meta.url))
+    const pin = base === 'cjpm' ? await readCjpmPin(new URL('../../ci/source_pin.env', import.meta.url))
       : await readToolsPin(new URL('../../ci/source_pin.env', import.meta.url));
     // Verify payloads relative to the SDK root, while the artifact binary lives
     // under tools/bin. The normal artifact verifier receives an explicit root.

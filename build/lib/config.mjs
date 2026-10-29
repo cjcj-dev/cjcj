@@ -10,16 +10,15 @@ import {resolveSources,nativeSourceSelection} from '../../ci/bootstrap/native-so
 
 export const VALID_BUILD_TYPES = Object.freeze(['release', 'debug', 'relwithdebinfo']);
 export const DEFAULT_BUILD_TYPE = 'relwithdebinfo';
-export const REPO_NAMES = Object.freeze(['compiler', 'runtime', 'tools', 'stdx', 'llvm', 'cjpm']);
+export const REPO_NAMES = Object.freeze(['compiler', 'runtime', 'tools', 'stdx', 'llvm']);
 
 const SEMVER_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 const FALLBACK_VERSION = '0.0.0-dev';
 const REPO_DEFAULTS = Object.freeze({
-  cjpm: ['https://github.com/cjcj-dev/cangjie-tools.git', 'cjpm-source'],
   llvm: ['https://github.com/cjcj-dev/cjcj-llvm.git', 'cangjie_compiler/third_party/llvm-project'],
   compiler: ['https://gitcode.com/Cangjie/cangjie_compiler.git', 'cangjie_compiler'],
   runtime: ['https://gitcode.com/Cangjie/cangjie_runtime.git', 'cangjie_runtime'],
-  tools: ['https://gitcode.com/Cangjie/cangjie_tools.git', 'cangjie_tools'],
+  tools: ['https://github.com/cjcj-dev/cjcj-tools.git', 'cjcj-tools'],
   stdx: ['https://gitcode.com/Cangjie/cangjie_stdx.git', 'cangjie_stdx'],
 });
 
@@ -76,13 +75,12 @@ export function resolveOfficialSdkRoot(value = process.env.CJCJ_OFFICIAL_SDK_ROO
 
 export function makeRepos({globalTag, overrides = {}, env=process.env, nativeSelection} = {}) {
   if (globalTag !== undefined && !String(globalTag).trim()) throw new ConfigError('empty global tag');
-  const pins = Object.fromEntries((fs.readFileSync(new URL('../../ci/runtime_pin.env', import.meta.url), 'utf8')+'\n'+fs.readFileSync(new URL('../../ci/source_pin.env', import.meta.url), 'utf8')+'\n'+fs.readFileSync(new URL('../../ci/cjpm_pin.env', import.meta.url),'utf8'))
+  const pins = Object.fromEntries((fs.readFileSync(new URL('../../ci/runtime_pin.env', import.meta.url), 'utf8')+'\n'+fs.readFileSync(new URL('../../ci/source_pin.env', import.meta.url), 'utf8'))
     .split(/\r?\n/).filter(line => line && !line.startsWith('#')).map(line => {
       const separator = line.indexOf('=');
       if (separator < 1) throw new ConfigError(`invalid source pin line: ${line}`);
       return [line.slice(0, separator), line.slice(separator + 1)];
     }));
-  pins.CJPM_REF=pins.CJPM_FORK_REF;pins.CJPM_SRC_URL=pins.CJPM_FORK_URL;
   const pair=env.CJCJ_NATIVE_LLVM_REF||env.CJCJ_NATIVE_RUNTIME_REF
     ? {llvm:env.CJCJ_NATIVE_LLVM_REF,runtime:env.CJCJ_NATIVE_RUNTIME_REF}:null;
   if(pair&&![pair.llvm,pair.runtime].every(value=>/^[a-f0-9]{40}$/.test(value??'')))throw new ConfigError('NATIVE_RUNTIME_EXPLICIT_PAIR_REQUIRED');

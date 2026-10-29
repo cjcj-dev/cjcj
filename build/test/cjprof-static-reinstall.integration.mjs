@@ -64,11 +64,11 @@ async function consume(pending) {
  const output=await fs.readFile(path.join(work,commands.at(-1).label+'.stdout'),'utf8');
  assert.match(output,/default::Dirived\s+1\s+72\s+168/);
 }
-const others=[['cjpm','cjpm/dist/cjpm'],['cjfmt','cjfmt/dist/bin/cjfmt'],['hle','hyperlangExtension/target/bin/main'],['LSPServer','cangjie-language-server/output/bin/LSPServer'],['cjcov','cjcov/dist/cjcov'],['cjtrace-recover','cjtrace-recover/dist/bin/cjtrace-recover'],['cjlint','cjlint/dist/bin/cjlint'],['cjcompat','cjcompat/dist/bin/cjcompat']];
+const others=[['cjpm','packages/cjpm/dist/cjpm'],['cjfmt','packages/cjfmt/dist/bin/cjfmt'],['hle','packages/hle/target/bin/main'],['LSPServer','packages/lsp/dist/bin/LSPServer'],['cjcov','packages/cjcov/dist/cjcov'],['cjtrace-recover','packages/cjtrace-recover/dist/bin/cjtrace-recover'],['cjlint','packages/cjlint/dist/bin/cjlint'],['cjcompat','packages/cjcompat/dist/bin/cjcompat']];
 for(const [name,relative]of others){const file=path.join(tools,relative);await write(file,'#!'+process.execPath+'\nconsole.log('+JSON.stringify(name+':control')+');\n');await fs.chmod(file,0o755);}
-for(const rel of ['cjlint/dist/lib/libcjlint.so','cjlint/dist/config/cjlint_rule_list.json','cjfmt/dist/config/cangjie-format.toml','cjpm/dist/cangjie-repo.toml'])await write(path.join(tools,rel),'independent control '+rel);
+for(const rel of ['packages/cjlint/dist/lib/libcjlint.so','packages/cjlint/dist/config/cjlint_rule_list.json','packages/cjfmt/dist/config/cangjie-format.toml','packages/cjpm/dist/cangjie-repo.toml'])await write(path.join(tools,rel),'independent control '+rel);
 await write(path.join(sdk,'tools/config/other.toml'),'shared config control');
-const parser=path.join(tools,'hyperlangExtension/src/dtsparser');
+const parser=path.join(tools,'packages/hle/src/dtsparser');
 await write(path.join(parser,'analysis.js'),'controlled parser input');await write(path.join(parser,'package.json'),JSON.stringify({dependencies:{typescript:'npm:typescript@4.9.5','https-proxy-agent':'7.0.6'}}));
 const hle=path.join(work,'hle');hlePayloadFixture(hle);
 await installHleDependencies({toolsRoot:tools,sdk,platform:'linux_x86_64',input:{platform:'linux_x86_64',node:{path:'/usr/bin/true',source:'unexecuted ELF fixture, not Node',version:'fixture'},modules:{path:path.join(hle,'tools/dtsparser/node_modules'),source:'controlled modules',version:'fixture'},cjbind:{path:'/usr/bin/true',source:'unexecuted ELF fixture, not cjbind',version:'v1.1.0-alpha.53.1'}}});
@@ -113,7 +113,7 @@ test('normal cjprof reinstall removes deleted and renamed pages from the real pu
 test('other tool entries and shared configuration survive cjprof replacement',async()=>{
  assert.equal(await fs.readFile(path.join(sdk,'tools/config/other.toml'),'utf8'),'shared config control');
  for(const [name]of others){const r=spawnSync(path.join(sdk,'tools/bin',name),[],{encoding:'utf8'});assert.equal(r.status,0);assert.equal(r.stdout.trim(),name+':control');}
- assert.equal(await fs.readFile(path.join(sdk,'tools/config/cjlint_rule_list.json'),'utf8'),'independent control cjlint/dist/config/cjlint_rule_list.json');
+ assert.equal(await fs.readFile(path.join(sdk,'tools/config/cjlint_rule_list.json'),'utf8'),'independent control packages/cjlint/dist/config/cjlint_rule_list.json');
 });
 test('formal cjprof artifact transports the recorded install set and excludes directory residue',async()=>{
  // Independent artifact arm: a prior unrecorded page must not be attributed

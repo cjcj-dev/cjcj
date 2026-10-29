@@ -19,7 +19,7 @@ const cli=new URL('../cli.mjs',import.meta.url).pathname;
 const profOptions=['--tools-json-build','/selected/json-build','--tools-analysis-sdk','/selected/analysis','--tools-frontend-source','/selected/frontend','--tools-frontend-ref','bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb','--tools-compiler-libs','/selected/frontend-libs','--tools-runtime-config','/selected/config.o','--tools-llvm-shim','/selected/shim.o','--tools-llvm-library','/selected/libLLVM-15.so','--tools-jni-home','/selected/jdk','--tools-runtime-header','/selected/Cangjie.h','--tools-lombok-jar','/selected/lombok.jar'];
 test('public trace entry selects Cangjie build.mjs and requires its compiler mangle source',async t=>{
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'trace-source-entry-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
- await fs.mkdir(root+'/cangjie_tools/cjtrace-recover/build',{recursive:true});
+ await fs.mkdir(root+'/cjcj-tools/cjtrace-recover/build',{recursive:true});
  const args=[cli,...profOptions,'--workspace',root,'--tools-phase','build','--tools-build-set','cjtrace-recover','--jobs','1'];
  const env={...process.env,CANGJIE_BUILD_DRY_RUN:'1'};delete env.CANGJIE_MANGLE_SOURCE_DIR;
  const missing=spawnSync(process.execPath,[...args,'build','tools'],{env,encoding:'utf8'});
@@ -63,10 +63,10 @@ test('public stdx tools profile selects existing producer options without changi
 
 test('public ten-tool stage separates the total CPU and heavy package budgets',async t=>{
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'sdk-tool-jobs-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
- const tools=root+'/cangjie_tools';
+ const tools=root+'/cjcj-tools';
  for(const relative of [...producers.map(([,dir])=>dir),'cjpm/dist'])await fs.mkdir(tools+'/'+relative,{recursive:true});
- await fs.writeFile(tools+'/cjpm/build/build.py','# controlled command-generation input\n');
- await fs.writeFile(tools+'/cjpm/dist/cjpm','controlled output existence; no compiled tool\n');
+ await fs.writeFile(tools+'/packages/cjpm/build/build.py','# controlled command-generation input\n');
+ await fs.writeFile(tools+'/packages/cjpm/dist/cjpm','controlled output existence; no compiled tool\n');
  const env={...process.env,CANGJIE_MANGLE_SOURCE_DIR:root+'/mangle',CJCJ_NATIVE_TOOL_DEPENDENCIES:root+'/native-dependencies.json',CANGJIE_BUILD_DRY_RUN:'1',CANGJIE_BUILD_JOBS:'1'};
  const p=spawnSync(process.execPath,[cli,...profOptions,'--workspace',root,'build','tools'],{env,encoding:'utf8'});
  assert.equal(p.status,0,p.stderr);
@@ -115,15 +115,15 @@ test('public ten-tool stage separates the total CPU and heavy package budgets',a
 
 test('public tool build selection retains a complete install and rejects ambiguous sets',async t=>{
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'sdk-tool-selection-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
- const tools=root+'/cangjie_tools';
+ const tools=root+'/cjcj-tools';
  for(const dir of [...producers.map(([,dir])=>dir),'cjpm/dist'])await fs.mkdir(tools+'/'+dir,{recursive:true});
- await fs.writeFile(tools+'/cjpm/build/build.py','# command generation fixture\n');await fs.writeFile(tools+'/cjpm/dist/cjpm','controlled existence; no compiled tool\n');
+ await fs.writeFile(tools+'/packages/cjpm/build/build.py','# command generation fixture\n');await fs.writeFile(tools+'/packages/cjpm/dist/cjpm','controlled existence; no compiled tool\n');
  const invoke=(set,phase='all')=>spawnSync(process.execPath,[cli,...profOptions,'--workspace',root,'--tools-build-set',set,'--tools-phase',phase,'--tools-build-mode','incremental','build','tools'],{
   env:{...process.env,CANGJIE_MANGLE_SOURCE_DIR:root+'/mangle',CJCJ_NATIVE_TOOL_DEPENDENCIES:root+'/native-dependencies.json',CANGJIE_BUILD_DRY_RUN:'1',CANGJIE_BUILD_JOBS:'4'},encoding:'utf8'});
  const p=invoke('cjpm,lsp,cjcov,cjtrace-recover');assert.equal(p.status,0,p.stderr);
  const lines=p.stderr.split('\n').filter(s=>isProducer(s));
  const builds=lines.filter(s=>isProducer(s,'build'));assert.equal(builds.length,4);
- assert(!builds.some(s=>s.includes('/cjfmt/')||s.includes('/hyperlangExtension/')));
+ assert(!builds.some(s=>s.includes('/cjfmt/')||s.includes('/packages/hle/')));
  assertCommands(lines,'install');
  assert.equal(lines.findIndex(s=>isProducer(s,'install')),4);
  assert(!lines.some(s=>isProducer(s,'clean')));
@@ -135,8 +135,8 @@ test('public tool build selection retains a complete install and rejects ambiguo
 
  test('public independent tool build has no shared install and uses its CPU allocation',async t=>{
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'sdk-tool-independent-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
- for(const dir of ['cjpm/build','cjcov/build','cjtrace-recover/build','cjlint/build','cjprof/build','cjcompat/build'])await fs.mkdir(root+'/cangjie_tools/'+dir,{recursive:true});
- await fs.writeFile(root+'/cangjie_tools/cjpm/build/build.py','# fixed fixture\n');
+ for(const dir of ['cjpm/build','cjcov/build','cjtrace-recover/build','cjlint/build','cjprof/build','cjcompat/build'])await fs.mkdir(root+'/cjcj-tools/'+dir,{recursive:true});
+ await fs.writeFile(root+'/cjcj-tools/packages/cjpm/build/build.py','# fixed fixture\n');
  const args=[cli,...profOptions,'--workspace',root,'--tools-build-set','cjcov,cjtrace-recover','--tools-phase','build','--tools-build-mode','incremental','--jobs','63','--tools-package-jobs','3','build','tools'];
  const env={...process.env,CANGJIE_MANGLE_SOURCE_DIR:root+'/mangle',CJCJ_NATIVE_TOOL_DEPENDENCIES:root+'/native-dependencies.json',CANGJIE_BUILD_DRY_RUN:'1',CANGJIE_BUILD_JOBS:'1'};
  const r=spawnSync(process.execPath,args,{env,encoding:'utf8'});assert.equal(r.status,0,r.stderr);
@@ -160,7 +160,7 @@ async function installedRegressionFixture() {
   const base=process.env.RELEASE_EVIDENCE_TEST_ROOT||os.tmpdir();
   await fs.mkdir(base,{recursive:true});
   const root=process.env.CJPM_WIRE_FIXTURE||await fs.mkdtemp(path.join(base,'cjpm-install-wire-'));
-  const workspace=root+'/workspace',sdk=root+'/sdk',tools=workspace+'/cangjie_tools';
+  const workspace=root+'/workspace',sdk=root+'/sdk',tools=workspace+'/cjcj-tools';
   const write=async(file,body,mode=0o644)=>{await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,body,{mode});};
   const trace=root+'/events.jsonl',commands=root+'/commands.jsonl';
   if(!await fs.stat(root+'/fixture-ready').catch(()=>null)) {
@@ -177,19 +177,19 @@ async function installedRegressionFixture() {
    await fs.symlink('cjcj-stage1',sdk+'/bin/cjc');
    // Do not copy Node or any SDK; these unrelated HLE inputs are unused markers.
    for(const file of ['tools/bin/node','tools/dtsparser/node_modules/.bin/cjbind','tools/dtsparser/DEPENDENCIES.json'])await write(sdk+'/'+file,'controlled unused HLE boundary');
-   const outputs={cjpm:'cjpm/dist/cjpm',cjfmt:'cjfmt/dist/bin/cjfmt',hle:'hyperlangExtension/target/bin/main',lsp:'cangjie-language-server/dist/bin/cangjie-lsp',cjhead:'cjhead/dist/bin/cjhead',cjcov:'cjcov/dist/cjcov','cjtrace-recover':'cjtrace-recover/dist/bin/cjtrace-recover',cjlint:'cjlint/dist/bin/cjlint',cjprof:'cjprof/dist/bin/cjprof',cjcompat:'cjcompat/dist/bin/cjcompat'};
-   const buildProducts={...outputs,cjfmt:'cjfmt/build/build/bin/cjfmt','cjtrace-recover':'cjtrace-recover/cmake-build/cjtrace-recover',cjlint:'unused-cjlint-build-path',cjprof:'cjprof/build/cangjie-output/cjprof',cjcompat:'cjcompat/build/cangjie-build/cjcompat'};
+   const outputs={cjpm:'packages/cjpm/dist/cjpm',cjfmt:'packages/cjfmt/dist/bin/cjfmt',hle:'packages/hle/target/bin/main',lsp:'packages/lsp/dist/bin/cangjie-lsp',cjhead:'packages/cjhead/dist/bin/cjhead',cjcov:'packages/cjcov/dist/cjcov','cjtrace-recover':'packages/cjtrace-recover/dist/bin/cjtrace-recover',cjlint:'packages/cjlint/dist/bin/cjlint',cjprof:'packages/cjprof/dist/bin/cjprof',cjcompat:'packages/cjcompat/dist/bin/cjcompat'};
+   const buildProducts={...outputs,cjfmt:'packages/cjfmt/build/build/bin/cjfmt','cjtrace-recover':'cjtrace-recover/cmake-build/cjtrace-recover',cjlint:'unused-cjlint-build-path',cjprof:'packages/cjprof/build/cangjie-output/cjprof',cjcompat:'packages/cjcompat/build/cangjie-build/cjcompat'};
    const cjpm='#!'+process.execPath+'\n'+`const fs=require('node:fs');const path=require('node:path');
 fs.appendFileSync(${JSON.stringify(trace)},JSON.stringify({event:'installed-cjpm',args:process.argv.slice(2),cwd:process.cwd()})+'\\n');
 if(process.argv[2]==='build'){const out=path.resolve('target/release/bin/main');fs.mkdirSync(path.dirname(out),{recursive:true});fs.writeFileSync(out,${JSON.stringify(hello)},{mode:0o755});}
 `;
    for(const [name,dir]of producers) {
     const body=name==='cjpm'?cjpm:'#!'+process.execPath+'\nconsole.log("controlled tool");\n';
-    const payloads=name==='cjpm'?{'cjpm/dist/cangjie-repo.toml':'fixture repo'}:
-     name==='cjfmt'?{'cjfmt/dist/config/cangjie-format.toml':'fixture format'}:
-     name==='cjlint'?{'cjlint/dist/lib/libcangjie-runtime.so':'unloaded fixture','cjlint/dist/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so':'unloaded fixture','cjlint/dist/modules/std.core.cjo':'analysis fixture','cjlint/dist/config/cjlint_rule_list.json':'{}'}:
-     ['lsp','cjhead'].includes(name)?{[outputs[name].replace(/bin\/[^/]+$/,'lib/libcangjie-runtime.so')]:'unloaded fixture',...(name==='cjhead'?{'cjhead/dist/share/cjhead/frontend.json':'fixture frontend'}:{})}:
-     name==='cjprof'?{'cjprof/dist/lib/libcjprof-cangjie.so':'unloaded fixture','cjprof/dist/lib/libcjprof-jni.so':'unloaded fixture','cjprof/dist/share/java/cjprof.jar':'unloaded fixture','cjprof/dist/config/static/index.html':'fixture page'}:{};
+    const payloads=name==='cjpm'?{'packages/cjpm/dist/cangjie-repo.toml':'fixture repo'}:
+     name==='cjfmt'?{'packages/cjfmt/dist/config/cangjie-format.toml':'fixture format'}:
+     name==='cjlint'?{'packages/cjlint/dist/lib/libcangjie-runtime.so':'unloaded fixture','packages/cjlint/dist/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so':'unloaded fixture','packages/cjlint/dist/modules/std.core.cjo':'analysis fixture','packages/cjlint/dist/config/cjlint_rule_list.json':'{}'}:
+     ['lsp','cjhead'].includes(name)?{[outputs[name].replace(/bin\/[^/]+$/,'lib/libcangjie-runtime.so')]:'unloaded fixture',...(name==='cjhead'?{'packages/cjhead/dist/share/cjhead/frontend.json':'fixture frontend'}:{})}:
+     name==='cjprof'?{'packages/cjprof/dist/lib/libcjprof-cangjie.so':'unloaded fixture','packages/cjprof/dist/lib/libcjprof-jni.so':'unloaded fixture','packages/cjprof/dist/share/java/cjprof.jar':'unloaded fixture','packages/cjprof/dist/config/static/index.html':'fixture page'}:{};
     if(name==='hle') {
      await write(tools+'/'+dir+'/build.mjs',`import fs from 'node:fs';import path from 'node:path';
 const verb=process.argv[2],build=process.argv[process.argv.indexOf('--build-dir')+1];
@@ -217,8 +217,8 @@ if verb in ('build','install'):
    p=root/rel;p.parent.mkdir(parents=True,exist_ok=True);p.write_text(value)
 `);
    }
-   await write(tools+'/cjfmt/dist/config/cangjie-format.toml','fixture format');
-   await write(tools+'/cjpm/tests/public/test-cache-errors.mjs',`import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {spawnSync} from 'node:child_process';
+   await write(tools+'/packages/cjfmt/dist/config/cangjie-format.toml','fixture format');
+   await write(tools+'/packages/cjpm/tests/public/test-cache-errors.mjs',`import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {spawnSync} from 'node:child_process';
 const [cjpm,out,arm]=process.argv.slice(2);const pending=path.dirname(path.dirname(path.dirname(cjpm)));assert.equal(path.dirname(pending),${JSON.stringify(root)});assert(path.basename(pending).startsWith('sdk.tools-pending-'));assert.equal(cjpm,path.join(pending,'tools/bin/cjpm'));assert(path.isAbsolute(cjpm));assert.equal(arm,'candidate');assert.deepEqual(fs.readdirSync(out),[]);assert.equal(process.env.CJPM_REGRESSION_CASES,undefined);assert.equal(process.env.CJPM_REGRESSION_PRIVATE_SDK,pending);assert.equal(process.env.CANGJIE_HOME,pending);assert(process.env.PATH.startsWith(pending+'/bin:'+pending+'/tools/bin:'));assert(!process.env.LD_LIBRARY_PATH.includes('foreign-sdk'));assert.equal(process.env.CPATH,undefined);
 const r=spawnSync(cjpm,['wire-public-consumer'],{encoding:'utf8'});assert.equal(r.status,0,r.stderr);
 const row={event:'regression',cjpm,out,arm,cases:process.env.CJPM_REGRESSION_CASES,rc:process.env.CJPM_WIRE_FAIL==='1'?23:0};fs.writeFileSync(path.join(out,'result.json'),JSON.stringify(row));fs.appendFileSync(${JSON.stringify(trace)},JSON.stringify(row)+'\\n');console.log('CJPM_PUBLIC_BODY_REACHED '+JSON.stringify(row));process.exitCode=row.rc;
@@ -343,7 +343,7 @@ test('public tools install accepts direct compiler SDKs and retains the staged r
 test('public independent install selects native tool prefixes without SDK publication',async t=>{
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'native-tool-prefix-'));
  t.after(()=>fs.rm(root,{recursive:true,force:true}));
- for(const [,dir]of producers)await fs.mkdir(root+'/cangjie_tools/'+dir,{recursive:true});
+ for(const [,dir]of producers)await fs.mkdir(root+'/cjcj-tools/'+dir,{recursive:true});
  const env={...process.env,CANGJIE_MANGLE_SOURCE_DIR:root+'/mangle',CANGJIE_BUILD_DRY_RUN:'1',CANGJIE_BUILD_JOBS:'1'};
  const invoke=(extra=[])=>spawnSync(process.execPath,[cli,...profOptions,'--workspace',root,'--build-root',root+'/build',
   '--tools-phase','install','--tools-build-set','cjfmt,lsp,cjlint,cjprof,cjcompat',
@@ -363,7 +363,7 @@ test('public independent install selects native tool prefixes without SDK public
 
 test('public Cangjie cjcompat receives the selected shared frontend inputs',async t=>{
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'compat-source-entry-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
- await fs.mkdir(root+'/cangjie_tools/cjcompat/build',{recursive:true});
+ await fs.mkdir(root+'/cjcj-tools/cjcompat/build',{recursive:true});
  const options=['--tools-compiler-libs',root+'/selected-libs','--tools-runtime-config',root+'/config.o','--tools-llvm-shim',root+'/shim.o','--tools-llvm-library',root+'/libLLVM.so'];
  const r=spawnSync(process.execPath,[cli,...profOptions,'--workspace',root,'--tools-phase','build','--tools-build-set','cjcompat','--jobs','1',...options,'build','tools'],{encoding:'utf8',env:{...process.env,CANGJIE_BUILD_DRY_RUN:'1'}});
  assert.equal(r.status,0,r.stderr);
@@ -374,7 +374,7 @@ test('public Cangjie cjcompat receives the selected shared frontend inputs',asyn
 
 test('public Cangjie cjprof forwards the selected host JNI inputs without a C++ fallback',async t=>{
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'prof-source-entry-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
- await fs.mkdir(root+'/cangjie_tools/cjprof/build',{recursive:true});
+ await fs.mkdir(root+'/cjcj-tools/cjprof/build',{recursive:true});
  const argv=[cli,'--workspace',root,'--build-root',root+'/selected-output','--tools-phase','build','--tools-build-set','cjprof','--jobs','1'];
  const env={...process.env,CANGJIE_BUILD_DRY_RUN:'1'};delete env.JAVA_HOME;delete env.CJPROF_LOMBOK_JAR;
  const invoke=options=>spawnSync(process.execPath,[...argv,...options,'build','tools'],{env,encoding:'utf8'});
@@ -391,7 +391,7 @@ test('public Cangjie cjprof forwards the selected host JNI inputs without a C++ 
 // This is the public CLI/configuration boundary, not a tool compilation.
 test('public Cangjie lint separates host execution and explicit/default analysis inputs',async t=>{
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'lint-source-entry-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
- await fs.mkdir(root+'/cangjie_tools/cjlint/build',{recursive:true});
+ await fs.mkdir(root+'/cjcj-tools/cjlint/build',{recursive:true});
  const executionSdk=root+'/execution-H';await fs.mkdir(executionSdk);
  const args=[cli,'--workspace',root,'--build-root',root+'/output','--tools-build-set','cjlint','--tools-phase','build','--jobs','1'];
  const env={...process.env,CANGJIE_BUILD_DRY_RUN:'1',CJCJ_SRCBUILD_CONSUMER_SDK:executionSdk};
@@ -435,7 +435,7 @@ test('fresh real tools source acquires independent CJPM before checking its prod
  };
  const git=async(label,args)=>{const r=await execute(label,['git',...args]);assert.equal(r.status,0,r.stderr);return r.stdout.trim();};
  async function workspace(label,selector){
-  const work=root+'/'+label;await fs.mkdir(work);const source=work+'/cangjie_tools';
+  const work=root+'/'+label;await fs.mkdir(work);const source=work+'/cjcj-tools';
   await git(label+'-clone',['clone','--shared','--no-checkout',inputs.toolsRepository,source]);
   // Normal sparse Git input: complete selected CJPM source and the real entry
   // files required by default all before its intentionally absent HLE inputs.
@@ -443,8 +443,8 @@ test('fresh real tools source acquires independent CJPM before checking its prod
   await git(label+'-sparse',['-C',source,'sparse-checkout','set','--no-cone','/cjpm/',
     ...producers.filter(([name])=>name!=='cjpm').map(([name,dir])=>'/'+dir+'/'+(name==='cjfmt'?'build.py':'build.mjs'))]);
   await git(label+'-checkout',['-C',source,'checkout','--detach',inputs.toolsRef]);
-  await assert.rejects(fs.access(source+'/cjpm/build/build.mjs'),{code:'ENOENT'});
-  await fs.access(source+'/cjpm/build/build.py');
+  await assert.rejects(fs.access(source+'/packages/cjpm/build/build.mjs'),{code:'ENOENT'});
+  await fs.access(source+'/packages/cjpm/build/build.py');
   await fs.writeFile(work+'/.source-selection.json',JSON.stringify({tools:{url:inputs.toolsRepository,tag:inputs.toolsRef},cjpm:{url:inputs.cjpmRepository,tag:selector}}));
   return {work,source};
  }
@@ -452,15 +452,15 @@ test('fresh real tools source acquires independent CJPM before checking its prod
  const invoke=(label,w,args=[])=>execute(label,[process.execPath,cli,'--workspace',w.work,'--build-root',w.work+'/build','--official-sdk-root',inputs.host,'--host-profile','kkk2','--tools-phase','build','--jobs','4','--tools-mangle-source',inputs.mangle,...args,'build','tools'],{env});
  const selected=async(label,w)=>{
   assert.equal(await git(label+'-fetched',['-C',w.source,'rev-parse','FETCH_HEAD']),inputs.cjpmRef);
-  const expected=await git(label+'-object',['-C',inputs.cjpmRepository,'rev-parse',inputs.cjpmRef+':cjpm/build/build.mjs']);
-  assert.equal(await git(label+'-index',['-C',w.source,'rev-parse',':cjpm/build/build.mjs']),expected);
+  const expected=await git(label+'-object',['-C',inputs.cjpmRepository,'rev-parse',inputs.cjpmRef+':packages/cjpm/build/build.mjs']);
+  assert.equal(await git(label+'-index',['-C',w.source,'rev-parse',':packages/cjpm/build/build.mjs']),expected);
   assert.equal((await git(label+'-source-diff',['-C',w.source,'diff',inputs.cjpmRef,'--','cjpm'])), '');
  };
  const all=await workspace('default-all',inputs.cjpmRef);
  let r=await invoke('default-all',all);assert.equal(r.status,1,r.stderr);assert.match(r.stderr,/HLE_DEPENDENCIES_REQUIRED/);assert.doesNotMatch(r.stderr,/required file missing/);await selected('default',all);
  console.log('CJPM_DEFAULT_ALL_REAL_SELECTOR_REACHED');
  const bad=await workspace('missing-selector','ffffffffffffffffffffffffffffffffffffffff');
- r=await invoke('missing-selector',bad,['--tools-build-set','cjpm']);assert.equal(r.status,1);assert.match(r.stderr,/fetch/);await assert.rejects(fs.access(bad.source+'/cjpm/build/build.mjs'),{code:'ENOENT'});
+ r=await invoke('missing-selector',bad,['--tools-build-set','cjpm']);assert.equal(r.status,1);assert.match(r.stderr,/fetch/);await assert.rejects(fs.access(bad.source+'/packages/cjpm/build/build.mjs'),{code:'ENOENT'});
  const missing=await workspace('missing-entry',inputs.toolsRef);
  r=await invoke('missing-entry',missing,['--tools-build-set','cjpm']);assert.equal(r.status,1);assert.match(r.stderr,/tools.cjpm.source.*build.mjs/);
  console.log('CJPM_REAL_SELECTOR_MISSING_ENTRY_REJECTED');
@@ -468,7 +468,7 @@ test('fresh real tools source acquires independent CJPM before checking its prod
  // before any successful producer existed; this is not a preseeded build tree.
   saveSourceSelection(buildConfig({workspace:missing.work,repoOverrides:{cjpm:{tag:inputs.cjpmRef}}}));
  r=await invoke('restored-explicit',missing,['--tools-build-set','cjpm']);assert.equal(r.status,0,r.stderr);await selected('restored',missing);
- await fs.access(missing.source+'/cjpm/dist/cjpm');
+ await fs.access(missing.source+'/packages/cjpm/dist/cjpm');
  const facts=JSON.parse(await fs.readFile(missing.work+'/build/tools/cjpm/build-inputs.json','utf8'));
  assert.equal(facts.source.commit,inputs.cjpmRef);
  console.log('CJPM_FRESH_REAL_BUILD_AND_SOURCE_RESTORED');
@@ -480,6 +480,6 @@ test('fresh real tools source acquires independent CJPM before checking its prod
  assert.equal(r.status,0,r.stderr);
  const installed=JSON.parse(await fs.readFile(prefix+'/cjpm/build-inputs.json','utf8'));
  assert.equal(installed.source.commit,inputs.cjpmRef,'install preserves the actual producer, not a new unused selector');
- assert.deepEqual(await fs.readFile(prefix+'/cjpm/bin/cjpm'),await fs.readFile(missing.source+'/cjpm/dist/cjpm'));
+ assert.deepEqual(await fs.readFile(prefix+'/cjpm/bin/cjpm'),await fs.readFile(missing.source+'/packages/cjpm/dist/cjpm'));
  console.log('CJPM_EXISTING_PRODUCER_INSTALL_CONTROL');
 });

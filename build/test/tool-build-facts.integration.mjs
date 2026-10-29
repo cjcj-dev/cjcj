@@ -15,7 +15,7 @@ import {installedInputs} from '../../ci/srcbuild/lib/installed-inputs.mjs';
 import {writeInstalledReleaseManifest,verifyInstalledReleaseManifest} from '../lib/release-manifest.mjs';
 const base=process.env.RELEASE_EVIDENCE_TEST_ROOT,mirror=process.env.SDK_INPUT_TOOLS_MIRROR;
 if(!base||!mirror)throw new Error('tool facts integration needs evidence root and fixed cjpm object mirror');
-const root=await fs.mkdtemp(path.join(base,'tool-facts-')),workspace=path.join(root,'workspace'),tools=path.join(workspace,'cangjie_tools'),sdk=path.join(root,'sdk');
+const root=await fs.mkdtemp(path.join(base,'tool-facts-')),workspace=path.join(root,'workspace'),tools=path.join(workspace,'cjcj-tools'),sdk=path.join(root,'sdk');
 const write=async(file,data)=>{await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,data);};
 const records=[];
 async function command(argv,options={}){
@@ -52,7 +52,7 @@ console.log('PUBLIC_PRODUCER_OUTPUT_REACHED');
 const record=path.join(workspace,'build/tools/lsp/build-inputs.json'),facts=JSON.parse(await fs.readFile(record,'utf8'));
 assert.equal(facts.source.commit,commit);assert.equal(facts.source.repository,repository);assert.equal(facts.build.rc,0);
 assert.deepEqual(facts.build.argv.slice(-2),['--jobs','2']);
-const product=path.join(tools,'cangjie-language-server/output/bin/LSPServer');
+const product=path.join(tools,'packages/lsp/dist/bin/LSPServer');
 assert.equal(facts.artifact.sha256,await fileDigest(product));
 const value=await command([product]);assert.equal(value.status,0);assert.equal(value.stdout.trim(),'42');
 const config=buildConfig({workspace,targetKey:'linux-x64',buildType:'release'});
@@ -71,14 +71,14 @@ await fs.rename(record+'.original',record);
 if(process.env.CJCJ_TOOL_FACTS_INSTALL==='1'){
  // Carry the actual CLI-produced record and binary through the real installer.
  // Other tools/HLE payloads are explicitly controlled inputs, not six-tool PASS.
- for(const rel of ['cjpm/dist/cjpm','cjfmt/dist/bin/cjfmt','hyperlangExtension/target/bin/main',
-   'cjcov/dist/cjcov','cjtrace-recover/dist/bin/cjtrace-recover','cjlint/dist/bin/cjlint','cjprof/dist/bin/cjprof','cjcompat/dist/bin/cjcompat']){
+ for(const rel of ['packages/cjpm/dist/cjpm','packages/cjfmt/dist/bin/cjfmt','packages/hle/target/bin/main',
+   'packages/cjcov/dist/cjcov','packages/cjtrace-recover/dist/bin/cjtrace-recover','packages/cjlint/dist/bin/cjlint','packages/cjprof/dist/bin/cjprof','packages/cjcompat/dist/bin/cjcompat']){
    await fs.mkdir(path.dirname(path.join(tools,rel)),{recursive:true});await fs.copyFile('/usr/bin/true',path.join(tools,rel));
  }
- for(const rel of ['cjlint/dist/lib/libcangjie-runtime.so','cjlint/dist/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so','cjlint/dist/modules/std.core.cjo','cjlint/dist/config/cjlint_rule_list.json','cjprof/dist/lib/libcjprof-cangjie.so','cjprof/dist/lib/libcjprof-jni.so','cjprof/dist/share/java/cjprof.jar','cjprof/dist/config/static/index.html'])await write(path.join(tools,rel),'explicit unrelated payload fixture');
- await write(path.join(tools,'cjfmt/dist/config/cangjie-format.toml'),'fixture formatter configuration');
- await write(path.join(tools,'cjpm/dist/cangjie-repo.toml'),'fixture repository configuration');
- const parser=path.join(tools,'hyperlangExtension/src/dtsparser');
+ for(const rel of ['packages/cjlint/dist/lib/libcangjie-runtime.so','packages/cjlint/dist/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so','packages/cjlint/dist/modules/std.core.cjo','packages/cjlint/dist/config/cjlint_rule_list.json','packages/cjprof/dist/lib/libcjprof-cangjie.so','packages/cjprof/dist/lib/libcjprof-jni.so','packages/cjprof/dist/share/java/cjprof.jar','packages/cjprof/dist/config/static/index.html'])await write(path.join(tools,rel),'explicit unrelated payload fixture');
+ await write(path.join(tools,'packages/cjfmt/dist/config/cangjie-format.toml'),'fixture formatter configuration');
+ await write(path.join(tools,'packages/cjpm/dist/cangjie-repo.toml'),'fixture repository configuration');
+ const parser=path.join(tools,'packages/hle/src/dtsparser');
  await write(path.join(parser,'analysis.js'),'// controlled parser boundary');
  await write(path.join(parser,'package.json'),JSON.stringify({dependencies:{typescript:'npm:typescript@4.9.5','https-proxy-agent':'7.0.6'}}));
  const deps=path.join(root,'dependencies');hlePayloadFixture(deps);

@@ -29,7 +29,7 @@ jobs:
       - name: Load pins
         run: |
           set -euo pipefail
-          cat ci/cjpm_pin.env >> "$GITHUB_ENV"
+          cat ci/source_pin.env >> "$GITHUB_ENV"
           node ci/host-toolchain-pin.mjs --github-env >> "$GITHUB_ENV"
           node ci/load_runtime_pin.mjs
           home="$RUNNER_TEMP/objc-nightly-home"

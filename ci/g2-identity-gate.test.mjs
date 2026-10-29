@@ -101,7 +101,7 @@ async function fixture(t) {
   ].join('\n'));
   await write(checkout, 'ci/llvm_pin.env', `LLVM_SHA=${LLVM_SHA}\n`);
   await write(checkout, 'ci/source_pin.env', '# unused\n');
-  await write(checkout, 'ci/cjpm_pin.env', '# unused\n');
+  await write(checkout, 'ci/source_pin.env', '# unused\n');
   await fs.mkdir(path.join(checkout, 'ci', 'release-evidence'), {recursive: true});
   await fs.copyFile(path.join(repo, 'ci', 'release-evidence', 'g2-identity.schema.json'),
     path.join(checkout, 'ci', 'release-evidence', 'g2-identity.schema.json'));

@@ -13,7 +13,7 @@ function fixture(name) {
   assert(host&&base,'CJCJ_TOOLS_TEST_HOST and RELEASE_EVIDENCE_TEST_ROOT required');
   assert(!fs.existsSync(path.join(host,'STAGE-INPUTS.json')),'use an unmodified official SDK');
   const root=fs.mkdtempSync(path.join(base,'tools-'+name+'-')),workspace=path.join(root,'workspace');
-  const tools=path.join(workspace,'cangjie_tools'),deps=path.join(root,'json'),records=[];
+  const tools=path.join(workspace,'cjcj-tools'),deps=path.join(root,'json'),records=[];
   const write=(p,s)=>{fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,s);};
   function run(argv,options={}) {
     const r=spawnSync(argv[0],argv.slice(1),{encoding:'utf8',maxBuffer:8*1024*1024,...options});
@@ -31,7 +31,7 @@ function fixture(name) {
   const depCommit=freeze(deps);
   write(path.join(root,'dependencies.json'),JSON.stringify({json:{repo:'file://'+deps,commit:depCommit,path:deps}}));
   write(path.join(tools,'.gitignore'),'**/build/build/\n**/output/\n');
-  write(path.join(tools,'cjpm/build/build.py'),'# fixed selector overlay, not executed\n');
+  write(path.join(tools,'packages/cjpm/build/build.py'),'# fixed selector overlay, not executed\n');
   for(const [directory,binary]of [['cjlint','cjlint'],['cangjie-language-server','LSPServer']]) {
     write(path.join(tools,directory,'main.cpp'),'#include <optional>\n#include <cstdio>\nint main(){std::optional<int> n=42; printf("%d\\n",*n);}\n');
     write(path.join(tools,directory,'lib.cpp'),'int bounded_native_consumer(){return 42;}\n');

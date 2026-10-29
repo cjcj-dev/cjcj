@@ -16,12 +16,12 @@ import {
 
 const root = path.resolve(import.meta.dirname, '..');
 const pinPath = path.join(root, 'ci', 'host_sdk_pin.env');
-const cjpmPinPath = path.join(root, 'ci', 'cjpm_pin.env');
+const cjpmPinPath = path.join(root, 'ci', 'source_pin.env');
 const h48LanguagePinPath = path.join(root, 'ci', 'h48_language_tuple_pin.json');
 const nightlyLiteral = /nightly-\d+\.\d+\.\d+-alpha\.\d+/;
 // Built in pieces so this test source is not itself an undeclared nightly literal.
 const h48HostSdk = 'nightly-' + '1.3.0-alpha.' + '20260904010027';
-const loadCommand = 'cat ci/cjpm_pin.env >> "$GITHUB_ENV"';
+const loadCommand = 'cat ci/source_pin.env >> "$GITHUB_ENV"';
 const srcbuildLoadCommand = 'cat ci/host_sdk_pin.env >> "$GITHUB_ENV"';
 
 async function filesBelow(directory) {
@@ -282,7 +282,7 @@ test('srcbuild pin reader returns a changed pinned host', async () => {
 
 test('srcbuild rejects a missing pin key instead of retaining stale host state', async () => {
   const result = await runSrcbuildHostResolver({
-    pin: 'CJPM_FORK_REF=fixture\n',
+    pin: 'TOOLS_REF=fixture\n',
     runtimeVersion: '9.9.9',
   });
   assert.notEqual(result.status, 0);
@@ -301,7 +301,7 @@ test('srcbuild pin reader rejects duplicate CJCJ_TOOLCHAIN keys', async () => {
   assert.equal(result.stdout, '');
 });
 
-test('every workflow host consumer loads ci/cjpm_pin.env after checkout', async () => {
+test('every workflow host consumer loads ci/source_pin.env after checkout', async () => {
   const expectedLoads = new Map([
     ['build-cjpm.yml', 1],
     ['build-windows-runtime.yml', 1],
@@ -574,7 +574,7 @@ test('workflow GitHub environment loaders resolve the execution host and stop on
         const work = await fs.mkdtemp(path.join(os.tmpdir(), 'github-host-loader-'));
         try {
           await fs.mkdir(path.join(work, 'ci'));
-          for (const input of ['host_sdk_pin.env', 'cjpm_pin.env', 'source_pin.env', 'llvm_pin.env', 'runtime_pin.env', 'host-toolchain-pin.mjs']) {
+          for (const input of ['host_sdk_pin.env', 'source_pin.env', 'source_pin.env', 'llvm_pin.env', 'runtime_pin.env', 'host-toolchain-pin.mjs']) {
             await fs.copyFile(path.join(root, 'ci', input), path.join(work, 'ci', input));
           }
           if (arm === 'bad-pin') {

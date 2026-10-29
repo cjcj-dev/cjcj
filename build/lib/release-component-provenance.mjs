@@ -265,20 +265,9 @@ export async function persistBaseSdkProvenance({archive, sidecar, toolchainDir, 
   return {provenance: durable, sidecar: durableSidecar, cachedArchive};
 }
 
-export function parseCjpmPin(text) {
-  const values = Object.fromEntries(text.split(/\r?\n/).filter(Boolean).map(line => {
-    const separator = line.indexOf('=');
-    if (separator < 1) throw new Error(`invalid cjpm pin line: ${line}`);
-    return [line.slice(0, separator), line.slice(separator + 1)];
-  }));
-  return {
-    repository: requireString(values.CJPM_FORK_URL, 'CJPM_FORK_URL'),
-    commit: requireMatch(values.CJPM_FORK_REF, SHA40, 'CJPM_FORK_REF'),
-  };
-}
+// CJPM and HLE are packages of the same selected cjcj-tools source.
+export function parseCjpmPin(text) { return parseToolsPin(text); }
 
-// hle is built from the same cangjie-tools checkout the source pin names, so
-// its sidecar is pinned the same way cjpm's is.
 export function parseToolsPin(text) {
   const values = Object.fromEntries(text.split(/\r?\n/).filter(Boolean).map(line => {
     const separator = line.indexOf('=');

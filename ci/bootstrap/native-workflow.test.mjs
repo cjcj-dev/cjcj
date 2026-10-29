@@ -68,16 +68,16 @@ test('ordinary stdx source selection preserves distinct full sources and actual 
  const base=workflowSourceSelection(env);assert.equal(base.STDX_REF,'b10784b27a5b3f815c9542d28f3ba02f48db48d5');
  const tools=/^TOOLS_REF=([a-f0-9]{40})$/m.exec(fs.readFileSync(path.join(repo,'ci/source_pin.env'),'utf8'))[1];
  assert.equal(base.TOOLS_REF,tools);
- const cjpm=/^CJPM_FORK_REF=([a-f0-9]{40})$/m.exec(fs.readFileSync(path.join(repo,'ci/cjpm_pin.env'),'utf8'))[1];
- assert.equal(base.CJPM_REF,cjpm);
- console.log('WORKFLOW_PIN_SELECTION_ASSERTION_REACHED',JSON.stringify({tools:base.TOOLS_REF,stdx:base.STDX_REF,cjpm:base.CJPM_REF}));
+ assert.equal(base.CJPM_REF,undefined,'CJPM has no independent source selector');
+ console.log('WORKFLOW_PIN_SELECTION_ASSERTION_REACHED',JSON.stringify({tools:base.TOOLS_REF,stdx:base.STDX_REF}));
  const alternative=workflowSourceSelection({...env,CJCJ_SOURCE_SELECTION:JSON.stringify({compiler:JSON.parse(inputs.source_selection).compiler,stdx:{url:'https://example.invalid/stdx.git',tag:'c3066ac097166145765b274d7a4a79e43d70ffc8'}})});
  assert.equal(alternative.STDX_REF,'c3066ac097166145765b274d7a4a79e43d70ffc8');assert.notEqual(alternative.STDX_REF,base.STDX_REF);
  assert.equal(alternative.CANGJIE_COMPILER_SHA,'3'.repeat(40));assert.equal(alternative.CJCJ_NATIVE_RUNTIME_REF,'2'.repeat(40));
- const explicitTools=workflowSourceSelection({...env,CJCJ_SOURCE_SELECTION:JSON.stringify({compiler:JSON.parse(inputs.source_selection).compiler,tools:{tag:'4'.repeat(40)},cjpm:{tag:'5'.repeat(40)}})});
- assert.equal(explicitTools.TOOLS_REF,'4'.repeat(40));assert.equal(explicitTools.CJPM_REF,'5'.repeat(40));
+ const explicitTools=workflowSourceSelection({...env,CJCJ_SOURCE_SELECTION:JSON.stringify({compiler:JSON.parse(inputs.source_selection).compiler,tools:{tag:'4'.repeat(40)}})});
+ assert.equal(explicitTools.TOOLS_REF,'4'.repeat(40));assert.equal(explicitTools.CJPM_REF,undefined);
+ assert.throws(()=>workflowSourceSelection({...env,CJCJ_SOURCE_SELECTION:JSON.stringify({cjpm:{tag:'5'.repeat(40)}})}),/WORKFLOW_SOURCE_SELECTION/);
  assert.equal(explicitTools.STDX_REF,base.STDX_REF);assert.equal(explicitTools.CJCJ_NATIVE_RUNTIME_REF,base.CJCJ_NATIVE_RUNTIME_REF);
- assert.equal(workflowSourceSelection(env).TOOLS_REF,tools);assert.equal(workflowSourceSelection(env).CJPM_REF,cjpm);
+ assert.equal(workflowSourceSelection(env).TOOLS_REF,tools);assert.equal(workflowSourceSelection(env).CJPM_REF,undefined);
  assert.throws(()=>workflowSourceSelection({...env,CJCJ_SOURCE_SELECTION:JSON.stringify({runtime:{tag:'4'.repeat(40)}})}),/SOURCE_CONFLICT/);
 });
 test('transport locations select same N/AST installation without overwriting original facts',async t=>{

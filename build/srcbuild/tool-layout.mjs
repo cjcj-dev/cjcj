@@ -7,7 +7,7 @@ import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 const execute=promisify(execFile);
 export const TOOL_NAMES = ['cjpm','cjfmt','hle','lsp','cjcov','cjtrace-recover','cjlint','cjprof','cjcompat','cjhead'];
-export const TOOL_DIRECTORIES = {cjpm:'cjpm',cjfmt:'cjfmt',hle:'hyperlangExtension',lsp:'cangjie-language-server',cjcov:'cjcov','cjtrace-recover':'cjtrace-recover',cjlint:'cjlint',cjprof:'cjprof',cjcompat:'cjcompat',cjhead:'cjhead'};
+export const TOOL_DIRECTORIES = Object.fromEntries(TOOL_NAMES.map(name=>[name,'packages/'+name]));
 export const toolProducerDirectory = (config,name) => config.toolsProducerBuildDir ?? path.join(config.buildRoot,name);
 export const TOOL_PUBLIC_NAMES = {lsp:'LSPServer'};
 export const toolName = name => { const plain=name.replace(/\.exe$/,''); return plain==='LSPServer'?'lsp':plain; };
@@ -23,10 +23,10 @@ export function requireToolProducer(name) {
 export function toolOutputs(config) {
   const root=config.repoPath('tools'),exe=config.target.spec.exeSuffix;
   return [
-    ['cjpm','cjpm/dist/cjpm'],['cjfmt','cjfmt/dist/bin/cjfmt'],
-    ['hle','hyperlangExtension/target/bin/main'],['lsp','cangjie-language-server/dist/bin/cangjie-lsp'],
-    ['cjcov','cjcov/dist/cjcov'],['cjtrace-recover','cjtrace-recover/dist/bin/cjtrace-recover'],
-    ['cjlint','cjlint/dist/bin/cjlint'],['cjprof','cjprof/dist/bin/cjprof'],['cjcompat','cjcompat/dist/bin/cjcompat'],['cjhead','cjhead/dist/bin/cjhead'],
+    ['cjpm','packages/cjpm/dist/bin/cjpm'],['cjfmt','packages/cjfmt/dist/bin/cjfmt'],
+    ['hle','packages/hle/dist/bin/hle'],['lsp','packages/lsp/dist/bin/cangjie-lsp'],
+    ['cjcov','packages/cjcov/dist/bin/cjcov'],['cjtrace-recover','packages/cjtrace-recover/dist/bin/cjtrace-recover'],
+    ['cjlint','packages/cjlint/dist/bin/cjlint'],['cjprof','packages/cjprof/dist/bin/cjprof'],['cjcompat','packages/cjcompat/dist/bin/cjcompat'],['cjhead','packages/cjhead/dist/bin/cjhead'],
   ].map(([producer,rel])=>({producer,name:(TOOL_PUBLIC_NAMES[producer]??producer)+exe,
     from:producer==='hle'?path.join(hleBuildDirectory(config),'bin','main'+exe):path.join(root,rel+exe),to:'tools/bin/'+(TOOL_PUBLIC_NAMES[producer]??producer)+exe}));
 }
@@ -34,15 +34,16 @@ export function toolBuildProduct(config,name) {
   const root=config.repoPath('tools'),exe=config.target.spec.exeSuffix;
   if(name==='lsp')return path.join(toolProducerDirectory(config,name),'server/target/release/bin/main'+exe);
   if(name==='cjhead')return path.join(toolProducerDirectory(config,name),'cjhead'+exe);
-  if(name==='cjtrace-recover')return path.join(root,'cjtrace-recover/cmake-build/cjtrace-recover'+exe);
-  if(name==='cjcompat')return path.join(root,'cjcompat/build/cangjie-build/cjcompat'+exe);
+  if(name==='cjtrace-recover')return path.join(toolProducerDirectory(config,name),'cjtrace-recover'+exe);
+  if(name==='cjcompat')return path.join(toolProducerDirectory(config,name),'cjcompat'+exe);
   if(name==='cjlint') {
     // The normal CJPM producer records its actual executable (main or cjlint).
     // Only command planning lacks a product; real build/install use that record.
     if(process.env.CANGJIE_BUILD_DRY_RUN==='1')return path.join(cjlintBuildDirectory(config),'target/release/bin/cjlint');
     return JSON.parse(readFileSync(path.join(cjlintBuildDirectory(config),'product.json'),'utf8')).executable;
   }
-  if(name==='cjfmt')return path.join(root,name,'build/build/bin',name+exe);
+  if(name==='cjfmt')return path.join(toolProducerDirectory(config,name),'cjfmt'+exe);
+  if(['cjpm','cjcov'].includes(name))return path.join(toolProducerDirectory(config,name),'dist',name+exe);
   if(name==='cjprof')return path.join(cjprofBuildDirectory(config),name+exe);
   const row=toolOutputs(config).find(row=>row.producer===name);
   if(!row)requireToolProducer(name);
@@ -53,8 +54,8 @@ export function nativeToolLibraries(name,os) {
   if(name==='cjlint')return []; // no retired C++ tool library
   if(name==='cjprof')return ['cjprof-cangjie','cjprof-jni'].map(lib=>{
     const file='lib'+lib+'.so';
-    return {build:'cjprof/build/cangjie-output/'+file,
-      install:'cjprof/dist/lib/'+file,to:'tools/lib/'+file};
+    return {build:'packages/cjprof/target/'+file,
+      install:'packages/cjprof/dist/lib/'+file,to:'tools/lib/'+file};
   });
   return [];
 }
@@ -65,7 +66,7 @@ export async function toolPayloads(config,name,installPrefix) {
   const add=(rel,to)=>rows.push({producer:name,from:installPrefix
     ?path.join(installPrefix,to.replace(/^\.target-tools\//,'').replace(/^tools\//,'')):path.join(root,rel),to});
   if(name==='cjlint') {
-    const prefix=installPrefix??path.join(root,'cjlint/dist');
+    const prefix=installPrefix??path.join(root,'packages/cjlint/dist');
     return lintInstalledPayloads(prefix);
   }
   if(['lsp','cjhead'].includes(name)) {
@@ -82,18 +83,18 @@ export async function toolPayloads(config,name,installPrefix) {
     if(name==='cjhead')await walk(path.join(prefix,'share'),'share');
     return rows;
   }
-  if(name==='cjfmt')add('cjfmt/dist/config/cangjie-format.toml','tools/config/cangjie-format.toml');
-  if(name==='cjpm')add('cjpm/dist/cangjie-repo.toml','tools/config/cangjie-repo.toml');
-  if(name==='cjprof')add('cjprof/dist/share/java/cjprof.jar','tools/share/java/cjprof.jar');
+  if(name==='cjfmt')add('packages/cjfmt/dist/config/cangjie-format.toml','tools/config/cangjie-format.toml');
+  if(name==='cjpm')add('packages/cjpm/dist/config/cangjie-repo.toml','tools/config/cangjie-repo.toml');
+  if(name==='cjprof')add('packages/cjprof/dist/share/java/cjprof.jar','tools/share/java/cjprof.jar');
   if(name==='cjprof') {
     for(const row of nativeToolLibraries(name,config.target.spec.os))add(row.install,row.to);
     async function walk(relative) {
-      const entries=await fs.readdir(installPrefix?path.join(installPrefix,relative.slice((name+'/dist/').length)):path.join(root,relative),{withFileTypes:true});
+      const entries=await fs.readdir(installPrefix?path.join(installPrefix,relative.slice((TOOL_DIRECTORIES[name]+'/dist/').length)):path.join(root,relative),{withFileTypes:true});
       for(const entry of entries.sort((a,b)=>a.name.localeCompare(b.name))) {
         const rel=relative+'/'+entry.name;
         if(entry.isDirectory())await walk(rel);
         else if(entry.isFile()) {
-          const installed='tools/'+rel.slice((name+'/dist/').length);
+          const installed='tools/'+rel.slice((TOOL_DIRECTORIES[name]+'/dist/').length);
           add(rel,installed);
           // cjprof resolves its executable directory; retain config next
           // to the actual target body as well as the public tool directory.
@@ -102,7 +103,7 @@ export async function toolPayloads(config,name,installPrefix) {
         else throw new Error('SOURCE_TOOL_PAYLOAD_TYPE '+rel);
       }
     }
-    await walk(name+'/dist/config');
+    await walk(TOOL_DIRECTORIES[name]+'/dist/config');
     if(!rows.some(row=>row.to.startsWith('tools/config/')))throw new Error('SOURCE_TOOL_CONFIG_MISSING '+name);
   }
   for(const row of rows)if(!(await fs.stat(row.from)).isFile())throw new Error('SOURCE_TOOL_PAYLOAD '+row.from);
@@ -117,7 +118,7 @@ export async function nativeToolBuildPayloads(config,name) {
   const root=config.repoPath('tools'),os=config.target.spec.os;
   const rows=nativeToolLibraries(name,os).map(row=>({from:name==='cjprof'?path.join(cjprofBuildDirectory(config),path.basename(row.build)):path.join(root,row.build),to:row.to}));
   if(name==='cjprof')rows.push({from:path.join(cjprofBuildDirectory(config),'cjprof.jar'),to:'tools/share/java/cjprof.jar'});
-  const source=path.join(root,name,'static');
+  const source=path.join(root,TOOL_DIRECTORIES[name],'static');
   async function walk(dir,tail='') {
     for(const entry of (await fs.readdir(dir,{withFileTypes:true})).sort((a,b)=>a.name.localeCompare(b.name))) {
       const rel=tail+entry.name,from=path.join(dir,entry.name);
@@ -158,7 +159,7 @@ async function lintBuildPayloads(config) {
   const file=path.join(cjlintBuildDirectory(config),'product.json'),facts=JSON.parse(await fs.readFile(file,'utf8'));
   if(facts.language!=='Cangjie'||!facts.analysis?.sdk)throw Error('CJLINT_ANALYSIS_INPUT_REQUIRED');
   const rows=[];
-  await lintTree(path.join(config.repoPath('tools'),'cjlint/config'),'config',rows);
+  await lintTree(path.join(config.repoPath('tools'),'packages/cjlint/config'),'config',rows);
   await lintTree(path.join(facts.analysis.sdk,'modules'),'modules',rows);
   const env={...process.env,LD_LIBRARY_PATH:[path.join(facts.host.sdk,'runtime/lib/linux_x86_64_cjnative'),path.join(facts.host.sdk,'lib/linux_x86_64_cjnative'),path.dirname(facts.frontend.llvmLibrary)].join(path.delimiter)};
   delete env.LD_PRELOAD;delete env.LD_AUDIT;

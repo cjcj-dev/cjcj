@@ -49,7 +49,7 @@ jobs:
       - name: Load host toolchain pin
         shell: bash
         run: |
-          cat ci/cjpm_pin.env >> "$GITHUB_ENV"
+          cat ci/source_pin.env >> "$GITHUB_ENV"
           node ci/host-toolchain-pin.mjs --github-env >> "$GITHUB_ENV"
 
       - name: Load runtime pin

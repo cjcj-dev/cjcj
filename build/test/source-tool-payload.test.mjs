@@ -387,8 +387,8 @@ test('A8 independent dependency producer returns installed parser and target dep
  const {installHleDependencies}=await import('../srcbuild/hle-dependencies.mjs');
  const work=fs.mkdtempSync(path.join(os.tmpdir(),'a8-dependency-producer-')),sdk=path.join(work,'sdk'),tools=path.join(work,'tools'),dependencies=path.join(work,'deps');
  hlePayloadFixture(dependencies);
- writeFile(path.join(tools,'hyperlangExtension/src/dtsparser/analysis.js'),'fixed parser boundary');
- writeFile(path.join(tools,'hyperlangExtension/src/dtsparser/package.json'),JSON.stringify({dependencies:{typescript:'npm:typescript@4.9.5','https-proxy-agent':'7.0.6'}}));
+ writeFile(path.join(tools,'packages/hle/src/dtsparser/analysis.js'),'fixed parser boundary');
+ writeFile(path.join(tools,'packages/hle/src/dtsparser/package.json'),JSON.stringify({dependencies:{typescript:'npm:typescript@4.9.5','https-proxy-agent':'7.0.6'}}));
  const input={platform:'linux_x86_64',node:{path:'/bin/true',source:'controlled ELF boundary',version:'fixture'},modules:{path:path.join(dependencies,'tools/dtsparser/node_modules'),source:'controlled module tree',version:'fixture'},cjbind:{path:'/bin/true',source:'controlled ELF boundary, not actual cjbind',version:'v1.1.0-alpha.53.1'}};
  try{
   const facts=await installHleDependencies({toolsRoot:tools,sdk,platform:'linux_x86_64',input});
