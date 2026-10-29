@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {test} from 'node:test';
-import {producer,tuples,requireArtifact,nativeCommands,consumeProgram,verifyArtifact} from './native_llvm_consumer.mjs';
+import {producer,tuples,dylibs,requireArtifact,requireDylibArtifact,headerCommands,consumeShim,nativeCommands,consumeProgram,verifyArtifact} from './native_llvm_consumer.mjs';
 
 const platform='linux_aarch64';
 function metadata() {
@@ -71,16 +71,68 @@ test('empty, extra, and symlink artifact members fail before fetch can select a 
   fs.symlinkSync('old-master',path.join(root,'bin'));
   assert.throws(()=>verifyArtifact(root,platform),/NATIVE_TUPLE_SYMLINK/);
 });
-test('official consumption selects only remaining Darwin ARM on standard macos-26',()=>{
+test('official shim consumption selects the three hosts with missing headers only',()=>{
   const workflow=fs.readFileSync(new URL('../../.github/workflows/consume-native-llvm-tuple.yml',import.meta.url),'utf8');
   const cells=[...workflow.matchAll(/- platform: ([^\s]+)\n\s+runner: ([^\s]+)/g)].map(match=>({platform:match[1],runner:match[2]}));
-  assert.deepEqual(cells,[{platform:'darwin_aarch64',runner:'macos-26'}],
-    'only the unconsumed ARM host on the selected standard runner may execute');
-  assert.equal((workflow.match(/- platform:/g)||[]).length,1);
-  assert.match(workflow,/timeout-minutes: 20/);assert.match(workflow,/max-parallel: 1/);
+  assert.deepEqual(cells,[{platform:'linux_aarch64',runner:'ubuntu-22.04-arm'},
+    {platform:'darwin_x86_64',runner:'macos-15-intel'},{platform:'darwin_aarch64',runner:'macos-26'}]);
+  assert.equal((workflow.match(/- platform:/g)||[]).length,3);
+  assert.match(workflow,/timeout-minutes: 90/);assert.match(workflow,/max-parallel: 3/);
+  assert.match(workflow,/native_llvm_consumer\.mjs prepare-shim/);
+  assert.match(workflow,/native_llvm_consumer\.mjs consume-shim/);
+  assert.doesNotMatch(workflow,/native_llvm_consumer\.mjs consume\s/);
+  assert.match(workflow,/artifact-ids: \$\{\{ steps.select.outputs.dylib_id \}\}/);
+  assert.match(workflow,/llvm-headers-\*\.tar\.gz/);
+  assert.match(workflow,/component: llvm-headers/);
   assert.match(workflow,/artifact-ids: \$\{\{ steps.select.outputs.artifact_id \}\}/);
   assert.match(workflow,/run-id: \$\{\{ steps.select.outputs.run_id \}\}/);
   assert.doesNotMatch(workflow,/build_cjcj|build-fixed-llc|build-llvm-tools|workflow_run:|schedule:/);
+});
+
+test('dylib selection binds exact old platform/run/artifact rather than a recent build',()=>{
+  for(const selected of Object.keys(dylibs)) {
+    const item=dylibs[selected];
+    const artifact={id:item.artifact,size_in_bytes:item.bytes,name:'llvm-dylib-'+selected,expired:false,
+      workflow_run:{id:producer.run,head_sha:producer.entry}};
+    requireDylibArtifact(selected,artifact);
+    assert.throws(()=>requireDylibArtifact(selected,{...artifact,id:item.artifact+1}),/ARTIFACT_id/);
+    assert.throws(()=>requireDylibArtifact(selected,{...artifact,workflow_run:{id:1,head_sha:producer.entry}}),/ARTIFACT_RUN/);
+    requireDylibArtifact(selected,artifact);
+  }
+});
+
+test('normal header graph keeps original ABI options and installs only its component',()=>{
+  for(const selected of Object.keys(tuples)) {
+    const root='/new native headers', commands=headerCommands(root,selected,1,
+      {c:'/usr/bin/clang',cxx:'/usr/bin/clang++'},'/cache/sccache',selected.startsWith('darwin_')?{root:'/actual SDK'}:null);
+    const configure=commands[0][2];
+    for(const option of ['-DLLVM_ENABLE_ASSERTIONS=OFF','-DLLVM_ENABLE_RTTI=OFF',
+      '-DBUILD_SHARED_LIBS=OFF','-DLLVM_BUILD_LLVM_DYLIB=OFF','-DLLVM_LINK_LLVM_DYLIB=OFF',
+      '-DCANGJIE_RUNTIME_SOURCE_DIR='+root+'/runtime-source'])assert.ok(configure.includes(option),option);
+    assert.ok(configure.includes('-DLLVM_TARGETS_TO_BUILD='+(selected.endsWith('aarch64')?'AArch64':'X86')));
+    assert.deepEqual(commands[1].slice(1),['cmake',['--build',root+'/header-build','--parallel','1','--target','llvm-headers']]);
+    assert.deepEqual(commands[2].slice(1),['cmake',['--install',root+'/header-build','--prefix',root+'/headers','--component','llvm-headers']]);
+  }
+});
+
+test('shim consumer uses installed headers and original object/library; API and loader failures reject',()=>{
+  for(const selected of Object.keys(tuples)) {
+    const root='/native shim',library=root+'/dylib/'+(selected.startsWith('darwin_')?'libLLVM.dylib':'libLLVM-15.so');
+    const good=['LLVMGetValueContext','LLVMCanValueUseFastMathFlags','LLVMSetFastMathFlags'].map(api=>'CHECK '+api+' PASS').join('\n')+'\nFAILS=0\n';
+    const calls=[],run=(label,tool,args)=>{calls.push({label,tool,args});return {stdout:label==='shim-three-apis'?good:library,stderr:library};};
+    const consume=executor=>consumeShim(selected,root,'/usr/bin/clang++',{root:'/actual SDK'},'/cache/sccache',executor,{});
+    consume(run);
+    assert.ok(calls[0].args.includes('-I'+root+'/headers/include'));
+    assert.ok(calls[0].args.includes(root+'/runtime_shim/cjselfhost_llvmshim.o'));
+    assert.ok(calls[0].args.includes(library));
+    assert.deepEqual(calls.map(row=>row.label),['shim-compile-link','shim-loader','shim-three-apis']);
+    assert.throws(()=>consume((label,tool,args)=>({...run(label,tool,args),stdout:label==='shim-three-apis'?good.replace('CHECK LLVMSetFastMathFlags PASS','CHECK LLVMSetFastMathFlags FAIL'):library})),/NATIVE_SHIM_API_LLVMSetFastMathFlags/);
+    assert.throws(()=>consume((label,tool,args)=>({...run(label,tool,args),stderr:'/system/libLLVM'})),/NATIVE_SHIM_LOADED_LIBRARY/);
+    const stopped=[];
+    assert.throws(()=>consume(label=>{stopped.push(label);throw Object.assign(Error('link failure'),{exitCode:7});}),error=>error.exitCode===7);
+    assert.deepEqual(stopped,['shim-compile-link']);
+    consume(run);
+  }
 });
 
 test('registered LLVM entry selects consumption exclusively and preserves normal production selection',()=>{

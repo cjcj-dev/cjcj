@@ -1,4 +1,4 @@
-name: Consume existing native LLVM tuples
+name: Consume existing native LLVM shim with installed headers
 on:
   workflow_call:
 permissions:
@@ -8,13 +8,19 @@ jobs:
   consume:
     strategy:
       fail-fast: false
-      max-parallel: 1
+      max-parallel: 3
       matrix:
         include:
+          - platform: linux_aarch64
+            runner: ubuntu-22.04-arm
+          - platform: darwin_x86_64
+            runner: macos-15-intel
           - platform: darwin_aarch64
             runner: macos-26
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 20
+    timeout-minutes: 90
+    env:
+      NATIVE_CONSUMER_PLATFORM: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7.1.0
@@ -30,7 +36,22 @@ jobs:
           ulimit -H -c 0
           export PLATFORM_CI_ROOT="$RUNNER_TEMP/native-tuple-consumer"
           echo "PLATFORM_CI_ROOT=$PLATFORM_CI_ROOT" >> "$GITHUB_ENV"
-          node ci/platform_matrix/native_llvm_consumer.mjs prepare
+          node ci/platform_matrix/native_llvm_consumer.mjs prepare-shim
+      - name: Install native header build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq clang cmake ninja-build
+      - name: Install native header build dependencies
+        if: runner.os == 'macOS'
+        run: brew install ninja
+      - name: Start sccache for header dependencies and consumer
+        uses: ./.github/actions/sccache
+        with:
+          component: llvm-headers
+          platform: ${{ matrix.platform }}
+          pin: 57537222f0b42b9f4e750e57e7684f2574ca0462
+          cache-size: 2G
       - uses: actions/download-artifact@v8
         with:
           repository: cjcj-dev/cjcj
@@ -39,12 +60,27 @@ jobs:
           github-token: ${{ github.token }}
           merge-multiple: true
           path: ${{ env.PLATFORM_CI_ROOT }}/artifact
-      - name: Fetch, install and consume this tuple on its native host
+      - uses: actions/download-artifact@v8
+        with:
+          repository: cjcj-dev/cjcj
+          run-id: ${{ steps.select.outputs.run_id }}
+          artifact-ids: ${{ steps.select.outputs.dylib_id }}
+          github-token: ${{ github.token }}
+          merge-multiple: true
+          path: ${{ env.PLATFORM_CI_ROOT }}/dylib
+      - name: Build and install only headers, then consume the original shim and dylib
         run: |
           set -euo pipefail
           ulimit -S -c 0
           ulimit -H -c 0
-          node ci/platform_matrix/native_llvm_consumer.mjs consume
+          node ci/platform_matrix/native_llvm_consumer.mjs consume-shim
+      - name: Report sccache
+        if: always() && env.SCCACHE_PATH != ''
+        uses: ./.github/actions/sccache-report
+        with:
+          component: llvm-headers
+          platform: ${{ matrix.platform }}
+          require-compiles: ${{ job.status == 'success' }}
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -55,4 +91,11 @@ jobs:
             ${{ env.PLATFORM_CI_ROOT }}/artifact/MANIFEST
             ${{ env.PLATFORM_CI_ROOT }}/artifact/SHA256SUMS
             ${{ env.PLATFORM_CI_ROOT }}/artifact/fixed-llc/llvm-tools.manifest
+            ${{ env.PLATFORM_CI_ROOT }}/dylib/manifest.json
+            ${{ env.PLATFORM_CI_ROOT }}/header-build/CMakeCache.txt
+            ${{ env.PLATFORM_CI_ROOT }}/header-build/CMakeFiles/CMakeOutput.log
+            ${{ env.PLATFORM_CI_ROOT }}/header-build/CMakeFiles/CMakeError.log
+            ${{ env.PLATFORM_CI_ROOT }}/header-build/CMakeFiles/CMakeConfigureLog.yaml
+            ${{ env.PLATFORM_CI_ROOT }}/header-build/build.ninja
+            ${{ env.PLATFORM_CI_ROOT }}/llvm-headers-*.tar.gz
           if-no-files-found: warn
