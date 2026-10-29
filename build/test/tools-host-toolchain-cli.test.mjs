@@ -1,6 +1,6 @@
 #!/usr/bin/env zx
-// Formal tools CLI, real read-only official H, bounded CMake C++ consumers.
-// This tests upper entry/configuration, not cjlint's Cangjie AST ABI.
+// Formal tools CLI and real read-only official H compiling a small CJ consumer.
+// The controlled root producer tests host/configuration flow, not the real LSP.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -30,52 +30,25 @@ function fixture(name) {
   write(path.join(deps,'include/nlohmann/json.hpp'),'// explicit bounded dependency fixture\n');
   const depCommit=freeze(deps);
   write(path.join(root,'dependencies.json'),JSON.stringify({json:{repo:'file://'+deps,commit:depCommit,path:deps}}));
-  write(path.join(tools,'.gitignore'),'**/build/build/\n**/output/\n');
-  write(path.join(tools,'packages/cjpm/build/build.py'),'# fixed selector overlay, not executed\n');
-  for(const [directory,binary]of [['cjlint','cjlint'],['cangjie-language-server','LSPServer']]) {
-    write(path.join(tools,directory,'main.cpp'),'#include <optional>\n#include <cstdio>\nint main(){std::optional<int> n=42; printf("%d\\n",*n);}\n');
-    write(path.join(tools,directory,'lib.cpp'),'int bounded_native_consumer(){return 42;}\n');
-    write(path.join(tools,directory,'config/rules.json'),'{}\n');
-    write(path.join(tools,directory,'CMakeLists.txt'),`cmake_minimum_required(VERSION 3.20)
-project(tools_cli_fixture CXX)
-set(GCC_TOOLCHAIN_FLAG "" CACHE PATH "selected native GCC prefix")
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-if(GCC_TOOLCHAIN_FLAG)
- add_compile_options("--gcc-toolchain=\${GCC_TOOLCHAIN_FLAG}")
- add_link_options("--gcc-toolchain=\${GCC_TOOLCHAIN_FLAG}")
-endif()
-add_executable(${binary} main.cpp)
-set_target_properties(${binary} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "\${CMAKE_BINARY_DIR}/bin")
-add_library(native SHARED lib.cpp)
-set_target_properties(native PROPERTIES OUTPUT_NAME cjlint LIBRARY_OUTPUT_DIRECTORY "\${CMAKE_BINARY_DIR}/lib")
+  write(path.join(tools,'packages/lsp/main.cj'),'main() { println(42) }\n');
+  for(const name of ['lsp','cjlint'])write(path.join(tools,'packages',name,'build/build.mjs'),'// controlled root producer below\n');
+  write(path.join(tools,'build.mjs'),`import fs from 'node:fs';import path from 'node:path';import {spawnSync} from 'node:child_process';
+const a=process.argv.slice(2),value=k=>a[a.indexOf(k)+1];if(a[0]!=='build'||value('--tool')!=='lsp')throw Error('PUBLIC_ROOT_PRODUCER');
+const out=path.join(value('--build-root'),'lsp/server/target/release/bin/main');fs.mkdirSync(path.dirname(out),{recursive:true});
+const p=spawnSync(path.join(process.env.CANGJIE_HOME,'bin/cjc'),[new URL('./packages/lsp/main.cj',import.meta.url).pathname,'-o',out],{stdio:'inherit'});
+if(p.error)throw p.error;if(p.signal)throw Error(p.signal);process.exitCode=p.status??1;
 `);
-    write(path.join(tools,directory,'build/build.py'),`import os,pathlib,subprocess,sys,shutil
-root=pathlib.Path(__file__).resolve().parents[1]
-build=root/'build/build'
-def run(args): subprocess.run(args,check=True)
-if sys.argv[1]=='clean':
- if build.exists(): shutil.rmtree(build)
-elif sys.argv[1]=='build':
- # Exercise the actual selected host executable as well as the native compiler.
- run([str(pathlib.Path(os.environ['CANGJIE_HOME'])/'bin/cjc'),'--version'])
- gcc=sys.argv[sys.argv.index('--gcc-toolchain')+1] if '--gcc-toolchain' in sys.argv else ''
- run(['cmake','-S',str(root),'-B',str(build),'-G','Ninja','-DCMAKE_BUILD_TYPE=Release','-DGCC_TOOLCHAIN_FLAG='+gcc])
- run(['cmake','--build',str(build),'--parallel',sys.argv[sys.argv.index('--jobs')+1]])
- if root.name=='cangjie-language-server':
-  out=root/'output/bin/LSPServer';out.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(build/'bin/LSPServer',out)
-else: raise RuntimeError('unexpected phase')
-`);
-  }
   const commit=freeze(tools);
-  write(path.join(workspace,'.source-selection.json'),JSON.stringify({tools:{url:'file://'+tools,tag:commit},cjpm:{url:'file://'+tools,tag:commit}}));
+  write(path.join(workspace,'.source-selection.json'),JSON.stringify({tools:{url:'file://'+tools,tag:commit}}));
   const env={...process.env,CJCJ_SRCBUILD_CONSUMER_SDK:host,CJCJ_OFFICIAL_SDK_ROOT:host};
   for(const key of ['CANGJIE_BUILD_DRY_RUN','CJCJ_TOOLS_GCC_TOOLCHAIN','CJCJ_SRCBUILD_SOURCE_MIRRORS','CJCJ_SRCBUILD_REQUIRE_MIRRORS'])delete env[key];
   function build(tool,extra=[]) {
     return run([process.execPath,new URL('../cli.mjs',import.meta.url).pathname,'--workspace',workspace,
       '--build-root',path.join(root,'buildtools'),'--official-sdk-root',host,'--host-profile','kkk2',
       '--target','linux-x64','--build-type','release','--tools-phase','build','--tools-build-set',tool,
-      '--tools-dependencies',path.join(root,'dependencies.json'),'--jobs','1',...extra,'build','tools'],{env});
+      '--tools-dependencies',path.join(root,'dependencies.json'),'--jobs','1',
+      '--tools-json-build',deps,'--tools-compiler-libs',deps,'--tools-runtime-config',path.join(root,'runtime.o'),
+      '--tools-llvm-shim',path.join(root,'shim.o'),'--tools-llvm-library',path.join(root,'libLLVM.so'),...extra,'build','tools'],{env});
   }
   const facts=tool=>JSON.parse(fs.readFileSync(path.join(workspace,'build/tools',tool,'build-inputs.json')));
   return {root,workspace,tools,write,run,ok,build,facts,host};
@@ -101,16 +74,15 @@ test('retired C++ cjlint GCC selection is rejected rather than silently changing
 for(const [label,selection]of [['default',null],['combined','cjlint,cjprof'],['prof-only','cjprof']])
 test('public dependency closure '+label+' reaches the post-prepare boundary',()=>{
  const f=fixture('dependency-'+label);
- const directories=['cjpm','cjfmt','hyperlangExtension','cangjie-language-server','cjcov','cjtrace-recover','cjlint','cjprof','cjcompat'];
+ const directories=['cjpm','cjfmt','hle','lsp','cjcov','cjtrace-recover','cjlint','cjprof','cjcompat','cjhead'];
  for(const directory of directories) {
-  const script=['cjtrace-recover','cjprof','cjcompat','cjlint'].includes(directory)?'build.mjs':'build.py';
-  const file=path.join(f.tools,directory,'build',script);
+  const file=path.join(f.tools,'packages',directory,'build/build.mjs');
   if(!fs.existsSync(file))f.write(file,'// producer must not execute in this boundary test\n');
  }
  f.ok(f.run(['git','-C',f.tools,'add','.']));
  f.ok(f.run(['git','-C',f.tools,'-c','user.name=Zxilly','-c','user.email=zxilly@outlook.com','commit','-m','test: complete public selector input']));
  const commit=f.ok(f.run(['git','-C',f.tools,'rev-parse','HEAD'])).stdout.trim();
- f.write(path.join(f.workspace,'.source-selection.json'),JSON.stringify({tools:{url:'file://'+f.tools,tag:commit},cjpm:{url:'file://'+f.tools,tag:commit}}));
+ f.write(path.join(f.workspace,'.source-selection.json'),JSON.stringify({tools:{url:'file://'+f.tools,tag:commit}}));
  const stage=new URL('../srcbuild/stages/tools.mjs',import.meta.url).href;
  const anchor='const toolEnv = targetToolsEnv(config);';
  f.write(path.join(f.root,'after-prepare.mjs'),`export async function load(url,context,next){const r=await next(url,context);if(url!==${JSON.stringify(stage)})return r;const source=String(r.source),anchor=${JSON.stringify(anchor)};if(source.split(anchor).length!==2)throw Error('POST_PREPARE_ANCHOR');return {...r,source:source.replace(anchor,anchor+"\\nconsole.log('PUBLIC_DEPENDENCY_TARGET_REACHED');throw Error('FINITE_AFTER_PREPARE');")};}`);

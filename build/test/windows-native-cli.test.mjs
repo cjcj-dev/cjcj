@@ -17,16 +17,15 @@ function fixture(t) {
   const preload = path.join(root, 'host.mjs');
   fs.writeFileSync(preload, "Object.defineProperty(process,'platform',{value:'win32'});\n");
   const tools = path.join(root, 'cjcj-tools');
-  for (const name of ['cjpm', 'cjfmt', 'hyperlangExtension', 'cangjie-language-server', 'cjcov', 'cjtrace-recover', 'cjlint', 'cjprof', 'cjcompat']) {
-    fs.mkdirSync(path.join(tools, name, 'build'), {recursive: true});
+  for (const name of ['cjpm', 'cjfmt', 'hle', 'lsp', 'cjcov', 'cjtrace-recover', 'cjlint', 'cjprof', 'cjcompat', 'cjhead']) {
+    fs.mkdirSync(path.join(tools, 'packages', name, 'build'), {recursive: true});
   }
-  fs.mkdirSync(path.join(tools, 'cjpm/dist'), {recursive: true});
-  fs.writeFileSync(path.join(tools, 'packages/cjpm/dist/cjpm.exe'), 'fixture marker, not PE');
-  fs.writeFileSync(path.join(tools, 'packages/cjpm/build/build.py'), '# controlled source fixture\n');
+  fs.writeFileSync(path.join(tools, 'build.mjs'), '// plan-only public root producer\n');
+  for(const name of ['cjpm','cjfmt','hle','lsp','cjcov','cjtrace-recover','cjlint','cjprof','cjcompat','cjhead'])fs.writeFileSync(path.join(tools,'packages',name,'build/build.mjs'),'// plan-only package producer\n');
   const env = {...process.env, CANGJIE_BUILD_DRY_RUN: '1', CJCJ_NATIVE_TOOL_DEPENDENCIES: path.join(root,'native-dependencies.json'), CJCJ_NATIVE_LLVM_BIN: path.join(root, 'llvm/bin'),
     CJCJ_NATIVE_OPENSSL_LIB: path.join(root, 'openssl/lib')};
   for (const key of ['CJCJ_OFFICIAL_SDK_ROOT', 'CJCJ_SRCBUILD_CONSUMER_SDK']) delete env[key];
-  return {root, env, run({native = true, args = ['build', 'tools'], extra = {}, profile = 'generic'} = {}) {
+  return {root, env, run({native = true, args = ['--tools-phase','build','--tools-build-set','cjpm,cjcov,hle,cjtrace-recover','--tools-mangle-source',path.join(root,'mangle'),'build','tools'], extra = {}, profile = 'generic'} = {}) {
     const argv = [...(native ? ['--import', preload] : []), 'build/cli.mjs', '--workspace', root,
       '--build-root', path.join(root, 'buildtools'), '--target', 'windows-x64', '--host-profile', profile, ...args];
     return spawnSync(process.execPath, argv, {cwd: path.resolve(import.meta.dirname, '../..'),
@@ -46,26 +45,21 @@ test('Windows native build context does not change the Linux cross producer regi
   assert.equal(cross.spec.nodePlatform, 'linux');
   assert.equal(getBuildTarget('windows-x64', {platform: 'linux', arch: 'x64'}), cross);
 });
-test('public Windows native CLI reaches nine tool command plans without cross or rpath arguments', t => {
-  const r = fixture(t).run();
-  console.log('WINDOWS_NATIVE_TOOL_PLAN_ASSERT_REACHED');
-  assert.equal(r.status, 0, r.stdout + r.stderr);
-  const output = r.stdout + r.stderr;
-  assert.match(output, /cjcov.*build\.py build/);
-  assert.match(output, /cjtrace-recover.*build\.py build/);
-  assert.doesNotMatch(output, /--target windows-x86_64|--set-rpath/);
-  assert.match(output, /cjcompat.*build\.py build[^\n]*--sdk /);
-  assert.equal((output.match(/build\.py build /g) || []).length, 9);
+test('public Windows native CLI plans the four applicable CJ producers without cross arguments', t => {
+  const r=fixture(t).run();assert.equal(r.status,0,r.stdout+r.stderr);
+  const output=r.stdout+r.stderr;
+  for(const name of ['cjpm','cjcov','hle','cjtrace-recover'])assert.match(output,new RegExp('build\\.mjs build --tool '+name+' '));
+  assert.doesNotMatch(output,/--target windows-x86_64|--set-rpath|build\.py/);
 });
-test('public Linux cross CLI preserves the complete nine tool producer target plans', t => {
-  const r = fixture(t).run({native: false});
-  assert.equal(r.status, 0, r.stdout + r.stderr);
-  const output = r.stdout + r.stderr;
-  assert.equal((output.match(/--target windows-x86_64/g) || []).length, 9);
-  assert.match(output, /cjcov.*build\.py build[^\n]*--target windows-x86_64/);
-  assert.match(output, /cjtrace-recover.*build\.py build[^\n]*--target windows-x86_64[^\n]*--target-sysroot[^\n]*--cangjie-sdk/);
-  assert.doesNotMatch(output, /--set-rpath/);
-  assert.match(output, /cjcompat.*build\.py build[^\n]*--target windows-x86_64[^\n]*--sdk /);
+test('public Linux cross CLI preserves the applicable target producer plans', t => {
+  const r=fixture(t).run({native:false});assert.equal(r.status,0,r.stdout+r.stderr);
+  const output=r.stdout+r.stderr;
+  for(const name of ['cjpm','cjcov','hle','cjtrace-recover'])assert.match(output,new RegExp('build\\.mjs build --tool '+name+' [^\\n]*--target windows-x86_64'));
+  assert.match(output,/--target-sysroot/);assert.doesNotMatch(output,/--set-rpath|build\.py/);
+});
+for(const native of [true,false])test('unimplemented Windows analysis set is refused, native='+native,t=>{
+ const r=fixture(t).run({native,args:['--tools-phase','build','--tools-build-set','lsp','build','tools']});
+ assert.notEqual(r.status,0);assert.match(r.stderr,/Cangjie analysis tools currently support Linux x86-64/);
 });
 test('public native CLI rejects kkk2 rather than granting a Windows execution slot', t => {
   const r = fixture(t).run({profile: 'kkk2', args: ['print-version']});
