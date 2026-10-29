@@ -36,6 +36,7 @@ function fixture(name) {
 const a=process.argv.slice(2),value=k=>a[a.indexOf(k)+1];if(a[0]!=='build'||value('--tool')!=='lsp')throw Error('PUBLIC_ROOT_PRODUCER');
 const out=path.join(value('--build-root'),'lsp/server/target/release/bin/main');fs.mkdirSync(path.dirname(out),{recursive:true});
 const p=spawnSync(path.join(process.env.CANGJIE_HOME,'bin/cjc'),[new URL('./packages/lsp/main.cj',import.meta.url).pathname,'-o',out],{stdio:'inherit'});
+fs.writeFileSync(path.join(value('--build-root'),'lsp/server-build-command.json'),JSON.stringify({rc:p.status,signal:p.signal,fixture:'bounded public producer; not actual LSP',argv:process.argv}));
 if(p.error)throw p.error;if(p.signal)throw Error(p.signal);process.exitCode=p.status??1;
 `);
   const commit=freeze(tools);

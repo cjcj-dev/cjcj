@@ -29,7 +29,8 @@ await write(path.join(tools,'packages/lsp/build/build.mjs'),'throw Error("finite
 await write(path.join(tools,'build.mjs'),`import fs from 'node:fs';import path from 'node:path';import {spawnSync} from 'node:child_process';
 const a=process.argv.slice(2),value=k=>a[a.indexOf(k)+1];if(a[0]!=='build'||value('--tool')!=='lsp')throw Error('fixture public argv');
 const out=path.join(value('--build-root'),'lsp/server/target/release/bin/main');fs.mkdirSync(path.dirname(out),{recursive:true});
-const r=spawnSync('cc',[new URL('./packages/lsp/main.c',import.meta.url).pathname,'-o',out],{stdio:'inherit'});if(r.error)throw r.error;process.exitCode=r.status??1;
+const r=spawnSync('cc',[new URL('./packages/lsp/main.c',import.meta.url).pathname,'-o',out],{stdio:'inherit'});fs.writeFileSync(path.join(value('--build-root'),'lsp/server-build-command.json'),JSON.stringify({rc:r.status,signal:r.signal,fixture:'bounded public producer; not actual LSP',argv:process.argv}));
+if(r.error)throw r.error;process.exitCode=r.status??1;
 `);
 await git('init');await git('add','.');await git('-c','user.name=Zxilly','-c','user.email=zxilly@outlook.com','commit','-m','finite native tool source');
 const commit=await git('rev-parse','HEAD'),repository='file://'+tools;
@@ -89,7 +90,7 @@ if(process.env.CJCJ_TOOL_FACTS_INSTALL==='1'){
   node:{path:process.execPath,source:'controlled native Node',version:process.version},
   modules:{path:path.join(deps,'tools/dtsparser/node_modules'),source:'controlled npm boundary',version:'fixture'},
   cjbind:{path:process.execPath,source:'controlled executable, not actual cjbind',version:'v1.1.0-alpha.53.1'}}});
- await installSourceTools(config,sdk);
+ await installSourceTools(config,sdk,{consume:async pending=>{const actual=await command([path.join(pending,'tools/bin/LSPServer')]);assert.equal(actual.status,0,actual.stderr);assert.equal(actual.stdout.trim(),'42');}});
  // Unrelated SDK-shaped inputs above do not claim compiler provenance. Retain
  // that explicit unresolved boundary in the package facts test.
  await fs.rename(path.join(sdk,'STAGE-INPUTS.json'),path.join(root,'controlled-sdk-input.json'));

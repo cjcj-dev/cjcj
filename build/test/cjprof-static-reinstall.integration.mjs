@@ -25,7 +25,7 @@ assert.equal(original.build.rc,0);assert.equal(original.build.platform,'linux_x8
 const originalRoot=path.dirname(path.dirname(original.build.nativeConfiguration.cangjie.values.sources[0])),originalBuild=path.dirname(original.artifact.path);
 const work=await fs.mkdtemp(path.join(parent,'cjprof-reinstall-'));
 const config=buildConfig({workspace:path.join(work,'workspace'),buildRoot:path.join(work,'buildtools'),cangjieVersion:original.build.version,consumerSdk:path.join(work,'sdk'),officialSdkRoot:path.join(work,'unused-host'),toolsPhase:'install'});
-const tools=config.repoPath('tools'),prof=path.join(tools,'cjprof'),sdk=config.consumerSdk;
+const tools=config.repoPath('tools'),prof=path.join(tools,'packages/cjprof'),sdk=config.consumerSdk;
 const write=async(file,value)=>{await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,value);};
 const copy=async(from,to)=>{await fs.mkdir(path.dirname(to),{recursive:true});await fs.copyFile(from,to);};
 const relocatedBuild=path.join(config.buildRoot,'cjprof');
@@ -64,9 +64,10 @@ async function consume(pending) {
  const output=await fs.readFile(path.join(work,commands.at(-1).label+'.stdout'),'utf8');
  assert.match(output,/default::Dirived\s+1\s+72\s+168/);
 }
-const others=[['cjpm','packages/cjpm/dist/cjpm'],['cjfmt','packages/cjfmt/dist/bin/cjfmt'],['hle','packages/hle/target/bin/main'],['LSPServer','packages/lsp/dist/bin/LSPServer'],['cjcov','packages/cjcov/dist/cjcov'],['cjtrace-recover','packages/cjtrace-recover/dist/bin/cjtrace-recover'],['cjlint','packages/cjlint/dist/bin/cjlint'],['cjcompat','packages/cjcompat/dist/bin/cjcompat']];
+const others=[['cjpm','packages/cjpm/dist/bin/cjpm'],['cjfmt','packages/cjfmt/dist/bin/cjfmt'],['hle','packages/hle/dist/bin/hle'],['LSPServer','packages/lsp/dist/bin/cangjie-lsp'],['cjcov','packages/cjcov/dist/bin/cjcov'],['cjtrace-recover','packages/cjtrace-recover/dist/bin/cjtrace-recover'],['cjlint','packages/cjlint/dist/bin/cjlint'],['cjcompat','packages/cjcompat/dist/bin/cjcompat'],['cjhead','packages/cjhead/dist/bin/cjhead']];
 for(const [name,relative]of others){const file=path.join(tools,relative);await write(file,'#!'+process.execPath+'\nconsole.log('+JSON.stringify(name+':control')+');\n');await fs.chmod(file,0o755);}
-for(const rel of ['packages/cjlint/dist/lib/libcjlint.so','packages/cjlint/dist/config/cjlint_rule_list.json','packages/cjfmt/dist/config/cangjie-format.toml','packages/cjpm/dist/cangjie-repo.toml'])await write(path.join(tools,rel),'independent control '+rel);
+for(const rel of ["packages/lsp/dist/lib/libcangjie-runtime.so","packages/cjhead/dist/lib/libcangjie-runtime.so","packages/cjhead/dist/share/readme","packages/cjlint/dist/lib/libcangjie-runtime.so","packages/cjlint/dist/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so","packages/cjlint/dist/modules/std.core.cjo","packages/cjlint/dist/config/cjlint_rule_list.json",'packages/cjfmt/dist/config/cangjie-format.toml','packages/cjpm/dist/config/cangjie-repo.toml'])await write(path.join(tools,rel),'independent control '+rel);
+await copy(path.join(tools,'packages/hle/dist/bin/hle'),path.join(config.buildRoot,'hle/bin/main'));
 await write(path.join(sdk,'tools/config/other.toml'),'shared config control');
 const parser=path.join(tools,'packages/hle/src/dtsparser');
 await write(path.join(parser,'analysis.js'),'controlled parser input');await write(path.join(parser,'package.json'),JSON.stringify({dependencies:{typescript:'npm:typescript@4.9.5','https-proxy-agent':'7.0.6'}}));

@@ -1,5 +1,5 @@
 #!/usr/bin/env zx
-// Nine small source-built Cangjie products exercise the SDK tool installer.
+// Ten small source-built Cangjie products exercise the SDK tool installer.
 // These are interface fixtures, not the complete fixed cangjie_tools programs.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -19,8 +19,8 @@ const root=await fs.mkdtemp(path.join(inputs.work,'source-tools-')),sdk=path.joi
 await copyOutputs(sdk,[{from:inputs.host,to:'',exclude:['.cjv'],owner:'reference H'}]);
 await installEntries({root:sdk,build:path.join(root,'host-entry'),groups:[{directory:'tools/bin',retain:'.host-tools/tools/bin',
  names:['cjpm','cjfmt','hle','LSPServer','cjcov','cjtrace-recover','cjlint','cjprof','cjcompat'],libraries:['runtime/lib/linux_x86_64_cjnative','lib/linux_x86_64_cjnative','third_party/llvm/lib','tools/lib']}],records:[],platform:'linux_x86_64'});
-const products=[['cjpm','packages/cjpm/dist/cjpm'],['cjfmt','packages/cjfmt/dist/bin/cjfmt'],['hle','packages/hle/target/bin/main'],
- ['LSPServer','packages/lsp/dist/bin/LSPServer'],['cjcov','packages/cjcov/dist/cjcov'],['cjtrace-recover','packages/cjtrace-recover/dist/bin/cjtrace-recover'],['cjlint','packages/cjlint/dist/bin/cjlint'],['cjprof','packages/cjprof/dist/bin/cjprof'],['cjcompat','packages/cjcompat/dist/bin/cjcompat']];
+const products=[['cjpm','packages/cjpm/dist/bin/cjpm'],['cjfmt','packages/cjfmt/dist/bin/cjfmt'],['hle','packages/hle/target/bin/main'],
+ ['LSPServer','packages/lsp/dist/bin/cangjie-lsp'],['cjcov','packages/cjcov/dist/bin/cjcov'],['cjtrace-recover','packages/cjtrace-recover/dist/bin/cjtrace-recover'],['cjlint','packages/cjlint/dist/bin/cjlint'],['cjprof','packages/cjprof/dist/bin/cjprof'],['cjcompat','packages/cjcompat/dist/bin/cjcompat'],['cjhead','packages/cjhead/dist/bin/cjhead']];
 const expected={};
 for(const [name,rel]of products){
  const output=path.join(source,rel),input=path.join(root,name+'.cj');await fs.mkdir(path.dirname(output),{recursive:true});
@@ -35,19 +35,20 @@ await fs.writeFile(path.join(source,'packages/hle/src/dtsparser/source.cj'),'fix
 // Payload-copy boundaries only: these markers are never loaded as libraries
 // and cannot qualify native/JNI products. The nine actual fixture executables
 // above still exercise the public installed launcher and lineage rejection.
-for(const rel of ['packages/cjpm/dist/cangjie-repo.toml','packages/cjlint/dist/lib/libcangjie-runtime.so','packages/cjlint/dist/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so','packages/cjlint/dist/modules/std.core.cjo','packages/cjlint/dist/config/cjlint_rule_list.json','packages/cjprof/dist/lib/libcjprof-cangjie.so','packages/cjprof/dist/lib/libcjprof-jni.so','packages/cjprof/dist/share/java/cjprof.jar','packages/cjprof/dist/config/static/index.html']) {
+for(const rel of ['packages/cjpm/dist/config/cangjie-repo.toml',"packages/lsp/dist/lib/libcangjie-runtime.so","packages/cjhead/dist/lib/libcangjie-runtime.so","packages/cjhead/dist/share/readme",'packages/cjlint/dist/lib/libcangjie-runtime.so','packages/cjlint/dist/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so','packages/cjlint/dist/modules/std.core.cjo','packages/cjlint/dist/config/cjlint_rule_list.json','packages/cjprof/dist/lib/libcjprof-cangjie.so','packages/cjprof/dist/lib/libcjprof-jni.so','packages/cjprof/dist/share/java/cjprof.jar','packages/cjprof/dist/config/static/index.html']) {
  const file=path.join(source,rel);await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,'controlled transport boundary '+rel);
 }
 await fs.copyFile(path.join(inputs.host,'runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so'),path.join(source,'packages/cjlint/dist/lib/libcangjie-runtime.so'));
 hlePayloadFixture(sdk);
 await fs.writeFile(path.join(sdk,'tools/dtsparser/DEPENDENCIES.json'),JSON.stringify({fixture:'unqualified transport inputs'}));
-const config={workspace:root,softwareDir:path.join(root,'software'),repoPath:()=>source,target:getTarget('linux-x64')};
-await installSourceTools(config);
+const config={workspace:root,buildRoot:path.join(root,'buildtools'),softwareDir:path.join(root,'software'),repoPath:()=>source,target:getTarget('linux-x64')};
+await fs.mkdir(path.join(config.buildRoot,'hle/bin'),{recursive:true});await fs.copyFile(path.join(source,'packages/hle/target/bin/main'),path.join(config.buildRoot,'hle/bin/main'));
+await installSourceTools(config,sdk,{consume:async pending=>{for(const [name]of products){const r=spawnSync(path.join(pending,'tools/bin',name),[],{encoding:'utf8'});assert.equal(r.status,0,r.stderr);assert.equal(r.stdout.trim(),name+':42');}}});
 for(const [name]of products)test('source-built '+name+' is the installed public tool result',async()=>{
  const binary=path.join(sdk,'tools/bin',name),result=spawnSync(binary,[],{encoding:'utf8'});
  console.log('SOURCE_TOOL_RESULT_TARGET_ASSERTION_REACHED '+JSON.stringify({name,rc:result.status,stdout:result.stdout}));
  assert.equal(result.status,0,result.stderr);assert.equal(result.stdout.trim(),name+':42');
- const raw=path.join(sdk,name==='cjlint'?'.target-tools/tools/cjlint/bin':'.target-tools/tools/bin',name);
+ const raw=path.join(sdk,['cjlint','LSPServer','cjhead'].includes(name)?'.target-tools/tools/'+(name==='LSPServer'?'lsp':name)+'/bin':'.target-tools/tools/bin',name);
  assert.equal(await fileDigest(raw),expected[name],'installed product retains actual independently captured build bytes');
 });
 test('lineage reads actual source-built tool bytes and still rejects unstamped interface fixtures',async()=>{

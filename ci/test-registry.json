@@ -683,12 +683,12 @@
   {
     "file": "build/test/tool-build-facts.integration.mjs",
     "executor": "manual",
-    "reason": "Public SDK source-build CLI with a real Git selector, fixed cjpm overlay mirror and bounded native C producer; requires RELEASE_EVIDENCE_TEST_ROOT/SDK_INPUT_TOOLS_MIRROR. Tests producer/source/build facts, not actual LSP or complete Cangjie SDK."
+    "reason": "Public SDK source-build CLI with a real canonical tools Git selector and bounded native C producer; requires RELEASE_EVIDENCE_TEST_ROOT and read-only CJCJ_OFFICIAL_SDK_ROOT. Tests producer/source/build facts, not actual LSP or complete Cangjie SDK."
   },
   {
     "file": "build/test/tools-host-toolchain-cli.test.mjs",
     "executor": "manual",
-    "reason": "Formal source-build CLI with read-only official H (CJCJ_TOOLS_TEST_HOST) and bounded real CMake C++ consumers. Requires RELEASE_EVIDENCE_TEST_ROOT; covers absent bootstrap stage record and native cjlint GCC cold/warm/withdraw/restore configuration. Not actual cjlint AST ABI or full SDK qualification."
+    "reason": "Formal source-build CLI with read-only official H (CJCJ_TOOLS_TEST_HOST) compiling a small CJ consumer through a controlled root producer. Requires RELEASE_EVIDENCE_TEST_ROOT; covers absent bootstrap stage record, retired GCC option refusal, and default/combined/prof-only dependency preparation. Not real tool algorithms or full SDK qualification."
   },
   {
     "file": "build/test/cjprof-static-reinstall.integration.mjs",

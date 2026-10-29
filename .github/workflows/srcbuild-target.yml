@@ -1192,7 +1192,7 @@ jobs:
         run: |
           node ci/release/prepare_cjpm_artifact.mjs \
             --platform "${{ matrix.target }}" \
-            --binary "$CANGJIE_WORKSPACE/cangjie_tools/cjpm/dist/cjpm" \
+            --binary "$CANGJIE_WORKSPACE/cjcj-tools/packages/cjpm/dist/bin/cjpm" \
             --outdir "$GITHUB_WORKSPACE/.release-cjpm/${{ matrix.target }}"
 
       - name: Upload source-built cjpm artifact
@@ -1207,7 +1207,7 @@ jobs:
         run: |
           node ci/release/prepare_hle_artifact.mjs \
             --platform "${{ matrix.target }}" \
-            --binary "$CANGJIE_WORKSPACE/cangjie_tools/hyperlangExtension/target/bin/main" \
+            --binary "$CANGJIE_BUILD_ROOT/hle/bin/main" \
             --sdk "$CANGJIE_WORKSPACE/software/cangjie" \
             --outdir "$GITHUB_WORKSPACE/.release-hle/${{ matrix.target }}"
 
@@ -1219,17 +1219,13 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      # cjfmt and LSPServer are built from the same pinned checkout. They carry
-      # no CJ_MCC_ entry points, because the backend is C++, so the release
-      # manifest cannot discover them by structure the way it discovers the
-      # Cangjie-written tools. Stage their artifacts here so the release package
-      # installs the source-built bytes rather than leaving the official ones in
-      # place under a manifest row that calls them inherited.
+      # All tools use the selected cjcj-tools packages. These artifact steps
+      # retain each real producer output; they do not grant target SDK readiness.
       - name: Prepare source-built cjlint artifact
         run: |
           node ci/release/prepare_tools_artifact.mjs \
             --tool cjlint --platform "${{ matrix.target }}" \
-            --binary "$CANGJIE_WORKSPACE/cangjie_tools/cjlint/dist/bin/cjlint" \
+            --binary "$CANGJIE_WORKSPACE/cjcj-tools/packages/cjlint/dist/bin/cjlint" \
             --sdk "$CANGJIE_WORKSPACE/software/cangjie" \
             --outdir "$GITHUB_WORKSPACE/.release-tools/${{ matrix.target }}/cjlint"
 
@@ -1245,7 +1241,7 @@ jobs:
         run: |
           node ci/release/prepare_tools_artifact.mjs \
             --tool cjprof --platform "${{ matrix.target }}" \
-            --binary "$CANGJIE_WORKSPACE/cangjie_tools/cjprof/dist/bin/cjprof" \
+            --binary "$CANGJIE_WORKSPACE/cjcj-tools/packages/cjprof/dist/bin/cjprof" \
             --sdk "$CANGJIE_WORKSPACE/software/cangjie" \
             --outdir "$GITHUB_WORKSPACE/.release-tools/${{ matrix.target }}/cjprof"
 
@@ -1261,7 +1257,7 @@ jobs:
         run: |
           node ci/release/prepare_tools_artifact.mjs \
             --tool cjcompat --platform "${{ matrix.target }}" \
-            --binary "$CANGJIE_WORKSPACE/cangjie_tools/cjcompat/dist/bin/cjcompat" \
+            --binary "$CANGJIE_WORKSPACE/cjcj-tools/packages/cjcompat/dist/bin/cjcompat" \
             --sdk "$CANGJIE_WORKSPACE/software/cangjie" \
             --outdir "$GITHUB_WORKSPACE/.release-tools/${{ matrix.target }}/cjcompat"
 
@@ -1277,7 +1273,7 @@ jobs:
         run: |
           node ci/release/prepare_tools_artifact.mjs \
             --tool cjhead --platform "${{ matrix.target }}" \
-            --binary "$CANGJIE_WORKSPACE/cangjie_tools/cjhead/dist/bin/cjhead" \
+            --binary "$CANGJIE_WORKSPACE/cjcj-tools/packages/cjhead/dist/bin/cjhead" \
             --sdk "$CANGJIE_WORKSPACE/software/cangjie" \
             --outdir "$GITHUB_WORKSPACE/.release-tools/${{ matrix.target }}/cjhead"
 
@@ -1294,7 +1290,7 @@ jobs:
           node ci/release/prepare_tools_artifact.mjs \
             --tool cjfmt --platform "${{ matrix.target }}" \
             --sdk "$CANGJIE_WORKSPACE/software/cangjie" \
-            --binary "$CANGJIE_WORKSPACE/cangjie_tools/cjfmt/dist/bin/cjfmt" \
+            --binary "$CANGJIE_WORKSPACE/cjcj-tools/packages/cjfmt/dist/bin/cjfmt" \
             --outdir "$GITHUB_WORKSPACE/.release-tools/${{ matrix.target }}/cjfmt"
 
       - name: Upload source-built cjfmt artifact
@@ -1310,7 +1306,7 @@ jobs:
           node ci/release/prepare_tools_artifact.mjs \
             --tool LSPServer --platform "${{ matrix.target }}" \
             --sdk "$CANGJIE_WORKSPACE/software/cangjie" \
-            --binary "$CANGJIE_WORKSPACE/cangjie_tools/cangjie-language-server/dist/bin/cangjie-lsp" \
+            --binary "$CANGJIE_WORKSPACE/cjcj-tools/packages/lsp/dist/bin/cangjie-lsp" \
             --outdir "$GITHUB_WORKSPACE/.release-tools/${{ matrix.target }}/LSPServer"
 
       - name: Upload source-built LSPServer artifact
@@ -1326,7 +1322,7 @@ jobs:
           node ci/release/prepare_tools_artifact.mjs \
             --tool cjcov --platform "${{ matrix.target }}" \
             --sdk "$CANGJIE_WORKSPACE/software/cangjie" \
-            --binary "$CANGJIE_WORKSPACE/cangjie_tools/cjcov/dist/cjcov" \
+            --binary "$CANGJIE_WORKSPACE/cjcj-tools/packages/cjcov/dist/bin/cjcov" \
             --outdir "$GITHUB_WORKSPACE/.release-tools/${{ matrix.target }}/cjcov"
 
       - name: Upload source-built cjcov artifact
@@ -1342,7 +1338,7 @@ jobs:
           node ci/release/prepare_tools_artifact.mjs \
             --tool cjtrace-recover --platform "${{ matrix.target }}" \
             --sdk "$CANGJIE_WORKSPACE/software/cangjie" \
-            --binary "$CANGJIE_WORKSPACE/cangjie_tools/cjtrace-recover/dist/bin/cjtrace-recover" \
+            --binary "$CANGJIE_WORKSPACE/cjcj-tools/packages/cjtrace-recover/dist/bin/cjtrace-recover" \
             --outdir "$GITHUB_WORKSPACE/.release-tools/${{ matrix.target }}/cjtrace-recover"
 
       - name: Upload source-built cjtrace-recover artifact
@@ -1932,7 +1928,7 @@ jobs:
         run: |
           node ci/release/prepare_tools_artifact.mjs \
             --tool cjlint --platform "windows-x64" \
-            --binary "$CANGJIE_WORKSPACE/cangjie_tools/cjlint/dist/bin/cjlint.exe" \
+            --binary "$CANGJIE_WORKSPACE/cjcj-tools/packages/cjlint/dist/bin/cjlint.exe" \
             --sdk "$CANGJIE_WORKSPACE/software/cangjie-windows" \
             --outdir "$GITHUB_WORKSPACE/.release-tools-windows/cjlint"
 
@@ -1950,7 +1946,7 @@ jobs:
         run: |
           node ci/release/prepare_tools_artifact.mjs \
             --tool cjprof --platform "windows-x64" \
-            --binary "$CANGJIE_WORKSPACE/cangjie_tools/cjprof/dist/bin/cjprof.exe" \
+            --binary "$CANGJIE_WORKSPACE/cjcj-tools/packages/cjprof/dist/bin/cjprof.exe" \
             --sdk "$CANGJIE_WORKSPACE/software/cangjie-windows" \
             --outdir "$GITHUB_WORKSPACE/.release-tools-windows/cjprof"
 
@@ -1968,7 +1964,7 @@ jobs:
         run: |
           node ci/release/prepare_tools_artifact.mjs \
             --tool cjcompat --platform "windows-x64" \
-            --binary "$CANGJIE_WORKSPACE/cangjie_tools/cjcompat/dist/bin/cjcompat.exe" \
+            --binary "$CANGJIE_WORKSPACE/cjcj-tools/packages/cjcompat/dist/bin/cjcompat.exe" \
             --sdk "$CANGJIE_WORKSPACE/software/cangjie-windows" \
             --outdir "$GITHUB_WORKSPACE/.release-tools-windows/cjcompat"
 
@@ -1986,7 +1982,7 @@ jobs:
         run: |
           node ci/release/prepare_tools_artifact.mjs \
             --tool cjhead --platform "windows-x64" \
-            --binary "$CANGJIE_WORKSPACE/cangjie_tools/cjhead/dist/bin/cjhead.exe" \
+            --binary "$CANGJIE_WORKSPACE/cjcj-tools/packages/cjhead/dist/bin/cjhead.exe" \
             --sdk "$CANGJIE_WORKSPACE/software/cangjie-windows" \
             --outdir "$GITHUB_WORKSPACE/.release-tools-windows/cjhead"
 
@@ -2004,7 +2000,7 @@ jobs:
         run: |
           node ci/release/prepare_tools_artifact.mjs \
             --tool cjfmt --platform windows-x64 \
-            --binary "$CANGJIE_WORKSPACE/cangjie_tools/cjfmt/dist/bin/cjfmt.exe" \
+            --binary "$CANGJIE_WORKSPACE/cjcj-tools/packages/cjfmt/dist/bin/cjfmt.exe" \
             --sdk "$CANGJIE_WORKSPACE/software/cangjie-windows" \
             --outdir "$GITHUB_WORKSPACE/.release-tools-windows/cjfmt"
 
@@ -2022,7 +2018,7 @@ jobs:
         run: |
           node ci/release/prepare_tools_artifact.mjs \
             --tool LSPServer --platform windows-x64 \
-            --binary "$CANGJIE_WORKSPACE/cangjie_tools/cangjie-language-server/dist/bin/cangjie-lsp.exe" \
+            --binary "$CANGJIE_WORKSPACE/cjcj-tools/packages/lsp/dist/bin/cangjie-lsp.exe" \
             --sdk "$CANGJIE_WORKSPACE/software/cangjie-windows" \
             --outdir "$GITHUB_WORKSPACE/.release-tools-windows/LSPServer"
 
@@ -2040,7 +2036,7 @@ jobs:
         run: |
           node ci/release/prepare_tools_artifact.mjs \
             --tool cjcov --platform windows-x64 \
-            --binary "$CANGJIE_WORKSPACE/cangjie_tools/cjcov/dist/cjcov.exe" \
+            --binary "$CANGJIE_WORKSPACE/cjcj-tools/packages/cjcov/dist/bin/cjcov.exe" \
             --sdk "$CANGJIE_WORKSPACE/software/cangjie-windows" \
             --outdir "$GITHUB_WORKSPACE/.release-tools-windows/cjcov"
 
@@ -2058,7 +2054,7 @@ jobs:
         run: |
           node ci/release/prepare_tools_artifact.mjs \
             --tool cjtrace-recover --platform windows-x64 \
-            --binary "$CANGJIE_WORKSPACE/cangjie_tools/cjtrace-recover/dist/bin/cjtrace-recover.exe" \
+            --binary "$CANGJIE_WORKSPACE/cjcj-tools/packages/cjtrace-recover/dist/bin/cjtrace-recover.exe" \
             --sdk "$CANGJIE_WORKSPACE/software/cangjie-windows" \
             --outdir "$GITHUB_WORKSPACE/.release-tools-windows/cjtrace-recover"
 
@@ -2076,7 +2072,7 @@ jobs:
         run: |
           node ci/release/prepare_hle_artifact.mjs \
             --platform windows-x64 \
-            --binary "$CANGJIE_WORKSPACE/cangjie_tools/hyperlangExtension/target/bin/main.exe" \
+            --binary "$CANGJIE_BUILD_ROOT/hle/bin/main.exe" \
             --sdk "$CANGJIE_WORKSPACE/software/cangjie-windows" \
             --outdir "$GITHUB_WORKSPACE/.release-hle-windows"
 

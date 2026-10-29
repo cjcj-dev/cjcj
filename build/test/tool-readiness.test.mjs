@@ -113,7 +113,7 @@ async function astTool(f,name) {
   template.artifact=await f.write(retained,await fs.readFile('/usr/bin/true'));
   template.entry=await f.write(rel,await fs.readFile('/usr/bin/true'));
   template.entry.recipe=await f.write(rel+'.entry',['cjcj-sdk-entry-v1','2',retained,'linux','native-target:x64','third_party/llvm/lib','runtime/lib/linux_x86_64_cjnative','lib/linux_x86_64_cjnative','tools/lib'].join('\n')+'\n');
-  const p=template.producer;p.build.directory=name==='lsp'?'cangjie-language-server':name;p.install.payloads={};
+  const p=template.producer;p.build.directory='packages/'+name;p.install.payloads={};
   if(name==='cjfmt') {
     const config=await f.write('tools/config/cangjie-format.toml','format config');
     p.install.payloads[config.path]={sha256:config.sha256};f.input.payloadFiles[config.path]={sha256:config.sha256,producers:[name]};
@@ -128,7 +128,7 @@ async function cangjieLsp(f) {
   template.entry=await f.write(rel,await fs.readFile('/usr/bin/true'));
   template.entry.recipe=await f.write(rel+'.entry',['cjcj-sdk-entry-v1','2',retained,'linux','native-target:x64','.target-tools/tools/lsp/lib'].join('\n')+'\n');
   p.artifact=structuredClone(template.artifact);p.install.artifact=structuredClone(template.artifact);
-  p.build.directory='cangjie-language-server';p.build.payloads={};p.install.payloads={};
+  p.build.directory='packages/lsp';p.build.payloads={};p.install.payloads={};
   p.build.nativeConfiguration={cangjie:{values:{rc:0,signal:null,error:null,inputs:{sdk:'/host-H',frontendPackages:'/fixed-frontend',llvmLibrary:'/libLLVM.so',runtimeConfig:'/config.o',jsonBuild:'/json',llvmShim:'/shim.o'}}}};
   for(const tail of ['libcangjie-runtime.so','libLLVM-15.so']) {
     const row=await f.write('.target-tools/tools/lsp/lib/'+tail,'normal LSP install '+tail);

@@ -268,7 +268,7 @@ test('workflow is a bash 3.2 macOS arm using the source and host pins', async ()
   assert.match(text, /\{\n\s+node ci\/host-toolchain-pin\.mjs --github-env\n\s+cat ci\/runtime_pin\.env\n\s+\} >> "\$GITHUB_ENV"/);
   assert.match(text, /workflow_dispatch:/);
   assert.match(text, /runs-on: macos-15\n/);
-  assert.match(text, /cat ci\/cjpm_pin\.env >> "\$GITHUB_ENV"/);
+  assert.match(text, /cat ci\/source_pin\.env >> "\$GITHUB_ENV"/);
   assert.match(text, /ci\/setup_sdk\.mjs/);
   assert.match(text, /node ci\/objc_darwin\/run_e2e\.mjs --scan-only/);
   assert.match(text, /node ci\/objc_darwin\/run_e2e\.mjs\n/);

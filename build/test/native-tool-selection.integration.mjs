@@ -28,12 +28,12 @@ const stage={platform:'linux_x86_64',compilerFile:'bin/cjcj-stage1',compilerComm
 const sdkFiles={compiler:'bin/cjcj-stage1',stdCore:'lib/linux_x86_64_cjnative/libcangjie-std-core.a',runtime:'runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so',nativeAst:'tools/lib/libcangjie-lsp.so'};
 for(const [key,rel]of Object.entries(sdkFiles))await write(path.join(sdk,rel),'original '+key);
 await write(path.join(sdk,'STAGE-INPUTS.json'),JSON.stringify(stage));
-await write(path.join(tools,'cangjie-language-server/main.c'),'#include <stdio.h>\nint main(void){puts("native fixture:42");return 0;}\n');
+await write(path.join(tools,'packages/lsp/main.c'),'#include <stdio.h>\nint main(void){puts("native fixture:42");return 0;}\n');
 await run('git-init',['git','init','-q',tools]);
 await run('git-add',['git','add','.'],tools);
 await run('git-commit',['git','-c','user.name=Zxilly','-c','user.email=zxilly@outlook.com','commit','-qm','native interface fixture'],tools);
-const product=path.join(tools,'packages/lsp/dist/bin/LSPServer');await fs.mkdir(path.dirname(product),{recursive:true});
-const argv=['cc',path.join(tools,'cangjie-language-server/main.c'),'-o',product];
+const product=path.join(tools,'packages/lsp/dist/bin/cangjie-lsp');await fs.mkdir(path.dirname(product),{recursive:true});
+const argv=['cc',path.join(tools,'packages/lsp/main.c'),'-o',product];
 const before=await beginToolBuild(config,'lsp',{argv,env:{CANGJIE_HOME:sdk},sdk});
 await run('native-build',argv);await finishToolBuild(config,'lsp',before,product);
 await finishToolInstall(config,'lsp',product,['upstream LSP output install (same directory)']);
@@ -41,12 +41,12 @@ const original=await json(path.join(workspace,'build/tools/lsp/build-inputs.json
 for(const row of toolOutputs(config))if(row.producer!=='lsp') {
  await fs.mkdir(path.dirname(row.from),{recursive:true});await fs.copyFile(product,row.from);
 }
-for(const rel of ['packages/cjpm/dist/cangjie-repo.toml','packages/cjfmt/config/cangjie-format.toml','packages/cjlint/dist/lib/libcjlint.so','packages/cjlint/dist/config/rules.json',
+for(const rel of ['packages/cjpm/dist/config/cangjie-repo.toml','packages/cjfmt/dist/config/cangjie-format.toml',"packages/lsp/dist/lib/libcangjie-runtime.so","packages/cjhead/dist/lib/libcangjie-runtime.so","packages/cjhead/dist/share/readme","packages/cjlint/dist/lib/libcangjie-runtime.so","packages/cjlint/dist/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so","packages/cjlint/dist/modules/std.core.cjo","packages/cjlint/dist/config/cjlint_rule_list.json",
  'packages/cjprof/dist/lib/libcjprof-cangjie.so','packages/cjprof/dist/lib/libcjprof-jni.so','packages/cjprof/dist/share/java/cjprof.jar','packages/cjprof/dist/config/static/index.html'])await write(path.join(tools,rel),'unqualified other-tool fixture');
 for(const rel of ['tools/dtsparser/DEPENDENCIES.json','tools/bin/node','tools/dtsparser/node_modules/.bin/cjbind'])await write(path.join(sdk,rel),'unqualified HLE fixture');
 const cli=fileURLToPath(new URL('../../ci/cangjie-test/tool-readiness.mjs',import.meta.url));
 const read=async label=>JSON.parse(await run(label,[process.execPath,cli,sdk]));
-await installSourceTools(config,sdk);
+await installSourceTools(config,sdk,{consume:async pending=>assert.equal((await run('pending-consumer-'+records.length,[path.join(pending,'tools/bin/LSPServer')])).trim(),'native fixture:42')});
 let observed=await read('same-build');assert.equal(observed.LSPServer.ready,true,observed.LSPServer.reason);
 assert.equal(observed.cjpm.ready,false,'unresolved CJ producer independent control');
 console.log('UNRESOLVED_CJ_INDEPENDENT_CONTROL_PASS');
