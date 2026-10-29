@@ -32,16 +32,20 @@ await write(path.join(tools,'packages/lsp/main.c'),'#include <stdio.h>\nint main
 await run('git-init',['git','init','-q',tools]);
 await run('git-add',['git','add','.'],tools);
 await run('git-commit',['git','-c','user.name=Zxilly','-c','user.email=zxilly@outlook.com','commit','-qm','native interface fixture'],tools);
-const product=path.join(tools,'packages/lsp/dist/bin/cangjie-lsp');await fs.mkdir(path.dirname(product),{recursive:true});
+const product=path.join(config.buildRoot,'lsp/server/target/release/bin/main');await fs.mkdir(path.dirname(product),{recursive:true});
 const argv=['cc',path.join(tools,'packages/lsp/main.c'),'-o',product];
 const before=await beginToolBuild(config,'lsp',{argv,env:{CANGJIE_HOME:sdk},sdk});
-await run('native-build',argv);await finishToolBuild(config,'lsp',before,product);
-await finishToolInstall(config,'lsp',product,['upstream LSP output install (same directory)']);
+await run('native-build',argv);
+await write(path.join(config.buildRoot,'lsp/server-build-command.json'),JSON.stringify({rc:records.at(-1).rc,signal:records.at(-1).signal,argv,fixture:'bounded native interface only',inputs:{sdk,frontendPackages:'/fixture/frontend',llvmLibrary:'/fixture/llvm',runtimeConfig:'/fixture/runtime.o',jsonBuild:'/fixture/json',llvmShim:'/fixture/shim.o'}}));
+await finishToolBuild(config,'lsp',before,product);
+const installed=path.join(tools,'packages/lsp/dist/bin/cangjie-lsp');await fs.mkdir(path.dirname(installed),{recursive:true});await fs.copyFile(product,installed);
+for(const rel of ['lib/libcangjie-runtime.so','lib/libLLVM-15.so'])await write(path.join(tools,'packages/lsp/dist',rel),'controlled retained payload');
+await finishToolInstall(config,'lsp',installed,['upstream LSP output install (same directory)']);
 const original=await json(path.join(workspace,'build/tools/lsp/build-inputs.json'));
 for(const row of toolOutputs(config))if(row.producer!=='lsp') {
  await fs.mkdir(path.dirname(row.from),{recursive:true});await fs.copyFile(product,row.from);
 }
-for(const rel of ['packages/cjpm/dist/config/cangjie-repo.toml','packages/cjfmt/dist/config/cangjie-format.toml',"packages/lsp/dist/lib/libcangjie-runtime.so","packages/cjhead/dist/lib/libcangjie-runtime.so","packages/cjhead/dist/share/readme","packages/cjlint/dist/lib/libcangjie-runtime.so","packages/cjlint/dist/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so","packages/cjlint/dist/modules/std.core.cjo","packages/cjlint/dist/config/cjlint_rule_list.json",
+for(const rel of ['packages/cjpm/dist/config/cangjie-repo.toml','packages/cjfmt/dist/config/cangjie-format.toml',"packages/cjhead/dist/lib/libcangjie-runtime.so","packages/cjhead/dist/share/readme","packages/cjlint/dist/lib/libcangjie-runtime.so","packages/cjlint/dist/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so","packages/cjlint/dist/modules/std.core.cjo","packages/cjlint/dist/config/cjlint_rule_list.json",
  'packages/cjprof/dist/lib/libcjprof-cangjie.so','packages/cjprof/dist/lib/libcjprof-jni.so','packages/cjprof/dist/share/java/cjprof.jar','packages/cjprof/dist/config/static/index.html'])await write(path.join(tools,rel),'unqualified other-tool fixture');
 for(const rel of ['tools/dtsparser/DEPENDENCIES.json','tools/bin/node','tools/dtsparser/node_modules/.bin/cjbind'])await write(path.join(sdk,rel),'unqualified HLE fixture');
 const cli=fileURLToPath(new URL('../../ci/cangjie-test/tool-readiness.mjs',import.meta.url));
@@ -89,7 +93,12 @@ await write(path.join(work,'graph.json'),JSON.stringify(graph));
 const sdkBuild=fileURLToPath(new URL('../../ci/bootstrap/sdk-build.mjs',import.meta.url));
 await run('public-sdk-consume',[process.execPath,sdkBuild,'--config',path.join(work,'graph.json'),'--no-package']);
 assert.equal((await read('after-public-consume')).LSPServer.ready,false,'ordinary fixture command is not full macro qualification');
-for(const key of ['nativeAst','runtime']) {
+// The Cangjie LSP has no dependency on the retired C++ analysis library.
+const oldAst=path.join(sdk,sdkFiles.nativeAst),oldAstBytes=await fs.readFile(oldAst);
+await fs.writeFile(oldAst,'unrelated retired C++ analysis library');
+try {assert.equal((await read('retired-ast-independent-control')).LSPServer.available,true);}
+finally {await fs.writeFile(oldAst,oldAstBytes);}
+for(const key of ['runtime']) {
  const file=path.join(sdk,sdkFiles[key]),bytes=await fs.readFile(file);await fs.writeFile(file,'wrong actual dependency');
  try {const bad=await read('bad-'+key);assert.equal(bad.LSPServer.available,false);assert.equal(bad.LSPServer.ready,false);assert.match(bad.LSPServer.reason,/installed bytes differ/);}
  finally {await fs.writeFile(file,bytes);}

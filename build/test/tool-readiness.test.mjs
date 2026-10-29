@@ -33,7 +33,7 @@ async function fixture(t) {
       input.payloadFiles[relative]={sha256:row.sha256,producers:[name]};
     }
     input.files[rel]={sha256:artifact.sha256,artifact,entry,producer:{source:{status:'resolved',repository:'fixture://source',commit:'a'.repeat(40)},artifact:structuredClone(artifact),
-      build:{directory:name,rc:0,platform:'linux_x86_64',inputs:{stage,artifacts},payloads:structuredClone(payloads),
+      build:{directory:'packages/'+name,rc:0,platform:'linux_x86_64',inputs:{stage,artifacts},payloads:structuredClone(payloads),
         dependencies:Object.fromEntries(['json','httplib','runtime','bounds'].map(key=>[key,{repo:'fixture://'+key,commit:'b'.repeat(40),changes_sha256:'c'.repeat(64)}])),
         nativeConfiguration:{cangjie:{values:{language:'Cangjie',sdk:'/selected/sdk',jdk:'/selected/jdk',runtimeHeader:'/selected/Cangjie.h',lombok:'/selected/lombok.jar'}},native:{values:{CMAKE_BUILD_TYPE:'Release',CMAKE_CXX_COMPILER:'/fixed/clang++',CJPROF_TARGET:'native'}},jni:{values:{CMAKE_BUILD_TYPE:'Release',CMAKE_CXX_COMPILER:'/fixed/clang++',CJPROF_TARGET:'native',CJPROF_LIBRARY:payloads['tools/lib/libcjprof-cangjie.so']?.source}}}},install:{rc:0,artifact:structuredClone(artifact),payloads}}};
   }
@@ -101,7 +101,7 @@ readTest('public readiness rejects changed SDK pairing for Cangjie cjprof and cj
 });
 readTest('native filename cannot bypass recorded native producer and actual configuration',async t=>{
   const f=await fixture(t),p=f.input.files['tools/bin/cjprof'].producer;
-  for(const change of [()=>{p.build.directory='cjpm';},()=>{p.build.directory='cjprof';delete p.build.nativeConfiguration.cangjie.values.language;}]) {
+  for(const change of [()=>{p.build.directory='packages/cjpm';},()=>{p.build.directory='packages/cjprof';delete p.build.nativeConfiguration.cangjie.values.language;}]) {
     change();await f.save();const result=publicRead(f.root);
     assert.equal(result.cjprof.ready,false);assert.match(result.cjprof.reason,/producer directory differs|Cangjie JNI configuration missing/);
     assert.equal(result.cjpm.ready,true);
@@ -177,7 +177,7 @@ readTest('Cangjie lint requires explicit analysis facts, bundled modules and hos
  template.entry=await f.write(rel,await fs.readFile('/usr/bin/true'));
  template.entry.recipe=await f.write(rel+'.entry',['cjcj-sdk-entry-v1','2',body,'linux','native-target:x64',retain+'lib'].join('\n')+'\n');
  p.artifact=structuredClone(template.artifact);p.install.artifact=structuredClone(template.artifact);
- p.build.directory='cjlint';p.build.dependencies={};p.build.payloads={};p.install.payloads={};
+ p.build.directory='packages/cjlint';p.build.dependencies={};p.build.payloads={};p.install.payloads={};
  const values={language:'Cangjie',host:{sdk:'/execution-H'},analysis:{sdk:'/analysis-R'},frontend:{ref:'b'.repeat(40),artifacts:'/frontend',runtimeObject:'/config.o',llvmShim:'/shim.o',llvmLibrary:'/libLLVM.so'}};
  p.build.nativeConfiguration={cangjie:{values}};
  for(const tail of ['lib/libcangjie-runtime.so','runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so','config/cjlint_rule_list.json','modules/linux_x86_64_cjnative/std.core.cjo']) {

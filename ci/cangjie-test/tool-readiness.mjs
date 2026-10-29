@@ -43,10 +43,13 @@ export async function toolReadiness(root) {
       if(facts?.source?.status!=='resolved'||!facts.source.repository||!/^[0-9a-f]{40}$/.test(facts.source.commit??''))throw Error('target producer source missing');
       if(facts.build?.rc!==0||facts.build.platform!==stage.platform||facts.install?.rc!==0)throw Error('target build/install not recorded');
       if(facts.build.directory!==TOOL_DIRECTORIES[name])throw Error('producer directory differs');
-      if(!isDeepStrictEqual(facts.build.inputs?.stage,stage))throw Error('producer SDK selection differs');
       const sdkInputs=toolSdkInputs(name);
       const compilerLoads=name==='lsp'?['compilerEntry','executionRuntime'].filter(key=>facts.build.inputs?.artifacts?.[key]):[];
       const runtimeInputs=toolRuntimeInputs(name),installed=runtimeInputs.length?inputs.installationInputs:undefined;
+      // A recorded LSP installation may select different analysis inputs.
+      // Validate that selection and its bytes below, without relabelling the
+      // original producer or qualifying the unexecuted semantic consumer.
+      if(!installed&&!isDeepStrictEqual(facts.build.inputs?.stage,stage))throw Error('producer SDK selection differs');
       const changed=[];
       if(installed)for(const key of ['platform','compilerFile','compilerCommit','runtimeCommit']) {
         if(installed.stage?.[key]!==stage[key])throw Error('installed SDK selection differs: '+key);

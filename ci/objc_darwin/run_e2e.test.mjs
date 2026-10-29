@@ -265,7 +265,9 @@ test('workflow is a bash 3.2 macOS arm using the source and host pins', async ()
   const text = await fs.readFile(workflow, 'utf8');
   const pin = await fs.readFile(path.join(repoRoot, 'ci', 'host_sdk_pin.env'), 'utf8');
   assert.match(pin, /^CJCJ_TOOLCHAIN=nightly-\S+$/m);
-  assert.match(text, /\{\n\s+node ci\/host-toolchain-pin\.mjs --github-env\n\s+cat ci\/runtime_pin\.env\n\s+\} >> "\$GITHUB_ENV"/);
+  assert.match(text, /node ci\/host-toolchain-pin\.mjs --github-env >> "\$GITHUB_ENV"/);
+  assert.match(text, /node ci\/load_runtime_pin\.mjs/);
+  assert.match(text, /ref: \$\{\{ env\.CJCJ_NATIVE_RUNTIME_REF \}\}/);
   assert.match(text, /workflow_dispatch:/);
   assert.match(text, /runs-on: macos-15\n/);
   assert.match(text, /cat ci\/source_pin\.env >> "\$GITHUB_ENV"/);

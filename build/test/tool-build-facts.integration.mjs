@@ -55,7 +55,7 @@ assert.equal(facts.build.argv[facts.build.argv.indexOf('--tool')+1],'lsp');asser
 const product=path.join(root,'buildtools/lsp/server/target/release/bin/main');
 assert.equal(facts.artifact.sha256,await fileDigest(product));
 const value=await command([product]);assert.equal(value.status,0);assert.equal(value.stdout.trim(),'42');
-const config=buildConfig({workspace,targetKey:'linux-x64',buildType:'release'});
+const config=buildConfig({workspace,buildRoot:path.join(root,'buildtools'),targetKey:'linux-x64',buildType:'release'});
 await toolBuildInputs(config,'lsp',product);
 // An install-only invocation with a newer selected pin still describes the old
 // producer. Neither its source nor its build configuration is overwritten.
