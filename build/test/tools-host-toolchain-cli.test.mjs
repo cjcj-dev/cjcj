@@ -61,6 +61,9 @@ test('official H reaches the public tools producer without a synthetic stage rec
   assert.equal(facts.build.inputs.stage,undefined);
   assert.equal(facts.build.inputs.artifacts.compiler.sdkRelative,'bin/cjc');
   assert.equal(facts.build.rc,0);
+  const command=JSON.parse(fs.readFileSync(path.join(f.root,'buildtools/lsp/server-build-command.json')));
+  assert.equal(command.argv[command.argv.indexOf('--cjpm')+1],path.join(host,'tools/bin/cjpm'));
+  assert.equal(command.argv[command.argv.indexOf('--sdk')+1],host);
   assert.equal(f.ok(f.run([facts.artifact.path])).stdout.trim(),'42');
   assert(!fs.existsSync(path.join(host,'STAGE-INPUTS.json')));
 });

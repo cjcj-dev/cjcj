@@ -17,7 +17,7 @@ import path from 'node:path';
 import {BuildError} from '../../lib/errors.mjs';
 import {assertSourceIdentity} from '../../lib/git.mjs';
 import {stage} from '../../lib/logging.mjs';
-import {baseEnv, consumerSdk, requireFile, runBuildScript, explicitBuildJobs} from './common.mjs';
+import {baseEnv, bootstrapHostSdk, consumerSdk, requireFile, runBuildScript, explicitBuildJobs} from './common.mjs';
 
 // All selected packages are built through the cjcj-tools public entry.
 const TOOL_PATHS = TOOL_NAMES.map(name=>[name,TOOL_DIRECTORIES[name]]);
@@ -41,7 +41,7 @@ function buildArgsFor(name, config, jobs) {
     const sdk=consumerSdk(config),build=toolProducerDirectory(config,name);
     if(name==='lsp') {
       if(!config.toolsJsonBuild)throw new BuildError('tools.lsp','toolsJsonBuild is required');
-      return ['--phase','build','--sdk',sdk,'--cjpm',path.join(sdk,'tools/bin/cjpm'),'--build',build,'--server','stdio','--jobs',String(jobs),
+      return ['--phase','build','--sdk',sdk,'--cjpm',path.join(bootstrapHostSdk(config),'tools/bin/cjpm'),'--build',build,'--server','stdio','--jobs',String(jobs),
         '--frontend-packages',config.toolsCompilerLibs,'--runtime-config',config.toolsRuntimeConfig,'--json-build',config.toolsJsonBuild,
         '--llvm-shim',config.toolsLlvmShim,'--llvm-library',config.toolsLlvmLibrary];
     }
@@ -55,7 +55,7 @@ function buildArgsFor(name, config, jobs) {
   if(name==='cjlint') {
     if(config.target.spec.os!=='linux'||config.target.spec.crossCompile||config.target.spec.llvmPlatform!=='linux_x86_64')throw new BuildError('tools.cjlint','selected Cangjie producer supports Linux x86-64');
     for(const key of ['toolsAnalysisSdk','toolsFrontendSource','toolsFrontendRef','toolsCompilerLibs','toolsRuntimeConfig','toolsLlvmShim','toolsLlvmLibrary'])if(!config[key])throw new BuildError('tools.cjlint',key+' is required');
-    return ['build','--sdk',consumerSdk(config),'--analysis-sdk',config.toolsAnalysisSdk,
+    return ['build','--sdk',consumerSdk(config),'--cjpm-sdk',bootstrapHostSdk(config),'--analysis-sdk',config.toolsAnalysisSdk,
       '--frontend-source',config.toolsFrontendSource,'--frontend-ref',config.toolsFrontendRef,
       '--frontend-artifacts',config.toolsCompilerLibs,'--frontend-runtime-object',config.toolsRuntimeConfig,
       '--llvm-shim',config.toolsLlvmShim,'--llvm-library',config.toolsLlvmLibrary,
@@ -88,7 +88,9 @@ function buildArgsFor(name, config, jobs) {
       ...(rpath?['--set-rpath',rpath]:[]),
       ...(config.target.spec.crossCompile?['--target','windows-x86_64','--target-sysroot',mingwInstallPath(config.buildRoot)]:[])];
   }
-  const dependencies=[];
+  // The initial component SDK has no CJPM until target tools are installed.
+  // Its public cjc launcher still selects the compiler's target execution libraries.
+  const dependencies=name==='cjfmt'?['--cjpm-sdk',bootstrapHostSdk(config)]:[];
   if (config.target.spec.crossCompile) {
     const args=['build','--build-dir',toolProducerDirectory(config,name), '-t', config.crossBuildType, '--target', 'windows-x86_64'];
     if(['cjpm','cjfmt','lsp','cjlint','cjprof','cjcompat'].includes(name))args.push('--jobs',String(jobs));
