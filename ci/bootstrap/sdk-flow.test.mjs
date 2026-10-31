@@ -267,8 +267,8 @@ test('public run-all uses one pending install and rolls back when a later produc
  // source resolution, entity copies, compiled launcher, hello subprocess and
  // publication remain the real product implementations.
  const selection={};
- for(const name of ['compiler','runtime','tools','stdx','llvm','cjpm']){
-  const repo=workspace+(name==='llvm'?'/cangjie_compiler/third_party/llvm-project':name==='cjpm'?'/cjpm-source':'/cangjie_'+name);
+ for(const name of ['compiler','runtime','tools','stdx','llvm']){
+  const repo=workspace+(name==='llvm'?'/cangjie_compiler/third_party/llvm-project':'/cangjie_'+name);
   await put(repo+'/tracked','fixed source '+name);
   for(const args of [['init','-q',repo],['-C',repo,'add','tracked'],['-C',repo,'-c','user.name=Zxilly','-c','user.email=zxilly@outlook.com','commit','-qm','test: controlled run-all native source']])assert.equal(run('git',args).status,0);
   selection[name]={url:'file://'+repo,tag:run('git',['-C',repo,'rev-parse','HEAD']).stdout.trim()};
@@ -345,8 +345,8 @@ async function stagedFixture(label) {
  const work=path.join(root,label),workspace=work+'/workspace',sdk=workspace+'/software/cangjie';
  const put=async(file,text,mode=0o644)=>{await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,text,{mode});};
  const selected={};
- for(const name of ['compiler','runtime','tools','stdx','llvm','cjpm']) {
-  const repo=workspace+(name==='llvm'?'/cangjie_compiler/third_party/llvm-project':name==='cjpm'?'/cjpm-source':'/cangjie_'+name);
+ for(const name of ['compiler','runtime','tools','stdx','llvm']) {
+  const repo=workspace+(name==='llvm'?'/cangjie_compiler/third_party/llvm-project':'/cangjie_'+name);
   await put(repo+'/tracked','fixed '+name);
   await put(repo+'/build.py','import os, sys\nprint("FINITE_NATIVE_COMMAND", os.environ.get("FINITE_PRODUCER"), sys.argv)\nsys.exit(17 if os.environ.get("STAGED_FAIL")==os.environ.get("FINITE_PRODUCER") and sys.argv[1]=="install" else 0)\n');
   for(const args of [['init','-q',repo],['-C',repo,'add','tracked','build.py'],['-C',repo,'-c','user.name=Zxilly','-c','user.email=zxilly@outlook.com','commit','-qm','test: finite native producer']])assert.equal(run('git',args).status,0);

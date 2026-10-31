@@ -3,14 +3,17 @@ integration tests. They are shallow, complete-tree packs, not invented commits.
 
 - runtime.pack: cjcj-dev/cangjie-runtime at
   259ad49f709222e75bdb832bcc28dc769ea4efbf
-- tools.pack: local cjcj-tools migration candidate at
-  8e27eead8dc93ddd20ed66eaac9fd4170072e1c6
+- tools.pack: cjcj-tools publish candidate at
+  52adc7a2b67f8f1e711b6a50fbd0c83d85558a58
 
 Captured with `git init --bare` and
 `git fetch --depth 1 <repository> <sha>:refs/heads/main`. Runtime used existing
 local objects; tools used a normal `git clone --no-local --depth=1 --single-branch`
-from the frozen local migration repository. The new public repository is not
-created (bot403); this fixture proves local fixed-object consumption only.
+from the frozen local candidate repository. The current tools pack was
+regenerated from the complete reviewed 52adc object on
+`fix/stage2-tool-cjpm-1031`; its public publish ref is
+`publish/cangjie-tools-8e27-1029`. This fixture proves local fixed-object
+consumption only; public fetch evidence is recorded separately.
 The pack contains
 that commit and its entire tree, with no parent history. `pinnedRemote` installs
 it into a fresh bare repository and records its shallow boundary. The tests
