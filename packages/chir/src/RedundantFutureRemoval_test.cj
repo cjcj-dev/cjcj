@@ -172,4 +172,36 @@ class RedundantFutureRemovalTest {
         @Expect(f.spawnExpr.IsExecuteClosure(), false)
         @Expect(second.IsExecuteClosure(), false)
     }
+    @TestCase
+    func parallelPackagePreservesObservedSiblingAndRewritesUnobservedGlobalClosure(): Unit {
+        let f = ReceiverFutureFixture()
+        let observed = f.AddGet(false)
+        f.Finish()
+        let b = f.builder
+        let ctx = b.context
+        let refTy = f.allocation.GetResult().getOrThrow().GetType().getOrThrow()
+        let closureTy = f.closure.GetType().getOrThrow()
+        let closure = b.CreateFunction((closureTy as FuncType).getOrThrow(), "globalClosure")
+        let fn = b.CreateFunction(ctx.GetFuncTy(ArrayList<Type>(), ctx.GetUnitTy()), "unobservedSibling")
+        let body = b.CreateBlockGroup(fn)
+        fn.InitBody(body)
+        let block = b.CreateBlock(body)
+        body.SetEntryBlock(block)
+        let allocation = b.CreateAllocate(refTy, f.allocation.GetType(), block)
+        let initCall = b.CreateApply(refTy, f.constructor,
+            FuncCallContext(args: ArrayList<Value>([allocation.GetResult().getOrThrow(), closure])), block)
+        let spawn = b.CreateSpawn(refTy, initCall.GetResult().getOrThrow(), block)
+        block.AppendExpressions(ArrayList<Expression>([allocation, initCall, spawn, b.CreateExit(None, block)]))
+        @Expect(RedundantFutureRemoval(f.pkg).RunOnPackage(threadNum: 2), 1)
+        @Expect(f.spawnExpr.IsExecuteClosure(), false)
+        @Expect(observed.GetOperand(1).nodeId, f.initCall.GetResult().getOrThrow().nodeId)
+        @Expect(spawn.IsExecuteClosure(), true)
+        @Expect(spawn.GetClosure().nodeId, closure.nodeId)
+        @Expect(spawn.GetExecuteClosure().getOrThrow().nodeId, f.execute.nodeId)
+        @Expect(initCall.GetParentBlock().isNone(), true)
+        @Expect(closure.GetUsers().size, 1)
+        @Expect(closure.GetUsers()[0].nodeId, spawn.nodeId)
+        @Expect(RedundantFutureRemoval(f.pkg).RunOnPackage(threadNum: 2), 0)
+    }
+
 }

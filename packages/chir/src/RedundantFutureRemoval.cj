@@ -18,16 +18,27 @@ public class RedundantFutureRemoval {
     private let chirPackage: Package
     private let isDebug: Bool
     private var executeClosure: Option<Function> = None
+    private let appendedGlobalUsers = ArrayList<(Value, Expression)>()
 
     public init(chirPackage: Package, isDebug!: Bool = false) {
         this.chirPackage = chirPackage
         this.isDebug = isDebug
     }
 
-    public func RunOnPackage(): Int64 {
+    public func RunOnPackage(threadNum!: Int64 = 1): Int64 {
         var changed: Int64 = 0
-        for (fn in chirPackage.GetGlobalFuncsWithBody()) {
-            changed += RunOnFunc(fn)
+        if (threadNum <= 1 || isDebug) {
+            for (fn in chirPackage.GetGlobalFuncsWithBody()) { changed += RunOnFunc(fn) }
+            return changed
+        }
+        let runs = RunFunctionLocalPass<(Int64, ArrayList<(Value, Expression)>)>(
+            chirPackage.GetGlobalFuncsWithBody(), threadNum, { fn =>
+                let worker = RedundantFutureRemoval(chirPackage)
+                (worker.RunOnFunc(fn), worker.appendedGlobalUsers)
+            })
+        for ((count, users) in runs) {
+            changed += count
+            for ((value, user) in users) { value.MoveUserToTail(user) }
         }
         return changed
     }
@@ -92,6 +103,12 @@ public class RedundantFutureRemoval {
         }
         let fn = executeClosure ??
             throw IllegalArgumentException("cannot find std.core.Future.executeClosure")
+        if (lambdaValue.IsGlobal()) {
+            for (user in matched.futureValue.GetUsers()) { appendedGlobalUsers.add((lambdaValue, user)) }
+            for (user in matched.allocation.GetResult().getOrThrow().GetUsers()) {
+                appendedGlobalUsers.add((lambdaValue, user))
+            }
+        }
         matched.futureValue.ReplaceWith(lambdaValue)
         matched.apply.RemoveSelfFromBlock()
         matched.allocation.GetResult().getOrThrow().ReplaceWith(lambdaValue)

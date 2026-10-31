@@ -664,10 +664,12 @@ private class ToCHIR {
             Devirtualization(currentPackage, devirtInfo)
             RunArrayLambdaOpt(currentPackage)
             if (options.IsOptimizationExisted(OptimizationFlag.REDUNDANT_FUTURE)) {
-                RedundantFutureRemoval(currentPackage, isDebug: options.chirDebugOptimizer).RunOnPackage()
+                RedundantFutureRemoval(currentPackage, isDebug: options.chirDebugOptimizer).RunOnPackage(
+                    threadNum: Int64(options.GetJobs()))
             }
             if (options.IsCHIROptimizationLevelOverO2() && !options.interpFullBchir) {
-                GetRefToArrayElem.RunOnPackage(currentPackage, builder)
+                GetRefToArrayElem.RunOnPackage(currentPackage, builder,
+                    threadNum: if (options.chirDebugOptimizer) { 1 } else { Int64(options.GetJobs()) })
             }
         }
     }
