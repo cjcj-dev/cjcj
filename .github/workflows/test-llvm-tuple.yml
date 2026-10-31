@@ -31,17 +31,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          eval "$(node ci/native-llvm-inputs.mjs)"
           source ci/runtime_pin.env
-          source ci/llvm_pin.env
           for side in runtime llvm; do
             dest="$RUNNER_TEMP/layout-sources/$side"
             git init "$dest"
             if [ "$side" = runtime ]; then
               url=$RUNTIME_SRC_URL
-              ref=$RUNTIME_REF
+              ref=$CJCJ_NATIVE_RUNTIME_REF
             else
               url=$LLVM_URL
-              ref=$LLVM_SHA
+              ref=$CJCJ_NATIVE_LLVM_REF
             fi
             git -C "$dest" fetch --depth=1 "$url" "$ref"
           done
@@ -75,10 +75,11 @@ jobs:
       - name: Read reviewed dylib pin
         run: |
           set -euo pipefail
-          source ci/llvm_pin.env
+          eval "$(node ci/native-llvm-inputs.mjs)"
           source ci/llvm-dylib/${{ matrix.platform }}.env
-          test "$LLVM_DYLIB_SOURCE_SHA" = "$LLVM_SHA"
-          cat ci/llvm_pin.env ci/llvm-dylib/${{ matrix.platform }}.env >> "$GITHUB_ENV"
+          test "$LLVM_DYLIB_SOURCE_SHA" = "$CJCJ_NATIVE_LLVM_REF"
+          node ci/native-llvm-inputs.mjs
+          cat ci/llvm-dylib/${{ matrix.platform }}.env >> "$GITHUB_ENV"
       - name: Download verified prerelease input
         env:
           GH_TOKEN: ${{ github.token }}
@@ -95,7 +96,7 @@ jobs:
           assert manifest['run_attempt'] == os.environ['LLVM_DYLIB_RUN_ATTEMPT']
           assert manifest['targets'] == ['X86', 'ARM', 'AArch64']
           PY
-          python3 ci/llvm-dylib/verify.py "$root" "$LLVM_SHA" "$LLVM_DYLIB_SHA256"
+          python3 ci/llvm-dylib/verify.py "$root" "$CJCJ_NATIVE_LLVM_REF" "$LLVM_DYLIB_SHA256"
           cp "$root/manifest.json" "$RUNNER_TEMP/manifest.original.json"
           python3 - <<'PY'
           import json, os
@@ -106,19 +107,19 @@ jobs:
           manifest['sha256'] = ('0' if value[0] != '0' else '1') + value[1:]
           file.write_text(json.dumps(manifest) + '\n')
           PY
-          if python3 ci/llvm-dylib/verify.py "$root" "$LLVM_SHA" "$LLVM_DYLIB_SHA256" > "$RUNNER_TEMP/manifest-cut.log" 2>&1; then
+          if python3 ci/llvm-dylib/verify.py "$root" "$CJCJ_NATIVE_LLVM_REF" "$LLVM_DYLIB_SHA256" > "$RUNNER_TEMP/manifest-cut.log" 2>&1; then
             echo 'changed manifest digest unexpectedly accepted' >&2
             exit 1
           fi
           grep -F LLVM_DYLIB_SHA256_MISMATCH "$RUNNER_TEMP/manifest-cut.log"
           cp "$RUNNER_TEMP/manifest.original.json" "$root/manifest.json"
-          python3 ci/llvm-dylib/verify.py "$root" "$LLVM_SHA" "$LLVM_DYLIB_SHA256"
+          python3 ci/llvm-dylib/verify.py "$root" "$CJCJ_NATIVE_LLVM_REF" "$LLVM_DYLIB_SHA256"
   contract:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v7
       - name: Read reviewed artifact pin
-        run: cat ci/llvm_pin.env >> "$GITHUB_ENV"
+        run: node ci/native-llvm-inputs.mjs
       - name: Download verified prerelease input
         env:
           GH_TOKEN: ${{ github.token }}

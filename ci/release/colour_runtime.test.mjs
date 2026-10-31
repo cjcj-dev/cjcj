@@ -11,7 +11,7 @@ test('runtime pair reaches bootstrap with explicit identity and host remains sep
   assert.match(result.stdout, /COLOUR_RT_VERIFIED run=123 artifact=456/);
   assert.ok(result.stdout.includes(`CJCJ_BOOTSTRAP_COLOUR_RT=${runtime}\n`));
   const base = /^CJCJ_BOOTSTRAP_BASE=(.+)$/m.exec(result.stdout)?.[1];
-  assert.notEqual(base, env.CJCJ_SRCBUILD_HOST_SDK);
+  assert.notEqual(base, env.CJCJ_OFFICIAL_SDK_ROOT);
   assert.ok(result.stdout.includes(`CJCJ_BOOTSTRAP_HOST_RT=${base}\n`));
   for (const rel of runtimeFiles) {
     assert.equal(digest(path.join(runtime, rel)), digest(path.join(runtimeSource, rel)));

@@ -13,6 +13,7 @@ import {FIXED_INPUTS} from './sdk-targets.mjs';
 import {sdkPlatform} from './sdk-platform.mjs';
 import {stage2Input} from './sdk-stage2-input.mjs';
 import {receiveNativeRuntime} from './native-runtime-input.mjs';
+import {languageSourceInputs} from '../../build/srcbuild/installed-language-source.mjs';
 import {hostPlatform, readHostToolchainPin, hostToolchainFromCjcVersion} from '../host-toolchain-pin.mjs';
 import {runtimeSourceRepository} from '../../build/lib/runtime-source-inputs.mjs';
 import {readInstalledNativeAst} from './installed-native-ast.mjs';
@@ -67,7 +68,7 @@ export async function prepareNativeInputs(descriptor, env = process.env) {
   const compilerDefault=(await execute('git',['-C',sources.compiler,'rev-parse','HEAD'])).stdout.trim();
   const commits={compiler:descriptor.compilerCommit??compilerDefault,
     runtime:descriptor.runtimeCommit??FIXED_INPUTS.runtime,llvm:descriptor.llvmCommit??FIXED_INPUTS.llvm,
-    ast:descriptor.astCommit??FIXED_INPUTS.compiler,h1:FIXED_INPUTS.h1};
+    ast:descriptor.astCommit??FIXED_INPUTS.compiler,h1:descriptor.h1Commit??FIXED_INPUTS.h1};
   const separateStd=descriptor.stdlibCommit!==undefined||sources.stdlib!==undefined||descriptor.sourceSelection?.stdlib!==undefined;
   if(separateStd) {
     if(!sources.stdlib||!(descriptor.stdlibCommit??descriptor.sourceSelection?.stdlib?.commit))throw Error('NATIVE_STDLIB_SOURCE_REQUIRED');
@@ -79,11 +80,11 @@ export async function prepareNativeInputs(descriptor, env = process.env) {
   const rows={},verifications={};
   for(const [name,row]of Object.entries(sourceSelection)) {
     const explicitCommit=descriptor[name+'Commit'];
-    if(explicitCommit&&explicitCommit!==row.commit||name==='h1'&&row.commit!==FIXED_INPUTS.h1)throw Error('NATIVE_SOURCE_SELECTION '+name);
+    if(explicitCommit&&explicitCommit!==row.commit)throw Error('NATIVE_SOURCE_SELECTION '+name);
     if(row.repository!==defaults[name].repository)throw Error('NATIVE_SOURCE_SELECTION '+name);
     rows[name]={...await gitInput(sources[name],row.commit),sourceRepository:row.repository};
   }
-  const {compiler:{commit:compilerCommit},runtime:{commit:runtimeCommit},llvm:{commit:llvmCommit},ast:{commit:astCommit}}=rows;
+  const {compiler:{commit:compilerCommit},runtime:{commit:runtimeCommit},llvm:{commit:llvmCommit},ast:{commit:astCommit},h1:{commit:h1Commit}}=rows;
   const stdlib=rows.stdlib;
   const version = descriptor.nativePair?.hostVersion ?? readHostToolchainPin(platform).replace(/^nightly-/, '');
   if (descriptor.nativePair && (descriptor.nativePair.llvm !== llvmCommit || descriptor.nativePair.runtime !== runtimeCommit))
@@ -153,8 +154,10 @@ export async function prepareNativeInputs(descriptor, env = process.env) {
       ...(supplied.sourceRoot ? {sourceRoot:await privateRoot(supplied.sourceRoot)} : {})};
     if(name==='runtime'&&native.os==='linux') {
       rows[name].sourceRoot=rows[name].sourceRoot||await privateRoot(path.join(rows[name].install,'share/runtime-build'));
-      for(const member of ['runtime/tests/gc_unit/gate_gc_unit.sh','runtime/tests/gc_unit/language_toolchain.mjs',
-        'runtime/CMakebuild/compile_commands.json','runtime/CMakebuild/gc-unit.status'])await fs.access(path.join(rows[name].sourceRoot,member));
+      languageSourceInputs(path.join(rows[name].sourceRoot,'runtime'),
+        {installed:rows[name].sourceRoot===path.join(rows[name].install,'share/runtime-build')});
+      for(const member of ['runtime/CMakebuild/compile_commands.json','runtime/CMakebuild/gc-unit.status'])
+        await fs.access(path.join(rows[name].sourceRoot,member));
       await fs.access(path.join(rows[name].install,'runtime/include/schedule.h'));
     }
   }
@@ -166,7 +169,7 @@ export async function prepareNativeInputs(descriptor, env = process.env) {
     if(!reused.product||!reused.buildInputs||!reused.buildResult)throw new Error('H1_REUSE_LOCATIONS_REQUIRED');
     const product=path.resolve(reused.product);
     const facts=await readJson(reused.buildInputs), commands=await readJson(reused.buildResult);
-    if(facts.source!==FIXED_INPUTS.h1||facts.host!==host.install||facts.native!==rows.llvm.install
+    if(facts.source!==h1Commit||facts.host!==host.install||facts.native!==rows.llvm.install
       ||!facts.sourceChanges||facts.sha256!==await fileDigest(product)
       ||path.resolve(reused.buildInputs)!==path.join(path.dirname(product),'build-inputs.json')
       ||!Array.isArray(commands)||commands.length!==1||commands[0].rc!==0||commands[0].signal
@@ -178,7 +181,7 @@ export async function prepareNativeInputs(descriptor, env = process.env) {
   tools.privateRoot = path.resolve(tools.privateRoot);
   for (const rel of ['cjcj-stage1.mjs', 'stage1-transform.mjs'])
     await fs.stat(path.join(tools.privateRoot, 'ts/src/sharedbuild', rel));
-  const inputs = {work, install, platform, host, runtimeCommit, llvmCommit, astCommit,
+  const inputs = {work, install, platform, host, runtimeCommit, llvmCommit, astCommit, h1Commit,
     ...(descriptor.nativePair ? {nativePair:descriptor.nativePair} : {}), ...rows, stdlib:stdlib??rows.runtime,
     ...(separateStd?{stdlibCommit:stdlib.commit}:{}), sourceSelection, tools,
     archive:descriptor.archive, finalStd:descriptor.finalStd, deliveryStage:descriptor.deliveryStage};
@@ -213,7 +216,7 @@ export async function prepareSourceBuildInputs(config, env=process.env, startSta
   }
   const selected=resolveSources(sources);
   const install=path.join(config.repoPath('compiler'),config.target.primaryCompilerOutput());
-  const hostInstall=config.officialSdkRoot??env.CJCJ_SRCBUILD_HOST_SDK;
+  const hostInstall=config.officialSdkRoot??env.CJCJ_OFFICIAL_SDK_ROOT;
   if(!hostInstall)throw Error('SOURCE_BUILD_BOOTSTRAP_HOST_REQUIRED');
   const bootstrapHost={install:path.resolve(hostInstall),platform:host};
   const component=name=>({...selected[name],install,platform});

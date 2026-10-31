@@ -542,6 +542,11 @@
     "reason": "Real fixed runtime commits and an explicitly supplied local Git transport mirror/work directory are required; stops at the first tuple CMake boundary without an LLVM build."
   },
   {
+    "file": "ci/test-llvm-runtime-input.mjs",
+    "executor": "manual",
+    "reason": "Real fixed runtime commits and an explicitly supplied local Git transport mirror/work directory are required; runs the canonical source contract through public fetch/build and stops at the first tuple CMake boundary without an LLVM build."
+  },
+  {
     "file": "ci/test-llvm-runtime-chain.mjs",
     "executor": "manual",
     "reason": "Requires explicit lane work directory, real fixed runtime Git mirror, and local other-source Git fixture; observes the real tuple CMake boundary without an LLVM build."
@@ -581,7 +586,7 @@
   {
     "file": "ci/bootstrap/sdk-native-cjo-install.integration.test.mjs",
     "executor": "manual",
-    "reason": "Requires npx-reachable zx@8 plus an owned temporary directory; it runs the real nativeStage compiler path and the real build_shim.mjs producer so the assertion reads the installed share/cjcj/cjo instead of a copy-list reimplementation. The source tree is an explicit fixture, not a compiler build."
+    "reason": "Requires prepared zx through ci/test-zx.mjs, a native C compiler and an owned temporary directory. Runs the real nativeStage compiler path/build_shim producer and installed CJO consumption, including explicit package-manager SDK versus embedded bootstrap host. SDK_FLOW_TEST_ROOT retains evidence. Controlled source/package-manager fixtures do not qualify a complete compiler build."
   },
   {
     "file": "ci/bootstrap/sdk-native-wiring.integration.test.mjs",
@@ -678,12 +683,17 @@
   {
     "file": "build/test/tool-build-facts.integration.mjs",
     "executor": "manual",
-    "reason": "Public SDK source-build CLI with a real Git selector, fixed cjpm overlay mirror and bounded native C producer; requires RELEASE_EVIDENCE_TEST_ROOT/SDK_INPUT_TOOLS_MIRROR. Tests producer/source/build facts, not actual LSP or complete Cangjie SDK."
+    "reason": "Public SDK source-build CLI with a real canonical tools Git selector and bounded native C producer; requires RELEASE_EVIDENCE_TEST_ROOT and read-only CJCJ_OFFICIAL_SDK_ROOT. Tests producer/source/build facts, not actual LSP or complete Cangjie SDK."
+  },
+  {
+    "file": "build/test/tools-host-toolchain-cli.test.mjs",
+    "executor": "manual",
+    "reason": "Formal source-build CLI with read-only official H (CJCJ_TOOLS_TEST_HOST) compiling a small CJ consumer through a controlled root producer. Requires RELEASE_EVIDENCE_TEST_ROOT; covers absent bootstrap stage record, retired GCC option refusal, and default/combined/prof-only dependency preparation. Not real tool algorithms or full SDK qualification."
   },
   {
     "file": "build/test/cjprof-static-reinstall.integration.mjs",
     "executor": "manual",
-    "reason": "Requires CJPROF_BUILT_INPUT pointing to recorded real Linux cjprof build facts and immutable native/source/install-rule files, plus RELEASE_EVIDENCE_TEST_ROOT. Runs normal Python/CMake/JNI install in a private relocated copy, SDK installer, real public HTTP consumer and release artifact/archive. Other eight tool/HLE inputs are unresolved interface controls; not full native production or SDK qualification."
+    "reason": "Requires CJPROF_BUILT_INPUT pointing to recorded real Linux cjprof build facts and immutable native/source/install-rule files, plus RELEASE_EVIDENCE_TEST_ROOT. Runs the normal Cangjie build.mjs install in a private relocated copy, SDK installer, real public HTTP consumer and release artifact/archive. Copies only the selected host runtime/bounds required by the real launcher; no full SDK. Other eight tool/HLE inputs are unresolved interface controls; not full native production or SDK qualification."
   },
   {
     "file": "build/test/tool-environment-availability.integration.mjs",
@@ -698,7 +708,7 @@
   {
     "file": "build/test/native-tool-readiness.integration.mjs",
     "executor": "manual",
-    "reason": "Requires an actual previously installed Linux cjprof in NATIVE_READINESS_INSTALLED_SDK, original NATIVE_READINESS_HEAP_INPUT, real NATIVE_READINESS_JDK and private RELEASE_EVIDENCE_TEST_ROOT. Copies only the recorded native payload; public readiness under a controlled changed stage selection, real HTTP and JNI library loads, changed-JNI refusal. Original producer/install facts stay unchanged. No complete SDK, macro or nine-tool semantic qualification."
+    "reason": "Requires an actual previously installed Linux cjprof in NATIVE_READINESS_INSTALLED_SDK, original NATIVE_READINESS_HEAP_INPUT, real NATIVE_READINESS_JDK and private RELEASE_EVIDENCE_TEST_ROOT. Requires an actual STAGE-INPUTS selection; official host-only installs are not applicable. Copies the recorded SDK compiler/stdCore/runtime edges and runtime bounds plus tool payload; positive readiness, changed-stage refusal/restoration, real HTTP and selected-JDK libjsig JNI loading, changed-JNI refusal. Original producer/install facts stay unchanged. No complete SDK, macro or nine-tool semantic qualification."
   },
   {
     "file": "ci/g2-native-inputs.integration.mjs",
@@ -724,6 +734,21 @@
     "file": "ci/bootstrap/sdk-std-install-native.integration.mjs",
     "executor": "manual",
     "reason": "Requires SDK_NATIVE_INSTALLED_SDK/TEST_ROOT/INPUTS, real paired Linux installed SDK; jobs follow actual resources. Public CLI installs existing std bytes without rebuilding std; missing artifacts, exact native-stage product cut, independent control, restored actual String compile/run. Windows/Darwin native production remains NOT_RUN."
+  },
+  {
+    "file": "ci/platform_matrix/windows-runtime-consumers.integration.test.mjs",
+    "executor": "manual",
+    "reason": "Requires formal CJCJ_TEST_ZX_RECEIPT (real ProcessOutput), owned WINDOWS_CONSUMERS_EVIDENCE on controlled Linux worker. Executes installed/package public entries with explicit Windows/compiler/consumer command fixtures and real capture/tar; checks product CMake inputs, IAT invocation, isolated install/unpack origin and child failure propagation. Actual COFF/PE/import-library/Windows OS qualification requires the official Windows runner."
+  },
+  {
+    "file": "ci/platform_matrix/windows-runtime-shell.integration.test.mjs",
+    "executor": "manual",
+    "reason": "Requires owned WINDOWS_SHELL_EVIDENCE, Node registerHooks and Bash on controlled Linux worker. Public Windows entry with explicit host/tool command fixtures exercises real Bash stdin, literal special paths, build/install capture and failure sequencing. Native MSYS/COFF/DLL qualification requires official Windows runner."
+  },
+  {
+    "file": "ci/bootstrap/native-llvm-version.integration.test.mjs",
+    "executor": "manual",
+    "reason": "Requires owned NATIVE_VERSION_EVIDENCE and native Python3.11/CMake/Ninja. Executes public native-cjdb entry with a finite compiler graph consuming the actual patched upstream VERSION command for archive/Git, cold/warm and rejection controls; also exercises normal clang/LLVM-header components with a real installed host clang resource consumer; selected XML2 test additionally requires NATIVE_XML2_ARCHIVE and runs its real native CMake producer/install/API/relocation plus finite Darwin/Windows installation rules. Stops before debugger/full native install, not full N qualification."
   },
   {
     "file": "ci/bootstrap/native-cjdb-jobs.test.mjs",
@@ -849,5 +874,42 @@
     "file": "packages/chir/src/ReachingDefinitionAnalysis_test.cj",
     "executor": "cjpm",
     "member": "packages/chir"
+  },
+  {
+    "file": "ci/release/test_darwin_loader_controls.mjs",
+    "executor": "workflow",
+    "workflow": ".github/workflows/darwin-input-consumers.yml",
+    "interpreter": "node"
+  },
+  {
+    "file": "ci/release/test_darwin_llvm_controls.mjs",
+    "executor": "workflow",
+    "workflow": ".github/workflows/darwin-input-consumers.yml",
+    "interpreter": "node"
+  },
+  {
+    "file": "build/test/static-libs-native.integration.mjs",
+    "executor": "manual",
+    "reason": "Requires real fixed ncurses/libedit archives in STATIC_LIBS_ARCHIVES and private RELEASE_EVIDENCE_TEST_ROOT. Public install-static-libs CLI cold/warm/partial-header restore, stage prefix through actual CMake/static consumer; not full CJDB or platform qualification."
+  },
+  {
+    "file": "ci/bootstrap/sdk-language-prepare.integration.test.mjs",
+    "executor": "manual",
+    "reason": "Requires read-only CJCJ_LANGUAGE_PREPARE_HOST and private RELEASE_EVIDENCE_TEST_ROOT. Formal CJCJ_NATIVE_INPUTS descriptor through prepare-bootstrap-plans, real Git/C finite artifacts and installed legacy/modern language inputs, exact missing-member rejection. CPP/N/AST shapes are explicit fixtures; not complete SDK or ABI qualification."
+  },
+  {
+    "file": "build/test/static-libs-headers.integration.mjs",
+    "executor": "manual",
+    "reason": "Requires a read-only normal static install, fixed archives/LLVM modules and private RELEASE_EVIDENCE_TEST_ROOT. Copies the installation, exercises public CLI warm and missing-header recovery, actual LLVM CMake/C consumer and independent libedit control. Not full CJDB/platform qualification."
+  },
+  {
+    "file": "build/test/native-tool-functions.integration.mjs",
+    "executor": "manual",
+    "reason": "Requires actual independently installed cjfmt/LSPServer/cjlint/cjprof/cjcompat prefixes, a read-only qualified SDK for AST/CJO dependencies, fixed tools source and fresh work directory. Exercises formatting/compilation/runtime, existing LSP protocol, lint diagnostics, heap parsing/selected-JDK Java JNI heap API and real compiler-produced CJO compatibility. No fixture tools or complete SDK qualification."
+  },
+  {
+    "file": "build/test/hle-c-bindings.integration.mjs",
+    "executor": "manual",
+    "reason": "Requires actual public HLE install with fixed Node/npm/cjbind, a compatible read-only Cangjie SDK and system C compiler. Run with prefix/sdk/fresh evidence arguments; covers default and explicit generator, directory input, child failures, real generated bindings linked to C and execution. Package relocation is driven by the production lane; no downloads or fixture generator."
   }
 ]

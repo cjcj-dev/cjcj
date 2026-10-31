@@ -160,7 +160,7 @@ export async function workflowRecord() {
     sourceSha: (await read('dist-runtime/SOURCE_SHA'))?.trim() ?? 'UNKNOWN',
     dependencies: process.env.RUNTIME_DEPENDENCY_OUTCOME || 'UNKNOWN',
     build: process.env.RUNTIME_BUILD_OUTCOME || 'UNKNOWN',
-    cjcjRef: process.env.GITHUB_SHA || 'UNKNOWN', runtimeRef: process.env.RUNTIME_REF || 'UNKNOWN',
+    cjcjRef: process.env.GITHUB_SHA || 'UNKNOWN', runtimeRef: process.env.CJCJ_NATIVE_RUNTIME_REF || 'UNKNOWN',
   });
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await workflowRecord();

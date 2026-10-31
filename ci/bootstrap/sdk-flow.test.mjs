@@ -297,7 +297,7 @@ source+='\\nexport async function '+name+'(config){const fs=await import("node:f
  const cliPath=new URL('../../build/cli.mjs',import.meta.url).pathname;
  const argv=[cliPath,'--workspace',workspace,'--build-root',work+'/buildtools','--official-sdk-root',work+'/host',
   'run-all','--skip-system-deps','--skip-install-libs'];
- const env={...process.env,NODE_OPTIONS:'--experimental-loader='+loader,RUN_ALL_TRACE:trace};
+ const env={...process.env,NODE_OPTIONS:[process.env.NODE_OPTIONS,'--experimental-loader='+loader].filter(Boolean).join(' '),RUN_ALL_TRACE:trace};
  const commands=[];
  async function invoke(label,extra={},flags=[]){
   const actualArgv=[...argv,...flags];const r=run(process.execPath,actualArgv,{env:{...env,...extra}});commands.push({label,argv:actualArgv,rc:r.status,signal:r.signal,stdout:r.stdout,stderr:r.stderr});
@@ -363,7 +363,10 @@ fs.writeFileSync(out+'.c','#include <stdio.h>\\nint main(void){puts("hello from 
   'third_party/llvm/lib/libLLVM-15.so','schema/StdAstFormat.fbs','include/flatbuffers/StdAstFormat_generated.h',
   'third_party/flatbuffers/bin/flatc','stdx/'+tuple+'/fixture',
   ...['llc','llvm-as','llvm-dis','opt'].map(name=>'third_party/llvm/bin/'+name),
-  ...['cjpm','cjfmt','hle','LSPServer','cjcov','cjtrace-recover','cjlint','cjprof','cjcompat'].flatMap(name=>['tools/bin/'+name,'tools/bin/'+name+'.entry','.target-tools/tools/bin/'+name]),
+  ...['cjpm','cjfmt','hle','LSPServer','cjcov','cjtrace-recover','cjlint','cjprof','cjcompat','cjhead'].flatMap(name=>{
+    const privateDir={LSPServer:'lsp',cjlint:'cjlint',cjhead:'cjhead'}[name];
+    return ['tools/bin/'+name,'tools/bin/'+name+'.entry','.target-tools/tools/'+(privateDir?privateDir+'/':'')+'bin/'+name];
+  }),
   'tools/config/cangjie-format.toml','tools/config/cangjie-repo.toml','tools/dtsparser/analysis.js','tools/bin/node'])await put(output+'/'+rel,'finite native artifact');
  for(const name of ['llc','llvm-as','llvm-dis','opt'])await fs.chmod(output+'/third_party/llvm/bin/'+name,0o755);
  await put(output+'/tools/dtsparser/DEPENDENCIES.json','{}');
@@ -379,7 +382,7 @@ return {...result,source};}
 `);
  const cliPath=fileURLToPath(new URL('../../build/cli.mjs',import.meta.url));
  const base=[cliPath,'--workspace',workspace,'--build-root',work+'/buildtools','--official-sdk-root',work+'/host'];
- const env={...process.env,NODE_OPTIONS:'--experimental-loader='+loader};
+ const env={...process.env,NODE_OPTIONS:[process.env.NODE_OPTIONS,'--experimental-loader='+loader].filter(Boolean).join(' ')};
  const commands=[];
  async function invoke(label,args,extra={}) {
   const argv=[...base,...args],r=run(process.execPath,argv,{env:{...env,...extra}});

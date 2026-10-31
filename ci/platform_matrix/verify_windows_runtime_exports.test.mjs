@@ -71,6 +71,15 @@ try {
   await run('missing-import', raw, 1, ['FATAL: missing official imports: dbghelp.dll'], imports.slice(1));
   await run('case-insensitive-imports', raw, 0, [], imports.map((name) => name.toUpperCase()));
 
+  const reference=['CJ_MCC_SetReferenceMethods','CJ_MCC_ReferenceInvokeFinalize','CJ_MCC_ReferenceWaitPending','CJ_MCC_ReferenceRuntimeRunning','CJ_MCC_ReferenceNanoTime'];
+  const referenceDump=names=>fs.writeFile(dumpFile,[...imports.map(dll=>`DLL Name: ${dll}`),'','[Ordinal/Name Pointer] Table',...names.map((name,i)=>`  [${i}] ${name}`),'',''].join('\n'));
+  await referenceDump([...new Set([...raw,...reference])]);
+  check('reference-services-present',invoke(false,['--reference-services']),0);
+  for(const symbol of reference) {
+    await referenceDump([...new Set([...raw,...reference])].filter(name=>name!==symbol));
+    check('reference-service-missing:'+symbol,invoke(false,['--reference-services']),1,[`FATAL: missing exports: ${symbol}`]);
+  }
+
   if (argv.dll) {
     const dll = await fs.readFile(argv.dll);
     console.log(`SELFTEST_NATIVE dll_sha256=${hash(dll)}`);

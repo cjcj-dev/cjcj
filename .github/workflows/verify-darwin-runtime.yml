@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@v7
       - name: Load immutable input pins
         run: |
-          cat ci/runtime_pin.env >> "$GITHUB_ENV"
+          node ci/load_runtime_pin.mjs
           cat "ci/colour-runtime/$PLATFORM.env" >> "$GITHUB_ENV"
       - name: Download verified prerelease input
         env:

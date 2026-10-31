@@ -148,7 +148,7 @@ test('G13 distinguishes ancestor, non-ancestor, and unreadable runtime histories
     `LOADERLIFE_MIN_REF=${loaderlife}`,
     '',
   ].join('\n'));
-  for (const file of ['llvm_pin.env', 'source_pin.env', 'cjpm_pin.env']) {
+  for (const file of ['llvm_pin.env', 'source_pin.env', 'source_pin.env']) {
     await write(cjcj, `ci/${file}`, '# unused by this fixture\n');
   }
 

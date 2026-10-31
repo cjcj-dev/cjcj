@@ -9,6 +9,7 @@ import {nativePair} from '../runtime-pin.mjs';
 import {hostPlatform} from '../host-toolchain-pin.mjs';
 import {targetForHost} from '../../build/lib/targets.mjs';
 import {verifyOfficialSdkIdentity} from '../../build/lib/official-sdk-identity.mjs';
+import {buildConfig} from '../../build/lib/config.mjs';
 import {nativeSourceSelection} from './native-source-selection.mjs';
 import {nativeInstallationLocations} from './native-installation-locations.mjs';
 import {readInstalledNativeAst} from './installed-native-ast.mjs';
@@ -29,7 +30,10 @@ export async function selectNativeHost(inputRoot, work, env=process.env, signal)
     return actual;
   };
   const host={install:await member(locations.host.install),archive:await member(locations.host.archive),version:pair.hostVersion};
-  const {selection,explicitAst}=nativeSourceSelection(env,pair);
+  const config=buildConfig({workspace:env.CANGJIE_WORKSPACE || env.GITHUB_WORKSPACE,env});
+  const compiler=config.repos.compiler;
+  const {selection,explicitAst}=nativeSourceSelection(env,pair,
+    config.sourceSelection.compiler?{ast:{repository:compiler.url,commit:compiler.tag}}:{});
   let ast;
   if(explicitAst){
     const installations=await nativeInstallationLocations(root,locations,env);

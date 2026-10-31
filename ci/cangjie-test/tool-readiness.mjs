@@ -7,25 +7,15 @@ import {fileURLToPath} from 'node:url';
 import {isDeepStrictEqual} from 'node:util';
 import {fileDigest,readJson,relative} from '../bootstrap/sdk-flow.mjs';
 import {sdkPlatform,entryPlatformName} from '../bootstrap/sdk-platform.mjs';
-import {TOOL_NAMES,TOOL_PUBLIC_NAMES,TOOL_DIRECTORIES,nativeToolLibraries,toolName} from '../../build/srcbuild/tool-layout.mjs';
-// These are the SDK edges of the actual source producers, not the entire SDK
-// snapshot recorded for diagnostics. cjprof links its own prof/JNI payload and
-// a source-built demangler. cjcompat imports CJO through cangjie-lsp; cjfmt uses
-// its formatter. Neither executes the selected Cangjie compiler. cjlint DOES
-// execute cjc --compile-macro and initialize RuntimeInit; LSP enables macro
-// expansion. Those two therefore retain compiler/std/runtime pairing, including
-// the compiler's separately installed execution runtime when recorded.
-const nativeSdkInputs={cjprof:[],cjcompat:['nativeAst'],cjfmt:['nativeAst'],
-  cjlint:['nativeAst','compiler','stdCore','runtime'],lsp:['nativeAst','compiler','stdCore','runtime']};
-// These tools load/execute the selected SDK at use time. Their linked native
-// AST remains a build dependency. Installing into another SDK does not by
-// itself establish that the macro/runtime consumer works with that selection.
-export const toolRuntimeInputs=name=>['cjlint','lsp'].includes(toolName(name))
+import {TOOL_NAMES,TOOL_PUBLIC_NAMES,TOOL_DIRECTORIES,nativeToolLibraries,toolName,retainedToolPath} from '../../build/srcbuild/tool-layout.mjs';
+// Every selected tool is now a Cangjie producer. LSP's analysis/runtime
+// selection remains distinct from its compiler execution dependencies.
+export const toolRuntimeInputs=name=>toolName(name)==='lsp'
   ?['compiler','stdCore','runtime','compilerEntry','executionRuntime']:[];
 export function toolSdkInputs(publicName) {
   const name=toolName(publicName);
   if(!TOOL_NAMES.includes(name))throw Error('unknown source tool: '+publicName);
-  return nativeSdkInputs[name]??['compiler','stdCore','runtime',...(name==='hle'?['hleDependencies']:[])];
+  return ['compiler','stdCore','runtime',...(name==='hle'?['hleDependencies']:[])];
 }
 const sha=value=>/^[0-9a-f]{64}$/.test(value??'');
 async function bytes(sdk,rel,expected) {
@@ -52,19 +42,14 @@ export async function toolReadiness(root) {
       const row=inputs.files?.[rel],facts=row?.producer;
       if(facts?.source?.status!=='resolved'||!facts.source.repository||!/^[0-9a-f]{40}$/.test(facts.source.commit??''))throw Error('target producer source missing');
       if(facts.build?.rc!==0||facts.build.platform!==stage.platform||facts.install?.rc!==0)throw Error('target build/install not recorded');
-      const nativeInputs=nativeSdkInputs[name];
-      if(nativeInputs) {
-        // A public filename alone cannot establish a native producer. Preserve
-        // its recorded source/build directory and actual native configuration.
-        if(facts.build.directory!==TOOL_DIRECTORIES[name])throw Error('native producer directory differs');
-        if(['cjprof','cjcompat','cjlint'].includes(name)) {
-          const config=facts.build.nativeConfiguration?.native?.values;
-          if(!config?.CMAKE_BUILD_TYPE||!config.CMAKE_CXX_COMPILER)throw Error('native configuration missing');
-        }
-      }else if(!isDeepStrictEqual(facts.build.inputs?.stage,stage))throw Error('producer SDK selection differs');
+      if(facts.build.directory!==TOOL_DIRECTORIES[name])throw Error('producer directory differs');
       const sdkInputs=toolSdkInputs(name);
-      const compilerLoads=nativeInputs?.includes('compiler')?['compilerEntry','executionRuntime'].filter(key=>facts.build.inputs?.artifacts?.[key]):[];
+      const compilerLoads=name==='lsp'?['compilerEntry','executionRuntime'].filter(key=>facts.build.inputs?.artifacts?.[key]):[];
       const runtimeInputs=toolRuntimeInputs(name),installed=runtimeInputs.length?inputs.installationInputs:undefined;
+      // A recorded LSP installation may select different analysis inputs.
+      // Validate that selection and its bytes below, without relabelling the
+      // original producer or qualifying the unexecuted semantic consumer.
+      if(!installed&&!isDeepStrictEqual(facts.build.inputs?.stage,stage))throw Error('producer SDK selection differs');
       const changed=[];
       if(installed)for(const key of ['platform','compilerFile','compilerCommit','runtimeCommit']) {
         if(installed.stage?.[key]!==stage[key])throw Error('installed SDK selection differs: '+key);
@@ -82,12 +67,12 @@ export async function toolReadiness(root) {
       }
       applicability={build:facts.build.inputs?.stage,installation:installed?.stage??facts.build.inputs?.stage,
         changedRuntimeInputs:changed,status:changed.length?'NOT_CONSUMED':'BUILD_INPUTS_MATCH'};
-      const retained='.target-tools/'+rel;
+      const retained=retainedToolPath({producer:name,name:publicName+native.exe,to:rel});
       if(row.artifact?.path!==retained||row.entry?.path!==rel||row.entry.recipe?.path!==rel+'.entry'
         ||row.artifact.sha256!==row.sha256||facts.install.artifact?.sha256!==row.sha256)throw Error('target body/entry binding differs');
       await bytes(sdk,retained,row.sha256);await bytes(sdk,rel,row.entry.sha256);await bytes(sdk,rel+'.entry',row.entry.recipe.sha256);
       const recipe=(await fs.readFile(path.join(sdk,rel+'.entry'),'utf8')).trimEnd().split('\n');
-      const libraries=['third_party/llvm/'+native.llvmDirectory,'runtime/lib/'+native.tuple,'lib/'+native.tuple,'tools/lib'];
+      const libraries=['cjlint','lsp','cjhead'].includes(name)?['.target-tools/tools/'+name+'/lib']:['third_party/llvm/'+native.llvmDirectory,'runtime/lib/'+native.tuple,'lib/'+native.tuple,'tools/lib'];
       if(!isDeepStrictEqual(recipe,['cjcj-sdk-entry-v1','2',retained,entryPlatformName(stage.platform),'native-target:'+native.arch,...libraries]))throw Error('target loader recipe differs');
       const payloads=facts.install.payloads;
       if(!payloads||typeof payloads!=='object')throw Error('install payload facts missing');
@@ -97,21 +82,33 @@ export async function toolReadiness(root) {
         if(!built||!isDeepStrictEqual(Object.keys(built).sort(),Object.keys(payloads).sort()))throw Error('installed native payload set differs from successful build');
         for(const [rel,row]of Object.entries(payloads)) {
           if(!isDeepStrictEqual(row.build,built[rel]))throw Error('installed native payload lacks build input: '+rel);
-          if((rel.includes('/config/')||rel.includes('cjprof-jni'))&&row.sha256!==built[rel].sha256)throw Error('installed copied payload differs from build: '+rel);
+          if((['cjprof','cjlint'].includes(name)||rel.includes('/config/'))&&row.sha256!==built[rel].sha256)throw Error('installed copied payload differs from build: '+rel);
         }
-        for(const key of name==='cjprof'?['json','httplib','runtime','bounds']:['json']) {
-          const dep=facts.build.dependencies?.[key];
-          if(!dep?.repo||!/^[0-9a-f]{40}$/.test(dep.commit??'')||!sha(dep.changes_sha256))throw Error('native dependency source missing: '+key);
+        if(name==='cjlint') {
+          if(stage.platform!=='linux_x86_64')throw Error('Cangjie lint platform not supported');
+          const selected=facts.build.nativeConfiguration?.cangjie?.values;
+          if(selected?.language!=='Cangjie'||!selected.host?.sdk||!selected.analysis?.sdk||!/^[0-9a-f]{40}$/.test(selected.frontend?.ref??''))throw Error('Cangjie analysis configuration missing');
+          for(const key of ['artifacts','runtimeObject','llvmShim','llvmLibrary'])if(!selected.frontend[key])throw Error('Cangjie frontend input missing: '+key);
+          if(Object.keys(payloads).some(rel=>/lib(?:cjlint|cangjie-lsp)\./.test(rel)))throw Error('retired C++ lint payload');
+          required.push('.target-tools/tools/cjlint/lib/libcangjie-runtime.so','.target-tools/tools/cjlint/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so','.target-tools/tools/cjlint/config/cjlint_rule_list.json');
+          if(!Object.keys(payloads).some(rel=>rel.startsWith('.target-tools/tools/cjlint/modules/')))throw Error('analysis modules absent');
         }
-        if(!facts.build.nativeConfiguration?.native?.values?.CMAKE_BUILD_TYPE)throw Error('native configuration missing');
         if(name==='cjprof') {
-          const parent=facts.build.nativeConfiguration.native.values,jni=facts.build.nativeConfiguration.jni?.values;
-          if(!jni||jni.CMAKE_BUILD_TYPE!==parent.CMAKE_BUILD_TYPE||!parent.CJPROF_TARGET||jni.CJPROF_TARGET!==parent.CJPROF_TARGET)throw Error('JNI configuration differs');
-          const lib=Object.entries(built).find(([rel])=>/\/libcjprof\.(so|dylib)$/.test(rel)||rel==='tools/lib/cjprof.dll')?.[1];
-          if(!lib||jni.CJPROF_LIBRARY!==lib.source)throw Error('JNI parent library differs');
+          const selected=facts.build.nativeConfiguration?.cangjie?.values;
+          if(selected?.language!=='Cangjie'||!selected.sdk||!selected.jdk||!selected.runtimeHeader||!selected.lombok)throw Error('Cangjie JNI configuration missing');
+          required.push('tools/share/java/cjprof.jar');
         }
         required.push(...nativeToolLibraries(name,native.os).map(row=>row.to));
-        if(!Object.keys(payloads).some(rel=>rel.startsWith(name==='cjprof'?'tools/config/static/':'tools/config/')&&(name!=='cjlint'||rel.endsWith('.json'))))throw Error('installed configuration absent');
+        if(!Object.keys(payloads).some(rel=>rel.startsWith(name==='cjprof'?'tools/config/static/':'.target-tools/tools/cjlint/config/')&&(name!=='cjlint'||rel.endsWith('.json'))))throw Error('installed configuration absent');
+      }
+      if(name==='lsp') {
+        const selected=facts.build.nativeConfiguration?.cangjie?.values;
+        if(selected?.rc!==0||selected.signal||selected.error)throw Error('Cangjie LSP build configuration missing');
+        for(const key of ['sdk','frontendPackages','llvmLibrary','runtimeConfig','jsonBuild','llvmShim'])
+          if(!selected.inputs?.[key])throw Error('Cangjie LSP input missing: '+key);
+        required.push('.target-tools/tools/lsp/lib/libcangjie-runtime.so');
+        if(!Object.keys(payloads).some(rel=>/^\.target-tools\/tools\/lsp\/lib\/libLLVM/.test(rel)))throw Error('Cangjie LSP LLVM payload missing');
+        if(Object.keys(payloads).some(rel=>/libcangjie-lsp\./.test(rel)))throw Error('retired C++ LSP payload');
       }
       if(name==='cjprof')for(const rel of Object.keys(payloads).filter(rel=>rel.startsWith('tools/config/static/')))required.push('.target-tools/'+rel);
       for(const rel of required)if(!payloads[rel])throw Error('required payload absent: '+rel);

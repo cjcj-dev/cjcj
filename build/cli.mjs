@@ -41,7 +41,9 @@ function usage() {
     + 'Global options:\n'
     + '  --workspace PATH\n'
     + '  --build-root PATH\n'
-    + '  --official-sdk-root PATH (default: CJCJ_OFFICIAL_SDK_ROOT, CJCJ_SRCBUILD_HOST_SDK, pinned cjv SDK)\n'
+    + '  --tools-jni-home PATH --tools-runtime-header FILE --tools-lombok-jar FILE\n'
+    + '  --tools-compiler-libs PATH --tools-runtime-config FILE --tools-llvm-shim FILE --tools-llvm-library FILE\n'
+    + '  --official-sdk-root PATH (default: CJCJ_OFFICIAL_SDK_ROOT, pinned cjv SDK)\n'
     + '  --target TARGET (default: linux-x64)\n'
     + '  --host-profile generic|kkk2 (default: generic)\n'
     + `  --build-type TYPE (default: ${DEFAULT_BUILD_TYPE})\n`
@@ -49,9 +51,15 @@ function usage() {
     + '  --stdx-version INTEGER (default: 1)\n'
     + '  --stdx-profile full|sdk-tools (default: full)\n'
     + '  --stdx-build-mode clean|incremental (default: clean)\n'
+    + '  --stdx-gcc-toolchain PATH (native Clang GCC headers/libraries prefix)\n'
     + '  --tools-build-mode clean|incremental (default: clean)\n'
-    + '  --tools-dependencies PATH (fixed native JSON/runtime/bounds/httplib sources)\n'
+    + '  --tools-analysis-sdk PATH --tools-frontend-source PATH --tools-frontend-ref SHA (Cangjie cjlint analysis and fixed shared frontend)\n'
+    + '  --tools-gcc-toolchain PATH (retired C++ cjlint option; rejected)\n'
+    + '  --tools-dependencies PATH (legacy native dependency description; not a Cangjie tool input)\n'
     + '  --tools-build-set all|NAME,... (default: all; omitted tools reuse existing outputs)\n'
+    + '  --tools-mangle-source DIR (compiler Cangjie demangler source for cjtrace-recover)\n'
+    + '  --tools-producer-build-dir PATH (one selected tool; normal existing producer directory)\n'
+    + '  --tools-json-build PATH (LSP matching JSON producer)\n'
     + '  --tools-phase all|build|install (default: all; build does not publish the shared SDK)\n'
     + '  --jobs INTEGER (tools total CPU budget; default: CANGJIE_BUILD_JOBS or available CPUs)\n'
     + '  --tools-package-jobs INTEGER (heavy producer limit, default/max: 4)\n'
@@ -100,8 +108,8 @@ function parseGlobal(args) {
       ['--host-profile', 'hostProfile'],
       ['--build-type', 'buildType'], ['--cangjie-version', 'cangjieVersion'],
       ['--stdx-version', 'stdxVersion'], ['--stdx-profile', 'stdxProfile'], ['--log-level', 'logLevel'],
-      ['--stdx-build-mode', 'stdxBuildMode'], ['--tools-build-mode','toolsBuildMode'], ['--tools-build-set','toolsBuildSet'],
-      ['--tools-phase','toolsPhase'], ['--tools-dependencies','toolsDependencies'], ['--jobs','jobs'], ['--tools-package-jobs','toolsPackageJobs'],
+      ['--stdx-build-mode', 'stdxBuildMode'], ['--stdx-gcc-toolchain', 'stdxGccToolchain'], ['--tools-build-mode','toolsBuildMode'], ['--tools-build-set','toolsBuildSet'],
+      ['--tools-producer-build-dir','toolsProducerBuildDir'], ['--tools-json-build','toolsJsonBuild'], ['--tools-phase','toolsPhase'], ['--tools-install-prefix','toolsInstallPrefix'], ['--tools-dependencies','toolsDependencies'], ['--tools-gcc-toolchain','toolsGccToolchain'], ['--tools-mangle-source','toolsMangleSource'], ['--tools-jni-home','toolsJniHome'], ['--tools-runtime-header','toolsRuntimeHeader'], ['--tools-lombok-jar','toolsLombokJar'], ['--tools-analysis-sdk','toolsAnalysisSdk'], ['--tools-frontend-source','toolsFrontendSource'], ['--tools-frontend-ref','toolsFrontendRef'], ['--tools-compiler-libs','toolsCompilerLibs'], ['--tools-runtime-config','toolsRuntimeConfig'], ['--tools-llvm-shim','toolsLlvmShim'], ['--tools-llvm-library','toolsLlvmLibrary'], ['--jobs','jobs'], ['--tools-package-jobs','toolsPackageJobs'],
     ]) {
       parsed = optionValue(args, index, flag);
       if (parsed) {
@@ -203,7 +211,7 @@ async function dispatch(config, command, args) {
   }
   if (command === 'install-static-libs') {
     requireNoArgs(command, args);
-    return staticLibs.install(config.buildRoot);
+    return staticLibs.install(config.buildRoot, {jobs:config.jobs});
   }
   if (command === 'install-mingw') {
     requireNoArgs(command, args);
@@ -238,10 +246,23 @@ async function dispatch(config, command, args) {
       stdxVersion: config.stdxVersion,
       stdxProfile: config.stdxProfile,
       stdxBuildMode: config.stdxBuildMode,
+      stdxGccToolchain: config.stdxGccToolchain,
       toolsBuildMode: config.toolsBuildMode,
       toolsBuildSet: config.toolsBuildSet,
       toolsDependencies: config.toolsDependencies,
-      toolsPhase: config.toolsPhase, jobs: config.jobs, toolsPackageJobs: config.toolsPackageJobs,
+      toolsGccToolchain: config.toolsGccToolchain,
+      toolsMangleSource: config.toolsMangleSource,
+      toolsJniHome: config.toolsJniHome,
+      toolsRuntimeHeader: config.toolsRuntimeHeader,
+      toolsLombokJar: config.toolsLombokJar,
+      toolsAnalysisSdk: config.toolsAnalysisSdk,
+      toolsFrontendSource: config.toolsFrontendSource,
+      toolsFrontendRef: config.toolsFrontendRef,
+      toolsCompilerLibs: config.toolsCompilerLibs,
+      toolsRuntimeConfig: config.toolsRuntimeConfig,
+      toolsLlvmShim: config.toolsLlvmShim,
+      toolsLlvmLibrary: config.toolsLlvmLibrary,
+      toolsPhase: config.toolsPhase, toolsInstallPrefix: config.toolsInstallPrefix, jobs: config.jobs, toolsPackageJobs: config.toolsPackageJobs,
       officialSdkRoot: config.officialSdkRoot,
       consumerSdk: config.consumerSdk,
       useSavedSources: false,
@@ -287,7 +308,7 @@ async function dispatch(config, command, args) {
         await mingw.install(config.buildRoot);
         if (config.target.spec.crossCompile) await targetPython.install(config.buildRoot);
       } else if (config.target.spec.needsStaticLibs) {
-        await staticLibs.install(config.buildRoot);
+        await staticLibs.install(config.buildRoot, {jobs:config.jobs});
       }
     }
     await fetchStage.run(config);

@@ -35,9 +35,9 @@ jobs:
       provision: ${{ steps.matrix.outputs.provision }}
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7.1.0
         with:
-          node-version: '22'
+          node-version: '24.22.1'
       - name: Export target matrix
         id: matrix
         run: node ci/target-matrix.mjs ci
@@ -104,7 +104,7 @@ jobs:
           path: ${{ runner.temp }}/contract-plan
       - name: Install release contract dependencies
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq zip unzip clang lld libssl-dev python3 build-essential git gdb jq cmake ninja-build
+          sudo apt-get update -qq && sudo apt-get install -y -qq zip unzip clang lld clang-15 lld-15 libssl-dev python3 build-essential git gdb jq cmake ninja-build
           npm exec --yes --package=zx@8 -- node ci/test-zx.mjs prepare "$RUNNER_TEMP/test-zx.json"
           npm ci --prefix ci/g1-parser --ignore-scripts --no-audit --no-fund
       # package-lineage compares package bytes with the official host SDK. Load
@@ -202,9 +202,9 @@ jobs:
     steps:
       - name: Checkout cjcj
         uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7.1.0
         with:
-          node-version: '22'
+          node-version: '24.22.1'
       - name: Install script test dependencies
         run: sudo apt-get update -qq && sudo apt-get install -y -qq python3 build-essential binutils zip unzip
       - name: Run registered script tests
@@ -224,16 +224,16 @@ jobs:
     steps:
       - name: Checkout cjcj
         uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7.1.0
         with:
-          node-version: '22'
+          node-version: '24.22.1'
       - name: Download test LLVM shim
         uses: actions/download-artifact@v8
         with:
           name: fixed-llvm-tools-linux_x86_64
           path: fixed-toolchain/linux_x86_64
       - name: Load runtime pin
-        run: cat ci/runtime_pin.env >> "$GITHUB_ENV"
+        run: node ci/load_runtime_pin.mjs
       - name: Receive packaged native SDK
         uses: actions/download-artifact@v8
         with:
@@ -250,7 +250,7 @@ jobs:
         with:
           component: runtime-shim
           platform: ubuntu-24.04
-          pin: ${{ env.RUNTIME_REF }}
+          pin: ${{ env.CJCJ_NATIVE_RUNTIME_REF }}
           cache-size: 1G
       - name: Run registered Cangjie package tests
         env:
@@ -299,11 +299,11 @@ jobs:
       - name: Load host toolchain pin
         shell: bash
         run: |
-          cat ci/cjpm_pin.env >> "$GITHUB_ENV"
+          cat ci/source_pin.env >> "$GITHUB_ENV"
           node ci/host-toolchain-pin.mjs --github-env >> "$GITHUB_ENV"
       - name: Load runtime pin
         shell: bash
-        run: cat ci/runtime_pin.env >> "$GITHUB_ENV"
+        run: node ci/load_runtime_pin.mjs
       - name: Download LLVM tools
         uses: actions/download-artifact@v8
         with:
@@ -343,7 +343,7 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: dist-runtime
-          key: rt-${{ runner.os }}-${{ runner.arch }}-${{ matrix.runner }}-${{ env.RUNTIME_REF }}-${{ env.RUNTIME_VERSION }}-${{ hashFiles('ci/build_patched_runtime.mjs', 'ci/runtime-diagnostics.mjs') }}
+          key: rt-${{ runner.os }}-${{ runner.arch }}-${{ matrix.runner }}-${{ env.CJCJ_NATIVE_RUNTIME_REF }}-${{ env.RUNTIME_VERSION }}-${{ hashFiles('ci/build_patched_runtime.mjs', 'ci/runtime-diagnostics.mjs') }}
       - name: Initialize runtime diagnostics
         run: |
           dir="$GITHUB_WORKSPACE/runtime-diagnostics/${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.runner }}"
@@ -362,7 +362,7 @@ jobs:
         with:
           component: runtime
           platform: ${{ matrix.runner }}
-          pin: ${{ env.RUNTIME_REF }}
+          pin: ${{ env.CJCJ_NATIVE_RUNTIME_REF }}
           cache-size: 1G
       - name: Build patched runtime
         id: rtbuild
@@ -396,7 +396,7 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: dist-runtime
-          key: rt-${{ runner.os }}-${{ runner.arch }}-${{ matrix.runner }}-${{ env.RUNTIME_REF }}-${{ env.RUNTIME_VERSION }}-${{ hashFiles('ci/build_patched_runtime.mjs', 'ci/runtime-diagnostics.mjs') }}
+          key: rt-${{ runner.os }}-${{ runner.arch }}-${{ matrix.runner }}-${{ env.CJCJ_NATIVE_RUNTIME_REF }}-${{ env.RUNTIME_VERSION }}-${{ hashFiles('ci/build_patched_runtime.mjs', 'ci/runtime-diagnostics.mjs') }}
       - name: Install runtime audit dependencies
         run: sudo apt-get update -qq && sudo apt-get install -y -qq libssl-dev
       - name: Install patched runtime
@@ -463,7 +463,7 @@ jobs:
       - name: Load host toolchain pin
         shell: bash
         run: |
-          cat ci/cjpm_pin.env >> "$GITHUB_ENV"
+          cat ci/source_pin.env >> "$GITHUB_ENV"
           node ci/host-toolchain-pin.mjs --github-env >> "$GITHUB_ENV"
       - name: Restore SDK cache
         id: sdkcache

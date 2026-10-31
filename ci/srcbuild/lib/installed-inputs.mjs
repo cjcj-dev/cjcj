@@ -12,6 +12,7 @@ import {STDX_BUILD_INPUTS} from '../../../build/srcbuild/stdx-build-inputs.mjs';
 import {reconcileStdArtifacts} from '../../../build/lib/release-manifest.mjs';
 import {readInstalledNativeAst} from '../../bootstrap/installed-native-ast.mjs';
 import {readWindowsPythonInstallation} from '../../bootstrap/native-python-install.mjs';
+import {TOOL_NAMES,TOOL_PUBLIC_NAMES,retainedToolPath} from '../../../build/srcbuild/tool-layout.mjs';
 const optional=async file=>{try{return await readJson(file);}catch(e){if(e.code==='ENOENT')return null;throw e;}};
 const unresolved=reason=>({status:'unresolved',reason});
 const source=row=>row?.repository&&/^[0-9a-f]{40}$/.test(row.commit||'')?{status:'resolved',repository:row.repository,commit:row.commit}:unresolved('producer source repository/commit not recorded');
@@ -147,10 +148,11 @@ export async function installedInputs(sdk,platform){
     rows.push({component:'llvm-cjdb',source:source(llvm.source),build:{configuration:llvm.configuration,python:llvm.pythonConfiguration,...(windowsToolchain?{windowsToolchain}:{})},artifacts:products});
     rows.push(await installedPython(sdk,platform,llvm,python));
   }
-  for(const name of ['cjpm','cjfmt','hle','LSPServer','cjcov','cjtrace-recover','cjlint','cjprof','cjcompat']){
+  for(const producer of TOOL_NAMES){
+    const name=TOOL_PUBLIC_NAMES[producer]??producer;
     const rel='tools/bin/'+name+native.exe,row=tools?.files?.[rel];
     if(!row){rows.push({component:name,source:unresolved('original tool producer inputs missing')});continue;}
-    const retained='.target-tools/'+rel;
+    const retained=retainedToolPath({producer,name:name+native.exe,to:rel});
     const product=await artifact(sdk,retained,row.sha256);
     const install=row.producer?.install;
     const installedArtifact=install===undefined?row.producer?.artifact:install?.artifact;

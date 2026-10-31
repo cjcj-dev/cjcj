@@ -27,7 +27,7 @@ if args[0]=='install':
  const sha=run('head',['git','-C',repo,'rev-parse','HEAD']).stdout.trim();
  const toolchain=dir+'/toolchain';await fs.mkdir(toolchain);
  const artifact=dir+'/artifacts';
- const env={...process.env,PATH:bin+path.delimiter+process.env.PATH,PLATFORM_CI_ROOT:artifact,RUNTIME_SOURCE:repo,RUNTIME_REF:sha,RUNTIME_TARGET:'windows-x86_64',RUNTIME_TOOLCHAIN:toolchain,
+ const env={...process.env,PATH:bin+path.delimiter+process.env.PATH,PLATFORM_CI_ROOT:artifact,RUNTIME_SOURCE:repo,CJCJ_NATIVE_RUNTIME_REF:sha,RUNTIME_TARGET:'windows-x86_64',RUNTIME_TOOLCHAIN:toolchain,
   RUNTIME_BUILD_TYPE:buildType,RUNTIME_VERSION:'1.3.0-fixture',RUNTIME_NATIVE_PAIR:'0',GITHUB_STEP_SUMMARY:'',BUILD_TYPE_COMMANDS:dir+'/children.jsonl',PYTHONDONTWRITEBYTECODE:'1'};
  const r=run('public',[process.env.ZX,path.resolve('ci/platform_matrix/build_runtime.mjs')],env);
  await fs.writeFile(dir+'/public.stdout',r.stdout||'');await fs.writeFile(dir+'/public.stderr',r.stderr||'');await fs.writeFile(dir+'/commands.json',JSON.stringify(commands,null,2));

@@ -21,30 +21,28 @@ jobs:
       DARWIN_BUILD_RUNTIME: ${{ matrix.build_runtime }}
       RUNTIME_BUILD_TYPE: relwithdebinfo
     steps:
-      # Dispatch identifies the registered workflow branch; this checkout
-      # identifies the separately reviewed product. Publishing this commit is
-      # a prerequisite for deployment/running, not part of this workflow change.
+      # Consume the exact candidate commit selected by the workflow dispatch.
       - uses: actions/checkout@v7
         with:
-          ref: 255d8c7e1f5e70be69b4cf3e9091514cfb1a4d09
-      - uses: actions/setup-node@v4
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v7.1.0
         with:
-          node-version: '22'
+          node-version: '24.22.1'
       - name: Check host and target guard before tools and input preparation
         run: node --test ci/release/darwin_consumer_boundary.test.mjs
       - name: Load pinned runtime source
-        run: cat ci/runtime_pin.env >> "$GITHUB_ENV"
+        run: node ci/load_runtime_pin.mjs
       - uses: actions/checkout@v7
         if: matrix.build_runtime
         with:
           repository: cjcj-dev/cangjie-runtime
-          ref: ${{ env.RUNTIME_REF }}
+          ref: ${{ env.CJCJ_NATIVE_RUNTIME_REF }}
           path: runtime-source
       - uses: ./.github/actions/sccache
         with:
           component: darwin-consumer
           platform: ${{ matrix.platform }}
-          pin: ${{ env.RUNTIME_REF }}
+          pin: ${{ env.CJCJ_NATIVE_RUNTIME_REF }}
           cache-size: 1G
       - name: Build or acquire native inputs and consume their actual loaded libraries
         env:

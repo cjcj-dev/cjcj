@@ -19,7 +19,7 @@ function fixture(check) {
     git(['-c','user.name=Zxilly','-c','user.email=zxilly@outlook.com','commit','-qm','native producer fixture']);
     const commit=git(['rev-parse','HEAD']);
     for(const file of ['libLLVM-15.so','libLLVM.dylib'])fs.writeFileSync(path.join(depot,file),'test library bytes');
-    const env={...process.env,LLVM_SHA:commit,CJCJ_NATIVE_RUNTIME_REF:commit,
+    const env={...process.env,CJCJ_NATIVE_LLVM_REF:commit,CJCJ_NATIVE_RUNTIME_REF:commit,
       LLVM_DYLIB_PLATFORM:'linux_aarch64',LLVM_DYLIB_LIBRARY:'libLLVM-15.so',
       GITHUB_RUN_ID:'123',GITHUB_RUN_ATTEMPT:'2',GITHUB_ENV:path.join(root,'environment')};
     const run=extra=>spawnSync(process.execPath,['ci/llvm-dylib/record-manifest.mjs',depot,source,source],
@@ -37,7 +37,7 @@ for(const [platform,library] of [['linux_aarch64','libLLVM-15.so'],['darwin_x86_
   }));
 }
 for(const [name,extra,reason] of [['runtime checkout',{CJCJ_NATIVE_RUNTIME_REF:'f'.repeat(40)},'LLVM_DYLIB_CHECKOUT_MISMATCH'],
-  ['LLVM checkout',{LLVM_SHA:'e'.repeat(40)},'LLVM_DYLIB_CHECKOUT_MISMATCH'],
+  ['LLVM checkout',{CJCJ_NATIVE_LLVM_REF:'e'.repeat(40)},'LLVM_DYLIB_CHECKOUT_MISMATCH'],
   ['platform library',{LLVM_DYLIB_LIBRARY:'libLLVM.dylib'},'LLVM_DYLIB_PLATFORM_MISMATCH']]) {
   test(`manifest refuses mismatched ${name} before publishing`,()=>fixture(({run,depot})=>{
     const result=run(extra);assert.equal(result.status,1);assert.ok(result.stderr.includes(reason),result.stderr);

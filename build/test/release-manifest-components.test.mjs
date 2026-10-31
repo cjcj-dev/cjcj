@@ -49,24 +49,24 @@ const writerRunner = [
 test('base SDK provenance maps every release platform to its nightly archive', async t => {
   const expected = new Map([
     ['linux-x64', [
-      'cangjie-sdk-linux-x64-1.3.0-alpha.20261009001050.tar.gz', 208435636,
-      '1e23b2b64263dfc2267a3f459e9b13840278e84db1797a6733db68f49885df5c',
+      'cangjie-sdk-linux-x64-1.3.0-alpha.20261025001053.tar.gz', 209397117,
+      '772cfec6e7e371b78ad487c7938dad296e2fb6fe9e2462fe4a5ff68b3d02984f',
     ]],
     ['linux-aarch64', [
-      'cangjie-sdk-linux-aarch64-1.3.0-alpha.20260925001050.tar.gz', 206550010,
-      '471fc3738ef70f7cbbb1f0a7dfee4b6f1a54ed19fa15b6d580b000786042e79a',
+      'cangjie-sdk-linux-aarch64-1.3.0-alpha.20261025001053.tar.gz', 211511830,
+      '693e273b6c32b91f0786d046e4dca955c36c1a9e9367fa085a7d1079eed39584',
     ]],
     ['darwin-x64', [
-      'cangjie-sdk-mac-x64-1.3.0-alpha.20260925001050.tar.gz', 177291792,
-      'c183258deb8f5055425ba99dce655daa4b9fc1d237bb95f356a9f0d1dd616f02',
+      'cangjie-sdk-mac-x64-1.3.0-alpha.20261025001053.tar.gz', 179061280,
+      'fb94b12336b1f05eecf6070f403774cbe25a576b8bd96253e05a7e90e62414d7',
     ]],
     ['darwin-arm64', [
-      'cangjie-sdk-mac-aarch64-1.3.0-alpha.20260925001050.tar.gz', 169803592,
-      'a60818932bc9bc258b3b93fdf568d5f83a5bb11f747bba35f9d82bbb98aa9f74',
+      'cangjie-sdk-mac-aarch64-1.3.0-alpha.20261025001053.tar.gz', 171517863,
+      'd54d2d062c23db3f5ff5665fd15a8ff63042193bf6cabccc70e9851115bda813',
     ]],
     ['windows-x64', [
-      'cangjie-sdk-windows-x64-1.3.0-alpha.20260925001050.zip', 268606563,
-      '904e1a7147c156b84afe03c2c01c0392a29267ae53a3847d3589e03cff96999d',
+      'cangjie-sdk-windows-x64-1.3.0-alpha.20261025001053.zip', 271672961,
+      '1adad3c906cbd3392b8f1e7da001837c4e25c4b4ea61544c97bd57808e05450d',
     ]],
   ]);
   for (const [platform, [archive, size, sha256]] of expected) {
@@ -75,7 +75,7 @@ test('base SDK provenance maps every release platform to its nightly archive', a
       const value = baseSdkDownload(platform, version);
       assert.equal(value.archive, archive);
       assert.equal(value.version, platform === 'linux-x64'
-        ? '1.3.0-alpha.20261009001050' : '1.3.0-alpha.20260925001050');
+        ? '1.3.0-alpha.20261025001053' : '1.3.0-alpha.20261025001053');
       assert.equal(value.url, `https://gitcode.com/Cangjie/nightly_build/releases/download/${value.version}/${archive}`);
       assert.equal(value.size, size);
       assert.equal(value.sha256, sha256);

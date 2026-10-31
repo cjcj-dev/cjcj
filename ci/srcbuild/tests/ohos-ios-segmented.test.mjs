@@ -154,7 +154,7 @@ for (const [tuple, cpu] of [['ios_aarch64_cjnative', 0x0100000c],
     console.log(`CROSS_HANDOFF_ASSERT tuple=${tuple} ${restored.stdout.trim()}`);
     const target = tuple.replace('_cjnative', '').replaceAll('_', '-').replace('x86-64', 'x86_64');
     const verify = () => invoke('ci/release/verify-ios-runtime.mjs', [], {
-      CANGJIE_WORKSPACE: runtimeWorkspace, IOS_TARGET: target, RUNTIME_REF: args.runtimeRef,
+      CANGJIE_WORKSPACE: runtimeWorkspace, IOS_TARGET: target, CJCJ_NATIVE_RUNTIME_REF: args.runtimeRef,
     });
     const verified = verify();
     console.log(verified.stdout + verified.stderr);

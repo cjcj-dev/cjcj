@@ -8,6 +8,7 @@ import {readJson, fileDigest} from '../bootstrap/sdk-flow.mjs';
 import {getTarget, getReleasePlatform} from '../../build/lib/targets.mjs';
 import {sourceOwnedTools} from '../../build/lib/release-component-provenance.mjs';
 import {sourceToolPayloads} from './source-tool-payloads.mjs';
+import {retainedToolPath, toolName} from '../../build/srcbuild/tool-layout.mjs';
 import {installedStageOutput} from '../srcbuild/lib/installed-stage-output.mjs';
 
 export function releaseSelection(platform, releaseKey = '') {
@@ -30,7 +31,7 @@ export async function assertNativeReleaseInputs({sdk, platform, releaseKey = '',
   const toolInputs = await readJson(path.join(sdk, 'TOOLS-INPUTS.json'));
   for (const tool of tools) {
     const name = tool + target.spec.exeSuffix, publicPath = 'tools/bin/' + name;
-    const retained = '.target-tools/tools/bin/' + name;
+    const retained = retainedToolPath({producer:toolName(tool),name,to:publicPath});
     for (const relative of [publicPath, publicPath + '.entry', retained,
       ...(tool === 'cjpm' ? ['tools/config/cangjie-repo.toml'] : sourceToolPayloads(tool, platform))]) {
       if (!(await fs.stat(path.join(sdk, relative)).catch(() => null)))

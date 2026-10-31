@@ -18,7 +18,7 @@ const required = name => {
   return process.env[name];
 };
 const workspace = path.resolve(required('CANGJIE_WORKSPACE'));
-const expectedRef = required('RUNTIME_REF');
+const expectedRef = required('CJCJ_NATIVE_RUNTIME_REF');
 const version = required('CJCJ_STAGE3_CANGJIE_VERSION');
 if (process.platform !== 'darwin' || process.arch !== 'arm64') throw new Error('iOS source build requires darwin/arm64');
 if (workspace === path.parse(workspace).root) throw new Error('workspace must not be filesystem root');

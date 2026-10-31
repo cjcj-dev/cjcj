@@ -12,8 +12,8 @@ const files = [`runtime/lib/${tuple}/libcangjie-runtime.dylib`,
   `runtime/lib/${tuple}/libboundscheck.dylib`, `lib/${tuple}/libcangjie-runtime.a`];
 const manifestFile = path.join(root, 'manifest.json');
 if (mode === 'prepare') {
-  assert.match(process.env.RUNTIME_REF || '', /^[a-f0-9]{40}$/, 'COLOUR_RT_SOURCE_PIN');
-  assert.equal(fs.readFileSync(path.join(source, 'SOURCE_SHA'), 'utf8').trim(), process.env.RUNTIME_REF,
+  assert.match(process.env.CJCJ_NATIVE_RUNTIME_REF || '', /^[a-f0-9]{40}$/, 'COLOUR_RT_SOURCE_PIN');
+  assert.equal(fs.readFileSync(path.join(source, 'SOURCE_SHA'), 'utf8').trim(), process.env.CJCJ_NATIVE_RUNTIME_REF,
     'COLOUR_RT_SOURCE_MISMATCH');
   assert.match(process.env.GITHUB_RUN_ID || '', /^\d+$/, 'COLOUR_RT_RUN_MISSING');
   assert.match(process.env.GITHUB_RUN_ATTEMPT || '', /^\d+$/, 'COLOUR_RT_RUN_MISSING');
@@ -27,7 +27,7 @@ if (mode === 'prepare') {
     hashes[relative] = digest(input);
   }
   fs.writeFileSync(manifestFile, JSON.stringify({role: 'colour-runtime-libraries',
-    runtime_sha: process.env.RUNTIME_REF, platform, producer_sha: process.env.GITHUB_SHA,
+    runtime_sha: process.env.CJCJ_NATIVE_RUNTIME_REF, platform, producer_sha: process.env.GITHUB_SHA,
     run_id: process.env.GITHUB_RUN_ID, run_attempt: process.env.GITHUB_RUN_ATTEMPT,
     files: hashes}, null, 2) + '\n');
   console.log(`COLOUR_RT_MANIFEST_SHA256=${digest(manifestFile)}`);
@@ -37,7 +37,7 @@ if (mode === 'prepare') {
   const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
   assert.equal(manifest.role, 'colour-runtime-libraries', 'COLOUR_RT_ROLE_MISMATCH');
   assert.equal(manifest.platform, platform, 'COLOUR_RT_PLATFORM_MISMATCH');
-  assert.equal(manifest.runtime_sha, process.env.RUNTIME_REF, 'COLOUR_RT_SOURCE_MISMATCH');
+  assert.equal(manifest.runtime_sha, process.env.CJCJ_NATIVE_RUNTIME_REF, 'COLOUR_RT_SOURCE_MISMATCH');
   assert.equal(manifest.run_id, process.env.COLOUR_RT_RUN_ID, 'COLOUR_RT_RUN_MISMATCH');
   assert.equal(manifest.run_attempt, process.env.COLOUR_RT_RUN_ATTEMPT, 'COLOUR_RT_RUN_MISMATCH');
   for (const relative of files) {

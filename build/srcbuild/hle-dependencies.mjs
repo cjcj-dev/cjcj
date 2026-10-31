@@ -4,6 +4,8 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {privateRoot,copyOutputs,atomicJson,fileDigest,publishPaths} from '../../ci/bootstrap/sdk-flow.mjs';
+import {installationRecipe} from '../../ci/bootstrap/sdk-targets.mjs';
+import {installEntries} from '../../ci/bootstrap/sdk-install-entries.mjs';
 import {sdkPlatform} from '../../ci/bootstrap/sdk-platform.mjs';
 import {assertLauncherFormat} from '../../ci/bootstrap/sdk-install-entries.mjs';
 export async function installHleDependencies({toolsRoot,sdk,platform,input,prepareOnly=false}) {
@@ -11,7 +13,7 @@ export async function installHleDependencies({toolsRoot,sdk,platform,input,prepa
   const native=sdkPlatform(platform);
   if(input.platform!==platform)throw new Error('HLE_DEPENDENCIES_PLATFORM');
   for(const key of ['node','modules','cjbind'])if(!input[key]?.source || !input[key]?.version || !input[key]?.path)throw new Error('HLE_DEPENDENCY_SOURCE '+key);
-  const parser=path.join(toolsRoot,'hyperlangExtension/src/dtsparser');
+  const parser=path.join(toolsRoot,'packages/hle/src/dtsparser');
   const manifest=JSON.parse(await fs.readFile(path.join(parser,'package.json'),'utf8'));
   for(const [name,wanted]of Object.entries(manifest.dependencies)) {
     const expected=wanted.replace(/^npm:[^@]+@/,'');
@@ -40,4 +42,16 @@ export async function installHleDependencies({toolsRoot,sdk,platform,input,prepa
   if(prepareOnly)return {root:pending,facts};
   await publishPaths(['tools/dtsparser','tools/bin/node'+native.exe].map(relative=>({pending:path.join(pending,relative),destination:path.join(sdk,relative)})));
   return facts;
+}
+
+// Standalone host-tool installation uses the same relative launcher recipe as
+// the SDK. Preserve the selected runtime layout; do not install into shared H.
+export async function installIndependentHle({toolsRoot,prefix,sdk,platform,build,input}) {
+  const native=sdkPlatform(platform);
+  await installHleDependencies({toolsRoot,sdk:prefix,platform,input});
+  await copyOutputs(prefix,[{from:path.join(sdk,'runtime/lib',native.tuple),to:'runtime/lib/'+native.tuple,owner:'selected HLE runtime'}]);
+  const rows=[{producer:'hle',name:'hle'+native.exe,to:'tools/bin/hle'+native.exe}];
+  const recipe=installationRecipe({platform},{tools:{rows,payloads:[]}}),records=[];
+  await installEntries({root:prefix,build,groups:recipe.entries,records,platform});
+  await atomicJson(path.join(prefix,'install-commands.json'),records);
 }

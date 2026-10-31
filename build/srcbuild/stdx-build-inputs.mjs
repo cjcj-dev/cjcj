@@ -112,6 +112,8 @@ export function finishStdxBuild(config, attempt) {
   for (const [key, value] of Object.entries(expected)) {
     if (cache.values[key] !== value) fail(`effective configuration mismatch: ${key}=${cache.values[key]}, requested ${value}`);
   }
+  if ((cache.values.BUILD_GCC_TOOLCHAIN ?? '') !== (config.stdxGccToolchain ?? ''))
+    fail('effective configuration mismatch: BUILD_GCC_TOOLCHAIN differs from selected native GCC toolchain');
   if (path.resolve(cache.values.CMAKE_HOME_DIRECTORY) !== path.resolve(config.repoPath('stdx')))
     fail('CMake source directory differs from selected stdx source');
   if (limited && path.resolve(cache.values.CMAKE_INSTALL_PREFIX) !== path.resolve(attempt.prefix))

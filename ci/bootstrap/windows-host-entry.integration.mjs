@@ -83,10 +83,11 @@ async function fixture(arm){
   RUNNER_TEMP:'C:'+work,CANGJIE_WORKSPACE:'C:'+work+'/workspace',CJCJ_SRCBUILD_TARGET:'windows-x64',
   CJCJ_NATIVE_INPUT_ROOT:'C:'+work+'/inputs',CJCJ_NATIVE_RUNTIME_REF:'79b34798d0f4696f9fe5a3708981539466ecd35b',
   CJCJ_NATIVE_LLVM_REF:'db51a4c7ebb6903e9f997d3b35d52f3577810385',CJCJ_NATIVE_HOST_VERSION:version,
-  CJCJ_NATIVE_RUNTIME_INSTALL:'C:'+work+'/runtime',CJCJ_NATIVE_SOURCE_SELECTION:'{}'};
+  CJCJ_NATIVE_RUNTIME_INSTALL:'C:'+work+'/runtime'};
  for(const key of ['NODE_TEST_CONTEXT','NODE_OPTIONS','CJCJ_NATIVE_CJDB_INSTALL'])delete env[key];
  if(arm==='ast'){
-  env.CJCJ_NATIVE_SOURCE_SELECTION=JSON.stringify({ast:{repository:'file:///fixture-ast',commit:'a'.repeat(40)}});
+  await fs.mkdir(work+'/workspace',{recursive:true});
+  await fs.writeFile(work+'/workspace/.source-selection.json',JSON.stringify({compiler:{url:'file:///fixture-ast',tag:'a'.repeat(40)}}));
   locations.installations={llvm:{install:'host',buildResult:'llvm.json'},ast:{install:'host',buildResult:'ast.json'}};
   await fs.writeFile(work+'/inputs/llvm.json',JSON.stringify({commits:{compiler:'b'.repeat(40),llvm:env.CJCJ_NATIVE_LLVM_REF}}));
   await fs.writeFile(work+'/inputs/ast.json','{}');

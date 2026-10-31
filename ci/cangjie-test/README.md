@@ -27,12 +27,15 @@ split the full worker budget (a single suite gets all of it, Conformance split
 evenly across its two pools). The runner refuses to start when load1 exceeds
 200 or the output filesystem has under 8GiB free, and appends load/disk samples
 to `load-monitor.log` once a minute while running.
-The runner enters a synchronous systemd scope using the last 96 CPUs in the
-caller's affinity and a 96-CPU quota (`CPUQuota=9600%`). The scope is stopped
-when the caller exits or receives a termination signal. No SDK executable is
-wrapped or changed. This implements the #504 advisor ruling of 2026-09-27
-20:3x: explicit jobs-option tests retain their arguments; nested compiler CPU
-usage is bounded by the inherited scope, not by rewriting their jobs options.
+The runner enters a synchronous systemd scope using the caller's actual process
+CPU affinity and the tightest CPU quota across its cgroup ancestors, capped by
+that affinity. It checks the requested bounds again before creating the scope
+and checks the actual child bounds before any suite starts. Finite parent memory
+and swap limits also carry into the new scope. A four-CPU caller
+therefore stays within four CPUs; there is no 96-CPU minimum. The scope is stopped
+when the caller exits or receives a termination signal. No SDK executable or
+explicit test jobs argument is rewritten. CPU selection/validation lives in
+`envelope.mjs`; the Python adapter retains its Linux parent-death and signal hooks.
 `--compiler-jobs` accepts 1 or 2 for Conformance's compiler flags. Maple uses
 the upstream compiler options, including diagnostic and explicit jobs tests.
 

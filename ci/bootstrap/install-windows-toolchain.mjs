@@ -9,9 +9,9 @@ import {fileURLToPath} from 'node:url';
 import {download} from '../../build/lib/archive.mjs';
 import {command,privateRoot} from './sdk-flow.mjs';
 export const WINDOWS_TOOLCHAIN=Object.freeze({
- directory:'llvm-mingw-20220906-msvcrt-x86_64',
- url:'https://github.com/mstorsjo/llvm-mingw/releases/download/20220906/llvm-mingw-20220906-msvcrt-x86_64.zip',
- sha256:'1b63120c346ff78a4e3dba77101a535434a62122d3b44021438a77bdf1b4679a',bytes:124197419});
+ directory:'llvm-mingw-20261020-msvcrt-x86_64',
+ url:'https://github.com/mstorsjo/llvm-mingw/releases/download/20261020/llvm-mingw-20261020-msvcrt-x86_64.zip',
+ sha256:'52a3e3f584a74c3cde8ceb0c6960549683178e03b36818cb02b7ed109a68ff67',bytes:172961237});
 export async function installWindowsToolchain({work,archive,env=process.env}) {
  if(process.platform!=='win32'||process.arch!=='x64')throw Error('WINDOWS_TOOLCHAIN_NATIVE_REQUIRED');
  work=await privateRoot(work);await fs.mkdir(work,{recursive:true});

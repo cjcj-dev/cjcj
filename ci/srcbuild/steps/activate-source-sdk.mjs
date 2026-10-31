@@ -1,6 +1,7 @@
 #!/usr/bin/env zx
 
 import crypto from 'node:crypto';
+import {nativeLlvmInputs} from '../../native-llvm-inputs.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import zlib from 'node:zlib';
@@ -15,10 +16,10 @@ const workspace = process.env.CANGJIE_WORKSPACE;
 const githubEnv = process.env.GITHUB_ENV;
 const githubPath = process.env.GITHUB_PATH;
 const targetKey = process.env.CJCJ_SRCBUILD_TARGET;
-const hostSdk = process.env.CJCJ_SRCBUILD_HOST_SDK;
+const hostSdk = process.env.CJCJ_OFFICIAL_SDK_ROOT;
 if (!workspace || !githubEnv || !githubPath || !targetKey || !hostSdk) {
   throw new Error(
-    'CANGJIE_WORKSPACE, GITHUB_ENV, GITHUB_PATH, CJCJ_SRCBUILD_TARGET and CJCJ_SRCBUILD_HOST_SDK are required',
+    'CANGJIE_WORKSPACE, GITHUB_ENV, GITHUB_PATH, CJCJ_SRCBUILD_TARGET and CJCJ_OFFICIAL_SDK_ROOT are required',
   );
 }
 const target = getTarget(targetKey);
@@ -33,28 +34,16 @@ const fixedRoot = path.resolve(process.env.CJCJ_FIXED_LLVM_DIR || '.srcbuild/fix
 const llvmBin = path.join(sdk, 'third_party', 'llvm', 'bin');
 const llvmLib = path.join(sdk, 'third_party', 'llvm', 'lib');
 
-function parsePinFile(text, label) {
-  const result = {};
-  for (const line of text.split(/\r?\n/).filter(Boolean)) {
-    const separator = line.indexOf('=');
-    if (separator < 1) throw new Error(`${label}: malformed line: ${line}`);
-    const key = line.slice(0, separator);
-    if (key in result) throw new Error(`${label}: duplicate key: ${key}`);
-    result[key] = line.slice(separator + 1);
-  }
-  return result;
-}
-
 const sha256 = data => crypto.createHash('sha256').update(data).digest('hex');
 const manifestFile = path.join(fixedRoot, 'llvm-tools.manifest');
 const manifest = Object.fromEntries(parseLlvmToolsManifest(
   await fs.readFile(manifestFile, 'utf8'),
   {label: manifestFile, schema: 'tuple'},
 ).values);
-const pins = parsePinFile(await fs.readFile(path.join(root, 'ci', 'llvm_pin.env'), 'utf8'), 'ci/llvm_pin.env');
+const pins = nativeLlvmInputs();
 for (const [key, expected] of [
   ['PLATFORM', spec.llvmPlatform],
-  ['LLVM_SHA', pins.LLVM_SHA],
+  ['LLVM_SHA', pins.CJCJ_NATIVE_LLVM_REF],
   ['CANGJIE_COMPILER_SHA', pins.CANGJIE_COMPILER_SHA],
   ['FLATBUFFERS_SHA', pins.FLATBUFFERS_SHA],
 ]) {
@@ -130,7 +119,7 @@ const runtimeBinary = path.join(runtimeLib, spec.runtimeLibrary);
 await assertColouredRuntime(runtimeBinary, path.join(hostSdk, 'runtime', 'lib',
   spec.hostRuntimeTuple || spec.runtimeTuple, spec.hostRuntimeLibrary || spec.runtimeLibrary));
 assertRuntimeSplit({
-  hostSdk: process.env.CJCJ_SRCBUILD_HOST_SDK,
+  hostSdk: process.env.CJCJ_OFFICIAL_SDK_ROOT,
   targetSdk: sdk,
   target,
 });

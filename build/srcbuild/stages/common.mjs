@@ -27,7 +27,7 @@ export function consumerSdk(config, output = 'output') {
 // Old standalone adapters may only carry an environment; a resolved source
 // build always supplies the selected plan and takes precedence over that input.
 export function bootstrapHostSdk(config, env = process.env) {
-  return config.selection?.bootstrapHost.install ?? config.officialSdkRoot ?? env.CJCJ_SRCBUILD_HOST_SDK;
+  return config.selection?.bootstrapHost.install ?? config.officialSdkRoot ?? env.CJCJ_OFFICIAL_SDK_ROOT;
 }
 
 export function baseEnv(config, base = process.env) {
@@ -52,7 +52,7 @@ export function baseEnv(config, base = process.env) {
   }
   const env = {
     ...base,
-    ...(hostSdk ? {CJCJ_SRCBUILD_HOST_SDK: hostSdk} : {}),
+    ...(hostSdk ? {CJCJ_OFFICIAL_SDK_ROOT: hostSdk} : {}),
     ARCH: spec.arch,
     SDK_NAME: spec.sdkName,
     CANGJIE_VERSION: config.cangjieVersion,
@@ -192,8 +192,7 @@ export function cmakePrefixPathFor(config) {
   if (config.target.spec.needsMingw) {
     parts.push(path.join(mingw.installPath(config.buildRoot), mingw.TARGET_TRIPLE));
   } else if (config.target.spec.needsStaticLibs) {
-    const ncursesRoot = path.join(config.buildRoot, `ncurses-${staticLibs.NCURSES_VERSION}`, 'usr');
-    const libeditRoot = path.join(config.buildRoot, 'libedit-3.1');
+    const {ncurses:ncursesRoot,libedit:libeditRoot}=staticLibs.installationPaths(config.buildRoot);
     if (fs.existsSync(ncursesRoot) || fs.existsSync(libeditRoot)) parts.push(staticLibs.cmakePrefixPath(config.buildRoot));
   }
   return parts.length ? parts.join(path.delimiter) : null;
@@ -229,10 +228,10 @@ export function pythonExe() {
   return 'python3';
 }
 
-export async function runBuildPy(config, cwd, args, {stageName, extraEnv, cpuSet} = {}) {
+export async function runBuildScript(config, cwd, args, {stageName, extraEnv, cpuSet, script = 'build.py'} = {}) {
   requireDir(cwd, {stage: stageName});
   const envOverlay = extraEnv ? mergedEnv(config, extraEnv) : mergedEnv(config);
-  const argv=[...(cpuSet?['taskset','-c',cpuSet]:[]), pythonExe(), 'build.py', ...args];
+  const argv=[...(cpuSet?['taskset','-c',cpuSet]:[]), script.endsWith('.mjs') ? process.execPath : pythonExe(), script, ...args];
   const observation={stage:stageName,argv,cwd};
   try {
     const result=await run(argv,{cwd,envOverlay,stage:stageName});
@@ -245,6 +244,10 @@ export async function runBuildPy(config, cwd, args, {stageName, extraEnv, cpuSet
       await atomicJson(path.join(config.workspace,'build/native-build.json'),config.production);
     }
   }
+}
+
+export function runBuildPy(config, cwd, args, options = {}) {
+  return runBuildScript(config, cwd, args, {...options, script:'build.py'});
 }
 
 export function ensureDir(directory) {

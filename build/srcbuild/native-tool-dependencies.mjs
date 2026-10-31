@@ -1,15 +1,15 @@
-// Fixed ordinary source inputs shared by cjlint/cjprof. Prepare each missing
-// checkout once before concurrent producers; their build.py remains the actual
-// CMake/JNI producer and validates the same selection on warm builds.
+// cjlint's ordinary JSON source input. Cangjie cjprof receives its SDK/JNI
+// inputs directly and no longer consumes the retired C++ dependency closure.
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {shallowClone,assertSourceIdentity,fetchSource} from '../lib/git.mjs';
 import {run} from '../lib/runner.mjs';
 import {readJson} from '../../ci/bootstrap/sdk-flow.mjs';
-const sentinels={json:'include/nlohmann/json.hpp',httplib:'httplib.h',runtime:'runtime/src/Demangler/CMakeLists.txt',bounds:'include/securec.h'};
+const sentinels={json:'include/nlohmann/json.hpp'};
 export async function readNativeToolDependencies(file,names) {
+  if(!names.includes('cjlint'))return {};
   if(!file)throw Error('TOOLS_DEPENDENCIES_REQUIRED: --tools-dependencies <fixed source JSON>');
-  const selection=await readJson(file),needed=names.includes('cjprof')?Object.keys(sentinels):['json'];
+  const selection=await readJson(file),needed=['json'];
   const result={};
   for(const name of needed) {
     const row=selection[name];
@@ -19,7 +19,7 @@ export async function readNativeToolDependencies(file,names) {
   return result;
 }
 export async function prepareNativeToolDependencies(config,names) {
-  if(!names.some(name=>['cjlint','cjprof'].includes(name)))return;
+  if(!names.includes('cjlint'))return;
   if(process.env.CANGJIE_BUILD_DRY_RUN==='1') {
     if(!config.toolsDependencies)throw Error('TOOLS_DEPENDENCIES_REQUIRED');
     return;

@@ -1,4 +1,5 @@
 #!/usr/bin/env zx
+import {nativeLlvmInputs} from '../native-llvm-inputs.mjs';
 
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -53,7 +54,9 @@ const platform = {'linux-x64': 'linux_x86_64', 'linux-aarch64': 'linux_aarch64',
   'darwin-arm64': 'darwin_aarch64', 'darwin-x64': 'darwin_x86_64', 'windows-x64': 'windows_x86_64'}[target];
 if (!platform) throw new Error(`BOOTSTRAP_TARGET_UNSUPPORTED: ${target}`);
 const runtimeSelection = await resolveRuntimeSource();
-process.env.RUNTIME_REF = runtimeSelection.runtimeRef;
+const nativeInputs=nativeLlvmInputs(process.env);
+process.env.CJCJ_NATIVE_LLVM_REF=nativeInputs.CJCJ_NATIVE_LLVM_REF;
+process.env.CJCJ_NATIVE_RUNTIME_REF = runtimeSelection.runtimeRef;
 process.env.RUNTIME_SRC_URL = runtimeSelection.sourceUrl;
 // Resolve caller-owned host selections before importing target dependency pins.
 const executionHost = hostPlatform();
@@ -113,7 +116,7 @@ const colourRt = verifyRuntime();
 const runtimePinFile = path.resolve(inputsWork, 'runtime-selection.env');
 await writeRuntimeSelection(runtimePinFile);
 
-const llvmSha = process.env.LLVM_SHA || '';
+const llvmSha = process.env.CJCJ_NATIVE_LLVM_REF || '';
 if (!/^[0-9a-f]{40}$/.test(llvmSha)) throw new Error('LLVM_SHA pin missing');
 
 const requestedCpp = process.env.CJCJ_BOOTSTRAP_CPP_SRC || process.env.CANGJIE_CPP_SRC;
@@ -150,7 +153,7 @@ if (process.platform === 'linux' || darwin || process.env.CJCJ_BOOTSTRAP_DYLIB_A
     throw new Error(`LLVM_DYLIB_SHA256_MISMATCH expected=${dylibPin} actual=${colourDigest} file=${colourLlvm}`);
   }
   const dylibManifest = JSON.parse(fs.readFileSync(path.join(dylibRoot, 'manifest.json'), 'utf8'));
-  if ((runtimeSelection.overrideRef || dylibManifest.runtime_sha !== undefined)
+  if ((runtimeSelection.nativePair || runtimeSelection.overrideRef || dylibManifest.runtime_sha !== undefined)
       && dylibManifest.runtime_sha !== runtimeSelection.runtimeRef) {
     throw new Error('LLVM_DYLIB_RUNTIME_MISMATCH');
   }
@@ -181,7 +184,7 @@ const exported = {
   COLOUR_RT_ARTIFACT_ID: process.env.COLOUR_RT_ARTIFACT_ID,
   COLOUR_RT_MANIFEST_SHA256: process.env.COLOUR_RT_MANIFEST_SHA256,
   CJCJ_BOOTSTRAP_RUNTIME_PIN: runtimePinFile,
-  RUNTIME_REF: runtimeSelection.runtimeRef,
+  CJCJ_NATIVE_RUNTIME_REF: runtimeSelection.runtimeRef,
   RUNTIME_SRC_URL: runtimeSelection.sourceUrl,
   CJCJ_BOOTSTRAP_BASE: path.resolve(base),
   CJCJ_BOOTSTRAP_BASE_ARCHIVE: hostSdk.archive,

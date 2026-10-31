@@ -6,7 +6,7 @@ const root=process.env.RELEASE_EVIDENCE_TEST_ROOT;if(!root)throw new Error('RELE
 await fs.mkdir(root,{recursive:true});
 test('formal runtime source resolves to repository pin',async()=>{const r=await resolveRuntimeSource({});assert.equal(r.runtimeRef,pins.RUNTIME_REF);assert.equal(r.sourceUrl,pins.RUNTIME_SRC_URL);});
 test('runtime ref, source URL and override authorization are independently checked',async()=>{
- await assert.rejects(resolveRuntimeSource({RUNTIME_REF:'a'.repeat(40)}),/ref mismatch/);
+ await assert.rejects(resolveRuntimeSource({CJCJ_NATIVE_RUNTIME_REF:'a'.repeat(40)}),/NATIVE_RUNTIME_EXPLICIT_PAIR_REQUIRED/);
  await assert.rejects(resolveRuntimeSource({RUNTIME_SRC_URL:'https://invalid/runtime'}),/URL mismatch/);
  await assert.rejects(resolveRuntimeSource({CJCJ_RUNTIME_REF_OVERRIDE:'a'.repeat(40)}),/explicit/);
  await assert.rejects(resolveRuntimeSource({CJCJ_RUNTIME_REF_OVERRIDE:'short',CJCJ_ALLOW_RUNTIME_OVERRIDE:'1'}),/40-character/);
@@ -29,10 +29,12 @@ test('formal loader carries the explicit component pair through handoff and reje
  const run=async label=>{const r=spawnSync(process.execPath,[new URL('../../ci/load_runtime_pin.mjs',import.meta.url).pathname],{env,encoding:'utf8'});
   await fs.writeFile(work+'/'+label+'.json',JSON.stringify({rc:r.status,signal:r.signal,stdout:r.stdout,stderr:r.stderr}));return r;};
  const normal=await run('normal');assert.equal(normal.status,0,normal.stderr);
- await assert.rejects(resolveRuntimeSource({...env,CJCJ_NATIVE_RUNTIME_ARTIFACT:''}),/COMPONENT_SELECTION_REQUIRED/);
+ // A source pair also drives the runtime-only producer, without an SDK artifact.
+ assert.equal((await resolveRuntimeSource({...env,CJCJ_NATIVE_RUNTIME_ARTIFACT:''})).runtimeRef,env.CJCJ_NATIVE_RUNTIME_REF);
+ await assert.rejects(resolveRuntimeSource({CJCJ_NATIVE_RUNTIME_ARTIFACT:'frozen-runtime'}),/COMPONENT_SELECTION_REQUIRED/);
  assert.equal((await resolveRuntimeSource({...env,CJCJ_NATIVE_RUNTIME_ARTIFACT:'frozen-runtime'})).runtimeRef,env.CJCJ_NATIVE_RUNTIME_REF);
  const handed=Object.fromEntries((await fs.readFile(env.GITHUB_ENV,'utf8')).trim().split('\n').map(s=>s.split('=')));
- assert.equal(handed.RUNTIME_REF,env.CJCJ_NATIVE_RUNTIME_REF);
+ assert.equal(handed.CJCJ_NATIVE_RUNTIME_REF,env.CJCJ_NATIVE_RUNTIME_REF);
  assert.equal(handed.CJCJ_NATIVE_LLVM_REF,env.CJCJ_NATIVE_LLVM_REF);
  assert.equal(handed.CJCJ_NATIVE_HOST_VERSION,env.CJCJ_NATIVE_HOST_VERSION);
  assert.equal(handed.CJCJ_ALLOW_RUNTIME_OVERRIDE,undefined);

@@ -5,7 +5,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 const [directory, llvmSource, runtimeSource] = process.argv.slice(2);
-const {LLVM_SHA, CJCJ_NATIVE_RUNTIME_REF, LLVM_DYLIB_PLATFORM, LLVM_DYLIB_LIBRARY,
+const {CJCJ_NATIVE_LLVM_REF: LLVM_SHA, CJCJ_NATIVE_RUNTIME_REF, LLVM_DYLIB_PLATFORM, LLVM_DYLIB_LIBRARY,
   GITHUB_RUN_ID, GITHUB_RUN_ATTEMPT, GITHUB_ENV} = process.env;
 if (!directory || !llvmSource || !runtimeSource) throw new Error('LLVM_DYLIB_SOURCE_LOCATIONS_REQUIRED');
 for (const [source, sha] of [[llvmSource, LLVM_SHA], [runtimeSource, CJCJ_NATIVE_RUNTIME_REF]]) {

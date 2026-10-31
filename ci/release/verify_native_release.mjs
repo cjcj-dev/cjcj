@@ -53,8 +53,8 @@ export async function verifyNativeRelease(options, env = process.env) {
     }
   }
   await readInstalledStdxInputs({sdk,platform:target.spec.llvmPlatform,requireFull:true});
-  await selectInstalledColourSdk(sdk, {...env, RUNTIME_REF: runtimeRef});
-  const installedEnv = await colourEnvironment('run', {...env, RUNTIME_REF: runtimeRef});
+  await selectInstalledColourSdk(sdk, {...env, CJCJ_NATIVE_RUNTIME_REF: runtimeRef});
+  const installedEnv = await colourEnvironment('run', {...env, CJCJ_NATIVE_RUNTIME_REF: runtimeRef});
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
   await command([process.execPath, path.join(root, 'scripts/verify_packaged_cjdb.mjs'), sdk], {env: installedEnv});
   await command(['npx', '--yes', 'zx@8', path.join(root, 'ci/smoke/run_smoke.mjs'),

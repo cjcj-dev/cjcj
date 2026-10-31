@@ -70,7 +70,7 @@ async function fixture(label,{ios=false}={}){
  }
  const ndk=work+'/ndk',ohos=work+'/ohos';
  await fs.mkdir(ndk+'/toolchains/llvm/prebuilt',{recursive:true});await fs.mkdir(ohos+'/native/llvm/bin',{recursive:true});
- const env={...process.env,CANGJIE_WORKSPACE:work,CJCJ_BOOTSTRAP_WORK:work+'/native-bootstrap',RUNTIME_REF:ref,RUNTIME_VERSION:'1.3.0-fixture',CJCJ_STAGE3_CANGJIE_VERSION:'1.3.0-fixture',
+ const env={...process.env,CANGJIE_WORKSPACE:work,CJCJ_BOOTSTRAP_WORK:work+'/native-bootstrap',CJCJ_NATIVE_RUNTIME_REF:ref,RUNTIME_VERSION:'1.3.0-fixture',CJCJ_STAGE3_CANGJIE_VERSION:'1.3.0-fixture',
   ANDROID_NDK_ROOT:ndk,OHOS_SDK_HOME:ohos,CROSS_COMMAND_LOG:work+'/children.jsonl',CANGJIE_BUILD_JOBS:'2',STD_BUILD_JOBS:'1',CMAKE_BUILD_PARALLEL_LEVEL:'4',PYTHONDONTWRITEBYTECODE:'1'};
  if(ios){
   // Explicit platform/command fixture on Linux; no Darwin or iOS execution claim.
@@ -109,7 +109,7 @@ test('resource selection rejects invalid budgets and preserves distinct std sele
  for(const value of ['0','-1','1.5','bad','9007199254740992'])assert.throws(()=>crossBuildJobs({CANGJIE_BUILD_JOBS:value}),/CROSS_BUILD_JOBS/);
 });
 test('public runtime entry still rejects the wrong fixed source before build',async()=>{
- const f=await fixture('wrong-source'),r=f.invoke('android-runtime',{RUNTIME_REF:'a'.repeat(40)});
+ const f=await fixture('wrong-source'),r=f.invoke('android-runtime',{CJCJ_NATIVE_RUNTIME_REF:'a'.repeat(40)});
  assert.notEqual(r.status,0);assert.match(r.stderr,/runtime source mismatch/);
  assert.equal(await fs.stat(f.env.CROSS_COMMAND_LOG).catch(()=>null),null);
 });

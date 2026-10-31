@@ -27,15 +27,15 @@ async function fixture(t) {
     const artifact=await write(retained,native),entry=await write(rel,native);
     entry.recipe=await write(rel+'.entry',['cjcj-sdk-entry-v1','2',retained,'linux','native-target:x64','third_party/llvm/lib','runtime/lib/linux_x86_64_cjnative','lib/linux_x86_64_cjnative','tools/lib'].join('\n')+'\n');
     const payloads={};
-    for(const relative of name==='cjpm'?['tools/config/cangjie-repo.toml']:['tools/lib/libcjprof.so','tools/lib/libcjprof-jni.so','tools/config/static/index.html','.target-tools/tools/config/static/index.html']) {
+    for(const relative of name==='cjpm'?['tools/config/cangjie-repo.toml']:['tools/share/java/cjprof.jar','tools/lib/libcjprof-cangjie.so','tools/lib/libcjprof-jni.so','tools/config/static/index.html','.target-tools/tools/config/static/index.html']) {
       const row=await write(relative,relative.endsWith('.so')?native:'reader config');
       payloads[relative]={source:'/unavailable-original/'+relative,sha256:row.sha256};
       input.payloadFiles[relative]={sha256:row.sha256,producers:[name]};
     }
     input.files[rel]={sha256:artifact.sha256,artifact,entry,producer:{source:{status:'resolved',repository:'fixture://source',commit:'a'.repeat(40)},artifact:structuredClone(artifact),
-      build:{directory:name,rc:0,platform:'linux_x86_64',inputs:{stage,artifacts},payloads:structuredClone(payloads),
+      build:{directory:'packages/'+name,rc:0,platform:'linux_x86_64',inputs:{stage,artifacts},payloads:structuredClone(payloads),
         dependencies:Object.fromEntries(['json','httplib','runtime','bounds'].map(key=>[key,{repo:'fixture://'+key,commit:'b'.repeat(40),changes_sha256:'c'.repeat(64)}])),
-        nativeConfiguration:{native:{values:{CMAKE_BUILD_TYPE:'Release',CMAKE_CXX_COMPILER:'/fixed/clang++',CJPROF_TARGET:'native'}},jni:{values:{CMAKE_BUILD_TYPE:'Release',CMAKE_CXX_COMPILER:'/fixed/clang++',CJPROF_TARGET:'native',CJPROF_LIBRARY:payloads['tools/lib/libcjprof.so']?.source}}}},install:{rc:0,artifact:structuredClone(artifact),payloads}}};
+        nativeConfiguration:{cangjie:{values:{language:'Cangjie',sdk:'/selected/sdk',jdk:'/selected/jdk',runtimeHeader:'/selected/Cangjie.h',lombok:'/selected/lombok.jar'}},native:{values:{CMAKE_BUILD_TYPE:'Release',CMAKE_CXX_COMPILER:'/fixed/clang++',CJPROF_TARGET:'native'}},jni:{values:{CMAKE_BUILD_TYPE:'Release',CMAKE_CXX_COMPILER:'/fixed/clang++',CJPROF_TARGET:'native',CJPROF_LIBRARY:payloads['tools/lib/libcjprof-cangjie.so']?.source}}}},install:{rc:0,artifact:structuredClone(artifact),payloads}}};
   }
   const prof=input.files['tools/bin/cjprof'].producer;
   for(const [rel,row]of Object.entries(prof.install.payloads))row.build=structuredClone(prof.build.payloads[rel]);
@@ -52,9 +52,9 @@ readTest('reader accepts matching target facts after relocation without original
 const changes={
   'missing producer':f=>delete f.input.files['tools/bin/cjprof'].producer,
   'missing native build payload':f=>{delete f.input.files['tools/bin/cjprof'].producer.build.payloads;},
-  'missing fixed dependency':f=>{delete f.input.files['tools/bin/cjprof'].producer.build.dependencies.json;},
-  'JNI configuration mismatch':f=>{f.input.files['tools/bin/cjprof'].producer.build.nativeConfiguration.jni.values.CMAKE_BUILD_TYPE='Debug';},
-  'JNI parent mismatch':f=>{f.input.files['tools/bin/cjprof'].producer.build.nativeConfiguration.jni.values.CJPROF_LIBRARY='/unrelated/libcjprof.so';},
+  'missing fixed dependency':f=>{delete f.input.files['tools/bin/cjprof'].producer.build.nativeConfiguration.cangjie.values.runtimeHeader;},
+  'JNI configuration mismatch':f=>{f.input.files['tools/bin/cjprof'].producer.build.nativeConfiguration.cangjie.values.jdk='' ;},
+  'JNI parent mismatch':f=>{f.input.files['tools/bin/cjprof'].producer.build.nativeConfiguration.cangjie.values.language='C++';},
   'unresolved source':f=>{f.input.files['tools/bin/cjprof'].producer.source.status='unresolved';},
   'missing install artifact':f=>{delete f.input.files['tools/bin/cjprof'].producer.install.artifact;},
   'failed install':f=>{f.input.files['tools/bin/cjprof'].producer.install.rc=1;},
@@ -63,7 +63,7 @@ const changes={
   'old JNI bytes':f=>f.write('tools/lib/libcjprof-jni.so','changed'),
   'missing JNI payload fact':f=>{delete f.input.files['tools/bin/cjprof'].producer.install.payloads['tools/lib/libcjprof-jni.so'];},
   'missing body-relative static config':f=>fs.unlink(path.join(f.root,'.target-tools/tools/config/static/index.html')),
-  'wrong library producer':f=>{f.input.payloadFiles['tools/lib/libcjprof.so'].producers=['cjpm'];},
+  'wrong library producer':f=>{f.input.payloadFiles['tools/lib/libcjprof-cangjie.so'].producers=['cjpm'];},
 };
 for(const [name,change]of Object.entries(changes))readTest('per-tool refusal and independent control: '+name,async t=>{
   const f=await fixture(t);await change(f);await f.save();const result=await toolReadiness(f.root);
@@ -74,15 +74,15 @@ for(const key of ['compiler','stdCore','runtime'])readTest('reject changed produ
   const result=await toolReadiness(f.root);assert.equal(result.cjpm.ready,false);assert.match(result.cjpm.reason,/installed bytes differ/);
 });
 
-readTest('normal native install bytes remain distinct from build bytes',async t=>{
+readTest('Cangjie cjprof copied payload cannot be relabelled as an install transformation',async t=>{
   const f=await fixture(t),prof=f.input.files['tools/bin/cjprof'].producer;
   // Reader-only normal install transformation record; no native install is
   // claimed by this fixture. JNI and copied config remain byte-identical.
   prof.artifact.sha256='d'.repeat(64);
-  prof.build.payloads['tools/lib/libcjprof.so'].sha256='e'.repeat(64);
-  prof.install.payloads['tools/lib/libcjprof.so'].build.sha256='e'.repeat(64);
+  prof.build.payloads['tools/lib/libcjprof-cangjie.so'].sha256='e'.repeat(64);
+  prof.install.payloads['tools/lib/libcjprof-cangjie.so'].build.sha256='e'.repeat(64);
   await f.save();const result=await toolReadiness(f.root);
-  assert.equal(result.cjprof.ready,true,result.cjprof.reason);assert.equal(result.cjpm.ready,true,result.cjpm.reason);
+  assert.equal(result.cjprof.ready,false);assert.match(result.cjprof.reason,/installed copied payload differs from build/);assert.equal(result.cjpm.ready,true,result.cjpm.reason);
 });
 
 // The externally executed reader is the same entry used by environment.py.
@@ -90,20 +90,20 @@ function publicRead(root) {
   const r=spawnSync(process.execPath,[fileURLToPath(new URL('../../ci/cangjie-test/tool-readiness.mjs',import.meta.url)),root],{encoding:'utf8'});
   assert.equal(r.status,0,r.stderr);return JSON.parse(r.stdout);
 }
-readTest('public readiness reuses native payload across unrelated stage and SDK changes but keeps CJ pairing',async t=>{
+readTest('public readiness rejects changed SDK pairing for Cangjie cjprof and cjpm',async t=>{
   const f=await fixture(t),before=JSON.stringify(f.input.files['tools/bin/cjprof'].producer);
   await f.write('STAGE-INPUTS.json',JSON.stringify({platform:'linux_x86_64',compilerFile:'libexec/compiler',fixture:'another stage'}));
   for(const key of ['compiler','stdCore','runtime'])await f.write(f.input.files['tools/bin/cjpm'].producer.build.inputs.artifacts[key].sdkRelative,'different SDK input');
   const result=publicRead(f.root);
-  assert.equal(result.cjprof.ready,true,result.cjprof.reason);
+  assert.equal(result.cjprof.ready,false);assert.match(result.cjprof.reason,/producer SDK selection differs/);
   assert.equal(result.cjpm.ready,false);assert.match(result.cjpm.reason,/producer SDK selection differs/);
   assert.equal(JSON.stringify(f.input.files['tools/bin/cjprof'].producer),before,'old producer facts are retained');
 });
 readTest('native filename cannot bypass recorded native producer and actual configuration',async t=>{
   const f=await fixture(t),p=f.input.files['tools/bin/cjprof'].producer;
-  for(const change of [()=>{p.build.directory='cjpm';},()=>{p.build.directory='cjprof';delete p.build.nativeConfiguration.native.values.CMAKE_CXX_COMPILER;}]) {
+  for(const change of [()=>{p.build.directory='packages/cjpm';},()=>{p.build.directory='packages/cjprof';delete p.build.nativeConfiguration.cangjie.values.language;}]) {
     change();await f.save();const result=publicRead(f.root);
-    assert.equal(result.cjprof.ready,false);assert.match(result.cjprof.reason,/native (producer directory differs|configuration missing)/);
+    assert.equal(result.cjprof.ready,false);assert.match(result.cjprof.reason,/producer directory differs|Cangjie JNI configuration missing/);
     assert.equal(result.cjpm.ready,true);
   }
 });
@@ -113,42 +113,84 @@ async function astTool(f,name) {
   template.artifact=await f.write(retained,await fs.readFile('/usr/bin/true'));
   template.entry=await f.write(rel,await fs.readFile('/usr/bin/true'));
   template.entry.recipe=await f.write(rel+'.entry',['cjcj-sdk-entry-v1','2',retained,'linux','native-target:x64','third_party/llvm/lib','runtime/lib/linux_x86_64_cjnative','lib/linux_x86_64_cjnative','tools/lib'].join('\n')+'\n');
-  const p=template.producer;p.build.directory=name==='lsp'?'cangjie-language-server':name;p.install.payloads={};
+  const p=template.producer;p.build.directory='packages/'+name;p.install.payloads={};
   if(name==='cjfmt') {
     const config=await f.write('tools/config/cangjie-format.toml','format config');
     p.install.payloads[config.path]={sha256:config.sha256};f.input.payloadFiles[config.path]={sha256:config.sha256,producers:[name]};
   }
-  if(name==='cjlint') {
-    p.build.payloads={};
-    for(const file of ['tools/lib/libcjlint.so','tools/config/rules.json']) {
-      const row=await f.write(file,'lint fixture'),built={source:'/fixture/'+file,sha256:row.sha256};
-      p.build.payloads[file]=built;p.install.payloads[file]={...built,build:{...built}};f.input.payloadFiles[file]={sha256:row.sha256,producers:[name]};
-    }
-  }
   const ast=await f.write('tools/lib/libcangjie-lsp.so','AST fixture');p.build.inputs.artifacts.nativeAst={sdkRelative:ast.path,sha256:ast.sha256};
   f.input.files[rel]=template;await f.save();return {rel,p};
 }
-for(const name of ['cjcompat','cjfmt','cjlint','lsp'])readTest('public '+name+' retains AST linkage and its actual compiler/macro edges',async t=>{
-  const f=await fixture(t),{rel,p}=await astTool(f,name),publicName=path.basename(rel);
-  assert.equal(publicRead(f.root)[publicName].ready,true);
-  await f.write('STAGE-INPUTS.json',JSON.stringify({...p.build.inputs.stage,fixture:'new label only'}));
-  assert.equal(publicRead(f.root)[publicName].ready,true,'unrelated stage label is not a native dependency');
-  await f.write('tools/lib/libcangjie-lsp.so','changed AST');
-  let r=publicRead(f.root);assert.equal(r[publicName].ready,false);assert.match(r[publicName].reason,/installed bytes differ: tools\/lib\/libcangjie-lsp/);assert.equal(r.cjprof.ready,true);
-  await f.write('tools/lib/libcangjie-lsp.so','AST fixture');
-  for(const key of ['compiler','stdCore','runtime']) {
-    const file=p.build.inputs.artifacts[key].sdkRelative,old=await fs.readFile(path.join(f.root,file));
-    await f.write(file,'changed macro dependency');r=publicRead(f.root);
-    assert.equal(r[publicName].ready,!['cjlint','lsp'].includes(name),key+': '+r[publicName].reason);
-    if(['cjlint','lsp'].includes(name))assert.match(r[publicName].reason,/installed bytes differ/);
-    await f.write(file,old);
+async function cangjieLsp(f) {
+  const template=structuredClone(f.input.files['tools/bin/cjprof']),p=template.producer;
+  const rel='tools/bin/LSPServer',retained='.target-tools/tools/lsp/bin/LSPServer';
+  template.artifact=await f.write(retained,await fs.readFile('/usr/bin/true'));
+  template.entry=await f.write(rel,await fs.readFile('/usr/bin/true'));
+  template.entry.recipe=await f.write(rel+'.entry',['cjcj-sdk-entry-v1','2',retained,'linux','native-target:x64','.target-tools/tools/lsp/lib'].join('\n')+'\n');
+  p.artifact=structuredClone(template.artifact);p.install.artifact=structuredClone(template.artifact);
+  p.build.directory='packages/lsp';p.build.payloads={};p.install.payloads={};
+  p.build.nativeConfiguration={cangjie:{values:{rc:0,signal:null,error:null,inputs:{sdk:'/host-H',frontendPackages:'/fixed-frontend',llvmLibrary:'/libLLVM.so',runtimeConfig:'/config.o',jsonBuild:'/json',llvmShim:'/shim.o'}}}};
+  for(const tail of ['libcangjie-runtime.so','libLLVM-15.so']) {
+    const row=await f.write('.target-tools/tools/lsp/lib/'+tail,'normal LSP install '+tail);
+    p.install.payloads[row.path]={source:'/producer/'+tail,sha256:row.sha256};
+    f.input.payloadFiles[row.path]={sha256:row.sha256,producers:['lsp']};
   }
+  delete p.build.inputs.artifacts.nativeAst;
+  f.input.files[rel]=template;await f.save();return p;
+}
+readTest('public Cangjie LSP binds its normal frontend payload and selected SDK without a C++ AST fallback',async t=>{
+  const f=await fixture(t),p=await cangjieLsp(f);
+  assert.equal(publicRead(f.root).LSPServer.ready,true,publicRead(f.root).LSPServer.reason);
+  const payload='.target-tools/tools/lsp/lib/libcangjie-runtime.so',old=await fs.readFile(path.join(f.root,payload));
+  await f.write(payload,'changed');assert.match(publicRead(f.root).LSPServer.reason,/installed bytes differ/);assert.equal(publicRead(f.root).cjprof.ready,true);
+  await f.write(payload,old);assert.equal(publicRead(f.root).LSPServer.ready,true);
+  const selected=p.build.nativeConfiguration.cangjie.values.inputs;
+  const frontend=selected.frontendPackages;delete selected.frontendPackages;await f.save();
+  assert.match(publicRead(f.root).LSPServer.reason,/Cangjie LSP input missing: frontendPackages/);
+  selected.frontendPackages=frontend;await f.save();assert.equal(publicRead(f.root).LSPServer.ready,true);
+  await f.write('STAGE-INPUTS.json',JSON.stringify({...p.build.inputs.stage,fixture:'different analysis SDK'}));
+  assert.match(publicRead(f.root).LSPServer.reason,/producer SDK selection differs/);
 });
-readTest('public readiness keeps separately installed compiler execution runtime for native macros',async t=>{
-  const f=await fixture(t),{p}=await astTool(f,'cjlint');
+readTest('public LSP readiness retains separately installed compiler execution dependencies',async t=>{
+  const f=await fixture(t),p=await cangjieLsp(f);
   const exec=await f.write('.compiler-exec/runtime/lib/runtime.so','execution runtime');
   p.build.inputs.artifacts.executionRuntime={sdkRelative:exec.path,sha256:exec.sha256};await f.save();
-  assert.equal(publicRead(f.root).cjlint.ready,true);
+  assert.equal(publicRead(f.root).LSPServer.ready,true);
   await f.write(exec.path,'changed execution runtime');const r=publicRead(f.root);
-  assert.equal(r.cjlint.ready,false);assert.match(r.cjlint.reason,/installed bytes differ: .compiler-exec/);assert.equal(r.cjprof.ready,true);
+  assert.equal(r.LSPServer.ready,false);assert.match(r.LSPServer.reason,/installed bytes differ: .compiler-exec/);assert.equal(r.cjprof.ready,true);
+});
+
+for(const tool of ['cjfmt','cjcompat'])readTest('Cangjie '+tool+' binds its SDK inputs without the retired C++ AST library',async t=>{
+ const f=await fixture(t),{p}=await astTool(f,tool);
+ await fs.rm(path.join(f.root,'tools/lib/libcangjie-lsp.so'));
+ assert.equal(publicRead(f.root)[tool].ready,true);
+ const runtime=p.build.inputs.artifacts.runtime.sdkRelative;
+ await f.write(runtime,'different selected runtime');
+ assert.equal(publicRead(f.root)[tool].ready,false);
+ assert.match(publicRead(f.root)[tool].reason,/installed bytes differ/);
+});
+
+readTest('Cangjie lint requires explicit analysis facts, bundled modules and host libraries',async t=>{
+ const f=await fixture(t),template=structuredClone(f.input.files['tools/bin/cjprof']),p=template.producer;
+ const rel='tools/bin/cjlint',retain='.target-tools/tools/cjlint/',body=retain+'bin/cjlint';
+ template.artifact=await f.write(body,await fs.readFile('/usr/bin/true'));
+ template.entry=await f.write(rel,await fs.readFile('/usr/bin/true'));
+ template.entry.recipe=await f.write(rel+'.entry',['cjcj-sdk-entry-v1','2',body,'linux','native-target:x64',retain+'lib'].join('\n')+'\n');
+ p.artifact=structuredClone(template.artifact);p.install.artifact=structuredClone(template.artifact);
+ p.build.directory='packages/cjlint';p.build.dependencies={};p.build.payloads={};p.install.payloads={};
+ const values={language:'Cangjie',host:{sdk:'/execution-H'},analysis:{sdk:'/analysis-R'},frontend:{ref:'b'.repeat(40),artifacts:'/frontend',runtimeObject:'/config.o',llvmShim:'/shim.o',llvmLibrary:'/libLLVM.so'}};
+ p.build.nativeConfiguration={cangjie:{values}};
+ for(const tail of ['lib/libcangjie-runtime.so','runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so','config/cjlint_rule_list.json','modules/linux_x86_64_cjnative/std.core.cjo']) {
+  const row=await f.write(retain+tail,'selected '+tail),built={source:'/raw/'+tail,sha256:row.sha256};
+  p.build.payloads[row.path]=built;p.install.payloads[row.path]={...built,build:structuredClone(built)};f.input.payloadFiles[row.path]={sha256:row.sha256,producers:['cjlint']};
+ }
+ f.input.files[rel]=template;await f.save();assert.equal(publicRead(f.root).cjlint.ready,true);
+ const original=structuredClone(values.analysis);delete values.analysis;await f.save();
+ assert.match(publicRead(f.root).cjlint.reason,/analysis configuration missing/);assert.equal(publicRead(f.root).cjprof.ready,true);
+ values.analysis=original;await f.save();assert.equal(publicRead(f.root).cjlint.ready,true);
+ const module=retain+'modules/linux_x86_64_cjnative/std.core.cjo';await f.write(module,'changed');
+ assert.match(publicRead(f.root).cjlint.reason,/installed bytes differ/);
+ await f.write(module,'selected modules/linux_x86_64_cjnative/std.core.cjo');assert.equal(publicRead(f.root).cjlint.ready,true);
+ await f.write('STAGE-INPUTS.json',JSON.stringify({...p.build.inputs.stage,fixture:'different target SDK'}));
+ assert.match(publicRead(f.root).cjlint.reason,/producer SDK selection differs/,'host analysis evidence does not grant target SDK readiness');
 });

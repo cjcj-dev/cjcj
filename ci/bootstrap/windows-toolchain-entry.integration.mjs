@@ -37,8 +37,8 @@ test('formal Windows native action selects the fixed MSVCRT package without repl
  assert.equal(attempted.rc,1);assert.match(attempted.stderr,/WINDOWS_TOOLCHAIN_ARCHIVE/);
  assert.equal(await fs.stat(root+'/tool-env').then(()=>true,()=>false),false);
  const {WINDOWS_TOOLCHAIN:p}=await import('./install-windows-toolchain.mjs');
- assert.equal(p.url,'https://github.com/mstorsjo/llvm-mingw/releases/download/20220906/llvm-mingw-20220906-msvcrt-x86_64.zip');
- assert.equal(p.sha256,'1b63120c346ff78a4e3dba77101a535434a62122d3b44021438a77bdf1b4679a');
+ assert.equal(p.url,'https://github.com/mstorsjo/llvm-mingw/releases/download/20261020/llvm-mingw-20261020-msvcrt-x86_64.zip');
+ assert.equal(p.sha256,'52a3e3f584a74c3cde8ceb0c6960549683178e03b36818cb02b7ed109a68ff67');
 });
 test('public raw materialization overlays the actual new source config and preserves original dependency bytes',async()=>{
  const base=root+'/raw',art=root+'/artifact',input=root+'/input';await fs.mkdir(base);await fs.mkdir(art);
@@ -65,11 +65,11 @@ test('public native adapter passes absolute selected compiler and fixed source t
  const digest=hash(await fs.readFile(input+'/dep.tar')),commit='a'.repeat(40),compiler='53da07662223e1dbaa7711f4ef149d6ae7b3afea';
  const config={platform:'windows_x86_64',commits:{compiler,llvm:commit,runtime:commit,bounds:commit,flatbuffers:commit},compiler:'compiler',tools:{cc:'clang',cxx:'clang++',launcher:'sccache'}};
  for(const name of ['llvm','runtime','bounds','flatbuffers'])config[name+'Archive']={file:'dep.tar',sha256:digest};await json(input+'/native-cjdb.json',config);
- const env={...process.env,CJCJ_WINDOWS_TOOLCHAIN:root+'/selected-toolchain',CJCJ_NATIVE_LLVM_REF:commit,CJCJ_NATIVE_RUNTIME_REF:commit,CJCJ_NATIVE_HOST_VERSION:'1.3.0-alpha.20260925001050',CJCJ_NATIVE_SOURCE_SELECTION:JSON.stringify({ast:{repository:'file:///controlled-cpp',commit:compiler}})};
+ const env={...process.env,CJCJ_WINDOWS_TOOLCHAIN:root+'/selected-toolchain',CJCJ_NATIVE_LLVM_REF:commit,CJCJ_NATIVE_RUNTIME_REF:commit,CJCJ_NATIVE_HOST_VERSION:'1.3.0-alpha.20260925001050'};
  const r=await run('selected',[process.execPath,child,'job','build',input,root+'/job-work'],env);
  assert.equal(r.rc,1);assert.match(r.stderr,/NATIVE_CJDB_RUNNER_REQUIRED/);
  const actual=JSON.parse(await fs.readFile(root+'/job-work/native-cjdb.json'));assert.equal(actual.tools.cc,bin+'/clang.exe');assert.equal(actual.tools.cxx,bin+'/clang++.exe');assert.equal(actual.tools.launcher,'sccache');assert.equal(actual.commits.compiler,compiler);
- const bad=await run('wrong-pair',[process.execPath,child,'job','build',input,root+'/bad-job'],{...env,CJCJ_NATIVE_SOURCE_SELECTION:JSON.stringify({ast:{repository:'file:///bad',commit:'b'.repeat(40)}})});
+ const bad=await run('wrong-pair',[process.execPath,child,'job','build',input,root+'/bad-job'],{...env,CJCJ_NATIVE_LLVM_REF:'b'.repeat(40)});
  assert.equal(bad.rc,1);assert.match(bad.stderr,/NATIVE_JOB_SOURCE_PAIR/);
 });
 function sdkInputs(){const row=(commit,name)=>({commit,tree:'a'.repeat(40),repository:'/fixture/'+name+'.git',install:root+'/'+name,configuration:{fixture:true},buildResult:root+'/'+name+'/result.json',sourceRoot:root+'/'+name+'-producer'});const runtime=row(FIXED_INPUTS.runtime,'R');return{platform:'windows_x86_64',work:root+'/sdk-work',install:root+'/sdk',host:{version:readHostToolchainPin('windows_x86_64').replace(/^nightly-/,''),install:root+'/H'},llvm:row(FIXED_INPUTS.llvm,'N'),runtime,ast:row(FIXED_INPUTS.compiler,'AST'),h1:{...row(FIXED_INPUTS.h1,'H1'),product:root+'/H1/compiler'},compiler:row('b'.repeat(40),'C'),stdlib:{...runtime,install:root+'/std'},tools:{privateRoot:root+'/tools'}};}
@@ -83,7 +83,7 @@ test('actual SDK copy recipes and archive retain native runtime bytes and origin
  const stage=createBootstrapTargets(input).stages.find(s=>s.id==='stage0-run');
  for(const group of stage.entries.filter(g=>['bin','third_party/llvm/bin'].includes(g.directory)&&!g.names))for(const name of dlls)assert.ok(group.exclude.includes(name),'DLL must not become an executable wrapper');
  const hostCopy=stage.copies.find(c=>c.to===''&&c.owner==='H');assert.ok(dlls.every(n=>hostCopy.exclude.includes('bin/'+n)));
- const copies=stage.copies.filter(c=>c.owner==='N runtime'||c.owner==='N toolchain input'||c.to==='third_party/llvm'||c.to==='third_party/flatbuffers');
+ const copies=stage.copies.filter(c=>c.owner==='native toolchain runtime'||c.owner==='native toolchain input'||c.to==='third_party/llvm'||c.to==='third_party/flatbuffers');
  // N and AST use one native install in production. This bounded transport uses
  // the same physical directory, without pretending to build AST or an SDK.
  for(const c of copies)if(c.to==='third_party/flatbuffers')c.from=input.llvm.install+'/third_party/flatbuffers';

@@ -5,33 +5,16 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {makeRepos,REPO_NAMES} from '../../build/lib/config.mjs';
-import {nativePair} from '../runtime-pin.mjs';
-import {nativeSourceSelection} from '../bootstrap/native-source-selection.mjs';
 export function workflowSourceSelection(env=process.env) {
   const overrides=JSON.parse(env.CJCJ_SOURCE_SELECTION||'{}');
   if(!overrides||Array.isArray(overrides)||typeof overrides!=='object'
     ||Object.keys(overrides).some(name=>!REPO_NAMES.includes(name)))throw Error('WORKFLOW_SOURCE_SELECTION');
-  const pair=nativePair(env);
-  if(!pair) {
-    if(env.CANGJIE_COMPILER_URL&&env.CANGJIE_COMPILER_SHA)
-      overrides.compiler={url:env.CANGJIE_COMPILER_URL,tag:env.CANGJIE_COMPILER_SHA,...overrides.compiler};
-    if(env.RUNTIME_REF&&env.RUNTIME_SRC_URL) {
-      const row=overrides.runtime;
-      if(row&&(row.url!==undefined&&row.url!==env.RUNTIME_SRC_URL||row.tag!==undefined&&row.tag!==env.RUNTIME_REF))
-        throw Error('WORKFLOW_NATIVE_SOURCE_CONFLICT runtime');
-      overrides.runtime={url:env.RUNTIME_SRC_URL,tag:env.RUNTIME_REF};
-    }
-  }
-  if(pair) {
-    const {selection}=nativeSourceSelection(env,pair);
-    for(const [name,key] of [['compiler','ast'],['runtime','runtime']]) {
-      const selected={url:selection[key].repository,tag:selection[key].commit},given=overrides[name];
-      if(given&&(given.url!==undefined&&given.url!==selected.url||given.tag!==undefined&&given.tag!==selected.tag))
-        throw Error('WORKFLOW_NATIVE_SOURCE_CONFLICT '+name);
-      overrides[name]=selected;
-    }
-  }
-  const repos=makeRepos({overrides}),result={};
+  // Ordinary repository options and the canonical pair meet in buildConfig's
+  // resolver. Persist only those options; do not create a second native JSON
+  // environment selection alongside the workspace's normal source options.
+  if(env.CANGJIE_COMPILER_URL&&env.CANGJIE_COMPILER_SHA&&!overrides.compiler)
+    overrides.compiler={url:env.CANGJIE_COMPILER_URL,tag:env.CANGJIE_COMPILER_SHA};
+  const repos=makeRepos({overrides,env}),result={};
   for(const name of REPO_NAMES) {
     const {url,tag}=repos[name];
     if(!url||/[\r\n]/.test(url)||!/^[a-f0-9]{40}$/.test(tag||''))throw Error('WORKFLOW_FIXED_SOURCE_REQUIRED '+name);
@@ -39,7 +22,9 @@ export function workflowSourceSelection(env=process.env) {
     result[prefix+(name==='compiler'?'_URL':'_SRC_URL')]=url;
     result[prefix+(name==='compiler'?'_SHA':'_REF')]=tag;
   }
-  if(pair)result.LLVM_SHA=pair.llvm;
+  result.CJCJ_NATIVE_LLVM_REF=repos.llvm.tag;
+  result.CJCJ_NATIVE_RUNTIME_REF=repos.runtime.tag;
+  delete result.LLVM_REF;delete result.RUNTIME_REF;
   return result;
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)) {

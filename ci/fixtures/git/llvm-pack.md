@@ -1,8 +1,8 @@
 The three llvm.pack.00–02 files concatenate to one complete-tree shallow Git
-pack for the formal LLVM pin 7ed574d4ba6ff1ebeceeb339ab4795e0141e4a60.
+pack for the formal LLVM pin b957cfbc31cf22e70fe4bd646e92a6a6d45f7614.
 They were captured read-only from /root/cj_build/llvm_rebase using a fresh bare
 repository and `git fetch --depth 1 file:///root/cj_build/llvm_rebase
-7ed574d4ba6ff1ebeceeb339ab4795e0141e4a60:refs/heads/main`.
+b957cfbc31cf22e70fe4bd646e92a6a6d45f7614:refs/heads/main`.
 
 The pack is about 178 MiB, split at 64 MiB to fit GitHub's per-file limit.
 It retains the entire pin tree, without parent history or an alternate object

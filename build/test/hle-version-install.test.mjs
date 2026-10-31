@@ -26,7 +26,7 @@ async function setup(version) {
   console.log('HLE_COMMAND',JSON.stringify(commands.at(-1)));
   assert.equal(p.status,expected,p.stderr);return p;
  }
- const parser=path.join(tools,'hyperlangExtension/src/dtsparser');
+ const parser=path.join(tools,'packages/hle/src/dtsparser');
  const dependencies={typescript:'npm:typescript@4.9.5','https-proxy-agent':'7.0.6'};
  await write(path.join(parser,'package.json'),JSON.stringify({dependencies}));
  await write(path.join(parser,'analysis.js'),'// controlled parser payload');
@@ -55,10 +55,14 @@ for(const version of ['v1.1.0-alpha.53.1','0.3.6'])test('HLE descriptor/install/
   await f.install();
   const facts=JSON.parse(await fs.readFile(path.join(f.sdk,'tools/dtsparser/DEPENDENCIES.json'),'utf8'));
   for(const key of ['node','modules','cjbind'])for(const field of ['version','source','path'])assert.equal(facts[key][field],f.input[key][field],key+'.'+field);
-  const rows=[['cjpm','cjpm/dist/cjpm'],['cjfmt','cjfmt/build/build/bin/cjfmt'],['hle','hyperlangExtension/target/bin/main'],['LSPServer','cangjie-language-server/output/bin/LSPServer'],['cjcov','cjcov/dist/cjcov'],['cjtrace-recover','cjtrace-recover/dist/bin/cjtrace-recover'],['cjlint','cjlint/dist/bin/cjlint'],['cjprof','cjprof/dist/bin/cjprof'],['cjcompat','cjcompat/dist/bin/cjcompat']];
+  const rows=[['cjpm','packages/cjpm/dist/cjpm'],['cjfmt','packages/cjfmt/dist/bin/cjfmt'],['hle','packages/hle/target/bin/main'],['LSPServer','packages/lsp/dist/bin/LSPServer'],['cjcov','packages/cjcov/dist/cjcov'],['cjtrace-recover','packages/cjtrace-recover/dist/bin/cjtrace-recover'],['cjlint','packages/cjlint/dist/bin/cjlint'],['cjprof','packages/cjprof/dist/bin/cjprof'],['cjcompat','packages/cjcompat/dist/bin/cjcompat']];
   for(const [name,rel]of rows)await write(path.join(f.tools,rel),'#!'+process.execPath+'\n'+(name==='hle'?`const {spawnSync}=require('node:child_process');const a=process.argv.slice(2),b=a[a.indexOf('-b')+1];const p=spawnSync(b,a.slice(a.indexOf('--')+1),{stdio:'inherit'});process.exit(p.status??1);`:`console.log(${JSON.stringify(name+':control')});`),0o755);
-  for(const rel of ['cjlint/dist/lib/libcjlint.so','cjlint/dist/config/cjlint_rule_list.json','cjprof/dist/lib/libcjprof.so','cjprof/dist/lib/libcjprof-jni.so','cjprof/dist/config/static/index.html','cjfmt/config/cangjie-format.toml','cjpm/dist/cangjie-repo.toml'])await write(path.join(f.tools,rel),'controlled payload '+rel);
-  await installSourceTools(f.config,f.sdk);
+  for(const rel of ['packages/cjlint/dist/lib/libcjlint.so','packages/cjlint/dist/config/cjlint_rule_list.json','packages/cjprof/dist/lib/libcjprof-cangjie.so','packages/cjprof/dist/lib/libcjprof-jni.so','packages/cjprof/dist/share/java/cjprof.jar','packages/cjprof/dist/config/static/index.html','packages/cjfmt/dist/config/cangjie-format.toml','packages/cjpm/dist/cangjie-repo.toml'])await write(path.join(f.tools,rel),'controlled payload '+rel);
+  await installSourceTools(f.config,f.sdk,{consume:async pending=>{
+   const actual=JSON.parse(f.run([path.join(pending,'tools/bin/hle'),'--','--version']).stdout);
+   assert.equal(actual.version,version);
+   assert.equal(f.run([path.join(pending,'tools/bin/cjpm')]).stdout.trim(),'cjpm:control');
+  }});
   const inputs=JSON.parse(await fs.readFile(path.join(f.sdk,'TOOLS-INPUTS.json'),'utf8'));
   assert.equal(inputs.files['tools/bin/hle'].producer.source.status,'unresolved','interface doubles must not acquire qualification');
   const argv=['--auto-cstring','--array-pointers-in-args','--no-layout-test','--no-detect-include-path','-p','hle_probe','-o','bindings.cj','header.h','--','-DPROBE=1'];
@@ -68,7 +72,11 @@ for(const version of ['v1.1.0-alpha.53.1','0.3.6'])test('HLE descriptor/install/
   }
   f.run([path.join(f.sdk,'tools/bin/cjpm')]);
   // Real installation reentry keeps source/version and default dependency selection.
-  await f.install();await installSourceTools(f.config,f.sdk);
+  await f.install();await installSourceTools(f.config,f.sdk,{consume:async pending=>{
+   const actual=JSON.parse(f.run([path.join(pending,'tools/bin/hle'),'--','--version']).stdout);
+   assert.equal(actual.version,version);
+   assert.equal(f.run([path.join(pending,'tools/bin/cjpm')]).stdout.trim(),'cjpm:control');
+  }});
   assert.equal(JSON.parse(f.run([path.join(f.sdk,'tools/bin/hle'),'--','--version']).stdout).version,version);
   const moved=f.sdk+'-moved';await fs.rename(f.sdk,moved);
   assert.equal(JSON.parse(f.run([path.join(moved,'tools/bin/hle'),'--','--version']).stdout).version,version);

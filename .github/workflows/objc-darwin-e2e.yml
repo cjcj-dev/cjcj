@@ -29,8 +29,9 @@ jobs:
       - name: Load pins
         run: |
           set -euo pipefail
-          cat ci/cjpm_pin.env >> "$GITHUB_ENV"
-          cat ci/runtime_pin.env >> "$GITHUB_ENV"
+          cat ci/source_pin.env >> "$GITHUB_ENV"
+          node ci/host-toolchain-pin.mjs --github-env >> "$GITHUB_ENV"
+          node ci/load_runtime_pin.mjs
           home="$RUNNER_TEMP/objc-nightly-home"
           mkdir -p "$home"
           echo "HOME=$home" >> "$GITHUB_ENV"
@@ -47,7 +48,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: cjcj-dev/cangjie-runtime
-          ref: ${{ env.RUNTIME_REF }}
+          ref: ${{ env.CJCJ_NATIVE_RUNTIME_REF }}
           fetch-depth: 1
           path: runtime-source
 
@@ -59,7 +60,7 @@ jobs:
         with:
           component: runtime
           platform: macos-15
-          pin: ${{ env.RUNTIME_REF }}
+          pin: ${{ env.CJCJ_NATIVE_RUNTIME_REF }}
           cache-size: 1G
 
       - name: Runtime build

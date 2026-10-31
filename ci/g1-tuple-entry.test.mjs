@@ -5,10 +5,11 @@ import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {inventory, expandInputs} from './g1-entry-branches.mjs';
+import {readSourcePins,nativeLlvmInputs} from './native-llvm-inputs.mjs';
 const root = path.resolve(import.meta.dirname, '..');
 const entry = 'ci/test-llvm-tuple-layout.mjs';
 function run(argv, cwd = root) {
-  const result = spawnSync(argv[0], argv.slice(1), {cwd, encoding: 'utf8', timeout: 60000});
+  const result = spawnSync(argv[0], argv.slice(1), {cwd, env:{...process.env,...nativeLlvmInputs()}, encoding: 'utf8', timeout: 60000});
   assert.ifError(result.error);
   assert.equal(result.signal, null);
   return {rc: result.status, stdout: result.stdout, stderr: result.stderr};
@@ -33,14 +34,15 @@ test('G1 registered tuple entry consumes default and explicit artifacts through 
     assert.equal(result.command[3], entry);
     console.log('ASSERT G1 registered tuple target reached rc=0');
     const output = path.join(path.dirname(result.log), 'output');
-    const identities = Object.fromEntries(fs.readFileSync(path.join(root, 'ci/llvm_pin.env'), 'utf8')
-      .split('\n').filter(line => line.includes('=')).map(line => line.split('=')));
+    const identities = readSourcePins(root).llvm;
     const tuple = path.join(output, 'depot', identities.LLVM_SHA, identities.CANGJIE_COMPILER_SHA);
     assert.equal(fs.readFileSync(path.join(tuple, 'SHA256SUMS'), 'utf8').trim().split('\n').length, 10);
     const head = run(['git', 'rev-parse', 'HEAD']);
     assert.equal(head.rc, 0);
     const checkout = run(['git', 'worktree', 'add', '--detach', oldRoot, head.stdout.trim()]);
     assert.equal(checkout.rc, 0, checkout.stderr);
+    // The retired Bash entry expects the old data name; feed the same selected compiler identity.
+    fs.appendFileSync(path.join(oldRoot, 'ci/llvm_pin.env'), `CANGJIE_COMPILER_SHA=${identities.CANGJIE_COMPILER_SHA}\n`);
     const oldEntry = path.join(oldRoot, 'ci/tuple-baseline.bash.txt');
     fs.copyFileSync(path.join(root, 'ci/fixtures/g1/test-llvm-tuple-layout.bash.txt'), oldEntry);
     const rows = inventory().filter(row => row.entry === entry && row.kind === 'parameter' && row.position === 2);

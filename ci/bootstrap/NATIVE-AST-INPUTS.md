@@ -86,7 +86,7 @@ Its incremental bundle requires the 9e26 parent; it is not a standalone source
 archive and the private commit is not claimed reachable at an official URL.
 
 After normal fixed-object transfer, select the actual reachable repository in
-`CJCJ_NATIVE_SOURCE_SELECTION.ast.repository` and f07c in its `commit`.
+the ordinary `source_selection.compiler.url` and f07c in its `tag`.
 The public workflow forwards that selection to configure; configure clones or
 checks the same repository/commit on re-entry and sets `astCommit`.
 For the explicit descriptor entry, supply the same `sourceSelection.ast`,
@@ -97,7 +97,7 @@ reader compares the N compiler commit, AST source and selected commit, then
 reads the original install manifest and installed bytes. No old installation
 may be relabelled by changing the selector.
 
-Omitting the selection still means the historical 174db default, not f07c.
+Omitting the selection uses the current compiler source pin, not this historical f07c candidate.
 That default has the observed missing generated-header installation defect and
 is not the R9 successor production input. The explicit native source path does
 not alter the old host pin or claim that a private commit was published.

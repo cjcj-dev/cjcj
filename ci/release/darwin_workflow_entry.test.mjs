@@ -34,8 +34,8 @@ test('reviewed workflow fixture retains its fixed Git content', () => {
   observed('DARWIN_REVIEWED_FIXTURE', {sourceSha, hash});
 });
 
-test('first checkout executes only the full reviewed product SHA', () => {
-  const expected = {...originalSteps[0], with: {ref: sourceSha}};
+test('first checkout executes the immutable dispatch commit', () => {
+  const expected = {...originalSteps[0], with: {ref: '${{ github.sha }}'}};
   observed('DARWIN_FIXED_CHECKOUT', steps[0]);
   assert.deepEqual(steps[0], expected, 'DARWIN_FIXED_CHECKOUT');
 });
@@ -63,14 +63,16 @@ test('all four native cells retain targets runtime split timeout and environment
 test('runtime checkout retains its pinned repository and separate source directory', () => {
   const checkouts = steps.filter(step => step.uses === 'actions/checkout@v7');
   const expected = originalSteps.filter(step => step.uses === 'actions/checkout@v7');
+  expected[1] = {...expected[1], with: {...expected[1].with, ref: '${{ env.CJCJ_NATIVE_RUNTIME_REF }}'}};
   observed('DARWIN_RUNTIME_SOURCE_DOMAIN', checkouts[1]);
   assert.equal(checkouts.length, 2, 'DARWIN_CHECKOUT_DOMAINS');
   assert.deepEqual(checkouts[1], expected[1], 'DARWIN_RUNTIME_SOURCE_DOMAIN');
 });
 
 test('Node boundary pin loading and actual input consumption retain reviewed commands', () => {
-  const node = 'actions/setup-node@v4';
-  assert.deepEqual(byUses(steps, node), byUses(originalSteps, node), 'DARWIN_NODE22');
+  const expectedNode = {...byUses(originalSteps, 'actions/setup-node@v4'), uses: 'actions/setup-node@v7.1.0'};
+  expectedNode.with = {...expectedNode.with, 'node-version': '24.22.1'};
+  assert.deepEqual(byUses(steps, expectedNode.uses), expectedNode, 'DARWIN_NODE24');
   for (const name of [
     'Check host and target guard before tools and input preparation',
     'Load pinned runtime source',
@@ -78,6 +80,7 @@ test('Node boundary pin loading and actual input consumption retain reviewed com
   ]) {
     observed('DARWIN_REVIEWED_CONSUMPTION', actualNamed(name));
     const expected = {...originalNamed(name)};
+    if (name === 'Load pinned runtime source') expected.run = 'node ci/load_runtime_pin.mjs';
     if (name === 'Build or acquire native inputs and consume their actual loaded libraries') {
       // This exact run is the sole authorized command change from the fixture.
       expected.run = 'ulimit -c 0\n'
@@ -104,7 +107,9 @@ test('native producer bytes retain Darwin identity and Mach-O rejection controls
 test('local sccache start and always report retain their original workspace domain', () => {
   for (const uses of ['./.github/actions/sccache', './.github/actions/sccache-report']) {
     observed('DARWIN_SCCACHE_DOMAIN', byUses(steps, uses));
-    assert.deepEqual(byUses(steps, uses), byUses(originalSteps, uses), 'DARWIN_SCCACHE_DOMAIN');
+    const expected = structuredClone(byUses(originalSteps, uses));
+    if (uses === './.github/actions/sccache') expected.with.pin = '${{ env.CJCJ_NATIVE_RUNTIME_REF }}';
+    assert.deepEqual(byUses(steps, uses), expected, 'DARWIN_SCCACHE_DOMAIN');
   }
 });
 
@@ -122,7 +127,8 @@ test('entry adds no steps or side effects and preserves reviewed execution order
     return list.map(step => step.name || (step.uses === 'actions/checkout@v7'
       ? `${step.uses}:${checkout++}` : step.uses));
   };
-  const expected = identities(originalSteps);
+  const expected = identities(originalSteps.map(step => step.uses === 'actions/setup-node@v4'
+    ? {...step, uses: 'actions/setup-node@v7.1.0'} : step));
   const actual = identities(steps);
   const positions = actual.map(identity => expected.indexOf(identity));
   observed('DARWIN_STEP_SCOPE_AND_ORDER', {actual, positions});

@@ -5,6 +5,10 @@ on:
     branches: [debug/llc-build]
   workflow_dispatch:
     inputs:
+      consume_native_only:
+        description: Consume existing native shim artifacts with normally generated headers; toolchain production and publication inputs are ignored.
+        type: boolean
+        default: false
       llvm_ref:
         description: Optional complete LLVM candidate SHA; requires runtime_ref.
         required: false
@@ -20,9 +24,9 @@ on:
         type: boolean
         default: false
       runtime_version:
-        description: Runtime version used by the native producer.
+        description: Optional runtime version; empty uses the runtime source pin.
         type: string
-        default: 1.3.0-alpha.20260925001050
+        default: ''
       publish_host:
         description: Build the separately pinned, uncoloured bootstrap host LLVM SO.
         required: false
@@ -73,21 +77,28 @@ permissions:
   contents: read
 
 jobs:
+  native-consume:
+    if: ${{ inputs.consume_native_only }}
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/consume-native-llvm-tuple.yml
+
   native-runtime:
-    if: inputs.build_runtime
+    if: ${{ !inputs.consume_native_only && inputs.build_runtime }}
     uses: ./.github/workflows/build-native-runtime.yml
     with:
       llvm_ref: ${{ inputs.llvm_ref }}
       runtime_ref: ${{ inputs.runtime_ref }}
       platforms: ${{ inputs.platforms || 'all' }}
-      runtime_version: ${{ inputs.runtime_version || '1.3.0-alpha.20260925001050' }}
+      runtime_version: ${{ inputs.runtime_version || '' }}
 
   host:
-    if: inputs.publish_host
+    if: ${{ !inputs.consume_native_only && inputs.publish_host }}
     uses: ./.github/workflows/build-host-llvm.yml
 
   tuple:
-    if: ${{ !inputs.publish_host || inputs.publish_tuple || inputs.publish_dylib }}
+    if: ${{ !inputs.consume_native_only && (!inputs.publish_host || inputs.publish_tuple || inputs.publish_dylib) }}
     uses: ./.github/workflows/build-llvm-tools.yml
     with:
       llvm_ref: ${{ inputs.llvm_ref }}
@@ -100,7 +111,7 @@ jobs:
       rebuild: ${{ inputs.rebuild || false }}
 
   persist:
-    if: inputs.persist_tuple && inputs.publish_tuple && needs.tuple.outputs.tuple_platforms != '[]'
+    if: ${{ !inputs.consume_native_only && inputs.persist_tuple && inputs.publish_tuple && needs.tuple.outputs.tuple_platforms != '[]' }}
     needs: tuple
     strategy:
       fail-fast: false

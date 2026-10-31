@@ -8,7 +8,7 @@ import {tuplePlatforms} from './release/tuple_platform.mjs';
 
 export async function publishFixedTupleToDepot(depotRoot, env = process.env) {
   depotRoot ||= env.CJCJ_LLVM_DEPOT_ROOT || '/root/llvmdepot';
-  const {LLVM_SHA = '', CANGJIE_COMPILER_SHA = '', REPO_ROOT = '', CJCJ_FIXED_LLVM_DIR = ''} = env;
+  const {CJCJ_NATIVE_LLVM_REF: LLVM_SHA = '', CANGJIE_COMPILER_SHA = '', REPO_ROOT = '', CJCJ_FIXED_LLVM_DIR = ''} = env;
   const platforms = fs.readFileSync(path.join(CJCJ_FIXED_LLVM_DIR, 'llvm-tools.manifest'), 'utf8')
     .split('\n').filter(line => line.startsWith('PLATFORM=')).map(line => line.slice(9));
   const platform = platforms[0];
