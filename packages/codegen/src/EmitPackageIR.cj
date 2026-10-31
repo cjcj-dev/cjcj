@@ -4,6 +4,7 @@ import std.collection.*
 import std.math.{max, min}
 import std.process.Process
 import std.sort.*
+import std.sync.Thread
 import cjcj::basic.CANGJIE_VERSION
 import cjcj::chir.Attribute
 import cjcj::chir.CustomDefKind
@@ -151,6 +152,21 @@ private func GenSubCHIRPackagePart2(cgMod: CGModule): Unit {
     }
 }
 
+// Optional execution trace records the worker that actually runs each task, including width one.
+private func RunModuleGenerationTask(cgModule: CGModule, finalize: Bool): Unit {
+    let trace = (Process.current.getEnv("CJCJ_BACKEND_CONCURRENCY_TRACE") ?? "") == "1"
+    let phase = if (finalize) { "finalize" } else { "definitions" }
+    let index = cgModule.GetCGContext().GetSubCHIRPackage().subCHIRPackageIdx
+    let worker = Thread.currentThread.id
+    if (trace) { eprintln("CJCJ_MODULE_TASK begin phase=${phase} module=${index} worker=${worker}") }
+    try {
+        if (finalize) { GenSubCHIRPackagePart2(cgModule) }
+        else { GenSubCHIRPackage(cgModule) }
+    } finally {
+        if (trace) { eprintln("CJCJ_MODULE_TASK end phase=${phase} module=${index} worker=${worker}") }
+    }
+}
+
 // Mirrors EmitPackageIR.cpp:467-492.
 private func GenSubCHIRPackages(cgPkgContext: CGPkgContext): Unit {
     try (recorder = ProfileRecorder("EmitIR", "GenSubCHIRPackages")) {
@@ -161,7 +177,8 @@ private func GenSubCHIRPackages(cgPkgContext: CGPkgContext): Unit {
         }
         let threadNum = GetModuleGenerationWidth(cgPkgContext)
         if ((Process.current.getEnv("CJCJ_BACKEND_CONCURRENCY_TRACE") ?? "") == "1") {
-            eprintln("CJCJ_BACKEND_CONCURRENCY threadNum=${threadNum} cgModules.size=${cgModules.size}")
+            let width = if (IsModuleGenerationSerial(options)) { 1 } else { threadNum }
+            eprintln("CJCJ_BACKEND_CONCURRENCY threadNum=${width} cgModules.size=${cgModules.size}")
         }
         if (IsModuleGenerationSerial(options)) {
             for (cgModule in cgModules) {
@@ -171,7 +188,7 @@ private func GenSubCHIRPackages(cgPkgContext: CGPkgContext): Unit {
             let taskQueueDefinitions = TaskQueue(threadNum)
             let results = ArrayList<TaskResult<Unit>>()
             for (cgModule in cgModules) {
-                results.add(taskQueueDefinitions.AddTask<Unit>({ => GenSubCHIRPackage(cgModule) }))
+                results.add(taskQueueDefinitions.AddTask<Unit>({ => RunModuleGenerationTask(cgModule, false) }))
             }
             taskQueueDefinitions.RunAndWaitForAllTasksCompleted()
             ConsumeModuleGenerationResults(results)
@@ -184,7 +201,7 @@ private func GenSubCHIRPackages(cgPkgContext: CGPkgContext): Unit {
             let taskQueueFinalize = TaskQueue(threadNum)
             let results = ArrayList<TaskResult<Unit>>()
             for (cgModule in cgModules) {
-                results.add(taskQueueFinalize.AddTask<Unit>({ => GenSubCHIRPackagePart2(cgModule) }))
+                results.add(taskQueueFinalize.AddTask<Unit>({ => RunModuleGenerationTask(cgModule, true) }))
             }
             taskQueueFinalize.RunAndWaitForAllTasksCompleted()
             ConsumeModuleGenerationResults(results)
