@@ -44,11 +44,16 @@ for (const name of ['heapSite', 'globalSite', 'localSite', 'relay', 'trySite']) 
   const call = fn[0].split('\n').filter(l => /\b(call|invoke)\b/.test(l) && /@[^ (]*3put/.test(l));
   assert.equal(call.length, 1, name + ': actual put call');
   evidence.push({name, signature: fn[0].split('\n')[0], call: call[0]});
-  // The hidden owner immediately follows the headerless this pointer.
-  const args = call[0].slice(call[0].indexOf('(', call[0].indexOf('@')) + 1);
-  if (name === 'globalSite') assert.match(args, /, i8 addrspace\(1\)\* inttoptr \(i64 1 to i8 addrspace\(1\)\*\)/);
-  else if (name === 'localSite') assert.match(args, /, i8 addrspace\(1\)\* null,/);
-  else assert.match(args, /, i8 addrspace\(1\)\* %[A-Za-z0-9_.]+,/);
+  // This fixture's named source parameters give independent exact owners.
+  // Match the hidden operand before value, not any later AS1 argument.
+  const owner = call[0].match(/, i8 addrspace\(1\)\* ([^,]+), i8 addrspace\(1\)\* %value(?:,|\))/);
+  assert.ok(owner, name + ': hidden owner operand located');
+  const expected = {heapSite: '%holder', trySite: '%holder', relay: '%"$BP"',
+    localSite: 'null', globalSite: 'inttoptr (i64 1 to i8 addrspace(1)*)'};
+  assert.equal(owner[1], expected[name], name + ': exact final argument owner');
+  evidence[evidence.length - 1].owner = owner[1];
+  assert.ok(call[0].includes(name === 'trySite' ? 'invoke void' : 'call void'), name + ': call kind');
+
 }
 fs.writeFileSync(path.join(work, 'owner-calls.json'), JSON.stringify(evidence, null, 2) + '\n');
 const exe = path.join(work, 'owner-main');
