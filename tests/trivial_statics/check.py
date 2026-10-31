@@ -32,7 +32,7 @@ def check_outputs(outputs):
     multi = outputs.get('multiple_instantiations', '')
     entry = function(multi, 'entry')
     calls = re.findall(r'= Apply\([^\n]*->@([^,()\n]+), (%\d+)\)', entry)
-    constants = re.findall(r'(%\d+): Int64 = Constant\(\)[^\n]*, 35i$', entry, re.M)
+    constants = re.findall(r'(%\d+): Int64 = Constant\(35i\)(?: //[^\n]*)?$', entry, re.M)
     expected = '_CN24trivial_statics_multiple1C2f1Hl'
     target = (len(calls) == 1 and calls[0][0] == expected and calls[0][1] in constants
               and 'InvokeStatic(' not in entry and 'TypeCast(' not in entry and 'Box(' not in entry)
@@ -40,7 +40,7 @@ def check_outputs(outputs):
     generic_this = function(multi, 'dispatch')
     dynamic = function(multi, 'fromInstance')
     control = function(outputs.get('control', ''), 'entry')
-    zero_values = re.findall(r'(%\d+): Int64 = Constant\(\)[^\n]*, 0i$', control, re.M)
+    zero_values = re.findall(r'(%\d+): Int64 = Constant\(0i\)(?: //[^\n]*)?$', control, re.M)
     control_ok = any('Store(' + value + ', ' in control for value in zero_values)
     return [
         ('actual_types_choose_nonrecursive_raw_callee', target,

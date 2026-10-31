@@ -134,6 +134,21 @@ public open class Expression <: Base & Hashable & Equatable<Expression> {
             kind == ExprKind.TRY_ALLOCATE || kind == ExprKind.TRY_RAW_ARRAY_ALLOCATE
     }
 
+    // Upstream 2a468452 Expression.cpp:412-439.
+    public func GetSuccessAndErrorBlocks(): (Option<Block>, Option<Block>) {
+        if (!IsTerminator()) { return (None, None) }
+        match (kind) {
+            case ExprKind.TRY_ADD | ExprKind.TRY_SUB | ExprKind.TRY_MUL |
+                ExprKind.TRY_DIV | ExprKind.TRY_MOD | ExprKind.TRY_EXP |
+                ExprKind.TRY_LSHIFT | ExprKind.TRY_RSHIFT | ExprKind.TRY_NEG |
+                ExprKind.TRY_APPLY | ExprKind.TRY_INVOKE | ExprKind.TRY_INVOKESTATIC |
+                ExprKind.TRY_SPAWN | ExprKind.TRY_NUMERIC_CAST | ExprKind.TRY_INTRINSIC |
+                ExprKind.TRY_ALLOCATE | ExprKind.TRY_RAW_ARRAY_ALLOCATE =>
+                return (Some(GetSuccessor(0)), Some(GetSuccessor(1)))
+            case _ => return (None, None)
+        }
+    }
+
     public func GetBlockGroups(): ArrayList<BlockGroup> {
         let out = ArrayList<BlockGroup>()
         for (group in blockGroups) {
