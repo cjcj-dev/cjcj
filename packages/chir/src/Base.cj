@@ -15,12 +15,11 @@ public open class Base <: Hashable & Equatable<Base> {
     private let annotationMap: AnnotationMap = AnnotationMap()
     var loc: DebugLocation = DebugLocation()
     private let attributes: AttributeInfo = AttributeInfo()
-    private var attributeMutex: Option<Mutex> = None
+    private let attributeMutex: Option<Mutex>
 
-    protected func SetSharedAttributeMutex(mutex: Mutex): Unit { attributeMutex = Some(mutex) }
-
-    public init() {
+    public init(sharedAttributes!: Bool = false) {
         nodeId = BaseIdAllocator.Next()
+        attributeMutex = if (sharedAttributes) { Some(Mutex()) } else { None }
     }
 
     public operator func ==(right: Base): Bool {

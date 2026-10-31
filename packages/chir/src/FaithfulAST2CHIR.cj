@@ -2216,18 +2216,18 @@ public class FaithfulAST2CHIR {
     // their original position, while lowering independent stretches on either side concurrently.
     private func PrepareBodyHeaders(decl: AstDecl): Bool {
         PrepareLoweringGenericBounds(decl)
-        var ownsOnlyBody = true
+        let ownsOnlyBody = [true]
         AstWalker(decl, visitPre: { node: AstNode =>
-            if (node.IsNominalDecl()) { ownsOnlyBody = false }
+            if (node.IsNominalDecl()) { ownsOnlyBody[0] = false }
             return AstVisitAction.WALK_CHILDREN
         }).Walk()
         if (let Some(value) <- globalCache.TryGet(decl)) {
             if (let Some(fn) <- (value as Function)) {
                 // A pre-existing body may belong to the ordered initializer phase.
-                if (fn.GetBody().isSome()) { ownsOnlyBody = false }
+                if (fn.GetBody().isSome()) { ownsOnlyBody[0] = false }
             }
         }
-        return ownsOnlyBody
+        return ownsOnlyBody[0]
     }
 
     private func TranslateFunctionBodies(decls: ArrayList<AstDecl>): Unit {

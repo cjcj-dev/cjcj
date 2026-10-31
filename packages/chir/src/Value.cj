@@ -14,13 +14,10 @@ public open class Value <: Base & Hashable & Equatable<Value> {
     private let userMutex: Mutex = Mutex()
 
     public init(ty: Option<Type>, identifier: String, kind: ValueKind) {
-        super()
+        super(sharedAttributes: kind == ValueKind.KIND_GLOBALVAR || kind == ValueKind.KIND_FUNC)
         this.ty = ty
         this.identifier = identifier
         this.kind = kind
-        if (kind == ValueKind.KIND_GLOBALVAR || kind == ValueKind.KIND_FUNC) {
-            SetSharedAttributeMutex(userMutex)
-        }
     }
 
     public operator func ==(right: Value): Bool {
