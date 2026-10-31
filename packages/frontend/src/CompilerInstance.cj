@@ -4,7 +4,6 @@ import cjcj::ast.Package as RealASTPackage
 import cjcj::ast.PackageDecl as RealASTPackageDecl
 import cjcj::ast.StructTy as RealASTStructTy
 import cjcj::ast.PrintNode
-import cjcj::chir.TypeValue
 import cjcj::mangle.BaseMangler as RealBaseMangler
 import cjcj::mangle.CHIRMangler as RealCHIRMangler
 import cjcj::mangle.ManglerContext as RealManglerContext
@@ -1164,9 +1163,6 @@ public class CompilerInstance {
     }
 
     public func FreeCHIRData(): Unit {
-        // TypeAnalysis.h:66 / TypeAnalysis.cpp:62-79 keeps a nullable borrowed
-        // builder pointer. Retire its managed owner with the CHIR data.
-        TypeValue.SetCHIRBuilder(None)
         if (let Some(data) <- chirData) {
             data.SetCurrentCHIRPackage(None)
             data.SetCurrentRealCHIRPackage(None)
