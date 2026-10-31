@@ -29,6 +29,10 @@ private func ConstAnalysisStrategyIndex(value: ConstAnalysisStrategy): Int64 {
 
 public class ConstAnalysisWrapper {
     private let builder: CHIRBuilder
+    // Initializer analysis populates these before the independent function frontier.
+    // Keep package analysis state with its wrapper, never in process-wide storage.
+    private let constStateGlobals = ValueAnalysisGlobals<ConstValueDomain, ConstStatePool>()
+    private let constActiveGlobals = ValueAnalysisGlobals<ConstValueDomain, ConstActivePool>()
     private let resultsMap: HashMap<Function, Results<ConstDomain>> = HashMap<Function, Results<ConstDomain>>()
     private let resultsPoolMap: HashMap<Function, Results<ConstPoolDomain>> =
         HashMap<Function, Results<ConstPoolDomain>>()

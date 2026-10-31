@@ -61,7 +61,7 @@ import cjcj::chir.RangeDomain
 import cjcj::chir.RangePropagation
 import cjcj::chir.ReplaceSrcCodeImportedVal
 import cjcj::chir.IsTrackedGVForRangeAnalysis
-import cjcj::chir.rangeStateGlobals
+import cjcj::chir.{ValueAnalysisGlobals, RangeValueDomain, RangeStatePool}
 import cjcj::chir.ReplaceUsesWithWrapper
 import cjcj::chir.SanitizerCoverage
 import cjcj::chir.ShouldReportUnusedCodeWarnings
@@ -791,6 +791,7 @@ private class ToCHIR {
             return
         }
         try (recorder = ProfileRecorder("CHIR Opt", "Range Propagation")) {
+            let rangeStateGlobals = ValueAnalysisGlobals<RangeValueDomain, RangeStatePool>()
             let rangeAnalysisWrapper = AnalysisWrapper<RangeAnalysis, RangeDomain>(builder,
                 { analysisPackage: RealCHIRPackage, analysisBuilder: ChirBuilder =>
                     RangeAnalysis.InitialiseLetGVState(analysisPackage, analysisBuilder, rangeStateGlobals,
@@ -800,7 +801,7 @@ private class ToCHIR {
             rangeAnalysisWrapper.RunOnPackage(currentPackage, options.chirDebugOptimizer, threadNum,
                 { funcValue: ChirFunction, analysisBuilder: ChirBuilder, isDebug: Bool =>
                     RangeAnalysis(funcValue, analysisBuilder, instance.diag.AsBasicDiagnosticEngine(),
-                        isDebug: isDebug)
+                        isDebug: isDebug, globalValues: rangeStateGlobals)
                 })
             let dce = DeadCodeElimination(builder, instance.diag.AsBasicDiagnosticEngine(), currentPackage)
             if (threadNum == 1) {

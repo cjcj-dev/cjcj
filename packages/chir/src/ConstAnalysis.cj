@@ -9,10 +9,6 @@ public type ConstActivePool = ActiveStatePool<ConstValueDomain>
 public type ConstDomain = State<ConstValueDomain, ConstStatePool>
 public type ConstPoolDomain = State<ConstValueDomain, ConstActivePool>
 
-// C++ ConstAnalysis.h:173-192 explicit template instantiations.
-public let constStateGlobals = ValueAnalysisGlobals<ConstValueDomain, ConstStatePool>()
-public let constActiveGlobals = ValueAnalysisGlobals<ConstValueDomain, ConstActivePool>()
-
 private enum ConstExceptionKind <: Equatable<ConstExceptionKind> {
     | SUCCESS | FAIL | NA
 
