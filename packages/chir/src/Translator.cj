@@ -2185,7 +2185,7 @@ public class Translator {
     private func SetupContextForLambda(body: AstBlock): Translator {
         let trans = Copy()
         let usedCapturedDecls = HashSet<AstNode>()
-        AstWalker(body, visitPre: { node: AstNode =>
+        AstWalker(body, localVisits: true, visitPre: { node: AstNode =>
             if (let Some(target) <- node.GetTarget()) {
                 if ((target.astKind == ASTKind.VAR_DECL && target.TestAttr(AstAttribute.IS_CAPTURE)) ||
                     target.astKind == ASTKind.FUNC_DECL) {

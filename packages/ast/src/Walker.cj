@@ -2,6 +2,7 @@ package cjcj::ast
 
 import cjcj::utils.CJC_ASSERT
 import std.sync.AtomicUInt32
+import std.collection.HashSet
 
 // C++ Walker.h:32-37 represents VisitAction as `enum class : uint8_t`. A Cangjie enum is a
 // managed tagged object even when none of its constructors has a payload, so returning an enum
@@ -49,9 +50,12 @@ public class Walker {
     private var visitPre: Option<(Node) -> VisitAction> = None
     private var visitPost: Option<(Node) -> VisitAction> = None
     private var walkExprDesugar: Bool = true
+    private var localVisited: Option<HashSet<Int64>> = None
 
     public init(node: Node, visitPre!: Option<(Node) -> VisitAction> = None,
-        visitPost!: Option<(Node) -> VisitAction> = None, walkExprDesugar!: Bool = true) {
+        visitPost!: Option<(Node) -> VisitAction> = None, walkExprDesugar!: Bool = true,
+        localVisits!: Bool = false) {
+        if (localVisits) { localVisited = Some(HashSet<Int64>()) }
         root = node
         id = GetNextWalkerID()
         this.visitPre = visitPre
@@ -84,10 +88,13 @@ public class Walker {
             case ASTKind.MODIFIER => true
             case _ => false
         }
-        if (!isModifier && curNode.visitedByWalkerID == id) {
-            return VisitAction.WALK_CHILDREN
+        if (let Some(visited) <- localVisited) {
+            // Concurrent read-only walkers must not publish marks into their shared input.
+            if (!isModifier && !visited.add(curNode.objectId)) { return VisitAction.WALK_CHILDREN }
+        } else {
+            if (!isModifier && curNode.visitedByWalkerID == id) { return VisitAction.WALK_CHILDREN }
+            curNode.visitedByWalkerID = id
         }
-        curNode.visitedByWalkerID = id
 
         var action = VisitAction.WALK_CHILDREN
         if (let Some(pre) <- visitPre) {
