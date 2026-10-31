@@ -1,5 +1,8 @@
 import path from 'node:path';
 
+// cjc_runtime_config.o belongs to the root workspace: CJPM concatenates
+// workspace and package options, including after Windows W2 restores the root.
+// Keep this generator limited to cjc-specific objects and platform libraries.
 const linkOptionPattern = /^(\s*link-option\s*=\s*)"([^"]*)"(\s*)$/m;
 
 export function assembleCjcLinkOption(
@@ -13,7 +16,6 @@ export function assembleCjcLinkOption(
       '-headerpad_max_install_names',
       '-export_dynamic',
       'runtime_shim/cjselfhost_llvmshim.o',
-      'runtime_shim/cjc_runtime_config.o',
       path.join(llvmDir, 'libLLVM.dylib'),
       '-lc++',
       '-rpath',
@@ -32,7 +34,6 @@ export function assembleCjcLinkOption(
     return [
       '--stack=0x4000000',
       'runtime_shim/cjselfhost_llvmshim.o',
-      'runtime_shim/cjc_runtime_config.o',
       `@${llvmLinkRsp.replaceAll('\\', '/')}`,
       `@${mingwCxxLinkRsp.replaceAll('\\', '/')}`,
     ].join(' ');

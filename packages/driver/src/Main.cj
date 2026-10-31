@@ -1,7 +1,5 @@
 package cjcj::driver
 
-@When[os == "Windows"]
-import cjcj::utils.GetApplicationPath
 @When[!debug && os != "Windows"]
 import cjcj::utils.{CreateAltSignalStack, RegisterCrashSignalHandler}
 @When[!debug && os == "Windows"]
@@ -36,11 +34,12 @@ public func RunDriverMain(args: Array<String>): Int64 {
         }
         let sourceManager = SourceManager()
         // C++: src/main.cpp:62-64, main-scope SourceManager and DiagnosticEngine lifetime.
-        try (diag = DiagnosticEngine()) {
+        let diag = DiagnosticEngine()
+        var failed = false
+        try {
         diag.SetSourceManager(sourceManager)
-        @When[os == "Windows"]
-        let maybeExePath = GetApplicationPath()
-        @When[os != "Windows"]
+        // Resolve the invocation entry, not the retained process image. Both
+        // Driver and the frontend shim use this same compiler-relative root.
         let maybeExePath = GetApplicationPath(args[0], environmentVars)
         if (let None <- maybeExePath) {
             return 1
@@ -49,8 +48,6 @@ public func RunDriverMain(args: Array<String>): Int64 {
         let executableName = FileUtil.GetFileName(args[0])
         if (executableName == "cjc-frontend" || executableName == "cjc-frontend.exe") {
             let exitCode = ExecuteFrontendShim(args, executablePath)
-            RuntimeInit.GetInstance().CloseRuntime()
-            TempFileManager.Instance().DeleteTempFiles()
             return exitCode
         }
         let driver = Driver(args, diag, executableName: executablePath)
@@ -60,12 +57,35 @@ public func RunDriverMain(args: Array<String>): Int64 {
             return 1
         }
         let result = driver.ExecuteCompilation()
-        TempFileManager.Instance().DeleteTempFiles()
         if (!result) {
-            RuntimeInit.GetInstance().CloseRuntime()
             return 1
         }
-        RuntimeInit.GetInstance().CloseRuntime()
+        } catch (e: Exception) {
+            failed = true
+            throw e
+        } finally {
+            // Frontend owners have joined their AST task before this outer
+            // scope releases process resources. Attempt all three cleanups;
+            // never replace the original compiler exception with a close error.
+            var cleanupFailure: Option<Exception> = None
+            try {
+                TempFileManager.Instance().DeleteTempFiles()
+            } catch (e: Exception) {
+                cleanupFailure = Some(e)
+            }
+            try {
+                RuntimeInit.GetInstance().CloseRuntime()
+            } catch (e: Exception) {
+                if (cleanupFailure.isNone()) { cleanupFailure = Some(e) }
+            }
+            try {
+                diag.close()
+            } catch (e: Exception) {
+                if (cleanupFailure.isNone()) { cleanupFailure = Some(e) }
+            }
+            if (!failed) {
+                if (let Some(e) <- cleanupFailure) { throw e }
+            }
         }
     } catch (nullPointerException: NullPointerException) {
         try (iceSetter = TriggerPointSetter(nullPointerException.GetTriggerPoint())) {

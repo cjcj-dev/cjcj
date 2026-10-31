@@ -1021,6 +1021,12 @@ public class CompilerInstance {
     }
 
     public func GetASTContextByPackage(pkg: Package): Option<ASTContext> {
+        // PreTypeCheck owns the populated symbol/lookup context, including when
+        // SEMA reports errors in incomplete source. Do not substitute the empty
+        // parse context, or a same-named but different package, after that stage.
+        if (let Some(semaInstance) <- faithfulSemaInstance) {
+            return semaInstance.GetASTContextByPackage(Some(pkg))
+        }
         return pkgCtxMap.get(pkg.fullPackageName)
     }
 
@@ -1161,6 +1167,10 @@ public class CompilerInstance {
         // TypeAnalysis.h:66 / TypeAnalysis.cpp:62-79 keeps a nullable borrowed
         // builder pointer. Retire its managed owner with the CHIR data.
         TypeValue.SetCHIRBuilder(None)
+        if (let Some(data) <- chirData) {
+            data.SetCurrentCHIRPackage(None)
+            data.SetCurrentRealCHIRPackage(None)
+        }
         chirData = None
     }
 
@@ -1505,9 +1515,17 @@ public class CompilerInstance {
         }
         taskQueue.RunInBackground()
         taskQueue.WaitForAllTasksCompleted()
+        let completed = ArrayList<ArrayList<PendingMangledDecl>>()
+        var firstFailure: Option<Exception> = None
         for (result in taskResults) {
-            mergeMangledDecls(result.get())
+            try {
+                completed.add(result.get())
+            } catch (e: Exception) {
+                if (firstFailure.isNone()) { firstFailure = Some(e) }
+            }
         }
+        if (let Some(e) <- firstFailure) { throw e }
+        for (pending in completed) { mergeMangledDecls(pending) }
         mergeMangledDecls(DoNewMangling(baseMangler, topDecls, start, topDecls.size))
     }
 

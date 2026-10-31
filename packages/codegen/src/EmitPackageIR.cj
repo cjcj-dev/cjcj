@@ -18,6 +18,7 @@ import cjcj::mangle.MANGLE_FUNC_PARAM_TYPE_PREFIX
 import cjcj::mangle.MANGLE_VOID_TY_SUFFIX
 import cjcj::mangle.SPECIAL_NAME_FOR_IMPORTS_INIT_FUNCTION
 import cjcj::mangle.SPECIAL_NAME_FOR_INIT_FUNCTION
+import cjcj::mangle.SPECIAL_NAME_FOR_INIT_FUNCTION
 import cjcj::mangle.SPECIAL_NAME_FOR_INIT_FLAG_RESET_FUNCTION
 import cjcj::mangle.SPECIAL_NAME_FOR_INIT_LITERAL_FUNCTION
 import cjcj::mangle.SPECIAL_NAME_FOR_INIT_RESET_FUNCTION
@@ -66,7 +67,8 @@ private func InitIncrementalGen(cgPkgContext: CGPkgContext): Bool {
         cgPkgContext.GetGlobalOptions().codegenDebugMode) { 1 } else { cgModules.size }
     if (threadNum == 1) {
         for (cgModule in cgModules) {
-            result = result && cgModule.InitIncrementalGen()
+            let initialized = cgModule.InitIncrementalGen()
+            result = initialized && result
         }
     } else {
         let taskQueueInitIncrementalGen = TaskQueue(threadNum)
@@ -75,9 +77,16 @@ private func InitIncrementalGen(cgPkgContext: CGPkgContext): Bool {
             results.add(taskQueueInitIncrementalGen.AddTask<Bool>({ => cgModule.InitIncrementalGen() }))
         }
         taskQueueInitIncrementalGen.RunAndWaitForAllTasksCompleted()
+        var firstFailure: Option<Exception> = None
         for (taskResult in results) {
-            result = result && taskResult.get()
+            try {
+                let initialized = taskResult.get()
+                result = initialized && result
+            } catch (e: Exception) {
+                if (firstFailure.isNone()) { firstFailure = Some(e) }
+            }
         }
+        if (let Some(e) <- firstFailure) { throw e }
     }
     return result
 }
@@ -141,49 +150,67 @@ private func GenSubCHIRPackagePart2(cgMod: CGModule): Unit {
 
 // Mirrors EmitPackageIR.cpp:467-492.
 private func GenSubCHIRPackages(cgPkgContext: CGPkgContext): Unit {
-    ProfileRecorder.Start("EmitIR", "GenSubCHIRPackages")
-    let cgModules = cgPkgContext.GetCGModules()
-    let options = cgPkgContext.GetGlobalOptions()
-    if (options.NeedDumpIRToFile()) {
-        ClearOldIRDumpFiles(options.output, cgPkgContext.GetCurrentPkgName())
-    }
-    let threadNum = if (!TEMPORARILY_ENABLE_BACKEND_CONCURRENCY || options.codegenDebugMode) {
-        1
-    } else {
-        cgModules.size
-    }
-    if ((Process.current.getEnv("CJCJ_BACKEND_CONCURRENCY_TRACE") ?? "") == "1") {
-        eprintln("CJCJ_BACKEND_CONCURRENCY threadNum=${threadNum} cgModules.size=${cgModules.size}")
-    }
-    if (threadNum == 1) {
-        for (cgModule in cgModules) {
-            GenSubCHIRPackage(cgModule)
+    try (recorder = ProfileRecorder("EmitIR", "GenSubCHIRPackages")) {
+        let cgModules = cgPkgContext.GetCGModules()
+        let options = cgPkgContext.GetGlobalOptions()
+        if (options.NeedDumpIRToFile()) {
+            ClearOldIRDumpFiles(options.output, cgPkgContext.GetCurrentPkgName())
         }
-    } else {
-        let taskQueueDefinitions = TaskQueue(threadNum)
-        for (cgModule in cgModules) {
-            let _ = taskQueueDefinitions.AddTask<Unit>({ => GenSubCHIRPackage(cgModule) })
+        let threadNum = if (!TEMPORARILY_ENABLE_BACKEND_CONCURRENCY || options.codegenDebugMode) {
+            1
+        } else {
+            cgModules.size
         }
-        taskQueueDefinitions.RunAndWaitForAllTasksCompleted()
+        if ((Process.current.getEnv("CJCJ_BACKEND_CONCURRENCY_TRACE") ?? "") == "1") {
+            eprintln("CJCJ_BACKEND_CONCURRENCY threadNum=${threadNum} cgModules.size=${cgModules.size}")
+        }
+        if (threadNum == 1) {
+            for (cgModule in cgModules) {
+                GenSubCHIRPackage(cgModule)
+            }
+        } else {
+            let taskQueueDefinitions = TaskQueue(threadNum)
+            let results = ArrayList<TaskResult<Unit>>()
+            for (cgModule in cgModules) {
+                results.add(taskQueueDefinitions.AddTask<Unit>({ => GenSubCHIRPackage(cgModule) }))
+            }
+            taskQueueDefinitions.RunAndWaitForAllTasksCompleted()
+            ConsumeModuleGenerationResults(results)
+        }
+        if (threadNum == 1) {
+            for (cgModule in cgModules) {
+                GenSubCHIRPackagePart2(cgModule)
+            }
+        } else {
+            let taskQueueFinalize = TaskQueue(threadNum)
+            let results = ArrayList<TaskResult<Unit>>()
+            for (cgModule in cgModules) {
+                results.add(taskQueueFinalize.AddTask<Unit>({ => GenSubCHIRPackagePart2(cgModule) }))
+            }
+            taskQueueFinalize.RunAndWaitForAllTasksCompleted()
+            ConsumeModuleGenerationResults(results)
+        }
+        if (options.NeedDumpIRToScreen()) {
+            for (cgModule in cgModules) {
+                DumpIR(cgModule.GetLLVMModule().getOrThrow(), "")
+            }
+        }
+        CGValueRepresentationCensus.Dump()
     }
-    if (threadNum == 1) {
-        for (cgModule in cgModules) {
-            GenSubCHIRPackagePart2(cgModule)
-        }
-    } else {
-        let taskQueueFinalize = TaskQueue(threadNum)
-        for (cgModule in cgModules) {
-            let _ = taskQueueFinalize.AddTask<Unit>({ => GenSubCHIRPackagePart2(cgModule) })
-        }
-        taskQueueFinalize.RunAndWaitForAllTasksCompleted()
-    }
-    if (options.NeedDumpIRToScreen()) {
-        for (cgModule in cgModules) {
-            DumpIR(cgModule.GetLLVMModule().getOrThrow(), "")
+}
+
+// Definitions must finish successfully before finalization; both phases must
+// consume every completed result before throwing the first stored exception.
+private func ConsumeModuleGenerationResults(results: ArrayList<TaskResult<Unit>>): Unit {
+    var firstFailure: Option<Exception> = None
+    for (result in results) {
+        try {
+            result.get()
+        } catch (e: Exception) {
+            if (firstFailure.isNone()) { firstFailure = Some(e) }
         }
     }
-    CGValueRepresentationCensus.Dump()
-    ProfileRecorder.Stop("EmitIR", "GenSubCHIRPackages")
+    if (let Some(e) <- firstFailure) { throw e }
 }
 
 public func GenPackageModules(chirData: CHIRData, options: GlobalOptions, enableIncrement: Bool,
@@ -191,6 +218,8 @@ public func GenPackageModules(chirData: CHIRData, options: GlobalOptions, enable
     cachedMangleMap!: CachedMangleMap = CachedMangleMap()): ArrayList<LLVMModuleHandle> {
     let cgPkgContext = CGPkgContext(chirData, options, enableIncrement, noHeapAllocChecker,
         noWriteBarrierRecChecker, cachedMangleMap)
+    var failed = false
+    try {
     let splitter = CHIRSplitter(cgPkgContext)
     let subPackages = splitter.SplitCHIRPackage()
     for (subPackage in subPackages) {
@@ -217,6 +246,16 @@ public func GenPackageModules(chirData: CHIRData, options: GlobalOptions, enable
     }
     options.symbolsNeedLocalizedPerPkg[cgPkgContext.GetCHIRPackage().GetName()] = localizedSymbolsForPkg
     return cgPkgContext.ReleaseLLVMModules()
+    } catch (e: Exception) {
+        failed = true
+        throw e
+    } finally {
+        try {
+            cgPkgContext.Clear()
+        } catch (e: Exception) {
+            if (!failed) { throw e }
+        }
+    }
 }
 
 private func SetSymbolLinkageType(cgMod: CGModule): Unit {
@@ -349,7 +388,8 @@ private func ReplaceFunction(cgMod: CGModule): Unit {
             argsVal[thisParamOffset] = thisParamWithTI
 
             let payloadPtr = irBuilder.GetPayloadFromObject(thisParamWithTI)
-            let thisLLVMType = CGType.GetOrCreate(cgMod, thisCHIRType).GetLLVMType()
+            let thisCGType = CGType.GetOrCreate(cgMod, thisCHIRType)
+            let thisLLVMType = thisCGType.GetLLVMType()
             if (irBuilder.IsTypeContainsRef(thisLLVMType)) {
                 if (item.isCalleeMutOrCtor) {
                     let load = irBuilder.CreateEntryAlloca(thisLLVMType)
@@ -400,7 +440,14 @@ private func ReplaceFunction(cgMod: CGModule): Unit {
             if (!item.isCalleeMutOrCtor) {
                 continue
             }
-            if (irBuilder.IsTypeContainsRef(thisLLVMType)) {
+            if (thisCGType.GetSize().isNone()) {
+                // The i8 representation of an unsized generic is not a
+                // one-byte/no-reference layout. Keep the actual field owner
+                // and let the generic barrier copy the boxed payload using
+                // its dynamic size and reference layout.
+                let owner = irBuilder.GetTrackedManagedBase(thisParamWithoutTI) ?? basePtr
+                irBuilder.CallGCWriteGeneric(owner, thisParamWithoutTI, thisParamWithTI, size32)
+            } else if (irBuilder.IsTypeContainsRef(thisLLVMType)) {
                 let load = irBuilder.CreateEntryAlloca(thisLLVMType)
                 let _ = irBuilder.CreateCJMemSetStructWith0(load)
                 irBuilder.CallGCReadAgg(thisLLVMType, ArrayList<LLVMValueRef>(
@@ -408,8 +455,28 @@ private func ReplaceFunction(cgMod: CGModule): Unit {
                 irBuilder.CallGCWriteAgg(thisLLVMType, ArrayList<LLVMValueRef>(
                     [basePtr, thisParamWithoutTI, load, size64]))
             } else {
-                irBuilder.CallGCWriteGenericPayloadFromSrc(
-                    thisParamWithoutTI, payloadPtr, size32, thisParamTypeInfo)
+                // The original receiver is a headerless payload, not the boxed
+                // destination expected by gcwrite/gcread.generic. For a native
+                // AS0->AS1 view use its original storage, without introducing
+                // typed-copy uses of the restricted addrspacecast result.
+                var nativeReceiver = LLVMNullValue()
+                if (unsafe { LLVMGetPointerAddressSpace(LLVMTypeOf(thisParamWithoutTI)) } == 0u32) {
+                    nativeReceiver = thisParamWithoutTI
+                } else if (unsafe { LLVMSelfhostIsAddrSpaceCastOperator(thisParamWithoutTI) } != 0) {
+                    let origin = unsafe { LLVMSelfhostAddrSpaceCastOperatorGetOperand(thisParamWithoutTI) }
+                    if (unsafe { LLVMGetPointerAddressSpace(LLVMTypeOf(origin)) } == 0u32) {
+                        nativeReceiver = IRBuilder2.GetNativePayloadSource(thisParamWithoutTI)
+                    }
+                }
+                if (!nativeReceiver.isNull()) {
+                    irBuilder.CallGCReadGenericPayload(nativeReceiver, thisParamWithTI, size32)
+                } else {
+                    // A true managed field retains its address space and its
+                    // known no-reference layout; never cast that field to AS0.
+                    let load = irBuilder.CreateEntryAlloca(thisLLVMType)
+                    irBuilder.CallGCReadGenericPayload(load, thisParamWithTI, size32)
+                    irBuilder.CopyNoRefOrMemCpy(thisLLVMType, thisParamWithoutTI, load, size64)
+                }
             }
         }
     }
@@ -799,6 +866,13 @@ private func RegisterExceptionRaiser(cgMod: CGModule): Unit {
             args.add(param)
             let _ = irBuilder.CreateIntrinsicCallNoInvoke("llvm.cj.register.implicit.exception.raisers",
                 ArrayList<LLVMTypeRef>(), args)
+            let referenceMethods = ArrayList<LLVMValueRef>()
+            for (name in ["rt$RegisterReferenceFinalizer", "rt$RunReferenceHandler", "rt$RunReferenceFinalizers"]) {
+                let method = cgMod.GetCGContext().GetCGPkgContext().FindCHIRGlobalValue(name).getOrThrow()
+                let entry = cgMod.GetOrInsertCGFunction(method).GetRawFunction()
+                referenceMethods.add(irBuilder.CreateBitCast(entry, int8PtrType))
+            }
+            irBuilder.PublishReferenceMethods(referenceMethods)
         }
     }
 }
@@ -885,20 +959,67 @@ private func SpecifyPackageInitFunc(cgMod: CGModule): Unit {
     }
 }
 
+private func GetResetNotifyType(cgMod: CGModule): LLVMTypeRef {
+    let ctx = cgMod.GetLLVMContext().raw
+    let pointer = unsafe { LLVMPointerType(LLVMInt8TypeInContext(ctx), 0u32) }
+    let i32 = unsafe { LLVMInt32TypeInContext(ctx) }
+    let sizeTy = unsafe { LLVMIntTypeInContext(ctx, cgMod.GetPointerSize() * 8u32) }
+    return BuildLLVMFunctionType(i32, ArrayList<LLVMTypeRef>([pointer, i32, pointer, sizeTy, pointer, sizeTy]))
+}
+
+private func GetResetNotifyArguments(cgMod: CGModule, irBuilder: IRBuilder2,
+    resetFunc: LLVMValueRef): (LLVMValueRef, LLVMValueRef) {
+    let ctx = cgMod.GetLLVMContext().raw
+    let pointer = unsafe { LLVMPointerType(LLVMInt8TypeInContext(ctx), 0u32) }
+    let paramType = GetOrCreateNamedStructType(cgMod.GetLLVMContext(), "struct.macro.reset.v2")
+    let fields = ArrayList<LLVMTypeRef>([pointer, pointer])
+    SetStructTypeBody(paramType, fields)
+    let param = irBuilder.CreateBitCast(unsafe { LLVMGetParam(resetFunc, 0u32) },
+        unsafe { LLVMPointerType(paramType, 0u32) })
+    return (irBuilder.CreateLoad(pointer, irBuilder.CreateStructGEP(paramType, param, 0u32)),
+        irBuilder.CreateLoad(pointer, irBuilder.CreateStructGEP(paramType, param, 1u32)))
+}
+
+// The wrapper is the existing CJ-to-C transition mechanism. Its parameters and
+// result are native values; no managed exception crosses into the host runtime.
+private func EmitResetNotification(cgMod: CGModule, irBuilder: IRBuilder2, resetFunc: LLVMValueRef,
+    kind: Int64, detail!: String = ""): LLVMValueRef {
+    let (notify, context) = GetResetNotifyArguments(cgMod, irBuilder, resetFunc)
+    let ctx = cgMod.GetLLVMContext().raw
+    let pointer = unsafe { LLVMPointerType(LLVMInt8TypeInContext(ctx), 0u32) }
+    let sizeTy = unsafe { LLVMIntTypeInContext(ctx, cgMod.GetPointerSize() * 8u32) }
+    let nullPointer = unsafe { LLVMConstNull(pointer) }
+    var detailPointer = nullPointer
+    if (!detail.isEmpty()) {
+        detailPointer = EmitRuntimeConfigString(cgMod.GetLLVMModule().getOrThrow(), ctx, detail,
+            ".macro.reset.v2.failure", pointer)
+    }
+    let args = ArrayList<LLVMValueRef>([notify, context, irBuilder.GetInt32(kind), nullPointer,
+        unsafe { LLVMConstInt(sizeTy, 0u64, 0) }, detailPointer,
+        unsafe { LLVMConstInt(sizeTy, UInt64(detail.size), 0) }])
+    return irBuilder.CreateCallOrInvoke(GetGVResetCallBack(cgMod, GetResetNotifyType(cgMod)), args)
+}
+
+private func EmitResetExportFailure(cgMod: CGModule, irBuilder: IRBuilder2, resetFunc: LLVMValueRef,
+    originalRoot: LLVMValueRef, kind: Int64, detail: String): Unit {
+    // A notification failure is not an acknowledgement of the original error.
+    // Even when H cannot record it, rethrow the original in R for its executor's
+    // existing diagnostic path. H also rejects a missing completion notification.
+    let _ = EmitResetNotification(cgMod, irBuilder, resetFunc, kind, detail: detail)
+    irBuilder.CallExceptionIntrinsicThrow(irBuilder.CreateLoad(CGType.GetRefType(cgMod.GetLLVMContext()), originalRoot))
+}
+
 private func CreatePackageInitResetFunction(cgMod: CGModule): Unit {
     let pkgInitFuncName = GetPackageInitFuncName(cgMod) ?? return
     let funcName = ReplaceLastMangleSpecialName(pkgInitFuncName, SPECIAL_NAME_FOR_INIT_RESET_FUNCTION)
     if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
-        if (!GetNamedFunction(moduleHandle, funcName).isNull()) {
-            return
-        }
+        if (!GetNamedFunction(moduleHandle, funcName).isNull()) { return }
     }
-    let llvmContext = cgMod.GetLLVMContext().raw
-    let voidType = unsafe { LLVMVoidTypeInContext(llvmContext) }
-    let i8Type = unsafe { LLVMInt8TypeInContext(llvmContext) }
-    let i8PtrType = unsafe { LLVMPointerType(i8Type, 0u32) }
-    let functionType = BuildLLVMFunctionType(voidType, SingleTypeList(i8PtrType))
-    let resetFunc = cgMod.GetOrInsertFunction(funcName, functionType)
+    let ctx = cgMod.GetLLVMContext().raw
+    let pointer = unsafe { LLVMPointerType(LLVMInt8TypeInContext(ctx), 0u32) }
+    // RunCJTask's result is native void*. null means notification acknowledged;
+    // the still-owned context pointer reports a failed normal notification.
+    let resetFunc = cgMod.GetOrInsertFunction(funcName, BuildLLVMFunctionType(pointer, SingleTypeList(pointer)))
     SetLLVMValueName(resetFunc, 0u32, "param")
     AddFnAttr(resetFunc, "noinline")
     cgMod.SetExceptionIntrinsicPersonality(resetFunc)
@@ -907,35 +1028,64 @@ private func CreatePackageInitResetFunction(cgMod: CGModule): Unit {
 
     try (irBuilder = IRBuilder2(cgMod)) {
         let entry = irBuilder.CreateEntryBasicBlock(resetFunc, "entry")
-        unsafe { LLVMPositionBuilderAtEnd(irBuilder.GetBuilder().raw, entry) }
-        // Reset reuses completed literal cache units; only the old variable flags reset.
-        EmitCjStringCacheCalls(cgMod, irBuilder)
-        let flagResetFunc = CreatePackageInitFlagResetFunction(cgMod)
-        let _ = irBuilder.CreateCallOrInvoke(flagResetFunc, ArrayList<LLVMValueRef>())
-
-        if (let Some(literalInitFunc) <- GetPackageInitSiblingFunction(cgMod, pkgInitFuncName,
-            SPECIAL_NAME_FOR_INIT_LITERAL_FUNCTION)) {
-            let _ = irBuilder.CreateCallOrInvoke(literalInitFunc, ArrayList<LLVMValueRef>())
+        irBuilder.SetInsertPoint(entry)
+        let originalRoot = irBuilder.CreateEntryAlloca(CGType.GetRefType(cgMod.GetLLVMContext()),
+            name: "macro.reset.original.exception")
+        let unwind = irBuilder.CreateAndInsertBasicBlock("reset.catch")
+        try (scope = CodeGenUnwindBlockScope(cgMod, unwind)) {
+            EmitCjStringCacheCalls(cgMod, irBuilder)
+            let _ = irBuilder.CreateCallOrInvoke(CreatePackageInitFlagResetFunction(cgMod), ArrayList<LLVMValueRef>())
+            if (let Some(literalInit) <- GetPackageInitSiblingFunction(cgMod, pkgInitFuncName,
+                SPECIAL_NAME_FOR_INIT_LITERAL_FUNCTION)) {
+                let _ = irBuilder.CreateCallOrInvoke(literalInit, ArrayList<LLVMValueRef>())
+            }
+            if (let Some(globalInit) <- GetNamedFunctionOpt(cgMod, pkgInitFuncName)) {
+                let _ = irBuilder.CreateCallOrInvoke(globalInit, ArrayList<LLVMValueRef>())
+            }
         }
-        if (let Some(gvInitFunc) <- GetNamedFunctionOpt(cgMod, pkgInitFuncName)) {
-            let _ = irBuilder.CreateCallOrInvoke(gvInitFunc, ArrayList<LLVMValueRef>())
-        }
+        let notified = EmitResetNotification(cgMod, irBuilder, resetFunc, 0)
+        let (_, context) = GetResetNotifyArguments(cgMod, irBuilder, resetFunc)
+        let acknowledged = irBuilder.CreateICmp(LLVMIntPredicate.EQ, notified, irBuilder.GetInt32(0))
+        let _ = irBuilder.CreateRet(irBuilder.CreateSelect(acknowledged,
+            unsafe { LLVMConstNull(pointer) }, context))
 
-        let cFuncType = BuildLLVMFunctionType(voidType, SingleTypeList(i8PtrType))
-        let paramType = GetOrCreateNamedStructType(cgMod.GetLLVMContext(), "struct._param")
-        let paramFields = ArrayList<LLVMTypeRef>()
-        paramFields.add(unsafe { LLVMPointerType(cFuncType, 0u32) })
-        paramFields.add(i8PtrType)
-        SetStructTypeBody(paramType, paramFields)
-        let wrapperFunc = GetGVResetCallBack(cgMod, cFuncType)
-        let castParam = irBuilder.CreateBitCast(unsafe { LLVMGetParam(resetFunc, 0u32) },
-            unsafe { LLVMPointerType(paramType, 0u32) })
-        let wrapperArgs = ArrayList<LLVMValueRef>()
-        wrapperArgs.add(irBuilder.CreateLoad(paramFields[0], irBuilder.CreateStructGEP(paramType, castParam, 0u32)))
-        wrapperArgs.add(irBuilder.CreateLoad(paramFields[1], irBuilder.CreateStructGEP(paramType, castParam, 1u32)))
-        let _ = irBuilder.CreateCallOrInvoke(wrapperFunc, wrapperArgs)
-        let _ = unsafe { LLVMBuildRetVoid(irBuilder.GetBuilder().raw) }
+        irBuilder.SetInsertPoint(unwind)
+        let landingPad = irBuilder.CreateLandingPad(CGType.GetLandingPadType(cgMod.GetLLVMContext()), 0u32)
+        irBuilder.AddLandingPadCatchAllClause(landingPad)
+        let original = irBuilder.CallPostThrowExceptionIntrinsic(irBuilder.CallExceptionIntrinsicGetExceptionValue())
+        let _ = irBuilder.CreateStore(original, originalRoot)
+        let exportUnwind = irBuilder.CreateAndInsertBasicBlock("reset.export.catch")
+        var report = LLVMNullValue()
+        try (scope = CodeGenUnwindBlockScope(cgMod, exportUnwind)) {
+            let (callback, callbackContext) = GetResetNotifyArguments(cgMod, irBuilder, resetFunc)
+            report = irBuilder.CreateResetFailureReportCall(originalRoot, callbackContext, callback)
+        }
+        let reported = irBuilder.CreateAndInsertBasicBlock("reset.error.reported")
+        let failed = irBuilder.CreateAndInsertBasicBlock("reset.error.not.reported")
+        irBuilder.CreateCondBr(irBuilder.CreateICmp(LLVMIntPredicate.EQ, report, irBuilder.GetInt32(0)), reported, failed)
+        irBuilder.SetInsertPoint(reported)
+        let _ = irBuilder.CreateRet(unsafe { LLVMConstNull(pointer) })
+        irBuilder.SetInsertPoint(failed)
+        let unknownStatus = irBuilder.CreateAndInsertBasicBlock("reset.export.unknown.status")
+        let statusSwitch = irBuilder.CreateSwitch(report, unknownStatus, 5u32)
+        for (code in 1..6) {
+            let block = irBuilder.CreateAndInsertBasicBlock("reset.export.status." + code.toString())
+            irBuilder.AddSwitchCase(statusSwitch, irBuilder.GetInt32(-code), block)
+            irBuilder.SetInsertPoint(block)
+            EmitResetExportFailure(cgMod, irBuilder, resetFunc, originalRoot, if (code == 4) { 3 } else { 4 },
+                "reportResetFailureV1 status=" + (-code).toString() + "; original details unavailable")
+        }
+        irBuilder.SetInsertPoint(unknownStatus)
+        EmitResetExportFailure(cgMod, irBuilder, resetFunc, originalRoot, 4,
+            "reportResetFailureV1 returned a status outside its declared contract; original details unavailable")
+        irBuilder.SetInsertPoint(exportUnwind)
+        let secondaryPad = irBuilder.CreateLandingPad(CGType.GetLandingPadType(cgMod.GetLLVMContext()), 0u32)
+        irBuilder.AddLandingPadCatchAllClause(secondaryPad)
+        let _ = irBuilder.CallPostThrowExceptionIntrinsic(irBuilder.CallExceptionIntrinsicGetExceptionValue())
+        EmitResetExportFailure(cgMod, irBuilder, resetFunc, originalRoot, 4,
+            "reportResetFailureV1 threw before returning; original details unavailable")
     }
+    CGFunction.AddZeroInitForStructWithRefField(cgMod, resetFunc)
 }
 
 private func CreatePackageInitFlagResetFunction(cgMod: CGModule): LLVMValueRef {
@@ -966,28 +1116,26 @@ private func CreatePackageInitFlagResetFunction(cgMod: CGModule): LLVMValueRef {
 }
 
 private func GetGVResetCallBack(cgMod: CGModule, callBackFuncType: LLVMTypeRef): LLVMValueRef {
-    let llvmContext = cgMod.GetLLVMContext().raw
-    let voidType = unsafe { LLVMVoidTypeInContext(llvmContext) }
-    let i8PtrType = unsafe { LLVMPointerType(LLVMInt8TypeInContext(llvmContext), 0u32) }
-    let wrapperParamTypes = ArrayList<LLVMTypeRef>()
-    wrapperParamTypes.add(unsafe { LLVMPointerType(callBackFuncType, 0u32) })
-    wrapperParamTypes.add(i8PtrType)
-    let wrapperFuncType = BuildLLVMFunctionType(voidType, wrapperParamTypes)
-    let wrapperFunc = cgMod.GetOrInsertFunction("wrapper.F0uPuE", wrapperFuncType)
-    if (unsafe { LLVMGetFirstBasicBlock(wrapperFunc) }.isNull()) {
+    let ctx = cgMod.GetLLVMContext().raw
+    let pointer = unsafe { LLVMPointerType(LLVMInt8TypeInContext(ctx), 0u32) }
+    let i32 = unsafe { LLVMInt32TypeInContext(ctx) }
+    let sizeTy = unsafe { LLVMIntTypeInContext(ctx, cgMod.GetPointerSize() * 8u32) }
+    let params = ArrayList<LLVMTypeRef>([pointer, pointer, i32, pointer, sizeTy, pointer, sizeTy])
+    let wrapper = cgMod.GetOrInsertFunction("wrapper.reset.notify.v2", BuildLLVMFunctionType(i32, params))
+    if (unsafe { LLVMGetFirstBasicBlock(wrapper) }.isNull()) {
         try (irBuilder = IRBuilder2(cgMod)) {
-            let entry = irBuilder.CreateEntryBasicBlock(wrapperFunc, "entry")
-            unsafe { LLVMPositionBuilderAtEnd(irBuilder.GetBuilder().raw, entry) }
+            irBuilder.SetInsertPoint(irBuilder.CreateEntryBasicBlock(wrapper, "entry"))
             let args = ArrayList<LLVMValueRef>()
-            args.add(unsafe { LLVMGetParam(wrapperFunc, 1u32) })
-            let _ = irBuilder.CreateCall(unsafe { LLVMGetParam(wrapperFunc, 0u32) }, callBackFuncType, args)
-            let _ = unsafe { LLVMBuildRetVoid(irBuilder.GetBuilder().raw) }
+            for (i in 1u32..7u32) { args.add(unsafe { LLVMGetParam(wrapper, i) }) }
+            let callback = irBuilder.CreateBitCast(unsafe { LLVMGetParam(wrapper, 0u32) },
+                unsafe { LLVMPointerType(callBackFuncType, 0u32) })
+            let _ = irBuilder.CreateRet(irBuilder.CreateCall(callback, callBackFuncType, args))
         }
     }
-    unsafe { LLVMSetLinkage(wrapperFunc, LLVMLinkageValue(LLVMLinkage.Private)) }
-    AddFnAttr(wrapperFunc, "noinline")
-    AddFnAttr(wrapperFunc, CJ2C_ATTR)
-    return wrapperFunc
+    unsafe { LLVMSetLinkage(wrapper, LLVMLinkageValue(LLVMLinkage.Private)) }
+    AddFnAttr(wrapper, "noinline")
+    AddFnAttr(wrapper, CJ2C_ATTR)
+    return wrapper
 }
 
 private func CallDependentPackageGlobalResetCall(irBuilder: IRBuilder2): Unit {
@@ -1165,8 +1313,10 @@ private func GetPackageInitSiblingFunction(cgMod: CGModule, pkgInitFuncName: Str
 }
 
 private func ReplaceLastMangleSpecialName(pkgInitFuncName: String, specialName: String): String {
+    let sourceSuffix = SPECIAL_NAME_FOR_INIT_FUNCTION + MANGLE_FUNC_PARAM_TYPE_PREFIX + MANGLE_VOID_TY_SUFFIX
     let targetSuffix = specialName + MANGLE_FUNC_PARAM_TYPE_PREFIX + MANGLE_VOID_TY_SUFFIX
-    return pkgInitFuncName[0..(pkgInitFuncName.size - targetSuffix.size)] + targetSuffix
+    CJC_ASSERT(pkgInitFuncName.endsWith(sourceSuffix))
+    return pkgInitFuncName[0..(pkgInitFuncName.size - sourceSuffix.size)] + targetSuffix
 }
 
 private func GetPackageInitFuncName(cgMod: CGModule): Option<String> {
@@ -1615,8 +1765,16 @@ public func SavePackageModule(module: LLVMModuleHandle, bcFilePath: String): Boo
 }
 
 public func ClearPackageModules(packageModules: ArrayList<LLVMModuleHandle>): Unit {
+    var failure: Option<Exception> = None
     for (moduleHandle in packageModules) {
-        unsafe { LLVMDisposeModule(moduleHandle.raw) }
+        try {
+            // ReleaseLLVMModule transfers its context with the module. Calling
+            // the owning handle closes both and records disposal exactly once.
+            moduleHandle.close()
+        } catch (e: Exception) {
+            if (failure.isNone()) { failure = Some(e) }
+        }
     }
     packageModules.clear()
+    if (let Some(e) <- failure) { throw e }
 }

@@ -3,7 +3,7 @@ package cjcj::macro_pkg
 import cjcj::basic.{DiagArgument, DiagKind}
 import cjcj::lex.{Lexer as RealLexer, StringPartKind, TOKEN_KIND_VALUES}
 import cjcj::option.GetHardwareConcurrency
-import cjcj::utils.TaskQueue
+import cjcj::utils.{TaskQueue, TaskResult}
 import std.collection.*
 import std.fs.File as FSFile
 import std.fs.exists
@@ -191,10 +191,11 @@ public func RefreshNewTokensPos(node: Node, sm: SourceManager, ci: MacroHost): U
         var prevTokenKind = TokenKind.END
         invocation.macroAtPosition.add(mcPos)
         let taskQueue = TaskQueue(Int64(GetHardwareConcurrency()))
+        let results = ArrayList<TaskResult<Unit>>()
         var tokenIdx: Int64 = 0
         while (tokenIdx < invocation.newTokens.size) {
             let currentTokenIdx = tokenIdx
-            let _ = taskQueue.AddTask<Unit>({ =>
+            results.add(taskQueue.AddTask<Unit>({ =>
                 var token = invocation.newTokens[currentTokenIdx]
                 if (token.kind == TokenKind.NL || token.kind == TokenKind.COMMENT) {
                     token.SetCurFile(true)
@@ -211,10 +212,19 @@ public func RefreshNewTokensPos(node: Node, sm: SourceManager, ci: MacroHost): U
                     token.SetCurFile(!isAtMacroPosition)
                 }
                 invocation.newTokens[currentTokenIdx] = token
-            })
+            }))
             tokenIdx++
         }
         taskQueue.RunAndWaitForAllTasksCompleted()
+        var firstFailure: Option<Exception> = None
+        for (result in results) {
+            try {
+                result.get()
+            } catch (e: Exception) {
+                if (firstFailure.isNone()) { firstFailure = Some(e) }
+            }
+        }
+        if (let Some(e) <- firstFailure) { throw e }
         tokenIdx = 0
         while (tokenIdx < invocation.newTokens.size) {
             var token = invocation.newTokens[tokenIdx]

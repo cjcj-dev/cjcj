@@ -7,7 +7,7 @@ import cjcj::basic.DiagKind as BasicDiagKind
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::modules.SemaImportManager
 import cjcj::option.GetHardwareConcurrency
-import cjcj::utils.{CJC_ASSERT, ProfileRecorder, TaskQueue}
+import cjcj::utils.{CJC_ASSERT, ProfileRecorder, TaskQueue, TaskResult}
 
 private let CORES_REQUIRED_WARMUP: UInt64 = 8u64
 
@@ -104,7 +104,6 @@ public class TypeCheckerImpl {
     public var importManager: Option<SemaImportManager> = None
     public let scopeManager: ScopeManager = ScopeManager()
     public let mainFunctionMap: HashMap<Node, ArrayList<Decl>> = HashMap<Node, ArrayList<Decl>>()
-    public var structMemberMap: HashMap<InheritableDecl, MemberMap> = HashMap<InheritableDecl, MemberMap>()
 
     public init(ci!: Option<CompilerInstance> = None, typeManager!: TypeManager = TypeManager(),
         diag!: Option<BasicDiagnosticEngine> = None,
@@ -235,6 +234,7 @@ public class TypeCheckerImpl {
             }
             let cache = HashMap<String, ArrayList<Symbol>>()
             let taskQueue = TaskQueue(Int64(scopeNames.size))
+            let results = ArrayList<TaskResult<Unit>>()
             let searchers = ArrayList<Searcher>()
             for (_ in 0..scopeNames.size) {
                 searchers.add(Searcher())
@@ -243,7 +243,7 @@ public class TypeCheckerImpl {
             while (idx < scopeNames.size) {
                 let scopeName = scopeNames[idx]
                 let searcher = searchers[idx]
-                let _ = taskQueue.AddTask<Unit>({ =>
+                results.add(taskQueue.AddTask<Unit>({ =>
                     let query = CompoundQuery(QueryKind.NOT)
                     let scopeAndDecl = CompoundQuery(QueryKind.AND)
                     scopeAndDecl.children.add(ScopeQuery(scopeName))
@@ -254,10 +254,19 @@ public class TypeCheckerImpl {
                     query.children.add(scopeAndDecl)
                     query.children.add(ASTKindQuery("extend_decl"))
                     let _ = searcher.Search(ctx, query)
-                })
+                }))
                 idx++
             }
             taskQueue.RunAndWaitForAllTasksCompleted()
+            var firstFailure: Option<Exception> = None
+            for (result in results) {
+                try {
+                    result.get()
+                } catch (e: Exception) {
+                    if (firstFailure.isNone()) { firstFailure = Some(e) }
+                }
+            }
+            if (let Some(e) <- firstFailure) { throw e }
             for (searcher in searchers) {
                 for ((key, value) in searcher.GetCache()) {
                     cache[key] = value

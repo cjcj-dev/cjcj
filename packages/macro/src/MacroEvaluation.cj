@@ -556,36 +556,40 @@ private func writeNativeBytes(ptr: CPointer<UInt8>, bytes: ArrayList<UInt8>): Un
 
 private func installNativeMacroResult(macCall: MacroCall, resultPtr: CPointer<UInt8>): Bool {
     let invocation = macCall.RequireInvocation()
-    let tokens = TokenSerialization.GetTokensFromNativeBuffer(resultPtr)
-    FreeNativeBuffer(resultPtr)
-    invocation.newTokens.clear()
-    for (token in tokens) {
-        invocation.newTokens.add(token)
+    // A null pointer is the native ABI's valid empty-token result. Always
+    // release a nonnull result even if decoding/installation throws.
+    try {
+        let tokens = TokenSerialization.GetTokensFromNativeBuffer(resultPtr)
+        invocation.newTokens.clear()
+        for (token in tokens) { invocation.newTokens.add(token) }
+        macCall.isDataReady = true
+        return true
+    } finally {
+        FreeNativeBuffer(resultPtr)
     }
-    macCall.isDataReady = true
-    return true
 }
 
 private func invokeCommonNativeMacro(macCall: MacroCall, inputBytes: ArrayList<UInt8>): Bool {
     var result = false
     try (inputPtr = LibC.malloc<UInt8>(count: nativeBufferSize(inputBytes)).asResource()) {
-        if (inputPtr.value.isNull()) {
-            result = false
-        } else {
-            writeNativeBytes(inputPtr.value, inputBytes)
-            let invokeFunc = CommonMacroFunc(macCall.invokeFunc)
-            let (ctxId, ctxHandle) = registerMacroCtx(macCall)
+        if (inputPtr.value.isNull()) { return false }
+        writeNativeBytes(inputPtr.value, inputBytes)
+        let invokeFunc = CommonMacroFunc(macCall.invokeFunc)
+        let (ctxId, ctxHandle) = registerMacroCtx(macCall)
+        var failed = false
+        try {
+            let resultPtr = unsafe { invokeFunc(inputPtr.value, inputBytes.size, CPointer<Unit>(ctxHandle)) }
+            result = installNativeMacroResult(macCall, resultPtr)
+        } catch (e: Exception) {
+            failed = true
+            throw e
+        } finally {
             try {
-                let resultPtr = unsafe {
-                    invokeFunc(inputPtr.value, inputBytes.size, CPointer<Unit>(ctxHandle))
-                }
-                result = installNativeMacroResult(macCall, resultPtr)
-            } finally {
                 unregisterMacroCtx(ctxId, ctxHandle)
+            } catch (e: Exception) {
+                if (!failed) { throw e }
             }
         }
-    } catch (e: Exception) {
-        result = false
     }
     return result
 }
@@ -593,49 +597,58 @@ private func invokeCommonNativeMacro(macCall: MacroCall, inputBytes: ArrayList<U
 private func invokeAttrNativeMacro(macCall: MacroCall, attrBytes: ArrayList<UInt8>, inputBytes: ArrayList<UInt8>): Bool {
     var result = false
     try (attrPtr = LibC.malloc<UInt8>(count: nativeBufferSize(attrBytes)).asResource()) {
-        if (attrPtr.value.isNull()) {
-            result = false
-        } else {
-            writeNativeBytes(attrPtr.value, attrBytes)
-            try (inputPtr = LibC.malloc<UInt8>(count: nativeBufferSize(inputBytes)).asResource()) {
-                if (inputPtr.value.isNull()) {
-                    result = false
-                } else {
-                    writeNativeBytes(inputPtr.value, inputBytes)
-                    let invokeFunc = AttrMacroFunc(macCall.invokeFunc)
-                    let (ctxId, ctxHandle) = registerMacroCtx(macCall)
-                    try {
-                        let resultPtr = unsafe {
-                            invokeFunc(attrPtr.value, attrBytes.size, inputPtr.value, inputBytes.size,
-                                CPointer<Unit>(ctxHandle))
-                        }
-                        result = installNativeMacroResult(macCall, resultPtr)
-                    } finally {
-                        unregisterMacroCtx(ctxId, ctxHandle)
-                    }
+        if (attrPtr.value.isNull()) { return false }
+        writeNativeBytes(attrPtr.value, attrBytes)
+        try (inputPtr = LibC.malloc<UInt8>(count: nativeBufferSize(inputBytes)).asResource()) {
+            if (inputPtr.value.isNull()) { return false }
+            writeNativeBytes(inputPtr.value, inputBytes)
+            let invokeFunc = AttrMacroFunc(macCall.invokeFunc)
+            let (ctxId, ctxHandle) = registerMacroCtx(macCall)
+            var failed = false
+            try {
+                let resultPtr = unsafe {
+                    invokeFunc(attrPtr.value, attrBytes.size, inputPtr.value, inputBytes.size,
+                        CPointer<Unit>(ctxHandle))
+                }
+                result = installNativeMacroResult(macCall, resultPtr)
+            } catch (e: Exception) {
+                failed = true
+                throw e
+            } finally {
+                try {
+                    unregisterMacroCtx(ctxId, ctxHandle)
+                } catch (e: Exception) {
+                    if (!failed) { throw e }
                 }
             }
         }
-    } catch (e: Exception) {
-        result = false
     }
     return result
 }
 
+private func markNativeMacroFailed(macCall: MacroCall): Bool {
+    macCall.status = MacroEvalStatus.FAIL
+    let invocation = macCall.RequireInvocation()
+    invocation.newTokens.clear()
+    invocation.newTokens.add(Token(TokenKind.ILLEGAL, ""))
+    macCall.isDataReady = true
+    return false
+}
+
 func evaluateNativeMacro(macCall: MacroCall): Bool {
     if (macCall.invokeFunc.isNull() && !macCall.FindMacroDefMethod()) {
-        return false
+        return markNativeMacroFailed(macCall)
     }
-    if (macCall.invokeFunc.isNull()) {
-        return false
-    }
+    if (macCall.invokeFunc.isNull()) { return markNativeMacroFailed(macCall) }
     let invocation = macCall.RequireInvocation()
     let inputBytes = TokenSerialization.GetTokensBytes(invocation.args)
-    if (invocation.hasAttr) {
+    let succeeded = if (invocation.hasAttr) {
         let attrBytes = TokenSerialization.GetTokensBytes(invocation.attrs)
-        return invokeAttrNativeMacro(macCall, attrBytes, inputBytes)
+        invokeAttrNativeMacro(macCall, attrBytes, inputBytes)
+    } else {
+        invokeCommonNativeMacro(macCall, inputBytes)
     }
-    return invokeCommonNativeMacro(macCall, inputBytes)
+    return if (succeeded) { true } else { markNativeMacroFailed(macCall) }
 }
 
 private func refreshNewTokensPosition(originPos: ArrayList<Position>, tokensToParse: ArrayList<Token>): Unit {
@@ -696,6 +709,9 @@ public class MacroEvaluation {
         let runtimeReady = RuntimeInit.GetInstance().InitRuntime(ci.GetRuntimeLibPath(), initArgs: initArgs)
         if (runtimeReady) {
             EvalMacros()
+        } else {
+            ci.GetDiag().Diagnose(DEFAULT_POSITION,
+                "Cannot initialize macro runtime: " + ci.GetRuntimeLibPath())
         }
     }
 
@@ -726,8 +742,7 @@ public class MacroEvaluation {
     public func GetMacroDefDynamicFiles(): ArrayList<String> {
         let macroDynFiles = ArrayList<String>()
         for (packageName in ci.importManager.GetImportedStdMacroPackages()) {
-            let basePath = FileUtil.JoinPath(FileUtil.GetDirPath(ci.GetGlobalOptions().executablePath),
-                "../runtime/lib")
+            let basePath = FileUtil.GetCompilerRuntimeBasePath(ci.GetGlobalOptions().executablePath)
             let libName = "lib" + FileUtil.ConvertPackageNameToLibCangjieBaseFormat(packageName) + LIB_SUFFIX
             let macroPath = FileUtil.JoinPath(
                 FileUtil.JoinPath(basePath, ci.GetGlobalOptions().GetCangjieLibHostPathName()), libName)
@@ -767,7 +782,6 @@ public class MacroEvaluation {
 
     public func InitGlobalVariable(): Unit {
         let runtimeInit = RuntimeInit.GetInstance()
-        let invokeReleaseHandle = ReleaseHandleFromC(runtimeInit.runtimeReleaseFunc)
         var idx: Int64 = 0
         while (idx < usedMacroPkgs.size) {
             let packageName = usedMacroPkgs[idx][0]
@@ -792,33 +806,50 @@ public class MacroEvaluation {
                     macroInvokeTable[currentId] = mInvoke
                     currentId
                 }
-                try (idCell = LibC.malloc<Int64>().asResource(),
-                    resetNotify = LibC.malloc<ResetNotify>().asResource()) {
-                    CJC_ASSERT(!idCell.value.isNull() && !resetNotify.value.isNull())
+                var task = CPointer<Unit>()
+                var completed = false
+                try {
+                    mInvoke.argument = unsafe { LibC.malloc<Int64>() }
+                    mInvoke.resetArgument = unsafe { LibC.malloc<ResetNotify>() }
+                    if (mInvoke.argument.isNull() || mInvoke.resetArgument.isNull()) {
+                        throw IllegalStateException("cannot allocate macro reset arguments")
+                    }
                     unsafe {
-                        idCell.value.write(id)
-                        resetNotify.value.write(ResetNotify(CPointer<Unit>(ResetVariableFinishNotify),
-                            CPointer<Unit>(idCell.value)))
+                        mInvoke.argument.write(id)
+                        mInvoke.resetArgument.write(ResetNotify(CPointer<Unit>(ResetVariableFinishNotify),
+                            CPointer<Unit>(mInvoke.argument)))
                     }
+                    task = runtimeInit.SubmitTask(CPointer<Unit>(initGlobalFunc),
+                        CPointer<Unit>(mInvoke.resetArgument))
+                    let taskResult = runtimeInit.CompleteTask(task)
+                    completed = true
                     synchronized(mInvoke.mtx) {
-                        let coroutineHandle = unsafe { InvokeNewTaskFromC(runtimeInit.runtimeMethodFunc)(
-                            CPointer<Unit>(initGlobalFunc), CPointer<Unit>(resetNotify.value)) }
-                        CJC_ASSERT(!coroutineHandle.isNull())
-                        while (!mInvoke.isDataReady) {
-                            mInvoke.cv.wait()
+                        if (let Some(e) <- mInvoke.failure) { throw e }
+                        if (!taskResult.isNull()) {
+                            throw mInvoke.notificationFailure
                         }
-                        unsafe { invokeReleaseHandle(coroutineHandle) }
+                        if (!mInvoke.isDataReady) {
+                            throw IllegalStateException("macro reset task completed without its notification")
+                        }
                     }
-                }
-                synchronized(macroInvokeTableLock) {
-                    macroInvokeTable.remove(id)
+                } finally {
+                    if (task.isNull() || completed) {
+                        synchronized(macroInvokeTableLock) { macroInvokeTable.remove(id) }
+                        unsafe {
+                            LibC.free(mInvoke.resetArgument)
+                            LibC.free(mInvoke.argument)
+                        }
+                    }
+                    // A failed wait leaves the table entry and its native
+                    // arguments alive. CloseRuntime preserves that failure.
                 }
                 findGlobalFunc = true
                 usedMacroPkgs[idx] = (packageName, true)
                 break
             }
             if (!findGlobalFunc) {
-                Warningln("could not find global reset method in macro dylib: " + method)
+                throw IllegalStateException("macro library lacks reset notification ABI v2; rebuild macro package " +
+                    packageName + ": " + method)
             }
             idx++
         }
@@ -858,31 +889,32 @@ public class MacroEvaluation {
             macroInvokeTable[currentId] = mInvoke
             currentId
         }
-        let handle = unsafe { LibC.malloc<Int64>() }
-        CJC_ASSERT(!handle.isNull())
-        unsafe { handle.write(id) }
-
-        synchronized(mInvoke.mtx) {
-            macCall.coroutineHandle = unsafe {
-                InvokeNewTaskFromC(runtimeInit.runtimeMethodFunc)(
-                    CPointer<Unit>(InvokeMacro), CPointer<Unit>(handle))
+        var completed = false
+        try {
+            mInvoke.argument = unsafe { LibC.malloc<Int64>() }
+            if (mInvoke.argument.isNull()) {
+                throw IllegalStateException("cannot allocate macro callback argument")
             }
-            CJC_ASSERT(!macCall.coroutineHandle.isNull())
-            while (!macCall.isDataReady) {
-                mInvoke.cv.wait()
+            unsafe { mInvoke.argument.write(id) }
+            macCall.coroutineHandle = runtimeInit.SubmitTask(CPointer<Unit>(InvokeMacro),
+                CPointer<Unit>(mInvoke.argument))
+            // The R future, not the H notification, is the completion barrier.
+            // In particular this wait must be outside the callback's H mutex.
+            runtimeInit.CompleteTask(macCall.coroutineHandle)
+            completed = true
+            macCall.coroutineHandle = CPointer<Unit>()
+            synchronized(mInvoke.mtx) {
+                if (let Some(e) <- mInvoke.failure) { throw e }
+                if (!macCall.isDataReady) {
+                    throw IllegalStateException("macro task completed without its result")
+                }
+            }
+        } finally {
+            if (macCall.coroutineHandle.isNull() || completed) {
+                synchronized(macroInvokeTableLock) { macroInvokeTable.remove(id) }
+                unsafe { LibC.free(mInvoke.argument) }
             }
         }
-        ReleaseThreadHandle(macCall)
-        synchronized(macroInvokeTableLock) {
-            macroInvokeTable.remove(id)
-        }
-        unsafe { LibC.free(handle) }
-    }
-
-    // Mirrors src/Macro/MacroEvaluationCJNative.cpp:180-185 ReleaseThreadHandle.
-    public func ReleaseThreadHandle(macCall: MacroCall): Unit {
-        let invokeReleaseHandle = ReleaseHandleFromC(RuntimeInit.GetInstance().runtimeReleaseFunc)
-        unsafe { invokeReleaseHandle(macCall.coroutineHandle) }
     }
 
     public func CheckAttrTokens(attrTokens: ArrayList<Token>, macCall: MacroCall): Bool {

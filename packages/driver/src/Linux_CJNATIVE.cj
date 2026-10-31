@@ -74,8 +74,13 @@ public open class Linux_CJNATIVE <: Gnu {
                 tool.AppendArg(crtfastmathFilepath)
             }
         }
+        // Macro admission requires the selected SDK to be the first runtime
+        // search path. Preserve user paths after it for private dependencies.
+        // Ordinary shared/executable outputs retain their existing ordering.
+        let macroRuntimeRpath = UsesMacroRuntimeRpath()
+        if (macroRuntimeRpath) { GenerateRuntimePath(tool) }
         HandleLLVMLinkOptions(objFiles, gccLibPath, tool, cjldScript)
-        GenerateRuntimePath(tool)
+        if (!macroRuntimeRpath) { GenerateRuntimePath(tool) }
         tool.AppendArg(GetGccLibFile(gccCrtFilePair[1], gccLibPath))
         if (let Some(crtn) <- FileUtil.FindFileByName("crtn.o", GetCRuntimeLibraryPath().toArray())) {
             tool.AppendArg(crtn)

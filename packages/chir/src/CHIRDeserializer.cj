@@ -24,6 +24,10 @@ public class CHIRDeserializer {
             eprintln(failedReason + ".")
             return false
         }
+        if (!HasCurrentConstructorABI(serializationInfo)) {
+            eprintln("CHIR constructor ABI mismatch: rebuild with receiver-returning constructors (CR01).")
+            return false
+        }
         var options = VerifierOptions()
         options.maxDepth = UInt32.Max
         options.maxTables = UInt32.Max
@@ -44,6 +48,10 @@ public class CHIRDeserializer {
         var succeed = true
         try {
             let serializationInfo = Array<UInt8>(size, { idx => unsafe { data.read(idx) } })
+            if (!HasCurrentConstructorABI(serializationInfo)) {
+                eprintln("CHIR constructor ABI mismatch: rebuild with receiver-returning constructors (CR01).")
+                return false
+            }
             var options = VerifierOptions()
             options.maxDepth = UInt32.Max
             options.maxTables = UInt32.Max

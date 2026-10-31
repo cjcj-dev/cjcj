@@ -67,7 +67,9 @@ public func CreateRefType(name: String): RefType {
     return ty
 }
 
-public class TestPackage {
+// Compiler bookkeeping, distinct from std.unittest.TestPackage used by the
+// generated registration code and by normal tests of this package.
+public class TestPackageInfo {
     public var packageName: String
     public let testRegisterFunctions: ArrayList<FuncDecl> = ArrayList<FuncDecl>()
 
@@ -78,7 +80,7 @@ public class TestPackage {
 
 public class TestModule {
     public var moduleName: String
-    public let testPackages: ArrayList<TestPackage> = ArrayList<TestPackage>()
+    public let testPackages: ArrayList<TestPackageInfo> = ArrayList<TestPackageInfo>()
 
     public init(moduleName: String) {
         this.moduleName = moduleName
@@ -342,7 +344,7 @@ public class TestEntryConstructor {
         }
         let testMod = TestModule(moduleName)
         for (pkg in srcPkgs) {
-            let testPkg = TestPackage(pkg.fullPackageName)
+            let testPkg = TestPackageInfo(pkg.fullPackageName)
             let funcs = GetTestSuiteRegisterFunctions(pkg)
             for (funcDecl in funcs) {
                 testPkg.testRegisterFunctions.add(funcDecl)
@@ -350,7 +352,7 @@ public class TestEntryConstructor {
             testMod.testPackages.add(testPkg)
         }
         if (let Some(mainPartPkg) <- importedMainPartPkgForTestPkg) {
-            let mainTestPkg = TestPackage(mainPartPkg.fullPackageName)
+            let mainTestPkg = TestPackageInfo(mainPartPkg.fullPackageName)
             let mainFuncs = GetTestSuiteRegisterFunctions(mainPartPkg)
             for (mainFuncDecl in mainFuncs) {
                 mainTestPkg.testRegisterFunctions.add(mainFuncDecl)

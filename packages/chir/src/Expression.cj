@@ -90,6 +90,18 @@ public open class Expression <: Base & Hashable & Equatable<Expression> {
     public func IsTypeCast(): Bool { return (this as TypeCast).isSome() }
     public func IsUnaryExpr(): Bool { return GetExprMajorKind() == ExprMajorKind.UNARY_EXPR }
 
+    // Canonical Expression.cpp: paired successors exist only on throwing expressions.
+    public func GetSuccessAndErrorBlocks(): (Option<Block>, Option<Block>) {
+        if (IsTryBinaryExpression() || IsTryUnaryExpression() ||
+            kind == ExprKind.TRY_APPLY || kind == ExprKind.TRY_INVOKE ||
+            kind == ExprKind.TRY_INVOKESTATIC || kind == ExprKind.TRY_SPAWN ||
+            kind == ExprKind.TRY_NUMERIC_CAST || kind == ExprKind.TRY_INTRINSIC ||
+            kind == ExprKind.TRY_ALLOCATE || kind == ExprKind.TRY_RAW_ARRAY_ALLOCATE) {
+            return (Some(GetSuccessor(0)), Some(GetSuccessor(1)))
+        }
+        return (None, None)
+    }
+
     public func IsConstantNull(): Bool {
         if (let Some(constant) <- (this as Constant)) {
             return constant.IsNullLit()

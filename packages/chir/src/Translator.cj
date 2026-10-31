@@ -562,13 +562,9 @@ public class Translator {
         blockGroupStack.add(body)
         let initExpr = RequireExpr(decl.initializer, "global variable initializer")
         let initValue = TranslateExprArg(initExpr, RequireRefBaseType(globalVar))
-        if (decl.IsConst()) {
-            for (expr in CurrentBlock().GetExpressions()) {
-                expr.SetDebugLocation(INVALID_LOCATION)
-            }
-        }
-        let loc = if (decl.IsConst()) { INVALID_LOCATION } else { TranslateLocation(decl) }
-        CreateAndAppendWrappedStore(initValue, globalVar, loc)
+        // Const evaluation may preserve runtime events (including Reference registration).
+        // Retain source locations for diagnostics and any initializer that survives folding.
+        CreateAndAppendWrappedStore(initValue, globalVar, TranslateLocation(decl))
         if (CurrentBlock().GetTerminator().isNone()) {
             let createdExit568 = builder.CreateExit(None, CurrentBlock())
             CurrentBlock().AppendExpression(createdExit568)
@@ -1087,6 +1083,10 @@ public class Translator {
                 entry.AppendExpression(retValue)
                 let returnSlot = RequireResult(retValue)
                 fn.SetReturnValue(returnSlot)
+                if (ConstructorReturnsReceiver(fn)) {
+                    let initialReceiver = builder.CreateStore(fn.GetParam(0), returnSlot, entry)
+                    entry.AppendExpression(initialReceiver)
+                }
             }
         }
         currentBlock = entry
@@ -1107,12 +1107,42 @@ public class Translator {
                 CurrentBlock().AppendExpression(createdExit1070)
             }
         }
+        EmitObjectInitReturn(fn, body)
         currentBlock = savedBlock
         delayExitSignal = savedDelayExitSignal
         currentFunc = None
         currentAstFuncDecl = savedAstFuncDecl
         blockGroupStack.remove(at: blockGroupStack.size - 1)
         return fn
+    }
+
+    private func EmitObjectInitReturn(fn: Function, body: BlockGroup): Unit {
+        if (!ConstructorReturnsReceiver(fn)) {
+            return
+        }
+        let owner = match (fn.GetParentCustomTypeDef()) {
+            case Some(value) => value
+            case None => return
+        }
+        if (owner.GetPackageName() != "std.core" || owner.GetSrcCodeIdentifier() != "Object") {
+            return
+        }
+        for (block in body.GetBlocks()) {
+            if (let Some(exit) <- block.GetTerminator()) {
+                if (exit.GetExprKind() == ExprKind.EXIT) {
+                    let receiverType = fn.GetReturnType().getOrThrow()
+                    let receiverSlot = fn.GetReturnValue().getOrThrow()
+                    let receiver = builder.CreateLoad(receiverType, receiverSlot, block)
+                    receiver.MoveBefore(exit)
+                    let registration = builder.CreateIntrinsic(receiverType,
+                        IntrisicCallContext(kind: IntrinsicKind.REGISTER_FINALIZER,
+                            args: ArrayList<Value>([RequireResult(receiver)])), block)
+                    registration.MoveBefore(exit)
+                    let updated = builder.CreateStore(RequireResult(registration), receiverSlot, block)
+                    updated.MoveBefore(exit)
+                }
+            }
+        }
     }
 
     private func TranslateConstructorDefaultFieldInitializers(funcDecl: AstFuncDecl, funcBody: AstFuncBody): Unit {
@@ -1161,7 +1191,7 @@ public class Translator {
                 } else {
                     TypeCastOrBoxIfNeeded(initValue, memberTy, loc)
                 }
-                let store = builder.CreateStoreElementRef(storedValue, thisVar, path, CurrentBlock())
+                let store = builder.CreateStoreElementRef(storedValue, GetCurrentThisObject(), path, CurrentBlock())
                 CurrentBlock().AppendExpression(store)
                 store.SetDebugLocation(loc)
             }
@@ -1611,21 +1641,6 @@ public class Translator {
         return castedValue
     }
 
-    private func IsUnnecessarySuperCall(node: AstNode): Bool {
-        if (let Some(callExpr) <- (node as AstCallExpr)) {
-            if (let Some(baseFunc) <- callExpr.baseFunc) {
-                if (let Some(refExpr) <- (baseFunc as AstRefExpr)) {
-                    if (refExpr.isSuper) {
-                        if (let Some(astTy) <- callExpr.GetTy()) {
-                            return astTy.IsObject()
-                        }
-                    }
-                }
-            }
-        }
-        return false
-    }
-
     // C++: TranslateBlock.cpp:12-23 CollectInstantiatedFuncNodes.
     private func CollectInstantiatedFuncNodes(nodes: ArrayList<AstNode>, genericFunc: AstFuncDecl,
         manager: GenericInstantiationManager): Unit {
@@ -1653,9 +1668,6 @@ public class Translator {
                     nodes.add(funcDecl)
                     continue
                 }
-            }
-            if (IsUnnecessarySuperCall(body)) {
-                continue
             }
             nodes.add(body)
         }
@@ -3006,7 +3018,12 @@ public class Translator {
         var calleeFuncTy = translatedFuncType
         if (!resolvedFuncDecl.TestAttr(AstAttribute.STATIC)) {
             paramTys.add(thisType, at: 0)
-            calleeFuncTy = builder.context.GetFuncTy(paramTys, translatedFuncType.GetReturnType())
+            let retTy = if (ConstructorReturnsReceiver(resolvedFuncDecl)) {
+                thisType
+            } else {
+                translatedFuncType.GetReturnType()
+            }
+            calleeFuncTy = builder.context.GetFuncTy(paramTys, retTy)
         }
         let funcInstArgs = ArrayList<Type>()
         for (instTy in expr.instTys) {
@@ -3038,7 +3055,12 @@ public class Translator {
                 paramTys[0] = thisType
             } else if (parentType.IsClass()) {
                 paramTys[0] = AddRefIfFuncIsMutOrClass(parentType, originalFuncDecl)
-                calleeFuncTy = builder.context.GetFuncTy(paramTys, calleeFuncTy.GetReturnType())
+                let retTy = if (ConstructorReturnsReceiver(originalFuncDecl)) {
+                    paramTys[0]
+                } else {
+                    calleeFuncTy.GetReturnType()
+                }
+                calleeFuncTy = builder.context.GetFuncTy(paramTys, retTy)
             }
         }
         var instThisType = thisType
@@ -4078,7 +4100,7 @@ public class Translator {
         } else {
             decl.linkage
         })
-        let needInitialSuperClassSetup = !decl.TestAttr(AstAttribute.SPECIFIC) ||
+        let needInitialSuperClassSetup = !mergingSpecific || !decl.TestAttr(AstAttribute.SPECIFIC) ||
             decl.TestAttr(AstAttribute.IMPORTED) || decl.TestAttr(AstAttribute.GENERIC_INSTANTIATED)
         if (needInitialSuperClassSetup) {
             SetClassSuperClass(def, decl)
@@ -4475,11 +4497,12 @@ public class Translator {
         currentBlock = thenBlock
         let createdConstant4323 = builder.CreateConstant(boolTy, BoolLiteral(true), CurrentBlock())
         CurrentBlock().AppendExpression(createdConstant4323)
+        createdConstant4323.SetDebugLocation(loc)
         let constantTrue = RequireResult(createdConstant4323)
-        CreateAndAppendWrappedStore(constantTrue, resultLoc, CurrentBlock(), rightLoc)
+        CreateAndAppendWrappedStore(constantTrue, resultLoc, CurrentBlock(), loc)
         let createdGoTo4325 = builder.CreateGoTo(endBlock, CurrentBlock())
         CurrentBlock().AppendExpression(createdGoTo4325)
-        createdGoTo4325.SetDebugLocation(rightLoc)
+        createdGoTo4325.SetDebugLocation(loc)
 
         currentBlock = elseBlock
         if (!isImplicitAdd) {
@@ -5496,6 +5519,12 @@ public class Translator {
 
     private func GenerateForInRetValLocation(): Option<Value> {
         let funcRetValLocation = GetOuterBlockGroupReturnValLocation() ?? return None
+        // A constructor's receiver lives in its single return slot even across
+        // delayed exits. Do not introduce a null-initialized for-in return copy.
+        if (ConstructorReturnsReceiver(CurrentFunction()) &&
+            CurrentFunction().GetReturnValue().getOrThrow().nodeId == funcRetValLocation.nodeId) {
+            return None
+        }
         let forInType = RequireRefBaseType(funcRetValLocation)
         if (forInType.IsNothing() || forInType.IsUnit()) {
             return None
@@ -5549,6 +5578,10 @@ public class Translator {
 
     private func StoreReturnExprValueIfNeeded(expr: AstReturnExpr, value: Value): Unit {
         if (let Some(returnLocation) <- GetOuterBlockGroupReturnValLocation()) {
+            if (ConstructorReturnsReceiver(CurrentFunction()) &&
+                CurrentFunction().GetReturnValue().getOrThrow().nodeId == returnLocation.nodeId) {
+                return
+            }
             if (expr.TestAttr(AstAttribute.COMPILER_ADD)) {
                 CreateAndAppendWrappedStore(value, returnLocation)
             } else {
@@ -5641,6 +5674,9 @@ public class Translator {
     }
 
     private func StoreReturnValueIfNeeded(fn: Function, value: Value): Unit {
+        if (ConstructorReturnsReceiver(fn)) {
+            return
+        }
         if (let Some(returnLocation) <- fn.GetReturnValue()) {
             let createdStore5367 = builder.CreateStore(CastValueIfNeeded(value, RequireRefBaseType(returnLocation)), returnLocation,
                 CurrentBlock())
@@ -5826,15 +5862,12 @@ public class Translator {
             currentBlock = trueBlock
             BindExceptionPatternValues(expr.catchPatterns[idx], beginCatch)
             let catchBlock = expr.catchBlocks[idx]
-            let catchValue = Translator.TranslateASTNode(catchBlock, this)
+            // A Unit catch can complete an Any-valued try. Use the same
+            // result conversion and reachable-exit handling as match bodies.
+            let currentBody = TranslateMatchCaseBody(catchBlock, resultLoc, endBlock)
             if (trueBlock.GetTerminator().isNone()) {
-                let createdGoTo5537 = builder.CreateGoTo(GetBlockByAST(catchBlock), trueBlock)
+                let createdGoTo5537 = builder.CreateGoTo(currentBody, trueBlock)
                 trueBlock.AppendExpression(createdGoTo5537)
-            }
-            StoreTryResult(resultLoc, catchValue, TranslateLocation(catchBlock))
-            if (CurrentBlock().GetTerminator().isNone()) {
-                let createdGoTo5541 = builder.CreateGoTo(endBlock, CurrentBlock())
-                CurrentBlock().AppendExpression(createdGoTo5541)
             }
             currentBlock = falseBlock
             idx++
@@ -6284,10 +6317,6 @@ public class Translator {
         }
         currentBlock = trueBlock
         let guardBlock = CurrentBlock()
-        let patternFailurePredecessors = ArrayList<Block>()
-        for (predecessor in falseBlock.GetPredecessors()) {
-            patternFailurePredecessors.add(predecessor)
-        }
         let newTrueBlock = CreateBlock()
         let guardLoc = TranslateLocation(RequireExpr(matchCase.patternGuard, "match pattern guard"))
         if (sourceExpr != SourceExpr.QUEST && !originLoc.IsInvalidPos()) {
@@ -6301,17 +6330,6 @@ public class Translator {
         }
         TranslateMatchGuardCondition(RequireExpr(matchCase.patternGuard, "match pattern guard"), newTrueBlock,
             falseBlock, sourceExpr)
-        if (!patternFailurePredecessors.isEmpty()) {
-            for (predecessor in falseBlock.GetPredecessors()) {
-                var existed = false
-                for (old in patternFailurePredecessors) {
-                    if (refEq(old, predecessor)) { existed = true }
-                }
-                if (!existed) {
-                    predecessor.GetTerminator().getOrThrow().EnableAttr(Attribute.MATCH_PATTERN)
-                }
-            }
-        }
         return newTrueBlock
     }
 
@@ -6929,7 +6947,7 @@ public class Translator {
             blocks.add(indexToBodies.get(key).getOrThrow())
         }
         if (refEq(defaultBlock, endBlock)) {
-            defaultBlock = blocks[0]
+            defaultBlock = CreateUnreachableMatchDefaultBlock()
         }
         currentBlock = baseBlock
         let targetType = if (let Some(enumTy) <- (RequireAstTy(RequireExpr(matchExpr.selector, "match selector")) as
@@ -6947,11 +6965,19 @@ public class Translator {
         currentBlock = endBlock
     }
 
+    private func CreateUnreachableMatchDefaultBlock(): Block {
+        let block = CreateBlock()
+        block.AppendExpression(builder.CreateExit(None, block))
+        block.EnableAttr(Attribute.UNREACHABLE)
+        return block
+    }
+
     private func TranslateEnumPatternMatchAsTable(matchExpr: AstMatchExpr, enumVal: Value,
         retVal: Option<Value>): Unit {
         var isStillReachable = true
         let baseBlock = CurrentBlock()
         let endBlock = CreateBlock()
+        endBlock.SetDebugLocation(TranslateLocation(matchExpr))
         var firstDefaultBlock = endBlock
         let firstSelectorVal = GetEnumIDValue(RequireAstTy(RequireExpr(matchExpr.selector, "match selector")), enumVal)
         let matchInfo = EnumMatchInfo()
@@ -6990,7 +7016,7 @@ public class Translator {
             blocks.add(matchInfo.firstSwitchBlocks.get(key).getOrThrow())
         }
         if (refEq(firstDefaultBlock, endBlock)) {
-            firstDefaultBlock = blocks[0]
+            firstDefaultBlock = CreateUnreachableMatchDefaultBlock()
         }
         currentBlock = baseBlock
         let createdMultiBranch6510 = builder.CreateMultiBranch(firstSelectorVal, firstDefaultBlock, indexes, blocks, baseBlock)
@@ -7137,6 +7163,7 @@ public class Translator {
                 firstLevelBlock)
             firstLevelBlock.AppendExpression(createdMultiBranch6624)
             createdMultiBranch6624.SetSourceExpr(tableSourceExpr)
+            createdMultiBranch6624.EnableAttr(Attribute.MATCH_PATTERN)
         }
         return blockBranchInfos
     }
@@ -8474,7 +8501,9 @@ public class Translator {
         }
         let resolvedFunction = expr.resolvedFunction.getOrThrow()
         let paramInstTys = funcType.GetParamTypes()
-        let retInstTy = if (resolvedFunction.TestAttr(AstAttribute.CONSTRUCTOR) || resolvedFunction.IsFinalizer()) {
+        let retInstTy = if (ConstructorReturnsReceiver(resolvedFunction)) {
+            builder.context.GetRefTy(chirTy.TranslateType(RequireAstTy(expr)).StripAllRefs())
+        } else if (resolvedFunction.TestAttr(AstAttribute.CONSTRUCTOR) || resolvedFunction.IsFinalizer()) {
             builder.context.GetUnitTy()
         } else {
             funcType.GetReturnType()
@@ -8851,7 +8880,7 @@ public class Translator {
                 let rtti = if (RequireExpr(expr.baseFunc, "member call base").astKind == ASTKind.REF_EXPR &&
                     !topLevelFunc.TestAttr(Attribute.STATIC)) {
                     let createdGetRTTI8206 = builder.CreateGetRTTI(builder.context.GetUnitTy(),
-                        topLevelFunc.GetParam(0), CurrentBlock())
+                        GetCurrentThisObject(), CurrentBlock())
                     CurrentBlock().AppendExpression(createdGetRTTI8206)
                     RequireResult(createdGetRTTI8206)
                 } else {
@@ -9153,7 +9182,7 @@ public class Translator {
     // C++: CHIR/AST2CHIR/TranslateASTNode/TranslateCallExpr.cpp:76-94.
     private func GetCurrentThisObject(resolved: AstFuncDecl): Value {
         let currentFunction = CurrentFunction()
-        let thisVariable = currentFunction.GetParam(0)
+        let thisVariable = GetCurrentThisObject()
         let isThisRef = currentFunction.IsConstructor() || currentFunction.TestAttr(Attribute.MUT) ||
             currentFunction.GetFuncKind() == FuncKind.SETTER
         let needThisRef = resolved.TestAttr(AstAttribute.MUT) ||
@@ -9173,6 +9202,12 @@ public class Translator {
 
     private func GetCurrentThisObject(): Value {
         let fn = CurrentFunction()
+        if (ConstructorReturnsReceiver(fn)) {
+            let receiver = builder.CreateLoad(fn.GetReturnType().getOrThrow(),
+                fn.GetReturnValue().getOrThrow(), CurrentBlock())
+            CurrentBlock().AppendExpression(receiver)
+            return RequireResult(receiver)
+        }
         if (fn.GetNumOfParams() > 0) {
             return fn.GetParam(0)
         }
@@ -9279,8 +9314,14 @@ public class Translator {
             args.add(arg)
         }
         let callee = globalSymbolTable.Get(calleeDecl)
-        let _ = CreateAndAppendApplyCallFromCallExpr(builder.context.GetUnitTy(), callee,
+        let returnsReceiver = ConstructorReturnsReceiver(calleeDecl)
+        let resultType = if (returnsReceiver) { thisRefTy } else { builder.context.GetUnitTy() }
+        let result = CreateAndAppendApplyCallFromCallExpr(resultType, callee,
             FuncCallContext(args: args, thisType: thisRefTy), expr)
+        let updatedReceiver = if (returnsReceiver) { result } else { thisObj }
+        if (returnsReceiver && IsSuperOrThisCall(expr)) {
+            StoreConstructorReceiver(updatedReceiver)
+        }
         if (let Some(outerDecl) <- calleeDecl.outerDecl) {
             if (outerDecl.astKind == ASTKind.STRUCT_DECL) {
                 if (IsSuperOrThisCall(expr)) {
@@ -9295,15 +9336,19 @@ public class Translator {
                 return Some(RequireResult(load))
             }
         }
-        return Some(thisObj)
+        return Some(updatedReceiver)
     }
 
     private func GetCurrentConstructorThisObject(): Value {
+        return GetCurrentThisObject()
+    }
+
+    private func StoreConstructorReceiver(value: Value): Unit {
         let fn = CurrentFunction()
-        if (fn.GetNumOfParams() > 0) {
-            return fn.GetParam(0)
-        }
-        throw IllegalStateException("faithful AST2CHIR constructor call requires current this object")
+        CJC_ASSERT(ConstructorReturnsReceiver(fn))
+        let receiver = CastValueIfNeeded(value, fn.GetReturnType().getOrThrow())
+        let store = builder.CreateStore(receiver, fn.GetReturnValue().getOrThrow(), CurrentBlock())
+        CurrentBlock().AppendExpression(store)
     }
 
     private func IsStructOrClassCtorCall(expr: AstCallExpr, calleeDecl: AstFuncDecl): Bool {
@@ -9976,14 +10021,20 @@ public class Translator {
             args.add(arg)
         }
         let callee = globalSymbolTable.Get(calleeDecl)
-        let _ = CreateAndAppendApplyCallFromCallExpr(builder.context.GetUnitTy(), callee,
+        let returnsReceiver = ConstructorReturnsReceiver(calleeDecl)
+        let resultType = if (returnsReceiver) { thisRefTy } else { builder.context.GetUnitTy() }
+        let result = CreateAndAppendApplyCallFromCallExpr(resultType, callee,
             FuncCallContext(args: args, thisType: thisRefTy), expr)
-        return FaithfulLeftValueInfo(args[0], ArrayList<String>())
+        let updatedReceiver = if (returnsReceiver) { result } else { thisObj }
+        if (returnsReceiver && IsSuperOrThisCall(expr)) {
+            StoreConstructorReceiver(updatedReceiver)
+        }
+        return FaithfulLeftValueInfo(updatedReceiver, ArrayList<String>())
     }
 
     // C++: CHIR/AST2CHIR/TranslateASTNode/Translator.cpp:142-147.
     private func GetImplicitThisParam(): Value {
-        return CurrentFunction().GetParam(0)
+        return GetCurrentThisObject()
     }
 
     // C++: CHIR/AST2CHIR/TranslateASTNode/TranslateRefExpr.cpp:18-30.

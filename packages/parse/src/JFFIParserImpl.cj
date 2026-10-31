@@ -14,6 +14,12 @@ public class JFFIParserImpl {
         if (anno.kind == AnnotationKind.JAVA_MIRROR) {
             CheckMirrorAnnoArgs(anno)
             CheckMirrorAnnoTarget(anno)
+        } else if (anno.kind == AnnotationKind.JAVA) {
+            FFIParserImpl(parser).CheckZeroOrSingleStringLitArgAnnotation(anno, "@Java")
+            CheckJavaAnnoTarget(anno)
+        } else if (anno.kind == AnnotationKind.JAVA_HAS_DEFAULT) {
+            FFIParserImpl(parser).CheckNoArgAnnotation(anno, "@JavaHasDefault")
+            CheckJavaHasDefaultAnnotation(anno)
         } else {
             CJC_ASSERT(anno.kind == AnnotationKind.JAVA_IMPL)
             CheckImplAnnoArgs(anno)
@@ -22,11 +28,11 @@ public class JFFIParserImpl {
     }
 
     public func CheckMirrorSignature(decl: ClassLikeDecl, annos: ArrayList<Annotation>): Unit {
-        CJC_ASSERT(parser.HasAnnotation(annos, AnnotationKind.JAVA_MIRROR))
-        decl.EnableAttr(Attribute.JAVA_MIRROR)
-        if (!decl.inheritedTypes.isEmpty()) {
-            decl.EnableAttr(Attribute.JAVA_MIRROR_SUBTYPE)
-        }
+        CJC_ASSERT(parser.HasAnnotation(annos, AnnotationKind.JAVA_MIRROR) ||
+            (parser.HasAnnotation(annos, AnnotationKind.JAVA) && parser.HasModifier(decl.modifiers, TokenKind.FOREIGN)))
+        decl.EnableAttr(Attribute.JAVA_FOREIGN)
+        decl.EnableAttr(Attribute.NO_REFLECT_INFO)
+        decl.DisableAttr(Attribute.FOREIGN)
         if (decl.TestAttr(Attribute.SEALED)) {
             DiagJavaMirrorCannotBeSealed(decl)
             decl.EnableAttr(Attribute.IS_BROKEN)
@@ -39,8 +45,10 @@ public class JFFIParserImpl {
     }
 
     public func CheckImplSignature(decl: ClassLikeDecl, annos: ArrayList<Annotation>): Unit {
-        CJC_ASSERT(parser.HasAnnotation(annos, AnnotationKind.JAVA_IMPL))
-        decl.EnableAttr(Attribute.JAVA_MIRROR_SUBTYPE)
+        CJC_ASSERT(parser.HasAnnotation(annos, AnnotationKind.JAVA_IMPL) ||
+            (parser.HasAnnotation(annos, AnnotationKind.JAVA) && !parser.HasModifier(decl.modifiers, TokenKind.FOREIGN)))
+        decl.EnableAttr(Attribute.JAVA_EXPORT)
+        decl.EnableAttr(Attribute.NO_REFLECT_INFO)
         if (let Some(_) <- decl.generic) {
             DiagJavaImplCannotBeGeneric(decl)
             decl.EnableAttr(Attribute.IS_BROKEN)
@@ -82,7 +90,7 @@ public class JFFIParserImpl {
         let hasOuterDeclAbstractModifier = outerDecl.TestAttr(Attribute.ABSTRACT)
         let isOuterDeclInterface = outerDecl.astKind == ASTKind.INTERFACE_DECL
         let isOuterDeclClass = outerDecl.astKind == ASTKind.CLASS_DECL
-        let isOuterDeclJavaImpl = outerDecl.TestAttr(Attribute.JAVA_MIRROR_SUBTYPE) && !outerDecl.TestAttr(Attribute.JAVA_MIRROR)
+        let isOuterDeclJavaImpl = outerDecl.TestAttr(Attribute.JAVA_EXPORT)
         let isAbstractInsideAbstractClass = hasAbstractModifier && isOuterDeclClass && hasOuterDeclAbstractModifier
         let isAbstractInsideInterface = isOuterDeclInterface && !hasStaticModifier
         return (isAbstractInsideAbstractClass || isAbstractInsideInterface) && !isOuterDeclJavaImpl
@@ -141,22 +149,19 @@ public class JFFIParserImpl {
     }
 
     private func CheckMirrorAnnoTarget(anno: Annotation): Unit {
-        if (parser.SeeingAny([TokenKind.CLASS, TokenKind.INTERFACE])) {
-            return
-        }
-        if (anno.kind == AnnotationKind.JAVA_MIRROR) {
-            parser.DiagUnexpectedAnnoOn(
-                anno, parser.lookahead.Begin(), anno.identifier.Val(), parser.lookahead.Value())
-        }
+        CheckJavaAnnoTarget(anno)
     }
 
     private func CheckImplAnnoTarget(anno: Annotation): Unit {
+        CheckJavaAnnoTarget(anno)
+    }
+
+    private func CheckJavaAnnoTarget(anno: Annotation): Unit {
         if (parser.SeeingAny([TokenKind.CLASS, TokenKind.INTERFACE])) {
             return
         }
-        if (anno.kind == AnnotationKind.JAVA_IMPL) {
-            parser.DiagUnexpectedAnnoOn(
-                anno, parser.lookahead.Begin(), anno.identifier.Val(), parser.lookahead.Value())
-        }
+        parser.DiagUnexpectedAnnoOn(
+            anno, parser.lookahead.Begin(), anno.identifier.Val(), parser.lookahead.Value())
+        anno.EnableAttr(Attribute.IS_BROKEN)
     }
 }

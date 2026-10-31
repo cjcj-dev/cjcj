@@ -988,8 +988,7 @@ public func GetParamTysInArgsOrder(typeManager: TypeManager, ce: CallExpr, fd: F
                 paramHasTy[argIdx] = true
             } else if (fd.TestAttr(Attribute.C)) {
                 tyInArgOrder.add(typeManager.GetCTypeTy())
-            } else if (HasJavaAttr(fd)) {
-                tyInArgOrder.add(typeManager.GetAnyTy())
+
             } else {
                 return empty
             }
@@ -1059,10 +1058,6 @@ public func AcceptPlaceholderTarget(node: Node): Bool {
 private func IsTypeObjectCreation(fd: FuncDecl, ce: CallExpr): Bool {
     let isTypeNameCall = ce.callKind == CallKind.CALL_OBJECT_CREATION || ce.callKind == CallKind.CALL_STRUCT_CREATION
     return (isTypeNameCall && fd.TestAttr(Attribute.CONSTRUCTOR)) || fd.TestAttr(Attribute.ENUM_CONSTRUCTOR)
-}
-
-private func HasJavaAttr(fd: FuncDecl): Bool {
-    return fd.TestAnyAttr(Attribute.JAVA_APP, Attribute.JAVA_EXT)
 }
 
 private func TypeCheckUtilDeclKey(decl: Decl): String {

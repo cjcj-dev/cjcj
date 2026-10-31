@@ -176,16 +176,6 @@ private func getSizeDeclFromMembers(members: ArrayList<Decl>): Option<FuncDecl> 
     return None
 }
 
-public func HasJavaAttr(node: Node): Option<Attribute> {
-    if (node.TestAttr(Attribute.JAVA_APP)) {
-        return Attribute.JAVA_APP
-    }
-    if (node.TestAttr(Attribute.JAVA_EXT)) {
-        return Attribute.JAVA_EXT
-    }
-    return None
-}
-
 public class FloatTypeInfo {
     public var inf: UInt64 = 0
     public var min: String = ""
@@ -628,22 +618,6 @@ public func IsDefaultImplementation(decl: Decl): Bool {
     return false
 }
 
-public func InsideAtJavaDecl(decl: Decl): Bool {
-    if ((decl.astKind == ASTKind.FUNC_DECL || decl.astKind == ASTKind.VAR_DECL) &&
-        decl.TestAttr(Attribute.IN_CLASSLIKE)) {
-        if (let Some(_) <- HasJavaAttr(decl)) {
-            return true
-        }
-        return false
-    }
-    if (decl.astKind == ASTKind.FUNC_PARAM) {
-        if (let Some(outer) <- decl.outerDecl) {
-            return InsideAtJavaDecl(outer)
-        }
-    }
-    return false
-}
-
 public func CanBeSrcExported(fd: FuncDecl): Bool {
     if (fd.isInline) {
         return true
@@ -709,8 +683,7 @@ public func IsVirtualMember(decl: Decl): Bool {
         return false
     }
     if (let Some(funcDecl) <- (decl as FuncDecl)) {
-        let isGenericInstantiatedNonJava = decl.TestAttr(Attribute.GENERIC_INSTANTIATED) &&
-            !decl.TestAnyAttr(Attribute.JAVA_APP, Attribute.JAVA_EXT)
+        let isGenericInstantiatedNonJava = decl.TestAttr(Attribute.GENERIC_INSTANTIATED)
         if (decl.TestAttr(Attribute.CONSTRUCTOR) || funcDecl.IsFinalizer() || isGenericInstantiatedNonJava) {
             return false
         }
@@ -937,7 +910,7 @@ private func makeMirrorPropFromVar(varDecl: VarDecl, attrToBeSet: Attribute): Pr
         propNode.SetTy(ty)
     }
     propNode.CloneAttrs(varDecl)
-    propNode.EnableAttr(Attribute.DESUGARED_MIRROR_FIELD)
+    propNode.EnableAttr(Attribute.DESUGARED_FOREIGN_FIELD)
     propNode.EnableAttr(Attribute.COMPILER_ADD)
     for (modifier in varDecl.modifiers) {
         propNode.modifiers.add(modifier)
@@ -969,7 +942,7 @@ private func SetPositionAndCurFileByProvidedNode(consumer: Node, provider: Node)
 }
 
 public func IsImpl(node: Node): Bool {
-    return !node.TestAttr(Attribute.JAVA_MIRROR) && node.TestAttr(Attribute.JAVA_MIRROR_SUBTYPE)
+    return node.TestAttr(Attribute.JAVA_EXPORT)
 }
 
 public func IsImpl(ty: Ty): Bool {
@@ -982,7 +955,7 @@ public func IsImpl(ty: Ty): Bool {
 }
 
 public func IsImplRegistryCompanion(node: Node): Bool {
-    return node.TestAttr(Attribute.JAVA_IMPL_REGISTRY_COMPANION)
+    return node.TestAttr(Attribute.JAVA_EXPORT_REGISTRY_COMPANION)
 }
 
 public func IsImplReferenceWrapper(node: Node): Bool {
@@ -999,7 +972,7 @@ public func IsJObject(decl: Decl, packageName: String): Bool {
 }
 
 public func IsMirror(node: Node): Bool {
-    return node.TestAttr(Attribute.JAVA_MIRROR)
+    return node.TestAttr(Attribute.JAVA_FOREIGN)
 }
 
 public func IsMirror(ty: Ty): Bool {
@@ -1067,9 +1040,8 @@ public func InsertSyntheticClassDecl(decl: ClassLikeDecl, file: File): Unit {
     } else if (decl.TestAttr(Attribute.PRIVATE)) {
         synthetic.EnableAttr(Attribute.PRIVATE)
     }
-    synthetic.EnableAttr(Attribute.JAVA_MIRROR)
-    synthetic.EnableAttr(Attribute.JAVA_MIRROR_SUBTYPE)
-    synthetic.EnableAttr(Attribute.JAVA_MIRROR_SYNTHETIC_WRAPPER)
+    synthetic.EnableAttr(Attribute.JAVA_FOREIGN)
+    synthetic.EnableAttr(Attribute.JAVA_FOREIGN_SYNTHETIC_WRAPPER)
     synthetic.EnableAttr(Attribute.COMPILER_ADD)
     synthetic.EnableAttr(Attribute.ABSTRACT)
     synthetic.identifier = SrcIdentifier(GetSyntheticNameFromClassLike(decl), decl.identifier.Begin(),

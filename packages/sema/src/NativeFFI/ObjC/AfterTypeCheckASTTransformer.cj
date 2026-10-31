@@ -43,7 +43,7 @@ public class AfterTypeCheckASTTransformer {
         regCompanion: ClassDecl): Unit {
         CJC_ASSERT_WITH_MSG(origin.TestAttr(Attribute.STATIC), "expected static function to be proxied")
         CJC_ASSERT_WITH_MSG(!origin.funcBody.getOrThrow().paramLists.isEmpty(), "expected at least one param list")
-        proxy.EnableAttr(Attribute.OBJ_C_IMPL_MOVED_MEMBER_PROXY)
+        proxy.EnableAttr(Attribute.OBJ_C_EXPORT_MOVED_MEMBER_PROXY)
         let params = proxy.funcBody.getOrThrow().paramLists[0].params
         let args = ArrayList<FuncArg>()
         for (param in params) {
@@ -65,7 +65,7 @@ public class AfterTypeCheckASTTransformer {
         pd.SetTy(vd.GetTy().getOrThrow())
         pd.CloneAttrs(vd)
         pd.EnableAttr(Attribute.COMPILER_ADD)
-        pd.EnableAttr(Attribute.OBJ_C_IMPL_MOVED_MEMBER_PROXY)
+        pd.EnableAttr(Attribute.OBJ_C_EXPORT_MOVED_MEMBER_PROXY)
         pd.isVar = vd.isVar
         for (modifier in vd.modifiers) {
             pd.modifiers.add(modifier)

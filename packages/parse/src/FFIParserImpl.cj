@@ -5,7 +5,7 @@ import std.collection.*
 public let CONFLICTED_FFI_ANNOS: Array<AnnotationKind> = [
     AnnotationKind.JAVA_MIRROR, AnnotationKind.JAVA_IMPL,
     AnnotationKind.OBJ_C_IMPL, AnnotationKind.OBJ_C_MIRROR,
-    AnnotationKind.C, AnnotationKind.JAVA
+    AnnotationKind.C, AnnotationKind.JAVA, AnnotationKind.OBJ_C
 ]
 
 public open class FFIParserImpl {
@@ -56,6 +56,9 @@ public open class FFIParserImpl {
         for (anno in annos) {
             if (anno.kind == AnnotationKind.JAVA_MIRROR || anno.kind == AnnotationKind.JAVA_IMPL) {
                 java.CheckAnnotation(anno)
+                DiagDeprecatedAnnotation(anno)
+            } else if (anno.kind == AnnotationKind.JAVA || anno.kind == AnnotationKind.JAVA_HAS_DEFAULT) {
+                java.CheckAnnotation(anno)
             } else if (anno.kind == AnnotationKind.FOREIGN_NAME) {
                 CheckForeignNameAnnoArgs(anno)
                 CheckForeignNameAnnoTarget(anno)
@@ -63,13 +66,15 @@ public open class FFIParserImpl {
                 anno.kind == AnnotationKind.FOREIGN_SETTER_NAME) {
                 CheckForeignGetterSetterNameAnnoArgs(anno)
                 CheckForeignGetterSetterNameAnnoTarget(anno)
-            } else if (anno.kind == AnnotationKind.JAVA_HAS_DEFAULT) {
-                java.CheckJavaHasDefaultAnnotation(anno)
             } else if (anno.kind == AnnotationKind.OBJ_C_MIRROR ||
                 anno.kind == AnnotationKind.OBJ_C_IMPL ||
+                anno.kind == AnnotationKind.OBJ_C ||
                 anno.kind == AnnotationKind.OBJ_C_INIT ||
                 anno.kind == AnnotationKind.OBJ_C_OPTIONAL) {
                 objc.CheckAnnotation(anno, scopeKind)
+                if (anno.kind == AnnotationKind.OBJ_C_MIRROR || anno.kind == AnnotationKind.OBJ_C_IMPL) {
+                    DiagDeprecatedAnnotation(anno)
+                }
             }
         }
         CheckAnnotationsConflict(annos)
@@ -81,8 +86,8 @@ public open class FFIParserImpl {
                 continue
             }
             if (let Some(outer) <- decl.outerDecl) {
-                if (outer.TestAnyAttr(Attribute.JAVA_MIRROR, Attribute.JAVA_MIRROR_SUBTYPE) ||
-                    outer.TestAnyAttr(Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_IMPL)) {
+                if (outer.TestAnyAttr(Attribute.JAVA_FOREIGN, Attribute.JAVA_EXPORT) ||
+                    outer.TestAnyAttr(Attribute.OBJ_C_FOREIGN, Attribute.OBJ_C_EXPORT)) {
                     return
                 }
             }
@@ -116,6 +121,18 @@ public open class FFIParserImpl {
                 java.CheckMirrorSignature(classLikeDecl, annos)
             } else if (anno.kind == AnnotationKind.JAVA_IMPL) {
                 java.CheckImplSignature(classLikeDecl, annos)
+            } else if (anno.kind == AnnotationKind.JAVA) {
+                if (parser.HasModifier(decl.modifiers, TokenKind.FOREIGN)) {
+                    java.CheckMirrorSignature(classLikeDecl, annos)
+                } else {
+                    java.CheckImplSignature(classLikeDecl, annos)
+                }
+            } else if (anno.kind == AnnotationKind.OBJ_C) {
+                if (parser.HasModifier(decl.modifiers, TokenKind.FOREIGN)) {
+                    objc.CheckMirrorSignature(classLikeDecl, annos)
+                } else {
+                    objc.CheckImplSignature(classLikeDecl, annos)
+                }
             } else if (anno.kind == AnnotationKind.OBJ_C_MIRROR) {
                 objc.CheckMirrorSignature(classLikeDecl, annos)
             } else if (anno.kind == AnnotationKind.OBJ_C_IMPL) {
@@ -127,10 +144,21 @@ public open class FFIParserImpl {
     public func CheckFuncSignature(decl: FuncDecl, annos: ArrayList<Annotation>): Unit {
         let objc = ObjC()
         for (anno in annos) {
-            if (anno.kind == AnnotationKind.OBJ_C_MIRROR) {
+            if (anno.kind == AnnotationKind.OBJ_C_MIRROR || anno.kind == AnnotationKind.OBJ_C) {
                 objc.CheckMirrorSignature(decl, annos)
             }
         }
+    }
+
+    private func DiagDeprecatedAnnotation(anno: Annotation): Unit {
+        let replacement = match (anno.kind) {
+            case AnnotationKind.JAVA_MIRROR => "@Java foreign"
+            case AnnotationKind.JAVA_IMPL => "@Java"
+            case AnnotationKind.OBJ_C_MIRROR => "@ObjC foreign"
+            case _ => "@ObjC"
+        }
+        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_deprecated_interop_annotation,
+            anno, "@" + anno.identifier.Val(), replacement).Emit()
     }
 
     private func CheckForeignNameAnnoArgs(anno: Annotation): Unit {

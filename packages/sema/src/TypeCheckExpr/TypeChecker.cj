@@ -49,7 +49,7 @@ private let INOUT_IMMUTABLE: String = "is a immutable variable"
 
 private let SPECIAL_EXPORTED_FUNCS = HashMap<String, HashSet<String>>([
     (UTILS_CORE_PACKAGE_NAME, HashSet<String>([
-        "arrayInitByCollection", "arrayInitByFunction", "composition", "handleException",
+        "arrayInitByCollection", "arrayInitByFunction", "composition", "handleException", "reportResetFailureV1",
         "createOverflowExceptionMsg", "createArithmeticExceptionMsg", "getCommandLineArgs"
     ])),
     (UTILS_AST_PACKAGE_NAME, HashSet<String>([
@@ -129,10 +129,6 @@ extend TypeCheckerImpl {
             opts: ci.getOrThrow().globalOptions)
         checker.Check()
 
-        let movedMembers = checker.MoveStructInheritedMembers()
-        CJC_ASSERT_WITH_MSG(structMemberMap.isEmpty(),
-            "structMemberMap should be empty when moving inherited members")
-        structMemberMap = movedMembers
     }
 
     internal func GenerateMainInvoke(): Unit {
@@ -1266,7 +1262,7 @@ extend TypeChecker {
             for (pkg in pkgs) {
                 let ctx = instance.GetASTContextByPackage(Some(pkg)).getOrThrow()
                 PerformDesugarAfterTypeCheck(impl.typeManager, manager, instance.mangler,
-                    impl.structMemberMap, pkg, context: Some(ctx), options: options,
+                    pkg, context: Some(ctx), options: options,
                     synthesizer: Some({ synCtx: ASTContext, pos: SynPos, node: Node =>
                         SynthesizeWithoutRecover(synCtx, pos, node)
                     }), callChecker: Some({ checkCtx: ASTContext, target: Ty, call: CallExpr =>
@@ -1525,7 +1521,7 @@ extend TypeChecker {
             case Some(value) => value
             case None => return
         }
-        var hasBrokenBody = funcBody.generic.isSome() && !fd.TestAttr(Attribute.STATIC) && HasJavaAttr(decl).isNone()
+        var hasBrokenBody = funcBody.generic.isSome() && !fd.TestAttr(Attribute.STATIC)
         if (hasBrokenBody) {
             Diagnose(impl.diag.getOrThrow(), fd, BasicDiagKind.sema_forbid_generic_constructor,
                 args: [BasicDiagArgument(fd.identifier.Val())]).Emit()
@@ -1665,10 +1661,7 @@ extend TypeChecker {
             case Some(value) => value
             case None => return
         }
-        let invalidGeneric = funcBody.generic.isSome() && !fd.TestAttr(Attribute.STATIC) && match (fd.outerDecl) {
-            case Some(outerDecl) => HasJavaAttr(outerDecl).isNone()
-            case None => false
-        }
+        let invalidGeneric = funcBody.generic.isSome() && !fd.TestAttr(Attribute.STATIC) && fd.outerDecl.isSome()
         if (invalidGeneric) {
             Diagnose(impl.diag.getOrThrow(), fd, BasicDiagKind.sema_forbid_generic_finalizer,
                 args: [BasicDiagArgument(fd.identifier.Val())]).Emit()
@@ -2275,11 +2268,11 @@ extend TypeChecker {
         if (decl.astKind != ASTKind.STRUCT_DECL && decl.astKind != ASTKind.CLASS_DECL) {
             return
         }
-        if (decl.TestAnyAttr(Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_MIRROR_INTERFACE_HANDLE_WRAPPER)) {
+        if (decl.TestAnyAttr(Attribute.OBJ_C_FOREIGN, Attribute.OBJ_C_FOREIGN_INTERFACE_HANDLE_WRAPPER)) {
             return
         }
-        if (decl.TestAnyAttr(Attribute.JAVA_MIRROR, Attribute.JAVA_MIRROR_SYNTHETIC_WRAPPER,
-            Attribute.JAVA_IMPL_REGISTRY_COMPANION)) {
+        if (decl.TestAnyAttr(Attribute.JAVA_FOREIGN, Attribute.JAVA_FOREIGN_SYNTHETIC_WRAPPER,
+            Attribute.JAVA_EXPORT_REGISTRY_COMPANION)) {
             return
         }
         if (decl.astKind == ASTKind.STRUCT_DECL && decl.TestAttr(Attribute.COMMON)) {
@@ -2981,7 +2974,7 @@ extend TypeChecker {
     private func GetImplicitUsedCoreDecls(): ArrayList<Decl> {
         let out = ArrayList<Decl>()
         if (let Some(instance) <- impl.ci) {
-            for (name in ["CJ_CORE_ExecAtexitCallbacks", "getCommandLineArgs", "eprintln", "handleException",
+            for (name in ["CJ_CORE_ExecAtexitCallbacks", "getCommandLineArgs", "eprintln", "handleException", "reportResetFailureV1",
                 "NegativeArraySizeException", "createOverflowExceptionMsg", "createArithmeticExceptionMsg",
                 "SpawnException"]) {
                 let decl = match (findCoreImplicitDeclInMap(instance, name)) {
@@ -3597,7 +3590,7 @@ extend TypeChecker {
             var isWellTyped = true
             if (retTy.IsUnit()) {
                 isWellTyped = Ty.IsTyCorrect(Synthesize(ctx, SynPos.UNUSED, body))
-            } else if (NeedCheckBodyReturn(fb)) {
+            } else {
                 isWellTyped = Check(ctx, retTy, body)
                 if (!isWellTyped && body.body.isEmpty()) {
                     if (let Some(diagValue2) <- impl.diag) {
@@ -3844,11 +3837,6 @@ extend TypeChecker {
 
     private func CheckCtorFuncBody(ctx: ASTContext, fb: FuncBody): Unit {
         let funcDecl = fb.funcDecl.getOrThrow()
-        if (let Some(parentClassLike) <- fb.parentClassLike) {
-            if (let Some(attr) <- HasJavaAttr(parentClassLike)) {
-                funcDecl.EnableAttr(attr)
-            }
-        }
         var ctorTy: Ty = TypeManager.GetInvalidTy()
         if (funcDecl.TestAttr(Attribute.STATIC)) {
             ctorTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
@@ -4145,12 +4133,12 @@ extend TypeChecker {
                 impl.CheckRecursiveConstructorCall(body.decls)
             }
             if (classDecl.TestAnyAttr(
-                Attribute.JAVA_MIRROR, Attribute.JAVA_MIRROR_SUBTYPE)) {
+                Attribute.JAVA_FOREIGN, Attribute.JAVA_EXPORT)) {
                 CheckJavaInteropLibImport(classDecl)
             }
             // C++ src/Sema/TypeCheckClassLike.cpp:136-138.
             if (classDecl.TestAnyAttr(
-                Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_IMPL)) {
+                Attribute.OBJ_C_FOREIGN, Attribute.OBJ_C_EXPORT)) {
                 CheckObjCInteropLibImport(classDecl)
             }
             return tyOrInvalid(classDecl)
@@ -4171,11 +4159,11 @@ extend TypeChecker {
             if (let Some(body3) <- interfaceDecl.body) {
                 TypeCheckCompositeBody(ctx, interfaceDecl, body3.decls)
             }
-            if (interfaceDecl.TestAnyAttr(Attribute.JAVA_MIRROR, Attribute.JAVA_MIRROR_SUBTYPE)) {
+            if (interfaceDecl.TestAnyAttr(Attribute.JAVA_FOREIGN, Attribute.JAVA_EXPORT)) {
                 CheckJavaInteropLibImport(interfaceDecl)
             }
             // C++ src/Sema/TypeCheckClassLike.cpp:268-270.
-            if (interfaceDecl.TestAnyAttr(Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_IMPL)) {
+            if (interfaceDecl.TestAnyAttr(Attribute.OBJ_C_FOREIGN, Attribute.OBJ_C_EXPORT)) {
                 CheckObjCInteropLibImport(interfaceDecl)
             }
             return tyOrInvalid(interfaceDecl)
@@ -4331,10 +4319,8 @@ extend TypeChecker {
                 let _ = SynthesizeBlock(ctx, body)
             } else if (IsConstructorBody(fb)) {
                 let _ = SynthesizeBlock(ctx, body)
-            } else if (NeedCheckBodyReturn(fb)) {
-                let _ = CheckBlock(ctx, retTy, body)
             } else {
-                let _ = SynthesizeBlock(ctx, body)
+                let _ = CheckBlock(ctx, retTy, body)
             }
             currentFuncBody = previousFuncBody
         }
@@ -6013,21 +5999,12 @@ extend TypeChecker {
                 ReplaceIdealTy(impl.typeManager, innerExpr, diag: impl.diag) && isWellTyped
         }
         replaceReturnClassThisOutsideClass(re, innerExpr)
-        if (!isWellTyped && NeedCheckBodyReturn(fb)) {
+        if (!isWellTyped) {
             return TcInvalid(re)
         }
         let nothingTy = TypeManager.GetNothingTy()
         re.SetTy(nothingTy)
         return nothingTy
-    }
-
-    private func AddUniqueBoundDecl(decls: ArrayList<Decl>, decl: Decl): Unit {
-        for (existing in decls) {
-            if (SameDecl(existing, decl)) {
-                return
-            }
-        }
-        decls.add(decl)
     }
 
     private func PropagateCtxExpr(pattern: Pattern, initializer: Expr): Unit {
@@ -6043,18 +6020,20 @@ extend TypeChecker {
         let _ = walker.Walk()
     }
 
-    private func BindCollectedConditionDecls(ctx: ASTContext, patterns: ArrayList<Pattern>,
-        boundDecls: ArrayList<Decl>): Unit {
+    // Collector assigns condition/then and loop-body declarations their own lexical scope.
+    // Keep them for ASTContext's lifetime: after-typecheck desugaring (std.ast.Token
+    // -> refreshPos) typechecks generated calls in that same scope. Lookup walks
+    // ancestors only, so else branches and following code cannot see these child scopes.
+    private func BindCollectedConditionDecls(ctx: ASTContext, patterns: ArrayList<Pattern>): Unit {
         let collected = ArrayList<Decl>()
         CollectPatternBindings(patterns, collected)
         for (decl in collected) {
             BindLocalDeclIfAbsent(ctx, decl)
-            AddUniqueBoundDecl(boundDecls, decl)
         }
     }
 
     private func CheckLetPatternCondition(ctx: ASTContext, letPattern: LetPatternDestructor,
-        boundDecls: ArrayList<Decl>, suppressIntroducingVariableError: Bool): Bool {
+        suppressIntroducingVariableError: Bool): Bool {
         if (let None <- letPattern.initializer) {
             let _ = TcInvalid(letPattern)
             return false
@@ -6085,21 +6064,21 @@ extend TypeChecker {
         }
         if (Ty.IsTyCorrect(selectorTy) && subpatternsGood) {
             letPattern.SetTy(TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN))
-            BindCollectedConditionDecls(ctx, letPattern.patterns, boundDecls)
+            BindCollectedConditionDecls(ctx, letPattern.patterns)
             return good
         }
         let _ = TcInvalid(letPattern)
         return false
     }
 
-    private func CheckConditionWithBindings(ctx: ASTContext, expr: Expr, boundDecls: ArrayList<Decl>,
+    private func CheckConditionWithBindings(ctx: ASTContext, expr: Expr,
         suppressIntroducingVariableError: Bool): Bool {
         if (let Some(letPattern) <- (expr as LetPatternDestructor)) {
-            return CheckLetPatternCondition(ctx, letPattern, boundDecls, suppressIntroducingVariableError)
+            return CheckLetPatternCondition(ctx, letPattern, suppressIntroducingVariableError)
         }
         if (let Some(parenExpr) <- (expr as ParenExpr)) {
             if (let Some(inner) <- parenExpr.expr) {
-                let ok = CheckConditionWithBindings(ctx, inner, boundDecls, suppressIntroducingVariableError)
+                let ok = CheckConditionWithBindings(ctx, inner, suppressIntroducingVariableError)
         parenExpr.SetTy(inner.GetTy().getOrThrow())
                 return ok
             }
@@ -6126,12 +6105,12 @@ extend TypeChecker {
                 }
                 var ok = true
                 if (let Some(left) <- binaryExpr.leftExpr) {
-                    ok = CheckConditionWithBindings(ctx, left, boundDecls, suppressChildren) && ok
+                    ok = CheckConditionWithBindings(ctx, left, suppressChildren) && ok
                 } else {
                     ok = false
                 }
                 if (let Some(right) <- binaryExpr.rightExpr) {
-                    ok = CheckConditionWithBindings(ctx, right, boundDecls, suppressChildren) && ok
+                    ok = CheckConditionWithBindings(ctx, right, suppressChildren) && ok
                 } else {
                     ok = false
                 }
@@ -6175,10 +6154,9 @@ extend TypeChecker {
     }
 
     private func SynthesizeIfExpr(ctx: ASTContext, pos: SynPos, ifExpr: IfExpr): Ty {
-        let conditionBindings = ArrayList<Decl>()
         var isWellTyped = true
         if (let Some(condExpr) <- ifExpr.condExpr) {
-            isWellTyped = CheckConditionWithBindings(ctx, condExpr, conditionBindings, false) && isWellTyped
+            isWellTyped = CheckConditionWithBindings(ctx, condExpr, false) && isWellTyped
         } else {
             isWellTyped = false
         }
@@ -6187,7 +6165,6 @@ extend TypeChecker {
         } else {
             isWellTyped = false
         }
-        RemovePatternBindings(ctx, conditionBindings)
         if (SynthesizedIfHasMissingElse(ifExpr)) {
             if (let Some(elseBody) <- ifExpr.elseBody) {
                 isWellTyped = Ty.IsTyCorrect(Synthesize(ctx, SynPos.EXPR_ARG, elseBody)) && isWellTyped
@@ -6275,16 +6252,14 @@ extend TypeChecker {
     }
 
     private func CheckIfExprWithTarget(ctx: ASTContext, target: Ty, ifExpr: IfExpr): Bool {
-        let conditionBindings = ArrayList<Decl>()
         var isWellTyped = true
         if (let Some(condExpr) <- ifExpr.condExpr) {
-            isWellTyped = CheckConditionWithBindings(ctx, condExpr, conditionBindings, false)
+            isWellTyped = CheckConditionWithBindings(ctx, condExpr, false)
         } else {
             isWellTyped = false
         }
         if (SynthesizedIfHasMissingElse(ifExpr)) {
             let branchOk = CheckIfExprNoElseWithTarget(ctx, target, ifExpr)
-            RemovePatternBindings(ctx, conditionBindings)
             isWellTyped = branchOk && isWellTyped
         } else {
             var thenTyCorrect = false
@@ -6300,7 +6275,6 @@ extend TypeChecker {
                 }
                 thenTyCorrect = Ty.IsTyCorrect(thenBody.GetTy())
             }
-            RemovePatternBindings(ctx, conditionBindings)
             var elseTyCorrect = false
             if (let Some(elseBody) <- ifExpr.elseBody) {
                 if (!Check(ctx, target, elseBody) && ifExpr.ShouldDiagnose() && !CanSkipDiag(elseBody)) {
@@ -6367,15 +6341,6 @@ extend TypeChecker {
     private func CollectPatternBindings(patterns: ArrayList<Pattern>, out: ArrayList<Decl>): Unit {
         for (pattern in patterns) {
             CollectPatternBinding(pattern, out)
-        }
-    }
-
-    private func RemovePatternBindings(ctx: ASTContext, decls: ArrayList<Decl>): Unit {
-        for (decl in decls) {
-            let name = decl.identifier.Val()
-            if (!name.isEmpty() && name != INVALID_IDENTIFIER) {
-                ctx.RemoveDeclByName(Names(name, decl.scopeName), decl)
-            }
         }
     }
 
@@ -9124,10 +9089,8 @@ extend TypeChecker {
         if ((let None <- we.condExpr) || (let None <- we.body)) {
             return TcInvalid(we)
         }
-        let bindings = ArrayList<Decl>()
-        var isWellTyped = CheckConditionWithBindings(ctx, we.condExpr.getOrThrow(), bindings, false)
+        var isWellTyped = CheckConditionWithBindings(ctx, we.condExpr.getOrThrow(), false)
         isWellTyped = Ty.IsTyCorrect(Synthesize(ctx, SynPos.UNUSED, we.body.getOrThrow())) && isWellTyped
-        RemovePatternBindings(ctx, bindings)
         let ty = if (isWellTyped) { TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT) }
             else { TypeManager.GetInvalidTy() }
         we.SetTy(ty)
@@ -9149,9 +9112,7 @@ extend TypeChecker {
             return TcInvalid(dwe)
         }
         var isWellTyped = Ty.IsTyCorrect(Synthesize(ctx, SynPos.UNUSED, dwe.body.getOrThrow()))
-        let bindings = ArrayList<Decl>()
-        isWellTyped = CheckConditionWithBindings(ctx, dwe.condExpr.getOrThrow(), bindings, false) && isWellTyped
-        RemovePatternBindings(ctx, bindings)
+        isWellTyped = CheckConditionWithBindings(ctx, dwe.condExpr.getOrThrow(), false) && isWellTyped
         let ty = if (isWellTyped) { TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT) }
             else { TypeManager.GetInvalidTy() }
         dwe.SetTy(ty)

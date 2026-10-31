@@ -9,6 +9,7 @@ import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
 private func AnnotationKindName(kind: AstAnnotationKind): String {
     return match (kind) {
         case AstAnnotationKind.JAVA => "Java"
+        case AstAnnotationKind.OBJ_C => "ObjC"
         case AstAnnotationKind.CALLING_CONV => "CallingConv"
         case AstAnnotationKind.C => "C"
         case AstAnnotationKind.JAVA_MIRROR => "JavaMirror"
@@ -45,9 +46,9 @@ private func AnnotationKindName(kind: AstAnnotationKind): String {
 private func NonSerializedAnnotationAttr(kind: AstAnnotationKind): Option<Attribute> {
     return match (kind) {
         case AstAnnotationKind.C => Some(Attribute.C)
-        case AstAnnotationKind.JAVA_MIRROR => Some(Attribute.JAVA_MIRROR)
+        case AstAnnotationKind.JAVA_MIRROR => Some(Attribute.JAVA_FOREIGN)
         case AstAnnotationKind.JAVA_HAS_DEFAULT => Some(Attribute.JAVA_HAS_DEFAULT)
-        case AstAnnotationKind.OBJ_C_MIRROR => Some(Attribute.OBJ_C_MIRROR)
+        case AstAnnotationKind.OBJ_C_MIRROR => Some(Attribute.OBJ_C_FOREIGN)
         case AstAnnotationKind.OBJ_C_INIT => Some(Attribute.OBJ_C_INIT)
         case AstAnnotationKind.OBJ_C_OPTIONAL => Some(Attribute.OBJ_C_OPTIONAL)
         case _ => None
@@ -62,7 +63,7 @@ private func IsNonSerializedAnnotation(kind: AstAnnotationKind): Bool {
 }
 
 private func IsUnsupportedAnnotation(kind: AstAnnotationKind): Bool {
-    return kind == AstAnnotationKind.JAVA || kind == AstAnnotationKind.CALLING_CONV ||
+    return kind == AstAnnotationKind.CALLING_CONV ||
         kind == AstAnnotationKind.FOREIGN_GETTER_NAME || kind == AstAnnotationKind.FOREIGN_SETTER_NAME ||
         kind == AstAnnotationKind.CONSTSAFE || kind == AstAnnotationKind.ENSURE_PREPARED_TO_MOCK ||
         kind == AstAnnotationKind.NON_PRODUCT || kind == AstAnnotationKind.UNKNOWN

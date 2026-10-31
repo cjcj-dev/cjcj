@@ -3,26 +3,6 @@ package cjcj::chir
 import std.collection.*
 import cjcj::utils.{HAS_INITED_IDENT, ProfileRecorder}
 
-private func IsObjCMirror(classDef: ClassDef): Bool {
-    return classDef.TestAttr(Attribute.OBJ_C_MIRROR)
-}
-
-private func IsJavaMirror(classDef: ClassDef): Bool {
-    return classDef.TestAttr(Attribute.JAVA_MIRROR)
-}
-
-private func IsMirror(classDef: ClassDef): Bool {
-    return IsObjCMirror(classDef) || IsJavaMirror(classDef)
-}
-
-private func IsObjCImpl(classDef: ClassDef): Bool {
-    return classDef.TestAttr(Attribute.OBJ_C_IMPL)
-}
-
-private func HasInitedGeneratedFromAST(classDef: ClassDef): Bool {
-    return IsMirror(classDef) || IsObjCImpl(classDef)
-}
-
 public class MarkClassHasInited {
     private let builder: CHIRBuilder
 
@@ -31,15 +11,18 @@ public class MarkClassHasInited {
     }
 
     private func AddHasInitedFlagToClassDef(classDef: ClassDef): Unit {
-        if (HasInitedGeneratedFromAST(classDef)) {
-            return
+        // Older CJO files carry this as an AST member. Recognize the actual
+        // field so imported classes never receive a duplicate layout entry.
+        for (member in classDef.GetDirectInstanceVars()) {
+            if (member.name == HAS_INITED_IDENT) {
+                return
+            }
         }
 
         let attributeInfo = AttributeInfo()
         attributeInfo.Enable(Attribute.NO_REFLECT_INFO)
         attributeInfo.Enable(Attribute.COMPILER_ADD)
         attributeInfo.Enable(Attribute.PRIVATE)
-        attributeInfo.Enable(Attribute.HAS_INITED_FIELD)
         let memberInfo = MemberVarInfo(HAS_INITED_IDENT, builder.context.GetBoolTy())
         memberInfo.attributeInfo.CopyFrom(attributeInfo)
         classDef.AddInstanceVar(memberInfo)
@@ -84,12 +67,19 @@ public class MarkClassHasInited {
 
     private func AssignHasInitedFlagToTrueInConstructorExit(constructor: Function): Unit {
         let boolTy = builder.context.GetBoolTy()
-        let thisArg = constructor.GetParam(0)
         let constructorBody = constructor.GetBody().getOrThrow()
         for (block in constructorBody.GetBlocks()) {
             let terminator = block.GetTerminator()
             if (terminator.isNone() || terminator.getOrThrow().GetExprKind() != ExprKind.EXIT) {
                 continue
+            }
+            let thisArg: Value = if (ConstructorReturnsReceiver(constructor)) {
+                let receiver = builder.CreateLoad(constructor.GetReturnType().getOrThrow(),
+                    constructor.GetReturnValue().getOrThrow(), block)
+                receiver.MoveBefore(terminator.getOrThrow())
+                receiver.GetResult().getOrThrow()
+            } else {
+                constructor.GetParam(0)
             }
             let trueVal = builder.CreateConstant(boolTy, BoolLiteral(true), block)
             trueVal.MoveBefore(terminator.getOrThrow())

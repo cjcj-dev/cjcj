@@ -5,7 +5,7 @@ import std.sort.*
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::basic.Range as BasicRange
 import cjcj::basic.DiagKindRefactor
-import cjcj::utils.TaskQueue
+import cjcj::utils.{TaskQueue, TaskResult}
 
 // cangjie_compiler d935a736, Analysis/UnreachableBlockAnalysis.cpp.
 private class UnreachableBlockRegion {
@@ -371,10 +371,20 @@ public class UnreachableBlockAnalysis {
             return
         }
         let queue = TaskQueue(threadsNum)
+        let results = ArrayList<TaskResult<Unit>>()
         for (fn in pkg.GetGlobalFuncsWithBody()) {
             if (fn.TestAttr(Attribute.SKIP_ANALYSIS)) { continue }
-            let _ = queue.AddTask<Unit>({ => RunOnFunc(fn) })
+            results.add(queue.AddTask<Unit>({ => RunOnFunc(fn) }))
         }
         queue.RunAndWaitForAllTasksCompleted()
+        var firstFailure: Option<Exception> = None
+        for (result in results) {
+            try {
+                result.get()
+            } catch (e: Exception) {
+                if (firstFailure.isNone()) { firstFailure = Some(e) }
+            }
+        }
+        if (let Some(e) <- firstFailure) { throw e }
     }
 }

@@ -18,6 +18,9 @@ public class OCFFIParserImpl {
             case AnnotationKind.OBJ_C_IMPL =>
                 CheckImplAnnoArgs(anno)
                 CheckImplAnnoTarget(anno)
+            case AnnotationKind.OBJ_C =>
+                FFIParserImpl(parser).CheckZeroOrSingleStringLitArgAnnotation(anno, "@ObjC")
+                CheckMirrorAnnoTarget(anno, scopeKind)
             case AnnotationKind.OBJ_C_INIT =>
                 CheckInitAnnoArgs(anno)
                 CheckInitAnnoTarget(anno)
@@ -35,7 +38,7 @@ public class OCFFIParserImpl {
                 continue
             }
             if (let Some(outer) <- fd.outerDecl) {
-                if (outer.astKind != ASTKind.CLASS_DECL || !outer.TestAttr(Attribute.OBJ_C_MIRROR)) {
+                if (outer.astKind != ASTKind.CLASS_DECL || !outer.TestAttr(Attribute.OBJ_C_FOREIGN)) {
                     DiagObjCInitFuncMustBeInMirrorClass(fd)
                     fd.EnableAttr(Attribute.IS_BROKEN)
                 }
@@ -60,7 +63,7 @@ public class OCFFIParserImpl {
                 continue
             }
             if (let Some(outer) <- fd.outerDecl) {
-                if (outer.astKind == ASTKind.INTERFACE_DECL && outer.TestAttr(Attribute.OBJ_C_MIRROR)) {
+                if (outer.astKind == ASTKind.INTERFACE_DECL && outer.TestAttr(Attribute.OBJ_C_FOREIGN)) {
                     if (!fd.TestAttr(Attribute.IS_BROKEN)) {
                         fd.EnableAttr(Attribute.OBJ_C_OPTIONAL)
                     }
@@ -73,8 +76,11 @@ public class OCFFIParserImpl {
     }
 
     public func CheckMirrorSignature(decl: ClassLikeDecl, annos: ArrayList<Annotation>): Unit {
-        CJC_ASSERT(parser.HasAnnotation(annos, AnnotationKind.OBJ_C_MIRROR))
-        decl.EnableAttr(Attribute.OBJ_C_MIRROR)
+        CJC_ASSERT(parser.HasAnnotation(annos, AnnotationKind.OBJ_C_MIRROR) ||
+            (parser.HasAnnotation(annos, AnnotationKind.OBJ_C) && parser.HasModifier(decl.modifiers, TokenKind.FOREIGN)))
+        decl.EnableAttr(Attribute.OBJ_C_FOREIGN)
+        decl.EnableAttr(Attribute.NO_REFLECT_INFO)
+        decl.DisableAttr(Attribute.FOREIGN)
         if (decl.TestAttr(Attribute.SEALED)) {
             DiagObjCMirrorCannotBeSealed(decl)
             decl.EnableAttr(Attribute.IS_BROKEN)
@@ -86,8 +92,10 @@ public class OCFFIParserImpl {
     }
 
     public func CheckImplSignature(decl: ClassLikeDecl, annos: ArrayList<Annotation>): Unit {
-        CJC_ASSERT(parser.HasAnnotation(annos, AnnotationKind.OBJ_C_IMPL))
-        decl.EnableAttr(Attribute.OBJ_C_IMPL)
+        CJC_ASSERT(parser.HasAnnotation(annos, AnnotationKind.OBJ_C_IMPL) ||
+            (parser.HasAnnotation(annos, AnnotationKind.OBJ_C) && !parser.HasModifier(decl.modifiers, TokenKind.FOREIGN)))
+        decl.EnableAttr(Attribute.OBJ_C_EXPORT)
+        decl.EnableAttr(Attribute.NO_REFLECT_INFO)
         if (let Some(_) <- decl.generic) {
             DiagObjCImplCannotBeGeneric(decl)
             decl.EnableAttr(Attribute.IS_BROKEN)
@@ -112,12 +120,14 @@ public class OCFFIParserImpl {
     }
 
     public func CheckMirrorSignature(decl: FuncDecl, annos: ArrayList<Annotation>): Unit {
-        CJC_ASSERT(parser.HasAnnotation(annos, AnnotationKind.OBJ_C_MIRROR))
-        decl.EnableAttr(Attribute.OBJ_C_MIRROR)
-        if (decl.TestAttr(Attribute.FOREIGN)) {
-            DiagObjCMirrorFuncCannotBeForeign(decl)
+        CJC_ASSERT(parser.HasAnnotation(annos, AnnotationKind.OBJ_C_MIRROR) || parser.HasAnnotation(annos, AnnotationKind.OBJ_C))
+        decl.EnableAttr(Attribute.OBJ_C_FOREIGN)
+        decl.EnableAttr(Attribute.NO_REFLECT_INFO)
+        if (parser.HasAnnotation(annos, AnnotationKind.OBJ_C) && !decl.TestAttr(Attribute.FOREIGN)) {
+            parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_func_must_be_foreign, decl, decl.identifier.Val()).Emit()
             decl.EnableAttr(Attribute.IS_BROKEN)
         }
+        decl.DisableAttr(Attribute.FOREIGN)
         if (let Some(_) <- decl.GetGeneric()) {
             DiagObjCMirrorFuncCannotBeGeneric(decl)
             decl.EnableAttr(Attribute.IS_BROKEN)
@@ -190,14 +200,14 @@ public class OCFFIParserImpl {
 
     public func DiagObjCInitFuncMustBeInMirrorClass(node: FuncDecl): Unit {
         if (let Some(outer) <- node.outerDecl) {
-            CJC_ASSERT(!outer.TestAttr(Attribute.OBJ_C_MIRROR) || outer.astKind != ASTKind.CLASS_DECL)
+            CJC_ASSERT(!outer.TestAttr(Attribute.OBJ_C_FOREIGN) || outer.astKind != ASTKind.CLASS_DECL)
         }
         parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_init_method_must_be_in_mirror_class, node).Emit()
     }
 
     public func DiagObjCOptionalFuncMustBeInMirrorClass(fd: FuncDecl): Unit {
         if (let Some(outer) <- fd.outerDecl) {
-            CJC_ASSERT(!outer.TestAttr(Attribute.OBJ_C_MIRROR) || outer.astKind != ASTKind.INTERFACE_DECL)
+            CJC_ASSERT(!outer.TestAttr(Attribute.OBJ_C_FOREIGN) || outer.astKind != ASTKind.INTERFACE_DECL)
         }
         parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_optional_method_must_be_in_mirror_class, fd).Emit()
     }
@@ -259,7 +269,7 @@ public class OCFFIParserImpl {
         if (parser.Seeing(TokenKind.FUNC) && ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) {
             return
         }
-        if (anno.kind == AnnotationKind.OBJ_C_MIRROR) {
+        if (anno.kind == AnnotationKind.OBJ_C_MIRROR || anno.kind == AnnotationKind.OBJ_C) {
             let qualifier = if (ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) { "" } else { "member or local " }
             parser.DiagUnexpectedAnnoOn(
                 anno, parser.lookahead.Begin(), anno.identifier.Val(), qualifier + parser.lookahead.Value())

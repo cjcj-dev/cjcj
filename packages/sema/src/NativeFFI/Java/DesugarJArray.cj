@@ -97,7 +97,7 @@ public class DesugarJArray {
         }
     }
 
-    private func InsertConstructorBody(constr: FuncDecl): Unit {
+    private func InsertConstructorBody(ctx: AfterTypeCheckContext, constr: FuncDecl): Unit {
         if (ilib.GetJniEnvPtrDecl().isNone()) {
             constr.EnableAttr(Attribute.IS_BROKEN)
             return
@@ -142,7 +142,11 @@ public class DesugarJArray {
                         nodes.add(jniEnvVar)
                         nodes.add(javaref.getOrThrow())
                         let thisCall = CreateThisCall(outer, wrapping, wrappingTy, curFile)
-                        thisCall.args.add(CreateFuncArg(WrapReturningLambdaCall(typeManager, nodes)))
+                        let scopeBody = CreateBlock(nodes, ilib.GetJavaEntityTy())
+                        scopeBody.curFile = Some(curFile)
+                        let exclusive = WrapWithExclusiveScope(ctx, scopeBody, ilib.GetJavaEntityTy().getOrThrow())
+                        if (exclusive.isNone()) { constr.EnableAttr(Attribute.IS_BROKEN); return }
+                        thisCall.args.add(CreateFuncArg(exclusive.getOrThrow()))
                         let body = constr.funcBody.getOrThrow().body.getOrThrow()
                         body.body.clear()
                         body.body.add(thisCall)
@@ -154,7 +158,7 @@ public class DesugarJArray {
         constr.EnableAttr(Attribute.IS_BROKEN)
     }
 
-    private func GenerateJniTypeConstructor(jarray: ClassDecl): Unit {
+    private func GenerateJniTypeConstructor(ctx: AfterTypeCheckContext, jarray: ClassDecl): Unit {
         var found: Option<FuncDecl> = None
         for (member in jarray.GetMemberDecls()) {
             if (let Some(fd) <- (member as FuncDecl)) {
@@ -171,7 +175,7 @@ public class DesugarJArray {
                 cloned.fullPackageName = jarray.fullPackageName
                 cloned.EnableAttr(Attribute.COMPILER_ADD)
                 InsertJniTypeParamIntoConstructor(cloned)
-                InsertConstructorBody(cloned)
+                InsertConstructorBody(ctx, cloned)
                 jarray.GetMemberDecls().add(cloned)
             }
         }
@@ -399,7 +403,7 @@ public class DesugarJArray {
                         InsertOriginalSizeConstructorBody(fd)
                     }
                 }
-                GenerateJniTypeConstructor(jarray)
+                GenerateJniTypeConstructor(ctx, jarray)
             }
         }
         for (file in ctx.pkg.files) {

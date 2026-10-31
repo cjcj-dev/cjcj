@@ -169,7 +169,7 @@ private func ReplaceString(str: String, pattern: String, replacement: String): S
     var posOpt = out.indexOf(pattern)
     while (let Some(pos) <- posOpt) {
         let currentLen = out.size
-        if (currentLen - pos - pattern.size <= 0) {
+        if (currentLen < pos + pattern.size) {
             break
         }
         out = out[0..pos] + replacement + out[pos + pattern.size..currentLen]
@@ -1106,6 +1106,9 @@ class Demangler {
         if (MatchForward(MANGLE_FLOAT16_PREFIX, MANGLE_FLOAT16_PREFIX.size)) {
             SkipString(MANGLE_FLOAT16_PREFIX)
         } else {
+            if (ch == b'D') {
+                return Reject("invalid primitive type")
+            }
             SkipChar(ch)
         }
         return DemangleInfo(GetPrimitiveDemangleMap(ch), DemanglerTypeKind.PRIMITIVE)

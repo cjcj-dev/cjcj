@@ -628,7 +628,8 @@ extend ParserImpl {
             if (ret.TestAttr(Attribute.SPECIFIC) && hasNoReturnType && hasNoBody) {
                 ParseDiagnoseRefactor(DiagKindRefactor.parse_specific_function_must_have_return_type, ret).Emit()
             }
-            if (HasModifier(modifiers, TokenKind.UNSAFE) || HasModifier(modifiers, TokenKind.FOREIGN)) {
+            if (HasModifier(modifiers, TokenKind.UNSAFE) ||
+                (HasModifier(modifiers, TokenKind.FOREIGN) && !HasAnnotation(annos, AnnotationKind.OBJ_C))) {
                 SetUnsafe(ret, modifiers: modifiers)
             }
             let ffiParser = FFIParserImpl(this)
@@ -661,9 +662,6 @@ extend ParserImpl {
         funcDecl.annotations.clear()
         for (anno in annos) {
             funcDecl.annotations.add(anno)
-            if (anno.kind == AnnotationKind.JAVA) {
-                funcDecl.EnableAttr(Attribute.JAVA_APP)
-            }
             if (anno.kind == AnnotationKind.INTRINSIC) {
                 CheckIntrinsicFunc(funcDecl)
                 funcDecl.EnableAttr(Attribute.INTRINSIC)
@@ -689,9 +687,6 @@ extend ParserImpl {
         funcDecl.annotations.clear()
         for (anno in annos) {
             funcDecl.annotations.add(anno)
-            if (anno.kind == AnnotationKind.JAVA) {
-                funcDecl.EnableAttr(Attribute.JAVA_APP)
-            }
             if (anno.kind == AnnotationKind.INTRINSIC) {
                 CheckIntrinsicFunc(funcDecl)
                 funcDecl.EnableAttr(Attribute.INTRINSIC)
@@ -883,9 +878,6 @@ extend ParserImpl {
                 DiagMissingBody("main function", "", lastToken.End())
             }
             for (anno in annos) {
-                if (anno.kind == AnnotationKind.JAVA) {
-                    ret.EnableAttr(Attribute.JAVA_APP)
-                }
                 if (anno.kind == AnnotationKind.INTRINSIC) {
                     CheckIntrinsicFunc(ret)
                     ret.EnableAttr(Attribute.INTRINSIC)
@@ -958,7 +950,7 @@ extend ParserImpl {
         if (let Some(funcBody) <- decl.funcBody) {
             if ((let None <- funcBody.body) && !parseDeclFile &&
                 !ScopeKindEquals(scopeKind, ScopeKind.UNKNOWN_SCOPE) &&
-                !decl.TestAnyAttr(Attribute.FOREIGN, Attribute.INTRINSIC, Attribute.OBJ_C_MIRROR)) {
+                !decl.TestAnyAttr(Attribute.FOREIGN, Attribute.INTRINSIC, Attribute.OBJ_C_FOREIGN)) {
                 if (CanBeAbstract(decl, scopeKind)) {
                     decl.EnableAttr(Attribute.ABSTRACT)
                 } else if (!funcBody.TestAttr(Attribute.HAS_BROKEN) && !inClassLikeScope &&
@@ -1008,7 +1000,7 @@ extend ParserImpl {
             case None => true
         }
         if (missingBody &&
-            !ctor.TestAnyAttr(Attribute.COMMON, Attribute.JAVA_MIRROR, Attribute.OBJ_C_MIRROR)) {
+            !ctor.TestAnyAttr(Attribute.COMMON, Attribute.JAVA_FOREIGN, Attribute.OBJ_C_FOREIGN)) {
             DiagMissingBody("constructor", "", ctor.end)
             if (!parseDeclFile) {
                 ctor.EnableAttr(Attribute.HAS_BROKEN)
@@ -1018,7 +1010,7 @@ extend ParserImpl {
 
     // C++ anchor: cangjie_compiler/src/Parse/ParseDecl.cpp:492-499
     private func CheckPropDeclJavaMirror(decl: PropDecl): Unit {
-        if (let Some(outerDecl) <- decl.outerDecl && outerDecl.TestAttr(Attribute.JAVA_MIRROR)) {
+        if (let Some(outerDecl) <- decl.outerDecl && outerDecl.TestAttr(Attribute.JAVA_FOREIGN)) {
             ParseDiagnoseRefactor(DiagKindRefactor.parse_java_mirror_prop_is_forbidden, decl).Emit()
             decl.EnableAttr(Attribute.IS_BROKEN)
             outerDecl.EnableAttr(Attribute.HAS_BROKEN)
@@ -1027,8 +1019,8 @@ extend ParserImpl {
 
     // C++ anchor: cangjie_compiler/src/Parse/ParseDecl.cpp:501-508
     private func CheckPrimaryCtorDeclJavaMirror(ctor: PrimaryCtorDecl): Unit {
-        if (let Some(outerDecl) <- ctor.outerDecl && outerDecl.TestAttr(Attribute.JAVA_MIRROR)) {
-            ctor.EnableAttr(Attribute.JAVA_MIRROR)
+        if (let Some(outerDecl) <- ctor.outerDecl && outerDecl.TestAttr(Attribute.JAVA_FOREIGN)) {
+            ctor.EnableAttr(Attribute.JAVA_FOREIGN)
             ctor.EnableAttr(Attribute.IS_BROKEN)
             ParseDiagnoseRefactor(DiagKindRefactor.parse_java_mirror_decl_cannot_have_primary_ctor, ctor).Emit()
         }
@@ -1037,8 +1029,8 @@ extend ParserImpl {
     // C++ anchor: cangjie_compiler/src/Parse/ParseDecl.cpp:521-562
     private func CheckJavaInteropMember(decl: Decl): Unit {
         let outerDecl = decl.outerDecl.getOrThrow()
-        if (outerDecl.TestAttr(Attribute.JAVA_MIRROR_SUBTYPE) &&
-            !outerDecl.TestAttr(Attribute.JAVA_MIRROR)) {
+        if (outerDecl.TestAttr(Attribute.JAVA_EXPORT) &&
+            !outerDecl.TestAttr(Attribute.JAVA_FOREIGN)) {
             if (decl.GetGeneric().isSome()) {
                 FFIParserImpl(this).Java().DiagJavaImplCannotBeGeneric(decl)
                 return
@@ -1052,7 +1044,7 @@ extend ParserImpl {
         if (let Some(funcDecl) <- (decl as FuncDecl)) {
             if (funcDecl.TestAttr(Attribute.CONSTRUCTOR)) {
                 CheckInitCtorDeclJavaMirror(funcDecl)
-            } else if (funcDecl.TestAttr(Attribute.FINALIZER) && outerDecl.TestAttr(Attribute.JAVA_MIRROR)) {
+            } else if (funcDecl.TestAttr(Attribute.FINALIZER) && outerDecl.TestAttr(Attribute.JAVA_FOREIGN)) {
                 FFIParserImpl(this).Java().DiagJavaMirrorCannotHaveFinalizer(funcDecl)
             } else {
                 CheckMemberFuncJavaMirror(funcDecl)
@@ -1069,7 +1061,7 @@ extend ParserImpl {
     // C++ anchor: cangjie_compiler/src/Parse/ParseDecl.cpp:564-619
     private func CheckObjCInteropMember(member: Decl): Unit {
         let outerDecl = member.outerDecl.getOrThrow()
-        if (outerDecl.TestAttr(Attribute.OBJ_C_IMPL)) {
+        if (outerDecl.TestAttr(Attribute.OBJ_C_EXPORT)) {
             if (member.GetGeneric().isSome()) {
                 outerDecl.EnableAttr(Attribute.IS_BROKEN)
                 member.EnableAttr(Attribute.IS_BROKEN)
@@ -1088,7 +1080,7 @@ extend ParserImpl {
             if (funcDecl.TestAttr(Attribute.CONSTRUCTOR)) {
                 CheckInitCtorDeclObjCMirror(funcDecl)
                 FFIParserImpl(this).CheckForeignNameAnnotation(funcDecl)
-            } else if (funcDecl.TestAttr(Attribute.FINALIZER) && outerDecl.TestAttr(Attribute.OBJ_C_MIRROR)) {
+            } else if (funcDecl.TestAttr(Attribute.FINALIZER) && outerDecl.TestAttr(Attribute.OBJ_C_FOREIGN)) {
                 outerDecl.EnableAttr(Attribute.IS_BROKEN)
                 funcDecl.EnableAttr(Attribute.IS_BROKEN)
                 FFIParserImpl(this).ObjC().DiagObjCMirrorCannotHaveFinalizer(funcDecl)
@@ -1111,10 +1103,10 @@ extend ParserImpl {
     // C++ anchor: cangjie_compiler/src/Parse/ParseDecl.cpp:651-674
     private func CheckMemberFuncObjCMirror(funcDecl: FuncDecl): Unit {
         if (let Some(outerDecl) <- funcDecl.outerDecl) {
-            if (!outerDecl.TestAttr(Attribute.OBJ_C_MIRROR)) {
+            if (!outerDecl.TestAttr(Attribute.OBJ_C_FOREIGN)) {
                 return
             }
-            funcDecl.EnableAttr(Attribute.OBJ_C_MIRROR)
+            funcDecl.EnableAttr(Attribute.OBJ_C_FOREIGN)
             if (funcDecl.TestAttr(Attribute.PRIVATE)) {
                 FFIParserImpl(this).ObjC().DiagObjCMirrorCannotHavePrivateMember(funcDecl)
                 funcDecl.EnableAttr(Attribute.IS_BROKEN)
@@ -1136,11 +1128,11 @@ extend ParserImpl {
     // C++ anchor: cangjie_compiler/src/Parse/ParseDecl.cpp:718-757
     private func CheckInitCtorDeclObjCMirror(ctor: FuncDecl): Unit {
         if (let Some(outerDecl) <- ctor.outerDecl) {
-            if (!outerDecl.TestAttr(Attribute.OBJ_C_MIRROR)) {
+            if (!outerDecl.TestAttr(Attribute.OBJ_C_FOREIGN)) {
                 return
             }
             ctor.constructorCall = ConstructorCall.OTHER_INIT
-            ctor.EnableAttr(Attribute.OBJ_C_MIRROR)
+            ctor.EnableAttr(Attribute.OBJ_C_FOREIGN)
             if (ctor.TestAttr(Attribute.STATIC)) {
                 FFIParserImpl(this).ObjC().DiagObjCMirrorCannotHaveStaticInit(ctor)
                 ctor.EnableAttr(Attribute.IS_BROKEN)
@@ -1183,10 +1175,10 @@ extend ParserImpl {
     // C++ anchor: cangjie_compiler/src/Parse/ParseDecl.cpp:759-784
     private func CheckVarDeclObjCMirror(field: VarDecl): Unit {
         if (let Some(outerDecl) <- field.outerDecl) {
-            if (!outerDecl.TestAnyAttr(Attribute.OBJ_C_MIRROR)) {
+            if (!outerDecl.TestAnyAttr(Attribute.OBJ_C_FOREIGN)) {
                 return
             }
-            field.EnableAttr(Attribute.OBJ_C_MIRROR)
+            field.EnableAttr(Attribute.OBJ_C_FOREIGN)
             if (field.TestAttr(Attribute.PRIVATE)) {
                 FFIParserImpl(this).ObjC().DiagObjCMirrorCannotHavePrivateMember(field)
                 field.EnableAttr(Attribute.IS_BROKEN)
@@ -1211,10 +1203,10 @@ extend ParserImpl {
     // C++ anchor: cangjie_compiler/src/Parse/ParseDecl.cpp:786-816
     private func CheckPropDeclObjCMirror(propDecl: PropDecl): Unit {
         if (let Some(outerDecl) <- propDecl.outerDecl) {
-            if (!outerDecl.TestAttr(Attribute.OBJ_C_MIRROR)) {
+            if (!outerDecl.TestAttr(Attribute.OBJ_C_FOREIGN)) {
                 return
             }
-            propDecl.EnableAttr(Attribute.OBJ_C_MIRROR)
+            propDecl.EnableAttr(Attribute.OBJ_C_FOREIGN)
             if (!outerDecl.TestAttr(Attribute.ABSTRACT)) {
                 propDecl.DisableAttr(Attribute.ABSTRACT)
             }
@@ -1229,14 +1221,14 @@ extend ParserImpl {
                     propDecl.identifier.Val()).Emit()
                 propDecl.EnableAttr(Attribute.IS_BROKEN)
             } else {
-                InsertPropGetterSignature(propDecl, Attribute.OBJ_C_MIRROR)
+                InsertPropGetterSignature(propDecl, Attribute.OBJ_C_FOREIGN)
             }
             if (!propDecl.setters.isEmpty()) {
                 ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_mirror_prop_cannot_have_setter, propDecl,
                     propDecl.identifier.Val()).Emit()
                 propDecl.EnableAttr(Attribute.IS_BROKEN)
             } else if (propDecl.isVar) {
-                InsertPropSetterSignature(propDecl, Attribute.OBJ_C_MIRROR)
+                InsertPropSetterSignature(propDecl, Attribute.OBJ_C_FOREIGN)
             }
         }
     }
@@ -1244,10 +1236,10 @@ extend ParserImpl {
     // C++ anchor: cangjie_compiler/src/Parse/ParseDecl.cpp:818-827
     private func CheckPrimaryCtorDeclObjCMirror(ctor: PrimaryCtorDecl): Unit {
         if (let Some(outerDecl) <- ctor.outerDecl) {
-            if (!outerDecl.TestAttr(Attribute.OBJ_C_MIRROR)) {
+            if (!outerDecl.TestAttr(Attribute.OBJ_C_FOREIGN)) {
                 return
             }
-            ctor.EnableAttr(Attribute.OBJ_C_MIRROR)
+            ctor.EnableAttr(Attribute.OBJ_C_FOREIGN)
             ctor.EnableAttr(Attribute.IS_BROKEN)
             ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_mirror_cannot_have_primary_ctor, ctor).Emit()
         }
@@ -1256,10 +1248,10 @@ extend ParserImpl {
     // C++ anchor: cangjie_compiler/src/Parse/ParseDecl.cpp:621-649
     private func CheckMemberFuncJavaMirror(decl: FuncDecl): Unit {
         if (let Some(outerDecl) <- decl.outerDecl) {
-            if (!outerDecl.TestAttr(Attribute.JAVA_MIRROR)) {
+            if (!outerDecl.TestAttr(Attribute.JAVA_FOREIGN)) {
                 return
             }
-            decl.EnableAttr(Attribute.JAVA_MIRROR)
+            decl.EnableAttr(Attribute.JAVA_FOREIGN)
             if (decl.TestAttr(Attribute.PRIVATE)) {
                 FFIParserImpl(this).Java().DiagJavaMirrorCannotHavePrivateMember(decl)
                 decl.EnableAttr(Attribute.IS_BROKEN)
@@ -1284,10 +1276,10 @@ extend ParserImpl {
 
     // C++ anchor: cangjie_compiler/src/Parse/ParseDecl.cpp:676-716
     private func CheckInitCtorDeclJavaMirror(ctor: FuncDecl): Unit {
-        if (!ctor.TestAttr(Attribute.JAVA_MIRROR)) {
+        if (!ctor.TestAttr(Attribute.JAVA_FOREIGN)) {
             return
         }
-        ctor.EnableAttr(Attribute.JAVA_MIRROR)
+        ctor.EnableAttr(Attribute.JAVA_FOREIGN)
         ctor.DisableAttr(Attribute.ABSTRACT)
         ctor.constructorCall = ConstructorCall.OTHER_INIT
         let outerDecl = ctor.outerDecl.getOrThrow()
@@ -1337,7 +1329,7 @@ extend ParserImpl {
         }
         let funcBody = decl.funcBody.getOrThrow()
         if (funcBody.retType.isNone() && !funcBody.TestAttr(Attribute.HAS_BROKEN)) {
-            ParseDiagnoseRefactor(functionMustHaveReturnType, decl).Emit()
+            ParseDiagnoseRefactor(functionMustHaveReturnType, decl, decl.identifier.Val()).Emit()
             decl.EnableAttr(Attribute.IS_BROKEN)
         }
         if (funcBody.body.isSome()) {
@@ -2508,11 +2500,11 @@ extend ParserImpl {
             SetMemberParentInheritableDecl(cd, decl)
             if (let Some(ctor) <- (decl as FuncDecl)) {
                 if (ctor.TestAttr(Attribute.CONSTRUCTOR)) {
-                    if (cd.TestAttr(Attribute.OBJ_C_MIRROR)) {
-                        ctor.EnableAttr(Attribute.OBJ_C_MIRROR)
+                    if (cd.TestAttr(Attribute.OBJ_C_FOREIGN)) {
+                        ctor.EnableAttr(Attribute.OBJ_C_FOREIGN)
                     }
-                    if (cd.TestAttr(Attribute.JAVA_MIRROR)) {
-                        ctor.EnableAttr(Attribute.JAVA_MIRROR)
+                    if (cd.TestAttr(Attribute.JAVA_FOREIGN)) {
+                        ctor.EnableAttr(Attribute.JAVA_FOREIGN)
                     }
                     CheckInitCtorDeclBody(ctor)
                 }
@@ -2591,8 +2583,8 @@ extend ParserImpl {
             if (let Some(ctor) <- (member as FuncDecl)) {
                 if (ctor.TestAttr(Attribute.CONSTRUCTOR)) {
                     if (let Some(structDecl) <- (ret as StructDecl)) {
-                        if (structDecl.TestAttr(Attribute.JAVA_MIRROR)) {
-                            ctor.EnableAttr(Attribute.JAVA_MIRROR)
+                        if (structDecl.TestAttr(Attribute.JAVA_FOREIGN)) {
+                            ctor.EnableAttr(Attribute.JAVA_FOREIGN)
                         }
                         CheckInitCtorDeclBody(ctor)
                     }
@@ -2889,9 +2881,9 @@ extend ParserImpl {
         let inCJMP = HasModifier(outerModifiers, TokenKind.SPECIFIC) ||
             HasModifier(outerModifiers, TokenKind.COMMON)
         let inAbstractCJMP = inAbstract && inCJMP
-        let inObjCMirror = outerDecl.TestAttr(Attribute.OBJ_C_MIRROR)
+        let inObjCMirror = outerDecl.TestAttr(Attribute.OBJ_C_FOREIGN)
         let isJavaMirrorOrJavaMirrorSubtype =
-            outerDecl.TestAnyAttr(Attribute.JAVA_MIRROR, Attribute.JAVA_MIRROR_SUBTYPE)
+            outerDecl.TestAnyAttr(Attribute.JAVA_FOREIGN, Attribute.JAVA_EXPORT)
 
         if (HasModifier(decl.modifiers, TokenKind.ABSTRACT) && !isCommon && !inAbstractCJMP &&
             !isJavaMirrorOrJavaMirrorSubtype) {
@@ -2984,12 +2976,12 @@ extend ParserImpl {
     // C++ anchor: cangjie_compiler/src/Parse/Parser.cpp:444-490
     private func CheckClassLikePropAbstractness(property: PropDecl): Unit {
         let outerDecl = property.outerDecl.getOrThrow()
-        if (outerDecl.TestAttr(Attribute.JAVA_MIRROR)) {
+        if (outerDecl.TestAttr(Attribute.JAVA_FOREIGN)) {
             property.DisableAttr(Attribute.ABSTRACT)
             return
         }
         let isJavaMirrorOrJavaMirrorSubtype =
-            outerDecl.TestAnyAttr(Attribute.JAVA_MIRROR, Attribute.JAVA_MIRROR_SUBTYPE)
+            outerDecl.TestAnyAttr(Attribute.JAVA_FOREIGN, Attribute.JAVA_EXPORT)
         let isCommon = property.TestAttr(Attribute.COMMON)
         let outerModifiers = outerDecl.modifiers
         let inAbstract = HasModifier(outerModifiers, TokenKind.ABSTRACT)
@@ -2998,7 +2990,7 @@ extend ParserImpl {
         let inAbstractCJMP = inAbstract && inCJMP
         let inClass = outerDecl.astKind == ASTKind.CLASS_DECL
         let inAbstractCJMPClass = inAbstractCJMP && inClass
-        let inObjCMirror = outerDecl.TestAttr(Attribute.OBJ_C_MIRROR)
+        let inObjCMirror = outerDecl.TestAttr(Attribute.OBJ_C_FOREIGN)
 
         if (HasModifier(property.modifiers, TokenKind.ABSTRACT) && !isCommon && !inAbstractCJMP &&
             !isJavaMirrorOrJavaMirrorSubtype) {

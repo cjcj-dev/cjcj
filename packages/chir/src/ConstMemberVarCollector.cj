@@ -90,7 +90,7 @@ public class ConstMemberVarCollector {
         if (!index2Type.contains(index)) {
             return
         }
-        if (storeRef.GetLocation() != firstParam) {
+        if (!IsCurrentReceiver(storeRef.GetLocation(), firstParam)) {
             return
         }
         let sourceValue = GetSourceTargetRecursively(storeRef.GetValue())

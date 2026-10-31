@@ -10,10 +10,11 @@ import cjcj::utils.CJC_ASSERT
 import cjcj::utils.ProfileRecorder
 import cjcj::utils.STANDARD_LIBS
 
-public open class DefaultCompilerInstance {
+public open class DefaultCompilerInstance <: Resource {
     public let invocation: CompilerInvocation
     public let diag: DiagnosticEngine
     public let core: CompilerInstance
+    private var closed = false
 
     public init(invocation: CompilerInvocation, diag: DiagnosticEngine) {
         this.invocation = invocation
@@ -29,6 +30,27 @@ public open class DefaultCompilerInstance {
     // C++ ~CompilerInstance joins destroyFut (CompilerInstance.cpp:87-91).
     public func JoinDestroyASTResources(): Unit {
         core.JoinDestroyASTResources()
+    }
+
+    public func isClosed(): Bool { return closed }
+
+    // Own the compiler through its last asynchronous AST user, including exits
+    // before CodegenAllPackages is entered. One cleanup must not skip the other.
+    public func close(): Unit {
+        if (closed) { return }
+        var failure: Option<Exception> = None
+        try {
+            core.FreeCHIRData()
+        } catch (e: Exception) {
+            failure = Some(e)
+        }
+        try {
+            core.JoinDestroyASTResources()
+        } catch (e: Exception) {
+            if (failure.isNone()) { failure = Some(e) }
+        }
+        closed = true
+        if (let Some(e) <- failure) { throw e }
     }
 
     public open func InitCompilerInstance(): Bool {
@@ -263,12 +285,12 @@ public open class DefaultCompilerInstance {
     // C++ src/FrontendTool/DefaultCompilerInstance.cpp:348-383 (7a1666e7).
     protected func CodegenAllPackages(enableIncrement: Bool,
         cachedMangleMap!: CachedMangleMap = CachedMangleMap()): Bool {
+        var failed = false
+        try {
         invocation.globalOptions.frontendOutputFiles.clear()
         let chirPkgs = core.GetAllCHIRPackages()
         if (chirPkgs.size <= 1) {
-            let ret = CodegenOnePackage(enableIncrement, cachedMangleMap: cachedMangleMap)
-            core.FreeCHIRData()
-            return ret
+            return CodegenOnePackage(enableIncrement, cachedMangleMap: cachedMangleMap)
         }
         var ret = true
         if (invocation.globalOptions.enIncrementalCompilation) {
@@ -291,10 +313,17 @@ public open class DefaultCompilerInstance {
                 break
             }
         }
-        core.chirData.getOrThrow().SetCurrentCHIRPackage(None)
-        core.chirData.getOrThrow().SetCurrentRealCHIRPackage(None)
-        core.FreeCHIRData()
         return ret
+        } catch (e: Exception) {
+            failed = true
+            throw e
+        } finally {
+            try {
+                core.FreeCHIRData()
+            } catch (e: Exception) {
+                if (!failed) { throw e }
+            }
+        }
     }
 
     private func PreMangleExportDecls(pkgs: ArrayList<Package>): Unit {
@@ -428,9 +457,11 @@ private func FrontendToolStageFromIndex(idx: Int64): CompileStage {
 
 private func ProfiledBool(title: String, subtitle: String, action: () -> Bool): Bool {
     let recorder = ProfileRecorder(title, subtitle)
-    let ret = action()
-    recorder.close()
-    return ret
+    try {
+        return action()
+    } finally {
+        recorder.close()
+    }
 }
 
 private func DumpASTToScreen(srcPkgs: ArrayList<Package>): Unit {

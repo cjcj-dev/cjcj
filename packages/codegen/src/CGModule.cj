@@ -270,7 +270,7 @@ public class MTableInterfaceInfo {
 
 public class CGModule {
     private let cgCtx: CGContext
-    private var module: Option<LLVMModuleHandle>
+    private var module: Option<LLVMModuleHandle> = None
     private let functions: HashMap<UIntNative, CGFunction> = HashMap<UIntNative, CGFunction>()
     private let globalVariables: HashMap<String, CGValue> = HashMap<String, CGValue>()
     private let localValueMapping: HashMap<Value, CGValue> = HashMap<Value, CGValue>()
@@ -306,6 +306,7 @@ public class CGModule {
 
     public init(subCHIRPackage: SubCHIRPackage, cgPkgCtx: CGPkgContext) {
         cgCtx = CGContext(subCHIRPackage, cgPkgCtx)
+        try {
         let moduleName = "${subCHIRPackage.subCHIRPackageIdx}-" + cgPkgCtx.GetCurrentPkgName()
         let moduleHandle = LLVMModuleHandle.Create(moduleName, cgCtx.GetLLVMContext())
         module = moduleHandle
@@ -314,6 +315,10 @@ public class CGModule {
         moduleHandle.SetTargetTriple(CGModule.GetTargetTripleString(cgCtx.GetCompileOptions().target))
         InitDebugInfo()
         cffi = CreateCGCFFI()
+        } catch (e: Exception) {
+            try { Clear() } catch (_: Exception) { () }
+            throw e
+        }
     }
 
     public func GetCGContext(): CGContext { return cgCtx }
@@ -585,7 +590,13 @@ public class CGModule {
     }
 
     public func Clear(): Unit {
-        FinalizeDebugInfo()
+        var failure: Option<Exception> = None
+        try {
+            FinalizeDebugInfo()
+        } catch (e: Exception) {
+            failure = Some(e)
+        }
+        try {
         if (let Some(moduleHandle) <- module) {
             moduleHandle.close()
             module = None
@@ -605,7 +616,16 @@ public class CGModule {
         ghostCFuncArgValues.clear()
         enumClassificationStack.clear()
         cgCtx.Clear()
-        cgCtx.GetLLVMContext().close()
+        } catch (e: Exception) {
+            if (failure.isNone()) { failure = Some(e) }
+        } finally {
+            try {
+                cgCtx.GetLLVMContext().close()
+            } catch (e: Exception) {
+                if (failure.isNone()) { failure = Some(e) }
+            }
+        }
+        if (let Some(e) <- failure) { throw e }
     }
 
     public func GetOrInsertCGFunction(chirValue: Value, forWrapper!: Bool = false): CGFunction {
@@ -1273,6 +1293,7 @@ public class CGModule {
                         LLVMLinkage.WeakODR
                     }
                     AddLinkageTypeMetadata(unitValue, linkage, false)
+                    unsafe { LLVMSetVisibility(unitValue, 1) } // LLVMHiddenVisibility
                 }
             }
             return unitValue

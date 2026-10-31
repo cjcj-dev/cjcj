@@ -460,11 +460,34 @@ public open class ToolChain {
         return paths
     }
 
+    protected func UsesMacroRuntimeRpath(): Bool {
+        return driverOptions.compileMacroPackage &&
+            driverOptions.target.os == OSType.LINUX && driverOptions.target.env == EnvironmentType.GNU
+    }
+
     protected func GenerateRuntimePath(tool: Tool): Unit {
-        if (!driverOptions.useRuntimeRpath && !driverOptions.sanitizerEnableRpath) {
+        let macroRuntimeRpath = UsesMacroRuntimeRpath()
+        if (!driverOptions.useRuntimeRpath && !driverOptions.sanitizerEnableRpath && !macroRuntimeRpath) {
             return
         }
         if (driverOptions.IsCrossCompiling()) {
+            return
+        }
+        if (macroRuntimeRpath) {
+            // dlopen's caller is not the dependency loader of the opened DSO.
+            // Put the search path on the actual macro producer, so its direct
+            // and transitive dependencies inherit it before host LD_LIBRARY_PATH.
+            // Use the public logical entry, just like the macro runtime consumer.
+            // This is deliberately an SDK-bound artifact. OpenMacroLibrary
+            // checks this first RPATH against the selected runtime before
+            // loading existing/cached/explicit macros. A changed SDK requires
+            // normal recompilation/relinking; copying the old SO is not that.
+            let macroRuntimePath = FileUtil.JoinPath(
+                FileUtil.GetCompilerRuntimeBasePath(driverOptions.executablePath),
+                driverOptions.GetCangjieLibHostPathName())
+            tool.AppendArg("--disable-new-dtags")
+            tool.AppendArg("-rpath")
+            tool.AppendArg(macroRuntimePath)
             return
         }
         let runtimePath = FileUtil.JoinPath(FileUtil.JoinPath(driver.cangjieHome, "runtime/lib"),

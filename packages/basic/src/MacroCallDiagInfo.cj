@@ -129,6 +129,10 @@ public class MacroCallDiagInfo {
         if (macroCallBegin.fileID != pos.fileID) {
             return pos
         }
+        // Expanded tokens are repacked onto the call line; other lines retain source positions.
+        if (!isCurFile && pos.line != macroCallBegin.line) {
+            return pos
+        }
         let key = if (isCurFile) { pos.Hash32() } else { UInt32(pos.column) }
         if (isLowerBound) {
             if (isForLSP) {
@@ -140,6 +144,9 @@ public class MacroCallDiagInfo {
                 }
             }
             if (let Some(posIt) <- new2macroCallPosMap.lowerBound(key)) {
+                if (isCurFile && Position.RestorePosFromHash(posIt[0])[0] != pos.line) {
+                    return pos
+                }
                 return getMacroCallEndPos(isCurFile, key, posIt[0], posIt[1])
             }
             return pos

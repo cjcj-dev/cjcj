@@ -100,6 +100,19 @@ public class DesugarTypeCheckingAndCasting {
         return None
     }
 
+    private func CreateNewGlobalJavaRef(javaRef: Expr, curFile: Option<File>): Option<Expr> {
+        let asObject = ilib.CreateAsJniJobjectCall(javaRef)
+        let env = ilib.CreateGetJniEnvCall(curFile)
+        if (asObject.isNone() || env.isNone()) { return None }
+        asObject.getOrThrow().curFile = curFile
+        let globalRef = ilib.CreateNewGlobalRefCall(env.getOrThrow(), asObject.getOrThrow(), false)
+        if (globalRef.isNone()) { return None }
+        if (let Some(entity) <- ilib.CreateJavaEntityJobjectCall(globalRef.getOrThrow())) {
+            return Some(entity)
+        }
+        return None
+    }
+
     private func CreateJObjectCast(jObjectVar: VarDecl, castDecl: ClassLikeDecl, castTy: Ty,
         curFile: Option<File>): Option<Expr> {
         let isInstanceCall = CreateIsInstanceCall(jObjectVar, castTy, curFile)
@@ -107,7 +120,9 @@ public class DesugarTypeCheckingAndCasting {
             return None
         }
         let javarefExpr = CreateJavaRefCall(WithinFile<RefExpr>(CreateRefExpr(jObjectVar), curFile))
-        let unwrapped = ilib.UnwrapJavaEntity(javarefExpr, castTy, castDecl)
+        let globalRef = CreateNewGlobalJavaRef(javarefExpr, curFile)
+        if (globalRef.isNone()) { return None }
+        let unwrapped = ilib.UnwrapJavaEntity(globalRef.getOrThrow(), castTy, castDecl)
         if (let None <- unwrapped) {
             return None
         }
@@ -205,7 +220,12 @@ public class DesugarTypeCheckingAndCasting {
             if (let Some(decl) <- castDecl) {
                 if (let Some(classLike) <- (decl as ClassLikeDecl)) {
                     let javarefExpr = CreateJavaRefCall(WithinFile<RefExpr>(CreateRefExpr(patternVar.decl), curFile))
-                    if (let Some(initializer) <- ilib.UnwrapJavaEntity(javarefExpr, patternVar.ty, classLike)) {
+                    let globalRef = CreateNewGlobalJavaRef(javarefExpr, curFile)
+                    if (globalRef.isNone()) {
+                        expr.EnableAttr(Attribute.IS_BROKEN)
+                        return block
+                    }
+                    if (let Some(initializer) <- ilib.UnwrapJavaEntity(globalRef.getOrThrow(), patternVar.ty, classLike)) {
                         let castedVar = WithinFile<VarDecl>(
                             CreateTmpVarDecl(Some(CreateType(classLike.GetTy().getOrThrow())), Some(initializer)), curFile)
                         castedVar.SetTy(patternVar.ty)

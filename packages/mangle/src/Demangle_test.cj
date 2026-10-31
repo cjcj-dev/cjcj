@@ -26,4 +26,29 @@ public class DemangleTest {
         let info = DemangleInfo("<init>", DemanglerTypeKind.NAME)
         @Expect(info.GetIdentifier(), "init")
     }
+
+    @TestCase
+    public func CanonicalPrimitiveAndBase62Boundaries(): Unit {
+        let half = Demangler("Dh").Demangle(isType: true)
+        @Expect(half.IsValid(), true)
+        @Expect(half.GetFullName("::"), "Float16")
+        @Expect(Demangler("D").Demangle(isType: true).IsValid(), false)
+        let tuple = Demangler("T0_iE").Demangle(isType: true)
+        @Expect(tuple.IsValid(), true)
+        @Expect(tuple.GetFullName("::"), "Tuple<Int32>")
+        let varray = Demangler("V0_i").Demangle(isType: true)
+        @Expect(varray.IsValid(), true)
+        @Expect(varray.GetFullName("::"), "VArray<Int32,$1>")
+    }
+
+    @TestCase
+    public func CanonicalTrailingSeparators(): Unit {
+        @Expect(Demangler("2a$").DemanglePackageName().pkgName, "a/")
+        let trailing = DemangleInfo("C", DemanglerTypeKind.GENERIC_CONSTRAINTS)
+        trailing.args = "a,b,"
+        @Expect(trailing.GetFullName("::"), ", C <: a &b &")
+        let control = DemangleInfo("C", DemanglerTypeKind.GENERIC_CONSTRAINTS)
+        control.args = "a,b"
+        @Expect(control.GetFullName("::"), ", C <: a &b")
+    }
 }

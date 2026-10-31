@@ -12,7 +12,7 @@ import cjcj::basic.WarnGroupIndex
 import cjcj::basic.WarningOptionMgr
 import cjcj::option.{CompileTarget, GlobalOptions, OutputMode}
 import cjcj::utils.{ANNOTATION_VAR_POSTFIX, CJC_ABORT, CJC_ASSERT, InternalError, OverflowStrategy,
-    REFLECT_PACKAGE_NAME, TaskQueue}
+    REFLECT_PACKAGE_NAME, TaskQueue, TaskResult}
 
 private let STD_CORE_FUTURE_MANGLED_NAME: String = "_CNat6Future"
 private let USER_MAIN_MANGLED_NAME: String = "user.main"
@@ -573,11 +573,12 @@ public class DeadCodeElimination {
     private func UnreachableBlockWarningReporterInParallel(pkg: Package, threadsNum: Int64,
         maybeUnreachableBlocks: HashMap<Block, Expression>): Unit {
         let taskQueue = TaskQueue(threadsNum)
+        let results = ArrayList<TaskResult<Unit>>()
         for (fn in pkg.GetGlobalFunctionsRef()) {
             if (fn.GetBody().isNone() || fn.TestAttr(Attribute.SKIP_ANALYSIS)) {
                 continue
             }
-            let _ = taskQueue.AddTask<Unit>({ =>
+            results.add(taskQueue.AddTask<Unit>({ =>
                 let isPrinted = CoreBox<Bool>(false)
                 Visitor.Visit(fn, { block: Block =>
                     if (let Some(terminator) <- maybeUnreachableBlocks.get(block)) {
@@ -587,9 +588,18 @@ public class DeadCodeElimination {
                     }
                     VisitResult.CONTINUE
                 })
-            })
+            }))
         }
         taskQueue.RunAndWaitForAllTasksCompleted()
+        var firstFailure: Option<Exception> = None
+        for (result in results) {
+            try {
+                result.get()
+            } catch (e: Exception) {
+                if (firstFailure.isNone()) { firstFailure = Some(e) }
+            }
+        }
+        if (let Some(e) <- firstFailure) { throw e }
     }
 
     public func UnreachableBlockEliminationForFunc(body: BlockGroup, isDebug!: Bool = false): Unit {

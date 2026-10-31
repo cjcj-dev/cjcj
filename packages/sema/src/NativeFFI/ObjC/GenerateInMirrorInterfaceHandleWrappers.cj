@@ -3,6 +3,7 @@ package cjcj::sema.NativeFFI.ObjC
 import cjcj::ast.*
 import cjcj::ast.AnnotationKind as AstAnnotationKind
 import cjcj::sema.MemberMap
+import std.collection.HashMap
 
 // Upstream a51ced71, NativeFFI/Utils.cpp:479-491.
 private func RebindClonedStubToSynthetic(stub: Decl, synthetic: ClassDecl): Unit {
@@ -44,6 +45,17 @@ public func GenerateMirrorInterfaceHandleWrapperAbstractMemberImplStubs(
         match (decl.astKind) {
             case ASTKind.FUNC_DECL | ASTKind.PROP_DECL => GenerateHandleWrapperClassStub(handleWrapper, decl)
             case _ => continue
+        }
+    }
+}
+
+// canonical 65ae772: consume the map before inheritance checker destruction.
+public func GenerateObjCForeignAbstractStub(memberMap: HashMap<InheritableDecl, MemberMap>): Unit {
+    for ((decl, members) in memberMap) {
+        if (let Some(wrapper) <- (decl as ClassDecl)) {
+            if (IsObjCMirrorInterfaceHandleWrapper(wrapper)) {
+                GenerateMirrorInterfaceHandleWrapperAbstractMemberImplStubs(wrapper, members)
+            }
         }
     }
 }

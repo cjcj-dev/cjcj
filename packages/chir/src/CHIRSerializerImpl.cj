@@ -385,6 +385,11 @@ private func IntrinsicKindToPackageIntrinsicKind(kind: IntrinsicKind): UInt16 {
         case IntrinsicKind.IS_SUBTYPE_TYPES => 360u16
         case IntrinsicKind.EXCLUSIVE_SCOPE => 361u16
         case IntrinsicKind.CANONICALIZE_STRING_BACKING => 362u16
+        case IntrinsicKind.REFERENCE_INVOKE_FINALIZE => 363u16
+        case IntrinsicKind.REFERENCE_WAIT_PENDING => 364u16
+        case IntrinsicKind.REFERENCE_RUNTIME_RUNNING => 365u16
+        case IntrinsicKind.REFERENCE_NANO_TIME => 366u16
+        case IntrinsicKind.REGISTER_FINALIZER => 367u16
 
     }
 }
@@ -1533,7 +1538,7 @@ class CHIRSerializerImpl {
             Some(valueKind), Some(allValue), Some(exprKind), Some(allExpression), Some(defKind),
             Some(allCustomTypeDef), packageInitFunc, ToCHIRPhaseIndex(phase), packageLiteralInitFunc)
         try {
-            builder.Finish(serializedPackage)
+            builder.Finish(serializedPackage, CONSTRUCTOR_ABI_CHIR_IDENTIFIER)
             WriteFlatBufferToFile(filename, builder.GetBufferPointer(), builder.GetSize())
         } catch (_: Exception) {
             CJC_ASSERT(false)
@@ -1546,7 +1551,7 @@ class CHIRSerializerImpl {
             UInt8(AccessLevelIndex(chirPackage.GetPackageAccessLevel())), Some(typeKind), Some(allType),
             Some(valueKind), Some(allValue), Some(exprKind), Some(allExpression), Some(defKind),
             Some(allCustomTypeDef), packageInitFunc, ToCHIRPhaseIndex(ToCHIRPhase.RAW), packageLiteralInitFunc)
-        builder.Finish(serializedPackage)
+        builder.Finish(serializedPackage, CONSTRUCTOR_ABI_CHIR_IDENTIFIER)
         return builder.Release()
     }
 

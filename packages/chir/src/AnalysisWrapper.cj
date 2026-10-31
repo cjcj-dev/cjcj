@@ -101,11 +101,19 @@ public class AnalysisWrapper<TAnalysis, TDomain> where TDomain <: AbstractDomain
 
         taskQueue.RunAndWaitForAllTasksCompleted()
 
+        let completed = ArrayList<Results<TDomain>>()
+        var firstFailure: Option<Exception> = None
         for (taskResult in results) {
-            if (let Some(result) <- taskResult.get()) {
-                if (!resultsMap.contains(result.functionValue)) {
-                    resultsMap[result.functionValue] = Some(result)
-                }
+            try {
+                if (let Some(result) <- taskResult.get()) { completed.add(result) }
+            } catch (e: Exception) {
+                if (firstFailure.isNone()) { firstFailure = Some(e) }
+            }
+        }
+        if (let Some(e) <- firstFailure) { throw e }
+        for (result in completed) {
+            if (!resultsMap.contains(result.functionValue)) {
+                resultsMap[result.functionValue] = Some(result)
             }
         }
     }

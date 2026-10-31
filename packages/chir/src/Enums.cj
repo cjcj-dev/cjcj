@@ -165,8 +165,8 @@ public enum Attribute {
     | MUT | FINAL | OPERATOR | READONLY | CONST | IMPORTED | GENERIC_INSTANTIATED
     | NO_DEBUG_INFO | GENERIC | INTERNAL | COMPILER_ADD | NO_REFLECT_INFO | NO_INLINE
     | NON_RECOMPILE | UNREACHABLE | NO_SIDE_EFFECT | COMMON | SPECIFIC | SKIP_ANALYSIS
-    | DESERIALIZED | INITIALIZER | UNSAFE | JAVA_MIRROR | JAVA_IMPL | OBJ_C_MIRROR
-    | HAS_INITED_FIELD | JAVA_HAS_DEFAULT | PREVIOUSLY_DESERIALIZED | DOES_NOT_THROW | OBJ_C_IMPL | MATCH_PATTERN | PLUGIN_ADDED
+    | DESERIALIZED | INITIALIZER | UNSAFE | JAVA_FOREIGN | JAVA_EXPORT | OBJ_C_FOREIGN
+    | HAS_INITED_FIELD | JAVA_HAS_DEFAULT | PREVIOUSLY_DESERIALIZED | DOES_NOT_THROW | OBJ_C_EXPORT | MATCH_PATTERN | PLUGIN_ADDED
     | FAST_NATIVE
     // FEATURE_DEBT(CJCJ_RUNTIME_SPEC §3.2/§7): selfhost-only extension domain;
     // upstream CHIR AttributeInfo.h still ends its C++ attribute domain at 39.
@@ -207,14 +207,14 @@ public func AttributeIndex(attr: Attribute): Int64 {
         case Attribute.DESERIALIZED => 29
         case Attribute.INITIALIZER => 30
         case Attribute.UNSAFE => 31
-        case Attribute.JAVA_MIRROR => 32
-        case Attribute.JAVA_IMPL => 33
-        case Attribute.OBJ_C_MIRROR => 34
+        case Attribute.JAVA_FOREIGN => 32
+        case Attribute.JAVA_EXPORT => 33
+        case Attribute.OBJ_C_FOREIGN => 34
         case Attribute.HAS_INITED_FIELD => 35
         case Attribute.JAVA_HAS_DEFAULT => 36
         case Attribute.PREVIOUSLY_DESERIALIZED => 37
         case Attribute.DOES_NOT_THROW => 38
-        case Attribute.OBJ_C_IMPL => 39
+        case Attribute.OBJ_C_EXPORT => 39
         case Attribute.MATCH_PATTERN => 40
         case Attribute.PLUGIN_ADDED => 41
         case Attribute.FAST_NATIVE => 71
@@ -243,16 +243,16 @@ public func AttributeName(attr: Attribute): String {
         case Attribute.INITIALIZER => "initializer"
         case Attribute.INTERNAL => "internal"
         case Attribute.JAVA_HAS_DEFAULT => "javaHasDefault"
-        case Attribute.JAVA_IMPL => "javaImpl"
-        case Attribute.JAVA_MIRROR => "javaMirror"
+        case Attribute.JAVA_EXPORT => "javaImpl"
+        case Attribute.JAVA_FOREIGN => "javaMirror"
         case Attribute.MUT => "mut"
         case Attribute.NO_DEBUG_INFO => "noDebugInfo"
         case Attribute.NO_INLINE => "noInline"
         case Attribute.NO_REFLECT_INFO => "noReflectInfo"
         case Attribute.NO_SIDE_EFFECT => "noSideEffect"
         case Attribute.NON_RECOMPILE => "nonRecompile"
-        case Attribute.OBJ_C_MIRROR => "objCMirror"
-        case Attribute.OBJ_C_IMPL => "objCImpl"
+        case Attribute.OBJ_C_FOREIGN => "objCMirror"
+        case Attribute.OBJ_C_EXPORT => "objCImpl"
         case Attribute.MATCH_PATTERN => "matchPattern"
         case Attribute.PLUGIN_ADDED => "pluginAdded"
         case Attribute.OPERATOR => "operator"

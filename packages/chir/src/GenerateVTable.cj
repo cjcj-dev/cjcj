@@ -5,7 +5,7 @@ import std.sort.*
 import cjcj::basic.Linkage as BasicLinkage
 import cjcj::incremental_compilation.{CompilationCache, IncreKind, VirtualWrapperDepMap}
 import cjcj::option.{GlobalOptions, OSType}
-import cjcj::utils.{CJC_ASSERT, CJC_ABORT, OverflowStrategy, ProfileRecorder, TaskQueue}
+import cjcj::utils.{CJC_ASSERT, CJC_ABORT, OverflowStrategy, ProfileRecorder, TaskQueue, TaskResult}
 
 private let OVERFLOW_OPERATOR_NAMES: Array<String> = ["+", "-", "*", "/"]
 private let SPLIT_OPERATOR_NAME_PREFIX: Array<String> = ["&", "~", "%"]
@@ -1529,16 +1529,26 @@ public class GenerateVTable {
             } else {
                 let taskQueue = TaskQueue(Int64(threadNum))
                 let vtableGeneratorList = ArrayList<VTableGenerator>()
+                let results = ArrayList<TaskResult<Unit>>()
                 for (customDef in candidateDefs) {
                     let vtableGenerator = VTableGenerator(builder)
                     vtableGeneratorList.add(vtableGenerator)
-                    { generatorPtr: VTableGenerator, customDefPtr: CustomTypeDef =>
-                        taskQueue.AddTask<Unit>({ =>
-                            generatorPtr.GenerateVTable(customDefPtr)
-                        })
-                    }(vtableGenerator, customDef)
+                    let generatorPtr = vtableGenerator
+                    let customDefPtr = customDef
+                    results.add(taskQueue.AddTask<Unit>({ =>
+                        generatorPtr.GenerateVTable(customDefPtr)
+                    }))
                 }
                 taskQueue.RunAndWaitForAllTasksCompleted()
+                var firstFailure: Option<Exception> = None
+                for (result in results) {
+                    try {
+                        result.get()
+                    } catch (e: Exception) {
+                        if (firstFailure.isNone()) { firstFailure = Some(e) }
+                    }
+                }
+                if (let Some(e) <- firstFailure) { throw e }
             }
             // Function instances are shared between definitions. Replay attribute snapshots
             // in candidate order only after all workers have finished reading them.

@@ -10,14 +10,11 @@ public class GenerateJavaMirrorApiStub {
     private let typeManager: TypeManager
     private let ilib: InteropLibBridge
     private let utils: Utils
-    private let memberMap: HashMap<InheritableDecl, MemberMap>
 
-    public init(typeManager: TypeManager, ilib: InteropLibBridge, utils: Utils,
-        memberMap: HashMap<InheritableDecl, MemberMap>) {
+    public init(typeManager: TypeManager, ilib: InteropLibBridge, utils: Utils) {
         this.typeManager = typeManager
         this.ilib = ilib
         this.utils = utils
-        this.memberMap = memberMap
     }
 
     private func CreateWrappingConstructorStub(mirror: ClassDecl): FuncDecl {
@@ -108,28 +105,6 @@ public class GenerateJavaMirrorApiStub {
         mirror.body.getOrThrow().decls.add(fd)
     }
 
-    private func InsertSyntheticAbstractWrapperMethodStubs(wrapper: ClassDecl): Unit {
-        if (let Some(map) <- memberMap.get(wrapper)) {
-        for (entry in map.entries) {
-            if (let Some(decl) <- entry.signature.decl) {
-                if (let Some(fd) <- (decl as FuncDecl)) {
-                    if (!fd.TestAttr(Attribute.ABSTRACT)) {
-                        continue
-                    }
-                    if (let Some(cloned) <- (ASTCloner.Clone(fd) as FuncDecl)) {
-                        cloned.DisableAttr(Attribute.ABSTRACT)
-                        cloned.outerDecl = Some(wrapper)
-                        cloned.funcBody.getOrThrow().parentClassLike = Some(wrapper)
-                        cloned.curFile = wrapper.curFile
-                        cloned.fullPackageName = wrapper.fullPackageName
-                        wrapper.body.getOrThrow().decls.add(cloned)
-                    }
-                }
-            }
-        }
-        }
-    }
-
     public func Process(ctx: AfterTypeCheckContext): Unit {
         for (mirror in ctx.GetJavaMirrors()) {
             if (mirror.TestAttr(Attribute.IS_BROKEN)) {
@@ -141,9 +116,6 @@ public class GenerateJavaMirrorApiStub {
                     if (mirrorClass == jstring) {
                         InsertJStringOfStringConstructor(mirrorClass)
                     }
-                }
-                if (IsSynthetic(mirrorClass)) {
-                    InsertSyntheticAbstractWrapperMethodStubs(mirrorClass)
                 }
             } else if (let Some(mirrorInterface) <- (mirror as InterfaceDecl)) {
                 InsertAbstractJavaReferenceGetterStub(mirrorInterface)

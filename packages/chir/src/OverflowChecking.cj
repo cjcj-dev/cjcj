@@ -231,7 +231,9 @@ private func IsSignedModOverflow(x: Int64, y: Int64, width: Int64): IntOverflowR
     }
     let minValue = SignedMin(width)
     if (x == minValue && y == -1) {
-        return IntOverflowResult(true, 0)
+        // canonical 2a5ac6dc: the remainder is representable under every strategy.
+        // Keep MIN / -1's separate overflow rule in IsSignedDivOverflow.
+        return IntOverflowResult(false, 0)
     }
     return IntOverflowResult(false, x % y)
 }

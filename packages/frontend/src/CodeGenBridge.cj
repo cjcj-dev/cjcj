@@ -29,7 +29,6 @@ import cjcj::chir.Devirtualization as ChirDevirtualization
 import cjcj::chir.ReturnTypeMapCollector
 import cjcj::chir.ConstMemberVarCollector
 import cjcj::chir.DevirtualizationInfo
-import cjcj::chir.DevirtualizeTrivialStatics
 import cjcj::chir.ExprKind as ChirExprKind
 import cjcj::chir.FaithfulAST2CHIR
 import cjcj::chir.FuncCallContext as ChirFuncCallContext
@@ -372,8 +371,7 @@ private class ToCHIR {
         let lowered = chirPkg.getOrThrow()
         // C++: CHIR/CHIR.cpp:1133-1140 ToCHIR::Run.
         if (instance.invocation.globalOptions.outputMode == OutputMode.CHIR) {
-            let fileName = FileUtil.JoinPath(outputPath, lowered.GetName()) + CHIR_SERIALIZATION_FILE_EXTENSION
-            CHIRSerializer.Serialize(lowered, fileName, ToCHIRPhase.RAW)
+            EmitCHIR(outputPath, lowered, ToCHIRPhase.RAW, instance.invocation.globalOptions.NeedDumpCHIR())
             return Some(lowered)
         }
         var pluginPackage = lowered
@@ -734,8 +732,6 @@ private class ToCHIR {
                     })
             }
             devirt.RunOnFuncs(funcs)
-            let devirtStatics = DevirtualizeTrivialStatics()
-            devirtStatics.RunOnPackage(currentPackage, builder, options.chirDebugOptimizer)
             if (!devirt.GetFrozenInstFuns().isEmpty()) {
                 let frozenFuncs = devirt.GetFrozenInstFuns()
                 for (fn in frozenFuncs) {
@@ -771,9 +767,15 @@ private class ToCHIR {
         }
         builderTaskQueue.RunAndWaitForAllTasksCompleted()
         let builderList = ArrayList<ChirBuilder>()
+        var firstFailure: Option<Exception> = None
         for (result in results) {
-            builderList.add(result.get())
+            try {
+                builderList.add(result.get())
+            } catch (e: Exception) {
+                if (firstFailure.isNone()) { firstFailure = Some(e) }
+            }
         }
+        if (let Some(e) <- firstFailure) { throw e }
         return builderList
     }
 
@@ -809,18 +811,20 @@ private class ToCHIR {
                 let builderList = ConstructSubBuilders(threadNum, funcNum)
                 let taskQueue = TaskQueue(threadNum)
                 let propagationList = ArrayList<RangePropagation>()
+                let results = ArrayList<TaskResult<Unit>>()
                 var index: Int64 = 0
                 while (index < funcNum) {
                     let funcValue = globalFuncs[index]
                     let rangePropagation = RangePropagation(builderList[index], rangeAnalysisWrapper,
                         instance.diag.AsBasicDiagnosticEngine(), options.enIncrementalCompilation)
-                    let _ = taskQueue.AddTask<Unit>({ =>
+                    results.add(taskQueue.AddTask<Unit>({ =>
                         rangePropagation.RunOnFunc(funcValue, options.chirDebugOptimizer)
-                    })
+                    }))
                     propagationList.add(rangePropagation)
                     index++
                 }
                 taskQueue.RunAndWaitForAllTasksCompleted()
+                ConsumeCHIRPassResults(results)
                 for (rangePropagation in propagationList) {
                     MergeEffectMap(rangePropagation.GetEffectMap(), effectMap)
                     dce.UnreachableBlockElimination(rangePropagation.GetFuncsNeedRemoveBlocks(),
@@ -1105,9 +1109,15 @@ private func ConstructSubBuilders(builder: ChirBuilder, threadNum: Int64,
     }
     builderTaskQueue.RunAndWaitForAllTasksCompleted()
     let builderList = ArrayList<ChirBuilder>()
+    var firstFailure: Option<Exception> = None
     for (result in results) {
-        builderList.add(result.get())
+        try {
+            builderList.add(result.get())
+        } catch (e: Exception) {
+            if (firstFailure.isNone()) { firstFailure = Some(e) }
+        }
     }
+    if (let Some(e) <- firstFailure) { throw e }
     return builderList
 }
 
@@ -1128,17 +1138,19 @@ private func RunConstantPropagation(pkg: RealCHIRPackage, builder: ChirBuilder, 
         let builderList = ConstructSubBuilders(builder, threadNum, funcNum)
         let taskQueue = TaskQueue(threadNum)
         let cpList = ArrayList<ConstPropagation>()
+        let results = ArrayList<TaskResult<Unit>>()
         var index: Int64 = 0
         while (index < funcNum) {
             let funcValue = globalFuncs[index]
             let cp = ConstPropagation(builder: Some(builderList[index]), wrapper: wrapper, opts: options)
-            let _ = taskQueue.AddTask<Unit>({ =>
+            results.add(taskQueue.AddTask<Unit>({ =>
                 cp.RunOnFunc(funcValue, isDebug: options.chirDebugOptimizer, isCJLint: false)
-            })
+            }))
             cpList.add(cp)
             index++
         }
         taskQueue.RunAndWaitForAllTasksCompleted()
+        ConsumeCHIRPassResults(results)
         for (cp in cpList) {
             MergeEffectMap(cp.GetEffectMap(), effectMap)
             dce.UnreachableBlockElimination(cp.GetFuncsNeedRemoveBlocks(),
@@ -1149,6 +1161,20 @@ private func RunConstantPropagation(pkg: RealCHIRPackage, builder: ChirBuilder, 
         }
         builder.context.MergeTypes()
     }
+}
+
+// Workers are joined by each caller. On failure, do not merge partial pass
+// effects or start the next phase; the compiler owner releases its CHIR graph.
+private func ConsumeCHIRPassResults(results: ArrayList<TaskResult<Unit>>): Unit {
+    var firstFailure: Option<Exception> = None
+    for (result in results) {
+        try {
+            result.get()
+        } catch (e: Exception) {
+            if (firstFailure.isNone()) { firstFailure = Some(e) }
+        }
+    }
+    if (let Some(e) <- firstFailure) { throw e }
 }
 
 private func RunVarInitChecking(pkg: RealCHIRPackage, diag: BasicDiagnosticEngine, jobs: UInt64): Bool {
@@ -1187,12 +1213,29 @@ public func GenPackageModules(instance: CompilerInstance, enableIncrement: Bool,
     noWriteBarrierRecChecker.RunOnPackage(realPackage)
     let packageModules = CodegenGenPackageModules(codegenData, codegenOptions, enableIncrement,
         noHeapAllocChecker, noWriteBarrierRecChecker, cachedMangleMap: cachedMangleMap)
-    if (instance.diag.GetErrorCount() != 0) {
-        instance.diag.EmitCategoryDiagnostics(DiagCategory.CHIR)
-        ClearPackageModules(packageModules)
-        return llvmModules
+    var transferred = false
+    var failed = false
+    try {
+        if (instance.diag.GetErrorCount() != 0) {
+            instance.diag.EmitCategoryDiagnostics(DiagCategory.CHIR)
+            return llvmModules
+        }
+        transferred = true
+        return packageModules
+    } catch (e: Exception) {
+        failed = true
+        throw e
+    } finally {
+        // Until return transfers the array to Emit, this scope owns it even
+        // when diagnostic emission throws. Never mask that first exception.
+        if (!transferred) {
+            try {
+                ClearPackageModules(packageModules)
+            } catch (e: Exception) {
+                if (!failed) { throw e }
+            }
+        }
     }
-    return packageModules
 }
 
 // C++: FrontendTool/DefaultCompilerInstance.cpp:252-299.
@@ -1204,61 +1247,101 @@ public func EmitLLVMSimilarBytecode(instance: CompilerInstance, enableIncrement:
     }
     let fullPackageName = curPackage.getOrThrow().GetName()
     let llvmModules = GenPackageModules(instance, enableIncrement, cachedMangleMap)
-    if (instance.diag.GetErrorCount() != 0) {
-        ClearPackageModules(llvmModules)
-        return false
-    }
-
-    let recorder = ProfileRecorder("CodeGen", "Save bc file")
-    instance.invocation.globalOptions.UpdateCachedDirName(fullPackageName)
-    if (llvmModules.size == 1) {
-        let filePath = GenerateBCFilePathAndUpdateToInvocation(
-            instance.invocation.globalOptions, TempFileKind.T_BC, fullPackageName, "")
-        if (filePath.isEmpty()) {
-            ClearPackageModules(llvmModules)
-            recorder.close()
+    var failed = false
+    // This scope owns every generated module, including diagnostic, path and
+    // native-writer exception exits. The recorder is closed during unwinding
+    // before module disposal, so either cleanup is independent of the other.
+    try {
+        if (instance.diag.GetErrorCount() != 0) {
             return false
         }
-        let _ = SavePackageModule(llvmModules[0], filePath)
-    } else {
-        let taskQueueSaveBitcode = TaskQueue(llvmModules.size)
-        let allBCFilePath = ArrayList<String>()
-        var index: Int64 = 0
-        while (index < llvmModules.size) {
-            let filePath = GenerateBCFilePathAndUpdateToInvocation(instance.invocation.globalOptions,
-                TempFileKind.T_BC, fullPackageName, index.toString())
-            if (filePath.isEmpty()) {
-                ClearPackageModules(llvmModules)
-                recorder.close()
+        let recorder = ProfileRecorder("CodeGen", "Save bc file")
+        try {
+            instance.invocation.globalOptions.UpdateCachedDirName(fullPackageName)
+            let allBCFilePath = ArrayList<String>()
+            for (index in 0..llvmModules.size) {
+                let suffix = if (llvmModules.size == 1) { "" } else { index.toString() }
+                let filePath = GenerateBCFilePathAndUpdateToInvocation(
+                    instance.invocation.globalOptions, TempFileKind.T_BC, fullPackageName, suffix)
+                if (filePath.isEmpty()) {
+                    return false
+                }
+                allBCFilePath.add(filePath)
+            }
+            let saved = SaveGeneratedBitcode(llvmModules, allBCFilePath)
+            if (!saved) {
                 return false
             }
-            allBCFilePath.add(filePath)
-            index++
-        }
-        index = 0
-        while (index < llvmModules.size) {
-            let module = llvmModules[index]
-            let bcFilePath = allBCFilePath[index]
-            let _ = taskQueueSaveBitcode.AddTask<Unit>({ =>
-                let _ = SavePackageModule(module, bcFilePath)
-            })
-            index++
-        }
-        taskQueueSaveBitcode.RunAndWaitForAllTasksCompleted()
-    }
-    ClearPackageModules(llvmModules)
 
-    if (instance.invocation.globalOptions.enIncrementalCompilation) {
-        let fileName = GenerateFileName(instance.invocation.globalOptions, fullPackageName, "")
-        if (instance.GetAllCHIRPackages().size > 1) {
-            instance.cachedInfo.bitcodeFilesName.add(fileName)
-        } else {
-            instance.cachedInfo.bitcodeFilesName.clear()
-            instance.cachedInfo.bitcodeFilesName.add(fileName)
+            if (instance.invocation.globalOptions.enIncrementalCompilation) {
+                let fileName = GenerateFileName(instance.invocation.globalOptions, fullPackageName, "")
+                if (instance.GetAllCHIRPackages().size > 1) {
+                    instance.cachedInfo.bitcodeFilesName.add(fileName)
+                } else {
+                    instance.cachedInfo.bitcodeFilesName.clear()
+                    instance.cachedInfo.bitcodeFilesName.add(fileName)
+                }
+            }
+            return true
+        } finally {
+            recorder.close()
+        }
+    } catch (e: Exception) {
+        failed = true
+        throw e
+    } finally {
+        try {
+            ClearPackageModules(llvmModules)
+        } catch (e: Exception) {
+            if (!failed) { throw e }
         }
     }
-    recorder.close()
-    return true
+}
+
+// Consume every native writer result before publishing successful codegen/cache state.
+// The worker queue joins execution; its join alone does not consume TaskResult failures.
+func SaveGeneratedBitcode(modules: ArrayList<LLVMModuleHandle>, paths: ArrayList<String>): Bool {
+    CJC_ASSERT(modules.size == paths.size)
+    let writeModule = { module: LLVMModuleHandle, path: String =>
+        let saved = SavePackageModule(module, path)
+        if (!saved) {
+            eprintln("error: failed to write LLVM bitcode file: " + path)
+        }
+        saved
+    }
+    if (modules.size == 1) {
+        return writeModule(modules[0], paths[0])
+    }
+    let queue = TaskQueue(modules.size)
+    let results = ArrayList<TaskResult<Bool>>()
+    for (index in 0..modules.size) {
+        let module = modules[index]
+        let path = paths[index]
+        results.add(queue.AddTask<Bool>({ => writeModule(module, path) }))
+    }
+    queue.RunAndWaitForAllTasksCompleted()
+    return CollectBitcodeWriteResults(results)
+}
+
+// All workers have joined before result consumption. Retain the first exception
+// while draining every result, then propagate it with its original type/message.
+func CollectBitcodeWriteResults(results: ArrayList<TaskResult<Bool>>): Bool {
+    var saved = true
+    var firstFailure: Option<Exception> = None
+    for (result in results) {
+        try {
+            let moduleSaved = result.get()
+            saved = moduleSaved && saved
+        } catch (e: Exception) {
+            if (let None <- firstFailure) {
+                firstFailure = Some(e)
+            }
+        }
+    }
+    if (let Some(failure) <- firstFailure) {
+        throw failure
+    }
+    return saved
 }
 
 public func ConvertFrontendOptionsToCodegenOptions(options: GlobalOptions): GlobalOptions {

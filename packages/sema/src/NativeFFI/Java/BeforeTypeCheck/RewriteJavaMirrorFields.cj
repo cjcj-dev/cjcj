@@ -10,7 +10,7 @@ public class RewriteJavaMirrorFields <: PreTypeCheckStage {
     public func Process(ctx: PreTypeCheckContext): Unit {
         for (mirror in ctx.javaMirrors) {
             if (let Some(mirrorClass) <- (mirror as ClassDecl)) {
-                InsertMirrorVarProp(mirrorClass, Attribute.JAVA_MIRROR)
+                InsertMirrorVarProp(mirrorClass, Attribute.JAVA_FOREIGN)
             }
         }
     }

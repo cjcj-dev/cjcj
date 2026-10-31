@@ -911,5 +911,110 @@
     "file": "build/test/hle-c-bindings.integration.mjs",
     "executor": "manual",
     "reason": "Requires actual public HLE install with fixed Node/npm/cjbind, a compatible read-only Cangjie SDK and system C compiler. Run with prefix/sdk/fresh evidence arguments; covers default and explicit generator, directory input, child failures, real generated bindings linked to C and execution. Package relocation is driven by the production lane; no downloads or fixture generator."
+  },
+  {
+    "file": "packages/codegen/src/ResetFailureSignature_test.cj",
+    "executor": "cjpm",
+    "member": "packages/codegen"
+  },
+  {
+    "file": "packages/compiler_unittest/src/ASTContextLookup_test.cj",
+    "executor": "cjpm",
+    "member": "packages/compiler_unittest"
+  },
+  {
+    "file": "packages/driver/src/WindowsEntry_test.cj",
+    "executor": "cjpm",
+    "member": "packages/driver"
+  },
+  {
+    "file": "packages/frontend/src/BitcodeWriteFailure_test.cj",
+    "executor": "cjpm",
+    "member": "packages/frontend"
+  },
+  {
+    "file": "packages/macro/src/RuntimeParamABI_test.cj",
+    "executor": "cjpm",
+    "member": "packages/macro"
+  },
+  {
+    "file": "build/test/platform-link-options.test.mjs",
+    "executor": "zx",
+    "args": []
+  },
+  {
+    "file": "packages/basic/src/MacroCallDiagInfo_test.cj",
+    "executor": "cjpm",
+    "member": "packages/basic"
+  },
+  {
+    "file": "packages/chir/src/CapturedConstructorReturn_test.cj",
+    "executor": "cjpm",
+    "member": "packages/chir"
+  },
+  {
+    "file": "packages/chir/src/ConstructorReceiver_test.cj",
+    "executor": "cjpm",
+    "member": "packages/chir"
+  },
+  {
+    "file": "packages/chir/src/RedundantFutureRemoval_test.cj",
+    "executor": "cjpm",
+    "member": "packages/chir"
+  },
+  {
+    "file": "packages/chir/src/SignedMinRemainder_test.cj",
+    "executor": "cjpm",
+    "member": "packages/chir"
+  },
+  {
+    "file": "packages/compiler_unittest/src/ConstructorReceiver_test.cj",
+    "executor": "cjpm",
+    "member": "packages/compiler_unittest"
+  },
+  {
+    "file": "packages/parse/src/InteropAnnotation_test.cj",
+    "executor": "cjpm",
+    "member": "packages/parse"
+  },
+  {
+    "file": "ci/test-atomic-option-reference.mjs",
+    "executor": "manual",
+    "reason": "Real CLI with candidate compiler and normally rebuilt paired std.sync; requires isolated work and separate host/target loader paths. Runs three cases with ten reached assertions; no skip path."
+  },
+  {
+    "file": "packages/compiler_unittest/src/CatchUnitAny_test.cj",
+    "executor": "cjpm",
+    "member": "packages/compiler_unittest"
+  },
+  {
+    "file": "ci/test-catch-unit-any.mjs",
+    "executor": "manual",
+    "reason": "Real CLI catch Unit/empty to Any, non-Unit/Nothing/finally controls. Requires paired target std.core and isolated work; no skip path."
+  },
+  {
+    "file": "ci/test-ref-struct-owner.mjs",
+    "executor": "manual",
+    "reason": "Real CLI pre-opt call emission and native heap/global/local/forwarded/exception/tuple controls; paired compiler, target std.core and llvm-dis required, no skip."
+  },
+  {
+    "file": "packages/codegen/src/AggregateArgumentOwner_test.cj",
+    "executor": "cjpm",
+    "member": "packages/codegen"
+  },
+  {
+    "file": "ci/test-temp-file-ownership.mjs",
+    "executor": "manual",
+    "reason": "Linux real TempFileManager consumer built from selected option package; native mkdir interposition creates a separate-process contender after exists, verifies EEXIST/retry, normal cleanup and foreign sentinel protection. Requires paired host closure and a new owned output root; old precise cut returns 2, no skip."
+  },
+  {
+    "file": "ci/test-macro-runtime-binding.mjs",
+    "executor": "manual",
+    "reason": "Requires matching LLVM development prefix and an empty private work directory; compiles the production ELF RPATH admission helper and real native shared objects. Does not replace public CJ macro relocation/relink and ir2 paired gates."
+  },
+  {
+    "file": "ci/test-macro-binding-paths.mjs",
+    "executor": "manual",
+    "reason": "Linux M1 R1/R2 real driver and borrowed RuntimeInit/OpenMacroLibrary control. Build tests/macro_binding_paths/Main.cj with the selected driver/macro packages and their actual normal H dependency closure. Arguments: consumer ELF, product binding checker, selected runtime directory, empty private work, red|fixed. Runs each arm once; red expects original assertions 2/3, fixed expects 0, stale-first and ordinary controls remain. Not public CJ/owned-R/ir2 qualification."
   }
 ]

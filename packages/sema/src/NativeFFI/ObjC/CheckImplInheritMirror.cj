@@ -31,7 +31,7 @@ public class CheckImplInheritMirror <: Handler<TypeCheckContext> {
             }
         }
 
-        if (IsObjCMirrorSubtype(targetTy)) {
+        if (IsValidObjCMirrorSubtype(targetTy)) {
             return
         }
 

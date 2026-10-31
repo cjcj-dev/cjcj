@@ -1,7 +1,9 @@
 package cjcj::modules
 
 // cangjie_compiler@12883f2b include/cangjie/Modules/CjoVersion.h:151-155.
-public const CJO_MAJOR_VERSION: UInt8 = 0u8
+// ABI 1: managed class constructors return the current receiver. Old CJO
+// declarations imply Unit/void constructors and must not be mixed with this ABI.
+public const CJO_MAJOR_VERSION: UInt8 = 1u8
 public const CJO_MINOR_VERSION: UInt8 = 1u8
 public const CJO_PATCH_VERSION: UInt8 = 0u8
 

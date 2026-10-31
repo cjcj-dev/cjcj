@@ -91,7 +91,15 @@ public class CGClassType <: CGCustomType {
         let classDef = (chirType as ClassType).getOrThrow().GetClassDef()
         if (let Some(rawTypeInfo) <- typeInfo) {
             if (IsCoreFutureClass(classDef) || IsSyncRelatedClass(classDef)) {
-                addAttribute(rawTypeInfo, classDef.GetSrcCodeIdentifier())
+                // Keep the existing backend layout attributes while moving
+                // their language carriers into the foundational package.
+                let name = classDef.GetSrcCodeIdentifier()
+                let layout = match (name) {
+                    case "ReferenceMutex" => "Mutex"
+                    case "ReferenceMonitor" => "Monitor"
+                    case _ => name
+                }
+                addAttribute(rawTypeInfo, layout)
             }
             if (classDef.GetFinalizer().isSome()) {
                 addAttribute(rawTypeInfo, GC_FINALIZER_ATTR)

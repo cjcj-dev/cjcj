@@ -29,13 +29,13 @@ public class BeforeTypeCheckASTTransformer {
         if (impl.IsOpen()) {
             regComp.EnableAttr(Attribute.OPEN)
         }
-        regComp.EnableAttr(Attribute.OBJ_C_IMPL_REGISTRY_COMPANION)
+        regComp.EnableAttr(Attribute.OBJ_C_EXPORT_REGISTRY_COMPANION)
         regComp.identifier = SrcIdentifier(NameGenerator.GenerateRegistryCompanionName(impl))
     }
 
     public func TransformToHandleWrapper(handleWrapper: ClassDecl, mirror: ClassLikeDecl): Unit {
         CloneVisibilityAttribute(mirror, handleWrapper)
-        handleWrapper.EnableAttr(Attribute.OBJ_C_MIRROR_INTERFACE_HANDLE_WRAPPER)
+        handleWrapper.EnableAttr(Attribute.OBJ_C_FOREIGN_INTERFACE_HANDLE_WRAPPER)
         handleWrapper.identifier = SrcIdentifier(NameGenerator.GenerateHandleWrapperName(mirror))
         handleWrapper.inheritedTypes.add(CreateRefType(mirror))
     }
@@ -88,12 +88,12 @@ public class WarmupContext <: Handler<PrepareTypeCheckContext> {
                     continue
                 }
                 if (let Some(mirror) <- (decl as ClassLikeDecl)) {
-                    if (mirror.TestAttr(Attribute.OBJ_C_MIRROR)) {
+                    if (mirror.TestAttr(Attribute.OBJ_C_FOREIGN)) {
                         ctx.mirrors.add(mirror)
                     }
                 }
                 if (let Some(impl) <- (decl as ClassDecl)) {
-                    if (impl.TestAttr(Attribute.OBJ_C_IMPL)) {
+                    if (impl.TestAttr(Attribute.OBJ_C_EXPORT)) {
                         ctx.impls.add(impl)
                     }
                 }
@@ -106,7 +106,7 @@ public class ReplaceFieldsWithProps <: Handler<PrepareTypeCheckContext> {
     public func HandleImpl(ctx: PrepareTypeCheckContext): Unit {
         for (mirror in ctx.mirrors) {
             if (let Some(cd) <- (mirror as ClassDecl)) {
-                InsertMirrorVarProp(cd, Attribute.OBJ_C_MIRROR)
+                InsertMirrorVarProp(cd, Attribute.OBJ_C_FOREIGN)
             }
         }
     }

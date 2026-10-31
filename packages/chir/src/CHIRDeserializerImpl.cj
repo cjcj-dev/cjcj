@@ -233,12 +233,8 @@ class CHIRDeserializerImpl {
 
     public func DeserializePackage(text: String): Package {
         let lines = text.split("\n")
-        if (lines.isEmpty()) {
-            return builder.CreatePackage("<deserialized>")
-        }
-        if (lines[0] != CHIR_TEXT_HEADER_V2) {
-            let name = if (text.startsWith("package ")) { text[8..].split("\n")[0] } else { "<deserialized>" }
-            return builder.CreatePackage(name)
+        if (lines.isEmpty() || lines[0] != CHIR_TEXT_HEADER_V2) {
+            throw IllegalArgumentException("CHIR text constructor ABI mismatch: rebuild for CR01")
         }
         parseRecords(lines)
         let pkg = createPackage()
@@ -2207,7 +2203,6 @@ class CHIRDeserializerImpl {
                 CJC_ASSERT(operands.size == 1)
                 return builder.CreateUnBoxToRef(resultTy.getOrThrow(), operands[0], owner)
             case ExprKind.VARRAY =>
-                CJC_ASSERT(!operands.isEmpty())
                 return builder.CreateVArray(resultTy.getOrThrow(), operands, owner)
             case ExprKind.VARRAY_BUILDER =>
                 CJC_ASSERT(operands.size == 3)
@@ -2841,6 +2836,11 @@ class CHIRDeserializerImpl {
             case 360u16 => IntrinsicKind.IS_SUBTYPE_TYPES
             case 361u16 => IntrinsicKind.EXCLUSIVE_SCOPE
             case 362u16 => IntrinsicKind.CANONICALIZE_STRING_BACKING
+            case 363u16 => IntrinsicKind.REFERENCE_INVOKE_FINALIZE
+            case 364u16 => IntrinsicKind.REFERENCE_WAIT_PENDING
+            case 365u16 => IntrinsicKind.REFERENCE_RUNTIME_RUNNING
+            case 366u16 => IntrinsicKind.REFERENCE_NANO_TIME
+            case 367u16 => IntrinsicKind.REGISTER_FINALIZER
             case _ =>
                 CJC_ABORT()
                 IntrinsicKind.NOT_INTRINSIC

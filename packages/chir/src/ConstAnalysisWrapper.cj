@@ -112,16 +112,26 @@ public class ConstAnalysisWrapper {
 
         taskQueue.RunAndWaitForAllTasksCompleted()
 
+        let completed = ArrayList<Results<ConstDomain>>()
+        let completedPool = ArrayList<Results<ConstPoolDomain>>()
+        var firstFailure: Option<Exception> = None
         for (taskResult in results) {
-            if (let Some(result) <- taskResult.get()) {
-                resultsMap[result.functionValue] = result
+            try {
+                if (let Some(result) <- taskResult.get()) { completed.add(result) }
+            } catch (e: Exception) {
+                if (firstFailure.isNone()) { firstFailure = Some(e) }
             }
         }
         for (taskResult in resultsPool) {
-            if (let Some(result) <- taskResult.get()) {
-                resultsPoolMap[result.functionValue] = result
+            try {
+                if (let Some(result) <- taskResult.get()) { completedPool.add(result) }
+            } catch (e: Exception) {
+                if (firstFailure.isNone()) { firstFailure = Some(e) }
             }
         }
+        if (let Some(e) <- firstFailure) { throw e }
+        for (result in completed) { resultsMap[result.functionValue] = result }
+        for (result in completedPool) { resultsPoolMap[result.functionValue] = result }
     }
 
     private func SetUpGlobalVarState(pkg: Package, diag: BasicDiagnosticEngine, isDebug!: Bool = false): Unit {

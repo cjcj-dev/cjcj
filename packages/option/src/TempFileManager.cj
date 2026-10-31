@@ -232,7 +232,10 @@ public class TempFileManager {
             let candidate = FileUtil.JoinPath(baseTemp, CANGJIE_TMP_DIR_PERFIX + GenerateRandomHexString() +
                 "-" + attempts.toString())
             try {
-                FSDirectory.create(candidate, recursive: true)
+                // The parent is already validated. A recursive mkdir can accept
+                // EEXIST after Directory's existence check, claiming another
+                // process's directory and later deleting its temporary files.
+                FSDirectory.create(candidate)
                 tempDir = candidate
                 deletedFiles.add(unsafe { LibC.mallocCString(tempDir) })
                 return true

@@ -28,22 +28,22 @@ public func UpdatePosForMacroExpandedNodes(pkgs: ArrayList<Package>): Unit {
 }
 
 public func PerformDesugarAfterTypeCheck(typeManager: TypeManager, importManager: SemaImportManager,
-    mangler: BaseMangler, structMemberMap: HashMap<InheritableDecl, MemberMap>, pkg: Package,
+    mangler: BaseMangler, pkg: Package,
     context!: Option<ASTContext> = None, options!: GlobalOptions = GlobalOptions(),
     synthesizer!: Option<(ASTContext, SynPos, Node) -> Ty> = None,
     callChecker!: Option<(ASTContext, Ty, CallExpr) -> Bool> = None,
     diag!: Option<BasicDiagnosticEngine> = None): Unit {
     let diagValue = diag.getOrThrow()
     let javaInteropManager = JavaInteropManager(importManager, typeManager, diagValue, mangler,
-        options.outputJavaGenDir, options.output)
+        options.outputJavaGenDir, options.output, options.target.ToFullTripleString())
     javaInteropManager.CheckImplRedefinition(pkg)
     for (file in pkg.files) {
         javaInteropManager.CheckTypes(file)
     }
-    javaInteropManager.DesugarPackage(pkg, structMemberMap,
+    javaInteropManager.DesugarPackage(pkg,
         { node: Node => DesugarForPropDecl(typeManager, node) })
     DesugarObjC(InteropContext(pkg, typeManager, importManager, diagValue, mangler, options.output,
-        options.outputObjCGenDir, structMemberMap, options.target.os,
+        options.outputObjCGenDir, options.target.os,
         { node: Node => DesugarForPropDecl(typeManager, node) }))
     DesugarDeclsForPackage(pkg, options.enableCoverage)
     let walker = Walker(pkg, visitPre: { node: Node =>

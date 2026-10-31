@@ -9,11 +9,11 @@ import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CJC_NULLPTR_CHECK, OBJ_C_BLOCK_IDENT,
 
 // Upstream a51ced71, ObjC/Utils/ASTQuery.cpp: IsObjCImplRegistryCompanion / GetOwnerClass.
 public func IsObjCImplRegistryCompanion(decl: Decl): Bool {
-    return decl.TestAttr(Attribute.OBJ_C_IMPL_REGISTRY_COMPANION)
+    return decl.TestAttr(Attribute.OBJ_C_EXPORT_REGISTRY_COMPANION)
 }
 
 public func IsObjCImplMovedMemberProxy(decl: Decl): Bool {
-    return decl.TestAttr(Attribute.OBJ_C_IMPL_MOVED_MEMBER_PROXY)
+    return decl.TestAttr(Attribute.OBJ_C_EXPORT_MOVED_MEMBER_PROXY)
 }
 
 public func GetOwnerClass(decl: Decl): Option<ClassDecl> {
@@ -56,9 +56,16 @@ private func IsObjCBlockImpl(decl: ClassDecl): Bool {
     return true
 }
 
+public enum TypePosition { | IN | OUT | BOTH }
+
 public func IsObjCCompatible(ty: Ty): Bool {
+    return IsObjCCompatible(ty, TypePosition.BOTH)
+}
+
+public func IsObjCCompatible(ty: Ty, pos: TypePosition): Bool {
     match (ty.kind) {
-        case TypeKind.TYPE_UNIT | TypeKind.TYPE_INT8 | TypeKind.TYPE_INT16 | TypeKind.TYPE_INT32 | TypeKind.TYPE_INT64 |
+        case TypeKind.TYPE_UNIT => return match (pos) { case TypePosition.OUT => true; case _ => false }
+        case TypeKind.TYPE_INT8 | TypeKind.TYPE_INT16 | TypeKind.TYPE_INT32 | TypeKind.TYPE_INT64 |
             TypeKind.TYPE_INT_NATIVE | TypeKind.TYPE_IDEAL_INT | TypeKind.TYPE_UINT8 | TypeKind.TYPE_UINT16 | TypeKind.TYPE_UINT32 |
             TypeKind.TYPE_UINT64 | TypeKind.TYPE_UINT_NATIVE | TypeKind.TYPE_FLOAT32 | TypeKind.TYPE_FLOAT64 | TypeKind.TYPE_IDEAL_FLOAT |
             TypeKind.TYPE_BOOLEAN => return true
@@ -67,18 +74,14 @@ public func IsObjCCompatible(ty: Ty): Bool {
             if (Ty.IsCStructType(ty)) { return true }
             if (IsObjCFunc(ty)) {
                 CJC_ASSERT(ty.typeArgs.size == 1); let tyArg = ty.typeArgs[0]
-                if (!tyArg.IsFunc() || tyArg.IsCFunc()) { return false }
-                for (arg in tyArg.typeArgs) { if (!IsObjCCompatible(arg)) { return false } }
-                return true
+                return IsObjCCompatibleFuncTy(tyArg)
             }
             return false
         case TypeKind.TYPE_CLASS | TypeKind.TYPE_INTERFACE =>
             if (IsObjCMirror(ty) || IsObjCImpl(ty)) { return true }
             if (IsObjCBlock(ty)) {
                 CJC_ASSERT(ty.typeArgs.size == 1); let tyArg = ty.typeArgs[0]
-                if (!tyArg.IsFunc() || tyArg.IsCFunc()) { return false }
-                for (arg in tyArg.typeArgs) { if (!IsObjCCompatible(arg)) { return false } }
-                return true
+                return IsObjCCompatibleFuncTy(tyArg)
             }
             return false
         case TypeKind.TYPE_ENUM =>
@@ -103,21 +106,21 @@ public func IsObjCCompatibleFuncTy(ty: Ty): Bool {
     if (value.isC) {
         return false
     }
-    if (!IsObjCCompatible(value.retTy)) {
+    if (!IsObjCCompatible(value.retTy, TypePosition.OUT)) {
         return false
     }
     for (argTy in value.paramTys) {
-        if (!IsObjCCompatible(argTy)) {
+        if (!IsObjCCompatible(argTy, TypePosition.IN)) {
             return false
         }
     }
     return true
 }
 
-public func IsObjCMirror(decl: Decl): Bool { return decl.TestAttr(Attribute.OBJ_C_MIRROR) }
-public func IsObjCMirrorInterfaceHandleWrapper(decl: Decl): Bool { return decl.TestAttr(Attribute.OBJ_C_MIRROR_INTERFACE_HANDLE_WRAPPER) }
+public func IsObjCMirror(decl: Decl): Bool { return decl.TestAttr(Attribute.OBJ_C_FOREIGN) }
+public func IsObjCMirrorInterfaceHandleWrapper(decl: Decl): Bool { return decl.TestAttr(Attribute.OBJ_C_FOREIGN_INTERFACE_HANDLE_WRAPPER) }
 public func IsObjCMirrorSubtype(decl: Decl): Bool { let ty = decl.GetTy(); CJC_NULLPTR_CHECK(ty); return IsObjCMirrorSubtype(ty.getOrThrow()) }
-public func IsObjCImpl(decl: Decl): Bool { return decl.TestAttr(Attribute.OBJ_C_IMPL) }
+public func IsObjCImpl(decl: Decl): Bool { return decl.TestAttr(Attribute.OBJ_C_EXPORT) }
 
 public func IsObjCMirrorSubtype(ty: Ty): Bool {
     if (let Some(it) <- (ty as InterfaceTy)) {
@@ -294,7 +297,6 @@ public func IsObjCImplUserCtor(fd: FuncDecl): Bool {
 public func IsGeneratedMember(decl: Decl): Bool {
     if (decl.identifier.Val() == "$obj" || decl.identifier.Val() == "$getObjCClass") { return true }
     if (decl.identifier.Val() == "$getObj" || IsObjCImplRegistryCompanionField(decl)) { return true }
-    if (decl.TestAttr(Attribute.HAS_INITED_FIELD)) { return true }
     if (let Some(fd) <- (decl as FuncDecl)) {
         return IsBaseCtor(fd) || IsObjCImplRegDataCtor(fd) || IsGeneratedStringConversion(fd)
     }
@@ -443,4 +445,32 @@ private func IsGeneratedStringConversion(fd: FuncDecl): Bool {
     if (owner.isNone()) { return false }
     return (IsNSString(owner.getOrThrow()) && IsGeneratedNSStringCtor(fd)) ||
         (IsNSObject(owner.getOrThrow()) && IsGeneratedNSObjectToString(fd))
+}
+
+public func IsValidObjCMirror(ty: Ty): Bool {
+    let classLikeTy = ty as ClassLikeTy
+    if (let None <- classLikeTy) { return false }
+    let value = classLikeTy.getOrThrow()
+    if (let None <- value.commonDecl) { return false }
+    if (!IsObjCMirror(value.commonDecl.getOrThrow())) { return false }
+    for (parent in value.GetSuperInterfaceTys()) { if (!IsValidObjCMirror(parent)) { return false } }
+    if (let Some(classTy) <- (ty as ClassTy)) {
+        if (let None <- classTy.GetSuperClassTy()) { return true }
+        let superTy = classTy.GetSuperClassTy().getOrThrow()
+        if (superTy.IsObject()) { return true }
+        return IsValidObjCMirror(superTy)
+    }
+    return true
+}
+
+public func IsValidObjCMirrorSubtype(ty: Ty): Bool {
+    let classTy = (ty as ClassTy) ?? return false
+    var hasMirrorSuperInterface = false
+    for (parent in classTy.GetSuperInterfaceTys()) {
+        if (!IsValidObjCMirror(parent)) { return false }
+        hasMirrorSuperInterface = true
+    }
+    let parent = classTy.GetSuperClassTy()
+    if (parent.isNone() || parent.getOrThrow().IsObject()) { return hasMirrorSuperInterface }
+    return IsValidObjCMirrorSubtype(parent.getOrThrow()) || IsValidObjCMirror(parent.getOrThrow())
 }

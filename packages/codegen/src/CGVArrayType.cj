@@ -53,6 +53,14 @@ public class CGVArrayType <: CGType {
             }
             size = Int64(layoutSize)
             align = Int64(cgMod.GetABITypeAlignment(arrayType))
+            // Explicit source alignment is not encoded in the raw LLVM
+            // element type. Preserve it for array storage, parent fields,
+            // TypeInfo and consumers of the LLVM type alignment registry.
+            if (let Some(vArrayTy) <- (chirType as VArrayType)) {
+                let elementAlign = CGType.GetOrCreate(cgMod, vArrayTy.GetElementType()).GetAlign().getOrThrow()
+                if (elementAlign > align.getOrThrow()) { align = elementAlign }
+            }
+            cgCtx.SetLLVMTypeAlignment(arrayType, UInt32(align.getOrThrow()))
         }
     }
 }

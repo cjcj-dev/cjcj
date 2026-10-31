@@ -206,9 +206,14 @@ struct RuntimeGCParamC {
     let garbageThreshold: Float64
     let gcInterval: UInt64
     let backupGCInterval: UInt64
+    let parallelGCThreads: UInt32
     let concGCThreads: UInt32
     let youngGCThreads: UInt32
     let oldGCThreads: UInt32
+    let parallelGCThreadsSet: Bool
+    let concGCThreadsSet: Bool
+    let youngGCThreadsSet: Bool
+    let oldGCThreadsSet: Bool
     let staticGCThreads: Bool
     let maxTenuringThreshold: UInt32
     let zTenuringThreshold: Int32
@@ -216,16 +221,23 @@ struct RuntimeGCParamC {
     let zTenuringThresholdSet: Bool
 
     init(gcThreshold: UIntNative, garbageThreshold: Float64, gcInterval: UInt64,
-        backupGCInterval: UInt64, concGCThreads: UInt32, youngGCThreads: UInt32, oldGCThreads: UInt32,
+        backupGCInterval: UInt64, parallelGCThreads: UInt32, concGCThreads: UInt32,
+        youngGCThreads: UInt32, oldGCThreads: UInt32, parallelGCThreadsSet: Bool,
+        concGCThreadsSet: Bool, youngGCThreadsSet: Bool, oldGCThreadsSet: Bool,
         staticGCThreads: Bool, maxTenuringThreshold: UInt32, zTenuringThreshold: Int32,
         maxTenuringThresholdSet: Bool, zTenuringThresholdSet: Bool) {
         this.gcThreshold = gcThreshold
         this.garbageThreshold = garbageThreshold
         this.gcInterval = gcInterval
         this.backupGCInterval = backupGCInterval
+        this.parallelGCThreads = parallelGCThreads
         this.concGCThreads = concGCThreads
         this.youngGCThreads = youngGCThreads
         this.oldGCThreads = oldGCThreads
+        this.parallelGCThreadsSet = parallelGCThreadsSet
+        this.concGCThreadsSet = concGCThreadsSet
+        this.youngGCThreadsSet = youngGCThreadsSet
+        this.oldGCThreadsSet = oldGCThreadsSet
         this.staticGCThreads = staticGCThreads
         this.maxTenuringThreshold = maxTenuringThreshold
         this.zTenuringThreshold = zTenuringThreshold
@@ -273,12 +285,14 @@ struct RuntimeConfigParamC {
 }
 
 private type RuntimeInitFunc = CFunc<(CPointer<RuntimeConfigParamC>) -> Int32>
-private type RuntimeFiniFunc = CFunc<() -> Int64>
+private type RuntimeFiniFunc = CFunc<() -> Int32>
+private type RuntimeTaskResultFunc = CFunc<(CPointer<Unit>, CPointer<CPointer<Unit>>) -> Int32>
 
 private let CJ_RUNTIME_INIT: String = "InitCJRuntime"
 private let CJ_RUNTIME_FINI: String = "FiniCJRuntime"
 private let CJ_NEW_TASK_FROM_C: String = "RunCJTask"
 private let CJ_RELEASE_HANDLE_FROM_C: String = "ReleaseHandle"
+private let CJ_GET_TASK_RET: String = "GetTaskRet"
 private let CJ_PACKAGE_INIT_BEGIN: String = "CJ_MCC_PackageInitBegin"
 @When[os == "Windows"]
 private let CJ_HEAP_SIZE: String = "CJHEAPSIZE"
@@ -311,10 +325,19 @@ public let GC_THRESHOLD: UIntNative = 0
 public let GARBAGE_THRESHOLD: Float64 = 0.5
 public let GC_INTERVAL: UInt64 = 150
 public let BACKUP_GC_INTERVAL: UInt64 = 0
+// R ee7cd Cangjie.h GCParam: keep worker counts and their origin bits in
+// declaration order. ZGC zArguments.cpp:56-83 distinguishes a default zero
+// budget from an explicitly supplied one; macro configuration leaves both
+// the counts and origin bits unset so the runtime performs its normal selection.
 // Zero worker budgets and unset thresholds select runtime ergonomics.
+public let PARALLEL_GC_THREADS: UInt32 = 0
 public let CONC_GC_THREADS: UInt32 = 0
 public let YOUNG_GC_THREADS: UInt32 = 0
 public let OLD_GC_THREADS: UInt32 = 0
+public let PARALLEL_GC_THREADS_SET: Bool = false
+public let CONC_GC_THREADS_SET: Bool = false
+public let YOUNG_GC_THREADS_SET: Bool = false
+public let OLD_GC_THREADS_SET: Bool = false
 public let STATIC_GC_THREADS: Bool = false
 public let MAX_TENURING_THRESHOLD: UInt32 = 15
 public let Z_TENURING_THRESHOLD: Int32 = -1
@@ -450,7 +473,8 @@ private func makeRuntimeConfig(envs: ArrayList<(String, String)>): RuntimeConfig
         RuntimeHeapParamC(REGION_SIZE, heapSize, EXEMPTION_THRESHOLD, HEAP_UTILIZATION, HEAP_GROWTH,
             getRuntimeEnv(envs, CJ_HEAP_SIZE).isSome() || HEAP_SIZE_SET, SOFT_HEAP_SIZE, SOFT_HEAP_SIZE_SET),
         RuntimeGCParamC(GC_THRESHOLD, GARBAGE_THRESHOLD, GC_INTERVAL, BACKUP_GC_INTERVAL,
-            CONC_GC_THREADS, YOUNG_GC_THREADS, OLD_GC_THREADS, STATIC_GC_THREADS,
+            PARALLEL_GC_THREADS, CONC_GC_THREADS, YOUNG_GC_THREADS, OLD_GC_THREADS,
+            PARALLEL_GC_THREADS_SET, CONC_GC_THREADS_SET, YOUNG_GC_THREADS_SET, OLD_GC_THREADS_SET, STATIC_GC_THREADS,
             MAX_TENURING_THRESHOLD, Z_TENURING_THRESHOLD, MAX_TENURING_THRESHOLD_SET, Z_TENURING_THRESHOLD_SET),
         RuntimeLogParamC(5),
         RuntimeConcurrencyParamC(STACK_SIZE, GetStackSizeFromEnv(envs), PROCESSOR_NUM))
@@ -539,21 +563,6 @@ private func OpenInLinkMap(libPath: String, lmid: Int64): RuntimeHandle {
 }
 
 @When[os == "Linux"]
-private func NativePathExists(libPath: String): Bool {
-    var found = false
-    try (path = unsafe { LibC.mallocCString(libPath) }.asResource()) {
-        let realpathRes = unsafe { realpath(path.value, CString(CPointer<UInt8>())) }
-        if (!realpathRes.isNull()) {
-            unsafe { free(realpathRes) }
-            found = true
-        }
-    } catch (e: Exception) {
-        found = false
-    }
-    return found
-}
-
-@When[os == "Linux"]
 private func ReadLinkMapId(raw: CPointer<Unit>): Option<Int64> {
     if (raw.isNull()) {
         return None
@@ -574,28 +583,6 @@ private func ReadLinkMapId(raw: CPointer<Unit>): Option<Int64> {
     return result
 }
 
-// Sibling cangjie libs share the admission image's directory. Load them into
-// that link map before the macro so their SONAME is already satisfied there,
-// instead of by the process LD_LIBRARY_PATH.
-@When[os == "Linux"]
-private func PreloadAdmissionSiblings(runtimeLibPath: String, lmid: Int64): Bool {
-    let dir = FileUtil.GetDirPath(runtimeLibPath)
-    let names = ["libboundscheck.so", "libcangjie-std-core.so", "libcangjie-std-math.so",
-        "libcangjie-std-collection.so", "libcangjie-std-sort.so", "libcangjie-std-ast.so"]
-    for (name in names) {
-        let full = FileUtil.JoinPath(dir, name)
-        if (!NativePathExists(full)) {
-            continue
-        }
-        let opened = OpenInLinkMap(full, lmid)
-        if (!opened.opened) {
-            return false
-        }
-        opened.retain = true
-    }
-    return true
-}
-
 @When[os == "Linux"]
 private func OpenMacroInNamespace(path: String): Option<RuntimeHandle> {
     if (!RuntimeInit.GetInstance().HasLinkMap()) {
@@ -613,9 +600,37 @@ private func OpenMacroInNamespace(path: String): Option<RuntimeHandle> {
     return None<RuntimeHandle>
 }
 
+// A precompiled macro keeps the RPATH chosen by its producer. Reject a stale
+// SDK binding before native image initialization, for imported, explicit, and
+// server-loaded macros alike. The normal repair is recompilation/relinking.
+@When[os == "Linux"]
+foreign func CJSelfhostCheckMacroRuntimeBinding(image: CString, runtimeDirectory: CString): Int32
+
+@When[os == "Linux"]
+private func HasCurrentMacroRuntimeBinding(path: String): Bool {
+    if (let Some(runtimeDirectory) <- RuntimeInit.GetInstance().GetRuntimeDirectory()) {
+        try (image = unsafe { LibC.mallocCString(path) }.asResource(),
+            directory = unsafe { LibC.mallocCString(runtimeDirectory) }.asResource()) {
+            if (!image.value.isNull() && !directory.value.isNull()) {
+                return unsafe { CJSelfhostCheckMacroRuntimeBinding(image.value, directory.value) } == 0
+            }
+        } catch (_: Exception) {
+            return false
+        }
+    }
+    return false
+}
+
+@When[os != "Linux"]
+private func HasCurrentMacroRuntimeBinding(path: String): Bool { return true }
+
 // Cangjie images register runtime metadata. Pair the runtime loader's path
 // handle with FindCJSymbol/UnloadCJLibrary, rather than bypassing it with dlclose.
 public func OpenMacroLibrary(path: String): RuntimeHandle {
+    if (!HasCurrentMacroRuntimeBinding(path)) {
+        Errorln("macro runtime binding is missing or belongs to another SDK; rebuild or relink macro with the current SDK: " + path)
+        return RuntimeHandle(path)
+    }
     // The runtime owns one entry per image. Repeated calls into the same macro
     // package reuse that entry rather than acquiring unmatched native references.
     for (opened in openedLibHandles) {
@@ -692,6 +707,7 @@ private func GetTaskRuntimeMethodPointer(name: String): CPointer<Unit> {
                 return method
             }
         }
+        return CPointer<Unit>()
     }
     return GetHostRuntimeMethodPointer(name)
 }
@@ -769,11 +785,13 @@ public func PrepareRuntime(handle: RuntimeHandle, initArgs: ArrayList<(String, S
 }
 
 public func FinishRuntime(handle: RuntimeHandle): Unit {
-    let fini = RuntimeFiniFunc(GetMethodPointer(handle, CJ_RUNTIME_FINI))
-    let finiInit = unsafe { fini() }
-    if (finiInit != 0) {
-        Errorln("runtime finish failed: ")
-        return
+    let method = GetMethodPointer(handle, CJ_RUNTIME_FINI)
+    if (method.isNull()) {
+        throw IllegalStateException("macro runtime missing FiniCJRuntime")
+    }
+    let status = unsafe { RuntimeFiniFunc(method)() }
+    if (status != 0) {
+        throw IllegalStateException("macro runtime FiniCJRuntime failed: " + status.toString())
     }
 }
 
@@ -822,15 +840,31 @@ public class RuntimeInit {
     private static let instance: RuntimeInit = RuntimeInit(true)
     private var initRuntime: Bool = false
     private var handle: Option<RuntimeHandle> = None
-    public var runtimeMethodFunc: CPointer<Unit> = CPointer<Unit>()
-    public var runtimeReleaseFunc: CPointer<Unit> = CPointer<Unit>()
+    // A borrowed host intentionally has no retained native handle. Keep the
+    // selected SDK identity separately; it is not runtime ownership or readiness.
+    private var runtimeDirectory: Option<String> = None
+    private var runtimeMethodFunc: CPointer<Unit> = CPointer<Unit>()
+    private var runtimeReleaseFunc: CPointer<Unit> = CPointer<Unit>()
+    private var runtimeTaskResultFunc: CPointer<Unit> = CPointer<Unit>()
+    private let lifecycleMutex = Mutex()
+    private let tasksFinished: Condition
+    private var outstandingTasks: Int64 = 0
+    private var taskFailure: Option<Exception> = None
+    private var ownsInitializedRuntime: Bool = false
+    private var closing: Bool = false
+    private var closed: Bool = false
+    private var closeFailure: Option<Exception> = None
     public var taskOnOpenedRuntime: Bool = false
     private var hasLinkMap: Bool = false
     private var linkMapId: Int64 = 0
 
-    public init() {}
+    public init() {
+        synchronized(lifecycleMutex) { tasksFinished = lifecycleMutex.condition() }
+    }
 
-    private init(_: Bool) {}
+    private init(_: Bool) {
+        synchronized(lifecycleMutex) { tasksFinished = lifecycleMutex.condition() }
+    }
 
     public static func GetInstance(): RuntimeInit {
         return RuntimeInit.instance
@@ -863,18 +897,20 @@ public class RuntimeInit {
         if (!PrepareRuntime(opened, initArgs)) {
             return Some(false)
         }
+        // LM_ID_NEWLM identifies an independent image owned by this instance.
+        // Remember the obligation before any subsequent symbol/layout failure.
+        ownsInitializedRuntime = true
+        opened.retain = true
         let mapId = ReadLinkMapId(opened.raw)
         if (let None <- mapId) {
             return Some(false)
         }
         let lmid = mapId.getOrThrow()
-        if (!PreloadAdmissionSiblings(runtimeLibPath, lmid)) {
-            return Some(false)
-        }
         runtimeMethodFunc = GetMethodPointer(opened, CJ_NEW_TASK_FROM_C)
         runtimeReleaseFunc = GetMethodPointer(opened, CJ_RELEASE_HANDLE_FROM_C)
-        if (runtimeMethodFunc.isNull() || runtimeReleaseFunc.isNull()) {
-            var errorInfo = CJ_RELEASE_HANDLE_FROM_C
+        runtimeTaskResultFunc = GetMethodPointer(opened, CJ_GET_TASK_RET)
+        if (runtimeMethodFunc.isNull() || runtimeReleaseFunc.isNull() || runtimeTaskResultFunc.isNull()) {
+            var errorInfo = if (runtimeTaskResultFunc.isNull()) { CJ_GET_TASK_RET } else { CJ_RELEASE_HANDLE_FROM_C }
             if (runtimeMethodFunc.isNull()) {
                 errorInfo = CJ_NEW_TASK_FROM_C
             }
@@ -905,6 +941,22 @@ public class RuntimeInit {
     }
 
     public func InitRuntime(runtimeLibPath: String, initArgs!: ArrayList<(String, String)> = ArrayList<(String, String)>()): Bool {
+        synchronized(lifecycleMutex) {
+            if (closing) {
+                throw IllegalStateException("macro runtime cannot initialize after close started")
+            }
+            if (ownsInitializedRuntime && !initRuntime) {
+                throw IllegalStateException("macro runtime initialization previously failed after acquiring ownership")
+            }
+            let ready = InitRuntimeLocked(runtimeLibPath, initArgs)
+            if (ready && runtimeDirectory.isNone()) {
+                runtimeDirectory = Some(FileUtil.GetDirPath(runtimeLibPath))
+            }
+            return ready
+        }
+    }
+
+    private func InitRuntimeLocked(runtimeLibPath: String, initArgs: ArrayList<(String, String)>): Bool {
         if (!initRuntime) {
             // Sample the process image before any second runtime is opened.
             let hostHasAdmission = !GetHostRuntimeMethodPointer(CJ_PACKAGE_INIT_BEGIN).isNull()
@@ -926,10 +978,13 @@ public class RuntimeInit {
                 if (!PrepareRuntime(opened, initArgs)) {
                     return false
                 }
+                ownsInitializedRuntime = true
+                opened.retain = true
                 runtimeMethodFunc = GetMethodPointer(opened, CJ_NEW_TASK_FROM_C)
                 runtimeReleaseFunc = GetMethodPointer(opened, CJ_RELEASE_HANDLE_FROM_C)
-                if (runtimeMethodFunc.isNull() || runtimeReleaseFunc.isNull()) {
-                    var errorInfo = CJ_RELEASE_HANDLE_FROM_C
+                runtimeTaskResultFunc = GetMethodPointer(opened, CJ_GET_TASK_RET)
+                if (runtimeMethodFunc.isNull() || runtimeReleaseFunc.isNull() || runtimeTaskResultFunc.isNull()) {
+                    var errorInfo = if (runtimeTaskResultFunc.isNull()) { CJ_GET_TASK_RET } else { CJ_RELEASE_HANDLE_FROM_C }
                     if (runtimeMethodFunc.isNull()) {
                         errorInfo = CJ_NEW_TASK_FROM_C
                     }
@@ -947,8 +1002,9 @@ public class RuntimeInit {
                 handle = None
                 runtimeMethodFunc = GetHostRuntimeMethodPointer(CJ_NEW_TASK_FROM_C)
                 runtimeReleaseFunc = GetHostRuntimeMethodPointer(CJ_RELEASE_HANDLE_FROM_C)
-                if (runtimeMethodFunc.isNull() || runtimeReleaseFunc.isNull()) {
-                    var errorInfo = CJ_RELEASE_HANDLE_FROM_C
+                runtimeTaskResultFunc = GetHostRuntimeMethodPointer(CJ_GET_TASK_RET)
+                if (runtimeMethodFunc.isNull() || runtimeReleaseFunc.isNull() || runtimeTaskResultFunc.isNull()) {
+                    var errorInfo = if (runtimeTaskResultFunc.isNull()) { CJ_GET_TASK_RET } else { CJ_RELEASE_HANDLE_FROM_C }
                     if (runtimeMethodFunc.isNull()) {
                         errorInfo = CJ_NEW_TASK_FROM_C
                     }
@@ -962,29 +1018,105 @@ public class RuntimeInit {
         return true
     }
 
-    public func CloseRuntime(): Unit {
-        if (let Some(opened) <- handle) {
-            if (initRuntime) {
-                initRuntime = false
+    // Submission is serialized with close. The caller owns the returned future
+    // and must retain its callback arguments until CompleteTask succeeds.
+    public func SubmitTask(callback: CPointer<Unit>, argument: CPointer<Unit>): CPointer<Unit> {
+        synchronized(lifecycleMutex) {
+            if (closing || !initRuntime) {
+                throw IllegalStateException("macro task submitted to an unavailable runtime")
             }
-            if (!taskOnOpenedRuntime) {
-                @When[backend == "cjnative" && env != "ohos"]
-                let _ = CloseSymbolTable(opened)
+            let task = unsafe { InvokeNewTaskFromC(runtimeMethodFunc)(callback, argument) }
+            if (task.isNull()) {
+                throw IllegalStateException("macro runtime RunCJTask failed")
             }
+            outstandingTasks++
+            return task
         }
-        handle = None
-        runtimeMethodFunc = CPointer<Unit>()
-        runtimeReleaseFunc = CPointer<Unit>()
-        taskOnOpenedRuntime = false
-        hasLinkMap = false
-        linkMapId = 0
-        // C++ InvokeUtil.cpp:113-129 finishes its runtime before unloading images.
-        // This Cangjie host still needs its runtime and registered image metadata.
-        // Keep macro images alive until the host process shuts down naturally.
+    }
+
+    public func CompleteTask(task: CPointer<Unit>): CPointer<Unit> {
+        // No MacroInvoke/table/lifecycle lock is held while R waits for the
+        // callback and UserFuncExecutor to finish. A null task result is valid.
+        var taskResult = CPointer<Unit>()
+        try {
+            try (result = LibC.malloc<CPointer<Unit>>().asResource()) {
+                if (result.value.isNull()) {
+                    throw IllegalStateException("cannot allocate macro task result slot")
+                }
+                let status = unsafe { RuntimeTaskResultFunc(runtimeTaskResultFunc)(task, result.value) }
+                if (status != 0) {
+                    throw IllegalStateException("macro runtime GetTaskRet failed: " + status.toString())
+                }
+                taskResult = unsafe { result.value.read() }
+                unsafe { ReleaseHandleFromC(runtimeReleaseFunc)(task) }
+            }
+        } catch (e: Exception) {
+            synchronized(lifecycleMutex) {
+                if (taskFailure.isNone()) { taskFailure = Some(e) }
+                tasksFinished.notifyAll()
+            }
+            // The future and callback arguments remain live. Close must not
+            // terminate this runtime or mistake a failed wait for completion.
+            throw e
+        }
+        synchronized(lifecycleMutex) {
+            outstandingTasks--
+            tasksFinished.notifyAll()
+        }
+        return taskResult
+    }
+
+    public func CloseRuntime(): Unit {
+        synchronized(lifecycleMutex) {
+            // A second closer waits for the first owner's result; it must not
+            // enter Fini while the first is waiting for outstanding callbacks.
+            while (closing && !closed && closeFailure.isNone()) {
+                tasksFinished.wait()
+            }
+            if (let Some(e) <- closeFailure) { throw e }
+            if (closed) { return }
+            closing = true
+            try {
+                while (outstandingTasks != 0 && taskFailure.isNone()) {
+                    tasksFinished.wait()
+                }
+                if (let Some(e) <- taskFailure) { throw e }
+                if (ownsInitializedRuntime) {
+                    // Only this instance's successfully initialized independent
+                    // runtime is finished; never the borrowed process host.
+                    FinishRuntime(handle.getOrThrow())
+                    ownsInitializedRuntime = false
+                }
+            } catch (e: Exception) {
+                closeFailure = Some(e)
+                tasksFinished.notifyAll()
+                // Fini may already have set its finished flag before failing.
+                // Keep the first failure and live image; never call it again.
+                throw e
+            }
+            closed = true
+            tasksFinished.notifyAll()
+            initRuntime = false
+            runtimeMethodFunc = CPointer<Unit>()
+            runtimeReleaseFunc = CPointer<Unit>()
+            runtimeTaskResultFunc = CPointer<Unit>()
+            taskOnOpenedRuntime = false
+            hasLinkMap = false
+            linkMapId = 0
+            // Keep registered macro images mapped through host shutdown. Fini
+            // ends our R's threads; it is not permission to dlclose host metadata.
+        }
     }
 
     public func GetHandle(): Option<RuntimeHandle> {
         return handle
+    }
+
+    public func GetRuntimeDirectory(): Option<String> {
+        synchronized(lifecycleMutex) {
+            if (!initRuntime || closing) { return None<String> }
+            return runtimeDirectory
+        }
     }
 
     private func CloseMacroDynamicLibrary(): Unit {

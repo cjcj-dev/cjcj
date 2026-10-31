@@ -1798,7 +1798,38 @@ public class ClosureConversion {
         if (opts.chirDebugOptimizer) {
             PrintMutableVarInfo(env.GetExpr().getOrThrow().GetDebugLocation().GetBeginPos())
         }
-        env.GetExpr().getOrThrow().RemoveSelfFromBlock()
+        if (!PreserveCapturedReturnValue(env, boxObj)) {
+            env.GetExpr().getOrThrow().RemoveSelfFromBlock()
+        }
+    }
+
+    private func PreserveCapturedReturnValue(env: LocalVar, boxObj: LocalVar): Bool {
+        if (!env.IsRetValue()) {
+            return false
+        }
+        // EXIT reads the function/lambda return slot implicitly, so that read is
+        // absent from env.GetUsers(). A constructor's captured `this` can be this
+        // very slot. Keep its allocation and copy the current boxed value back
+        // on every normal exit; exceptions must not acquire a return edge.
+        let body = env.GetExpr().getOrThrow().GetParentBlockGroup().getOrThrow()
+        CJC_ASSERT(GetReturnValue(body).getOrThrow().nodeId == env.nodeId)
+        let slotTy = env.GetType().getOrThrow()
+        let valueTy = (slotTy as RefType).getOrThrow().GetBaseType()
+        for (block in body.GetBlocks()) {
+            if (let Some(exit) <- block.GetTerminator()) {
+                if (exit.GetExprKind() != ExprKind.EXIT) {
+                    continue
+                }
+                let field = builder.CreateGetElementRef(slotTy, boxObj, ArrayList<UInt64>([0u64]), block)
+                let current = builder.CreateLoad(valueTy, RequireResult(field), block)
+                let result = builder.CreateStore(RequireResult(current), env, block)
+                for (expr in ArrayList<Expression>([field, current, result])) {
+                    expr.SetDebugLocation(exit.GetDebugLocation())
+                    expr.MoveBefore(exit)
+                }
+            }
+        }
+        return true
     }
 
     private func SetBoxClassAsMutableVar(rValue: LocalVar, srcCodeIdentifier: String): (LocalVar, LocalVar) {

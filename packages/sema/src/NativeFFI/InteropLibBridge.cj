@@ -1038,7 +1038,7 @@ public class InteropLibBridge {
         let argTy = arg.GetTy().getOrThrow()
         if (let Some(classLikeTy) <- (argTy as ClassLikeTy)) {
             if (let Some(decl) <- classLikeTy.commonDecl) {
-                if (decl.TestAnyAttr(Attribute.JAVA_MIRROR, Attribute.JAVA_MIRROR_SUBTYPE)) {
+                if (decl.TestAnyAttr(Attribute.JAVA_FOREIGN, Attribute.JAVA_EXPORT)) {
                     return Some(CreateJavaRefCall(arg))
                 }
             }
@@ -1046,7 +1046,7 @@ public class InteropLibBridge {
             CJC_ASSERT_WITH_MSG(!argTy.typeArgs.isEmpty(), "Option type must be generic")
             if (let Some(classLikeTy) <- (argTy.typeArgs[0] as ClassLikeTy)) {
                 if (let Some(decl) <- classLikeTy.commonDecl) {
-                    if (decl.TestAnyAttr(Attribute.JAVA_MIRROR, Attribute.JAVA_MIRROR_SUBTYPE)) {
+                    if (decl.TestAnyAttr(Attribute.JAVA_FOREIGN, Attribute.JAVA_EXPORT)) {
                         return Some(CreateJavaEntityFromOptionMirror(arg, decl))
                     }
                 }

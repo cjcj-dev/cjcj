@@ -9,13 +9,16 @@ import cjcj::frontend.CompileStage
 
 // Compile actual source through parser/imports/SEMA. A parse or SDK error must
 // fail these tests, rather than count as rejection of the intended bad read.
-private func ExpectInitializationDiagnostic(code: String, immutable!: Bool = false): Unit {
+private func ExpectInitializationDiagnostic(code: String, immutable!: Bool = false,
+    constructor!: Bool = false): Unit {
     @Assert(!getVariable("CANGJIE_HOME").getOrThrow().isEmpty())
     let result = CompileSource(code, stage: CompileStage.SEMA)
     @Assert(!result.ok)
     @Assert(result.instance.faithfulSemaInstance.isSome())
     let diag = result.instance.faithfulSemaInstance.getOrThrow().diag.getOrThrow()
-    let marker = if (immutable) { "// expected-let-error" } else { "// expected-init-error" }
+    let marker = if (immutable) { "// expected-let-error" } else if (constructor) {
+        "// expected-constructor-error"
+    } else { "// expected-init-error" }
     var expectedLine: Int64 = 0
     var line: Int64 = 1
     for (text in code.split("\n")) {
@@ -27,6 +30,8 @@ private func ExpectInitializationDiagnostic(code: String, immutable!: Bool = fal
     for (diagnostic in diag.GetCategoryDiagnostic(DiagCategory.SEMA)) {
         let expectedKind = if (immutable) {
             diagnostic.isRefactor && diagnostic.rKind == DiagKindRefactor.sema_cannot_assign_to_immutable
+        } else if (constructor) {
+            diagnostic.kind == DiagKind.sema_class_uninitialized_field
         } else {
             diagnostic.kind == DiagKind.sema_used_before_initialization
         }
@@ -51,6 +56,152 @@ private func ExpectInitializationAccepted(code: String): Unit {
 
 @Test
 public class InitializationControlFlowTest {
+    @TestCase
+    public func PrimaryMembersSurviveEarlierGlobalInitializer(): Unit {
+        ExpectInitializationAccepted("""
+            let observed = Pair(0, 1).second + 1
+            struct Pair {
+                Pair(let first: Int64, let second: Int64) {}
+            }
+            """)
+    }
+
+    @TestCase
+    public func PrimaryMembersSurviveEarlierStaticInitializer(): Unit {
+        ExpectInitializationAccepted("""
+            struct Earlier { static let observed = Pair(0, 1).second + 1 }
+            struct Pair {
+                Pair(let first: Int64, let second: Int64) {}
+            }
+            """)
+    }
+
+    @TestCase
+    public func DelegatingStaticConstantsKeepPrimaryCompletion(): Unit {
+        ExpectInitializationAccepted("""
+            let observed = FieldLocation(0, 1).length + 1
+            struct FieldLocation {
+                const FieldLocation(let offset: Int64, let length: Int64) {}
+                private const init(last: FieldLocation, length: Int64) {
+                    this(last.offset + last.length, length)
+                }
+                static const NAME = FieldLocation(0, 100)
+                static const MODE = FieldLocation(NAME, 8)
+                static const UID = FieldLocation(MODE, 8)
+                const func contains(index: Int64): Bool {
+                    return offset <= index && index < offset + length
+                }
+            }
+            """)
+    }
+
+    @TestCase
+    public func EarlierMemberReferenceDoesNotHideIncompleteConstructor(): Unit {
+        ExpectInitializationDiagnostic("""
+            let observed = Value(true).x + 1
+            class Value {
+                let x: Int64
+                init(assign: Bool) { // expected-constructor-error
+                    if (assign) { x = 1 }
+                }
+            }
+            """, constructor: true)
+    }
+
+    @TestCase
+    public func CoalescingReturnConstructorRequiresInitializedEarlyExit(): Unit {
+        ExpectInitializationDiagnostic("""
+            class Value {
+                let x: Int64
+                init(value: ?Int64) { // expected-constructor-error
+                    x = value ?? return
+                }
+            }
+            """, constructor: true)
+    }
+
+    @TestCase
+    public func CoalescingReturnAssignmentSurvivesLaterBranch(): Unit {
+        ExpectInitializationAccepted("""
+            func read(value: ?Int64): Int64 {
+                var x: Int64
+                x = value ?? return 0
+                if (x > 0) { return x }
+                return x
+            }
+            """)
+    }
+
+    @TestCase
+    public func CoalescingReturnAssignmentSurvivesDoMatch(): Unit {
+        ExpectInitializationAccepted("""
+            enum Kind { A | B | C }
+            class Header { let kind: Kind = Kind.A; let size: Int64 = 1 }
+            func next(): ?Header { return Header() }
+            func take(x: Int64): Unit {}
+            func read(): ?Header {
+                var header: Header
+                do {
+                    header = next() ?? return None
+                    take(header.size)
+                    match (header.kind) {
+                        case Kind.A => take(header.size)
+                        case Kind.B => take(header.size)
+                        case _ => break
+                    }
+                } while (true)
+                return header
+            }
+            """)
+    }
+
+    @TestCase
+    public func CoalescingReturnDoesNotInitializeUnassignedBranch(): Unit {
+        ExpectInitializationDiagnostic("""
+            func read(value: ?Int64, assign: Bool): Int64 {
+                var x: Int64
+                if (assign) { x = value ?? return 0 }
+                return x // expected-init-error
+            }
+            """)
+    }
+
+    @TestCase
+    public func CoalescingReturnValueStillRequiresInitialization(): Unit {
+        ExpectInitializationDiagnostic("""
+            func read(value: ?Int64): Int64 {
+                var x: Int64
+                x = value ?? return x // expected-init-error
+                return x
+            }
+            """)
+    }
+
+    @TestCase
+    public func CoalescingThrowAssignmentKeepsExceptionalState(): Unit {
+        ExpectInitializationDiagnostic("""
+            func read(value: ?Int64): Int64 {
+                var x: Int64
+                try { x = value ?? throw Exception() }
+                catch (e: Exception) {}
+                return x // expected-init-error
+            }
+            """)
+    }
+
+    @TestCase
+    public func CoalescingThrowConstructorInitializesNormalCompletion(): Unit {
+        ExpectInitializationAccepted("""
+            class Value {
+                let x: Int64
+                init(value: ?Int64) {
+                    x = value ?? throw Exception()
+                    if (x > 0) { let observed = x }
+                }
+            }
+            """)
+    }
+
     @TestCase
     public func InterpolatedToStringMayThrowBeforeAssignment(): Unit {
         ExpectInitializationDiagnostic("""

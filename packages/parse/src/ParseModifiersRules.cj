@@ -73,7 +73,7 @@ private func TopLevelEnumStructRule(modifier: TokenKind): Option<Array<TokenKind
 
 private func TopLevelClassRule(modifier: TokenKind): Option<Array<TokenKind>> {
     if (modifier == TokenKind.PUBLIC) {
-        return [TokenKind.PRIVATE, TokenKind.INTERNAL, TokenKind.PROTECTED, TokenKind.FOREIGN]
+        return [TokenKind.PRIVATE, TokenKind.INTERNAL, TokenKind.PROTECTED]
     }
     if (modifier == TokenKind.PRIVATE) {
         return [
@@ -90,7 +90,7 @@ private func TopLevelClassRule(modifier: TokenKind): Option<Array<TokenKind>> {
     if (modifier == TokenKind.ABSTRACT) { return NoConflicts() }
     if (modifier == TokenKind.SEALED) { return [TokenKind.PRIVATE, TokenKind.INTERNAL, TokenKind.PROTECTED] }
     if (modifier == TokenKind.OPEN) { return NoConflicts() }
-    if (modifier == TokenKind.FOREIGN) { return [TokenKind.PUBLIC] }
+    if (modifier == TokenKind.FOREIGN) { return NoConflicts() }
     if (modifier == TokenKind.COMMON) { return [TokenKind.PRIVATE, TokenKind.SPECIFIC] }
     if (modifier == TokenKind.SPECIFIC) { return [TokenKind.PRIVATE, TokenKind.COMMON] }
     return None
@@ -98,7 +98,7 @@ private func TopLevelClassRule(modifier: TokenKind): Option<Array<TokenKind>> {
 
 private func TopLevelInterfaceRule(modifier: TokenKind): Option<Array<TokenKind>> {
     if (modifier == TokenKind.PUBLIC) {
-        return [TokenKind.PRIVATE, TokenKind.INTERNAL, TokenKind.PROTECTED, TokenKind.FOREIGN]
+        return [TokenKind.PRIVATE, TokenKind.INTERNAL, TokenKind.PROTECTED]
     }
     if (modifier == TokenKind.PRIVATE) {
         return [
@@ -114,7 +114,7 @@ private func TopLevelInterfaceRule(modifier: TokenKind): Option<Array<TokenKind>
     }
     if (modifier == TokenKind.SEALED) { return [TokenKind.PRIVATE, TokenKind.INTERNAL, TokenKind.PROTECTED] }
     if (modifier == TokenKind.OPEN) { return NoConflicts() }
-    if (modifier == TokenKind.FOREIGN) { return [TokenKind.PUBLIC] }
+    if (modifier == TokenKind.FOREIGN) { return NoConflicts() }
     if (modifier == TokenKind.COMMON) { return [TokenKind.PRIVATE, TokenKind.SPECIFIC] }
     if (modifier == TokenKind.SPECIFIC) { return [TokenKind.PRIVATE, TokenKind.COMMON] }
     return None

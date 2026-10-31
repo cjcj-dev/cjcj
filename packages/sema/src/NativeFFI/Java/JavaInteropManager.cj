@@ -18,7 +18,7 @@ private func MakeJavaImplJavaNameRange(decl: ClassLikeDecl): BasicRange {
         return MakeRangeForDeclIdentifier(decl)
     }
     for (anno in decl.annotations) {
-        if (anno.kind != JavaAnnotationKind.JAVA_IMPL) {
+        if (anno.kind != JavaAnnotationKind.JAVA_IMPL && anno.kind != JavaAnnotationKind.JAVA) {
             continue
         }
         return MakeRange(anno.GetBegin(), decl.identifier.End())
@@ -87,10 +87,12 @@ private func DiagJavaMirrorChildMustBeAnnotated(
         }
     }
     let parent = parentDecl.getOrThrow()
-    DiagnoseRefactor(diag,
+    let builder = DiagnoseRefactor(diag,
         DiagKindRefactor.sema_java_mirror_subtype_must_be_annotated,
         decl,
-        arguments: [parent.identifier.Val()]).Emit()
+        arguments: [parent.identifier.Val()])
+    builder.AddMainHintArguments(decl.identifier.Val())
+    builder.Emit()
 }
 
 // C++ src/Sema/NativeFFI/Java/AfterTypeCheck/TypeCheckJavaInterop.cpp:36-60.
@@ -143,8 +145,14 @@ private func DiagJavaTypesAsGenericParam(diag: DiagnosticEngine, expr: Node,
     if (javaDecls.isEmpty()) {
         return
     }
-    // FEATURE_DEBT(JAVA_AFTERTYPECHECK_BODY): C++
-    // src/Sema/NativeFFI/Java/AfterTypeCheck/DiagsInterop.cpp:142-153.
+    let primary = javaDecls[javaDecls.size - 1]
+    let genericDecl = expr.GetTarget().getOrThrow()
+    let builder = DiagnoseRefactor(diag, DiagKindRefactor.sema_generic_parameter_of_java_type,
+        expr, arguments: [primary.identifier.Val(), genericDecl.identifier.Val()])
+    for (index in 0..javaDecls.size - 1) {
+        builder.AddNote("It also uses '@Java' type '" + javaDecls[index].identifier.Val() + "'")
+    }
+    builder.Emit()
 }
 
 // C++ src/Sema/NativeFFI/Java/AfterTypeCheck/EscapeChecks.cpp:44-60.
@@ -200,16 +208,18 @@ public class JavaInteropManager {
     private let mangler: BaseMangler
     private let javagenOutputPath: MaybeString
     private let outputPath: String
+    private let targetTriple: String
     private var hasMirrorOrImpl: Bool = false
 
     public init(importManager: SemaImportManager, typeManager: TypeManager, diag: DiagnosticEngine,
-        mangler: BaseMangler, javagenOutputPath: MaybeString, outputPath: String) {
+        mangler: BaseMangler, javagenOutputPath: MaybeString, outputPath: String, targetTriple: String) {
         this.importManager = importManager
         this.typeManager = typeManager
         this.diag = diag
         this.mangler = mangler
         this.javagenOutputPath = javagenOutputPath
         this.outputPath = outputPath
+        this.targetTriple = targetTriple
     }
 
     // C++ TypeCheckJavaInterop.cpp:351-375.
@@ -255,7 +265,7 @@ public class JavaInteropManager {
                 return
             }
         }
-        if (decl.HasAnno(JavaAnnotationKind.JAVA_IMPL) &&
+        if (decl.TestAttr(Attribute.JAVA_EXPORT) &&
             !IsJavaMirrorSubtype(decl.GetTy().getOrThrow())) {
             DiagnoseRefactor(diag,
                 DiagKindRefactor.sema_java_mirror_subtype_anno_must_inherit_mirror,
@@ -267,7 +277,7 @@ public class JavaInteropManager {
     // C++ TypeCheckJavaInterop.cpp:310-318.
     private func CheckJavaMirrorSubtypeAttrClassLikeDecl(decl: ClassLikeDecl): Unit {
         if (IsJavaMirrorSubtype(decl.GetTy().getOrThrow())) {
-            if (!decl.TestAnyAttr(Attribute.JAVA_MIRROR_SUBTYPE, Attribute.JAVA_MIRROR)) {
+            if (!decl.TestAnyAttr(Attribute.JAVA_EXPORT, Attribute.JAVA_FOREIGN)) {
                 DiagJavaMirrorChildMustBeAnnotated(diag, decl)
                 decl.EnableAttr(Attribute.IS_BROKEN)
             }
@@ -280,19 +290,21 @@ public class JavaInteropManager {
         if (!IsMirror(ty) && !IsImpl(ty)) {
             return
         }
-        // FEATURE_DEBT(JAVA_AFTERTYPECHECK_BODY): C++
-        // src/Sema/NativeFFI/Java/AfterTypeCheck/TypeCheckJavaInterop.cpp:327-330.
+        if (!decl.inheritedTypes.isEmpty()) {
+            let kind = if (IsMirror(ty)) { DiagKindRefactor.sema_java_mirror_cannot_be_extended_with_interface }
+                else { DiagKindRefactor.sema_java_impl_cannot_be_extended_with_interface }
+            DiagnoseRefactor(diag, kind, decl).Emit()
+            decl.EnableAttr(Attribute.IS_BROKEN)
+        }
     }
 
     // C++ TypeCheckJavaInterop.cpp:333-349.
     public func CheckJavaMirrorTypes(decl: ClassLikeDecl): Unit {
-        // FEATURE_DEBT(JAVA_AFTERTYPECHECK_BODY): C++
-        // src/Sema/NativeFFI/Java/AfterTypeCheck/TypeCheckJavaInterop.cpp:335-339.
+        JavaInteropTypeChecker(false, diag).CheckJavaCompatibleDeclSignature(decl)
     }
 
     public func CheckJavaImplTypes(decl: ClassLikeDecl): Unit {
-        // FEATURE_DEBT(JAVA_AFTERTYPECHECK_BODY): C++
-        // src/Sema/NativeFFI/Java/AfterTypeCheck/TypeCheckJavaInterop.cpp:344-348.
+        JavaInteropTypeChecker(true, diag).CheckJavaCompatibleDeclSignature(decl)
     }
 
     // C++ TypeCheckJavaInterop.cpp:377-390.
@@ -310,12 +322,17 @@ public class JavaInteropManager {
 
     // C++ TypeCheckJavaInterop.cpp:392-418.
     public func CheckTypes(classLikeDecl: ClassLikeDecl): Unit {
-        if (!classLikeDecl.TestAnyAttr(Attribute.JAVA_MIRROR, Attribute.JAVA_MIRROR_SUBTYPE)) {
+        if (!classLikeDecl.TestAnyAttr(Attribute.JAVA_FOREIGN, Attribute.JAVA_EXPORT)) {
             return
         }
         hasMirrorOrImpl = true
-        // FEATURE_DEBT(JAVA_AFTERTYPECHECK_BODY): C++
-        // src/Sema/NativeFFI/Java/AfterTypeCheck/TypeCheckJavaInterop.cpp:400-417.
+        if (classLikeDecl.IsJavaForeign()) {
+            CheckJavaMirrorTypes(classLikeDecl)
+        } else if (classLikeDecl.IsJavaExport()) {
+            CJC_ASSERT(classLikeDecl.astKind != ASTKind.INTERFACE_DECL)
+            CJC_ASSERT(!classLikeDecl.TestAttr(Attribute.ABSTRACT))
+            CheckJavaImplTypes(classLikeDecl)
+        }
     }
 
     // C++ EscapeChecks.cpp:86-100.
@@ -337,7 +354,7 @@ public class JavaInteropManager {
     }
 
     // C++ DesugarPackage.cpp:56-77.
-    public func DesugarPackage(pkg: Package, memberMap: HashMap<InheritableDecl, MemberMap>,
+    public func DesugarPackage(pkg: Package,
         desugarPropRef: (Node) -> Unit): Unit {
         if (!InteropLibBridge.IsInteropLibAccessible(importManager)) {
             if (hasMirrorOrImpl) {
@@ -346,9 +363,8 @@ public class JavaInteropManager {
             }
             return
         }
-        let desugarer = JavaDesugarManager(importManager, typeManager, diag, mangler, javagenOutputPath, outputPath,
-            memberMap)
-        let ctx = AfterTypeCheckContext(importManager, typeManager, pkg, hasMirrorOrImpl)
+        let desugarer = JavaDesugarManager(importManager, typeManager, diag, mangler, javagenOutputPath, outputPath)
+        let ctx = AfterTypeCheckContext(importManager, typeManager, pkg, hasMirrorOrImpl, targetTriple)
         if (hasMirrorOrImpl) {
             desugarer.ProcessJavaMirrorImplStages(ctx, desugarPropRef)
         }

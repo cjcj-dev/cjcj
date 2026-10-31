@@ -1,6 +1,7 @@
 package cjcj::frontend
 
 import std.collection.*
+import cjcj::utils.FileUtil
 
 public class CompilerInvocation {
     public var globalOptions: GlobalOptions = GlobalOptions()
@@ -36,7 +37,11 @@ public class CompilerInvocation {
         let runtimeLib = "libcangjie-runtime.so"
         let exePath = globalOptions.executablePath
         let hostPathName = globalOptions.GetCangjieLibHostPathName()
-        let basePath = JoinPath(GetDirPath(exePath), relativePath)
+        let basePath = if (relativePath == "../runtime/lib") {
+            FileUtil.GetCompilerRuntimeBasePath(exePath)
+        } else {
+            JoinPath(GetDirPath(exePath), relativePath)
+        }
         return JoinPath(JoinPath(basePath, hostPathName), runtimeLib)
     }
 }

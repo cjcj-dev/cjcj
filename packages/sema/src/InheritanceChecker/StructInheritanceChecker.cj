@@ -10,6 +10,8 @@ import cjcj::option.GlobalOptions as OptionGlobalOptions
 import cjcj::sema.*
 import cjcj::sema.NativeFFI.{GetAnnotation, GetForeignNameAnnotation}
 import cjcj::sema.Test.TestManager
+import cjcj::sema.NativeFFI.Java.GenerateJavaForeignAbstractStub
+import cjcj::sema.NativeFFI.ObjC.GenerateObjCForeignAbstractStub
 
 private func DeclRange(decl: Decl): BasicRange {
     return MakeRange(decl.begin, decl.end)
@@ -430,10 +432,10 @@ private func NeedCheck(parent: MemberSignature, child: MemberSignature): Bool {
     if (!parentDecl.IsFuncOrProp()) {
         return false
     }
-    if (!parentDecl.outerDecl.getOrThrow().TestAnyAttr(Attribute.JAVA_MIRROR, Attribute.JAVA_MIRROR_SUBTYPE)) {
+    if (!parentDecl.outerDecl.getOrThrow().TestAnyAttr(Attribute.JAVA_FOREIGN, Attribute.JAVA_EXPORT)) {
         return false
     }
-    if (!childDecl.outerDecl.getOrThrow().TestAnyAttr(Attribute.JAVA_MIRROR, Attribute.JAVA_MIRROR_SUBTYPE)) {
+    if (!childDecl.outerDecl.getOrThrow().TestAnyAttr(Attribute.JAVA_FOREIGN, Attribute.JAVA_EXPORT)) {
         return false
     }
     if (SameDecl(parentDecl.outerDecl.getOrThrow(), childDecl.outerDecl.getOrThrow())) {
@@ -501,10 +503,10 @@ private func NeedCheckForeignName(parent: MemberSignature, child: MemberSignatur
     if (!parentDecl.IsFuncOrProp()) {
         return false
     }
-    if (!parentDecl.outerDecl.getOrThrow().TestAnyAttr(Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_IMPL)) {
+    if (!parentDecl.outerDecl.getOrThrow().TestAnyAttr(Attribute.OBJ_C_FOREIGN, Attribute.OBJ_C_EXPORT)) {
         return false
     }
-    if (!childDecl.outerDecl.getOrThrow().TestAnyAttr(Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_IMPL)) {
+    if (!childDecl.outerDecl.getOrThrow().TestAnyAttr(Attribute.OBJ_C_FOREIGN, Attribute.OBJ_C_EXPORT)) {
         return false
     }
     if (SameDecl(parentDecl.outerDecl.getOrThrow(), childDecl.outerDecl.getOrThrow())) {
@@ -598,6 +600,8 @@ public class StructInheritanceChecker {
         }
         CheckAllUpperBoundsConfliction()
         CheckInstDupFuncsInNominalDecls(this)
+        GenerateJavaForeignAbstractStub(structInheritedMembers)
+        GenerateObjCForeignAbstractStub(structInheritedMembers)
     }
 
     @When[backend != "cjnative"]
@@ -634,17 +638,6 @@ public class StructInheritanceChecker {
         }
         CheckAllUpperBoundsConfliction()
         CheckInstDupFuncsInNominalDecls(this)
-    }
-
-    public func MoveStructInheritedMembers(): HashMap<InheritableDecl, MemberMap> {
-        let out = HashMap<InheritableDecl, MemberMap>()
-        for (decl in structInheritedMembers.keys()) {
-            if (let Some(members) <- structInheritedMembers.get(decl)) {
-                out[decl] = members.Clone()
-            }
-        }
-        structInheritedMembers.clear()
-        return out
     }
 
     public func HasInstantiatedKey(key: DeclTySeqKey): Bool {
@@ -1544,6 +1537,19 @@ public class StructInheritanceChecker {
 
     @When[backend == "cjnative"]
     private func CheckNativeFFI(parent: MemberSignature, child: MemberSignature): Unit {
+        let parentDecl = parent.decl.getOrThrow()
+        let childDecl = child.decl.getOrThrow()
+        let sameStatus = parentDecl.TestAttr(Attribute.STATIC) == childDecl.TestAttr(Attribute.STATIC) &&
+            parentDecl.TestAttr(Attribute.GENERIC) == childDecl.TestAttr(Attribute.GENERIC) &&
+            parentDecl.astKind == childDecl.astKind
+        let parentFuncTy = parent.ty.getOrThrow() as FuncTy
+        let childFuncTy = child.ty.getOrThrow() as FuncTy
+        let sameParams = (parentFuncTy.isNone() && childFuncTy.isNone()) ||
+            (parentFuncTy.isSome() && childFuncTy.isSome() && parentDecl.IsFunc() && childDecl.IsFunc() &&
+                typeManager.IsFuncParameterTypesIdentical(parentFuncTy.getOrThrow(), childFuncTy.getOrThrow()))
+        if (!sameStatus || !sameParams) {
+            return
+        }
         if (!checkingDecls.isEmpty()) {
             let checkingDecl = checkingDecls[checkingDecls.size - 1]
             CheckForeignName(diag, typeManager, parent, child, checkingDecl)
@@ -1772,8 +1778,8 @@ public class StructInheritanceChecker {
 
     private func DiagnoseForUnimplementedInterfaces(members: MemberMap, structDecl: Decl): Unit {
         if (structDecl.TestAttr(Attribute.FOREIGN) ||
-            structDecl.TestAnyAttr(Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_MIRROR_INTERFACE_HANDLE_WRAPPER) ||
-            structDecl.TestAttr(Attribute.JAVA_MIRROR_SYNTHETIC_WRAPPER)) {
+            structDecl.TestAnyAttr(Attribute.OBJ_C_FOREIGN, Attribute.OBJ_C_FOREIGN_INTERFACE_HANDLE_WRAPPER) ||
+            structDecl.TestAttr(Attribute.JAVA_FOREIGN_SYNTHETIC_WRAPPER)) {
             return
         }
         let prefix = if (structDecl.astKind == ASTKind.EXTEND_DECL) { "extend " } else { "" }

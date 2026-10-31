@@ -50,17 +50,18 @@ public class PopulateJavaMirrorStubs {
             userCtor.EnableAttr(Attribute.IS_BROKEN)
             return
         }
-        let nodes = ArrayList<Node>()
-        for (node in constructorExpr.getOrThrow().body) {
-            nodes.add(node)
-        }
+        let scopeBody = constructorExpr.getOrThrow()
+        scopeBody.curFile = curFile
+        let exclusive = WrapWithExclusiveScope(ctx, scopeBody,
+            userCtor.funcBody.getOrThrow().retType.getOrThrow().GetTy().getOrThrow())
+        if (exclusive.isNone()) { userCtor.EnableAttr(Attribute.IS_BROKEN); return }
         let thisCall = CreateThisCall(userCtor.outerDecl.getOrThrow(), wrappingCtor,
             wrappingCtor.GetTy().getOrThrow(), file)
-        thisCall.args.add(CreateFuncArg(WrapReturningLambdaCall(typeManager, nodes)))
+        thisCall.args.add(CreateFuncArg(exclusive.getOrThrow()))
         userCtor.funcBody.getOrThrow().body.getOrThrow().body.add(thisCall)
     }
 
-    private func PopulateJArrayMethod(jarray: ClassDecl, userMethod: FuncDecl): Unit {
+    private func PopulateJArrayMethod(ctx: AfterTypeCheckContext, jarray: ClassDecl, userMethod: FuncDecl): Unit {
         if (userMethod.TestAttr(Attribute.STATIC)) {
             return
         }
@@ -93,19 +94,19 @@ public class PopulateJavaMirrorStubs {
         }
         let jniEnv = CreateTmpVarDecl(None, Some((envCall.getOrThrow() as Expr).getOrThrow()))
         jniEnv.curFile = curFile
-        body.add(jniEnv)
+        let scopeBody = CreateBlock(ArrayList<Node>([jniEnv]), retTy)
+        scopeBody.curFile = curFile
         let paramList = userMethod.funcBody.getOrThrow().paramLists[0]
         let methodCall = ilib.CreateCFFICallArrayMethodCall(
             WithinFile<RefExpr>(CreateRefExpr(jniEnv), curFile),
             CreateJavaRefCall(jarray, curFile), paramList, genericParam, GetArrayOperationKind(userMethod))
-        if (let Some(call) <- methodCall) {
-            if (let Some(ty) <- retTy) {
-                if (let Some(unwrapped) <- ilib.UnwrapJavaEntity(call, ty, jarray)) {
-                    body.add(unwrapped)
-                    return
-                }
-            }
-            body.add(call)
+        if (let Some(call) <- methodCall && let Some(ty) <- retTy) {
+            let converted = ilib.ConvertJavaResultToCJ(call, ty, Some(jarray))
+            if (converted.isNone()) { userMethod.EnableAttr(Attribute.IS_BROKEN); return }
+            scopeBody.body.add(converted.getOrThrow())
+            let exclusive = WrapWithExclusiveScope(ctx, scopeBody, ty)
+            if (exclusive.isNone()) { userMethod.EnableAttr(Attribute.IS_BROKEN); return }
+            body.add(exclusive.getOrThrow())
             return
         }
         userMethod.EnableAttr(Attribute.IS_BROKEN)
@@ -114,7 +115,7 @@ public class PopulateJavaMirrorStubs {
     private func PopulateUserMethod(ctx: AfterTypeCheckContext, mirror: ClassLikeDecl, userMethod: FuncDecl): Unit {
         if (IsJArray(mirror)) {
             if (let Some(jarray) <- (mirror as ClassDecl)) {
-                PopulateJArrayMethod(jarray, userMethod)
+                PopulateJArrayMethod(ctx, jarray, userMethod)
             }
             return
         }
@@ -161,9 +162,10 @@ public class PopulateJavaMirrorStubs {
             userMethod.EnableAttr(Attribute.IS_BROKEN)
             return
         }
-        for (node in methodBlock.getOrThrow().body) {
-            body.add(node)
-        }
+        methodBlock.getOrThrow().curFile = curFile
+        let exclusive = WrapWithExclusiveScope(ctx, methodBlock.getOrThrow(), ty)
+        if (exclusive.isNone()) { userMethod.EnableAttr(Attribute.IS_BROKEN); return }
+        body.add(exclusive.getOrThrow())
         if (IsSynthetic(mirror)) {
             userMethod.DisableAttr(Attribute.ABSTRACT)
         }
@@ -220,7 +222,18 @@ public class PopulateJavaMirrorStubs {
             body.add(tmp)
             let ref = WithinFile<RefExpr>(CreateRefExpr(tmp), curFile)
             body.add(CreateReturnExpr(ref, getter.funcBody))
+        } else {
+            getter.EnableAttr(Attribute.IS_BROKEN)
+            return
         }
+        let getterBody = getter.funcBody.getOrThrow().body.getOrThrow()
+        getterBody.curFile = curFile
+        let exclusive = WrapWithExclusiveScope(ctx, getterBody, property.GetTy().getOrThrow())
+        if (exclusive.isNone()) { getter.EnableAttr(Attribute.IS_BROKEN); return }
+        let replacement = CreateBlock(ArrayList<Node>(), property.GetTy())
+        replacement.curFile = curFile
+        replacement.body.add(CreateReturnExpr(exclusive.getOrThrow(), getter.funcBody))
+        getter.funcBody.getOrThrow().body = Some(replacement)
     }
 
     private func InsertPropSetter(ctx: AfterTypeCheckContext, mirror: ClassLikeDecl, property: PropDecl): Unit {
@@ -265,11 +278,12 @@ public class PopulateJavaMirrorStubs {
                 setterBlock = factory.CreateInstanceJavaFieldSetCall(ctx, file, asObj, signature, ty, paramRef)
             }
         }
-        if (let Some(block) <- setterBlock) {
-            for (node in block.body) {
-                body.add(node)
-            }
-        }
+        if (setterBlock.isNone()) { setter.EnableAttr(Attribute.IS_BROKEN); return }
+        let block = setterBlock.getOrThrow()
+        block.curFile = curFile
+        let exclusive = WrapWithExclusiveScope(ctx, block, unitTy)
+        if (exclusive.isNone()) { setter.EnableAttr(Attribute.IS_BROKEN); return }
+        body.add(exclusive.getOrThrow())
     }
 
     private func PopulateUserProperty(ctx: AfterTypeCheckContext, mirror: ClassLikeDecl, property: PropDecl): Unit {

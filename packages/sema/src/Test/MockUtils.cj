@@ -839,7 +839,9 @@ public class MockUtils {
             CJC_ASSERT(mockedFuncDecl.funcBody.isSome())
             let mockedFuncBody = mockedFuncDecl.funcBody.getOrThrow()
             if (let Some(retType) <- mockedFuncBody.retType) {
-                UpdateRefTypesTarget(retType, generic, newGeneric)
+                let typeMapping = GenerateTypeMapping(originalDecl, typeParamTys)
+                mockedFuncBody.retType = CreateType(typeManager.GetInstantiatedTy(
+                    retType.GetTy().getOrThrow(), typeMapping))
             }
             mockedFuncBody.generic = newGeneric
         } else {
@@ -912,36 +914,6 @@ public class MockUtils {
         return genericSubsts
     }
 
-    public static func GetIndexOfGenericTypeParam(ty: Ty, generic: Generic): Int64 {
-        var idx: Int64 = 0
-        for (typeParam in generic.typeParameters) {
-            if (let Some(typeParamTy) <- typeParam.GetTy()) {
-                if (refEq(typeParamTy, ty)) {
-                    return idx
-                }
-            }
-            idx++
-        }
-        return -1
-    }
-
-    public static func UpdateRefTypesTarget(typeNode: Type, oldGeneric: Generic, newGeneric: Generic): Unit {
-        if (let None <- (typeNode as RefType)) {
-            return
-        }
-        let refType = (typeNode as RefType).getOrThrow()
-        if (let Some(typeTy) <- refType.GetTy()) {
-            if (let Some(genericTy) <- (typeTy as GenericsTy)) {
-                let typeParamIndex = GetIndexOfGenericTypeParam(genericTy, oldGeneric)
-                if (typeParamIndex != -1) {
-                    refType.ref.target = newGeneric.typeParameters[typeParamIndex]
-                }
-            }
-        }
-        for (typeArg in refType.typeArguments) {
-            UpdateRefTypesTarget(typeArg, oldGeneric, newGeneric)
-        }
-    }
 }
 
 private func GetVarDeclAccessorKinds(varDecl: Decl): (AccessorKind, AccessorKind) {

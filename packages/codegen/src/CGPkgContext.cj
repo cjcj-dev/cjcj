@@ -89,14 +89,20 @@ public class CGPkgContext {
     }
 
     public func Clear(): Unit {
+        var failure: Option<Exception> = None
         for (cgMod in cgMods) {
-            cgMod.Clear()
+            try {
+                cgMod.Clear()
+            } catch (e: Exception) {
+                if (failure.isNone()) { failure = Some(e) }
+            }
         }
         subTypeMap.clear()
         correctedCachedMangleMap.Clear()
         quickCHIRValues.Do({ object => object.clear() })
         localizedSymbols.Do({ object => object.clear() })
         cgMods.clear()
+        if (let Some(e) <- failure) { throw e }
     }
 
     public func GetCHIRBuilder(): CHIRBuilder {
@@ -151,6 +157,7 @@ public class CGPkgContext {
 
     public func ReleaseLLVMModules(): ArrayList<LLVMModuleHandle> {
         let out = ArrayList<LLVMModuleHandle>()
+        try {
         for (cgMod in cgMods) {
             if (let Some(moduleHandle) <- cgMod.ReleaseLLVMModule()) {
                 out.add(moduleHandle)
@@ -159,6 +166,10 @@ public class CGPkgContext {
         }
         cgMods.clear()
         return out
+        } catch (e: Exception) {
+            try { ClearPackageModules(out) } catch (_: Exception) { () }
+            throw e
+        }
     }
 
     public func AddLocalizedSymbol(symName: String): Unit {

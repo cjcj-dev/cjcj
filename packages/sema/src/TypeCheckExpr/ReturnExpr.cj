@@ -9,27 +9,6 @@ private func invalidReturnExpr(re: ReturnExpr): Ty {
     return invalidTy
 }
 
-private func hasImportedGenericJava(node: Node): Bool {
-    if (let Some(_) <- HasJavaAttr(node)) {
-        return node.TestAttr(Attribute.GENERIC) && node.TestAttr(Attribute.IMPORTED)
-    }
-    return false
-}
-
-public func NeedCheckBodyReturn(fb: FuncBody): Bool {
-    if (let Some(classLike) <- fb.parentClassLike) {
-        if (hasImportedGenericJava(classLike)) {
-            return false
-        }
-    }
-    if (let Some(funcDecl) <- fb.funcDecl) {
-        if (hasImportedGenericJava(funcDecl)) {
-            return false
-        }
-    }
-    return true
-}
-
 private func replaceClassThisOutsideClass(re: ReturnExpr, expr: Expr): Unit {
     if (let Some(fb) <- re.refFuncBody) {
         if (let Some(parent) <- fb.parentClassLike) {
@@ -103,7 +82,7 @@ public func SynReturnExpr(typeManager: TypeManager, re: ReturnExpr): Ty {
                     isWellTyped = synthesizeReturnValue(typeManager, innerExpr)
                 }
                 replaceClassThisOutsideClass(re, innerExpr)
-                if (!isWellTyped && NeedCheckBodyReturn(fb)) {
+                if (!isWellTyped) {
                     return invalidReturnExpr(re)
                 }
                 let nothingTy = TypeManager.GetNothingTy()

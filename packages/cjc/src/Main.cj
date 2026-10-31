@@ -5,6 +5,15 @@ import std.collection.*
 import cjcj::driver.RunDriverMain
 import cjcj::utils.StringifyArgumentVector
 
+@When[os == "Windows"]
+private func GetArgumentVector(): Array<String> {
+    // Windows std.env obtains this vector from GetCommandLineW/CommandLineToArgvW.
+    // getCommand() is the real process image, which differs from the public
+    // SDK argv[0] when the launcher retains the compiler under libexec.
+    return getCommandLine()
+}
+
+@When[os != "Windows"]
 private func GetArgumentVector(): Array<String> {
     let command = getCommand()
     let commandLine = getCommandLine()

@@ -164,6 +164,26 @@ private func GenerateApply(irBuilder: IRBuilder2, callee: Value, args: ArrayList
     return LLVMNullValue()
 }
 
+private func AddSubWordIntParamAttrsForWrapper(cgMod: CGModule, funcTy: FuncType,
+    call: LLVMValueRef, llvmArgs: ArrayList<LLVMValueRef>, sret: Bool): Unit {
+    var index: Int64 = if (sret) { 1 } else { 0 }
+    let params = funcTy.GetParamTypes()
+    for (paramIndex in 0..params.size) {
+        let ty = params[paramIndex]
+        let count = cgMod.GetCGCFFI().GetLoweredParamCount(funcTy, paramIndex)
+        if (count == 0) { continue }
+        if (index >= llvmArgs.size) { break }
+        let loweredTy = unsafe { LLVMTypeOf(llvmArgs[index]) }
+        if ((ty.IsBoolean() || ty.IsInteger()) && unsafe { LLVMGetTypeKind(loweredTy) } == 8 &&
+            unsafe { LLVMGetIntTypeWidth(loweredTy) } < 32u32) {
+            AddParamAttr(call, UInt32(index), "noundef")
+            AddParamAttr(call, UInt32(index), if (ty.IsSignedInteger()) { "signext" } else { "zeroext" })
+        }
+        // Aggregate coercion can occupy multiple slots in our full FFI implementation.
+        index += count
+    }
+}
+
 private func AddAttributeForWrapper(cgMod: CGModule, function: LLVMValueRef, callInst: LLVMValueRef, varFuncTy: LLVMTypeRef,
     chirFuncTy: FuncType, sret: Bool): Unit {
     AddLinkageTypeMetadata(function, LLVMLinkage.Internal, false)
@@ -173,6 +193,8 @@ private func AddAttributeForWrapper(cgMod: CGModule, function: LLVMValueRef, cal
         AddParamAttr(callInst, 0u32, "noalias")
         AddSRetAttribute(function, GetPointerElementType(unsafe { LLVMTypeOf(LLVMGetParam(function, 0u32)) }))
         AddSRetAttribute(callInst, GetPointerElementType(unsafe { LLVMTypeOf(LLVMGetParam(function, 0u32)) }))
+        AddAlignAttributeAtIndex(function, 1u32, GetTypeAlignment(cgMod, chirFuncTy.GetReturnType()))
+        AddAlignAttributeAtIndex(callInst, 1u32, GetTypeAlignment(cgMod, chirFuncTy.GetReturnType()))
         if (cgMod.GetCGContext().GetCompileOptions().target.os == OSType.WINDOWS) {
             let sretParamType = GetPointerElementType(unsafe { LLVMTypeOf(LLVMGetParam(function, 0u32)) })
             let align = GetTypeAlignment(cgMod, sretParamType)
@@ -207,29 +229,23 @@ private func AddAttributeForWrapper(cgMod: CGModule, function: LLVMValueRef, cal
         return
     }
     let chirParamTys = chirFuncTy.GetParamTypes()
-    var cumulativeOffset: Int64 = 0
-    let sretOffset = if (sret) { 1 } else { 0 }
+    var paramIdx: Int64 = if (sret) { 1 } else { 0 }
     var idx: Int64 = 0
     while (idx < chirParamTys.size) {
         let chirParamTy = chirParamTys[idx]
-        if (!IsCommonStruct(chirParamTy)) {
+        let count = cgMod.GetCGCFFI().GetLoweredParamCount(chirFuncTy, idx)
+        if (count == 0) {
             idx++
             continue
         }
-        if (IsZeroSizedTypeInC(cgMod, chirParamTy)) {
-            cumulativeOffset--
-            idx++
-            continue
-        }
-        let paramIdx = idx + cumulativeOffset + sretOffset
         let paramType = unsafe { LLVMTypeOf(LLVMGetParam(function, UInt32(paramIdx + 1))) }
-        if (!IsLitStructPtrType(paramType) && IsStructPtrType(paramType)) {
+        if (IsCommonStruct(chirParamTy) && !IsLitStructPtrType(paramType) && IsStructPtrType(paramType)) {
             let byValType = GetPointerElementType(paramType)
-            AddByValAttribute(function, UInt32(paramIdx + 1), byValType, align: GetTypeAlignment(cgMod, paramType))
-            AddTypeAttributeAtIndex(callInst, UInt32(paramIdx + 1), "byval", byValType)
-        } else if (GetTypeSize(cgMod, paramType) < GetTypeSize(cgMod, chirParamTy)) {
-            cumulativeOffset++
+            let align = GetTypeAlignment(cgMod, chirParamTy)
+            AddByValAttribute(function, UInt32(paramIdx + 1), byValType, align: align)
+            AddByValAttribute(callInst, UInt32(paramIdx), byValType, align: align)
         }
+        paramIdx += count
         idx++
     }
 }
@@ -258,6 +274,7 @@ private func GenerateWrapperFuncBody(cgMod: CGModule, irBuilder: IRBuilder2, fun
         } else {
             let _ = irBuilder.CreateRet(callInst)
         }
+        AddSubWordIntParamAttrsForWrapper(cgMod, chirFuncTy, callInst, llvmArgs, sret)
         AddAttributeForWrapper(cgMod, function, callInst, varFuncTy, chirFuncTy, sret)
     }
     irBuilder.SetInsertPoint(oldBlock)
@@ -354,105 +371,92 @@ private func HasAddrSpace(value: LLVMValueRef, addrSpace: UInt32): Bool {
         unsafe { LLVMGetPointerAddressSpace(llvmType) } == addrSpace
 }
 
-@When[os == "macOS" || os == "iOS"]
-private func CreateCFuncCallOrInvoke(cgMod: CGModule, irBuilder: IRBuilder2, callee: LLVMValueRef,
-    args: ArrayList<CGValue>, retTy: Type, isSRet: Bool): LLVMValueRef {
+private func CreateCFuncCallArgs(cgMod: CGModule, irBuilder: IRBuilder2,
+    args: ArrayList<CGValue>, retTy: Type, isSRet: Bool): ArrayList<LLVMValueRef> {
     let llvmArgs = ArrayList<LLVMValueRef>()
-    var ret = LLVMNullValue()
     if (isSRet) {
-        ret = irBuilder.CreateEntryAlloca(CGType.GetOrCreate(cgMod, retTy))
-        llvmArgs.add(ret)
+        llvmArgs.add(irBuilder.CreateEntryAlloca(CGType.GetOrCreate(cgMod, retTy)))
     }
-    for (cgArg in args) {
-        let cgArgTy = cgArg.GetCGType().getOrThrow().GetOriginal()
-        if (IsZeroSizedTypeInC(cgMod, cgArgTy)) {
-            continue
-        }
-        if (HasAddrSpace(cgArg.GetRawValue(), 1u32)) {
-            llvmArgs.add(irBuilder.CreateAddrSpaceCast(cgArg.GetRawValue(),
-                CGType.GetOrCreate(cgMod, cgArgTy).GetLLVMType()))
+    for (arg in args) {
+        let ty = arg.GetCGType().getOrThrow().GetOriginal()
+        if (IsZeroSizedTypeInC(cgMod, ty)) { continue }
+        if (HasAddrSpace(arg.GetRawValue(), 1u32)) {
+            llvmArgs.add(irBuilder.CreateAddrSpaceCast(arg.GetRawValue(),
+                CGType.GetOrCreate(cgMod, ty).GetLLVMType()))
         } else {
-            llvmArgs.add(cgArg.GetRawValue())
+            llvmArgs.add(arg.GetRawValue())
         }
     }
-    let calleeType = unsafe { LLVMGlobalGetValueType(callee) }
-    let callRet = irBuilder.CreateCallOrInvoke(callee, calleeType, llvmArgs)
-    if (cgMod.GetCGContext().GetCompileOptions().target.arch != ArchType.AARCH64) {
-        var paramIdx: UInt32 = 0u32
-        let paramCount = unsafe { LLVMCountParams(callee) }
-        while (paramIdx < paramCount) {
-            if (HasAttributeAtIndex(callee, paramIdx + 1u32, "byval")) {
-                AddTypeAttributeAtIndex(callRet, paramIdx + 1u32, "byval",
-                    GetPointerElementType(unsafe { LLVMTypeOf(LLVMGetParam(callee, paramIdx)) }))
-            }
-            paramIdx++
-        }
-    }
-    let targetTriple = cgMod.GetCGContext().GetCompileOptions().target
-    if (targetTriple.arch == ArchType.AARCH64 &&
-        (targetTriple.os == OSType.DARWIN || targetTriple.os == OSType.IOS)) {
-        if (HasAttributeAtIndex(callee, 0u32, "signext")) {
-            AddRetAttr(callRet, "signext")
-        } else if (HasAttributeAtIndex(callee, 0u32, "zeroext")) {
-            AddRetAttr(callRet, "zeroext")
-        }
-        var paramIdx: UInt32 = 0u32
-        let paramCount = unsafe { LLVMCountParams(callee) }
-        while (paramIdx < paramCount) {
-            if (HasAttributeAtIndex(callee, paramIdx + 1u32, "noundef")) {
-                AddParamAttr(callRet, paramIdx, "noundef")
-            }
-            if (HasAttributeAtIndex(callee, paramIdx + 1u32, "signext")) {
-                AddParamAttr(callRet, paramIdx, "signext")
-            } else if (HasAttributeAtIndex(callee, paramIdx + 1u32, "zeroext")) {
-                AddParamAttr(callRet, paramIdx, "zeroext")
-            }
-            paramIdx++
-        }
-    }
-    if (isSRet) {
-        AddParamAttr(callRet, 0u32, "noalias")
-        AddSRetAttribute(callRet, GetPointerElementType(unsafe { LLVMTypeOf(ret) }))
-        return ret
-    }
-    return callRet
+    return llvmArgs
 }
 
-@When[os != "macOS" && os != "iOS"]
+private func CopyCalleeDeclAttrsToCallSite(cgMod: CGModule, callee: LLVMValueRef,
+    call: LLVMValueRef): Unit {
+    if (cgMod.GetCGContext().GetCompileOptions().target.arch != ArchType.AARCH64) {
+        var index = 0u32
+        while (index < unsafe { LLVMCountParams(callee) }) {
+            if (HasAttributeAtIndex(callee, index + 1u32, "byval")) {
+                AddTypeAttributeAtIndex(call, index + 1u32, "byval",
+                    GetPointerElementType(unsafe { LLVMTypeOf(LLVMGetParam(callee, index)) }))
+                let alignment = GetAttributeAtIndex(callee, index + 1u32, "align")
+                if (!alignment.isNull()) {
+                    unsafe { LLVMAddCallSiteAttribute(call, index + 1u32, alignment) }
+                }
+            }
+            index++
+        }
+    }
+    for (ext in ["signext", "zeroext"]) {
+        if (HasAttributeAtIndex(callee, 0u32, ext)) { AddRetAttr(call, ext) }
+    }
+}
+
+private func AddSubWordIntParamAttrsForDirectCall(cgMod: CGModule, callee: LLVMValueRef,
+    call: LLVMValueRef, args: ArrayList<CGValue>, llvmArgs: ArrayList<LLVMValueRef>, sret: Bool): Unit {
+    let fixedCount = Int64(unsafe { LLVMCountParams(callee) })
+    CJC_ASSERT(fixedCount <= llvmArgs.size)
+    var index: Int64 = if (sret) { 1 } else { 0 }
+    for (arg in args) {
+        if (index >= fixedCount || index >= llvmArgs.size) { break }
+        let ty = arg.GetCGType().getOrThrow().GetOriginal()
+        if (IsZeroSizedTypeInC(cgMod, ty)) { continue }
+        if (ty.IsBoolean() || ty.IsInteger()) {
+            AddParamAttr(call, UInt32(index), "noundef")
+            let loweredTy = unsafe { LLVMTypeOf(llvmArgs[index]) }
+            if (unsafe { LLVMGetTypeKind(loweredTy) } == 8 &&
+                unsafe { LLVMGetIntTypeWidth(loweredTy) } < 32u32) {
+                AddParamAttr(call, UInt32(index), if (ty.IsSignedInteger()) { "signext" } else { "zeroext" })
+            }
+        }
+        index++
+    }
+}
+
 private func CreateCFuncCallOrInvoke(cgMod: CGModule, irBuilder: IRBuilder2, callee: LLVMValueRef,
     args: ArrayList<CGValue>, retTy: Type, isSRet: Bool): LLVMValueRef {
-    let llvmArgs = ArrayList<LLVMValueRef>()
-    var ret = LLVMNullValue()
-    if (isSRet) {
-        ret = irBuilder.CreateEntryAlloca(CGType.GetOrCreate(cgMod, retTy))
-        llvmArgs.add(ret)
-    }
-    for (cgArg in args) {
-        let cgArgTy = cgArg.GetCGType().getOrThrow().GetOriginal()
-        if (IsZeroSizedTypeInC(cgMod, cgArgTy)) {
-            continue
-        }
-        if (HasAddrSpace(cgArg.GetRawValue(), 1u32)) {
-            llvmArgs.add(irBuilder.CreateAddrSpaceCast(cgArg.GetRawValue(),
-                CGType.GetOrCreate(cgMod, cgArgTy).GetLLVMType()))
-        } else {
-            llvmArgs.add(cgArg.GetRawValue())
-        }
-    }
+    let llvmArgs = CreateCFuncCallArgs(cgMod, irBuilder, args, retTy, isSRet)
     let calleeType = unsafe { LLVMGlobalGetValueType(callee) }
     let callRet = irBuilder.CreateCallOrInvoke(callee, calleeType, llvmArgs)
-    if (cgMod.GetCGContext().GetCompileOptions().target.arch != ArchType.AARCH64) {
-        var paramIdx: UInt32 = 0u32
-        let paramCount = unsafe { LLVMCountParams(callee) }
-        while (paramIdx < paramCount) {
-            if (HasAttributeAtIndex(callee, paramIdx + 1u32, "byval")) {
-                AddTypeAttributeAtIndex(callRet, paramIdx + 1u32, "byval",
-                    GetPointerElementType(unsafe { LLVMTypeOf(LLVMGetParam(callee, paramIdx)) }))
+    CopyCalleeDeclAttrsToCallSite(cgMod, callee, callRet)
+    AddSubWordIntParamAttrsForDirectCall(cgMod, callee, callRet, args, llvmArgs, isSRet)
+    // Retain our complete SysV FFI lowering: variadic memory aggregates have no
+    // declaration parameter from which to copy byval and alignment.
+    if (cgMod.GetCGContext().GetCompileOptions().target.arch == ArchType.X86_64 &&
+        cgMod.GetCGContext().GetCompileOptions().target.os != OSType.WINDOWS) {
+        let fixedCount = unsafe { LLVMCountParams(callee) }
+        var index = if (isSRet) { 1u32 } else { 0u32 }
+        for (arg in args) {
+            let ty = CGType.GetOrCreate(cgMod, arg.GetCGType().getOrThrow().GetOriginal().StripAllRefs())
+            if (IsZeroSizedTypeInC(cgMod, ty.GetOriginal())) { continue }
+            if (index >= fixedCount && ty.GetOriginal().IsStruct() &&
+                unsafe { LLVMGetTypeKind(LLVMTypeOf(arg.GetRawValue())) } == LLVM_POINTER_TYPE_KIND) {
+                AddByValAttribute(callRet, index, ty.GetLLVMType(), align: UInt64(ty.GetAlign().getOrThrow()))
             }
-            paramIdx++
+            index++
         }
     }
     if (isSRet) {
+        let ret = llvmArgs[0]
         AddParamAttr(callRet, 0u32, "noalias")
         AddSRetAttribute(callRet, GetPointerElementType(unsafe { LLVMTypeOf(ret) }))
         return ret
@@ -483,7 +487,12 @@ private func HandleForeignFuncCall(cgMod: CGModule, irBuilder: IRBuilder2, args:
         return args
     }
     let processedArgs = ArrayList<CGValue>()
-    let paramSize = funcTy.GetNumOfParams()
+    var paramSize: Int64 = 0
+    for (paramTy in funcTy.GetParamTypes()) {
+        if (!IsZeroSizedTypeInC(cgMod, paramTy)) {
+            paramSize++
+        }
+    }
     var argCount: Int64 = 0
     for (arg in args) {
         argCount++
@@ -511,7 +520,18 @@ private func HandleApplyCFunc(cgMod: CGModule, irBuilder: IRBuilder2, callee: Va
     }
     let processedArgs = HandleForeignFuncCall(cgMod, irBuilder, args, funcTy)
     let cffi = cgMod.GetCGCFFI()
-    let handleRet = cffi.ProcessInvocation(funcTy, processedArgs, irBuilder)
+    var invocationType = funcTy
+    // SysV variadic aggregates consume the same register budget as fixed
+    // arguments. Classify the promoted actual types, including sret, together.
+    let target = cgMod.GetCGContext().GetCompileOptions().target
+    if (funcTy.HasVarArg() && (target.os == OSType.LINUX || target.os == OSType.DARWIN) && target.arch == ArchType.X86_64) {
+        let actualTypes = ArrayList<Type>()
+        for (arg in processedArgs) { actualTypes.add(arg.GetCGType().getOrThrow().GetOriginal().StripAllRefs()) }
+        invocationType = cgMod.GetCGContext().GetCHIRBuilder().context.GetFuncTy(actualTypes,
+            funcTy.GetReturnType(), hasVarLenParam: true, isCFunc: true)
+        let _ = cffi.GetCFuncType(invocationType)
+    }
+    let handleRet = cffi.ProcessInvocation(invocationType, processedArgs, irBuilder)
     let cfunc = UpdateCFuncCalleeAndArgs(cgMod, irBuilder, calleeValue, processedArgs, funcTy)
     let chirRetTy = funcTy.GetReturnType()
     let isSRet = !handleRet && chirRetTy.IsStruct() && !IsZeroSizedTypeInC(cgMod, chirRetTy)

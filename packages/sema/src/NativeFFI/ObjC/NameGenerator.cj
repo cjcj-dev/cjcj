@@ -117,7 +117,8 @@ public class NameGenerator {
 
     public static func GetUserDefinedObjCName(target: Decl): Option<String> {
         for (annotation in target.annotations) {
-            if (annotation.kind != AstAnnotationKind.OBJ_C_MIRROR &&
+            if (annotation.kind != AstAnnotationKind.OBJ_C &&
+                annotation.kind != AstAnnotationKind.OBJ_C_MIRROR &&
                 annotation.kind != AstAnnotationKind.OBJ_C_IMPL &&
                 annotation.kind != AstAnnotationKind.FOREIGN_NAME) {
                 continue
