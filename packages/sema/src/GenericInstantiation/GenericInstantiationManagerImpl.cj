@@ -1052,6 +1052,10 @@ class GenericInstantiationManagerImpl {
         let g2gTyMap = buildCloneGenericToGenericMap(decl)
         let cloned = PartialInstantiation.Instantiate(decl, { source: Node, target: Node =>
             updateClonedNode(source, target, ci.typeManager, typeMapping, g2gTyMap, pkg)
+        }, threadNum: if (ci.globalOptions.disableGenericConcurrency || ci.globalOptions.codegenDebugMode) {
+            1
+        } else {
+            Int64(ci.globalOptions.GetJobs())
         })
         if (let Some(clonedDecl) <- (cloned as Decl)) {
             clonedDecl.EnableAttr(Attribute.GENERIC_INSTANTIATED)

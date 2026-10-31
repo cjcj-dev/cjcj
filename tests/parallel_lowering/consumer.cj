@@ -2,6 +2,17 @@ package parallel_lowering
 
 let shared: Int64 = 7
 func identity<T>(value: T): T { value }
+func pick<T>(first: T, second: T, choose: Bool): T {
+    let retained = first
+    let fallback = second
+    if (choose) { return retained }
+    return fallback
+}
+func genericCapture<T>(value: T): T {
+    let retained = value
+    let f = { => retained }
+    return f()
+}
 func addShared(value: Int64): Int64 { value + shared }
 func branch(value: Int64): Int64 { if (value > 0) { addShared(value) } else { shared } }
 func loop(value: Int64): Int64 {
@@ -44,6 +55,8 @@ main(): Int64 {
     if (closure(5) != 15 || nested(6) != 12) { return 2 }
     if (checked(0) != 7 || checked(11) != 11) { return 3 }
     if (virtualCall(Derived(9)) != 16 || arrays(2) != 20) { return 4 }
+    if (pick<Int64>(2, 3, true) != 2 || pick<Int64>(2, 3, false) != 3) { return 5 }
+    if (genericCapture<Int64>(13) != 13) { return 6 }
     println("PARALLEL_LOWERING_OK")
     return 0
 }

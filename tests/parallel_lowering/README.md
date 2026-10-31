@@ -10,3 +10,8 @@ trials separately; this consumer checks return values from branches, captured la
 nested functions, generic calls, exceptions, virtual dispatch, shared globals and arrays.
 Compare outputs and declared artifact identities across arms. A passing build alone is
 not a runtime result, and the disable arm must contain no lowering-worker events.
+
+The generic cloning arm also compares `--cjcj-disable-generic-concurrency` at O2.
+`pick` and `genericCapture` require cloned statements to retain cross-statement local
+references and captured variables after the ordered registration/reconnection phase.
+Capture generic-clone-worker events to establish actual concurrent allocation.

@@ -310,6 +310,7 @@ public func CreateOptionInfos(): Array<OptionInfo> {
         OptionInfo("--cjcj-disable-parse-concurrency", ID.CJCJ_DISABLE_PARSE_CONCURRENCY, Kind.FLAG, [Backend.CJNATIVE], [Group.GLOBAL, Group.STABLE, Group.VISIBLE], "", EMPTY_VALUES, Occurrence.MULTIPLE_OCCURRENCE, "Disable concurrent parsing of source files"),
         OptionInfo("--cjcj-disable-codegen-concurrency", ID.CJCJ_DISABLE_CODEGEN_CONCURRENCY, Kind.FLAG, [Backend.CJNATIVE], [Group.GLOBAL, Group.STABLE, Group.VISIBLE], "", EMPTY_VALUES, Occurrence.MULTIPLE_OCCURRENCE, "Disable concurrent module code generation"),
         OptionInfo("--cjcj-disable-lowering-concurrency", ID.CJCJ_DISABLE_LOWERING_CONCURRENCY, Kind.FLAG, [Backend.CJNATIVE], [Group.GLOBAL, Group.STABLE, Group.VISIBLE], "", EMPTY_VALUES, Occurrence.MULTIPLE_OCCURRENCE, "Disable concurrent function body lowering"),
+        OptionInfo("--cjcj-disable-generic-concurrency", ID.CJCJ_DISABLE_GENERIC_CONCURRENCY, Kind.FLAG, [Backend.CJNATIVE], [Group.GLOBAL, Group.STABLE, Group.VISIBLE], "", EMPTY_VALUES, Occurrence.MULTIPLE_OCCURRENCE, "Disable concurrent generic AST cloning"),
         OptionInfo("--runtime-config", ID.RUNTIME_CONFIG, Kind.SEPARATED, [Backend.CJNATIVE], [Group.GLOBAL, Group.STABLE, Group.VISIBLE], "", EMPTY_VALUES, Occurrence.MULTIPLE_OCCURRENCE, "Embed a runtime configuration as an environment-variable name/value pair"),
     ]
 }

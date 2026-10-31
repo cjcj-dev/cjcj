@@ -8,7 +8,9 @@ import cjcj::option.GlobalOptions as OptionGlobalOptions
 import cjcj::option.OptimizationLevel
 import cjcj::option.OutputMode
 import cjcj::option.enumIndex
-import cjcj::utils.CJC_ASSERT
+import cjcj::utils.{CJC_ASSERT, TaskQueue, TaskResult}
+import std.process.Process
+import std.sync.Thread
 
 private var currentOptLevel: OptimizationLevel = OptimizationLevel.O0
 private var currentOutputMode: OutputMode = OutputMode.EXECUTABLE
@@ -337,7 +339,31 @@ public class PartialInstantiation {
         ArrayList<(Node, (Node) -> Unit)>()
     private let source2cloned: HashMap<Node, Node> = HashMap<Node, Node>()
 
-    public init() {}
+    private let threadNum: Int64
+    private let deferRegistration: Bool
+
+    public init(threadNum!: Int64 = 1, deferRegistration!: Bool = false) {
+        this.threadNum = threadNum
+        this.deferRegistration = deferRegistration
+    }
+
+    private func InstantiateNested(node: Node, visitor: (Node, Node) -> Unit): Node {
+        return PartialInstantiation(deferRegistration: deferRegistration).InstantiateWithRearrange(node, visitor)
+    }
+
+    private func CloneGeneric(generic: Generic, visitor: (Node, Node) -> Unit): Generic {
+        let target = Generic()
+        for (param in generic.typeParameters) {
+            target.typeParameters.add((InstantiateNested(param, visitor) as GenericParamDecl).getOrThrow())
+        }
+        for (constraint in generic.genericConstraints) {
+            target.genericConstraints.add((InstantiateNested(constraint, visitor) as GenericConstraint).getOrThrow())
+        }
+        target.leftAnglePos = generic.leftAnglePos
+        target.rightAnglePos = generic.rightAnglePos
+        return target
+    }
+
 
     private func TargetAddrMapInsert(from: Option<Node>, target: (Node) -> Unit): Unit {
         if (let Some(value) <- from) {
@@ -407,11 +433,11 @@ public class PartialInstantiation {
         return Instantiate(node, DefaultVisitFunc)
     }
 
-    public static func Instantiate(node: Node, visitFunc: (Node, Node) -> Unit): Node {
-        return PartialInstantiation().InstantiateWithRearrange(node, visitFunc)
+    public static func Instantiate(node: Node, visitFunc: (Node, Node) -> Unit, threadNum!: Int64 = 1): Node {
+        return PartialInstantiation(threadNum: threadNum).InstantiateWithRearrange(node, visitFunc)
     }
 
-    private static func InstantiateGenericParamDecl(source: GenericParamDecl): Decl {
+    private func InstantiateGenericParamDecl(source: GenericParamDecl): Decl {
         let target = GenericParamDecl()
         target.outerDecl = source.outerDecl
         target.commaPos = source.commaPos
@@ -419,7 +445,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateFuncParam(source: FuncParam, visitor: (Node, Node) -> Unit): VarDecl {
+    private func InstantiateFuncParam(source: FuncParam, visitor: (Node, Node) -> Unit): VarDecl {
         let target = FuncParam()
         target.colonPos = source.colonPos
         target.assignment = InstantiateExpr(source.assignment, visitor)
@@ -436,7 +462,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateVarWithPatternDecl(
+    private func InstantiateVarWithPatternDecl(
         source: VarWithPatternDecl, visitor: (Node, Node) -> Unit): Decl {
         let target = VarWithPatternDecl()
         target.typeNode = InstantiateType(source.typeNode, visitor)
@@ -449,7 +475,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateVarDecl(source: VarDecl, visitor: (Node, Node) -> Unit): Decl {
+    private func InstantiateVarDecl(source: VarDecl, visitor: (Node, Node) -> Unit): Decl {
         let target: VarDecl = if (let Some(funcParam) <- (source as FuncParam)) {
             InstantiateFuncParam(funcParam, visitor)
         } else {
@@ -468,7 +494,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateFuncDecl(source: FuncDecl, visitor: (Node, Node) -> Unit): Decl {
+    private func InstantiateFuncDecl(source: FuncDecl, visitor: (Node, Node) -> Unit): Decl {
         let target = FuncDecl()
         target.leftParenPos = source.leftParenPos
         target.rightParenPos = source.rightParenPos
@@ -493,7 +519,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiatePrimaryCtorDecl(
+    private func InstantiatePrimaryCtorDecl(
         source: PrimaryCtorDecl, visitor: (Node, Node) -> Unit): Decl {
         let target = PrimaryCtorDecl()
         let funcBody = source.funcBody.getOrThrow()
@@ -505,7 +531,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiatePropDecl(source: PropDecl, visitor: (Node, Node) -> Unit): Decl {
+    private func InstantiatePropDecl(source: PropDecl, visitor: (Node, Node) -> Unit): Decl {
         let target = PropDecl()
         target.typeNode = InstantiateType(source.typeNode, visitor)
         target.colonPos = source.colonPos
@@ -529,7 +555,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateRefType(source: RefType, visitor: (Node, Node) -> Unit): RefType {
+    private func InstantiateRefType(source: RefType, visitor: (Node, Node) -> Unit): RefType {
         let target = RefType()
         CopyNodeField(source, target)
         target.ref.identifier = SrcIdentifier(source.ref.identifier.Val(), source.ref.identifier.Begin(),
@@ -549,7 +575,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateExtendDecl(source: ExtendDecl, visitor: (Node, Node) -> Unit): Decl {
+    private func InstantiateExtendDecl(source: ExtendDecl, visitor: (Node, Node) -> Unit): Decl {
         let target = ExtendDecl()
         target.extendedType = InstantiateType(source.extendedType, visitor)
         for (inheritedType in source.inheritedTypes) {
@@ -561,7 +587,7 @@ public class PartialInstantiation {
             }
         }
         if (let Some(generic) <- source.generic) {
-            target.generic = InstantiateGeneric(generic, visitor)
+            target.generic = CloneGeneric(generic, visitor)
         }
         if (let Some(bodyScope) <- source.bodyScope) {
             let clonedBodyScope = DummyBody()
@@ -572,56 +598,56 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateMacroExpandDecl(source: MacroExpandDecl): Decl {
+    private func InstantiateMacroExpandDecl(source: MacroExpandDecl): Decl {
         let target = MacroExpandDecl()
         target.invocation = InstantiateMacroInvocation(source.invocation)
         target.EnableAttr(Attribute.COMPILER_ADD)
         return target
     }
 
-    private static func InstantiateStructDecl(source: StructDecl, visitor: (Node, Node) -> Unit): Decl {
+    private func InstantiateStructDecl(source: StructDecl, visitor: (Node, Node) -> Unit): Decl {
         let target = StructDecl()
         for (inheritedType in source.inheritedTypes) {
             target.inheritedTypes.add(InstantiateType(inheritedType, visitor))
         }
         target.body = InstantiateNode(source.body.getOrThrow(), visitor) as StructBody
         if (let Some(generic) <- source.generic) {
-            target.generic = InstantiateGeneric(generic, visitor)
+            target.generic = CloneGeneric(generic, visitor)
         }
         target.upperBoundPos = source.upperBoundPos
         target.EnableAttr(Attribute.COMPILER_ADD)
         return target
     }
 
-    private static func InstantiateClassDecl(source: ClassDecl, visitor: (Node, Node) -> Unit): Decl {
+    private func InstantiateClassDecl(source: ClassDecl, visitor: (Node, Node) -> Unit): Decl {
         let target = ClassDecl()
         for (inheritedType in source.inheritedTypes) {
             target.inheritedTypes.add(InstantiateType(inheritedType, visitor))
         }
         target.body = InstantiateNode(source.body.getOrThrow(), visitor) as ClassBody
         if (let Some(generic) <- source.generic) {
-            target.generic = InstantiateGeneric(generic, visitor)
+            target.generic = CloneGeneric(generic, visitor)
         }
         target.upperBoundPos = source.upperBoundPos
         target.EnableAttr(Attribute.COMPILER_ADD)
         return target
     }
 
-    private static func InstantiateInterfaceDecl(source: InterfaceDecl, visitor: (Node, Node) -> Unit): Decl {
+    private func InstantiateInterfaceDecl(source: InterfaceDecl, visitor: (Node, Node) -> Unit): Decl {
         let target = InterfaceDecl()
         for (inheritedType in source.inheritedTypes) {
             target.inheritedTypes.add(InstantiateType(inheritedType, visitor))
         }
         target.body = InstantiateNode(source.body.getOrThrow(), visitor) as InterfaceBody
         if (let Some(generic) <- source.generic) {
-            target.generic = InstantiateGeneric(generic, visitor)
+            target.generic = CloneGeneric(generic, visitor)
         }
         target.upperBoundPos = source.upperBoundPos
         target.EnableAttr(Attribute.COMPILER_ADD)
         return target
     }
 
-    private static func InstantiateEnumDecl(source: EnumDecl, visitor: (Node, Node) -> Unit): Decl {
+    private func InstantiateEnumDecl(source: EnumDecl, visitor: (Node, Node) -> Unit): Decl {
         let target = EnumDecl()
         for (inheritedType in source.inheritedTypes) {
             target.inheritedTypes.add(InstantiateType(inheritedType, visitor))
@@ -636,7 +662,7 @@ public class PartialInstantiation {
             target.members.add(InstantiateDecl(member, visitor))
         }
         if (let Some(generic) <- source.generic) {
-            target.generic = InstantiateGeneric(generic, visitor)
+            target.generic = CloneGeneric(generic, visitor)
         }
         target.hasArguments = source.hasArguments
         if (let Some(bodyScope) <- source.bodyScope) {
@@ -655,18 +681,18 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateTypeAliasDecl(source: TypeAliasDecl, visitor: (Node, Node) -> Unit): Decl {
+    private func InstantiateTypeAliasDecl(source: TypeAliasDecl, visitor: (Node, Node) -> Unit): Decl {
         let target = TypeAliasDecl()
         target.assignPos = source.assignPos
         target.typeNode = InstantiateType(source.typeNode, visitor)
         if (let Some(generic) <- source.generic) {
-            target.generic = InstantiateGeneric(generic, visitor)
+            target.generic = CloneGeneric(generic, visitor)
         }
         target.EnableAttr(Attribute.COMPILER_ADD)
         return target
     }
 
-    private static func InstantiateQualifiedType(
+    private func InstantiateQualifiedType(
         source: QualifiedType, visitor: (Node, Node) -> Unit): QualifiedType {
         let target = QualifiedType()
         target.baseType = InstantiateType(source.baseType, visitor)
@@ -679,7 +705,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateParenType(source: ParenType, visitor: (Node, Node) -> Unit): ParenType {
+    private func InstantiateParenType(source: ParenType, visitor: (Node, Node) -> Unit): ParenType {
         let target = ParenType()
         target.innerType = InstantiateType(source.innerType, visitor)
         target.leftParenPos = source.leftParenPos
@@ -687,7 +713,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateOptionType(source: OptionType, visitor: (Node, Node) -> Unit): OptionType {
+    private func InstantiateOptionType(source: OptionType, visitor: (Node, Node) -> Unit): OptionType {
         let target = OptionType()
         target.componentType = InstantiateType(source.componentType, visitor)
         target.questNum = source.questNum
@@ -695,12 +721,12 @@ public class PartialInstantiation {
             target.questVector.add(position)
         }
         if (let Some(desugarType) <- source.desugarType) {
-            target.desugarType = PartialInstantiation.Instantiate(desugarType, visitor) as RefType
+            target.desugarType = InstantiateNested(desugarType, visitor) as RefType
         }
         return target
     }
 
-    private static func InstantiateFuncType(source: FuncType, visitor: (Node, Node) -> Unit): FuncType {
+    private func InstantiateFuncType(source: FuncType, visitor: (Node, Node) -> Unit): FuncType {
         let target = FuncType()
         for (paramType in source.paramTypes) {
             target.paramTypes.add(InstantiateType(paramType, visitor))
@@ -713,7 +739,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateTupleType(source: TupleType, visitor: (Node, Node) -> Unit): TupleType {
+    private func InstantiateTupleType(source: TupleType, visitor: (Node, Node) -> Unit): TupleType {
         let target = TupleType()
         for (fieldType in source.fieldTypes) {
             target.fieldTypes.add(InstantiateType(fieldType, visitor))
@@ -726,7 +752,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateConstantType(
+    private func InstantiateConstantType(
         source: ConstantType, visitor: (Node, Node) -> Unit): ConstantType {
         let target = ConstantType()
         target.constantExpr = InstantiateExpr(source.constantExpr, visitor)
@@ -734,7 +760,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateVArrayType(source: VArrayType, visitor: (Node, Node) -> Unit): VArrayType {
+    private func InstantiateVArrayType(source: VArrayType, visitor: (Node, Node) -> Unit): VArrayType {
         let target = VArrayType()
         target.leftAnglePos = source.leftAnglePos
         target.typeArgument = InstantiateType(source.typeArgument, visitor)
@@ -743,14 +769,14 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateType(node: Option<Type>, visitor: (Node, Node) -> Unit): Option<Type> {
+    private func InstantiateType(node: Option<Type>, visitor: (Node, Node) -> Unit): Option<Type> {
         if (let Some(source) <- node) {
             return InstantiateType(source, visitor)
         }
         return None
     }
 
-    private static func InstantiateType(source: Type, visitor: (Node, Node) -> Unit): Type {
+    private func InstantiateType(source: Type, visitor: (Node, Node) -> Unit): Type {
         let target: Type = match (source.astKind) {
             case ASTKind.REF_TYPE => InstantiateRefType((source as RefType).getOrThrow(), visitor)
             case ASTKind.PRIMITIVE_TYPE =>
@@ -784,7 +810,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateMacroExpandExpr(
+    private func InstantiateMacroExpandExpr(
         source: MacroExpandExpr, visitor: (Node, Node) -> Unit): MacroExpandExpr {
         let target = MacroExpandExpr()
         target.identifier = Identifier(source.identifier.Val(), source.identifier.Begin(), source.identifier.End())
@@ -803,7 +829,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateTokenPart(source: TokenPart, visitor: (Node, Node) -> Unit): TokenPart {
+    private func InstantiateTokenPart(source: TokenPart, visitor: (Node, Node) -> Unit): TokenPart {
         let _ = visitor
         let target = TokenPart()
         for (token in source.tokens) {
@@ -812,7 +838,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateQuoteExpr(source: QuoteExpr, visitor: (Node, Node) -> Unit): QuoteExpr {
+    private func InstantiateQuoteExpr(source: QuoteExpr, visitor: (Node, Node) -> Unit): QuoteExpr {
         let target = QuoteExpr()
         for (expr in source.exprs) {
             target.exprs.add(InstantiateExpr(expr, visitor))
@@ -823,7 +849,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateIfExpr(source: IfExpr, visitor: (Node, Node) -> Unit): IfExpr {
+    private func InstantiateIfExpr(source: IfExpr, visitor: (Node, Node) -> Unit): IfExpr {
         let target = IfExpr()
         target.ifPos = source.ifPos
         target.leftParenPos = source.leftParenPos
@@ -839,7 +865,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateTryExpr(source: TryExpr, visitor: (Node, Node) -> Unit): TryExpr {
+    private func InstantiateTryExpr(source: TryExpr, visitor: (Node, Node) -> Unit): TryExpr {
         let target = TryExpr()
         target.tryPos = source.tryPos
         target.lParen = source.lParen
@@ -882,14 +908,14 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateThrowExpr(source: ThrowExpr, visitor: (Node, Node) -> Unit): ThrowExpr {
+    private func InstantiateThrowExpr(source: ThrowExpr, visitor: (Node, Node) -> Unit): ThrowExpr {
         let target = ThrowExpr()
         target.throwPos = source.throwPos
         target.expr = InstantiateExpr(source.expr, visitor)
         return target
     }
 
-    private static func InstantiateReturnExpr(source: ReturnExpr, visitor: (Node, Node) -> Unit): ReturnExpr {
+    private func InstantiateReturnExpr(source: ReturnExpr, visitor: (Node, Node) -> Unit): ReturnExpr {
         let target = ReturnExpr()
         target.returnPos = source.returnPos
         target.expr = InstantiateExpr(source.expr, visitor)
@@ -897,7 +923,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateWhileExpr(source: WhileExpr, visitor: (Node, Node) -> Unit): WhileExpr {
+    private func InstantiateWhileExpr(source: WhileExpr, visitor: (Node, Node) -> Unit): WhileExpr {
         let target = WhileExpr()
         target.whilePos = source.whilePos
         target.leftParenPos = source.leftParenPos
@@ -909,7 +935,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateDoWhileExpr(source: DoWhileExpr, visitor: (Node, Node) -> Unit): DoWhileExpr {
+    private func InstantiateDoWhileExpr(source: DoWhileExpr, visitor: (Node, Node) -> Unit): DoWhileExpr {
         let target = DoWhileExpr()
         target.doPos = source.doPos
         if (let Some(body) <- source.body) {
@@ -922,7 +948,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateAssignExpr(source: AssignExpr, visitor: (Node, Node) -> Unit): AssignExpr {
+    private func InstantiateAssignExpr(source: AssignExpr, visitor: (Node, Node) -> Unit): AssignExpr {
         let target = AssignExpr()
         target.leftValue = InstantiateExpr(source.leftValue, visitor)
         target.op = source.op
@@ -932,7 +958,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateIncOrDecExpr(
+    private func InstantiateIncOrDecExpr(
         source: IncOrDecExpr, visitor: (Node, Node) -> Unit): IncOrDecExpr {
         let target = IncOrDecExpr()
         target.op = source.op
@@ -941,7 +967,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateUnaryExpr(source: UnaryExpr, visitor: (Node, Node) -> Unit): UnaryExpr {
+    private func InstantiateUnaryExpr(source: UnaryExpr, visitor: (Node, Node) -> Unit): UnaryExpr {
         let target = UnaryExpr()
         target.op = source.op
         target.expr = InstantiateExpr(source.expr, visitor)
@@ -949,7 +975,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateBinaryExpr(source: BinaryExpr, visitor: (Node, Node) -> Unit): BinaryExpr {
+    private func InstantiateBinaryExpr(source: BinaryExpr, visitor: (Node, Node) -> Unit): BinaryExpr {
         let target = BinaryExpr()
         target.op = source.op
         target.leftExpr = InstantiateExpr(source.leftExpr, visitor)
@@ -958,7 +984,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateRangeExpr(source: RangeExpr, visitor: (Node, Node) -> Unit): RangeExpr {
+    private func InstantiateRangeExpr(source: RangeExpr, visitor: (Node, Node) -> Unit): RangeExpr {
         let target = RangeExpr()
         target.startExpr = InstantiateExpr(source.startExpr, visitor)
         target.rangePos = source.rangePos
@@ -970,7 +996,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateSubscriptExpr(
+    private func InstantiateSubscriptExpr(
         source: SubscriptExpr, visitor: (Node, Node) -> Unit): SubscriptExpr {
         let target = SubscriptExpr()
         target.baseExpr = InstantiateExpr(source.baseExpr, visitor)
@@ -986,7 +1012,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateMemberAccess(
+    private func InstantiateMemberAccess(
         source: MemberAccess, visitor: (Node, Node) -> Unit): MemberAccess {
         let target = MemberAccess()
         target.baseExpr = InstantiateExpr(source.baseExpr, visitor)
@@ -1018,7 +1044,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateCallExpr(source: CallExpr, visitor: (Node, Node) -> Unit): CallExpr {
+    private func InstantiateCallExpr(source: CallExpr, visitor: (Node, Node) -> Unit): CallExpr {
         let target = CallExpr()
         target.baseFunc = InstantiateExpr(source.baseFunc, visitor)
         target.leftParenPos = source.leftParenPos
@@ -1057,7 +1083,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateParenExpr(source: ParenExpr, visitor: (Node, Node) -> Unit): ParenExpr {
+    private func InstantiateParenExpr(source: ParenExpr, visitor: (Node, Node) -> Unit): ParenExpr {
         let target = ParenExpr()
         target.leftParenPos = source.leftParenPos
         target.expr = InstantiateExpr(source.expr, visitor)
@@ -1065,7 +1091,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateLambdaExpr(source: LambdaExpr, visitor: (Node, Node) -> Unit): LambdaExpr {
+    private func InstantiateLambdaExpr(source: LambdaExpr, visitor: (Node, Node) -> Unit): LambdaExpr {
         let target = LambdaExpr((InstantiateNode(source.funcBody.getOrThrow(), visitor) as FuncBody).getOrThrow())
         if (source.TestAttr(Attribute.MOCK_SUPPORTED)) {
             target.EnableAttr(Attribute.MOCK_SUPPORTED)
@@ -1073,7 +1099,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateLitConstExpr(
+    private func InstantiateLitConstExpr(
         source: LitConstExpr, visitor: (Node, Node) -> Unit): LitConstExpr {
         let target = LitConstExpr(source.kind, source.stringValue)
         for (codepoint in source.codepoint) {
@@ -1093,7 +1119,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateInterpolationExpr(
+    private func InstantiateInterpolationExpr(
         source: InterpolationExpr, visitor: (Node, Node) -> Unit): InterpolationExpr {
         let target = InterpolationExpr()
         target.rawString = source.rawString
@@ -1104,7 +1130,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateStrInterpolationExpr(
+    private func InstantiateStrInterpolationExpr(
         source: StrInterpolationExpr, visitor: (Node, Node) -> Unit): StrInterpolationExpr {
         let target = StrInterpolationExpr()
         target.rawString = source.rawString
@@ -1117,7 +1143,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateArrayLit(source: ArrayLit, visitor: (Node, Node) -> Unit): ArrayLit {
+    private func InstantiateArrayLit(source: ArrayLit, visitor: (Node, Node) -> Unit): ArrayLit {
         let target = ArrayLit()
         CopyBasicInfo(source, target)
         target.leftSquarePos = source.leftSquarePos
@@ -1132,7 +1158,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateArrayExpr(source: ArrayExpr, visitor: (Node, Node) -> Unit): ArrayExpr {
+    private func InstantiateArrayExpr(source: ArrayExpr, visitor: (Node, Node) -> Unit): ArrayExpr {
         let target = ArrayExpr()
         target.typeNode = InstantiateType(source.typeNode, visitor)
         target.leftParenPos = source.leftParenPos
@@ -1148,7 +1174,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiatePointerExpr(
+    private func InstantiatePointerExpr(
         source: PointerExpr, visitor: (Node, Node) -> Unit): PointerExpr {
         let target = PointerExpr()
         target.typeNode = InstantiateType(source.typeNode, visitor)
@@ -1158,7 +1184,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateTupleLit(source: TupleLit, visitor: (Node, Node) -> Unit): TupleLit {
+    private func InstantiateTupleLit(source: TupleLit, visitor: (Node, Node) -> Unit): TupleLit {
         let target = TupleLit()
         target.leftParenPos = source.leftParenPos
         for (child in source.children) {
@@ -1171,7 +1197,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateRefExpr(source: RefExpr, visitor: (Node, Node) -> Unit): RefExpr {
+    private func InstantiateRefExpr(source: RefExpr, visitor: (Node, Node) -> Unit): RefExpr {
         let target = RefExpr(SrcIdentifier(source.ref.identifier.Val(), source.ref.identifier.Begin(),
             source.ref.identifier.End(), source.ref.identifier.IsRaw()))
         target.leftAnglePos = source.leftAnglePos
@@ -1194,7 +1220,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateForInExpr(source: ForInExpr, visitor: (Node, Node) -> Unit): ForInExpr {
+    private func InstantiateForInExpr(source: ForInExpr, visitor: (Node, Node) -> Unit): ForInExpr {
         let target = ForInExpr()
         target.leftParenPos = source.leftParenPos
         target.rightParenPos = source.rightParenPos
@@ -1211,7 +1237,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateMatchExpr(source: MatchExpr, visitor: (Node, Node) -> Unit): MatchExpr {
+    private func InstantiateMatchExpr(source: MatchExpr, visitor: (Node, Node) -> Unit): MatchExpr {
         let target = MatchExpr()
         target.matchMode = source.matchMode
         target.sugarKind = source.sugarKind
@@ -1233,14 +1259,14 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateJumpExpr(source: JumpExpr): JumpExpr {
+    private func InstantiateJumpExpr(source: JumpExpr): JumpExpr {
         let target = JumpExpr()
         target.isBreak = source.isBreak
         target.refLoop = source.refLoop
         return target
     }
 
-    private static func InstantiateTypeConvExpr(
+    private func InstantiateTypeConvExpr(
         source: TypeConvExpr, visitor: (Node, Node) -> Unit): TypeConvExpr {
         let target = TypeConvExpr()
         target.typeNode = InstantiateType(source.typeNode, visitor)
@@ -1250,7 +1276,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateSpawnExpr(source: SpawnExpr, visitor: (Node, Node) -> Unit): SpawnExpr {
+    private func InstantiateSpawnExpr(source: SpawnExpr, visitor: (Node, Node) -> Unit): SpawnExpr {
         let target = SpawnExpr()
         target.task = InstantiateExpr(source.task, visitor)
         target.arg = InstantiateExpr(source.arg, visitor)
@@ -1263,7 +1289,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateSynchronizedExpr(
+    private func InstantiateSynchronizedExpr(
         source: SynchronizedExpr, visitor: (Node, Node) -> Unit): SynchronizedExpr {
         let target = SynchronizedExpr()
         target.mutex = InstantiateExpr(source.mutex, visitor)
@@ -1276,13 +1302,13 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateInvalidExpr(source: InvalidExpr): InvalidExpr {
+    private func InstantiateInvalidExpr(source: InvalidExpr): InvalidExpr {
         let target = InvalidExpr(source.begin)
         target.value = source.value
         return target
     }
 
-    private static func InstantiateTrailingClosureExpr(
+    private func InstantiateTrailingClosureExpr(
         source: TrailingClosureExpr, visitor: (Node, Node) -> Unit): TrailingClosureExpr {
         let target = TrailingClosureExpr()
         target.leftLambda = source.leftLambda
@@ -1296,7 +1322,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateIsExpr(source: IsExpr, visitor: (Node, Node) -> Unit): IsExpr {
+    private func InstantiateIsExpr(source: IsExpr, visitor: (Node, Node) -> Unit): IsExpr {
         let target = IsExpr()
         target.leftExpr = InstantiateExpr(source.leftExpr, visitor)
         target.isType = InstantiateType(source.isType, visitor)
@@ -1304,7 +1330,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateAsExpr(source: AsExpr, visitor: (Node, Node) -> Unit): AsExpr {
+    private func InstantiateAsExpr(source: AsExpr, visitor: (Node, Node) -> Unit): AsExpr {
         let target = AsExpr()
         target.leftExpr = InstantiateExpr(source.leftExpr, visitor)
         target.asType = InstantiateType(source.asType, visitor)
@@ -1312,7 +1338,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateOptionalExpr(
+    private func InstantiateOptionalExpr(
         source: OptionalExpr, visitor: (Node, Node) -> Unit): OptionalExpr {
         let target = OptionalExpr()
         target.baseExpr = InstantiateExpr(source.baseExpr, visitor)
@@ -1320,14 +1346,14 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateOptionalChainExpr(
+    private func InstantiateOptionalChainExpr(
         source: OptionalChainExpr, visitor: (Node, Node) -> Unit): OptionalChainExpr {
         let target = OptionalChainExpr()
         target.expr = InstantiateExpr(source.expr, visitor)
         return target
     }
 
-    private static func InstantiateLetPatternDestructor(
+    private func InstantiateLetPatternDestructor(
         source: LetPatternDestructor, visitor: (Node, Node) -> Unit): LetPatternDestructor {
         let target = LetPatternDestructor()
         target.backarrowPos = source.backarrowPos
@@ -1341,14 +1367,14 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateExpr(node: Option<Expr>, visitor: (Node, Node) -> Unit): Option<Expr> {
+    private func InstantiateExpr(node: Option<Expr>, visitor: (Node, Node) -> Unit): Option<Expr> {
         if (let Some(source) <- node) {
             return InstantiateExpr(source, visitor)
         }
         return None
     }
 
-    private static func InstantiateExpr(source: Expr, visitor: (Node, Node) -> Unit): Expr {
+    private func InstantiateExpr(source: Expr, visitor: (Node, Node) -> Unit): Expr {
         let clonedExpr: Expr = match (source.astKind) {
             case ASTKind.IF_EXPR => InstantiateIfExpr((source as IfExpr).getOrThrow(), visitor)
             case ASTKind.PRIMITIVE_TYPE_EXPR =>
@@ -1434,7 +1460,7 @@ public class PartialInstantiation {
         return clonedExpr
     }
 
-    private static func InstantiateDecl(source: Decl, visitor: (Node, Node) -> Unit): Decl {
+    private func InstantiateDecl(source: Decl, visitor: (Node, Node) -> Unit): Decl {
         let target: Decl = match (source.astKind) {
             case ASTKind.GENERIC_PARAM_DECL =>
                 InstantiateGenericParamDecl((source as GenericParamDecl).getOrThrow())
@@ -1490,7 +1516,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateConstPattern(
+    private func InstantiateConstPattern(
         source: ConstPattern, visitor: (Node, Node) -> Unit): ConstPattern {
         let target = ConstPattern()
         target.literal = InstantiateExpr(source.literal, visitor)
@@ -1500,7 +1526,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateVarPattern(source: VarPattern, visitor: (Node, Node) -> Unit): VarPattern {
+    private func InstantiateVarPattern(source: VarPattern, visitor: (Node, Node) -> Unit): VarPattern {
         let target = if (let Some(varDecl) <- source.varDecl) {
             let clonedPattern = VarPattern(varDecl.identifier, nodePos: source.begin)
             clonedPattern.varDecl = InstantiateDecl(varDecl, visitor) as VarDecl
@@ -1512,7 +1538,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateTuplePattern(
+    private func InstantiateTuplePattern(
         source: TuplePattern, visitor: (Node, Node) -> Unit): TuplePattern {
         let target = TuplePattern()
         for (pattern in source.patterns) {
@@ -1526,7 +1552,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateTypePattern(
+    private func InstantiateTypePattern(
         source: TypePattern, visitor: (Node, Node) -> Unit): TypePattern {
         let target = TypePattern()
         target.pattern = InstantiatePattern(source.pattern, visitor)
@@ -1536,14 +1562,14 @@ public class PartialInstantiation {
             target.desugarExpr = InstantiateExpr(desugarExpr, visitor)
         }
         if (let Some(desugarVarPattern) <- source.desugarVarPattern) {
-            target.desugarVarPattern = PartialInstantiation.Instantiate(desugarVarPattern, visitor) as VarPattern
+            target.desugarVarPattern = InstantiateNested(desugarVarPattern, visitor) as VarPattern
         }
         target.needRuntimeTypeCheck = source.needRuntimeTypeCheck
         target.matchBeforeRuntime = source.matchBeforeRuntime
         return target
     }
 
-    private static func InstantiateEnumPattern(
+    private func InstantiateEnumPattern(
         source: EnumPattern, visitor: (Node, Node) -> Unit): EnumPattern {
         let target = EnumPattern()
         target.constructor = InstantiateExpr(source.constructor, visitor)
@@ -1558,7 +1584,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateExceptTypePattern(
+    private func InstantiateExceptTypePattern(
         source: ExceptTypePattern, visitor: (Node, Node) -> Unit): ExceptTypePattern {
         let target = ExceptTypePattern()
         target.pattern = InstantiatePattern(source.pattern, visitor)
@@ -1573,7 +1599,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateVarOrEnumPattern(
+    private func InstantiateVarOrEnumPattern(
         source: VarOrEnumPattern, visitor: (Node, Node) -> Unit): VarOrEnumPattern {
         let target = VarOrEnumPattern(SrcIdentifier(source.identifier.Val(), source.identifier.Begin(),
             source.identifier.End(), source.identifier.IsRaw()))
@@ -1583,7 +1609,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiatePattern(
+    private func InstantiatePattern(
         node: Option<Pattern>, visitor: (Node, Node) -> Unit): Option<Pattern> {
         if (let Some(source) <- node) {
             return InstantiatePattern(source, visitor)
@@ -1591,7 +1617,7 @@ public class PartialInstantiation {
         return None
     }
 
-    private static func InstantiatePattern(source: Pattern, visitor: (Node, Node) -> Unit): Pattern {
+    private func InstantiatePattern(source: Pattern, visitor: (Node, Node) -> Unit): Pattern {
         let target: Pattern = match (source.astKind) {
             case ASTKind.CONST_PATTERN =>
                 InstantiateConstPattern((source as ConstPattern).getOrThrow(), visitor)
@@ -1616,20 +1642,53 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateBlock(source: Block, visitor: (Node, Node) -> Unit): Block {
+    private func InstantiateBlock(source: Block, visitor: (Node, Node) -> Unit): Block {
         let target = Block()
         CopyNodeField(source, target)
         target.unsafePos = source.unsafePos
         target.leftCurlPos = source.leftCurlPos
-        for (node in source.body) {
-            target.body.add(InstantiateNode(node, visitor))
+        if (threadNum > 1 && source.body.size > 1) {
+            // Only the allocation/copy phase is concurrent. Callback replay is ordered: it owns
+            // TypeManager substitution, registration and the enclosing cross-node address map.
+            let queue = TaskQueue(threadNum)
+            let results = ArrayList<TaskResult<(Node, ArrayList<(Node, Node)>)>>()
+            for (node in source.body) {
+                results.add(queue.AddTask<(Node, ArrayList<(Node, Node)>)>({ =>
+                    let pairs = ArrayList<(Node, Node)>()
+                    let worker = PartialInstantiation(deferRegistration: true)
+                    let trace = (Process.current.getEnv("CJCJ_BACKEND_CONCURRENCY_TRACE") ?? "") == "1"
+                    let id = Thread.currentThread.id
+                    if (trace) { eprintln("generic-clone-worker begin thread=${id}") }
+                    try {
+                        let cloned = worker.InstantiateNode(node, { from: Node, to: Node => pairs.add((from, to)) })
+                        return (cloned, pairs)
+                    } finally {
+                        if (trace) { eprintln("generic-clone-worker end thread=${id}") }
+                    }
+                }))
+            }
+            queue.RunAndWaitForAllTasksCompleted()
+            let completed = ArrayList<(Node, ArrayList<(Node, Node)>)>()
+            var failure: Option<Exception> = None
+            for (result in results) {
+                try { completed.add(result.get()) } catch (e: Exception) {
+                    if (failure.isNone()) { failure = Some(e) }
+                }
+            }
+            if (let Some(e) <- failure) { throw e }
+            for ((cloned, pairs) in completed) {
+                for ((from, to) in pairs) { visitor(from, to) }
+                target.body.add(cloned)
+            }
+        } else {
+            for (node in source.body) { target.body.add(InstantiateNode(node, visitor)) }
         }
         target.rightCurlPos = source.rightCurlPos
         target.EnableAttr(Attribute.COMPILER_ADD)
         return target
     }
 
-    private static func InstantiateClassBody(source: ClassBody, visitor: (Node, Node) -> Unit): ClassBody {
+    private func InstantiateClassBody(source: ClassBody, visitor: (Node, Node) -> Unit): ClassBody {
         let target = ClassBody()
         CopyNodeField(source, target)
         target.leftCurlPos = source.leftCurlPos
@@ -1646,7 +1705,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateStructBody(
+    private func InstantiateStructBody(
         source: StructBody, visitor: (Node, Node) -> Unit): StructBody {
         let target = StructBody()
         CopyNodeField(source, target)
@@ -1664,7 +1723,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateInterfaceBody(
+    private func InstantiateInterfaceBody(
         source: InterfaceBody, visitor: (Node, Node) -> Unit): InterfaceBody {
         let target = InterfaceBody()
         CopyNodeField(source, target)
@@ -1681,7 +1740,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateGenericConstraint(
+    private func InstantiateGenericConstraint(
         source: GenericConstraint, visitor: (Node, Node) -> Unit): GenericConstraint {
         let target = GenericConstraint()
         CopyNodeField(source, target)
@@ -1701,7 +1760,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateFuncBody(source: FuncBody, visitor: (Node, Node) -> Unit): FuncBody {
+    private func InstantiateFuncBody(source: FuncBody, visitor: (Node, Node) -> Unit): FuncBody {
         let target = FuncBody()
         CopyNodeField(source, target)
         for (paramList in source.paramLists) {
@@ -1716,7 +1775,7 @@ public class PartialInstantiation {
             target.body = InstantiateExpr(body, visitor) as Block
         }
         if (let Some(generic) <- source.generic) {
-            target.generic = InstantiateGeneric(generic, visitor)
+            target.generic = CloneGeneric(generic, visitor)
         }
         for (capturedVar in source.capturedVars) {
             target.capturedVars.add(capturedVar)
@@ -1730,7 +1789,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateFuncParamList(
+    private func InstantiateFuncParamList(
         source: FuncParamList, visitor: (Node, Node) -> Unit): FuncParamList {
         let target = FuncParamList()
         CopyNodeField(source, target)
@@ -1747,7 +1806,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateFuncArg(source: FuncArg, visitor: (Node, Node) -> Unit): FuncArg {
+    private func InstantiateFuncArg(source: FuncArg, visitor: (Node, Node) -> Unit): FuncArg {
         let target = FuncArg()
         CopyNodeField(source, target)
         target.name = SrcIdentifier(source.name.Val(), source.name.Begin(), source.name.End(), source.name.IsRaw())
@@ -1759,7 +1818,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateAnnotation(
+    private func InstantiateAnnotation(
         source: Annotation, visitor: (Node, Node) -> Unit): Annotation {
         let target = Annotation(source.identifier.Val(), source.kind, source.begin)
         CopyNodeField(source, target)
@@ -1785,7 +1844,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func cloneContent(source: ImportContent, target: ImportContent): Unit {
+    private func cloneContent(source: ImportContent, target: ImportContent): Unit {
         CopyNodeField(source, target)
         target.kind = source.kind
         for (path in source.prefixPaths) {
@@ -1812,7 +1871,7 @@ public class PartialInstantiation {
         target.rightCurlPos = source.rightCurlPos
     }
 
-    private static func InstantiateImportSpec(
+    private func InstantiateImportSpec(
         source: ImportSpec, visitor: (Node, Node) -> Unit): ImportSpec {
         let target = ImportSpec()
         CopyNodeField(source, target)
@@ -1831,7 +1890,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateMatchCase(source: MatchCase, visitor: (Node, Node) -> Unit): MatchCase {
+    private func InstantiateMatchCase(source: MatchCase, visitor: (Node, Node) -> Unit): MatchCase {
         let target = MatchCase()
         CopyNodeField(source, target)
         for (pattern in source.patterns) {
@@ -1850,7 +1909,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateMatchCaseOther(
+    private func InstantiateMatchCaseOther(
         source: MatchCaseOther, visitor: (Node, Node) -> Unit): MatchCaseOther {
         let target = MatchCaseOther()
         CopyNodeField(source, target)
@@ -1863,7 +1922,7 @@ public class PartialInstantiation {
         return target
     }
 
-    private static func InstantiateNode(node: Node, visitor: (Node, Node) -> Unit): Node {
+    private func InstantiateNode(node: Node, visitor: (Node, Node) -> Unit): Node {
         let target: Option<Node> = if (let Some(typeNode) <- (node as Type)) {
             InstantiateType(typeNode, visitor)
         } else if (let Some(expr) <- (node as Expr)) {
@@ -1911,7 +1970,7 @@ public class PartialInstantiation {
             if (let Some(sourceDecl) <- (from as Decl)) {
                 if (let Some(targetDecl) <- (target as Decl)) {
                     source2cloned[sourceDecl] = targetDecl
-                    registerInstantiation(sourceDecl, targetDecl)
+                    if (!deferRegistration) { registerInstantiation(sourceDecl, targetDecl) }
                     TargetAddrMapInsert(sourceDecl.outerDecl,
                         { value: Decl => targetDecl.outerDecl = value })
                     TargetAddrMapInsert(sourceDecl.genericDecl,
