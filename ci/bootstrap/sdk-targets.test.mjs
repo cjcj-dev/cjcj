@@ -182,6 +182,7 @@ test('explicit std Git identity reaches std targets without relabeling installed
   for(const id of ['stage2','stage3']){
    const expected=structuredClone(original.stages.find(s=>s.id===id));
    expected.metadata.sources.std={repository:input.stdlib.repository,commit:input.stdlibCommit};
+   expected.metadata.selection.targetComponents.std=input.stdlib;
    assert.deepEqual(c.stages.find(s=>s.id===id),expected,'only actual std source facts follow the explicit std selection');
   }
   assert.doesNotThrow(()=>validateBootstrapTargets(c));
