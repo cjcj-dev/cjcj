@@ -7235,7 +7235,7 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
             serializingCommon: globalOptions.outputMode == OutputMode.CHIR,
             exportContent: importSrcCode, exportForIncr: false,
             exportForTest: globalOptions.exportForTest, exportFuncBody: true,
-            compileCjd: globalOptions.compileCjd)
+            compileCjd: globalOptions.compileCjd, mangleJobs: Int64(globalOptions.GetJobs()))
         try {
             writer.PreSaveFullExportDecls(pkg)
             astWriters[pkg] = writer
@@ -7256,7 +7256,7 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
                 serializingCommon: globalOptions.outputMode == OutputMode.CHIR,
                 exportContent: importSrcCode, exportForIncr: false,
                 exportForTest: globalOptions.exportForTest, exportFuncBody: true,
-                compileCjd: globalOptions.compileCjd)
+                compileCjd: globalOptions.compileCjd, mangleJobs: Int64(globalOptions.GetJobs()))
             try {
                 newWriter.PreSaveFullExportDecls(pkg)
             } catch (error: Exception) {

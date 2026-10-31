@@ -427,6 +427,11 @@
     "member": "packages/mangle"
   },
   {
+    "file": "packages/mangle/src/MangleExportIds_test.cj",
+    "executor": "cjpm",
+    "member": "packages/mangle"
+  },
+  {
     "file": "packages/option/src/Option_test.cj",
     "executor": "cjpm",
     "member": "packages/option"
