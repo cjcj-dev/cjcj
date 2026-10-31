@@ -2209,8 +2209,8 @@ public class FaithfulAST2CHIR {
                             if (!AstTy.IsTyCorrect(paramTy)) {
                                 throw IllegalStateException("lowering generic parameter has invalid Sema type: ${param.identifier.Val()}")
                             }
+                            let _ = chirType.TranslateType(paramTy)
                             if (let Some(genericTy) <- (paramTy as AstGenericsTy)) {
-                                let _ = chirType.TranslateType(genericTy)
                                 genericTys.add(genericTy)
                             }
                         }
