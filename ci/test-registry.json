@@ -939,5 +939,10 @@
     "file": "packages/codegen/src/AggregateArgumentOwner_test.cj",
     "executor": "cjpm",
     "member": "packages/codegen"
+  },
+  {
+    "file": "ci/test-temp-file-ownership.mjs",
+    "executor": "manual",
+    "reason": "Linux real TempFileManager consumer built from selected option package; native mkdir interposition creates a separate-process contender after exists, verifies EEXIST/retry, normal cleanup and foreign sentinel protection. Requires paired host closure and a new owned output root; old precise cut returns 2, no skip."
   }
 ]
