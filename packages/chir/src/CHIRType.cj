@@ -112,20 +112,25 @@ public class CHIRTypeCache {
 public class CHIRType {
     private let builder: CHIRBuilder
     private let chirTypeCache: CHIRTypeCache
+    private let frozenGenericBounds: Bool
 
-    public init(builder: CHIRBuilder, typeCache: CHIRTypeCache) {
+    public init(builder: CHIRBuilder, typeCache: CHIRTypeCache, frozenGenericBounds!: Bool = false) {
         this.builder = builder
         this.chirTypeCache = typeCache
+        this.frozenGenericBounds = frozenGenericBounds
     }
 
     public func Fork(workerBuilder: CHIRBuilder): CHIRType {
-        return CHIRType(workerBuilder, CHIRTypeCache(parent: Some(chirTypeCache)))
+        return CHIRType(workerBuilder, CHIRTypeCache(parent: Some(chirTypeCache)), frozenGenericBounds: true)
     }
 
     public func MergeFrom(worker: CHIRType): Unit { chirTypeCache.MergeFrom(worker.chirTypeCache) }
 
     public func FillGenericArgType(ty: AstGenericsTy): Unit {
         if (chirTypeCache.HasInheritedGenericBounds(ty)) { return }
+        if (frozenGenericBounds) {
+            throw IllegalStateException("lowering worker generic bounds were not prepared: ${ty.String()}")
+        }
         let cachedType = chirTypeCache.TryGetType(ty) ??
             throw IllegalStateException("generic AST type has not been translated: ${ty.String()}")
         if (let Some(genericType) <- (cachedType as GenericType)) {

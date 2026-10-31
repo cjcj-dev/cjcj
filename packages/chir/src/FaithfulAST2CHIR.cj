@@ -2174,7 +2174,10 @@ public class FaithfulAST2CHIR {
     }
 
     private func TranslateOtherTopLevelDecls(node: AstPackage): Unit {
-        let _ = node
+        // Include nested generic functions in field initializers as well as ordinary bodies.
+        if (opts.GetJobs() > 1u64 && !opts.disableLoweringConcurrency && !opts.codegenDebugMode) {
+            PrepareLoweringGenericBounds(node)
+        }
         let bodies = ArrayList<AstDecl>()
         for (decl in globalAndMemberFuncs) {
             if (NeedTranslate(decl)) { bodies.add(decl) }
@@ -2192,12 +2195,8 @@ public class FaithfulAST2CHIR {
         let _ = Translator.TranslateASTNode(decl, trans)
     }
 
-    // Local nominal declarations publish shared member/type shells. Keep those declarations at
-    // their original position, while lowering independent stretches on either side concurrently.
-    private func PrepareBodyHeaders(decl: AstDecl): Bool {
-        var ownsOnlyBody = true
-        AstWalker(decl, visitPre: { node: AstNode =>
-            if (node.IsNominalDecl()) { ownsOnlyBody = false }
+    private func PrepareLoweringGenericBounds(root: AstNode): Unit {
+        AstWalker(root, visitPre: { node: AstNode =>
             if (let Some(fn) <- (node as AstFuncDecl)) {
                 if (let Some(body) <- fn.funcBody) {
                     if (let Some(generic) <- body.generic) {
@@ -2210,6 +2209,17 @@ public class FaithfulAST2CHIR {
                     }
                 }
             }
+            return AstVisitAction.WALK_CHILDREN
+        }).Walk()
+    }
+
+    // Local nominal declarations publish shared member/type shells. Keep those declarations at
+    // their original position, while lowering independent stretches on either side concurrently.
+    private func PrepareBodyHeaders(decl: AstDecl): Bool {
+        PrepareLoweringGenericBounds(decl)
+        var ownsOnlyBody = true
+        AstWalker(decl, visitPre: { node: AstNode =>
+            if (node.IsNominalDecl()) { ownsOnlyBody = false }
             return AstVisitAction.WALK_CHILDREN
         }).Walk()
         if (let Some(value) <- globalCache.TryGet(decl)) {
