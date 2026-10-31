@@ -361,6 +361,7 @@ public open class GlobalOptions <: Option {
     public var disableManglingConcurrency: Bool = false
     public var disableParseConcurrency: Bool = false
     public var disableCodegenConcurrency: Bool = false
+    public var disableLoweringConcurrency: Bool = false
     public let runtimeConfigs: HashMap<String, String> = HashMap<String, String>()
     public let selectedCHIROpts: ArrayList<OptimizationFlag> = ArrayList<OptimizationFlag>()
     public var interpreter: Bool = false
@@ -546,6 +547,7 @@ public open class GlobalOptions <: Option {
         disableManglingConcurrency = other.disableManglingConcurrency
         disableParseConcurrency = other.disableParseConcurrency
         disableCodegenConcurrency = other.disableCodegenConcurrency
+        disableLoweringConcurrency = other.disableLoweringConcurrency
         for ((key, value) in other.runtimeConfigs) { runtimeConfigs.add(key, value) }
         for (value in other.selectedCHIROpts) { selectedCHIROpts.add(value) }
         interpreter = other.interpreter

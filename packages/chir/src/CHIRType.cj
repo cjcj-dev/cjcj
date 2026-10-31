@@ -47,12 +47,36 @@ public class CHIRTypeCache {
     private let typeIndex: HashMap<Int64, CHIRTypeCacheEntry> = HashMap<Int64, CHIRTypeCacheEntry>()
     private let nominalIndex: HashMap<Int64, CHIRNominalCacheEntry> = HashMap<Int64, CHIRNominalCacheEntry>()
 
-    public init() {}
+    private let parent: Option<CHIRTypeCache>
+    private let filledGenericBounds: HashSet<Int64> = HashSet<Int64>()
+
+    public init(parent!: Option<CHIRTypeCache> = None) { this.parent = parent }
+
+    public func HasGenericBounds(ty: AstTy): Bool {
+        if (filledGenericBounds.contains(ty.objectId)) { return true }
+        if (let Some(base) <- parent) { return base.HasGenericBounds(ty) }
+        return false
+    }
+
+    public func HasInheritedGenericBounds(ty: AstTy): Bool {
+        if (let Some(base) <- parent) { return base.HasGenericBounds(ty) }
+        return false
+    }
+
+    public func MarkGenericBounds(ty: AstTy): Unit { filledGenericBounds.add(ty.objectId) }
+
+    public func MergeFrom(worker: CHIRTypeCache): Unit {
+        for (entry in worker.typeMap) { SetType(entry.astTy, entry.chirTy) }
+        for (entry in worker.globalNominalCache) { SetNominal(entry.decl, entry.def) }
+        for (key in worker.filledGenericBounds) { filledGenericBounds.add(key) }
+    }
+
 
     public func TryGetType(ty: AstTy): Option<Type> {
         if (let Some(entry) <- typeIndex.get(ty.objectId)) {
             return entry.chirTy
         }
+        if (let Some(base) <- parent) { return base.TryGetType(ty) }
         return None
     }
 
@@ -70,6 +94,7 @@ public class CHIRTypeCache {
         if (let Some(entry) <- nominalIndex.get(decl.objectId)) {
             return entry.def
         }
+        if (let Some(base) <- parent) { return base.TryGetNominal(decl) }
         return None
     }
 
@@ -93,7 +118,14 @@ public class CHIRType {
         this.chirTypeCache = typeCache
     }
 
+    public func Fork(workerBuilder: CHIRBuilder): CHIRType {
+        return CHIRType(workerBuilder, CHIRTypeCache(parent: Some(chirTypeCache)))
+    }
+
+    public func MergeFrom(worker: CHIRType): Unit { chirTypeCache.MergeFrom(worker.chirTypeCache) }
+
     public func FillGenericArgType(ty: AstGenericsTy): Unit {
+        if (chirTypeCache.HasInheritedGenericBounds(ty)) { return }
         let cachedType = chirTypeCache.TryGetType(ty) ??
             throw IllegalStateException("generic AST type has not been translated: ${ty.String()}")
         if (let Some(genericType) <- (cachedType as GenericType)) {
@@ -105,6 +137,7 @@ public class CHIRType {
                 chirUpperBounds.add(TranslateType(argTy))
             }
             genericType.SetUpperBounds(chirUpperBounds)
+            chirTypeCache.MarkGenericBounds(ty)
             return
         }
         throw IllegalStateException("translated generic AST type is not CHIR GenericType")

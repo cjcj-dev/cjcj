@@ -81,17 +81,21 @@ public class FaithfulAST2CHIRNodeMapEntry {
 public class FaithfulAST2CHIRNodeMap {
     private let cache: HashMap<AstDecl, Value> = HashMap<AstDecl, Value>()
 
-    public init() {}
+    private let parent: Option<FaithfulAST2CHIRNodeMap>
+
+    public init(parent!: Option<FaithfulAST2CHIRNodeMap> = None) { this.parent = parent }
 
     public func Set(decl: AstDecl, value: Value): Unit {
-        if (cache.contains(decl)) {
+        if (Has(decl)) {
             throw IllegalStateException("AST2CHIRNodeMap duplicate node: ${ASTKindName(decl.astKind)}")
         }
         cache[decl] = value
     }
 
     public func TryGet(decl: AstDecl): Option<Value> {
-        return cache.get(decl)
+        if (let Some(value) <- cache.get(decl)) { return value }
+        if (let Some(base) <- parent) { return base.TryGet(decl) }
+        return None
     }
 
     public func Get(decl: AstDecl): Value {
@@ -100,7 +104,7 @@ public class FaithfulAST2CHIRNodeMap {
     }
 
     public func Has(decl: AstDecl): Bool {
-        return cache.contains(decl)
+        return TryGet(decl).isSome()
     }
 
     public func Entries(): ArrayList<FaithfulAST2CHIRNodeMapEntry> {
