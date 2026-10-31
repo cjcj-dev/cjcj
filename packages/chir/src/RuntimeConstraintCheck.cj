@@ -74,8 +74,9 @@ public class NoHeapAllocChecker {
 
     public func CheckFunction(fn: Function, expr: Option<Expression>, operation: String): Unit {
         synchronized(reportMutex) {
-            let root = constrainedRoots.get(fn.nodeId) ?? return
-            ReportFunction(fn, root, expr, operation)
+            if (let Some(root) <- constrainedRoots.get(fn.nodeId)) {
+                ReportFunction(fn, root, expr, operation)
+            }
         }
     }
 
@@ -195,8 +196,9 @@ public class NoWriteBarrierRecChecker {
 
     public func CheckFunction(fn: Function, expr: Option<Expression>): Unit {
         synchronized(reportMutex) {
-            let root = constrainedRoots.get(fn.nodeId) ?? return
-            ReportFunction(fn, root, expr)
+            if (let Some(root) <- constrainedRoots.get(fn.nodeId)) {
+                ReportFunction(fn, root, expr)
+            }
         }
     }
 
