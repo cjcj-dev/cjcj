@@ -2236,12 +2236,27 @@ public class FaithfulAST2CHIR {
             for (decl in decls) { TranslateFunctionBody(decl) }
             return
         }
+        // A separately scheduled local const function can still be contained in
+        // another scheduled body. Those roots share the same AST/CHIR body;
+        // preserve their source-order dependency instead of assigning two owners.
+        let scheduledRoots = HashSet<Int64>()
+        for (decl in decls) { scheduledRoots.add(decl.objectId) }
+        let overlappingRoots = HashSet<Int64>()
+        for (decl in decls) {
+            AstWalker(decl, localVisits: true, visitPre: { node: AstNode =>
+                if (node.objectId != decl.objectId && scheduledRoots.contains(node.objectId)) {
+                    overlappingRoots.add(decl.objectId)
+                    overlappingRoots.add(node.objectId)
+                }
+                AstVisitAction.WALK_CHILDREN
+            }).Walk()
+        }
         let pending = ArrayList<AstDecl>()
         let pendingFunctions = HashSet<Int64>()
         for (decl in decls) {
             let value = globalCache.TryGet(decl)
             let repeated = value.isSome() && pendingFunctions.contains(value.getOrThrow().nodeId)
-            if (PrepareBodyHeaders(decl) && !repeated) {
+            if (PrepareBodyHeaders(decl) && !repeated && !overlappingRoots.contains(decl.objectId)) {
                 pending.add(decl)
                 if (let Some(fn) <- value) { pendingFunctions.add(fn.nodeId) }
             } else {
