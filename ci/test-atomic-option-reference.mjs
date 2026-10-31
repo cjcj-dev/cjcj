@@ -27,6 +27,7 @@ function run(name, argv, env = process.env) {
   return fs.readFileSync(path.join(work, name + '.stdout'), 'utf8');
 }
 const library = path.join(work, 'libaor_regression.a');
+fs.mkdirSync(path.join(work, 'library-temps'));
 run('library', [compiler, '-p', path.join(fixture, 'library'), '--output-type=staticlib', '-O0',
   '--save-temps=' + path.join(work, 'library-temps'), '-o', library]);
 const exe = path.join(work, 'aor-main');
