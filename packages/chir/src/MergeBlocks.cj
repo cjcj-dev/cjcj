@@ -12,7 +12,18 @@ extend SkipKind {
     }
 }
 
-private func CopyBlock(builder: CHIRBuilder, block: Block): Block {
+private func RecordClonedGlobalUsers(expr: Expression, users: ArrayList<(Value, Expression)>): Unit {
+    for (operand in expr.GetOperands()) {
+        if (operand.IsGlobal()) { users.add((operand, expr)) }
+    }
+    for (group in expr.GetBlockGroups()) {
+        for (block in group.GetBlocks()) {
+            for (nested in block.GetExpressions()) { RecordClonedGlobalUsers(nested, users) }
+        }
+    }
+}
+
+private func CopyBlock(builder: CHIRBuilder, block: Block, users: ArrayList<(Value, Expression)>): Block {
     let blockGroup = block.GetParentBlockGroup() ??
         throw IllegalStateException("MergeBlocks CopyBlock expected parent block group")
     let copiedBlock = builder.CreateBlock(blockGroup)
@@ -26,6 +37,7 @@ private func CopyBlock(builder: CHIRBuilder, block: Block): Block {
         for ((oldValue, newValue) in replaceTable) {
             cloned.ReplaceOperand(oldValue, newValue)
         }
+        RecordClonedGlobalUsers(cloned, users)
         if (idx + 1 != exprs.size) {
             replaceTable.add((expr.GetResult().getOrThrow(), cloned.GetResult().getOrThrow()))
         }
@@ -34,12 +46,12 @@ private func CopyBlock(builder: CHIRBuilder, block: Block): Block {
     return copiedBlock
 }
 
-private func MergeForInCondBlock(builder: CHIRBuilder, block: Block): Unit {
+private func MergeForInCondBlock(builder: CHIRBuilder, block: Block, users: ArrayList<(Value, Expression)>): Unit {
     let oldPreds = block.GetPredecessors()
     CJC_ASSERT(!oldPreds.isEmpty())
     var idx: Int64 = 0
     while (idx < oldPreds.size - 1) {
-        let copiedBlock = CopyBlock(builder, block)
+        let copiedBlock = CopyBlock(builder, block, users)
         let pred = oldPreds[idx]
         pred.GetTerminator().getOrThrow().ReplaceSuccessor(block, copiedBlock)
         idx++
@@ -48,11 +60,31 @@ private func MergeForInCondBlock(builder: CHIRBuilder, block: Block): Unit {
 }
 
 public class MergeBlocks {
+    private let appendedGlobalUsers = ArrayList<(Value, Expression)>()
     public init() {}
 
     public func RunOnPackage(pkg: Package, builder: CHIRBuilder, enableCompileDebug!: Bool = false,
-        enableCoverage!: Bool = false): Int64 {
+        enableCoverage!: Bool = false, threadNum!: Int64 = 1): Int64 {
         var merged: Int64 = 0
+        if (threadNum > 1) {
+            let completed = RunFunctionLocalPass<(Int64, CHIRBuilder, MergeBlocks)>(
+                pkg.GetGlobalFuncsWithBody(), threadNum, { fn =>
+                    let localBuilder = CHIRBuilder(builder.context)
+                    localBuilder.SetCompileTimeValueMark(builder.GetCompileTimeValueMark())
+                    let worker = MergeBlocks()
+                    let count = if (fn.TestAttr(Attribute.SKIP_ANALYSIS)) { 0 } else {
+                        worker.RunOnFunction(fn, localBuilder, enableCompileDebug: enableCompileDebug,
+                            enableCoverage: enableCoverage)
+                    }
+                    (count, localBuilder, worker)
+                }, passName: "merge-blocks")
+            for ((count, localBuilder, worker) in completed) {
+                merged += count
+                for ((value, user) in worker.appendedGlobalUsers) { value.MoveUserToTail(user) }
+                localBuilder.MergeAllocatedInstance()
+            }
+            return merged
+        }
         for (fn in pkg.GetGlobalFuncsWithBody()) {
             if (fn.TestAttr(Attribute.SKIP_ANALYSIS)) {
                 continue
@@ -81,7 +113,7 @@ public class MergeBlocks {
                 merged += RunOnNestedLambdas(block, builder, enableCompileDebug: enableCompileDebug,
                     enableCoverage: enableCoverage)
                 if (block.GetGeneratedFromForIn()) {
-                    MergeForInCondBlock(builder, block)
+                    MergeForInCondBlock(builder, block, appendedGlobalUsers)
                     merged++
                     changed = true
                 } else if (CanMergeIntoPredecessor(block, enableCompileDebug, enableCoverage)) {

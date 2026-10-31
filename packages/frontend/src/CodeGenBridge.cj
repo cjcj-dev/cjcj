@@ -891,7 +891,7 @@ private class ToCHIR {
         try (recorder = ProfileRecorder(firstName, secondName)) {
             let options = instance.invocation.globalOptions
             MergeBlocks().RunOnPackage(currentPackage, builder, enableCompileDebug: options.enableCompileDebug,
-                enableCoverage: options.enableCoverage)
+                enableCoverage: options.enableCoverage, threadNum: Int64(options.GetJobs()))
             DumpCHIRToFile(secondName)
         }
     }
@@ -1074,7 +1074,7 @@ private func RulesChecking(pkg: RealCHIRPackage, builder: ChirBuilder, options: 
     UnreachableBlockAnalysis(diag, pkg).RunOnPackage(Int64(options.GetJobs()))
     DeadCodeElimination(builder).ClearUnreachableMarkBlock(pkg)
     MergeBlocks().RunOnPackage(pkg, builder, enableCompileDebug: options.enableCompileDebug,
-        enableCoverage: options.enableCoverage)
+        enableCoverage: options.enableCoverage, threadNum: Int64(options.GetJobs()))
     DeadCodeElimination(builder).NothingTypeExprElimination(pkg, isDebug: options.chirDebugOptimizer)
     let wrapper = ConstAnalysisWrapper(builder,
         deferredReports: options.GetJobs() > 1 && !options.chirDebugOptimizer)
@@ -1088,7 +1088,7 @@ private func RulesChecking(pkg: RealCHIRPackage, builder: ChirBuilder, options: 
     ClearMatchMetadata(pkg)
     DeadCodeElimination(builder).UnreachableBlockEliminationForPackage(pkg, isDebug: options.chirDebugOptimizer)
     MergeBlocks().RunOnPackage(pkg, builder, enableCompileDebug: options.enableCompileDebug,
-        enableCoverage: options.enableCoverage)
+        enableCoverage: options.enableCoverage, threadNum: Int64(options.GetJobs()))
     if (ShouldReportUnusedCodeWarnings()) {
         DeadCodeElimination(builder, diag, pkg).ReportUnusedCode(pkg, options)
     }
