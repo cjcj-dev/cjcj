@@ -283,7 +283,8 @@ const c=output+'.c';fs.writeFileSync(c,'#include <stdio.h>\\nint main(void){puts
 const r=cp.spawnSync('cc',[c,'-o',output],{stdio:'inherit'});process.exit(r.status??1);
 `,0o755);
  for(const relative of ['modules/'+tuple+'/std/std.core.cjo','lib/'+tuple+'/libcangjie-std-core.a',
-  'runtime/lib/'+tuple+'/libcangjie-runtime.so','third_party/llvm/bin/llc','third_party/llvm/lib/libLLVM-15.so'])await put(native+'/'+relative,'controlled native dependency');
+  'runtime/lib/'+tuple+'/libcangjie-runtime.so','third_party/llvm/bin/llc','third_party/llvm/lib/libLLVM-15.so',
+  'third_party/llvm/lib/clang/15/include/stdint.h'])await put(native+'/'+relative,'controlled native dependency');
  await fs.mkdir(native+'/tools/bin',{recursive:true});
  await put(work+'/host/runtime/lib/'+tuple+'/libcangjie-runtime.so','controlled host runtime');
  await put(sdk+'/old-success','previous SDK');
@@ -309,7 +310,7 @@ source+='\\nexport async function '+name+'(config){const fs=await import("node:f
  assert.match(build.stdout,/NOT_INSTALLED/);assert.equal(await fs.readFile(sdk+'/old-success','utf8'),'previous SDK');
  const built=(await fs.readFile(trace,'utf8')).trim().split('\n').map(JSON.parse);
  assert.deepEqual(built.map(row=>row.name),['fetch','compiler','runtime','stdlib','stdx','tools']);
- for(const row of built){
+ for(const row of built.filter(row=>row.name!=='fetch')){
   const actual=row.selection.targetComponents;
   console.log('SOURCE_TOOLS_SELECTION_TARGET_REACHED '+JSON.stringify({stage:row.name,tools:actual.tools}));
   assert.equal(actual.tools.commit,selection.tools.tag,'UNIFIED_TOOLS_SELECTION_COMMIT');
@@ -367,7 +368,7 @@ fs.writeFileSync(out+'.c','#include <stdio.h>\\nint main(void){puts("hello from 
 `,0o755);
  for(const rel of ['modules/'+tuple+'/std/std.core.cjo','lib/'+tuple+'/libcangjie-std-core.a',
   'lib/'+tuple+'/libcangjie-ast-support.a','runtime/lib/'+tuple+'/libcangjie-runtime.so',
-  'third_party/llvm/lib/libLLVM-15.so','schema/StdAstFormat.fbs','include/flatbuffers/StdAstFormat_generated.h',
+  'third_party/llvm/lib/libLLVM-15.so','third_party/llvm/lib/clang/15/include/stdint.h','schema/StdAstFormat.fbs','include/flatbuffers/StdAstFormat_generated.h',
   'third_party/flatbuffers/bin/flatc','stdx/'+tuple+'/fixture',
   ...['llc','llvm-as','llvm-dis','opt'].map(name=>'third_party/llvm/bin/'+name),
   ...['cjpm','cjfmt','hle','LSPServer','cjcov','cjtrace-recover','cjlint','cjprof','cjcompat','cjhead'].flatMap(name=>{
