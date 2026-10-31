@@ -1076,7 +1076,8 @@ private func RulesChecking(pkg: RealCHIRPackage, builder: ChirBuilder, options: 
     MergeBlocks().RunOnPackage(pkg, builder, enableCompileDebug: options.enableCompileDebug,
         enableCoverage: options.enableCoverage)
     DeadCodeElimination(builder).NothingTypeExprElimination(pkg, isDebug: options.chirDebugOptimizer)
-    let wrapper = ConstAnalysisWrapper(builder)
+    let wrapper = ConstAnalysisWrapper(builder,
+        deferredReports: options.GetJobs() > 1 && !options.chirDebugOptimizer)
     // C++ CHIR.cpp:475-480 ToCHIR::RunConstantAnalysis.
     wrapper.RunOnPackage(pkg, diag, Int64(options.GetJobs()), isDebug: options.chirDebugOptimizer)
     if (!RunVarInitChecking(pkg, diag, options.GetJobs())) {
@@ -1136,6 +1137,7 @@ private func RunConstantPropagation(pkg: RealCHIRPackage, builder: ChirBuilder, 
     if (threadNum == 1) {
         let cp = ConstPropagation(builder: Some(builder), wrapper: wrapper, opts: options)
         cp.RunOnPackage(pkg, isDebug: options.chirDebugOptimizer, isCJLint: false)
+        wrapper.FlushReports()
         MergeEffectMap(cp.GetEffectMap(), effectMap)
         dce.UnreachableBlockElimination(cp.GetFuncsNeedRemoveBlocks(),
             isDebug: options.chirDebugOptimizer)
@@ -1158,6 +1160,7 @@ private func RunConstantPropagation(pkg: RealCHIRPackage, builder: ChirBuilder, 
         }
         taskQueue.RunAndWaitForAllTasksCompleted()
         ConsumeCHIRPassResults(results)
+        wrapper.FlushReports()
         for (cp in cpList) {
             MergeEffectMap(cp.GetEffectMap(), effectMap)
             dce.UnreachableBlockElimination(cp.GetFuncsNeedRemoveBlocks(),
