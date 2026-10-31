@@ -5,6 +5,7 @@
 #include <cwchar>
 #include <filesystem>
 #include <algorithm>
+#include <cctype>
 #include <fstream>
 #include <string>
 #include <type_traits>
@@ -187,6 +188,22 @@ int main(int argc, char **argv) {
         if (lines[3] != "linux") throw std::runtime_error("entry platform mismatch");
         const char *loader = "LD_LIBRARY_PATH";
 #endif
+        // The bundled Python is also a runner for caller-built native programs.
+        // Keep SDK libraries first for Python itself, then pass the caller's
+        // helper-library directories through to its subprocesses. Compiler and
+        // other native entries continue to use only their selected libraries.
+        const auto name = real.filename().string();
+        const auto version = name.size() >= 6 ? name.substr(6) : std::string();
+        const bool python = name == "python" ||
+            (name.compare(0, 6, "python") == 0 && !version.empty() &&
+             std::isdigit(static_cast<unsigned char>(version[0])) &&
+             std::all_of(version.begin(), version.end(), [](unsigned char c) {
+                 return std::isdigit(c) || c == '.';
+             }));
+        if (real.parent_path() == root / ".native-tools/third_party/llvm/bin" && python) {
+            const char *callerLibraries = getenv(loader);
+            if (callerLibraries && *callerLibraries) libraries += ":" + std::string(callerLibraries);
+        }
         if (setenv(loader, libraries.c_str(), 1) || setenv("CANGJIE_HOME", root.c_str(), 1))
             throw std::runtime_error("entry environment");
         unsetenv("LD_PRELOAD"); unsetenv("LD_AUDIT"); unsetenv("DYLD_INSERT_LIBRARIES");

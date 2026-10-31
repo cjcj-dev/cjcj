@@ -1,5 +1,41 @@
 import test from'node:test';import assert from'node:assert/strict';import fs from'node:fs/promises';import path from'node:path';import {spawnSync}from'node:child_process';import {installEntries,assertLauncherFormat}from'./sdk-install-entries.mjs';import {fileDigest}from'./sdk-flow.mjs';
 const parent=process.env.RELEASE_EVIDENCE_TEST_ROOT;if(!parent)throw new Error('RELEASE_EVIDENCE_TEST_ROOT required');await fs.mkdir(parent,{recursive:true});
+test('bundled Python passes caller helper libraries to subprocesses while compiler entries remain isolated',
+ {skip:process.platform!=='linux'},async()=>{
+ const work=await fs.mkdtemp(path.join(parent,'python-loader-'));let sdk=path.join(work,'SDK with spaces');
+ const caller=path.join(work,'caller libraries'),bin=path.join(sdk,'third_party/llvm/bin');
+ await fs.mkdir(caller);await fs.mkdir(bin,{recursive:true});await fs.mkdir(path.join(sdk,'bin'));
+ await fs.mkdir(path.join(sdk,'lib'));const records=[];
+ const ok=(argv,opts={})=>{const r=spawnSync(argv[0],argv.slice(1),{encoding:'utf8',timeout:60000,...opts});assert.equal(r.status,0,r.stdout+r.stderr);return r;};
+ await fs.writeFile(path.join(work,'helper.c'),'int helper(void){return 42;}\n');
+ await fs.writeFile(path.join(work,'child.c'),'extern int helper(void);int main(void){return helper()==42?0:1;}\n');
+ await fs.writeFile(path.join(work,'env.c'),'#include <stdio.h>\n#include <stdlib.h>\nint main(void){puts(getenv("LD_LIBRARY_PATH"));return 0;}\n');
+ ok(['cc','-shared','-fPIC',path.join(work,'helper.c'),'-Wl,-soname,libcaller_helper.so','-o',path.join(caller,'libcaller_helper.so')]);
+ const child=path.join(work,'child');ok(['cc',path.join(work,'child.c'),'-L'+caller,'-lcaller_helper','-o',child]);
+ ok(['cc',path.join(work,'env.c'),'-o',path.join(sdk,'bin/cjc')]);
+ await fs.copyFile(path.join(sdk,'bin/cjc'),path.join(bin,'python-config'));
+ const python=await fs.realpath('/usr/bin/python3'),version=path.basename(python);
+ await fs.copyFile(python,path.join(bin,version));await fs.symlink(version,path.join(bin,'python3'));
+ await installEntries({root:sdk,build:path.join(work,'entry-build'),platform:'linux_x86_64',records,groups:[
+  {directory:'third_party/llvm/bin',retain:'.native-tools/third_party/llvm/bin',libraries:['lib']},
+  {directory:'bin',retain:'libexec/compiler',libraries:['lib']} ]});
+ await fs.writeFile(path.join(work,'install-commands.json'),JSON.stringify(records,null,2));
+ const results=[];
+ async function check(){
+  const env={...process.env,LD_LIBRARY_PATH:caller};
+  const r=ok([path.join(sdk,'third_party/llvm/bin/python3'),'-c',
+   'import os,subprocess,sys; print(os.environ["LD_LIBRARY_PATH"],flush=True); subprocess.run([sys.argv[1]],check=True)',child],{env});
+  results.push({name:'python-subprocess-helper',sdk,rc:r.status,signal:r.signal,stdout:r.stdout,stderr:r.stderr});
+  console.log('PYTHON_NATIVE_HELPER_TARGET_REACHED',r.status,r.stdout.trim());
+  assert.equal(r.stdout.trim(),path.join(sdk,'lib')+':'+caller,'SDK libraries precede caller helper directories');
+  for(const name of ['bin/cjc','third_party/llvm/bin/python-config']){
+   const control=ok([path.join(sdk,name)],{env});results.push({name,sdk,rc:control.status,stdout:control.stdout});
+   assert.equal(control.stdout.trim(),path.join(sdk,'lib'),'non-interpreter entries retain loader isolation');
+  }
+  await fs.writeFile(path.join(work,'consumer-results.json'),JSON.stringify(results,null,2));
+ }
+ await check();const moved=path.join(work,'relocated SDK');await fs.rename(sdk,moved);sdk=moved;await check();
+});
 test('public compiler argv0 selects target resources while retained execution loads the host',async()=>{
  const work=await fs.realpath(await fs.mkdtemp(path.join(parent,'compiler argv0-')));
  let sdk=path.join(work,'SDK with spaces');
