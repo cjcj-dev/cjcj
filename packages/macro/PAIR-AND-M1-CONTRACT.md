@@ -29,3 +29,8 @@ stdx owner需核其两个宏producer与发布/install路径：保正常宏重链
 - borrowed H控制：实际借用H不Fini H；owned R在Init成功立即记责任、后续符号/预载失败仍走已有Main finally→CloseRuntime，保首次异常及责任。失败Fini不再调用取0，不dlclose活映像。
 动态取证按实际需要交原Grok，仅已有函数/自然执行点或正常既有日志，记录ACK/Get/Release/Fini/最后H退出顺序；不自造监控框架、不在callback锁内等待自己。每臂监督总≤180秒/首fault保，不循环至绿；具体目标布局/资源在完整pair成熟后实核裁定。旧sig/scope/内存耗用永久保。
 这些是执行合同不是PASS。SOURCE增量交原Sol；真实公开旧SO/ir2门与默认pin配套未完成前PAIR_HOLD保持。
+
+## R1/R2 successor controls
+Linux_CJNATIVE emits the SDK macro RPATH before user link options, preserving private paths after it. Ordinary shared/executable ordering is unchanged. Admission remains first-path based: an old SDK first and current SDK only at the tail is rejected. The selected runtime directory is retained independently of the native handle, only exposed while initialization succeeded and close has not started; borrowed H still uses the same admission, never initializes/finalizes another H merely to obtain a handle.
+
+The registered tests/macro_binding_paths/Main.cj consumer calls the real Linux_CJNATIVE.GenerateLinkingTool and RuntimeInit/OpenMacroLibrary. Its native SO only validates image admission/loading and borrowed-host close/task behavior, not CJ macro expansion or owned-R ir2. ci/test-macro-binding-paths.mjs records the original two assertion failures, ordinary control, stale-first rejection and repaired paths. The public paired SDK gate must additionally produce a CJ macro with explicit private RPATH, retain the old SO for both default/explicit/cache consumers, and perform normal relink recovery.

@@ -608,9 +608,9 @@ foreign func CJSelfhostCheckMacroRuntimeBinding(image: CString, runtimeDirectory
 
 @When[os == "Linux"]
 private func HasCurrentMacroRuntimeBinding(path: String): Bool {
-    if (let Some(runtime) <- RuntimeInit.GetInstance().GetHandle()) {
+    if (let Some(runtimeDirectory) <- RuntimeInit.GetInstance().GetRuntimeDirectory()) {
         try (image = unsafe { LibC.mallocCString(path) }.asResource(),
-            directory = unsafe { LibC.mallocCString(FileUtil.GetDirPath(runtime.path)) }.asResource()) {
+            directory = unsafe { LibC.mallocCString(runtimeDirectory) }.asResource()) {
             if (!image.value.isNull() && !directory.value.isNull()) {
                 return unsafe { CJSelfhostCheckMacroRuntimeBinding(image.value, directory.value) } == 0
             }
@@ -840,6 +840,9 @@ public class RuntimeInit {
     private static let instance: RuntimeInit = RuntimeInit(true)
     private var initRuntime: Bool = false
     private var handle: Option<RuntimeHandle> = None
+    // A borrowed host intentionally has no retained native handle. Keep the
+    // selected SDK identity separately; it is not runtime ownership or readiness.
+    private var runtimeDirectory: Option<String> = None
     private var runtimeMethodFunc: CPointer<Unit> = CPointer<Unit>()
     private var runtimeReleaseFunc: CPointer<Unit> = CPointer<Unit>()
     private var runtimeTaskResultFunc: CPointer<Unit> = CPointer<Unit>()
@@ -945,7 +948,11 @@ public class RuntimeInit {
             if (ownsInitializedRuntime && !initRuntime) {
                 throw IllegalStateException("macro runtime initialization previously failed after acquiring ownership")
             }
-            return InitRuntimeLocked(runtimeLibPath, initArgs)
+            let ready = InitRuntimeLocked(runtimeLibPath, initArgs)
+            if (ready && runtimeDirectory.isNone()) {
+                runtimeDirectory = Some(FileUtil.GetDirPath(runtimeLibPath))
+            }
+            return ready
         }
     }
 
@@ -1103,6 +1110,13 @@ public class RuntimeInit {
 
     public func GetHandle(): Option<RuntimeHandle> {
         return handle
+    }
+
+    public func GetRuntimeDirectory(): Option<String> {
+        synchronized(lifecycleMutex) {
+            if (!initRuntime || closing) { return None<String> }
+            return runtimeDirectory
+        }
     }
 
     private func CloseMacroDynamicLibrary(): Unit {

@@ -460,9 +460,13 @@ public open class ToolChain {
         return paths
     }
 
-    protected func GenerateRuntimePath(tool: Tool): Unit {
-        let macroRuntimeRpath = driverOptions.compileMacroPackage &&
+    protected func UsesMacroRuntimeRpath(): Bool {
+        return driverOptions.compileMacroPackage &&
             driverOptions.target.os == OSType.LINUX && driverOptions.target.env == EnvironmentType.GNU
+    }
+
+    protected func GenerateRuntimePath(tool: Tool): Unit {
+        let macroRuntimeRpath = UsesMacroRuntimeRpath()
         if (!driverOptions.useRuntimeRpath && !driverOptions.sanitizerEnableRpath && !macroRuntimeRpath) {
             return
         }
