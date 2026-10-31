@@ -62,6 +62,7 @@ func LinkPaths(macroOutput: Bool): Int64 {
             return if (matches) { 0 } else { 2 }
         } finally { TempFileManager.Instance().DeleteTempFiles() }
     }
+    return 99
 }
 
 func BorrowedBinding(): Int64 {
