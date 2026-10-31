@@ -481,6 +481,8 @@ public class TypeManager {
     private let declInstantiationStatus: HashMap<Decl, ArrayList<DeclInstantiationStatusEntry>> =
         HashMap<Decl, ArrayList<DeclInstantiationStatusEntry>>()
     private let canonicalTypes: CanonicalTypeStore
+    private let ownsCanonicalTypes: Bool
+    private let bodyNamespace: String
     private var validateTypeManagerInterning: Bool = false
     private let unsolvedTyVars: ArrayList<GenericsTy> = ArrayList<GenericsTy>()
     private let tyVarScopes: ArrayList<TyVarScope> = ArrayList<TyVarScope>()
@@ -501,6 +503,70 @@ public class TypeManager {
             validateTypeManagerInterning = value == "1"
         }
         canonicalTypes = CanonicalTypeStore(validateTypeManagerInterning)
+        ownsCanonicalTypes = true
+        bodyNamespace = ""
+    }
+
+    // Construct before launching any body workers. Declaration/type shells are
+    // shared; all writable inference containers and query caches belong to this
+    // manager. The caller must still establish disjoint AST/dependency ownership.
+    private init(parent: TypeManager, ordinal: UInt64) {
+        canonicalTypes = parent.canonicalTypes
+        ownsCanonicalTypes = false
+        bodyNamespace = "${parent.bodyNamespace}body${ordinal}:"
+        validateTypeManagerInterning = parent.validateTypeManagerInterning
+        anyTy = parent.anyTy
+        ctypeTy = parent.ctypeTy
+        compileTestsOnly = parent.compileTestsOnly
+        tyVarScopes.add(TyVarScope())
+        for (entry in parent.constraints.entries) {
+            constraints.entries.add(ConstraintEntry(entry.tyVar, bounds: entry.bounds.Clone()))
+        }
+        for (entry in parent.builtinTyToExtendMap) {
+            let copy = TyExtendsEntry(entry.ty)
+            for (decl in entry.extends) { copy.extends.add(decl) }
+            builtinTyToExtendMap.add(copy)
+        }
+        for (entry in parent.declToExtendMap) {
+            let copy = DeclExtendsEntry(entry.decl)
+            for (decl in entry.extends) { copy.extends.add(decl) }
+            declToExtendMap.add(copy)
+            declToExtendIndex[copy.decl.objectId] = copy
+        }
+        for ((fileHash, names) in parent.resolvedImportedDeclsMap) {
+            let copiedNames = HashMap<String, ArrayList<Decl>>()
+            for ((name, decls) in names) {
+                let copiedDecls = ArrayList<Decl>()
+                for (decl in decls) { copiedDecls.add(decl) }
+                copiedNames[name] = copiedDecls
+            }
+            resolvedImportedDeclsMap[fileHash] = copiedNames
+        }
+        for ((id, aliases) in parent.declToTypeAlias) {
+            let copiedAliases = HashSet<String>()
+            for (alias in aliases) { copiedAliases.add(alias) }
+            declToTypeAlias[id] = copiedAliases
+        }
+    }
+
+    public func ForkForBody(ordinal: UInt64): TypeManager {
+        // A live inference transaction cannot be split into independent roots.
+        CJC_ASSERT(tyVarScopes.size == 1 && instCtxScopes.isEmpty() && unsolvedTyVars.isEmpty())
+        return TypeManager(this, ordinal)
+    }
+
+    // Invoke after all workers join, in original body order. Query caches and
+    // local constraints never escape; only used-extend publication is merged.
+    public func MergeBodyUsage(body: TypeManager): Unit {
+        addBoxUsedExtends(body.boxUsedExtends)
+        for (decl in body.boxedNonGenericDecls) { addBoxedNonGenericDecl(decl) }
+        for (ty in body.boxedTys) { addBoxedTy(ty) }
+        for (entry in body.tyUsedExtends) { addTyUsedExtends(entry.ty, entry.extends) }
+        for (entry in body.checkedTyExtendRelation) {
+            if (!hasCheckedTyExtendRelation(entry.child, entry.interfaceTy)) {
+                checkedTyExtendRelation.add(CheckedTyExtendRelation(entry.child, entry.interfaceTy))
+            }
+        }
     }
 
     public func AddResolvedImportedDecls(fileHash: UInt64, name: String, decls: ArrayList<Decl>): Unit {
@@ -1983,7 +2049,7 @@ public class TypeManager {
     public func Clear(): Unit {
         constraints.Clear()
         ClearMapCache()
-        canonicalTypes.Clear()
+        if (ownsCanonicalTypes) { canonicalTypes.Clear() }
         unsolvedTyVars.clear()
         subtypeCache.clear()
         declInstantiationStatus.clear()
@@ -2502,7 +2568,7 @@ public class TypeManager {
             dummyGenDecls.add(decl)
             newVar.isPlaceholder = true
             nextUniqId++
-            let name = "${srcId}-${nextUniqId}"
+            let name = "${bodyNamespace}${srcId}-${nextUniqId}"
             decl.identifier = SrcIdentifier(name)
             newVar.name = name
             newVar
