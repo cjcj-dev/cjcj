@@ -57,6 +57,8 @@ for(const [role,prefix]of [['target',''],['separate','/.compiler-exec'],['bootst
   const f=fixture('role-'+role,(prefix?prefix.slice(1)+'/':'')+'runtime/lib/'+tuple);
   write(f.sdk+'/STAGE-INPUTS.json',JSON.stringify({selection:{compilerExecution:{role}}}));
   write(f.sdk+prefix+'/runtime/lib/'+tuple+'/libcangjie-runtime.so','selected '+role);
+  fs.rmSync(f.host,{recursive:true});
+  if(role!=='bootstrap-host')fs.rmSync(f.sdk+'/.host',{recursive:true});
   for(const explicit of [false,true])assert.equal(f.run({defaultHost:true,explicit}).status,0);
   const archive=f.root+'/sdk.tar',moved=f.root+'/unpacked';fs.mkdirSync(moved);
   for(const argv of [['-cf',archive,'-C',f.sdk,'.'],['-xf',archive,'-C',moved]])assert.equal(spawnSync('tar',argv).status,0);
