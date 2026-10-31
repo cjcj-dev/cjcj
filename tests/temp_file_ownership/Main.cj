@@ -1,6 +1,6 @@
 import cjcj::option.*
 import std.env.getVariable
-import std.fs.{Directory, File}
+import std.fs.{File, exists}
 
 main(): Int64 {
     let root = (getVariable("TEMP_OWNERSHIP_ROOT") ?? "")
@@ -19,10 +19,10 @@ main(): Int64 {
     }
     let distinct = !race || own != other
     manager.DeleteTempFiles()
-    let ownGone = !Directory.exists(own)
+    let ownGone = !exists(own)
     var protected = true
     if (race) {
-        protected = Directory.exists(other)
+        protected = exists(other)
         if (protected) {
             protected = String.fromUtf8(File.readFrom(other + "/sentinel")) == "other-process"
         }
