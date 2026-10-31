@@ -15,7 +15,7 @@ public class CanonicalizeStringBackingTest {
         @Expect(CHIRIntrinsicKindFromName(IntrinsicKindName(kind.getOrThrow())) ==
             IntrinsicKind.CANONICALIZE_STRING_BACKING, true)
         @Expect(CHIRFB_INTRINSIC_KIND_CANONICALIZE_STRING_BACKING, 362u16)
-        @Expect(CHIRFB_INTRINSIC_KIND_MAX, 362u16)
+        @Expect(CHIRFB_INTRINSIC_KIND_MAX, CHIRFB_INTRINSIC_KIND_REGISTER_FINALIZER)
         @Expect(CHIRFB_INTRINSIC_KIND_EXCLUSIVE_SCOPE, 361u16)
     }
 

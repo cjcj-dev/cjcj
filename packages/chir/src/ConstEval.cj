@@ -42,7 +42,10 @@ public class ConstEvalPass {
         interpreter.SetGlobalVars(globalInitValues)
         let result = interpreter.Run(baseIndex: 0, expectsReturn: false)
         match (result) {
-            case INotRun => ReplaceGlobalConstantInitializers(pkg, interpreter, linker)
+            case INotRun =>
+                if (!interpreter.RequiresRuntimeFinalizerRegistration()) {
+                    ReplaceGlobalConstantInitializers(pkg, interpreter, linker)
+                }
             case IException(_) => ()
             case ISuccess(_) => ()
         }

@@ -21,6 +21,11 @@ public class BCHIRInterpreter {
     private var interpreterError: Bool = false
     private var lastResult: IResult = INotRun
     private var currentException: Option<InterpreterValue> = None
+    private var requiresRuntimeFinalizerRegistration: Bool = false
+
+    public func RequiresRuntimeFinalizerRegistration(): Bool {
+        return requiresRuntimeFinalizerRegistration
+    }
 
     public init(bchir: BCHIR, diag: BasicDiagnosticEngine) {
         this.bchir = bchir
@@ -352,7 +357,12 @@ public class BCHIRInterpreter {
                 }
             } else if (opCode == OpCode.INTRINSIC0 || opCode == OpCode.INTRINSIC0_EXC) {
                 let intrinsicKind = code.Get(pc + 1)
-                if (BCHIRIntrinsic.IsReferenceEquality(intrinsicKind)) {
+                if (BCHIRIntrinsic.IsRegisterFinalizer(intrinsicKind)) {
+                    let receiver = interpStack.ArgsPopIVal()
+                    RecordObjectInitReturn(receiver)
+                    interpStack.ArgsPush(InterpreterValue.MakeUnit())
+                    pc += 1 + GetOpCodeArgSize(opCode)
+                } else if (BCHIRIntrinsic.IsReferenceEquality(intrinsicKind)) {
                     let right = interpStack.ArgsPopIVal()
                     let left = interpStack.ArgsPopIVal()
                     interpStack.ArgsPush(InterpreterValue.MakeBool(BCHIRIntrinsic.ReferenceEquals(left, right)))
@@ -451,6 +461,19 @@ public class BCHIRInterpreter {
     public func ToArena(value: InterpreterValue): InterpreterValue {
         // Mirrors C++ BCHIRInterpreter.cpp:1079-1083.
         return AllocateValue(value)
+    }
+
+    private func RecordObjectInitReturn(receiver: InterpreterValue): Unit {
+        if (let Some(object) <- DereferencePointer(receiver)) {
+            if (object.kind == InterpreterValueKind.IOBJECT) {
+                if (let Some(classInfo) <- bchir.GetClass(object.GetClassId())) {
+                    requiresRuntimeFinalizerRegistration = requiresRuntimeFinalizerRegistration ||
+                        classInfo.requiresRuntimeFinalizerRegistration
+                    return
+                }
+            }
+        }
+        requiresRuntimeFinalizerRegistration = true
     }
 
     // Mirrors C++ BCHIRInterpreter.cpp:1653-1664.
