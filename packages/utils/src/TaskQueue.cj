@@ -89,10 +89,14 @@ public class TaskQueue {
     }
 
     public func WaitForAllTasksCompleted(): Unit {
+        var firstFailure: Option<Exception> = None
         for (thread in threads) {
-            thread.get()
+            try { thread.get() } catch (e: Exception) {
+                if (firstFailure.isNone()) { firstFailure = Some(e) }
+            }
         }
         threads.clear()
+        if (let Some(e) <- firstFailure) { throw e }
     }
 
     public func RunAndWaitForAllTasksCompleted(): Unit {
