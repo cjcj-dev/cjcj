@@ -1,11 +1,33 @@
 package cjcj::utils
 
 import std.collection.*
+import std.sync.AtomicInt64
 import std.unittest.*
 import std.unittest.testmacro.*
 
 @Test
 class TaskQueueTest {
+    @TestCase
+    func failedTaskRetainsSiblingCompletionAndFailure(): Unit {
+        let count = AtomicInt64(0)
+        let queue = TaskQueue(2)
+        let failing = queue.AddTask<Int64>({ =>
+            count.fetchAdd(1)
+            throw IllegalStateException("expected queue failure")
+        }, priority: 2u64)
+        let sibling = queue.AddTask<Int64>({ =>
+            sleep(10 * Duration.millisecond)
+            count.fetchAdd(1)
+            42
+        }, priority: 1u64)
+        queue.RunAndWaitForAllTasksCompleted()
+        @Expect(count.load(), 2)
+        var failure = ""
+        try { let _ = failing.get() } catch (e: Exception) { failure = e.message }
+        @Expect(failure, "expected queue failure")
+        @Expect(sibling.get(), 42)
+    }
+
     @TestCase
     func taskResultGetConsumesValue(): Unit {
         let result = TaskResult<Int64>()
