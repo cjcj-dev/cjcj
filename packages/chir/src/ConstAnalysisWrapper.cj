@@ -44,7 +44,7 @@ public class ConstAnalysisWrapper {
     // C++ ConstAnalysisWrapper.h:36-45.
     public func RunOnPackage(pkg: Package, diag: BasicDiagnosticEngine, threadNum: Int64,
         isDebug!: Bool = false): Unit {
-        if (threadNum == 1) {
+        if (threadNum == 1 || isDebug) {
             RunOnPackageInSerial(pkg, diag, isDebug: isDebug)
         } else {
             RunOnPackageInParallel(pkg, diag, threadNum, isDebug: isDebug)
@@ -52,16 +52,16 @@ public class ConstAnalysisWrapper {
     }
 
     public func RunOnFunc(funcValue: Function, diag: BasicDiagnosticEngine,
-        isDebug!: Bool = false): Option<Results<ConstDomain>> {
+        isDebug!: Bool = false, deferredReports!: Option<ArrayList<() -> Unit>> = None): Option<Results<ConstDomain>> {
         let analysis = ConstAnalysis<ConstStatePool>(funcValue, builder, constStateGlobals,
-            { literalValue: LiteralValue => HandleNonNullLiteralValue(literalValue) }, diag, isDebug: isDebug)
+            { literalValue: LiteralValue => HandleNonNullLiteralValue(literalValue) }, diag, isDebug: isDebug, deferredReports: deferredReports)
         return Engine<ConstDomain>(funcValue, analysis).IterateToFixpoint()
     }
 
     public func RunOnFuncWithPool(funcValue: Function, diag: BasicDiagnosticEngine,
-        isDebug!: Bool = false): Option<Results<ConstPoolDomain>> {
+        isDebug!: Bool = false, deferredReports!: Option<ArrayList<() -> Unit>> = None): Option<Results<ConstPoolDomain>> {
         let analysis = ConstAnalysis<ConstActivePool>(funcValue, builder, constActiveGlobals,
-            { literalValue: LiteralValue => HandleNonNullLiteralValue(literalValue) }, diag, isDebug: isDebug)
+            { literalValue: LiteralValue => HandleNonNullLiteralValue(literalValue) }, diag, isDebug: isDebug, deferredReports: deferredReports)
         return Engine<ConstPoolDomain>(funcValue, analysis).IterateToFixpoint()
     }
 
@@ -101,15 +101,18 @@ public class ConstAnalysisWrapper {
         let taskQueue = TaskQueue(threadNum)
         let results = ArrayList<TaskResult<Option<Results<ConstDomain>>>>()
         let resultsPool = ArrayList<TaskResult<Option<Results<ConstPoolDomain>>>>()
+        let orderedReports = ArrayList<ArrayList<() -> Unit>>()
         for (funcValue in pkg.GetGlobalFuncsWithBody()) {
             let strategy = ChooseAnalysisStrategy(funcValue)
+            let reports = ArrayList<() -> Unit>()
+            orderedReports.add(reports)
             if (strategy == ConstAnalysisStrategy.ActiveStatePool) {
                 resultsPool.add(taskQueue.AddTask<Option<Results<ConstPoolDomain>>>({ =>
-                    RunOnFuncWithPool(funcValue, diag, isDebug: isDebug)
+                    RunOnFuncWithPool(funcValue, diag, isDebug: isDebug, deferredReports: Some(reports))
                 }, priority: UInt64(funcValue.GetBody().getOrThrow().GetBlocks().size)))
             } else if (strategy == ConstAnalysisStrategy.FullStatePool) {
                 results.add(taskQueue.AddTask<Option<Results<ConstDomain>>>({ =>
-                    RunOnFunc(funcValue, diag, isDebug: isDebug)
+                    RunOnFunc(funcValue, diag, isDebug: isDebug, deferredReports: Some(reports))
                 }, priority: UInt64(funcValue.GetBody().getOrThrow().GetBlocks().size)))
             }
         }
@@ -134,6 +137,9 @@ public class ConstAnalysisWrapper {
             }
         }
         if (let Some(e) <- firstFailure) { throw e }
+        for (reports in orderedReports) {
+            for (report in reports) { report() }
+        }
         for (result in completed) { resultsMap[result.functionValue] = result }
         for (result in completedPool) { resultsPoolMap[result.functionValue] = result }
     }

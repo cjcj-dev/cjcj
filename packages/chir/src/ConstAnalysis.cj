@@ -41,13 +41,23 @@ private let lenFieldIndex: Int64 = 2
 
 public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValueDomain, Pool> where Pool <: ValueStatePool<ConstValueDomain, Pool> {
     private let diag: BasicDiagnosticEngine
+    private let deferredReports: Option<ArrayList<() -> Unit>>
 
     public init(functionValue: Function, builder: CHIRBuilder,
         globals: ValueAnalysisGlobals<ConstValueDomain, Pool>,
         handleNonNullLiteralValue: (LiteralValue) -> ConstValueDomain, diag: BasicDiagnosticEngine,
-        isDebug!: Bool = false) {
+        isDebug!: Bool = false, deferredReports!: Option<ArrayList<() -> Unit>> = None) {
         super(functionValue, builder, globals, handleNonNullLiteralValue, isDebug: isDebug)
         this.diag = diag
+        this.deferredReports = deferredReports
+    }
+
+    private func Report(action: () -> Unit): Unit {
+        if (let Some(reports) <- deferredReports) {
+            reports.add(action)
+        } else {
+            action()
+        }
     }
 
     public override func HandleNormalExpressionEffect(state: State<ConstValueDomain, Pool>, expression: Expression): Unit {
@@ -850,8 +860,10 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValueDomain, Pool> where 
             return ConstExceptionKind.SUCCESS
         }
         if (isStable) {
-            diag.DiagnoseRefactor(DiagKindRefactor.chir_step_non_zero_range,
-                ToRange(apply.GetDebugLocation())).Emit()
+            Report({ =>
+                diag.DiagnoseRefactor(DiagKindRefactor.chir_step_non_zero_range,
+                    ToRange(apply.GetDebugLocation())).Emit()
+            })
             return ConstExceptionKind.FAIL
         }
         return ConstExceptionKind.NA
@@ -918,20 +930,24 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValueDomain, Pool> where 
     private func RaiseOutOfBoundError(expr: Expression, len: UInt64, index: Int64): ConstExceptionKind {
         if (index < 0) {
             if (isStable) {
-                let builder = diag.DiagnoseRefactor(DiagKindRefactor.chir_idx_out_of_bounds,
-                    ToRange(expr.GetDebugLocation()))
-                builder.AddMainHintArguments("array index can not be negative")
-                builder.Emit()
+                Report({ =>
+                    let builder = diag.DiagnoseRefactor(DiagKindRefactor.chir_idx_out_of_bounds,
+                        ToRange(expr.GetDebugLocation()))
+                    builder.AddMainHintArguments("array index can not be negative")
+                    builder.Emit()
+                })
             }
             return ConstExceptionKind.FAIL
         } else if (UInt64(index) >= len) {
             if (isStable) {
-                let builder = diag.DiagnoseRefactor(DiagKindRefactor.chir_idx_out_of_bounds,
-                    ToRange(expr.GetDebugLocation()))
-                let hint = "array index " + index.toString() + " is past the end of array (which contains " +
-                    len.toString() + " elements)"
-                builder.AddMainHintArguments(hint)
-                builder.Emit()
+                Report({ =>
+                    let builder = diag.DiagnoseRefactor(DiagKindRefactor.chir_idx_out_of_bounds,
+                        ToRange(expr.GetDebugLocation()))
+                    let hint = "array index " + index.toString() + " is past the end of array (which contains " +
+                        len.toString() + " elements)"
+                    builder.AddMainHintArguments(hint)
+                    builder.Emit()
+                })
             }
             return ConstExceptionKind.FAIL
         }
@@ -940,75 +956,87 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValueDomain, Pool> where 
 
     private func RaiseDivByZeroError(expr: Expression, kind: ExprKind): Unit {
         if (isStable) {
-            let prompt = if (kind == ExprKind.DIV) { "divide" } else { "modulo" }
-            let builder = diag.DiagnoseRefactor(DiagKindRefactor.chir_divisor_is_zero,
-                ToRange(expr.GetDebugLocation()), prompt)
-            builder.AddMainHintArguments(prompt)
-            builder.Emit()
+            Report({ =>
+                let prompt = if (kind == ExprKind.DIV) { "divide" } else { "modulo" }
+                let builder = diag.DiagnoseRefactor(DiagKindRefactor.chir_divisor_is_zero,
+                    ToRange(expr.GetDebugLocation()), prompt)
+                builder.AddMainHintArguments(prompt)
+                builder.Emit()
+            })
         }
     }
 
     private func RaiseNegOverflowError(expr: Expression, value: ConstValue): Unit {
         if (isStable) {
-            let builder = diag.DiagnoseRefactor(DiagKindRefactor.chir_arithmetic_operator_overflow,
-                ToRange(expr.GetDebugLocation()), "-")
-            let tyText = expr.GetResult().getOrThrow().GetType().getOrThrow().ToString()
-            builder.AddMainHintArguments("-" + tyText + "(" + value.ToString() + ")")
-            builder.AddNote(GenerateTypeRangePrompt(expr.GetResult().getOrThrow().GetType().getOrThrow()))
-            builder.Emit()
+            Report({ =>
+                let builder = diag.DiagnoseRefactor(DiagKindRefactor.chir_arithmetic_operator_overflow,
+                    ToRange(expr.GetDebugLocation()), "-")
+                let tyText = expr.GetResult().getOrThrow().GetType().getOrThrow().ToString()
+                builder.AddMainHintArguments("-" + tyText + "(" + value.ToString() + ")")
+                builder.AddNote(GenerateTypeRangePrompt(expr.GetResult().getOrThrow().GetType().getOrThrow()))
+                builder.Emit()
+            })
         }
     }
 
     private func RaiseArithmeticOverflowError(expr: Expression, kind: ExprKind,
         leftVal: ConstValue, rightVal: ConstValue): Unit {
         if (isStable) {
-            let token = ArithmeticToken(kind)
-            let builder = diag.DiagnoseRefactor(DiagKindRefactor.chir_arithmetic_operator_overflow,
-                ToRange(expr.GetDebugLocation()), token)
-            let ty = expr.GetResult().getOrThrow().GetType().getOrThrow()
-            let hint = ty.ToString() + "(" + leftVal.ToString() + ") " + token + " " +
-                GetRHSOperand(expr).GetType().getOrThrow().ToString() + "(" + rightVal.ToString() + ")"
-            builder.AddMainHintArguments(hint)
-            builder.AddNote(GenerateTypeRangePrompt(expr.GetResult().getOrThrow().GetType().getOrThrow()))
-            builder.Emit()
+            Report({ =>
+                let token = ArithmeticToken(kind)
+                let builder = diag.DiagnoseRefactor(DiagKindRefactor.chir_arithmetic_operator_overflow,
+                    ToRange(expr.GetDebugLocation()), token)
+                let ty = expr.GetResult().getOrThrow().GetType().getOrThrow()
+                let hint = ty.ToString() + "(" + leftVal.ToString() + ") " + token + " " +
+                    GetRHSOperand(expr).GetType().getOrThrow().ToString() + "(" + rightVal.ToString() + ")"
+                builder.AddMainHintArguments(hint)
+                builder.AddNote(GenerateTypeRangePrompt(expr.GetResult().getOrThrow().GetType().getOrThrow()))
+                builder.Emit()
+            })
         }
     }
 
     private func RaiseNegativeShiftError(expr: Expression, rightVal: Int64): Unit {
         if (isStable) {
-            let builder = diag.DiagnoseRefactor(DiagKindRefactor.chir_shift_length_overflow,
-                ToRange(expr.GetDebugLocation()))
-            builder.AddMainHintArguments(rightVal.toString(), GetLHSOperand(expr).GetType().getOrThrow().ToString())
-            builder.AddNote("right operand can not be negative")
-            builder.Emit()
+            Report({ =>
+                let builder = diag.DiagnoseRefactor(DiagKindRefactor.chir_shift_length_overflow,
+                    ToRange(expr.GetDebugLocation()))
+                builder.AddMainHintArguments(rightVal.toString(), GetLHSOperand(expr).GetType().getOrThrow().ToString())
+                builder.AddNote("right operand can not be negative")
+                builder.Emit()
+            })
         }
     }
 
     private func RaiseOvershiftError(expr: Expression, rightVal: UInt64, leftValBit: UInt64): Unit {
         if (isStable) {
-            let lhsTyString = GetLHSOperand(expr).GetType().getOrThrow().ToString()
-            let builder = diag.DiagnoseRefactor(DiagKindRefactor.chir_shift_length_overflow,
-                ToRange(expr.GetDebugLocation()))
-            builder.AddMainHintArguments(rightVal.toString(), lhsTyString)
-            builder.AddNote("the type of left operand is " + lhsTyString +
-                ", the most bits that expected to shift are " + (leftValBit - 1u64).toString())
-            builder.Emit()
+            Report({ =>
+                let lhsTyString = GetLHSOperand(expr).GetType().getOrThrow().ToString()
+                let builder = diag.DiagnoseRefactor(DiagKindRefactor.chir_shift_length_overflow,
+                    ToRange(expr.GetDebugLocation()))
+                builder.AddMainHintArguments(rightVal.toString(), lhsTyString)
+                builder.AddNote("the type of left operand is " + lhsTyString +
+                    ", the most bits that expected to shift are " + (leftValBit - 1u64).toString())
+                builder.Emit()
+            })
         }
     }
 
     private func RaiseTypeCastOverflowError(cast: Expression, srcVal: String, targetTy: Type): Unit {
         if (isStable) {
-            let builder = diag.DiagnoseRefactor(DiagKindRefactor.chir_typecast_overflow,
-                ToRange(cast.GetDebugLocation()))
-            let sourceTy = if (let Some(typeCast) <- (cast as TypeCast)) {
-                typeCast.GetSourceType().getOrThrow()
-            } else {
-                (cast as TryNumericCast).getOrThrow().GetSourceType().getOrThrow()
-            }
-            let srcValStr = sourceTy.ToString() + "(" + srcVal + ")"
-            builder.AddMainHintArguments(srcValStr, targetTy.ToString())
-            builder.AddNote(GenerateTypeRangePrompt(targetTy))
-            builder.Emit()
+            Report({ =>
+                let builder = diag.DiagnoseRefactor(DiagKindRefactor.chir_typecast_overflow,
+                    ToRange(cast.GetDebugLocation()))
+                let sourceTy = if (let Some(typeCast) <- (cast as TypeCast)) {
+                    typeCast.GetSourceType().getOrThrow()
+                } else {
+                    (cast as TryNumericCast).getOrThrow().GetSourceType().getOrThrow()
+                }
+                let srcValStr = sourceTy.ToString() + "(" + srcVal + ")"
+                builder.AddMainHintArguments(srcValStr, targetTy.ToString())
+                builder.AddNote(GenerateTypeRangePrompt(targetTy))
+                builder.Emit()
+            })
         }
     }
 }
