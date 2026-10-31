@@ -9,14 +9,16 @@ import {readJson,withProcessCancellation} from './sdk-flow.mjs';
 import {assertFinalStdInput} from './sdk-final-std.mjs';
 import {verifyInstalledLanguage} from './sdk-installed-language.mjs';
 import {verifyCompiler} from './compiler_identity.mjs';
+import {compilerExecutionRoot} from './sdk-targets.mjs';
 export async function verifyInstall({sdk,work,platform,finalStd=false,cjpm=true,precompiledStdx=false}) {
  await verifyCompiler(sdk);
  if(finalStd) {
   const metadata=await readJson(path.join(sdk,'STAGE-INPUTS.json'));
   if(!['stage2-target-sdk','stage3','source-build'].includes(metadata.phase))throw new Error('FINAL_STD_INSTALL_PHASE');
-  if(platform.startsWith('linux_'))await verifyInstalledLanguage({sdk,work,platform,host:path.join(sdk,'.host')});
+  const host=compilerExecutionRoot(sdk,metadata.selection);
+  if(platform.startsWith('linux_'))await verifyInstalledLanguage({sdk,work,platform,host});
   await withProcessCancellation(signal=>assertFinalStdInput({sdk,std:sdk,runtime:sdk,
-   host:path.join(sdk,'.host'),platform,work:path.join(work,'string'),signal}));
+   host,platform,work:path.join(work,'string'),signal}));
  }
  await helloInstall({sdk,work:path.join(work,'ordinary'),platform,cjpm});
  if(precompiledStdx)await precompiledStdxMacros({sdk,work:path.join(work,'precompiled-stdx'),platform});

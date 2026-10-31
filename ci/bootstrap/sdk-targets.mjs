@@ -47,6 +47,11 @@ export async function toolConsumerCopies(sdk,platform) {
 }
 // The sole SDK layout recipe. Callers select actual producer artifacts and an
 // execution role; they never enumerate loader paths, retained ELF names or aliases.
+export function compilerExecutionRoot(sdk,selection) {
+  const role=selection?.compilerExecution?.role;
+  if(!['target','separate','bootstrap-host'].includes(role))throw Error('INSTALL_COMPILER_EXECUTION_ROLE');
+  return path.join(sdk,role==='separate'?'.compiler-exec':role==='bootstrap-host'?'.host':'');
+}
 export function installationRecipe(selection,{compiler:product,std,bootstrap=false,hostObjects=false,final=false,nativeChecks,tools,layout}={}) {
   const {platform,bootstrapHost:host,compilerExecution:execution,targetComponents:target}=selection;
   const native=sdkPlatform(platform),tuple=native.tuple,exe=native.exe;
@@ -57,7 +62,7 @@ export function installationRecipe(selection,{compiler:product,std,bootstrap=fal
   const {llvm,runtime,ast}=target;
   product??=target.compiler.product;std??=target.std.install;
   const compilerName='bin/cjcj-stage1'+exe;
-  const prefix=execution.role==='bootstrap-host'?'.host':execution.role==='separate'?'.compiler-exec':'';
+  const prefix=path.relative('.',compilerExecutionRoot('.',selection));
   const executionNative=sdkPlatform(execution.platform??platform),execTuple=executionNative.tuple;
   const executionLibraries=[prefix?prefix+'/runtime/lib/'+execTuple:'runtime/lib/'+execTuple,
     prefix?prefix+'/lib/'+execTuple:'lib/'+execTuple,
@@ -134,7 +139,9 @@ export function installationRecipe(selection,{compiler:product,std,bootstrap=fal
   if(llvm.windowsToolchain)copies.push(
     {from:path.join(llvm.install,relative(llvm.windowsToolchain.original.path)),to:relative(llvm.windowsToolchain.original.path),owner:'native toolchain input'},
     ...llvm.windowsToolchain.installedFiles.filter(row=>row.path.startsWith('bin/')).map(row=>({from:path.join(llvm.install,relative(row.path)),to:relative(row.path),owner:'native toolchain runtime'})));
-  return {copies,entries:[
+  if(runtime.gateStatus&&!runtime.sourceRoot)throw Error('INSTALL_RUNTIME_SOURCE_REQUIRED');
+  return {copies,...(!hostObjects&&native.os==='linux'&&runtime.sourceRoot?{
+    runtimeLanguageInputs:{runtime:path.join(runtime.sourceRoot,'runtime'),gateStatus:runtime.gateStatus}}:{}),entries:[
     {directory:'bin',retain:'libexec/compiler',names:['cjcj-stage1'+exe],libraries:executionLibraries},
     ...(bootstrap&&hostObjects?[
       {directory:'bin',retain:'.host-tools/bin',exclude:['cjcj-stage1'+exe,...(hostObjects?[]:['cjfilt'+exe]),...(llvm.windowsToolchain?.installedFiles.filter(row=>row.path.startsWith('bin/')).map(row=>path.basename(row.path))||[])],libraries:hostToolLib},
@@ -191,7 +198,7 @@ export function createBootstrapTargets(input) {
       copies:[...recipe.copies,...(['stage2','stage3'].includes(id)?[
         {from:'${build}/compiler/share/cjcj',to:'share/cjcj',owner:'compiler',exclude:['build-inputs']},
         {from:'${build}/compiler/compiler-inputs.json',to:'compiler-inputs.json',owner:'compiler'}]:[])],
-      metadata:{phase:id,platform,compilerRole:hostObjects||['stage1-initial','stage1-std'].includes(id)?'transitional-ordinary-compiler':'r-host-compiler',
+      metadata:{phase:id,platform,selection,compilerRole:hostObjects||['stage1-initial','stage1-std'].includes(id)?'transitional-ordinary-compiler':'r-host-compiler',
         macroSdk:hostObjects||['stage1-initial','stage1-std'].includes(id)?'UNSUPPORTED':'REQUIRES_INSTALLED_GATE',compilerFile:'libexec/compiler/cjcj-stage1'+exe,runtimeCommit:runtime.commit,
         compilerCommit:['stage0-run','stage1-initial','stage1-std'].includes(id)?h1.commit:compiler.commit,stdSource:std,
         sources:{compiler:{repository:['stage0-run','stage1-initial','stage1-std'].includes(id)?h1.repository:compiler.repository,
@@ -269,7 +276,7 @@ export function createBootstrapTargets(input) {
   }
   stages.find(s=>s.id==='stage3-std').test={commands:[{argv:[process.execPath,
     fileURLToPath(new URL('./sdk-final-std.mjs',import.meta.url)), '--sdk',out('stage2'),
-    '--std','${output}','--runtime',runtime.install,'--host',out('stage2')+'/.host',
+    '--std','${output}','--runtime',runtime.install,'--host',compilerExecutionRoot(out('stage2'),stages.find(s=>s.id==='stage2').metadata.selection),
     '--platform',platform,'--work','${work}/final-std-consumers']}]};
   // The original Linux language obligation consumes the final installed
   // compiler/runtime, after std install and before the source phase handoff.
@@ -277,7 +284,7 @@ export function createBootstrapTargets(input) {
   for(const stage of stages.filter(s=>['stage2-target-sdk','stage3'].includes(s.id))) {
     if(native.os==='linux')stage.test={commands:[{argv:[process.execPath,
       fileURLToPath(new URL('./sdk-installed-language.mjs',import.meta.url)),
-      '--sdk','${output}','--platform',platform,'--host','${output}/.host','--work','${work}/'+stage.id+'-language']}]};
+      '--sdk','${output}','--platform',platform,'--work','${work}/'+stage.id+'-language']}]};
   }
   // The first macro consumer is AFTER C2 has been built and installed. H/H1
   // remain ordinary bootstrap tools; no macro gate is a C2 production input.

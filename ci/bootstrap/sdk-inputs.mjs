@@ -154,11 +154,12 @@ export async function prepareNativeInputs(descriptor, env = process.env) {
       ...(supplied.sourceRoot ? {sourceRoot:await privateRoot(supplied.sourceRoot)} : {})};
     if(name==='runtime'&&native.os==='linux') {
       rows[name].sourceRoot=rows[name].sourceRoot||await privateRoot(path.join(rows[name].install,'share/runtime-build'));
+      rows[name].gateStatus=supplied.gateStatus||path.join(rows[name].sourceRoot,'runtime/CMakebuild/gc-unit.status');
       languageSourceInputs(path.join(rows[name].sourceRoot,'runtime'),
         {installed:rows[name].sourceRoot===path.join(rows[name].install,'share/runtime-build')});
-      for(const member of ['runtime/CMakebuild/compile_commands.json','runtime/CMakebuild/gc-unit.status'])
+      for(const member of ['runtime/CMakebuild/compile_commands.json','runtime/CMakebuild/runtime-staging/include/schedule.h'])
         await fs.access(path.join(rows[name].sourceRoot,member));
-      await fs.access(path.join(rows[name].install,'runtime/include/schedule.h'));
+      await fs.access(rows[name].gateStatus);
     }
   }
   // Optional reuse is an original H1 producer, not a copied flow directory.

@@ -5,6 +5,7 @@ import test from 'node:test';import assert from 'node:assert/strict';import {spa
 import {directSource,directBuild,write} from '../../ci/fixtures/runtime-direct-inputs.mjs';
 import {buildConfig} from '../lib/config.mjs';
 import {installGcUnitInputs} from '../srcbuild/gc-unit-gate.mjs';
+import {installRecipe} from '../../ci/bootstrap/sdk-flow.mjs';
 const tuple='linux_x86_64_cjnative',entry=new URL('../../ci/bootstrap/sdk-installed-language.mjs',import.meta.url).pathname;
 function fixture(name,recipe=null,platform='linux_x86_64') {
  const tuple=platform+'_cjnative',targetKey=platform==='linux_aarch64'?'linux-aarch64':'linux-x64';
@@ -35,8 +36,8 @@ function fixture(name,recipe=null,platform='linux_x86_64') {
   write(layoutHost,`import fs from 'node:fs';console.error('CONTROLLED_LAYOUT_HOST arch='+process.arch+' -> arm64; dependency directory stat only; no ARM program execution');Object.defineProperty(process,'arch',{value:'arm64'});const stat=fs.statSync;fs.statSync=(file,...args)=>stat(file===${JSON.stringify(dependency)}?${JSON.stringify(layoutDependency)}:file,...args);\n`);
  }
 
- function run({extra={},explicit=false}={}) {
-  const log=root+'/command-'+(++count),argv=[...(layoutHost?['--import',layoutHost]:[]),entry,'--sdk',sdk,'--platform',platform,'--host',host,'--work',root+'/work',...(explicit?['--runtime-source',sdk+'/share/runtime-build']:[])];
+ function run({extra={},explicit=false,defaultHost=false}={}) {
+  const log=root+'/command-'+(++count),argv=[...(layoutHost?['--import',layoutHost]:[]),entry,'--sdk',sdk,'--platform',platform,...(defaultHost?[]:['--host',host]),'--work',root+'/work',...(explicit?['--runtime-source',sdk+'/share/runtime-build']:[])];
   const out=fs.openSync(log+'.stdout','wx'),err=fs.openSync(log+'.stderr','wx');
   const r=spawnSync(process.execPath,argv,{env:{...process.env,GC_UNIT_GATE_CONTRACT_SELFTEST:'1',GC_UNIT_GATE_SKIP:'0',MRT_TESTABLE_INTERNALS:'0',DIRECT_TRACE:trace,...extra},stdio:['ignore',out,err]});fs.closeSync(out);fs.closeSync(err);
   write(log+'.json',JSON.stringify({argv:[process.execPath,...argv],rc:r.status,signal:r.signal,error:r.error?.message}));
@@ -50,6 +51,42 @@ test('public direct language defaults and explicit inputs execute again after co
  const r=f.run({extra:{DIRECT_PHASE_FAIL:'7'}});assert.notEqual(r.status,0);assert.match(r.stderr,/PHASE_ENTRY_FAILURE rc=7/);
  assert.match(fs.readFileSync(f.sdk+'/runtime/lib/'+tuple+'/gc_unit_gate.status','utf8'),/GATE=FAIL/);
  const restored=f.run();assert.equal(restored.status,0,restored.stderr);console.log('DIRECT_REENTRY_LANGUAGE_ASSERTION_REACHED');
+});
+for(const [role,prefix]of [['target',''],['separate','/.compiler-exec'],['bootstrap-host','/.host']])
+ test('installed language derives '+role+' execution root and relocates it',()=>{
+  const f=fixture('role-'+role,(prefix?prefix.slice(1)+'/':'')+'runtime/lib/'+tuple);
+  write(f.sdk+'/STAGE-INPUTS.json',JSON.stringify({selection:{compilerExecution:{role}}}));
+  write(f.sdk+prefix+'/runtime/lib/'+tuple+'/libcangjie-runtime.so','selected '+role);
+  for(const explicit of [false,true])assert.equal(f.run({defaultHost:true,explicit}).status,0);
+  const archive=f.root+'/sdk.tar',moved=f.root+'/unpacked';fs.mkdirSync(moved);
+  for(const argv of [['-cf',archive,'-C',f.sdk,'.'],['-xf',archive,'-C',moved]])assert.equal(spawnSync('tar',argv).status,0);
+  fs.renameSync(f.sdk,f.sdk+'.old');fs.renameSync(moved,f.sdk);
+  assert.equal(f.run({defaultHost:true}).status,0);
+  assert.equal(f.rows().at(-1).env.GC_UNIT_CJC_RUNTIME_LIB_DIR,f.sdk+prefix+'/runtime/lib/'+tuple);
+  write(f.sdk+'/STAGE-INPUTS.json',JSON.stringify({selection:{compilerExecution:{role:'unknown'}}}));
+  const before=f.rows().length,bad=f.run({defaultHost:true});assert.notEqual(bad.status,0);
+  assert.match(bad.stderr,/INSTALL_COMPILER_EXECUTION_ROLE/);assert.equal(f.rows().length,before);
+ });
+test('pending install carries explicit normal CPP inputs before its consumer and preserves gate bytes',async()=>{
+ const root=fs.mkdtempSync(path.join(process.env.RELEASE_EVIDENCE_TEST_ROOT||os.tmpdir(),'install-language-'));
+ const runtime=root+'/source/runtime',sdk=root+'/sdk';directSource(runtime);directBuild(runtime);
+ const old=runtime+'/CMakebuild/gc-unit.status',gateStatus=root+'/normal-gate.status';fs.renameSync(old,gateStatus);
+ const expected=fs.readFileSync(gateStatus,'utf8'),records=[];
+ const check=`const fs=require('node:fs'),s=process.argv[1];
+ for(const p of ['runtime/include/schedule.h','share/runtime-build/runtime/CMakebuild/compile_commands.json','share/runtime-build/runtime/src/Heap/z/zGlobals.cpp'])if(!fs.existsSync(s+'/'+p))throw Error('PENDING_RUNTIME_INPUT_MISSING '+p);
+ if(fs.readFileSync(s+'/share/runtime-build/runtime/CMakebuild/gc-unit.status','utf8')!==${JSON.stringify(expected)})throw Error('PENDING_GATE_BYTES');`;
+ const recipe={runtimeLanguageInputs:{runtime,gateStatus}};
+ const test={commands:[{argv:[process.execPath,'-e',check,'${install}']}]};
+ await installRecipe({root:sdk,recipe,platform:'linux_x86_64',test,records});
+ assert.equal(records[0].rc,0);assert.equal(fs.readFileSync(sdk+'/runtime/lib/'+tuple+'/gc_unit_gate.status','utf8'),expected);
+ // A carried installation is a legal input for the next normal installation.
+ await installRecipe({root:root+'/reinstalled',recipe:{runtimeLanguageInputs:{runtime:sdk+'/share/runtime-build/runtime'}},platform:'linux_x86_64',test,records});
+ assert.equal(records[1].rc,0);
+ write(gateStatus,expected.replace('CPP_SUITE=PASS','CPP_SUITE=FAIL'));
+ await assert.rejects(installRecipe({root:root+'/rejected',recipe,platform:'linux_x86_64',test,records}),/native gate did not complete/);
+ assert.equal(fs.existsSync(root+'/rejected'),false);assert.equal(records.length,2);
+ write(gateStatus,expected);
+ await installRecipe({root:root+'/restored',recipe,platform:'linux_x86_64',test,records});assert.equal(records[2].rc,0);
 });
 for(const [label,recipe,selected]of [['source',null,'host'],['transitional','.host/runtime/lib/'+tuple,'sdk/.host'],['final','runtime/lib/'+tuple,'sdk']])
  test('public direct language uses the '+label+' compiler runtime domain',()=>{

@@ -75,6 +75,7 @@ export function installGcUnitInputs(config,runtime,sdk,{gateStatus=gcUnitBuildSt
   prepareInstalledLanguage(to);
   if(cppElf)fs.copyFileSync(cppElf,path.join(to,'CMakebuild/cj_gc_unit'));
   fs.cpSync(headers,path.join(sdk,'runtime/include'),{recursive:true,dereference:true});
+  fs.cpSync(headers,path.join(to,'CMakebuild/runtime-staging/include'),{recursive:true,dereference:true});
   fs.copyFileSync(status,path.join(to,'CMakebuild/gc-unit.status'));
   const installed=gcUnitStatusPath(config,sdk);fs.mkdirSync(path.dirname(installed),{recursive:true});fs.copyFileSync(status,installed);
   return carried;
