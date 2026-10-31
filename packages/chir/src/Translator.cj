@@ -5862,15 +5862,12 @@ public class Translator {
             currentBlock = trueBlock
             BindExceptionPatternValues(expr.catchPatterns[idx], beginCatch)
             let catchBlock = expr.catchBlocks[idx]
-            let catchValue = Translator.TranslateASTNode(catchBlock, this)
+            // A Unit catch can complete an Any-valued try. Use the same
+            // result conversion and reachable-exit handling as match bodies.
+            let currentBody = TranslateMatchCaseBody(catchBlock, resultLoc, endBlock)
             if (trueBlock.GetTerminator().isNone()) {
-                let createdGoTo5537 = builder.CreateGoTo(GetBlockByAST(catchBlock), trueBlock)
+                let createdGoTo5537 = builder.CreateGoTo(currentBody, trueBlock)
                 trueBlock.AppendExpression(createdGoTo5537)
-            }
-            StoreTryResult(resultLoc, catchValue, TranslateLocation(catchBlock))
-            if (CurrentBlock().GetTerminator().isNone()) {
-                let createdGoTo5541 = builder.CreateGoTo(endBlock, CurrentBlock())
-                CurrentBlock().AppendExpression(createdGoTo5541)
             }
             currentBlock = falseBlock
             idx++

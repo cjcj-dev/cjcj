@@ -919,5 +919,15 @@
     "file": "ci/test-atomic-option-reference.mjs",
     "executor": "manual",
     "reason": "Real CLI with candidate compiler and normally rebuilt paired std.sync; requires isolated work and separate host/target loader paths. Runs three cases with ten reached assertions; no skip path."
+  },
+  {
+    "file": "packages/compiler_unittest/src/CatchUnitAny_test.cj",
+    "executor": "cjpm",
+    "member": "packages/compiler_unittest"
+  },
+  {
+    "file": "ci/test-catch-unit-any.mjs",
+    "executor": "manual",
+    "reason": "Real CLI catch Unit/empty to Any, non-Unit/Nothing/finally controls. Requires paired target std.core and isolated work; no skip path."
   }
 ]
