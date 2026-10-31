@@ -1,7 +1,6 @@
 package cjcj::codegen
 
 import std.collection.*
-import std.math.{max, min}
 import std.process.Process
 import std.sort.*
 import cjcj::basic.CANGJIE_VERSION
@@ -18,7 +17,6 @@ import cjcj::option.{ArchType, EnvironmentType, OSType}
 import cjcj::mangle.MANGLE_FUNC_PARAM_TYPE_PREFIX
 import cjcj::mangle.MANGLE_VOID_TY_SUFFIX
 import cjcj::mangle.SPECIAL_NAME_FOR_IMPORTS_INIT_FUNCTION
-import cjcj::mangle.SPECIAL_NAME_FOR_INIT_FUNCTION
 import cjcj::mangle.SPECIAL_NAME_FOR_INIT_FUNCTION
 import cjcj::mangle.SPECIAL_NAME_FOR_INIT_FLAG_RESET_FUNCTION
 import cjcj::mangle.SPECIAL_NAME_FOR_INIT_LITERAL_FUNCTION
@@ -57,7 +55,10 @@ private func IsModuleGenerationSerial(options: GlobalOptions): Bool {
 }
 
 private func GetModuleGenerationWidth(cgPkgContext: CGPkgContext): Int64 {
-    return max(1, min(cgPkgContext.GetCGModules().size, Int64(cgPkgContext.GetGlobalOptions().GetJobs())))
+    let modules = cgPkgContext.GetCGModules().size
+    let jobs = Int64(cgPkgContext.GetGlobalOptions().GetJobs())
+    let width = if (modules < jobs) { modules } else { jobs }
+    return if (width > 0) { width } else { 1 }
 }
 
 // Mirrors EmitPackageIR.cpp:437-465.
