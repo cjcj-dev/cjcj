@@ -1,6 +1,7 @@
 package cjcj::compiler_unittest
 
-import cjcj::chir.{BlockGroup, Box, Constant, Store}
+import cjcj::chir.{BlockGroup, Constant, Store}
+import cjcj::chir.Box as CHIRBox
 import cjcj::frontend.CompileStage
 import cjcj::option.CandidateEmitCHIRPhase
 import std.unittest.*
@@ -11,7 +12,7 @@ private func CountStoredUnitBoxes(group: BlockGroup): Int64 {
     var count: Int64 = 0
     for (block in group.GetBlocks()) {
         for (expr in block.GetExpressions()) {
-            if (let Some(box) <- (expr as Box)) {
+            if (let Some(box) <- (expr as CHIRBox)) {
                 if (let Some(local) <- box.GetSourceValue().AsLocalVar()) {
                     if (let Some(constant) <- (local.GetExpr().getOrThrow() as Constant)) {
                         if (constant.IsUnitLit()) {
