@@ -305,6 +305,11 @@ public class MacroCall {
     public let items: ArrayList<ItemInfo> = ArrayList<ItemInfo>()
     public let childMessages: ArrayList<ChildMessage> = ArrayList<ChildMessage>()
     public let assertParents: ArrayList<String> = ArrayList<String>()
+    // One evaluator owns each call. Workers retain reports here until the ordered join.
+    public var deferReports: Bool = false
+    public var reportsForServer: Bool = false
+    public let pendingReports = ArrayList<(Int64, Range, String, String)>()
+    private let pendingParentReports = ArrayList<String>()
     public var hasSend: Bool = false
     public var methodName: String = ""
     public var packageName: String = ""
@@ -454,7 +459,10 @@ public class MacroCall {
             }
         }
         if (!success && report) {
-            if (let Some(instance) <- ci) {
+            if (deferReports) {
+                if (reportsForServer) { assertParents.add(parentStr) }
+                else { pendingParentReports.add(parentStr) }
+            } else if (let Some(instance) <- ci) {
                 instance.GetDiag().Diagnose(begin, DiagKind.macro_assert_parent_context_failed,
                     args: [DiagArgument(GetFullName()), DiagArgument(parentStr)]).Emit()
             } else {
@@ -464,7 +472,41 @@ public class MacroCall {
         return success
     }
 
+    public func ReportParentFailure(parentName: String): Unit {
+        if (deferReports) {
+            pendingParentReports.add(parentName)
+        } else if (let Some(instance) <- ci) {
+            instance.GetDiag().Diagnose(begin, DiagKind.macro_assert_parent_context_failed,
+                args: [DiagArgument(GetFullName()), DiagArgument(parentName)]).Emit()
+        } else {
+            assertParents.add(parentName)
+        }
+    }
+
+    public func FlushReports(): Unit {
+        deferReports = false
+        for ((level, range, message, hint) in pendingReports) {
+            DiagReport(level, range, message, hint)
+        }
+        pendingReports.clear()
+        for (parentName in pendingParentReports) {
+            if (let Some(instance) <- ci) {
+                instance.GetDiag().Diagnose(begin, DiagKind.macro_assert_parent_context_failed,
+                    args: [DiagArgument(GetFullName()), DiagArgument(parentName)]).Emit()
+            } else {
+                assertParents.add(parentName)
+            }
+        }
+        pendingParentReports.clear()
+    }
+
     public func DiagReport(level: Int64, range: Range, message: String, hint: String): Unit {
+        if (deferReports) {
+            if (level != DiagSeverityIndex(DiagSeverity.DS_ERROR) &&
+                level != DiagSeverityIndex(DiagSeverity.DS_WARNING)) { return }
+            pendingReports.add((level, range, message, hint))
+            return
+        }
         let diagKind = if (level == DiagSeverityIndex(DiagSeverity.DS_ERROR)) {
             DiagKindRefactor.parse_diag_error
         } else if (level == DiagSeverityIndex(DiagSeverity.DS_WARNING)) {

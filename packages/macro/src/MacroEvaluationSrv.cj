@@ -74,7 +74,7 @@ public func ExecuteMacroServerTaskLoop(evaluation: MacroEvaluation): Unit {
 }
 
 private func evalServerCalls(evaluation: MacroEvaluation, calls: ArrayList<MacroCall>): Bool {
-    var hasRunnable = false
+    let ready = ArrayList<MacroCall>()
     for (call in calls) {
         if (call.status != MacroEvalStatus.INIT) {
             continue
@@ -92,17 +92,18 @@ private func evalServerCalls(evaluation: MacroEvaluation, calls: ArrayList<Macro
         } else {
             evaluation.SaveUsedMacroPkgs(call.packageName)
         }
-        hasRunnable = true
+        ready.add(call)
     }
-    if (!hasRunnable) {
+    if (ready.isEmpty()) {
         return true
     }
     evaluation.InitGlobalVariable()
-    for (call in calls) {
-        if (call.status == MacroEvalStatus.FAIL) {
-            continue
-        }
-        evaluation.EvalOneMacroCall(call)
+    if (evaluation.enableParallelMacro) {
+        // Keep call-owned diagnostics for the wire; never serialize another call's reports.
+        evaluation.EvaluateReadyNativeCalls(ready, flushReports: false)
+    }
+    for (call in ready) {
+        if (!evaluation.enableParallelMacro) { evaluation.EvalOneMacroCall(call) }
         if (!evaluation.SerializeAndNotifyResult(call)) {
             return false
         }

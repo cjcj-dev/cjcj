@@ -270,6 +270,21 @@ private func decodeDiagnostics(value: String, out: ArrayList<Diagnostic>): Unit 
 }
 
 private func getCallDiagnostics(macCall: MacroCall): ArrayList<Diagnostic> {
+    if (macCall.deferReports) {
+        let out = ArrayList<Diagnostic>()
+        for ((level, range, message, hint) in macCall.pendingReports) {
+            let severity = diagSeverityFromIndex(level)
+            let diag = Diagnostic(true, range, diagnosticKindForSeverity(severity), arguments: [message])
+            diag.start = range.begin
+            diag.end = range.end
+            diag.diagSeverity = severity
+            diag.errorMessage = message
+            diag.mainHint.str = hint
+            out.add(diag)
+        }
+        return out
+    }
+
     if (let Some(instance) <- macCall.ci) {
         let out = ArrayList<Diagnostic>()
         for (diag in instance.GetDiag().GetCategoryDiagnostic(DiagCategory.PARSE)) {

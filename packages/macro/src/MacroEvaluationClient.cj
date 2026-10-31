@@ -654,11 +654,14 @@ extend MacroEvaluation {
             }
             return false
         }
-        DeserializeMacroCallsResult(calls, msgList)
+        if (!DeserializeMacroCallsResult(calls, msgList)) {
+            for (call in calls) { call.status = MacroEvalStatus.FAIL }
+            return false
+        }
         return true
     }
 
-    public func DeserializeMacroCallsResult(calls: ArrayList<MacroCall>, msgList: ArrayList<ArrayList<UInt8>>): Unit {
+    public func DeserializeMacroCallsResult(calls: ArrayList<MacroCall>, msgList: ArrayList<ArrayList<UInt8>>): Bool {
         for (msg in msgList) {
             let id = Box<String>("")
             let pos = Box<Position>(INVALID_POSITION)
@@ -668,6 +671,10 @@ extend MacroEvaluation {
                 let invocation = call.RequireInvocation()
                 if (!IsResultForMacCall(id.value, pos.value, invocation)) {
                     continue
+                }
+                if (call.isDataReady) {
+                    Errorln("duplicate macro result " + id.value + pos.value.ToString())
+                    return false
                 }
                 findFlag = true
                 MacroEvalMsgSerializer.DeSerializeTksFromResult(invocation.newTokens, msg)
@@ -682,14 +689,15 @@ extend MacroEvaluation {
                 }
                 call.isDataReady = true
                 for (parentName in call.assertParents) {
-                    ci.GetDiag().Diagnose(call.GetBeginPos(), DiagKind.macro_assert_parent_context_failed,
-                        args: [DiagArgument(call.GetFullName()), DiagArgument(parentName)]).Emit()
+                    call.ReportParentFailure(parentName)
                 }
                 break
             }
             if (!findFlag) {
                 Errorln("DeserializeMacroCallsResult not find macCall for result " + id.value + pos.value.ToString())
+                return false
             }
         }
+        return true
     }
 }
