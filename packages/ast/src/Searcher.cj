@@ -25,6 +25,24 @@ public class Trie {
 
     public init() {}
 
+    public func Clone(): Trie {
+        let out = Trie()
+        out.root = CloneNode(root, None)
+        return out
+    }
+
+    private func CloneNode(node: TrieNode, parent: Option<TrieNode>): TrieNode {
+        let out = TrieNode(node.c)
+        out.value = node.value
+        out.prefix = node.prefix
+        out.depth = node.depth
+        out.parent = parent
+        for (suffix in node.suffixes) { out.suffixes.add(suffix) }
+        for (id in node.ids) { out.ids.add(id) }
+        for ((key, child) in node.next) { out.next[key] = CloneNode(child, Some(out)) }
+        return out
+    }
+
     public func Reset(): Unit {
         root = TrieNode(82u8)
     }
@@ -418,7 +436,7 @@ public class Searcher {
             return cached[0]
         }
         let ids = PerformSearch(ctx, query)
-        let out = FilterAndSortSearchResult(ids, query, order: order)
+        let out = FilterAndSortSearchResult(ctx, ids, query, order: order)
         cache[key] = out
         return out
     }
@@ -460,7 +478,7 @@ public class Searcher {
         }
         let out = ArrayList<String>()
         for (symbol in ctx.symbolTable) {
-            if (!symbol.invertedIndexBeenDeleted && symbol.scopeName.startsWith(prefix)) {
+            if (!ctx.invertedIndex.IsDeleted(symbol) && symbol.scopeName.startsWith(prefix)) {
                 AddUniqueString(out, symbol.scopeName)
             }
         }
@@ -497,12 +515,12 @@ public class Searcher {
         return (results, false)
     }
 
-    private func FilterAndSortSearchResult(ids: TreeSet<Ptr<Symbol>>, query: Query,
+    private func FilterAndSortSearchResult(ctx: ASTContext, ids: TreeSet<Ptr<Symbol>>, query: Query,
         order!: SearchOrder = SearchOrder.POS_DESC): ArrayList<Symbol> {
         let out = ArrayList<Symbol>()
         for (id in ids) {
             let symbol = id.value
-            if (!symbol.invertedIndexBeenDeleted && InFiles(query, symbol)) {
+            if (!ctx.invertedIndex.IsDeleted(symbol) && InFiles(query, symbol)) {
                 out.add(symbol)
             }
         }
@@ -774,7 +792,7 @@ public class Searcher {
     private func FilterByMatcher(ctx: ASTContext, query: Query): TreeSet<Ptr<Symbol>> {
         let out = TreeSet<Ptr<Symbol>>()
         for (symbol in ctx.symbolTable) {
-            if (!symbol.invertedIndexBeenDeleted && query.Match(symbol)) {
+            if (!ctx.invertedIndex.IsDeleted(symbol) && query.Match(symbol)) {
                 out.add(Ptr<Symbol>(symbol))
             }
         }
@@ -784,7 +802,7 @@ public class Searcher {
     private func AllLiveSymbols(ctx: ASTContext): TreeSet<Ptr<Symbol>> {
         let out = TreeSet<Ptr<Symbol>>()
         for (symbol in ctx.symbolTable) {
-            if (!symbol.invertedIndexBeenDeleted) {
+            if (!ctx.invertedIndex.IsDeleted(symbol)) {
                 out.add(Ptr<Symbol>(symbol))
             }
         }

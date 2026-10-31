@@ -16,9 +16,49 @@ public class InvertedIndex {
     public var minPos: Position = BEGIN_POSITION
     public var maxPos: Position = Position(0, 1000000, 10000)
 
+    private let deletedSymbols = HashSet<Ptr<Symbol>>()
+
     public init() {}
 
+    public func IsDeleted(symbol: Symbol): Bool {
+        return deletedSymbols.contains(Ptr<Symbol>(symbol))
+    }
+
+    // Each checking context owns index membership. Symbol/declaration identities
+    // stay shared, but deleting from a body snapshot cannot hide a sibling's name.
+    public func Clone(): InvertedIndex {
+        let out = InvertedIndex()
+        CopyStringIndex(nameIndexes, out.nameIndexes)
+        CopyStringIndex(scopeNameIndexes, out.scopeNameIndexes)
+        CopyStringIndex(astKindIndexes, out.astKindIndexes)
+        for ((name, symbol) in scopeGateMap) { out.scopeGateMap[name] = symbol }
+        for ((level, values) in scopeLevelIndexes) {
+            let copied = TreeSet<Ptr<Symbol>>()
+            for (value in values) { copied.add(value) }
+            out.scopeLevelIndexes[level] = copied
+        }
+        out.nameTrie.root = nameTrie.Clone().root
+        out.scopeNameTrie.root = scopeNameTrie.Clone().root
+        out.astKindTrie.root = astKindTrie.Clone().root
+        out.posBeginTrie.root = posBeginTrie.Clone().root
+        out.posEndTrie.root = posEndTrie.Clone().root
+        out.minPos = minPos
+        out.maxPos = maxPos
+        for (symbol in deletedSymbols) { out.deletedSymbols.add(symbol) }
+        return out
+    }
+
+    private func CopyStringIndex(source: HashMap<String, TreeSet<Ptr<Symbol>>>,
+        target: HashMap<String, TreeSet<Ptr<Symbol>>>): Unit {
+        for ((name, values) in source) {
+            let copied = TreeSet<Ptr<Symbol>>()
+            for (value in values) { copied.add(value) }
+            target[name] = copied
+        }
+    }
+
     public func Reset(): Unit {
+        deletedSymbols.clear()
         nameIndexes.clear()
         scopeNameIndexes.clear()
         astKindIndexes.clear()
@@ -35,7 +75,7 @@ public class InvertedIndex {
     }
 
     public func Index(symbol: Symbol, withTrie!: Bool = true): Unit {
-        symbol.invertedIndexBeenDeleted = false
+        deletedSymbols.remove(Ptr<Symbol>(symbol))
         let scopeName = GetScopeNameWithoutTail(symbol.scopeName)
         putString(nameIndexes, symbol.name, symbol)
         putString(scopeNameIndexes, scopeName, symbol)
@@ -57,7 +97,7 @@ public class InvertedIndex {
     }
 
     public func Delete(symbol: Symbol): Unit {
-        if (symbol.invertedIndexBeenDeleted) {
+        if (IsDeleted(symbol)) {
             return
         }
         let scopeName = GetScopeNameWithoutTail(symbol.scopeName)
@@ -73,7 +113,7 @@ public class InvertedIndex {
             posBeginTrie.Delete(PosSearchApi.PosToStr(node.begin), symbol)
             posEndTrie.Delete(PosSearchApi.PosToStr(node.end), symbol)
         }
-        symbol.invertedIndexBeenDeleted = true
+        deletedSymbols.add(Ptr<Symbol>(symbol))
     }
 
     private func putString(map: HashMap<String, TreeSet<Ptr<Symbol>>>, key: String, symbol: Symbol): Unit {
@@ -216,6 +256,106 @@ public class ASTContext {
         curPackage = pkg
         fullPackageName = pkg.fullPackageName
         Reset()
+    }
+
+    // Create at a declaration barrier. This does not copy the AST: callers must
+    // own the body/dependency component before mutating its nodes or symbols.
+    // No Reset() here: constructing a worker must not reset process symbol IDs.
+    private init(parent: ASTContext) {
+        curPackage = parent.curPackage
+        fullPackageName = parent.fullPackageName
+        currentScopeLevel = parent.currentScopeLevel
+        currentMaxDepth = parent.currentMaxDepth
+        currentScopeName = parent.currentScopeName
+        invertedIndex = parent.invertedIndex.Clone()
+        for (symbol in parent.symbolTable) { symbolTable.add(symbol) }
+        for (decl in parent.packageDecls) { packageDecls.add(decl) }
+        for ((key, value) in parent.targetTypeMap) { targetTypeMap[key] = value }
+        for ((key, value) in parent.lastTargetTypeMap) { lastTargetTypeMap[key] = value }
+        for ((key, value) in parent.funcArgReachable) { funcArgReachable[key] = value }
+        for ((key, value) in parent.resolvedImportPackageNameMap) { resolvedImportPackageNameMap[key] = value }
+        for ((key, value) in parent.resolvedPackageDeclMap) { resolvedPackageDeclMap[key] = value }
+        for ((key, values) in parent.resolvedImportedDeclsMap) {
+            let copied = HashMap<String, ArrayList<Decl>>()
+            for ((name, decls) in values) {
+                let copiedDecls = ArrayList<Decl>()
+                for (decl in decls) { copiedDecls.add(decl) }
+                copied[name] = copiedDecls
+            }
+            resolvedImportedDeclsMap[key] = copied
+        }
+        for ((key, values) in parent.resolvedPackageMemberDeclsMap) {
+            let copied = HashMap<String, ArrayList<Decl>>()
+            for ((name, decls) in values) {
+                let copiedDecls = ArrayList<Decl>()
+                for (decl in decls) { copiedDecls.add(decl) }
+                copied[name] = copiedDecls
+            }
+            resolvedPackageMemberDeclsMap[key] = copied
+        }
+        for ((key, values) in parent.resolvedCjoPackageMemberDeclsMap) {
+            let copied = HashMap<String, ArrayList<Decl>>()
+            for ((name, decls) in values) {
+                let copiedDecls = ArrayList<Decl>()
+                for (decl in decls) { copiedDecls.add(decl) }
+                copied[name] = copiedDecls
+            }
+            resolvedCjoPackageMemberDeclsMap[key] = copied
+        }
+        for ((key, values) in parent.resolvedUsedMacroDeclsMap) {
+            let copied = HashMap<String, ArrayList<Decl>>()
+            for ((name, decls) in values) {
+                let copiedDecls = ArrayList<Decl>()
+                for (decl in decls) { copiedDecls.add(decl) }
+                copied[name] = copiedDecls
+            }
+            resolvedUsedMacroDeclsMap[key] = copied
+        }
+        for ((key, values) in parent.enumConstructors) {
+            let copied = HashMap<UInt64, ArrayList<Decl>>()
+            for ((name, decls) in values) {
+                let copiedDecls = ArrayList<Decl>()
+                for (decl in decls) { copiedDecls.add(decl) }
+                copied[name] = copiedDecls
+            }
+            enumConstructors[key] = copied
+        }
+        for ((key, values) in parent.resolvedImplicitPackageMemberDeclsMap) {
+            let copied = HashMap<String, Decl>()
+            for ((name, decl) in values) { copied[name] = decl }
+            resolvedImplicitPackageMemberDeclsMap[key] = copied
+        }
+        for ((key, decls) in parent.mem2Decls) {
+            let copied = ArrayList<Decl>()
+            for (decl in decls) { copied.add(decl) }
+            mem2Decls[key] = copied
+        }
+        for ((key, decls) in parent.subtypeDeclsMap) {
+            let copied = ArrayList<Decl>()
+            for (decl in decls) { copied.add(decl) }
+            subtypeDeclsMap[key] = copied
+        }
+        for ((key, decls) in parent.declMap) {
+            let copied = ArrayList<Decl>()
+            for (decl in decls) { copied.add(decl) }
+            declMap[key] = copied
+        }
+        for ((ty, blames) in parent.gcBlames) {
+            let copied = HashMap<Ptr<Ty>, HashSet<Node>>()
+            for ((bound, nodes) in blames) {
+                let copiedNodes = HashSet<Node>()
+                for (node in nodes) { copiedNodes.add(node) }
+                copied[bound] = copiedNodes
+            }
+            gcBlames[ty] = copied
+        }
+        for (entry in parent.varDeclToVarWithPatternDeclMap) {
+            varDeclToVarWithPatternDeclMap.add(OuterVarWithPatternDecl(entry.varDecl, entry.patternDecl))
+        }
+    }
+
+    public func ForkForBody(): ASTContext {
+        return ASTContext(this)
     }
 
     public func Reset(): Unit {
