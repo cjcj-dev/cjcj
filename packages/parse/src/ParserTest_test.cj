@@ -434,6 +434,34 @@ class ParserPortTest {
         let H = 40
         class A {
         }
+        interface F <: E & G{
+        }
+    }
+"#
+        let parsed = parseFile(code)
+        let file = parsed[0]
+        let members = ArrayList<String>()
+        let refs = ArrayList<String>()
+        Walker(file, visitPre: { node: Node =>
+            if (let Some(decl) <- (node as Decl)) {
+                members.add(decl.identifier.Val())
+            } else if (let Some(refType) <- (node as RefType)) {
+                refs.add(refType.ref.identifier.Val())
+            }
+            return VisitAction.WALK_CHILDREN
+        }).Walk()
+        @Expect(expectStrings(members, ["I", "E", "H", "A", "F"]), true)
+        @Expect(expectStrings(refs, ["C", "D", "E", "G"]), true)
+    }
+
+    @TestCase
+    func selfInheritanceRecovery(): Unit {
+        let code = #"
+    interface I <: C & D{
+        func E() {}
+        let H = 40
+        class A {
+        }
         interface F <: E & F{
         }
     }
