@@ -124,7 +124,8 @@ test('CI invokes registered script and native SDK Cangjie consumers', async () =
   assert.match(ci, /node ci\/run-registered-tests\.mjs scripts/);
   const job = ci.slice(ci.indexOf('  package-tests:'), ci.indexOf('  fixed-llvm-tools:'));
   assert.match(job, /node ci\/release\/receive_native_sdk\.mjs/);
-  assert.match(job, /cat ci\/runtime_pin\.env >> "\$GITHUB_ENV"/);
+  assert.match(job, /run: node ci\/load_runtime_pin\.mjs/);
+  assert.doesNotMatch(job, /cat ci\/runtime_pin\.env >> "\$GITHUB_ENV"/);
   assert.match(job, /node ci\/run-native-package-tests\.mjs/);
   const entry = await fs.readFile(path.join(repoRoot, 'ci/run-native-package-tests.mjs'), 'utf8');
   assert.match(entry, /colourEnvironment\('build'\)/);

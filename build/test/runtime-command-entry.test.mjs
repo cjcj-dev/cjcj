@@ -101,8 +101,8 @@ if sys.argv[1]=='install':
  for(const name of ['lib','runtime'])fs.cpSync(seed+'/'+name,snapshot+'/'+name,{recursive:true});
  const stale=root+'/stale-host/runtime/lib/'+r3Tuple;fs.mkdirSync(stale,{recursive:true});fs.copyFileSync(sdk+'/runtime/lib/'+r3Tuple+'/libcangjie-runtime.so',stale+'/libcangjie-runtime.so');
  const choices={};
- for(const name of ['compiler','runtime','tools','stdx','llvm','cjpm']){
-  const repo=workspace+(name==='llvm'?'/cangjie_compiler/third_party/llvm-project':name==='cjpm'?'/cjpm-source':'/cangjie_'+name);
+ for(const name of ['compiler','runtime','tools','stdx','llvm']){
+  const repo=workspace+(name==='llvm'?'/cangjie_compiler/third_party/llvm-project':name==='tools'?'/cjcj-tools':'/cangjie_'+name);
   write(repo+'/tracked','source '+name);write(repo+'/.gitignore','output/\nCMakebuild/\nstdlib/build/\nstdlib/output/\nruntime/target/\nruntime/output/\n');
   okay('git-init','git',['init','-q',repo]);okay('git-add','git',['-C',repo,'add','tracked','.gitignore']);
   okay('git-commit','git',['-C',repo,'-c','user.name=Zxilly','-c','user.email=zxilly@outlook.com','commit','-qm','finite stage source']);

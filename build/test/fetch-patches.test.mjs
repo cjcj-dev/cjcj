@@ -74,9 +74,9 @@ test('Windows fetch preserves selected native compilers and normal runtime insta
     fs.cpSync(WINDOWS_PIN_FIXTURE, compiler, {recursive: true});
     fs.cpSync(SCHEMA_PIN_FIXTURE, path.join(compiler, 'schema'), {recursive: true});
     const repoOverrides = {};
-    for (const name of ['compiler', 'runtime', 'tools', 'stdx', 'llvm', 'cjpm']) {
+    for (const name of ['compiler', 'runtime', 'tools', 'stdx', 'llvm']) {
       const root = path.join(workspace, name === 'llvm' ? 'cangjie_compiler/third_party/llvm-project'
-        : name === 'cjpm' ? 'cjpm-source' : 'cangjie_' + name);
+        : name === 'tools' ? 'cjcj-tools' : 'cangjie_' + name);
       fs.mkdirSync(root, {recursive: true});
       const git = (...args) => {
         const r = spawnSync('git', ['-C', root, ...args], {encoding: 'utf8'});
@@ -158,8 +158,8 @@ test('pinned 174db8f compiler files pass verify only after fetch run restores th
     // the fixed 174db file bytes, but identify these small fixture Git objects
     // honestly rather than claiming they are the complete pinned compiler.
     const repoOverrides={};
-    for(const name of ['compiler','runtime','tools','stdx','llvm','cjpm']) {
-      const root=path.join(workspace,name==='llvm'?'cangjie_compiler/third_party/llvm-project':name==='cjpm'?'cjpm-source':'cangjie_'+name);
+    for(const name of ['compiler','runtime','tools','stdx','llvm']) {
+      const root=path.join(workspace,name==='llvm'?'cangjie_compiler/third_party/llvm-project':name==='tools'?'cjcj-tools':'cangjie_'+name);
       fs.mkdirSync(root,{recursive:true});
       const git=(...args)=>{const r=spawnSync('git',['-C',root,...args],{encoding:'utf8'});assert.equal(r.status,0,r.stderr);return r.stdout.trim();};
       git('init','-q');git('add','.');
@@ -238,8 +238,8 @@ for (const entry of ['fetch', 'build']) test(`public ${entry} restores both stat
     // source preparation only, never a compiler build or installation.
     fs.writeFileSync(path.join(compiler,'build.py'),"raise SystemExit('BOUNDSCHECK_FINITE_BUILD_BOUNDARY')\n");
     const options=[],repoOverrides={};
-    for (const name of ['compiler','runtime','tools','stdx','llvm','cjpm']) {
-      const root=path.join(workspace,name==='llvm'?'cangjie_compiler/third_party/llvm-project':name==='cjpm'?'cjpm-source':'cangjie_'+name);
+    for (const name of ['compiler','runtime','tools','stdx','llvm']) {
+      const root=path.join(workspace,name==='llvm'?'cangjie_compiler/third_party/llvm-project':name==='tools'?'cjcj-tools':'cangjie_'+name);
       fs.mkdirSync(root,{recursive:true});
       const git=(...args)=>{const r=spawnSync('git',['-C',root,...args],{encoding:'utf8'});assert.equal(r.status,0,r.stderr);return r.stdout.trim();};
       git('init','-q');git('add','.');
