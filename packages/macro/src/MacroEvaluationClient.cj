@@ -618,78 +618,100 @@ extend MacroEvaluation {
     }
 
     public func SendMacroCallsTask(calls: ArrayList<MacroCall>): Bool {
-        let needSendCalls = ArrayList<MacroCall>()
-        for (call in calls) {
-            if (!call.hasSend) {
-                needSendCalls.add(call)
-                call.hasSend = true
-            }
-        }
-        let msg = ArrayList<UInt8>()
-        MacroEvalMsgSerializer().SerializeMultiCallsMsg(needSendCalls, msg)
-        if (!MacroProcMsger.GetInstance().SendMsgToSrv(msg)) {
-            for (call in calls) {
-                call.status = MacroEvalStatus.FAIL
-            }
-            return false
-        }
-        return true
+        return SendMacroCallsTaskToServer(calls)
     }
 
     public func WaitMacroCallsEvalResult(calls: ArrayList<MacroCall>): Bool {
-        var foundEvalmc = false
-        for (call in calls) {
-            if (!call.isDataReady) {
-                foundEvalmc = true
-                break
-            }
-        }
-        if (!foundEvalmc) {
-            return true
-        }
-        let msgList = ArrayList<ArrayList<UInt8>>()
-        if (!MacroProcMsger.GetInstance().ReadAllMsgFromSrv(msgList)) {
-            for (call in calls) {
-                call.status = MacroEvalStatus.FAIL
-            }
-            return false
-        }
-        DeserializeMacroCallsResult(calls, msgList)
-        return true
+        return WaitMacroCallsEvalResultFromServer(calls)
     }
 
-    public func DeserializeMacroCallsResult(calls: ArrayList<MacroCall>, msgList: ArrayList<ArrayList<UInt8>>): Unit {
-        for (msg in msgList) {
-            let id = Box<String>("")
-            let pos = Box<Position>(INVALID_POSITION)
-            MacroEvalMsgSerializer.DeSerializeIdInfoFromResult(id, pos, msg)
-            var findFlag = false
-            for (call in calls) {
-                let invocation = call.RequireInvocation()
-                if (!IsResultForMacCall(id.value, pos.value, invocation)) {
-                    continue
-                }
-                findFlag = true
-                MacroEvalMsgSerializer.DeSerializeTksFromResult(invocation.newTokens, msg)
-                call.status = MacroEvalMsgSerializer.DeSerializeStatusFromResult(msg)
-                MacroEvalMsgSerializer.DeSerializeItemsFromResult(call.items, msg)
-                MacroEvalMsgSerializer.DeSerializeAssertParentsFromResult(call.assertParents, msg)
-                let diags = ArrayList<Diagnostic>()
-                MacroEvalMsgSerializer.DeSerializeDiagsFromResult(diags, msg)
-                for (diag in diags) {
-                    call.DiagReport(DiagSeverityIndex(diag.diagSeverity), MakeRange(diag.start, diag.end),
-                        diag.errorMessage, diag.mainHint.str)
-                }
-                call.isDataReady = true
-                for (parentName in call.assertParents) {
-                    ci.GetDiag().Diagnose(call.GetBeginPos(), DiagKind.macro_assert_parent_context_failed,
-                        args: [DiagArgument(call.GetFullName()), DiagArgument(parentName)]).Emit()
-                }
-                break
-            }
-            if (!findFlag) {
-                Errorln("DeserializeMacroCallsResult not find macCall for result " + id.value + pos.value.ToString())
-            }
+    public func DeserializeMacroCallsResult(calls: ArrayList<MacroCall>, msgList: ArrayList<ArrayList<UInt8>>): Bool {
+        return DeserializeMacroCallsResultFromServer(calls, msgList)
+    }
+
+}
+
+
+public func SendMacroCallsTaskToServer(calls: ArrayList<MacroCall>): Bool {
+    let needSendCalls = ArrayList<MacroCall>()
+    for (call in calls) {
+        if (!call.hasSend) {
+            needSendCalls.add(call)
+            call.hasSend = true
         }
     }
+    let msg = ArrayList<UInt8>()
+    MacroEvalMsgSerializer().SerializeMultiCallsMsg(needSendCalls, msg)
+    if (!MacroProcMsger.GetInstance().SendMsgToSrv(msg)) {
+        for (call in calls) {
+            call.status = MacroEvalStatus.FAIL
+        }
+        return false
+    }
+    return true
+}
+
+public func WaitMacroCallsEvalResultFromServer(calls: ArrayList<MacroCall>): Bool {
+    var foundEvalmc = false
+    for (call in calls) {
+        if (!call.isDataReady) {
+            foundEvalmc = true
+            break
+        }
+    }
+    if (!foundEvalmc) {
+        return true
+    }
+    let msgList = ArrayList<ArrayList<UInt8>>()
+    if (!MacroProcMsger.GetInstance().ReadAllMsgFromSrv(msgList)) {
+        for (call in calls) {
+            call.status = MacroEvalStatus.FAIL
+        }
+        return false
+    }
+    if (!DeserializeMacroCallsResultFromServer(calls, msgList)) {
+        for (call in calls) { call.status = MacroEvalStatus.FAIL }
+        return false
+    }
+    return true
+}
+
+public func DeserializeMacroCallsResultFromServer(calls: ArrayList<MacroCall>, msgList: ArrayList<ArrayList<UInt8>>): Bool {
+    for (msg in msgList) {
+        let id = Box<String>("")
+        let pos = Box<Position>(INVALID_POSITION)
+        MacroEvalMsgSerializer.DeSerializeIdInfoFromResult(id, pos, msg)
+        var findFlag = false
+        for (call in calls) {
+            let invocation = call.RequireInvocation()
+            if (!IsResultForMacCall(id.value, pos.value, invocation)) {
+                continue
+            }
+            if (call.isDataReady) {
+                Errorln("duplicate macro result " + id.value + pos.value.ToString())
+                return false
+            }
+            findFlag = true
+            MacroEvalMsgSerializer.DeSerializeTksFromResult(invocation.newTokens, msg)
+            call.status = MacroEvalMsgSerializer.DeSerializeStatusFromResult(msg)
+            MacroEvalMsgSerializer.DeSerializeItemsFromResult(call.items, msg)
+            MacroEvalMsgSerializer.DeSerializeAssertParentsFromResult(call.assertParents, msg)
+            let diags = ArrayList<Diagnostic>()
+            MacroEvalMsgSerializer.DeSerializeDiagsFromResult(diags, msg)
+            for (diag in diags) {
+                call.DiagReport(DiagSeverityIndex(diag.diagSeverity), MakeRange(diag.start, diag.end),
+                    diag.errorMessage, diag.mainHint.str)
+            }
+            call.isDataReady = true
+            for (parentName in call.assertParents) {
+                call.ReportParentFailure(parentName)
+            }
+            break
+        }
+        if (!findFlag) {
+            Errorln("DeserializeMacroCallsResult not find macCall for result " + id.value + pos.value.ToString())
+            return false
+        }
+    }
+    return true
 }

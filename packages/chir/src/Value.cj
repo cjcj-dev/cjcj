@@ -14,7 +14,7 @@ public open class Value <: Base & Hashable & Equatable<Value> {
     private let userMutex: Mutex = Mutex()
 
     public init(ty: Option<Type>, identifier: String, kind: ValueKind) {
-        super()
+        super(sharedAttributes: kind == ValueKind.KIND_GLOBALVAR || kind == ValueKind.KIND_FUNC)
         this.ty = ty
         this.identifier = identifier
         this.kind = kind
@@ -136,6 +136,43 @@ public open class Value <: Base & Hashable & Equatable<Value> {
                     continue
                 }
                 idx++
+            }
+        }
+    }
+
+    // After lowering has joined, restore serial function order without disturbing each worker's
+    // append order (including repeated operands and remove/re-add operations).
+    public func OrderNewUsers(prefixSize: Int64, ownerOrder: HashMap<Int64, Int64>): Unit {
+        if (users.size <= prefixSize) { return }
+        let appended = ArrayList<Expression>()
+        while (users.size > prefixSize) { appended.add(users.remove(at: prefixSize)) }
+        let rank = { expr: Expression =>
+            let fn = expr.GetTopLevelFunc().getOrThrow()
+            ownerOrder.get(fn.nodeId).getOrThrow()
+        }
+        sort(appended, by: { left: Expression, right: Expression =>
+            let a = rank(left)
+            let b = rank(right)
+            if (a < b) { Ordering.LT } else if (a > b) { Ordering.GT } else { Ordering.EQ }
+        }, stable: true)
+        users.add(all: appended)
+    }
+
+    // Moves every occurrence of expr to the end of the list, keeping the occurrence count.
+    public func MoveUserToTail(expr: Expression): Unit {
+        synchronized(userMutex) {
+            var moved: Int64 = 0
+            var idx: Int64 = 0
+            while (idx < users.size) {
+                if (users[idx].nodeId == expr.nodeId) {
+                    users.remove(at: idx)
+                    moved++
+                    continue
+                }
+                idx++
+            }
+            for (_ in 0..moved) {
+                users.add(expr)
             }
         }
     }

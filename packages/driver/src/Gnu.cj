@@ -136,13 +136,16 @@ public open class Gnu <: ToolChain {
         }
 
         let processedObjFiles = ArrayList<TempFileInfo>()
+        let packageRoots = ToolBatch()
         var groupIdx: Int64 = 0
         while (groupIdx < packageNames.size) {
-            if (!PartialLinkOnePackage(packageNames[groupIdx], packageModules[groupIdx], processedObjFiles)) {
+            if (!PartialLinkOnePackage(packageNames[groupIdx], packageModules[groupIdx], processedObjFiles,
+                packageRoots)) {
                 return false
             }
             groupIdx++
         }
+        if (!packageRoots.isEmpty()) { backendCmds.add(packageRoots) }
         for (foreignInput in foreignInputs) {
             processedObjFiles.add(foreignInput)
         }
@@ -152,11 +155,13 @@ public open class Gnu <: ToolChain {
     protected func PartialLinkOnePackage(
         pkgName: String,
         modules: ArrayList<TempFileInfo>,
-        processedObjFiles: ArrayList<TempFileInfo>
+        processedObjFiles: ArrayList<TempFileInfo>,
+        packageRoots: ToolBatch
     ): Bool {
         if (modules.isEmpty()) {
             return true
         }
+        let chain = ToolBatch()
         let dirPath = FileUtil.GetDirPath(modules[0].filePath)
         let outputFile = FileUtil.JoinPath(dirPath, pkgName + ".o")
         if (!(modules.size == 1 && modules[0].filePath == outputFile)) {
@@ -167,7 +172,7 @@ public open class Gnu <: ToolChain {
             for (module in modules) {
                 tool.AppendArg(module.filePath)
             }
-            backendCmds.add(MakeSingleToolBatch(tool))
+            chain.add(tool)
         }
 
         let outputDir = FileUtil.GetAbsPath(FileUtil.GetDirPath(outputFile)) ?? FileUtil.GetDirPath(outputFile)
@@ -189,7 +194,7 @@ public open class Gnu <: ToolChain {
             let changeSymVis = Tool(objcopyPath, ToolType.BACKEND, driverOptions.environment.allVariables)
             changeSymVis.AppendArg(outputFile)
             changeSymVis.AppendArg("--localize-symbols=" + symbolFile)
-            backendCmds.add(MakeSingleToolBatch(changeSymVis))
+            chain.add(changeSymVis)
         }
 
         processedObjFiles.add(TempFileInfo(fileName: FileUtil.GetFileNameWithoutExtension(outputFile),
@@ -200,7 +205,11 @@ public open class Gnu <: ToolChain {
             let cacheCopyTool = Tool("CacheCopy", ToolType.INTERNAL_IMPLEMENTED, driverOptions.environment.allVariables)
             cacheCopyTool.AppendArg(outputFile)
             cacheCopyTool.AppendArg(destFile)
-            backendCmds.add(MakeSingleToolBatch(cacheCopyTool))
+            chain.add(cacheCopyTool)
+        }
+        if (!chain.isEmpty()) {
+            packageRoots.add(chain[0])
+            for (idx in 1..chain.size) { chain[idx - 1].successors.add(chain[idx]) }
         }
         return true
     }

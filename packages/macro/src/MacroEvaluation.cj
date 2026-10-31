@@ -11,8 +11,9 @@ import cjcj::parse.ScopeKind as EvalParsedScopeKind
 import cjcj::ast.{IsPureAnnotation, VisitAction, Walker}
 import cjcj::mangle.{GetOptPkgName, MANGLE_CANGJIE_PREFIX, MANGLE_FUNC_PARAM_TYPE_PREFIX,
     MANGLE_GLOBAL_PACKAGE_INIT_PREFIX, MANGLE_VOID_TY_SUFFIX, SPECIAL_NAME_FOR_INIT_RESET_FUNCTION}
-import cjcj::utils.{CJC_ASSERT, FileUtil}
+import cjcj::utils.{CJC_ASSERT, FileUtil, TaskQueue, TaskResult}
 import std.collection.*
+import std.process.Process
 
 private func appendTokens(target: ArrayList<Token>, source: ArrayList<Token>): Unit {
     for (token in source) {
@@ -864,23 +865,7 @@ public class MacroEvaluation {
             return
         }
 
-        // The C++ parallel branch depends on MacroEvaluation.cpp:919-1022, whose
-        // CreateThreadToEvalMacroCall/WaitForOneMacroCallEvalFinish chain is not yet
-        // present in selfhost. Preserve the existing synchronous behavior in that mode.
-        if (enableParallelMacro) {
-            let invocation = macCall.RequireInvocation()
-            if (!invocation.newTokens.isEmpty() && !MacroExpandFailed(invocation.newTokens)) {
-                macCall.isDataReady = true
-                return
-            }
-            if (!evaluateNativeMacro(macCall)) {
-                invocation.newTokens.clear()
-                invocation.newTokens.add(Token(TokenKind.ILLEGAL, ""))
-                macCall.isDataReady = true
-            }
-            return
-        }
-
+        // Both serial and parallel calls cross the same runtime submission/completion ABI.
         let runtimeInit = RuntimeInit.GetInstance()
         let mInvoke = MacroInvoke(macCall)
         let id = synchronized(macroInvokeTableLock) {
@@ -1308,9 +1293,84 @@ public class MacroEvaluation {
         }
     }
 
+    // Readiness, argument expansion and AST mutation stay on the owning thread. Only
+    // independent native invocations enter workers; the next frontier sees all results.
     public func EvalMacroCallsOnMultiThread(): Unit {
         InitGlobalVariable()
-        EvalMacroCallsOnSingleThread()
+        while (true) {
+            let ready = ArrayList<MacroCall>()
+            for (macCall in pMacroCalls) {
+                if (IsMacroCallReadyForEval(macCall, ci.GetDiag(), ci.GetGlobalOptions().compileCjd)) {
+                    ready.add(macCall)
+                }
+            }
+            if (ready.isEmpty()) { break }
+            if (useChildProcess) {
+                var start: Int64 = 0
+                let width = Int64(ci.GetGlobalOptions().GetJobs())
+                while (start < ready.size) {
+                    let batch = ArrayList<MacroCall>()
+                    while (start < ready.size && batch.size < width) {
+                        let call = ready[start]
+                        call.isDataReady = false
+                        call.hasSend = false
+                        call.deferReports = true
+                        batch.add(call)
+                        start++
+                    }
+                    if (SendMacroCallsTaskToServer(batch)) {
+                        while (true) {
+                            if (!WaitMacroCallsEvalResultFromServer(batch)) { break }
+                            var completed = true
+                            for (call in batch) {
+                                completed = (call.isDataReady || call.status == MacroEvalStatus.FAIL) && completed
+                            }
+                            if (completed) { break }
+                        }
+                    }
+                    for (call in batch) { call.FlushReports() }
+                }
+            } else {
+                EvaluateReadyNativeCalls(ready)
+            }
+            for (call in ready) {
+                SetMacroCallEvalResult(call, ci.GetDiag())
+            }
+        }
+    }
+
+    public func EvaluateReadyNativeCalls(calls: ArrayList<MacroCall>, flushReports!: Bool = true): Unit {
+        let queue = TaskQueue(Int64(ci.GetGlobalOptions().GetJobs()))
+        let results = ArrayList<TaskResult<Unit>>()
+        for (call in calls) {
+            call.deferReports = true
+            call.reportsForServer = !flushReports
+            call.isDataReady = false
+            results.add(queue.AddTask<Unit>({ =>
+                let trace = (Process.current.getEnv("CJCJ_BACKEND_CONCURRENCY_TRACE") ?? "") == "1"
+                let worker = Thread.currentThread.id
+                if (trace) { eprintln("macro-worker begin ${call.GetFullName()} thread=${worker}") }
+                try { EvalOneMacroCall(call) } finally {
+                    if (trace) { eprintln("macro-worker end ${call.GetFullName()} thread=${worker}") }
+                }
+            }))
+        }
+        queue.RunAndWaitForAllTasksCompleted()
+        var firstFailure: Option<Exception> = None
+        var index: Int64 = 0
+        for (result in results) {
+            try {
+                result.get()
+            } catch (e: Exception) {
+                calls[index].status = MacroEvalStatus.FAIL
+                if (firstFailure.isNone()) { firstFailure = Some(e) }
+            }
+            index++
+        }
+        if (flushReports) {
+            for (call in calls) { call.FlushReports() }
+        }
+        if (let Some(e) <- firstFailure) { throw e }
     }
 
     public func EvalMacroCalls(): Unit {

@@ -351,6 +351,90 @@ private struct SubtypeCacheKey <: Hashable & Equatable<SubtypeCacheKey> {
     }
 }
 
+// Canonical identity/allocation state is independent from each checker's
+// constraint transactions, type-variable scopes and query caches. The lock
+// covers interning only; it is not a lock around semantic body checking.
+private class CanonicalTypeStore {
+    private let mutex = Mutex()
+    private let allocatedTys = HashMap<TypePointer, Ty>()
+    private let allocatedClassLikeTys = ArrayList<Ty>()
+    private let allocatedTyConstructionTraces: Option<HashMap<Int64, String>>
+    private let validateTypeManagerInterning: Bool
+
+    public init(validate: Bool) {
+        validateTypeManagerInterning = validate
+        allocatedTyConstructionTraces = if (validate) { Some(HashMap<Int64, String>()) } else { None }
+    }
+
+    public func Intern(ty: Ty, classLike!: Bool = false): Ty {
+        synchronized(mutex) {
+            let key = TypePointer(Some(ty))
+            if (let Some(cached) <- allocatedTys.get(key)) {
+                return cached
+            }
+            allocatedTys[key] = ty
+            if (validateTypeManagerInterning && ty.Hash() % 16 == 0) {
+                if (let Some(traces) <- allocatedTyConstructionTraces) {
+                    traces[ty.objectId] = ThreadSnapshot.dumpCurrentThread().toString()
+                }
+            }
+            if (classLike) {
+                allocatedClassLikeTys.add(ty)
+            }
+            return ty
+        }
+    }
+
+    public func Validate(): Bool {
+        synchronized(mutex) {
+            let tysByHash = HashMap<Int64, ArrayList<Ty>>()
+            var sampled: Int64 = 0
+            var violations: Int64 = 0
+            for ((_, ty) in allocatedTys) {
+                let hash = ty.Hash()
+                if (hash % 16 != 0) {
+                    continue
+                }
+                sampled++
+                if (let Some(tys) <- tysByHash.get(hash)) {
+                    for (other in tys) {
+                        if (ty == other && ty.objectId != other.objectId) {
+                            violations++
+                            eprintln("TY-INTERN-VIOLATION hash=${hash} left=${other.objectId} right=${ty.objectId}")
+                            eprintln("TY-INTERN-LEFT ${other.String()}")
+                            if (let Some(traces) <- allocatedTyConstructionTraces) {
+                                if (let Some(trace) <- traces.get(other.objectId)) {
+                                    eprintln(trace)
+                                }
+                            }
+                            eprintln("TY-INTERN-RIGHT ${ty.String()}")
+                            if (let Some(traces) <- allocatedTyConstructionTraces) {
+                                if (let Some(trace) <- traces.get(ty.objectId)) {
+                                    eprintln(trace)
+                                }
+                            }
+                        }
+                    }
+                    tys.add(ty)
+                } else {
+                    tysByHash[hash] = ArrayList<Ty>([ty])
+                }
+            }
+            eprintln("TY-INTERN-VALIDATION TOTAL=${allocatedTys.size} SAMPLED=${sampled} " +
+                "VIOLATIONS=${violations}")
+            return violations == 0
+        }
+    }
+
+    public func Clear(): Unit {
+        synchronized(mutex) {
+            allocatedTys.clear()
+            if (let Some(traces) <- allocatedTyConstructionTraces) { traces.clear() }
+            allocatedClassLikeTys.clear()
+        }
+    }
+}
+
 public class TypeManager {
     private let overrideResolverImplMutex = Mutex()
     private static let theInvalidTy: InvalidTy = InvalidTy()
@@ -396,9 +480,9 @@ public class TypeManager {
     private let subtypeCache: HashMap<SubtypeCacheKey, Bool> = HashMap<SubtypeCacheKey, Bool>()
     private let declInstantiationStatus: HashMap<Decl, ArrayList<DeclInstantiationStatusEntry>> =
         HashMap<Decl, ArrayList<DeclInstantiationStatusEntry>>()
-    private let allocatedTys: HashMap<TypePointer, Ty> = HashMap<TypePointer, Ty>()
-    private var allocatedTyConstructionTraces: Option<HashMap<Int64, String>> = None
-    private let allocatedClassLikeTys: ArrayList<Ty> = ArrayList<Ty>()
+    private let canonicalTypes: CanonicalTypeStore
+    private let ownsCanonicalTypes: Bool
+    private let bodyNamespace: String
     private var validateTypeManagerInterning: Bool = false
     private let unsolvedTyVars: ArrayList<GenericsTy> = ArrayList<GenericsTy>()
     private let tyVarScopes: ArrayList<TyVarScope> = ArrayList<TyVarScope>()
@@ -417,8 +501,70 @@ public class TypeManager {
         tyVarScopes.add(TyVarScope())
         if (let Some(value) <- getVariable("CJC_VALIDATE_TY_INTERNING")) {
             validateTypeManagerInterning = value == "1"
-            if (validateTypeManagerInterning) {
-                allocatedTyConstructionTraces = Some(HashMap<Int64, String>())
+        }
+        canonicalTypes = CanonicalTypeStore(validateTypeManagerInterning)
+        ownsCanonicalTypes = true
+        bodyNamespace = ""
+    }
+
+    // Construct before launching any body workers. Declaration/type shells are
+    // shared; all writable inference containers and query caches belong to this
+    // manager. The caller must still establish disjoint AST/dependency ownership.
+    private init(parent: TypeManager, ordinal: UInt64) {
+        canonicalTypes = parent.canonicalTypes
+        ownsCanonicalTypes = false
+        bodyNamespace = "${parent.bodyNamespace}body${ordinal}:"
+        validateTypeManagerInterning = parent.validateTypeManagerInterning
+        anyTy = parent.anyTy
+        ctypeTy = parent.ctypeTy
+        compileTestsOnly = parent.compileTestsOnly
+        tyVarScopes.add(TyVarScope())
+        for (entry in parent.constraints.entries) {
+            constraints.entries.add(ConstraintEntry(entry.tyVar, bounds: entry.bounds.Clone()))
+        }
+        for (entry in parent.builtinTyToExtendMap) {
+            let copy = TyExtendsEntry(entry.ty)
+            for (decl in entry.extends) { copy.extends.add(decl) }
+            builtinTyToExtendMap.add(copy)
+        }
+        for (entry in parent.declToExtendMap) {
+            let copy = DeclExtendsEntry(entry.decl)
+            for (decl in entry.extends) { copy.extends.add(decl) }
+            declToExtendMap.add(copy)
+            declToExtendIndex[copy.decl.objectId] = copy
+        }
+        for ((fileHash, names) in parent.resolvedImportedDeclsMap) {
+            let copiedNames = HashMap<String, ArrayList<Decl>>()
+            for ((name, decls) in names) {
+                let copiedDecls = ArrayList<Decl>()
+                for (decl in decls) { copiedDecls.add(decl) }
+                copiedNames[name] = copiedDecls
+            }
+            resolvedImportedDeclsMap[fileHash] = copiedNames
+        }
+        for ((id, aliases) in parent.declToTypeAlias) {
+            let copiedAliases = HashSet<String>()
+            for (alias in aliases) { copiedAliases.add(alias) }
+            declToTypeAlias[id] = copiedAliases
+        }
+    }
+
+    public func ForkForBody(ordinal: UInt64): TypeManager {
+        // A live inference transaction cannot be split into independent roots.
+        CJC_ASSERT(tyVarScopes.size == 1 && instCtxScopes.isEmpty() && unsolvedTyVars.isEmpty())
+        return TypeManager(this, ordinal)
+    }
+
+    // Invoke after all workers join, in original body order. Query caches and
+    // local constraints never escape; only used-extend publication is merged.
+    public func MergeBodyUsage(body: TypeManager): Unit {
+        addBoxUsedExtends(body.boxUsedExtends)
+        for (decl in body.boxedNonGenericDecls) { addBoxedNonGenericDecl(decl) }
+        for (ty in body.boxedTys) { addBoxedTy(ty) }
+        for (entry in body.tyUsedExtends) { addTyUsedExtends(entry.ty, entry.extends) }
+        for (entry in body.checkedTyExtendRelation) {
+            if (!hasCheckedTyExtendRelation(entry.child, entry.interfaceTy)) {
+                checkedTyExtendRelation.add(CheckedTyExtendRelation(entry.child, entry.interfaceTy))
             }
         }
     }
@@ -667,59 +813,11 @@ public class TypeManager {
     }
 
     private func internAllocatedTy(ty: Ty, classLike!: Bool = false): Ty {
-        let key = TypePointer(Some(ty))
-        if (let Some(cached) <- allocatedTys.get(key)) {
-            return cached
-        }
-        allocatedTys[key] = ty
-        if (validateTypeManagerInterning && ty.Hash() % 16 == 0) {
-            if (let Some(traces) <- allocatedTyConstructionTraces) {
-                traces[ty.objectId] = ThreadSnapshot.dumpCurrentThread().toString()
-            }
-        }
-        if (classLike) {
-            allocatedClassLikeTys.add(ty)
-        }
-        return ty
+        return canonicalTypes.Intern(ty, classLike: classLike)
     }
 
     private func ValidateTypeManagerInterning(): Bool {
-        let tysByHash = HashMap<Int64, ArrayList<Ty>>()
-        var sampled: Int64 = 0
-        var violations: Int64 = 0
-        for ((_, ty) in allocatedTys) {
-            let hash = ty.Hash()
-            if (hash % 16 != 0) {
-                continue
-            }
-            sampled++
-            if (let Some(tys) <- tysByHash.get(hash)) {
-                for (other in tys) {
-                    if (ty == other && ty.objectId != other.objectId) {
-                        violations++
-                        eprintln("TY-INTERN-VIOLATION hash=${hash} left=${other.objectId} right=${ty.objectId}")
-                        eprintln("TY-INTERN-LEFT ${other.String()}")
-                        if (let Some(traces) <- allocatedTyConstructionTraces) {
-                            if (let Some(trace) <- traces.get(other.objectId)) {
-                                eprintln(trace)
-                            }
-                        }
-                        eprintln("TY-INTERN-RIGHT ${ty.String()}")
-                        if (let Some(traces) <- allocatedTyConstructionTraces) {
-                            if (let Some(trace) <- traces.get(ty.objectId)) {
-                                eprintln(trace)
-                            }
-                        }
-                    }
-                }
-                tys.add(ty)
-            } else {
-                tysByHash[hash] = ArrayList<Ty>([ty])
-            }
-        }
-        eprintln("TY-INTERN-VALIDATION TOTAL=${allocatedTys.size} SAMPLED=${sampled} " +
-            "VIOLATIONS=${violations}")
-        return violations == 0
+        return canonicalTypes.Validate()
     }
 
     public func GetInstantiatedTys(ty: Ty, mts: MultiTypeSubst): TySet {
@@ -1951,11 +2049,7 @@ public class TypeManager {
     public func Clear(): Unit {
         constraints.Clear()
         ClearMapCache()
-        allocatedTys.clear()
-        if (let Some(traces) <- allocatedTyConstructionTraces) {
-            traces.clear()
-        }
-        allocatedClassLikeTys.clear()
+        if (ownsCanonicalTypes) { canonicalTypes.Clear() }
         unsolvedTyVars.clear()
         subtypeCache.clear()
         declInstantiationStatus.clear()
@@ -2474,7 +2568,7 @@ public class TypeManager {
             dummyGenDecls.add(decl)
             newVar.isPlaceholder = true
             nextUniqId++
-            let name = "${srcId}-${nextUniqId}"
+            let name = "${bodyNamespace}${srcId}-${nextUniqId}"
             decl.identifier = SrcIdentifier(name)
             newVar.name = name
             newVar

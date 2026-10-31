@@ -44,6 +44,37 @@ private class WalkerCounter {
 @Test
 class WalkerTest {
     @TestCase
+    func localVisitSetPreservesSharedInputAndPersistentWalkers(): Unit {
+        let file = walkerFixture()
+        let persistentID = GetNextWalkerID()
+        let original = WalkerCounter()
+        Walker(file, persistentID, visitPre: { _: Node =>
+            original.value++
+            VisitAction.WALK_CHILDREN
+        }).Walk()
+        @Expect(original.value > 1)
+        let first = WalkerCounter()
+        let second = WalkerCounter()
+        Walker(file, localVisits: true, visitPre: { _: Node =>
+            first.value++
+            VisitAction.WALK_CHILDREN
+        }).Walk()
+        Walker(file, localVisits: true, visitPre: { _: Node =>
+            second.value++
+            VisitAction.WALK_CHILDREN
+        }).Walk()
+        @Expect(first.value, original.value)
+        @Expect(second.value, original.value)
+        @Expect(file.visitedByWalkerID, persistentID)
+        let suppressed = WalkerCounter()
+        Walker(file, persistentID, visitPre: { _: Node =>
+            suppressed.value++
+            VisitAction.WALK_CHILDREN
+        }).Walk()
+        @Expect(suppressed.value, 0)
+    }
+
+    @TestCase
     func walkPair(): Unit {
         let file = walkerFixture()
         let count = WalkerCounter()

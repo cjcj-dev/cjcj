@@ -29,18 +29,32 @@ private func ConstAnalysisStrategyIndex(value: ConstAnalysisStrategy): Int64 {
 
 public class ConstAnalysisWrapper {
     private let builder: CHIRBuilder
+    private let deferReports: Bool
+    private let reportsByFunction = HashMap<Function, ArrayList<() -> Unit>>()
+    private let reportOrder = ArrayList<Function>()
+    // Initializer analysis populates these before the independent function frontier.
+    // Keep package analysis state with its wrapper, never in process-wide storage.
+    private let constStateGlobals = ValueAnalysisGlobals<ConstValueDomain, ConstStatePool>()
+    private let constActiveGlobals = ValueAnalysisGlobals<ConstValueDomain, ConstActivePool>()
     private let resultsMap: HashMap<Function, Results<ConstDomain>> = HashMap<Function, Results<ConstDomain>>()
     private let resultsPoolMap: HashMap<Function, Results<ConstPoolDomain>> =
         HashMap<Function, Results<ConstPoolDomain>>()
 
-    public init(builder: CHIRBuilder) {
+    public init(builder: CHIRBuilder, deferredReports!: Bool = false) {
         this.builder = builder
+        this.deferReports = deferredReports
     }
 
     // C++ ConstAnalysisWrapper.h:36-45.
     public func RunOnPackage(pkg: Package, diag: BasicDiagnosticEngine, threadNum: Int64,
         isDebug!: Bool = false): Unit {
-        if (threadNum == 1) {
+        if (deferReports) {
+            for (fn in pkg.GetGlobalFuncsWithBody()) { PrepareReports(fn) }
+            for (gv in pkg.GetGlobalVarsWithInit()) {
+                if (let Some(fn) <- gv.GetInitFunc()) { PrepareReports(fn) }
+            }
+        }
+        if (threadNum == 1 || isDebug) {
             RunOnPackageInSerial(pkg, diag, isDebug: isDebug)
         } else {
             RunOnPackageInParallel(pkg, diag, threadNum, isDebug: isDebug)
@@ -50,15 +64,36 @@ public class ConstAnalysisWrapper {
     public func RunOnFunc(funcValue: Function, diag: BasicDiagnosticEngine,
         isDebug!: Bool = false): Option<Results<ConstDomain>> {
         let analysis = ConstAnalysis<ConstStatePool>(funcValue, builder, constStateGlobals,
-            { literalValue: LiteralValue => HandleNonNullLiteralValue(literalValue) }, diag, isDebug: isDebug)
+            { literalValue: LiteralValue => HandleNonNullLiteralValue(literalValue) }, diag, isDebug: isDebug, deferredReports: reportsByFunction.get(funcValue))
         return Engine<ConstDomain>(funcValue, analysis).IterateToFixpoint()
     }
 
     public func RunOnFuncWithPool(funcValue: Function, diag: BasicDiagnosticEngine,
         isDebug!: Bool = false): Option<Results<ConstPoolDomain>> {
         let analysis = ConstAnalysis<ConstActivePool>(funcValue, builder, constActiveGlobals,
-            { literalValue: LiteralValue => HandleNonNullLiteralValue(literalValue) }, diag, isDebug: isDebug)
+            { literalValue: LiteralValue => HandleNonNullLiteralValue(literalValue) }, diag, isDebug: isDebug, deferredReports: reportsByFunction.get(funcValue))
         return Engine<ConstPoolDomain>(funcValue, analysis).IterateToFixpoint()
+    }
+
+    private func PrepareReports(fn: Function): Unit {
+        if (!reportsByFunction.contains(fn)) {
+            reportsByFunction[fn] = ArrayList<() -> Unit>()
+            reportOrder.add(fn)
+        }
+    }
+
+    // Stable analysis runs again through Results.VisitWith during propagation.
+    // The caller flushes only after those consumers have joined, before DCE.
+    public func GetDeferredReports(fn: Function): Option<ArrayList<() -> Unit>> {
+        return reportsByFunction.get(fn)
+    }
+
+    public func FlushReports(): Unit {
+        for (fn in reportOrder) {
+            let reports = reportsByFunction[fn]
+            for (report in reports) { report() }
+            reports.clear()
+        }
     }
 
     public func CheckFuncResult(funcValue: Function): Option<Results<ConstDomain>> {

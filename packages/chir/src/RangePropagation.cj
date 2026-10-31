@@ -2,12 +2,10 @@ package cjcj::chir
 
 import cjcj::basic.{DiagKindRefactor, DiagnosticEngine as BasicDiagnosticEngine}
 import cjcj::utils.{CJC_ABORT, CJC_ASSERT}
+import cjcj::basic.Range as BasicRange
 import std.collection.*
 import std.core.Box as CoreBox
-import std.sync.Mutex
 
-private let rangePropagationEffectMap: OptEffectCHIRMap = OptEffectCHIRMap()
-private let rangePropagationEffectMapMutex: Mutex = Mutex()
 
 // C++ RangePropagation.cpp:15-24.
 public func CheckSingleBool(valueRange: ValueRange): Option<Bool> {
@@ -46,6 +44,9 @@ private class RangePropagationRewriteInfo {
 
 // C++ RangePropagation.h:22-108; RangePropagation.cpp:37-276.
 public class RangePropagation {
+    private let effectMap: OptEffectCHIRMap = OptEffectCHIRMap()
+    private let deferredReports: Bool
+    private let reports = ArrayList<(BasicRange, String)>()
     private let builder: CHIRBuilder
     private let analysisWrapper: AnalysisWrapper<RangeAnalysis, RangeDomain>
     private let diag: BasicDiagnosticEngine
@@ -54,16 +55,28 @@ public class RangePropagation {
 
     // C++ RangePropagation.cpp:37-41.
     public init(builder: CHIRBuilder, analysisWrapper: AnalysisWrapper<RangeAnalysis, RangeDomain>,
-        diag: BasicDiagnosticEngine, enIncre: Bool) {
+        diag: BasicDiagnosticEngine, enIncre: Bool, deferredReports!: Bool = false) {
         this.builder = builder
         this.analysisWrapper = analysisWrapper
         this.diag = diag
         this.enIncre = enIncre
+        this.deferredReports = deferredReports
+    }
+
+    private func ReportIndex(range: BasicRange, hint: String): Unit {
+        let diagnosticBuilder = diag.DiagnoseRefactor(DiagKindRefactor.chir_idx_out_of_bounds, range)
+        diagnosticBuilder.AddMainHintArguments(hint)
+        diagnosticBuilder.Emit()
+    }
+
+    public func FlushReports(): Unit {
+        for ((range, hint) in reports) { ReportIndex(range, hint) }
+        reports.clear()
     }
 
     // C++ RangePropagation.cpp:43-46.
     public func GetEffectMap(): OptEffectCHIRMap {
-        return rangePropagationEffectMap
+        return effectMap
     }
 
     // C++ RangePropagation.cpp:48-51.
@@ -191,12 +204,10 @@ public class RangePropagation {
             globalVar = RecordFieldEffectMap((expr as Field).getOrThrow())
         }
         if (let Some(gv) <- globalVar) {
-            synchronized(rangePropagationEffectMapMutex) {
-                if (let Some(affectedFunctions) <- rangePropagationEffectMap.get(gv)) {
-                    affectedFunctions.add(funcValue)
-                } else {
-                    rangePropagationEffectMap[gv] = HashSet<Value>([funcValue])
-                }
+            if (let Some(affectedFunctions) <- effectMap.get(gv)) {
+                affectedFunctions.add(funcValue)
+            } else {
+                effectMap[gv] = HashSet<Value>([funcValue])
             }
         }
     }
@@ -226,11 +237,10 @@ public class RangePropagation {
             let geLowerBound = ComputeRelIntBinop(CHIRRelIntBinopArgs(indexRange, zeroNode,
                 Some(index), None, ExprKind.GE, false))
             if (ltUpperBound.IsFalse() || geLowerBound.IsFalse()) {
-                let diagnosticBuilder = diag.DiagnoseRefactor(DiagKindRefactor.chir_idx_out_of_bounds,
-                    ToRange(intrinsic.GetDebugLocation()))
-                diagnosticBuilder.AddMainHintArguments("range of index ${indexPosition - begin} is (" +
-                    indexRange.ToString() + "), however the size of varray is ${size}")
-                diagnosticBuilder.Emit()
+                let range = ToRange(intrinsic.GetDebugLocation())
+                let hint = "range of index ${indexPosition - begin} is (" +
+                    indexRange.ToString() + "), however the size of varray is ${size}"
+                if (deferredReports) { reports.add((range, hint)) } else { ReportIndex(range, hint) }
             }
             indexPosition++
         }

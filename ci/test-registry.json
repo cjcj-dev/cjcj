@@ -1016,5 +1016,30 @@
     "file": "ci/test-macro-binding-paths.mjs",
     "executor": "manual",
     "reason": "Linux M1 R1/R2 real driver and borrowed RuntimeInit/OpenMacroLibrary control. Build tests/macro_binding_paths/Main.cj with the selected driver/macro packages and their actual normal H dependency closure. Arguments: consumer ELF, product binding checker, selected runtime directory, empty private work, red|fixed. Runs each arm once; red expects original assertions 2/3, fixed expects 0, stale-first and ordinary controls remain. Not public CJ/owned-R/ir2 qualification."
+  },
+  {
+    "file": "packages/mangle/src/MangleExportIds_test.cj",
+    "executor": "cjpm",
+    "member": "packages/mangle"
+  },
+  {
+    "file": "packages/chir/src/MergeBlocksParallel_test.cj",
+    "executor": "cjpm",
+    "member": "packages/chir"
+  },
+  {
+    "file": "packages/macro/src/ParallelMacroReports_test.cj",
+    "executor": "cjpm",
+    "member": "packages/macro"
+  },
+  {
+    "file": "packages/utils/src/StdUtils_test.cj",
+    "executor": "cjpm",
+    "member": "packages/utils"
+  },
+  {
+    "file": "packages/sema/src/TypeManagerConcurrent_test.cj",
+    "executor": "cjpm",
+    "member": "packages/sema"
   }
 ]

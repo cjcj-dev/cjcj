@@ -245,6 +245,8 @@ public class Tool {
     private let deferredArgMap: HashMap<Int64, Int64> = HashMap<Int64, Int64>()
     private let deferredDirArgs: ArrayList<DeferredDirArgs> = ArrayList<DeferredDirArgs>()
     private var ldLibraryPath: String = ""
+    // Started by Job after this tool succeeds, inside the same command batch.
+    public let successors: ArrayList<Tool> = ArrayList<Tool>()
 
     public init(name: String, toolType: ToolType, environmentVars: HashMap<String, String>) {
         this.name = name
@@ -502,14 +504,19 @@ public class Tool {
     }
 
     public func ExecuteWithLease(verbose: Bool, lease: ConcurrencyLease): ToolFuture {
-        if (verbose) {
-            println(FileUtil.Normalize(GetCommandString()))
-        }
-        if (TempFileManager.Instance().IsDeleted()) {
+        try {
+            if (verbose) {
+                println(FileUtil.Normalize(GetCommandString()))
+            }
+            if (TempFileManager.Instance().IsDeleted()) {
+                lease.Release()
+                return ErrorFuture("temporary files were deleted before command execution")
+            }
+            return RunWithLease(lease)
+        } catch (e: Exception) {
             lease.Release()
-            return ErrorFuture("temporary files were deleted before command execution")
+            throw e
         }
-        return RunWithLease(lease)
     }
 
     public func GetName(): String {

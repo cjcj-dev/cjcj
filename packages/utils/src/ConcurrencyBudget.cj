@@ -267,14 +267,19 @@ public class ConcurrencyBudget {
     }
 
     public func SpawnWithLease<T>(lease: ConcurrencyLease, body: () -> T): Future<T> {
-        return spawn {
-            EnterLeaseThread()
-            try {
-                body()
-            } finally {
-                LeaveLeaseThread()
-                lease.Release()
+        try {
+            return spawn {
+                try {
+                    EnterLeaseThread()
+                    try { body() } finally { LeaveLeaseThread() }
+                } finally {
+                    lease.Release()
+                }
             }
+        } catch (e: Exception) {
+            // Spawn failed before a worker could take ownership of this admission.
+            lease.Release()
+            throw e
         }
     }
 

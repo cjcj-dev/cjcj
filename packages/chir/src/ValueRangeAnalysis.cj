@@ -131,10 +131,6 @@ public type RangeValueDomain = ValueDomain<ValueRange>
 public type RangeStatePool = FullStatePool<RangeValueDomain>
 public type RangeDomain = State<RangeValueDomain, RangeStatePool>
 
-// C++ ValueRangeAnalysis.h:94-101 explicit Range template instantiation;
-// ValueRangeAnalysis.cpp:90-107 supplies its two free-function specializations.
-public let rangeStateGlobals = ValueAnalysisGlobals<RangeValueDomain, RangeStatePool>()
-
 public func HandleNonNullLiteralValue(literal: LiteralValue, ty: Option<Type>): RangeValueDomain {
     if (let Some(boolLiteral) <- (literal as BoolLiteral)) {
         return RangeValueDomain(BoolRange(BoolDomain.FromBool(boolLiteral.value)))
@@ -191,8 +187,10 @@ public class RangeAnalysis <: ValueAnalysis<RangeValueDomain, RangeStatePool> {
     private let diag: BasicDiagnosticEngine
 
     public init(functionValue: Function, builder: CHIRBuilder, diag: BasicDiagnosticEngine,
-        isDebug!: Bool = false) {
-        super(functionValue, builder, rangeStateGlobals,
+        isDebug!: Bool = false,
+        globalValues!: ValueAnalysisGlobals<RangeValueDomain, RangeStatePool> =
+            ValueAnalysisGlobals<RangeValueDomain, RangeStatePool>()) {
+        super(functionValue, builder, globalValues,
             { literal: LiteralValue => HandleNonNullLiteralValue(literal, Some(literal.GetType().getOrThrow())) },
             isDebug: isDebug)
         this.diag = diag

@@ -1,6 +1,7 @@
 package cjcj::chir
 
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cjcj::basic.Range as BasicRange
 import cjcj::basic.DiagKindRefactor
 import cjcj::utils.{TaskQueue, TaskResult}
 import std.collection.*
@@ -20,11 +21,18 @@ public class UnreachableBranchCheck {
     private let diag: BasicDiagnosticEngine
     private let analysisWrapper: ConstAnalysisWrapper
     private let currentPackageName: String
+    private let deferredReports: Bool
+    private let reports: ArrayList<() -> Unit>
+    private let borrowedReports: Bool
 
-    public init(analysisWrapper: ConstAnalysisWrapper, diag: BasicDiagnosticEngine, packageName: String) {
+    public init(analysisWrapper: ConstAnalysisWrapper, diag: BasicDiagnosticEngine, packageName: String,
+        deferredReports!: Bool = false, sharedReports!: Option<ArrayList<() -> Unit>> = None) {
         this.diag = diag
         this.analysisWrapper = analysisWrapper
         this.currentPackageName = packageName
+        this.deferredReports = deferredReports
+        this.reports = sharedReports ?? ArrayList<() -> Unit>()
+        this.borrowedReports = sharedReports.isSome()
     }
 
     // C++ UnreachableBranchCheck.cpp:30-58 — parallel arm was a dead serial copy.
@@ -38,26 +46,49 @@ public class UnreachableBranchCheck {
             }
         } else {
             let taskQueue = TaskQueue(threadNum)
-            let results = ArrayList<TaskResult<Unit>>()
+            let results = ArrayList<TaskResult<UnreachableBranchCheck>>()
             for (funcValue in pkg.GetGlobalFuncsWithBody()) {
                 if (funcValue.GetSkipCheck() == SkipKind.SKIP_DCE_WARNING) {
                     continue
                 }
-                results.add(taskQueue.AddTask<Unit>({ =>
-                    RunOnFunc(funcValue)
+                results.add(taskQueue.AddTask<UnreachableBranchCheck>({ =>
+                    let worker = UnreachableBranchCheck(analysisWrapper, diag, currentPackageName, deferredReports: true,
+                        sharedReports: analysisWrapper.GetDeferredReports(funcValue))
+                    worker.RunOnFunc(funcValue)
+                    worker
                 }))
             }
             taskQueue.RunAndWaitForAllTasksCompleted()
             var firstFailure: Option<Exception> = None
+            let completed = ArrayList<UnreachableBranchCheck>()
             for (result in results) {
                 try {
-                    result.get()
+                    completed.add(result.get())
                 } catch (e: Exception) {
                     if (firstFailure.isNone()) { firstFailure = Some(e) }
                 }
             }
             if (let Some(e) <- firstFailure) { throw e }
+            // Constant-analysis errors and branch warnings append to the same
+            // per-function stream, preserving their order during Results.VisitWith.
+            analysisWrapper.FlushReports()
+            for (worker in completed) {
+                if (!worker.borrowedReports) { for (report in worker.reports) { report() } }
+            }
         }
+    }
+
+    private func ReportWarning(kind: DiagKindRefactor, range: BasicRange, keyword!: Option<String> = None): Unit {
+        let emit = { =>
+            if (let Some(word) <- keyword) {
+                let builder = diag.DiagnoseRefactor(kind, range, word)
+                builder.AddMainHintArguments(word)
+                builder.Emit()
+            } else {
+                diag.DiagnoseRefactor(kind, range).Emit()
+            }
+        }
+        if (deferredReports) { reports.add(emit) } else { emit() }
     }
 
     private func PrintMatchSuccessors<T>(result: Results<T>, block: Block,
@@ -139,25 +170,21 @@ public class UnreachableBranchCheck {
             }
             if (!hasProcessed.add(block)) { return }
             if (sourceExpr == SourceExpr.QUEST || sourceExpr == SourceExpr.BINARY) {
-                diag.DiagnoseRefactor(DiagKindRefactor.chir_dce_unreachable_expression, range[1]).Emit()
+                ReportWarning(DiagKindRefactor.chir_dce_unreachable_expression, range[1])
             } else if (sourceExpr == SourceExpr.MATCH_EXPR || sourceExpr == SourceExpr.MATCH_CASE) {
-                diag.DiagnoseRefactor(DiagKindRefactor.chir_unreachable_pattern, range[1]).Emit()
+                ReportWarning(DiagKindRefactor.chir_unreachable_pattern, range[1])
             } else {
                 let keyword = GetKeyWordBySourceExpr(sourceExpr)
-                let builder = diag.DiagnoseRefactor(DiagKindRefactor.chir_dce_unreachable_block_in_expression, range[1], keyword)
-                builder.AddMainHintArguments(keyword)
-                builder.Emit()
+                ReportWarning(DiagKindRefactor.chir_dce_unreachable_block_in_expression, range[1], keyword: Some(keyword))
             }
         } else {
             if (!hasProcessed.add(block)) { return }
             let sourceExpr = (node as MultiBranch).getOrThrow().GetSourceExpr()
             if (sourceExpr == SourceExpr.MATCH_EXPR || sourceExpr == SourceExpr.MATCH_CASE || sourceExpr == SourceExpr.OTHER) {
-                diag.DiagnoseRefactor(DiagKindRefactor.chir_unreachable_pattern, range[1]).Emit()
+                ReportWarning(DiagKindRefactor.chir_unreachable_pattern, range[1])
             } else {
                 let keyword = GetKeyWordBySourceExpr(sourceExpr)
-                let builder = diag.DiagnoseRefactor(DiagKindRefactor.chir_dce_unreachable_block_in_expression, range[1], keyword)
-                builder.AddMainHintArguments(keyword)
-                builder.Emit()
+                ReportWarning(DiagKindRefactor.chir_dce_unreachable_block_in_expression, range[1], keyword: Some(keyword))
             }
         }
     }

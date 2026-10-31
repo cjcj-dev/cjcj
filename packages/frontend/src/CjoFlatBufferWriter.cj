@@ -202,13 +202,14 @@ public func SerializePackageToCjoFlatBuffer(
     exportForIncr!: Bool = false,
     exportForTest!: Bool = false,
     exportFuncBody!: Bool = true,
-    compileCjd!: Bool = false
+    compileCjd!: Bool = false,
+    mangleJobs!: Int64 = 1
 ): Array<UInt8> {
     let writer = ASTWriter(packageDepInfo, cjoManager, debug, optimizationLevel,
         saveFileWithAbsPath: saveFileWithAbsPath, diag: diag, serializingCommon: serializingCommon,
         exportContent: exportContent, exportForIncr: exportForIncr, exportForTest: exportForTest,
         exportFuncBody: exportFuncBody,
-        compileCjd: compileCjd)
+        compileCjd: compileCjd, mangleJobs: mangleJobs)
     try {
         writer.PreSaveFullExportDecls(pkg)
         writer.ExportAST(pkg)
@@ -233,6 +234,7 @@ public class ASTWriter <: Resource {
     private let exportForIncr: Bool
     private let exportForTest: Bool
     private var exportFuncBody: Bool
+    private let mangleJobs: Int64
     private let compileCjd: Bool
     private let mangler: RealBaseMangler = RealBaseMangler()
     private let typeManager: FaithfulSemaTypeManager = FaithfulSemaTypeManager()
@@ -268,7 +270,8 @@ public class ASTWriter <: Resource {
         exportForIncr!: Bool,
         exportForTest!: Bool = false,
         exportFuncBody!: Bool,
-        compileCjd!: Bool = false
+        compileCjd!: Bool = false,
+        mangleJobs!: Int64 = 1
     ) {
         this.packageDepInfo = packageDepInfo
         this.cjoManager = cjoManager
@@ -282,6 +285,7 @@ public class ASTWriter <: Resource {
         this.exportForTest = exportForTest
         this.exportFuncBody = exportFuncBody
         this.compileCjd = compileCjd
+        this.mangleJobs = mangleJobs
     }
 
     // ASTWriter.cpp:559-627 ASTWriterImpl::PreSaveFullExportDecls.
@@ -677,7 +681,7 @@ public class ASTWriter <: Resource {
 
     // ASTWriter.cpp:177-181 MangleExportId.
     private func MangleExportId(pkg: Package): Unit {
-        mangler.MangleExportIds(pkg)
+        mangler.MangleExportIds(pkg, threadNum: mangleJobs)
     }
 
     // Mirror C++ ASTWriter AppendDecl (Modules/ASTSerialization/ASTWriter.cpp:99-120): a MainDecl/MacroDecl is exported

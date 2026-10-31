@@ -5,10 +5,15 @@ import cjcj::utils.StaticCast
 public class UselessAllocateElimination {
     public init() {}
 
-    public static func RunOnPackage(pkg: Package, isDebug!: Bool = false): Unit {
-        for (fn in pkg.GetGlobalFuncsWithBody()) {
-            RunOnFunc(fn, isDebug)
+    public static func RunOnPackage(pkg: Package, isDebug!: Bool = false, threadNum!: Int64 = 1): Unit {
+        if (threadNum <= 1 || isDebug) {
+            for (fn in pkg.GetGlobalFuncsWithBody()) { RunOnFunc(fn, isDebug) }
+            return
         }
+        // No builder or cross-function analysis: each task removes only its own unused allocation
+        // and stores. Shared global operands only lose users under Value's existing lock.
+        let _ = RunFunctionLocalPass<Unit>(pkg.GetGlobalFuncsWithBody(), threadNum,
+            { fn => RunOnFunc(fn, false) }, passName: "useless-allocation")
     }
 
     private static func RunOnFunc(fn: Function, isDebug: Bool): Unit {

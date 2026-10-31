@@ -362,6 +362,22 @@ public class TyVarBounds {
 
     public init() {}
 
+    // Snapshot values, not PData transaction history or mutable blame containers.
+    public func Clone(): TyVarBounds {
+        let out = TyVarBounds()
+        out.lbs = lbs.Clone()
+        out.ubs = ubs.Clone()
+        out.sum = sum.Clone()
+        out.eq = eq.Clone()
+        for (entry in lb2Blames) {
+            out.lb2Blames.add(TyBlameEntry(entry.ty, blames: entry.blames.Clone()))
+        }
+        for (entry in ub2Blames) {
+            out.ub2Blames.add(TyBlameEntry(entry.ty, blames: entry.blames.Clone()))
+        }
+        return out
+    }
+
     public func ToString(): String {
         return "lbs=${lbs.ToString()}, ubs=${ubs.ToString()}, sum=${sum.ToString()}, eq=${eq.ToString()}"
     }

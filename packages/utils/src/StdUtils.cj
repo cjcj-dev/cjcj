@@ -50,7 +50,35 @@ private func stdUtilsErrno(): Int32 {
     }
 }
 
+// Bare digits cannot reach a strtol edge case (sign, 0x prefix, whitespace, empty input), and at most 15
+// digits of base 16 or lower fit 60 bits, so no range error is possible. Anything else takes the libc path.
+private func parseBareDigits(s: String, base: Int32): Option<Int64> {
+    if (s.isEmpty() || s.size > 15 || base < 2 || base > 16) {
+        return None
+    }
+    var value: Int64 = 0
+    for (byte in s) {
+        let digit = if (byte >= b'0' && byte <= b'9') {
+            Int64(byte - b'0')
+        } else if (byte >= b'a' && byte <= b'f') {
+            Int64(byte - b'a') + 10
+        } else if (byte >= b'A' && byte <= b'F') {
+            Int64(byte - b'A') + 10
+        } else {
+            return None
+        }
+        if (digit >= Int64(base)) {
+            return None
+        }
+        value = value * Int64(base) + digit
+    }
+    return value
+}
+
 public func Stoi(s: String, base!: Int32 = STOINT_BASE): Option<Int64> {
+    if (let Some(value) <- parseBareDigits(s, base)) {
+        return if (value > Int64(Int32.Max)) { None } else { value }
+    }
     var result: Option<Int64> = None
     try (cInput = unsafe { LibC.mallocCString(s) }.asResource(),
         endPtr = LibC.malloc<CString>().asResource()) {
@@ -163,6 +191,9 @@ public func Stoul(s: String, base!: Int32 = STOINT_BASE): Option<UInt64> {
 }
 
 public func Stoll(s: String, base!: Int32 = STOINT_BASE): Option<Int64> {
+    if (let Some(value) <- parseBareDigits(s, base)) {
+        return value
+    }
     var result: Option<Int64> = None
     try (cInput = unsafe { LibC.mallocCString(s) }.asResource(),
         endPtr = LibC.malloc<CString>().asResource()) {
@@ -186,6 +217,9 @@ public func Stoll(s: String, base!: Int32 = STOINT_BASE): Option<Int64> {
 }
 
 public func Stoull(s: String, base!: Int32 = STOINT_BASE): Option<UInt64> {
+    if (let Some(value) <- parseBareDigits(s, base)) {
+        return UInt64(value)
+    }
     var result: Option<UInt64> = None
     try (cInput = unsafe { LibC.mallocCString(s) }.asResource(),
         endPtr = LibC.malloc<CString>().asResource()) {

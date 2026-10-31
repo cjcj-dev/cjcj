@@ -65,8 +65,9 @@ import cjcj::ast.IsMirror as AstIsMirror
 import cjcj::incremental_compilation.{CompilationCache, IncreKind}
 import cjcj::sema.GenericInstantiation.GenericInstantiationManager
 import cjcj::utils.{ANNOTATION_VAR_POSTFIX, CFFI_FUNC_SUFFIX, CJC_ABORT, CJC_ASSERT, FileUtil,
-    MAIN_INVOKE, ProfileRecorder, STATIC_INIT_FUNC, STATIC_INIT_VAR}
+    MAIN_INVOKE, ProfileRecorder, STATIC_INIT_FUNC, STATIC_INIT_VAR, TaskQueue, TaskResult}
 import std.runtime.gc
+import std.process.Process
 
 foreign {
     func CJSelfhostStrtoldToFloat32(value: CString): Float64
@@ -987,6 +988,25 @@ public class FaithfulAST2CHIRBuilder {
     }
 }
 
+// One body owns allocations, type-cache additions, symbols and deferred diagnostics/annotations.
+// The package/header caches are read-only until every task has completed.
+private class BodyLoweringWork {
+    public let decl: AstDecl
+    public let builder: CHIRBuilder
+    public let types: CHIRType
+    public let symbols: FaithfulAST2CHIRNodeMap
+    public let annotations: ArrayList<(AstDecl, Function)> = ArrayList<(AstDecl, Function)>()
+    public let unreachable: HashMap<Block, Expression> = HashMap<Block, Expression>()
+    public let annotationInits: ArrayList<Function> = ArrayList<Function>()
+
+    public init(decl: AstDecl, builder: CHIRBuilder, types: CHIRType, symbols: FaithfulAST2CHIRNodeMap) {
+        this.decl = decl
+        this.builder = builder
+        this.types = types
+        this.symbols = symbols
+    }
+}
+
 public class FaithfulAST2CHIR {
     private let builder: CHIRBuilder
     private let chirType: CHIRType
@@ -1097,7 +1117,8 @@ public class FaithfulAST2CHIR {
             SetAnnotationTargets(def, decl)
         }
         TranslateOtherTopLevelDecls(node)
-        FlatForInExpr(builder).RunOnPackage(CurrentPackage())
+        FlatForInExpr(builder).RunOnPackage(CurrentPackage(),
+            threadNum: if (opts.disableLoweringConcurrency || opts.codegenDebugMode) { 1 } else { Int64(opts.GetJobs()) })
         if (chirWFC) {
             AST2CHIRCheck()
         }
@@ -2153,23 +2174,165 @@ public class FaithfulAST2CHIR {
     }
 
     private func TranslateOtherTopLevelDecls(node: AstPackage): Unit {
-        let _ = node
+        // Include nested generic functions in field initializers as well as ordinary bodies.
+        if (opts.GetJobs() > 1u64 && !opts.disableLoweringConcurrency && !opts.codegenDebugMode) {
+            PrepareLoweringGenericBounds(node)
+        }
+        let bodies = ArrayList<AstDecl>()
         for (decl in globalAndMemberFuncs) {
-            if (!NeedTranslate(decl)) {
-                continue
-            }
-            let trans = CreateTranslator()
-            trans.SetTopLevel(decl)
-            let _ = Translator.TranslateASTNode(decl, trans)
+            if (NeedTranslate(decl)) { bodies.add(decl) }
         }
-        for (decl in localConstFuncs.stableOrderValue) {
-            let trans = CreateTranslator()
-            trans.SetTopLevel(decl)
-            let _ = Translator.TranslateASTNode(decl, trans)
-        }
+        bodies.add(all: localConstFuncs.stableOrderValue)
+        TranslateFunctionBodies(bodies)
         TranslateVecDecl(globalAndStaticVars, CreateTranslator())
         TranslateAnnotationRelatedDecls()
         SetCompileTimeValueFlag()
+    }
+
+    private func TranslateFunctionBody(decl: AstDecl): Unit {
+        let trans = CreateTranslator()
+        trans.SetTopLevel(decl)
+        let _ = Translator.TranslateASTNode(decl, trans)
+    }
+
+    private func PrepareLoweringGenericBounds(root: AstNode): Unit {
+        AstWalker(root, visitPre: { node: AstNode =>
+            if (let Some(fn) <- (node as AstFuncDecl)) {
+                if (let Some(body) <- fn.funcBody) {
+                    if (let Some(generic) <- body.generic) {
+                        for (param in generic.typeParameters) {
+                            let _ = chirType.TranslateType(param.GetTy().getOrThrow())
+                        }
+                        for (param in generic.typeParameters) {
+                            chirType.FillGenericArgType((param.GetTy().getOrThrow() as AstGenericsTy).getOrThrow())
+                        }
+                    }
+                }
+            }
+            return AstVisitAction.WALK_CHILDREN
+        }).Walk()
+    }
+
+    // Local nominal declarations publish shared member/type shells. Keep those declarations at
+    // their original position, while lowering independent stretches on either side concurrently.
+    private func PrepareBodyHeaders(decl: AstDecl): Bool {
+        PrepareLoweringGenericBounds(decl)
+        let ownsOnlyBody = [true]
+        AstWalker(decl, visitPre: { node: AstNode =>
+            if (node.IsNominalDecl()) { ownsOnlyBody[0] = false }
+            return AstVisitAction.WALK_CHILDREN
+        }).Walk()
+        if (let Some(value) <- globalCache.TryGet(decl)) {
+            if (let Some(fn) <- (value as Function)) {
+                // A pre-existing body may belong to the ordered initializer phase.
+                if (fn.GetBody().isSome()) { ownsOnlyBody[0] = false }
+            }
+        }
+        return ownsOnlyBody[0]
+    }
+
+    private func TranslateFunctionBodies(decls: ArrayList<AstDecl>): Unit {
+        if (opts.GetJobs() <= 1u64 || opts.disableLoweringConcurrency || opts.codegenDebugMode) {
+            for (decl in decls) { TranslateFunctionBody(decl) }
+            return
+        }
+        // A separately scheduled local const function can still be contained in
+        // another scheduled body. Those roots share the same AST/CHIR body;
+        // preserve their source-order dependency instead of assigning two owners.
+        let scheduledRoots = HashSet<Int64>()
+        for (decl in decls) { scheduledRoots.add(decl.objectId) }
+        let overlappingRoots = HashSet<Int64>()
+        for (decl in decls) {
+            AstWalker(decl, localVisits: true, visitPre: { node: AstNode =>
+                if (node.objectId != decl.objectId && scheduledRoots.contains(node.objectId)) {
+                    overlappingRoots.add(decl.objectId)
+                    overlappingRoots.add(node.objectId)
+                }
+                AstVisitAction.WALK_CHILDREN
+            }).Walk()
+        }
+        let pending = ArrayList<AstDecl>()
+        let pendingFunctions = HashSet<Int64>()
+        for (decl in decls) {
+            let value = globalCache.TryGet(decl)
+            let repeated = value.isSome() && pendingFunctions.contains(value.getOrThrow().nodeId)
+            if (PrepareBodyHeaders(decl) && !repeated && !overlappingRoots.contains(decl.objectId)) {
+                pending.add(decl)
+                if (let Some(fn) <- value) { pendingFunctions.add(fn.nodeId) }
+            } else {
+                LowerIndependentBodies(pending)
+                pending.clear()
+                pendingFunctions.clear()
+                TranslateFunctionBody(decl)
+            }
+        }
+        LowerIndependentBodies(pending)
+    }
+
+    private func LowerIndependentBodies(decls: ArrayList<AstDecl>): Unit {
+        if (decls.isEmpty()) { return }
+        if (decls.size == 1) { TranslateFunctionBody(decls[0]); return }
+        let originalUsers = ArrayList<(Value, Int64)>()
+        for (fn in CurrentPackage().GetGlobalFunctions(includePureAbstract: true)) {
+            originalUsers.add((fn, fn.GetUsers().size))
+        }
+        for (gv in CurrentPackage().GetGlobalVars()) { originalUsers.add((gv, gv.GetUsers().size)) }
+        let queue = TaskQueue(Int64(opts.GetJobs()))
+        let works = ArrayList<BodyLoweringWork>()
+        let results = ArrayList<TaskResult<Unit>>()
+        var index: Int64 = 0
+        for (decl in decls) {
+            let workerBuilder = CHIRBuilder(builder.context, threadIdx: index, deferPackagePublication: true)
+            workerBuilder.SetCompileTimeValueMark(builder.GetCompileTimeValueMark())
+            let work = BodyLoweringWork(decl, workerBuilder, chirType.Fork(workerBuilder),
+                FaithfulAST2CHIRNodeMap(parent: Some(globalCache)))
+            works.add(work)
+            results.add(queue.AddTask<Unit>({ =>
+                let trans = Translator(work.builder, work.types, work.symbols,
+                    localConstVars: localConstVars, localConstFuncs: localConstFuncs,
+                    deserializedVals: deserializedVals, gim: gim, overrideSrcFuncResolver: overrideSrcFuncResolver,
+                    opts: opts, increKind: kind, annoFactoryFuncs: work.annotations,
+                    maybeUnreachable: work.unreachable, isComputingAnnos: isComputingAnnos,
+                    initFuncsForAnnoFactory: work.annotationInits)
+                trans.SetTopLevel(work.decl)
+                let trace = (Process.current.getEnv("CJCJ_BACKEND_CONCURRENCY_TRACE") ?? "") == "1"
+                let workerId = Thread.currentThread.id
+                if (trace) { eprintln("lowering-worker begin ${work.decl.mangledName} thread=${workerId}") }
+                try {
+                    let _ = Translator.TranslateASTNode(work.decl, trans)
+                } finally {
+                    if (trace) { eprintln("lowering-worker end ${work.decl.mangledName} thread=${workerId}") }
+                }
+            }))
+            index++
+        }
+        queue.RunAndWaitForAllTasksCompleted()
+        var failure: Option<Exception> = None
+        for (result in results) {
+            try { result.get() } catch (e: Exception) {
+                if (failure.isNone()) { failure = Some(e) }
+            }
+        }
+        if (let Some(e) <- failure) { throw e }
+        let ownerOrder = HashMap<Int64, Int64>()
+        index = 0
+        for (work in works) {
+            if (let Some(value) <- globalCache.TryGet(work.decl)) { ownerOrder[value.nodeId] = index }
+            for (value in work.builder.GetUnpublishedValues()) {
+                if (value.IsGlobal()) { originalUsers.add((value, 0)); ownerOrder[value.nodeId] = index }
+            }
+            index++
+        }
+        for ((value, prefix) in originalUsers) { value.OrderNewUsers(prefix, ownerOrder) }
+        for (work in works) {
+            work.builder.PublishPackageValues()
+            work.builder.MergeAllocatedInstance()
+            chirType.MergeFrom(work.types)
+            for (entry in work.symbols.Entries()) { globalCache.Set(entry.decl, entry.value) }
+            annoFactoryFuncs.add(all: work.annotations)
+            initFuncsForAnnoFactory.add(all: work.annotationInits)
+            for ((block, expr) in work.unreachable) { maybeUnreachable[block] = expr }
+        }
     }
 
     // C++: CHIR/AST2CHIR/AST2CHIR.cpp:365-390.

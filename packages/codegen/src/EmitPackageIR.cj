@@ -18,7 +18,6 @@ import cjcj::mangle.MANGLE_FUNC_PARAM_TYPE_PREFIX
 import cjcj::mangle.MANGLE_VOID_TY_SUFFIX
 import cjcj::mangle.SPECIAL_NAME_FOR_IMPORTS_INIT_FUNCTION
 import cjcj::mangle.SPECIAL_NAME_FOR_INIT_FUNCTION
-import cjcj::mangle.SPECIAL_NAME_FOR_INIT_FUNCTION
 import cjcj::mangle.SPECIAL_NAME_FOR_INIT_FLAG_RESET_FUNCTION
 import cjcj::mangle.SPECIAL_NAME_FOR_INIT_LITERAL_FUNCTION
 import cjcj::mangle.SPECIAL_NAME_FOR_INIT_RESET_FUNCTION
@@ -32,13 +31,6 @@ private let CANGJIE_SDK_VERSION: String = CANGJIE_VERSION
 private let PKG_INIT_FUNC_METADATA: String = "pkg_init_func"
 private let HAS_INVOKED_PKG_INIT_LITERAL: String = "has_invoked_pkg_init_literal"
 private let RUNTIME_CONFIG_GLOBAL_PREFIX: String = ".cjcj.runtime.config."
-
-// TEMPORARY selfhost safety gate: keep backend concurrency disabled by default because the selfhost runtime has a
-// concurrent-GC phase-handshake race that is nearly reproducible with jobs=4 (see REPORT-llcpar2.md for the stacks).
-// Delete this gate and restore the official default concurrency only after the runtime race is fixed and the
-// concurrent compiler passes the same-input 5-SHA determinism gate.
-private let TEMPORARILY_ENABLE_BACKEND_CONCURRENCY: Bool =
-    (Process.current.getEnv("CJCJ_BACKEND_CONCURRENCY") ?? "") == "1"
 
 private type LLVMSetValueName2Func = CFunc<(LLVMValueRef, CString, UIntNative) -> Unit>
 
@@ -56,6 +48,19 @@ private func DumpIRIfNeeded(cgMod: CGModule, suffix: String, subDirNum: Int64): 
     return subDirNum + 1
 }
 
+// Every CGModule owns its LLVM context, module and builders, so modules generate independently.
+// --jobs bounds the queue. --debug-codegen and the explicit disable flag stay on the calling thread.
+private func IsModuleGenerationSerial(options: GlobalOptions): Bool {
+    return options.disableCodegenConcurrency || options.codegenDebugMode
+}
+
+private func GetModuleGenerationWidth(cgPkgContext: CGPkgContext): Int64 {
+    let modules = cgPkgContext.GetCGModules().size
+    let jobs = Int64(cgPkgContext.GetGlobalOptions().GetJobs())
+    let width = if (modules < jobs) { modules } else { jobs }
+    return if (width > 0) { width } else { 1 }
+}
+
 // Mirrors EmitPackageIR.cpp:437-465.
 private func InitIncrementalGen(cgPkgContext: CGPkgContext): Bool {
     var result = true
@@ -63,9 +68,8 @@ private func InitIncrementalGen(cgPkgContext: CGPkgContext): Bool {
         return result
     }
     let cgModules = cgPkgContext.GetCGModules()
-    let threadNum = if (!TEMPORARILY_ENABLE_BACKEND_CONCURRENCY ||
-        cgPkgContext.GetGlobalOptions().codegenDebugMode) { 1 } else { cgModules.size }
-    if (threadNum == 1) {
+    let threadNum = GetModuleGenerationWidth(cgPkgContext)
+    if (IsModuleGenerationSerial(cgPkgContext.GetGlobalOptions())) {
         for (cgModule in cgModules) {
             let initialized = cgModule.InitIncrementalGen()
             result = initialized && result
@@ -148,6 +152,21 @@ private func GenSubCHIRPackagePart2(cgMod: CGModule): Unit {
     }
 }
 
+// Optional execution trace records the worker that actually runs each task, including width one.
+private func RunModuleGenerationTask(cgModule: CGModule, finalize: Bool): Unit {
+    let trace = (Process.current.getEnv("CJCJ_BACKEND_CONCURRENCY_TRACE") ?? "") == "1"
+    let phase = if (finalize) { "finalize" } else { "definitions" }
+    let index = cgModule.GetCGContext().GetSubCHIRPackage().subCHIRPackageIdx
+    let worker = Thread.currentThread.id
+    if (trace) { eprintln("CJCJ_MODULE_TASK begin phase=${phase} module=${index} worker=${worker}") }
+    try {
+        if (finalize) { GenSubCHIRPackagePart2(cgModule) }
+        else { GenSubCHIRPackage(cgModule) }
+    } finally {
+        if (trace) { eprintln("CJCJ_MODULE_TASK end phase=${phase} module=${index} worker=${worker}") }
+    }
+}
+
 // Mirrors EmitPackageIR.cpp:467-492.
 private func GenSubCHIRPackages(cgPkgContext: CGPkgContext): Unit {
     try (recorder = ProfileRecorder("EmitIR", "GenSubCHIRPackages")) {
@@ -156,15 +175,12 @@ private func GenSubCHIRPackages(cgPkgContext: CGPkgContext): Unit {
         if (options.NeedDumpIRToFile()) {
             ClearOldIRDumpFiles(options.output, cgPkgContext.GetCurrentPkgName())
         }
-        let threadNum = if (!TEMPORARILY_ENABLE_BACKEND_CONCURRENCY || options.codegenDebugMode) {
-            1
-        } else {
-            cgModules.size
-        }
+        let threadNum = GetModuleGenerationWidth(cgPkgContext)
         if ((Process.current.getEnv("CJCJ_BACKEND_CONCURRENCY_TRACE") ?? "") == "1") {
-            eprintln("CJCJ_BACKEND_CONCURRENCY threadNum=${threadNum} cgModules.size=${cgModules.size}")
+            let width = if (IsModuleGenerationSerial(options)) { 1 } else { threadNum }
+            eprintln("CJCJ_BACKEND_CONCURRENCY threadNum=${width} cgModules.size=${cgModules.size}")
         }
-        if (threadNum == 1) {
+        if (IsModuleGenerationSerial(options)) {
             for (cgModule in cgModules) {
                 GenSubCHIRPackage(cgModule)
             }
@@ -172,12 +188,12 @@ private func GenSubCHIRPackages(cgPkgContext: CGPkgContext): Unit {
             let taskQueueDefinitions = TaskQueue(threadNum)
             let results = ArrayList<TaskResult<Unit>>()
             for (cgModule in cgModules) {
-                results.add(taskQueueDefinitions.AddTask<Unit>({ => GenSubCHIRPackage(cgModule) }))
+                results.add(taskQueueDefinitions.AddTask<Unit>({ => RunModuleGenerationTask(cgModule, false) }))
             }
             taskQueueDefinitions.RunAndWaitForAllTasksCompleted()
             ConsumeModuleGenerationResults(results)
         }
-        if (threadNum == 1) {
+        if (IsModuleGenerationSerial(options)) {
             for (cgModule in cgModules) {
                 GenSubCHIRPackagePart2(cgModule)
             }
@@ -185,7 +201,7 @@ private func GenSubCHIRPackages(cgPkgContext: CGPkgContext): Unit {
             let taskQueueFinalize = TaskQueue(threadNum)
             let results = ArrayList<TaskResult<Unit>>()
             for (cgModule in cgModules) {
-                results.add(taskQueueFinalize.AddTask<Unit>({ => GenSubCHIRPackagePart2(cgModule) }))
+                results.add(taskQueueFinalize.AddTask<Unit>({ => RunModuleGenerationTask(cgModule, true) }))
             }
             taskQueueFinalize.RunAndWaitForAllTasksCompleted()
             ConsumeModuleGenerationResults(results)
@@ -229,7 +245,15 @@ public func GenPackageModules(chirData: CHIRData, options: GlobalOptions, enable
     if (!InitIncrementalGen(cgPkgContext)) {
         return cgPkgContext.ReleaseLLVMModules()
     }
-    GenSubCHIRPackages(cgPkgContext)
+    noHeapAllocChecker.BeginDeferredReports()
+    noWriteBarrierRecChecker.BeginDeferredReports()
+    try {
+        GenSubCHIRPackages(cgPkgContext)
+    } finally {
+        // GenSubCHIRPackages drains each phase before returning or throwing.
+        noHeapAllocChecker.FlushDeferredReports()
+        noWriteBarrierRecChecker.FlushDeferredReports()
+    }
     let localizedSymbols = cgPkgContext.GetLocalizedSymbols()
     let localizedSymbolsVec = ArrayList<String>()
     for (symbol in localizedSymbols) {

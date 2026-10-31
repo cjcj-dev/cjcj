@@ -9,6 +9,8 @@ import cjcj::basic.MakeRange as BasicMakeRange
 import cjcj::option.GlobalOptions as OptionGlobalOptions
 import cjcj::sema.*
 import cjcj::sema.FFI.*
+import cjcj::utils.{TaskQueue, TaskResult}
+import std.process.Process
 
 private class BoolBox {
     public var value: Bool
@@ -306,7 +308,7 @@ private func CheckStaticMemberWithGeneric(member: Decl, outerGenericTys: ArrayLi
     if (member.astKind != ASTKind.VAR_DECL && member.astKind != ASTKind.PROP_DECL && !IsStaticInitializer(member)) {
         return
     }
-    let walker = Walker(member, visitPre: { node: Node =>
+    let walker = Walker(member, localVisits: true, visitPre: { node: Node =>
         if (MaybeAddStaticMemberGenericIssue(member, node, outerGenericTys, out)) {
             return VisitAction.SKIP_CHILDREN
         }
@@ -325,17 +327,48 @@ private func CheckStaticMembersInGenericDecl(decl: Decl, out: ArrayList<StaticMe
     }
 }
 
-public func CheckStaticMembersWithGeneric(pkg: Package): ArrayList<StaticMemberGenericIssue> {
-    let out = ArrayList<StaticMemberGenericIssue>()
-    for (file in pkg.files) {
-        for (decl in file.decls) {
-            CheckStaticMembersInGenericDecl(decl, out)
-        }
-        for (exportedDecl in file.exportedInternalDecls) {
-            CheckStaticMembersInGenericDecl(exportedDecl, out)
+// Results, including diagnostics, are private to each read-only checker until the ordered join.
+private func RunLegalityChecks<T>(roots: ArrayList<Node>, threadNum: Int64,
+    check: (Node) -> ArrayList<T>): ArrayList<T> {
+    let out = ArrayList<T>()
+    if (threadNum <= 1 || roots.size <= 1) {
+        for (root in roots) { out.add(all: check(root)) }
+        return out
+    }
+    let queue = TaskQueue(threadNum)
+    let results = ArrayList<TaskResult<ArrayList<T>>>()
+    for (root in roots) {
+        results.add(queue.AddTask<ArrayList<T>>({ =>
+            let trace = (Process.current.getEnv("CJCJ_BACKEND_CONCURRENCY_TRACE") ?? "") == "1"
+            let worker = Thread.currentThread.id
+            if (trace) { eprintln("sema-legality-worker begin thread=${worker}") }
+            try { return check(root) } finally {
+                if (trace) { eprintln("sema-legality-worker end thread=${worker}") }
+            }
+        }))
+    }
+    queue.RunAndWaitForAllTasksCompleted()
+    var failure: Option<Exception> = None
+    for (result in results) {
+        try { out.add(all: result.get()) } catch (e: Exception) {
+            if (failure.isNone()) { failure = Some(e) }
         }
     }
+    if (let Some(e) <- failure) { throw e }
     return out
+}
+
+public func CheckStaticMembersWithGeneric(pkg: Package, threadNum!: Int64 = 1): ArrayList<StaticMemberGenericIssue> {
+    let roots = ArrayList<Node>()
+    for (file in pkg.files) {
+        for (decl in file.decls) { roots.add(decl) }
+        for (decl in file.exportedInternalDecls) { roots.add(decl) }
+    }
+    return RunLegalityChecks<StaticMemberGenericIssue>(roots, threadNum, { node =>
+        let issues = ArrayList<StaticMemberGenericIssue>()
+        CheckStaticMembersInGenericDecl((node as Decl).getOrThrow(), issues)
+        issues
+    })
 }
 
 private func CheckVArraySubscript(se: SubscriptExpr, out: ArrayList<SubscriptLegalityIssue>): Unit {
@@ -385,7 +418,7 @@ private func CheckVArraySubscript(se: SubscriptExpr, out: ArrayList<SubscriptLeg
 
 public func CheckSubscriptLegality(root: Node): ArrayList<SubscriptLegalityIssue> {
     let out = ArrayList<SubscriptLegalityIssue>()
-    let walker = Walker(root, visitPost: { node: Node =>
+    let walker = Walker(root, localVisits: true, visitPost: { node: Node =>
         if (let Some(subscript) <- (node as SubscriptExpr)) {
             CheckVArraySubscript(subscript, out)
         }
@@ -393,6 +426,31 @@ public func CheckSubscriptLegality(root: Node): ArrayList<SubscriptLegalityIssue
     })
     walker.Walk()
     return out
+}
+
+private func CheckPackageSubscripts(pkg: Package, threadNum: Int64): ArrayList<SubscriptLegalityIssue> {
+    if (threadNum <= 1) { return CheckSubscriptLegality(pkg) }
+    let roots = ArrayList<Node>()
+    // Derive the frontier from the real walker, including instantiated and source-imported
+    // declarations and file metadata, rather than assuming only file.decls are consumers.
+    let collector = Walker(pkg, localVisits: true, visitPre: { node: Node =>
+        if (node.astKind == ASTKind.PACKAGE || node.astKind == ASTKind.FILE) {
+            return VisitAction.WALK_CHILDREN
+        }
+        roots.add(node)
+        VisitAction.SKIP_CHILDREN
+    })
+    collector.Walk()
+    let issues = RunLegalityChecks<SubscriptLegalityIssue>(roots, threadNum,
+        { node => CheckSubscriptLegality(node) })
+    let seen = HashSet<Int64>()
+    let ordered = ArrayList<SubscriptLegalityIssue>()
+    for (issue in issues) {
+        // A desugared node may be reachable from two declaration roots. The original package
+        // walker visits it once; retain its first result in the same traversal order.
+        if (seen.add(issue.node.objectId)) { ordered.add(issue) }
+    }
+    return ordered
 }
 
 // Generate type mapping for src is an override or implement of target.
@@ -576,8 +634,9 @@ public func CheckLegalityOfUsage(
     opts!: OptionGlobalOptions = OptionGlobalOptions()
 ): LegalityOfUsageResult {
     let result = LegalityOfUsageResult()
+    let threadNum = if (opts.codegenDebugMode) { 1 } else { Int64(opts.GetJobs()) }
     TypeCheckReferenceCheckLegalityOfReference(diag, typeManager, impl, ctx, pkg)
-    AppendStaticMemberGenericIssues(result.staticMemberGenericIssues, CheckStaticMembersWithGeneric(pkg))
+    AppendStaticMemberGenericIssues(result.staticMemberGenericIssues, CheckStaticMembersWithGeneric(pkg, threadNum: threadNum))
     EmitLegalityOfUsage(diag, result)
     result.staticMemberGenericIssues.clear()
     TypeCheckReferenceCheckUsageOfDeprecated(diag, typeManager, pkg)
@@ -591,6 +650,6 @@ public func CheckLegalityOfUsage(
     checkClosures(ctx, pkg)
     CheckAccessLevelValidity(pkg, diag)
     CheckAllInvocationHasImpl(ctx, pkg, diag, typeManager)
-    AppendSubscriptIssues(result.subscriptLegalityIssues, CheckSubscriptLegality(pkg))
+    AppendSubscriptIssues(result.subscriptLegalityIssues, CheckPackageSubscripts(pkg, threadNum))
     return result
 }

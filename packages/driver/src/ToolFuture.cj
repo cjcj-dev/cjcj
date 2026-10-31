@@ -17,6 +17,21 @@ foreign {
     func waitpid(pid: Int32, status: CPointer<Int32>, options: Int32): Int32
 }
 
+@When[os == "Linux"]
+foreign { func __errno_location(): CPointer<Int32> }
+
+@When[os == "macOS"]
+foreign { func __error(): CPointer<Int32> }
+
+@When[os == "Linux"]
+private func WaitErrorNumber(): Int32 { return unsafe { __errno_location().read() } }
+
+@When[os == "macOS"]
+private func WaitErrorNumber(): Int32 { return unsafe { __error().read() } }
+
+@When[os != "Linux" && os != "macOS" && os != "Windows"]
+private func WaitErrorNumber(): Int32 { return 0 }
+
 @When[os == "Windows"]
 foreign {
     func WaitForSingleObject(handle: CPointer<Unit>, milliseconds: UInt32): UInt32
@@ -56,7 +71,12 @@ public class ThreadFuture <: ToolFuture {
 
     public override func GetState(): ToolFutureState {
         if (let None <- result) {
-            result = future.get()
+            try {
+                result = future.get()
+            } catch (e: Exception) {
+                eprintln("internal backend command failed: ${e.message}")
+                result = Some(false)
+            }
         }
         let succeeded = result.getOrThrow()
         exitCode = if (succeeded) { 0 } else { 1 }
@@ -130,14 +150,26 @@ public class LinuxProcessFuture <: ToolFuture {
     public override func GetState(): ToolFutureState {
         var status: Int32 = 0
         var waitResult: Int32 = 0
+        var waitError: Int32 = 0
         try (statusPtr = LibC.malloc<Int32>().asResource()) {
             if (statusPtr.value.isNull()) {
+                // Even an allocation failure must not abandon the admitted child. A null
+                // status pointer is valid for waitpid; reap it before returning failure.
+                while (true) {
+                    let waited = unsafe { waitpid(pid, CPointer<Int32>(), 0) }
+                    if (waited >= 0 || WaitErrorNumber() != 4) { break }
+                }
                 exitCode = -1
                 return ToolFutureState.FAILED
             }
             unsafe { statusPtr.value.write(0) }
             waitResult = unsafe { waitpid(pid, statusPtr.value, WNOHANG) }
+            // Capture errno before freeing the native status allocation can overwrite it.
+            if (waitResult < 0) { waitError = WaitErrorNumber() }
             status = unsafe { statusPtr.value.read() }
+        }
+        if (waitResult < 0 && waitError == 4) {
+            return ToolFutureState.RUNNING
         }
         let signalBits = status & 0x7f
         if (signalBits == 0) {

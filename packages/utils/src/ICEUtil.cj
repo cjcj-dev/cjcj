@@ -3,7 +3,7 @@ package cjcj::utils
 import cjcj::basic.ANSI_COLOR_RED
 import cjcj::basic.ANSI_COLOR_RESET
 import cjcj::basic.CANGJIE_COMPILER_VERSION
-import std.sync.AtomicBool
+import std.sync.{AtomicBool, AtomicInt64}
 
 public enum CompileStage {
     | FRONTEND
@@ -53,7 +53,7 @@ public class ICE {
     }
 
     public static func GetTriggerPoint(): Int64 {
-        return TriggerPointSetter.triggerPoint
+        return TriggerPointSetter.GetTriggerPoint()
     }
 
     public static func CanWriteOnceICEMessage(): Bool {
@@ -64,7 +64,9 @@ public class ICE {
 public class TriggerPointSetter <: Resource {
     public static var interpreterTP: Int64 = 2
     public static var writeCahedTP: Int64 = 3
-    public static var triggerPoint: Int64 = 1
+    private static let triggerPoint = AtomicInt64(1)
+
+    public static func GetTriggerPoint(): Int64 { return triggerPoint.load() }
     private var closed: Bool = false
 
     public init(stage: CompileStage) {
@@ -88,22 +90,22 @@ public class TriggerPointSetter <: Resource {
     }
 
     public static func SetICETriggerPoint(stage: CompileStage): Unit {
-        if (triggerPoint == ICE.LSP_TP) {
+        if (triggerPoint.load() == ICE.LSP_TP) {
             return
         }
-        triggerPoint = match (stage) {
+        triggerPoint.store(match (stage) {
             case CompileStage.FRONTEND => 0
             case CompileStage.COMPILE_STAGE_NUMBER => 1
-        }
+        })
     }
 
     public static func SetICETriggerPoint(tp!: Int64 = ICE.FRONTEND_TP): Unit {
         if (tp == ICE.LSP_TP) {
-            triggerPoint = tp
+            triggerPoint.store(tp)
         } else if (tp == ICE.FRONTEND_TP) {
-            triggerPoint = 1
+            triggerPoint.store(1)
         } else {
-            triggerPoint = tp
+            triggerPoint.store(tp)
         }
     }
 }

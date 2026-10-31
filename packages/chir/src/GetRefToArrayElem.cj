@@ -5,22 +5,40 @@ import std.collection.*
 public class GetRefToArrayElem {
     public init() {}
 
-    public static func RunOnPackage(pkg: Package, builder: CHIRBuilder): Int64 {
+    public static func RunOnPackage(pkg: Package, builder: CHIRBuilder, threadNum!: Int64 = 1): Int64 {
         var changed: Int64 = 0
-        for (fn in pkg.GetGlobalFuncsWithBody()) {
-            changed += GetRefToArrayElem.RunOnFunc(fn, builder)
+        if (threadNum <= 1) {
+            for (fn in pkg.GetGlobalFuncsWithBody()) { changed += GetRefToArrayElem.RunOnFunc(fn, builder) }
+            return changed
+        }
+        let runs = RunFunctionLocalPass<(Int64, CHIRBuilder, ArrayList<(Value, Expression)>)>(
+            pkg.GetGlobalFuncsWithBody(), threadNum, { fn =>
+                let worker = CHIRBuilder(builder.context)
+                worker.SetCompileTimeValueMark(builder.GetCompileTimeValueMark())
+                let users = ArrayList<(Value, Expression)>()
+                (GetRefToArrayElem.RunOnFunc(fn, worker, users), worker, users)
+            }, passName: "array-element-reference")
+        for ((count, worker, users) in runs) {
+            changed += count
+            for ((value, user) in users) { value.MoveUserToTail(user) }
+            worker.MergeAllocatedInstance()
         }
         return changed
     }
 
     public static func RunOnFunc(fn: Function, builder: CHIRBuilder): Int64 {
+        return RunOnFunc(fn, builder, ArrayList<(Value, Expression)>())
+    }
+
+    private static func RunOnFunc(fn: Function, builder: CHIRBuilder,
+        users: ArrayList<(Value, Expression)>): Int64 {
         var changed: Int64 = 0
         if (let Some(body) <- fn.GetBody()) {
             for (block in body.GetBlocks()) {
                 let exprs = block.GetExpressions()
                 for (expr in exprs) {
                     if (let Some(intrinsic) <- (expr as Intrinsic)) {
-                        if (TryRewriteArrayGetUnchecked(intrinsic, builder)) {
+                        if (TryRewriteArrayGetUnchecked(intrinsic, builder, users)) {
                             changed++
                         }
                     }
@@ -30,7 +48,8 @@ public class GetRefToArrayElem {
         return changed
     }
 
-    private static func TryRewriteArrayGetUnchecked(intrinsic: Intrinsic, builder: CHIRBuilder): Bool {
+    private static func TryRewriteArrayGetUnchecked(intrinsic: Intrinsic, builder: CHIRBuilder,
+        users: ArrayList<(Value, Expression)>): Bool {
         if (intrinsic.GetIntrinsicKind() != IntrinsicKind.ARRAY_GET_UNCHECKED) {
             return false
         }
@@ -57,6 +76,9 @@ public class GetRefToArrayElem {
         let callContext = IntrisicCallContext(kind: IntrinsicKind.ARRAY_GET_REF_UNCHECKED,
             args: intrinsic.GetOperands())
         let arrayGetRef = builder.CreateIntrinsic(builder.context.GetRefTy(resultTy), callContext, parentBlock)
+        for (operand in arrayGetRef.GetOperands()) {
+            if (operand.IsGlobal()) { users.add((operand, arrayGetRef)) }
+        }
         arrayGetRef.CopyBaseInfoFrom(intrinsic)
         let arrayGetRefResult = if (let Some(newResult) <- arrayGetRef.GetResult()) {
             newResult

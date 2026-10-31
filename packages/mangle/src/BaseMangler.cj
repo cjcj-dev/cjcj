@@ -1,8 +1,9 @@
 package cjcj::mangle
 
 import std.collection.*
+import std.process.Process
 import cjcj::ast.*
-import cjcj::utils.{CJC_ASSERT, CJC_NULLPTR_CHECK}
+import cjcj::utils.{CJC_ASSERT, CJC_NULLPTR_CHECK, TaskQueue, TaskResult}
 
 private func GetParentDecl(decl: FuncDecl): Option<Decl> {
     if (let Some(body) <- decl.funcBody) {
@@ -63,6 +64,16 @@ private func toBase62(value: UInt64): String {
         idx--
     }
     return if (reversed.size > length) { reversed[0..length] } else { reversed }
+}
+
+// A component owns every exportId it writes, including recursively emitted members.
+// References read by generic-parameter IDs join the same component as their writer.
+private class ExportIdWork {
+    public let entries = ArrayList<(Int64, Decl)>()
+    public var failedIndex: Int64 = -1
+    public var error: Option<Exception> = None
+
+    public init() {}
 }
 
 public open class BaseMangler {
@@ -932,18 +943,140 @@ public open class BaseMangler {
         }).Walk()
     }
 
-    public func MangleExportIds(pkg: Package): Unit {
+    public func MangleExportIds(pkg: Package, threadNum!: Int64 = 1): Unit {
         let ctx = PrepareContextForPackage(pkg)
         CollectLocalDecls(ctx, pkg)
         exportIdMode = true
-        Walker(pkg, visitPre: { node: Node =>
+        let roots = ArrayList<Decl>()
+        Walker(pkg, localVisits: true, visitPre: { node: Node =>
             if (let Some(decl) <- (node as Decl)) {
                 if (Ty.IsTyCorrect(decl.GetTy()) && decl.TestAttr(Attribute.GLOBAL)) {
-                    decl.exportId = MangleExportId(decl)
+                    roots.add(decl)
                 }
             }
             VisitAction.WALK_CHILDREN
         }).Walk()
+        if (threadNum <= 1 || roots.size <= 1) {
+            for (decl in roots) { decl.exportId = MangleExportId(decl) }
+            return
+        }
+        let work = PartitionExportIdWork(roots)
+        let queue = TaskQueue(threadNum)
+        let results = ArrayList<TaskResult<Unit>>()
+        for (group in work) {
+            // The table itself is worker-local; its contexts are frozen after collection.
+            let worker = BaseMangler(moduleDelimiter)
+            worker.exportIdMode = true
+            for ((name, context) in manglerCtxTable) { worker.manglerCtxTable[name] = context }
+            results.add(queue.AddTask<Unit>({ =>
+                let trace = (Process.current.getEnv("CJCJ_BACKEND_CONCURRENCY_TRACE") ?? "") == "1"
+                let id = Thread.currentThread.id
+                let first = group.entries[0][0]
+                if (trace) { eprintln("export-id-worker begin group=${first} thread=${id}") }
+                try {
+                    for ((index, decl) in group.entries) {
+                        try { decl.exportId = worker.MangleExportId(decl) } catch (e: Exception) {
+                            group.failedIndex = index
+                            group.error = Some(e)
+                            break
+                        }
+                    }
+                } finally {
+                    if (trace) { eprintln("export-id-worker end group=${first} thread=${id}") }
+                }
+            }))
+        }
+        queue.RunAndWaitForAllTasksCompleted()
+        var unexpected: Option<Exception> = None
+        for (result in results) {
+            try { result.get() } catch (e: Exception) {
+                if (unexpected.isNone()) { unexpected = Some(e) }
+            }
+        }
+        // A component may contain nonadjacent source roots. Select the earliest failing
+        // root, not the first component, after every worker has stopped touching the AST.
+        var firstIndex = roots.size
+        var failure: Option<Exception> = None
+        for (group in work) {
+            if (group.failedIndex >= 0 && group.failedIndex < firstIndex) {
+                firstIndex = group.failedIndex
+                failure = group.error
+            }
+        }
+        if (let Some(e) <- failure) { throw e }
+        if (let Some(e) <- unexpected) { throw e }
+    }
+
+    private func AddGenericExportIdTouches(decl: Decl, touches: HashSet<Decl>): Unit {
+        if (let Some(generic) <- decl.GetGeneric()) {
+            for (param in generic.typeParameters) {
+                touches.add(param)
+                if (let Some(outer) <- param.outerDecl) { touches.add(outer) }
+            }
+        }
+    }
+
+    private func CollectExportIdTouches(decl: Decl, touches: HashSet<Decl>, seen: HashSet<Decl>): Unit {
+        if (!seen.add(decl)) { return }
+        touches.add(decl)
+        if (decl.TestAttr(Attribute.NO_MANGLE) || decl.astKind == ASTKind.PRIMARY_CTOR_DECL) { return }
+        if (decl.astKind == ASTKind.FUNC_DECL) {
+            if (decl.TestAttr(Attribute.DEFAULT)) {
+                if (let Some(outer) <- decl.outerDecl) {
+                    if (outer.astKind == ASTKind.INTERFACE_DECL) { AddGenericExportIdTouches(decl, touches) }
+                }
+            }
+            return
+        }
+        if (let Some(propertyDecl) <- (decl as PropDecl)) {
+            for (getter in propertyDecl.getters) { touches.add(getter) }
+            for (setter in propertyDecl.setters) { touches.add(setter) }
+            return
+        }
+        for (member in decl.GetMemberDeclPtrs()) { CollectExportIdTouches(member, touches, seen) }
+        if (decl.astKind == ASTKind.INTERFACE_DECL && decl.TestAttr(Attribute.GENERIC)) {
+            AddGenericExportIdTouches(decl, touches)
+        }
+    }
+
+    private func PartitionExportIdWork(roots: ArrayList<Decl>): ArrayList<ExportIdWork> {
+        let parents = ArrayList<Int64>()
+        for (index in 0..roots.size) { parents.add(index) }
+        func rootOf(index: Int64): Int64 {
+            var root = index
+            while (parents[root] != root) { root = parents[root] }
+            var current = index
+            while (parents[current] != current) {
+                let next = parents[current]
+                parents[current] = root
+                current = next
+            }
+            return root
+        }
+        let owner = HashMap<Decl, Int64>()
+        for (index in 0..roots.size) {
+            let touches = HashSet<Decl>()
+            CollectExportIdTouches(roots[index], touches, HashSet<Decl>())
+            for (decl in touches) {
+                if (let Some(previous) <- owner.get(decl)) {
+                    let left = rootOf(index)
+                    let right = rootOf(previous)
+                    if (left < right) { parents[right] = left } else { parents[left] = right }
+                } else { owner[decl] = index }
+            }
+        }
+        let groups = HashMap<Int64, ExportIdWork>()
+        let ordered = ArrayList<ExportIdWork>()
+        for (index in 0..roots.size) {
+            let root = rootOf(index)
+            if (!groups.contains(root)) {
+                let group = ExportIdWork()
+                groups[root] = group
+                ordered.add(group)
+            }
+            groups[root].entries.add((index, roots[index]))
+        }
+        return ordered
     }
 
     public func MangleExportId(decl: Decl): String {

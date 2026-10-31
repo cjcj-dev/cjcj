@@ -49,6 +49,46 @@ class SignedMinRemainderTest {
     }
 
     @TestCase
+    func deferredErrorsSurviveStableResultConsumers(): Unit {
+        let context = CHIRContext()
+        let builder = CHIRBuilder(context)
+        let pkg = builder.CreatePackage("deferredErrors")
+        let ty = context.GetInt64Ty()
+        let fn = builder.CreateFunction(context.GetFuncTy(ArrayList<Type>(), ty), "divideByZero")
+        let body = builder.CreateBlockGroup(fn)
+        fn.InitBody(body)
+        let block = builder.CreateBlock(body)
+        body.SetEntryBlock(block)
+        let lhs = builder.CreateConstant(ty, IntLiteral(7), block)
+        let rhs = builder.CreateConstant(ty, IntLiteral(0), block)
+        let division = builder.CreateBinaryExpression(ExprKind.DIV, ty,
+            lhs.GetResult().getOrThrow(), rhs.GetResult().getOrThrow(), block,
+            overflowStrategy: OverflowStrategy.THROWING)
+        let sourceManager = BasicSourceManager()
+        let fileId = sourceManager.AddSource("deferred_errors.cj", "7 / 0")
+        division.SetDebugLocation(DebugLocation("deferred_errors.cj", UInt32(fileId),
+            Position(1u32, 1u32), Position(1u32, 6u32)))
+        block.AppendExpressions(ArrayList<Expression>([lhs, rhs, division,
+            builder.CreateExit(Some<Value>(division.GetResult().getOrThrow()), block)]))
+        let diagnostics = BasicDiagnosticEngine()
+        diagnostics.SetSourceManager(sourceManager)
+        let wrapper = ConstAnalysisWrapper(builder, deferredReports: true)
+        wrapper.RunOnPackage(pkg, diagnostics, 2)
+        let result = wrapper.CheckFuncResult(fn).getOrThrow()
+        @Expect(diagnostics.GetErrorCount(), 0u64)
+        wrapper.FlushReports()
+        @Expect(diagnostics.GetErrorCount(), 0u64)
+        result.VisitWith({ _: ConstDomain, _: Expression, _: Int64 => () },
+            { _: ConstDomain, _: Expression, _: Int64 => () },
+            { _: ConstDomain, _: Expression, _: Option<Block> => () })
+        @Expect(diagnostics.GetErrorCount(), 0u64)
+        wrapper.FlushReports()
+        @Expect(diagnostics.GetErrorCount(), 1u64)
+        wrapper.FlushReports()
+        @Expect(diagnostics.GetErrorCount(), 1u64)
+    }
+
+    @TestCase
     func constantAnalysisConsumesZeroWithoutOverflowDiagnostic(): Unit {
         let context = CHIRContext()
         for ((ty, minimum) in Cases(context)) {

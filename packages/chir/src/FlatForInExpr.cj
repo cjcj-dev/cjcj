@@ -4,14 +4,33 @@ import std.collection.*
 
 public class FlatForInExpr {
     private let builder: CHIRBuilder
+    private let appendedGlobalUsers = ArrayList<(Value, Expression)>()
 
     public init(builder: CHIRBuilder) {
         this.builder = builder
     }
 
-    public func RunOnPackage(pkg: Package): Unit {
-        for (fn in pkg.GetGlobalFuncsWithBody()) {
-            RunOnFunc(fn)
+    public func RunOnPackage(pkg: Package, threadNum!: Int64 = 1): Unit {
+        if (threadNum <= 1) {
+            for (fn in pkg.GetGlobalFuncsWithBody()) { RunOnFunc(fn) }
+            return
+        }
+        let completed = RunFunctionLocalPass<FlatForInExpr>(pkg.GetGlobalFuncsWithBody(), threadNum, { fn =>
+            let localBuilder = CHIRBuilder(builder.context)
+            localBuilder.SetCompileTimeValueMark(builder.GetCompileTimeValueMark())
+            let worker = FlatForInExpr(localBuilder)
+            worker.RunOnFunc(fn)
+            worker
+        }, passName: "flatten-for-in")
+        for (worker in completed) {
+            for ((value, user) in worker.appendedGlobalUsers) { value.MoveUserToTail(user) }
+            worker.builder.MergeAllocatedInstance()
+        }
+    }
+
+    private func RecordGlobalUsers(expr: Expression): Unit {
+        for (operand in expr.GetOperands()) {
+            if (operand.IsGlobal()) { appendedGlobalUsers.add((operand, expr)) }
         }
     }
 
@@ -74,6 +93,7 @@ public class FlatForInExpr {
             throw IllegalStateException("faithful FlatForInExpr expected parent block group")
         let jumpBlock = builder.CreateBlock(parentGroup)
         let loadCondVar = builder.CreateLoad(builder.context.GetBoolTy(), expr.GetLoopCondVar(), jumpBlock)
+        RecordGlobalUsers(loadCondVar)
         jumpBlock.AppendExpression(loadCondVar)
         let condValue = loadCondVar.GetResult() ??
             throw IllegalStateException("faithful FlatForInExpr load cond has no result")
@@ -114,6 +134,7 @@ public class FlatForInExpr {
         latchEntryBlock.SetGeneratedFromForIn(true)
         ReplaceExitWithGoto(expr.GetCond(), latchEntryBlock)
         let condValueExpr = builder.CreateLoad(builder.context.GetBoolTy(), expr.GetLoopCondVar(), latchEntryBlock)
+        RecordGlobalUsers(condValueExpr)
         latchEntryBlock.AppendExpression(condValueExpr)
         let condValue = condValueExpr.GetResult() ??
             throw IllegalStateException("faithful FlatForInExpr closed-range cond load has no result")

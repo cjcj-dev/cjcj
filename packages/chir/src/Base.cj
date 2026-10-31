@@ -1,6 +1,6 @@
 package cjcj::chir
 
-import std.sync.AtomicInt64
+import std.sync.{AtomicInt64, Mutex}
 
 private class BaseIdAllocator {
     private static let nextId = AtomicInt64(1)
@@ -15,9 +15,11 @@ public open class Base <: Hashable & Equatable<Base> {
     private let annotationMap: AnnotationMap = AnnotationMap()
     var loc: DebugLocation = DebugLocation()
     private let attributes: AttributeInfo = AttributeInfo()
+    private let attributeMutex: Option<Mutex>
 
-    public init() {
+    public init(sharedAttributes!: Bool = false) {
         nodeId = BaseIdAllocator.Next()
+        attributeMutex = if (sharedAttributes) { Some(Mutex()) } else { None }
     }
 
     public operator func ==(right: Base): Bool {
@@ -121,22 +123,34 @@ public open class Base <: Hashable & Equatable<Base> {
     }
 
     public func GetAttributeInfo(): AttributeInfo {
+        if (let Some(mutex) <- attributeMutex) {
+            synchronized(mutex) { return AttributeInfo(attributes) }
+        }
         return AttributeInfo(attributes)
     }
 
     public func AppendAttributeInfo(info: AttributeInfo): Unit {
-        attributes.Append(info)
+        if (let Some(mutex) <- attributeMutex) {
+            synchronized(mutex) { attributes.Append(info) }
+        } else { attributes.Append(info) }
     }
 
     public func DisableAttr(attr: Attribute): Unit {
-        attributes.Disable(attr)
+        if (let Some(mutex) <- attributeMutex) {
+            synchronized(mutex) { attributes.Disable(attr) }
+        } else { attributes.Disable(attr) }
     }
 
     public func EnableAttr(attr: Attribute): Unit {
-        attributes.Enable(attr)
+        if (let Some(mutex) <- attributeMutex) {
+            synchronized(mutex) { attributes.Enable(attr) }
+        } else { attributes.Enable(attr) }
     }
 
     public func TestAttr(attr: Attribute): Bool {
+        if (let Some(mutex) <- attributeMutex) {
+            synchronized(mutex) { return attributes.Test(attr) }
+        }
         return attributes.Test(attr)
     }
 

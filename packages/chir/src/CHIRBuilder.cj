@@ -7,6 +7,7 @@ public class CHIRBuilder {
     public let context: CHIRContext
     private var markAsCompileTimeValue: Bool = false
     private let threadIdx: Int64
+    private let deferPackagePublication: Bool
     private let allocatedValues: ArrayList<Value> = ArrayList<Value>()
     private let allocatedStructs: ArrayList<StructDef> = ArrayList<StructDef>()
     private let allocatedClasses: ArrayList<ClassDef> = ArrayList<ClassDef>()
@@ -14,9 +15,10 @@ public class CHIRBuilder {
     private let allocatedExtends: ArrayList<ExtendDef> = ArrayList<ExtendDef>()
     private let allocatedPtrInFuncOrLambda: HashMap<Int64, ArrayList<Base>> = HashMap<Int64, ArrayList<Base>>()
 
-    public init(context: CHIRContext, threadIdx!: Int64 = 0) {
+    public init(context: CHIRContext, threadIdx!: Int64 = 0, deferPackagePublication!: Bool = false) {
         this.context = context
         this.threadIdx = threadIdx
+        this.deferPackagePublication = deferPackagePublication
     }
 
     public func GetChirContext(): CHIRContext {
@@ -165,7 +167,7 @@ public class CHIRBuilder {
             genericTypeParams: genericTypeParams)
         allocatedValues.add(fn)
         if (let Some(pkg) <- context.GetCurPackage()) {
-            pkg.AddGlobalFunc(fn)
+            if (!deferPackagePublication) { pkg.AddGlobalFunc(fn) }
         }
         return fn
     }
@@ -174,7 +176,7 @@ public class CHIRBuilder {
         rawMangledName!: String = "", packageName!: String = ""): GlobalVar {
         let globalVar = GlobalVar(ty, GLOBAL_VALUE_PREFIX + identifier, srcCodeIdentifier, rawMangledName, packageName)
         allocatedValues.add(globalVar)
-        context.GetCurPackage().getOrThrow().AddGlobalVar(globalVar)
+        if (!deferPackagePublication) { context.GetCurPackage().getOrThrow().AddGlobalVar(globalVar) }
         return globalVar
     }
 
@@ -257,6 +259,21 @@ public class CHIRBuilder {
     public func UpdateTypeInCorePackage(): Unit {
         context.SetObjectTy(context.SearchObjectTyInPackage())
         context.SetAnyTy(context.SearchAnyTyInPackage())
+    }
+
+    // A lowering worker owns these allocations until its ordered join. Package indices are
+    // immutable during body translation; publication is performed by the joining thread.
+    public func GetUnpublishedValues(): ArrayList<Value> {
+        return allocatedValues
+    }
+
+    public func PublishPackageValues(): Unit {
+        if (!deferPackagePublication) { return }
+        let pkg = context.GetCurPackage().getOrThrow()
+        for (value in allocatedValues) {
+            if (let Some(fn) <- (value as Function)) { pkg.AddGlobalFunc(fn) }
+            if (let Some(gv) <- (value as GlobalVar)) { pkg.AddGlobalVar(gv) }
+        }
     }
 
     public func MergeAllocatedInstance(): Unit {

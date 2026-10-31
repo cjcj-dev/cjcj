@@ -7,10 +7,18 @@ import std.core.Box as CoreBox
 public class RedundantGetOrThrowElimination {
     public init() {}
 
-    public func RunOnPackage(pkg: Package, isDebug!: Bool = false): Int64 {
+    public func RunOnPackage(pkg: Package, isDebug!: Bool = false, threadNum!: Int64 = 1): Int64 {
         var changed: Int64 = 0
-        for (fn in pkg.GetGlobalFuncsWithBody()) {
-            changed += RunOnFunc(fn, isDebug: isDebug)
+        if (threadNum <= 1 || isDebug) {
+            for (fn in pkg.GetGlobalFuncsWithBody()) {
+                changed += RunOnFunc(fn, isDebug: isDebug)
+            }
+            return changed
+        }
+        // Replacements stay on this function's own Apply results, so no global-user order needs replaying.
+        for (count in RunFunctionLocalPass<Int64>(pkg.GetGlobalFuncsWithBody(), threadNum, { fn => RunOnFunc(fn) },
+            passName: "redundant-get-or-throw")) {
+            changed += count
         }
         return changed
     }

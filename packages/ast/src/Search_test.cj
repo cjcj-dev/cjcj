@@ -1,12 +1,54 @@
 package cjcj::ast
 
 import std.collection.*
+import cjcj::utils.TaskQueue
 import std.unittest.*
 import std.unittest.testmacro.*
 
 @Test
 class SearchTest {
     // PORT-DEFERRED: all compiler-instance, sema, collector, and source parsing SearchTest cases need parser/harness wave.
+
+    @TestCase
+    func bodyContextsKeepSearchMembershipAndIdsIndependent(): Unit {
+        let parent = ASTContext(Package())
+        let node = VarDecl()
+        node.scopeName = "a"
+        let symbol = Symbol("shared", node: Some(node))
+        parent.symbolTable.add(symbol)
+        parent.invertedIndex.Index(symbol)
+        let firstId = SymbolApi.NextHashID(0u64)
+        let left = parent.ForkForBody()
+        let right = parent.ForkForBody()
+        let secondId = SymbolApi.NextHashID(0u64)
+        @Expect(secondId.fieldID, firstId.fieldID + 1u32)
+        @Expect(left.searcher.Search(left, "name: shared").size, 1)
+        @Expect(right.searcher.Search(right, "name: shared").size, 1)
+        let queue = TaskQueue(2)
+        let deleted = queue.AddTask<Int64>({ =>
+            left.invertedIndex.Delete(symbol)
+            left.searcher.InvalidateCache()
+            left.invertedIndex.scopeNameTrie.Insert("left-only")
+            left.searcher.Search(left, "name: shared").size
+        })
+        let retained = queue.AddTask<Int64>({ =>
+            right.searcher.InvalidateCache()
+            right.searcher.Search(right, "name: shared").size
+        })
+        queue.RunAndWaitForAllTasksCompleted()
+        @Expect(deleted.get(), 0)
+        @Expect(retained.get(), 1)
+        @Expect(parent.searcher.Search(parent, "name: shared").size, 1)
+        @Expect(parent.invertedIndex.IsDeleted(symbol), false)
+        @Expect(left.invertedIndex.scopeNameTrie.PrefixMatch("left-only").size, 1)
+        @Expect(right.invertedIndex.scopeNameTrie.PrefixMatch("left-only").size, 0)
+        @Expect(parent.invertedIndex.scopeNameTrie.PrefixMatch("left-only").size, 0)
+        parent.invertedIndex.Delete(symbol)
+        parent.searcher.InvalidateCache()
+        @Expect(parent.searcher.Search(parent, "name: shared").size, 0)
+        right.searcher.InvalidateCache()
+        @Expect(right.searcher.Search(right, "name: shared").size, 1)
+    }
 
     @TestCase
     func queryParserTest(): Unit {
