@@ -12,7 +12,12 @@ for (const [name, script, marker] of [
 ]) {
   test(name, {concurrency: true}, async () => {
     const result = await execute(script.endsWith('.mjs') ? process.execPath : 'python3',
-      [fileURLToPath(new URL(script, import.meta.url))]);
+      [fileURLToPath(new URL(script, import.meta.url))]).catch(error => {
+        // Nested node:test failures report their diagnostic TAP on stdout.
+        process.stdout.write(error.stdout || '');
+        process.stderr.write(error.stderr || '');
+        throw error;
+      });
     assert.match(result.stdout, new RegExp(marker));
     process.stdout.write(result.stdout);
   });

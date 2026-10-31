@@ -23,11 +23,11 @@ const digest = contents => crypto.createHash('sha256').update(contents).digest('
 
 test('default lineage reference selects the independently declared execution host SDK', async () => {
   const versions = {
-    'linux-x64': 'nightly-' + '1.3.0-alpha.20261009001050',
-    'linux-arm64': 'nightly-' + '1.3.0-alpha.20260925001050',
-    'darwin-x64': 'nightly-' + '1.3.0-alpha.20260925001050',
-    'darwin-arm64': 'nightly-' + '1.3.0-alpha.20260925001050',
-    'win32-x64': 'nightly-' + '1.3.0-alpha.20260925001050',
+    'linux-x64': 'nightly-' + '1.3.0-alpha.20261025001053',
+    'linux-arm64': 'nightly-' + '1.3.0-alpha.20261025001053',
+    'darwin-x64': 'nightly-' + '1.3.0-alpha.20261025001053',
+    'darwin-arm64': 'nightly-' + '1.3.0-alpha.20261025001053',
+    'win32-x64': 'nightly-' + '1.3.0-alpha.20261025001053',
   };
   const expected = versions[`${process.platform}-${process.arch}`];
   assert.ok(expected, 'execution host must have an independent SDK declaration');

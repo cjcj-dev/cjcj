@@ -40,7 +40,7 @@ test('explicit depot layout does not determine input identity', () => fixture(({
   delete env.CJCJ_BOOTSTRAP_COLOUR_TUPLE;
   env.CJCJ_LLVM_DEPOT_ROOT = path.join(path.dirname(fallback), 'depot');
   env.CANGJIE_COMPILER_SHA = 'c'.repeat(40);
-  const nested = path.join(env.CJCJ_LLVM_DEPOT_ROOT, env.LLVM_SHA, env.CANGJIE_COMPILER_SHA);
+  const nested = path.join(env.CJCJ_LLVM_DEPOT_ROOT, env.CJCJ_NATIVE_LLVM_REF, env.CANGJIE_COMPILER_SHA);
   env.CJCJ_BOOTSTRAP_COLOUR_TUPLE = nested;
   fs.mkdirSync(nested, {recursive: true});
   fs.cpSync(fallback, nested, {recursive: true});

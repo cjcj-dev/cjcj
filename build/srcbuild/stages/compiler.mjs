@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {stage} from '../../lib/logging.mjs';
 import {run as runCommand} from '../../lib/runner.mjs';
+import {applyCompilerBoundscheckDependencies} from './fetch.mjs';
 import * as staticLibs from '../../toolchain/static-libs.mjs';
 import {cjdbPythonHome} from '../../toolchain/system-deps.mjs';
 import * as targetPython from '../../toolchain/target-python.mjs';
@@ -32,6 +33,7 @@ export async function run(config, {resolveCjdbPythonHome = cjdbPythonHome} = {})
   // Homebrew keg.
   const cjdbEnv = await nativeCjdbEnv(config, resolveCjdbPythonHome);
   await stage('compiler', async () => {
+    applyCompilerBoundscheckDependencies(repoDir);
     applyCompilerPathNeutralFlags(repoDir);
 
     if (config.target.spec.crossCompile) {

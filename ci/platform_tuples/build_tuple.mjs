@@ -38,7 +38,7 @@ await entry(async () => {
       '-DCMAKE_C_COMPILER=clang', '-DCMAKE_CXX_COMPILER=clang++']);
     await run(['cmake', '--build', flatBuild, '--target', 'flatc', '--parallel', '3']);
     await run(['mkdir', '-p', `${generated}/flatbuffers`]);
-    await run([`${flatBuild}/flatc${exe}`, '--no-warnings', '-c', '-o', `${generated}/flatbuffers`, `${root}/cangjie-compiler/schema/ModuleFormat.fbs`]);
+    await run([`${flatBuild}/flatc${exe}`, '--no-warnings', '-c', '-o', `${generated}/flatbuffers`, `${root}/cangjie-compiler/schema/CjoFormat.fbs`]);
     await run([...(process.env.SCCACHE_PATH ? [process.env.SCCACHE_PATH] : []), 'clang++', '-std=c++17', '-O2',
       ...(windows ? [] : ['-fPIC']), '-fno-rtti', '-fno-exceptions', `-I${llvmSrc}/llvm/include`, `-I${llvmBuild}/include`,
       `-I${flatSrc}/include`, `-I${generated}`, '-c', 'runtime_shim/cjselfhost_llvmshim.cpp', '-o', `${output}/cjselfhost_llvmshim.o`]);
@@ -61,7 +61,7 @@ await entry(async () => {
       emit('CANGJIE_COMPILER_SHA', required('CANGJIE_COMPILER_SHA', 102));
       emit('FLATBUFFERS_SHA', required('FLATBUFFERS_SHA', 103));
       emit('SHIM_SHA256', await sha(`${output}/cjselfhost_llvmshim.o`, false));
-      const llvmSha = required('LLVM_SHA', 105, 'LLVM_SHA is required');
+      const llvmSha = required('CJCJ_NATIVE_LLVM_REF', 105, 'LLVM_SHA is required');
       emit('LLVM_SHA', llvmSha);
       for (const [prefix, tool] of [['LLC', 'llc'], ['OPT', 'opt'], ['LLD', lld]]) {
         if (prefix === 'LLD') emit('LLD_TOOL', lld);
@@ -74,7 +74,7 @@ await entry(async () => {
       await run(['chmod', '0755', `${root}/verify/${tool}${exe}`]);
       await run(['bash', '-c', 'set -o pipefail; "$1" --version | head -n 5', 'verify-version', `${root}/verify/${tool}${exe}`]);
     }
-    const llvmSha = process.env.LLVM_SHA;
+    const llvmSha = process.env.CJCJ_NATIVE_LLVM_REF;
     await run(['grep', '-Fx', `LLVM_SHA=${llvmSha}`, manifest]);
     for (const [prefix, tool] of [['LLC', 'llc'], ['OPT', 'opt'], ['LLD', lld]]) {
       if (prefix === 'LLD') await run(['grep', '-Fx', `LLD_TOOL=${lld}`, manifest]);

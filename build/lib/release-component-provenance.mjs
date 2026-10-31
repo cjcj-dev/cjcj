@@ -1,3 +1,4 @@
+import {TOOL_NAMES,TOOL_PUBLIC_NAMES} from '../srcbuild/tool-layout.mjs';
 import {sourceToolPayloads} from '../../ci/release/source-tool-payloads.mjs';
 import {getTarget} from './targets.mjs';
 import {sdkPlatform,entryPlatformName} from '../../ci/bootstrap/sdk-platform.mjs';
@@ -10,7 +11,7 @@ export const BASE_SDK_PROVENANCE = 'BASE-SDK-PROVENANCE.json';
 export const CJPM_PROVENANCE = 'CJPM-PROVENANCE.json';
 export const HLE_PROVENANCE = 'HLE-PROVENANCE.json';
 // Required shared-tool products include their target native support payloads.
-export const SOURCE_TOOLS_NATIVE = Object.freeze(['cjfmt', 'LSPServer', 'cjcov', 'cjtrace-recover', 'cjlint', 'cjprof', 'cjcompat']);
+export const SOURCE_TOOLS_NATIVE = Object.freeze(TOOL_NAMES.filter(name=>!['cjpm','hle'].includes(name)).map(name=>TOOL_PUBLIC_NAMES[name]??name));
 export const SOURCE_TOOLS_WINDOWS = SOURCE_TOOLS_NATIVE;
 
 // hle and cjpm retain their dedicated producer/install paths.
@@ -264,20 +265,9 @@ export async function persistBaseSdkProvenance({archive, sidecar, toolchainDir, 
   return {provenance: durable, sidecar: durableSidecar, cachedArchive};
 }
 
-export function parseCjpmPin(text) {
-  const values = Object.fromEntries(text.split(/\r?\n/).filter(Boolean).map(line => {
-    const separator = line.indexOf('=');
-    if (separator < 1) throw new Error(`invalid cjpm pin line: ${line}`);
-    return [line.slice(0, separator), line.slice(separator + 1)];
-  }));
-  return {
-    repository: requireString(values.CJPM_FORK_URL, 'CJPM_FORK_URL'),
-    commit: requireMatch(values.CJPM_FORK_REF, SHA40, 'CJPM_FORK_REF'),
-  };
-}
+// CJPM and HLE are packages of the same selected cjcj-tools source.
+export function parseCjpmPin(text) { return parseToolsPin(text); }
 
-// hle is built from the same cangjie-tools checkout the source pin names, so
-// its sidecar is pinned the same way cjpm's is.
 export function parseToolsPin(text) {
   const values = Object.fromEntries(text.split(/\r?\n/).filter(Boolean).map(line => {
     const separator = line.indexOf('=');

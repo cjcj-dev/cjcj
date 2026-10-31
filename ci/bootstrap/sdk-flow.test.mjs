@@ -267,8 +267,8 @@ test('public run-all uses one pending install and rolls back when a later produc
  // source resolution, entity copies, compiled launcher, hello subprocess and
  // publication remain the real product implementations.
  const selection={};
- for(const name of ['compiler','runtime','tools','stdx','llvm','cjpm']){
-  const repo=workspace+(name==='llvm'?'/cangjie_compiler/third_party/llvm-project':name==='cjpm'?'/cjpm-source':'/cangjie_'+name);
+ for(const name of ['compiler','runtime','tools','stdx','llvm']){
+  const repo=workspace+(name==='llvm'?'/cangjie_compiler/third_party/llvm-project':name==='tools'?'/cjcj-tools':'/cangjie_'+name);
   await put(repo+'/tracked','fixed source '+name);
   for(const args of [['init','-q',repo],['-C',repo,'add','tracked'],['-C',repo,'-c','user.name=Zxilly','-c','user.email=zxilly@outlook.com','commit','-qm','test: controlled run-all native source']])assert.equal(run('git',args).status,0);
   selection[name]={url:'file://'+repo,tag:run('git',['-C',repo,'rev-parse','HEAD']).stdout.trim()};
@@ -283,7 +283,8 @@ const c=output+'.c';fs.writeFileSync(c,'#include <stdio.h>\\nint main(void){puts
 const r=cp.spawnSync('cc',[c,'-o',output],{stdio:'inherit'});process.exit(r.status??1);
 `,0o755);
  for(const relative of ['modules/'+tuple+'/std/std.core.cjo','lib/'+tuple+'/libcangjie-std-core.a',
-  'runtime/lib/'+tuple+'/libcangjie-runtime.so','third_party/llvm/bin/llc','third_party/llvm/lib/libLLVM-15.so'])await put(native+'/'+relative,'controlled native dependency');
+  'runtime/lib/'+tuple+'/libcangjie-runtime.so','third_party/llvm/bin/llc','third_party/llvm/lib/libLLVM-15.so',
+  'third_party/llvm/lib/clang/15/include/stdint.h'])await put(native+'/'+relative,'controlled native dependency');
  await fs.mkdir(native+'/tools/bin',{recursive:true});
  await put(work+'/host/runtime/lib/'+tuple+'/libcangjie-runtime.so','controlled host runtime');
  await put(sdk+'/old-success','previous SDK');
@@ -297,7 +298,7 @@ source+='\\nexport async function '+name+'(config){const fs=await import("node:f
  const cliPath=new URL('../../build/cli.mjs',import.meta.url).pathname;
  const argv=[cliPath,'--workspace',workspace,'--build-root',work+'/buildtools','--official-sdk-root',work+'/host',
   'run-all','--skip-system-deps','--skip-install-libs'];
- const env={...process.env,NODE_OPTIONS:'--experimental-loader='+loader,RUN_ALL_TRACE:trace};
+ const env={...process.env,NODE_OPTIONS:[process.env.NODE_OPTIONS,'--experimental-loader='+loader].filter(Boolean).join(' '),RUN_ALL_TRACE:trace};
  const commands=[];
  async function invoke(label,extra={},flags=[]){
   const actualArgv=[...argv,...flags];const r=run(process.execPath,actualArgv,{env:{...env,...extra}});commands.push({label,argv:actualArgv,rc:r.status,signal:r.signal,stdout:r.stdout,stderr:r.stderr});
@@ -309,6 +310,13 @@ source+='\\nexport async function '+name+'(config){const fs=await import("node:f
  assert.match(build.stdout,/NOT_INSTALLED/);assert.equal(await fs.readFile(sdk+'/old-success','utf8'),'previous SDK');
  const built=(await fs.readFile(trace,'utf8')).trim().split('\n').map(JSON.parse);
  assert.deepEqual(built.map(row=>row.name),['fetch','compiler','runtime','stdlib','stdx','tools']);
+ for(const row of built.filter(row=>row.name!=='fetch')){
+  const actual=row.selection.targetComponents;
+  console.log('SOURCE_TOOLS_SELECTION_TARGET_REACHED '+JSON.stringify({stage:row.name,tools:actual.tools}));
+  assert.equal(actual.tools.commit,selection.tools.tag,'UNIFIED_TOOLS_SELECTION_COMMIT');
+  assert.equal(actual.tools.repository,selection.tools.url,'UNIFIED_TOOLS_SELECTION_REPOSITORY');
+  assert.equal(Object.hasOwn(actual,'cjpm'),false,'RETIRED_CJPM_COMPONENT_ABSENT');
+ }
  await fs.rename(trace,trace+'.build-only');
  let r=await invoke('late-failure',{RUN_ALL_FAIL:'tools'});assert.equal(r.status,1,r.stdout+r.stderr);
  assert.match(r.stderr,/RUN_ALL_LATE_PRODUCER_FAILURE/);assert.match(r.stdout,/SDK_HELLO_TARGET_ASSERTION_REACHED/);
@@ -345,8 +353,8 @@ async function stagedFixture(label) {
  const work=path.join(root,label),workspace=work+'/workspace',sdk=workspace+'/software/cangjie';
  const put=async(file,text,mode=0o644)=>{await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,text,{mode});};
  const selected={};
- for(const name of ['compiler','runtime','tools','stdx','llvm','cjpm']) {
-  const repo=workspace+(name==='llvm'?'/cangjie_compiler/third_party/llvm-project':name==='cjpm'?'/cjpm-source':'/cangjie_'+name);
+ for(const name of ['compiler','runtime','tools','stdx','llvm']) {
+  const repo=workspace+(name==='llvm'?'/cangjie_compiler/third_party/llvm-project':name==='tools'?'/cjcj-tools':'/cangjie_'+name);
   await put(repo+'/tracked','fixed '+name);
   await put(repo+'/build.py','import os, sys\nprint("FINITE_NATIVE_COMMAND", os.environ.get("FINITE_PRODUCER"), sys.argv)\nsys.exit(17 if os.environ.get("STAGED_FAIL")==os.environ.get("FINITE_PRODUCER") and sys.argv[1]=="install" else 0)\n');
   for(const args of [['init','-q',repo],['-C',repo,'add','tracked','build.py'],['-C',repo,'-c','user.name=Zxilly','-c','user.email=zxilly@outlook.com','commit','-qm','test: finite native producer']])assert.equal(run('git',args).status,0);
@@ -360,10 +368,13 @@ fs.writeFileSync(out+'.c','#include <stdio.h>\\nint main(void){puts("hello from 
 `,0o755);
  for(const rel of ['modules/'+tuple+'/std/std.core.cjo','lib/'+tuple+'/libcangjie-std-core.a',
   'lib/'+tuple+'/libcangjie-ast-support.a','runtime/lib/'+tuple+'/libcangjie-runtime.so',
-  'third_party/llvm/lib/libLLVM-15.so','schema/StdAstFormat.fbs','include/flatbuffers/StdAstFormat_generated.h',
+  'third_party/llvm/lib/libLLVM-15.so','third_party/llvm/lib/clang/15/include/stdint.h','schema/StdAstFormat.fbs','include/flatbuffers/StdAstFormat_generated.h',
   'third_party/flatbuffers/bin/flatc','stdx/'+tuple+'/fixture',
   ...['llc','llvm-as','llvm-dis','opt'].map(name=>'third_party/llvm/bin/'+name),
-  ...['cjpm','cjfmt','hle','LSPServer','cjcov','cjtrace-recover','cjlint','cjprof','cjcompat'].flatMap(name=>['tools/bin/'+name,'tools/bin/'+name+'.entry','.target-tools/tools/bin/'+name]),
+  ...['cjpm','cjfmt','hle','LSPServer','cjcov','cjtrace-recover','cjlint','cjprof','cjcompat','cjhead'].flatMap(name=>{
+    const privateDir={LSPServer:'lsp',cjlint:'cjlint',cjhead:'cjhead'}[name];
+    return ['tools/bin/'+name,'tools/bin/'+name+'.entry','.target-tools/tools/'+(privateDir?privateDir+'/':'')+'bin/'+name];
+  }),
   'tools/config/cangjie-format.toml','tools/config/cangjie-repo.toml','tools/dtsparser/analysis.js','tools/bin/node'])await put(output+'/'+rel,'finite native artifact');
  for(const name of ['llc','llvm-as','llvm-dis','opt'])await fs.chmod(output+'/third_party/llvm/bin/'+name,0o755);
  await put(output+'/tools/dtsparser/DEPENDENCIES.json','{}');
@@ -379,7 +390,7 @@ return {...result,source};}
 `);
  const cliPath=fileURLToPath(new URL('../../build/cli.mjs',import.meta.url));
  const base=[cliPath,'--workspace',workspace,'--build-root',work+'/buildtools','--official-sdk-root',work+'/host'];
- const env={...process.env,NODE_OPTIONS:'--experimental-loader='+loader};
+ const env={...process.env,NODE_OPTIONS:[process.env.NODE_OPTIONS,'--experimental-loader='+loader].filter(Boolean).join(' ')};
  const commands=[];
  async function invoke(label,args,extra={}) {
   const argv=[...base,...args],r=run(process.execPath,argv,{env:{...env,...extra}});
@@ -401,6 +412,8 @@ test('public staged build preserves predecessor commands through package and rec
  assert.equal(packaged.status,0,packaged.stdout+packaged.stderr);
  const original=JSON.parse(await fs.readFile(f.work+'/compiler-original.json','utf8')).commands;
  const installed=JSON.parse(await fs.readFile(f.sdk+'/STAGE-INPUTS.json','utf8'));
+ assert.equal(installed.selection.targetComponents.tools.commit,f.selected.tools.tag,'INSTALLED_UNIFIED_TOOLS_SOURCE');
+ assert.equal(Object.hasOwn(installed.selection.targetComponents,'cjpm'),false,'INSTALLED_RETIRED_CJPM_ABSENT');
  assert.deepEqual(installed.production.commands.filter(row=>row.stage.startsWith('compiler.')),original);
  const archives=(await fs.readdir(path.dirname(f.sdk))).filter(n=>n.startsWith('cangjie-sdk-')&&n.endsWith('.tar.gz'));
  assert.equal(archives.length,1);

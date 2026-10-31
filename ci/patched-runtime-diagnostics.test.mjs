@@ -83,7 +83,7 @@ async function fixture(mode, check, {missingTool = false} = {}) {
     const observation = path.join(root, 'observation.json');
     const env = {...process.env, PATH: `${bin}:${process.env.PATH}`, TMPDIR: root,
       CJCJ_SRCBUILD_SOURCE_MIRRORS: `${sourceUrl}=${source}`, CJCJ_ALLOW_RUNTIME_OVERRIDE: '1',
-      CJCJ_RUNTIME_REF_OVERRIDE: git(['rev-parse', 'HEAD']), RUNTIME_REF: '',
+      CJCJ_RUNTIME_REF_OVERRIDE: git(['rev-parse', 'HEAD']), CJCJ_NATIVE_RUNTIME_REF: '',
       RUNTIME_DIAGNOSTICS_DIR: diagnostics, cjHeapSize: '12GB', CANGJIE_HOME: '/fixture/sdk',
       FIXTURE_MODE: mode, FIXTURE_OBSERVATION: observation};
     const result = await run('npx', ['--yes', 'zx@8', product, path.join(root, 'dist')], {cwd: repo, env});

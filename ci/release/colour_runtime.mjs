@@ -30,7 +30,7 @@ function regularFile(root, relative) {
 export function prepareRuntime(source, dest, env = process.env) {
   const platform = runtimePlatform(env);
   const sourceSha = fs.readFileSync(path.join(source, 'SOURCE_SHA'), 'utf8').trim();
-  if (!/^[a-f0-9]{40}$/.test(env.RUNTIME_REF || '') || sourceSha !== env.RUNTIME_REF) {
+  if (!/^[a-f0-9]{40}$/.test(env.CJCJ_NATIVE_RUNTIME_REF || '') || sourceSha !== env.CJCJ_NATIVE_RUNTIME_REF) {
     throw new Error('COLOUR_RT_SOURCE_MISMATCH');
   }
   if (!/^\d+$/.test(env.GITHUB_RUN_ID || '') || !/^\d+$/.test(env.GITHUB_RUN_ATTEMPT || '')) {
@@ -75,7 +75,7 @@ export function verifyRuntime(env = process.env) {
     throw new Error(`COLOUR_RT_SHA256_MISMATCH expected=${pin} actual=${actual}`);
   }
   const manifest = JSON.parse(fs.readFileSync(path.join(root, 'manifest.json'), 'utf8'));
-  if (manifest.runtime_sha !== env.RUNTIME_REF || manifest.platform !== platform
+  if (manifest.runtime_sha !== env.CJCJ_NATIVE_RUNTIME_REF || manifest.platform !== platform
       || manifest.run_id !== env.COLOUR_RT_RUN_ID || manifest.run_attempt !== env.COLOUR_RT_RUN_ATTEMPT) {
     throw new Error('COLOUR_RT_MANIFEST_MISMATCH');
   }

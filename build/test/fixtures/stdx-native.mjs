@@ -42,6 +42,7 @@ set(CANGJIE_INCLUDE "" CACHE PATH "compiler include")
 set(CANGJIE_TARGET_LIB "" CACHE PATH "target library")
 set(CANGJIE_TARGET_TOOLCHAIN "" CACHE PATH "target toolchain")
 set(CANGJIE_TARGET_SYSROOT "" CACHE PATH "sysroot")
+set(BUILD_GCC_TOOLCHAIN "" CACHE PATH "GCC headers/libraries prefix")
 set(CANGJIE_BUILD_ARGS "" CACHE STRING "args")
 option(CANGJIE_BUILD_STDLIB_WITH_COVERAGE "coverage" OFF)
 foreach(feature CHIR SYNTAX EFFECT_HANDLERS PLUGIN ASPECT_CJ)
@@ -92,6 +93,7 @@ if sys.argv[1]=='build':
  for flag,key in [('--skip-chir','CHIR'),('--skip-syntax','SYNTAX'),('--without-effect-handlers','EFFECT_HANDLERS')]:
   args+=['-DCANGJIE_BUILD_WITHOUT_'+key+'='+('ON' if flag in sys.argv else 'OFF')]
  args+=['-DCANGJIE_INCLUDE='+next(a.split('=',1)[1] for a in sys.argv if a.startswith('--include=')),'-DCANGJIE_TARGET_LIB='+next((a.split('=',1)[1] for a in sys.argv if a.startswith('--target-lib=')),'')]
+ args+=['-DBUILD_GCC_TOOLCHAIN='+next((a.split('=',1)[1] for a in sys.argv if a.startswith('--gcc-toolchain=')),'')]
  if not build.exists():
   if os.environ.get('FIXTURE_FAIL_CONFIGURE'): sys.exit(25)
   subprocess.run(args,check=True)
@@ -110,7 +112,7 @@ if sys.argv[1]=='install':
   saveSourceSelection(buildConfig({workspace:root,repoOverrides:{stdx:{url:'https://gitcode.com/Cangjie/cangjie_stdx.git',tag:commit}}}));
   const env = {...process.env, CC: process.env.CC || '/usr/lib/llvm-15/bin/clang',
     CXX: process.env.CXX || '/usr/lib/llvm-15/bin/clang++',
-    FIXTURE_ROOT: root, CJCJ_SRCBUILD_HOST_SDK: host, CJCJ_SRCBUILD_CONSUMER_SDK: sdk};
+    FIXTURE_ROOT: root, CJCJ_OFFICIAL_SDK_ROOT: host, CJCJ_SRCBUILD_CONSUMER_SDK: sdk};
   delete env.CANGJIE_BUILD_DRY_RUN; delete env.CJCJ_SRCBUILD_VERIFIER_REPORT_ACTIVE;
   env.CANGJIE_STDX_PATH = path.join(root, 'unrelated-host-stdx');
   const args = [cli, '--workspace', root, '--build-root', path.join(root, 'buildtools'), '--host-profile', 'kkk2'];

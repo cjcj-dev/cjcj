@@ -57,9 +57,8 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # RUNTIME_REF/RUNTIME_SRC_URL come from ci/runtime_pin.env via the
+  # The canonical pair and runtime metadata come from ci/runtime_pin.env via the
   # "Load runtime pin" step — the pin lives in exactly one file.
-  RUNTIME_VERSION: 1.2.0-alpha.20260721165458
   CJ_HEAP_SIZE: 12GB
   CANGJIE_WORKSPACE: ${{ github.workspace }}/.srcbuild
   CJCJ_NATIVE_INPUT_ROOT: ${{ github.workspace }}/.srcbuild/native-inputs
@@ -71,9 +70,9 @@ jobs:
       matrix: ${{ steps.matrix.outputs.matrix }}
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7.1.0
         with:
-          node-version: '22'
+          node-version: '24.22.1'
       - name: Export target matrix
         id: matrix
         run: node ci/target-matrix.mjs platform
@@ -119,17 +118,17 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Load runtime pin
-        run: cat ci/runtime_pin.env >> "$GITHUB_ENV"
+        run: node ci/load_runtime_pin.mjs
       - uses: actions/checkout@v7
         with:
           repository: cjcj-dev/cangjie-runtime
-          ref: ${{ env.RUNTIME_REF }}
+          ref: ${{ env.CJCJ_NATIVE_RUNTIME_REF }}
           path: runtime-source
       - uses: ./.github/actions/sccache
         with:
           component: runtime
           platform: ${{ matrix.platform }}
-          pin: ${{ env.RUNTIME_REF }}
+          pin: ${{ env.CJCJ_NATIVE_RUNTIME_REF }}
           cache-size: 1G
       - name: Build pinned native runtime
         env:
@@ -206,17 +205,17 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Load runtime pin
-        run: cat ci/runtime_pin.env >> "$GITHUB_ENV"
+        run: node ci/load_runtime_pin.mjs
       - uses: actions/checkout@v7
         with:
           repository: cjcj-dev/cangjie-runtime
-          ref: ${{ env.RUNTIME_REF }}
+          ref: ${{ env.CJCJ_NATIVE_RUNTIME_REF }}
           path: runtime-source
       - uses: ./.github/actions/sccache
         with:
           component: runtime
           platform: ${{ matrix.runner }}
-          pin: ${{ env.RUNTIME_REF }}
+          pin: ${{ env.CJCJ_NATIVE_RUNTIME_REF }}
           cache-size: 1G
       - name: Receive packaged native SDK
         uses: actions/download-artifact@v8
@@ -339,8 +338,6 @@ jobs:
     if: ${{ !inputs.runtime_only && !inputs.std_evidence_only && !inputs.darwin_runtime_only && !inputs.darwin_host_only && !inputs.darwin_verify_only }}
     name: Build Windows runtime
     uses: ./.github/workflows/build-windows-runtime.yml
-    with:
-      version: 1.2.0-alpha.20260721165458
 
   platform:
     name: ${{ matrix.runner }} / runtime + cjcj + smoke
@@ -362,12 +359,12 @@ jobs:
       - name: Load host toolchain pin
         shell: bash
         run: |
-          cat ci/cjpm_pin.env >> "$GITHUB_ENV"
+          cat ci/source_pin.env >> "$GITHUB_ENV"
           node ci/host-toolchain-pin.mjs --github-env >> "$GITHUB_ENV"
 
       - name: Load runtime pin
         shell: bash
-        run: cat ci/runtime_pin.env >> "$GITHUB_ENV"
+        run: node ci/load_runtime_pin.mjs
 
       # The consolidated cangjie-runtime main already carries the GC and Darwin
       # fixes; no per-runner patch overlay is needed.
@@ -376,7 +373,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: cjcj-dev/cangjie-runtime
-          ref: ${{ env.RUNTIME_REF }}
+          ref: ${{ env.CJCJ_NATIVE_RUNTIME_REF }}
           fetch-depth: 1
           path: runtime-source
 
@@ -407,7 +404,7 @@ jobs:
         with:
           component: runtime
           platform: ${{ matrix.runner }}
-          pin: ${{ env.RUNTIME_REF }}
+          pin: ${{ env.CJCJ_NATIVE_RUNTIME_REF }}
           cache-size: 1G
 
       - name: Runtime build (Linux/macOS native)

@@ -31,7 +31,7 @@ export function requireHostToolchain(env = process.env, platform = hostPlatform(
   const selected = platforms[platform];
   if (!selected) throw new Error(`unsupported host platform: ${platform}`);
   const toolchain = (env[`CJCJ_TOOLCHAIN_${selected}`] || env.CJCJ_TOOLCHAIN)?.trim();
-  if (!toolchain) throw new Error('CJCJ_TOOLCHAIN is required; load ci/cjpm_pin.env before invoking this script');
+  if (!toolchain) throw new Error('CJCJ_TOOLCHAIN is required; load ci/host_sdk_pin.env before invoking this script');
   return toolchain;
 }
 

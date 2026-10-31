@@ -15,7 +15,7 @@ const actual = await digest(path.join(root, 'runtime', 'lib', target.tuple, 'lib
 console.log(`IOS_BOUNDSCHECK_OBSERVED actual=${actual} expected=${expected}`);
 assert.equal(actual, expected, 'IOS_BOUNDSCHECK_SAME_BUILD_BYTES');
 const stage = path.join(source, 'installed-sdk');
-const record = await installCrossRuntime({root, stage, tuple: target.tuple, runtimeRef: process.env.RUNTIME_REF});
+const record = await installCrossRuntime({root, stage, tuple: target.tuple, runtimeRef: process.env.CJCJ_NATIVE_RUNTIME_REF});
 const produced = [], installed = [];
 for (const file of record.files) {
   produced.push({path: file.path, sha256: await digest(path.join(root, file.path))});

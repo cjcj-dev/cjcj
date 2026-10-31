@@ -34,7 +34,7 @@ async function fixture() {
   await fs.writeFile(path.join(state.sdk, 'STAGE-INPUTS.json'), JSON.stringify({phase: state.stage, platform,
     runtimeCommit: state.runtime_sha, compilerFile: 'libexec/compiler/cjc', compilerSha256: state.compiler_sha256}));
   await fs.writeFile(path.join(root, '.platform-ci/colour-sdk.json'), JSON.stringify(state));
-  const env = {...process.env, RUNTIME_REF: state.runtime_sha, LD_LIBRARY_PATH: '/unrelated-inherited-runtime'};
+  const env = {...process.env, CJCJ_NATIVE_RUNTIME_REF: state.runtime_sha, LD_LIBRARY_PATH: '/unrelated-inherited-runtime'};
   const run = (entry, args = [], extra = {}) => {
     const result = spawnSync(process.execPath, [path.join(root, 'ci', entry), ...args], {encoding: 'utf8', env: {...env, ...extra}});
     console.log(`ENTRY ${entry} rc=${result.status} signal=${result.signal}`);
@@ -78,7 +78,7 @@ test('real wrapper retains child exit status and rejects a different runtime pin
   const {run} = await fixture();
   const command = ['build', '--', process.execPath, '-e', 'process.exit(7)'];
   assert.equal(run('with-colour-sdk.mjs', command).status, 7);
-  const bad = run('with-colour-sdk.mjs', command, {RUNTIME_REF: 'c'.repeat(40)});
+  const bad = run('with-colour-sdk.mjs', command, {CJCJ_NATIVE_RUNTIME_REF: 'c'.repeat(40)});
   assert.equal(bad.status, 1); assert.match(bad.stderr, /COLOUR_RT_STATE_MISMATCH/);
 });
 test('real preparation rejects a different configured runtime before invoking native targets', async () => {
@@ -91,7 +91,7 @@ test('real preparation rejects a different configured runtime before invoking na
     llvm: row(FIXED_INPUTS.llvm, 'llvm'), runtime, ast: row(FIXED_INPUTS.compiler, 'ast'),
     h1: row(FIXED_INPUTS.h1, 'h1'), compiler: row('b'.repeat(40), 'compiler'), stdlib: {...runtime}, tools: {privateRoot: root+'/tools'}});
   const file = root+'/targets.json'; await fs.writeFile(file, JSON.stringify(config));
-  const result = run('prepare-colour-sdk.mjs', [], {CJCJ_SDK_TARGETS: file, RUNTIME_REF: 'c'.repeat(40)});
+  const result = run('prepare-colour-sdk.mjs', [], {CJCJ_SDK_TARGETS: file, CJCJ_NATIVE_RUNTIME_REF: 'c'.repeat(40)});
   console.log(`TARGET_ASSERT configured runtime rc=${result.status}`);
   assert.equal(result.status, 1); assert.match(result.stderr, /COLOUR_RT_STATE_MISMATCH/);
   assert.equal(await fs.stat(root+'/work').then(() => true, () => false), false);

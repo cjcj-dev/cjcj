@@ -8,8 +8,9 @@ import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {hostToolchainFromCjcVersion} from '../../ci/host-toolchain-pin.mjs';
+import {buildConfig} from '../lib/config.mjs';
 const repo=new URL('../../',import.meta.url).pathname;
-const base=process.env.RELEASE_EVIDENCE_TEST_ROOT,generator=process.env.CJCJ_TEST_RUNTIME_GENERATOR,host=process.env.CJCJ_SRCBUILD_HOST_SDK;
+const base=process.env.RELEASE_EVIDENCE_TEST_ROOT,generator=process.env.CJCJ_TEST_RUNTIME_GENERATOR,host=process.env.CJCJ_OFFICIAL_SDK_ROOT;
 if(!base||!generator||!host)throw Error('runtime component test requires evidence root, original generator and complete private host');
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
 const write=async(file,data)=>{await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,data);};
@@ -80,7 +81,7 @@ if sys.argv[1]=='install':
  const source=mode.startsWith('archive')?materialized:objects;
  // Explicit unavailable functionality, never a fabricated CPP PASS file.
  const boundaries={
-  'ci/platform_matrix/native_runtime.mjs':{installNativeRuntimeInputs:'const root=arguments[0].installRoot;for(const f of ["share/runtime-build/runtime/tests/gc_unit/gate_gc_unit.sh","share/runtime-build/runtime/tests/gc_unit/language_toolchain.mjs","share/runtime-build/runtime/CMakebuild/compile_commands.json","share/runtime-build/runtime/CMakebuild/gc-unit.status","runtime/include/schedule.h"]){fs.mkdirSync(path.dirname(path.join(root,f)),{recursive:true});fs.writeFileSync(path.join(root,f),"CONTROLLED_CPP_NOT_RUN");}console.log("CONTROLLED_CPP_DIRECT_INPUT_NOT_RUN");'},
+  'ci/platform_matrix/native_runtime.mjs':{installNativeRuntimeInputs:'const root=arguments[0].installRoot;controlledDirectSource(path.join(root,"share/runtime-build/runtime"));for(const f of ["share/runtime-build/runtime/CMakebuild/compile_commands.json","share/runtime-build/runtime/CMakebuild/gc-unit.status","runtime/include/schedule.h"]){fs.mkdirSync(path.dirname(path.join(root,f)),{recursive:true});fs.writeFileSync(path.join(root,f),"CONTROLLED_CPP_NOT_RUN");}console.log("CONTROLLED_CPP_DIRECT_INPUT_NOT_RUN");'},
   'build/srcbuild/gc-unit-gate.mjs':{
    assertLanguageState:'console.log("CONTROLLED_CPP_GATE_NOT_RUN");return new Map([["CPP_SUITE","PASS"]]);',
   },
@@ -88,19 +89,21 @@ if sys.argv[1]=='install':
  await write(root+'/boundaries.json',JSON.stringify({functions:boundaries,otherSourcePins:'H1/AST/LLVM use actual finite Git object; no native qualification',commands:['sudo apt-get preparation','npx qualify_teardown_tools'],host:'actual complete private H925'},null,2));
  await write(root+'/loader.mjs',String.raw`const boundaries=${JSON.stringify(Object.fromEntries(Object.entries(boundaries).map(([p,v])=>[new URL(p,'file://'+repo).href,v])))};
 export async function load(url,context,next){const r=await next(url,context);if(!boundaries[url]&&!url.endsWith('/ci/bootstrap/sdk-targets.mjs'))return r;let source=String(r.source);
+if(url.endsWith('/ci/platform_matrix/native_runtime.mjs'))source+='\nimport {directSource as controlledDirectSource} from '+JSON.stringify(${JSON.stringify(new URL('ci/fixtures/runtime-direct-inputs.mjs','file://'+repo).href)})+';\n';
 if(boundaries[url])for(const [name,body]of Object.entries(boundaries[url])){const re=new RegExp('export (async )?function '+name+'\\(');if(!re.test(source))throw Error('BOUNDARY_ANCHOR '+name);source=source.replace(re,(_,a='')=>a+'function CONTROLLED_ORIGINAL_'+name+'(');source+='\nexport function '+name+'(){'+body+'}\n';}
-if(url.endsWith('/ci/bootstrap/sdk-targets.mjs'))source=source.replace(/compiler:'[0-9a-f]{40}'/,"compiler:'${commit}'").replace(/h1:'[0-9a-f]{40}'/,"h1:'${commit}'");
+if(url.endsWith('/ci/bootstrap/sdk-targets.mjs')){const anchor='compiler:pins.source.COMPILER_REF';if(!source.includes(anchor))throw Error('BOUNDARY_COMPILER_PIN_ANCHOR');source=source.replace(anchor,"compiler:'${commit}'").replace(/h1:'[0-9a-f]{40}'/,"h1:'${commit}'");}
 return {...r,source};}
 `);
  const bin=root+'/bin';await fs.mkdir(bin);
  for(const name of ['sudo','npx','sccache']){const file=bin+'/'+name;await write(file,`#!${process.execPath}\nconsole.log('CONTROLLED_EXTERNAL_PREPARATION',${JSON.stringify(name)},process.argv.slice(2));\n`);await fs.chmod(file,0o755);}
  const loader='--experimental-loader='+root+'/loader.mjs';
  const env={NODE_OPTIONS:loader,PATH:bin+path.delimiter+process.env.PATH,PLATFORM_CI_ROOT:root+'/producer',
-  RUNTIME_SOURCE:source,RUNTIME_GIT_REPOSITORY:objects,RUNTIME_TARGET:'native',RUNTIME_TOOLCHAIN:'',RUNTIME_NATIVE_PAIR:'1',
-  RUNTIME_REF:commit,CJCJ_NATIVE_RUNTIME_REF:commit,LLVM_SHA:commit,NATIVE_RUNTIME_PLATFORM:platform,
+  RUNTIME_SOURCE:source,RUNTIME_TARGET:'native',RUNTIME_TOOLCHAIN:'',RUNTIME_NATIVE_PAIR:'1',
+  CJCJ_NATIVE_RUNTIME_REF:commit,CJCJ_NATIVE_LLVM_REF:commit,NATIVE_RUNTIME_PLATFORM:platform,
   RUNTIME_VERSION:version,RUNTIME_BUILD_TYPE:'release',CJCJ_NATIVE_HOST_VERSION:version,
   FINITE_CACHE_WRAPPER:mode==='archive-wrapper'?'1':'',SCCACHE_PATH:bin+'/sccache',CMAKE_TOOLCHAIN_FILE:'',CJ_RUNTIME_COMMIT:'',GC_UNIT_GATE_LANGUAGE_TESTS:'defer',GITHUB_STEP_SUMMARY:'',RUNNER_TEMP:root+'/preinstall'};
- await run('formal-producer',[process.env.ZX||'zx',repo+'ci/platform_matrix/build_runtime.mjs'],env);
+ await write(root+'/producer-entry.mjs',`import {buildRuntime} from '${repo}ci/platform_matrix/build_runtime.mjs'; await buildRuntime({objectRepository:${JSON.stringify(objects)}});`);
+ await run('formal-producer',[process.env.ZX||'zx',root+'/producer-entry.mjs'],env);
  const installed=root+'/producer/runtime-install',carried=root+'/received';await fs.mkdir(carried);
  if(mode==='archive-wrapper'){const m=JSON.parse(await fs.readFile(installed+'/NATIVE-INPUTS.json'));for(const k of ['C','CXX'])assert.equal(m.compiler_cache_configuration[k].mode,'compiler-wrapper');console.log('NATIVE_WRAPPER_RECORD_TO_RECEIVE_REACHED');}
  console.log('RUNTIME_PRODUCER_INSTALLED_RECORD_ASSERT_REACHED '+mode);
@@ -171,7 +174,20 @@ return {...r,source};}
  await fs.mkdir(carried+'/share/runtime-build',{recursive:true});
  const legacy=root+'/legacy';await fs.mkdir(legacy);
  await run('legacy-source-clone',['git','clone',origin,legacy+'/cangjie_runtime'],consumer);
+ // The public CLI resolves every selected source before entering runtime/std.
+ // Materialize finite Git inputs for those unchanged boundaries as well.
+ const legacyConfig=buildConfig({workspace:legacy,targetKey:'linux-x64'}),choices={};
+ for(const name of ['compiler','runtime','tools','stdx','llvm','cjpm']) {
+  const url=name==='llvm'?'https://github.com/cjcj-dev/cjcj-llvm.git':origin;
+  if(name!=='runtime')await run('legacy-'+name+'-clone',['git','clone',url,legacyConfig.repoPath(name)],consumer);
+  choices[name]={url,tag:commit};
+ }
+ await write(legacy+'/.source-selection.json',JSON.stringify(choices));
  const legacyBoundary={...boundaries,
+  // This test's C-only std producer cannot create a complete nine-tool SDK.
+  // The public stages and actual runtime split/snapshot remain under test;
+  // full installation stays explicitly outside this finite component gate.
+  'ci/bootstrap/sdk-flow.mjs':{installProducts:'if(arguments[0]?.selection?.platform!=="linux_x86_64")throw Error("CONTROLLED_INSTALL_SELECTION_REQUIRED");console.log("CONTROLLED_COMPLETE_SDK_INSTALL_NOT_RUN");'},
   'build/lib/provenance.mjs':{writeStdProvenance:'console.log("CONTROLLED_CANGJIE_STD_PROVENANCE_NOT_RUN");'},
   'build/srcbuild/gc-unit-gate.mjs':{...boundaries['build/srcbuild/gc-unit-gate.mjs'],
    runGcUnitLanguageTests:'console.log("LEGACY_LANGUAGE_PRODUCER_ASSERT_REACHED");if(arguments[2]?.source!==process.env.CJCJ_NATIVE_RUNTIME_SOURCE)throw Error("LEGACY_LANGUAGE_PRODUCER_REQUIRED");console.log("CONTROLLED_LEGACY_LANGUAGE_SOURCE_SELECTED "+arguments[2].source);'}};
@@ -183,7 +199,7 @@ return {...r,source};}
  legacyLoader=legacyLoader.replace("+'(){'+body", "+'(...args){'+body");
  await write(root+'/legacy-loader.mjs',legacyLoader);
  await write(root+'/legacy-boundaries.json',JSON.stringify({functions:legacyBoundary,CPP:'NOT_RUN',CANGJIE_STD:'NOT_RUN',LANGUAGE:'NOT_RUN'}));
- const legacyEnv={...consumer,NODE_OPTIONS:'--experimental-loader='+root+'/legacy-loader.mjs',CJCJ_SRCBUILD_HOST_SDK:host};
+ const legacyEnv={...consumer,NODE_OPTIONS:'--experimental-loader='+root+'/legacy-loader.mjs',CJCJ_OFFICIAL_SDK_ROOT:host};
  for(const buildType of ['release','relwithdebinfo']){
   const cli=[process.execPath,repo+'build/cli.mjs','--workspace',legacy,'--build-root',root+'/legacy-build','--build-type',buildType];
   await run('legacy-runtime-'+buildType,[...cli,'build','runtime'],legacyEnv);
@@ -196,6 +212,7 @@ return {...r,source};}
   const std=await run('legacy-stdlib-'+buildType,[...cli,'build','stdlib'],legacyEnv);
   assert.match(std.stdout+std.stderr,/LEGACY_NATIVE_VALUE=42/);
   assert.match(std.stdout+std.stderr,/CONTROLLED_LEGACY_LANGUAGE_SOURCE_SELECTED/);
+  assert.match(std.stdout+std.stderr,/CONTROLLED_COMPLETE_SDK_INSTALL_NOT_RUN/);
   await run('legacy-runtime-repeat-'+buildType,[...cli,'build','runtime'],legacyEnv);
  }
  console.log('RUNTIME_FORMAL_FINITE_PASS '+JSON.stringify({mode,root,commit,stamp:facts.embedded_stamp,commands:records.length,CPP:'NOT_RUN'}));

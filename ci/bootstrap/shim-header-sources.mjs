@@ -5,7 +5,12 @@ import {checkoutExactSource} from '../../build/lib/git.mjs';
 import {run} from '../../build/lib/runner.mjs';
 import {verifyNativeSource,materializeNativeSource} from './sdk-source.mjs';
 import {command} from './sdk-flow.mjs';
-export const SHIM_SOURCE_COMMITS=Object.freeze(JSON.parse(fs.readFileSync(new URL('./shim-source-commits.json',import.meta.url),'utf8')));
+import {readSourcePins} from '../native-llvm-inputs.mjs';
+const pins=readSourcePins();
+export const SHIM_SOURCE_COMMITS=Object.freeze({compiler:pins.source.COMPILER_REF,
+ llvm:pins.llvm.LLVM_SHA,runtime:pins.runtime.RUNTIME_REF,flatbuffers:pins.llvm.FLATBUFFERS_SHA});
+const repositories={compiler:pins.source.COMPILER_SRC_URL,llvm:pins.llvm.LLVM_URL,
+ runtime:pins.runtime.RUNTIME_SRC_URL,flatbuffers:pins.llvm.FLATBUFFERS_URL};
 
 export function selectShimSources(root,env=process.env) {
  const explicit=env.CJCJ_BOOTSTRAP_SHIM_SOURCES
@@ -18,7 +23,7 @@ export function selectShimSources(root,env=process.env) {
   const row=explicit[name]||{};
   if(typeof row!=='object'||Array.isArray(row)||row.commit&&!/^[a-f0-9]{40}$/.test(row.commit))
    throw Error('SHIM_SOURCE_SELECTION '+name);
-  return [name,{...row,commit:row.commit||commit,root:path.resolve(row.root||path.join(root,'sources',name))}];
+  return [name,{...(explicit[name]?{}:{repository:repositories[name]}),...row,commit:row.commit||commit,root:path.resolve(row.root||path.join(root,'sources',name))}];
  }));
 }
 

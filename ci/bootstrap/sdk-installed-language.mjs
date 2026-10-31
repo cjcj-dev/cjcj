@@ -11,7 +11,7 @@ export function installedLanguageConfig({sdk,platform,host,work}) {
   const targetKey={linux_x86_64:'linux-x64',linux_aarch64:'linux-aarch64'}[platform];
   if(!targetKey||!sdk||!host||!work)throw new Error('INSTALLED_LANGUAGE_INPUT_REQUIRED');
   const config=buildConfig({workspace:work,consumerSdk:sdk,targetKey,officialSdkRoot:host});
-  const env={...cleanSdkEnvironment(sdk,platform),CJCJ_SRCBUILD_HOST_SDK:host,
+  const env={...cleanSdkEnvironment(sdk,platform),CJCJ_OFFICIAL_SDK_ROOT:host,
     GC_UNIT_OUT:path.join(work,'gc-unit'),cjHeapSize:process.env.cjHeapSize||'2GB'};
   if(!gcUnitLanguageGateEnabled(config,env))throw new Error('INSTALLED_LANGUAGE_DISABLED');
   return {config,env};

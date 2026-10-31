@@ -119,7 +119,7 @@ source+='\\nexport async function '+name+'(){console.log("CONTROLLED_UNAVAILABLE
 `);
 const env={...process.env,NODE_OPTIONS:'--experimental-loader='+root+'/loader.mjs',CANGJIE_WORKSPACE:workspace,
  CJCJ_SRCBUILD_TARGET:'linux-x64',SOURCE_SDK_VERSION:'0.0.0-manifest-fixture',CJCJ_SDK_TARGETS:root+'/targets.json',
- CJCJ_OFFICIAL_SDK_ROOT:process.env.CJCJ_SRCBUILD_HOST_SDK||root+'/unavailable-host'};
+ CJCJ_OFFICIAL_SDK_ROOT:process.env.CJCJ_OFFICIAL_SDK_ROOT||root+'/unavailable-host'};
 if(process.env.INSTALLED_PYTHON_RECORD && !publicMode){
  const wrong=await run('formal-package-wrong-source',[process.execPath,repo+'ci/srcbuild/steps/package-install.mjs'],
   {...env,CJCJ_PACKAGE_SOURCE_REPOSITORY:env.CJCJ_PACKAGE_SOURCE_REPOSITORY||'file://'+repo,CJCJ_PACKAGE_SOURCE_COMMIT:'0'.repeat(40)});
@@ -154,7 +154,7 @@ if(publicMode){
 const artifactDir=workspace+'/software',archiveName=(await fs.readdir(artifactDir)).find(name=>name.startsWith('cangjie-sdk-')&&name.endsWith('.tar.gz'));
 assert.ok(archiveName);const archive=artifactDir+'/'+archiveName;
 const releaseEnv={...env,NATIVE_SDK_ARTIFACT_DIR:artifactDir,NATIVE_SDK_INSTALL_DIR:root+'/received',RELEASE_PLATFORM:'linux-x64',RELEASE_KEY:'linux-x64',
- CJCJ_NATIVE_SDK_VERSION:env.SOURCE_SDK_VERSION,CJCJ_RELEASE_SOURCE_SHA:commit,RUNTIME_REF:commit,FINAL_STD_DIR:root+'/std',RELEASE_DIST:root+'/dist'};
+ CJCJ_NATIVE_SDK_VERSION:env.SOURCE_SDK_VERSION,CJCJ_RELEASE_SOURCE_SHA:commit,CJCJ_NATIVE_RUNTIME_REF:commit,FINAL_STD_DIR:root+'/std',RELEASE_DIST:root+'/dist'};
 const composed=await run('formal-compose-unresolved',[process.execPath,repo+'ci/release/compose-package.mjs'],releaseEnv);
 // A checksum failure is an independent earlier transport control.
 const archiveBytes=await fs.readFile(archive);await fs.appendFile(archive,'changed');

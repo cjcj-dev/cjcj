@@ -17,8 +17,8 @@ export const stateFile = path.join(repo, '.platform-ci', 'colour-sdk.json');
 const finalStages = new Set(['stage2-target-sdk', 'stage3']);
 function paired(platform, runtime, env) {
   if (platform !== hostPlatform()) throw new Error('COLOUR_SDK_PLATFORM_MISMATCH');
-  if (!/^[a-f0-9]{40}$/.test(runtime || '') || runtime !== env.RUNTIME_REF)
-    throw new Error(`COLOUR_RT_STATE_MISMATCH: installed/configured runtime=${runtime} required=${env.RUNTIME_REF}`);
+  if (!/^[a-f0-9]{40}$/.test(runtime || '') || runtime !== env.CJCJ_NATIVE_RUNTIME_REF)
+    throw new Error(`COLOUR_RT_STATE_MISMATCH: installed/configured runtime=${runtime} required=${env.CJCJ_NATIVE_RUNTIME_REF}`);
 }
 async function installed(sdk, stage, env) {
   if (!finalStages.has(stage)) throw new Error('COLOUR_SDK_FINAL_STAGE_REQUIRED');

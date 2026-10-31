@@ -11,7 +11,7 @@ import {archiveInstall, privateRoot} from '../bootstrap/sdk-flow.mjs';
 import {writePlatformSums} from './package_checksums.mjs';
 export async function composeNativePackage(env = process.env) {
   for (const key of ['NATIVE_SDK_ARTIFACT_DIR', 'NATIVE_SDK_INSTALL_DIR', 'RELEASE_PLATFORM',
-    'CJCJ_NATIVE_SDK_VERSION', 'CJCJ_RELEASE_SOURCE_SHA', 'RUNTIME_REF', 'FINAL_STD_DIR', 'RELEASE_DIST'])
+    'CJCJ_NATIVE_SDK_VERSION', 'CJCJ_RELEASE_SOURCE_SHA', 'CJCJ_NATIVE_RUNTIME_REF', 'FINAL_STD_DIR', 'RELEASE_DIST'])
     if (!env[key]) throw new Error(key + ' required');
   const platform = env.RELEASE_PLATFORM, version = env.CJCJ_NATIVE_SDK_VERSION;
   if (!/^[A-Za-z0-9][A-Za-z0-9.+_-]*$/.test(version)) throw new Error('NATIVE_RELEASE_VERSION');
@@ -21,7 +21,7 @@ export async function composeNativePackage(env = process.env) {
   const dist = await privateRoot(env.RELEASE_DIST);
   await fs.mkdir(dist, {recursive: true});
   const {sdk} = await unpackNativeSdk(env.NATIVE_SDK_ARTIFACT_DIR, env.NATIVE_SDK_INSTALL_DIR, platform, env);
-  const options = {sdk, platform, version, sourceSha: env.CJCJ_RELEASE_SOURCE_SHA, runtimeRef: env.RUNTIME_REF,
+  const options = {sdk, platform, version, sourceSha: env.CJCJ_RELEASE_SOURCE_SHA, runtimeRef: env.CJCJ_NATIVE_RUNTIME_REF,
     releaseKey: env.RELEASE_KEY, std: env.FINAL_STD_DIR, crossRoot: env.CROSS_STD_DIR, work: path.join(dist, 'installed-check')};
   await verifyNativeRelease(options, env);
   const stem = `cjcj-${version}-${release.archiveKey}`;

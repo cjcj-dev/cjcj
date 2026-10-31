@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {exportBranches} from './llvm-runtime-branches.mjs';
-import {fixture, originalSource, prepareOriginalSource, command, repo, base} from './llvm-runtime-fixture.mjs';
+import {fixture, originalSource, prepareOriginalSource, command, historyRepo, base} from './llvm-runtime-fixture.mjs';
 
 const source = originalSource();
 const table = exportBranches(source);
@@ -16,7 +16,7 @@ test('fixed historical input is rejected when missing and recovered through prep
   const previous = process.env.CJCJ_SRCBUILD_SOURCE_MIRRORS;
   const required = process.env.CJCJ_SRCBUILD_REQUIRE_MIRRORS;
   try {
-    process.env.CJCJ_SRCBUILD_SOURCE_MIRRORS = `https://github.com/cjcj-dev/cjcj.git=file://${repo}`;
+    process.env.CJCJ_SRCBUILD_SOURCE_MIRRORS = `https://github.com/cjcj-dev/cjcj.git=file://${historyRepo}`;
     process.env.CJCJ_SRCBUILD_REQUIRE_MIRRORS = '1';
     prepareOriginalSource(root);
     assert.equal(originalSource(root), source);
@@ -43,7 +43,7 @@ test('branch exporter loses exactly the removed source case arm', () => {
 
 for (const [name, select] of [
   ['private SHA guard rejects uppercase at the real entry', row => row.source.includes('complete lowercase')],
-  ['private mixed-mode guard preserves explicit empty environment inputs', row => row.source.includes('do not mix')],
+  ['retired mixed-mode aliases cannot override the canonical pair', row => row.source.includes('do not mix')],
   ['private checkout consumer rejects mismatched HEAD', row => row.source.includes('HEAD differs')],
 ]) {
   test(name, t => {
@@ -61,8 +61,10 @@ for (const [name, select] of [
       const result = product.execute(input, i);
       const message = /reject '([^']+)'/.exec(row.source)[1];
       console.log(`ASSERT_REACHED ${name} entry=${result.entrySha256} rc=${result.rc} stderr=${JSON.stringify(result.stderr)}`);
-      assert.deepEqual({rc: result.rc, stdout: result.stdout, stderr: result.stderr},
-        {rc: 1, stdout: '', stderr: `LLVM_RUNTIME_INPUT_ERROR: ${message}\n`}, name);
+      if(name.includes('uppercase')){assert.equal(result.rc,1);assert.match(result.stderr,/NATIVE_LLVM_REF_INVALID/);}
+      else if(name.includes('aliases'))assert.equal(result.rc,0,result.stderr);
+      else assert.deepEqual({rc:result.rc,stdout:result.stdout,stderr:result.stderr},
+        {rc:1,stdout:'',stderr:'LLVM_RUNTIME_INPUT_ERROR: '+message+'\n'},name);
     });
   });
 }

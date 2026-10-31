@@ -32,6 +32,11 @@ async function setup(name) {
   }
   await fs.mkdir(path.join(tree, 'ci'), {recursive: true}); await fs.mkdir(path.join(tree, 'scripts'), {recursive: true});
   await fs.copyFile(path.join(repo, 'ci/producer-evidence.mjs'), path.join(tree, 'ci/producer-evidence.mjs'));
+  // The controlled SDK/producer belongs to this fixture source declaration.
+  // Execute the unchanged smoke entry beside it, not beside the entire checkout
+  // whose Git scan was repeated for every sample during the parallel shard.
+  await fs.cp(path.join(repo, 'ci/smoke'), path.join(tree, 'ci/smoke'), {recursive: true});
+  await fs.copyFile(path.join(repo, 'ci/check-colour-tlab.mjs'), path.join(tree, 'ci/check-colour-tlab.mjs'));
   await fs.copyFile(path.join(repo, 'scripts/objc_preamble_unit.py'), path.join(tree, 'scripts/objc_preamble_unit.py'));
   await fs.cp(path.join(repo, 'scripts/objc_regcomp_fixtures'), path.join(tree, 'scripts/objc_regcomp_fixtures'), {recursive: true});
   await fs.mkdir(path.join(tree, 'runtime_shim')); await fs.writeFile(path.join(tree, 'runtime_shim/cjselfhost_llvmshim.o'), 'controlled shim');
@@ -68,7 +73,7 @@ async function packageRun(fixture, extra = {}) {
 }
 async function smokeRun(fixture, extra = {}) {
   const work = path.join(fixture.root, 'smoke');
-  const command = zxCommand([path.join(repo, 'ci/smoke/run_smoke.mjs'), fixture.producer, work]);
+  const command = zxCommand([path.join(fixture.tree, 'ci/smoke/run_smoke.mjs'), fixture.producer, work]);
   const result = spawnSync(command[0], command.slice(1),
     {cwd: fixture.tree, env: {...fixture.env, ...extra}, encoding: 'utf8', timeout: 30_000});
   await fs.writeFile(path.join(fixture.root, 'smoke-execution.json'), JSON.stringify({parent_rc: result.status, signal: result.signal, stdout: result.stdout, stderr: result.stderr}, null, 2));
@@ -455,7 +460,7 @@ if (boundary === 'spawn-return') {
       const deadline = Date.now() + 3000;
       while (!fs.existsSync(trace) && Date.now() < deadline) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1);
       if (!fs.existsSync(trace)) throw Error('controlled producer never became ready');
-      fired = true; process.kill(process.pid, 'SIGTERM');
+      fired = true; fs.writeSync(3, 'cancellation-boundary'); process.kill(process.pid, 'SIGTERM');
     }
     return child;
   };
@@ -466,7 +471,7 @@ if (boundary === 'spawn-return') {
   promises[method] = async function(file, ...args) {
     const target = boundary.startsWith('summary-') ? 'package-internal.result.json.tmp' : boundary === 'finish-write' ? 'stdout.log' : 'execution.json';
     if (!fired && String(file).endsWith('/' + target)) {
-      fired = true; process.kill(process.pid, 'SIGTERM');
+      fired = true; fs.writeSync(3, 'cancellation-boundary'); process.kill(process.pid, 'SIGTERM');
       // Hold the real persistence window open for signal delivery, not a retry.
       await new Promise(resolve => setTimeout(resolve, 20));
     }
@@ -480,10 +485,11 @@ process.on('exit', () => fs.writeFileSync(${JSON.stringify(path.join(f.root, 'sc
     const args = ['--import', hook, path.join(repo, 'ci/producer-evidence.mjs'), '--role', 'package',
       '--name', 'internal', '--source-tree', f.tree, '--root', root,
       '--summary-file', path.join(root, 'package-internal.result.json'), '--invocation-id', `boundary-${boundary}`, '--', f.producer];
-    const collector = spawn(process.execPath, args, {cwd: f.tree, env, stdio: ['ignore', 'pipe', 'pipe']});
-    let stdout = ''; let stderr = ''; let watchdog = false;
+    const collector = spawn(process.execPath, args, {cwd: f.tree, env, stdio: ['ignore', 'pipe', 'pipe', 'pipe']});
+    let stdout = ''; let stderr = ''; let watchdog = false; let boundaryReached = false;
+    const started = performance.now(); let boundaryAt = null;
     collector.stdout.on('data', chunk => { stdout += chunk; }); collector.stderr.on('data', chunk => { stderr += chunk; });
-    const timer = setTimeout(async () => {
+    const reap = async () => {
       watchdog = true;
       // The spawn-return cut can kill the collector before call.json gets its
       // child_pid. Retain launch ownership outside that failed persistence.
@@ -491,15 +497,25 @@ process.on('exit', () => fs.writeFileSync(${JSON.stringify(path.join(f.root, 'sc
       if (owned?.parent === collector.pid && await fs.realpath(`/proc/${owned.pid}/exe`).catch(() => null) === f.producer)
         process.kill(owned.pid, 'SIGKILL');
       collector.kill('SIGKILL');
-    }, 5000);
+    };
+    // Preparation is not the cancellation window. Keep a finite startup bound,
+    // then apply the original five-second watchdog from the real injected signal.
+    let timer = setTimeout(reap, 30_000);
+    collector.stdio[3].once('data', () => {
+      boundaryReached = true; boundaryAt = performance.now();
+      clearTimeout(timer); timer = setTimeout(reap, 5000);
+    });
     const result = await new Promise(resolve => collector.on('close', (status, signal) => resolve({status, signal, stdout, stderr})));
     clearTimeout(timer);
     const [call] = await calls(root);
-    const actual = {boundary, rc: result.status, signal: result.signal, error: result.error?.message,
+    const actual = {boundary, boundaryReached, preparation_ms: boundaryAt === null ? null : boundaryAt-started,
+      cancellation_ms: boundaryAt === null ? null : performance.now()-boundaryAt,
+      rc: result.status, signal: result.signal, error: result.error?.message,
       child: call?.child_rc, child_signal: call?.child_signal, collector: call?.collector_rc, state: call?.state};
     await fs.writeFile(path.join(f.root, 'boundary-result.json'), JSON.stringify({...actual, args, stdout: result.stdout, stderr: result.stderr}, null, 2));
     target('cancel_boundary_owned', actual);
     assert.equal(result.status, 143, `target collector owns cancellation at ${boundary}`);
+    assert.equal(boundaryReached, true, 'real scheduler reached the cancellation window');
     assert.equal(watchdog, false, 'target collector finishes without test cleanup');
     assert.equal(result.signal, null); assert.equal(result.error, undefined);
     assert.deepEqual(JSON.parse(await fs.readFile(path.join(f.root, 'schedule.json'))), {boundary, fired: true});

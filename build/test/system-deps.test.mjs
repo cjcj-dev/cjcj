@@ -31,7 +31,7 @@ function brewDependencyStdout(command) {
 test('Darwin dependency pins keep LLVM 16 and OpenSSL 3 without top-level Python', () => {
   assert.equal(LLVM_PYTHON_FORMULA, 'python@3.11');
   assert.equal(LLVM_PYTHON_VERSION, '3.11');
-  assert.equal(CMAKE_VERSION, '3.31.10');
+  assert.equal(CMAKE_VERSION, '3.31.12');
   assert.ok(!BREW_PACKAGES.includes('python3'));
   assert.ok(BREW_PACKAGES.includes('llvm@16'));
   assert.ok(BREW_PACKAGES.includes('openssl@3'));
@@ -56,7 +56,7 @@ test('CMake installer verifies the official archive and exposes its exact binary
     process.env.GITHUB_PATH = githubPath;
     const cmake = await installCmake3(root, {
       downloadArchive: async (url, archive) => {
-        assert.match(url, /Kitware\/CMake\/releases\/download\/v3\.31\.10/);
+        assert.match(url, /Kitware\/CMake\/releases\/download\/v3\.31\.12/);
         write(archive, 'archive fixture');
       },
       hashFile: async file => {

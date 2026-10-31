@@ -8,7 +8,7 @@ const required = name => {
   return process.env[name];
 };
 const source = path.join(path.resolve(required('CANGJIE_WORKSPACE')), 'cangjie_runtime');
-const runtimeRef = required('RUNTIME_REF');
+const runtimeRef = required('CJCJ_NATIVE_RUNTIME_REF');
 const actual = (await $({stdio: 'pipe'})`git -C ${source} rev-parse HEAD`).stdout.trim();
 if (actual !== runtimeRef) throw new Error(`runtime source mismatch: ${actual} != ${runtimeRef}`);
 const target = iosTargets.find(entry => entry.target === required('IOS_TARGET'));

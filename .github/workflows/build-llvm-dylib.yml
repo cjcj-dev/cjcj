@@ -49,6 +49,7 @@ permissions:
 jobs:
   plan:
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     outputs:
       matrix: ${{ steps.select.outputs.dylib_matrix }}
       platforms: ${{ steps.select.outputs.tuple_platforms }}
@@ -56,8 +57,8 @@ jobs:
       - uses: actions/checkout@v7
       - name: Validate the selected source pair
         env:
-          NATIVE_LLVM_REF: ${{ inputs.llvm_ref }}
-          NATIVE_RUNTIME_REF: ${{ inputs.runtime_ref }}
+          CJCJ_NATIVE_LLVM_REF: ${{ inputs.llvm_ref }}
+          CJCJ_NATIVE_RUNTIME_REF: ${{ inputs.runtime_ref }}
         run: node ci/native-llvm-inputs.mjs
       - name: Select native dylib producers
         id: select
@@ -70,6 +71,7 @@ jobs:
     if: needs.plan.outputs.platforms != '[]'
     strategy:
       fail-fast: false
+      max-parallel: 4
       matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 180
@@ -78,11 +80,27 @@ jobs:
       LLVM_DYLIB_PLATFORM: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24.22.1'
+      - name: Select native build capacity
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import os from 'node:os';
+          import {buildCapacity, selectBuildJobs} from './ci/build-resources.mjs';
+          const capacity = await buildCapacity();
+          const jobs = await selectBuildJobs(undefined, process.env, capacity);
+          const disk = fs.statfsSync('.');
+          console.log('NATIVE_BUILD_CAPACITY ' + JSON.stringify({...capacity, jobs, linkJobs: 1,
+            freeMemory: os.freemem(), diskAvailable: disk.bavail * disk.bsize}));
+          fs.appendFileSync(process.env.GITHUB_ENV, 'CMAKE_BUILD_PARALLEL_LEVEL=' + jobs + '\n');
+          NODE
       - name: Load native LLVM source pair
         id: pin
         env:
-          NATIVE_LLVM_REF: ${{ inputs.llvm_ref }}
-          NATIVE_RUNTIME_REF: ${{ inputs.runtime_ref }}
+          CJCJ_NATIVE_LLVM_REF: ${{ inputs.llvm_ref }}
+          CJCJ_NATIVE_RUNTIME_REF: ${{ inputs.runtime_ref }}
         run: node ci/native-llvm-inputs.mjs
       - uses: ./.github/actions/sccache
         with:
@@ -97,26 +115,25 @@ jobs:
           if [ "$RUNNER_OS" = Linux ]; then
             sudo apt-get update -qq
             sudo apt-get install -y -qq clang cmake ninja-build
-            jobs=$(nproc)
-          else
-            jobs=$(sysctl -n hw.logicalcpu)
           fi
           git init llvm-fork
           git -C llvm-fork remote add origin "$LLVM_URL"
-          git -C llvm-fork fetch --depth=1 origin "$LLVM_SHA"
+          git -C llvm-fork fetch --depth=1 origin "$CJCJ_NATIVE_LLVM_REF"
           git -C llvm-fork checkout --detach FETCH_HEAD
-          test "$(git -C llvm-fork rev-parse HEAD)" = "$LLVM_SHA"
+          test "$(git -C llvm-fork rev-parse HEAD)" = "$CJCJ_NATIVE_LLVM_REF"
           npx --yes zx@8 ci/fetch-llvm-runtime.mjs paired-runtime
           cmake -G Ninja -S llvm-fork/llvm -B dylib-build \
             -DCANGJIE_RUNTIME_SOURCE_DIR="$PWD/paired-runtime" \
+            -DCJ_LLVM_COMMIT="$CJCJ_NATIVE_LLVM_REF" \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
             -DCMAKE_C_FLAGS_RELWITHDEBINFO='-O2 -g1 -DNDEBUG' \
             -DCMAKE_CXX_FLAGS_RELWITHDEBINFO='-O2 -g1 -DNDEBUG' \
             -DLLVM_ENABLE_ASSERTIONS=OFF -DLLVM_ENABLE_RTTI=OFF \
+            -DLLVM_PARALLEL_COMPILE_JOBS="$CMAKE_BUILD_PARALLEL_LEVEL" -DLLVM_PARALLEL_LINK_JOBS=1 \
             -DBUILD_SHARED_LIBS=OFF -DLLVM_BUILD_LLVM_DYLIB=ON -DLLVM_LINK_LLVM_DYLIB=OFF \
             -DLLVM_TARGETS_TO_BUILD='X86;ARM;AArch64' -DLLVM_ENABLE_PROJECTS='' \
             -DCMAKE_CXX_FLAGS='-include cstdint -include unordered_map -include map -include vector -include string'
-          cmake --build dylib-build --target LLVM llvm-nm -j"$jobs"
+          cmake --build dylib-build --target LLVM llvm-nm --parallel "$CMAKE_BUILD_PARALLEL_LEVEL"
           # nm --defined-only must see the real full symbol table, including
           # local symbols; a stripped binary cannot establish that invariant.
           dylib-build/bin/llvm-nm --defined-only "dylib-build/lib/$LLVM_DYLIB_LIBRARY" > dylib-build/defined-symbols.txt
@@ -129,7 +146,7 @@ jobs:
       - name: Verify exact loaded library and C API
         run: |
           set -euo pipefail
-          LLVM_NM="$PWD/dylib-build/bin/llvm-nm" python3 ci/llvm-dylib/verify.py depot/dylib "$LLVM_SHA" "$BUILT_DYLIB_SHA256" | tee depot/dylib/loaded.json
+          LLVM_NM="$PWD/dylib-build/bin/llvm-nm" python3 ci/llvm-dylib/verify.py depot/dylib "$CJCJ_NATIVE_LLVM_REF" "$BUILT_DYLIB_SHA256" | tee depot/dylib/loaded.json
           test -s depot/dylib/loaded.json
       - name: Exercise bootstrap identity check with real libraries
         if: runner.os == 'Linux'
@@ -142,7 +159,7 @@ jobs:
           mkdir -p dylib-build/invalid-dylib
           cp -L "$wrong" dylib-build/invalid-dylib/libLLVM-15.so
           cp depot/dylib/manifest.json dylib-build/invalid-dylib/manifest.json
-          if python3 ci/llvm-dylib/verify.py dylib-build/invalid-dylib "$LLVM_SHA" "$BUILT_DYLIB_SHA256" \
+          if python3 ci/llvm-dylib/verify.py dylib-build/invalid-dylib "$CJCJ_NATIVE_LLVM_REF" "$BUILT_DYLIB_SHA256" \
               > dylib-build/invalid-dylib/stdout.log 2> dylib-build/invalid-dylib/stderr.log; then
             echo 'wrong in-process LLVM library unexpectedly passed verification' >&2
             exit 1
@@ -158,7 +175,7 @@ jobs:
           cp "depot/dylib/$LLVM_DYLIB_LIBRARY" dylib-build/invalid-dylib/
           cp depot/dylib/manifest.json dylib-build/invalid-dylib/
           printf 'changed' >> "dylib-build/invalid-dylib/$LLVM_DYLIB_LIBRARY"
-          if LLVM_NM="$PWD/dylib-build/bin/llvm-nm" python3 ci/llvm-dylib/verify.py dylib-build/invalid-dylib "$LLVM_SHA" "$BUILT_DYLIB_SHA256" > dylib-build/rejected.log 2>&1; then
+          if LLVM_NM="$PWD/dylib-build/bin/llvm-nm" python3 ci/llvm-dylib/verify.py dylib-build/invalid-dylib "$CJCJ_NATIVE_LLVM_REF" "$BUILT_DYLIB_SHA256" > dylib-build/rejected.log 2>&1; then
             echo 'changed library unexpectedly accepted' >&2
             exit 1
           fi

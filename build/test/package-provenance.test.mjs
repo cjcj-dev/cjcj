@@ -445,7 +445,7 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
     const result=runRaw('zx',[path.resolve('ci/release/compose-package.mjs')],{env:{...process.env,
       NATIVE_SDK_ARTIFACT_DIR:input,NATIVE_SDK_INSTALL_DIR:path.join(root,'received-android-'+mode),
       RELEASE_PLATFORM:'linux-x64',RELEASE_KEY:'linux-x64-android',CJCJ_NATIVE_SDK_VERSION:'fixture',
-      CJCJ_RELEASE_SOURCE_SHA:CJCJ_SHA,RUNTIME_REF:RUNTIME_SHA,FINAL_STD_DIR:std,RELEASE_DIST:androidOut,
+      CJCJ_RELEASE_SOURCE_SHA:CJCJ_SHA,CJCJ_NATIVE_RUNTIME_REF:RUNTIME_SHA,FINAL_STD_DIR:std,RELEASE_DIST:androidOut,
       CROSS_STD_DIR:crossRoot,CROSS_STD_ARTIFACTS:mode==='list'?JSON.stringify([{tuple,artifact:'final-std-android-aarch64'}]):'[]',
       CROSS_STD_ARTIFACT:mode==='single'?'final-std-android-aarch64':'',CROSS_STD_TUPLE:mode==='single'?tuple:''}});
     assert.equal(result.status,1,result.stderr);assert.match(result.stderr,/NATIVE_SDK_ARCHIVE_COUNT 0/);
@@ -516,7 +516,7 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
       const result=runRaw('zx',[path.resolve('ci/release/compose-package.mjs')],{env:{...process.env,
         NATIVE_SDK_ARTIFACT_DIR:input,NATIVE_SDK_INSTALL_DIR:path.join(root,'received-'+label+'-'+mode),
         RELEASE_PLATFORM:platform,RELEASE_KEY:key,CJCJ_NATIVE_SDK_VERSION:'fixture',
-        CJCJ_RELEASE_SOURCE_SHA:CJCJ_SHA,RUNTIME_REF:RUNTIME_SHA,FINAL_STD_DIR:std,RELEASE_DIST:outputRoot,
+        CJCJ_RELEASE_SOURCE_SHA:CJCJ_SHA,CJCJ_NATIVE_RUNTIME_REF:RUNTIME_SHA,FINAL_STD_DIR:std,RELEASE_DIST:outputRoot,
         CROSS_STD_DIR:crossRoot,CROSS_STD_ARTIFACTS:mode==='list'?JSON.stringify(builds.map(({tuple,artifact})=>({tuple,artifact}))):'[]',
         CROSS_STD_ARTIFACT:mode==='single'?builds[0].artifact:'',CROSS_STD_TUPLE:mode==='single'?builds[0].tuple:''}});
       assert.equal(result.status,1,result.stderr);assert.match(result.stderr,/NATIVE_SDK_ARCHIVE_COUNT 0/);

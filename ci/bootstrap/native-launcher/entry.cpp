@@ -165,7 +165,7 @@ int main(int argc, char **argv) {
         const auto realDir = real.parent_path();
         if (count > 0 && args[0] && realDir.filename() == L"compiler" &&
             realDir.parent_path().filename() == L"libexec") {
-            reportedArgv0 = (realDir / fs::path(args[0]).filename()).wstring();
+            reportedArgv0 = (root / L"bin" / fs::path(args[0]).filename()).wstring();
             args[0] = reportedArgv0.data();
         }
         std::wstring command;
@@ -194,9 +194,9 @@ int main(int argc, char **argv) {
         const auto search = (root / "bin").string() + ":" + (root / "tools/bin").string() + ":" +
             (root / "third_party/llvm/bin").string() + ":" + (inheritedPath ? inheritedPath : "/usr/bin:/bin");
         if (setenv("PATH", search.c_str(), 1)) throw std::runtime_error("entry PATH");
-        // Keep the invoked basename (cjc versus cjc-frontend) but report a path
-        // beside the real compiler. ../runtime is then libexec/runtime, the image
-        // this process already runs, instead of a second runtime beside bin/.
+        // Compiler-relative resources belong to the public SDK. Preserve the
+        // invoked basename, while exec and the loader still select the retained
+        // compiler and its separate execution libraries above.
         std::vector<char *> execArgs;
         std::string reportedArgv0;
         char **childArgv = argv;
@@ -204,7 +204,7 @@ int main(int argc, char **argv) {
         const auto realDir = real.parent_path();
         if (argc > 0 && argv[0] && realDir.filename() == "compiler" &&
             realDir.parent_path().filename() == "libexec") {
-            reportedArgv0 = (realDir / fs::path(argv[0]).filename()).string();
+            reportedArgv0 = (root / "bin" / fs::path(argv[0]).filename()).string();
             execArgs.assign(argv, argv + argc);
             execArgs[0] = reportedArgv0.data();
             execArgs.push_back(nullptr);

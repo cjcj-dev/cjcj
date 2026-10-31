@@ -1,0 +1,176 @@
+// Real independent tools, using a read-only, explicitly selected SDK for AST/CJO
+// dependencies. This is not a complete SDK or a new compiler/std qualification.
+import fs from 'node:fs';
+import path from 'node:path';
+import assert from 'node:assert/strict';
+import {spawnSync} from 'node:child_process';
+import {cleanSdkEnvironment} from '../../ci/bootstrap/sdk-platform.mjs';
+const [prefix,sdk,source,work,names='cjfmt,lsp,cjlint,cjprof,cjcompat']=process.argv.slice(2);
+const selected=new Set(names.split(','));
+assert(selected.size && [...selected].every(name=>['cjfmt','lsp','cjlint','cjprof','cjcompat','cjtrace-recover'].includes(name)),'known tool selection required');
+for(const value of [prefix,sdk,source,work])assert(value&&path.isAbsolute(value),'absolute prefix/sdk/source/work required');
+assert.equal(process.platform,'linux');
+fs.mkdirSync(work);
+const env=cleanSdkEnvironment(sdk,'linux_x86_64');
+// An independently installed frontend component belongs to this tool prefix,
+// not to the read-only compiler SDK. The loader evidence below records which
+// library each executable actually selects, installed and unpacked alike.
+env.LD_LIBRARY_PATH=prefix+'/tools/lib:'+env.LD_LIBRARY_PATH;
+const commands=[],groups=[],checks=[];
+function run(name,argv,{cwd=work,library,expected=0,environment={}}={}) {
+ const started=new Date().toISOString(),selected={...env,...(library?{LD_LIBRARY_PATH:library+':'+env.LD_LIBRARY_PATH}:{}),...environment};
+ const r=spawnSync(argv[0],argv.slice(1),{cwd,env:selected,encoding:'utf8',maxBuffer:16*1024*1024,timeout:120000});
+ fs.writeFileSync(work+'/'+name+'.stdout',r.stdout??'');fs.writeFileSync(work+'/'+name+'.stderr',r.stderr??'');
+ commands.push({name,argv,cwd,env:selected,started,ended:new Date().toISOString(),rc:r.status,signal:r.signal,error:r.error?.message??null});
+ fs.writeFileSync(work+'/commands.json',JSON.stringify(commands,null,2));
+ if(expected!==null)assert.equal(r.status,expected,name);return r;
+}
+function check(name,fn){try{fn();checks.push({name,pass:true});}catch(e){checks.push({name,pass:false,error:String(e)});throw e;}finally{fs.writeFileSync(work+'/checks.json',JSON.stringify(checks,null,2));}}
+async function group(name,fn){if(!selected.has(name)){groups.push({name,status:'NOT_RUN',reason:'not selected'});return;}try{await fn();groups.push({name,rc:0});}catch(e){groups.push({name,rc:1,error:e.stack});}fs.writeFileSync(work+'/groups.json',JSON.stringify(groups,null,2));}
+const binary=name=>prefix+'/'+name+'/bin/'+(name==='lsp'?'cangjie-lsp':name);
+// Exercise source-language receiver results, inheritance and generic results.
+// These declarations also enter actual major-1 CJO files in cjcompat below.
+const receiverDeclarations=`
+public open class ReceiverBase {
+ public let value: Int64
+ public init(value: Int64) { this.value = value }
+ public func read(): Int64 { value }
+}
+public class ReceiverDerived <: ReceiverBase {
+ public init(value: Int64) { super(value + 2) }
+}
+public class ReceiverBox<T> {
+ public let payload: T
+ public init(payload: T) { this.payload = payload }
+ public func read(): T { payload }
+}
+public func receiverResult(): Int64 {
+ let receiver = ReceiverDerived(40)
+ let box = ReceiverBox<Int64>(receiver.read())
+ return box.read()
+}
+`;
+for(const name of selected)run(name+'-loader',['ldd',binary(name)],{library:prefix+'/'+name+'/lib'});
+await group('cjfmt',()=>{
+ const input=work+'/format.cj',output=work+'/formatted.cj',again=work+'/again.cj';
+ fs.writeFileSync(input,'// header\nmain(){\nlet value=7 // inline\nprintln(value)\n}\n');
+ run('fmt',[binary('cjfmt'),'-f',input,'-o',output,'-c',prefix+'/cjfmt/config/cangjie-format.toml']);
+ check('format changes whitespace and preserves comments',()=>{const text=fs.readFileSync(output,'utf8');assert.notEqual(text,fs.readFileSync(input,'utf8'));assert.match(text,/\/\/ header/);assert.match(text,/\/\/ inline/);});
+ run('fmt-compile',[sdk+'/bin/cjc',output,'-o',work+'/formatted-program']);
+ check('formatted program semantics',()=>assert.equal(run('fmt-run',[work+'/formatted-program']).stdout.trim(),'7'));
+ run('fmt-again',[binary('cjfmt'),'-f',output,'-o',again,'-c',prefix+'/cjfmt/config/cangjie-format.toml']);
+ check('format idempotence',()=>assert.equal(fs.readFileSync(again,'utf8'),fs.readFileSync(output,'utf8')));
+});
+await group('lsp',()=>{
+ // sdk is the explicitly selected analysis prefix for this group. The server's
+ // retained host libraries are resolved by its private installed runtime path.
+ const evidence=work+'/lsp-stdio';
+ run('lsp-stdio',[process.execPath,source+'/packages/lsp/tests/server-client.mjs',
+  binary('lsp'),sdk,evidence,'target'],{environment:{CANGJIE_HOME:undefined,CANGJIE_PATH:undefined,LD_LIBRARY_PATH:undefined}});
+ check('Cangjie server lifecycle and real semantic queries',()=>{
+  const rows=JSON.parse(fs.readFileSync(evidence+'/client-results.json','utf8'));
+  assert.equal(rows.length,1);assert.equal(rows[0].label,'lifecycle-semantics');
+  assert.equal(rows[0].pass,true);assert.equal(rows[0].rc,0);assert.equal(rows[0].signal,null);
+  const wire=JSON.parse(fs.readFileSync(evidence+'/lifecycle-semantics-transcript.json','utf8'));
+  for(const method of ['initialize','textDocument/didOpen','textDocument/didChange','textDocument/definition','textDocument/references','shutdown'])
+   assert(wire.some(row=>row.direction==='send'&&row.value?.method===method)||method==='initialize'&&wire.some(row=>row.direction==='send-bytes'),method);
+ });
+});
+await group('cjlint',()=>{
+ const app=prefix+'/cjlint';
+ // Execution H and analysis modules are separate inputs. Installed/unpacked
+ // calls resolve their bundled modules; neither ambient H nor SDK -m overrides it.
+ const environment={CANGJIE_HOME:undefined,CANGJIE_PATH:undefined,LD_LIBRARY_PATH:undefined,LD_PRELOAD:undefined,LD_AUDIT:undefined};
+ const invoke=(name,source,rules,{format='json',expected=0,explicitAnalysis=false}={})=>{
+  const root=work+'/lint-'+name,dir=root+'/src';fs.mkdirSync(dir,{recursive:true});
+  fs.cpSync(app+'/config',root+'/config',{recursive:true});
+  fs.writeFileSync(root+'/config/cjlint_rule_list.json',JSON.stringify({RuleList:rules}));
+  fs.writeFileSync(dir+'/main.cj',source);
+  const output=root+'/report.'+format;
+  const r=run('lint-'+name,[binary('cjlint'),'-f',dir,'-c',root,'-o',output,'-r',format,...(explicitAnalysis?['-m',app]:[])],{environment,expected});
+  const text=fs.readFileSync(output,'utf8');
+  let rows;
+  if(format==='json')rows=JSON.parse(text);
+  else {
+   const all=[],row=[];let field='',quoted=false;
+   for(let i=0;i<text.length;i++){const c=text[i];if(c==='"'){if(quoted&&text[i+1]==='"'){field+='"';i++;}else quoted=!quoted;}else if(!quoted&&(c===','||c==='\n')){row.push(field);field='';if(c==='\n')all.push(row.splice(0));}else field+=c;}
+   assert.equal(quoted,false);rows=all.slice(1).map(r=>({file:r[0],line:Number(r[1]),column:Number(r[2]),description:r[5]}));
+  }
+  assert(Array.isArray(rows));return {rows,result:r};
+ };
+ for(const [arm,decl]of [['mutable','var'],['immutable','let']]) {
+  const ordinary=invoke(arm,'func api(): Int64 { '+decl+' value: Int64 = 42\n value }\n',['G.VAR.01'],{explicitAnalysis:arm==='immutable'});
+  check('lint immutable rule '+arm,()=>{assert.equal(ordinary.rows.length,arm==='mutable'?1:0);if(arm==='mutable')assert.equal(ordinary.rows[0].description,"G.VAR.01: Prefer immutable variables when the value of the variable 'value' does not change.");});
+  const receiver=invoke('receiver-'+arm,receiverDeclarations+'\nfunc api(): Int64 { '+decl+' value = receiverResult()\n value }\n',['G.VAR.01'],{explicitAnalysis:arm==='immutable'});
+  check('lint receiver result '+arm,()=>assert.equal(receiver.rows.some(x=>x.description?.includes('G.VAR.01')&&x.description.includes("'value'")),arm==='mutable'));
+ }
+ const error=invoke('sema-error','interface Counter { func increase(): Unit }\nstruct CounterValue <: Counter { var value: Int64 = 0\n public func increase(): Unit { value += 1 } }\n',['G.ITF.01'],{expected:1});
+ check('lint SEMA failure retains actual diagnostic and report',()=>{assert.match(error.result.stderr,/immutable/);assert(error.rows.some(x=>x.defectType==='G_ITF_01_should_use_mut_modifier'));});
+ for(const [name,body]of [['parse-error','func broken( {'],['import-error','import missing_package.not_here\nfunc api(): Int64 { 1 }\n']]) {
+  const root=work+'/lint-'+name;fs.mkdirSync(root+'/src',{recursive:true});fs.writeFileSync(root+'/src/main.cj',body);
+  run('lint-'+name,[binary('cjlint'),'-f',root+'/src','-c',app,'-o',root+'/report.json','-r','json'],{environment,expected:1});
+  check('lint '+name+' refuses report publication',()=>assert.equal(fs.existsSync(root+'/report.json'),false));
+ }
+ const rules=['G.SYN.01','G.VAR.03','G.FMT.13','G.VAR.02','G.VAR.01'];
+ const ordered=["G.FMT.13: The file header comments should contain the copyright information.","G.VAR.01: Prefer immutable variables when the value of the variable 'value' does not change.","G.VAR.02: Prefer variable 'value' to follow the principle of minimizing scope.","G.VAR.03: Avoid declaring global variable 'value'.","G.SYN.01: The syntax 'global variable' is disabled in this project."];
+ for(const format of ['json','csv']) {
+  const order=invoke('order-'+format,'package example\nvar value = 1\nfunc api(): Int64 { value }\n',rules,{format});
+  check('lint raw '+format+' position and body order',()=>{assert.deepEqual(order.rows.map(x=>x.line),[1,2,2,2,2]);assert.deepEqual(order.rows.map(x=>x.description),ordered);});
+  const duplicate=invoke('dedup-'+format,'extend String { public func serialize(): Unit {} }\nfunc api(): Unit { "password passwd".serialize() }\n',['G.SER.01'],{format});
+  check('lint raw '+format+' body deduplication',()=>{assert.equal(duplicate.rows.length,1);assert.equal(duplicate.rows[0].description,"G.SER.01: Serialize unencrypted sensitive data 'password passwd' may cause information leak");});
+ }
+});
+await group('cjprof',()=>{
+ for(const [name,expected]of [['heap',/default::Dirived\s+1\s+72\s+168/],['heap_multi_ref',/std.core::Future<Unit>\s+1\s+168\s+728/]]) {
+  const input=work+'/'+name+'.data';fs.copyFileSync(source+'/packages/cjprof/tests/'+name+'.data',input);
+  const result=run('prof-'+name,[binary('cjprof'),'heap','-i',input],{library:prefix+'/cjprof/lib'});
+  check('prof actual retained heap '+name,()=>assert.match(result.stdout,expected));
+ }
+ const facts=JSON.parse(fs.readFileSync(prefix+'/cjprof/build-facts.json'));
+ assert.equal(facts.language,'Cangjie');assert.equal(facts.sdk,sdk,'selected compiler/runtime host');
+ const jdk=facts.jdk,jar=prefix+'/cjprof/share/java/cjprof.jar';assert(path.isAbsolute(jdk));
+ fs.writeFileSync(work+'/PublicProf.java',`import com.cjprof.jni.Cjprof;
+public class PublicProf {
+ public static void main(String[] a) throws Exception {
+  Cjprof.initialize();
+  if (!Cjprof.parseHeapSnapshotFiles(java.util.Arrays.asList(a[0]))) throw new AssertionError("parse");
+  if (Cjprof.queryAllHeapSnapshot().size()!=1) throw new AssertionError("snapshot count");
+  long id=Cjprof.getSnapshotIDByFilePath(a[0]);
+  if (Cjprof.getConstructorNodesBySnapshotID(id).isEmpty()) throw new AssertionError("constructors");
+  System.out.println("CJPROF_PUBLIC_JAVA_HEAP_PASS");
+  System.out.print(java.nio.file.Files.readString(java.nio.file.Path.of("/proc/self/maps")));
+ }
+}\n`);
+ run('prof-java-compile',[jdk+'/bin/javac','-cp',jar,work+'/PublicProf.java']);
+ const result=run('prof-java-run',[jdk+'/bin/java','-Xcheck:jni','-Djava.library.path='+prefix+'/cjprof/lib','-cp',work+':'+jar,'PublicProf',work+'/heap.data'],
+  {library:prefix+'/cjprof/lib',environment:{LD_PRELOAD:jdk+'/lib/libjsig.so'}});
+ check('prof Java parsed installed CJ implementation',()=>{
+  assert.match(result.stdout,/CJPROF_PUBLIC_JAVA_HEAP_PASS/);
+  for(const lib of ['libcjprof-cangjie.so','libcjprof-jni.so'])assert(result.stdout.includes(prefix+'/cjprof/lib/'+lib));
+  assert(result.stdout.includes(sdk+'/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so'));
+  assert(result.stdout.includes(jdk+'/lib/libjsig.so'));
+ });
+});
+await group('cjcompat',()=>{
+ for(const [name,body]of Object.entries({old:'public func retained(): Int64 { 1 }\npublic func removed(): Int64 { 2 }\n',same:'public func retained(): Int64 { 1 }\npublic func removed(): Int64 { 2 }\n',deleted:'public func retained(): Int64 { 1 }\n'})) {
+  const dir=work+'/compat-'+name;fs.mkdirSync(dir);fs.writeFileSync(dir+'/lib.cj','package compat_fixture\n'+receiverDeclarations+body);
+  run('compat-cjo-'+name,[sdk+'/bin/cjc','lib.cj','--output-type=staticlib','-o','libcompat_fixture.a'],{cwd:dir});
+ }
+ for(const mode of [[],['--api'],['--abi']])for(const name of ['same','deleted']) {
+  const tag=mode[0]?.slice(2)||'default';const r=run('compat-'+name+'-'+tag,[binary('cjcompat'),'--old',work+'/compat-old/compat_fixture.cjo','--new',work+'/compat-'+name+'/compat_fixture.cjo',...mode]);
+  check('compat '+name+' '+tag,()=>{assert.match(r.stdout,name==='same'?/^Compatible!\s*$/m:/^Incompatible!$/m);if(name==='deleted')assert(r.stdout.includes('Function declaration visible outside the module deleted or made private.'));});
+ }
+});
+await group('cjtrace-recover',()=>{
+ const file=work+'/trace-source.cj';fs.writeFileSync(file,'func ordinaryControl(): Int64 { 7 }\nmain() { println(ordinaryControl()) }\n');
+ run('trace-source-compile',[sdk+'/bin/cjc',file,'-o',work+'/trace-program']);
+ check('trace source program',()=>assert.equal(run('trace-source-run',[work+'/trace-program']).stdout.trim(),'7'));
+ const symbols=run('trace-symbols',['nm','--defined-only',work+'/trace-program']).stdout;
+ const symbol=symbols.split('\n').map(s=>s.trim().split(/\s+/).at(-1)).find(s=>s?.startsWith('_CN')&&s.includes('ordinaryControl')&&!s.includes('$'));
+ assert(symbol,'actual compiler symbol required');
+ fs.writeFileSync(work+'/trace.map',symbol+' target original.cj\n');fs.writeFileSync(work+'/trace.txt','Exception: probe\n    at target(SOURCE:17)\n');
+ const output=run('trace-recovery',[binary('cjtrace-recover'),'-m',work+'/trace.map','-f',work+'/trace.txt']).stdout;
+ check('trace actual recovered symbol and source',()=>assert(output.split('\n').includes('    at default.ordinaryControl()(original.cj:17)')));
+});
+fs.writeFileSync(work+'/result.json' ,JSON.stringify({prefix,sdk,source,selected:[...selected],groups,scope:'selected independent tools; external selected SDK AST/CJO dependencies; no full SDK/Stage2'},null,2));
+process.exitCode=groups.some(g=>g.rc!==undefined&&g.rc!==0)?1:0;

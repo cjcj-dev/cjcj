@@ -25,7 +25,7 @@ const windows = values.platform === 'windows-x64';
 const destination = path.resolve(values.outdir);
 const binary = path.join(destination, windows ? 'cjpm.exe' : 'cjpm');
 const sidecar = path.join(destination, CJPM_PROVENANCE);
-const pinFile = path.resolve(import.meta.dirname, '..', 'cjpm_pin.env');
+const pinFile = path.resolve(import.meta.dirname, '..', 'source_pin.env');
 const pin = await readCjpmPin(pinFile);
 
 await fs.rm(destination, {recursive: true, force: true});

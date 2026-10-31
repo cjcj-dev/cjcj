@@ -19,8 +19,8 @@ test('the real workflow selector chooses the independently measured Linux publis
   console.log(`HOST_PLATFORM_IDENTITY_ASSERT_REACHED actual=${selected.stdout.trim()} measured=${expected}`);
   assert.equal(selected.stdout.trim(),`CJCJ_TOOLCHAIN=${expected}`,'workflow value must select the independently measured new Linux publisher');
 });
-test('the workflow selector retains the unverified other-platform identity',()=>{
+test('the workflow selector uses the independently downloaded ARM release identity',()=>{
   const selected=spawnSync(process.execPath,[path.join(repository,'ci/host-toolchain-pin.mjs'),'--github-env','--platform','linux_aarch64'],{encoding:'utf8'});
   assert.equal(selected.status,0,selected.stderr);
-  assert.equal(selected.stdout.trim(),'CJCJ_TOOLCHAIN=nightly-'+'1.3.0-alpha.20260925001050');
+  assert.equal(selected.stdout.trim(),'CJCJ_TOOLCHAIN=nightly-'+'1.3.0-alpha.20261025001053');
 });

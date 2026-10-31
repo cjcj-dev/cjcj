@@ -25,14 +25,11 @@ import fs from 'node:fs';
 export const repoRoot = path.resolve(import.meta.dirname, '..');
 export const REGISTERED = Object.freeze(JSON.parse(fs.readFileSync(new URL('./test-registry.json', import.meta.url), 'utf8')));
 
-// These tests execute in a separately checked-out, fixed product tree. They
-// cannot be in this branch's GATING file list: that would execute a different
-// source identity (or a file that is absent here). The manifest test checks the
-// actual first checkout before recognizing this workflow-specific registration.
+// This workflow must execute this candidate, including its registered native
+// boundary test. The checker rejects missing, branch or foreign checkouts.
 export const WORKFLOW_TEST_SOURCES = Object.freeze([
-  {workflow: 'darwin-input-consumers.yml',
-    source_sha: '255d8c7e1f5e70be69b4cf3e9091514cfb1a4d09',
-    gating: ['ci/release/darwin_consumer_boundary.test.mjs']},
+  {workflow:'darwin-input-consumers.yml', source_ref:'${{ github.sha }}',
+    gating:['ci/release/darwin_consumer_boundary.test.mjs']},
 ]);
 
 // The second axis, and the reason it exists. The name patterns above cannot see
@@ -46,6 +43,7 @@ export const DRIVERS = Object.freeze(JSON.parse(fs.readFileSync(new URL('./test-
 
 // Run by `node --test` in .github/workflows/ci.yml, via `test-manifest.mjs list`.
 export const GATING = Object.freeze([
+  'ci/platform_matrix/windows_runtime_capture.test.mjs',
   'ci/bootstrap/sdk-python-source.test.mjs',
   'ci/colour-sdk.test.mjs',
   'ci/release/receive_native_sdk.test.mjs',
@@ -54,6 +52,7 @@ export const GATING = Object.freeze([
   'ci/bootstrap/native-runtime-input.test.mjs',
   'ci/bootstrap/native-host.test.mjs',
   'build/test/runtime-command-entry.test.mjs',
+  'build/test/installed-language-259.test.mjs',
   'build/test/sdk-tools-profile.test.mjs',
   'build/test/native-tool-layout.test.mjs',
   'build/test/tool-readiness.test.mjs',
@@ -62,6 +61,8 @@ export const GATING = Object.freeze([
   'ci/bootstrap/sdk-std-barrier-resume.test.mjs',
   'ci/check-colour-tlab.test.mjs',
   'ci/release/darwin_workflow_entry.test.mjs',
+  'ci/release/darwin_consumer_boundary.test.mjs',
+  'ci/release/darwin_llvm.test.mjs',
   'ci/bootstrap/compiler-identity.integration.test.mjs',
   'ci/g1-entry-branches.test.mjs',
   'ci/g1-entry-differential.test.mjs',
@@ -81,9 +82,11 @@ export const GATING = Object.freeze([
   'build/test/source-matrix.test.mjs',
   'ci/platform_matrix/summarize_scope.test.mjs',
   'ci/platform_matrix/llvm-tuple.test.mjs',
+  'ci/platform_matrix/native_llvm_consumer.test.mjs',
   'ci/release/g8.test.mjs',
   'build/test/archive.test.mjs',
   'build/test/cangjie-test-preparation.test.mjs',
+  'ci/cangjie-test/envelope.test.mjs',
   'build/test/compose-sdk-entry.test.mjs',
   'build/test/darwin-cjdb-python.test.mjs',
   'build/test/fail-closed-probes.test.mjs',
@@ -200,6 +203,14 @@ export const GATING = Object.freeze([
 // records what the invocation in `needs` actually produced when run by hand, so
 // wiring one of these in is a decision about CI shape, not a re-investigation.
 export const DEFERRED = Object.freeze([
+  Object.freeze({
+    file: 'ci/platform_matrix/native-runtime-package.integration.test.mjs',
+    needs: 'Native Linux or Darwin x64/arm64, Node, CXX (default clang++) with shared-library support, which and tar; '
+      + 'NATIVE_PACKAGE_EVIDENCE must name an absolute private directory retaining real compiled libraries, loader and package evidence. '
+      + 'Run node --test ci/platform_matrix/native-runtime-package.integration.test.mjs after preparing these inputs; generic GATING does not provision that evidence directory.',
+    verified: 'Fixed c7f447 finite-v2 on kkk2: 4 tests pass, rc0; real Linux ELF load/origin/memcpy and same-package unpack, '
+      + 'missing library and wrong-origin rejection/recovery. Fixtures do not qualify a native runtime, Darwin execution or SDK.',
+  }),
   Object.freeze({file: "ci/bootstrap/sdk-command-lifetime.test.mjs",
     needs: "Dedicated Linux worker with Python3 pidfd/subreaper support and Node; owned absolute RELEASE_EVIDENCE_TEST_ROOT and TMPDIR; node --test ci/bootstrap/sdk-command-lifetime.test.mjs. Retains small CLI logs and symlinks only; no SDK or repository copy",
     verified: "TASK02:10 public supervisor CLI regression for absolute/relative/symlink paths, body and exit propagation, import isolation and cancellation; actual results belong to the fixed candidate report, not SDK production qualification"}),
@@ -321,6 +332,7 @@ export function discoverTestFiles(root = repoRoot) {
   const found = listed.split('\0').filter(Boolean)
     .filter(file => !file.split('/').includes('node_modules'))
     .filter(file => /\.(?:test|integration)\.mjs$|(?:^|\/)test[_.-][^/]*\.(?:py|sh)$|[._-]test\.sh$|_test\.cj$|^build\/test\/.*\.sh$|\/tests\/[^/]+\.(?:py|sh)$/.test(file)
+      || /^ci\/release\/test_[^/]*\.mjs$/.test(file)
       || (/^ci\/test-[^/]*\.mjs$/.test(file)
         && /^#!\/usr\/bin\/env zx(?:\r?\n|$)/.test(fs.readFileSync(path.join(root, file), 'utf8'))));
   return [...new Set(found)].sort();

@@ -32,7 +32,7 @@ try {
     entry: sha256(await fs.readFile(entry)),
     selection: sha256(await fs.readFile(selection)),
     test: sha256(await fs.readFile('ci/platform_matrix/test_windows_runtime_link.mjs')),
-    runtime: process.env.RUNTIME_REF,
+    runtime: process.env.CJCJ_NATIVE_RUNTIME_REF,
   };
   const run = await $({nothrow: true, verbose: false})`npx --yes zx@8 ci/platform_matrix/build_runtime.mjs`;
   const log = `${run.stdout}\n${run.stderr}`;
@@ -63,7 +63,7 @@ try {
   } else {
     assert.match(linkCommand, /-fuse-ld=lld/);
     const install = '.platform-ci/runtime-install/windows_release_x86_64';
-    assert.equal((await fs.readFile(path.join(install, 'SOURCE_SHA'), 'utf8')).trim(), process.env.RUNTIME_REF);
+    assert.equal((await fs.readFile(path.join(install, 'SOURCE_SHA'), 'utf8')).trim(), process.env.CJCJ_NATIVE_RUNTIME_REF);
     const dll = path.join(install, 'runtime/lib/windows_x86_64_cjnative/libcangjie-runtime.dll');
     const bytes = await fs.readFile(dll);
     assert.equal(bytes.toString('ascii', 0, 2), 'MZ', 'installed DLL is a PE image');

@@ -4,6 +4,8 @@ import {BuildError} from '../lib/errors.mjs';
 import {compilerRuntimeDirectory} from '../lib/runtime-split.mjs';
 import {run as runCommand} from '../lib/runner.mjs';
 import {bootstrapHostSdk, envFrom, requireDir, requireFile} from './stages/common.mjs';
+import {languageSourceInputs,prepareInstalledLanguage,installedLanguageCommand} from './installed-language-source.mjs';
+import {completedGcUnitGate} from './installed-language-inputs.mjs';
 
 export const GC_UNIT_LANGUAGE_DONE = 'LANGUAGE_TESTS=LANGUAGE_DONE';
 export const GC_UNIT_LANGUAGE_DEFERRED = 'LANGUAGE_TESTS=LANGUAGE_DEFERRED';
@@ -29,7 +31,7 @@ function statusFields(file,stage) {
 }
 export function assertLanguageState(file,expected,stage) {
   const fields=statusFields(file,stage);
-  if(fields.get('GATE')!=='PASS'||fields.get('GATE_RC')!=='0')throw new BuildError(stage,`gc_unit gate is not one exact PASS/rc0 in ${file}`);
+  if(!completedGcUnitGate(fields))throw new BuildError(stage,`gc_unit gate is not one exact PASS/rc0 in ${file}`);
   if(fields.get('LANGUAGE_TESTS')!==expected.slice('LANGUAGE_TESTS='.length))
     throw new BuildError(stage,`${expected} missing in ${file}`);
   return fields;
@@ -50,24 +52,29 @@ export function beginGcUnitLanguageDeferral(config,runtime,sdk,{env=process.env}
 export function installGcUnitInputs(config,runtime,sdk,{gateStatus=gcUnitBuildStatus(runtime)}={}) {
   const stage='runtime.gc_unit_language',status=gateStatus;
   const fields=statusFields(status,stage);
-  if(fields.get('GATE')!=='PASS'||fields.get('GATE_RC')!=='0'||fields.get('CPP_SUITE')!=='PASS'
+  if(!completedGcUnitGate(fields)||fields.get('CPP_SUITE')!=='PASS'
     ||!['LANGUAGE_DEFERRED','LANGUAGE_DONE'].includes(fields.get('LANGUAGE_TESTS')))
     throw new BuildError(stage,`current native gate did not complete: ${status}`);
-  for(const member of ['gate_gc_unit.sh','gate_gc_unit.mjs','language_toolchain.py','language_toolchain.mjs'])
-    requireFile(path.join(runtime,'tests/gc_unit',member),{stage});
+  const {modern}=languageSourceInputs(runtime);
   const carried=path.join(sdk,'share/runtime-build'),to=path.join(carried,'runtime');
   if(path.resolve(runtime)===path.resolve(to)||path.resolve(runtime).startsWith(path.resolve(carried)+path.sep))throw new BuildError(stage,'runtime source overlaps carried destination');
-  fs.rmSync(carried,{recursive:true,force:true});
   const members=['tests/gc_unit','tests/perf_vs_official','src','include','third_party/third_party_bounds_checking_function/include',
-    'build/resolve_runtime_headers.py','build/resolve_runtime_headers.mjs','CMakeLists.txt',
+    'build/resolve_runtime_headers.py',...(modern?['build/resolve_runtime_headers.mjs']:[]),'CMakeLists.txt',
     'CMakebuild/compile_commands.json'];
+  for(const member of members)if(!fs.existsSync(path.join(runtime,member)))throw new BuildError(stage,`missing normal runtime input: ${member}`);
+  const headers=requireDir(path.join(runtime,'CMakebuild/runtime-staging/include'),{stage});
+  const segmented=fields.get('SEGMENTED_ARRAY_MANAGED_CAN_RUN')==='1';
+  const cppElf=segmented?requireFile(path.join(fields.get('EVIDENCE_DIR')||'', 'cj_gc_unit'),{stage}):null;
+  fs.rmSync(carried,{recursive:true,force:true});
   for(const member of members) {
     const from=path.join(runtime,member),destination=path.join(to,member);
     if(!fs.existsSync(from))throw new BuildError(stage,`missing normal runtime input: ${from}`);
     fs.mkdirSync(path.dirname(destination),{recursive:true});
     fs.cpSync(from,destination,{recursive:true,dereference:true,filter:file=>!['.git','__pycache__','build_standalone'].includes(path.basename(file))});
   }
-  fs.cpSync(requireDir(path.join(runtime,'CMakebuild/runtime-staging/include'),{stage}),path.join(sdk,'runtime/include'),{recursive:true,dereference:true});
+  prepareInstalledLanguage(to);
+  if(cppElf)fs.copyFileSync(cppElf,path.join(to,'CMakebuild/cj_gc_unit'));
+  fs.cpSync(headers,path.join(sdk,'runtime/include'),{recursive:true,dereference:true});
   fs.copyFileSync(status,path.join(to,'CMakebuild/gc-unit.status'));
   const installed=gcUnitStatusPath(config,sdk);fs.mkdirSync(path.dirname(installed),{recursive:true});fs.copyFileSync(status,installed);
   return carried;
@@ -79,7 +86,7 @@ export function finishGcUnitLanguageDeferral(config,runtime,sdk,{env=process.env
 }
 export function languageInputEnvironment(config,sdk,env=process.env) {
   const compiler=path.join(sdk,'bin/cjc'),hostSdk=bootstrapHostSdk(config,env);
-  return {...env,CJCJ_SRCBUILD_HOST_SDK:hostSdk,CANGJIE_HOME:sdk,CJC:compiler,GC_UNIT_LANGUAGE_SDK:sdk,
+  return {...env,CJCJ_OFFICIAL_SDK_ROOT:hostSdk,CANGJIE_HOME:sdk,CJC:compiler,GC_UNIT_LANGUAGE_SDK:sdk,
     GC_UNIT_RUNTIME_TUPLE:config.target.runtimeLibSubdir(config.buildType),
     GC_UNIT_CJC_RUNTIME_TUPLE:config.target.spec.hostRuntimeTuple||config.target.spec.runtimeTuple,
     GCV2_RUNTIME_LIB_DIR:path.join(sdk,'runtime/lib',config.target.runtimeLibSubdir(config.buildType)),
@@ -95,10 +102,9 @@ export async function runGcUnitLanguageTests(config,sdk,{env=process.env,source=
   // inputs. The std checkout is not the producer of these runtime tests.
   const root=source||path.join(sdk,'share/runtime-build'),runtime=path.join(root,'runtime');
   const native=statusFields(gcUnitBuildStatus(runtime),stage);
-  if(native.get('GATE')!=='PASS'||native.get('GATE_RC')!=='0'||native.get('CPP_SUITE')!=='PASS')
+  if(!completedGcUnitGate(native)||native.get('CPP_SUITE')!=='PASS')
     throw new BuildError(stage,'native CPP result required before only-language');
-  const gate=requireFile(path.join(runtime,'tests/gc_unit/gate_gc_unit.sh'),{stage});
-  requireFile(path.join(runtime,'tests/gc_unit/language_toolchain.mjs'),{stage});
+  const command=installedLanguageCommand(runtime);
   requireFile(path.join(runtime,'CMakebuild/compile_commands.json'),{stage});
   const headers=requireDir(path.join(sdk,'runtime'),{stage});
   requireFile(path.join(headers,'include/schedule.h'),{stage});
@@ -107,7 +113,7 @@ export async function runGcUnitLanguageTests(config,sdk,{env=process.env,source=
   // successful process that fails to produce this invocation's status fails.
   fs.rmSync(status,{force:true});
   const deleted=Object.fromEntries(Object.keys(process.env).filter(key=>!(key in env)).map(key=>[key,null]));
-  await runCommand(['bash',gate],{stage,envOverlay:{...deleted,...envFrom(config,languageInputEnvironment(config,sdk,env),{
+  await runCommand(command,{stage,envOverlay:{...deleted,...envFrom(config,languageInputEnvironment(config,sdk,env),{
     GC_UNIT_SOURCE_ROOT:root,GCV2_RUNTIME_CONFIG:null,GCV2_RUNTIME_OUTPUT_ROOT:headers,
     GCV2_RUNTIME_BUILD_DIR:path.join(runtime,'CMakebuild'),GC_UNIT_GATE_STATUS:status,GC_UNIT_GATE_LANGUAGE_TESTS:'only',
   })}});

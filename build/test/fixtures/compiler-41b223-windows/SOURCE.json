@@ -1,0 +1,27 @@
+{
+  "repository": "https://gitcode.com/Cangjie/cangjie_compiler.git",
+  "commit": "41b22350b8eb5b0c8244704f906b7b8d3096eb9c",
+  "scope": "Exact CMake source subset; fixture Git commits are not the canonical repository.",
+  "files": [
+    {
+      "path": "cmake/mingw_x86_64_toolchain.cmake",
+      "sha256": "162b30ce46f9b73f45c1334e34d03a7bc244d6ce4b54d06fd3f5ee37876d2cf1"
+    },
+    {
+      "path": "third_party/CMakeLists.txt",
+      "sha256": "a03052e115558b7d3b8755e00e864bac0e5bbc004991201fbdba712acaf8a4b2"
+    },
+    {
+      "path": "third_party/cmake/Xml2.cmake",
+      "sha256": "f79d84552b62877133a2f929d0f59068c09c3f57ab76f2dbd4cf89e98a2e2732"
+    },
+    {
+      "path": "third_party/cmake/BuildCJDB.cmake",
+      "sha256": "9ddcd128f8921d998fdb1e468df93c961199f13d84014781e927bfb71144c460"
+    },
+    {
+      "path": "src/CMakeLists.txt",
+      "sha256": "3520410df21eb13e534a1f655479b7b26007976bce7fa3c7ab8715462fe3c48c"
+    }
+  ]
+}

@@ -11,7 +11,7 @@ const PIN_FILES = [
   'ci/runtime_pin.env',
   'ci/llvm_pin.env',
   'ci/source_pin.env',
-  'ci/cjpm_pin.env',
+  'ci/source_pin.env',
 ];
 const G2_ARTIFACTS = [
   'runtime_dynamic',

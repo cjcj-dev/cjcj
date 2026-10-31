@@ -24,7 +24,7 @@ function executorFixture(t) {
   fs.writeFileSync(py, fs.readFileSync(py, 'utf8')
     .replace("build=pathlib.Path('build_temp/build')", `build=pathlib.Path('build_temp/build')
 with (root/'executor-env.jsonl').open('a') as stream:
- stream.write(json.dumps(dict(phase=sys.argv[1],macro=os.environ.get('STDX_HOST_CANGJIE_HOME'),baseline=os.environ.get('CJCJ_SRCBUILD_HOST_SDK'),home=os.environ.get('CANGJIE_HOME'),cjc=shutil.which('cjc')))+'\\n')`)
+ stream.write(json.dumps(dict(phase=sys.argv[1],macro=os.environ.get('STDX_HOST_CANGJIE_HOME'),baseline=os.environ.get('CJCJ_OFFICIAL_SDK_ROOT'),home=os.environ.get('CANGJIE_HOME'),cjc=shutil.which('cjc')))+'\\n')`)
     .replace('if not build.exists():', "if not build.exists() or os.environ.get('CANGJIE_SCHEMA_DIR'):"));
   fs.appendFileSync(path.join(f.stdx, 'CMakeLists.txt'), `
 include(\${CMAKE_CURRENT_SOURCE_DIR}/MakeHostCJNATIVESharedLib.cmake)
@@ -94,19 +94,21 @@ test('public sdk-tools producer records its actual subset configuration in its o
 });
 
 for (const [phase, rc] of [['CONFIGURE', 25], ['BUILD', 23], ['INSTALL', 24]]) {
-  test(`public failed ${phase.toLowerCase()} invalidates prior installed success and preserves it`, t => {
+  test(`public failed ${phase.toLowerCase()} preserves the published install without publishing the failed attempt`, t => {
     const f = fixture(t); successful(f.build());
     const before = fs.readFileSync(path.join(f.sdk, STDX_BUILD_INPUTS));
+    const pendingBefore = new Set(fs.readdirSync(f.root).filter(name=>name.startsWith('sdk.stdx-pending-')));
     const result = f.build([], {['FIXTURE_FAIL_' + phase]: '1'});
     console.log('STDX_FAILED_' + phase + '_ASSERT_REACHED');
     // The public CLI maps a BuildError to 1; retain the child producer's own
     // 23/24 from the runner diagnostic instead of conflating parent/child rc.
     assert.equal(result.status, 1, result.stderr);
     assert.match(result.stderr, new RegExp('\\(exit=' + rc + '\\)'));
-    assert.equal(fs.existsSync(path.join(f.sdk, STDX_BUILD_INPUTS)), false);
-    const directory = path.dirname(path.join(f.sdk, STDX_BUILD_INPUTS));
-    const previous = fs.readdirSync(directory).find(name => name.startsWith('stdx.json.previous-'));
-    assert.ok(previous); assert.deepEqual(fs.readFileSync(path.join(directory, previous)), before);
+    assert.deepEqual(fs.readFileSync(path.join(f.sdk, STDX_BUILD_INPUTS)), before);
+    const failedPending = fs.readdirSync(f.root).filter(name=>name.startsWith('sdk.stdx-pending-')&&!pendingBefore.has(name));
+    assert.equal(failedPending.length,1,'one isolated failed producer attempt');
+    assert.equal(fs.existsSync(path.join(f.root,failedPending[0],STDX_BUILD_INPUTS)),false,
+      'failed attempt cannot publish successful install facts');
     if (phase === 'INSTALL') {
       const built = JSON.parse(fs.readFileSync(path.join(f.root, 'build/stdx/build-inputs.json')));
       assert.equal(built.build.rc, 0); assert.equal(built.install, undefined);
@@ -207,6 +209,7 @@ add_custom_target(cj_entry ALL COMMAND`).replace(
   assert(originalGraph.includes(hostRuntime));
   const consumer = path.join(f.root, 'consumer.jsonl');
   const beforeConsumer = fs.readFileSync(consumer, 'utf8');
+  const beforeInstall = fs.readFileSync(path.join(f.sdk,STDX_BUILD_INPUTS));
   fs.writeFileSync(graph, originalGraph.replaceAll(hostRuntime, wrongRuntime));
   try {
     const wrong = f.build(inc, env);
@@ -218,7 +221,10 @@ add_custom_target(cj_entry ALL COMMAND`).replace(
   assert.equal(generatedWrong.status, 1);
   assert.match(generatedWrong.stderr, /generated cjc command selects wrong runtime/);
   assert.notEqual(fs.readFileSync(consumer, 'utf8'), beforeConsumer, 'native reconfigure actually ran');
-  assert(!fs.existsSync(path.join(f.sdk, STDX_BUILD_INPUTS)), 'wrong generated graph cannot publish install success');
+  assert.deepEqual(fs.readFileSync(path.join(f.sdk, STDX_BUILD_INPUTS)),beforeInstall,
+    'wrong generated graph cannot replace the previously published install facts');
+  assert.equal(fs.existsSync(path.join(f.root,'build/stdx/build-inputs.json')),false,
+    'wrong graph cannot complete the current build or installation');
   console.log('STDX_GENERATED_RUNTIME_REJECTION_ASSERT_REACHED');
   // Restore this controlled graph fault; the normal producer regenerates it.
   fs.writeFileSync(graph, originalGraph);
@@ -245,11 +251,13 @@ test('explicit stdx macro executor reaches first incremental recovery and instal
   }
   assert(fs.readFileSync(f.executorEnv.FIXTURE_EXECUTOR_TRACE,'utf8').includes(path.join(f.sdk,'bin/cjc')));
   console.log('EXPLICIT_EXECUTOR_ATTEMPT_BUILD_INSTALL_ASSERT_REACHED');
+  const published = fs.readFileSync(path.join(f.sdk, STDX_BUILD_INPUTS));
   const wrong = f.build(inc, {...env, STDX_HOST_CANGJIE_HOME:f.host});
   assert.equal(wrong.status, 1); assert.match(wrong.stderr, /must provide the public cjc selected on PATH/);
-  assert(!fs.existsSync(path.join(f.sdk, STDX_BUILD_INPUTS)));
+  assert.deepEqual(fs.readFileSync(path.join(f.sdk, STDX_BUILD_INPUTS)), published);
   const missing = f.build(inc, {...env, STDX_HOST_CANGJIE_HOME:path.join(f.root,'missing-home')});
   assert.equal(missing.status, 1); assert.match(missing.stderr, /host cjc not found/);
+  assert.deepEqual(fs.readFileSync(path.join(f.sdk, STDX_BUILD_INPUTS)), published);
   // b107's native contract uses explicit empty HOME to disable host closure.
   successful(f.build(inc, {...env, STDX_HOST_CANGJIE_HOME:''}));
   assert.equal(read(f.sdk).build.environment.STDX_HOST_CANGJIE_HOME, '');
@@ -260,9 +268,10 @@ test('explicit stdx macro executor reaches first incremental recovery and instal
 
 test('unset stdx macro executor retains official host default when PATH selects that host', t => {
   const f = executorFixture(t);
-  // Existing non-explicit consumer layout: H precedes the default compiler output.
-  fs.mkdirSync(path.join(f.root,'cangjie_compiler'), {recursive:true});
-  fs.symlinkSync(f.sdk, path.join(f.root,'cangjie_compiler/output'));
+  // Existing non-explicit consumer layout: H precedes the normal SDK install.
+  fs.mkdirSync(path.join(f.root,'software'), {recursive:true});
+  const destination=path.join(f.root,'software/cangjie');
+  fs.cpSync(f.sdk, destination, {recursive:true});
   const env = {...f.executorEnv, STDX_HOST_CANGJIE_HOME:undefined, CJCJ_SRCBUILD_CONSUMER_SDK:''};
   successful(f.build([], env));
   successful(f.build(['--stdx-build-mode','incremental'], env));
@@ -270,6 +279,33 @@ test('unset stdx macro executor retains official host default when PATH selects 
     assert.equal(row.macro, f.host); assert.equal(row.baseline, f.host);
     assert.equal(row.cjc, path.join(f.host,'bin/cjc'));
   }
-  assert.equal(read(f.sdk).build.environment.STDX_HOST_CANGJIE_HOME, f.host);
+  assert.equal(read(destination).build.environment.STDX_HOST_CANGJIE_HOME, f.host);
   console.log('UNSET_EXECUTOR_DEFAULT_CONTROL_ASSERT_REACHED');
+});
+
+
+test('public native stdx forwards GCC input and rejects incompatible incremental reuse', t => {
+  const f=fixture(t), gcc=path.join(f.root,'gcc-prefix'); fs.mkdirSync(gcc);
+  successful(f.build());
+  console.log('STDX_GCC_DEFAULT_CONTROL_REACHED');
+  assert.equal(read(f.sdk).build.configuration.values.BUILD_GCC_TOOLCHAIN,'');
+  successful(f.build(['--stdx-gcc-toolchain',gcc]));
+  console.log('STDX_GCC_FORWARD_TARGET_REACHED');
+  const facts=read(f.sdk);
+  assert(facts.build.argv.includes('--gcc-toolchain='+gcc));
+  assert.equal(facts.build.configuration.values.BUILD_GCC_TOOLCHAIN,gcc);
+  successful(f.build(['--stdx-gcc-toolchain',gcc,'--stdx-build-mode','incremental']));
+  const before=fs.readFileSync(path.join(f.root,'consumer.jsonl'),'utf8');
+  const missing=f.build(['--stdx-build-mode','incremental']);
+  assert.equal(missing.status,1); assert.match(missing.stderr,/native configuration changed: BUILD_GCC_TOOLCHAIN=/);
+  assert.equal(fs.readFileSync(path.join(f.root,'consumer.jsonl'),'utf8'),before);
+  const other=path.join(f.root,'other-gcc'); fs.mkdirSync(other);
+  const changed=f.build(['--stdx-gcc-toolchain',other,'--stdx-build-mode','incremental']);
+  assert.equal(changed.status,1); assert.match(changed.stderr,/native configuration changed: BUILD_GCC_TOOLCHAIN=/);
+  successful(f.build(['--stdx-build-mode','incremental'],{CJCJ_STDX_GCC_TOOLCHAIN:gcc}));
+  successful(f.build());
+  const relative=f.build(['--stdx-gcc-toolchain','relative']);
+  assert.equal(relative.status,2,relative.stderr); assert.match(relative.stderr,/expected an absolute GCC/);
+  const cross=f.build(['--target','windows-x64','--stdx-gcc-toolchain',gcc]);
+  assert.equal(cross.status,2,cross.stderr); assert.match(cross.stderr,/only supported for native stdx builds/);
 });

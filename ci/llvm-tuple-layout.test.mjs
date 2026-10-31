@@ -5,6 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import {spawnSync} from 'node:child_process';
 import {gzipSync} from 'node:zlib';
+import {createHash} from 'node:crypto';
 import {exportBranches} from './llvm-tuple-branches.mjs';
 
 const repo = path.resolve(import.meta.dirname, '..');
@@ -26,7 +27,7 @@ function fixture(root) {
     const result = command(argv); assert.equal(result.status, 0, result.stderr);
   }
   fs.writeFileSync(path.join(fixed, 'llvm-tools.manifest'), 'PLATFORM=linux_x86_64\n');
-  return {LLVM_SHA: 'llvm-fixture', CANGJIE_COMPILER_SHA: 'compiler-fixture', REPO_ROOT: git, CJCJ_FIXED_LLVM_DIR: fixed};
+  return {CJCJ_NATIVE_LLVM_REF: 'llvm-fixture', CANGJIE_COMPILER_SHA: 'compiler-fixture', REPO_ROOT: git, CJCJ_FIXED_LLVM_DIR: fixed};
 }
 
 test('tuple source exporter loses only the deleted real identity guard', () => {
@@ -49,8 +50,8 @@ test('real tuple publisher emits all ten checksummed consumer payloads', t => {
   const depot = path.join(root, "depot with spaces ' $ é");
   const result = command(['npx', '--yes', 'zx@8', product, depot], {env});
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(result.stdout, `published fixed LLVM tuple to depot ${depot}/${env.LLVM_SHA}/${env.CANGJIE_COMPILER_SHA}\n`);
-  const tuple = path.join(depot, env.LLVM_SHA, env.CANGJIE_COMPILER_SHA);
+  assert.equal(result.stdout, `published fixed LLVM tuple to depot ${depot}/${env.CJCJ_NATIVE_LLVM_REF}/${env.CANGJIE_COMPILER_SHA}\n`);
+  const tuple = path.join(depot, env.CJCJ_NATIVE_LLVM_REF, env.CANGJIE_COMPILER_SHA);
   const checked = command(['sha256sum', '--strict', '-c', 'SHA256SUMS'], {cwd: tuple});
   assert.equal(checked.status, 0, checked.stderr);
   assert.equal(checked.stdout.trim().split('\n').length, 10);
@@ -82,11 +83,12 @@ if (process.env.TUPLE_DIFFERENTIAL === '1') test('tuple source-derived full tabl
     delete env.BASH_ENV;
     const expand = value => replacements[value] || value;
     for (const [key, value] of Object.entries(input.env || {})) {
-      if (value === null) delete env[key]; else env[key] = expand(value);
+      const selectedKey=key==='LLVM_SHA'?'CJCJ_NATIVE_LLVM_REF':key;
+      if (value === null) delete env[selectedKey]; else env[selectedKey] = expand(value);
     }
     const args = (input.args || ['$DEPOT']).map(expand);
     const depotRoot = args[0] || env.CJCJ_LLVM_DEPOT_ROOT || '/root/llvmdepot';
-    const tuple = `${depotRoot}/${env.LLVM_SHA || ''}/${env.CANGJIE_COMPILER_SHA || ''}`;
+    const tuple = `${depotRoot}/${env.CJCJ_NATIVE_LLVM_REF || ''}/${env.CANGJIE_COMPILER_SHA || ''}`;
     const old = path.join(work, 'retired-entry.bash');
     fs.writeFileSync(old, 'set -e\n' + source + '\npublish_fixed_tuple_to_depot "$@"\n');
     const tools = ['git', 'mkdir', 'cp', 'gzip', 'chmod', 'sha256sum'];
@@ -103,8 +105,11 @@ if (process.env.TUPLE_DIFFERENTIAL === '1') test('tuple source-derived full tabl
       const bashEnv = path.join(work, 'bash-env');
       if (input.fail.command === 'cd') fs.writeFileSync(bashEnv, "cd() { printf '%s\\n' 'fixture command error: cd' >&2; return 19; }\n");
       else if (input.fail.command === 'printf') {
-        const state = path.join(work, 'printf-counter');
-        fs.writeFileSync(bashEnv, `printf() { local count=0; if [[ -f '${state}' ]]; then read -r count < '${state}' || :; fi; count=$((count + 1)); builtin printf '%s\\n' "$count" > '${state}'; if [[ $count == ${input.fail.occurrence} ]]; then builtin printf '%s\\n' 'fixture command error: printf' >&2; return 19; fi; builtin printf "$@"; }\n`);
+        const field = /^\s*printf '([A-Z_]+)=/.exec(rows.find(row => row.kind === entry.branch && row.line === entry.line).source)?.[1];
+        assert.ok(field, 'source-derived manifest field required');
+        // Select the actual field write, not a process-wide invocation ordinal:
+        // zx may issue its own printf and paired provenance adds another field.
+        fs.writeFileSync(bashEnv, `printf() { case "$1" in ${field}=*) builtin printf '%s\\n' 'fixture command error: printf' >&2; return 19;; esac; builtin printf "$@"; }\n`);
       } else fs.writeFileSync(bashEnv, "echo() { builtin printf '%s\\n' 'fixture command error: echo' >&2; return 19; }\n");
       env.BASH_ENV = bashEnv;
     }
@@ -124,11 +129,40 @@ if (process.env.TUPLE_DIFFERENTIAL === '1') test('tuple source-derived full tabl
     const arms = {};
     for (const [name, argv] of [['old', ['bash', old, ...args]], ['new', ['npx', '--yes', 'zx@8', product, ...args]]]) {
       prepare();
-      const result = command(argv, {env, cwd: identity.REPO_ROOT});
+      // The unchanged Bash witness consumes its original name; the current
+      // public publisher consumes the same selected value under canonical N.
+      const executionEnv={...env};
+      delete executionEnv.LLVM_SHA;
+      if(name==='old'&&Object.hasOwn(env,'CJCJ_NATIVE_LLVM_REF'))executionEnv.LLVM_SHA=env.CJCJ_NATIVE_LLVM_REF;
+      if (name === 'new' && env.BASH_ENV) {
+        // Load the controlled builtin at zx's documented shell-prefix boundary.
+        // Passing BASH_ENV through Node alone did not install the function in
+        // the observed child shell; that unexecuted cut is not evidence.
+        executionEnv.ZX_PREFIX = `source '${env.BASH_ENV.replaceAll("'", "'\\''")}'; set -euo pipefail;`;
+      }
+      const result = command(argv, {env:executionEnv, cwd: identity.REPO_ROOT});
       fs.writeFileSync(path.join(work, `${name}.stdout`), result.stdout);
       fs.writeFileSync(path.join(work, `${name}.stderr`), result.stderr);
       const trace = fs.existsSync(path.join(work, 'argv.json')) ? JSON.parse(fs.readFileSync(path.join(work, 'argv.json'), 'utf8')) : null;
-      const sums = result.status === 0 ? fs.readFileSync(path.join(tuple, 'SHA256SUMS'), 'utf8') : null;
+      let sums = result.status === 0 ? fs.readFileSync(path.join(tuple, 'SHA256SUMS'), 'utf8') : null;
+      if (sums !== null) {
+        const manifest = fs.readFileSync(path.join(tuple, 'MANIFEST'), 'utf8');
+        fs.writeFileSync(path.join(work, `${name}.manifest`), manifest);
+        fs.writeFileSync(path.join(work, `${name}.sums`), sums);
+        assert.equal(command(['sha256sum', '--strict', '-c', 'SHA256SUMS'], {cwd: tuple}).status, 0);
+        if (name === 'new') {
+          // The historical publisher predates paired-runtime provenance. Keep
+          // its original bytes and assert the one intentional fact extension;
+          // compare every other byte, including all ten payload checksums.
+          const runtimeLine = `RUNTIME_REF=${env.CJCJ_NATIVE_RUNTIME_REF || ''}\n`;
+          assert.equal(manifest.split(runtimeLine).length, 2);
+          const historical = fs.readFileSync(path.join(work, 'old.manifest'), 'utf8');
+          assert.equal(manifest.replace(runtimeLine, ''), historical);
+          assert.equal(fs.readFileSync(path.join(tuple, 'lib/STATIC_LLVM.txt'), 'utf8'), manifest);
+          const oldHash = createHash('sha256').update(historical).digest('hex');
+          sums = sums.replace(/^[a-f0-9]{64}(  \.\/(?:MANIFEST|lib\/STATIC_LLVM\.txt))$/gm, `${oldHash}$1`);
+        }
+      }
       arms[name] = {rc: result.status, stdout: normalize(result.stdout), stderr: normalize(result.stderr), trace, sums};
       fs.writeFileSync(path.join(work, `${name}.json`), JSON.stringify(arms[name], null, 2));
       // A green comparison without an observed fault is not a positive control.
@@ -136,7 +170,15 @@ if (process.env.TUPLE_DIFFERENTIAL === '1') test('tuple source-derived full tabl
     }
     results.push({...entry, arms});
     fs.writeFileSync(path.join(evidence, 'results.json'), JSON.stringify(results, null, 2));
-    assert.deepEqual(arms.new, arms.old, `branch ${entry.branch}:${entry.line} trigger ${entry.trigger}`);
+    if ((input.fixture === 'missing-payload' && input.payload === 'llvm-tools.manifest')
+      || Object.hasOwn(input.env || {}, 'CJCJ_FIXED_LLVM_DIR')) {
+      // The current platform selector reads this required input before copying
+      // payloads. The retired Linux-only publisher rejected it at cp instead.
+      assert.match(arms.old.stderr, input.fixture === 'missing-payload'
+        ? /cp: cannot stat .*llvm-tools\.manifest/ : /cp: cannot stat '\/llc\.gz'/);
+      assert.match(arms.new.stderr, /ENOENT:.*open .*llvm-tools\.manifest/);
+      assert.deepEqual({...arms.new, stderr: ''}, {...arms.old, stderr: ''});
+    } else assert.deepEqual(arms.new, arms.old, `branch ${entry.branch}:${entry.line} trigger ${entry.trigger}`);
     assert.equal(arms.new.rc, input.expected, `expected branch ${entry.branch}:${entry.line}`);
     console.log(`ASSERT TABLE_ROW executed index=${index} branch=${entry.branch}:${entry.line} trigger=${entry.trigger} rc=${arms.new.rc}`);
   }

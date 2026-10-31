@@ -48,10 +48,10 @@ export const LLVM_PYTHON_FORMULA = `python@${LLVM_PYTHON_VERSION}`;
 // cangjie_build/docs/macos.md:52-76 still requires CMake >=3.17 and <4 and
 // explicitly directs macOS users to Kitware's 3.x archive. Homebrew/core has no
 // versioned CMake 3 formula, so keep the official archive and digest explicit.
-export const CMAKE_VERSION = '3.31.10';
+export const CMAKE_VERSION = '3.31.12';
 export const CMAKE_ARCHIVE = `cmake-${CMAKE_VERSION}-macos-universal.tar.gz`;
 export const CMAKE_URL = `https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/${CMAKE_ARCHIVE}`;
-export const CMAKE_SHA256 = 'be9f3faeeaf7921cc2d77cea711dd5e6f72c63af2810cacd9205b3ce8d1593c9';
+export const CMAKE_SHA256 = '799af7fd545db9bf1b9cfe72f8095880e727a2d4e0df0e3dffc3bc7b95c2d3b0';
 
 function which(name) {
   for (const directory of (process.env.PATH || '').split(path.delimiter)) {

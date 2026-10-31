@@ -219,17 +219,16 @@ function parseEnv(text, label) {
 }
 
 async function loadPins(context) {
-  const [runtime, llvm, source, cjpm] = await Promise.all([
+  const [runtime, llvm, source] = await Promise.all([
     readFile(context, 'ci/runtime_pin.env', {absence: 'UNKNOWN'}),
     readFile(context, 'ci/llvm_pin.env', {absence: 'UNKNOWN'}),
     readFile(context, 'ci/source_pin.env', {absence: 'UNKNOWN'}),
-    readFile(context, 'ci/cjpm_pin.env', {absence: 'UNKNOWN'}),
   ]);
+  const sourcePins = parseEnv(source, 'ci/source_pin.env');
   return {
     runtime: parseEnv(runtime, 'ci/runtime_pin.env'),
-    llvm: parseEnv(llvm, 'ci/llvm_pin.env'),
-    source: parseEnv(source, 'ci/source_pin.env'),
-    cjpm: parseEnv(cjpm, 'ci/cjpm_pin.env'),
+    llvm: {...parseEnv(llvm, 'ci/llvm_pin.env'), CANGJIE_COMPILER_SHA: sourcePins.COMPILER_REF, CANGJIE_COMPILER_URL: sourcePins.COMPILER_SRC_URL},
+    source: sourcePins,
   };
 }
 
@@ -429,7 +428,7 @@ function declaredPinValues(pins) {
     COMPILER_REF: pins.source.COMPILER_REF,
     TOOLS_REF: pins.source.TOOLS_REF,
     STDX_REF: pins.source.STDX_REF,
-    CJPM_FORK_REF: pins.cjpm.CJPM_FORK_REF,
+    CJPM_FORK_REF: pins.source.TOOLS_REF,
   };
 }
 

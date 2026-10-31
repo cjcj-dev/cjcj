@@ -1,3 +1,4 @@
+import {nativeLlvmInputs,readSourcePins} from '../native-llvm-inputs.mjs';
 import {FIXED_INPUTS} from './sdk-targets.mjs';
 import {sdkPlatform} from './sdk-platform.mjs';
 export const NATIVE_REPOSITORIES=Object.freeze({
@@ -40,12 +41,15 @@ export function installationSelection(input) {
     throw Error('INSTALL_EXECUTION_TARGET_CONFLICT');
   return selection;
 }
-export function nativeSourceSelection(env,pair) {
-  const selected=JSON.parse(env.CJCJ_NATIVE_SOURCE_SELECTION||'{}');
+export function nativeSourceSelection(env=process.env,pair,selected={}) {
+  const pins=readSourcePins();
+  if(!pair){const inputs=nativeLlvmInputs(env);pair={llvm:inputs.CJCJ_NATIVE_LLVM_REF,runtime:inputs.CJCJ_NATIVE_RUNTIME_REF};}
+  const repositories={...NATIVE_REPOSITORIES,llvm:pins.llvm.LLVM_URL,
+    runtime:pins.runtime.RUNTIME_SRC_URL,ast:pins.source.COMPILER_SRC_URL};
   if(!selected||Array.isArray(selected)||typeof selected!=='object'
     ||Object.keys(selected).some(name=>!Object.hasOwn(NATIVE_REPOSITORIES,name)))throw Error('GHA_NATIVE_SOURCE_SELECTION');
   const selection={};
-  for(const [name,repository] of Object.entries(NATIVE_REPOSITORIES)){
+  for(const [name,repository] of Object.entries(repositories)){
     const commit=pair?.[name]||FIXED_INPUTS[name==='ast'?'compiler':name],row=selected[name];
     if(Object.hasOwn(selected,name)&&(!row||typeof row!=='object'||!row.repository||typeof row.repository!=='string'
       ||!/^[a-f0-9]{40}$/.test(row.commit||'')||name!=='ast'&&row.commit!==commit))throw Error('GHA_NATIVE_SOURCE_SELECTION '+name);

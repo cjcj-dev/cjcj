@@ -77,8 +77,7 @@ build.py, installation and tool consumers follow this step unchanged.
 
 1. `--official-sdk-root PATH` (relative paths resolve against the invocation cwd).
 2. `CJCJ_OFFICIAL_SDK_ROOT` (the existing release package reference setting).
-3. `CJCJ_SRCBUILD_HOST_SDK` (the existing private host SDK setting).
-4. The platform host pin under the real home directory's `.cjv/toolchains/`.
+3. The platform host pin under the real home directory's `.cjv/toolchains/`.
 
 An explicit empty value, absent directory or regular file is a configuration
 error. An omitted option preserves the existing pinned fallback. No HOME
@@ -86,7 +85,7 @@ override or shared SDK write is needed. The CLI passes `officialSdkRoot`
 through config, `packageMainSdk`, `packageInstall` and `assertSdkPathParity`;
 the parity boundary still rejects a materialized depot reference. The CI
 `ci/srcbuild/steps/package-install.mjs` already supplies the official env value
-to buildConfig and now inherits the private host fallback when it is absent.
+to buildConfig; an omitted value uses the same pinned fallback.
 CI `steps/verify.mjs`, config and both parity/lineage consumers use the same
 `resolveOfficialSdkRoot` function; CI has env precedence and the same pinned
 fallback, without a new descriptor scheduler.
@@ -306,3 +305,31 @@ Native build and install artifacts are recorded separately: normal CMake RPATH
 or install-name changes are not falsely rejected as a source change. Source
 configuration and the copied JNI output must stay byte-identical; each native
 installed payload retains its actual successful build input.
+
+For native Linux cjlint, `--tools-gcc-toolchain /absolute/prefix` (or
+`CJCJ_TOOLS_GCC_TOOLCHAIN`) selects Clang's GCC headers/libraries through the
+producer's ordinary `build.py --gcc-toolchain`. Choose it to match the selected
+SDK's native AST ABI; it is independent of stdx's option and is rejected for
+cross/non-Linux targets. Clean and incremental invocations pass the same option;
+withdrawing it lets the producer clear its cached selection. Build facts capture
+and check `GCC_TOOLCHAIN_FLAG`; install-only reuse retains the original build
+configuration. This requires a tools source with the normal cjlint option and
+cache reconfiguration support. A passed configuration test is not AST ABI proof.
+
+Official host archives do not have a bootstrap `STAGE-INPUTS.json`. Tool builds
+record their actual `bin/cjc`, std-core/runtime and available native AST library
+inputs without creating a stage record or modifying that SDK. If bootstrap
+stage facts exist, they still select and describe that stage's compiler. Invalid
+existing records and missing actual compiler/library files remain failures.
+
+Support libraries use the complete upstream ncurses 6.6 and libedit
+20260512-3.1 archives. `install-static-libs` and `run-all` pass their admitted
+`--jobs` to each native make. Source extraction and versioned installations are
+separate: `sources/<archive-root>`, `ncurses-6.6/usr`, and
+`libedit-20260512-3.1`. The old undated `libedit-3.1` prefix is not selected.
+Restored caches go through the normal entry again: complete headers/libraries
+skip that component, while an incomplete component is configured and installed
+normally without rebuilding its complete peer. Libedit's configure consumes
+that ncurses prefix. Compiler environment construction uses these same prefixes;
+standalone native-CJDB descriptors must select the actual new installation and
+run their own affected native link/install gates before claiming that input.

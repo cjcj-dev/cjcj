@@ -13,7 +13,6 @@ async function assertAuthorizedRefAccepted(runtimeRef) {
   const source = await resolveRuntimeSource({
     CJCJ_RUNTIME_REF_OVERRIDE: runtimeRef,
     CJCJ_ALLOW_RUNTIME_OVERRIDE: 'true',
-    RUNTIME_REF: runtimeRef,
   });
   assert.equal(source.runtimeRef, runtimeRef);
 }
@@ -51,7 +50,6 @@ test('runtime source accepts an explicitly authorized exact commit', async () =>
   const source = await resolveRuntimeSource({
     CJCJ_RUNTIME_REF_OVERRIDE: overrideRef,
     CJCJ_ALLOW_RUNTIME_OVERRIDE: 'true',
-    RUNTIME_REF: overrideRef,
   });
   assert.equal(source.runtimeRef, overrideRef);
   assert.equal(source.pinRef === overrideRef, false);
@@ -73,8 +71,8 @@ test('runtime source continues to accept the old full commit SHA', async () => {
   await assertAuthorizedRefAccepted(oldRef);
 });
 
-test('runtime source rejects a mismatched consumer ref', async () => {
-  await assert.rejects(resolveRuntimeSource({RUNTIME_REF: overrideRef}), /runtime ref mismatch/);
+test('runtime source rejects an incomplete explicit pair', async () => {
+  await assert.rejects(resolveRuntimeSource({CJCJ_NATIVE_RUNTIME_REF: overrideRef}), /NATIVE_RUNTIME_EXPLICIT_PAIR_REQUIRED/);
 });
 
 test('runtime source rejects a 39-character commit SHA', async () => {

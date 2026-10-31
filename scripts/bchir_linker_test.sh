@@ -16,7 +16,7 @@ manifest=$source_dir/packages/chir/cjpm.toml
 backup=$(mktemp "$evidence_dir/chir-manifest.XXXXXX")
 cp -p "$manifest" "$backup"
 # Invoked by the EXIT trap below, including the final explicit exit.
-# shellcheck disable=SC2317
+# shellcheck disable=SC2317,SC2329
 restore_manifest() {
     local rc=$?
     cp -p "$backup" "$manifest"

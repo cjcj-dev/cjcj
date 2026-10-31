@@ -19,13 +19,13 @@ export async function packageInstall({sdk,target,version,officialSdkRoot,archive
  const work=path.join(path.dirname(archive),'package-test');
  const consumption=packageConsumption(target);
  if(consumption.status==='EXECUTED'){
-  await verifyInstall({sdk,work:work+'/installed',platform:target.spec.llvmPlatform,finalStd:true});
+  await verifyInstall({sdk,work:work+'/installed',platform:target.spec.llvmPlatform,finalStd:true,precompiledStdx:true});
  }else await atomicJson(path.join(work,'cross-consumption.json'),consumption);
  const inputs=await installedInputs(sdk,target.spec.llvmPlatform);
  await writeInstalledReleaseManifest({stage:sdk,platform:target.spec.llvmPlatform,...inputs});
  await atomicJson(path.join(sdk,'BUILD-MANIFEST.json'),{version,target:target.spec.key,consumption,...inputs});
  const test=consumption.status==='EXECUTED'?{commands:[{argv:[process.execPath,fileURLToPath(new URL('../../bootstrap/sdk-verify-install.mjs',import.meta.url)),
-  '--sdk','${install}','--work','${work}/relocated','--platform',target.spec.llvmPlatform,'--final-std']}]}:{commands:[],consumption};
+  '--sdk','${install}','--work','${work}/relocated','--platform',target.spec.llvmPlatform,'--final-std','--precompiled-stdx']}]}:{commands:[],consumption};
  const archived=await archiveInstall({install:sdk,archive,format:target.spec.archiveFormat,test,vars:{work},records:[]});
  return {...archived,consumption};
 }

@@ -9,7 +9,7 @@ import {installEntries} from '../../ci/bootstrap/sdk-install-entries.mjs';
 import {sdkPlatform} from '../../ci/bootstrap/sdk-platform.mjs';
 import {installPath as mingwInstallPath} from '../toolchain/mingw.mjs';
 import {installedToolBuildInputs,sdkInputs} from './tool-build-inputs.mjs';
-import {TOOL_NAMES,requireToolProducer,toolOutputs,toolPayloads} from './tool-layout.mjs';
+import {TOOL_NAMES,requireToolProducer,toolOutputs,toolPayloads,retainedToolPath} from './tool-layout.mjs';
 
 export const sourceToolOutputs=toolOutputs;
 export async function installSourceTools(config, installRoot=path.join(config.softwareDir,'cangjie'), {consume,dependencies}={}) {
@@ -49,7 +49,7 @@ export async function installSourceTools(config, installRoot=path.join(config.so
     const installed=path.join(sdk,row.to),recipe=installed+'.entry';
     try{
       const lines=(await fs.readFile(recipe,'utf8')).trimEnd().split('\n');
-      if(lines[0]!=='cjcj-sdk-entry-v1'||!['.host-tools/tools/bin/','.target-tools/tools/bin/'].some(prefix=>lines[2]===prefix+row.name))
+      if(lines[0]!=='cjcj-sdk-entry-v1'||![ '.host-tools/tools/bin/'+row.name,'.target-tools/tools/bin/'+row.name,retainedToolPath(row)].includes(lines[2]))
         throw new Error('SOURCE_TOOL_OWNERSHIP '+row.name);
       if(lines[2].startsWith('.target-tools/'))await fs.rm(path.join(sdk,lines[2]),{force:true});
       await fs.unlink(recipe);
@@ -61,7 +61,7 @@ export async function installSourceTools(config, installRoot=path.join(config.so
   // cjprof owns these static subtrees. A normal source update may delete or
   // rename a page; copying only today's members leaves yesterday's pages live.
   // Other tools share tools/config, so replace only the two owned subtrees.
-  for(const relative of ['tools/config/static','.target-tools/tools/config/static']) {
+  for(const relative of ['tools/config/static','.target-tools/tools/config/static','.target-tools/tools/cjlint','.target-tools/tools/lsp','.target-tools/tools/cjhead']) {
     const directory=await privateRoot(path.join(sdk,relative));
     await fs.rm(directory,{recursive:true,force:true});
   }
@@ -80,7 +80,7 @@ export async function installSourceTools(config, installRoot=path.join(config.so
       ...(config.target.spec.needsMingw?{targetToolchain:path.join(mingwInstallPath(config.buildRoot),'bin')}:{})},
     records,platform:config.target.spec.llvmPlatform});
   for(const row of rows){
-    const retained='.target-tools/'+row.to;
+    const retained=retainedToolPath(row);
     if(await fileDigest(path.join(sdk,retained))!==files[row.to].sha256)throw new Error('SOURCE_TOOL_RETAINED_BYTES '+row.name);
     files[row.to].artifact={path:retained,sha256:files[row.to].sha256};
     files[row.to].entry={path:row.to,sha256:await fileDigest(path.join(sdk,row.to)),
@@ -89,7 +89,7 @@ export async function installSourceTools(config, installRoot=path.join(config.so
   // The destination selection is an install fact, not a rewrite of any old
   // producer's build inputs. Record it once for native macro consumers; their
   // applicability is determined at the consumer, not by copying these facts.
-  const installationInputs=rows.some(row=>['cjlint','lsp'].includes(row.producer)
+  const installationInputs=rows.some(row=>row.producer==='lsp'
     &&files[row.to].producer.source.status==='resolved')?await sdkInputs(config,original):undefined;
   await atomicJson(path.join(sdk,'TOOLS-INPUTS.json'),{files,payloadFiles,commands:records,installationInputs,
     buildSelection:{phase:config.toolsPhase??'all',builtThisInvocation:config.toolsPhase==='install'?'none':config.toolsBuildSet??'all',

@@ -21,7 +21,7 @@ async function fixture(suffix='-cjcj') {
     await fs.writeFile(archive+'.sha256',sha+'  '+path.basename(archive)+'\n');
   };
   const run = label => spawnSync(process.execPath,[entry,root+'/artifact',root+'/'+label,'linux-x64'],
-    {encoding:'utf8',env:{...process.env,RUNTIME_REF:'a'.repeat(40),CJCJ_NATIVE_SDK_VERSION:'test'}});
+    {encoding:'utf8',env:{...process.env,CJCJ_NATIVE_RUNTIME_REF:'a'.repeat(40),CJCJ_NATIVE_SDK_VERSION:'test'}});
   return {root,archive,pack,run};
 }
 test('real package receiver verifies archive digest before extraction', async () => {

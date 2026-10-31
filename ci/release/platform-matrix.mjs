@@ -163,7 +163,7 @@ export function probeRequirement(name, env = process.env, exec = execFileSync) {
 }
 
 export function checkPlatform(key, {platform = process.platform, arch = process.arch, env = process.env, exec = execFileSync} = {}) {
-  const readiness = releasePlatformReadiness(key,{nativeInputs:Boolean(nativePair(env))});
+  const readiness = releasePlatformReadiness(key,{nativeInputs:Boolean(env.CJCJ_NATIVE_RUNTIME_ARTIFACT && nativePair(env))});
   const definition = getReleasePlatform(key);
   const lines = [];
   const problems = [];

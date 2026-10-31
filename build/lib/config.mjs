@@ -3,22 +3,22 @@
 import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
+import {TOOL_NAMES} from '../srcbuild/tool-layout.mjs';
 import {ConfigError} from './errors.mjs';
 import {getBuildTarget} from './build-target.mjs';
 import {resolveSources,nativeSourceSelection} from '../../ci/bootstrap/native-source-selection.mjs';
 
 export const VALID_BUILD_TYPES = Object.freeze(['release', 'debug', 'relwithdebinfo']);
 export const DEFAULT_BUILD_TYPE = 'relwithdebinfo';
-export const REPO_NAMES = Object.freeze(['compiler', 'runtime', 'tools', 'stdx', 'llvm', 'cjpm']);
+export const REPO_NAMES = Object.freeze(['compiler', 'runtime', 'tools', 'stdx', 'llvm']);
 
 const SEMVER_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 const FALLBACK_VERSION = '0.0.0-dev';
 const REPO_DEFAULTS = Object.freeze({
-  cjpm: ['https://github.com/cjcj-dev/cangjie-tools.git', 'cjpm-source'],
   llvm: ['https://github.com/cjcj-dev/cjcj-llvm.git', 'cangjie_compiler/third_party/llvm-project'],
   compiler: ['https://gitcode.com/Cangjie/cangjie_compiler.git', 'cangjie_compiler'],
   runtime: ['https://gitcode.com/Cangjie/cangjie_runtime.git', 'cangjie_runtime'],
-  tools: ['https://gitcode.com/Cangjie/cangjie_tools.git', 'cangjie_tools'],
+  tools: ['https://github.com/cjcj-dev/cjcj-tools.git', 'cjcj-tools'],
   stdx: ['https://gitcode.com/Cangjie/cangjie_stdx.git', 'cangjie_stdx'],
 });
 
@@ -67,26 +67,28 @@ export function saveSourceSelection(config) {
   fs.writeFileSync(`${file}.tmp`, `${JSON.stringify(config.sourceSelection, null, 2)}\n`);
   fs.renameSync(`${file}.tmp`, file);
 }
-export function resolveOfficialSdkRoot(value = process.env.CJCJ_OFFICIAL_SDK_ROOT ?? process.env.CJCJ_SRCBUILD_HOST_SDK) {
+export function resolveOfficialSdkRoot(value = process.env.CJCJ_OFFICIAL_SDK_ROOT) {
   if (value === undefined || value === null) return null;
   if (!String(value).trim()) throw new ConfigError('officialSdkRoot: expected a nonempty path');
   return absolute(value);
 }
 
-export function makeRepos({globalTag, overrides = {}} = {}) {
+export function makeRepos({globalTag, overrides = {}, env=process.env, nativeSelection} = {}) {
   if (globalTag !== undefined && !String(globalTag).trim()) throw new ConfigError('empty global tag');
-  const pins = Object.fromEntries((fs.readFileSync(new URL('../../ci/runtime_pin.env', import.meta.url), 'utf8')+'\n'+fs.readFileSync(new URL('../../ci/source_pin.env', import.meta.url), 'utf8')+'\n'+fs.readFileSync(new URL('../../ci/cjpm_pin.env', import.meta.url),'utf8'))
+  const pins = Object.fromEntries((fs.readFileSync(new URL('../../ci/runtime_pin.env', import.meta.url), 'utf8')+'\n'+fs.readFileSync(new URL('../../ci/source_pin.env', import.meta.url), 'utf8'))
     .split(/\r?\n/).filter(line => line && !line.startsWith('#')).map(line => {
       const separator = line.indexOf('=');
       if (separator < 1) throw new ConfigError(`invalid source pin line: ${line}`);
       return [line.slice(0, separator), line.slice(separator + 1)];
     }));
-  pins.CJPM_REF=pins.CJPM_FORK_REF;pins.CJPM_SRC_URL=pins.CJPM_FORK_URL;
-  const pair=process.env.CJCJ_NATIVE_LLVM_REF||process.env.CJCJ_NATIVE_RUNTIME_REF
-    ? {llvm:process.env.CJCJ_NATIVE_LLVM_REF,runtime:process.env.CJCJ_NATIVE_RUNTIME_REF}:null;
+  const pair=env.CJCJ_NATIVE_LLVM_REF||env.CJCJ_NATIVE_RUNTIME_REF
+    ? {llvm:env.CJCJ_NATIVE_LLVM_REF,runtime:env.CJCJ_NATIVE_RUNTIME_REF}:null;
   if(pair&&![pair.llvm,pair.runtime].every(value=>/^[a-f0-9]{40}$/.test(value??'')))throw new ConfigError('NATIVE_RUNTIME_EXPLICIT_PAIR_REQUIRED');
-  if(process.env.CJCJ_NATIVE_RUNTIME_INSTALL&&!pair)throw new ConfigError('NATIVE_RUNTIME_EXPLICIT_PAIR_REQUIRED');
-  const native=nativeSourceSelection(process.env,pair).selection;
+  if(env.CJCJ_NATIVE_RUNTIME_INSTALL&&!pair)throw new ConfigError('NATIVE_RUNTIME_EXPLICIT_PAIR_REQUIRED');
+  const selected=Object.fromEntries(['llvm','runtime'].filter(name=>overrides[name]?.url)
+    .map(name=>[name,{repository:overrides[name].url,commit:pair?.[name]}]));
+  const native=nativeSelection || nativeSourceSelection(env,pair,pair?selected:{}).selection;
+  if(pair&&['llvm','runtime'].some(name=>native[name]?.commit!==pair[name]))throw new ConfigError('NATIVE_COMPONENT_SOURCE_CONFLICT');
   pins.LLVM_REF=native.llvm.commit;pins.LLVM_SRC_URL=native.llvm.repository;
   if(pair){pins.RUNTIME_REF=native.runtime.commit;pins.RUNTIME_SRC_URL=native.runtime.repository;}
   const repos = {};
@@ -119,7 +121,7 @@ export function makeRepos({globalTag, overrides = {}} = {}) {
 export function buildConfig({
   workspace,
   buildRoot,
-  officialSdkRoot = process.env.CJCJ_OFFICIAL_SDK_ROOT ?? process.env.CJCJ_SRCBUILD_HOST_SDK,
+  officialSdkRoot = process.env.CJCJ_OFFICIAL_SDK_ROOT,
   consumerSdk = process.env.CJCJ_SRCBUILD_CONSUMER_SDK,
   targetKey = 'linux-x64',
   buildType = DEFAULT_BUILD_TYPE,
@@ -127,14 +129,32 @@ export function buildConfig({
   stdxVersion = 1,
   stdxProfile = 'full',
   stdxBuildMode = 'clean',
+  stdxGccToolchain = process.env.CJCJ_STDX_GCC_TOOLCHAIN,
   toolsBuildMode = 'clean',
   toolsBuildSet = 'all',
   toolsDependencies = process.env.CJCJ_NATIVE_TOOL_DEPENDENCIES,
+  toolsGccToolchain = process.env.CJCJ_TOOLS_GCC_TOOLCHAIN,
+  toolsMangleSource = process.env.CANGJIE_MANGLE_SOURCE_DIR,
+  toolsJniHome = process.env.JAVA_HOME,
+  toolsRuntimeHeader,
+  toolsLombokJar = process.env.CJPROF_LOMBOK_JAR,
+  toolsAnalysisSdk = process.env.CJLINT_ANALYSIS_SDK,
+  toolsFrontendSource = process.env.CJLINT_FRONTEND_SOURCE,
+  toolsFrontendRef = process.env.CJLINT_FRONTEND_REF,
+  toolsCompilerLibs,
+  toolsRuntimeConfig,
+  toolsLlvmShim,
+  toolsLlvmLibrary,
+  toolsProducerBuildDir,
+  toolsJsonBuild,
   toolsPhase = 'all',
+  toolsInstallPrefix,
   jobs,
   toolsPackageJobs = 4,
   globalTag,
   repoOverrides,
+  nativeSelection,
+  env=process.env,
   useSavedSources = true,
 } = {}) {
   if (!['full','sdk-tools'].includes(stdxProfile)) throw new ConfigError('invalid stdx profile: '+stdxProfile);
@@ -143,8 +163,11 @@ export function buildConfig({
     if(value!==undefined&&(!/^[1-9][0-9]*$/.test(String(value))||!Number.isSafeInteger(Number(value)))) throw new ConfigError('invalid '+key+': '+value);
   }
   if(Number(toolsPackageJobs)>4)throw new ConfigError('tools-package-jobs exceeds the four heavy C2 package limit');
-  const toolNames=['cjpm','cjfmt','hle','lsp','cjcov','cjtrace-recover','cjlint','cjprof','cjcompat'];
+  const toolNames=TOOL_NAMES;
+  if(toolsInstallPrefix!==undefined && (toolsPhase!=='install' || !path.isAbsolute(toolsInstallPrefix)))
+    throw new ConfigError('tools-install-prefix requires install phase and absolute prefix');
   const selectedTools=String(toolsBuildSet).split(',');
+  if(toolsProducerBuildDir && (toolsBuildSet==='all'||selectedTools.length!==1))throw new ConfigError('tools-producer-build-dir requires one selected tool');
   if(toolsBuildSet!=='all'&&(!selectedTools.every(name=>toolNames.includes(name))||new Set(selectedTools).size!==selectedTools.length))
     throw new ConfigError('invalid tools build set: '+toolsBuildSet);
   if (!['clean','incremental'].includes(toolsBuildMode)) throw new ConfigError('invalid tools build mode: '+toolsBuildMode);
@@ -156,6 +179,16 @@ export function buildConfig({
     throw new ConfigError('officialSdkRoot: expected a nonempty path');
   }
   const target = getBuildTarget(targetKey);
+  if (stdxGccToolchain != null) {
+    if (typeof stdxGccToolchain !== 'string' || !stdxGccToolchain.trim() || !path.isAbsolute(stdxGccToolchain))
+      throw new ConfigError('stdx-gcc-toolchain: expected an absolute GCC headers/libraries prefix');
+    if (target.spec.crossCompile) throw new ConfigError('stdx-gcc-toolchain is only supported for native stdx builds');
+  }
+  if(toolsGccToolchain!=null)throw new ConfigError('tools-gcc-toolchain: retired C++ cjlint producer option');
+  if (toolsMangleSource != null && (typeof toolsMangleSource !== 'string' || !path.isAbsolute(toolsMangleSource)))
+    throw new ConfigError('tools-mangle-source: expected an absolute compiler packages/mangle/src path');
+  for(const [name,value]of Object.entries({toolsAnalysisSdk,toolsFrontendSource,toolsJniHome,toolsRuntimeHeader,toolsLombokJar,toolsCompilerLibs,toolsRuntimeConfig,toolsLlvmShim,toolsLlvmLibrary,toolsProducerBuildDir,toolsJsonBuild}))if(value!=null&&(typeof value!=='string'||!path.isAbsolute(value)))throw new ConfigError(name+': expected an absolute frontend input path');
+  if(toolsFrontendRef!=null&&!/^[0-9a-f]{40}$/.test(toolsFrontendRef))throw new ConfigError('tools-frontend-ref: full fixed commit required');
   const workspacePath = absolute(workspace || process.env.CANGJIE_WORKSPACE || path.join(process.cwd(), 'workspace'));
   const buildRootPath = absolute(buildRoot || process.env.CANGJIE_BUILD_ROOT || path.join(process.cwd(), 'buildtools'));
   const rawVersion = cangjieVersion || process.env.CANGJIE_VERSION || globalTag || '';
@@ -169,7 +202,7 @@ export function buildConfig({
     if (Object.keys(selected).length) sourceSelection[name] = selected;
   }
   validateSourceSelection(sourceSelection);
-  const repos = makeRepos({globalTag, overrides: sourceSelection});
+  const repos = makeRepos({globalTag, overrides: sourceSelection,env,nativeSelection});
 
   const config = {
     workspace: workspacePath,
@@ -180,10 +213,26 @@ export function buildConfig({
     stdxVersion: Number(stdxVersion),
     stdxProfile,
     stdxBuildMode,
+    stdxGccToolchain: stdxGccToolchain == null ? null : absolute(stdxGccToolchain),
     toolsBuildMode,
     toolsBuildSet,
     toolsDependencies: toolsDependencies ? absolute(toolsDependencies) : null,
+    toolsGccToolchain: toolsGccToolchain == null ? null : absolute(toolsGccToolchain),
+    toolsMangleSource: toolsMangleSource == null ? null : absolute(toolsMangleSource),
+    toolsJniHome: toolsJniHome == null ? null : absolute(toolsJniHome),
+    toolsRuntimeHeader: toolsRuntimeHeader == null ? null : absolute(toolsRuntimeHeader),
+    toolsLombokJar: toolsLombokJar == null ? null : absolute(toolsLombokJar),
+    toolsAnalysisSdk: toolsAnalysisSdk == null ? null : absolute(toolsAnalysisSdk),
+    toolsFrontendSource: toolsFrontendSource == null ? null : absolute(toolsFrontendSource),
+    toolsFrontendRef,
+    toolsCompilerLibs: toolsCompilerLibs == null ? null : absolute(toolsCompilerLibs),
+    toolsRuntimeConfig: toolsRuntimeConfig == null ? null : absolute(toolsRuntimeConfig),
+    toolsLlvmShim: toolsLlvmShim == null ? null : absolute(toolsLlvmShim),
+    toolsLlvmLibrary: toolsLlvmLibrary == null ? null : absolute(toolsLlvmLibrary),
+    toolsProducerBuildDir: toolsProducerBuildDir == null ? null : absolute(toolsProducerBuildDir),
+    toolsJsonBuild: toolsJsonBuild == null ? null : absolute(toolsJsonBuild),
     toolsPhase,
+    toolsInstallPrefix,
     jobs: jobs===undefined?undefined:Number(jobs),
     toolsPackageJobs:Number(toolsPackageJobs),
     repos,
@@ -217,10 +266,26 @@ export function withBuildType(config, buildType) {
     stdxVersion: config.stdxVersion,
     stdxProfile: config.stdxProfile,
     stdxBuildMode: config.stdxBuildMode,
+    stdxGccToolchain: config.stdxGccToolchain,
     toolsBuildMode: config.toolsBuildMode,
     toolsBuildSet: config.toolsBuildSet,
     toolsDependencies: config.toolsDependencies,
+    toolsGccToolchain: config.toolsGccToolchain,
+    toolsMangleSource: config.toolsMangleSource,
+    toolsJniHome: config.toolsJniHome,
+    toolsRuntimeHeader: config.toolsRuntimeHeader,
+    toolsLombokJar: config.toolsLombokJar,
+    toolsAnalysisSdk: config.toolsAnalysisSdk,
+    toolsFrontendSource: config.toolsFrontendSource,
+    toolsFrontendRef: config.toolsFrontendRef,
+    toolsCompilerLibs: config.toolsCompilerLibs,
+    toolsRuntimeConfig: config.toolsRuntimeConfig,
+    toolsLlvmShim: config.toolsLlvmShim,
+    toolsLlvmLibrary: config.toolsLlvmLibrary,
+    toolsProducerBuildDir: config.toolsProducerBuildDir,
+    toolsJsonBuild: config.toolsJsonBuild,
     toolsPhase: config.toolsPhase,
+    toolsInstallPrefix: config.toolsInstallPrefix,
     jobs: config.jobs,
     toolsPackageJobs: config.toolsPackageJobs,
     officialSdkRoot: config.officialSdkRoot,

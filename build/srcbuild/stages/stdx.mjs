@@ -7,6 +7,7 @@ import {command,publishPaths,atomicJson} from '../../../ci/bootstrap/sdk-flow.mj
 import {cleanSdkEnvironment,sdkPlatform} from '../../../ci/bootstrap/sdk-platform.mjs';
 import {STDX_BUILD_INPUTS} from '../stdx-build-inputs.mjs';
 import {selectBuildJobs} from '../../../ci/build-resources.mjs';
+import {precompiledStdxMacros} from '../../../ci/bootstrap/sdk-installed-macros.mjs';
 import {BuildError} from '../../lib/errors.mjs';
 import {stage} from '../../lib/logging.mjs';
 import {assertSourceIdentity} from '../../lib/git.mjs';
@@ -28,9 +29,9 @@ function checkIncrementalConfiguration(config, directory, compilerInclude) {
     CANGJIE_BUILD_WITHOUT_PLUGIN:'OFF',CANGJIE_BUILD_WITHOUT_ASPECT_CJ:'OFF',
     CANGJIE_BUILD_STDLIB_WITH_COVERAGE:'OFF',CANGJIE_BUILD_ARGS:''};
   if(!config.target.spec.crossCompile)Object.assign(expected,{CANGJIE_TARGET_LIB:opensslLibPath(config)||'',
-    CANGJIE_TARGET_TOOLCHAIN:'',CANGJIE_TARGET_SYSROOT:''});
+    CANGJIE_TARGET_TOOLCHAIN:'',CANGJIE_TARGET_SYSROOT:'',BUILD_GCC_TOOLCHAIN:config.stdxGccToolchain||''});
   for(const [key,value]of Object.entries(expected)) {
-    const actual=values[key];
+    const actual=key==='BUILD_GCC_TOOLCHAIN' ? values[key]??'' : values[key];
     if((key==='CMAKE_BUILD_TYPE'?actual?.toLowerCase():actual)!==value)
       throw new BuildError('stdx.incremental',`native configuration changed: ${key}=${actual} expected=${value}; select a separate build or clean explicitly`);
   }
@@ -86,6 +87,7 @@ export async function run(config) {
       ];
     } else {
       args = ['build', '-t', config.buildType, `--include=${compilerInclude}`];
+      if (config.stdxGccToolchain) args.push(`--gcc-toolchain=${config.stdxGccToolchain}`);
       const openssl = opensslLibPath(config);
       if (openssl) args.push(`--target-lib=${openssl}`);
     }
@@ -125,6 +127,8 @@ export async function run(config) {
     if(!dry&&!limited) {
       await consumeStdx(config,prefix);
       await publishPaths(['stdx',STDX_BUILD_INPUTS].map(relative=>({pending:path.join(installRoot,relative),destination:path.join(destination,relative)})));
+      if(!config.target.spec.crossCompile)await precompiledStdxMacros({sdk:destination,
+        work:path.join(config.workspace,'build/stdx/installed-macros'),platform:config.target.spec.llvmPlatform});
     }
   });
 }

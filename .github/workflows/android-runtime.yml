@@ -25,9 +25,9 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7.1.0
         with:
-          node-version: '22'
+          node-version: '24.22.1'
       - name: Install official lineage test input
         if: matrix.arm == 'candidate'
         shell: bash
@@ -59,19 +59,18 @@ jobs:
         run: |
           set -euo pipefail
           {
-            echo "RUNTIME_REF=$RUNTIME_REF"
             echo "RUNTIME_VERSION=$RUNTIME_VERSION"
             echo "CANGJIE_WORKSPACE=$RUNNER_TEMP/android-source"
           } >> "$GITHUB_ENV"
           mkdir -p "$RUNNER_TEMP/android-source/cangjie_runtime"
           git -C "$RUNNER_TEMP/android-source/cangjie_runtime" init
-          git -C "$RUNNER_TEMP/android-source/cangjie_runtime" fetch --depth=1 "$RUNTIME_SRC_URL" "$RUNTIME_REF"
+          git -C "$RUNNER_TEMP/android-source/cangjie_runtime" fetch --depth=1 "$RUNTIME_SRC_URL" "$CJCJ_NATIVE_RUNTIME_REF"
           git -C "$RUNNER_TEMP/android-source/cangjie_runtime" checkout --detach FETCH_HEAD
       - uses: ./.github/actions/sccache
         with:
           component: runtime
           platform: android-aarch64
-          pin: ${{ env.RUNTIME_REF }}
+          pin: ${{ env.CJCJ_NATIVE_RUNTIME_REF }}
       - name: Prepare controlled producer arm
         env:
           ARM: ${{ matrix.arm }}

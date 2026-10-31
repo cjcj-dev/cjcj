@@ -16,12 +16,12 @@ import {
 
 const root = path.resolve(import.meta.dirname, '..');
 const pinPath = path.join(root, 'ci', 'host_sdk_pin.env');
-const cjpmPinPath = path.join(root, 'ci', 'cjpm_pin.env');
+const cjpmPinPath = path.join(root, 'ci', 'source_pin.env');
 const h48LanguagePinPath = path.join(root, 'ci', 'h48_language_tuple_pin.json');
 const nightlyLiteral = /nightly-\d+\.\d+\.\d+-alpha\.\d+/;
 // Built in pieces so this test source is not itself an undeclared nightly literal.
 const h48HostSdk = 'nightly-' + '1.3.0-alpha.' + '20260904010027';
-const loadCommand = 'cat ci/cjpm_pin.env >> "$GITHUB_ENV"';
+const loadCommand = 'cat ci/source_pin.env >> "$GITHUB_ENV"';
 const srcbuildLoadCommand = 'cat ci/host_sdk_pin.env >> "$GITHUB_ENV"';
 
 async function filesBelow(directory) {
@@ -282,7 +282,7 @@ test('srcbuild pin reader returns a changed pinned host', async () => {
 
 test('srcbuild rejects a missing pin key instead of retaining stale host state', async () => {
   const result = await runSrcbuildHostResolver({
-    pin: 'CJPM_FORK_REF=fixture\n',
+    pin: 'TOOLS_REF=fixture\n',
     runtimeVersion: '9.9.9',
   });
   assert.notEqual(result.status, 0);
@@ -301,7 +301,7 @@ test('srcbuild pin reader rejects duplicate CJCJ_TOOLCHAIN keys', async () => {
   assert.equal(result.stdout, '');
 });
 
-test('every workflow host consumer loads ci/cjpm_pin.env after checkout', async () => {
+test('every workflow host consumer loads ci/source_pin.env after checkout', async () => {
   const expectedLoads = new Map([
     ['build-cjpm.yml', 1],
     ['build-windows-runtime.yml', 1],
@@ -369,24 +369,24 @@ test('both JavaScript entry points require the loaded environment value', async 
 // sets explicit so updating a pin cannot silently disconnect a workflow.
 // Enumerate definitions from git to discover undeclared additional pins.
 const HOST_TOOLCHAIN_PINS = Object.freeze({
-  'ci/cjpm_pin.env': Object.freeze({
-    host: 'ordinary CI build host',
-    loaders: Object.freeze(['build-cjpm.yml', 'build-windows-runtime.yml', 'ci.yml', 'objc-darwin-e2e.yml', 'platform-matrix.yml']),
-  }),
   'ci/host_sdk_pin.env': Object.freeze({
-    host: 'source-build host',
-    // Native package consumers use their installed SDK; official pins remain host inputs.
-    loaders: Object.freeze(['build-ast-support.yml', 'build-host-runtime.yml',
-      'srcbuild-target.yml']),
+    host: 'ordinary CI and source-build host',
+    loaders: Object.freeze(['build-ast-support.yml', 'build-host-runtime.yml', 'srcbuild-target.yml']),
   }),
 });
 
-test('ordinary CI and source-build hosts use the same nightly', async () => {
+test('ordinary CI and source-build hosts use the sole nightly pin', async () => {
   const ordinary = await fs.readFile(cjpmPinPath, 'utf8');
-  const definitions = ordinary.match(/^CJCJ_TOOLCHAIN=\S+$/gm) ?? [];
-  assert.equal(definitions.length, 1, 'ordinary host must define exactly one toolchain');
-  assert.equal(parseHostToolchainPin(ordinary.split(/\r?\n/).filter(line => line.startsWith('CJCJ_TOOLCHAIN')).join('\n')), await hostPin(),
-    'CJCJ_TOOLCHAIN must be equal in ci/cjpm_pin.env and ci/host_sdk_pin.env');
+  assert.doesNotMatch(ordinary, /^CJCJ_TOOLCHAIN(?:_[A-Z0-9_]+)?=/m,
+    'cjpm source selection must not duplicate the host nightly');
+  for (const name of ['build-cjpm.yml', 'build-windows-runtime.yml', 'ci.yml', 'objc-darwin-e2e.yml', 'platform-matrix.yml']) {
+    const workflow = loadYaml(await fs.readFile(path.join(root, '.github/workflows', name), 'utf8'));
+    for (const job of Object.values(workflow.jobs)) for (const step of job.steps || []) {
+      if (!step.run?.includes(loadCommand)) continue;
+      assert.match(step.run, /node ci\/host-toolchain-pin\.mjs/, name+' must resolve its host in the cjpm load step');
+      assert.match(step.run, /(?:--github-env|echo "CJCJ_TOOLCHAIN=\$CJCJ_TOOLCHAIN")/, name+' must export the resolved host');
+    }
+  }
 });
 
 test('every CJCJ_TOOLCHAIN definition names a host and has measured consumers', async () => {
@@ -435,11 +435,11 @@ async function workflowStep(workflow, job, name) {
 }
 
 const independentHostVersions = Object.freeze({
-  linux_x86_64: '1.3.0-alpha.20261009001050',
-  linux_aarch64: '1.3.0-alpha.20260925001050',
-  darwin_x86_64: '1.3.0-alpha.20260925001050',
-  darwin_aarch64: '1.3.0-alpha.20260925001050',
-  windows_x86_64: '1.3.0-alpha.20260925001050',
+  linux_x86_64: '1.3.0-alpha.20261025001053',
+  linux_aarch64: '1.3.0-alpha.20261025001053',
+  darwin_x86_64: '1.3.0-alpha.20261025001053',
+  darwin_aarch64: '1.3.0-alpha.20261025001053',
+  windows_x86_64: '1.3.0-alpha.20261025001053',
 });
 
 for (const [platform, version] of Object.entries(independentHostVersions)) {
@@ -514,7 +514,7 @@ test('workflow host pin assignment preserves parser failure and exported success
     }
   }
   assert.deepEqual(sites.map(({file, job}) => `${file}:${job}`).sort(), [
-    'android-runtime.yml:runtime', 'ci.yml:contracts', 'test-host-identities.yml:aarch64',
+    'android-runtime.yml:runtime', 'build-cjpm.yml:build-cjpm', 'ci.yml:contracts', 'test-host-identities.yml:aarch64',
   ].sort(), 'all workflow command-substitution host loaders must be exercised');
   for (const site of sites) {
     for (const invalid of [false, true]) {
@@ -559,6 +559,7 @@ test('workflow host pin assignment preserves parser failure and exported success
 test('workflow GitHub environment loaders resolve the execution host and stop on reader failure', async t => {
   const sites = [
     ['build-ast-support.yml', 'build', 'Load host toolchain pin'],
+    ['objc-darwin-e2e.yml', 'objc-darwin-e2e', 'Load pins'],
     ['build-windows-runtime.yml', 'build-runtime', 'Load host toolchain pin'],
     ['build-windows-runtime.yml', 'build-runtime', 'Load compiler pins'],
     ['ci.yml', 'build', 'Load host toolchain pin'],
@@ -573,7 +574,14 @@ test('workflow GitHub environment loaders resolve the execution host and stop on
         const work = await fs.mkdtemp(path.join(os.tmpdir(), 'github-host-loader-'));
         try {
           await fs.mkdir(path.join(work, 'ci'));
-          for (const input of ['host_sdk_pin.env', 'cjpm_pin.env', 'source_pin.env', 'llvm_pin.env', 'host-toolchain-pin.mjs']) {
+          // Load pins also executes the real runtime reader and its source-selection imports.
+          for (const input of ['host_sdk_pin.env', 'source_pin.env', 'llvm_pin.env', 'runtime_pin.env',
+            'host-toolchain-pin.mjs', 'load_runtime_pin.mjs', 'native-llvm-inputs.mjs', 'runtime-pin.mjs',
+            'build-resources.mjs', 'bootstrap/native-source-selection.mjs', 'bootstrap/sdk-command-lifetime.mjs',
+            'bootstrap/sdk-flow.mjs', 'bootstrap/sdk-install-entries.mjs', 'bootstrap/sdk-io.mjs',
+            'bootstrap/sdk-platform.mjs', 'bootstrap/sdk-source.mjs', 'bootstrap/sdk-std-resume.mjs',
+            'bootstrap/sdk-targets.mjs']) {
+            await fs.mkdir(path.dirname(path.join(work, 'ci', input)), {recursive: true});
             await fs.copyFile(path.join(root, 'ci', input), path.join(work, 'ci', input));
           }
           if (arm === 'bad-pin') {
@@ -581,7 +589,7 @@ test('workflow GitHub environment loaders resolve the execution host and stop on
             await fs.writeFile(pin, (await fs.readFile(pin, 'utf8')).trimEnd() + '\nCJCJ_TOOLCHAIN_UNKNOWN=invalid\n');
           }
           if (arm === 'missing-reader') await fs.rename(path.join(work, 'ci/host-toolchain-pin.mjs'), path.join(work, 'ci/host-toolchain-pin.disabled'));
-          const env = {...process.env, GITHUB_ENV: path.join(work, 'github.env')};
+          const env = {...process.env, RUNNER_TEMP:work, GITHUB_ENV: path.join(work, 'github.env')};
           const result = spawnSync('bash', ['--noprofile', '--norc', '-euo', 'pipefail', '-c', `${script}\nprintf 'HOST_LOADER_COMPLETED\\n'`], {cwd: work, env, encoding: 'utf8'});
           assert.ifError(result.error);
           console.log(`TARGET_GITHUB_HOST_LOADER ${JSON.stringify({file, job, name, arm, rc: result.status, stdout: result.stdout, stderr: result.stderr})}`);
@@ -615,6 +623,6 @@ test('explicit native host archive selection retains the default pin and rejects
  assert.equal(baseSdkDownload('linux-x64',old,{selectedHost:true}).sha256,
   'fde68a5713968f5f875e013355d73aab8bd95bb1fbfd1f1b6a29b1adcf48943b');
  assert.equal(baseSdkDownload('linux-x64',readHostToolchainPin('linux-x64')).sha256,
-  '1e23b2b64263dfc2267a3f459e9b13840278e84db1797a6733db68f49885df5c');
+  '772cfec6e7e371b78ad487c7938dad296e2fb6fe9e2462fe4a5ff68b3d02984f');
  assert.throws(()=>baseSdkDownload('linux-x64','nightly-'+'1.3.0-alpha.20260101000000',{selectedHost:true}),/no pinned archive identity/);
 });

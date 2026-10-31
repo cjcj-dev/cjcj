@@ -46,7 +46,7 @@ if (hostCompilerSha !== compilerSha) {
   throw new Error(`private host cjc copy mismatch: ${hostCompilerSha} != ${compilerSha}`);
 }
 assertPlainHostRuntime({hostSdk, target});
-await fs.appendFile(githubEnv, `CJCJ_SRCBUILD_HOST_SDK=${hostSdk}\n`);
+await fs.appendFile(githubEnv, `CJCJ_OFFICIAL_SDK_ROOT=${hostSdk}\n`);
 console.log(
   `SOURCE_HOST_SDK_PREPARED path=${hostSdk} source=${sourceSdk} ` +
   `cjc_sha256=${hostCompilerSha}`,

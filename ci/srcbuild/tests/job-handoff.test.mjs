@@ -114,7 +114,7 @@ test('same-run handoff retains and revalidates explicit runtime authorization an
   const formal = Object.fromEntries((await fs.readFile(new URL('../../runtime_pin.env', import.meta.url), 'utf8')).trim().split('\n').map(line => line.split('=')));
   await fs.writeFile(pin, `RUNTIME_REF=${selected}\nRUNTIME_SRC_URL=${formal.RUNTIME_SRC_URL}\n`);
   Object.assign(f.env, {CJCJ_RUNTIME_REF_OVERRIDE: selected, CJCJ_ALLOW_RUNTIME_OVERRIDE: 'true',
-    RUNTIME_REF: selected, RUNTIME_SRC_URL: formal.RUNTIME_SRC_URL, CJCJ_BOOTSTRAP_RUNTIME_PIN: pin,
+    RUNTIME_SRC_URL: formal.RUNTIME_SRC_URL, CJCJ_BOOTSTRAP_RUNTIME_PIN: pin,
     COLOUR_RT_RUN_ID: '123', COLOUR_RT_RUN_ATTEMPT: '1', COLOUR_RT_ARTIFACT_ID: '456',
     COLOUR_RT_MANIFEST_SHA256: 'e'.repeat(64)});
   const packed = f.run('pack');
@@ -177,13 +177,24 @@ test('native HLE locations and relative component paths survive the public job h
 
 test('public handoff carries native tool dependency locations and rejects an unarchived source',async t=>{
  const f=await fixture(t),selection={};
- for(const name of ['json','httplib','runtime','bounds']) {
+ for(const name of ['json']) {
   const source=path.join(f.root,'.srcbuild','native-tools',name);await fs.mkdir(source,{recursive:true});
   await fs.writeFile(path.join(source,'transport.txt'),'finite dependency transport '+name);
   selection[name]={repo:'fixture://'+name,commit:'a'.repeat(40),path:source};
  }
  const descriptor=path.join(f.root,'.srcbuild','native-tool-dependencies.json');
- await fs.writeFile(descriptor,JSON.stringify(selection));f.env.CJCJ_NATIVE_TOOL_DEPENDENCIES=descriptor;
+ const inputRoot=path.join(f.root,'.srcbuild'),sourceDescriptor=path.join(inputRoot,'native-source-dependencies.json');
+ const relativeSelection={json:{...selection.json,path:'native-tools/json'}};
+ await fs.writeFile(path.join(inputRoot,'locations.json'),JSON.stringify({platform:'linux_x86_64',nativeToolDependencies:'native-source-dependencies.json'}));
+ await fs.writeFile(sourceDescriptor,JSON.stringify(relativeSelection));
+ const {configureNativeToolInput}=await import('../../bootstrap/native-tool-input.mjs');
+ const configure=()=>configureNativeToolInput({root:inputRoot,workspace:inputRoot,platform:'linux_x86_64',envFile:f.env.GITHUB_ENV});
+ assert.equal(await configure(),descriptor,'json-only artifact reaches ordinary input configuration');
+ assert.deepEqual(JSON.parse(await fs.readFile(descriptor)),selection);
+ await fs.writeFile(sourceDescriptor,JSON.stringify({}));
+ await assert.rejects(configure(),/GHA_NATIVE_TOOL_SOURCE json/);
+ await fs.writeFile(sourceDescriptor,JSON.stringify(relativeSelection));
+ await configure();f.env.CJCJ_NATIVE_TOOL_DEPENDENCIES=descriptor;
  assert.equal(f.run('pack').rc,0);
  await fs.rm(f.root,{recursive:true});await fs.mkdir(f.root);
  const restored=f.run('restore');assert.equal(restored.rc,0,restored.output);

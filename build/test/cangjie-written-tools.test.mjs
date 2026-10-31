@@ -21,19 +21,19 @@ function file(root, parts, contents = '') {
 function packageFixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cjtoolsrc-package-'));
   const workspace = path.join(root, 'workspace');
-  const tools = path.join(workspace, 'cangjie_tools');
+  const tools = path.join(workspace, 'cjcj-tools');
   const officialSdkRoot = path.join(root, 'official-sdk');
   const installed = path.join(workspace, 'software', 'cangjie');
   file(installed, ['stdx', 'linux_x86_64_cjnative', 'static', 'stdx', 'fixture.cjo'], 'installed stdx fixture');
-  file(tools, ['cjpm', 'dist', 'cjpm']);
+  file(tools, ['packages', 'cjpm', 'dist', 'bin', 'cjpm']);
   file(officialSdkRoot, ['tools', 'bin', 'cjpm']);
-  file(tools, ['cjfmt', 'build', 'build', 'bin', 'cjfmt']);
-  file(tools, ['cjfmt', 'config', 'default.toml']);
-  file(tools, ['hyperlangExtension', 'target', 'bin', 'main']);
-  file(tools, ['hyperlangExtension', 'src', 'dtsparser', 'keep.txt']);
-  file(tools, ['cangjie-language-server', 'output', 'bin', 'LSPServer']);
-  file(tools, ['cjcov', 'dist', 'cjcov'], 'source-built cjcov');
-  file(tools, ['cjtrace-recover', 'dist', 'bin', 'cjtrace-recover'], 'source-built cjtrace-recover');
+  file(tools, ['packages', 'cjfmt', 'dist', 'bin', 'cjfmt']);
+  file(tools, ['packages', 'cjfmt', 'dist', 'config', 'default.toml']);
+  file(tools, ['packages', 'hle', 'target', 'bin', 'main']);
+  file(tools, ['packages', 'hle', 'src', 'dtsparser', 'keep.txt']);
+  file(tools, ['packages', 'lsp', 'output', 'bin', 'LSPServer']);
+  file(tools, ['packages', 'cjcov', 'dist', 'bin', 'cjcov'], 'source-built cjcov');
+  file(tools, ['packages', 'cjtrace-recover', 'dist', 'bin', 'cjtrace-recover'], 'source-built cjtrace-recover');
   for(const name of ['cjpm','cjfmt','hle','LSPServer','cjcov','cjtrace-recover','cjlint','cjprof','cjcompat']) {
     const value=name==='cjcov'||name==='cjtrace-recover'?'source-built '+name:'source '+name;
     file(installed,['tools/bin',name],'installed launcher '+name);
@@ -116,7 +116,7 @@ test('cjtrace-recover installs into the repo instead of CMAKE_INSTALL_PREFIX', (
   const config = buildConfig({targetKey: 'linux-x64'});
   const entry = toolsFor(config).find(([name]) => name === 'cjtrace-recover');
   assert.ok(entry, 'cjtrace-recover is not in the tool table');
-  assert.equal(entry[1], path.join('cjtrace-recover', 'build'));
+  assert.equal(entry[1], 'packages/cjtrace-recover');
 });
 
 test('the SDK tree carries the source-built cjcov and cjtrace-recover', async () => {

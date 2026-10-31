@@ -23,12 +23,12 @@ for name, old, new in [
 PY
 for arm in candidate producer-cut consumer-cut; do
   (set +e
-   DARWIN_RT_PRODUCT="$out/$arm.mjs" node --test ci/release/darwin_runtime.test.mjs > "$out/$arm.log" 2>&1
+   DARWIN_RT_PRODUCT="$out/$arm.mjs" node --test --test-reporter=tap ci/release/darwin_runtime.test.mjs > "$out/$arm.log" 2>&1
    echo "$?" > "$out/$arm.rc") &
 done
 wait
 cp "$out/candidate.mjs" "$out/restored.mjs"
-DARWIN_RT_PRODUCT="$out/restored.mjs" node --test ci/release/darwin_runtime.test.mjs > "$out/restored.log" 2>&1
+DARWIN_RT_PRODUCT="$out/restored.mjs" node --test --test-reporter=tap ci/release/darwin_runtime.test.mjs > "$out/restored.log" 2>&1
 echo 0 > "$out/restored.rc"
 test "$(cat "$out/candidate.rc")" = 0
 test "$(cat "$out/producer-cut.rc")" != 0

@@ -66,10 +66,14 @@ function sourceGating(name, text) {
   if (!registration) return [];
   const workflow = loadYaml(text);
   const jobs = Object.values(workflow.jobs);
-  assert.match(registration.source_sha, /^[0-9a-f]{40}$/, 'WORKFLOW_TEST_SOURCE_SHA');
+  assert.equal(registration.source_ref, '${{ github.sha }}', 'WORKFLOW_TEST_SOURCE_REF');
+  for (const file of registration.gating) {
+    assert.ok(GATING.includes(file), `WORKFLOW_TEST_CURRENT_GATING ${file}`);
+    assert.ok(fsSync.existsSync(path.join(repoRoot, file)), `WORKFLOW_TEST_CURRENT_FILE ${file}`);
+  }
   for (const job of jobs) {
     assert.deepEqual(job.steps[0], {
-      uses: 'actions/checkout@v7', with: {ref: registration.source_sha},
+      uses: 'actions/checkout@v7', with: {ref: registration.source_ref},
     }, 'WORKFLOW_TEST_SOURCE_CHECKOUT');
   }
   return registration.gating;
@@ -120,7 +124,8 @@ test('CI invokes registered script and native SDK Cangjie consumers', async () =
   assert.match(ci, /node ci\/run-registered-tests\.mjs scripts/);
   const job = ci.slice(ci.indexOf('  package-tests:'), ci.indexOf('  fixed-llvm-tools:'));
   assert.match(job, /node ci\/release\/receive_native_sdk\.mjs/);
-  assert.match(job, /cat ci\/runtime_pin\.env >> "\$GITHUB_ENV"/);
+  assert.match(job, /run: node ci\/load_runtime_pin\.mjs/);
+  assert.doesNotMatch(job, /cat ci\/runtime_pin\.env >> "\$GITHUB_ENV"/);
   assert.match(job, /node ci\/run-native-package-tests\.mjs/);
   const entry = await fs.readFile(path.join(repoRoot, 'ci/run-native-package-tests.mjs'), 'utf8');
   assert.match(entry, /colourEnvironment\('build'\)/);
@@ -220,8 +225,10 @@ test('no workflow runs a test file the manifest does not gate', async () => {
         offenders.push(`${name} runs ${file}, which is not in its source's GATING`);
       }
     }
-    for (const [, file] of text.matchAll(/(?:python3|bash)\s+([\w./-]+\.(?:py|sh))/g)) {
+    for (const [, file] of text.matchAll(/(?:python3|bash|node)\s+([\w./-]+\.(?:py|sh|mjs))/g)) {
       if (!/(?:^|\/)test[_.-]|[._-]test\.sh$|\/tests\//.test(file)) continue;
+      // Node manifest/tool launchers are infrastructure, not discovered tests.
+      if (file.endsWith('.mjs') && !discoverTestFiles().includes(file)) continue;
       const entry = REGISTERED.find(item => item.file === file);
       if (!entry || entry.executor === 'manual') offenders.push(`${name} executes unregistered/manual ${file}`);
     }
@@ -229,13 +236,13 @@ test('no workflow runs a test file the manifest does not gate', async () => {
   assert.deepEqual(offenders, [], `\n  ${offenders.join('\n  ')}`);
 });
 
-test('fixed-source workflow registration rejects missing or drifting checkout and stays scoped', async () => {
+test('candidate-source workflow registration rejects missing or drifting checkout and stays scoped', async () => {
   const name = 'darwin-input-consumers.yml';
   const text = (await workflows()).get(name);
   assert.deepEqual(sourceGating(name, text), ['ci/release/darwin_consumer_boundary.test.mjs']);
   assert.deepEqual(sourceGating('other.yml', text), []);
   for (const withValue of [undefined, {ref: 'master'},
-    {ref: '0'.repeat(40)}, {ref: WORKFLOW_TEST_SOURCES[0].source_sha, path: 'other-source'}]) {
+    {ref: '0'.repeat(40)}, {ref: WORKFLOW_TEST_SOURCES[0].source_ref, path: 'other-source'}]) {
     const parsed = loadYaml(text);
     parsed.jobs['native-input'].steps[0].with = withValue;
     assert.throws(() => sourceGating(name, dumpYaml(parsed)), /WORKFLOW_TEST_SOURCE_CHECKOUT/);

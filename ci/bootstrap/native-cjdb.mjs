@@ -1,6 +1,7 @@
 #!/usr/bin/env zx
 // Fixed compiler CMake targets build the complete native LLVM/CJDB dependency closure.
 import fs from 'node:fs/promises';
+import {applyCompilerBoundscheckDependencies,applyCompilerLlvmVersion,applyCompilerXml2Install,applyCompilerCjdbPatches,applyCompilerWindowsPatches,applyCompilerSchemaInstall} from '../../build/srcbuild/stages/fetch.mjs';
 import path from 'node:path';
 import os from 'node:os';
 import {fileURLToPath} from 'node:url';
@@ -9,6 +10,7 @@ import {materializeNativeSource} from './sdk-source.mjs';
 import {nativeHostFlatc} from './native-shim-inputs.mjs';
 import {prepareNativeCompilerSource} from './native-compiler-input.mjs';
 import {nativeAstInstallation} from './native-ast-inputs.mjs';
+import {installNativeClang} from './native-clang-install.mjs';
 import {pythonConfiguration,verifyCjdbPythonConfiguration,verifyCjdbPythonInstallation,pythonSourceInputs} from './sdk-cjdb-python.mjs';
 import {sdkPlatform} from './sdk-platform.mjs';
 import {execute} from './sdk-io.mjs';
@@ -74,9 +76,16 @@ export async function nativeCjdb(config) {
  const prepared=await prepareNativeCompilerSource({compiler,compilerArchive:config.compilerArchive,
   bounds,flatbuffers,build,install,commits,commit:commits.compiler},run);
  compiler=prepared.compiler;
+ // Preserve the existing frontend ordering fixes on the selected upstream source.
+ applyCompilerCjdbPatches(compiler);
+ applyCompilerBoundscheckDependencies(compiler);
+ applyCompilerSchemaInstall(compiler);
+ applyCompilerLlvmVersion(compiler);
+ applyCompilerXml2Install(compiler);
  const compilerSource=prepared.source;
  let windowsToolchain;
  if(native.os==='win32') {
+  applyCompilerWindowsPatches(compiler);
   windowsToolchain=await probeWindowsToolchain({tools,compiler,work:build+'.toolchain',env});
   tools={...tools,cc:windowsToolchain.cc,cxx:windowsToolchain.cxx};
   config={...config,tools};
@@ -92,6 +101,7 @@ export async function nativeCjdb(config) {
  const llvmArgs=[`-DCANGJIE_RUNTIME_SOURCE_DIR=${runtime}`,`-DCMAKE_C_COMPILER_LAUNCHER=${launcher}`,
   `-DCMAKE_CXX_COMPILER_LAUNCHER=${launcher}`,`-DLLVM_PARALLEL_LINK_JOBS=${linkJobs}`,`-DCJ_LLVM_COMMIT=${commits.llvm}`];
  await run([tools.cmake||'cmake','-G','Ninja','-S',compiler,'-B',build,'-DCMAKE_BUILD_TYPE=Release',
+  `-DCJCJ_NATIVE_NODE=${process.execPath}`,`-DCJ_LLVM_COMMIT=${commits.llvm}`,
   `-DCMAKE_TOOLCHAIN_FILE=${toolchain}`,`-DCMAKE_C_COMPILER=${tools.cc}`,
   `-DCMAKE_CXX_COMPILER=${tools.cxx}`,`-DCMAKE_C_COMPILER_LAUNCHER=${launcher}`,`-DCMAKE_CXX_COMPILER_LAUNCHER=${launcher}`,
   '-DCANGJIE_BUILD_CJC=ON','-DCANGJIE_BUILD_STD_SUPPORT=ON','-DCANGJIE_BUILD_TESTS=OFF','-DCANGJIE_BUILD_CJDB=ON',
@@ -104,6 +114,7 @@ export async function nativeCjdb(config) {
  const targets=[...new Set([...native.nativeTargets,'cangjie-ast-support'])];
  await run([tools.cmake||'cmake','--build',build,'--target',...targets.filter(t=>!['all','install'].includes(t)),'-j',jobs]);
  await run([tools.cmake||'cmake','--build',build,'-j',jobs]);await run([tools.cmake||'cmake','--install',build]);
+ const clangInstallation=await installNativeClang({build,install,platform,cmake:tools.cmake||'cmake',env},run);
  const astInstallation=await nativeAstInstallation({compiler,build,install,platform,source:compilerSource,commands:records,cmakeCommand:tools.cmake||'cmake'});
  // CMake is the only native library installer; Python and libedit are explicit
  // runtime dependencies copied once, with conflicts diagnosed at installation.
@@ -137,7 +148,7 @@ export async function nativeCjdb(config) {
   windowsToolchain={compiler:windowsToolchain.facts.compiler,installedFiles,original:{path:original,sha256:await fileDigest(path.join(install,original))}};
  }
  await atomicJson(install+'/BUILD-INPUTS.json',{commits,compilerSource,platform,llvmLibrary:{file:'third_party/llvm/'+native.llvmDirectory+'/'+native.llvmLibrary,sha256:await fileDigest(nativeRoot+'/'+native.llvmDirectory+'/'+native.llvmLibrary)},targets,
-  astInstallation,nativeShim,pythonInstallationInput,...(windowsToolchain?{windowsToolchain}:{}),configuration:config,python:{configured:observed,installed},pythonSource,commands:records});
+  astInstallation,clangInstallation,nativeShim,pythonInstallationInput,...(windowsToolchain?{windowsToolchain}:{}),configuration:config,python:{configured:observed,installed},pythonSource,commands:records});
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
  try{await nativeCjdb(await readJson(process.argv[2]));}catch(e){console.error(e.stack);process.exitCode=e.rc||1;}

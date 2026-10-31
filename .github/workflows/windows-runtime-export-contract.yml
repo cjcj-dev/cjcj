@@ -4,14 +4,20 @@ on:
   pull_request:
     paths:
       - 'ci/platform_matrix/verify_windows_runtime_exports*.mjs'
+      - 'ci/platform_matrix/windows_runtime_*.mjs'
+      - 'ci/platform_matrix/windows_runtime_toolchain.cmake'
+      - 'ci/platform_matrix/build_runtime.mjs'
       - '.github/workflows/windows-runtime-export-contract.yml'
   workflow_dispatch:
     inputs:
-      runtime_ref:
-        description: Runtime commit providing the generated caller contract
-        required: true
-        default: 1a14f0a8ccb685038729d8ca221768884beb5654
+      llvm_ref:
+        description: Paired LLVM identity only; empty pair uses current pins
         type: string
+        default: ''
+      runtime_ref:
+        description: Published runtime commit; supply both source identities
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -21,19 +27,26 @@ jobs:
     runs-on: windows-2025
     timeout-minutes: 45
     env:
-      # Fixed integration fixture: runtime's reviewed caller-contract producer.
-      RUNTIME_REF: ${{ inputs.runtime_ref || '1a14f0a8ccb685038729d8ca221768884beb5654' }}
       RUNTIME_TARGET: windows-x86_64
+      RUNTIME_BUILD_JOBS: '4'
+      COMPILER_CALLER_REF: 8ba3eb11c18527d5641794225b901202071d726f
+      LLVM_CALLER_REF: de7f37458b456c4a7ef1ebe2726d81fcfd9904c2
     steps:
       - uses: actions/checkout@v7
+      - name: Resolve native source pair
+        id: pin
+        env:
+          CJCJ_NATIVE_LLVM_REF: ${{ inputs.llvm_ref }}
+          CJCJ_NATIVE_RUNTIME_REF: ${{ inputs.runtime_ref }}
+        run: node ci/native-llvm-inputs.mjs
       - uses: actions/checkout@v7
         with:
           repository: cjcj-dev/cangjie-runtime
-          ref: ${{ env.RUNTIME_REF }}
+          ref: ${{ env.CJCJ_NATIVE_RUNTIME_REF }}
           path: runtime-source
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7.1.0
         with:
-          node-version: 22
+          node-version: '24.22.1'
       - uses: msys2/setup-msys2@v2
         with:
           msystem: MINGW64
@@ -42,6 +55,7 @@ jobs:
           path-type: inherit
           install: >-
             git make python gzip unzip file binutils
+            mingw-w64-x86_64-binutils
             mingw-w64-x86_64-clang
             mingw-w64-x86_64-cmake
             mingw-w64-x86_64-compiler-rt
@@ -49,6 +63,7 @@ jobs:
             mingw-w64-x86_64-libc++
             mingw-w64-x86_64-libunwind
             mingw-w64-x86_64-lld
+            mingw-w64-x86_64-llvm-tools
             mingw-w64-x86_64-ninja
             mingw-w64-x86_64-python
       # The runtime's find_program prefers ccache over sccache. Remove the
@@ -67,13 +82,26 @@ jobs:
         with:
           component: windows-runtime
           platform: windows-x86_64
-          pin: ${{ env.RUNTIME_REF }}
+          pin: ${{ env.CJCJ_NATIVE_RUNTIME_REF }}
       - name: Build through the production MINGW64 entry
+        id: native
         shell: bash
         run: npx --yes zx@8 ci/platform_matrix/build_runtime.mjs
       - name: Verify the installed runtime contract
         shell: bash
-        run: npx --yes zx@8 ci/platform_matrix/verify_windows_runtime_exports.mjs
+        run: npx --yes zx@8 ci/platform_matrix/verify_windows_runtime_exports.mjs --reference-services
+      - name: Compile and run installed native OS consumers
+        shell: bash
+        run: node ci/platform_matrix/windows_runtime_consumers.mjs
+      - name: Package and consume the same installed runtime
+        shell: bash
+        run: npx --yes zx@8 ci/platform_matrix/windows_runtime_package.mjs
+      - name: Preserve link and install outputs even after a failed post-build contract
+        if: always()
+        shell: bash
+        env:
+          WINDOWS_RUNTIME_BUILD_OUTCOME: ${{ steps.native.outcome }}
+        run: node ci/platform_matrix/windows_runtime_capture.mjs collect
       - name: Report sccache
         if: always()
         uses: ./.github/actions/sccache-report

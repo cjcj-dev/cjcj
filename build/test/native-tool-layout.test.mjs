@@ -4,29 +4,40 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {getTarget} from '../lib/targets.mjs';
-import {nativeToolBuildPayloads,toolPayloads} from '../srcbuild/tool-layout.mjs';
+import {nativeToolBuildPayloads,toolPayloads,toolBuildProduct} from '../srcbuild/tool-layout.mjs';
 import {sourceToolPayloads} from '../../ci/release/source-tool-payloads.mjs';
-import {toolReadiness} from '../../ci/cangjie-test/tool-readiness.mjs';
-import {fileDigest} from '../../ci/bootstrap/sdk-flow.mjs';
 // Independent literals from fixed ec1 native CMake producers/install rules.
 // Text transport fixtures only: no compiler, DLL, Windows execution or SDK pass.
 const layouts=[
- ['linux-x64','cjlint','cjlint/build/build/lib/libcjlint.so','cjlint/dist/lib/libcjlint.so','tools/lib/libcjlint.so'],
- ['darwin-x64','cjlint','cjlint/build/build/lib/libcjlint.dylib','cjlint/dist/lib/libcjlint.dylib','tools/lib/libcjlint.dylib'],
- ['windows-x64','cjlint','cjlint/build/build/bin/libcjlint.dll','cjlint/dist/lib/libcjlint.dll','tools/lib/libcjlint.dll'],
- ['windows-x64','cjprof','cjprof/build/build/src/cjprof.dll','cjprof/dist/lib/cjprof.dll','tools/lib/cjprof.dll'],
- ['windows-x64','cjprof','cjprof/bridge/jni/build/cjprof-jni.dll','cjprof/dist/lib/cjprof-jni.dll','tools/lib/cjprof-jni.dll'],
+ ['linux-x64','cjprof','selected-build/cjprof/libcjprof-cangjie.so','packages/cjprof/dist/lib/libcjprof-cangjie.so','tools/lib/libcjprof-cangjie.so'],
+ ['linux-x64','cjprof','selected-build/cjprof/libcjprof-jni.so','packages/cjprof/dist/lib/libcjprof-jni.so','tools/lib/libcjprof-jni.so'],
+ ['linux-x64','cjprof','selected-build/cjprof/cjprof.jar','packages/cjprof/dist/share/java/cjprof.jar','tools/share/java/cjprof.jar'],
 ];
+test('Cangjie lint consumes the executable recorded by its normal CJPM producer',async t=>{
+ const root=await fs.mkdtemp(path.join(os.tmpdir(),'lint-product-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
+ const config={repoPath:()=>root,buildRoot:root,target:getTarget('linux-x64')};
+ const build=root+'/cjlint';await fs.mkdir(build);
+ for(const name of ['main','cjlint']) {
+  const executable=build+'/target/release/bin/'+name;
+  await fs.mkdir(path.dirname(executable),{recursive:true});await fs.writeFile(executable,'normal producer output fixture');
+  await fs.writeFile(build+'/product.json',JSON.stringify({executable}));
+  assert.equal(toolBuildProduct(config,'cjlint'),executable);
+ }
+ await fs.rename(build+'/product.json',build+'/product-held.json');
+ assert.throws(()=>toolBuildProduct(config,'cjlint'),/ENOENT/,'no guessed filename without producer record');
+ await fs.rename(build+'/product-held.json',build+'/product.json');
+ assert.equal(toolBuildProduct(config,'cjlint'),build+'/target/release/bin/cjlint');
+});
 for(const [platform,name] of [...new Map(layouts.map(row=>[row[0]+'/'+row[1],[row[0],row[1]]])).values()])test('native raw/install/release paths: '+platform+' '+name,async t=>{
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'native-layout-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
  const write=async(rel,body='transport marker')=>{await fs.mkdir(path.dirname(root+'/'+rel),{recursive:true});await fs.writeFile(root+'/'+rel,body);};
- const config={repoPath:()=>root,target:getTarget(platform)};
+ const config={repoPath:()=>root,buildRoot:root+'/selected-build',target:getTarget(platform)};
  {
   const rows=layouts.filter(row=>row[0]===platform&&row[1]===name);
   for(const [,,raw,installed]of rows){await write(raw);await write(installed);}
   const sourceConfig=name==='cjlint'?'config/rules.json':'static/index.html';
   const installedConfig=name==='cjlint'?'config/rules.json':'config/static/index.html';
-  await write(name+'/'+sourceConfig);await write(name+'/dist/'+installedConfig);
+  await write('packages/'+name+'/'+sourceConfig);await write('packages/'+name+'/dist/'+installedConfig);
   const raw=await nativeToolBuildPayloads(config,name);
   console.log('NATIVE_RAW_LIBRARY_TARGET_BEGIN '+platform+' '+name);
   for(const [,,build,,to]of rows) {
@@ -40,45 +51,23 @@ for(const [platform,name] of [...new Map(layouts.map(row=>[row[0]+'/'+row[1],[ro
   }
   assert(raw.some(row=>row.to.startsWith('tools/config/')),'configuration independent control');
   if(name==='cjprof')assert(installed.some(row=>row.to.startsWith('.target-tools/tools/config/')),'body-relative configuration control');
-  if(platform==='windows-x64'&&name==='cjlint') {
-   await fs.rename(root+'/cjlint/dist/lib/libcjlint.dll',root+'/cjlint/dist/lib/cjlint.dll');
-   await assert.rejects(toolPayloads(config,name),/libcjlint\.dll/);
-   await fs.rename(root+'/cjlint/dist/lib/cjlint.dll',root+'/cjlint/dist/lib/libcjlint.dll');
-   assert((await toolPayloads(config,name)).some(row=>row.to==='tools/lib/libcjlint.dll'));
-  }
+
  }
 });
 
-test('Windows readiness consumes installed lib-prefixed cjlint DLL and refuses the obsolete name',async t=>{
- const root=await fs.mkdtemp(path.join(os.tmpdir(),'lint-reader-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
- const write=async(rel,body='reader transport marker')=>{await fs.mkdir(path.dirname(root+'/'+rel),{recursive:true});await fs.writeFile(root+'/'+rel,body);return {path:rel,sha256:await fileDigest(root+'/'+rel)};};
- const stage={platform:'windows_x86_64',fixture:'record/byte reader only; not executable'};
- await write('STAGE-INPUTS.json',JSON.stringify(stage));
- const artifacts={};
- for(const key of ['compiler','stdCore','runtime','nativeAst']){const row=await write('inputs/'+key);artifacts[key]={...row,sdkRelative:row.path};}
- const rel='tools/bin/cjlint.exe',retained='.target-tools/'+rel;
- const artifact=await write(retained),entry=await write(rel);
- entry.recipe=await write(rel+'.entry',['cjcj-sdk-entry-v1','2',retained,'windows','native-target:x64','third_party/llvm/bin','runtime/lib/windows_x86_64_cjnative','lib/windows_x86_64_cjnative','tools/lib'].join('\n')+'\n');
- const payloads={},built={},payloadFiles={};
- for(const relative of ['tools/lib/libcjlint.dll','tools/config/rules.json']){
-  const row=await write(relative);built[relative]={source:'/raw/'+relative,sha256:row.sha256};
-  payloads[relative]={source:'/install/'+relative,sha256:row.sha256,build:structuredClone(built[relative])};
-  payloadFiles[relative]={sha256:row.sha256,producers:['cjlint']};
- }
- const producer={source:{status:'resolved',repository:'fixture://tools',commit:'a'.repeat(40)},artifact,
-  build:{rc:0,directory:'cjlint',platform:stage.platform,inputs:{stage,artifacts},payloads:built,
-   dependencies:{json:{repo:'fixture://json',commit:'b'.repeat(40),changes_sha256:'c'.repeat(64)}},nativeConfiguration:{native:{values:{CMAKE_BUILD_TYPE:'Release',CMAKE_CXX_COMPILER:'fixture-clang++'}}}},
-  install:{rc:0,artifact,payloads}};
- const inputs={files:{[rel]:{sha256:artifact.sha256,artifact,entry,producer}},payloadFiles};
- const save=()=>write('TOOLS-INPUTS.json',JSON.stringify(inputs));await save();
- const accepted= (await toolReadiness(root)).cjlint;
- assert.equal(accepted.ready,true,accepted.reason);
- const correct='tools/lib/libcjlint.dll',wrong='tools/lib/cjlint.dll';
- await fs.rename(root+'/'+correct,root+'/'+wrong);
- for(const rows of [built,payloads,payloadFiles]){rows[wrong]=rows[correct];delete rows[correct];}
- await save();const rejected=(await toolReadiness(root)).cjlint;
- assert.equal(rejected.ready,false);assert.match(rejected.reason,/required payload absent: tools\/lib\/libcjlint.dll/);
- await fs.rename(root+'/'+wrong,root+'/'+correct);
- for(const rows of [built,payloads,payloadFiles]){rows[correct]=rows[wrong];delete rows[wrong];}
- await save();assert.equal((await toolReadiness(root)).cjlint.ready,true);
+test('Cangjie lint transports an isolated analysis application without legacy libraries',async t=>{
+ const root=await fs.mkdtemp(path.join(os.tmpdir(),'lint-layout-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
+ const prefix=root+'/installed',config={repoPath:()=>root,buildRoot:root+'/build',target:getTarget('linux-x64')};
+ const write=async(rel,body='transport fixture')=>{await fs.mkdir(path.dirname(prefix+'/'+rel),{recursive:true});await fs.writeFile(prefix+'/'+rel,body);};
+ for(const rel of ['config/cjlint_rule_list.json','modules/linux_x86_64_cjnative/std.core.cjo','lib/libcangjie-runtime.so','lib/libLLVM-15.so'])await write(rel);
+ await fs.mkdir(prefix+'/runtime/lib/linux_x86_64_cjnative',{recursive:true});
+ await fs.symlink('../../../lib/libcangjie-runtime.so',prefix+'/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so');
+ const read=()=>toolPayloads(config,'cjlint',prefix);
+ const rows=await read();assert.equal(rows.length,5);
+ assert(rows.every(row=>row.to.startsWith('.target-tools/tools/cjlint/')));
+ assert.deepEqual(sourceToolPayloads('cjlint'),['.target-tools/tools/cjlint','tools/bin/cjlint','tools/bin/cjlint.entry']);
+ await write('lib/libcjlint.so');await assert.rejects(read,/CJLINT_RETIRED_LIBRARY/);
+ await fs.rm(prefix+'/lib/libcjlint.so');assert.deepEqual(await read(),rows);
+ await fs.rename(prefix+'/modules',prefix+'/modules-held');await assert.rejects(read,/ENOENT/);
+ await fs.rename(prefix+'/modules-held',prefix+'/modules');assert.deepEqual(await read(),rows);
 });

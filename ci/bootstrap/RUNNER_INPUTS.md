@@ -35,7 +35,7 @@ and `unzip`; supplying local artifact directories avoids that transport. All
 supplied directories still pass exactly the same identity checks.
 
 The official SDK is extracted from the verified archive without dereferencing
-upstream symlinks. An installed `CJCJ_SRCBUILD_HOST_SDK`, cjv installation, or
+upstream symlinks. An installed `CJCJ_OFFICIAL_SDK_ROOT`, cjv installation, or
 dereferenced sharedbuild SDK is not a bootstrap base. Its archive SHA identifies
 the whole distribution and its original layout. No shared installation is
 modified. Missing platform archive pins fail with `HOST_SDK_PIN_MISSING`;

@@ -30,6 +30,8 @@ foreach(name cjdb lldb-boundscheck lldb-cangjie-lsp lldb-cangjie-frontend cangji
  add_custom_target(\${name})
 endforeach()
 `);
+ fs.cpSync(new URL('../../build/test/fixtures/compiler-174db8f/',import.meta.url),compiler,{recursive:true});
+ fs.cpSync(new URL('../../build/test/fixtures/compiler-41b223-schema/schema',import.meta.url),compiler+'/schema',{recursive:true});
  function git(dir,label){for(const [name,args]of [['init',['init']],['add',['add','.']],['commit',['-c','user.name=Zxilly','-c','user.email=zxilly@outlook.com','commit','--allow-empty','-m','Finite workflow input']]])assert.equal(run(label+'-'+name,['git','-C',dir,...args]).status,0);return run(label+'-head',['git','-C',dir,'rev-parse','HEAD']).stdout.trim();}
  const compilerSha=git(compiler,'compiler'),dependencySha=git(input+'/dep','dependency');
  fs.writeFileSync(input+'/xml-input/xml/README','finite dependency transfer only\n');
@@ -40,8 +42,7 @@ endforeach()
  tools:{cmake:'cmake',cc:'/usr/lib/llvm-15/bin/clang',cxx:'/usr/lib/llvm-15/bin/clang++',launcher:process.env.NATIVE_JOB_SCCACHE},
  xml2Archive:{file:'xml.tar.xz',sha256:crypto.createHash('sha256').update(fs.readFileSync(archive)).digest('hex')}};
  fs.writeFileSync(input+'/native-cjdb.json',JSON.stringify(config));
- selectedEnv={...process.env,GITHUB_ACTIONS:'true',CJCJ_NATIVE_LLVM_REF:dependencySha,CJCJ_NATIVE_RUNTIME_REF:dependencySha,CJCJ_NATIVE_HOST_VERSION:'1.3.0-alpha.20261009001050',
- CJCJ_NATIVE_SOURCE_SELECTION:JSON.stringify({ast:{repository:compiler,commit:compilerSha}})};
+ selectedEnv={...process.env,GITHUB_ACTIONS:'true',CJCJ_NATIVE_LLVM_REF:dependencySha,CJCJ_NATIVE_RUNTIME_REF:dependencySha,CJCJ_NATIVE_HOST_VERSION:'1.3.0-alpha.20261009001050'};
  const r=run('public',[process.execPath,entry,'build',input,root+'/work'],selectedEnv);
  console.log('NATIVE_JOB_COMPILE_ASSERTION_REACHED');assert.equal(r.status,1,r.stderr);
  assert.match(r.stdout,/NATIVE_JOB_REAL_COMPILE_REACHED/);
@@ -49,8 +50,8 @@ endforeach()
  assert.ok(calls.some(row=>row.argv?.some(arg=>String(arg).endsWith('/native-cjdb.mjs'))));
  assert.equal(fs.existsSync(root+'/work/native-install.tar'),false,'failed native producer must not publish installation');
 });
-test('public native adapter rejects a different selected compiler before CMake',()=>{
- const bad={...selectedEnv,CJCJ_NATIVE_SOURCE_SELECTION:JSON.stringify({ast:{repository:'file:///wrong',commit:'f'.repeat(40)}})};
+test('public native adapter rejects a different selected LLVM pair before CMake',()=>{
+ const bad={...selectedEnv,CJCJ_NATIVE_LLVM_REF:'f'.repeat(40)};
  const r=run('bad-pair',[process.execPath,entry,'build',root+'/input',root+'/bad-work'],bad);
  console.log('NATIVE_JOB_PAIR_CONTROL_REACHED');assert.equal(r.status,1);assert.match(r.stderr,/NATIVE_JOB_SOURCE_PAIR/);
  assert.equal(fs.existsSync(root+'/bad-work/native-cjdb.json'),false);

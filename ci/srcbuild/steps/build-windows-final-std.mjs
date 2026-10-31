@@ -21,7 +21,7 @@ const requiredEnv = name => {
 const workspace = path.resolve(requiredEnv('CANGJIE_WORKSPACE'));
 const buildRoot = path.resolve(requiredEnv('CANGJIE_BUILD_ROOT'));
 const version = requiredEnv('CJCJ_STAGE3_CANGJIE_VERSION');
-const expectedRuntimeRef = requiredEnv('RUNTIME_REF');
+const expectedRuntimeRef = requiredEnv('CJCJ_NATIVE_RUNTIME_REF');
 for (const directory of [workspace, buildRoot]) {
   if (directory === path.parse(directory).root) throw new Error('source-build paths must not be filesystem roots');
 }

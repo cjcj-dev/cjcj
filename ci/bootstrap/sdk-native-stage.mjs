@@ -103,6 +103,7 @@ export async function nativeStage(options, {signal} = {}) {
       cwd:source,env:{...env,CANGJIE_HOME:host,SB_SOURCE:source,SB_OUTPUT:path.join(output,'bin'),SB_NATIVE_ROOT:sdk,
         SB_SHA:commit,SB_PLATFORM:platform,SB_CC:options.cc,SB_OPTIMIZATION:'O1',SB_PARAMETERS_JSON:'{"compile_flags":""}'},records});
   } else if(kind==='compiler') {
+    const target=await privateRoot(options['target-dir']||path.join(source,'target'));
     if(options.phase==='stage3')await assertFinalStdInput({sdk,std:sdk,runtime:sdk,host:path.join(sdk,'.host'),platform,work:output+'.std-consumers',signal});
     if(process.env.SOURCE_SDK_VERSION)await injectCangjieVersion(source,process.env.SOURCE_SDK_VERSION);
     const before=await fs.readFile(path.join(source,'cjpm.toml'));
@@ -110,16 +111,20 @@ export async function nativeStage(options, {signal} = {}) {
     await command([options.zx||'zx',path.join(source,'runtime_shim/build_shim.mjs')],{cwd:source,env,records});
     try {
       await prepareTrimpath(source);
-      await command([path.join(sdk,'.host/tools/bin/cjpm'+native.exe),'build','-j',jobs],{cwd:source,env:cleanSdkEnvironment(sdk,platform,env,path.join(sdk,'.host')),records});
+      // A completed user installation need not contain the bootstrap .host
+      // tree. The existing explicit host option selects the package manager
+      // and its execution libraries; the selected SDK still supplies cjc/std.
+      const packageManagerSdk=host??path.join(sdk,'.host');
+      await command([path.join(packageManagerSdk,'tools/bin/cjpm'+native.exe),'build',...(options['target-dir']?['--target-dir',target]:[]),'-j',jobs],{cwd:source,env:cleanSdkEnvironment(sdk,platform,env,packageManagerSdk),records});
     } finally { await fs.writeFile(path.join(source,'cjpm.toml'), before); }
-    const product=await resolveProductBinary(path.join(source,'target/release/bin'),options.phase||'stage2',{windows:native.os==='win32'});
+    const product=await resolveProductBinary(path.join(target,'release/bin'),options.phase||'stage2',{windows:native.os==='win32'});
     await assembleDirectory(output, async destination => {
     await copyOutputs(destination,[{from:product,to:'bin/cjcj-stage1'+native.exe},
       // runtime_shim/build_shim.mjs links the host runtime into the source tree as
       // ${repo}/target/release/runtime for the compiler's relative lookup. That is
       // a build-tree facility, not a package member: copying it would carry an
       // absolute path out of the tree, which the install guard rejects as escape.
-      {from:path.join(source,'target/release'),to:'share/cjcj/cjo',exclude:['bin','runtime']},
+      {from:path.join(target,'release'),to:'share/cjcj/cjo',exclude:['bin','runtime']},
       ...['cjselfhost_llvmshim.o','cjc_runtime_config.o'].map(name=>({from:path.join(source,'runtime_shim',name),to:'share/cjcj/runtime_shim/'+name}))]);
     await atomicJson(path.join(destination,'compiler-inputs.json'),{commit,version:process.env.SOURCE_SDK_VERSION,parentSha256:await fileDigest(await compilerProducer(sdk)),
       stdSha256:await stdIdentity(options['std-input']||sdk),
@@ -131,7 +136,7 @@ export async function nativeStage(options, {signal} = {}) {
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
   try {
-    const spec=Object.fromEntries(['jobs','kind','source','sdk','runtime','output','platform','commit','host','heap','private-tools','cc','compiler-runtime','zx','phase','std-input','accept-records','resume-state','resume-stage','source-archive','source-archive-sha256'].map(k=>[k,{type:'string'}]));
+    const spec=Object.fromEntries(['jobs','kind','source','sdk','runtime','output','platform','commit','host','heap','private-tools','cc','compiler-runtime','zx','phase','std-input','accept-records','resume-state','resume-stage','source-archive','source-archive-sha256','target-dir'].map(k=>[k,{type:'string'}]));
     spec['resume-installed']={type:'boolean'};
     nativeSourceOptions(process.argv); // Reject duplicate identity flags before parseArgs.
     const {values}=parseArgs({options:spec});

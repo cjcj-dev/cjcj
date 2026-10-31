@@ -7,17 +7,32 @@ import {fileURLToPath} from 'node:url';
 import {sdkPlatform} from './sdk-platform.mjs';
 import {readHostToolchainPin} from '../host-toolchain-pin.mjs';
 export const BOOTSTRAP_PHASES=Object.freeze(['stage0','stage0-run','std-bootstrap','stage1-initial','stage1-std','stage2','stage3-std','stage3']);
-// Private paired source inputs; release artifact pins are deliberately separate.
-export const FIXED_INPUTS=Object.freeze({llvm:'872b162de7a8806760fb1194764b4b8f0c605e1a',
-  compiler:'174db8f40d5efddee63c47a3162bbf676bc227a0',bounds:'2ae82839ecaaa7d031e66ccbd2076d671acfd615',
-  runtime:'58dae8764fb7bcc16296abb617f0cebd01712973',h1:'1553645ac50f72ba58712843255313250869cbbc',host:'1.3.0-alpha.20261009001050'});
+import {readSourcePins} from '../native-llvm-inputs.mjs';
+// SDK defaults consume the same source pins as the workflow producers.
+const pins=readSourcePins();
+export const FIXED_INPUTS=Object.freeze({llvm:pins.llvm.LLVM_SHA,
+  compiler:pins.source.COMPILER_REF,bounds:pins.source.BOUNDS_REF,
+  runtime:pins.runtime.RUNTIME_REF,flatbuffers:pins.llvm.FLATBUFFERS_SHA,
+  h1:'83901791548856f0458f3e3e38c4c1ab7ac496c5',host:readHostToolchainPin().replace(/^nightly-/, '')});
 const stageEntry=fileURLToPath(new URL('./sdk-native-stage.mjs',import.meta.url));
 const verifyEntry=fileURLToPath(new URL('./sdk-verify-install.mjs',import.meta.url));
 // A tool update's pending consumer needs the compiler and its actual execution
 // closure. Copy those dependencies for use, never a backup of the whole SDK.
 export async function toolConsumerCopies(sdk,platform) {
-  const native=sdkPlatform(platform),recipe=(await fs.readFile(path.join(sdk,'bin/cjcj-stage1'+native.exe+'.entry'),'utf8')).trimEnd().split('\n');
-  if(recipe[0]!=='cjcj-sdk-entry-v1')throw Error('TOOL_CONSUMER_COMPILER_ENTRY');
+  const native=sdkPlatform(platform);
+  // Official SDKs expose bin/cjc directly. A staged SDK still requires its
+  // normal launcher recipe; losing that recipe must not select the host path.
+  const stage=await fs.stat(path.join(sdk,'STAGE-INPUTS.json')).catch(error=>{
+    if(error.code==='ENOENT')return null;throw error;
+  });
+  const entry=await fs.readFile(path.join(sdk,'bin/cjcj-stage1'+native.exe+'.entry'),'utf8').catch(error=>{
+    if(error.code!=='ENOENT')throw error;
+    if(stage)throw Error('TOOL_CONSUMER_COMPILER_ENTRY missing staged launcher recipe');
+    return null;
+  });
+  const recipe=entry===null?[]:entry.trimEnd().split('\n');
+  if(entry!==null&&recipe[0]!=='cjcj-sdk-entry-v1')throw Error('TOOL_CONSUMER_COMPILER_ENTRY');
+  if(entry===null)await fs.access(path.join(sdk,'bin/cjc'+native.exe));
   const paths=new Set(['bin','libexec','runtime','lib','modules','third_party','.native-tools','include','schema','share/cjcj',
     'STAGE-INPUTS.json','compiler-inputs.json','PROVENANCE.txt','RUNTIME-INPUTS.json',
     ...recipe.slice(5).filter(rel=>rel.startsWith('.host/')||rel.startsWith('.compiler-exec/'))]);
@@ -37,7 +52,8 @@ export function installationRecipe(selection,{compiler:product,std,bootstrap=fal
   const native=sdkPlatform(platform),tuple=native.tuple,exe=native.exe;
   const nLib=['third_party/llvm/'+native.llvmDirectory,'runtime/lib/'+tuple,'lib/'+tuple,'tools/lib'];
   if(tools)return {copies:[...tools.rows,...tools.payloads].map(row=>({...row,owner:'source-built tools'})),
-    entries:[{directory:'tools/bin',retain:'.target-tools/tools/bin',names:tools.rows.map(row=>row.name),libraries:nLib}],links:{}};
+    entries:[{directory:'tools/bin',retain:'.target-tools/tools/bin',names:tools.rows.filter(row=>!['cjlint','lsp','cjhead'].includes(row.producer)).map(row=>row.name),libraries:nLib},
+      ...tools.rows.filter(row=>['cjlint','lsp','cjhead'].includes(row.producer)).map(row=>({directory:'tools/bin',retain:'.target-tools/tools/'+row.producer+'/bin',names:[row.name],libraries:['.target-tools/tools/'+row.producer+'/lib']}))],links:{}};
   const {llvm,runtime,ast}=target;
   product??=target.compiler.product;std??=target.std.install;
   const compilerName='bin/cjcj-stage1'+exe;
@@ -96,6 +112,11 @@ export function installationRecipe(selection,{compiler:product,std,bootstrap=fal
       {from:host.install+'/runtime/lib/'+sdkPlatform(host.platform??platform).tuple,to:'.host/runtime/lib/'+sdkPlatform(host.platform??platform).tuple,owner:'bootstrap host comparison runtime'},
       {from:product,to:compilerName,owner:'compiler'});
   }
+  // Native LLVM executables run from the retained bin directory. Clang
+  // derives its builtin headers from that executable, so carry the producer's
+  // matching resource tree beside it as well as in the public LLVM prefix.
+  copies.push({from:llvm.install+'/third_party/llvm/lib/clang',
+    to:'.native-tools/third_party/llvm/lib/clang',owner:'N clang resources'});
   // These repository tools belong to the installation, before pending
   // consumers run. Packaging only archives this same installed directory.
   const scripts=['check_sdk_usable.mjs','verifier_artifact_gate.mjs'];
@@ -139,7 +160,7 @@ export function createBootstrapTargets(input) {
   if(typeof runtimeCommit!=='string'||!/^[a-f0-9]{40}$/.test(runtimeCommit))throw new Error('TARGET_SOURCE runtime commit');
   for(const [name,row]of Object.entries({llvm,runtime,ast,h1})) {
     const expected=name==='runtime'?runtimeCommit:name==='llvm'?(input.llvmCommit??FIXED_INPUTS.llvm)
-      :name==='ast'?(input.astCommit??FIXED_INPUTS.compiler):FIXED_INPUTS[name];
+      :name==='ast'?(input.astCommit??FIXED_INPUTS.compiler):name==='h1'?(input.h1Commit??FIXED_INPUTS.h1):FIXED_INPUTS[name];
     if (!/^[a-f0-9]{40}$/.test(expected || '')) throw new Error('TARGET_SOURCE '+name);
     if(row.commit!==expected)throw new Error('TARGET_SOURCE '+name);
   }

@@ -600,7 +600,7 @@ test('native build environments use configured architecture, OpenSSL, and loader
   try {
     for (const targetKey of ['linux-aarch64', 'darwin-arm64', 'darwin-x64', 'linux-x64']) {
       const config = buildConfig({targetKey, officialSdkRoot: null});
-      const env = baseEnv(config, {...process.env, CJCJ_SRCBUILD_HOST_SDK: undefined});
+      const env = baseEnv(config, {...process.env, CJCJ_OFFICIAL_SDK_ROOT: undefined});
       assert.equal(env.ARCH, config.target.spec.arch);
       assert.equal(env.OPENSSL_PATH, config.target.spec.opensslLibDir);
       assert.ok(env.PATH.startsWith(config.target.spec.llvmBinDir));
@@ -637,7 +637,7 @@ for (const shape of ['fresh', 'tools']) {
           'require("node:fs").writeFileSync(process.argv[1], process.env[process.argv[2]] ?? "absent")',
           observed, spec.loaderEnv,
         ], {
-          envOverlay: envFrom(config, {...process.env, CJCJ_SRCBUILD_HOST_SDK: null,
+          envOverlay: envFrom(config, {...process.env, CJCJ_OFFICIAL_SDK_ROOT: null,
             [spec.loaderEnv]: inherited}),
           capture: true, logOutput: false, check: false,
         });
@@ -682,7 +682,7 @@ test('source build keeps the pinned plain host runtime across both bootstrap hal
     'export CJCJ_SDK_STOCK_LLC=1',
     'cat ci/host_sdk_pin.env >> "$GITHUB_ENV"',
     'CJCJ_SRCBUILD_BOOTSTRAP_SDK=$host_sdk',
-    'CJCJ_SRCBUILD_HOST_SDK=$host_sdk',
+    'CJCJ_OFFICIAL_SDK_ROOT=$host_sdk',
   ]) assert.ok(workflow.includes(contract), contract);
 
   const prepare = await fs.readFile(path.join(root, 'ci/srcbuild/steps/prepare-source-host-sdk.mjs'), 'utf8');
@@ -693,7 +693,7 @@ test('source build keeps the pinned plain host runtime across both bootstrap hal
     'await fs.cp(sourceSdk, hostSdk, {recursive: true, preserveTimestamps: true})',
     'await fs.copyFile(compiler, hostCompiler)',
     'assertPlainHostRuntime({hostSdk, target})',
-    'CJCJ_SRCBUILD_HOST_SDK=${hostSdk}',
+    'CJCJ_OFFICIAL_SDK_ROOT=${hostSdk}',
   ]) assert.ok(prepare.includes(contract), contract);
 
   const stdlib = await fs.readFile(path.join(root, 'build/srcbuild/stages/stdlib.mjs'), 'utf8');

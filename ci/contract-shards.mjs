@@ -150,7 +150,6 @@ async function main([mode, first, second, third]) {
     fs.mkdirSync(directory, {recursive: true});
     const env = testEnvironment(path.join(directory, 'bin'), {...process.env,
       CJCJ_OFFICIAL_SDK_ROOT: input.host.root,
-      ...(process.env.CJCJ_SRCBUILD_HOST_SDK === undefined ? {} : {CJCJ_SRCBUILD_HOST_SDK: input.host.root}),
       CJCJ_TEST_ZX_LOG: path.join(directory, 'zx-calls.jsonl')});
     const initial = {id, files: plan.groups[id].files, planHash: planHash(plan), source: source(), inputs: input};
     save(path.join(directory, 'group-start.json'), initial);

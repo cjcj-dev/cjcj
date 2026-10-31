@@ -13,21 +13,21 @@ function parsePins(text) {
   }));
 }
 
-export function nativePair(env = process.env) {
+export function nativePair(env = process.env, {requireHost=true} = {}) {
   const llvm = env.CJCJ_NATIVE_LLVM_REF, runtime = env.CJCJ_NATIVE_RUNTIME_REF;
   if (!llvm && !runtime) return null;
   if (![llvm, runtime].every(value => /^[0-9a-f]{40}$/.test(value || '')))
     throw new Error('NATIVE_RUNTIME_EXPLICIT_PAIR_REQUIRED');
   const hostVersion = env.CJCJ_NATIVE_HOST_VERSION;
-  if (!/^\d+\.\d+\.\d+-alpha\.\d+$/.test(hostVersion || ''))
+  if (requireHost && !/^\d+\.\d+\.\d+-alpha\.\d+$/.test(hostVersion || ''))
     throw new Error('NATIVE_RUNTIME_EXPLICIT_HOST_REQUIRED');
   return {llvm, runtime, hostVersion};
 }
 
 export async function resolveRuntimeSource(env = process.env, pinFile = env.CJCJ_BOOTSTRAP_RUNTIME_PIN) {
   const pins = parsePins(await fs.readFile(PIN_FILE, 'utf8'));
-  const pair = nativePair(env);
-  if (env.CJCJ_NATIVE_RUNTIME_ARTIFACT !== undefined && Boolean(env.CJCJ_NATIVE_RUNTIME_ARTIFACT) !== Boolean(pair))
+  const pair = nativePair(env,{requireHost:Boolean(env.CJCJ_NATIVE_RUNTIME_ARTIFACT)});
+  if (env.CJCJ_NATIVE_RUNTIME_ARTIFACT && !pair)
     throw new Error('NATIVE_RUNTIME_COMPONENT_SELECTION_REQUIRED');
   const requestedOverride = env.CJCJ_RUNTIME_REF_OVERRIDE || '';
   if (pair && requestedOverride && requestedOverride !== pair.runtime) throw new Error('NATIVE_RUNTIME_OVERRIDE_CONFLICT');
@@ -39,10 +39,6 @@ export async function resolveRuntimeSource(env = process.env, pinFile = env.CJCJ
   const runtimeRef = pair?.runtime || overrideRef || pins.RUNTIME_REF;
   if (!/^[0-9a-f]{40}$/i.test(runtimeRef)) {
     throw new Error(`runtime ref must be a full 40-character commit SHA: ${runtimeRef}`);
-  }
-  const requestedRef = env.RUNTIME_REF || '';
-  if (requestedRef && requestedRef !== runtimeRef) {
-    throw new Error(`runtime ref mismatch: environment=${requestedRef}, resolved=${runtimeRef}`);
   }
   const sourceUrl=pair?nativeSourceSelection(env,pair).selection.runtime.repository:pins.RUNTIME_SRC_URL;
   const requestedUrl = env.RUNTIME_SRC_URL || '';
@@ -82,6 +78,6 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   if (mode !== '--write' && mode !== '--shell') throw new Error('usage: runtime-pin.mjs --write|--shell FILE');
   if (mode === '--shell') {
     const quote = value => `'${value.replaceAll("'", "'\\''")}'`;
-    console.log(`RUNTIME_REF=${quote(selected.runtimeRef)}\nRUNTIME_SRC_URL=${quote(selected.sourceUrl)}`);
+    console.log(`CJCJ_NATIVE_RUNTIME_REF=${quote(selected.runtimeRef)}\nRUNTIME_SRC_URL=${quote(selected.sourceUrl)}`);
   }
 }

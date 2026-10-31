@@ -1,16 +1,35 @@
 name: Native runtime and bounds installation
 on:
+  workflow_dispatch:
+    inputs:
+      llvm_ref:
+        description: Full paired LLVM source identity (not built by this runtime job)
+        type: string
+        required: false
+      runtime_ref:
+        description: Published full runtime source commit
+        type: string
+        required: false
+      runtime_version:
+        description: Native runtime version (empty uses the existing runtime pin)
+        type: string
+        default: ''
+      platforms:
+        description: Comma-separated native platforms; select only authorized jobs
+        type: string
+        required: false
+        default: darwin_aarch64,darwin_x86_64
   workflow_call:
     inputs:
       llvm_ref:
         type: string
-        required: true
+        required: false
       runtime_ref:
         type: string
-        required: true
+        required: false
       runtime_version:
         type: string
-        required: true
+        default: ''
       platforms:
         type: string
         default: all
@@ -19,19 +38,18 @@ permissions:
 jobs:
   plan:
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     outputs:
       matrix: ${{ steps.select.outputs.dylib_matrix }}
       platforms: ${{ steps.select.outputs.tuple_platforms }}
     steps:
       - uses: actions/checkout@v7
-      - name: Validate the explicit native source pair
+      - name: Resolve the default or explicit native source pair
         env:
-          NATIVE_LLVM_REF: ${{ inputs.llvm_ref }}
-          NATIVE_RUNTIME_REF: ${{ inputs.runtime_ref }}
+          CJCJ_NATIVE_LLVM_REF: ${{ inputs.llvm_ref }}
+          CJCJ_NATIVE_RUNTIME_REF: ${{ inputs.runtime_ref }}
         run: |
           set -euo pipefail
-          test -n "$NATIVE_LLVM_REF"
-          test -n "$NATIVE_RUNTIME_REF"
           node ci/native-llvm-inputs.mjs
       - name: Select the existing native runner matrix
         id: select
@@ -44,31 +62,65 @@ jobs:
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
+      max-parallel: 4
       matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24.22.1'
       - name: Load native source pair
         id: pin
         env:
-          NATIVE_LLVM_REF: ${{ inputs.llvm_ref }}
-          NATIVE_RUNTIME_REF: ${{ inputs.runtime_ref }}
+          CJCJ_NATIVE_LLVM_REF: ${{ inputs.llvm_ref }}
+          CJCJ_NATIVE_RUNTIME_REF: ${{ inputs.runtime_ref }}
         run: node ci/native-llvm-inputs.mjs
       - uses: actions/checkout@v7
         with:
           repository: cjcj-dev/cangjie-runtime
           ref: ${{ steps.pin.outputs.runtime_sha }}
           path: runtime-source
+      - name: Prepare fixed bounds source through normal Git inputs
+        run: |
+          node --input-type=module <<'JS'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          import {darwinCommand as run} from './ci/release/darwin_commands.mjs';
+          import {readSourcePins} from './ci/native-llvm-inputs.mjs';
+          const logs='.platform-ci/logs/native-prepare', pin=readSourcePins().source;
+          const destination=path.resolve('runtime-source/runtime/third_party/third_party_bounds_checking_function');
+          if(fs.existsSync(destination))throw Error('fresh bounds source required');
+          run(logs,'bounds-init','git',['init',destination]);
+          run(logs,'bounds-fetch','git',['-C',destination,'fetch','--depth=1',pin.BOUNDS_SRC_URL,pin.BOUNDS_REF]);
+          run(logs,'bounds-checkout','git',['-C',destination,'checkout','--detach','FETCH_HEAD']);
+          const actual=run(logs,'bounds-ref','git',['-C',destination,'rev-parse','HEAD']).stdout.trim();
+          if(actual!==pin.BOUNDS_REF)throw Error('bounds fixed source mismatch');
+          JS
       - uses: ./.github/actions/sccache
         with:
           component: native-runtime
           platform: ${{ matrix.platform }}
           pin: ${{ steps.pin.outputs.runtime_sha }}
+      - name: Record native runner capacity before production
+        run: |
+          node --input-type=module <<'JS'
+          import fs from 'node:fs';
+          import os from 'node:os';
+          import {buildCapacity,selectBuildJobs} from './ci/build-resources.mjs';
+          const capacity=await buildCapacity(), disk=fs.statfsSync('.');
+          fs.mkdirSync('.platform-ci/logs',{recursive:true});
+          fs.writeFileSync('.platform-ci/logs/native-capacity.json',JSON.stringify({
+            observed:new Date().toISOString(),...capacity,jobs:await selectBuildJobs(undefined,process.env,capacity),
+            freeMemory:os.freemem(),availableDiskBytes:disk.bavail*disk.bsize,
+            planning:{entityBytes:8*1024**3,memoryBytes:8*1024**3,sccacheBytes:2*1024**3}
+          },null,2)+'\n');
+          JS
       - name: Build and install the exact native runtime and bounds
         env:
           RUNTIME_NATIVE_PAIR: '1'
           GC_UNIT_GATE_LANGUAGE_TESTS: ${{ runner.os == 'Linux' && 'defer' || 'all' }}
-          RUNTIME_REF: ${{ steps.pin.outputs.runtime_sha }}
+          CJCJ_NATIVE_RUNTIME_REF: ${{ steps.pin.outputs.runtime_sha }}
           RUNTIME_VERSION: ${{ inputs.runtime_version }}
           RUNTIME_TARGET: native
           RUNTIME_BUILD_TYPE: release
@@ -78,23 +130,29 @@ jobs:
           set -euo pipefail
           ulimit -S -c 0
           ulimit -H -c 0
-          if [ "$RUNNER_OS" = macOS ]; then
-            export CANGJIE_BUILD_JOBS=$(sysctl -n hw.logicalcpu)
-          else
-            export CANGJIE_BUILD_JOBS=$(nproc)
-          fi
+          CANGJIE_BUILD_JOBS=$(node ci/build-resources.mjs --jobs-only)
+          export CANGJIE_BUILD_JOBS
           npx --yes zx@8 ci/platform_matrix/build_runtime.mjs
+      - name: Consume the installation and the same package on this native host
+        env:
+          NATIVE_RUNTIME_PLATFORM: ${{ matrix.platform }}
+        run: node ci/platform_matrix/native_runtime_package.mjs
       - uses: actions/upload-artifact@v7
         with:
           name: native-runtime-install-${{ matrix.platform }}
           path: .platform-ci/runtime-install
           if-no-files-found: error
+      - name: Retain the exact Linux gate libraries beside its original ELF
+        if: always() && runner.os == 'Linux'
+        run: node ci/platform_matrix/native_runtime.mjs retain-gate runtime-source
       - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: native-runtime-diagnostics-${{ matrix.platform }}
           path: |
             .platform-ci/logs
+            .platform-ci/native-consumers
+            .platform-ci/runtime-install.tar
             runtime-source/runtime/CMakebuild/CMakeCache.txt
             runtime-source/runtime/tests/gc_unit/build_standalone/gate-runs
           if-no-files-found: warn

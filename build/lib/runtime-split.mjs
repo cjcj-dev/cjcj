@@ -127,7 +127,7 @@ export function compilerRuntimeDirectory({sdk, hostSdk, target, compiler}) {
       `installed entry recipe declares no ${target.spec.runtimeLibrary} directory: ${recipe.physical}.entry`,
     );
   }
-  const hostRoot = requireDirectory(hostSdk, 'CJCJ_SRCBUILD_HOST_SDK');
+  const hostRoot = requireDirectory(hostSdk, 'CJCJ_OFFICIAL_SDK_ROOT');
   return path.dirname(requireRuntime(path.join(hostRoot, runtimeRelativePath(target, 'host')), 'host'));
 }
 
@@ -137,7 +137,7 @@ export function assertPlainHostRuntime({
   readSymbols = readRuntimeSymbols,
   log = console.log,
 }) {
-  const hostRoot = requireDirectory(hostSdk, 'CJCJ_SRCBUILD_HOST_SDK');
+  const hostRoot = requireDirectory(hostSdk, 'CJCJ_OFFICIAL_SDK_ROOT');
   const hostRuntime = requireRuntime(
     path.join(hostRoot, runtimeRelativePath(target, 'host')),
     'host',
@@ -155,7 +155,7 @@ export function assertPlainHostRuntime({
 }
 
 export function runtimeSplitPaths({hostSdk, targetSdk, target}) {
-  const hostRoot = requireDirectory(hostSdk, 'CJCJ_SRCBUILD_HOST_SDK');
+  const hostRoot = requireDirectory(hostSdk, 'CJCJ_OFFICIAL_SDK_ROOT');
   const targetRoot = requireDirectory(targetSdk, 'target SDK');
   const hostRelative = runtimeRelativePath(target, 'host');
   const targetRelative = runtimeRelativePath(target, 'target');
@@ -284,7 +284,7 @@ export function assertRuntimeSplit({
 }
 
 export function hostLoaderPath({hostSdk, targetSdk, target, inherited = '', includeTargetLlvm = true}) {
-  const hostRoot = requireDirectory(hostSdk, 'CJCJ_SRCBUILD_HOST_SDK');
+  const hostRoot = requireDirectory(hostSdk, 'CJCJ_OFFICIAL_SDK_ROOT');
   const targetRoot = requireDirectory(targetSdk, 'target SDK');
   const hostRuntime = requireRuntime(
     path.join(hostRoot, runtimeRelativePath(target, 'host')),

@@ -31,6 +31,11 @@ foreach(name cjdb lldb-boundscheck lldb-cangjie-lsp lldb-cangjie-frontend cangji
  add_custom_target(\${name})
 endforeach()
 `);
+ await fs.mkdir(compiler+'/third_party/cmake',{recursive:true});await fs.mkdir(compiler+'/src',{recursive:true});
+ await fs.copyFile(new URL('../../build/test/fixtures/compiler-41b223-cjdb/BuildCJDB.cmake',import.meta.url),compiler+'/third_party/cmake/BuildCJDB.cmake');
+ await fs.writeFile(compiler+'/src/CMakeLists.txt','if(CANGJIE_BUILD_CJDB)\n    add_dependencies(lldb cangjie-frontend)\nendif()\n');
+ await fs.copyFile(new URL('../../build/test/fixtures/compiler-174db8f/third_party/CMakeLists.txt',import.meta.url),compiler+'/third_party/CMakeLists.txt');
+ await fs.cp(new URL('../../build/test/fixtures/compiler-41b223-schema/schema',import.meta.url),compiler+'/schema',{recursive:true});
  for(const [name,args]of [['init',['init']],['add',['add','.']],['commit',['-c','user.name=Zxilly','-c','user.email=zxilly@outlook.com','commit','-m','Finite native tool path fixture']]])
   assert.equal(run(name,['git','-C',compiler,...args]).status,0);
  const commit=run('head',['git','-C',compiler,'rev-parse','HEAD']).stdout.trim();
