@@ -1,0 +1,9 @@
+{
+  "head": "845a2d7eee50868f04eb29f848c18964f15af2fa",
+  "files": {
+    "identity.py": "e068215ec4d9732d37f3834c382717ea8920500e7b505323ea4ed4156a42693a",
+    "prepare_build.py": "f7835260b5e9ffc8d96d81a5aaa292bb3cf6ea0b77a27828bf17004e5c9e21ba",
+    "frozen-inputs.json": "e9caf0e533bcf1c665fa2cdae80b6ac116cad20dea4602aff82d00efddbb7074",
+    "source-identity.json": "25a1a844e2e756b9bea387c11853b192138a4b1d087ce635eafd24d2f579ced0"
+  }
+}
