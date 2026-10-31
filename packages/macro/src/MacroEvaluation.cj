@@ -1317,9 +1317,9 @@ public class MacroEvaluation {
                         batch.add(call)
                         start++
                     }
-                    if (SendMacroCallsTask(batch)) {
+                    if (this.SendMacroCallsTask(batch)) {
                         while (true) {
-                            if (!WaitMacroCallsEvalResult(batch)) { break }
+                            if (!this.WaitMacroCallsEvalResult(batch)) { break }
                             var completed = true
                             for (call in batch) {
                                 completed = (call.isDataReady || call.status == MacroEvalStatus.FAIL) && completed
