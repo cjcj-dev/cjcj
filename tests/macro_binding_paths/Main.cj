@@ -1,7 +1,7 @@
-import cjcj::driver.*
-import cjcj::option.*
+import cjcj::driver.{Driver, Linux_CJNATIVE, ToolBatch}
+import cjcj::option.{TempFileInfo, TempFileManager, ArchType, OSType, EnvironmentType, OutputMode, OrderedInput}
 import cjcj::frontend.DiagnosticEngine
-import cjcj::macro_pkg.*
+import cjcj::macro_pkg.{RuntimeInit, OpenMacroLibrary, GetMethodPointer}
 import std.collection.ArrayList
 import std.env.getVariable
 
