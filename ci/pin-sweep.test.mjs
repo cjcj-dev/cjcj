@@ -70,10 +70,13 @@ test('the inventory gate rejects each missing canonical pin and tools declaratio
   const originals = new Map(pinFiles.map(file => [file, fs.readFileSync(path.join(repoRoot, file), 'utf8')]));
   const files = [...pinFiles, 'ci/pin-sweep.mjs', 'ci/pin-sweep.test.mjs',
     'build/lib/git.mjs', 'build/lib/errors.mjs', 'build/lib/logging.mjs', 'build/lib/runner.mjs'];
+  // A nested runner must not inherit the parent's internal worker protocol.
+  const env = {...process.env};
+  delete env.NODE_TEST_CONTEXT;
   const gate = () => spawnSync(process.execPath, [
-    '--test', '--test-name-pattern=^every commit-valued pin is inventoried',
+    '--test', '--test-reporter=tap', '--test-name-pattern=^every commit-valued pin is inventoried',
     path.join(fixture, 'ci/pin-sweep.test.mjs'),
-  ], {encoding: 'utf8'});
+  ], {encoding: 'utf8', env});
   try {
     for (const file of files) {
       fs.mkdirSync(path.dirname(path.join(fixture, file)), {recursive: true});
