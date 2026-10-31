@@ -711,7 +711,7 @@ private class ToCHIR {
             if (funcs.isEmpty()) {
                 return
             }
-            let threadNum = Int64(options.GetJobs())
+            let threadNum = if (options.chirDebugOptimizer) { 1 } else { Int64(options.GetJobs()) }
             let typeAnalysisGlobals = ValueAnalysisGlobals<TypeValueDomain, FullStatePool<TypeValueDomain>>()
             let typeAnalysisWrapper = AnalysisWrapper<TypeAnalysis, TypeDomain>(builder,
                 { analysisPackage: RealCHIRPackage, analysisBuilder: ChirBuilder =>
@@ -1082,7 +1082,8 @@ private func RulesChecking(pkg: RealCHIRPackage, builder: ChirBuilder, options: 
     if (!RunVarInitChecking(pkg, diag, options.GetJobs())) {
         return false
     }
-    UnreachableBranchCheck(wrapper, diag, pkg.GetName()).RunOnPackage(pkg, Int64(options.GetJobs()))
+    UnreachableBranchCheck(wrapper, diag, pkg.GetName()).RunOnPackage(pkg,
+        if (options.chirDebugOptimizer) { 1 } else { Int64(options.GetJobs()) })
     wrapper.FlushReports()
     ClearMatchMetadata(pkg)
     DeadCodeElimination(builder).UnreachableBlockEliminationForPackage(pkg, isDebug: options.chirDebugOptimizer)

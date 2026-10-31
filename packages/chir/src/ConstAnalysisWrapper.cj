@@ -84,6 +84,10 @@ public class ConstAnalysisWrapper {
 
     // Stable analysis runs again through Results.VisitWith during propagation.
     // The caller flushes only after those consumers have joined, before DCE.
+    public func GetDeferredReports(fn: Function): Option<ArrayList<() -> Unit>> {
+        return reportsByFunction.get(fn)
+    }
+
     public func FlushReports(): Unit {
         for (fn in reportOrder) {
             let reports = reportsByFunction[fn]

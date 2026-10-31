@@ -22,14 +22,17 @@ public class UnreachableBranchCheck {
     private let analysisWrapper: ConstAnalysisWrapper
     private let currentPackageName: String
     private let deferredReports: Bool
-    private let reports = ArrayList<() -> Unit>()
+    private let reports: ArrayList<() -> Unit>
+    private let borrowedReports: Bool
 
     public init(analysisWrapper: ConstAnalysisWrapper, diag: BasicDiagnosticEngine, packageName: String,
-        deferredReports!: Bool = false) {
+        deferredReports!: Bool = false, sharedReports!: Option<ArrayList<() -> Unit>> = None) {
         this.diag = diag
         this.analysisWrapper = analysisWrapper
         this.currentPackageName = packageName
         this.deferredReports = deferredReports
+        this.reports = sharedReports ?? ArrayList<() -> Unit>()
+        this.borrowedReports = sharedReports.isSome()
     }
 
     // C++ UnreachableBranchCheck.cpp:30-58 — parallel arm was a dead serial copy.
@@ -49,7 +52,8 @@ public class UnreachableBranchCheck {
                     continue
                 }
                 results.add(taskQueue.AddTask<UnreachableBranchCheck>({ =>
-                    let worker = UnreachableBranchCheck(analysisWrapper, diag, currentPackageName, deferredReports: true)
+                    let worker = UnreachableBranchCheck(analysisWrapper, diag, currentPackageName, deferredReports: true,
+                        sharedReports: analysisWrapper.GetDeferredReports(funcValue))
                     worker.RunOnFunc(funcValue)
                     worker
                 }))
@@ -65,7 +69,12 @@ public class UnreachableBranchCheck {
                 }
             }
             if (let Some(e) <- firstFailure) { throw e }
-            for (worker in completed) { for (report in worker.reports) { report() } }
+            // Constant-analysis errors and branch warnings append to the same
+            // per-function stream, preserving their order during Results.VisitWith.
+            analysisWrapper.FlushReports()
+            for (worker in completed) {
+                if (!worker.borrowedReports) { for (report in worker.reports) { report() } }
+            }
         }
     }
 
