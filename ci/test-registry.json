@@ -929,5 +929,10 @@
     "file": "packages/utils/src/StdUtils_test.cj",
     "executor": "cjpm",
     "member": "packages/utils"
+  },
+  {
+    "file": "packages/sema/src/TypeManagerConcurrent_test.cj",
+    "executor": "cjpm",
+    "member": "packages/sema"
   }
 ]
