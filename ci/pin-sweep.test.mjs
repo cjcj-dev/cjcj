@@ -6,6 +6,13 @@ import path from 'node:path';
 import test from 'node:test';
 import {auditPins, discoverPins, repoRoot} from './pin-sweep.mjs';
 
+// Canonical source selectors, maintained independently of discoverPins.
+// CJPM's former selector was retired in 95fca23860a8; TOOLS_REF selects it too.
+const EXPECTED_COMMIT_PINS = Object.freeze([
+  'BOUNDS_REF', 'COMPILER_REF', 'FLATBUFFERS_SHA', 'LLVM_SHA',
+  'LOADERLIFE_MIN_REF', 'RUNTIME_REF', 'STDX_REF', 'TOOLS_REF',
+]);
+
 function git(root, ...arguments_) {
   const result = spawnSync('git', ['-C', root, ...arguments_], {encoding: 'utf8'});
   assert.equal(result.status, 0, `git ${arguments_.join(' ')} failed: ${(result.stderr || '').trim()}`);
@@ -30,17 +37,7 @@ function declaration(key, authority = 'refs/heads/main', mainline = 'refs/heads/
 
 test('every commit-valued pin is inventoried and paired with its clone URL', () => {
   const pins = discoverPins(repoRoot);
-  assert.deepEqual(pins.map(pin => pin.key).sort(), [
-    'BOUNDS_REF',
-    'CJPM_FORK_REF',
-    'COMPILER_REF',
-    'FLATBUFFERS_SHA',
-    'LLVM_SHA',
-    'LOADERLIFE_MIN_REF',
-    'RUNTIME_REF',
-    'STDX_REF',
-    'TOOLS_REF',
-  ]);
+  assert.deepEqual(pins.map(pin => pin.key).sort(), EXPECTED_COMMIT_PINS);
   assert.deepEqual(
     pins.filter(pin => !pin.urlKey || !pin.url).map(pin => pin.key),
     [],
@@ -65,6 +62,54 @@ test('every commit-valued pin is inventoried and paired with its clone URL', () 
     'RUNTIME_SRC_URL',
     'the minimum loader-life ref must be judged in the same runtime repository as RUNTIME_REF',
   );
+});
+
+test('the inventory gate rejects each missing canonical pin and tools declaration', () => {
+  const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'pin-sweep-inventory-'));
+  const pinFiles = ['ci/host_sdk_pin.env', 'ci/llvm_pin.env', 'ci/runtime_pin.env', 'ci/source_pin.env'];
+  const originals = new Map(pinFiles.map(file => [file, fs.readFileSync(path.join(repoRoot, file), 'utf8')]));
+  const files = [...pinFiles, 'ci/pin-sweep.mjs', 'ci/pin-sweep.test.mjs',
+    'build/lib/git.mjs', 'build/lib/errors.mjs', 'build/lib/logging.mjs', 'build/lib/runner.mjs'];
+  const gate = () => spawnSync(process.execPath, [
+    '--test', '--test-name-pattern=^every commit-valued pin is inventoried',
+    path.join(fixture, 'ci/pin-sweep.test.mjs'),
+  ], {encoding: 'utf8'});
+  try {
+    for (const file of files) {
+      fs.mkdirSync(path.dirname(path.join(fixture, file)), {recursive: true});
+      fs.copyFileSync(path.join(repoRoot, file), path.join(fixture, file));
+    }
+    const intact = gate();
+    assert.equal(intact.status, 0, intact.stdout + intact.stderr);
+    assert.match(intact.stdout, /ok 1 - every commit-valued pin is inventoried/);
+    console.log('GATEARM INVENTORY intact rc=0');
+    for (const key of [...EXPECTED_COMMIT_PINS, 'TOOLS_SRC_URL', 'TOOLS_REF_AUTHORITY', 'TOOLS_REF_MAINLINE']) {
+      let removed = 0;
+      for (const [file, text] of originals) {
+        const lines = text.split(/\r?\n/).filter(line => {
+          if (!line.startsWith(key + '=')) return true;
+          removed++;
+          return false;
+        });
+        fs.writeFileSync(path.join(fixture, file), lines.join('\n'));
+      }
+      assert.equal(removed, 1, `${key} must have exactly one real declaration`);
+      const missing = gate();
+      assert.equal(missing.status, 1, `${key}: ${missing.stdout}${missing.stderr}`);
+      assert.equal(missing.signal, null);
+      assert.match(missing.stdout, /not ok 1 - every commit-valued pin is inventoried/);
+      assert.match(missing.stdout, /ERR_ASSERTION/);
+      assert.match(missing.stdout, /# fail 1/);
+      const diagnostic = EXPECTED_COMMIT_PINS.includes(key)
+        ? new RegExp(`-\\s+'${key}'`)
+        : key === 'TOOLS_SRC_URL' ? /a commit pin without a URL/
+          : /every commit pin must declare both its authority ref and comparison mainline/;
+      assert.match(missing.stdout, diagnostic);
+      console.log(`GATEARM INVENTORY missing=${key} target=inventory-assertion rc=1`);
+    }
+  } finally {
+    fs.rmSync(fixture, {recursive: true, force: true});
+  }
 });
 
 test('an existing commit on a backup line is NOT_MET for both authority questions', () => {
