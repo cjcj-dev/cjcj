@@ -504,14 +504,19 @@ public class Tool {
     }
 
     public func ExecuteWithLease(verbose: Bool, lease: ConcurrencyLease): ToolFuture {
-        if (verbose) {
-            println(FileUtil.Normalize(GetCommandString()))
-        }
-        if (TempFileManager.Instance().IsDeleted()) {
+        try {
+            if (verbose) {
+                println(FileUtil.Normalize(GetCommandString()))
+            }
+            if (TempFileManager.Instance().IsDeleted()) {
+                lease.Release()
+                return ErrorFuture("temporary files were deleted before command execution")
+            }
+            return RunWithLease(lease)
+        } catch (e: Exception) {
             lease.Release()
-            return ErrorFuture("temporary files were deleted before command execution")
+            throw e
         }
-        return RunWithLease(lease)
     }
 
     public func GetName(): String {

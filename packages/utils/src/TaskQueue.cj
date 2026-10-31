@@ -120,13 +120,19 @@ public class TaskQueue {
         })
         let fixedThreadsNum = if (tasks.size < threadsNum) { tasks.size } else { threadsNum }
         var hasWorker = false
-        for (_ in 0..fixedThreadsNum) {
-            if (let Some(worker) <- ConcurrencyBudget.Get().SpawnBudgeted({ => doTask() })) {
-                threads.add(worker)
-                hasWorker = true
-            } else {
-                break
+        try {
+            for (_ in 0..fixedThreadsNum) {
+                if (let Some(worker) <- ConcurrencyBudget.Get().SpawnBudgeted({ => doTask() })) {
+                    threads.add(worker)
+                    hasWorker = true
+                } else {
+                    break
+                }
             }
+        } catch (e: Exception) {
+            // A later spawn may fail after earlier workers already started. Join those
+            // workers before exposing the failure to callers that own their captures.
+            try { WaitForAllTasksCompleted() } finally { throw e }
         }
         // Nested queues are executed by their current token-owning worker. A
         // top-level queue also uses this path when every global token is busy.
