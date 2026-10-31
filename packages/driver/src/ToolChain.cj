@@ -474,6 +474,10 @@ public open class ToolChain {
             // Put the search path on the actual macro producer, so its direct
             // and transitive dependencies inherit it before host LD_LIBRARY_PATH.
             // Use the public logical entry, just like the macro runtime consumer.
+            // This is deliberately an SDK-bound artifact. OpenMacroLibrary
+            // checks this first RPATH against the selected runtime before
+            // loading existing/cached/explicit macros. A changed SDK requires
+            // normal recompilation/relinking; copying the old SO is not that.
             let macroRuntimePath = FileUtil.JoinPath(
                 FileUtil.GetCompilerRuntimeBasePath(driverOptions.executablePath),
                 driverOptions.GetCangjieLibHostPathName())

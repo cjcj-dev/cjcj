@@ -58,6 +58,8 @@
 #include <new>
 #include <vector>
 
+#include "macro_runtime_binding.inc"
+
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/IR/BasicBlock.h"

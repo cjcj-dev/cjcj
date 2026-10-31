@@ -600,9 +600,37 @@ private func OpenMacroInNamespace(path: String): Option<RuntimeHandle> {
     return None<RuntimeHandle>
 }
 
+// A precompiled macro keeps the RPATH chosen by its producer. Reject a stale
+// SDK binding before native image initialization, for imported, explicit, and
+// server-loaded macros alike. The normal repair is recompilation/relinking.
+@When[os == "Linux"]
+foreign func CJSelfhostCheckMacroRuntimeBinding(image: CString, runtimeDirectory: CString): Int32
+
+@When[os == "Linux"]
+private func HasCurrentMacroRuntimeBinding(path: String): Bool {
+    if (let Some(runtime) <- RuntimeInit.GetInstance().GetHandle()) {
+        try (image = unsafe { LibC.mallocCString(path) }.asResource(),
+            directory = unsafe { LibC.mallocCString(FileUtil.GetDirPath(runtime.path)) }.asResource()) {
+            if (!image.value.isNull() && !directory.value.isNull()) {
+                return unsafe { CJSelfhostCheckMacroRuntimeBinding(image.value, directory.value) } == 0
+            }
+        } catch (_: Exception) {
+            return false
+        }
+    }
+    return false
+}
+
+@When[os != "Linux"]
+private func HasCurrentMacroRuntimeBinding(path: String): Bool { return true }
+
 // Cangjie images register runtime metadata. Pair the runtime loader's path
 // handle with FindCJSymbol/UnloadCJLibrary, rather than bypassing it with dlclose.
 public func OpenMacroLibrary(path: String): RuntimeHandle {
+    if (!HasCurrentMacroRuntimeBinding(path)) {
+        Errorln("macro runtime binding is missing or belongs to another SDK; rebuild or relink macro with the current SDK: " + path)
+        return RuntimeHandle(path)
+    }
     // The runtime owns one entry per image. Repeated calls into the same macro
     // package reuse that entry rather than acquiring unmatched native references.
     for (opened in openedLibHandles) {

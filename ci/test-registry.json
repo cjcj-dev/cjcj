@@ -944,5 +944,10 @@
     "file": "ci/test-temp-file-ownership.mjs",
     "executor": "manual",
     "reason": "Linux real TempFileManager consumer built from selected option package; native mkdir interposition creates a separate-process contender after exists, verifies EEXIST/retry, normal cleanup and foreign sentinel protection. Requires paired host closure and a new owned output root; old precise cut returns 2, no skip."
+  },
+  {
+    "file": "ci/test-macro-runtime-binding.mjs",
+    "executor": "manual",
+    "reason": "Requires matching LLVM development prefix and an empty private work directory; compiles the production ELF RPATH admission helper and real native shared objects. Does not replace public CJ macro relocation/relink and ir2 paired gates."
   }
 ]
