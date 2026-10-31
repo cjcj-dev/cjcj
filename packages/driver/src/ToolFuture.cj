@@ -56,7 +56,12 @@ public class ThreadFuture <: ToolFuture {
 
     public override func GetState(): ToolFutureState {
         if (let None <- result) {
-            result = future.get()
+            try {
+                result = future.get()
+            } catch (e: Exception) {
+                eprintln("internal backend command failed: ${e.message}")
+                result = Some(false)
+            }
         }
         let succeeded = result.getOrThrow()
         exitCode = if (succeeded) { 0 } else { 1 }
