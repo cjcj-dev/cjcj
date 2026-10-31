@@ -2235,8 +2235,11 @@ public class FaithfulAST2CHIR {
         }).Walk()
         if (let Some(value) <- globalCache.TryGet(decl)) {
             if (let Some(fn) <- (value as Function)) {
-                // A pre-existing body may belong to the ordered initializer phase.
-                if (fn.GetBody().isSome()) { ownsOnlyBody[0] = false }
+                // Signature preparation creates an empty body shell for every defined function.
+                // Only a body that already contains blocks belongs to an earlier lowering phase.
+                if (let Some(body) <- fn.GetBody()) {
+                    if (!body.GetBlocks().isEmpty()) { ownsOnlyBody[0] = false }
+                }
             }
         }
         return ownsOnlyBody[0]
