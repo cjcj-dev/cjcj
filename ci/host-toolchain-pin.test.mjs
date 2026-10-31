@@ -574,7 +574,14 @@ test('workflow GitHub environment loaders resolve the execution host and stop on
         const work = await fs.mkdtemp(path.join(os.tmpdir(), 'github-host-loader-'));
         try {
           await fs.mkdir(path.join(work, 'ci'));
-          for (const input of ['host_sdk_pin.env', 'source_pin.env', 'source_pin.env', 'llvm_pin.env', 'runtime_pin.env', 'host-toolchain-pin.mjs']) {
+          // Load pins also executes the real runtime reader and its source-selection imports.
+          for (const input of ['host_sdk_pin.env', 'source_pin.env', 'llvm_pin.env', 'runtime_pin.env',
+            'host-toolchain-pin.mjs', 'load_runtime_pin.mjs', 'native-llvm-inputs.mjs', 'runtime-pin.mjs',
+            'build-resources.mjs', 'bootstrap/native-source-selection.mjs', 'bootstrap/sdk-command-lifetime.mjs',
+            'bootstrap/sdk-flow.mjs', 'bootstrap/sdk-install-entries.mjs', 'bootstrap/sdk-io.mjs',
+            'bootstrap/sdk-platform.mjs', 'bootstrap/sdk-source.mjs', 'bootstrap/sdk-std-resume.mjs',
+            'bootstrap/sdk-targets.mjs']) {
+            await fs.mkdir(path.dirname(path.join(work, 'ci', input)), {recursive: true});
             await fs.copyFile(path.join(root, 'ci', input), path.join(work, 'ci', input));
           }
           if (arm === 'bad-pin') {
