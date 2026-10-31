@@ -5,7 +5,7 @@ import cjcj::utils.{ConcurrencyBudget, ProfileRecorder, Semaphore}
 
 // Mirrors Driver/Job.cpp:30-69.
 private func CheckExecuteResult(checklist: TreeMap<String, ToolFuture>,
-    returnIfAnyToolFinished!: Bool = false): Bool {
+    returnIfAnyToolFinished!: Bool = false, succeeded!: ArrayList<String> = ArrayList<String>()): Bool {
     var success = true
     while (!checklist.isEmpty()) {
         let totalTasks = checklist.size
@@ -24,6 +24,7 @@ private func CheckExecuteResult(checklist: TreeMap<String, ToolFuture>,
                     Semaphore.Get().Release()
                 }
                 finishedCommands.add(command)
+                succeeded.add(command)
             }
         }
         for (command in finishedCommands) {
@@ -66,38 +67,66 @@ public class Job {
             if (cmdBatch.isEmpty()) {
                 continue
             }
-            try (recorder = ProfileRecorder("Main Stage", "Execute " + FileUtil.GetFileName(cmdBatch[0].GetName()))) {
+            var stage = FileUtil.GetFileName(cmdBatch[0].GetName())
+            if (let Some(successor) <- cmdBatch[0].successor) {
+                stage += "+" + FileUtil.GetFileName(successor.GetName())
+            }
+            try (recorder = ProfileRecorder("Main Stage", "Execute " + stage)) {
                 let childWorkers = TreeMap<String, ToolFuture>()
-                for (command in cmdBatch) {
-                    let budget = ConcurrencyBudget.Get()
-                    let future = if (budget.IsEnabled()) {
-                        var lease = budget.TryAcquire()
-                        while (let None <- lease) {
-                            if (childWorkers.isEmpty()) {
-                                eprintln("error: no jobserver execution slot is available for a driver command")
-                                return false
+                let pending = ArrayList<Tool>(cmdBatch)
+                let runningTools = HashMap<String, Tool>()
+                let succeeded = ArrayList<String>()
+                var next: Int64 = 0
+                var success = true
+                while (true) {
+                    while (success && next < pending.size) {
+                        let command = pending[next]
+                        next++
+                        let budget = ConcurrencyBudget.Get()
+                        let future = if (budget.IsEnabled()) {
+                            var lease = budget.TryAcquire()
+                            while (let None <- lease) {
+                                if (childWorkers.isEmpty()) {
+                                    eprintln("error: no jobserver execution slot is available for a driver command")
+                                    return false
+                                }
+                                if (!CheckExecuteResult(childWorkers, returnIfAnyToolFinished: true,
+                                    succeeded: succeeded)) {
+                                    return false
+                                }
+                                lease = budget.TryAcquire()
                             }
-                            if (!CheckExecuteResult(childWorkers, returnIfAnyToolFinished: true)) {
-                                return false
+                            command.ExecuteWithLease(verbose, lease.getOrThrow())
+                        } else {
+                            while (Semaphore.Get().GetCount() == 0) {
+                                if (!CheckExecuteResult(childWorkers, returnIfAnyToolFinished: true,
+                                    succeeded: succeeded)) {
+                                    return false
+                                }
                             }
-                            lease = budget.TryAcquire()
+                            command.Execute(verbose)
                         }
-                        command.ExecuteWithLease(verbose, lease.getOrThrow())
-                    } else {
-                        while (Semaphore.Get().GetCount() == 0) {
-                            if (!CheckExecuteResult(childWorkers, returnIfAnyToolFinished: true)) {
-                                return false
-                            }
+                        if (!future.spawnErrorMessage.isEmpty()) {
+                            eprintln("${command.GetCommandString()}: command failed (${future.spawnErrorMessage})")
+                            return false
                         }
-                        command.Execute(verbose)
+                        childWorkers[command.GetCommandString()] = future
+                        runningTools[command.GetCommandString()] = command
                     }
-                    if (!future.spawnErrorMessage.isEmpty()) {
-                        eprintln("${command.GetCommandString()}: command failed (${future.spawnErrorMessage})")
-                        return false
+                    if (childWorkers.isEmpty()) {
+                        break
                     }
-                    childWorkers[command.GetCommandString()] = future
+                    // A failure stops new starts but still drains every running child, as the batch wait does.
+                    success = CheckExecuteResult(childWorkers, returnIfAnyToolFinished: true,
+                        succeeded: succeeded) && success
+                    for (command in succeeded) {
+                        if (let Some(successor) <- runningTools[command].successor) {
+                            pending.add(successor)
+                        }
+                    }
+                    succeeded.clear()
                 }
-                if (!CheckExecuteResult(childWorkers)) {
+                if (!success) {
                     return false
                 }
             }
