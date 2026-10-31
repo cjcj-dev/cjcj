@@ -2,10 +2,7 @@ package cjcj::chir
 
 import cjcj::option.{GlobalOptions, OptimizationFlag}
 import std.collection.*
-import std.sync.Mutex
 
-private let constPropagationEffectMap: OptEffectCHIRMap = OptEffectCHIRMap()
-private let constPropagationEffectMapMutex = Mutex()
 
 private class RewriteInfo {
     public let oldExpr: Expression
@@ -32,6 +29,7 @@ private class TerminatorRewriteInfo {
 }
 
 public class ConstPropagation {
+    private let effectMap: OptEffectCHIRMap = OptEffectCHIRMap()
     private let builder: Option<CHIRBuilder>
     private let analysisWrapper: ConstAnalysisWrapper
     private let opts: GlobalOptions
@@ -66,7 +64,7 @@ public class ConstPropagation {
     }
 
     public func GetEffectMap(): OptEffectCHIRMap {
-        return constPropagationEffectMap
+        return effectMap
     }
 
     private func VisitFunc<Pool>(funcValue: Function, isDebug: Bool, isCJLint: Bool,
@@ -329,20 +327,10 @@ public class ConstPropagation {
             }
         }
         if (let Some(gv) <- globalVar) {
-            if (opts.GetJobs() > 1u64) {
-                synchronized(constPropagationEffectMapMutex) {
-                    if (let Some(affectedFunctions) <- constPropagationEffectMap.get(gv)) {
-                        affectedFunctions.add(funcValue)
-                    } else {
-                        constPropagationEffectMap[gv] = HashSet<Value>([funcValue])
-                    }
-                }
+            if (let Some(affectedFunctions) <- effectMap.get(gv)) {
+                affectedFunctions.add(funcValue)
             } else {
-                if (let Some(affectedFunctions) <- constPropagationEffectMap.get(gv)) {
-                    affectedFunctions.add(funcValue)
-                } else {
-                    constPropagationEffectMap[gv] = HashSet<Value>([funcValue])
-                }
+                effectMap[gv] = HashSet<Value>([funcValue])
             }
         }
     }

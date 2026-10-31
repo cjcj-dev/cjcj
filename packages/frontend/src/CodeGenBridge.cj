@@ -796,7 +796,7 @@ private class ToCHIR {
                     RangeAnalysis.InitialiseLetGVState(analysisPackage, analysisBuilder, rangeStateGlobals,
                         { globalVar => IsTrackedGVForRangeAnalysis(globalVar) })
                 })
-            let threadNum = Int64(options.GetJobs())
+            let threadNum = if (options.chirDebugOptimizer) { 1 } else { Int64(options.GetJobs()) }
             rangeAnalysisWrapper.RunOnPackage(currentPackage, options.chirDebugOptimizer, threadNum,
                 { funcValue: ChirFunction, analysisBuilder: ChirBuilder, isDebug: Bool =>
                     RangeAnalysis(funcValue, analysisBuilder, instance.diag.AsBasicDiagnosticEngine(),
@@ -821,7 +821,7 @@ private class ToCHIR {
                 while (index < funcNum) {
                     let funcValue = globalFuncs[index]
                     let rangePropagation = RangePropagation(builderList[index], rangeAnalysisWrapper,
-                        instance.diag.AsBasicDiagnosticEngine(), options.enIncrementalCompilation)
+                        instance.diag.AsBasicDiagnosticEngine(), options.enIncrementalCompilation, deferredReports: true)
                     results.add(taskQueue.AddTask<Unit>({ =>
                         rangePropagation.RunOnFunc(funcValue, options.chirDebugOptimizer)
                     }))
@@ -831,6 +831,7 @@ private class ToCHIR {
                 taskQueue.RunAndWaitForAllTasksCompleted()
                 ConsumeCHIRPassResults(results)
                 for (rangePropagation in propagationList) {
+                    rangePropagation.FlushReports()
                     MergeEffectMap(rangePropagation.GetEffectMap(), effectMap)
                     dce.UnreachableBlockElimination(rangePropagation.GetFuncsNeedRemoveBlocks(),
                         isDebug: options.chirDebugOptimizer)
@@ -1129,12 +1130,12 @@ private func ConstructSubBuilders(builder: ChirBuilder, threadNum: Int64,
 // C++ CHIR.cpp:481-519 ToCHIR::RunConstantPropagation.
 private func RunConstantPropagation(pkg: RealCHIRPackage, builder: ChirBuilder, options: GlobalOptions,
     wrapper: ConstAnalysisWrapper, effectMap: ChirOptEffectCHIRMap): Unit {
-    let threadNum = Int64(options.GetJobs())
+    let threadNum = if (options.chirDebugOptimizer) { 1 } else { Int64(options.GetJobs()) }
     let dce = DeadCodeElimination(builder)
     if (threadNum == 1) {
         let cp = ConstPropagation(builder: Some(builder), wrapper: wrapper, opts: options)
-        MergeEffectMap(cp.GetEffectMap(), effectMap)
         cp.RunOnPackage(pkg, isDebug: options.chirDebugOptimizer, isCJLint: false)
+        MergeEffectMap(cp.GetEffectMap(), effectMap)
         dce.UnreachableBlockElimination(cp.GetFuncsNeedRemoveBlocks(),
             isDebug: options.chirDebugOptimizer)
     } else {
