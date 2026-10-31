@@ -39,6 +39,7 @@ import cjcj::chir.CHIRPrinter as ChirPrinter
 import cjcj::chir.ToCHIRPhase as ChirToCHIRPhase
 import std.collection.*
 import std.core.Box as CoreBox
+import std.math.min
 import std.runtime.gc
 
 // Faithful port of C++ RegisterMacroCallDiagInfos (Frontend/CompilerInstance.cpp:935-947).
@@ -1499,19 +1500,17 @@ public class CompilerInstance {
         }
 
         let batchSize: Int64 = 30
-        let tasksNum = topDecls.size / batchSize
+        let tasksNum = (topDecls.size + batchSize - 1) / batchSize
         var start: Int64 = 0
-        var end: Int64 = batchSize
         let taskQueue = TaskQueue(parallelNum)
         let taskResults = ArrayList<TaskResult<ArrayList<PendingMangledDecl>>>()
         for (_ in 0..tasksNum) {
             let taskStart = start
-            let taskEnd = end
+            let taskEnd = min(start + batchSize, topDecls.size)
             taskResults.add(taskQueue.AddTask<ArrayList<PendingMangledDecl>>({ =>
                 DoNewMangling(baseMangler, topDecls, taskStart, taskEnd)
             }))
             start += batchSize
-            end += batchSize
         }
         taskQueue.RunInBackground()
         taskQueue.WaitForAllTasksCompleted()
@@ -1526,7 +1525,6 @@ public class CompilerInstance {
         }
         if (let Some(e) <- firstFailure) { throw e }
         for (pending in completed) { mergeMangledDecls(pending) }
-        mergeMangledDecls(DoNewMangling(baseMangler, topDecls, start, topDecls.size))
     }
 
     private func getMangleFilteredPrefix(prefix: ArrayList<Node>): ArrayList<Node> {
