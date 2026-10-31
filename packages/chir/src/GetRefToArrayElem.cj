@@ -17,7 +17,7 @@ public class GetRefToArrayElem {
                 worker.SetCompileTimeValueMark(builder.GetCompileTimeValueMark())
                 let users = ArrayList<(Value, Expression)>()
                 (GetRefToArrayElem.RunOnFunc(fn, worker, users), worker, users)
-            })
+            }, passName: "array-element-reference")
         for ((count, worker, users) in runs) {
             changed += count
             for ((value, user) in users) { value.MoveUserToTail(user) }

@@ -13,7 +13,7 @@ public class UselessAllocateElimination {
         // No builder or cross-function analysis: each task removes only its own unused allocation
         // and stores. Shared global operands only lose users under Value's existing lock.
         let _ = RunFunctionLocalPass<Unit>(pkg.GetGlobalFuncsWithBody(), threadNum,
-            { fn => RunOnFunc(fn, false) })
+            { fn => RunOnFunc(fn, false) }, passName: "useless-allocation")
     }
 
     private static func RunOnFunc(fn: Function, isDebug: Bool): Unit {

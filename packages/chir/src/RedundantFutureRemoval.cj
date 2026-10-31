@@ -35,7 +35,7 @@ public class RedundantFutureRemoval {
             chirPackage.GetGlobalFuncsWithBody(), threadNum, { fn =>
                 let worker = RedundantFutureRemoval(chirPackage)
                 (worker.RunOnFunc(fn), worker.appendedGlobalUsers)
-            })
+            }, passName: "redundant-future")
         for ((count, users) in runs) {
             changed += count
             for ((value, user) in users) { value.MoveUserToTail(user) }

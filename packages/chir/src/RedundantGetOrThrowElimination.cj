@@ -16,7 +16,8 @@ public class RedundantGetOrThrowElimination {
             return changed
         }
         // Replacements stay on this function's own Apply results, so no global-user order needs replaying.
-        for (count in RunFunctionLocalPass<Int64>(pkg.GetGlobalFuncsWithBody(), threadNum, { fn => RunOnFunc(fn) })) {
+        for (count in RunFunctionLocalPass<Int64>(pkg.GetGlobalFuncsWithBody(), threadNum, { fn => RunOnFunc(fn) },
+            passName: "redundant-get-or-throw")) {
             changed += count
         }
         return changed

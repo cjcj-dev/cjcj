@@ -21,7 +21,7 @@ public class FlatForInExpr {
             let worker = FlatForInExpr(localBuilder)
             worker.RunOnFunc(fn)
             worker
-        })
+        }, passName: "flatten-for-in")
         for (worker in completed) {
             for ((value, user) in worker.appendedGlobalUsers) { value.MoveUserToTail(user) }
             worker.builder.MergeAllocatedInstance()
