@@ -68,8 +68,7 @@ import cjcj::chir.ShouldReportUnusedCodeWarnings
 import cjcj::chir.Expression as ChirExpression
 import cjcj::chir.TypeAnalysis
 import cjcj::chir.TypeDomain
-import cjcj::chir.TypeValue
-import cjcj::chir.globalState as typeAnalysisGlobals
+import cjcj::chir.{TypeValueDomain, FullStatePool}
 import cjcj::chir.ToCHIRPhase
 import cjcj::chir.UnitUnify
 import cjcj::chir.UpdateMemberVarPath
@@ -713,7 +712,7 @@ private class ToCHIR {
                 return
             }
             let threadNum = Int64(options.GetJobs())
-            TypeValue.SetCHIRBuilder(Some(builder))
+            let typeAnalysisGlobals = ValueAnalysisGlobals<TypeValueDomain, FullStatePool<TypeValueDomain>>()
             let typeAnalysisWrapper = AnalysisWrapper<TypeAnalysis, TypeDomain>(builder,
                 { analysisPackage: RealCHIRPackage, analysisBuilder: ChirBuilder =>
                     TypeAnalysis.InitialiseLetGVState(analysisPackage, analysisBuilder, typeAnalysisGlobals,
@@ -726,14 +725,14 @@ private class ToCHIR {
                 for (fn in funcs) {
                     let result = typeAnalysisWrapper.RunOnFunc(fn, options.chirDebugOptimizer,
                         { instantiatedFn: ChirFunction, analysisBuilder: ChirBuilder, isDebug: Bool =>
-                            TypeAnalysis(instantiatedFn, analysisBuilder, isDebug, devirtInfo)
+                            TypeAnalysis(instantiatedFn, analysisBuilder, isDebug, devirtInfo, globalValues: typeAnalysisGlobals)
                         })
                     devirt.AppendFrozenFuncState(fn, result)
                 }
             } else {
                 typeAnalysisWrapper.RunOnPackage(currentPackage, options.chirDebugOptimizer, threadNum,
                     { fn: ChirFunction, analysisBuilder: ChirBuilder, isDebug: Bool =>
-                        TypeAnalysis(fn, analysisBuilder, isDebug, devirtInfo)
+                        TypeAnalysis(fn, analysisBuilder, isDebug, devirtInfo, globalValues: typeAnalysisGlobals)
                     })
             }
             devirt.RunOnFuncs(funcs)
@@ -742,7 +741,7 @@ private class ToCHIR {
                 for (fn in frozenFuncs) {
                     let result = typeAnalysisWrapper.RunOnFunc(fn, options.chirDebugOptimizer,
                         { frozenFn: ChirFunction, analysisBuilder: ChirBuilder, isDebug: Bool =>
-                            TypeAnalysis(frozenFn, analysisBuilder, isDebug, devirtInfo)
+                            TypeAnalysis(frozenFn, analysisBuilder, isDebug, devirtInfo, globalValues: typeAnalysisGlobals)
                         })
                     devirt.AppendFrozenFuncState(fn, result)
                 }

@@ -30,11 +30,12 @@ public class TypeValue <: HasEqual<TypeValue> {
     protected let kind: DevirtualTyKind
     protected let baseLineType: Type
 
-    private static var builder: Option<CHIRBuilder> = None
+    private let builder: CHIRBuilder
 
-    public init(kind: DevirtualTyKind, baseLineType: Type) {
+    public init(kind: DevirtualTyKind, baseLineType: Type, builder: CHIRBuilder) {
         this.kind = kind
         this.baseLineType = baseLineType
+        this.builder = builder
     }
 
     public func Join(rhs: TypeValue): Option<Option<TypeValue>> {
@@ -46,15 +47,15 @@ public class TypeValue <: HasEqual<TypeValue> {
             let fatherTy = LeastCommonSuperClass(
                 (baseLineType as ClassType).getOrThrow(),
                 (rhsClassTy as ClassType).getOrThrow(),
-                TypeValue.builder.getOrThrow())
+                builder)
             if (let Some(value) <- fatherTy) {
-                return Some(Some(TypeValue(DevirtualTyKind.SUBTYPE_OF, value)))
+                return Some(Some(TypeValue(DevirtualTyKind.SUBTYPE_OF, value, builder)))
             } else {
                 return Some(None)
             }
         } else {
             if (kind == DevirtualTyKind.EXACTLY && rhs.kind == DevirtualTyKind.SUBTYPE_OF) {
-                return Some(Some(TypeValue(DevirtualTyKind.SUBTYPE_OF, baseLineType)))
+                return Some(Some(TypeValue(DevirtualTyKind.SUBTYPE_OF, baseLineType, builder)))
             } else {
                 return None
             }
@@ -76,10 +77,6 @@ public class TypeValue <: HasEqual<TypeValue> {
 
     public func GetSpecificType(): Type {
         return baseLineType
-    }
-
-    public static func SetCHIRBuilder(chirBuilder: Option<CHIRBuilder>): Unit {
-        builder = chirBuilder
     }
 
     private func GetKindString(clsTyKind: DevirtualTyKind): String {
@@ -126,16 +123,15 @@ private func GetRealGenericRetType(apply: Apply, genericType: Type,
     return Some(ReplaceRawGenericArgType(genericType, genericMap, builder))
 }
 
-// C++ TypeAnalysis.cpp:108-115 explicit TypeValueDomain instantiation.
-public let globalState = ValueAnalysisGlobals<TypeValueDomain, FullStatePool<TypeValueDomain>>()
-
 public class TypeAnalysis <: ValueAnalysis<TypeValueDomain, FullStatePool<TypeValueDomain>> {
     private let realRetTyMap: HashMap<Int64, Type>
     private let constMemberTypeMap: HashMap<Int64, HashMap<Int64, Type>>
 
     public init(functionValue: Function, builder: CHIRBuilder, isDebug: Bool,
-        devirtInfo: DevirtualizationInfo) {
-        super(functionValue, builder, globalState,
+        devirtInfo: DevirtualizationInfo,
+        globalValues!: ValueAnalysisGlobals<TypeValueDomain, FullStatePool<TypeValueDomain>> =
+            ValueAnalysisGlobals<TypeValueDomain, FullStatePool<TypeValueDomain>>()) {
+        super(functionValue, builder, globalValues,
             { literal: LiteralValue => TypeAnalysis.HandleNonNullLiteralValue(literal) }, isDebug: isDebug)
         realRetTyMap = devirtInfo.returnTypeMap
         constMemberTypeMap = devirtInfo.constMemberTypeMap
@@ -210,7 +206,7 @@ public class TypeAnalysis <: ValueAnalysis<TypeValueDomain, FullStatePool<TypeVa
                 let domain = state.GetAbstractDomain(result)
                 if ((domain.isNone() || domain.getOrThrow().IsTop()) &&
                     result.GetType().getOrThrow().IsPrimitive()) {
-                    state.Update(result, TypeValue(DevirtualTyKind.EXACTLY, result.GetType().getOrThrow()))
+                    state.Update(result, TypeValue(DevirtualTyKind.EXACTLY, result.GetType().getOrThrow(), builder))
                 } else {
                     state.TrySetToTopOrTopRef(result, result.GetType().getOrThrow().IsRef())
                 }
@@ -228,7 +224,7 @@ public class TypeAnalysis <: ValueAnalysis<TypeValueDomain, FullStatePool<TypeVa
         let obj = newObj ?? return
         let baseTy = expression.GetType()
         if (baseTy.IsClass()) {
-            state.Update(obj, TypeValue(DevirtualTyKind.EXACTLY, (baseTy as ClassType).getOrThrow()))
+            state.Update(obj, TypeValue(DevirtualTyKind.EXACTLY, (baseTy as ClassType).getOrThrow(), builder))
         }
     }
 
@@ -267,13 +263,13 @@ public class TypeAnalysis <: ValueAnalysis<TypeValueDomain, FullStatePool<TypeVa
             return
         }
         state.Update(refObj.getOrThrow(),
-            TypeValue(DevirtualTyKind.SUBTYPE_OF, (resultType as ClassType).getOrThrow()))
+            TypeValue(DevirtualTyKind.SUBTYPE_OF, (resultType as ClassType).getOrThrow(), builder))
     }
 
     public override func HandleTryInvokeTerminator(state: TypeDomain,
         invoke: TryInvoke, refObj: Option<Value>): Option<Block> {
         let ty = invoke.GetResult().getOrThrow().GetType().getOrThrow().StripAllRefs()
-        if (ty.IsClass()) { state.Update(refObj.getOrThrow(), TypeValue(DevirtualTyKind.SUBTYPE_OF, ty)) }
+        if (ty.IsClass()) { state.Update(refObj.getOrThrow(), TypeValue(DevirtualTyKind.SUBTYPE_OF, ty, builder)) }
         return None
     }
 
@@ -314,7 +310,7 @@ public class TypeAnalysis <: ValueAnalysis<TypeValueDomain, FullStatePool<TypeVa
         let obj = state.GetReferencedObjAndSetToTop(result, expr: Some(boxExpr))
         let srcTy = boxExpr.GetSourceType().getOrThrow().StripAllRefs()
         if (srcTy.IsValueType()) {
-            state.Update(obj, TypeValue(DevirtualTyKind.EXACTLY, srcTy))
+            state.Update(obj, TypeValue(DevirtualTyKind.EXACTLY, srcTy, builder))
         } else {
             state.Propagate(boxExpr.GetSourceValue(), obj)
         }
@@ -348,7 +344,7 @@ public class TypeAnalysis <: ValueAnalysis<TypeValueDomain, FullStatePool<TypeVa
             if (result.GetType().getOrThrow().IsRef()) {
                 resVal = state.CheckAbstractObjectRefBy(result).getOrThrow()
             }
-            state.Update(resVal, TypeValue(DevirtualTyKind.SUBTYPE_OF, tgtClsTy))
+            state.Update(resVal, TypeValue(DevirtualTyKind.SUBTYPE_OF, tgtClsTy, builder))
         }
     }
 
@@ -407,7 +403,7 @@ public class TypeAnalysis <: ValueAnalysis<TypeValueDomain, FullStatePool<TypeVa
             if (result.GetType().getOrThrow().IsRef()) {
                 resVal = state.CheckAbstractObjectRefBy(result).getOrThrow()
             }
-            state.Update(resVal, TypeValue(DevirtualTyKind.SUBTYPE_OF, tgtClsTy))
+            state.Update(resVal, TypeValue(DevirtualTyKind.SUBTYPE_OF, tgtClsTy, builder))
         }
     }
 
@@ -524,7 +520,7 @@ public class TypeAnalysis <: ValueAnalysis<TypeValueDomain, FullStatePool<TypeVa
             typeValue = (typeValue as BoxType).getOrThrow().GetBaseType()
         }
         if (typeValue.IsPrimitive() || typeValue.IsStruct() || typeValue.IsEnum()) {
-            state.Update(dest, TypeValue(DevirtualTyKind.EXACTLY, typeValue))
+            state.Update(dest, TypeValue(DevirtualTyKind.EXACTLY, typeValue, builder))
         }
         if (typeValue.IsClass()) {
             let classDef = (typeValue as ClassType).getOrThrow().GetClassDef()
@@ -534,7 +530,7 @@ public class TypeAnalysis <: ValueAnalysis<TypeValueDomain, FullStatePool<TypeVa
             } else {
                 DevirtualTyKind.SUBTYPE_OF
             }
-            state.Update(dest, TypeValue(typeKind, typeValue))
+            state.Update(dest, TypeValue(typeKind, typeValue, builder))
         }
     }
 
