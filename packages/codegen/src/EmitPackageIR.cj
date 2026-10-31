@@ -4,7 +4,6 @@ import std.collection.*
 import std.math.{max, min}
 import std.process.Process
 import std.sort.*
-import std.sync.Thread
 import cjcj::basic.CANGJIE_VERSION
 import cjcj::chir.Attribute
 import cjcj::chir.CustomDefKind

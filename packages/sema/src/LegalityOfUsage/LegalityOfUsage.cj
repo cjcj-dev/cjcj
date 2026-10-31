@@ -11,7 +11,6 @@ import cjcj::sema.*
 import cjcj::sema.FFI.*
 import cjcj::utils.{TaskQueue, TaskResult}
 import std.process.Process
-import std.sync.Thread
 
 private class BoolBox {
     public var value: Bool

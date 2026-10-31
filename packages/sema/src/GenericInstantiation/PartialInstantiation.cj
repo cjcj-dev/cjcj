@@ -10,7 +10,6 @@ import cjcj::option.OutputMode
 import cjcj::option.enumIndex
 import cjcj::utils.{CJC_ASSERT, TaskQueue, TaskResult}
 import std.process.Process
-import std.sync.Thread
 
 private var currentOptLevel: OptimizationLevel = OptimizationLevel.O0
 private var currentOutputMode: OutputMode = OutputMode.EXECUTABLE

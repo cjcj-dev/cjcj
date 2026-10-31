@@ -68,7 +68,6 @@ import cjcj::utils.{ANNOTATION_VAR_POSTFIX, CFFI_FUNC_SUFFIX, CJC_ABORT, CJC_ASS
     MAIN_INVOKE, ProfileRecorder, STATIC_INIT_FUNC, STATIC_INIT_VAR, TaskQueue, TaskResult}
 import std.runtime.gc
 import std.process.Process
-import std.sync.Thread
 
 foreign {
     func CJSelfhostStrtoldToFloat32(value: CString): Float64
