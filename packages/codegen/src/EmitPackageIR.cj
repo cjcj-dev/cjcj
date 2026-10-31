@@ -1,6 +1,7 @@
 package cjcj::codegen
 
 import std.collection.*
+import std.math.{max, min}
 import std.process.Process
 import std.sort.*
 import cjcj::basic.CANGJIE_VERSION
@@ -33,13 +34,6 @@ private let PKG_INIT_FUNC_METADATA: String = "pkg_init_func"
 private let HAS_INVOKED_PKG_INIT_LITERAL: String = "has_invoked_pkg_init_literal"
 private let RUNTIME_CONFIG_GLOBAL_PREFIX: String = ".cjcj.runtime.config."
 
-// TEMPORARY selfhost safety gate: keep backend concurrency disabled by default because the selfhost runtime has a
-// concurrent-GC phase-handshake race that is nearly reproducible with jobs=4 (see REPORT-llcpar2.md for the stacks).
-// Delete this gate and restore the official default concurrency only after the runtime race is fixed and the
-// concurrent compiler passes the same-input 5-SHA determinism gate.
-private let TEMPORARILY_ENABLE_BACKEND_CONCURRENCY: Bool =
-    (Process.current.getEnv("CJCJ_BACKEND_CONCURRENCY") ?? "") == "1"
-
 private type LLVMSetValueName2Func = CFunc<(LLVMValueRef, CString, UIntNative) -> Unit>
 
 // Mirrors EmitPackageIR.cpp:56-67.
@@ -56,6 +50,16 @@ private func DumpIRIfNeeded(cgMod: CGModule, suffix: String, subDirNum: Int64): 
     return subDirNum + 1
 }
 
+// Every CGModule owns its LLVM context, module and builders, so modules generate independently.
+// --jobs bounds the queue, and --debug-codegen keeps the serial path for readable interleaving.
+private func GetModuleGenerationWidth(cgPkgContext: CGPkgContext): Int64 {
+    let options = cgPkgContext.GetGlobalOptions()
+    if (options.disableCodegenConcurrency || options.codegenDebugMode) {
+        return 1
+    }
+    return max(1, min(cgPkgContext.GetCGModules().size, Int64(options.GetJobs())))
+}
+
 // Mirrors EmitPackageIR.cpp:437-465.
 private func InitIncrementalGen(cgPkgContext: CGPkgContext): Bool {
     var result = true
@@ -63,8 +67,7 @@ private func InitIncrementalGen(cgPkgContext: CGPkgContext): Bool {
         return result
     }
     let cgModules = cgPkgContext.GetCGModules()
-    let threadNum = if (!TEMPORARILY_ENABLE_BACKEND_CONCURRENCY ||
-        cgPkgContext.GetGlobalOptions().codegenDebugMode) { 1 } else { cgModules.size }
+    let threadNum = GetModuleGenerationWidth(cgPkgContext)
     if (threadNum == 1) {
         for (cgModule in cgModules) {
             let initialized = cgModule.InitIncrementalGen()
@@ -156,11 +159,7 @@ private func GenSubCHIRPackages(cgPkgContext: CGPkgContext): Unit {
         if (options.NeedDumpIRToFile()) {
             ClearOldIRDumpFiles(options.output, cgPkgContext.GetCurrentPkgName())
         }
-        let threadNum = if (!TEMPORARILY_ENABLE_BACKEND_CONCURRENCY || options.codegenDebugMode) {
-            1
-        } else {
-            cgModules.size
-        }
+        let threadNum = GetModuleGenerationWidth(cgPkgContext)
         if ((Process.current.getEnv("CJCJ_BACKEND_CONCURRENCY_TRACE") ?? "") == "1") {
             eprintln("CJCJ_BACKEND_CONCURRENCY threadNum=${threadNum} cgModules.size=${cgModules.size}")
         }

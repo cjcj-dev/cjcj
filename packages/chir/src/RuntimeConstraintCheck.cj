@@ -1,6 +1,7 @@
 package cjcj::chir
 
 import std.collection.*
+import std.sync.Mutex
 import cjcj::basic.DiagKindRefactor
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 
@@ -11,6 +12,8 @@ public class NoHeapAllocChecker {
     private let visited: HashSet<Int64> = HashSet<Int64>()
     private let reportedExpressions: HashSet<Int64> = HashSet<Int64>()
     private let reportedFunctions: HashSet<Int64> = HashSet<Int64>()
+    // Module generation workers report concurrently; constrainedRoots and paths are frozen by RunOnPackage.
+    private let reportMutex: Mutex = Mutex()
 
     public init(diag: BasicDiagnosticEngine) {
         this.diag = diag
@@ -71,6 +74,12 @@ public class NoHeapAllocChecker {
 
     public func CheckFunction(fn: Function, expr: Option<Expression>, operation: String): Unit {
         let root = constrainedRoots.get(fn.nodeId) ?? return
+        synchronized(reportMutex) {
+            ReportFunction(fn, root, expr, operation)
+        }
+    }
+
+    private func ReportFunction(fn: Function, root: Function, expr: Option<Expression>, operation: String): Unit {
         var reportPos = GetDebugPos(fn)
         if (let Some(currentExpr) <- expr) {
             if (reportedExpressions.contains(currentExpr.nodeId)) {
@@ -110,6 +119,8 @@ public class NoWriteBarrierRecChecker {
     private let cycles: ArrayList<String> = ArrayList<String>()
     private let reportedExpressions: HashSet<Int64> = HashSet<Int64>()
     private let reportedFunctions: HashSet<Int64> = HashSet<Int64>()
+    // Module generation workers report concurrently; constrainedRoots and paths are frozen by RunOnPackage.
+    private let reportMutex: Mutex = Mutex()
 
     public init(diag: BasicDiagnosticEngine) {
         this.diag = diag
@@ -184,6 +195,12 @@ public class NoWriteBarrierRecChecker {
 
     public func CheckFunction(fn: Function, expr: Option<Expression>): Unit {
         let root = constrainedRoots.get(fn.nodeId) ?? return
+        synchronized(reportMutex) {
+            ReportFunction(fn, root, expr)
+        }
+    }
+
+    private func ReportFunction(fn: Function, root: Function, expr: Option<Expression>): Unit {
         var operation = "codegen-generated"
         var reportPos = GetDebugPos(fn)
         if (let Some(currentExpr) <- expr) {
