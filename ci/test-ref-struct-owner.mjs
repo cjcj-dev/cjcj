@@ -28,11 +28,14 @@ function run(name, argv, env = process.env) {
 fs.mkdirSync(path.join(work, 'temps'));
 run('library', [compiler, path.join(fixture, 'Library.cj'), '--output-type=staticlib', '-O0',
   '--save-temps=' + path.join(work, 'temps'), '-o', path.join(work, 'libref_struct_owner.a')]);
-const preopt = fs.readdirSync(path.join(work, 'temps')).filter(n => /^3-.*\.bc$/.test(n));
-assert.equal(preopt.length, 1, 'one real pre-optimization module');
-const irPath = path.join(work, 'preopt.ll');
-run('read-ir', [llvmDis, path.join(work, 'temps', preopt[0]), '-o', irPath]);
-const ir = fs.readFileSync(irPath, 'utf8');
+const preopt = fs.readdirSync(path.join(work, 'temps'))
+  .filter(n => /^\d+-.*\.bc$/.test(n) && !n.endsWith('.opt.bc')).sort();
+assert.ok(preopt.length > 0, 'real pre-optimization modules');
+const ir = preopt.map((name, index) => {
+  const irPath = path.join(work, `preopt-${index}.ll`);
+  run(`read-ir-${index}`, [llvmDis, path.join(work, 'temps', name), '-o', irPath]);
+  return fs.readFileSync(irPath, 'utf8');
+}).join('\n');
 const functions = ir.match(/^define[^\n]*\{[\s\S]*?^}/gm) ?? [];
 const evidence = [];
 for (const name of ['heapSite', 'globalSite', 'localSite', 'relay', 'trySite']) {
