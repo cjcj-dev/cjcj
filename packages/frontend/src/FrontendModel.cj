@@ -60,6 +60,8 @@ import cjcj::utils.STANDARD_LIBS
 import std.collection.*
 import std.sort.*
 import std.process.Process
+import std.fs.File as CjoPrefetchFile
+import std.fs.OpenMode
 
 foreign {
     func CJOFVerifyPackageBuffer(data: CPointer<UInt8>, size: UIntNative): Int32
@@ -6585,6 +6587,35 @@ private const NO_CJO_HELP_INFO: String =
     "check if the .cjo file of the package exists in CANGJIE_PATH or CANGJIE_HOME, or use " +
     "'--import-path' to specify the .cjo file path"
 
+// Each recursive header walk keeps its own ordered cursor; all windows share the owner's byte budget.
+private class ImportedCjoPrefetchWindow {
+    let paths = ArrayList<String>()
+    let consumed = HashSet<String>()
+    var next: Int64 = 0
+}
+
+private const IMPORTED_CJO_PREFETCH_BYTES: Int64 = 8 * 1024 * 1024
+
+// A stat-sized reservation must also bound the read itself if the file changes afterwards.
+// Failed, resized, or incomplete speculation falls back to the original ordered reader/diagnostics.
+private func ReadPrefetchedCjoBytes(path: String, expectedSize: Int64): Option<Array<UInt8>> {
+    try (file = CjoPrefetchFile(path, OpenMode.Read)) {
+        if (file.length != expectedSize) { return None }
+        let data = Array<UInt8>(expectedSize, repeat: 0u8)
+        var offset: Int64 = 0
+        while (offset < data.size) {
+            let count = file.read(data[offset..])
+            if (count == 0) { return None }
+            offset += count
+        }
+        if (file.length != expectedSize) { return None }
+        return data
+    } catch (e: Exception) {
+        return None
+    }
+    return None
+}
+
 public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImportManager {
     private let diag: DiagnosticEngine
     private let typeManager: FaithfulSemaTypeManager
@@ -6596,7 +6627,9 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
         HashMap<String, HashMap<String, Decl>>()
     private let cjoFilePaths: HashMap<String, String> = HashMap<String, String>()
     // Only the import owner mutates this map. Workers return independent immutable file buffers.
-    private let prefetchedCjoData = HashMap<String, (Bool, Array<UInt8>, String)>()
+    private let prefetchedCjoData = HashMap<String, Array<UInt8>>()
+    private var prefetchedCjoBytes: Int64 = 0
+    private var peakPrefetchedCjoBytes: Int64 = 0
     private let depPkgCjdPaths: HashMap<String, String> = HashMap<String, String>()
     private let stdDepsMap: HashMap<String, StdDepEntry> = HashMap<String, StdDepEntry>()
     private let packageNameMap: FaithfulUnorderedMap<CjoPackageInfo> = FaithfulUnorderedMap<CjoPackageInfo>()
@@ -6922,7 +6955,7 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
         packageDecls.clear()
         exportIdDeclMaps.clear()
         cjoFilePaths.clear()
-        prefetchedCjoData.clear()
+        ClearPrefetchedCjoBytes()
         depPkgCjdPaths.clear()
         stdDepsMap.clear()
         packageNameMap.clear()
@@ -7195,7 +7228,7 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
         typeManager.Clear()
         typeManager.ClearMapCache()
         cjoFilePaths.clear()
-        prefetchedCjoData.clear()
+        ClearPrefetchedCjoBytes()
         depPkgCjdPaths.clear()
         stdDepsMap.clear()
         dependencyGraph.getOrThrow().Clear()
@@ -8513,7 +8546,7 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
                 }
             }
         }
-        prefetchedCjoData.clear()
+        ClearPrefetchedCjoBytes()
         LoadPackageDeclsOnDemand(packages)
         for (pkg2 in packages) {
             AddPackageDeclMap(pkg2.fullPackageName)
@@ -8708,17 +8741,23 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
     }
 
     private func ResolveImportedPackageHeaders(pkg: Package, isRecursive!: Bool = false): Bool {
-        PrefetchImportedCjoBytes(pkg)
-        var success = true
-        for (file in pkg.files) {
-            if (!ResolveImportedPackageForFile(file, isRecursive: isRecursive)) {
-                success = false
+        let window = DiscoverImportedCjoPaths(pkg)
+        try {
+            var success = true
+            for (file in pkg.files) {
+                if (!ResolveImportedPackageForFile(file, window, isRecursive: isRecursive)) {
+                    success = false
+                }
             }
+            return success
+        } finally {
+            // Paths bypassed by name binding/re-exports must not retain speculative bytes.
+            for (path in window.paths) { RemovePrefetchedCjoBytes(path) }
         }
-        return success
     }
 
-    private func ResolveImportedPackageForFile(file: File, isRecursive!: Bool = false): Bool {
+    private func ResolveImportedPackageForFile(file: File, window: ImportedCjoPrefetchWindow,
+        isRecursive!: Bool = false): Bool {
         var success = true
         if (let None <- file.curPackage) {
             throw IllegalStateException("ResolveImportedPackageForFile requires file.curPackage")
@@ -8757,7 +8796,7 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
             let isMainPartPkgForTestPkg = globalOptions.compileTestsOnly && IsTestPackage(curPkg.fullPackageName) &&
                 GetMainPartPkgNameForTestPkg(curPkg.fullPackageName) == fullPackageName
             if (!CheckCjoPathLegality(importSpec, cjoPath, fullPackageName, isRecursive, isMainPartPkgForTestPkg) ||
-                !LoadImportedPackageFromCjo(fullPackageName, cjoPath)) {
+                !LoadImportedPackageFromCjo(fullPackageName, cjoPath, window)) {
                 success = false
                 continue
             }
@@ -8811,10 +8850,10 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
         }
     }
 
-    private func PrefetchImportedCjoBytes(pkg: Package): Unit {
-        let width = Int64(globalOptions.GetJobs())
-        if (width <= 1) { return }
-        let paths = ArrayList<String>()
+    private func DiscoverImportedCjoPaths(pkg: Package): ImportedCjoPrefetchWindow {
+        let window = ImportedCjoPrefetchWindow()
+        if (globalOptions.GetJobs() <= 1u64) { return window }
+        let paths = window.paths
         let seen = HashSet<String>()
         // Name binding and dependency discovery remain ordered: speculation only reads bytes,
         // never registers a package, updates an alias, or reports an error.
@@ -8833,38 +8872,107 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
                 }
             }
         }
-        if (paths.size <= 1) { return }
-        let queue = TaskQueue(width)
-        let results = ArrayList<TaskResult<(Bool, Array<UInt8>, String)>>()
-        for (path in paths) {
-            results.add(queue.AddTask<(Bool, Array<UInt8>, String)>({ => FileUtil.ReadBinaryFileToBuffer(path) }))
+        return window
+    }
+
+    private func TracePrefetchedCjoBytes(event: String): Unit {
+        if ((Process.current.getEnv("CJCJ_BACKEND_CONCURRENCY_TRACE") ?? "") == "1") {
+            eprintln("CJCJ_CJO_PREFETCH ${event} pending=${prefetchedCjoBytes} peak=${peakPrefetchedCjoBytes} limit=${IMPORTED_CJO_PREFETCH_BYTES}")
         }
-        queue.RunAndWaitForAllTasksCompleted()
+    }
+
+    private func RemovePrefetchedCjoBytes(path: String): Unit {
+        if (let Some(data) <- prefetchedCjoData.get(path)) {
+            prefetchedCjoData.remove(path)
+            prefetchedCjoBytes -= data.size
+            TracePrefetchedCjoBytes("release")
+        }
+    }
+
+    private func ClearPrefetchedCjoBytes(): Unit {
+        prefetchedCjoData.clear()
+        prefetchedCjoBytes = 0
+        TracePrefetchedCjoBytes("clear")
+        peakPrefetchedCjoBytes = 0
+    }
+
+    private func PrefetchImportedCjoBytes(window: ImportedCjoPrefetchWindow): Unit {
+        let width = Int64(globalOptions.GetJobs())
+        if (width <= 1) { return }
+        let paths = ArrayList<String>()
+        let sizes = ArrayList<Int64>()
+        // Retained parent-window buffers and this batch's in-flight allocations share one limit.
+        while (window.next < window.paths.size && paths.size < width) {
+            let path = window.paths[window.next]
+            if (window.consumed.contains(path) || prefetchedCjoData.contains(path)) { window.next++; continue }
+            let size = FileUtil.GetFileSize(path)
+            if (size <= 0 || size > IMPORTED_CJO_PREFETCH_BYTES) {
+                window.next++
+                TracePrefetchedCjoBytes("ordered-read")
+                continue
+            }
+            if (size > IMPORTED_CJO_PREFETCH_BYTES - prefetchedCjoBytes) { break }
+            window.next++
+            paths.add(path)
+            sizes.add(size)
+            prefetchedCjoBytes += size
+        }
+        if (paths.isEmpty()) { return }
+        if (prefetchedCjoBytes > peakPrefetchedCjoBytes) { peakPrefetchedCjoBytes = prefetchedCjoBytes }
+        TracePrefetchedCjoBytes("reserve")
+        let queue = TaskQueue(width)
+        let results = ArrayList<TaskResult<Option<Array<UInt8>>>>()
+        for (idx in 0..paths.size) {
+            let path = paths[idx]
+            let size = sizes[idx]
+            results.add(queue.AddTask<Option<Array<UInt8>>>({ => ReadPrefetchedCjoBytes(path, size) }))
+        }
+        try {
+            queue.RunAndWaitForAllTasksCompleted()
+        } catch (e: Exception) {
+            for (size in sizes) { prefetchedCjoBytes -= size }
+            throw e
+        }
         var firstFailure: Option<Exception> = None
         for (idx in 0..results.size) {
             try {
-                prefetchedCjoData[paths[idx]] = results[idx].get()
+                let data = results[idx].get()
+                if (let Some(bytes) <- data) {
+                    prefetchedCjoData[paths[idx]] = bytes
+                } else {
+                    prefetchedCjoBytes -= sizes[idx]
+                }
             } catch (e: Exception) {
+                prefetchedCjoBytes -= sizes[idx]
                 if (firstFailure.isNone()) { firstFailure = Some(e) }
             }
         }
+        TracePrefetchedCjoBytes("ready")
         if (let Some(e) <- firstFailure) { throw e }
     }
 
-    private func ConsumeImportedCjoBytes(path: String): (Bool, Array<UInt8>, String) {
+    private func ConsumeImportedCjoBytes(path: String,
+        window: ImportedCjoPrefetchWindow): (Bool, Array<UInt8>, String) {
+        PrefetchImportedCjoBytes(window)
+        window.consumed.add(path)
         if (let Some(data) <- prefetchedCjoData.get(path)) {
-            prefetchedCjoData.remove(path)
-            return data
+            RemovePrefetchedCjoBytes(path)
+            return (true, data, "")
         }
         return FileUtil.ReadBinaryFileToBuffer(path)
     }
 
     private func LoadImportedPackageFromCjo(fullPackageName: String, cjoPath: String): Bool {
+        return LoadImportedPackageFromCjo(fullPackageName, cjoPath, ImportedCjoPrefetchWindow())
+    }
+
+    private func LoadImportedPackageFromCjo(fullPackageName: String, cjoPath: String,
+        window: ImportedCjoPrefetchWindow): Bool {
         if ((let Some(_) <- GetPackage(fullPackageName)) || loadingPackages.contains(fullPackageName)) {
             return true
         }
         loadingPackages.add(fullPackageName)
-        let (ok, data, reason) = ConsumeImportedCjoBytes(cjoPath)
+        let (ok, data, reason) = ConsumeImportedCjoBytes(cjoPath, window)
         if (!ok) {
             loadingPackages.remove(fullPackageName)
             diag.Diagnose(DiagCategory.IMPORT_PACKAGE, DEFAULT_POSITION,
