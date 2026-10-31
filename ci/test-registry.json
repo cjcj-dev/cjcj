@@ -949,5 +949,10 @@
     "file": "ci/test-macro-runtime-binding.mjs",
     "executor": "manual",
     "reason": "Requires matching LLVM development prefix and an empty private work directory; compiles the production ELF RPATH admission helper and real native shared objects. Does not replace public CJ macro relocation/relink and ir2 paired gates."
+  },
+  {
+    "file": "ci/test-macro-binding-paths.mjs",
+    "executor": "manual",
+    "reason": "Linux M1 R1/R2 real driver and borrowed RuntimeInit/OpenMacroLibrary control. Build tests/macro_binding_paths/Main.cj with the selected driver/macro packages and their actual normal H dependency closure. Arguments: consumer ELF, product binding checker, selected runtime directory, empty private work, red|fixed. Runs each arm once; red expects original assertions 2/3, fixed expects 0, stale-first and ordinary controls remain. Not public CJ/owned-R/ir2 qualification."
   }
 ]
