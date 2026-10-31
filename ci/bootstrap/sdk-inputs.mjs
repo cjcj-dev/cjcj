@@ -230,7 +230,7 @@ export async function prepareSourceBuildInputs(config, env=process.env, startSta
       // existing third_party/llvm-project source input. AST is compiler source.
       llvm:{...component('llvm'),configuration:{producer:'compiler/build.py',component:'third_party/llvm'}},
       ast:{...component('compiler'),configuration:{producer:'compiler/build.py',component:'AST/flatbuffers'}},
-      tools:{...selected.tools,platform},stdx:{...selected.stdx,platform},cjpm:{...selected.cjpm,platform}}});
+      tools:{...selected.tools,platform},stdx:{...selected.stdx,platform}}});
   // This is the existing native command log, not a cache qualification file.
   // Independent CLI processes retain only actual predecessor commands from
   // the same source/configuration. Rebuilding a producer supersedes that

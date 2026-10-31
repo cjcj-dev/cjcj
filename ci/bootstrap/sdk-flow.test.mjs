@@ -309,6 +309,13 @@ source+='\\nexport async function '+name+'(config){const fs=await import("node:f
  assert.match(build.stdout,/NOT_INSTALLED/);assert.equal(await fs.readFile(sdk+'/old-success','utf8'),'previous SDK');
  const built=(await fs.readFile(trace,'utf8')).trim().split('\n').map(JSON.parse);
  assert.deepEqual(built.map(row=>row.name),['fetch','compiler','runtime','stdlib','stdx','tools']);
+ for(const row of built){
+  const actual=row.selection.targetComponents;
+  console.log('SOURCE_TOOLS_SELECTION_TARGET_REACHED '+JSON.stringify({stage:row.name,tools:actual.tools}));
+  assert.equal(actual.tools.commit,selection.tools.tag,'UNIFIED_TOOLS_SELECTION_COMMIT');
+  assert.equal(actual.tools.repository,selection.tools.url,'UNIFIED_TOOLS_SELECTION_REPOSITORY');
+  assert.equal(Object.hasOwn(actual,'cjpm'),false,'RETIRED_CJPM_COMPONENT_ABSENT');
+ }
  await fs.rename(trace,trace+'.build-only');
  let r=await invoke('late-failure',{RUN_ALL_FAIL:'tools'});assert.equal(r.status,1,r.stdout+r.stderr);
  assert.match(r.stderr,/RUN_ALL_LATE_PRODUCER_FAILURE/);assert.match(r.stdout,/SDK_HELLO_TARGET_ASSERTION_REACHED/);
@@ -404,6 +411,8 @@ test('public staged build preserves predecessor commands through package and rec
  assert.equal(packaged.status,0,packaged.stdout+packaged.stderr);
  const original=JSON.parse(await fs.readFile(f.work+'/compiler-original.json','utf8')).commands;
  const installed=JSON.parse(await fs.readFile(f.sdk+'/STAGE-INPUTS.json','utf8'));
+ assert.equal(installed.selection.targetComponents.tools.commit,f.selected.tools.tag,'INSTALLED_UNIFIED_TOOLS_SOURCE');
+ assert.equal(Object.hasOwn(installed.selection.targetComponents,'cjpm'),false,'INSTALLED_RETIRED_CJPM_ABSENT');
  assert.deepEqual(installed.production.commands.filter(row=>row.stage.startsWith('compiler.')),original);
  const archives=(await fs.readdir(path.dirname(f.sdk))).filter(n=>n.startsWith('cangjie-sdk-')&&n.endsWith('.tar.gz'));
  assert.equal(archives.length,1);
