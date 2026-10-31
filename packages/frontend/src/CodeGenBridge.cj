@@ -1084,6 +1084,7 @@ private func RulesChecking(pkg: RealCHIRPackage, builder: ChirBuilder, options: 
         return false
     }
     UnreachableBranchCheck(wrapper, diag, pkg.GetName()).RunOnPackage(pkg, Int64(options.GetJobs()))
+    wrapper.FlushReports()
     ClearMatchMetadata(pkg)
     DeadCodeElimination(builder).UnreachableBlockEliminationForPackage(pkg, isDebug: options.chirDebugOptimizer)
     MergeBlocks().RunOnPackage(pkg, builder, enableCompileDebug: options.enableCompileDebug,
