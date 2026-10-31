@@ -2200,11 +2200,22 @@ public class FaithfulAST2CHIR {
             if (let Some(fn) <- (node as AstFuncDecl)) {
                 if (let Some(body) <- fn.funcBody) {
                     if (let Some(generic) <- body.generic) {
+                        // Instantiation retains the parameter declarations but substitutes their
+                        // types (e.g. T -> Int64). Only residual generic types have bounds to freeze.
+                        // Missing/invalid Sema types are still errors, not instantiated parameters.
+                        let genericTys = ArrayList<AstGenericsTy>()
                         for (param in generic.typeParameters) {
-                            let _ = chirType.TranslateType(param.GetTy().getOrThrow())
+                            let paramTy = RequireAstTy(param)
+                            if (!AstTy.IsTyCorrect(paramTy)) {
+                                throw IllegalStateException("lowering generic parameter has invalid Sema type: ${param.identifier.Val()}")
+                            }
+                            if (let Some(genericTy) <- (paramTy as AstGenericsTy)) {
+                                let _ = chirType.TranslateType(genericTy)
+                                genericTys.add(genericTy)
+                            }
                         }
-                        for (param in generic.typeParameters) {
-                            chirType.FillGenericArgType((param.GetTy().getOrThrow() as AstGenericsTy).getOrThrow())
+                        for (genericTy in genericTys) {
+                            chirType.FillGenericArgType(genericTy)
                         }
                     }
                 }
