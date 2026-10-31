@@ -51,13 +51,13 @@ private func DumpIRIfNeeded(cgMod: CGModule, suffix: String, subDirNum: Int64): 
 }
 
 // Every CGModule owns its LLVM context, module and builders, so modules generate independently.
-// --jobs bounds the queue, and --debug-codegen keeps the serial path for readable interleaving.
+// --jobs bounds the queue. --debug-codegen and the explicit disable flag stay on the calling thread.
+private func IsModuleGenerationSerial(options: GlobalOptions): Bool {
+    return options.disableCodegenConcurrency || options.codegenDebugMode
+}
+
 private func GetModuleGenerationWidth(cgPkgContext: CGPkgContext): Int64 {
-    let options = cgPkgContext.GetGlobalOptions()
-    if (options.disableCodegenConcurrency || options.codegenDebugMode) {
-        return 1
-    }
-    return max(1, min(cgPkgContext.GetCGModules().size, Int64(options.GetJobs())))
+    return max(1, min(cgPkgContext.GetCGModules().size, Int64(cgPkgContext.GetGlobalOptions().GetJobs())))
 }
 
 // Mirrors EmitPackageIR.cpp:437-465.
@@ -68,7 +68,7 @@ private func InitIncrementalGen(cgPkgContext: CGPkgContext): Bool {
     }
     let cgModules = cgPkgContext.GetCGModules()
     let threadNum = GetModuleGenerationWidth(cgPkgContext)
-    if (threadNum == 1) {
+    if (IsModuleGenerationSerial(cgPkgContext.GetGlobalOptions())) {
         for (cgModule in cgModules) {
             let initialized = cgModule.InitIncrementalGen()
             result = initialized && result
@@ -163,7 +163,7 @@ private func GenSubCHIRPackages(cgPkgContext: CGPkgContext): Unit {
         if ((Process.current.getEnv("CJCJ_BACKEND_CONCURRENCY_TRACE") ?? "") == "1") {
             eprintln("CJCJ_BACKEND_CONCURRENCY threadNum=${threadNum} cgModules.size=${cgModules.size}")
         }
-        if (threadNum == 1) {
+        if (IsModuleGenerationSerial(options)) {
             for (cgModule in cgModules) {
                 GenSubCHIRPackage(cgModule)
             }
@@ -176,7 +176,7 @@ private func GenSubCHIRPackages(cgPkgContext: CGPkgContext): Unit {
             taskQueueDefinitions.RunAndWaitForAllTasksCompleted()
             ConsumeModuleGenerationResults(results)
         }
-        if (threadNum == 1) {
+        if (IsModuleGenerationSerial(options)) {
             for (cgModule in cgModules) {
                 GenSubCHIRPackagePart2(cgModule)
             }
