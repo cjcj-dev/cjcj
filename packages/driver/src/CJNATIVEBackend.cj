@@ -150,9 +150,7 @@ public class CJNATIVEBackend <: Backend {
             let _ = GenerateCompileTool(preprocessedFiles, emitAssembly: true)
         }
         let objFiles = GenerateCompileTool(preprocessedFiles)
-        if (!driverOptions.saveTemps) {
-            ChainCompileAfterPreprocess()
-        }
+        ChainCompileAfterPreprocess(driverOptions.saveTemps)
         let batch = ArrayList<Tool>()
         for (objFile in objFiles) {
             let srcFile = objFile.filePath
@@ -256,11 +254,20 @@ public class CJNATIVEBackend <: Backend {
     }
 
     // llc_i only reads opt_i's output, so a partition's llc can start without waiting for the other opts.
-    private func ChainCompileAfterPreprocess(): Unit {
+    private func ChainCompileAfterPreprocess(saveAssembly: Bool): Unit {
         let compileBatch = backendCmds.remove(at: backendCmds.size - 1)
+        let assemblyBatch = if (saveAssembly) {
+            backendCmds.remove(at: backendCmds.size - 1)
+        } else {
+            ToolBatch()
+        }
         let preprocessBatch = backendCmds[backendCmds.size - 1]
         for (idx in 0..preprocessBatch.size) {
-            preprocessBatch[idx].successor = compileBatch[idx]
+            preprocessBatch[idx].successors.add(compileBatch[idx])
+            // Both consumers read the immutable opt output and own different output files.
+            if (saveAssembly) {
+                preprocessBatch[idx].successors.add(assemblyBatch[idx])
+            }
         }
     }
 

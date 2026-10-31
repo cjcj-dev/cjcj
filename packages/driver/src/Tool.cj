@@ -246,7 +246,7 @@ public class Tool {
     private let deferredDirArgs: ArrayList<DeferredDirArgs> = ArrayList<DeferredDirArgs>()
     private var ldLibraryPath: String = ""
     // Started by Job after this tool succeeds, inside the same command batch.
-    public var successor: Option<Tool> = None
+    public let successors: ArrayList<Tool> = ArrayList<Tool>()
 
     public init(name: String, toolType: ToolType, environmentVars: HashMap<String, String>) {
         this.name = name

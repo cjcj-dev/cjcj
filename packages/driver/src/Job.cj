@@ -68,8 +68,8 @@ public class Job {
                 continue
             }
             var stage = FileUtil.GetFileName(cmdBatch[0].GetName())
-            if (let Some(successor) <- cmdBatch[0].successor) {
-                stage += "+" + FileUtil.GetFileName(successor.GetName())
+            if (!cmdBatch[0].successors.isEmpty()) {
+                stage += "+" + FileUtil.GetFileName(cmdBatch[0].successors[0].GetName())
             }
             try (recorder = ProfileRecorder("Main Stage", "Execute " + stage)) {
                 // Numeric task identities retain every child even if two command strings are identical.
@@ -85,7 +85,7 @@ public class Job {
                         // Publish ready successors before checking for an empty running set. The last
                         // opt may have completed while admission was waiting for a token.
                         for (completed in succeeded) {
-                            if (let Some(successor) <- runningTools[completed].successor) {
+                            for (successor in runningTools[completed].successors) {
                                 pending.add(successor, at: next)
                             }
                             runningTools.remove(completed)
